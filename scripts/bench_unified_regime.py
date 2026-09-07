@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import statistics
 import subprocess
 import sys
@@ -62,19 +63,27 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=12)
     parser.add_argument("--context-rounds", type=int, default=3)
     parser.add_argument("--other-rounds", type=int, default=2)
+    parser.add_argument("--mode", choices=("baseline", "scale"), default="baseline")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     runs_root = args.out / "runs"
     runs_root.mkdir(exist_ok=True)
 
-    cases = [
-        ("r4_scv2_1s_b128", "real_r4_scv2_unified", 1.0, 128, args.context_rounds),
-        ("r4_scv2_2s_b64", "real_r4_scv2_unified", 2.0, 64, args.context_rounds),
-        ("r4_tm_1s_b128", "real_r4_tm_unified", 1.0, 128, args.context_rounds),
-        ("r4_tm_2s_b64", "real_r4_tm_unified", 2.0, 64, args.context_rounds),
-        ("r4_gru_1s_b128", "real_r4_gru_unified", 1.0, 128, args.other_rounds),
-        ("r4_sc_1s_b128", "real_r4_sc_unified", 1.0, 128, args.other_rounds),
-    ]
+    if args.mode == "baseline":
+        cases = [
+            ("r4_scv2_1s_b128", "real_r4_scv2_unified", 1.0, 128, args.context_rounds),
+            ("r4_scv2_2s_b64", "real_r4_scv2_unified", 2.0, 64, args.context_rounds),
+            ("r4_tm_1s_b128", "real_r4_tm_unified", 1.0, 128, args.context_rounds),
+            ("r4_tm_2s_b64", "real_r4_tm_unified", 2.0, 64, args.context_rounds),
+            ("r4_gru_1s_b128", "real_r4_gru_unified", 1.0, 128, args.other_rounds),
+            ("r4_sc_1s_b128", "real_r4_sc_unified", 1.0, 128, args.other_rounds),
+        ]
+    else:
+        cases = [
+            ("r4_scv2_2s_b128", "real_r4_scv2_unified", 2.0, 128, args.other_rounds),
+            ("r4_tm_2s_b128", "real_r4_tm_unified", 2.0, 128, args.other_rounds),
+            ("r4_gru_2s_b128", "real_r4_gru_unified", 2.0, 128, args.other_rounds),
+        ]
     telemetry: list[dict[str, Any]] = []
     phase = {"case": "setup"}
     stop = threading.Event()
@@ -170,11 +179,14 @@ def main() -> None:
         sampler.join(timeout=10)
         (args.out / "gpu_telemetry.json").write_text(json.dumps(telemetry, indent=2) + "\n")
 
+    cpu_max = Path("/sys/fs/cgroup/cpu.max")
     metadata = {
         "gpu": subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"], text=True
+            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+            text=True,
         ).strip(),
-        "cpu_count": len(__import__("os").sched_getaffinity(0)),
+        "cpu_count": len(os.sched_getaffinity(0)),
+        "cpu_max": cpu_max.read_text().strip() if cpu_max.exists() else None,
         "cases": summaries,
     }
     (args.out / "summary.json").write_text(json.dumps(metadata, indent=2) + "\n")
