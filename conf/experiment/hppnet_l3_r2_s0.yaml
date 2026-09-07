@@ -1,0 +1,31 @@
+# @package _global_
+# B, historical R2 honest-base adaptation protocol; seed 0 only.
+# Match hb_sal_multif0_l4: real-only, 50k-chunk warm-up, 40k frames/validation.
+# Not the regressor ladder's DREGON-only R2; no comb pretraining/checkpoint.
+defaults:
+  - override /data: e12_real_fullflight
+  - override /model: hppnet_rps_l4
+  - override /loss: salience_layers_r150
+  - override /metrics: salience_layers_r150
+
+experiment_name: hppnet_l3_r2_s0
+seed: 0
+checkpoint: null
+epochs: 200
+patience: 20
+batch_size: 16
+num_workers: 6
+samples_per_validation: 40000
+data:
+  train:
+    params:
+      path: conf/online_mix/hb_silence_dload.yaml
+  valid:
+    params:
+      data_dir: "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9"
+model:
+  params:
+    lstm_size: 128
+optim:
+  monitor: rps_mae
+  monitor_mode: min

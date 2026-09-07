@@ -1152,47 +1152,64 @@ trees, vast egress, subagents and local compute.
 
 ## Review experiments B/C
 
-**Current B scope: seed 0 only.** At the user's request, the eight seed-1/2
-controllers were stopped before cancelling all eight outstanding jobs; every
-job reached `cancelled`. The four seed-0 controllers remain active. Original
-configs/submission records below are historical, not authorization to restart
-the extra seeds. C and reserved experiment A are unchanged. Replication of
-this supporting ablation is deferred unless its value justifies the compute.
+**Current B scope: four real-only R2 runs, seed 0 only.** All controllers and
+outstanding jobs from the incorrectly selected comb curriculum have been
+stopped/cancelled. None of those checkpoints may initialize the corrected
+runs. The removed curriculum/extra-seed configs remain recoverable at revision
+`5ffe296`. C and reserved experiment A are unchanged. Additional seeds require
+a justified compute decision, not an automatic expansion of this ablation.
 
 The reserved held-out experiment A remains deferred. B and C use the existing
 development protocols, not the reserved test recordings.
 
-### B: matched HPPNet/HarmoF0 L2 versus L3
+### B: matched HPPNet/HarmoF0 L2 versus L3 on historical R2
 
-The 24 configs `conf/experiment/{hppnet,hf0}_l{2,3}_{comb,r4}_s{0,1,2}.yaml`
-define 12 same-seed two-stage runs. The recipe is the existing salience
-`*_r4_l4` curriculum: static-comb pretraining followed by R4 real fine-tuning
-(C1 in the regime table's vocabulary). Each real stage starts from **its own**
-architecture/level/seed's best comb checkpoint.
+The four configs `conf/experiment/{hppnet,hf0}_l{2,3}_r2_s0.yaml` match the
+LateDeep adaptation ladder's real-only honest-base recipe:
+`hb_sal_multif0_l4` → `e12_real_fullflight` with
+`conf/online_mix/hb_silence_dload.yaml`. They train from scratch with
+`checkpoint: null`; there is no synthetic pretraining or second stage.
 
-Controls shared by both levels and stages: four Gaussian salience layers,
-300 uniform output bins over 0–150 rev/s, hop 512 at 16 kHz, the existing
-layer BCE/CRF pair, AdamW 1e-3/weight decay 1e-4, batch 16, six loader workers,
-16,000 samples per validation, 200-epoch ceiling and patience 20.
-Both stages select checkpoints on `rps_mae`, not historical BCE selection.
-HPPNet's LSTM width is **128 in both levels**; historical L3 used 64.
+**Name the protocol, not just its ambiguous number.** Historical R2 here
+means the full-flight DREGON + FLY125 honest-base pool, eight microphones,
+online speech mixing, the 16.7% zero-labelled silence arm and SNR reference
+floor. The first 50,000 generated chunks are unaugmented; the established
+frequency/time/gain augmentations follow. This is NOT the regressor
+data-diversity ladder's DREGON-only “R2, eight microphones”; its data pool
+corresponds to that ladder's R4. The paper reports the multi-pitch adaptation
+ladder in its own table, separate from regressor results.
+
+Both levels use four Gaussian salience layers, 300 uniform output bins over
+0–150 rev/s, hop 512 at 16 kHz, the existing layer BCE/CRF pair, AdamW
+1e-3/weight decay 1e-4, batch 16, six loader workers, **40,000 frames per
+validation**, a 200-epoch ceiling and patience 20. Both select on `rps_mae`;
+the older L0/L1 checkpoints selected on BCE. HPPNet's LSTM width is 128 in
+both corrected levels. Historical L3 port runs used width 64 (HPPNet),
+16,000 frames per validation and the warm-up-free `hb_m3s2_dload` policy;
+their table entries must remain explicitly marked legacy-schedule results
+until the corrected runs are evaluated, not presented as matched evidence.
 
 L2 adds the existing `FreqSuperResHead` to the original log-input model.
 L3 retains the linear-STFT harmonic gather. This compares the
-front-end/harmonic-coordinate adaptation bundle, not an isolated single
-operator: native bandwidth, input resolution, coordinate-dependent dilations
-and L2's below-27.5-Hz clamp remain different. The L2 adapter adds 6,084
-parameters; it cannot create acoustic evidence below the native input range.
+front-end/harmonic-coordinate adaptation bundle, not an isolated operator:
+native bandwidth, input resolution, coordinate-dependent dilations and L2's
+below-27.5-Hz clamp remain different. The L2 adapter adds 6,084 parameters.
+LateDeep retains its native hop-256 input; the new ports retain hop 512.
 
 Placement: `uni-gpushort`, resumable 55-minute segments, 1 GPU with at least
-24 GB VRAM, 8 CPUs and 32 GB RAM. The existing `scripts/chain_train.sh`
-controllers run under user systemd on Hetzner, not on the laptop.
-Each chain completes comb training, then real fine-tuning, then submits the
-frozen-real `rps_dump.py` and `rps_regime_table.py` evaluation. Outputs are
-under `results/paper_review_B/<experiment>/`; checkpoints retain the standard
-R2 `artifacts/<experiment>/checkpoints/` path. No `uni` long or paid backend.
-Cancellation and segment-budget exhaustion return nonzero so a subsequent
-curriculum stage cannot mistake them for convergence.
+24 GB VRAM, 8 CPUs and 32 GB RAM. Existing `scripts/chain_train.sh`
+controllers run under user systemd on Hetzner. Each controller completes
+one real-only training run and then submits the frozen-real `rps_dump.py`
+and `rps_regime_table.py` evaluation. New names prevent accidental resumption
+of cancelled curriculum checkpoints. Outputs are
+`results/paper_review_B/<experiment>/`; checkpoint storage remains the
+standard object-store `artifacts/<experiment>/checkpoints/` path.
+No `uni` long or paid backend is used.
+
+Each corrected controller is limited to the runner's default **10 segments**
+(550 allocated GPU-minutes). Exhaustion is a nonzero exit, not convergence:
+it stops the chain and does not automatically evaluate an incomplete run.
+Further allocation or replication requires another compute decision.
 
 ### C: one saved dynamic search, zero/one/three phase iterations
 
