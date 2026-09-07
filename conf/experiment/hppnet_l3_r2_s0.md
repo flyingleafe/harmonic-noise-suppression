@@ -26,4 +26,12 @@ comb-curriculum protocol, not any original published measurement.
 
 ## Conclusion
 
-Results pending. No comparative accuracy conclusion is available yet.
+Frozen real split, all mics, PIT MAE (rev/s): all **4.30** — zero 5.15,
+below-30 28.29, DREGON ramp 9.91, FLY124 ramp 6.07, DREGON cruise 3.10,
+FLY124 cruise 0.89. Early-stopped at epoch 38, best at 17, last-15 plateau
+4.85 (IQR 0.35). Reproduces the legacy-schedule `hppnet_r2hb_l4` (4.18,
+plateau 5.17), so that row was not a schedule artefact. Loses to the matched
+L2 `hppnet_l2_r2_s0` (2.27) on every regime but FLY124 cruise: under the same
+per-rotor readout, the comb gather on the linear STFT is worse than HPPNet's
+own CQT + `HarmonicDilatedConv`. Record: `docs/experiments/paper-regime-matrix.md`
+§ "B results".

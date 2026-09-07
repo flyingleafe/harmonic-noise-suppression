@@ -26,4 +26,15 @@ comb-curriculum protocol, not any original published measurement.
 
 ## Conclusion
 
-Results pending. No comparative accuracy conclusion is available yet.
+Frozen real split, all mics, PIT MAE (rev/s): all **2.45** — zero 0.09,
+below-30 11.51, DREGON ramp 4.27, FLY124 ramp 2.47, DREGON cruise 2.98,
+FLY124 cruise 1.07; the best silence and below-grid rows of any model on the
+split. Early-stopped at epoch 66, best at 45. The curve is noisy — the last
+15 validations oscillate between 2.5 and 6 (median 3.25, IQR 2.34) — so 2.45
+is the favourable end of a ~3.3 plateau; read it beside HPPNet L2 (2.27 on a
+2.79 plateau). Beats the published L0 (10.79) and the matched L3
+`hf0_l3_r2_s0` (11.54, which did not train) by the whole distance: the
+per-rotor readout adapts HarmoF0, the comb gather does not. Its evaluation was
+dumped by hand (`br2-hf0-l2-s0-eval-0df425`) because the chain's tenth
+segment ended on the completed run without submitting it. Record:
+`docs/experiments/paper-regime-matrix.md` § "B results".

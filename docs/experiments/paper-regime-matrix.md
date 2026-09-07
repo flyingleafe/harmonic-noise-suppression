@@ -105,8 +105,13 @@ Pitch have no such convolutions).
 |---|---|---|---|---|
 | LateDeep | old `hb_sal_multif0` | old `hb_sal_multif0_nsr` | `hb_sal_multif0_l4` | n/a |
 | Basic Pitch | old `hb_sal_bp` | June only | `hb_sal_bp_l4` | n/a |
-| HarmoF0 | `hb_sal_hf0_orig` | — | (optional) | `hf0_r2hb_l4` |
-| HPPNet | `hb_sal_hppnet_orig` | — | (optional) | `hppnet_r2hb_l4` |
+| HarmoF0 | `hb_sal_hf0_orig` | — | `hf0_l2_r2_s0` | `hf0_l3_r2_s0` (matched); `hf0_r2hb_l4` (legacy schedule) |
+| HPPNet | `hb_sal_hppnet_orig` | — | `hppnet_l2_r2_s0` | `hppnet_l3_r2_s0` (matched); `hppnet_r2hb_l4` (legacy schedule) |
+
+HarmoF0 and HPPNet have no L1 row: the finer output grid alone moved LateDeep
+by 0.8 rev/s (12.65 → 11.82) and the ladder skipped it for the two ports. Their
+L2/L3 pairs are the review experiment B below (§ "Review experiments B/C"),
+which is where the ladder's reading now lives.
 
 ### L0 for HarmoF0 and HPPNet: what "the published architecture" is
 
@@ -1129,17 +1134,22 @@ Written 2026-09-06; every cell of the matrix is trained and scored.
 
 Block S: the harmonic device decides the ranking before any adaptation
 (published HPPNet 7.77 and HarmoF0 10.79 against LateDeep 12.65 and
-Basic Pitch 27.30); the comb gather with per-rotor layers halves
-HPPNet's error (4.18, silence 17.5 -> 6.0) and HarmoF0's DREGON cruise
-error (11.5 -> 6.2); output resolution alone (L1) changes little; the
-per-rotor layers with the joint readout (L2) rescue LateDeep completely
-(3.83, the best salience row) and do not rescue Basic Pitch (27.56).
+Basic Pitch 27.30); output resolution alone (L1) changes little; the
+per-rotor layers with the joint readout (L2) are the adaptation that
+matters — they rescue LateDeep (12.65 -> 3.83), HPPNet (7.77 -> 2.27)
+and HarmoF0 (10.79 -> 2.45), and do not rescue Basic Pitch (27.56); the
+comb gather on the linear STFT (L3) then LOSES against the published
+front ends under the same readout and recipe (HPPNet 4.30, HarmoF0
+11.54 — the latter a from-scratch training failure). Review experiment
+B, single seed, § "B results".
 
 Leaderboard: the blind tracker remains the most precise DREGON cruise
 method (0.92) at forty times a regressor's cost, loses on FLY124 (9.2)
 and has no silence decision without its gates; the best learned cells
-are C1 Conv+BiGRU (all 2.74) and the HPPNet port at rung 3 on the unseen
-drone (FLY124 cruise 0.93). Training-free estimators stay above 11 rev/s
+are the two block-S L2 rows, HPPNet (all 2.27, FLY124 cruise 0.77) and
+HarmoF0 (all 2.45, silence 0.09), ahead of C1 Conv+BiGRU (all 2.74) and
+the rung-3 HPPNet port on the unseen drone (FLY124 cruise 0.93) — one
+seed each. Training-free estimators stay above 11 rev/s
 at cruise.
 
 Deliverables: `writing/papers/2026-08_wrapup` (ICASSP `src/index.tex`,
@@ -1224,6 +1234,83 @@ validate_only=true` and were submitted from pushed revision `136a38f`:
 The complete commands, controller units, frozen validation URI, resource
 limits and first job IDs are in `results/paper_review_B/r2_submissions.json`.
 The old seed-0 curriculum jobs were cancelled; they do not constitute B.
+
+#### B results (frozen real split, all mics, PIT MAE in rev/s; single seed)
+
+All four runs early-stopped inside their 10 segments (patience 20 on
+`val/rps_mae`); the dumps reproduce the W&B monitored best to three
+decimals (2.264 / 4.304 / 2.447 / 11.540). The `hf0_l2_r2_s0` chain ended
+its tenth segment on the already-complete run and did not submit its
+evaluation; it was dumped afterwards by hand with the identical command
+(`br2-hf0-l2-s0-eval-0df425`, from merged `main`). Tables:
+`results/paper_review_B/<experiment>/regimes.csv`.
+
+| row | zero | below-30 | DREGON ramp | FLY124 ramp | DREGON cruise | FLY124 cruise | all | best ep / stop | last-15 median (IQR) |
+|---|---|---|---|---|---|---|---|---|---|
+| `hppnet_l2_r2_s0` (HPPNet L2: published front end + `HarmonicDilatedConv`, per-rotor layers + CRF) | 1.07 | 14.64 | 4.91 | 2.72 | 2.07 | **0.77** | **2.27** | 33 / 54 | 2.79 (0.27) |
+| `hppnet_l3_r2_s0` (HPPNet L3: comb gather on the linear STFT, same layers) | 5.15 | 28.29 | 9.91 | 6.07 | 3.10 | 0.89 | 4.30 | 17 / 38 | 4.85 (0.35) |
+| `hf0_l2_r2_s0` (HarmoF0 L2: published front end + `MRDConv`, per-rotor layers + CRF) | **0.09** | **11.51** | **4.27** | **2.47** | 2.98 | 1.07 | 2.45 | 45 / 66 | 3.25 (2.34) |
+| `hf0_l3_r2_s0` (HarmoF0 L3: comb gather on the linear STFT, same layers) | 5.63 | 24.60 | 30.36 | 21.27 | 12.78 | 3.76 | 11.54 | 2 / 23 | 16.36 (6.05) |
+| `hppnet_r2hb_l4` (HPPNet L3, legacy schedule: `hb_m3s2_dload`, no warm-up, 16k/validation, LSTM 64) | 5.95 | 26.65 | 9.83 | 4.77 | 2.95 | 0.92 | 4.18 | 21 / 42 | 5.17 (1.25) |
+| `hf0_r2hb_l4` (HarmoF0 L3, legacy schedule) | 13.96 | 24.28 | 16.62 | 12.90 | 6.22 | 2.29 | 7.90 | 41 / 62 | 9.76 (2.45) |
+| `hb_sal_hppnet_orig` (HPPNet L0, BCE-selected) | 17.48 | 17.52 | 40.14 | 7.50 | 3.81 | 1.63 | 7.77 | — | — |
+| `hb_sal_hf0_orig` (HarmoF0 L0, BCE-selected) | 14.77 | 18.92 | 37.65 | 8.13 | 11.50 | 1.92 | 10.79 | — | — |
+| `hb_sal_multif0_l4` (LateDeep L2, the same recipe) | 4.98 | 15.76 | 9.48 | 7.99 | **2.32** | 1.69 | 3.83 | 52 / 73 | 4.26 (0.24) |
+
+The last two columns read the W&B `val/rps_mae` curve: the epoch of the
+selected checkpoint over the epoch training stopped, and the median and
+interquartile range of the last 15 validations — the plateau the run
+actually sits on, as opposed to the favourable draw checkpoint selection
+takes from it.
+
+Readings:
+
+1. **The per-rotor layers with the CRF readout are the adaptation; the comb
+   gather is not.** With the output representation held equal, keeping the
+   published log-frequency front end and harmonic device (L2) beats
+   replacing them with the linear-STFT gather (L3) on both architectures
+   and on every regime but FLY124 cruise for HPPNet: 2.27 vs 4.30 for
+   HPPNet, 2.45 vs 11.54 for HarmoF0. This reverses the Batch 14 reading,
+   which compared L0 with L3 and credited the gather with the whole gain;
+   L0 lacked the readout, so that pair measured both changes at once. The
+   L0 → L2 step is the whole improvement (HPPNet 7.77 → 2.27, HarmoF0
+   10.79 → 2.45); L2 → L3 loses it back.
+2. **The legacy L3 rows were not schedule artefacts.** The matched HPPNet
+   L3 (4.30, plateau 4.85) reproduces `hppnet_r2hb_l4` (4.18, plateau 5.17)
+   under the corrected recipe, so the L3 column of Batch 14 stands. HarmoF0
+   L3 is worse than its legacy row (11.54 vs 7.90), and both curves say why:
+   the HarmoF0 port does not train from scratch on the real pool. Its
+   validation never leaves the 8-24 band (legacy plateau 9.76, matched
+   16.36); the matched run's best came at epoch 2 and patience ended it at
+   23, so 11.54 is an early-stopping draw from a run that had not learned.
+   The legacy 7.90 is the same draw from a longer run. The `_r4_l4` rows,
+   which warm-start from a comb-only stage, are the recipe that makes this
+   port train.
+3. **HarmoF0 L2 is a noisy optimum.** Its curve oscillates between 2.5 and
+   6 (IQR 2.34, against 0.27 for HPPNet L2 and 0.24 for LateDeep L2), so
+   the 2.45 checkpoint is the favourable end of a 3.25 plateau; the HPPNet
+   L2 2.27 sits on a 2.79 plateau and is the more reproducible of the two.
+   Neither is a second seed.
+4. **Block S now holds the best learned cells of the frozen split.** HPPNet
+   L2 (2.27; FLY124 cruise 0.77) and HarmoF0 L2 (2.45; zero-frames 0.09,
+   below-30 11.51, the best silence and below-grid rows of any model) are
+   under C1 Conv+BiGRU (2.74) and the rung-3 HPPNet port on FLY124 cruise
+   (0.93). Both trained on the historical R2 pool of `hb_sal_multif0_l4`
+   (LateDeep L2, 3.83), so within block S the ranking under equal
+   adaptation is HPPNet ≈ HarmoF0 > LateDeep >> Basic Pitch — the harmonic
+   device still decides it, as at L0, but by 1.4-1.6 rev/s rather than 5.
+5. **The below-27.5 clamp of the L2 adapter is not what limits below-30.**
+   L3 reads a grid that starts at 0 and is worse there on both trunks
+   (28.29 / 24.60 against 14.64 / 11.51). The below-grid regime is a
+   training-data and readout question, not a front-end span question, on
+   this evidence.
+
+What B does not settle: one seed per cell; the L2 → L3 step still moves the
+bundle (front end, input resolution, coordinate-dependent dilations, hop) and
+not one operator; HarmoF0 L3's number is a failed-training draw, so the size
+of its L2 → L3 gap is not a measurement of the gather. The paper's block-S
+paragraph and the wrap-up tables (`writing/papers/2026-08_wrapup`) still
+carry the Batch 14 reading and need the reversal in reading 1.
 
 ### C: one saved dynamic search, zero/one/three phase iterations
 

@@ -26,4 +26,13 @@ comb-curriculum protocol, not any original published measurement.
 
 ## Conclusion
 
-Results pending. No comparative accuracy conclusion is available yet.
+Frozen real split, all mics, PIT MAE (rev/s): all **11.54** — zero 5.63,
+below-30 24.60, DREGON ramp 30.36, FLY124 ramp 21.27, DREGON cruise 12.78,
+FLY124 cruise 3.76. A from-scratch training failure, not a measurement of the
+gather: `val/rps_mae` never left the 11-24 band (last-15 plateau 16.36, IQR
+6.05), the best came at epoch 2 and patience stopped the run at 23. The
+legacy-schedule `hf0_r2hb_l4` (7.90, plateau 9.76) shows the same behaviour
+over 62 epochs; the `hf0_r4_l4` warm start from a comb-only stage is the
+recipe that makes this port train. The matched L2 `hf0_l2_r2_s0` on the same
+recipe reaches 2.45. Record: `docs/experiments/paper-regime-matrix.md`
+§ "B results".

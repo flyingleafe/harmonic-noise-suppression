@@ -26,4 +26,12 @@ comb-curriculum protocol, not any original published measurement.
 
 ## Conclusion
 
-Results pending. No comparative accuracy conclusion is available yet.
+Frozen real split, all mics, PIT MAE (rev/s): all **2.27** — zero 1.07,
+below-30 14.64, DREGON ramp 4.91, FLY124 ramp 2.72, DREGON cruise 2.07,
+FLY124 cruise 0.77. Early-stopped at epoch 54, best at 33; the last 15
+validations sit on a 2.79 plateau (IQR 0.27), so the number is stable. Beats
+the matched L3 `hppnet_l3_r2_s0` (4.30) on every regime but FLY124 cruise
+(0.77 vs 0.89), the published L0 (7.77) and LateDeep L2 on the same recipe
+(3.83); at one seed it is the best learned row of the frozen split. The
+per-rotor readout, not the comb gather, is what adapts HPPNet. Record:
+`docs/experiments/paper-regime-matrix.md` § "B results".
