@@ -13,6 +13,48 @@
         pkgs = nixpkgs.legacyPackages.${system};
         python = pkgs.python312;
 
+        # `mk-worktree <name> [<base-ref>]` — creates .worktrees/<name>, links the
+        # shared gitignored resources, then drops you into a shell there.
+        # Only a launcher: the logic stays in the repo at scripts/mk-worktree.sh
+        # so edits take effect without a flake rebuild.
+        mk-worktree = pkgs.writeShellScriptBin "mk-worktree" ''
+          set -euo pipefail
+
+          no_shell=0
+          args=()
+          for a in "$@"; do
+            case "$a" in
+              -n|--no-shell) no_shell=1 ;;
+              *) args+=("$a") ;;
+            esac
+          done
+
+          common="$(${pkgs.git}/bin/git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
+            echo "mk-worktree: not in a git repository" >&2
+            exit 1
+          }
+          main="''${common%/.git}"
+          main="''${main%/}"
+          script="$main/scripts/mk-worktree.sh"
+          [ -x "$script" ] || {
+            echo "mk-worktree: $script not found or not executable" >&2
+            exit 1
+          }
+
+          dest="$("$script" "''${args[@]}")"
+
+          if [ "$no_shell" = 1 ]; then
+            printf '%s\n' "$dest"
+            exit 0
+          fi
+
+          # An executable cannot cd its parent shell, so start a shell in the
+          # worktree instead. direnv loads the worktree env; `exit` returns you
+          # to where you were.
+          cd "$dest"
+          exec "''${SHELL:-${pkgs.bashInteractive}/bin/bash}"
+        '';
+
         pre-commit-check = git-hooks.lib.${system}.run {
           src = ./. ;
           hooks = {
@@ -75,7 +117,7 @@
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = pre-commit-check.enabledPackages ++ (with pkgs; [
+          buildInputs = pre-commit-check.enabledPackages ++ [ mk-worktree ] ++ (with pkgs; [
             python
             uv
             # C++ standard library for NumPy and other native dependencies
