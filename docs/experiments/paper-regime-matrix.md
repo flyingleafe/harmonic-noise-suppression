@@ -1307,3 +1307,60 @@ Evidence: `results/paper_review_C/smoke_verification.json`. This is a plumbing
 smoke, not an accuracy result. Two seconds is too short for the unchanged
 ridge instrument's block law; the submitted campaign retains 20-second
 windows, 4-second overlap and the complete 37-clip scoring protocol.
+
+## R3/R4 regressor continuation — 2026-09-07
+
+Requested comparison: continue the six early-stopped SCv2/TM/GRU runs from
+their last checkpoints, reset LR to `5e-4`, and stop at noise-tolerant
+saturation or the corresponding SimpleConv's total epoch count (R3: 107;
+R4: 51). These are dirty continuations, not controlled reruns isolating LR
+from stopping policy. **Keep original batch sizes and effective optimizer
+batches.** Resume the original W&B IDs; use separate `*_continue_lr5e4`
+artifact prefixes so original checkpoints remain intact.
+
+The continuation policy uses a five-value median, a meaningful improvement
+of at least `max(0.05, 0.01 * abs(best))`, scheduler patience 15/cooldown 10,
+and saturation patience 30 after epoch 100, two LR reductions, and ten
+post-reduction epochs. The R4 cap precedes the saturation minimum. Raw
+metrics still select best checkpoints. R4's monitor is now native frame
+MAE rather than MSE; PIT-MSE remains the optimization objective.
+
+The first batch was stopped before correcting W&B identities. R4 GRU's
+completed epochs 26–33 were backfilled into original run `9niuejv1`, and its
+consistent checkpoint resumes at 34. An interrupted R4 SCv2 upload had
+mismatched weights/state: its artifacts were preserved under
+`interrupted_attempt_1`, and the intact original prepared bundle was
+restored before retrying. Never pair independently uploaded files without
+checking consistency. Forked loader workers also inherited live S3 sockets;
+revision `188374931227` recreates the cached S3 remote after fork. A real
+four-worker, 32-read R2 smoke and 23 stream/retry tests passed.
+
+### Single-A100 pilot result
+
+`r34-a100-pilot-e9dd45` resumed `real_r4_scv2` / W&B `gatrtl5n` at epoch 29
+and completed through epoch 50 (`next_epoch=51`). Best and last coincide;
+LR remained `5e-4`. Native MAE was 3.425957. The same exact table scorer used
+for the original comparison gives **3.411367** over 74,296 frame positions,
+versus original SCv2 **4.614424** and SimpleConv **3.275915**: a 26.1%
+reduction, with a remaining 0.135452 gap to SimpleConv.
+
+Training, validation, original W&B resumption, checkpoint uploads and
+best/last scoring passed end-to-end. GPU saturation did **not** pass:
+179 direct 1-Hz samples averaged 42.49% GPU utilization, peaked at 89%,
+and included 48 zeros across validation/upload gaps. Active training was
+also not continuously saturated. The requested 16 CPUs yielded a 7.68-core
+cgroup quota; Vast advertised eight effective CPUs. The other five
+continuations remain gated on the CPU-allocation repair and a fixed-batch
+A100 throughput profile. Evidence lives in `results/r34_continuation/`;
+pilot scores are also under the SCv2 continuation's R2 `evaluation/` prefix.
+
+### W&B step axis is not a training-work axis
+
+Original training committed validation previews and scalar metrics separately,
+so each epoch advanced W&B `_step` twice. The continuation disables previews
+(`artifacts.num_val_samples=0`), advancing `_step` once per epoch. Verified
+full histories: R4 SCv2 epoch 28 is step 57, epoch 29 is step 58, and epoch
+50 is step 79; SimpleConv epoch 50 is step 101. Both have 51 epoch records,
+0–50. Compare on the **`epoch` axis**, not logging commits; `_step` is not an
+optimizer-update counter. Raw history evidence:
+`results/r34_continuation/wandb-step-explanation.jsonl`.
