@@ -17,3 +17,24 @@ Online-mixed retraining reshuffled the ranking rather than uniformly improving i
 ## Conclusion
 
 A BiGRU (or GRU-family) temporal head over a conv/SE encoder is the consistent architectural winner across both sweeps and both training regimes; pure width scaling, SE-only (no temporal head), transformer, and unstructured multi-scale fusion all underperform it. Sweep 1 settled `bigru_v2`/`v2` as the practical choice for DREGON-LM-scale training. Sweep 2 shows this generalizes to `simple_conv_v2` as a strong baseline on the richer V4-michaels data, with `smol_causal_tcn` (offline) or wide unidirectional-GRU (online-mixed) as marginal improvements depending on regime — but model selection must be done under the training regime actually used in production (online-mixed), since offline rankings do not transfer. Online mixing is the current default training regime as a result. Open follow-up: the residual temporal-overfitting effect (models still overfitting the small underlying set of RPS trajectories even under acoustic online-mixing) is unaddressed — the proposed fix is augmenting/synthesizing RPS trajectories themselves rather than just their acoustic dressing (see `data_processing/rps_synthesis.py`, OU-mode synthetic RPS generation, as a candidate direction).
+
+## Causal-head follow-up (autoresearch session `20260617-012233`)
+
+Moved here from `src/models/AGENTS.md` (2026-09-07); the code-level summary is
+one Gotchas line there.
+
+Simply swapping `BiGRUHead` for a unidirectional GRU was unstable/poor. The
+best causal-head variant in that sweep was `simple_conv_v2_uni_gru96_norm_do03`
+(GroupNorm + dropout 0.3), still worse than `simple_conv_v2`. Fully
+time-causal STFT + left-padded temporal conv variants
+(`simple_conv_v2_causal_gru{,96}`) underfit badly, likely due to
+alignment/latency and loss of future context; treat them as a separate
+front-end/alignment problem, not just a head replacement.
+
+The external SMoLnet reference (`../drone-audition/drone_audition/models/smolnet.py`)
+is frequency-dilated in its early `(kernel, 1)` Conv2d layers and uses
+symmetric time padding in late square layers, so it is not strictly causal as
+written. When adapting a new backbone such as SMoLnet to RPS prediction, run
+the cleanest body-only ablation first (body + SimpleConv-style mean-pool
+Conv1d head, `smolnet_rps_simple_head`) before adding stronger TCN/GRU/attention
+heads; otherwise body and head effects are confounded.

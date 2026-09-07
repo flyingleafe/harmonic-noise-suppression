@@ -43,5 +43,3 @@ backups/
 /.pre-commit-config.yaml
 omnirun-outputs/
 .jupyterlab.log
-# /writeup workflow transient state (target manifest, baselines)
-.claude/writeup/

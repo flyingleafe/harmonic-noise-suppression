@@ -5,9 +5,9 @@ description: Create any variant of the DREGON-LM dataset (mono, multichannel syn
 
 # Create a derived dataset (DREGON-LM and friends)
 
-> Bootstrap applies. Read `docs/refactor-data-pipelines.md` (the data-layer
-> architecture) and `src/data_processing/AGENTS.md` (recording inventory,
-> telemetry gotchas) before acting.
+> Read `docs/refactor-data-pipelines.md` (the data-layer architecture) and
+> `src/data_processing/AGENTS.md` (recording inventory, telemetry gotchas)
+> before acting.
 
 ## The one model
 

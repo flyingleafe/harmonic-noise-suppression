@@ -47,8 +47,9 @@ entry's `raw_dataset`.
 
 **Everything else is a derivation** — declared as a frozen spec in
 `data_processing.derivations.SPECS` and materialized only through the single
-driver (full detail: `src/data_processing/AGENTS.md` § "Publishing datasets to
-dload", architecture: `docs/refactor-data-pipelines.md`):
+driver (driver contract and layouts: `src/data_processing/AGENTS.md`; what is
+pinned and why: `docs/data-catalog.md`; architecture:
+`docs/refactor-data-pipelines.md`):
 
 ```bash
 python scripts/derive.py list --check-remote -v   # specs + fingerprints + refs
@@ -157,8 +158,9 @@ in its module docstring):
   returned. Path-based loaders need no dload awareness.
 - **`frames:NAME[@VERSION]` specs** — `noise_rps_dataset` and online-mix
   `kind: frames` noise sources consume the published rich-frame datasets
-  (`DREGON-frames`, `michaels-frames`) directly; see
-  `src/data_processing/AGENTS.md`.
+  (`DREGON-frames`, `michaels-frames`, `michaels-test-frames`) directly; the
+  source-kind reference is `docs/refactor-data-pipelines.md` § "Online-mix
+  policy reference".
 
 Measured on the V4 stream (laptop ↔ R2): cold time-to-first-sample ~6 s per
 shard, warm epochs ~18× faster than cold, ~48 MB/s sustained download;
@@ -224,27 +226,40 @@ speed (~18× faster than cold, measured).
 
 ## Job running (omnirun)
 
-Remote GPU jobs are submitted with **omnirun** (installed as a `uv tool`).
-Backend definitions live in the user-global `~/.config/omnirun/config.toml`:
+Remote jobs are submitted with **omnirun**. The laptop CLI is a *thin client*
+of the scheduler daemon on hetzner (`[daemon] address = "10.100.0.1:8787"` over
+WireGuard in `~/.config/omnirun/config.toml`); the daemon owns the job store,
+the backend credentials and the backend definitions. `omnirun --local ...`
+forces daemonless mode (uses the commented-out backends in the laptop config).
+Backends as configured on the daemon:
 
 | Backend | What it is |
 |---|---|
-| `apocrita-short` | Apocrita Slurm, `gpushort` partition, ≤ 1 h |
-| `apocrita-long` | Apocrita Slurm, `sae` partition (GPU), long jobs — GPU-only, don't use for CPU work |
-| `apocrita-cpu` | Apocrita Slurm, `compute` partition — **CPU-only**, open-access, ≤ 10 days. For dataset generation / preprocessing (`scripts/derive.py derive`, etc.); submit with `--gpus 0` so GPU partitions stay free |
-| `colab` | Colab T4 — needs the local keep-alive daemon running; T4 allocation is a lottery (503s) |
-| `kaggle` | Kaggle P100 — kernel source cap ~1 MB, needs the slim-snapshot clone recipe (strip `notebooks/ writing/ tests/ docs/ .pi/ scripts/ uv.lock`, orphan commit, no origin, `env kind = system`) |
+| `uni` | Apocrita Slurm, `sae` partition (GPU, account `pilot_sae_gpu`), ≤ 10 days. Real training runs only — must request ≥ 1 GPU |
+| `uni-gpushort` | Apocrita Slurm, `gpushort` partition, ≤ 1 h — smoke tests, kernel benchmarks, short fine-tunes; usually starts within minutes |
+| `uni-cpu` | Apocrita Slurm, `compute` partition — **CPU-only**, ≤ 10 days. Dataset materialization, analysis sweeps, anything that would otherwise peg the laptop CPU; submit with `--gpus 0` |
+| `vast` | Vast.ai marketplace burst (`max_hourly` 2 $/h, auto-terminate) — when the cluster queue is long |
+| `kaggle` | Kaggle free GPU quota — CUDA validation of new code without waiting for the queue; ~1 MB kernel source cap |
 
 The committed repo-level `omnirun.toml` holds job *defaults* only
-(`outputs = results/**`, 1 GPU, 1 h, `env kind = auto`).
+(`outputs = results/**`, 1 GPU, 1 h, `env kind = uv`).
 
 ```bash
-omnirun submit --backend apocrita-short --gpus 1 --time 30m --yes -- \
+omnirun submit --backend uni-gpushort --gpus 1 --time 30m --yes -- \
     python train.py experiment=<name>
-omnirun ps                    # all jobs;  omnirun status/logs <job> for one
+omnirun ps                    # in-flight + recent jobs (-A: all repos)
+omnirun status <job>          # one job (unique id prefix is enough)
+omnirun logs -f <job>         # stream logs (there is no --tail)
+omnirun wait <job>            # block until a state is reached
 omnirun pull <job>            # collect the job's results/** locally
+omnirun cancel <job>          # graceful; --force hard-kills
+omnirun offers --gpus 1       # probe backends, submit nothing
 omnirun backends check        # re-establish the SSH ControlMaster after expiry
 ```
+
+- `omnirun ssh <job>` is **not available in daemon mode**; marketplace
+  backends have no ssh entry at all. Inspect a running job through its logs
+  and `results/**`, not by shelling in.
 
 - Requires a **clean, pushed HEAD** (`--push`/`--dirty` exist; prefer clean —
   `train.py` errors on a dirty tree anyway).
@@ -253,14 +268,13 @@ omnirun backends check        # re-establish the SSH ControlMaster after expiry
   (`uv sync --frozen`).
 - `.env` ships with every job automatically — R2 + WANDB credentials travel,
   so dload streaming and wandb logging work on any backend.
-- The `sae` partition (`apocrita-long`) **requires** `account =
-  "pilot_sae_gpu"` in the backend config — `sbatch` rejects the submission
-  otherwise. `sae` is GPU and account-gated — reserve it for real GPU jobs.
-- **CPU-only jobs go to `apocrita-cpu`** (the open-access `compute` partition,
-  no account, ≤ 10 days), submitted with `--gpus 0`. Dataset materialization is
-  the canonical case — e.g. build DN-LM from its derived-dataset spec:
+- `uni` (the `sae` partition) is GPU- and account-gated — reserve it for real
+  GPU jobs; a submission without a GPU request is rejected (`QOSMinGRES`).
+- **CPU-only jobs go to `uni-cpu`**, submitted with `--gpus 0`. Dataset
+  materialization is the canonical case — e.g. build DN-LM from its
+  derived-dataset spec:
   ```bash
-  omnirun submit --backend apocrita-cpu --gpus 0 --time 3h --yes -- \
+  omnirun submit --backend uni-cpu --gpus 0 --time 3h --yes -- \
       bash -lc 'python scripts/derive.py derive DN-LM-train --no-pin && \
                 python scripts/derive.py derive DN-LM-valid --no-pin'
   # then locally, once it succeeds: pull the new versions from R2 into the lock

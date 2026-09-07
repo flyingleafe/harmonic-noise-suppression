@@ -46,8 +46,8 @@ num_rotors, ...)` is the richer factory that also handles the salience-model
 narrow-input/super-resolution config overrides.
 
 ### Dataset
-`DREGONRPSDataset` loads `mixture.wav` + `rps.npy` from DREGON-LM chunks.
-Dataloaders for this task should expose the common `(audio, rps_target)` format:
+`DregonLMFrameDataset` and `NoiseRPSDataset` in `src/data_processing/frame_datasets.py` and `src/data_processing/noise_rps_dataset.py` provide the current DREGON/RPS data adapters. Dataloaders for this task should expose the common `(audio, rps_target)` format:
+Use `OnlineMixFrameDataset`/`OnlineMixIterableDataset` for online mixing and train through `python train.py experiment=<name>`.
 audio is `(T,)` or `(C, T)`, and `rps_target` is `(4, T_stft)` on the model's
 STFT output grid.  Salience-map models do **not** require a special dataset item;
 the training loop derives their BCE salience targets on the fly from `rps_target`.
@@ -111,9 +111,9 @@ family).  The front-end handles STFT/HCQT/whatever; the model only sees a
 
 ## Evaluation
 
-Use `notebooks/eval_rps_predictor.ipynb` (or generate model comparisons via
-the `generate-model-comparisons` skill).  Metrics: MAE, RMSE of predicted
-RPS vs ground truth.
+Use `python eval.py experiment=<name>` (or the `generate-model-comparisons`
+skill for cross-model tables/plots). Metrics: PIT-aligned MAE, RMSE of
+predicted RPS vs ground truth (`src/metrics/rps.py`).
 
 ---
 

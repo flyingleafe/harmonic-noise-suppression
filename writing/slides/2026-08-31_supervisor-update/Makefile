@@ -18,3 +18,6 @@ check: slides.pdf
 	pdftoppm -png -r 150 $< check/page
 
 .PHONY: all figures watch check
+slides.html: slides.qmd styles.scss
+	quarto render slides.qmd --to revealjs
+

@@ -1,0 +1,325 @@
+---
+title: "What the rotor-speed models actually read"
+subtitle: "Synthetic families, the fixed fan, and a scoring architecture"
+author: "Dmitrii Mukhutdinov"
+date: 2026-08-31
+format:
+  revealjs:
+    output-file: slides.html
+    embed-resources: true
+    width: 1280
+    height: 720
+    margin: 0.06
+    slide-number: c/t
+    transition: none
+    fig-align: center
+    auto-stretch: false
+    html-math-method: katex
+    theme: [default, styles.scss]
+execute:
+  echo: false
+---
+
+## Augmentation makes them react; only synthetic data makes them track
+
+:::: {.columns}
+::: {.column width="56%"}
+![](assets/freq_probe_nophase.png){height="520px"}
+:::
+::: {.column width="44%" .small}
+| Training regime | near $\alpha = 1$ | full range |
+|:--|--:|--:|
+| no label-transforming augmentation | 0.16 | 0.03 |
+| augmentation only (R2) | 0.14 | 0.89 |
+| augmentation + comb pre-training (R4) | **1.02** | **1.04** |
+| ideal | 1.00 | 1.00 |
+
+::: {.tiny}
+The probe resamples the input by $\alpha$: every harmonic, and hence every true speed, moves by that factor. Slope 1.00 reads harmonic positions.
+:::
+
+::: {.cbox}
+**Augmentation buys a GLOBAL reaction (0.89) and no LOCAL one (0.14). Only comb pre-training buys both.**
+:::
+:::
+::::
+
+::: {.notes}
+Slope near 1 means the model is reading harmonic positions, not clip-level statistics.
+:::
+
+## What we had before stochastic combs
+
+:::: {.columns}
+::: {.column width="55%"}
+![](assets/families_row.png){height="380px"}
+
+::: {.tiny}
+Real drone noise, the neural generator (`gen_m3_refined_all_perrotor`, the checkpoint every curriculum run consumes), and the analytic static comb — driven by the SAME rotor-speed trajectory, that of a DREGON cruise clip with no played source. Each panel is RMS-normalized under one shared dB scale: structure is comparable, absolute level is not.
+:::
+:::
+::: {.column width="45%" .small}
+| Arrangement | all-MAE | val PIT-MSE |
+|:--|--:|--:|
+| comb stage 1 → real stage 2 (R4) | **2.67** | **17.59** |
+| stochastic stage 1 → real stage 2 (R6) | 3.04 | 23.78 |
+| one stage, stochastic pooled (R7) | 5.99 | 94.97 |
+| real stage 2 + 29.4% stochastic, warm (R8) | 5.81 | 104.85 |
+| one stage, generator pooled (R5) | — | 147.6 |
+
+| Generated data in the pool | val PIT-MSE |
+|:--|--:|
+| real training on its own | ≈ 7.3 |
+| generated recordings added to the real pool | +27% worse |
+| generated-only training | 17.8–25.4 |
+| generated-only + a short real fine-tune | 11.1–14.1 |
+
+::: {.cbox}
+**Synthetic data bought coverage, never realism — and it had to be kept out of the real stage entirely.**
+:::
+:::
+::::
+
+## The stochastic comb family
+
+:::: {.columns}
+::: {.column width="54%" .cbox-paper .small}
+$$S(f,t) = B(f,t) + \sum_r \sum_k P_{rk}(t)\, L\!\big(f - k\cdot \mathrm{rps}_r(t);\ \gamma_{rk}\big)$$
+$$L(d;\gamma) = \tfrac{1}{\pi}\,\tfrac{\gamma}{d^2+\gamma^2}\ \text{(Cauchy)},\qquad \gamma_{rk} = \gamma_{0r} + s_r\, k$$
+$$10\log_{10} P_{rk}(t) = \mathrm{harm\_mean\_db} + \mathrm{profile\_db}[r,k] + h_{rk}(t)$$
+:::
+::: {.column width="46%" .small}
+- $h_{rk}$ drifts as a squared-exponential Gaussian process, drawn **independently of the speed trajectory** — no amplitude carries speed information, by construction.
+- The floor $B$ is a smooth random curve in log frequency, with its own GP in level and tilt.
+- Line width grows with $k$: a shaft wandering by 0.6 rev/s widens harmonic $k$ to about $0.6k$ Hz.
+- `harm_coherence`: a rotor breathes as a whole; `rotor_similarity`: four rotors of one airframe.
+:::
+::::
+
+![](assets/stoch_samples.png){width="64%"}
+
+::: {.tiny}
+The same trajectory in all four panels: the spacing is identical, and the timbre, the floor and the line breathing are redrawn each time. RMS-normalized, one shared dB scale.
+:::
+
+::: {.cbox}
+**Comb spacing stays the only cue, and the texture stops being a constant — the narrowness that made every static-comb clip sound the same is gone.**
+:::
+
+## Results after stochastic-comb training, split by regime
+
+| Model | Trained on | all-MAE | zero | low (ramps) | flight |
+|:--|:--|--:|--:|--:|--:|
+| `r4hb_scv2` | real | **2.67** | **2.87** | **3.48** | **2.49** |
+| `stoch_s1g_scv2` | synthetic | 8.08 | 20.27 | 16.20 | 4.50 |
+| `m3abl_comb_unigru128_s1` | synthetic | 8.30 | 4.73 | 24.24 | 6.00 |
+| `stoch_s1h_scv2` | synthetic | 9.07 | 27.98 | 26.77 | **2.60** |
+
+::: {.small}
+PIT MAE in rev/s on the frozen real split `DREGON-LM-V4-michaels-valid-full`. One row per MODEL — never a per-regime best-of, which no single model achieves.
+:::
+
+::: {.cbox}
+**Best synthetic-only is 3.03× the real target overall: 7.06× on stopped rotors, 4.66× on ramps, 1.81× at cruise. One arm reaches cruise parity alone (2.60 against 2.49); none reaches two cells at once.**
+:::
+
+## Synthetic-only, trained to convergence
+
+| Run | params | epochs | val RMSE min | at epoch |
+|:--|--:|--:|--:|:--|
+| `stoch_long_scv2` | 1.5M | 229 | **10.304** | 202 |
+| `stoch_long_trxxl` | 38M | 157 | 13.207 | 31 |
+| multi-F0 salience on the same family | — | — | — [TODO verify]{.todo} | — |
+
+::: {.callout-warning appearance="simple"}
+**CAVEAT.** These are *half-real, half-synthetic* validation numbers. They are NOT comparable to the synthetic-only figures on the previous slide or to the real-only figures anywhere else in this deck. Read them only against each other.
+:::
+
+::: {.small}
+- Training at the 8 s scoring length is worth about 8.5% over the 1 s-trained predecessor (11.265).
+- The 1.5M run was truncated by an MSE-patience rule while its RMSE was still descending, so 229 epochs is a *lower bound* on what convergence costs.
+- The multi-F0 salience arms on this family are still in flight. [TODO verify]{.todo}
+:::
+
+## Every model outputs an evenly-spaced fan around the mean
+
+:::: {.columns}
+::: {.column width="56%"}
+![](assets/fan_panels.png){height="400px"}
+
+::: {.tiny}
+Predicted (solid) against true (dotted) per-rotor speeds, PIT-aligned. LEFT: true spread 36.1–50.0, predicted 10.5–11.2 (s.d. 0.15), PIT MAE 10.6. RIGHT: true spread 7.0–12.6, predicted 8.2–8.7 (s.d. 0.11), PIT MAE 2.20 — the centre is right and the spread is still pinned. The LEFT truth is redrawn on the rebuilt synthetic benchmark, whose trajectories now carry real telemetry's frame-to-frame jitter; the pinned prediction does not move. RIGHT is real data and is unchanged.
+:::
+:::
+::: {.column width="44%" .small}
+`stoch_s1id_scv2`, cruise columns, 120 clips:
+
+::: {.tiny}
+| true spread | 0.19 | 3.96 | 8.37 | 12.76 | 42.75 |
+|:--|--:|--:|--:|--:|--:|
+| **predicted spread** | 8.96 | 10.28 | 9.59 | 10.74 | **10.81** |
+| PIT MAE | 5.04 | 5.86 | 7.69 | 5.29 | 17.55 |
+
+True spread varies over 42.6 rev/s; predicted spread over 1.85. The fan settles at ≈ 9.4 rev/s — this generator's own mean spread. The static-comb model emits the same pinned fan.
+:::
+
+::: {.cbox}
+**The model learned the marginal distribution of the quantity, not the signal that determines it.**
+:::
+
+::: {.tiny}
+**Honest exception — the fan is RIG-dependent.** Swept over all 37 validation clips, `r4hb_scv2` pins its spread at 8.3–8.6 rev/s on every DREGON clip (within-clip s.d. 0.07–0.14). On the FLY124 clips it does follow the true spread (within-clip correlation +0.78 to +0.91; clip 27, true 12.3–27.5, predicted 15.5–19.5). It has learned two per-rig fan widths. Synthetic training locks the fan in everywhere; real training escapes it on one rig only.
+:::
+:::
+::::
+
+## The exception: the fan width is per-rig, not universal
+
+![](assets/fan_counterexample.png){height="330px"}
+
+:::: {.columns .small}
+::: {.column width="50%"}
+**DREGON, cruise clip 20** — true spread 7.0–12.6 rev/s, predicted 8.2–8.7. The spread trace is flat: the prediction ignores a 5.6 rev/s swing in the truth. PIT MAE 2.20.
+:::
+::: {.column width="50%"}
+**Michael's FLY124, cruise clip 27** — true spread 12.3–27.5 rev/s, predicted 15.5–19.5, and the two traces move together. PIT MAE 1.90.
+:::
+::::
+
+::: {.cbox .small}
+Same model, same weights, one forward pass each. Across all 37 validation clips `r4hb_scv2` pins its spread at 8.3–8.6 rev/s on *every* DREGON clip (within-clip s.d. 0.07–0.14, correlation with truth $-0.63$ to $+0.48$), and tracks the true spread on *every* FLY124 clip (correlation $+0.78$ to $+0.91$). It has memorized two per-rig fan widths rather than learning one universal one — so the fan is what the model falls back on when it cannot resolve the rotors, not something it always does.
+:::
+
+## Scaling does not touch it
+
+:::: {.columns}
+::: {.column width="58%" .small}
+Static comb, three temporal heads trained to saturation:
+
+| Arm | Head | params | floor (val RMSE) |
+|:--|:--|--:|--:|
+| `comb_floor_base` | 2 × 64, 4 heads | 0.141M | 2.535 |
+| `comb_floor_deep` | **4** × 64, 4 heads | 0.241M | **2.155** (−15%) |
+| `comb_floor_wide` | 2 × **128**, 8 heads | 0.479M | 2.968 (+17%) |
+
+::: {.tiny}
+Predicted spread stays pinned in all three, over true spreads 0.20–21.04 rev/s: base 10.4–10.7, deep 10.2–10.6, wide 11.5–12.1. Depth buys a better CENTRE for the fan, not per-rotor resolution.
+:::
+
+::: {.cbox}
+Stochastic family, same axis: the 38M `trxxl` sits *28% worse* than the 1.5M trunk (13.207 against 10.304) and climbs away from its epoch-31 minimum. Width is harmful on both families; the arm with the most parameters loses.
+:::
+:::
+::: {.column width="42%" .small}
+**How the heads were scaled**
+
+```{=html}
+<div class="towers">
+  <div class="tower"><div class="lyr b"></div><div class="lyr b"></div><div class="cap">2 × 64<br>base</div></div>
+  <div class="tower"><div class="lyr r wide"></div><div class="lyr r wide"></div><div class="cap">2 × 128<br><b>wider: +17%</b></div></div>
+  <div class="tower"><div class="lyr g"></div><div class="lyr g"></div><div class="lyr g"></div><div class="lyr g"></div><div class="cap">4 × 64<br><b>deeper: −15%</b></div></div>
+</div>
+```
+
+::: {.tiny}
+Width = key/value/head dimension per time step, quadratic in parameters. Depth = sequential processing steps, linear. The widest arm carries 3.4× the parameters of base and loses; the deep arm carries 1.7× and wins.
+:::
+:::
+::::
+
+::: {.cbox}
+**The model is not capacity-limited; it has found a degenerate solution the loss rewards.**
+:::
+
+## What the new salience models change, and why
+
+:::: {.columns}
+::: {.column width="50%" .small}
+**Original multi-pitch models** (HarmoF0, HPPNet, hFT, and our own `multif0_salience` baseline)
+
+```{=html}
+<div class="flow">
+  <div class="node">CQT / log-frequency spectrogram</div><div class="arrow">↓</div>
+  <div class="node">harmonics gathered as a <b>shift</b> by log₂(k)·B bins</div><div class="arrow">↓</div>
+  <div class="node">trunk</div><div class="arrow">↓</div>
+  <div class="node red"><b>ONE</b> salience map, all rotors</div><div class="arrow">↓</div>
+  <div class="node red">peak-pick + threshold + Hungarian tracking</div>
+</div>
+```
+
+::: {.tiny}
+Built for music: a semitone grid, sources of different timbre.
+:::
+:::
+::: {.column width="50%" .small}
+**Ours**
+
+```{=html}
+<div class="flow">
+  <div class="node"><b>linear</b> STFT power, n<sub>fft</sub> 4096, 3.906 Hz bins</div><div class="arrow">↓</div>
+  <div class="node green"><b>GATHER</b>: read at k·r for every candidate rate</div><div class="arrow">↓</div>
+  <div class="node">same trunk</div><div class="arrow">↓</div>
+  <div class="node green"><b>FOUR</b> layers, one per rotor, zero at bin 0</div><div class="arrow">↓</div>
+  <div class="node green">one <b>CRF</b> best path per layer — no threshold, no assignment</div>
+</div>
+```
+
+::: {.tiny}
+Built for rotors: 0.13 rev/s pairs, four equal timbres.
+:::
+:::
+::::
+
+## Why each of the three changes
+
+:::: {.columns .small}
+::: {.column width="33%" .cbox}
+**Why a linear STFT.** On a log grid the pair separation-to-bandwidth ratio is $D/(r(2^{1/B}-1))$ — **$k$ cancels**, so a pair resolves at every harmonic or at none. DREGON's 0.13 rev/s pair then needs a 19 s window. A uniform STFT separates *linearly with $k$*: 0.13 rev/s from $k \ge 31$.
+:::
+::: {.column width="33%" .cbox}
+**Why four layers.** One map cannot hold four rotors whose pairs sit inside one bin. Encode the true speeds, decode them back: **8.24 rev/s error on a PERFECT target**. Four layers: **2.2e-16**. A stopped rotor also becomes a peak at bin 0, not an absence.
+:::
+::: {.column width="33%" .cbox}
+**Why the gather.** A comb at $r$ is a *dilation* of one at $r'$, not a translation, so convolutions share no weights on a linear axis. Reading *at* $k\cdot r$ restores that sharing by indexing, and keeps the STFT resolution.
+:::
+::::
+
+## Current validation scores, new salience models
+
+:::: {.columns}
+::: {.column width="56%" .small}
+`val/rps_mae`, rev/s, PIT-aligned. Each arm validates on the family it trained on; *r4* is the real split.
+
+::: {.tiny}
+| model | arm | epoch | state | rev/s |
+|:--|:--|--:|:--|--:|
+| **regressor** | static comb | — | converged | **3.08** |
+| **regressor** | stochastic | — | converged | **4.96** |
+| **regressor** | real (R4) | — | converged | **2.67** |
+| HarmoF0 | static comb | 39 | running | **1.43** |
+| HPPNet | static comb | 28 | converged | **1.51** |
+| hFT | static comb | 20 | converged | 19.31 |
+| HPPNet | stochastic | 27 | converged | **4.62** |
+| HarmoF0 | stochastic | 94 | converged | 5.90 |
+| hFT | stochastic | 20 | converged | 66.47 |
+| HPPNet | real (r4) | 26 | converged | 5.32 |
+| HarmoF0 | real (r4) | 24 | converged | 12.69 |
+| hFT | real (r4) | — | never ran | — |
+
+**WIP.** Only `hf0_comb` still trains. Regressor rows: `m3abl_comb_scv2_s1`, `stoch_s1id_scv2`, `r4hb_scv2`. The two blocks use different metrics. hFT's real arm gave no epoch — it did not run. [TODO verify]{.todo}
+:::
+:::
+::: {.column width="44%" .small}
+::: {.cbox}
+**Both convolutional ports beat the regressors on the two synthetic families. On real data they do not.**
+:::
+
+::: {.tiny}
+**The monitor is wrong.** `val/bce` increases while `val/rps_mae` decreases. BCE scores every bin; the metric scores the peak only. Thus early stopping stops the runs too soon, and each `best.ckpt` uses the wrong signal.
+
+**hFT failed, and it is not undertrained.** Its comb arm stopped at 19.31. Its rate tokens read only their own 32 harmonics, so the four layers cannot become different. A `gather-as-bias` variant is not yet run.
+
+**The r4 rows are not proper R4 cells.** They start from a stage-1 checkpoint at epoch 6, which has since improved. [TODO verify]{.todo}
+:::
+:::
+::::

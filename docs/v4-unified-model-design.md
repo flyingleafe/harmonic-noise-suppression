@@ -154,3 +154,146 @@ If gates 1–4 pass, v4 is the centerpiece: one Gaussian model, one
 marginal-likelihood objective, decomposition = posterior inference,
 measure = the objective, amplitude targets = model parameters. The v3
 machinery becomes the ablation story (what each simplification breaks).
+
+
+## Implementation reference — as built (moved from `src/tracking/AGENTS.md`, 2026-09)
+
+`JointConfig.v4`, default off. Everything in v3 (marginal and H-aware readouts included) is a
+correction bolted onto a measure whose noise model does not contain the comb; v4 puts the comb
+IN the model — one Gaussian process whose power spectral density is a smooth floor plus a comb of
+Lorentzians riding the trajectories:
+
+```
+M_c(f, t) = S_c(f, t) + sum_{i,k} H_{c,i,k}(t) L_{gamma_k}(f - k r_i(t)),  gamma_k = max(0.6 k, one bin)
+```
+
+The v3 primitive inventory is `docs/vk-decompose-v3-design.md` §10; these are the v4 additions in
+`tracking/joint_decompose.py`. One switch selects them, because the four parts only work together,
+and off is the v3 arm call for call.
+
+| Primitive | Purpose |
+|---|---|
+| `fit_floor_powers(audio, sr, r_audio, k_hi, ...) -> (SmoothPSD, HPowers)` | **F1**: `S` and the line powers `H`, fitted JOINTLY with NO mask on the ORIGINAL signal, per (microphone, time block) |
+| `HPowers` | the fitted powers: `(C, B, L)` peak power spectral density on `masked_smooth_psd`'s own units, plus the line table. `.pooled()` (arithmetic mean over microphones), `.block_of(t)` |
+| `floor_lambda(b_f_hz, sr, n_fft)` / `floor_penalty(psd, b_f_hz)` | the floor's smoothness weight from a LENGTH SCALE in hertz, and the penalty term itself |
+| `whittle_floor_objective(p, hump, g, lam)` | the F1 cost of one cell — what GUARDS every step and chooses between the starts |
+| `v4_rho2_gain(r_audio, k_hi, cfg, ...)` | **F2a**: the band law `max(b0, 0.6 k)` Hz with NO spacing cap, in the solver's own currency |
+| `v4_ridge(psd, hp, k, rotor, r_env, t_env, weight, c0=)` | **F2b**: the amplitude prior `beta = c0 S / H`, fed to `vk_envelopes(ridge=)` |
+| `map_objective(..., v4_powers=, v4_carrier=)` | **J_v4**: `sum [P/M + log M]` + the two phase priors + the floor penalty. No envelope term, no separate rent |
+| `joint_objective(state, audio)` | the same off a state — and under v4 the `audio` is REQUIRED |
+
+Five things a caller must know, and the first two are the ones that will bite:
+
+- **`J_v4` scores the ORIGINAL signal, not the residual.** The line processes are integrated out
+  rather than conditioned on, so the thing the model describes is the audio; scoring the residual
+  would count the comb twice, once by subtracting it and once by modelling it. `joint_objective`
+  raises rather than guess. Its column is therefore NOT comparable with `total` — different model,
+  different signal — which is why `scripts/joint_rescore.py --v4` ranks on it alone.
+- **The `(S, H)` alternation is BISTABLE, and the two starts are a guard and not a knob.** Where
+  the comb blankets a band, "floor on the blanket with `H = 0`" and "lines claim the blanket" are
+  both honest stationary points; from the masked warm start the first H-step finds no excess and
+  nothing ever moves, so the v3 failure survives INSIDE the v4 fit. The objective ranks them
+  correctly, so the fit screens `FLOOR_START_DB = (0, -12)` dB on `FLOOR_SCREEN_ROUNDS` and
+  refines the winner. Measured on the dense fixture the two differ by 13 dB of fitted floor.
+- **The band law changes `rho^2` and NOTHING else**, so the coupling partition, `group_plan` and
+  the banded memory are identical to v3's — measured on the smoke window, 0.149 GB either way.
+  What moves is wall time: 1.42 s to 2.53 s there, the difference being the three `(S, H)` fits.
+- **Regime 3 does not run.** The comb channel already carries the line flanks, so the
+  decomposition is two channels and a subtraction, and `joint_solve_window(stochastic=True)` is
+  REFUSED under v4 rather than silently ignored.
+- **`H` is a first-class product**, not a diagnostic: it is the generator's amplitude targets by
+  construction, and `scripts/vk_decompose.py --v4` writes it into the unit `.npz`
+  (`h_rotor` / `h_k` / `h_t` / `h_lines` / `h_half` / `h_power`).
+- **A v4 group that will not factorize FAILS — it never falls into `splu`.** The automatic
+  fallback is right for a v2-sized group and is the OOM bomb for a v4 one (SuperLU's fill-in on
+  300+ tracks does not fit in memory; the measured field failure was a spin-up window that took
+  its worker and then the pool with it). Under `ridge` the banded path keeps its two `diag_scale`
+  repair retries and then raises a `MemoryError` naming the group, the harmonics and the knob, so
+  `gridrun` writes one `.err` and the other units keep running. An EXPLICIT `solver="splu"` is a
+  different statement and is still honoured.
+
+**Conditioning, and the limit of the fix.** With the bands uncapped, two rotors whose lines nearly
+coincide have passbands that nearly coincide, so the difference direction of that pair has almost
+no data curvature; `rho^2` is small because the band is wide, and `beta = c0 S / H` is small for
+exactly the STRONG lines — so the loudest comb in a window is the one that breaks the
+factorization. `RIDGE_FLOOR_FRAC = 0.03` holds the prior above 3 % of the group's own mean data
+curvature, and the constant is squeezed from both sides: below it nothing factorizes on the
+four-rotor spin-up fixture (120 tracks, rotors fanning 2 rev/s and crossing), and above it the
+estimator starts to move — at 0.3 the Wiener calibration breaks (0.72-0.76, outside ±20 %) and a
+strong line keeps 0.61 of its power. At the chosen value the calibration is unmoved to three
+decimals and a strong line keeps 0.945 instead of 0.980.
+
+The deficiency is NOT float rounding — it is the decimated cross term's own approximation error,
+which is percent-relative — so the floor has a reach and past it there is nothing to do. Four
+rotors within ~1 rev/s would need 0.1, costing a strong line 17 %; those windows are genuinely
+unidentifiable at these bands (four combs 0.3 Hz apart at `k` 1 are not four combs to a 3-second
+window). `tests/tracking/test_v4_conditioning.py` pins both halves: the floor factorizes a group
+that fails without it, and past its reach the failure is clean and names its own mechanism.
+
+**Past that reach, the band law steps aside — `JointConfig.v4_band_law`.** DREGON is a twin rig
+(its pairs sit 0.43 and 0.81 rev/s apart), so at `k_hi` 83 six of its seven windows are in the
+unidentifiable regime and fail cleanly. `scripts/vk_decompose.py` catches that one exception per
+window and retries ONCE with `v4_band_law=False`: the envelope bands come from the `--bw-schedule`
+(the v3 spacing-capped law) and **everything else stays v4** — the joint `(S, H)` fit, the
+amplitude prior with its floor, `J_v4`. That is not a degradation of what the model estimates.
+The amplitude targets ARE `(S, H)`, they come from the F1 fit, and that fit never looks at a band;
+the uncapped bands refine the WAVEFORM channel, which is only identifiable where the rotor spreads
+allow it. The row carries `v4_band_fallback: true` and the report's `v4` block carries
+`n_band_fallback` / `band_law_mixed`.
+
+Mixed sets stitch: the stitch's only compatibility check is the HARMONIC SET, and `k_hi` comes
+from the recording's reference trajectory rather than from any window's bands, so windows solved
+under different band laws stitch exactly as windows that were not. `bw_track` is carried from the
+first window and never enters the arithmetic — which is why `band_law_mixed` has to be reported,
+because `bw_track_hz_by_band` is then one window's law and not the recording's.
+
+**The fallback derives its own bands — `v4_fallback_rho2_gain`, not `track_rho2_gain`.** This is
+the one place where reusing the v2 seam is wrong, and it cost a second field failure (FLY124,
+`k_hi` 83: 13 of 21 units died in the objective READOUT with `bw_hz=100.0 exceeds fs_env=100.0`).
+The chain, all four links measured:
+
+1. `bw_rps` is 1.0, so the solver's own band for track `k` is `min(k, 0.9 fs_env)` capped by the
+   group's minimum line separation. On DREGON everything is in one dense group and the cap holds
+   every track near 1 Hz; on a rig whose rotors are tens of hertz apart an isolated high-`k` track
+   is never capped, and its band is 60 to 90 Hz on a **100 Hz** envelope grid.
+2. `schedule_bandwidths` FLOORS at that band — "a schedule never NARROWS a track below v1" is
+   right for v2 and wrong here — so a schedule asking for 3 Hz achieves 30 to 90.
+3. `bandwidth_neutral` multiplies `rho^2` by the track's own `mean(u^2)`, which is BELOW one for a
+   loud track (the weight is normalized over all cells, not per track, and the clamp bottoms at
+   `10^-1.5`), so it WIDENS those bands further.
+4. `_tuma_bw` then saturates at `fs_env` exactly, and `_tuma_rho` refuses that value.
+
+So the fallback asks for the same schedule with the floor at the smallest numerically usable band
+instead of the solver's, and `JointState` keeps `bw_schedule` / `rho_scale` so the retry can
+re-derive rather than reuse a compiled gain. `solve_block` additionally holds the v4 arm's
+achieved band inside `0.9 fs_env` after the neutral gain, and `map_objective` reads a saturated
+band at the widest CONVERTIBLE one — an observer must not be the thing that raises. Measured on
+the FLY fixture at a schedule absmax of 3 Hz: the solver's clamp and the v2 gain both give 30.0 Hz,
+the fallback law gives 3.0, and with no schedule at all it gives 1.0.
+
+The two calibrated constants, both frozen with their measurement in the test that made it:
+
+- `FLOOR_LENGTH_HZ = 600` — the floor's smoothness length in hertz. On the dense fixture (one
+  comb whose density `gamma / Delta` runs 0.06 to 0.48) the fitted floor lands at
+  0.36 / 0.53 / 0.70 / 0.46 dB rms in the four bands, against 0.37 / 0.63 / 1.03 / 0.73 at 400 Hz
+  (the v3 cepstral lift's own scale) and 0.33 / 0.61 / 0.49 / 0.31 at 800 Hz.
+- `V4_RIDGE_C0 = 1` — and it is 1 for a derivable reason, not a fitted one: the band is `0.6 k` Hz
+  and the line's own half width is the same `0.6 k`, so line and noise contribute in proportion to
+  the SAME noise-equivalent bandwidth and the ratio of the two powers the band admits is exactly
+  the ratio of the two densities, `S / H`. Measured against the Wiener target over three seeds:
+  0.97 / 1.02 / 1.01 at `k` 5 / 20 / 60 for a line 10 dB over the floor.
+
+Acceptance (gate 1 of the design, plus the carve):
+`tests/tracking/test_v4_floor.py` reads the fitted floor at 0.33 / 0.45 / 0.58 / 0.40 dB rms
+against the masked fit's 2.00 / 4.83 / 8.12 / 10.46 on the same fixture — and against 0.33 / 2.05
+/ 6.69 / 5.75 for the v4 fit given only the warm start, which is the bistability measured.
+`tests/tracking/test_v4_carve.py` gives one rotor a band it owns with lines on the low harmonics
+only: the line-free tracks take 3.9 % of what the same wide bands take with the prior switched
+off, while the owned harmonics keep 84 %. `tests/tracking/test_v4_ridge.py` holds the `c0`
+calibration; `tests/tracking/test_v4_objective.py` holds `J_v4`'s discrimination.
+
+The bar on the floor gate is 0.9 dB rms and not the design's 0.5, for a measured reason that is
+in the fit's favour: the Hann main lobe smears each line's skirts into the bins the floor is read
+from, so a CORRECT fit reads a few tenths of a decibel high on this grid whatever it does. The
+residual error is that bias and almost nothing else.
+

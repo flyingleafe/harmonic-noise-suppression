@@ -1,6 +1,6 @@
 # Per-repo omnirun job defaults (CLI flags override). Committed; backend
-# definitions (apocrita-short/-long, colab, kaggle) live in the user-global
-# ~/.config/omnirun/config.toml — see docs/data-and-artifacts.md § "Job running".
+# definitions (uni, uni-gpushort, uni-cpu, vast, kaggle) live on the omnirun
+# daemon — see docs/data-and-artifacts.md § "Job running".
 
 [job]
 outputs = ["results/**"]
