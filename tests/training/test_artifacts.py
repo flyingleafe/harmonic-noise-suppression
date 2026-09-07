@@ -44,6 +44,12 @@ class FakeS3Client:
         path = self._check(Bucket, Key)
         self.objects[path] = Path(Filename).read_bytes()
 
+    def copy_object(self, *, Bucket: str, Key: str, CopySource: dict[str, str]) -> dict:
+        destination = self._check(Bucket, Key)
+        source = f"{CopySource['Bucket']}/{CopySource['Key']}"
+        self.objects[destination] = self.objects[source]
+        return {}
+
 
 # ─── upload_checkpoint ──────────────────────────────────────────────────────
 
@@ -72,6 +78,20 @@ def test_upload_checkpoint_custom_bucket_and_prefix(tmp_path):
     uri = store.upload_checkpoint(ckpt)
 
     assert uri == "r2://other-bucket/runs/exp2/checkpoints/ep3_mse_0.1234.ckpt"
+
+
+def test_alias_checkpoint_copies_inside_r2_without_reupload(tmp_path):
+    ckpt = tmp_path / "last.ckpt"
+    ckpt.write_bytes(b"selected-state")
+    client = FakeS3Client()
+    store = ArtifactStore(experiment_name="exp", client=client, enabled=True)
+    store.upload_checkpoint(ckpt)
+
+    uri = store.alias_checkpoint("last.ckpt", "best_real_r3.ckpt")
+
+    key = "ml-data/artifacts/exp/checkpoints/best_real_r3.ckpt"
+    assert uri == f"r2://{key}"
+    assert client.objects[key] == b"selected-state"
 
 
 def test_upload_checkpoint_disabled_is_noop(tmp_path):

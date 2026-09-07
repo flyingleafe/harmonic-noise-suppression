@@ -18,7 +18,7 @@ Directories mirror `src/` package by package.
 | `framespec/` | `FrameSpec` structural typing (`test_spec.py`) |
 | `tasks/` | `tasks.checkpoints` `Type@ckpt` loading, the live `evaluate-rps` CLI, RPS prediction + its golden-artifact regression, noise-generation codec |
 | `plots/` | plot registry, RPS plots, `plots.dwym` dispatch + `data_processing.canonical` coercion, `plots.explore` notebook primitives |
-| `training/` | training loop, collate, `validate_config`, val-logging, R2 `ArtifactStore` (fake client; the one real-R2 test is `network`-marked). `conftest.py` + `_fixtures.py` live here |
+| `training/` | Training loop, collate, preflight validation, `test_validation.py` (GPU-vectorized PIT equivalence, overlapping views, log-scale any-subset stopping and state resume), subset checkpoint aliases, R2 `ArtifactStore`, and on-demand val-media helpers. |
 | `zoo/` | `zoo.cache` refresh/listing against a fake S3 client, `zoo.FrameModel` round-trip. No network |
 | `scripts/` | The importable cores of the generic tools — `se_eval.py`, `table.py`, `bench.py`/`probe_ckpt.py`. `conftest.py` puts `scripts/` on `sys.path` |
 | `utils/` | `utils.paths` resolution, `utils.gridrun` (resume, error isolation, aggregation) |

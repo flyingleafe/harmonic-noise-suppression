@@ -42,6 +42,7 @@ from tasks.task import TASK_FACTORIES, Task
 __all__ = [
     "DatasetSpec",
     "DataConfig",
+    "ValidationConfig",
     "ModelConfig",
     "LossTermConfig",
     "LossConfig",
@@ -88,6 +89,28 @@ class DataConfig:
     valid: DatasetSpec = field(default_factory=DatasetSpec)
     batch_size: int | None = None
     num_workers: int | None = None
+
+
+@dataclass
+class ValidationConfig:
+    """Optional multi-dataset RPS validation and convergence protocol."""
+
+    enabled: bool = False
+    every_optimizer_steps: int = 500
+    max_optimizer_steps: int = 100_000
+    batch_size: int | None = None
+    num_workers: int | None = None
+    datasets: dict[str, DatasetSpec] = field(default_factory=dict)
+    views: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aggregates: dict[str, dict[str, float]] = field(default_factory=dict)
+    primary: list[str] = field(default_factory=list)
+    control: str = "overall_macro"
+    smoothing_window: int = 5
+    min_relative_improvement: float = 0.01
+    lr_patience: int = 15
+    lr_factor: float = 0.5
+    min_lr_reductions: int = 4
+    final_patience: int = 20
 
 
 @dataclass
@@ -199,8 +222,6 @@ class ArtifactsConfig:
     bucket: str = "ml-data"
     prefix: str = "artifacts"
     upload_checkpoints: bool = True
-    upload_val_samples: bool = True
-    num_val_samples: int = 6
 
 
 @dataclass
@@ -240,6 +261,7 @@ class RootConfig:
     checkpoint_every: int = 0  # 0 = only best.ckpt; N>0 = also every N epochs
     checkpoint: str | None = None  # eval.py: explicit checkpoint path override
     data: DataConfig = field(default_factory=DataConfig)
+    validation: ValidationConfig = field(default_factory=ValidationConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     loss: LossConfig = field(default_factory=LossConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)

@@ -10,10 +10,12 @@ it with a tiny recording stub for the duration of each test.
 
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
 import torch
+from omegaconf import OmegaConf
 
 import training.loop as loop_module
 from tests.training.conftest import make_tiny_config
@@ -110,7 +112,6 @@ def test_run_training_uploads_best_checkpoint_to_injected_artifact_store(tmp_pat
         n_valid=4,
         batch_size=2,
         artifacts_enabled=True,
-        num_val_samples=0,  # this test is scoped to checkpoint upload, not sample logging
     )
     run_training(cfg, artifact_store=store)
 
@@ -124,33 +125,103 @@ def test_run_training_uploads_best_checkpoint_to_injected_artifact_store(tmp_pat
     assert recorded_uri == f"r2://{ckpt_key}"
 
 
-def test_run_training_val_sample_logging_and_upload_when_enabled(tmp_path, monkeypatch):
+def test_multi_validation_writes_independent_stable_best_checkpoints(tmp_path, monkeypatch):
     fake_wandb = _FakeWandb()
     monkeypatch.setattr(loop_module, "wandb", fake_wandb)
-
-    client = FakeS3Client()
-    experiment_name = "tiny_loop_val_samples"
-    store = ArtifactStore(experiment_name=experiment_name, client=client, enabled=True)
-
     cfg = make_tiny_config(
         results_root=str(tmp_path),
-        experiment_name=experiment_name,
+        experiment_name="tiny_multi_validation",
         epochs=1,
-        n_train=6,
-        n_valid=4,
+        n_train=4,
         batch_size=2,
-        artifacts_enabled=True,
-        num_val_samples=2,
     )
-    run_training(cfg, artifact_store=store)
+    valid_spec = {
+        "_target_": "tests.training._fixtures.TinyRPSFrameDataset",
+        "params": {
+            "n_samples": 4,
+            "duration_s": 0.5,
+            "sample_rate": 16000,
+            "seed": 7,
+        },
+        "iterable": False,
+    }
+    cfg.validation = OmegaConf.create(
+        {
+            "enabled": True,
+            "every_optimizer_steps": 2,
+            "max_optimizer_steps": 2,
+            "batch_size": 2,
+            "num_workers": 0,
+            "datasets": {"real": valid_spec},
+            "views": {
+                "first_half": {"dataset": "real", "start": 0, "stop": 2},
+                "all": {"dataset": "real"},
+            },
+            "aggregates": {"overall": {"all": 1.0}},
+            "primary": ["first_half", "all", "overall"],
+            "control": "overall",
+            "smoothing_window": 1,
+            "min_relative_improvement": 0.01,
+            "lr_patience": 2,
+            "lr_factor": 0.5,
+            "min_lr_reductions": 1,
+            "final_patience": 2,
+        }
+    )
 
-    # wandb.Audio/Image payloads logged alongside the usual train/val scalars.
-    audio_rows = [row for row in fake_wandb.logged if any(k.startswith("val/") for k in row)]
-    assert audio_rows, "expected at least one wandb.log call carrying val/ sample keys"
+    result = run_training(cfg)
+    run_dir = tmp_path / "tiny_multi_validation"
+    index = json.loads((run_dir / "best_checkpoints.json").read_text())
 
-    # And the same samples reached the (fake) R2 client as a manifest.
-    manifest_keys = [k for k in client.objects if k.endswith("manifest.json")]
-    assert manifest_keys, f"expected a val_samples manifest.json, got keys: {list(client.objects)}"
+    assert result["optimizer_steps"] == 2
+    assert set(index) == {"first_half", "all", "overall"}
+    assert (run_dir / "best_first_half.ckpt").is_file()
+    assert (run_dir / "best_all.ckpt").is_file()
+    assert (run_dir / "best_overall.ckpt").is_file()
+    assert (run_dir / "best.ckpt").is_file()
+    scalar_row = next(row for row in fake_wandb.logged if "optimizer_step" in row)
+    assert scalar_row["optimizer_step"] == 2
+    assert scalar_row["validation_round"] == 0
+
+
+def test_iterable_multi_validation_epoch_is_exact_optimizer_step_interval(tmp_path, monkeypatch):
+    fake_wandb = _FakeWandb()
+    monkeypatch.setattr(loop_module, "wandb", fake_wandb)
+    cfg = make_tiny_config(
+        results_root=str(tmp_path),
+        experiment_name="tiny_step_cadence",
+        epochs=2,
+        n_train=4,
+        batch_size=2,
+    )
+    cfg.data.train._target_ = "tests.training._fixtures.TinyRPSIterableDataset"
+    cfg.data.train.iterable = True
+    cfg.validation = OmegaConf.create(
+        {
+            "enabled": True,
+            "every_optimizer_steps": 3,
+            "max_optimizer_steps": 6,
+            "batch_size": 2,
+            "num_workers": 0,
+            "datasets": {"valid": cfg.data.valid},
+            "views": {"all": {"dataset": "valid"}},
+            "aggregates": {},
+            "primary": ["all"],
+            "control": "all",
+            "smoothing_window": 1,
+            "min_relative_improvement": 0.01,
+            "lr_patience": 10,
+            "lr_factor": 0.5,
+            "min_lr_reductions": 4,
+            "final_patience": 20,
+        }
+    )
+
+    result = run_training(cfg)
+    steps = [row["optimizer_step"] for row in fake_wandb.logged if "optimizer_step" in row]
+
+    assert steps == [3, 6]
+    assert result["optimizer_steps"] == 6
 
 
 def test_resume_continues_from_the_saved_epoch_instead_of_restarting(tmp_path, monkeypatch):
@@ -406,8 +477,8 @@ def test_nonfinite_train_loss_stops_before_touching_the_last_good_state(tmp_path
     real_train = loop_module._train_one_epoch
 
     def poisoned(**kw):
-        loss = real_train(**kw)
-        return math.nan if kw["epoch"] == 1 else loss
+        loss, steps = real_train(**kw)
+        return (math.nan, steps) if kw["epoch"] == 1 else (loss, steps)
 
     monkeypatch.setattr(loop_module, "_train_one_epoch", poisoned)
     cfg = make_tiny_config(

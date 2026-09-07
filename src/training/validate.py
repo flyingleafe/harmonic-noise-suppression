@@ -35,6 +35,7 @@ from training.config import (
     build_task_and_codec,
     instantiate_model,
 )
+from training.validation import build_validation_plan
 
 __all__ = ["validate_config"]
 
@@ -78,6 +79,16 @@ def validate_config(cfg: Any) -> list[str]:  # noqa: C901 - linear checklist, no
         task, codec = build_task_and_codec(cfg.model)
     except Exception as exc:
         return [f"failed to build model task/codec: {exc!r}"]
+
+    validation_cfg = getattr(cfg, "validation", None)
+    multi_validation = bool(
+        validation_cfg is not None and getattr(validation_cfg, "enabled", False)
+    )
+    if multi_validation:
+        try:
+            build_validation_plan(validation_cfg)
+        except Exception as exc:
+            problems.append(f"failed to build validation plan: {exc!r}")
 
     try:
         samples = _draw_samples(train_ds, SMOKE_SAMPLES)
@@ -132,19 +143,17 @@ def validate_config(cfg: Any) -> list[str]:  # noqa: C901 - linear checklist, no
                 ]
 
     # ── 3. scheduler monitor metric exists ─────────────────────────────────
-    try:
-        monitor = cfg.optim.monitor
-        metric_names = set(metric_suite.metrics) if metric_suite is not None else set()
-        # "val_loss" is the objective on held-out data — the right monitor
-        # whenever the metric suite is not aligned with the loss being trained
-        # (see training.loop.run_training).
-        if monitor not in ("loss", "val_loss") and monitor not in metric_names:
-            problems.append(
-                f"optim.monitor {monitor!r} is neither 'loss'/'val_loss' nor a "
-                f"metrics.terms name {sorted(metric_names)}"
-            )
-    except Exception as exc:
-        problems.append(f"failed to read optim.monitor: {exc!r}")
+    if not multi_validation:
+        try:
+            monitor = cfg.optim.monitor
+            metric_names = set(metric_suite.metrics) if metric_suite is not None else set()
+            if monitor not in ("loss", "val_loss") and monitor not in metric_names:
+                problems.append(
+                    f"optim.monitor {monitor!r} is neither 'loss'/'val_loss' nor a "
+                    f"metrics.terms name {sorted(metric_names)}"
+                )
+        except Exception as exc:
+            problems.append(f"failed to read optim.monitor: {exc!r}")
 
     # ── 4. one-batch CPU smoke test ─────────────────────────────────────────
     if batch is not None:

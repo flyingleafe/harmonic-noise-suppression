@@ -50,7 +50,7 @@ yielded numpy-backed Frames.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import tdseries as td
@@ -160,6 +160,17 @@ def collate_frames(frames: Sequence[td.Frame]) -> td.Frame:
     return td.Frame(entries)
 
 
+class _PinnableFrame(td.Frame):
+    """Frame batch hook consumed by PyTorch's pin-memory worker."""
+
+    def pin_memory(self) -> _PinnableFrame:
+        pinned = self.map_data(torch.Tensor.pin_memory)
+        return cast(
+            _PinnableFrame,
+            type(self)._from_local(pinned.entries, pinned.t_start_ticks, pinned.dur_ticks),
+        )
+
+
 def frame_collate(frames: Sequence[td.Frame]) -> td.Frame:
     """``collate_fn`` for a ``torch.utils.data.DataLoader`` over Frame samples.
 
@@ -168,7 +179,15 @@ def frame_collate(frames: Sequence[td.Frame]) -> td.Frame:
     torch-backed ones pass through ``torch.as_tensor`` as a no-op).
     """
     batched = collate_frames(frames)
-    return batched.map_data(torch.as_tensor)
+    tensors = batched.map_data(torch.as_tensor)
+    return cast(
+        _PinnableFrame,
+        _PinnableFrame._from_local(
+            tensors.entries,
+            tensors.t_start_ticks,
+            tensors.dur_ticks,
+        ),
+    )
 
 
 def batch_size(frame: td.Frame) -> int:

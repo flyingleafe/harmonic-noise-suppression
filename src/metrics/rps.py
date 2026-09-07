@@ -14,14 +14,60 @@ consistent.
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable
+from functools import cache
 
 import numpy as np
 import tdseries as td
+import torch
+import torch.nn.functional as F
 
 from framespec import FrameSpec
 from losses.pit import align_rps_to_gt
 from metrics._common import Metric, get_array, rps_series_spec
+
+
+@cache
+def _pit_permutations(rotors: int, device_type: str, device_index: int | None) -> torch.Tensor:
+    device = (
+        torch.device(device_type)
+        if device_index is None
+        else torch.device(device_type, device_index)
+    )
+    return torch.tensor(
+        list(itertools.permutations(range(rotors))),
+        dtype=torch.long,
+        device=device,
+    )
+
+
+def batched_pit_mae(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """MAE-optimal PIT score per sample, entirely on the input tensor's device.
+
+    Both inputs are ``(batch, rotor, time)``. Target resampling matches
+    :func:`experiments.rps_bench.resample_like_metric` (linear,
+    ``align_corners=False``). The returned ``(batch,)`` tensor stays on-device
+    so a validation pass needs only one host synchronization at its end.
+    """
+    if pred.ndim != 3 or target.ndim != 3 or pred.shape[:2] != target.shape[:2]:
+        raise ValueError(
+            f"batched_pit_mae needs matching (B, R, T) tensors, got "
+            f"{tuple(pred.shape)} and {tuple(target.shape)}"
+        )
+    rotors = int(pred.shape[1])
+    if not 1 <= rotors <= 8:
+        raise ValueError(f"batched_pit_mae supports 1..8 rotors, got {rotors}")
+    pred = pred.float()
+    target = target.float()
+    if target.shape[-1] != pred.shape[-1]:
+        target = F.interpolate(target, size=pred.shape[-1], mode="linear", align_corners=False)
+    pairwise = (pred[:, :, None, :] - target[:, None, :, :]).abs().mean(dim=-1)
+    permutations = _pit_permutations(rotors, pred.device.type, pred.device.index)
+    rows = torch.arange(rotors, device=pred.device)
+    costs = pairwise[:, rows, permutations].mean(dim=-1)
+    return costs.amin(dim=-1)
+
 
 # ─── Pure numpy functions ────────────────────────────────────────────────────
 
@@ -153,6 +199,7 @@ def rps_metric_suite(*, rate: tuple[int, int] | None = None, pit: bool = True) -
 
 
 __all__ = [
+    "batched_pit_mae",
     "rps_mse",
     "rps_rmse",
     "rps_mae_frame",

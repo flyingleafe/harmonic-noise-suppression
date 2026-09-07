@@ -21,9 +21,7 @@ def make_tiny_config(
     batch_size: int = 2,
     monitor: str = "mse",
     artifacts_enabled: bool = False,
-    num_val_samples: int = 0,
     upload_checkpoints: bool = True,
-    upload_val_samples: bool = True,
     early_stopping: dict[str, Any] | None = None,
 ) -> Any:
     """Build a minimal RootConfig-shaped ``DictConfig`` around
@@ -93,19 +91,12 @@ def make_tiny_config(
         "resume_id": None,
         "tags": [],
     }
-    # Disabled + num_val_samples=0 by default so ordinary loop/collate/validate
-    # tests never touch R2, the network, or the (heavier) validation-sample
-    # figure/audio-building path; tests that specifically exercise artifact
-    # upload or sample logging override "artifacts" (see
-    # tests/training/test_loop.py) or inject an ArtifactStore directly via
-    # ``run_training(cfg, artifact_store=...)``.
+    # Checkpoint upload is dependency-injected in the tests that exercise it.
     artifacts = {
         "enabled": artifacts_enabled,
         "bucket": "ml-data",
         "prefix": "artifacts",
         "upload_checkpoints": upload_checkpoints,
-        "upload_val_samples": upload_val_samples,
-        "num_val_samples": num_val_samples,
     }
     lora = {
         "enabled": False,

@@ -13,10 +13,11 @@ import tdseries as td
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 
 __all__ = [
     "TinyRPSFrameDataset",
+    "TinyRPSIterableDataset",
     "TinyRPSModel",
     "make_tiny_frame",
     "TinyNoiseGenFrameDataset",
@@ -80,6 +81,18 @@ class TinyRPSFrameDataset(Dataset):
 
     def __getitem__(self, idx: int) -> td.Frame:
         return self._frames[idx]
+
+
+class TinyRPSIterableDataset(IterableDataset):
+    """Infinite deterministic stream for optimizer-step cadence tests."""
+
+    def __init__(self, **kwargs) -> None:
+        self._finite = TinyRPSFrameDataset(**kwargs)
+
+    def __iter__(self):
+        while True:
+            for index in range(len(self._finite)):
+                yield self._finite[index]
 
 
 class TinyRPSModel(nn.Module):

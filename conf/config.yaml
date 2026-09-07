@@ -8,6 +8,7 @@ defaults:
   - base_config
   - data: ???
   - model: ???
+  - validation: disabled
   - loss: ???
   - metrics: ???
   - optim: adamw_plateau

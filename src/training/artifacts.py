@@ -164,6 +164,32 @@ class ArtifactStore:
             return None
         return self._uri(key)
 
+    def alias_checkpoint(self, source_name: str, alias_name: str) -> str | None:
+        """Server-side copy one uploaded checkpoint to a stable selector name."""
+        if not self.enabled:
+            return None
+        client = self._get_client()
+        if client is None:
+            return None
+        root = f"{self._key_root()}/checkpoints"
+        source = f"{root}/{Path(source_name).name}"
+        destination = f"{root}/{Path(alias_name).name}"
+        try:
+            client.copy_object(
+                Bucket=self.bucket,
+                Key=destination,
+                CopySource={"Bucket": self.bucket, "Key": source},
+            )
+        except Exception:
+            logger.warning(
+                "ArtifactStore: failed to alias checkpoint %s to %s",
+                source_name,
+                alias_name,
+                exc_info=True,
+            )
+            return None
+        return self._uri(destination)
+
     def upload_file(self, path: str | Path, subkey: str) -> str | None:
         """Upload one small file under this experiment's key root.
 

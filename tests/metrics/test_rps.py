@@ -2,8 +2,17 @@
 
 import numpy as np
 import tdseries as td
+import torch
 
-from metrics.rps import RPSMetric, rps_mae_clip, rps_mae_frame, rps_mse, rps_r2, rps_rmse
+from metrics.rps import (
+    RPSMetric,
+    batched_pit_mae,
+    rps_mae_clip,
+    rps_mae_frame,
+    rps_mse,
+    rps_r2,
+    rps_rmse,
+)
 
 
 def _rps_frame(entry: str, rps: np.ndarray) -> td.Frame:
@@ -31,6 +40,18 @@ def test_pit_alignment_finds_permuted_rotors():
     assert rps_mse(pred, target, pit=True) < 1e-8
     assert rps_mae_frame(pred, target, pit=True) < 1e-6
     assert rps_mae_clip(pred, target, pit=True) < 1e-6
+
+
+def test_batched_pit_mae_matches_mae_optimal_reference_with_resampling():
+    rng = np.random.default_rng(7)
+    target = rng.normal(size=(3, 4, 17)).astype(np.float32)
+    pred = rng.normal(size=(3, 4, 11)).astype(np.float32)
+    got = batched_pit_mae(torch.from_numpy(pred), torch.from_numpy(target)).numpy()
+
+    from experiments.rps_bench import pit_mae
+
+    expected = np.array([pit_mae(p, t) for p, t in zip(pred, target)])
+    np.testing.assert_allclose(got, expected, rtol=1e-6, atol=1e-6)
 
 
 def test_rps_r2_perfect_prediction_is_one():
