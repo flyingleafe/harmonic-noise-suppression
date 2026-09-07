@@ -67,7 +67,7 @@ Live drivers (each injects data and calls a recipe): `scripts/tracking_ref.py` (
 - `scripts/tracking_ref.py --exact` no longer passes and is not expected to; tolerance mode is the bar.
 - `pad="fast"` helps only when the bad factor is in `n_env`, never in `stride`; pick an `fs_env` whose stride factorizes.
 - `comb_displacement` and `order_domain` are two INDEPENDENT estimators built to fail differently; trust neither without the half-integer null (`half=True`).
-- Search/refinement ablations: `Vit2dspConfig(stop_after="vit2dsp")` returns the spatial two-pair DP trajectory BEFORE the midband and refine VK stages (`"viterbi_c"` stops at the pair-mean search; neither computes the discarded stages). `scripts/blind_valid_row.py annotate --arm vit2dsp_dp` persists it; `--init-traj-dir <search>/traj --phase-iterations 1|3` consumes that exact trajectory (hash recorded). Journal 37-clip driver, not `vk37`/`beatvk`.
+- `Vit2dspConfig(stop_after="vit2dsp"|"viterbi_c")` stops the ladder before the midband/refine VK stages; `scripts/blind_valid_row.py annotate --arm vit2dsp_dp` persists it, `--init-traj-dir <search>/traj --phase-iterations 1|3` reuses it.
 
 ## Further reading
 

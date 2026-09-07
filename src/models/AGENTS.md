@@ -131,11 +131,9 @@ SimpleConv* models take `frontend=` as an instance **or a registry key string**
   (docs/experiments/simpleconv-rps-architecture-search.md § causal follow-up).
 - A rate grid that reaches 0 needs `f_min` (near-DC gather), constant-`k_max`
   normalisation and `r_min` (sub-bin candidates): `harmof0_rps.py`, `hft_rps.py`.
-- `harmof0_orig`/`hppnet_orig` take an L2 output adapter (`superres_out=True`,
-  `n_maps=4`, `out_fmin/out_fmax/out_bins`, `head_hidden/head_kernel`; attached as
-  `superres_head`, since HPPNet's `head` is its `FreqGroupLSTM`): `FreqSuperResHead`
-  over the native 352-bin log grid → four 300-bin maps on 0–150 rev/s; clamps below
-  27.5 Hz. `n_maps>1` REQUIRES it. Configs `conf/model/{harmof0,hppnet}_l2.yaml`.
+- `*_orig` L2 adapter (`superres_out=True`, `n_maps=4`; `FreqSuperResHead` as
+  `superres_head`): 352-bin log grid → four 300-bin maps on 0–150 rev/s, clamped
+  below 27.5 Hz. `n_maps>1` REQUIRES it. `conf/model/{harmof0,hppnet}_l2.yaml`.
 - Slot-comb v2: a knob that starts "off" starts with ~0 gradient (`gap_mu_init`,
   `read_sigma_init`); weights are `softplus`, never `1 + MLP` (went non-finite).
   `mask_k_max` caps a 121 s mask-bank build at `r_lo=10`.
