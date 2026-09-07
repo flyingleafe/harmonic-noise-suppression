@@ -1238,3 +1238,34 @@ The real model preflight also exposed a shared float32 CRF bug: the
 that L2's clamped interpolation can generate. The decoder now retains its
 discrete path when no parabolic vertex exists and uses a dtype-representable
 probability floor. `tests/models/test_salience_crf.py` preserves that regression.
+
+### Submission and preflight — 2026-09-07
+
+Both campaigns were accepted at revision `5ffe29647122` on branch
+`paper-review`. B has 12 accepted first-segment jobs, driven by Hetzner user
+units `paper-review-b-{hp2,hp3,hf2,hf3}-s{0,1,2}`. The daemon's
+`10.100.0.1` address also belongs to Hetzner; chaining is laptop-independent.
+`b-hf3-s1-c-1-57d57f` was observed training through its second epoch.
+The full per-chain commands and first-job IDs are in
+`results/paper_review_B/submissions.json`.
+
+C is `paper-review-c-b1c858`, observed **running** on `uni-cpu`, with an
+8-CPU/32-GB, 12-hour allocation. One job runs all three annotations and their
+scores sequentially, so both phase arms consume the same persisted search
+without cross-job artifact transfer. Its command and dataset pin are recorded
+in `results/paper_review_C/submission.json`.
+
+Verification: 24 B configs composed; all eight architecture/level/stage
+combinations passed real-data preflight at seed 0; the four model variants
+also passed a real-batch optimizer step with finite gradients/decoding and
+exact checkpoint reloads. Affected tests: **61 passed, 2 skipped**; commit
+hooks passed, including YAML, import boundaries, type checking and lint.
+
+C's actual CLI completed all three arms on the eight-channel airborne
+16–20 s slice of `free-flight_nosource_room1`. Both phase artifacts contain
+the same source hash, identical time grids, finite four-rotor trajectories,
+and exactly one `pi_kalman` stage, with schedules `[8]` and `[8,20,40]`.
+Evidence: `results/paper_review_C/smoke_verification.json`. This is a plumbing
+smoke, not an accuracy result. Two seconds is too short for the unchanged
+ridge instrument's block law; the submitted campaign retains 20-second
+windows, 4-second overlap and the complete 37-clip scoring protocol.
