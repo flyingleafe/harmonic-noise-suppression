@@ -358,3 +358,87 @@ def test_load_train_state_starts_fresh_when_nothing_exists(tmp_path):
         store=None,
     )
     assert got == (0, None, 0)
+
+
+# ── opt-in robust stopping policy (training.stopping) ───────────────────────
+
+
+def test_robust_policy_persists_its_counters_and_bypasses_raw_patience(tmp_path, monkeypatch):
+    """With ``early_stopping.enabled`` the raw ``patience`` guard is inert
+    (min_epochs/LR gates decide instead) and the controller's history rides
+    along in train_state.pt, so a relaunch continues the SAME window/counters."""
+    monkeypatch.setattr(loop_module, "wandb", (fake_wandb := _FakeWandb()))
+
+    def cfg_for(epochs: int):
+        cfg = make_tiny_config(
+            results_root=str(tmp_path),
+            experiment_name="tiny_robust",
+            epochs=epochs,
+            n_train=6,
+            n_valid=4,
+            early_stopping={"enabled": True, "median_window": 3, "min_epochs": 100},
+        )
+        cfg.patience = 1  # would stop the raw policy after one non-improving epoch
+        return cfg
+
+    run_training(cfg_for(3))
+    state = torch.load(tmp_path / "tiny_robust" / "train_state.pt", weights_only=False)
+    es = state["early_stopping"]
+    assert len(es["window"]) == 3 and es["stop_reason"] is None
+    logged = [row for row in fake_wandb.logged if "epoch" in row]
+    assert [row["epoch"] for row in logged] == [0, 1, 2]
+    assert all(math.isfinite(row["val/mse_median"]) for row in logged)
+
+    # Force the raw counter past cfg.patience: a robust-policy resume ignores it.
+    state["no_improve"] = 5
+    torch.save(state, tmp_path / "tiny_robust" / "train_state.pt")
+    fake_wandb.logged.clear()
+    cfg = cfg_for(5)
+    cfg.resume = True
+    run_training(cfg)
+    assert [row["epoch"] for row in fake_wandb.logged if "epoch" in row] == [3, 4]
+    state = torch.load(tmp_path / "tiny_robust" / "train_state.pt", weights_only=False)
+    assert len(state["early_stopping"]["window"]) == 3  # rolled, not restarted
+
+
+def test_nonfinite_train_loss_stops_before_touching_the_last_good_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(loop_module, "wandb", _FakeWandb())
+    real_train = loop_module._train_one_epoch
+
+    def poisoned(**kw):
+        loss = real_train(**kw)
+        return math.nan if kw["epoch"] == 1 else loss
+
+    monkeypatch.setattr(loop_module, "_train_one_epoch", poisoned)
+    cfg = make_tiny_config(
+        results_root=str(tmp_path),
+        experiment_name="tiny_nan",
+        epochs=4,
+        n_train=6,
+        n_valid=4,
+        early_stopping={"enabled": True},
+    )
+    result = run_training(cfg)
+
+    run_dir = tmp_path / "tiny_nan"
+    state = torch.load(run_dir / "train_state.pt", weights_only=False)
+    assert state["next_epoch"] == 1  # epoch 1 was never checkpointed
+    assert result["final_epoch"] == 1.0
+    assert math.isfinite(result["best_mse"])
+    weights = torch.load(run_dir / "last.ckpt", weights_only=False)
+    assert all(torch.isfinite(t).all() for t in weights.values())
+
+
+def test_deadline_before_the_first_epoch_trains_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(loop_module, "wandb", (fake_wandb := _FakeWandb()))
+    cfg = make_tiny_config(
+        results_root=str(tmp_path),
+        experiment_name="tiny_deadline",
+        epochs=2,
+        n_train=6,
+        n_valid=4,
+        early_stopping={"enabled": True, "deadline_unix": 1.0},  # long past
+    )
+    result = run_training(cfg)
+    assert [row for row in fake_wandb.logged if "epoch" in row] == []
+    assert result["final_epoch"] == 0.0

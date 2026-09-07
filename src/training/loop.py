@@ -6,7 +6,9 @@ Covers the union of behaviors of the three old trainers (``train.py``,
 (online-mixing) datasets, AMP autocast + ``GradScaler``, gradient
 accumulation, grad-norm clipping, an optimizer factory ported from
 ``train.py::get_optimizer``, ``ReduceLROnPlateau`` + early stopping on a
-configurable monitor metric, checkpointing (``best.ckpt`` best-monitor +
+configurable monitor metric (raw ``patience`` by default, or the opt-in
+median-smoothed policy in ``training.stopping`` when
+``early_stopping.enabled``), checkpointing (``best.ckpt`` best-monitor +
 ``last.ckpt`` latest-epoch + optional periodic
 ``ep{N}_{monitor}_{value:.4f}.ckpt``), and wandb logging (run name =
 experiment name, git commit hash, dirty-tree guard, run-id file for the
@@ -30,11 +32,11 @@ from typing import Any
 
 import tdseries as td
 import torch
+import wandb
 from torch.amp.grad_scaler import GradScaler
 from torch.utils.data import DataLoader, IterableDataset
 from tqdm.auto import tqdm
 
-import wandb
 from data_processing.collate import batch_size as frame_batch_size
 from data_processing.collate import frame_collate, slice_sample
 from tasks.codecs import Codec
@@ -48,6 +50,7 @@ from training.config import (
     instantiate_model,
 )
 from training.lora import maybe_apply_lora
+from training.stopping import STATE_KEY, StoppingController
 from training.val_logging import log_validation_samples
 
 __all__ = ["run_training", "get_optimizer", "git_commit_hash", "is_git_dirty"]
@@ -324,20 +327,21 @@ def _save_train_state(
     epoch: int,
     best_metric: float | None,
     no_improve: int,
+    stopping: StoppingController | None = None,
 ) -> None:
     """Persist everything needed to continue training after ``epoch``."""
     tmp = path.with_suffix(".pt.tmp")
-    torch.save(
-        {
-            "optimizer": optimizer.state_dict(),
-            "scheduler": scheduler.state_dict(),
-            "scaler": scaler.state_dict(),
-            "next_epoch": epoch + 1,
-            "best_metric": best_metric,
-            "no_improve": no_improve,
-        },
-        tmp,
-    )
+    state: dict[str, Any] = {
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "scaler": scaler.state_dict(),
+        "next_epoch": epoch + 1,
+        "best_metric": best_metric,
+        "no_improve": no_improve,
+    }
+    if stopping is not None:
+        state[STATE_KEY] = stopping.state_dict()
+    torch.save(state, tmp)
     tmp.replace(path)  # atomic: a job killed mid-save leaves the old state intact
 
 
@@ -375,6 +379,7 @@ def _load_train_state(
     scaler: GradScaler,
     device: torch.device,
     store: ArtifactStore | None = None,
+    stopping: StoppingController | None = None,
 ) -> tuple[int, float | None, int]:
     """Restore an interrupted run in place; return ``(start_epoch, best, no_improve)``.
 
@@ -424,6 +429,9 @@ def _load_train_state(
     optimizer.load_state_dict(state["optimizer"])
     scheduler.load_state_dict(state["scheduler"])
     scaler.load_state_dict(state["scaler"])
+    if stopping is not None and STATE_KEY in state:
+        # Absent on a freshly prepared continuation bundle: fresh controller.
+        stopping.load_state_dict(state[STATE_KEY])
     start_epoch = int(state["next_epoch"])
     logger.info(
         "resuming %s at epoch %d (best=%s, no_improve=%d)",
@@ -531,9 +539,23 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
         weight_decay=cfg.optim.weight_decay,
         extra_params=dict(cfg.optim.optimizer_params or {}),
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode=cfg.optim.monitor_mode, patience=cfg.optim.patience, factor=cfg.optim.factor
+    es_cfg = getattr(cfg, "early_stopping", None)
+    stopping = (
+        StoppingController(es_cfg, mode=cfg.optim.monitor_mode)
+        if es_cfg is not None and es_cfg.enabled
+        else None
     )
+    scheduler_kwargs: dict[str, Any] = dict(
+        mode=cfg.optim.monitor_mode,
+        patience=cfg.optim.patience,
+        factor=cfg.optim.factor,
+        cooldown=getattr(cfg.optim, "cooldown", 0),
+    )
+    if stopping is not None:
+        # Absolute threshold: the controller re-derives it every epoch from
+        # the best smoothed value (see training.stopping).
+        scheduler_kwargs.update(threshold=stopping.min_delta(None), threshold_mode="abs")
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, **scheduler_kwargs)
     better = _better(cfg.optim.monitor_mode)
 
     train_ds = build_dataset(cfg.data.train)
@@ -601,25 +623,39 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             scaler=scaler,
             device=device,
             store=store if cfg.artifacts.upload_checkpoints else None,
+            stopping=stopping,
         )
         if cfg.resume
         else (0, None, 0)
     )
+    if stopping is not None and cfg.resume:
+        # Config owns the schedule's hyperparameters; the saved state owns
+        # only its counters (best / num_bad_epochs / cooldown_counter).
+        for key in ("patience", "factor", "cooldown"):
+            setattr(scheduler, key, scheduler_kwargs[key])
+        scheduler.threshold_mode = "abs"
     epoch = start_epoch
     # A resumed run may already be finished. Detect it *before* training so a
     # chain of short segments is self-terminating: without this, every further
     # segment would train one epoch, re-hit the early-stop check at the end of
     # it, and exit — burning a full epoch per segment forever.
-    if best_metric is not None and (no_improve >= cfg.patience or start_epoch >= cfg.epochs):
-        reason = "early stopping" if no_improve >= cfg.patience else "epoch budget"
+    done_reason: str | None = None
+    if best_metric is not None and start_epoch >= cfg.epochs:
+        done_reason = "epoch budget"
+    elif stopping is None and best_metric is not None and no_improve >= cfg.patience:
+        done_reason = "early stopping"
+    elif stopping is not None and stopping.stop_reason:
+        done_reason = stopping.stop_reason
+    elif stopping is not None and stopping.deadline_reached():
+        done_reason = "deadline"
+    if done_reason:
         logger.info(
-            "%s already complete at epoch %d (%s); nothing to resume",
-            cfg.experiment_name,
-            start_epoch,
-            reason,
+            "%s not training at epoch %d (%s)", cfg.experiment_name, start_epoch, done_reason
         )
         wandb.finish()
-        return {f"best_{monitor}": best_metric, "final_epoch": float(start_epoch)}
+        best = best_metric if best_metric is not None else math.nan
+        return {f"best_{monitor}": best, "final_epoch": float(start_epoch)}
+    stop_reason: str | None = None
     for epoch in range(start_epoch, cfg.epochs):
         if train_iterable:
             assert train_iter is not None and batches_per_epoch is not None
@@ -673,7 +709,24 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             metric_value = val_loss
         else:
             metric_value = val_metrics[monitor]
-        scheduler.step(metric_value)
+        if stopping is not None:
+            verdict = stopping.step(
+                epoch=epoch,
+                train_loss=train_loss,
+                raw_metric=metric_value,
+                optimizer=optimizer,
+                scheduler=scheduler,
+            )
+            stop_reason = verdict.stop_reason
+            if stop_reason == "nonfinite":
+                # Nothing from this epoch is checkpointed or uploaded: the
+                # last good last.ckpt/train_state.pt stay authoritative.
+                wandb.log({"epoch": epoch, "train/loss": train_loss, "val/loss": val_loss})
+                break
+            smoothed_log = {f"val/{monitor}_median": verdict.smoothed}
+        else:
+            scheduler.step(metric_value)
+            smoothed_log = {}
         lr = optimizer.param_groups[0]["lr"]
 
         wandb.log(
@@ -683,6 +736,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
                 "val/loss": val_loss,
                 "lr": lr,
                 **{f"val/{k}": v for k, v in val_metrics.items()},
+                **smoothed_log,
             }
         )
 
@@ -740,6 +794,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             epoch=epoch,
             best_metric=best_metric,
             no_improve=no_improve,
+            stopping=stopping,
         )
         # Uploaded AFTER `last.ckpt`, mirroring the local write order: the
         # remote copy of this file is likewise the marker that the remote
@@ -754,9 +809,17 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             summary_key="r2/train_state",
         )
 
-        if no_improve >= cfg.patience:
+        if stopping is None:
+            if no_improve >= cfg.patience:
+                stop_reason = "early stopping"
+                break
+        elif stop_reason is None and stopping.deadline_reached():
+            stop_reason = "deadline"
+        if stop_reason:
             break
 
+    if stop_reason:
+        logger.info("%s stopped after epoch %d: %s", cfg.experiment_name, epoch, stop_reason)
     wandb.finish()
-    assert best_metric is not None
-    return {f"best_{monitor}": best_metric, "final_epoch": float(epoch)}
+    best = best_metric if best_metric is not None else math.nan
+    return {f"best_{monitor}": best, "final_epoch": float(epoch)}

@@ -48,6 +48,7 @@ __all__ = [
     "MetricTermConfig",
     "MetricsConfig",
     "OptimConfig",
+    "EarlyStoppingConfig",
     "WandbConfig",
     "ArtifactsConfig",
     "LoraConfig",
@@ -140,8 +141,38 @@ class OptimConfig:
     optimizer_params: dict[str, Any] = field(default_factory=dict)
     patience: int = 5  # ReduceLROnPlateau patience (epochs)
     factor: float = 0.5  # ReduceLROnPlateau reduce factor
+    cooldown: int = 0  # ReduceLROnPlateau cooldown (epochs after a reduction)
     monitor: str = MISSING  # metric name from metrics.terms (or "loss")
     monitor_mode: str = "min"  # "min" or "max"
+
+
+@dataclass
+class EarlyStoppingConfig:
+    """Opt-in noise-tolerant stopping policy — see ``training.stopping``.
+
+    Disabled by default, in which case the loop keeps its historical raw
+    ``RootConfig.patience`` early stop. When enabled, the median of the last
+    ``median_window`` raw monitor values drives BOTH ``ReduceLROnPlateau``
+    (``threshold_mode='abs'``, threshold re-derived every epoch) and stopping;
+    ``best.ckpt`` selection still uses the raw monitor value.
+    """
+
+    enabled: bool = False
+    median_window: int = 5  # raw validation values per smoothed check
+    min_epochs: int = 100  # absolute completed-epoch floor before stopping
+    patience: int = 30  # smoothed checks without meaningful improvement
+    min_delta_abs: float = 0.05  # meaningful improvement = max(abs, rel*|best|)
+    min_delta_rel: float = 0.01
+    min_lr_reductions: int = 2  # actual LR reductions required before stopping
+    lr_grace_epochs: int = 10  # checks since the latest reduction before stopping
+    deadline_unix: float | None = None  # wall-clock stop, checked between epochs
+    # Divergence guard (finite but sustained worsening): BOTH the raw train
+    # loss and the smoothed monitor must be worse than their best-so-far by
+    # ``diverge_rel`` (relative, floored at ``min_delta_abs``) for
+    # ``diverge_epochs`` CONSECUTIVE epochs; a single spike resets the streak.
+    # First trigger: one LR reduction (``optim.factor``); second: stop.
+    diverge_rel: float = 0.25
+    diverge_epochs: int = 5
 
 
 @dataclass
@@ -214,6 +245,7 @@ class RootConfig:
     logging: WandbConfig = field(default_factory=WandbConfig)
     artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     lora: LoraConfig = field(default_factory=LoraConfig)
+    early_stopping: EarlyStoppingConfig = field(default_factory=EarlyStoppingConfig)
 
 
 def register_configs() -> None:
