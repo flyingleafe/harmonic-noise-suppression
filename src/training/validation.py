@@ -228,6 +228,7 @@ class MultiMetricController:
     def __init__(self, cfg: Any, names: tuple[str, ...]) -> None:
         self.window = int(cfg.smoothing_window)
         self.min_log_improvement = math.log1p(float(cfg.min_relative_improvement))
+        self.min_rounds = int(cfg.min_rounds)
         self.lr_patience = int(cfg.lr_patience)
         self.lr_factor = float(cfg.lr_factor)
         self.min_lr_reductions = int(cfg.min_lr_reductions)
@@ -237,6 +238,7 @@ class MultiMetricController:
         self.best_smoothed: dict[str, float] = {}
         self.stale_rounds = 0
         self.lr_reductions = 0
+        self.rounds_completed = 0
         self.stop_reason: str | None = None
 
     def _improved(self, value: float, best: float) -> bool:
@@ -253,6 +255,7 @@ class MultiMetricController:
         scores: Mapping[str, float],
         optimizer: torch.optim.Optimizer,
     ) -> MultiValidationVerdict:
+        self.rounds_completed += 1
         values = {name: float(scores[name]) for name in self.names}
         if not all(math.isfinite(value) for value in values.values()):
             self.stop_reason = "nonfinite"
@@ -283,7 +286,10 @@ class MultiMetricController:
                     self.lr_reductions += 1
                     self.stale_rounds = 0
                     reduced = True
-            elif self.stale_rounds >= self.final_patience:
+            elif (
+                self.rounds_completed >= self.min_rounds
+                and self.stale_rounds >= self.final_patience
+            ):
                 self.stop_reason = "saturation"
 
         return MultiValidationVerdict(
@@ -301,6 +307,7 @@ class MultiMetricController:
             "stale_rounds": self.stale_rounds,
             "lr_reductions": self.lr_reductions,
             "stop_reason": self.stop_reason,
+            "rounds_completed": self.rounds_completed,
         }
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
@@ -315,4 +322,5 @@ class MultiMetricController:
         }
         self.stale_rounds = int(state["stale_rounds"])
         self.lr_reductions = int(state["lr_reductions"])
+        self.rounds_completed = int(state.get("rounds_completed", 0))
         self.stop_reason = state.get("stop_reason")

@@ -103,6 +103,7 @@ def test_gpu_style_validation_reduces_overlapping_views_in_one_pass():
 def test_any_subset_progress_delays_lr_reduction_and_all_subset_stagnation_stops():
     cfg = SimpleNamespace(
         smoothing_window=1,
+        min_rounds=0,
         min_relative_improvement=0.01,
         lr_patience=2,
         lr_factor=0.5,
@@ -128,6 +129,7 @@ def test_any_subset_progress_delays_lr_reduction_and_all_subset_stagnation_stops
 def test_meaningful_improvement_is_scale_invariant_in_log_space():
     cfg = SimpleNamespace(
         smoothing_window=1,
+        min_rounds=0,
         min_relative_improvement=0.01,
         lr_patience=10,
         lr_factor=0.5,
@@ -146,9 +148,33 @@ def test_meaningful_improvement_is_scale_invariant_in_log_space():
     assert set(meaningful.improved) == {"large", "small"}
 
 
+def test_revised_policy_stops_after_exactly_thirty_six_stagnant_rounds():
+    cfg = SimpleNamespace(
+        smoothing_window=1,
+        min_rounds=30,
+        min_relative_improvement=0.01,
+        lr_patience=8,
+        lr_factor=0.5,
+        min_lr_reductions=3,
+        final_patience=12,
+    )
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.SGD([parameter], lr=1e-3)
+    controller = MultiMetricController(cfg, ("score",))
+    controller.step({"score": 1.0}, optimizer)
+
+    verdicts = [controller.step({"score": 1.0}, optimizer) for _ in range(36)]
+
+    assert [i + 1 for i, verdict in enumerate(verdicts) if verdict.lr_reduced] == [8, 16, 24]
+    assert all(verdict.stop_reason is None for verdict in verdicts[:-1])
+    assert verdicts[-1].stop_reason == "saturation"
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(1.25e-4)
+
+
 def test_controller_state_resume_matches_uninterrupted_decisions():
     cfg = SimpleNamespace(
         smoothing_window=3,
+        min_rounds=0,
         min_relative_improvement=0.01,
         lr_patience=2,
         lr_factor=0.5,

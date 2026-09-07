@@ -106,11 +106,12 @@ class ValidationConfig:
     primary: list[str] = field(default_factory=list)
     control: str = "overall_macro"
     smoothing_window: int = 5
+    min_rounds: int = 30
     min_relative_improvement: float = 0.01
-    lr_patience: int = 15
+    lr_patience: int = 8
     lr_factor: float = 0.5
-    min_lr_reductions: int = 4
-    final_patience: int = 20
+    min_lr_reductions: int = 3
+    final_patience: int = 12
 
 
 @dataclass

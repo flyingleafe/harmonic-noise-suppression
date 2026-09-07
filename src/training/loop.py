@@ -721,7 +721,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
     max_optimizer_steps = int(multi_cfg.max_optimizer_steps) if multi_cfg is not None else None
     done_reason: str | None = None
     if max_optimizer_steps is not None and optimizer_steps >= max_optimizer_steps:
-        done_reason = "optimizer-step budget"
+        done_reason = "censored at optimizer-step budget"
     elif multi_validation is not None and multi_validation.stop_reason:
         done_reason = multi_validation.stop_reason
     elif best_metric is not None and start_epoch >= cfg.epochs:
@@ -764,7 +764,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             if max_optimizer_steps is not None:
                 remaining_updates = max_optimizer_steps - optimizer_steps
                 if remaining_updates <= 0:
-                    stop_reason = "optimizer-step budget"
+                    stop_reason = "censored at optimizer-step budget"
                     break
                 n_batches = min(
                     n_batches,
@@ -1019,7 +1019,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
         elif stopping is not None and stop_reason is None and stopping.deadline_reached():
             stop_reason = "deadline"
         elif max_optimizer_steps is not None and optimizer_steps >= max_optimizer_steps:
-            stop_reason = "optimizer-step budget"
+            stop_reason = "censored at optimizer-step budget"
         if stop_reason:
             break
 
@@ -1031,6 +1031,8 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             optimizer_steps,
             stop_reason,
         )
+    if run is not None and stop_reason is not None:
+        run.summary["stop_reason"] = stop_reason
     wandb.finish()
     best = best_metric if best_metric is not None else math.nan
     return {

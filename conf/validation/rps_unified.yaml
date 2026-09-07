@@ -5,15 +5,18 @@
 enabled: true
 every_optimizer_steps: 500
 max_optimizer_steps: 100000
+# Default circuit breaker: 200 rounds. A still-improving run is censored;
+# extend explicitly with epochs=220 validation.max_optimizer_steps=110000.
 batch_size: 128
 num_workers: null
 smoothing_window: 5
+min_rounds: 30
 control: overall_macro
 min_relative_improvement: 0.01
-lr_patience: 15
+lr_patience: 8
 lr_factor: 0.5
-min_lr_reductions: 4
-final_patience: 20
+min_lr_reductions: 3
+final_patience: 12
 
 datasets:
   real:
