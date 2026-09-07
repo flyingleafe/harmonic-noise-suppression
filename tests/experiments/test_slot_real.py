@@ -55,6 +55,8 @@ def _stream(mono: bool, n_mic: int = 8, seed: int = 0, crop_s: float = 1.0) -> W
     st.n_crop = int(round(crop_s * SR))
     st.t_crop = st.n_crop // st.hop + 1
     st.r_lo, st.r_hi = 31.0, 99.0
+    st.min_in_grid = 0.0
+    st.grid = (st.r_lo, st.r_hi)
     st.mono = mono
     st.rng = np.random.default_rng(seed)
     st.seen = st.kept = 0
