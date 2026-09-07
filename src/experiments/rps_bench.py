@@ -57,6 +57,7 @@ from plots.timeframe import PlotTrack, plot_timeframe
 from plots.timeframe.renderers import make_spectrogram_series
 from training.config import build_dataset
 from utils.audio import first_channel
+from zoo.cache import REPO_ROOT
 
 __all__ = [
     "PARTS",
@@ -73,19 +74,20 @@ __all__ = [
     "worst",
 ]
 
-#: part name -> (data yaml whose ``valid`` block defines it, param overrides)
+#: part name -> (data yaml whose ``valid`` block defines it, param overrides).
+#: Paths are repo-root anchored so a notebook run from ``notebooks/`` works.
 PARTS: dict[str, tuple[str, dict[str, Any]]] = {
-    "comb": ("conf/data/salv2_comb_nomix.yaml", {}),
-    "stoch": ("conf/data/salv2_stoch_nomix.yaml", {}),
-    "real": ("conf/data/m3cur_s2.yaml", {}),
-    "real_nospeech": ("conf/data/m3cur_s2_nospeech.yaml", {}),
-    "comb_speech": ("conf/data/salv2_comb_nomix.yaml", {"speech": True}),
-    "stoch_speech": ("conf/data/salv2_stoch_nomix.yaml", {"speech": True}),
+    "comb": (str(REPO_ROOT / "conf/data/salv2_comb_nomix.yaml"), {}),
+    "stoch": (str(REPO_ROOT / "conf/data/salv2_stoch_nomix.yaml"), {}),
+    "real": (str(REPO_ROOT / "conf/data/m3cur_s2.yaml"), {}),
+    "real_nospeech": (str(REPO_ROOT / "conf/data/m3cur_s2_nospeech.yaml"), {}),
+    "comb_speech": (str(REPO_ROOT / "conf/data/salv2_comb_nomix.yaml"), {"speech": True}),
+    "stoch_speech": (str(REPO_ROOT / "conf/data/salv2_stoch_nomix.yaml"), {"speech": True}),
 }
 RATE = (16000, 512)  # the label / prediction frame grid
-DUMP_ROOT = Path("results/rps_dump")
-PROFILE = Path("results/rps_profile/frames.csv")
-CACHE_DIR = Path(".cache/rps_bench")
+DUMP_ROOT = REPO_ROOT / "results/rps_dump"
+PROFILE = REPO_ROOT / "results/rps_profile/frames.csv"
+CACHE_DIR = REPO_ROOT / ".cache/rps_bench"
 _PERMS = list(permutations(range(4)))
 
 
@@ -121,6 +123,9 @@ def build_set(path: str, overrides: dict[str, Any]) -> Any:
     spec: dict[str, Any] = dict(cast(dict, OmegaConf.to_container(cfg.valid, resolve=True)))
     params: dict[str, Any] = dict(spec.get("params") or {})
     params.update(overrides)
+    policy = params.get("path")
+    if isinstance(policy, str) and not Path(policy).is_absolute():
+        params["path"] = str(REPO_ROOT / policy)  # the synthetic parts' online-mix policy
     spec["params"] = params
     return build_dataset(spec)
 
