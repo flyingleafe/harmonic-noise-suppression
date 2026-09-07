@@ -81,6 +81,18 @@ DEVIATIONS, and what forces each:
 WHAT THE GRID MEANS HERE. Under ``f0 = rps`` the 352 bins span 27.5-4370 rev/s,
 of which rotors occupy bins 0-118. See `harmof0_orig` for the full reading of
 that axis; the two share it exactly.
+
+LEVEL L2 — THE LINEAR OUTPUT GRID (``superres_out=True``). The same seam
+`harmof0_orig` carries, read there in full: the whole published path above —
+CQT, `HarmonicDilatedConv`, `CNNTrunk`, `FreqGroupLSTM` — is untouched, and
+its ``n_maps x 352`` log-grid logits pass through
+`models.salience_rps.FreqSuperResHead` onto ``out_bins`` uniform bins over
+``[out_fmin, out_fmax]``. The adapter is ``superres_head``, NOT ``head``:
+``head`` is HPPNet's own `FreqGroupLSTM`, and that name stays on the
+published module so the L0 checkpoints keep loading. ``n_maps > 1`` requires
+it, as in `LateDeepSalience`, because `LayerCRFReadout`'s band and vertex fit
+are defined on a uniform axis. The clamp below the CQT's ``fmin`` (output bins
+0-54 read the bottom input bin) is L2's documented limit and is not moved here.
 """
 
 from __future__ import annotations
@@ -91,7 +103,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from models.harmonic_ports.layer_readout import LayerCRFReadout
-from models.salience_rps import SalienceRPSPredictor
+from models.multif0.utils import linear_freq_grid
+from models.salience_rps import FreqSuperResHead, SalienceRPSPredictor
 
 __all__ = [
     "HPPNetOrig",
@@ -279,7 +292,9 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
     tracking at eval. The output axis is the CQT's own grid, so
     ``output_freqs()`` is ``27.5 * 2 ** (i / 48)`` for ``i = 0 .. 351`` — the
     same array `HarmoF0Orig` emits and the same one
-    `conf/loss/salience_bce_orig.yaml` builds.
+    `conf/loss/salience_bce_orig.yaml` builds. With ``superres_out=True``
+    (level L2) the output is ``(B, n_maps * out_bins, T)`` on the LINEAR
+    ``[out_fmin, out_fmax]`` grid instead, and ``output_freqs()`` follows it.
 
     Args:
         n_fft, hop_length: the frame grid `predict_rps` resamples its output
@@ -296,8 +311,17 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
             ``(48, 12)`` is one octave on each block's own axis only when the
             frequency pool is on (deviation 3).
         freq_pool, time_pooling: the two published pools (deviations 1 and 2).
-        n_maps: salience maps emitted. See `HarmoF0Orig` for the caveat that
-            `LayerCRFReadout`'s transition band carries on a log grid.
+        n_maps: salience maps emitted. > 1 stacks per-rotor layers along the
+            output axis for `LayerCRFReadout` and needs ``superres_out=True``.
+        superres_out: level L2 (module docstring). Resample the log-grid
+            logits onto a LINEAR grid through ``superres_head``, a
+            `FreqSuperResHead`; ``out_freqs`` becomes that grid. With
+            ``freq_pool > 1`` the input grid is the pooled bin centres.
+        out_fmin, out_fmax, out_bins: the linear output grid; the defaults are
+            the ports' 0-150 rev/s in 300 bins, and a config must pin them to
+            the grid its loss builds (conf/loss/salience_layers_r150.yaml).
+        head_hidden, head_kernel: the sharpening stack's width and its
+            frequency kernel, `FreqSuperResHead`'s own defaults.
     """
 
     def __init__(
@@ -316,11 +340,23 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         freq_pool: int = 1,
         time_pooling: bool = False,
         n_maps: int = 1,
+        superres_out: bool = False,
+        out_fmin: float = 0.0,
+        out_fmax: float = 150.0,
+        out_bins: int = 300,
+        head_hidden: int = 32,
+        head_kernel: int = 5,
     ):
         super().__init__(n_fft, hop_length, num_rotors)
         if int(n_bins) % int(freq_pool):
             raise ValueError(f"n_bins={n_bins} is not divisible by freq_pool={freq_pool}")
         self.sr, self.n_maps = int(sr), int(n_maps)
+        if self.n_maps > 1 and not superres_out:
+            raise ValueError(
+                "per-rotor layers need an explicit LINEAR output grid: the "
+                "log-parabolic readout and the CRF band are both defined on a "
+                "uniform axis. Set superres_out=True."
+            )
         self.freq_pool, self.time_pooling = int(freq_pool), bool(time_pooling)
 
         self.frontend = CQTLogSpecgram(
@@ -354,6 +390,20 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         self.spec_sr = int(sr)
         self.spec_hop = int(hop_length)
 
+        # Level L2: the published log-grid logits resampled and sharpened onto a
+        # linear output grid. `in_freqs` is the CQT grid (pooled centres when
+        # `freq_pool > 1`) computed above; `out_freqs` moves to the linear grid
+        # so the target, the CRF band and the tracker all read the axis the
+        # model emits. Named `superres_head`: `head` is the `FreqGroupLSTM`.
+        self.superres_head: FreqSuperResHead | None = None
+        if superres_out:
+            in_freqs = self.out_freqs
+            out_freqs = linear_freq_grid(out_fmin, out_fmax, out_bins)
+            self.out_freqs = out_freqs
+            self.superres_head = FreqSuperResHead(
+                in_freqs, out_freqs, hidden=head_hidden, kernel=head_kernel, n_maps=self.n_maps
+            )
+
     # ── grid ────────────────────────────────────────────────────────────────
 
     def grid_params(self) -> dict:
@@ -378,6 +428,8 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         if self.time_pooling:
             y = F.interpolate(y, size=(n_time, y.shape[-1]), mode="bilinear", align_corners=False)
         y = y.transpose(2, 3)  # (B, n_maps, F_out, T)
+        if self.superres_head is not None:
+            y = self.superres_head(y)  # (B, n_maps, out_bins, T) on the linear grid
         b, m, f, t = y.shape
         return y.reshape(b, m * f, t)
 

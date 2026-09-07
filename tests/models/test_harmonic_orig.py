@@ -143,16 +143,6 @@ def test_the_published_pools_are_reachable():
     assert m.output_freqs().shape == (88,)
 
 
-def test_the_layer_readout_mixin_is_wired():
-    """`n_maps > 1` stacks per-rotor layers on the output axis, as in the ports."""
-    from models.harmonic_ports.layer_readout import split_maps
-
-    m = HarmoF0Orig(n_maps=4).eval()
-    y = m(torch.randn(1, SR))
-    assert y.shape == (1, 4 * N_BINS, SR // 512 + 1)
-    assert split_maps(y, 4).shape == (1, 4, N_BINS, SR // 512 + 1)
-
-
 # ─── parity with the published blocks ──────────────────────────────────────
 #
 # Verbatim from WX-Wei/HarmoF0@3b22236 `harmof0/layers.py` and

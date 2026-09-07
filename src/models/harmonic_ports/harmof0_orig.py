@@ -70,6 +70,31 @@ bin (15.6 Hz) wide, identical at training and at test, and the released
 checkpoints were trained through it. Thus it is part of the published
 model and is kept. ``published_interp=False`` swaps it back, for the follow-up
 that asks whether it costs anything at 16 kHz.
+
+LEVEL L2 — THE LINEAR OUTPUT GRID (``superres_out=True``). The regime matrix
+(docs/experiments/paper-regime-matrix.md § "Block S") defines L2 as per-rotor
+Gaussian layers on the 0-150 rev/s linear grid with the CRF readout, ORIGINAL
+INPUT. Everything above is the original input: the front end, `MRDConv`,
+blocks 2-4 and ``conv_5``/``conv_6`` are untouched, and the seam is the one
+`models.salience_rps.LateDeepSalience` already carries for the same level —
+`models.salience_rps.FreqSuperResHead`, a fixed linear interpolation of the
+``n_maps x 352`` log-grid logits onto ``out_bins`` uniform bins over
+``[out_fmin, out_fmax]`` followed by a small ``(head_kernel, 1)`` sharpening
+stack of width ``head_hidden``. It is attached as ``superres_head`` (the name
+both controls use for it; `HPPNetOrig` cannot call it ``head`` because that is
+its `FreqGroupLSTM`) and ``out_freqs`` becomes the linear grid, so the
+`salience_layers_r150` loss, the `LayerCRFReadout` band and the metrics all
+read one uniform axis. ``n_maps > 1`` REQUIRES it, as it does in
+`LateDeepSalience`: the log-parabolic readout and the CRF band are defined on
+a uniform axis, and on this log grid the band sized from the median spacing
+admits far more than 25 rev/s at the bottom and far less at the top.
+
+The known L2 limit carries over verbatim from conf/model/multif0_salience_l4.yaml:
+`FreqSuperResHead` CLAMPS output bins outside the input span, so every output
+bin below the input ``fmin`` (27.5 rev/s here — bins 0-54 of the 300) reads the
+same bottom input bin and the sharpening stack has to separate them on context
+alone. L2 may not move the input to buy that band; L3 (`harmof0_rps`) is the
+level that does.
 """
 
 from __future__ import annotations
@@ -82,8 +107,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from models.harmonic_ports.layer_readout import LayerCRFReadout
-from models.multif0.utils import cqt_freq_grid
-from models.salience_rps import SalienceRPSPredictor
+from models.multif0.utils import cqt_freq_grid, linear_freq_grid
+from models.salience_rps import FreqSuperResHead, SalienceRPSPredictor
 
 __all__ = ["HarmoF0Orig", "MRDConv", "WaveformToLogSpecgram", "dila_conv_block"]
 
@@ -244,7 +269,9 @@ class HarmoF0Orig(LayerCRFReadout, SalienceRPSPredictor):
     tracking at eval. The output axis is the paper's own log-spaced grid, so
     ``output_freqs()`` is ``cqt_freq_grid(fmin=27.5, n_bins=352,
     bins_per_octave=48)`` and `conf/loss/salience_bce_orig.yaml` builds the same
-    array from the same three numbers.
+    array from the same three numbers. With ``superres_out=True`` (level L2)
+    the output is ``(B, n_maps * out_bins, T)`` on the LINEAR
+    ``[out_fmin, out_fmax]`` grid instead, and ``output_freqs()`` follows it.
 
     Args:
         n_fft, hop_length: the frame grid `predict_rps` resamples its output
@@ -261,14 +288,16 @@ class HarmoF0Orig(LayerCRFReadout, SalienceRPSPredictor):
             frequency dilations (the paper's ``(32, 64, 128, 128)`` and 48).
         published_interp: keep the upstream's swapped interpolation weights.
         n_maps: salience maps emitted. 1 is the shared multi-hot map; > 1 stacks
-            per-rotor layers along the output axis for `LayerCRFReadout`.
-
-    CAVEAT ON ``n_maps > 1``. `LayerCRFReadout` sizes its transition band from
-    ``np.median(np.diff(out_freqs))``, which on a LOG grid is one number for a
-    spacing that runs from 0.40 to 62 Hz. The band then admits far more than
-    25 rev/s at the bottom of the axis and far less at the top. The mixin is
-    kept so a later config can ask for layers here without a code change, but a
-    row that does must size that band itself.
+            per-rotor layers along the output axis for `LayerCRFReadout`, and
+            needs ``superres_out=True``.
+        superres_out: level L2 (module docstring). Resample the log-grid
+            logits onto a LINEAR grid through ``superres_head``, a
+            `FreqSuperResHead`; ``out_freqs`` becomes that grid.
+        out_fmin, out_fmax, out_bins: the linear output grid; the defaults are
+            the ports' 0-150 rev/s in 300 bins, and a config must pin them to
+            the grid its loss builds (conf/loss/salience_layers_r150.yaml).
+        head_hidden, head_kernel: the sharpening stack's width and its
+            frequency kernel, `FreqSuperResHead`'s own defaults.
     """
 
     def __init__(
@@ -286,11 +315,23 @@ class HarmoF0Orig(LayerCRFReadout, SalienceRPSPredictor):
         dilation_rates: tuple[int, ...] = (48, 48, 48, 48),
         published_interp: bool = True,
         n_maps: int = 1,
+        superres_out: bool = False,
+        out_fmin: float = 0.0,
+        out_fmax: float = 150.0,
+        out_bins: int = 300,
+        head_hidden: int = 32,
+        head_kernel: int = 5,
     ):
         super().__init__(n_fft, hop_length, num_rotors)
         if len(channels) != 4 or len(dilation_rates) != 4:
             raise ValueError("HarmoF0 has four blocks; give four channels and four dilations")
         self.sr, self.n_maps = int(sr), int(n_maps)
+        if self.n_maps > 1 and not superres_out:
+            raise ValueError(
+                "per-rotor layers need an explicit LINEAR output grid: the "
+                "log-parabolic readout and the CRF band are both defined on a "
+                "uniform axis. Set superres_out=True."
+            )
 
         # Grid descriptor. `over_sample` is bins per SEMITONE, `n_octaves` the
         # (non-integer) span; `n_bins`/`bins_per_octave` are what size
@@ -340,6 +381,19 @@ class HarmoF0Orig(LayerCRFReadout, SalienceRPSPredictor):
         self.conv_5 = nn.Conv2d(channels[3], channels[3] // 2, kernel_size=(1, 1))
         self.conv_6 = nn.Conv2d(channels[3] // 2, self.n_maps, kernel_size=(1, 1))
 
+        # Level L2: the published log-grid logits resampled and sharpened onto a
+        # linear output grid. `in_freqs` is the paper's grid computed above;
+        # `out_freqs` moves to the linear grid so the target, the CRF band and
+        # the tracker all read the axis the model emits.
+        self.superres_head: FreqSuperResHead | None = None
+        if superres_out:
+            in_freqs = self.out_freqs
+            out_freqs = linear_freq_grid(out_fmin, out_fmax, out_bins)
+            self.out_freqs = out_freqs
+            self.superres_head = FreqSuperResHead(
+                in_freqs, out_freqs, hidden=head_hidden, kernel=head_kernel, n_maps=self.n_maps
+            )
+
     # ── grid ────────────────────────────────────────────────────────────────
 
     def num_grid_frames(self, n_samples: int) -> int:
@@ -353,5 +407,7 @@ class HarmoF0Orig(LayerCRFReadout, SalienceRPSPredictor):
         x = self.block_4(self.block_3(self.block_2(self.block_1(x))))
         x = self.conv_6(torch.relu(self.conv_5(x)))  # (B, n_maps, T, F)
         x = x.transpose(2, 3)  # (B, n_maps, F, T)
+        if self.superres_head is not None:
+            x = self.superres_head(x)  # (B, n_maps, out_bins, T) on the linear grid
         b, m, f, t = x.shape
         return x.reshape(b, m * f, t)

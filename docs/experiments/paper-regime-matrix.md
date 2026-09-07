@@ -1149,3 +1149,161 @@ from the dumps (`scripts/rps_claim_tables.py`, `make_tables.py`,
 `make_phase_fig.py`. Lessons for the next campaign are in the session
 memory: credentials in direct sbatch jobs, chain runners and dirty
 trees, vast egress, subagents and local compute.
+
+## Review experiments B/C
+
+**Current B scope: four real-only R2 runs, seed 0 only.** All controllers and
+outstanding jobs from the incorrectly selected comb curriculum have been
+stopped/cancelled. None of those checkpoints may initialize the corrected
+runs. The removed curriculum/extra-seed configs remain recoverable at revision
+`5ffe296`. C and reserved experiment A are unchanged. Additional seeds require
+a justified compute decision, not an automatic expansion of this ablation.
+
+The reserved held-out experiment A remains deferred. B and C use the existing
+development protocols, not the reserved test recordings.
+
+### B: matched HPPNet/HarmoF0 L2 versus L3 on historical R2
+
+The four configs `conf/experiment/{hppnet,hf0}_l{2,3}_r2_s0.yaml` match the
+LateDeep adaptation ladder's real-only honest-base recipe:
+`hb_sal_multif0_l4` → `e12_real_fullflight` with
+`conf/online_mix/hb_silence_dload.yaml`. They train from scratch with
+`checkpoint: null`; there is no synthetic pretraining or second stage.
+
+**Name the protocol, not just its ambiguous number.** Historical R2 here
+means the full-flight DREGON + FLY125 honest-base pool, eight microphones,
+online speech mixing, the 16.7% zero-labelled silence arm and SNR reference
+floor. The first 50,000 generated chunks are unaugmented; the established
+frequency/time/gain augmentations follow. This is NOT the regressor
+data-diversity ladder's DREGON-only “R2, eight microphones”; its data pool
+corresponds to that ladder's R4. The paper reports the multi-pitch adaptation
+ladder in its own table, separate from regressor results.
+
+Both levels use four Gaussian salience layers, 300 uniform output bins over
+0–150 rev/s, hop 512 at 16 kHz, the existing layer BCE/CRF pair, AdamW
+1e-3/weight decay 1e-4, batch 16, six loader workers, **40,000 frames per
+validation**, a 200-epoch ceiling and patience 20. Both select on `rps_mae`;
+the older L0/L1 checkpoints selected on BCE. HPPNet's LSTM width is 128 in
+both corrected levels. Historical L3 port runs used width 64 (HPPNet),
+16,000 frames per validation and the warm-up-free `hb_m3s2_dload` policy;
+their table entries must remain explicitly marked legacy-schedule results
+until the corrected runs are evaluated, not presented as matched evidence.
+
+L2 adds the existing `FreqSuperResHead` to the original log-input model.
+L3 retains the linear-STFT harmonic gather. This compares the
+front-end/harmonic-coordinate adaptation bundle, not an isolated operator:
+native bandwidth, input resolution, coordinate-dependent dilations and L2's
+below-27.5-Hz clamp remain different. The L2 adapter adds 6,084 parameters.
+LateDeep retains its native hop-256 input; the new ports retain hop 512.
+
+Placement: `uni-gpushort`, resumable 55-minute segments, 1 GPU with at least
+24 GB VRAM, 8 CPUs and 32 GB RAM. Existing `scripts/chain_train.sh`
+controllers run under user systemd on Hetzner. Each controller completes
+one real-only training run and then submits the frozen-real `rps_dump.py`
+and `rps_regime_table.py` evaluation. New names prevent accidental resumption
+of cancelled curriculum checkpoints. Outputs are
+`results/paper_review_B/<experiment>/`; checkpoint storage remains the
+standard object-store `artifacts/<experiment>/checkpoints/` path.
+No `uni` long or paid backend is used.
+
+Each corrected controller is limited to the runner's default **10 segments**
+(550 allocated GPU-minutes). Exhaustion is a nonzero exit, not convergence:
+it stops the chain and does not automatically evaluate an incomplete run.
+Further allocation or replication requires another compute decision.
+
+The four corrected configs passed `train.py experiment=<name>
+validate_only=true` and were submitted from pushed revision `136a38f`:
+
+| experiment | first short-partition segment |
+|---|---|
+| `hppnet_l2_r2_s0` | `br2-hppnet-l2-s0-1-f0f684` |
+| `hppnet_l3_r2_s0` | `br2-hppnet-l3-s0-1-873149` |
+| `hf0_l2_r2_s0` | `br2-hf0-l2-s0-1-6ece6e` |
+| `hf0_l3_r2_s0` | `br2-hf0-l3-s0-1-5db5bd` |
+
+The complete commands, controller units, frozen validation URI, resource
+limits and first job IDs are in `results/paper_review_B/r2_submissions.json`.
+The old seed-0 curriculum jobs were cancelled; they do not constitute B.
+
+### C: one saved dynamic search, zero/one/three phase iterations
+
+`blind_valid_row.py annotate --arm vit2dsp_dp` stops the existing calibrated
+ladder after its spatial two-pair DP snapshot, before midband VK and VK
+refinement. This is a dynamic search, **not** the constant initial seed.
+The two phase arms consume its persisted trajectories via `--init-traj-dir`
+and `--phase-iterations 1` or `3`. Only iteration count changes:
+`PI_PROTOCOL`, joint-pair mode, fixed 6 Hz band, caps `[8]` versus `[8,20,40]`.
+There is no peel alternation or hidden VK stage in either phase arm.
+Source trajectory hashes and sample-identical window checks enforce reuse.
+
+All arms retain the journal's four parent recordings, 20-second windows
+with 4-second overlap, eight microphones, midpoint stitching, 37 eight-second
+validation clips, original PIT/regime scoring and g1/g5 gated/ungated outputs.
+This is neither `vk37` (five 25-second windows) nor `beatvk` (16-second windows).
+Placement is `uni-cpu`, 8 CPUs/32 GB RAM; outputs are
+`results/paper_review_C/{search,search_pi1,search_pi3}/`.
+
+**Manuscript/evidence distinction:** the existing published `vit2dsp` row
+contains midband VK and VK refinement, not the described phase-increment
+schedule. It remains an untouched historical reference. C measures the
+phase-increment alternative from the same pre-VK search; it must not be
+presented as merely rerunning that historical row. The historical parent's
+mapping diagnostics are not byte-exact label reconstruction: modern parents
+and frozen targets differ; retain those diagnostics rather than call them
+proof of exact current-parent provenance.
+
+### Frozen validation labels: direct byte-level provenance check
+
+The pinned `DREGON-LM-V4-michaels-valid-full` version is
+`9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9`.
+All **22 DREGON** saved `rps.npy` arrays equal the original per-clip
+`motor.command` arrays after `clean_command_spikes`, bit-for-bit. None equals
+the corresponding `motor.measured` track. All **15 FLY124** arrays match
+contiguous original CSV motor-speed segments divided by 60, before the later
+multiplicative calibration. Evidence:
+`results/paper_review_label_provenance.json`.
+
+Thus these frozen validation targets are **not audio-refined trajectories**.
+The dataset contains recordings with measured DREGON telemetry, but its
+selected targets are cleaned commands. Current published-frame adapters
+preferring measured speeds, later FLY124 calibration, and separate refined
+annotations must not be conflated with these older frozen bytes. B/C leave
+the targets unchanged. An independent-reference check would score the same
+development recordings against measured speeds separately.
+
+The real model preflight also exposed a shared float32 CRF bug: the
+`1e-300` flat-curvature guard underflowed to zero, producing NaNs on plateaus
+that L2's clamped interpolation can generate. The decoder now retains its
+discrete path when no parabolic vertex exists and uses a dtype-representable
+probability floor. `tests/models/test_salience_crf.py` preserves that regression.
+
+### Submission and preflight — 2026-09-07
+
+Both campaigns were accepted at revision `5ffe29647122` on branch
+`paper-review`. B has 12 accepted first-segment jobs, driven by Hetzner user
+units `paper-review-b-{hp2,hp3,hf2,hf3}-s{0,1,2}`. The daemon's
+`10.100.0.1` address also belongs to Hetzner; chaining is laptop-independent.
+`b-hf3-s1-c-1-57d57f` was observed training through its second epoch.
+The full per-chain commands and first-job IDs are in
+`results/paper_review_B/submissions.json`.
+
+C is `paper-review-c-b1c858`, observed **running** on `uni-cpu`, with an
+8-CPU/32-GB, 12-hour allocation. One job runs all three annotations and their
+scores sequentially, so both phase arms consume the same persisted search
+without cross-job artifact transfer. Its command and dataset pin are recorded
+in `results/paper_review_C/submission.json`.
+
+Verification: 24 B configs composed; all eight architecture/level/stage
+combinations passed real-data preflight at seed 0; the four model variants
+also passed a real-batch optimizer step with finite gradients/decoding and
+exact checkpoint reloads. Affected tests: **61 passed, 2 skipped**; commit
+hooks passed, including YAML, import boundaries, type checking and lint.
+
+C's actual CLI completed all three arms on the eight-channel airborne
+16–20 s slice of `free-flight_nosource_room1`. Both phase artifacts contain
+the same source hash, identical time grids, finite four-rotor trajectories,
+and exactly one `pi_kalman` stage, with schedules `[8]` and `[8,20,40]`.
+Evidence: `results/paper_review_C/smoke_verification.json`. This is a plumbing
+smoke, not an accuracy result. Two seconds is too short for the unchanged
+ridge instrument's block law; the submitted campaign retains 20-second
+windows, 4-second overlap and the complete 37-clip scoring protocol.
