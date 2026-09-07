@@ -1211,6 +1211,20 @@ Each corrected controller is limited to the runner's default **10 segments**
 it stops the chain and does not automatically evaluate an incomplete run.
 Further allocation or replication requires another compute decision.
 
+The four corrected configs passed `train.py experiment=<name>
+validate_only=true` and were submitted from pushed revision `136a38f`:
+
+| experiment | first short-partition segment |
+|---|---|
+| `hppnet_l2_r2_s0` | `br2-hppnet-l2-s0-1-f0f684` |
+| `hppnet_l3_r2_s0` | `br2-hppnet-l3-s0-1-873149` |
+| `hf0_l2_r2_s0` | `br2-hf0-l2-s0-1-6ece6e` |
+| `hf0_l3_r2_s0` | `br2-hf0-l3-s0-1-5db5bd` |
+
+The complete commands, controller units, frozen validation URI, resource
+limits and first job IDs are in `results/paper_review_B/r2_submissions.json`.
+The old seed-0 curriculum jobs were cancelled; they do not constitute B.
+
 ### C: one saved dynamic search, zero/one/three phase iterations
 
 `blind_valid_row.py annotate --arm vit2dsp_dp` stops the existing calibrated

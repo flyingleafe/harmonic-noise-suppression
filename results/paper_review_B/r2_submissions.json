@@ -1,0 +1,75 @@
+{
+  "revision": "136a38f",
+  "protocol": "historical R2 honest-base adaptation",
+  "training_policy": "conf/online_mix/hb_silence_dload.yaml",
+  "warmup_generated_chunks": 50000,
+  "samples_per_validation": 40000,
+  "checkpoint": null,
+  "seed": 0,
+  "backend": "uni-gpushort",
+  "resources": {
+    "gpus": 1,
+    "cpus": 8,
+    "mem_gb": 32,
+    "min_vram_gb": 24,
+    "segment_time": "55m",
+    "max_segments": 10
+  },
+  "controller_host": "hetzner",
+  "controller_worktree": "/home/flyingleafe/projects/harmonic-noise-suppression/.worktrees/paper-review-r2-controller",
+  "runs": [
+    {
+      "architecture": "hppnet",
+      "level": 2,
+      "seed": 0,
+      "experiment": "hppnet_l2_r2_s0",
+      "model_config": "hppnet_l2",
+      "unit": "paper-review-b-r2-hppnet-l2-s0",
+      "prefix": "br2-hppnet-l2-s0",
+      "command": "bash scripts/chain_train.sh hppnet_l2_r2_s0 br2-hppnet-l2-s0 10 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name br2-hppnet-l2-s0-eval --outputs 'results/paper_review_B/hppnet_l2_r2_s0/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/e12_real_fullflight.yaml --experiments hppnet_l2_r2_s0 --out results/paper_review_B/hppnet_l2_r2_s0 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hppnet_l2_r2_s0/real --models hppnet_l2_r2_s0 --csv results/paper_review_B/hppnet_l2_r2_s0/regimes.csv'",
+      "outputs": "results/paper_review_B/hppnet_l2_r2_s0",
+      "max_segments": 10,
+      "first_job": "br2-hppnet-l2-s0-1-f0f684"
+    },
+    {
+      "architecture": "hppnet",
+      "level": 3,
+      "seed": 0,
+      "experiment": "hppnet_l3_r2_s0",
+      "model_config": "hppnet_rps_l4",
+      "unit": "paper-review-b-r2-hppnet-l3-s0",
+      "prefix": "br2-hppnet-l3-s0",
+      "command": "bash scripts/chain_train.sh hppnet_l3_r2_s0 br2-hppnet-l3-s0 10 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name br2-hppnet-l3-s0-eval --outputs 'results/paper_review_B/hppnet_l3_r2_s0/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/e12_real_fullflight.yaml --experiments hppnet_l3_r2_s0 --out results/paper_review_B/hppnet_l3_r2_s0 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hppnet_l3_r2_s0/real --models hppnet_l3_r2_s0 --csv results/paper_review_B/hppnet_l3_r2_s0/regimes.csv'",
+      "outputs": "results/paper_review_B/hppnet_l3_r2_s0",
+      "max_segments": 10,
+      "first_job": "br2-hppnet-l3-s0-1-873149"
+    },
+    {
+      "architecture": "hf0",
+      "level": 2,
+      "seed": 0,
+      "experiment": "hf0_l2_r2_s0",
+      "model_config": "harmof0_l2",
+      "unit": "paper-review-b-r2-hf0-l2-s0",
+      "prefix": "br2-hf0-l2-s0",
+      "command": "bash scripts/chain_train.sh hf0_l2_r2_s0 br2-hf0-l2-s0 10 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name br2-hf0-l2-s0-eval --outputs 'results/paper_review_B/hf0_l2_r2_s0/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/e12_real_fullflight.yaml --experiments hf0_l2_r2_s0 --out results/paper_review_B/hf0_l2_r2_s0 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hf0_l2_r2_s0/real --models hf0_l2_r2_s0 --csv results/paper_review_B/hf0_l2_r2_s0/regimes.csv'",
+      "outputs": "results/paper_review_B/hf0_l2_r2_s0",
+      "max_segments": 10,
+      "first_job": "br2-hf0-l2-s0-1-6ece6e"
+    },
+    {
+      "architecture": "hf0",
+      "level": 3,
+      "seed": 0,
+      "experiment": "hf0_l3_r2_s0",
+      "model_config": "harmof0_rps_l4",
+      "unit": "paper-review-b-r2-hf0-l3-s0",
+      "prefix": "br2-hf0-l3-s0",
+      "command": "bash scripts/chain_train.sh hf0_l3_r2_s0 br2-hf0-l3-s0 10 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name br2-hf0-l3-s0-eval --outputs 'results/paper_review_B/hf0_l3_r2_s0/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/e12_real_fullflight.yaml --experiments hf0_l3_r2_s0 --out results/paper_review_B/hf0_l3_r2_s0 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hf0_l3_r2_s0/real --models hf0_l3_r2_s0 --csv results/paper_review_B/hf0_l3_r2_s0/regimes.csv'",
+      "outputs": "results/paper_review_B/hf0_l3_r2_s0",
+      "max_segments": 10,
+      "first_job": "br2-hf0-l3-s0-1-5db5bd"
+    }
+  ],
+  "preflight": "All four actual train.py validate_only=true commands passed with the two-stage real-only augmentation schedule."
+}

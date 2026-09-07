@@ -1,0 +1,183 @@
+{
+  "revision": "5ffe29647122",
+  "active_seeds": [],
+  "scope_decision": "Entire comb-curriculum campaign cancelled for protocol mismatch. Historical submission records only; corrected seed-zero real-only R2 runs are in r2_submissions.json.",
+  "active_controller_units": [],
+  "cancelled_jobs": [
+    "b-hp3-s0-c-1-5b8d18",
+    "b-hf3-s0-c-1-9ce7c8",
+    "b-hf2-s0-c-1-0dc7fd",
+    "b-hp2-s0-c-2-f0a8e8",
+    "b-hf3-s1-c-1-57d57f",
+    "b-hp2-s2-c-1-d09215",
+    "b-hp3-s2-c-1-7a16c5",
+    "b-hf3-s2-c-1-2b45d1",
+    "b-hf2-s2-c-1-926997",
+    "b-hf2-s1-c-1-b81fd4",
+    "b-hp2-s1-c-1-ad29b5",
+    "b-hp3-s1-c-1-e3d9fe"
+  ],
+  "backend": "uni-gpushort",
+  "controller_host": "hetzner",
+  "controller_worktree": "/home/flyingleafe/projects/harmonic-noise-suppression/.worktrees/paper-review-controller",
+  "resources": {
+    "gpus": 1,
+    "cpus": 8,
+    "mem_gb": 32,
+    "min_vram_gb": 24,
+    "segment_time": "55m"
+  },
+  "runs": [
+    {
+      "architecture": "hppnet",
+      "level": 2,
+      "seed": 0,
+      "stage1": "hppnet_l2_comb_s0",
+      "stage2": "hppnet_l2_r4_s0",
+      "unit": "paper-review-b-hp2-s0",
+      "command": "bash scripts/chain_train.sh hppnet_l2_comb_s0 b-hp2-s0-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hppnet_l2_r4_s0 b-hp2-s0-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hp2-s0-eval --outputs 'results/paper_review_B/hppnet_l2_r4_s0/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hppnet_l2_r4_s0 --out results/paper_review_B/hppnet_l2_r4_s0 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hppnet_l2_r4_s0/real --models hppnet_l2_r4_s0 --csv results/paper_review_B/hppnet_l2_r4_s0/regimes.csv'",
+      "outputs": "results/paper_review_B/hppnet_l2_r4_s0",
+      "backend": "uni-gpushort",
+      "first_job": "b-hp2-s0-c-1-3e582b"
+    },
+    {
+      "architecture": "hppnet",
+      "level": 2,
+      "seed": 1,
+      "stage1": "hppnet_l2_comb_s1",
+      "stage2": "hppnet_l2_r4_s1",
+      "unit": "paper-review-b-hp2-s1",
+      "command": "bash scripts/chain_train.sh hppnet_l2_comb_s1 b-hp2-s1-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hppnet_l2_r4_s1 b-hp2-s1-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hp2-s1-eval --outputs 'results/paper_review_B/hppnet_l2_r4_s1/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hppnet_l2_r4_s1 --out results/paper_review_B/hppnet_l2_r4_s1 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hppnet_l2_r4_s1/real --models hppnet_l2_r4_s1 --csv results/paper_review_B/hppnet_l2_r4_s1/regimes.csv'",
+      "outputs": "results/paper_review_B/hppnet_l2_r4_s1",
+      "backend": "uni-gpushort",
+      "first_job": "b-hp2-s1-c-1-ad29b5"
+    },
+    {
+      "architecture": "hppnet",
+      "level": 2,
+      "seed": 2,
+      "stage1": "hppnet_l2_comb_s2",
+      "stage2": "hppnet_l2_r4_s2",
+      "unit": "paper-review-b-hp2-s2",
+      "command": "bash scripts/chain_train.sh hppnet_l2_comb_s2 b-hp2-s2-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hppnet_l2_r4_s2 b-hp2-s2-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hp2-s2-eval --outputs 'results/paper_review_B/hppnet_l2_r4_s2/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hppnet_l2_r4_s2 --out results/paper_review_B/hppnet_l2_r4_s2 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hppnet_l2_r4_s2/real --models hppnet_l2_r4_s2 --csv results/paper_review_B/hppnet_l2_r4_s2/regimes.csv'",
+      "outputs": "results/paper_review_B/hppnet_l2_r4_s2",
+      "backend": "uni-gpushort",
+      "first_job": "b-hp2-s2-c-1-d09215"
+    },
+    {
+      "architecture": "hppnet",
+      "level": 3,
+      "seed": 0,
+      "stage1": "hppnet_l3_comb_s0",
+      "stage2": "hppnet_l3_r4_s0",
+      "unit": "paper-review-b-hp3-s0",
+      "command": "bash scripts/chain_train.sh hppnet_l3_comb_s0 b-hp3-s0-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hppnet_l3_r4_s0 b-hp3-s0-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hp3-s0-eval --outputs 'results/paper_review_B/hppnet_l3_r4_s0/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hppnet_l3_r4_s0 --out results/paper_review_B/hppnet_l3_r4_s0 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hppnet_l3_r4_s0/real --models hppnet_l3_r4_s0 --csv results/paper_review_B/hppnet_l3_r4_s0/regimes.csv'",
+      "outputs": "results/paper_review_B/hppnet_l3_r4_s0",
+      "backend": "uni-gpushort",
+      "first_job": "b-hp3-s0-c-1-5b8d18"
+    },
+    {
+      "architecture": "hppnet",
+      "level": 3,
+      "seed": 1,
+      "stage1": "hppnet_l3_comb_s1",
+      "stage2": "hppnet_l3_r4_s1",
+      "unit": "paper-review-b-hp3-s1",
+      "command": "bash scripts/chain_train.sh hppnet_l3_comb_s1 b-hp3-s1-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hppnet_l3_r4_s1 b-hp3-s1-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hp3-s1-eval --outputs 'results/paper_review_B/hppnet_l3_r4_s1/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hppnet_l3_r4_s1 --out results/paper_review_B/hppnet_l3_r4_s1 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hppnet_l3_r4_s1/real --models hppnet_l3_r4_s1 --csv results/paper_review_B/hppnet_l3_r4_s1/regimes.csv'",
+      "outputs": "results/paper_review_B/hppnet_l3_r4_s1",
+      "backend": "uni-gpushort",
+      "first_job": "b-hp3-s1-c-1-e3d9fe"
+    },
+    {
+      "architecture": "hppnet",
+      "level": 3,
+      "seed": 2,
+      "stage1": "hppnet_l3_comb_s2",
+      "stage2": "hppnet_l3_r4_s2",
+      "unit": "paper-review-b-hp3-s2",
+      "command": "bash scripts/chain_train.sh hppnet_l3_comb_s2 b-hp3-s2-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hppnet_l3_r4_s2 b-hp3-s2-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hp3-s2-eval --outputs 'results/paper_review_B/hppnet_l3_r4_s2/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hppnet_l3_r4_s2 --out results/paper_review_B/hppnet_l3_r4_s2 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hppnet_l3_r4_s2/real --models hppnet_l3_r4_s2 --csv results/paper_review_B/hppnet_l3_r4_s2/regimes.csv'",
+      "outputs": "results/paper_review_B/hppnet_l3_r4_s2",
+      "backend": "uni-gpushort",
+      "first_job": "b-hp3-s2-c-1-7a16c5"
+    },
+    {
+      "architecture": "hf0",
+      "level": 2,
+      "seed": 0,
+      "stage1": "hf0_l2_comb_s0",
+      "stage2": "hf0_l2_r4_s0",
+      "unit": "paper-review-b-hf2-s0",
+      "command": "bash scripts/chain_train.sh hf0_l2_comb_s0 b-hf2-s0-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hf0_l2_r4_s0 b-hf2-s0-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hf2-s0-eval --outputs 'results/paper_review_B/hf0_l2_r4_s0/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hf0_l2_r4_s0 --out results/paper_review_B/hf0_l2_r4_s0 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hf0_l2_r4_s0/real --models hf0_l2_r4_s0 --csv results/paper_review_B/hf0_l2_r4_s0/regimes.csv'",
+      "outputs": "results/paper_review_B/hf0_l2_r4_s0",
+      "backend": "uni-gpushort",
+      "first_job": "b-hf2-s0-c-1-0dc7fd"
+    },
+    {
+      "architecture": "hf0",
+      "level": 2,
+      "seed": 1,
+      "stage1": "hf0_l2_comb_s1",
+      "stage2": "hf0_l2_r4_s1",
+      "unit": "paper-review-b-hf2-s1",
+      "command": "bash scripts/chain_train.sh hf0_l2_comb_s1 b-hf2-s1-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hf0_l2_r4_s1 b-hf2-s1-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hf2-s1-eval --outputs 'results/paper_review_B/hf0_l2_r4_s1/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hf0_l2_r4_s1 --out results/paper_review_B/hf0_l2_r4_s1 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hf0_l2_r4_s1/real --models hf0_l2_r4_s1 --csv results/paper_review_B/hf0_l2_r4_s1/regimes.csv'",
+      "outputs": "results/paper_review_B/hf0_l2_r4_s1",
+      "backend": "uni-gpushort",
+      "first_job": "b-hf2-s1-c-1-b81fd4"
+    },
+    {
+      "architecture": "hf0",
+      "level": 2,
+      "seed": 2,
+      "stage1": "hf0_l2_comb_s2",
+      "stage2": "hf0_l2_r4_s2",
+      "unit": "paper-review-b-hf2-s2",
+      "command": "bash scripts/chain_train.sh hf0_l2_comb_s2 b-hf2-s2-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hf0_l2_r4_s2 b-hf2-s2-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hf2-s2-eval --outputs 'results/paper_review_B/hf0_l2_r4_s2/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hf0_l2_r4_s2 --out results/paper_review_B/hf0_l2_r4_s2 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hf0_l2_r4_s2/real --models hf0_l2_r4_s2 --csv results/paper_review_B/hf0_l2_r4_s2/regimes.csv'",
+      "outputs": "results/paper_review_B/hf0_l2_r4_s2",
+      "backend": "uni-gpushort",
+      "first_job": "b-hf2-s2-c-1-926997"
+    },
+    {
+      "architecture": "hf0",
+      "level": 3,
+      "seed": 0,
+      "stage1": "hf0_l3_comb_s0",
+      "stage2": "hf0_l3_r4_s0",
+      "unit": "paper-review-b-hf3-s0",
+      "command": "bash scripts/chain_train.sh hf0_l3_comb_s0 b-hf3-s0-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hf0_l3_r4_s0 b-hf3-s0-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hf3-s0-eval --outputs 'results/paper_review_B/hf0_l3_r4_s0/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hf0_l3_r4_s0 --out results/paper_review_B/hf0_l3_r4_s0 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hf0_l3_r4_s0/real --models hf0_l3_r4_s0 --csv results/paper_review_B/hf0_l3_r4_s0/regimes.csv'",
+      "outputs": "results/paper_review_B/hf0_l3_r4_s0",
+      "backend": "uni-gpushort",
+      "first_job": "b-hf3-s0-c-1-9ce7c8"
+    },
+    {
+      "architecture": "hf0",
+      "level": 3,
+      "seed": 1,
+      "stage1": "hf0_l3_comb_s1",
+      "stage2": "hf0_l3_r4_s1",
+      "unit": "paper-review-b-hf3-s1",
+      "command": "bash scripts/chain_train.sh hf0_l3_comb_s1 b-hf3-s1-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hf0_l3_r4_s1 b-hf3-s1-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hf3-s1-eval --outputs 'results/paper_review_B/hf0_l3_r4_s1/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hf0_l3_r4_s1 --out results/paper_review_B/hf0_l3_r4_s1 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hf0_l3_r4_s1/real --models hf0_l3_r4_s1 --csv results/paper_review_B/hf0_l3_r4_s1/regimes.csv'",
+      "outputs": "results/paper_review_B/hf0_l3_r4_s1",
+      "backend": "uni-gpushort",
+      "first_job": "b-hf3-s1-c-1-57d57f"
+    },
+    {
+      "architecture": "hf0",
+      "level": 3,
+      "seed": 2,
+      "stage1": "hf0_l3_comb_s2",
+      "stage2": "hf0_l3_r4_s2",
+      "unit": "paper-review-b-hf3-s2",
+      "command": "bash scripts/chain_train.sh hf0_l3_comb_s2 b-hf3-s2-c 1000 uni-gpushort 55m && bash scripts/chain_train.sh hf0_l3_r4_s2 b-hf3-s2-r 1000 uni-gpushort 55m && omnirun submit --backend uni-gpushort --gpus 1 --cpus 4 --mem 16 --vram 24 --time 30m --name b-hf3-s2-eval --outputs 'results/paper_review_B/hf0_l3_r4_s2/**' --env PYTHONPATH=src --wait -- bash -c 'python scripts/rps_dump.py --sets real=conf/data/m3cur_s2.yaml --experiments hf0_l3_r4_s2 --out results/paper_review_B/hf0_l3_r4_s2 --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/paper_review_B/hf0_l3_r4_s2/real --models hf0_l3_r4_s2 --csv results/paper_review_B/hf0_l3_r4_s2/regimes.csv'",
+      "outputs": "results/paper_review_B/hf0_l3_r4_s2",
+      "backend": "uni-gpushort",
+      "first_job": "b-hf3-s2-c-1-2b45d1"
+    }
+  ],
+  "verification": {
+    "configs_composed": 24,
+    "variants_real_batch_backward_checkpoint_roundtrip": 4,
+    "affected_tests_passed": 61,
+    "affected_tests_skipped": 2,
+    "first_training_observed": "b-hf3-s1-c-1-57d57f"
+  }
+}
