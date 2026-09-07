@@ -1,0 +1,16 @@
+{
+  "job": "paper-review-c-b1c858",
+  "state": "succeeded",
+  "sync": "omnirun HTTP pull materialized daemon cache but timed out/disconnected; recovered with rsync from /home/omnirun/tmp/omnirun-pull-4o5gqkn2/results/paper_review_C/",
+  "files_transferred": 591,
+  "bytes_transferred": 1903436377,
+  "frozen_validation": "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9",
+  "n_clips_per_arm": 37,
+  "n_windows_per_arm": 20,
+  "same_pi1_pi3_initial_hashes": true,
+  "source_sha256": {
+    "search": "cbdadc4caa2716274c94920f8075f5bb12620d89a4b442248c92949f68b5fd2b",
+    "search_pi1": "2749ec6ccf53db469aceb339b810881b856d9a8ca9cff94cf6c2f81dc9692522",
+    "search_pi3": "7cbd831efdc351fbf2f420398602ef226ac288529e4aa93ea5ebc954ad7ff984"
+  }
+}
