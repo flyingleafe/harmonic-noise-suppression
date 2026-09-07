@@ -621,7 +621,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
     valid_batch_size = (
         int(multi_cfg.batch_size)
         if multi_cfg is not None and multi_cfg.batch_size is not None
-        else batch_size
+        else int(getattr(cfg.data, "valid_batch_size", None) or batch_size)
     )
     valid_num_workers = (
         int(multi_cfg.num_workers)
@@ -893,15 +893,27 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
                 smoothed_log = {}
 
         if stop_reason == "nonfinite":
-            wandb.log(
-                {
-                    "epoch": epoch,
-                    "validation_round": epoch,
-                    "optimizer_step": optimizer_steps,
-                    "train/loss": train_loss,
-                    "val/loss": val_loss,
-                }
+            nonfinite_scores = sorted(
+                name for name, value in val_metrics.items() if not math.isfinite(value)
             )
+            failure_payload = {
+                "epoch": epoch,
+                "validation_round": epoch,
+                "optimizer_step": optimizer_steps,
+                "train/loss": train_loss,
+                "val/loss": val_loss,
+                "validation/nonfinite_scores": nonfinite_scores,
+                **{f"val/{key}": value for key, value in val_metrics.items()},
+            }
+            logger.error(
+                "non-finite validation at optimizer step %d: scores=%s val_loss=%s",
+                optimizer_steps,
+                nonfinite_scores,
+                val_loss,
+            )
+            with (run_dir / "validation_history.jsonl").open("a") as history:
+                history.write(json.dumps(failure_payload, sort_keys=True) + "\n")
+            wandb.log(failure_payload)
             break
 
         lr = optimizer.param_groups[0]["lr"]

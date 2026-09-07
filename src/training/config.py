@@ -88,6 +88,7 @@ class DataConfig:
     train: DatasetSpec = field(default_factory=DatasetSpec)
     valid: DatasetSpec = field(default_factory=DatasetSpec)
     batch_size: int | None = None
+    valid_batch_size: int | None = None
     num_workers: int | None = None
 
 
