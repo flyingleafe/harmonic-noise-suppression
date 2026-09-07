@@ -28,6 +28,7 @@ import logging
 import math
 import shutil
 import subprocess
+import time
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
@@ -774,6 +775,10 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             batches = train_loader
             n_batches = len(train_loader)
 
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
+        train_started_unix = time.time()
+        train_started = time.perf_counter()
         train_loss, completed_steps = _train_one_epoch(
             model=model,
             codec=codec,
@@ -789,8 +794,12 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             grad_accum_steps=max(1, cfg.grad_accum_steps),
             epoch=epoch,
         )
+        train_finished_unix = time.time()
+        train_seconds = time.perf_counter() - train_started
         optimizer_steps += completed_steps
 
+        validation_started_unix = time.time()
+        validation_started = time.perf_counter()
         if validation_plan is not None:
             val_metrics, val_loss = validate_rps(
                 model=model,
@@ -813,6 +822,14 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
                 amp=cfg.amp,
                 amp_dtype=amp_dtype,
             )
+        validation_finished_unix = time.time()
+        validation_seconds = time.perf_counter() - validation_started
+        peak_allocated_gb = (
+            torch.cuda.max_memory_allocated(device) / 2**30 if device.type == "cuda" else 0.0
+        )
+        peak_reserved_gb = (
+            torch.cuda.max_memory_reserved(device) / 2**30 if device.type == "cuda" else 0.0
+        )
 
         if multi_validation is not None:
             multi_verdict = multi_validation.step(val_metrics, optimizer)
@@ -874,6 +891,14 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             "train/loss": train_loss,
             "val/loss": val_loss,
             "lr": lr,
+            "perf/train_s": train_seconds,
+            "perf/validation_s": validation_seconds,
+            "perf/train_started_unix": train_started_unix,
+            "perf/train_finished_unix": train_finished_unix,
+            "perf/validation_started_unix": validation_started_unix,
+            "perf/validation_finished_unix": validation_finished_unix,
+            "perf/peak_allocated_gb": peak_allocated_gb,
+            "perf/peak_reserved_gb": peak_reserved_gb,
             **{f"val/{key}": value for key, value in val_metrics.items()},
             **{
                 f"val/{key}_log": math.log(value)
