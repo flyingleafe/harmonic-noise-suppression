@@ -188,6 +188,15 @@ def test_multi_validation_writes_independent_stable_best_checkpoints(tmp_path, m
 def test_iterable_multi_validation_epoch_is_exact_optimizer_step_interval(tmp_path, monkeypatch):
     fake_wandb = _FakeWandb()
     monkeypatch.setattr(loop_module, "wandb", fake_wandb)
+    real_train = loop_module._train_one_epoch
+    batch_counts: list[int] = []
+
+    def one_scaler_skip(**kwargs):
+        batch_counts.append(kwargs["n_batches"])
+        loss, completed = real_train(**kwargs)
+        return loss, completed - 1 if len(batch_counts) == 1 else completed
+
+    monkeypatch.setattr(loop_module, "_train_one_epoch", one_scaler_skip)
     cfg = make_tiny_config(
         results_root=str(tmp_path),
         experiment_name="tiny_step_cadence",
@@ -224,6 +233,7 @@ def test_iterable_multi_validation_epoch_is_exact_optimizer_step_interval(tmp_pa
 
     assert steps == [3, 6]
     assert result["optimizer_steps"] == 6
+    assert batch_counts == [3, 1, 3]
 
 
 def test_resume_continues_from_the_saved_epoch_instead_of_restarting(tmp_path, monkeypatch):

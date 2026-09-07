@@ -106,7 +106,7 @@ def main() -> None:
                 "logging.enabled=false",
             ]
             if duration != 1.0:
-                command.append(f"data.train.params.duration_s={duration}")
+                command.append(f"+data.train.params.duration_s={duration}")
             started = time.time()
             with (args.out / f"{name}.log").open("w") as log:
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, text=True)

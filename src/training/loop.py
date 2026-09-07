@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import time
 from collections.abc import Iterable, Iterator
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -758,42 +759,62 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
     )
     stop_reason: str | None = None
     for epoch in range(start_epoch, cfg.epochs):
+        grad_accum = max(1, int(cfg.grad_accum_steps))
+        target_updates: int | None = None
         if train_iterable:
             assert train_iter is not None and batches_per_epoch is not None
-            n_batches = batches_per_epoch
-            if max_optimizer_steps is not None:
-                remaining_updates = max_optimizer_steps - optimizer_steps
-                if remaining_updates <= 0:
-                    stop_reason = "censored at optimizer-step budget"
-                    break
-                n_batches = min(
-                    n_batches,
-                    remaining_updates * max(1, int(cfg.grad_accum_steps)),
-                )
-            batches = _take(train_iter, n_batches)
+            if multi_validation is not None:
+                target_updates = batches_per_epoch // grad_accum
+                if max_optimizer_steps is not None:
+                    remaining_updates = max_optimizer_steps - optimizer_steps
+                    if remaining_updates <= 0:
+                        stop_reason = "censored at optimizer-step budget"
+                        break
+                    target_updates = min(target_updates, remaining_updates)
+                n_batches = target_updates * grad_accum
+                batches = _take(train_iter, n_batches)
+            else:
+                n_batches = batches_per_epoch
+                batches = _take(train_iter, n_batches)
         else:
             batches = train_loader
             n_batches = len(train_loader)
 
-        if device.type == "cuda":
-            torch.cuda.reset_peak_memory_stats(device)
-        train_started_unix = time.time()
-        train_started = time.perf_counter()
-        train_loss, completed_steps = _train_one_epoch(
+        train_once = partial(
+            _train_one_epoch,
             model=model,
             codec=codec,
             loss_fn=loss_fn,
             optimizer=optimizer,
             scaler=scaler,
-            batches=batches,
-            n_batches=n_batches,
             device=device,
             amp=cfg.amp,
             amp_dtype=amp_dtype,
             grad_clip=cfg.grad_clip,
-            grad_accum_steps=max(1, cfg.grad_accum_steps),
+            grad_accum_steps=grad_accum,
             epoch=epoch,
         )
+
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
+        train_started_unix = time.time()
+        train_started = time.perf_counter()
+        train_loss, completed_steps = train_once(batches=batches, n_batches=n_batches)
+        if target_updates is not None:
+            weighted_loss = train_loss * completed_steps
+            while completed_steps < target_updates:
+                missing = target_updates - completed_steps
+                extra_loss, extra_steps = train_once(
+                    batches=_take(train_iter, missing * grad_accum),
+                    n_batches=missing * grad_accum,
+                )
+                if extra_steps == 0:
+                    raise RuntimeError(
+                        "GradScaler skipped every retry batch; cannot reach validation cadence"
+                    )
+                weighted_loss += extra_loss * extra_steps
+                completed_steps += extra_steps
+            train_loss = weighted_loss / completed_steps
         train_finished_unix = time.time()
         train_seconds = time.perf_counter() - train_started
         optimizer_steps += completed_steps
