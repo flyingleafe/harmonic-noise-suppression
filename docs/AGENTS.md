@@ -12,12 +12,16 @@ Long-form documentation that doesn't belong in code comments or AGENTS.md files.
 |----------|---------|
 | `debug-training-loop.md` | Training loop debugging guide — read this before debugging training failures |
 | `data-and-artifacts.md` | dload + wandb Artifacts workflow (datasets → R2, checkpoints → wandb), per-machine setup |
+| `data-catalog.md` | Data inventory: DREGON recordings + telemetry tracks + in-flight windows, Michael's rig (FLY124/125, FLY103/108) calibration constants and history, derived-dataset variants (DN-LM, DREGON-LM V4, the nospeech twin), every `dload.lock` pin — moved out of `src/data_processing/AGENTS.md` 2026-09-07 |
+| `refactor-data-pipelines.md` | Design of the one-dload-pipeline data layer (sources → derivations → streams) and § "Online-mix policy reference": every noise-source `kind`, `audio_pool` holdouts, the `generated` producer + `interp` mode, `gp`, `noise_augmentations`, SE task mode, `check_stream` |
 | `dcunet-refactored.md` | Design notes for DCUNet/DCCRN refactoring (Paper 2) |
 | `diffusion-buffer-paper.md` | Notes on the diffusion buffer paper |
 | `diffusion-prompt.md` | Prompt used to implement the diffusion buffer model |
 | `koopman-and-order-tracking-ideas.md` | Literature survey: Koopman operators + modal-synthesis for bidirectional audio↔RPS latent states; Vold–Kalman aeroacoustics literature and "VK in reverse" (blind IF estimation) — cross-references `vk-order-tracking-design.md`'s outer loop |
 | `rps-tracking-architecture-candidates.md` | 2026-09-03 synthesis: the measured structure of drone ego-noise, what each model family does with it, the seven walls, the design requirements, and the candidate architectures for tracking variable frequencies from partially observed harmonics, with the day's probes |
+| `noise-generator-models.md` | Reference for `src/models/generative/` and the noise-generation task: class map, `PositionalHarmonicNoiseGen` (`amp_stats`, calibration gains, phases), `MicEQ`, `WindWakeChannel`, external per-drone codebook, geometry/`rel_pos`, channel policy, loss guidance — moved out of `src/models/AGENTS.md` + `src/tasks/noise-generation/AGENTS.md` 2026-09-07 |
 | `slot-comb-v2-design.md` | ARCHIVED 2026-09-06 (implemented, trained, lost by 10x on every split; see `experiments/paper-regime-matrix.md` § "Slot-comb v2 test"). 2026-09-04 design: the slot-comb CRF (C1) with more learnable parameters and the same mechanism — an OFF state, a grid from 10 rev/s, a learned transition, a gap gather (multiple discriminator + comb-conditioned floor), a cross-order emission network, a pairwise rate prior, learned read/claim widths; each group contains the current setting at init; the ablation order |
+| `tracking-performance.md` | `src/tracking` performance record: knobs, kernel paths, CPU/GPU tables, the peel, the `scripts/tracking_ref.py` guard |
 | `experiments/` | One doc per past experiment (motivation/results/conclusion); live PhD-bet detail cards under `experiments/bets/` — see `docs/experiments/AGENTS.md` |
 
 ## Removed components

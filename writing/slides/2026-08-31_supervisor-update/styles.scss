@@ -1,0 +1,44 @@
+/*-- scss:defaults --*/
+$presentation-font-size-root: 26px;
+$presentation-heading-font-weight: 700;
+$presentation-h2-font-size: 1.25em;
+
+/*-- scss:rules --*/
+.reveal .slides section { text-align: left; }
+.reveal h2 { margin-bottom: 0.5em; }
+.reveal .small { font-size: 0.78em; }
+.reveal .tiny { font-size: 0.66em; line-height: 1.3; }
+.reveal .small .tiny, .reveal .tiny .tiny { font-size: 0.85em; }
+.reveal .cbox {
+  background: #ebebeb;
+  border: 1px solid #a0a0a0;
+  border-radius: 3px;
+  padding: 0.35em 0.6em;
+  margin: 0.4em 0;
+}
+.reveal .cbox-paper { background: #f6f6f2; border: 1px solid #a0a0a0; border-radius: 3px; padding: 0.3em 0.6em; }
+.reveal .cbox p:last-child, .reveal .cbox-paper p:last-child { margin-bottom: 0; }
+.reveal .todo { color: #b03000; font-weight: 700; }
+.reveal table { font-size: 0.85em; margin: 0.3em 0; }
+.reveal table th, .reveal table td { padding: 0.2em 0.5em; border-bottom: 1px solid #c8c8c8; }
+.reveal .columns { display: flex; gap: 0.8em; align-items: flex-start; }
+.reveal .column > p:first-child { margin-top: 0; }
+.reveal p { margin: 0.3em 0; }
+.reveal ul { margin: 0.2em 0 0.2em 1em; }
+.reveal .callout { font-size: 0.85em; }
+
+.towers { display: flex; justify-content: space-around; align-items: flex-end; margin: 0.5em 0; }
+.tower { display: flex; flex-direction: column; align-items: center; }
+.tower .cap { margin-top: 0.35em; font-size: 0.66em; text-align: center; line-height: 1.2; }
+.lyr { width: 44px; height: 22px; margin: 2px 0; border: 1px solid #8c8c8c; }
+.lyr.wide { width: 88px; }
+.lyr.b { background: #dfe8f5; }
+.lyr.r { background: #f5dfe0; }
+.lyr.g { background: #dfeee2; }
+
+.flow { display: flex; flex-direction: column; align-items: stretch; margin: 0.3em 0; }
+.flow .node { background: #eef2f8; border: 1px solid #8c8c8c; border-radius: 3px; padding: 0.5em 0.6em; text-align: center; font-size: 0.9em; }
+.flow .arrow { font-size: 1em; }
+.flow .node.red { background: #f7e9e6; }
+.flow .node.green { background: #e6f2ea; }
+.flow .arrow { text-align: center; font-size: 0.7em; line-height: 1.1; color: #555; }

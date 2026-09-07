@@ -338,3 +338,18 @@ Leclère/André/Antoni MOPA MSSP 2016 (degenerates for integer combs — non-
 commensurate orders are its alias immunity); Peeters et al. MSSP 2019 review;
 Peeters et al. MSSP 2022 (ML harmonic weighting); Hua & Hao ARC 2026
 (curvature-adaptive prior, keeps octave alternatives alive).
+
+
+## 6. F_VK as built — `tracking/fitness_vk.py` (moved from `src/tracking/AGENTS.md`, 2026-09)
+
+`FVKConfig` / `FVKStage` / `DEFAULT_SCHEDULE`, `fvk_score` (numpy scorer: profiled residual, R²,
+per-harmonic captured energy, config echo), `fvk_loss` (the torch scalar), `solve_envelopes` (a
+thin wrapper over `vk_envelopes`), `alias_charge` (the order/alias counter-term, off by default,
+reading through `fitness.line_power`), `optimize_trajectory` (L-BFGS). The VK cost is quadratic
+in the envelopes at a fixed trajectory, so substituting the closed-form envelope solution back
+leaves a function of the trajectory alone (Fact 3). Four things a caller must know:
+
+- **The envelope theorem is the whole trick.** `fvk_loss` solves `a*` with the existing numpy/scipy solver under `no_grad`, then rebuilds the carriers in torch (`phase_k = 2 pi k cumsum(r) / sr`) and evaluates the objective with `a*` DETACHED. Since `a*` is stationary in `a`, that gradient IS the profiled objective's — no autograd through the banded Cholesky. Two details are load-bearing, not cosmetic, because both decide whether `dL/da = 0` really holds: the prior weight is `(stride/2) rho^2`, not `rho^2` (the VK normal equations live on the decimated grid), and the data term carries the solver's own `edge_taper` (extracted into `vk_tracking.edge_taper` so there is one implementation). Measured on a 1 s single-rotor window: the chain rule matches finite differences to 1.7e-5, the profiled objective to 3.2 % of the gradient (0.7 % at 2 s); with either detail wrong it is 39-65 %.
+- **Fixed degrees of freedom by construction.** `FVKConfig.vk_config` disables the VK validity mask (`f_min = 0`, `f_max = inf`, `min_rps = 0`) — the mask is the one part of the solver that would react to the candidate — and the harmonic set is capped from a pinned REFERENCE trajectory instead (`k_cap`). Every candidate is scored on the identical `(channel, rotor, harmonic)` cells; the score reports `n_cells`.
+- **The smoothness weight is not portable, so ask for `"auto"`.** `optimize_trajectory(smooth_lambda=1.0)` is calibrated for a CRUISE window (log-domain prior ~0.8 against a data term normalized to order 1). A takeoff ramp reads 244 and the window then cannot move at all. `smooth_lambda="auto"` calls `auto_smooth_lambda`, which measures the prior of the init itself and holds it to half the data term; the weight and the init prior come back in the diagnostics (`smooth_lambda` / `prior_init`). Any driver that sees whole recordings wants it.
+- **The basin knob is `bw_rps`, not `k_max`.** The `1/(K T)` law is for a coherent harmonic sum; here every harmonic has its own VK envelope with a `k`-scaled band, so the capture radius is `bw_rps / 2` rev/s at EVERY harmonic and the gradient at a 0.5 rev/s error still points at truth at `k_max` = 80. What `k_max` moves is the depth and the curvature of the well (objective at truth 0.587 -> 0.073 from `k_max` 5 to 80, neighbours barely moving), which is the precision half of the same law and why the schedule still starts coarse. Open the band to a non-capture 2.0 rev/s and `k_max` = 80 does break into 7 local minima inside ±1 rev/s.

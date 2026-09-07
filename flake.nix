@@ -85,6 +85,14 @@
               pass_filenames = false;
               language = "system";
             };
+            agents-md-size = {
+              enable = true;
+              name = "AGENTS.md size";
+              # Root AGENTS.md rule 5: per-directory guides stay maps (<= 10 KB).
+              entry = "${python}/bin/python scripts/check_agents_md_size.py";
+              files = "(^|/)AGENTS\\.md$";
+              language = "system";
+            };
             lint-imports = {
               enable = true;
               name = "import-linter";

@@ -97,6 +97,26 @@ Controls outside the grid: `scv2_fs_v2` (old data, no gate) against
 `hb_scv2_mag_nogate` isolates the data effect; `hb_scv2_mag_nogate` against
 `hb_scv2_mag` isolates the gate effect.
 
+### Code (moved from `src/models/AGENTS.md`, 2026-09-07)
+
+The three grid architectures — `simple_conv_v2` (`BiGRUHead`),
+`simple_conv_v2_uni_gru128` (`CausalGRUHead`) and `simple_conv_v2_transformer`
+(`TemporalTransformerHead`) — take two constructor keywords, both reachable
+from a `conf/model` `params:` block. `frontend=` also accepts a front-end
+registry **key as a string** (`frontend: stft_mag_if`), which the model builds
+with its own `n_fft`/`hop_length`; the first encoder block then adapts its
+input width to the front-end's `out_channels`, so the default 1-channel
+`stft_mag` case stays weight-identical to older checkpoints.
+`voicing_gate=True` replaces the head's final `nn.Linear` with
+`GatedProjection` (`rps_predictor.py`), which emits `speed * sigmoid(gate_logit)`
+from one `Linear` to `2*num_rotors`: a stopped rotor becomes a classification
+decision instead of an MSE-mean regression to a false hover.
+`voicing_gate=False` (the default) keeps the attribute name `head.proj` and its
+`weight`/`bias` keys, so existing checkpoints load unchanged; the gated variant
+nests them under `head.proj.linear.*` and is not weight-compatible. The ten
+grid configs are `conf/model/hb_{scv2,tr,gru}_{mag,if,ssq}.yaml` plus
+`conf/model/hb_scv2_mag_nogate.yaml`. Tests: `tests/models/test_voicing_gate.py`.
+
 ## Readouts
 
 1. Aggregate best `val/mse` per run (W&B history minimum, not the summary).

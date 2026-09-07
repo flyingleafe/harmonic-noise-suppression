@@ -98,3 +98,51 @@ cause, independent of acoustic augmentation; (3) drop the generated weight to
 the VRAM ceiling. Investigation diagnostics: `scripts/diag_generated_noise*.py`,
 `scripts/diag_online_mix_integrity.py`, `scripts/diag_tune_gen.py`; the cluster
 online-mix policy used is `conf/online_mix/online_mix_generated_augment_gpfs.yaml`.
+
+## Framework migration notes (moved from `src/tasks/noise-generation/AGENTS.md`, 2026-09-07)
+
+How the E1–E3 noise-generation line was carried from the dedicated trainer into
+the unified `train.py` + `conf` framework. The routing table (historical vs.
+new-framework commands, split caveats, replicability status) is
+REPLICATION.md § E1–E3; this section keeps the design history those entries
+point at.
+
+- **E1 is an intentional dead end**: `DroneNoisePlusFilterGen` was used by the
+  deleted `train_noise_gen.py` and its model class is not registered in
+  `models.registry.NOISE_GEN_MODEL_REGISTRY`.
+- **Codebook bundling.** The deleted `train_noise_generation.py` took the
+  per-drone conditioning as `--cond_dim d --drone_name NAME`, with the
+  `DroneCodebook` bundled *alongside* the model in a checkpoint file
+  (`save_bundle`: `{"model", "codebook", "cond_dim", "drone_names"}`) —
+  external to "the model" in `models.registry`'s sense, with its own optimizer
+  param group. Few-shot adaptation to an unseen drone was `--freeze_emitter`
+  (freeze the generator) + `--init_checkpoint` (warm-start from a trained
+  bundle), optimising just the new drone's `d`-vector. The unified
+  `training.loop.run_training` supports neither a second optimizer group nor a
+  second checkpoint entry (one `optimizer = get_optimizer(model, ...)` over
+  `model.parameters()`, one checkpoint = `model.state_dict()`), so
+  `models.registry.build_noise_gen_model(..., cond_dim=d, drone_names=[...])`
+  now returns a composite `_CodebookConditionedNoiseGen(generator, codebook)`
+  and `tasks.codecs.NoiseGenerationCodec(conditioned=True)` passes
+  `drone_names` resolved from `meta.drone`.
+- **Codec/model signature mismatch** (once an open bug in REPLICATION.md
+  § E2/E3): the codec passed `mic_pos`/`rotor_pos`/`drone_id` straight through
+  as kwargs the model's `forward(rps, rel_pos, z=None)` never accepted. Fixed
+  by giving `geometry_to_rel_pos` a batched-torch path the codec calls.
+- **Geometry selection** was a `--geometry {dregon,michaels}` flag; the unified
+  framework resolves geometry per chunk via `NoiseGenFrameDataset` from the
+  inner `NoiseRPSDataset` chunk `origin`, which is what made mixed-geometry
+  (DREGON + Michael's) training possible in one run.
+- **Channel policy.** The Hydra migration first supported only
+  `channel_policy="first"` (single microphone); `"all"` was added later to
+  restore the historical online trainer's native multi-observer rendering —
+  required for any spatially-defined component (wind channel), see
+  `../noise-generator-models.md` § "Mixed-geometry datasets and channel policy".
+- **Smoothness regularisers** (`--harm_smooth_weight`/`--noise_smooth_weight`,
+  default 0) became `losses.SmoothnessPenalty` on the `harm_amps`/`noise_amps`
+  entries exposed by `NoiseGenerationCodec(return_dict=True)` —
+  `conf/loss/multiscale_stft_smoothness.yaml`,
+  `conf/experiment/e3_noise_gen_swapped_smoothness.yaml`.
+- The historical `notebooks/noise_gen_real_vs_generated.ipynb` figure notebook
+  is gone; figure scripts that reload a checkpoint outside the training loop
+  call `models.registry.build_noise_gen_model` directly.

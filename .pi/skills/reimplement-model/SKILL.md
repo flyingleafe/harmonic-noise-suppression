@@ -25,7 +25,7 @@ Ask the user or infer from context which **task** this model serves:
 
 Read the task description at `src/tasks/<task-name>/AGENTS.md`.  This defines:
 - The model interface (input/output shapes, required constructor params)
-- How the model plugs into training (`train_rps_predictor.py`, `train.py`, …)
+- How the model plugs into training (`train.py` via a `conf/experiment/<name>.yaml`)
 - Where to place code (`src/models/<subdir>/`)
 - Existing implementations for reference
 

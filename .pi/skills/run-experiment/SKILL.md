@@ -1,59 +1,64 @@
 ---
 name: run-experiment
-description: End-to-end ML experiment workflow - configuration, training, evaluation, and result analysis. Use when the user wants to train a model, run evaluation, or orchestrate an experiment.
+description: Train, evaluate or orchestrate an ML experiment in this repo — Hydra experiment configs, omnirun submission to the real backends, monitoring, result sync, analysis. Use whenever a model is to be trained or evaluated, locally or remotely.
 ---
 
 # Run an Experiment
 
-Complete workflow for running ML experiments in this repository.
+## Before submitting anything
 
-**First: apply the Bootstrap** (see root AGENTS.md). Reflect on what the experiment is really testing, whether the setup is optimal, and what could go wrong before executing.
+State in one line what the run tests and which **existing** run it is compared
+against. New runs must be *comparable*: same data regime (`conf/data` entry,
+split, protocol) and training setup as the baseline they will be read against.
+Change the architecture or the hypothesis under test, not the regime — unless
+the regime itself is the experiment. Protocols/regimes are listed in
+`docs/experiments/AGENTS.md`.
+
+Compute conventions (the user's, not negotiable without asking):
+- **One seed** unless the user asks for more. Multi-seed runs are the exception.
+- Do not launch a control arm whose result is not going to be reported.
+- **Nothing heavy on the laptop** — CPU sweeps and dataset builds go to `uni-cpu`.
+- **CUDA smoke test of new code → `kaggle` or `uni-gpushort`**, never the long queue.
 
 ## Steps
 
-1. **Define the experiment.** What model, dataset, conditioning, and hypothesis?
+1. **Prerequisites.**
+   - Dataset published on dload? (`dload pull <name>`, a `*_stream.yaml` data config, or a `dload:` URI override) — `src/data_processing/AGENTS.md`.
+   - Model registered? — `src/models/AGENTS.md` (`_target_`/keys).
+   - Experiment config: `conf/experiment/<name>.yaml` **plus** its sibling `<name>.md` (pre-commit enforces the pair via `scripts/validate_experiment_docs.py`) — `conf/AGENTS.md`. Override on the CLI: `optim.max_epochs=50 data=<other>`.
 
-2. **Check prerequisites.**
-   - Dataset exists? → `data_processing/AGENTS.md` (local `datasets/`, or published on dload — `dload pull <name>` / a `*_stream.yaml` data config / a `dload:` URI override)
-   - Experiment config exists? → `conf/AGENTS.md` (`conf/experiment/<name>.yaml` + its sibling `.md` doc)
-   - Model registered? → Check `src/models/AGENTS.md` for valid `_target_`/keys
-   - RPS needed? → the experiment's `conf/data` entry sets `load_rps`
-
-3. **Pick / create the experiment config.**
-   - Experiments live in `conf/experiment/<name>.yaml` (Hydra), selected with `experiment=<name>`. See `conf/AGENTS.md`.
-   - New experiment? add `conf/experiment/<name>.yaml` **and** its sibling `conf/experiment/<name>.md` doc — the pre-commit hook (`scripts/validate_experiment_docs.py`) enforces this.
-   - Override anything on the CLI, e.g. `optim.max_epochs=50 data=<other>`.
-
-4. **Run.** There is no bespoke job runner — a job is just the training command.
+2. **Run.** A job is the training command; there is no bespoke runner.
    ```bash
-   python train.py experiment=<name>       # local GPU: run it directly
+   python train.py experiment=<name>                       # local GPU only
+   omnirun submit --backend uni-gpushort --gpus 1 --time 30m --yes -- \
+       python train.py experiment=<name>                   # remote
    ```
-   Remote GPU (Slurm / Colab / Kaggle) — submit the same command via **omnirun** (requires a clean, *pushed* HEAD; `.env` ships automatically, so dload streaming + wandb work on any backend):
-   ```bash
-   omnirun submit --backend apocrita-short --gpus 1 --time 30m --yes -- \
-       python train.py experiment=<name>
-   ```
-   Backends (`~/.config/omnirun/config.toml`): `apocrita-short` (Slurm gpushort, ≤1 h), `apocrita-long` (Slurm sae, long jobs), `colab` (T4 — needs the local keep-alive daemon; allocation is a lottery), `kaggle` (P100 — ~1 MB kernel source cap, needs the slim-snapshot clone recipe). Repo `omnirun.toml` sets job defaults (`outputs=results/**`). Details: `docs/data-and-artifacts.md` § "Job running (omnirun)".
+   Backends (daemon-side; full table in `docs/data-and-artifacts.md` § "Job running"):
+   `uni` (Slurm `sae`, long GPU jobs, ≥1 GPU required), `uni-gpushort` (≤1 h),
+   `uni-cpu` (CPU-only, `--gpus 0`), `vast` (paid burst when the queue is long),
+   `kaggle` (free GPU for CUDA validation). Requires a clean **pushed** HEAD;
+   `.env` ships automatically so dload streaming + wandb work everywhere.
 
-   **Slurm timeout fallback pattern** (raw `sbatch` on a login node, exceptional): when asked to try `gpushort` first and escalate only if the short job hits walltime, submit the short job, then a long `sae` job with `--dependency=afternotok:<short_job_id>`. In the dependent job, inspect `sacct` for the short job's top-level state and run training only if it starts with `TIMEOUT`; exit without training on ordinary failures. This avoids masking data/code errors as a long rerun.
+3. **Monitor.** `omnirun ps` · `omnirun status <job>` · `omnirun logs -f <job>` ·
+   `omnirun wait <job>`. The CLI is a thin client of the hetzner daemon:
+   `omnirun ssh` is unavailable, there is no `--tail`, `omnirun backends check`
+   revives an expired SSH ControlMaster. Jobs showing LOST after a ControlMaster
+   expiry are usually fine — check again after `backends check`.
 
-5. **Monitor.** Locally: watch stdout / the wandb run. omnirun jobs: `omnirun ps`, `omnirun status <job>`, `omnirun logs <job>` (`omnirun backends check` first if the SSH ControlMaster expired). Raw Slurm (legacy): `squeue -u $USER`, `sacct -j <id>`, logs under `/gpfs/scratch/acw592/logs/`.
+4. **Evaluate.** `python eval.py experiment=<name>` (the single eval entry point;
+   chain with `&&` after training when the run is short).
 
-6. **Evaluate.** Run the single eval entry point (it absorbed the old `valid`/`final_valid`/`eval_cross` scripts):
-   ```bash
-   python eval.py experiment=<name>
-   ```
-   Or chain: `python train.py experiment=<name> && python eval.py experiment=<name>`.
+5. **Analyze.** Sync first — `omnirun pull <job>` collects `results/**` — then
+   the `generate-model-comparisons` skill or `scripts/table.py`.
 
-7. **Analyze results.**
-   - Sync first (mandatory): `omnirun pull <job>` for omnirun jobs (collects `results/**`)
-   - Then use `generate-model-comparisons` skill
+6. **Log.** Add the run to the campaign doc under `docs/experiments/`
+   (motivation · setup · results · conclusion) — see `docs/experiments/AGENTS.md`.
 
-8. **Finish with `record-and-remember`.** Record setup, results, conclusions.
+## Pitfalls
 
-## Common Pitfalls
-
-- **Create datasets first** — training fails silently with empty data dirs
-- **Match model_type key exactly** to `utils.py:get_model_from_config()` entries
-- **RPS experiments require `load_rps: true`** in config and `rps.npy` in dataset
-- **Always sync results before analysis** — `omnirun pull <job>`
+- A crashed run's `results/<exp>` dir persists in the cluster worktree and
+  poisons retries at the same SHA (`FileExistsError`) — override `results_root=`.
+- `outputs = results/**` scoops sibling jobs' results into every `omnirun pull`.
+- RPS experiments need `load_rps: true` in the data config.
+- Kaggle kernels have a ~1 MB source cap: strip notebooks/writing/docs from the
+  pushed snapshot when it fails to upload.
