@@ -89,6 +89,8 @@ def make_tiny_config(
         "entity": "test",
         "project": "test",
         "mode": "disabled",
+        "name": None,
+        "resume_id": None,
         "tags": [],
     }
     # Disabled + num_val_samples=0 by default so ordinary loop/collate/validate

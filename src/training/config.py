@@ -181,6 +181,8 @@ class WandbConfig:
     entity: str = "flyingleafe"
     project: str = "harmonic-noise-suppression"
     mode: str | None = None  # e.g. "disabled"/"offline" override
+    name: str | None = None
+    resume_id: str | None = None  # Must resume this existing W&B run; never fork silently.
     tags: list[str] = field(default_factory=list)
 
 

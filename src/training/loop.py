@@ -593,22 +593,26 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
     wandb_mode = (
         cfg.logging.mode if cfg.logging.mode else (None if cfg.logging.enabled else "disabled")
     )
-    # On a preemptible queue the same experiment is relaunched many times; reuse
-    # the recorded run id so the chained segments form ONE continuous curve
-    # instead of N truncated ones. `resume="allow"` still creates the run if the
-    # id is unknown to the backend.
+    # Explicit identity lets a continuation keep its original W&B history while
+    # writing checkpoints under a separate experiment name. A missing explicit
+    # ID must fail, not silently create another run.
     run_id_file = run_dir / "wandb_run_id.txt"
     prior_run_id = run_id_file.read_text().strip() if cfg.resume and run_id_file.exists() else ""
+    prior_run_id = cfg.logging.resume_id or prior_run_id
     run = wandb.init(
         entity=cfg.logging.entity,
         project=cfg.logging.project,
-        name=cfg.experiment_name,
+        name=cfg.logging.name or cfg.experiment_name,
         mode=wandb_mode,
         tags=[task.name, *list(cfg.logging.tags or [])],
         dir=str(run_dir),
-        config={"git_commit": commit, "experiment_name": cfg.experiment_name},
+        config=(
+            {"continuation/git_commit": commit, "continuation/experiment_name": cfg.experiment_name}
+            if cfg.logging.resume_id
+            else {"git_commit": commit, "experiment_name": cfg.experiment_name}
+        ),
         id=prior_run_id or None,
-        resume="allow" if prior_run_id else None,
+        resume="must" if cfg.logging.resume_id else ("allow" if prior_run_id else None),
     )
     if run is not None and getattr(run, "id", None):
         (run_dir / "wandb_run_id.txt").write_text(run.id)
