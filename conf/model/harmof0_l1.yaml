@@ -1,0 +1,35 @@
+# L1: original harmof0 front end/MRDConv/blocks, ONE shared map, FreqSuperResHead
+# onto the LateDeep L1 output grid (linear 20–130 rev/s, 720 bins = 0.153 rev/s
+# per bin). The finer output grid only: threshold + Hungarian decode as at L0,
+# no per-rotor layers, no CRF (those are L2, harmof0_l2.yaml).
+# Below the native fmin=27.5 Hz the interpolation clamps; it adds no new
+# acoustic evidence. Ladder: docs/experiments/paper-regime-matrix.md § "Block S".
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: harmof0_orig
+  n_fft: 1024
+  hop_length: 512
+  num_rotors: 4
+  sr: 16000
+  n_freq: 512
+  fmin: 27.5
+  bins_per_octave: 48
+  freq_bins: 352
+  n_har: 12
+  channels: [32, 64, 128, 128]
+  dilation_rates: [48, 48, 48, 48]
+  published_interp: true
+  n_maps: 1
+  superres_out: true
+  out_fmin: 20.0
+  out_fmax: 130.0
+  out_bins: 720
+  head_hidden: 32
+  head_kernel: 5
+model_type: null
+legacy_config_path: null

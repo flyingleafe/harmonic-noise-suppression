@@ -1,0 +1,18 @@
+# Validation twin of conf/loss/salience_bce_nsr_orig.yaml — same grid, blur and
+# pos_weight — so `optim.monitor: bce` selects on the object being fitted.
+#
+# `bce` is the only term, as for conf/metrics/salience_bce_orig.yaml: a shared
+# map has no per-rotor layers for metrics.LayerPeakRPSMetric to read, so L1 rows
+# select on cross-entropy like L0 (and unlike L2, which selects on rps_mae).
+# Rotor-speed error comes from scripts/rps_dump.py's shared-map readout.
+terms:
+  - name: bce
+    _target_: metrics.SalienceBCEMetric
+    params:
+      out_fmin: 20.0
+      out_fmax: 130.0
+      out_bins: 720
+      blur_bins: 2
+      pos_weight: auto
+      num_rotors: 4
+      rate: [16000, 512]

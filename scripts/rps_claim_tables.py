@@ -127,14 +127,30 @@ MATRIX: dict[str, dict[str, str]] = {
     "M": {"scv2": "r7hb_scv2", "tm": "r7hb_tm", "gru": "r7hb_gru"},
 }
 
-#: block S: architecture -> level -> experiment ("Block S", the L3 rows are the ports)
+#: block S: architecture -> level -> experiment. The two ports carry the matched
+#: review-B L2/L3 pair (`docs/experiments/paper-regime-matrix.md` § "B results")
+#: and their legacy-schedule L3 row; the L1 rows are defined but not run, so they
+#: appear in `missing.txt` until dumped. L3 is RETIRED from the ladder (it loses
+#: to L2 on both trunks under the matched recipe); its rows stay for the record.
 BLOCK_S: dict[str, dict[str, str]] = {
     "LateDeep": {"L0": "hb_sal_multif0", "L1": "hb_sal_multif0_nsr", "L2": "hb_sal_multif0_l4"},
     "Basic Pitch": {"L0": "hb_sal_bp", "L2": "hb_sal_bp_l4"},
-    "HarmoF0": {"L0": "hb_sal_hf0_orig", "L3": "hf0_r2hb_l4"},
-    "HPPNet": {"L0": "hb_sal_hppnet_orig", "L3": "hppnet_r2hb_l4"},
+    "HarmoF0": {
+        "L0": "hb_sal_hf0_orig",
+        "L1": "hf0_l1_r2_s0",
+        "L2": "hf0_l2_r2_s0",
+        "L3": "hf0_l3_r2_s0",
+        "L3 (legacy)": "hf0_r2hb_l4",
+    },
+    "HPPNet": {
+        "L0": "hb_sal_hppnet_orig",
+        "L1": "hppnet_l1_r2_s0",
+        "L2": "hppnet_l2_r2_s0",
+        "L3": "hppnet_l3_r2_s0",
+        "L3 (legacy)": "hppnet_r2hb_l4",
+    },
 }
-BLOCK_S_LEVELS = ("L0", "L1", "L2", "L3")
+BLOCK_S_LEVELS = ("L0", "L1", "L2", "L3", "L3 (legacy)")
 
 #: the speech A/B pairs: family -> trunk -> (trained without speech, trained with speech).
 #: On real data the pair is the old R4 row against its `_wu` no-speech twin, so

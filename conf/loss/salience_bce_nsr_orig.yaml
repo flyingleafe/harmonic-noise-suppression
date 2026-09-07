@@ -1,0 +1,21 @@
+# BCE-on-RPS-derived-salience on the LateDeep L1 output grid — linear 20-130 Hz,
+# 720 bins = 0.153 Hz/bin, conf/loss/salience_bce_nsr_hb.yaml's triple — for the
+# HarmoF0/HPPNet level-L1 rows (conf/model/{harmof0,hppnet}_l1.yaml). One shared
+# map, as at L0; only the output axis moves, which is what L1 isolates.
+#
+# Differs from salience_bce_nsr_hb.yaml in ONE number: rate [16000, 512], the
+# ports' hop (the nsr_hb file is LateDeep's hop-256 HCQT grid). blur_bins 2 and
+# pos_weight auto are the L1 settings kept verbatim, so the LateDeep L0 -> L1
+# step and this one are read against the same objective.
+terms:
+  - name: bce
+    _target_: losses.SalienceRPSBCELoss
+    weight: 1.0
+    params:
+      out_fmin: 20.0
+      out_fmax: 130.0
+      out_bins: 720
+      blur_bins: 2
+      pos_weight: auto
+      num_rotors: 4
+      rate: [16000, 512]

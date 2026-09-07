@@ -105,13 +105,21 @@ Pitch have no such convolutions).
 |---|---|---|---|---|
 | LateDeep | old `hb_sal_multif0` | old `hb_sal_multif0_nsr` | `hb_sal_multif0_l4` | n/a |
 | Basic Pitch | old `hb_sal_bp` | June only | `hb_sal_bp_l4` | n/a |
-| HarmoF0 | `hb_sal_hf0_orig` | — | `hf0_l2_r2_s0` | `hf0_l3_r2_s0` (matched); `hf0_r2hb_l4` (legacy schedule) |
-| HPPNet | `hb_sal_hppnet_orig` | — | `hppnet_l2_r2_s0` | `hppnet_l3_r2_s0` (matched); `hppnet_r2hb_l4` (legacy schedule) |
+| HarmoF0 | `hb_sal_hf0_orig` | `hf0_l1_r2_s0` (defined, not run) | `hf0_l2_r2_s0` | `hf0_l3_r2_s0` (matched); `hf0_r2hb_l4` (legacy schedule) — **retired** |
+| HPPNet | `hb_sal_hppnet_orig` | `hppnet_l1_r2_s0` (defined, not run) | `hppnet_l2_r2_s0` | `hppnet_l3_r2_s0` (matched); `hppnet_r2hb_l4` (legacy schedule) — **retired** |
 
-HarmoF0 and HPPNet have no L1 row: the finer output grid alone moved LateDeep
-by 0.8 rev/s (12.65 → 11.82) and the ladder skipped it for the two ports. Their
-L2/L3 pairs are the review experiment B below (§ "Review experiments B/C"),
-which is where the ladder's reading now lives.
+The L2/L3 pairs are review experiment B below (§ "Review experiments B/C"),
+which is where the ladder's reading now lives: L3 lost to L2 on both trunks
+under the matched recipe, so the comb gather is **retired from the ladder**
+(2026-09-07) — its rows stay in the record, marked deprecated in the wrap-up
+report, and leave the paper's adaptation table. The L1 rung the ports had
+skipped is now defined for both, analogously to LateDeep's
+`hb_sal_multif0_nsr`: the published model with ONE shared map passed through
+`FreqSuperResHead` onto the same linear 20–130 rev/s / 720-bin grid, L0's
+threshold + Hungarian decode, BCE loss and monitor
+(`conf/model/{harmof0,hppnet}_l1.yaml`, `conf/loss/salience_bce_nsr_orig.yaml`,
+`conf/experiment/{hf0,hppnet}_l1_r2_s0.yaml` on the B recipe). It separates
+output resolution from the per-rotor readout in the L0 → L2 gain. Not run.
 
 ### L0 for HarmoF0 and HPPNet: what "the published architecture" is
 

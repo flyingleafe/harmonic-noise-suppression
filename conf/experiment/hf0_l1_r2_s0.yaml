@@ -1,0 +1,30 @@
+# @package _global_
+# Block S level L1 for HarmoF0, historical R2 honest-base adaptation protocol;
+# seed 0 only. DEFINED, NOT YET RUN. Same recipe as hf0_l2_r2_s0 (real-only,
+# 50k-chunk warm-up, 40k frames/validation); only the model/loss/metrics trio
+# changes to the shared-map fine linear grid, and the monitor is `bce` as for
+# every shared-map row (L0, LateDeep L1) — a shared map has no rps_mae metric.
+defaults:
+  - override /data: e12_real_fullflight
+  - override /model: harmof0_l1
+  - override /loss: salience_bce_nsr_orig
+  - override /metrics: salience_bce_nsr_orig
+
+experiment_name: hf0_l1_r2_s0
+seed: 0
+checkpoint: null
+epochs: 200
+patience: 20
+batch_size: 16
+num_workers: 6
+samples_per_validation: 40000
+data:
+  train:
+    params:
+      path: conf/online_mix/hb_silence_dload.yaml
+  valid:
+    params:
+      data_dir: "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9"
+optim:
+  monitor: bce
+  monitor_mode: min
