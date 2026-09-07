@@ -1152,6 +1152,13 @@ trees, vast egress, subagents and local compute.
 
 ## Review experiments B/C
 
+**Current B scope: seed 0 only.** At the user's request, the eight seed-1/2
+controllers were stopped before cancelling all eight outstanding jobs; every
+job reached `cancelled`. The four seed-0 controllers remain active. Original
+configs/submission records below are historical, not authorization to restart
+the extra seeds. C and reserved experiment A are unchanged. Replication of
+this supporting ablation is deferred unless its value justifies the compute.
+
 The reserved held-out experiment A remains deferred. B and C use the existing
 development protocols, not the reserved test recordings.
 
