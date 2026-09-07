@@ -88,6 +88,42 @@ BLAS thread, so the grid is about 2.2 CPU-hours::
   omnirun submit --backend uni-cpu --gpus 0 --cpus 8 --time 2h --yes -- \\
       python scripts/blind_valid_row.py annotate --jobs 8 --omp 1 \\
           --out results/blind_valid_row/vit2dsp
+
+**The phase-refinement ablation (search -> phase iterations).** The published
+``vit2dsp`` row above stays the historical reference. The ablation asks what
+the phase-increment refinement adds to the ladder's pre-VK dynamic
+search, so it runs on one persisted search and differs only in the phase
+iteration count:
+
+1. ``--arm vit2dsp_dp`` — ``tracking.vit2dsp`` with
+   ``Vit2dspConfig(stop_after="vit2dsp")``: blind seed -> Viterbi pair-mean
+   c(t) -> spatial joint 2-rotor DP, returned before any VK stage runs (the
+   ``vit2dsp`` snapshot of ``vit2dsp_pipeline``). Same seed config, pair /
+   octave search, eight microphones, window and grid as the run of record.
+2. ``--init-traj-dir <search>/traj --phase-iterations N`` — the unit's
+   ``rps`` is that persisted trajectory read back verbatim (sha256 recorded;
+   a missing source, a mismatched window, or window audio that is not
+   sample-identical to the source campaign's raises — nothing is reseeded),
+   and the only stage run is ``pi_kalman_stage(replace(PI_PROTOCOL,
+   n_iter=N))`` on the unmodified clip — no peel, no VK. ``PI_PROTOCOL`` is
+   ``n_iter=3``, ``band_hz=6``, ``pair_mode="joint"`` over the core's
+   ``k_caps=(8, 20, 40)``; iteration ``j`` uses cap ``k_caps[j]`` regardless of how many
+   follow, so ``N=1`` is exactly the protocol's first iteration and ``N=3``
+   the full protocol. The row's ``wall_ladder_s`` is search + phase, with
+   both parts kept (``init_wall_ladder_s``, ``wall_phase_s``).
+
+The instruments, the gates, the stitch and the score are the same code for
+all three rows::
+
+  python scripts/blind_valid_row.py annotate --arm vit2dsp_dp --jobs 8 --omp 1 \\
+      --out results/paper_review_C/search
+  python scripts/blind_valid_row.py annotate --jobs 8 --omp 1 \\
+      --init-traj-dir results/paper_review_C/search/traj --phase-iterations 1 \\
+      --out results/paper_review_C/search_pi1
+  python scripts/blind_valid_row.py annotate --jobs 8 --omp 1 \\
+      --init-traj-dir results/paper_review_C/search/traj --phase-iterations 3 \\
+      --out results/paper_review_C/search_pi3
+  python scripts/blind_valid_row.py score --annot results/paper_review_C/<row> --gates g1,g5
 """
 
 from __future__ import annotations
@@ -128,6 +164,7 @@ sys.path.insert(0, str(_HERE))
 
 from blind_corpus import MAX_CHANNELS, SCORE_WINDOW_S, SR, Worker  # noqa: E402
 
+from tracking import PI_PROTOCOL  # noqa: E402
 from utils.gridrun import Unit, add_gridrun_args, gridrun_from_args  # noqa: E402
 
 DATASET = "dload:DREGON-LM-V4-michaels-valid-full"
@@ -159,10 +196,11 @@ def parent_recording(clip_rid: str) -> str:
 
 
 def parent_specs() -> list[dict[str, Any]]:
-    """The PINNED parent set of the valid split, off the derivation itself.
+    """Published parents named by the adopted validation specification.
 
-    Reading the spec rather than a literal keeps the audio this driver
-    annotates the audio the clips were cut from, at the same version.
+    These reproduce the historical annotation driver's input selection, not
+    byte-exact generating parents: the frozen clips predate later telemetry
+    calibration. Keep the score's mapping diagnostics alongside the results.
     """
     from data_processing.derivations import SPECS
 
@@ -318,9 +356,42 @@ def _safe(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", text)
 
 
+def _init_arm(init_dir: Path) -> str:
+    """The ONE arm the persisted source campaign ran, off its raw rows."""
+    raw = init_dir.parent / "raw"
+    arms = {str(json.loads(p.read_text()).get("arm")) for p in raw.glob("*.json")}
+    if len(arms) != 1:
+        raise SystemExit(
+            f"--init-traj-dir {init_dir}: expected one source arm in {raw}, got {arms}"
+        )
+    return next(iter(arms))
+
+
 def annotate(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     cache_dir = out_dir / "windows"
+    init_dir = Path(args.init_traj_dir).resolve() if args.init_traj_dir else None
+    if (init_dir is None) != (args.phase_iterations is None):
+        raise SystemExit("--init-traj-dir and --phase-iterations go together")
+    if init_dir is not None and args.arm is not None:
+        raise SystemExit("--arm is fixed by the persisted init's source arm; drop it")
+    if args.phase_iterations is not None and args.phase_iterations < 1:
+        raise SystemExit("--phase-iterations must be >= 1")
+    extra: dict[str, Any] = {}
+    if init_dir is not None:
+        if not init_dir.is_dir():
+            raise SystemExit(f"--init-traj-dir {init_dir} is not a directory")
+        if init_dir.resolve() == (out_dir / "traj").resolve():
+            raise SystemExit("--out must be a separate tree from the persisted init")
+        init_arm = _init_arm(init_dir)
+        arm = f"{init_arm}+pi{int(args.phase_iterations)}"
+        extra = {
+            "init_arm": init_arm,
+            "init_traj_dir": str(init_dir),
+            "phase_iterations": int(args.phase_iterations),
+        }
+    else:
+        arm = args.arm or "vit2dsp"
     recordings = (
         {r.strip() for r in args.recordings.split(",") if r.strip()} if args.recordings else None
     )
@@ -339,8 +410,10 @@ def annotate(args: argparse.Namespace) -> int:
         keep = {int(w) for w in args.windows.split(",")}
         index = [e for e in index if e["window"] in keep]
 
-    units = [Unit(uid=e["uid"], params={**e, "arm": args.arm, "dataset": SPEC_NAME}) for e in index]
-    print(f"{len(units)} units (arm {args.arm})", flush=True)
+    units = [
+        Unit(uid=e["uid"], params={**e, "arm": arm, "dataset": SPEC_NAME, **extra}) for e in index
+    ]
+    print(f"{len(units)} units (arm {arm})", flush=True)
 
     res = gridrun_from_args(
         args,
@@ -353,6 +426,8 @@ def annotate(args: argparse.Namespace) -> int:
             args.alias_penalty,
             args.score_window_s,
             not args.no_per_rotor_octave,
+            init_dir,
+            args.phase_iterations,
         ),
         out_dir,
         blas_threads=int(args.omp),
@@ -376,6 +451,7 @@ def _annotate_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "cpu_s": round(cpu_s, 1),
         "cpu_s_per_audio_s": round(cpu_s / audio_s, 2) if audio_s else None,
         "wall_ladder_s": round(_sum("wall_ladder_s"), 1),
+        "wall_phase_s": round(_sum("wall_phase_s"), 1),
         "wall_fvk_s": round(_sum("wall_fvk_s"), 1),
         "wall_ridge_s": round(_sum("wall_ridge_s"), 1),
         "wall_octave_s": round(_sum("wall_octave_s"), 1),
@@ -462,6 +538,10 @@ def load_windows(annot_dir: Path, gates: set[str]) -> dict[str, list[dict[str, A
             "spread_rev_s": row.get("spread_rev_s"),
             "pr_margin_half_min_db": row.get("pr_margin_half_min_db"),
             "ref_mae_rev_s": row.get("ref_mae_rev_s"),
+            "arm": row.get("arm"),
+            "phase_iterations": row.get("phase_iterations"),
+            "init_sha256": row.get("init_sha256"),
+            "wall_phase_s": row.get("wall_phase_s"),
             "cpu_s": round(
                 sum(
                     float(row.get(k) or 0.0)
@@ -709,6 +789,16 @@ def score(args: argparse.Namespace) -> int:
         "gates": sorted(gates),
         "n_clips": len(clips),
         "n_windows": len(all_windows),
+        "arms": sorted({str(w["arm"]) for w in all_windows}),
+        # Phase-refinement rows: the persisted init every window refined
+        # (sha256 of its traj npz) and the iteration count — the ablation's
+        # only degrees of freedom.
+        "phase": {
+            "iterations": sorted({w["phase_iterations"] for w in all_windows}),
+            "init_sha256": {w["uid"]: w["init_sha256"] for w in all_windows},
+        }
+        if any(w["phase_iterations"] is not None for w in all_windows)
+        else None,
         "n_windows_accepted": sum(1 for w in all_windows if not w["failed_gates"]),
         "scores": {mode: _aggregate(per_clip[mode]) for mode in ("gated", "ungated")},
         "scores_by_recording": {rid: _aggregate(p) for rid, p in sorted(per_rec.items())},
@@ -735,6 +825,8 @@ def score(args: argparse.Namespace) -> int:
                 else None,
                 "ref_mae_rev_s": w["ref_mae_rev_s"],
                 "cpu_s": w["cpu_s"],
+                "arm": w["arm"],
+                "wall_phase_s": w["wall_phase_s"],
             }
             for w in sorted(all_windows, key=lambda x: (x["recording_id"], x["t0_s"]))
         ],
@@ -807,7 +899,24 @@ def main() -> int:
     sub = ap.add_subparsers(dest="stage", required=True)
 
     ann = sub.add_parser("annotate", help="run the blind ladder on the parent recordings")
-    ann.add_argument("--arm", default="vit2dsp", choices=("vit2dsp", "fullrange", "seedvk"))
+    ann.add_argument(
+        "--arm",
+        default=None,
+        choices=("vit2dsp", "fullrange", "seedvk", "vit2dsp_dp"),
+        help="blind recipe (default vit2dsp); vit2dsp_dp = the ladder's dynamic search only",
+    )
+    ann.add_argument(
+        "--init-traj-dir",
+        default=None,
+        help="refine a PERSISTED campaign's traj/ dir by pi_kalman_stage(PI_PROTOCOL) "
+        "instead of running an arm (its raw/ sibling supplies the provenance)",
+    )
+    ann.add_argument(
+        "--phase-iterations",
+        type=int,
+        default=None,
+        help=f"n_iter of the phase pass on the persisted init; {PI_PROTOCOL.n_iter} = the full protocol",
+    )
     ann.add_argument("--window-s", type=float, default=20.0)
     ann.add_argument("--overlap-s", type=float, default=4.0)
     ann.add_argument("--max-s", type=float, default=None, help="cap seconds per recording (smoke)")

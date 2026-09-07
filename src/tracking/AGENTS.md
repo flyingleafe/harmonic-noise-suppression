@@ -37,6 +37,16 @@ Concretely: the frame plumbing (`Stage`, `tracking_frame` — `dtype=` keeps a f
 exact —, `get_audio`/`get_rps`/`with_rps`/`with_meta`, `pipeline`), then the stages, then the
 recipes. The frame contract itself is §"The Stage API" below.
 
+For search/refinement ablations, `Vit2dspConfig(stop_after="vit2dsp")`
+returns the spatial two-pair DP trajectory **before** the midband and refine
+VK stages; `stop_after="viterbi_c"` stops at the earlier pair-mean search.
+Neither computes the discarded later stages. The default `None` retains the
+complete ladder. `scripts/blind_valid_row.py annotate --arm vit2dsp_dp`
+persists the pre-VK trajectory; `--init-traj-dir <search>/traj
+--phase-iterations 1|3` consumes that exact saved trajectory with the fixed
+phase protocol, recording its hash. This is the journal 37-clip driver,
+not the distinct `vk37` or `beatvk` protocols.
+
 The stage vocabulary:
 
 | Stage | Config | What it does |

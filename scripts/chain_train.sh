@@ -28,6 +28,13 @@ BACKEND=${4:-uni-gpushort}
 TIME_LIMIT=${5:-55m}
 RESULTS_ROOT=${RESULTS_ROOT:-/data/scratch/acw592/results}
 
+# Optional allocation overrides for models whose loader or native front end
+# needs more than the backend defaults.
+RESOURCE_ARGS=()
+[ -z "${CHAIN_CPUS:-}" ] || RESOURCE_ARGS+=(--cpus "$CHAIN_CPUS")
+[ -z "${CHAIN_MEM:-}" ] || RESOURCE_ARGS+=(--mem "$CHAIN_MEM")
+[ -z "${CHAIN_VRAM:-}" ] || RESOURCE_ARGS+=(--vram "$CHAIN_VRAM")
+
 export SSH_ASKPASS=${SSH_ASKPASS:-/bin/false}
 # omnirun is installed globally now (~/.local/bin/omnirun); the old
 # `uvx --from ~/Projects/omnirun` wrapper this used is no longer needed.
@@ -54,7 +61,7 @@ submit_segment() {
   # window fails with "unknown backend"; that window can outlast a handful of
   # quick retries, so back off generously rather than dropping the chain.
   for attempt in $(seq 1 10); do
-    out=$($OR submit --backend "$BACKEND" --gpus 1 --time "$TIME_LIMIT" --name "$name" \
+    out=$($OR submit --backend "$BACKEND" --gpus 1 --time "$TIME_LIMIT" --name "$name" "${RESOURCE_ARGS[@]}" \
       --env PYTHONPATH=src --env "RESULTS_ROOT=$RESULTS_ROOT" \
       -- python train.py "experiment=$EXPERIMENT" resume=true 2>&1)
     local id
@@ -104,7 +111,7 @@ if [ -n "${CHAIN_WAIT_FOR:-}" ]; then
   # makes the driver helpfully submit a replacement and take the slot back.
   if [ "$LAST_STATE" = cancelled ]; then
     echo "CHAIN $PREFIX: attached segment cancelled — stopping chain"
-    exit 0
+    exit 130
   fi
   START_AT=2
 fi
@@ -123,8 +130,9 @@ for i in $(seq "$START_AT" "$MAX_SEGMENTS"); do
   fi
   if [ "$LAST_STATE" = cancelled ]; then
     echo "CHAIN $PREFIX: segment cancelled — stopping chain"
-    exit 0
+    exit 130
   fi
 done
 
 echo "CHAIN $PREFIX: exhausted $MAX_SEGMENTS segments without converging"
+exit 1

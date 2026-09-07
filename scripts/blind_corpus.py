@@ -62,9 +62,10 @@ for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXP
     os.environ.setdefault(_v, _OMP)
 
 import argparse  # noqa: E402
+import hashlib  # noqa: E402
 import json  # noqa: E402
 import time  # noqa: E402
-from dataclasses import dataclass  # noqa: E402
+from dataclasses import dataclass, replace  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Any  # noqa: E402
 
@@ -234,7 +235,13 @@ def build_arm(arm: str, n_rotors: int):
             trk.blind_seed_stage(n_rotors),
             trk.vk_stage(trk.VKConfig(fs=float(SR))),
         )
-    raise ValueError(f"unknown arm {arm!r}; valid: fullrange, vit2dsp, seedvk")
+    if arm == "vit2dsp_dp":
+        # The vit2dsp ladder's MAGNITUDE-ONLY dynamic search: blind seed ->
+        # Viterbi pair-mean c(t) -> spatial joint 2-rotor DP, returned before
+        # any VK stage runs. The persisted trajectory is the common input of
+        # the phase-refinement ablation (``Worker.init_traj_dir``).
+        return trk.vit2dsp(trk.Vit2dspConfig(stop_after="vit2dsp"), n_rotors=n_rotors)
+    raise ValueError(f"unknown arm {arm!r}; valid: fullrange, vit2dsp, seedvk, vit2dsp_dp")
 
 
 def _stage_log(frame) -> list[dict[str, Any]]:
@@ -258,6 +265,10 @@ def _seed_readings(log: list[dict[str, Any]]) -> dict[str, Any]:
             out["coarse_halved"] = e.get("halved")
             out["coarse_bases"] = e.get("bases")
             out["coarse_mode"] = e.get("coarse_mode")
+        if st == "vit2dsp":
+            out["vit2dsp_stages"] = e.get("stages")
+            if e.get("stop_after") is not None:
+                out["vit2dsp_stop_after"] = e["stop_after"]
         if st in ("vit2dsp", "guard"):
             for k in ("comb_conf", "conf", "reverted", "n_reverted"):
                 if k in e:
@@ -452,7 +463,15 @@ def _per_rotor_octave(audio: np.ndarray, r: np.ndarray, ft: np.ndarray) -> dict[
 class Worker:
     """One unit of the grid. A module-level callable, NOT a closure: the pool
     pickles the worker to send it to a child process, and a closure has no
-    importable qualified name."""
+    importable qualified name.
+
+    ``init_traj_dir`` switches the unit from "run the named arm" to "refine a
+    PERSISTED trajectory": the unit's ``rps`` is ``<init_traj_dir>/<uid>.npz``
+    of an earlier campaign read back verbatim, and the only stage that runs is
+    ``pi_kalman_stage(PI_PROTOCOL)`` with ``n_iter = phase_iterations``. The
+    instruments, the gate readings and the trajectory artifact are then the
+    same as for a from-scratch arm, so a search-only row and its phase-refined
+    rows are judged by the same code on the same window audio."""
 
     cache_dir: Path
     n_rotors: int
@@ -461,6 +480,8 @@ class Worker:
     alias_penalty: float
     score_s: float = SCORE_WINDOW_S
     per_rotor_octave: bool = True
+    init_traj_dir: Path | None = None
+    phase_iterations: int | None = None
 
     def __call__(self, unit: Unit) -> dict[str, Any]:
         cache_dir, n_rotors = self.cache_dir, self.n_rotors
@@ -469,24 +490,28 @@ class Worker:
         blob = np.load(cache_dir / f"{p['uid']}.npz")
         audio = np.ascontiguousarray(blob["audio"], dtype=np.float64)
 
-        frame = trk.tracking_frame(audio, SR, dtype=np.float64)
         arm = str(p["arm"])
         tic = time.perf_counter()
         fallback = None
-        try:
-            out_frame = build_arm(arm, n_rotors)(frame)
-        except ValueError as exc:
-            # ``coarse_init``'s takeoff bridge selects the idle rate from
-            # ``c_grid <= bridge_idle_c_frac * c_hi``; on a window whose
-            # detected cruise rate is low (a pre-takeoff or near-idle slice)
-            # that selection is EMPTY and ``argmax`` raises. The stage that
-            # exists to serve a ramp is exactly the one that fails on one, so
-            # a corpus driver must not die on it: drop the coarse init and
-            # run the plain ladder, recording that it did.
-            if arm != "fullrange":
-                raise
-            fallback = f"{type(exc).__name__}: {exc}"
-            out_frame = build_arm("vit2dsp", n_rotors)(frame)
+        phase: dict[str, Any] = {}
+        if self.init_traj_dir is not None:
+            out_frame, phase = self._phase_refine(unit, audio)
+        else:
+            frame = trk.tracking_frame(audio, SR, dtype=np.float64)
+            try:
+                out_frame = build_arm(arm, n_rotors)(frame)
+            except ValueError as exc:
+                # ``coarse_init``'s takeoff bridge selects the idle rate from
+                # ``c_grid <= bridge_idle_c_frac * c_hi``; on a window whose
+                # detected cruise rate is low (a pre-takeoff or near-idle slice)
+                # that selection is EMPTY and ``argmax`` raises. The stage that
+                # exists to serve a ramp is exactly the one that fails on one, so
+                # a corpus driver must not die on it: drop the coarse init and
+                # run the plain ladder, recording that it did.
+                if arm != "fullrange":
+                    raise
+                fallback = f"{type(exc).__name__}: {exc}"
+                out_frame = build_arm("vit2dsp", n_rotors)(frame)
         wall_ladder = time.perf_counter() - tic
 
         r, ft = trk.get_rps(out_frame)
@@ -503,6 +528,9 @@ class Worker:
             "rps_max": [round(float(x), 3) for x in r.max(axis=1)],
             "spread_rev_s": round(float(r.mean(axis=1).max() - r.mean(axis=1).min()), 3),
             **_seed_readings(_stage_log(out_frame)),
+            # Phase mode: the source campaign's seed/ladder readings, the init
+            # provenance and the end-to-end ``wall_ladder_s`` (search + phase).
+            **phase,
         }
 
         # Both instruments read the same centre crop, so their cells and the
@@ -592,6 +620,83 @@ class Worker:
             npz_dir / f"{unit.uid}.npz", rps=r.astype(np.float32), ft=ft.astype(np.float32)
         )
         return row
+
+    def _phase_refine(self, unit: Unit, audio: np.ndarray) -> tuple[Any, dict[str, Any]]:
+        """``pi_kalman_stage(PI_PROTOCOL, n_iter=phase_iterations)`` on a persisted init.
+
+        Every input is checked before anything runs, and nothing is
+        substituted: a missing trajectory or source row, a source row cut
+        from a different window, or a grid that does not fit this window's
+        audio all raise, so a refined row can never hide a reseed. The
+        protocol's iteration ``j`` (harmonic cap ``k_caps[j]``, fixed band)
+        does not depend on how many iterations follow, so ``n_iter=1`` is
+        exactly the protocol's first iteration and ``n_iter=PI_PROTOCOL.n_iter``
+        is the protocol itself — only the iteration count differs between the
+        ablation's rows. No peel seam: the refinement reads the clip.
+        """
+        assert self.init_traj_dir is not None and self.phase_iterations is not None
+        p = unit.params
+        src_npz = self.init_traj_dir / f"{unit.uid}.npz"
+        src_json = self.init_traj_dir.parent / "raw" / f"{unit.uid}.json"
+        src_win = self.init_traj_dir.parent / "windows" / f"{unit.uid}.npz"
+        for path in (src_npz, src_json, src_win):
+            if not path.is_file():
+                raise FileNotFoundError(f"{unit.uid}: persisted init is missing {path}")
+        src = json.loads(src_json.read_text())
+        # The init was searched on THIS audio: the source campaign's cached
+        # window must be sample-identical to the one this unit reads.
+        with np.load(src_win) as blob:
+            if not np.array_equal(np.asarray(blob["audio"], dtype=np.float64), audio):
+                raise ValueError(f"{unit.uid}: window audio differs from the persisted init's")
+        if str(src.get("arm")) != str(p["init_arm"]):
+            raise ValueError(
+                f"{unit.uid}: source row arm {src.get('arm')!r} != expected {p['init_arm']!r}"
+            )
+        for key in ("recording_id", "t0_s", "dur_s", "n_channels"):
+            if src.get(key) != p.get(key):
+                raise ValueError(
+                    f"{unit.uid}: source row {key}={src.get(key)!r} != this window's {p.get(key)!r}"
+                )
+        raw_bytes = src_npz.read_bytes()
+        with np.load(src_npz) as blob:
+            r0 = np.asarray(blob["rps"], dtype=np.float64)
+            ft_stored = np.asarray(blob["ft"], dtype=np.float64)
+        if r0.ndim != 2 or r0.shape[0] != self.n_rotors or r0.shape[1] != ft_stored.size:
+            raise ValueError(
+                f"{unit.uid}: init rps {r0.shape} does not fit {self.n_rotors} rotors "
+                f"x {ft_stored.size} frames"
+            )
+        # The exact float64 grid the search arm ran on (``blind_seed_stage``:
+        # ``arange(0, dur - hop/2, hop)``); the stored float32 grid must be it.
+        ft = np.arange(ft_stored.size, dtype=np.float64) * HOP_S
+        if ft_stored.size == 0 or ft[-1] >= audio.shape[-1] / SR:
+            raise ValueError(f"{unit.uid}: init grid ({ft_stored.size} frames) exceeds the window")
+        if not np.allclose(ft, ft_stored, atol=1e-3, rtol=0.0):
+            raise ValueError(f"{unit.uid}: init grid is not the {HOP_S} s window grid")
+
+        n_iter = int(self.phase_iterations)
+        cfg = replace(trk.PI_PROTOCOL, n_iter=n_iter)
+        frame = trk.tracking_frame(audio, SR, rps=r0, frame_times=ft, dtype=np.float64)
+        tic = time.perf_counter()
+        out_frame = trk.pi_kalman_stage(cfg)(frame)
+        wall_phase = time.perf_counter() - tic
+        log = _stage_log(out_frame)
+        diag = log[-1].get("diagnostics") or {}
+        src_wall = float(src["wall_ladder_s"])
+        prov: dict[str, Any] = {
+            **{k: v for k, v in src.items() if k.startswith(("seed_", "coarse_", "vit2dsp_"))},
+            "init_traj": str(src_npz),
+            "init_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+            "init_rps_mean": [round(float(x), 3) for x in r0.mean(axis=1)],
+            "init_wall_ladder_s": round(src_wall, 1),
+            "phase_iterations": n_iter,
+            "phase_protocol": diag.get("params"),
+            "phase_k_schedule": diag.get("k_schedule"),
+            "phase_stage_log": log,
+            "wall_phase_s": round(wall_phase, 1),
+            "wall_ladder_s": round(src_wall + wall_phase, 1),
+        }
+        return out_frame, prov
 
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:

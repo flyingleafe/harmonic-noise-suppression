@@ -475,6 +475,11 @@ class Vit2dspConfig:
     blind caller leaves them ``None``: uniform weights and the identity map).
     ``splice_update_gate`` takes the seed's auto ``update_gate`` off the stage
     log and splices it into the two VK configs — the ``blind_KR`` behaviour.
+    ``stop_after`` names a :data:`tracking.pipelines.VIT2DSP_SCAN_STAGES`
+    snapshot the ladder returns at instead of running its VK stages:
+    ``"vit2dsp"`` is the magnitude-only dynamic search (spatial-DP output),
+    the input a phase-refinement ablation starts from. ``None`` (default) is
+    the full ladder.
     """
 
     weights: Any = None
@@ -485,6 +490,7 @@ class Vit2dspConfig:
     seed_cfg: SeedConfig | None = None
     hop_s: float = DEFAULT_HOP_S
     splice_update_gate: bool = False
+    stop_after: str | None = None
 
 
 def vit2dsp_stage(
@@ -556,12 +562,10 @@ def vit2dsp_stage(
             refine_cfg=rcfg,
             stage_guard=use.stage_guard,
             sr=sr_f,
+            stop_after=use.stop_after,
         )
-        conf = ref.confidence
         info: dict[str, Any] = {
             "stages": [lb for lb, _ in stage_snaps],
-            "confidence_mean": float(conf.mean()) if conf.size else float("nan"),
-            "residual_ratios": [float(v) for v in ref.residual_ratios],
             "guard_reverted": {
                 k[len("guard_reverted_") :]: [int(v) for v in np.asarray(arr).ravel()]
                 for k, arr in extras.items()
@@ -570,6 +574,12 @@ def vit2dsp_stage(
             "wall_scan_s": float(wall_scan),
             "wall_vk_s": float(wall_vk),
         }
+        if ref is not None:
+            conf = ref.confidence
+            info["confidence_mean"] = float(conf.mean()) if conf.size else float("nan")
+            info["residual_ratios"] = [float(v) for v in ref.residual_ratios]
+        else:
+            info["stop_after"] = use.stop_after
         return with_rps(f, stage_snaps[-1][1], times, stage=name, info=info)
 
     return run
@@ -1318,6 +1328,8 @@ def vit2dsp(cfg: Vit2dspConfig | None = None, *, n_rotors: int = LADDER_N_ROTORS
 
     The four ladder steps after the seed are one unit — see
     :func:`vit2dsp_stage` for why they are not composed here.
+    ``Vit2dspConfig(stop_after="vit2dsp")`` returns the ladder's dynamic
+    search (seed -> Viterbi -> spatial DP) with no VK stage run.
     """
     use = cfg or Vit2dspConfig()
     return pipeline(

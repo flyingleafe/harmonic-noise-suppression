@@ -146,6 +146,16 @@ salience/multif0 variants, from `registry.py::RPS_MODEL_REGISTRY` — the single
 | `harmof0_orig` | HarmoF0 (Wei et al. ISMIR 2022) UNMODIFIED — its own log-interpolated STFT front end, `MRDConv`, the octave-dilated blocks 2-4, and a 352-bin log salience map at 48 bins/octave from 27.5 Hz. The CONTROL for `harmof0_rps` (`harmonic_ports/harmof0_orig.py`) |
 | `hppnet_orig` | HPPNet (Wei et al. ISMIR 2022) UNMODIFIED — nnAudio CQT, `HarmonicDilatedConv`, `CNNTrunk`, `FreqGroupLSTM`, frame head only, on the same 352-bin log grid. The CONTROL for `hppnet_rps` (`harmonic_ports/hppnet_orig.py`) |
 
+The original-model factories also accept an **L2 output adapter**:
+`superres_out=True`, `n_maps=4`, with `out_fmin/out_fmax/out_bins` and
+`head_hidden/head_kernel`. `conf/model/{harmof0,hppnet}_l2.yaml` keeps the
+native front end and harmonic blocks, then uses the existing `FreqSuperResHead`
+for four 300-bin maps over 0–150 rev/s. Multi-map output requires that linear
+grid; the default single-map models and their checkpoint keys are unchanged.
+The adapter clamps below the native 27.5 Hz lower bound. Matched L2/L3
+experiments and their remaining input-coordinate differences are documented
+in `docs/experiments/paper-regime-matrix.md` under “Review experiments B/C”.
+
 All SimpleConv* models now accept a `frontend=` kwarg.  Old checkpoints are
 loadable via automatic `window` → `frontend.window` remap.
 

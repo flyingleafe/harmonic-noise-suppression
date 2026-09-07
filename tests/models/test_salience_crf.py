@@ -1,4 +1,5 @@
 """The encode/decode pair must lose nothing on real-shaped trajectories."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -15,8 +16,12 @@ def _tracks(seed=0, n=3, r=4, t=200):
     out = []
     for _ in range(n):
         base = np.cumsum(rng.standard_normal(t)) * 0.6 + 60.0
-        g = np.stack([np.clip(base + rng.standard_normal(t).cumsum() * 0.2 + k * 3.0,
-                              0.0, 149.0) for k in range(r)])
+        g = np.stack(
+            [
+                np.clip(base + rng.standard_normal(t).cumsum() * 0.2 + k * 3.0, 0.0, 149.0)
+                for k in range(r)
+            ]
+        )
         out.append(g)
     return torch.tensor(np.stack(out))
 
@@ -43,3 +48,13 @@ def test_the_band_admits_what_real_rotors_do():
     """15.3 rev/s in one frame is 31 bins at 0.5 rev/s; 3 bins cannot hold it."""
     span, _ = band_for_rev_s(15.3, 0.5)
     assert span >= 31
+
+
+def test_flat_float32_maps_keep_the_discrete_path():
+    """Sub-bin fitting cannot invent a vertex on an uninformative plateau."""
+    layers = torch.zeros(1, 4, len(GRID), 5, dtype=torch.float32)
+    span, pen = band_for_rev_s(16.0, 0.5)
+    for logits in (False, True):
+        discrete = crf_decode_layers(layers, GRID, span, pen, logits=logits, subgrid=False)
+        refined = crf_decode_layers(layers, GRID, span, pen, logits=logits)
+        torch.testing.assert_close(refined, discrete, rtol=0, atol=0)

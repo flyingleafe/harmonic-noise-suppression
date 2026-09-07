@@ -1149,3 +1149,92 @@ from the dumps (`scripts/rps_claim_tables.py`, `make_tables.py`,
 `make_phase_fig.py`. Lessons for the next campaign are in the session
 memory: credentials in direct sbatch jobs, chain runners and dirty
 trees, vast egress, subagents and local compute.
+
+## Review experiments B/C
+
+The reserved held-out experiment A remains deferred. B and C use the existing
+development protocols, not the reserved test recordings.
+
+### B: matched HPPNet/HarmoF0 L2 versus L3
+
+The 24 configs `conf/experiment/{hppnet,hf0}_l{2,3}_{comb,r4}_s{0,1,2}.yaml`
+define 12 same-seed two-stage runs. The recipe is the existing salience
+`*_r4_l4` curriculum: static-comb pretraining followed by R4 real fine-tuning
+(C1 in the regime table's vocabulary). Each real stage starts from **its own**
+architecture/level/seed's best comb checkpoint.
+
+Controls shared by both levels and stages: four Gaussian salience layers,
+300 uniform output bins over 0–150 rev/s, hop 512 at 16 kHz, the existing
+layer BCE/CRF pair, AdamW 1e-3/weight decay 1e-4, batch 16, six loader workers,
+16,000 samples per validation, 200-epoch ceiling and patience 20.
+Both stages select checkpoints on `rps_mae`, not historical BCE selection.
+HPPNet's LSTM width is **128 in both levels**; historical L3 used 64.
+
+L2 adds the existing `FreqSuperResHead` to the original log-input model.
+L3 retains the linear-STFT harmonic gather. This compares the
+front-end/harmonic-coordinate adaptation bundle, not an isolated single
+operator: native bandwidth, input resolution, coordinate-dependent dilations
+and L2's below-27.5-Hz clamp remain different. The L2 adapter adds 6,084
+parameters; it cannot create acoustic evidence below the native input range.
+
+Placement: `uni-gpushort`, resumable 55-minute segments, 1 GPU with at least
+24 GB VRAM, 8 CPUs and 32 GB RAM. The existing `scripts/chain_train.sh`
+controllers run under user systemd on Hetzner, not on the laptop.
+Each chain completes comb training, then real fine-tuning, then submits the
+frozen-real `rps_dump.py` and `rps_regime_table.py` evaluation. Outputs are
+under `results/paper_review_B/<experiment>/`; checkpoints retain the standard
+R2 `artifacts/<experiment>/checkpoints/` path. No `uni` long or paid backend.
+Cancellation and segment-budget exhaustion return nonzero so a subsequent
+curriculum stage cannot mistake them for convergence.
+
+### C: one saved dynamic search, zero/one/three phase iterations
+
+`blind_valid_row.py annotate --arm vit2dsp_dp` stops the existing calibrated
+ladder after its spatial two-pair DP snapshot, before midband VK and VK
+refinement. This is a dynamic search, **not** the constant initial seed.
+The two phase arms consume its persisted trajectories via `--init-traj-dir`
+and `--phase-iterations 1` or `3`. Only iteration count changes:
+`PI_PROTOCOL`, joint-pair mode, fixed 6 Hz band, caps `[8]` versus `[8,20,40]`.
+There is no peel alternation or hidden VK stage in either phase arm.
+Source trajectory hashes and sample-identical window checks enforce reuse.
+
+All arms retain the journal's four parent recordings, 20-second windows
+with 4-second overlap, eight microphones, midpoint stitching, 37 eight-second
+validation clips, original PIT/regime scoring and g1/g5 gated/ungated outputs.
+This is neither `vk37` (five 25-second windows) nor `beatvk` (16-second windows).
+Placement is `uni-cpu`, 8 CPUs/32 GB RAM; outputs are
+`results/paper_review_C/{search,search_pi1,search_pi3}/`.
+
+**Manuscript/evidence distinction:** the existing published `vit2dsp` row
+contains midband VK and VK refinement, not the described phase-increment
+schedule. It remains an untouched historical reference. C measures the
+phase-increment alternative from the same pre-VK search; it must not be
+presented as merely rerunning that historical row. The historical parent's
+mapping diagnostics are not byte-exact label reconstruction: modern parents
+and frozen targets differ; retain those diagnostics rather than call them
+proof of exact current-parent provenance.
+
+### Frozen validation labels: direct byte-level provenance check
+
+The pinned `DREGON-LM-V4-michaels-valid-full` version is
+`9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9`.
+All **22 DREGON** saved `rps.npy` arrays equal the original per-clip
+`motor.command` arrays after `clean_command_spikes`, bit-for-bit. None equals
+the corresponding `motor.measured` track. All **15 FLY124** arrays match
+contiguous original CSV motor-speed segments divided by 60, before the later
+multiplicative calibration. Evidence:
+`results/paper_review_label_provenance.json`.
+
+Thus these frozen validation targets are **not audio-refined trajectories**.
+The dataset contains recordings with measured DREGON telemetry, but its
+selected targets are cleaned commands. Current published-frame adapters
+preferring measured speeds, later FLY124 calibration, and separate refined
+annotations must not be conflated with these older frozen bytes. B/C leave
+the targets unchanged. An independent-reference check would score the same
+development recordings against measured speeds separately.
+
+The real model preflight also exposed a shared float32 CRF bug: the
+`1e-300` flat-curvature guard underflowed to zero, producing NaNs on plateaus
+that L2's clamped interpolation can generate. The decoder now retains its
+discrete path when no parabolic vertex exists and uses a dtype-representable
+probability floor. `tests/models/test_salience_crf.py` preserves that regression.

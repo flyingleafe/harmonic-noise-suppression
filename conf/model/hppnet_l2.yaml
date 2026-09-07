@@ -1,0 +1,35 @@
+# L2: original hppnet front end/harmonic blocks plus four linear-output maps.
+# FreqSuperResHead adapts the native 352-bin log grid to 0–150 rev/s, 300 bins.
+# Below native fmin=27.5 Hz, interpolation clamps; it adds no new acoustic evidence.
+# L2→L3 changes the front-end/harmonic-coordinate bundle, not only one operator.
+# Matched training controls: docs/experiments/paper-regime-matrix.md.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_orig
+  n_fft: 2048
+  hop_length: 512
+  num_rotors: 4
+  sr: 16000
+  fmin: 27.5
+  n_bins: 352
+  bins_per_octave: 48
+  c_har: 16
+  embedding: 128
+  lstm_size: 128
+  dilations: [48, 12]
+  freq_pool: 1
+  time_pooling: false
+  n_maps: 4
+  superres_out: true
+  out_fmin: 0.0
+  out_fmax: 150.0
+  out_bins: 300
+  head_hidden: 32
+  head_kernel: 5
+model_type: null
+legacy_config_path: null

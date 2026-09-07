@@ -90,6 +90,7 @@ __all__ = [
     "VIT_DELTA",
     "VIT_DSTEP",
     "VIT_GAMMA_MULT",
+    "VIT2DSP_SCAN_STAGES",
     "CoarseConfig",
     "Segment",
     "apply_guard",
@@ -590,6 +591,11 @@ def apply_guard(
     return guarded
 
 
+#: The scan-block snapshots :func:`vit2dsp_pipeline` can stop after — the
+#: dynamic (time-varying) trajectory BEFORE any VK stage has touched it.
+VIT2DSP_SCAN_STAGES = ("viterbi_c", "vit2dsp")
+
+
 def vit2dsp_pipeline(
     prep: LadderInput,
     r0: np.ndarray,
@@ -599,7 +605,8 @@ def vit2dsp_pipeline(
     refine_cfg: VKConfig | None = None,
     stage_guard: bool = False,
     sr: float = float(SR),
-) -> tuple[list[tuple[str, np.ndarray]], VKResult, dict[str, Any], float, float]:
+    stop_after: str | None = None,
+) -> tuple[list[tuple[str, np.ndarray]], VKResult | None, dict[str, Any], float, float]:
     """The spatial-DP ladder from an arbitrary 4-track blind init.
 
     Viterbi pair-mean c(t) -> SPATIAL joint 2-rotor Viterbi (per-rotor
@@ -615,8 +622,18 @@ def vit2dsp_pipeline(
     failure: viterbi_c tracked all four rotors at pooled 1.03, then the
     joint-DP pulled the weak 82.4 track onto the 91 comb). Default False =
     the validated guard-less behaviour.
+    ``stop_after`` names a :data:`VIT2DSP_SCAN_STAGES` snapshot to return at
+    (the later stages are NOT computed): ``"vit2dsp"`` is the spatial-DP
+    trajectory the VK stages would refine — the magnitude-only dynamic
+    search, which a phase-refinement ablation takes as its input. Default
+    ``None`` runs the whole ladder. The final ``VKResult`` is ``None`` and
+    ``wall_vk_s`` is 0 when the ladder stops before its VK stages.
     Returns ``(stages, final VKResult, extras, wall_scan_s, wall_vk_s)``.
     """
+    if stop_after is not None and stop_after not in VIT2DSP_SCAN_STAGES:
+        raise ValueError(
+            f"stop_after must be one of {VIT2DSP_SCAN_STAGES} or None, got {stop_after!r}"
+        )
     lm_avg, bin_hz, st = whitened_logmag(prep.audio, float(sr), SEED_CFG)
     lm_multi, _, _ = whitened_logmag_multi(prep.audio, float(sr), SEED_CFG)
     ks = np.arange(1, 31)
@@ -642,17 +659,20 @@ def vit2dsp_pipeline(
             log=guard_log,
         )
 
-    tic = time.perf_counter()
-    r_prev = r_cur.copy()
-    r_cur, c_trajs = vit_stage1(prep.ft, r_cur, pairs, lm_avg, bin_hz, st, VIT_GAMMA_MULT)
-    r_cur = _guard("viterbi_c", r_prev, r_cur)
-    stages.append(("viterbi_c", r_cur.copy()))
     extras: dict[str, Any] = {
         "vit2d_deltas": deltas,
         "mic_weights": weights,
         "phys_map": phys_map,
         "pairs": np.array(pairs),
     }
+    tic = time.perf_counter()
+    r_prev = r_cur.copy()
+    r_cur, c_trajs = vit_stage1(prep.ft, r_cur, pairs, lm_avg, bin_hz, st, VIT_GAMMA_MULT)
+    r_cur = _guard("viterbi_c", r_prev, r_cur)
+    stages.append(("viterbi_c", r_cur.copy()))
+    if stop_after == "viterbi_c":
+        extras.update(guard_log)
+        return stages, None, extras, time.perf_counter() - tic, 0.0
     # Pair means from the (possibly guard-reverted) stage-1 output — equals
     # vit_stage1's own c_trajs when no track was reverted.
     c_trajs = [r_cur[list(pair)].mean(axis=0) for pair in pairs]
@@ -689,6 +709,9 @@ def vit2dsp_pipeline(
     r_cur = _guard("vit2dsp", r_prev, r_cur)
     stages.append(("vit2dsp", r_cur.copy()))
     wall_scan = time.perf_counter() - tic
+    if stop_after == "vit2dsp":
+        extras.update(guard_log)
+        return stages, None, extras, wall_scan, 0.0
 
     tic = time.perf_counter()
     mid = vk_track(prep.audio, r_cur, prep.ft, midband_cfg or MIDBAND_CFGS[0])

@@ -45,8 +45,9 @@ from models import comb_crf
 __all__ = ["gaussian_layer_target", "crf_decode_layers", "band_for_rev_s"]
 
 
-def band_for_rev_s(max_step_rev_s: float, grid_step: float, stiff: float = 40.0,
-                   dtype=torch.float32):
+def band_for_rev_s(
+    max_step_rev_s: float, grid_step: float, stiff: float = 40.0, dtype=torch.float32
+):
     """Transition band that ADMITS a per-frame change of ``max_step_rev_s``.
 
     Sized from the data, not from a slew constant: real training telemetry moves
@@ -63,14 +64,21 @@ def gaussian_layer_target(rps: torch.Tensor, grid, sigma_bins: float = 1.0) -> t
     """
     g = torch.as_tensor(np.asarray(grid), dtype=rps.dtype, device=rps.device)
     step = float(g[1] - g[0])
-    pos = (rps - g[0]) / step                                   # (B, R, T) in bins
+    pos = (rps - g[0]) / step  # (B, R, T) in bins
     idx = torch.arange(g.numel(), device=rps.device, dtype=rps.dtype)
     d = (idx.view(1, 1, -1, 1) - pos.unsqueeze(2)) / float(sigma_bins)
     return torch.exp(-0.5 * d * d)
 
 
-def crf_decode_layers(layers: torch.Tensor, grid, span: int, pen: torch.Tensor,
-                      *, logits: bool = False, subgrid: bool = True) -> torch.Tensor:
+def crf_decode_layers(
+    layers: torch.Tensor,
+    grid,
+    span: int,
+    pen: torch.Tensor,
+    *,
+    logits: bool = False,
+    subgrid: bool = True,
+) -> torch.Tensor:
     """``(B, R, G, T)`` per-rotor layers -> ``(B, R, T)`` rev/s.
 
     One CRF best path per layer, so there is no assignment step at decode time and
@@ -78,14 +86,13 @@ def crf_decode_layers(layers: torch.Tensor, grid, span: int, pen: torch.Tensor,
     ``logits=True`` treats the input as already log-domain (a model's raw output);
     otherwise it is a probability-like map and is logged here.
     """
-    g = torch.as_tensor(np.asarray(grid), dtype=torch.get_default_dtype(),
-                        device=layers.device)
+    g = torch.as_tensor(np.asarray(grid), dtype=torch.get_default_dtype(), device=layers.device)
     step = float(g[1] - g[0])
-    s_all = layers if logits else torch.log(layers.clamp_min(1e-300))
+    s_all = layers if logits else torch.log(layers.clamp_min(torch.finfo(layers.dtype).tiny))
     b, r, n_g, _ = s_all.shape
     out = []
     for i in range(r):
-        s = s_all[:, i]                                          # (B, G, T)
+        s = s_all[:, i]  # (B, G, T)
         path = comb_crf.viterbi(s, span, pen)
         rate = g[path]
         if subgrid:
@@ -94,9 +101,11 @@ def crf_decode_layers(layers: torch.Tensor, grid, span: int, pen: torch.Tensor,
             c0 = s.gather(1, i0.unsqueeze(1)).squeeze(1)
             c = s.gather(1, (i0 + 1).unsqueeze(1)).squeeze(1)
             den = a - 2 * c0 + c
-            # The log of a Gaussian is a parabola everywhere, so this is exact.
-            delta = torch.where(den.abs() < 1e-300, torch.zeros_like(den),
-                                0.5 * (a - c) / den)
-            rate = g[i0] + delta.clamp(-1, 1) * step
+            # A flat triplet has no parabolic vertex: retain the discrete path.
+            # A fixed 1e-300 tolerance underflows to zero in float32.
+            curved = den != 0
+            safe_den = torch.where(curved, den, torch.ones_like(den))
+            delta = 0.5 * (a - c) / safe_den
+            rate = torch.where(curved, g[i0] + delta.clamp(-1, 1) * step, rate)
         out.append(rate)
     return torch.stack(out, dim=1)
