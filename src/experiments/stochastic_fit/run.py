@@ -270,14 +270,18 @@ def fit(args: argparse.Namespace) -> None:
                 print(f"  FAILED: {exc!r}", flush=True)
                 (out.with_suffix(".err")).write_text(repr(exc))
                 continue
+            # slim: the periodogram and the LOO smoother are recomputed from the R2
+            # clip by the offline diagnostics; the fitted spectrum travels as
+            # float16 decibels (0.01 dB resolution). Full-size files (2.5 GB per
+            # 50-clip job) broke Kaggle's output collection.
             np.savez_compressed(
                 out,
-                power=pg.power,
                 freqs=pg.freqs,
                 times=pg.times,
                 rps=pg.rps,
-                spectrum=res["spectrum"],
-                loo_smoother=res["loo_smoother"],
+                spectrum_db=(10.0 * np.log10(np.maximum(res["spectrum"], 1e-30))).astype(
+                    np.float16
+                ),
                 scores=np.array(json.dumps(res["scores"])),
                 params=np.array(
                     json.dumps(

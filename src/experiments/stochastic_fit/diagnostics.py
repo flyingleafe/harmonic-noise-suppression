@@ -22,6 +22,21 @@ ORDER_BANDS: tuple[tuple[int, int], ...] = ((1, 8), (9, 24), (25, 64), (65, 10_0
 BAND_NAMES = ("k1-8", "k9-24", "k25-64", "k65+")
 
 
+CLIP_CACHE = Path.home() / ".cache" / "stochastic_fit_clips"
+
+
+def load_clip_cached(clip_id: str):
+    """The bundle clip, from the local cache or R2."""
+    from .run import BUCKET, PREFIX, clip_from_bytes, r2_client
+
+    CLIP_CACHE.mkdir(parents=True, exist_ok=True)
+    local = CLIP_CACHE / f"{clip_id}.npz"
+    if not local.exists():
+        body = r2_client().get_object(Bucket=BUCKET, Key=f"{PREFIX}/{clip_id}.npz")["Body"].read()
+        local.write_bytes(body)
+    return clip_from_bytes(local.read_bytes())
+
+
 @dataclass
 class FitResult:
     clip_id: str
@@ -40,23 +55,49 @@ class FitResult:
 
     @classmethod
     def load(cls, path: Path) -> FitResult:
+        """Load a result file. Slim files (``spectrum_db`` only) get their
+        periodogram and LOO smoother rebuilt from the clip bundle (cached
+        under ``CLIP_CACHE``, fetched from R2 on first use)."""
         with np.load(path, allow_pickle=True) as z:
             meta = json.loads(str(z["meta"]))
-            return cls(
-                meta["clip_id"],
-                meta["group"],
-                meta["variant"],
-                z["power"],
-                z["spectrum"],
-                z["loo_smoother"],
+            scores = json.loads(str(z["scores"]))
+            common = (
                 z["freqs"],
                 z["times"],
                 z["rps"],
-                json.loads(str(z["scores"])),
+                scores,
                 json.loads(str(z["params"])),
                 json.loads(str(z["spec"])),
                 meta,
             )
+            if "power" in z.files:
+                return cls(
+                    meta["clip_id"],
+                    meta["group"],
+                    meta["variant"],
+                    z["power"],
+                    z["spectrum"],
+                    z["loo_smoother"],
+                    *common,
+                )
+            spectrum = (10.0 ** (z["spectrum_db"].astype(np.float32) / 10.0)).astype(np.float32)
+        from .data import periodogram
+        from .fit import loo_reference
+
+        clip = load_clip_cached(meta["clip_id"])
+        pg = periodogram(clip)
+        assert pg.power.shape == spectrum.shape, (pg.power.shape, spectrum.shape)
+        band = pg.freqs >= 30.0
+        _, m_hat = loo_reference(pg.power.astype(np.float32) / scores["power_scale"], band)
+        return cls(
+            meta["clip_id"],
+            meta["group"],
+            meta["variant"],
+            pg.power,
+            spectrum,
+            (m_hat * scores["power_scale"]).astype(np.float32),
+            *common,
+        )
 
     @property
     def residual(self) -> np.ndarray:
