@@ -54,6 +54,23 @@ VARIANTS: dict[str, dict[str, Any]] = {
     "sharp": dict(rps_offset=True, gamma_min_bins=0.0, line_bin_integrate=True),
     # weak drift prior (the family's top of range): tests the slow residual structure
     "drift6": dict(rps_offset=True, gp_std_db=6.0),
+    # the Gaussian line shape removes ~0.24 of the ~0.30 nats/cell excess on
+    # the 27 crops (2026-09-08); the rest is probed on top of it
+    "gauss_sharp": dict(
+        rps_offset=True, line_shape="gauss", gamma_min_bins=0.0, line_bin_integrate=True
+    ),
+    "gauss_mic": dict(rps_offset=True, line_shape="gauss", mic_floor=True),
+    "gauss_drift6": dict(rps_offset=True, line_shape="gauss", gp_std_db=6.0),
+    "gauss_free": dict(rps_offset=True, line_shape="gauss", free_gamma=True),
+    "gauss_all": dict(
+        rps_offset=True,
+        line_shape="gauss",
+        free_gamma=True,
+        mic_floor=True,
+        gamma_min_bins=0.0,
+        line_bin_integrate=True,
+        gp_std_db=6.0,
+    ),
     # everything at once: the most the family's *shape* can be stretched
     "extended": dict(
         rps_offset=True,
