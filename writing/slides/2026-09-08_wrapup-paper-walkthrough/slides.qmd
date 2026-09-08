@@ -1,0 +1,174 @@
+---
+title: "Rotor speeds from drone ego-noise: the journal draft in seven slides"
+subtitle: "What we have, what the numbers say, what is still wrong"
+author: "Dmitrii Mukhutdinov"
+date: 2026-09-08
+format:
+  revealjs:
+    output-file: slides.html
+    embed-resources: true
+    width: 1280
+    height: 720
+    margin: 0.05
+    slide-number: c/t
+    transition: none
+    fig-align: center
+    auto-stretch: false
+    html-math-method: katex
+    theme: [default, styles.scss]
+execute:
+  echo: false
+---
+
+## 1. Real data, splits and ground truth {.smaller}
+
+:::: {.columns}
+::: {.column width="52%"}
+| Rig | Recording | Dur. | Role |
+|:--|:--|--:|:--|
+| DREGON (MikroKopter, indoor) | room 2: free flight, hover, up/down, rectangle, spinning | 266 s | **train** |
+| | room 1: free flight (no source / speech / white noise) | 199 s | **valid**, 22 clips |
+| | room 1: two high-level source flights | 114 s | held out |
+| MD2 (Matrice 100, outdoor) | FLY125 | 178 s | **train** |
+| | FLY124 | 122 s | **valid**, 15 clips |
+| | FLY103, FLY108 (mono) | 206 s | held out |
+
+::: {.tiny}
+Train pool 444 s × 8 mics ≈ 1 h of channels, a few dozen distinct trajectories. Validation 37 × 8-s clips × 8 mics = 74 296 frames: 12.5 % stopped, 3.7 % below 30 rev/s, 13.5 % ramps, 70.3 % cruise. Speech: LibriSpeech train-clean-100 (100 h) mixed at U[−30, 0] dB, one sixth of chunks are a zero-labelled silence arm.
+:::
+:::
+::: {.column width="48%"}
+**Regimes** (Table II): R1 = room 2, mic 0 · R2 = all 8 mics · R3 = R2 + FLY125 · R4 = R3 + frequency scaling α ∈ [0.7, 1.3] and time warp (labels transformed with the audio).
+
+**Ground truth, three caveats**
+
+- DREGON: *commanded* speed after cleaning; measured (tachometer) exists only in room 1 and agrees to 0.04 %. Against the audio the telemetry over-reports by 0.35–0.85 % → we keep the logs and carry a **0.3–0.7 rev/s floor** under every DREGON cruise number.
+- MD2: SDK log lags the audio and the lag grows with time → lag + clock-dilation fit (12–16 ms → 3–5 ms RMS), and speeds ×1.0070.
+- Every number in the paper is a validation number; checkpoints are selected on the same split.
+:::
+::::
+
+::: {.notes}
+One minute. The point of this slide: seven minutes of annotated flight from two drones, and the labels themselves have a floor.
+:::
+
+## 2. Regressors {.smaller}
+
+:::: {.columns}
+::: {.column width="55%"}
+![](assets/arch.png){height="470px"}
+:::
+::: {.column width="45%"}
+- Four compact networks on a log-magnitude STFT (2048 / 512).
+- **SimpleConv** (0.54M): five strided conv blocks, mean over frequency, 1-D conv head.
+- The other three (1.5–1.6M) share a trunk of six conv blocks with squeeze-and-excitation and a self-attention pool over the 17 surviving bands, then differ in the head: **Conv+BiGRU**, **Transformer** (2 layers), **causal GRU** (causal in the head only).
+- **Loss: PIT-MSE.** Rotor indices are arbitrary; the first multichannel experiment showed why: fixed-index $R^2 = -0.78$, the same predictions under the optimal permutation $R^2 = 0.94$.
+- All four are kept because the ranking of the 26-variant search did not survive a change of split.
+:::
+::::
+
+::: {.notes}
+Note the correction from earlier drafts: SimpleConv does not share the SE trunk, and the causal GRU is not a streaming model.
+:::
+
+## 3. Baselines and the overall comparison {.smaller}
+
+:::: {.columns}
+::: {.column width="66%"}
+::: {.tiny}
+{{< include assets/headline_slide.md >}}
+:::
+:::
+::: {.column width="34%"}
+::: {.small}
+PIT MAE (rev/s) on the frozen split, per frame regime.
+
+- Classical (pYIN, cepstrum, HPS, matched comb, NMF, OT clustering): ≥ 24 rev/s over all frames; none can say "stopped".
+- **Blind tracker** (ours; DP comb search + phase-increment Kalman): best DREGON cruise, 0.92, but 9.2 on FLY124 and 40× the cost.
+- Multi-pitch models at **L0** (published readout: one shared salience map, threshold + Hungarian): 2–10× worse than the regressors.
+- **Why:** the shared map has an *oracle floor* of 8.2 rev/s on our data (55 % of frames have a rotor pair < 1 Hz apart). **L2** = four per-rotor layers + CRF readout, front end untouched → HPPNet 7.8 → **2.27**, HarmoF0 10.8 → **2.45**: on par with or ahead of the regressors.
+:::
+:::
+::::
+
+::: {.notes}
+Point 3 and 3½ of the paper. The headline is a tie, not a win: our regressors beat everything off the shelf, and a music model with a proper output representation matches them.
+:::
+
+## 4. Generalization across microphones and drones {.smaller}
+
+![](assets/ladder_r1_r3.png){width="100%"}
+
+:::: {.columns}
+::: {.column width="50%"}
+**Microphones (R1 → R2).** Trained on channel 0 only, the recurrent and attention models score the same on channels 1–7 as on channel 0 (2.73/2.73, 2.37/2.27, 2.40/2.29). Only SimpleConv pays (3.56 → 6.06).
+:::
+::: {.column width="50%"}
+**Drones (R2 → R3).** Every R1/R2 model fails on FLY124 (cruise 8.5–66 rev/s, octave-scale) although the cruise bands overlap. One flight of the second drone brings it to 1.3–2.3. This is transfer across *flights*, not airframes: first motivation for synthetic data.
+:::
+::::
+
+## 5. What the models actually use: frequency-scaling probe {.smaller}
+
+![](assets/freq_probe_panels.png){width="100%"}
+
+::: {.small}
+Resample six cruise clips by α; a model that reads the comb must scale its answer by α (slope 1). **R3:** every regressor is flat (local slopes −0.3 to 0.2), i.e. they recognise trajectories, they do not read frequency. **R4** (labels transformed with the audio): slopes 0.5–1.0 from step 0, 0.0–0.4 after a warm-up; HPPNet L2 0.62, HarmoF0 L2 0.89. **C1 / M** (comb curriculum / pool): 1.0–1.6. The probe cannot tell loudness, envelope and speed prior apart; it only says whether the harmonics are used.
+:::
+
+## 6. Synthetic rotor noise: generators and regimes {.smaller}
+
+:::: {.columns}
+::: {.column width="58%"}
+::: {.tiny}
+{{< include assets/crossval.md >}}
+:::
+:::
+::: {.column width="42%"}
+::: {.small}
+**Static comb:** coherent sinusoids at $k\,r_i(t)$, frequency structure only (15–25 dB in-octave contrast vs 7–8 dB real). **Stochastic comb:** Lorentzian lines with order-dependent width, GP-varying powers and floor, from phase measurements on the recordings (7–8 dB contrast).
+
+**S1/S2** comb only · **C1/C2** comb then R4 · **M** one pool 2:1:1.
+
+- No transfer either way: real-trained 9–47 on combs; comb-trained 30–60 on real.
+- Curriculum helps a bit (C1 Conv+BiGRU 2.74 vs 2.77) and is where the models start to follow frequency.
+- Pooling (M) transfers to both synthetic families but costs 5.9–7.4 on real; budget-truncated runs.
+- Speech at eval time: ×1.8–2.2 without speech mixing, ×1.0–1.1 with.
+:::
+:::
+::::
+
+## 7. What the predictions look like {.smaller}
+
+![](assets/qual_overlays.png){width="92%"}
+
+::: {.small}
+Best regressor and best salience model trained on each family. **Regressors** regress to the mean comb: near-unison rotors merge, and on the stochastic comb the predicted spread is 5–6 rev/s whatever the truth (0.4–22). **Salience models** keep rotors apart but *jump*: octave locks, wandering on ramps, nothing below the grid. Both lose the take-off/landing ramps, where the labels are weakest. Remedies (future work): a multimodal readout on the regressor trunk; a joint decoder or the tracker's phase refinement on the L2 tracks.
+:::
+
+## Where this stands {.smaller}
+
+:::: {.columns}
+::: {.column width="52%"}
+**Problems with the current results**
+
+- **Regimes are not unified.** The L0/L2 salience rows and the "R4" regressors were trained on the R4-with-warm-up recipe; the ladder rows on R3. Table III has two regressor blocks for that reason.
+- **Undertrained rows.** The M regime was budget-truncated (25–34 epochs); early-stopping schedules differed across the campaign. Salience rows used batch 16, regressors 128 (8–10× more steps at equal frames).
+- **Single seeds everywhere.** C1 vs R4 is within seed noise; HarmoF0 L2 sits on a noisy plateau.
+- **L1 for the ports** (HarmoF0, HPPNet) is defined but not run, so the L0 → L2 gain is not decomposed.
+- Two drones only; DREGON labels carry a 0.3–0.7 rev/s floor; the blind tracker is our own baseline.
+- The draft is 11 pages against OJSP's 8 + 1.
+:::
+::: {.column width="48%"}
+**Plan**
+
+1. Unified-regime reruns are in the queue (A100 batch, fixed schedule, one recipe for every row). Tables and figures regenerate from scripts; the prose is written to survive the numbers changing.
+2. Rerun M to patience, run the two L1 rows, add a second seed for the headline rows if the budget allows.
+3. Trim to 8 pages (subsection headings and the two large tables are the cost).
+4. Target: **IEEE OJSP if the reruns hold up** — i.e. if L2 stays on par with the regressors and the R3 → R4 → C1 story survives. Otherwise a conference version (ICASSP text exists) with the same evidence.
+:::
+::::
+
+::: {.notes}
+Be clear with the supervisor: the structure is done, the evidence is current but pre-rerun, and OJSP is the optimistic outcome.
+:::
