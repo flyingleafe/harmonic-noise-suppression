@@ -7,5 +7,3 @@ enabled: true
 bucket: ml-data
 prefix: artifacts
 upload_checkpoints: true
-upload_val_samples: true
-num_val_samples: 6

@@ -1,0 +1,147 @@
+# Full deterministic RPS panel. The historical real artifact name is immutable;
+# active metrics use MD2 terminology. Real view ranges are flattened sample
+# indices in its frozen order: 14 source-present DREGON clips, 8 nosource
+# DREGON clips, then 15 MD2/FLY124 clips, each with eight channels.
+enabled: true
+every_optimizer_steps: 500
+max_optimizer_steps: 100000
+# Default circuit breaker: 200 rounds. A still-improving run is censored;
+# extend explicitly with epochs=220 validation.max_optimizer_steps=110000.
+batch_size: 128
+num_workers: null
+smoothing_window: 5
+min_rounds: 30
+control: overall_macro
+min_relative_improvement: 0.01
+lr_patience: 8
+lr_factor: 0.5
+min_lr_reductions: 3
+final_patience: 12
+
+datasets:
+  real:
+    _target_: data_processing.frame_datasets.DregonLMFrameDataset
+    params:
+      data_dir: dload:DREGON-LM-V4-michaels-valid-full
+      n_fft: 2048
+      hop_length: 512
+      sample_rate: 16000
+      flatten_channels: true
+    iterable: false
+  static_nomix:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/salv2_comb.yaml
+      n: 256
+      base_seed: 880101
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      speech: false
+      cache_path: .cache/rps_validation/v1_static_nomix_880101_8s_256.pkl
+    iterable: false
+  static_mix:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/salv2_comb.yaml
+      n: 256
+      base_seed: 880101
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      speech: true
+      cache_path: .cache/rps_validation/v1_static_mix_880101_8s_256.pkl
+    iterable: false
+  stochastic_nomix:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/salv2_stoch.yaml
+      n: 256
+      base_seed: 881101
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      speech: false
+      cache_path: .cache/rps_validation/v1_stochastic_nomix_881101_8s_256.pkl
+    iterable: false
+  stochastic_mix:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/salv2_stoch.yaml
+      n: 256
+      base_seed: 881101
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      speech: true
+      cache_path: .cache/rps_validation/v1_stochastic_mix_881101_8s_256.pkl
+    iterable: false
+
+views:
+  real_r1:
+    dataset: real
+    start: 0
+    stop: 176
+    channels: [0]
+    channels_per_clip: 8
+  real_r2:
+    dataset: real
+    start: 0
+    stop: 176
+  real_r3:
+    dataset: real
+    start: 0
+    stop: 296
+  real_source_present:
+    dataset: real
+    start: 0
+    stop: 112
+  real_nosource:
+    dataset: real
+    start: 112
+    stop: 296
+  static_nomix:
+    dataset: static_nomix
+  static_mix:
+    dataset: static_mix
+  stochastic_nomix:
+    dataset: stochastic_nomix
+  stochastic_mix:
+    dataset: stochastic_mix
+
+aggregates:
+  real_overall:
+    real_r3: 1.0
+  synthetic_overall:
+    static_nomix: 0.25
+    static_mix: 0.25
+    stochastic_nomix: 0.25
+    stochastic_mix: 0.25
+  overall_macro:
+    real_overall: 0.5
+    synthetic_overall: 0.5
+  overall_micro:
+    real_r3: 0.22424242424242424
+    static_nomix: 0.19393939393939394
+    static_mix: 0.19393939393939394
+    stochastic_nomix: 0.19393939393939394
+    stochastic_mix: 0.19393939393939394
+
+primary:
+  - real_r1
+  - real_r2
+  - real_r3
+  - real_source_present
+  - real_nosource
+  - static_nomix
+  - static_mix
+  - stochastic_nomix
+  - stochastic_mix
+  - real_overall
+  - synthetic_overall
+  - overall_macro
+  - overall_micro

@@ -12,9 +12,11 @@ trainer scripts.
 |---|---|
 | `config.py` | Dataclass structured configs registered in Hydra ConfigStore (`RootConfig`, Data/Model/Loss/Metrics/Optim/Wandb/Artifacts/Lora). `instantiate_target` resolves `_target_` entries and normalizes rate params to reduced `(num, den)` tuples — required for exact equality with `GridIndex` rates. |
 | `validate.py` | Pre-run spec validation: dataset ⊇ model input; model output ∪ dataset ⊇ every loss/metric requirement; monitor metric exists; one-batch CPU smoke test. Runs at the start of train/eval; `validate_only=true` exits after it. |
-| `loop.py` | The generic loop: map-style + iterable (online-mix, `samples_per_validation`) datasets, AMP, grad accumulation/clipping, optimizer factory, ReduceLROnPlateau + early stop on the monitor metric, checkpointing, wandb logging. |
-| `artifacts.py` | `ArtifactStore` — uploads checkpoints + selected validation samples to Cloudflare R2 (bucket `ml-data`, `artifacts/<experiment>/...`), env from `.env` (`R2_ACCOUNT_ID` + AWS keys), via `boto3`. Uploads never crash training; disabled/missing-env → no-op. |
-| `val_logging.py` | SNR-stratified validation-sample logging: audio triples (mixture/target/output) for speech tasks, mixture + RPS-overlay figure for `rps_prediction`; goes to wandb AND R2. Takes a logger interface — reusable by future multi-model training schemes. |
+| `loop.py` | The generic loop: map-style + iterable datasets, AMP, grad accumulation/clipping, optimizer-step validation cadence, atomic checkpointing, W&B logging. The legacy single-monitor path remains for other tasks; RPS reruns select `validation/rps_unified`. |
+| `validation.py` | Full-panel RPS validation: one concatenated finite loader, GPU-vectorized MAE-optimal PIT, zero-copy nested index views, domain aggregates, log-scale median progress, any-subset LR/stopping state. |
+| `stopping.py` | Legacy opt-in single-monitor median stopping. Unified RPS runs instead use `MultiMetricController` from `validation.py`; the two policies are mutually exclusive. |
+| `artifacts.py` | Cloudflare R2 artifacts. Subset-best checkpoint aliases use S3 server-side copies of the already-uploaded `last.ckpt`, avoiding repeated checkpoint uploads. |
+| `val_logging.py` | On-demand/final-evaluation validation media construction. The training loop never renders figures or audio previews during validation. |
 | `lora.py` | LoRA config seam (`maybe_apply_lora`). Disabled by default; enabling raises NotImplementedError pointing at the legacy implementation (`git show d94ce9f:train.py`). |
 
 ## Future-expansion seams (see design doc §"Future expansions")

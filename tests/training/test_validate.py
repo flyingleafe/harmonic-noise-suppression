@@ -140,8 +140,6 @@ def test_validate_config_passes_a_salience_pipeline(tmp_path):
                 "bucket": "ml-data",
                 "prefix": "artifacts",
                 "upload_checkpoints": True,
-                "upload_val_samples": True,
-                "num_val_samples": 0,
             },
             "lora": {
                 "enabled": False,
@@ -268,8 +266,6 @@ def test_validate_config_passes_a_conditioned_noise_generation_pipeline(tmp_path
                 "bucket": "ml-data",
                 "prefix": "artifacts",
                 "upload_checkpoints": True,
-                "upload_val_samples": True,
-                "num_val_samples": 0,
             },
             "lora": {
                 "enabled": False,

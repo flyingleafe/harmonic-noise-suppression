@@ -50,6 +50,7 @@ import glob
 import json
 import logging
 import os
+import pickle
 import zlib
 from collections.abc import Sequence
 from functools import partial
@@ -527,6 +528,7 @@ class OnlineMixFrameDataset(IterableDataset):
         rps_corruption: dict[str, Any] | None = None,
         speech: bool | None = None,
         flight_reuse: int | None = None,
+        duration_s: float | None = None,
     ) -> OnlineMixFrameDataset:
         """Load an online-mix policy YAML (e.g. ``conf/online_mix/online_mix_*.yaml``)
         and build the dataset from it — the ``_target_`` this module's
@@ -536,6 +538,8 @@ class OnlineMixFrameDataset(IterableDataset):
         from omegaconf import OmegaConf
 
         cfg = OmegaConf.load(path)
+        if duration_s is not None:
+            cfg.duration_s = float(duration_s)
         apply_speech_override(cfg, speech)
         apply_flight_reuse(cfg, flight_reuse)
         return cls.from_config(
@@ -1309,7 +1313,18 @@ class FixedSynthFrameDataset(Dataset):
         flatten_channels: bool = True,
         flight_reuse: int | None = None,
         speech: bool | None = None,
+        cache_path: str | Path | None = None,
     ):
+        cache = Path(cache_path) if cache_path is not None else None
+        if cache is not None and cache.is_file():
+            with cache.open("rb") as handle:
+                frames = pickle.load(handle)
+            if not isinstance(frames, list) or len(frames) != int(n):
+                raise ValueError(
+                    f"invalid fixed-synthetic validation cache {cache}: expected {n} frames"
+                )
+            self._frames = frames
+            return
         cfg = OmegaConf.load(path) if isinstance(path, str) else path
         cfg.base_seed = int(base_seed)
         if duration_s is not None:
@@ -1327,6 +1342,12 @@ class FixedSynthFrameDataset(Dataset):
             self._frames.append(frame)
             if len(self._frames) >= int(n):
                 break
+        if cache is not None:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache.with_suffix(cache.suffix + ".tmp")
+            with tmp.open("wb") as handle:
+                pickle.dump(self._frames, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            tmp.replace(cache)
 
     def __len__(self) -> int:
         return len(self._frames)

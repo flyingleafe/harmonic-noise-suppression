@@ -1,0 +1,13 @@
+# @package _global_
+defaults:
+  - real_r2_scv2
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: real_r2_scv2_unified
+samples_per_validation: null
+batch_size: 128
+data:
+  train:
+    params:
+      duration_s: 2.0

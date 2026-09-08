@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import ssl
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -68,12 +69,14 @@ from functools import partial, wraps
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import boto3
 import dload
 import numpy as np
 import soundfile as sf
 import tdseries as td
 import torch
 import torch.nn.functional as F
+from dload.remote import S3Remote
 from dload.torch import as_iterable_dataset
 from torch.utils.data import IterableDataset
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
@@ -183,6 +186,20 @@ def open_repository() -> dload.Repository:
         repo.lock_path = REPO_ROOT / "dload.lock"
         _repository = repo
     return _repository
+
+
+def _reset_repository_after_fork() -> None:
+    # Dataset/pipeline objects retain this repository across fork. Replace its
+    # remote in place: inherited TLS sockets can exchange other workers' S3
+    # responses, producing SSL, Content-Range and ETag failures.
+    if _repository is not None and isinstance(_repository.remote, S3Remote):
+        remote = _repository.remote
+        boto3.setup_default_session()
+        _repository.remote = S3Remote(remote.endpoint_url, remote.bucket, remote.prefix)
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_repository_after_fork)
 
 
 def local_repository(root: str | Path) -> dload.Repository:

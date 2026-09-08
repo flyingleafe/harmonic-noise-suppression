@@ -1402,3 +1402,171 @@ Evidence: `results/paper_review_C/smoke_verification.json`. This is a plumbing
 smoke, not an accuracy result. Two seconds is too short for the unchanged
 ridge instrument's block law; the submitted campaign retains 20-second
 windows, 4-second overlap and the complete 37-clip scoring protocol.
+
+## R3/R4 regressor continuation — 2026-09-07
+
+Requested comparison: continue the six early-stopped SCv2/TM/GRU runs from
+their last checkpoints, reset LR to `5e-4`, and stop at noise-tolerant
+saturation or the corresponding SimpleConv's total epoch count (R3: 107;
+R4: 51). These are dirty continuations, not controlled reruns isolating LR
+from stopping policy. **Keep original batch sizes and effective optimizer
+batches.** Resume the original W&B IDs; use separate `*_continue_lr5e4`
+artifact prefixes so original checkpoints remain intact.
+
+The continuation policy uses a five-value median, a meaningful improvement
+of at least `max(0.05, 0.01 * abs(best))`, scheduler patience 15/cooldown 10,
+and saturation patience 30 after epoch 100, two LR reductions, and ten
+post-reduction epochs. The R4 cap precedes the saturation minimum. Raw
+metrics still select best checkpoints. R4's monitor is now native frame
+MAE rather than MSE; PIT-MSE remains the optimization objective.
+
+The first batch was stopped before correcting W&B identities. R4 GRU's
+completed epochs 26–33 were backfilled into original run `9niuejv1`, and its
+consistent checkpoint resumes at 34. An interrupted R4 SCv2 upload had
+mismatched weights/state: its artifacts were preserved under
+`interrupted_attempt_1`, and the intact original prepared bundle was
+restored before retrying. Never pair independently uploaded files without
+checking consistency. Forked loader workers also inherited live S3 sockets;
+revision `188374931227` recreates the cached S3 remote after fork. A real
+four-worker, 32-read R2 smoke and 23 stream/retry tests passed.
+
+### Single-A100 pilot result
+
+`r34-a100-pilot-e9dd45` resumed `real_r4_scv2` / W&B `gatrtl5n` at epoch 29
+and completed through epoch 50 (`next_epoch=51`). Best and last coincide;
+LR remained `5e-4`. Native MAE was 3.425957. The same exact table scorer used
+for the original comparison gives **3.411367** over 74,296 frame positions,
+versus original SCv2 **4.614424** and SimpleConv **3.275915**: a 26.1%
+reduction, with a remaining 0.135452 gap to SimpleConv.
+
+Training, validation, original W&B resumption, checkpoint uploads and
+best/last scoring passed end-to-end. GPU saturation did **not** pass:
+179 direct 1-Hz samples averaged 42.49% GPU utilization, peaked at 89%,
+and included 48 zeros across validation/upload gaps. Active training was
+also not continuously saturated. The requested 16 CPUs yielded a 7.68-core
+cgroup quota; Vast advertised eight effective CPUs. The other five
+continuations remain gated on the CPU-allocation repair and a fixed-batch
+A100 throughput profile. Evidence lives in `results/r34_continuation/`;
+pilot scores are also under the SCv2 continuation's R2 `evaluation/` prefix.
+
+### W&B step axis is not a training-work axis
+
+Original training committed validation previews and scalar metrics separately,
+so each epoch advanced W&B `_step` twice. The continuation disabled previews,
+advancing `_step` once per epoch. Verified full histories: R4 SCv2 epoch 28 is
+step 57, epoch 29 is step 58, and epoch 50 is step 79; SimpleConv epoch 50 is
+step 101. Both have 51 epoch records, 0–50. Compare on the **`epoch` axis**,
+not logging commits; `_step` is not an optimizer-update counter. Raw history
+evidence: `results/r34_continuation/wandb-step-explanation.jsonl`. The unified
+regime below removes training-time validation media rendering entirely.
+
+## Unified R1–R4 regressor rerun handoff — 2026-09-08
+
+**User decisions, frozen for the next session:**
+
+1. Every fresh R1/R2/R3/R4 regressor uses **2-second training clips and batch
+   128**. This is an intentional doubling of token/audio batch relative to the
+   old 1-second/B128 runs, justified by the A100 utilization study below.
+2. Rerun all sixteen direct regressors — SimpleConv, SCv2, transformer and
+   causal GRU at each of R1/R2/R3/R4 — **in parallel** after handoff. The
+   committed configs are `real_r{1,2,3,4}_{sc,scv2,tm,gru}_unified`.
+3. Do **not** rerun salience models yet. First implement GPU salience decoding
+   and give salience models the same full-panel MAE views, aggregates, stopping
+   semantics and subset-best checkpoints. Salience reruns follow that work.
+4. The old six-run checkpoint-continuation plan is superseded. Its R4 SCv2
+   result remains diagnostic evidence, not a final matrix row.
+5. No real rerun was submitted during this implementation/handoff session.
+
+### Unified validation and stopping contract
+
+One deterministic 1,320-channel-sample panel covers the existing frozen real
+set once plus static/stochastic synthetic noise with and without matched added
+speech. R1/R2/R3 and real source-present/nosource are index views over the one
+real forward pass; nested views never reweight the aggregate or repeat
+inference. `overall_macro` gives real and synthetic aggregates equal weight;
+`overall_micro` is logged separately.
+
+Direct regressors use one GPU-vectorized MAE-optimal 4! PIT implementation,
+with the same `align_corners=False` target resampling as the benchmark tables.
+Validation is every **500 successful optimizer updates**. W&B and the durable
+JSONL log carry explicit `optimizer_step` and `validation_round`; W&B `_step`
+is never used as training work.
+
+For every primary subset/aggregate, a trailing median of five validation
+rounds is monitored on the **log scale**. A multiplicative 1% improvement in
+any primary score resets global stagnation. LR halves after eight stagnant
+rounds; saturation requires three actual reductions plus twelve final stagnant
+rounds, and cannot stop before round 30. Thus no improvement permits stopping
+after 36 rounds / 18,000 updates, with LR
+`1e-3 -> 5e-4 -> 2.5e-4 -> 1.25e-4`. The default circuit breaker is 200 rounds
+/ 100,000 updates. A still-improving run is recorded as censored; the explicit
+extension is 220 rounds / 110,000 updates.
+
+Each stable subset improvement updates its own `best_<subset>.ckpt`; R2 aliases
+are server-side copies of the already-uploaded `last.ckpt`, not repeated
+uploads. `best:<subset>@<experiment>` starts a new curriculum stage from
+weights only. Same-run continuation still restores last weights plus optimizer,
+scaler, update count and multi-monitor state.
+
+Training-time validation figures/audio are deleted from the loop. The legacy
+helpers remain available only for explicit final/on-demand inspection.
+Validation Frames are pinned, transfers are nonblocking, validation workers
+persist, metric tensors remain on GPU through aggregation, and the training
+path avoids per-batch `.item()` synchronization under FP16.
+
+### A100 benchmark evidence
+
+The complete panel takes **2.0–2.4 seconds after warm-up** (cold first pass
+about 5.2 seconds), despite containing 4.46 times the old real-only examples.
+At token-matched settings, SCv2 took 31.73 s per 500 updates at 1 s/B128 and
+31.66 s at 2 s/B64; transformer took 32.88 / 31.91 s. Two-second context
+therefore has no intrinsic throughput or memory penalty when token-matched,
+although three rounds are not an accuracy comparison.
+
+Sequential 2-second Vast A100-SXM4-80GB probes:
+
+| Model | Batch | mean / median GPU | peak reserved VRAM |
+|---|---:|---:|---:|
+| SCv2 | 128 | 87.4% / 97% | 18.9 GB |
+| SCv2 | 256 | 97.1% / 98% | 23.1 GB |
+| transformer | 128 | 94.2% / 96% | 19.0 GB |
+| transformer | 256 | 97.1% / 98% | 23.0 GB |
+| causal GRU | 128 | 95.6% / 97% | 18.7 GB |
+| causal GRU | 256 | 97.5% / 99% | 23.1 GB |
+| HCQT transformer | 128 / 256 | 89.0% / 92.2% mean | 3.5 / 7.0 GB |
+| HPPNet original CQT | 128 / 256 | 94.7% / 96.3% mean | 35.9 / **71.6 GB** |
+| HarmoF0 original | 128 / 256 | 89.3% / 93.5% mean | 13.0 / 26.7 GB |
+| MultiF0 L4 | 128 / 256 | 99.1% / 99.3% mean | 23.5 / 46.9 GB |
+
+B128 is the largest safe common setting. B256 raises direct-regressor
+utilization but is unnecessary for already-saturated salience models and
+leaves HPPNet only about 8 GB allocator headroom (73.9 GiB observed by
+`nvidia-smi`). The chosen common B128 avoids architecture-dependent effective
+batches while reaching 96–100% median utilization on the temporal regressors
+and largest salience models.
+
+One early SCv2 2 s/B128 probe produced non-finite unified MAE after 500
+updates. R² was not computed. The expanded rerun completed SCv2 B128 and B256
+for 1,000 updates each with all scores finite; every one of the fourteen
+expanded cases was finite. Non-finite exits now persist the exact offending
+subset list in `validation_history.jsonl`.
+
+The requested `uni-gpushort` replica did not produce performance data: its
+first allocation imported `training.config` from the shared environment's
+wrong worktree; a source-pinned retry remained capacity/priority blocked and
+was cancelled at this review checkpoint. Vast supplied the completed A100
+evidence above with 30.72 effective cgroup CPUs.
+
+### Verification and remaining work
+
+Focused training, metric, online-mixing, checkpoint and config suites pass;
+all 438 Hydra configs composed, and the complete validation panel
+passed real-data preflight. A 900-second full-suite pass reached 82% and exposed
+an unrelated `WindowStream.__new__` test fixture missing the constructor's
+new `min_in_grid`/`grid` fields; that fixture is repaired and its five tests
+pass. A final full-suite rerun remains for the next implementation session.
+
+The full-panel validator currently accepts direct `rps_prediction` outputs.
+The next task is the deferred salience seam: vectorized GPU decoding from
+salience/layer outputs to RPS, exact MAE-optimal PIT parity, then the same
+views/controller/checkpoint path. Do not launch salience reruns before it.

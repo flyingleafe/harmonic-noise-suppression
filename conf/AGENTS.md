@@ -17,6 +17,7 @@ Historical experiments are catalogued in `REPLICATION.md` (repo root).
 | `optim/` | Optimizer + scheduler + monitor |
 | `logging/` | wandb (entity/project; run name = `experiment_name`) |
 | `artifacts/`, `lora/` | R2 artifact uploads; LoRA seam |
+| `validation/` | Optional validation protocol. `rps_unified` freezes the complete real/static/stochastic panel, optimizer-step cadence, nested views, aggregates, log-scale progress and saturation policy; `disabled` preserves other tasks. |
 
 ## Conventions (enforced by train.py)
 
@@ -50,6 +51,12 @@ Historical experiments are catalogued in `REPLICATION.md` (repo root).
   accept `frames:NAME[@VERSION]` specs for the published rich-frame datasets.
   So any folder-based data config runs checkout-free with a one-line CLI
   override, e.g. `data.train.params.data_dir=dload:DREGON-LM-V4-train`.
+
+Unified RPS reruns inherit their historical architecture/training policy and
+override `/validation: rps_unified`. The sixteen
+`real_r{1,2,3,4}_{sc,scv2,tm,gru}_unified` configs use fresh names so
+historical W&B/R2 artifacts are never overwritten. All use 2-second training
+clips at batch 128; one validation round is 500 successful optimizer updates.
 
 ## Adding an experiment
 

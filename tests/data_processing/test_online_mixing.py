@@ -9,10 +9,13 @@ compiled dload pipeline over synthetic local-repo datasets (see
 from __future__ import annotations
 
 import itertools
+import pickle
 
 import numpy as np
+import tdseries as td
 from omegaconf import OmegaConf
 
+from data_processing.frame_datasets import FixedSynthFrameDataset
 from data_processing.frames import get_meta
 from data_processing.online_mixing import _resolve_policy, _resolve_probability
 
@@ -38,6 +41,21 @@ def _rps_cfg(**over):
     }
     cfg.update(over)
     return cfg
+
+
+def test_fixed_synthetic_validation_reuses_complete_disk_cache(tmp_path):
+    cache = tmp_path / "fixed.pkl"
+    frame = td.Frame({"feature": td.wrap(np.ones(2), dims=("feature",))})
+    with cache.open("wb") as handle:
+        pickle.dump([frame], handle)
+
+    dataset = FixedSynthFrameDataset(
+        path=tmp_path / "policy-does-not-need-to-exist.yaml",
+        n=1,
+        cache_path=cache,
+    )
+
+    np.testing.assert_array_equal(dataset[0]["feature"].data, np.ones(2))
 
 
 # ─── policy resolution (unchanged semantics) ──────────────────────────────────

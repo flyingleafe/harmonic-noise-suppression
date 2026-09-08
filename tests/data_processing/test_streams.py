@@ -11,9 +11,12 @@ test Repository.
 from __future__ import annotations
 
 import io
+import multiprocessing
+import os
 from functools import partial
 from pathlib import PurePosixPath
 
+import boto3
 import dload
 import numpy as np
 import pytest
@@ -21,7 +24,7 @@ import soundfile as sf
 import tdseries as td
 import torch
 from dload.cache import ShardCache
-from dload.remote import LocalRemote
+from dload.remote import LocalRemote, S3Remote
 from dload.repo import Repository
 
 import data_processing.streams as streams
@@ -53,6 +56,47 @@ def patched_repo(repo, monkeypatch) -> Repository:
     """Route streams.open_repository() to the tmp_path-backed Repository."""
     monkeypatch.setattr(streams, "_repository", repo)
     return repo
+
+
+@pytest.mark.skipif("fork" not in multiprocessing.get_all_start_methods(), reason="requires fork")
+def test_forked_reader_does_not_reuse_parent_s3_connections(patched_repo, monkeypatch):
+    class ProcessBoundClient:
+        def __init__(self):
+            self.owner_pid = os.getpid()
+
+        def get_object(self, **kwargs):
+            if os.getpid() != self.owner_pid:
+                raise RuntimeError("inherited a parent process connection")
+            return {"Body": io.BytesIO(b"sample payload")}
+
+    monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: ProcessBoundClient())
+    patched_repo.remote = S3Remote("https://example.invalid", "bucket", "prefix")
+    assert patched_repo.remote.get_bytes("sample") == b"sample payload"
+    context = multiprocessing.get_context("fork")
+    receive, send = context.Pipe(duplex=False)
+
+    def read_in_child():
+        try:
+            send.send(patched_repo.remote.get_bytes("sample"))
+        except Exception as exc:
+            send.send(str(exc))
+        finally:
+            send.close()
+
+    process = context.Process(target=read_in_child)
+    try:
+        process.start()
+        send.close()
+        assert receive.poll(10), "forked reader stalled"
+        assert receive.recv() == b"sample payload"
+        process.join(10)
+        assert process.exitcode == 0
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(10)
+        receive.close()
+        send.close()
 
 
 def _wav_bytes(audio_tc: np.ndarray, sr: int = SR) -> bytes:

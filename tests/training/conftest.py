@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from omegaconf import OmegaConf
+
+from training.config import EarlyStoppingConfig
 
 
 def make_tiny_config(
@@ -18,9 +21,8 @@ def make_tiny_config(
     batch_size: int = 2,
     monitor: str = "mse",
     artifacts_enabled: bool = False,
-    num_val_samples: int = 0,
     upload_checkpoints: bool = True,
-    upload_val_samples: bool = True,
+    early_stopping: dict[str, Any] | None = None,
 ) -> Any:
     """Build a minimal RootConfig-shaped ``DictConfig`` around
     ``tests.training._fixtures`` (``TinyRPSFrameDataset`` / ``TinyRPSModel``)
@@ -76,6 +78,7 @@ def make_tiny_config(
         "optimizer_params": {},
         "patience": 5,
         "factor": 0.5,
+        "cooldown": 0,
         "monitor": monitor,
         "monitor_mode": "min",
     }
@@ -84,21 +87,16 @@ def make_tiny_config(
         "entity": "test",
         "project": "test",
         "mode": "disabled",
+        "name": None,
+        "resume_id": None,
         "tags": [],
     }
-    # Disabled + num_val_samples=0 by default so ordinary loop/collate/validate
-    # tests never touch R2, the network, or the (heavier) validation-sample
-    # figure/audio-building path; tests that specifically exercise artifact
-    # upload or sample logging override "artifacts" (see
-    # tests/training/test_loop.py) or inject an ArtifactStore directly via
-    # ``run_training(cfg, artifact_store=...)``.
+    # Checkpoint upload is dependency-injected in the tests that exercise it.
     artifacts = {
         "enabled": artifacts_enabled,
         "bucket": "ml-data",
         "prefix": "artifacts",
         "upload_checkpoints": upload_checkpoints,
-        "upload_val_samples": upload_val_samples,
-        "num_val_samples": num_val_samples,
     }
     lora = {
         "enabled": False,
@@ -134,5 +132,6 @@ def make_tiny_config(
             "logging": logging,
             "artifacts": artifacts,
             "lora": lora,
+            "early_stopping": {**asdict(EarlyStoppingConfig()), **(early_stopping or {})},
         }
     )

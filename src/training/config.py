@@ -42,12 +42,14 @@ from tasks.task import TASK_FACTORIES, Task
 __all__ = [
     "DatasetSpec",
     "DataConfig",
+    "ValidationConfig",
     "ModelConfig",
     "LossTermConfig",
     "LossConfig",
     "MetricTermConfig",
     "MetricsConfig",
     "OptimConfig",
+    "EarlyStoppingConfig",
     "WandbConfig",
     "ArtifactsConfig",
     "LoraConfig",
@@ -86,7 +88,31 @@ class DataConfig:
     train: DatasetSpec = field(default_factory=DatasetSpec)
     valid: DatasetSpec = field(default_factory=DatasetSpec)
     batch_size: int | None = None
+    valid_batch_size: int | None = None
     num_workers: int | None = None
+
+
+@dataclass
+class ValidationConfig:
+    """Optional multi-dataset RPS validation and convergence protocol."""
+
+    enabled: bool = False
+    every_optimizer_steps: int = 500
+    max_optimizer_steps: int = 100_000
+    batch_size: int | None = None
+    num_workers: int | None = None
+    datasets: dict[str, DatasetSpec] = field(default_factory=dict)
+    views: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aggregates: dict[str, dict[str, float]] = field(default_factory=dict)
+    primary: list[str] = field(default_factory=list)
+    control: str = "overall_macro"
+    smoothing_window: int = 5
+    min_rounds: int = 30
+    min_relative_improvement: float = 0.01
+    lr_patience: int = 8
+    lr_factor: float = 0.5
+    min_lr_reductions: int = 3
+    final_patience: int = 12
 
 
 @dataclass
@@ -140,8 +166,38 @@ class OptimConfig:
     optimizer_params: dict[str, Any] = field(default_factory=dict)
     patience: int = 5  # ReduceLROnPlateau patience (epochs)
     factor: float = 0.5  # ReduceLROnPlateau reduce factor
+    cooldown: int = 0  # ReduceLROnPlateau cooldown (epochs after a reduction)
     monitor: str = MISSING  # metric name from metrics.terms (or "loss")
     monitor_mode: str = "min"  # "min" or "max"
+
+
+@dataclass
+class EarlyStoppingConfig:
+    """Opt-in noise-tolerant stopping policy — see ``training.stopping``.
+
+    Disabled by default, in which case the loop keeps its historical raw
+    ``RootConfig.patience`` early stop. When enabled, the median of the last
+    ``median_window`` raw monitor values drives BOTH ``ReduceLROnPlateau``
+    (``threshold_mode='abs'``, threshold re-derived every epoch) and stopping;
+    ``best.ckpt`` selection still uses the raw monitor value.
+    """
+
+    enabled: bool = False
+    median_window: int = 5  # raw validation values per smoothed check
+    min_epochs: int = 100  # absolute completed-epoch floor before stopping
+    patience: int = 30  # smoothed checks without meaningful improvement
+    min_delta_abs: float = 0.05  # meaningful improvement = max(abs, rel*|best|)
+    min_delta_rel: float = 0.01
+    min_lr_reductions: int = 2  # actual LR reductions required before stopping
+    lr_grace_epochs: int = 10  # checks since the latest reduction before stopping
+    deadline_unix: float | None = None  # wall-clock stop, checked between epochs
+    # Divergence guard (finite but sustained worsening): BOTH the raw train
+    # loss and the smoothed monitor must be worse than their best-so-far by
+    # ``diverge_rel`` (relative, floored at ``min_delta_abs``) for
+    # ``diverge_epochs`` CONSECUTIVE epochs; a single spike resets the streak.
+    # First trigger: one LR reduction (``optim.factor``); second: stop.
+    diverge_rel: float = 0.25
+    diverge_epochs: int = 5
 
 
 @dataclass
@@ -150,6 +206,8 @@ class WandbConfig:
     entity: str = "flyingleafe"
     project: str = "harmonic-noise-suppression"
     mode: str | None = None  # e.g. "disabled"/"offline" override
+    name: str | None = None
+    resume_id: str | None = None  # Must resume this existing W&B run; never fork silently.
     tags: list[str] = field(default_factory=list)
 
 
@@ -166,8 +224,6 @@ class ArtifactsConfig:
     bucket: str = "ml-data"
     prefix: str = "artifacts"
     upload_checkpoints: bool = True
-    upload_val_samples: bool = True
-    num_val_samples: int = 6
 
 
 @dataclass
@@ -207,6 +263,7 @@ class RootConfig:
     checkpoint_every: int = 0  # 0 = only best.ckpt; N>0 = also every N epochs
     checkpoint: str | None = None  # eval.py: explicit checkpoint path override
     data: DataConfig = field(default_factory=DataConfig)
+    validation: ValidationConfig = field(default_factory=ValidationConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     loss: LossConfig = field(default_factory=LossConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
@@ -214,6 +271,7 @@ class RootConfig:
     logging: WandbConfig = field(default_factory=WandbConfig)
     artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     lora: LoraConfig = field(default_factory=LoraConfig)
+    early_stopping: EarlyStoppingConfig = field(default_factory=EarlyStoppingConfig)
 
 
 def register_configs() -> None:
