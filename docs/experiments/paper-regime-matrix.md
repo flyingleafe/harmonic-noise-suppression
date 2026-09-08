@@ -1595,6 +1595,14 @@ reason). All four passed the steps at which fp16 died (R1 at 4,500, R3 at
 than fp16. The GRU column therefore differs from the other three in autocast
 dtype; it is a precision detail, disclosed here and in the configs.
 
+`real_r2_scv2` (fp16, on the one SXM4 host that ran at 135 s per round) also
+failed: its training loss rose from round 8 (7.2 → 8.8), the panel worsened
+(27.2 → 29.6), and round 10 came back non-finite at update 5,500, while the
+R1/R3/R4 SCv2 rungs were at 22–25k updates and improving. Same remedy:
+resubmitted under `amp_dtype: bfloat16` (config comment records it). Policy
+from here: a run that goes non-finite under fp16 is resubmitted under bf16
+once; a second failure is the recipe's, not the dtype's.
+
 ### Salience models now validate on the same panel
 
 The `task.name == "rps_prediction"` guard is gone. `training.validation`
