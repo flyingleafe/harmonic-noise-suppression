@@ -6,3 +6,8 @@ defaults:
 
 experiment_name: real_r3_tm_unified
 samples_per_validation: null
+batch_size: 128
+data:
+  train:
+    params:
+      duration_s: 2.0

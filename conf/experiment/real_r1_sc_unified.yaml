@@ -1,10 +1,10 @@
 # @package _global_
 defaults:
-  - real_r3_gru
+  - real_r1_sc
   - override /validation: rps_unified
   - _self_
 
-experiment_name: real_r3_gru_unified
+experiment_name: real_r1_sc_unified
 samples_per_validation: null
 batch_size: 128
 data:

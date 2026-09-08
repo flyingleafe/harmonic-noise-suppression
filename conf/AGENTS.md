@@ -53,9 +53,10 @@ Historical experiments are catalogued in `REPLICATION.md` (repo root).
   override, e.g. `data.train.params.data_dir=dload:DREGON-LM-V4-train`.
 
 Unified RPS reruns inherit their historical architecture/training policy and
-override `/validation: rps_unified`. They use fresh `*_unified` experiment
-names so historical W&B runs and R2 checkpoint prefixes are never overwritten.
-Their batch size remains 128; one validation round is 500 optimizer updates.
+override `/validation: rps_unified`. The sixteen
+`real_r{1,2,3,4}_{sc,scv2,tm,gru}_unified` configs use fresh names so
+historical W&B/R2 artifacts are never overwritten. All use 2-second training
+clips at batch 128; one validation round is 500 successful optimizer updates.
 
 ## Adding an experiment
 
