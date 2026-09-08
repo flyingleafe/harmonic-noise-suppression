@@ -299,12 +299,24 @@ b_ρk + ψ_ρk)`), with a coherent share that is a *range including zero*
 overall gain.
 
 What this campaign has **not** yet done: implement that renderer, read its
-ranges off the fitted distributions, and pass the gate — renderer output on
-the real trajectories, refitted, must land where the real clips land
-(excess ≈ 0.06 with the same residual structure and the same coherence
-plateaus on Michael's-like draws) — and then the transfer test (retrain S2,
-score the real panel). Until then the claim "samples statistically more
-similar to DREGON / MD2" is a prediction, not a result.
+ranges off the fitted distributions, and pass a three-part gate:
+
+1. *Calibration.* The new renderer's samples on the real trajectories,
+   refitted with the model that describes the new renderer, must sit at
+   excess ≈ 0 — as every correctly specified control has so far. A
+   non-zero control excess means the model, the reference or the renderer
+   is wrong; it is never a realism target.
+2. *Real-data misfit.* The extended model fitted to the 48 real clips must
+   move from the realized family's 0.13–0.16 toward its own control-
+   calibrated zero. The Gaussian arm's 0.055–0.07 is where that stands.
+3. *Held-out summary distributions.* The renderer's draws must land inside
+   the real clips' spread, per rig, on statistics the fit does not use:
+   coherence-vs-lag per order band, amplitude normalized variance and
+   residual ACF, per-microphone level/floor covariance, line profiles.
+
+Then the transfer test (retrain S2, score the real panel). Until then the
+claim "samples statistically more similar to DREGON / MD2" is a
+prediction, not a result.
 
 ## Gotchas
 
