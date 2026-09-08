@@ -1,0 +1,509 @@
+---
+title: "Fitting the stochastic rotor-noise model to real recordings"
+subtitle: "What is being minimized, why, and how the answer will be read"
+date: 2026-09-08
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    embed-resources: true
+    html-math-method: mathjax
+execute:
+  echo: false
+---
+
+## The question, and what an answer looks like {.unnumbered}
+
+Rotor-speed regressors trained on the stochastic synthetic family alone score
+8.1 rev/s MAE on the real panel; the same architectures trained with real
+audio in the mix score 2.7. Every attempt to close that gap so far has moved
+one range of the sampler at a time (floor level, comb length, band edge,
+flicker) and measured whether transfer improved. None did. That leaves two
+hypotheses standing, and they call for opposite fixes:
+
+* **H1 — wrong ranges.** The family *contains* good models of real rotor
+  noise, but the sampler rarely draws them. Fix: retune the sampler.
+* **H2 — wrong family.** No member of the family looks like real rotor noise:
+  some structural assumption (line shape, width law, common floor, Gaussian
+  statistics, independent-per-microphone realizations, …) is false. Fix:
+  change the model.
+
+The only way to separate them is to find the *best* member of the family for
+a given real recording and measure how far it still is from the recording.
+That is a **fit**. This document defines exactly what will be fitted, what
+quantity will be minimized, how the minimized number will be turned into an
+answer to H1-vs-H2, and why each engineering step of the procedure is there.
+
+Reading guide: §@sec-prereq is the textbook part (spectra, Gaussian processes,
+likelihoods, MAP). §@sec-model writes the generative model down completely.
+§@sec-objective states the objective. §@sec-scale explains how one likelihood
+number becomes "how much is explained". §@sec-procedure is the procedure and
+its engineering. §@sec-reading is what each possible outcome would mean.
+
+## Prerequisites {#sec-prereq}
+
+### Spectrogram cells as random variables {#sec-periodogram}
+
+Take one microphone's audio $x[n]$ at 16 kHz, a Hann window $w$ of 2048
+samples (128 ms) and a hop of 512. The short-time Fourier transform is
+
+$$
+X(t, f) = \sum_{n} w[n]\, x[n + 512\,t]\, e^{-2\pi i f n / 2048},
+\qquad f = 0, 1, \dots, 1024 \text{ (bins of 7.8125 Hz)} .
+$$
+
+The **periodogram** is its power, normalized so that white noise of variance
+$\sigma^2$ gives cells of mean $\sigma^2$:
+
+$$
+I(t, f) = \frac{|X(t,f)|^2}{\sum_n w[n]^2} .
+$$
+
+This is exactly the front end every RPS model in the project sees, so a
+mismatch measured on this grid is the mismatch the models experience.
+
+The key fact for everything that follows: **if $x$ is a Gaussian process**
+(any signal that is a linear filtering of white Gaussian noise — which is
+precisely what the renderer produces), then each $X(t,f)$ is a complex
+Gaussian variable with mean zero and some variance $M(t,f)$, and therefore
+
+$$
+I(t,f) \sim \operatorname{Exponential}\big(\text{mean } M(t,f)\big),
+\qquad p(I \mid M) = \frac{1}{M} e^{-I/M} .
+$$ {#eq-exp}
+
+$M(t,f)$ is the **expected periodogram**: the signal's power spectral density
+at $(t, f)$, smeared by the window. For a stationary spectrum $S(f)$ on the
+bin grid, a periodic Hann window mixes each bin with its neighbours through
+its own power response,
+
+$$
+M(f) = \tfrac16 S(f{-}1) + \tfrac23 S(f) + \tfrac16 S(f{+}1),
+$$ {#eq-kernel}
+
+because the Hann window's DFT has exactly three non-zero coefficients
+$(-\tfrac14, \tfrac12, -\tfrac14)$ and power adds their squares. A model of
+the *spectrum* must therefore be pushed through @eq-kernel before it is
+compared to the periodogram; otherwise a line narrower than a bin is
+predicted 33 % too tall at its peak and absent in its neighbours.
+
+Two approximations are being made and should be named. Adjacent frames
+overlap by 75 %, so cells one hop apart are not independent — for a Hann
+window the correlation of their *powers* is about 0.03, small enough to
+ignore. Adjacent bins are correlated more strongly (about 0.44), which does
+not bias anything below but means the effective number of independent cells
+is roughly two thirds of the count; every score is reported per cell, so this
+only affects how one would put error bars on it.
+
+### The Whittle likelihood {#sec-whittle}
+
+Given a model spectrum $M$ with parameters $\theta$, the log-likelihood of one
+cell under @eq-exp is $-\log M - I/M$. Summing over cells and flipping the
+sign gives the **Whittle negative log-likelihood**:
+
+$$
+\mathcal{L}(\theta) = \sum_{m,t,f} \left[ \frac{I_m(t,f)}{M_m(t,f;\theta)} + \log M_m(t,f;\theta) \right] .
+$$ {#eq-whittle}
+
+Read the two terms as forces on $M$: the ratio $I/M$ pushes $M$ *up* wherever
+the model predicts less power than observed (a line the model does not have
+costs $I/M \gg 1$); the logarithm pushes $M$ *down* everywhere, so the model
+cannot buy its way out by predicting huge power. The per-cell minimum is at
+$M = I$, where the cost is $1 + \log I$; a model that is *correct*, i.e. has
+$M$ equal to the true expectation, does not reach that minimum on any single
+cell (the cell is random), but reaches the smallest *expected* cost,
+$1 + \log M_{\text{true}}$. The difference between a model's expected cost and
+that floor is the Kullback–Leibler divergence between the two exponential
+laws:
+
+$$
+\mathbb{E}\!\left[\tfrac{I}{M} + \log M\right] - \big(1 + \log M_{\text{true}}\big)
+= \frac{M_{\text{true}}}{M} - 1 - \log\frac{M_{\text{true}}}{M} \;\ge\; 0 ,
+$$ {#eq-kl}
+
+zero only when $M = M_{\text{true}}$. Every excess-over-truth number in this
+document is this quantity averaged over cells: **nats per cell**, a
+unit-free measure of how wrong the model's predicted power is, on average.
+
+```{ojs}
+//| label: fig-whittle
+//| fig-cap: "The per-cell excess cost of predicting M when the truth is M_true, as a function of the ratio. Predicting half the true power costs 0.31 nats; predicting double costs 0.19; both directions are penalized, under-prediction harder."
+viewof ratioPick = Inputs.range([0.1, 5], {value: 2, step: 0.05, label: "M / M_true"})
+```
+
+```{ojs}
+{
+  const kl = r => 1/r - 1 + Math.log(r);
+  const pts = d3.range(0.1, 5.001, 0.02).map(r => ({r, kl: kl(r)}));
+  return Plot.plot({
+    width: 640, height: 300, x: {label: "M / M_true", type: "log"}, y: {label: "excess cost, nats/cell"},
+    marks: [Plot.line(pts, {x: "r", y: "kl"}), Plot.dot([{r: ratioPick, kl: kl(ratioPick)}], {x: "r", y: "kl", r: 5, fill: "crimson"}),
+            Plot.text([{r: ratioPick, kl: kl(ratioPick)}], {x: "r", y: "kl", text: d => d.kl.toFixed(3) + " nats", dy: -12})]
+  });
+}
+```
+
+Why not least squares on the spectrogram in dB? Because @eq-exp is not
+symmetric in dB: the periodogram of a *correct* model scatters by $-\ln 2 =
+-1.6$ dB at the median and has a long upper tail, so an L1/L2 fit in dB
+converges to the wrong level (the project already paid for this lesson in the
+wind-channel work). The Whittle cost is the likelihood the data actually
+follow.
+
+### Gaussian processes as priors on slow curves {#sec-gp}
+
+The renderer makes every line's log-power drift in time as a **Gaussian
+process** (GP): a random function $h(t)$ whose values at any set of times are
+jointly Gaussian with covariance
+
+$$
+\operatorname{Cov}\big(h(t), h(t')\big) = \sigma^2 \exp\!\left(-\frac{(t-t')^2}{2\tau^2}\right) ,
+$$
+
+the squared-exponential kernel: $\sigma$ is how far the curve wanders (dB),
+$\tau$ how slowly (s). On a grid of knot times $t_1 \dots t_J$ this is a
+$J \times J$ covariance matrix $K$, and a draw is $h = L z$ with $L L^\top = K$
+(the Cholesky factor) and $z \sim \mathcal{N}(0, I)$. Two consequences:
+
+* **Prior as penalty.** $-\log p(h) = \tfrac12 h^\top K^{-1} h + \text{const}
+  = \tfrac12 \|z\|^2$. Parametrizing the curve by its *whitened* coordinates
+  $z$ turns the GP prior into a plain ridge penalty, and the optimizer sees a
+  well-conditioned problem.
+* **Fixed hyperparameters.** With $\sigma, \tau$ fixed, the constant above
+  really is constant. If they were fitted jointly with $z$, the term
+  $\tfrac12 \log\det K$ would have to be included, and joint optimization of
+  latents and their own prior scale is degenerate (it drives $\sigma \to 0$).
+  So the fit holds $\sigma, \tau$ at the family's midpoints (3 dB, 1.5 s) and
+  afterwards *measures* the standard deviation and correlation time of the
+  fitted curves; those measured values are what is compared to the sampler's
+  ranges.
+
+### MAP estimation {#sec-map}
+
+The unknowns split into **parameters** $\theta$ (levels, widths, floor shape,
+gains — a few hundred numbers that the sampler draws once per clip) and
+**latent curves** $z$ (the drifts — thousands of numbers that the renderer
+draws from the GPs). Bayes:
+
+$$
+p(\theta, z \mid I) \propto p(I \mid \theta, z)\; p(z)\; p(\theta) .
+$$
+
+The **maximum a posteriori** (MAP) estimate is the $(\theta, z)$ minimizing
+$-\log p(I \mid \theta, z) - \log p(z) - \log p(\theta)$. No prior is placed on
+$\theta$ (flat), so the parameters are maximum-likelihood; the latents carry
+the GP prior. This is a *joint* MAP: it picks one drift curve per line
+instead of averaging over all curves compatible with the data (the marginal
+likelihood). The joint estimate is the appropriate one here because the
+fitted curves themselves are an output — their statistics are what gets
+compared to the sampler — and because the marginal would require integrating
+a log-power GP through an exponential likelihood, which has no closed form.
+
+One consequence to keep in mind when reading fitted curves: MAP curves are
+*smoother than truth*. Where the data barely constrain a line (a faint
+harmonic), the prior wins and the curve sits near zero; the fitted standard
+deviation of a faint line's drift underestimates the real drift.
+
+## The generative model, completely {#sec-model}
+
+This is `data_processing.stochastic_rotor_noise` written as equations, with
+the renderer's names. Rotor speeds $r_\rho(t)$, $\rho = 1..R$ (rev/s), are
+*given* — from telemetry refined against the audio's low harmonics — and are
+held fixed throughout the fit. $k$ indexes harmonic order, $m$ microphones.
+
+**Lines.** Harmonic $k$ of rotor $\rho$ is a Lorentzian line centred at
+$k\,r_\rho(t)$ with half-width at half-maximum $\gamma_{\rho k}$ and power
+$P_{\rho k}(t)$ (unit-area density times power):
+
+$$
+\ell_{\rho k}(f, t) = P_{\rho k}(t)\, \frac{1}{\pi}\frac{\gamma_{\rho k}}{(f - k r_\rho(t))^2 + \gamma_{\rho k}^2} .
+$$ {#eq-line}
+
+A Lorentzian is what a tone with a random-walk phase produces; its width is a
+*frequency* jitter, hence the linear width law
+$\gamma_{\rho k} = \gamma_{0\rho} + s_\rho\, k$ (a shaft wandering by 0.6
+rev/s widens harmonic $k$ by about $0.6k$ Hz).
+
+**Line power.** In decibels, everything is additive:
+
+$$
+10\log_{10} P_{\rho k}(t) = \underbrace{\pi_{\rho k}}_{\text{static profile}}
++ \underbrace{h_{\rho k}(t)}_{\text{GP drift}}
++ \underbrace{10\,\alpha \log_{10}\!\frac{r_\rho(t)}{80}}_{\text{speed law, } \alpha = 2.5} .
+$$ {#eq-power}
+
+The renderer builds the profile $\pi$ from a roll-off $-10 p \log_{10} k$,
+a blade-passing emphasis on every $b$-th order, per-order jitter, and a
+clip-wide mean; the fit does not need that decomposition — it estimates
+$\pi_{\rho k}$ freely, one number per line, and the roll-off / jitter are
+*read off* the fitted profile afterwards. The drift is
+$h_{\rho k} = \sqrt{\varrho}\, c_\rho + \sqrt{1-\varrho}\, e_{\rho k}$, a
+per-rotor common GP mixed with a private one; either way $h_{\rho k}$ is a GP
+with the same $\sigma, \tau$, which is how the fit treats it (the common /
+private split is again measured on the fitted curves).
+
+**Floor.** The broadband part, in dB:
+
+$$
+\begin{aligned}
+10\log_{10} B_0(f,t) &= \beta_0 + \beta(f) + b(t) + \big(\theta_0 + \theta(t)\big)\log_2\!\frac{f}{500\,\text{Hz}} , \\
+B(f,t) &= B_0(f,t) \cdot \Big[\tfrac1R \textstyle\sum_\rho \big(\tfrac{r_\rho(t)}{80}\big)^{\alpha_B} + s_0\Big] ,
+\end{aligned}
+$$ {#eq-floor}
+
+with $\beta(f)$ a smooth random curve through 14 control points spaced in
+log-frequency, $b(t)$ and $\theta(t)$ slow GPs (level and tilt drift), and a
+speed factor: the rotors' share of the floor scales like the lines, plus a
+static share $s_0$ (the recording chain's own floor, what remains when the
+rotors stop).
+
+**Microphones.** Each microphone $m$ hears the same floor and the lines of
+rotor $\rho$ through a gain $g_{m\rho}$ (drawn uniformly in $[-12, 0]$ dB):
+
+$$
+S_m(f, t) = B(f,t) + \sum_\rho g_{m\rho} \sum_k \ell_{\rho k}(f,t) .
+$$ {#eq-spectrum}
+
+**Realization.** For each microphone independently, white Gaussian noise is
+filtered in the STFT domain with gain $\sqrt{S_m}$ and overlap-added; the
+clip is then scaled to a fixed RMS. Two things follow. First, the output is
+(before the RMS scaling) a Gaussian process with spectrum $S_m$, so
+§@sec-periodogram applies and its periodogram cells are exponential with mean
+$S_m$ smeared by @eq-kernel. Second, the microphones are *independent
+realizations* — there is no cross-microphone phase relation — and the fit,
+which uses one likelihood per microphone, is blind to that assumption by
+construction. Cross-microphone structure is not part of this question.
+
+**What the fit therefore estimates**, given $r_\rho(t)$:
+
+| symbol | meaning | count (4 rotors, $K$ orders, 8 mics, $J$ knots) |
+|---|---|---|
+| $\pi_{\rho k}$ | static line levels (dB) | $4K$ |
+| $z_{\rho k}$ | whitened drift knots, $h = \sigma L z$ | $4KJ$ |
+| $\gamma_{0\rho}, s_\rho$ | width law (Hz, Hz/order) | 8 |
+| $\beta_0, \beta_{1..14}, \theta_0$ | floor level, shape, tilt | 16 |
+| $z^b, z^\theta$ | floor level / tilt drift knots | $2J$ |
+| $g_{m\rho}$ | microphone line gains (dB), mean over $m$ pinned to 0 | 32 |
+| $\alpha, \alpha_B, s_0$ | speed law (fixed at 2.5, 2.5, 0 unless a clip has speed variation) | 3 |
+
+For a 4 s crop at 30 rev/s, $K = 266$ orders reach the 8 kHz band edge and
+$J = 41$ knots (0.1 s spacing): about 45 000 numbers, 96 % of them drift
+knots, fitted to $8 \times 122 \times 1021 \approx 10^6$ periodogram cells.
+
+## The objective {#sec-objective}
+
+Put @eq-line–@eq-spectrum on the bin grid. Two details make the model
+predict the periodogram rather than the density: each line's density is
+*integrated across its bin* (the Lorentzian's antiderivative is an arctangent,
+so this is exact and cheap), which keeps a sub-bin-wide line's power right
+whatever its sub-bin position; and the whole spectrum is convolved with the
+Hann kernel @eq-kernel. Call the result $M_m(t,f;\theta,z)$. The fit
+minimizes
+
+$$
+\begin{aligned}
+J(\theta, z) \;=\;& \sum_{m}\sum_{t}\sum_{f \in \text{band}}
+\left[ \frac{I_m(t,f)}{M_m(t,f;\theta,z)} + \log M_m(t,f;\theta,z) \right] \\
+&+\; \tfrac12 \|z\|^2 \;+\; \tfrac12 \|z^b\|^2 + \tfrac12 \|z^\theta\|^2 + \tfrac12\|z^\beta\|^2
+\;+\; \tfrac{1}{2\sigma_r^2}\|\delta\|^2 ,
+\end{aligned}
+$$ {#eq-objective}
+
+term by term:
+
+* the Whittle sum @eq-whittle over the fit band (30 Hz to Nyquist; below
+  30 Hz a 16 kHz recording carries nothing and the renderer holds its floor
+  flat), all microphones, all frames of the clip;
+* the GP priors of the line drifts, the floor's level and tilt drifts, and
+  the floor's 14-point shape (a GP in log-frequency, as in the sampler);
+* optionally (variant `family_rps`) a smooth per-rotor **carrier correction**
+  $\delta_\rho(t)$ added to the given speeds, on a 0.5 s knot grid with a
+  0.3 rev/s prior. Its purpose is defensive: the references are acoustic
+  refinements, not tachometers, and an error of 0.3 rev/s misplaces
+  harmonic 100 by 30 Hz, four bins, which a fit with the correct widths would
+  otherwise have to explain by *widening* the lines. The prior keeps it a
+  correction, not a search.
+
+Nothing else is regularized. The periodogram is scaled to unit mean before
+the fit, which shifts every score of a clip by the same constant and keeps
+the arithmetic in float32 range.
+
+Reported score: the Whittle sum divided by the number of band cells,
+**nats per cell**, for the fitted model. On its own that number is
+meaningless — it depends on the clip's spectrum through $\log M$. It becomes
+meaningful against two references.
+
+## From a likelihood to "how much is explained" {#sec-scale}
+
+Two reference scores bracket every fit on the same cells:
+
+**Bottom of the scale — floor only.** The same model with all lines switched
+off, fitted to the same clip: level, shape, tilt and drifts of the floor
+alone. Its score $\mathcal{L}_\text{floor}$ is what "no comb at all"
+achieves. Anything a comb model gains is measured from here.
+
+**Top of the scale — leave-one-out smoother.** For each cell, predict its
+expectation by the mean of its four time-neighbours (same bin, same
+microphone, frames $t\pm1, t\pm2$):
+
+$$
+\hat M(t,f) = \tfrac14\big[I(t{-}2,f) + I(t{-}1,f) + I(t{+}1,f) + I(t{+}2,f)\big] .
+$$
+
+For a locally stationary process these are four replicates of the cell, so
+$\hat M$ is an unbiased estimate of $M_\text{true}$ that uses **no model at
+all**. Scoring the cell against $\hat M$ costs a little more than scoring it
+against the true $M$ because $\hat M$ is itself noisy; for exponential cells
+that bias is analytic — $\mathbb{E}[I/\hat M] = n/(n-1)$ and
+$\mathbb{E}[\log \hat M] = \log M + \psi(n) - \log n$ — and is subtracted,
+giving $\mathcal{L}_\text{LOO}$, an estimate of $1 + \log M_\text{true}$
+averaged over cells: **the score a correct model would reach**. The
+approximation is stationarity over $\pm 2$ hops (64 ms); on a ramp whose
+lines move by more than a bin over that span the smoother is optimistic,
+which is why each fit records how far its fastest in-band line moves over
+the neighbourhood and why the near-steady crops carry the headline numbers.
+
+With both, a fit with score $\mathcal{L}_\text{fit}$ yields
+
+$$
+\text{explained} = \frac{\mathcal{L}_\text{floor} - \mathcal{L}_\text{fit}}{\mathcal{L}_\text{floor} - \mathcal{L}_\text{LOO}} ,
+\qquad
+\text{excess} = \mathcal{L}_\text{fit} - \mathcal{L}_\text{LOO} \;\approx\; \overline{\mathrm{KL}}\big(\text{truth}\,\|\,\text{fit}\big) \text{ nats/cell.}
+$$
+
+*Explained* is a fraction of the way from "no comb" to "correct"; *excess* is
+the absolute residual misfit in the units of @eq-kl, which can be localized
+to cells (§@sec-diagnostics). Both are computed for every variant of the
+model on every clip, and on renderer-generated control clips where the
+answer is known (explained ≈ 1, excess ≈ 0 up to the LOO's own noise).
+
+## The procedure and its engineering {#sec-procedure}
+
+### Data {#sec-data}
+
+* **Real, near-steady:** the 27 four-second training crops of the linewidth
+  audit (17 DREGON room2, 10 Michael's FLY125), eight channels, telemetry
+  refined against the low harmonics. These carry the headline numbers.
+* **Real, full regime:** the `nosource` clips of the frozen validation split
+  (DREGON room1 with *measured* shaft rate, Michael's FLY124), eight seconds
+  each, including stopped rotors, spin-ups and ramps — the frames where
+  synthetic-only models fail worst. Refined the same way where the rotors
+  turn; telemetry otherwise.
+* **Synthetic controls:** renderer draws on the real trajectories, with the
+  planted parameters kept. A fit that cannot recover planted widths and
+  profiles on these says nothing about real audio.
+
+### Initialization {#sec-init}
+
+@eq-objective is not convex: a line placed on the wrong neighbour, a width
+twice too large, a floor that has swallowed the comb are all local minima.
+The starting point is therefore chosen from the data, crudely but safely:
+
+* floor level from the 20th percentile of the periodogram over time in each
+  bin (+6.5 dB, the exponential law's correction for a 20th percentile:
+  between lines the floor dominates and lines move, so the percentile sees
+  the floor);
+* each line's level from the median periodogram at its centre bin minus the
+  floor, divided by the peak density a line of the starting width has;
+* widths at the family's midpoint ($\gamma_0 = 2$ Hz, $s = 0.3$ Hz/order),
+  gains 0 dB, all drifts zero.
+
+### Stages {#sec-stages}
+
+1. **Floor only** (lines off) — Adam then L-BFGS. Its optimum *is* the
+   floor-only reference of §@sec-scale; nothing is fitted twice.
+2. **Harmonic ladder** — lines on up to order 16, then 48, then all, 150
+   Adam steps per rung. Low orders are well resolved (a 0.3 rev/s carrier
+   error is 5 Hz at $k=16$, under a bin) and anchor the width law and any
+   carrier correction before the crowded high orders — where neighbouring
+   rotors' lines overlap and a wrong carrier can be traded for a wider line —
+   are allowed to pull.
+3. **Polish** — all parameters, 300 Adam steps, then 60 L-BFGS iterations
+   with a strong-Wolfe line search for the last digits.
+
+Adam is used first because the parameters live on very different scales
+(decibels, hertz, whitened knots) and its per-coordinate step handles that
+without hand-tuned preconditioning; L-BFGS finishes because near the optimum
+its curvature model converges far faster than a first-order method.
+
+### Cost and where it runs {#sec-compute}
+
+The expensive tensor is the line spectrum before summing over orders:
+rotors × orders × frames × bins = $4 \times 266 \times 122 \times 1025
+\approx 1.3\times10^8$ values per evaluation, with gradients. It is
+evaluated in chunks of 32 orders on a GPU; one iteration takes well under a
+second on a P100/T4, so one variant of one clip takes a few minutes. The fits
+run as omnirun jobs on Kaggle/Colab from a slim source snapshot (the job
+imports only this package; the renderer and the tracker run once, on a CPU
+job, to build the clip bundle on R2). The laptop is not used for the
+optimization.
+
+### Variants: one structural change at a time {#sec-variants}
+
+Every variant is the family plus exactly one relaxation, so its gain over
+`family_rps` is the price of that one assumption:
+
+| variant | what changes | which assumption it tests |
+|---|---|---|
+| `family` | nothing | the family as the sampler draws it |
+| `family_rps` | + carrier correction $\delta_\rho(t)$ | reference accuracy (a nuisance, removed before reading the rest) |
+| `free_gamma` | $\gamma_{\rho k}$ free per line (smooth in $k$) | the linear width law $\gamma_0 + s k$ |
+| `gauss` | Gaussian line of the same HWHM | the Lorentzian shape (a Gaussian is what *speed* jitter within a frame produces; a Lorentzian is phase jitter) |
+| `mic_floor` | + per-microphone floor offset | the common floor |
+| `speed_law` | $\alpha, \alpha_B, s_0$ fitted | the $r^{2.5}$ law and the static floor share (only identifiable on ramps) |
+| `extended` | all of the above | the most the family's *shape* can be stretched — the ceiling of H1-style fixes |
+
+### Diagnostics: where the excess lives {#sec-diagnostics}
+
+The fitted spectrum gives a residual field $\;R_m(t,f) = I_m(t,f) / M_m(t,f)$,
+which under a correct model is exponential with mean 1 everywhere and no
+structure. Its structure, read along the fitted lines, localizes the misfit:
+
+* **Line profile.** $R$ sampled at offsets $d$ from each line centre, in
+  units of that line's fitted $\gamma$, averaged over time, microphones and
+  the lines of an order band (1–8, 9–24, 25–64, 65+). A peak at $d = 0$ with
+  troughs at the shoulders means the true line is *narrower* or *sharper*
+  than the Lorentzian fitted to it (a coherent core); the opposite, wider.
+  This is the direct test of the linewidth question the 2026-09-06 audits
+  could not settle.
+* **Temporal structure.** Autocorrelation of $\log R$ at line centres over
+  frames. A correct drift model leaves white residuals; slow structure means
+  the GP's $\tau$ or $\sigma$ are wrong, or the drift is not Gaussian.
+* **Coherence.** The normalized variance of $R$ at line centres,
+  $\operatorname{Var}(R)/\mathbb{E}[R]^2$, is 1 for exponential cells and
+  drops toward 0 for a steady tone in noise (Rician). Per order band, this
+  measures how much of each harmonic is a *tone* rather than narrowband
+  noise — the `stochastic` vs `coherent` line-mode question, as a number per
+  order, calibrated on the synthetic controls.
+* **Between the lines.** Mean $R$ at the midpoints between adjacent orders,
+  against frequency: floor shape errors. And at half-integer orders: lines
+  the family does not have.
+* **Per microphone.** Mean $R$ per microphone on line cells versus floor
+  cells: whether an 8-channel real recording has a common floor.
+* **Fitted parameters against the sampler.** Roll-off $p$ and jitter from a
+  regression of $\pi_{\rho k}$ on $\log_{10} k$; $\gamma_0, s$; floor level
+  under the median line peak; the standard deviation and correlation time of
+  the fitted $h_{\rho k}(t)$; the common/private variance split; microphone
+  gain spread; tilt — each placed against the range the sampler draws it
+  from.
+
+### Controls that must pass first {#sec-controls}
+
+On the synthetic clips: planted $\gamma_0, s$, profile roll-off and microphone
+gains recovered within their identifiable precision; explained fraction at
+1 within the LOO's noise; residual profile flat. If these fail, the procedure
+— not the family — is wrong, and nothing from real clips is read.
+
+## Reading the outcome {#sec-reading}
+
+| observation on real clips | reading | consequence |
+|---|---|---|
+| `family` explains ≳ 0.9 with a flat residual profile, and the fitted parameters fall *outside* the sampler's ranges | H1: right family, wrong ranges | retune the ranges from the fitted distributions; posterior-predictive check; retrain S2 |
+| `family` explains ≳ 0.9 and the fitted parameters fall *inside* the ranges | the spectrum is not where the transfer gap is | the gap is in what the Whittle fit is blind to: cross-microphone structure, non-Gaussian statistics (coherence), or the trajectory distribution — the coherence diagnostic and the array are next |
+| `family` leaves a large excess but one variant (`free_gamma`, `gauss`, `mic_floor`) removes most of it | H2, localized | that structural change goes into the renderer; the fitted parameters then say the ranges |
+| even `extended` leaves a large, structured excess | H2, unlocalized within this family | the residual profile / half-order / coherence diagnostics say what kind of component is missing; the family is not the model of real rotor noise |
+
+"Large" is calibrated by the synthetic controls' own excess and by the KL
+scale of @eq-kl: 0.1 nats/cell is a 60 % power error on every cell, or a
+factor of 10 on one cell in fifteen.
