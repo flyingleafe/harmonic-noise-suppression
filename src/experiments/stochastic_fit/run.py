@@ -17,6 +17,7 @@ outputs are skipped.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import io
 import json
 import os
@@ -51,9 +52,15 @@ VARIANTS: dict[str, dict[str, Any]] = {
 
 
 def r2_client():
-    from dotenv import load_dotenv
-
-    load_dotenv(Path(".env")) if Path(".env").exists() else None
+    env = Path(".env")
+    if env.exists():  # the job ships .env; parse it without depending on python-dotenv
+        for line in env.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(
+                    key.strip().removeprefix("export "), value.strip().strip("'\"")
+                )
     return boto3.client(
         "s3",
         endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
@@ -101,10 +108,16 @@ def prepare(args: argparse.Namespace) -> None:
 
     client = r2_client()
     manifest: list[dict[str, Any]] = []
+    # incremental: the refs, the validation clips and the controls are uploaded in separate runs
+    with contextlib.suppress(client.exceptions.NoSuchKey):
+        manifest = json.loads(
+            client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
+        )
 
     def put(clip: Clip) -> None:
         key = f"{PREFIX}/{clip.clip_id}.npz"
         client.put_object(Bucket=BUCKET, Key=key, Body=clip_to_bytes(clip))
+        manifest[:] = [m for m in manifest if m["clip_id"] != clip.clip_id]
         manifest.append(
             dict(
                 clip_id=clip.clip_id,
@@ -112,6 +125,7 @@ def prepare(args: argparse.Namespace) -> None:
                 key=key,
                 duration_s=clip.duration_s,
                 rps_median=np.median(clip.rps, axis=1).round(2).tolist(),
+                refinement=clip.meta.get("refinement"),
             )
         )
         print(f"  uploaded {key}", flush=True)
