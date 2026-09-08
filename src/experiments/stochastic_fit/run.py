@@ -235,8 +235,9 @@ def fit(args: argparse.Namespace) -> None:
         manifest = manifest[i::n]
     variants = {k: VARIANTS[k] for k in args.variants}
     print(f"{len(manifest)} clips x {list(variants)}", flush=True)
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    summary_path = RESULTS / f"summary_{args.tag}.json"
+    results = Path(args.results_dir)
+    results.mkdir(parents=True, exist_ok=True)
+    summary_path = results / f"summary_{args.tag}.json"
     rows: list[dict[str, Any]] = (
         json.loads(summary_path.read_text()) if summary_path.exists() else []
     )
@@ -244,7 +245,7 @@ def fit(args: argparse.Namespace) -> None:
         clip = clip_from_bytes(client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read())
         pg = periodogram(clip)
         for name, variant in variants.items():
-            out = RESULTS / name / f"{clip.clip_id}.npz"
+            out = results / name / f"{clip.clip_id}.npz"
             if out.exists():
                 continue
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -330,6 +331,7 @@ def main(argv: list[str] | None = None) -> None:
     f.add_argument("--k-cap", type=int, default=300)
     f.add_argument("--iters", nargs=4, type=int, default=[150, 150, 300, 60])
     f.add_argument("--tag", default="run")
+    f.add_argument("--results-dir", default=str(RESULTS))
     f.set_defaults(func=fit)
     args = ap.parse_args(argv)
     args.func(args)

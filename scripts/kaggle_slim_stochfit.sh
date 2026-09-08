@@ -38,11 +38,17 @@ git --work-tree="$SLIM" add -A
 TREE=$(git write-tree)
 COMMIT=$(echo "kaggle slim snapshot of experiments.stochastic_fit @ $(git rev-parse --short HEAD)" | git commit-tree "$TREE")
 unset GIT_INDEX_FILE
-git branch -f "$BRANCH" "$COMMIT"
-git push -q -f origin "$BRANCH"
 rm -rf "$SLIM"
 MAIN=$(git rev-parse --path-format=absolute --git-common-dir); MAIN=${MAIN%/.git}
 WT="$MAIN/.worktrees/$BRANCH"
-if [ -d "$WT" ]; then git -C "$WT" checkout -q --detach "$COMMIT" && git -C "$WT" checkout -q -B "$BRANCH"; else git -C "$MAIN" worktree add "$WT" "$BRANCH" >/dev/null; fi
+if [ -d "$WT" ]; then
+  git -C "$WT" checkout -q --detach "$COMMIT"   # release the branch, then move it
+  git branch -f "$BRANCH" "$COMMIT"
+  git -C "$WT" checkout -q "$BRANCH"
+else
+  git branch -f "$BRANCH" "$COMMIT"
+  git -C "$MAIN" worktree add "$WT" "$BRANCH" >/dev/null
+fi
+git push -q -f origin "$BRANCH"
 [ -e "$WT/.env" ] || ln -s ../../.env "$WT/.env"
 echo "$WT @ $(git rev-parse --short "$COMMIT")"
