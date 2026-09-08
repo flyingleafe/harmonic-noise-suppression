@@ -459,6 +459,48 @@ def fitted_parameter_summary(res: FitResult) -> dict[str, Any]:
     )
 
 
+def phase_diagnostics(
+    res: FitResult, lags: tuple[int, ...] = (1, 2, 3, 4, 6, 8, 12, 16)
+) -> dict[str, Any]:
+    """Lag coherence along isolated lines per order band (tested estimator,
+    :mod:`.phase_stats`), the Lorentzian prediction at the band's median
+    fitted width, and the centre regressions on speed deviation / sub-bin
+    offset. Needs the clip's audio (bundle cache)."""
+    from .phase_stats import centre_regressions, lag_coherence, lorentzian_lag_prediction
+
+    clip = load_clip_cached(res.clip_id)
+    cells = line_cells(res)
+    bins = np.clip(np.rint(cells["centre"] / res.df).astype(int), 0, res.freqs.size - 1)
+    carrier = res.carrier
+    dev = 100.0 * (
+        carrier[cells["rotor"], cells["frame"]] / carrier.mean(axis=1)[cells["rotor"]] - 1.0
+    )
+    sub_bin = np.abs(cells["centre"] / res.df - np.rint(cells["centre"] / res.df))
+    log_r = np.log(np.maximum(res.residual[:, cells["frame"], bins], 1e-9)).mean(axis=0)
+    out: dict[str, Any] = dict(lags=list(lags), bands={})
+    R = carrier.shape[0]
+    for b, name in enumerate(BAND_NAMES):
+        sel = (cells["band"] == b) & cells["isolated"]
+        if sel.sum() < 50:
+            continue
+        tracks = []
+        for r in range(R):
+            for k in np.unique(cells["order"][sel & (cells["rotor"] == r)]):
+                s2 = sel & (cells["rotor"] == r) & (cells["order"] == k)
+                tracks.append((cells["frame"][s2], cells["centre"][s2]))
+        lc = lag_coherence(clip.audio, tracks, lags)
+        gamma_med = float(np.median(cells["gamma"][sel]))
+        out["bands"][name] = dict(
+            coherence=lc.coherence.tolist(),
+            null=lc.null.tolist(),
+            n_pairs=lc.n_pairs.tolist(),
+            gamma_median_hz=gamma_med,
+            lorentzian_prediction=lorentzian_lag_prediction(gamma_med, np.asarray(lags)).tolist(),
+            regressions=centre_regressions(log_r[sel], dev[sel], sub_bin[sel]),
+        )
+    return out
+
+
 def analyse(path: Path) -> dict[str, Any]:
     """Every diagnostic of one result file, JSON-serializable."""
     res = FitResult.load(path)
@@ -478,5 +520,6 @@ def analyse(path: Path) -> dict[str, Any]:
         coherence=plain(coherence_by_band(res)),
         floor=plain(between_lines(res)),
         params=fitted_parameter_summary(res),
+        phase=phase_diagnostics(res),
         planted=res.meta.get("planted"),
     )
