@@ -42,6 +42,10 @@ FLOOR_SHAPE_N_CTRL = 14
 AMP_RPS_REF = 80.0
 HANN_POWER_KERNEL = (1.0 / 6.0, 2.0 / 3.0, 1.0 / 6.0)
 GAMMA_FLOOR_HZ = 0.05
+#: The renderer floors every half width at 0.6 bins (``GAMMA_MIN_BINS``) so a
+#: sub-bin line keeps its power; the family's *realized* spectra carry that
+#: floor, and so does the model unless ``gamma_min_bins`` is set to 0.
+GAMMA_MIN_BINS = 0.6
 
 
 @dataclass
@@ -73,6 +77,11 @@ class Spec:
     rps_offset_dt_s: float = 0.5
     amp_rps_exponent: float = 2.5
     window_kernel: bool = True
+    gamma_min_bins: float = GAMMA_MIN_BINS
+    #: The renderer samples each line's density at the bin centres
+    #: (``line_bin_integrate=False`` in every training stream); ``True`` uses
+    #: the exact bin integral instead (the renderer's optional route).
+    line_bin_integrate: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -226,11 +235,12 @@ class CombSpectrum(nn.Module):
     @property
     def gamma(self) -> Tensor:
         """``(R, K)`` half widths in Hz."""
+        floor = max(GAMMA_FLOOR_HZ, self.spec.gamma_min_bins * self.df)
         if self.spec.free_gamma:
-            return torch.exp(self.log_gamma_free).clamp_min(GAMMA_FLOOR_HZ)
+            return torch.exp(self.log_gamma_free).clamp_min(floor)
         g0 = torch.nn.functional.softplus(self.gamma0_raw)
         sl = torch.nn.functional.softplus(self.slope_raw)
-        return (g0[:, None] + sl[:, None] * self.k[None, :]).clamp_min(GAMMA_FLOOR_HZ)
+        return (g0[:, None] + sl[:, None] * self.k[None, :]).clamp_min(floor)
 
     @property
     def h_db(self) -> Tensor:
@@ -292,12 +302,18 @@ class CombSpectrum(nn.Module):
         return power
 
     def _line_density(self, d: Tensor, gamma: Tensor) -> Tensor:
-        """Bin-integrated unit-area line density at signed offsets ``d`` (Hz)."""
-        half = 0.5 * self.df
+        """Unit-area line density at signed offsets ``d`` (Hz): the renderer's
+        point sample at the bin centre, or the exact bin integral."""
         if self.spec.line_shape == "gauss":
             sigma = gamma / math.sqrt(2.0 * math.log(2.0))
+            if not self.spec.line_bin_integrate:
+                return torch.exp(-0.5 * (d / sigma) ** 2) / (sigma * math.sqrt(2.0 * math.pi))
+            half = 0.5 * self.df
             s2 = sigma * math.sqrt(2.0)
             return 0.5 * (torch.erf((d + half) / s2) - torch.erf((d - half) / s2)) / self.df
+        if not self.spec.line_bin_integrate:
+            return gamma / (math.pi * (d * d + gamma * gamma))
+        half = 0.5 * self.df
         return (torch.atan((d + half) / gamma) - torch.atan((d - half) / gamma)) / (
             math.pi * self.df
         )

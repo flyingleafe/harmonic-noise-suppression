@@ -293,13 +293,15 @@ knots, fitted to $8 \times 122 \times 1021 \approx 10^6$ periodogram cells.
 
 ## The objective {#sec-objective}
 
-Put @eq-line–@eq-spectrum on the bin grid. Two details make the model
-predict the periodogram rather than the density: each line's density is
-*integrated across its bin* (the Lorentzian's antiderivative is an arctangent,
-so this is exact and cheap), which keeps a sub-bin-wide line's power right
-whatever its sub-bin position; and the whole spectrum is convolved with the
-Hann kernel @eq-kernel. Call the result $M_m(t,f;\theta,z)$. The fit
-minimizes
+Put @eq-line–@eq-spectrum on the bin grid exactly as the renderer does:
+each line's density is sampled at the bin centres and its half width floored
+at 0.6 bins (4.7 Hz), which is what every training stream renders — a
+sub-bin line is *represented* at bin resolution, so the family's realized
+spectra carry that floor and the model must too (the exact bin integral is
+available as an option, and the `free_gamma` variant lifts the width law
+altogether). Then the whole spectrum is convolved with the Hann kernel
+@eq-kernel, so the model predicts the periodogram rather than the density.
+Call the result $M_m(t,f;\theta,z)$. The fit minimizes
 
 $$
 \begin{aligned}
