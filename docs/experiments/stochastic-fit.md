@@ -125,16 +125,104 @@ Per-clip numbers: `results/stochastic_fit/summary_family.json` of the job.
   is a selection-biased sliver; the `mic_floor` ablation is the evidence.)
 - Half-order residual 1.05–1.17 at orders 1–8: a little sub-harmonic content.
 
-### Ablations (in flight)
+### Ablations on the 27 crops (`stochfit-var-crops-7c047a`)
 
-Kaggle jobs `stochfit-var-crops-7c047a` (27 crops × `family_rps`, `mic_floor`,
-`sharp`, `gauss`, `free_gamma`, `drift6`, `extended`) and `stochfit-var-valid`
-(23 validation clips × `family_rps`, `mic_floor`, `sharp`, `speed_law`,
-`extended`; controls at the 6 dB drift prior). Results to follow.
+Excess over the LOO reference, nats/cell, median over clips; Δ against
+`family_rps` (median, min–max over clips):
 
-## Conclusion
+| variant | one change | FLY125 excess | Δ | DREGON room2 excess | Δ |
+|---|---|---:|---:|---:|---:|
+| `family` | — | 0.307 | +0.008 | 0.333 | +0.012 |
+| `family_rps` | + carrier correction | 0.299 | 0 | 0.314 | 0 |
+| `sharp` | no width floor, bin-integrated | 0.271 | −0.022 (−0.043..+0.004) | 0.315 | −0.002 |
+| **`gauss`** | **Gaussian line of equal HWHM** | **0.069** | **−0.232 (−0.246..−0.179)** | **0.079** | **−0.243 (−0.263..−0.201)** |
+| `free_gamma` | width free per order | 0.285 | −0.008 | 0.304 | −0.009 |
+| `mic_floor` | per-mic floor offset | 0.290 | −0.001 | 0.319 | −0.006 |
+| `drift6` | 6 dB drift prior | 0.297 | −0.002 | 0.310 | −0.004 |
+| `extended` | all of the above but Lorentzian | 0.241 | −0.051 | 0.285 | −0.027 |
 
-Pending the ablations.
+One change accounts for ~80 % of the misfit on both rigs and on every clip
+(the Δ range never crosses −0.18): the **Lorentzian line shape**. Sub-bin
+widths, a free width law, per-microphone floors and a looser drift prior
+each buy ≤ 0.02, even combined. Fitted carrier corrections are large
+(rms 0.7 rev/s on FLY125, 1.3 on room2 — the room2 references are refined
+commanded speeds) but buy only 0.01–0.02.
+
+Caveats on reading the `gauss` arm as a physical parameter fit: it keeps
+the renderer's 0.6-bin width floor and a free γ₀ (median γ₀ 3.3 Hz on FLY125
+but 22.8 Hz on room2, where buried rotors take arbitrary widths), so its
+slope is not yet a clean estimator of a shared shaft jitter — see
+"Interpretation" below. Pending: `gauss` on the Lorentzian renderer controls
+(must lose to `family`), `gauss` on room1/FLY124, and the Gaussian
+combinations (`gauss_sharp`, `gauss_mic`, `gauss_drift6`, `gauss_free`,
+`gauss_all`) for the remaining 0.07 (job `stochfit-gauss`).
+
+### Phase statistics along the lines (tested estimator, `phase_stats.py`)
+
+Normalized complex cross-correlation of the STFT evaluated at each line's
+exact centre (frame-start reference; reading the nearest bin flips the phase
+by π at every bin change — the first ad-hoc pass did that and its numbers
+are superseded), carrier phase advance removed, lags in hops of 32 ms;
+isolated lines, runs ≥ 8 frames, pooled per band; the phase-scrambled null
+beside it. A tone with Wiener phase (Lorentzian line) follows the
+window-smoothed autocorrelation (`lorentzian_lag_prediction`, pinned by
+`tests/experiments/test_stochastic_fit_phase_stats.py` together with the
+white-noise overlap curve, the tone-in-noise plateau and a bin-crossing
+chirp); a coherent tone plus noise plateaus at the tone's share of the bin
+power.
+
+| orders 1–8 | lag 1 | 2 | 3 | 4 | 6 | 8 | 12 | 16 | null |
+|---|---|---|---|---|---|---|---|---|---|
+| FLY125 (8 clips) | 0.97 | 0.92 | 0.86 | 0.81 | 0.76 | 0.70 | 0.56 | 0.61 | 0.08 |
+| FLY124 (7) | 0.92 | 0.76 | 0.72 | 0.65 | 0.57 | 0.57 | 0.64 | 0.63 | 0.08 |
+| DREGON room2 (5) | 0.66 | 0.29 | 0.25 | 0.26 | 0.18 | 0.18 | 0.23 | 0.13 | 0.10–0.21 |
+| renderer controls (2) | 0.69 | 0.22 | 0.17 | 0.18 | 0.18 | 0.24 | 0.07 | 0.09 | 0.05–0.17 |
+| Lorentzian at the fitted γ (4.7 Hz) | 0.79 | 0.40 | 0.15 | 0.05 | 0.01 | 0 | 0 | 0 | |
+
+Orders 9–24: DREGON room1 0.76 / 0.52 / 0.48 / 0.51 / 0.55 / 0.39 / 0.32 /
+0.30 (null 0.09–0.20); FLY125 and FLY124 0.3–0.5 with nulls 0.1–0.3 (few
+isolated runs); no band above 24 has enough isolated runs.
+
+Reading: on both Michael's flights the low harmonics are coherent tones
+carrying ≈ 0.6 of their bin power (a plateau eight times the null, where a
+Lorentzian of the fitted width has decayed to zero by lag 6); DREGON room2's
+low harmonics are stochastic and broad with at most a marginal coherent
+share (0.1–0.15 above a null of 0.1–0.2); room1's mid orders show a
+plateau of 0.3–0.5. The earlier claim "FLY124 decays like a narrow line"
+came from the bin-jump artefact and is withdrawn.
+
+Centre regressions of `log R` on the rotor's in-clip speed deviation:
+slopes −0.09…+0.15 nats per 1 % on every group/band, |corr| ≤ 0.09; on the
+sub-bin offset +0.1…+0.4 with the same sign and size on the controls
+(the model's bin-centre sampling). Neither explains the normalized
+variance of 1.3–4; the in-clip speed range (±1–2 %) has little leverage on
+the across-speed law, which the `speed_law` arm on the ramp clips tests.
+
+### Interpretation: the phase-increment model, two regimes
+
+The tracker's generative model (`phase_increment_tracker.py`, WP18 of
+`rps-refine-precision.md`) is `θ_k = k·φ + b_k + ψ_k` with `φ` the shaft
+phase (`r_label + δr`, the ~0.6 rev/s label-invisible jitter) and `b_k` a
+per-harmonic phase diffusion (bench: HWHM 0.042 Hz/order, i.e.
+`q_k = 4π·0.042·k` rad²/s). A tone with Wiener phase has an exactly
+Lorentzian line (HWHM = q/4π) — the family's Cauchy shape is the transform
+of `b_k`, not an extra assumption. But the *shaft* term is band-limited
+(τ_c ≳ a frame): a tone whose frequency wanders slowly has a line equal to
+the distribution of its instantaneous frequency — Gaussian, width ∝ k·σ_r
+— the quasi-static FM regime; only when the phase variance accumulates
+linearly (τ ≫ τ_c, or true diffusion) does the shape become Lorentzian
+(width ∝ k²σ_r²τ_c). The general line is their convolution (Voigt). The
+`gauss` result says real harmonics sit in the quasi-static regime at this
+front end: coherent tones on one slowly wandering shaft, whose 1/d² skirts
+the family wrongly puts between the lines. The per-harmonic diffusion is
+the only Lorentzian left and is sub-bin below k ≈ 60.
+
+WP18's caveats carry over: the rank-one (shaft/arrival-time) plus diagonal
+covariance of the rate opinions explained only 12–27 % of the off-diagonal
+energy and the common term was unresolved on DREGON / marginal on Michael's
+and predominantly per-microphone — so the three-term decomposition is the
+coordinate system for the generative model, not a validated covariance;
+its loadings are to be fitted, not assumed.
 
 ## Gotchas
 
