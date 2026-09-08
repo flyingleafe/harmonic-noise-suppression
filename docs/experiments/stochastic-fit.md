@@ -84,7 +84,9 @@ fraction):
 | renderer controls | 4 | 1.02 (1.01–1.07) | −0.006 (−0.02–0.00) | 0.30 |
 
 The leftover ≈ 0.3 nats/cell is nearly constant within a group — a
-structural misfit, not a bad draw. On the KL scale (`r − 1 − log r`, r =
+structural misfit, not a bad draw. **Read with the correction under
+"Ablations": this arm carries full Lorentzian skirts the renderer never
+produces; the realized family's excess is 0.13–0.16 (explained 0.74–0.87).** On the KL scale (`r − 1 − log r`, r =
 true/model mean) 0.3 nats is what a 2× under-prediction or a 2.5×
 over-prediction on *every* cell would cost; direction matters, and the
 diagnostics below say which cells carry it.
@@ -141,12 +143,36 @@ Excess over the LOO reference, nats/cell, median over clips; Δ against
 | `drift6` | 6 dB drift prior | 0.297 | −0.002 | 0.310 | −0.004 |
 | `extended` | all of the above but Lorentzian | 0.241 | −0.051 | 0.285 | −0.027 |
 
-One change accounts for ~80 % of the misfit on both rigs and on every clip
-(the Δ range never crosses −0.18): the **Lorentzian line shape**. Sub-bin
-widths, a free width law, per-microphone floors and a looser drift prior
-each buy ≤ 0.02, even combined. Fitted carrier corrections are large
-(rms 0.7 rev/s on FLY125, 1.3 on room2 — the room2 references are refined
-commanded speeds) but buy only 0.01–0.02.
+Sub-bin widths, a free width law, per-microphone floors and a looser drift
+prior each buy ≤ 0.02, even combined; the line shape is the only lever.
+Fitted carrier corrections are large (rms 0.7 rev/s on FLY125, 1.3 on room2
+— the room2 references are refined commanded speeds) but buy only 0.01–0.02.
+
+**Correction (job `stochfit-trunc-82ef61`): the `family` arm above is not the
+family as rendered.** `build_psd` renders each line over a power-of-two
+bucket of ≥ 5γ half widths and renormalizes by the fixed 87.4 % (so a
+realized line has *no* skirt beyond 5–10 γ and slightly more than unit
+area). Arms reproducing that (`family_bucket*`) and a clean ±5γ cut
+(`family_trunc*`), same clips:
+
+| arm | line | FLY125 excess | DREGON room2 excess |
+|---|---|---:|---:|
+| `family_rps` | full Lorentzian skirts | 0.299 | 0.314 |
+| `family_bucket_rps` | **the renderer's realized line** | **0.133** | **0.161** |
+| `family_trunc_rps` | Lorentzian cut at ±5γ | 0.119 | 0.07–0.15 (one clip NaN) |
+| `gauss` | Gaussian, equal HWHM | 0.069 | 0.079 |
+| controls (4) | all Lorentzian arms | −0.004…−0.007 | |
+
+So the family *as trained on* explains 0.87 (FLY125) / 0.74 (room2) of the
+way from floor-only to correct, not 0.68 / 0.45: the full-skirt arm
+overstated its misfit by half, and about half of the "Gaussian gain" was
+the skirt clipping the renderer already does. The Gaussian still halves
+the realized family's remaining excess (0.13–0.16 → 0.07–0.08) on every
+clip — the largest single term — and the part it leaves is what the
+Gaussian combinations probe. (The full-skirt model is indistinguishable on
+the controls because their lines are wide, so the clipped tail is small
+against the floor; on real audio there is no skirt power between the
+lines at all.)
 
 Caveats on reading the `gauss` arm as a physical parameter fit: it keeps
 the renderer's 0.6-bin width floor and a free γ₀ (median γ₀ 3.3 Hz on FLY125
@@ -212,10 +238,11 @@ the distribution of its instantaneous frequency — Gaussian, width ∝ k·σ_r
 — the quasi-static FM regime; only when the phase variance accumulates
 linearly (τ ≫ τ_c, or true diffusion) does the shape become Lorentzian
 (width ∝ k²σ_r²τ_c). The general line is their convolution (Voigt). The
-`gauss` result says real harmonics sit in the quasi-static regime at this
-front end: coherent tones on one slowly wandering shaft, whose 1/d² skirts
-the family wrongly puts between the lines. The per-harmonic diffusion is
-the only Lorentzian left and is sub-bin below k ≈ 60.
+`gauss` result says real harmonics sit closer to the quasi-static regime at
+this front end than the family's lines do: the realized family already
+clips its skirts at 5–10 γ, and the Gaussian's faster fall-off still halves
+the remaining excess. The per-harmonic diffusion is the only Lorentzian
+left and is sub-bin below k ≈ 60.
 
 WP18's caveats carry over: the rank-one (shaft/arrival-time) plus diagonal
 covariance of the rate opinions explained only 12–27 % of the off-diagonal
