@@ -1,3 +1,15 @@
-# real_r1_gru_unified
+---
+experiment: real_r1_gru_unified
+training_config: conf/experiment/real_r1_gru_unified.yaml
+batch: docs/experiments/paper-regime-matrix.md
+---
 
-Fresh R1 causal-GRU run using 2-second clips, batch 128, PIT-MSE training, and the complete unified RPS validation/stopping protocol. It is one member of the parallel R1–R4 regressor rerun matrix.
+# `real_r1_gru_unified`
+
+## Motivation
+
+Fresh R1 causal-GRU rerun with 2-second clips, batch 128, PIT-MSE and the unified full-panel validation/stopping protocol.
+
+## Conclusion
+
+Not run. Authorized as one of the sixteen parallel R1–R4 regressor reruns after handoff.

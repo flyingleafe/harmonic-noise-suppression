@@ -1,3 +1,15 @@
-# real_r3_gru_unified
+---
+experiment: real_r3_gru_unified
+training_config: conf/experiment/real_r3_gru_unified.yaml
+batch: docs/experiments/paper-regime-matrix.md
+---
 
-Fresh R3 causal-GRU rerun with 2-second clips, batch 128 and PIT-MSE objective. Uses the complete GPU-batched validation panel every 500 optimizer updates, log-smoothed any-subset stopping, and subset-specific stable-best checkpoints.
+# `real_r3_gru_unified`
+
+## Motivation
+
+Fresh R3 causal-GRU rerun with 2-second clips, batch 128, PIT-MSE and the unified full-panel validation/stopping protocol.
+
+## Conclusion
+
+Not run. Authorized as one of the sixteen parallel R1–R4 regressor reruns after handoff.

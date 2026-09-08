@@ -1560,7 +1560,7 @@ evidence above with 30.72 effective cgroup CPUs.
 ### Verification and remaining work
 
 Focused training, metric, online-mixing, checkpoint and config suites pass;
-all 438 Hydra configs composed, and the complete validation panel
+all 440 Hydra configs composed on merged `main`, and the complete validation panel
 passed real-data preflight. A 900-second full-suite pass reached 82% and exposed
 an unrelated `WindowStream.__new__` test fixture missing the constructor's
 new `min_in_grid`/`grid` fields; that fixture is repaired and its five tests
