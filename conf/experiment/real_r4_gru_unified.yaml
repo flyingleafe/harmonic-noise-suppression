@@ -7,6 +7,12 @@ defaults:
 experiment_name: real_r4_gru_unified
 samples_per_validation: null
 batch_size: 128
+# The causal GRU overflows under float16 autocast on 2-second clips: the fp16
+# runs of this rung died within 1,500 optimizer updates (persistent non-finite
+# gradients / NaN validation), while the 1-second originals trained to
+# completion. bfloat16 keeps fp32's exponent range; the GradScaler is then a
+# no-op. The other three trunks stay on the float16 default.
+amp_dtype: bfloat16
 data:
   train:
     params:

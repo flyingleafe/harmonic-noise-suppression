@@ -12,4 +12,4 @@ Fresh R3 causal-GRU rerun with 2-second clips, batch 128, PIT-MSE and the unifie
 
 ## Conclusion
 
-Not run. Authorized as one of the sixteen parallel R1–R4 regressor reruns after handoff.
+First submission (2026-09-08, float16 autocast) diverged: R1 went non-finite at update 1,500, R3 hit persistent non-finite gradients after update 500; R2/R4 were cancelled and the rung resubmitted with `amp_dtype: bfloat16` (see the config comment). Not yet complete. Authorized as one of the sixteen parallel R1–R4 regressor reruns after handoff.
