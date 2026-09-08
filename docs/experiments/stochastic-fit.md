@@ -148,7 +148,7 @@ Crops (27 clips: FLY125 10, DREGON room2 17), median excess and paired Δ vs `fa
 | `family` | full skirts, reference carriers | 0.307 | +0.170 (0/10) | 0.333 | +0.177 (0/17) |
 | `family_rps` | full skirts + carrier correction | 0.299 | +0.158 (0/10) | 0.314 | +0.163 (0/17) |
 | **`family_bucket_rps`** | **the realized family** | **0.133 [0.125, 0.160]** | — | **0.161 [0.139, 0.191]** | — |
-| `family_trunc_rps` | clean ±5γ cut | 0.119 | −0.014 (9/10) | 0.126 (16 finite of 17) | −0.032 (15/16) |
+| `family_trunc_rps` | clean ±5γ cut | 0.119 | −0.014 (9/10) | 0.126 (16 finite of 17; `hovering_nosource_room2_03` non-finite on retry too) | −0.032 (15/16) |
 | `integrated` | exact bin integral | 0.299 | +0.159 (0/10) | 0.315 | +0.162 (0/17) |
 | `sharp` | no width floor + integral | 0.271 | +0.131 (0/10) | 0.315 | +0.164 (0/17) |
 | `free_gamma` | width free per order | 0.285 | +0.153 | 0.304 | +0.153 |
@@ -165,17 +165,20 @@ Crops (27 clips: FLY125 10, DREGON room2 17), median excess and paired Δ vs `fa
 (`integrated` ≡ `family_rps` to three decimals on every clip: the bin-centre
 sampling of the renderer costs nothing at this resolution.)
 
-Validation rigs, paired Δ vs `family_rps` (full skirts — the realized-family
-arm has not run there yet):
+Validation rigs (`stochfit-bucket-valid-ea26eb` added the realized-family
+arm), median excess and paired Δ vs `family_bucket_rps`:
 
-| arm | DREGON room1 (7) | FLY124 (14) |
-|---|---|---|
-| `family_rps` | 0.279 [0.273, 0.290] | 0.257 [0.210, 0.267] |
-| `sharp` | −0.005 (6/7) | −0.012 (12/14) |
-| `mic_floor` | +0.003 (2/7) | −0.009 (12/14) |
-| `speed_law` | +0.006 (1/7) | −0.000 (8/14) |
-| `extended` | −0.031 (7/7) | −0.050 (14/14) |
-| `gauss` | **0.102 [0.070, 0.111]**, −0.182 (7/7) | **0.066 [0.054, 0.072]**, −0.181 (13/14) |
+| arm | DREGON room1 (7) | Δ (improved) | FLY124 (14) | Δ (improved) |
+|---|---:|---:|---:|---:|
+| `family_rps` (full skirts) | 0.279 [0.273, 0.290] | +0.180 (0/7) | 0.257 [0.210, 0.267] | +0.128 (1/14) |
+| **`family_bucket_rps`** | **0.114 [0.086, 0.117]** | — | **0.116 [0.083, 0.137]** | — |
+| `extended` (Lorentzian) | 0.247 | +0.141 (0/7) | 0.203 | +0.086 (2/14) |
+| **`gauss`** | **0.102 [0.070, 0.111]** | **−0.011 [−0.018, −0.010] (7/7)** | **0.066 [0.054, 0.072]** | **−0.056 [−0.065, −0.024] (14/14)** |
+
+The single-change arms vs the full-skirt arm (`sharp` −0.005 / −0.012,
+`mic_floor` +0.003 / −0.009, `speed_law` +0.006 / −0.000) buy nothing.
+Explained fraction of the realized family: 0.87 on both validation rigs;
+of the Gaussian: 0.89 (room1), 0.92 (FLY124).
 
 Renderer controls (4 Lorentzian clips): `family_bucket_rps` −0.007,
 `family_trunc_rps` −0.007, `gauss` −0.007 [−0.012, −0.005], paired Δ 0.000.
@@ -184,16 +187,13 @@ controls' wide lines the clipped tail is small against the floor, so the
 shape arms are indistinguishable there. What the controls establish is
 that no arm gains from the fitting machinery itself.
 
-Readings. (1) On the 27 crops the realized family explains 0.87 (FLY125) /
-0.74 (room2) of the way from floor-only to correct; on the validation rigs
-the realized-family arm is pending (job `stochfit-bucket-valid`), so their
-baseline is still the full-skirt arm. (2) On the crops the Gaussian line
-halves the realized family's remaining excess on 25/27 clips (group medians
-0.13 → 0.07, 0.16 → 0.08; FLY125_00 is the exception, 0.078 vs 0.077). On
-the validation rigs it improves on the *full-skirt* arm on 20/21 clips
-(Δ ≈ −0.18), leaving 0.102 on room1 and 0.066 on FLY124; how much of that
-Δ is skirt clipping the renderer already does is what the pending bucket
-arm settles. (3) Within
+Readings. (1) The realized family explains 0.87 (FLY125, room1, FLY124) /
+0.74 (room2) of the way from floor-only to correct. (2) The Gaussian line
+improves on the realized family on 46/48 clips, but by a rig-dependent
+amount: it halves the remaining excess on FLY125 (0.13 → 0.07), room2
+(0.16 → 0.08) and FLY124 (0.12 → 0.07), while on DREGON room1 it buys only
+−0.011 (0.114 → 0.102, 7/7) — room1's misfit is mostly *not* the line
+shape. (FLY125_00 is one of the two non-improving clips, 0.078 vs 0.077.) (3) Within
 the Gaussian family a free width per order buys another 0.01–0.02 on
 room2 (17/17) and 0.01 on FLY125; sub-bin widths, per-mic floor and a
 looser drift prior buy nothing beyond the Gaussian. (4) The speed law, on
@@ -280,16 +280,15 @@ its loadings are to be fitted, not assumed.
 
 ## Conclusion (provisional — no modified renderer exists yet)
 
-Answer to "wrong ranges or wrong family": on the 27 training crops the
-realized family already explains three quarters (room2) to seven eighths
-(FLY125) of what a correct spectral model would; what it misses is
+Answer to "wrong ranges or wrong family": the realized family already
+explains three quarters (room2) to seven eighths (FLY125, room1, FLY124)
+of what a correct spectral model would; what it misses is
 structural, not a range. Two structural facts are established by paired
 ablations and second-order statistics: (1) the harmonic line falls off
-faster than the family's clipped Lorentzian — on the crops a Gaussian of
-equal half width halves the realized family's remaining misfit on 25 of 27
-clips, and on the validation rigs (room1, FLY124; realized-family baseline
-pending) it improves on the full-skirt arm on 20 of 21; a free width per
-order adds a little on DREGON; (2) Michael's low harmonics are partly coherent tones
+faster than the family's clipped Lorentzian — a Gaussian of equal half
+width improves on the realized family on 46 of 48 clips, halving the
+remaining misfit on FLY125, FLY124 and room2 but buying only 0.01 of
+room1's 0.11; a free width per order adds a little on DREGON; (2) Michael's low harmonics are partly coherent tones
 (plateau 0.33–0.37 vs null 0.08), DREGON's are not, and real amplitudes
 fluctuate more than exponentially everywhere. Neither sub-bin widths, nor
 per-microphone floors, nor a looser drift prior, nor the speed law, nor
