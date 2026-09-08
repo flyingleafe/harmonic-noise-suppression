@@ -36,11 +36,11 @@ from typing import Any
 
 import tdseries as td
 import torch
+import wandb
 from torch.amp.grad_scaler import GradScaler
 from torch.utils.data import DataLoader, IterableDataset
 from tqdm.auto import tqdm
 
-import wandb
 from data_processing.collate import batch_size as frame_batch_size
 from data_processing.collate import frame_collate, slice_sample
 from tasks.codecs import Codec
@@ -59,6 +59,7 @@ from training.validation import (
     MULTI_VALIDATION_STATE_KEY,
     MultiMetricController,
     build_validation_plan,
+    rps_readout_for,
     validate_rps,
 )
 
@@ -574,8 +575,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
         validation_cfg is not None and getattr(validation_cfg, "enabled", False)
     )
     multi_cfg: Any = validation_cfg if multi_validation_enabled else None
-    if multi_validation_enabled and task.name != "rps_prediction":
-        raise ValueError("multi-validation currently requires task=rps_prediction")
+    rps_readout = rps_readout_for(task.name) if multi_validation_enabled else None
     if multi_validation_enabled and getattr(cfg.early_stopping, "enabled", False):
         raise ValueError("validation.enabled and early_stopping.enabled are mutually exclusive")
 
@@ -822,6 +822,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
         validation_started_unix = time.time()
         validation_started = time.perf_counter()
         if validation_plan is not None:
+            assert rps_readout is not None
             val_metrics, val_loss = validate_rps(
                 model=model,
                 codec=codec,
@@ -831,6 +832,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
                 device=device,
                 amp=cfg.amp,
                 amp_dtype=amp_dtype,
+                readout=rps_readout,
             )
         else:
             val_metrics, val_loss = _validate(

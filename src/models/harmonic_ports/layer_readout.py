@@ -120,6 +120,34 @@ class LayerCRFReadout:
             scores, cast(np.ndarray, self.out_freqs), span, pen.to(scores.device), logits=True
         )
 
+    def decode_logits(
+        self,
+        logits: torch.Tensor,
+        n_samples: int,
+        *,
+        threshold: float | None = None,
+        max_jump_bins: int | None = None,
+    ) -> torch.Tensor:
+        """``(B, R*G, T_grid)`` logits -> ``(B, num_rotors, T_stft)`` rev/s, on-device.
+
+        ``threshold`` and ``max_jump_bins`` are accepted and IGNORED: they are
+        the single-map decoder's parameters, and this readout has neither a
+        detection decision nor a per-frame jump cap (the CRF's transition band
+        is the jump model, and it is sized from the data).
+        """
+        if int(self.n_maps) == 1:
+            return super().decode_logits(  # type: ignore[misc]
+                logits,
+                n_samples,
+                threshold=0.3 if threshold is None else threshold,
+                max_jump_bins=max_jump_bins,
+            )
+        rps_grid = self.decode_salience(logits.float())  # (B, R, T_grid)
+        t_stft = int(n_samples) // int(self.hop_length) + 1
+        if rps_grid.shape[-1] != t_stft:
+            rps_grid = F.interpolate(rps_grid, size=t_stft, mode="linear", align_corners=False)
+        return rps_grid
+
     @torch.no_grad()
     def predict_rps(
         self,
@@ -130,20 +158,8 @@ class LayerCRFReadout:
         chunk_size: int = 8,
         **_: Any,
     ) -> torch.Tensor:
-        """Audio -> ``(B, num_rotors, T_stft)`` rev/s.
-
-        ``threshold`` and ``max_jump_bins`` are accepted and IGNORED: they are
-        the single-map decoder's parameters, and this readout has neither a
-        detection decision nor a per-frame jump cap (the CRF's transition band
-        is the jump model, and it is sized from the data).
-        """
-        if int(self.n_maps) == 1:
-            return super().predict_rps(  # type: ignore[misc]
-                audio,
-                threshold=0.3 if threshold is None else threshold,
-                max_jump_bins=max_jump_bins,
-                chunk_size=chunk_size,
-            )
+        """Audio -> ``(B, num_rotors, T_stft)`` rev/s; forward in row chunks, then
+        :meth:`decode_logits`."""
         if chunk_size and chunk_size > 0 and audio.shape[0] > chunk_size:
             logits = torch.cat(
                 [
@@ -154,12 +170,6 @@ class LayerCRFReadout:
             )
         else:
             logits = self.forward(audio)  # type: ignore[attr-defined]
-        rps_grid = self.decode_salience(logits)  # (B, R, T_grid)
-
-        n_samples = audio.shape[-1]
-        t_stft = int(n_samples) // int(self.hop_length) + 1
-        if rps_grid.shape[-1] != t_stft:
-            rps_grid = F.interpolate(
-                rps_grid.float(), size=t_stft, mode="linear", align_corners=False
-            )
-        return rps_grid
+        return self.decode_logits(
+            logits, audio.shape[-1], threshold=threshold, max_jump_bins=max_jump_bins
+        )

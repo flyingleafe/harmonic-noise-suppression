@@ -9,9 +9,11 @@ RPS trajectories directly:
   targets derived on the fly from the batch's STFT-grid RPS target (see
   ``salience_target_from_frame_rps``). This keeps every dataloader on the common
   ``(audio, rps)`` task interface; no per-step inverse tracking is involved.
-- **Inference / eval**: ``predict_rps()`` does ``sigmoid -> salience_to_rps_segmented``
-  (Hungarian tracking) -> resample to the STFT frame grid -> ``(B, num_rotors, T_stft)``,
-  so the *existing* global-PIT metrics in ``evaluate()`` apply unchanged.
+- **Inference / eval**: ``decode_logits()`` does ``sigmoid -> salience_to_rps_segmented``
+  (on-device peak tracking, ``models.salience_tracker``) -> resample to the STFT
+  frame grid -> ``(B, num_rotors, T_stft)``; ``predict_rps()`` is forward + that,
+  and training-time validation calls it on the batch's logits, so the
+  *existing* global-PIT metrics in ``evaluate()`` apply unchanged.
 
 Models are flagged with ``outputs_salience = True`` so the train/eval loops route
 them to the BCE/tracking path. Two concrete baselines:
@@ -291,6 +293,41 @@ class SalienceRPSPredictor(nn.Module):
         """Return salience **logits** ``(B, n_bins, T_grid)``."""
         raise NotImplementedError
 
+    def decode_logits(
+        self,
+        logits: torch.Tensor,
+        n_samples: int,
+        *,
+        threshold: float = 0.3,
+        max_jump_bins: int | None = None,
+    ) -> torch.Tensor:
+        """``(B, n_bins, T_grid)`` logits -> tracked RPS on the STFT grid, on-device.
+
+        This IS the deployed shared-map readout: ``sigmoid`` -> threshold ->
+        per-frame peaks -> frame-to-frame assignment tracking
+        (:mod:`models.salience_tracker`) -> resample to ``N // hop + 1`` STFT
+        frames. Training-time validation and :meth:`predict_rps` share it, so
+        the monitor scores exactly what evaluation reports.
+        """
+        salience = torch.sigmoid(logits.float())
+        if max_jump_bins is None:
+            max_jump_bins = self._default_max_jump_bins()
+        rps_grid, _merge = salience_to_rps_segmented(
+            salience,
+            num_rotors=self.num_rotors,
+            freqs=self.output_freqs(),
+            threshold=threshold,
+            max_jump_bins=max_jump_bins,
+        )  # (B, num_rotors, T_grid)
+
+        # Resample grid frames -> STFT frames. Endpoint-to-endpoint shape-stretch,
+        # matching how the GT RPS target is built in DREGONRPSDataset (both cover
+        # the same audio span, so the time axes align).
+        t_stft = stft_time_frames(int(n_samples), self.hop_length)
+        if rps_grid.shape[-1] != t_stft:
+            rps_grid = F.interpolate(rps_grid, size=t_stft, mode="linear", align_corners=False)
+        return rps_grid
+
     @torch.no_grad()
     def predict_rps(
         self,
@@ -300,9 +337,7 @@ class SalienceRPSPredictor(nn.Module):
         max_jump_bins: int | None = None,
         chunk_size: int = 8,
     ) -> torch.Tensor:
-        """Salience -> tracked RPS on the STFT frame grid, ``(B, num_rotors, T_stft)``.
-
-        Hungarian tracking runs on CPU/numpy (slow but validation-only).
+        """Audio -> tracked RPS on the STFT frame grid, ``(B, num_rotors, T_stft)``.
 
         The CNN forward is run in row-chunks of ``chunk_size``. Validation clips
         are typically much longer than training clips, and LateDeep's (360, 1)
@@ -321,38 +356,9 @@ class SalienceRPSPredictor(nn.Module):
             )
         else:
             logits = self.forward(audio)  # (B, n_bins, T_grid)
-        salience = torch.sigmoid(logits)
-        if max_jump_bins is None:
-            max_jump_bins = self._default_max_jump_bins()
-        if self.out_freqs is not None:
-            rps_grid, _merge = salience_to_rps_segmented(
-                salience,
-                num_rotors=self.num_rotors,
-                freqs=self.out_freqs,
-                threshold=threshold,
-                max_jump_bins=max_jump_bins,
-            )  # (B, num_rotors, T_grid)
-        else:
-            rps_grid, _merge = salience_to_rps_segmented(
-                salience,
-                num_rotors=self.num_rotors,
-                **self.grid_params(),
-                threshold=threshold,
-                max_jump_bins=max_jump_bins,
-            )  # (B, num_rotors, T_grid)
-
-        # Dark frames already decode to 0.0 inside the tracker (silence == zero
-        # rotor speed). This guard only covers a rotor that never gets a peak.
-        rps_grid = torch.nan_to_num(rps_grid, nan=0.0)
-
-        # Resample grid frames -> STFT frames. Endpoint-to-endpoint shape-stretch,
-        # matching how the GT RPS target is built in DREGONRPSDataset (both cover
-        # the same audio span, so the time axes align).
-        n_samples = audio.shape[-1]
-        t_stft = stft_time_frames(n_samples, self.hop_length)
-        if rps_grid.shape[-1] != t_stft:
-            rps_grid = F.interpolate(rps_grid, size=t_stft, mode="linear", align_corners=False)
-        return rps_grid
+        return self.decode_logits(
+            logits, audio.shape[-1], threshold=threshold, max_jump_bins=max_jump_bins
+        )
 
 
 class LateDeepSalience(LayerCRFReadout, SalienceRPSPredictor):
