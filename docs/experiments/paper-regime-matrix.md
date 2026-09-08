@@ -1724,3 +1724,18 @@ Throughput of the full panel on trained salience checkpoints is measured by
 `scripts/salience_val_bench.py` on `uni-gpushort` (six checkpoints, L0 and L2
 of each family, B32, cold and warm passes, per-clip spot check); numbers go
 below when the job returns. Fresh unified salience configs follow that gate.
+
+Status at this checkpoint: `salience-val-bench-280fdb` (A100-80, B32) has
+been Slurm-pending on `gpushort` for over 4 h — every A100 on the partition
+is allocated (`sbg1/4/5/19` 4/4 GPUs each) and it is first in line on
+`(Resources)`; a V100-16 copy at B8 (`salience-val-bench-v100-a6f3c3`,
+functional check + scores, timing not representative) is pending
+`(Priority)` behind it. Both stay queued.
+
+Full `pytest -q` on the branch: **1,656 passed, 3 skipped, 2 failed**, both
+failures pre-existing on `main` and outside this work —
+`tests/scripts/test_rps_claim_tables.py::test_every_mapped_name_obeys_the_doc_naming`
+(the `hf0/hppnet_l{1,2,3}_r2_s0` names introduced by `67beae9`) and
+`tests/tracking/test_joint_regression.py::test_v3b_joint_solve_reproduces_the_pinned_reference`
+(a 2.4e-6 relative drift against a 1e-10 pin; `src/tracking` is untouched
+here).
