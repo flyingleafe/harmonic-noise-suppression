@@ -1570,3 +1570,93 @@ The full-panel validator currently accepts direct `rps_prediction` outputs.
 The next task is the deferred salience seam: vectorized GPU decoding from
 salience/layer outputs to RPS, exact MAE-optimal PIT parity, then the same
 views/controller/checkpoint path. Do not launch salience reruns before it.
+
+## Unified rerun submission and the salience seam — 2026-09-08
+
+Branch `unified-runs` (from `main` `f3b0e90`). All sixteen
+`real_r{1,2,3,4}_{sc,scv2,tm,gru}_unified` runs were submitted in parallel to
+Vast A100-80GB (16 vCPU / 64 GB, omnirun group `unified-r1r4`, code
+`f3b0e90`). Health at the first check: optimizer step 500 at round 0, all
+thirteen scores, `validation_history.jsonl` and `last.ckpt` on R2 after every
+round, the fourteen subset-best aliases plus `best_checkpoints.json` after
+round 4, W&B system metrics at 94–100% GPU utilization, 45–60 s per 500
+updates on most hosts (one SXM4 host ran SCv2 at 135 s; Vast hosts vary).
+
+**The causal GRU diverges under float16 on 2-second clips.** `real_r1_gru`
+went non-finite on `static_mix` at update 1,500 (training loss had fallen
+1787 → 20 by update 1,000); `real_r3_gru` hit persistent non-finite gradients
+right after round 0 (`GradScaler skipped every retry batch`). The 1-second
+originals of the same recipe trained to completion under fp16, and the other
+three trunks are unaffected, so this is fp16 range on the longer recurrence,
+not the recipe. The four GRU rungs were cancelled and resubmitted at code
+`93611ef` with `amp_dtype: bfloat16` (written into the four configs with the
+reason). All four passed the steps at which fp16 died (R1 at 4,500, R3 at
+6,000 when checked) at ~80 s per 500 updates — bf16 cuDNN GRU is ~40% slower
+than fp16. The GRU column therefore differs from the other three in autocast
+dtype; it is a precision detail, disclosed here and in the configs.
+
+### Salience models now validate on the same panel
+
+The `task.name == "rps_prediction"` guard is gone. `training.validation`
+reads the prediction through a task-dispatched `RPSReadout`
+(`rps_readout_for`): direct regressors give `rps_pred`; `salience_rps` models
+give `salience` logits which the model's own `decode_logits(logits,
+n_samples)` turns into `(B, R, T_stft)` rev/s on the GPU. `decode_logits` is
+the deployed decoder — `predict_rps` is now forward + `decode_logits`, and
+`scripts/rps_dump.py`'s shared-map route goes through it — so the monitor
+scores what evaluation reports.
+
+*Per-layer models (L2/L3)* already decoded on the GPU (`LayerCRFReadout` →
+`salience_crf.crf_decode_layers`); they only needed the seam.
+
+*Shared-map models (L0/L1)* decoded on the CPU: `sigmoid` → per-frame peaks →
+one SciPy `linear_sum_assignment` per frame per sample → jump-cap rejection.
+That is `models/salience_tracker.py` now, batched over samples with one
+`(B, ...)` step per frame. The assignment is exact: costs are
+`|f_track − f_peak|` on a line, so a minimum-cost injective assignment can be
+taken order-preserving (L1 Monge), and a prefix-minimum DP with a "hold"
+option finds it in `R` `cummin` steps. The one behavioural difference is the
+tie-break — L1 assignment ties are systematic (two tracks below two peaks cost
+the same crossed or uncrossed) and SciPy's choice was implementation-defined;
+the DP returns the monotone optimum. Alternatives were measured against the
+generating trajectories of synthetic maps with dropouts (8 clips × 100 frames
+× 6–10 seeds, mean PIT-MAE in rev/s):
+
+| dropout | SciPy reference | verbatim rule, monotone tie-break | cap inside the cost | stale tracks jump uncapped |
+|---:|---:|---:|---:|---:|
+| 0.00 | 0.40 | 0.39 | 0.42 | 0.47 |
+| 0.05 | 2.37 | 2.42 | 2.47 | 13.9 |
+| 0.15 | 6.55 | 6.52 | 6.77 | 19.8 |
+| 0.30 | 11.78 | 11.81 | 12.06 | 23.6 |
+
+The verbatim rule is within ±1% of the reference everywhere; the "principled"
+capped cost is 3–4% worse because the reference's arbitrary tie choices
+happen to drag stale duplicate tracks onto live peaks. So the published rule
+is kept, tie-break aside. `tests/models/test_salience_tracker.py` carries the
+SciPy tracker as its oracle and checks bit-equality on maps with unique
+assignments (linear and CQT grids), peak-detection parity on soft, binary and
+saturated columns, the hold-on-dropout rule, batch-composition independence,
+and Hungarian-optimal cost on random rectangular problems.
+
+**Two front-end bugs surfaced by batched inference.** `HarmoF0Orig` and
+`HPPNetOrig` applied `torchaudio.AmplitudeToDB(top_db=80)` to a 3-D
+`(B, T, F)` tensor, which torchaudio floors relative to the max over the
+WHOLE batch; the published models process one clip at a time. A batch of two
+clips changed a clip's logits by up to 7.1 and its decoded rates by up to 32
+rev/s. Both front ends now floor per clip (a leading channel axis), so the
+batched forward equals the per-clip forward that `rps_dump.py` scored; every
+existing HarmoF0/HPPNet checkpoint was trained with the batch-coupled floor
+and is evaluated per clip, so the fix changes training for the reruns only.
+LateDeep's residual batch dependence is float noise (mean |Δlogit| 6e-5,
+identical for `[a, b]` and `[a, a]`), which the threshold decoder can turn
+into a one-frame flip — inherent to L0 decoding, not a coupling.
+
+`scripts/rps_dump.py` still reads L2/L3 ports by per-frame peak + parabola
+(`LayerPeakRPSMetric`) rather than the deployed CRF; the paper's L2 rows and
+the deployed decoder disagree there. The unified validator uses the CRF. To
+be reconciled when the tables are regenerated.
+
+Throughput of the full panel on trained salience checkpoints is measured by
+`scripts/salience_val_bench.py` on `uni-gpushort` (six checkpoints, L0 and L2
+of each family, B32, cold and warm passes, per-clip spot check); numbers go
+below when the job returns. Fresh unified salience configs follow that gate.
