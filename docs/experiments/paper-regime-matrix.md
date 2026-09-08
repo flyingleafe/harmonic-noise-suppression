@@ -1739,3 +1739,54 @@ failures pre-existing on `main` and outside this work —
 `tests/tracking/test_joint_regression.py::test_v3b_joint_solve_reproduces_the_pinned_reference`
 (a 2.4e-6 relative drift against a 1e-10 pin; `src/tracking` is untouched
 here).
+
+### Salience validation benchmark (Vast A100-SXM4-80GB, 2026-09-08)
+
+`scripts/salience_val_bench.py`, job `salience-val-bench-0f6a9d` (the two
+`uni-gpushort` copies stayed Slurm-pending for 8 h and were cancelled; the
+user released Vast for it). Full 1,320-sample panel, validation batch 32,
+fp16 autocast, trained checkpoints, one cold and one warm pass each:
+
+| checkpoint | family / level | cold / warm s | peak VRAM GB | real_r3 | real_r1 | synth | macro |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `hb_sal_hf0_orig` | HarmoF0 L0 | 17.3 / 15.5 | 6.2 | 10.90 | 17.11 | 23.20 | 17.05 |
+| `hf0_l2_r2_s0` | HarmoF0 L2 | 9.7 / 9.7 | 6.2 | 2.28 | 2.71 | 21.57 | 11.93 |
+| `hb_sal_hppnet_orig` | HPPNet L0 | 18.0 / 18.2 | 16.4 | 7.55 | 9.08 | 17.19 | 12.37 |
+| `hppnet_l2_r2_s0` | HPPNet L2 | 12.2 / 12.2 | 16.4 | 2.21 | 2.88 | 28.64 | 15.43 |
+| `hb_sal_multif0` | LateDeep L0 | 36.4 / 36.1 | 9.5 | 12.71 | 10.45 | 33.92 | 23.32 |
+| `hb_sal_multif0_l4` | LateDeep L2 | 24.8 / 24.7 | 9.5 | 3.45 | 2.99 | 29.98 | 16.72 |
+| `hb_sal_multif0_nsr` | LateDeep L1 | 38.0 / 38.5 | 9.7 | 11.98 | 13.98 | 27.62 | 19.80 |
+
+Reading. (1) Every level validates in 10–40 s on the full panel — down from
+minutes per real-only pass on the CPU tracker — so the 500-update cadence is
+affordable for salience models too. (2) L0/L1 cost is the tracker's per-frame
+loop, not the model: it scales with the number of batches, not the batch size
+(HarmoF0 hop 512 → 251 frames → 15 s; LateDeep hop 256 → 501 frames → 36 s),
+so the salience configs raise the validation batch to 64 (ports: HPPNet peaks
+at 16.4 GB at B32) and 128 (LateDeep: 9.5 GB at B32), which cuts L0/L1
+validation to ~5–10 s. L2 (CRF) is 10–25 s and shrinks the same way. (3) The
+batched fp16 readout matches the per-clip fp32 `predict_rps` route on the
+spot-checked clips to the digit, except where fp16 flips a threshold/CRF
+decision on one clip (HPPNet L0 5.13 → 5.32, LateDeep L2 0.11 → 1.05) —
+inherent to hard decoders, and the same for both routes. (4) The L0 scores of
+the old checkpoints on the GPU tracker sit where the paper table put them
+(HarmoF0 L0 10.90 here vs 10.79 in the table, per-clip SciPy tracker), which
+is the ±1 % tie-break margin measured on synthetic maps.
+
+### Unified salience matrix — defined, NOT submitted
+
+Fifteen configs, `conf/experiment/real_r{1,2,3,4}_{hf0,hppnet}_l2_unified`
+(the matrix rows: the comb gather is retired, so the salience trunks of the
+paper are the L2 ports) plus the Block S ladder at R4,
+`real_r4_{hf0,hppnet}_{l0,l1}_unified` and `real_r4_multif0_{l0,l1,l2}_unified`.
+One recipe for all of them and for the regressors: the rung's policy, 2 s
+clips, batch 128 (the old salience rows used 16), AdamW 1e-3 / 1e-4, no
+warm-up, no warm start, fp16 autocast (bf16 fallback on a non-finite exit, as
+for the GRU), `validation/rps_unified` with `overall_macro` as the control and
+the validation batch above. Per level: L0 `{harmof0,hppnet}_orig` /
+`multif0_salience` with `salience_bce_orig` / `salience_bce_multif0`; L1
+`{harmof0,hppnet}_l1` / `multif0_salience_nsr_hb` with
+`salience_bce_nsr_orig` / `salience_bce_nsr_hb`; L2 `{harmof0,hppnet}_l2` /
+`multif0_salience_l4` with `salience_layers_r150` / `_h256`. The ports carry
+the per-clip dB floor fix above. All 455 configs compose; the four
+representative configs pass `train.py validate_only=true`.
