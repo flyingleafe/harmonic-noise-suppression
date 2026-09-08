@@ -35,7 +35,15 @@ from scipy.special import digamma
 from .data import Periodogram
 from .model import AMP_RPS_REF, CombSpectrum, Spec
 
-LOO_HALF = 2  # +-2 frames -> n = 4 neighbours
+#: Neighbour frame offsets of the leave-one-out smoother. At a quarter-window
+#: hop the ADJACENT frame's periodogram is correlated with the cell's (power
+#: correlation ~0.43 for Hann), which makes a +-1 smoother optimistic by a
+#: constant ~0.25 nats/cell (measured on renderer controls). Two hops apart
+#: the window overlap is half and the power correlation ~0.03, so the
+#: replicates are taken at +-2 and +-4 hops: four near-independent samples
+#: over a +-128 ms span.
+LOO_OFFSETS = (-4, -2, 2, 4)
+LOO_HALF = 4  # frames excluded at each clip edge
 
 
 def _inv_softplus(x: float) -> float:
@@ -43,27 +51,24 @@ def _inv_softplus(x: float) -> float:
 
 
 def loo_reference(
-    power: np.ndarray, band: np.ndarray, half: int = LOO_HALF
+    power: np.ndarray, band: np.ndarray, offsets: tuple[int, ...] = LOO_OFFSETS
 ) -> tuple[float, np.ndarray]:
     """Bias-corrected leave-one-out Whittle score per cell and the smoother.
 
-    Returns ``(nll_per_cell, m_hat (M, N, F))``; frames within ``half`` of the
-    clip edges are excluded from the score (their neighbourhoods are one-sided).
+    Returns ``(nll_per_cell, m_hat (M, N, F))``; frames within ``max|offset|``
+    of the clip edges are excluded from the score (one-sided neighbourhoods).
     """
     m, n, f = power.shape
+    half = max(abs(s) for s in offsets)
     acc = np.zeros_like(power, dtype=np.float64)
-    cnt = 0
-    for s in range(-half, half + 1):
-        if s == 0:
-            continue
+    for s in offsets:
         acc[:, max(0, -s) : n - max(0, s)] += power[:, max(0, s) : n - max(0, -s)]
-        cnt += 1
-    m_hat = acc / cnt
+    m_hat = acc / len(offsets)
     inner = slice(half, n - half)
     p = power[:, inner][..., band].astype(np.float64)
     mh = np.maximum(m_hat[:, inner][..., band], 1e-30)
     nll = float(np.mean(p / mh + np.log(mh)))
-    n_nb = 2 * half
+    n_nb = len(offsets)
     bias = n_nb / (n_nb - 1.0) - 1.0 + (float(digamma(n_nb)) - math.log(n_nb))
     return nll - bias, m_hat
 
@@ -204,7 +209,7 @@ def fit_clip(
         ]
         nll_fit_inner = float(cell.mean().item())
     # how far the fastest in-band line moves over the LOO neighbourhood, in bins
-    carrier = model.carrier().cpu().numpy()
+    carrier = model.carrier().detach().cpu().numpy()
     k_top = np.minimum(
         model.K, np.floor((spec.f_max or pg.freqs[-1]) / np.maximum(carrier.max(axis=1), 1e-3))
     )

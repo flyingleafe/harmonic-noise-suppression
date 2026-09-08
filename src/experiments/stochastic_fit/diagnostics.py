@@ -107,7 +107,9 @@ def line_cells(res: FitResult, f_max: float | None = None) -> dict[str, np.ndarr
         # neighbours in sorted order (any rotor, including own adjacent orders)
         gap_prev = np.r_[np.inf, np.diff(cs)]
         gap_next = np.r_[np.diff(cs), np.inf]
-        iso = (gap_prev > 2.0 * gs + 2 * res.df) & (gap_next > 2.0 * gs + 2 * res.df)
+        g_prev = np.r_[0.0, gs[:-1]]
+        g_next = np.r_[gs[1:], 0.0]
+        iso = (gap_prev > gs + g_prev + res.df) & (gap_next > gs + g_next + res.df)
         out = np.empty_like(iso)
         out[order] = iso
         isolated[sel] = out
@@ -263,8 +265,9 @@ def between_lines(res: FitResult, n_bins: int = 24) -> dict[str, Any]:
     cells = line_cells(res)
     near = np.zeros((N, F), dtype=bool)
     for c, g, n in zip(cells["centre"], cells["gamma"], cells["frame"], strict=True):
-        lo = max(int(np.floor((c - 3 * g) / res.df)), 0)
-        hi = min(int(np.ceil((c + 3 * g) / res.df)) + 1, F)
+        w = max(1.5 * g, res.df)
+        lo = max(int(np.floor((c - w) / res.df)), 0)
+        hi = min(int(np.ceil((c + w) / res.df)) + 1, F)
         near[n, lo:hi] = True
     floor = ~near
     floor[:, res.freqs < 30.0] = False
@@ -296,8 +299,9 @@ def excess_by_region(res: FitResult) -> dict[str, float]:
     cells = line_cells(res)
     near = np.zeros((N, F), dtype=bool)
     for c, g, n in zip(cells["centre"], cells["gamma"], cells["frame"], strict=True):
-        lo = max(int(np.floor((c - 2 * g) / res.df)), 0)
-        hi = min(int(np.ceil((c + 2 * g) / res.df)) + 1, F)
+        w = max(g, res.df)
+        lo = max(int(np.floor((c - w) / res.df)), 0)
+        hi = min(int(np.ceil((c + w) / res.df)) + 1, F)
         near[n, lo:hi] = True
     band = res.freqs >= 30.0
     p = res.power[:, inner][..., band].astype(np.float64)
@@ -328,6 +332,23 @@ def fitted_parameter_summary(res: FitResult) -> dict[str, Any]:
     cells = line_cells(res)
     live = np.zeros((R, K), dtype=bool)
     live[cells["rotor"], cells["order"] - 1] = True
+    # only lines that stand out of the floor are constrained by the data: an
+    # invisible line's level is arbitrary and would swamp every statistic
+    gamma_all = np.asarray(p["gamma"])
+    fl_shape = np.asarray(p["floor_shape_db"])
+    ctrl = np.asarray(p["floor_ctrl_hz"])
+    mean_rps = res.carrier.mean(axis=1)
+    speed_db = 10 * 2.5 * np.log10(np.maximum(mean_rps, 1e-3) / 80.0)
+    peak_db = prof - 10 * np.log10(np.pi * gamma_all) + speed_db[:, None]
+    f_line = np.maximum(k[None, :] * mean_rps[:, None], 30.0)
+    floor_db = (
+        p["floor_mean_db"]
+        + np.interp(np.log2(f_line), np.log2(ctrl), fl_shape)
+        + p["floor_tilt_db_oct"] * np.log2(f_line / 500.0)
+        + speed_db.mean()
+    )
+    visible = live & (peak_db > floor_db - 6.0)
+    live = visible
     rolloff, jitter = [], []
     for r in range(R):
         sel = live[r] & np.isfinite(prof[r])
@@ -366,14 +387,8 @@ def fitted_parameter_summary(res: FitResult) -> dict[str, Any]:
         else float("nan")
     )
     # floor under the median line peak, at the reference speed
-    gamma = np.asarray(p["gamma"])
-    peaks = prof[live] - 10 * np.log10(np.pi * gamma[live])
-    fl = np.asarray(p["floor_shape_db"])
-    floor_rel = (
-        float(np.median(peaks) - (p["floor_mean_db"] + np.median(fl)))
-        if peaks.size
-        else float("nan")
-    )
+    fl = fl_shape
+    floor_rel = float(np.median(peak_db[live] - floor_db[live])) if live.any() else float("nan")
     return dict(
         rolloff_p=rolloff,
         harm_jitter_db=jitter,
@@ -383,6 +398,10 @@ def fitted_parameter_summary(res: FitResult) -> dict[str, Any]:
         harm_gp_tau_s=tau,
         harm_coherence=common,
         floor_rel_db=-floor_rel,
+        visible_lines=int(live.sum()),
+        visible_fraction_by_band=[
+            float(live[:, lo - 1 : hi].mean()) for lo, hi in ORDER_BANDS if lo <= K
+        ],
         floor_tilt_db_oct=float(p["floor_tilt_db_oct"]),
         floor_shape_std_db=float(np.std(fl)),
         mic_gain_spread_db=float(np.ptp(np.asarray(p["mic_gain_db"]), axis=0).mean()),
