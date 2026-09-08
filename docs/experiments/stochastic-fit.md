@@ -68,7 +68,7 @@ Two findings about the instrument itself:
   likelihood-level questions are unaffected; parameter readouts are
   restricted to visible lines (`diagnostics.fitted_parameter_summary`).
 
-### The family, as sampled, explains half to two thirds of real recordings
+### The full-skirt arm: half to two thirds (superseded by the realized-family arm below)
 
 Variant `family` (the renderer's exact parametrization, reference carriers,
 no correction), Kaggle job `stochfit-family-b9f69d`, all 48 clips with
@@ -127,61 +127,74 @@ Per-clip numbers: `results/stochastic_fit/summary_family.json` of the job.
   is a selection-biased sliver; the `mic_floor` ablation is the evidence.)
 - Half-order residual 1.05–1.17 at orders 1–8: a little sub-harmonic content.
 
-### Ablations on the 27 crops (`stochfit-var-crops-7c047a`)
+### Ablations (jobs `stochfit-var-crops-7c047a`, `stochfit-trunc-82ef61`, `stochfit-gauss-0456f6`, `stochfit-var-valid-016a03`)
 
-Excess over the LOO reference, nats/cell, median over clips; Δ against
-`family_rps` (median, min–max over clips):
+Excess over the LOO reference, nats/cell: median [IQR] over clips, and the
+*paired* difference against the realized family (`family_bucket_rps` on the
+crops; `family_rps` on the validation rigs, where the bucket arm was not
+run) with the count of clips improved.
 
-| variant | one change | FLY125 excess | Δ | DREGON room2 excess | Δ |
+**The baseline is the family as rendered, not as written.** `build_psd`
+renders each Lorentzian over a power-of-two bucket of ≥ 5γ half widths and
+renormalizes by the fixed 87.4 %, so a realized line has no skirt beyond
+5–10 γ. The `family` arm with full 1/d² skirts overstates the misfit by
+about half; `family_bucket*` reproduces the realized support and is the
+reference below.
+
+Crops (27 clips: FLY125 10, DREGON room2 17), median excess and paired Δ vs `family_bucket_rps`:
+
+| arm | one change | FLY125 | Δ (improved) | room2 | Δ (improved) |
 |---|---|---:|---:|---:|---:|
-| `family` | — | 0.307 | +0.008 | 0.333 | +0.012 |
-| `family_rps` | + carrier correction | 0.299 | 0 | 0.314 | 0 |
-| `sharp` | no width floor, bin-integrated | 0.271 | −0.022 (−0.043..+0.004) | 0.315 | −0.002 |
-| **`gauss`** | **Gaussian line of equal HWHM** | **0.069** | **−0.232 (−0.246..−0.179)** | **0.079** | **−0.243 (−0.263..−0.201)** |
-| `free_gamma` | width free per order | 0.285 | −0.008 | 0.304 | −0.009 |
-| `mic_floor` | per-mic floor offset | 0.290 | −0.001 | 0.319 | −0.006 |
-| `drift6` | 6 dB drift prior | 0.297 | −0.002 | 0.310 | −0.004 |
-| `extended` | all of the above but Lorentzian | 0.241 | −0.051 | 0.285 | −0.027 |
+| `family` | full skirts, reference carriers | 0.307 | +0.170 (0/10) | 0.333 | +0.177 (0/17) |
+| `family_rps` | full skirts + carrier correction | 0.299 | +0.158 (0/10) | 0.314 | +0.163 (0/17) |
+| **`family_bucket_rps`** | **the realized family** | **0.133 [0.125, 0.160]** | — | **0.161 [0.139, 0.191]** | — |
+| `family_trunc_rps` | clean ±5γ cut | 0.119 | −0.014 (9/10) | 0.126 (16 finite of 17) | −0.032 (15/16) |
+| `integrated` | exact bin integral | 0.299 | +0.159 (0/10) | 0.315 | +0.162 (0/17) |
+| `sharp` | no width floor + integral | 0.271 | +0.131 (0/10) | 0.315 | +0.164 (0/17) |
+| `free_gamma` | width free per order | 0.285 | +0.153 | 0.304 | +0.153 |
+| `mic_floor` | per-mic floor offset | 0.290 | +0.159 | 0.319 | +0.156 |
+| `drift6` | 6 dB drift prior | 0.297 | +0.160 | 0.310 | +0.162 |
+| `extended` | all of the above, Lorentzian | 0.241 | +0.102 | 0.285 | +0.138 |
+| **`gauss`** | **Gaussian line, equal HWHM** | **0.069 [0.059, 0.076]** | **−0.075 [−0.084, −0.054] (9/10)** | **0.079 [0.058, 0.092]** | **−0.074 [−0.099, −0.058] (16/17)** |
+| `gauss_sharp` | + no width floor | 0.066 | −0.063 (10/10) | 0.086 | −0.068 (17/17) |
+| `gauss_mic` | + per-mic floor | 0.065 | −0.069 (10/10) | 0.082 | −0.079 (17/17) |
+| `gauss_drift6` | + 6 dB drift prior | 0.069 | −0.061 (10/10) | 0.083 | −0.074 (16/17) |
+| `gauss_free` | + free width per order | 0.057 | −0.073 (10/10) | 0.055 | −0.098 (17/17) |
+| `gauss_all` | all Gaussian relaxations | 0.060 | −0.069 (10/10) | 0.058 | −0.083 (17/17) |
 
-Sub-bin widths, a free width law, per-microphone floors and a looser drift
-prior each buy ≤ 0.02, even combined; the line shape is the only lever.
-Fitted carrier corrections are large (rms 0.7 rev/s on FLY125, 1.3 on room2
-— the room2 references are refined commanded speeds) but buy only 0.01–0.02.
+(`integrated` ≡ `family_rps` to three decimals on every clip: the bin-centre
+sampling of the renderer costs nothing at this resolution.)
 
-**Correction (job `stochfit-trunc-82ef61`): the `family` arm above is not the
-family as rendered.** `build_psd` renders each line over a power-of-two
-bucket of ≥ 5γ half widths and renormalizes by the fixed 87.4 % (so a
-realized line has *no* skirt beyond 5–10 γ and slightly more than unit
-area). Arms reproducing that (`family_bucket*`) and a clean ±5γ cut
-(`family_trunc*`), same clips:
+Validation rigs, paired Δ vs `family_rps` (full skirts — the realized-family
+arm has not run there yet):
 
-| arm | line | FLY125 excess | DREGON room2 excess |
-|---|---|---:|---:|
-| `family_rps` | full Lorentzian skirts | 0.299 | 0.314 |
-| `family_bucket_rps` | **the renderer's realized line** | **0.133** | **0.161** |
-| `family_trunc_rps` | Lorentzian cut at ±5γ | 0.119 | 0.07–0.15 (one clip NaN) |
-| `gauss` | Gaussian, equal HWHM | 0.069 | 0.079 |
-| controls (4) | all Lorentzian arms | −0.004…−0.007 | |
+| arm | DREGON room1 (7) | FLY124 (14) |
+|---|---|---|
+| `family_rps` | 0.279 [0.273, 0.290] | 0.257 [0.210, 0.267] |
+| `sharp` | −0.005 (6/7) | −0.012 (12/14) |
+| `mic_floor` | +0.003 (2/7) | −0.009 (12/14) |
+| `speed_law` | +0.006 (1/7) | −0.000 (8/14) |
+| `extended` | −0.031 (7/7) | −0.050 (14/14) |
+| `gauss` | **0.102 [0.070, 0.111]**, −0.182 (7/7) | **0.066 [0.054, 0.072]**, −0.181 (13/14) |
 
-So the family *as trained on* explains 0.87 (FLY125) / 0.74 (room2) of the
-way from floor-only to correct, not 0.68 / 0.45: the full-skirt arm
-overstated its misfit by half, and about half of the "Gaussian gain" was
-the skirt clipping the renderer already does. The Gaussian still halves
-the realized family's remaining excess (0.13–0.16 → 0.07–0.08) on every
-clip — the largest single term — and the part it leaves is what the
-Gaussian combinations probe. (The full-skirt model is indistinguishable on
-the controls because their lines are wide, so the clipped tail is small
-against the floor; on real audio there is no skirt power between the
-lines at all.)
+Renderer controls (4 Lorentzian clips): `family_bucket_rps` −0.007,
+`family_trunc_rps` −0.007, `gauss` −0.007 [−0.012, −0.005], paired Δ 0.000.
+The negative control is therefore **uninformative**, not passed: on the
+controls' wide lines the clipped tail is small against the floor, so the
+shape arms are indistinguishable there. What the controls establish is
+that no arm gains from the fitting machinery itself.
 
-Caveats on reading the `gauss` arm as a physical parameter fit: it keeps
-the renderer's 0.6-bin width floor and a free γ₀ (median γ₀ 3.3 Hz on FLY125
-but 22.8 Hz on room2, where buried rotors take arbitrary widths), so its
-slope is not yet a clean estimator of a shared shaft jitter — see
-"Interpretation" below. Pending: `gauss` on the Lorentzian renderer controls
-(must lose to `family`), `gauss` on room1/FLY124, and the Gaussian
-combinations (`gauss_sharp`, `gauss_mic`, `gauss_drift6`, `gauss_free`,
-`gauss_all`) for the remaining 0.07 (job `stochfit-gauss`).
+Readings. (1) The realized family explains 0.87 (FLY125) / 0.74 (room2) of
+the way from floor-only to correct. (2) The Gaussian line halves the
+remaining excess on 9/10 and 16/17 crops (group medians 0.13 → 0.07,
+0.16 → 0.08; FLY125_00 is the exception, 0.078 vs 0.077) and gives the same
+Δ ≈ −0.18 against the full-skirt arm on both validation rigs. (3) Within
+the Gaussian family a free width per order buys another 0.01–0.02 on
+room2 (17/17) and 0.01 on FLY125; sub-bin widths, per-mic floor and a
+looser drift prior buy nothing beyond the Gaussian. (4) The speed law, on
+the ramp-containing validation clips, buys nothing. (5) What is left,
+0.055–0.07 nats/cell on every rig, is not reachable by any spectral-shape
+relaxation tested; it is where the second-order findings below point.
 
 ### Phase statistics along the lines (tested estimator, `phase_stats.py`)
 
@@ -197,25 +210,34 @@ white-noise overlap curve, the tone-in-noise plateau and a bin-crossing
 chirp); a coherent tone plus noise plateaus at the tone's share of the bin
 power.
 
-| orders 1–8 | lag 1 | 2 | 3 | 4 | 6 | 8 | 12 | 16 | null |
+| orders 1–8 | lag 1 | 2 | 3 | 4 | 6 | 8 | 12 | 16 | null (lags ≥ 3) |
 |---|---|---|---|---|---|---|---|---|---|
-| FLY125 (8 clips) | 0.97 | 0.92 | 0.86 | 0.81 | 0.76 | 0.70 | 0.56 | 0.61 | 0.08 |
-| FLY124 (7) | 0.92 | 0.76 | 0.72 | 0.65 | 0.57 | 0.57 | 0.64 | 0.63 | 0.08 |
-| DREGON room2 (5) | 0.66 | 0.29 | 0.25 | 0.26 | 0.18 | 0.18 | 0.23 | 0.13 | 0.10–0.21 |
-| renderer controls (2) | 0.69 | 0.22 | 0.17 | 0.18 | 0.18 | 0.24 | 0.07 | 0.09 | 0.05–0.17 |
+| FLY125 (8 clips) | 0.78 | 0.51 | 0.41 | 0.37 | 0.37 | 0.35 | 0.28 | 0.33 | 0.07–0.08 |
+| FLY124 (7) | 0.77 | 0.47 | 0.41 | 0.38 | 0.33 | 0.33 | 0.33 | 0.34 | 0.07–0.10 |
+| DREGON room2 (5) | 0.65 | 0.26 | 0.24 | 0.24 | 0.18 | 0.20 | 0.23 | 0.13 | 0.09–0.19 |
+| renderer controls (2) | 0.66 | 0.21 | 0.16 | 0.15 | 0.17 | 0.24 | 0.09 | 0.09 | 0.08–0.16 |
 | Lorentzian at the fitted γ (4.7 Hz) | 0.79 | 0.40 | 0.15 | 0.05 | 0.01 | 0 | 0 | 0 | |
 
-Orders 9–24: DREGON room1 0.76 / 0.52 / 0.48 / 0.51 / 0.55 / 0.39 / 0.32 /
-0.30 (null 0.09–0.20); FLY125 and FLY124 0.3–0.5 with nulls 0.1–0.3 (few
-isolated runs); no band above 24 has enough isolated runs.
+Orders 9–24: DREGON room1 0.69 / 0.43 / 0.39 / 0.41 / 0.50 / 0.35 / 0.32 /
+0.35 against a null of 0.62 / 0.24 / 0.14 / 0.17 / 0.25 / 0.13 / 0.20 /
+0.22 (few isolated runs, hence the high null); Michael's 0.3–0.5 with
+nulls 0.13–0.26; no band above 24 has enough isolated runs.
 
-Reading: on both Michael's flights the low harmonics are coherent tones
-carrying ≈ 0.6 of their bin power (a plateau eight times the null, where a
-Lorentzian of the fitted width has decayed to zero by lag 6); DREGON room2's
-low harmonics are stochastic and broad with at most a marginal coherent
-share (0.1–0.15 above a null of 0.1–0.2); room1's mid orders show a
-plateau of 0.3–0.5. The earlier claim "FLY124 decays like a narrow line"
-came from the bin-jump artefact and is withdrawn.
+The null is white noise through the same window, frames and demodulation:
+successive lagged products of a 75 %-overlap STFT are correlated, so a short
+run's |Σ| is inflated beyond the iid value, and a phase-scrambled null
+under-reads it by ~30 % (the first version of this estimator, and its
+0.6 plateaus, are superseded; that version also took |Σ| per run and
+added, a positive bias growing with the number of short runs).
+
+Reading: on both Michael's flights the low harmonics carry a coherent
+component — a plateau of 0.33–0.37 out to half a second, four times the
+null, where a Lorentzian of the fitted width is at zero by lag 6; the
+tone's share of the bin power is of that order (the plateau is a lower
+bound: any carrier error decorrelates long lags). DREGON room2's low
+harmonics sit 0.05–0.1 above their null — at most a marginal coherent
+share; room1's mid orders 0.1–0.25 above theirs. The renderer controls sit
+at their null, as they must.
 
 Centre regressions of `log R` on the rotor's in-clip speed deviation:
 slopes −0.09…+0.15 nats per 1 % on every group/band, |corr| ≤ 0.09; on the
@@ -250,6 +272,39 @@ energy and the common term was unresolved on DREGON / marginal on Michael's
 and predominantly per-microphone — so the three-term decomposition is the
 coordinate system for the generative model, not a validated covariance;
 its loadings are to be fitted, not assumed.
+
+## Conclusion (provisional — no modified renderer exists yet)
+
+Answer to "wrong ranges or wrong family": the realized family already
+explains three quarters to seven eighths of what a correct spectral model
+would on every rig; what it misses is structural, not a range. Two
+structural facts are established by paired ablations and second-order
+statistics on 48 real clips: (1) the harmonic line falls off faster than
+the family's clipped Lorentzian — a Gaussian of equal half width halves
+the remaining misfit on 45 of 48 clips, and a free width per order adds a
+little on DREGON; (2) Michael's low harmonics are partly coherent tones
+(plateau 0.33–0.37 vs null 0.08), DREGON's are not, and real amplitudes
+fluctuate more than exponentially everywhere. Neither sub-bin widths, nor
+per-microphone floors, nor a looser drift prior, nor the speed law, nor
+bin integration moves the fit.
+
+Physically (§ Interpretation) this is the quasi-static FM regime: coherent
+tones on one slowly wandering shaft, whose within-frame frequency
+distribution is Gaussian with width ∝ k, over a small per-harmonic
+diffusion; the family renders independently phase-diffusing narrowband
+noise per harmonic. The candidate generative change is therefore a
+shared-shaft FM tone bank (`δr_ρ(t)` per rotor, `x_ρk = A_ρk cos(k φ_ρ +
+b_ρk + ψ_ρk)`), with a coherent share that is a *range including zero*
+(DREGON), a heavier-tailed / faster amplitude process, and a per-microphone
+overall gain.
+
+What this campaign has **not** yet done: implement that renderer, read its
+ranges off the fitted distributions, and pass the gate — renderer output on
+the real trajectories, refitted, must land where the real clips land
+(excess ≈ 0.06 with the same residual structure and the same coherence
+plateaus on Michael's-like draws) — and then the transfer test (retrain S2,
+score the real panel). Until then the claim "samples statistically more
+similar to DREGON / MD2" is a prediction, not a result.
 
 ## Gotchas
 
