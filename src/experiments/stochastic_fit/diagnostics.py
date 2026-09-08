@@ -18,6 +18,8 @@ from typing import Any
 
 import numpy as np
 
+from .fit import LOO_OFFSETS, loo_reference
+
 ORDER_BANDS: tuple[tuple[int, int], ...] = ((1, 8), (9, 24), (25, 64), (65, 10_000))
 BAND_NAMES = ("k1-8", "k9-24", "k25-64", "k65+")
 
@@ -70,19 +72,22 @@ class FitResult:
                 json.loads(str(z["spec"])),
                 meta,
             )
-            if "power" in z.files:
+            if "power" in z.files:  # full-size file: rebuild the smoother with the current offsets
+                power, spectrum = z["power"], z["spectrum"]
+                _, m_hat = loo_reference(
+                    power.astype(np.float32) / scores["power_scale"], z["freqs"] >= 30.0
+                )
                 return cls(
                     meta["clip_id"],
                     meta["group"],
                     meta["variant"],
-                    z["power"],
-                    z["spectrum"],
-                    z["loo_smoother"],
+                    power,
+                    spectrum,
+                    (m_hat * scores["power_scale"]).astype(np.float32),
                     *common,
                 )
             spectrum = (10.0 ** (z["spectrum_db"].astype(np.float32) / 10.0)).astype(np.float32)
         from .data import periodogram
-        from .fit import loo_reference
 
         clip = load_clip_cached(meta["clip_id"])
         pg = periodogram(clip)
@@ -335,7 +340,7 @@ def excess_by_region(res: FitResult) -> dict[str, float]:
     """Excess over the LOO reference split into line cells and floor cells
     (nats/cell, inner frames only), so the misfit can be attributed."""
     M, N, F = res.power.shape
-    half = 2
+    half = max(abs(s) for s in LOO_OFFSETS)
     inner = slice(half, N - half)
     cells = line_cells(res)
     near = np.zeros((N, F), dtype=bool)
@@ -352,7 +357,7 @@ def excess_by_region(res: FitResult) -> dict[str, float]:
     cell_loo = p / m_loo + np.log(m_loo)
     from scipy.special import digamma
 
-    n_nb = 2 * half
+    n_nb = len(LOO_OFFSETS)
     bias = n_nb / (n_nb - 1.0) - 1.0 + (float(digamma(n_nb)) - np.log(n_nb))
     ex = cell_fit - (cell_loo - bias)
     lines = near[inner][:, band][None].repeat(M, axis=0)
