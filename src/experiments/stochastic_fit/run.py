@@ -41,6 +41,9 @@ VARIANTS: dict[str, dict[str, Any]] = {
     "family": {},
     # + a smooth per-rotor carrier correction (imperfect references)
     "family_rps": dict(rps_offset=True),
+    # the renderer's REALIZED line: skirts cut at +-5 gamma and renormalized
+    "family_trunc": dict(line_shape="lorentz_trunc"),
+    "family_trunc_rps": dict(rps_offset=True, line_shape="lorentz_trunc"),
     # structural alternatives, each one change from family_rps
     "free_gamma": dict(rps_offset=True, free_gamma=True),
     "gauss": dict(rps_offset=True, line_shape="gauss"),

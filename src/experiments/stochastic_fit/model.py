@@ -47,6 +47,10 @@ GAMMA_FLOOR_HZ = 0.05
 #: sub-bin line keeps its power; the family's *realized* spectra carry that
 #: floor, and so does the model unless ``gamma_min_bins`` is set to 0.
 GAMMA_MIN_BINS = 0.6
+#: The renderer renders each line over +-5 half widths and divides by the
+#: fraction of a Lorentzian inside that support (``stochastic_rotor_noise``).
+LORENTZ_SUPPORT_HWHM = 5.0
+LORENTZ_TRUNC_NORM = float(2.0 / math.pi * math.atan(LORENTZ_SUPPORT_HWHM))
 
 
 @dataclass
@@ -304,7 +308,13 @@ class CombSpectrum(nn.Module):
 
     def _line_density(self, d: Tensor, gamma: Tensor) -> Tensor:
         """Unit-area line density at signed offsets ``d`` (Hz): the renderer's
-        point sample at the bin centre, or the exact bin integral."""
+        point sample at the bin centre, or the exact bin integral.
+
+        ``line_shape``: ``lorentz`` (full skirts), ``lorentz_trunc`` (the
+        renderer's realized line: support cut at ``LORENTZ_SUPPORT_HWHM`` half
+        widths and the kept 87.4 % renormalized to unit area — the family's
+        clips carry no skirts beyond 5 gamma) or ``gauss`` (equal HWHM).
+        """
         if self.spec.line_shape == "gauss":
             sigma = gamma / math.sqrt(2.0 * math.log(2.0))
             if not self.spec.line_bin_integrate:
@@ -313,11 +323,16 @@ class CombSpectrum(nn.Module):
             s2 = sigma * math.sqrt(2.0)
             return 0.5 * (torch.erf((d + half) / s2) - torch.erf((d - half) / s2)) / self.df
         if not self.spec.line_bin_integrate:
-            return gamma / (math.pi * (d * d + gamma * gamma))
-        half = 0.5 * self.df
-        return (torch.atan((d + half) / gamma) - torch.atan((d - half) / gamma)) / (
-            math.pi * self.df
-        )
+            dens = gamma / (math.pi * (d * d + gamma * gamma))
+        else:
+            half = 0.5 * self.df
+            dens = (torch.atan((d + half) / gamma) - torch.atan((d - half) / gamma)) / (
+                math.pi * self.df
+            )
+        if self.spec.line_shape == "lorentz_trunc":
+            keep = (d.abs() <= LORENTZ_SUPPORT_HWHM * gamma).to(dens.dtype)
+            return dens * keep / LORENTZ_TRUNC_NORM
+        return dens
 
     def lines(self, k_chunk: int = 32) -> Tensor:
         """``(R, N, F)`` the rotors' line spectra (before microphone gains)."""
