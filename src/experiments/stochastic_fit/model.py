@@ -18,12 +18,13 @@ coordinates (decibels, Hz, rev/s), so a fitted set can be read against
   floor share, and an optional smooth per-rotor carrier offset in rev/s
   (``rps_offset``) with a tight prior for imperfect references.
 
-Lines are bin-integrated (the Lorentzian's arctan antiderivative, the
-renderer's ``line_bin_integrate`` route, or a Gaussian of equal HWHM under
-``line_shape="gauss"``) and the whole spectrum is convolved with the periodic
-Hann window's power response ``[1/6, 2/3, 1/6]`` — the analysis window's
-smearing of a stationary spectrum on the bin grid — so the model predicts the
-periodogram's expectation, not the PSD.
+Lines are sampled at the bin centres with the renderer's 0.6-bin width floor
+(its default route; ``line_bin_integrate`` switches to the exact arctan bin
+integral, ``line_shape="gauss"`` to a Gaussian of equal HWHM) and the whole
+spectrum is convolved with the periodic Hann window's power response
+``[1/6, 2/3, 1/6]`` — the analysis window's smearing of a stationary spectrum
+on the bin grid — so the model predicts the periodogram's expectation, not
+the PSD.
 """
 
 from __future__ import annotations
