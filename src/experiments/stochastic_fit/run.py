@@ -46,8 +46,21 @@ VARIANTS: dict[str, dict[str, Any]] = {
     "gauss": dict(rps_offset=True, line_shape="gauss"),
     "mic_floor": dict(rps_offset=True, mic_floor=True),
     "speed_law": dict(rps_offset=True, fit_speed_law=True),
+    # sub-bin lines: no 0.6-bin width floor, exact bin integral — tests the
+    # peaked low-order residual (real low harmonics sharper than the renderer can make)
+    "sharp": dict(rps_offset=True, gamma_min_bins=0.0, line_bin_integrate=True),
+    # weak drift prior (the family's top of range): tests the slow residual structure
+    "drift6": dict(rps_offset=True, gp_std_db=6.0),
     # everything at once: the most the family's *shape* can be stretched
-    "extended": dict(rps_offset=True, free_gamma=True, mic_floor=True, fit_speed_law=True),
+    "extended": dict(
+        rps_offset=True,
+        free_gamma=True,
+        mic_floor=True,
+        fit_speed_law=True,
+        gamma_min_bins=0.0,
+        line_bin_integrate=True,
+        gp_std_db=6.0,
+    ),
 }
 
 
