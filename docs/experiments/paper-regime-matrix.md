@@ -1603,6 +1603,62 @@ resubmitted under `amp_dtype: bfloat16` (config comment records it). Policy
 from here: a run that goes non-finite under fp16 is resubmitted under bf16
 once; a second failure is the recipe's, not the dtype's.
 
+### Vast ran out of funds at ~03:15 UTC — every run is resumable from R2
+
+All fifteen live instances stopped within the same minute (Vast: balance 0,
+credit 14.29 below the 16.83 threshold); W&B marked every run `crashed` at
+03:14–03:20 and the omnirun daemon kept reporting them `running`. Nothing was
+lost that matters: `last.ckpt` and `train_state.pt` (optimizer, scheduler,
+scaler, controller windows, optimizer-step counter) are uploaded to R2 after
+every round, so each run resumes from its last completed round; at most the
+partial round in flight (<500 updates) is repeated. The dead jobs were
+cancelled (instances destroyed, none remain). State at the stop:
+
+| run | optimizer step | overall_macro | lr | W&B id |
+|---|---:|---:|---:|---|
+| `real_r1_sc_unified` | 34,500 | 23.02 | 1.00e-03 | `sgjdjezs` |
+| `real_r1_scv2_unified` | 33,000 | 19.99 | 5.00e-04 | `1scbu9d6` |
+| `real_r1_tm_unified` | 30,000 | 18.41 | 1.00e-03 | `l1umrr6s` |
+| `real_r1_gru_unified` | 12,500 | 30.47 | 1.00e-03 | `kbs78t8r` |
+| `real_r2_sc_unified` | 37,500 | 15.13 | 2.50e-04 | `dyktp6k6` |
+| `real_r2_scv2_unified` | 3,500 | 22.82 | 1.00e-03 | `a47qq9hh` |
+| `real_r2_tm_unified` | 30,500 | 17.45 | 2.50e-04 | `j47e0cxg` |
+| `real_r2_gru_unified` | 12,000 | 19.95 | 1.00e-03 | `1z12x0aq` |
+| `real_r3_sc_unified` | 35,000 | 14.12 | 1.00e-03 | `we7arczl` |
+| `real_r3_scv2_unified` | 30,000 | 15.55 | 2.50e-04 | `hagkdlsp` |
+| `real_r3_tm_unified` | 30,000 | 16.92 | 2.50e-04 | `o31jtckp` |
+| `real_r3_gru_unified` | 15,000 | 18.72 | 1.00e-03 | `rtc0ibc4` |
+| `real_r4_sc_unified` | 25,500 | 12.91 | 2.50e-04 | `2xswdg6j` |
+| `real_r4_scv2_unified` | 29,000 | 14.12 | 1.25e-04 | `ltdj9hl2` |
+| `real_r4_tm_unified` | 29,500 | 11.5 | 2.50e-04 | `24qqsgmp` |
+| `real_r4_gru_unified` | 12,000 | 11.58 | 1.00e-03 | `ckp5647j` |
+
+`real_r2_scv2_unified` is the bf16 restart (the earlier fp16 run is
+superseded). Its second bf16 attempt hung on its host at 02:16 before the
+funds ran out and was cancelled; the R2 state is the bf16 run's round 6.
+
+Resume, once the balance is topped up (same code `a8b34fd`; `resume=true`
+pulls the state from R2, `logging.resume_id` continues the same W&B history):
+
+```bash
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r1_sc_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r1_sc_unified resume=true logging.resume_id=sgjdjezs'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r1_scv2_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r1_scv2_unified resume=true logging.resume_id=1scbu9d6'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r1_tm_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r1_tm_unified resume=true logging.resume_id=l1umrr6s'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r1_gru_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r1_gru_unified resume=true logging.resume_id=kbs78t8r'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r2_sc_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r2_sc_unified resume=true logging.resume_id=dyktp6k6'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r2_scv2_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r2_scv2_unified resume=true logging.resume_id=a47qq9hh'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r2_tm_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r2_tm_unified resume=true logging.resume_id=j47e0cxg'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r2_gru_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r2_gru_unified resume=true logging.resume_id=1z12x0aq'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r3_sc_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r3_sc_unified resume=true logging.resume_id=we7arczl'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r3_scv2_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r3_scv2_unified resume=true logging.resume_id=hagkdlsp'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r3_tm_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r3_tm_unified resume=true logging.resume_id=o31jtckp'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r3_gru_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r3_gru_unified resume=true logging.resume_id=rtc0ibc4'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r4_sc_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r4_sc_unified resume=true logging.resume_id=2xswdg6j'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r4_scv2_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r4_scv2_unified resume=true logging.resume_id=ltdj9hl2'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r4_tm_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r4_tm_unified resume=true logging.resume_id=24qqsgmp'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r4_gru_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r4_gru_unified resume=true logging.resume_id=ckp5647j'
+```
+
 ### Salience models now validate on the same panel
 
 The `task.name == "rps_prediction"` guard is gone. `training.validation`
