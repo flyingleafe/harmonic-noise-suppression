@@ -30,7 +30,9 @@ def test_white_noise_follows_the_window_overlap():
     expect = np.array([HANN_OVERLAP[min(lag, 4)] for lag in LAGS])
     np.testing.assert_allclose(coh.coherence[:4], expect[:4], atol=0.03)
     assert np.all(coh.coherence[4:] < 0.04)
-    assert np.all(coh.null < 0.03)
+    # the null is white noise through the same window: it carries the overlap too
+    np.testing.assert_allclose(coh.null[:4], expect[:4], atol=0.03)
+    assert np.all(coh.null[4:] < 0.04)
 
 
 @pytest.mark.parametrize("gamma_hz", [1.0, 4.0])
@@ -91,3 +93,19 @@ def test_a_chirp_crossing_bins_reads_as_a_coherent_tone():
     centres = f_inst[np.arange(n_frames) * HOP + N_FFT // 2]
     coh = lag_coherence(x, [(np.arange(n_frames), centres)], LAGS)
     assert np.all(coh.coherence > 0.97)
+
+
+def test_many_short_runs_of_noise_read_as_their_null():
+    """Pooling many short runs must not manufacture coherence: white noise
+    chopped into 20-frame runs reads at (not above) the phase-scrambled null
+    beyond the window overlap, and that null is well above zero."""
+    rng = np.random.default_rng(4)
+    x = rng.standard_normal((2, SR * 60))
+    n_frames = _frames(x.shape[1])
+    frames = np.arange(n_frames)
+    keep = (frames % 21) != 20  # runs of 20 frames
+    tracks = [(frames[keep], np.full(int(keep.sum()), 1000.0))]
+    coh = lag_coherence(x, tracks, LAGS)
+    beyond = (np.array(LAGS) >= 6) & (np.array(LAGS) <= 12)
+    assert np.all(coh.coherence[beyond] < coh.null[beyond] + 0.06)
+    assert np.all(coh.null[beyond] > 0.1)

@@ -17,8 +17,8 @@ cell-to-cell structure. Two readouts:
     (:func:`lorentzian_lag_prediction`, which the window makes much slower
     than ``exp(-2 pi gamma tau)`` at short lags); a coherent tone plus noise
     sits on a plateau equal to the tone's share of the bin power. The null
-    level (phase-scrambled surrogate) is returned beside the statistic
-    because with few pairs it is not zero.
+    level (white noise through the same window, frames and demodulation) is
+    returned beside the statistic because with few pairs it is not zero.
 
 ``centre_regressions``
     slope of ``log R`` at the line centre against the rotor's speed
@@ -52,7 +52,7 @@ def stft(audio: np.ndarray, n_fft: int = N_FFT, hop: int = HOP) -> np.ndarray:
 class LagCoherence:
     lags: np.ndarray
     coherence: np.ndarray  # (L,)
-    null: np.ndarray  # (L,) phase-scrambled surrogate level
+    null: np.ndarray  # (L,) white-noise surrogate through the same window/runs
     n_pairs: np.ndarray  # (L,)
 
 
@@ -107,10 +107,14 @@ def lag_coherence(
     """
     rng = np.random.default_rng(seed)
     lags_a = np.asarray(lags)
-    num = np.zeros(lags_a.size)
-    p_a = np.zeros(lags_a.size)
-    p_b = np.zeros(lags_a.size)
-    null_num = np.zeros(lags_a.size)
+    # per run: |sum inc| / sqrt(sum|a|^2 sum|b|^2), then a pair-count-weighted
+    # mean over runs. Runs cannot be pooled as one complex sum: every harmonic
+    # has its own initial phase, so cross-run terms would cancel. The per-run
+    # magnitude carries a positive finite-sample bias (~1/sqrt(n_pairs)); the
+    # phase-scrambled null reproduces it with the same weights.
+    w_sum = np.zeros(lags_a.size)
+    coh_sum = np.zeros(lags_a.size)
+    null_sum = np.zeros(lags_a.size)
     count = np.zeros(lags_a.size, dtype=int)
     for frames, centres in tracks:
         frames, centres = np.asarray(frames), np.asarray(centres, dtype=np.float64)
@@ -122,21 +126,31 @@ def lag_coherence(
             advance = 2 * np.pi * 0.5 * (c_i[:-1] + c_i[1:]) * hop / sr
             phase = np.concatenate([[0.0], np.cumsum(advance)])
             zd = z * np.exp(-1j * phase)[None, :]
+            # the null: white noise of the same length through the SAME window,
+            # frames and demodulation. Successive lagged products of a Hann STFT
+            # are correlated through the 75 % frame overlap, which inflates a
+            # short run's |sum| beyond the iid finite-sample value; a per-frame
+            # phase scramble destroys that correlation and under-reads the null
+            # by ~30 % on 20-frame runs, a white-noise surrogate reproduces it.
+            white = rng.standard_normal(audio.shape)
+            zn = stft_at(white, f_i, c_i, hop=hop, sr=sr) * np.exp(-1j * phase)[None, :]
             for i, lag in enumerate(lags_a):
                 if zd.shape[1] <= lag:
                     continue
                 a, b = zd[:, lag:], zd[:, :-lag]
-                inc = a * np.conj(b)
-                num[i] += np.abs(inc.sum())
-                p_a[i] += float(np.sum(np.abs(a) ** 2))
-                p_b[i] += float(np.sum(np.abs(b) ** 2))
-                count[i] += inc.size
-                theta = rng.uniform(0, 2 * np.pi, inc.shape)
-                null_num[i] += np.abs((np.abs(inc) * np.exp(1j * theta)).sum())
-    den = np.sqrt(p_a * p_b)
-    ok = den > 0
-    coh = np.where(ok, num / np.maximum(den, 1e-30), np.nan)
-    null = np.where(ok, null_num / np.maximum(den, 1e-30), np.nan)
+                den = float(np.sqrt(np.sum(np.abs(a) ** 2) * np.sum(np.abs(b) ** 2)))
+                if den <= 0:
+                    continue
+                an, bn = zn[:, lag:], zn[:, :-lag]
+                den_n = float(np.sqrt(np.sum(np.abs(an) ** 2) * np.sum(np.abs(bn) ** 2)))
+                w = a.size
+                coh_sum[i] += w * float(np.abs((a * np.conj(b)).sum())) / den
+                null_sum[i] += w * float(np.abs((an * np.conj(bn)).sum())) / den_n
+                w_sum[i] += w
+                count[i] += w
+    ok = w_sum > 0
+    coh = np.where(ok, coh_sum / np.maximum(w_sum, 1e-30), np.nan)
+    null = np.where(ok, null_sum / np.maximum(w_sum, 1e-30), np.nan)
     return LagCoherence(lags_a, coh, null, count)
 
 

@@ -309,6 +309,11 @@ def fit(args: argparse.Namespace) -> None:
                 print(f"  FAILED: {exc!r}", flush=True)
                 (out.with_suffix(".err")).write_text(repr(exc))
                 continue
+            finite = np.isfinite(res["scores"]["nll_fit"]) and np.all(np.isfinite(res["spectrum"]))
+            if not finite:
+                print("  FAILED: non-finite fit", flush=True)
+                (out.with_suffix(".err")).write_text("non-finite fit")
+                continue
             # slim: the periodogram and the LOO smoother are recomputed from the R2
             # clip by the offline diagnostics; the fitted spectrum travels as
             # float16 decibels (0.01 dB resolution). Full-size files (2.5 GB per
