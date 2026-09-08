@@ -332,6 +332,15 @@ class CombSpectrum(nn.Module):
         if self.spec.line_shape == "lorentz_trunc":
             keep = (d.abs() <= LORENTZ_SUPPORT_HWHM * gamma).to(dens.dtype)
             return dens * keep / LORENTZ_TRUNC_NORM
+        if self.spec.line_shape == "lorentz_bucket":
+            # the renderer's REALIZED support: ceil(5 gamma / df) bins rounded up
+            # to a power of two, on either side of the centre bin, still divided
+            # by the fixed 87.4 % norm — so a realized line carries slightly
+            # more than unit area (``build_psd``, bucket rendering)
+            half_w = torch.ceil(LORENTZ_SUPPORT_HWHM * gamma.detach() / self.df).clamp_min(1.0)
+            bucket = torch.exp2(torch.ceil(torch.log2(half_w)))
+            keep = (d.abs() <= bucket * self.df + 0.5 * self.df).to(dens.dtype)
+            return dens * keep / LORENTZ_TRUNC_NORM
         return dens
 
     def lines(self, k_chunk: int = 32) -> Tensor:

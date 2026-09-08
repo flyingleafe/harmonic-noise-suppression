@@ -44,6 +44,9 @@ VARIANTS: dict[str, dict[str, Any]] = {
     # the renderer's REALIZED line: skirts cut at +-5 gamma and renormalized
     "family_trunc": dict(line_shape="lorentz_trunc"),
     "family_trunc_rps": dict(rps_offset=True, line_shape="lorentz_trunc"),
+    # the renderer's realized support (power-of-two bucket >= 5 gamma, fixed norm)
+    "family_bucket": dict(line_shape="lorentz_bucket"),
+    "family_bucket_rps": dict(rps_offset=True, line_shape="lorentz_bucket"),
     # structural alternatives, each one change from family_rps
     "free_gamma": dict(rps_offset=True, free_gamma=True),
     "gauss": dict(rps_offset=True, line_shape="gauss"),
