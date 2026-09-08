@@ -249,8 +249,13 @@ def fit(args: argparse.Namespace) -> None:
             if out.exists():
                 continue
             out.parent.mkdir(parents=True, exist_ok=True)
+            extra = {} if args.gp_std is None else dict(gp_std_db=float(args.gp_std))
             spec = make_spec(
-                pg, n_mics=clip.audio.shape[0], f_max=args.f_max, k_cap=args.k_cap, variant=variant
+                pg,
+                n_mics=clip.audio.shape[0],
+                f_max=args.f_max,
+                k_cap=args.k_cap,
+                variant=variant | extra,
             )
             print(f"{clip.clip_id} [{name}] K={spec.n_harm} N={pg.times.size}", flush=True)
             try:
@@ -332,6 +337,12 @@ def main(argv: list[str] | None = None) -> None:
     f.add_argument("--iters", nargs=4, type=int, default=[150, 150, 300, 60])
     f.add_argument("--tag", default="run")
     f.add_argument("--results-dir", default=str(RESULTS))
+    f.add_argument(
+        "--gp-std",
+        type=float,
+        default=None,
+        help="line-drift GP prior std in dB (default: the family midpoint, 3)",
+    )
     f.set_defaults(func=fit)
     args = ap.parse_args(argv)
     args.func(args)
