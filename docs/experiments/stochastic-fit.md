@@ -84,8 +84,10 @@ fraction):
 | renderer controls | 4 | 1.02 (1.01–1.07) | −0.006 (−0.02–0.00) | 0.30 |
 
 The leftover ≈ 0.3 nats/cell is nearly constant within a group — a
-structural misfit, not a bad draw; on the KL scale of the explainer it is a
-factor-1.8 power error on every cell, or a factor 10 on one cell in five.
+structural misfit, not a bad draw. On the KL scale (`r − 1 − log r`, r =
+true/model mean) 0.3 nats is what a 2× under-prediction or a 2.5×
+over-prediction on *every* cell would cost; direction matters, and the
+diagnostics below say which cells carry it.
 Per-clip numbers: `results/stochastic_fit/summary_family.json` of the job.
 
 ### Where it fails (residual `I/M` of the family fit, representative clips)

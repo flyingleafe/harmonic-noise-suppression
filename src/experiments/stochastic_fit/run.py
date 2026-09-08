@@ -48,6 +48,9 @@ VARIANTS: dict[str, dict[str, Any]] = {
     "speed_law": dict(rps_offset=True, fit_speed_law=True),
     # sub-bin lines: no 0.6-bin width floor, exact bin integral — tests the
     # peaked low-order residual (real low harmonics sharper than the renderer can make)
+    # discretization alone: exact bin integral, original 0.6-bin width floor;
+    # `sharp - integrated` isolates sub-bin width, `integrated - family_rps` the sampling
+    "integrated": dict(rps_offset=True, line_bin_integrate=True),
     "sharp": dict(rps_offset=True, gamma_min_bins=0.0, line_bin_integrate=True),
     # weak drift prior (the family's top of range): tests the slow residual structure
     "drift6": dict(rps_offset=True, gp_std_db=6.0),

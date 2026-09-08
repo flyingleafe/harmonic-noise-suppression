@@ -507,5 +507,6 @@ gains recovered within their identifiable precision; explained fraction at
 | even `extended` leaves a large, structured excess | H2, unlocalized within this family | the residual profile / half-order / coherence diagnostics say what kind of component is missing; the family is not the model of real rotor noise |
 
 "Large" is calibrated by the synthetic controls' own excess and by the KL
-scale of @eq-kl: 0.1 nats/cell is a 60 % power error on every cell, or a
-factor of 10 on one cell in fifteen.
+scale of @eq-kl, which is asymmetric: 0.1 nats/cell is a 60 % under-prediction
+(true = 1.6 × model) or a 37 % over-prediction on every cell, or a 10 ×
+over-prediction on one cell in fifteen.
