@@ -687,6 +687,28 @@ CV. FLY103/FLY108 remain independent for Michael's. DREGON has no unused
 noise-only recording in the current bundle; either prepare a genuinely unused
 recording or label the DREGON realism result exploratory.
 
+### First 50/50 rig-FM transfer run: decisive failure
+
+The originally requested unchanged baseline completed after its interrupted
+run was resumed from the R2 checkpoint: W&B `7rf8rng7`, revision `0aa5923`,
+104 validation rounds / 52,000 optimizer steps, stopped by any-subset
+saturation. Best scores (each at its own epoch):
+
+| metric | best MAE (rev/s) | epoch |
+|---|---:|---:|
+| `real_r3` / real overall | 23.075 | 47 |
+| real nosource | 16.840 | 47 |
+| real source-present | 30.131 | 1 |
+| synthetic overall | 8.600 | 30 |
+| static no-mix / mix | 1.136 / 1.134 | 59 / 92 |
+
+R4's comparable real score is 2.99. The first fitted-preset stream is
+therefore 7.72× worse and fails the transfer objective. Static-subset
+improvements kept resetting the controller until epoch 103; the run was not
+censored early by its poor real score. This result belongs to the pre-parity,
+hand-exported presets and is a baseline, not a test of the corrected
+population renderer now under development.
+
 ## Prior conditional-fit conclusion (superseded by the population correction)
 
 Answer to "wrong ranges or wrong family": the realized family already
