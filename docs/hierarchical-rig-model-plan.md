@@ -1,12 +1,146 @@
 # One probabilistic rotor-noise model per rig: plan
 
-**Date**: 2026-09-09 · **Branch**: `stochastic-fit` · **Status**: PROPOSED
-(awaiting the user's reordering) · Evidence base:
+**Date**: 2026-09-09 · **Branch**: `stochastic-fit` · **Status**: ACTIVE —
+the joint-MAP ladder is complete; the population-model correction below is in progress. Evidence base:
 `docs/experiments/stochastic-fit.md` (the fitting campaign),
 `writing/reports/2026-07-18_dregon-analysis-and-generator-design` (per-rotor
 identity, geometry), `docs/experiments/residual-attribution.md` (mic
 structure of the floor), `docs/experiments/wind-channel-likelihood.md`
 (the refuted wake gate), Bretthorst (1988).
+
+## 0. Population-model correction (2026-09-09)
+
+The M1--M5 campaign implemented the hierarchy below as a joint MAP fit.  It
+answered the conditional question
+
+```
+max_eta p(periodogram | theta, eta) p(eta | theta),
+```
+
+where `eta` is a clip's level, harmonic drift, floor drift, microphone
+modulation and carrier correction.  The renderer, however, needs the
+prior-predictive distribution
+
+```
+p(periodogram | theta) = integral p(periodogram | theta, eta)
+                                  p(eta | theta) d eta.
+```
+
+The listening audit exposed the distinction: a clip can have an excellent
+conditional fit while draws from the hand-exported nuisance ranges have too
+many prominent teeth and the wrong joint order profile.  Therefore the joint
+MAP ladder remains the structural baseline, but its fitted clip scatter is
+not a sampler and §4's original procedure is superseded by the population
+fit specified here.
+
+### 0.1 Harmonic population
+
+For rig `g`, clip `c`, physical rotor `r` and order `k`, the static line
+profile in dB is
+
+```
+a_gcrk = mu_gk + delta_grk + ell_gcr + B_gk' z_gcr + e_gcrk.
+```
+
+- `mu_gk` is the rig mean profile.
+- `delta_grk` is a persistent, partially pooled physical-rotor profile.
+- `ell_gcr ~ Normal(0, sigma_level_g^2)` is the clip/rotor level.
+- `z_gcr ~ Normal(0, I_Q)` drives `Q` correlated order-profile modes.
+- `B_g` is learned, smooth in log order and row-centred so it cannot duplicate
+  `ell`; `sum_r delta_grk = 0` identifies `mu`.
+- `e_gcr` is initially zero.  A small smooth residual order process is an
+  evidence-selected addition, never broad independent harmonic jitter.
+
+Rank is selected from `Q = 0, 1, 2, 3` by held-out marginal predictive
+likelihood.  A visibility/hurdle state is admitted only if every continuous
+rank fails the held-out visible-tooth-count distribution.  If admitted, an
+invisible tooth is drawn below its local floor threshold rather than replaced
+by an arbitrary exact zero.
+
+The already-supported temporal and spatial structure remains conditional on
+this draw: shared-shaft FM, small per-harmonic diffusion, OU line amplitudes,
+one rig floor, DREGON's independent per-mic low-band floor modulation and
+Michael's common whole-signal microphone gain.
+
+### 0.2 Inference target
+
+Rig and population hyperparameters are empirical-Bayes point estimates.
+Every Gaussian clip random effect that the renderer later samples is
+marginalized during fitting in whitened coordinates:
+
+```
+eta_c = {ell, z, line-OU, floor-OU, DREGON mic-OU, carrier correction}.
+```
+
+Use a reparameterized variational posterior `q_c(eta_c)` and optimize
+
+```
+ELBO = sum_c E_q[log p(I_c | theta, eta_c)]
+             - KL(q_c(eta_c) || p(eta_c | theta))
+             + log p(theta),
+```
+
+with the existing Whittle observation likelihood.  Antithetic samples reduce
+gradient variance.  The model is fitted on one recording and scored on
+another by freezing `theta`, fitting only `q_c`, and reporting both the ELBO
+and an importance-weighted estimate
+
+```
+log p(I_c | theta) ~= logmeanexp(log p(I_c, eta) - log q_c(eta)).
+```
+
+The MAP mode is only an initialization.  No optimized clip nuisance or its
+raw scatter is exported as a prior; generation draws from `p(eta | theta)`.
+
+Implementation stays in native PyTorch and reuses `CombSpectrum`.
+`torch.func.functional_call` supplies sampled nuisance tensors without
+copying the spectral model.  Pyro was rejected because it would require a
+second model implementation while providing the same ELBO approximation;
+GPyTorch was rejected because exact marginal likelihood is restricted to a
+Gaussian observation model, whereas the observation here is Whittle
+(exponential periodogram cells).  A hand-built dense Laplace Hessian was
+rejected because the OU paths make the nuisance vector thousands of
+dimensions per clip.
+
+### 0.3 Evidence ladder
+
+| arm | population addition | admission criterion |
+|---|---|---|
+| P0 | `mu`, persistent `delta`, marginalized `ell`; no profile modes | calibrated population control |
+| P1--P3 | one, two, then three smooth profile modes | held-out IW predictive NLL improves in both directions |
+| PV | floor-relative visibility/hurdle process | continuous winner fails visible-tooth counts and PV fixes them |
+| PT | Student-t line innovations or coherent low-order share | temporal/coherence gate fails and held-out evidence improves |
+
+An arm is rejected if it only improves the training ELBO, if its planted
+population is not recoverable, or if its extra mode is not reproducible
+between the two recordings of a rig.
+
+### 0.4 Posterior-predictive gates
+
+All gates use recordings excluded from the population fit.
+
+1. **Population calibration.** On planted multi-clip populations, the fitted
+   hyperparameters cover the truth and 80/95% posterior-predictive intervals
+   attain their nominal coverage within binomial uncertainty.
+2. **Comb topology.** Per-order line/local-floor quantiles, visible-tooth
+   count, decay slope/curvature, blade-pass prominence and four-rotor
+   prominence must be no farther from held-out real data than the
+   real-recording-to-real-recording reference distance.
+3. **Dynamics and microphones.** Line-amplitude variance/ACF, cross-order
+   co-movement, floor-envelope statistics and cross-mic covariance/rankings
+   must fall inside the held-out real bootstrap bands.
+4. **Classifier two-sample check.** A grouped, cross-recording classifier is
+   run separately on topology, dynamics, floor and microphone feature blocks.
+   Its bootstrap upper confidence bound on AUC must be below 0.70; a low-power
+   non-significant p-value alone is not a pass.
+5. **Listening audit.** Matched-RPS real/synthetic panels must have no
+   systematic defect not represented by a registered statistic.  Listening
+   discovers a missing gate; it does not authorize manual range tuning.
+
+Only after these gates pass is the 50/50 DREGON/Michael posterior-predictive
+stream frozen.  The final test is one otherwise unchanged SCv2 unified run,
+compared on the same real panel with R4's 2.99 rev/s MAE; “comparable” is
+predeclared as at most 3.3 rev/s with no collapsed real subset.
 
 ## 1. The question
 

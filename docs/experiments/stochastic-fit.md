@@ -559,7 +559,45 @@ cell likelihood, the interference of four tones in one bin). The transfer
 run (`rig_fm_scv2_unified`) is the test of whether what is captured is
 enough.
 
-## Conclusion (provisional — no modified renderer exists yet)
+## Population correction — 2026-09-09
+
+The matched-RPS listening audit rejected the first fitted presets despite
+their conditional Whittle scores: both rigs produced too many independently
+prominent teeth; Michael's real comb has a smooth order decay and a strong
+blade-pass region, while its draw kept conspicuous high orders. The cause is
+statistical, not another range: M1--M5 maximized each clip nuisance and the
+preset sampled hand ranges around those modes. `max_eta p(I|theta,eta)` is not
+the prior-predictive `integral p(I|theta,eta)p(eta|theta)d eta`.
+
+`population.py` now fits the latter with a native-PyTorch variational
+objective over every renderer random effect at clip level. The static profile
+is `mu_k + delta_rk + ell_cr + B_k z_cr`: persistent rotor identity,
+marginalized line/floor level and low-rank correlated order modes. Basis rows
+are centred so they cannot duplicate level. The population prior is expressed
+in scale-invariant coordinates — order-2 line/floor ratio and rotor-level
+contrasts — because the fit normalizes each clip's periodogram and absolute
+level is unidentifiable. Whitened line/floor OU paths, DREGON microphone OU
+and carrier corrections are marginalized too. Held-out scoring freezes the
+population and reports both ELBO and importance-weighted predictive NLL/ESS.
+`run.py popfit` is the P0--P3 recording-held-out ladder.
+
+The planted **population** control (24 independent clips, 18 train / 6
+held-out, rank 1) passes:
+
+- order-profile covariance cosine 0.998;
+- order-2 line/floor mean 23.67 dB recovered from 23.79 dB;
+- line/floor population std 2.34 dB from 3.28 dB and rotor-contrast std
+  3.72 dB from 3.00 dB;
+- train / held-out excess over the correct Whittle reference +0.012 / +0.013
+  nats/cell;
+- median held-out importance ESS 3.75 of 8.
+
+The bounded regression control uses 12 clips and admits sampling uncertainty
+while pinning covariance recovery, held-out calibration and non-degenerate
+importance weights (`test_stochastic_fit_population.py`). Full experiment
+tests: 50 passed, 1 deselected; renderer tests: 28 passed.
+
+## Prior conditional-fit conclusion (superseded by the population correction)
 
 Answer to "wrong ranges or wrong family": the realized family already
 explains three quarters (room2) to seven eighths (FLY125, room1, FLY124)

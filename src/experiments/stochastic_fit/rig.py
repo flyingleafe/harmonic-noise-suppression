@@ -48,6 +48,8 @@ class RigSpec:
     rotor_width: bool = False  # per-rotor width scale w_r, prior std 0.2 in log
     width_scale_std: float = 0.2
     level_prior_db: float = 10.0  # per-clip per-rotor level, weak prior
+    profile_rank: int = 0  # low-rank correlated clip/rotor profile population
+    profile_mode_smooth_db: float = 3.0  # second-difference prior on each loading
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -62,6 +64,11 @@ class RigParams(nn.Module):
         self.floor_tilt_db_oct = z(1)
         self.profile_db = z(K)  # A_k
         self.delta_db = z(R, K)  # delta_rk
+        self.profile_basis_db: nn.Parameter | None
+        if rig.profile_rank > 0:
+            self.profile_basis_db = z(rig.profile_rank, K)
+        else:
+            self.register_parameter("profile_basis_db", None)
         self.gamma0_raw = nn.Parameter(
             torch.full((1,), _inv_softplus(2.0), dtype=dtype, device=device)
         )
@@ -90,7 +97,19 @@ class RigParams(nn.Module):
             p = p + 0.5 * self.delta_db.square().sum() / r.delta_std_db**2
         if r.rotor_width:
             p = p + 0.5 * self.log_width_scale.square().sum() / r.width_scale_std**2
+        if self.profile_basis_db is not None:
+            basis = self.profile_basis()
+            if basis.shape[1] > 2:
+                d2 = basis[:, 2:] - 2.0 * basis[:, 1:-1] + basis[:, :-2]
+                p = p + 0.5 * d2.square().sum() / r.profile_mode_smooth_db**2
+            p = p + 0.5 * basis.square().sum() / 20.0**2
         return p
+
+    def profile_basis(self) -> Tensor:
+        """Centred ``(Q, K)`` profile loadings; centring identifies rotor level."""
+        if self.profile_basis_db is None:
+            return self.profile_db.new_zeros((0, self.profile_db.numel()))
+        return self.profile_basis_db - self.profile_basis_db.mean(dim=1, keepdim=True)
 
     def parameters_for(self, stage: str) -> list[nn.Parameter]:
         s, r = self.spec, self.rig
@@ -112,6 +131,8 @@ class RigParams(nn.Module):
             lines.append(self.profile_db)
         if r.rotor_delta:
             lines.append(self.delta_db)
+        if self.profile_basis_db is not None:
+            lines.append(self.profile_basis_db)
         if r.tie_width:
             lines += [self.gamma0_raw, self.slope_raw]
         if r.rotor_width:
@@ -132,6 +153,11 @@ class RigParams(nn.Module):
                 floor_shape_z=self.floor_shape_z.cpu().numpy().copy(),
                 floor_tilt_db_oct=float(self.floor_tilt_db_oct.item()),
                 profile_db=self.profile_db.cpu().numpy().copy(),
+                profile_basis_db=(
+                    self.profile_basis().cpu().numpy().copy()
+                    if self.profile_basis_db is not None
+                    else None
+                ),
                 delta_db=self.delta_db.cpu().numpy().copy(),
                 gamma0=float(g(self.gamma0_raw).item()),
                 gamma_slope=float(g(self.slope_raw).item()),
@@ -155,6 +181,13 @@ class ClipInRig(CombSpectrum):
         super().__init__(spec, device=device, dtype=dtype)
         self.rig = rig
         self.level_db = nn.Parameter(torch.zeros(self.R, dtype=dtype, device=device))  # l_cr
+        self.profile_z: nn.Parameter | None
+        if rig.profile_basis_db is not None:
+            self.profile_z = nn.Parameter(
+                torch.zeros(self.R, rig.rig.profile_rank, dtype=dtype, device=device)
+            )
+        else:
+            self.register_parameter("profile_z", None)
 
     # the rig's floor-shape prior is paid once, by the rig, when tied
     def _floor_shape_z(self) -> Tensor:
@@ -170,6 +203,8 @@ class ClipInRig(CombSpectrum):
         prof = self.rig.profile_db[None, :] + self.level_db[:, None]
         if r.rotor_delta:
             prof = prof + self.rig.delta_db
+        if self.profile_z is not None:
+            prof = prof + self.profile_z @ self.rig.profile_basis()
         return prof
 
     def _gamma_raw(self) -> tuple[Tensor, Tensor]:
@@ -210,6 +245,8 @@ class ClipInRig(CombSpectrum):
             p = p - 0.5 * self.floor_shape_z.square().sum()
         if r.tie_profile:
             p = p + 0.5 * self.level_db.square().sum() / r.level_prior_db**2
+        if self.profile_z is not None:
+            p = p + 0.5 * self.profile_z.square().sum()
         return p
 
     def parameter_groups(self, stage: str) -> list[nn.Parameter]:
@@ -230,6 +267,8 @@ class ClipInRig(CombSpectrum):
             return floor
         lines = [self.h_z]
         lines.append(self.level_db if r.tie_profile else self.profile_db)
+        if self.profile_z is not None:
+            lines.append(self.profile_z)
         if not r.tie_width:
             lines += [self.log_gamma_free] if s.free_gamma else [self.gamma0_raw, self.slope_raw]
         if not r.tie_mic_gain:
@@ -280,6 +319,21 @@ def _init_rig_from_clips(rig: RigParams, rcs: list[RigClip]) -> None:
         rig.profile_db.copy_(a)
         for rc in rcs:
             rc.model.level_db.copy_((rc.model.profile_db - a[None, :]).median(dim=1).values)
+        if rig.profile_basis_db is not None:
+            levels = torch.stack([rc.model.level_db for rc in rcs])
+            residual = prof - a[None, None, :] - levels[:, :, None]
+            flat = residual.reshape(-1, residual.shape[-1])
+            flat = flat - flat.mean(dim=1, keepdim=True)
+            u, singular, vh = torch.linalg.svd(flat, full_matrices=False)
+            q = min(rig.rig.profile_rank, u.shape[1])
+            sample_scale = float(max(flat.shape[0] - 1, 1)) ** 0.5
+            rig.profile_basis_db.zero_()
+            rig.profile_basis_db[:q].copy_(singular[:q, None] * vh[:q] / sample_scale)
+            scores = u[:, :q] * sample_scale
+            for c, rc in enumerate(rcs):
+                assert rc.model.profile_z is not None
+                rc.model.profile_z.zero_()
+                rc.model.profile_z[:, :q].copy_(scores[c * rig.R : (c + 1) * rig.R])
         rig.floor_tilt_db_oct.copy_(
             torch.stack([rc.model.floor_tilt_db_oct for rc in rcs]).median(dim=0).values
         )

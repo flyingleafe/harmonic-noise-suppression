@@ -611,6 +611,191 @@ def rigfit(args: argparse.Namespace) -> None:
         print(line + f"  ({time.time() - t0:.0f}s)", flush=True)
 
 
+def population_fit(args: argparse.Namespace) -> None:
+    """Fit and held-out-score the P0--P3 marginal population ladder."""
+    import torch
+
+    from .population import PopulationFitSpec, fit_population, fit_population_heldout
+    from .rig import RigSpec
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"device {device}", flush=True)
+    client = r2_client()
+    manifest = json.loads(
+        client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
+    )
+    if args.clips:
+        manifest = [entry for entry in manifest if entry["clip_id"] in args.clips]
+
+    def load(groups: list[str]) -> list[tuple[str, str, Any, Any]]:
+        loaded = []
+        for entry in manifest:
+            if entry["group"] not in groups:
+                continue
+            clip = clip_from_bytes(
+                client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read()
+            )
+            if clip.rps.max() < 5:
+                continue
+            loaded.append((clip.clip_id, entry["group"], clip, periodogram(clip)))
+        return loaded
+
+    raw_train = load(args.train_groups)
+    raw_test = load(args.test_groups) if args.test_groups else []
+    print(
+        f"train {len(raw_train)} clips {args.train_groups}; "
+        f"test {len(raw_test)} {args.test_groups}",
+        flush=True,
+    )
+    spec_over, base_rig_over = LADDER[args.rig_config]
+
+    def make_clips(raw: list[tuple[str, str, Any, Any]]) -> list[tuple[str, str, Any, Spec]]:
+        return [
+            (
+                clip_id,
+                group,
+                pg,
+                make_spec(
+                    pg,
+                    n_mics=clip.audio.shape[0],
+                    f_max=args.f_max,
+                    k_cap=args.k_cap,
+                    variant=BASE_VARIANT | spec_over,
+                ),
+            )
+            for clip_id, group, clip, pg in raw
+        ]
+
+    untrimmed = make_clips(raw_train) + make_clips(raw_test)
+    k_rig = min(item[3].n_harm for item in untrimmed)
+
+    def trim(raw: list[tuple[str, str, Any, Any]]) -> list[tuple[str, str, Any, Spec]]:
+        return [
+            (clip_id, group, pg, Spec(**{**spec.__dict__, "n_harm": k_rig}))
+            for clip_id, group, pg, spec in make_clips(raw)
+        ]
+
+    train = trim(raw_train)
+    test = trim(raw_test)
+    results = Path(args.results_dir) / args.tag
+    results.mkdir(parents=True, exist_ok=True)
+    fit_spec = PopulationFitSpec(
+        mc_samples=args.mc_samples,
+        iw_samples=args.iw_samples,
+        init_posterior_std=args.init_posterior_std,
+    )
+
+    def array_dict(values: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value.tolist() if isinstance(value, np.ndarray) else value
+            for key, value in values.items()
+        }
+
+    def slim(clips: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for clip_id, value in clips.items():
+            row = {
+                "group": value["group"],
+                "scores": value["scores"],
+                "params": {
+                    key: item.tolist() if isinstance(item, np.ndarray) else item
+                    for key, item in value["params"].items()
+                    if key not in ("carrier", "h_db", "umod_db", "rps_offset")
+                },
+                "posterior": {
+                    part: {
+                        key: item.tolist()
+                        for key, item in values.items()
+                        if key in ("level_db", "profile_z")
+                    }
+                    for part, values in value["posterior"].items()
+                },
+            }
+            for key in ("iw_log_evidence", "iw_nll_per_cell", "iw_ess"):
+                if key in value:
+                    row[key] = value[key]
+            out[clip_id] = row
+        return out
+
+    for rank in args.ranks:
+        name = f"P{rank}"
+        output = results / f"{name}.json"
+        if output.exists():
+            print(f"{name}: exists, skipping", flush=True)
+            continue
+        rig_spec = RigSpec(**(base_rig_over | {"profile_rank": rank}))
+        print(
+            f"== {name}: K={k_rig}, base={args.rig_config}, rank={rank}",
+            flush=True,
+        )
+        started = time.time()
+        fitted = fit_population(
+            train,
+            rig_spec,
+            fit_spec=fit_spec,
+            device=device,
+            map_iters=tuple(args.map_iters),
+            vi_iters=args.vi_iters,
+            map_lr=args.map_lr,
+            vi_lr=args.vi_lr,
+            seed=args.seed + rank,
+            log=lambda message: print(message, flush=True),
+        )
+        heldout = (
+            fit_population_heldout(
+                fitted,
+                test,
+                device=device,
+                map_iters=tuple(args.map_iters),
+                vi_iters=args.heldout_vi_iters,
+                map_lr=args.map_lr,
+                vi_lr=args.vi_lr,
+                seed=args.seed + 100 + rank,
+                log=lambda message: print(message, flush=True),
+            )
+            if test
+            else None
+        )
+        summary = {
+            "config": name,
+            "base_config": args.rig_config,
+            "spec": fitted["spec"],
+            "rig_spec": fitted["rig_spec"],
+            "fit_spec": fitted["fit_spec"],
+            "k_rig": k_rig,
+            "rig": array_dict(fitted["rig"]),
+            "population": fitted["population"],
+            "train_elbo_per_cell": fitted["elbo_per_cell"],
+            "heldout_elbo_per_cell": (heldout["elbo_per_cell"] if heldout is not None else None),
+            "train": slim(fitted["clips"]),
+            "heldout": slim(heldout["clips"]) if heldout is not None else None,
+            "seconds": time.time() - started,
+        }
+        output.write_text(json.dumps(summary))
+        torch.save(
+            {
+                "rig_spec": fitted["rig_spec"],
+                "fit_spec": fitted["fit_spec"],
+                "rig_state": fitted["rig_state"],
+                "population_state": fitted["population_state"],
+                "rig": fitted["rig"],
+                "population": fitted["population"],
+            },
+            results / f"{name}_state.pt",
+        )
+        heldout_nll = (
+            np.median([value["iw_nll_per_cell"] for value in heldout["clips"].values()])
+            if heldout is not None
+            else float("nan")
+        )
+        print(
+            f"{name}: train ELBO/cell {fitted['elbo_per_cell']:+.4f}; "
+            f"held-out IW NLL/cell {heldout_nll:+.4f} "
+            f"({time.time() - started:.0f}s)",
+            flush=True,
+        )
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -668,6 +853,26 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--tag", default="rig")
     r.add_argument("--results-dir", default=str(RESULTS) + "_rig")
     r.set_defaults(func=rigfit)
+    pf = sub.add_parser("popfit")
+    pf.add_argument("--rig-config", choices=["M5", "M5g"], required=True)
+    pf.add_argument("--ranks", nargs="+", type=int, default=[0, 1, 2, 3])
+    pf.add_argument("--train-groups", nargs="+", required=True)
+    pf.add_argument("--test-groups", nargs="*", default=None)
+    pf.add_argument("--clips", nargs="*", default=None)
+    pf.add_argument("--f-max", type=float, default=None)
+    pf.add_argument("--k-cap", type=int, default=128)
+    pf.add_argument("--map-iters", nargs=3, type=int, default=[60, 60, 120])
+    pf.add_argument("--vi-iters", type=int, default=200)
+    pf.add_argument("--heldout-vi-iters", type=int, default=150)
+    pf.add_argument("--map-lr", type=float, default=0.1)
+    pf.add_argument("--vi-lr", type=float, default=0.03)
+    pf.add_argument("--mc-samples", type=int, default=2)
+    pf.add_argument("--iw-samples", type=int, default=16)
+    pf.add_argument("--init-posterior-std", type=float, default=0.1)
+    pf.add_argument("--seed", type=int, default=0)
+    pf.add_argument("--tag", default="population")
+    pf.add_argument("--results-dir", default=str(RESULTS) + "_population")
+    pf.set_defaults(func=population_fit)
     args = ap.parse_args(argv)
     args.func(args)
 
