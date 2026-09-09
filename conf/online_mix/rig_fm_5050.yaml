@@ -55,7 +55,7 @@ sources:
         gamma_slope_hz: [0.4, 0.9]
         # quasi-static regime: the rig fit's 0.55-1.0 Hz/order Gaussian widths
         # and the ~0.5 s coherence time at k = 1 (stochastic-fit record)
-        shaft_jitter_rps: [0.7, 1.1]
+        shaft_jitter_rps: [0.8, 1.2]
         shaft_jitter_tau_s: [0.15, 0.35]
         phase_diffusion_hz_per_order: [0.03, 0.06]
         floor_shape_preset:

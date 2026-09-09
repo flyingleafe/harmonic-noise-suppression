@@ -473,6 +473,75 @@ and predominantly per-microphone — so the three-term decomposition is the
 coordinate system for the generative model, not a validated covariance;
 its loadings are to be fitted, not assumed.
 
+## The rig model: ladder, verdicts, presets — 2026-09-09
+
+Instrument: `rig.py` (`RigParams` / `ClipInRig` / `fit_rig` / `fit_heldout`),
+one joint MAP over all clips of a rig with rig-level parameters tied,
+rotor-level deviations partially pooled, clip nuisances free — Bretthorst's
+joint analysis of multiple measurements with the Whittle likelihood. Every
+ladder step is Gaussian lines with a carrier correction. Planted-rig control
+(`controls.py`, real FLY125 carriers, exponential cells): width law,
+microphone pattern (0.97–1.00) and the per-mic modulation (0.92–0.93, σ 3.4
+vs 3.35 planted) come back; profile 0.59–0.86, rotor deviation 0.35–0.45,
+floor tilt/shape not — identifiability limits at this comb density (the
+bench gives δ_rk directly, the between-line instrument gives the floor); the
+control's excess is −0.05…−0.11 because planted modulations faster than the
+LOO reference's ±64 ms replicate window bias the reference high. Kaggle P100,
+~4 min per config.
+
+| config | DREGON room2 (17) → room1 (7) | Michael's FLY125 (10) → FLY124 (14) |
+|---|---|---|
+| M0 independent fits | 0.088 → 0.089 | 0.077 → 0.079 |
+| M1 every rig-level parameter tied | 0.091 → 0.151 | 0.127 → 0.150 |
+| M2 + rotor profile deviation δ_rk | 0.093 → 0.148 | 0.123 → 0.150 |
+| M4 + per-mic floor gains / gain-all + per-mic low-band OU | 0.068 → 0.149 | 0.112 → 0.123 |
+| **M5 + OU (rough, 0.5 s) amplitude process** | **−0.014 → 0.071** | **0.017 → 0.030** |
+
+excess over LOO, nats/cell, train median → held-out median. Readings. (1)
+Tying every rig-level parameter costs 0.003 in-sample on DREGON and 0.05 on
+Michael's — one rig model per rig is adequate. (2) The rough amplitude
+process is the largest single lever on both rigs, larger than the line
+shape: on Michael's the M5g rig model predicts held-out FLY124 *better* than
+independent per-clip fits (0.030 vs 0.079); on DREGON it halves the transfer
+penalty (0.149 → 0.071; two room1 clips remain at 0.11 and 0.75). (3) δ_rk is
+not identifiable in flight (M2 = M1), as the control said; the bench value
+(2.2 dB) and the flight fit's 2.7–2.9 dB agree. Rig parameters (M5/M5g):
+DREGON width law 3.7 + 0.37 k Hz × per-rotor scale 1.5–2.8, profile roll-off
+0.68, even−odd +1.4 dB, mic line-gain spread 6 dB, per-mic floor ±3 dB,
+tilt −5.2; Michael's 2.0 + 0.45 k × 1–3.3, roll-off ≈ 0 with even−odd +6 dB
+(k = 2 at +22, odd orders −6…−11), gain-all spread ±4.5 dB, mic line-gain
+spread 7.6 dB, tilt −3.1.
+
+**Two shaft-jitter regimes.** Michael's high-order widths (0.45 k × 1–3.3 Hz)
+and its k = 2 tone coherent for 2 s are consistent only with widths growing
+as k²: a shaft jitter of σ ≈ 0.6 rev/s with a *millisecond* correlation time
+(the diffusive regime; WP18's 0.6 rev/s, 16 ms) — HWHM ≈ 0.011 k² Hz gives
+0.04 Hz at k = 2 and 18 Hz at k = 40. DREGON's ~0.5 s coherence at k = 1 and
+0.55–1 Hz/order widths are the linear law: σ 0.8–1.2 rev/s, τ 0.15–0.35 s
+(quasi-static). One mechanism, one knob per rig.
+
+**Renderer** (`stochastic_rotor_noise.py`): `line_mode: "fm"` — tones on a
+shared jittering shaft (OU per rotor) with a per-harmonic phase diffusion,
+vectorized at 0.7 s per 8-mic 4-s clip; `rotor_delta_std_db` (replaces the
+similarity mixing), `harm_gp_kernel: ou`, `umod_*` (independent per-mic
+low-band log-OU on floor and lines), `mic_gain_all_db`, `mic_floor_std_db`,
+`floor_shape_preset` (a measured curve the GP jitters around). Default
+streams are bit-identical (degenerate ranges draw nothing).
+**Presets**: `conf/online_mix/rig_fm_5050.yaml`, 50/50 DREGON / Michael's
+plus the 0.2 silence arm; every range from the tables above.
+
+**Gate 3 (held-out summary statistics), preset renders on real
+trajectories.** Coherent share (net, k = 1/2/4/8 × T = 0.25/0.5/1/2 s):
+Michael's preset k = 2: 0.68/0.77/0.78/0.65 (real 0.66/0.85/0.86/0.82),
+k = 4: 0.39/0.52/0.55/0.24 (0.52/0.46/0.39/0.33), k = 8: 0.36/0.23/0.15/0.08
+(0.40/0.32/0.20/0.13); DREGON preset (jitter 0.7–1.1) k = 1:
+0.95/0.73/0.53/0.23 (0.83/0.47/0.23/0.10), k = 2: 0.80/0.54/0.27/0.15
+(0.65/0.33/0.15/0.07), k = 4: 0.50/0.27/0.13/0.06 (0.37/0.19/0.08/0.04).
+Floor envelope (std dB / cross-mic corr / lag-1): DREGON 50–500 Hz render
+2.8 / 0.14 / 0.91 vs real 3.3 / −0.04 / 0.92, 500–2000 Hz 1.8 / 0.92 / 0.84
+vs 1.6 / 0.71 / 0.90; Michael's 50–500 Hz 2.05 / 0.83 / 0.74 vs
+1.8 / 0.81 / 0.79, 500–2000 Hz 1.2 / 0.90 / 0.72 vs 0.9 / 0.58 / 0.63.
+
 ## Conclusion (provisional — no modified renderer exists yet)
 
 Answer to "wrong ranges or wrong family": the realized family already
