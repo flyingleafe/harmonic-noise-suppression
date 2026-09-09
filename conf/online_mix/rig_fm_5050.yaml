@@ -1,0 +1,143 @@
+# RIG-FITTED stochastic family, 50/50 DREGON / Michael's, FM tone bank.
+#
+# Two presets of ONE family (`kind: stochastic`, `line_mode: fm`), each read
+# off the rig's real recordings (docs/experiments/stochastic-fit.md; the
+# hierarchical fit of docs/hierarchical-rig-model-plan.md):
+#
+#   lines     tones on a shared jittering shaft (Gaussian width ∝ k) with a
+#             small per-harmonic phase diffusion — Michael's even orders stay
+#             phase-locked for seconds (small jitter), DREGON's decohere in
+#             ~0.5 s (larger jitter); blade-passing emphasis ±13 dB on
+#             Michael's two-blade combs, 1–4 dB on DREGON
+#   timbre    rig roll-off (Michael's flat, DREGON ~1), per-rotor deviation
+#             ~2.2 dB (bench), fast rough (OU) amplitude process
+#   floor     the rig's measured between-line floor curve, its level under
+#             the lines (Michael's −36…−24 dB, DREGON −20…−12), a slow
+#             common modulation, and on DREGON an independent per-microphone
+#             low-band modulation (diaphragm flow noise, σ ≈ 3.3 dB)
+#   mics      DREGON: per-(mic, rotor) line gains over a common floor;
+#             Michael's: one gain on everything per microphone (~12 dB spread)
+#
+# Everything else (two excitations, `rps_scale_range`, the silence arm at 0.2
+# and no label-transforming augmentation) is conf/online_mix/salv2_stoch.yaml.
+
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+
+sources:
+  noise:
+    # ── DREGON preset ────────────────────────────────────────────────────
+    - kind: stochastic
+      weight: 0.4
+      line_mode: fm
+      n_harmonics: 80
+      n_mics: 8
+      n_rotors: 4
+      drone_profile_range: [0.0, 1.0]
+      mic_gain_db: [-12.0, 0.0]
+      amp_rps_exponent: 2.5
+      amp_rps_ref: 80.0
+      rps_scale_range: [0.45, 1.20]
+      rps:
+        kind: full_flight
+        aggressiveness: 1.0
+        flight_reuse: 32
+      ranges:
+        rolloff_p: [0.9, 1.3]
+        harm_jitter_db: [4.5, 7.0]
+        blade_counts: [2]
+        blade_emphasis_db: [1.0, 4.0]
+        rotor_similarity: [1.0, 1.0]
+        rotor_delta_std_db: [1.5, 3.0]
+        gamma0_hz: [1.0, 3.0]
+        gamma_slope_hz: [0.3, 0.8]
+        shaft_jitter_rps: [0.5, 0.9]
+        shaft_jitter_tau_s: [0.1, 0.3]
+        phase_diffusion_hz_per_order: [0.03, 0.06]
+        floor_shape_preset:
+          [[32, 11.5], [45, 13.6], [64, 13.3], [91, 12.9], [128, 9.7], [182, 6.4], [258, 3.1],
+           [366, 0.0], [519, -0.7], [736, 0.1], [1044, -3.9], [1480, -3.1], [2098, -6.4],
+           [2975, -7.8], [4218, -8.1], [5980, -10.0], [8000, -18.0]]
+        floor_shape_std_db: [1.0, 3.0]
+        floor_shape_oct: [1.0, 2.0]
+        floor_tilt_db_oct: [-0.5, 0.5]
+        floor_rel_db: [-20.0, -12.0]
+        floor_static_rel: [0.1, 0.35]
+        harm_gp_kernel: ou
+        harm_gp_std_db: [3.0, 4.5]
+        harm_gp_tau_s: [0.3, 0.8]
+        harm_coherence: [0.0, 0.1]
+        floor_gp_std_db: [1.0, 2.0]
+        floor_gp_tau_s: [1.0, 4.0]
+        floor_tilt_gp_std: [0.0, 0.5]
+        umod_std_db: [2.5, 4.0]
+        umod_tau_s: [0.15, 0.4]
+        umod_corner_hz: [400.0, 600.0]
+    # ── Michael's preset ─────────────────────────────────────────────────
+    - kind: stochastic
+      weight: 0.4
+      line_mode: fm
+      n_harmonics: 80
+      n_mics: 8
+      n_rotors: 4
+      drone_profile_range: [0.0, 1.0]
+      mic_gain_db: [-4.0, 0.0]
+      amp_rps_exponent: 2.5
+      amp_rps_ref: 80.0
+      rps_scale_range: [0.45, 1.20]
+      rps:
+        kind: full_flight
+        aggressiveness: 1.0
+        flight_reuse: 32
+      ranges:
+        rolloff_p: [0.15, 0.4]
+        harm_jitter_db: [5.0, 7.5]
+        blade_counts: [2]
+        blade_emphasis_db: [10.0, 15.0]
+        rotor_similarity: [1.0, 1.0]
+        rotor_delta_std_db: [1.5, 3.0]
+        gamma0_hz: [1.0, 3.0]
+        gamma_slope_hz: [0.3, 0.7]
+        shaft_jitter_rps: [0.08, 0.25]
+        shaft_jitter_tau_s: [0.2, 0.5]
+        phase_diffusion_hz_per_order: [0.01, 0.04]
+        floor_shape_preset:
+          [[32, 6.8], [45, 2.7], [64, -2.3], [91, -1.7], [128, -7.3], [182, -8.5], [258, -9.1],
+           [366, -6.0], [519, -2.3], [736, 1.0], [1044, 0.3], [1480, 1.1], [2098, 1.9],
+           [2975, 1.2], [4218, 0.2], [5980, -1.7], [8000, -5.0]]
+        floor_shape_std_db: [2.0, 4.0]
+        floor_shape_oct: [1.0, 2.0]
+        floor_tilt_db_oct: [-0.5, 0.5]
+        floor_rel_db: [-36.0, -24.0]
+        floor_static_rel: [0.1, 0.35]
+        harm_gp_kernel: ou
+        harm_gp_std_db: [2.0, 3.5]
+        harm_gp_tau_s: [0.3, 0.8]
+        harm_coherence: [0.0, 0.1]
+        floor_gp_std_db: [1.0, 2.0]
+        floor_gp_tau_s: [1.0, 4.0]
+        floor_tilt_gp_std: [0.0, 0.5]
+        mic_gain_all_db: [3.0, 4.5]
+    - kind: silence
+      weight: 0.2
+      n_channels: 8
+
+  speech:
+    - dataset: librispeech
+      subpath: LibriSpeech/train-clean-100
+
+policy:
+  stages:
+    - until: null
+      source_prob: 1.0
+      snr_db:
+        uniform: {low: -30.0, high: 0.0}
+      speech_per_channel: independent
+      snr_per_channel: false
+      augmentations:
+        probability: 0.5
+        choices:
+          - random_gain: {min_db: -6.0, max_db: 6.0}
+          - random_polarity: {}

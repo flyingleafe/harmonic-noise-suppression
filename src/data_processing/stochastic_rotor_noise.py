@@ -166,8 +166,10 @@ def sample_gp(
     dt: float,
     tau: float,
     std: float,
+    kernel: str = "se",
 ) -> np.ndarray:
-    """``(n_series, n)`` draws from a zero-mean squared-exponential process.
+    """``(n_series, n)`` draws from a zero-mean squared-exponential (``"se"``)
+    or Ornstein-Uhlenbeck (``"ou"``) process.
 
     ``dt`` is the sample spacing in seconds, ``tau`` the correlation time in
     seconds, ``std`` the standard deviation. A correlation time far below the
@@ -180,6 +182,16 @@ def sample_gp(
         return np.zeros((n_series, n), dtype=np.float64)
     ratio = float(dt) / max(float(tau), 1e-6)
     ratio = min(ratio, 12.0)  # beyond this the kernel is numerically the identity
+    if kernel == "ou":
+        # exact AR(1) recursion: stationary start, a = exp(-dt / tau)
+        a = float(np.exp(-ratio))
+        eps = rng.standard_normal((n_series, n))
+        out = np.empty((n_series, n), dtype=np.float64)
+        out[:, 0] = eps[:, 0]
+        scale = float(np.sqrt(max(1.0 - a * a, 0.0)))
+        for i in range(1, n):
+            out[:, i] = a * out[:, i - 1] + scale * eps[:, i]
+        return float(std) * out
     factor = _se_cholesky(int(n), round(ratio, 6))
     z = rng.standard_normal((n, n_series))
     return (float(std) * (factor @ z)).T
@@ -213,10 +225,23 @@ class StochasticRanges:
     blade_emphasis_db: tuple[float, float] = (0.0, 10.0)
     #: How much of one clip's timbre is shared by its four rotors.
     rotor_similarity: tuple[float, float] = (0.3, 0.95)
+    #: Per-rotor deviation from the clip's timbre, dB per line, when > 0:
+    #: ``profile_r = drone + N(0, std)`` replaces the similarity mixing. The
+    #: DREGON bench measures the rotor-specific profile at ~5 dB^2 (2.2 dB),
+    #: constant across speed and microphone (stochastic-fit record, § bench).
+    rotor_delta_std_db: tuple[float, float] = (0.0, 0.0)
 
     # Linewidth: gamma_k = gamma0 + slope * k, in Hz (half width at half max).
     gamma0_hz: tuple[float, float] = (0.5, 4.0)
     gamma_slope_hz: tuple[float, float] = (0.05, 0.8)
+    #: ``line_mode: "fm"`` — the shaft's label-invisible speed jitter, rev/s
+    #: (an OU process per rotor, shared by all its harmonics, so every line is
+    #: a Gaussian of width proportional to k: the quasi-static FM regime the
+    #: fits found) and its correlation time; plus a per-harmonic phase
+    #: diffusion, Lorentzian HWHM per order (bench: 0.042 Hz/order).
+    shaft_jitter_rps: tuple[float, float] = (0.0, 0.0)
+    shaft_jitter_tau_s: tuple[float, float] = (0.1, 0.1)
+    phase_diffusion_hz_per_order: tuple[float, float] = (0.0, 0.0)
 
     # Broadband floor.
     floor_shape_std_db: tuple[float, float] = (2.0, 9.0)
@@ -241,6 +266,22 @@ class StochasticRanges:
     harm_gp_std_db: tuple[float, float] = (0.5, 6.0)
     harm_gp_tau_s: tuple[float, float] = (0.3, 6.0)
     harm_coherence: tuple[float, float] = (0.0, 1.0)
+    #: ``"se"`` (smooth) or ``"ou"`` (rough) amplitude process.
+    harm_gp_kernel: str = "se"
+
+    #: Per-microphone modulation of the low band — an independent log-OU gain
+    #: per microphone below ``umod_corner_hz`` on floor and lines alike
+    #: (DREGON's diaphragm flow noise: σ ≈ 3.3 dB, τ 0.1-0.5 s, uncorrelated
+    #: across the array). Zero std disables it.
+    umod_std_db: tuple[float, float] = (0.0, 0.0)
+    umod_tau_s: tuple[float, float] = (0.25, 0.25)
+    umod_corner_hz: tuple[float, float] = (500.0, 500.0)
+    #: Std of one per-microphone gain on EVERYTHING (Michael's rig: the mics
+    #: differ by ~12 dB with floor and lines moving together).
+    mic_gain_all_db: tuple[float, float] = (0.0, 0.0)
+    #: A measured floor curve ``[[hz, dB], ...]`` that replaces the GP draw's
+    #: mean; the GP (``floor_shape_std_db``) then jitters around it.
+    floor_shape_preset: tuple[tuple[float, float], ...] | None = None
 
     # Time variation of the floor.
     floor_gp_std_db: tuple[float, float] = (0.5, 4.0)
@@ -254,7 +295,15 @@ class StochasticRanges:
             return cls()
         out = cls()
         for key, value in d.items():
-            if hasattr(out, key):
+            if not hasattr(out, key):
+                continue
+            if key == "floor_shape_preset":
+                setattr(
+                    out,
+                    key,
+                    None if value is None else tuple((float(a), float(b)) for a, b in value),
+                )
+            else:
                 setattr(out, key, tuple(value) if isinstance(value, (list, tuple)) else value)
         return out
 
@@ -361,6 +410,16 @@ class StochasticParams:
     #: one. ``None`` keeps the old behaviour.
     amp_rps_exponent_floor: float | None = None
     amp_rps_ref: float = 80.0
+
+    #: ``line_mode: "fm"`` knobs (see :class:`StochasticRanges`).
+    shaft_jitter_rps: float = 0.0
+    shaft_jitter_tau_s: float = 0.1
+    phase_diffusion_hz_per_order: float = 0.0
+    harm_gp_kernel: str = "se"
+    umod_std_db: float = 0.0
+    umod_tau_s: float = 0.25
+    umod_corner_hz: float = 500.0
+    mic_gain_all_db: float = 0.0
 
     def with_(self, **changes: Any) -> StochasticParams:
         """A copy with fields replaced — the slider path."""
@@ -475,12 +534,22 @@ def sample_params(
         lo, hi = int(n_harmonics_range[0]), int(n_harmonics_range[1])
         n_harmonics = int(rng.integers(lo, hi + 1))
 
+    def draw(pair: tuple[float, float]) -> float:
+        """A uniform draw that leaves the stream untouched for a fixed value,
+        so streams that never set the new knobs stay bit-identical."""
+        lo, hi = float(pair[0]), float(pair[1])
+        return lo if hi == lo else float(rng.uniform(lo, hi))
+
     drone = _profile_db(rng, ranges, n_harmonics=n_harmonics)
     similarity = float(rng.uniform(*ranges.rotor_similarity))
+    delta_std = draw(ranges.rotor_delta_std_db)
     profile = np.empty((n_rotors, n_harmonics), dtype=np.float64)
     for r in range(n_rotors):
-        own = _profile_db(rng, ranges, n_harmonics=n_harmonics)
-        profile[r] = similarity * drone + (1.0 - similarity) * own
+        if delta_std > 0.0:
+            profile[r] = drone + rng.normal(0.0, delta_std, size=n_harmonics)
+        else:
+            own = _profile_db(rng, ranges, n_harmonics=n_harmonics)
+            profile[r] = similarity * drone + (1.0 - similarity) * own
         profile[r] -= np.median(profile[r])
 
     ctrl_hz = np.geomspace(FLOOR_SHAPE_F_MIN, sample_rate / 2.0, FLOOR_SHAPE_N_CTRL)
@@ -496,6 +565,10 @@ def sample_params(
         std=shape_std,
     )[0]
     ctrl_db -= ctrl_db.mean()
+    if ranges.floor_shape_preset:
+        pre = np.asarray(ranges.floor_shape_preset, dtype=np.float64)
+        base = np.interp(np.log2(ctrl_hz), np.log2(pre[:, 0]), pre[:, 1])
+        ctrl_db = ctrl_db + base - base.mean()
 
     gamma0 = rng.uniform(*ranges.gamma0_hz, size=n_rotors)
     gamma_slope = rng.uniform(*ranges.gamma_slope_hz, size=n_rotors)
@@ -532,6 +605,14 @@ def sample_params(
         floor_tilt_gp_std=float(rng.uniform(*ranges.floor_tilt_gp_std)),
         floor_tilt_gp_tau_s=float(rng.uniform(*ranges.floor_tilt_gp_tau_s)),
         line_bin_integrate=bool(line_bin_integrate),
+        shaft_jitter_rps=draw(ranges.shaft_jitter_rps),
+        shaft_jitter_tau_s=draw(ranges.shaft_jitter_tau_s),
+        phase_diffusion_hz_per_order=draw(ranges.phase_diffusion_hz_per_order),
+        harm_gp_kernel=str(ranges.harm_gp_kernel),
+        umod_std_db=draw(ranges.umod_std_db),
+        umod_tau_s=draw(ranges.umod_tau_s),
+        umod_corner_hz=draw(ranges.umod_corner_hz),
+        mic_gain_all_db=draw(ranges.mic_gain_all_db),
     )
 
 
@@ -621,7 +702,13 @@ def build_psd(
     # every line's process is harm_gp_std_db^2 whatever the mixing.
     rho = float(np.clip(params.harm_coherence, 0.0, 1.0))
     common = sample_gp(
-        rng, n_rotors, n_frames, dt=dt, tau=params.harm_gp_tau_s, std=params.harm_gp_std_db
+        rng,
+        n_rotors,
+        n_frames,
+        dt=dt,
+        tau=params.harm_gp_tau_s,
+        std=params.harm_gp_std_db,
+        kernel=params.harm_gp_kernel,
     )
     private = sample_gp(
         rng,
@@ -630,6 +717,7 @@ def build_psd(
         dt=dt,
         tau=params.harm_gp_tau_s,
         std=params.harm_gp_std_db,
+        kernel=params.harm_gp_kernel,
     ).reshape(n_rotors, n_harm, n_frames)
     harm_gp = np.sqrt(rho) * common[:, None, :] + np.sqrt(1.0 - rho) * private
 
@@ -825,6 +913,105 @@ def coherent_lines(
     return out
 
 
+def fm_lines(
+    params: StochasticParams,
+    rps: np.ndarray,
+    psd: dict[str, np.ndarray],
+    gains: np.ndarray,
+    *,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """``(M, T)`` harmonic lines as tones on a jittering SHARED shaft.
+
+    The measured regime (stochastic-fit record): each rotor's harmonics ride
+    one shaft whose speed wanders by ``shaft_jitter_rps`` (an OU process with
+    correlation time ``shaft_jitter_tau_s``) relative to the label, so every
+    line is a Gaussian of width proportional to ``k`` and the whole comb of a
+    rotor moves together; on top, each harmonic diffuses its own phase at
+    ``phase_diffusion_hz_per_order * k`` Hz (Lorentzian, small). Michael's even
+    orders stay phase-locked for seconds (small jitter), DREGON's lines
+    decohere within ~0.5 s (larger jitter); the same mechanism, one knob.
+    """
+    rps = np.atleast_2d(np.asarray(rps, dtype=np.float64))
+    n_rotors, n_samples = rps.shape
+    sr = float(params.sample_rate)
+    nyquist = sr / 2.0
+    n_mics = gains.shape[0]
+    n_harm = params.n_harmonics
+
+    t_frames = np.linspace(0.0, n_samples / sr, psd["harm_gp"].shape[2])
+    n_slow = max(int(np.ceil(n_samples / sr * PHASE_NOISE_FS)) + 2, 2)
+    t_slow = np.arange(n_slow) / PHASE_NOISE_FS
+    dt_slow = 1.0 / PHASE_NOISE_FS
+
+    # The shaft: label plus one OU jitter per rotor, at the slow rate.
+    jitter = sample_gp(
+        rng,
+        n_rotors,
+        n_slow,
+        dt=dt_slow,
+        tau=params.shaft_jitter_tau_s,
+        std=params.shaft_jitter_rps,
+        kernel="ou",
+    )
+    q = max(params.phase_diffusion_hz_per_order, 0.0)
+    k_all = np.arange(1, n_harm + 1, dtype=np.float64)
+    # Slow processes are generated at PHASE_NOISE_FS and held constant over
+    # each slow step (a 1 ms hold is far below any correlation time here);
+    # everything at the audio rate is float32 / complex64, one line at a time,
+    # so no (K, T) array is ever built.
+    up = int(np.ceil(n_samples / n_slow)) + 1
+
+    def hold(x_slow: np.ndarray) -> np.ndarray:
+        return np.repeat(x_slow, up)[:n_samples]
+
+    n_frames = psd["harm_gp"].shape[2]
+    frame_of_slow = np.clip(t_slow / max(t_frames[1] - t_frames[0], 1e-9), 0.0, n_frames - 1.0)
+    f0 = np.floor(frame_of_slow).astype(np.int64)
+    f1 = np.minimum(f0 + 1, n_frames - 1)
+    fw = (frame_of_slow - f0).astype(np.float32)
+    per_rotor = np.zeros((n_rotors, n_samples), dtype=np.float32)
+    for r in range(n_rotors):
+        shaft = rps[r] + hold(jitter[r])
+        phase = 2.0 * np.pi * np.cumsum(shaft) / sr
+        z = np.exp(1j * np.remainder(phase, 2.0 * np.pi)).astype(np.complex64)
+        power_frames = (
+            10.0
+            ** ((params.harm_mean_db + params.profile_db[r][:, None] + psd["harm_gp"][r]) / 10.0)
+            * psd["amp"][r][None, :]
+        ).astype(np.float32)  # (K, N)
+        top = int(np.clip(np.searchsorted(k_all * float(rps[r].min()), nyquist), 0, n_harm))
+        if top == 0:
+            continue
+        r_max = float(rps[r].max())
+        zk = np.ones(n_samples, dtype=np.complex64)
+        acc = np.zeros(n_samples, dtype=np.float32)
+        for i in range(top):
+            k = i + 1
+            zk = zk * z
+            amp_slow = np.sqrt(
+                2.0 * np.maximum(power_frames[i, f0] * (1.0 - fw) + power_frames[i, f1] * fw, 0.0)
+            )
+            amp = hold(amp_slow)
+            if k * r_max >= nyquist:
+                amp = np.where(k * rps[r] < nyquist, amp, 0.0).astype(np.float32)
+            b0 = rng.uniform(0.0, 2.0 * np.pi)
+            if q > 0.0:
+                walk = np.cumsum(
+                    rng.normal(0.0, np.sqrt(4.0 * np.pi * q * k * dt_slow), size=n_slow)
+                )
+                rot = hold(np.exp(1j * (b0 + walk)).astype(np.complex64))
+                acc += amp * (zk * rot).real
+            else:
+                acc += amp * (zk * np.complex64(np.exp(1j * b0))).real
+        per_rotor[r] = acc
+
+    out = np.empty((n_mics, n_samples), dtype=np.float64)
+    for m in range(n_mics):
+        out[m] = np.tensordot(np.sqrt(gains[m]), per_rotor, axes=(0, 0))
+    return out
+
+
 def synthesize(
     params: StochasticParams,
     rps: np.ndarray,
@@ -898,13 +1085,17 @@ def synthesize(
     gains = 10.0 ** (rng.uniform(lo, hi, size=(n_mics, n_rotors)) / 10.0)
     # (M, N, F): the floor is common, and each microphone weighs the rotors'
     # lines by its own gains.
-    if line_mode == "coherent":
+    if line_mode in ("coherent", "fm"):
         floor_spec = np.repeat(psd["floor"][None], n_mics, axis=0)
         white = rng.standard_normal((n_mics, n_padded))
         floor_audio = _ola_filter(white, np.sqrt(np.maximum(floor_spec, 0.0)), n_fft, hop)[
             :, pad : pad + n_samples
         ]
-        line_audio = coherent_lines(params, rps, psd, gains, rng=rng)
+        line_audio = (
+            fm_lines(params, rps, psd, gains, rng=rng)
+            if line_mode == "fm"
+            else coherent_lines(params, rps, psd, gains, rng=rng)
+        )
         # Put the lines at the level the spectrum asks for. A filtered-noise
         # signal's variance is the mean of its spectrum over bins, so the ratio
         # of the two mean spectra is the ratio the two parts must end up with —
@@ -922,6 +1113,32 @@ def synthesize(
         white = rng.standard_normal((n_mics, n_padded))
         y = _ola_filter(white, np.sqrt(np.maximum(spectrum, 0.0)), n_fft, hop)
         audio = y[:, pad : pad + n_samples].astype(np.float32)
+
+    # Per-microphone processes on the MIXED signal: the low-band modulation
+    # (an independent log-OU gain per mic on floor and lines alike) and one
+    # gain on everything.
+    umod = None
+    if params.umod_std_db > 0.0:
+        umod = sample_gp(
+            rng,
+            n_mics,
+            n_frames,
+            dt=hop / sr,
+            tau=params.umod_tau_s,
+            std=params.umod_std_db,
+            kernel="ou",
+        )  # (M, N) dB
+        band = 1.0 / (1.0 + (np.maximum(freqs, 1.0) / max(params.umod_corner_hz, 1.0)) ** 4)
+        amp_gain = 1.0 + (10.0 ** (umod / 20.0) - 1.0)[:, :, None] * band[None, None, :]
+        padded = np.zeros((n_mics, n_padded), dtype=np.float64)
+        padded[:, pad : pad + n_samples] = audio
+        audio = _ola_filter(padded, amp_gain, n_fft, hop)[:, pad : pad + n_samples].astype(
+            np.float32
+        )
+    mic_all = None
+    if params.mic_gain_all_db > 0.0:
+        mic_all = rng.normal(0.0, params.mic_gain_all_db, size=n_mics)
+        audio = (audio * 10.0 ** (mic_all / 20.0)[:, None]).astype(np.float32)
 
     if normalize_rms is not None:
         rms = float(np.sqrt(np.mean(np.square(audio)))) or 1.0
@@ -941,6 +1158,8 @@ def synthesize(
         "frame_times": frame_times,
         "rps_frames": rps_frames,
         "mic_gains": gains,
+        "umod_db": umod,
+        "mic_gain_all_db": mic_all,
         **psd,
     }
     return audio, diag
@@ -1309,6 +1528,7 @@ class StochasticNoisePool:
             amp_rps_ref=float(hover),
             gamma0=params.gamma0 * size,
             gamma_slope=params.gamma_slope * size,
+            shaft_jitter_rps=params.shaft_jitter_rps * size,
         )
         # One gain for a whole flight when asked for, else the old per-window
         # draw. See _FlightCache.level.
