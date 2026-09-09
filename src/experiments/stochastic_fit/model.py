@@ -501,22 +501,28 @@ class CombSpectrum(nn.Module):
     def export(self) -> dict[str, Any]:
         with torch.no_grad():
             g = torch.nn.functional.softplus
+            g0_raw, sl_raw = self._gamma_raw()
+            fe, fs_raw = self._floor_exp()
+            mg = self._mic_gain_db()
+            # every entry goes through the parameter hooks, so a clip inside a
+            # rig fit exports the composite values ``forward`` used, not its
+            # own unused initializations
             out = dict(
-                profile_db=self.profile_db.cpu().numpy().copy(),
+                profile_db=self._profile_db().cpu().numpy().copy(),
                 h_db=self.h_db.cpu().numpy().copy(),
                 knots_s=self.knots.copy(),
                 gamma=self.gamma.cpu().numpy().copy(),
-                gamma0=g(self.gamma0_raw).cpu().numpy().copy(),
-                gamma_slope=g(self.slope_raw).cpu().numpy().copy(),
+                gamma0=g(g0_raw).cpu().numpy().copy(),
+                gamma_slope=g(sl_raw).cpu().numpy().copy(),
                 floor_mean_db=float(self.floor_mean_db.item()),
                 floor_shape_db=(
-                    self.spec.floor_shape_std_db * (self.shape_chol @ self.floor_shape_z)
+                    self.spec.floor_shape_std_db * (self.shape_chol @ self._floor_shape_z())
                 )
                 .cpu()
                 .numpy()
                 .copy(),
                 floor_ctrl_hz=self.ctrl_hz.copy(),
-                floor_tilt_db_oct=float(self.floor_tilt_db_oct.item()),
+                floor_tilt_db_oct=float(self._floor_tilt_db_oct().item()),
                 floor_level_db=(self.spec.floor_gp_std_db * (self.b_chol @ self.floor_level_z))
                 .cpu()
                 .numpy()
@@ -525,14 +531,11 @@ class CombSpectrum(nn.Module):
                 .cpu()
                 .numpy()
                 .copy(),
-                mic_floor_db=self.mic_floor_db.cpu().numpy().copy(),
-                mic_gain_db=(self.mic_gain_db - self.mic_gain_db.mean(dim=0, keepdim=True))
-                .cpu()
-                .numpy()
-                .copy(),
-                amp_exp=float(self.amp_exp.item()),
-                floor_exp=float(self.floor_exp.item()),
-                floor_static_rel=float(g(self.floor_static_raw).item()),
+                mic_floor_db=self._mic_floor_db().cpu().numpy().copy(),
+                mic_gain_db=(mg - mg.mean(dim=0, keepdim=True)).cpu().numpy().copy(),
+                amp_exp=float(self._amp_exp().item()),
+                floor_exp=float(fe.item()),
+                floor_static_rel=float(g(fs_raw).item()),
                 rps_offset=(torch.einsum("nj,rj->rn", self.o_interp, self.rps_offset_knots))
                 .cpu()
                 .numpy()
@@ -542,6 +545,9 @@ class CombSpectrum(nn.Module):
             u = self._umod_db()
             if u is not None:
                 out["umod_db"] = u.cpu().numpy().copy()
+            ga = self._gain_all_db()
+            if ga is not None:
+                out["gain_all_db"] = (ga - ga.mean()).cpu().numpy().copy()
         return out
 
     def parameter_groups(self, stage: str) -> list[nn.Parameter]:

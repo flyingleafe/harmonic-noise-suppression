@@ -126,10 +126,10 @@ class RigParams(nn.Module):
         g = torch.nn.functional.softplus
         with torch.no_grad():
             return dict(
-                floor_shape_db=(self.spec.floor_shape_std_db * self.floor_shape_z)
-                .cpu()
-                .numpy()
-                .copy(),
+                # whitened knots -> dB curve needs the shape kernel's Cholesky,
+                # which lives on the clip models; export the knots and let
+                # ``ClipInRig.export`` (through ``_floor_shape_z``) give the curve
+                floor_shape_z=self.floor_shape_z.cpu().numpy().copy(),
                 floor_tilt_db_oct=float(self.floor_tilt_db_oct.item()),
                 profile_db=self.profile_db.cpu().numpy().copy(),
                 delta_db=self.delta_db.cpu().numpy().copy(),
