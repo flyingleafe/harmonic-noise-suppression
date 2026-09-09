@@ -399,35 +399,46 @@ def _adam(
     if not params:
         return float("nan")
     initial = [parameter.detach().clone() for parameter in params]
+
+    def recover(reason: str) -> float:
+        with torch.no_grad():
+            for parameter, value in zip(params, initial, strict=True):
+                parameter.copy_(value)
+        if retries == 0:
+            raise FloatingPointError(
+                f"rig optimizer {reason} remained non-finite at learning rate {lr:g}"
+            )
+        next_lr = lr / 3.0
+        warnings.warn(
+            f"rig optimizer {reason} became non-finite at lr={lr:g}; "
+            f"retrying the stage from its initial state at lr={next_lr:g}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return _adam(
+            rig,
+            rcs,
+            params,
+            iters,
+            next_lr,
+            retries=retries - 1,
+        )
+
     opt = torch.optim.Adam(params, lr=lr)
     last = float("nan")
     for _ in range(iters):
         opt.zero_grad(set_to_none=True)
         _, last = _objective(rig, rcs)
         if not math.isfinite(last):
-            with torch.no_grad():
-                for parameter, value in zip(params, initial, strict=True):
-                    parameter.copy_(value)
-            if retries == 0:
-                raise FloatingPointError(
-                    f"rig optimizer remained non-finite at learning rate {lr:g}"
-                )
-            next_lr = lr / 3.0
-            warnings.warn(
-                f"rig optimizer became non-finite at lr={lr:g}; "
-                f"retrying the stage from its initial state at lr={next_lr:g}",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return _adam(
-                rig,
-                rcs,
-                params,
-                iters,
-                next_lr,
-                retries=retries - 1,
-            )
+            return recover("loss")
+        if any(
+            parameter.grad is not None and not bool(torch.isfinite(parameter.grad).all())
+            for parameter in params
+        ):
+            return recover("gradient")
         opt.step()
+        if any(not bool(torch.isfinite(parameter).all()) for parameter in params):
+            return recover("parameter")
     return last
 
 

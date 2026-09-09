@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import torch
 
+import experiments.stochastic_fit.rig as rig_module
 from data_processing import stochastic_rotor_noise as srn
 from experiments.stochastic_fit.controls import planted_population_control
 from experiments.stochastic_fit.data import Clip, Periodogram
@@ -79,6 +80,33 @@ def test_rank_zero_preserves_the_original_state_dict_contract() -> None:
     assert "profile_basis_db" not in rig.state_dict()
     assert "profile_mode_std_raw" not in rig.state_dict()
     assert "profile_z" not in clip.state_dict()
+
+
+def test_adam_retries_a_nonfinite_final_step_gradient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parameter = torch.nn.Parameter(torch.tensor([0.0]))
+    rig = RigParams(_spec(), RigSpec(), n_rotors=2, device="cpu")
+    calls = 0
+
+    def objective(_rig, _clips):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            parameter.grad = torch.full_like(parameter, float("nan"))
+            return torch.zeros(()), 0.0
+        loss = (parameter - 1.0).square().sum()
+        loss.backward()
+        return loss, float(loss)
+
+    monkeypatch.setattr(rig_module, "_objective", objective)
+    with pytest.warns(RuntimeWarning, match="gradient became non-finite"):
+        result = rig_module._adam(rig, [], [parameter], iters=1, lr=0.1, retries=1)
+
+    assert calls == 2
+    assert np.isfinite(result)
+    assert torch.isfinite(parameter).all()
+    assert float(parameter) > 0.0
 
 
 def test_heldout_near_zero_profile_mode_has_a_bounded_initialization() -> None:
