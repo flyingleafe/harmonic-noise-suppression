@@ -542,6 +542,23 @@ Floor envelope (std dB / cross-mic corr / lag-1): DREGON 50–500 Hz render
 vs 1.6 / 0.71 / 0.90; Michael's 50–500 Hz 2.05 / 0.83 / 0.74 vs
 1.8 / 0.81 / 0.79, 500–2000 Hz 1.2 / 0.90 / 0.72 vs 0.9 / 0.58 / 0.63.
 
+**Gate 1 (calibration), committed presets.** 12 renders per preset on the
+real trajectories (`prepare-presets`), refitted with the rig model (M5 /
+M5g) on Kaggle: excess −0.129 (DREGON) / −0.082 (Michael's; mean −0.007).
+Oracle decomposition on planted clips with a *known* spectrum: the true
+spectrum itself scores −0.042…−0.061 against the LOO reference at these
+modulation speeds (OU τ 0.3–1.5 s, umod τ 0.15–0.5 s) — the reference's
+bias — and the fit's free clip nuisances take a further −0.03…−0.06 on
+draws (the planted control's −0.05…−0.11). So the renders sit where a
+correctly specified generator sits under this instrument. The real clips
+under the same model sit at −0.014 / +0.017: relative to the oracle bias
+they keep ≈ 0.05–0.10 nats/cell the model does not explain and the renders
+do not carry — the residual realism gap, which no preset range closes; it
+needs structure the spectral model lacks (coherent low-order tones in the
+cell likelihood, the interference of four tones in one bin). The transfer
+run (`rig_fm_scv2_unified`) is the test of whether what is captured is
+enough.
+
 ## Conclusion (provisional — no modified renderer exists yet)
 
 Answer to "wrong ranges or wrong family": the realized family already
