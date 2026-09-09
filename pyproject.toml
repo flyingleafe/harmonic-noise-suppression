@@ -1,0 +1,5 @@
+[project]
+name = "stochastic-fit-slim"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["numpy>=2,<3", "scipy>=1.13", "torch==2.7.0", "soundfile>=0.12", "boto3>=1.34"]

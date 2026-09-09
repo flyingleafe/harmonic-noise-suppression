@@ -1,0 +1,11 @@
+[job]
+outputs = ["results/**"]
+
+[job.resources]
+gpus = 1
+time = "8h"
+
+[job.env]
+# uv, not system: Kaggle's image ships a torch without sm_60 kernels (P100);
+# PyPI torch 2.7.0 (cu126) still has them.
+kind = "uv"
