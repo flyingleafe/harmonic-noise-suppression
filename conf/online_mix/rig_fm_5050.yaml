@@ -36,7 +36,7 @@ sources:
       n_mics: 8
       n_rotors: 4
       drone_profile_range: [0.0, 1.0]
-      mic_gain_db: [-12.0, 0.0]
+      mic_gain_db: [-7.0, 0.0]
       amp_rps_exponent: 2.5
       amp_rps_ref: 80.0
       rps_scale_range: [0.45, 1.20]
@@ -45,16 +45,18 @@ sources:
         aggressiveness: 1.0
         flight_reuse: 32
       ranges:
-        rolloff_p: [0.9, 1.3]
+        rolloff_p: [0.5, 0.9]
         harm_jitter_db: [4.5, 7.0]
         blade_counts: [2]
-        blade_emphasis_db: [1.0, 4.0]
+        blade_emphasis_db: [0.5, 3.0]
         rotor_similarity: [1.0, 1.0]
-        rotor_delta_std_db: [1.5, 3.0]
-        gamma0_hz: [1.0, 3.0]
-        gamma_slope_hz: [0.3, 0.8]
-        shaft_jitter_rps: [0.5, 0.9]
-        shaft_jitter_tau_s: [0.1, 0.3]
+        rotor_delta_std_db: [2.0, 3.5]
+        gamma0_hz: [2.0, 4.0]
+        gamma_slope_hz: [0.4, 0.9]
+        # quasi-static regime: the rig fit's 0.55-1.0 Hz/order Gaussian widths
+        # and the ~0.5 s coherence time at k = 1 (stochastic-fit record)
+        shaft_jitter_rps: [0.7, 1.1]
+        shaft_jitter_tau_s: [0.15, 0.35]
         phase_diffusion_hz_per_order: [0.03, 0.06]
         floor_shape_preset:
           [[32, 11.5], [45, 13.6], [64, 13.3], [91, 12.9], [128, 9.7], [182, 6.4], [258, 3.1],
@@ -75,6 +77,7 @@ sources:
         umod_std_db: [2.5, 4.0]
         umod_tau_s: [0.15, 0.4]
         umod_corner_hz: [400.0, 600.0]
+        mic_floor_std_db: [2.0, 3.5]
     # ── Michael's preset ─────────────────────────────────────────────────
     - kind: stochastic
       weight: 0.4
@@ -83,7 +86,7 @@ sources:
       n_mics: 8
       n_rotors: 4
       drone_profile_range: [0.0, 1.0]
-      mic_gain_db: [-4.0, 0.0]
+      mic_gain_db: [-8.0, 0.0]
       amp_rps_exponent: 2.5
       amp_rps_ref: 80.0
       rps_scale_range: [0.45, 1.20]
@@ -92,17 +95,20 @@ sources:
         aggressiveness: 1.0
         flight_reuse: 32
       ranges:
-        rolloff_p: [0.15, 0.4]
+        rolloff_p: [0.0, 0.3]
         harm_jitter_db: [5.0, 7.5]
         blade_counts: [2]
-        blade_emphasis_db: [10.0, 15.0]
+        blade_emphasis_db: [8.0, 14.0]
         rotor_similarity: [1.0, 1.0]
-        rotor_delta_std_db: [1.5, 3.0]
-        gamma0_hz: [1.0, 3.0]
-        gamma_slope_hz: [0.3, 0.7]
-        shaft_jitter_rps: [0.08, 0.25]
-        shaft_jitter_tau_s: [0.2, 0.5]
-        phase_diffusion_hz_per_order: [0.01, 0.04]
+        rotor_delta_std_db: [2.0, 3.5]
+        gamma0_hz: [1.5, 3.0]
+        gamma_slope_hz: [0.4, 0.9]
+        # diffusive regime: fast shaft jitter (WP18's ~0.6 rev/s, ms-scale)
+        # gives Lorentzian widths growing as k^2 - k = 2 phase-locked for
+        # seconds, k = 40 at the rig fit's ~15-20 Hz
+        shaft_jitter_rps: [0.4, 0.8]
+        shaft_jitter_tau_s: [0.003, 0.008]
+        phase_diffusion_hz_per_order: [0.0, 0.02]
         floor_shape_preset:
           [[32, 6.8], [45, 2.7], [64, -2.3], [91, -1.7], [128, -7.3], [182, -8.5], [258, -9.1],
            [366, -6.0], [519, -2.3], [736, 1.0], [1044, 0.3], [1480, 1.1], [2098, 1.9],

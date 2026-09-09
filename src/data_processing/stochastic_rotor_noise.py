@@ -279,6 +279,9 @@ class StochasticRanges:
     #: Std of one per-microphone gain on EVERYTHING (Michael's rig: the mics
     #: differ by ~12 dB with floor and lines moving together).
     mic_gain_all_db: tuple[float, float] = (0.0, 0.0)
+    #: Std of a static per-microphone FLOOR gain (DREGON: the floor's per-mic
+    #: pattern is decoupled from the lines', ±3 dB in the rig fit).
+    mic_floor_std_db: tuple[float, float] = (0.0, 0.0)
     #: A measured floor curve ``[[hz, dB], ...]`` that replaces the GP draw's
     #: mean; the GP (``floor_shape_std_db``) then jitters around it.
     floor_shape_preset: tuple[tuple[float, float], ...] | None = None
@@ -420,6 +423,7 @@ class StochasticParams:
     umod_tau_s: float = 0.25
     umod_corner_hz: float = 500.0
     mic_gain_all_db: float = 0.0
+    mic_floor_std_db: float = 0.0
 
     def with_(self, **changes: Any) -> StochasticParams:
         """A copy with fields replaced — the slider path."""
@@ -613,6 +617,7 @@ def sample_params(
         umod_tau_s=draw(ranges.umod_tau_s),
         umod_corner_hz=draw(ranges.umod_corner_hz),
         mic_gain_all_db=draw(ranges.mic_gain_all_db),
+        mic_floor_std_db=draw(ranges.mic_floor_std_db),
     )
 
 
@@ -1085,8 +1090,13 @@ def synthesize(
     gains = 10.0 ** (rng.uniform(lo, hi, size=(n_mics, n_rotors)) / 10.0)
     # (M, N, F): the floor is common, and each microphone weighs the rotors'
     # lines by its own gains.
+    floor_mic = (
+        10.0 ** (rng.normal(0.0, params.mic_floor_std_db, size=n_mics) / 10.0)
+        if params.mic_floor_std_db > 0.0
+        else np.ones(n_mics)
+    )
     if line_mode in ("coherent", "fm"):
-        floor_spec = np.repeat(psd["floor"][None], n_mics, axis=0)
+        floor_spec = psd["floor"][None] * floor_mic[:, None, None]
         white = rng.standard_normal((n_mics, n_padded))
         floor_audio = _ola_filter(white, np.sqrt(np.maximum(floor_spec, 0.0)), n_fft, hop)[
             :, pad : pad + n_samples
@@ -1109,7 +1119,9 @@ def synthesize(
             scale = np.sqrt(want / have) if have > 0 else 0.0
             audio[m] = (floor_audio[m] + scale * line_audio[m]).astype(np.float32)
     else:
-        spectrum = psd["floor"][None] + np.tensordot(gains, psd["lines"], axes=(1, 0))
+        spectrum = psd["floor"][None] * floor_mic[:, None, None] + np.tensordot(
+            gains, psd["lines"], axes=(1, 0)
+        )
         white = rng.standard_normal((n_mics, n_padded))
         y = _ola_filter(white, np.sqrt(np.maximum(spectrum, 0.0)), n_fft, hop)
         audio = y[:, pad : pad + n_samples].astype(np.float32)
