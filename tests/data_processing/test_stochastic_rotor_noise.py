@@ -398,3 +398,46 @@ def test_n_harmonics_range_reaches_the_pool_and_shortens_the_comb():
     plain = srn.StochasticNoisePool(sample_rate=SR, duration_s=1.0, n_mics=1, n_rotors=4)
     _, _, plain_params, _ = plain.render(np.random.default_rng(7), 1.0)
     assert plain_params.n_harmonics > 16  # the default comb still fills the band
+
+
+def test_fm_mode_per_mic_floor_gain_leaves_the_lines_alone():
+    # A static per-mic floor gain must move the floor and only the floor: the
+    # line-to-floor ratio realized at each microphone shifts by exactly the
+    # mic's floor gain, and the lines themselves stay at one level across mics.
+    rng = np.random.default_rng(3)
+    ranges = srn.StochasticRanges(
+        rolloff_p=(0.5, 0.5),
+        harm_jitter_db=(0.0, 0.0),
+        blade_counts=(1,),
+        rotor_similarity=(1.0, 1.0),
+        gamma0_hz=(0.5, 0.5),
+        gamma_slope_hz=(0.2, 0.2),
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(-3.0, -3.0),
+        floor_rel_db=(-20.0, -20.0),
+        harm_gp_std_db=(0.0, 0.0),
+        floor_gp_std_db=(0.0, 0.0),
+        floor_tilt_gp_std=(0.0, 0.0),
+        mic_floor_std_db=(6.0, 6.0),
+    )
+    params = srn.sample_params(rng, ranges, n_rotors=1, n_harmonics=20, sample_rate=SR)
+    rps = np.full((1, SR * 4), 100.0)
+    audio, diag = srn.synthesize(
+        params, rps, rng=rng, n_mics=6, mic_gain_db=(0.0, 0.0), line_mode="fm", normalize_rms=None
+    )
+    power, freqs = _power_spectrum_frames(audio[0])
+    df = float(freqs[1] - freqs[0])
+    line_bins = np.zeros(freqs.size, bool)
+    for k in range(1, 21):
+        i = int(round(k * 100.0 / df))
+        line_bins[i - 2 : i + 3] = True
+    floor_bins = ~line_bins & (freqs > 300) & (freqs < 3000)
+    lines, floors = [], []
+    for m in range(6):
+        pm = _power_spectrum_frames(audio[m])[0].mean(axis=0)
+        floor_bin = float(np.median(pm[floor_bins]))
+        lines.append(10 * np.log10(max(pm[line_bins].sum() - floor_bin * line_bins.sum(), 1e-20)))
+        floors.append(10 * np.log10(floor_bin))
+    lines, floors = np.array(lines), np.array(floors)
+    assert np.ptp(floors) > 6.0  # the floor gains were drawn (std 6 dB) and applied
+    assert np.ptp(lines) < 2.5  # the lines did not follow them (the leak gives >= 6 dB)

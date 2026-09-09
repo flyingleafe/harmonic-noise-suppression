@@ -1121,7 +1121,12 @@ def synthesize(
         floor_mean = float(np.mean(psd["floor"])) or 1.0
         audio = np.empty((n_mics, n_samples), dtype=np.float32)
         for m in range(n_mics):
-            want = float(np.mean(np.tensordot(gains[m], psd["lines"], axes=(0, 0)))) / floor_mean
+            # the realized floor of mic m carries its own floor gain, so the
+            # wanted ratio must be taken against that same gained floor —
+            # otherwise the gain leaks into the lines through ``scale``
+            want = float(np.mean(np.tensordot(gains[m], psd["lines"], axes=(0, 0)))) / (
+                floor_mean * float(floor_mic[m])
+            )
             have = float(np.var(line_audio[m])) / max(float(np.var(floor_audio[m])), 1e-30)
             scale = np.sqrt(want / have) if have > 0 else 0.0
             audio[m] = (floor_audio[m] + scale * line_audio[m]).astype(np.float32)
