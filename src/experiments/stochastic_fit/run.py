@@ -235,6 +235,85 @@ def prepare(args: argparse.Namespace) -> None:
     print(f"manifest: {len(manifest)} clips")
 
 
+# ── preset renders (the calibration gate's clips) ─────────────────────────
+
+
+def prepare_presets(args: argparse.Namespace) -> None:
+    """Render the rig presets of an online-mix policy on the REAL clips'
+    trajectories and add them to the manifest as ``syn_<preset>`` groups, so the
+    rig fit can score the renderer's own output the way it scores recordings
+    (gate 1 of ``docs/hierarchical-rig-model-plan.md`` § 7)."""
+    import yaml
+
+    from data_processing import stochastic_rotor_noise as srn
+
+    from .data import Clip
+
+    client = r2_client()
+    manifest = json.loads(
+        client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
+    )
+    pol = yaml.safe_load(Path(args.policy).read_text())
+    presets = [src for src in pol["sources"]["noise"] if src.get("kind") == "stochastic"]
+    names = args.names or [f"preset{i}" for i in range(len(presets))]
+    rng = np.random.default_rng(args.seed)
+    for name, src, groups in zip(names, presets, args.groups_per_preset):
+        ranges = srn.StochasticRanges.from_dict(src.get("ranges"))
+        sources = [m for m in manifest if m["group"] in groups.split(",")]
+        n_done = 0
+        for entry in sources:
+            if n_done >= args.per_preset:
+                break
+            clip = clip_from_bytes(
+                client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read()
+            )
+            if clip.rps.max() < 5:
+                continue
+            rps = clip.rps.astype(np.float64)
+            hover = float(np.median(rps[rps > 5]))
+            n_harm = int(np.clip(np.ceil(clip.sr / 2.0 / max(hover, 1.0)), 40, 200))
+            params = srn.sample_params(
+                rng, ranges, n_rotors=rps.shape[0], n_harmonics=n_harm, sample_rate=clip.sr
+            )
+            audio, _ = srn.synthesize(
+                params,
+                rps,
+                rng=rng,
+                n_mics=clip.audio.shape[0],
+                mic_gain_db=tuple(src.get("mic_gain_db", (0.0, 0.0))),
+                line_mode=str(src.get("line_mode", "stochastic")),
+            )
+            cid = f"syn_{name}_{clip.clip_id}"
+            syn = Clip(
+                cid,
+                f"syn_{name}",
+                audio.astype(np.float32),
+                clip.rps,
+                clip.sr,
+                clip.rps.copy(),
+                dict(source=clip.clip_id, preset=name),
+            )
+            key = f"{PREFIX}/{cid}.npz"
+            client.put_object(Bucket=BUCKET, Key=key, Body=clip_to_bytes(syn))
+            manifest = [m for m in manifest if m["clip_id"] != cid]
+            manifest.append(
+                dict(
+                    clip_id=cid,
+                    group=f"syn_{name}",
+                    key=key,
+                    duration_s=audio.shape[1] / clip.sr,
+                    rps_median=np.median(rps, axis=1).round(2).tolist(),
+                    refinement=None,
+                )
+            )
+            n_done += 1
+            print(f"rendered {cid}", flush=True)
+    client.put_object(
+        Bucket=BUCKET, Key=f"{PREFIX}/manifest.json", Body=json.dumps(manifest, indent=1).encode()
+    )
+    print(f"manifest: {len(manifest)} clips")
+
+
 # ── fit ───────────────────────────────────────────────────────────────────
 
 
@@ -549,6 +628,18 @@ def main(argv: list[str] | None = None) -> None:
         "--synthetic", type=int, default=0, help="number of renderer control clips to add"
     )
     p.set_defaults(func=prepare)
+    pp = sub.add_parser("prepare-presets")
+    pp.add_argument("--policy", required=True)
+    pp.add_argument("--names", nargs="*", default=None)
+    pp.add_argument(
+        "--groups-per-preset",
+        nargs="+",
+        required=True,
+        help="comma-joined real groups whose trajectories each preset renders on",
+    )
+    pp.add_argument("--per-preset", type=int, default=12)
+    pp.add_argument("--seed", type=int, default=0)
+    pp.set_defaults(func=prepare_presets)
     f = sub.add_parser("fit")
     f.add_argument("--variants", nargs="+", default=["family"], choices=list(VARIANTS))
     f.add_argument("--groups", nargs="*", default=None)
