@@ -223,6 +223,10 @@ class StochasticRanges:
     harm_dropout_p: tuple[float, float] = (0.0, 0.0)
     blade_counts: tuple[int, ...] = (1, 2, 3)
     blade_emphasis_db: tuple[float, float] = (0.0, 10.0)
+    #: Extra dB on the blade-passing FUNDAMENTAL alone (order = blade count).
+    #: Michael's two-blade combs put k = 2 some 16-19 dB above every other
+    #: order (rig fit A_2 = +22 against +2…+5 at k = 4-8).
+    bpf_boost_db: tuple[float, float] = (0.0, 0.0)
     #: How much of one clip's timbre is shared by its four rotors.
     rotor_similarity: tuple[float, float] = (0.3, 0.95)
     #: Per-rotor deviation from the clip's timbre, dB per line, when > 0:
@@ -443,6 +447,9 @@ def _profile_db(
     emphasis = float(rng.uniform(*ranges.blade_emphasis_db))
     if blade > 1 and emphasis > 0.0:
         db[(np.arange(1, n_harmonics + 1) % blade) == 0] += emphasis
+    lo, hi = ranges.bpf_boost_db
+    if blade > 1 and hi > 0.0 and blade <= n_harmonics:
+        db[blade - 1] += float(rng.uniform(lo, hi)) if hi > lo else float(lo)
     db += rng.normal(0.0, float(rng.uniform(*ranges.harm_jitter_db)), size=n_harmonics)
     p_drop = float(rng.uniform(*ranges.harm_dropout_p))
     if p_drop > 0.0:

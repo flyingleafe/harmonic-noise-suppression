@@ -10,6 +10,9 @@ defaults:
   - _self_
 
 experiment_name: rig_fm_scv2_unified
+# fp16 went non-finite at step ~500 on the FM stream (GradScaler skipped every
+# retry batch, run tgr8l18p); the matrix's one-time bf16 policy applies.
+amp_dtype: bfloat16
 samples_per_validation: null
 batch_size: 128
 num_workers: 12
