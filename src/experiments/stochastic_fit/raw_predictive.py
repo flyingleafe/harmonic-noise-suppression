@@ -15,6 +15,8 @@ import numpy as np
 from .data import Clip, periodogram
 from .predictive import ORDER_POINTS, VISIBLE_THRESHOLDS_DB, two_sample_classifier
 
+AUC_UPPER_LIMIT = 0.80
+
 
 @dataclass(frozen=True)
 class RawTopologyDraws:
@@ -22,6 +24,7 @@ class RawTopologyDraws:
 
     margin_db: np.ndarray  # (clips, rotors, orders); NaN where attribution is impossible
     observations: np.ndarray  # same shape; independent-enough frame count
+    carrier_id: np.ndarray | None = None  # (clips,), clusters repeated matched-RPS draws
 
     def __post_init__(self) -> None:
         margin = np.asarray(self.margin_db)
@@ -30,6 +33,8 @@ class RawTopologyDraws:
             raise ValueError("raw topology arrays must share shape (clips, rotors, orders)")
         if np.isinf(margin).any() or not np.isfinite(observations).all():
             raise ValueError("raw topology arrays contain invalid values")
+        if self.carrier_id is not None and np.asarray(self.carrier_id).shape != (margin.shape[0],):
+            raise ValueError("carrier_id must have one entry per clip")
 
 
 def line_floor_margins(
@@ -135,7 +140,11 @@ def extract_raw_topology(clips: list[Clip], *, k_max: int = 64) -> RawTopologyDr
     margins, observations = zip(
         *(line_floor_margins(clip, k_max=k_max) for clip in clips), strict=True
     )
-    return RawTopologyDraws(np.stack(margins), np.stack(observations))
+    carrier_id = np.asarray(
+        [clip.meta.get("matched_real_clip", clip.clip_id) for clip in clips],
+        dtype=object,
+    )
+    return RawTopologyDraws(np.stack(margins), np.stack(observations), carrier_id)
 
 
 def _finite_row_stats(values: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -247,6 +256,8 @@ def raw_topology_gate(
             test_synth_x,
             seed=seed,
             n_bootstrap=n_bootstrap,
+            test_real_groups=real_test.carrier_id,
+            test_synthetic_groups=synthetic_test.carrier_id,
         )
         if run_classifier
         else {"classifier_auc": None, "classifier_auc_95": None}
@@ -308,7 +319,7 @@ def raw_topology_gate(
         assert point_value is not None and isinstance(interval, list)
         point_auc = float(point_value)
         upper_auc = float(interval[1])
-        if direct_ok and upper_auc < 0.70:
+        if direct_ok and upper_auc < AUC_UPPER_LIMIT:
             status = "pass"
         elif point_auc > 0.70 or coverage < 0.65 or curve_rmse > 1.5:
             status = "fail"
@@ -320,6 +331,7 @@ def raw_topology_gate(
         "passed": status == "pass",
         "classifier_enabled": run_classifier,
         **classifier,
+        "classifier_auc_upper_limit": AUC_UPPER_LIMIT,
         "predictive_90_coverage": coverage,
         "median_curve_iqr_rmse": curve_rmse,
         "per_order_margin_db": curve_rows,
@@ -327,6 +339,91 @@ def raw_topology_gate(
         "feature_names": names,
         "real_observed_cells": int(np.isfinite(real).sum()),
         "synthetic_observed_cells": int(np.isfinite(synthetic).sum()),
+    }
+
+
+def _subset(draws: RawTopologyDraws, indices: np.ndarray) -> RawTopologyDraws:
+    carrier_id = None if draws.carrier_id is None else np.asarray(draws.carrier_id)[indices]
+    return RawTopologyDraws(
+        draws.margin_db[indices],
+        draws.observations[indices],
+        carrier_id,
+    )
+
+
+def repeated_waveform_gate_control(
+    train_pool: RawTopologyDraws,
+    test_pool: RawTopologyDraws,
+    *,
+    synthetic_draws_per_carrier: int = 4,
+    repeats: int = 20,
+    n_bootstrap: int = 200,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """False-rejection calibration for the exact one-vs-many Michael gate."""
+    if train_pool.carrier_id is None or test_pool.carrier_id is None:
+        raise ValueError("repeated gate control requires carrier IDs")
+    if synthetic_draws_per_carrier < 1 or repeats < 1:
+        raise ValueError("draw and repeat counts must be positive")
+    rng = np.random.default_rng(seed)
+
+    def split(pool: RawTopologyDraws) -> tuple[RawTopologyDraws, RawTopologyDraws]:
+        real_indices: list[int] = []
+        synthetic_indices: list[int] = []
+        carrier_id = np.asarray(pool.carrier_id)
+        for carrier in np.unique(carrier_id):
+            available = np.flatnonzero(carrier_id == carrier)
+            need = synthetic_draws_per_carrier + 1
+            if available.size < need:
+                raise ValueError(f"carrier {carrier!r} has {available.size} draws, need {need}")
+            selected = rng.choice(available, need, replace=False)
+            real_indices.append(int(selected[0]))
+            synthetic_indices.extend(int(index) for index in selected[1:])
+        return (
+            _subset(pool, np.asarray(real_indices)),
+            _subset(pool, np.asarray(synthetic_indices)),
+        )
+
+    rows: list[dict[str, Any]] = []
+    for repeat in range(repeats):
+        train_real, train_synthetic = split(train_pool)
+        test_real, test_synthetic = split(test_pool)
+        result = raw_topology_gate(
+            train_real,
+            test_real,
+            train_synthetic,
+            test_synthetic,
+            seed=seed + repeat + 1,
+            n_bootstrap=n_bootstrap,
+            run_classifier=True,
+        )
+        rows.append(
+            {
+                "status": result["status"],
+                "auc": result["classifier_auc"],
+                "auc_upper": result["classifier_auc_95"][1],
+                "coverage": result["predictive_90_coverage"],
+                "curve_rmse": result["median_curve_iqr_rmse"],
+            }
+        )
+    passed = np.asarray([row["status"] == "pass" for row in rows])
+    return {
+        "repeats": repeats,
+        "pass_rate": float(passed.mean()),
+        "false_rejection_rate": float(1.0 - passed.mean()),
+        "auc_median_q95": [
+            float(value) for value in np.quantile([row["auc"] for row in rows], (0.5, 0.95))
+        ],
+        "auc_upper_median_q95": [
+            float(value) for value in np.quantile([row["auc_upper"] for row in rows], (0.5, 0.95))
+        ],
+        "coverage_median_q05": [
+            float(value) for value in np.quantile([row["coverage"] for row in rows], (0.5, 0.05))
+        ],
+        "curve_rmse_median_q95": [
+            float(value) for value in np.quantile([row["curve_rmse"] for row in rows], (0.5, 0.95))
+        ],
+        "rows": rows,
     }
 
 
@@ -469,11 +566,13 @@ def render_matched_population(
 
 
 __all__ = [
+    "AUC_UPPER_LIMIT",
     "RawTopologyDraws",
     "extract_raw_topology",
     "line_floor_margins",
     "population_ranges",
     "raw_topology_features",
     "raw_topology_gate",
+    "repeated_waveform_gate_control",
     "render_matched_population",
 ]

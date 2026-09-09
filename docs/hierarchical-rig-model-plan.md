@@ -131,8 +131,10 @@ All gates use recordings excluded from the population fit.
    must fall inside the held-out real bootstrap bands.
 4. **Classifier two-sample check.** A grouped, cross-recording classifier is
    run separately on topology, dynamics, floor and microphone feature blocks.
-   Its bootstrap upper confidence bound on AUC must be below 0.70; a low-power
-   non-significant p-value alone is not a pass.
+   The topology gate's carrier-cluster-bootstrap upper AUC limit is 0.80:
+   200 exact one-real-vs-four-synthetic planted repetitions give 4% false
+   rejection at 0.80 versus 44.5% at the originally proposed 0.70. A
+   low-power non-significant p-value alone is never a pass.
 5. **Listening audit.** Matched-RPS real/synthetic panels must have no
    systematic defect not represented by a registered statistic.  Listening
    discovers a missing gate; it does not authorize manual range tuning.

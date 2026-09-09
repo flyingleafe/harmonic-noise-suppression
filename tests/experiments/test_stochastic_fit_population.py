@@ -19,8 +19,10 @@ from experiments.stochastic_fit.predictive import (
     latent_topology_diagnostic,
 )
 from experiments.stochastic_fit.raw_predictive import (
+    RawTopologyDraws,
     line_floor_margins,
     population_ranges,
+    repeated_waveform_gate_control,
 )
 from experiments.stochastic_fit.rig import ClipInRig, RigClip, RigParams, RigSpec
 from experiments.stochastic_fit.topology_calibration import (
@@ -375,3 +377,29 @@ def test_synthetic_likelihood_recovers_missing_profile_covariance() -> None:
     planted = np.outer(mode, mode)
     cosine = np.sum(recovered * planted) / (np.linalg.norm(recovered) * np.linalg.norm(planted))
     assert cosine > 0.9
+
+
+def test_exact_one_vs_four_gate_has_a_low_planted_false_rejection_rate() -> None:
+    def pool(seed: int, carriers: int) -> RawTopologyDraws:
+        rng = np.random.default_rng(seed)
+        draws, orders = 8, 32
+        carrier_effect = rng.normal(0.0, 2.0, (carriers, 1, orders))
+        margin = carrier_effect[:, None] + rng.normal(0.0, 1.0, (carriers, draws, 1, orders))
+        margin = margin.reshape(carriers * draws, 1, orders)
+        carrier_id = np.repeat(np.arange(carriers), draws)
+        return RawTopologyDraws(
+            margin,
+            np.ones_like(margin),
+            carrier_id,
+        )
+
+    control = repeated_waveform_gate_control(
+        pool(10, 10),
+        pool(11, 14),
+        synthetic_draws_per_carrier=4,
+        repeats=50,
+        n_bootstrap=100,
+        seed=12,
+    )
+
+    assert control["false_rejection_rate"] <= 0.1

@@ -868,6 +868,12 @@ def population_raw_gate(args: argparse.Namespace) -> None:
             clip = clip_from_bytes(
                 client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read()
             )
+            if (
+                entry["group"].startswith("dregon")
+                and clip.rps.max() >= 5
+                and clip.meta.get("refinement") is None
+            ):
+                raise ValueError(f"{clip.clip_id}: DREGON waveform gates require refined RPS")
             if clip.rps.max() >= 5:
                 clips.append(clip)
         return clips

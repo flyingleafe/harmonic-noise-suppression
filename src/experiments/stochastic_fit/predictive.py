@@ -223,20 +223,30 @@ def _auc_interval(
     *,
     seed: int,
     n_bootstrap: int,
+    groups: np.ndarray | None = None,
 ) -> tuple[float, float, float]:
     rng = np.random.default_rng(seed)
     real = np.flatnonzero(labels == 0)
     synth = np.flatnonzero(labels == 1)
-    aucs = np.empty(n_bootstrap, dtype=np.float64)
+    aucs = np.full(n_bootstrap, np.nan, dtype=np.float64)
+    unique_groups = np.unique(groups) if groups is not None else None
     for i in range(n_bootstrap):
-        indices = np.concatenate(
-            (rng.choice(real, real.size, replace=True), rng.choice(synth, synth.size, replace=True))
-        )
-        auc = roc_auc_score(labels[indices], scores[indices])
-        aucs[i] = max(float(auc), 1.0 - float(auc))
+        if unique_groups is None:
+            indices = np.concatenate(
+                (
+                    rng.choice(real, real.size, replace=True),
+                    rng.choice(synth, synth.size, replace=True),
+                )
+            )
+        else:
+            sampled = rng.choice(unique_groups, unique_groups.size, replace=True)
+            indices = np.concatenate([np.flatnonzero(groups == group) for group in sampled])
+        if np.unique(labels[indices]).size == 2:
+            value = float(roc_auc_score(labels[indices], scores[indices]))
+            aucs[i] = max(value, 1.0 - value)
     auc = float(roc_auc_score(labels, scores))
     auc = max(auc, 1.0 - auc)
-    lo, hi = np.quantile(aucs, (0.025, 0.975))
+    lo, hi = np.nanquantile(aucs, (0.025, 0.975))
     return auc, float(lo), float(hi)
 
 
@@ -248,6 +258,8 @@ def two_sample_classifier(
     *,
     seed: int,
     n_bootstrap: int,
+    test_real_groups: np.ndarray | None = None,
+    test_synthetic_groups: np.ndarray | None = None,
 ) -> dict[str, Any]:
     """Train on one recording and estimate held-out separability on another."""
     train_x = np.concatenate((train_real, train_synthetic))
@@ -264,6 +276,13 @@ def two_sample_classifier(
             np.ones(test_synthetic.shape[0], dtype=int),
         )
     )
+    if (test_real_groups is None) != (test_synthetic_groups is None):
+        raise ValueError("both test group arrays must be supplied together")
+    if test_real_groups is None:
+        test_groups = None
+    else:
+        assert test_synthetic_groups is not None
+        test_groups = np.concatenate((test_real_groups, test_synthetic_groups))
     classifier = make_pipeline(
         RobustScaler(),
         LogisticRegression(
@@ -275,7 +294,13 @@ def two_sample_classifier(
     )
     classifier.fit(train_x, train_y)
     scores = classifier.predict_proba(test_x)[:, 1]
-    auc, auc_lo, auc_hi = _auc_interval(test_y, scores, seed=seed, n_bootstrap=n_bootstrap)
+    auc, auc_lo, auc_hi = _auc_interval(
+        test_y,
+        scores,
+        seed=seed,
+        n_bootstrap=n_bootstrap,
+        groups=test_groups,
+    )
     return {
         "classifier_auc": auc,
         "classifier_auc_95": [auc_lo, auc_hi],

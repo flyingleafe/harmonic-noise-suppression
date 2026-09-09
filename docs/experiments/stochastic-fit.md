@@ -634,6 +634,12 @@ descriptive per-order comb curves/coverage. The classifier is used on
 Michael's FLY125→FLY124, where gusts are not the dominant unmatched process,
 with FLY103/FLY108 reserved for independent confirmation.
 
+All DREGON fit/gate clips use the refined audio-aligned trajectories from the
+August telemetry-refinement campaign: room2 crops carry their refined
+references and the turning room1 clips were refined during bundle preparation.
+`poprawgate` now rejects a turning DREGON clip with no refinement metadata.
+Unrefined command telemetry is not a valid carrier for fit-realism conclusions.
+
 **Fit→renderer parity correction.** The first waveform gates transferred the
 fitted profile, line/floor population and floor curve but accidentally left
 the policy's linewidth and random microphone draws in place. They did not
@@ -647,12 +653,16 @@ normalization but is not invented as an FM process: it is dominated by the
 analysis-window/carrier nuisance and shared-shaft FM has no order-independent
 width.
 
-A parity-complete planted waveform self-control—two independent sets of four
-draws per carrier from the same population—gives median-curve error 0.245
-real-IQR and 0.856 coverage over 1,792 order observations per side. This is
-inside finite-sample uncertainty of the nominal 90% interval, so the waveform
-gate itself is calibrated. The old hybrid table cannot be used to admit
-visibility; rerun Michael's after the parity fix first.
+The first descriptive self-control (four draws on both sides) was insufficient:
+the real gate has one “real” draw and four comparison draws per carrier.
+The exact control now renders eight draws on each FLY125/FLY124 carrier,
+repeatedly assigns one versus four, and bootstraps whole carrier clusters.
+Over 200 repetitions: point AUC median/95th 0.541/0.633, upper AUC
+0.694/0.795, coverage median/5th 0.873/0.831, and curve error median/95th
+0.159/0.201 IQR. The proposed upper-AUC limit 0.70 falsely rejected 44.5%;
+the preregistered limit is therefore 0.80, which rejects 4%. The complete
+Michael gate is calibrated before reading the real result. The old hybrid
+table cannot admit visibility; rerun Michael's after parity first.
 
 The hybrid mismatch mirrored the listening finding—low orders 1--4 weak and
 many orders above 15 prominent—but cannot identify which omitted fitted
