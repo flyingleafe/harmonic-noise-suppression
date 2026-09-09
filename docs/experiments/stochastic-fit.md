@@ -647,13 +647,12 @@ normalization but is not invented as an FM process: it is dominated by the
 analysis-window/carrier nuisance and shared-shaft FM has no order-independent
 width.
 
-A planted waveform self-control—two independent draws of the same complete
-population on the same room2→room1 carriers—gives median-curve error 0.462
-real-IQR and 0.725 coverage. With only seven predictive clips, the nominal
-5--95% sample interval is effectively min--max and its exact new-draw coverage
-is 6/8 = 0.75, so this is calibrated. Future gates render four posterior draws
-per carrier. The old table cannot be used to admit visibility; rerun
-Michael's after the parity fix first.
+A parity-complete planted waveform self-control—two independent sets of four
+draws per carrier from the same population—gives median-curve error 0.245
+real-IQR and 0.856 coverage over 1,792 order observations per side. This is
+inside finite-sample uncertainty of the nominal 90% interval, so the waveform
+gate itself is calibrated. The old hybrid table cannot be used to admit
+visibility; rerun Michael's after the parity fix first.
 
 The hybrid mismatch mirrored the listening finding—low orders 1--4 weak and
 many orders above 15 prominent—but cannot identify which omitted fitted
