@@ -358,6 +358,180 @@ def fit(args: argparse.Namespace) -> None:
             )
 
 
+# ── rig fit (the hierarchical ladder) ─────────────────────────────────────
+
+#: Ladder steps of ``docs/hierarchical-rig-model-plan.md`` § 4: each is a
+#: (Spec overrides, RigSpec overrides) pair; every step is Gaussian lines with
+#: a carrier correction, the two established facts.
+BASE_VARIANT: dict[str, Any] = dict(rps_offset=True, line_shape="gauss")
+LADDER: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
+    # independent fits in the rig code path (the M0 reference)
+    "M0": (
+        {},
+        dict(
+            tie_floor_shape=False,
+            tie_tilt=False,
+            tie_profile=False,
+            tie_width=False,
+            tie_mic_gain=False,
+        ),
+    ),
+    "M1": ({}, {}),  # every rig-level parameter tied
+    "M2": ({}, dict(rotor_delta=True)),
+    "M3": ({}, dict(rotor_delta=True, rotor_width=True)),
+    # per-mic floor gains + per-mic low-band modulation (DREGON's flow noise)
+    "M4": (
+        dict(mic_floor=True, umod_std_db=3.5, umod_tau_s=0.25),
+        dict(rotor_delta=True, rotor_width=True),
+    ),
+    # one per-mic gain on everything (Michael's rig) instead of separate floor gains
+    "M4g": (
+        dict(gain_all=True, umod_std_db=3.5, umod_tau_s=0.25),
+        dict(rotor_delta=True, rotor_width=True),
+    ),
+    # faster, rougher amplitude process
+    "M5": (
+        dict(mic_floor=True, umod_std_db=3.5, umod_tau_s=0.25, gp_kernel="ou", gp_tau_s=0.5),
+        dict(rotor_delta=True, rotor_width=True),
+    ),
+    "M5g": (
+        dict(gain_all=True, umod_std_db=3.5, umod_tau_s=0.25, gp_kernel="ou", gp_tau_s=0.5),
+        dict(rotor_delta=True, rotor_width=True),
+    ),
+}
+
+
+def rigfit(args: argparse.Namespace) -> None:
+    import torch
+
+    from .rig import RigSpec, fit_heldout, fit_rig
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"device {device}", flush=True)
+    client = r2_client()
+    manifest = json.loads(
+        client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
+    )
+    if args.clips:
+        manifest = [m for m in manifest if m["clip_id"] in args.clips]
+
+    def load(groups: list[str]) -> list[tuple[str, str, Any, Any]]:
+        out = []
+        for entry in manifest:
+            if entry["group"] not in groups:
+                continue
+            clip = clip_from_bytes(
+                client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read()
+            )
+            if clip.rps.max() < 5:
+                continue
+            out.append((clip.clip_id, entry["group"], clip, periodogram(clip)))
+        return out
+
+    train_raw = load(args.train_groups)
+    test_raw = load(args.test_groups) if args.test_groups else []
+    print(
+        f"train {len(train_raw)} clips {args.train_groups}; test {len(test_raw)} {args.test_groups}",
+        flush=True,
+    )
+    results = Path(args.results_dir) / args.tag
+    results.mkdir(parents=True, exist_ok=True)
+    for name in args.configs:
+        spec_over, rig_over = LADDER[name]
+        out_json = results / f"{name}.json"
+        if out_json.exists():
+            print(f"{name}: exists, skipping", flush=True)
+            continue
+
+        def clips_for(raw, spec_over=spec_over):
+            return [
+                (
+                    cid,
+                    g,
+                    pg,
+                    make_spec(
+                        pg,
+                        n_mics=clip.audio.shape[0],
+                        f_max=args.f_max,
+                        k_cap=args.k_cap,
+                        variant=BASE_VARIANT | spec_over,
+                    ),
+                )
+                for cid, g, clip, pg in raw
+            ]
+
+        train = clips_for(train_raw)
+        # one K for the rig: the smallest over clips (the profile is shared)
+        k_rig = min(c[3].n_harm for c in train + (clips_for(test_raw) if test_raw else []))
+        train = [(a, b, c, Spec(**{**d.__dict__, "n_harm": k_rig})) for a, b, c, d in train]
+        print(f"== {name}: K={k_rig}, spec {spec_over}, rig {rig_over}", flush=True)
+        t0 = time.time()
+        fitted = fit_rig(
+            train,
+            RigSpec(**rig_over),
+            device=device,
+            iters=tuple(args.iters),
+            log=lambda m: print(m, flush=True),
+        )
+        held = None
+        if test_raw:
+            test = [
+                (a, b, c, Spec(**{**d.__dict__, "n_harm": k_rig}))
+                for a, b, c, d in clips_for(test_raw)
+            ]
+            held = fit_heldout(
+                fitted,
+                test,
+                device=device,
+                iters=tuple(args.iters),
+                log=lambda m: print(m, flush=True),
+            )
+
+        def slim(clips: dict[str, Any]) -> dict[str, Any]:
+            return {
+                cid: dict(
+                    group=v["group"],
+                    scores=v["scores"],
+                    params={
+                        k: (x.tolist() if isinstance(x, np.ndarray) else x)
+                        for k, x in v["params"].items()
+                        if k not in ("carrier", "h_db", "umod_db", "rps_offset")
+                    },
+                )
+                for cid, v in clips.items()
+            }
+
+        summary = dict(
+            config=name,
+            spec=fitted["spec"],
+            rig_spec=fitted["rig_spec"],
+            k_rig=k_rig,
+            rig={
+                k: (x.tolist() if isinstance(x, np.ndarray) else x)
+                for k, x in fitted["rig"].items()
+            },
+            train=slim(fitted["clips"]),
+            heldout=slim(held["clips"]) if held else None,
+            seconds=time.time() - t0,
+        )
+        out_json.write_text(json.dumps(summary))
+        torch.save(fitted["rig_state"], results / f"{name}_rig_state.pt")
+        arrays: dict[str, np.ndarray] = {
+            f"{cid}__{k}": np.asarray(x)
+            for cid, v in fitted["clips"].items()
+            for k, x in v["params"].items()
+            if isinstance(x, np.ndarray)
+        }
+        with open(results / f"{name}_clip_params.npz", "wb") as fh:
+            np.savez_compressed(fh, **arrays)  # type: ignore[arg-type]
+        ex_tr = [v["scores"]["excess_over_loo"] for v in fitted["clips"].values()]
+        line = f"{name}: train excess median {np.median(ex_tr):+.3f}"
+        if held:
+            ex_te = [v["scores"]["excess_over_loo"] for v in held["clips"].values()]
+            line += f"; held-out median {np.median(ex_te):+.3f}"
+        print(line + f"  ({time.time() - t0:.0f}s)", flush=True)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -392,6 +566,17 @@ def main(argv: list[str] | None = None) -> None:
         help="line-drift GP prior std in dB (default: the family midpoint, 3)",
     )
     f.set_defaults(func=fit)
+    r = sub.add_parser("rigfit")
+    r.add_argument("--configs", nargs="+", default=["M0", "M1", "M2"], choices=list(LADDER))
+    r.add_argument("--train-groups", nargs="+", required=True)
+    r.add_argument("--test-groups", nargs="*", default=None)
+    r.add_argument("--clips", nargs="*", default=None)
+    r.add_argument("--f-max", type=float, default=None)
+    r.add_argument("--k-cap", type=int, default=300)
+    r.add_argument("--iters", nargs=3, type=int, default=[100, 100, 200])
+    r.add_argument("--tag", default="rig")
+    r.add_argument("--results-dir", default=str(RESULTS) + "_rig")
+    r.set_defaults(func=rigfit)
     args = ap.parse_args(argv)
     args.func(args)
 

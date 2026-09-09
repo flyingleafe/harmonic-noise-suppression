@@ -87,6 +87,17 @@ class Spec:
     #: (``line_bin_integrate=False`` in every training stream); ``True`` uses
     #: the exact bin integral instead (the renderer's optional route).
     line_bin_integrate: bool = False
+    #: drift kernel of the line levels and the per-mic modulation: ``se`` or ``ou``
+    gp_kernel: str = "se"
+    #: per-mic multiplicative modulation of the low band (DREGON flow noise):
+    #: ``umod_std_db`` > 0 switches it on; ``umod_lines`` lets it act on the
+    #: lines at that microphone as well as on the floor
+    umod_std_db: float = 0.0
+    umod_tau_s: float = 0.25
+    umod_corner_hz: float = 500.0
+    umod_lines: bool = True
+    #: one per-mic gain on everything (Michael's rig) — fitted only in a rig fit
+    gain_all: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -94,6 +105,17 @@ def se_cholesky(n: int, dt: float, tau: float, jitter: float = 1e-6) -> np.ndarr
     t = np.arange(n) * dt
     k = np.exp(-0.5 * ((t[:, None] - t[None, :]) / max(tau, 1e-9)) ** 2)
     return np.linalg.cholesky(k + jitter * np.eye(n))
+
+
+def ou_cholesky(n: int, dt: float, tau: float, jitter: float = 1e-6) -> np.ndarray:
+    """Matérn-1/2 (Ornstein-Uhlenbeck) kernel: ``exp(-|dt|/tau)``."""
+    t = np.arange(n) * dt
+    k = np.exp(-np.abs(t[:, None] - t[None, :]) / max(tau, 1e-9))
+    return np.linalg.cholesky(k + jitter * np.eye(n))
+
+
+def drift_cholesky(kind: str, n: int, dt: float, tau: float) -> np.ndarray:
+    return ou_cholesky(n, dt, tau) if kind == "ou" else se_cholesky(n, dt, tau)
 
 
 def interp_matrix(x: np.ndarray, knots: np.ndarray) -> np.ndarray:
@@ -135,6 +157,8 @@ class CombSpectrum(nn.Module):
         self.tilt_chol: Tensor
         self.o_interp: Tensor
         self.kernel: Tensor
+        self.u_chol: Tensor
+        self.u_band: Tensor
         self.spec = spec
         R, N = spec.rps.shape
         F = spec.freqs.size
@@ -187,7 +211,27 @@ class CombSpectrum(nn.Module):
         kdt = float(knots[1] - knots[0])
         self.register_buffer(
             "h_chol",
-            torch.as_tensor(se_cholesky(knots.size, kdt, spec.gp_tau_s), dtype=dt, device=dev),
+            torch.as_tensor(
+                drift_cholesky(spec.gp_kernel, knots.size, kdt, spec.gp_tau_s), dtype=dt, device=dev
+            ),
+        )
+        self.register_buffer(
+            "u_chol",
+            torch.as_tensor(
+                drift_cholesky(spec.gp_kernel, knots.size, kdt, spec.umod_tau_s),
+                dtype=dt,
+                device=dev,
+            ),
+        )
+        # soft low-band selector of the per-mic modulation (one octave transition)
+        self.register_buffer(
+            "u_band",
+            torch.sigmoid(
+                -torch.as_tensor(
+                    np.log2(np.maximum(freqs, 1.0) / spec.umod_corner_hz), dtype=dt, device=dev
+                )
+                * 4.0
+            ),
         )
         self.register_buffer(
             "b_chol",
@@ -230,10 +274,46 @@ class CombSpectrum(nn.Module):
             torch.full((1,), -6.0, dtype=dt, device=dev)
         )  # softplus -> share
         self.rps_offset_knots = z(R, oknots.size)
+        self.u_z = z(M, Tk)  # per-mic low-band modulation knots (whitened)
         self.active_k = K  # harmonic ladder: lines with k > active_k are off
 
         kernel = torch.tensor(HANN_POWER_KERNEL, dtype=dt, device=dev).view(1, 1, 3)
         self.register_buffer("kernel", kernel)
+
+    # ── parameter hooks (a clip inside a rig fit substitutes composites) ──
+
+    def _profile_db(self) -> Tensor:
+        return self.profile_db  # (R, K)
+
+    def _floor_shape_z(self) -> Tensor:
+        return self.floor_shape_z  # (n_ctrl,)
+
+    def _floor_tilt_db_oct(self) -> Tensor:
+        return self.floor_tilt_db_oct  # (1,)
+
+    def _mic_gain_db(self) -> Tensor:
+        return self.mic_gain_db  # (M, R)
+
+    def _mic_floor_db(self) -> Tensor:
+        return self.mic_floor_db  # (M,)
+
+    def _gain_all_db(self) -> Tensor | None:
+        return None  # (M,) dB on floor and lines alike
+
+    def _gamma_raw(self) -> tuple[Tensor, Tensor]:
+        return self.gamma0_raw, self.slope_raw  # (R,), (R,)
+
+    def _amp_exp(self) -> Tensor:
+        return self.amp_exp
+
+    def _floor_exp(self) -> tuple[Tensor, Tensor]:
+        return self.floor_exp, self.floor_static_raw
+
+    def _umod_db(self) -> Tensor | None:
+        """``(M, N)`` per-mic low-band modulation in dB, or None."""
+        if self.spec.umod_std_db <= 0:
+            return None
+        return self.spec.umod_std_db * (self.t_interp @ (self.u_chol @ self.u_z.T)).T
 
     # ── pieces ────────────────────────────────────────────────────────────
 
@@ -243,8 +323,9 @@ class CombSpectrum(nn.Module):
         floor = max(GAMMA_FLOOR_HZ, self.spec.gamma_min_bins * self.df)
         if self.spec.free_gamma:
             return torch.exp(self.log_gamma_free).clamp_min(floor)
-        g0 = torch.nn.functional.softplus(self.gamma0_raw)
-        sl = torch.nn.functional.softplus(self.slope_raw)
+        g0_raw, sl_raw = self._gamma_raw()
+        g0 = torch.nn.functional.softplus(g0_raw)
+        sl = torch.nn.functional.softplus(sl_raw)
         return (g0[:, None] + sl[:, None] * self.k[None, :]).clamp_min(floor)
 
     @property
@@ -263,7 +344,7 @@ class CombSpectrum(nn.Module):
         """``(M, N, F)`` broadband floor (per mic only through ``mic_floor``)."""
         s = self.spec
         shape = self.shape_interp @ (
-            s.floor_shape_std_db * (self.shape_chol @ self.floor_shape_z)
+            s.floor_shape_std_db * (self.shape_chol @ self._floor_shape_z())
         )  # (F,)
         level_t = self.t_interp @ (s.floor_gp_std_db * (self.b_chol @ self.floor_level_z))  # (N,)
         tilt_t = self.t_interp @ (
@@ -273,34 +354,30 @@ class CombSpectrum(nn.Module):
             self.floor_mean_db
             + shape[None, :]
             + level_t[:, None]
-            + (self.floor_tilt_db_oct + tilt_t)[:, None] * self.tilt_oct[None, :]
+            + (self._floor_tilt_db_oct() + tilt_t)[:, None] * self.tilt_oct[None, :]
         )
         speed = self.rps.clamp_min(0.0) / AMP_RPS_REF
-        fexp = (
-            self.floor_exp
-            if s.fit_speed_law
-            else torch.full_like(self.floor_exp, s.amp_rps_exponent)
-        )
+        floor_exp, static_raw = self._floor_exp()
+        fexp = floor_exp if s.fit_speed_law else torch.full_like(floor_exp, s.amp_rps_exponent)
         static = (
-            torch.nn.functional.softplus(self.floor_static_raw)
+            torch.nn.functional.softplus(static_raw)
             if s.fit_speed_law
-            else torch.zeros_like(self.floor_static_raw)
+            else torch.zeros_like(static_raw)
         )
         gain = (speed**fexp).mean(dim=0) + static  # (N,)
         floor = 10.0 ** (db / 10.0) * gain[:, None]  # (N, F)
         if s.mic_floor:
-            return floor[None] * 10.0 ** (self.mic_floor_db[:, None, None] / 10.0)
+            return floor[None] * 10.0 ** (self._mic_floor_db()[:, None, None] / 10.0)
         return floor[None].expand(self.M, -1, -1)
 
     def line_power(self) -> Tensor:
         """``(R, K, N)`` line powers (unit-area weights) incl. the speed law."""
         s = self.spec
         h = torch.einsum("nj,rkj->rkn", self.t_interp, self.h_db)
-        db = self.profile_db[:, :, None] + h
+        db = self._profile_db()[:, :, None] + h
         speed = self.rps.clamp_min(0.0) / AMP_RPS_REF
-        aexp = (
-            self.amp_exp if s.fit_speed_law else torch.full_like(self.amp_exp, s.amp_rps_exponent)
-        )
+        amp_exp = self._amp_exp()
+        aexp = amp_exp if s.fit_speed_law else torch.full_like(amp_exp, s.amp_rps_exponent)
         power = 10.0 ** (db / 10.0) * (speed**aexp)[:, None, :]
         if self.active_k < self.K:
             power = power * (self.k <= self.active_k).to(power.dtype)[None, :, None]
@@ -360,10 +437,22 @@ class CombSpectrum(nn.Module):
 
     def forward(self) -> Tensor:
         """``(M, N, F)`` expected periodogram."""
-        gains = 10.0 ** (
-            (self.mic_gain_db - self.mic_gain_db.mean(dim=0, keepdim=True)) / 10.0
-        )  # (M, R)
-        spectrum = self.floor() + torch.einsum("mr,rnf->mnf", gains, self.lines())
+        mg = self._mic_gain_db()
+        gains = 10.0 ** ((mg - mg.mean(dim=0, keepdim=True)) / 10.0)  # (M, R)
+        floor = self.floor()
+        lines = torch.einsum("mr,rnf->mnf", gains, self.lines())
+        u = self._umod_db()
+        if u is not None:
+            mod = (
+                1.0 + (10.0 ** (u / 10.0) - 1.0)[:, :, None] * self.u_band[None, None, :]
+            )  # (M, N, F)
+            floor = floor * mod
+            if self.spec.umod_lines:
+                lines = lines * mod
+        spectrum = floor + lines
+        g_all = self._gain_all_db()
+        if g_all is not None:
+            spectrum = spectrum * 10.0 ** ((g_all - g_all.mean()) / 10.0)[:, None, None]
         if self.spec.window_kernel:
             x = spectrum.reshape(-1, 1, self.F)
             x = torch.nn.functional.conv1d(
@@ -385,6 +474,8 @@ class CombSpectrum(nn.Module):
         )
         if s.rps_offset:
             p = p + 0.5 * self.rps_offset_knots.square().sum() / s.rps_offset_std**2
+        if s.umod_std_db > 0:
+            p = p + 0.5 * self.u_z.square().sum()
         if s.free_gamma:
             # smoothness of log gamma along k (second differences), weak
             d2 = (
@@ -448,6 +539,9 @@ class CombSpectrum(nn.Module):
                 .copy(),
                 carrier=self.carrier().cpu().numpy().copy(),
             )
+            u = self._umod_db()
+            if u is not None:
+                out["umod_db"] = u.cpu().numpy().copy()
         return out
 
     def parameter_groups(self, stage: str) -> list[nn.Parameter]:
@@ -472,4 +566,6 @@ class CombSpectrum(nn.Module):
             lines.append(self.amp_exp)
         if s.rps_offset:
             lines.append(self.rps_offset_knots)
+        if s.umod_std_db > 0:
+            floor.append(self.u_z)
         return floor + lines

@@ -399,6 +399,53 @@ which. Michael's floor needs only a common term (0.8–0.9), σ 1–2 dB net,
 slower (lag-1 0.81–0.94). The current sampler's floor drift (common to all
 mics) has the wrong sharing for DREGON's low band.
 
+### Coherent share per order: Michael's even orders are phase-locked tones, DREGON's lines are random-phase (`coherent.py`)
+
+Bretthorst's general linear model on the refined carriers: for order `k`
+and a segment of `T` s, the eight model functions `cos/sin(k φ_ρ(t))` of
+the four rotors are fitted jointly by least squares (the Gram matrix
+carries the near-collinear rotors), the explained fraction of the band
+energy around the lines is the segment's coherent share, the same
+functions at `k + ½` give the null. Controls on real FLY125 carriers:
+phase-locked tones read 0.94–0.99 at k = 1–2 flat in `T` (0.7 / 0.5 / 0.3
+at k = 4 / 8 / 12 — the band's noise share grows with `k`, so absolute
+values are read against this ceiling), random-phase Lorentzian lines of
+HWHM 0.5 Hz read 0.92 → 0.17 from 0.25 to 2 s at k = 1; null 0.05.
+Real clips, median net share at T = 0.25 / 0.5 / 1 / 2 s:
+
+| k | FLY125 (10) | FLY124 (14) | DREGON room1 (7) | DREGON room2 (17) |
+|---|---|---|---|---|
+| 1 | 0.76 / 0.75 / 0.77 / 0.77 | 0.73 / 0.68 / 0.64 / 0.57 | 0.83 / 0.67 / 0.43 / 0.20 | 0.83 / 0.47 / 0.23 / 0.10 |
+| 2 | 0.66 / 0.85 / 0.86 / **0.82** | 0.70 / 0.79 / 0.76 / **0.73** | 0.76 / 0.55 / 0.28 / 0.17 | 0.65 / 0.33 / 0.15 / 0.07 |
+| 3 | 0.38 / 0.37 / 0.25 / 0.12 | 0.32 / 0.19 / 0.12 / 0.07 | 0.34 / 0.19 / 0.11 / 0.04 | 0.45 / 0.20 / 0.10 / 0.05 |
+| 4 | 0.52 / 0.46 / 0.39 / 0.33 | 0.44 / 0.38 / 0.29 / 0.25 | 0.34 / 0.19 / 0.12 / 0.05 | 0.37 / 0.19 / 0.08 / 0.04 |
+| 5 | 0.19 / 0.11 / 0.04 / 0.03 | 0.17 / 0.09 / 0.03 / 0.02 | 0.04 / 0.03 / 0.01 / 0.01 | 0.26 / 0.12 / 0.06 / 0.03 |
+| 6 | 0.56 / 0.48 / 0.43 / 0.40 | 0.34 / 0.23 / 0.13 / 0.09 | 0.15 / 0.10 / 0.04 / 0.02 | 0.18 / 0.10 / 0.04 / 0.02 |
+| 7 | **−0.08 / −0.04 / −0.02 / −0.01** | −0.04 / −0.02 / 0 / 0 | 0.10 / 0.05 / 0.02 / 0.01 | 0.14 / 0.07 / 0.03 / 0.02 |
+| 8 | 0.40 / 0.32 / 0.20 / 0.13 | 0.19 / 0.14 / 0.06 / 0.04 | 0.15 / 0.08 / 0.04 / 0.02 | 0.14 / 0.07 / 0.03 / 0.01 |
+| 10 | 0.20 / 0.12 / 0.10 / 0.05 | 0.14 / 0.07 / 0.04 / 0.03 | 0.09 / 0.05 / 0.03 / 0.01 | 0.08 / 0.04 / 0.02 / 0.02 |
+| 12 | 0.05 / 0.04 / 0.02 / 0.02 | 0.05 / 0.03 / 0.01 / 0.01 | 0.05 / 0.03 / 0.02 / 0.01 | 0.10 / 0.04 / 0.02 / 0.01 |
+
+Readings. (1) **Michael's even orders are phase-locked tones**: k = 2 holds
+0.82–0.86 out to 2 s (the tone control's shape), k = 4 and 6 decay slowly
+(0.5 → 0.3–0.4), k = 8 by 1 s; k = 1 (shaft rate) is coherent at 0.6–0.77.
+The **odd orders are nearly absent** (k = 7 at the null on both flights,
+k = 5, 9, 11 ≤ 0.2 at 0.25 s): a two-blade rotor's blade-passing comb at
+`2 r` with only imbalance at the odd shaft orders. This is the "phase
+interference" of the low harmonics — four deterministic tones in one bin —
+and it is what the earlier lag-coherence plateau (0.33–0.37, all orders
+1–8 pooled) was averaging over. (2) **DREGON's lines are random-phase at
+every order**, decaying with `T` exactly as the Lorentzian control: k = 1
+0.83 → 0.20 (room1) / 0.10 (room2), i.e. coherence time ≈ 0.5 s
+(HWHM ≈ 0.3 Hz at k = 1, broader than the bench's 0.04 Hz/order — flight
+shaft jitter); odd and even orders alike. (3) Consequences: Michael's
+preset renders even orders as phase-locked tones with a per-order
+decoherence (`q_k`) read from these curves and odd orders at their
+measured low level; DREGON's renders Lorentzian random-phase lines with
+the flight coherence time. In the spectral fit, k ≤ 8 on Michael's is a
+deterministic-tone regime where the exponential cell model is wrong by
+construction; ladder verdicts are read at k ≥ 9 there.
+
 ### Interpretation: the phase-increment model, two regimes
 
 The tracker's generative model (`phase_increment_tracker.py`, WP18 of

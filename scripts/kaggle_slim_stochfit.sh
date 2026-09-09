@@ -11,7 +11,7 @@ BRANCH=kaggle-slim-stochfit
 SLIM=$(mktemp -d)
 mkdir -p "$SLIM/src/experiments/stochastic_fit"
 cp src/experiments/__init__.py "$SLIM/src/experiments/"
-cp src/experiments/stochastic_fit/{__init__,data,model,fit,run}.py "$SLIM/src/experiments/stochastic_fit/"
+cp src/experiments/stochastic_fit/{__init__,data,model,fit,rig,run}.py "$SLIM/src/experiments/stochastic_fit/"
 cat > "$SLIM/pyproject.toml" <<'EOF'
 [project]
 name = "stochastic-fit-slim"
