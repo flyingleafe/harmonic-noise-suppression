@@ -469,8 +469,14 @@ def _init_heldout_profiles(rig: RigParams, rcs: list[RigClip]) -> None:
             rc.model.level_db.copy_(residual.median(dim=1).values)
             if rc.model.profile_z is not None:
                 shape = residual - rc.model.level_db[:, None]
-                solution = torch.linalg.lstsq(basis.T, shape.T).solution.T
-                rc.model.profile_z.copy_(solution)
+                # The N(0, I) factor prior makes this a ridge-MAP initialization.
+                # Plain least squares explodes when an evidence-rejected mode has
+                # almost zero loading, which poisoned held-out optimization.
+                gram = basis @ basis.T + torch.eye(
+                    basis.shape[0], dtype=basis.dtype, device=basis.device
+                )
+                solution = torch.linalg.solve(gram, basis @ shape.T).T
+                rc.model.profile_z.copy_(solution.clamp(-6.0, 6.0))
 
 
 def fit_population_heldout(

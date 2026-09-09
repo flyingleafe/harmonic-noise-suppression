@@ -111,6 +111,11 @@ def plant_population_and_draw(
         rig.delta_db.copy_(torch.as_tensor(delta))
         if rig.profile_basis_db is not None:
             rig.profile_basis_db.copy_(torch.as_tensor(modes))
+            assert rig.profile_mode_std_raw is not None
+            mode_std = torch.as_tensor(
+                np.sqrt(np.mean(modes**2, axis=1)), dtype=torch.float32
+            ).clamp_min(1e-3)
+            rig.profile_mode_std_raw.copy_(torch.log(torch.expm1(mode_std)))
         rig.floor_tilt_db_oct.fill_(-6.0)
         rig.gamma0_raw.fill_(_inv_softplus(2.0))
         rig.slope_raw.fill_(_inv_softplus(0.5))

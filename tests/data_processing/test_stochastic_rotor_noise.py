@@ -389,6 +389,65 @@ def test_n_harmonics_range_draws_the_comb_length_per_clip():
     )
 
 
+def test_fitted_population_sets_profile_and_scale_invariant_line_floor_ratio():
+    mean = (2.0, 6.0, -1.0, -4.0, -7.0)
+    rotor = ((1.0, -1.0, 0.5, 0.0, -0.5), (-1.0, 1.0, -0.5, 0.0, 0.5))
+    ranges = srn.StochasticRanges(
+        profile_mean_db=mean,
+        profile_basis_db=(),
+        profile_rotor_db=rotor,
+        line_floor_mean_db=18.0,
+        line_floor_std_db=0.0,
+        rotor_contrast_std_db=0.0,
+        # These incompatible legacy controls must be ignored by the fitted path.
+        rolloff_p=(9.0, 9.0),
+        harm_jitter_db=(30.0, 30.0),
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(3),
+        ranges,
+        n_rotors=2,
+        n_harmonics=5,
+        sample_rate=SR,
+    )
+
+    expected = np.asarray(mean)[None, :] + np.asarray(rotor)
+    np.testing.assert_allclose(params.profile_db, expected)
+    assert params.profile_db[:, 1].mean() - params.floor_mean_db == pytest.approx(18.0)
+
+
+def test_fitted_population_draws_the_learned_cross_order_covariance():
+    mode = np.array((-4.0, -2.0, 0.0, 2.0, 4.0))
+    ranges = srn.StochasticRanges(
+        profile_mean_db=(0.0,) * 5,
+        profile_basis_db=(tuple(mode),),
+        profile_rotor_db=((0.0,) * 5,),
+        line_floor_mean_db=18.0,
+        line_floor_std_db=0.0,
+        rotor_contrast_std_db=0.0,
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+    )
+    profiles = np.stack(
+        [
+            srn.sample_params(
+                np.random.default_rng(seed),
+                ranges,
+                n_rotors=1,
+                n_harmonics=5,
+                sample_rate=SR,
+            ).profile_db[0]
+            for seed in range(512)
+        ]
+    )
+    empirical = np.cov(profiles, rowvar=False)
+    expected = np.outer(mode, mode)
+    cosine = np.sum(empirical * expected) / (np.linalg.norm(empirical) * np.linalg.norm(expected))
+    assert cosine > 0.999
+
+
 def test_n_harmonics_range_reaches_the_pool_and_shortens_the_comb():
     pool = srn.StochasticNoisePool(
         sample_rate=SR, duration_s=1.0, n_harmonics_range=(8, 16), n_mics=1, n_rotors=4
@@ -441,3 +500,49 @@ def test_fm_mode_per_mic_floor_gain_leaves_the_lines_alone():
     lines, floors = np.array(lines), np.array(floors)
     assert np.ptp(floors) > 6.0  # the floor gains were drawn (std 6 dB) and applied
     assert np.ptp(lines) < 2.5  # the lines did not follow them (the leak gives >= 6 dB)
+
+
+def test_fitted_width_and_microphone_parameters_reach_the_waveform() -> None:
+    gain_db = ((0.0, -6.0), (3.0, 1.0))
+    floor_db = (-2.0, 4.0)
+    all_db = (1.5, -1.5)
+    ranges = srn.StochasticRanges(
+        fixed_gamma0_hz=(1.0, 2.0),
+        fixed_gamma_slope_hz=(0.2, 0.4),
+        fixed_shaft_jitter_rps=(0.3, 0.7),
+        fixed_mic_gain_db=gain_db,
+        fixed_mic_floor_db=floor_db,
+        fixed_mic_gain_all_db=all_db,
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+        harm_gp_std_db=(0.0, 0.0),
+        floor_gp_std_db=(0.0, 0.0),
+        floor_tilt_gp_std=(0.0, 0.0),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(4),
+        ranges,
+        n_rotors=2,
+        n_harmonics=12,
+        sample_rate=SR,
+    )
+    rps = np.stack((np.full(SR // 2, 70.0), np.full(SR // 2, 83.0)))
+    _, diagnostics = srn.synthesize(
+        params,
+        rps,
+        rng=np.random.default_rng(5),
+        n_mics=2,
+        mic_gain_db=(-30.0, -20.0),
+        line_mode="fm",
+        normalize_rms=None,
+    )
+
+    np.testing.assert_allclose(params.gamma0, [1.0, 2.0])
+    np.testing.assert_allclose(params.gamma_slope, [0.2, 0.4])
+    np.testing.assert_allclose(params.shaft_jitter_rps, [0.3, 0.7])
+    np.testing.assert_allclose(diagnostics["mic_gains"], 10.0 ** (np.asarray(gain_db) / 10.0))
+    np.testing.assert_allclose(
+        diagnostics["mic_floor_gains"],
+        10.0 ** (np.asarray(floor_db) / 10.0),
+    )
+    np.testing.assert_allclose(diagnostics["mic_gain_all_db"], all_db)

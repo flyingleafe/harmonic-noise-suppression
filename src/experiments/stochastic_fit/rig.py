@@ -50,6 +50,7 @@ class RigSpec:
     level_prior_db: float = 10.0  # per-clip per-rotor level, weak prior
     profile_rank: int = 0  # low-rank correlated clip/rotor profile population
     profile_mode_smooth_db: float = 3.0  # second-difference prior on each loading
+    profile_mode_scale_prior_db: float = 5.0
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -65,10 +66,20 @@ class RigParams(nn.Module):
         self.profile_db = z(K)  # A_k
         self.delta_db = z(R, K)  # delta_rk
         self.profile_basis_db: nn.Parameter | None
+        self.profile_mode_std_raw: nn.Parameter | None
         if rig.profile_rank > 0:
             self.profile_basis_db = z(rig.profile_rank, K)
+            self.profile_mode_std_raw = nn.Parameter(
+                torch.full(
+                    (rig.profile_rank,),
+                    _inv_softplus(2.0),
+                    dtype=dtype,
+                    device=device,
+                )
+            )
         else:
             self.register_parameter("profile_basis_db", None)
+            self.register_parameter("profile_mode_std_raw", None)
         self.gamma0_raw = nn.Parameter(
             torch.full((1,), _inv_softplus(2.0), dtype=dtype, device=device)
         )
@@ -102,14 +113,20 @@ class RigParams(nn.Module):
             if basis.shape[1] > 2:
                 d2 = basis[:, 2:] - 2.0 * basis[:, 1:-1] + basis[:, :-2]
                 p = p + 0.5 * d2.square().sum() / r.profile_mode_smooth_db**2
-            p = p + 0.5 * basis.square().sum() / 20.0**2
+            assert self.profile_mode_std_raw is not None
+            mode_std = torch.nn.functional.softplus(self.profile_mode_std_raw)
+            p = p + 0.5 * (mode_std / r.profile_mode_scale_prior_db).square().sum()
         return p
 
     def profile_basis(self) -> Tensor:
-        """Centred ``(Q, K)`` profile loadings; centring identifies rotor level."""
+        """Centred unit-RMS directions times explicit mode standard deviations."""
         if self.profile_basis_db is None:
             return self.profile_db.new_zeros((0, self.profile_db.numel()))
-        return self.profile_basis_db - self.profile_basis_db.mean(dim=1, keepdim=True)
+        assert self.profile_mode_std_raw is not None
+        centred = self.profile_basis_db - self.profile_basis_db.mean(dim=1, keepdim=True)
+        rms = centred.square().mean(dim=1, keepdim=True).sqrt().clamp_min(1e-6)
+        scale = torch.nn.functional.softplus(self.profile_mode_std_raw)[:, None]
+        return centred / rms * scale
 
     def parameters_for(self, stage: str) -> list[nn.Parameter]:
         s, r = self.spec, self.rig
@@ -132,7 +149,8 @@ class RigParams(nn.Module):
         if r.rotor_delta:
             lines.append(self.delta_db)
         if self.profile_basis_db is not None:
-            lines.append(self.profile_basis_db)
+            assert self.profile_mode_std_raw is not None
+            lines.extend((self.profile_basis_db, self.profile_mode_std_raw))
         if r.tie_width:
             lines += [self.gamma0_raw, self.slope_raw]
         if r.rotor_width:
@@ -156,6 +174,11 @@ class RigParams(nn.Module):
                 profile_basis_db=(
                     self.profile_basis().cpu().numpy().copy()
                     if self.profile_basis_db is not None
+                    else None
+                ),
+                profile_mode_std_db=(
+                    torch.nn.functional.softplus(self.profile_mode_std_raw).cpu().numpy().copy()
+                    if self.profile_mode_std_raw is not None
                     else None
                 ),
                 delta_db=self.delta_db.cpu().numpy().copy(),
@@ -327,8 +350,12 @@ def _init_rig_from_clips(rig: RigParams, rcs: list[RigClip]) -> None:
             u, singular, vh = torch.linalg.svd(flat, full_matrices=False)
             q = min(rig.rig.profile_rank, u.shape[1])
             sample_scale = float(max(flat.shape[0] - 1, 1)) ** 0.5
+            desired = singular[:q, None] * vh[:q] / sample_scale
             rig.profile_basis_db.zero_()
-            rig.profile_basis_db[:q].copy_(singular[:q, None] * vh[:q] / sample_scale)
+            rig.profile_basis_db[:q].copy_(desired)
+            assert rig.profile_mode_std_raw is not None
+            desired_std = desired.square().mean(dim=1).sqrt().clamp_min(1e-3)
+            rig.profile_mode_std_raw[:q].copy_(_inv_softplus_t(desired_std))
             scores = u[:, :q] * sample_scale
             for c, rc in enumerate(rcs):
                 assert rc.model.profile_z is not None

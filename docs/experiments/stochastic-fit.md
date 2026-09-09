@@ -597,6 +597,87 @@ while pinning covariance recovery, held-out calibration and non-degenerate
 importance weights (`test_stochastic_fit_population.py`). Full experiment
 tests: 50 passed, 1 deselected; renderer tests: 28 passed.
 
+### The first population ladder does not pass a waveform gate
+
+The first `popgate` implementation compared prior profile draws with
+`clip.params.profile_db` from the same candidate fit. That is circular as a
+realism claim: the “real” side already obeys the candidate hierarchy. It is
+retained only as `poplatent`, labelled `fitted-latent-diagnostic`.
+
+`poprawgate` is the actual gate. It never refits either side. On each real
+trajectory it renders one independent prior-predictive waveform and extracts
+from real and rendered audio the same union-comb statistic: for order `k`, the
+integrated power in the union of all four telemetry-predicted line windows
+relative to neighbouring bins after masking every predicted line. Rotors are
+aggregated because room1's nearby lines are almost never attributable to one
+rotor without importing the candidate model. Non-positive excess is retained
+as a censored observation. Train the classifier on room2-real versus
+room2-render; score it only on room1-real versus room1-render.
+
+DREGON P0--P3 marginal evidence is nearly flat. Held-out IW NLL/cell:
+P0 −1.7488, P1 −1.7530, P2 −1.7569, P3 −1.7501. The tiny P2 optimum is not a
+realism result. The first DREGON waveform diagnostics below are **superseded
+hybrid-preset diagnostics** after the parity audit described below:
+
+| draw | exploratory AUC | 90% coverage | median-curve IQR RMSE |
+|---|---:|---:|---:|
+| P0 | 1.000 | 0.116 | 2.91 |
+| P2 | 1.000 | 0.201 | 2.69 |
+| P0 + existing spectral recolour and random-RIR observation model | 1.000 | 0.167 | 3.05 |
+
+The AUC is **not a DREGON model-selection gate**. Real DREGON carries wind
+gusts that this model deliberately does not attempt to reproduce beyond the
+already measured per-microphone low-band OU term; a classifier can detect
+that missing channel trivially even when the comb is right. `poprawgate`
+therefore refuses to run its classifier on DREGON groups. DREGON retains only
+descriptive per-order comb curves/coverage. The classifier is used on
+Michael's FLY125→FLY124, where gusts are not the dominant unmatched process,
+with FLY103/FLY108 reserved for independent confirmation.
+
+**Fit→renderer parity correction.** The first waveform gates transferred the
+fitted profile, line/floor population and floor curve but accidentally left
+the policy's linewidth and random microphone draws in place. They did not
+test the complete fitted population. `population_ranges` now transfers
+per-rotor `gamma0`/slope/width scale, the fitted `(mic, rotor)` line gains,
+per-mic floor gains and Michael's whole-signal gains; matched rendering also
+uses the fitted line/floor speed exponents and static floor share. The FM
+shaft-rate std is the fitted Gaussian high-order HWHM slope divided by
+`sqrt(2 log 2)`, per rotor. The fitted width intercept remains in the spectral
+normalization but is not invented as an FM process: it is dominated by the
+analysis-window/carrier nuisance and shared-shaft FM has no order-independent
+width.
+
+A planted waveform self-control—two independent draws of the same complete
+population on the same room2→room1 carriers—gives median-curve error 0.462
+real-IQR and 0.725 coverage. With only seven predictive clips, the nominal
+5--95% sample interval is effectively min--max and its exact new-draw coverage
+is 6/8 = 0.75, so this is calibrated. Future gates render four posterior draws
+per carrier. The old table cannot be used to admit visibility; rerun
+Michael's after the parity fix first.
+
+The hybrid mismatch mirrored the listening finding—low orders 1--4 weak and
+many orders above 15 prominent—but cannot identify which omitted fitted
+parameter caused it. One independent defect is valid: P2's first factor had
+12.1 dB RMS because loading scale could grow while variational coordinates
+shrunk. `RigParams` now uses unit-RMS mode directions plus an explicit positive
+mode standard deviation with a 5 dB half-normal prior; P1--P3 must be rerun.
+
+The training-only mean correction, default recolour/reverb, and Ledoit--Wolf
+covariance probes were all evaluated through the same incomplete hybrid
+renderer. Their numerical failures remain useful provenance but do **not**
+reject those structures or admit the next visibility arm. Decision order is:
+complete fit→renderer parity → planted waveform control → rerun Michael's
+continuous P0--P3 → only then decide whether PV visibility/censoring is
+necessary.
+
+**Validation status correction.** Repeated room1 failures informed the
+sequence above, so room1 is now development validation, not an untouched
+confirmatory set, even though no room1 statistic entered parameter fitting.
+The next candidate and stopping rule must be frozen from training-recording
+CV. FLY103/FLY108 remain independent for Michael's. DREGON has no unused
+noise-only recording in the current bundle; either prepare a genuinely unused
+recording or label the DREGON realism result exploratory.
+
 ## Prior conditional-fit conclusion (superseded by the population correction)
 
 Answer to "wrong ranges or wrong family": the realized family already

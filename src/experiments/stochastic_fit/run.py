@@ -796,6 +796,219 @@ def population_fit(args: argparse.Namespace) -> None:
         )
 
 
+def population_latent_diagnostic(args: argparse.Namespace) -> None:
+    """Compare prior draws with fitted latents; explicitly not a realism gate."""
+    from .predictive import (
+        fitted_profile_draws,
+        latent_topology_diagnostic,
+        synthetic_profile_draws,
+    )
+
+    summary_path = Path(args.summary)
+    summary = json.loads(summary_path.read_text())
+    fitted_train = fitted_profile_draws(summary, "train")
+    fitted_test = fitted_profile_draws(summary, "heldout")
+    synthetic_train = synthetic_profile_draws(
+        summary, fitted_train.profile_db.shape[0], seed=args.seed
+    )
+    synthetic_test = synthetic_profile_draws(
+        summary, fitted_test.profile_db.shape[0], seed=args.seed + 1
+    )
+    result = latent_topology_diagnostic(
+        fitted_train,
+        fitted_test,
+        synthetic_train,
+        synthetic_test,
+        seed=args.seed + 2,
+        n_bootstrap=args.bootstrap,
+    )
+    output = (
+        Path(args.output)
+        if args.output is not None
+        else summary_path.with_suffix(".latent-topology.json")
+    )
+    output.write_text(json.dumps(result, indent=2))
+    print(json.dumps(result, indent=2), flush=True)
+
+
+def population_raw_gate(args: argparse.Namespace) -> None:
+    """Compare held-out real and posterior-predictive waveforms without refitting."""
+    import yaml
+
+    from .raw_predictive import (
+        extract_raw_topology,
+        raw_topology_gate,
+        render_matched_population,
+    )
+
+    summary_path = Path(args.summary)
+    summary = json.loads(summary_path.read_text())
+    policy = yaml.safe_load(Path(args.policy).read_text())
+    source = policy["sources"]["noise"][args.source_index]
+    if source.get("kind") != "stochastic":
+        raise ValueError("source-index must select a stochastic noise source")
+    if args.classifier and any(
+        not group.startswith("fly") for group in (*args.train_groups, *args.test_groups)
+    ):
+        raise ValueError(
+            "the waveform classifier is reserved for Michael's recordings; "
+            "DREGON gusts make it a trivial domain detector"
+        )
+
+    client = r2_client()
+    manifest = json.loads(
+        client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
+    )
+
+    def load(groups: list[str]) -> list[Clip]:
+        clips: list[Clip] = []
+        for entry in manifest:
+            if entry["group"] not in groups:
+                continue
+            clip = clip_from_bytes(
+                client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read()
+            )
+            if clip.rps.max() >= 5:
+                clips.append(clip)
+        return clips
+
+    train_real = load(args.train_groups)
+    test_real = load(args.test_groups)
+    observation_augmentations: list[dict[str, Any]] = []
+    if args.observation in ("recolor", "both"):
+        observation_augmentations.append(
+            {
+                "probability": 1.0,
+                "choices": [
+                    {
+                        "spectral_recolor": {
+                            "gain_db": 8.0,
+                            "n_anchors": 10,
+                            "f_low": 30.0,
+                            "f_high": 8000.0,
+                        }
+                    }
+                ],
+            }
+        )
+    if args.observation in ("reverb", "both"):
+        observation_augmentations.append(
+            {
+                "probability": 1.0,
+                "choices": [
+                    {
+                        "random_reverb": {
+                            "n_rirs": 200,
+                            "rt60_low": 0.1,
+                            "rt60_high": 0.8,
+                            "drr_low_db": 3.0,
+                            "drr_high_db": 15.0,
+                        }
+                    }
+                ],
+            }
+        )
+    train_synthetic = render_matched_population(
+        summary,
+        train_real,
+        base_ranges=source.get("ranges", {}),
+        line_mode=source.get("line_mode", "stochastic"),
+        mic_gain_db=tuple(source.get("mic_gain_db", (-12.0, 0.0))),
+        seed=args.seed,
+        observation_augmentations=observation_augmentations,
+        draws_per_clip=args.draws_per_clip,
+    )
+    test_synthetic = render_matched_population(
+        summary,
+        test_real,
+        base_ranges=source.get("ranges", {}),
+        line_mode=source.get("line_mode", "stochastic"),
+        mic_gain_db=tuple(source.get("mic_gain_db", (-12.0, 0.0))),
+        seed=args.seed + 10_000,
+        observation_augmentations=observation_augmentations,
+        draws_per_clip=args.draws_per_clip,
+    )
+    raw_train_real = extract_raw_topology(train_real, k_max=args.k_max)
+    raw_test_real = extract_raw_topology(test_real, k_max=args.k_max)
+    raw_train_synthetic = extract_raw_topology(train_synthetic, k_max=args.k_max)
+    raw_test_synthetic = extract_raw_topology(test_synthetic, k_max=args.k_max)
+    result = raw_topology_gate(
+        raw_train_real,
+        raw_test_real,
+        raw_train_synthetic,
+        raw_test_synthetic,
+        seed=args.seed + 20_000,
+        n_bootstrap=args.bootstrap,
+        run_classifier=args.classifier,
+    )
+    result.update(
+        summary=str(summary_path),
+        policy=args.policy,
+        source_index=args.source_index,
+        observation=args.observation,
+        classifier=args.classifier,
+        draws_per_clip=args.draws_per_clip,
+        train_groups=args.train_groups,
+        test_groups=args.test_groups,
+    )
+    output = (
+        Path(args.output)
+        if args.output is not None
+        else summary_path.with_suffix(".raw-topology.json")
+    )
+    output.write_text(json.dumps(result, indent=2))
+    with open(output.with_suffix(".npz"), "wb") as handle:
+        np.savez_compressed(
+            handle,
+            train_real=raw_train_real.margin_db,
+            test_real=raw_test_real.margin_db,
+            train_synthetic=raw_train_synthetic.margin_db,
+            test_synthetic=raw_test_synthetic.margin_db,
+            train_real_observations=raw_train_real.observations,
+            test_real_observations=raw_test_real.observations,
+            train_synthetic_observations=raw_train_synthetic.observations,
+            test_synthetic_observations=raw_test_synthetic.observations,
+        )
+    if args.compact:
+        keys = (
+            "scope",
+            "status",
+            "classifier_enabled",
+            "classifier_auc",
+            "classifier_auc_95",
+            "predictive_90_coverage",
+            "median_curve_iqr_rmse",
+        )
+        print(json.dumps({key: result.get(key) for key in keys}), flush=True)
+    else:
+        print(json.dumps(result, indent=2), flush=True)
+
+
+def population_calibrate(args: argparse.Namespace) -> None:
+    """Fit the training-only Gaussian synthetic likelihood and update a summary."""
+    from .topology_calibration import (
+        apply_topology_calibration,
+        fit_topology_calibration,
+    )
+
+    summary_path = Path(args.summary)
+    summary = json.loads(summary_path.read_text())
+    with np.load(args.raw_npz) as arrays:
+        calibration = fit_topology_calibration(
+            np.asarray(arrays["train_real"]),
+            np.asarray(arrays["train_synthetic"]),
+            reference_order=args.reference_order,
+        )
+    corrected = apply_topology_calibration(summary, calibration)
+    output = (
+        Path(args.output)
+        if args.output is not None
+        else summary_path.with_suffix(".calibrated.json")
+    )
+    output.write_text(json.dumps(corrected))
+    print(json.dumps(calibration.export(), indent=2), flush=True)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -873,6 +1086,41 @@ def main(argv: list[str] | None = None) -> None:
     pf.add_argument("--tag", default="population")
     pf.add_argument("--results-dir", default=str(RESULTS) + "_population")
     pf.set_defaults(func=population_fit)
+    pd = sub.add_parser("poplatent")
+    pd.add_argument("--summary", required=True)
+    pd.add_argument("--output", default=None)
+    pd.add_argument("--seed", type=int, default=0)
+    pd.add_argument("--bootstrap", type=int, default=1000)
+    pd.set_defaults(func=population_latent_diagnostic)
+    pg = sub.add_parser("poprawgate")
+    pg.add_argument("--summary", required=True)
+    pg.add_argument("--policy", required=True)
+    pg.add_argument("--source-index", type=int, required=True)
+    pg.add_argument("--train-groups", nargs="+", required=True)
+    pg.add_argument("--test-groups", nargs="+", required=True)
+    pg.add_argument("--k-max", type=int, default=64)
+    pg.add_argument(
+        "--observation",
+        choices=["none", "recolor", "reverb", "both"],
+        default="none",
+    )
+    pg.add_argument(
+        "--classifier",
+        action="store_true",
+        help="enable the two-sample classifier (Michael's recordings only)",
+    )
+    pg.add_argument("--draws-per-clip", type=int, default=4)
+    pg.add_argument("--compact", action="store_true")
+    pg.add_argument("--output", default=None)
+    pg.add_argument("--seed", type=int, default=0)
+    pg.add_argument("--bootstrap", type=int, default=1000)
+    pg.set_defaults(func=population_raw_gate)
+    pc = sub.add_parser("popcalibrate")
+    pc.add_argument("--summary", required=True)
+    pc.add_argument("--raw-npz", required=True)
+    pc.add_argument("--reference-order", type=int, default=2)
+    pc.add_argument("--output", default=None)
+    pc.set_defaults(func=population_calibrate)
     args = ap.parse_args(argv)
     args.func(args)
 

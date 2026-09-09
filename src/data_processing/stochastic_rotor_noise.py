@@ -234,16 +234,30 @@ class StochasticRanges:
     #: DREGON bench measures the rotor-specific profile at ~5 dB^2 (2.2 dB),
     #: constant across speed and microphone (stochastic-fit record, § bench).
     rotor_delta_std_db: tuple[float, float] = (0.0, 0.0)
+    #: Optional fitted population. When present, these replace roll-off,
+    #: independent jitter, blade emphasis and ``rotor_delta_std_db`` with one
+    #: coherent draw ``mu + delta_r + B z_r + rotor_level_r``.
+    profile_mean_db: tuple[float, ...] | None = None
+    profile_basis_db: tuple[tuple[float, ...], ...] | None = None
+    profile_rotor_db: tuple[tuple[float, ...], ...] | None = None
+    #: Population of the order-2 unit-area line power above the floor's base
+    #: level. Absolute clip gain is deliberately absent: rendering normalizes it.
+    line_floor_mean_db: float | None = None
+    line_floor_std_db: float = 0.0
+    rotor_contrast_std_db: float = 0.0
 
     # Linewidth: gamma_k = gamma0 + slope * k, in Hz (half width at half max).
     gamma0_hz: tuple[float, float] = (0.5, 4.0)
     gamma_slope_hz: tuple[float, float] = (0.05, 0.8)
+    fixed_gamma0_hz: tuple[float, ...] | None = None
+    fixed_gamma_slope_hz: tuple[float, ...] | None = None
     #: ``line_mode: "fm"`` — the shaft's label-invisible speed jitter, rev/s
     #: (an OU process per rotor, shared by all its harmonics, so every line is
     #: a Gaussian of width proportional to k: the quasi-static FM regime the
     #: fits found) and its correlation time; plus a per-harmonic phase
     #: diffusion, Lorentzian HWHM per order (bench: 0.042 Hz/order).
     shaft_jitter_rps: tuple[float, float] = (0.0, 0.0)
+    fixed_shaft_jitter_rps: tuple[float, ...] | None = None
     shaft_jitter_tau_s: tuple[float, float] = (0.1, 0.1)
     phase_diffusion_hz_per_order: tuple[float, float] = (0.0, 0.0)
 
@@ -286,6 +300,11 @@ class StochasticRanges:
     #: Std of a static per-microphone FLOOR gain (DREGON: the floor's per-mic
     #: pattern is decoupled from the lines', ±3 dB in the rig fit).
     mic_floor_std_db: tuple[float, float] = (0.0, 0.0)
+    #: Optional fitted microphone patterns. These are dB POWER gains; the
+    #: renderer converts them to amplitude only at the waveform boundary.
+    fixed_mic_gain_db: tuple[tuple[float, ...], ...] | None = None
+    fixed_mic_floor_db: tuple[float, ...] | None = None
+    fixed_mic_gain_all_db: tuple[float, ...] | None = None
     #: A measured floor curve ``[[hz, dB], ...]`` that replaces the GP draw's
     #: mean; the GP (``floor_shape_std_db``) then jitters around it.
     floor_shape_preset: tuple[tuple[float, float], ...] | None = None
@@ -338,6 +357,9 @@ class StochasticParams:
     floor_ctrl_hz: np.ndarray  # (C,)
     floor_ctrl_db: np.ndarray  # (C,)
     floor_tilt_db_oct: float
+    fixed_mic_gain_db: np.ndarray | None = None  # (M, R), dB power
+    fixed_mic_floor_db: np.ndarray | None = None  # (M,), dB power
+    fixed_mic_gain_all_db: np.ndarray | None = None  # (M,), dB power
 
     # Levels — the two amplitude-mean sliders.
     harm_mean_db: float = 0.0
@@ -419,7 +441,7 @@ class StochasticParams:
     amp_rps_ref: float = 80.0
 
     #: ``line_mode: "fm"`` knobs (see :class:`StochasticRanges`).
-    shaft_jitter_rps: float = 0.0
+    shaft_jitter_rps: float | np.ndarray = 0.0
     shaft_jitter_tau_s: float = 0.1
     phase_diffusion_hz_per_order: float = 0.0
     harm_gp_kernel: str = "se"
@@ -456,6 +478,62 @@ def _profile_db(
         # -120 dB is silence against any floor this model produces.
         db[rng.random(n_harmonics) < p_drop] = -120.0
     return db
+
+
+def _population_profile_db(
+    rng: np.random.Generator,
+    ranges: StochasticRanges,
+    *,
+    n_rotors: int,
+    n_harmonics: int,
+) -> tuple[np.ndarray, float] | None:
+    """Draw the fitted low-rank order population and its floor base level."""
+    if ranges.profile_mean_db is None:
+        return None
+    if ranges.line_floor_mean_db is None:
+        raise ValueError("profile_mean_db requires line_floor_mean_db")
+    mean = np.asarray(ranges.profile_mean_db, dtype=np.float64)
+    if mean.ndim != 1 or mean.size < n_harmonics:
+        raise ValueError(f"profile_mean_db has shape {mean.shape}, need at least ({n_harmonics},)")
+    mean = mean[:n_harmonics]
+    if ranges.profile_rotor_db is None:
+        rotor = np.zeros((n_rotors, n_harmonics), dtype=np.float64)
+    else:
+        rotor = np.asarray(ranges.profile_rotor_db, dtype=np.float64)
+        if rotor.ndim != 2 or rotor.shape[0] != n_rotors or rotor.shape[1] < n_harmonics:
+            raise ValueError(
+                "profile_rotor_db must have shape "
+                f"({n_rotors}, >= {n_harmonics}), got {rotor.shape}"
+            )
+        rotor = rotor[:, :n_harmonics]
+    if ranges.profile_basis_db is None:
+        basis = np.zeros((0, n_harmonics), dtype=np.float64)
+    else:
+        basis = np.asarray(ranges.profile_basis_db, dtype=np.float64)
+        if basis.size == 0:
+            basis = np.zeros((0, n_harmonics), dtype=np.float64)
+        elif basis.ndim != 2 or basis.shape[1] < n_harmonics:
+            raise ValueError(
+                f"profile_basis_db has shape {basis.shape}, need (Q, >= {n_harmonics})"
+            )
+        else:
+            basis = basis[:, :n_harmonics]
+    if not (np.isfinite(mean).all() and np.isfinite(rotor).all() and np.isfinite(basis).all()):
+        raise ValueError("fitted profile population contains non-finite values")
+    factors = rng.standard_normal((n_rotors, basis.shape[0]))
+    contrast_std = float(ranges.rotor_contrast_std_db)
+    if contrast_std < 0:
+        raise ValueError("rotor_contrast_std_db must be non-negative")
+    contrast = rng.normal(0.0, contrast_std, n_rotors)
+    contrast -= contrast.mean()
+    profile = mean[None, :] + rotor + factors @ basis + contrast[:, None]
+    ratio_std = float(ranges.line_floor_std_db)
+    if ratio_std < 0:
+        raise ValueError("line_floor_std_db must be non-negative")
+    ratio = float(ranges.line_floor_mean_db) + rng.normal(0.0, ratio_std)
+    reference_order = min(1, n_harmonics - 1)
+    floor_mean_db = float(profile[:, reference_order].mean() - ratio)
+    return profile, floor_mean_db
 
 
 def line_peak_db(params: StochasticParams, ref_rps: float = 80.0) -> tuple[np.ndarray, np.ndarray]:
@@ -551,17 +629,27 @@ def sample_params(
         lo, hi = float(pair[0]), float(pair[1])
         return lo if hi == lo else float(rng.uniform(lo, hi))
 
-    drone = _profile_db(rng, ranges, n_harmonics=n_harmonics)
-    similarity = float(rng.uniform(*ranges.rotor_similarity))
-    delta_std = draw(ranges.rotor_delta_std_db)
-    profile = np.empty((n_rotors, n_harmonics), dtype=np.float64)
-    for r in range(n_rotors):
-        if delta_std > 0.0:
-            profile[r] = drone + rng.normal(0.0, delta_std, size=n_harmonics)
-        else:
-            own = _profile_db(rng, ranges, n_harmonics=n_harmonics)
-            profile[r] = similarity * drone + (1.0 - similarity) * own
-        profile[r] -= np.median(profile[r])
+    population_profile = _population_profile_db(
+        rng,
+        ranges,
+        n_rotors=n_rotors,
+        n_harmonics=n_harmonics,
+    )
+    floor_mean_override: float | None = None
+    if population_profile is not None:
+        profile, floor_mean_override = population_profile
+    else:
+        drone = _profile_db(rng, ranges, n_harmonics=n_harmonics)
+        similarity = float(rng.uniform(*ranges.rotor_similarity))
+        delta_std = draw(ranges.rotor_delta_std_db)
+        profile = np.empty((n_rotors, n_harmonics), dtype=np.float64)
+        for r in range(n_rotors):
+            if delta_std > 0.0:
+                profile[r] = drone + rng.normal(0.0, delta_std, size=n_harmonics)
+            else:
+                own = _profile_db(rng, ranges, n_harmonics=n_harmonics)
+                profile[r] = similarity * drone + (1.0 - similarity) * own
+            profile[r] -= np.median(profile[r])
 
     ctrl_hz = np.geomspace(FLOOR_SHAPE_F_MIN, sample_rate / 2.0, FLOOR_SHAPE_N_CTRL)
     oct_grid = np.log2(ctrl_hz / ctrl_hz[0])
@@ -581,8 +669,26 @@ def sample_params(
         base = np.interp(np.log2(ctrl_hz), np.log2(pre[:, 0]), pre[:, 1])
         ctrl_db = ctrl_db + base - base.mean()
 
-    gamma0 = rng.uniform(*ranges.gamma0_hz, size=n_rotors)
-    gamma_slope = rng.uniform(*ranges.gamma_slope_hz, size=n_rotors)
+    def fixed_rotor_vector(value: tuple[float, ...] | None, name: str) -> np.ndarray | None:
+        if value is None:
+            return None
+        array = np.asarray(value, dtype=np.float64)
+        if array.shape != (n_rotors,):
+            raise ValueError(f"{name} must have shape ({n_rotors},), got {array.shape}")
+        return array.copy()
+
+    fixed_gamma0 = fixed_rotor_vector(ranges.fixed_gamma0_hz, "fixed_gamma0_hz")
+    fixed_gamma_slope = fixed_rotor_vector(ranges.fixed_gamma_slope_hz, "fixed_gamma_slope_hz")
+    fixed_shaft_jitter = fixed_rotor_vector(ranges.fixed_shaft_jitter_rps, "fixed_shaft_jitter_rps")
+
+    gamma0 = (
+        fixed_gamma0 if fixed_gamma0 is not None else rng.uniform(*ranges.gamma0_hz, size=n_rotors)
+    )
+    gamma_slope = (
+        fixed_gamma_slope
+        if fixed_gamma_slope is not None
+        else rng.uniform(*ranges.gamma_slope_hz, size=n_rotors)
+    )
     tilt = float(rng.uniform(*ranges.floor_tilt_db_oct))
     draft = StochasticParams(
         sample_rate=int(sample_rate),
@@ -595,14 +701,33 @@ def sample_params(
         floor_ctrl_hz=ctrl_hz,
         floor_ctrl_db=ctrl_db,
         floor_tilt_db_oct=tilt,
+        fixed_mic_gain_db=(
+            None
+            if ranges.fixed_mic_gain_db is None
+            else np.asarray(ranges.fixed_mic_gain_db, dtype=np.float64).copy()
+        ),
+        fixed_mic_floor_db=(
+            None
+            if ranges.fixed_mic_floor_db is None
+            else np.asarray(ranges.fixed_mic_floor_db, dtype=np.float64).copy()
+        ),
+        fixed_mic_gain_all_db=(
+            None
+            if ranges.fixed_mic_gain_all_db is None
+            else np.asarray(ranges.fixed_mic_gain_all_db, dtype=np.float64).copy()
+        ),
         harm_mean_db=0.0,
         floor_mean_db=0.0,
         floor_static_rel=float(rng.uniform(*ranges.floor_static_rel)),
     )
-    floor_mean_db = calibrate_floor(
-        draft,
-        float(rng.uniform(*ranges.floor_rel_db)),
-        min_lines_above_floor=ranges.min_lines_above_floor,
+    floor_mean_db = (
+        calibrate_floor(
+            draft,
+            float(rng.uniform(*ranges.floor_rel_db)),
+            min_lines_above_floor=ranges.min_lines_above_floor,
+        )
+        if floor_mean_override is None
+        else floor_mean_override
     )
 
     return replace(
@@ -616,7 +741,9 @@ def sample_params(
         floor_tilt_gp_std=float(rng.uniform(*ranges.floor_tilt_gp_std)),
         floor_tilt_gp_tau_s=float(rng.uniform(*ranges.floor_tilt_gp_tau_s)),
         line_bin_integrate=bool(line_bin_integrate),
-        shaft_jitter_rps=draw(ranges.shaft_jitter_rps),
+        shaft_jitter_rps=(
+            fixed_shaft_jitter if fixed_shaft_jitter is not None else draw(ranges.shaft_jitter_rps)
+        ),
         shaft_jitter_tau_s=draw(ranges.shaft_jitter_tau_s),
         phase_diffusion_hz_per_order=draw(ranges.phase_diffusion_hz_per_order),
         harm_gp_kernel=str(ranges.harm_gp_kernel),
@@ -957,15 +1084,32 @@ def fm_lines(
     dt_slow = 1.0 / PHASE_NOISE_FS
 
     # The shaft: label plus one OU jitter per rotor, at the slow rate.
-    jitter = sample_gp(
-        rng,
-        n_rotors,
-        n_slow,
-        dt=dt_slow,
-        tau=params.shaft_jitter_tau_s,
-        std=params.shaft_jitter_rps,
-        kernel="ou",
-    )
+    jitter_std = np.asarray(params.shaft_jitter_rps, dtype=np.float64)
+    if jitter_std.ndim == 0:
+        jitter = sample_gp(
+            rng,
+            n_rotors,
+            n_slow,
+            dt=dt_slow,
+            tau=params.shaft_jitter_tau_s,
+            std=float(jitter_std),
+            kernel="ou",
+        )
+    else:
+        if jitter_std.shape != (n_rotors,):
+            raise ValueError(
+                f"shaft_jitter_rps must be scalar or ({n_rotors},), got {jitter_std.shape}"
+            )
+        jitter = sample_gp(
+            rng,
+            n_rotors,
+            n_slow,
+            dt=dt_slow,
+            tau=params.shaft_jitter_tau_s,
+            std=1.0,
+            kernel="ou",
+        )
+        jitter *= jitter_std[:, None]
     q = max(params.phase_diffusion_hz_per_order, 0.0)
     k_all = np.arange(1, n_harm + 1, dtype=np.float64)
     # Slow processes are generated at PHASE_NOISE_FS and held constant over
@@ -1093,15 +1237,36 @@ def synthesize(
     freqs = np.fft.rfftfreq(n_fft, d=1.0 / sr)
     psd = build_psd(params, rps_frames, freqs, dt=hop / sr, rng=rng)
 
-    lo, hi = mic_gain_db
-    gains = 10.0 ** (rng.uniform(lo, hi, size=(n_mics, n_rotors)) / 10.0)
+    def fixed_mic(value: np.ndarray | None, shape: tuple[int, ...], name: str) -> np.ndarray | None:
+        if value is None:
+            return None
+        array = np.asarray(value, dtype=np.float64)
+        if array.shape != shape:
+            raise ValueError(f"{name} must have shape {shape}, got {array.shape}")
+        return array
+
+    fixed_gain_db = fixed_mic(
+        params.fixed_mic_gain_db,
+        (n_mics, n_rotors),
+        "fixed_mic_gain_db",
+    )
+    if fixed_gain_db is None:
+        lo, hi = mic_gain_db
+        fixed_gain_db = rng.uniform(lo, hi, size=(n_mics, n_rotors))
+    gains = 10.0 ** (fixed_gain_db / 10.0)
     # (M, N, F): the floor is common, and each microphone weighs the rotors'
     # lines by its own gains.
-    floor_mic = (
-        10.0 ** (rng.normal(0.0, params.mic_floor_std_db, size=n_mics) / 10.0)
-        if params.mic_floor_std_db > 0.0
-        else np.ones(n_mics)
+    fixed_floor_db = fixed_mic(
+        params.fixed_mic_floor_db,
+        (n_mics,),
+        "fixed_mic_floor_db",
     )
+    if fixed_floor_db is not None:
+        floor_mic = 10.0 ** (fixed_floor_db / 10.0)
+    elif params.mic_floor_std_db > 0.0:
+        floor_mic = 10.0 ** (rng.normal(0.0, params.mic_floor_std_db, size=n_mics) / 10.0)
+    else:
+        floor_mic = np.ones(n_mics)
     if line_mode in ("coherent", "fm"):
         floor_spec = psd["floor"][None] * floor_mic[:, None, None]
         white = rng.standard_normal((n_mics, n_padded))
@@ -1159,9 +1324,15 @@ def synthesize(
         audio = _ola_filter(padded, amp_gain, n_fft, hop)[:, pad : pad + n_samples].astype(
             np.float32
         )
-    mic_all = None
-    if params.mic_gain_all_db > 0.0:
+    fixed_all_db = fixed_mic(
+        params.fixed_mic_gain_all_db,
+        (n_mics,),
+        "fixed_mic_gain_all_db",
+    )
+    mic_all = fixed_all_db
+    if mic_all is None and params.mic_gain_all_db > 0.0:
         mic_all = rng.normal(0.0, params.mic_gain_all_db, size=n_mics)
+    if mic_all is not None:
         audio = (audio * 10.0 ** (mic_all / 20.0)[:, None]).astype(np.float32)
 
     if normalize_rms is not None:
@@ -1182,6 +1353,7 @@ def synthesize(
         "frame_times": frame_times,
         "rps_frames": rps_frames,
         "mic_gains": gains,
+        "mic_floor_gains": floor_mic,
         "umod_db": umod,
         "mic_gain_all_db": mic_all,
         **psd,
