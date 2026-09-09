@@ -502,16 +502,30 @@ def phase_diagnostics(
 
 
 def floor_envelope(
-    power: np.ndarray, freqs: np.ndarray, rps: np.ndarray, lo: float, hi: float, guard_bins: int = 3
-) -> np.ndarray:
-    """``(M, N)`` per-mic floor envelope in dB re the clip median: the median of
-    the floor cells (``lo <= f < hi`` minus ``+-guard_bins`` around every ``k r``)
-    in every frame. Model-free; the instrument for the gust / flow-noise
-    statistics (burstiness, tails, cross-mic correlation)."""
+    power: np.ndarray,
+    freqs: np.ndarray,
+    rps: np.ndarray,
+    lo: float,
+    hi: float,
+    guard_hz: float = 5.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(M, N)`` per-mic floor envelope in dB re the clip median — the median of
+    the floor cells (``lo <= f < hi`` minus ``+-guard_hz`` around every ``k r``)
+    in every frame — and ``(N,)`` the fraction of the band's bins that were
+    floor cells. Model-free; the instrument for the flow-noise statistics.
+
+    Needs a fine grid: on the 2048-point training grid (7.8 Hz bins) four
+    rotors near 80 rev/s leave NO floor cell below 500 Hz and the function
+    falls back to the whole band (coverage 0). Use an 8192-point STFT
+    (1.95 Hz) for the low band; calibrated 2026-09-09 (white-noise null std
+    0.55 dB, lag-1 0.68 at 87.5 % overlap; planted 4 dB log-OU recovered at
+    2.8-3.4 dB with the independent/common distinction intact)."""
     m_, n_, _ = power.shape
     df = freqs[1] - freqs[0]
+    g = int(round(guard_hz / df))
     band = (freqs >= lo) & (freqs < hi)
     env = np.zeros((m_, n_))
+    cover = np.zeros(n_)
     for n in range(n_):
         mask = band.copy()
         for r in range(rps.shape[0]):
@@ -520,12 +534,13 @@ def floor_envelope(
                 continue
             for c in np.arange(1, int(hi / rr) + 2) * rr:
                 i = int(round(c / df))
-                mask[max(i - guard_bins, 0) : i + guard_bins + 1] = False
+                mask[max(i - g, 0) : i + g + 1] = False
+        cover[n] = mask.sum() / band.sum()
         if mask.sum() < 8:
             mask = band
         env[:, n] = np.median(power[:, n, mask], axis=1)
     e = 10.0 * np.log10(np.maximum(env, 1e-30))
-    return e - np.median(e, axis=1, keepdims=True)
+    return e - np.median(e, axis=1, keepdims=True), cover
 
 
 def floor_envelope_stats(e0: np.ndarray, burst_db: float = 6.0) -> dict[str, float]:

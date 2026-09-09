@@ -350,41 +350,54 @@ across slices) this fixes the hierarchy for the sampler: one rig-level
 profile, a per-rotor deviation of ~5 dB² that is constant across speed and
 microphone, a per-clip level.
 
-### DREGON's low-band floor: fast, per-microphone-independent, log-Gaussian (`floor_envelope`)
+### DREGON's low-band floor: per-microphone-independent modulation; Michael's: common (`floor_envelope`)
 
 No gust statistics existed (the wind-channel work measured the spatial
-gate, the tracker's `adaptive_floor` absorbs bursts without measuring
-them). Model-free instrument: per 32-ms frame and microphone, the median
-periodogram over the floor cells of a band (±3 bins around every `k r`
-excluded), in dB re the clip's median; 48 real clips.
+gate; the tracker's `adaptive_floor` absorbs bursts without measuring
+them). Instrument: per frame and microphone, the median periodogram over
+the *floor cells* of a band (±5 Hz around every `k r` of every rotor
+excluded), dB re the clip median. **Calibration** (advisory 2026-09-09):
+on the 2048/512 training grid four rotors near 80 rev/s leave no floor
+cell below 500 Hz — the first version fell back to the whole band in
+98–100 % of frames, so its 50–500 Hz numbers were band envelopes with the
+lines in; discarded. On an 8192/1024 grid (1.95 Hz, 64 ms hop) floor
+cells are 45–58 % of the band, fallback 0 %. Controls through the exact
+estimator: white noise std 0.55 dB, p5/p95 ±0.9, lag-1 0.68 (the 87.5 %
+overlap alone), cross-mic −0.04; planted independent log-OU of 4 dB reads
+2.8 / 3.4 / 2.6 dB at τ = 0.1 / 0.5 / 2 s with lag-1 0.88 / 0.95 / 0.96 and
+cross-mic ≈ 0; a common 4 dB OU reads cross-mic 0.79. So σ is recovered
+to within ~25 %, the independent/common distinction is clean, τ is
+bracketed only coarsely by lag-1 and run length. 48 real clips, medians:
 
-| group | band | std | p5 / p95 | frames > +6 dB | run median / p90 (frames) | cross-mic corr | PC1 share | lag-1 AC |
-|---|---|---:|---|---:|---|---:|---:|---:|
-| DREGON room1 | 50–500 Hz | 3.5 | −5.4 / +5.8 | 4.4 % | 2 / 3 | **0.07** | 0.45 | 0.74 |
-| DREGON room2 | 50–500 Hz | 3.9 | −6.6 / +7.3 | 7.4 % | 2 / 4 | **0.10** | 0.38 | 0.71 |
-| DREGON room1 | 500–2000 Hz | 2.1 | −3.6 / +3.1 | 0.3 % | 1 / 2 | 0.65 | 0.62 | 0.68 |
-| DREGON room2 | 500–2000 Hz | 1.9 | −2.9 / +3.1 | 0.4 % | 1 / 2 | 0.65 | 0.63 | 0.70 |
-| FLY124 | 50–500 Hz | 2.3 | −3.1 / +3.9 | 0.8 % | 1 / 2 | 0.83 | 0.85 | 0.79 |
-| FLY125 | 50–500 Hz | 1.6 | −2.4 / +2.5 | 0 | – | 0.61 | 0.66 | 0.55 |
-| FLY124 / FLY125 | 500–2000 Hz | 1.9 / 1.5 | ±2–3 | 0 | – | 0.88 / 0.84 | 0.89 / 0.83 | 0.80 / 0.66 |
+| group | band | std | p5 / p95 | frames > +6 dB | run med / p90 (64 ms frames) | cross-mic corr | PC1 | lag-1 | floor–line corr |
+|---|---|---:|---|---:|---|---:|---:|---:|---:|
+| DREGON room1 | 50–500 Hz | 3.3 | −5.9 / +5.2 | 3.2 % | 4 / 7 | **0.06** | 0.58 | 0.93 | 0.70 |
+| DREGON room2 | 50–500 Hz | 3.4 | −5.3 / +6.0 | 5.0 % | 2 / 4 | **0.06** | 0.46 | 0.90 | 0.79 |
+| DREGON room1 / room2 | 500–2000 Hz | 1.8 / 1.4 | ±2–3 | 0 | – | 0.80 / 0.74 | 0.78 / 0.70 | 0.92 / 0.86 | 0.40 / 0.72 |
+| FLY124 | 50–500 Hz | 2.3 | −3.1 / +4.0 | 0.5 % | 1 / 1 | 0.91 | 0.91 | 0.92 | 0.49 |
+| FLY125 | 50–500 Hz | 1.7 | −2.4 / +2.2 | 0 | – | 0.79 | 0.78 | 0.81 | 0.00 |
+| FLY124 / FLY125 | 500–2000 Hz | 1.8 / 1.2 | ±2–3 | 0 | – | 0.94 / 0.89 | 0.94 / 0.89 | 0.94 / 0.90 | 0.78 / 0.61 |
 
-Readings. (1) DREGON's 50–500 Hz floor fluctuates with std 3.5–3.9 dB and
-its per-mic envelopes are **uncorrelated across microphones** (0.07–0.10;
-above 500 Hz the same rig is 0.65-correlated, Michael's 0.6–0.9 in both
-bands) — the time-domain counterpart of the residual-attribution MSC
-finding (0.014 at 50–200 Hz): local flow noise at each diaphragm, not a
-sound field. (2) It is *fast*: lag-1 autocorrelation 0.71–0.74 at a 32 ms
-hop (τ ≈ 0.1 s), excursions above +6 dB last 2–4 frames (60–130 ms) — not
-the many-second gusts the tracker's `adaptive_floor` comment describes;
-if those exist they are in longer recordings than these 4–8 s clips. (3)
-The tails are what a log-Gaussian gives: p5/p95 = ±1.6 σ, frames above
-+6 dB = 4–7 % against 5 % for a Gaussian of that σ — no heavy tail in the
-log domain. So the "gust" process the sampler needs on DREGON is a
-per-microphone independent log-Gaussian modulation of the low-band floor,
-σ ≈ 3.5–4 dB, τ ≈ 0.1 s, on top of a common (0.65) slower modulation of
-the whole floor; the current sampler's floor drift (common to all mics,
-0.5–4 dB, τ 0.5–8 s) has the wrong sharing and the wrong time scale for
-that band. Michael's floor needs only the common, slow term.
+Readings (band-envelope observations; the process parameters are for the
+hierarchical fit to estimate). (1) DREGON's 50–500 Hz floor fluctuates
+with std 3.3–3.4 dB (null 0.55) and its per-mic envelopes are
+**uncorrelated across microphones** (0.06; the same rig above 500 Hz is
+0.74–0.80, Michael's 0.8–0.9 in both bands) — the time-domain counterpart
+of the residual-attribution MSC finding (0.014 at 50–200 Hz): local flow
+noise at each diaphragm. (2) Time scale: lag-1 0.90–0.93 sits between the
+τ = 0.1 s (0.88) and 0.5 s (0.95) controls; excursions above +6 dB last
+2–7 frames (0.13–0.45 s); no multi-second bursts in these 4–8 s clips —
+whether the tracker's many-second gusts exist needs the 41–82 s flights.
+(3) Tails: p5/p95 ≈ ±1.6–1.8 σ, 3–5 % of frames above +6 dB — consistent
+with log-Gaussian; no heavy tail resolved. (4) **The low-band line cells
+co-move with the floor at the same microphone on DREGON (0.70–0.79)** but
+not on FLY125 (0.00): the per-mic modulation is not purely additive floor —
+either it multiplies everything at that diaphragm, or DREGON's k ≤ 6 lines
+are floor-dominated there (line − floor ≈ 3 dB on this rig at low orders);
+the hierarchical fit must let `u_cm(t)` act on lines and floor and test
+which. Michael's floor needs only a common term (0.8–0.9), σ 1–2 dB net,
+slower (lag-1 0.81–0.94). The current sampler's floor drift (common to all
+mics) has the wrong sharing for DREGON's low band.
 
 ### Interpretation: the phase-increment model, two regimes
 

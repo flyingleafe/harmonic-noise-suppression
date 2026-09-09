@@ -42,7 +42,7 @@ second-order statistic:
 | Michael's low orders partly coherent (0.33–0.37 vs null 0.08, flat to 0.5 s); DREGON ≤ marginal | § phase statistics | coherent share as a rig-level *range including zero* |
 | amplitude normalized variance 1.4–3.1 at k ≤ 8 and k ≥ 65; drift τ pinned at the knot floor (0.5–0.8 s) on every rig | § where it fails, § consistency | faster and heavier-tailed amplitude process than the 3 dB / 1.5 s GP |
 | Michael's mics differ by ~12 dB with floor and lines moving together; DREGON's floor and line spreads decoupled by 8–9 dB | § where it fails | Michael's: one per-mic gain on everything; DREGON: per-mic floor separate from per-(mic, rotor) line gains |
-| DREGON 50–500 Hz floor: std 3.5–3.9 dB, τ ≈ 0.1 s, cross-mic corr 0.07–0.10, log-Gaussian tails; > 500 Hz and Michael's: common (0.6–0.9), σ 1.5–2 dB | § floor envelope (new) | per-mic *independent* log-OU floor modulation in the low band on DREGON; a common slow term everywhere |
+| DREGON 50–500 Hz floor: std 3.3–3.4 dB (null 0.55), lag-1 between the 0.1 s and 0.5 s controls, cross-mic corr 0.06, no resolved heavy tail; low-band line cells co-move with it (0.7–0.8); > 500 Hz and Michael’s: common (0.7–0.9), σ 1–2 dB | § floor envelope (calibrated) | per-mic *independent* log-OU floor modulation in the low band on DREGON; a common slow term everywhere |
 | four-motor bench floor exceeds the sum of single motors by +10.9 dB at 100–250 Hz; per-rotor low-band shares unidentifiable in flight (VIF 21–118) | `residual-attribution.md` | the floor is one rig process, not four rotor sources; do not fit per-rotor floors |
 | physics-gated wake channel: gate predicts per-mic bench floor at ρ = 0.92 but uniform exposure beats it in training | `wind-channel-likelihood.md` | keep the floor's per-mic *statistics*, drop the spatial gate |
 | bench rotors: rotor-specific profile 5.1 of 21.4 dB² of centred line variance, same on all mics (rotor×mic 1.9) and speeds; Motor2's low orders +3 dB richer | § bench (new) | per-rotor profile deviation δ_rk, constant across speed and mic, partially pooled |
@@ -170,9 +170,14 @@ over the sum of singles at 100–250 Hz; bench airframe state differs).
 
 ## 5. The gust / floor process
 
-Measured (this campaign): DREGON's low-band floor is a per-microphone
-independent log-Gaussian modulation, σ 3.5–3.9 dB, τ ≈ 0.1 s, on top of a
-common slow term; no heavy tail; no multi-second gusts in the 4–8 s clips.
+Measured (this campaign, calibrated instrument): DREGON's low-band floor
+carries a per-microphone *independent* modulation, σ ≈ 3.3 dB net, with a
+correlation time between 0.1 and 0.5 s, no resolved heavy tail, and the
+low-band line cells at the same microphone move with it (0.7–0.8); above
+500 Hz and on Michael's the modulation is common across mics and 1–2 dB.
+No multi-second gusts in the 4–8 s clips. The process parameters (σ_u,
+τ_u, whether it multiplies lines as well as floor) are M4's to fit, not
+these observations'.
 Open measurement before M4 is frozen: run `floor_envelope` on the full
 DREGON flights (41–82 s, `DREGON_free-flight_nosource_room{1,2}`,
 `hovering_nosource_room2`) to see whether the many-second, order-of-
