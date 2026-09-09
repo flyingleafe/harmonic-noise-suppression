@@ -197,9 +197,10 @@ shape. (FLY125_00 is one of the two non-improving clips, 0.078 vs 0.077.) (3) Wi
 the Gaussian family a free width per order buys another 0.01–0.02 on
 room2 (17/17) and 0.01 on FLY125; sub-bin widths, per-mic floor and a
 looser drift prior buy nothing beyond the Gaussian. (4) The speed law, on
-the ramp-containing validation clips, buys nothing. (5) What is left,
-0.055–0.07 nats/cell on every rig, is not reachable by any spectral-shape
-relaxation tested; it is where the second-order findings below point.
+the ramp-containing validation clips, buys nothing. (5) What is left — 0.055–0.07 nats/cell on FLY125, FLY124 and room2
+(the Gaussian combinations ran on the crops only), 0.10 on room1 — is not
+reachable by any spectral-shape relaxation tested; it is where the
+second-order findings below point.
 
 ### Phase statistics along the lines (tested estimator, `phase_stats.py`)
 
@@ -230,10 +231,11 @@ nulls 0.13–0.26; no band above 24 has enough isolated runs.
 
 The null is white noise through the same window, frames and demodulation:
 successive lagged products of a 75 %-overlap STFT are correlated, so a short
-run's |Σ| is inflated beyond the iid value, and a phase-scrambled null
-under-reads it by ~30 % (the first version of this estimator, and its
-0.6 plateaus, are superseded; that version also took |Σ| per run and
-added, a positive bias growing with the number of short runs).
+run's |Σ| is inflated beyond the iid value; a phase-scrambled null would
+under-read that by ~30 %, which is why the null is matched white noise
+(the first version of this estimator, and its 0.6 plateaus, are
+superseded; that version also took |Σ| per run and added, a positive bias
+growing with the number of short runs).
 
 Reading: on both Michael's flights the low harmonics carry a coherent
 component — a plateau of 0.33–0.37 out to half a second, four times the
