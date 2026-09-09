@@ -256,9 +256,14 @@ the across-speed law, which the `speed_law` arm on the ramp clips tests.
 ### Across-clip consistency of the independent fits (realized-family arm, visible lines)
 
 Every clip was fitted separately; nothing was tied across the clips of a
-rig. A rig property should therefore come out the same on every slice, and
-a parameter that does not is not identifiable per clip. Median [10th, 90th
-percentile] across clips; the sampler's range beside it:
+rig, and `profile_db`, `gamma0`/`slope` and `mic_gain_db` carry **no
+prior** (`CombSpectrum.prior` regularizes only the GP knots and the carrier
+correction). The scatter below therefore mixes three things it cannot
+separate: genuine slice-to-slice variation, non-identifiability (widths
+trade off against the carrier correction), and optimizer trade-offs. It is
+descriptive; the question "does one rig-level model suffice?" is answered
+only by the tied fit described at the end of this section. Median [10th,
+90th percentile] across clips; the sampler's range beside it:
 
 | parameter | room1 (7) | room2 (17) | FLY124 (14) | FLY125 (10) | sampler |
 |---|---|---|---|---|---|
@@ -296,10 +301,15 @@ normalized-variance finding. The `gauss` arm shows the same stability
 classes, except that its γ₀ on DREGON (13–19 Hz) and its floor level on
 the crops absorb model mismatch at buried lines and are not physical.
 
-Consequence for the sampler: a hierarchical fit (rig level: tilt, mic
-pattern, roll-off, width law; clip level: line levels, drifts, floor
-level) is both better identified and the object the sampler needs —
-per-rig distributions with the within-rig spread as the range.
+The test this calls for (not yet run): a **tied fit** per rig — tilt,
+microphone pattern, profile shape (roll-off, jitter pattern) and width law
+shared across the rig's clips; line-level mean, drifts, floor level and
+carrier correction free per clip — scored by the **predictive ΔNLL of
+held-out slices** against the fully independent fit. Tying that costs ≈ 0
+nats/cell on held-out clips means one rig-level model suffices and its
+values are the sampler's; a cost that is a substantial fraction of the
+0.11–0.16 excess means the slices genuinely differ and the sampler needs
+within-rig ranges of that size. Parameter IQRs alone cannot decide this.
 
 ### Interpretation: the phase-increment model, two regimes
 
