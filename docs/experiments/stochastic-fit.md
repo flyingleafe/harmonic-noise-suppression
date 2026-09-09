@@ -253,6 +253,54 @@ sub-bin offset +0.1…+0.4 with the same sign and size on the controls
 variance of 1.3–4; the in-clip speed range (±1–2 %) has little leverage on
 the across-speed law, which the `speed_law` arm on the ramp clips tests.
 
+### Across-clip consistency of the independent fits (realized-family arm, visible lines)
+
+Every clip was fitted separately; nothing was tied across the clips of a
+rig. A rig property should therefore come out the same on every slice, and
+a parameter that does not is not identifiable per clip. Median [10th, 90th
+percentile] across clips; the sampler's range beside it:
+
+| parameter | room1 (7) | room2 (17) | FLY124 (14) | FLY125 (10) | sampler |
+|---|---|---|---|---|---|
+| floor tilt, dB/oct | −6.6 [−6.8, −5.3] | −6.1 [−7.2, −5.2] | −5.5 [−6.4, −4.8] | −5.9 [−6.2, −5.5] | −9…−1 |
+| harmonic jitter, dB | 5.2 [4.9, 5.9] | 5.8 [4.6, 7.1] | 5.5 [4.4, 7.0] | 6.8 [6.2, 7.7] | 2–8 |
+| drift std, dB | 4.3 [3.6, 5.7] | 3.7 [2.7, 4.5] | 3.5 [2.7, 5.3] | 2.6 [1.5, 3.3] | 0.5–6 |
+| drift τ, s | 0.8 (at the knot floor) | 0.5 | 0.8 | 0.5 | 0.3–6 |
+| drift common share | 0.02 | 0.02 | 0.02 | 0.01 | 0–1 |
+| roll-off p | 0.98 [0.84, 1.04] | 1.20 [0.97, 1.52] | **0.27 [0.13, 0.57]** | **0.22 [−0.06, 0.46]** | 0.4–1.9 |
+| floor under median line, dB | −15 [−29, −10] | −18 [−26, −10] | **−26 [−29, −21]** | **−36 [−44, −30]** | −22…−2 |
+| floor shape std, dB | 10.5 [7.5, 25] | 7.9 [6.5, 9.8] | 15.5 [7.0, 22] | 17.0 [9.0, 19.5] | 2–9 |
+| mic gain spread, dB | 11.7 | 9.2 | 12.0 | 12.7 | ≤ 12 |
+| mic-gain pattern: corr. between clips / per-mic mean spread / its clip-to-clip std | 0.28 / 6.3 / 0.7 | 0.39 / 5.7 / 0.9 | **0.76 / 10.1 / 0.7** | **0.76 / 11.5 / 0.6** | fresh draw per clip |
+| width slope, Hz/order | 0.44 [0.27, 0.70] | 0.75 [0.42, 2.1] | 0.79 [0.21, 1.4] | 0.59 [0.08, 0.78] | 0.05–0.8 |
+| γ₀, Hz | 5.8 [4.3, 12.8] | 7.9 [2.4, 15] | 3.3 [0.1, 5.8] | 2.3 [0.0, 4.4] | 0.5–4 |
+| carrier correction rms, rev/s | 1.6 [1.0, 2.8] | 1.6 [1.0, 3.5] | 3.3 [1.1, 4.0] | 1.7 [0.4, 2.8] | — |
+
+Three classes. *Stable rig properties*: tilt (±0.7 dB on every rig; the
+sampler's range is far wider than the data), jitter, drift std, the
+absence of a common per-rotor drift (0.02 vs the sampler's 0–1), and on
+Michael's rig the microphone pattern — the (mic × rotor) gain matrices of
+different clips correlate 0.76 with a 10–12 dB ring spread and 0.6–0.7 dB
+clip-to-clip scatter: a fixed per-rig microphone pattern, not a fresh
+uniform draw. *Rig-specific but consistent*: roll-off (Michael's combs are
+flat in order, p ≈ 0.2–0.3, below the sampler's floor) and the floor's
+distance under the lines (Michael's −26 to −36 dB, outside the sampler's
+range). *Not identifiable per clip*: the width law (10–90 % spans 0.2–2
+Hz/order; widths trade off against the carrier correction, itself
+1.5–3.3 rev/s rms and unstable) — a σ_r for the sampler must come from a
+pooled per-rig fit with telemetry carriers, not from clip-level slopes.
+
+Drift τ sits at the knot floor on every rig: the data want faster
+amplitude variation than the 1.5 s prior allows, consistent with the
+normalized-variance finding. The `gauss` arm shows the same stability
+classes, except that its γ₀ on DREGON (13–19 Hz) and its floor level on
+the crops absorb model mismatch at buried lines and are not physical.
+
+Consequence for the sampler: a hierarchical fit (rig level: tilt, mic
+pattern, roll-off, width law; clip level: line levels, drifts, floor
+level) is both better identified and the object the sampler needs —
+per-rig distributions with the within-rig spread as the range.
+
 ### Interpretation: the phase-increment model, two regimes
 
 The tracker's generative model (`phase_increment_tracker.py`, WP18 of
