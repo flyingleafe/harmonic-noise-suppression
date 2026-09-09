@@ -1,0 +1,58 @@
+[
+ {
+  "rig": "dregon",
+  "clip": "hovering_nosource_room2_03",
+  "label": "hover, room 2",
+  "slug": "dregon_hovering_nosource_room2_03",
+  "dur": 4.0
+ },
+ {
+  "rig": "dregon",
+  "clip": "free-flight_nosource_room2_04",
+  "label": "free flight, room 2",
+  "slug": "dregon_free-flight_nosource_room2_04",
+  "dur": 4.0
+ },
+ {
+  "rig": "dregon",
+  "clip": "free-flight_nosource_room1_sample_00015",
+  "label": "spin-up ramp 2 \u2192 90 rev/s, room 1",
+  "slug": "dregon_free-flight_nosource_room1_sample_00015",
+  "dur": 8.0
+ },
+ {
+  "rig": "dregon",
+  "clip": "free-flight_nosource_room1_sample_00017",
+  "label": "cruise, room 1 (measured shaft rate)",
+  "slug": "dregon_free-flight_nosource_room1_sample_00017",
+  "dur": 8.0
+ },
+ {
+  "rig": "michaels",
+  "clip": "FLY125_00",
+  "label": "idle \u2248 35 rev/s, FLY125",
+  "slug": "michaels_FLY125_00",
+  "dur": 4.0
+ },
+ {
+  "rig": "michaels",
+  "clip": "FLY125_04",
+  "label": "cruise \u2248 80 rev/s, FLY125",
+  "slug": "michaels_FLY125_04",
+  "dur": 4.0
+ },
+ {
+  "rig": "michaels",
+  "clip": "michaels_FLY124_sample_00022",
+  "label": "take-off ramp 0 \u2192 50 rev/s, FLY124",
+  "slug": "michaels_michaels_FLY124_sample_00022",
+  "dur": 8.0
+ },
+ {
+  "rig": "michaels",
+  "clip": "michaels_FLY124_sample_00029",
+  "label": "cruise, FLY124 (8 s)",
+  "slug": "michaels_michaels_FLY124_sample_00029",
+  "dur": 8.0
+ }
+]

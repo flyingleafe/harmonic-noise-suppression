@@ -1,0 +1,54 @@
+---
+title: "Rig models against the recordings: listen and look"
+subtitle: "Real DREGON and Michael's clips beside a draw of the fitted rig preset on the same rotor speeds, and the old hand-ranged family for contrast"
+date: 2026-09-09
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+execute:
+  echo: false
+---
+
+## What is compared {.unnumbered}
+
+Every row is one real clip (one microphone, level-matched to the same RMS)
+and two synthetic renders driven by **that clip's own rotor-speed
+trajectories**: a random draw of the rig's preset from
+`conf/online_mix/rig_fm_5050.yaml` (`line_mode: fm` — tones on a jittering
+shared shaft, blade-passing emphasis, the rig's floor curve, its amplitude
+process and microphone structure), and a random draw of the old hand-ranged
+family (`conf/online_mix/salv2_stoch.yaml` defaults, filtered-noise lines)
+that the earlier synthetic-only regressors were trained on. Spectrograms are
+2048/512 Hann, 0–8 kHz, one colour scale per row (70 dB range). The renders
+are *random draws*, not fits to the clip: timbre, floor jitter and drifts are
+sampled from the rig's ranges, only the trajectories are shared.
+
+What to listen for: the pitch and its motion follow the trajectory in all
+three; the rig preset should carry the recording's balance of comb and
+broadband floor (DREGON: a heavy low-frequency flow-noise floor with a comb
+that fades by 3 kHz; Michael's: a dominant blade-passing tone with faint odd
+orders and a quiet floor), the old family a flat, over-complete comb.
+Assets are built by `rig-model-listening/build.py`; the quantitative
+comparison (line level per order, floor per band, coherent share, floor
+envelope statistics) is in `docs/experiments/stochastic-fit.md`.
+
+```{python}
+#| output: asis
+import json
+from pathlib import Path
+
+here = Path("rig-model-listening")
+index = json.loads((here / "index.json").read_text())
+for rig, title in (("dregon", "DREGON"), ("michaels", "Michael's rig")):
+    print(f"\n## {title}\n")
+    for e in [x for x in index if x["rig"] == rig]:
+        slug = e["slug"]
+        print(f"\n### {e['clip']} — {e['label']} ({e['dur']} s)\n")
+        print(f"![]({here.name}/{slug}.png){{width=100%}}\n")
+        print('<table style="width:100%"><tr>')
+        for name, label in (("real", "real recording"), ("rig", "rig preset, same RPS"), ("old", "old family, same RPS")):
+            print(f'<td style="text-align:center"><b>{label}</b><br><audio controls preload="none" src="{here.name}/{slug}_{name}.wav"></audio></td>')
+        print("</tr></table>\n")
+```
