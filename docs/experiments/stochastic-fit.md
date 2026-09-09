@@ -311,6 +311,81 @@ values are the sampler's; a cost that is a substantial fraction of the
 0.11–0.16 excess means the slices genuinely differ and the sampler needs
 within-rig ranges of that size. Parameter IQRs alone cannot decide this.
 
+### DREGON bench: the four rotors' timbres are similar but distinct, as a source property (`bench.py`)
+
+Revision of the 2026-07-18 report
+(`writing/reports/2026-07-18_dregon-analysis-and-generator-design`, § "Are
+the four rotors one source?"), which read one microphone (the nearest) at
+nominal 70 Hz, twelve harmonics normalised to the fundamental, and found a
+6.8 dB RMS inter-rotor spread that motivated the generator's per-rotor
+sub-embeddings `z_r = z_drone + δz_r`. That figure used the nominal 70 Hz
+grid while the acoustic rates are 67.7–69.5 rev/s (its own panel shows
+rotor 2's lines off the grid from k = 3), and the fundamental it normalised
+by sits in the wind band. Here: all 20 `Motor{1-4}_{50..90}` files, 20 s
+each, Welch 2¹⁶ (0.67 Hz), comb refined per file (acoustic rates of the
+forensics doc ±3 %), line = peak within ±1.5 Hz of `k f0`, per-mic level
+removed (median over k ≤ 48) before any comparison.
+
+| comparison (k = 2–48, centred) | RMS dB | correlation |
+|---|---|---|
+| same rotor, two microphones (median over mic pairs, per speed) | 4.0–4.4 | 0.90 |
+| same rotor, two speeds (mic-averaged profile) | 4.0–5.0 | 0.84–0.92 |
+| **two rotors, same microphone** (median over pairs, per speed) | **5.4–6.6** | **0.76–0.83** |
+| two rotors, mic-averaged | 2.9–6.4 (pair 3–4 closest, 2–3 farthest) | 0.74–0.94 |
+
+Variance decomposition of the centred line level `L[rotor, speed, mic, k]`
+(21.4 dB² total after removing the common k-profile): rotor main effect
+5.1, speed 4.4, rotor×speed 3.8, rotor×mic 1.9, mic main 1.0, remainder 5.2.
+The rotor-specific profile is a *source* property — it is the same on all
+eight microphones (rotor×mic 1.9 vs rotor 5.1) and largely the same at all
+five speeds — and it is about a quarter of the centred variance; the
+band means show it: k2–8 / k9–24 / k25–48 = +10.6/+2.1/−4.7 (Motor1),
++13.2/+3.8/−4.0 (Motor2), +9.1/+5.9/−4.0 (Motor3), +8.4/+4.4/−4.4 (Motor4)
+dB. Motor2's richer low-order comb, the July report's headline, survives;
+its 6.8 dB overstated the spread by the grid error. The per-rotor
+microphone pattern is separately known to be stable across throttle
+(cosine 0.95–1.00, `residual-attribution.md`). Together with the flight
+fits (§ across-clip consistency: k ≥ 9 profile stable per rotor to 2–4 dB
+across slices) this fixes the hierarchy for the sampler: one rig-level
+profile, a per-rotor deviation of ~5 dB² that is constant across speed and
+microphone, a per-clip level.
+
+### DREGON's low-band floor: fast, per-microphone-independent, log-Gaussian (`floor_envelope`)
+
+No gust statistics existed (the wind-channel work measured the spatial
+gate, the tracker's `adaptive_floor` absorbs bursts without measuring
+them). Model-free instrument: per 32-ms frame and microphone, the median
+periodogram over the floor cells of a band (±3 bins around every `k r`
+excluded), in dB re the clip's median; 48 real clips.
+
+| group | band | std | p5 / p95 | frames > +6 dB | run median / p90 (frames) | cross-mic corr | PC1 share | lag-1 AC |
+|---|---|---:|---|---:|---|---:|---:|---:|
+| DREGON room1 | 50–500 Hz | 3.5 | −5.4 / +5.8 | 4.4 % | 2 / 3 | **0.07** | 0.45 | 0.74 |
+| DREGON room2 | 50–500 Hz | 3.9 | −6.6 / +7.3 | 7.4 % | 2 / 4 | **0.10** | 0.38 | 0.71 |
+| DREGON room1 | 500–2000 Hz | 2.1 | −3.6 / +3.1 | 0.3 % | 1 / 2 | 0.65 | 0.62 | 0.68 |
+| DREGON room2 | 500–2000 Hz | 1.9 | −2.9 / +3.1 | 0.4 % | 1 / 2 | 0.65 | 0.63 | 0.70 |
+| FLY124 | 50–500 Hz | 2.3 | −3.1 / +3.9 | 0.8 % | 1 / 2 | 0.83 | 0.85 | 0.79 |
+| FLY125 | 50–500 Hz | 1.6 | −2.4 / +2.5 | 0 | – | 0.61 | 0.66 | 0.55 |
+| FLY124 / FLY125 | 500–2000 Hz | 1.9 / 1.5 | ±2–3 | 0 | – | 0.88 / 0.84 | 0.89 / 0.83 | 0.80 / 0.66 |
+
+Readings. (1) DREGON's 50–500 Hz floor fluctuates with std 3.5–3.9 dB and
+its per-mic envelopes are **uncorrelated across microphones** (0.07–0.10;
+above 500 Hz the same rig is 0.65-correlated, Michael's 0.6–0.9 in both
+bands) — the time-domain counterpart of the residual-attribution MSC
+finding (0.014 at 50–200 Hz): local flow noise at each diaphragm, not a
+sound field. (2) It is *fast*: lag-1 autocorrelation 0.71–0.74 at a 32 ms
+hop (τ ≈ 0.1 s), excursions above +6 dB last 2–4 frames (60–130 ms) — not
+the many-second gusts the tracker's `adaptive_floor` comment describes;
+if those exist they are in longer recordings than these 4–8 s clips. (3)
+The tails are what a log-Gaussian gives: p5/p95 = ±1.6 σ, frames above
++6 dB = 4–7 % against 5 % for a Gaussian of that σ — no heavy tail in the
+log domain. So the "gust" process the sampler needs on DREGON is a
+per-microphone independent log-Gaussian modulation of the low-band floor,
+σ ≈ 3.5–4 dB, τ ≈ 0.1 s, on top of a common (0.65) slower modulation of
+the whole floor; the current sampler's floor drift (common to all mics,
+0.5–4 dB, τ 0.5–8 s) has the wrong sharing and the wrong time scale for
+that band. Michael's floor needs only the common, slow term.
+
 ### Interpretation: the phase-increment model, two regimes
 
 The tracker's generative model (`phase_increment_tracker.py`, WP18 of

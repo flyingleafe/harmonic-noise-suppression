@@ -501,6 +501,67 @@ def phase_diagnostics(
     return out
 
 
+def floor_envelope(
+    power: np.ndarray, freqs: np.ndarray, rps: np.ndarray, lo: float, hi: float, guard_bins: int = 3
+) -> np.ndarray:
+    """``(M, N)`` per-mic floor envelope in dB re the clip median: the median of
+    the floor cells (``lo <= f < hi`` minus ``+-guard_bins`` around every ``k r``)
+    in every frame. Model-free; the instrument for the gust / flow-noise
+    statistics (burstiness, tails, cross-mic correlation)."""
+    m_, n_, _ = power.shape
+    df = freqs[1] - freqs[0]
+    band = (freqs >= lo) & (freqs < hi)
+    env = np.zeros((m_, n_))
+    for n in range(n_):
+        mask = band.copy()
+        for r in range(rps.shape[0]):
+            rr = rps[r, n]
+            if rr < 5:
+                continue
+            for c in np.arange(1, int(hi / rr) + 2) * rr:
+                i = int(round(c / df))
+                mask[max(i - guard_bins, 0) : i + guard_bins + 1] = False
+        if mask.sum() < 8:
+            mask = band
+        env[:, n] = np.median(power[:, n, mask], axis=1)
+    e = 10.0 * np.log10(np.maximum(env, 1e-30))
+    return e - np.median(e, axis=1, keepdims=True)
+
+
+def floor_envelope_stats(e0: np.ndarray, burst_db: float = 6.0) -> dict[str, float]:
+    """Std / tails / fraction and run lengths above ``burst_db`` / cross-mic
+    correlation / first-PC share / lag-1 autocorrelation of a floor envelope."""
+    m_ = e0.shape[0]
+    runs: list[int] = []
+    frac = []
+    for m in range(m_):
+        above = e0[m] > burst_db
+        frac.append(float(above.mean()))
+        k = 0
+        for a in above:
+            if a:
+                k += 1
+            elif k:
+                runs.append(k)
+                k = 0
+        if k:
+            runs.append(k)
+    corr = np.corrcoef(e0)
+    iu = np.triu_indices(m_, 1)
+    ev = np.linalg.eigvalsh(np.cov(e0))
+    return dict(
+        std=float(np.std(e0)),
+        p5=float(np.percentile(e0, 5)),
+        p95=float(np.percentile(e0, 95)),
+        frac_burst=float(np.mean(frac)),
+        run_median=float(np.median(runs)) if runs else 0.0,
+        run_p90=float(np.percentile(runs, 90)) if runs else 0.0,
+        xmic_corr=float(np.median(corr[iu])),
+        pc1_share=float(ev[-1] / ev.sum()),
+        lag1=float(np.median([np.corrcoef(e0[m, :-1], e0[m, 1:])[0, 1] for m in range(m_)])),
+    )
+
+
 def analyse(path: Path) -> dict[str, Any]:
     """Every diagnostic of one result file, JSON-serializable."""
     res = FitResult.load(path)
