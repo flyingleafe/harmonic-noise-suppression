@@ -19,7 +19,9 @@ refits only the clip nuisances (``fit_heldout``).
 
 from __future__ import annotations
 
+import math
 import time
+import warnings
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -387,15 +389,44 @@ def _objective(rig: RigParams, rcs: list[RigClip]) -> tuple[Tensor, float]:
 
 
 def _adam(
-    rig: RigParams, rcs: list[RigClip], params: list[nn.Parameter], iters: int, lr: float
+    rig: RigParams,
+    rcs: list[RigClip],
+    params: list[nn.Parameter],
+    iters: int,
+    lr: float,
+    retries: int = 3,
 ) -> float:
     if not params:
         return float("nan")
+    initial = [parameter.detach().clone() for parameter in params]
     opt = torch.optim.Adam(params, lr=lr)
     last = float("nan")
     for _ in range(iters):
         opt.zero_grad(set_to_none=True)
         _, last = _objective(rig, rcs)
+        if not math.isfinite(last):
+            with torch.no_grad():
+                for parameter, value in zip(params, initial, strict=True):
+                    parameter.copy_(value)
+            if retries == 0:
+                raise FloatingPointError(
+                    f"rig optimizer remained non-finite at learning rate {lr:g}"
+                )
+            next_lr = lr / 3.0
+            warnings.warn(
+                f"rig optimizer became non-finite at lr={lr:g}; "
+                f"retrying the stage from its initial state at lr={next_lr:g}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return _adam(
+                rig,
+                rcs,
+                params,
+                iters,
+                next_lr,
+                retries=retries - 1,
+            )
         opt.step()
     return last
 
