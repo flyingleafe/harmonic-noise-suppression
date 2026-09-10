@@ -1083,8 +1083,11 @@ envelope, so a rotating envelope is punished exactly like a wobbling amplitude
 — applies to the periodogram in the same measure: any estimator that assumes
 coherence over $T$ seconds must lose whatever the phase moved in $T$ seconds.
 
-Do it properly. Cut the record into $S$ blocks of $N_b$ samples, chosen short
-enough that $k\theta$ is constant within a block. Inside block $b$ the model is
+The quick way — the one this section takes — is to cut the record into $S$
+blocks of $N_b$ samples, chosen short enough that $k\theta$ is constant within
+a block. It is a crutch in two respects, and §13 replaces it: it carries only
+the shaft term, and it leaves the block length unspecified. Read it as an
+order-of-magnitude argument whose conclusions §13.3 derives properly. Inside block $b$ the model is
 again linear, with *its own* amplitudes:
 
 $$
@@ -1489,3 +1492,303 @@ inflow, a different loading and a different room, so the absolute
 line-to-floor ratio $\bar\Lambda$ and the floor shape $F(f)$ stay flight
 quantities. Shape, width law, speed exponent and rotor spread transfer;
 loudness does not.
+
+## 13. Phase noise done properly
+
+§10.4 disposed of phase noise by cutting the record into blocks short enough
+that the phase stands still inside one. That is a crutch, and it has two
+holes. It contains only the *shaft* term, when §2.1's model has a
+per-harmonic term as well; and it leaves the block length unspecified, which
+is fatal precisely where it matters — if the high harmonics decohere in
+milliseconds, is the answer milliseconds? This chapter removes both holes by
+marginalising the phase process **exactly** instead of assuming it away.
+
+### 13.1 Two phase terms, and what one line can and cannot see
+
+Order $k$ of one rotor carries the phase error
+
+$$
+\delta_k(t) \;=\; \underbrace{k\,\theta(t)}_{\text{shaft}} \;+\; \underbrace{\psi_k(t)}_{\text{per-harmonic}} ,
+$$
+
+with $\theta$ the shaft's own wander — one process, entering order $k$
+multiplied by $k$, because $k$ turns of phase per turn of shaft — and $\psi_k$
+whatever that harmonic does on its own: blade-to-blade differences, unsteady
+loading over one blade passage, a source that is not rigidly locked to the
+shaft. Take both zero-mean Gaussian with stationary increments, $\psi_k$
+mutually independent and independent of $\theta$.
+
+The observed contribution of order $k$ at one microphone is
+
+$$
+x_k(t) \;=\; \Re\Big[\,a_k\, e^{\,i\left(k\omega t + \delta_k(t)\right)}\Big] .
+$$
+
+**One line sees only the sum.** Its autocovariance is
+$R_k(\tau)=\mathbb E\,x_k(t)x_k(t+\tau)$, and with the amplitude fixed,
+
+$$
+R_k(\tau) \;=\; \frac{P_k}{2}\,\Re\Big\{e^{\,ik\omega\tau}\;
+\mathbb E\,e^{\,i\left[\delta_k(t+\tau)-\delta_k(t)\right]}\Big\} .
+$$
+
+For a Gaussian increment, the expectation is the characteristic function
+evaluated at 1 — an *exact* identity, not an expansion:
+
+$$
+\boxed{\;\mathbb E\,e^{\,i\Delta\delta_k(\tau)} \;=\;
+\exp\!\left\{-\tfrac12 V_k(\tau)\right\},
+\qquad
+V_k(\tau) \;\equiv\; \operatorname{Var}\big[\delta_k(t+\tau)-\delta_k(t)\big]
+\;=\; k^2V_\theta(\tau) + V_{\psi_k}(\tau) . \;}
+$$
+
+Only the combination $k^2V_\theta+V_{\psi_k}$ enters. **No statistic of a
+single line can separate the shaft from its own harmonic's noise** — the
+separation must come from the way the two scale with $k$, or from correlations
+*between* lines. §13.4 does both.
+
+### 13.2 Marginalising the phase exactly: the line shape *is* a characteristic function
+
+Here is the point the blocking argument obscured. Once the phase has been
+marginalised, the signal is no longer a sinusoid with unknown parameters — it
+is a **stationary Gaussian process with a known parametric covariance**:
+
+$$
+R(\tau) \;=\; \sum_{k=1}^{K}\frac{P_k}{2}\cos(k\omega\tau)\,
+e^{-\frac12 V_k(\tau)} \;+\; \sigma^2\delta_{\tau0} ,
+$$
+
+so the likelihood of the whole record is a single Gaussian,
+$-2\log p = \log\det\Sigma + d^{\!\top}\Sigma^{-1}d$, with
+$\Sigma_{ij}=R(t_i-t_j)$. There are no nuisance amplitudes left to
+integrate — the marginalisation over the phase *did that*, converting $2K$
+unknown amplitudes and one unknown phase trajectory into $K$ powers and the
+handful of parameters inside $V$. Diagonalising $\Sigma$ in the Fourier basis
+(exact as $N\to\infty$, the Whittle approximation at finite $N$) gives
+
+$$
+\mathcal S(f) \;=\; \sum_k \frac{P_k}{4}\Big[\mathcal L_k(f-k s) + \mathcal L_k(f+k s)\Big] + \sigma^2,
+\qquad
+\mathcal L_k(\nu) \;=\; \int e^{-\frac12V_k(\tau)}e^{-2\pi i\nu\tau}\,\mathrm d\tau .
+$$
+
+**The line shape is the Fourier transform of the characteristic function of the
+phase increment.** That single sentence contains §2.2's two regimes as special
+cases, and it tells us exactly what to fit.
+
+* **Wiener phase** (a random walk, no restoring force):
+  $V_k(\tau)=D_k|\tau|$ with $D_k = k^2D_\theta + D_{\psi_k}$. Then
+  $e^{-D_k|\tau|/2}$ transforms to a **Lorentzian** of half width
+  $$\gamma_k \;=\; \frac{D_k}{4\pi}\ \text{Hz} .$$
+* **Ornstein–Uhlenbeck phase** with variance $\varsigma^2$ and time $\tau_c$:
+  $V(\tau)=2\varsigma^2\big(1-e^{-|\tau|/\tau_c}\big)$. For
+  $|\tau|\ll\tau_c$ this is $\approx \varsigma^2\tau^2/\tau_c^2$, whose
+  transform is a **Gaussian** of half width
+  $\sqrt{2\ln2}\,\varsigma/(2\pi\tau_c)$ — the quasi-static branch, and with
+  $\varsigma = 2\pi k\sigma_s\tau_c$ it reproduces §2.2's
+  $\gamma=\sqrt{2\ln2}\,k\sigma_s$ exactly. For $|\tau|\gg\tau_c$ the
+  exponential saturates at $e^{-\varsigma^2}$, leaving a **delta plus a
+  pedestal**: a coherent carrier of relative power $e^{-\varsigma^2}$ sitting
+  in a broad skirt. The general case is the transform of
+  $\exp\{-\varsigma^2(1-e^{-|\tau|/\tau_c})\}$, whose series expansion
+  $e^{-\varsigma^2}\sum_n \varsigma^{2n}/n!\cdot\mathcal L(n/\tau_c)$ is a sum
+  of Lorentzians of widths $n/(2\pi\tau_c)$ — the Voigt-like interpolation.
+
+So the "is it $k^1$ or $k^2$" question of §9.3 was mis-posed. The exponent is
+not a modelling choice; it is a **consequence** of which regime $V$ is in over
+the analysis window, and of how much of $V$ is shaft versus per-harmonic. Fit
+$V$ and the exponent is an output.
+
+### 13.3 What phase noise actually costs, and why the block length is a red herring
+
+Now the question the blocking argument could not answer. Take the Wiener case
+for concreteness and ask what happens to a *coherent* estimate over a window
+of length $T_b$. The expected periodogram at the line is
+
+$$
+\mathbb E\big|D_b(k\omega)\big|^2
+\;=\;\frac{N_b}{2}P_k\,G_k(T_b) + 2\sigma^2 ,
+\qquad
+G_k(T_b) \;=\; \frac{1}{T_b^2}\int_0^{T_b}\!\!\int_0^{T_b} e^{-\frac12V_k(t-t')}\,\mathrm dt\,\mathrm dt' .
+$$
+
+Reduce the double integral by substituting $u=t-t'$ (the integrand depends
+only on the difference, so the area element is $2(T_b-u)$):
+
+$$
+G_k(T_b) \;=\; \frac{2}{T_b}\int_0^{T_b}\Big(1-\frac{u}{T_b}\Big)e^{-\frac12V_k(u)}\,\mathrm du
+\;\;\xrightarrow[\text{Wiener}]{}\;\;
+G_k \;=\; \frac{2\big(x-1+e^{-x}\big)}{x^2},
+\qquad x \equiv \tfrac12 D_kT_b = 2\pi\gamma_kT_b .
+$$
+
+$G$ is the **coherence loss**: $G\to1$ as $x\to0$ (nothing lost), $G\to2/x$
+for $x\gg1$ (the coherent sum saturates — extra window length buys nothing).
+Three consequences, and they dispose of the question.
+
+1. **The bias is computable, so the block length is not a bias question.**
+   Divide by $G_k(T_b)$ and the estimator
+   $\hat P_k = \big[\overline{|D_b|^2}-2\sigma^2\big]\cdot 2/(N_bG_k)$ is
+   unbiased for *any* $T_b$, once $\gamma_k$ is known — and $\gamma_k$ is a
+   parameter of the same likelihood, so it is estimated jointly, not assumed.
+2. **The variance has a floor that no block choice can beat.** With $S=T/T_b$
+   blocks, the relative variance of the corrected estimator is
+   $\approx S^{-1}\big(1+2\sigma^2/[\tfrac{N_b}{2}P_kG_k]\big)^2$. In the
+   strong-line limit the bracket is 1 and the variance is $T_b/T$: shorter
+   blocks are better, until $x\lesssim1$ makes $G\approx1$ and the per-block
+   SNR starts falling as $T_b$. The optimum sits at
+   $$\boxed{\;T_b^{\text{opt}} \;\approx\; \frac{1}{2\pi\gamma_k}\;}$$
+   — one *coherence* time, not one arbitrary "short" time — and the relative
+   variance there is $\approx 2\pi\gamma_kT$. This is exactly the number the
+   exact likelihood gives without any blocks: the Fisher information for
+   $P_k$ from $\mathcal S(f)$, in the well-separated strong-line limit, is
+   $$
+   I(P_k) \;=\; \sum_f\frac{\big(\partial\mathcal S/\partial P_k\big)^2}{\mathcal S(f)^2}
+   \;\approx\; \frac{N_{\text{line}}}{P_k^2},
+   \qquad N_{\text{line}} \approx 2\gamma_kT ,
+   $$
+   i.e. the line carries **$2\gamma_kT$ independent numbers**, not one. That
+   is the whole cost of phase noise: not a bias, but the replacement of one
+   coherent measurement by $2\gamma_kT$ noisy ones. A 24 s bench record at
+   $\gamma=12$ Hz gives $\approx600$ — plenty. The same line in a 4 s flight
+   crop gives 96, and at the top of the comb where $\gamma$ is a fraction of a
+   Hz, it gives a handful.
+3. **The real breakdown is not decoherence but merging.** Everything above
+   assumed the lines are separable. They stop being separable when
+   $\gamma_k\gtrsim s/2$, at which point the comb has become a continuum and
+   the *profile itself* is unidentifiable — no estimator, block-based or
+   likelihood-based, can recover per-order powers that the data no longer
+   distinguish. With the widths measured below, that limit is
+   $$
+   k^\star \;=\; \sqrt{\frac{2\pi s}{D_\theta+D_\psi/k^2}} \;\approx\; 150
+   $$
+   on this rotor, comfortably above the order 100 where its margins vanish
+   anyway. That is why the bench recordings are usable at all — and it is the
+   test the flight renderer fails at $k=80$ (§9.1 i).
+
+So: **do not block.** Fit $\{P_k\}$ and $\{\gamma_k\}$ in the exact likelihood
+of §13.2. Blocking remains legitimate as a *nonparametric* readout — no line
+shape committed — provided the $G_k$ correction is applied and the block
+length is set to the coherence time rather than guessed.
+
+### 13.4 Separating shaft from per-harmonic: a rank-one plus a diagonal
+
+§13.1 showed one line cannot do it. Two lines can, because the shaft term is
+*shared*. Demodulate each strong order to its complex envelope (a rectangular
+band, no smoothness prior anywhere), take the phase, and form increments over
+a lag $\tau$. Their covariance across orders is
+
+$$
+C_{kl}(\tau) \;=\; \operatorname{Cov}\big[\Delta\delta_k,\Delta\delta_l\big]
+\;=\; \underbrace{k\,l\;V_\theta(\tau)}_{\text{rank one}}
+\;+\; \underbrace{\delta_{kl}\,V_{\psi_k}(\tau)}_{\text{diagonal}}
+\;+\; \underbrace{\delta_{kl}\,w_k}_{\text{additive noise}} .
+$$
+
+Three structural facts make this a *measurement* rather than a fit.
+
+* **Rank one plus diagonal is identifiable** for $K\ge3$ orders — the
+  off-diagonal entries determine $V_\theta$ alone (the diagonal cannot reach
+  them), after which the diagonal gives each $V_{\psi_k}$.
+* **The shaft's eigenvector is predicted, not fitted.** If the rank-one part is
+  the shaft, its eigenvector must be proportional to $\mathbf k=(k_1,\dots)$.
+  That is a falsifiable prediction; a rank-one component pointing anywhere
+  else is not a shaft.
+* **Additive noise is separated by its lag dependence.** Noise inside the
+  demodulation band produces a phase jitter that is *white*, so its
+  contribution $w_k$ is the same at every lag, while a phase random walk grows
+  as $V(\tau)=D\tau$. Fitting $C(\tau) = a + D\tau$ over a range of lags
+  discards the former and keeps the latter — the same white-term separation
+  §4.2c applies to the amplitude envelopes.
+
+**Measured** on `motor_Motor1_70` (23.8 s, mic 1, even orders 2–60, band
+$4\gamma_k$ wide, lags 10–450 ms):
+
+| quantity | value |
+|---|---|
+| shaft diffusion $D_\theta$ | $1.42\times10^{-2}$ rad²/s (white intercept $-2\times10^{-4}$, i.e. none) |
+| per-harmonic diffusion $D_{\psi_k}$, median | $84.5$ rad²/s |
+| **$k$-exponent of $D_{\psi_k}$** | $\mathbf{2.01}$ |
+| shaft share of the total diffusion | 0.37 at $k=2$, 0.08–0.19 for $k=8\dots60$ |
+| crossover order (shaft = per-harmonic) | $k\approx77$ |
+| top eigenvalue of $C$ | 18% of the trace |
+| $|\cos(\mathbf v_1,\mathbf k)|$ | **0.97** |
+| implied $\sigma_s$ if the shaft term is read quasi-statically | 0.028 rev/s |
+| implied $\gamma_k$ (shaft + per-harmonic) | 0.01 Hz at $k=2$, 0.5 at $k=8$, 3.8 at 16, 12.7 at 32, 21.7 at 60 |
+
+![](rig-model-listening/phase_noise.png){width=100%}
+
+Read those rows together, because they say something the model does not
+currently contain.
+
+1. **The rank-one shaft component is real and correctly identified** — its
+   eigenvector is aligned with $\mathbf k$ to $\cos=0.97$, exactly as
+   predicted — **but it is not dominant.** It carries 18% of the phase-noise
+   variance; the per-harmonic terms carry the rest at every order below 77.
+   The left panel of the figure shows this directly: the order phases divided
+   by their order do drift together (correlations 0.2–0.5), but they are not
+   the same curve.
+2. **The per-harmonic diffusion itself scales as $k^{2.01}$.** That is the
+   signature of a *frequency* jitter, $\delta f_k = k\,\delta s_k$ — but with
+   a $\delta s_k$ that is only 18% common across orders. In plain terms: even
+   a single rotor at a fixed throttle does not have one instantaneous rate.
+   Each harmonic sees its own slightly different rate, presumably because
+   blade-passage unsteadiness is not phase-locked across the blade cycle.
+3. **§2.1's model has this backwards.** The renderer carries a large shaft
+   jitter ($\sigma_\rho = 0.5$–$1.6$ rev/s) and a token per-harmonic
+   diffusion (`phase_diffusion_hz_per_order` $= 0.02$–$0.05$ Hz/order,
+   *linear* in $k$). The measurement says the split is roughly 1:5 the other
+   way, and that the per-harmonic term scales as $k^2$, not $k$. A shaft term
+   forced to carry all of the broadening over-broadens *coherently* — every
+   order of a rotor moves together, which is what makes DREGON's rendered
+   high comb collapse into a continuum (§9.1 i) — whereas the same width
+   delivered per-harmonic leaves each line broad but independent, which is
+   what the real recording shows.
+
+### 13.5 Why this also explains the $k^1$ versus $k^2$ mess
+
+Put §11.4 and §13.4 side by side. The *width* measured from the periodogram
+grows like $k^{0.88}$; the *phase diffusion* measured from the envelopes grows
+like $k^{2.0}$. Both are right, and their reconciliation is the missing piece.
+
+At $k=2$ the phase noise implies $\gamma=0.01$ Hz while the measured line width
+is 0.65 Hz — the low orders are **not** broadened by phase noise at all.
+Something else broadens them, and the same recording says what: the demodulated
+amplitudes have a relative standard deviation of $-6.0$ dB, i.e. 50% amplitude
+modulation, which puts sidebands around every line with a width set by the
+modulation's own bandwidth and *independent of $k$*. So
+
+$$
+\gamma_k \;\approx\; \underbrace{\gamma_{\text{AM}}}_{\text{flat in }k}
+\;+\;\underbrace{\frac{k^2\big(D_\theta + c\big)}{4\pi}}_{\text{phase, }\propto k^2} ,
+$$
+
+and fitting a single power $\gamma\propto k^p$ to a sum of a constant and a
+quadratic returns an intermediate exponent over any finite order range —
+$p\approx0.9$ over $k=2\dots16$ here, and $p\approx0.9$ was exactly the median
+the Whittle width-exponent fit returned in §4.1's variant comparison. **The
+$k^1$ law that won on held-out likelihood is not a mechanism; it is the
+best single-power fit to a two-mechanism width.** That is why the exponent
+test could not license a renderer regime, and §9.3's "unresolved tension" is
+resolved: both regimes are present, in different order ranges, from different
+physical causes.
+
+The corrections this implies for Part I are specific:
+
+* $\gamma_k$ needs *two* additive terms — a $k$-independent one from the
+  amplitude process (which the renderer already owns, and which should
+  therefore not be duplicated by shaft jitter) and a $k^2$ one from phase
+  diffusion;
+* the phase diffusion should be **mostly per-harmonic** (coherence $\approx0.2$
+  measured, against the renderer's implicit 1.0), which decouples the high
+  orders instead of sweeping them together;
+* with the $k^2$ term calibrated to the *high*-order widths rather than to the
+  total, DREGON's transferred jitter drops by roughly the ratio it currently
+  over-broadens by, and the merge order moves from $k\approx45$ (§7.1) out
+  past 100.
+
+Everything in this list is a measurement on 24 s of one stationary bench
+recording, on one rotor of one rig; the same instrument applied to the other
+19 recordings would give it per rotor and per speed, which is the natural
+companion to the profile programme of §12.3.
