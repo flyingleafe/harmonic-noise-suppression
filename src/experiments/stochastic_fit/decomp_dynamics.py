@@ -311,7 +311,9 @@ def _unpack(
     the component variance (on the planted control, by 40%). The cap keeps
     every reported variance inside the measured band.
     """
-    value = np.exp(theta)
+    # Nelder-Mead wanders freely in log space; clip before exponentiating so a
+    # scouting step cannot turn the density into inf and poison the simplex.
+    value = np.exp(np.clip(theta, -80.0, 80.0))
     return value[0:-1:2], np.clip(value[1:-1:2], *tau_bounds), float(value[-1])
 
 

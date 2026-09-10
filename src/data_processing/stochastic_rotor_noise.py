@@ -664,6 +664,24 @@ def calibrate_floor(
     return level
 
 
+def _centred_normals(rng: np.random.Generator, std: float, size: int) -> np.ndarray:
+    """``size`` zero-mean normals, or exact zeros without touching ``rng``.
+
+    Leaving the generator alone at zero spread keeps every preset that does not
+    use the knob on its previous random stream.
+    """
+    if std <= 0.0:
+        return np.zeros(size)
+    return rng.normal(0.0, std, size=size)
+
+
+def _lognormal_factor(rng: np.random.Generator, log_std: float) -> float:
+    """``exp(N(0, log_std))``, or exactly 1 without touching ``rng``."""
+    if log_std <= 0.0:
+        return 1.0
+    return float(np.exp(rng.normal(0.0, log_std)))
+
+
 def sample_params(
     rng: np.random.Generator,
     ranges: StochasticRanges | None = None,
@@ -822,16 +840,19 @@ def sample_params(
         floor_tilt_gp_tau_s=float(rng.uniform(*ranges.floor_tilt_gp_tau_s)),
         line_bin_integrate=bool(line_bin_integrate),
         # One lognormal draw per CLIP, shared by its rotors: how much this
-        # flight segment's shaft wandered (``shaft_jitter_log_std``).
+        # flight segment's shaft wandered (``shaft_jitter_log_std``). Both this
+        # and the label-error draw below leave the generator untouched when
+        # their spread is zero, so presets that do not use them keep their
+        # existing streams.
         shaft_jitter_rps=(
             fixed_shaft_jitter if fixed_shaft_jitter is not None else draw(ranges.shaft_jitter_rps)
         )
-        * float(np.exp(rng.normal(0.0, draw(ranges.shaft_jitter_log_std)))),
+        * _lognormal_factor(rng, draw(ranges.shaft_jitter_log_std)),
         shaft_jitter_tau_s=draw(ranges.shaft_jitter_tau_s),
         phase_diffusion_hz_per_order=draw(ranges.phase_diffusion_hz_per_order),
         # One static draw per rotor: the label error is a property of this
         # clip's telemetry, not a process that evolves inside it.
-        shaft_offset_rps=rng.normal(0.0, draw(ranges.shaft_offset_rps), size=n_rotors),
+        shaft_offset_rps=_centred_normals(rng, draw(ranges.shaft_offset_rps), n_rotors),
         harm_gp_kernel=str(ranges.harm_gp_kernel),
         umod_std_db=draw(ranges.umod_std_db),
         umod_tau_s=draw(ranges.umod_tau_s),
@@ -1334,8 +1355,13 @@ def synthesize(
     offset = np.asarray(params.shaft_offset_rps, dtype=np.float64)
     if offset.ndim == 0:
         offset = np.full(n_rotors, float(offset))
-    elif offset.shape != (n_rotors,):
-        raise ValueError(f"shaft_offset_rps must be scalar or ({n_rotors},), got {offset.shape}")
+    elif offset.size < n_rotors:
+        raise ValueError(f"shaft_offset_rps has {offset.size} entries for {n_rotors} rotors")
+    else:
+        # A parameter set may be sized for more rotors than this clip drives;
+        # every other per-rotor array (profile, gamma, jitter) is read the same
+        # way, by leading index.
+        offset = offset[:n_rotors]
     # A stopped rotor stays stopped: the label error is an error about a
     # running shaft's speed, not a phantom rotation.
     rps = np.where(label_rps > 0.0, np.maximum(label_rps + offset[:, None], 0.0), 0.0)

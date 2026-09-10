@@ -486,3 +486,137 @@ def test_visibility_model_recovers_probability_and_finite_off_component() -> Non
     applied = apply_visibility_model(summary, model)
     assert applied["visibility_model"]["threshold_db"] == 6.0
     assert len(applied["visibility_model"]["visible_probability"]) == 40
+
+
+class _FakeSeries:
+    """The two attributes the envelope fitters read off a ``td.Series``."""
+
+    def __init__(self, data: np.ndarray, rate: float | None = None) -> None:
+        self.data = data
+        self.tindex = type("TIndex", (), {"rate": rate})()
+
+
+def _ou(rng: np.random.Generator, n: int, length: int, tau: float, std: float, rate: float):
+    decay = np.exp(-1.0 / (rate * tau))
+    out = np.empty((n, length))
+    out[:, 0] = rng.normal(0.0, std, n)
+    step = rng.normal(0.0, std * np.sqrt(1.0 - decay * decay), (n, length))
+    for index in range(1, length):
+        out[:, index] = decay * out[:, index - 1] + step[:, index]
+    return out
+
+
+def _planted_decomp_frame(seed: int = 11) -> tuple[dict, list[tuple[float, float, float]], float]:
+    """Envelopes with a known speed law and a known two-component amplitude process."""
+    rng = np.random.default_rng(seed)
+    n_rotors, n_orders, n_frames, env_rate = 4, 64, 18000, 100.0
+    truth = [(2.6, 4.5, 0.30), (3.9, 0.15, 0.05)]
+    residual = np.zeros((n_rotors, n_orders, n_frames))
+    for std, tau, coherence in truth:
+        common = _ou(rng, n_rotors, n_frames, tau, std, env_rate)
+        private = _ou(rng, n_rotors * n_orders, n_frames, tau, std, env_rate).reshape(
+            n_rotors, n_orders, n_frames
+        )
+        residual += np.sqrt(coherence) * common[:, None, :] + np.sqrt(1.0 - coherence) * private
+    residual += rng.normal(0.0, 0.8, residual.shape)
+    speed = (
+        60.0
+        + 15.0 * np.sin(np.linspace(0.0, 9.0, n_frames))[None, :]
+        + rng.normal(0.0, 0.5, (n_rotors, n_frames))
+    )
+    exponent = 4.1
+    level = (
+        -60.0
+        + exponent * 10.0 * np.log10(speed)[:, None, :]
+        + np.linspace(20.0, -20.0, n_orders)[None, :, None]
+        + residual
+    )
+    amplitude = np.sqrt(10.0 ** (level / 10.0))[None].repeat(8, axis=0)
+    frame = {
+        "amp": _FakeSeries(amplitude),
+        "amp_valid": _FakeSeries(np.ones((n_rotors, n_orders, n_frames), dtype=bool)),
+        "rps": _FakeSeries(np.repeat(speed, 160, axis=1), rate=16000.0),
+    }
+    return frame, truth, exponent
+
+
+def test_planted_amplitude_process_is_recovered_from_envelopes() -> None:
+    """The dynamics fitter must find the planted mixture, not the noise floor.
+
+    A sign or normalisation error in the OU spectral density, or in the
+    coherence projection, changes these numbers by far more than the tolerances
+    below; the mixture's TOTAL variance is what the renderer consumes, so it is
+    checked tightest.
+    """
+    from experiments.stochastic_fit.decomp_dynamics import fit_decomp_dynamics
+
+    frame, truth, exponent = _planted_decomp_frame()
+    fitted = fit_decomp_dynamics(frame, recording_id="PLANTED", floor_law=False)
+
+    assert fitted.selected_components == 2
+    planted_variance = sum(std**2 for std, _, _ in truth)
+    fitted_variance = sum(component["std_db"] ** 2 for component in fitted.components)
+    assert fitted_variance == pytest.approx(planted_variance, rel=0.25)
+    slow, fast = fitted.components
+    assert slow["tau_s"] > 3.0 > fast["tau_s"]
+    assert fast["tau_s"] == pytest.approx(truth[1][1], abs=0.1)
+    # the slow component is the coherent one, by a wide margin
+    assert slow["coherence"] > 3.0 * fast["coherence"]
+    assert slow["coherence"] == pytest.approx(truth[0][2], abs=0.1)
+    # few independent speed excursions in 180 s, so the exponent is loose
+    assert fitted.speed_exponent == pytest.approx(exponent, abs=0.5)
+
+
+def test_one_standard_error_rule_prefers_the_simpler_kernel() -> None:
+    """A single-component truth must not buy a second component."""
+    from experiments.stochastic_fit.decomp_dynamics import fit_decomp_dynamics
+
+    rng = np.random.default_rng(5)
+    n_rotors, n_orders, n_frames, env_rate = 4, 64, 18000, 100.0
+    residual = _ou(rng, n_rotors * n_orders, n_frames, 0.8, 2.9, env_rate).reshape(
+        n_rotors, n_orders, n_frames
+    )
+    speed = np.full((n_rotors, n_frames), 70.0) + rng.normal(0.0, 0.3, (n_rotors, n_frames))
+    level = -60.0 + np.linspace(10.0, -10.0, n_orders)[None, :, None] + residual
+    frame = {
+        "amp": _FakeSeries(np.sqrt(10.0 ** (level / 10.0))[None].repeat(8, axis=0)),
+        "amp_valid": _FakeSeries(np.ones((n_rotors, n_orders, n_frames), dtype=bool)),
+        "rps": _FakeSeries(np.repeat(speed, 160, axis=1), rate=16000.0),
+    }
+    fitted = fit_decomp_dynamics(frame, recording_id="PLANTED", floor_law=False, min_rps=30.0)
+    assert fitted.selected_components == 1
+    assert fitted.components[0]["tau_s"] == pytest.approx(0.8, abs=0.3)
+
+
+def test_width_population_separates_flight_spread_from_estimation_noise(tmp_path) -> None:
+    """Only the common mode across a clip's rotors counts as a population.
+
+    Independent per-rotor scatter is the fitters' own noise; a bug that counts
+    it as flight-to-flight spread would report roughly the total, which is more
+    than twice the planted value here.
+    """
+    import json
+
+    from experiments.stochastic_fit.carrier_error import fit_width_population
+
+    rng = np.random.default_rng(3)
+    n_clips, n_rotors = 40, 4
+    base = np.asarray([0.9, 0.5, 0.45, 0.6])
+    planted_log_std, noise_log_std = 0.5, 0.7
+    root = tmp_path / "gauss"
+    root.mkdir()
+    for clip in range(n_clips):
+        common = rng.normal(0.0, planted_log_std)
+        noise = rng.normal(0.0, noise_log_std, n_rotors)
+        slope = base * np.exp(common + noise)
+        np.savez(
+            root / f"CLIP_{clip:02d}.npz",
+            params=json.dumps({"gamma_slope": slope.tolist()}),
+        )
+
+    fitted = fit_width_population(tmp_path, clip_prefixes=("CLIP",), variant="gauss")
+
+    assert fitted.common_log_std == pytest.approx(planted_log_std, abs=0.15)
+    total = np.sqrt(planted_log_std**2 + noise_log_std**2)
+    assert fitted.common_log_std < 0.75 * total
+    assert fitted.rotor_median_slope_hz == pytest.approx(list(base), rel=0.3)
