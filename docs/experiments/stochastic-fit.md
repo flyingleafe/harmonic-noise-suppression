@@ -1094,3 +1094,29 @@ prediction, not a result.
 - Kaggle's image torch has no sm_60 kernels; the slim snapshot uses a uv env
   with PyPI `torch==2.7.0` (`scripts/kaggle_slim_stochfit.sh`, branch
   `kaggle-slim-stochfit`, worktree `.worktrees/kaggle-slim-stochfit`).
+- **dload duplicated every shard download once per DataLoader worker**
+  (fixed upstream in `dload-ml` 0.3.1). The first launch of
+  `rig_fitted_scv2_unified` on a 32-worker vast A100 (job
+  `rigfitted-adb93b`) sat at **0% GPU for 12 minutes** having pulled 11 GB;
+  the instance showed 707 established R2 connections and several
+  *identical-size* 134 MB files in `~/.cache/dload/tmp/`. Cause: N
+  DataLoader workers share one cache directory, but `ShardCache`
+  single-flighted downloads with a `threading.Event` that `__getstate__`
+  drops, and pins were in-process refcounts — so every worker missing the
+  same shard started its own download, and one worker's LRU eviction could
+  unlink a shard another was reading. Both are now backed by a per-digest
+  `flock` under `<cache>/locks/`. A/B on the real speech stream, 4 workers,
+  cold cache: **1749 MB pulled / 29.8 s → 446 MB / 13.0 s** for the same
+  403 MB of distinct shards. This is worth remembering as a class of bug:
+  the earlier per-sample stream benchmarks were run single-process, which
+  is exactly the configuration in which the defect is invisible.
+- Consequence for the epoch-time comparison above: the loader is
+  CPU/IO-bound in every synthetic run, so epoch time tracks core count, not
+  the renderer. Historical evidence — the *original* filtered-noise family
+  ran 2.37 min/epoch on 48 cores (`stoch_s1g_scv2`), 4.01 on 6
+  (`salv2_scv2_stoch_mix`), 10.78 on 2 (`stoch_s1id_scv2`) and 21.03 on 6
+  with a weaker GPU (`salv2_scv2_stoch_nomix`); real-data training is 1.09
+  (`real_r4_scv2_unified`, 128 cores). With the dload fix and
+  `render_reuse: 48`, the fitted rig stream runs ~5 it/s at batch 128 on 32
+  cores = **~1.75 min/epoch** (run `v2r3w2e7`), i.e. within 1.6x of the
+  real-noise floor and faster than the family it replaces.
