@@ -25,6 +25,7 @@ class TopologyCalibration:
     profile_basis_db: np.ndarray
     selected_rank: int
     rank_cv_nll_per_order: list[float]
+    rank_cv_se_per_order: list[float]
     smoothing_lambda: float
     observed_orders: int
     standardized_rmse_before: float
@@ -68,7 +69,15 @@ def fit_topology_calibration(
     real = np.asarray(real_train, dtype=np.float64)
     synthetic = np.asarray(synthetic_train, dtype=np.float64)
     if real.shape != synthetic.shape:
-        raise ValueError("real and matched synthetic topology arrays must have equal shape")
+        if real.shape[1:] != synthetic.shape[1:] or synthetic.shape[0] % real.shape[0] != 0:
+            raise ValueError(
+                "synthetic topology must have an integer number of matched draws per real clip"
+            )
+        draws = synthetic.shape[0] // real.shape[0]
+        synthetic = np.nanmedian(
+            synthetic.reshape(real.shape[0], draws, *real.shape[1:]),
+            axis=1,
+        )
     difference_samples = real - synthetic
     difference, variance, count = _order_location_and_variance(difference_samples)
     observed = np.isfinite(difference) & (count >= 3)
@@ -109,6 +118,8 @@ def fit_topology_calibration(
         else np.asarray(lambda_grid, dtype=np.float64)
     )
     n_clips = difference_samples.shape[0]
+    if n_clips < 3:
+        raise ValueError("topology calibration needs at least three matched clips")
     n_folds = min(5, n_clips)
     fold_index = np.arange(n_clips) % n_folds
     best_score = float("inf")
@@ -144,8 +155,8 @@ def fit_topology_calibration(
 
     real_complete = complete(real)
     synthetic_complete = complete(synthetic)
-    ranks = range(max(0, int(max_rank)) + 1)
-    rank_scores = np.zeros(len(tuple(ranks)), dtype=np.float64)
+    rank_values = tuple(range(max(0, int(max_rank)) + 1))
+    fold_scores = np.full((n_folds, len(rank_values)), np.inf, dtype=np.float64)
     fold_index = np.arange(n_clips) % n_folds
     for fold in range(n_folds):
         train = fold_index != fold
@@ -158,7 +169,7 @@ def fit_topology_calibration(
         eigenvalue = np.maximum(eigenvalue[order], 0.0)
         eigenvector = eigenvector[:, order]
         centered_validation = real_complete[validation] - real_model.location_[None, :]
-        for rank in ranks:
+        for rank in rank_values:
             covariance = synthetic_model.covariance_.copy()
             if rank:
                 covariance += (eigenvector[:, :rank] * eigenvalue[:rank][None, :]) @ eigenvector[
@@ -167,14 +178,21 @@ def fit_topology_calibration(
             covariance += 1e-5 * np.eye(n_orders)
             sign, logdet = np.linalg.slogdet(covariance)
             if sign <= 0:
-                rank_scores[rank] = np.inf
                 continue
             solved = np.linalg.solve(covariance, centered_validation.T).T
-            rank_scores[rank] += float(
+            fold_scores[fold, rank] = float(
                 0.5 * np.mean(logdet + np.sum(centered_validation * solved, axis=1)) / n_orders
             )
-    rank_scores /= n_folds
-    selected_rank = int(np.argmin(rank_scores))
+    rank_scores = np.mean(fold_scores, axis=0)
+    rank_se = np.std(fold_scores, axis=0, ddof=1) / np.sqrt(n_folds)
+    best_rank = int(np.argmin(rank_scores))
+    # Small clip sets make adjacent residual ranks statistically
+    # indistinguishable. The one-standard-error rule chooses the simplest
+    # model supported by training folds instead of spending every available
+    # covariance degree of freedom.
+    selected_rank = int(
+        np.flatnonzero(rank_scores <= rank_scores[best_rank] + rank_se[best_rank])[0]
+    )
     real_model = LedoitWolf().fit(real_complete)
     synthetic_model = LedoitWolf().fit(synthetic_complete)
     covariance_delta = real_model.covariance_ - synthetic_model.covariance_
@@ -199,6 +217,7 @@ def fit_topology_calibration(
         profile_basis_db=profile_basis,
         selected_rank=selected_rank,
         rank_cv_nll_per_order=rank_scores.tolist(),
+        rank_cv_se_per_order=rank_se.tolist(),
         smoothing_lambda=smoothing,
         observed_orders=int(observed.sum()),
         standardized_rmse_before=before,
@@ -222,14 +241,24 @@ def apply_topology_calibration(
     out["population"]["line_floor_mean_db"] = float(
         out["population"]["line_floor_mean_db"] + calibration.line_floor_shift_db
     )
-    basis = calibration.profile_basis_db
-    if basis.shape[1] < profile.size:
-        basis = np.pad(
-            basis,
-            ((0, 0), (0, profile.size - basis.shape[1])),
+    residual_basis = calibration.profile_basis_db
+    if residual_basis.shape[1] < profile.size:
+        residual_basis = np.pad(
+            residual_basis,
+            ((0, 0), (0, profile.size - residual_basis.shape[1])),
             mode="constant",
         )
-    out["rig"]["profile_basis_db"] = basis[:, : profile.size].tolist()
+    old_value = out["rig"].get("profile_basis_db")
+    old_basis = (
+        np.zeros((0, profile.size), dtype=np.float64)
+        if old_value is None
+        else np.asarray(old_value, dtype=np.float64)
+    )
+    basis = np.concatenate(
+        (old_basis[:, : profile.size], residual_basis[:, : profile.size]),
+        axis=0,
+    )
+    out["rig"]["profile_basis_db"] = basis.tolist()
     out["topology_calibration"] = calibration.export()
     return out
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -448,6 +449,73 @@ def test_fitted_population_draws_the_learned_cross_order_covariance():
     assert cosine > 0.999
 
 
+def test_visibility_hurdle_uses_a_finite_attenuated_component() -> None:
+    ranges = srn.StochasticRanges(
+        profile_mean_db=(0.0,) * 5,
+        profile_basis_db=(),
+        profile_rotor_db=((0.0,) * 5,),
+        line_floor_mean_db=18.0,
+        line_floor_std_db=0.0,
+        rotor_contrast_std_db=0.0,
+        visibility_probability=(1.0, 0.0, 1.0, 0.0, 1.0),
+        visibility_attenuation_db=(8.0, 10.0, 12.0, 14.0, 16.0),
+        visibility_attenuation_std_db=0.0,
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(19),
+        ranges,
+        n_rotors=1,
+        n_harmonics=5,
+        sample_rate=SR,
+    )
+
+    np.testing.assert_allclose(params.profile_db[0], [0.0, -10.0, 0.0, -14.0, 0.0])
+    assert params.floor_mean_db == pytest.approx(-18.0)
+    assert np.min(params.profile_db) > -120.0
+
+
+def test_visibility_uses_a_substream_and_changes_only_the_profile() -> None:
+    plain_ranges = srn.StochasticRanges(
+        profile_mean_db=(0.0,) * 5,
+        profile_basis_db=(),
+        profile_rotor_db=((0.0,) * 5,),
+        line_floor_mean_db=18.0,
+        line_floor_std_db=0.0,
+        rotor_contrast_std_db=0.0,
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+    )
+    visible_ranges = replace(
+        plain_ranges,
+        visibility_probability=(1.0,) * 5,
+        visibility_attenuation_db=(10.0,) * 5,
+    )
+    plain_rng = np.random.default_rng(31)
+    visible_rng = np.random.default_rng(31)
+    plain = srn.sample_params(
+        plain_rng,
+        plain_ranges,
+        n_rotors=1,
+        n_harmonics=5,
+        sample_rate=SR,
+    )
+    visible = srn.sample_params(
+        visible_rng,
+        visible_ranges,
+        n_rotors=1,
+        n_harmonics=5,
+        sample_rate=SR,
+    )
+
+    np.testing.assert_allclose(visible.profile_db, plain.profile_db)
+    np.testing.assert_allclose(visible.floor_ctrl_db, plain.floor_ctrl_db)
+    np.testing.assert_allclose(visible.gamma0, plain.gamma0)
+    assert visible.floor_mean_db == plain.floor_mean_db
+    assert visible_rng.random() == plain_rng.random()
+
+
 def test_n_harmonics_range_reaches_the_pool_and_shortens_the_comb():
     pool = srn.StochasticNoisePool(
         sample_rate=SR, duration_s=1.0, n_harmonics_range=(8, 16), n_mics=1, n_rotors=4
@@ -546,3 +614,47 @@ def test_fitted_width_and_microphone_parameters_reach_the_waveform() -> None:
         10.0 ** (np.asarray(floor_db) / 10.0),
     )
     np.testing.assert_allclose(diagnostics["mic_gain_all_db"], all_db)
+
+
+def test_fm_harmonics_have_static_microphone_phase() -> None:
+    ranges = srn.StochasticRanges(
+        gamma0_hz=(0.5, 0.5),
+        gamma_slope_hz=(0.1, 0.1),
+        fixed_shaft_jitter_rps=(0.0,),
+        phase_diffusion_hz_per_order=(0.0, 0.0),
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+        floor_rel_db=(-80.0, -80.0),
+        min_lines_above_floor=0.0,
+        harm_gp_std_db=(0.0, 0.0),
+        floor_gp_std_db=(0.0, 0.0),
+        floor_tilt_gp_std=(0.0, 0.0),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(18),
+        ranges,
+        n_rotors=1,
+        n_harmonics=12,
+        sample_rate=SR,
+    )
+    audio, _ = srn.synthesize(
+        params,
+        np.full((1, 2 * SR), 73.0),
+        rng=np.random.default_rng(19),
+        n_mics=2,
+        mic_gain_db=(0.0, 0.0),
+        line_mode="fm",
+        normalize_rms=None,
+    )
+
+    # Propagation contributes a static phase at each microphone. Equal gains
+    # therefore preserve the line powers without cloning the line waveform.
+    assert abs(float(np.corrcoef(audio)[0, 1])) < 0.9
+    p0, freqs = _power_spectrum(audio[0])
+    p1, _ = _power_spectrum(audio[1])
+    line_bins = np.asarray([np.argmin(np.abs(freqs - 73.0 * k)) for k in range(1, 13)])
+    np.testing.assert_allclose(
+        10.0 * np.log10(np.maximum(p0[line_bins], 1e-20)),
+        10.0 * np.log10(np.maximum(p1[line_bins], 1e-20)),
+        atol=1.0,
+    )

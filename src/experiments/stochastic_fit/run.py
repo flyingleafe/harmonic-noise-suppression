@@ -68,6 +68,11 @@ VARIANTS: dict[str, dict[str, Any]] = {
     "gauss_mic": dict(rps_offset=True, line_shape="gauss", mic_floor=True),
     "gauss_drift6": dict(rps_offset=True, line_shape="gauss", gp_std_db=6.0),
     "gauss_free": dict(rps_offset=True, line_shape="gauss", free_gamma=True),
+    # the width law's regime: k^1 is a frozen speed offset (quasi-static shaft),
+    # k^2 an OU shaft that decorrelates inside the analysis window (diffusive).
+    # ``gauss_wp`` fits the exponent, so the regime is read off the likelihood.
+    "gauss_wp": dict(rps_offset=True, line_shape="gauss", fit_width_power=True),
+    "gauss_wp2": dict(rps_offset=True, line_shape="gauss", width_power=2.0),
     "gauss_all": dict(
         rps_offset=True,
         line_shape="gauss",
@@ -1015,6 +1020,105 @@ def population_calibrate(args: argparse.Namespace) -> None:
     print(json.dumps(calibration.export(), indent=2), flush=True)
 
 
+def population_visibility(args: argparse.Namespace) -> None:
+    """Fit the PV hurdle arm from training-recording waveform margins."""
+    from .visibility import apply_visibility_model, fit_visibility_model
+
+    summary_path = Path(args.summary)
+    summary = json.loads(summary_path.read_text())
+    with np.load(args.raw_npz) as arrays:
+        model = fit_visibility_model(
+            np.asarray(arrays["train_real"]),
+            np.asarray(arrays["train_synthetic"]),
+            threshold_db=args.threshold_db,
+        )
+    visible = apply_visibility_model(summary, model)
+    output = (
+        Path(args.output)
+        if args.output is not None
+        else summary_path.with_suffix(".visibility.json")
+    )
+    output.write_text(json.dumps(visible))
+    print(json.dumps(model.export(), indent=2), flush=True)
+
+
+def population_decomp_profile(args: argparse.Namespace) -> None:
+    """Fit the Michael profile hierarchy from VK amplitude envelopes."""
+    from data_processing.frames import meta_dict
+    from data_processing.streams import iter_published_frames
+
+    from .decomp_population import apply_decomp_profile, fit_decomp_profile
+
+    summary_path = Path(args.summary)
+    summary = json.loads(summary_path.read_text())
+    frames = [
+        frame
+        for frame in iter_published_frames(args.dataset)
+        if str(meta_dict(frame).get("recording_id")) == args.recording
+    ]
+    if len(frames) != 1:
+        raise ValueError(
+            f"{args.dataset}: expected one {args.recording!r} frame, got {len(frames)}"
+        )
+    model = fit_decomp_profile(
+        frames[0],
+        k_max=args.k_max,
+        chunk_s=args.chunk_s,
+        min_rps=args.min_rps,
+        valid_fraction=args.valid_fraction,
+        max_rank=args.max_rank,
+    )
+    fitted = apply_decomp_profile(summary, model)
+    output = (
+        Path(args.output)
+        if args.output is not None
+        else summary_path.with_suffix(".decomp-profile.json")
+    )
+    output.write_text(json.dumps(fitted))
+    print(json.dumps(model.export(), indent=2), flush=True)
+
+
+def population_decomp_dynamics(args: argparse.Namespace) -> None:
+    """Fit the amplitude process and both speed laws from one decomposition."""
+    from dataclasses import asdict
+
+    from data_processing.frames import meta_dict
+    from data_processing.streams import iter_published_frames
+
+    from .decomp_dynamics import apply_decomp_dynamics, fit_decomp_dynamics
+
+    summary_path = Path(args.summary)
+    summary = json.loads(summary_path.read_text())
+    frames = [
+        frame
+        for frame in iter_published_frames(args.dataset)
+        if str(meta_dict(frame).get("recording_id")) == args.recording
+    ]
+    if len(frames) != 1:
+        raise ValueError(
+            f"{args.dataset}: expected one {args.recording!r} frame, got {len(frames)}"
+        )
+    dynamics = fit_decomp_dynamics(
+        frames[0],
+        recording_id=args.recording,
+        k_max=args.k_max,
+        min_rps=args.min_rps,
+        k_min=args.k_min,
+        segment_s=args.segment_s,
+        max_components=args.max_components,
+    )
+    fitted = apply_decomp_dynamics(summary, dynamics)
+    output = (
+        Path(args.output)
+        if args.output is not None
+        else summary_path.with_suffix(".decomp-dynamics.json")
+    )
+    output.write_text(json.dumps(fitted))
+    printable = asdict(dynamics)
+    printable.pop("residual_std_db")
+    print(json.dumps(printable, indent=2), flush=True)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1127,6 +1231,34 @@ def main(argv: list[str] | None = None) -> None:
     pc.add_argument("--reference-order", type=int, default=2)
     pc.add_argument("--output", default=None)
     pc.set_defaults(func=population_calibrate)
+    pv = sub.add_parser("popvisibility")
+    pv.add_argument("--summary", required=True)
+    pv.add_argument("--raw-npz", required=True)
+    pv.add_argument("--threshold-db", type=float, default=6.0)
+    pv.add_argument("--output", default=None)
+    pv.set_defaults(func=population_visibility)
+    dp = sub.add_parser("popdecomp")
+    dp.add_argument("--summary", required=True)
+    dp.add_argument("--dataset", default="decomp-frames-v2")
+    dp.add_argument("--recording", default="FLY125")
+    dp.add_argument("--k-max", type=int, default=64)
+    dp.add_argument("--chunk-s", type=float, default=2.0)
+    dp.add_argument("--min-rps", type=float, default=30.0)
+    dp.add_argument("--valid-fraction", type=float, default=0.1)
+    dp.add_argument("--max-rank", type=int, default=8)
+    dp.add_argument("--output", default=None)
+    dp.set_defaults(func=population_decomp_profile)
+    dy = sub.add_parser("popdyn")
+    dy.add_argument("--summary", required=True)
+    dy.add_argument("--dataset", default="decomp-frames-v2")
+    dy.add_argument("--recording", required=True)
+    dy.add_argument("--k-max", type=int, default=64)
+    dy.add_argument("--k-min", type=int, default=4)
+    dy.add_argument("--min-rps", type=float, default=30.0)
+    dy.add_argument("--segment-s", type=float, default=40.96)
+    dy.add_argument("--max-components", type=int, default=3)
+    dy.add_argument("--output")
+    dy.set_defaults(func=population_decomp_dynamics)
     args = ap.parse_args(argv)
     args.func(args)
 

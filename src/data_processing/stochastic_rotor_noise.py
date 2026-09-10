@@ -240,11 +240,17 @@ class StochasticRanges:
     profile_mean_db: tuple[float, ...] | None = None
     profile_basis_db: tuple[tuple[float, ...], ...] | None = None
     profile_rotor_db: tuple[tuple[float, ...], ...] | None = None
+    profile_residual_std_db: tuple[float, ...] | None = None
     #: Population of the order-2 unit-area line power above the floor's base
     #: level. Absolute clip gain is deliberately absent: rendering normalizes it.
     line_floor_mean_db: float | None = None
     line_floor_std_db: float = 0.0
     rotor_contrast_std_db: float = 0.0
+    #: PV hurdle arm: common per-clip/order state. The off component is a
+    #: finite attenuated log-amplitude, never an exact-zero tooth.
+    visibility_probability: tuple[float, ...] | None = None
+    visibility_attenuation_db: tuple[float, ...] | None = None
+    visibility_attenuation_std_db: float = 0.0
 
     # Linewidth: gamma_k = gamma0 + slope * k, in Hz (half width at half max).
     gamma0_hz: tuple[float, float] = (0.5, 4.0)
@@ -527,13 +533,69 @@ def _population_profile_db(
     contrast = rng.normal(0.0, contrast_std, n_rotors)
     contrast -= contrast.mean()
     profile = mean[None, :] + rotor + factors @ basis + contrast[:, None]
+    if ranges.profile_residual_std_db is not None:
+        residual_std = np.asarray(ranges.profile_residual_std_db, dtype=np.float64)
+        if residual_std.size < n_harmonics or np.any(residual_std < 0.0):
+            raise ValueError(
+                "profile_residual_std_db must be non-negative and cover every harmonic"
+            )
+        profile += rng.normal(
+            0.0,
+            residual_std[:n_harmonics][None, :],
+            (n_rotors, n_harmonics),
+        )
+    reference_order = min(1, n_harmonics - 1)
+    reference_profile = float(profile[:, reference_order].mean())
+
     ratio_std = float(ranges.line_floor_std_db)
     if ratio_std < 0:
         raise ValueError("line_floor_std_db must be non-negative")
     ratio = float(ranges.line_floor_mean_db) + rng.normal(0.0, ratio_std)
-    reference_order = min(1, n_harmonics - 1)
-    floor_mean_db = float(profile[:, reference_order].mean() - ratio)
+    floor_mean_db = reference_profile - ratio
     return profile, floor_mean_db
+
+
+def _apply_visibility(
+    profile: np.ndarray,
+    ranges: StochasticRanges,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    if ranges.visibility_probability is None:
+        return profile
+    if ranges.visibility_attenuation_db is None:
+        raise ValueError("visibility_probability requires visibility_attenuation_db")
+    n_harmonics = profile.shape[1]
+    probability = np.asarray(ranges.visibility_probability, dtype=np.float64)
+    attenuation = np.asarray(ranges.visibility_attenuation_db, dtype=np.float64)
+    if probability.size < n_harmonics or attenuation.size < n_harmonics:
+        raise ValueError("visibility probability and attenuation must cover every harmonic")
+    probability = probability[:n_harmonics]
+    attenuation = attenuation[:n_harmonics]
+    if (
+        not np.isfinite(probability).all()
+        or not np.isfinite(attenuation).all()
+        or np.any((probability < 0.0) | (probability > 1.0))
+        or np.any(attenuation < 0.0)
+    ):
+        raise ValueError("invalid visibility population")
+    # A jumped substream leaves every continuous renderer draw bit-identical in
+    # PV versus P3; only the hurdle state changes in a paired experiment.
+    jump = getattr(rng.bit_generator, "jumped", None)
+    if jump is None:
+        raise TypeError("visibility substream requires a jumpable NumPy bit generator")
+    visibility_rng = np.random.Generator(jump())
+    visible = visibility_rng.random(n_harmonics) < probability
+    off_db = np.maximum(
+        visibility_rng.normal(
+            attenuation,
+            float(ranges.visibility_attenuation_std_db),
+            n_harmonics,
+        ),
+        0.0,
+    )
+    out = profile.copy()
+    out[:, ~visible] -= off_db[None, ~visible]
+    return out
 
 
 def line_peak_db(params: StochasticParams, ref_rps: float = 80.0) -> tuple[np.ndarray, np.ndarray]:
@@ -730,7 +792,7 @@ def sample_params(
         else floor_mean_override
     )
 
-    return replace(
+    params = replace(
         draft,
         floor_mean_db=floor_mean_db,
         harm_gp_std_db=float(rng.uniform(*ranges.harm_gp_std_db)),
@@ -753,6 +815,12 @@ def sample_params(
         mic_gain_all_db=draw(ranges.mic_gain_all_db),
         mic_floor_std_db=draw(ranges.mic_floor_std_db),
     )
+    if ranges.visibility_probability is not None:
+        params = replace(
+            params,
+            profile_db=_apply_visibility(params.profile_db, ranges, rng),
+        )
+    return params
 
 
 # ── The spectrum ────────────────────────────────────────────────────────────
@@ -980,6 +1048,19 @@ def _ola_filter(x: np.ndarray, gain: np.ndarray, n_fft: int, hop: int) -> np.nda
 PHASE_NOISE_FS = 1000.0
 
 
+def _mix_line_bank(
+    bank: np.ndarray,
+    gains: np.ndarray,
+    rotor: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Mix one rotor's analytic harmonics through static per-mic phases."""
+    n_mics = gains.shape[0]
+    phase = rng.uniform(0.0, 2.0 * np.pi, (n_mics, bank.shape[0]))
+    weight = np.sqrt(gains[:, rotor])[:, None]
+    return (weight * np.cos(phase)) @ bank.real - (weight * np.sin(phase)) @ bank.imag
+
+
 def coherent_lines(
     params: StochasticParams,
     rps: np.ndarray,
@@ -1024,31 +1105,41 @@ def coherent_lines(
     t_slow = np.arange(n_slow) / PHASE_NOISE_FS
     dt_slow = 1.0 / PHASE_NOISE_FS
 
-    per_rotor = np.zeros((n_rotors, n_samples), dtype=np.float64)
+    out = np.zeros((n_mics, n_samples), dtype=np.float64)
     for r in range(n_rotors):
         power_frames = (
             10.0
             ** ((params.harm_mean_db + params.profile_db[r][:, None] + psd["harm_gp"][r]) / 10.0)
             * psd["amp"][r][None, :]
         )
-        for i in range(n_harm):
+        top = int(
+            np.clip(
+                np.searchsorted(
+                    np.arange(1, n_harm + 1, dtype=np.float64) * float(rps[r].min()),
+                    nyquist,
+                ),
+                0,
+                n_harm,
+            )
+        )
+        if top == 0:
+            continue
+        bank = np.zeros((top, n_samples), dtype=np.complex64)
+        for i in range(top):
             k = i + 1
-            centers = k * rps[r]
-            live = centers < nyquist
-            if not live.any():
-                continue
+            live = k * rps[r] < nyquist
             gamma = max(params.gamma0[r] + params.gamma_slope[r] * k, 1e-3)
             steps = rng.normal(0.0, np.sqrt(4.0 * np.pi * gamma * dt_slow), size=n_slow)
-            walk = np.cumsum(steps)
-            b = np.interp(t_audio, t_slow, walk) + rng.uniform(0.0, 2.0 * np.pi)
+            walk = np.interp(t_audio, t_slow, np.cumsum(steps))
             amplitude = np.sqrt(
                 2.0 * np.maximum(np.interp(t_audio, t_frames, power_frames[i]), 0.0)
             )
-            per_rotor[r] += np.where(live, amplitude, 0.0) * np.cos(k * phase[r] + b)
-
-    out = np.empty((n_mics, n_samples), dtype=np.float64)
-    for m in range(n_mics):
-        out[m] = np.tensordot(np.sqrt(gains[m]), per_rotor, axes=(0, 0))
+            bank[i] = np.where(
+                live,
+                amplitude * np.exp(1j * np.remainder(k * phase[r] + walk, 2.0 * np.pi)),
+                0.0,
+            )
+        out += _mix_line_bank(bank, gains, r, rng)
     return out
 
 
@@ -1126,7 +1217,7 @@ def fm_lines(
     f0 = np.floor(frame_of_slow).astype(np.int64)
     f1 = np.minimum(f0 + 1, n_frames - 1)
     fw = (frame_of_slow - f0).astype(np.float32)
-    per_rotor = np.zeros((n_rotors, n_samples), dtype=np.float32)
+    out = np.zeros((n_mics, n_samples), dtype=np.float64)
     for r in range(n_rotors):
         shaft = rps[r] + hold(jitter[r])
         phase = 2.0 * np.pi * np.cumsum(shaft) / sr
@@ -1141,7 +1232,7 @@ def fm_lines(
             continue
         r_max = float(rps[r].max())
         zk = np.ones(n_samples, dtype=np.complex64)
-        acc = np.zeros(n_samples, dtype=np.float32)
+        bank = np.zeros((top, n_samples), dtype=np.complex64)
         for i in range(top):
             k = i + 1
             zk = zk * z
@@ -1151,20 +1242,15 @@ def fm_lines(
             amp = hold(amp_slow)
             if k * r_max >= nyquist:
                 amp = np.where(k * rps[r] < nyquist, amp, 0.0).astype(np.float32)
-            b0 = rng.uniform(0.0, 2.0 * np.pi)
             if q > 0.0:
                 walk = np.cumsum(
                     rng.normal(0.0, np.sqrt(4.0 * np.pi * q * k * dt_slow), size=n_slow)
                 )
-                rot = hold(np.exp(1j * (b0 + walk)).astype(np.complex64))
-                acc += amp * (zk * rot).real
+                rotation = hold(np.exp(1j * walk).astype(np.complex64))
+                bank[i] = amp * zk * rotation
             else:
-                acc += amp * (zk * np.complex64(np.exp(1j * b0))).real
-        per_rotor[r] = acc
-
-    out = np.empty((n_mics, n_samples), dtype=np.float64)
-    for m in range(n_mics):
-        out[m] = np.tensordot(np.sqrt(gains[m]), per_rotor, axes=(0, 0))
+                bank[i] = amp * zk
+        out += _mix_line_bank(bank, gains, r, rng)
     return out
 
 

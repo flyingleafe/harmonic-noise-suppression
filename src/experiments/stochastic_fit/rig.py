@@ -89,6 +89,7 @@ class RigParams(nn.Module):
             torch.full((1,), _inv_softplus(0.3), dtype=dtype, device=device)
         )
         self.log_width_scale = z(R)  # w_r
+        self.log_width_power = z(1)  # log ratio to spec.width_power, tied with the law
         self.mic_gain_db = z(M, R)
         self.mic_floor_db = z(M)
         self.gain_all_db = z(M)
@@ -110,6 +111,8 @@ class RigParams(nn.Module):
             p = p + 0.5 * self.delta_db.square().sum() / r.delta_std_db**2
         if r.rotor_width:
             p = p + 0.5 * self.log_width_scale.square().sum() / r.width_scale_std**2
+        if self.spec.fit_width_power and r.tie_width:
+            p = p + 0.5 * self.log_width_power.square().sum() / self.spec.width_power_log_std**2
         if self.profile_basis_db is not None:
             basis = self.profile_basis()
             if basis.shape[1] > 2:
@@ -155,6 +158,8 @@ class RigParams(nn.Module):
             lines.extend((self.profile_basis_db, self.profile_mode_std_raw))
         if r.tie_width:
             lines += [self.gamma0_raw, self.slope_raw]
+            if s.fit_width_power:
+                lines.append(self.log_width_power)
         if r.rotor_width:
             lines.append(self.log_width_scale)
         if r.tie_mic_gain:
@@ -186,6 +191,14 @@ class RigParams(nn.Module):
                 delta_db=self.delta_db.cpu().numpy().copy(),
                 gamma0=float(g(self.gamma0_raw).item()),
                 gamma_slope=float(g(self.slope_raw).item()),
+                width_power=float(
+                    self.spec.width_power
+                    * (
+                        torch.exp(self.log_width_power[0]).item()
+                        if self.spec.fit_width_power
+                        else 1.0
+                    )
+                ),
                 width_scale=torch.exp(self.log_width_scale).cpu().numpy().copy(),
                 mic_gain_db=(self.mic_gain_db - self.mic_gain_db.mean(dim=0, keepdim=True))
                 .cpu()
@@ -245,6 +258,12 @@ class ClipInRig(CombSpectrum):
         g0 = torch.nn.functional.softplus(self.rig.gamma0_raw) * scale
         sl = torch.nn.functional.softplus(self.rig.slope_raw) * scale
         return _inv_softplus_t(g0), _inv_softplus_t(sl)
+
+    def _width_power(self) -> Tensor:
+        if not (self.rig.rig.tie_width and self.spec.fit_width_power):
+            return super()._width_power()
+        p = torch.as_tensor(self.spec.width_power, dtype=self._dtype, device=self._dev)
+        return p * torch.exp(self.rig.log_width_power[0])
 
     def _mic_gain_db(self) -> Tensor:
         return self.rig.mic_gain_db if self.rig.rig.tie_mic_gain else self.mic_gain_db

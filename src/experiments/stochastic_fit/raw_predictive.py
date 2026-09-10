@@ -450,6 +450,7 @@ def population_ranges(summary: dict[str, Any], base_ranges: dict[str, Any]) -> d
         profile_mean_db=rig["profile_db"],
         profile_basis_db=rig.get("profile_basis_db"),
         profile_rotor_db=rig["delta_db"],
+        profile_residual_std_db=summary.get("profile_residual_std_db"),
         line_floor_mean_db=population["line_floor_mean_db"] - shape_mean,
         line_floor_std_db=population["line_floor_std_db"],
         rotor_contrast_std_db=population["rotor_contrast_std_db"],
@@ -468,6 +469,30 @@ def population_ranges(summary: dict[str, Any], base_ranges: dict[str, Any]) -> d
             float(example["floor_tilt_db_oct"]),
         ],
     )
+    dynamics = summary.get("dynamics")
+    if dynamics is not None:
+        components = dynamics["components"]
+        if len(components) != 1:
+            raise ValueError(
+                "the renderer carries ONE amplitude timescale; the envelope fit selected "
+                f"{len(components)} components, which needs a renderer extension rather "
+                "than a silently collapsed transfer"
+            )
+        component = components[0]
+        # Degenerate ranges: these are measured, not prior beliefs to draw from.
+        ranges.update(
+            harm_gp_kernel="ou",  # the fitted density is Lorentzian
+            harm_gp_std_db=[component["std_db"], component["std_db"]],
+            harm_gp_tau_s=[component["tau_s"], component["tau_s"]],
+            harm_coherence=[component["coherence"], component["coherence"]],
+        )
+    visibility = summary.get("visibility_model")
+    if visibility is not None:
+        ranges.update(
+            visibility_probability=visibility["visible_probability"],
+            visibility_attenuation_db=visibility["attenuation_mean_db"],
+            visibility_attenuation_std_db=visibility["attenuation_std_db"],
+        )
     return ranges
 
 

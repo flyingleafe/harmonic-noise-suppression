@@ -27,8 +27,13 @@ from experiments.stochastic_fit.raw_predictive import (
 )
 from experiments.stochastic_fit.rig import ClipInRig, RigClip, RigParams, RigSpec
 from experiments.stochastic_fit.topology_calibration import (
+    TopologyCalibration,
     apply_topology_calibration,
     fit_topology_calibration,
+)
+from experiments.stochastic_fit.visibility import (
+    apply_visibility_model,
+    fit_visibility_model,
 )
 
 
@@ -382,6 +387,31 @@ def test_synthetic_likelihood_recovers_training_only_profile_correction() -> Non
     )
 
 
+def test_zero_topology_correction_preserves_the_continuous_basis() -> None:
+    old_basis = [[1.0, -1.0, 0.5], [-0.5, 0.0, 0.5]]
+    summary = {
+        "rig": {"profile_db": [0.0, 0.0, 0.0], "profile_basis_db": old_basis},
+        "population": {"line_floor_mean_db": 20.0},
+    }
+    calibration = TopologyCalibration(
+        reference_order=2,
+        line_floor_shift_db=0.0,
+        profile_correction_db=np.zeros(3),
+        profile_basis_db=np.zeros((0, 3)),
+        selected_rank=0,
+        rank_cv_nll_per_order=[0.0],
+        rank_cv_se_per_order=[0.0],
+        smoothing_lambda=1.0,
+        observed_orders=3,
+        standardized_rmse_before=0.0,
+        standardized_rmse_after=0.0,
+    )
+
+    corrected = apply_topology_calibration(summary, calibration)
+
+    np.testing.assert_allclose(corrected["rig"]["profile_basis_db"], old_basis)
+
+
 def test_synthetic_likelihood_recovers_missing_profile_covariance() -> None:
     rng = np.random.default_rng(91)
     n_clips, n_orders = 320, 16
@@ -431,3 +461,26 @@ def test_exact_one_vs_four_gate_has_a_low_planted_false_rejection_rate() -> None
     )
 
     assert control["false_rejection_rate"] <= 0.1
+
+
+def test_visibility_model_recovers_probability_and_finite_off_component() -> None:
+    rng = np.random.default_rng(72)
+    n_clips, n_orders = 240, 32
+    order = np.arange(1, n_orders + 1, dtype=np.float64)
+    logit = 2.5 - 0.12 * order + 1.2 * (order % 2 == 0) + 2.0 * (order == 2)
+    planted_probability = 1.0 / (1.0 + np.exp(-logit))
+    synthetic = 12.0 - 0.1 * order[None, None, :] + rng.normal(0.0, 1.0, (n_clips, 1, n_orders))
+    visible = rng.random((n_clips, 1, n_orders)) < planted_probability
+    real = synthetic + rng.normal(0.0, 0.5, synthetic.shape)
+    real = np.where(visible, real, real - 12.0)
+
+    model = fit_visibility_model(real, synthetic, threshold_db=6.0)
+
+    assert np.corrcoef(model.visible_probability, planted_probability)[0, 1] > 0.85
+    assert np.median(model.attenuation_mean_db) > 8.0
+    assert 1.0 <= model.attenuation_std_db <= 6.0
+    assert np.isfinite(model.cv_nll_per_observation).all()
+    summary = {"rig": {"profile_db": [0.0] * 40}, "population": {}}
+    applied = apply_visibility_model(summary, model)
+    assert applied["visibility_model"]["threshold_db"] == 6.0
+    assert len(applied["visibility_model"]["visible_probability"]) == 40

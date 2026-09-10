@@ -75,6 +75,17 @@ class Spec:
     floor_shape_oct: float = 1.5
     line_shape: str = "lorentz"  # lorentz | gauss
     free_gamma: bool = False
+    #: width law exponent: ``gamma = gamma0 + slope * k**width_power``. 1 is the
+    #: quasi-static shaft regime (a frozen speed offset smears every line by
+    #: ``k * sigma``), 2 the diffusive one (an OU shaft with correlation time
+    #: short against the analysis window gives a Lorentzian of HWHM
+    #: ``2 pi tau k^2 sigma^2``). ``fit_width_power`` makes the exponent a
+    #: fitted scalar, so the regime is read off the likelihood instead of
+    #: assumed; the OU shaft interpolates between the two as tau crosses the
+    #: window length, so a non-integer value is meaningful.
+    width_power: float = 1.0
+    fit_width_power: bool = False
+    width_power_log_std: float = 0.5
     mic_floor: bool = False
     fit_speed_law: bool = False
     rps_offset: bool = False
@@ -267,6 +278,7 @@ class CombSpectrum(nn.Module):
         )  # softplus -> Hz
         self.slope_raw = nn.Parameter(torch.full((R,), 0.3, dtype=dt, device=dev))
         self.log_gamma_free = z(R, K)  # log Hz, used when free_gamma
+        self.log_width_power = z(1)  # log ratio to spec.width_power
         self.mic_gain_db = z(M, R)
         self.amp_exp = nn.Parameter(torch.full((1,), spec.amp_rps_exponent, dtype=dt, device=dev))
         self.floor_exp = nn.Parameter(torch.full((1,), spec.amp_rps_exponent, dtype=dt, device=dev))
@@ -303,6 +315,14 @@ class CombSpectrum(nn.Module):
     def _gamma_raw(self) -> tuple[Tensor, Tensor]:
         return self.gamma0_raw, self.slope_raw  # (R,), (R,)
 
+    def _width_power(self) -> Tensor:
+        p = torch.as_tensor(
+            self.spec.width_power,
+            dtype=self.log_width_power.dtype,
+            device=self.log_width_power.device,
+        )
+        return p * torch.exp(self.log_width_power[0]) if self.spec.fit_width_power else p
+
     def _amp_exp(self) -> Tensor:
         return self.amp_exp
 
@@ -326,7 +346,7 @@ class CombSpectrum(nn.Module):
         g0_raw, sl_raw = self._gamma_raw()
         g0 = torch.nn.functional.softplus(g0_raw)
         sl = torch.nn.functional.softplus(sl_raw)
-        return (g0[:, None] + sl[:, None] * self.k[None, :]).clamp_min(floor)
+        return (g0[:, None] + sl[:, None] * self.k[None, :] ** self._width_power()).clamp_min(floor)
 
     @property
     def h_db(self) -> Tensor:
@@ -484,6 +504,8 @@ class CombSpectrum(nn.Module):
                 + self.log_gamma_free[:, :-2]
             )
             p = p + 0.5 * d2.square().sum() / 0.3**2
+        if s.fit_width_power:
+            p = p + 0.5 * self.log_width_power.square().sum() / s.width_power_log_std**2
         return p
 
     def whittle(self, power: Tensor, model: Tensor | None = None) -> Tensor:
@@ -514,6 +536,7 @@ class CombSpectrum(nn.Module):
                 gamma=self.gamma.cpu().numpy().copy(),
                 gamma0=g(g0_raw).cpu().numpy().copy(),
                 gamma_slope=g(sl_raw).cpu().numpy().copy(),
+                width_power=float(self._width_power().item()),
                 floor_mean_db=float(self.floor_mean_db.item()),
                 floor_shape_db=(
                     self.spec.floor_shape_std_db * (self.shape_chol @ self._floor_shape_z())
@@ -568,6 +591,8 @@ class CombSpectrum(nn.Module):
             return floor
         lines = [self.profile_db, self.h_z, self.mic_gain_db]
         lines += [self.log_gamma_free] if s.free_gamma else [self.gamma0_raw, self.slope_raw]
+        if s.fit_width_power:
+            lines.append(self.log_width_power)
         if s.fit_speed_law:
             lines.append(self.amp_exp)
         if s.rps_offset:
