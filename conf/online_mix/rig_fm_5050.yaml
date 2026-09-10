@@ -41,7 +41,7 @@ sources:
       # every epoch, so this is the same regime, not a fidelity loss: at
       # batch 128 x 500 steps it still draws 4000 distinct clips per epoch from
       # a rolling pool of 64 per worker.
-      render_reuse: 16
+      render_reuse: 48
       n_mics: 8
       n_rotors: 4
       drone_profile_range: [0.0, 1.0]
@@ -101,7 +101,7 @@ sources:
       # every epoch, so this is the same regime, not a fidelity loss: at
       # batch 128 x 500 steps it still draws 4000 distinct clips per epoch from
       # a rolling pool of 64 per worker.
-      render_reuse: 16
+      render_reuse: 48
       n_mics: 8
       n_rotors: 4
       drone_profile_range: [0.0, 1.0]

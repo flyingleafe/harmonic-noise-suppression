@@ -12,7 +12,7 @@ sources:
     weight: 0.4
     line_mode: fm
     n_harmonics: 80
-    render_reuse: 16
+    render_reuse: 48
     n_mics: 8
     n_rotors: 4
     drone_profile_range:
@@ -2023,7 +2023,7 @@ sources:
     weight: 0.4
     line_mode: fm
     n_harmonics: 80
-    render_reuse: 16
+    render_reuse: 48
     n_mics: 8
     n_rotors: 4
     drone_profile_range:
