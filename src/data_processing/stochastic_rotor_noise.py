@@ -266,6 +266,14 @@ class StochasticRanges:
     fixed_shaft_jitter_rps: tuple[float, ...] | None = None
     shaft_jitter_tau_s: tuple[float, float] = (0.1, 0.1)
     phase_diffusion_hz_per_order: tuple[float, float] = (0.0, 0.0)
+    #: Std of a per-rotor STATIC offset between the shaft the comb actually
+    #: rides and the rev/s LABEL, in rev/s. Real telemetry is not the shaft:
+    #: the rig fits need a carrier correction whose per-(clip, rotor) static
+    #: part measures ~1.1 rev/s on Michael's training crops, which displaces
+    #: order 64 by ~9 analysis bins. Rendering the comb exactly on the label
+    #: therefore hands a regressor a precision no real recording carries — the
+    #: label error belongs in the generator, not only in the evaluation.
+    shaft_offset_rps: tuple[float, float] = (0.0, 0.0)
 
     # Broadband floor.
     floor_shape_std_db: tuple[float, float] = (2.0, 9.0)
@@ -450,6 +458,8 @@ class StochasticParams:
     shaft_jitter_rps: float | np.ndarray = 0.0
     shaft_jitter_tau_s: float = 0.1
     phase_diffusion_hz_per_order: float = 0.0
+    #: ``(R,)`` per-rotor static shaft-minus-label offset, rev/s.
+    shaft_offset_rps: float | np.ndarray = 0.0
     harm_gp_kernel: str = "se"
     umod_std_db: float = 0.0
     umod_tau_s: float = 0.25
@@ -808,6 +818,9 @@ def sample_params(
         ),
         shaft_jitter_tau_s=draw(ranges.shaft_jitter_tau_s),
         phase_diffusion_hz_per_order=draw(ranges.phase_diffusion_hz_per_order),
+        # One static draw per rotor: the label error is a property of this
+        # clip's telemetry, not a process that evolves inside it.
+        shaft_offset_rps=rng.normal(0.0, draw(ranges.shaft_offset_rps), size=n_rotors),
         harm_gp_kernel=str(ranges.harm_gp_kernel),
         umod_std_db=draw(ranges.umod_std_db),
         umod_tau_s=draw(ranges.umod_tau_s),
@@ -1301,8 +1314,20 @@ def synthesize(
         model spectrum and the Gaussian-process draws, which is what the
         notebook plots next to the realized spectrogram.
     """
-    rps = np.atleast_2d(np.asarray(rps, dtype=np.float64))
-    n_rotors, n_samples = rps.shape
+    label_rps = np.atleast_2d(np.asarray(rps, dtype=np.float64))
+    n_rotors, n_samples = label_rps.shape
+    # The comb rides the SHAFT; the caller's argument is the LABEL. Real
+    # telemetry differs from the shaft by a static per-rotor offset, and the
+    # returned label stays the caller's, so a synthetic clip carries the same
+    # label error a real one does (``StochasticRanges.shaft_offset_rps``).
+    offset = np.asarray(params.shaft_offset_rps, dtype=np.float64)
+    if offset.ndim == 0:
+        offset = np.full(n_rotors, float(offset))
+    elif offset.shape != (n_rotors,):
+        raise ValueError(f"shaft_offset_rps must be scalar or ({n_rotors},), got {offset.shape}")
+    # A stopped rotor stays stopped: the label error is an error about a
+    # running shaft's speed, not a phantom rotation.
+    rps = np.where(label_rps > 0.0, np.maximum(label_rps + offset[:, None], 0.0), 0.0)
     sr = params.sample_rate
     hop = int(hop or n_fft // DEFAULT_HOP_DIV)
 

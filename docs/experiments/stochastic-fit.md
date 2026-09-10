@@ -709,6 +709,127 @@ censored early by its poor real score. This result belongs to the pre-parity,
 hand-exported presets and is a baseline, not a test of the corrected
 population renderer now under development.
 
+## Decomposed-envelope fits, the width law, and the label error — 2026-09-10
+
+Four things were fitted or decided here. Every one uses training recordings
+only (FLY125 / dregon_room2); FLY124 and dregon_room1 stay held out, and
+FLY103/FLY108 remain untouched.
+
+### The profile population comes from the decomposed envelopes
+
+`src/experiments/stochastic_fit/decomp_population.py` (`popdecomp`) fits
+`mu_k + delta_rk + Bz + eps` to linewidth-matched Vold-Kalman amplitudes from
+`decomp-frames-v2` (FLY125 only). The envelopes separate microphone, rotor and
+order against the exact carrier the solve used, so the profile hierarchy is
+identifiable there while it is not in the dense-comb spectral fit (M2 ≡ M1 in
+the ladder). Rank selection uses held-out `score_samples` with rotors averaged
+inside a time chunk (rotors of one chunk share the flight state) plus the
+**one-standard-error rule**: rank 3 → rank 1 on Michael's, and on the planted
+control rank 3 → rank 2 with the true rank 2 (basis cosine 0.9991).
+
+### The amplitude process: one timescale, not two
+
+`decomp_dynamics.py` (`popdyn`) fits the amplitude process from the same
+envelopes. Only the band the decomposition passes untouched is used
+(0.03–1.5 Hz for orders `k >= 4`, whose Vold-Kalman bandwidth is `k` Hz), and a
+white term absorbs envelope estimation noise without being transferred.
+Cross-validation is **leave-one-rotor-out**: the kernel is a rig-level
+population and each rotor carries its own common component, so a held-out rotor
+is independent in a way a held-out slice of time or order is not.
+
+| arm | held-out Whittle / bin | SE |
+|---|---:|---:|
+| 1 OU + white | −2.2237 | 0.0524 |
+| 2 OU + white | −2.2108 | 0.0517 |
+| 3 OU + white | −2.2109 | 0.0518 |
+
+The second component buys 0.013 nats against a fold SE of 0.052, so the
+one-SE rule keeps **one** component: `std 2.90 dB, tau 0.82 s, cross-order
+coherence 0.191`. The earlier "two-timescale ACF" reading does not survive
+cross-validation, and the planned second renderer timescale is therefore
+**rejected** — the renderer already expresses this exactly (`harm_gp_kernel:
+ou`). The planted control recovers a genuine mixture (total std 4.80 vs 4.69,
+coherences 0.324/0.055 vs 0.30/0.05), so the negative result is the data's,
+not the instrument's.
+
+Both speed laws were pinned at 2.5 and are now measured:
+
+| quantity | fitted | previous |
+|---|---:|---:|
+| line power vs rps (dB/dB) | 3.93 ± 0.10 (clustered) | 2.5 |
+| floor power vs rps (dB/dB) | 3.46, bootstrap q05 3.20 | 2.5 |
+| floor static share | 0.0 | 0.0025 |
+
+The floor law is fitted on the decomposition's *residual* — the recording with
+every tracked line removed, which is what the renderer's floor stands for. Its
+upper bootstrap tail is unidentified (the exponent and the static share trade
+off along a ridge, so q95 sits at the bound); the per-band slopes run 1.0–5.0,
+which is real heterogeneity a single exponent cannot carry. On the planted
+control the speed exponent came back 4.40 against a true 4.10 with a clustered
+SE of 0.11: a 180 s record with few independent speed excursions supports
+about ±0.3, so read the fitted 3.93 that way.
+
+### The width law is quasi-static (k^1), on both rigs
+
+`Spec.fit_width_power` makes the exponent of `gamma = gamma0 + slope k^p` a
+fitted rig scalar, so the regime is read off the likelihood instead of assumed.
+Per-clip fits over the 27 training crops (`gauss` = p 1, `gauss_wp` = p fitted,
+`gauss_wp2` = p 2), mean `excess_over_loo` (lower is better):
+
+| rig | p = 1 | p fitted | p = 2 | Δ(p=2) ± SE |
+|---|---:|---:|---:|---:|
+| FLY125 (10 clips) | 0.0696 | 0.1056 | 0.1443 | +0.075 ± 0.018 |
+| dregon_room2 (17) | 0.0759 | 0.1923 | 0.2037 | +0.128 ± 0.023 |
+
+The quadratic law is 4–6 standard errors worse on both rigs, and the free
+exponent lands at a median of 0.9 with per-clip scatter 0.44–3.6 (weakly
+identified, and its extra parameter destabilizes the staged optimizer). So
+`k^1` stands: the shaft's speed offset is **frozen inside an analysis window**.
+Michael's preset previously carried `shaft_jitter_tau_s: [0.003, 0.008]`, a
+diffusive `k^2` regime that was assumed, never measured; both rigs now use
+`[0.3, 1.0]` s — above the 128 ms window, below the clip.
+
+### The renderer had no label error; real recordings have ~1.1–1.4 rev/s of it
+
+Every per-clip fit with `Spec.rps_offset` carries a per-rotor carrier
+correction. Its static part, over training clips only
+(`carrier_error.py`, `popcarrier`):
+
+| rig | static offset std (rev/s) | 90% CI | within-clip |
+|---|---:|---:|---:|
+| Michael's (FLY125, 10 clips) | 1.100 | 0.71–1.40 | 0.90 |
+| DREGON (room2, 17 clips) | 1.362 | 1.10–1.59 | 1.34 |
+
+The estimate is a posterior mean under a zero-centred prior, so it is shrunk —
+it understates the label error. The sub-clip structure is *not* reported: its
+autocorrelation is the prior's own (knots every `rps_offset_dt_s`), so only the
+static part is transferred. The magnitude is corroborated independently by the
+blind tracking campaign, whose final PIT-MAE is 1.14 rev/s on fly124_cruise and
+3.21 on dregon_ramp (`docs/experiments/rps-refine-precision.md`).
+
+At order 64 a 1.1 rev/s offset displaces a line by ~70 Hz — nine analysis bins
+— which is why real combs lose their top against a local floor while a comb
+rendered exactly on the label does not (measured gap at k = 64: real −7.9 dB
+vs synthetic +1.1 dB). `StochasticRanges.shaft_offset_rps` now draws one static
+per-rotor offset, the comb rides `label + offset`, and the returned label stays
+the caller's, so a synthetic clip carries the same label error a real one does.
+A stopped rotor stays stopped.
+
+This matters beyond the gate: R4's real validation MAE is 2.99 rev/s while the
+real labels themselves are uncertain at 1.1–1.4 rev/s. Training on offset-free
+synthetic data asks a regressor for a precision the real task does not define.
+
+### Transfer plumbing
+
+`popexport` writes a policy whose stochastic sources carry the fitted presets
+through `raw_predictive.population_ranges` — the same function the gate renders
+with, so an exported policy and a passed gate cannot drift apart. Two
+corrections were needed there: the renderer sizes each clip's comb from its own
+slowest turning rotor, so fitted profiles are held out to 200 orders past their
+**measured support**, and that support stops at the onset of the fit's
+unconstrained tail (DREGON's mean curve falls from −14 dB at k 91 to −140 dB by
+k 106 — orders that sit above the fit band on every frame and are pure prior).
+
 ## Prior conditional-fit conclusion (superseded by the population correction)
 
 Answer to "wrong ranges or wrong family": the realized family already

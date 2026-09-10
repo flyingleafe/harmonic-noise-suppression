@@ -658,3 +658,69 @@ def test_fm_harmonics_have_static_microphone_phase() -> None:
         10.0 * np.log10(np.maximum(p1[line_bins], 1e-20)),
         atol=1.0,
     )
+
+
+def test_shaft_offset_moves_the_comb_off_the_label() -> None:
+    """The comb rides the shaft; the label the caller passed stays the label.
+
+    Real telemetry differs from the shaft by a static per-rotor offset, so a
+    line at order ``k`` sits ``k`` times that offset away from the frequency the
+    label predicts. A generator that ignores this teaches a regressor an
+    accuracy no real recording supports.
+    """
+    label_rps = 70.0
+    offset_std = 2.0
+    ranges = srn.StochasticRanges(
+        gamma0_hz=(0.5, 0.5),
+        gamma_slope_hz=(0.05, 0.05),
+        fixed_shaft_jitter_rps=(0.0,),
+        phase_diffusion_hz_per_order=(0.0, 0.0),
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+        floor_rel_db=(-80.0, -80.0),
+        min_lines_above_floor=0.0,
+        harm_gp_std_db=(0.0, 0.0),
+        floor_gp_std_db=(0.0, 0.0),
+        floor_tilt_gp_std=(0.0, 0.0),
+        shaft_offset_rps=(offset_std, offset_std),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(31),
+        ranges,
+        n_rotors=1,
+        n_harmonics=20,
+        sample_rate=SR,
+    )
+    offset = float(np.asarray(params.shaft_offset_rps).ravel()[0])
+    assert offset != 0.0
+    audio, _ = srn.synthesize(
+        params,
+        np.full((1, 2 * SR), label_rps),
+        rng=np.random.default_rng(32),
+        n_mics=1,
+        mic_gain_db=(0.0, 0.0),
+        line_mode="fm",
+        normalize_rms=None,
+    )
+    power, freqs = _power_spectrum(audio[0].astype(np.float64))
+    for order in (2, 5, 10):
+        centre = order * label_rps
+        window = np.flatnonzero(np.abs(freqs - centre) < 0.4 * label_rps)
+        peak = float(freqs[window][np.argmax(power[window])])
+        assert abs(peak - centre - order * offset) < 1.5 * (freqs[1] - freqs[0])
+
+    # A stopped rotor stays stopped — the offset is an error about a running
+    # shaft's speed, not a phantom rotation. The recording chain's static floor
+    # keeps the clip audible, so a phantom comb would show as a tonal peak.
+    stopped, _ = srn.synthesize(
+        params.with_(floor_static_rel=0.2),
+        np.zeros((1, SR)),
+        rng=np.random.default_rng(33),
+        n_mics=1,
+        mic_gain_db=(0.0, 0.0),
+        line_mode="fm",
+        normalize_rms=None,
+    )
+    stopped_power, stopped_freqs = _power_spectrum(stopped[0].astype(np.float64))
+    band = (stopped_freqs > 20.0) & (stopped_freqs < 4000.0)
+    assert float(stopped_power[band].max() / np.median(stopped_power[band])) < 50.0

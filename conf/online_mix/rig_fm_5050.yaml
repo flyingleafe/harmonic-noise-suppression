@@ -58,7 +58,11 @@ sources:
         # the model-free between-line floor of the real clips says the lines are
         # narrower - sigma 0.25-0.45 rev/s keeps the gaps as empty as the recordings.
         shaft_jitter_rps: [0.25, 0.45]
-        shaft_jitter_tau_s: [0.1, 0.25]
+        # tau >> the 128 ms analysis window, < the clip: the QUASI-STATIC regime
+        # the likelihood selected (width law k^1; the free-exponent and k^2 arms
+        # both scored worse on the 27 training crops — see
+        # docs/experiments/stochastic-fit.md).
+        shaft_jitter_tau_s: [0.3, 1.0]
         phase_diffusion_hz_per_order: [0.02, 0.05]
         floor_shape_preset:
           [[32, 12.0], [64, 13.5], [128, 11.0], [200, 8.5], [400, 2.0], [600, -2.0], [1000, -8.0],
@@ -105,11 +109,15 @@ sources:
         rotor_delta_std_db: [2.0, 3.5]
         gamma0_hz: [1.5, 3.0]
         gamma_slope_hz: [0.4, 0.9]
-        # diffusive regime: fast shaft jitter (WP18's ~0.6 rev/s, ms-scale)
-        # gives Lorentzian widths growing as k^2 - k = 2 phase-locked for
-        # seconds, k = 40 at the rig fit's ~15-20 Hz
+        # QUASI-STATIC regime (width law k^1), selected on held-out likelihood:
+        # the free-exponent arm's median exponent is 0.9 on FLY125 and the k^2
+        # arm is 0.075 nats/cell WORSE than k^1 (10 training crops, 4x its
+        # standard error). The earlier ms-scale (diffusive) setting was an
+        # assumption, never a measurement. tau sits above the 128 ms analysis
+        # window and below the clip, so the smear is frozen inside a window and
+        # still varies across a flight.
         shaft_jitter_rps: [0.4, 0.8]
-        shaft_jitter_tau_s: [0.003, 0.008]
+        shaft_jitter_tau_s: [0.3, 1.0]
         phase_diffusion_hz_per_order: [0.0, 0.02]
         floor_shape_preset:
           [[32, 3.0], [64, -1.0], [128, -3.0], [200, -2.0], [400, -0.5], [600, 0.5], [1000, 2.0],

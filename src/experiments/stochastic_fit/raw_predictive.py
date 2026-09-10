@@ -427,6 +427,70 @@ def repeated_waveform_gate_control(
     }
 
 
+#: The renderer sizes each clip's comb from its own slowest turning rotor, so a
+#: slow clip asks for more harmonics than a rig fit (sized to ITS clips' speeds)
+#: ever carried. ``StochasticSource.n_harm_max`` bounds that request.
+PROFILE_PAD_HARMONICS = 200
+
+#: A terminal run of steeper-than-this per-order drops, totalling more than
+#: ``PROFILE_SUPPORT_DROP_DB``, is the fit's unconstrained tail.
+PROFILE_SUPPORT_SLOPE_DB = 3.0
+PROFILE_SUPPORT_DROP_DB = 30.0
+
+
+def measured_profile_support(
+    mean_db: Any,
+    *,
+    slope_db: float = PROFILE_SUPPORT_SLOPE_DB,
+    drop_db: float = PROFILE_SUPPORT_DROP_DB,
+) -> int:
+    """How many orders the rig fit actually constrained.
+
+    A rig fit sizes its harmonic ladder to the FASTEST clips, so its top orders
+    sit above the fit band on every frame, carry no likelihood term, and fall to
+    the prior — DREGON's mean curve drops from −16 dB to −140 dB over its last
+    eighteen orders. That is not a measurement of a comb that dies, and
+    transferring it would silence the top of a slow clip's band.
+
+    The tail is identified by its shape, not by a level: a terminal run of
+    per-order drops steeper than ``slope_db`` whose total exceeds ``drop_db``.
+    A rig with a genuinely steep but bounded roll-off keeps all its orders.
+    """
+    mean = np.asarray(mean_db, dtype=np.float64)
+    if mean.size < 3:
+        return int(mean.size)
+    reference = float(np.median(mean[: min(32, mean.size)]))
+    collapsed = np.flatnonzero(mean < reference - drop_db)
+    if collapsed.size == 0:
+        return int(mean.size)
+    # Back off from the first collapsed order to where the decline began, so
+    # the last transferred entry is a measured level and not a point halfway
+    # down the cliff.
+    index = int(collapsed[0])
+    steps = np.diff(mean)
+    while index > 0 and steps[index - 1] < -slope_db:
+        index -= 1
+    return max(index, 1)
+
+
+def _pad_profile(values: Any, support: int, n_harmonics: int) -> Any:
+    """Truncate to the measured support, then hold its last order out to ``n``.
+
+    Holding is the honest continuation: on both rigs the measured curve over its
+    top octave is flat to under 1 dB per order. Truncating instead would put a
+    speed-dependent cutoff inside the band, which is exactly the artefact a
+    rev/s regressor learns to read instead of the comb.
+    """
+    if values is None:
+        return None
+    array = np.asarray(values, dtype=np.float64)[..., :support]
+    missing = n_harmonics - array.shape[-1]
+    if missing <= 0:
+        return array.tolist()
+    pad = [(0, 0)] * (array.ndim - 1) + [(0, missing)]
+    return np.pad(array, pad, mode="edge").tolist()
+
+
 def population_ranges(summary: dict[str, Any], base_ranges: dict[str, Any]) -> dict[str, Any]:
     """Inject fitted line and floor populations into a renderer preset."""
     rig = summary["rig"]
@@ -441,16 +505,21 @@ def population_ranges(summary: dict[str, Any], base_ranges: dict[str, Any]) -> d
     gamma0 = float(rig["gamma0"]) * width_scale
     gamma_slope = float(rig["gamma_slope"]) * width_scale
     # A Gaussian line with shaft-rate std sigma has HWHM
-    # sqrt(2 log 2) * k * sigma. The fitted intercept is dominated by the
+    # sqrt(2 log 2) * k * sigma — the QUASI-STATIC regime, which the width-law
+    # comparison selected on held-out likelihood (k^1 beats a free exponent and
+    # k^2 on both rigs). The fitted intercept is dominated by the
     # analysis-window floor/carrier nuisance and has no FM counterpart; the
     # identifiable high-order slope transfers exactly.
     shaft_jitter = gamma_slope / np.sqrt(2.0 * np.log(2.0))
+    support = measured_profile_support(rig["profile_db"])
     ranges = dict(base_ranges)
     ranges.update(
-        profile_mean_db=rig["profile_db"],
-        profile_basis_db=rig.get("profile_basis_db"),
-        profile_rotor_db=rig["delta_db"],
-        profile_residual_std_db=summary.get("profile_residual_std_db"),
+        profile_mean_db=_pad_profile(rig["profile_db"], support, PROFILE_PAD_HARMONICS),
+        profile_basis_db=_pad_profile(rig.get("profile_basis_db"), support, PROFILE_PAD_HARMONICS),
+        profile_rotor_db=_pad_profile(rig["delta_db"], support, PROFILE_PAD_HARMONICS),
+        profile_residual_std_db=_pad_profile(
+            summary.get("profile_residual_std_db"), support, PROFILE_PAD_HARMONICS
+        ),
         line_floor_mean_db=population["line_floor_mean_db"] - shape_mean,
         line_floor_std_db=population["line_floor_std_db"],
         rotor_contrast_std_db=population["rotor_contrast_std_db"],
@@ -486,6 +555,13 @@ def population_ranges(summary: dict[str, Any], base_ranges: dict[str, Any]) -> d
             harm_gp_tau_s=[component["tau_s"], component["tau_s"]],
             harm_coherence=[component["coherence"], component["coherence"]],
         )
+    carrier = summary.get("carrier_error")
+    if carrier is not None:
+        # The robust scale, not the standard deviation: a plain std measures the
+        # estimator's failure on wide-line rotors — see
+        # ``carrier_error._robust_scale``.
+        scale = float(carrier["static_scale_rps"])
+        ranges.update(shaft_offset_rps=[scale, scale])
     visibility = summary.get("visibility_model")
     if visibility is not None:
         ranges.update(

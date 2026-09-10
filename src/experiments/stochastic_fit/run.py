@@ -1119,6 +1119,30 @@ def population_decomp_dynamics(args: argparse.Namespace) -> None:
     print(json.dumps(printable, indent=2), flush=True)
 
 
+def population_carrier_error(args: argparse.Namespace) -> None:
+    """Measure the static shaft-minus-label offset from training-clip fits."""
+    from dataclasses import asdict
+
+    from .carrier_error import apply_carrier_error, fit_carrier_error
+
+    summary_path = Path(args.summary)
+    summary = json.loads(summary_path.read_text())
+    carrier = fit_carrier_error(
+        args.fit_dir,
+        clip_prefixes=tuple(args.clip_prefix),
+        variant=args.variant,
+        seed=args.seed,
+    )
+    fitted = apply_carrier_error(summary, carrier)
+    output = (
+        Path(args.output) if args.output is not None else summary_path.with_suffix(".carrier.json")
+    )
+    output.write_text(json.dumps(fitted))
+    printable = asdict(carrier)
+    printable.pop("per_clip_rotor_offsets")
+    print(json.dumps(printable, indent=2), flush=True)
+
+
 def population_export_policy(args: argparse.Namespace) -> None:
     """Write a stream policy whose stochastic sources carry the fitted presets.
 
@@ -1143,7 +1167,15 @@ def population_export_policy(args: argparse.Namespace) -> None:
         summary = json.loads(Path(summary_path).read_text())
         source["ranges"] = population_ranges(summary, source.get("ranges", {}))
         source["amp_rps_exponent"] = float(summary["rig"]["amp_exp"])
-        source["n_harmonics"] = len(summary["rig"]["profile_db"])
+        # ``n_harmonics`` stays the policy's: it caps the comb the renderer
+        # sizes per clip (and may be scaled up further by
+        # ``n_harmonics_range``), while the fitted profile only has to be long
+        # enough to cover it.
+        if len(summary["rig"]["profile_db"]) < int(source.get("n_harmonics", 0)):
+            raise ValueError(
+                f"source {index}: fitted profile has {len(summary['rig']['profile_db'])} "
+                f"harmonics, policy asks for {source['n_harmonics']}"
+            )
         source["fitted_from"] = str(summary_path)
     output = Path(args.output)
     output.write_text(
@@ -1300,6 +1332,14 @@ def main(argv: list[str] | None = None) -> None:
     pe.add_argument("--preset", action="append", required=True)
     pe.add_argument("--output", required=True)
     pe.set_defaults(func=population_export_policy)
+    pk = sub.add_parser("popcarrier")
+    pk.add_argument("--summary", required=True)
+    pk.add_argument("--fit-dir", required=True)
+    pk.add_argument("--variant", default="gauss")
+    pk.add_argument("--clip-prefix", action="append", required=True)
+    pk.add_argument("--seed", type=int, default=0)
+    pk.add_argument("--output")
+    pk.set_defaults(func=population_carrier_error)
     args = ap.parse_args(argv)
     args.func(args)
 
