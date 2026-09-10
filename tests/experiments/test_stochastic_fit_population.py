@@ -620,3 +620,123 @@ def test_width_population_separates_flight_spread_from_estimation_noise(tmp_path
     total = np.sqrt(planted_log_std**2 + noise_log_std**2)
     assert fitted.common_log_std < 0.75 * total
     assert fitted.rotor_median_slope_hz == pytest.approx(list(base), rel=0.3)
+
+
+# -- the bench instrument and the conditional render ---------------------------
+
+
+def _planted_bench_recording(
+    rate: float,
+    profile_db: np.ndarray,
+    *,
+    gamma_slope: float,
+    sr: float,
+    seconds: float,
+    seed: int,
+    n_mic: int = 2,
+) -> np.ndarray:
+    """A stationary single-rotor comb with a KNOWN profile and width law.
+
+    Each order is a tone at ``k * rate`` whose phase diffuses so that its
+    Lorentzian half width is ``gamma_slope * k`` Hz (the quasi-static reading
+    of §2.2), on a flat noise floor. Nothing else varies, so the bench
+    instrument's three outputs have known truths.
+    """
+    rng = np.random.default_rng(seed)
+    n = int(seconds * sr)
+    t = np.arange(n) / sr
+    out = rng.standard_normal((n_mic, n)) * 1e-3
+    for i, level in enumerate(profile_db):
+        k = i + 1
+        if k * rate > 0.45 * sr:
+            break
+        amp = 10.0 ** (level / 20.0)
+        # phase random walk giving HWHM = gamma_slope * k Hz
+        d = 4.0 * np.pi * gamma_slope * k
+        walk = np.cumsum(rng.standard_normal(n) * np.sqrt(d / sr))
+        for m in range(n_mic):
+            out[m] += amp * np.cos(2 * np.pi * k * rate * t + walk + m * 0.7)
+    return out
+
+
+def test_planted_bench_recovers_the_rate_profile_and_width_law() -> None:
+    from experiments.stochastic_fit import bench
+
+    sr, rate, slope = 8000.0, 40.0, 0.15
+    # 40 orders reach 1.6 kHz: a comb that spans the band, so a half-rate
+    # hypothesis has to pay for 40 empty orders instead of covering real ones.
+    k = np.arange(1, 41)
+    profile = -0.25 * k + np.where(k % 2, -8.0, 0.0)
+    recs = {
+        (motor, 50): _planted_bench_recording(
+            rate, profile, gamma_slope=slope, sr=sr, seconds=8.0, seed=11 + j
+        )
+        for j, motor in enumerate(bench.MOTORS)
+    }
+    spectra = bench.bench_spectra(recs, sr=sr, n_analysis=1 << 14, k_max=20)
+    fit = bench.fit_profile(spectra)
+    width = bench.fit_width_law_joint(spectra, k_hi=16)
+
+    assert len(spectra) == 4
+    for s in spectra:
+        assert abs(s.rate_rps - rate) < 0.05, f"{s.motor}: {s.rate_rps}"
+    # the profile is relative to order 2, which is the planted reference
+    got = fit.profile_db[:8]
+    want = profile[:8] - profile[1]
+    assert np.all(np.isfinite(got)), got
+    assert np.max(np.abs(got - want)) < 3.0, np.round(got - want, 2)
+    # and the planted width law is linear in k with the planted slope
+    assert width, "no width law fitted"
+    assert 0.6 * slope < width["gamma_slope_hz_per_order"] < 1.6 * slope, width
+
+
+def test_planted_speed_law_is_recovered_from_setpoints() -> None:
+    from experiments.stochastic_fit import bench
+
+    sr, slope, q = 8000.0, 0.05, 3.0
+    kk = np.arange(1, 31)
+    base = -0.25 * kk + np.where(kk % 2, -8.0, 0.0)
+    rates = {50: 30.0, 60: 36.0, 70: 42.0, 80: 48.0, 90: 54.0}
+    recs = {}
+    for j, motor in enumerate(bench.MOTORS[:2]):
+        for setpoint, rate in rates.items():
+            # planted speed law: every line grows as q dB per dB of rev/s
+            level = base + q * 10.0 * np.log10(rate / 42.0)
+            recs[(motor, setpoint)] = _planted_bench_recording(
+                rate, level, gamma_slope=slope, sr=sr, seconds=6.0, seed=101 + 7 * j + setpoint
+            )
+    spectra = bench.bench_spectra(recs, sr=sr, n_analysis=1 << 14, k_max=24)
+    law = bench.fit_speed_law(spectra, k_hi=8)
+    assert law["line_cells"] >= 20, law
+    assert abs(law["line_exponent"] - q) < 0.8, law
+
+
+def test_conditional_sample_reproduces_its_target_spectrum() -> None:
+    """The conditional render's sampler must land on the spectrum it is given.
+
+    This is the property the conditional arm rests on: whatever the MAP fit
+    says the clip's time-varying spectrum is, the draw has to realise it, so
+    that any remaining difference from the real clip is the MODEL's and not
+    the sampler's.
+    """
+    from experiments.stochastic_fit.conditional import sample_from_spectrum
+    from experiments.stochastic_fit.data import Clip, periodogram
+
+    n_fft, hop, n_frames = 512, 128, 80
+    freqs = np.fft.rfftfreq(n_fft, 1 / 8000.0)
+    # a tilted target with a bump, so a flat-gain bug cannot pass
+    shape = 10 ** ((-3.0 * np.log2(np.maximum(freqs, 20.0) / 500.0)) / 10.0)
+    shape = shape + 6.0 * np.exp(-(((freqs - 1200.0) / 90.0) ** 2))
+    target = np.repeat((1e-4 * shape)[None], n_frames, axis=0)[None]
+    target = np.repeat(target, 2, axis=0)
+
+    audio = sample_from_spectrum(target, n_fft, hop, (n_frames - 1) * hop, seed=5)
+    clip = Clip(
+        "probe", "p", audio.astype(np.float64), np.full((1, audio.shape[1]), 50.0), 8000, None, {}
+    )
+    got = periodogram(clip, n_fft=n_fft, hop=hop).power
+    # average over frames: one ordinate is exponential, its mean is the target
+    ratio_db = 10 * np.log10(got.mean(axis=1) / target[:, 0, :])
+    inner = ratio_db[:, 2:-2]
+    assert np.abs(np.median(inner)) < 1.0, float(np.median(inner))
+    assert np.percentile(np.abs(inner), 90) < 3.0, float(np.percentile(np.abs(inner), 90))

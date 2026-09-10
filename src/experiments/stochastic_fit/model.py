@@ -600,3 +600,28 @@ class CombSpectrum(nn.Module):
         if s.umod_std_db > 0:
             floor.append(self.u_z)
         return floor + lines
+
+
+def make_spec(
+    pg: Any, *, n_mics: int, f_max: float | None, k_cap: int, variant: dict[str, Any]
+) -> Spec:
+    """The :class:`Spec` one clip is fitted under.
+
+    The harmonic ladder is sized by the SLOWEST rotor speed in the clip, so
+    every order the model carries stays inside the fit band on every frame
+    (an order that leaves the band carries no likelihood term and falls to its
+    prior — the mechanism behind DREGON's flat profile hold above order 91).
+    """
+    live = pg.rps[pg.rps > 5.0]
+    slowest = float(live.min()) if live.size else 20.0
+    nyq = f_max or float(pg.freqs[-1])
+    n_harm = int(min(np.floor(nyq / slowest), k_cap))
+    return Spec(
+        freqs=pg.freqs,
+        times=pg.times,
+        rps=pg.rps,
+        n_mics=n_mics,
+        n_harm=max(n_harm, 1),
+        f_max=f_max,
+        **variant,
+    )

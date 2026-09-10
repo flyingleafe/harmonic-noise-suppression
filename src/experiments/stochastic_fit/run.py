@@ -30,7 +30,7 @@ import boto3
 import numpy as np
 
 from .data import Clip, periodogram
-from .model import Spec
+from .model import Spec, make_spec
 
 BUCKET = "ml-data"
 PREFIX = "artifacts/stochastic-fit/clips"
@@ -320,22 +320,6 @@ def prepare_presets(args: argparse.Namespace) -> None:
 
 
 # ── fit ───────────────────────────────────────────────────────────────────
-
-
-def make_spec(pg, *, n_mics: int, f_max: float | None, k_cap: int, variant: dict[str, Any]) -> Spec:
-    live = pg.rps[pg.rps > 5.0]
-    slowest = float(live.min()) if live.size else 20.0
-    nyq = f_max or float(pg.freqs[-1])
-    n_harm = int(min(np.floor(nyq / slowest), k_cap))
-    return Spec(
-        freqs=pg.freqs,
-        times=pg.times,
-        rps=pg.rps,
-        n_mics=n_mics,
-        n_harm=max(n_harm, 1),
-        f_max=f_max,
-        **variant,
-    )
 
 
 def fit(args: argparse.Namespace) -> None:
@@ -1146,6 +1130,42 @@ def population_decomp_dynamics(args: argparse.Namespace) -> None:
     print(json.dumps(printable, indent=2), flush=True)
 
 
+def population_bench(args: argparse.Namespace) -> None:
+    """Fit DREGON's single-motor bench recordings and merge what they identify.
+
+    The bench is stationary and single-rotor, so it measures three things the
+    4 s flight crops cannot: the per-order profile beyond the flight fit's
+    measured support, the line-width law with no tracking error in it, and
+    both speed exponents (five setpoints per rotor). Levels and floor shape
+    are NOT merged — a bench motor has no inflow and a different room.
+
+    After merging, the render calibration must be re-run: it is a per-order
+    correction fitted against a matched render, and changing the widths by a
+    factor of three invalidates it.
+    """
+    from .bench import apply_bench, bench_summary, fit_bench
+
+    fit = fit_bench()
+    if args.bench_output:
+        Path(args.bench_output).write_text(json.dumps(bench_summary(fit), indent=1))
+    print(
+        json.dumps({"width_law": fit.width_law, "speed_law": fit.speed_law}, indent=2), flush=True
+    )
+    if args.summary:
+        summary = json.loads(Path(args.summary).read_text())
+        merged = apply_bench(summary, fit)
+        Path(args.output).write_text(json.dumps(merged))
+        print(
+            f"merged into {args.output}: "
+            f"{merged.get('bench_profile_orders_replaced')} orders replaced, "
+            f"amp_exp {merged['rig']['amp_exp']:.3f}, floor_exp {merged['rig']['floor_exp']:.3f}, "
+            f"gamma_slope {merged['rig']['gamma_slope']:.4f} Hz/order",
+            flush=True,
+        )
+    else:
+        Path(args.output).write_text(json.dumps(bench_summary(fit), indent=1))
+
+
 def population_width_spread(args: argparse.Namespace) -> None:
     """Measure the flight-to-flight line-width spread from training-clip fits."""
     from dataclasses import asdict
@@ -1453,6 +1473,13 @@ def main(argv: list[str] | None = None) -> None:
     pw.add_argument("--seed", type=int, default=0)
     pw.add_argument("--output")
     pw.set_defaults(func=population_width_spread)
+    pb = sub.add_parser("popbench")
+    pb.add_argument(
+        "--summary", default=None, help="rig summary to merge the bench measurements into"
+    )
+    pb.add_argument("--output", required=True)
+    pb.add_argument("--bench-output", default=None, help="also write the raw bench fit here")
+    pb.set_defaults(func=population_bench)
     args = ap.parse_args(argv)
     args.func(args)
 
