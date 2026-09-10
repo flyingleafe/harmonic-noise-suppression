@@ -482,6 +482,33 @@ LADDER: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
         dict(gain_all=True, umod_std_db=3.5, umod_tau_s=0.25, gp_kernel="ou", gp_tau_s=0.5),
         dict(rotor_delta=True, rotor_width=True),
     ),
+    # + the speed laws fitted and tied at rig level. Per-clip fits cannot
+    # identify an exponent (a 4 s crop spans too little speed: per-clip values
+    # scatter from -0.2 to 6.4), but a rig fit pools every training clip, which
+    # collectively cover the whole flight envelope. This is the only route to a
+    # measured speed law for a rig with no published decomposition.
+    "M5s": (
+        dict(
+            mic_floor=True,
+            umod_std_db=3.5,
+            umod_tau_s=0.25,
+            gp_kernel="ou",
+            gp_tau_s=0.5,
+            fit_speed_law=True,
+        ),
+        dict(rotor_delta=True, rotor_width=True),
+    ),
+    "M5gs": (
+        dict(
+            gain_all=True,
+            umod_std_db=3.5,
+            umod_tau_s=0.25,
+            gp_kernel="ou",
+            gp_tau_s=0.5,
+            fit_speed_law=True,
+        ),
+        dict(rotor_delta=True, rotor_width=True),
+    ),
 }
 
 
@@ -1245,7 +1272,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--results-dir", default=str(RESULTS) + "_rig")
     r.set_defaults(func=rigfit)
     pf = sub.add_parser("popfit")
-    pf.add_argument("--rig-config", choices=["M5", "M5g"], required=True)
+    pf.add_argument("--rig-config", choices=["M5", "M5g", "M5s", "M5gs"], required=True)
     pf.add_argument("--ranks", nargs="+", type=int, default=[0, 1, 2, 3])
     pf.add_argument("--train-groups", nargs="+", required=True)
     pf.add_argument("--test-groups", nargs="*", default=None)

@@ -152,19 +152,16 @@ def fit_topology_calibration(
             float(per_fold.std(ddof=1) / np.sqrt(per_fold.size)) if per_fold.size > 1 else 0.0
         )
     best = int(np.argmin(scores))
-    # One standard error, on the SMOOTHNESS too. Ten training clips over 64
-    # orders make neighbouring lambdas statistically indistinguishable, and
-    # taking the argmin buys a wiggly correction that does not survive to a
-    # held-out recording (measured: a round-2 argmin correction cut the
-    # training standardized RMSE to 0.39 and made the held-out predictive check
-    # worse on every axis). The largest lambda within one SE of the best is the
-    # smoothest correction the training folds actually support.
-    within = [
-        index
-        for index, score in enumerate(scores)
-        if score <= scores[best] + score_se[best] and np.isfinite(score)
-    ]
-    smoothing = float(lambdas[max(within)]) if within else float(lambdas[best])
+    # The smoothing stays at the cross-validated minimum. A one-standard-error
+    # rule was tried here and is WRONG for this parameter: the largest lambda
+    # within one SE is effectively level-only, and a level shift without its
+    # shape correction is worse than no calibration at all (measured on
+    # Michael's training clips: standardized RMSE 1.89 with no calibration,
+    # 2.43 level-only, 0.39 with the CV-chosen shape). The rule that DOES hold
+    # is not to iterate: a second round of calibration on an already-calibrated
+    # render overfits the training clips and moves every held-out axis
+    # backwards (docs/experiments/stochastic-fit.md).
+    smoothing = float(lambdas[best])
     lambda_cv_score = scores
     lambda_cv_se = score_se
 
