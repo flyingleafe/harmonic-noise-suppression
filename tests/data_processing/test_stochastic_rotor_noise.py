@@ -804,3 +804,67 @@ def test_render_reuse_amortises_synthesis_without_freezing_the_noise() -> None:
     for _ in range(5):
         eager.sample_timeframe(rng, 1.0)
     assert eager_calls[0] == 5, "the default must still render every sample"
+
+
+def test_per_rotor_floor_guard_lifts_the_quietest_rotor_above_the_floor():
+    """A pooled coverage fraction can bury a whole rotor; the per-rotor form
+    cannot.
+
+    One rotor is put 30 dB under the other three. With only the pooled guard
+    the loud rotors satisfy it on their own and the quiet one keeps no visible
+    line at all — a clip whose fourth label has no evidence anywhere in the
+    spectrum. The per-rotor guard lowers the floor until every rotor keeps its
+    share.
+    """
+    params = _params(3)
+    profile = params.profile_db.copy()
+    profile[3] -= 30.0
+    quiet = replace(params, profile_db=profile)
+
+    def coverage(level: float) -> np.ndarray:
+        zero = replace(quiet, floor_mean_db=0.0)
+        return np.array(
+            [
+                float(np.mean(peaks > level + srn.floor_shape_db(zero, centers)))
+                for peaks, centers in srn.line_peaks_by_rotor(quiet)
+            ]
+        )
+
+    pooled = srn.calibrate_floor(quiet, -2.0, min_lines_above_floor=0.30)
+    guarded = srn.calibrate_floor(
+        quiet, -2.0, min_lines_above_floor=0.30, min_lines_above_floor_per_rotor=0.30
+    )
+    assert coverage(pooled).mean() >= 0.30  # the pooled guard is satisfied ...
+    assert coverage(pooled).min() < 0.05  # ... with one rotor essentially invisible
+    assert guarded < pooled  # the floor had to come down
+    assert coverage(guarded).min() >= 0.30  # every rotor keeps a trackable comb
+    # A zero threshold is exactly the old behaviour.
+    assert srn.calibrate_floor(
+        quiet, -2.0, min_lines_above_floor=0.30, min_lines_above_floor_per_rotor=0.0
+    ) == pytest.approx(pooled)
+
+
+def test_per_rotor_floor_threshold_reaches_the_renderer_from_its_range():
+    """``StochasticRanges`` carries the threshold into ``sample_params``."""
+    profile = None
+    for seed in range(6):
+        loose = srn.sample_params(
+            np.random.default_rng(seed), n_rotors=4, n_harmonics=64, sample_rate=SR
+        )
+        tight = srn.sample_params(
+            np.random.default_rng(seed),
+            n_rotors=4,
+            n_harmonics=64,
+            sample_rate=SR,
+            ranges=srn.StochasticRanges(min_lines_above_floor_per_rotor=0.95),
+        )
+        assert tight.floor_mean_db <= loose.floor_mean_db
+        if tight.floor_mean_db < loose.floor_mean_db:
+            profile = tight
+    assert profile is not None, "no draw needed the per-rotor guard"
+    zero = replace(profile, floor_mean_db=0.0)
+    per_rotor = [
+        float(np.mean(peaks > profile.floor_mean_db + srn.floor_shape_db(zero, centers)))
+        for peaks, centers in srn.line_peaks_by_rotor(profile)
+    ]
+    assert min(per_rotor) >= 0.95

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 import torch
@@ -740,3 +742,99 @@ def test_conditional_sample_reproduces_its_target_spectrum() -> None:
     inner = ratio_db[:, 2:-2]
     assert np.abs(np.median(inner)) < 1.0, float(np.median(inner))
     assert np.percentile(np.abs(inner), 90) < 3.0, float(np.percentile(np.abs(inner), 90))
+
+
+# ── per-order identifiability ────────────────────────────────────────────────
+
+
+def _planted_identifiability_clip(
+    *,
+    speeds: tuple[float, ...],
+    gamma_slope: float,
+    n_harm: int = 24,
+    n_mics: int = 2,
+    seconds: float = 4.0,
+    sr: int = 16000,
+    n_fft: int = 2048,
+    level_db: float = 20.0,
+) -> tuple[dict[str, Any], np.ndarray, np.ndarray, np.ndarray]:
+    """A flat-floor, constant-speed clip whose lines are placed by hand.
+
+    Only the geometry matters here: the Fisher matrix is built from the fitted
+    parameters, never from data, so a planted parameter set is a complete test
+    case.
+    """
+    df = sr / n_fft
+    freqs = np.arange(n_fft // 2 + 1) * df
+    starts = np.arange(0, int(seconds * sr) - n_fft, n_fft // 4)
+    times = starts / sr + n_fft / 2 / sr
+    rotors = len(speeds)
+    rps = np.tile(np.asarray(speeds, dtype=float)[:, None], (1, times.size))
+    k = np.arange(1, n_harm + 1)
+    params = dict(
+        profile_db=np.tile(level_db - 0.2 * k, (rotors, 1)).astype(float),
+        gamma=np.tile(0.3 + gamma_slope * k, (rotors, 1)).astype(float),
+        knots_s=np.linspace(0.0, float(times[-1] - times[0]), 8),
+        floor_mean_db=0.0,
+        floor_shape_db=np.zeros(14),
+        floor_ctrl_hz=np.geomspace(30.0, float(freqs[-1]), 14),
+        floor_tilt_db_oct=0.0,
+        floor_level_db=np.zeros(8),
+        floor_tilt_gp=np.zeros(8),
+        mic_floor_db=np.zeros(n_mics),
+        mic_gain_db=np.zeros((n_mics, rotors)),
+        gain_all_db=np.zeros(n_mics),
+        amp_exp=0.0,
+        floor_exp=0.0,
+        floor_static_rel=1.0,
+    )
+    return params, freqs, times, rps
+
+
+def test_marginal_information_charges_for_a_nearly_degenerate_rotor_pair():
+    """Two rotors 0.4 rev/s apart cannot both own their low orders.
+
+    Order k of one rotor sits ``k * delta`` from the same order of the other,
+    so a small speed difference leaves the FUNDAMENTALS on top of each other
+    while the high orders separate cleanly. The isolated width cannot see this
+    at all — it is the same in both layouts — and the marginal width is what
+    decides whether a per-rotor profile value means anything.
+    """
+    from experiments.stochastic_fit.identify import marginal_information
+
+    def fit(**over) -> Any:
+        params, freqs, times, rps = _planted_identifiability_clip(gamma_slope=0.02, **over)
+        return marginal_information(params, freqs=freqs, times=times, rps=rps, n_mics=2)
+
+    apart = fit(speeds=(80.0, 61.0))
+    close = fit(speeds=(80.0, 80.4))
+    # The per-line noise is the same in both, so the isolated widths agree.
+    assert close.isolated_std_db[0, 0] == pytest.approx(apart.isolated_std_db[0, 0], rel=0.5)
+    # Separated rotors pay almost nothing for sharing the spectrum.
+    assert apart.std_db[0, 0] < 1.5
+    # A degenerate pair pays an order of magnitude at the fundamental ...
+    assert close.std_db[0, 0] > 4.0
+    assert close.std_db[0, 0] > 5.0 * close.isolated_std_db[0, 0]
+    # ... and recovers as k * delta grows past the linewidth.
+    assert close.std_db[0, 23] < 0.4 * close.std_db[0, 0]
+
+
+def test_marginal_information_returns_the_prior_for_an_out_of_band_order():
+    """An order past Nyquist carries no likelihood, so its width IS the prior.
+
+    This is the mechanism behind the flat profile hold at the top of both
+    fitted rigs: the exported value there is the prior's, and the instrument
+    has to say so rather than reporting a number that looks measured.
+    """
+    from experiments.stochastic_fit.identify import marginal_information
+
+    params, freqs, times, rps = _planted_identifiability_clip(
+        speeds=(80.0, 61.0), gamma_slope=0.02, n_harm=140
+    )
+    info = marginal_information(
+        params, freqs=freqs, times=times, rps=rps, n_mics=2, prior_std_db=10.0
+    )
+    in_band = int(np.floor(freqs[-1] / 80.0))
+    assert info.std_db[0, 8] < 1.0  # a live order is measured
+    assert info.std_db[0, in_band + 8] == pytest.approx(10.0, rel=1e-3)  # a dead one is the prior
+    assert info.identifiable(3.0)[0, in_band + 8] == np.False_

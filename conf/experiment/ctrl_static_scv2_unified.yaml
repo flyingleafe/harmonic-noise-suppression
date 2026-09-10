@@ -1,0 +1,41 @@
+# @package _global_
+# C1 — THE SIMPLE CONTROL. Static combs under the same regime as
+# rig_fitted_scv2_unified: identical clip length, batch, panel, stopping rule,
+# speech corpus, SNR prior, augmentation block, silence arm and trajectory
+# generator. The ONLY difference is the noise family, which is what makes a
+# transfer difference attributable.
+#
+# The family is static in the strict sense — amplitudes frozen for the clip, no
+# shaft wander, no line diffusion, no floor breathing — but NOT simple in its
+# timbre: roll-off, blade count, blade-pass emphasis, a boost on the
+# blade-passing fundamental alone, per-order irregularity and a rotor-to-rotor
+# spread are all sampled wide, and two arms render the fitted DREGON and
+# Michael's profiles themselves with the dynamics switched off, so the family
+# provably contains the measured timbres.
+#
+# WHAT THIS DECIDES. Whether the stochastic apparatus is load bearing at all.
+# If a static comb transfers, the apparatus is unnecessary and that is the best
+# available outcome. The campaign's claim is that it will not, because a real
+# high-order comb is broadened and amplitude modulated and a model trained on
+# razor-thin static lines reads a cue real audio does not carry.
+#
+# The static per-rotor shaft-minus-label offset stays ON (0.4-1.4 rev/s,
+# measured): it is a property of the telemetry, not of the noise family, and
+# removing it would hand this control a precision no recording has.
+defaults:
+  - real_r1_scv2
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: ctrl_static_scv2_unified
+# fp16 went non-finite at step ~500 on the FM stream (run tgr8l18p); the
+# matrix's one-time bf16 policy applies to every FM-tone-bank stream.
+amp_dtype: bfloat16
+samples_per_validation: null
+batch_size: 128
+num_workers: 12
+data:
+  train:
+    params:
+      path: conf/online_mix/ctrl_static.yaml
+      duration_s: 2.0

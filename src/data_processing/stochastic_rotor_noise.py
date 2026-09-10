@@ -296,6 +296,11 @@ class StochasticRanges:
     #: floor is lowered until the draw satisfies it, so a clip always carries a
     #: trackable comb.
     min_lines_above_floor: float = 0.30
+    #: The same fraction demanded of EVERY rotor separately. Four rotors share
+    #: one spectrum, so the pooled fraction above is satisfiable with one rotor
+    #: entirely buried under the other three — and that rotor's speed is then a
+    #: label with no evidence in the clip. Nonzero closes that hole.
+    min_lines_above_floor_per_rotor: float = 0.0
     #: The recording chain's own floor, as a fraction of the floor's level at
     #: the reference speed. Measured on the frozen split: a stopped-rotor clip
     #: sits at 0.175 of a cruise clip and a ramp clip at 0.370. Default 0 keeps
@@ -616,8 +621,10 @@ def _apply_visibility(
     return out
 
 
-def line_peak_db(params: StochasticParams, ref_rps: float = 80.0) -> tuple[np.ndarray, np.ndarray]:
-    """``(peak level in dB, center frequency in Hz)`` of every in-band line.
+def line_peaks_by_rotor(
+    params: StochasticParams, ref_rps: float = 80.0
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """One ``(peak level in dB, center frequency in Hz)`` pair per rotor.
 
     A line of power ``P`` and half width ``gamma`` has a peak spectral density
     of ``P / (pi * gamma)``, so a wide line stands lower than a narrow one of
@@ -626,15 +633,22 @@ def line_peak_db(params: StochasticParams, ref_rps: float = 80.0) -> tuple[np.nd
     """
     nyquist = params.sample_rate / 2.0
     k = np.arange(1, params.n_harmonics + 1, dtype=np.float64)
-    peaks: list[np.ndarray] = []
-    centers: list[np.ndarray] = []
+    out: list[tuple[np.ndarray, np.ndarray]] = []
     for r in range(params.n_rotors):
         gamma = np.maximum(params.gamma0[r] + params.gamma_slope[r] * k, 1e-3)
         freq = k * ref_rps
         live = freq < nyquist
-        peaks.append(params.profile_db[r][live] - 10.0 * np.log10(np.pi * gamma[live]))
-        centers.append(freq[live])
-    return np.concatenate(peaks), np.concatenate(centers)
+        out.append((params.profile_db[r][live] - 10.0 * np.log10(np.pi * gamma[live]), freq[live]))
+    return out
+
+
+def line_peak_db(params: StochasticParams, ref_rps: float = 80.0) -> tuple[np.ndarray, np.ndarray]:
+    """Every in-band line of every rotor, pooled."""
+    per_rotor = line_peaks_by_rotor(params, ref_rps)
+    return (
+        np.concatenate([p for p, _ in per_rotor]),
+        np.concatenate([c for _, c in per_rotor]),
+    )
 
 
 def calibrate_floor(
@@ -643,6 +657,7 @@ def calibrate_floor(
     *,
     ref_rps: float = 80.0,
     min_lines_above_floor: float = 0.30,
+    min_lines_above_floor_per_rotor: float = 0.0,
 ) -> float:
     """The floor level that puts the floor ``floor_rel_db`` under the lines.
 
@@ -651,14 +666,31 @@ def calibrate_floor(
     steps until at least ``min_lines_above_floor`` of the in-band lines stand
     above it. Without the guard a draw can bury its whole comb, and a clip with
     no visible comb teaches nothing.
+
+    The POOLED fraction stops being enough once the rotors are allowed to
+    differ. Four rotors put their lines in one spectrum, so a draw whose
+    quietest rotor sits 25 dB under the other three passes a pooled 0.30 with
+    that rotor completely buried — and its speed is then a label with no
+    evidence anywhere in the clip, which is the one thing a regressor cannot be
+    asked to learn. ``min_lines_above_floor_per_rotor`` applies the fraction to
+    EVERY rotor separately; 0 keeps the pooled-only behaviour.
     """
-    peaks, centers = line_peak_db(params, ref_rps)
+    per_rotor = line_peaks_by_rotor(params, ref_rps)
+    peaks = np.concatenate([p for p, _ in per_rotor]) if per_rotor else np.zeros(0)
     if peaks.size == 0:
         return floor_rel_db
-    shape = floor_shape_db(replace(params, floor_mean_db=0.0), centers)
+    centers = np.concatenate([c for _, c in per_rotor])
+    zero = replace(params, floor_mean_db=0.0)
+    shape = floor_shape_db(zero, centers)
+    shapes = [floor_shape_db(zero, c) for _, c in per_rotor]
     level = float(np.median(peaks) + floor_rel_db - np.median(shape))
     for _ in range(60):
-        if float(np.mean(peaks > level + shape)) >= min_lines_above_floor:
+        pooled_ok = float(np.mean(peaks > level + shape)) >= min_lines_above_floor
+        rotor_ok = min_lines_above_floor_per_rotor <= 0.0 or all(
+            float(np.mean(p > level + s)) >= min_lines_above_floor_per_rotor
+            for (p, _), s in zip(per_rotor, shapes, strict=True)
+        )
+        if pooled_ok and rotor_ok:
             break
         level -= 1.0
     return level
@@ -826,6 +858,7 @@ def sample_params(
             draft,
             float(rng.uniform(*ranges.floor_rel_db)),
             min_lines_above_floor=ranges.min_lines_above_floor,
+            min_lines_above_floor_per_rotor=ranges.min_lines_above_floor_per_rotor,
         )
         if floor_mean_override is None
         else floor_mean_override
@@ -2020,6 +2053,7 @@ __all__ = [
     "calibrate_floor",
     "floor_shape_db",
     "line_peak_db",
+    "line_peaks_by_rotor",
     "model_psd_db",
     "sample_gp",
     "sample_params",
