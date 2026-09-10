@@ -664,22 +664,25 @@ def calibrate_floor(
     return level
 
 
-def _centred_normals(rng: np.random.Generator, std: float, size: int) -> np.ndarray:
-    """``size`` zero-mean normals, or exact zeros without touching ``rng``.
+def _centred_normals(
+    rng: np.random.Generator, spread: tuple[float, float], size: int
+) -> np.ndarray:
+    """``size`` zero-mean normals whose std is drawn from ``spread``.
 
-    Leaving the generator alone at zero spread keeps every preset that does not
-    use the knob on its previous random stream.
+    An all-zero range returns exact zeros WITHOUT touching ``rng`` — neither
+    for the std draw nor for the normals — so every preset that does not use
+    the knob keeps its previous random stream.
     """
-    if std <= 0.0:
+    if spread[0] <= 0.0 and spread[1] <= 0.0:
         return np.zeros(size)
-    return rng.normal(0.0, std, size=size)
+    return rng.normal(0.0, float(rng.uniform(*spread)), size=size)
 
 
-def _lognormal_factor(rng: np.random.Generator, log_std: float) -> float:
-    """``exp(N(0, log_std))``, or exactly 1 without touching ``rng``."""
-    if log_std <= 0.0:
+def _lognormal_factor(rng: np.random.Generator, spread: tuple[float, float]) -> float:
+    """``exp(N(0, s))`` with ``s`` drawn from ``spread``; exactly 1 when off."""
+    if spread[0] <= 0.0 and spread[1] <= 0.0:
         return 1.0
-    return float(np.exp(rng.normal(0.0, log_std)))
+    return float(np.exp(rng.normal(0.0, float(rng.uniform(*spread)))))
 
 
 def sample_params(
@@ -847,12 +850,12 @@ def sample_params(
         shaft_jitter_rps=(
             fixed_shaft_jitter if fixed_shaft_jitter is not None else draw(ranges.shaft_jitter_rps)
         )
-        * _lognormal_factor(rng, draw(ranges.shaft_jitter_log_std)),
+        * _lognormal_factor(rng, ranges.shaft_jitter_log_std),
         shaft_jitter_tau_s=draw(ranges.shaft_jitter_tau_s),
         phase_diffusion_hz_per_order=draw(ranges.phase_diffusion_hz_per_order),
         # One static draw per rotor: the label error is a property of this
         # clip's telemetry, not a process that evolves inside it.
-        shaft_offset_rps=_centred_normals(rng, draw(ranges.shaft_offset_rps), n_rotors),
+        shaft_offset_rps=_centred_normals(rng, ranges.shaft_offset_rps, n_rotors),
         harm_gp_kernel=str(ranges.harm_gp_kernel),
         umod_std_db=draw(ranges.umod_std_db),
         umod_tau_s=draw(ranges.umod_tau_s),
@@ -1093,17 +1096,72 @@ def _ola_filter(x: np.ndarray, gain: np.ndarray, n_fft: int, hop: int) -> np.nda
 PHASE_NOISE_FS = 1000.0
 
 
-def _mix_line_bank(
-    bank: np.ndarray,
+#: How many harmonics are mixed into the microphones at once. One line at a
+#: time means touching the whole ``(M, T)`` accumulator per line — 1.9 GB of
+#: traffic for a 200-harmonic 2 s clip. A block of this many lines fits in
+#: cache and lets one BLAS call do the reduction, which is what makes the
+#: per-microphone phase affordable.
+MIX_BLOCK = 32
+
+
+def _mic_phase_weights(
+    n_mics: int,
+    n_harmonics: int,
     gains: np.ndarray,
     rotor: int,
     rng: np.random.Generator,
-) -> np.ndarray:
-    """Mix one rotor's analytic harmonics through static per-mic phases."""
-    n_mics = gains.shape[0]
-    phase = rng.uniform(0.0, 2.0 * np.pi, (n_mics, bank.shape[0]))
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(cos, sin)`` per-``(mic, harmonic)`` mixing weights, ``(M, K)`` each.
+
+    Propagation gives each microphone its own static phase on the same line, so
+    the mics must not receive a bit-identical waveform. Expanding
+    ``cos(k phi + psi_m) = cos psi_m cos(k phi) - sin psi_m sin(k phi)`` turns
+    that into two real weights per ``(mic, harmonic)``, so a caller can mix a
+    BLOCK of lines with two real matrix products and never materialize a
+    ``(K, T)`` bank for the whole comb.
+    """
+    phase = rng.uniform(0.0, 2.0 * np.pi, (n_mics, n_harmonics))
     weight = np.sqrt(gains[:, rotor])[:, None]
-    return (weight * np.cos(phase)) @ bank.real - (weight * np.sin(phase)) @ bank.imag
+    return (weight * np.cos(phase)).astype(np.float32), (weight * np.sin(phase)).astype(np.float32)
+
+
+class _LineMixer:
+    """Accumulate ``sum_k w_cos[:, k] Re(line_k) - w_sin[:, k] Im(line_k)``.
+
+    Lines arrive one at a time and are flushed to the output in blocks of
+    :data:`MIX_BLOCK`, so the ``(M, T)`` accumulator is written once per block
+    rather than once per harmonic.
+    """
+
+    def __init__(self, out: np.ndarray, block: int = MIX_BLOCK) -> None:
+        self.out = out
+        self.real = np.empty((block, out.shape[1]), dtype=np.float32)
+        self.imag = np.empty((block, out.shape[1]), dtype=np.float32)
+        self.block = block
+        self.first = 0  # index of the first harmonic held in the buffers
+        self.count = 0
+
+    def start(self, cos_w: np.ndarray, sin_w: np.ndarray) -> None:
+        self.flush()
+        self.cos_w, self.sin_w = cos_w, sin_w
+        self.first = 0
+
+    def add(self, index: int, line: np.ndarray) -> None:
+        if self.count == 0:
+            self.first = index
+        self.real[self.count] = line.real
+        self.imag[self.count] = line.imag
+        self.count += 1
+        if self.count == self.block:
+            self.flush()
+
+    def flush(self) -> None:
+        if self.count == 0:
+            return
+        columns = slice(self.first, self.first + self.count)
+        self.out += self.cos_w[:, columns] @ self.real[: self.count]
+        self.out -= self.sin_w[:, columns] @ self.imag[: self.count]
+        self.count = 0
 
 
 def coherent_lines(
@@ -1150,7 +1208,8 @@ def coherent_lines(
     t_slow = np.arange(n_slow) / PHASE_NOISE_FS
     dt_slow = 1.0 / PHASE_NOISE_FS
 
-    out = np.zeros((n_mics, n_samples), dtype=np.float64)
+    out = np.zeros((n_mics, n_samples), dtype=np.float32)
+    mixer = _LineMixer(out)
     for r in range(n_rotors):
         power_frames = (
             10.0
@@ -1169,7 +1228,7 @@ def coherent_lines(
         )
         if top == 0:
             continue
-        bank = np.zeros((top, n_samples), dtype=np.complex64)
+        mixer.start(*_mic_phase_weights(n_mics, top, gains, r, rng))
         for i in range(top):
             k = i + 1
             live = k * rps[r] < nyquist
@@ -1179,13 +1238,13 @@ def coherent_lines(
             amplitude = np.sqrt(
                 2.0 * np.maximum(np.interp(t_audio, t_frames, power_frames[i]), 0.0)
             )
-            bank[i] = np.where(
-                live,
-                amplitude * np.exp(1j * np.remainder(k * phase[r] + walk, 2.0 * np.pi)),
-                0.0,
+            angle = np.remainder(k * phase[r] + walk, 2.0 * np.pi)
+            mixer.add(
+                i,
+                np.where(live, amplitude, 0.0) * np.exp(1j * angle).astype(np.complex64),
             )
-        out += _mix_line_bank(bank, gains, r, rng)
-    return out
+    mixer.flush()
+    return out.astype(np.float64)
 
 
 def fm_lines(
@@ -1250,19 +1309,22 @@ def fm_lines(
     k_all = np.arange(1, n_harm + 1, dtype=np.float64)
     # Slow processes are generated at PHASE_NOISE_FS and held constant over
     # each slow step (a 1 ms hold is far below any correlation time here);
-    # everything at the audio rate is float32 / complex64, one line at a time,
-    # so no (K, T) array is ever built.
+    # everything at the audio rate is float32, one line at a time, so no
+    # (K, T) array is ever built.
     up = int(np.ceil(n_samples / n_slow)) + 1
 
     def hold(x_slow: np.ndarray) -> np.ndarray:
-        return np.repeat(x_slow, up)[:n_samples]
+        # A broadcast view + reshape holds each slow sample ``up`` times without
+        # the copy ``np.repeat`` makes; this runs once per line per rotor.
+        return np.broadcast_to(x_slow[:, None], (x_slow.size, up)).reshape(-1)[:n_samples]
 
     n_frames = psd["harm_gp"].shape[2]
     frame_of_slow = np.clip(t_slow / max(t_frames[1] - t_frames[0], 1e-9), 0.0, n_frames - 1.0)
     f0 = np.floor(frame_of_slow).astype(np.int64)
     f1 = np.minimum(f0 + 1, n_frames - 1)
     fw = (frame_of_slow - f0).astype(np.float32)
-    out = np.zeros((n_mics, n_samples), dtype=np.float64)
+    out = np.zeros((n_mics, n_samples), dtype=np.float32)
+    mixer = _LineMixer(out)
     for r in range(n_rotors):
         shaft = rps[r] + hold(jitter[r])
         phase = 2.0 * np.pi * np.cumsum(shaft) / sr
@@ -1276,8 +1338,8 @@ def fm_lines(
         if top == 0:
             continue
         r_max = float(rps[r].max())
+        mixer.start(*_mic_phase_weights(n_mics, top, gains, r, rng))
         zk = np.ones(n_samples, dtype=np.complex64)
-        bank = np.zeros((top, n_samples), dtype=np.complex64)
         for i in range(top):
             k = i + 1
             zk = zk * z
@@ -1292,11 +1354,12 @@ def fm_lines(
                     rng.normal(0.0, np.sqrt(4.0 * np.pi * q * k * dt_slow), size=n_slow)
                 )
                 rotation = hold(np.exp(1j * walk).astype(np.complex64))
-                bank[i] = amp * zk * rotation
+                line = amp * zk * rotation
             else:
-                bank[i] = amp * zk
-        out += _mix_line_bank(bank, gains, r, rng)
-    return out
+                line = amp * zk
+            mixer.add(i, line)
+    mixer.flush()
+    return out.astype(np.float64)
 
 
 def synthesize(
@@ -1566,6 +1629,8 @@ class StochasticNoisePool:
         aggressiveness: float | tuple[float, float] = 1.0,
         flight_fs: float = 200.0,
         flight_reuse: int = 32,
+        render_reuse: int = 1,
+        render_pool: int = 0,
         mode_scales: dict[str, float] | None = None,
         rotor_trim_rel: tuple[float, float] | None = None,
         band_taper_frac: float = 0.0,
@@ -1612,6 +1677,18 @@ class StochasticNoisePool:
         )
         self.flight_fs = float(flight_fs)
         self.flight_reuse = int(flight_reuse)
+        # Rendering a fresh clip for EVERY training sample costs about a
+        # second of CPU, which starves the GPU. A real-noise baseline reuses a
+        # finite recorded corpus every epoch, so reusing rendered clips is the
+        # same regime rather than a fidelity loss: keep a rolling pool of
+        # ``render_pool`` finished clips, refresh one slot every
+        # ``render_reuse`` draws, and take a random slot otherwise. Speech,
+        # SNR and every augmentation are still drawn per sample downstream.
+        # ``render_reuse <= 1`` keeps the old render-every-sample behaviour.
+        self.render_reuse = max(int(render_reuse), 1)
+        self.render_pool = int(render_pool) if render_pool else 4 * self.render_reuse
+        self._pool: list[tuple[float, np.ndarray, np.ndarray]] = []
+        self._pool_draws = 0
         # How the four rotors SEPARATE, as opposed to how far they wander. Yaw
         # drives the two diagonal pairs apart and leaves each pair together;
         # roll and pitch separate the rotors within a pair. See
@@ -1715,6 +1792,8 @@ class StochasticNoisePool:
             ),
             flight_fs=float(rps.get("flight_fs", 200.0)),
             flight_reuse=int(rps.get("flight_reuse", 32)),
+            render_reuse=int(g("render_reuse", 1)),
+            render_pool=int(g("render_pool", 0)),
             mode_scales=(dict(rps["mode_scales"]) if rps.get("mode_scales") else None),
             rotor_trim_rel=(tuple(rps["rotor_trim_rel"]) if rps.get("rotor_trim_rel") else None),
             band_taper_frac=float(g("band_taper_frac", 0.0)),
@@ -1891,8 +1970,35 @@ class StochasticNoisePool:
         )
         return audio, rps.astype(np.float32), params, diag
 
+    def _pooled_render(
+        self, rng: np.random.Generator, duration_s: float
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """One rendered clip, from the rolling pool when reuse is enabled.
+
+        Reuse starts immediately and the pool GROWS: one slot is refreshed
+        every ``render_reuse`` draws, appended until the pool is full and
+        replacing a random slot afterwards. So the render rate is
+        ``1 / render_reuse`` from the first sample, while the number of
+        distinct clips in circulation climbs to ``render_pool``.
+        """
+        if self.render_reuse <= 1:
+            audio, rps, _, _ = self.render(rng, duration_s)
+            return audio, rps.astype(np.float32)
+        matching = [entry for entry in self._pool if entry[0] == duration_s]
+        if not matching or self._pool_draws % self.render_reuse == 0:
+            audio, rps, _, _ = self.render(rng, duration_s)
+            entry = (float(duration_s), audio, rps.astype(np.float32))
+            if len(self._pool) < self.render_pool:
+                self._pool.append(entry)
+            else:
+                self._pool[int(rng.integers(len(self._pool)))] = entry
+            matching = [item for item in self._pool if item[0] == duration_s]
+        self._pool_draws += 1
+        _, audio, rps = matching[int(rng.integers(len(matching)))]
+        return audio, rps
+
     def sample_timeframe(self, rng: np.random.Generator, duration_s: float) -> td.Frame:
-        audio, rps, _, _ = self.render(rng, duration_s)
+        audio, rps = self._pooled_render(rng, duration_s)
         audio_us = td.uniform(
             np.ascontiguousarray(audio), self.sample_rate, dims=("mic", "time"), t_start=0.0
         )

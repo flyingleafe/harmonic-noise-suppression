@@ -755,3 +755,52 @@ def test_shaft_jitter_log_std_varies_the_whole_clip_together() -> None:
     # a real spread, and centred on the fitted width (lognormal median 1)
     assert np.std(np.log(factors), ddof=1) > 0.1
     assert min(factors) < 1.0 < max(factors)
+
+
+def test_render_reuse_amortises_synthesis_without_freezing_the_noise() -> None:
+    """One render per ``render_reuse`` draws, and the pool stays diverse.
+
+    Rendering a clip for every training sample starves the GPU; a real-noise
+    baseline reuses a finite corpus, so reusing rendered clips is the same
+    regime. What must hold is that the render RATE drops and the drawn clips do
+    not collapse onto one waveform.
+    """
+
+    def make(reuse: int) -> srn.StochasticNoisePool:
+        return srn.StochasticNoisePool(
+            sample_rate=SR,
+            duration_s=1.0,
+            n_harmonics=24,
+            n_mics=2,
+            line_mode="fm",
+            ranges={"floor_rel_db": (-20.0, -20.0), "min_lines_above_floor": 0.0},
+            render_reuse=reuse,
+            render_pool=4,
+        )
+
+    def counting(pool: srn.StochasticNoisePool) -> list[int]:
+        calls = [0]
+        inner = pool.render
+
+        def counted(*args: object, **kwargs: object) -> object:
+            calls[0] += 1
+            return inner(*args, **kwargs)  # type: ignore[arg-type]
+
+        pool.render = counted  # type: ignore[assignment]
+        return calls
+
+    reuse = 8
+    pooled = make(reuse)
+    calls = counting(pooled)
+    rng = np.random.default_rng(4)
+    drawn = [np.asarray(pooled.sample_timeframe(rng, 1.0)["audio"].data) for _ in range(32)]
+
+    assert calls[0] == 32 // reuse, f"expected {32 // reuse} renders, got {calls[0]}"
+    distinct = {round(float(np.std(x, dtype=np.float64)), 9) for x in drawn}
+    assert len(distinct) >= 3, "the pool collapsed onto too few clips"
+
+    eager = make(1)
+    eager_calls = counting(eager)
+    for _ in range(5):
+        eager.sample_timeframe(rng, 1.0)
+    assert eager_calls[0] == 5, "the default must still render every sample"
