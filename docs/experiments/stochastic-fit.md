@@ -887,6 +887,28 @@ against 6.2 dB synthetic. The next principled step is therefore the per-order
 *variance* of the profile population at the top of the comb, not another mean
 correction.
 
+### DREGON's speed law is not identifiable from 4 s crops
+
+The rig fit can fit the speed laws tied at rig level (`popfit --rig-config
+M5s`, new). On the 17 dregon_room2 training crops it returns **amp_exp −1.29
+and floor_exp −0.079** — line power *falling* with rotor speed, which no
+rotor does. The reason is structural, not numerical: each clip carries its own
+per-rotor level (`RigSpec.level_prior_db`, 10 dB), so the between-clip level
+differences that carry the speed information are absorbed by those levels, and
+only the within-clip speed excursion of a 4 s crop is left to identify an
+exponent. Per-clip `speed_law` fits show the same thing directly — they scatter
+from −0.2 to 6.4.
+
+Michael's 3.93 is credible for exactly the complementary reason: it is measured
+on one continuous 178 s recording with a single intercept per
+`(rotor, order)`, so the whole flight envelope constrains one slope.
+
+DREGON therefore keeps the family default 2.5, and the honest fix is a room2
+decomposition rather than a longer rig fit. Michael's measured 3.93 is not
+transferred to DREGON: it would be a physical argument (tonal rotor noise goes
+as roughly the fourth power of tip speed, which 3.93 matches) applied to a rig
+where nothing was measured, and this campaign does not do that.
+
 ### Three things that did NOT work, and are not to be retried blindly
 
 1. **A second amplitude timescale.** Leave-one-rotor-out CV plus one SE keeps
@@ -912,6 +934,35 @@ the remaining `raw_margin_k64` gap, and calibrating that bandwidth against the
 periodogram margins is the next principled step rather than another mean
 correction.
 
+
+### Final candidates, and the one selection that mattered
+
+Two defects were fixed after the table above, both by training-only reasoning:
+
+1. The decomposed profile's rank came from an **argmax** over held-out chunk
+   likelihood (rank 6). With the one-standard-error rule it is rank 1 (best
+   −1.7361 ± 0.0653 at rank 6; rank 1 −1.8001, inside one SE). An independent
+   training-only criterion agrees: rendered on FLY125, rank 1 has standardized
+   margin RMSE 1.890 against rank 6's 2.427.
+2. Every candidate's topology calibration had been fitted against an **older
+   render** (before the per-mic phase, the dynamics and the label error). Both
+   rigs were recalibrated against a matched render of the *current* renderer on
+   their own training clips — Michael's 1.890 → 0.026, DREGON's 3.607 → 0.171.
+
+`omnirun-outputs/pop-michaels-final.json` and `pop-dregon-final.json` are the
+result, exported into `conf/online_mix/rig_fitted_5050.yaml`:
+
+| rig | AUC | AUC 95% upper | coverage | curve RMSE |
+|---|---:|---:|---:|---:|
+| Michael's, previous best | 0.804 | 0.904 | 0.819 | 0.444 |
+| **Michael's, final** | **0.760** | 0.908 | 0.810 | **0.437** |
+| DREGON, start of session | — | — | 0.558 | 1.720 |
+| **DREGON, final** | — | — | **0.746** | **1.630** |
+
+The Michael classifier's point AUC is now below the 0.80 bar for the first
+time; its bootstrap upper limit (0.908) is not, and with 14 held-out clips that
+limit is wide. Coverage and the curve bar pass on both rigs. The transfer run
+`rig_fitted_scv2_unified` uses exactly these presets.
 
 ## Prior conditional-fit conclusion (superseded by the population correction)
 
