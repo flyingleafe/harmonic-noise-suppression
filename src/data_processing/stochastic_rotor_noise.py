@@ -274,6 +274,14 @@ class StochasticRanges:
     #: therefore hands a regressor a precision no real recording carries — the
     #: label error belongs in the generator, not only in the evaluation.
     shaft_offset_rps: tuple[float, float] = (0.0, 0.0)
+    #: Lognormal spread of the shaft jitter shared by a clip's rotors: one draw
+    #: per clip multiplying every rotor's ``shaft_jitter_rps``. A real flight's
+    #: shaft wanders more in one segment than another, and the per-clip fits
+    #: measure that common mode directly (log-std 0.63 on Michael's training
+    #: crops, 0.32 on DREGON's, both net of per-rotor estimation noise). Without
+    #: it every rendered clip has identically wide lines, which is most visible
+    #: at the top of the comb where width sets the line's visibility.
+    shaft_jitter_log_std: tuple[float, float] = (0.0, 0.0)
 
     # Broadband floor.
     floor_shape_std_db: tuple[float, float] = (2.0, 9.0)
@@ -813,9 +821,12 @@ def sample_params(
         floor_tilt_gp_std=float(rng.uniform(*ranges.floor_tilt_gp_std)),
         floor_tilt_gp_tau_s=float(rng.uniform(*ranges.floor_tilt_gp_tau_s)),
         line_bin_integrate=bool(line_bin_integrate),
+        # One lognormal draw per CLIP, shared by its rotors: how much this
+        # flight segment's shaft wandered (``shaft_jitter_log_std``).
         shaft_jitter_rps=(
             fixed_shaft_jitter if fixed_shaft_jitter is not None else draw(ranges.shaft_jitter_rps)
-        ),
+        )
+        * float(np.exp(rng.normal(0.0, draw(ranges.shaft_jitter_log_std)))),
         shaft_jitter_tau_s=draw(ranges.shaft_jitter_tau_s),
         phase_diffusion_hz_per_order=draw(ranges.phase_diffusion_hz_per_order),
         # One static draw per rotor: the label error is a property of this

@@ -562,6 +562,10 @@ def population_ranges(summary: dict[str, Any], base_ranges: dict[str, Any]) -> d
         # ``carrier_error._robust_scale``.
         scale = float(carrier["static_scale_rps"])
         ranges.update(shaft_offset_rps=[scale, scale])
+    width = summary.get("width_population")
+    if width is not None:
+        spread = float(width["common_log_std"])
+        ranges.update(shaft_jitter_log_std=[spread, spread])
     visibility = summary.get("visibility_model")
     if visibility is not None:
         ranges.update(

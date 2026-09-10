@@ -724,3 +724,34 @@ def test_shaft_offset_moves_the_comb_off_the_label() -> None:
     stopped_power, stopped_freqs = _power_spectrum(stopped[0].astype(np.float64))
     band = (stopped_freqs > 20.0) & (stopped_freqs < 4000.0)
     assert float(stopped_power[band].max() / np.median(stopped_power[band])) < 50.0
+
+
+def test_shaft_jitter_log_std_varies_the_whole_clip_together() -> None:
+    """One width draw per clip, shared by its rotors.
+
+    A real flight's shaft wanders more in one segment than another, and the
+    per-clip fits measure that as a common mode across the four rotors. The
+    spread must therefore scale every rotor's jitter by the SAME factor — a
+    per-rotor draw would be the estimation noise the measurement subtracts.
+    """
+    fixed = (0.2, 0.4, 0.6, 0.8)
+    ranges = srn.StochasticRanges(
+        fixed_shaft_jitter_rps=fixed,
+        shaft_jitter_log_std=(0.5, 0.5),
+    )
+    factors = []
+    for seed in range(6):
+        params = srn.sample_params(
+            np.random.default_rng(seed),
+            ranges,
+            n_rotors=4,
+            n_harmonics=8,
+            sample_rate=SR,
+        )
+        drawn = np.asarray(params.shaft_jitter_rps, dtype=np.float64)
+        ratio = drawn / np.asarray(fixed)
+        np.testing.assert_allclose(ratio, ratio[0], rtol=1e-9)
+        factors.append(float(ratio[0]))
+    # a real spread, and centred on the fitted width (lognormal median 1)
+    assert np.std(np.log(factors), ddof=1) > 0.1
+    assert min(factors) < 1.0 < max(factors)

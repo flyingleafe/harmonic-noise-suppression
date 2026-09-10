@@ -1146,6 +1146,30 @@ def population_decomp_dynamics(args: argparse.Namespace) -> None:
     print(json.dumps(printable, indent=2), flush=True)
 
 
+def population_width_spread(args: argparse.Namespace) -> None:
+    """Measure the flight-to-flight line-width spread from training-clip fits."""
+    from dataclasses import asdict
+
+    from .carrier_error import apply_width_population, fit_width_population
+
+    summary_path = Path(args.summary)
+    summary = json.loads(summary_path.read_text())
+    width = fit_width_population(
+        args.fit_dir,
+        clip_prefixes=tuple(args.clip_prefix),
+        variant=args.variant,
+        seed=args.seed,
+    )
+    fitted = apply_width_population(summary, width)
+    output = (
+        Path(args.output) if args.output is not None else summary_path.with_suffix(".width.json")
+    )
+    output.write_text(json.dumps(fitted))
+    printable = asdict(width)
+    printable.pop("clips")
+    print(json.dumps(printable, indent=2), flush=True)
+
+
 def population_carrier_error(args: argparse.Namespace) -> None:
     """Measure the static shaft-minus-label offset from training-clip fits."""
     from dataclasses import asdict
@@ -1367,6 +1391,14 @@ def main(argv: list[str] | None = None) -> None:
     pk.add_argument("--seed", type=int, default=0)
     pk.add_argument("--output")
     pk.set_defaults(func=population_carrier_error)
+    pw = sub.add_parser("popwidth")
+    pw.add_argument("--summary", required=True)
+    pw.add_argument("--fit-dir", required=True)
+    pw.add_argument("--variant", default="gauss")
+    pw.add_argument("--clip-prefix", action="append", required=True)
+    pw.add_argument("--seed", type=int, default=0)
+    pw.add_argument("--output")
+    pw.set_defaults(func=population_width_spread)
     args = ap.parse_args(argv)
     args.func(args)
 

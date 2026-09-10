@@ -1,4 +1,4 @@
-"""How far the comb's shaft sits from the rev/s label, measured from the fits.
+"""What the per-clip fits say about the shaft: its label error and its wander.
 
 Every per-clip fit with ``Spec.rps_offset`` carries a smooth per-rotor carrier
 correction with a ``rps_offset_std`` prior. Its *static* part — the mean over a
@@ -112,6 +112,93 @@ def fit_carrier_error(
     )
 
 
+@dataclass(frozen=True)
+class WidthPopulation:
+    """Clip-to-clip spread of the fitted line-width slope, in log units."""
+
+    common_log_std: float
+    common_log_std_q05_q95: list[float]
+    clip_common_variance: float
+    rotor_residual_variance: float
+    rotor_median_slope_hz: list[float]
+    clips: list[str]
+    variant: str
+
+
+def _clip_width_slopes(path: Path) -> np.ndarray:
+    with np.load(path, allow_pickle=True) as handle:
+        params = json.loads(str(handle["params"]))
+    slope = np.asarray(params.get("gamma_slope", []), dtype=np.float64)
+    if slope.ndim != 1 or slope.size == 0:
+        raise ValueError(f"{path}: fit carries no per-rotor gamma_slope")
+    return slope
+
+
+def fit_width_population(
+    fit_dir: str | Path,
+    *,
+    clip_prefixes: tuple[str, ...],
+    variant: str,
+    n_bootstrap: int = 2000,
+    seed: int = 0,
+) -> WidthPopulation:
+    """Measure the flight-to-flight width spread, net of estimation noise.
+
+    Only the **common mode** across a clip's rotors is reported. Independent
+    per-rotor estimation noise of variance ``v`` contributes ``v / R`` to the
+    clip-mean's variance and ``v (R - 1) / R`` to the rotor residual, so
+    subtracting ``rotor_residual / (R - 1)`` from the clip-mean variance removes
+    it under the most conservative assumption available — that ALL rotor-level
+    scatter is noise and none of it is a real per-rotor population. What
+    survives cannot be produced by independent noise: four rotors of one clip
+    moving together is a property of the flight, i.e. how much that segment's
+    shaft wandered.
+    """
+    root = Path(fit_dir) / variant
+    paths = sorted(
+        path
+        for path in root.glob("*.npz")
+        if any(path.stem.startswith(prefix) for prefix in clip_prefixes)
+    )
+    if not paths:
+        raise ValueError(f"{root}: no fit matches {clip_prefixes}")
+    slopes = np.stack([_clip_width_slopes(path) for path in paths])  # (clips, rotors)
+    if slopes.shape[1] < 2:
+        raise ValueError("the width population needs at least two rotors per clip")
+    log_slope = np.log(np.maximum(slopes, 1e-3))
+    log_slope = log_slope - np.median(log_slope, axis=0, keepdims=True)
+
+    def estimate(sample: np.ndarray) -> float:
+        common = sample.mean(axis=1)
+        residual = sample - common[:, None]
+        clip_variance = float(np.var(common, ddof=1))
+        rotor_variance = float(np.var(residual, ddof=1))
+        return float(np.sqrt(max(clip_variance - rotor_variance / (sample.shape[1] - 1), 0.0)))
+
+    rng = np.random.default_rng(seed)
+    draws = [
+        estimate(log_slope[rng.integers(0, log_slope.shape[0], size=log_slope.shape[0])])
+        for _ in range(n_bootstrap)
+    ]
+    common = log_slope.mean(axis=1)
+    return WidthPopulation(
+        common_log_std=estimate(log_slope),
+        common_log_std_q05_q95=[float(value) for value in np.quantile(draws, (0.05, 0.95))],
+        clip_common_variance=float(np.var(common, ddof=1)),
+        rotor_residual_variance=float(np.var(log_slope - common[:, None], ddof=1)),
+        rotor_median_slope_hz=[float(value) for value in np.median(slopes, axis=0)],
+        clips=[path.stem for path in paths],
+        variant=variant,
+    )
+
+
+def apply_width_population(summary: dict[str, Any], width: WidthPopulation) -> dict[str, Any]:
+    """Attach the measured flight-to-flight width spread to a candidate summary."""
+    out = copy.deepcopy(summary)
+    out["width_population"] = asdict(width)
+    return out
+
+
 def apply_carrier_error(summary: dict[str, Any], carrier: CarrierError) -> dict[str, Any]:
     """Attach the measured label error to a candidate summary."""
     out = copy.deepcopy(summary)
@@ -119,4 +206,11 @@ def apply_carrier_error(summary: dict[str, Any], carrier: CarrierError) -> dict[
     return out
 
 
-__all__ = ["CarrierError", "apply_carrier_error", "fit_carrier_error"]
+__all__ = [
+    "CarrierError",
+    "WidthPopulation",
+    "apply_carrier_error",
+    "apply_width_population",
+    "fit_carrier_error",
+    "fit_width_population",
+]

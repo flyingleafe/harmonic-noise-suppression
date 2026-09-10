@@ -964,6 +964,38 @@ time; its bootstrap upper limit (0.908) is not, and with 14 held-out clips that
 limit is wide. Coverage and the curve bar pass on both rigs. The transfer run
 `rig_fitted_scv2_unified` uses exactly these presets.
 
+### The flight-to-flight width population
+
+The renderer pinned one line width per rotor, so every rendered clip had
+identically wide lines. The per-clip fits say otherwise: after removing each
+rotor's own median, the fitted width slope carries a **common mode across a
+clip's four rotors** (`carrier_error.fit_width_population`, `popwidth`).
+Independent per-rotor estimation noise cannot make four rotors move together,
+and the estimator subtracts `rotor_residual / (R - 1)` from the clip-mean
+variance, which is the most conservative correction available — it credits ALL
+rotor-level scatter to noise:
+
+| rig | common-mode log-std | 90% bootstrap | clip var | rotor var |
+|---|---:|---:|---:|---:|
+| Michael's (10 clips) | 0.633 | 0.00–0.844 | 0.474 | 0.221 |
+| DREGON (17 clips) | 0.321 | 0.00–0.499 | 0.358 | 0.763 |
+
+Ten to seventeen clips cannot exclude zero, so the point estimate is what is
+transferred (`StochasticRanges.shaft_jitter_log_std`, one lognormal draw per
+clip shared by its rotors) with the interval recorded here. On the held-out
+check it moves the binding axis:
+
+| candidate | AUC | AUC 95% upper | coverage | curve RMSE |
+|---|---:|---:|---:|---:|
+| Michael's final | 0.760 | 0.908 | 0.810 | 0.437 |
+| **+ width population** | **0.754** | **0.897** | **0.854** | 0.587 |
+| DREGON final | — | — | 0.746 | 1.630 |
+| **+ width population** | — | — | 0.737 | **1.541** |
+
+These are the presets `conf/online_mix/rig_fitted_5050.yaml` carries and the
+transfer run uses. Coverage (0.854) and the curve bar (0.587) pass with margin;
+the classifier's bootstrap upper limit, 0.897, is the one bar still open.
+
 ## Prior conditional-fit conclusion (superseded by the population correction)
 
 Answer to "wrong ranges or wrong family": the realized family already
