@@ -849,14 +849,43 @@ real-vs-real splits, 0.80 rejects 4%).
 
 DREGON descriptive (source-index 0, seed 670, no classifier): coverage 0.558 →
 **0.734** and curve RMSE 1.71 → 1.80 once the label error is carried; the
-profile is still the Whittle one, and its curve error is what a room2
+profile there is still the Whittle one, and its curve error is what a room2
 decomposition would address.
 
 Coverage and the curve bar now pass. The classifier still separates at
-AUC 0.804 (upper 0.904), on two features: `raw_margin_k64` (real −7.9 dB vs
-synthetic +0.7) and `raw_visible_gt0` (54.3 vs 57.3 orders). Order 64 sits at
-4.5 kHz on Michael's cruise — the very top of the comb — and order 3 remains
+AUC 0.804 (upper 0.904) on two features: `raw_margin_k64` (real −7.9 dB vs
+synthetic +0.7) and `raw_visible_gt0` (54.3 vs 57.3 orders). Order 3 also stays
 deeper in real data (−23 vs −11 dB) than any mean correction reproduces.
+
+### The high-order profile is corroborated; what is missing is its variance
+
+Because the envelope amplitude at order `k` integrates the floor across the
+decomposition's own passband, a crude leak estimate (off-comb residual PSD
+times `bw_rps * k` Hz) exceeds the measured envelope power eightfold by
+`k = 64`, which would have condemned the whole high-`k` profile. **That estimate
+is wrong by the Vold-Kalman filter's effective noise bandwidth**, and
+calibrating it against the periodogram settles the question: on isolated cells
+of FLY125 (no other predicted line within three bins), the envelope power and
+the periodogram's own line excess over a local floor agree to within 2–4 dB at
+every order from 12 to 64 —
+
+| order | envelope (dB) | periodogram line excess (dB) | ratio |
+|---:|---:|---:|---:|
+| 12 | −62.7 | −58.6 | 0.38 |
+| 24 | −61.5 | −58.5 | 0.50 |
+| 48 | −64.2 | −63.3 | 0.81 |
+| 64 | −64.8 | −66.8 | 1.58 |
+
+— so the effective bandwidth is about a fifth of the nominal band and the
+fitted high-`k` line profile is corroborated, not floor. The remaining
+`raw_margin_k64` gap is therefore **not** a line-power error: real FLY125 puts
+order 64 about 8.5 dB below its local floor inside the analysis window (which
+matches the gate's real −7.9 dB), and so does the envelope fit. What synthetic
+draws lack at that order is *dispersion*: the real clip-to-clip spread is
+13.2 dB with heavy censoring (many clips have no visible order 64 at all)
+against 6.2 dB synthetic. The next principled step is therefore the per-order
+*variance* of the profile population at the top of the comb, not another mean
+correction.
 
 ### Three things that did NOT work, and are not to be retried blindly
 
