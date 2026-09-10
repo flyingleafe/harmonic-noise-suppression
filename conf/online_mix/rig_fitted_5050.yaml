@@ -57,8 +57,8 @@ sources:
       - 0.25
       - 0.45
       shaft_jitter_tau_s:
-      - 0.3
-      - 1.0
+      - 0.1
+      - 0.25
       phase_diffusion_hz_per_order:
       - 0.02
       - 0.05
@@ -2011,8 +2011,8 @@ sources:
       - 0.0
       - 0.0
       shaft_offset_rps:
-      - 1.3622895131329933
-      - 1.3622895131329933
+      - 1.3788769827880911
+      - 1.3788769827880911
     fitted_from: omnirun-outputs/pop-dregon-p2-cal1se-carrier.json
   - kind: stochastic
     weight: 0.4
@@ -2066,8 +2066,8 @@ sources:
       - 0.4
       - 0.8
       shaft_jitter_tau_s:
-      - 0.3
-      - 1.0
+      - 0.003
+      - 0.008
       phase_diffusion_hz_per_order:
       - 0.0
       - 0.02
@@ -4811,8 +4811,8 @@ sources:
       - -1.5738499164581299
       - -5.331848621368408
       shaft_offset_rps:
-      - 1.1003721185813993
-      - 1.1003721185813993
+      - 0.4085828554874462
+      - 0.4085828554874462
     fitted_from: omnirun-outputs/pop-michaels-p3-decomp4-cal1se-dyn-carrier.json
   - kind: silence
     weight: 0.2
