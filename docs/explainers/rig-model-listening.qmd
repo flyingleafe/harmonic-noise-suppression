@@ -900,3 +900,592 @@ pushes DREGON into "no high lines at all" and Michael's into "one needle where
 there should be none". Resolving it needs a width model whose intercept is
 physical — a per-order visibility mechanism, or an explicit finite-bandwidth
 excitation for each line — rather than a $\tau$ tuned per rig.
+
+# Part V — Two derivations from first principles
+
+Part II fitted the rig with four instruments and stated their likelihoods.
+This part does something narrower and more careful: it takes the *simplest*
+case the project owns — DREGON's single-motor bench recordings, one rotor,
+stationary, 25–45 s at 44.1 kHz, five commanded speeds each — and derives the
+estimator from probability theory alone, in the manner of Bretthorst's
+*Bayesian Spectrum Analysis and Parameter Estimation* (Springer Lecture Notes
+in Statistics 48, 1988). Nothing is quoted without deriving it, and every
+result is checked numerically on `motor_Motor1_70`.
+
+Why bother, when §4.1 already has a Whittle likelihood? Because the Whittle
+fit answers a question about a *moving* carrier in flight, and pays for it
+with a nuisance-heavy variational bound. Here nothing moves. The posterior is
+available in closed form, and closed form tells us three things the flight fit
+cannot: what the exact sufficient statistic for the profile is, how accurately
+a comb pins its own fundamental, and why a harmonic-sum score prefers the
+wrong answer unless the amplitude priors are proper.
+
+**Notation** follows Bretthorst throughout: $N$ data $d_i$ sampled uniformly;
+$m$ model functions $G_j(t;\{\omega\})$ with amplitudes $B_j$; the matrix
+$g_{jk}=\sum_i G_j(t_i)G_k(t_i)$; its normalised eigenvectors $e_{kj}$ and
+eigenvalues $\lambda_k$; the orthonormal model functions
+$H_j=\lambda_j^{-1/2}\sum_k e_{jk}G_k$ with amplitudes $A_j$; the projections
+$h_j=\sum_i d_iH_j(t_i)$; and the two mean squares
+$\overline{d^2}=N^{-1}\sum_i d_i^2$, $\overline{h^2}=m^{-1}\sum_j h_j^2$.
+
+## 10. The amplitude profile, given the fundamental
+
+### 10.1 The model and its likelihood
+
+One rotor, one microphone, a constant shaft rate $s$ (rev/s), so
+$\omega = 2\pi s/f_s$ radians per sample. Take the time origin at the centre
+of the record, $t_i = i$ for $i=-T\dots T$ with $N = 2T+1$; this is not
+cosmetic, it is what makes the odd sums vanish below. The comb of $K$ orders
+with unknown amplitudes and phases is *linear* in $2K$ unknowns once we write
+each line in quadrature:
+
+$$
+d_i \;=\; \sum_{k=1}^{K}\Big[\,\alpha_k\cos(k\omega t_i) + \beta_k\sin(k\omega t_i)\Big] \;+\; e_i ,
+$$
+
+which is Bretthorst's general model (3.1) with $m=2K$, $B_{2k-1}=\alpha_k$,
+$B_{2k}=\beta_k$, and model functions $G_{2k-1}=\cos k\omega t$,
+$G_{2k}=\sin k\omega t$. Assign the noise $e_i$ independent Gaussians of
+unknown variance $\sigma^2$ — the maximum-entropy choice given only a
+second-moment constraint, and the one that makes any *other* structure in the
+residual show up as a failure of the model rather than be absorbed silently.
+The likelihood is then
+
+$$
+L(\{B\},\omega,\sigma) \;\propto\; \sigma^{-N}\exp\left\{-\frac{N\,Q}{2\sigma^2}\right\},
+\qquad
+Q \;=\; \overline{d^2} - \frac{2}{N}\sum_{j=1}^{m}B_j\sum_{i}d_iG_j(t_i) + \frac{1}{N}\sum_{j,k}g_{jk}B_jB_k .
+$$
+
+### 10.2 Why the comb is (almost) already orthogonal
+
+The quadratic term does not factor unless $g_{jk}$ is diagonal, so compute it.
+With the centred origin, and using $2\cos a\cos b = \cos(a-b)+\cos(a+b)$,
+
+$$
+g_{2k-1,2l-1} \;=\; \sum_{i=-T}^{T}\cos(k\omega t_i)\cos(l\omega t_i)
+\;=\; \tfrac12\Big[\mathcal D\big((k-l)\omega\big) + \mathcal D\big((k+l)\omega\big)\Big],
+\qquad
+\mathcal D(x) \;\equiv\; \sum_{i=-T}^{T}\cos(x t_i) \;=\; \frac{\sin(Nx/2)}{\sin(x/2)} .
+$$
+
+$\mathcal D$ is the Dirichlet kernel: $\mathcal D(0)=N$, and
+$\mathcal D(x)=0$ whenever $Nx/2$ is a multiple of $\pi$. Two consequences.
+
+* **Diagonal.** $k=l$ gives $g = \tfrac12[N + \mathcal D(2k\omega)] \approx N/2$
+  as long as $2k\omega$ is not a small multiple of $2\pi/N$ — i.e. as long as
+  the line is not at DC or at Nyquist.
+* **Off-diagonal.** $k\ne l$ gives terms $\mathcal D((k\pm l)\omega)/2$, and
+  $|k\pm l|\ge 1$, so the argument is at least $\omega$. Since
+  $|\mathcal D(x)| \le 1/|\sin(x/2)|$, the off-diagonal elements are bounded by
+  $1/(2\sin(\omega/2)) \approx f_s/(2\pi s)$ — a *constant*, while the
+  diagonal grows as $N/2$. The sine–cosine cross-block vanishes identically by
+  parity: $\sum_i \cos(k\omega t_i)\sin(l\omega t_i) = 0$ for a symmetric grid.
+
+So $g_{jk} = (N/2)\,\delta_{jk} + O(f_s/s)$, and the *relative* off-diagonal
+size is $O(f_s/(\pi s N))$. On the bench recording ($f_s = 44100$, $s=68.5$,
+$N = 2^{18}$) that is $8\times10^{-4}$. We may take
+
+$$
+\lambda_j = \frac{N}{2},
+\qquad
+H_{2k-1}(t) = \sqrt{\tfrac{2}{N}}\cos k\omega t,
+\qquad
+H_{2k}(t) = \sqrt{\tfrac{2}{N}}\sin k\omega t ,
+$$
+
+with the caveat recorded rather than hidden: for a *short* record or a *slow*
+rotor the eigenproblem must be solved, exactly as Bretthorst does for two
+close frequencies in his §6.3, and the correction is the Dirichlet overlap
+$\mathcal D((k\pm l)\omega)/N$ above.
+
+The projections are then the discrete Fourier transform evaluated **on the
+comb**, and nowhere else:
+
+$$
+h_{2k-1} = \sqrt{\tfrac{2}{N}}\sum_i d_i\cos(k\omega t_i) = \sqrt{\tfrac{2}{N}}\,\Re D(k\omega),
+\qquad
+h_{2k} = -\sqrt{\tfrac{2}{N}}\,\Im D(k\omega),
+\qquad
+h_{2k-1}^2 + h_{2k}^2 = \frac{2}{N}\big|D(k\omega)\big|^2 .
+$$
+
+That last identity is the first result worth stating plainly: **the sufficient
+statistic for the whole profile is the periodogram sampled at the comb
+frequencies.** Not a filter bank, not a decomposition — the periodogram, read
+at $K$ points.
+
+### 10.3 Marginalising the amplitudes and the noise
+
+Insert the orthonormal parametrisation into the likelihood. The quadratic form
+collapses and the joint likelihood factors over amplitudes (Bretthorst 3.12):
+
+$$
+L(\{A\},\omega,\sigma) \;\propto\; \sigma^{-N}
+\exp\left\{-\frac{1}{2\sigma^2}\Big[N\overline{d^2} - 2\sum_j A_jh_j + \sum_j A_j^2\Big]\right\}
+\;=\;\sigma^{-N}\exp\left\{-\frac{N\overline{d^2}-\sum_jh_j^2}{2\sigma^2}\right\}
+\prod_{j=1}^{m}\exp\left\{-\frac{(A_j-h_j)^2}{2\sigma^2}\right\} .
+$$
+
+Every amplitude appears in exactly one factor, a Gaussian centred on its own
+projection with width $\sigma$. Three things follow immediately, each by a one
+-line integral.
+
+**The profile estimate.** With a uniform prior on $A_j$ (we know the sign and
+scale of nothing a priori), $\langle A_j\rangle = h_j$ — Bretthorst (4.1) —
+and the posterior covariance is $\langle A_jA_k\rangle - \langle
+A_j\rangle\langle A_k\rangle = \sigma^2\delta_{jk}$, his (4.4). Transforming
+back with (3.10) and $\lambda=N/2$,
+
+$$
+\boxed{\;\hat\alpha_k = \sqrt{\tfrac{2}{N}}\,h_{2k-1} = \frac{2}{N}\Re D(k\omega),
+\qquad
+\hat\beta_k = \frac{2}{N}\,\big(\!-\Im D(k\omega)\big),
+\qquad
+\operatorname{Var} = \frac{2\sigma^2}{N}\;}
+$$
+
+**The order power, unbiased.** The profile of Part I is a *power* per order,
+$P_k=\alpha_k^2+\beta_k^2$. Its naive estimate $\hat\alpha_k^2+\hat\beta_k^2$
+is biased, because each projection carries noise of variance $\sigma^2$:
+
+$$
+\mathbb E\big[h_{2k-1}^2+h_{2k}^2\big] \;=\; \frac{N}{2}P_k + 2\sigma^2
+\qquad\Longrightarrow\qquad
+\boxed{\;\hat P_k \;=\; \frac{2}{N}\left(\frac{2}{N}\big|D(k\omega)\big|^2 - 2\sigma^2\right)\;}
+$$
+
+This is the "subtract the local floor" step that every practitioner performs
+by instinct; here it is a bias correction with a derived size, $2\sigma^2$ per
+order, which matters exactly where the line is weak — at the top of the comb.
+
+**The noise variance.** Integrating $\sigma$ out with the Jeffreys prior
+$1/\sigma$ and taking the second moment gives Bretthorst (4.7),
+
+$$
+\langle\sigma^2\rangle \;=\; \frac{N\overline{d^2} - m\overline{h^2}}{N-m-2}
+\;=\;\frac{1}{N-m-2}\left[\sum_i d_i^2 - \sum_{j=1}^m h_j^2\right] ,
+$$
+
+which is the residual energy per remaining degree of freedom — the comb's
+energy removed, the $-m-2$ accounting for the $m$ amplitudes we fitted and the
+two moments we took. Note what this *is*: an estimate of the broadband floor
+of §2.4, measured on the same data, with no extra machinery.
+
+### 10.4 Phase noise: from one coherent amplitude to a band of them
+
+Everything above assumed the line is coherent over the whole record. It is
+not. §2.1 has the shaft wandering, $s(t) = s + \xi(t)$, so order $k$ carries
+the phase error $k\theta(t)$ with $\theta(t)=2\pi\int\xi$. The model is no
+longer linear in the unknowns, and the objection usually raised against the
+Vold–Kalman prior — that its second-difference penalty acts on the *complex*
+envelope, so a rotating envelope is punished exactly like a wobbling amplitude
+— applies to the periodogram in the same measure: any estimator that assumes
+coherence over $T$ seconds must lose whatever the phase moved in $T$ seconds.
+
+Do it properly. Cut the record into $S$ blocks of $N_b$ samples, chosen short
+enough that $k\theta$ is constant within a block. Inside block $b$ the model is
+again linear, with *its own* amplitudes:
+
+$$
+d_i^{(b)} \;=\; \sum_k\Big[\alpha_{kb}\cos(k\omega t_i)+\beta_{kb}\sin(k\omega t_i)\Big] + e_i,
+\qquad i\in\text{block }b .
+$$
+
+The blocks share $\omega$ and $\sigma$ but nothing else — that is precisely
+the statement "the phase is unknown and unrelated from block to block". The
+likelihood is the product over blocks, each of the factored form of §10.3, so
+marginalising all $2KS$ amplitudes with uniform priors and $\sigma$ with
+Jeffreys gives Bretthorst (3.17) with $m = 2KS$ and $\overline{h^2}$ the mean
+over *all* blocks and orders:
+
+$$
+P(\omega\mid D,I) \;\propto\;
+\left[1-\frac{m\,\overline{h^2}}{N\,\overline{d^2}}\right]^{\frac{m-N}{2}},
+\qquad
+m\,\overline{h^2} \;=\; \sum_{b=1}^{S}\sum_{k=1}^{K}\frac{2}{N_b}\big|D_b(k\omega)\big|^2 .
+$$
+
+The sufficient statistic has become the **incoherently averaged** periodogram
+— the sum of block periodograms, not the periodogram of the sum. And the
+per-order power estimate inherits the same form,
+
+$$
+\hat P_k \;=\; \frac{2}{N_b}\left(\frac{1}{S}\sum_{b}\frac{2}{N_b}\big|D_b(k\omega)\big|^2 - 2\sigma^2\right),
+\qquad
+\frac{\operatorname{Var}\hat P_k}{P_k^2} \;\approx\; \frac{1}{S}\left(1+\frac{2\sigma^2}{(N_b/2)P_k}\right)^2 ,
+$$
+
+the second expression being the usual $\chi^2_{2S}$ behaviour of an
+$S$-fold-averaged power.
+
+**The block length is not a free knob.** Two errors fight. Too long, and the
+phase wanders inside a block: the coherent sum loses the fraction of the line
+that has drifted outside the block's resolution $1/T_b$, which for a line of
+half width $\gamma_k$ costs a factor $\approx (1+\gamma_kT_b)^{-1}$. Too
+short, and we pay $2K$ amplitudes per block against a fixed $N$: the exponent
+$(m-N)/2$ in the Student-t is an Occam penalty, and the variance of $\hat P_k$
+grows as $1/S = N_b/N$. Setting the derivative of the log posterior to zero
+gives the balance at
+
+$$
+\boxed{\;T_b \;\approx\; \frac{1}{\gamma_k}\;}
+$$
+
+— one coherence time per block, and, because $\gamma_k$ grows with $k$
+(§2.2), **a different optimal window per order**: long windows for the
+fundamental, short ones for the top of the comb. That is a derived
+prescription, and it is the thing my first pass at this measurement got wrong
+by peak-picking a fixed $\pm2$ bins for every order.
+
+Equivalently, and this is worth seeing: in the limit $S\to\infty$ with the
+phase process stationary, the block sum converges to the Whittle likelihood of
+§4.1 with a *line shape* rather than a line,
+
+$$
+-\log p(D\mid\theta) \;\stackrel{c}{=}\; \sum_f\left[\frac{I(f)}{\mathcal S(f)}+\log\mathcal S(f)\right],
+\qquad
+\mathcal S(f) \;=\; \sum_k P_k\,L\big(f-k\omega;\gamma_k\big) + \sigma^2 ,
+$$
+
+and setting $\partial/\partial P_k = 0$ in the well-separated, high-SNR limit
+gives the maximum-likelihood order power as the **band integral**
+
+$$
+\hat P_k \;=\; \sum_{f\,\in\,\text{line }k}\big[I(f)-\sigma^2\big] ,
+$$
+
+which is the same answer the block derivation gave, and which is *not* the
+peak value. So the two routes agree, as they must: the coherent-block picture
+and the stationary-Gaussian picture are the same marginalisation done in two
+orders.
+
+### 10.5 What this costs in practice
+
+Measured on `motor_Motor1_70` (5.94 s, mic 1, $\hat s = 68.4607$ rev/s),
+band-integrated minus peak-picked line power:
+
+| order range | $k\le 8$ | 9–32 | 33–64 | 65–100 |
+|---|---:|---:|---:|---:|
+| band integral − peak, dB | **+3.3** | **+7.4** | **+7.8** | **+6.2** |
+
+Peak-picking throws away 3 dB at the bottom of the comb and 6–8 dB above it —
+a profile *shape* error of 4–5 dB across the comb, which is the same order as
+the entire calibration correction of §4.4. The derivation does not merely
+tidy the estimator; it changes the answer.
+
+## 11. The fundamental, given nothing but "a comb"
+
+Now forget that we know the rate. We assume only: one comb of $K$ orders,
+stationary amplitudes, stationary rate, Gaussian noise of unknown variance.
+What does probability theory say about $s$?
+
+### 11.1 The posterior, and why it is the harmonic sum
+
+Nothing changes in §10.1–10.3 except that $\omega$ is now a parameter rather
+than a given. The amplitudes and $\sigma$ are nuisances; marginalise them
+exactly as before. With $\sigma$ *known* we get Bretthorst (3.16),
+
+$$
+P(\omega\mid D,\sigma,I) \;\propto\; \exp\left\{\frac{m\,\overline{h^2}}{2\sigma^2}\right\}
+\;=\; \exp\left\{\frac{1}{\sigma^2}\sum_{k=1}^{K}\frac{\big|D(k\omega)\big|^2}{N}\right\},
+$$
+
+and with $\sigma$ unknown, his (3.17),
+
+$$
+\boxed{\;P(\omega\mid D,I) \;\propto\;
+\left[1-\frac{1}{N\overline{d^2}}\sum_{k=1}^{K}\frac{2\big|D(k\omega)\big|^2}{N}\right]^{\frac{2K-N}{2}}\;}
+$$
+
+Read the first form: the log posterior for the shaft rate is the **sum of the
+periodogram over the comb**, divided by the noise power. The harmonic-sum
+score that every order-tracking paper uses as a heuristic is the exact
+Bayesian answer for this model — but only with $\sigma$ known and only with
+flat amplitude priors, and §11.3 shows both caveats have teeth.
+
+### 11.2 How accurately does a comb know its own fundamental?
+
+Expand $m\overline{h^2}$ about its maximum. For data whose true content is the
+comb $\hat\alpha_k,\hat\beta_k$ at rate $\hat\omega$, the projection of the
+data onto a *trial* comb at $\omega$ is, by §10.2,
+
+$$
+h_{2k-1}(\omega) \;\approx\; \sqrt{\tfrac{N}{2}}\;\hat\alpha_k\;\frac{\mathcal D\big(k(\omega-\hat\omega)\big)}{N},
+$$
+
+and the Dirichlet kernel near zero is, expanding
+$\sin x = x - x^3/6$ twice,
+
+$$
+\frac{\mathcal D(x)}{N} \;=\; \frac{\sin(Nx/2)}{N\sin(x/2)} \;=\; 1-\frac{N^2x^2}{24}+O(x^4) .
+$$
+
+Squaring and summing over the two quadratures,
+
+$$
+m\,\overline{h^2}(\omega) \;=\; \frac{N}{2}\sum_k a_k^2\left[1-\frac{N^2k^2(\omega-\hat\omega)^2}{12}\right],
+\qquad a_k^2 \equiv \hat\alpha_k^2+\hat\beta_k^2 ,
+$$
+
+so that, with $\delta=\omega-\hat\omega$,
+
+$$
+\log P(\omega\mid D,\sigma,I) \;=\; \text{const} \;-\; \frac{N^3\delta^2}{48\,\sigma^2}\sum_k k^2a_k^2 .
+$$
+
+The posterior is Gaussian in the rate with
+
+$$
+\boxed{\;\operatorname{Var}(\omega) \;=\; \frac{24\,\sigma^2}{N^3\sum_{k}k^2a_k^2}\;}
+\qquad\Longleftrightarrow\qquad
+\sigma_s \;=\; \frac{f_s}{2\pi}\sqrt{\frac{24\,\sigma^2}{N^3\sum_kk^2a_k^2}}\ \ \text{rev/s} .
+$$
+
+Three readings, and the third is the useful one.
+
+1. For a single sinusoid ($K=1$) this is the classical
+   $\operatorname{Var}(\omega)=24\sigma^2/(N^3a^2)$ — the $T^{-3/2}$ law,
+   recovered as a special case.
+2. The weight is $k^2$. **The top of the comb, not the fundamental,
+   determines the rate.** An order at $k=64$ contributes 4096 times what the
+   fundamental does at equal amplitude. This is the formal version of the
+   "capture radius" remark in §2.2: a rate error $\delta s$ displaces order
+   $k$ by $k\,\delta s$ Hz, so the high orders are the long lever arm.
+3. Therefore *anything that destroys the high orders destroys the rate
+   estimate* — which is exactly what phase noise does, since $\gamma_k$ grows
+   with $k$ until the line is wider than its own spacing. Replacing $N$ by the
+   coherent length $N_{\text{eff}} = \min(N, f_s/\gamma_k)$ per order gives the
+   floor: no amount of extra record length improves the estimate once every
+   informative order has decohered. This is the mechanism behind the label
+   error of §4.3 — 0.41 rev/s on Michael's rig, 1.38 on DREGON — and it says
+   the errors are not sensor sloppiness but an information limit.
+
+**Check.** On `motor_Motor1_70`, $N=2^{18}$, the closed form predicts
+$\sigma_s = 6.5\times10^{-5}$ rev/s; the measured curvature of the actual
+Student-t posterior gives $1.26\times10^{-4}$ rev/s. A factor 1.9, in the
+expected direction: the derivation assumed white noise and perfectly coherent
+lines, and the recording has a coloured floor and lines of finite width. Both
+say the same thing — a stationary bench recording pins the shaft rate to
+$\sim10^{-4}$ rev/s, four orders of magnitude better than the flight labels,
+which is why these recordings can serve as ground truth at all.
+
+### 11.3 The octave trap, and why flat priors walk into it
+
+Here is the failure I actually hit. Grid-searching the harmonic sum on these
+recordings returned 24.5 rev/s for a rotor turning at 49.0, and 22.8 for one
+at 68.5 — subharmonics, every time. The Bayesian formulation explains it and
+fixes it.
+
+Compare two models of the same data: $M_1$, a comb at $\omega$ with $K$
+orders; $M_2$, a comb at $\omega/2$ with $2K$ orders (same frequency span).
+$M_2$ contains $M_1$ — every line of $M_1$ is an even-numbered line of $M_2$ —
+so $M_2$ can never fit worse. With flat priors, the Student-t exponent
+$(m-N)/2$ is the *only* thing standing against the extra parameters, and it is
+weak: measured on the bench recording,
+
+| model | $m$ | flat-prior $\log P$ (3.17) | proper-prior $\log$ evidence |
+|---|---:|---:|---:|
+| $\omega = 68.4607$ rev/s | 200 | 53037.3 | **36361.7** |
+| $\omega/2 = 34.2303$ | 400 | 53141.4 | 36169.4 |
+| $\omega/3 = 22.8202$ | 600 | **53242.1** | 35975.2 |
+| $2\omega = 136.9213$ | 100 | 52219.4 | 36027.5 |
+
+The flat-prior posterior prefers $\omega/3$ — it will always prefer the
+finest comb offered, because unused amplitudes cost it nothing. This is not a
+bug in the code; it is Bretthorst's warning about improper priors in his
+Chapter 5, arriving on schedule.
+
+The cure is to say what we actually know: a line's amplitude is not uniform on
+$(-\infty,\infty)$, it has a scale. Assign each orthonormal amplitude a proper
+Gaussian prior $\mathcal N(0,\delta^2)$ and marginalise:
+
+$$
+\int\!\mathrm dA_j\;\frac{e^{-A_j^2/2\delta^2}}{\sqrt{2\pi\delta^2}}\;
+e^{-(A_j^2-2A_jh_j)/2\sigma^2}
+\;=\;
+\sqrt{\frac{\sigma^2}{\sigma^2+\delta^2}}\;
+\exp\left\{\frac{h_j^2\,\delta^2}{2\sigma^2(\sigma^2+\delta^2)}\right\},
+$$
+
+so that
+
+$$
+\boxed{\;\log p(D\mid\omega,M) \;=\;
+\underbrace{-\frac{m}{2}\log\!\left(1+\frac{\delta^2}{\sigma^2}\right)}_{\text{Occam factor}}
+\;+\;\underbrace{\frac{\delta^2}{2\sigma^2(\sigma^2+\delta^2)}\sum_{j=1}^{m}h_j^2}_{\text{fit}}\;}
+$$
+
+Every amplitude now costs $\tfrac12\log(1+\delta^2/\sigma^2)$ whether the data
+want it or not — at the bench recording's per-line signal-to-noise that is
+about 3.5 nats each — and an order whose line is absent contributes nothing to
+the fit term. The $\omega/2$ model pays $200$ extra Occam factors to explain
+$200$ empty bins, and loses by $192$ nats; $\omega/3$ loses by $386$. The
+right-hand column of the table above is that calculation. **The octave
+ambiguity is not a likelihood question, it is a model-selection question**, and
+the median-margin heuristic I patched in earlier is a crude estimator of
+exactly this quantity.
+
+There is a physical corollary. A two-blade propeller genuinely suppresses odd
+orders — on these recordings the odd-order margins are 6–21 dB below the even
+ones — so a comb at the *blade-passing* rate $2s$ is a defensible model of the
+same data with half the parameters. The table's last row is that comparison:
+$2\omega$ loses by 334 nats, i.e. the odd orders are weak but not absent, and
+probability theory can tell the difference. Had they been truly absent, the
+shaft rate would be unidentifiable from a spectrum alone — a fact worth
+knowing before building an estimator that assumes otherwise.
+
+### 11.4 The width law, measured where nothing moves
+
+The same machinery yields a diagnostic that flight data cannot give cleanly.
+The second moment of the floor-subtracted excess about each line measures the
+line's width, and on a stationary recording every broadening mechanism except
+phase noise is absent. On `motor_Motor1_70`, over the orders whose peak margin
+exceeds 28 dB (below that the moment is floor-dominated):
+
+$$
+\gamma_k \;\approx\; 0.39 + 0.227\,k\ \text{Hz},
+\qquad
+\text{log--log slope } 0.88\ (k=2\dots16),
+$$
+
+which is **linear in $k$**, not quadratic: the quasi-static branch of §2.2,
+with implied shaft jitter $\sigma_\rho = 0.227/\sqrt{2\ln2} = 0.19$ rev/s.
+Above $k\approx24$ the readout saturates against its own window and the floor,
+so the slope is fitted below that and the rest is displayed only.
+
+![](rig-model-listening/bayes_comb.png){width=100%}
+
+This is independent evidence on the question §9.3 leaves open — the likelihood
+comparison reported there preferred $k^1$ on both rigs but could not license
+a renderer regime, because it measured the *total* width including a nuisance
+intercept with no counterpart in the generator. Here there is no flight, no tracking error, no aggregation over
+mics: one rotor, stationary, and the width grows like $k$. The honest next step
+is not another moment but the derivation's own recommendation — fit $\gamma_k$
+as a *parameter* of the line shape, which is Bretthorst's §6.2 (a frequency
+with Lorentzian decay) applied per order, and which the block formulation of
+§10.4 already contains.
+
+## 12. Both at once
+
+Can we estimate the profile and the fundamental jointly? Yes, and the answer
+is more definite than "run an optimiser": the problem *factorises*, and it
+factorises because the model is linear in the amplitudes for any fixed rate.
+
+### 12.1 The exact factorisation
+
+Write the joint posterior over everything:
+
+$$
+p\big(\omega,\{A\},\sigma\mid D,I\big)
+\;=\;
+\underbrace{p\big(\omega\mid D,I\big)}_{\text{§11.1, marginal}}
+\;\cdot\;
+\underbrace{p\big(\{A\},\sigma \mid \omega, D, I\big)}_{\text{§10.3, conditional}} .
+$$
+
+Both factors are known in closed form: the first is the Student-t of §11.1,
+the second is a product of independent Gaussians centred on $h_j(\omega)$
+times an inverse-gamma for $\sigma^2$. So the joint estimate is a *two-line
+algorithm*, not an iteration:
+
+1. evaluate $\sum_k|D(k\omega)|^2$ on a rate grid, take the posterior of
+   §11.1 — with proper amplitude priors if the octave is in play (§11.3);
+2. at the resulting $\hat\omega$ (or, if the peak is broad, by averaging over
+   the grid with the posterior as weight), read off
+   $\hat P_k$ and $\langle\sigma^2\rangle$ from §10.3.
+
+Step 2 conditioned on step 1 is *exact*, not an approximation, because the
+conditional is available analytically. The only approximation is replacing
+$\int\mathrm d\omega\,p(\omega\mid D)\,\hat P_k(\omega)$ by
+$\hat P_k(\hat\omega)$, and §11.2 bounds the error: the posterior width is
+$10^{-4}$ rev/s, over which $\hat P_k$ varies by
+$\partial\hat P_k/\partial s\cdot\sigma_s$, negligible for $k\lesssim 10^3$.
+Bretthorst makes the same argument in his §4.1: when the data are plentiful,
+$P(\{\omega\}\mid D,I)$ is so nearly a delta function that the amplitudes may
+be read at its maximum.
+
+### 12.2 Where it stops being that easy
+
+Three couplings break the clean factorisation, and each one is a live issue in
+this project rather than a technicality.
+
+**(a) The profile prior feeds back into the rate.** §11.1 assumed flat
+amplitude priors, which is why its statistic weights every order equally.
+With a *known* profile — which is what Part III fitted — the sufficient
+statistic becomes a matched filter in order space. Repeating §11.2 with
+$\mathcal N(0,\delta_k^2)$ priors, the log posterior gains the weight
+$\delta_k^2/(\sigma^2+\delta_k^2)$ per order, so
+
+$$
+\log P(\omega\mid D) \;\simeq\; \sum_k w_k\,\frac{|D(k\omega)|^2}{N\sigma^2},
+\qquad
+w_k = \frac{\delta_k^2}{\sigma^2+\delta_k^2}\,,
+$$
+
+and the *accuracy* becomes $\operatorname{Var}(\omega)^{-1} \propto
+N^3\sum_k k^2w_ka_k^2$ — orders that the profile says should be loud get their
+$k^2$ leverage, orders it says are absent are down-weighted instead of
+contributing noise. This is the principled version of "track the strong
+harmonics", and it is what the project's blind-tracking stack does by hand.
+
+**(b) Rate drift and line width are the same thing to second order.** Over
+one window a slow linear drift $s(t) = s + \dot s t$ spreads order $k$'s
+energy over $k\dot sT$ Hz; phase noise spreads it over $\gamma_k$. In the
+Gaussian likelihood of §10.4 both enter *only* through $\mathcal S(f)$, so
+within a single window they are strictly degenerate: no statistic of the
+second-order spectrum can separate them. What breaks the degeneracy is
+structure across orders and across windows —
+
+* a drift is *coherent* across orders (all lines move the same way in
+  order-normalised units) while diffusion is not;
+* a drift's spread grows linearly in $k$ *and* in $T$, a quasi-static jitter's
+  linearly in $k$ and not at all in $T$, a diffusive one's as $k^2$.
+
+So the resolution requires exactly the joint, multi-order, multi-window model
+that §2.1 writes down — which is the formal reason §9.3's tension cannot be
+settled inside one analysis window, and the reason the bench recordings
+(stationary by construction, $\dot s \equiv 0$) are the right place to
+measure $\gamma_k$.
+
+**(c) With $\gamma_k$ unknown, the factorisation becomes conditional, not
+exact.** The full joint is now over
+$\big(\omega,\{P_k\},\{\gamma_k\},\sigma\big)$; $P_k$ and $\gamma_k$ enter
+$\mathcal S(f)$ multiplicatively-and-shape-wise, so neither marginalises in
+closed form. But the structure remains benign: given $\{\gamma_k\}$ the
+problem is §10.4 (linear, closed form); given $\{P_k\}$ the widths separate
+per order (each is a one-dimensional line-shape fit on its own band, because
+the lines are well separated when $\gamma_k \ll s/2$). Alternating the two is
+block-wise exact, and it is exactly the alternation a magnitude-only
+smoothness penalty would require in the envelope formulation (where it is
+non-convex, being bilinear in magnitude and phase) — with the difference that
+here each block is a *marginalisation* rather than a maximisation, so the
+sloppiness warned against in §3 does not creep back in.
+
+### 12.3 The recipe this licenses for the bench recordings
+
+Put §10–§12 together and the estimator for DREGON's 20 single-motor
+recordings is fully specified, with no tuned constants:
+
+1. **Rate.** Maximise the proper-prior evidence of §11.3 over a rate grid,
+   with $K$ set by $f_{\max}$; the Occam factor kills the octaves. Accuracy
+   $\sim10^{-4}$ rev/s (§11.2), so the rate is effectively exact for
+   everything downstream.
+2. **Width.** Per order, fit $\gamma_k$ on its own band (Bretthorst §6.2
+   applied per line); this both tests the $k^1$ vs $k^2$ law on stationary
+   data and sets the per-order coherent window $T_b\approx1/\gamma_k$
+   (§10.4).
+3. **Profile.** Band-integrate with the floor bias correction of §10.3 over
+   $S=T/T_b$ blocks; report $\hat P_k$ with its $\chi^2_{2S}$ interval.
+4. **Speed law.** Regress $\log\hat P_k$ on $\log s$ across the five
+   commanded speeds, per order and per rotor — the quantity §4.1 declared
+   unidentifiable from 4 s flight crops and which DREGON currently inherits as
+   $q=q_{\text{fl}}=2.5$ (§9.1 iii).
+5. **Rotor deviations.** The four motors give $\Delta_{\rho k}$ directly, on a
+   bench where they are not confounded by flight state.
+
+What it cannot give is transferable *levels*: a motor on a bench has no
+inflow, a different loading and a different room, so the absolute
+line-to-floor ratio $\bar\Lambda$ and the floor shape $F(f)$ stay flight
+quantities. Shape, width law, speed exponent and rotor spread transfer;
+loudness does not.

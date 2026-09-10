@@ -1,0 +1,72 @@
+{
+ "recording": "motor_Motor1_70",
+ "seconds": 5.944,
+ "rate_rps": 68.46065,
+ "posterior_sigma_rps": 0.000126,
+ "predicted_sigma_rps": 6.542e-05,
+ "noise_var_per_function": 2.0349e-05,
+ "models": [
+  {
+   "model": "omega (fitted)",
+   "rate": 68.4607,
+   "k_max": 100,
+   "student_t": 53037.3,
+   "evidence": 36361.7
+  },
+  {
+   "model": "omega / 2",
+   "rate": 34.2303,
+   "k_max": 200,
+   "student_t": 53141.4,
+   "evidence": 36169.4
+  },
+  {
+   "model": "omega / 3",
+   "rate": 22.8202,
+   "k_max": 300,
+   "student_t": 53242.1,
+   "evidence": 35975.2
+  },
+  {
+   "model": "2 omega",
+   "rate": 136.9213,
+   "k_max": 50,
+   "student_t": 52219.4,
+   "evidence": 36027.5
+  }
+ ],
+ "band_minus_peak_db": {
+  "k<=8": 3.25,
+  "k 9-32": 7.42,
+  "k 33-64": 7.82,
+  "k 65-100": 6.2
+ },
+ "line_width_hz": {
+  "k=2": 0.637,
+  "k=4": 1.151,
+  "k=8": 2.411,
+  "k=16": 4.539,
+  "k=32": 8.259,
+  "k=48": 11.394,
+  "k=64": 11.538,
+  "k=80": 12.297
+ },
+ "width_law": {
+  "range": "k = 2..16",
+  "loglog_slope": 0.879,
+  "gamma0_hz": 0.391,
+  "gamma_slope_hz_per_order": 0.227,
+  "implied_sigma_rps": 0.1928,
+  "saturates_above_k": 100
+ },
+ "width_fit_orders": [
+  2,
+  4,
+  6,
+  8,
+  9,
+  11,
+  12,
+  13
+ ]
+}
