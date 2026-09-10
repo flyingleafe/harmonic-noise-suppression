@@ -996,6 +996,48 @@ These are the presets `conf/online_mix/rig_fitted_5050.yaml` carries and the
 transfer run uses. Coverage (0.854) and the curve bar (0.587) pass with margin;
 the classifier's bootstrap upper limit, 0.897, is the one bar still open.
 
+### The pipeline, end to end
+
+Every step below reads training recordings only. The order matters: the
+calibration must see a render of the renderer it is calibrating, so it comes
+after the profile and before nothing else changes the mean.
+
+```bash
+# 1. profile hierarchy from the decomposed envelopes (one-SE rank)
+python -m experiments.stochastic_fit.run popdecomp --summary <rigfit>/P3.json \
+  --recording FLY125 --k-max 64 --chunk-s 4 --min-rps 30 --max-rank 8 \
+  --output michaels-profile.json
+# 2. matched render of the TRAINING clips (test-groups = train-groups: nothing
+#    held out is touched; only the train arrays of the .npz are used next)
+python -m experiments.stochastic_fit.run poprawgate --summary michaels-profile.json \
+  --policy conf/online_mix/rig_fm_5050.yaml --source-index 1 \
+  --train-groups fly125 --test-groups fly125 --k-max 64 --bootstrap 200 \
+  --seed 570 --draws-per-clip 4 --compact --output train-render.json
+# 3. mean/covariance calibration against that render
+python -m experiments.stochastic_fit.run popcalibrate --summary michaels-profile.json \
+  --raw-npz train-render.npz --reference-order 2 --output michaels-cal.json
+# 4. amplitude process + both speed laws from the same decomposition
+python -m experiments.stochastic_fit.run popdyn --summary michaels-cal.json \
+  --recording FLY125 --output michaels-dyn.json
+# 5. the shaft: static label error, then the flight-to-flight width spread
+python -m experiments.stochastic_fit.run popcarrier --summary michaels-dyn.json \
+  --fit-dir <per-clip fits> --variant gauss --clip-prefix FLY125 \
+  --output michaels-carrier.json
+python -m experiments.stochastic_fit.run popwidth --summary michaels-carrier.json \
+  --fit-dir <per-clip fits> --variant gauss --clip-prefix FLY125 \
+  --output michaels-final.json
+# 6. export both rigs into one policy, through the gate's own transfer function
+python -m experiments.stochastic_fit.run popexport \
+  --policy conf/online_mix/rig_fm_5050.yaml \
+  --preset 0=dregon-final.json --preset 1=michaels-final.json \
+  --output conf/online_mix/rig_fitted_5050.yaml
+```
+
+DREGON skips steps 1 and 4 — `decomp-frames-v2` holds only the **held-out**
+room1 recording, so there is no room2 decomposition to fit. Its profile is the
+Whittle population plus step 3, and its speed laws stay at the family default
+(see the identifiability finding above).
+
 ## Prior conditional-fit conclusion (superseded by the population correction)
 
 Answer to "wrong ranges or wrong family": the realized family already
