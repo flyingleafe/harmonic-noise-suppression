@@ -7,6 +7,12 @@ format:
     toc: true
     toc-depth: 3
     embed-resources: true
+    # The §2.6 parameter table and the Part III figures are wide.
+    page-layout: full
+    grid:
+      body-width: 1200px
+      sidebar-width: 240px
+      margin-width: 180px
 execute:
   echo: false
 ---
@@ -183,7 +189,7 @@ silence: $c_{\text{stat}}$ does not follow the rotors.
 **Note the structure.** The line-to-floor ratio at fixed frequency scales as
 $s^{\,q - q_{\text{fl}}}$. If the line and floor exponents are equal, the comb's
 prominence is *speed-invariant by construction* — a fact we will need in Part
-III.
+IV.
 
 ### 2.5 What is drawn once per clip
 
@@ -199,6 +205,128 @@ lives:
 
 The clip-level width factor multiplies **every** rotor's $\sigma_\rho$ by the
 same amount: a real flight segment is gustier or calmer as a whole.
+
+### 2.6 The whole model in one place
+
+Everything above, assembled. The colour of a symbol says **what the data does
+to it**, which is the only property that matters when reading a fitted value:
+
+<span style="color:#157F3D;font-weight:600">green</span> — measured, and the
+measurement survives a held-out check.
+<span style="color:#9A6700;font-weight:600">amber</span> — fitted, but weakly
+identified: the confidence interval is wide or reaches zero, or the estimate is
+shrunk by its prior, or it leans on the one synthetic-likelihood step.
+<span style="color:#B42318;font-weight:600">red</span> — **not** identified by
+our data: an inherited hand-chosen value, kept because nothing measured it.
+<span style="color:#0969DA;font-weight:600">blue</span> — a nuisance, integrated
+out during fitting and redrawn by the generator; never a fitted number.
+
+$$
+\begin{aligned}
+\textbf{array}\quad
+x_m(t) &= \sum_{\rho=1}^{R}\sum_{k=1}^{K} a_{\rho k}(t)\;\textcolor{#157F3D}{g_{m\rho}}\,
+   \cos\!\big(k\,\phi_\rho(t) + \textcolor{#B42318}{\psi_{m\rho k}}\big)
+   \;+\; \textcolor{#157F3D}{G_m}\, n_m(t)
+\\[6pt]
+\textbf{shaft}\quad
+\phi_\rho(t) &= 2\pi\!\int_0^t\! s_\rho(u)\,\mathrm du,
+\qquad
+s_\rho(t) = \underbrace{r_\rho(t)}_{\text{label (data)}}
+  + \textcolor{#9A6700}{\delta_\rho} + \textcolor{#0969DA}{\xi_\rho(t)}
+\\
+\delta_\rho &\sim \mathcal N\!\big(0,\ \textcolor{#9A6700}{\sigma_{\text{off}}^2}\big),
+\qquad
+\textcolor{#0969DA}{\xi_\rho} \sim \operatorname{OU}\!\big(e^{\textcolor{#0969DA}{v}}\textcolor{#157F3D}{\sigma_\rho},\
+   \textcolor{#B42318}{\tau_{\text{jit}}}\big),
+\qquad
+\textcolor{#0969DA}{v} \sim \mathcal N\!\big(0,\ \textcolor{#9A6700}{s_w^2}\big)
+\\
+\gamma_{\rho k} &=
+\underbrace{\begin{cases}
+  \sqrt{2\ln 2}\;k\,e^{\textcolor{#0969DA}{v}}\textcolor{#157F3D}{\sigma_\rho}, & \textcolor{#B42318}{\tau_{\text{jit}}} \gg W \\[2pt]
+  2\pi\,\textcolor{#B42318}{\tau_{\text{jit}}}\,k^2 \big(e^{\textcolor{#0969DA}{v}}\textcolor{#157F3D}{\sigma_\rho}\big)^2, & \textcolor{#B42318}{\tau_{\text{jit}}} \ll W
+\end{cases}}_{\text{regime set by }\textcolor{#B42318}{\tau_{\text{jit}}}\text{, not measured}}
+\;+\;\textcolor{#B42318}{q_{\text{pd}}}\,k
+\\[6pt]
+\textbf{lines}\quad
+10\log_{10} a_{\rho k}^2(t) &=
+   \textcolor{#9A6700}{\bar\Lambda} + \textcolor{#0969DA}{\lambda} + \textcolor{#0969DA}{\pi_\rho}
+ + \textcolor{#157F3D}{A_k} + \textcolor{#157F3D}{\Delta_{\rho k}}
+ + \textstyle\sum_{j=1}^{J}\textcolor{#0969DA}{z_{\rho j}}\,\textcolor{#157F3D}{B_{jk}}
+ + \textcolor{#0969DA}{\varepsilon_{\rho k}}
+ + \textcolor{#0969DA}{h_{\rho k}(t)}
+ + \textcolor{#157F3D}{q}\cdot 10\log_{10}\!\frac{s_\rho(t)}{s_{\text{ref}}}
+\\
+\textcolor{#0969DA}{\lambda} &\sim \mathcal N\!\big(0, \textcolor{#157F3D}{\sigma_\Lambda^2}\big),\quad
+\textcolor{#0969DA}{\pi_\rho} \sim \mathcal N\!\big(0, \textcolor{#157F3D}{\sigma_{\text{ctr}}^2}\big),\quad
+\textcolor{#0969DA}{\varepsilon_{\rho k}} \sim \mathcal N\!\big(0, \textcolor{#157F3D}{s_k^2}\big),\quad
+\textcolor{#0969DA}{z_{\rho j}} \sim \mathcal N(0,1)
+\\
+\textcolor{#0969DA}{h_{\rho k}} &= \sqrt{\textcolor{#157F3D}{\varrho}}\;\textcolor{#0969DA}{c_\rho(t)}
+ + \sqrt{1-\textcolor{#157F3D}{\varrho}}\;\textcolor{#0969DA}{p_{\rho k}(t)},
+\qquad
+\textcolor{#0969DA}{c},\textcolor{#0969DA}{p} \ \text{i.i.d.}\ \operatorname{OU}\!\big(\textcolor{#157F3D}{\sigma_{\text{amp}}},\textcolor{#157F3D}{\tau_{\text{amp}}}\big)
+\\[6pt]
+\textbf{floor}\quad
+N_m(f,t) &= 10^{\frac{1}{10}\left[\,\textcolor{#157F3D}{F(f)} \;+\; \textcolor{#157F3D}{\beta}\log_2\frac{f}{f_{\text{ref}}}
+  \;+\; \textcolor{#0969DA}{b(t)} \;+\; \textcolor{#0969DA}{\theta(t)}\log_2\frac{f}{f_{\text{ref}}}
+  \;+\; \textcolor{#B42318}{u_m(f,t)}\,\right]}
+  \Big[\tfrac1R\textstyle\sum_\rho\big(s_\rho(t)/s_{\text{ref}}\big)^{\textcolor{#9A6700}{q_{\text{fl}}}}
+  + \textcolor{#9A6700}{c_{\text{stat}}}\Big]
+\\
+\textcolor{#0969DA}{b} &\sim \operatorname{OU}\!\big(\textcolor{#B42318}{\sigma_b}, \textcolor{#B42318}{\tau_b}\big),
+\qquad
+\textcolor{#0969DA}{\theta} \sim \operatorname{OU}\!\big(\textcolor{#B42318}{\sigma_\theta}, \textcolor{#B42318}{\tau_\theta}\big),
+\qquad
+n_m \ \text{white, shaped by } N_m
+\end{aligned}
+$$
+
+Read the colours as a summary of the whole campaign: the **spectral shape** of
+both rigs is measured (green), the **shaft's regime** is not (red), and every
+quantity that had to be recovered from a *spread* rather than from a level sits
+in between (amber).
+
+#### Every symbol, and what it is worth
+
+$M=8$ microphones, $R=4$ rotors, $K$ orders up to Nyquist, $W = 128$ ms
+analysis window, $s_{\text{ref}} = 80$ rev/s, $f_{\text{ref}} = 500$ Hz.
+Fitted values: Michael's rig = FLY125, 10 crops; DREGON = room 2, 17 crops.
+
+| symbol | what it is | level | fitted by | Michael's | DREGON |
+|---|---|---|---|---|---|
+| <span style="color:#157F3D">$A_k$</span> | rig mean order profile (dB) | rig | §4.2b envelopes (M) / §4.1 Whittle (D), then §4.4 | 109 orders, $A_2=+22.5$ | 91 measured of 106, $A_2=+11.6$ |
+| <span style="color:#157F3D">$\Delta_{\rho k}$</span> | how one rotor departs from $A_k$ | rotor | §4.1 | $-13.4\dots+11.3$ dB | $-20.3\dots+5.2$ dB |
+| <span style="color:#157F3D">$B_{jk}$</span> | clip-population profile modes | rig | §4.2b rank + §4.4 rank | $J=3$, mode stds 15.0 / 9.6 / 3.7 dB | $J=2$ |
+| <span style="color:#157F3D">$s_k$</span> | per-order residual spread | rig | §4.2b | 0.001–5.16 dB (median 1.48) | — (not separable without envelopes) |
+| <span style="color:#9A6700">$\bar\Lambda$</span> | mean line-to-floor level (dB) | rig | §4.1 + §4.4 level shift | 45.0 (of which $+10.6$ is calibration) | 25.6 ($+1.4$) |
+| <span style="color:#157F3D">$\sigma_\Lambda$</span> | clip-to-clip level spread | rig | §4.1 | 2.48 dB | 0.49 dB |
+| <span style="color:#157F3D">$\sigma_{\text{ctr}}$</span> | rotor-to-rotor level spread | rig | §4.1 | 2.30 dB | 1.90 dB |
+| <span style="color:#157F3D">$\sigma_{\text{amp}}$, $\tau_{\text{amp}}$, $\varrho$</span> | amplitude process | rig | §4.2c–d | 2.90 dB, 0.82 s, 0.191 | <span style="color:#B42318">inherited [3.0,4.5] dB, [0.3,0.8] s, [0,0.1]</span> |
+| <span style="color:#157F3D">$q$</span> | line speed exponent | rig | §4.2a | $3.93\pm0.10$ | <span style="color:#B42318">2.5 (family default)</span> |
+| <span style="color:#9A6700">$q_{\text{fl}}$</span> | floor speed exponent | rig | §4.2e | 3.46 ($q_{05}$ 3.20, upper unidentified) | <span style="color:#B42318">2.5</span> |
+| <span style="color:#9A6700">$c_{\text{stat}}$</span> | speed-independent floor | rig | §4.2e | $\approx 0$ | $2.5\times10^{-3}$ |
+| <span style="color:#157F3D">$F(f)$</span> | floor shape, 14 control points | rig | §4.1 | $-34\dots+9$ dB | $-69\dots+24$ dB |
+| <span style="color:#157F3D">$\beta$</span> | floor tilt | rig | §4.1 | $-3.93$ dB/oct | $-6.24$ dB/oct |
+| <span style="color:#157F3D">$\gamma_0,\ \gamma_{\text{slope}}$</span> | affine width law | rig | §4.1 | 2.21 Hz, 0.573 Hz/order | 3.33 Hz, 0.336 Hz/order |
+| <span style="color:#157F3D">$\sigma_\rho = w_\rho\gamma_{\text{slope}}/\sqrt{2\ln2}$</span> | per-rotor shaft jitter | rotor | §4.1 ($w_\rho$) | 0.68, 0.14, 0.50, 1.58 rev/s | 0.52, 0.80, 0.49, 0.48 rev/s |
+| <span style="color:#157F3D">$g_{m\rho}$</span> | per-(mic, rotor) line gain | rotor | §4.1 | $8\times4$, $-7.1\dots+3.2$ dB | $8\times4$, $-3.9\dots+4.5$ dB |
+| <span style="color:#157F3D">$G_m$</span> | the one extra array term | mic | §4.1 | broadband gain $-5.3\dots+4.5$ dB | floor offset $-8.0\dots+3.4$ dB |
+| <span style="color:#9A6700">$\sigma_{\text{off}}$</span> | static label error | rig | §4.3 | 0.409 rev/s (CI 0.28–0.58) | 1.379 (1.00–1.83) |
+| <span style="color:#9A6700">$s_w$</span> | clip-common width spread | rig | §4.3 | 0.633 (CI reaches 0) | 0.321 (reaches 0) |
+| <span style="color:#B42318">$\tau_{\text{jit}}$</span> | shaft correlation time — **sets the width regime** | rig | nothing | inherited [3, 8] ms (diffusive, $k^2$) | inherited [0.10, 0.25] s (quasi-static, $k$) |
+| <span style="color:#B42318">$q_{\text{pd}}$</span> | per-harmonic phase diffusion | rig | nothing | [0, 0.02] Hz/order | [0.02, 0.05] |
+| <span style="color:#B42318">$\psi_{m\rho k}$</span> | static per-mic line phase | rotor | nothing (drawn uniform) | physics, not fitted | physics, not fitted |
+| <span style="color:#B42318">$\sigma_b,\tau_b,\sigma_\theta,\tau_\theta$</span> | floor level and tilt drift | rig | nothing | [1,2] dB, [1,4] s, [0,0.5], — | same inherited ranges |
+| <span style="color:#B42318">$u_m$</span> | per-mic low-band modulation | mic | nothing | not used | inherited [2.5,4.0] dB, corner 400–600 Hz |
+| <span style="color:#0969DA">$\lambda,\pi_\rho,z_{\rho j},\varepsilon_{\rho k},\delta_\rho,v$</span> | clip draws | clip | integrated out | — | — |
+| <span style="color:#0969DA">$h_{\rho k},\xi_\rho,b,\theta,n_m$</span> | frame draws | frame | integrated out | — | — |
+
+Three renderer settings are **not** model parameters and carry no
+identifiability claim: the tone-bank size (80 harmonics drawn, profile padded
+to 200), the profile truncation at measured support, and `render_reuse` (how
+many training samples share one synthesized clip). They affect cost and
+coverage, not the distribution's shape.
 
 # Part II — The estimation
 
@@ -466,9 +594,137 @@ Current state of the presets rendered below:
 
 Coverage and the curve bar pass; the classifier bar does not.
 
-# Part III — Listen, look, and diagnose
+# Part III — The fitted rigs, parameter by parameter
 
-## 6. What is compared {.unnumbered}
+Every figure below is built by
+`docs/explainers/rig-model-listening/params.py` directly from the two accepted
+summaries, so nothing here can drift from what the renderer uses. Colours of
+§2.6 apply: what you see is measured unless the caption says otherwise.
+
+## 6. The line amplitudes
+
+The profile is the largest object in the model — one number per order, per
+rotor, plus a population — and it is the one the ear notices first.
+
+![](rig-model-listening/params_profile.png){width=100%}
+
+Stem height is the rig mean $A_k$; the four dashes at each order are that
+order's four rotors, $A_k + \Delta_{\rho k}$; the band is the clip-to-clip
+$\pm1\sigma$ that $B_{jk}$ and $s_k$ produce together. Three things to see:
+
+* **Both rigs peak at the blade-passing order** ($k=2$: $+22.5$ dB on
+  Michael's, $+11.6$ on DREGON) and both keep a two-blade even/odd alternation
+  for the first ~20 orders. Michael's is far more sharply peaked, DREGON far
+  flatter — audible as a hum versus a broadband whirr.
+* **Michael's rotors are strongly unequal at every order.** Median over the
+  measured support, the four deviations are $(-9.8,\ -1.0,\ +1.8,\ +9.1)$ dB —
+  a 18.9 dB spread between the quietest and loudest rotor, held across the whole
+  comb. DREGON's four rotors agree to $0.3$ dB. That is one rig with a damaged
+  or differently mounted propeller and one with four matched ones.
+* **DREGON's profile stops being a measurement at $k=91$.** Above it the fit
+  has no likelihood term (those orders sit above the fit band on every frame),
+  the mean collapses by 126 dB into the prior, and the renderer therefore
+  truncates and holds the last measured order. At 80 rev/s that boundary is
+  7.3 kHz — the whole 6–8 kHz band, which is exactly where §9.1 finds DREGON's
+  worst discrepancy.
+
+![](rig-model-listening/params_profile_modes.png){width=100%}
+
+The population modes say *what changes between two clips of the same rig*.
+Michael's mode 1 is a near-flat $\pm2$ dB whole-comb level term — a clip is
+globally brighter or duller. Its mode 2 is the pathology of §9.2: a narrow
+spike of $-13.7$ dB per unit loading sitting exactly at order 64, the edge of
+the calibration band, which is a symmetric Gaussian answer to a one-sided
+reality (most clips show no line there; a few show a strong one).
+
+## 7. Widths, floor, array, dynamics, shaft
+
+### 7.1 The width law is the model's weakest link
+
+![](rig-model-listening/params_width.png){width=100%}
+
+One affine rig law $\gamma_0 + \gamma_{\text{slope}}k$ times a per-rotor scale
+$w_\rho$ (dashed = the rig law, solid = the four rotors). The horizontal lines
+mark $\gamma = s/2$, where a line's half width equals half the comb spacing and
+the comb stops being a comb. Michael's spread across rotors is more than
+tenfold ($w = 0.28\dots3.24$); DREGON's is tight ($1.67\dots2.80$) but sits
+higher, so **DREGON crosses the merge line at $k\approx45$ while Michael's
+rotor 2 never crosses it at all**. Note this is the *quasi-static* reading of
+the law; Michael's renderer actually runs the diffusive branch, where the same
+$\sigma$ spread is squared (§9.2).
+
+### 7.2 The floor
+
+![](rig-model-listening/params_floor.png){width=100%}
+
+The two rigs have genuinely different noise: DREGON's floor peaks near 1 kHz
+and falls off a cliff (tilt $-6.24$ dB/oct), Michael's is flatter and much
+quieter relative to its lines. And that ratio is the striking number — the comb
+sits **45 dB** above Michael's floor against **25.6 dB** on DREGON, with the
+clip-to-clip spread five times larger on Michael's (2.48 versus 0.49 dB). One
+rig is a tonal source in quiet air; the other is a tonal source inside its own
+broadband roar.
+
+### 7.3 The array
+
+![](rig-model-listening/params_mics.png){width=100%}
+
+$g_{m\rho}$ is a full $8\times4$ matrix on both rigs — a microphone hears the
+four rotors at genuinely different levels, which is the geometry the array
+actually has, and the spread ($\pm7$ dB on Michael's) is larger than any
+free-field distance ratio would give. Beyond it each rig needs exactly *one*
+more array term, and a different one: Michael's a broadband per-microphone gain
+(a channel-gain mismatch), DREGON a per-microphone **floor** offset (diaphragm
+flow noise that does not scale with the lines). Adding the other term to either
+rig lost on held-out likelihood.
+
+### 7.4 Dynamics and the speed laws — Michael's rig only
+
+![](rig-model-listening/params_dynamics.png){width=100%}
+
+Left: the one OU component the leave-one-rotor-out check kept, and the white
+term that is deliberately *not* transferred (it is envelope estimation noise,
+not physics). Middle: the per-order residual spread the process has to
+represent — 7 dB at $k\approx6$ falling to 3.2 dB at $k=64$, against the single
+transferred $\sigma_{\text{amp}} = 2.90$ dB, so the fitted process is a
+deliberate under-statement at low orders. Right: the speed laws, and the reason
+they matter — $q = 3.93$ against $q_{\text{fl}} = 3.46$ leaves the comb
+$+0.5$ dB/dB of prominence growth with speed, whereas DREGON's inherited
+$q = q_{\text{fl}} = 2.5$ leaves exactly **zero** (§9.1 iii). The seven
+per-band floor slopes run 1.0 to 5.0, which is real heterogeneity that one
+exponent cannot carry.
+
+### 7.5 The two shaft populations
+
+![](rig-model-listening/params_shaft.png){width=100%}
+
+Each dot is one training clip's fitted shaft-minus-label offset for one rotor.
+The heavy tails are visible and they are not symmetric noise: the $\pm3$ rev/s
+outliers belong to the rotors whose lines are widest, i.e. whose carrier is
+worst localized, which is why the scale is taken robustly (shaded) rather than
+as a standard deviation (dashed). DREGON's label is genuinely three times worse
+than Michael's — 1.38 against 0.41 rev/s — and both estimates are shrunk by a
+zero-centred prior, so both understate. Right: the clip-common width factor,
+the "this segment was gustier" term, whose bootstrap interval reaches zero on
+both rigs; it is kept because four rotors moving together cannot be produced by
+independent per-rotor noise, but it is the weakest number in the model.
+
+### 7.6 The calibration, and where the one-SE rule bit
+
+![](rig-model-listening/params_selection.png){width=100%}
+
+Left: the render calibration $\hat c_k$ of §4.4 — DREGON needs $-2$ to $-5$ dB
+across the comb, Michael's a much larger $-10$ dB with a strong low-order
+ripple, on top of level shifts of $+1.4$ and $+10.6$ dB. A correction this
+large is a warning, not a triumph: it is the part of the profile the spectral
+likelihood could not see. Middle and right: the two places the
+one-standard-error rule chose a simpler model than the argmax — profile rank
+1 instead of 6, and one amplitude timescale instead of two. In both cases the
+error bars overlap the maximum, so the argmax would have been noise-fitting.
+
+# Part IV — Listen, look, and diagnose
+
+## 8. What is compared {.unnumbered}
 
 Every row is one real clip (one microphone, level-matched) and **three**
 synthetic renders on *that clip's own rotor-speed trajectories*:
@@ -512,7 +768,7 @@ for rig, title in (("dregon", "DREGON"), ("michaels", "Michael's rig")):
         print("</tr></table>\n")
 ```
 
-## 7. Why the two rigs fail in opposite directions
+## 9. Why the two rigs fail in opposite directions
 
 The discrepancy is not impressionistic. Measuring line **prominence** on the
 assets above — the median over frames of (95th percentile − median) of the
@@ -532,7 +788,7 @@ lines and low when it is a continuum:
 
 Two opposite failures, and both trace to identifiable lines of Part I.
 
-### 7.1 DREGON loses its high comb: the width law swallows it
+### 9.1 DREGON loses its high comb: the width law swallows it
 
 Real DREGON keeps sparse, pronounced lines at 6–8 kHz, and they get *stronger*
 with speed (9.0 dB at hover → 12.3 dB in the room-1 cruise). The fitted render
@@ -582,7 +838,7 @@ degree of freedom that can produce that. (Michael's, where the decomposition
 gave $q = 3.93$ against $q_{\text{fl}} = 3.46$, does have one — a $+0.5$
 exponent of headroom.)
 
-### 7.2 Michael's grows a high harmonic it should not have
+### 9.2 Michael's grows a high harmonic it should not have
 
 At cruise, Michael's fitted render is 3.6 dB *too* peaky at 4–6 kHz, visible in
 the figure as one bright, isolated, slowly drifting line near 4.5 kHz — order
@@ -622,10 +878,10 @@ mechanism for a line being *absent*.
 **(iii) Above order 109 Michael's profile is also a flat hold** (−14.35 dB), so
 at cruise the render carries lines to Nyquist at a constant level while the
 real recording's high orders fade. This is the same truncation as DREGON's
-(§7.1 ii), but because Michael's support reaches 7.7 kHz at cruise speed it
+(§9.1 ii), but because Michael's support reaches 7.7 kHz at cruise speed it
 bites only in the top octave.
 
-### 7.3 The common cause worth naming
+### 9.3 The common cause worth naming
 
 The two rigs are rendered in **different physical regimes** — DREGON
 quasi-static ($\propto k$), Michael's diffusive ($\propto k^2$) — while the
