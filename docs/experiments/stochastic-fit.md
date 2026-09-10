@@ -1120,3 +1120,46 @@ prediction, not a result.
   `render_reuse: 48`, the fitted rig stream runs ~5 it/s at batch 128 on 32
   cores = **~1.75 min/epoch** (run `v2r3w2e7`), i.e. within 1.6x of the
   real-noise floor and faster than the family it replaces.
+
+## The first fitted-preset transfer run — 2026-09-10 (`v2r3w2e7`)
+
+`rig_fitted_scv2_unified` on the exported fitted presets, vast A100-80, 32
+workers, ~1.75 min/epoch. Per-view rev/s MAE against the two reference runs
+(the panel's `real_r1` = 22 DREGON clips, channel 0 only; `real_r2` = the same
+clips, all 8 channels; `real_r3` = those plus 15 FLY124 clips, so Michael's
+alone is `(296·r3 − 176·r2)/120`):
+
+|run|stream|r1 DREGON 1ch|r2 DREGON 8ch|r3 both|Michael's (derived)|static_mix|
+|---|---|---:|---:|---:|---:|---:|
+|`ltdj9hl2`|**real** noise|4.07|3.78|**3.32**|2.65|21.93|
+|`7rf8rng7`|pre-fit rig|41.56|38.75|26.57|8.69|1.45|
+|`v2r3w2e7` @ep102|fitted rig|36.56|18.90|13.42|5.38|3.51|
+|`v2r3w2e7` **best (ep 22)**|fitted rig|**10.01**|**8.87**|**9.97**|~11.6|8.4|
+
+Four things this says, in order of importance.
+
+1. **Michael's arm transfers; DREGON's does not.** At the plateau Michael's
+   is 5.4 rev/s against real-trained 2.65 — within a factor two — while
+   DREGON is 18.9 against 3.78, a factor five. That maps exactly onto how
+   much of each rig was measured: Michael's got the envelope instruments
+   (profile rank, OU amplitude process, both speed laws), DREGON inherited
+   the amplitude process, both exponents and the width regime.
+2. **The plateau is synthetic overfitting, not saturation.** The best real
+   score is at **epoch 22** (r3 9.97, and crucially r1 10.01 ≈ r2 8.87 ≈ r3),
+   after which single-channel DREGON collapses from 10 to 36 while the
+   multichannel views hold and `static_mix` keeps improving 8.4 → 3.5. The
+   network is progressively trading single-channel spectral cues — which are
+   the mis-specified ones — for cross-channel structure, which the renderer
+   does get right (mic gains, shared lines, per-mic phase).
+3. **Model selection is being driven by the synthetic half.** The stopping
+   control is `overall_macro` = 0.5·`real_r3` + 0.5·`synthetic_overall`, and
+   the synthetic half improves monotonically, so the run neither stops nor
+   reduces LR while its real score doubles. Any future transfer run should
+   select on `real_overall`.
+4. **The r1 versus r2 gap is the diagnostic to steer by.** Real training
+   shows almost no channel-count dependence (4.07 → 3.78); the fitted stream
+   shows 36.6 → 18.9. A synthetic clip whose *single-channel* spectrum were
+   right would not need eight microphones. So the remaining error lives in
+   per-channel spectral structure — line widths, the high-order profile and
+   the speed-invariant prominence — and not in the array model.
+
