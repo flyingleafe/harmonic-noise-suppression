@@ -402,6 +402,8 @@ def test_zero_topology_correction_preserves_the_continuous_basis() -> None:
         rank_cv_nll_per_order=[0.0],
         rank_cv_se_per_order=[0.0],
         smoothing_lambda=1.0,
+        lambda_cv_score=[0.0],
+        lambda_cv_se=[0.0],
         observed_orders=3,
         standardized_rmse_before=0.0,
         standardized_rmse_after=0.0,

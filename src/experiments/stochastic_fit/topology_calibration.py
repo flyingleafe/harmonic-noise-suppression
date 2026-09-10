@@ -27,6 +27,8 @@ class TopologyCalibration:
     rank_cv_nll_per_order: list[float]
     rank_cv_se_per_order: list[float]
     smoothing_lambda: float
+    lambda_cv_score: list[float]
+    lambda_cv_se: list[float]
     observed_orders: int
     standardized_rmse_before: float
     standardized_rmse_after: float
@@ -122,8 +124,8 @@ def fit_topology_calibration(
         raise ValueError("topology calibration needs at least three matched clips")
     n_folds = min(5, n_clips)
     fold_index = np.arange(n_clips) % n_folds
-    best_score = float("inf")
-    smoothing = float(lambdas[0])
+    scores: list[float] = []
+    score_se: list[float] = []
     for candidate in lambdas:
         errors: list[np.ndarray] = []
         for fold in range(n_folds):
@@ -141,11 +143,30 @@ def fit_topology_calibration(
                 (residual[valid] / np.broadcast_to(robust_std, residual.shape)[valid]) ** 2
             )
         if not errors:
+            scores.append(float("inf"))
+            score_se.append(0.0)
             continue
-        score = float(np.mean(np.concatenate(errors)))
-        if score < best_score:
-            best_score = score
-            smoothing = float(candidate)
+        per_fold = np.asarray([float(np.mean(fold_errors)) for fold_errors in errors])
+        scores.append(float(per_fold.mean()))
+        score_se.append(
+            float(per_fold.std(ddof=1) / np.sqrt(per_fold.size)) if per_fold.size > 1 else 0.0
+        )
+    best = int(np.argmin(scores))
+    # One standard error, on the SMOOTHNESS too. Ten training clips over 64
+    # orders make neighbouring lambdas statistically indistinguishable, and
+    # taking the argmin buys a wiggly correction that does not survive to a
+    # held-out recording (measured: a round-2 argmin correction cut the
+    # training standardized RMSE to 0.39 and made the held-out predictive check
+    # worse on every axis). The largest lambda within one SE of the best is the
+    # smoothest correction the training folds actually support.
+    within = [
+        index
+        for index, score in enumerate(scores)
+        if score <= scores[best] + score_se[best] and np.isfinite(score)
+    ]
+    smoothing = float(lambdas[max(within)]) if within else float(lambdas[best])
+    lambda_cv_score = scores
+    lambda_cv_se = score_se
 
     def complete(values: np.ndarray) -> np.ndarray:
         reduced = np.nanmedian(values, axis=1)
@@ -219,6 +240,8 @@ def fit_topology_calibration(
         rank_cv_nll_per_order=rank_scores.tolist(),
         rank_cv_se_per_order=rank_se.tolist(),
         smoothing_lambda=smoothing,
+        lambda_cv_score=lambda_cv_score,
+        lambda_cv_se=lambda_cv_se,
         observed_orders=int(observed.sum()),
         standardized_rmse_before=before,
         standardized_rmse_after=after,

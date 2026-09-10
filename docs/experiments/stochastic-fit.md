@@ -830,6 +830,60 @@ slowest turning rotor, so fitted profiles are held out to 200 orders past their
 unconstrained tail (DREGON's mean curve falls from −14 dB at k 91 to −140 dB by
 k 106 — orders that sit above the fit band on every frame and are pure prior).
 
+### Held-out predictive gate: two of three bars pass
+
+All rows are FLY125 → FLY124, seed 570, 4 draws/clip, `--classifier`; bars are
+coverage ≥ 0.80, curve RMSE ≤ 1.0, bootstrap upper AUC < 0.80 (the upper limit
+preregistered from the false-rejection calibration: 0.70 rejects 44.5% of
+real-vs-real splits, 0.80 rejects 4%).
+
+| candidate | AUC | AUC 95% upper | coverage | curve RMSE |
+|---|---:|---:|---:|---:|
+| `decomp4-calibrated-1se` (per-mic phase, diffusive) | 0.839 | 0.946 | 0.769 | 0.517 |
+| + envelope dynamics + speed laws | 0.838 | 0.946 | 0.763 | 0.524 |
+| + label error (std 1.10) + quasi-static tau | 0.952 | 0.999 | 0.677 | 1.014 |
+| + label error (robust 0.41) + quasi-static tau | 0.976 | 1.000 | 0.623 | 1.277 |
+| **+ label error (robust 0.41), diffusive tau** | **0.804** | **0.904** | **0.819** | **0.444** |
+| + round-2 calibration (argmin lambda) | 0.987 | 1.000 | 0.724 | 0.867 |
+| + round-2 calibration (one-SE lambda) | 0.909 | 0.978 | 0.808 | 0.690 |
+
+DREGON descriptive (source-index 0, seed 670, no classifier): coverage 0.558 →
+**0.734** and curve RMSE 1.71 → 1.80 once the label error is carried; the
+profile is still the Whittle one, and its curve error is what a room2
+decomposition would address.
+
+Coverage and the curve bar now pass. The classifier still separates at
+AUC 0.804 (upper 0.904), on two features: `raw_margin_k64` (real −7.9 dB vs
+synthetic +0.7) and `raw_visible_gt0` (54.3 vs 57.3 orders). Order 64 sits at
+4.5 kHz on Michael's cruise — the very top of the comb — and order 3 remains
+deeper in real data (−23 vs −11 dB) than any mean correction reproduces.
+
+### Three things that did NOT work, and are not to be retried blindly
+
+1. **A second amplitude timescale.** Leave-one-rotor-out CV plus one SE keeps
+   one OU component; the planned renderer extension is unnecessary.
+2. **The quasi-static jitter regime.** Justified from the width-exponent test,
+   it was rejected by the held-out check (curve RMSE 0.44 → 1.28). The test
+   measures the total width including its nuisance intercept, so it does not
+   identify the regime the renderer needs.
+3. **A second round of topology calibration.** With the argmin smoothing it
+   drives the training standardized RMSE to 0.39 and every held-out axis
+   backwards; with one-SE smoothing (now the default — `lambda_cv_score`,
+   `lambda_cv_se`) it is milder and still worse than no second round. Ten
+   training clips over 64 orders do not support a second mean correction on top
+   of a render that already passes the curve bar.
+
+Because the envelope amplitude at order `k` integrates the floor across the
+decomposition's own passband (`bw_rps * k` Hz), the estimated in-band floor
+overtakes the measured line power at `k ~ 16` and exceeds it eightfold by
+`k = 64` on FLY125. The absolute size of that correction depends on the
+Vold-Kalman filter's effective noise bandwidth, which is not calibrated here,
+so the high-`k` profile is left as fitted — but it is the leading suspect for
+the remaining `raw_margin_k64` gap, and calibrating that bandwidth against the
+periodogram margins is the next principled step rather than another mean
+correction.
+
+
 ## Prior conditional-fit conclusion (superseded by the population correction)
 
 Answer to "wrong ranges or wrong family": the realized family already
