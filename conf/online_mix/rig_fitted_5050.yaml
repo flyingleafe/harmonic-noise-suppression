@@ -105,8 +105,8 @@ sources:
       - -14.0
       - -7.0
       floor_static_rel:
-      - 0.1
-      - 0.35
+      - 0.0024756852071732283
+      - 0.0024756852071732283
       harm_gp_kernel: ou
       harm_gp_std_db:
       - 3.0
@@ -2017,6 +2017,7 @@ sources:
       shaft_jitter_log_std:
       - 0.3211933129836242
       - 0.3211933129836242
+    amp_rps_exponent_floor: 2.5
     fitted_from: omnirun-outputs/pop-dregon-final-w.json
   - kind: stochastic
     weight: 0.4
@@ -2118,8 +2119,8 @@ sources:
       - -24.0
       - -16.0
       floor_static_rel:
-      - 0.1
-      - 0.35
+      - 9.244565285276204e-17
+      - 9.244565285276204e-17
       harm_gp_kernel: ou
       harm_gp_std_db:
       - 2.9002381507162363
@@ -4221,6 +4222,7 @@ sources:
       shaft_jitter_log_std:
       - 0.6330240696243405
       - 0.6330240696243405
+    amp_rps_exponent_floor: 3.4615761512118355
     fitted_from: omnirun-outputs/pop-michaels-final-w.json
   - kind: silence
     weight: 0.2
