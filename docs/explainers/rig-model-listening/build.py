@@ -1,9 +1,17 @@
 """Build the assets of ``docs/explainers/rig-model-listening.qmd``: for every
-chosen real clip, the real audio (one microphone), a draw of the matching rig
-preset rendered on the SAME rotor-speed trajectories, and — for contrast — a
-draw of the old hand-ranged family (``conf/online_mix/salv2_stoch.yaml``
-defaults, stochastic line mode). Audio is level-matched; spectrograms share
-one colour scale per row.
+chosen real clip, the real audio (one microphone) and three synthetic renders
+driven by the SAME rotor-speed trajectories —
+
+* ``fit``  the FITTED presets of 2026-09-10 (`pop-michaels-final-w.json`,
+  `pop-dregon-final-w.json`), pushed through
+  ``raw_predictive.population_ranges`` — the very function the
+  posterior-predictive gate renders with, so what you hear is what was gated;
+* ``rig``  the earlier hand-ranged rig presets (``rig_fm_5050.yaml``), the
+  starting point of the fitting campaign;
+* ``old``  the pre-rig family (``StochasticRanges()`` defaults, filtered-noise
+  lines) the first synthetic-only regressors were trained on.
+
+Audio is level-matched; spectrograms share one colour scale per row.
 
 Run from the repo root::
 
@@ -25,9 +33,18 @@ import yaml
 
 from data_processing import stochastic_rotor_noise as srn
 from experiments.stochastic_fit import diagnostics as D
+from experiments.stochastic_fit.raw_predictive import population_ranges
 
 HERE = Path(__file__).resolve().parent
-POLICY = HERE.parents[2] / "conf/online_mix/rig_fm_5050.yaml"
+ROOT = HERE.parents[2]
+POLICY = ROOT / "conf/online_mix/rig_fm_5050.yaml"
+#: The fitted summaries the gate accepted, per rig. Derived artefacts, so they
+#: live outside git; regenerate with the pipeline in
+#: docs/experiments/stochastic-fit.md if they are missing.
+FITTED = {
+    "dregon": ROOT / "omnirun-outputs/pop-dregon-final-w.json",
+    "michaels": ROOT / "omnirun-outputs/pop-michaels-final-w.json",
+}
 SR = 16000
 CLIPS = {
     "dregon": [
@@ -58,6 +75,27 @@ def spectrogram_db(x: np.ndarray, n_fft: int = 2048, hop: int = 512) -> np.ndarr
     return 10.0 * np.log10(np.abs(np.fft.rfft(frames, axis=-1)) ** 2 + 1e-12).T
 
 
+def fitted_arm(rig: str, base_ranges: dict) -> tuple[srn.StochasticRanges, dict]:
+    """The gated preset: ranges through the gate's own transfer, plus its rig scalars.
+
+    ``population_ranges`` carries the profile, floor curve, widths, microphone
+    structure, amplitude process, label error and width population; the three
+    speed-law scalars live on the fitted rig and are applied to the drawn
+    parameters exactly as ``render_matched_population`` does.
+    """
+    path = FITTED[rig]
+    if not path.exists():
+        raise FileNotFoundError(f"{path}: fitted summary missing — see the pipeline in the log")
+    summary = json.loads(path.read_text())
+    ranges = srn.StochasticRanges.from_dict(population_ranges(summary, base_ranges))
+    scalars = dict(
+        amp_rps_exponent=float(summary["rig"]["amp_exp"]),
+        amp_rps_exponent_floor=float(summary["rig"]["floor_exp"]),
+        floor_static_rel=float(summary["rig"]["floor_static_rel"]),
+    )
+    return ranges, scalars
+
+
 def main() -> None:
     pol = yaml.safe_load(POLICY.read_text())
     presets = {"dregon": pol["sources"]["noise"][0], "michaels": pol["sources"]["noise"][1]}
@@ -67,6 +105,7 @@ def main() -> None:
     for rig, items in CLIPS.items():
         src = presets[rig]
         ranges = srn.StochasticRanges.from_dict(src["ranges"])
+        fit_ranges, fit_scalars = fitted_arm(rig, src.get("ranges", {}))
         for cid, label in items:
             clip = D.load_clip_cached(cid)
             rps = clip.rps.astype(np.float64)
@@ -80,6 +119,19 @@ def main() -> None:
                     40,
                     200,
                 )
+            )
+            fitted_profile = fit_ranges.profile_mean_db or ()
+            n_fit = min(n_harm, len(fitted_profile)) if fitted_profile else n_harm
+            fit_params = srn.sample_params(
+                rng, fit_ranges, n_rotors=4, n_harmonics=n_fit, sample_rate=SR
+            ).with_(**fit_scalars)
+            fit, _ = srn.synthesize(
+                fit_params,
+                rps,
+                rng=rng,
+                n_mics=8,
+                mic_gain_db=tuple(src["mic_gain_db"]),
+                line_mode="fm",
             )
             params = srn.sample_params(rng, ranges, n_rotors=4, n_harmonics=n_harm, sample_rate=SR)
             new, _ = srn.synthesize(
@@ -96,7 +148,12 @@ def main() -> None:
             old, _ = srn.synthesize(
                 old_params, rps, rng=rng, n_mics=8, mic_gain_db=(-12.0, 0.0), line_mode="stochastic"
             )
-            trio = {"real": level(clip.audio[MIC]), "rig": level(new[MIC]), "old": level(old[MIC])}
+            trio = {
+                "real": level(clip.audio[MIC]),
+                "fit": level(fit[MIC]),
+                "rig": level(new[MIC]),
+                "old": level(old[MIC]),
+            }
             slug = f"{rig}_{cid}"
             for name, x in trio.items():
                 sf.write(HERE / f"{slug}_{name}.wav", x, SR)
@@ -104,7 +161,7 @@ def main() -> None:
             vmax = max(np.percentile(s, 99.5) for s in specs.values())
             vmin = vmax - 70
             fig, axes = plt.subplots(
-                1, 4, figsize=(16, 3.6), gridspec_kw=dict(width_ratios=[1.6, 3, 3, 3])
+                1, 5, figsize=(19, 3.4), gridspec_kw=dict(width_ratios=[1.5, 3, 3, 3, 3])
             )
             t = np.arange(rps.shape[1]) / SR
             for r in range(rps.shape[0]):
@@ -116,9 +173,11 @@ def main() -> None:
                 axes[1:],
                 [
                     ("real", "real recording"),
-                    ("rig", "rig preset (same RPS)"),
-                    ("old", "old family (same RPS)"),
+                    ("fit", "FITTED preset (same RPS)"),
+                    ("rig", "pre-fit rig preset"),
+                    ("old", "old family"),
                 ],
+                strict=True,
             ):
                 s = specs[name]
                 ax.imshow(
