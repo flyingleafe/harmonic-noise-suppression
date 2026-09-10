@@ -1145,21 +1145,37 @@ Four things this says, in order of importance.
    (profile rank, OU amplitude process, both speed laws), DREGON inherited
    the amplitude process, both exponents and the width regime.
 2. **The plateau is synthetic overfitting, not saturation.** The best real
-   score is at **epoch 22** (r3 9.97, and crucially r1 10.01 ≈ r2 8.87 ≈ r3),
-   after which single-channel DREGON collapses from 10 to 36 while the
-   multichannel views hold and `static_mix` keeps improving 8.4 → 3.5. The
-   network is progressively trading single-channel spectral cues — which are
-   the mis-specified ones — for cross-channel structure, which the renderer
-   does get right (mic gains, shared lines, per-mic phase).
+   score is at **epoch 22** (r3 9.97, r2 8.87, r1 10.01), after which every
+   real view degrades — r2 8.9 → 18.9, r1 10.0 → 36.6 — while `static_mix`
+   keeps improving 8.4 → 3.5 and the LR never leaves its maximum. The model is
+   single-channel throughout; r1 and r2 differ only in which validation
+   samples are scored, so this is not a channel-count effect.
 3. **Model selection is being driven by the synthetic half.** The stopping
    control is `overall_macro` = 0.5·`real_r3` + 0.5·`synthetic_overall`, and
    the synthetic half improves monotonically, so the run neither stops nor
    reduces LR while its real score doubles. Any future transfer run should
    select on `real_overall`.
-4. **The r1 versus r2 gap is the diagnostic to steer by.** Real training
-   shows almost no channel-count dependence (4.07 → 3.78); the fitted stream
-   shows 36.6 → 18.9. A synthetic clip whose *single-channel* spectrum were
-   right would not need eight microphones. So the remaining error lives in
-   per-channel spectral structure — line widths, the high-order profile and
-   the speed-invariant prominence — and not in the array model.
+4. **The r1/r2 *ratio* is a channel-locked error, and it is ours.** `real_r1`
+   is channel 0 of the same 22 clips that `real_r2` scores in full, so with a
+   single-channel model the two differ only by sample selection. Channel 0 is
+   mildly harder for everyone — the ratio is 1.08 for the real-trained run and
+   1.07 for the pre-fit stream — but **1.93** for the fitted stream. Something
+   in the fitted presets is wrong *at microphone index 0 specifically*, which
+   the pre-fit hand-ranged presets did not do.
+
+   The mechanism is the export: `population_ranges` pins
+   `fixed_mic_gain_db` (8x4) and `fixed_mic_floor_db` (8) from the rig fit and
+   `synthesize` applies them **at fixed indices, with no permutation**
+   (`stochastic_rotor_noise.py:1459-1476`). Those values were fitted on room 2
+   and the panel is room 1, so every synthetic clip pins one recording's
+   per-microphone character onto the index the panel fills with another's.
+   DREGON's fitted floor offsets span -8.0 to +3.4 dB, so the mismatch is
+   several dB of floor on one channel, always the same channel. The fix is to
+   treat the per-microphone vector as a *population* — permute per clip, or
+   draw from the fitted spread — because the microphone index carries no
+   physics that was measured. Michael's arm is unaffected: its `mic_floor` was
+   off, so its per-mic vector is all zeros.
+
+   (The earlier reading of this table as "multichannel input helps" was wrong:
+   the model never sees more than one channel.)
 
