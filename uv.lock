@@ -923,16 +923,16 @@ wheels = [
 
 [[package]]
 name = "dload-ml"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
     { name = "click" },
     { name = "msgpack" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7a/4b/aef775162ce2e105417f47f5c6994834ba58dc628255ce4db8ad8a98b0c8/dload_ml-0.3.0.tar.gz", hash = "sha256:bb0b7c26b657d88950e1d64ba5a1c614c378ca3b32f7de067b8829373b37ae93", size = 176273, upload-time = "2026-07-08T15:31:02.13Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/ef/673b49ccccb502cb029978394017a56a258dbbc16bc5bb9fe8b0a7727496/dload_ml-0.3.1.tar.gz", hash = "sha256:120f83bf13859c32bcdfd8330f033b2c4a495a30d25b82a1b3446f8cdb4b9276", size = 180631, upload-time = "2026-09-10T16:51:11.365Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/36/7a/36e45bb8a2418ad422cf3d8e461434134ec75299f4929c4e01d9c6e3d611/dload_ml-0.3.0-py3-none-any.whl", hash = "sha256:d1380730dbfe120e3e78d92727a1d01928787452da457b251fae74007cfbe2d5", size = 41739, upload-time = "2026-07-08T15:31:01.069Z" },
+    { url = "https://files.pythonhosted.org/packages/13/69/774ea8a301c215f08f61f0b4af932a2ff414075eb1aada06937f790ece5a/dload_ml-0.3.1-py3-none-any.whl", hash = "sha256:6a64f619a2ce79f00bcb1681a133b45fc0318940744a33f4b34e3a4b851b1578", size = 46295, upload-time = "2026-09-10T16:51:10.268Z" },
 ]
 
 [[package]]
@@ -1025,7 +1025,7 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.34" },
     { name = "datasets", specifier = ">=4.5.0" },
     { name = "demucs", specifier = ">=4.0.1" },
-    { name = "dload-ml", specifier = ">=0.3.0" },
+    { name = "dload-ml", specifier = ">=0.3.1" },
     { name = "einops", specifier = "==0.8.1" },
     { name = "gdown", specifier = ">=5.2" },
     { name = "gpytorch", specifier = ">=1.15.2" },
