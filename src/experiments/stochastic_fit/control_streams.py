@@ -59,6 +59,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+import numpy as np
+
 #: The timbre family, shared by both controls so that C1 and C2 differ ONLY in
 #: their dynamics. Every entry is wider than either rig's fitted value and
 #: brackets both.
@@ -178,6 +180,155 @@ DIVERSE_DYNAMICS: dict[str, Any] = {
 }
 
 
+# ── containment ──────────────────────────────────────────────────────────────
+#
+# A diverse family that does not CONTAIN the fitted rigs tests the wrong thing.
+# If a range chosen by hand for variety happens to exclude the measured value,
+# the run answers "does a model trained on a family that excludes reality
+# transfer to reality", whose answer is known and uninteresting. So the ranges
+# below are not final: every one is widened, programmatically, until it holds
+# both fitted rigs' own ranges with margin. Measured before the widening, the
+# hand ranges missed on eleven axes — Michael's 0.003-0.008 s shaft correlation
+# time against a [0.1, 0.6] prior, both rigs' ~0 static floor against [0.05,
+# 0.4], both rigs' 0.4-0.9 Hz/order width against [0.02, 0.50], and more.
+#
+# Widening cannot fix the PROFILE. The fitted arms carry a measured 200-order
+# mean plus a basis; the parametric family here is a power law with blade
+# emphasis and independent per-order jitter, and no setting of it produces the
+# correlated order-to-order structure a real comb has. The two neighbourhood
+# arms below carry the fitted profile populations themselves, with their
+# residual spread inflated and the wide dynamics attached — so the measured
+# timbres are in support, surrounded rather than merely included.
+
+
+def _span(values: Any) -> tuple[float, float] | None:
+    """``(min, max)`` over a scalar, a range or a fitted per-rotor vector."""
+    if values is None:
+        return None
+    arr = np.atleast_1d(np.asarray(values, dtype=np.float64)).ravel()
+    if arr.size == 0 or not np.isfinite(arr).all():
+        return None
+    return float(arr.min()), float(arr.max())
+
+
+#: Fitted keys that carry the same quantity under a different name, because a
+#: fitted preset pins per-rotor vectors where the family samples a range.
+_ALIASES: dict[str, tuple[str, ...]] = {
+    "gamma0_hz": ("fixed_gamma0_hz",),
+    "gamma_slope_hz": ("fixed_gamma_slope_hz",),
+    "shaft_jitter_rps": ("fixed_shaft_jitter_rps",),
+}
+
+
+def widen(key: str, base: Any, fitted: list[dict[str, Any]], *, grow: float = 0.2) -> Any:
+    """``base`` extended to contain every fitted value of ``key``, plus margin.
+
+    The margin is applied only where a FIT is the binding constraint: a range
+    already holding both rigs is returned untouched, and one that clips them is
+    opened past them, because a family whose edge sits exactly on the measured
+    value puts half of that neighbourhood outside its own support. Padding a
+    bound the hand range already cleared would walk ranges past their physical
+    meaning — ``floor_rel_db`` into positive numbers, where the floor sits over
+    the comb.
+
+    An identically zero range is never widened. C1's zeros ARE C1.
+    """
+    if not isinstance(base, (list, tuple)) or len(base) != 2:
+        return base
+    lo, hi = float(base[0]), float(base[1])
+    if lo == 0.0 and hi == 0.0:
+        return base
+    fit_lo, fit_hi = None, None
+    for arm in fitted:
+        ranges = arm.get("ranges") or {}
+        for name in (key, *_ALIASES.get(key, ())):
+            span = _span(ranges.get(name))
+            if span is None:
+                continue
+            fit_lo = span[0] if fit_lo is None else min(fit_lo, span[0])
+            fit_hi = span[1] if fit_hi is None else max(fit_hi, span[1])
+    if fit_lo is None or fit_hi is None:
+        return base
+    pad = grow * max(fit_hi - fit_lo, abs(hi - lo), 1e-9)
+    if fit_lo < lo:
+        lo = fit_lo - pad if fit_lo - pad > 0.0 or fit_lo < 0.0 else 0.0
+    if fit_hi > hi:
+        hi = fit_hi + pad
+    return [round(lo, 6), round(hi, 6)]
+
+
+def contained(policy: dict[str, Any], fitted: dict[str, Any]) -> dict[str, bool]:
+    """Per key, whether the control arm's range holds both fitted rigs."""
+    arms = [a for a in fitted["sources"]["noise"] if a.get("kind") == "stochastic"]
+    wide = policy["sources"]["noise"][0].get("ranges") or {}
+    out: dict[str, bool] = {}
+    for key, value in wide.items():
+        span = _span(value) if isinstance(value, (list, tuple)) and len(value) == 2 else None
+        if span is None:
+            continue
+        ok = True
+        for arm in arms:
+            ranges = arm.get("ranges") or {}
+            for name in (key, *_ALIASES.get(key, ())):
+                fit_span = _span(ranges.get(name))
+                if fit_span is None:
+                    continue
+                ok = ok and span[0] <= fit_span[0] and fit_span[1] <= span[1]
+        out[key] = ok
+    return out
+
+
+def neighbourhood_arm(
+    fitted_arm: dict[str, Any],
+    *,
+    weight: float,
+    dynamics: dict[str, Any],
+    inflate_residual_db: float = 3.0,
+    rotor_contrast_std_db: float = 3.0,
+) -> dict:
+    """One fitted rig's measured profile population, widened, with C2 dynamics.
+
+    The profile mean, basis and per-rotor deviations stay: they are the measured
+    timbre and the parametric family cannot reproduce them. What widens is the
+    spread around them — the per-order residual is inflated so draws sit in a
+    NEIGHBOURHOOD of the fit rather than on it, the rotor contrast is opened so
+    a clip's rotors can differ more than that rig's did, and the dynamics come
+    from the wide family.
+    """
+    arm = _chassis(fitted_arm)
+    arm["weight"] = weight
+    ranges = copy.deepcopy(fitted_arm.get("ranges") or {})
+    # The residual must cover every harmonic the fitted profile carries, so its
+    # length follows the profile mean rather than whatever the fit exported.
+    n_harm = len(np.atleast_1d(np.asarray(ranges.get("profile_mean_db") or [0.0])).ravel())
+    residual = ranges.get("profile_residual_std_db")
+    base = (
+        np.zeros(n_harm)
+        if residual is None
+        else np.resize(np.atleast_1d(np.asarray(residual, dtype=np.float64)).ravel(), n_harm)
+    )
+    ranges["profile_residual_std_db"] = [
+        float(v) for v in np.hypot(base, float(inflate_residual_db))
+    ]
+    ranges["rotor_contrast_std_db"] = float(
+        max(float(ranges.get("rotor_contrast_std_db") or 0.0), rotor_contrast_std_db)
+    )
+    ranges.update(dynamics)
+    ranges.update(LABEL_ERROR)
+    ranges["min_lines_above_floor"] = 0.30
+    ranges["min_lines_above_floor_per_rotor"] = 0.20
+    # The per-microphone vectors are dropped: microphone INDEX carries no
+    # measured physics, and pinning them is what made channel 0 of DREGON score
+    # twice the error of the full array.
+    for key in ("fixed_mic_gain_db", "fixed_mic_floor_db", "fixed_mic_gain_all_db"):
+        ranges.pop(key, None)
+    ranges.setdefault("mic_gain_all_db", [0.0, 6.0])
+    ranges.setdefault("mic_floor_std_db", [0.0, 3.0])
+    arm["ranges"] = ranges
+    arm["fitted_from"] = fitted_arm.get("fitted_from")
+    return arm
+
+
 def _chassis(arm: dict[str, Any]) -> dict[str, Any]:
     """One fitted arm stripped to what is not a claim about a rig."""
     out = {k: copy.deepcopy(v) for k, v in arm.items() if k not in ("ranges", "fitted_from")}
@@ -185,12 +336,39 @@ def _chassis(arm: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def wide_arm(fitted_arm: dict[str, Any], *, weight: float, dynamics: dict[str, Any]) -> dict:
+def wide_arm(
+    fitted_arm: dict[str, Any],
+    *,
+    weight: float,
+    dynamics: dict[str, Any],
+    fitted: list[dict[str, Any]] | None = None,
+) -> dict:
     """A control arm: the fitted chassis, the wide timbre family, and either
-    the static or the diverse dynamics."""
+    the static or the diverse dynamics.
+
+    ``fitted`` are the arms whose measured ranges the family must contain; the
+    timbre and floor ranges are widened to hold them. The DYNAMICS are widened
+    only when they are meant to be present — C1's zeros are the point of C1 and
+    are left alone.
+    """
     arm = _chassis(fitted_arm)
     arm["weight"] = weight
-    arm["ranges"] = PROFILE_FAMILY | LABEL_ERROR | dynamics
+    ranges = dict(PROFILE_FAMILY | LABEL_ERROR | dynamics)
+    if fitted:
+        # Only the TIMBRE and floor ranges are stretched to the fits. Stretching
+        # a uniform to reach one rig's widest fitted rotor would put half the
+        # family's mass wider than any measurement: widening shaft_jitter_rps to
+        # 1.86 rev/s gave a median half width of 20 Hz at order 16 against an
+        # 80 Hz line spacing, and 16 draws in 150 came out as a merged
+        # continuum — the exact failure of the original stochastic stream. The
+        # fitted extremes live in the neighbourhood arms, which pin them
+        # directly, so the MIXTURE contains them without the wide arm becoming
+        # a harder task than reality.
+        ranges = {
+            key: (widen(key, value, fitted) if key in PROFILE_FAMILY else value)
+            for key, value in ranges.items()
+        }
+    arm["ranges"] = ranges
     return arm
 
 
@@ -204,6 +382,13 @@ def matched_static_arm(fitted_arm: dict[str, Any], *, weight: float) -> dict:
     arm = _chassis(fitted_arm)
     arm["weight"] = weight
     ranges = copy.deepcopy(fitted_arm.get("ranges") or {})
+    # A fitted preset pins per-rotor vectors that OVERRIDE the sampled ranges,
+    # so zeroing `shaft_jitter_rps` while `fixed_shaft_jitter_rps` survives
+    # leaves the lines exactly as wide as the fit made them. Measured on the
+    # first generated file: half width 15 Hz at order 16, on an 80 Hz spacing,
+    # in an arm whose whole purpose is to have no line broadening at all.
+    for key in ("fixed_shaft_jitter_rps", "fixed_gamma0_hz", "fixed_gamma_slope_hz"):
+        ranges.pop(key, None)
     ranges.update(STATIC_OFF)
     ranges.update(LABEL_ERROR)
     ranges["min_lines_above_floor_per_rotor"] = 0.20
@@ -221,7 +406,7 @@ def build_static_policy(fitted: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"expected two fitted rig arms, got {len(stochastic)}")
     out = copy.deepcopy(fitted)
     out["sources"]["noise"] = [
-        wide_arm(stochastic[0], weight=0.5, dynamics=STATIC_OFF),
+        wide_arm(stochastic[0], weight=0.5, dynamics=STATIC_OFF, fitted=stochastic),
         matched_static_arm(stochastic[0], weight=0.15),
         matched_static_arm(stochastic[1], weight=0.15),
         *copy.deepcopy(other),
@@ -236,13 +421,22 @@ def build_diverse_policy(fitted: dict[str, Any]) -> dict[str, Any]:
     other = [a for a in noise if a.get("kind") != "stochastic"]
     if not stochastic:
         raise ValueError("fitted policy has no stochastic arm to take a chassis from")
-    arm = wide_arm(stochastic[0], weight=0.8, dynamics=DIVERSE_DYNAMICS)
+    arm = wide_arm(stochastic[0], weight=0.4, dynamics=DIVERSE_DYNAMICS, fitted=stochastic)
     # The speed laws are measured on the bench, not inherited: line power grows
     # as s^2.196 +- 0.125 over 802 cells and the floor as s^1.400 +- 0.076, so
     # the comb's PROMINENCE grows as s^0.80 instead of being speed-invariant by
     # construction as a single shared exponent makes it.
     arm["amp_rps_exponent"] = 2.196
     arm["amp_rps_exponent_floor"] = 1.400
+    dynamics = {key: widen(key, value, stochastic) for key, value in DIVERSE_DYNAMICS.items()}
     out = copy.deepcopy(fitted)
-    out["sources"]["noise"] = [arm, *copy.deepcopy(other)]
+    out["sources"]["noise"] = [
+        arm,
+        # The measured timbres, surrounded: the parametric family above cannot
+        # reach a 200-order measured profile, so each fitted population enters
+        # with its residual spread inflated and the wide dynamics attached.
+        neighbourhood_arm(stochastic[0], weight=0.2, dynamics=dynamics),
+        neighbourhood_arm(stochastic[1], weight=0.2, dynamics=dynamics),
+        *copy.deepcopy(other),
+    ]
     return out

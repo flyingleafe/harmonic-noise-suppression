@@ -39,14 +39,14 @@ sources:
       - 1.5
       - 8.0
       blade_counts:
-      - 2
-      - 3
-      blade_emphasis_db:
       - 2.0
+      - 3.0
+      blade_emphasis_db:
+      - 0.0
       - 16.0
       bpf_boost_db:
       - 0.0
-      - 14.0
+      - 19.8
       rotor_similarity:
       - 0.3
       - 1.0
@@ -54,7 +54,7 @@ sources:
       - 0.0
       - 4.0
       floor_shape_std_db:
-      - 2.0
+      - 0.0
       - 9.0
       floor_shape_oct:
       - 0.7
@@ -63,10 +63,10 @@ sources:
       - -9.0
       - -1.0
       floor_rel_db:
-      - -22.0
+      - -28.0
       - -2.0
       floor_static_rel:
-      - 0.05
+      - 0.0
       - 0.4
       min_lines_above_floor: 0.3
       min_lines_above_floor_per_rotor: 0.2
@@ -75,7 +75,7 @@ sources:
       - 6.0
       mic_floor_std_db:
       - 0.0
-      - 3.0
+      - 4.1
       shaft_offset_rps: &id010
       - 0.4
       - 1.4
@@ -2029,21 +2029,6 @@ sources:
       line_floor_mean_db: 30.61153368468604
       line_floor_std_db: 0.49202045798301697
       rotor_contrast_std_db: 1.9000747203826904
-      fixed_gamma0_hz:
-      - 6.0085784264265385
-      - 9.334015928275221
-      - 5.721437953727673
-      - 5.556251181174048
-      fixed_gamma_slope_hz:
-      - 0.6067185008426748
-      - 0.9425058223318885
-      - 0.5777243819740754
-      - 0.5610445845427918
-      fixed_shaft_jitter_rps:
-      - 0.5152992494037485
-      - 0.8004907418048594
-      - 0.49067391216850487
-      - 0.47650739658572766
       fixed_mic_gain_db:
       - - -1.3869730234146118
         - -0.9554383754730225
@@ -4215,21 +4200,6 @@ sources:
       line_floor_mean_db: 62.023391183853946
       line_floor_std_db: 2.4825377464294434
       rotor_contrast_std_db: 2.2950844764709473
-      fixed_gamma0_hz:
-      - 3.085093161587338
-      - 0.6187323414408752
-      - 2.288066823632562
-      - 7.169027445593201
-      fixed_gamma_slope_hz:
-      - 0.7988649977119167
-      - 0.16021675347889186
-      - 0.592480162539232
-      - 1.8563734687913893
-      fixed_shaft_jitter_rps:
-      - 0.6784934580437693
-      - 0.13607558150099416
-      - 0.5032063182827586
-      - 1.5766584565208175
       fixed_mic_gain_db:
       - - 0.30363988876342773
         - 2.8719043731689453
