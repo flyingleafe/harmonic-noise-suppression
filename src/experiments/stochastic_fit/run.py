@@ -1377,6 +1377,26 @@ def population_export_policy(args: argparse.Namespace) -> None:
     print(f"wrote {output}", flush=True)
 
 
+def put_results(args: argparse.Namespace) -> None:
+    """Copy a job's result files to R2.
+
+    A remote job's outputs come back through the runner's collection step, and
+    when that step cannot be read the result of an hour of GPU time is simply
+    gone. The fits already talk to R2 for their inputs, so the same bucket is
+    the durable place for their outputs; this makes a job self-delivering
+    instead of dependent on the runner.
+    """
+    client = r2_client()
+    for path in args.path:
+        local = Path(path)
+        if not local.exists():
+            print(f"missing {local}", flush=True)
+            continue
+        key = f"{args.prefix.rstrip('/')}/{local.name}"
+        client.put_object(Bucket=BUCKET, Key=key, Body=local.read_bytes())
+        print(f"put s3://{BUCKET}/{key} ({local.stat().st_size / 1e6:.1f} MB)", flush=True)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1572,12 +1592,16 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="JSON applied over every arm's ranges, e.g. '{\"shaft_offset_rps\": [0, 0]}'",
     )
+    pr.set_defaults(func=population_roundtrip)
     pr.add_argument(
         "--arm-overrides",
         default=None,
         help='JSON applied over every arm\'s top-level keys, e.g. its "rps" block',
     )
-    pr.set_defaults(func=population_roundtrip)
+    pu = sub.add_parser("putr2")
+    pu.add_argument("--path", required=True, action="append", help="local file, repeatable")
+    pu.add_argument("--prefix", default=f"{PREFIX}/results", help="key prefix under the bucket")
+    pu.set_defaults(func=put_results)
     args = ap.parse_args(argv)
     args.func(args)
 
