@@ -838,3 +838,90 @@ def test_marginal_information_returns_the_prior_for_an_out_of_band_order():
     assert info.std_db[0, 8] < 1.0  # a live order is measured
     assert info.std_db[0, in_band + 8] == pytest.approx(10.0, rel=1e-3)  # a dead one is the prior
     assert info.identifiable(3.0)[0, in_band + 8] == np.False_
+
+
+def test_chirp_width_adds_the_sweep_the_labels_imply():
+    """The known part of a line's width comes in without a free parameter.
+
+    Order k of a rotor accelerating at ``ds/dt`` sweeps ``k ds`` hertz across an
+    analysis window of ``1/df`` seconds, and a linear sweep of total width ``W``
+    has half width ``W/2``. A stationary rotor must get nothing.
+    """
+    import numpy as np
+    import torch
+
+    from experiments.stochastic_fit.model import BASE_VARIANT, CombSpectrum, Spec
+
+    sr, n_fft = 16000.0, 2048
+    freqs = np.arange(n_fft // 2 + 1) * (sr / n_fft)
+    times = np.arange(24) * (n_fft / 4) / sr
+    accel = 30.0  # rev/s per second
+    ramp = 80.0 + accel * (times - times[0])
+    spec_kw = dict(BASE_VARIANT)
+    spec_kw.pop("rps_offset")  # the carrier must be the labels for this check
+    flat = Spec(
+        freqs=freqs,
+        times=times,
+        rps=np.tile(np.full_like(times, 80.0), (2, 1)),
+        n_mics=1,
+        n_harm=8,
+        **spec_kw,
+    )
+    ramped = Spec(
+        freqs=freqs, times=times, rps=np.tile(ramp, (2, 1)), n_mics=1, n_harm=8, **spec_kw
+    )
+    with torch.no_grad():
+        still = CombSpectrum(flat).gamma_frames().numpy()
+        moving = CombSpectrum(ramped).gamma_frames().numpy()
+        intrinsic = CombSpectrum(flat).gamma.numpy()
+
+    # A stationary rotor's width is its intrinsic width, on every frame.
+    assert np.allclose(still, intrinsic[:, :, None], atol=1e-5)
+    # A ramping one gains 0.5 * k * |ds/dt| / df, and nothing else.
+    df = float(freqs[1] - freqs[0])
+    for k in (1, 4, 8):
+        expected = intrinsic[0, k - 1] + 0.5 * k * accel / df
+        assert moving[0, k - 1, len(times) // 2] == pytest.approx(expected, rel=1e-3)
+    # The sweep grows with order, so it cannot be mistaken for a constant
+    # offset. Differencing against the stationary rotor removes the intrinsic
+    # width, which grows with order too.
+    added = (moving - still)[0, :, 12]
+    assert added[7] - added[0] == pytest.approx(0.5 * 7 * accel / df, rel=1e-3)
+
+
+def test_corrected_forward_model_can_represent_a_sub_bin_line():
+    """The width floor no longer hides a line narrower than the window.
+
+    The old floor of 0.6 bins was 4.69 Hz at ``n_fft`` 2048, while the bench
+    measures 0.14 Hz at order 4 — so the model could not express a real line at
+    all, and the 4.69 Hz it kept returning was its own floor rather than a
+    measurement. ``window_kernel`` already supplies the window's broadening.
+    """
+    import numpy as np
+    import torch
+
+    from experiments.stochastic_fit.model import BASE_VARIANT, CombSpectrum, Spec
+
+    sr, n_fft = 16000.0, 2048
+    freqs = np.arange(n_fft // 2 + 1) * (sr / n_fft)
+    times = np.arange(8) * (n_fft / 4) / sr
+    spec = Spec(
+        freqs=freqs,
+        times=times,
+        rps=np.full((1, times.size), 80.0),
+        n_mics=1,
+        n_harm=4,
+        free_gamma=True,
+        **dict(BASE_VARIANT),
+    )
+    model = CombSpectrum(spec)
+    with torch.no_grad():
+        model.log_gamma_free.fill_(float(np.log(0.2)))
+        narrow = float(model.gamma.max())
+        spectrum = model.forward().numpy()
+    # 0.2 Hz survives; under the old 0.6-bin floor it came back as 4.69 Hz,
+    # and under a 0.05-bin floor as 0.39 -- still over the bench's 0.14 at k=4.
+    assert narrow == pytest.approx(0.2, rel=1e-3)
+    assert 0.6 * float(freqs[1] - freqs[0]) > 4.0  # the floor it would have hit
+    # and the sub-bin line is still a finite, positive, power-carrying spectrum
+    assert np.isfinite(spectrum).all() and (spectrum > 0).all()

@@ -214,7 +214,7 @@ def roundtrip(
 ) -> dict[str, Any]:
     """Render, fit and compare; returns one record per clip."""
     from .fit import fit_clip
-    from .model import make_spec
+    from .model import BASE_VARIANT, make_spec
 
     rendered = render_from_policy(
         policy_path,
@@ -233,7 +233,7 @@ def roundtrip(
             n_mics=item.clip.audio.shape[0],
             f_max=None,
             k_cap=k_cap,
-            variant={"rps_offset": True, "line_shape": "gauss"},
+            variant=dict(BASE_VARIANT),
         )
         log(
             f"  fitting {item.clip.clip_id}: K={spec.n_harm} "

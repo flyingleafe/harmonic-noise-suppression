@@ -93,6 +93,12 @@ class Spec:
     rps_offset_dt_s: float = 0.5
     amp_rps_exponent: float = 2.5
     window_kernel: bool = True
+    #: Add the width a line acquires from the rate changing ACROSS one analysis
+    #: window, computed from the carrier with no free parameter. Without it the
+    #: fitted width absorbs the sweep, which on a ramp is several hertz at
+    #: modest orders and is what made a comb of pure tones come back 12-70 Hz
+    #: wide. See :meth:`CombSpectrum.gamma_frames`.
+    chirp_width: bool = False
     gamma_min_bins: float = GAMMA_MIN_BINS
     #: The renderer samples each line's density at the bin centres
     #: (``line_bin_integrate=False`` in every training stream); ``True`` uses
@@ -187,6 +193,7 @@ class CombSpectrum(nn.Module):
         self.register_buffer("band", torch.as_tensor(band, device=dev))
         t_rel = np.asarray(spec.times) - float(spec.times[0])
         t_end = float(t_rel[-1])
+        self.t_step = float(t_rel[1] - t_rel[0]) if t_rel.size > 1 else 1.0
 
         # Floor shape: knots in octaves above f_min, linear interpolation.
         ctrl_hz = np.geomspace(spec.f_min, float(freqs[-1]), FLOOR_SHAPE_N_CTRL)
@@ -348,6 +355,37 @@ class CombSpectrum(nn.Module):
         sl = torch.nn.functional.softplus(sl_raw)
         return (g0[:, None] + sl[:, None] * self.k[None, :] ** self._width_power()).clamp_min(floor)
 
+    def gamma_frames(self) -> Tensor:
+        """``(R, K, N)`` half width per frame: intrinsic plus the known chirp.
+
+        A line is not stationary inside an analysis window. The rotor changes
+        speed, so order ``k`` sweeps ``k * ds`` hertz across the window, and a
+        linear sweep of total width ``W`` has a half width ``W / 2``. With a
+        window of ``1 / df`` seconds that is
+
+            gamma_chirp = 0.5 * k * |ds/dt| / df
+
+        which at order 8 on a 10 rev/s per second ramp is 5 Hz — the same size
+        as the widths the fit was returning for a comb of PURE TONES. Section 12
+        of the explainer proves rate drift and line width are exactly degenerate
+        inside one window, so the only way to keep the fitted width meaningful
+        is to put the part that is KNOWN from the labels in as a covariate with
+        no free parameter, leaving the fitted value intrinsic.
+        """
+        gamma = self.gamma
+        if not self.spec.chirp_width:
+            return gamma[:, :, None].expand(self.R, self.K, self.N)
+        rate = self.carrier()  # (R, N) — the carrier the lines actually ride
+        if self.N < 2:
+            return gamma[:, :, None].expand(self.R, self.K, self.N)
+        slope = torch.zeros_like(rate)
+        dt = self.t_step
+        slope[:, 1:-1] = (rate[:, 2:] - rate[:, :-2]) / (2.0 * dt)
+        slope[:, 0] = (rate[:, 1] - rate[:, 0]) / dt
+        slope[:, -1] = (rate[:, -1] - rate[:, -2]) / dt
+        sweep = 0.5 * self.k[None, :, None] * slope.abs()[:, None, :] / self.df
+        return gamma[:, :, None] + sweep
+
     @property
     def h_db(self) -> Tensor:
         """``(R, K, Tk)`` line drift in dB at the knots."""
@@ -443,7 +481,7 @@ class CombSpectrum(nn.Module):
     def lines(self, k_chunk: int = 32) -> Tensor:
         """``(R, N, F)`` the rotors' line spectra (before microphone gains)."""
         power = self.line_power()  # (R, K, N)
-        gamma = self.gamma  # (R, K)
+        gamma = self.gamma_frames()  # (R, K, N)
         carrier = self.carrier()  # (R, N)
         out = torch.zeros(self.R, self.N, self.F, dtype=self._dtype, device=self._dev)
         k_top = min(self.K, self.active_k)
@@ -451,7 +489,7 @@ class CombSpectrum(nn.Module):
             k1 = min(k0 + k_chunk, k_top)
             centres = self.k[k0:k1][None, :, None] * carrier[:, None, :]  # (R, k, N)
             d = self.freqs[None, None, None, :] - centres[..., None]  # (R, k, N, F)
-            dens = self._line_density(d, gamma[:, k0:k1, None, None])
+            dens = self._line_density(d, gamma[:, k0:k1, :, None])
             out = out + torch.einsum("rkn,rknf->rnf", power[:, k0:k1], dens)
         return out
 
@@ -600,6 +638,36 @@ class CombSpectrum(nn.Module):
         if s.umod_std_db > 0:
             floor.append(self.u_z)
         return floor + lines
+
+
+#: The forward model every fit uses unless a ladder rung overrides it.
+#:
+#: WHY EACH ENTRY. `rps_offset` because telemetry is not the shaft, with a prior
+#: of 1 rev/s to cover both rigs' measured robust scales (0.41 on Michael's
+#: crops, 1.38 on DREGON's) — a 0.3 prior fought an offset three times its size
+#: and the mismatch was bought with line width. `line_bin_integrate` because a
+#: line narrower than a bin cannot be point-sampled at bin centres without
+#: aliasing, and the exact bin integral costs two arctangents. `gamma_min_bins`
+#: at 0.01 instead of 0.6 because the 0.6-bin floor DOUBLE-COUNTED the window:
+#: `window_kernel` already convolves the model with the Hann power response, so
+#: a floor of 0.6 bins (4.7 Hz at n_fft 2048) forbade the model from
+#: representing anything narrower than the window while the kernel was already
+#: supplying that broadening. Measured consequence: a comb of pure tones came
+#: back with 4.69 Hz widths — exactly the floor — while the bench measures real
+#: lines at 0.14 Hz at order 4 and 1.87 at order 32, so every flight width fit
+#: was censored 3 to 30 times too wide. 0.01 bins is 0.078 Hz at n_fft 2048,
+#: under the narrowest line the bench resolves (0.14 Hz at order 4), because a
+#: floor above anything we intend to represent is a censor, not a safeguard. `chirp_width` because the rest of the
+#: excess is the rate sweeping across the window, which is known from the
+#: labels and must not be paid for with a free parameter.
+BASE_VARIANT: dict[str, Any] = dict(
+    rps_offset=True,
+    rps_offset_std=1.0,
+    line_shape="gauss",
+    line_bin_integrate=True,
+    gamma_min_bins=0.01,
+    chirp_width=True,
+)
 
 
 def make_spec(

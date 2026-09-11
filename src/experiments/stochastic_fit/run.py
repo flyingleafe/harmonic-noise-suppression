@@ -30,7 +30,7 @@ import boto3
 import numpy as np
 
 from .data import Clip, periodogram
-from .model import Spec, make_spec
+from .model import BASE_VARIANT, Spec, make_spec
 
 BUCKET = "ml-data"
 PREFIX = "artifacts/stochastic-fit/clips"
@@ -431,7 +431,6 @@ def fit(args: argparse.Namespace) -> None:
 #: Ladder steps of ``docs/hierarchical-rig-model-plan.md`` § 4: each is a
 #: (Spec overrides, RigSpec overrides) pair; every step is Gaussian lines with
 #: a carrier correction, the two established facts.
-BASE_VARIANT: dict[str, Any] = dict(rps_offset=True, line_shape="gauss")
 LADDER: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     # independent fits in the rig code path (the M0 reference)
     "M0": (
@@ -1572,6 +1571,11 @@ def main(argv: list[str] | None = None) -> None:
         "--range-overrides",
         default=None,
         help="JSON applied over every arm's ranges, e.g. '{\"shaft_offset_rps\": [0, 0]}'",
+    )
+    pr.add_argument(
+        "--arm-overrides",
+        default=None,
+        help='JSON applied over every arm\'s top-level keys, e.g. its "rps" block',
     )
     pr.set_defaults(func=population_roundtrip)
     args = ap.parse_args(argv)
