@@ -389,6 +389,15 @@ def matched_static_arm(fitted_arm: dict[str, Any], *, weight: float) -> dict:
     # in an arm whose whole purpose is to have no line broadening at all.
     for key in ("fixed_shaft_jitter_rps", "fixed_gamma0_hz", "fixed_gamma_slope_hz"):
         ranges.pop(key, None)
+    # Microphone INDEX carries no measured physics, and pinning the fitted
+    # vectors to indices is what made channel 0 of DREGON score 1.93x the error
+    # of the full array in the fitted run, against 1.08 for a real-trained
+    # model. The first diverse control, whose arms sample the microphone
+    # population instead, came back at 1.01. No control arm keeps them.
+    for key in ("fixed_mic_gain_db", "fixed_mic_floor_db", "fixed_mic_gain_all_db"):
+        ranges.pop(key, None)
+    ranges.setdefault("mic_gain_all_db", [0.0, 6.0])
+    ranges.setdefault("mic_floor_std_db", [0.0, 3.0])
     ranges.update(STATIC_OFF)
     ranges.update(LABEL_ERROR)
     ranges["min_lines_above_floor_per_rotor"] = 0.20
