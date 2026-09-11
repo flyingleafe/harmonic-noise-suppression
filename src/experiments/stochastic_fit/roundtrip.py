@@ -62,6 +62,7 @@ def render_from_policy(
     n_mics: int | None = 2,
     sample_rate: int = 16000,
     range_overrides: dict[str, Any] | None = None,
+    arm_overrides: dict[str, Any] | None = None,
 ) -> list[Rendered]:
     """Render clips from one noise arm of a policy, keeping the draws.
 
@@ -81,6 +82,8 @@ def render_from_policy(
         # One knob per cell of a controlled sweep: the point of a round trip is
         # to vary ONE thing and see what the fit does with it.
         cfg["ranges"] = dict(cfg.get("ranges") or {}) | dict(range_overrides)
+    if arm_overrides:
+        cfg.update(arm_overrides)
     if n_mics is not None:
         cfg["n_mics"] = int(n_mics)
         for key in ("fixed_mic_gain_db", "fixed_mic_floor_db", "fixed_mic_gain_all_db"):
@@ -155,8 +158,15 @@ def compare(rendered: Rendered, fitted: dict[str, Any], *, max_std_db: float = 3
     def at(order: int, arr: np.ndarray) -> float:
         return float(np.median(arr[:, min(order, arr.shape[1]) - 1]))
 
+    rps = np.asarray(rendered.clip.rps, dtype=np.float64)
+    win = int(rendered.pg.n_fft)
+    drift = float(np.max(np.abs(np.diff(rps[:, ::win], axis=1)))) if rps.shape[1] > win else 0.0
     return {
         "clip": rendered.clip.clip_id,
+        # Rate drift and line width are exactly degenerate inside one analysis
+        # window (explainer §12), so the width a fit reports cannot be read
+        # without knowing how much the rate moved across that window.
+        "rate_change_per_window_rps": drift,
         "identifiable_fraction": float(ok.mean()),
         "per_rotor_identifiable": [int(v) for v in ok.sum(axis=1)],
         "profile_rms_error_db": float(np.sqrt(np.mean(err[ok] ** 2))) if ok.any() else float("nan"),
@@ -199,6 +209,7 @@ def roundtrip(
     k_cap: int = 64,
     iters: tuple[int, int, int, int] = (120, 120, 240, 40),
     range_overrides: dict[str, Any] | None = None,
+    arm_overrides: dict[str, Any] | None = None,
     log: Any = print,
 ) -> dict[str, Any]:
     """Render, fit and compare; returns one record per clip."""
@@ -213,6 +224,7 @@ def roundtrip(
         duration_s=duration_s,
         n_mics=n_mics,
         range_overrides=range_overrides,
+        arm_overrides=arm_overrides,
     )
     records = []
     for item in rendered:
@@ -246,5 +258,6 @@ def roundtrip(
         "policy": policy_path,
         "arm": arm,
         "range_overrides": range_overrides or {},
+        "arm_overrides": arm_overrides or {},
         "clips": records,
     }

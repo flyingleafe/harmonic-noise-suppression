@@ -1180,6 +1180,7 @@ def population_roundtrip(args: argparse.Namespace) -> None:
     if args.threads:
         torch.set_num_threads(int(args.threads))
     overrides = json.loads(args.range_overrides) if args.range_overrides else None
+    arm_overrides = json.loads(args.arm_overrides) if args.arm_overrides else None
     targets = [spec.split("=", 1) for spec in args.arm]
     out: dict[str, Any] = {}
     for label, spec in targets:
@@ -1195,6 +1196,7 @@ def population_roundtrip(args: argparse.Namespace) -> None:
             k_cap=args.k_cap,
             iters=tuple(args.iters),
             range_overrides=overrides,
+            arm_overrides=arm_overrides,
         )
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output).write_text(json.dumps(out, indent=1))
