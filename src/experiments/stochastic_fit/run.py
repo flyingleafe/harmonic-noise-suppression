@@ -1377,6 +1377,24 @@ def population_export_policy(args: argparse.Namespace) -> None:
     print(f"wrote {output}", flush=True)
 
 
+def get_results(args: argparse.Namespace) -> None:
+    """Fetch result files from R2 into a local directory.
+
+    The counterpart of :func:`put_results`. Fitted summaries live in the
+    gitignored ``omnirun-outputs/``, so a remote job cannot get them from the
+    checkout — R2 is the transport in both directions.
+    """
+    client = r2_client()
+    dest = Path(args.dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    for spec in args.key:
+        key, _, name = spec.partition("=")
+        local = dest / (name or Path(key).name)
+        body = client.get_object(Bucket=BUCKET, Key=key)["Body"].read()
+        local.write_bytes(body)
+        print(f"got {local} ({len(body) / 1e6:.1f} MB)", flush=True)
+
+
 def put_results(args: argparse.Namespace) -> None:
     """Copy a job's result files to R2.
 
@@ -1602,6 +1620,12 @@ def main(argv: list[str] | None = None) -> None:
     pu.add_argument("--path", required=True, action="append", help="local file, repeatable")
     pu.add_argument("--prefix", default=f"{PREFIX}/results", help="key prefix under the bucket")
     pu.set_defaults(func=put_results)
+    pg2 = sub.add_parser("getr2")
+    pg2.add_argument(
+        "--key", required=True, action="append", help="R2 key, or key=localname; repeatable"
+    )
+    pg2.add_argument("--dest", default="omnirun-outputs")
+    pg2.set_defaults(func=get_results)
     args = ap.parse_args(argv)
     args.func(args)
 
