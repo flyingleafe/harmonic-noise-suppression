@@ -61,6 +61,7 @@ def render_from_policy(
     duration_s: float = 4.0,
     n_mics: int | None = 2,
     sample_rate: int = 16000,
+    range_overrides: dict[str, Any] | None = None,
 ) -> list[Rendered]:
     """Render clips from one noise arm of a policy, keeping the draws.
 
@@ -76,6 +77,10 @@ def render_from_policy(
     if arm >= len(arms):
         raise ValueError(f"policy has {len(arms)} stochastic arms, asked for index {arm}")
     cfg = dict(arms[arm])
+    if range_overrides:
+        # One knob per cell of a controlled sweep: the point of a round trip is
+        # to vary ONE thing and see what the fit does with it.
+        cfg["ranges"] = dict(cfg.get("ranges") or {}) | dict(range_overrides)
     if n_mics is not None:
         cfg["n_mics"] = int(n_mics)
         for key in ("fixed_mic_gain_db", "fixed_mic_floor_db", "fixed_mic_gain_all_db"):
@@ -193,6 +198,7 @@ def roundtrip(
     n_mics: int = 2,
     k_cap: int = 64,
     iters: tuple[int, int, int, int] = (120, 120, 240, 40),
+    range_overrides: dict[str, Any] | None = None,
     log: Any = print,
 ) -> dict[str, Any]:
     """Render, fit and compare; returns one record per clip."""
@@ -206,6 +212,7 @@ def roundtrip(
         seed=seed,
         duration_s=duration_s,
         n_mics=n_mics,
+        range_overrides=range_overrides,
     )
     records = []
     for item in rendered:
@@ -235,4 +242,9 @@ def roundtrip(
             f"{record['amp_drift_std_db']['fitted']:.2f}",
             flush=True,
         )
-    return {"policy": policy_path, "arm": arm, "clips": records}
+    return {
+        "policy": policy_path,
+        "arm": arm,
+        "range_overrides": range_overrides or {},
+        "clips": records,
+    }

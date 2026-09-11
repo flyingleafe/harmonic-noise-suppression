@@ -1179,6 +1179,7 @@ def population_roundtrip(args: argparse.Namespace) -> None:
 
     if args.threads:
         torch.set_num_threads(int(args.threads))
+    overrides = json.loads(args.range_overrides) if args.range_overrides else None
     targets = [spec.split("=", 1) for spec in args.arm]
     out: dict[str, Any] = {}
     for label, spec in targets:
@@ -1193,6 +1194,7 @@ def population_roundtrip(args: argparse.Namespace) -> None:
             n_mics=args.n_mics,
             k_cap=args.k_cap,
             iters=tuple(args.iters),
+            range_overrides=overrides,
         )
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output).write_text(json.dumps(out, indent=1))
@@ -1564,6 +1566,11 @@ def main(argv: list[str] | None = None) -> None:
     pr.add_argument("--k-cap", type=int, default=64)
     pr.add_argument("--iters", type=int, nargs=4, default=(120, 120, 240, 40))
     pr.add_argument("--threads", type=int, default=0)
+    pr.add_argument(
+        "--range-overrides",
+        default=None,
+        help="JSON applied over every arm's ranges, e.g. '{\"shaft_offset_rps\": [0, 0]}'",
+    )
     pr.set_defaults(func=population_roundtrip)
     args = ap.parse_args(argv)
     args.func(args)
