@@ -50,10 +50,14 @@ HELD_OUT_MOTORS = (4,)
 #: Channel with the largest comb margin; see the module docstring.
 CHANNEL = 7
 SR = 16000
-#: 16 s of audio at 16 kHz with a 65536-point window: 0.244 Hz bins and ~7
+#: 9 s of audio at 16 kHz with a 65536-point window: 0.244 Hz bins and 3
 #: averages. The narrowest bench line measured at 44.1 kHz is 0.28 Hz, so this
 #: resolves it; a coarser grid would report the window instead of the line.
-SECONDS = 16.0
+#: 9 s is what the tightest recording offers: the rotors spin up between 1.25
+#: and 5.38 s and stop between 14.7 and 17.2 s, so a fixed 16 s window from
+#: 3 s held up to 34 % silence, which depresses the measured floor and makes
+#: the span non-stationary.
+SECONDS = 9.0
 N_ANALYSIS = 1 << 16
 K_MAX = 200
 #: Orders are read to 200: the slowest cell (49 rev/s) needs order 160 to
@@ -83,6 +87,37 @@ class CellMeasurement:
     @property
     def cell(self) -> tuple[int, int]:
         return (self.motor, self.setpoint)
+
+
+_SPAN_CACHE: dict[tuple[int, int], tuple[float, float]] = {}
+
+
+def bench_span(motor: int, setpoint: int, *, channel: int = CHANNEL) -> tuple[float, float]:
+    """``(start_s, duration_s)`` of the steady span of one bench recording.
+
+    The rotors spin up between 1.25 s and 5.38 s and stop between 14.7 s and
+    17.2 s depending on the cell, so no fixed window works: a 16 s window from
+    3 s held up to 34 % silence. Onset and offset are the first and last times
+    the 50 ms envelope clears half the 95th percentile; the window starts 1 s
+    after onset and ends 0.5 s before offset.
+    """
+    key = (int(motor), int(setpoint))
+    if key in _SPAN_CACHE:
+        return _SPAN_CACHE[key]
+    import soundfile as sf
+
+    audio, sr = sf.read(
+        native.BENCH_DIR / f"Motor{motor}_{setpoint}.wav", dtype="float32", always_2d=True
+    )
+    y = audio[:, channel].astype(np.float64)
+    n = int(0.05 * sr)
+    env = np.sqrt(np.convolve(y**2, np.ones(n) / n, mode="same"))
+    on = np.flatnonzero(env > 0.5 * np.percentile(env, 95))
+    start = float(on[0]) / sr + 1.0
+    end = float(on[-1]) / sr - 0.5
+    span = (start, min(SECONDS, max(end - start, 1.0)))
+    _SPAN_CACHE[key] = span
+    return span
 
 
 def _welch(x: np.ndarray, n_fft: int) -> np.ndarray:
@@ -195,6 +230,64 @@ def detection_limit_db(m: CellMeasurement) -> np.ndarray:
     return floor + rel_limit
 
 
+def fit_censored_rolloff(
+    det: np.ndarray, lim: np.ndarray, k: np.ndarray, k_lo: float = 4.0
+) -> tuple[float, float, float]:
+    """``(intercept, slope_db_per_log_k, sigma)`` of a CENSORED profile fit.
+
+    Extrapolating the median of the DETECTED levels is what makes the roll-off
+    too shallow: at high order only the loud lines clear the floor, so the
+    median of what survives flattens out. Measured on Motor1_80, that gave
+    -2.7 dB per log-k while the real per-order excess falls ~8 dB per octave
+    (about -11 dB per log-k), and the rendered comb stopped decaying entirely
+    above order 48.
+
+    The fix is to use the censored orders as the information they are: an
+    undetected line is the statement ``level < limit``. The likelihood is
+    Gaussian for detected levels and ``log Phi((limit - mu) / sigma)`` for
+    censored ones, with ``mu = a + b log k`` — a Tobit regression, which has
+    to explain WHY so many high orders are invisible and therefore recovers
+    the steep decay.
+    """
+    from scipy.optimize import minimize
+    from scipy.stats import norm
+
+    rows_det, rows_lim = [], []
+    for row_d, row_l in zip(det, lim, strict=True):
+        ok = k >= k_lo
+        d = np.isfinite(row_d) & ok
+        c = (~np.isfinite(row_d)) & np.isfinite(row_l) & ok
+        rows_det.append((k[d], row_d[d]))
+        rows_lim.append((k[c], row_l[c]))
+    kd = np.concatenate([a for a, _ in rows_det])
+    vd = np.concatenate([b for _, b in rows_det])
+    kc = np.concatenate([a for a, _ in rows_lim])
+    vc = np.concatenate([b for _, b in rows_lim])
+    if kd.size < 8:
+        return float("nan"), float("nan"), float("nan")
+
+    def nll(theta: np.ndarray) -> float:
+        a, b, log_s = theta
+        s = float(np.exp(log_s))
+        mu_d = a + b * np.log(kd)
+        out = float(np.sum(0.5 * ((vd - mu_d) / s) ** 2 + np.log(s)))
+        if kc.size:
+            mu_c = a + b * np.log(kc)
+            cdf = norm.logcdf((vc - mu_c) / s)
+            out -= float(np.sum(cdf))
+        return out
+
+    start = np.polyfit(np.log(kd), vd, 1)
+    res = minimize(
+        nll,
+        np.array([start[1], start[0], np.log(4.0)]),
+        method="Nelder-Mead",
+        options={"maxiter": 4000, "xatol": 1e-3, "fatol": 1e-3},
+    )
+    a, b, log_s = res.x
+    return float(a), float(b), float(np.exp(log_s))
+
+
 def _masked(m: CellMeasurement, *, censor: bool = True) -> np.ndarray:
     """Line levels; undetected orders replaced by this cell's detection limit.
 
@@ -218,9 +311,20 @@ def _masked(m: CellMeasurement, *, censor: bool = True) -> np.ndarray:
     return out
 
 
-def fit_population(measurements: list[CellMeasurement]) -> Stage1Fit:
-    """Fit the S1 population on the FIT motors only."""
-    fit_set = [m for m in measurements if m.motor in FIT_MOTORS]
+def fit_population(
+    measurements: list[CellMeasurement],
+    motors: tuple[int, ...] = FIT_MOTORS,
+    speeds: tuple[int, ...] = SPEEDS,
+) -> Stage1Fit:
+    """Fit the S1 model on the given cells.
+
+    ``motors`` selects which rotors enter. A SINGLE motor gives the simplest
+    possible model — one rotor, no per-rotor terms — which is the first thing
+    that has to work: if the family cannot reproduce one clamped motor at five
+    setpoints, nothing about a population is worth measuring. ``speeds``
+    narrows the setpoints, so one can be left out to test the speed law.
+    """
+    fit_set = [m for m in measurements if m.motor in motors and m.setpoint in speeds]
     if not fit_set:
         raise ValueError("no fit-set cells")
     k = np.arange(1, K_MAX + 1, dtype=np.float64)
@@ -255,40 +359,36 @@ def fit_population(measurements: list[CellMeasurement]) -> Stage1Fit:
     support = int(np.max(np.flatnonzero(measured)) + 1) if measured.any() else 0
 
     profile = np.array(det_med, dtype=np.float64, copy=True)
+    censor_sigma = float("nan")
     if support >= 8:
-        # The roll-off is fitted over the WHOLE measured range from order 4 up,
-        # not over its upper half: at high order only the loud cells detect the
-        # line, so a fit restricted to the top of the support reads the
-        # selection instead of the decay and returned +3.3 dB per log-k —
-        # a comb RISING with order, which then jumped the extrapolated profile
-        # from -43 dB at order 160 to -21 dB at order 200.
-        seg = np.flatnonzero(measured & (k >= 4.0))
-        coef = np.polyfit(np.log(k[seg]), det_med[seg], 1)
-        tail = np.arange(support, K_MAX)
-        extrap = np.polyval(coef, np.log(k[tail]))
-        cap = np.where(np.isfinite(lim_med[tail]), lim_med[tail], extrap)
-        profile[tail] = np.minimum(extrap, cap)
-        profile[:support] = np.where(
-            measured[:support],
-            det_med[:support],
-            np.minimum(
-                np.polyval(coef, np.log(k[:support])),
-                np.where(np.isfinite(lim_med[:support]), lim_med[:support], 0.0),
-            ),
-        )
-        # Past the measured support the comb cannot rise: no mechanism makes a
-        # blade-passage harmonic louder at higher order, and the detection
-        # limits are only upper bounds.
-        if support < K_MAX:
-            profile[support - 1 :] = np.minimum.accumulate(profile[support - 1 :])
-        rolloff_db_per_log_k = float(coef[0])
+        # The roll-off comes from a CENSORED fit over every cell and order
+        # (:func:`fit_censored_rolloff`), not from extrapolating the detected
+        # median. Extrapolating the median reads the selection instead of the
+        # decay: restricted to the top of the support it returned +3.3 dB per
+        # log-k (a comb RISING with order); fitted over the whole support it
+        # returned -2.7 dB per log-k where the real per-order excess falls
+        # about -11 dB per log-k, and the rendered comb then stopped decaying
+        # above order 48 entirely.
+        a_db, b_db, censor_sigma = fit_censored_rolloff(det_arr, lim_arr, k)
+        model = a_db + b_db * np.log(k)
+        # Nonparametric where detection is nearly complete (the data are
+        # better than any two-parameter law there), the censored model beyond,
+        # capped by the median detection limit and forced monotone.
+        nearly_all = n_det >= max(1, int(np.ceil(0.9 * n_cells)))
+        profile = np.where(nearly_all, det_med, model)
+        cap = np.where(np.isfinite(lim_med), lim_med, np.inf)
+        profile = np.where(nearly_all, profile, np.minimum(profile, cap))
+        first_model = int(np.max(np.flatnonzero(nearly_all)) + 1) if nearly_all.any() else 1
+        profile[first_model - 1 :] = np.minimum.accumulate(profile[first_model - 1 :])
+        profile[K_REF - 1] = 0.0
+        rolloff_db_per_log_k = float(b_db)
     else:
         rolloff_db_per_log_k = float("nan")
 
     motor_dev: dict[int, list[float]] = {}
     with np.errstate(invalid="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        for mot in FIT_MOTORS:
+        for mot in motors:
             rows = [d for d, m in zip(det_arr, fit_set, strict=True) if m.motor == mot]
             dev = np.nanmedian(np.array(rows), axis=0) - profile
             dev[~measured] = 0.0  # no per-motor timbre where nobody measured it
@@ -333,6 +433,13 @@ def fit_population(measurements: list[CellMeasurement]) -> Stage1Fit:
         a = np.stack([wk_a, np.ones_like(wk_a)])
         coef, *_ = np.linalg.lstsq(a.T, wv_a, rcond=None)
         gamma_slope, gamma0 = float(coef[0]), float(coef[1])
+        if gamma0 < 0.0:
+            # A negative width at order zero is not a model: the unconstrained
+            # fit on clean spans returned -0.193 Hz, which is -0.07 Hz of line
+            # width at k = 2. Refit through the origin instead, which is also
+            # the shaft-jitter form (width = 1.177 sigma k, exactly linear).
+            gamma_slope = float(np.dot(wk_a, wv_a) / np.dot(wk_a, wk_a))
+            gamma0 = 0.0
     else:
         gamma_slope, gamma0 = float("nan"), float("nan")
 
@@ -369,8 +476,11 @@ def fit_population(measurements: list[CellMeasurement]) -> Stage1Fit:
             "width_lines_used": int(wk_a.size),
             "profile_support_orders": support,
             "rolloff_db_per_log_k": rolloff_db_per_log_k,
+            "censored_sigma_db": censor_sigma,
             "channel": CHANNEL,
             "margin_min_db": MARGIN_MIN_DB,
+            "motors": list(motors),
+            "speeds": list(speeds),
         },
     )
 
@@ -507,11 +617,12 @@ def calibrate_profile(
     for r in range(rounds):
         deltas = []
         for m in cells:
+            start_s, duration_s = bench_span(m.motor, m.setpoint)
             real = native.decimate(
-                native.bench_clip(m.motor, m.setpoint, duration_s=SECONDS, start_s=3.0), SR
+                native.bench_clip(m.motor, m.setpoint, duration_s=duration_s, start_s=start_s), SR
             )
             xr = real.audio[CHANNEL].astype(np.float64)
-            xs = render(out, m.rate_rps, seconds=SECONDS, seed=seed + r, motor=m.motor)
+            xs = render(out, m.rate_rps, seconds=duration_s, seed=seed + r, motor=m.motor)
             er, mr = stats.order_profile(
                 xr, m.rate_rps, gamma0=out.gamma0_hz, gamma_slope=out.gamma_slope_hz
             )

@@ -161,3 +161,38 @@ def pooled_excess(
     good = margin[np.isfinite(margin)]
     out["n_detected"] = float(np.count_nonzero(good >= MARGIN_MIN_DB))
     return out
+
+
+def paired_delta(
+    x_real: np.ndarray,
+    x_synth: np.ndarray,
+    rate: float,
+    *,
+    gamma0: float,
+    gamma_slope: float,
+    sr: int = SR,
+    half: bool = False,
+) -> dict[str, float]:
+    """Per-band median of the PER-ORDER excess difference, synthetic - real.
+
+    Comparing band medians of the two clips separately is invalid: the real
+    clip's excess is undefined wherever its line sits under the floor, so the
+    two medians run over different order sets. On one bench cell that read
+    +7.36 dB over orders 30-100 where the paired difference is +2.51 dB — the
+    gap is entirely 27 real orders against 71 synthetic ones. Only orders where
+    the REAL line is detected and both are finite enter.
+    """
+    kw = {"gamma0": gamma0, "gamma_slope": gamma_slope, "sr": sr, "offset": 0.5 if half else 0.0}
+    er, mr = order_profile(x_real, rate, **kw)
+    es, _ = order_profile(x_synth, rate, **kw)
+    n = min(er.size, es.size)
+    usable = np.isfinite(er[:n]) & np.isfinite(es[:n]) & (mr[:n] >= MARGIN_MIN_DB)
+    out: dict[str, float] = {}
+    for lo, hi in ORDER_BANDS:
+        sl = slice(lo - 1, min(hi, n))
+        m = usable[sl]
+        out[f"k{lo}_{hi}"] = float(np.median((es[sl] - er[sl])[m])) if m.any() else float("nan")
+        out[f"n_k{lo}_{hi}"] = float(m.sum())
+    out["n_detected_real"] = float(np.count_nonzero(mr[np.isfinite(mr)] >= MARGIN_MIN_DB))
+    out["n_detected_synth"] = float(np.count_nonzero(np.isfinite(es)))
+    return out

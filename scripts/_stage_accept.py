@@ -64,8 +64,9 @@ def accept_s1(n_draws: int = 5) -> dict[str, Any]:
 
     real_rows, syn_rows = [], []
     for m in held:
+        start_s, duration_s = stage1.bench_span(m.motor, m.setpoint)
         real_clip = native.decimate(
-            native.bench_clip(m.motor, m.setpoint, duration_s=stage1.SECONDS, start_s=3.0), SR
+            native.bench_clip(m.motor, m.setpoint, duration_s=duration_s, start_s=start_s), SR
         )
         xr = real_clip.audio[stage1.CHANNEL].astype(np.float64)
         real_rows.append(
@@ -80,7 +81,9 @@ def accept_s1(n_draws: int = 5) -> dict[str, Any]:
 
     for m in held:
         for d in range(n_draws):
-            xs = stage1.render(fit, m.rate_rps, seconds=stage1.SECONDS, seed=1000 + d)
+            xs = stage1.render(
+                fit, m.rate_rps, seconds=stage1.bench_span(m.motor, m.setpoint)[1], seed=1000 + d
+            )
             syn_rows.append(
                 {
                     "cell": f"Motor{m.motor}_{m.setpoint}",
