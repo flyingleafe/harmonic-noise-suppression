@@ -1166,6 +1166,39 @@ def population_bench(args: argparse.Namespace) -> None:
         Path(args.output).write_text(json.dumps(bench_summary(fit), indent=1))
 
 
+def population_roundtrip(args: argparse.Namespace) -> None:
+    """Render from control policies, refit the renders, compare with the draws.
+
+    One job, every arm, because the comparison is only meaningful PAIRED: the
+    fit starts its amplitude drift at zero, so "C1 came back static" says
+    nothing unless C2 came back dynamic on the same iteration budget.
+    """
+    import torch
+
+    from .roundtrip import roundtrip
+
+    if args.threads:
+        torch.set_num_threads(int(args.threads))
+    targets = [spec.split("=", 1) for spec in args.arm]
+    out: dict[str, Any] = {}
+    for label, spec in targets:
+        policy, _, arm = spec.partition(":")
+        print(f"\n=== {label}  ({policy} arm {arm or 0})", flush=True)
+        out[label] = roundtrip(
+            policy,
+            arm=int(arm or 0),
+            n_clips=args.n_clips,
+            seed=args.seed,
+            duration_s=args.duration_s,
+            n_mics=args.n_mics,
+            k_cap=args.k_cap,
+            iters=tuple(args.iters),
+        )
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(json.dumps(out, indent=1))
+    print(f"\nwritten {args.output}", flush=True)
+
+
 def population_controls(args: argparse.Namespace) -> None:
     """Write the two control streams from the accepted fitted policy.
 
@@ -1516,6 +1549,22 @@ def main(argv: list[str] | None = None) -> None:
     pc.add_argument("--static-output", default=None, help="write C1 (static combs) here")
     pc.add_argument("--diverse-output", default=None, help="write C2 (diverse parameters) here")
     pc.set_defaults(func=population_controls)
+    pr = sub.add_parser("poproundtrip")
+    pr.add_argument(
+        "--arm",
+        action="append",
+        required=True,
+        help="LABEL=policy.yaml[:arm_index], repeatable",
+    )
+    pr.add_argument("--output", required=True)
+    pr.add_argument("--n-clips", type=int, default=2)
+    pr.add_argument("--seed", type=int, default=7)
+    pr.add_argument("--duration-s", type=float, default=4.0)
+    pr.add_argument("--n-mics", type=int, default=2)
+    pr.add_argument("--k-cap", type=int, default=64)
+    pr.add_argument("--iters", type=int, nargs=4, default=(120, 120, 240, 40))
+    pr.add_argument("--threads", type=int, default=0)
+    pr.set_defaults(func=population_roundtrip)
     args = ap.parse_args(argv)
     args.func(args)
 

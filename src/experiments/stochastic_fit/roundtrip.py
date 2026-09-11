@@ -216,11 +216,17 @@ def roundtrip(
             k_cap=k_cap,
             variant={"rps_offset": True, "line_shape": "gauss"},
         )
-        fitted = fit_clip(item.pg, spec, iters=iters, log=lambda *a, **k: None)
+        log(
+            f"  fitting {item.clip.clip_id}: K={spec.n_harm} "
+            f"frames={item.pg.times.size} freqs={item.pg.freqs.size} "
+            f"mics={item.clip.audio.shape[0]}",
+            flush=True,
+        )
+        fitted = fit_clip(item.pg, spec, iters=iters, log=log)
         record = compare(item, fitted)
         records.append(record)
         log(
-            f"  {record['clip']}: profile rms {record['profile_rms_error_db']:.2f} dB "
+            f"  DONE {record['clip']}: profile rms {record['profile_rms_error_db']:.2f} dB "
             f"(r={record['profile_correlation']:.3f}, {record['identifiable_fraction']:.2f} "
             f"identifiable) | gamma k=8 planted "
             f"{record['gamma_hz']['k=8']['planted']:.3f} fitted "
