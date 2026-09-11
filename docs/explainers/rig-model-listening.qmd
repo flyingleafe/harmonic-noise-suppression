@@ -748,6 +748,12 @@ from pathlib import Path
 
 here = Path("rig-model-listening")
 index = json.loads((here / "index.json").read_text())
+ARMS = (
+    ("real", "real recording"),
+    ("fit", "fitted preset"),
+    ("rig", "pre-fit rig preset"),
+    ("old", "old family"),
+)
 for rig, title in (("dregon", "DREGON"), ("michaels", "Michael's rig")):
     print(f"\n## {title}\n")
     for e in [x for x in index if x["rig"] == rig]:
@@ -755,12 +761,9 @@ for rig, title in (("dregon", "DREGON"), ("michaels", "Michael's rig")):
         print(f"\n### {e['clip']} — {e['label']} ({e['dur']} s)\n")
         print(f"![]({here.name}/{slug}.png){{width=100%}}\n")
         print('<table style="width:100%"><tr>')
-        for name, label in (
-            ("real", "real recording"),
-            ("fit", "fitted preset"),
-            ("rig", "pre-fit rig preset"),
-            ("old", "old family"),
-        ):
+        for name, label in ARMS:
+            if not (here / f"{slug}_{name}.wav").exists():
+                continue
             print(
                 f'<td style="text-align:center"><b>{label}</b><br>'
                 f'<audio controls preload="none" src="{here.name}/{slug}_{name}.wav"></audio></td>'

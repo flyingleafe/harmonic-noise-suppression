@@ -28,9 +28,13 @@ import yaml
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 POLICY = ROOT / "conf/online_mix/rig_fm_5050.yaml"
+#: The rigs as refitted under the uncensored, chirp-aware forward model. The
+#: previous pair is superseded: its width parameter was the estimator's own
+#: floor (0.6 bins = 4.69 Hz at n_fft 2048, against bench lines of 0.14 Hz at
+#: order 4) and its rig-level profile mean was unidentified.
 FITTED = {
-    "dregon": ROOT / "omnirun-outputs/pop-dregon-final-w.json",
-    "michaels": ROOT / "omnirun-outputs/pop-michaels-final-w.json",
+    "dregon": ROOT / "omnirun-outputs/refit-dregon-aug.json",
+    "michaels": ROOT / "omnirun-outputs/refit-michaels-aug.json",
 }
 NAME = {"dregon": "DREGON (room 2, 17 crops)", "michaels": "Michael's (FLY125, 10 crops)"}
 RIG_C = {"dregon": "#1f77b4", "michaels": "#d62728"}
@@ -592,7 +596,22 @@ def fig_selection(S: dict[str, dict]) -> None:
 
     ax = axes[0]
     for rig in ("michaels", "dregon"):
-        tc = S[rig]["topology_calibration"]
+        tc = S[rig].get("topology_calibration")
+        if tc is None:
+            # The calibration is a correction fitted against a MATCHED RENDER,
+            # so it is invalidated by any change to the export it corrects. It
+            # is pending a re-run against the clip-centred preset; drawing a
+            # stale curve here would be worse than drawing none.
+            ax.text(
+                0.5,
+                0.5 if rig == "michaels" else 0.4,
+                f"{NAME[rig].split(' ')[0]}: calibration pending re-run",
+                transform=ax.transAxes,
+                ha="center",
+                fontsize=9,
+                color=RIG_C[rig],
+            )
+            continue
         c = np.asarray(tc["profile_correction_db"], float)
         ax.plot(
             np.arange(1, c.size + 1),

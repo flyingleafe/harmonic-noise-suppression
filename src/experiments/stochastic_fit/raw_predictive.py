@@ -491,6 +491,39 @@ def _pad_profile(values: Any, support: int, n_harmonics: int) -> Any:
     return np.pad(array, pad, mode="edge").tolist()
 
 
+def clip_centred_profile(
+    summary: dict[str, Any],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(mean, per-rotor deviation, per-order residual std)`` from the CLIPS.
+
+    WHY NOT ``rig["profile_db"]``. A clip's profile is
+    ``mu + delta_r + B z_c + level_c``, so ``mu`` can take any value that the
+    per-clip level and mode coefficients absorb — it is the one quantity in the
+    hierarchy the likelihood does not pin. Measured on Michael's rig, the fitted
+    ``mu`` disagrees with the median of its OWN clips by 13 dB at order 8 and 25
+    dB at order 90, and the disagreement changed sign between two fits of the
+    same data while every per-clip profile stayed within half a dB. Exporting
+    ``mu`` therefore exported a number that means nothing on its own: the old
+    preset rendered 5-7 dB too dark through the mid band and a refit rendered
+    +54 dB too hot at the top of it.
+
+    The population the gate validates is over CLIPS, so the centre is taken
+    there: the median over (clip, rotor), with the per-rotor deviation and the
+    clip-to-clip residual measured around it. The basis is left alone — its
+    vectors are directions in profile space and carry no centre.
+    """
+    clips = summary.get("train") or {}
+    if not clips:
+        raise ValueError("summary has no fitted clips to centre the population on")
+    profiles = np.stack(
+        [np.asarray(clip["params"]["profile_db"], dtype=np.float64) for clip in clips.values()]
+    )  # (C, R, K)
+    mean = np.median(profiles.reshape(-1, profiles.shape[-1]), axis=0)
+    delta = np.median(profiles, axis=0) - mean[None, :]
+    residual = np.std(profiles - mean[None, None, :] - delta[None, :, :], axis=(0, 1))
+    return mean, delta, residual
+
+
 def population_ranges(summary: dict[str, Any], base_ranges: dict[str, Any]) -> dict[str, Any]:
     """Inject fitted line and floor populations into a renderer preset."""
     rig = summary["rig"]
@@ -511,15 +544,14 @@ def population_ranges(summary: dict[str, Any], base_ranges: dict[str, Any]) -> d
     # analysis-window floor/carrier nuisance and has no FM counterpart; the
     # identifiable high-order slope transfers exactly.
     shaft_jitter = gamma_slope / np.sqrt(2.0 * np.log(2.0))
-    support = measured_profile_support(rig["profile_db"])
+    profile_mean, profile_delta, profile_residual = clip_centred_profile(summary)
+    support = measured_profile_support(profile_mean)
     ranges = dict(base_ranges)
     ranges.update(
-        profile_mean_db=_pad_profile(rig["profile_db"], support, PROFILE_PAD_HARMONICS),
+        profile_mean_db=_pad_profile(profile_mean, support, PROFILE_PAD_HARMONICS),
         profile_basis_db=_pad_profile(rig.get("profile_basis_db"), support, PROFILE_PAD_HARMONICS),
-        profile_rotor_db=_pad_profile(rig["delta_db"], support, PROFILE_PAD_HARMONICS),
-        profile_residual_std_db=_pad_profile(
-            summary.get("profile_residual_std_db"), support, PROFILE_PAD_HARMONICS
-        ),
+        profile_rotor_db=_pad_profile(profile_delta, support, PROFILE_PAD_HARMONICS),
+        profile_residual_std_db=_pad_profile(profile_residual, support, PROFILE_PAD_HARMONICS),
         line_floor_mean_db=population["line_floor_mean_db"] - shape_mean,
         line_floor_std_db=population["line_floor_std_db"],
         rotor_contrast_std_db=population["rotor_contrast_std_db"],

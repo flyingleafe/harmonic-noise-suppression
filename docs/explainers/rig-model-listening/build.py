@@ -41,9 +41,14 @@ POLICY = ROOT / "conf/online_mix/rig_fm_5050.yaml"
 #: The fitted summaries the gate accepted, per rig. Derived artefacts, so they
 #: live outside git; regenerate with the pipeline in
 #: docs/experiments/stochastic-fit.md if they are missing.
+#: THE fitted summaries — the rigs as refitted under the uncensored,
+#: chirp-aware forward model, exported through the clip-centred population.
+#: The previous pair (pop-*-final-w.json) is superseded: its width parameter was
+#: the estimator's own floor and its exported profile centre was the one
+#: quantity in the hierarchy the likelihood does not pin.
 FITTED = {
-    "dregon": ROOT / "omnirun-outputs/pop-dregon-final-w.json",
-    "michaels": ROOT / "omnirun-outputs/pop-michaels-final-w.json",
+    "dregon": ROOT / "omnirun-outputs/refit-dregon-aug.json",
+    "michaels": ROOT / "omnirun-outputs/refit-michaels-aug.json",
 }
 SR = 16000
 CLIPS = {
@@ -75,7 +80,27 @@ def spectrogram_db(x: np.ndarray, n_fft: int = 2048, hop: int = 512) -> np.ndarr
     return 10.0 * np.log10(np.abs(np.fft.rfft(frames, axis=-1)) ** 2 + 1e-12).T
 
 
-def fitted_arm(rig: str, base_ranges: dict) -> tuple[srn.StochasticRanges, dict]:
+def prominence_db(x: np.ndarray, lo: float, hi: float, n_fft: int = 2048, hop: int = 512) -> float:
+    """Median over frames of (95th percentile - median) power in a band, in dB.
+
+    High when a band holds sparse strong lines, low when it is a continuum, and
+    insensitive to the band's absolute level — which is what distinguishes a
+    comb that survived from one that merged.
+    """
+    spec = spectrogram_db(x, n_fft, hop)
+    freqs = np.fft.rfftfreq(n_fft, 1.0 / SR)
+    band = spec[(freqs >= lo) & (freqs < hi)]
+    return float(np.median(np.percentile(band, 95, axis=0) - np.median(band, axis=0)))
+
+
+#: The bands the diagnosis quotes: the mid comb, the region where DREGON's comb
+#: merges, and the top of the band where its real lines are strongest.
+PROMINENCE_BANDS = ((1000.0, 3000.0), (4000.0, 6000.0), (6000.0, 8000.0))
+
+
+def fitted_arm(
+    rig: str, base_ranges: dict, source: dict[str, Path] | None = None
+) -> tuple[srn.StochasticRanges, dict]:
     """The gated preset: ranges through the gate's own transfer, plus its rig scalars.
 
     ``population_ranges`` carries the profile, floor curve, widths, microphone
@@ -83,7 +108,7 @@ def fitted_arm(rig: str, base_ranges: dict) -> tuple[srn.StochasticRanges, dict]
     speed-law scalars live on the fitted rig and are applied to the drawn
     parameters exactly as ``render_matched_population`` does.
     """
-    path = FITTED[rig]
+    path = (source or FITTED)[rig]
     if not path.exists():
         raise FileNotFoundError(f"{path}: fitted summary missing — see the pipeline in the log")
     summary = json.loads(path.read_text())
@@ -160,8 +185,17 @@ def main() -> None:
             specs = {k: spectrogram_db(v) for k, v in trio.items()}
             vmax = max(np.percentile(s, 99.5) for s in specs.values())
             vmin = vmax - 70
+            columns = [
+                ("real", "real recording"),
+                ("fit", "fitted preset (same RPS)"),
+                ("rig", "pre-fit rig preset"),
+                ("old", "old family"),
+            ]
             fig, axes = plt.subplots(
-                1, 5, figsize=(19, 3.4), gridspec_kw=dict(width_ratios=[1.5, 3, 3, 3, 3])
+                1,
+                1 + len(columns),
+                figsize=(4 + 3.2 * len(columns), 3.4),
+                gridspec_kw=dict(width_ratios=[1.5] + [3] * len(columns)),
             )
             t = np.arange(rps.shape[1]) / SR
             for r in range(rps.shape[0]):
@@ -169,16 +203,7 @@ def main() -> None:
             axes[0].set_title("rotor speeds (label)", fontsize=10)
             axes[0].set_xlabel("s")
             axes[0].set_ylabel("rev/s")
-            for ax, (name, title) in zip(
-                axes[1:],
-                [
-                    ("real", "real recording"),
-                    ("fit", "FITTED preset (same RPS)"),
-                    ("rig", "pre-fit rig preset"),
-                    ("old", "old family"),
-                ],
-                strict=True,
-            ):
+            for ax, (name, title) in zip(axes[1:], columns, strict=True):
                 s = specs[name]
                 ax.imshow(
                     s,
@@ -198,8 +223,14 @@ def main() -> None:
             fig.tight_layout()
             fig.savefig(HERE / f"{slug}.png", dpi=110)
             plt.close(fig)
+            prominence = {
+                name: [prominence_db(x, lo, hi) for lo, hi in PROMINENCE_BANDS]
+                for name, x in trio.items()
+            }
             index.append(
                 dict(
+                    prominence=prominence,
+                    prominence_bands=[list(b) for b in PROMINENCE_BANDS],
                     rig=rig,
                     clip=cid,
                     label=label,

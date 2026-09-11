@@ -1395,6 +1395,85 @@ def get_results(args: argparse.Namespace) -> None:
         print(f"got {local} ({len(body) / 1e6:.1f} MB)", flush=True)
 
 
+def population_augment(args: argparse.Namespace) -> None:
+    """Attach the blocks a raw ``popfit`` summary does not carry.
+
+    A refit is a raw rig fit: it has no amplitude process, no label error and no
+    width population, and ``population_ranges`` skips each missing block
+    SILENTLY, so an export from a raw refit quietly falls back to hand-chosen
+    dynamics. Two of the three blocks do not depend on the rig fit at all and
+    are carried over with their provenance recorded; the third is rederived
+    here, because it must be.
+
+    * ``dynamics`` — fitted on the decomposed Vold-Kalman envelopes of the
+      training recording. The rig summary enters only as the file the result is
+      merged into, so carrying it is exactly equivalent to re-running it.
+    * ``carrier_error`` — the static shaft-minus-label offset, measured from
+      independent per-clip fits. Also independent of the rig fit.
+    * ``width_population`` — NOT carried. Its clip-to-clip width spread came
+      from per-clip fits made under the censored forward model, where the width
+      parameter was pinned at 0.6 bins for most clips, so its spread is the
+      spread of a floor. It is recomputed from THIS fit's own per-clip widths.
+    """
+    summary = json.loads(Path(args.summary).read_text())
+    carry = json.loads(Path(args.carry).read_text()) if args.carry else {}
+    provenance: dict[str, Any] = {}
+    for block in ("dynamics", "carrier_error"):
+        if block in summary:
+            continue
+        if block in carry:
+            summary[block] = carry[block]
+            provenance[block] = args.carry
+    slopes = np.array(
+        [
+            float(np.median(np.asarray(clip["params"]["gamma_slope"], dtype=np.float64)))
+            for clip in summary["train"].values()
+        ]
+    )
+    live = slopes[slopes > 0]
+    log_std = float(np.std(np.log(live))) if live.size > 1 else 0.0
+    per_rotor = np.stack(
+        [
+            np.asarray(clip["params"]["gamma_slope"], dtype=np.float64)
+            for clip in summary["train"].values()
+        ]
+    )
+    # A tied rig fit gives every clip the same width, so the clip-to-clip
+    # spread is exactly zero here and is NOT a measurement of zero: it is not
+    # estimable from this fit. Writing the zero would silently remove an effect
+    # the recordings do show (a real flight's shaft wanders more in one segment
+    # than another), so the inherited value is kept instead, with its own
+    # contamination recorded — it came from per-clip fits whose width parameter
+    # was pinned at the old 0.6-bin floor for most clips.
+    if log_std > 0.0:
+        summary["width_population"] = {
+            "common_log_std": log_std,
+            "rotor_median_slope_hz": [float(v) for v in np.median(per_rotor, axis=0)],
+            "clips": list(summary["train"]),
+            "source": "rederived from this fit's per-clip gamma_slope",
+        }
+    elif "width_population" in carry:
+        summary["width_population"] = dict(carry["width_population"])
+        summary["width_population"]["rotor_median_slope_hz"] = [
+            float(v) for v in np.median(per_rotor, axis=0)
+        ]
+        summary["width_population"]["source"] = (
+            "spread inherited from censored per-clip fits (not estimable from a tied fit); "
+            "per-rotor slopes from this fit"
+        )
+        provenance["width_population.common_log_std"] = args.carry
+    summary["augment_provenance"] = provenance
+    Path(args.output).write_text(json.dumps(summary))
+    print(
+        f"{args.output}: carried {sorted(provenance) or 'nothing'}; "
+        f"width common_log_std {summary['width_population']['common_log_std']:.3f} "
+        f"(rederived {log_std:.3f} over {live.size} clips), "
+        f"per-rotor median slope "
+        f"{[round(v, 4) for v in summary['width_population']['rotor_median_slope_hz']]}",
+        flush=True,
+    )
+
+
 def put_results(args: argparse.Namespace) -> None:
     """Copy a job's result files to R2.
 
@@ -1620,6 +1699,11 @@ def main(argv: list[str] | None = None) -> None:
     pu.add_argument("--path", required=True, action="append", help="local file, repeatable")
     pu.add_argument("--prefix", default=f"{PREFIX}/results", help="key prefix under the bucket")
     pu.set_defaults(func=put_results)
+    pa = sub.add_parser("popaugment")
+    pa.add_argument("--summary", required=True)
+    pa.add_argument("--carry", default=None, help="summary to carry fit-independent blocks from")
+    pa.add_argument("--output", required=True)
+    pa.set_defaults(func=population_augment)
     pg2 = sub.add_parser("getr2")
     pg2.add_argument(
         "--key", required=True, action="append", help="R2 key, or key=localname; repeatable"
