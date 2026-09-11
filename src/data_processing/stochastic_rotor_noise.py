@@ -479,6 +479,16 @@ class StochasticParams:
     umod_corner_hz: float = 500.0
     mic_gain_all_db: float = 0.0
     mic_floor_std_db: float = 0.0
+    #: Minimum line width, in OLA bins. The default reproduces the historical
+    #: :data:`GAMMA_MIN_BINS` behaviour, but that floor is a CENSOR whenever the
+    #: lines being rendered are narrower than it: at 44.1 kHz with the default
+    #: ``n_fft`` it forces every line to 12.9 Hz, against 0.2-2 Hz measured on
+    #: DREGON's bench. It also double-counts the analysis window, which
+    #: ``_ola_filter`` already convolves in, and ``line_bin_integrate`` handles
+    #: a sub-bin line exactly. The fit's forward model uses 0.01
+    #: (``model.BASE_VARIANT``); a fitted parameter set should render with the
+    #: same value it was fitted under.
+    gamma_min_bins: float = GAMMA_MIN_BINS
 
     def with_(self, **changes: Any) -> StochasticParams:
         """A copy with fields replaced — the slider path."""
@@ -1010,7 +1020,7 @@ def build_psd(
     harm_gp = np.sqrt(rho) * common[:, None, :] + np.sqrt(1.0 - rho) * private
 
     lines = np.zeros((n_rotors, n_frames, n_freqs), dtype=np.float64)
-    gamma_min = GAMMA_MIN_BINS * df
+    gamma_min = float(params.gamma_min_bins) * df
     frame_idx = np.arange(n_frames)
     k_all = np.arange(1, n_harm + 1, dtype=np.float64)
     for r in range(n_rotors):

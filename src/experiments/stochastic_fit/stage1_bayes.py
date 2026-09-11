@@ -57,6 +57,8 @@ N_FFT = 16384
 HOP = 8192
 F_MAX = 7900.0
 K_CAP = 200
+#: OLA window for rendering at 44.1 kHz: 0.67 Hz bins.
+OLA_N_FFT = 1 << 16
 
 #: The variant the corrected forward model uses everywhere else, minus the
 #: pieces a clamped bench motor cannot have: no rate trajectory, so no chirp
@@ -230,6 +232,9 @@ def params_from_export(export: dict[str, Any], rate_rps: float, *, sample_rate: 
         umod_corner_hz=200.0,
         mic_gain_all_db=0.0,
         mic_floor_std_db=0.0,
+        # Render under the same width floor the fit used, or every line comes
+        # out at least 12.9 Hz wide at 44.1 kHz against 0.2-2 Hz measured.
+        gamma_min_bins=0.01,
     )
 
 
