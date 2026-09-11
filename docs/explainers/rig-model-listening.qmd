@@ -776,133 +776,155 @@ for rig, title in (("dregon", "DREGON"), ("michaels", "Michael's rig")):
 The discrepancy is not impressionistic. Measuring line **prominence** on the
 assets above — the median over frames of (95th percentile − median) of the
 power inside a band, in dB, which is high when a band contains sparse strong
-lines and low when it is a continuum:
+lines and low when it is a continuum. The table is computed by `build.py` on
+the very files the players above play, so it cannot drift away from them:
 
-| rig | clip | arm | 1–3 kHz | 4–6 kHz | 6–8 kHz |
-|---|---|---|---:|---:|---:|
-| DREGON | hover, room 2 | real | 9.49 | 7.05 | **9.02** |
-| DREGON | hover, room 2 | fit | 14.47 | 7.71 | **7.92** |
-| DREGON | cruise, room 1 | real | 9.57 | 7.29 | **12.28** |
-| DREGON | cruise, room 1 | fit | 12.59 | 8.43 | **8.47** |
-| Michael's | cruise ≈ 80 rev/s | real | 8.32 | **7.28** | 7.81 |
-| Michael's | cruise ≈ 80 rev/s | fit | 10.35 | **10.84** | 8.02 |
-| Michael's | idle ≈ 35 rev/s | real | 7.34 | 6.36 | 8.08 |
-| Michael's | idle ≈ 35 rev/s | fit | 7.56 | 6.38 | 7.62 |
+```{python}
+#| output: asis
+print("| rig | clip | arm | " + " | ".join(
+    f"{int(lo) // 1000}–{int(hi) // 1000} kHz" for lo, hi in index[0]["prominence_bands"]
+) + " |")
+print("|---|---|---|" + "---:|" * len(index[0]["prominence_bands"]))
+for e in index:
+    for arm in ("real", "fit"):
+        cells = " | ".join(f"{v:.2f}" for v in e["prominence"][arm])
+        rig = "DREGON" if e["rig"] == "dregon" else "Michael's"
+        print(f"| {rig} | {e['label']} | {arm} | {cells} |")
+```
 
-Two opposite failures, and both trace to identifiable lines of Part I.
+Two opposite failures. **DREGON's rendered comb is slightly too prominent in
+the mid band and slightly too weak at the top**, where the real recording's
+high lines *strengthen* with speed; **Michael's rendered comb is far too
+prominent above 4 kHz**, where the real recording is a continuum at 6–8 dB on
+every clip. Both are smaller than they were before the 2026-09 audit below,
+and one of the two explanations this section used to give was wrong.
 
-### 9.1 DREGON loses its high comb: the width law swallows it
 
-Real DREGON keeps sparse, pronounced lines at 6–8 kHz, and they get *stronger*
-with speed (9.0 dB at hover → 12.3 dB in the room-1 cruise). The fitted render
-is flat there (7.9–8.5 dB regardless of speed). Three mechanisms of Part I
-combine, all pointing the same way.
+### 9.1 The audit: the width the fit reported was its own floor
 
-**(i) The rendered width is half the line spacing.** DREGON's preset uses
-$\tau_{\text{jit}} \in [0.1, 0.25]$ s, which *straddles* the 128 ms analysis
-window: the rig sits at the crossover of §2.2 rather than cleanly inside either
-branch. Its $\sigma_\rho$ was derived under the quasi-static branch
-($\sigma = w_\rho\gamma_{\text{slope}}/\sqrt{2\ln2}$), and since the diffusive
-branch at the same $\tau$ and $\sigma$ would give 1600–4500 Hz at $k=80$, the
-quasi-static value is a **lower bound** on what is actually rendered. With the
-transferred $\sigma_\rho = (0.52, 0.80, 0.49, 0.48)$ rev/s:
+This section used to blame DREGON's missing high comb on the width law. That
+explanation was wrong, and the thing that caught it was not a statistic but a
+**round trip**: render a clip from the family, hand the audio and the speed
+labels to the fitting machinery, and compare what comes back with what went in.
 
-$$
-\gamma_{\rho,80} \;=\; \sqrt{2\ln2}\cdot 80 \cdot \sigma_\rho
- \;=\; (48.5,\ 75.4,\ 46.2,\ 44.9)\ \text{Hz}.
-$$
+On a comb of **pure tones** — amplitudes frozen, no shaft wander, no line
+diffusion, planted half width exactly zero — the fit returned
 
-At 80 rev/s the comb spacing is 80 Hz. A line whose half width is 45–75 Hz on
-an 80 Hz grid has merged with its neighbours: the model *cannot* put a sparse
-pronounced line at 6.4 kHz, because at $k=80$ it no longer renders lines at
-all, only a modulated continuum. The same $\sigma$ at $k=8$ gives 5 Hz — under
-one bin — which is why the fitted DREGON render is simultaneously **too** peaky
-at 1–3 kHz (14.5 versus 9.5 dB). One linear-in-$k$ law with this $\sigma$
-cannot be right at both ends, and the fitted $\gamma_0$ intercept that would
-have broadened the low orders is deliberately not transferred (§2.2).
+| planted $\gamma$ at $k=8$ | fitted, before | fitted, after |
+|---|---:|---:|
+| 0 Hz (pure tones) | 4.69 / 25.2 / 70.5 Hz | 0.35 / 1.79 / 2.27 Hz |
+| 1.5–3.1 Hz (diverse arm) | 4.69 Hz (all clips) | 4.29 / 4.43 / 7.53 Hz |
 
-**(ii) Above order 91 the profile is a held constant, not a measurement.** The
-rig fit sizes its harmonic ladder to the *fastest* clips, so its top orders sit
-above the fit band on every frame, carry no likelihood term, and fall to the
-prior — DREGON's mean curve collapses from −14 dB at order 91 to −140 dB by
-order 106. Transferring that would silence the top of the band, so the profile
-is truncated at its measured support and **held flat** at −14.3 dB above it. At
-80 rev/s order 91 is 7.3 kHz: the entire 6–8 kHz region is at or beyond the
-edge of what was measured. Whatever real structure lives there — and the table
-says something sharp does — the fit never saw it.
+The repeated 4.688 Hz is the tell: it is $0.6 \times 16000/2048$, the width
+**floor** (`gamma_min_bins`). Nothing narrower than 4.69 Hz could be expressed
+at $n_\text{fft}=2048$, while the bench resolves real lines at 0.14 Hz at
+order 4 and 1.87 Hz at order 32 (§7.3). Worse, the floor **double-counted the
+analysis window**: the model is already convolved with the Hann power response,
+so the window's broadening was supplied twice and the second copy was
+mandatory. The correct treatment of a sub-bin line is the exact bin integral,
+not a floor on its width.
 
-**(iii) The comb's prominence cannot grow with speed.** DREGON's speed
-exponents are *not* identifiable from 4 s crops (§4.1) and no room-2
-decomposition exists, so both stay at the family default $q = q_{\text{fl}} =
-2.5$. By the observation at the end of §2.4, equal exponents make the
-line-to-floor ratio **speed-invariant by construction**. Real DREGON's 6–8 kHz
-prominence rises by more than 3 dB from hover to cruise; the model has no
-degree of freedom that can produce that. (Michael's, where the decomposition
-gave $q = 3.93$ against $q_{\text{fl}} = 3.46$, does have one — a $+0.5$
-exponent of headroom.)
+The rest of the excess was real but knowable. A rotor changing speed at
+$\dot s$ sweeps order $k$ across $k\dot s$ hertz within one window, and a
+linear sweep of total width $W$ has half width $W/2$, so
 
-### 9.2 Michael's grows a high harmonic it should not have
+$$\gamma_{\text{chirp}} = \frac{1}{2}\,k\,\frac{|\dot s|}{\Delta f}$$
 
-At cruise, Michael's fitted render is 3.6 dB *too* peaky at 4–6 kHz, visible in
-the figure as one bright, isolated, slowly drifting line near 4.5 kHz — order
-64 at 71 rev/s. Two mechanisms, both from Part I.
+which is 5 Hz at order 8 on a 10 rev/s² ramp — the size of the mystery. §12
+proves rate drift and line width are *exactly* degenerate inside one window, so
+the part that is known from the labels must enter as a covariate with no free
+parameter. It now does.
 
-**(i) The diffusive branch makes the width spread across rotors explode.**
-Michael's preset uses $\tau_{\text{jit}} \in [0.003, 0.008]$ s — the
-**diffusive** branch, width $\propto k^2\sigma^2$. Its fitted per-rotor scales
-span more than tenfold, $\sigma_\rho = (0.68, 0.14, 0.50, 1.58)$ rev/s, and the
-quadratic law amplifies that spread quadratically:
+Everything below this line was refitted with both corrections.
 
-$$
-\gamma_{\rho,64} \;=\; 2\pi\,\tau\,64^2\,\sigma_\rho^2
- \;=\; (65.2,\ \mathbf{2.6},\ 35.8,\ 351.9)\ \text{Hz}\quad (\tau = 5\ \text{ms}).
-$$
+### 9.2 DREGON: the width slope collapses, and what remains is flat in $k$
 
-Rotor 2 is a **needle** — 2.6 Hz, a third of a bin — at order 64, while rotors
-1 and 4 are smeared over hundreds of Hz. That is precisely "sparse pronounced
-high harmonics": one rotor contributes a razor-sharp line at the top of the
-comb and the others contribute continuum. Under the quasi-static law the same
-rotor would give 10.3 Hz, still sharp but not a needle, and the spread across
-rotors would be linear rather than quadratic.
+With the floor removed and the chirp charged to the labels, DREGON's fitted
+width law drops fivefold and lands within an order of magnitude of the bench
+instead of fifteen times above it:
 
-**(ii) The calibration injects its high-order dispersion in the wrong shape.**
-The gate correctly reports that real clips vary enormously at the top of the
-comb (13.2 dB clip-to-clip at order 64, with most clips showing *no* visible
-line and a few showing a strong one). The §4.4 covariance rank answers by
-adding a profile mode $B_{jk}$ whose largest loading is exactly at order 64
-(2.03 dB RMS). A symmetric Gaussian mode with the right variance and a
-one-sided reality gives the wrong thing: instead of "usually absent, sometimes
-present", the render produces "sometimes 4 dB down, sometimes 4 dB up" — an
-occasional implausibly loud needle. Right variance, wrong shape. This is our
-leading explanation for the residual classifier separation, and it is a
-structural gap in §2.3: the amplitude hierarchy is Gaussian in dB and has no
-mechanism for a line being *absent*.
+| | slope (Hz/order) | $\gamma(k{=}2)$ | $\gamma(k{=}8)$ | $\gamma(k{=}64)$ |
+|---|---:|---:|---:|---:|
+| DREGON, censored fit | 0.336 | 7.05 | 10.60 | 43.77 |
+| DREGON, corrected fit | **0.064** | 12.00 | 13.15 | 23.84 |
+| Michael's, censored fit | 0.573 | 4.69 | 8.25 | 47.21 |
+| Michael's, corrected fit | **0.364** | 2.82 | 4.90 | 24.24 |
+| bench, single motor | 0.023 | 0.28 | 0.42 | 1.69 |
 
-**(iii) Above order 109 Michael's profile is also a flat hold** (−14.35 dB), so
-at cruise the render carries lines to Nyquist at a constant level while the
-real recording's high orders fade. This is the same truncation as DREGON's
-(§9.1 ii), but because Michael's support reaches 7.7 kHz at cruise speed it
-bites only in the top octave.
+Held-out likelihood barely moved (DREGON $-1.7837 \to -1.7798$ nats/cell) and
+training got slightly *worse* ($-1.9727 \to -1.9428$), which is what must
+happen when a free parameter is replaced by a known covariate.
 
-### 9.3 The common cause worth naming
+What survives is the interesting part. It is nearly **independent of $k$**: 12
+Hz at order 2 rising only to 24 Hz at order 64. A shaft offset cannot do that,
+because it smears order $k$ by $k\sigma$; a flat-in-$k$ broadening is the
+signature of **amplitude modulation**, which puts sidebands at the same offset
+on every order. That is the $\gamma_{\text{AM}}$ term of the decomposition in
+§13.5, and it says the renderer has the mechanism backwards: it buys flight
+broadening with a wide shaft, where the data wants fast AM on a narrow one.
 
-The two rigs are rendered in **different physical regimes** — DREGON
-quasi-static ($\propto k$), Michael's diffusive ($\propto k^2$) — while the
-likelihood comparison that we ran on this question preferred the *same* law
-$\gamma \propto k^1$ on both rigs (the $k^2$ arm scored 0.075 and 0.128
-nats/cell worse on FLY125 and room 2 respectively, four to six standard
-errors). We nevertheless kept each rig's inherited $\tau$, because switching
-both to quasi-static was rejected by the held-out predictive check
-(curve RMSE 0.44 → 1.28, coverage 0.82 → 0.62) — the exponent test measures the
-*total* width including the $\gamma_0$ intercept that the renderer does not
-carry, so it does not identify the regime the renderer needs.
+### 9.3 Michael's: the exported profile centre was not a measurement
 
-That unresolved tension is exactly where the two symptoms above come from: a
-$\tau$ chosen per rig is doing work that the width *law* should be doing, and it
-pushes DREGON into "no high lines at all" and Michael's into "one needle where
-there should be none". Resolving it needs a width model whose intercept is
-physical — a per-order visibility mechanism, or an explicit finite-bandwidth
-excitation for each line — rather than a $\tau$ tuned per rig.
+Michael's failure had a different cause, and looking at a picture found it
+where the likelihood could not. The first render from the corrected fit put a
+bright band at 6–8 kHz over a dark low band — nothing like the recording — and
+measured against the real clip it was **+54 dB** too hot in the top band.
+
+The fit was fine. A clip's profile is
+
+$$A_{c,r,k} = \mu_k + \delta_{r,k} + (Bz_c)_k + \ell_c$$
+
+and the likelihood sees only the sum, so $\mu$ is identified only up to the
+span of the mode basis plus constants. Measured on the same data fitted twice,
+every per-clip profile reproduced to half a dB while $\mu$ disagreed with **its
+own clips** by 13 dB at order 8 and 25 dB at order 90 — and flipped sign
+between the two fits. The export used $\mu$.
+
+| order | clips (median) | $\mu$, fit 1 | $\mu$, fit 2 |
+|---:|---:|---:|---:|
+| 8 | +6.9 / +7.4 | −6.0 | +1.2 |
+| 32 | +7.2 / +7.1 | −11.0 | +1.4 |
+| 90 | −25.6 / −25.7 | −14.3 | −0.5 |
+
+The population that the gate scores is over **clips**, so the centre is taken
+there: $\mu^\*_k = \operatorname{med}_{c,r} A_{c,r,k}$, with the per-rotor
+deviation and the clip-to-clip residual measured around it, and the basis left
+alone because its columns are directions and carry no centre. Michael's top
+band went from +54.4 dB to +6.4 dB, and its mean band error from 13.8 dB to
+4.3 dB.
+
+The same fix moved **DREGON the wrong way** (4.1 → 7.4 dB, uniformly hot
+through 700 Hz–7 kHz), and that is not a reason to revert it. DREGON's
+clip-median profile is flat at $\approx+7$ dB from order 8 to 32 where $\mu$
+rolled off to −6…−11 dB, and that band is exactly where §6.2's marginal
+information says DREGON's lines sit **6.4 dB below the floor**. A flat line
+profile fits the data there because the lines are invisible and the floor
+carries the spectrum; it renders badly because the renderer then puts real
+energy into invisible lines. The remaining work is to export an unmeasured
+order as *under the floor*, keyed off the identifiability boundary, rather than
+as a point estimate — and not by tuning against the same check that would
+validate it.
+
+### 9.4 What the round trip says the fit cannot measure at all
+
+The same planted control that caught the width floor also reports an
+**amplitude drift of 2.3–3.7 dB where the planted value is exactly zero**,
+against a prior standard deviation of 3.0 dB. The drift readout is therefore
+not an estimator: it is returning prior-scale noise fitting, because the model
+carries one drift process per (rotor, order) and a MAP estimate will spend that
+capacity on the periodogram's own $\chi^2$ fluctuation. Any claim resting on
+the fitted `h_db` — including the 2.90 dB amplitude standard deviation quoted
+in §7.6 — is the same size as this null and needs a capacity-matched
+reparameterisation (one shared process per rotor plus a per-order residual,
+which is what the renderer actually implements) before it can be believed.
+
+### 9.5 A cue neither rig's render carries
+
+Every real recording has a black band above ~7.9 kHz — the anti-alias filter of
+the recording chain. No render reproduces it; the synthetic spectra run to
+Nyquist. It is a trivially learnable domain cue sitting in every synthetic clip
+of every arm above, and it costs one low-pass to remove.
+
 
 # Part V — Two derivations from first principles
 
