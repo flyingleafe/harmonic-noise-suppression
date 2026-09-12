@@ -174,6 +174,7 @@ def fit(
     rotor_delta: bool = True,
     regime: str = "cruise",
     floor_dynamics: bool = False,
+    min_rps: float | None = None,
     device: str = "cpu",
     log: Any = print,
 ) -> dict[str, Any]:
@@ -188,7 +189,7 @@ def fit(
         recording_id,
         seconds=seconds,
         max_clips=max_clips,
-        min_rps=float(band["min_rps"]),
+        min_rps=float(band["min_rps"] if min_rps is None else min_rps),
         max_rps=band["max_rps"],
         stride_s=band["stride_s"],
     )
