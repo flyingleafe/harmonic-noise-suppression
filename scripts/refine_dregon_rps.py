@@ -612,6 +612,31 @@ def stitch(
                 "idle_rev_s": IDLE_REV_S,
                 "max_move_rev_s": MAX_MOVE_REV_S,
             },
+            # The gate is provenance: without it the report cannot substantiate
+            # that standby carries the telemetry, and an old repaired sidecar
+            # and a freshly produced one would describe themselves differently.
+            "gate": {
+                "policy": policy.as_dict(),
+                "regimes": gating.regime_summary(ft, r_tel, policy),
+                "invariants": {
+                    "standby_exact": bool(
+                        np.array_equal(r_ref[:, gate_w <= 0.0], r_tel[:, gate_w <= 0.0])
+                    ),
+                    "cruise_exact": bool(
+                        np.array_equal(r_ref[:, gate_w >= 1.0], r_raw[:, gate_w >= 1.0])
+                    ),
+                    "standby_correction_rms": round(
+                        float(
+                            np.sqrt(
+                                np.mean((r_ref[:, gate_w <= 0.0] - r_tel[:, gate_w <= 0.0]) ** 2)
+                            )
+                            if (gate_w <= 0.0).any()
+                            else 0.0
+                        ),
+                        6,
+                    ),
+                },
+            },
             "n_frames": int(ft.size),
             "n_windows": len(got),
             "n_used": sum(1 for r in got if r["used"]),

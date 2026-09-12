@@ -122,5 +122,25 @@
    "reason": "not_cruise",
    "min_rev_s": 62.4424
   }
- ]
+ ],
+ "gate": {
+  "policy": {
+   "standby_max_rps": 45.0,
+   "cruise_min_rps": 65.0,
+   "settle_s": 1.0
+  },
+  "regimes": {
+   "frames": 1116.0,
+   "standby_frac": 0.09050179211469533,
+   "ramp_frac": 0.012544802867383513,
+   "cruise_frac": 0.8969534050179212,
+   "weight_zero_frac": 0.0913978494623656,
+   "weight_one_frac": 0.8772401433691757
+  },
+  "invariants": {
+   "standby_exact": true,
+   "cruise_exact": true,
+   "standby_correction_rms": 0.0
+  }
+ }
 }
