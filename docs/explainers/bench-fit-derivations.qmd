@@ -781,7 +781,46 @@ argmin over $C$ recovers planted values 0, 1 and 8 exactly.
 We keep this function as a diagnostic. We do not need it in the fit, because §5.3
 shows the mean spectrum already identifies $w_k$.
 
-# 8. Hacks, defects, and hindrances
+# 7. Looking and listening
+
+Statistics alone do not close a stage. The five bench cells were rendered from
+the fitted vector through the SAME renderer the training streams use, and
+decimated on the real clips' own path. Each panel is real, fitted, and a draw
+from the untouched default family, plus the LTAS band profile of all three.
+
+|cell|rev/s|fitted LTAS mean\|dev\| (dB)|pre-fit (dB)|
+|---|---:|---:|---:|
+|Motor1_50|49.0|2.06|7.25|
+|Motor1_60|58.8|1.94|9.69|
+|Motor1_70|68.5|1.93|9.62|
+|Motor1_80|78.2|2.51|10.59|
+|Motor1_90|88.0|2.03|8.67|
+
+::: {layout-ncol=1}
+![Motor 1 at setpoint 80](stage1-bench/bayes_Motor1_80.png)
+
+![Motor 1 at setpoint 50](stage1-bench/bayes_Motor1_50.png)
+
+![Motor 1 at setpoint 90](stage1-bench/bayes_Motor1_90.png)
+:::
+
+The fitted panel carries the real clip's comb, its 4.3 kHz and 6.5 kHz bright
+bands, and its broadband floor level. The pre-fit panel does not: its comb is
+too strong, its floor too dark, and its LTAS falls away by more than 10 dB
+across the band.
+
+The residual is in the 3 to 7 kHz bands, where the fitted LTAS sits about 4 dB
+low. WAV files for every cell are in `docs/explainers/stage1-bench/` as
+`bayes_Motor1_NN_{real,fitted,prefit}.wav`.
+
+# 8. Where this goes next
+
+The same line model is fitted to Michael's FLY125 cruise in
+[stage2-cruise](stage2-cruise.html), where a frozen rotor-speed tracker scores
+the synthetic clips at 0.76 rev/s against 0.35 for the real clips through the
+same pipeline, with no refusals.
+
+# 9. Hacks, defects, and hindrances
 
 This list is complete and honest. Items 1 to 7 are **defects that we found and
 fixed**. Items 8 to 12 are **open**.
@@ -848,7 +887,7 @@ fixed**. Items 8 to 12 are **open**.
     statistics computed with different band widths. It was wrong. The correct
     statement is in §5.1.
 
-# 9. What comes next
+# 10. What comes next
 
 1. Finish the constant-pedestal test, and keep the variant with the better
    held-out NLL.
