@@ -177,6 +177,36 @@ back on, with that identifiability handled, is the next step.
 WAV files for each window are next to the figures in
 `docs/explainers/stage2-cruise/` as `cruise_NN_{real,fitted,prefit}.wav`.
 
+## Listen
+
+Each row is the same window: the real recording, the fitted model's render, and
+a draw from the untouched default family. All three are peak-normalised to the
+same level, so the difference you hear is spectrum and texture, not loudness.
+
+```{python}
+from IPython.display import HTML, display as _d
+
+
+def players(rows, subdir="stage2-cruise"):
+    out = ["<table style='width:100%;border-collapse:collapse'>",
+           "<tr><th style='text-align:left'>window</th><th>real</th>"
+           "<th>fitted</th><th>pre-fit</th></tr>"]
+    for label, stem in rows:
+        cells = "".join(
+            f"<td style='padding:4px'><audio controls preload='metadata' "
+            f"style='width:230px' src='{subdir}/{stem}_{kind}.wav'></audio></td>"
+            for kind in ("real", "fitted", "prefit")
+        )
+        out.append(f"<tr><td style='padding:4px'><b>{label}</b></td>{cells}</tr>")
+    out.append("</table>")
+    return HTML("\n".join(out))
+
+
+rows = [(f"cruise {i}", f"cruise_{i:02d}") for i in range(4)] + [("standby", "standby_00")]
+_d(players(rows))
+```
+
+
 # 4. The gate: a frozen tracker as the judge
 
 The strongest available test of "is this Michael's comb" is not a spectral

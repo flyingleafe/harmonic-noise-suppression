@@ -541,8 +541,7 @@ $k$-linear width law is therefore correct, and a constant-width variant is worse
 by 3800 nats.
 
 This is the third time the same class of defect appeared: a measurement or a
-model floor that cannot represent the value it measures. See §8, items 1, 2 and
-8.
+model floor that cannot represent the value it measures. See §10, items 1, 2 and 8.
 :::
 
 The uncensored measurement, with the same code and a $\pm 30$ Hz band:
@@ -781,7 +780,7 @@ argmin over $C$ recovers planted values 0, 1 and 8 exactly.
 We keep this function as a diagnostic. We do not need it in the fit, because §5.3
 shows the mean spectrum already identifies $w_k$.
 
-# 7. Looking and listening
+# 8. Looking and listening
 
 Statistics alone do not close a stage. The five bench cells were rendered from
 the fitted vector through the SAME renderer the training streams use, and
@@ -813,14 +812,37 @@ The residual is in the 3 to 7 kHz bands, where the fitted LTAS sits about 4 dB
 low. WAV files for every cell are in `docs/explainers/stage1-bench/` as
 `bayes_Motor1_NN_{real,fitted,prefit}.wav`.
 
-# 8. Where this goes next
+## Listen
+
+```{python}
+from IPython.display import HTML, display as _d
+
+cells = [r["cell"] for r in idx] if (idx := locals().get("idx")) else [
+    f"Motor1_{s}" for s in (50, 60, 70, 80, 90)
+]
+html = ["<table style='width:100%;border-collapse:collapse'>",
+        "<tr><th style='text-align:left'>cell</th><th>real</th><th>fitted</th>"
+        "<th>pre-fit</th></tr>"]
+for c in cells:
+    tds = "".join(
+        f"<td style='padding:4px'><audio controls preload='metadata' "
+        f"style='width:230px' src='stage1-bench/bayes_{c}_{k}.wav'></audio></td>"
+        for k in ("real", "fitted", "prefit")
+    )
+    html.append(f"<tr><td style='padding:4px'><b>{c}</b></td>{tds}</tr>")
+html.append("</table>")
+_d(HTML("\n".join(html)))
+```
+
+
+# 9. Where this goes next
 
 The same line model is fitted to Michael's FLY125 cruise in
 [stage2-cruise](stage2-cruise.html), where a frozen rotor-speed tracker scores
 the synthetic clips at 0.76 rev/s against 0.35 for the real clips through the
 same pipeline, with no refusals.
 
-# 9. Hacks, defects, and hindrances
+# 10. Hacks, defects, and hindrances
 
 This list is complete and honest. Items 1 to 7 are **defects that we found and
 fixed**. Items 8 to 12 are **open**.
@@ -887,7 +909,7 @@ fixed**. Items 8 to 12 are **open**.
     statistics computed with different band widths. It was wrong. The correct
     statement is in §5.1.
 
-# 10. What comes next
+# 11. What comes next
 
 1. Finish the constant-pedestal test, and keep the variant with the better
    held-out NLL.
