@@ -38,6 +38,7 @@ def main() -> None:
     ap.add_argument("--ladder", type=int, nargs="*", default=(16, 48))
     ap.add_argument("--no-rotor-delta", action="store_true")
     ap.add_argument("--regime", default="cruise", choices=sorted(S2.REGIMES))
+    ap.add_argument("--floor-dynamics", action="store_true", help="let the floor level/tilt drift")
     ap.add_argument("--threads", type=int, default=0, help="torch threads (0 = leave default)")
     ap.add_argument("--out", type=Path, default=Path("results/S2/cruise.json"))
     args = ap.parse_args()
@@ -56,6 +57,7 @@ def main() -> None:
         ladder=tuple(args.ladder),
         rotor_delta=not args.no_rotor_delta,
         regime=args.regime,
+        floor_dynamics=args.floor_dynamics,
     )
     path = S2.save(summary, args.out)
     print(f"\nwrote {path}  ({time.time() - t0:.0f}s)", flush=True)

@@ -148,6 +148,20 @@ def cruise_clips(
     return rows
 
 
+#: Floor-only dynamics. Real cruise gusts: the broadband floor's level and tilt
+#: drift over a few seconds, and a stationary model cannot produce that. The
+#: LINE drift stays off, because that is the term which absorbed +4.97 dB of
+#: static per-order level on the bench and broke the map to the renderer. A
+#: floor GP cannot steal per-order line level, so this is the one dynamic the
+#: identifiability argument permits without a reparameterisation.
+FLOOR_DYNAMICS: dict[str, Any] = {
+    "floor_gp_std_db": 2.0,
+    "floor_gp_tau_s": 3.0,
+    "floor_tilt_gp_std": 0.5,
+    "floor_tilt_gp_tau_s": 6.0,
+}
+
+
 def fit(
     recording_id: str = FIT_RECORDING,
     *,
@@ -159,6 +173,7 @@ def fit(
     ladder: tuple[int, ...] = (16, 48),
     rotor_delta: bool = True,
     regime: str = "cruise",
+    floor_dynamics: bool = False,
     device: str = "cpu",
     log: Any = print,
 ) -> dict[str, Any]:
@@ -183,7 +198,8 @@ def fit(
     staged: list[tuple[str, str, Periodogram, Any]] = []
     for cid, clip, pg in rows:
         m = int(clip.audio.shape[0] if n_mics is None else n_mics)
-        spec = make_spec(pg, n_mics=m, f_max=F_MAX, k_cap=k_cap, variant=S2_VARIANT)
+        variant = {**S2_VARIANT, **(FLOOR_DYNAMICS if floor_dynamics else {})}
+        spec = make_spec(pg, n_mics=m, f_max=F_MAX, k_cap=k_cap, variant=variant)
         staged.append((cid, clip.group, pg, spec))
         log(
             f"  {cid}: {clip.audio.shape[0]} mics, {pg.power.shape[1]} frames, "
