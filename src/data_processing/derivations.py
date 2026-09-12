@@ -1201,8 +1201,8 @@ def _refined_label_identity(source: str) -> dict[str, Any]:
 def _verify_refined_labels(refined: dict[str, Any]) -> None:
     """Fail unless the sidecars on disk are exactly the bytes the spec names.
 
-    The sidecars are pipeline INPUTS, so the spec carries a sha per recording
-    and generation checks it. Without that, dload's fingerprint could memoize a
+    The sidecars are pipeline INPUTS, so the spec carries a 16-hex SHA-256
+    PREFIX per recording (not the full digest) and generation checks it. Without that, dload's fingerprint could memoize a
     snapshot whose labels have since been re-refined, and the stored recipe
     could not identify which label bytes a published dataset contains.
     """

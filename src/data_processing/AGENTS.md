@@ -68,6 +68,8 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   `time_warp.py` (`policy.noise_time_warp`), `rps_corruption.py` (clean-RPS
   corruption → extra `rps_cond` entry; telemetry label-noise
   `tachometer_corrupt` / `presmooth_track`).
+- `rps_gating.py` + `refined_label_track.py` — refined rps labels
+  (`refined_labels/`, produced by `scripts/refine_dregon_rps.py`).
 - `harmonicity.py` (analysis-stage `measure_harmonicity`), `rps_synthesis.py`
   / `collate.py` (mixer constants from `tracking.rotors`), `comb_bench*.py`.
 
@@ -78,10 +80,11 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   aligned and rev/s-calibrated (`MICHAELS_RPS_SCALE` inside `load_raw_aligned`).
   Consumers re-apply nothing (`adapt_recording_frame` → `rps`;
   `resolve_motor_tracks` no-cleaning path).
-- Published `*-frames` carry ONE `rps` track chosen by `PUBLISHED_RPS_KEYS`
-  (`motors_measured` preferred; only the five DREGON `free-flight_*_room1`
-  recordings log it) — detection and labelling use the same track, so
-  command-only recordings keep their trailing logging freeze.
+- Published `*-frames` carry TWO rps tracks: the raw one via
+  `PUBLISHED_RPS_KEYS` (`*_room2` logs only `motors_command`) and
+  `rps_refined` (regime-gated; **standby is never refined**), attached by the
+  `source_frames` derivation on the frame's AUDIO `t_start`. Details:
+  `docs/experiments/refined-rps-labels.md`.
 - Telemetry is time-last `(…, M)` on `StampIndex`-backed Series.
 - Two SNR conventions: offline/LibriMix (`mix_at_snr`, speech is the
   reference) vs online (`scale_source_to_snr`, noise is the reference).
@@ -91,6 +94,8 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   `pcm16-mono-v1`.
 - `adopt_only` specs are historical uploads whose bytes predate the spec;
   re-deriving would push a near-duplicate (mixing RNG is not byte-stable).
+  `DREGON-frames`/`michaels-frames` are no longer adopt-only (re-derived for
+  `rps_refined`).
   `michaels-test-frames` (FLY103/FLY108) is a **TEST set**: no training
   derivation may root on it.
 - Online-mix determinism: content is deterministic per `(base_seed, epoch,
