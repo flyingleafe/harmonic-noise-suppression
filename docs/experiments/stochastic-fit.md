@@ -1181,3 +1181,153 @@ Four things this says, in order of importance.
    (The earlier reading of this table as "multichannel input helps" was wrong:
    the model never sees more than one channel.)
 
+## GPU benchmark and the refined-label refits — 2026-09-12
+
+**Motivation.** The fit was just refactored onto the published frames datasets
+with the refined rotor-speed label (`scripts/stochastic_fit.py`, one
+regime-selected endpoint, SHA `3583c474`). Two questions: is `--device cuda`
+correct and worth using, and what do the accepted fits score when the label
+they hold fixed is `rps_refined` instead of raw telemetry?
+
+**Setup.** All three jobs on `uni-gpushort`, `--gpus 1 --time 1h`, one seed,
+`PYTHONPATH=$PWD/src` (the `experiments` package is not in the wheel's
+`packages` list). `uni-gpushort` over `kaggle` because `omnirun offers --gpus 1`
+quoted a 6 min wait against kaggle's 2 min while streaming logs live and
+imposing no ~1 MB source cap; in the event the benchmark started 16 s after
+submission. The benchmark is one job, three arms chained with `&&` so all three
+land on the same node:
+
+```bash
+omnirun submit --backend uni-gpushort --gpus 1 --time 1h --name sfit-bench -- \
+  bash -c 'PYTHONPATH=$PWD/src python scripts/stochastic_fit.py --regime cruise --recording FLY125 --clips 2 --seconds 16 --iters 20 20 40 --device cuda --out results/bench/gpu_2clip.json && PYTHONPATH=$PWD/src python scripts/stochastic_fit.py --regime cruise --recording FLY125 --clips 2 --seconds 16 --iters 20 20 40 --device cpu --out results/bench/cpu_2clip.json && PYTHONPATH=$PWD/src python scripts/stochastic_fit.py --regime cruise --recording FLY125 --clips 8 --seconds 16 --device cuda --out results/bench/gpu_8clip.json'
+# -> sfit-bench-efedab, exit 0, 16:35:46 -> 16:42:25Z
+
+omnirun submit --backend uni-gpushort --gpus 1 --time 1h --name sfit-fly125 -- \
+  bash -c 'PYTHONPATH=$PWD/src python scripts/stochastic_fit.py --regime cruise --recording FLY125 --clips 8 --seconds 16 --device auto --out results/S2/cruise_8clip_refined.json'
+# -> sfit-fly125-0e9c2b, exit 0, 16:44:16 -> 16:47:35Z
+
+omnirun submit --backend uni-gpushort --gpus 1 --time 1h --name sfit-dregon-cruise -- \
+  bash -c 'PYTHONPATH=$PWD/src python scripts/stochastic_fit.py --regime cruise --dataset DREGON-frames --recording free-flight_nosource_room2 hovering_nosource_room2 updown_nosource_room2 rectangle_nosource_room2 spinning_nosource_room2 --clips 2 --seconds 16 --device auto --out results/S2/dregon_room2_cruise_refined.json'
+# -> sfit-dregon-cruise-bec559, exit 0, 16:44:32 -> 16:47:15Z
+```
+
+### Results — CUDA is correct and 3.6-5.4x faster
+
+Banner on the GPU arms: `device cuda (Tesla V100-PCIE-16GB)` (benchmark and
+FLY125 refit) and `device cuda (Tesla V100-PCIE-32GB)` (DREGON refit), 8 torch
+threads everywhere.
+
+Matched work, 2 clips x 16 s, `--iters 20 20 40`, same node:
+
+|arm|floor-only|k<=16|k<=48|k<=109|fit phase|total wall|
+|---|---:|---:|---:|---:|---:|---:|
+|`--device cuda`|11 s|12 s|13 s|17 s|16.7 s|**31 s**|
+|`--device cpu`|7 s|14 s|30 s|107 s|108.1 s|**113 s**|
+
+3.6x on total wall. The optimiser itself is ~17x (6 s of GPU ladder time
+against 101 s); the 11-14 s before the first stage line is frame decode plus
+decimation to 16 kHz, which is CPU-bound in both arms and sets the floor on
+how much a GPU can buy a short fit.
+
+Parity at matched work (`results/bench/{gpu,cpu}_2clip.json`):
+
+|clip|`nll_fit` cuda|`nll_fit` cpu|abs diff|`excess_over_loo` cuda|cpu|abs diff|
+|---|---:|---:|---:|---:|---:|---:|
+|`fly125_cruise_00`|-0.190426|-0.190448|2.17e-05|-0.166905|-0.166906|8.9e-07|
+|`fly125_cruise_01`|-0.482533|-0.482531|1.20e-06|0.000737|0.000740|3.2e-06|
+
+Max `|Δ nll_fit|` = **2.17e-05 nats/cell**, max `|Δ excess_over_loo|` =
+3.16e-06 — two orders inside the 1e-3 tolerance, so the CUDA path is the same
+estimator, not a cheaper one.
+
+Full 8-clip GPU arm: **174 s total / 166.1 s fit phase** against the 896 s CPU
+reference for the same 8 x 16 s work (`results/S2/cruise_8clip.json`, 895.7 s
+fit phase) = **5.4x**.
+
+### Results — the three refits on `rps_refined`
+
+`results/S2/cruise_8clip_refined.json`, FLY125, fit phase 159.9 s (168 s total
+wall). Provenance: `dataset michaels-frames`, `dataset_version null`,
+`rps_key rps_refined`, `channels [0..7]`, `n_fft 16384`, 8 clips of 16.0 s at
+`starts_s [16, 32, 48, 64, 96, 112, 128, 144]`, `recordings ["FLY125"]`.
+`gamma0` = 1.9e-05 and `gamma_slope` = 0.568086 are rig-tied, one value for
+every clip:
+
+|clip|`nll_fit`|`excess_over_loo`|`coherence_k_half`|
+|---|---:|---:|---:|
+|`fly125_cruise_00`|-0.189135|-0.173039|1.7281|
+|`fly125_cruise_01`|-0.493095|-0.010362|2.9535|
+|`fly125_cruise_02`|-0.595961|-0.208999|2.0958|
+|`fly125_cruise_03`|-0.553248|-0.201784|3.2662|
+|`fly125_cruise_04`|-0.593552|-0.391599|2.4495|
+|`fly125_cruise_05`|-0.518457|-0.233402|1.7875|
+|`fly125_cruise_06`|-0.487364|-0.234137|2.0575|
+|`fly125_cruise_07`|-0.365945|-0.170085|2.5814|
+
+**Refined against raw telemetry, clip 0:** `nll_fit` -0.189135 against the
+recorded -0.229622, **Δ = +0.040487 nats/cell**. This is not a regression: the
+two fits hold *different labels* fixed (`rps_refined` here, raw telemetry
+there) and nothing else changed — `n_cells` is identical at 967080, the clip
+ids and window starts are identical, and `excess_over_loo` moves only
+-0.174976 -> -0.173039. The comb still lands where the data has lines; the
+likelihood is read against a different rate track.
+
+`results/S2/dregon_room2_cruise_refined.json`, the five room2 training
+recordings pooled into ONE rig fit, fit phase 99.8 s (132 s total wall).
+Provenance: `dataset DREGON-frames`, `dataset_version null`, `rps_key
+rps_refined`, `channels [0..7]`, `n_fft 16384`, 5 clips of 16.0 s,
+`starts_s [1512727417.205, 1511903913.394, 1511903588.177, 1511905733.559,
+1511905207.335]` (DREGON stamps are absolute on the recording's own clock),
+`recordings` = the five ids below. `gamma0` = 13.067655, `gamma_slope` =
+0.211394, rig-tied:
+
+|clip|`nll_fit`|`excess_over_loo`|`coherence_k_half`|
+|---|---:|---:|---:|
+|`free-flight_nosource_room2_cruise_00`|-1.489111|-0.210690|1.6963|
+|`hovering_nosource_room2_cruise_00`|-1.301005|-0.069349|1.6978|
+|`updown_nosource_room2_cruise_00`|-1.540472|-0.081813|1.4548|
+|`rectangle_nosource_room2_cruise_00`|-1.607109|-0.147509|1.4046|
+|`spinning_nosource_room2_cruise_00`|-1.555408|-0.208519|1.6004|
+
+Each of the five contributes exactly one 16 s cruise window (`--clips 2` is a
+per-recording cap, and with the cruise stride equal to the window length and
+the grid anchored to the audio start, only one candidate per recording lies
+inside the label's coverage with all four rotors above 65 rev/s).
+`free-flight_nosource_room1` was not touched.
+
+**The DREGON standby fit was not run: no room2 recording contains a standby
+run.** Over each label's covered span, sampled at 200 Hz, the fraction of time
+all four rotors sit inside the standby band [20, 45] rev/s is 0.000 for all
+five, and the longest contiguous in-band run is 0.00 s against the 12.5 s the
+regime needs:
+
+|recording|covered|rps min / median / max|standby windows|
+|---|---:|---|---:|
+|`free-flight_nosource_room2`|73.5 s|0.0 / 80.2 / 89.6|0|
+|`hovering_nosource_room2`|35.7 s|0.0 / 80.4 / 90.0|0|
+|`updown_nosource_room2`|44.7 s|0.0 / 80.7 / 90.0|0|
+|`rectangle_nosource_room2`|35.9 s|0.0 / 80.4 / 92.4|0|
+|`spinning_nosource_room2`|30.5 s|0.0 / 80.8 / 88.8|0|
+
+The 0.0 minima are spin-up/spin-down, which fall outside the telemetry
+coverage (room2 labels start ~5 s into the audio and stop ~3 s early) and are
+dropped by the coverage test rather than by the band test. The band was not
+widened.
+
+### Conclusion
+
+- `--device cuda` is the default worth using for this fit: identical estimates
+  to 2e-05 nats/cell, 3.6x on a short job, 5.4x on the accepted 8 x 16 s
+  cruise fit (896 s CPU -> 174 s). Anything with more clips gains more,
+  because the fixed 11-17 s of decode/decimation does not shrink.
+- Refining the label shifts `nll_fit` by ~0.04 nats/cell on FLY125 clip 0 with
+  `excess_over_loo` essentially unchanged; every acceptance number quoted
+  before 2026-09-12 was measured against raw telemetry and is not comparable
+  digit-for-digit to the refined fits.
+- DREGON's room2 training recordings support the cruise regime only. A
+  standby fit for that rig needs a recording that actually contains a slow
+  hold; none of the five does.
+- Provenance gap worth closing: every summary writes `"dataset_version": null`
+  even though the fit resolves a pinned dload version, so the JSON does not
+  record which version was read.
+
