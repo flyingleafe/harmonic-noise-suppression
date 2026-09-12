@@ -182,3 +182,129 @@ def save(summary: dict[str, Any], path: str | Path) -> Path:
     keep = {k: v for k, v in summary.items() if k != "rig_state"}
     p.write_text(json.dumps(plain(keep), indent=1))
     return p
+
+
+def params_from_export(
+    export: dict[str, Any],
+    rates: np.ndarray,
+    *,
+    sample_rate: int = SR,
+    n_mics: int = 8,
+) -> Any:
+    """Renderer parameters from one cruise clip's MAP export.
+
+    The four-rotor, eight-microphone counterpart of
+    :func:`stage1_bayes.params_from_export`. Every field is copied, not
+    converted: the fit emits the renderer's own coordinates. The microphone
+    structure is copied as FIXED vectors, so a synthetic clip carries the
+    fitted rig's own channel pattern and cross-channel agreement can be
+    measured the way the acceptance probe measures it on real clips.
+    """
+    from data_processing import stochastic_rotor_noise as srn
+
+    profile = np.atleast_2d(np.asarray(export["profile_db"], dtype=np.float64))
+    h = np.asarray(export.get("h_db", 0.0), dtype=np.float64)
+    if h.ndim == 3:
+        profile = profile + h.mean(axis=-1)[: profile.shape[0]]
+    n_rotors = profile.shape[0]
+    rates = np.atleast_1d(np.asarray(rates, dtype=np.float64))
+    # The comb must reach Nyquist for the SLOWEST rotor, or the fastest rotor's
+    # high orders are cut while the slowest keeps padding.
+    k_max = max(2, int(np.floor((sample_rate / 2) / max(float(rates.min()), 1.0))))
+    k_use = min(k_max, profile.shape[1])
+    gamma0 = np.atleast_1d(np.asarray(export["gamma0"], dtype=np.float64))
+    slope = np.atleast_1d(np.asarray(export["gamma_slope"], dtype=np.float64))
+
+    def per_rotor(x: np.ndarray) -> np.ndarray:
+        return np.resize(x, n_rotors).astype(np.float64)
+
+    mic_gain = export.get("mic_gain_db")
+    mic_gain_db = None
+    if mic_gain is not None:
+        g = np.atleast_2d(np.asarray(mic_gain, dtype=np.float64))
+        if g.shape[0] >= n_mics and g.shape[1] >= n_rotors:
+            mic_gain_db = g[:n_mics, :n_rotors].copy()
+    mic_floor = export.get("mic_floor_db")
+    mic_floor_db = (
+        np.asarray(mic_floor, dtype=np.float64)[:n_mics].copy() if mic_floor is not None else None
+    )
+    gain_all = export.get("gain_all_db")
+    gain_all_db = (
+        np.asarray(gain_all, dtype=np.float64)[:n_mics].copy() if gain_all is not None else None
+    )
+    return srn.StochasticParams(
+        sample_rate=int(sample_rate),
+        n_rotors=n_rotors,
+        n_harmonics=k_use,
+        profile_db=profile[:n_rotors, :k_use].copy(),
+        gamma0=per_rotor(gamma0),
+        gamma_slope=per_rotor(slope),
+        floor_ctrl_hz=np.asarray(export["floor_ctrl_hz"], dtype=np.float64),
+        floor_ctrl_db=np.asarray(export["floor_shape_db"], dtype=np.float64),
+        floor_tilt_db_oct=float(export.get("floor_tilt_db_oct", 0.0)),
+        harm_mean_db=0.0,
+        floor_mean_db=float(export.get("floor_mean_db", 0.0)),
+        harm_gp_std_db=0.0,
+        harm_gp_tau_s=1.0,
+        harm_coherence=0.0,
+        floor_gp_std_db=0.0,
+        floor_gp_tau_s=1.0,
+        floor_tilt_gp_std=0.0,
+        floor_tilt_gp_tau_s=1.0,
+        line_bin_integrate=True,
+        floor_static_rel=float(export.get("floor_static_rel", 0.0)),
+        amp_rps_exponent=float(export.get("amp_exp", 0.0)),
+        amp_rps_exponent_floor=float(export.get("floor_exp", export.get("amp_exp", 0.0))),
+        amp_rps_ref=80.0,
+        shaft_jitter_rps=0.0,
+        shaft_jitter_tau_s=2.0,
+        phase_diffusion_hz_per_order=0.0,
+        shaft_offset_rps=0.0,
+        umod_std_db=0.0,
+        umod_tau_s=1.0,
+        umod_corner_hz=200.0,
+        mic_gain_all_db=0.0,
+        mic_floor_std_db=0.0,
+        fixed_mic_gain_db=mic_gain_db,
+        fixed_mic_floor_db=mic_floor_db,
+        fixed_mic_gain_all_db=gain_all_db,
+        gamma_min_bins=0.01,
+        coherence_k_half=float(export.get("coherence_k_half", 0.0)),
+    )
+
+
+def render_from_export(
+    export: dict[str, Any],
+    rps: np.ndarray,
+    *,
+    sample_rate_native: int = native.NATIVE_SR,
+    n_mics: int = 8,
+    seed: int = 0,
+) -> np.ndarray:
+    """``(M, T)`` synthetic cruise audio at 16 kHz from a MAP export.
+
+    Rendered at the native rate and decimated on the real clips' own path, so
+    the synthetic clip carries no band edge the real clips do not have.
+    """
+    from data_processing import stochastic_rotor_noise as srn
+
+    rps = np.atleast_2d(np.asarray(rps, dtype=np.float64))
+    rates = rps.mean(axis=1)
+    params = params_from_export(export, rates, sample_rate=sample_rate_native, n_mics=n_mics)
+    # the trajectory is resampled to the native grid the renderer works on
+    n_native = int(round(rps.shape[-1] / SR * sample_rate_native))
+    t_src = np.linspace(0.0, 1.0, rps.shape[-1])
+    t_dst = np.linspace(0.0, 1.0, n_native)
+    rps_native = np.stack([np.interp(t_dst, t_src, r) for r in rps])
+    audio, _ = srn.synthesize(
+        params,
+        rps_native,
+        rng=np.random.default_rng(seed),
+        n_mics=n_mics,
+        line_mode="fm",
+        n_fft=1 << 16,
+    )
+    clip = Clip(
+        "synthetic", "synthetic", np.asarray(audio, np.float32), rps_native, sample_rate_native
+    )
+    return np.asarray(native.decimate(clip, SR).audio, dtype=np.float64)
