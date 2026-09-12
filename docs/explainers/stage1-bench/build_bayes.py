@@ -25,30 +25,32 @@ import soundfile as sf
 
 from data_processing import stochastic_rotor_noise as srn
 from experiments.stochastic_fit import accept_stats as stats
-from experiments.stochastic_fit import native, stage1
+from experiments.stochastic_fit import clips as C
 from experiments.stochastic_fit import stage1_bayes as SB
+from experiments.stochastic_fit.data import Clip
 
 OUT = Path(__file__).resolve().parent
 FIT_JSON = os.environ.get("FIT_JSON", "results/S1/bayes_motor1_needle.json")
+#: The bench cells come from the published frames dataset; override to pin a
+#: version (``DREGON-frames@<hash>``) when a page must be rebuilt exactly.
+BENCH_DATASET = os.environ.get("BENCH_DATASET", SB.BENCH_DATASET)
 
 
 def prefit(rate: float, seconds: float, seed: int) -> np.ndarray:
     """A draw from the default ranges at the same rotor speed."""
     rng = np.random.default_rng(seed)
-    k_max = max(2, int(np.floor((native.NATIVE_SR / 2) / max(rate, 1.0))))
+    k_max = max(2, int(np.floor((C.NATIVE_SR / 2) / max(rate, 1.0))))
     params = srn.sample_params(
         rng,
         srn.StochasticRanges(),
         n_rotors=1,
         n_harmonics=min(k_max, 200),
-        sample_rate=native.NATIVE_SR,
+        sample_rate=C.NATIVE_SR,
     )
-    rps = np.full((1, int(round(seconds * native.NATIVE_SR))), float(rate))
+    rps = np.full((1, int(round(seconds * C.NATIVE_SR))), float(rate))
     audio, _ = srn.synthesize(params, rps, rng=rng, n_mics=1, line_mode="fm", n_fft=SB.OLA_N_FFT)
-    clip = stage1.Clip(
-        "prefit", "synthetic", np.asarray(audio, np.float32), rps, native.NATIVE_SR, None, {}
-    )
-    return np.asarray(native.decimate(clip, stage1.SR).audio[0], dtype=np.float64)
+    clip = Clip("prefit", "synthetic", np.asarray(audio, np.float32), rps, C.NATIVE_SR, None, {})
+    return np.asarray(C.decimate(clip, SB.SR).audio[0], dtype=np.float64)
 
 
 def spec_panel(ax, x: np.ndarray, title: str) -> None:
@@ -62,7 +64,7 @@ def spec_panel(ax, x: np.ndarray, title: str) -> None:
         origin="lower",
         aspect="auto",
         cmap="magma",
-        extent=[0, x.size / stage1.SR, 0, stage1.SR / 2000],
+        extent=[0, x.size / SB.SR, 0, SB.SR / 2000],
         vmin=v - 75,
         vmax=v,
     )
@@ -77,14 +79,9 @@ def main() -> None:
         p = entry["params"]
         rate = float(np.asarray(p["carrier"]).mean())
         motor, speed = int(cell[5]), int(cell.split("_")[1])
-        start_s, dur = stage1.bench_span(motor, speed)
-        xr = (
-            native.decimate(
-                native.bench_clip(motor, speed, duration_s=dur, start_s=start_s), stage1.SR
-            )
-            .audio[stage1.CHANNEL]
-            .astype(np.float64)
-        )
+        real = SB.bench_clip(motor, speed, dataset=BENCH_DATASET)
+        dur = float(real.meta["duration_s"])
+        xr = np.asarray(real.audio[0], dtype=np.float64)
         xf = SB.render_from_export(p, rate, seconds=dur, seed=4242)
         xp = prefit(rate, dur, seed=4242)
 
@@ -144,7 +141,7 @@ def main() -> None:
 
         for x, name in ((xr, "real"), (xf, "fitted"), (xp, "prefit")):
             y = x / max(float(np.abs(x).max()), 1e-9) * 0.7
-            sf.write(OUT / f"bayes_{cell}_{name}.wav", y.astype(np.float32), stage1.SR)
+            sf.write(OUT / f"bayes_{cell}_{name}.wav", y.astype(np.float32), SB.SR)
         index.append(row)
         print(
             f"{cell}: rate {rate:.1f}  fitted {row['fitted_mean_abs_db']:.2f} dB  "

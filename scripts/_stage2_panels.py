@@ -23,7 +23,7 @@ import soundfile as sf
 
 from data_processing import stochastic_rotor_noise as srn
 from experiments.stochastic_fit import accept_stats as stats
-from experiments.stochastic_fit import native
+from experiments.stochastic_fit import clips as C
 from experiments.stochastic_fit import stage2 as S2
 
 OUT = Path("docs/explainers/stage2-cruise")
@@ -37,17 +37,17 @@ def prefit(rps: np.ndarray, n_mics: int, seed: int) -> np.ndarray:
         srn.StochasticRanges(),
         n_rotors=rps.shape[0],
         n_harmonics=S2.K_CAP,
-        sample_rate=native.NATIVE_SR,
+        sample_rate=C.NATIVE_SR,
     )
-    n_native = int(round(rps.shape[-1] / S2.SR * native.NATIVE_SR))
+    n_native = int(round(rps.shape[-1] / S2.SR * C.NATIVE_SR))
     t_src = np.linspace(0.0, 1.0, rps.shape[-1])
     t_dst = np.linspace(0.0, 1.0, n_native)
     rps_native = np.stack([np.interp(t_dst, t_src, r) for r in rps])
     audio, _ = srn.synthesize(p, rps_native, rng=rng, n_mics=n_mics, line_mode="fm", n_fft=1 << 16)
     from experiments.stochastic_fit.data import Clip
 
-    clip = Clip("prefit", "synthetic", np.asarray(audio, np.float32), rps_native, native.NATIVE_SR)
-    return np.asarray(native.decimate(clip, S2.SR).audio, dtype=np.float64)
+    clip = Clip("prefit", "synthetic", np.asarray(audio, np.float32), rps_native, C.NATIVE_SR)
+    return np.asarray(C.decimate(clip, S2.SR).audio, dtype=np.float64)
 
 
 def spec_panel(ax, x: np.ndarray, title: str) -> None:
@@ -77,6 +77,11 @@ def main() -> None:
     ap.add_argument("--seconds", type=float, default=8.0)
     ap.add_argument("--regime", default="cruise")
     ap.add_argument("--prefix", default="cruise")
+    ap.add_argument("--recording", default=S2.FIT_RECORDING)
+    ap.add_argument("--dataset", default=S2.FIT_DATASET, help="frames dataset, NAME[@VERSION]")
+    ap.add_argument("--version", default=None)
+    ap.add_argument("--channels", default=None, help="'all' (default) or e.g. '0,3-5'")
+    ap.add_argument("--rps-key", default=C.DEFAULT_RPS_KEY)
     args = ap.parse_args()
 
     summary = json.loads(args.fit.read_text())
@@ -86,6 +91,10 @@ def main() -> None:
         p = entry["params"]
         band = S2.REGIMES[args.regime]
         spec = S2.cruise_windows(
+            args.recording,
+            dataset=args.dataset,
+            version=args.version,
+            rps_key=args.rps_key,
             max_clips=40,
             stride_s=band["stride_s"] or args.seconds,
             seconds=args.seconds,
@@ -93,11 +102,15 @@ def main() -> None:
             max_rps=band["max_rps"],
         )
         start_s, dur = spec[i % len(spec)]
-        real_clip = native.decimate(
-            native.load_native_clip(
-                S2.FIT_RECORDING,
+        real_clip = C.decimate(
+            C.load_clip(
+                args.dataset,
+                args.recording,
                 start_s,
                 min(dur, args.seconds),
+                version=args.version,
+                channels=args.channels,
+                rps_key=args.rps_key,
                 clip_id=f"panel_{S2.FIT_RECORDING}_{start_s:.2f}_{min(dur, args.seconds):g}",
             ),
             S2.SR,

@@ -64,7 +64,7 @@ def plant_and_draw(
             m.floor_level_z.normal_()
             if s.umod_std_db > 0:
                 m.u_z.normal_()
-            spectrum = m.forward().numpy()
+            spectrum = m.forward().cpu().numpy()
         power = rng.exponential(1.0, spectrum.shape) * spectrum
         planted["clips"][i] = m.export()
         out.append(
@@ -151,7 +151,7 @@ def plant_population_and_draw(
                 model.rps_offset_knots.normal_(std=clip_spec.rps_offset_std)
             if clip_spec.umod_std_db > 0:
                 model.u_z.normal_()
-            spectrum = model.forward().numpy()
+            spectrum = model.forward().cpu().numpy()
         power = rng.exponential(1.0, spectrum.shape) * spectrum
         planted["clips"][i] = model.export()
         out.append(

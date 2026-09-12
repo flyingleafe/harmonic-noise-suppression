@@ -1,12 +1,12 @@
 """S1 as a Bayesian fit of the bench spectrum — the project's own machinery.
 
-The first S1 attempt (:mod:`experiments.stochastic_fit.stage1`) fitted DERIVED
-SUMMARIES: per-order band-integrated excess over a local floor, thresholded at
-6 dB of peak margin, then regressions on those summaries, then an iterative
-calibration of the renderer against the estimator. Every step needed a patch —
-median-to-mean debiasing, two selection-bias corrections, a Tobit regression for
-the thresholded orders, and finally an affine calibration that could not
-represent a non-monotone residual. None of that is a fit.
+The first S1 attempt (``stage1.py``, retired with the frames cutover) fitted
+DERIVED SUMMARIES: per-order band-integrated excess over a local floor,
+thresholded at 6 dB of peak margin, then regressions on those summaries, then
+an iterative calibration of the renderer against the estimator. Every step
+needed a patch — median-to-mean debiasing, two selection-bias corrections, a
+Tobit regression for the thresholded orders, and finally an affine calibration
+that could not represent a non-monotone residual. None of that is a fit.
 
 The right object was already in the repository. For one stationary rotor the
 periodogram bins are independent with mean equal to the model spectrum, so the
@@ -36,18 +36,29 @@ from typing import Any
 
 import numpy as np
 
-from experiments.stochastic_fit import native, rig
+from experiments.stochastic_fit import clips as C
+from experiments.stochastic_fit import rig
 from experiments.stochastic_fit.data import Clip, Periodogram, periodogram
-from experiments.stochastic_fit.model import AMP_RPS_REF, BASE_VARIANT, make_spec
-from experiments.stochastic_fit.stage1 import (
-    CHANNEL,
-    FIT_MOTORS,
-    HELD_OUT_MOTORS,
-    MOTORS,
-    SPEEDS,
-    SR,
-    bench_span,
-)
+from experiments.stochastic_fit.model import AMP_RPS_REF, BASE_VARIANT
+
+#: The bench cells. Setpoints are NOT rev/s — the rate is measured per cell.
+MOTORS = (1, 2, 3, 4)
+SPEEDS = (50, 60, 70, 80, 90)
+FIT_MOTORS = (1, 2, 3)
+HELD_OUT_MOTORS = (4,)
+
+#: Channel with the largest comb margin.
+CHANNEL = 7
+SR = 16000
+#: The published frames dataset that carries the single-motor recordings, as
+#: ``split="motor"`` samples with ids ``motor_Motor1_80``. They have no
+#: telemetry, so the rate is a fitted parameter seeded by comb evidence.
+BENCH_DATASET = "DREGON-frames"
+#: 9 s is what the tightest recording offers: the rotors spin up between 1.25
+#: and 5.38 s and stop between 14.7 and 17.2 s, so a fixed 16 s window from
+#: 3 s held up to 34 % silence, which depresses the measured floor and makes
+#: the span non-stationary.
+BENCH_SECONDS = 9.0
 
 #: The bench is stationary, so a long window costs nothing in time resolution
 #: and buys frequency resolution: 16384 points at 16 kHz is a 0.98 Hz bin, and
@@ -102,28 +113,30 @@ BENCH_VARIANT: dict[str, Any] = {
 }
 
 
-def bench_clip_16k(motor: int, setpoint: int, *, channel: int = CHANNEL) -> Clip:
-    """One bench cell on one channel: raw 44.1 kHz, steady span, decimated."""
-    start_s, duration_s = bench_span(motor, setpoint, channel=channel)
-    clip = native.decimate(
-        native.bench_clip(motor, setpoint, duration_s=duration_s, start_s=start_s), SR
-    )
-    rate = _rate_seed(motor, setpoint)
-    return Clip(
-        f"Motor{motor}_{setpoint}",
-        "dregon_bench",
-        clip.audio[channel][None, :],
-        np.full((1, clip.audio.shape[1]), rate),
-        SR,
-        None,
-        {"motor": motor, "setpoint": setpoint, "rate_seed": rate},
-    )
+def bench_recording_id(motor: int, setpoint: int) -> str:
+    """The published frames id of one bench cell."""
+    return f"motor_Motor{int(motor)}_{int(setpoint)}"
 
 
-_RATE_CACHE: dict[tuple[int, int], float] = {}
+def bench_span(audio: np.ndarray, sr: float) -> tuple[float, float]:
+    """``(start_s, duration_s)`` of the steady span of one bench recording.
+
+    The rotors spin up between 1.25 s and 5.38 s and stop between 14.7 s and
+    17.2 s depending on the cell, so no fixed window works: a 16 s window from
+    3 s held up to 34 % silence. Onset and offset are the first and last times
+    the 50 ms envelope clears half the 95th percentile; the window starts 1 s
+    after onset and ends 0.5 s before offset.
+    """
+    y = np.asarray(audio, dtype=np.float64)
+    n = int(0.05 * sr)
+    env = np.sqrt(np.convolve(y**2, np.ones(n) / n, mode="same"))
+    on = np.flatnonzero(env > 0.5 * np.percentile(env, 95))
+    start = float(on[0]) / sr + 1.0
+    end = float(on[-1]) / sr - 0.5
+    return start, min(BENCH_SECONDS, max(end - start, 1.0))
 
 
-def _rate_seed(motor: int, setpoint: int) -> float:
+def _rate_seed(clip: Clip) -> float:
     """A starting rate for the fit, from the proper-prior comb evidence.
 
     The fit refines the rate itself; this only has to land in the right octave.
@@ -132,23 +145,88 @@ def _rate_seed(motor: int, setpoint: int) -> float:
     """
     from experiments.stochastic_fit import bench as bench_mod
 
-    key = (motor, setpoint)
-    if key in _RATE_CACHE:
-        return _RATE_CACHE[key]
-    start_s, duration_s = bench_span(motor, setpoint)
-    clip = native.decimate(
-        native.bench_clip(motor, setpoint, duration_s=duration_s, start_s=start_s), SR
-    )
-    x = clip.audio[CHANNEL].astype(np.float64)
+    x = np.asarray(clip.audio[0], dtype=np.float64)
     n = 1 << 16
-    psd = bench_mod._welch(x - x.mean(), n)
-    rate = float(bench_mod.estimate_rate(psd, SR / n))
-    _RATE_CACHE[key] = rate
-    return rate
+    psd = bench_mod._welch(x - x.mean(), n)  # noqa: SLF001 - the bench instrument's own
+    return float(bench_mod.estimate_rate(psd, clip.sr / n))
 
 
-def bench_periodogram(motor: int, setpoint: int) -> tuple[Clip, Periodogram]:
-    clip = bench_clip_16k(motor, setpoint)
+def _cache_path(
+    dataset: str, version: str | None, motor: int, setpoint: int, channels: tuple[int, ...] | None
+) -> Path:
+    stamp = "all" if channels is None else "-".join(str(c) for c in channels)
+    return C.CACHE_DIR / (
+        f"bench_{dataset}_{(version or 'pinned')[:12]}_Motor{motor}_{setpoint}_ch{stamp}_16k.npz"
+    )
+
+
+def bench_cells(
+    motors: tuple[int, ...] = FIT_MOTORS,
+    speeds: tuple[int, ...] = SPEEDS,
+    *,
+    dataset: str = BENCH_DATASET,
+    version: str | None = None,
+    channels: str | tuple[int, ...] | None = (CHANNEL,),
+) -> dict[tuple[int, int], Clip]:
+    """``{(motor, setpoint): clip_16k}`` — the steady span of each cell.
+
+    Every missing cell is read in ONE pass over the frames dataset (272
+    samples, of which 262 are bench cells), because a pass per cell would
+    re-scan the shards twenty times. Cut cells are cached at 16 kHz, so a
+    second run touches no dataset at all.
+    """
+    dataset, pinned = C.split_dataset(dataset)
+    version = version or pinned
+    spec = C.channel_spec(channels)
+    want = [(int(m), int(s)) for m in motors for s in speeds]
+    out: dict[tuple[int, int], Clip] = {}
+    missing: dict[str, tuple[int, int]] = {}
+    for motor, speed in want:
+        path = _cache_path(dataset, version, motor, speed, spec)
+        cached = C.read_cached_clip(path, f"Motor{motor}_{speed}") if path.exists() else None
+        if cached is not None:
+            out[(motor, speed)] = cached
+        else:
+            missing[bench_recording_id(motor, speed)] = (motor, speed)
+    if missing:
+        for rec in C.iter_recordings(dataset, tuple(missing), version, rps_key="auto"):
+            motor, speed = missing[rec.recording_id]
+            chans = C.resolve_channels(spec, rec.n_channels)
+            start_s, duration_s = bench_span(rec.audio[chans[0]], rec.sr)
+            clip = C.decimate(
+                rec.cut(
+                    rec.t_start + start_s,
+                    duration_s,
+                    channels=chans,
+                    clip_id=f"Motor{motor}_{speed}",
+                ),
+                SR,
+            )
+            rate = _rate_seed(clip)
+            clip.rps = np.full((1, clip.audio.shape[1]), rate)
+            clip.rps_original = clip.rps
+            clip.meta.update(motor=motor, setpoint=speed, rate_seed=rate, span_start_s=start_s)
+            C.write_cached_clip(_cache_path(dataset, version, motor, speed, spec), clip)
+            out[(motor, speed)] = clip
+    return {cell: out[cell] for cell in want}
+
+
+def bench_clip(
+    motor: int,
+    setpoint: int,
+    *,
+    dataset: str = BENCH_DATASET,
+    version: str | None = None,
+    channels: str | tuple[int, ...] | None = (CHANNEL,),
+) -> Clip:
+    """One bench cell: native frames audio, steady span, decimated to 16 kHz."""
+    return bench_cells(
+        (int(motor),), (int(setpoint),), dataset=dataset, version=version, channels=channels
+    )[(int(motor), int(setpoint))]
+
+
+def bench_periodogram(motor: int, setpoint: int, **kwargs: Any) -> tuple[Clip, Periodogram]:
+    clip = bench_clip(motor, setpoint, **kwargs)
     return clip, periodogram(clip, n_fft=N_FFT, hop=HOP)
 
 
@@ -156,64 +234,24 @@ def bench_clips(
     motors: tuple[int, ...] = FIT_MOTORS,
     speeds: tuple[int, ...] = SPEEDS,
     *,
+    dataset: str = BENCH_DATASET,
+    version: str | None = None,
+    channels: str | tuple[int, ...] | None = (CHANNEL,),
     n_harm: int | None = None,
 ) -> list[tuple[str, str, Periodogram, Any]]:
     """The ``fit_rig`` input list for the chosen cells.
 
-    ``make_spec`` sizes the harmonic ladder from each clip's own slowest rate,
-    which gives 161 orders at 49 rev/s and 134 at 78 rev/s. A TIED profile
-    needs one ladder, so every cell gets the longest one — the slowest cell's.
-    A faster cell's high orders then sit outside its fit band, carry no
-    likelihood term and fall to their prior, which is the correct statement
-    about an order that is above Nyquist for that recording.
+    The fitting entry point is :func:`campaign.fit` with ``regime="bench"``;
+    this is the same staging, kept here for the routines that re-stage a
+    SUBSET of cells under an already fitted rig (:func:`reconstruct`,
+    :func:`held_out_nll`), which must inherit that rig's ladder.
     """
-    from dataclasses import replace
-
-    staged = []
-    for motor in motors:
-        for speed in speeds:
-            clip, pg = bench_periodogram(motor, speed)
-            spec = make_spec(pg, n_mics=1, f_max=F_MAX, k_cap=K_CAP, variant=BENCH_VARIANT)
-            staged.append((clip.clip_id, f"motor{motor}", pg, spec))
-    # A SUBSET of cells must inherit the ladder its rig was fitted under, or the
-    # tied parameter vectors no longer match (161 orders fitted, 100 rebuilt).
-    k = int(n_harm) if n_harm else max(int(s.n_harm) for _, _, _, s in staged)
-    return [(cid, grp, pg, replace(spec, n_harm=k)) for cid, grp, pg, spec in staged]
-
-
-def fit(
-    motors: tuple[int, ...] = FIT_MOTORS,
-    speeds: tuple[int, ...] = SPEEDS,
-    *,
-    rotor_delta: bool = False,
-    iters: tuple[int, int, int] = (120, 120, 300),
-    device: str = "cpu",
-    log: Any = print,
-) -> dict[str, Any]:
-    """Joint MAP over the chosen bench cells.
-
-    ``rotor_delta=False`` is S1a: ONE rotor model, no per-rotor terms — the
-    simplest thing the family has to reproduce. ``rotor_delta=True`` is S1b,
-    where each motor carries its own profile deviation.
-    """
-    clips = bench_clips(motors, speeds)
-    rig_spec = rig.RigSpec(
-        tie_profile=True,
-        tie_width=True,
-        tie_floor_shape=True,
-        tie_speed_law=True,
-        rotor_delta=rotor_delta,
-    )
-    out = rig.fit_rig(clips, rig_spec, device=device, iters=iters, log=log)
-    out["cells"] = [c[0] for c in clips]
-    out["motors"] = list(motors)
-    out["speeds"] = list(speeds)
-    out["rotor_delta"] = rotor_delta
-    out["held_out_motors"] = list(HELD_OUT_MOTORS)
-    out["channel"] = CHANNEL
-    out["n_fft"] = N_FFT
-    out["variant"] = BENCH_VARIANT
-    return out
+    cells = bench_cells(motors, speeds, dataset=dataset, version=version, channels=channels)
+    rows = [
+        (clip.clip_id, f"motor{motor}", clip, periodogram(clip, n_fft=N_FFT, hop=HOP))
+        for (motor, _speed), clip in cells.items()
+    ]
+    return rig.stage_clips(rows, variant=BENCH_VARIANT, f_max=F_MAX, k_cap=K_CAP, n_harm=n_harm)
 
 
 def reconstruct(
@@ -235,9 +273,9 @@ def reconstruct(
     state = {
         k: torch.as_tensor(np.asarray(v, dtype=np.float32)) for k, v in summary["rig_state"].items()
     }
-    clips = bench_clips(motors=(motor,), speeds=(setpoint,), n_harm=int(summary["spec"]["n_harm"]))
+    staged = bench_clips(motors=(motor,), speeds=(setpoint,), n_harm=int(summary["spec"]["n_harm"]))
     rig_params = rig.RigParams(
-        clips[0][3], rig.RigSpec(**summary["rig_spec"]), clips[0][2].rps.shape[0], device
+        staged[0][3], rig.RigSpec(**summary["rig_spec"]), staged[0][2].rps.shape[0], device
     )
     rig_params.load_state_dict(state)
     for p in rig_params.parameters():
@@ -258,7 +296,7 @@ def reconstruct(
         log=lambda *_: None,
         t0=0.0,
     )
-    return rcs[0].model, clips[0][2]
+    return rcs[0].model, staged[0][2]
 
 
 def sample_from_fit(clip_model: Any, *, seed: int = 0, mic: int = 0) -> np.ndarray:
@@ -365,13 +403,13 @@ def render_from_export(
 ) -> np.ndarray:
     """One synthetic clip from a MAP export, on the real clips' own path.
 
-    Rendered at 44.1 kHz and decimated by ``native.decimate`` so the synthetic
+    Rendered at 44.1 kHz and decimated by ``clips.decimate`` so the synthetic
     clip carries the same resampler transition band the real one does.
     """
     from data_processing import stochastic_rotor_noise as srn
 
-    params = params_from_export(export, rate_rps, sample_rate=native.NATIVE_SR)
-    n = int(round(seconds * native.NATIVE_SR))
+    params = params_from_export(export, rate_rps, sample_rate=C.NATIVE_SR)
+    n = int(round(seconds * C.NATIVE_SR))
     rps = np.full((1, n), float(rate_rps))
     audio, _ = srn.synthesize(
         params, rps, rng=np.random.default_rng(seed), n_mics=1, line_mode="fm"
@@ -381,19 +419,19 @@ def render_from_export(
         "synthetic",
         np.asarray(audio, dtype=np.float32),
         rps,
-        native.NATIVE_SR,
+        C.NATIVE_SR,
         None,
         {"synthetic": True},
     )
-    return np.asarray(native.decimate(clip, SR).audio[0], dtype=np.float64)
+    return np.asarray(C.decimate(clip, SR).audio[0], dtype=np.float64)
 
 
 def held_out_nll(
     summary: dict[str, Any], motors: tuple[int, ...] = HELD_OUT_MOTORS, **kwargs: Any
 ) -> dict[str, Any]:
     """Score the fitted rig on cells it never saw (``rig.fit_heldout``)."""
-    clips = bench_clips(motors, SPEEDS, n_harm=int(summary["spec"]["n_harm"]))
-    return rig.fit_heldout(summary, clips, **kwargs)
+    staged = bench_clips(motors, SPEEDS, n_harm=int(summary["spec"]["n_harm"]))
+    return rig.fit_heldout(summary, staged, **kwargs)
 
 
 def save(summary: dict[str, Any], path: str | Path) -> Path:
@@ -420,7 +458,9 @@ def save(summary: dict[str, Any], path: str | Path) -> Path:
 __all__ = [
     "BENCH_VARIANT",
     "MOTORS",
-    "bench_clip_16k",
+    "BENCH_DATASET",
+    "bench_cells",
+    "bench_clip",
     "bench_clips",
     "bench_periodogram",
     "fit",

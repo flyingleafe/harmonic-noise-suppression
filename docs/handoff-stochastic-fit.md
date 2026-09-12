@@ -1,8 +1,47 @@
 # Handoff: fitting the rotor-noise model to DREGON and Michael's, and refining the labels
 
-**Branch** `stochastic-fit`, 112 commits, merged into `main`. Everything below
-is on `main` now. Read this first, then the two explainer pages, then the
-experiment records.
+**Branch** `stochastic-fit`, merged into `main`; the 2026-09-12 refactor then
+moved every fit onto the published frames datasets and collapsed the fitting
+surface to one endpoint. Read this first, then the two explainer pages, then
+the experiment records.
+
+## 0. What changed on 2026-09-12 (read before anything else)
+
+* **One data source.** `src/experiments/stochastic_fit/clips.py` is the only
+  loader of real audio: `DREGON-frames@261b09971c8a` and
+  `michaels-frames@8e9d149560dd` publish every recording at its NATIVE
+  44.1 kHz with `rps_refined` attached, so the raw-tree cutter (`native.py`)
+  and the hardcoded 16 kHz crop directories in `data.py` are gone.
+  `load_recording` / `iter_recordings` (one pass, decodes only wanted keys) /
+  `Recording.cut` / `load_clip(channels=…, rps_key=…)` / `windows` /
+  `decimate` / `recording_ids(split="motor")`.
+* **One fit endpoint.** `scripts/stochastic_fit.py --regime {cruise,standby,bench}`
+  over `experiments.stochastic_fit.campaign.fit`. A regime fixes the dataset,
+  the window rule, the forward variant, the ladder cap and the rig-level ties —
+  nothing else. `--dataset NAME[@VERSION] --recording --clips --seconds
+  --channels (all by default) --rps-key (rps_refined by default) --motors
+  --speeds --device {auto,cpu,cuda}`. `scripts/_stage2_fit.py` and
+  `scripts/_stage1b_fit.py` are deleted.
+* **Windows must lie inside the label's own span.** `Recording.coverage` is
+  audio ∩ rotor-label; `windows()` drops anything outside it and `rps_at`
+  refuses to interpolate past it. DREGON's telemetry starts 2.5–6.5 s after
+  its audio and stops early (room2: +5.223 s in, 2.873 s short, its last
+  sample still at 69–76 rev/s), so `np.interp` used to hold cruise speeds flat
+  over uncovered audio and an uncovered window passed the regime test with a
+  carrier nothing measured. room2 8 s cruise windows are now 16…64 s, not
+  16…72 s; FLY125's 16 s set is unchanged (16/32/48/64/96/112/128/144).
+* **Bit-exact against the retired loader.** The new 16 s FLY125 cruise cut and
+  the legacy raw-tree cache (`.cache/native_clips/fly125_cruise_00_native.npz`,
+  8 s at 44.1 kHz) agree on every overlapping sample — max abs diff 0.0 — and
+  the bench span/rate seed match too (Motor1_80: 9 s from 4.99 s, 78.221 rev/s
+  against the accepted fit's fitted carrier 78.221). What DOES change is the
+  carrier: refined minus raw is up to 1.52 rev/s on that window (mean 0.16).
+* **Retired with the cutover**: `native.py`, `stage1.py` (the derived-summary
+  S1), `coherent.py`, `conditional.py`, `scripts/_s1_baseline.py`,
+  `scripts/_s1_conditional.py`, `scripts/_stage_accept.py`,
+  `docs/explainers/stage1-bench/build.py`, and `run.py`'s R2 clip bundle
+  (`prepare`, `prepare-presets`): `run fit|rigfit|popfit|poprawgate` now select
+  `--recordings "[dataset[@version]:]RECORDING"` straight from dload.
 
 ## 1. What exists, in one paragraph
 
@@ -39,31 +78,40 @@ rotor-speed label** published as an extra series in the frames datasets.
   `coherence_k_half` splits each order between the tone bank and narrowband
   noise; `gamma_min_bins` must be 0.01 for these fits (0.6 bins is a 12.9 Hz
   censor at 44.1 kHz).
-* `src/experiments/stochastic_fit/native.py` — native 44.1 kHz loading
-  (`load_native_clip`, `decimate`, `bench_clip`). **Native audio is the only
-  source**; the published 16 kHz sets have an 88–90 dB brick wall at 7.9 kHz
-  that is a learnable domain cue. Raw trees resolve through
-  `streams.ensure_local`, so the same code runs on a cluster node.
+* `src/experiments/stochastic_fit/clips.py` — the only loader of real audio:
+  published frames at their NATIVE 44.1 kHz, decimated by the fit itself.
+  **Never fit the published 16 kHz training sets**: they carry an 88–90 dB
+  brick wall at 7.9 kHz that a fit reads as structure. dload streams the
+  shards, so the same call runs on a cluster node.
+* `src/experiments/stochastic_fit/campaign.py` — the central fit:
+  `REGIMES` (`cruise`, `standby`, `bench`) × `fit()`. Each regime fixes the
+  dataset, the window rule, the forward variant, the ladder cap and the ties.
 
 ## 3. Stage fits, results, artifacts
 
-| stage | driver | result file | fitted `k_half` | `γ0` |
+| stage | regime | result file | fitted `k_half` | `γ0` |
 |---|---|---|---:|---:|
-| S1 bench, Motor 1 | `stage1_bayes.fit` | `results/S1/bayes_motor1_needle.json` | 9.7–54.6 | 0.30 Hz |
-| S1 bench rig, 20 cells | `scripts/_stage1b_fit.py` | `results/S1/bayes_rig.json` | 19.4 median | 0.15 Hz |
-| S2 FLY125 cruise, 8×16 s | `scripts/_stage2_fit.py` | `results/S2/cruise_8clip.json` | 1.6–2.9 | 0.00 Hz |
+| S1 bench, Motor 1 | `--regime bench --motors 1` | `results/S1/bayes_motor1_needle.json` | 9.7–54.6 | 0.30 Hz |
+| S1 bench rig, 20 cells | `--regime bench --motors 1,2,3,4` | `results/S1/bayes_rig.json` | 19.4 median | 0.15 Hz |
+| S2 FLY125 cruise, 8×16 s | `--regime cruise --clips 8 --seconds 16` | `results/S2/cruise_8clip.json` | 1.6–2.9 | 0.00 Hz |
 | S2 cruise, drifting floor | same, `--floor-dynamics` | `results/S2/cruise_8clip_dyn.json` | ~2.3 | 0.00 Hz |
-| S3 FLY125 standby, 1×12.5 s | same, `--regime standby` | `results/S2/standby.json` | 5.58 | 2.62 Hz |
-| DREGON free-flight | same, `--recording free-flight_nosource_room2` | `results/S2/dregon_flight.json` | 1.24 | 12.37 Hz |
+| S3 FLY125 standby, 1×12.5 s | `--regime standby --clips 1` | `results/S2/standby.json` | 5.58 | 2.62 Hz |
+| DREGON free-flight | `--dataset DREGON-frames --recording free-flight_nosource_room2` | `results/S2/dregon_flight.json` | 1.24 | 12.37 Hz |
+
+Every row above was fitted on the RAW telemetry track, before `rps_refined`
+existed as a published series. All six are due for a refit through
+`scripts/stochastic_fit.py` on the refined label.
 
 `k_half` orders itself across regimes with nothing forcing it — 19 clamped,
 5.6 standby, 1.6–2.9 flying, 1.2 DREGON flight — which is the direction a
 steadier shaft implies.
 
-**Modules**: `stage1_bayes.py` (bench, `BENCH_VARIANT` pins all dynamics off),
-`stage2.py` (flight; `REGIMES`, `cruise_windows`, `params_from_export`,
-`render_from_export`, `FLOOR_DYNAMICS`), `accept_stats.py` (LTAS bands, order
-bands, `paired_delta`).
+**Modules**: `campaign.py` (the regime table and the one `fit`),
+`stage1_bayes.py` (bench cells, `bench_span`, the rate seed, `BENCH_VARIANT`
+pins all dynamics off, bench→renderer export), `stage2.py` (flight windows,
+`REGIMES` bands, `S2_VARIANT`, `FLOOR_DYNAMICS`, `params_from_export`,
+`render_from_export`), `rig.py` (`stage_clips` + `fit_rig`),
+`accept_stats.py` (LTAS bands, order bands, `paired_delta`).
 
 ## 4. The acceptance gate that works
 
@@ -167,8 +215,8 @@ is smeared. `scripts/_dregon_transfer.py` runs the four-arm comparison.
    (2.08 vs 1.069 real). Next suspects, in order: no per-microphone inter-rotor
    phase structure; the width law; telemetry error the carrier cannot absorb.
 2. **Per-motor bench shapes.** `bayes_rig.json` is one shape + clip gains;
-   four independent single-motor fits (`scripts/_stage1b_fit.py --motors m`)
-   were submitted for this and should be re-run and folded into the transfer.
+   four independent single-motor fits (`--regime bench --motors m`) were
+   submitted for this and should be re-run and folded into the transfer.
 3. **S1 absolute gates.** Real bench clips fail the preregistered 1.5/3.0 dB
    LTAS thresholds against *other real clips* (2.00 / 4.49 dB), because floor
    shape varies by motor position. The gate needs restating distributionally
@@ -178,9 +226,19 @@ is smeared. `scripts/_dregon_transfer.py` runs the four-arm comparison.
    per-order level; a capacity-matched reparameterisation is the fix.
 5. `accept_stats.paired_delta` sizes its integration band from `γ` alone and
    must integrate needle and pedestal separately.
-6. The **GPU refinement path** (`TRACKING_DEVICE=cuda`) is unbenchmarked;
-   Kaggle buffers logs until completion and collected no outputs.
+6. **The GPU fit path is unmeasured.** `--device cuda` now reaches every fit
+   entry point (`scripts/stochastic_fit.py`, `run fit|rigfit|popfit`), and the
+   forward/objective is pure torch with no host round-trip inside a step, but
+   nothing has been timed: the accepted 8-clip cruise fit took 896 s on CPU
+   (the `--floor-dynamics` twin 1332 s). The **refinement** path
+   (`TRACKING_DEVICE=cuda`) is separately unbenchmarked; Kaggle buffers logs
+   until completion and collected no outputs.
 7. `decomp-frames-v1/v2` still pin `rps_override_dir` for room1 only.
+8. **A pre-existing test failure**, unrelated to the cutover and reproduced on
+   `4ca88f68`: `test_population_renderer_preserves_fitted_local_floor_reference`
+   dies with `KeyError: 'profile_db'` in `raw_predictive.py:519` —
+   `population_ranges` reads `summary["train"][clip]["params"]["profile_db"]`
+   from a summary shape the test does not build. 28 of 29 tests pass.
 
 ## 10. Records
 

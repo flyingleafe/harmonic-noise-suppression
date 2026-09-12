@@ -624,7 +624,7 @@ def test_width_population_separates_flight_spread_from_estimation_noise(tmp_path
     assert fitted.rotor_median_slope_hz == pytest.approx(list(base), rel=0.3)
 
 
-# -- the bench instrument and the conditional render ---------------------------
+# -- the bench instrument ------------------------------------------------------
 
 
 def _planted_bench_recording(
@@ -711,37 +711,6 @@ def test_planted_speed_law_is_recovered_from_setpoints() -> None:
     law = bench.fit_speed_law(spectra, k_hi=8)
     assert law["line_cells"] >= 20, law
     assert abs(law["line_exponent"] - q) < 0.8, law
-
-
-def test_conditional_sample_reproduces_its_target_spectrum() -> None:
-    """The conditional render's sampler must land on the spectrum it is given.
-
-    This is the property the conditional arm rests on: whatever the MAP fit
-    says the clip's time-varying spectrum is, the draw has to realise it, so
-    that any remaining difference from the real clip is the MODEL's and not
-    the sampler's.
-    """
-    from experiments.stochastic_fit.conditional import sample_from_spectrum
-    from experiments.stochastic_fit.data import Clip, periodogram
-
-    n_fft, hop, n_frames = 512, 128, 80
-    freqs = np.fft.rfftfreq(n_fft, 1 / 8000.0)
-    # a tilted target with a bump, so a flat-gain bug cannot pass
-    shape = 10 ** ((-3.0 * np.log2(np.maximum(freqs, 20.0) / 500.0)) / 10.0)
-    shape = shape + 6.0 * np.exp(-(((freqs - 1200.0) / 90.0) ** 2))
-    target = np.repeat((1e-4 * shape)[None], n_frames, axis=0)[None]
-    target = np.repeat(target, 2, axis=0)
-
-    audio = sample_from_spectrum(target, n_fft, hop, (n_frames - 1) * hop, seed=5)
-    clip = Clip(
-        "probe", "p", audio.astype(np.float64), np.full((1, audio.shape[1]), 50.0), 8000, None, {}
-    )
-    got = periodogram(clip, n_fft=n_fft, hop=hop).power
-    # average over frames: one ordinate is exponential, its mean is the target
-    ratio_db = 10 * np.log10(got.mean(axis=1) / target[:, 0, :])
-    inner = ratio_db[:, 2:-2]
-    assert np.abs(np.median(inner)) < 1.0, float(np.median(inner))
-    assert np.percentile(np.abs(inner), 90) < 3.0, float(np.percentile(np.abs(inner), 90))
 
 
 # ── per-order identifiability ────────────────────────────────────────────────

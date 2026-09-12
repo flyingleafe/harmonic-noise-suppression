@@ -85,8 +85,9 @@ Four things differ from the bench, each forced by the data:
 4. **Cruise only.** A window is used only when all four rotors stay above
    65 rev/s for its whole length, so a stationary model has a stationary target.
 
-Native 44.1 kHz audio is the only source; every clip is decimated with
-`native.decimate`, so the published 16 kHz brick wall never enters the fit.
+Native 44.1 kHz audio is the only source; every clip comes from the published
+`michaels-frames` dataset and is decimated with `clips.decimate`, so the
+published 16 kHz brick wall never enters the fit.
 
 # 2. The fit
 

@@ -38,7 +38,7 @@ import soundfile as sf
 import zoo
 from data_processing import stochastic_rotor_noise as srn
 from experiments.stochastic_fit import accept_stats as stats
-from experiments.stochastic_fit import native
+from experiments.stochastic_fit import clips as C
 from experiments.stochastic_fit import stage2 as S2
 from experiments.stochastic_fit.data import Clip
 from metrics.salience_layers import LayerPeakRPSMetric
@@ -147,7 +147,7 @@ def rig_params_from_bench(
 
 def render(params: Any, rps16: np.ndarray, *, n_mics: int, seed: int) -> np.ndarray:
     """``(M, T)`` 16 kHz audio, rendered natively and decimated."""
-    n_native = int(round(rps16.shape[-1] / S2.SR * native.NATIVE_SR))
+    n_native = int(round(rps16.shape[-1] / S2.SR * C.NATIVE_SR))
     t_src = np.linspace(0.0, 1.0, rps16.shape[-1])
     t_dst = np.linspace(0.0, 1.0, n_native)
     rps_native = np.stack([np.interp(t_dst, t_src, r) for r in rps16])
@@ -159,8 +159,8 @@ def render(params: Any, rps16: np.ndarray, *, n_mics: int, seed: int) -> np.ndar
         line_mode="fm",
         n_fft=1 << 16,
     )
-    clip = Clip("t", "synthetic", np.asarray(audio, np.float32), rps_native, native.NATIVE_SR)
-    return np.asarray(native.decimate(clip, S2.SR).audio, dtype=np.float64)
+    clip = Clip("t", "synthetic", np.asarray(audio, np.float32), rps_native, C.NATIVE_SR)
+    return np.asarray(C.decimate(clip, S2.SR).audio, dtype=np.float64)
 
 
 def band_level_db(x: np.ndarray, lo: float, hi: float, sr: int = S2.SR) -> float:
@@ -207,6 +207,10 @@ def main() -> None:
     ap.add_argument("--clips", type=int, default=4)
     ap.add_argument("--seconds", type=float, default=8.0)
     ap.add_argument("--min-rps", type=float, default=60.0)
+    ap.add_argument("--dataset", default=S2.DREGON_DATASET, help="frames dataset, NAME[@VERSION]")
+    ap.add_argument("--version", default=None)
+    ap.add_argument("--channels", default=None, help="'all' (default) or e.g. '0,3-5'")
+    ap.add_argument("--rps-key", default=C.DEFAULT_RPS_KEY)
     ap.add_argument("--out", type=Path, default=RESULTS / "transfer.json")
     args = ap.parse_args()
 
@@ -223,6 +227,9 @@ def main() -> None:
 
     windows = S2.cruise_windows(
         args.recording,
+        dataset=args.dataset,
+        version=args.version,
+        rps_key=args.rps_key,
         seconds=args.seconds,
         min_rps=args.min_rps,
         max_clips=args.clips,
@@ -233,9 +240,16 @@ def main() -> None:
 
     rows: list[dict[str, Any]] = []
     for i, (start_s, dur) in enumerate(windows):
-        real_clip = native.decimate(
-            native.load_native_clip(
-                args.recording, start_s, dur, clip_id=f"transfer_{args.recording}_{start_s:.2f}"
+        real_clip = C.decimate(
+            C.load_clip(
+                args.dataset,
+                args.recording,
+                start_s,
+                dur,
+                version=args.version,
+                channels=args.channels,
+                rps_key=args.rps_key,
+                clip_id=f"transfer_{args.recording}_{start_s:.2f}",
             ),
             S2.SR,
         )
@@ -244,7 +258,7 @@ def main() -> None:
         m = int(xr_all.shape[0])
         rates = rps.mean(axis=1)
 
-        params, picked = rig_params_from_bench(bench, rates, n_mics=m, sample_rate=native.NATIVE_SR)
+        params, picked = rig_params_from_bench(bench, rates, n_mics=m, sample_rate=C.NATIVE_SR)
         arms: dict[str, np.ndarray] = {"bench, blind": render(params, rps, n_mics=m, seed=500 + i)}
         # second arm: the same comb with the floor level matched in a line-free band
         d = band_level_db(xr_all[0], *FLOOR_BAND) - band_level_db(

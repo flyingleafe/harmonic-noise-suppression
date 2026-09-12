@@ -19,6 +19,10 @@ Every clip is an independent render: its own seed, its own rotor trajectory
 taken from a real cruise window, and no reuse of any draw.
 
     python scripts/_stage2_probe.py --fit results/S2/cruise_8clip.json
+
+Real audio comes from the published frames dataset (native 44.1 kHz,
+decimated here), with the same ``--dataset``/``--channels``/``--rps-key``
+selection the fit CLI takes, so the probe scores the clips the fit saw.
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ from typing import Any
 import numpy as np
 
 import zoo
-from experiments.stochastic_fit import native
+from experiments.stochastic_fit import clips as C
 from experiments.stochastic_fit import stage2 as S2
 from metrics.salience_layers import LayerPeakRPSMetric
 
@@ -55,7 +59,14 @@ def _probe_helpers() -> Any:
 
 
 def real_windows(
-    recording: str, seconds: float, n: int, regime: str = "cruise"
+    recording: str,
+    seconds: float,
+    n: int,
+    regime: str = "cruise",
+    *,
+    dataset: str = S2.FIT_DATASET,
+    version: str | None = None,
+    rps_key: str = C.DEFAULT_RPS_KEY,
 ) -> list[tuple[float, float]]:
     """Real windows of one regime, to supply the rotor trajectories.
 
@@ -67,6 +78,9 @@ def real_windows(
     band = S2.REGIMES[regime]
     return S2.cruise_windows(
         recording,
+        dataset=dataset,
+        version=version,
+        rps_key=rps_key,
         seconds=seconds,
         max_clips=n,
         min_rps=float(band["min_rps"]),
@@ -83,6 +97,10 @@ def main() -> None:
     ap.add_argument("--real", action="store_true", help="also score the REAL clips")
     ap.add_argument("--recording", default=S2.FIT_RECORDING)
     ap.add_argument("--regime", default="cruise", choices=sorted(S2.REGIMES))
+    ap.add_argument("--dataset", default=S2.FIT_DATASET, help="frames dataset, NAME[@VERSION]")
+    ap.add_argument("--version", default=None)
+    ap.add_argument("--channels", default=None, help="'all' (default) or e.g. '0,3-5'")
+    ap.add_argument("--rps-key", default=C.DEFAULT_RPS_KEY)
     ap.add_argument("--out", type=Path, default=OUT / "probe.json")
     args = ap.parse_args()
 
@@ -93,15 +111,27 @@ def main() -> None:
     metric = LayerPeakRPSMetric()
     OUT.mkdir(parents=True, exist_ok=True)
 
-    windows = real_windows(args.recording, args.seconds, args.clips, args.regime)
+    windows = real_windows(
+        args.recording,
+        args.seconds,
+        args.clips,
+        args.regime,
+        dataset=args.dataset,
+        version=args.version,
+        rps_key=args.rps_key,
+    )
     rows: list[dict[str, Any]] = []
     for i in range(args.clips):
         start_s, dur = windows[i % len(windows)]
-        real = native.decimate(
-            native.load_native_clip(
+        real = C.decimate(
+            C.load_clip(
+                args.dataset,
                 args.recording,
                 start_s,
                 dur,
+                version=args.version,
+                channels=args.channels,
+                rps_key=args.rps_key,
                 # The cache key must name the DATA, not the loop index. Keyed
                 # "probe_00" the standby run read the cruise clips the cruise
                 # run had left in the cache, and reported 80 rev/s windows for

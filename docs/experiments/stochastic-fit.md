@@ -543,7 +543,8 @@ vs 1.6 / 0.71 / 0.90; Michael's 50–500 Hz 2.05 / 0.83 / 0.74 vs
 1.8 / 0.81 / 0.79, 500–2000 Hz 1.2 / 0.90 / 0.72 vs 0.9 / 0.58 / 0.63.
 
 **Gate 1 (calibration), committed presets.** 12 renders per preset on the
-real trajectories (`prepare-presets`), refitted with the rig model (M5 /
+real trajectories (`prepare-presets`, retired 2026-09-12 with the R2 clip
+bundle), refitted with the rig model (M5 /
 M5g) on Kaggle: excess −0.129 (DREGON) / −0.082 (Michael's; mean −0.007).
 Oracle decomposition on planted clips with a *known* spectrum: the true
 spectrum itself scores −0.042…−0.061 against the LOO reference at these
@@ -1011,7 +1012,8 @@ python -m experiments.stochastic_fit.run popdecomp --summary <rigfit>/P3.json \
 #    held out is touched; only the train arrays of the .npz are used next)
 python -m experiments.stochastic_fit.run poprawgate --summary michaels-profile.json \
   --policy conf/online_mix/rig_fm_5050.yaml --source-index 1 \
-  --train-groups fly125 --test-groups fly125 --k-max 64 --bootstrap 200 \
+  --train-recordings michaels-frames:FLY125 --test-recordings michaels-frames:FLY125 \
+  --k-max 64 --bootstrap 200 \
   --seed 570 --draws-per-clip 4 --compact --output train-render.json
 # 3. mean/covariance calibration against that render
 python -m experiments.stochastic_fit.run popcalibrate --summary michaels-profile.json \

@@ -124,7 +124,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path("results/S1/cell_coherence.json"))
     args = ap.parse_args()
 
-    clip = SB.bench_clip_16k(args.motor, args.speed)
+    clip = SB.bench_clip(args.motor, args.speed)
     x = np.asarray(clip.audio, float)
     x = x[0] if x.ndim > 1 else x
     rate = float(np.asarray(clip.rps).mean())

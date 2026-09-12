@@ -32,7 +32,14 @@ floor, coherence), and the extended variants in :mod:`.model` (free width per
 order, Gaussian lines, per-microphone floors, refined carriers) measure how
 much each structural change buys.
 
-Entry point: ``python -m experiments.stochastic_fit.run --help``.
+Data: :mod:`.clips` is the only source of real audio — the published
+``*-frames`` datasets at their native 44.1 kHz, with the refined rotor-speed
+label held fixed.
+
+Entry points: ``python scripts/stochastic_fit.py --help`` (one fit, regime
+selected: ``cruise``, ``standby``, ``bench``) and
+``python -m experiments.stochastic_fit.run --help`` (the population/gate/export
+pipeline).
 """
 
 from __future__ import annotations

@@ -22,24 +22,27 @@ each forced by the data rather than chosen:
 * **Cruise only.** Windows are selected where all four rotors are above
   ``CRUISE_MIN_RPS``, so one stationary model has a stationary target.
 
-Native 44.1 kHz audio is the only source. Every clip is decimated by
-``native.decimate``, so the published 16 kHz brick wall at 7.9 kHz never enters.
+Native 44.1 kHz audio is the only source: every clip comes out of the published
+frames datasets (`experiments.stochastic_fit.clips`) and is decimated here, so
+the 16 kHz training sets' brick wall at 7.9 kHz never enters, and the rotor
+track the fit holds fixed is the published refined label.
 
-Run a fit with ``scripts/_stage2_fit.py``.
+The fitting entry point is `campaign.fit` (regimes ``cruise``/``standby``),
+driven by ``scripts/stochastic_fit.py``; this module owns the flight window
+selection, the flight variant and the map to the renderer's parameters.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from experiments.stochastic_fit import native, rig
+from experiments.stochastic_fit import clips
 from experiments.stochastic_fit.data import Clip, Periodogram, periodogram
-from experiments.stochastic_fit.model import BASE_VARIANT, make_spec
+from experiments.stochastic_fit.model import BASE_VARIANT
 from experiments.stochastic_fit.stage1_bayes import HOP, N_FFT
 
 SR = 16000
@@ -72,6 +75,9 @@ K_CAP = 130
 FIT_RECORDING = "FLY125"
 #: Held out, never fitted and never used to choose a threshold.
 HELD_OUT_RECORDING = "FLY124"
+#: The published frames datasets the flight fit reads.
+FIT_DATASET = "michaels-frames"
+DREGON_DATASET = "DREGON-frames"
 
 S2_VARIANT: dict[str, Any] = {
     **BASE_VARIANT,
@@ -98,13 +104,12 @@ S2_VARIANT: dict[str, Any] = {
 }
 
 
-def _recording(recording_id: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
-    return native._load_recording(recording_id)  # noqa: SLF001 - the only loader
-
-
 def cruise_windows(
     recording_id: str = FIT_RECORDING,
     *,
+    dataset: str = FIT_DATASET,
+    version: str | None = None,
+    rps_key: str = clips.DEFAULT_RPS_KEY,
     seconds: float = CRUISE_SECONDS,
     min_rps: float = CRUISE_MIN_RPS,
     max_rps: float | None = None,
@@ -113,37 +118,58 @@ def cruise_windows(
 ) -> list[tuple[float, float]]:
     """``[(start_s, duration_s)]`` windows where every rotor stays in one regime.
 
-    The selection reads the telemetry only. A window is kept when every rotor
-    stays inside ``[min_rps, max_rps]`` for the whole window, so no window
-    straddles a transition and one stationary model has a stationary target.
+    The selection reads the rotor-speed LABEL only (``rps_key``, the refined
+    one by default). A window is kept when every rotor stays inside
+    ``[min_rps, max_rps]`` for the whole window, so no window straddles a
+    transition and one stationary model has a stationary target.
     """
-    _, audio_t, rps, sr = _recording(recording_id)
-    step = float(seconds if stride_s is None else stride_s)
-    t0 = float(audio_t[0])
-    total = float(audio_t[-1] - audio_t[0])
-    out: list[tuple[float, float]] = []
-    n = int(round(seconds * sr))
-    start = 0.0
-    while start + seconds <= total and len(out) < max_clips:
-        i0 = int(np.searchsorted(audio_t, t0 + start))
-        block = rps[:, i0 : i0 + n]
-        ok = block.shape[-1] == n and float(np.nanmin(block)) >= min_rps
-        if ok and max_rps is not None:
-            ok = float(np.nanmax(block)) <= max_rps
-        if ok:
-            out.append((t0 + start, seconds))
-        start += step
-    return out
+    rec = clips.load_recording(dataset, recording_id, version, rps_key)
+    return clips.windows(
+        rec,
+        seconds=seconds,
+        max_clips=max_clips,
+        min_rps=min_rps,
+        max_rps=max_rps,
+        stride_s=stride_s,
+    )
 
 
 def cruise_clips(
-    recording_id: str = FIT_RECORDING, **kwargs: Any
+    recording_id: str = FIT_RECORDING,
+    *,
+    dataset: str = FIT_DATASET,
+    version: str | None = None,
+    rps_key: str = clips.DEFAULT_RPS_KEY,
+    channels: str | tuple[int, ...] | None = None,
+    tag: str = "cruise",
+    **kwargs: Any,
 ) -> list[tuple[str, Clip, Periodogram]]:
-    """``[(clip_id, clip_16k, periodogram)]`` for the cruise windows."""
+    """``[(clip_id, clip_16k, periodogram)]`` for the windows of one recording.
+
+    Native 44.1 kHz audio out of the published frames, decimated here: the
+    published 16 kHz training sets carry an 88-90 dB brick wall at 7.9 kHz,
+    which a fit would read as structure. ``tag`` names the regime in the clip
+    id, so a rig fit over several recordings and regimes has unique ids.
+    """
     rows: list[tuple[str, Clip, Periodogram]] = []
-    for i, (start_s, dur) in enumerate(cruise_windows(recording_id, **kwargs)):
-        cid = f"{recording_id.lower()}_cruise_{i:02d}"
-        clip = native.decimate(native.load_native_clip(recording_id, start_s, dur, clip_id=cid), SR)
+    found = cruise_windows(
+        recording_id, dataset=dataset, version=version, rps_key=rps_key, **kwargs
+    )
+    for i, (start_s, dur) in enumerate(found):
+        cid = f"{recording_id.lower()}_{tag}_{i:02d}"
+        clip = clips.decimate(
+            clips.load_clip(
+                dataset,
+                recording_id,
+                start_s,
+                dur,
+                version=version,
+                channels=channels,
+                rps_key=rps_key,
+                clip_id=cid,
+            ),
+            SR,
+        )
         rows.append((cid, clip, periodogram(clip, n_fft=N_FFT, hop=HOP)))
     return rows
 
@@ -160,56 +186,6 @@ FLOOR_DYNAMICS: dict[str, Any] = {
     "floor_tilt_gp_std": 0.5,
     "floor_tilt_gp_tau_s": 6.0,
 }
-
-
-def fit(
-    recording_id: str = FIT_RECORDING,
-    *,
-    max_clips: int = 8,
-    seconds: float = CRUISE_SECONDS,
-    k_cap: int = K_CAP,
-    n_mics: int | None = None,
-    iters: tuple[int, int, int] = (120, 120, 300),
-    ladder: tuple[int, ...] = (16, 48),
-    rotor_delta: bool = True,
-    regime: str = "cruise",
-    floor_dynamics: bool = False,
-    min_rps: float | None = None,
-    device: str = "cpu",
-    log: Any = print,
-) -> dict[str, Any]:
-    """Joint MAP over the cruise windows.
-
-    ``rotor_delta=True`` gives each rotor its own profile offset on top of the
-    shared shape, which is the point of a four-rotor rig: the rotors differ in
-    level and in the microphone pattern, not in the physics.
-    """
-    band = REGIMES[regime]
-    rows = cruise_clips(
-        recording_id,
-        seconds=seconds,
-        max_clips=max_clips,
-        min_rps=float(band["min_rps"] if min_rps is None else min_rps),
-        max_rps=band["max_rps"],
-        stride_s=band["stride_s"],
-    )
-    if not rows:
-        raise ValueError(f"{recording_id}: no {regime} window of {seconds} s found")
-    k_cap = k_cap if k_cap != K_CAP else int(band["k_cap"])
-    staged: list[tuple[str, str, Periodogram, Any]] = []
-    for cid, clip, pg in rows:
-        m = int(clip.audio.shape[0] if n_mics is None else n_mics)
-        variant = {**S2_VARIANT, **(FLOOR_DYNAMICS if floor_dynamics else {})}
-        spec = make_spec(pg, n_mics=m, f_max=F_MAX, k_cap=k_cap, variant=variant)
-        staged.append((cid, clip.group, pg, spec))
-        log(
-            f"  {cid}: {clip.audio.shape[0]} mics, {pg.power.shape[1]} frames, "
-            f"rotors {np.round(np.asarray(pg.rps).mean(axis=1), 1).tolist()} rev/s"
-        )
-    k = max(int(s.n_harm) for _, _, _, s in staged)
-    staged = [(cid, grp, pg, replace(s, n_harm=k)) for cid, grp, pg, s in staged]
-    rig_spec = rig.RigSpec(rotor_delta=rotor_delta)
-    return rig.fit_rig(staged, rig_spec, device=device, ladder=ladder, iters=iters, lr=0.1, log=log)
 
 
 def save(summary: dict[str, Any], path: str | Path) -> Path:
@@ -326,7 +302,7 @@ def render_from_export(
     export: dict[str, Any],
     rps: np.ndarray,
     *,
-    sample_rate_native: int = native.NATIVE_SR,
+    sample_rate_native: int = clips.NATIVE_SR,
     n_mics: int = 8,
     seed: int = 0,
 ) -> np.ndarray:
@@ -356,4 +332,4 @@ def render_from_export(
     clip = Clip(
         "synthetic", "synthetic", np.asarray(audio, np.float32), rps_native, sample_rate_native
     )
-    return np.asarray(native.decimate(clip, SR).audio, dtype=np.float64)
+    return np.asarray(clips.decimate(clip, SR).audio, dtype=np.float64)

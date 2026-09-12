@@ -90,7 +90,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path("results/S1/two_component.json"))
     args = ap.parse_args()
 
-    clip = SB.bench_clip_16k(args.motor, args.speed)
+    clip = SB.bench_clip(args.motor, args.speed)
     pg = periodogram(clip, n_fft=SB.N_FFT, hop=SB.HOP)
     measured = json.loads(Path("results/S1/cell_coherence_b30.json").read_text())["real"]
 

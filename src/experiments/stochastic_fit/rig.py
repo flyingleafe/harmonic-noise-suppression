@@ -22,7 +22,7 @@ from __future__ import annotations
 import math
 import time
 import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -31,7 +31,7 @@ from torch import Tensor, nn
 
 from .data import Periodogram
 from .fit import _inv_softplus, initialize, loo_offsets_for, loo_reference
-from .model import FLOOR_SHAPE_N_CTRL, CombSpectrum, Spec
+from .model import FLOOR_SHAPE_N_CTRL, CombSpectrum, Spec, make_spec
 
 
 @dataclass
@@ -525,6 +525,43 @@ def _stages(
         log(f"  k<={min(rung, K)}: {loss:.1f}  ({time.time() - t0:.0f}s)")
 
 
+def stage_clips(
+    rows: list[tuple[str, str, Any, Periodogram]],
+    *,
+    variant: dict[str, Any],
+    f_max: float | None,
+    k_cap: int,
+    n_harm: int | None = None,
+) -> list[tuple[str, str, Periodogram, Spec]]:
+    """``fit_rig`` input from ``[(clip_id, group, clip, periodogram)]``.
+
+    ``make_spec`` sizes each clip's ladder from its OWN slowest rotor, but a
+    tied profile needs one ladder for the whole rig, so every clip is given the
+    longest one. A faster clip's high orders then sit outside its fit band,
+    carry no likelihood term and fall to their prior — the correct statement
+    about an order above that recording's Nyquist. ``n_harm`` pins the ladder
+    to a rig that was already fitted: a SUBSET must inherit it, or the tied
+    parameter vectors no longer line up (161 orders fitted, 100 rebuilt).
+    """
+    staged = [
+        (
+            cid,
+            group,
+            pg,
+            make_spec(
+                pg,
+                n_mics=int(clip.audio.shape[0]),
+                f_max=f_max,
+                k_cap=k_cap,
+                variant=variant,
+            ),
+        )
+        for cid, group, clip, pg in rows
+    ]
+    k = int(n_harm) if n_harm else max(int(spec.n_harm) for _, _, _, spec in staged)
+    return [(cid, group, pg, replace(spec, n_harm=k)) for cid, group, pg, spec in staged]
+
+
 def fit_rig(
     clips: list[tuple[str, str, Periodogram, Spec]],
     rig_spec: RigSpec,
@@ -598,4 +635,4 @@ def fit_heldout(
     return dict(clips=per_clip, seconds=time.time() - t0)
 
 
-__all__ = ["RigSpec", "RigParams", "ClipInRig", "fit_rig", "fit_heldout"]
+__all__ = ["RigSpec", "RigParams", "ClipInRig", "stage_clips", "fit_rig", "fit_heldout"]

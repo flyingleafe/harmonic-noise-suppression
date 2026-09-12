@@ -1,24 +1,22 @@
 """Job driver.
 
-``prepare`` (CPU, once): assemble the clip bundle — the 27 refined training
-crops plus the ``nosource`` validation clips of DREGON room1 / FLY124 with
-their telemetry refined the same way — and upload it to R2 under
-``artifacts/stochastic-fit/clips/``. Synthetic control clips (renderer draws
-on real trajectories) are made here too, so the GPU side never imports the
-renderer or the tracker and stays inside a slim source snapshot.
+``fit`` (GPU): fit the requested model variants to every clip of a selected
+recording set and write ``results/stochastic_fit/<variant>/<clip>.npz``
+(scores, fitted parameters, fitted spectrum, LOO smoother) plus a
+``summary.json``. Restartable: existing outputs are skipped. ``rigfit`` and
+``popfit`` run the tied rig and the population ladder over the same clip
+selection; every ``pop*`` command after that consumes JSON summaries only.
 
-``fit`` (GPU): pull the bundle, fit the requested model variants to each
-clip, write ``results/stochastic_fit/<variant>/<clip>.npz`` (scores, fitted
-parameters, fitted spectrum, LOO smoother, the periodogram) — everything the
-offline diagnostics need — and a ``summary.json``. Restartable: existing
-outputs are skipped.
+Clips come straight from the published frames datasets (`clips.py`): native
+44.1 kHz audio with the refined rotor-speed label, decimated to 16 kHz here.
+There is no bundle step — the clips used to be cut on a laptop and uploaded to
+R2 because the cluster could not reach the raw trees, and dload removed that
+constraint.
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
-import io
 import json
 import os
 import sys
@@ -29,7 +27,8 @@ from typing import Any
 import boto3
 import numpy as np
 
-from .data import Clip, periodogram
+from . import clips as C
+from .data import SR, Clip, periodogram
 from .model import BASE_VARIANT, Spec, make_spec
 
 BUCKET = "ml-data"
@@ -114,209 +113,70 @@ def r2_client():
     )
 
 
-def clip_to_bytes(clip: Clip) -> bytes:
-    buf = io.BytesIO()
-    np.savez_compressed(
-        buf,
-        audio=clip.audio.astype(np.float32),
-        rps=clip.rps.astype(np.float64),
-        rps_original=(clip.rps if clip.rps_original is None else clip.rps_original).astype(
-            np.float64
-        ),
-        meta=np.array(
-            json.dumps(dict(clip.meta, clip_id=clip.clip_id, group=clip.group, sample_rate=clip.sr))
-        ),
+DEFAULT_DATASET = "michaels-frames"
+#: One clip window. 8 s at 16 kHz is 250 frames on the 2048/512 analysis grid.
+DEFAULT_SECONDS = 8.0
+
+
+def add_clip_args(parser: argparse.ArgumentParser) -> None:
+    """The clip-selection surface every fitting command shares."""
+    parser.add_argument(
+        "--dataset", default=DEFAULT_DATASET, help="default frames dataset, NAME[@VERSION]"
     )
-    return buf.getvalue()
+    parser.add_argument("--seconds", type=float, default=DEFAULT_SECONDS)
+    parser.add_argument("--clips-per-recording", type=int, default=8)
+    parser.add_argument("--channels", default=None, help="'all' (default) or e.g. '0,3-5'")
+    parser.add_argument(
+        "--rps-key",
+        default=C.DEFAULT_RPS_KEY,
+        help="rotor track held fixed (rps_refined, rps, motors_measured, motors_command, auto)",
+    )
+    parser.add_argument(
+        "--min-rps", type=float, default=5.0, help="every rotor above this for the whole window"
+    )
+    parser.add_argument("--max-rps", type=float, default=None)
+    parser.add_argument(
+        "--stride-s", type=float, default=None, help="window advance (default: no overlap)"
+    )
+    parser.add_argument("--clips", nargs="*", default=None, help="keep only these clip ids")
 
 
-def clip_from_bytes(data: bytes) -> Clip:
-    with np.load(io.BytesIO(data), allow_pickle=True) as z:
-        meta = json.loads(str(z["meta"]))
-        return Clip(
-            meta["clip_id"],
-            meta["group"],
-            np.asarray(z["audio"]),
-            np.asarray(z["rps"]),
-            int(meta["sample_rate"]),
-            np.asarray(z["rps_original"]),
-            meta,
+def clip_set(args: argparse.Namespace, specs: list[str]) -> list[tuple[str, str, Clip, Any]]:
+    """``[(clip_id, group, clip_16k, periodogram)]`` for a recording selection.
+
+    A spec is ``[dataset[@version]:]recording_id``, so one command can mix rigs
+    (``michaels-frames:FLY125 DREGON-frames:free-flight_nosource_room1``); a
+    bare id takes ``--dataset``. Windows are chosen from the rotor label at its
+    own resolution, so no clip straddles a regime transition, and the group a
+    clip carries is the recording's rig family (``fly125``, ``dregon_room1``,
+    ...) — what the rig-level ties key on.
+    """
+    out: list[tuple[str, str, Clip, Any]] = []
+    for spec in specs:
+        dataset, _, rid = str(spec).rpartition(":")
+        dataset = dataset or args.dataset
+        rec = C.load_recording(dataset, rid, None, args.rps_key)
+        found = C.windows(
+            rec,
+            seconds=args.seconds,
+            max_clips=args.clips_per_recording,
+            min_rps=args.min_rps,
+            max_rps=args.max_rps,
+            stride_s=args.stride_s,
         )
-
-
-# ── prepare ───────────────────────────────────────────────────────────────
-
-
-def prepare(args: argparse.Namespace) -> None:
-    from . import data
-
-    client = r2_client()
-    manifest: list[dict[str, Any]] = []
-    # incremental: the refs, the validation clips and the controls are uploaded in separate runs
-    with contextlib.suppress(client.exceptions.NoSuchKey):
-        manifest = json.loads(
-            client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
+        for i, (start_s, dur) in enumerate(found):
+            cid = f"{rid.lower().replace(':', '_')}_{i:02d}"
+            clip = C.decimate(rec.cut(start_s, dur, channels=args.channels, clip_id=cid), SR)
+            out.append((cid, rec.group, clip, periodogram(clip)))
+        print(
+            f"  {dataset}:{rid} [{rec.group}] {len(found)} clips of {args.seconds:g}s "
+            f"on {rec.rps_key}",
+            flush=True,
         )
-
-    def put(clip: Clip) -> None:
-        key = f"{PREFIX}/{clip.clip_id}.npz"
-        client.put_object(Bucket=BUCKET, Key=key, Body=clip_to_bytes(clip))
-        manifest[:] = [m for m in manifest if m["clip_id"] != clip.clip_id]
-        manifest.append(
-            dict(
-                clip_id=clip.clip_id,
-                group=clip.group,
-                key=key,
-                duration_s=clip.duration_s,
-                rps_median=np.median(clip.rps, axis=1).round(2).tolist(),
-                refinement=clip.meta.get("refinement"),
-            )
-        )
-        print(f"  uploaded {key}", flush=True)
-
-    if args.refs_dir:
-        data.REFS_DIR = Path(args.refs_dir)
-        for path in data.ref_clips():
-            put(data.load_ref_clip(path))
-
-    if args.valid:
-        if args.valid_dir:
-            data.VALID_DIR = Path(args.valid_dir)
-        else:
-            from data_processing.streams import ensure_local
-
-            data.VALID_DIR = Path(ensure_local("DREGON-LM-V4-michaels-valid-full"))
-        for sample_id, _rec in data.valid_nosource_ids():
-            clip = data.load_valid_clip(sample_id)
-            moving = clip.rps.max(axis=1) > 15.0
-            if moving.any():
-                t0 = time.time()
-                try:
-                    clip = data.refine_rps(clip)
-                    print(f"  refined {clip.clip_id} in {time.time() - t0:.0f}s", flush=True)
-                except Exception as exc:  # a stopped/ramp clip the tracker cannot hold
-                    print(
-                        f"  refinement failed on {clip.clip_id}: {exc!r}; keeping telemetry",
-                        flush=True,
-                    )
-                    clip.meta["refinement"] = dict(error=repr(exc))
-            put(clip)
-
-    if args.synthetic:
-        # renderer draws on real trajectories: planted-parameter controls
-        rng = np.random.default_rng(0)
-        sources = [m for m in manifest if m["group"] in ("fly125", "dregon_room2")]
-        for i in range(args.synthetic):
-            src = sources[int(rng.integers(len(sources)))]
-            obj = client.get_object(Bucket=BUCKET, Key=src["key"])["Body"].read()
-            real = clip_from_bytes(obj)
-            clip, diag = data.synthetic_clip(1000 + i, real.rps)
-            p = diag["params"]
-            clip.meta.update(
-                source_clip=src["clip_id"],
-                planted=dict(
-                    profile_db=p.profile_db.tolist(),
-                    gamma0=p.gamma0.tolist(),
-                    gamma_slope=p.gamma_slope.tolist(),
-                    floor_ctrl_hz=p.floor_ctrl_hz.tolist(),
-                    floor_ctrl_db=p.floor_ctrl_db.tolist(),
-                    floor_tilt_db_oct=p.floor_tilt_db_oct,
-                    harm_mean_db=p.harm_mean_db,
-                    floor_mean_db=p.floor_mean_db,
-                    harm_gp_std_db=p.harm_gp_std_db,
-                    harm_gp_tau_s=p.harm_gp_tau_s,
-                    harm_coherence=p.harm_coherence,
-                    floor_gp_std_db=p.floor_gp_std_db,
-                    floor_gp_tau_s=p.floor_gp_tau_s,
-                    mic_gains_db=(10 * np.log10(diag["mic_gains"])).tolist(),
-                    n_harmonics=p.n_harmonics,
-                ),
-            )
-            put(clip)
-
-    client.put_object(
-        Bucket=BUCKET, Key=f"{PREFIX}/manifest.json", Body=json.dumps(manifest, indent=1).encode()
-    )
-    print(f"manifest: {len(manifest)} clips")
-
-
-# ── preset renders (the calibration gate's clips) ─────────────────────────
-
-
-def prepare_presets(args: argparse.Namespace) -> None:
-    """Render the rig presets of an online-mix policy on the REAL clips'
-    trajectories and add them to the manifest as ``syn_<preset>`` groups, so the
-    rig fit can score the renderer's own output the way it scores recordings
-    (gate 1 of ``docs/hierarchical-rig-model-plan.md`` § 7)."""
-    import yaml
-
-    from data_processing import stochastic_rotor_noise as srn
-
-    from .data import Clip
-
-    client = r2_client()
-    manifest = json.loads(
-        client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
-    )
-    pol = yaml.safe_load(Path(args.policy).read_text())
-    presets = [src for src in pol["sources"]["noise"] if src.get("kind") == "stochastic"]
-    names = args.names or [f"preset{i}" for i in range(len(presets))]
-    rng = np.random.default_rng(args.seed)
-    for name, src, groups in zip(names, presets, args.groups_per_preset):
-        ranges = srn.StochasticRanges.from_dict(src.get("ranges"))
-        sources = [m for m in manifest if m["group"] in groups.split(",")]
-        n_done = 0
-        for entry in sources:
-            if n_done >= args.per_preset:
-                break
-            clip = clip_from_bytes(
-                client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read()
-            )
-            if clip.rps.max() < 5:
-                continue
-            rps = clip.rps.astype(np.float64)
-            hover = float(np.median(rps[rps > 5]))
-            n_harm = int(np.clip(np.ceil(clip.sr / 2.0 / max(hover, 1.0)), 40, 200))
-            params = srn.sample_params(
-                rng, ranges, n_rotors=rps.shape[0], n_harmonics=n_harm, sample_rate=clip.sr
-            )
-            audio, _ = srn.synthesize(
-                params,
-                rps,
-                rng=rng,
-                n_mics=clip.audio.shape[0],
-                mic_gain_db=tuple(src.get("mic_gain_db", (0.0, 0.0))),
-                line_mode=str(src.get("line_mode", "stochastic")),
-            )
-            cid = f"syn_{name}_{clip.clip_id}"
-            syn = Clip(
-                cid,
-                f"syn_{name}",
-                audio.astype(np.float32),
-                clip.rps,
-                clip.sr,
-                clip.rps.copy(),
-                dict(source=clip.clip_id, preset=name),
-            )
-            key = f"{PREFIX}/{cid}.npz"
-            client.put_object(Bucket=BUCKET, Key=key, Body=clip_to_bytes(syn))
-            manifest = [m for m in manifest if m["clip_id"] != cid]
-            manifest.append(
-                dict(
-                    clip_id=cid,
-                    group=f"syn_{name}",
-                    key=key,
-                    duration_s=audio.shape[1] / clip.sr,
-                    rps_median=np.median(rps, axis=1).round(2).tolist(),
-                    refinement=None,
-                )
-            )
-            n_done += 1
-            print(f"rendered {cid}", flush=True)
-    client.put_object(
-        Bucket=BUCKET, Key=f"{PREFIX}/manifest.json", Body=json.dumps(manifest, indent=1).encode()
-    )
-    print(f"manifest: {len(manifest)} clips")
+    if getattr(args, "clips", None):
+        keep = set(args.clips)
+        out = [row for row in out if row[0] in keep]
+    return out
 
 
 # ── fit ───────────────────────────────────────────────────────────────────
@@ -329,28 +189,19 @@ def fit(args: argparse.Namespace) -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"device {device}", flush=True)
-    client = r2_client()
-    manifest = json.loads(
-        client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
-    )
-    if args.groups:
-        manifest = [m for m in manifest if m["group"] in args.groups]
-    if args.clips:
-        manifest = [m for m in manifest if m["clip_id"] in args.clips]
+    rows = clip_set(args, args.recordings)
     if args.shard:
         i, n = (int(x) for x in args.shard.split("/"))
-        manifest = manifest[i::n]
+        rows = rows[i::n]
     variants = {k: VARIANTS[k] for k in args.variants}
-    print(f"{len(manifest)} clips x {list(variants)}", flush=True)
+    print(f"{len(rows)} clips x {list(variants)}", flush=True)
     results = Path(args.results_dir)
     results.mkdir(parents=True, exist_ok=True)
     summary_path = results / f"summary_{args.tag}.json"
     rows: list[dict[str, Any]] = (
         json.loads(summary_path.read_text()) if summary_path.exists() else []
     )
-    for entry in manifest:
-        clip = clip_from_bytes(client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read())
-        pg = periodogram(clip)
+    for _cid, _group, clip, pg in rows:
         for name, variant in variants.items():
             out = results / name / f"{clip.clip_id}.npz"
             if out.exists():
@@ -502,30 +353,11 @@ def rigfit(args: argparse.Namespace) -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"device {device}", flush=True)
-    client = r2_client()
-    manifest = json.loads(
-        client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
-    )
-    if args.clips:
-        manifest = [m for m in manifest if m["clip_id"] in args.clips]
-
-    def load(groups: list[str]) -> list[tuple[str, str, Any, Any]]:
-        out = []
-        for entry in manifest:
-            if entry["group"] not in groups:
-                continue
-            clip = clip_from_bytes(
-                client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read()
-            )
-            if clip.rps.max() < 5:
-                continue
-            out.append((clip.clip_id, entry["group"], clip, periodogram(clip)))
-        return out
-
-    train_raw = load(args.train_groups)
-    test_raw = load(args.test_groups) if args.test_groups else []
+    train_raw = clip_set(args, args.train_recordings)
+    test_raw = clip_set(args, args.test_recordings) if args.test_recordings else []
     print(
-        f"train {len(train_raw)} clips {args.train_groups}; test {len(test_raw)} {args.test_groups}",
+        f"train {len(train_raw)} clips {args.train_recordings}; "
+        f"test {len(test_raw)} {args.test_recordings}",
         flush=True,
     )
     results = Path(args.results_dir) / args.tag
@@ -635,31 +467,11 @@ def population_fit(args: argparse.Namespace) -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"device {device}", flush=True)
-    client = r2_client()
-    manifest = json.loads(
-        client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
-    )
-    if args.clips:
-        manifest = [entry for entry in manifest if entry["clip_id"] in args.clips]
-
-    def load(groups: list[str]) -> list[tuple[str, str, Any, Any]]:
-        loaded = []
-        for entry in manifest:
-            if entry["group"] not in groups:
-                continue
-            clip = clip_from_bytes(
-                client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read()
-            )
-            if clip.rps.max() < 5:
-                continue
-            loaded.append((clip.clip_id, entry["group"], clip, periodogram(clip)))
-        return loaded
-
-    raw_train = load(args.train_groups)
-    raw_test = load(args.test_groups) if args.test_groups else []
+    raw_train = clip_set(args, args.train_recordings)
+    raw_test = clip_set(args, args.test_recordings) if args.test_recordings else []
     print(
-        f"train {len(raw_train)} clips {args.train_groups}; "
-        f"test {len(raw_test)} {args.test_groups}",
+        f"train {len(raw_train)} clips {args.train_recordings}; "
+        f"test {len(raw_test)} {args.test_recordings}",
         flush=True,
     )
     spec_over, base_rig_over = LADDER[args.rig_config]
@@ -863,38 +675,23 @@ def population_raw_gate(args: argparse.Namespace) -> None:
     if source.get("kind") != "stochastic":
         raise ValueError("source-index must select a stochastic noise source")
     if args.classifier and any(
-        not group.startswith("fly") for group in (*args.train_groups, *args.test_groups)
+        "FLY" not in spec.upper() for spec in (*args.train_recordings, *args.test_recordings)
     ):
         raise ValueError(
             "the waveform classifier is reserved for Michael's recordings; "
             "DREGON gusts make it a trivial domain detector"
         )
 
-    client = r2_client()
-    manifest = json.loads(
-        client.get_object(Bucket=BUCKET, Key=f"{PREFIX}/manifest.json")["Body"].read()
-    )
+    def load(specs: list[str]) -> list[Clip]:
+        rows = clip_set(args, specs)
+        # A DREGON waveform gate on raw telemetry compares the model with a
+        # carrier the labels do not hold: the refined label is the reference.
+        if args.rps_key != "rps_refined" and any(r[1].startswith("dregon") for r in rows):
+            raise ValueError("DREGON waveform gates require --rps-key rps_refined")
+        return [clip for _cid, _group, clip, _pg in rows]
 
-    def load(groups: list[str]) -> list[Clip]:
-        clips: list[Clip] = []
-        for entry in manifest:
-            if entry["group"] not in groups:
-                continue
-            clip = clip_from_bytes(
-                client.get_object(Bucket=BUCKET, Key=entry["key"])["Body"].read()
-            )
-            if (
-                entry["group"].startswith("dregon")
-                and clip.rps.max() >= 5
-                and clip.meta.get("refinement") is None
-            ):
-                raise ValueError(f"{clip.clip_id}: DREGON waveform gates require refined RPS")
-            if clip.rps.max() >= 5:
-                clips.append(clip)
-        return clips
-
-    train_real = load(args.train_groups)
-    test_real = load(args.test_groups)
+    train_real = load(args.train_recordings)
+    test_real = load(args.test_recordings)
     observation_augmentations: list[dict[str, Any]] = []
     if args.observation in ("recolor", "both"):
         observation_augmentations.append(
@@ -969,8 +766,9 @@ def population_raw_gate(args: argparse.Namespace) -> None:
         observation=args.observation,
         classifier=args.classifier,
         draws_per_clip=args.draws_per_clip,
-        train_groups=args.train_groups,
-        test_groups=args.test_groups,
+        train_recordings=args.train_recordings,
+        test_recordings=args.test_recordings,
+        rps_key=args.rps_key,
     )
     output = (
         Path(args.output)
@@ -1499,34 +1297,15 @@ def main(argv: list[str] | None = None) -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("prepare")
-    p.add_argument(
-        "--refs-dir", default=None, help="directory of refined-reference npz files (laptop only)"
-    )
-    p.add_argument(
-        "--valid", action="store_true", help="include and refine the validation nosource clips"
-    )
-    p.add_argument("--valid-dir", default=None)
-    p.add_argument(
-        "--synthetic", type=int, default=0, help="number of renderer control clips to add"
-    )
-    p.set_defaults(func=prepare)
-    pp = sub.add_parser("prepare-presets")
-    pp.add_argument("--policy", required=True)
-    pp.add_argument("--names", nargs="*", default=None)
-    pp.add_argument(
-        "--groups-per-preset",
-        nargs="+",
-        required=True,
-        help="comma-joined real groups whose trajectories each preset renders on",
-    )
-    pp.add_argument("--per-preset", type=int, default=12)
-    pp.add_argument("--seed", type=int, default=0)
-    pp.set_defaults(func=prepare_presets)
     f = sub.add_parser("fit")
     f.add_argument("--variants", nargs="+", default=["family"], choices=list(VARIANTS))
-    f.add_argument("--groups", nargs="*", default=None)
-    f.add_argument("--clips", nargs="*", default=None)
+    f.add_argument(
+        "--recordings",
+        nargs="+",
+        required=True,
+        help="[dataset[@version]:]RECORDING, repeatable",
+    )
+    add_clip_args(f)
     f.add_argument("--shard", default=None, help="i/n: take every n-th clip starting at i")
     f.add_argument("--f-max", type=float, default=None)
     f.add_argument("--k-cap", type=int, default=300)
@@ -1542,9 +1321,9 @@ def main(argv: list[str] | None = None) -> None:
     f.set_defaults(func=fit)
     r = sub.add_parser("rigfit")
     r.add_argument("--configs", nargs="+", default=["M0", "M1", "M2"], choices=list(LADDER))
-    r.add_argument("--train-groups", nargs="+", required=True)
-    r.add_argument("--test-groups", nargs="*", default=None)
-    r.add_argument("--clips", nargs="*", default=None)
+    r.add_argument("--train-recordings", nargs="+", required=True)
+    r.add_argument("--test-recordings", nargs="*", default=None)
+    add_clip_args(r)
     r.add_argument("--f-max", type=float, default=None)
     r.add_argument("--k-cap", type=int, default=300)
     r.add_argument("--iters", nargs=3, type=int, default=[100, 100, 200])
@@ -1554,9 +1333,9 @@ def main(argv: list[str] | None = None) -> None:
     pf = sub.add_parser("popfit")
     pf.add_argument("--rig-config", choices=["M5", "M5g", "M5s", "M5gs"], required=True)
     pf.add_argument("--ranks", nargs="+", type=int, default=[0, 1, 2, 3])
-    pf.add_argument("--train-groups", nargs="+", required=True)
-    pf.add_argument("--test-groups", nargs="*", default=None)
-    pf.add_argument("--clips", nargs="*", default=None)
+    pf.add_argument("--train-recordings", nargs="+", required=True)
+    pf.add_argument("--test-recordings", nargs="*", default=None)
+    add_clip_args(pf)
     pf.add_argument("--f-max", type=float, default=None)
     pf.add_argument("--k-cap", type=int, default=128)
     pf.add_argument("--map-iters", nargs=3, type=int, default=[60, 60, 120])
@@ -1581,8 +1360,9 @@ def main(argv: list[str] | None = None) -> None:
     pg.add_argument("--summary", required=True)
     pg.add_argument("--policy", required=True)
     pg.add_argument("--source-index", type=int, required=True)
-    pg.add_argument("--train-groups", nargs="+", required=True)
-    pg.add_argument("--test-groups", nargs="+", required=True)
+    pg.add_argument("--train-recordings", nargs="+", required=True)
+    pg.add_argument("--test-recordings", nargs="+", required=True)
+    add_clip_args(pg)
     pg.add_argument("--k-max", type=int, default=64)
     pg.add_argument(
         "--observation",

@@ -1,7 +1,7 @@
 ---
 stage: S1
 objective: distributional fit of the stochastic rotor-noise model
-data: DREGON single-motor bench, channel 7, native 44.1 kHz decimated to 16 kHz
+data: DREGON-frames `split="motor"` cells, channel 7, native 44.1 kHz decimated to 16 kHz
 ---
 
 # S1 — the single-rotor, windless, single-microphone fit
@@ -15,18 +15,21 @@ is held out**. Channel 7 is used throughout: it carries the largest
 band-integrated comb margin over orders 2-30 (18.54 dB against 16.59-18.11 dB
 for the other seven), measured with `bench.read_orders` over six recordings.
 
-Audio is always the raw 44.1 kHz WAV decimated by `native.decimate`. The
-published 16 kHz datasets brick-wall at 7.9 kHz by 88-90 dB and would be fitted
-as if that were the rig.
+Audio is always the native 44.1 kHz recording decimated by `clips.decimate`;
+since the 2026-09-12 cutover it comes from the published `DREGON-frames`
+dataset (`split="motor"`, recording ids `motor_Motor1_80`), not from the raw
+tree. The published 16 kHz *training* datasets brick-wall at 7.9 kHz by
+88-90 dB and would be fitted as if that were the rig.
 
 ## Instruments built
 
 | file | role |
 |---|---|
-| `src/experiments/stochastic_fit/native.py` | native-rate clips (`bench_clip`, `load_native`, `decimate`); verified against the published 16 kHz clips at corr +0.993 to +0.9997, lag 0 |
-| `src/experiments/stochastic_fit/stage1.py` | per-cell measurement, the population fit, the render, and the train-only level calibration |
+| `src/experiments/stochastic_fit/clips.py` | the only loader: published frames at native rate, `Recording.cut`, `decimate` (earlier verified against the published 16 kHz clips at corr +0.993 to +0.9997, lag 0) |
+| `src/experiments/stochastic_fit/stage1_bayes.py` | the bench cells (`bench_cells`, `bench_span`, the comb-evidence rate seed), `BENCH_VARIANT`, and the bench→renderer export |
+| `src/experiments/stochastic_fit/campaign.py` | the fit itself: `fit(regime="bench")`, driven by `scripts/stochastic_fit.py --regime bench` |
 | `src/experiments/stochastic_fit/accept_stats.py` | the two acceptance statistics, shared by the gate and the fit so they cannot diverge |
-| `scripts/_stage_accept.py` | the preregistered gate |
+| ~~`scripts/_stage_accept.py`~~ | the preregistered gate, **retired 2026-09-12** with `stage1.py`: it scored the derived-summary S1 fit, which the Whittle fit replaced. The statistics themselves survive in `accept_stats.py` (used by `scripts/_stage2_panels.py`), so restating the gate is a matter of choosing the criterion — see the open decision below |
 
 ## Measured quantities (fit motors)
 

@@ -15,25 +15,25 @@ done
 python -m experiments.stochastic_fit.run popbench --summary $P/refit-dregon-aug.json \
   --output $P/refit-dregon-bench.json --bench-output $P/bench-dregon-refit.json
 python -m experiments.stochastic_fit.run poprawgate --summary $P/refit-dregon-bench.json \
-  --policy conf/online_mix/rig_fm_5050.yaml --source-index 0 --train-groups dregon_room2 \
-  --test-groups dregon_room2 --k-max 64 --bootstrap 200 --seed 670 --draws-per-clip 4 \
+  --policy conf/online_mix/rig_fm_5050.yaml --source-index 0 --train-recordings DREGON-frames:free-flight_nosource_room2 DREGON-frames:hovering_nosource_room2 DREGON-frames:updown_nosource_room2 DREGON-frames:rectangle_nosource_room2 DREGON-frames:spinning_nosource_room2 \
+  --test-recordings DREGON-frames:free-flight_nosource_room2 DREGON-frames:hovering_nosource_room2 DREGON-frames:updown_nosource_room2 DREGON-frames:rectangle_nosource_room2 DREGON-frames:spinning_nosource_room2 --k-max 64 --bootstrap 200 --seed 670 --draws-per-clip 4 \
   --compact --output /tmp/d-train.json
 python -m experiments.stochastic_fit.run popcalibrate --summary $P/refit-dregon-bench.json \
   --raw-npz /tmp/d-train.npz --reference-order 2 --output $P/refit-dregon-final.json
 python -m experiments.stochastic_fit.run poprawgate --summary $P/refit-dregon-final.json \
-  --policy conf/online_mix/rig_fm_5050.yaml --source-index 0 --train-groups dregon_room2 \
-  --test-groups dregon_room1 --k-max 64 --bootstrap 1000 --seed 670 --draws-per-clip 4 \
+  --policy conf/online_mix/rig_fm_5050.yaml --source-index 0 --train-recordings DREGON-frames:free-flight_nosource_room2 DREGON-frames:hovering_nosource_room2 DREGON-frames:updown_nosource_room2 DREGON-frames:rectangle_nosource_room2 DREGON-frames:spinning_nosource_room2 \
+  --test-recordings DREGON-frames:free-flight_nosource_room1 --k-max 64 --bootstrap 1000 --seed 670 --draws-per-clip 4 \
   --compact --output $P/gate-refit-dregon.json
 # Michael's: calibration then gate.
 python -m experiments.stochastic_fit.run poprawgate --summary $P/refit-michaels-aug.json \
-  --policy conf/online_mix/rig_fm_5050.yaml --source-index 1 --train-groups fly125 \
-  --test-groups fly125 --k-max 64 --bootstrap 200 --seed 570 --draws-per-clip 4 \
+  --policy conf/online_mix/rig_fm_5050.yaml --source-index 1 --train-recordings michaels-frames:FLY125 \
+  --test-recordings michaels-frames:FLY125 --k-max 64 --bootstrap 200 --seed 570 --draws-per-clip 4 \
   --compact --output /tmp/m-train.json
 python -m experiments.stochastic_fit.run popcalibrate --summary $P/refit-michaels-aug.json \
   --raw-npz /tmp/m-train.npz --reference-order 2 --output $P/refit-michaels-final.json
 python -m experiments.stochastic_fit.run poprawgate --summary $P/refit-michaels-final.json \
-  --policy conf/online_mix/rig_fm_5050.yaml --source-index 1 --train-groups fly125 \
-  --test-groups fly124 --k-max 64 --bootstrap 1000 --seed 570 --draws-per-clip 4 \
+  --policy conf/online_mix/rig_fm_5050.yaml --source-index 1 --train-recordings michaels-frames:FLY125 \
+  --test-recordings michaels-frames:FLY124 --k-max 64 --bootstrap 1000 --seed 570 --draws-per-clip 4 \
   --compact --output $P/gate-refit-michaels.json
 python -m experiments.stochastic_fit.run putr2 --prefix $R/recalib \
   --path $P/refit-dregon-final.json --path $P/refit-michaels-final.json \

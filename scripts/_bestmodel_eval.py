@@ -57,13 +57,63 @@ DREGON_ROOM2 = [
 FIGURE_CLIPS = FLY124_CRUISE + DREGON_ROOM1 + FLY125_CRUISE + FLY125_IDLE + DREGON_ROOM2
 
 
+# ── the legacy 16 kHz clip sets this campaign was measured on ──────────────
+#
+# These are the crops of the 2026-09-06 linewidth audit (27 four-second
+# windows with telemetry refined against the audio) and the frozen
+# DREGON-LM-V4-michaels-valid-full validation split. They are kept HERE, in
+# the only script that still reads them, because the page's numbers were
+# produced from exactly these files; every fitting path now reads the
+# published frames datasets instead (`experiments.stochastic_fit.clips`).
+REFS_DIR = Path(
+    "/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.worktrees/jhtr-refinement"
+    "/results/jhtr/trajectory-linewidth/refs"
+)
+VALID_DIR = Path(
+    "/home/flyingleafe/.cache/dload/materialized/DREGON-LM-V4-michaels-valid-full/9604f3ffc2c9"
+)
+
+
+def ref_clips() -> list[Path]:
+    return sorted(p for p in REFS_DIR.glob("*.npz") if not p.stem.endswith("_matched"))
+
+
+def load_ref_clip(path: Path) -> SD.Clip:
+    with np.load(path, allow_pickle=True) as z:
+        meta = json.loads(str(z["meta"]))
+        audio = np.asarray(z["audio"], dtype=np.float32)
+        rps = np.asarray(z["rps"], dtype=np.float64)
+        original = np.asarray(z["rps_original"], dtype=np.float64)
+    rec = meta.get("recording_id", path.stem)
+    group = "fly125" if rec.startswith("FLY") else "dregon_room2"
+    return SD.Clip(
+        path.stem, group, audio, rps, int(meta.get("sample_rate", SD.SR)), original, meta
+    )
+
+
+def load_valid_clip(sample_id: str) -> SD.Clip:
+    import soundfile as sf
+
+    meta = json.loads((VALID_DIR / "metadata.json").read_text())["valid"]
+    entry = next(s for s in meta if s["id"] == sample_id)
+    audio, sr = sf.read(VALID_DIR / sample_id / "mixture.wav", dtype="float32", always_2d=True)
+    audio = np.ascontiguousarray(audio.T)
+    rps_tel = np.load(VALID_DIR / sample_id / "rps.npy").astype(np.float64)
+    t_tel = np.arange(rps_tel.shape[1]) / float(entry["motor_sample_rate"])
+    t_audio = np.arange(audio.shape[1]) / sr
+    rps = np.maximum(np.stack([np.interp(t_audio, t_tel, r) for r in rps_tel]), 0.0)
+    rec = entry["recording_id"]
+    group = "fly124" if "FLY" in rec else "dregon_room1"
+    return SD.Clip(f"{rec}_{sample_id}", group, audio, rps, int(sr), rps.copy(), dict(entry))
+
+
 def _ref(clip_id: str) -> SD.Clip:
-    return SD.load_ref_clip(next(p for p in SD.ref_clips() if p.stem == clip_id))
+    return load_ref_clip(next(p for p in ref_clips() if p.stem == clip_id))
 
 
 CLIP_SETS: list[tuple[str, bool, list[str], Callable[[str], SD.Clip]]] = [
-    ("Michael's FLY124 cruise", True, FLY124_CRUISE, SD.load_valid_clip),
-    ("DREGON room1 free-flight", True, DREGON_ROOM1, SD.load_valid_clip),
+    ("Michael's FLY124 cruise", True, FLY124_CRUISE, load_valid_clip),
+    ("DREGON room1 free-flight", True, DREGON_ROOM1, load_valid_clip),
     ("Michael's FLY125 cruise", False, FLY125_CRUISE, _ref),
     ("Michael's FLY125 idle", False, FLY125_IDLE, _ref),
     ("DREGON room2 flight", False, DREGON_ROOM2, _ref),
