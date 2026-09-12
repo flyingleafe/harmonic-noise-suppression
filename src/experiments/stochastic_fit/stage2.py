@@ -49,6 +49,24 @@ F_MAX = 7900.0
 #: cruise and near 35-40 rev/s in standby, so the two regimes are far apart.
 CRUISE_MIN_RPS = 65.0
 CRUISE_SECONDS = 16.0
+#: Standby (Stage 3): every rotor spinning but below this rate. FLY125's
+#: standby sits near 35-40 rev/s, so the two regimes do not overlap. A slower
+#: shaft puts MORE orders under Nyquist - 7900 / 35 = 226 against 121 in cruise
+#: - so standby needs a taller comb, not a shorter one.
+STANDBY_MAX_RPS = 45.0
+STANDBY_MIN_RPS = 20.0
+STANDBY_K_CAP = 230
+#: FLY125 holds exactly ONE contiguous standby run, 13.5 s starting at 1.78 s
+#: (13.9 s of standby in the whole 178 s recording). So Stage 3 fits a single
+#: window, not a population: its clips would otherwise be consecutive slices of
+#: one event, which is not a sample of anything.
+STANDBY_SECONDS = 12.5
+REGIMES = {
+    "cruise": dict(min_rps=CRUISE_MIN_RPS, max_rps=None, k_cap=130, stride_s=None),
+    "standby": dict(
+        min_rps=STANDBY_MIN_RPS, max_rps=STANDBY_MAX_RPS, k_cap=STANDBY_K_CAP, stride_s=1.0
+    ),
+}
 #: 7900 Hz / 65 rev/s = 121 orders at the slowest cruise rate.
 K_CAP = 130
 FIT_RECORDING = "FLY125"
@@ -89,14 +107,15 @@ def cruise_windows(
     *,
     seconds: float = CRUISE_SECONDS,
     min_rps: float = CRUISE_MIN_RPS,
+    max_rps: float | None = None,
     max_clips: int = 12,
     stride_s: float | None = None,
 ) -> list[tuple[float, float]]:
-    """``[(start_s, duration_s)]`` windows where every rotor stays in cruise.
+    """``[(start_s, duration_s)]`` windows where every rotor stays in one regime.
 
-    The selection reads the telemetry only. A window is kept when the minimum
-    over rotors and over time of the rotor rate is above ``min_rps``, so no
-    window straddles a transition.
+    The selection reads the telemetry only. A window is kept when every rotor
+    stays inside ``[min_rps, max_rps]`` for the whole window, so no window
+    straddles a transition and one stationary model has a stationary target.
     """
     _, audio_t, rps, sr = _recording(recording_id)
     step = float(seconds if stride_s is None else stride_s)
@@ -108,7 +127,10 @@ def cruise_windows(
     while start + seconds <= total and len(out) < max_clips:
         i0 = int(np.searchsorted(audio_t, t0 + start))
         block = rps[:, i0 : i0 + n]
-        if block.shape[-1] == n and float(np.nanmin(block)) >= min_rps:
+        ok = block.shape[-1] == n and float(np.nanmin(block)) >= min_rps
+        if ok and max_rps is not None:
+            ok = float(np.nanmax(block)) <= max_rps
+        if ok:
             out.append((t0 + start, seconds))
         start += step
     return out
@@ -136,6 +158,7 @@ def fit(
     iters: tuple[int, int, int] = (120, 120, 300),
     ladder: tuple[int, ...] = (16, 48),
     rotor_delta: bool = True,
+    regime: str = "cruise",
     device: str = "cpu",
     log: Any = print,
 ) -> dict[str, Any]:
@@ -145,9 +168,18 @@ def fit(
     shared shape, which is the point of a four-rotor rig: the rotors differ in
     level and in the microphone pattern, not in the physics.
     """
-    rows = cruise_clips(recording_id, seconds=seconds, max_clips=max_clips)
+    band = REGIMES[regime]
+    rows = cruise_clips(
+        recording_id,
+        seconds=seconds,
+        max_clips=max_clips,
+        min_rps=float(band["min_rps"]),
+        max_rps=band["max_rps"],
+        stride_s=band["stride_s"],
+    )
     if not rows:
-        raise ValueError(f"{recording_id}: no cruise window of {seconds} s found")
+        raise ValueError(f"{recording_id}: no {regime} window of {seconds} s found")
+    k_cap = k_cap if k_cap != K_CAP else int(band["k_cap"])
     staged: list[tuple[str, str, Periodogram, Any]] = []
     for cid, clip, pg in rows:
         m = int(clip.audio.shape[0] if n_mics is None else n_mics)
