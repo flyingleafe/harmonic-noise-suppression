@@ -552,11 +552,22 @@ def resolve_test_raw_root(data_root: str | Path | None = None) -> Path:
 
 
 def build(raw_dir: Path) -> Iterator[tuple[str, td.Frame]]:
-    """Yield ``(recording_id, frame)`` for each aligned recording."""
+    """Yield ``(recording_id, frame)`` for each aligned recording.
+
+    Each frame also carries ``rps_refined``, the F_VK-refined label from its
+    committed sidecar (regime-gated: standby is the telemetry exactly), or its
+    own ``rps`` track when no sidecar exists. See
+    :mod:`data_processing.refined_label_track`.
+    """
+    from data_processing.refined_label_track import attach_refined
+
     raw_dir = resolve_raw_root(raw_dir)
     for wav_rel, csv_rel, time_offset, time_dilation in MICHAELS_FILES:
         rid = Path(csv_rel).stem
-        yield rid, build_frame(raw_dir, wav_rel, csv_rel, time_offset, time_dilation)
+        yield (
+            rid,
+            attach_refined(build_frame(raw_dir, wav_rel, csv_rel, time_offset, time_dilation), rid),
+        )
 
 
 def build_test(raw_dir: Path) -> Iterator[tuple[str, td.Frame]]:

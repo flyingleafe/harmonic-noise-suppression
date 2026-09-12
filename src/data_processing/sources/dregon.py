@@ -609,7 +609,16 @@ def load_dregon_timeframes(
 
 
 def build(raw_dir: Path) -> Iterator[tuple[str, td.Frame]]:
-    """Yield ``(recording_id, frame)`` for every discovered recording."""
+    """Yield ``(recording_id, frame)`` for every discovered recording.
+
+    Each frame that carries a rotor-speed track also carries ``rps_refined``,
+    the F_VK-refined label from its committed sidecar (regime-gated: standby is
+    the telemetry exactly). A recording with no sidecar publishes its reference
+    track under that name, so the field is defined wherever a label exists at
+    all. See :mod:`data_processing.refined_label_track`.
+    """
+    from data_processing.refined_label_track import attach_refined
+
     raw_dir = Path(raw_dir)
     geometry = get_geometry(raw_dir)
     samples = sorted(discover_recordings(raw_dir), key=lambda s: str(s["recording_id"]))
@@ -617,7 +626,8 @@ def build(raw_dir: Path) -> Iterator[tuple[str, td.Frame]]:
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate DREGON recording ids in discover_recordings output")
     for sample in samples:
-        yield str(sample["recording_id"]), build_frame(sample, geometry)
+        rid = str(sample["recording_id"])
+        yield rid, attach_refined(build_frame(sample, geometry), rid)
 
 
 # ─── Registry provenance ──────────────────────────────────────────────────────
