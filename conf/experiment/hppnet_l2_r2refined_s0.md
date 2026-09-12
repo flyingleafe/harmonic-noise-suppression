@@ -64,12 +64,47 @@ below-30 regimes could only be an indirect consequence or run-to-run noise.
 
 ## Results
 
-Pending — the run is submitted. Evaluated on the gate's protocol
-(`scripts/rps_dump.py` + `scripts/rps_regime_table.py` on
-`conf/data/e12_real_fullflight.yaml`, grid `0,150,300`, 4 layers), compared
-against `hppnet_l2_r2_s0`'s `results/paper_review_B/hppnet_l2_r2_s0/regimes.csv`.
+Frozen real split, all mics, PIT MAE (rev/s). Both models were dumped in the
+SAME job (`scripts/rps_dump.py` on `conf/data/e12_real_fullflight.yaml`, grid
+`0,150,300`, 4 layers, then `scripts/rps_regime_table.py`), so the two rows
+share one readout, one set of 296 clips and one revision. **Control:** the
+gate re-dumped today reads **2.2658**, reproducing its published 2.265799 —
+no evaluation drift is in this comparison.
+
+| regime (frames) | refined | gate `hppnet_l2_r2_s0` | delta |
+|---|---:|---:|---:|
+| all (74,296) | 2.86 | **2.27** | +0.59 |
+| zero-frames (9,296) | **0.24** | 1.07 | −0.83 |
+| below-30 (2,728) | 16.37 | **14.64** | +1.73 |
+| DREGON ramp in-grid (4,176) | 7.41 | **4.91** | +2.50 |
+| FLY124 ramp in-grid (5,888) | 6.24 | **2.72** | +3.52 |
+| DREGON cruise (32,128) | 2.57 | **2.07** | +0.50 |
+| FLY124 cruise (20,080) | 0.78 | **0.77** | +0.01 |
+| ground all (8,032) | **0.20** | 0.38 | −0.18 |
+
+Run: best epoch 19, stopped 39 (gate: 33 / 54); `val/rps_mae` last-15 median
+**4.72** (IQR 0.44) against the gate's 2.79 (IQR 0.27), so the whole curve is
+worse, not just the selected draw. `eval.py` agrees with the dump
+(`rps_mae` 2.8629, `bce` 0.7751). Artifacts:
+`results/refined_label_training/{regimes.csv,regimes.md,submissions.json}`.
 
 ## Conclusion
 
-Pending the run. See `docs/experiments/refined-label-training.md` for the
-verdict on the label-noise hypothesis.
+**The hypothesis is refuted at one seed.** Training on refined labels did not
+close the DREGON gap — it widened it. DREGON cruise went 2.07 → 2.57 while
+FLY124 cruise stood still (0.77 → 0.78), so the cross-rig cruise gap grew from
+1.30 to **1.79** rev/s, and the overall number lost 0.59. Whatever makes
+DREGON harder survives a cruise-label correction of mean 0.24 rev/s, so it is
+not the tachometer's scale error.
+
+The ramp collapse (DREGON 4.91 → 7.41, FLY124 2.72 → 6.24) is the documented
+side effect, not the labels being "more wrong": `rps_refined` is published on
+the 0.032 s analysis grid while DREGON's `motors_command` is ~929 Hz, so ramp
+labels in this arm are a coarse piecewise-linear approximation of a fast
+trajectory (up to 7.5 rev/s of label difference on ramp frames). The one real
+win is zero-frames, 1.07 → **0.24**.
+
+Anyone re-running this should publish `rps_refined` at telemetry rate first —
+the label-resolution change is confounded with the label-value change on the
+ramp, though not on cruise, where the verdict stands. Campaign:
+`docs/experiments/refined-label-training.md`.

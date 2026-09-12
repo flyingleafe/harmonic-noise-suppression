@@ -1,0 +1,49 @@
+{
+  "revision": "9f065dcd1d81",
+  "branch": "refined-label-training",
+  "hypothesis": "the DREGON-vs-Michael's rotor-speed tracking gap is TRAINING-LABEL noise, not harder audio",
+  "verdict": "refuted at one seed; refined training labels cost 0.59 rev/s overall and widened the cross-rig cruise gap from 1.30 to 1.79 rev/s",
+  "protocol": "historical R2 honest-base adaptation, refined training labels",
+  "control": "hppnet_l2_r2_s0 was re-dumped in the SAME job; its 2.2658 reproduces the published 2.265799, so no dump/readout drift is in the comparison",
+  "training_policy": "conf/online_mix/hb_silence_refined_dload.yaml",
+  "gate_training_policy": "conf/online_mix/hb_silence_dload.yaml",
+  "only_field_changed": "data.train.params.path",
+  "warmup_generated_chunks": 50000,
+  "samples_per_validation": 40000,
+  "checkpoint": null,
+  "seed": 0,
+  "validation": "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9 (unchanged, raw published targets)",
+  "runs": [
+    {
+      "stage": "training",
+      "experiment": "hppnet_l2_r2refined_s0",
+      "backend": "uni",
+      "job": "rlt-hppnet-l2-r2refined--291b11",
+      "resources": {"gpus": 1, "cpus": 8, "mem_gb": 32, "min_vram_gb": 24, "time": "12h"},
+      "command": "python train.py experiment=hppnet_l2_r2refined_s0",
+      "queue_wait_s": 14,
+      "wall_s": 3252,
+      "best_epoch": 19,
+      "final_epoch": 39,
+      "best_rps_mae": 2.8616435928382784,
+      "last15_median": 4.72,
+      "last15_iqr": 0.44,
+      "wandb": "https://wandb.ai/flyingleafe/harmonic-noise-suppression/runs/tt0xt2vq"
+    },
+    {
+      "stage": "evaluation",
+      "backend": "uni-gpushort",
+      "job": "rlt-eval-refined-ab4de2",
+      "resources": {"gpus": 1, "cpus": 4, "mem_gb": 16, "min_vram_gb": 24, "time": "45m"},
+      "command": "python scripts/rps_dump.py --sets real=conf/data/e12_real_fullflight.yaml --experiments hppnet_l2_r2refined_s0,hppnet_l2_r2_s0 --out results/refined_label_training --device cuda --grid 0,150,300 --n-layers 4 && python scripts/rps_regime_table.py --dump results/refined_label_training/real --models hppnet_l2_r2refined_s0 hppnet_l2_r2_s0 --csv results/refined_label_training/regimes.csv --md results/refined_label_training/regimes.md && python eval.py experiment=hppnet_l2_r2refined_s0",
+      "outputs": ["results/refined_label_training/regimes.csv", "results/refined_label_training/regimes.md"],
+      "eval_py_metrics": {"bce": 0.7750942790629091, "rps_mae": 2.8628507696163066}
+    }
+  ],
+  "training_label_delta_measured_on_the_pool": {
+    "method": "both tracks compared at the refined track's own stamps, telemetry interpolated there; 6 recordings x 4 rotors",
+    "standby_below_45": {"max": 0.226, "mean": 0.0021, "moved_pct": 26.3, "n": 4724},
+    "ramp": {"max": 1.264, "mean": 0.0179, "moved_pct": 51.5, "n": 408},
+    "settled_cruise_at_or_above_65": {"max": 4.258, "mean": 0.241, "moved_pct": 75.2, "n": 44640}
+  }
+}
