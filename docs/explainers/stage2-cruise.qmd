@@ -31,6 +31,11 @@ def load(p):
 
 
 fit = load("results/S2/cruise_8clip.json")
+fit_dyn = load("results/S2/cruise_8clip_dyn.json")
+standby = load("results/S2/standby.json")
+sb_probe = load("results/S2/probe/standby_probe.json")
+sb_real = load("results/S2/probe/standby_real_probe.json")
+dyn_probe = load("results/S2/probe/cruise_dyn_probe.json")
 panels = load("docs/explainers/stage2-cruise/index.json")
 probe = load("results/S2/probe/cruise_probe.json")
 real = load("results/S2/probe/real_probe.json")
@@ -261,7 +266,95 @@ is **the same failure mode the tracker has on real recordings**, where the
 near-degenerate 73.7 / 75.5 rev/s pair carries the residual. The synthetic clip
 reproduces the real ambiguity, not just the real energy.
 
-# 5. What is open
+# 5. Does letting the floor gust help?
+
+The synthetic cruise is stationary, and real cruise gusts. So the same eight
+windows were refitted with the **floor** level and tilt allowed to drift
+(a Gaussian process with a 3 s and a 6 s correlation time). The LINE drift
+stays off, because that is the term that absorbed static per-order level on the
+bench; a floor GP cannot steal per-order line level.
+
+```{python}
+import statistics as st
+
+if fit and fit_dyn and probe and dyn_probe:
+    def med(d, key):
+        return round(st.median([e["scores"][key] for e in d["clips"].values()]), 4)
+
+    display(
+        pd.DataFrame(
+            [
+                dict(
+                    variant="static floor",
+                    median_nll=med(fit, "nll_fit"),
+                    median_excess=med(fit, "excess_over_loo"),
+                    probe_MAE=probe["verdict"]["median_mae_8mic"],
+                ),
+                dict(
+                    variant="floor drifts (gusts)",
+                    median_nll=med(fit_dyn, "nll_fit"),
+                    median_excess=med(fit_dyn, "excess_over_loo"),
+                    probe_MAE=dyn_probe["verdict"]["median_mae_8mic"],
+                ),
+            ]
+        ).set_index("variant")
+    )
+```
+
+The likelihood prefers the drifting floor on every window (median $-0.519$
+against $-0.507$ nats per cell), so the gusts are real and the model can hold
+them. The tracker does not care: 0.767 against 0.756 rev/s, which is the same
+number. **So floor dynamics are not the explanation for the remaining gap to
+real.** That is a useful negative result: it removes the first hypothesis on the
+list.
+
+# 6. Stage 3: standby
+
+FLY125 holds exactly **one** contiguous standby run — 13.5 s starting at 1.78 s,
+out of 13.9 s of standby in a 178 s recording. So Stage 3 fits a single 12.5 s
+window and says so: more "clips" would be consecutive slices of one event.
+Standby also needs a taller comb than cruise, not a shorter one: at 35 rev/s
+there are 226 orders under Nyquist against 121 in cruise.
+
+```{python}
+if standby and sb_probe and sb_real:
+    e = next(iter(standby["clips"].values()))
+    p, sc = e["params"], e["scores"]
+    display(
+        pd.DataFrame(
+            [
+                dict(
+                    quantity="rotor rates (rev/s)",
+                    value=", ".join(f"{v:.0f}" for v in np.asarray(p["carrier"]).mean(axis=1)),
+                ),
+                dict(quantity="NLL per cell", value=round(float(sc["nll_fit"]), 4)),
+                dict(quantity="excess over LOO", value=round(float(sc["excess_over_loo"]), 3)),
+                dict(quantity="k_half", value=round(float(p["coherence_k_half"]), 2)),
+                dict(quantity="probe: synthetic median 8-mic MAE", value=sb_probe["verdict"]["median_mae_8mic"]),
+                dict(quantity="probe: real median 8-mic MAE", value=sb_real["verdict"]["median_mae_8mic"]),
+                dict(quantity="probe: refusals", value=f"{sb_probe['verdict']['refusals']}/12"),
+                dict(quantity="probe: median spread", value=sb_probe["verdict"]["median_spread"]),
+            ]
+        ).set_index("quantity")
+    )
+```
+
+::: {layout-ncol=1}
+![standby: real, fitted, pre-fit](stage2-cruise/standby_00.png)
+:::
+
+Standby is the closest fit of the three stages. Its LTAS deviation is **0.59 dB**
+against 6.65 dB for the pre-fit family, its channel pattern is within 0.66 dB
+rms, and the two strong tonals near 2.8 and 3.0 kHz are reproduced. The tracker
+reads **0.084 rev/s** on the synthetic draws against 0.054 rev/s on the real
+ones, with no refusals and a cross-channel spread of 0.034.
+
+Note that $k_{1/2}$ comes out at 5.6 here, between the flying value (1.6 to 2.9)
+and the clamped bench (15 to 55). A slower shaft broadens its orders less, so
+more of them stay coherent. Nothing forced that ordering; it is what the
+likelihood returned on three separate regimes.
+
+# 7. What is open
 
 1. **Dynamics.** The synthetic cruise is stationary. Real cruise gusts. Drift
    terms are off because a free drift absorbed static level on the bench; the
@@ -271,7 +364,15 @@ reproduces the real ambiguity, not just the real energy.
    too wide at high order, and no per-microphone phase structure between rotors.
 3. **Standby (Stage 3).** Not started. The same machinery applies with
    `CRUISE_MIN_RPS` replaced by a standby band.
-4. **The order-domain acceptance statistic** in `accept_stats.paired_delta`
+4. **A cache-key collision that produced a fake failure.** The probe keyed its
+   native clips by loop index (`probe_00`), so the standby run read the cruise
+   clips the cruise run had left in the cache and scored standby parameters
+   against 80 rev/s trajectories. It reported a median error of 2.78 rev/s and
+   a cross-channel spread of 7.85, and the diagnosis I started writing from
+   those numbers was a diagnosis of nothing. The key now names the data
+   (recording, regime, start, duration). With it fixed, standby reads 0.084.
+   **A cache key must name the data, not the loop index.**
+5. **The order-domain acceptance statistic** in `accept_stats.paired_delta`
    sizes its integration band from $\gamma$ alone. With a two-component line it
    must integrate the needle and the pedestal separately, or a wide pedestal's
    own skirts are subtracted as floor. Measured cost of getting this wrong:

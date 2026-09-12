@@ -54,8 +54,25 @@ def _probe_helpers() -> Any:
     return mod
 
 
-def real_windows(recording: str, seconds: float, n: int) -> list[tuple[float, float]]:
-    return S2.cruise_windows(recording, seconds=seconds, max_clips=n, stride_s=seconds)
+def real_windows(
+    recording: str, seconds: float, n: int, regime: str = "cruise"
+) -> list[tuple[float, float]]:
+    """Real windows of one regime, to supply the rotor trajectories.
+
+    Standby holds exactly one contiguous run in FLY125, so its twelve draws
+    share one trajectory and differ only in their random seed. That is stated
+    where the numbers are reported: the draws are independent renders, not
+    independent flights.
+    """
+    band = S2.REGIMES[regime]
+    return S2.cruise_windows(
+        recording,
+        seconds=seconds,
+        max_clips=n,
+        min_rps=float(band["min_rps"]),
+        max_rps=band["max_rps"],
+        stride_s=band["stride_s"] or seconds,
+    )
 
 
 def main() -> None:
@@ -65,6 +82,7 @@ def main() -> None:
     ap.add_argument("--seconds", type=float, default=8.0)
     ap.add_argument("--real", action="store_true", help="also score the REAL clips")
     ap.add_argument("--recording", default=S2.FIT_RECORDING)
+    ap.add_argument("--regime", default="cruise", choices=sorted(S2.REGIMES))
     ap.add_argument("--out", type=Path, default=OUT / "probe.json")
     args = ap.parse_args()
 
@@ -75,12 +93,22 @@ def main() -> None:
     metric = LayerPeakRPSMetric()
     OUT.mkdir(parents=True, exist_ok=True)
 
-    windows = real_windows(args.recording, args.seconds, args.clips)
+    windows = real_windows(args.recording, args.seconds, args.clips, args.regime)
     rows: list[dict[str, Any]] = []
     for i in range(args.clips):
         start_s, dur = windows[i % len(windows)]
         real = native.decimate(
-            native.load_native_clip(args.recording, start_s, dur, clip_id=f"probe_{i:02d}"), S2.SR
+            native.load_native_clip(
+                args.recording,
+                start_s,
+                dur,
+                # The cache key must name the DATA, not the loop index. Keyed
+                # "probe_00" the standby run read the cruise clips the cruise
+                # run had left in the cache, and reported 80 rev/s windows for
+                # a standby probe.
+                clip_id=f"probe_{args.recording}_{args.regime}_{start_s:.2f}_{dur:g}",
+            ),
+            S2.SR,
         )
         rps = np.asarray(real.rps, dtype=np.float64)
         if args.real:
@@ -115,7 +143,7 @@ def main() -> None:
             per_mic=[round(v, 3) for v in per_mic],
         )
         assert pred0 is not None and truth0 is not None
-        tag = "s2_real" if args.real else "s2_fitted"
+        tag = f"{args.regime}_{'real' if args.real else 'fitted'}"
         row["figure"] = helpers.figure(tag, i, audio, rps_i, S2.SR, pred0, truth0, per_mic)
         rows.append(row)
         print(row, flush=True)

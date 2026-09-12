@@ -75,6 +75,8 @@ def main() -> None:
     ap.add_argument("--mic", type=int, default=0)
     ap.add_argument("--clips", type=int, default=4)
     ap.add_argument("--seconds", type=float, default=8.0)
+    ap.add_argument("--regime", default="cruise")
+    ap.add_argument("--prefix", default="cruise")
     args = ap.parse_args()
 
     summary = json.loads(args.fit.read_text())
@@ -82,11 +84,21 @@ def main() -> None:
     index = []
     for i, (cid, entry) in enumerate(list(summary["clips"].items())[: args.clips]):
         p = entry["params"]
-        spec = S2.cruise_windows(max_clips=40, stride_s=args.seconds)
+        band = S2.REGIMES[args.regime]
+        spec = S2.cruise_windows(
+            max_clips=40,
+            stride_s=band["stride_s"] or args.seconds,
+            seconds=args.seconds,
+            min_rps=float(band["min_rps"]),
+            max_rps=band["max_rps"],
+        )
         start_s, dur = spec[i % len(spec)]
         real_clip = native.decimate(
             native.load_native_clip(
-                S2.FIT_RECORDING, start_s, min(dur, args.seconds), clip_id=f"panel_{i:02d}"
+                S2.FIT_RECORDING,
+                start_s,
+                min(dur, args.seconds),
+                clip_id=f"panel_{S2.FIT_RECORDING}_{start_s:.2f}_{min(dur, args.seconds):g}",
             ),
             S2.SR,
         )
@@ -148,12 +160,12 @@ def main() -> None:
             fontsize=9,
         )
         fig.tight_layout()
-        fig.savefig(OUT / f"cruise_{i:02d}.png", dpi=100)
+        fig.savefig(OUT / f"{args.prefix}_{i:02d}.png", dpi=100)
         plt.close(fig)
 
         for x, name in ((xr, "real"), (xf, "fitted"), (xp, "prefit")):
             y = x / max(float(np.abs(x).max()), 1e-9) * 0.7
-            sf.write(OUT / f"cruise_{i:02d}_{name}.wav", y.astype(np.float32), S2.SR)
+            sf.write(OUT / f"{args.prefix}_{i:02d}_{name}.wav", y.astype(np.float32), S2.SR)
 
         row = dict(
             clip=cid,
@@ -167,7 +179,7 @@ def main() -> None:
             channel_rms_dev_db=round(
                 float(np.abs((lv_r - lv_r.mean()) - (lv_f - lv_f.mean())).mean()), 2
             ),
-            figure=f"cruise_{i:02d}.png",
+            figure=f"{args.prefix}_{i:02d}.png",
         )
         index.append(row)
         print(
@@ -177,7 +189,7 @@ def main() -> None:
             flush=True,
         )
 
-    (OUT / "index.json").write_text(json.dumps(index, indent=1))
+    (OUT / f"index_{args.prefix}.json").write_text(json.dumps(index, indent=1))
     print(f"\nwrote {len(index)} panels and {3 * len(index)} wavs to {OUT}")
 
 
