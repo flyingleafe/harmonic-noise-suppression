@@ -84,8 +84,8 @@ PARENTS = {
     "DREGON": "dload:DREGON@db39bcf762d0b2beb3433fc2760da6a55e078f8134f8bb074ee8bf985a5ffc03",
     "librispeech": "dload:librispeech@b674a6d0c4e9d598e7f12400d75e7f21b9bea72845aa3bcb37f5b96d56f73783",
     "drone_audio": "dload:drone_audio@b6c77a68c55dedec11750a3784c10833e7db981fab6ef00380300a9e4d382b95",
-    "DREGON-frames": "dload:DREGON-frames@298e77d4cb96fd1fcce052360b6c669ea403596c89aaed8c00e1e83d1d159279",
-    "michaels-frames": "dload:michaels-frames@fdef818432e99f0909762b9a9d45b76ae95ef3d1f1b7b9aa8012bcc91cd9200a",
+    "DREGON-frames": "dload:DREGON-frames@261b09971c8ace16e3434f4a89406c6043403f8ac89a3f1202566cb8c712ba89",
+    "michaels-frames": "dload:michaels-frames@8e9d149560dd5d5fa8aaa87e7ea537d7e4d96e829e874dab7d9c92621cca6e46",
     "AVQ": "dload:AVQ@50dd53d1a6c0ab81fe02e4a40a57557a0a2b1c1b85152470edd12aa6d0725f39",
     "AVQ-egonoise": "dload:AVQ-egonoise@b43b374b007a0d5c9575dd2feacd31a05097d0c436629819b936273f17cf7703",
     "DREGON-LM-V4-michaels-valid-full": "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9",
@@ -364,7 +364,20 @@ def generate_source_frames(gen: dict[str, Any]) -> Iterator[Sample]:
     name = gen["source"]
     raw = gen.get("raw") or {}
     root = resolve_source(raw["uri"]) if raw.get("kind") == "dload" else sources.raw_root(name)
+    refined = gen.get("refined_labels")
+    if refined:
+        _verify_refined_labels(refined)
     for key, frame in sources.get(name).builder(root):  # type: ignore[misc]
+        if refined and key in refined["sidecars"]:
+            from data_processing.refined_label_track import attach_refined
+
+            frame = attach_refined(frame, key)
+        elif refined:
+            # no sidecar for this recording: publish the reference track under
+            # the same name, so the field is defined wherever a label exists
+            from data_processing.refined_label_track import attach_refined
+
+            frame = attach_refined(frame, key)
         yield key, frame_to_sample(frame)
 
 
@@ -1160,6 +1173,60 @@ def generate_se_valid(gen: dict[str, Any]) -> Iterator[Sample]:
 
 # ─── Spec registry ────────────────────────────────────────────────────────────
 #
+def _refined_label_identity(source: str) -> dict[str, Any]:
+    """Exact identity of the refined-label inputs, for the fingerprint.
+
+    The frame builders attach ``rps_refined`` from the committed sidecars, so a
+    dataset derived from them is only reproducible if the fingerprint names the
+    sidecars themselves. Hashing each file's bytes means a re-refinement or a
+    changed gate policy mints a new derivation identity instead of silently
+    republishing different labels under the same recipe.
+    """
+    import hashlib
+
+    from data_processing.refined_label_track import LABEL_DIR, REFINED_KEY
+    from data_processing.rps_gating import GatePolicy
+
+    # Only this source's own recordings: a DREGON re-refinement must not change
+    # Michael's fingerprint and force an unnecessary republish.
+    is_michaels = source == "michaels"
+    sidecars = {
+        path.stem: hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        for path in sorted(LABEL_DIR.glob("*.npz"))
+        if path.stem.startswith("FLY") == is_michaels
+    }
+    return {"track": REFINED_KEY, "gate": GatePolicy().as_dict(), "sidecars": sidecars}
+
+
+def _verify_refined_labels(refined: dict[str, Any]) -> None:
+    """Fail unless the sidecars on disk are exactly the bytes the spec names.
+
+    The sidecars are pipeline INPUTS, so the spec carries a 16-hex SHA-256
+    PREFIX per recording (not the full digest) and generation checks it. Without that, dload's fingerprint could memoize a
+    snapshot whose labels have since been re-refined, and the stored recipe
+    could not identify which label bytes a published dataset contains.
+    """
+    import hashlib
+
+    from data_processing.refined_label_track import LABEL_DIR
+
+    want: dict[str, str] = dict(refined["sidecars"])
+    missing, wrong = [], []
+    for rid, sha in sorted(want.items()):
+        path = LABEL_DIR / f"{rid}.npz"
+        if not path.exists():
+            missing.append(rid)
+            continue
+        got = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        if got != sha:
+            wrong.append(f"{rid}: spec {sha}, disk {got}")
+    if missing or wrong:
+        raise ValueError(
+            "refined-label sidecars do not match the spec — regenerate the spec "
+            f"(missing: {missing or 'none'}; changed: {wrong or 'none'})"
+        )
+
+
 # One entry per derived dataset. ``gen`` is the fingerprinted sub-spec (feeds
 # ``partial(generator, gen)``); everything else (``generator``, ``fields``,
 # ``adopt_only``, ``note``) is registry metadata. ``adopt_only`` datasets are
@@ -1400,14 +1467,22 @@ SPECS: dict[str, dict[str, Any]] = {
     # ── Source frames (uniform: every source's builder as a derivation) ─────
     "DREGON-frames": {
         "generator": "source_frames",
-        "adopt_only": True,
-        "note": "Adopt-in-place (published by the deleted "
-        "scripts/publish_frame_datasets.py; the sources.dregon builder "
-        "reproduces it).",
+        "adopt_only": False,
+        "note": "recipe_version 2 adds the rps_refined track: the F_VK/L-BFGS "
+        "refined rotor-speed label of each recording, REGIME-GATED so standby "
+        "carries the telemetry exactly (a static shaft's comb is too weak to "
+        "refine against, and correcting it made the refiner's own fitness "
+        "worse). Recordings with no sidecar publish their reference track under "
+        "that name, so the field is defined wherever a label exists; the bench "
+        "runs have no telemetry and no track. room2 recordings are refined "
+        "against motors_command, which is the only rotor track they publish. "
+        "version 1 = the adopt-in-place snapshot of the deleted "
+        "scripts/publish_frame_datasets.py, with no refined labels.",
         "gen": {
-            "recipe_version": 1,
+            "recipe_version": 2,
             "source": "DREGON",
             "raw": {"kind": "dload", "uri": PARENTS["DREGON"]},
+            "refined_labels": _refined_label_identity("DREGON"),
         },
     },
     "michaels-test-frames": {
@@ -1431,22 +1506,21 @@ SPECS: dict[str, dict[str, Any]] = {
     },
     "michaels-frames": {
         "generator": "source_frames",
-        "adopt_only": True,
-        "note": "Adopt-in-place (published by the deleted "
-        "scripts/publish_frame_datasets.py). The sources.michaels builder "
-        "reproduces the tracks and the meta, except that the provenance strings "
-        "name the current builder rather than the deleted script. "
-        "recipe_version 2 = the measured telemetry calibration of 2026-07-31 "
-        "(MICHAELS_FILES offsets/dilations + the new MICHAELS_RPS_SCALE); "
-        "version 1 frames carry uncalibrated labels, so every number derived "
-        "from them is stale.",
+        "adopt_only": False,
+        "note": "recipe_version 3 adds the rps_refined track (see DREGON-frames "
+        "for the gate). recipe_version 2 = the measured telemetry calibration "
+        "of 2026-07-31 (MICHAELS_FILES offsets/dilations + the new "
+        "MICHAELS_RPS_SCALE), adopted in place from the deleted "
+        "scripts/publish_frame_datasets.py; version 1 frames carry uncalibrated "
+        "labels, so every number derived from them is stale.",
         "gen": {
-            "recipe_version": 2,
+            "recipe_version": 3,
             "source": "michaels",
             "raw": {
                 "kind": "dload",
                 "uri": "dload:recording_with_motor_speed@5b7eab554710c3d83667085c8f5ca256322ec10e2cffae6002443f63b05257b4",
             },
+            "refined_labels": _refined_label_identity("michaels"),
         },
     },
     # ── External harmonic-noise frames (the 10 externals; adopted) ──────────

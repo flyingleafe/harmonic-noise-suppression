@@ -16,6 +16,7 @@ This format is ready for `models.generative.DroneNoisePlusFilterGen`:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -530,12 +531,33 @@ def _parse_frames_spec(spec: str) -> tuple[str, str | None]:
     return name, (version or None)
 
 
+#: Reference-track preference for DREGON. ``motors_measured`` is the tachometer
+#: and is what room1 carries; the five room2 flights publish ONLY
+#: ``motors_command``, so a loader pinned to the measured key silently skips
+#: every one of them. Resolving per frame is what lets room2 be labelled at all.
+RPS_KEY_PREFERENCE: tuple[str, ...] = ("motors_measured", "motors_command")
+
+
+def resolve_rps_key(frame: td.Frame, rps_key: str | Sequence[str]) -> str | None:
+    """The first requested track the frame actually has, or ``None``.
+
+    A single string is honoured as given (no silent substitution); a sequence is
+    a preference chain.
+    """
+    if isinstance(rps_key, str):
+        return rps_key if rps_key in frame else None
+    for key in rps_key:
+        if key in frame:
+            return key
+    return None
+
+
 def load_published_noise_sources(
     spec: str,
     sample_rate: int,
     *,
     origin: str,
-    rps_key: str,
+    rps_key: str | Sequence[str],
     splits: list[str] | None = None,
     rps_override_dir: str | Path | None = None,
     rps_scale: float = 1.0,
@@ -547,8 +569,11 @@ def load_published_noise_sources(
     ``streams.iter_published_frames``, keeps only the ``audio`` + ``rps_key``
     tracks (+ ``meta``) of each recording — the published frames carry their
     fixes baked in, so nothing is re-cleaned here — and soxr-resamples audio
-    to ``sample_rate``. Recordings missing either track are skipped, matching
-    the folder loaders (e.g. DREGON recordings without ``motors_measured``).
+    to ``sample_rate``. ``rps_key`` may be a PREFERENCE CHAIN
+    (:data:`RPS_KEY_PREFERENCE`), resolved per frame by
+    :func:`resolve_rps_key`; recordings with none of the requested tracks are
+    skipped. A single string is honoured exactly, so no caller silently changes
+    reference track.
 
     ``rps_override_dir`` / ``rps_scale`` are the two label knobs (see
     :func:`apply_rps_override` / :func:`apply_rps_scale`). They apply to the
@@ -561,19 +586,20 @@ def load_published_noise_sources(
     name, version = _parse_frames_spec(spec)
     sources: list[_ChunkSource] = []
     for tf in iter_published_frames(name, version, splits=splits):
-        if "audio" not in tf or rps_key not in tf:
+        key = resolve_rps_key(tf, rps_key)
+        if "audio" not in tf or key is None:
             continue
         entries: dict[str, Any] = {
             "audio": resample_audio_series(cast(td.Series, tf["audio"]), sample_rate),
-            rps_key: tf[rps_key],
+            key: tf[key],
         }
         if "meta" in tf:
             entries["meta"] = tf["meta"]
         frame = td.Frame(entries)
         if rps_override_dir is not None:
-            frame = apply_rps_override(frame, rps_key, rps_override_dir)
+            frame = apply_rps_override(frame, key, rps_override_dir)
         elif float(rps_scale) != 1.0:
-            frame = apply_rps_scale(frame, rps_key, rps_scale)
+            frame = apply_rps_scale(frame, key, rps_scale)
         # The published audio can span more than the telemetry (e.g. michaels
         # rps starts after the audio) — chunks sampled outside the overlap
         # would carry an empty motor slice (upsample_rps_to_audio_rate
@@ -585,7 +611,7 @@ def load_published_noise_sources(
         # bounds (= the container's), not the first/last stamp — DREGON
         # motors_measured stamps start seconds after the audio. Use the
         # actual stamps.
-        stamps = np.asarray(cast(Any, frame[rps_key]).tindex.abs_stamps, dtype=np.float64)
+        stamps = np.asarray(cast(Any, frame[key]).tindex.abs_stamps, dtype=np.float64)
         if stamps.size < 2:
             continue
         margin = 0.01
@@ -593,7 +619,7 @@ def load_published_noise_sources(
         hi = min(float(frame["audio"].t_end), float(stamps[-1])) - margin
         if hi - lo < 1.0:
             continue
-        sources.append(_wrap_frame(frame.time[lo:hi], origin=origin, rps_key=rps_key))
+        sources.append(_wrap_frame(frame.time[lo:hi], origin=origin, rps_key=key))
     return sources
 
 

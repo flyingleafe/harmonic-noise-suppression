@@ -1,0 +1,23 @@
+# @package _global_
+# SCv2 on the RIG-FITTED stochastic family (50/50 DREGON / Michael's presets,
+# FM tone bank — conf/online_mix/rig_fm_5050.yaml) under the unified regime:
+# 2 s clips, batch 128, full-panel validation/stopping. Synthetic only; the
+# question is whether a family fitted to the two rigs transfers to their real
+# recordings where the hand-ranged family (real_r1 / stoch_s1g) did not.
+defaults:
+  - real_r1_scv2
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: rig_fm_scv2_unified
+# fp16 went non-finite at step ~500 on the FM stream (GradScaler skipped every
+# retry batch, run tgr8l18p); the matrix's one-time bf16 policy applies.
+amp_dtype: bfloat16
+samples_per_validation: null
+batch_size: 128
+num_workers: 12
+data:
+  train:
+    params:
+      path: conf/online_mix/rig_fm_5050.yaml
+      duration_s: 2.0

@@ -45,3 +45,4 @@ omnirun-outputs/
 .jupyterlab.log
 # per-checkout direnv extras (see .envrc)
 .envrc.local
+docs/explainers/*.html

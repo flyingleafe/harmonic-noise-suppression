@@ -988,5 +988,33 @@
    ],
    "k_cap": 40
   }
- ]
+ ],
+ "gate": {
+  "policy": {
+   "standby_max_rps": 45.0,
+   "cruise_min_rps": 65.0,
+   "settle_s": 1.0
+  },
+  "invariants": {
+   "standby_exact": true,
+   "standby_max_dev": 0.0,
+   "cruise_exact": true,
+   "cruise_max_dev": 0.0,
+   "max_weight_step": 0.2690707424551055,
+   "max_weight_step_smooth": 0.04257552943071413,
+   "weight_step_bound": 0.18200000000000002,
+   "settle_step_bound": 0.03200000000000003,
+   "correction_step_gated": 0.24873827580847774,
+   "correction_step_raw": 0.24602850312140845,
+   "introduced_step": false
+  },
+  "regimes": {
+   "frames": 5553.0,
+   "standby_frac": 0.1224563299117594,
+   "ramp_frac": 0.005222402305060328,
+   "cruise_frac": 0.8723212677831803,
+   "weight_zero_frac": 0.12299657842607599,
+   "weight_one_frac": 0.8690797766972808
+  }
+ }
 }

@@ -609,7 +609,13 @@ def load_dregon_timeframes(
 
 
 def build(raw_dir: Path) -> Iterator[tuple[str, td.Frame]]:
-    """Yield ``(recording_id, frame)`` for every discovered recording."""
+    """Yield ``(recording_id, frame)`` for every discovered recording.
+
+    RAW tracks only. The refined label (``rps_refined``) is attached by the
+    ``source_frames`` derivation, which also verifies the sidecar bytes against
+    the manifest in its spec - a builder cannot state which label bytes a
+    published dataset contains, and a derivation can.
+    """
     raw_dir = Path(raw_dir)
     geometry = get_geometry(raw_dir)
     samples = sorted(discover_recordings(raw_dir), key=lambda s: str(s["recording_id"]))

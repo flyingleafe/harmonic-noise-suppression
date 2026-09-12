@@ -95,7 +95,7 @@ Telemetry (`Motor:Speed:*`, RPM) logs at ~29 Hz vs DREGON's ~929 Hz, so
 | alignment path | legacy (crop the audio head) | **anchored** (`load_raw_aligned(..., anchor=True)`) |
 | constants | `MICHAELS_FILES` (measured, WP13/WP14) | `MICHAELS_TEST_FILES` (measured 2026-08-24) |
 | role | training (FLY125) / validation (FLY124) | **held-out TEST set** — no training derivation may root on it |
-| published as | `michaels-frames` (adopt-only) | `michaels-test-frames` (derivable, pinned) |
+| published as | `michaels-frames` (derivable, `recipe_version 3`, carries `rps_refined`) | `michaels-test-frames` (derivable, pinned) |
 
 Current shipped constants (`src/data_processing/sources/michaels.py`):
 
@@ -303,10 +303,29 @@ entry, or listed in `HISTORICAL_PINS`.
   `DREGON-LM-test-{train,valid}`,
   `DREGON-LM-rps_{eval_long,eval_specific,train_specific}_samples`.
 - **DN-LM** (2, `sample-dir-v1`): `DN-LM-{train,valid}`.
-- **Rich frames** (3, `tdframe-v1`): `DREGON-frames`, `michaels-frames`
-  (adopt-only, published by the deleted `scripts/publish_frame_datasets.py`;
-  the `sources` builders reproduce them), `michaels-test-frames` (FLY103/FLY108,
-  the held-out TEST set; derivable).
+- **Rich frames** (3, `tdframe-v1`): `DREGON-frames` (`recipe_version 2`,
+  `261b09971c8a`), `michaels-frames` (`recipe_version 3`, `8e9d149560dd`) —
+  both now **derivable**, no longer adopt-only — and `michaels-test-frames`
+  (FLY103/FLY108, the held-out TEST set; derivable).
+
+  Since those versions every frame with a rotor-speed track carries **two**:
+  the raw one (`motors_measured` / `motors_command` / `rps`) and **`rps_refined`**,
+  the F_VK/L-BFGS refined trajectory, gated by regime so standby keeps the
+  telemetry exactly (`data_processing.rps_gating`). Coverage is all 10 DREGON
+  recordings with telemetry — including the five `*_room2` flights, which
+  publish only `motors_command` and had no refined labels at all until the
+  loader started resolving its reference track per recording — plus FLY124 and
+  FLY125. The 262 DREGON bench runs have no rotor label and no track; a
+  recording without a sidecar would publish its reference track under the
+  refined name, so the field is never partially defined.
+
+  The labels themselves are **git** artifacts, not dload ones:
+  `src/data_processing/refined_labels/<recording_id>.npz` (+ `.report.json`),
+  produced by `scripts/refine_dregon_rps.py`. Each spec's
+  `gen["refined_labels"]` records the track name, the gate policy and a
+  `{recording_id: 16-hex SHA-256 prefix}` manifest, verified at generation, so
+  a re-refinement mints a new derivation identity rather than reusing a
+  memoized snapshot.
 - **External harmonic-noise datasets** (10, `tdframe-v1`; registry
   `src/data_processing/sources/`, driver `scripts/derive.py`, plan
   `docs/external-datasets-plan.md`):

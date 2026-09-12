@@ -166,8 +166,10 @@ def sample_gp(
     dt: float,
     tau: float,
     std: float,
+    kernel: str = "se",
 ) -> np.ndarray:
-    """``(n_series, n)`` draws from a zero-mean squared-exponential process.
+    """``(n_series, n)`` draws from a zero-mean squared-exponential (``"se"``)
+    or Ornstein-Uhlenbeck (``"ou"``) process.
 
     ``dt`` is the sample spacing in seconds, ``tau`` the correlation time in
     seconds, ``std`` the standard deviation. A correlation time far below the
@@ -180,6 +182,16 @@ def sample_gp(
         return np.zeros((n_series, n), dtype=np.float64)
     ratio = float(dt) / max(float(tau), 1e-6)
     ratio = min(ratio, 12.0)  # beyond this the kernel is numerically the identity
+    if kernel == "ou":
+        # exact AR(1) recursion: stationary start, a = exp(-dt / tau)
+        a = float(np.exp(-ratio))
+        eps = rng.standard_normal((n_series, n))
+        out = np.empty((n_series, n), dtype=np.float64)
+        out[:, 0] = eps[:, 0]
+        scale = float(np.sqrt(max(1.0 - a * a, 0.0)))
+        for i in range(1, n):
+            out[:, i] = a * out[:, i - 1] + scale * eps[:, i]
+        return float(std) * out
     factor = _se_cholesky(int(n), round(ratio, 6))
     z = rng.standard_normal((n, n_series))
     return (float(std) * (factor @ z)).T
@@ -211,12 +223,65 @@ class StochasticRanges:
     harm_dropout_p: tuple[float, float] = (0.0, 0.0)
     blade_counts: tuple[int, ...] = (1, 2, 3)
     blade_emphasis_db: tuple[float, float] = (0.0, 10.0)
+    #: Extra dB on the blade-passing FUNDAMENTAL alone (order = blade count).
+    #: Michael's two-blade combs put k = 2 some 16-19 dB above every other
+    #: order (rig fit A_2 = +22 against +2…+5 at k = 4-8).
+    bpf_boost_db: tuple[float, float] = (0.0, 0.0)
     #: How much of one clip's timbre is shared by its four rotors.
     rotor_similarity: tuple[float, float] = (0.3, 0.95)
+    #: Per-rotor deviation from the clip's timbre, dB per line, when > 0:
+    #: ``profile_r = drone + N(0, std)`` replaces the similarity mixing. The
+    #: DREGON bench measures the rotor-specific profile at ~5 dB^2 (2.2 dB),
+    #: constant across speed and microphone (stochastic-fit record, § bench).
+    rotor_delta_std_db: tuple[float, float] = (0.0, 0.0)
+    #: Optional fitted population. When present, these replace roll-off,
+    #: independent jitter, blade emphasis and ``rotor_delta_std_db`` with one
+    #: coherent draw ``mu + delta_r + B z_r + rotor_level_r``.
+    profile_mean_db: tuple[float, ...] | None = None
+    profile_basis_db: tuple[tuple[float, ...], ...] | None = None
+    profile_rotor_db: tuple[tuple[float, ...], ...] | None = None
+    profile_residual_std_db: tuple[float, ...] | None = None
+    #: Population of the order-2 unit-area line power above the floor's base
+    #: level. Absolute clip gain is deliberately absent: rendering normalizes it.
+    line_floor_mean_db: float | None = None
+    line_floor_std_db: float = 0.0
+    rotor_contrast_std_db: float = 0.0
+    #: PV hurdle arm: common per-clip/order state. The off component is a
+    #: finite attenuated log-amplitude, never an exact-zero tooth.
+    visibility_probability: tuple[float, ...] | None = None
+    visibility_attenuation_db: tuple[float, ...] | None = None
+    visibility_attenuation_std_db: float = 0.0
 
     # Linewidth: gamma_k = gamma0 + slope * k, in Hz (half width at half max).
     gamma0_hz: tuple[float, float] = (0.5, 4.0)
     gamma_slope_hz: tuple[float, float] = (0.05, 0.8)
+    fixed_gamma0_hz: tuple[float, ...] | None = None
+    fixed_gamma_slope_hz: tuple[float, ...] | None = None
+    #: ``line_mode: "fm"`` — the shaft's label-invisible speed jitter, rev/s
+    #: (an OU process per rotor, shared by all its harmonics, so every line is
+    #: a Gaussian of width proportional to k: the quasi-static FM regime the
+    #: fits found) and its correlation time; plus a per-harmonic phase
+    #: diffusion, Lorentzian HWHM per order (bench: 0.042 Hz/order).
+    shaft_jitter_rps: tuple[float, float] = (0.0, 0.0)
+    fixed_shaft_jitter_rps: tuple[float, ...] | None = None
+    shaft_jitter_tau_s: tuple[float, float] = (0.1, 0.1)
+    phase_diffusion_hz_per_order: tuple[float, float] = (0.0, 0.0)
+    #: Std of a per-rotor STATIC offset between the shaft the comb actually
+    #: rides and the rev/s LABEL, in rev/s. Real telemetry is not the shaft:
+    #: the rig fits need a carrier correction whose per-(clip, rotor) static
+    #: part measures ~1.1 rev/s on Michael's training crops, which displaces
+    #: order 64 by ~9 analysis bins. Rendering the comb exactly on the label
+    #: therefore hands a regressor a precision no real recording carries — the
+    #: label error belongs in the generator, not only in the evaluation.
+    shaft_offset_rps: tuple[float, float] = (0.0, 0.0)
+    #: Lognormal spread of the shaft jitter shared by a clip's rotors: one draw
+    #: per clip multiplying every rotor's ``shaft_jitter_rps``. A real flight's
+    #: shaft wanders more in one segment than another, and the per-clip fits
+    #: measure that common mode directly (log-std 0.63 on Michael's training
+    #: crops, 0.32 on DREGON's, both net of per-rotor estimation noise). Without
+    #: it every rendered clip has identically wide lines, which is most visible
+    #: at the top of the comb where width sets the line's visibility.
+    shaft_jitter_log_std: tuple[float, float] = (0.0, 0.0)
 
     # Broadband floor.
     floor_shape_std_db: tuple[float, float] = (2.0, 9.0)
@@ -231,6 +296,11 @@ class StochasticRanges:
     #: floor is lowered until the draw satisfies it, so a clip always carries a
     #: trackable comb.
     min_lines_above_floor: float = 0.30
+    #: The same fraction demanded of EVERY rotor separately. Four rotors share
+    #: one spectrum, so the pooled fraction above is satisfiable with one rotor
+    #: entirely buried under the other three — and that rotor's speed is then a
+    #: label with no evidence in the clip. Nonzero closes that hole.
+    min_lines_above_floor_per_rotor: float = 0.0
     #: The recording chain's own floor, as a fraction of the floor's level at
     #: the reference speed. Measured on the frozen split: a stopped-rotor clip
     #: sits at 0.175 of a cruise clip and a ramp clip at 0.370. Default 0 keeps
@@ -241,6 +311,30 @@ class StochasticRanges:
     harm_gp_std_db: tuple[float, float] = (0.5, 6.0)
     harm_gp_tau_s: tuple[float, float] = (0.3, 6.0)
     harm_coherence: tuple[float, float] = (0.0, 1.0)
+    #: ``"se"`` (smooth) or ``"ou"`` (rough) amplitude process.
+    harm_gp_kernel: str = "se"
+
+    #: Per-microphone modulation of the low band — an independent log-OU gain
+    #: per microphone below ``umod_corner_hz`` on floor and lines alike
+    #: (DREGON's diaphragm flow noise: σ ≈ 3.3 dB, τ 0.1-0.5 s, uncorrelated
+    #: across the array). Zero std disables it.
+    umod_std_db: tuple[float, float] = (0.0, 0.0)
+    umod_tau_s: tuple[float, float] = (0.25, 0.25)
+    umod_corner_hz: tuple[float, float] = (500.0, 500.0)
+    #: Std of one per-microphone gain on EVERYTHING (Michael's rig: the mics
+    #: differ by ~12 dB with floor and lines moving together).
+    mic_gain_all_db: tuple[float, float] = (0.0, 0.0)
+    #: Std of a static per-microphone FLOOR gain (DREGON: the floor's per-mic
+    #: pattern is decoupled from the lines', ±3 dB in the rig fit).
+    mic_floor_std_db: tuple[float, float] = (0.0, 0.0)
+    #: Optional fitted microphone patterns. These are dB POWER gains; the
+    #: renderer converts them to amplitude only at the waveform boundary.
+    fixed_mic_gain_db: tuple[tuple[float, ...], ...] | None = None
+    fixed_mic_floor_db: tuple[float, ...] | None = None
+    fixed_mic_gain_all_db: tuple[float, ...] | None = None
+    #: A measured floor curve ``[[hz, dB], ...]`` that replaces the GP draw's
+    #: mean; the GP (``floor_shape_std_db``) then jitters around it.
+    floor_shape_preset: tuple[tuple[float, float], ...] | None = None
 
     # Time variation of the floor.
     floor_gp_std_db: tuple[float, float] = (0.5, 4.0)
@@ -254,7 +348,15 @@ class StochasticRanges:
             return cls()
         out = cls()
         for key, value in d.items():
-            if hasattr(out, key):
+            if not hasattr(out, key):
+                continue
+            if key == "floor_shape_preset":
+                setattr(
+                    out,
+                    key,
+                    None if value is None else tuple((float(a), float(b)) for a, b in value),
+                )
+            else:
                 setattr(out, key, tuple(value) if isinstance(value, (list, tuple)) else value)
         return out
 
@@ -282,6 +384,9 @@ class StochasticParams:
     floor_ctrl_hz: np.ndarray  # (C,)
     floor_ctrl_db: np.ndarray  # (C,)
     floor_tilt_db_oct: float
+    fixed_mic_gain_db: np.ndarray | None = None  # (M, R), dB power
+    fixed_mic_floor_db: np.ndarray | None = None  # (M,), dB power
+    fixed_mic_gain_all_db: np.ndarray | None = None  # (M,), dB power
 
     # Levels — the two amplitude-mean sliders.
     harm_mean_db: float = 0.0
@@ -362,6 +467,41 @@ class StochasticParams:
     amp_rps_exponent_floor: float | None = None
     amp_rps_ref: float = 80.0
 
+    #: ``line_mode: "fm"`` knobs (see :class:`StochasticRanges`).
+    shaft_jitter_rps: float | np.ndarray = 0.0
+    shaft_jitter_tau_s: float = 0.1
+    phase_diffusion_hz_per_order: float = 0.0
+    #: ``(R,)`` per-rotor static shaft-minus-label offset, rev/s.
+    shaft_offset_rps: float | np.ndarray = 0.0
+    harm_gp_kernel: str = "se"
+    umod_std_db: float = 0.0
+    umod_tau_s: float = 0.25
+    umod_corner_hz: float = 500.0
+    mic_gain_all_db: float = 0.0
+    mic_floor_std_db: float = 0.0
+    #: Minimum line width, in OLA bins. The default reproduces the historical
+    #: :data:`GAMMA_MIN_BINS` behaviour, but that floor is a CENSOR whenever the
+    #: lines being rendered are narrower than it: at 44.1 kHz with the default
+    #: ``n_fft`` it forces every line to 12.9 Hz, against 0.2-2 Hz measured on
+    #: DREGON's bench. It also double-counts the analysis window, which
+    #: ``_ola_filter`` already convolves in, and ``line_bin_integrate`` handles
+    #: a sub-bin line exactly. The fit's forward model uses 0.01
+    #: (``model.BASE_VARIANT``); a fitted parameter set should render with the
+    #: same value it was fitted under.
+    gamma_min_bins: float = GAMMA_MIN_BINS
+    #: Order at which a line's amplitude stops being deterministic, in
+    #: harmonics. Measured on DREGON's bench (one clamped motor, channel 7):
+    #: the per-frame band power of order k has coefficient of variation 0.06
+    #: at k = 2 and 1.09-1.16 by k = 8-32, i.e. low orders are COHERENT tones
+    #: and high orders are RAYLEIGH. ``line_mode="fm"`` renders every order
+    #: coherent (CV 0.02-0.26) and ``"stochastic"`` renders every order
+    #: Rayleigh (CV 0.83-1.17); neither is the measurement. With this set, the
+    #: ``fm`` path splits each order's power by
+    #: ``w_k = exp(-(k / coherence_k_half) ** 2)``: the coherent share rides the
+    #: tone bank, the rest is rendered as narrowband noise with the floor.
+    #: Zero disables the split and reproduces the historical behaviour exactly.
+    coherence_k_half: float = 0.0
+
     def with_(self, **changes: Any) -> StochasticParams:
         """A copy with fields replaced — the slider path."""
         return replace(self, **changes)
@@ -380,6 +520,9 @@ def _profile_db(
     emphasis = float(rng.uniform(*ranges.blade_emphasis_db))
     if blade > 1 and emphasis > 0.0:
         db[(np.arange(1, n_harmonics + 1) % blade) == 0] += emphasis
+    lo, hi = ranges.bpf_boost_db
+    if blade > 1 and hi > 0.0 and blade <= n_harmonics:
+        db[blade - 1] += float(rng.uniform(lo, hi)) if hi > lo else float(lo)
     db += rng.normal(0.0, float(rng.uniform(*ranges.harm_jitter_db)), size=n_harmonics)
     p_drop = float(rng.uniform(*ranges.harm_dropout_p))
     if p_drop > 0.0:
@@ -388,8 +531,122 @@ def _profile_db(
     return db
 
 
-def line_peak_db(params: StochasticParams, ref_rps: float = 80.0) -> tuple[np.ndarray, np.ndarray]:
-    """``(peak level in dB, center frequency in Hz)`` of every in-band line.
+def _population_profile_db(
+    rng: np.random.Generator,
+    ranges: StochasticRanges,
+    *,
+    n_rotors: int,
+    n_harmonics: int,
+) -> tuple[np.ndarray, float] | None:
+    """Draw the fitted low-rank order population and its floor base level."""
+    if ranges.profile_mean_db is None:
+        return None
+    if ranges.line_floor_mean_db is None:
+        raise ValueError("profile_mean_db requires line_floor_mean_db")
+    mean = np.asarray(ranges.profile_mean_db, dtype=np.float64)
+    if mean.ndim != 1 or mean.size < n_harmonics:
+        raise ValueError(f"profile_mean_db has shape {mean.shape}, need at least ({n_harmonics},)")
+    mean = mean[:n_harmonics]
+    if ranges.profile_rotor_db is None:
+        rotor = np.zeros((n_rotors, n_harmonics), dtype=np.float64)
+    else:
+        rotor = np.asarray(ranges.profile_rotor_db, dtype=np.float64)
+        if rotor.ndim != 2 or rotor.shape[0] != n_rotors or rotor.shape[1] < n_harmonics:
+            raise ValueError(
+                "profile_rotor_db must have shape "
+                f"({n_rotors}, >= {n_harmonics}), got {rotor.shape}"
+            )
+        rotor = rotor[:, :n_harmonics]
+    if ranges.profile_basis_db is None:
+        basis = np.zeros((0, n_harmonics), dtype=np.float64)
+    else:
+        basis = np.asarray(ranges.profile_basis_db, dtype=np.float64)
+        if basis.size == 0:
+            basis = np.zeros((0, n_harmonics), dtype=np.float64)
+        elif basis.ndim != 2 or basis.shape[1] < n_harmonics:
+            raise ValueError(
+                f"profile_basis_db has shape {basis.shape}, need (Q, >= {n_harmonics})"
+            )
+        else:
+            basis = basis[:, :n_harmonics]
+    if not (np.isfinite(mean).all() and np.isfinite(rotor).all() and np.isfinite(basis).all()):
+        raise ValueError("fitted profile population contains non-finite values")
+    factors = rng.standard_normal((n_rotors, basis.shape[0]))
+    contrast_std = float(ranges.rotor_contrast_std_db)
+    if contrast_std < 0:
+        raise ValueError("rotor_contrast_std_db must be non-negative")
+    contrast = rng.normal(0.0, contrast_std, n_rotors)
+    contrast -= contrast.mean()
+    profile = mean[None, :] + rotor + factors @ basis + contrast[:, None]
+    if ranges.profile_residual_std_db is not None:
+        residual_std = np.asarray(ranges.profile_residual_std_db, dtype=np.float64)
+        if residual_std.size < n_harmonics or np.any(residual_std < 0.0):
+            raise ValueError(
+                "profile_residual_std_db must be non-negative and cover every harmonic"
+            )
+        profile += rng.normal(
+            0.0,
+            residual_std[:n_harmonics][None, :],
+            (n_rotors, n_harmonics),
+        )
+    reference_order = min(1, n_harmonics - 1)
+    reference_profile = float(profile[:, reference_order].mean())
+
+    ratio_std = float(ranges.line_floor_std_db)
+    if ratio_std < 0:
+        raise ValueError("line_floor_std_db must be non-negative")
+    ratio = float(ranges.line_floor_mean_db) + rng.normal(0.0, ratio_std)
+    floor_mean_db = reference_profile - ratio
+    return profile, floor_mean_db
+
+
+def _apply_visibility(
+    profile: np.ndarray,
+    ranges: StochasticRanges,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    if ranges.visibility_probability is None:
+        return profile
+    if ranges.visibility_attenuation_db is None:
+        raise ValueError("visibility_probability requires visibility_attenuation_db")
+    n_harmonics = profile.shape[1]
+    probability = np.asarray(ranges.visibility_probability, dtype=np.float64)
+    attenuation = np.asarray(ranges.visibility_attenuation_db, dtype=np.float64)
+    if probability.size < n_harmonics or attenuation.size < n_harmonics:
+        raise ValueError("visibility probability and attenuation must cover every harmonic")
+    probability = probability[:n_harmonics]
+    attenuation = attenuation[:n_harmonics]
+    if (
+        not np.isfinite(probability).all()
+        or not np.isfinite(attenuation).all()
+        or np.any((probability < 0.0) | (probability > 1.0))
+        or np.any(attenuation < 0.0)
+    ):
+        raise ValueError("invalid visibility population")
+    # A jumped substream leaves every continuous renderer draw bit-identical in
+    # PV versus P3; only the hurdle state changes in a paired experiment.
+    jump = getattr(rng.bit_generator, "jumped", None)
+    if jump is None:
+        raise TypeError("visibility substream requires a jumpable NumPy bit generator")
+    visibility_rng = np.random.Generator(jump())
+    visible = visibility_rng.random(n_harmonics) < probability
+    off_db = np.maximum(
+        visibility_rng.normal(
+            attenuation,
+            float(ranges.visibility_attenuation_std_db),
+            n_harmonics,
+        ),
+        0.0,
+    )
+    out = profile.copy()
+    out[:, ~visible] -= off_db[None, ~visible]
+    return out
+
+
+def line_peaks_by_rotor(
+    params: StochasticParams, ref_rps: float = 80.0
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """One ``(peak level in dB, center frequency in Hz)`` pair per rotor.
 
     A line of power ``P`` and half width ``gamma`` has a peak spectral density
     of ``P / (pi * gamma)``, so a wide line stands lower than a narrow one of
@@ -398,15 +655,22 @@ def line_peak_db(params: StochasticParams, ref_rps: float = 80.0) -> tuple[np.nd
     """
     nyquist = params.sample_rate / 2.0
     k = np.arange(1, params.n_harmonics + 1, dtype=np.float64)
-    peaks: list[np.ndarray] = []
-    centers: list[np.ndarray] = []
+    out: list[tuple[np.ndarray, np.ndarray]] = []
     for r in range(params.n_rotors):
         gamma = np.maximum(params.gamma0[r] + params.gamma_slope[r] * k, 1e-3)
         freq = k * ref_rps
         live = freq < nyquist
-        peaks.append(params.profile_db[r][live] - 10.0 * np.log10(np.pi * gamma[live]))
-        centers.append(freq[live])
-    return np.concatenate(peaks), np.concatenate(centers)
+        out.append((params.profile_db[r][live] - 10.0 * np.log10(np.pi * gamma[live]), freq[live]))
+    return out
+
+
+def line_peak_db(params: StochasticParams, ref_rps: float = 80.0) -> tuple[np.ndarray, np.ndarray]:
+    """Every in-band line of every rotor, pooled."""
+    per_rotor = line_peaks_by_rotor(params, ref_rps)
+    return (
+        np.concatenate([p for p, _ in per_rotor]),
+        np.concatenate([c for _, c in per_rotor]),
+    )
 
 
 def calibrate_floor(
@@ -415,6 +679,7 @@ def calibrate_floor(
     *,
     ref_rps: float = 80.0,
     min_lines_above_floor: float = 0.30,
+    min_lines_above_floor_per_rotor: float = 0.0,
 ) -> float:
     """The floor level that puts the floor ``floor_rel_db`` under the lines.
 
@@ -423,17 +688,55 @@ def calibrate_floor(
     steps until at least ``min_lines_above_floor`` of the in-band lines stand
     above it. Without the guard a draw can bury its whole comb, and a clip with
     no visible comb teaches nothing.
+
+    The POOLED fraction stops being enough once the rotors are allowed to
+    differ. Four rotors put their lines in one spectrum, so a draw whose
+    quietest rotor sits 25 dB under the other three passes a pooled 0.30 with
+    that rotor completely buried — and its speed is then a label with no
+    evidence anywhere in the clip, which is the one thing a regressor cannot be
+    asked to learn. ``min_lines_above_floor_per_rotor`` applies the fraction to
+    EVERY rotor separately; 0 keeps the pooled-only behaviour.
     """
-    peaks, centers = line_peak_db(params, ref_rps)
+    per_rotor = line_peaks_by_rotor(params, ref_rps)
+    peaks = np.concatenate([p for p, _ in per_rotor]) if per_rotor else np.zeros(0)
     if peaks.size == 0:
         return floor_rel_db
-    shape = floor_shape_db(replace(params, floor_mean_db=0.0), centers)
+    centers = np.concatenate([c for _, c in per_rotor])
+    zero = replace(params, floor_mean_db=0.0)
+    shape = floor_shape_db(zero, centers)
+    shapes = [floor_shape_db(zero, c) for _, c in per_rotor]
     level = float(np.median(peaks) + floor_rel_db - np.median(shape))
     for _ in range(60):
-        if float(np.mean(peaks > level + shape)) >= min_lines_above_floor:
+        pooled_ok = float(np.mean(peaks > level + shape)) >= min_lines_above_floor
+        rotor_ok = min_lines_above_floor_per_rotor <= 0.0 or all(
+            float(np.mean(p > level + s)) >= min_lines_above_floor_per_rotor
+            for (p, _), s in zip(per_rotor, shapes, strict=True)
+        )
+        if pooled_ok and rotor_ok:
             break
         level -= 1.0
     return level
+
+
+def _centred_normals(
+    rng: np.random.Generator, spread: tuple[float, float], size: int
+) -> np.ndarray:
+    """``size`` zero-mean normals whose std is drawn from ``spread``.
+
+    An all-zero range returns exact zeros WITHOUT touching ``rng`` — neither
+    for the std draw nor for the normals — so every preset that does not use
+    the knob keeps its previous random stream.
+    """
+    if spread[0] <= 0.0 and spread[1] <= 0.0:
+        return np.zeros(size)
+    return rng.normal(0.0, float(rng.uniform(*spread)), size=size)
+
+
+def _lognormal_factor(rng: np.random.Generator, spread: tuple[float, float]) -> float:
+    """``exp(N(0, s))`` with ``s`` drawn from ``spread``; exactly 1 when off."""
+    if spread[0] <= 0.0 and spread[1] <= 0.0:
+        return 1.0
+    return float(np.exp(rng.normal(0.0, float(rng.uniform(*spread)))))
 
 
 def sample_params(
@@ -475,13 +778,33 @@ def sample_params(
         lo, hi = int(n_harmonics_range[0]), int(n_harmonics_range[1])
         n_harmonics = int(rng.integers(lo, hi + 1))
 
-    drone = _profile_db(rng, ranges, n_harmonics=n_harmonics)
-    similarity = float(rng.uniform(*ranges.rotor_similarity))
-    profile = np.empty((n_rotors, n_harmonics), dtype=np.float64)
-    for r in range(n_rotors):
-        own = _profile_db(rng, ranges, n_harmonics=n_harmonics)
-        profile[r] = similarity * drone + (1.0 - similarity) * own
-        profile[r] -= np.median(profile[r])
+    def draw(pair: tuple[float, float]) -> float:
+        """A uniform draw that leaves the stream untouched for a fixed value,
+        so streams that never set the new knobs stay bit-identical."""
+        lo, hi = float(pair[0]), float(pair[1])
+        return lo if hi == lo else float(rng.uniform(lo, hi))
+
+    population_profile = _population_profile_db(
+        rng,
+        ranges,
+        n_rotors=n_rotors,
+        n_harmonics=n_harmonics,
+    )
+    floor_mean_override: float | None = None
+    if population_profile is not None:
+        profile, floor_mean_override = population_profile
+    else:
+        drone = _profile_db(rng, ranges, n_harmonics=n_harmonics)
+        similarity = float(rng.uniform(*ranges.rotor_similarity))
+        delta_std = draw(ranges.rotor_delta_std_db)
+        profile = np.empty((n_rotors, n_harmonics), dtype=np.float64)
+        for r in range(n_rotors):
+            if delta_std > 0.0:
+                profile[r] = drone + rng.normal(0.0, delta_std, size=n_harmonics)
+            else:
+                own = _profile_db(rng, ranges, n_harmonics=n_harmonics)
+                profile[r] = similarity * drone + (1.0 - similarity) * own
+            profile[r] -= np.median(profile[r])
 
     ctrl_hz = np.geomspace(FLOOR_SHAPE_F_MIN, sample_rate / 2.0, FLOOR_SHAPE_N_CTRL)
     oct_grid = np.log2(ctrl_hz / ctrl_hz[0])
@@ -496,9 +819,31 @@ def sample_params(
         std=shape_std,
     )[0]
     ctrl_db -= ctrl_db.mean()
+    if ranges.floor_shape_preset:
+        pre = np.asarray(ranges.floor_shape_preset, dtype=np.float64)
+        base = np.interp(np.log2(ctrl_hz), np.log2(pre[:, 0]), pre[:, 1])
+        ctrl_db = ctrl_db + base - base.mean()
 
-    gamma0 = rng.uniform(*ranges.gamma0_hz, size=n_rotors)
-    gamma_slope = rng.uniform(*ranges.gamma_slope_hz, size=n_rotors)
+    def fixed_rotor_vector(value: tuple[float, ...] | None, name: str) -> np.ndarray | None:
+        if value is None:
+            return None
+        array = np.asarray(value, dtype=np.float64)
+        if array.shape != (n_rotors,):
+            raise ValueError(f"{name} must have shape ({n_rotors},), got {array.shape}")
+        return array.copy()
+
+    fixed_gamma0 = fixed_rotor_vector(ranges.fixed_gamma0_hz, "fixed_gamma0_hz")
+    fixed_gamma_slope = fixed_rotor_vector(ranges.fixed_gamma_slope_hz, "fixed_gamma_slope_hz")
+    fixed_shaft_jitter = fixed_rotor_vector(ranges.fixed_shaft_jitter_rps, "fixed_shaft_jitter_rps")
+
+    gamma0 = (
+        fixed_gamma0 if fixed_gamma0 is not None else rng.uniform(*ranges.gamma0_hz, size=n_rotors)
+    )
+    gamma_slope = (
+        fixed_gamma_slope
+        if fixed_gamma_slope is not None
+        else rng.uniform(*ranges.gamma_slope_hz, size=n_rotors)
+    )
     tilt = float(rng.uniform(*ranges.floor_tilt_db_oct))
     draft = StochasticParams(
         sample_rate=int(sample_rate),
@@ -511,17 +856,37 @@ def sample_params(
         floor_ctrl_hz=ctrl_hz,
         floor_ctrl_db=ctrl_db,
         floor_tilt_db_oct=tilt,
+        fixed_mic_gain_db=(
+            None
+            if ranges.fixed_mic_gain_db is None
+            else np.asarray(ranges.fixed_mic_gain_db, dtype=np.float64).copy()
+        ),
+        fixed_mic_floor_db=(
+            None
+            if ranges.fixed_mic_floor_db is None
+            else np.asarray(ranges.fixed_mic_floor_db, dtype=np.float64).copy()
+        ),
+        fixed_mic_gain_all_db=(
+            None
+            if ranges.fixed_mic_gain_all_db is None
+            else np.asarray(ranges.fixed_mic_gain_all_db, dtype=np.float64).copy()
+        ),
         harm_mean_db=0.0,
         floor_mean_db=0.0,
         floor_static_rel=float(rng.uniform(*ranges.floor_static_rel)),
     )
-    floor_mean_db = calibrate_floor(
-        draft,
-        float(rng.uniform(*ranges.floor_rel_db)),
-        min_lines_above_floor=ranges.min_lines_above_floor,
+    floor_mean_db = (
+        calibrate_floor(
+            draft,
+            float(rng.uniform(*ranges.floor_rel_db)),
+            min_lines_above_floor=ranges.min_lines_above_floor,
+            min_lines_above_floor_per_rotor=ranges.min_lines_above_floor_per_rotor,
+        )
+        if floor_mean_override is None
+        else floor_mean_override
     )
 
-    return replace(
+    params = replace(
         draft,
         floor_mean_db=floor_mean_db,
         harm_gp_std_db=float(rng.uniform(*ranges.harm_gp_std_db)),
@@ -532,7 +897,33 @@ def sample_params(
         floor_tilt_gp_std=float(rng.uniform(*ranges.floor_tilt_gp_std)),
         floor_tilt_gp_tau_s=float(rng.uniform(*ranges.floor_tilt_gp_tau_s)),
         line_bin_integrate=bool(line_bin_integrate),
+        # One lognormal draw per CLIP, shared by its rotors: how much this
+        # flight segment's shaft wandered (``shaft_jitter_log_std``). Both this
+        # and the label-error draw below leave the generator untouched when
+        # their spread is zero, so presets that do not use them keep their
+        # existing streams.
+        shaft_jitter_rps=(
+            fixed_shaft_jitter if fixed_shaft_jitter is not None else draw(ranges.shaft_jitter_rps)
+        )
+        * _lognormal_factor(rng, ranges.shaft_jitter_log_std),
+        shaft_jitter_tau_s=draw(ranges.shaft_jitter_tau_s),
+        phase_diffusion_hz_per_order=draw(ranges.phase_diffusion_hz_per_order),
+        # One static draw per rotor: the label error is a property of this
+        # clip's telemetry, not a process that evolves inside it.
+        shaft_offset_rps=_centred_normals(rng, ranges.shaft_offset_rps, n_rotors),
+        harm_gp_kernel=str(ranges.harm_gp_kernel),
+        umod_std_db=draw(ranges.umod_std_db),
+        umod_tau_s=draw(ranges.umod_tau_s),
+        umod_corner_hz=draw(ranges.umod_corner_hz),
+        mic_gain_all_db=draw(ranges.mic_gain_all_db),
+        mic_floor_std_db=draw(ranges.mic_floor_std_db),
     )
+    if ranges.visibility_probability is not None:
+        params = replace(
+            params,
+            profile_db=_apply_visibility(params.profile_db, ranges, rng),
+        )
+    return params
 
 
 # ── The spectrum ────────────────────────────────────────────────────────────
@@ -621,7 +1012,13 @@ def build_psd(
     # every line's process is harm_gp_std_db^2 whatever the mixing.
     rho = float(np.clip(params.harm_coherence, 0.0, 1.0))
     common = sample_gp(
-        rng, n_rotors, n_frames, dt=dt, tau=params.harm_gp_tau_s, std=params.harm_gp_std_db
+        rng,
+        n_rotors,
+        n_frames,
+        dt=dt,
+        tau=params.harm_gp_tau_s,
+        std=params.harm_gp_std_db,
+        kernel=params.harm_gp_kernel,
     )
     private = sample_gp(
         rng,
@@ -630,11 +1027,12 @@ def build_psd(
         dt=dt,
         tau=params.harm_gp_tau_s,
         std=params.harm_gp_std_db,
+        kernel=params.harm_gp_kernel,
     ).reshape(n_rotors, n_harm, n_frames)
     harm_gp = np.sqrt(rho) * common[:, None, :] + np.sqrt(1.0 - rho) * private
 
     lines = np.zeros((n_rotors, n_frames, n_freqs), dtype=np.float64)
-    gamma_min = GAMMA_MIN_BINS * df
+    gamma_min = float(params.gamma_min_bins) * df
     frame_idx = np.arange(n_frames)
     k_all = np.arange(1, n_harm + 1, dtype=np.float64)
     for r in range(n_rotors):
@@ -753,6 +1151,74 @@ def _ola_filter(x: np.ndarray, gain: np.ndarray, n_fft: int, hop: int) -> np.nda
 PHASE_NOISE_FS = 1000.0
 
 
+#: How many harmonics are mixed into the microphones at once. One line at a
+#: time means touching the whole ``(M, T)`` accumulator per line — 1.9 GB of
+#: traffic for a 200-harmonic 2 s clip. A block of this many lines fits in
+#: cache and lets one BLAS call do the reduction, which is what makes the
+#: per-microphone phase affordable.
+MIX_BLOCK = 32
+
+
+def _mic_phase_weights(
+    n_mics: int,
+    n_harmonics: int,
+    gains: np.ndarray,
+    rotor: int,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(cos, sin)`` per-``(mic, harmonic)`` mixing weights, ``(M, K)`` each.
+
+    Propagation gives each microphone its own static phase on the same line, so
+    the mics must not receive a bit-identical waveform. Expanding
+    ``cos(k phi + psi_m) = cos psi_m cos(k phi) - sin psi_m sin(k phi)`` turns
+    that into two real weights per ``(mic, harmonic)``, so a caller can mix a
+    BLOCK of lines with two real matrix products and never materialize a
+    ``(K, T)`` bank for the whole comb.
+    """
+    phase = rng.uniform(0.0, 2.0 * np.pi, (n_mics, n_harmonics))
+    weight = np.sqrt(gains[:, rotor])[:, None]
+    return (weight * np.cos(phase)).astype(np.float32), (weight * np.sin(phase)).astype(np.float32)
+
+
+class _LineMixer:
+    """Accumulate ``sum_k w_cos[:, k] Re(line_k) - w_sin[:, k] Im(line_k)``.
+
+    Lines arrive one at a time and are flushed to the output in blocks of
+    :data:`MIX_BLOCK`, so the ``(M, T)`` accumulator is written once per block
+    rather than once per harmonic.
+    """
+
+    def __init__(self, out: np.ndarray, block: int = MIX_BLOCK) -> None:
+        self.out = out
+        self.real = np.empty((block, out.shape[1]), dtype=np.float32)
+        self.imag = np.empty((block, out.shape[1]), dtype=np.float32)
+        self.block = block
+        self.first = 0  # index of the first harmonic held in the buffers
+        self.count = 0
+
+    def start(self, cos_w: np.ndarray, sin_w: np.ndarray) -> None:
+        self.flush()
+        self.cos_w, self.sin_w = cos_w, sin_w
+        self.first = 0
+
+    def add(self, index: int, line: np.ndarray) -> None:
+        if self.count == 0:
+            self.first = index
+        self.real[self.count] = line.real
+        self.imag[self.count] = line.imag
+        self.count += 1
+        if self.count == self.block:
+            self.flush()
+
+    def flush(self) -> None:
+        if self.count == 0:
+            return
+        columns = slice(self.first, self.first + self.count)
+        self.out += self.cos_w[:, columns] @ self.real[: self.count]
+        self.out -= self.sin_w[:, columns] @ self.imag[: self.count]
+        self.count = 0
+
+
 def coherent_lines(
     params: StochasticParams,
     rps: np.ndarray,
@@ -797,32 +1263,158 @@ def coherent_lines(
     t_slow = np.arange(n_slow) / PHASE_NOISE_FS
     dt_slow = 1.0 / PHASE_NOISE_FS
 
-    per_rotor = np.zeros((n_rotors, n_samples), dtype=np.float64)
+    out = np.zeros((n_mics, n_samples), dtype=np.float32)
+    mixer = _LineMixer(out)
     for r in range(n_rotors):
         power_frames = (
             10.0
             ** ((params.harm_mean_db + params.profile_db[r][:, None] + psd["harm_gp"][r]) / 10.0)
             * psd["amp"][r][None, :]
         )
-        for i in range(n_harm):
+        top = int(
+            np.clip(
+                np.searchsorted(
+                    np.arange(1, n_harm + 1, dtype=np.float64) * float(rps[r].min()),
+                    nyquist,
+                ),
+                0,
+                n_harm,
+            )
+        )
+        if top == 0:
+            continue
+        mixer.start(*_mic_phase_weights(n_mics, top, gains, r, rng))
+        for i in range(top):
             k = i + 1
-            centers = k * rps[r]
-            live = centers < nyquist
-            if not live.any():
-                continue
+            live = k * rps[r] < nyquist
             gamma = max(params.gamma0[r] + params.gamma_slope[r] * k, 1e-3)
             steps = rng.normal(0.0, np.sqrt(4.0 * np.pi * gamma * dt_slow), size=n_slow)
-            walk = np.cumsum(steps)
-            b = np.interp(t_audio, t_slow, walk) + rng.uniform(0.0, 2.0 * np.pi)
+            walk = np.interp(t_audio, t_slow, np.cumsum(steps))
             amplitude = np.sqrt(
                 2.0 * np.maximum(np.interp(t_audio, t_frames, power_frames[i]), 0.0)
             )
-            per_rotor[r] += np.where(live, amplitude, 0.0) * np.cos(k * phase[r] + b)
+            angle = np.remainder(k * phase[r] + walk, 2.0 * np.pi)
+            mixer.add(
+                i,
+                np.where(live, amplitude, 0.0) * np.exp(1j * angle).astype(np.complex64),
+            )
+    mixer.flush()
+    return out.astype(np.float64)
 
-    out = np.empty((n_mics, n_samples), dtype=np.float64)
-    for m in range(n_mics):
-        out[m] = np.tensordot(np.sqrt(gains[m]), per_rotor, axes=(0, 0))
-    return out
+
+def fm_lines(
+    params: StochasticParams,
+    rps: np.ndarray,
+    psd: dict[str, np.ndarray],
+    gains: np.ndarray,
+    *,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """``(M, T)`` harmonic lines as tones on a jittering SHARED shaft.
+
+    The measured regime (stochastic-fit record): each rotor's harmonics ride
+    one shaft whose speed wanders by ``shaft_jitter_rps`` (an OU process with
+    correlation time ``shaft_jitter_tau_s``) relative to the label, so every
+    line is a Gaussian of width proportional to ``k`` and the whole comb of a
+    rotor moves together; on top, each harmonic diffuses its own phase at
+    ``phase_diffusion_hz_per_order * k`` Hz (Lorentzian, small). Michael's even
+    orders stay phase-locked for seconds (small jitter), DREGON's lines
+    decohere within ~0.5 s (larger jitter); the same mechanism, one knob.
+    """
+    rps = np.atleast_2d(np.asarray(rps, dtype=np.float64))
+    n_rotors, n_samples = rps.shape
+    sr = float(params.sample_rate)
+    nyquist = sr / 2.0
+    n_mics = gains.shape[0]
+    n_harm = params.n_harmonics
+
+    t_frames = np.linspace(0.0, n_samples / sr, psd["harm_gp"].shape[2])
+    n_slow = max(int(np.ceil(n_samples / sr * PHASE_NOISE_FS)) + 2, 2)
+    t_slow = np.arange(n_slow) / PHASE_NOISE_FS
+    dt_slow = 1.0 / PHASE_NOISE_FS
+
+    # The shaft: label plus one OU jitter per rotor, at the slow rate.
+    jitter_std = np.asarray(params.shaft_jitter_rps, dtype=np.float64)
+    if jitter_std.ndim == 0:
+        jitter = sample_gp(
+            rng,
+            n_rotors,
+            n_slow,
+            dt=dt_slow,
+            tau=params.shaft_jitter_tau_s,
+            std=float(jitter_std),
+            kernel="ou",
+        )
+    else:
+        if jitter_std.shape != (n_rotors,):
+            raise ValueError(
+                f"shaft_jitter_rps must be scalar or ({n_rotors},), got {jitter_std.shape}"
+            )
+        jitter = sample_gp(
+            rng,
+            n_rotors,
+            n_slow,
+            dt=dt_slow,
+            tau=params.shaft_jitter_tau_s,
+            std=1.0,
+            kernel="ou",
+        )
+        jitter *= jitter_std[:, None]
+    q = max(params.phase_diffusion_hz_per_order, 0.0)
+    k_all = np.arange(1, n_harm + 1, dtype=np.float64)
+    # Slow processes are generated at PHASE_NOISE_FS and held constant over
+    # each slow step (a 1 ms hold is far below any correlation time here);
+    # everything at the audio rate is float32, one line at a time, so no
+    # (K, T) array is ever built.
+    up = int(np.ceil(n_samples / n_slow)) + 1
+
+    def hold(x_slow: np.ndarray) -> np.ndarray:
+        # A broadcast view + reshape holds each slow sample ``up`` times without
+        # the copy ``np.repeat`` makes; this runs once per line per rotor.
+        return np.broadcast_to(x_slow[:, None], (x_slow.size, up)).reshape(-1)[:n_samples]
+
+    n_frames = psd["harm_gp"].shape[2]
+    frame_of_slow = np.clip(t_slow / max(t_frames[1] - t_frames[0], 1e-9), 0.0, n_frames - 1.0)
+    f0 = np.floor(frame_of_slow).astype(np.int64)
+    f1 = np.minimum(f0 + 1, n_frames - 1)
+    fw = (frame_of_slow - f0).astype(np.float32)
+    out = np.zeros((n_mics, n_samples), dtype=np.float32)
+    mixer = _LineMixer(out)
+    for r in range(n_rotors):
+        shaft = rps[r] + hold(jitter[r])
+        phase = 2.0 * np.pi * np.cumsum(shaft) / sr
+        z = np.exp(1j * np.remainder(phase, 2.0 * np.pi)).astype(np.complex64)
+        power_frames = (
+            10.0
+            ** ((params.harm_mean_db + params.profile_db[r][:, None] + psd["harm_gp"][r]) / 10.0)
+            * psd["amp"][r][None, :]
+        ).astype(np.float32)  # (K, N)
+        top = int(np.clip(np.searchsorted(k_all * float(rps[r].min()), nyquist), 0, n_harm))
+        if top == 0:
+            continue
+        r_max = float(rps[r].max())
+        mixer.start(*_mic_phase_weights(n_mics, top, gains, r, rng))
+        zk = np.ones(n_samples, dtype=np.complex64)
+        for i in range(top):
+            k = i + 1
+            zk = zk * z
+            amp_slow = np.sqrt(
+                2.0 * np.maximum(power_frames[i, f0] * (1.0 - fw) + power_frames[i, f1] * fw, 0.0)
+            )
+            amp = hold(amp_slow)
+            if k * r_max >= nyquist:
+                amp = np.where(k * rps[r] < nyquist, amp, 0.0).astype(np.float32)
+            if q > 0.0:
+                walk = np.cumsum(
+                    rng.normal(0.0, np.sqrt(4.0 * np.pi * q * k * dt_slow), size=n_slow)
+                )
+                rotation = hold(np.exp(1j * walk).astype(np.complex64))
+                line = amp * zk * rotation
+            else:
+                line = amp * zk
+            mixer.add(i, line)
+    mixer.flush()
+    return out.astype(np.float64)
 
 
 def synthesize(
@@ -872,8 +1464,25 @@ def synthesize(
         model spectrum and the Gaussian-process draws, which is what the
         notebook plots next to the realized spectrogram.
     """
-    rps = np.atleast_2d(np.asarray(rps, dtype=np.float64))
-    n_rotors, n_samples = rps.shape
+    label_rps = np.atleast_2d(np.asarray(rps, dtype=np.float64))
+    n_rotors, n_samples = label_rps.shape
+    # The comb rides the SHAFT; the caller's argument is the LABEL. Real
+    # telemetry differs from the shaft by a static per-rotor offset, and the
+    # returned label stays the caller's, so a synthetic clip carries the same
+    # label error a real one does (``StochasticRanges.shaft_offset_rps``).
+    offset = np.asarray(params.shaft_offset_rps, dtype=np.float64)
+    if offset.ndim == 0:
+        offset = np.full(n_rotors, float(offset))
+    elif offset.size < n_rotors:
+        raise ValueError(f"shaft_offset_rps has {offset.size} entries for {n_rotors} rotors")
+    else:
+        # A parameter set may be sized for more rotors than this clip drives;
+        # every other per-rotor array (profile, gamma, jitter) is read the same
+        # way, by leading index.
+        offset = offset[:n_rotors]
+    # A stopped rotor stays stopped: the label error is an error about a
+    # running shaft's speed, not a phantom rotation.
+    rps = np.where(label_rps > 0.0, np.maximum(label_rps + offset[:, None], 0.0), 0.0)
     sr = params.sample_rate
     hop = int(hop or n_fft // DEFAULT_HOP_DIV)
 
@@ -894,17 +1503,67 @@ def synthesize(
     freqs = np.fft.rfftfreq(n_fft, d=1.0 / sr)
     psd = build_psd(params, rps_frames, freqs, dt=hop / sr, rng=rng)
 
-    lo, hi = mic_gain_db
-    gains = 10.0 ** (rng.uniform(lo, hi, size=(n_mics, n_rotors)) / 10.0)
+    def fixed_mic(value: np.ndarray | None, shape: tuple[int, ...], name: str) -> np.ndarray | None:
+        if value is None:
+            return None
+        array = np.asarray(value, dtype=np.float64)
+        if array.shape != shape:
+            raise ValueError(f"{name} must have shape {shape}, got {array.shape}")
+        return array
+
+    fixed_gain_db = fixed_mic(
+        params.fixed_mic_gain_db,
+        (n_mics, n_rotors),
+        "fixed_mic_gain_db",
+    )
+    if fixed_gain_db is None:
+        lo, hi = mic_gain_db
+        fixed_gain_db = rng.uniform(lo, hi, size=(n_mics, n_rotors))
+    gains = 10.0 ** (fixed_gain_db / 10.0)
     # (M, N, F): the floor is common, and each microphone weighs the rotors'
     # lines by its own gains.
-    if line_mode == "coherent":
-        floor_spec = np.repeat(psd["floor"][None], n_mics, axis=0)
+    fixed_floor_db = fixed_mic(
+        params.fixed_mic_floor_db,
+        (n_mics,),
+        "fixed_mic_floor_db",
+    )
+    if fixed_floor_db is not None:
+        floor_mic = 10.0 ** (fixed_floor_db / 10.0)
+    elif params.mic_floor_std_db > 0.0:
+        floor_mic = 10.0 ** (rng.normal(0.0, params.mic_floor_std_db, size=n_mics) / 10.0)
+    else:
+        floor_mic = np.ones(n_mics)
+    if line_mode in ("coherent", "fm"):
+        # Order-dependent coherence: the coherent share w_k of each order's
+        # power goes through the tone bank, the incoherent share 1 - w_k is
+        # rendered as narrowband noise alongside the floor. The bench's
+        # per-frame CV measurement (0.06 at k = 2, >1 by k = 8) says a real
+        # comb is neither fully coherent nor fully Rayleigh.
+        psd_lines = psd
+        incoherent = None
+        if params.coherence_k_half > 0.0:
+            k_axis = np.arange(1, params.n_harmonics + 1, dtype=np.float64)
+            w = np.exp(-((k_axis / float(params.coherence_k_half)) ** 2))
+            w = np.clip(w, 1e-6, 1.0 - 1e-6)
+            prof = np.atleast_2d(np.asarray(params.profile_db, dtype=np.float64))
+            coh_params = params.with_(profile_db=prof + 10.0 * np.log10(w)[None, :])
+            inc_params = params.with_(profile_db=prof + 10.0 * np.log10(1.0 - w)[None, :])
+            psd_lines = build_psd(coh_params, rps_frames, freqs, dt=hop / sr, rng=rng)
+            psd_lines["floor"] = psd["floor"]
+            incoherent = build_psd(inc_params, rps_frames, freqs, dt=hop / sr, rng=rng)["lines"]
+            params = coh_params
+        floor_spec = psd["floor"][None] * floor_mic[:, None, None]
+        if incoherent is not None:
+            floor_spec = floor_spec + np.tensordot(gains, incoherent, axes=(1, 0))
         white = rng.standard_normal((n_mics, n_padded))
         floor_audio = _ola_filter(white, np.sqrt(np.maximum(floor_spec, 0.0)), n_fft, hop)[
             :, pad : pad + n_samples
         ]
-        line_audio = coherent_lines(params, rps, psd, gains, rng=rng)
+        line_audio = (
+            fm_lines(params, rps, psd_lines, gains, rng=rng)
+            if line_mode == "fm"
+            else coherent_lines(params, rps, psd_lines, gains, rng=rng)
+        )
         # Put the lines at the level the spectrum asks for. A filtered-noise
         # signal's variance is the mean of its spectrum over bins, so the ratio
         # of the two mean spectra is the ratio the two parts must end up with —
@@ -913,15 +1572,54 @@ def synthesize(
         floor_mean = float(np.mean(psd["floor"])) or 1.0
         audio = np.empty((n_mics, n_samples), dtype=np.float32)
         for m in range(n_mics):
-            want = float(np.mean(np.tensordot(gains[m], psd["lines"], axes=(0, 0)))) / floor_mean
+            # the realized floor of mic m carries its own floor gain, so the
+            # wanted ratio must be taken against that same gained floor —
+            # otherwise the gain leaks into the lines through ``scale``
+            want = float(np.mean(np.tensordot(gains[m], psd_lines["lines"], axes=(0, 0)))) / (
+                floor_mean * float(floor_mic[m])
+            )
             have = float(np.var(line_audio[m])) / max(float(np.var(floor_audio[m])), 1e-30)
             scale = np.sqrt(want / have) if have > 0 else 0.0
             audio[m] = (floor_audio[m] + scale * line_audio[m]).astype(np.float32)
     else:
-        spectrum = psd["floor"][None] + np.tensordot(gains, psd["lines"], axes=(1, 0))
+        spectrum = psd["floor"][None] * floor_mic[:, None, None] + np.tensordot(
+            gains, psd["lines"], axes=(1, 0)
+        )
         white = rng.standard_normal((n_mics, n_padded))
         y = _ola_filter(white, np.sqrt(np.maximum(spectrum, 0.0)), n_fft, hop)
         audio = y[:, pad : pad + n_samples].astype(np.float32)
+
+    # Per-microphone processes on the MIXED signal: the low-band modulation
+    # (an independent log-OU gain per mic on floor and lines alike) and one
+    # gain on everything.
+    umod = None
+    if params.umod_std_db > 0.0:
+        umod = sample_gp(
+            rng,
+            n_mics,
+            n_frames,
+            dt=hop / sr,
+            tau=params.umod_tau_s,
+            std=params.umod_std_db,
+            kernel="ou",
+        )  # (M, N) dB
+        band = 1.0 / (1.0 + (np.maximum(freqs, 1.0) / max(params.umod_corner_hz, 1.0)) ** 4)
+        amp_gain = 1.0 + (10.0 ** (umod / 20.0) - 1.0)[:, :, None] * band[None, None, :]
+        padded = np.zeros((n_mics, n_padded), dtype=np.float64)
+        padded[:, pad : pad + n_samples] = audio
+        audio = _ola_filter(padded, amp_gain, n_fft, hop)[:, pad : pad + n_samples].astype(
+            np.float32
+        )
+    fixed_all_db = fixed_mic(
+        params.fixed_mic_gain_all_db,
+        (n_mics,),
+        "fixed_mic_gain_all_db",
+    )
+    mic_all = fixed_all_db
+    if mic_all is None and params.mic_gain_all_db > 0.0:
+        mic_all = rng.normal(0.0, params.mic_gain_all_db, size=n_mics)
+    if mic_all is not None:
+        audio = (audio * 10.0 ** (mic_all / 20.0)[:, None]).astype(np.float32)
 
     if normalize_rms is not None:
         rms = float(np.sqrt(np.mean(np.square(audio)))) or 1.0
@@ -941,6 +1639,9 @@ def synthesize(
         "frame_times": frame_times,
         "rps_frames": rps_frames,
         "mic_gains": gains,
+        "mic_floor_gains": floor_mic,
+        "umod_db": umod,
+        "mic_gain_all_db": mic_all,
         **psd,
     }
     return audio, diag
@@ -1003,6 +1704,8 @@ class StochasticNoisePool:
         aggressiveness: float | tuple[float, float] = 1.0,
         flight_fs: float = 200.0,
         flight_reuse: int = 32,
+        render_reuse: int = 1,
+        render_pool: int = 0,
         mode_scales: dict[str, float] | None = None,
         rotor_trim_rel: tuple[float, float] | None = None,
         band_taper_frac: float = 0.0,
@@ -1049,6 +1752,18 @@ class StochasticNoisePool:
         )
         self.flight_fs = float(flight_fs)
         self.flight_reuse = int(flight_reuse)
+        # Rendering a fresh clip for EVERY training sample costs about a
+        # second of CPU, which starves the GPU. A real-noise baseline reuses a
+        # finite recorded corpus every epoch, so reusing rendered clips is the
+        # same regime rather than a fidelity loss: keep a rolling pool of
+        # ``render_pool`` finished clips, refresh one slot every
+        # ``render_reuse`` draws, and take a random slot otherwise. Speech,
+        # SNR and every augmentation are still drawn per sample downstream.
+        # ``render_reuse <= 1`` keeps the old render-every-sample behaviour.
+        self.render_reuse = max(int(render_reuse), 1)
+        self.render_pool = int(render_pool) if render_pool else 4 * self.render_reuse
+        self._pool: list[tuple[float, np.ndarray, np.ndarray]] = []
+        self._pool_draws = 0
         # How the four rotors SEPARATE, as opposed to how far they wander. Yaw
         # drives the two diagonal pairs apart and leaves each pair together;
         # roll and pitch separate the rotors within a pair. See
@@ -1152,6 +1867,8 @@ class StochasticNoisePool:
             ),
             flight_fs=float(rps.get("flight_fs", 200.0)),
             flight_reuse=int(rps.get("flight_reuse", 32)),
+            render_reuse=int(g("render_reuse", 1)),
+            render_pool=int(g("render_pool", 0)),
             mode_scales=(dict(rps["mode_scales"]) if rps.get("mode_scales") else None),
             rotor_trim_rel=(tuple(rps["rotor_trim_rel"]) if rps.get("rotor_trim_rel") else None),
             band_taper_frac=float(g("band_taper_frac", 0.0)),
@@ -1309,6 +2026,7 @@ class StochasticNoisePool:
             amp_rps_ref=float(hover),
             gamma0=params.gamma0 * size,
             gamma_slope=params.gamma_slope * size,
+            shaft_jitter_rps=params.shaft_jitter_rps * size,
         )
         # One gain for a whole flight when asked for, else the old per-window
         # draw. See _FlightCache.level.
@@ -1327,8 +2045,35 @@ class StochasticNoisePool:
         )
         return audio, rps.astype(np.float32), params, diag
 
+    def _pooled_render(
+        self, rng: np.random.Generator, duration_s: float
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """One rendered clip, from the rolling pool when reuse is enabled.
+
+        Reuse starts immediately and the pool GROWS: one slot is refreshed
+        every ``render_reuse`` draws, appended until the pool is full and
+        replacing a random slot afterwards. So the render rate is
+        ``1 / render_reuse`` from the first sample, while the number of
+        distinct clips in circulation climbs to ``render_pool``.
+        """
+        if self.render_reuse <= 1:
+            audio, rps, _, _ = self.render(rng, duration_s)
+            return audio, rps.astype(np.float32)
+        matching = [entry for entry in self._pool if entry[0] == duration_s]
+        if not matching or self._pool_draws % self.render_reuse == 0:
+            audio, rps, _, _ = self.render(rng, duration_s)
+            entry = (float(duration_s), audio, rps.astype(np.float32))
+            if len(self._pool) < self.render_pool:
+                self._pool.append(entry)
+            else:
+                self._pool[int(rng.integers(len(self._pool)))] = entry
+            matching = [item for item in self._pool if item[0] == duration_s]
+        self._pool_draws += 1
+        _, audio, rps = matching[int(rng.integers(len(matching)))]
+        return audio, rps
+
     def sample_timeframe(self, rng: np.random.Generator, duration_s: float) -> td.Frame:
-        audio, rps, _, _ = self.render(rng, duration_s)
+        audio, rps = self._pooled_render(rng, duration_s)
         audio_us = td.uniform(
             np.ascontiguousarray(audio), self.sample_rate, dims=("mic", "time"), t_start=0.0
         )
@@ -1350,6 +2095,7 @@ __all__ = [
     "calibrate_floor",
     "floor_shape_db",
     "line_peak_db",
+    "line_peaks_by_rotor",
     "model_psd_db",
     "sample_gp",
     "sample_params",

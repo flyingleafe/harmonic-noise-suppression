@@ -552,7 +552,11 @@ def resolve_test_raw_root(data_root: str | Path | None = None) -> Path:
 
 
 def build(raw_dir: Path) -> Iterator[tuple[str, td.Frame]]:
-    """Yield ``(recording_id, frame)`` for each aligned recording."""
+    """Yield ``(recording_id, frame)`` for each aligned recording.
+
+    RAW tracks only; ``rps_refined`` is attached by the ``source_frames``
+    derivation, which verifies the sidecar bytes against its spec.
+    """
     raw_dir = resolve_raw_root(raw_dir)
     for wav_rel, csv_rel, time_offset, time_dilation in MICHAELS_FILES:
         rid = Path(csv_rel).stem

@@ -64,7 +64,11 @@ def test_parse_splits_takes_a_string_or_a_list() -> None:
 
 def test_source_profile_dregon_is_the_default_and_takes_the_splits() -> None:
     prof = R.source_profile(R.FRAMES_SPEC)
-    assert (prof.origin, prof.rps_key) == ("dregon", "motors_measured")
+    # DREGON's reference track is a PREFERENCE CHAIN: room1 carries the
+    # tachometer, the five room2 flights publish only the command track, and a
+    # profile pinned to the measured key skipped every one of them.
+    assert prof.origin == "dregon"
+    assert prof.rps_key == ("motors_measured", "motors_command")
     assert prof.splits_list == ["in_flight_noise"]  # unchanged: the generator's pool
     # The speech recordings of the same rig: one flag, same key, same origin.
     assert R.source_profile(R.FRAMES_SPEC, "in_flight_source").splits_list == ["in_flight_source"]

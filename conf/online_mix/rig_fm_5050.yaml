@@ -1,0 +1,175 @@
+# RIG-FITTED stochastic family, 50/50 DREGON / Michael's, FM tone bank.
+#
+# Two presets of ONE family (`kind: stochastic`, `line_mode: fm`), each read
+# off the rig's real recordings (docs/experiments/stochastic-fit.md; the
+# hierarchical fit of docs/hierarchical-rig-model-plan.md):
+#
+#   lines     tones on a shared jittering shaft (Gaussian width ∝ k) with a
+#             small per-harmonic phase diffusion — Michael's even orders stay
+#             phase-locked for seconds (small jitter), DREGON's decohere in
+#             ~0.5 s (larger jitter); blade-passing emphasis ±13 dB on
+#             Michael's two-blade combs, 1–4 dB on DREGON
+#   timbre    rig roll-off (Michael's flat, DREGON ~1), per-rotor deviation
+#             ~2.2 dB (bench), fast rough (OU) amplitude process
+#   floor     the rig's measured between-line floor curve, its level under
+#             the lines (Michael's −36…−24 dB, DREGON −20…−12), a slow
+#             common modulation, and on DREGON an independent per-microphone
+#             low-band modulation (diaphragm flow noise, σ ≈ 3.3 dB)
+#   mics      DREGON: per-(mic, rotor) line gains over a common floor;
+#             Michael's: one gain on everything per microphone (~12 dB spread)
+#
+# Everything else (two excitations, `rps_scale_range`, the silence arm at 0.2
+# and no label-transforming augmentation) is conf/online_mix/salv2_stoch.yaml.
+
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+
+sources:
+  noise:
+    # ── DREGON preset ────────────────────────────────────────────────────
+    - kind: stochastic
+      weight: 0.4
+      line_mode: fm
+      n_harmonics: 80
+      # Reuse each rendered noise clip 16 times, drawing fresh speech, SNR and
+      # augmentations per sample. Rendering a clip per sample costs ~0.8 s of
+      # CPU and starved the GPU (1027 s/epoch of training against 130 s on the
+      # same 500 steps with a faster dataloader); reuse brings the stream to
+      # 98 ms/sample. A real-noise baseline reuses a finite recorded corpus
+      # every epoch, so this is the same regime, not a fidelity loss: at
+      # batch 128 x 500 steps it still draws 4000 distinct clips per epoch from
+      # a rolling pool of 64 per worker.
+      render_reuse: 48
+      n_mics: 8
+      n_rotors: 4
+      drone_profile_range: [0.0, 1.0]
+      mic_gain_db: [-7.0, 0.0]
+      amp_rps_exponent: 2.5
+      amp_rps_ref: 80.0
+      rps_scale_range: [0.45, 1.20]
+      rps:
+        kind: full_flight
+        aggressiveness: 1.0
+        flight_reuse: 32
+      ranges:
+        rolloff_p: [1.6, 2.1]
+        harm_jitter_db: [4.5, 7.0]
+        blade_counts: [2]
+        blade_emphasis_db: [0.5, 3.0]
+        rotor_similarity: [1.0, 1.0]
+        rotor_delta_std_db: [2.0, 3.5]
+        gamma0_hz: [2.0, 4.0]
+        gamma_slope_hz: [0.4, 0.9]
+        # quasi-static regime. The rig fit's width law (0.55-1.0 Hz/order, floored
+        # at 0.6 bins) fills the 18 Hz line spacing with Gaussian skirts by k = 8;
+        # the model-free between-line floor of the real clips says the lines are
+        # narrower - sigma 0.25-0.45 rev/s keeps the gaps as empty as the recordings.
+        shaft_jitter_rps: [0.25, 0.45]
+        shaft_jitter_tau_s: [0.1, 0.25]
+        phase_diffusion_hz_per_order: [0.02, 0.05]
+        floor_shape_preset:
+          [[32, 12.0], [64, 13.5], [128, 11.0], [200, 8.5], [400, 2.0], [600, -2.0], [1000, -8.0],
+           [1500, -11.0], [2500, -12.5], [4000, -12.0], [6000, -15.0], [8000, -22.0]]
+        floor_shape_std_db: [1.0, 3.0]
+        floor_shape_oct: [1.0, 2.0]
+        floor_tilt_db_oct: [-0.5, 0.5]
+        floor_rel_db: [-14.0, -7.0]
+        floor_static_rel: [0.1, 0.35]
+        harm_gp_kernel: ou
+        harm_gp_std_db: [3.0, 4.5]
+        harm_gp_tau_s: [0.3, 0.8]
+        harm_coherence: [0.0, 0.1]
+        floor_gp_std_db: [1.0, 2.0]
+        floor_gp_tau_s: [1.0, 4.0]
+        floor_tilt_gp_std: [0.0, 0.5]
+        umod_std_db: [2.5, 4.0]
+        umod_tau_s: [0.15, 0.4]
+        umod_corner_hz: [400.0, 600.0]
+        mic_floor_std_db: [2.0, 3.5]
+    # ── Michael's preset ─────────────────────────────────────────────────
+    - kind: stochastic
+      weight: 0.4
+      line_mode: fm
+      n_harmonics: 80
+      # Reuse each rendered noise clip 16 times, drawing fresh speech, SNR and
+      # augmentations per sample. Rendering a clip per sample costs ~0.8 s of
+      # CPU and starved the GPU (1027 s/epoch of training against 130 s on the
+      # same 500 steps with a faster dataloader); reuse brings the stream to
+      # 98 ms/sample. A real-noise baseline reuses a finite recorded corpus
+      # every epoch, so this is the same regime, not a fidelity loss: at
+      # batch 128 x 500 steps it still draws 4000 distinct clips per epoch from
+      # a rolling pool of 64 per worker.
+      render_reuse: 48
+      n_mics: 8
+      n_rotors: 4
+      drone_profile_range: [0.0, 1.0]
+      mic_gain_db: [-8.0, 0.0]
+      amp_rps_exponent: 2.5
+      amp_rps_ref: 80.0
+      rps_scale_range: [0.45, 1.20]
+      rps:
+        kind: full_flight
+        aggressiveness: 1.0
+        flight_reuse: 32
+      ranges:
+        rolloff_p: [0.4, 0.7]
+        harm_jitter_db: [5.0, 7.5]
+        blade_counts: [2]
+        blade_emphasis_db: [5.0, 10.0]
+        bpf_boost_db: [12.0, 17.0]
+        rotor_similarity: [1.0, 1.0]
+        rotor_delta_std_db: [2.0, 3.5]
+        gamma0_hz: [1.5, 3.0]
+        gamma_slope_hz: [0.4, 0.9]
+        # Fast (diffusive) shaft jitter, kept from the earlier training-data
+        # calibration of the model-free between-line floor. The width-exponent
+        # comparison (k^1 beats k^2 on held-out likelihood, both rigs) does NOT
+        # license the quasi-static regime here: it tests the TOTAL width
+        # gamma0 + slope k^p, whose fitted intercept (12.3 Hz per clip with the
+        # carrier correction on) dominates every low order and is a nuisance
+        # the renderer does not carry. With the intercept excluded the regime is
+        # unidentified by that test; switching tau to [0.3, 1.0] s was tried and
+        # the held-out predictive check rejected it (curve RMSE 0.44 -> 1.28,
+        # coverage 0.82 -> 0.62).
+        shaft_jitter_rps: [0.4, 0.8]
+        shaft_jitter_tau_s: [0.003, 0.008]
+        phase_diffusion_hz_per_order: [0.0, 0.02]
+        floor_shape_preset:
+          [[32, 3.0], [64, -1.0], [128, -3.0], [200, -2.0], [400, -0.5], [600, 0.5], [1000, 2.0],
+           [1500, 2.8], [2500, 2.5], [4000, 1.4], [6000, -3.0], [8000, -12.0]]
+        floor_shape_std_db: [2.0, 4.0]
+        floor_shape_oct: [1.0, 2.0]
+        floor_tilt_db_oct: [-0.5, 0.5]
+        floor_rel_db: [-24.0, -16.0]
+        floor_static_rel: [0.1, 0.35]
+        harm_gp_kernel: ou
+        harm_gp_std_db: [2.0, 3.5]
+        harm_gp_tau_s: [0.3, 0.8]
+        harm_coherence: [0.0, 0.1]
+        floor_gp_std_db: [1.0, 2.0]
+        floor_gp_tau_s: [1.0, 4.0]
+        floor_tilt_gp_std: [0.0, 0.5]
+        mic_gain_all_db: [3.0, 4.5]
+    - kind: silence
+      weight: 0.2
+      n_channels: 8
+
+  speech:
+    - dataset: librispeech
+      subpath: LibriSpeech/train-clean-100
+
+policy:
+  stages:
+    - until: null
+      source_prob: 1.0
+      snr_db:
+        uniform: {low: -30.0, high: 0.0}
+      speech_per_channel: independent
+      snr_per_channel: false
+      augmentations:
+        probability: 0.5
+        choices:
+          - random_gain: {min_db: -6.0, max_db: 6.0}
+          - random_polarity: {}

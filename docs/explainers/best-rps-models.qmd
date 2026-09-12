@@ -1,0 +1,357 @@
+---
+title: "The two best-on-Michael's-cruise RPS models, clip by clip"
+subtitle: "What they were trained on, how they score per microphone, and where they fail"
+date: 2026-09-11
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    fig-align: center
+    tbl-cap-location: top
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+# | tags: [setup]
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from IPython.display import Markdown, display
+
+RES = Path("../../results/bestmodel_eval/results.json")
+DATA = json.loads(RES.read_text())
+MODELS = list(DATA)
+ROWS = {m: DATA[m]["rows"] for m in MODELS}
+INFO = {m: DATA[m]["info"] for m in MODELS}
+SET_ORDER = ["Michael's FLY125 idle", "Michael's FLY125 cruise", "DREGON room2 flight",
+             "Michael's FLY124 cruise", "DREGON room1 free-flight"]
+PRETTY = {"hppnet_l2_r2_s0": "hppnet_l2_r2_s0 (salience)",
+          "r2hb_gru_nomix_wu": "r2hb_gru_nomix_wu (regressor)"}
+```
+
+## What this page answers
+
+Two checkpoints were selected by **one** number: the `fly124_cruise` column of
+`results/paper_regime_matrix/{ladder,blocks}.csv` — frame-weighted PIT MAE in rev/s on
+Michael's **held-out** FLY124 cruise frames, over 75 scored rows of the August campaign.
+
+* **`hppnet_l2_r2_s0`** — 0.768 rev/s, the best row overall. Task `salience_rps`.
+* **`r2hb_gru_nomix_wu`** — 1.027 rev/s, the best **regressor** (task `rps_prediction`);
+  HPPNet variants take the top six places, so this is the best model that emits rev/s
+  directly rather than a salience map.
+
+Both are then re-scored here on every real clip set available, **each microphone separately**,
+with the project's own readouts. Nothing on this page is a new training run.
+
+::: {.callout-note}
+## Readout, exactly
+
+The salience model's output Frame is a `(1200, 251)` salience map, not rev/s. The rev/s read is
+`metrics.salience_layers.LayerPeakRPSMetric`: reshape to 4 layers × 300 rate bins on
+`linear_freq_grid(0, 150, 300)`, `logsigmoid`, per-layer argmax refined by the three-point
+log-parabolic vertex (exact on a Gaussian layer), then PIT alignment. The regressor emits
+`(4, T)` rev/s directly and is scored with the same MAE-optimal 24-permutation PIT assignment.
+This is the training-time metric, **not** the deployed CRF best-path decoder.
+:::
+
+## Training data
+
+Both checkpoints were trained on **real recordings only** — no synthetic rotor noise, no comb
+pretraining — from the same pool, `conf/online_mix/hb_silence_dload.yaml` (the GRU uses its
+`*_nomix_dload.yaml` twin, identical but with `source_prob: 0.0`).
+
+| ingredient | detail |
+|---|---|
+| DREGON | `DREGON-frames`, split `in_flight_noise`, **excluding `free-flight_nosource_room1`**, `min_motor_rps: 0.0` (the whole envelope: ground, warm-up, take-off, landing) |
+| Michael's | `michaels-frames`, `recording_ids: [FLY125]` only, `min_motor_rps: 0.0` |
+| silence arm | `kind: silence`, weight 0.4 against merged real weight 2.0 (16.7 % of noise chunks), label exactly zero rev/s: quiet room tone, colored noise up to flight level, or a 30–120 Hz rumble |
+| speech | `hppnet_l2_r2_s0`: LibriSpeech train-clean-100 mixed at SNR U(−30, 0) dB, per-channel independent. `r2hb_gru_nomix_wu`: **none** (`source_prob: 0.0`) |
+| augmentation | after a 50 k-chunk unaugmented warm-up: `freq_scale` α ∈ [0.7, 1.3] at p = 1.0, 50 % post-mix gain/polarity, 50 % time warp of the noise+RPS pair |
+| validation | `dload:DREGON-LM-V4-michaels-valid-full`, 40 000 frames per validation; monitor `rps_mae` (salience) / `mse` (regressor) |
+
+So the split that matters for this page:
+
+* **In training** — Michael's FLY125 (all regimes), DREGON room2 flights, DREGON room1
+  recordings *other than* `free-flight_nosource_room1`.
+* **Held out** — Michael's FLY124 entirely, and DREGON `free-flight_nosource_room1`.
+
+Architecturally: `hppnet_l2` is the original HPPNet front end (CQT, `fmin` 27.5 Hz, 352 bins,
+48 bins/octave, harmonic dilations [48, 12], BiLSTM head) plus a `FreqSuperResHead` mapping the
+native log-frequency grid onto 0–150 rev/s in 300 bins, four output maps. `simple_conv_v2_uni_gru128`
+is a causal Conv + unidirectional GRU(128) regressor on a 2048/512 STFT, PIT-MSE loss.
+
+## Scores
+
+```{python}
+# | label: tbl-summary
+frames = []
+for m in MODELS:
+    df = pd.DataFrame(ROWS[m])
+    g = df.groupby("set").agg(clips=("clip", "count"),
+                              mic0=("mic0_mae", "mean"),
+                              mean8=("mean_mae", "mean"))
+    g["model"] = PRETTY[m]
+    g["held out"] = df.groupby("set")["held_out"].first().map({True: "held out", False: "in training"})
+    frames.append(g.reset_index())
+summary = pd.concat(frames)
+summary["set"] = pd.Categorical(summary["set"], SET_ORDER, ordered=True)
+piv = summary.pivot_table(index=["set", "held out"], columns="model", values="mean8",
+                          observed=False).round(3)
+display(Markdown("**8-microphone mean PIT MAE, rev/s, by clip set**"))
+display(piv)
+```
+
+Reading this table:
+
+1. **Both models are far better on the recordings they trained on.** For the salience model,
+   Michael's FLY125 cruise scores 0.38 rev/s against 0.99 on held-out FLY124 cruise — a factor
+   2.6. FLY125 *idle* is better still at 0.26 rev/s, which is the opposite of the generative
+   side's experience, where idle clips are the hardest to synthesize.
+2. **DREGON is harder than Michael's, trained or not.** DREGON room2 (in training) scores
+   0.84 rev/s, worse than FLY125 cruise; held-out DREGON room1 free-flight is the worst set
+   on the page at 2.06 rev/s for the salience model and 2.49 for the regressor.
+3. **The regressor is uniformly worse**, by 1.3× to 2.6× depending on the set, and its penalty
+   is largest exactly where the salience model is strongest (FLY125 idle: 0.49 vs 0.26).
+
+```{python}
+# | label: tbl-permic
+for m in MODELS:
+    df = pd.DataFrame(ROWS[m])
+    df["set"] = pd.Categorical(df["set"], SET_ORDER, ordered=True)
+    df = df.sort_values(["set", "clip"], kind="stable")
+    mics = pd.DataFrame(df["per_mic_mae"].tolist(), columns=[f"mic {i}" for i in range(8)],
+                        index=df["clip"].values).round(2)
+    mics.insert(0, "set", df["set"].astype(str).values)
+    mics["spread"] = (mics[[f"mic {i}" for i in range(8)]].max(axis=1)
+                      - mics[[f"mic {i}" for i in range(8)]].min(axis=1)).round(2)
+    display(Markdown(f"**{PRETTY[m]} — per-microphone PIT MAE, rev/s**"))
+    display(mics)
+```
+
+### What the microphone axis shows
+
+```{python}
+lines = []
+for m in MODELS:
+    df = pd.DataFrame(ROWS[m])
+    arr = np.array(df["per_mic_mae"].tolist())
+    rel = arr / arr.mean(axis=1, keepdims=True)
+    per_mic_rank = rel.mean(axis=0)
+    spread = (arr.max(1) - arr.min(1)) / arr.mean(1)
+    lines.append(f"- **{PRETTY[m]}**: mean per-clip spread across mics is "
+                 f"{100 * spread.mean():.0f} % of the clip's own MAE "
+                 f"(worst clip {100 * spread.max():.0f} %). Ranked by mean relative error, the "
+                 f"quietest microphone is **mic {int(np.argmin(per_mic_rank))}** "
+                 f"({per_mic_rank.min():.2f}× the clip mean) and the worst is "
+                 f"**mic {int(np.argmax(per_mic_rank))}** ({per_mic_rank.max():.2f}×).")
+display(Markdown("\n".join(lines)))
+```
+
+The microphone choice matters much less than the recording. Within a clip, the eight channels
+agree to a few percent on Michael's data; the only set where the array spreads appreciably is
+DREGON room1 free-flight, where single channels differ by up to 1.6 rev/s — consistent with
+DREGON's known wind-gust contamination on some channels, which is why the single-microphone
+DREGON work should select a channel rather than average.
+
+## Clip by clip
+
+Each figure: spectrogram of microphone 0 on top, prediction (thin, dotted) over telemetry
+ground truth (thick, pale) below, PIT-matched, with per-rotor and per-microphone MAE.
+
+```{python}
+# | output: asis
+for set_label in SET_ORDER:
+    held = next(r["held_out"] for m in MODELS for r in ROWS[m] if r["set"] == set_label)
+    print(f"\n### {set_label} — {'held out' if held else 'in training'}\n")
+    clips = [r["clip"] for r in ROWS[MODELS[0]] if r["set"] == set_label]
+    for clip in clips:
+        print(f"\n#### {clip}\n")
+        for m in MODELS:
+            row = next(r for r in ROWS[m] if r["clip"] == clip)
+            fig = row.get("figure")
+            if not fig:
+                continue
+            print(f"![{PRETTY[m]} on {clip} — 8-mic mean {row['mean_mae']:.2f} rev/s]"
+                  f"(../../results/bestmodel_eval/{fig})\n")
+```
+
+## Is this checkpoint a usable realism probe for synthetic noise?
+
+The reason to care: the salience model tracks **all four** of Michael's rotors on held-out
+FLY124 at 0.99 rev/s, so Michael's data demonstrably carries enough per-rotor information to
+be read — including the twin pair at 73.7 / 75.5 rev/s, whose harmonics are scrambled together
+and which accordingly carry the largest residual. That makes the frozen checkpoint a candidate
+**discriminative test of synthetic fidelity**: if a generative policy really matched Michael's
+rig, this checkpoint should score on its renders about as well as it scores on real held-out
+clips.
+
+A test that cannot fail is worthless, so the counterexample runs first. `ctrl_diverse` is the
+C2 control — a deliberately wide parametric arm plus two measurement-anchored neighbourhood
+arms with inflated residual. Nobody claims it looks like Michael's rig. If the checkpoint
+tracked *those* at ~1 rev/s, the probe would only be detecting "is there a comb at all".
+
+Both policies are rendered **noise-only** (`source_prob: 0.0`, speech source removed, silence
+arm dropped) to match the `nosource` real clips, and with `render_reuse`/`flight_reuse` forced
+to 1 so every clip is an independent draw from the policy's population — at their training
+values of 48 / 32, eight consecutive samples collapse to three distinct draws.
+
+```{python}
+# | label: tbl-synthetic
+SYN = json.loads(Path("../../results/synthetic_probe/results.json").read_text())
+syn_rows = []
+for tag, rows in SYN.items():
+    for r in rows:
+        syn_rows.append({"policy": tag, "clip": r["clip"], "mean rps": r["mean_rps"],
+                         "cruise band": "yes" if r["cruise_band"] else "",
+                         "mic0": r["mic0_mae"], "8-mic mean": r["mean_mae"],
+                         "mic spread": round(max(r["per_mic_mae"]) - min(r["per_mic_mae"]), 2)})
+syn = pd.DataFrame(syn_rows).round(2)
+display(Markdown("**`hppnet_l2_r2_s0` on synthetic noise-only clips, PIT MAE rev/s**"))
+display(syn)
+
+real_held = pd.DataFrame(ROWS["hppnet_l2_r2_s0"]).query("held_out")["mean_mae"]
+cmp_rows = []
+for tag, rows in SYN.items():
+    a = np.array([r["mean_mae"] for r in rows])
+    c = np.array([r["mean_mae"] for r in rows if r["cruise_band"]])
+    cmp_rows.append({"data": tag + " (synthetic)", "clips": len(a),
+                     "median": np.median(a).round(2), "mean": a.mean().round(2),
+                     "best": a.min().round(2), "worst": a.max().round(2),
+                     "cruise-band median": np.median(c).round(2) if c.size else np.nan})
+mich = pd.DataFrame(ROWS["hppnet_l2_r2_s0"]).query("set.str.contains('FLY124')")["mean_mae"].values
+fly125 = pd.DataFrame(ROWS["hppnet_l2_r2_s0"]).query("set.str.contains('FLY125')")["mean_mae"].values
+cmp_rows += [
+    {"data": "Michael's FLY124 cruise (real, held out)", "clips": len(mich),
+     "median": np.median(mich).round(2), "mean": mich.mean().round(2),
+     "best": mich.min().round(2), "worst": mich.max().round(2),
+     "cruise-band median": np.median(mich).round(2)},
+    {"data": "Michael's FLY125 (real, in training)", "clips": len(fly125),
+     "median": np.median(fly125).round(2), "mean": fly125.mean().round(2),
+     "best": fly125.min().round(2), "worst": fly125.max().round(2),
+     "cruise-band median": np.nan},
+]
+display(Markdown("**Synthetic versus real, same frozen checkpoint**"))
+display(pd.DataFrame(cmp_rows).set_index("data"))
+```
+
+### The probe is discriminative — the counterexample failed to pass
+
+```{python}
+# | output: asis
+div = np.array([r["mean_mae"] for r in SYN["ctrl_diverse"]])
+fit = np.array([r["mean_mae"] for r in SYN["rig_fitted_5050"]])
+divc = np.array([r["mean_mae"] for r in SYN["ctrl_diverse"] if r["cruise_band"]])
+fitc = np.array([r["mean_mae"] for r in SYN["rig_fitted_5050"] if r["cruise_band"]])
+zeroed = [r for rows in SYN.values() for r in rows
+          if abs(r["mean_mae"] - r["mean_rps"]) < 0.05 * max(r["mean_rps"], 1)]
+print(f"""
+`ctrl_diverse` scores a median of **{np.median(div):.1f} rev/s** (range
+{div.min():.1f}–{div.max():.1f}) against **{np.median(mich):.2f} rev/s** on real held-out
+Michael's cruise — a factor of {np.median(div) / np.median(mich):.0f}. The diverse control is
+not mistaken for Michael's rig, so the probe has discriminative power and the test is
+meaningful.
+
+The fitted policy `rig_fitted_5050` scores a median of **{np.median(fit):.1f} rev/s**
+(range {fit.min():.1f}–{fit.max():.1f}); restricted to cruise-band draws,
+**{np.median(fitc):.1f} rev/s** versus {np.median(divc):.1f} for the diverse control. So the
+fitted policy is better than the deliberately-wrong control by about
+{np.median(divc) / np.median(fitc):.1f}x in the cruise band, and still
+**{np.median(fitc) / np.median(mich):.0f}x worse than real data**.
+""")
+```
+
+Two failure modes appear, and they are qualitatively different from anything the real clips do:
+
+```{python}
+# | output: asis
+refuse = [r for rows in SYN.values() for r in rows
+          if abs(r["mic0_mae"] - r["mean_rps"]) < 0.03 * max(r["mean_rps"], 1)]
+spreads = np.array([max(r["per_mic_mae"]) - min(r["per_mic_mae"])
+                    for rows in SYN.values() for r in rows])
+worst = max((r for rows in SYN.values() for r in rows),
+            key=lambda r: max(r["per_mic_mae"]) - min(r["per_mic_mae"]))
+real_spread = np.array([max(r["per_mic_mae"]) - min(r["per_mic_mae"])
+                        for r in ROWS["hppnet_l2_r2_s0"] if "FLY" in r["set"]])
+print(f"""
+1. **Total refusal.** In **{len(refuse)} of {sum(len(v) for v in SYN.values())}** draws the
+   model outputs ~0 rev/s for the whole clip on microphone 0, so the MAE equals the clip's true
+   speed to within 3 % ({', '.join(f"`{r['policy']}` clip {r['clip']}: {r['mic0_mae']:.1f} vs "
+                                   f"{r['mean_rps']:.1f}" for r in refuse[:4])}). The model was
+   trained with a zero-labelled silence arm, so this is it actively classifying the render as
+   *rotors off* — not a tracking error but a detection failure.
+2. **Catastrophic microphone disagreement.** The per-clip spread across the 8 channels reaches
+   **{spreads.max():.0f} rev/s** (`{worst['policy']}` clip {worst['clip']}:
+   {min(worst['per_mic_mae']):.1f} on its best channel, {max(worst['per_mic_mae']):.1f} on its
+   worst), median {np.median(spreads):.1f} rev/s. On Michael's real clips the same spread is
+   {real_spread.min():.2f}–{real_spread.max():.2f} rev/s. The renderer's per-microphone
+   construction is emitting channels that are not views of one coherent rig.
+""")
+```
+
+```{python}
+# | output: asis
+for tag, rows in SYN.items():
+    print(f"\n#### {tag} — independent draws, noise only\n")
+    for r in sorted(rows, key=lambda q: q["mean_mae"]):
+        print(f"![{tag} clip {r['clip']} — mean rps {r['mean_rps']:.1f}, 8-mic MAE "
+              f"{r['mean_mae']:.2f} rev/s]"
+              f"(../../results/synthetic_probe/{r['figure']})\n")
+```
+
+### How to use this as the acceptance test
+
+The measurement is now defined end to end and is cheap: render N noise-only clips from a
+policy, score them with this frozen checkpoint on all 8 microphones, compare the distribution
+against the real held-out distribution. It is a *sufficient* test in one direction only — a
+policy that fails it is certainly not Michael's data; a policy that passes it has matched
+whatever features this checkpoint reads (per-rotor comb structure at low order, in the right
+speed band, coherent across channels), which is much more than LTAS shape but is not proof of
+full distributional equality. Used together with the LTAS/order-domain statistics it is a
+strong pair: one is a spectral-shape criterion, the other a per-rotor-information criterion.
+
+
+## Conclusions
+
+```{python}
+# | output: asis
+sal, reg = MODELS
+d_sal = pd.DataFrame(ROWS[sal]).set_index("clip")["mean_mae"]
+d_reg = pd.DataFrame(ROWS[reg]).set_index("clip")["mean_mae"]
+ratio = (d_reg / d_sal).mean()
+fly125 = pd.DataFrame(ROWS[sal]).query("set.str.contains('FLY125')")["mean_mae"].mean()
+fly124 = pd.DataFrame(ROWS[sal]).query("set.str.contains('FLY124')")["mean_mae"].mean()
+print(f"""
+1. **The fit is genuinely good, and part of it is memorization.** The salience model averages
+   {fly125:.2f} rev/s on Michael's FLY125 — a training recording — and {fly124:.2f} rev/s on
+   held-out FLY124, a {fly124 / fly125:.1f}x gap on the same airframe, same rig, same regimes.
+   The held-out number is still the best on record for this data.
+2. **Salience beats regression by {ratio:.1f}x on average**, across every set, trained or held out.
+3. **The residual error is concentrated in the near-degenerate rotor pair.** On the FLY124
+   cruise clips the two rotors at 73.7 and 75.5 rev/s carry the largest per-rotor MAE and
+   visibly swap trajectories; the 90 rev/s rotor tracks tightly. This matches, from a third
+   independent direction, the marginal-information audit (a rotor pair 0.4 rev/s apart loses its
+   fundamental from 0.38 to 6.09 dB of posterior width) and the per-microphone order-domain
+   measurement (in the frames of the two slow rotors, the *other* rotors' comb positions carry
+   more energy than their own).
+4. **DREGON room1 free-flight is the hard set** and shows the largest per-microphone spread,
+   which supports choosing a wind-free channel for the single-microphone DREGON fitting stage
+   rather than treating the eight channels as interchangeable.
+""")
+```
+
+::: {.callout-warning}
+## Caveats
+
+The L2/L3 HPPNet rows in the campaign matrix were run without the warm-up stage, with 16 000
+rather than 40 000 frames per validation and width 64 rather than 128; they are **not** matched
+architectural ablations against the `r2hb_*` rows. Clip counts here are small (2–3 clips per set,
+8 channels each — channels are not independent observations), so per-set means carry real
+sampling error. All clips come from the published 16 kHz datasets, which brick-wall above
+7.9 kHz; that notch is visible at the top of every spectrogram and is an artefact of the
+publishing resampler, not of the drone.
+:::

@@ -111,7 +111,12 @@ OUT_DEFAULT = "results/refine_dregon_rps"
 LABEL_DIR_DEFAULT = "src/data_processing/refined_labels"
 #: The generator's own noise source, loaded with the generator's own arguments.
 FRAMES_SPEC = "frames:DREGON-frames"
-RPS_KEY = "motors_measured"
+#: DREGON's reference track, as a PREFERENCE CHAIN. room1 carries the
+#: tachometer (``motors_measured``); the five room2 flights publish only
+#: ``motors_command``, and a loader pinned to the measured key skipped every one
+#: of them - which is why room2 had no refined labels at all. The key actually
+#: used is recorded per recording in the sidecar report.
+RPS_KEY: tuple[str, ...] = ("motors_measured", "motors_command")
 SPLITS = ["in_flight_noise"]
 SR = 16000
 #: The frozen evaluation frame grid (``tracking.protocols.BEATVK.hop_s``), kept
@@ -141,12 +146,13 @@ class SourceProfile:
     """The three loader arguments a dataset needs, and nothing else.
 
     ``splits`` is ``None`` for a dataset the loader takes whole. It is the only
-    field a caller can set, because the other two are properties OF the dataset:
-    a rotor-speed track is either ``motors_measured`` or it is not.
+    field a caller can set, because the other two are properties OF the dataset.
+    ``rps_key`` may be a preference chain, resolved per recording by the loader
+    (:func:`data_processing.noise_rps_dataset.resolve_rps_key`).
     """
 
     origin: str
-    rps_key: str
+    rps_key: str | tuple[str, ...]
     splits: tuple[str, ...] | None
 
     @property
@@ -253,11 +259,11 @@ def load_recordings(spec: str, splits: str | Sequence[str] | None = None) -> lis
                 # sidecar's report names what was READ and not what a constant
                 # says (the two are the same profile, but the report is
                 # provenance and provenance is worth the four bytes).
-                "rps_key": prof.rps_key,
+                "rps_key": src.rps_key,
             }
         )
     if not recs:
-        raise RuntimeError(f"{spec}: no recording with an {prof.rps_key} track survived loading")
+        raise RuntimeError(f"{spec}: no recording with any of {prof.rps_key} survived loading")
     return recs
 
 
@@ -319,6 +325,7 @@ def refine_worker(unit: Unit) -> dict[str, Any]:
     """One (recording, window) unit: L-BFGS on F_VK from the telemetry init."""
     import numpy as np
 
+    from data_processing import rps_gating as gating
     from tracking.fitness_vk import FVKConfig, fvk_score, optimize_trajectory
 
     p = dict(unit.params)
@@ -349,8 +356,23 @@ def refine_worker(unit: Unit) -> dict[str, Any]:
         "k_max": int(p["k_max"]),
         "channels": channels,
     }
+    # Refine CRUISE windows only. A standby shaft is nearly static, its comb is
+    # weak and dense, and the correction the refiner finds there is fitted to
+    # noise: measured on the committed sidecars, standby corrections make the
+    # refiner's OWN comb fitness worse (-0.0021 on FLY125, -0.0788 on DREGON
+    # room1) while cruise corrections improve it. The regime is read from the
+    # SLOWEST rotor, because a window with one rotor still idling is not cruise.
+    min_rev_s = float(np.nanmin(r_init))
     if mean_rev_s < IDLE_REV_S:
         return {**out, "used": False, "reason": "idle", "r_window": r_init.tolist()}
+    if min_rev_s < gating.GatePolicy().cruise_min_rps:
+        return {
+            **out,
+            "used": False,
+            "reason": "not_cruise",
+            "min_rev_s": round(min_rev_s, 4),
+            "r_window": r_init.tolist(),
+        }
 
     cfg = FVKConfig(sr=SR, k_max=int(p["k_max"]), max_channels=channels)
 
@@ -487,6 +509,8 @@ def stitch(
     """
     import numpy as np
 
+    from data_processing import rps_gating as gating
+
     prof = source_profile(spec, splits)
     rows = read_rows(out)
     if not rows:
@@ -511,7 +535,15 @@ def stitch(
             den[i0:i1] += w
         # A frame no window covered keeps its telemetry (windows tile the whole
         # recording, so this is a guard and not a path).
-        r_ref = np.where(den > 0.0, num / np.maximum(den, 1e-12), r_tel)
+        r_raw = np.where(den > 0.0, num / np.maximum(den, 1e-12), r_tel)
+        # The regime gate is part of the PRODUCER, not a repair step: standby
+        # frames carry the telemetry exactly, settled cruise carries the refined
+        # trajectory exactly, and the ramp blends the correction so the label
+        # stays continuous. A recording with no cruise window at all therefore
+        # comes out equal to its reference track everywhere, which is what makes
+        # the published field defined for every eligible frame.
+        policy = gating.GatePolicy()
+        r_ref, gate_w = gating.gate_refinement(ft, r_tel, r_raw, policy)
 
         npz = label_dir / f"{rid}.npz"
         offset = float(rec["t0_offset_s"])
@@ -522,6 +554,9 @@ def stitch(
             t0_offset_s=np.float64(offset),
             r_telemetry=r_tel,
             r_refined=r_ref,
+            r_refined_raw=r_raw,
+            gate_weight=gate_w,
+            gate_policy=json.dumps(policy.as_dict()),
             window_used=np.asarray([bool(r["used"]) for r in got]),
             window_starts=np.asarray([int(r["i0"]) for r in got], dtype=np.int64),
             k_max=np.int64(params["k_max"]),
@@ -557,7 +592,12 @@ def stitch(
                 # What the loader was ACTUALLY given. A sidecar of Michael's
                 # frames and one of DREGON's live in the same directory, so the
                 # report is the only place the two are told apart.
-                "rps_key": str(rec.get("rps_key", prof.rps_key)),
+                "rps_key": str(
+                    rec.get(
+                        "rps_key",
+                        prof.rps_key[0] if not isinstance(prof.rps_key, str) else prof.rps_key,
+                    )
+                ),
                 "splits": prof.splits_list,
                 "sample_rate": SR,
             },
@@ -571,6 +611,31 @@ def stitch(
                 "hop_frame_s": HOP_S,
                 "idle_rev_s": IDLE_REV_S,
                 "max_move_rev_s": MAX_MOVE_REV_S,
+            },
+            # The gate is provenance: without it the report cannot substantiate
+            # that standby carries the telemetry, and an old repaired sidecar
+            # and a freshly produced one would describe themselves differently.
+            "gate": {
+                "policy": policy.as_dict(),
+                "regimes": gating.regime_summary(ft, r_tel, policy),
+                "invariants": {
+                    "standby_exact": bool(
+                        np.array_equal(r_ref[:, gate_w <= 0.0], r_tel[:, gate_w <= 0.0])
+                    ),
+                    "cruise_exact": bool(
+                        np.array_equal(r_ref[:, gate_w >= 1.0], r_raw[:, gate_w >= 1.0])
+                    ),
+                    "standby_correction_rms": round(
+                        float(
+                            np.sqrt(
+                                np.mean((r_ref[:, gate_w <= 0.0] - r_tel[:, gate_w <= 0.0]) ** 2)
+                            )
+                            if (gate_w <= 0.0).any()
+                            else 0.0
+                        ),
+                        6,
+                    ),
+                },
             },
             "n_frames": int(ft.size),
             "n_windows": len(got),

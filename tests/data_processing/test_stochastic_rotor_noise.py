@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -389,6 +390,132 @@ def test_n_harmonics_range_draws_the_comb_length_per_clip():
     )
 
 
+def test_fitted_population_sets_profile_and_scale_invariant_line_floor_ratio():
+    mean = (2.0, 6.0, -1.0, -4.0, -7.0)
+    rotor = ((1.0, -1.0, 0.5, 0.0, -0.5), (-1.0, 1.0, -0.5, 0.0, 0.5))
+    ranges = srn.StochasticRanges(
+        profile_mean_db=mean,
+        profile_basis_db=(),
+        profile_rotor_db=rotor,
+        line_floor_mean_db=18.0,
+        line_floor_std_db=0.0,
+        rotor_contrast_std_db=0.0,
+        # These incompatible legacy controls must be ignored by the fitted path.
+        rolloff_p=(9.0, 9.0),
+        harm_jitter_db=(30.0, 30.0),
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(3),
+        ranges,
+        n_rotors=2,
+        n_harmonics=5,
+        sample_rate=SR,
+    )
+
+    expected = np.asarray(mean)[None, :] + np.asarray(rotor)
+    np.testing.assert_allclose(params.profile_db, expected)
+    assert params.profile_db[:, 1].mean() - params.floor_mean_db == pytest.approx(18.0)
+
+
+def test_fitted_population_draws_the_learned_cross_order_covariance():
+    mode = np.array((-4.0, -2.0, 0.0, 2.0, 4.0))
+    ranges = srn.StochasticRanges(
+        profile_mean_db=(0.0,) * 5,
+        profile_basis_db=(tuple(mode),),
+        profile_rotor_db=((0.0,) * 5,),
+        line_floor_mean_db=18.0,
+        line_floor_std_db=0.0,
+        rotor_contrast_std_db=0.0,
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+    )
+    profiles = np.stack(
+        [
+            srn.sample_params(
+                np.random.default_rng(seed),
+                ranges,
+                n_rotors=1,
+                n_harmonics=5,
+                sample_rate=SR,
+            ).profile_db[0]
+            for seed in range(512)
+        ]
+    )
+    empirical = np.cov(profiles, rowvar=False)
+    expected = np.outer(mode, mode)
+    cosine = np.sum(empirical * expected) / (np.linalg.norm(empirical) * np.linalg.norm(expected))
+    assert cosine > 0.999
+
+
+def test_visibility_hurdle_uses_a_finite_attenuated_component() -> None:
+    ranges = srn.StochasticRanges(
+        profile_mean_db=(0.0,) * 5,
+        profile_basis_db=(),
+        profile_rotor_db=((0.0,) * 5,),
+        line_floor_mean_db=18.0,
+        line_floor_std_db=0.0,
+        rotor_contrast_std_db=0.0,
+        visibility_probability=(1.0, 0.0, 1.0, 0.0, 1.0),
+        visibility_attenuation_db=(8.0, 10.0, 12.0, 14.0, 16.0),
+        visibility_attenuation_std_db=0.0,
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(19),
+        ranges,
+        n_rotors=1,
+        n_harmonics=5,
+        sample_rate=SR,
+    )
+
+    np.testing.assert_allclose(params.profile_db[0], [0.0, -10.0, 0.0, -14.0, 0.0])
+    assert params.floor_mean_db == pytest.approx(-18.0)
+    assert np.min(params.profile_db) > -120.0
+
+
+def test_visibility_uses_a_substream_and_changes_only_the_profile() -> None:
+    plain_ranges = srn.StochasticRanges(
+        profile_mean_db=(0.0,) * 5,
+        profile_basis_db=(),
+        profile_rotor_db=((0.0,) * 5,),
+        line_floor_mean_db=18.0,
+        line_floor_std_db=0.0,
+        rotor_contrast_std_db=0.0,
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+    )
+    visible_ranges = replace(
+        plain_ranges,
+        visibility_probability=(1.0,) * 5,
+        visibility_attenuation_db=(10.0,) * 5,
+    )
+    plain_rng = np.random.default_rng(31)
+    visible_rng = np.random.default_rng(31)
+    plain = srn.sample_params(
+        plain_rng,
+        plain_ranges,
+        n_rotors=1,
+        n_harmonics=5,
+        sample_rate=SR,
+    )
+    visible = srn.sample_params(
+        visible_rng,
+        visible_ranges,
+        n_rotors=1,
+        n_harmonics=5,
+        sample_rate=SR,
+    )
+
+    np.testing.assert_allclose(visible.profile_db, plain.profile_db)
+    np.testing.assert_allclose(visible.floor_ctrl_db, plain.floor_ctrl_db)
+    np.testing.assert_allclose(visible.gamma0, plain.gamma0)
+    assert visible.floor_mean_db == plain.floor_mean_db
+    assert visible_rng.random() == plain_rng.random()
+
+
 def test_n_harmonics_range_reaches_the_pool_and_shortens_the_comb():
     pool = srn.StochasticNoisePool(
         sample_rate=SR, duration_s=1.0, n_harmonics_range=(8, 16), n_mics=1, n_rotors=4
@@ -398,3 +525,346 @@ def test_n_harmonics_range_reaches_the_pool_and_shortens_the_comb():
     plain = srn.StochasticNoisePool(sample_rate=SR, duration_s=1.0, n_mics=1, n_rotors=4)
     _, _, plain_params, _ = plain.render(np.random.default_rng(7), 1.0)
     assert plain_params.n_harmonics > 16  # the default comb still fills the band
+
+
+def test_fm_mode_per_mic_floor_gain_leaves_the_lines_alone():
+    # A static per-mic floor gain must move the floor and only the floor: the
+    # line-to-floor ratio realized at each microphone shifts by exactly the
+    # mic's floor gain, and the lines themselves stay at one level across mics.
+    rng = np.random.default_rng(3)
+    ranges = srn.StochasticRanges(
+        rolloff_p=(0.5, 0.5),
+        harm_jitter_db=(0.0, 0.0),
+        blade_counts=(1,),
+        rotor_similarity=(1.0, 1.0),
+        gamma0_hz=(0.5, 0.5),
+        gamma_slope_hz=(0.2, 0.2),
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(-3.0, -3.0),
+        floor_rel_db=(-20.0, -20.0),
+        harm_gp_std_db=(0.0, 0.0),
+        floor_gp_std_db=(0.0, 0.0),
+        floor_tilt_gp_std=(0.0, 0.0),
+        mic_floor_std_db=(6.0, 6.0),
+    )
+    params = srn.sample_params(rng, ranges, n_rotors=1, n_harmonics=20, sample_rate=SR)
+    rps = np.full((1, SR * 4), 100.0)
+    audio, diag = srn.synthesize(
+        params, rps, rng=rng, n_mics=6, mic_gain_db=(0.0, 0.0), line_mode="fm", normalize_rms=None
+    )
+    power, freqs = _power_spectrum_frames(audio[0])
+    df = float(freqs[1] - freqs[0])
+    line_bins = np.zeros(freqs.size, bool)
+    for k in range(1, 21):
+        i = int(round(k * 100.0 / df))
+        line_bins[i - 2 : i + 3] = True
+    floor_bins = ~line_bins & (freqs > 300) & (freqs < 3000)
+    lines, floors = [], []
+    for m in range(6):
+        pm = _power_spectrum_frames(audio[m])[0].mean(axis=0)
+        floor_bin = float(np.median(pm[floor_bins]))
+        lines.append(10 * np.log10(max(pm[line_bins].sum() - floor_bin * line_bins.sum(), 1e-20)))
+        floors.append(10 * np.log10(floor_bin))
+    lines, floors = np.array(lines), np.array(floors)
+    assert np.ptp(floors) > 6.0  # the floor gains were drawn (std 6 dB) and applied
+    assert np.ptp(lines) < 2.5  # the lines did not follow them (the leak gives >= 6 dB)
+
+
+def test_fitted_width_and_microphone_parameters_reach_the_waveform() -> None:
+    gain_db = ((0.0, -6.0), (3.0, 1.0))
+    floor_db = (-2.0, 4.0)
+    all_db = (1.5, -1.5)
+    ranges = srn.StochasticRanges(
+        fixed_gamma0_hz=(1.0, 2.0),
+        fixed_gamma_slope_hz=(0.2, 0.4),
+        fixed_shaft_jitter_rps=(0.3, 0.7),
+        fixed_mic_gain_db=gain_db,
+        fixed_mic_floor_db=floor_db,
+        fixed_mic_gain_all_db=all_db,
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+        harm_gp_std_db=(0.0, 0.0),
+        floor_gp_std_db=(0.0, 0.0),
+        floor_tilt_gp_std=(0.0, 0.0),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(4),
+        ranges,
+        n_rotors=2,
+        n_harmonics=12,
+        sample_rate=SR,
+    )
+    rps = np.stack((np.full(SR // 2, 70.0), np.full(SR // 2, 83.0)))
+    _, diagnostics = srn.synthesize(
+        params,
+        rps,
+        rng=np.random.default_rng(5),
+        n_mics=2,
+        mic_gain_db=(-30.0, -20.0),
+        line_mode="fm",
+        normalize_rms=None,
+    )
+
+    np.testing.assert_allclose(params.gamma0, [1.0, 2.0])
+    np.testing.assert_allclose(params.gamma_slope, [0.2, 0.4])
+    np.testing.assert_allclose(params.shaft_jitter_rps, [0.3, 0.7])
+    np.testing.assert_allclose(diagnostics["mic_gains"], 10.0 ** (np.asarray(gain_db) / 10.0))
+    np.testing.assert_allclose(
+        diagnostics["mic_floor_gains"],
+        10.0 ** (np.asarray(floor_db) / 10.0),
+    )
+    np.testing.assert_allclose(diagnostics["mic_gain_all_db"], all_db)
+
+
+def test_fm_harmonics_have_static_microphone_phase() -> None:
+    ranges = srn.StochasticRanges(
+        gamma0_hz=(0.5, 0.5),
+        gamma_slope_hz=(0.1, 0.1),
+        fixed_shaft_jitter_rps=(0.0,),
+        phase_diffusion_hz_per_order=(0.0, 0.0),
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+        floor_rel_db=(-80.0, -80.0),
+        min_lines_above_floor=0.0,
+        harm_gp_std_db=(0.0, 0.0),
+        floor_gp_std_db=(0.0, 0.0),
+        floor_tilt_gp_std=(0.0, 0.0),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(18),
+        ranges,
+        n_rotors=1,
+        n_harmonics=12,
+        sample_rate=SR,
+    )
+    audio, _ = srn.synthesize(
+        params,
+        np.full((1, 2 * SR), 73.0),
+        rng=np.random.default_rng(19),
+        n_mics=2,
+        mic_gain_db=(0.0, 0.0),
+        line_mode="fm",
+        normalize_rms=None,
+    )
+
+    # Propagation contributes a static phase at each microphone. Equal gains
+    # therefore preserve the line powers without cloning the line waveform.
+    assert abs(float(np.corrcoef(audio)[0, 1])) < 0.9
+    p0, freqs = _power_spectrum(audio[0])
+    p1, _ = _power_spectrum(audio[1])
+    line_bins = np.asarray([np.argmin(np.abs(freqs - 73.0 * k)) for k in range(1, 13)])
+    np.testing.assert_allclose(
+        10.0 * np.log10(np.maximum(p0[line_bins], 1e-20)),
+        10.0 * np.log10(np.maximum(p1[line_bins], 1e-20)),
+        atol=1.0,
+    )
+
+
+def test_shaft_offset_moves_the_comb_off_the_label() -> None:
+    """The comb rides the shaft; the label the caller passed stays the label.
+
+    Real telemetry differs from the shaft by a static per-rotor offset, so a
+    line at order ``k`` sits ``k`` times that offset away from the frequency the
+    label predicts. A generator that ignores this teaches a regressor an
+    accuracy no real recording supports.
+    """
+    label_rps = 70.0
+    offset_std = 2.0
+    ranges = srn.StochasticRanges(
+        gamma0_hz=(0.5, 0.5),
+        gamma_slope_hz=(0.05, 0.05),
+        fixed_shaft_jitter_rps=(0.0,),
+        phase_diffusion_hz_per_order=(0.0, 0.0),
+        floor_shape_std_db=(0.0, 0.0),
+        floor_tilt_db_oct=(0.0, 0.0),
+        floor_rel_db=(-80.0, -80.0),
+        min_lines_above_floor=0.0,
+        harm_gp_std_db=(0.0, 0.0),
+        floor_gp_std_db=(0.0, 0.0),
+        floor_tilt_gp_std=(0.0, 0.0),
+        shaft_offset_rps=(offset_std, offset_std),
+    )
+    params = srn.sample_params(
+        np.random.default_rng(31),
+        ranges,
+        n_rotors=1,
+        n_harmonics=20,
+        sample_rate=SR,
+    )
+    offset = float(np.asarray(params.shaft_offset_rps).ravel()[0])
+    assert offset != 0.0
+    audio, _ = srn.synthesize(
+        params,
+        np.full((1, 2 * SR), label_rps),
+        rng=np.random.default_rng(32),
+        n_mics=1,
+        mic_gain_db=(0.0, 0.0),
+        line_mode="fm",
+        normalize_rms=None,
+    )
+    power, freqs = _power_spectrum(audio[0].astype(np.float64))
+    for order in (2, 5, 10):
+        centre = order * label_rps
+        window = np.flatnonzero(np.abs(freqs - centre) < 0.4 * label_rps)
+        peak = float(freqs[window][np.argmax(power[window])])
+        assert abs(peak - centre - order * offset) < 1.5 * (freqs[1] - freqs[0])
+
+    # A stopped rotor stays stopped — the offset is an error about a running
+    # shaft's speed, not a phantom rotation. The recording chain's static floor
+    # keeps the clip audible, so a phantom comb would show as a tonal peak.
+    stopped, _ = srn.synthesize(
+        params.with_(floor_static_rel=0.2),
+        np.zeros((1, SR)),
+        rng=np.random.default_rng(33),
+        n_mics=1,
+        mic_gain_db=(0.0, 0.0),
+        line_mode="fm",
+        normalize_rms=None,
+    )
+    stopped_power, stopped_freqs = _power_spectrum(stopped[0].astype(np.float64))
+    band = (stopped_freqs > 20.0) & (stopped_freqs < 4000.0)
+    assert float(stopped_power[band].max() / np.median(stopped_power[band])) < 50.0
+
+
+def test_shaft_jitter_log_std_varies_the_whole_clip_together() -> None:
+    """One width draw per clip, shared by its rotors.
+
+    A real flight's shaft wanders more in one segment than another, and the
+    per-clip fits measure that as a common mode across the four rotors. The
+    spread must therefore scale every rotor's jitter by the SAME factor — a
+    per-rotor draw would be the estimation noise the measurement subtracts.
+    """
+    fixed = (0.2, 0.4, 0.6, 0.8)
+    ranges = srn.StochasticRanges(
+        fixed_shaft_jitter_rps=fixed,
+        shaft_jitter_log_std=(0.5, 0.5),
+    )
+    factors = []
+    for seed in range(6):
+        params = srn.sample_params(
+            np.random.default_rng(seed),
+            ranges,
+            n_rotors=4,
+            n_harmonics=8,
+            sample_rate=SR,
+        )
+        drawn = np.asarray(params.shaft_jitter_rps, dtype=np.float64)
+        ratio = drawn / np.asarray(fixed)
+        np.testing.assert_allclose(ratio, ratio[0], rtol=1e-9)
+        factors.append(float(ratio[0]))
+    # a real spread, and centred on the fitted width (lognormal median 1)
+    assert np.std(np.log(factors), ddof=1) > 0.1
+    assert min(factors) < 1.0 < max(factors)
+
+
+def test_render_reuse_amortises_synthesis_without_freezing_the_noise() -> None:
+    """One render per ``render_reuse`` draws, and the pool stays diverse.
+
+    Rendering a clip for every training sample starves the GPU; a real-noise
+    baseline reuses a finite corpus, so reusing rendered clips is the same
+    regime. What must hold is that the render RATE drops and the drawn clips do
+    not collapse onto one waveform.
+    """
+
+    def make(reuse: int) -> srn.StochasticNoisePool:
+        return srn.StochasticNoisePool(
+            sample_rate=SR,
+            duration_s=1.0,
+            n_harmonics=24,
+            n_mics=2,
+            line_mode="fm",
+            ranges={"floor_rel_db": (-20.0, -20.0), "min_lines_above_floor": 0.0},
+            render_reuse=reuse,
+            render_pool=4,
+        )
+
+    def counting(pool: srn.StochasticNoisePool) -> list[int]:
+        calls = [0]
+        inner = pool.render
+
+        def counted(*args: object, **kwargs: object) -> object:
+            calls[0] += 1
+            return inner(*args, **kwargs)  # type: ignore[arg-type]
+
+        pool.render = counted  # type: ignore[assignment]
+        return calls
+
+    reuse = 8
+    pooled = make(reuse)
+    calls = counting(pooled)
+    rng = np.random.default_rng(4)
+    drawn = [np.asarray(pooled.sample_timeframe(rng, 1.0)["audio"].data) for _ in range(32)]
+
+    assert calls[0] == 32 // reuse, f"expected {32 // reuse} renders, got {calls[0]}"
+    distinct = {round(float(np.std(x, dtype=np.float64)), 9) for x in drawn}
+    assert len(distinct) >= 3, "the pool collapsed onto too few clips"
+
+    eager = make(1)
+    eager_calls = counting(eager)
+    for _ in range(5):
+        eager.sample_timeframe(rng, 1.0)
+    assert eager_calls[0] == 5, "the default must still render every sample"
+
+
+def test_per_rotor_floor_guard_lifts_the_quietest_rotor_above_the_floor():
+    """A pooled coverage fraction can bury a whole rotor; the per-rotor form
+    cannot.
+
+    One rotor is put 30 dB under the other three. With only the pooled guard
+    the loud rotors satisfy it on their own and the quiet one keeps no visible
+    line at all — a clip whose fourth label has no evidence anywhere in the
+    spectrum. The per-rotor guard lowers the floor until every rotor keeps its
+    share.
+    """
+    params = _params(3)
+    profile = params.profile_db.copy()
+    profile[3] -= 30.0
+    quiet = replace(params, profile_db=profile)
+
+    def coverage(level: float) -> np.ndarray:
+        zero = replace(quiet, floor_mean_db=0.0)
+        return np.array(
+            [
+                float(np.mean(peaks > level + srn.floor_shape_db(zero, centers)))
+                for peaks, centers in srn.line_peaks_by_rotor(quiet)
+            ]
+        )
+
+    pooled = srn.calibrate_floor(quiet, -2.0, min_lines_above_floor=0.30)
+    guarded = srn.calibrate_floor(
+        quiet, -2.0, min_lines_above_floor=0.30, min_lines_above_floor_per_rotor=0.30
+    )
+    assert coverage(pooled).mean() >= 0.30  # the pooled guard is satisfied ...
+    assert coverage(pooled).min() < 0.05  # ... with one rotor essentially invisible
+    assert guarded < pooled  # the floor had to come down
+    assert coverage(guarded).min() >= 0.30  # every rotor keeps a trackable comb
+    # A zero threshold is exactly the old behaviour.
+    assert srn.calibrate_floor(
+        quiet, -2.0, min_lines_above_floor=0.30, min_lines_above_floor_per_rotor=0.0
+    ) == pytest.approx(pooled)
+
+
+def test_per_rotor_floor_threshold_reaches_the_renderer_from_its_range():
+    """``StochasticRanges`` carries the threshold into ``sample_params``."""
+    profile = None
+    for seed in range(6):
+        loose = srn.sample_params(
+            np.random.default_rng(seed), n_rotors=4, n_harmonics=64, sample_rate=SR
+        )
+        tight = srn.sample_params(
+            np.random.default_rng(seed),
+            n_rotors=4,
+            n_harmonics=64,
+            sample_rate=SR,
+            ranges=srn.StochasticRanges(min_lines_above_floor_per_rotor=0.95),
+        )
+        assert tight.floor_mean_db <= loose.floor_mean_db
+        if tight.floor_mean_db < loose.floor_mean_db:
+            profile = tight
+    assert profile is not None, "no draw needed the per-rotor guard"
+    zero = replace(profile, floor_mean_db=0.0)
+    per_rotor = [
+        float(np.mean(peaks > profile.floor_mean_db + srn.floor_shape_db(zero, centers)))
+        for peaks, centers in srn.line_peaks_by_rotor(profile)
+    ]
+    assert min(per_rotor) >= 0.95

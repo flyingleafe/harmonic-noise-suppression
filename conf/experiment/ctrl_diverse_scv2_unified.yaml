@@ -1,0 +1,37 @@
+# @package _global_
+# C2 — THE DIVERSE-PARAMETER TEST. Not a control: a hypothesis test. Same model
+# as rig_fitted_scv2_unified and the same regime, but the parameters are sampled
+# over a wide space instead of a tight neighbourhood of two rigs. Only what the
+# measurements pin is held: the line-width bracket (bench 0.02 rev/s of shaft
+# jitter to flight 0.5), the amplitude process (OU, 2.90 dB, 0.82 s, coherence
+# 0.191), the bench speed laws (line 2.196 +- 0.125, floor 1.400 +- 0.076) and
+# the label error. Timbre is wide.
+#
+# HYPOTHESIS. A model forced to disentangle a broad distribution learns the
+# disentangling operation rather than one rig's fingerprint, and therefore
+# transfers if the family describes real rotor noise faithfully.
+#
+# The failure to avoid is the original stochastic-comb stream, which was diverse
+# in the wrong way: it occupied regions no real rig does (lines wide enough to
+# merge the comb, floors that buried every order) and was a harder, different
+# task. Every range is anchored to a measurement, and two guards keep a draw
+# learnable: the per-rotor floor-coverage guard (every rotor keeps a fifth of
+# its in-band lines above the floor, so no rotor's label is evidence-free) and a
+# width prior whose upper end is the widest the flight fits ever asked for.
+defaults:
+  - real_r1_scv2
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: ctrl_diverse_scv2_unified
+# fp16 went non-finite at step ~500 on the FM stream (run tgr8l18p); the
+# matrix's one-time bf16 policy applies to every FM-tone-bank stream.
+amp_dtype: bfloat16
+samples_per_validation: null
+batch_size: 128
+num_workers: 12
+data:
+  train:
+    params:
+      path: conf/online_mix/ctrl_diverse.yaml
+      duration_s: 2.0
