@@ -541,7 +541,7 @@ $k$-linear width law is therefore correct, and a constant-width variant is worse
 by 3800 nats.
 
 This is the third time the same class of defect appeared: a measurement or a
-model floor that cannot represent the value it measures. See §10, items 1, 2 and 8.
+model floor that cannot represent the value it measures. See §11, items 1, 2 and 8.
 :::
 
 The uncensored measurement, with the same code and a $\pm 30$ Hz band:
@@ -782,67 +782,212 @@ shows the mean spectrum already identifies $w_k$.
 
 # 8. Looking and listening
 
-Statistics alone do not close a stage. The five bench cells were rendered from
-the fitted vector through the SAME renderer the training streams use, and
-decimated on the real clips' own path. Each panel is real, fitted, and a draw
-from the untouched default family, plus the LTAS band profile of all three.
+Statistics alone do not close a stage. Every bench cell was rendered from its
+fitted vector through the SAME renderer the training streams use, and decimated
+on the real clips' own path. Each panel is real, fitted, and a draw from the
+untouched default family, plus the LTAS band profile of all three.
 
-|cell|rev/s|fitted LTAS mean\|dev\| (dB)|pre-fit (dB)|
-|---|---:|---:|---:|
-|Motor1_50|49.0|2.06|7.25|
-|Motor1_60|58.8|1.94|9.69|
-|Motor1_70|68.5|1.93|9.62|
-|Motor1_80|78.2|2.51|10.59|
-|Motor1_90|88.0|2.03|8.67|
+## The whole bench rig: four motors, five setpoints
+
+```{python}
+rig_idx = json.loads((ROOT / "docs/explainers/stage1-bench/index_bayes.json").read_text())
+tab = pd.DataFrame(
+    [
+        dict(
+            cell=r["cell"],
+            rev_s=r["rate"],
+            fitted_LTAS_dB=r["fitted_mean_abs_db"],
+            prefit_LTAS_dB=r["prefit_mean_abs_db"],
+            k2_15=r["orders"]["k2_15"],
+            k15_30=r["orders"]["k15_30"],
+        )
+        for r in rig_idx
+    ]
+).set_index("cell")
+display(tab)
+print(
+    f"fitted LTAS deviation: median {tab.fitted_LTAS_dB.median():.2f} dB "
+    f"(range {tab.fitted_LTAS_dB.min():.2f}-{tab.fitted_LTAS_dB.max():.2f}); "
+    f"pre-fit median {tab.prefit_LTAS_dB.median():.2f} dB"
+)
+```
 
 ::: {layout-ncol=1}
 ![Motor 1 at setpoint 80](stage1-bench/bayes_Motor1_80.png)
 
-![Motor 1 at setpoint 50](stage1-bench/bayes_Motor1_50.png)
+![Motor 2 at setpoint 80 — the same setpoint, a different motor position](stage1-bench/bayes_Motor2_80.png)
 
-![Motor 1 at setpoint 90](stage1-bench/bayes_Motor1_90.png)
+![Motor 3 at setpoint 80](stage1-bench/bayes_Motor3_80.png)
+
+![Motor 4 at setpoint 80](stage1-bench/bayes_Motor4_80.png)
 :::
 
-The fitted panel carries the real clip's comb, its 4.3 kHz and 6.5 kHz bright
-bands, and its broadband floor level. The pre-fit panel does not: its comb is
-too strong, its floor too dark, and its LTAS falls away by more than 10 dB
-across the band.
+::: {.callout-warning}
+## What this rig fit does and does not contain
 
-The residual is in the 3 to 7 kHz bands, where the fitted LTAS sits about 4 dB
-low. WAV files for every cell are in `docs/explainers/stage1-bench/` as
-`bayes_Motor1_NN_{real,fitted,prefit}.wav`.
+A rig fit over bench clips has one rotor per clip, so its tied profile is **one
+shape plus a scalar level per clip**. The four motors above therefore share a
+timbre and differ by a gain: Motor 1 sits exactly 5.9 dB above Motor 2 at every
+order. The measurement says the difference is **frequency dependent** (Motor 2
+is 5 to 13 dB below Motor 1 around 1 kHz), so a single gain cannot express it.
+Four independent single-motor fits are running to supply four genuinely
+different shapes; this page will be updated with them.
+:::
 
 ## Listen
+
+Each row is one bench cell: the real recording, the fitted model's render, and a
+draw from the untouched default family. All three are peak-normalised to the
+same level, so what differs is spectrum and texture, not loudness.
 
 ```{python}
 from IPython.display import HTML, display as _d
 
-cells = [r["cell"] for r in idx] if (idx := locals().get("idx")) else [
-    f"Motor1_{s}" for s in (50, 60, 70, 80, 90)
-]
-html = ["<table style='width:100%;border-collapse:collapse'>",
-        "<tr><th style='text-align:left'>cell</th><th>real</th><th>fitted</th>"
-        "<th>pre-fit</th></tr>"]
-for c in cells:
-    tds = "".join(
-        f"<td style='padding:4px'><audio controls preload='metadata' "
-        f"style='width:230px' src='stage1-bench/bayes_{c}_{k}.wav'></audio></td>"
-        for k in ("real", "fitted", "prefit")
+
+def player_table(rows, subdir, stem_of):
+    out = [
+        "<table style='width:100%;border-collapse:collapse'>",
+        "<tr><th style='text-align:left'>clip</th><th>real</th><th>fitted</th>"
+        "<th>pre-fit</th></tr>",
+    ]
+    for label, kinds in rows:
+        tds = "".join(
+            f"<td style='padding:4px'><audio controls preload='metadata' "
+            f"style='width:225px' src='{subdir}/{src}'></audio></td>"
+            for src in kinds
+        )
+        out.append(f"<tr><td style='padding:4px'><b>{label}</b></td>{tds}</tr>")
+    out.append("</table>")
+    return HTML("\n".join(out))
+
+
+cells = [f"Motor1_{v}" for v in (50, 60, 70, 80, 90)] + [f"Motor{m}_80" for m in (2, 3, 4)]
+_d(
+    player_table(
+        [
+            (c, [f"bayes_{c}_{k}.wav" for k in ("real", "fitted", "prefit")])
+            for c in cells
+        ],
+        "stage1-bench",
+        None,
     )
-    html.append(f"<tr><td style='padding:4px'><b>{c}</b></td>{tds}</tr>")
-html.append("</table>")
-_d(HTML("\n".join(html)))
+)
 ```
 
+# 9. Does the bench predict DREGON in flight?
 
-# 9. Where this goes next
+The bench is clamped, single-motor and single-channel. A flight is four rotors
+at once, eight microphones, and a moving shaft. This section asks the transfer
+question directly: build the generative model from the bench cells ONLY, take
+nothing from the flight except its rotor telemetry, and see how the result
+compares with the real flight recording.
+
+Four arms on `free-flight_nosource_room2`, four 8 s windows:
+
+* **real** — the recording itself.
+* **bench, blind** — every number from the bench, including its room floor.
+* **bench comb + flight floor** — the same comb, with the floor LEVEL matched to
+  the real clip in the line-free 5-7 kHz band. One number, so the comb is still
+  entirely from the bench.
+* **flight-fitted** — the same model fitted to the flight recording. The
+  reference a transfer should be measured against.
+
+Every arm is rendered at the real window's own rotor trajectories and scored by
+the frozen `hppnet_l2_r2_s0` on all eight channels.
+
+```{python}
+tr = load("transfer/transfer.json")  # load() is rooted at results/S1
+if tr:
+    display(
+        pd.DataFrame(
+            [
+                dict(
+                    arm=k,
+                    median_8mic_MAE=v["median_mae_8mic"],
+                    median_spread=v["median_spread"],
+                    median_LTAS_dev_dB=v["median_ltas_dev_db"],
+                )
+                for k, v in tr["summary"].items()
+            ]
+        ).set_index("arm")
+    )
+```
+
+Read it in this order.
+
+1. **The real DREGON flight tracks at 1.07 rev/s.** That is the number every
+   synthetic arm is trying to reach. For scale, Michael's real cruise reads
+   0.35 rev/s through the same pipeline.
+2. **A blind bench transfer reads 2.49 rev/s** — worse than real by 2.3 times,
+   with the band profile off by 9.4 dB. The bench comb does carry enough
+   structure to be tracked at all, which is not nothing, but it is not the
+   flight.
+3. **Matching the floor level changes almost nothing** (2.47 rev/s). So the
+   transfer gap is not a room-level gap.
+4. **The flight-fitted arm gets the envelope right — 1.54 dB — and still reads
+   2.08 rev/s.** This is the informative result. On Michael's cruise the same
+   model fitted the same way reached 0.76 against 0.35 real. On DREGON it does
+   not, and the fitted parameters say why: the DREGON flight fit returns
+   $\gamma_0 = 12.4$ Hz and $k_{1/2} = 1.2$, against 0.0 Hz and 1.9 for
+   Michael. DREGON's flight lines are fitted as very wide and almost entirely
+   incoherent, so the rendered comb is smeared and the tracker has less to lock
+   onto — even though the average spectrum is nearly perfect.
+
+::: {layout-ncol=1}
+![DREGON flight: real, bench-blind, bench comb + flight floor, flight-fitted, and the LTAS of all four](dregon-transfer/dregon_00.png)
+:::
+
+## The tracker's output against the truth
+
+Same window, four arms. The upper panel is the clip, the lower panel is the
+frozen tracker's four rotor predictions over the ground truth.
+
+::: {layout-ncol=1}
+![real DREGON flight](../../results/synthetic_probe/dregon_real__clip00.png)
+
+![bench, blind](../../results/synthetic_probe/dregon_bench_blind__clip00.png)
+
+![flight-fitted](../../results/synthetic_probe/dregon_flight-fitted__clip00.png)
+:::
+
+## Listen to the transfer
+
+```{python}
+if tr:
+    rows = []
+    for i in range(min(2, len(tr["clips"]))):
+        rows.append(
+            (
+                f"window {i}",
+                [
+                    f"dregon_{i:02d}_real.wav",
+                    f"dregon_{i:02d}_bench_blind.wav",
+                    f"dregon_{i:02d}_flight-fitted.wav",
+                ],
+            )
+        )
+    out = ["<table style='width:100%;border-collapse:collapse'>",
+           "<tr><th style='text-align:left'>window</th><th>real flight</th>"
+           "<th>bench, blind</th><th>flight-fitted</th></tr>"]
+    for label, srcs in rows:
+        tds = "".join(
+            f"<td style='padding:4px'><audio controls preload='metadata' "
+            f"style='width:225px' src='dregon-transfer/{s}'></audio></td>" for s in srcs
+        )
+        out.append(f"<tr><td style='padding:4px'><b>{label}</b></td>{tds}</tr>")
+    out.append("</table>")
+    _d(HTML("\n".join(out)))
+```
+
+# 10. Where this goes next
+
 
 The same line model is fitted to Michael's FLY125 cruise in
 [stage2-cruise](stage2-cruise.html), where a frozen rotor-speed tracker scores
 the synthetic clips at 0.76 rev/s against 0.35 for the real clips through the
 same pipeline, with no refusals.
 
-# 10. Hacks, defects, and hindrances
+# 11. Hacks, defects, and hindrances
 
 This list is complete and honest. Items 1 to 7 are **defects that we found and
 fixed**. Items 8 to 12 are **open**.
@@ -909,7 +1054,7 @@ fixed**. Items 8 to 12 are **open**.
     statistics computed with different band widths. It was wrong. The correct
     statement is in §5.1.
 
-# 11. What comes next
+# 12. What comes next
 
 1. Finish the constant-pedestal test, and keep the variant with the better
    held-out NLL.
