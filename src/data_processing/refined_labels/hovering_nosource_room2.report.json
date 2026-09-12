@@ -1,0 +1,126 @@
+{
+ "recording_id": "hovering_nosource_room2",
+ "source": {
+  "spec": "frames:DREGON-frames",
+  "origin": "dregon",
+  "rps_key": "motors_command",
+  "splits": [
+   "in_flight_noise"
+  ],
+  "sample_rate": 16000
+ },
+ "time_reference": "seconds from the published recording's audio t_start (the full frame, before the loader's telemetry-overlap trim of t0_offset_s)",
+ "t0_offset_s": 4.232547,
+ "params": {
+  "window_s": 16.0,
+  "hop_s": 12.0,
+  "k_max": 40,
+  "channels": 4,
+  "knot_s": 0.25,
+  "lr": 1.0,
+  "schedule": null,
+  "hop_frame_s": 0.032,
+  "idle_rev_s": 20.0,
+  "max_move_rev_s": 3.0
+ },
+ "n_frames": 1116,
+ "n_windows": 3,
+ "n_used": 1,
+ "cruise_scale_pct": -0.50396,
+ "cruise_scale_pct_raw_optimizer": -0.77361,
+ "max_abs_delta": 1.749183,
+ "windows": [
+  {
+   "recording": "hovering_nosource_room2",
+   "i0": 0,
+   "i1": 500,
+   "start_s": 4.232547,
+   "end_s": 20.232547,
+   "n_frames": 500,
+   "mean_rev_s": 65.6446,
+   "k_max": 40,
+   "channels": 4,
+   "used": false,
+   "reason": "not_cruise",
+   "min_rev_s": 0.0
+  },
+  {
+   "recording": "hovering_nosource_room2",
+   "i0": 375,
+   "i1": 875,
+   "start_s": 16.232547,
+   "end_s": 32.232547,
+   "n_frames": 500,
+   "mean_rev_s": 80.7176,
+   "k_max": 40,
+   "channels": 4,
+   "used": true,
+   "used_per_rotor": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "reason": "ok",
+   "smooth_lambda": 1.0,
+   "prior_init": 0.065545,
+   "scale_pct_per_rotor": [
+    -1.80956,
+    0.8048,
+    -1.7928,
+    -0.29688
+   ],
+   "move_max": 1.74918,
+   "objective_before": 0.84384432,
+   "objective_after": 0.70601541,
+   "r2_before": 0.197715,
+   "r2_after": 0.309894,
+   "wall_s": 275.98,
+   "stages": [
+    {
+     "k_max": 5,
+     "n_evals": 41,
+     "loss_start": 0.9113948033315632,
+     "loss_end": 0.7851944918942706,
+     "wall_s": 31.903
+    },
+    {
+     "k_max": 10,
+     "n_evals": 37,
+     "loss_start": 0.7808514037221094,
+     "loss_end": 0.7793024100761272,
+     "wall_s": 56.678
+    },
+    {
+     "k_max": 20,
+     "n_evals": 25,
+     "loss_start": 0.7764401660375075,
+     "loss_end": 0.7696458381880514,
+     "wall_s": 90.255
+    },
+    {
+     "k_max": 40,
+     "n_evals": 9,
+     "loss_start": 0.7676383383511383,
+     "loss_end": 0.7676383384707415,
+     "wall_s": 92.639
+    }
+   ],
+   "k_cap": 40
+  },
+  {
+   "recording": "hovering_nosource_room2",
+   "i0": 616,
+   "i1": 1116,
+   "start_s": 23.944547,
+   "end_s": 39.944547,
+   "n_frames": 500,
+   "mean_rev_s": 80.5132,
+   "k_max": 40,
+   "channels": 4,
+   "used": false,
+   "reason": "not_cruise",
+   "min_rev_s": 62.4424
+  }
+ ]
+}
