@@ -1,0 +1,218 @@
+{
+ "recording_id": "free-flight_nosource_room2",
+ "source": {
+  "spec": "frames:DREGON-frames",
+  "origin": "dregon",
+  "rps_key": "motors_command",
+  "splits": [
+   "in_flight_noise"
+  ],
+  "sample_rate": 16000
+ },
+ "time_reference": "seconds from the published recording's audio t_start (the full frame, before the loader's telemetry-overlap trim of t0_offset_s)",
+ "t0_offset_s": 5.223059,
+ "params": {
+  "window_s": 16.0,
+  "hop_s": 12.0,
+  "k_max": 40,
+  "channels": 4,
+  "knot_s": 0.25,
+  "lr": 1.0,
+  "schedule": null,
+  "hop_frame_s": 0.032,
+  "idle_rev_s": 20.0,
+  "max_move_rev_s": 3.0
+ },
+ "n_frames": 2299,
+ "n_windows": 6,
+ "n_used": 2,
+ "cruise_scale_pct": -0.86799,
+ "cruise_scale_pct_raw_optimizer": -1.07159,
+ "max_abs_delta": 2.42073,
+ "windows": [
+  {
+   "recording": "free-flight_nosource_room2",
+   "i0": 0,
+   "i1": 500,
+   "start_s": 5.223059,
+   "end_s": 21.223059,
+   "n_frames": 500,
+   "mean_rev_s": 65.623,
+   "k_max": 40,
+   "channels": 4,
+   "used": false,
+   "reason": "not_cruise",
+   "min_rev_s": 0.0
+  },
+  {
+   "recording": "free-flight_nosource_room2",
+   "i0": 375,
+   "i1": 875,
+   "start_s": 17.223059,
+   "end_s": 33.223059,
+   "n_frames": 500,
+   "mean_rev_s": 81.0735,
+   "k_max": 40,
+   "channels": 4,
+   "used": false,
+   "reason": "not_cruise",
+   "min_rev_s": 62.6728
+  },
+  {
+   "recording": "free-flight_nosource_room2",
+   "i0": 750,
+   "i1": 1250,
+   "start_s": 29.223059,
+   "end_s": 45.223059,
+   "n_frames": 500,
+   "mean_rev_s": 80.8251,
+   "k_max": 40,
+   "channels": 4,
+   "used": false,
+   "reason": "not_cruise",
+   "min_rev_s": 62.6728
+  },
+  {
+   "recording": "free-flight_nosource_room2",
+   "i0": 1125,
+   "i1": 1625,
+   "start_s": 41.223059,
+   "end_s": 57.223059,
+   "n_frames": 500,
+   "mean_rev_s": 80.7498,
+   "k_max": 40,
+   "channels": 4,
+   "used": true,
+   "used_per_rotor": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "reason": "ok",
+   "smooth_lambda": 1.0,
+   "prior_init": 0.048114,
+   "scale_pct_per_rotor": [
+    -0.0156,
+    -2.46167,
+    -1.4738,
+    -0.68236
+   ],
+   "move_max": 2.51136,
+   "objective_before": 0.86128748,
+   "objective_after": 0.66125737,
+   "r2_before": 0.180377,
+   "r2_after": 0.3574,
+   "wall_s": 975.24,
+   "stages": [
+    {
+     "k_max": 5,
+     "n_evals": 27,
+     "loss_start": 0.9168153253766138,
+     "loss_end": 0.7894312422384916,
+     "wall_s": 49.086
+    },
+    {
+     "k_max": 10,
+     "n_evals": 23,
+     "loss_start": 0.7855737269327807,
+     "loss_end": 0.7218870234504315,
+     "wall_s": 86.323
+    },
+    {
+     "k_max": 20,
+     "n_evals": 36,
+     "loss_start": 0.7181873759694539,
+     "loss_end": 0.7177832542045213,
+     "wall_s": 299.729
+    },
+    {
+     "k_max": 40,
+     "n_evals": 25,
+     "loss_start": 0.7148093979988954,
+     "loss_end": 0.7089828750169492,
+     "wall_s": 534.418
+    }
+   ],
+   "k_cap": 40
+  },
+  {
+   "recording": "free-flight_nosource_room2",
+   "i0": 1500,
+   "i1": 2000,
+   "start_s": 53.223059,
+   "end_s": 69.223059,
+   "n_frames": 500,
+   "mean_rev_s": 80.6894,
+   "k_max": 40,
+   "channels": 4,
+   "used": true,
+   "used_per_rotor": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "reason": "ok",
+   "smooth_lambda": 1.0,
+   "prior_init": 0.061265,
+   "scale_pct_per_rotor": [
+    -1.67912,
+    0.07115,
+    -1.30259,
+    -1.0287
+   ],
+   "move_max": 1.59887,
+   "objective_before": 0.8750241,
+   "objective_after": 0.77265665,
+   "r2_before": 0.157882,
+   "r2_after": 0.249125,
+   "wall_s": 869.71,
+   "stages": [
+    {
+     "k_max": 5,
+     "n_evals": 49,
+     "loss_start": 0.9438051181365557,
+     "loss_end": 0.9150261155151119,
+     "wall_s": 84.237
+    },
+    {
+     "k_max": 10,
+     "n_evals": 36,
+     "loss_start": 0.9104307515168732,
+     "loss_end": 0.8479703151074216,
+     "wall_s": 128.021
+    },
+    {
+     "k_max": 20,
+     "n_evals": 32,
+     "loss_start": 0.8440330745964386,
+     "loss_end": 0.8349499286433855,
+     "wall_s": 252.973
+    },
+    {
+     "k_max": 40,
+     "n_evals": 20,
+     "loss_start": 0.831736145988302,
+     "loss_end": 0.8317222047527577,
+     "wall_s": 404.101
+    }
+   ],
+   "k_cap": 40
+  },
+  {
+   "recording": "free-flight_nosource_room2",
+   "i0": 1799,
+   "i1": 2299,
+   "start_s": 62.791059,
+   "end_s": 78.791059,
+   "n_frames": 500,
+   "mean_rev_s": 79.8616,
+   "k_max": 40,
+   "channels": 4,
+   "used": false,
+   "reason": "not_cruise",
+   "min_rev_s": 63.8577
+  }
+ ]
+}

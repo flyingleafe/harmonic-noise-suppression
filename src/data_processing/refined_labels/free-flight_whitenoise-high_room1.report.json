@@ -1,0 +1,204 @@
+{
+ "recording_id": "free-flight_whitenoise-high_room1",
+ "source": {
+  "spec": "frames:DREGON-frames",
+  "origin": "dregon",
+  "rps_key": "motors_measured",
+  "splits": [
+   "in_flight_source"
+  ],
+  "sample_rate": 16000
+ },
+ "time_reference": "seconds from the published recording's audio t_start (the full frame, before the loader's telemetry-overlap trim of t0_offset_s)",
+ "t0_offset_s": 5.66968,
+ "params": {
+  "window_s": 16.0,
+  "hop_s": 12.0,
+  "k_max": 40,
+  "channels": 4,
+  "knot_s": 0.25,
+  "lr": 1.0,
+  "schedule": null,
+  "hop_frame_s": 0.032,
+  "idle_rev_s": 20.0,
+  "max_move_rev_s": 3.0
+ },
+ "n_frames": 1626,
+ "n_windows": 5,
+ "n_used": 2,
+ "cruise_scale_pct": -0.52957,
+ "cruise_scale_pct_raw_optimizer": -0.62865,
+ "max_abs_delta": 1.626339,
+ "windows": [
+  {
+   "recording": "free-flight_whitenoise-high_room1",
+   "i0": 0,
+   "i1": 500,
+   "start_s": 5.66968,
+   "end_s": 21.66968,
+   "n_frames": 500,
+   "mean_rev_s": 60.0594,
+   "k_max": 40,
+   "channels": 4,
+   "used": false,
+   "reason": "not_cruise",
+   "min_rev_s": 0.0
+  },
+  {
+   "recording": "free-flight_whitenoise-high_room1",
+   "i0": 375,
+   "i1": 875,
+   "start_s": 17.66968,
+   "end_s": 33.66968,
+   "n_frames": 500,
+   "mean_rev_s": 80.6326,
+   "k_max": 40,
+   "channels": 4,
+   "used": true,
+   "used_per_rotor": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "reason": "ok",
+   "smooth_lambda": 1.0,
+   "prior_init": 0.090229,
+   "scale_pct_per_rotor": [
+    -0.65981,
+    -0.94803,
+    -0.57987,
+    -0.47667
+   ],
+   "move_max": 1.62634,
+   "objective_before": 0.51794925,
+   "objective_after": 0.37808696,
+   "r2_before": 0.557916,
+   "r2_after": 0.630052,
+   "wall_s": 533.67,
+   "stages": [
+    {
+     "k_max": 5,
+     "n_evals": 22,
+     "loss_start": 0.6124402399507376,
+     "loss_end": 0.4807650601674841,
+     "wall_s": 43.834
+    },
+    {
+     "k_max": 10,
+     "n_evals": 25,
+     "loss_start": 0.478293403750111,
+     "loss_end": 0.47379156413947243,
+     "wall_s": 100.578
+    },
+    {
+     "k_max": 20,
+     "n_evals": 16,
+     "loss_start": 0.47074163512314604,
+     "loss_end": 0.46983767842300217,
+     "wall_s": 141.47
+    },
+    {
+     "k_max": 40,
+     "n_evals": 11,
+     "loss_start": 0.46710558429416127,
+     "loss_end": 0.46710558429372795,
+     "wall_s": 242.845
+    }
+   ],
+   "k_cap": 40
+  },
+  {
+   "recording": "free-flight_whitenoise-high_room1",
+   "i0": 750,
+   "i1": 1250,
+   "start_s": 29.66968,
+   "end_s": 45.66968,
+   "n_frames": 500,
+   "mean_rev_s": 80.4589,
+   "k_max": 40,
+   "channels": 4,
+   "used": true,
+   "used_per_rotor": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "reason": "ok",
+   "smooth_lambda": 1.0,
+   "prior_init": 0.085044,
+   "scale_pct_per_rotor": [
+    -0.54298,
+    -0.75396,
+    -0.52307,
+    -0.54478
+   ],
+   "move_max": 1.26276,
+   "objective_before": 0.64470812,
+   "objective_after": 0.50403501,
+   "r2_before": 0.420717,
+   "r2_after": 0.505146,
+   "wall_s": 846.43,
+   "stages": [
+    {
+     "k_max": 5,
+     "n_evals": 23,
+     "loss_start": 0.734730807935219,
+     "loss_end": 0.6030053265187436,
+     "wall_s": 43.339
+    },
+    {
+     "k_max": 10,
+     "n_evals": 25,
+     "loss_start": 0.5996780069826961,
+     "loss_end": 0.5950712833672533,
+     "wall_s": 95.831
+    },
+    {
+     "k_max": 20,
+     "n_evals": 22,
+     "loss_start": 0.5918254013149834,
+     "loss_end": 0.5906499591536674,
+     "wall_s": 185.402
+    },
+    {
+     "k_max": 40,
+     "n_evals": 24,
+     "loss_start": 0.5876947424930464,
+     "loss_end": 0.587133333877158,
+     "wall_s": 521.631
+    }
+   ],
+   "k_cap": 40
+  },
+  {
+   "recording": "free-flight_whitenoise-high_room1",
+   "i0": 1125,
+   "i1": 1625,
+   "start_s": 41.66968,
+   "end_s": 57.66968,
+   "n_frames": 500,
+   "mean_rev_s": 76.4247,
+   "k_max": 40,
+   "channels": 4,
+   "used": false,
+   "reason": "not_cruise",
+   "min_rev_s": 0.0
+  },
+  {
+   "recording": "free-flight_whitenoise-high_room1",
+   "i0": 1126,
+   "i1": 1626,
+   "start_s": 41.70168,
+   "end_s": 57.70168,
+   "n_frames": 500,
+   "mean_rev_s": 76.2638,
+   "k_max": 40,
+   "channels": 4,
+   "used": false,
+   "reason": "not_cruise",
+   "min_rev_s": 0.0
+  }
+ ]
+}
