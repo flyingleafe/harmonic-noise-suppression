@@ -42,3 +42,6 @@ $presentation-h2-font-size: 1.25em;
 .flow .node.red { background: #f7e9e6; }
 .flow .node.green { background: #e6f2ea; }
 .flow .arrow { text-align: center; font-size: 0.7em; line-height: 1.1; color: #555; }
+
+.reveal .claim { position: absolute; bottom: 0; left: 0; right: 0; font-size: 1.2em; line-height: 1.25; background: #fff7e0; border-top: 2px solid #d9a400; padding: 0.3em 0.6em; }
+.reveal .claim p { margin: 0; }

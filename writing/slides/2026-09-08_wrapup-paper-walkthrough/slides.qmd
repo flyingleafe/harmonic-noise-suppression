@@ -16,6 +16,21 @@ format:
     auto-stretch: false
     html-math-method: katex
     theme: [default, styles.scss]
+  beamer:
+    output-file: slides.pdf
+    pdf-engine: tectonic
+    aspectratio: 169
+    fontsize: 8pt
+    navigation: empty
+    theme: default
+    colortheme: seahorse
+    header-includes: |
+      \setbeamertemplate{navigation symbols}{}
+      \setbeamertemplate{footline}[frame number]
+      \setbeamerfont{title}{size=\large}
+      \setbeamerfont{frametitle}{size=\normalsize}
+      \setbeamersize{text margin left=4mm,text margin right=4mm}
+      \usepackage{xcolor}
 execute:
   echo: false
 ---
@@ -48,6 +63,10 @@ Train pool 444 s × 8 mics ≈ 1 h of channels, a few dozen distinct trajectorie
 :::
 ::::
 
+::: {.claim}
+**What we claim:** Claim: we describe the real data and its splits (R1–R4) in one place, how much there is, how much speech we mix in, and how the telemetry ground truth was selected and pre-processed (command vs. measured on DREGON; offset/stretch recalibration for MD2).
+:::
+
 ::: {.notes}
 One minute. The point of this slide: seven minutes of annotated flight from two drones, and the labels themselves have a floor.
 :::
@@ -56,7 +75,7 @@ One minute. The point of this slide: seven minutes of annotated flight from two 
 
 :::: {.columns}
 ::: {.column width="55%"}
-![](assets/arch.png){height="470px"}
+![](assets/arch.png){width="100%"}
 :::
 ::: {.column width="45%"}
 - Four compact networks on a log-magnitude STFT (2048 / 512).
@@ -67,6 +86,10 @@ One minute. The point of this slide: seven minutes of annotated flight from two 
 :::
 ::::
 
+::: {.claim}
+**What we claim:** Claim: one common stem, different heads; PIT-MSE is justified because rotor indexing is arbitrary and the initial multi-microphone experiments showed it is necessary.
+:::
+
 ::: {.notes}
 Note the correction from earlier drafts: SimpleConv does not share the SE trunk, and the causal GRU is not a streaming model.
 :::
@@ -76,12 +99,18 @@ Note the correction from earlier drafts: SimpleConv does not share the SE trunk,
 :::: {.columns}
 ::: {.column width="66%"}
 ::: {.tiny}
+::: {.content-visible when-format="html"}
 {{< include assets/headline_slide.md >}}
+:::
+::: {.content-visible when-format="pdf"}
+\tiny
+{{< include assets/headline_slide_tex.md >}}
+:::
 :::
 :::
 ::: {.column width="34%"}
 ::: {.small}
-PIT MAE (rev/s) on the frozen split, per frame regime.
+PIT MAE (rev/s) on the frozen split, per frame regime. Colour: [< 3]{style="color:#1a7f37"} · [3–6]{style="color:#8a7a00"} · [6–15]{style="color:#c05a00"} · [≥ 15]{style="color:#b02020"}.
 
 - Classical (pYIN, cepstrum, HPS, matched comb, NMF, OT clustering): ≥ 24 rev/s over all frames; none can say "stopped".
 - **Blind tracker** (ours; DP comb search + phase-increment Kalman): best DREGON cruise, 0.92, but 9.2 on FLY124 and 40× the cost.
@@ -91,13 +120,17 @@ PIT MAE (rev/s) on the frozen split, per frame regime.
 :::
 ::::
 
+::: {.claim}
+**What we claim:** Claim: our simple regressors beat all the diverse baselines (classical + L0 multi-f0) by a margin, with the narrow exception of one blind tracker which is our invention — but (3½) salience models cannot even represent our ladder without modification, and the proper L1/L2 modifications bring them to parity with the regressors.
+:::
+
 ::: {.notes}
 Point 3 and 3½ of the paper. The headline is a tie, not a win: our regressors beat everything off the shelf, and a music model with a proper output representation matches them.
 :::
 
 ## 4. Generalization across microphones and drones {.smaller}
 
-![](assets/ladder_r1_r3.png){width="100%"}
+![](assets/ladder_r1_r3.png){width="88%"}
 
 :::: {.columns}
 ::: {.column width="50%"}
@@ -108,12 +141,20 @@ Point 3 and 3½ of the paper. The headline is a tie, not a win: our regressors b
 :::
 ::::
 
+::: {.claim}
+**What we claim:** Claim: R1→R3 — only SimpleConv fails to generalize to unseen microphones, but all models fail to generalize across drones after seeing only one drone. One motivation for synthetic data.
+:::
+
 ## 5. What the models actually use: frequency-scaling probe {.smaller}
 
-![](assets/freq_probe_panels.png){width="100%"}
+![](assets/freq_probe_panels.png){width="88%"}
 
 ::: {.small}
 Resample six cruise clips by α; a model that reads the comb must scale its answer by α (slope 1). **R3:** every regressor is flat (local slopes −0.3 to 0.2), i.e. they recognise trajectories, they do not read frequency. **R4** (labels transformed with the audio): slopes 0.5–1.0 from step 0, 0.0–0.4 after a warm-up; HPPNet L2 0.62, HarmoF0 L2 0.89. **C1 / M** (comb curriculum / pool): 1.0–1.6. The probe cannot tell loudness, envelope and speed prior apart; it only says whether the harmonics are used.
+:::
+
+::: {.claim}
+**What we claim:** Claim: our methods never learned to actually track frequencies (flat frequency-shift response on R3); freq-scaling and time-warp augmentations (R4) make the models at least react to frequency scaling.
 :::
 
 ## 6. Synthetic rotor noise: generators and regimes {.smaller}
@@ -121,7 +162,13 @@ Resample six cruise clips by α; a model that reads the comb must scale its answ
 :::: {.columns}
 ::: {.column width="58%"}
 ::: {.tiny}
+::: {.content-visible when-format="html"}
 {{< include assets/crossval.md >}}
+:::
+::: {.content-visible when-format="pdf"}
+\tiny
+{{< include assets/crossval_tex.md >}}
+:::
 :::
 :::
 ::: {.column width="42%"}
@@ -138,12 +185,20 @@ Resample six cruise clips by α; a model that reads the comb must scale its answ
 :::
 ::::
 
+::: {.claim}
+**What we claim:** Claim: static comb = simple rotor noise without amplitude cues; stochastic comb = statistically closer to real drone noise. S1/S2/C1/C2/M cross-validation: models do not transfer from synthetic to real data, but curriculum training helps a bit.
+:::
+
 ## 7. What the predictions look like {.smaller}
 
-![](assets/qual_overlays.png){width="92%"}
+![](assets/qual_overlays.png){width="70%"}
 
 ::: {.small}
 Best regressor and best salience model trained on each family. **Regressors** regress to the mean comb: near-unison rotors merge, and on the stochastic comb the predicted spread is 5–6 rev/s whatever the truth (0.4–22). **Salience models** keep rotors apart but *jump*: octave locks, wandering on ramps, nothing below the grid. Both lose the take-off/landing ramps, where the labels are weakest. Remedies (future work): a multimodal readout on the regressor trunk; a joint decoder or the tracker's phase refinement on the L2 tracks.
+:::
+
+::: {.claim}
+**What we claim:** Claim: overlaying the best models on ground truth (static comb, stochastic comb, DREGON, MD2) shows regression to the comb-over-mean for regressors and noisy jumps for salience models; we propose mitigations as future work.
 :::
 
 ## Where this stands {.smaller}
@@ -165,7 +220,7 @@ Best regressor and best salience model trained on each family. **Regressors** re
 1. Unified-regime reruns are in the queue (A100 batch, fixed schedule, one recipe for every row). Tables and figures regenerate from scripts; the prose is written to survive the numbers changing.
 2. Rerun M to patience, run the two L1 rows, add a second seed for the headline rows if the budget allows.
 3. Trim to 8 pages (subsection headings and the two large tables are the cost).
-4. Target: **IEEE OJSP if the reruns hold up** — i.e. if L2 stays on par with the regressors and the R3 → R4 → C1 story survives. Otherwise a conference version (ICASSP text exists) with the same evidence.
+4. Target: **IEEE OJSP if the reruns hold up** — i.e. if L2 stays on par with the regressors and the R3 → R4 → C1 story survives.
 :::
 ::::
 

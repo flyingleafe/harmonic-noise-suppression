@@ -53,13 +53,34 @@ def tex_rows(path: Path) -> tuple[list[str], list[list[str]]]:
     return header, rows
 
 
-def markdown(header: list[str], rows: list[list[str]], drop: set[int] = frozenset()) -> str:
+#: PIT MAE (rev/s) buckets -> colour; lower is better.
+BUCKETS = ((3.0, "#1a7f37"), (6.0, "#8a7a00"), (15.0, "#c05a00"), (float("inf"), "#b02020"))
+
+
+def colour(cell: str, fmt: str) -> str:
+    m = re.fullmatch(r"(\*\*)?(\d+(?:\.\d+)?)(\*\*)?", cell)
+    if not m:
+        return cell
+    v = float(m.group(2))
+    hexc = next(c for lim, c in BUCKETS if v < lim)
+    if fmt == "html":
+        return f'<span style="color:{hexc};font-weight:600">{cell}</span>'
+    text = f"\\textbf{{{m.group(2)}}}" if m.group(1) else m.group(2)
+    return f"\\textcolor[HTML]{{{hexc[1:]}}}{{{text}}}"
+
+
+def markdown(header, rows, drop=frozenset(), fmt="html") -> str:
     keep = [i for i in range(len(header)) if i not in drop]
     align = ["|:--" if i < 2 else "|--:" for i in keep]
     out = ["|" + "|".join(header[i] for i in keep) + "|", "".join(align) + "|"]
     for r in rows:
-        out.append("|" + "|".join(r[i] if i < len(r) else "" for i in keep) + "|")
+        out.append("|" + "|".join(colour(r[i], fmt) if i < len(r) else "" for i in keep) + "|")
     return "\n".join(out) + "\n"
+
+
+def write_both(name: str, header, rows, drop=frozenset()) -> None:
+    (ASSETS / f"{name}.md").write_text(markdown(header, rows, drop, "html"))
+    (ASSETS / f"{name}_tex.md").write_text(markdown(header, rows, drop, "tex"))
 
 
 def architecture_png() -> None:
@@ -109,11 +130,11 @@ def main() -> None:
             skip = r[0].startswith(("Classical (greedy", "Regression, R4"))
         if not skip:
             compact.append(r)
-    (ASSETS / "headline_slide.md").write_text(markdown(h, compact + l2, drop={8}))
+    write_both("headline_slide", h, compact + l2, drop={8})
     (ASSETS / "adaptation.md").write_text(
         markdown(*tex_rows(PAPER / "src/tables/adaptation.tex"), drop={8})
     )
-    (ASSETS / "crossval.md").write_text(markdown(*tex_rows(PAPER / "src/tables/crossval.tex")))
+    write_both("crossval", *tex_rows(PAPER / "src/tables/crossval.tex"))
     print("wrote", sorted(p.name for p in ASSETS.iterdir()))
 
 

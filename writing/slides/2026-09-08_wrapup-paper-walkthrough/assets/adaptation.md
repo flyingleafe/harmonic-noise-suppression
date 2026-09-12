@@ -1,11 +1,11 @@
 |Model|Level|zero|<30|ramp|cruise DR|cruise FL|all|
 |:--|:--|--:|--:|--:|--:|--:|--:|
-|Basic Pitch|L0|33.9|38.7|24.4|26.4|25.6|27.3|
-||L2|0.50|18.0|39.1|43.9|9.47|27.6|
-|LateDeep|L0|52.6|35.6|16.8|2.96|4.46|12.6|
-||L1|48.5|25.8|16.9|3.53|3.66|11.8|
-||L2|4.98|15.8|8.61|2.32|1.69|3.83|
-|HarmoF0|L0|14.8|18.9|20.4|11.5|1.92|10.8|
-||L2|**0.09**|**11.5**|**3.21**|2.98|1.07|2.45|
-|HPPNet|L0|17.5|17.5|21.0|3.81|1.63|7.77|
-||L2|1.07|14.6|3.63|**2.07**|**0.77**|**2.27**|
+|Basic Pitch|L0|<span style="color:#b02020;font-weight:600">33.9</span>|<span style="color:#b02020;font-weight:600">38.7</span>|<span style="color:#b02020;font-weight:600">24.4</span>|<span style="color:#b02020;font-weight:600">26.4</span>|<span style="color:#b02020;font-weight:600">25.6</span>|<span style="color:#b02020;font-weight:600">27.3</span>|
+||L2|<span style="color:#1a7f37;font-weight:600">0.50</span>|<span style="color:#b02020;font-weight:600">18.0</span>|<span style="color:#b02020;font-weight:600">39.1</span>|<span style="color:#b02020;font-weight:600">43.9</span>|<span style="color:#c05a00;font-weight:600">9.47</span>|<span style="color:#b02020;font-weight:600">27.6</span>|
+|LateDeep|L0|<span style="color:#b02020;font-weight:600">52.6</span>|<span style="color:#b02020;font-weight:600">35.6</span>|<span style="color:#b02020;font-weight:600">16.8</span>|<span style="color:#1a7f37;font-weight:600">2.96</span>|<span style="color:#8a7a00;font-weight:600">4.46</span>|<span style="color:#c05a00;font-weight:600">12.6</span>|
+||L1|<span style="color:#b02020;font-weight:600">48.5</span>|<span style="color:#b02020;font-weight:600">25.8</span>|<span style="color:#b02020;font-weight:600">16.9</span>|<span style="color:#8a7a00;font-weight:600">3.53</span>|<span style="color:#8a7a00;font-weight:600">3.66</span>|<span style="color:#c05a00;font-weight:600">11.8</span>|
+||L2|<span style="color:#8a7a00;font-weight:600">4.98</span>|<span style="color:#b02020;font-weight:600">15.8</span>|<span style="color:#c05a00;font-weight:600">8.61</span>|<span style="color:#1a7f37;font-weight:600">2.32</span>|<span style="color:#1a7f37;font-weight:600">1.69</span>|<span style="color:#8a7a00;font-weight:600">3.83</span>|
+|HarmoF0|L0|<span style="color:#c05a00;font-weight:600">14.8</span>|<span style="color:#b02020;font-weight:600">18.9</span>|<span style="color:#b02020;font-weight:600">20.4</span>|<span style="color:#c05a00;font-weight:600">11.5</span>|<span style="color:#1a7f37;font-weight:600">1.92</span>|<span style="color:#c05a00;font-weight:600">10.8</span>|
+||L2|<span style="color:#1a7f37;font-weight:600">**0.09**</span>|<span style="color:#c05a00;font-weight:600">**11.5**</span>|<span style="color:#8a7a00;font-weight:600">**3.21**</span>|<span style="color:#1a7f37;font-weight:600">2.98</span>|<span style="color:#1a7f37;font-weight:600">1.07</span>|<span style="color:#1a7f37;font-weight:600">2.45</span>|
+|HPPNet|L0|<span style="color:#b02020;font-weight:600">17.5</span>|<span style="color:#b02020;font-weight:600">17.5</span>|<span style="color:#b02020;font-weight:600">21.0</span>|<span style="color:#8a7a00;font-weight:600">3.81</span>|<span style="color:#1a7f37;font-weight:600">1.63</span>|<span style="color:#c05a00;font-weight:600">7.77</span>|
+||L2|<span style="color:#1a7f37;font-weight:600">1.07</span>|<span style="color:#c05a00;font-weight:600">14.6</span>|<span style="color:#8a7a00;font-weight:600">3.63</span>|<span style="color:#1a7f37;font-weight:600">**2.07**</span>|<span style="color:#1a7f37;font-weight:600">**0.77**</span>|<span style="color:#1a7f37;font-weight:600">**2.27**</span>|
