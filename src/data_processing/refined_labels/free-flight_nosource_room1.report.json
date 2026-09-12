@@ -361,8 +361,12 @@
    "standby_max_dev": 0.0,
    "cruise_exact": true,
    "cruise_max_dev": 0.0,
-   "max_step_gated": 81.26119995117188,
-   "max_step_raw": 81.26155180954021,
+   "max_weight_step": 1.0,
+   "max_weight_step_smooth": 0.03200000000000003,
+   "weight_step_bound": 0.18200000000000002,
+   "settle_step_bound": 0.03200000000000003,
+   "correction_step_gated": 0.8537275243673008,
+   "correction_step_raw": 0.24535407166912648,
    "introduced_step": false
   },
   "regimes": {
@@ -370,8 +374,8 @@
    "standby_frac": 0.07014028056112225,
    "ramp_frac": 0.011523046092184368,
    "cruise_frac": 0.9183366733466933,
-   "weight_zero_frac": 0.07114228456913828,
-   "weight_one_frac": 0.8862725450901804
+   "weight_zero_frac": 0.07064128256513026,
+   "weight_one_frac": 0.9098196392785571
   }
  }
 }

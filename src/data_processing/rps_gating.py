@@ -74,9 +74,11 @@ def regime_weight(
     filtering (the rate itself is continuous), and it is exactly 0 at the
     standby threshold and exactly 1 at the cruise threshold.
 
-    ``settle_s`` then holds the weight down for the first moments after cruise
-    is reached, ramping it in linearly, which is where the refiner's ramp
-    transient sits.
+    ``settle_s`` then holds the weight down for the first ``settle_s`` seconds
+    after the rig leaves standby, ramping it in linearly, which is where the
+    refiner's ramp transient sits. It is keyed on standby exit rather than on
+    cruise entry so that both factors vanish at the same instant and the
+    envelope stays continuous and monotone across the merge.
     """
     ft = np.asarray(ft, dtype=np.float64)
     lo = np.nanmin(np.asarray(r_telemetry, dtype=np.float64), axis=0)
@@ -84,20 +86,26 @@ def regime_weight(
     w = _smoothstep((lo - policy.standby_max_rps) / span)
 
     if policy.settle_s > 0.0 and ft.size > 1:
-        in_cruise = lo >= policy.cruise_min_rps
-        # seconds since the rig last entered cruise; 0 while not in cruise
+        # Delay full trust for settle_s after the rig LEAVES STANDBY, not after
+        # it reaches cruise. Keyed on cruise entry the envelope is
+        # discontinuous: just below the cruise threshold the rate term is
+        # already ~1, and at the first cruising sample the elapsed time is 0, so
+        # the minimum would drop the weight to 0 and ramp it back up - a step in
+        # the middle of the merge, which is exactly what the merge exists to
+        # avoid. Keyed on standby exit both terms are 0 at the same instant, so
+        # the envelope is continuous and monotone through the ramp.
+        out_of_standby = lo >= policy.standby_max_rps
         since = np.zeros_like(ft)
-        last_entry = np.nan
+        entry = np.nan
         for i in range(ft.size):
-            if in_cruise[i]:
-                if not np.isfinite(last_entry):
-                    last_entry = ft[i]
-                since[i] = ft[i] - last_entry
+            if out_of_standby[i]:
+                if not np.isfinite(entry):
+                    entry = ft[i]
+                since[i] = ft[i] - entry
             else:
-                last_entry = np.nan
+                entry = np.nan
                 since[i] = 0.0
-        settle = np.where(in_cruise, np.clip(since / policy.settle_s, 0.0, 1.0), 1.0)
-        w = np.minimum(w, settle)
+        w = np.minimum(w, np.clip(since / policy.settle_s, 0.0, 1.0))
     return w
 
 

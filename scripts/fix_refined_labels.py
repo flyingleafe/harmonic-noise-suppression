@@ -33,24 +33,49 @@ def check_invariants(
     raw: np.ndarray,
     gated: np.ndarray,
     w: np.ndarray,
+    dt: float,
+    policy: GatePolicy,
 ) -> dict[str, float | bool]:
-    """The three properties the gate must have, measured rather than asserted."""
+    """The properties the gate must have, measured rather than asserted.
+
+    Continuity is checked LOCALLY, on the correction and on the weight. A
+    global maximum step cannot see a gate artefact: the recordings ramp at up to
+    80 rev/s per frame, which swamps anything the blend does. The weight's own
+    first difference is the sharp test, and it is bounded by what the policy
+    allows - the rate term cannot move faster than the rate, and the settle term
+    rises by at most ``dt / settle_s`` per frame.
+    """
     standby = w <= 0.0
     full = w >= 1.0
     d_standby = float(np.abs(gated[:, standby] - tel[:, standby]).max()) if standby.any() else 0.0
     d_full = float(np.abs(gated[:, full] - raw[:, full]).max()) if full.any() else 0.0
-    # continuity: the largest frame-to-frame step the GATE introduces, i.e. the
-    # step in the gated label minus the step the raw refined label already has
-    step_gated = np.abs(np.diff(gated, axis=1)).max() if gated.shape[-1] > 1 else 0.0
-    step_raw = np.abs(np.diff(raw, axis=1)).max() if raw.shape[-1] > 1 else 0.0
+    lo = np.nanmin(tel, axis=0)
+    dlo = np.abs(np.diff(lo)) if lo.size > 1 else np.zeros(1)
+    dw = np.abs(np.diff(w)) if w.size > 1 else np.zeros(1)
+    # The weight is a function of the rate, so it may only move fast where the
+    # RATE moves fast - at a landing or a motor cut-off, where the telemetry
+    # itself is discontinuous across the gate band. A step in a smooth stretch
+    # would be a gate artefact, which is what this separates.
+    smooth = dlo <= 1.0
+    artefact = float(dw[smooth].max()) if smooth.any() else 0.0
+    # the correction the gate produces, against the correction it modulates
+    step_gate = float(np.abs(np.diff(gated - tel, axis=1)).max()) if gated.shape[-1] > 1 else 0.0
+    step_raw = float(np.abs(np.diff(raw - tel, axis=1)).max()) if raw.shape[-1] > 1 else 0.0
+    settle_rate = dt / policy.settle_s if policy.settle_s > 0 else 1.0
+    bound = settle_rate + 3.0 / max(policy.cruise_min_rps - policy.standby_max_rps, 1e-9)
     return dict(
         standby_exact=bool(d_standby == 0.0),
         standby_max_dev=d_standby,
         cruise_exact=bool(d_full == 0.0),
         cruise_max_dev=d_full,
-        max_step_gated=float(step_gated),
-        max_step_raw=float(step_raw),
-        introduced_step=bool(step_gated > step_raw + 1e-9),
+        max_weight_step=float(dw.max()),
+        max_weight_step_smooth=artefact,
+        weight_step_bound=float(bound),
+        settle_step_bound=float(settle_rate),
+        correction_step_gated=step_gate,
+        correction_step_raw=step_raw,
+        # a failure only if the weight jumps where the rate is smooth
+        introduced_step=bool(artefact > bound),
     )
 
 
@@ -73,7 +98,8 @@ def main() -> None:
         tel = np.asarray(payload["r_telemetry"], dtype=np.float64)
         raw = np.asarray(payload.get("r_refined_raw", payload["r_refined"]), dtype=np.float64)
         gated, w = gate_refinement(ft, tel, raw, policy)
-        inv = check_invariants(tel, raw, gated, w)
+        dt = float(np.median(np.diff(ft))) if ft.size > 1 else 1.0
+        inv = check_invariants(tel, raw, gated, w, dt, policy)
         summ = regime_summary(ft, tel, policy)
         d_raw = np.abs(raw - tel)
         d_gate = np.abs(gated - tel)
@@ -92,7 +118,11 @@ def main() -> None:
             flags.append("introduced_step")
         print(
             f"{'':34}  invariants {'OK' if not flags else 'FAILED: ' + ', '.join(flags)}"
-            f"  (max step gated {inv['max_step_gated']:.3f} vs raw {inv['max_step_raw']:.3f})"
+            f"  max weight step {inv['max_weight_step']:.3f}"
+            f" (in smooth stretches {inv['max_weight_step_smooth']:.4f}"
+            f" vs bound {inv['weight_step_bound']:.4f})"
+            f"  correction step {inv['correction_step_gated']:.3f} vs raw "
+            f"{inv['correction_step_raw']:.3f}"
         )
         if not args.write:
             continue
