@@ -83,8 +83,15 @@ def main() -> None:
             native.load_native_clip(args.recording, start_s, dur, clip_id=f"probe_{i:02d}"), S2.SR
         )
         rps = np.asarray(real.rps, dtype=np.float64)
-        export = entries[i % len(entries)]["params"]
-        audio = S2.render_from_export(export, rps, n_mics=int(real.audio.shape[0]), seed=1000 + i)
+        if args.real:
+            # the same pipeline on the REAL clip: the reference the synthetic
+            # numbers are read against, measured here rather than quoted
+            audio = np.asarray(real.audio, dtype=np.float64)
+        else:
+            export = entries[i % len(entries)]["params"]
+            audio = S2.render_from_export(
+                export, rps, n_mics=int(real.audio.shape[0]), seed=1000 + i
+            )
         n = min(audio.shape[-1], rps.shape[-1])
         audio, rps_i = audio[:, :n], rps[:, :n]
 
@@ -108,7 +115,8 @@ def main() -> None:
             per_mic=[round(v, 3) for v in per_mic],
         )
         assert pred0 is not None and truth0 is not None
-        row["figure"] = helpers.figure("s2_fitted", i, audio, rps_i, S2.SR, pred0, truth0, per_mic)
+        tag = "s2_real" if args.real else "s2_fitted"
+        row["figure"] = helpers.figure(tag, i, audio, rps_i, S2.SR, pred0, truth0, per_mic)
         rows.append(row)
         print(row, flush=True)
 

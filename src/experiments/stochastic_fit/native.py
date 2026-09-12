@@ -25,6 +25,7 @@ with no notch at all.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
@@ -218,6 +219,15 @@ def load_native_clip(
     cid = clip_id or f"{recording_id}@{start_s:.3f}+{duration_s:g}"
     path = CACHE_DIR / f"{cid.replace('/', '_')}_native.npz"
     if cache and path.exists():
+        try:
+            z_ok = True
+            with np.load(path, allow_pickle=True) as z:
+                z_ok = "audio" in z
+        except Exception:
+            z_ok = False
+        if not z_ok:
+            path.unlink(missing_ok=True)
+    if cache and path.exists():
         with np.load(path, allow_pickle=True) as z:
             return Clip(
                 cid,
@@ -260,15 +270,21 @@ def load_native_clip(
         meta,
     )
     if cache:
+        # Atomic publish. Two jobs sharing this cache raced: one wrote the npz
+        # while the other read it, and the reader died on "File is not a zip
+        # file". A unique temp file plus os.replace makes a reader see either
+        # the old file or the complete new one.
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp.npz")
         np.savez_compressed(
-            path,
+            tmp,
             audio=clip.audio,
             rps=clip.rps,
             sr=clip.sr,
             group=clip.group,
             meta=json.dumps(meta),
         )
+        os.replace(tmp, path)
     return clip
 
 
