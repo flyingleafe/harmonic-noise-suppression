@@ -111,7 +111,12 @@ OUT_DEFAULT = "results/refine_dregon_rps"
 LABEL_DIR_DEFAULT = "src/data_processing/refined_labels"
 #: The generator's own noise source, loaded with the generator's own arguments.
 FRAMES_SPEC = "frames:DREGON-frames"
-RPS_KEY = "motors_measured"
+#: DREGON's reference track, as a PREFERENCE CHAIN. room1 carries the
+#: tachometer (``motors_measured``); the five room2 flights publish only
+#: ``motors_command``, and a loader pinned to the measured key skipped every one
+#: of them - which is why room2 had no refined labels at all. The key actually
+#: used is recorded per recording in the sidecar report.
+RPS_KEY: tuple[str, ...] = ("motors_measured", "motors_command")
 SPLITS = ["in_flight_noise"]
 SR = 16000
 #: The frozen evaluation frame grid (``tracking.protocols.BEATVK.hop_s``), kept
@@ -141,12 +146,13 @@ class SourceProfile:
     """The three loader arguments a dataset needs, and nothing else.
 
     ``splits`` is ``None`` for a dataset the loader takes whole. It is the only
-    field a caller can set, because the other two are properties OF the dataset:
-    a rotor-speed track is either ``motors_measured`` or it is not.
+    field a caller can set, because the other two are properties OF the dataset.
+    ``rps_key`` may be a preference chain, resolved per recording by the loader
+    (:func:`data_processing.noise_rps_dataset.resolve_rps_key`).
     """
 
     origin: str
-    rps_key: str
+    rps_key: str | tuple[str, ...]
     splits: tuple[str, ...] | None
 
     @property
@@ -253,11 +259,11 @@ def load_recordings(spec: str, splits: str | Sequence[str] | None = None) -> lis
                 # sidecar's report names what was READ and not what a constant
                 # says (the two are the same profile, but the report is
                 # provenance and provenance is worth the four bytes).
-                "rps_key": prof.rps_key,
+                "rps_key": src.rps_key,
             }
         )
     if not recs:
-        raise RuntimeError(f"{spec}: no recording with an {prof.rps_key} track survived loading")
+        raise RuntimeError(f"{spec}: no recording with any of {prof.rps_key} survived loading")
     return recs
 
 
@@ -557,7 +563,12 @@ def stitch(
                 # What the loader was ACTUALLY given. A sidecar of Michael's
                 # frames and one of DREGON's live in the same directory, so the
                 # report is the only place the two are told apart.
-                "rps_key": str(rec.get("rps_key", prof.rps_key)),
+                "rps_key": str(
+                    rec.get(
+                        "rps_key",
+                        prof.rps_key[0] if not isinstance(prof.rps_key, str) else prof.rps_key,
+                    )
+                ),
                 "splits": prof.splits_list,
                 "sample_rate": SR,
             },
