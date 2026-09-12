@@ -96,7 +96,11 @@ def regime_weight(
         # the envelope is continuous and monotone through the ramp.
         out_of_standby = lo >= policy.standby_max_rps
         since = np.zeros_like(ft)
-        entry = np.nan
+        # A recording that BEGINS out of standby has no ramp to settle after:
+        # treat it as already settled, or the first settle_s seconds of every
+        # mid-flight recording (and of any clip shorter than settle_s) would be
+        # silently un-refined.
+        entry = ft[0] - policy.settle_s if out_of_standby[0] else np.nan
         for i in range(ft.size):
             if out_of_standby[i]:
                 if not np.isfinite(entry):

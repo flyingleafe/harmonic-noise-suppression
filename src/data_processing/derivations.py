@@ -1160,6 +1160,31 @@ def generate_se_valid(gen: dict[str, Any]) -> Iterator[Sample]:
 
 # ─── Spec registry ────────────────────────────────────────────────────────────
 #
+def _refined_label_identity(source: str) -> dict[str, Any]:
+    """Exact identity of the refined-label inputs, for the fingerprint.
+
+    The frame builders attach ``rps_refined`` from the committed sidecars, so a
+    dataset derived from them is only reproducible if the fingerprint names the
+    sidecars themselves. Hashing each file's bytes means a re-refinement or a
+    changed gate policy mints a new derivation identity instead of silently
+    republishing different labels under the same recipe.
+    """
+    import hashlib
+
+    from data_processing.refined_label_track import LABEL_DIR, REFINED_KEY
+    from data_processing.rps_gating import GatePolicy
+
+    # Only this source's own recordings: a DREGON re-refinement must not change
+    # Michael's fingerprint and force an unnecessary republish.
+    is_michaels = source == "michaels"
+    sidecars = {
+        path.stem: hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        for path in sorted(LABEL_DIR.glob("*.npz"))
+        if path.stem.startswith("FLY") == is_michaels
+    }
+    return {"track": REFINED_KEY, "gate": GatePolicy().as_dict(), "sidecars": sidecars}
+
+
 # One entry per derived dataset. ``gen`` is the fingerprinted sub-spec (feeds
 # ``partial(generator, gen)``); everything else (``generator``, ``fields``,
 # ``adopt_only``, ``note``) is registry metadata. ``adopt_only`` datasets are
@@ -1400,14 +1425,22 @@ SPECS: dict[str, dict[str, Any]] = {
     # ── Source frames (uniform: every source's builder as a derivation) ─────
     "DREGON-frames": {
         "generator": "source_frames",
-        "adopt_only": True,
-        "note": "Adopt-in-place (published by the deleted "
-        "scripts/publish_frame_datasets.py; the sources.dregon builder "
-        "reproduces it).",
+        "adopt_only": False,
+        "note": "recipe_version 2 adds the rps_refined track: the F_VK/L-BFGS "
+        "refined rotor-speed label of each recording, REGIME-GATED so standby "
+        "carries the telemetry exactly (a static shaft's comb is too weak to "
+        "refine against, and correcting it made the refiner's own fitness "
+        "worse). Recordings with no sidecar publish their reference track under "
+        "that name, so the field is defined wherever a label exists; the bench "
+        "runs have no telemetry and no track. room2 recordings are refined "
+        "against motors_command, which is the only rotor track they publish. "
+        "version 1 = the adopt-in-place snapshot of the deleted "
+        "scripts/publish_frame_datasets.py, with no refined labels.",
         "gen": {
-            "recipe_version": 1,
+            "recipe_version": 2,
             "source": "DREGON",
             "raw": {"kind": "dload", "uri": PARENTS["DREGON"]},
+            "refined_labels": _refined_label_identity("DREGON"),
         },
     },
     "michaels-test-frames": {
@@ -1431,22 +1464,21 @@ SPECS: dict[str, dict[str, Any]] = {
     },
     "michaels-frames": {
         "generator": "source_frames",
-        "adopt_only": True,
-        "note": "Adopt-in-place (published by the deleted "
-        "scripts/publish_frame_datasets.py). The sources.michaels builder "
-        "reproduces the tracks and the meta, except that the provenance strings "
-        "name the current builder rather than the deleted script. "
-        "recipe_version 2 = the measured telemetry calibration of 2026-07-31 "
-        "(MICHAELS_FILES offsets/dilations + the new MICHAELS_RPS_SCALE); "
-        "version 1 frames carry uncalibrated labels, so every number derived "
-        "from them is stale.",
+        "adopt_only": False,
+        "note": "recipe_version 3 adds the rps_refined track (see DREGON-frames "
+        "for the gate). recipe_version 2 = the measured telemetry calibration "
+        "of 2026-07-31 (MICHAELS_FILES offsets/dilations + the new "
+        "MICHAELS_RPS_SCALE), adopted in place from the deleted "
+        "scripts/publish_frame_datasets.py; version 1 frames carry uncalibrated "
+        "labels, so every number derived from them is stale.",
         "gen": {
-            "recipe_version": 2,
+            "recipe_version": 3,
             "source": "michaels",
             "raw": {
                 "kind": "dload",
                 "uri": "dload:recording_with_motor_speed@5b7eab554710c3d83667085c8f5ca256322ec10e2cffae6002443f63b05257b4",
             },
+            "refined_labels": _refined_label_identity("michaels"),
         },
     },
     # ── External harmonic-noise frames (the 10 externals; adopted) ──────────
