@@ -349,5 +349,29 @@
    ],
    "k_cap": 40
   }
- ]
+ ],
+ "gate": {
+  "policy": {
+   "standby_max_rps": 45.0,
+   "cruise_min_rps": 65.0,
+   "settle_s": 1.0
+  },
+  "invariants": {
+   "standby_exact": true,
+   "standby_max_dev": 0.0,
+   "cruise_exact": true,
+   "cruise_max_dev": 0.0,
+   "max_step_gated": 81.26119995117188,
+   "max_step_raw": 81.26155180954021,
+   "introduced_step": false
+  },
+  "regimes": {
+   "frames": 1996.0,
+   "standby_frac": 0.07014028056112225,
+   "ramp_frac": 0.011523046092184368,
+   "cruise_frac": 0.9183366733466933,
+   "weight_zero_frac": 0.07114228456913828,
+   "weight_one_frac": 0.8862725450901804
+  }
+ }
 }

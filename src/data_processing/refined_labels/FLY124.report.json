@@ -617,5 +617,29 @@
    "used": false,
    "reason": "idle"
   }
- ]
+ ],
+ "gate": {
+  "policy": {
+   "standby_max_rps": 45.0,
+   "cruise_min_rps": 65.0,
+   "settle_s": 1.0
+  },
+  "invariants": {
+   "standby_exact": true,
+   "standby_max_dev": 0.0,
+   "cruise_exact": true,
+   "cruise_max_dev": 0.0,
+   "max_step_gated": 17.29092288853663,
+   "max_step_raw": 17.29092288853663,
+   "introduced_step": false
+  },
+  "regimes": {
+   "frames": 3801.0,
+   "standby_frac": 0.38437253354380424,
+   "ramp_frac": 0.019205472244146277,
+   "cruise_frac": 0.5964219942120494,
+   "weight_zero_frac": 0.3854248881873191,
+   "weight_one_frac": 0.5682715074980268
+  }
+ }
 }
