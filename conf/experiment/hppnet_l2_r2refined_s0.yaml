@@ -1,0 +1,32 @@
+# @package _global_
+# hppnet_l2_r2_s0 with REFINED TRAINING LABELS. One field differs from the
+# quality-gate config: the online-mix policy, which is hb_silence_dload.yaml
+# with `rps_key: rps_refined` on its two real arms. Same pool, same envelope,
+# same silence arm, same warm-up, same model/loss/metrics/optimiser, same
+# seed, and the SAME frozen real validation URI — validation targets stay the
+# raw published ones, because the comparison is only meaningful against the
+# gate's own validation protocol. The experiment is the TRAINING labels.
+defaults:
+  - override /data: e12_real_fullflight
+  - override /model: hppnet_l2
+  - override /loss: salience_layers_r150
+  - override /metrics: salience_layers_r150
+
+experiment_name: hppnet_l2_r2refined_s0
+seed: 0
+checkpoint: null
+epochs: 200
+patience: 20
+batch_size: 16
+num_workers: 6
+samples_per_validation: 40000
+data:
+  train:
+    params:
+      path: conf/online_mix/hb_silence_refined_dload.yaml
+  valid:
+    params:
+      data_dir: "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9"
+optim:
+  monitor: rps_mae
+  monitor_mode: min

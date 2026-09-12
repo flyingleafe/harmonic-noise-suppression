@@ -424,13 +424,21 @@ def load_noise_source_frames(specs: list[dict[str, Any]], *, sample_rate: int) -
 
         {"dataset": "DREGON-frames", "splits": ["in_flight_noise"],
          "exclude_recording_ids": ["free-flight_nosource_room1"]}
-        {"dataset": "michaels-frames@<ver>", "recording_ids": ["FLY125"]}
+        {"dataset": "michaels-frames@<ver>", "recording_ids": ["FLY125"],
+         "rps_key": "rps_refined"}
 
     Keys: ``dataset`` (required, optional ``@version``), ``splits`` /
-    ``split``, ``recording_ids``, ``exclude_recording_ids``, ``take``. Every
-    selected frame is reduced to the canonical (audio + rps + meta) noise
-    frame at ``sample_rate`` (:func:`frames.adapt_recording_frame`) — fixes
-    are baked in at derivation time, so nothing is re-cleaned here.
+    ``split``, ``recording_ids``, ``exclude_recording_ids``, ``take``,
+    ``rps_key``. Every selected frame is reduced to the canonical
+    (audio + rps + meta) noise frame at ``sample_rate``
+    (:func:`frames.adapt_recording_frame`) — fixes are baked in at derivation
+    time, so nothing is re-cleaned here.
+
+    ``rps_key`` names WHICH published rotor track becomes the ``rps`` label:
+    omitted (or ``null``) takes the raw telemetry in
+    :data:`frames.PUBLISHED_RPS_KEYS` order, ``rps_refined`` takes the
+    regime-gated refined label. An explicit key a labelled recording does not
+    carry is an error, not a fallback.
     """
     from data_processing.streams import iter_published_frames
 
@@ -449,6 +457,7 @@ def load_noise_source_frames(specs: list[dict[str, Any]], *, sample_rate: int) -
             if spec.get("exclude_recording_ids")
             else None
         )
+        rps_key = spec.get("rps_key")
         kept = 0
         for frame in iter_published_frames(
             name, version or None, splits=[str(s) for s in splits] if splits else None
@@ -458,7 +467,9 @@ def load_noise_source_frames(specs: list[dict[str, Any]], *, sample_rate: int) -
                 continue
             if excluded is not None and rid in excluded:
                 continue
-            adapted = adapt_recording_frame(frame, sample_rate=sample_rate)
+            adapted = adapt_recording_frame(
+                frame, sample_rate=sample_rate, rps_key=str(rps_key) if rps_key else None
+            )
             if adapted is None:
                 continue
             frames.append(adapted)

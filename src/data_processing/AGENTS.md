@@ -92,12 +92,10 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   (`sample_NNNNN/` dirs + `_meta` sample; `dregon_lm`, `dn_lm`), `tdframe-v1`
   (one Frame per recording/clip; all frame generators), `raw-files` /
   `pcm16-mono-v1`.
-- `adopt_only` specs are historical uploads whose bytes predate the spec;
-  re-deriving would push a near-duplicate (mixing RNG is not byte-stable).
-  `DREGON-frames`/`michaels-frames` are no longer adopt-only (re-derived for
-  `rps_refined`).
-  `michaels-test-frames` (FLY103/FLY108) is a **TEST set**: no training
-  derivation may root on it.
+- `adopt_only` specs must not be re-derived: their bytes predate the spec and
+  the mixing RNG is not byte-stable. `DREGON-frames`/`michaels-frames` are not
+  adopt-only. `michaels-test-frames` (FLY103/FLY108) is a **TEST set**: no
+  training derivation may root on it.
 - Online-mix determinism: content is deterministic per `(base_seed, epoch,
   worker, position)`; curriculum/augmentation decisions are pure functions of
   the global sample id. `kind: generated` with `refresh: true` is not.
@@ -123,7 +121,8 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   `load_noise_source_frames`): `dataset` (`NAME[@version]`), `splits`/`split`,
   `recording_ids`, `exclude_recording_ids`, `take`, `min_motor_rps`,
   `channels`, `weight` (explicit = own sub-pool; unweighted reals merge
-  duration-weighted).
+  duration-weighted), `rps_key` (label track: default raw,
+  `rps_refined` = refined; never falls back).
 - **Check a policy before training**: `python scripts/check_stream.py
   --experiment <name>` — real chunk→frame expansion, stage boundaries,
   empirical augmentation fire rates; nonzero exit on FAIL. Mandatory after any
@@ -131,7 +130,7 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
 - **RPS helpers**: `sources.dregon.load_timeframe` / `load_dregon_timeframes`;
   `mixing.resolve_motor_tracks(tf) -> (detect_key, rps_key, needs_cleaning)`;
   `mixing.find_inflight_window(tf, key, min_motor_rps, clean=…) -> (t0, t1)`
-  (pass `min_motor_rps=30.0`; the default 0 is backward-compat).
+  (pass `min_motor_rps=30.0`; the 0 default is legacy).
 
 ## Conventions
 

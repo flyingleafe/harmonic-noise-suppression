@@ -17,6 +17,8 @@ import librosa
 import numpy as np
 import tdseries as td
 
+from data_processing.refined_label_track import REFINED_KEY
+
 
 def audio_series(audio: np.ndarray, sample_rate: int) -> td.Series:
     """``(C, T)`` -> mono ``(time,)`` Series (``C == 1``) or ``(mic, time)``.
@@ -100,7 +102,9 @@ def with_meta(frame: td.Frame, **updates: Any) -> td.Frame:
 PUBLISHED_RPS_KEYS = ("rps", "motors_measured", "motors_command")
 
 
-def adapt_recording_frame(frame: td.Frame, *, sample_rate: int) -> td.Frame | None:
+def adapt_recording_frame(
+    frame: td.Frame, *, sample_rate: int, rps_key: str | None = None
+) -> td.Frame | None:
     """Rich published recording -> the minimal (audio + rps) noise-source Frame.
 
     Published frames datasets (``DREGON-frames`` / ``michaels-frames`` / any
@@ -113,19 +117,48 @@ def adapt_recording_frame(frame: td.Frame, *, sample_rate: int) -> td.Frame | No
     clocks) is dropped so pools keep only what they slice; audio is
     soxr-resampled to ``sample_rate``. Returns ``None`` for frames without
     audio or a rotor track (e.g. clean-source recordings).
+
+    ``rps_key`` chooses WHICH published rotor track becomes the label.
+    ``None`` takes the first of :data:`PUBLISHED_RPS_KEYS` the frame carries —
+    the raw telemetry. An explicit name (``"rps_refined"``, the regime-gated
+    refined label) takes exactly that entry and **raises** when a frame that
+    does carry a rotor track lacks it: falling back to the raw telemetry there
+    would silently mix two label definitions into one pool, which is precisely
+    what a refined-vs-raw label comparison cannot tolerate. A frame with no
+    rotor track at all is not a rotor recording (DREGON's bench runs,
+    clean-source recordings) and is still skipped with ``None``.
+
+    The chosen entry name and its ``label_variant`` (``"refined"`` /
+    ``"published"``) are recorded in the returned frame's ``"meta"``, so a
+    training run's provenance names the labels it was fitted to.
     """
     if "audio" not in frame:
         return None
-    rps_key = next((k for k in PUBLISHED_RPS_KEYS if k in frame), None)
+    available = next((k for k in PUBLISHED_RPS_KEYS if k in frame), None)
     if rps_key is None:
-        return None
-    entries: dict[str, Any] = {
-        "audio": resample_audio_series(frame["audio"], int(sample_rate)),
-        "rps": frame[rps_key],
-    }
-    if "meta" in frame:
-        entries["meta"] = frame["meta"]
-    return td.Frame(entries)
+        key = available
+        if key is None:
+            return None
+    else:
+        key = str(rps_key)
+        if key not in frame:
+            if available is None:
+                return None
+            raise KeyError(
+                f"recording {get_meta(frame, 'recording_id', '?')!r} carries the rotor "
+                f"track {available!r} but not the requested {key!r}; refusing to fall "
+                "back to a different label definition"
+            )
+    meta = meta_dict(frame)
+    meta["rps_key"] = key
+    meta["label_variant"] = "refined" if key == REFINED_KEY else "published"
+    return td.Frame(
+        {
+            "audio": resample_audio_series(frame["audio"], int(sample_rate)),
+            "rps": frame[key],
+            "meta": td.Frame(meta),
+        }
+    )
 
 
 def make_recording_frame(
