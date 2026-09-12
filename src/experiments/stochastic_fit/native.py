@@ -37,11 +37,26 @@ from experiments.stochastic_fit.data import SR, Clip, ref_clips
 
 NATIVE_SR = 44100
 
+
 #: Raw trees, as materialized by dload. Both are inputs to the canonical
 #: builders, so a change here is a change of data, not of formatting.
-DREGON_RAW = Path("/home/flyingleafe/.cache/dload/materialized/DREGON/db39bcf762d0")
-MICHAELS_RAW = Path(
-    "/home/flyingleafe/.cache/dload/materialized/recording_with_motor_speed/5b7eab554710"
+#:
+#: Resolved through ``streams.ensure_local`` so the same code runs on a cluster
+#: node, where no path under this user's home exists. The local cache hit is a
+#: marker-file check, so the lookup is free once the tree is present.
+def _raw_tree(dataset: str, fallback: str) -> Path:
+    local = Path(fallback)
+    if local.exists():
+        return local
+    from data_processing.streams import ensure_local
+
+    return ensure_local(dataset)
+
+
+DREGON_RAW = _raw_tree("DREGON", "/home/flyingleafe/.cache/dload/materialized/DREGON/db39bcf762d0")
+MICHAELS_RAW = _raw_tree(
+    "recording_with_motor_speed",
+    "/home/flyingleafe/.cache/dload/materialized/recording_with_motor_speed/5b7eab554710",
 )
 BENCH_DIR = DREGON_RAW / "DREGON_individual_motors_recordings"
 

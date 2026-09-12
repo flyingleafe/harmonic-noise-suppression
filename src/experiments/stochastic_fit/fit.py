@@ -46,6 +46,20 @@ LOO_OFFSETS = (-4, -2, 2, 4)
 LOO_HALF = 4  # frames excluded at each clip edge
 
 
+def loo_offsets_for(n_frames: int) -> tuple[int, ...]:
+    """The widest neighbourhood a clip of ``n_frames`` can afford.
+
+    The leave-one-out reference predicts a frame from its neighbours, so it
+    cannot score frames within ``max|offset|`` of an edge. With NON-overlapping
+    analysis frames a 9 s bench span holds eight frames, and the fixed
+    four-frame neighbourhood left nothing to score: every ``excess_over_loo``
+    came back ``nan``. The neighbourhood now shrinks to keep at least two
+    scorable frames.
+    """
+    half = max(2, min(LOO_HALF, (n_frames - 2) // 2))
+    return tuple(s for s in LOO_OFFSETS if abs(s) <= half)
+
+
 def _inv_softplus(x: float) -> float:
     return math.log(math.expm1(x))
 

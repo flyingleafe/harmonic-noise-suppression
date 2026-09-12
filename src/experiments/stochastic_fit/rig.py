@@ -30,7 +30,7 @@ import torch
 from torch import Tensor, nn
 
 from .data import Periodogram
-from .fit import LOO_HALF, _inv_softplus, initialize, loo_reference
+from .fit import _inv_softplus, initialize, loo_offsets_for, loo_reference
 from .model import FLOOR_SHAPE_N_CTRL, CombSpectrum, Spec
 
 
@@ -475,14 +475,16 @@ def _scores(rc: RigClip) -> dict[str, float]:
         # Rice-power density it actually assumes; ``nll_fit_inner`` below stays
         # on the exponential form because its LOO reference is exponential too
         nll_fit = float(model.whittle(rc.power).item()) / n_cells
-        inner = slice(LOO_HALF, model.N - LOO_HALF)
+        offsets = loo_offsets_for(model.N)
+        half = max(abs(s) for s in offsets)
+        inner = slice(half, model.N - half)
         cell = (rc.power / spectrum.clamp_min(1e-12) + torch.log(spectrum.clamp_min(1e-12)))[
             :, inner
         ][..., model.band]
         nll_inner = float(cell.mean().item())
         # per order band (k<=8 excluded from ladder verdicts: interference)
         prior = float(model.prior().item())
-    nll_loo, _ = loo_reference(rc.power.cpu().numpy(), band_np)
+    nll_loo, _ = loo_reference(rc.power.cpu().numpy(), band_np, offsets=offsets)
     return dict(
         nll_fit=nll_fit,
         nll_fit_inner=nll_inner,

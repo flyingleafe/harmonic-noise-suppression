@@ -54,7 +54,14 @@ from experiments.stochastic_fit.stage1 import (
 #: the model's ``line_bin_integrate`` + window kernel handle lines narrower
 #: than that correctly rather than pretending to resolve them.
 N_FFT = 16384
-HOP = 8192
+# NON-overlapping frames. The Whittle likelihood treats every cell as an
+# independent draw, and 50 % overlapped frames are not independent -- the same
+# samples enter two frames, so an overlapped analysis double counts the data and
+# scores correlated cells as if they were fresh. It also doubles the cost and
+# the memory of every gradient step, which is what let a five-clip fit be killed
+# twice. One frame per 16384 samples at 16 kHz is 1.024 s, and a 9 s bench span
+# still gives eight independent frames per cell.
+HOP = N_FFT
 F_MAX = 7900.0
 K_CAP = 200
 #: OLA window for rendering at 44.1 kHz: 0.67 Hz bins.
