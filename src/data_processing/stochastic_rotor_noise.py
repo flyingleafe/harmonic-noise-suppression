@@ -489,6 +489,18 @@ class StochasticParams:
     #: (``model.BASE_VARIANT``); a fitted parameter set should render with the
     #: same value it was fitted under.
     gamma_min_bins: float = GAMMA_MIN_BINS
+    #: Order at which a line's amplitude stops being deterministic, in
+    #: harmonics. Measured on DREGON's bench (one clamped motor, channel 7):
+    #: the per-frame band power of order k has coefficient of variation 0.06
+    #: at k = 2 and 1.09-1.16 by k = 8-32, i.e. low orders are COHERENT tones
+    #: and high orders are RAYLEIGH. ``line_mode="fm"`` renders every order
+    #: coherent (CV 0.02-0.26) and ``"stochastic"`` renders every order
+    #: Rayleigh (CV 0.83-1.17); neither is the measurement. With this set, the
+    #: ``fm`` path splits each order's power by
+    #: ``w_k = exp(-(k / coherence_k_half) ** 2)``: the coherent share rides the
+    #: tone bank, the rest is rendered as narrowband noise with the floor.
+    #: Zero disables the split and reproduces the historical behaviour exactly.
+    coherence_k_half: float = 0.0
 
     def with_(self, **changes: Any) -> StochasticParams:
         """A copy with fields replaced — the slider path."""
@@ -1522,15 +1534,35 @@ def synthesize(
     else:
         floor_mic = np.ones(n_mics)
     if line_mode in ("coherent", "fm"):
+        # Order-dependent coherence: the coherent share w_k of each order's
+        # power goes through the tone bank, the incoherent share 1 - w_k is
+        # rendered as narrowband noise alongside the floor. The bench's
+        # per-frame CV measurement (0.06 at k = 2, >1 by k = 8) says a real
+        # comb is neither fully coherent nor fully Rayleigh.
+        psd_lines = psd
+        incoherent = None
+        if params.coherence_k_half > 0.0:
+            k_axis = np.arange(1, params.n_harmonics + 1, dtype=np.float64)
+            w = np.exp(-((k_axis / float(params.coherence_k_half)) ** 2))
+            w = np.clip(w, 1e-6, 1.0 - 1e-6)
+            prof = np.atleast_2d(np.asarray(params.profile_db, dtype=np.float64))
+            coh_params = params.with_(profile_db=prof + 10.0 * np.log10(w)[None, :])
+            inc_params = params.with_(profile_db=prof + 10.0 * np.log10(1.0 - w)[None, :])
+            psd_lines = build_psd(coh_params, rps_frames, freqs, dt=hop / sr, rng=rng)
+            psd_lines["floor"] = psd["floor"]
+            incoherent = build_psd(inc_params, rps_frames, freqs, dt=hop / sr, rng=rng)["lines"]
+            params = coh_params
         floor_spec = psd["floor"][None] * floor_mic[:, None, None]
+        if incoherent is not None:
+            floor_spec = floor_spec + np.tensordot(gains, incoherent, axes=(1, 0))
         white = rng.standard_normal((n_mics, n_padded))
         floor_audio = _ola_filter(white, np.sqrt(np.maximum(floor_spec, 0.0)), n_fft, hop)[
             :, pad : pad + n_samples
         ]
         line_audio = (
-            fm_lines(params, rps, psd, gains, rng=rng)
+            fm_lines(params, rps, psd_lines, gains, rng=rng)
             if line_mode == "fm"
-            else coherent_lines(params, rps, psd, gains, rng=rng)
+            else coherent_lines(params, rps, psd_lines, gains, rng=rng)
         )
         # Put the lines at the level the spectrum asks for. A filtered-noise
         # signal's variance is the mean of its spectrum over bins, so the ratio
@@ -1543,7 +1575,7 @@ def synthesize(
             # the realized floor of mic m carries its own floor gain, so the
             # wanted ratio must be taken against that same gained floor —
             # otherwise the gain leaks into the lines through ``scale``
-            want = float(np.mean(np.tensordot(gains[m], psd["lines"], axes=(0, 0)))) / (
+            want = float(np.mean(np.tensordot(gains[m], psd_lines["lines"], axes=(0, 0)))) / (
                 floor_mean * float(floor_mic[m])
             )
             have = float(np.var(line_audio[m])) / max(float(np.var(floor_audio[m])), 1e-30)

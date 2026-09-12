@@ -319,6 +319,10 @@ class ClipInRig(CombSpectrum):
             lines.append(self.mic_gain_db)
         if s.fit_speed_law and not r.tie_speed_law:
             lines.append(self.amp_exp)
+        if s.fit_coherence:
+            # a clip property: a rotor's lines may decohere at a different
+            # order at a different speed
+            lines.append(self.log_k_half)
         if s.rps_offset:
             lines.append(self.rps_offset_knots)
         return floor + lines
@@ -467,7 +471,10 @@ def _scores(rc: RigClip) -> dict[str, float]:
     n_cells = model.n_cells()
     with torch.no_grad():
         spectrum = model.forward()
-        nll_fit = float(model.whittle(rc.power, spectrum).item()) / n_cells
+        # the model's OWN likelihood, so a coherence variant is scored by the
+        # Rice-power density it actually assumes; ``nll_fit_inner`` below stays
+        # on the exponential form because its LOO reference is exponential too
+        nll_fit = float(model.whittle(rc.power).item()) / n_cells
         inner = slice(LOO_HALF, model.N - LOO_HALF)
         cell = (rc.power / spectrum.clamp_min(1e-12) + torch.log(spectrum.clamp_min(1e-12)))[
             :, inner

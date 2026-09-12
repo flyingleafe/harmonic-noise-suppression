@@ -84,6 +84,14 @@ BENCH_VARIANT: dict[str, Any] = {
     "floor_gp_std_db": 0.0,
     "floor_tilt_gp_std": 0.0,
     "umod_std_db": 0.0,
+    # A bench line is a MIXTURE: a coherent needle carrying the window's own
+    # power response |W(f - f0)|^2, plus a Rayleigh pedestal of the fitted
+    # width, with needle share w_k = exp(-(k/k_half)^2). Measured on Motor1_80,
+    # the fitted w_k matches the share that the equivalent width and the
+    # centre-bin share independently imply, and the variant is worth about
+    # 1030 nats over a single-component line (-1.1462 against -1.1404 per cell).
+    "fit_coherence": True,
+    "needle_window_shape": True,
 }
 
 
@@ -337,6 +345,11 @@ def params_from_export(export: dict[str, Any], rate_rps: float, *, sample_rate: 
         # Render under the same width floor the fit used, or every line comes
         # out at least 12.9 Hz wide at 44.1 kHz against 0.2-2 Hz measured.
         gamma_min_bins=0.01,
+        # The fitted coherence transition. The renderer puts the coherent share
+        # w_k = exp(-(k/k_half)^2) of each order through the tone bank and the
+        # rest through narrowband noise, which is the generative form of the
+        # needle-plus-pedestal line the fit identified.
+        coherence_k_half=float(export.get("coherence_k_half", 0.0)),
     )
 
 

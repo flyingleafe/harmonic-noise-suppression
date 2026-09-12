@@ -13,6 +13,7 @@ Run: ``PYTHONPATH=src python docs/explainers/stage1-bench/build_bayes.py``
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import matplotlib
@@ -28,7 +29,7 @@ from experiments.stochastic_fit import native, stage1
 from experiments.stochastic_fit import stage1_bayes as SB
 
 OUT = Path(__file__).resolve().parent
-FIT_JSON = "results/S1/bayes_motor1_final.json"
+FIT_JSON = os.environ.get("FIT_JSON", "results/S1/bayes_motor1_needle.json")
 
 
 def prefit(rate: float, seconds: float, seed: int) -> np.ndarray:
