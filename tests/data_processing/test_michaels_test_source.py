@@ -58,8 +58,12 @@ def test_derivation_spec_is_derivable():
     assert not spec.get("adopt_only")
     assert spec["gen"]["source"] == "michaels-test"
     assert spec["gen"]["raw"]["uri"].startswith("dload:new-drone-noises@")
-    # the published michaels-frames spec must not have been touched
-    assert SPECS["michaels-frames"]["adopt_only"] is True
+    # michaels-frames is DERIVABLE since recipe_version 3, which adds the
+    # rps_refined label track, so it is no longer an adopt-in-place snapshot.
+    mf = SPECS["michaels-frames"]
+    assert mf["adopt_only"] is False
+    assert mf["gen"]["recipe_version"] == 3
+    assert mf["gen"]["refined_labels"]["track"] == "rps_refined"
 
 
 # ─── synthetic tree ──────────────────────────────────────────────────────────

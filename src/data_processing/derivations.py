@@ -85,7 +85,7 @@ PARENTS = {
     "librispeech": "dload:librispeech@b674a6d0c4e9d598e7f12400d75e7f21b9bea72845aa3bcb37f5b96d56f73783",
     "drone_audio": "dload:drone_audio@b6c77a68c55dedec11750a3784c10833e7db981fab6ef00380300a9e4d382b95",
     "DREGON-frames": "dload:DREGON-frames@298e77d4cb96fd1fcce052360b6c669ea403596c89aaed8c00e1e83d1d159279",
-    "michaels-frames": "dload:michaels-frames@fdef818432e99f0909762b9a9d45b76ae95ef3d1f1b7b9aa8012bcc91cd9200a",
+    "michaels-frames": "dload:michaels-frames@8e9d149560dd5d5fa8aaa87e7ea537d7e4d96e829e874dab7d9c92621cca6e46",
     "AVQ": "dload:AVQ@50dd53d1a6c0ab81fe02e4a40a57557a0a2b1c1b85152470edd12aa6d0725f39",
     "AVQ-egonoise": "dload:AVQ-egonoise@b43b374b007a0d5c9575dd2feacd31a05097d0c436629819b936273f17cf7703",
     "DREGON-LM-V4-michaels-valid-full": "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9",
@@ -364,7 +364,20 @@ def generate_source_frames(gen: dict[str, Any]) -> Iterator[Sample]:
     name = gen["source"]
     raw = gen.get("raw") or {}
     root = resolve_source(raw["uri"]) if raw.get("kind") == "dload" else sources.raw_root(name)
+    refined = gen.get("refined_labels")
+    if refined:
+        _verify_refined_labels(refined)
     for key, frame in sources.get(name).builder(root):  # type: ignore[misc]
+        if refined and key in refined["sidecars"]:
+            from data_processing.refined_label_track import attach_refined
+
+            frame = attach_refined(frame, key)
+        elif refined:
+            # no sidecar for this recording: publish the reference track under
+            # the same name, so the field is defined wherever a label exists
+            from data_processing.refined_label_track import attach_refined
+
+            frame = attach_refined(frame, key)
         yield key, frame_to_sample(frame)
 
 
@@ -1183,6 +1196,35 @@ def _refined_label_identity(source: str) -> dict[str, Any]:
         if path.stem.startswith("FLY") == is_michaels
     }
     return {"track": REFINED_KEY, "gate": GatePolicy().as_dict(), "sidecars": sidecars}
+
+
+def _verify_refined_labels(refined: dict[str, Any]) -> None:
+    """Fail unless the sidecars on disk are exactly the bytes the spec names.
+
+    The sidecars are pipeline INPUTS, so the spec carries a sha per recording
+    and generation checks it. Without that, dload's fingerprint could memoize a
+    snapshot whose labels have since been re-refined, and the stored recipe
+    could not identify which label bytes a published dataset contains.
+    """
+    import hashlib
+
+    from data_processing.refined_label_track import LABEL_DIR
+
+    want: dict[str, str] = dict(refined["sidecars"])
+    missing, wrong = [], []
+    for rid, sha in sorted(want.items()):
+        path = LABEL_DIR / f"{rid}.npz"
+        if not path.exists():
+            missing.append(rid)
+            continue
+        got = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        if got != sha:
+            wrong.append(f"{rid}: spec {sha}, disk {got}")
+    if missing or wrong:
+        raise ValueError(
+            "refined-label sidecars do not match the spec — regenerate the spec "
+            f"(missing: {missing or 'none'}; changed: {wrong or 'none'})"
+        )
 
 
 # One entry per derived dataset. ``gen`` is the fingerprinted sub-spec (feeds
