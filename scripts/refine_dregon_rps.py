@@ -325,6 +325,7 @@ def refine_worker(unit: Unit) -> dict[str, Any]:
     """One (recording, window) unit: L-BFGS on F_VK from the telemetry init."""
     import numpy as np
 
+    from data_processing import rps_gating as gating
     from tracking.fitness_vk import FVKConfig, fvk_score, optimize_trajectory
 
     p = dict(unit.params)
@@ -355,8 +356,23 @@ def refine_worker(unit: Unit) -> dict[str, Any]:
         "k_max": int(p["k_max"]),
         "channels": channels,
     }
+    # Refine CRUISE windows only. A standby shaft is nearly static, its comb is
+    # weak and dense, and the correction the refiner finds there is fitted to
+    # noise: measured on the committed sidecars, standby corrections make the
+    # refiner's OWN comb fitness worse (-0.0021 on FLY125, -0.0788 on DREGON
+    # room1) while cruise corrections improve it. The regime is read from the
+    # SLOWEST rotor, because a window with one rotor still idling is not cruise.
+    min_rev_s = float(np.nanmin(r_init))
     if mean_rev_s < IDLE_REV_S:
         return {**out, "used": False, "reason": "idle", "r_window": r_init.tolist()}
+    if min_rev_s < gating.GatePolicy().cruise_min_rps:
+        return {
+            **out,
+            "used": False,
+            "reason": "not_cruise",
+            "min_rev_s": round(min_rev_s, 4),
+            "r_window": r_init.tolist(),
+        }
 
     cfg = FVKConfig(sr=SR, k_max=int(p["k_max"]), max_channels=channels)
 
@@ -493,6 +509,8 @@ def stitch(
     """
     import numpy as np
 
+    from data_processing import rps_gating as gating
+
     prof = source_profile(spec, splits)
     rows = read_rows(out)
     if not rows:
@@ -517,7 +535,15 @@ def stitch(
             den[i0:i1] += w
         # A frame no window covered keeps its telemetry (windows tile the whole
         # recording, so this is a guard and not a path).
-        r_ref = np.where(den > 0.0, num / np.maximum(den, 1e-12), r_tel)
+        r_raw = np.where(den > 0.0, num / np.maximum(den, 1e-12), r_tel)
+        # The regime gate is part of the PRODUCER, not a repair step: standby
+        # frames carry the telemetry exactly, settled cruise carries the refined
+        # trajectory exactly, and the ramp blends the correction so the label
+        # stays continuous. A recording with no cruise window at all therefore
+        # comes out equal to its reference track everywhere, which is what makes
+        # the published field defined for every eligible frame.
+        policy = gating.GatePolicy()
+        r_ref, gate_w = gating.gate_refinement(ft, r_tel, r_raw, policy)
 
         npz = label_dir / f"{rid}.npz"
         offset = float(rec["t0_offset_s"])
@@ -528,6 +554,9 @@ def stitch(
             t0_offset_s=np.float64(offset),
             r_telemetry=r_tel,
             r_refined=r_ref,
+            r_refined_raw=r_raw,
+            gate_weight=gate_w,
+            gate_policy=json.dumps(policy.as_dict()),
             window_used=np.asarray([bool(r["used"]) for r in got]),
             window_starts=np.asarray([int(r["i0"]) for r in got], dtype=np.int64),
             k_max=np.int64(params["k_max"]),
