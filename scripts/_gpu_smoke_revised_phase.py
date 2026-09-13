@@ -234,7 +234,7 @@ def _run_gpu_smoke(out: Path | None = None) -> int:
     return 0
 
 
-def _production_moment_config() -> RP.FitConfig:
+def _production_moment_config(*, n_rotors: int = 1) -> RP.FitConfig:
     """The production moment front end and gate, independent of spectral fit params."""
     return RP.FitConfig(
         n_fft=N_FFT,
@@ -244,7 +244,7 @@ def _production_moment_config() -> RP.FitConfig:
         band_hz=(30.0, 7900.0),
         state_rate_hz=500.0,
         k_cap=130,
-        delay_s=(0.0, 0.0, 0.0, 0.0),
+        delay_s=(0.0,) * n_rotors,
         iters=1,
         lr=0.01,
         seed=0,
@@ -337,28 +337,26 @@ def _run_cpu_planted_control(out: Path | None) -> int:
     print(f"revised_phase: {RP.__file__}")
     print(f"cwd: {Path.cwd().resolve()}")
 
-    cfg = _production_moment_config()
-    rps = _real_like_rps(duration_s=48.0, seed=11)
+    # Single-rotor control: the production gate's isolation requirement is
+    # impossible to satisfy with four real-like rotors (their harmonics overlap),
+    # so we plant one rotor and compare shared-vs-independent per-order motion.
+    cfg = _production_moment_config(n_rotors=1)
+    rps = _real_like_rps(duration_s=16.0, seed=11)[:1]  # keep only rotor 0
     T = rps.shape[1]
     lam_true, sigma_true, d_true = 6.0, 6.0, 0.05
 
-    # shared shaft: all orders of each rotor feel the same rotor theta
-    shared_orders: dict[tuple[int, int], np.ndarray] = {}
-    for r in range(rps.shape[0]):
-        theta_shared = _ou_path(T, lam=lam_true, sigma=sigma_true, seed=21 + r)
-        for k in range(2, 41):
-            shared_orders[(r, k)] = theta_shared
+    # shared shaft: all orders feel the same theta
+    theta_shared = _ou_path(T, lam=lam_true, sigma=sigma_true, seed=21)
+    shared_orders: dict[tuple[int, int], np.ndarray] = {(0, k): theta_shared for k in range(2, 41)}
     clip_shared = _synthetic_harmonic_clip(
         rps, shared_orders, d=d_true, n_mics=N_MICS, seed=31, clip_id="shared_shaft"
     )
 
-    # independent per-order: each (rotor, order) gets its own OU path with the SAME marginals
-    independent_orders: dict[tuple[int, int], np.ndarray] = {}
-    for r in range(rps.shape[0]):
-        for k in range(2, 41):
-            independent_orders[(r, k)] = _ou_path(
-                T, lam=lam_true, sigma=sigma_true, seed=100 * r + k
-            )
+    # independent per-order: each order gets its own OU path with the SAME marginals
+    independent_orders: dict[tuple[int, int], np.ndarray] = {
+        (0, k): _ou_path(T, lam=lam_true, sigma=sigma_true, seed=100 + k)
+        for k in range(2, 41)
+    }
     clip_indep = _synthetic_harmonic_clip(
         rps, independent_orders, d=d_true, n_mics=N_MICS, seed=41, clip_id="independent_per_order"
     )
