@@ -1,0 +1,149 @@
+{
+  "schema": "revised-phase-fit/1",
+  "status": "AUTHORIZED C4 Michael's fixed-carrier marginal training manifest \u2014 raw carrier",
+  "notes": [
+    "AUTHORIZED C4 Michael's fixed_carrier_marginal fit manifest (raw carrier).",
+    "Supersedes C4 carrier recovery/alternation: supplied carrier is fixed; shared OU and independent Wiener phase are marginalized.",
+    "Optimizer: deterministic torch LBFGS strong_wolfe, max_iter=20, max_eval=30, history_size=10, full training frames, all K active from the first objective.",
+    "Warm start loads C3 global P/F/q/mic/sigma/D only; bias and MAP/state fields are skipped; exported bias fields remain exact zero for compatibility.",
+    "Canonical runner output: results/revised_phase/c4_fixed/michaels_raw.json.",
+    "Front end: n_fft=16384, hop=1024, sr=16000, work grid 64000, band [30,7900] Hz.",
+    "Training recording FLY125 only; FLY124 is held out and refused by HELD_OUT_TOKENS.",
+    "Dataset pin: michaels-frames = 8e9d149560dd5d5fa8aaa87e7ea537d7e4d96e829e874dab7d9c92621cca6e46.",
+    "Regimes are not redefined: standby = all rotors 20-45 rps; ramp = 45-65 event/context around the actual transition; cruise = all rotors >=65 rps.",
+    "Selected non-overlapping supports: standby 2..10 s; ramp context 10..18 s containing the actual transition; cruise 32..48, 64..80, 96..112 s after raw-key audit."
+  ],
+  "front_end": {
+    "sr": 16000,
+    "sample_rate_work": 64000,
+    "n_fft": 16384,
+    "hop": 1024,
+    "band_hz": [
+      30.0,
+      7900.0
+    ]
+  },
+  "state": {
+    "rate_hz": 500.0
+  },
+  "optimizer": {
+    "algorithm": "LBFGS",
+    "iters": 20,
+    "lr": 1.0,
+    "carrier_iters": null,
+    "carrier_lr": null,
+    "seed": 0,
+    "frame_chunk": 1,
+    "frames_per_step": null,
+    "frames_per_step_scope": "full_training_frame_set",
+    "training_recipe": "full",
+    "atom_dtype": "float32",
+    "harmonic_chunk": 8,
+    "warm_gpu_measurement": {
+      "source_job": "python-af021d",
+      "K": 230,
+      "R": 4,
+      "M": 8,
+      "harmonic_chunk": 8,
+      "first_s": 7.927,
+      "warm_s": [
+        2.367,
+        2.364
+      ],
+      "peak_gb": 3.929
+    },
+    "fit_method": "fixed_carrier_marginal",
+    "lbfgs_max_iter": 20,
+    "lbfgs_max_eval": 30,
+    "lbfgs_history_size": 10,
+    "lbfgs_line_search": "strong_wolfe",
+    "warm_start_export": "results/revised_phase/c3/michaels.json",
+    "warm_start_export_sha256": "22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc",
+    "fixed_lambda": 6.0
+  },
+  "composite": {
+    "temperature": 15.214066879865468
+  },
+  "priors": {
+    "bias_std_hz": 0.5,
+    "log_d_mean": 0.0,
+    "log_d_std": 2.0,
+    "log_sigma_mean": 0.0,
+    "log_sigma_std": 2.0
+  },
+  "moments": {
+    "window": 4096,
+    "hop": 256,
+    "lags": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "gate": {
+      "min_line_snr_db": 10.0,
+      "min_isolation_bins": 4.0,
+      "order_range": [
+        2,
+        40
+      ],
+      "min_frames": 32,
+      "max_wrap_spread_rad": 1.2,
+      "preregistered": true
+    }
+  },
+  "rigs": {
+    "michaels": {
+      "dataset": "michaels-frames",
+      "rps_key": "rps",
+      "k_cap": 230,
+      "delay_s": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "clips": [
+        {
+          "recording": "FLY125",
+          "regime": "standby",
+          "start_s": 2.0,
+          "seconds": 8.0,
+          "channels": null
+        },
+        {
+          "recording": "FLY125",
+          "regime": "ramp",
+          "start_s": 10.0,
+          "seconds": 8.0,
+          "channels": null
+        },
+        {
+          "recording": "FLY125",
+          "regime": "cruise",
+          "start_s": 32.0,
+          "seconds": 16.0,
+          "channels": null
+        },
+        {
+          "recording": "FLY125",
+          "regime": "cruise",
+          "start_s": 64.0,
+          "seconds": 16.0,
+          "channels": null
+        },
+        {
+          "recording": "FLY125",
+          "regime": "cruise",
+          "start_s": 96.0,
+          "seconds": 16.0,
+          "channels": null
+        }
+      ]
+    }
+  },
+  "carrier_source": "raw"
+}

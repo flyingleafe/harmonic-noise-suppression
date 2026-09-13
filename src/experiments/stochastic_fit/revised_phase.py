@@ -422,8 +422,9 @@ class FitConfig:
     k_cap: int = 130
     #: one telemetry delay per rotor, in seconds; REQUIRED (no invented default)
     delay_s: tuple[float, ...] | None = None
-    #: Stage-1 marginal Adam schedule. These keep the historical names because
-    #: the frozen manifests already carry optimizer.iters/lr for the global fit.
+    #: Historical Adam schedules. These keep the frozen manifest names because
+    #: old C3 manifests already carry optimizer.iters/lr for the global fit.
+    #: ``fixed_carrier_marginal`` uses the LBFGS fields below instead.
     iters: int = 120
     lr: float = 0.1
     #: Stage-2 diagnostic carrier schedule. ``None`` falls back to ``iters/lr``
@@ -445,22 +446,31 @@ class FitConfig:
     #: for tiny tests and old manifests; ``"band_energy_ladder"`` is the round-3
     #: continuation recipe: fit active orders 1..16, then 1..48, then full K.
     training_recipe: str = "full"
-    #: Estimator contract. ``"marginal_then_carrier"`` is the C3 path kept for
-    #: existing Michael's exports. ``"alternating_conditional_map"`` is the C4
-    #: inexact block-coordinate MAP: one conditional spectral objective plus one
-    #: exact OU state prior, safeguarded by full-objective descent checks.
+    #: Estimator contract. ``"marginal_then_carrier"`` is the historical C3
+    #: marginal global fit plus diagnostic carrier MAP. ``"alternating_conditional_map"``
+    #: is the superseded C4 recovery attempt. ``"fixed_carrier_marginal"`` is the
+    #: fixed supplied-carrier C4 path: no carrier state, no bias, marginalized
+    #: shared OU + independent Wiener broadening.
     fit_method: str = "marginal_then_carrier"
+    #: Declared deterministic carrier source. Historical exports are implicitly
+    #: raw; the new fixed method records raw/refined at top-level and in
+    #: provenance so evaluation can distinguish conditioning labels from scoring
+    #: references.
+    carrier_source: str = "raw"
     alternating_cycles: int = 3
     alternating_block_iters: int = 20
     alternating_lr: float = 0.05
     alternating_backtracks: int = 4
+    lbfgs_max_iter: int = 20
+    lbfgs_max_eval: int = 30
+    lbfgs_history_size: int = 10
+    lbfgs_line_search: str = "strong_wolfe"
     #: Optional C4 warm start from a previous revised export. Parameters are
-    #: loaded before the C4 reset below; held-out clips are never read.
+    #: loaded before any configured reset below; held-out clips are never read.
     warm_start_export: str | None = None
-    #: C4 empirical OU hyperparameters. They are fixed values copied from the
-    #: C3 DREGON training fit, not re-estimated and not a causal identification
-    #: claim. ``initial_d`` is an initialization only; the alternating spectral
-    #: block may move ``D`` under the same full objective.
+    #: Optional initialization resets after warm start. For fixed-carrier C4
+    #: these are initial values only; both sigma and D remain trainable. For the
+    #: superseded alternating MAP path they retain their historical names.
     fixed_lambda: float | None = None
     fixed_sigma: float | None = None
     initial_d: float | None = None
@@ -504,14 +514,23 @@ class FitConfig:
                 "optimizer.training_recipe must be 'full' or "
                 f"{STAGE1_LADDER_RECIPE!r}, got {self.training_recipe!r}"
             )
-        if self.fit_method not in ("marginal_then_carrier", "alternating_conditional_map"):
+        if self.fit_method not in (
+            "marginal_then_carrier",
+            "alternating_conditional_map",
+            "fixed_carrier_marginal",
+        ):
             raise ValueError(
-                "optimizer.fit_method must be 'marginal_then_carrier' or "
-                f"'alternating_conditional_map', got {self.fit_method!r}"
+                "optimizer.fit_method must be 'marginal_then_carrier', "
+                "'alternating_conditional_map' or 'fixed_carrier_marginal', "
+                f"got {self.fit_method!r}"
             )
-        if self.fit_method == "alternating_conditional_map" and self.training_recipe != "full":
+        if self.carrier_source not in ("raw", "refined"):
             raise ValueError(
-                "alternating_conditional_map models every order from the first objective; "
+                f"carrier_source must be 'raw' or 'refined', got {self.carrier_source!r}"
+            )
+        if self.fit_method in ("alternating_conditional_map", "fixed_carrier_marginal") and self.training_recipe != "full":
+            raise ValueError(
+                f"{self.fit_method} models every order from the first objective; "
                 "optimizer.training_recipe must be 'full' (no ladder)"
             )
         if self.fit_method == "alternating_conditional_map":
@@ -530,6 +549,15 @@ class FitConfig:
                     raise ValueError(
                         f"alternating_conditional_map requires finite positive {key}; got {value!r}"
                     )
+        if self.fit_method == "fixed_carrier_marginal":
+            if int(self.lbfgs_max_iter) <= 0 or int(self.lbfgs_max_eval) <= 0:
+                raise ValueError("fixed_carrier_marginal requires positive LBFGS max_iter/max_eval")
+            if int(self.lbfgs_history_size) <= 0:
+                raise ValueError("fixed_carrier_marginal requires positive LBFGS history_size")
+            if self.lbfgs_line_search != "strong_wolfe":
+                raise ValueError(
+                    "fixed_carrier_marginal requires optimizer.lbfgs_line_search='strong_wolfe'"
+                )
         self.n_fft_work  # noqa: B018 — validate the derived window here, not mid-fit
 
     @property
@@ -888,11 +916,11 @@ def composite_risk(power: Any, model: Any, weights: Any, *, band: Any = None) ->
 
 # ── what may be fitted at all: raw tracks, the frozen cohort, disjointness ──
 
-#: The RAW rotor tracks candidate 1 may be fitted on. ``rps_refined`` is an
-#: INFERRED label and ``clips.RPS_KEYS`` resolves ``auto`` to it FIRST, so both
-#: are refused: this candidate is fitted on telemetry, never on labels the
-#: project itself inferred.
+#: The RAW rotor tracks historical candidate-1 fits may be fitted on. The
+#: fixed-carrier C4 contract additionally allows the existing refined DREGON
+#: label when, and only when, the manifest declares ``carrier_source="refined"``.
 RAW_RPS_KEYS: tuple[str, ...] = ("rps", "motors_measured", "motors_command")
+REFINED_RPS_KEYS: tuple[str, ...] = ("rps_refined",)
 
 #: The FROZEN per-rig training cohort. It is PROVENANCE, not a preference: a
 #: manifest naming a different support is a different experiment, and it is
@@ -922,21 +950,29 @@ TRAINING_COHORT: dict[str, dict[str, Any]] = {
 }
 
 
-def check_rotor_track_key(rps_key: str, *, rig: str, where: str = "manifest") -> str:
-    """Refuse an INFERRED rotor track, before a single clip is loaded.
-
-    The entry point promises never to fit on inferred labels, and
-    :func:`clips.load_clip` takes the key verbatim, so this is where the
-    promise is kept.
-    """
+def check_rotor_track_key(
+    rps_key: str,
+    *,
+    rig: str,
+    where: str = "manifest",
+    carrier_source: str = "raw",
+) -> str:
+    """Validate that the manifest's declared carrier source matches its key."""
     key = str(rps_key)
-    if key in RAW_RPS_KEYS:
+    source = str(carrier_source)
+    if source == "raw" and key in RAW_RPS_KEYS:
         return key
+    if source == "refined" and rig == "dregon" and key in REFINED_RPS_KEYS:
+        return key
+    if source == "refined" and rig != "dregon":
+        raise ValueError(
+            f"{where}: carrier_source='refined' is only defined for DREGON; rig {rig!r} "
+            f"declares rps_key {key!r}"
+        )
+    accepted = list(RAW_RPS_KEYS) if source == "raw" else list(REFINED_RPS_KEYS)
     raise ValueError(
-        f"{where}: rigs.{rig}.rps_key is {key!r}. Candidate 1 is fitted on RAW telemetry and "
-        f"accepts only {list(RAW_RPS_KEYS)}: 'rps_refined' is an INFERRED label and 'auto' "
-        "resolves to it first (clips.RPS_KEYS), so either would fit the candidate on labels "
-        "this project inferred. Name the raw track explicitly — no default is substituted."
+        f"{where}: rigs.{rig}.rps_key is {key!r} but carrier_source is {source!r}. "
+        f"Accepted keys for that source are {accepted}; no default or 'auto' key is substituted."
     )
 
 
@@ -1731,7 +1767,9 @@ class _RevisedModel(torch.nn.Module):
         self.bias_hz = zeros(len(self.clips), self.n_rotors)
         self.bias_mean_hz = zeros(self.n_rotors)
         self.state_innov = torch.nn.ParameterList(
-            [zeros(self.n_rotors, cd.n_states, 2) for cd in self.clips]
+            []
+            if config.fit_method == "fixed_carrier_marginal"
+            else [zeros(self.n_rotors, cd.n_states, 2) for cd in self.clips]
         )
         self.active_k = self.K
         self.initialization_diagnostics: dict[str, Any] = {}
@@ -2038,6 +2076,28 @@ class _RevisedModel(torch.nn.Module):
             "log_sigma": self.log_sigma,
             "bias_hz": self.bias_hz,
             "bias_mean_hz": self.bias_mean_hz,
+        }
+
+    def fixed_carrier_global_parameters(self) -> dict[str, torch.nn.Parameter]:
+        """C4 fixed-carrier parameters: global spectrum/dynamics only.
+
+        The supplied carrier track is deterministic. There is no fitted bias and
+        no MAP state block in this estimator; stochastic broadening is
+        marginalized by the prior kernel in :meth:`frame_model`.
+        """
+        return {
+            "profile_db": self.profile_db,
+            "amp_exp": self.amp_exp,
+            "floor_mean_db": self.floor_mean_db,
+            "floor_shape_z": self.floor_shape_z,
+            "floor_tilt_db_oct": self.floor_tilt_db_oct,
+            "floor_exp": self.floor_exp,
+            "floor_static_raw": self.floor_static_raw,
+            "mic_floor_db": self.mic_floor_db,
+            "mic_gain_db": self.mic_gain_db,
+            "gain_all_db": self.gain_all_db,
+            "log_d": self.log_d,
+            "log_sigma": self.log_sigma,
         }
 
     def carrier_parameters(self) -> dict[str, torch.nn.Parameter]:
@@ -2694,6 +2754,7 @@ def _run_proposal_steps(
     block: str,
     seed_offset: int,
 ) -> dict[str, dict[str, float]]:
+    _enable_only_gradients(model, named)
     opt = torch.optim.Adam(list(named.values()), lr=float(config.alternating_lr))
     rng = np.random.default_rng(int(config.seed) + int(seed_offset))
     grads: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
@@ -2741,7 +2802,7 @@ def _state_to_innov(theta: np.ndarray, nu: np.ndarray, *, lam: float, sigma: flo
 
 
 def _apply_warm_start(model: _RevisedModel, *, config: FitConfig) -> dict[str, Any]:
-    """Load C3 training parameters/state, then apply the C4 D/sigma reset."""
+    """Load previous global parameters, then apply any configured C4 resets."""
     report: dict[str, Any] = dict(applied=False)
     if config.warm_start_export:
         p = Path(config.warm_start_export)
@@ -2756,24 +2817,34 @@ def _apply_warm_start(model: _RevisedModel, *, config: FitConfig) -> dict[str, A
             loaded_training_states=[],
             missing_training_states=[],
         )
-        stored = dict((export.get("diagnostics") or {}).get("map_state") or {})
-        with torch.no_grad():
-            for ci, cd in enumerate(model.clips):
-                entry = stored.get(cd.clip_id)
-                if not isinstance(entry, Mapping):
-                    report["missing_training_states"].append(cd.clip_id)
-                    continue
-                theta = np.asarray(entry["theta_rad"], dtype=np.float64)
-                nu = 2.0 * np.pi * np.asarray(entry["nu_hz"], dtype=np.float64)
-                if theta.shape[1] != cd.n_states:
-                    report["missing_training_states"].append(
-                        f"{cd.clip_id}: state length {theta.shape[1]} != {cd.n_states}"
+        if config.fit_method == "fixed_carrier_marginal":
+            report["map_state"] = "skipped: fixed_carrier_marginal has no MAP carrier state"
+        else:
+            stored = dict((export.get("diagnostics") or {}).get("map_state") or {})
+            with torch.no_grad():
+                for ci, cd in enumerate(model.clips):
+                    entry = stored.get(cd.clip_id)
+                    if not isinstance(entry, Mapping):
+                        report["missing_training_states"].append(cd.clip_id)
+                        continue
+                    theta = np.asarray(entry["theta_rad"], dtype=np.float64)
+                    nu = 2.0 * np.pi * np.asarray(entry["nu_hz"], dtype=np.float64)
+                    if theta.shape[1] != cd.n_states:
+                        report["missing_training_states"].append(
+                            f"{cd.clip_id}: state length {theta.shape[1]} != {cd.n_states}"
+                        )
+                        continue
+                    innov = _state_to_innov(
+                        theta, nu, lam=model.lam, sigma=model.sigma_value(), dt=model.dt_state
                     )
-                    continue
-                innov = _state_to_innov(theta, nu, lam=model.lam, sigma=model.sigma_value(), dt=model.dt_state)
-                model.state_innov[ci].copy_(torch.as_tensor(innov, dtype=torch.float64, device=model._dev))
-                report["loaded_training_states"].append(cd.clip_id)
+                    model.state_innov[ci].copy_(
+                        torch.as_tensor(innov, dtype=torch.float64, device=model._dev)
+                    )
+                    report["loaded_training_states"].append(cd.clip_id)
     with torch.no_grad():
+        if config.fit_method == "fixed_carrier_marginal":
+            model.bias_hz.zero_()
+            model.bias_mean_hz.zero_()
         if config.fixed_sigma is not None:
             model.log_sigma.copy_(
                 torch.as_tensor(math.log(float(config.fixed_sigma)), dtype=torch.float64, device=model._dev)
@@ -2782,10 +2853,26 @@ def _apply_warm_start(model: _RevisedModel, *, config: FitConfig) -> dict[str, A
             model.log_d.copy_(
                 torch.as_tensor(math.log(float(config.initial_d)), dtype=torch.float64, device=model._dev)
             )
+    report["ou_hyperparameter_initialization"] = dict(
+        lambda_=float(model.lam),
+        sigma=float(model.sigma_value()),
+        d_scalar=float(torch.exp(model.log_d).detach().cpu().item()),
+        sigma_reset=config.fixed_sigma is not None,
+        d_reset=config.initial_d is not None,
+        provenance=(
+            "warm-started C3 globals with optional manifest resets; sigma and D remain trainable"
+            if config.fit_method == "fixed_carrier_marginal"
+            else "historical C4 initialization"
+        ),
+    )
     report["fixed_ou_hyperparameters"] = dict(
         lambda_=float(model.lam),
         sigma=float(model.sigma_value()),
-        provenance="C3 DREGON training empirical prior; fixed, not re-estimated, no causal claim",
+        provenance=(
+            "lambda fixed by reference; sigma is an initial trainable value"
+            if config.fit_method == "fixed_carrier_marginal"
+            else "C3 DREGON training empirical prior; fixed, not re-estimated, no causal claim"
+        ),
     )
     report["d_initial_after_reset"] = float(torch.exp(model.log_d).detach().cpu().item())
     return report
@@ -2819,6 +2906,18 @@ def _grad_norms(named: dict[str, torch.nn.Parameter]) -> dict[str, float]:
         for name, p in named.items()
     }
 
+def _enable_only_gradients(
+    model: _RevisedModel, named: Mapping[str, torch.nn.Parameter]
+) -> None:
+    """Make ``named`` the only differentiable block and clear stale inactive grads."""
+    active = {id(p) for p in named.values()}
+    for p in model.parameters():
+        is_active = id(p) in active
+        p.requires_grad_(is_active)
+        if not is_active:
+            p.grad = None
+
+
 
 def _fit_summary(trace: list[float], grad_norms: dict[str, dict[str, float]]) -> dict[str, Any]:
     vals = np.asarray(trace, dtype=np.float64)
@@ -2834,6 +2933,132 @@ def _fit_summary(trace: list[float], grad_norms: dict[str, dict[str, float]]) ->
         iterations=int(vals.size),
         loss_trace=trace,
         grad_norms=grad_norms,
+    )
+
+
+def _fixed_carrier_full_objective(
+    model: _RevisedModel, *, config: FitConfig, backward: bool
+) -> Tensor:
+    total = torch.zeros((), dtype=torch.float64, device=model._dev)
+    for ci, fi in _all_frame_indices(model):
+        for chunk in _chunks(fi, config.frame_chunk):
+            total = total + model.marginal_chunk_risk(ci, chunk, scale=1.0) / float(config.temperature)
+    total = total + model.prior(state=False, globals=True, bias_population=False, clip_bias=False)
+    if backward:
+        total.backward()
+    return total
+
+
+def _global_grad_norm(named: Mapping[str, torch.nn.Parameter]) -> float:
+    total = 0.0
+    for p in named.values():
+        if p.grad is not None:
+            total += float(p.grad.detach().double().norm().item()) ** 2
+    return math.sqrt(total)
+
+
+def _parameters_finite(named: Mapping[str, torch.nn.Parameter]) -> bool:
+    return all(bool(torch.isfinite(p.detach()).all().item()) for p in named.values())
+
+
+def _optimize_fixed_carrier_marginal(
+    model: _RevisedModel,
+    *,
+    config: FitConfig,
+    progress: Callable[[str], None] | None,
+) -> dict[str, Any]:
+    named = model.fixed_carrier_global_parameters()
+    _enable_only_gradients(model, named)
+    with torch.no_grad():
+        model.bias_hz.zero_()
+        model.bias_mean_hz.zero_()
+    closure_trace: list[dict[str, Any]] = []
+    eval_count = 0
+
+    def evaluate(kind: str, *, backward: bool) -> tuple[float, float | None]:
+        nonlocal eval_count
+        for p in named.values():
+            p.grad = None
+        loss = _fixed_carrier_full_objective(model, config=config, backward=backward)
+        value = float(loss.detach().cpu().item())
+        grad_norm = _global_grad_norm(named) if backward else None
+        eval_count += 1
+        closure_trace.append(
+            dict(eval=int(eval_count), kind=kind, full_objective=float(value), grad_norm=grad_norm)
+        )
+        return value, grad_norm
+
+    initial, _ = evaluate("initial_full_objective", backward=False)
+    opt = torch.optim.LBFGS(
+        list(named.values()),
+        max_iter=int(config.lbfgs_max_iter),
+        max_eval=int(config.lbfgs_max_eval),
+        history_size=int(config.lbfgs_history_size),
+        line_search_fn=config.lbfgs_line_search,
+    )
+
+    def closure() -> Tensor:
+        nonlocal eval_count
+        for p in named.values():
+            p.grad = None
+        loss = _fixed_carrier_full_objective(model, config=config, backward=True)
+        value = float(loss.detach().cpu().item())
+        grad_norm = _global_grad_norm(named)
+        eval_count += 1
+        closure_trace.append(
+            dict(eval=int(eval_count), kind="lbfgs_closure", full_objective=value, grad_norm=grad_norm)
+        )
+        return loss
+
+    if progress is not None:
+        progress(
+            "fixed-carrier marginal LBFGS: full-frame objective, strong_wolfe, "
+            f"max_iter {int(config.lbfgs_max_iter)}, max_eval {int(config.lbfgs_max_eval)}"
+        )
+    try:
+        opt.step(closure)
+        termination = "lbfgs_completed"
+    except RuntimeError as exc:
+        termination = f"lbfgs_runtime_error: {exc}"
+    final, final_grad = evaluate("final_full_objective", backward=True)
+    if progress is not None:
+        progress(f"fixed-carrier marginal full J {initial:.6f} -> {final:.6f}")
+    finite_trace = np.isfinite([entry["full_objective"] for entry in closure_trace]).all()
+    valid = bool(
+        math.isfinite(initial)
+        and math.isfinite(final)
+        and final <= initial
+        and math.isfinite(final_grad)
+        and finite_trace
+        and _parameters_finite(named)
+        and termination == "lbfgs_completed"
+    )
+    return dict(
+        valid=valid,
+        finite_parameters=_parameters_finite(named),
+        finite_objectives=bool(finite_trace),
+        objective_start=float(initial),
+        objective_end=float(final),
+        full_objective_initial=float(initial),
+        full_objective_final=float(final),
+        grad_norm=float(final_grad),
+        eval_count=int(eval_count),
+        iterations=int(config.lbfgs_max_iter),
+        termination=termination,
+        optimizer=dict(
+            name="lbfgs",
+            line_search=config.lbfgs_line_search,
+            max_iter=int(config.lbfgs_max_iter),
+            max_eval=int(config.lbfgs_max_eval),
+            history_size=int(config.lbfgs_history_size),
+            full_frame=True,
+        ),
+        closure_trace=closure_trace,
+        closure_trace_note=(
+            "Actual LBFGS objective function evaluations; line search may be non-monotonic and "
+            "entries are not accepted-iteration history."
+        ),
+        active_parameters=sorted(named),
     )
 
 
@@ -2864,6 +3089,7 @@ def _optimize_marginal(
     progress: Callable[[str], None] | None,
 ) -> tuple[list[float], dict[str, dict[str, float]], list[dict[str, Any]]]:
     named = model.marginal_parameters()
+    _enable_only_gradients(model, named)
     opt = torch.optim.Adam(list(named.values()), lr=float(config.lr))
     rng = np.random.default_rng(int(config.seed))
     trace: list[float] = []
@@ -2928,6 +3154,7 @@ def _optimize_carrier(
     progress: Callable[[str], None] | None = None,
 ) -> tuple[list[float], dict[str, dict[str, float]]]:
     named = model.carrier_parameters()
+    _enable_only_gradients(model, named)
     opt = torch.optim.Adam(list(named.values()), lr=float(config.stage2_lr))
     rng = np.random.default_rng(int(config.seed) + 17)
     indices = list(range(len(model.clips))) if clip_indices is None else list(clip_indices)
@@ -2978,6 +3205,7 @@ def _optimize_alternating_conditional_map(
     for cycle in range(int(config.alternating_cycles)):
         for block_i, (block_name, named_fn) in enumerate(blocks):
             named = named_fn()
+            _enable_only_gradients(model, named)
             before_state = _snapshot_parameters(named)
             before = float(current)
             grads = _run_proposal_steps(
@@ -3058,16 +3286,21 @@ def fit_revised(
     t0 = time.time()
     torch.manual_seed(int(config.seed))
     if config.fixed_lambda is not None or config.fixed_sigma is not None:
+        init_sigma = float(config.fixed_sigma if config.fixed_sigma is not None else dynamics.sigma)
         dynamics = dataclasses.replace(
             dynamics,
             lam=float(config.fixed_lambda if config.fixed_lambda is not None else dynamics.lam),
-            sigma=float(config.fixed_sigma if config.fixed_sigma is not None else dynamics.sigma),
+            sigma=init_sigma,
             diagnostics={
                 **dict(dynamics.diagnostics),
-                "fixed_ou_hyperparameters": dict(
+                "ou_hyperparameter_manifest_initialization": dict(
                     lambda_=float(config.fixed_lambda if config.fixed_lambda is not None else dynamics.lam),
-                    sigma=float(config.fixed_sigma if config.fixed_sigma is not None else dynamics.sigma),
-                    provenance="manifest empirical prior; fixed for this fit",
+                    sigma=init_sigma,
+                    provenance=(
+                        "manifest initialization; sigma remains trainable"
+                        if config.fit_method == "fixed_carrier_marginal"
+                        else "manifest empirical prior; fixed for this fit"
+                    ),
                 ),
             },
         )
@@ -3082,11 +3315,15 @@ def fit_revised(
     rung_trace: list[dict[str, Any]] = []
     alternating_trace: list[float] = []
     alternating_fit: dict[str, Any] | None = None
+    fixed_fit: dict[str, Any] | None = None
     if config.fit_method == "alternating_conditional_map":
         alternating_trace, alternating_fit = _optimize_alternating_conditional_map(
             model, config=config, progress=progress
         )
         initial_full_objective_after_reset = alternating_trace[0]
+        predictive_parameters = model.parameter_export()
+    elif config.fit_method == "fixed_carrier_marginal":
+        fixed_fit = _optimize_fixed_carrier_marginal(model, config=config, progress=progress)
         predictive_parameters = model.parameter_export()
     else:
         marginal_trace, marginal_grads, rung_trace = _optimize_marginal(
@@ -3103,14 +3340,15 @@ def fit_revised(
         map_state: dict[str, Any] = {}
         off_regime: dict[str, Any] = {}
         for ci, cd in enumerate(model.clips):
-            theta, nu = model.theta_nu(ci)
-            map_state[cd.clip_id] = dict(
-                time_s=(np.arange(cd.n_states) * model.dt_state).tolist(),
-                theta_rad=theta.cpu().numpy().tolist(),
-                nu_hz=(nu.cpu().numpy() / (2.0 * np.pi)).tolist(),
-                diagnostic_bias_hz=model.bias_hz[ci].cpu().numpy().tolist(),
-                bias_note="stage-2 diagnostic clip bias; held-out prediction uses parameters.bias_mean_hz",
-            )
+            if config.fit_method != "fixed_carrier_marginal":
+                theta, nu = model.theta_nu(ci)
+                map_state[cd.clip_id] = dict(
+                    time_s=(np.arange(cd.n_states) * model.dt_state).tolist(),
+                    theta_rad=theta.cpu().numpy().tolist(),
+                    nu_hz=(nu.cpu().numpy() / (2.0 * np.pi)).tolist(),
+                    diagnostic_bias_hz=model.bias_hz[ci].cpu().numpy().tolist(),
+                    bias_note="stage-2 diagnostic clip bias; held-out prediction uses parameters.bias_mean_hz",
+                )
             off_regime[cd.clip_id] = off_regime_extrapolation(
                 (cd.raw_hz + torch.as_tensor(predictive_parameters["bias_mean_hz"], device=model._dev)[:, None])
                 .cpu()
@@ -3152,16 +3390,30 @@ def fit_revised(
         ),
         state_rate_hz=float(config.state_rate_hz),
         fit_method=config.fit_method,
+        carrier_source=config.carrier_source,
         lambda_source="fixed_reference",
         optimizer=dict(
-            name="adam",
-            stage1_marginal=dict(iters=int(config.iters), lr=float(config.lr)),
+            name="lbfgs" if config.fit_method == "fixed_carrier_marginal" else "adam",
+            stage1_marginal=dict(iters=int(config.iters), lr=float(config.lr))
+            if config.fit_method != "fixed_carrier_marginal"
+            else None,
+            fixed_carrier_marginal=dict(
+                max_iter=int(config.lbfgs_max_iter),
+                max_eval=int(config.lbfgs_max_eval),
+                history_size=int(config.lbfgs_history_size),
+                line_search=config.lbfgs_line_search,
+                full_frame=True,
+            )
+            if config.fit_method == "fixed_carrier_marginal"
+            else None,
             training_recipe=config.training_recipe,
             rung_schedule=[
                 dict(active_k=int(active_k), iterations=int(n_iter))
                 for active_k, n_iter in _stage1_schedule(config)
             ],
-            stage2_carrier=dict(iters=int(config.stage2_iters), lr=float(config.stage2_lr)),
+            stage2_carrier=dict(iters=int(config.stage2_iters), lr=float(config.stage2_lr))
+            if config.fit_method == "marginal_then_carrier"
+            else None,
             alternating_conditional_map=dict(
                 cycles=int(config.alternating_cycles),
                 block_iters=int(config.alternating_block_iters),
@@ -3174,17 +3426,27 @@ def fit_revised(
             frame_chunk=int(config.frame_chunk),
             harmonic_chunk=config.harmonic_chunk,
             frames_per_step=config.frames_per_step,
-            minibatch_estimator="uniform without replacement, own weights, scaled N_full/N_"
-            "sampled (unbiased for the proposal gradient only; block acceptance uses the full risk)",
+            minibatch_estimator=(
+                "none: fixed_carrier_marginal evaluates every training frame in each LBFGS closure"
+                if config.fit_method == "fixed_carrier_marginal"
+                else "uniform without replacement, own weights, scaled N_full/N_sampled "
+                "(unbiased for the proposal gradient only; block acceptance uses the full risk)"
+            ),
             atom_dtype=config.atom_dtype,
             device=str(device),
         ),
         seed=int(config.seed),
         composite_temperature=float(config.temperature),
         composite_semantics=(
-            "alternating_conditional_map" if config.fit_method == "alternating_conditional_map"
-            else "stage 1 is a marginal mean-prediction composite risk; stage 2 is a plug-in "
-            "conditional MAP diagnostic. The two objectives are not summed as evidence."
+            "fixed_carrier_marginal full-frame marginal composite risk; supplied carrier fixed, "
+            "shared OU and independent Wiener broadening marginalized, no MAP state or bias"
+            if config.fit_method == "fixed_carrier_marginal"
+            else (
+                "alternating_conditional_map"
+                if config.fit_method == "alternating_conditional_map"
+                else "stage 1 is a marginal mean-prediction composite risk; stage 2 is a plug-in "
+                "conditional MAP diagnostic. The two objectives are not summed as evidence."
+            )
         ),
         moment_gate=config.gate.as_dict(),
         moment_front_end=config.moments.as_dict(),
@@ -3213,6 +3475,7 @@ def fit_revised(
         schema_version=SCHEMA_VERSION,
         model_family=MODEL_FAMILY,
         fit_method=config.fit_method,
+        carrier_source=config.carrier_source,
         lambda_source="fixed_reference",
         shared_phase_evidence="not_identified_by_marginal_score",
         rig_id=str(rig_id),
@@ -3228,63 +3491,112 @@ def fit_revised(
             final_profile_db=predictive_parameters["profile_db"],
             shared_phase_evidence="not_identified_by_marginal_score",
             marginal_fit=(
-                dict(_fit_summary(marginal_trace, marginal_grads), rung_trace=rung_trace)
-                if config.fit_method == "marginal_then_carrier"
-                else dict(valid=True, skipped="not used by alternating_conditional_map")
+                fixed_fit
+                if config.fit_method == "fixed_carrier_marginal"
+                else (
+                    dict(_fit_summary(marginal_trace, marginal_grads), rung_trace=rung_trace)
+                    if config.fit_method == "marginal_then_carrier"
+                    else dict(valid=True, skipped="not used by alternating_conditional_map")
+                )
             ),
             carrier_fit=(
                 _fit_summary(carrier_trace, carrier_grads)
                 if config.fit_method == "marginal_then_carrier"
-                else dict(valid=True, skipped="absorbed into alternating_conditional_map")
+                else (
+                    None
+                    if config.fit_method == "fixed_carrier_marginal"
+                    else dict(valid=True, skipped="absorbed into alternating_conditional_map")
+                )
             ),
             alternating_conditional_map=alternating_fit,
             fixed_ou_hyperparameters=warm_start.get("fixed_ou_hyperparameters"),
             warm_start=warm_start,
             initial_full_objective_after_reset=initial_full_objective_after_reset,
-            loss_trace=alternating_trace if config.fit_method == "alternating_conditional_map" else carrier_trace,
-            grad_norms=(
-                dict(alternating=alternating_fit.get("grad_norms", {}) if alternating_fit else {})
-                if config.fit_method == "alternating_conditional_map"
-                else dict(marginal=marginal_grads, carrier=carrier_grads)
+            loss_trace=(
+                [entry["full_objective"] for entry in fixed_fit["closure_trace"]]
+                if fixed_fit is not None
+                else (alternating_trace if config.fit_method == "alternating_conditional_map" else carrier_trace)
             ),
-            bias_vs_nu_mean_confounding=_bias_confounding(model),
+            grad_norms=(
+                dict(fixed_carrier_marginal=dict(final=fixed_fit["grad_norm"]))
+                if fixed_fit is not None
+                else (
+                    dict(alternating=alternating_fit.get("grad_norms", {}) if alternating_fit else {})
+                    if config.fit_method == "alternating_conditional_map"
+                    else dict(marginal=marginal_grads, carrier=carrier_grads)
+                )
+            ),
+            bias_vs_nu_mean_confounding=(
+                None if config.fit_method == "fixed_carrier_marginal" else _bias_confounding(model)
+            ),
             state_grid_note=STATE_GRID_NOTE,
-            coarsening_sensitivity=_coarsening_sensitivity(model),
+            coarsening_sensitivity=(
+                None if config.fit_method == "fixed_carrier_marginal" else _coarsening_sensitivity(model)
+            ),
             off_regime_extrapolation=off_regime,
             complexity=dict(
                 stochastic_mechanisms=2,
                 rig_dynamic_params=3,
                 rig_dynamic_params_detail=(
-                    "lambda and sigma fixed by empirical C3 DREGON training values for "
-                    "alternating_conditional_map; scalar D fitted under the full conditional objective"
-                    if config.fit_method == "alternating_conditional_map"
-                    else "lambda fixed by reference assumption; sigma and scalar D fitted in marginal "
-                    "stage, then frozen for carrier diagnostics"
+                    "lambda fixed by reference; sigma and scalar D fitted under the full-frame "
+                    "fixed-carrier marginal objective"
+                    if config.fit_method == "fixed_carrier_marginal"
+                    else (
+                        "lambda and sigma fixed by empirical C3 DREGON training values for "
+                        "alternating_conditional_map; scalar D fitted under the full conditional objective"
+                        if config.fit_method == "alternating_conditional_map"
+                        else "lambda fixed by reference assumption; sigma and scalar D fitted in marginal "
+                        "stage, then frozen for carrier diagnostics"
+                    )
                 ),
-                latent_state_blocks=len(model.clips) * model.n_rotors,
-                latent_state_rate_hz=float(config.state_rate_hz),
+                latent_state_blocks=(
+                    0
+                    if config.fit_method == "fixed_carrier_marginal"
+                    else len(model.clips) * model.n_rotors
+                ),
+                latent_state_rate_hz=(
+                    None if config.fit_method == "fixed_carrier_marginal" else float(config.state_rate_hz)
+                ),
                 nuisance_blocks=dict(
-                    diagnostic_bias_per_clip_rotor=int(model.bias_hz.numel()),
-                    predictive_bias_population_mean=int(model.bias_mean_hz.numel()),
+                    diagnostic_bias_per_clip_rotor=(
+                        0 if config.fit_method == "fixed_carrier_marginal" else int(model.bias_hz.numel())
+                    ),
+                    predictive_bias_population_mean=(
+                        0 if config.fit_method == "fixed_carrier_marginal" else int(model.bias_mean_hz.numel())
+                    ),
                     profile_db=int(model.profile_db.numel()),
                 ),
                 inference_stages=(
-                    2 * int(config.alternating_cycles)
-                    if config.fit_method == "alternating_conditional_map"
-                    else 2
+                    1
+                    if config.fit_method == "fixed_carrier_marginal"
+                    else (
+                        2 * int(config.alternating_cycles)
+                        if config.fit_method == "alternating_conditional_map"
+                        else 2
+                    )
                 ),
                 approximations=[
                     (
-                        "inexact block-coordinate MAP: carrier and spectral Adam proposals are "
-                        "accepted only by full fixed-training conditional objective decrease"
-                        if config.fit_method == "alternating_conditional_map"
-                        else "stage-1 marginal expected periodogram integrates the OU state once"
+                        "full-frame LBFGS on the fixed supplied-carrier marginal objective; no "
+                        "carrier recovery, bias, state allocation or state prior"
+                        if config.fit_method == "fixed_carrier_marginal"
+                        else (
+                            "inexact block-coordinate MAP: carrier and spectral Adam proposals are "
+                            "accepted only by full fixed-training conditional objective decrease"
+                            if config.fit_method == "alternating_conditional_map"
+                            else "stage-1 marginal expected periodogram integrates the OU state once"
+                        )
                     ),
                     (
-                        "C3 carrier paths warm-start training diagnostics where available; held-out "
-                        "prediction still uses raw telemetry plus population bias"
-                        if config.fit_method == "alternating_conditional_map"
-                        else "stage-2 carrier paths are plug-in training diagnostics only"
+                        "C3 warm start contributes global parameters only; bias/MAP fields are skipped "
+                        "and fixed-method exported bias fields are exact zero for compatibility"
+                        if config.fit_method == "fixed_carrier_marginal"
+                        else (
+                            "C3 carrier paths warm-start training diagnostics where available; held-out "
+                            "prediction still uses raw telemetry plus population bias"
+                            if config.fit_method == "alternating_conditional_map"
+                            else "stage-2 carrier paths are plug-in training diagnostics only"
+                        )
                     ),
                     "cubic Hermite state interpolation omits the intra-interval OU bridge "
                     "variance (grid approximation)",
@@ -3300,6 +3612,18 @@ def fit_revised(
             runtime_s=time.time() - t0,
         ),
     )
+    if config.fit_method == "fixed_carrier_marginal":
+        diagnostics = export["diagnostics"]
+        diagnostics.pop("map_state", None)
+        diagnostics.pop("map_state_note", None)
+        diagnostics.pop("carrier_fit", None)
+        diagnostics.pop("bias_vs_nu_mean_confounding", None)
+        diagnostics.pop("coarsening_sensitivity", None)
+        diagnostics["fixed_carrier_marginal_note"] = (
+            "The supplied carrier is deterministic; shared OU and independent Wiener phase are "
+            "marginalized in the expected periodogram. No recovered carrier, no MAP state, and no "
+            "carrier_fit.valid are exported."
+        )
     return export
 
 
@@ -3324,6 +3648,13 @@ def _config_from_export(export: dict[str, Any], **overrides: Any) -> FitConfig:
     opt = prov.get("optimizer", {})
     stage1 = opt.get("stage1_marginal", {}) if isinstance(opt, dict) else {}
     stage2 = opt.get("stage2_carrier", {}) if isinstance(opt, dict) else {}
+    lbfgs = opt.get("fixed_carrier_marginal", {}) if isinstance(opt, dict) else {}
+    if stage1 is None:
+        stage1 = {}
+    if stage2 is None:
+        stage2 = {}
+    if lbfgs is None:
+        lbfgs = {}
     cfg = FitConfig(
         n_fft=int(fe["n_fft"]),
         hop=int(fe["hop"]),
@@ -3345,6 +3676,12 @@ def _config_from_export(export: dict[str, Any], **overrides: Any) -> FitConfig:
         frames_per_step=opt.get("frames_per_step"),
         temperature=float(prov.get("composite_temperature", 1.0)),
         atom_dtype=str(opt.get("atom_dtype", "float32")),
+        fit_method=str(export.get("fit_method", prov.get("fit_method", "marginal_then_carrier"))),
+        carrier_source=str(export.get("carrier_source", prov.get("carrier_source", "raw"))),
+        lbfgs_max_iter=int(lbfgs.get("max_iter", opt.get("lbfgs_max_iter", 20))),
+        lbfgs_max_eval=int(lbfgs.get("max_eval", opt.get("lbfgs_max_eval", 30))),
+        lbfgs_history_size=int(lbfgs.get("history_size", opt.get("lbfgs_history_size", 10))),
+        lbfgs_line_search=str(lbfgs.get("line_search", opt.get("lbfgs_line_search", "strong_wolfe"))),
     )
     priors = prov.get("priors", {})
     cfg.bias_std_hz = float(priors.get("bias_std_hz", params.get("bias_prior_std_hz", 0.5)))
@@ -3759,6 +4096,7 @@ __all__ = [
     "MODEL_FAMILY",
     "MOMENT_GATE",
     "RAW_RPS_KEYS",
+    "REFINED_RPS_KEYS",
     "SAMPLE_RATE_WORK",
     "SCHEMA_VERSION",
     "SPEED_FLOOR_RPS",

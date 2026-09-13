@@ -837,11 +837,18 @@ class CandidateExport:
         return int(np.atleast_2d(np.asarray(self.summary["parameters"]["profile_db"])).shape[1])
 
     @property
+    def carrier_source(self) -> str | None:
+        """``"raw"``/``"refined"`` for fixed-carrier C4 exports; absent on old C2/C3."""
+        source = self.summary.get("carrier_source")
+        return None if source is None else str(source)
+
+    @property
     def fit_contract(self) -> dict[str, Any]:
-        """The declared round-2 estimator contract carried by the export."""
+        """The declared estimator contract carried by the export."""
         diag = dict(self.summary.get("diagnostics") or {})
         return dict(
             fit_method=self.summary.get("fit_method"),
+            carrier_source=self.carrier_source,
             lambda_source=self.summary.get("lambda_source"),
             shared_phase_evidence=self.summary.get("shared_phase_evidence"),
             marginal_fit=diag.get("marginal_fit"),
@@ -880,6 +887,8 @@ class CandidateExport:
             rig_id=self.rig_id,
             n_rotors=self.n_rotors,
             n_orders=self.n_orders,
+            fit_method=self.summary.get("fit_method"),
+            carrier_source=self.carrier_source,
             fit_manifest_sha256=prov.get("manifest_sha256"),
             front_end=prov.get("front_end"),
             training_clips=[w.as_dict() for w in self.training_windows()],
@@ -949,6 +958,123 @@ def _valid_fixed_ou_hyperparameters(diag: Mapping[str, Any]) -> bool:
     return all(math.isfinite(float(v)) and float(v) > 0.0 for v in vals)
 
 
+
+
+def _valid_fixed_carrier_marginal_fit(stage: Any) -> bool:
+    """C4 fixed-carrier diagnostic: finite canonical full-J LBFGS provenance."""
+    if not isinstance(stage, Mapping):
+        return False
+    s = dict(stage)
+    if not bool(s.get("valid")) or not _numeric_finite(s):
+        return False
+    for key in (
+        "objective_start",
+        "objective_end",
+        "full_objective_initial",
+        "full_objective_final",
+        "grad_norm",
+        "eval_count",
+    ):
+        if key not in s:
+            return False
+        try:
+            value = float(s[key])
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(value):
+            return False
+    if float(s["objective_start"]) != float(s["full_objective_initial"]):
+        return False
+    if float(s["objective_end"]) != float(s["full_objective_final"]):
+        return False
+    if float(s["full_objective_final"]) > float(s["full_objective_initial"]) + 1e-9:
+        return False
+    if int(s["eval_count"]) <= 0:
+        return False
+    if not str(s.get("termination") or "").strip():
+        return False
+    trace = s.get("closure_trace")
+    if not isinstance(trace, Sequence) or isinstance(trace, (str, bytes)):
+        return False
+    if len(trace) != int(s["eval_count"]):
+        return False
+    for i, item in enumerate(trace, start=1):
+        if not isinstance(item, Mapping):
+            return False
+        if int(item.get("eval", -1)) != i:
+            return False
+        if not item.get("kind"):
+            return False
+        try:
+            value = float(item["full_objective"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if not math.isfinite(value):
+            return False
+    return True
+
+
+def _all_numeric_zero(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return all(_all_numeric_zero(v) for v in value.values())
+    if isinstance(value, (str, bytes)) or value is None:
+        return False
+    if isinstance(value, Sequence):
+        return all(_all_numeric_zero(v) for v in value)
+    try:
+        arr = np.asarray(value, dtype=np.float64)
+    except (TypeError, ValueError):
+        return False
+    return bool((arr == 0.0).all())
+
+
+def _validate_fixed_carrier_source(path: Path, summary: Mapping[str, Any]) -> None:
+    source = summary.get("carrier_source")
+    if source not in ("raw", "refined"):
+        raise ValueError(
+            f"{path}: fixed_carrier_marginal exports must declare top-level "
+            f"carrier_source='raw' or 'refined'; got {source!r}"
+        )
+    if str(summary.get("rig_id", "")) == "michaels" and source != "raw":
+        raise ValueError(f"{path}: Michael's fixed-carrier export must use carrier_source='raw'")
+    prov = dict(summary.get("training_provenance") or {})
+    prov_source = prov.get("carrier_source")
+    if prov_source is not None and str(prov_source) != str(source):
+        raise ValueError(
+            f"{path}: top-level carrier_source {source!r} disagrees with "
+            f"training_provenance.carrier_source {prov_source!r}"
+        )
+    clips = prov.get("clips")
+    if not isinstance(clips, Sequence) or isinstance(clips, (str, bytes)) or not clips:
+        raise ValueError(f"{path}: training_provenance.clips must name the selected rps_key")
+    keys: list[str] = []
+    for i, entry in enumerate(clips):
+        if not isinstance(entry, Mapping) or not entry.get("rps_key"):
+            raise ValueError(f"{path}: training_provenance.clips[{i}].rps_key is required")
+        keys.append(str(entry["rps_key"]))
+    if source == "refined":
+        bad = sorted({k for k in keys if k != REFINED_RPS_KEY})
+        if bad:
+            raise ValueError(
+                f"{path}: carrier_source='refined' requires every training rps_key to be "
+                f"{REFINED_RPS_KEY!r}; got {bad}"
+            )
+    else:
+        bad = sorted({k for k in keys if k not in RAW_RPS_KEYS})
+        if bad:
+            raise ValueError(
+                f"{path}: carrier_source='raw' requires raw telemetry rps_key values "
+                f"{RAW_RPS_KEYS}; got {bad}"
+            )
+
+
+def _validate_fixed_carrier_zero_bias(path: Path, params: Mapping[str, Any]) -> None:
+    for key in ("bias_mean_hz", "bias_hz"):
+        if key not in params:
+            raise ValueError(f"{path}: fixed_carrier_marginal requires parameters.{key}=0")
+        if not _all_numeric_zero(params[key]):
+            raise ValueError(f"{path}: fixed_carrier_marginal requires parameters.{key} to be exactly zero")
+
 def read_candidate_export(path: str | Path) -> CandidateExport:
     """Read and pin a revised export; refuse legacy, C1, and malformed C2 records."""
     p = Path(path)
@@ -963,10 +1089,14 @@ def read_candidate_export(path: str | Path) -> CandidateExport:
         if not isinstance(summary.get(key), dict):
             raise ValueError(f"{p}: model_family={fam!r} but {key!r} is missing or not a mapping")
     fit_method = summary.get("fit_method")
-    if fit_method not in ("marginal_then_carrier", "alternating_conditional_map"):
+    if fit_method not in (
+        "marginal_then_carrier",
+        "alternating_conditional_map",
+        "fixed_carrier_marginal",
+    ):
         raise ValueError(
-            f"{p}: revised candidate exports must declare fit_method='marginal_then_carrier' "
-            f"or 'alternating_conditional_map'; got {fit_method!r}"
+            f"{p}: revised candidate exports must declare fit_method='marginal_then_carrier', "
+            f"'alternating_conditional_map', or 'fixed_carrier_marginal'; got {fit_method!r}"
         )
     if summary.get("lambda_source") != "fixed_reference":
         raise ValueError(
@@ -983,7 +1113,7 @@ def read_candidate_export(path: str | Path) -> CandidateExport:
         for stage in ("marginal_fit", "carrier_fit"):
             if not _valid_stage_fit(diag.get(stage)):
                 raise ValueError(f"{p}: diagnostics.{stage}.valid must be true with finite diagnostics")
-    else:
+    elif fit_method == "alternating_conditional_map":
         if not _valid_alternating_fit(diag.get("alternating_conditional_map")):
             raise ValueError(
                 f"{p}: diagnostics.alternating_conditional_map must carry finite non-increasing "
@@ -993,6 +1123,13 @@ def read_candidate_export(path: str | Path) -> CandidateExport:
             raise ValueError(
                 f"{p}: alternating_conditional_map exports must declare finite fixed OU hyperparameters"
             )
+    else:
+        if not _valid_fixed_carrier_marginal_fit(diag.get("marginal_fit")):
+            raise ValueError(
+                f"{p}: diagnostics.marginal_fit must be valid, finite, carry canonical "
+                "objective_start/objective_end/full_objective_initial/full_objective_final, "
+                "grad_norm, eval_count, termination, and one closure_trace row per function evaluation"
+            )
     params = dict(summary["parameters"])
     for key in ("lam", "sigma", "d_scalar"):
         v = float(params.get(key, float("nan")))
@@ -1000,6 +1137,22 @@ def read_candidate_export(path: str | Path) -> CandidateExport:
             raise ValueError(f"{p}: parameters.{key} must be finite and positive")
     if not _numeric_finite(params):
         raise ValueError(f"{p}: parameters contain non-finite numeric values")
+    if fit_method == "fixed_carrier_marginal":
+        _validate_fixed_carrier_source(p, summary)
+        _validate_fixed_carrier_zero_bias(p, params)
+        if diag.get("map_state"):
+            raise ValueError(f"{p}: fixed_carrier_marginal must not export diagnostics.map_state")
+        carrier_fit = diag.get("carrier_fit")
+        if isinstance(carrier_fit, Mapping) and bool(carrier_fit.get("valid")):
+            raise ValueError(
+                f"{p}: fixed_carrier_marginal must not claim a valid diagnostics.carrier_fit"
+            )
+        optimizer = dict(summary["training_provenance"]).get("optimizer") or diag["marginal_fit"].get("optimizer")
+        if not isinstance(optimizer, Mapping) or not optimizer:
+            raise ValueError(
+                f"{p}: fixed_carrier_marginal requires optimizer provenance in "
+                "training_provenance.optimizer or diagnostics.marginal_fit.optimizer"
+            )
     return CandidateExport(
         path=p,
         summary=summary,

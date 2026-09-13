@@ -464,15 +464,31 @@ class ArmModel:
                 model_family=self.candidate.model_family,
                 observation_law=(
                     "revised_phase.predict_spectrum(mode='prior'): the exact moving-window "
-                    "kernel, raw telemetry plus the learned bias law, m=0, full prior kernel"
+                    "kernel driven by the candidate conditioning rotor track selected by "
+                    "carrier_source; scoring remains against the cohort's frozen raw reference"
                 ),
                 candidate=self.candidate.provenance(),
                 fit_contract=self.candidate.fit_contract,
             )
         return dict(model_family=self.kind, label=self.label)
 
+    def conditioning_rps_key(self, scoring_rps_key: str) -> str:
+        if self.kind == "revised" and self.candidate is not None:
+            source = self.candidate.carrier_source
+            if source == "refined":
+                return RE.REFINED_RPS_KEY
+            if source in (None, "raw"):
+                return RE.assert_raw_reference(scoring_rps_key)
+            die(f"arm {self.name}: unknown candidate carrier_source {source!r}")
+        return RE.assert_raw_reference(scoring_rps_key)
+
     def render(
-        self, reference_rps: np.ndarray, *, n_mics: int, seed: int
+        self,
+        reference_rps: np.ndarray,
+        *,
+        n_mics: int,
+        seed: int,
+        conditioning_rps: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
         """``(audio, physical_rps | None, diagnostics)`` at 16 kHz."""
         if self.kind == "legacy":
@@ -497,18 +513,21 @@ class ArmModel:
             )
         if self.kind == "revised":
             assert self.candidate is not None
+            carrier = reference_rps if conditioning_rps is None else conditioning_rps
             out = RP.render_revised(
                 self.candidate.summary,
-                reference_rps,
+                carrier,
                 sample_rate=RE.SR,
                 sample_rate_work=RE.SAMPLE_RATE_WORK,
                 n_mics=int(n_mics),
                 seed=int(seed),
             )
+            diag = dict(out.diagnostics)
+            diag["conditioning_carrier_source"] = self.candidate.carrier_source
             return (
                 np.asarray(out.audio, dtype=np.float64),
                 np.asarray(out.physical_rps, dtype=np.float64),
-                dict(out.diagnostics),
+                diag,
             )
         raise AssertionError(f"arm {self.name}: kind {self.kind!r} does not render")
 
@@ -533,6 +552,18 @@ class ArmModel:
         return None
 
 
+def _candidate_fit_manifest_sha(spec: dict[str, Any], *, context: str) -> str | None:
+    if spec.get("fit_manifest_sha256"):
+        return str(spec["fit_manifest_sha256"])
+    path = spec.get("fit_manifest") or spec.get("fit_manifest_path")
+    if path:
+        p = Path(str(path))
+        if not p.is_file():
+            die(f"{context}: fit manifest {p} is missing; cannot pin candidate provenance")
+        return str(RE.artifact_digest(p)["sha256"])
+    return None
+
+
 def _resolve_candidate_export(
     spec: dict[str, Any], rig: str | None, *, context: str
 ) -> tuple[str, str | None]:
@@ -550,8 +581,11 @@ def _resolve_candidate_export(
         if not isinstance(entry, dict):
             die(f"{context}: no candidate export declared for rig {rig!r}")
         entry = dict(entry)
-        return str(require(entry, "export", f"{context} rig {rig}")), entry.get("fit_manifest_sha256")
-    return str(require(spec, "export", context)), spec.get("fit_manifest_sha256")
+        return (
+            str(require(entry, "export", f"{context} rig {rig}")),
+            _candidate_fit_manifest_sha(entry, context=f"{context} rig {rig}"),
+        )
+    return str(require(spec, "export", context)), _candidate_fit_manifest_sha(spec, context=context)
 
 
 def arm_model(
@@ -828,27 +862,28 @@ class Tracker:
 def scored_ltas(
     real: np.ndarray, arm: np.ndarray, support: RE.RegimeSupport
 ) -> dict[str, Any] | None:
-    """Absolute-level LTAS on the LONGEST contiguous scored span, or ``None``.
-
-    The LTAS needs ONE complete 8192-point Welch window inside the scored
-    support; with the half-hop geometry that is ``>= LTAS_N`` samples, not
-    ``2 * LTAS_N``. Material shorter than one window has no LTAS, which is
-    reported rather than papered over with the surrounding context.
-    """
-    spans: list[tuple[int, int]] = []
-    m = np.asarray(support.sample_mask, dtype=bool)
-    padded = np.concatenate(([False], m, [False]))
-    edges = np.flatnonzero(np.diff(padded.astype(np.int8)))
-    for a, b in zip(edges[0::2], edges[1::2], strict=True):
-        spans.append((int(a), int(b)))
-    if not spans:
+    """Absolute-level LTAS on the LONGEST contiguous scored span, or ``None``."""
+    mask = np.asarray(support.sample_mask, dtype=bool)
+    n = min(mask.size, real.shape[-1], arm.shape[-1])
+    if n <= 0:
         return None
-    a, b = max(spans, key=lambda s: s[1] - s[0])
-    if (b - a) < LTAS_N:
+    mask = mask[:n]
+    if not bool(mask.any()):
         return None
-    out = RE.ltas_deviation_db(real[:, a:b], arm[:, a:b])
-    out["scored_span_samples"] = [a, b]
-    out["scored_span_seconds"] = float((b - a) / support.sr)
+    idx = np.flatnonzero(mask)
+    breaks = np.flatnonzero(np.diff(idx) > 1)
+    starts = np.r_[idx[0], idx[breaks + 1]]
+    stops = np.r_[idx[breaks] + 1, idx[-1] + 1]
+    lengths = stops - starts
+    j = int(np.argmax(lengths))
+    lo, hi = int(starts[j]), int(stops[j])
+    if hi - lo < LTAS_N:
+        return None
+    out = RE.ltas_deviation_db(real[:, lo:hi], arm[:, lo:hi])
+    out["scored_span_samples"] = [int(lo), int(hi)]
+    out["support_samples"] = int(hi - lo)
+    out["support_start_s"] = float(lo / RE.SR)
+    out["support_stop_s"] = float(hi / RE.SR)
     return out
 
 
@@ -874,11 +909,30 @@ def measure_window(
         channels=cohort.get("channels"),
         rps_key=key,
     )
+    loaded_by_rps_key: dict[str, Clip] = {key: clip}
     real_all = np.asarray(clip.audio, dtype=np.float64)
     mics = list(range(int(n_mics or real_all.shape[0])))
     real = real_all[: len(mics)]
     reference = np.asarray(clip.rps, dtype=np.float64)
     n_samples = int(real.shape[-1])
+
+    def conditioning_clip_for(rps_key: str) -> Clip:
+        if rps_key not in loaded_by_rps_key:
+            conditioned = RE.load_window(
+                window,
+                dataset=dataset,
+                version=cohort.get("version"),
+                channels=cohort.get("channels"),
+                rps_key=rps_key,
+            )
+            if int(conditioned.audio.shape[-1]) != n_samples:
+                die(
+                    f"{window.key}: conditioning track {rps_key!r} has "
+                    f"{conditioned.audio.shape[-1]} samples, raw scoring reference has {n_samples}"
+                )
+            loaded_by_rps_key[rps_key] = conditioned
+        return loaded_by_rps_key[rps_key]
+
     support = RE.regime_support(
         window,
         reference,
@@ -903,7 +957,10 @@ def measure_window(
         seed=int(seed),
         scoring_reference=dict(
             rps_key=key,
-            note="same raw telemetry array for every arm; reference agreement, not ground truth",
+            note=(
+                "frozen raw telemetry array for real/baseline/every candidate score; "
+                "candidate conditioning may use another declared track and is recorded per arm"
+            ),
             mean_rps=float(reference.mean()),
             per_rotor_mean_rps=[float(v) for v in reference.mean(axis=1)],
         ),
@@ -931,12 +988,34 @@ def measure_window(
         kind = str(spec["kind"])
         physical: np.ndarray | None = None
         diag: dict[str, Any] = {}
+        conditioning_key = key
         if kind == "real":
             audio = real
         else:
-            audio, physical, diag = model.render(reference, n_mics=len(mics), seed=int(seed))
+            conditioning_key = model.conditioning_rps_key(key)
+            conditioning_clip = conditioning_clip_for(conditioning_key)
+            conditioning_rps = np.asarray(conditioning_clip.rps, dtype=np.float64)
+            audio, physical, diag = model.render(
+                reference,
+                n_mics=len(mics),
+                seed=int(seed),
+                conditioning_rps=conditioning_rps,
+            )
             audio = audio[: len(mics)]
         entry: dict[str, Any] = dict(kind=kind, seed=int(seed), label=model.label, render=diag)
+        if kind != "real":
+            entry["conditioning_reference"] = dict(
+                rps_key=conditioning_key,
+                carrier_source=(
+                    model.candidate.carrier_source
+                    if model.kind == "revised" and model.candidate is not None
+                    else "raw"
+                ),
+                role=(
+                    "candidate expected PSD/rendering input; scoring reference remains "
+                    "row.scoring_reference.rps_key"
+                ),
+            )
         t0 = time.time()
         entry["pit"] = tracker.pit(
             audio,
@@ -967,7 +1046,12 @@ def measure_window(
                 eps_excluded=diag.get("eps_in_physical_rps"),
             )
         if want_spectrum and str(spec["kind"]) != "real" and bool(frame_keep.any()):
-            m = model.spectrum(scored_clip, n_mics=len(mics))
+            spectrum_clip = (
+                conditioning_clip_for(model.conditioning_rps_key(key))
+                if model.kind == "revised"
+                else scored_clip
+            )
+            m = model.spectrum(spectrum_clip, n_mics=len(mics))
             if m is not None:
                 power = np.asarray(pg.power, dtype=np.float64)[: len(mics)]
                 if m.shape != power.shape:

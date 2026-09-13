@@ -874,6 +874,154 @@ def test_revised_export_must_declare_valid_c2_contract(tmp_path: Path) -> None:
         RE.read_candidate_export(p)
 
 
+def test_fixed_carrier_marginal_export_contract_names_conditioning_track(tmp_path: Path) -> None:
+    p = _revised_export(
+        tmp_path / "fixed.json",
+        clips=[
+            dict(
+                recording="free-flight_nosource_room2",
+                start_s=1512727417.2050455,
+                seconds=16.0,
+                regime="cruise",
+                rps_key=RE.REFINED_RPS_KEY,
+            )
+        ],
+    )
+    data = json.loads(p.read_text())
+    data["rig_id"] = "dregon"
+    data["fit_method"] = "fixed_carrier_marginal"
+    data["carrier_source"] = "refined"
+    data["parameters"]["bias_mean_hz"] = [0.0, 0.0]
+    data["parameters"]["bias_hz"] = {"free-flight_nosource_room2": [0.0, 0.0]}
+    data["training_provenance"]["carrier_source"] = "refined"
+    data["training_provenance"]["optimizer"] = {
+        "fixed_carrier_marginal": {
+            "max_iter": 20,
+            "max_eval": 30,
+            "history_size": 10,
+            "line_search": "strong_wolfe",
+            "full_frame": True,
+        }
+    }
+    data["diagnostics"] = {
+        "marginal_fit": {
+            "valid": True,
+            "objective_start": 10.0,
+            "objective_end": 9.0,
+            "full_objective_initial": 10.0,
+            "full_objective_final": 9.0,
+            "grad_norm": 0.5,
+            "eval_count": 2,
+            "termination": "lbfgs_completed",
+            "closure_trace": [
+                {"eval": 1, "kind": "initial_full_objective", "full_objective": 10.0, "grad_norm": 0.0},
+                {"eval": 2, "kind": "final_full_objective", "full_objective": 9.0, "grad_norm": 0.5},
+            ],
+        }
+    }
+    p.write_text(json.dumps(data))
+
+    cand = RE.read_candidate_export(p)
+    assert cand.fit_contract["fit_method"] == "fixed_carrier_marginal"
+    assert cand.provenance()["carrier_source"] == "refined"
+
+    runner = _runner()
+    model = runner.arm_model("cand", {"kind": "revised_export", "export": str(p)}, regime="cruise", recording="x", rig="dregon")
+    assert model.conditioning_rps_key("motors_command") == RE.REFINED_RPS_KEY
+
+    data["diagnostics"]["map_state"] = {"free-flight_nosource_room2": {}}
+    p.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="diagnostics.map_state"):
+        RE.read_candidate_export(p)
+
+    data["diagnostics"].pop("map_state")
+    data["diagnostics"]["carrier_fit"] = {"valid": True}
+    p.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="diagnostics.carrier_fit"):
+        RE.read_candidate_export(p)
+
+    data["diagnostics"].pop("carrier_fit")
+    data["parameters"]["bias_mean_hz"] = [0.1, 0.0]
+    p.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="bias_mean_hz.*exactly zero"):
+        RE.read_candidate_export(p)
+
+    data["parameters"]["bias_mean_hz"] = [0.0, 0.0]
+    data["training_provenance"]["clips"][0]["rps_key"] = "motors_command"
+    p.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="carrier_source='refined'"):
+        RE.read_candidate_export(p)
+
+    data["training_provenance"]["clips"][0]["rps_key"] = RE.REFINED_RPS_KEY
+    data["rig_id"] = "michaels"
+    p.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="Michael's fixed-carrier export"):
+        RE.read_candidate_export(p)
+
+def test_refined_candidate_conditioning_keeps_raw_scoring_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    from experiments.stochastic_fit.data import Clip
+
+    runner = _runner()
+    n = 20000
+    raw_rps = np.full((2, n), 70.0, dtype=np.float64)
+    refined_rps = np.full((2, n), 75.0, dtype=np.float64)
+    audio = np.zeros((1, n), dtype=np.float32)
+
+    def fake_load_window(window: RE.Window, **kw: Any) -> Clip:
+        key = kw["rps_key"]
+        assert key in ("motors_command", RE.REFINED_RPS_KEY)
+        rps = refined_rps if key == RE.REFINED_RPS_KEY else raw_rps
+        return Clip("clip", "synthetic", audio.copy(), rps.copy(), int(RE.SR), rps.copy(), {})
+
+    class _Tracker:
+        def pit(self, arm: np.ndarray, reference: np.ndarray, **kw: Any) -> dict[str, Any]:
+            assert reference is raw_rps or np.array_equal(reference, raw_rps)
+            return {"mae": float(np.abs(reference - raw_rps).mean())}
+
+    class _Candidate:
+        carrier_source = "refined"
+
+    class _Model:
+        kind = "revised"
+        label = "candidate"
+        spec = {"kind": "revised_export"}
+        candidate = _Candidate()
+
+        def conditioning_rps_key(self, scoring_rps_key: str) -> str:
+            assert scoring_rps_key == "motors_command"
+            return RE.REFINED_RPS_KEY
+
+        def render(
+            self,
+            reference_rps: np.ndarray,
+            *,
+            n_mics: int,
+            seed: int,
+            conditioning_rps: np.ndarray | None = None,
+        ) -> tuple[np.ndarray, None, dict[str, Any]]:
+            assert np.array_equal(reference_rps, raw_rps)
+            assert conditioning_rps is not None and np.array_equal(conditioning_rps, refined_rps)
+            return audio.copy(), None, {}
+
+    monkeypatch.setattr(runner.RE, "load_window", fake_load_window)
+    row = runner.measure_window(
+        RE.Window("rec", 0.0, n / RE.SR, regime="cruise"),
+        cohort={"dataset": "DREGON-frames", "scoring_rps_key": "motors_command"},
+        regime_spec={"regime": "cruise", "min_rps": 65.0, "max_rps": None},
+        tracker=_Tracker(),
+        models={"candidate": _Model()},
+        seed=2001,
+        n_mics=1,
+        want_spectrum=False,
+    )
+    assert row["scoring_reference"]["rps_key"] == "motors_command"
+    assert row["arms"]["candidate"]["conditioning_reference"] == {
+        "rps_key": RE.REFINED_RPS_KEY,
+        "carrier_source": "refined",
+        "role": "candidate expected PSD/rendering input; scoring reference remains row.scoring_reference.rps_key",
+    }
+
+
 def test_training_leakage_catches_an_overlapping_fit_support() -> None:
     train = [RE.Window("FLY124", 100.0, 16.0, role="candidate_training")]
     scored_clean = [RE.Window("FLY124", 130.0, 8.0)]
@@ -1208,6 +1356,16 @@ def test_protocol_fingerprint_adopts_old_calibration_manifest(tmp_path: Path) ->
     }
     sha = runner.verify_protocol_fingerprint(man, cal)
     assert sha == runner.protocol_fingerprint(man)
+
+def test_fixed_carrier_eval_manifests_keep_the_frozen_v2_protocol_fingerprint() -> None:
+    runner = _runner()
+    expected = "a1ce5294ae1e17c525990b3531154eb6d7c4e71010ad50e0a2e76277f254d226"
+    for path in (
+        Path("docs/revised-phase-c4-fixed-raw-eval-v2.json"),
+        Path("docs/revised-phase-c4-fixed-refined-eval-v2.json"),
+    ):
+        man = runner.load_manifest(path)
+        assert runner.protocol_fingerprint(man) == expected
 
 
 # ── per-rig candidate mapping and rig_id validation ─────────────────────────

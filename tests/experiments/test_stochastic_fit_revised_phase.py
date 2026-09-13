@@ -1610,3 +1610,83 @@ def test_alternating_contract_history_is_full_objective_monotone(tmp_path: Path)
     path.write_text(json.dumps(export))
     with pytest.raises(ValueError, match="non-increasing full objective"):
         RE.read_candidate_export(path)
+
+
+@pytest.mark.parametrize(
+    ("rig_id", "carrier_source", "rps_key"),
+    [
+        ("dregon", "raw", "motors_command"),
+        ("dregon", "refined", "rps_refined"),
+        ("michaels", "raw", "rps"),
+    ],
+)
+def test_fixed_carrier_fit_export_read_predict_and_render_smoke(
+    tmp_path: Path, rig_id: str, carrier_source: str, rps_key: str
+) -> None:
+    n_fft, hop, n_frames = 64, 32, 2
+    n = n_fft + (n_frames - 1) * hop
+    clip = _line_clip(
+        f"{rig_id}_{carrier_source}",
+        rps=np.full(n, 70.0),
+        profile_db=-18.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-3,
+        seed=37,
+    )
+    clip.meta.update(
+        dataset="toy",
+        recording_id=f"{rig_id}_toy",
+        start_s=0.0,
+        duration_s=n / SR,
+        channels=[0],
+        rps_key=rps_key,
+    )
+    cfg = _tiny_fit_config(
+        n_fft=n_fft,
+        hop=hop,
+        fit_method="fixed_carrier_marginal",
+        training_recipe="full",
+        iters=1,
+        frame_chunk=1,
+        harmonic_chunk=None,
+        lbfgs_max_iter=2,
+        lbfgs_max_eval=4,
+        lbfgs_history_size=2,
+        lbfgs_line_search="strong_wolfe",
+        frames_per_step=None,
+        carrier_source=carrier_source,
+        provenance={"carrier_source": carrier_source, "regimes": {clip.clip_id: "toy"}, "rps_key": rps_key},
+    )
+    export = RP.fit_revised(
+        [(clip.clip_id, clip)],
+        rig_id=rig_id,
+        dynamics=RP.ShaftDynamics(lam=6.0, sigma=1.0, d_init=1.0, identified=True, diagnostics={}),
+        config=cfg,
+    )
+    assert export["fit_method"] == "fixed_carrier_marginal"
+    assert export["carrier_source"] == carrier_source
+    assert export["training_provenance"]["carrier_source"] == carrier_source
+    assert export["training_provenance"]["clips"][0]["rps_key"] == rps_key
+    assert "map_state" not in export["diagnostics"]
+    assert "carrier_fit" not in export["diagnostics"]
+    assert "coarsening_sensitivity" not in export["diagnostics"]
+    assert "bias_vs_nu_mean_confounding" not in export["diagnostics"]
+    assert np.all(np.asarray(export["parameters"]["bias_mean_hz"], dtype=float) == 0.0)
+    assert np.all(np.asarray(export["parameters"]["bias_hz"][clip.clip_id], dtype=float) == 0.0)
+    fit = export["diagnostics"]["marginal_fit"]
+    assert fit["valid"] is True
+    assert len(fit["closure_trace"]) == fit["eval_count"]
+
+    path = tmp_path / "fixed.json"
+    path.write_text(json.dumps(export))
+    from experiments.stochastic_fit import revised_eval as RE
+
+    read = RE.read_candidate_export(path)
+    assert read.provenance()["carrier_source"] == carrier_source
+    pred = RP.predict_spectrum(read.summary, clip, n_fft=n_fft, hop=hop)
+    rendered = RP.render_revised(read.summary, clip.rps, n_mics=1, seed=3)
+    assert pred.shape == (1, n_frames, n_fft // 2 + 1)
+    assert np.isfinite(pred).all()
+    assert rendered.audio.shape == (1, n)
+    assert np.isfinite(rendered.audio).all()
