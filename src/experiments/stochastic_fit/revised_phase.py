@@ -1,6 +1,6 @@
 """Candidate 1 of the revised rotor-phase model: ONE shared shaft process per
-rotor plus ONE independent acoustic phase diffusion, fitted by ordinary Adam on
-a single plug-in composite MAP objective.
+rotor plus ONE independent acoustic phase diffusion, fitted by a two-stage
+quasi/plug-in estimator.
 
 THE MODEL. For rig rotors ``r``, clips ``c``, orders ``k``, mics ``m``::
 
@@ -12,14 +12,17 @@ THE MODEL. For rig rotors ``r``, clips ``c``, orders ``k``, mics ``m``::
     x_m(t)   = sum_{r,k} A_{mrk}(t) cos(k Phi_r(t) + eps_rk(t) + alpha_mrk)
                + u_m(t)
 
-``lam`` and ``sigma`` are rig-shared and FROZEN (moment-estimated,
-:func:`estimate_shaft_dynamics`); ``D`` is ONE scalar per rig, initialized from
-the residual moments and then fitted in the spectral MAP. ``theta_r`` is shared
-across all orders and all mics; ``eps_rk`` is shared across mics (it is a source
-property) and independent across ``(r, k)``. The initial residual and source
-phases are independent uniform per harmonic, which is why every component adds
-in POWER and why the fixed mic response phase ``alpha_mrk`` never enters the
-expected periodogram. ``eps`` never enters the physical shaft speed.
+``lam`` is a rig-shared FIXED reference assumption (6 s^-1, not measured from
+the data). Stage 1 fits ``sigma`` and ``D`` together with the global spectrum,
+floor, speed laws and bias population by a marginal expected-periodogram risk
+that integrates the OU state once. Stage 2 freezes those globals and infers only
+training-clip diagnostic ``theta_r, nu_r`` paths plus per-clip bias under the
+conditional ``exp(-D |tau|)`` kernel and one exact OU state prior. ``theta_r`` is
+shared across all orders and all mics; ``eps_rk`` is shared across mics (it is a
+source property) and independent across ``(r, k)``. The initial residual and
+source phases are independent uniform per harmonic, which is why every
+component adds in POWER and why the fixed mic response phase ``alpha_mrk`` never
+enters the expected periodogram. ``eps`` never enters the physical shaft speed.
 
 ``A_{mrk}`` and ``u_m`` are the EXISTING harmonic power profile, speed law, mic
 gains and floor of :mod:`experiments.stochastic_fit.model` (same functional
@@ -142,25 +145,37 @@ to be introduced unless a later diagnostic motivates one. ``FitConfig.delay_s``
 stays REQUIRED with no invented default — the manifest supplies the zeros
 explicitly, so the choice stays visible.
 
-WHAT IS FITTED, AND WHAT THE OBJECTIVE IS. One objective, one prior::
+WHAT IS FITTED, AND WHAT THE OBJECTIVES ARE. Two labelled estimators, not EM and
+not two independent likelihood factors to be summed as evidence::
 
-    L = (1 / temperature) * sum_i a_i * sum_{m, f in band} (I_i / M_i + log M_i)
-        + 0.5 * sum e^2                              (exact integrated-OU state)
-        + bias prior + parameter priors
+    Stage 1 (marginal quasi-MAP):
+      L_m = (1 / temperature) * sum_i a_i * sum_{m, f in band}
+              (I_i / M_prior_i + log M_prior_i)
+            + bias prior + sigma/D/floor parameter priors
 
-This is a MARGINAL COMPOSITE RISK / plug-in composite MAP. It is NOT an exact
-joint NLL, not an evidence, not a posterior; overlapping windows reuse the same
-samples, so frame counts are NOT evidence counts and no uncertainty may be read
-off cellwise Hessians or the nominal frame count. ``temperature`` DIVIDES the
-composite risk. Its frozen scalar value is ``T = J / H`` with
-``U = sum_i a_i (1 - I / M)`` (the untempered FIT-risk log-gain score),
-``H = sum_i a_i`` (the total exposure) and ``J = Var(U)`` over fixed baseline
-predictive draws, so the objective is ``L / T + one prior``. The calibration is
-matched to the actual UNNORMALIZED risk returned by :func:`composite_risk` —
-never to a reported per-second or per-frame score. It is calibrated on
-planted/baseline data and then frozen — this code reads it, it never tunes it.
-Weights ``a_i = hop / n_fft`` are normalized per unique audio duration and
-identical duplicated windows SPLIT their exposure (:func:`composite_weights`).
+    Stage 2 (plug-in conditional MAP diagnostics):
+      L_c = (1 / temperature) * sum_i a_i * sum_{m, f in band}
+              (I_i / M_cond_i + log M_cond_i)
+            + 0.5 * sum e^2 + per-clip-bias prior
+
+Stage 1 has NO state innovation path and NO state prior energy; the one OU
+state is integrated out in ``M_prior``. Stage 2 freezes the stage-1 globals,
+including ``lambda``, learned ``sigma``, ``D``, spectrum/floor parameters and
+the predictive population bias, then writes carrier tracks as TRAINING
+diagnostics only. This is a MARGINAL COMPOSITE RISK followed by plug-in
+conditional MAP diagnostics. It is NOT an exact joint NLL, not an evidence, not
+a posterior; overlapping windows reuse the same samples, so frame counts are
+NOT evidence counts and no uncertainty may be read off cellwise Hessians or the
+nominal frame count. ``temperature`` DIVIDES each composite risk. Its frozen
+scalar value is ``T = J / H`` with ``U = sum_i a_i (1 - I / M)`` (the
+untempered FIT-risk log-gain score), ``H = sum_i a_i`` (the total exposure) and
+``J = Var(U)`` over fixed baseline predictive draws, so the objective is
+``L / T + the stage's priors``. The calibration is matched to the actual
+UNNORMALIZED risk returned by :func:`composite_risk` — never to a reported
+per-second or per-frame score. It is calibrated on planted/baseline data and
+then frozen — this code reads it, it never tunes it. Weights ``a_i = hop /
+n_fft`` are normalized per unique audio duration and identical duplicated
+windows SPLIT their exposure (:func:`composite_weights`).
 
 COST ARITHMETIC (so the next reader can check feasibility without rerunning
 it). One call of :func:`~experiments.stochastic_fit.phase_kernel.expected_periodogram_from_atoms`
@@ -226,6 +241,14 @@ from .stage2 import RENDER_TRANSFER_SPEC, antialias, render_transfer_power
 
 SCHEMA_VERSION = 1
 MODEL_FAMILY = "shared_shaft_ou"
+
+#: Round-2 reference correlation time, fixed by contract. It is a model
+#: assumption, not a phase-moment measurement and not controller physics.
+FIXED_REFERENCE_LAMBDA = 6.0
+
+#: Stage-1 starting value for the learned OU stationary rate scale. The
+#: log-sigma prior is N(0, 2^2), so this is also the prior mean.
+INITIAL_SIGMA = 1.0
 
 #: The same guard :meth:`model.CombSpectrum.whittle` uses, so a cell of the
 #: revised risk and a cell of the legacy Whittle term are floored identically.
@@ -340,8 +363,8 @@ class MomentConfig:
 
 @dataclass(frozen=True)
 class ShaftDynamics:
-    """Frozen rig dynamics: ``lam``/``sigma`` are constants in stage 2, ``D`` is
-    only INITIALIZED here and then fitted by the spectral MAP."""
+    """Round-2 rig dynamics: ``lam`` is the fixed reference assumption,
+    ``sigma``/``D`` are positive initial values for the marginal stage."""
 
     lam: float  # 1/s
     sigma: float  # rad/s, stationary std of nu
@@ -384,8 +407,14 @@ class FitConfig:
     k_cap: int = 130
     #: one telemetry delay per rotor, in seconds; REQUIRED (no invented default)
     delay_s: tuple[float, ...] | None = None
-    iters: int = 400
-    lr: float = 0.05
+    #: Stage-1 marginal Adam schedule. These keep the historical names because
+    #: the frozen manifests already carry optimizer.iters/lr for the global fit.
+    iters: int = 120
+    lr: float = 0.1
+    #: Stage-2 diagnostic carrier schedule. ``None`` falls back to ``iters/lr``
+    #: for tiny tests that deliberately run both stages on the same budget.
+    carrier_iters: int | None = None
+    carrier_lr: float | None = None
     seed: int = 0
     frame_chunk: int = 1
     #: orders per kernel call. ``None`` computes every order in one call; an
@@ -406,6 +435,8 @@ class FitConfig:
     bias_mean_std_hz: float = BIAS_MEAN_PRIOR_STD_HZ
     log_d_mean: float = 0.0
     log_d_std: float = 2.0
+    log_sigma_mean: float = 0.0
+    log_sigma_std: float = 2.0
     #: real dtype of the atoms and the spectral kernel ("float32" or "float64").
     #: The carrier phase is ALWAYS accumulated in float64 and wrapped into
     #: ``[0, 2 pi)`` before the cast, so float32 atoms cost 1e-7 rad, not the
@@ -461,6 +492,15 @@ class FitConfig:
         if d.size != n_rotors:
             raise ValueError(f"delay_s has {d.size} entries for {n_rotors} rotors")
         return d
+
+
+    @property
+    def stage2_iters(self) -> int:
+        return int(self.iters if self.carrier_iters is None else self.carrier_iters)
+
+    @property
+    def stage2_lr(self) -> float:
+        return float(self.lr if self.carrier_lr is None else self.carrier_lr)
 
     def front_end(self) -> dict[str, Any]:
         return dict(
@@ -1684,7 +1724,7 @@ class _RevisedModel(torch.nn.Module):
         check_training_supports(rows)
         self.config = config
         self.dynamics = dynamics
-        self.lam, self.sigma = float(dynamics.lam), float(dynamics.sigma)
+        self.lam = float(dynamics.lam)
         self.dt_state = 1.0 / float(config.state_rate_hz)
         dev = torch.device(device)
         self._dev = dev
@@ -1841,6 +1881,9 @@ class _RevisedModel(torch.nn.Module):
         self.mic_gain_db = zeros(self.n_mics, self.n_rotors)
         self.gain_all_db = zeros(self.n_mics)
         self.log_d = torch.nn.Parameter(torch.tensor(math.log(max(dynamics.d_init, 1e-9)), **f64))
+        self.log_sigma = torch.nn.Parameter(
+            torch.tensor(math.log(max(float(dynamics.sigma), 1e-9)), **f64)
+        )
         self.bias_hz = zeros(len(self.clips), self.n_rotors)
         self.bias_mean_hz = zeros(self.n_rotors)
         self.state_innov = torch.nn.ParameterList(
@@ -1895,8 +1938,14 @@ class _RevisedModel(torch.nn.Module):
 
     # ── parameter views ─────────────────────────────────────────────────
 
-    def fitted_parameters(self) -> dict[str, torch.nn.Parameter]:
-        out: dict[str, torch.nn.Parameter] = {
+    def marginal_parameters(self) -> dict[str, torch.nn.Parameter]:
+        """Stage-1 parameters: globals, population/per-clip bias, sigma and D.
+
+        State innovations are absent by design: the marginal expected
+        periodogram integrates the OU state out once and carries no state prior
+        energy.
+        """
+        return {
             "profile_db": self.profile_db,
             "amp_exp": self.amp_exp,
             "floor_mean_db": self.floor_mean_db,
@@ -1908,12 +1957,21 @@ class _RevisedModel(torch.nn.Module):
             "mic_gain_db": self.mic_gain_db,
             "gain_all_db": self.gain_all_db,
             "log_d": self.log_d,
+            "log_sigma": self.log_sigma,
             "bias_hz": self.bias_hz,
             "bias_mean_hz": self.bias_mean_hz,
         }
+
+    def carrier_parameters(self) -> dict[str, torch.nn.Parameter]:
+        """Stage-2 parameters: diagnostic per-clip bias and state only."""
+        out: dict[str, torch.nn.Parameter] = {"bias_hz": self.bias_hz}
         for i, p in enumerate(self.state_innov):
             out[f"state_innov[{self.clips[i].clip_id}]"] = p
         return out
+
+    def fitted_parameters(self) -> dict[str, torch.nn.Parameter]:
+        """Backward-compatible alias for the stage-1 fitted block."""
+        return self.marginal_parameters()
 
     def mic_line_gain(self) -> Tensor:
         """``(M, R)`` linear gain on the line power; the mean over mics is pinned."""
@@ -1927,9 +1985,17 @@ class _RevisedModel(torch.nn.Module):
     def floor_shape_db(self) -> Tensor:
         return FLOOR_SHAPE_STD_DB * (self.shape_chol @ self.floor_shape_z)
 
+    def sigma_tensor(self) -> Tensor:
+        """Learned positive OU stationary rate scale for marginal kernels."""
+        return torch.exp(self.log_sigma)
+
+    def sigma_value(self) -> float:
+        """Detached sigma for the frozen linear state whitening in stage 2."""
+        return float(self.sigma_tensor().detach().cpu().item())
+
     def theta_nu(self, ci: int) -> tuple[Tensor, Tensor]:
         return simulate_state(
-            self.state_innov[ci], lam=self.lam, sigma=self.sigma, dt=self.dt_state
+            self.state_innov[ci], lam=self.lam, sigma=self.sigma_value(), dt=self.dt_state
         )
 
     # ── forward ─────────────────────────────────────────────────────────
@@ -2097,7 +2163,7 @@ class _RevisedModel(torch.nn.Module):
                     self.tau_s_work[None, :],
                     k_c[:, None],
                     lam=self.lam,
-                    sigma=self.sigma,
+                    sigma=self.sigma_tensor(),
                     d=d_c,
                 )[None, :, None, :]
             shapes_work = expected_periodogram_from_atoms(
@@ -2151,34 +2217,58 @@ class _RevisedModel(torch.nn.Module):
         observed = (floor + lines.to(torch.float64)) * self.transfer_power[None, None, :]
         return observed * self.all_gain()[:, None, None]
 
-    def chunk_risk(self, ci: int, fi: np.ndarray, *, scale: float = 1.0) -> Tensor:
+    def _observed_risk(self, ci: int, fi: np.ndarray, model: Tensor, *, scale: float) -> Tensor:
         cd = self.clips[ci]
         if cd.power is None:
             raise ValueError(f"{cd.clip_id}: no observed periodogram (built with observe=False)")
-        model = self.frame_model(ci, fi, state=self.theta_nu(ci), kernel="conditional")
         obs = cd.power.index_select(1, torch.as_tensor(fi, dtype=torch.int64)).to(
             device=self._dev, dtype=torch.float64
         )
         w = torch.as_tensor(cd.weights[fi] * scale, dtype=torch.float64, device=self._dev)
         return composite_risk(obs, model.to(torch.float64), w, band=self.band)
 
-    def prior(self) -> Tensor:
-        """``-log p`` of the state, the bias hierarchy and the parameters.
+    def marginal_chunk_risk(self, ci: int, fi: np.ndarray, *, scale: float = 1.0) -> Tensor:
+        """Stage-1 risk: prior expected periodogram, no optimized state path."""
+        return self._observed_risk(
+            ci, fi, self.frame_model(ci, fi, state=None, kernel="prior"), scale=scale
+        )
 
-        ONE state prior: ``0.5 sum e^2`` over the USED innovations (the
-        ``theta_0 = 0`` gauge slot ``innov[..., 0, 1]`` carries no innovation and
-        is excluded). The ``log D`` prior is a broad Gaussian on a FITTED
-        parameter — it is explicitly NOT conjugate to the noisy moment-derived
-        ``D`` and must not be described as such.
+    def chunk_risk(self, ci: int, fi: np.ndarray, *, scale: float = 1.0) -> Tensor:
+        """Stage-2 risk: conditional expected periodogram around the MAP state."""
+        return self._observed_risk(
+            ci, fi, self.frame_model(ci, fi, state=self.theta_nu(ci), kernel="conditional"), scale=scale
+        )
+
+    def prior(
+        self,
+        *,
+        state: bool,
+        globals: bool,
+        bias_population: bool,
+        clip_bias: bool = True,
+    ) -> Tensor:
+        """``-log p`` pieces used by the two labelled estimators.
+
+        Stage 1 sets ``state=False`` and ``globals=True``: no state path exists,
+        but floor shape, ``D`` and ``sigma`` keep their priors. Stage 2 sets
+        ``state=True`` and ``globals=False``: only the exact OU state prior and
+        the per-clip bias prior remain active while all globals are frozen.
         """
         cfg = self.config
         p = torch.zeros((), dtype=torch.float64, device=self._dev)
-        for e in self.state_innov:
-            p = p + 0.5 * (e[:, 0, 0].square().sum() + e[:, 1:, :].square().sum())
-        p = p + 0.5 * self.floor_shape_z.square().sum()
-        p = p + 0.5 * ((self.bias_hz - self.bias_mean_hz[None, :]) / cfg.bias_std_hz).square().sum()
-        p = p + 0.5 * (self.bias_mean_hz / cfg.bias_mean_std_hz).square().sum()
-        p = p + 0.5 * ((self.log_d - cfg.log_d_mean) / cfg.log_d_std) ** 2
+        if state:
+            for e in self.state_innov:
+                p = p + 0.5 * (e[:, 0, 0].square().sum() + e[:, 1:, :].square().sum())
+        if globals:
+            p = p + 0.5 * self.floor_shape_z.square().sum()
+            p = p + 0.5 * ((self.log_d - cfg.log_d_mean) / cfg.log_d_std) ** 2
+            p = p + 0.5 * ((self.log_sigma - cfg.log_sigma_mean) / cfg.log_sigma_std) ** 2
+        if clip_bias:
+            p = p + 0.5 * (
+                (self.bias_hz - self.bias_mean_hz[None, :]) / cfg.bias_std_hz
+            ).square().sum()
+        if bias_population:
+            p = p + 0.5 * (self.bias_mean_hz / cfg.bias_mean_std_hz).square().sum()
         return p
 
     # ── export / load ───────────────────────────────────────────────────
@@ -2188,7 +2278,8 @@ class _RevisedModel(torch.nn.Module):
             mg = self.mic_gain_db - self.mic_gain_db.mean(dim=0, keepdim=True)
             return dict(
                 lam=self.lam,
-                sigma=self.sigma,
+                sigma=self.sigma_value(),
+                lambda_source="fixed_reference",
                 d_scalar=float(torch.exp(self.log_d).item()),
                 delay_s={
                     str(r): float(v) for r, v in enumerate(self.config.rotor_delays(self.n_rotors))
@@ -2259,6 +2350,13 @@ class _RevisedModel(torch.nn.Module):
             self.log_d.copy_(
                 torch.as_tensor(
                     math.log(max(float(params["d_scalar"]), 1e-30)),
+                    dtype=torch.float64,
+                    device=self._dev,
+                )
+            )
+            self.log_sigma.copy_(
+                torch.as_tensor(
+                    math.log(max(float(params["sigma"]), 1e-30)),
                     dtype=torch.float64,
                     device=self._dev,
                 )
@@ -2347,7 +2445,7 @@ def _coarsening_sensitivity(model: _RevisedModel) -> dict[str, Any]:
             name
             for name, value in (
                 ("lam", model.lam),
-                ("sigma", model.sigma),
+                ("sigma", model.sigma_value()),
                 ("k", float(model.K)),
             )
             if value > COARSENING_VALIDATED_AT[name]
@@ -2411,6 +2509,118 @@ STATE_GRID_NOTE = (
 )
 
 
+def _sample_frames(
+    cd: _ClipData, rng: np.random.Generator, frames_per_step: int | None
+) -> tuple[np.ndarray, float]:
+    fi = np.arange(cd.starts.size)
+    if frames_per_step is None or int(frames_per_step) >= fi.size:
+        return fi, 1.0
+    # UNIFORM sampling WITHOUT replacement; each selected frame keeps its OWN
+    # composite weight and the sum is scaled by N_full / N_sampled. That is
+    # unbiased for the full risk, unlike self-normalizing by the selected
+    # weights, which changes the target when duplicate-split weights are unequal.
+    n_full = int(fi.size)
+    picked = np.sort(rng.choice(fi, size=int(frames_per_step), replace=False))
+    return picked, float(n_full) / float(picked.size)
+
+
+def _grad_norms(named: dict[str, torch.nn.Parameter]) -> dict[str, float]:
+    return {
+        name: (float(p.grad.norm().item()) if p.grad is not None else 0.0)
+        for name, p in named.items()
+    }
+
+
+def _fit_summary(trace: list[float], grad_norms: dict[str, dict[str, float]]) -> dict[str, Any]:
+    vals = np.asarray(trace, dtype=np.float64)
+    grad_vals = np.asarray(
+        [v for block in grad_norms.values() for v in block.values()], dtype=np.float64
+    )
+    finite_gradients = bool(grad_vals.size and np.isfinite(grad_vals).all())
+    return dict(
+        valid=bool(vals.size and np.isfinite(vals).all() and finite_gradients),
+        finite_gradients=finite_gradients,
+        objective_start=float(vals[0]) if vals.size else float("nan"),
+        objective_end=float(vals[-1]) if vals.size else float("nan"),
+        iterations=int(vals.size),
+        loss_trace=trace,
+        grad_norms=grad_norms,
+    )
+
+
+def _optimize_marginal(
+    model: _RevisedModel,
+    *,
+    config: FitConfig,
+    progress: Callable[[str], None] | None,
+) -> tuple[list[float], dict[str, dict[str, float]]]:
+    named = model.marginal_parameters()
+    opt = torch.optim.Adam(list(named.values()), lr=float(config.lr))
+    rng = np.random.default_rng(int(config.seed))
+    trace: list[float] = []
+    grad_norms: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
+    every = max(1, int(config.iters) // 20)
+    for it in range(int(config.iters)):
+        opt.zero_grad(set_to_none=True)
+        total = 0.0
+        for ci, cd in enumerate(model.clips):
+            fi, scale = _sample_frames(cd, rng, config.frames_per_step)
+            for chunk in _chunks(fi, config.frame_chunk):
+                loss = model.marginal_chunk_risk(ci, chunk, scale=scale) / config.temperature
+                loss.backward()
+                total += float(loss.detach())
+        prior = model.prior(state=False, globals=True, bias_population=True)
+        prior.backward()
+        total += float(prior.detach())
+        step_norms = _grad_norms(named)
+        if it == 0:
+            grad_norms["first_step"] = step_norms
+        grad_norms["last_step"] = step_norms
+        opt.step()
+        trace.append(total)
+        if progress is not None and (it % every == 0 or it == int(config.iters) - 1):
+            progress(f"marginal iter {it:4d}  quasi-risk {total:.4f}")
+    return trace, grad_norms
+
+
+def _optimize_carrier(
+    model: _RevisedModel,
+    *,
+    config: FitConfig,
+    clip_indices: Sequence[int] | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> tuple[list[float], dict[str, dict[str, float]]]:
+    named = model.carrier_parameters()
+    opt = torch.optim.Adam(list(named.values()), lr=float(config.stage2_lr))
+    rng = np.random.default_rng(int(config.seed) + 17)
+    indices = list(range(len(model.clips))) if clip_indices is None else list(clip_indices)
+    trace: list[float] = []
+    grad_norms: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
+    every = max(1, int(config.stage2_iters) // 20)
+    for it in range(int(config.stage2_iters)):
+        opt.zero_grad(set_to_none=True)
+        total = 0.0
+        for ci in indices:
+            cd = model.clips[ci]
+            fi, scale = _sample_frames(cd, rng, config.frames_per_step)
+            for chunk in _chunks(fi, config.frame_chunk):
+                loss = model.chunk_risk(ci, chunk, scale=scale) / config.temperature
+                loss.backward()
+                total += float(loss.detach())
+        prior = model.prior(state=True, globals=False, bias_population=False)
+        prior.backward()
+        total += float(prior.detach())
+        step_norms = _grad_norms(named)
+        if it == 0:
+            grad_norms["first_step"] = step_norms
+        grad_norms["last_step"] = step_norms
+        opt.step()
+        trace.append(total)
+        if progress is not None and (it % every == 0 or it == int(config.stage2_iters) - 1):
+            progress(f"carrier iter {it:4d}  conditional MAP {total:.4f}")
+    return trace, grad_norms
+
+
 def fit_revised(
     rows: Sequence[tuple[str, Clip]],
     *,
@@ -2420,61 +2630,19 @@ def fit_revised(
     device: str | torch.device = "cpu",
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Fit the candidate by ordinary Adam on the plug-in composite MAP.
-
-    ``rows`` are ``(clip_id, Clip)`` at ``config.sr``, whose ``rps`` track is the
-    RAW telemetry — refined labels are never used to fit. The returned export is
-    JSON-serializable and carries the physical parameters, the provenance needed
-    to reproduce the fit, and TRAINING-ONLY diagnostics (the MAP state path among
-    them; it is never a predictive input for a new clip).
-    """
+    """Fit round-2 by marginal quasi-MAP, then carrier-only diagnostics."""
     t0 = time.time()
     torch.manual_seed(int(config.seed))
     model = _RevisedModel(rows, dynamics=dynamics, config=config, device=device, observe=True)
-    named = model.fitted_parameters()
-    opt = torch.optim.Adam(list(named.values()), lr=float(config.lr))
-    rng = np.random.default_rng(int(config.seed))
-    trace: list[float] = []
-    grad_norms: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
-    every = max(1, int(config.iters) // 20)
 
-    for it in range(int(config.iters)):
-        opt.zero_grad(set_to_none=True)
-        total = 0.0
-        for ci, cd in enumerate(model.clips):
-            fi = np.arange(cd.starts.size)
-            scale = 1.0
-            if config.frames_per_step is not None and config.frames_per_step < fi.size:
-                # UNIFORM sampling WITHOUT replacement; each selected frame keeps
-                # its OWN composite weight and the sum is scaled by
-                # N_full / N_sampled. That is UNBIASED for the full risk. The
-                # self-normalized ``weights.sum() / weights[fi].sum()`` it
-                # replaces was NOT: it handed every draw the clip's whole
-                # exposure regardless of the drawn frames' weights, so with
-                # unequal (duplicate-split) weights the duplicated windows
-                # regained influence and the MAP target moved with
-                # frames_per_step.
-                n_full = int(fi.size)
-                fi = np.sort(rng.choice(fi, size=int(config.frames_per_step), replace=False))
-                scale = float(n_full) / float(fi.size)
-            for chunk in _chunks(fi, config.frame_chunk):
-                loss = model.chunk_risk(ci, chunk, scale=scale) / config.temperature
-                loss.backward()
-                total += float(loss.detach())
-        prior = model.prior()
-        prior.backward()
-        total += float(prior.detach())
-        step_norms = {
-            name: (float(p.grad.norm().item()) if p.grad is not None else 0.0)
-            for name, p in named.items()
-        }
-        if it == 0:
-            grad_norms["first_step"] = step_norms
-        grad_norms["last_step"] = step_norms
-        opt.step()
-        trace.append(total)
-        if progress is not None and (it % every == 0 or it == int(config.iters) - 1):
-            progress(f"iter {it:4d}  composite risk {total:.4f}")
+    marginal_trace, marginal_grads = _optimize_marginal(model, config=config, progress=progress)
+    predictive_parameters = model.parameter_export()
+
+    with torch.no_grad():
+        model.bias_hz.copy_(model.bias_mean_hz[None, :])
+        for p in model.state_innov:
+            p.zero_()
+    carrier_trace, carrier_grads = _optimize_carrier(model, config=config, progress=progress)
 
     with torch.no_grad():
         map_state: dict[str, Any] = {}
@@ -2485,9 +2653,14 @@ def fit_revised(
                 time_s=(np.arange(cd.n_states) * model.dt_state).tolist(),
                 theta_rad=theta.cpu().numpy().tolist(),
                 nu_hz=(nu.cpu().numpy() / (2.0 * np.pi)).tolist(),
+                diagnostic_bias_hz=model.bias_hz[ci].cpu().numpy().tolist(),
+                bias_note="stage-2 diagnostic clip bias; held-out prediction uses parameters.bias_mean_hz",
             )
             off_regime[cd.clip_id] = off_regime_extrapolation(
-                (cd.raw_hz + model.bias_hz[ci][:, None]).cpu().numpy(), where=cd.clip_id
+                (cd.raw_hz + torch.as_tensor(predictive_parameters["bias_mean_hz"], device=model._dev)[:, None])
+                .cpu()
+                .numpy(),
+                where=cd.clip_id,
             )
 
     provenance = dict(config.provenance)
@@ -2513,9 +2686,6 @@ def fit_revised(
         manifest_sha256=provenance.get("manifest_sha256"),
         clips=clip_rows,
         front_end=config.front_end(),
-        #: the two grids, named unambiguously: the atoms are synthesized on
-        #: model_grid_hz and the periodogram is read on analysis_grid_hz.
-        #: Nothing here is called "native".
         model_grid_hz=int(config.sample_rate_work),
         analysis_grid_hz=int(config.sr),
         render_transfer_spec=RENDER_TRANSFER_SPEC,
@@ -2526,10 +2696,12 @@ def fit_revised(
             "quantity of THIS chain, not a calibrated absolute spectrum"
         ),
         state_rate_hz=float(config.state_rate_hz),
+        fit_method="marginal_then_carrier",
+        lambda_source="fixed_reference",
         optimizer=dict(
             name="adam",
-            iters=int(config.iters),
-            lr=float(config.lr),
+            stage1_marginal=dict(iters=int(config.iters), lr=float(config.lr)),
+            stage2_carrier=dict(iters=int(config.stage2_iters), lr=float(config.stage2_lr)),
             frame_chunk=int(config.frame_chunk),
             harmonic_chunk=config.harmonic_chunk,
             frames_per_step=config.frames_per_step,
@@ -2541,8 +2713,8 @@ def fit_revised(
         seed=int(config.seed),
         composite_temperature=float(config.temperature),
         composite_semantics=(
-            "marginal composite risk / plug-in composite MAP: not an exact joint NLL, not "
-            "an evidence, not a posterior; frame counts are not evidence counts"
+            "stage 1 is a marginal mean-prediction composite risk; stage 2 is a plug-in "
+            "conditional MAP diagnostic. The two objectives are not summed as evidence."
         ),
         moment_gate=config.gate.as_dict(),
         moment_front_end=config.moments.as_dict(),
@@ -2551,32 +2723,35 @@ def fit_revised(
             bias_mean_std_hz=float(config.bias_mean_std_hz),
             log_d_mean=float(config.log_d_mean),
             log_d_std=float(config.log_d_std),
-            log_d_note="a broad Gaussian prior on a FITTED parameter; NOT conjugate to the "
-            "noisy moment-derived D",
+            log_sigma_mean=float(config.log_sigma_mean),
+            log_sigma_std=float(config.log_sigma_std),
+            log_sigma_note="N(0, 2^2) on log sigma; sigma is fitted by the marginal stage",
+            log_d_note="a broad Gaussian prior on a FITTED parameter; NOT conjugate to a "
+            "moment-derived D",
         ),
         code_version=_git_head(),
     )
-    # EVERY other key the caller put in config.provenance survives into the
-    # serialized provenance — ``bench_diagnostic_only`` and ``scored_arm``
-    # among them, so a downstream arm selector can enforce the
-    # no-unreported-control-arm rule from the artifact itself instead of
-    # trusting whoever ran it. Hand-listing the fields is what lost them.
     for key, value in provenance.items():
         training_provenance.setdefault(key, value)
     export = dict(
         schema_version=SCHEMA_VERSION,
         model_family=MODEL_FAMILY,
+        fit_method="marginal_then_carrier",
+        lambda_source="fixed_reference",
+        shared_phase_evidence="not_identified_by_marginal_score",
         rig_id=str(rig_id),
-        parameters=model.parameter_export(),
+        parameters=predictive_parameters,
         training_provenance=training_provenance,
         diagnostics=dict(
             map_state=map_state,
-            map_state_note="TRAINING ONLY: a plug-in MAP path, never a predictive input for a "
-            "new clip and never compared to the refined tracks as ground truth",
+            map_state_note="TRAINING ONLY: plug-in MAP carrier diagnostics; never a predictive "
+            "input for held-out clips and never compared to refined tracks as ground truth",
             moments=dynamics.diagnostics,
-            identified=bool(dynamics.identified),
-            loss_trace=trace,
-            grad_norms=grad_norms,
+            shared_phase_evidence="not_identified_by_marginal_score",
+            marginal_fit=_fit_summary(marginal_trace, marginal_grads),
+            carrier_fit=_fit_summary(carrier_trace, carrier_grads),
+            loss_trace=carrier_trace,
+            grad_norms=dict(marginal=marginal_grads, carrier=carrier_grads),
             bias_vs_nu_mean_confounding=_bias_confounding(model),
             state_grid_note=STATE_GRID_NOTE,
             coarsening_sensitivity=_coarsening_sensitivity(model),
@@ -2584,21 +2759,26 @@ def fit_revised(
             complexity=dict(
                 stochastic_mechanisms=2,
                 rig_dynamic_params=3,
-                rig_dynamic_params_detail="lam, sigma frozen (moment-estimated); D fitted",
+                rig_dynamic_params_detail=(
+                    "lambda fixed by reference assumption; sigma and scalar D fitted in marginal "
+                    "stage, then frozen for carrier diagnostics"
+                ),
                 latent_state_blocks=len(model.clips) * model.n_rotors,
                 latent_state_rate_hz=float(config.state_rate_hz),
                 nuisance_blocks=dict(
-                    bias_per_clip_rotor=int(model.bias_hz.numel()),
-                    bias_population_mean=int(model.bias_mean_hz.numel()),
+                    diagnostic_bias_per_clip_rotor=int(model.bias_hz.numel()),
+                    predictive_bias_population_mean=int(model.bias_mean_hz.numel()),
                     profile_db=int(model.profile_db.numel()),
                 ),
                 inference_stages=2,
                 approximations=[
+                    "stage-1 marginal expected periodogram integrates the OU state once",
+                    "stage-2 carrier paths are plug-in training diagnostics only",
                     "cubic Hermite state interpolation omits the intra-interval OU bridge "
                     "variance (grid approximation)",
-                    "plug-in composite risk over overlapping windows: proper for the mean "
-                    "prediction, not a joint likelihood",
-                    "lam, sigma frozen at their moment estimates",
+                    "composite risk over overlapping windows: proper for the mean prediction, "
+                    "not a joint likelihood",
+                    "fixed lambda=6 s^-1 is an explicit reference assumption, not measured",
                     "the known render/decimation transfer is applied to the WINDOWED expected "
                     "spectrum (window/filter commutation), not as an exact filtered periodogram",
                     "no order is dropped: out-of-band content is removed by the work grid and "
@@ -2630,6 +2810,8 @@ def _config_from_export(export: dict[str, Any], **overrides: Any) -> FitConfig:
     else:
         delay_s = tuple(float(v) for v in np.atleast_1d(delays))
     opt = prov.get("optimizer", {})
+    stage1 = opt.get("stage1_marginal", {}) if isinstance(opt, dict) else {}
+    stage2 = opt.get("stage2_carrier", {}) if isinstance(opt, dict) else {}
     cfg = FitConfig(
         n_fft=int(fe["n_fft"]),
         hop=int(fe["hop"]),
@@ -2641,8 +2823,10 @@ def _config_from_export(export: dict[str, Any], **overrides: Any) -> FitConfig:
         state_rate_hz=float(prov["state_rate_hz"]),
         k_cap=int(params["k_cap"]),
         delay_s=delay_s,
-        iters=int(opt.get("iters", 400)),
-        lr=float(opt.get("lr", 0.05)),
+        iters=int(stage1.get("iters", opt.get("iters", 120))),
+        lr=float(stage1.get("lr", opt.get("lr", 0.1))),
+        carrier_iters=int(stage2["iters"]) if "iters" in stage2 else opt.get("carrier_iters"),
+        carrier_lr=float(stage2["lr"]) if "lr" in stage2 else opt.get("carrier_lr"),
         seed=int(prov.get("seed", 0)),
         frame_chunk=int(opt.get("frame_chunk", 1)),
         harmonic_chunk=opt.get("harmonic_chunk", 32),
@@ -2655,6 +2839,8 @@ def _config_from_export(export: dict[str, Any], **overrides: Any) -> FitConfig:
     cfg.bias_mean_std_hz = float(priors.get("bias_mean_std_hz", BIAS_MEAN_PRIOR_STD_HZ))
     cfg.log_d_mean = float(priors.get("log_d_mean", 0.0))
     cfg.log_d_std = float(priors.get("log_d_std", 2.0))
+    cfg.log_sigma_mean = float(priors.get("log_sigma_mean", 0.0))
+    cfg.log_sigma_std = float(priors.get("log_sigma_std", 2.0))
     for key, value in overrides.items():
         setattr(cfg, key, value)
     return cfg
@@ -2662,13 +2848,12 @@ def _config_from_export(export: dict[str, Any], **overrides: Any) -> FitConfig:
 
 def _dynamics_from_export(export: dict[str, Any]) -> ShaftDynamics:
     p = export["parameters"]
-    diag = export.get("diagnostics", {})
     return ShaftDynamics(
         lam=float(p["lam"]),
         sigma=float(p["sigma"]),
         d_init=float(p["d_scalar"]),
-        identified=bool(diag.get("identified", False)),
-        diagnostics={"source": "export"},
+        identified=False,
+        diagnostics={"source": "export", "shared_phase_evidence": "not_identified_by_marginal_score"},
     )
 
 
@@ -2729,9 +2914,12 @@ def predict_spectrum(
         entry = stored[clip.clip_id]
         theta = torch.as_tensor(np.asarray(entry["theta_rad"], dtype=np.float64))
         nu = torch.as_tensor(np.asarray(entry["nu_hz"], dtype=np.float64)) * 2.0 * np.pi
+        bias = torch.as_tensor(
+            np.asarray(entry.get("diagnostic_bias_hz", model.bias_hz[0].detach().cpu().numpy()), dtype=np.float64)
+        )
         with torch.no_grad():
             out = [
-                model.frame_model(0, chunk, state=(theta, nu), kernel="conditional")
+                model.frame_model(0, chunk, state=(theta, nu), kernel="conditional", bias=bias)
                 for chunk in _chunks(np.arange(cd.starts.size), cfg.frame_chunk)
             ]
     else:
@@ -2765,22 +2953,9 @@ def infer_carrier(
     model.load_parameters(export["parameters"])
     with torch.no_grad():
         model.bias_hz[0].copy_(model.bias_mean_hz)
-    fitted = [model.state_innov[0], model.bias_hz]
-    opt = torch.optim.Adam(fitted, lr=float(cfg.lr))
-    cd = model.clips[0]
-    trace: list[float] = []
-    for _ in range(int(cfg.iters)):
-        opt.zero_grad(set_to_none=True)
-        total = 0.0
-        for chunk in _chunks(np.arange(cd.starts.size), cfg.frame_chunk):
-            loss = model.chunk_risk(0, chunk) / cfg.temperature
-            loss.backward()
-            total += float(loss.detach())
-        prior = model.prior()
-        prior.backward()
-        total += float(prior.detach())
-        opt.step()
-        trace.append(total)
+        for p in model.state_innov:
+            p.zero_()
+    trace, grad_norms = _optimize_carrier(model, config=cfg, clip_indices=[0])
     with torch.no_grad():
         theta, nu = model.theta_nu(0)
         theta_np = theta.cpu().numpy()
@@ -2806,9 +2981,12 @@ def infer_carrier(
         diagnostics=dict(
             clip_id=clip.clip_id,
             loss_trace=trace,
+            carrier_fit=_fit_summary(trace, grad_norms),
             state_rate_hz=float(cfg.state_rate_hz),
-            iters=int(cfg.iters),
-            kind="plug-in MAP track (not a posterior mean)",
+            iters=int(cfg.stage2_iters),
+            frames_per_step=cfg.frames_per_step,
+            minibatch_estimator="uniform without replacement, own weights, scaled N_full/N_sampled",
+            kind="plug-in conditional MAP track (not a posterior mean)",
             refined_track_comparison="diagnostic only; the refined tracks are not ground truth",
             state_grid_note=STATE_GRID_NOTE,
         ),
@@ -3057,12 +3235,14 @@ __all__ = [
     "CALIBRATED_MIN_RPS",
     "COARSENING_SENSITIVITY_NOTE",
     "COARSENING_VALIDATED_AT",
+    "FIXED_REFERENCE_LAMBDA",
     "FLOOR_PSD_OVERSAMPLE",
     "GATE_MAX_WRAP_SPREAD_RAD",
     "GATE_MIN_FRAMES",
     "GATE_MIN_ISOLATION_BINS",
     "GATE_MIN_LINE_SNR_DB",
     "GATE_ORDER_RANGE",
+    "INITIAL_SIGMA",
     "MODEL_FAMILY",
     "MOMENT_GATE",
     "RAW_RPS_KEYS",
