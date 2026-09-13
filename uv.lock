@@ -4521,15 +4521,15 @@ wheels = [
 
 [[package]]
 name = "tdseries"
-version = "0.2.1"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "array-api-compat" },
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/4a/5e63a4cbd4b6ce7c185713c100399ea4b7b9cfe1bcf501c07dafd6d9431b/tdseries-0.2.1.tar.gz", hash = "sha256:443ba45198f5c01d61195c7208803ff2b51050ea4a7331269ee60b7965f2ae62", size = 94907, upload-time = "2026-08-06T11:22:56.728Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/63/ea/bff1e5eb3d1dc46f9c9beeafff90a7c243d206404137b2ea2fbdb9380000/tdseries-0.2.2.tar.gz", hash = "sha256:b91313f619842f5c598e984b09de19834deac0a44b33ec7254b0c82e82cee6e2", size = 95987, upload-time = "2026-09-12T13:12:46.173Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/b9/ba370c0681aa1a8a1fda6337160e8299c1ef296b40a4474d7d3cfd0820ad/tdseries-0.2.1-py3-none-any.whl", hash = "sha256:2c224422f31ce6876d6ab30d129805f7859bcb927c56b8116551c14a0df0f324", size = 25558, upload-time = "2026-08-06T11:22:55.748Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/13/f1230de3938025072df22cd8a3f85a41df96b65abb6bc487416ccf4abaa1/tdseries-0.2.2-py3-none-any.whl", hash = "sha256:7d13f99fb1d371e77de041303f39d187a04be5e0442f2418909f8def8aae01a3", size = 25862, upload-time = "2026-09-12T13:12:45.113Z" },
 ]
 
 [[package]]

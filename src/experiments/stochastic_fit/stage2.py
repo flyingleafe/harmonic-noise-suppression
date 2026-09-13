@@ -209,6 +209,40 @@ def save(summary: dict[str, Any], path: str | Path) -> Path:
     return p
 
 
+#: The render's own anti-alias low-pass, specified rather than inherited.
+#: Passband edge (the fit's own band edge, F_MAX), stopband edge (the output
+#: Nyquist) and stopband attenuation;
+#: the filter length follows from them through ``kaiserord``, so the transition
+#: is as narrow as the specification requires instead of as narrow as a fixed
+#: length allows.
+AA_PASS_HZ, AA_STOP_HZ, AA_STOP_DB = 7900.0, 8000.0, 100.0
+
+
+def antialias(
+    x: np.ndarray,
+    sample_rate: float,
+    *,
+    pass_hz: float = AA_PASS_HZ,
+    stop_hz: float = AA_STOP_HZ,
+    stop_db: float = AA_STOP_DB,
+) -> np.ndarray:
+    """Low-pass ``x`` so that nothing above ``stop_hz`` survives decimation.
+
+    A rendered comb carries lines above the OUTPUT Nyquist; the shared
+    decimator's own filter is a fixed-length Kaiser whose stop band is about
+    40-50 dB, and raising its beta widens the transition instead of deepening
+    it at constant length. So the render removes its own out-of-band energy
+    first, with a filter whose passband, stopband and attenuation are stated.
+    """
+    from scipy.signal import filtfilt, firwin, kaiserord
+
+    width = (float(stop_hz) - float(pass_hz)) / (float(sample_rate) / 2.0)
+    n_taps, beta = kaiserord(float(stop_db), width)
+    n_taps = int(n_taps) | 1  # firwin wants an odd length for a type-I linear phase
+    taps = firwin(n_taps, (pass_hz + stop_hz) / 2.0, window=("kaiser", beta), fs=sample_rate)
+    return filtfilt(taps, [1.0], np.asarray(x, dtype=np.float64), axis=-1)
+
+
 def params_from_export(
     export: dict[str, Any],
     rates: np.ndarray,
@@ -234,9 +268,14 @@ def params_from_export(
     n_rotors = profile.shape[0]
     rates = np.atleast_1d(np.asarray(rates, dtype=np.float64))
     # The comb must reach Nyquist for the SLOWEST rotor, or the fastest rotor's
-    # high orders are cut while the slowest keeps padding.
+    # high orders are cut while the slowest keeps padding. Lines above the
+    # OUTPUT Nyquist are therefore rendered on purpose and removed by
+    # :func:`antialias` before decimation, never by truncating the ladder: one
+    # order is above the band for the fast rotor and inside it for the slow
+    # one, and the profile is a single shared (rotor, order) grid.
     k_max = max(2, int(np.floor((sample_rate / 2) / max(float(rates.min()), 1.0))))
     k_use = min(k_max, profile.shape[1])
+    profile = profile[:n_rotors, :k_use].copy()
     gamma0 = np.atleast_1d(np.asarray(export["gamma0"], dtype=np.float64))
     slope = np.atleast_1d(np.asarray(export["gamma_slope"], dtype=np.float64))
 
@@ -261,7 +300,7 @@ def params_from_export(
         sample_rate=int(sample_rate),
         n_rotors=n_rotors,
         n_harmonics=k_use,
-        profile_db=profile[:n_rotors, :k_use].copy(),
+        profile_db=profile,
         gamma0=per_rotor(gamma0),
         gamma_slope=per_rotor(slope),
         floor_ctrl_hz=np.asarray(export["floor_ctrl_hz"], dtype=np.float64),
@@ -310,6 +349,14 @@ def render_from_export(
 
     Rendered at the native rate and decimated on the real clips' own path, so
     the synthetic clip carries no band edge the real clips do not have.
+
+    The comb runs past the OUTPUT Nyquist — at these rotor speeds the fitted
+    ladder reaches about 10.8 kHz against an 8 kHz output Nyquist — so the
+    render low-passes ITSELF (:func:`antialias`) before the shared decimator
+    touches it. Without that step the out-of-band lines folded down: decomposing
+    the accepted raw-label render showed the above-8 kHz component contributing
+    14.5 dB to the decimated 7.5-8 kHz band against 5.7 dB from genuine in-band
+    content, and a 9 kHz tone arriving only 31 dB down.
     """
     from data_processing import stochastic_rotor_noise as srn
 
@@ -329,6 +376,7 @@ def render_from_export(
         line_mode="fm",
         n_fft=1 << 16,
     )
+    audio = antialias(np.asarray(audio, dtype=np.float64), sample_rate_native)
     clip = Clip(
         "synthetic", "synthetic", np.asarray(audio, np.float32), rps_native, sample_rate_native
     )

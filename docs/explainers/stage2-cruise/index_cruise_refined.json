@@ -1,0 +1,137 @@
+[
+ {
+  "clip": "fly125_cruise_00",
+  "start_s": 16.0,
+  "rotors": [
+   89.8,
+   74.3,
+   81.4,
+   75.4
+  ],
+  "k_half": 1.73,
+  "bands": {
+   "real": [
+    1.9,
+    1.92,
+    1.06,
+    -0.73,
+    -4.3,
+    -9.42,
+    -13.21
+   ],
+   "fitted": [
+    4.35,
+    2.29,
+    0.74,
+    -1.0,
+    -4.21,
+    -8.85,
+    -14.35
+   ],
+   "pre-fit": [
+    0.22,
+    -0.09,
+    -0.86,
+    -4.1,
+    -6.04,
+    -5.92,
+    -7.78
+   ]
+  },
+  "fitted_mean_abs_db": 0.74,
+  "fitted_max_abs_db": 2.45,
+  "prefit_mean_abs_db": 2.81,
+  "channel_rms_dev_db": 0.79,
+  "figure": "cruise_refined_00.png"
+ },
+ {
+  "clip": "fly125_cruise_01",
+  "start_s": 32.0,
+  "rotors": [
+   91.8,
+   74.9,
+   81.0,
+   75.2
+  ],
+  "k_half": 2.95,
+  "bands": {
+   "real": [
+    3.67,
+    0.55,
+    2.74,
+    3.79,
+    1.16,
+    -4.75,
+    -8.12
+   ],
+   "fitted": [
+    3.02,
+    0.76,
+    -0.28,
+    -0.92,
+    -3.77,
+    -8.12,
+    -13.56
+   ],
+   "pre-fit": [
+    3.66,
+    -2.46,
+    -2.48,
+    -6.1,
+    -8.97,
+    -11.58,
+    -14.13
+   ]
+  },
+  "fitted_mean_abs_db": 3.19,
+  "fitted_max_abs_db": 5.44,
+  "prefit_mean_abs_db": 5.87,
+  "channel_rms_dev_db": 1.25,
+  "figure": "cruise_refined_01.png"
+ },
+ {
+  "clip": "fly125_cruise_02",
+  "start_s": 48.0,
+  "rotors": [
+   89.4,
+   75.0,
+   81.3,
+   77.4
+  ],
+  "k_half": 2.1,
+  "bands": {
+   "real": [
+    2.92,
+    1.1,
+    0.62,
+    0.01,
+    -2.56,
+    -7.84,
+    -11.24
+   ],
+   "fitted": [
+    3.33,
+    1.44,
+    -0.08,
+    -1.17,
+    -4.21,
+    -8.82,
+    -14.22
+   ],
+   "pre-fit": [
+    3.35,
+    -0.97,
+    -3.15,
+    -6.94,
+    -9.25,
+    -11.06,
+    -13.82
+   ]
+  },
+  "fitted_mean_abs_db": 1.18,
+  "fitted_max_abs_db": 2.98,
+  "prefit_mean_abs_db": 3.67,
+  "channel_rms_dev_db": 0.92,
+  "figure": "cruise_refined_02.png"
+ }
+]

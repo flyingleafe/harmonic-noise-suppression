@@ -404,9 +404,13 @@ def render_from_export(
     """One synthetic clip from a MAP export, on the real clips' own path.
 
     Rendered at 44.1 kHz and decimated by ``clips.decimate`` so the synthetic
-    clip carries the same resampler transition band the real one does.
+    clip carries the same resampler transition band the real one does. The
+    bench ladder reaches 163 orders, which at 78 rev/s is 12.7 kHz, so the
+    render low-passes itself first (`stage2.antialias`) — otherwise those lines
+    fold into the top octave of the decimated clip.
     """
     from data_processing import stochastic_rotor_noise as srn
+    from experiments.stochastic_fit.stage2 import antialias
 
     params = params_from_export(export, rate_rps, sample_rate=C.NATIVE_SR)
     n = int(round(seconds * C.NATIVE_SR))
@@ -414,6 +418,7 @@ def render_from_export(
     audio, _ = srn.synthesize(
         params, rps, rng=np.random.default_rng(seed), n_mics=1, line_mode="fm"
     )
+    audio = antialias(np.asarray(audio, dtype=np.float64), C.NATIVE_SR)
     clip = Clip(
         "synthetic",
         "synthetic",
