@@ -120,6 +120,7 @@ def main() -> int:
         band_hz=cfg.band_hz,
         state_rate_hz=cfg.state_rate_hz,
         k_cap=cfg.k_cap,
+        delay_s=cfg.delay_s,
         frame_chunk=1,
         harmonic_chunk=32,
         temperature=1.0,
