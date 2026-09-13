@@ -26,7 +26,7 @@ SAMPLE_RATE_WORK = 64000
 N_ROTORS = 4
 N_MICS = 8
 K_CAP = 230
-DURATION_S = 1.0
+DURATION_S = 2.0
 
 
 def _planted_clip() -> Clip:
