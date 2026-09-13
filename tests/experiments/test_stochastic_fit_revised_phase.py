@@ -219,7 +219,7 @@ def test_conditioning_on_a_known_path_removes_the_ou_broadening():
     ``exp(-D|tau|)`` and the line stays narrow; the marginal prediction still
     carries the OU broadening. Both must match their own Monte-Carlo mean, and
     phase modulation must conserve the band power."""
-    n, draws = 256, 4000
+    n, draws = 4096, 4000
     w, wss = _window(n)
     lam, sigma, d, k = 6.0, 6.0, 0.5, 20
     t = np.arange(n, dtype=np.float64) / SR
@@ -305,7 +305,7 @@ def _tiny_export(
     n_fft: int = 256,
     hop: int = 128,
     sample_rate_work: int = RP.SAMPLE_RATE_WORK,
-    profile_db: tuple[float, ...] = (-6.0, -12.0, -18.0, 0.0),
+    profile_db: tuple[float, ...] = (-45.0, -51.0, -57.0, -60.0),
     n_mics: int = 2,
     sigma: float = 6.0,
     amp_exp: float = 0.0,
@@ -586,14 +586,14 @@ def test_every_fitted_parameter_receives_a_finite_nonzero_gradient(device: str):
 def test_state_grid_convergence_at_a_high_order():
     """The Hermite state interpolation omits the intra-interval OU bridge, and
     the atom carries ``k theta``, so the error scales with ``k^2``. At ``k =
-    100`` with ``sigma = 6`` rad/s and ``lam = 6`` /s the predicted spectrum must
+    100`` with ``sigma = 15`` rad/s and ``lam = 15`` /s the predicted spectrum must
     be converged between 1000 Hz and 500 Hz — and must DIVERGE at a deliberately
     coarse 62.5 Hz grid, or the check proves nothing.
 
     THIS is the real two-sided check: a genuine prediction from a REFINED grid
     against the reference path. The export's ``coarsening_sensitivity`` block is
     not this and must not be read as a convergence result."""
-    n_fft, k, lam, sigma, d = 1024, 100, 6.0, 6.0, 0.5
+    n_fft, k, lam, sigma, d = 1024, 100, 15.0, 15.0, 0.1
     w, wss = _window(n_fft)
     n_ref = n_fft + 257
     rng = np.random.default_rng(17)
