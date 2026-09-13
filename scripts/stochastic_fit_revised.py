@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import time
 from pathlib import Path
 from typing import Any
@@ -71,8 +72,10 @@ MANIFEST_SCHEMA: dict[str, Any] = {
     "optimizer": {
         "harmonic_chunk": "optional int or null, orders per kernel call "
         "(null = all at once); a memory device only, no order is ever dropped",
-        "iters": "int, Adam iterations",
-        "lr": "float, Adam learning rate",
+        "iters": "int, stage-1 marginal Adam iterations",
+        "lr": "float, stage-1 marginal Adam learning rate",
+        "carrier_iters": "int, stage-2 carrier-only Adam iterations",
+        "carrier_lr": "float, stage-2 carrier-only Adam learning rate",
         "seed": "int",
         "frame_chunk": "int, frames per backward chunk (memory bound, 1 at n_fft 16384)",
         "frames_per_step": "int or null, frames sampled per step (null = all)",
@@ -86,8 +89,10 @@ MANIFEST_SCHEMA: dict[str, Any] = {
     },
     "priors": {
         "bias_std_hz": "float, per-clip bias prior std around the rotor population mean",
-        "log_d_mean": "float, broad Gaussian prior on log D (NOT conjugate to the moment D)",
+        "log_d_mean": "float, broad Gaussian prior on fitted log D",
         "log_d_std": "float",
+        "log_sigma_mean": "optional float, default 0.0 (sigma prior mean = 1 rad/s)",
+        "log_sigma_std": "optional float, default 2.0",
         "bias_mean_std_hz": f"optional float, default {RP.BIAS_MEAN_PRIOR_STD_HZ}",
     },
     "moments": {
@@ -179,6 +184,8 @@ def _config(manifest: dict[str, Any], rig: str, where: Path, sha: str) -> RP.Fit
         delay_s=delay_s,
         iters=int(_req(manifest, "optimizer.iters", where)),
         lr=float(_req(manifest, "optimizer.lr", where)),
+        carrier_iters=int(opt["carrier_iters"]) if "carrier_iters" in opt else None,
+        carrier_lr=float(opt["carrier_lr"]) if "carrier_lr" in opt else None,
         seed=int(_req(manifest, "optimizer.seed", where)),
         frame_chunk=int(_req(manifest, "optimizer.frame_chunk", where)),
         frames_per_step=(
@@ -193,6 +200,8 @@ def _config(manifest: dict[str, Any], rig: str, where: Path, sha: str) -> RP.Fit
         ),
         log_d_mean=float(_req(manifest, "priors.log_d_mean", where)),
         log_d_std=float(_req(manifest, "priors.log_d_std", where)),
+        log_sigma_mean=float(manifest["priors"].get("log_sigma_mean", 0.0)),
+        log_sigma_std=float(manifest["priors"].get("log_sigma_std", 2.0)),
         atom_dtype=str(opt.get("atom_dtype", "float32")),
         harmonic_chunk=opt.get("harmonic_chunk", 32),
         moments=RP.MomentConfig(
@@ -279,12 +288,6 @@ def main() -> None:
         action="store_true",
         help="print the exact manifest schema this CLI requires (JSON) and exit",
     )
-    ap.add_argument(
-        "--allow-unidentified-diagnostic-fit",
-        action="store_true",
-        help="EXPLORATORY, NOT SCIENTIFIC: run the MAP even when stage 1 did not identify the "
-        "shaft dynamics. Forces scored_arm=false in the export.",
-    )
     args = ap.parse_args()
 
     if args.schema:
@@ -321,39 +324,28 @@ def main() -> None:
     rows, regimes = _load_rows(manifest, args.rig, cfg, path)
     cfg.provenance["regimes"] = regimes
 
-    print(f"\nstage 1: moments over {len(rows)} clip(s)", flush=True)
-    dynamics = RP.estimate_shaft_dynamics(rows, gate=cfg.gate, config=cfg)
+    dynamics = RP.ShaftDynamics(
+        lam=RP.FIXED_REFERENCE_LAMBDA,
+        sigma=RP.INITIAL_SIGMA,
+        d_init=math.exp(float(cfg.log_d_mean)),
+        identified=False,
+        diagnostics=dict(
+            estimator_stage="marginal_then_carrier",
+            lambda_source="fixed_reference",
+            lambda_assumption_s_inv=RP.FIXED_REFERENCE_LAMBDA,
+            initial_sigma_rad_s=RP.INITIAL_SIGMA,
+            shared_phase_evidence="not_identified_by_marginal_score",
+            note="phase-moment estimates are diagnostics only in round 2; no moment gate controls export validity",
+        ),
+    )
     print(
-        f"  lam {dynamics.lam:.4g} 1/s   sigma {dynamics.sigma:.4g} rad/s   "
-        f"D_init {dynamics.d_init:.4g} rad^2/s   identified {dynamics.identified}",
+        f"\nstage 1: marginal expected-periodogram quasi-MAP over {len(rows)} clip(s)\n"
+        f"  fixed lambda {dynamics.lam:.4g} 1/s (reference assumption, not measured); "
+        f"sigma init {dynamics.sigma:.4g} rad/s; D init {dynamics.d_init:.4g} rad^2/s",
         flush=True,
     )
-    if not dynamics.identified:
-        reason = str(dynamics.diagnostics.get("unidentifiable_reason", "(no reason recorded)"))
-        print(f"  NOT IDENTIFIED: {reason}", flush=True)
-        diag_path = save(
-            RP.unidentified_diagnostic(args.rig, dynamics, cfg),
-            Path(args.out).with_suffix(".unidentified.json"),
-        )
-        if not args.allow_unidentified_diagnostic_fit:
-            raise SystemExit(
-                f"stage 1 did not identify the shaft dynamics: {reason}\n"
-                f"wrote the moment diagnostic to {diag_path} and STOPPED before the MAP — "
-                "freezing unidentifiable lam/sigma into a full fit produces an artifact with no "
-                "valid dynamics estimate, which the evaluator must reject anyway. Pass "
-                "--allow-unidentified-diagnostic-fit for an explicitly NON-SCIENTIFIC "
-                "exploratory fit (it is forced to scored_arm=false)."
-            )
-        cfg.provenance["scored_arm"] = False
-        cfg.provenance["unidentified_diagnostic_fit"] = True
-        cfg.provenance["unidentifiable_reason"] = reason
-        print(
-            f"  --allow-unidentified-diagnostic-fit: diagnostic written to {diag_path}, "
-            "proceeding with scored_arm=false. This is NOT a scientific run.",
-            flush=True,
-        )
 
-    print("\nstage 2: plug-in composite MAP", flush=True)
+    print("\nstage 2: frozen-global carrier diagnostics", flush=True)
     export = RP.fit_revised(
         rows,
         rig_id=args.rig,
@@ -370,11 +362,19 @@ def main() -> None:
         if sens["needs_real_grid_refinement"]
         else ""
     )
+    mf = export["diagnostics"]["marginal_fit"]
+    cf = export["diagnostics"]["carrier_fit"]
     print(
         f"\nwrote {out}  ({export['diagnostics']['runtime_s']:.0f}s fit, "
         f"{time.time() - t0:.0f}s total)\n"
-        f"  final composite risk {export['diagnostics']['loss_trace'][-1]:.4f}\n"
-        f"  D {export['parameters']['d_scalar']:.4g} rad^2/s\n"
+        f"  marginal quasi-risk {mf['objective_start']:.4f} -> {mf['objective_end']:.4f} "
+        f"valid={mf['valid']}\n"
+        f"  carrier diagnostic MAP {cf['objective_start']:.4f} -> {cf['objective_end']:.4f} "
+        f"valid={cf['valid']}\n"
+        f"  fixed lambda {export['parameters']['lam']:.4g} 1/s; "
+        f"sigma {export['parameters']['sigma']:.4g} rad/s; "
+        f"D {export['parameters']['d_scalar']:.4g} rad^2/s\n"
+        f"  shared_phase_evidence={export['shared_phase_evidence']}\n"
         f"  coarsening sensitivity (a sanity indicator, NOT convergence): subsampling the "
         f"fitted {sens['rate_hz']:.0f} Hz MAP path by two moves one frame's predicted spectrum "
         f"by {sens['band_l1_rel_change'] * 100:.2f}% (band L1)" + flagged,

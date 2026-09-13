@@ -1,6 +1,6 @@
 {
   "schema": "revised-phase-fit/1",
-  "status": "PROPOSED first-C1 Michael's training manifest — config not used for scientific fit until Main review",
+  "status": "PROPOSED C2 Michael's marginal-then-carrier training manifest — config not used for scientific fit until Main review",
   "notes": [
     "Per-rig fit manifest for scripts/stochastic_fit_revised.py --rig michaels.",
     "Calibrated composite temperature T = J/H = 15.214066879865468 from baseline_v1/calibration.json.",
@@ -12,7 +12,8 @@
     "Known FLY125 standby support is 13.5 s at 1.78..15.28 s; selected standby 2..10 s, not motors-off landing.",
     "Selected non-overlapping supports: standby 2..10 s; ramp context 10..18 s containing the actual transition; cruise 32..48, 64..80, 96..112 s after raw-key audit.",
     "Optimizer proposal from measured warm GPU smoke python-af021d: first 7.927 s, warm 2.367/2.364 s, 3.929 GB at K230 R4 M8 harmonic_chunk=8.",
-    "Proposed C1 fit budget: Adam 120 iterations, lr 0.1, frames_per_step=1 per clip, frame_chunk=1, harmonic_chunk=8, seed 0."
+    "C2 fit budget: stage-1 marginal Adam 120 iterations lr 0.1; stage-2 carrier-only Adam 40 iterations lr 0.05; frames_per_step=1 per clip, frame_chunk=1, harmonic_chunk=8, seed 0.",
+    "C2 fixes lambda=6 s^-1 as a reference assumption, initializes sigma=1 rad/s, fits sigma and scalar D in stage 1, and reports shared_phase_evidence=not_identified_by_marginal_score."
   ],
   "front_end": {
     "sr": 16000,
@@ -31,6 +32,8 @@
     "algorithm": "Adam",
     "iters": 120,
     "lr": 0.1,
+    "carrier_iters": 40,
+    "carrier_lr": 0.05,
     "seed": 0,
     "frame_chunk": 1,
     "frames_per_step": 1,
@@ -57,7 +60,9 @@
   "priors": {
     "bias_std_hz": 0.5,
     "log_d_mean": 0.0,
-    "log_d_std": 2.0
+    "log_d_std": 2.0,
+    "log_sigma_mean": 0.0,
+    "log_sigma_std": 2.0
   },
   "moments": {
     "window": 4096,
