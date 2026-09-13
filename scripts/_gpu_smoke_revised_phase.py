@@ -143,7 +143,7 @@ def _build_smoke_model(device: torch.device) -> tuple[RP._RevisedModel, dict[str
     return model, params
 
 
-def _run_gpu_smoke() -> int:
+def _run_gpu_smoke(out: Path | None = None) -> int:
     print(f"python: {sys.executable}")
     print(f"torch: {torch.__version__}")
     print(f"cuda_available: {torch.cuda.is_available()}")
@@ -203,10 +203,33 @@ def _run_gpu_smoke() -> int:
 
     arr_t = np.asarray(times)
     arr_p = np.asarray(peaks_gb)
+    summary = dict(
+        repeats=len(times),
+        elapsed_s=dict(
+            mean=float(arr_t.mean()),
+            std=float(arr_t.std()),
+            min=float(arr_t.min()),
+            max=float(arr_t.max()),
+            per_repeat=[float(t) for t in times],
+        ),
+        peak_allocated_gb=dict(
+            mean=float(arr_p.mean()),
+            std=float(arr_p.std()),
+            min=float(arr_p.min()),
+            max=float(arr_p.max()),
+            per_repeat=[float(p) for p in peaks_gb],
+        ),
+        device=str(torch.cuda.get_device_name(device)),
+        torch_version=str(torch.__version__),
+    )
     print("summary:")
     print(f"  repeats: {len(times)}")
     print(f"  elapsed_s: mean={arr_t.mean():.3f} std={arr_t.std():.3f} min={arr_t.min():.3f} max={arr_t.max():.3f}")
     print(f"  peak_allocated_gb: mean={arr_p.mean():.3f} std={arr_p.std():.3f} min={arr_p.min():.3f} max={arr_p.max():.3f}")
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(summary, indent=2))
+        print(f"wrote {out}")
     print("PASS")
     return 0
 
@@ -411,7 +434,7 @@ def main() -> int:
 
     if args.cpu_planted_control:
         return _run_cpu_planted_control(args.out)
-    return _run_gpu_smoke()
+    return _run_gpu_smoke(args.out)
 
 
 if __name__ == "__main__":
