@@ -1,0 +1,278 @@
+---
+title: "Revised phase fixed-carrier closeout handoff"
+subtitle: "Stop state, verified implementation, and restart boundaries"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    code-fold: true
+    html-math-method: katex
+execute:
+  echo: false
+  warning: false
+---
+
+```{=html}
+<style>
+pre { white-space: pre-wrap; }
+code { overflow-wrap: anywhere; }
+table { display: block; overflow-x: auto; white-space: normal; }
+</style>
+```
+
+**Status:** stopped at user request after the current fixed-carrier implementation step. No more fits, submissions, HPP evaluations, carrier recovery, candidate rounds, or research work were run in this closeout.
+
+:::: {.callout-important}
+## Operational decision
+
+The revised-phase campaign is **not complete** and has **no overall passing incumbent**. Three earlier rounds are concluded in the current plan. C4 has been replanned as a fixed-carrier implementation, and this closeout verifies only that implementation contract on toy data and manifest parsing. The real C4 fits and evaluations were **not run**.
+::::
+
+# 1. Current source of truth
+
+Two worktrees now matter:
+
+| Tier | Authority | Current commit / path | Role |
+|---|---:|---|---|
+| SMALL source/config/tests | this worktree | `/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.worktrees/revised-phase-preflight` at `fe075f2f53020f46f8a09256117e970251a0799b` | fixed-carrier implementation, 3 fit manifests, 2 eval manifests, focused tests |
+| LARGE documents | independent docs worker | `/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.worktrees/revised-phase` at `a5f51651d04ed71ff20168b7a28b3441eb251ec8` | four long QMD explainers/campaign docs updated and rendered |
+| This handoff | SMALL | `docs/experiments/revised-phase-handoff-2026-09-13.qmd` | closeout summary for the next agent |
+
+Large docs updated by the docs worker, not by SMALL:
+
+- `docs/experiments/revised-phase-campaign.qmd` → `docs/experiments/revised-phase-campaign.html`
+- `docs/explainers/bench-fit-revised-phase-model.qmd` → `docs/explainers/bench-fit-revised-phase-model.html`
+- `docs/explainers/fitting-four-moving-harmonic-combs.qmd` → `docs/explainers/fitting-four-moving-harmonic-combs.html`
+- `docs/explainers/rotor-noise-fit.qmd` → `docs/explainers/rotor-noise-fit.html`
+
+Large browser proof is recorded at `verification_artifacts/revised-phase-docs-2026-09-13/browser-proof.json` with full-page screenshots in the same directory. The docs worker reported no horizontal overflow, no KaTeX parse errors, no broken images/audio, no broken TOC anchors, and preservation of `22` images plus `69` audio elements in `rotor-noise-fit.html`.
+
+# 2. Stop state
+
+- Latest user instruction: stop after this implementation closeout and handoff.
+- No remote jobs were submitted in this closeout.
+- `omnirun ps` showed no active campaign jobs; visible recent jobs were failed historical `revised-phase-round2...` `uni-cpu` jobs.
+- No real C4 data fit was run.
+- No fixed C4 evaluation was run.
+- No HPP scoring bundle was run.
+- No `--check` pass is claimed, because the future candidate export files intentionally do not exist yet.
+- No project-wide formatter, lint, build, or full test suite was run.
+- No `.venv` synchronization was run.
+
+Two attempted delegated integration workers failed immediately with provider 429 rate-limit errors, so the closeout owner performed only the bounded integration/verification work needed to avoid leaving the implementation half-finished.
+
+# 3. Fixed-carrier C4 contract now implemented
+
+The new method is `fit_method = "fixed_carrier_marginal"`.
+
+Estimator semantics:
+
+- Supplied deterministic carrier is fixed.
+- DREGON has two allowed carrier inputs: raw `motors_command` and refined `rps_refined`.
+- Michael's rig has one allowed carrier input: raw `rps`.
+- `carrier_source` is top-level export provenance and also appears in `training_provenance`.
+- Shared integrated-OU phase broadening and independent Wiener residual broadening are marginalized in the expected periodogram. They are **not** estimated trajectories.
+- Lambda is fixed at `6.0 s^-1` as the reference assumption.
+- `sigma`, scalar `D`, profiles, floors, speed laws and mic power parameters remain trainable globals.
+- C3 warm starts are staged from `omnirun-outputs/revised-phase-c3-fits-ad2c57/results/revised_phase/c3/{dregon,michaels}.json` into `results/revised_phase/c3/{rig}.json`: DREGON SHA-256 `5d232ed9760b000a39583c54c8f9d9ee5e5baccfbedec2d63c5f6d5615956831`, Michael SHA-256 `22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc`. Fixed C4 loads **globals only** from those files; no bias and no MAP-state warm start.
+- DREGON fixed C4 resets the initial `D` to `82.1212319648372` and initial `sigma` to `3.10117415072719`; both are then free. Michael fixed C4 keeps the C3 global initial `D`/`sigma`; both are then free.
+- Bias fields remain in `parameters` only for compatibility and must be exactly zero; they are not optimized.
+- No MAP state, no fitted clip/population bias, no learned delay, no `carrier_fit.valid`, no recovered-carrier claim.
+
+Canonical fixed export diagnostics under `diagnostics.marginal_fit`:
+
+- `valid`
+- `objective_start`
+- `objective_end`
+- `full_objective_initial`
+- `full_objective_final`
+- `grad_norm`
+- `eval_count`
+- `termination`
+- `closure_trace`
+
+`closure_trace` is actual LBFGS objective function evaluations. It is not a monotone accepted-iteration history.
+
+# 4. Manifests and expected outputs
+
+Fit manifests parse without loading clips. No data fit was run.
+
+| Fit manifest | Carrier | RPS key | K | SHA-256 | Future output |
+|---|---:|---|---:|---|---|
+| `docs/revised-phase-fit-manifest-dregon-c4-raw.json` | raw | `motors_command` | 130 | `408acecd2af7a9c64101b3ee2953ffb035933fd4ea12284ea0fbae17b4fc6841` | `results/revised_phase/c4_fixed/dregon_raw.json` |
+| `docs/revised-phase-fit-manifest-dregon-c4-refined.json` | refined | `rps_refined` | 130 | `7f35ce5b053fd210148a4ce2fcc89bec404a1ac65d7a9712a5ecebd916246651` | `results/revised_phase/c4_fixed/dregon_refined.json` |
+| `docs/revised-phase-fit-manifest-michaels-c4-raw.json` | raw | `rps` | 230 | `c0a7211a6d7e6eb89993a4d425b8774683eee4cd5591ae95f9f28f261fb43be9` | `results/revised_phase/c4_fixed/michaels_raw.json` |
+
+Both eval manifests preserve the frozen v2 protocol fingerprint:
+
+`a1ce5294ae1e17c525990b3531154eb6d7c4e71010ad50e0a2e76277f254d226`.
+
+| Eval manifest | DREGON arm | Michael arm | SHA-256 | Output dir |
+|---|---|---|---|---|
+| `docs/revised-phase-c4-fixed-raw-eval-v2.json` | `dregon_raw.json` | `michaels_raw.json` | `15c86df2a1132b7a52977effe9b95f51f41d3c5e7dd39038e167ad3196cdc3b9` | `results/revised_phase/c4_fixed/eval_raw_v2` |
+| `docs/revised-phase-c4-fixed-refined-eval-v2.json` | `dregon_refined.json` | `michaels_raw.json` | `b1255c441d323132f1f87e4f9f4426def347d8b525f329eb3814efd289f1f96f` | `results/revised_phase/c4_fixed/eval_refined_v2` |
+
+# 5. Frozen inputs, scores, and hashes already in artifacts
+
+Frozen protocol/data/checkpoint/calibration:
+
+| Item | Value |
+|---|---|
+| protocol fingerprint | `a1ce5294ae1e17c525990b3531154eb6d7c4e71010ad50e0a2e76277f254d226` |
+| calibration artifact | `omnirun-outputs/revised-phase-round2-v2--82591d/results/revised_phase/baseline_v2/calibration.json` |
+| calibration SHA-256 | `b0832ba9c5f8b5a290e0043ed7e396b63bf5cfe17710e09c59ce5143f3a1ac3c` |
+| HPP scorer | `hppnet_l2_r2_s0`, `best` |
+| HPP checkpoint SHA-256 | `6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1` |
+| DREGON dataset pin | `261b09971c8ace16e3434f4a89406c6043403f8ac89a3f1202566cb8c712ba89` |
+| Michael dataset pin | `8e9d149560dd5d5fa8aaa87e7ea537d7e4d96e829e874dab7d9c92621cca6e46` |
+| DREGON composite temperature | `5.192017220082491` |
+| Michael composite temperature | `15.214066879865468` |
+| DREGON PIT target | `1.897062542673336` |
+| DREGON LTAS baseline/tolerance | `2.136169143073238` / `0.05595793956082849` |
+| Michael MAE ratio gate | `E=(E_standby+E_ramp+E_cruise)/3`, `ratio=E_candidate/E_baseline <= 1.05`; baseline `3.026661398168452` |
+
+Prior C2 and C3 gate artifacts:
+
+| Round artifact | Overall | DREGON PIT mean candidate / target | DREGON composite delta | DREGON LTAS candidate | Michael gate ratio | Diagnostic per-regime ratios |
+|---|---:|---:|---:|---:|---:|---|
+| `omnirun-outputs/revised-phase-round2-v2--82591d/results/revised_phase/round2/eval_v2/gates.json` | fail | `9.347665728259988` / `1.897062542673336` | `-11474.552935701178` | `2.4230805972169502` | fail; `4.161924784806722` | diagnostic only: cruise `1.2316223434050422`, ramp `0.4393874978452157`, standby `105.14307827306017` |
+| `omnirun-outputs/revised-phase-c3-eval-733d43/results/revised_phase/c3/eval_v2/gates.json` | fail | `69.31143066855915` / `1.897062542673336` | `-10853.753018558247` | `2.4337617952979103` | pass; about `0.6257` | diagnostic only: cruise `1.362783915197165`, ramp `0.4217332138492895`, standby `4.019261956560474` |
+
+C3 Michael's pass is **historical generator/fixed-candidate evidence only**. It is not proof that the new fixed-carrier C4 Michael arm passes. The diagnostic per-regime ratios above are not individual gates; the gate is the ratio of equal-regime means, not the mean of ratios.
+
+# 6. Verification actually run in SMALL
+
+Initial focused suite command:
+
+```bash
+PYTHONPATH="$PWD/src:$PWD/scripts" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 HNS_TEST_THREADS=1 \
+  python -m pytest tests/experiments/test_stochastic_fit_revised_phase.py \
+  tests/experiments/test_stochastic_fit_revised_eval.py -q
+```
+
+Initial result: `102 passed, 2 skipped, 1 failed`. The failure was `test_scored_ltas_allows_0_99s_ramp_and_refuses_shorter`: source returned support span metadata but not the test's `scored_span_samples` key.
+
+Targeted fixes made:
+
+- Added `scored_span_samples` to `scripts/stochastic_fit_revised_eval.py::scored_ltas`.
+- Replaced fixed-carrier eval validation aliases with canonical Core keys.
+- Made fixed-carrier Core export avoid evaluating MAP-dependent diagnostics before popping them.
+- Replaced non-standard `NaN` gradient trace for the no-backward initial full-objective evaluation with JSON-safe `null`.
+- Added earned tests for fixed export contract, raw scoring/reference separation, eval-manifest protocol hash, and actual fixed fit/export/read/predict/render smoke.
+
+Targeted reruns:
+
+```bash
+PYTHONPATH="$PWD/src:$PWD/scripts" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 HNS_TEST_THREADS=1 \
+  python -m pytest tests/experiments/test_stochastic_fit_revised_eval.py::test_scored_ltas_allows_0_99s_ramp_and_refuses_shorter \
+  tests/experiments/test_stochastic_fit_revised_eval.py::test_fixed_carrier_marginal_export_contract_names_conditioning_track \
+  tests/experiments/test_stochastic_fit_revised_eval.py::test_refined_candidate_conditioning_keeps_raw_scoring_reference \
+  tests/experiments/test_stochastic_fit_revised_eval.py::test_fixed_carrier_eval_manifests_keep_the_frozen_v2_protocol_fingerprint -q
+```
+
+Result after one test-size correction: all selected tests passed.
+
+Toy smoke command:
+
+```bash
+PYTHONPATH="$PWD/src:$PWD/scripts" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 HNS_TEST_THREADS=1 \
+  python -m pytest tests/experiments/test_stochastic_fit_revised_phase.py::test_fixed_carrier_fit_export_read_predict_and_render_smoke -q
+```
+
+Result: `3 passed`. Covered DREGON raw, DREGON refined, and Michael raw. Each smoke fit used tiny synthetic clips, small FFT/hop/K, CPU thread caps, actual `fit_revised`, JSON export, `revised_eval.read_candidate_export`, `predict_spectrum`, and `render_revised`. Assertions observed:
+
+- exported `carrier_source` and `training_provenance.carrier_source` match the case;
+- D raw uses `motors_command`, D refined uses `rps_refined`, M raw uses `rps`;
+- fixed export contains no `diagnostics.map_state`, no `diagnostics.carrier_fit`, no `diagnostics.coarsening_sensitivity`, no `diagnostics.bias_vs_nu_mean_confounding`;
+- `parameters.bias_mean_hz` and all per-clip `parameters.bias_hz` are exact zero;
+- `diagnostics.marginal_fit.valid is True`;
+- `len(closure_trace) == eval_count`;
+- `read_candidate_export`, `predict_spectrum`, and `render_revised` produce finite outputs.
+
+Final focused suite rerun:
+
+```bash
+PYTHONPATH="$PWD/src:$PWD/scripts" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 HNS_TEST_THREADS=1 \
+  python -m pytest tests/experiments/test_stochastic_fit_revised_phase.py \
+  tests/experiments/test_stochastic_fit_revised_eval.py -q
+```
+
+Result: `108 passed, 2 skipped, 1 warning in 7.94s`. The warning is the existing stopped-rotor finite-render warning in `test_a_stopped_rotor_stays_finite_in_prediction_and_in_rendering`.
+
+Import provenance check:
+
+- `experiments`, `revised_phase`, `revised_eval`, `phase_kernel`, and `stage2` all resolved under the current SMALL worktree `src/`.
+- `sys.path_head` had current worktree `src` and `scripts` ahead of the shared environment.
+
+# 7. What is not verified
+
+- No production DREGON raw fit.
+- No production DREGON refined fit.
+- No production Michael raw fit.
+- No fixed-carrier eval against the frozen five-DREGON plus three-Michael-regime protocol.
+- No HPP scorer execution for fixed C4 candidates.
+- No real comparison of D raw vs D refined.
+- No proof that either D arm or M raw passes gates.
+- No transport fix.
+- No overall campaign pass.
+
+# 8. Do not resume these abandoned paths
+
+Do **not** resume carrier recovery or alternating recovery just because files still exist historically. Specifically do not revive:
+
+- C4 carrier recovery/preflight;
+- honest production moment preflight `python-e25ee9`, which **failed**; the earlier PASS used an invalid scalar `theta[0]` fixture and must not be reused as proof;
+- `alternating_conditional_map` as the active C4 plan;
+- fitted carrier delay or fitted bias as a shortcut;
+- MAP carrier trajectories as ground truth;
+- changing the HPP scoring reference from raw to refined;
+- fake `--check` success without future candidate export files;
+- heavy CPU work on the laptop;
+- `uv sync` in a shared worktree environment;
+- global omnirun daemon edits for this campaign.
+
+Historical C2/C3 readability is preserved. Old exports remain accepted by their own contracts. New fixed-carrier exports use the canonical fixed keys above; the eval reader no longer accepts brand-new aliases for those keys.
+
+# 9. If the user explicitly resumes C4 later
+
+First action is **not** another design round. First action is operational:
+
+1. Confirm the SMALL source commit and import provenance in the worktree that will submit.
+2. Time one full-gradient/full-frame fixed-carrier step remotely before choosing wall time.
+3. Run exactly the three fits already manifested:
+   - DREGON raw → `results/revised_phase/c4_fixed/dregon_raw.json`
+   - DREGON refined → `results/revised_phase/c4_fixed/dregon_refined.json`
+   - Michael raw → `results/revised_phase/c4_fixed/michaels_raw.json`
+4. Validate the three exports with the reader contract.
+5. Run the two eval manifests:
+   - raw D + M raw;
+   - refined D + M raw.
+6. Score all five DREGON recordings and all three Michael regimes against the unchanged raw scoring references.
+7. Show both D raw and D refined. If both D arms pass all D gates, select by lower held-out mean composite risk; if indistinguishable, prefer raw for simplicity.
+
+Constraints remain frozen:
+
+- at most eight revised candidate rounds;
+- simplicity first; add complexity only after a named acceptance failure; after any early pass, user preference is to spend remaining rounds simplifying while preserving the incumbent;
+- one seed unless uncertainty would change the decision and the user agrees;
+- fixed raw HPP scoring target;
+- no changed gates, calibration, checkpoint, data regime, split, or protocol;
+- no paid backend by default;
+- no heavy laptop CPU jobs;
+- source work happens inside a named worktree with that worktree's `src` first on `PYTHONPATH`.
+
+# 10. Transport note for a future runner
+
+The prior submission blockage was a transport limit, not a scientific constraint: Bottle's JSON body memory cap is `102400` bytes, so omnirun POST can fail with HTTP 413 even though the thin bundle cap is `16 MiB`.
+
+Non-destructive options if a future user-authorized runner needs remote execution:
+
+- use scoped existing-auth push of the relevant campaign branch, no force push, no auth modification; or
+- create a public-base `930e57` runtime-only single-commit thin submission branch whose source hash matches SMALL.
+
+In either code-transport path, stage large inputs via the existing R2 capsule pattern; the R2 input capsule is required **in addition to** code push/thin bundle, not an alternative fix for a large code bundle.
+
+This HTML handoff is committed in the latest HEAD and enlarges the checkout. A future thin runtime branch should omit generated docs; the actual source-code reference remains `fe075f2f53020f46f8a09256117e970251a0799b`.
+
+This is **not** a user push ban. It is also **not** authorization to edit daemon/global infrastructure.

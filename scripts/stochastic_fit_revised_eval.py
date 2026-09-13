@@ -53,6 +53,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -121,6 +122,74 @@ def checkpoint_record(experiment: str, ckpt: str) -> dict[str, Any]:
         sha256=hashlib.sha256(local.read_bytes()).hexdigest(),
     )
 
+def _load_env_file() -> None:
+    env = Path(".env")
+    if not env.exists():
+        return
+    for line in env.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            sys_key = key.strip().removeprefix("export ")
+            os.environ.setdefault(sys_key, value.strip().strip("'\""))
+
+
+def _download_s3_uri(uri: str, dest: Path) -> bytes:
+    """Download one small JSON artifact from Cloudflare R2/S3 URI."""
+    if not uri.startswith("s3://"):
+        die(f"candidate artifact URI must be s3://..., got {uri!r}")
+    bucket_key = uri.removeprefix("s3://")
+    bucket, _, key = bucket_key.partition("/")
+    if not bucket or not key:
+        die(f"candidate artifact URI is incomplete: {uri!r}")
+    _load_env_file()
+    import boto3
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        region_name="auto",
+    )
+    body = client.get_object(Bucket=bucket, Key=key)["Body"].read()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(body)
+    return body
+
+
+def ensure_candidate_artifacts(man: dict[str, Any]) -> list[dict[str, Any]]:
+    """Materialize per-rig candidate exports from pinned R2 records when absent."""
+    cand = dict(dict(man["arms"]).get("candidate") or {})
+    reject_candidate_guard_override(cand, context="arms.candidate")
+    artifacts = dict(man.get("candidate_artifacts") or {})
+    ensured: list[dict[str, Any]] = []
+    specs = {
+        str(rig): dict(spec)
+        for rig, spec in dict(cand.get("per_rig") or {}).items()
+        if isinstance(spec, dict) and spec.get("export")
+    }
+    if cand.get("export"):
+        specs.setdefault("candidate", cand)
+    for rig, spec in specs.items():
+        path = Path(str(spec["export"]))
+        expected = str(dict(artifacts.get(rig) or {}).get("sha256") or "")
+        uri = dict(artifacts.get(rig) or {}).get("r2_uri")
+        if path.is_file():
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        elif uri:
+            body = _download_s3_uri(str(uri), path)
+            digest = hashlib.sha256(body).hexdigest()
+            print(f"fetched {path} from {uri}", flush=True)
+        else:
+            die(f"candidate export {path} is missing and no candidate_artifacts.{rig}.r2_uri is set")
+        if expected and digest != expected:
+            die(f"candidate export {path} sha256 {digest} != expected {expected}")
+        ensured.append(dict(rig=rig, path=str(path), sha256=digest))
+    return ensured
+
+
+
 
 # ── the manifest and the frozen input record ────────────────────────────────
 
@@ -149,6 +218,30 @@ def load_manifest(path: Path) -> dict[str, Any]:
     man["gates"] = gates
     return man
 
+def training_guard_seconds(man: dict[str, Any]) -> float:
+    """Protocol-level symmetric fit-support guard, hashed with observations."""
+    obs = dict(require(man, "observation", str(man.get("_path", "manifest"))))
+    guard = float(require(obs, "training_guard_seconds", "observation"))
+    if not np.isfinite(guard) or guard < 0.0:
+        die(f"observation.training_guard_seconds must be finite and non-negative, got {guard!r}")
+    return guard
+
+
+def reject_candidate_guard_override(spec: dict[str, Any], *, context: str) -> None:
+    """Candidate arms may not redefine the protocol guard."""
+    if "training_guard_seconds" in spec:
+        die(
+            f"{context}: training_guard_seconds belongs in observation, not in the candidate arm"
+        )
+    for rig, rig_spec in dict(spec.get("per_rig") or {}).items():
+        if isinstance(rig_spec, dict) and "training_guard_seconds" in rig_spec:
+            die(
+                f"{context}.per_rig.{rig}: training_guard_seconds belongs in observation, "
+                "not in the candidate arm"
+            )
+
+
+
 
 def _canonical_manifest(man: dict[str, Any]) -> dict[str, Any]:
     """Deep copy with run-input and authoring keys removed.
@@ -157,12 +250,22 @@ def _canonical_manifest(man: dict[str, Any]) -> dict[str, Any]:
     observations, cohorts, baseline families, seeds — but excludes only the
     run inputs that change between --prepare and --check:
     ``arms.candidate``, ``candidate_arm_template``, ``out_dir``,
-    ``calibration_path``, and authoring/status/runtime keys.
+    ``calibration_path``, run/candidate artifact records, and
+    authoring/status/runtime keys.
     """
     import copy
 
     canon = copy.deepcopy(man)
-    for key in ("_digest", "_path", "status", "notes", "out_dir", "calibration_path"):
+    for key in (
+        "_digest",
+        "_path",
+        "status",
+        "notes",
+        "out_dir",
+        "calibration_path",
+        "calibration_input",
+        "candidate_artifacts",
+    ):
         canon.pop(key, None)
     arms = canon.get("arms")
     if isinstance(arms, dict) and "candidate" in arms:
@@ -248,7 +351,12 @@ def frozen_inputs(man: dict[str, Any], scorer: dict[str, Any]) -> dict[str, Any]
         exports=exports,
         datasets=datasets,
         observation=dict(
-            n_fft=RE.OBS_N_FFT, hop=RE.OBS_HOP, f_min=RE.OBS_F_MIN, f_max=RE.OBS_F_MAX, sr=RE.SR
+            n_fft=RE.OBS_N_FFT,
+            hop=RE.OBS_HOP,
+            f_min=RE.OBS_F_MIN,
+            f_max=RE.OBS_F_MAX,
+            sr=RE.SR,
+            training_guard_seconds=training_guard_seconds(man),
         ),
         rule=(
             "the frozen-manifest promise covers the referenced artifacts: manifest text, scorer "
@@ -356,15 +464,31 @@ class ArmModel:
                 model_family=self.candidate.model_family,
                 observation_law=(
                     "revised_phase.predict_spectrum(mode='prior'): the exact moving-window "
-                    "kernel, raw telemetry plus the learned bias law, m=0, full prior kernel"
+                    "kernel driven by the candidate conditioning rotor track selected by "
+                    "carrier_source; scoring remains against the cohort's frozen raw reference"
                 ),
                 candidate=self.candidate.provenance(),
-                identified=self.candidate.identified,
+                fit_contract=self.candidate.fit_contract,
             )
         return dict(model_family=self.kind, label=self.label)
 
+    def conditioning_rps_key(self, scoring_rps_key: str) -> str:
+        if self.kind == "revised" and self.candidate is not None:
+            source = self.candidate.carrier_source
+            if source == "refined":
+                return RE.REFINED_RPS_KEY
+            if source in (None, "raw"):
+                return RE.assert_raw_reference(scoring_rps_key)
+            die(f"arm {self.name}: unknown candidate carrier_source {source!r}")
+        return RE.assert_raw_reference(scoring_rps_key)
+
     def render(
-        self, reference_rps: np.ndarray, *, n_mics: int, seed: int
+        self,
+        reference_rps: np.ndarray,
+        *,
+        n_mics: int,
+        seed: int,
+        conditioning_rps: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
         """``(audio, physical_rps | None, diagnostics)`` at 16 kHz."""
         if self.kind == "legacy":
@@ -389,18 +513,21 @@ class ArmModel:
             )
         if self.kind == "revised":
             assert self.candidate is not None
+            carrier = reference_rps if conditioning_rps is None else conditioning_rps
             out = RP.render_revised(
                 self.candidate.summary,
-                reference_rps,
+                carrier,
                 sample_rate=RE.SR,
                 sample_rate_work=RE.SAMPLE_RATE_WORK,
                 n_mics=int(n_mics),
                 seed=int(seed),
             )
+            diag = dict(out.diagnostics)
+            diag["conditioning_carrier_source"] = self.candidate.carrier_source
             return (
                 np.asarray(out.audio, dtype=np.float64),
                 np.asarray(out.physical_rps, dtype=np.float64),
-                dict(out.diagnostics),
+                diag,
             )
         raise AssertionError(f"arm {self.name}: kind {self.kind!r} does not render")
 
@@ -425,6 +552,18 @@ class ArmModel:
         return None
 
 
+def _candidate_fit_manifest_sha(spec: dict[str, Any], *, context: str) -> str | None:
+    if spec.get("fit_manifest_sha256"):
+        return str(spec["fit_manifest_sha256"])
+    path = spec.get("fit_manifest") or spec.get("fit_manifest_path")
+    if path:
+        p = Path(str(path))
+        if not p.is_file():
+            die(f"{context}: fit manifest {p} is missing; cannot pin candidate provenance")
+        return str(RE.artifact_digest(p)["sha256"])
+    return None
+
+
 def _resolve_candidate_export(
     spec: dict[str, Any], rig: str | None, *, context: str
 ) -> tuple[str, str | None]:
@@ -439,10 +578,14 @@ def _resolve_candidate_export(
         if rig is None:
             die(f"{context}: per_rig candidate mapping requires a cohort rig")
         entry = dict(per_rig).get(rig)
-        if entry is None:
+        if not isinstance(entry, dict):
             die(f"{context}: no candidate export declared for rig {rig!r}")
-        return str(require(entry, "export", f"{context} rig {rig}")), entry.get("fit_manifest_sha256")
-    return str(require(spec, "export", context)), spec.get("fit_manifest_sha256")
+        entry = dict(entry)
+        return (
+            str(require(entry, "export", f"{context} rig {rig}")),
+            _candidate_fit_manifest_sha(entry, context=f"{context} rig {rig}"),
+        )
+    return str(require(spec, "export", context)), _candidate_fit_manifest_sha(spec, context=context)
 
 
 def arm_model(
@@ -549,11 +692,60 @@ def baseline_params(
     return mp
 
 
+def validate_explicit_windows(
+    cohort: dict[str, Any], regime_spec: dict[str, Any], windows: list[RE.Window]
+) -> list[dict[str, Any]]:
+    """Validate declared held-out windows against published raw support before scoring."""
+    if not windows:
+        return []
+    dataset, pinned = C.split_dataset(str(require(cohort, "dataset", f"cohort {cohort['name']}")))
+    version = cohort.get("version") or pinned
+    key = RE.assert_raw_reference(str(require(cohort, "scoring_rps_key", "cohort")))
+    min_rps = regime_spec.get("min_rps")
+    max_rps = regime_spec.get("max_rps")
+    out: list[dict[str, Any]] = []
+    for w in windows:
+        rec = C.load_recording(dataset, w.recording, version, key)
+        try:
+            native = rec.cut(w.start_s, w.duration_s, channels=cohort.get("channels"))
+        except ValueError as exc:
+            die(f"{w.key}: explicit window is outside published audio/RPS coverage: {exc}")
+        expected = int(round(float(w.duration_s) * float(rec.sr)))
+        if int(native.audio.shape[-1]) != expected:
+            die(f"{w.key}: expected {expected} native samples, got {native.audio.shape[-1]}")
+        rps = np.asarray(native.rps, dtype=np.float64)
+        if min_rps is not None and float(np.nanmin(rps)) < float(min_rps) - 1e-9:
+            die(f"{w.key}: explicit window drops below min_rps={float(min_rps):g}")
+        if max_rps is not None and float(np.nanmax(rps)) > float(max_rps) + 1e-9:
+            die(f"{w.key}: explicit window exceeds max_rps={float(max_rps):g}")
+        start_sample_f = (float(w.start_s) - float(rec.t_start)) * float(rec.sr)
+        start_sample = int(round(start_sample_f))
+        out.append(
+            dict(
+                window=w.key,
+                dataset=dataset,
+                resolved_version=version,
+                rps_key=key,
+                native_sample_rate=float(rec.sr),
+                native_start_sample=start_sample,
+                start_alignment_error_samples=float(start_sample_f - start_sample),
+                n_samples=int(native.audio.shape[-1]),
+                min_rps=float(np.nanmin(rps)),
+                max_rps=float(np.nanmax(rps)),
+            )
+        )
+    return out
+
+
 # ── window resolution ───────────────────────────────────────────────────────
 
 
 def resolve_windows(
-    cohort: dict[str, Any], regime_spec: dict[str, Any], calibration: list[RE.Window]
+    cohort: dict[str, Any],
+    regime_spec: dict[str, Any],
+    calibration: list[RE.Window],
+    *,
+    guard_seconds: float,
 ) -> tuple[list[RE.Window], list[dict[str, Any]]]:
     """Held-out windows plus the support report for every cohort recording.
 
@@ -575,8 +767,19 @@ def resolve_windows(
             )
             for w in ev.get("windows", [])
         ]
-        kept, reports = RE.check_explicit_windows(declared, regime=regime, calibration=calibration)
-        return kept, [r.as_dict() | dict(mode="explicit") for r in reports]
+        kept, explicit_reports = RE.check_explicit_windows(
+            declared, regime=regime, calibration=calibration, guard_seconds=guard_seconds
+        )
+        support = validate_explicit_windows(cohort, regime_spec, kept)
+        return kept, [
+            r.as_dict()
+            | dict(
+                mode="explicit",
+                training_guard_seconds=guard_seconds,
+                published_support=[s for s in support if s["window"].startswith(r.recording + "@")],
+            )
+            for r in explicit_reports
+        ]
     dataset, pinned = C.split_dataset(str(require(cohort, "dataset", f"cohort {cohort['name']}")))
     version = cohort.get("version") or pinned
     key = RE.assert_raw_reference(str(require(cohort, "scoring_rps_key", "cohort")))
@@ -596,6 +799,7 @@ def resolve_windows(
                 max_windows=int(ev.get("max_windows", 1)),
                 min_rps=regime_spec.get("min_rps"),
                 max_rps=regime_spec.get("max_rps"),
+                guard_seconds=guard_seconds,
             )
         elif mode == "auto":
             got, report = RE.resolve_evaluation_windows(
@@ -607,6 +811,7 @@ def resolve_windows(
                 max_windows=int(ev.get("max_windows", 1)),
                 min_rps=regime_spec.get("min_rps"),
                 max_rps=regime_spec.get("max_rps"),
+                guard_seconds=guard_seconds,
             )
         else:
             die(f"cohort {cohort['name']} regime {regime}: unknown evaluation mode {mode!r}")
@@ -657,27 +862,28 @@ class Tracker:
 def scored_ltas(
     real: np.ndarray, arm: np.ndarray, support: RE.RegimeSupport
 ) -> dict[str, Any] | None:
-    """Absolute-level LTAS on the LONGEST contiguous scored span, or ``None``.
-
-    The LTAS needs ONE complete 8192-point Welch window inside the scored
-    support; with the half-hop geometry that is ``>= LTAS_N`` samples, not
-    ``2 * LTAS_N``. Material shorter than one window has no LTAS, which is
-    reported rather than papered over with the surrounding context.
-    """
-    spans: list[tuple[int, int]] = []
-    m = np.asarray(support.sample_mask, dtype=bool)
-    padded = np.concatenate(([False], m, [False]))
-    edges = np.flatnonzero(np.diff(padded.astype(np.int8)))
-    for a, b in zip(edges[0::2], edges[1::2], strict=True):
-        spans.append((int(a), int(b)))
-    if not spans:
+    """Absolute-level LTAS on the LONGEST contiguous scored span, or ``None``."""
+    mask = np.asarray(support.sample_mask, dtype=bool)
+    n = min(mask.size, real.shape[-1], arm.shape[-1])
+    if n <= 0:
         return None
-    a, b = max(spans, key=lambda s: s[1] - s[0])
-    if (b - a) < LTAS_N:
+    mask = mask[:n]
+    if not bool(mask.any()):
         return None
-    out = RE.ltas_deviation_db(real[:, a:b], arm[:, a:b])
-    out["scored_span_samples"] = [a, b]
-    out["scored_span_seconds"] = float((b - a) / support.sr)
+    idx = np.flatnonzero(mask)
+    breaks = np.flatnonzero(np.diff(idx) > 1)
+    starts = np.r_[idx[0], idx[breaks + 1]]
+    stops = np.r_[idx[breaks] + 1, idx[-1] + 1]
+    lengths = stops - starts
+    j = int(np.argmax(lengths))
+    lo, hi = int(starts[j]), int(stops[j])
+    if hi - lo < LTAS_N:
+        return None
+    out = RE.ltas_deviation_db(real[:, lo:hi], arm[:, lo:hi])
+    out["scored_span_samples"] = [int(lo), int(hi)]
+    out["support_samples"] = int(hi - lo)
+    out["support_start_s"] = float(lo / RE.SR)
+    out["support_stop_s"] = float(hi / RE.SR)
     return out
 
 
@@ -703,11 +909,30 @@ def measure_window(
         channels=cohort.get("channels"),
         rps_key=key,
     )
+    loaded_by_rps_key: dict[str, Clip] = {key: clip}
     real_all = np.asarray(clip.audio, dtype=np.float64)
     mics = list(range(int(n_mics or real_all.shape[0])))
     real = real_all[: len(mics)]
     reference = np.asarray(clip.rps, dtype=np.float64)
     n_samples = int(real.shape[-1])
+
+    def conditioning_clip_for(rps_key: str) -> Clip:
+        if rps_key not in loaded_by_rps_key:
+            conditioned = RE.load_window(
+                window,
+                dataset=dataset,
+                version=cohort.get("version"),
+                channels=cohort.get("channels"),
+                rps_key=rps_key,
+            )
+            if int(conditioned.audio.shape[-1]) != n_samples:
+                die(
+                    f"{window.key}: conditioning track {rps_key!r} has "
+                    f"{conditioned.audio.shape[-1]} samples, raw scoring reference has {n_samples}"
+                )
+            loaded_by_rps_key[rps_key] = conditioned
+        return loaded_by_rps_key[rps_key]
+
     support = RE.regime_support(
         window,
         reference,
@@ -732,7 +957,10 @@ def measure_window(
         seed=int(seed),
         scoring_reference=dict(
             rps_key=key,
-            note="same raw telemetry array for every arm; reference agreement, not ground truth",
+            note=(
+                "frozen raw telemetry array for real/baseline/every candidate score; "
+                "candidate conditioning may use another declared track and is recorded per arm"
+            ),
             mean_rps=float(reference.mean()),
             per_rotor_mean_rps=[float(v) for v in reference.mean(axis=1)],
         ),
@@ -760,12 +988,34 @@ def measure_window(
         kind = str(spec["kind"])
         physical: np.ndarray | None = None
         diag: dict[str, Any] = {}
+        conditioning_key = key
         if kind == "real":
             audio = real
         else:
-            audio, physical, diag = model.render(reference, n_mics=len(mics), seed=int(seed))
+            conditioning_key = model.conditioning_rps_key(key)
+            conditioning_clip = conditioning_clip_for(conditioning_key)
+            conditioning_rps = np.asarray(conditioning_clip.rps, dtype=np.float64)
+            audio, physical, diag = model.render(
+                reference,
+                n_mics=len(mics),
+                seed=int(seed),
+                conditioning_rps=conditioning_rps,
+            )
             audio = audio[: len(mics)]
         entry: dict[str, Any] = dict(kind=kind, seed=int(seed), label=model.label, render=diag)
+        if kind != "real":
+            entry["conditioning_reference"] = dict(
+                rps_key=conditioning_key,
+                carrier_source=(
+                    model.candidate.carrier_source
+                    if model.kind == "revised" and model.candidate is not None
+                    else "raw"
+                ),
+                role=(
+                    "candidate expected PSD/rendering input; scoring reference remains "
+                    "row.scoring_reference.rps_key"
+                ),
+            )
         t0 = time.time()
         entry["pit"] = tracker.pit(
             audio,
@@ -796,7 +1046,12 @@ def measure_window(
                 eps_excluded=diag.get("eps_in_physical_rps"),
             )
         if want_spectrum and str(spec["kind"]) != "real" and bool(frame_keep.any()):
-            m = model.spectrum(scored_clip, n_mics=len(mics))
+            spectrum_clip = (
+                conditioning_clip_for(model.conditioning_rps_key(key))
+                if model.kind == "revised"
+                else scored_clip
+            )
+            m = model.spectrum(spectrum_clip, n_mics=len(mics))
             if m is not None:
                 power = np.asarray(pg.power, dtype=np.float64)[: len(mics)]
                 if m.shape != power.shape:
@@ -893,7 +1148,7 @@ def composite_per_window(rows: list[dict[str, Any]], arm: str) -> dict[str, floa
 # ── modes ───────────────────────────────────────────────────────────────────
 
 
-def cohort_plan(cohort: dict[str, Any]) -> dict[str, Any]:
+def cohort_plan(cohort: dict[str, Any], *, guard_seconds: float) -> dict[str, Any]:
     """Cohort, supports and family eligibility — no scoring, no rendering."""
     name = str(require(cohort, "name", "cohort"))
     plan: dict[str, Any] = dict(
@@ -910,7 +1165,9 @@ def cohort_plan(cohort: dict[str, Any]) -> dict[str, Any]:
         regime = str(regime_spec["regime"])
         bundles = cohort_families(cohort, regime)
         calibration = [w for b in bundles.values() for w in b.calibration_windows()]
-        windows, reports = resolve_windows(cohort, regime_spec, calibration)
+        windows, reports = resolve_windows(
+            cohort, regime_spec, calibration, guard_seconds=guard_seconds
+        )
         plan["regimes"][regime] = dict(
             families={f: b.provenance() for f, b in bundles.items()},
             coverage={
@@ -1018,11 +1275,16 @@ def run_plan(man: dict[str, Any], out: Path, *, provenance: dict[str, Any] | Non
         manifest=dict(path=man["_path"], sha256=man["_digest"]),
         import_provenance=provenance,
         observation=dict(
-            n_fft=RE.OBS_N_FFT, hop=RE.OBS_HOP, f_min=RE.OBS_F_MIN, f_max=RE.OBS_F_MAX, sr=RE.SR
+            n_fft=RE.OBS_N_FFT,
+            hop=RE.OBS_HOP,
+            f_min=RE.OBS_F_MIN,
+            f_max=RE.OBS_F_MAX,
+            sr=RE.SR,
+            training_guard_seconds=training_guard_seconds(man),
         ),
         gates=man["gates"],
         caveat=RE.ADAPTIVE_SELECTION_CAVEAT,
-        cohorts=[cohort_plan(c) for c in man["cohorts"]],
+        cohorts=[cohort_plan(c, guard_seconds=training_guard_seconds(man)) for c in man["cohorts"]],
     )
     RE.write_json(out / "plan.json", payload)
     for c in payload["cohorts"]:
@@ -1159,6 +1421,7 @@ def run_prepare(
     if len(seeds) < 2:
         die("null_variation.seeds must hold at least two baseline render seeds")
     baseline_spec = dict(require(dict(man["arms"]), "baseline", "arms"))
+    guard_seconds = training_guard_seconds(man)
     record: dict[str, Any] = dict(
         mode="prepare",
         schema=RE.SCHEMA,
@@ -1184,7 +1447,7 @@ def run_prepare(
     for cohort in man["cohorts"]:
         name = str(cohort["name"])
         bundles_by_regime = all_families(cohort)
-        cres: dict[str, Any] = dict(plan=cohort_plan(cohort), regimes={})
+        cres: dict[str, Any] = dict(plan=cohort_plan(cohort, guard_seconds=guard_seconds), regimes={})
         temp_config = dict(man.get("composite_temperature") or {})
         temp_master = temp_config.get("master_seed")
         temp_B = temp_config.get("B")
@@ -1202,7 +1465,9 @@ def run_prepare(
                 require(dict(regime_spec), "family", f"{name}:{regime}")
             )
             calibration = [w for b in bundles.values() for w in b.calibration_windows()]
-            windows, reports = resolve_windows(cohort, regime_spec, calibration)
+            windows, reports = resolve_windows(
+                cohort, regime_spec, calibration, guard_seconds=guard_seconds
+            )
 
             for w in calibration:
                 if w.key not in all_mp_for_window:
@@ -1428,6 +1693,7 @@ def candidate_leakage_guard(
     *,
     cohort_name: str,
     rig: str | None = None,
+    guard_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Refuse a candidate whose fit supports touch a scored support.
 
@@ -1438,8 +1704,9 @@ def candidate_leakage_guard(
     windows in the manifest; an undeclared one is refused rather than assumed
     clean.
     """
+    reject_candidate_guard_override(cand_spec, context=f"cohort {cohort_name} candidate")
     kind = str(cand_spec.get("kind"))
-    guard = float(cand_spec.get("training_guard_seconds", RE.OBS_N_FFT / RE.SR))
+    guard = float(RE.OBS_N_FFT / RE.SR if guard_seconds is None else guard_seconds)
     if kind == "revised_export":
         export_path, expected_sha = _resolve_candidate_export(
             cand_spec, rig, context=f"cohort {cohort_name} candidate"
@@ -1503,14 +1770,15 @@ def candidate_leakage_guard(
 def run_check(
     man: dict[str, Any], out: Path, *, n_mics: int | None, provenance: dict[str, Any] | None = None
 ) -> int:
-    cal_path = out / "calibration.json"
+    cal_path = Path(man.get("calibration_path") or (out / "calibration.json"))
     if not cal_path.is_file():
-        die(f"{cal_path} not found — run --prepare first; --check never invents a calibration")
+        die(f"{cal_path} not found — --check never invents a calibration")
     cal = json.loads(cal_path.read_text())
     arms = dict(man["arms"])
     if "candidate" not in arms:
         die("manifest has no 'candidate' arm: nothing to check")
     cand_spec = dict(arms["candidate"])
+    candidate_artifacts = ensure_candidate_artifacts(man)
     tracker = Tracker(dict(man["scorer"]))
     now = frozen_inputs(man, tracker.record)
     verify_frozen_inputs(now, dict(cal.get("frozen_inputs") or {}))
@@ -1533,6 +1801,7 @@ def run_check(
         render_seeds=seeds,
         caveat=RE.ADAPTIVE_SELECTION_CAVEAT,
         cohorts={},
+        candidate_artifacts=candidate_artifacts,
     )
     gates: list[RE.Gate] = []
     for cohort in man["cohorts"]:
@@ -1563,9 +1832,14 @@ def run_check(
             calibration = [
                 w for b in bundles_by_regime[regime].values() for w in b.calibration_windows()
             ]
-            windows, reports = resolve_windows(cohort, regime_spec, calibration)
+            guard_seconds = training_guard_seconds(man)
+            windows, reports = resolve_windows(
+                cohort, regime_spec, calibration, guard_seconds=guard_seconds
+            )
             all_reports.extend(reports)
-            leakage = candidate_leakage_guard(cand_spec, windows, cohort_name=name, rig=rig)
+            leakage = candidate_leakage_guard(
+                cand_spec, windows, cohort_name=name, rig=rig, guard_seconds=guard_seconds
+            )
 
             def model_for(
                 arm: str, spec: dict[str, Any], w: RE.Window, _r: str = regime
@@ -1752,6 +2026,7 @@ def run_verify_adapter(
     two disjoint seed halves of the SAME parameters give the Monte-Carlo floor
     the agreement must be read against.
     """
+    guard_seconds = training_guard_seconds(man)
     rows: list[dict[str, Any]] = []
     for cohort in man["cohorts"]:
         bundles_by_regime = all_families(cohort)
@@ -1759,7 +2034,7 @@ def run_verify_adapter(
             regime = str(regime_spec["regime"])
             bundles = bundles_by_regime[regime]
             calibration = [w for b in bundles.values() for w in b.calibration_windows()]
-            windows, _ = resolve_windows(cohort, regime_spec, calibration)
+            windows, _ = resolve_windows(cohort, regime_spec, calibration, guard_seconds=guard_seconds)
             for family in bundles:
                 for w in windows[:1]:
                     mp = baseline_params(

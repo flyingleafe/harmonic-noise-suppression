@@ -19,7 +19,9 @@ continuity that the removed whole-frame order mask destroyed.
 from __future__ import annotations
 
 import math
+import json
 from itertools import combinations
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -480,6 +482,132 @@ def _tiny_fit_config(**kw) -> RP.FitConfig:
     )
     base.update(kw)
     return RP.FitConfig(**base)  # type: ignore[arg-type]
+
+def _line_clip(
+    clip_id: str,
+    *,
+    rps: np.ndarray,
+    profile_db: float,
+    n_fft: int,
+    hop: int,
+    floor_std: float,
+    seed: int,
+) -> Clip:
+    """One observed harmonic whose carrier follows ``rps`` exactly."""
+    rng = np.random.default_rng(seed)
+    n = int(rps.size)
+    phase = 2.0 * np.pi * np.cumsum(rps.astype(np.float64)) / SR
+    audio = rng.standard_normal((1, n)) * floor_std
+    audio[0] += math.sqrt(2.0 * 10.0 ** (profile_db / 10.0)) * np.cos(phase + 0.17)
+    return Clip(clip_id, "synthetic", audio.astype(np.float32), rps[None], SR, rps[None].copy(), {})
+
+
+def test_initialization_keeps_quiet_and_loud_clip_floors_separate():
+    """A quiet standby clip must not be initialized against a pooled cruise floor."""
+    n_fft, hop, n_frames = 512, 256, 5
+    n = n_fft + (n_frames - 1) * hop
+    quiet = _line_clip(
+        "quiet",
+        rps=np.full(n, 80.0),
+        profile_db=-48.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-7,
+        seed=21,
+    )
+    loud = _line_clip(
+        "loud",
+        rps=np.full(n, 80.0),
+        profile_db=-18.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-3,
+        seed=22,
+    )
+    model = RP._RevisedModel(  # type: ignore[attr-defined]
+        [(quiet.clip_id, quiet), (loud.clip_id, loud)],
+        dynamics=RP.ShaftDynamics(lam=6.0, sigma=1.0, d_init=1.0, identified=False, diagnostics={}),
+        config=_tiny_fit_config(n_fft=n_fft, hop=hop, k_cap=2, iters=1, training_recipe=RP.STAGE1_LADDER_RECIPE),
+        observe=True,
+    )
+
+    clips = model.initialization_diagnostics["floor"]["clips"]
+    q = clips["quiet"]["floor_db_p20_plus_6p5_band_median"]
+    l = clips["loud"]["floor_db_p20_plus_6p5_band_median"]
+    assert l - q > 50.0
+    assert model.initialization_diagnostics["harmonic_seed"]["line_floor_db"][0][0] > 20.0
+
+
+def test_initialization_integrates_fractional_moving_harmonic_energy_in_physical_units():
+    """Fractional and moving line energy is integrated, not treated as floor."""
+    n_fft, hop, n_frames = 512, 256, 5
+    n = n_fft + (n_frames - 1) * hop
+    t = np.arange(n, dtype=np.float64) / SR
+    rps = 125.0 + 20.0 * np.sin(2.0 * np.pi * t / t[-1])
+    clip = _line_clip(
+        "moving",
+        rps=rps,
+        profile_db=-24.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-5,
+        seed=23,
+    )
+    model = RP._RevisedModel(  # type: ignore[attr-defined]
+        [(clip.clip_id, clip)],
+        dynamics=RP.ShaftDynamics(lam=6.0, sigma=1.0, d_init=1.0, identified=False, diagnostics={}),
+        config=_tiny_fit_config(n_fft=n_fft, hop=hop, k_cap=3, iters=1, training_recipe=RP.STAGE1_LADDER_RECIPE),
+        observe=True,
+    )
+
+    profile = float(model.profile_db.detach().cpu().numpy()[0, 0])
+    expected = -24.0 - RP.AMP_EXP_INIT * 10.0 * math.log10(float(np.mean(rps)) / RP.AMP_RPS_REF)
+    assert profile == pytest.approx(expected, abs=6.0)
+    assert model.initialization_diagnostics["harmonic_seed"]["line_floor_db"][0][0] > 20.0
+    assert "P_meansquare = 2" in model.initialization_diagnostics["harmonic_seed"]["units"]
+
+
+def test_band_energy_ladder_exports_full_k_and_rung_trace():
+    """The temporary active-order ladder must end with a full-K export."""
+    n_fft, hop, n_frames = 64, 32, 3
+    n = n_fft + (n_frames - 1) * hop
+    clip = _line_clip(
+        "ladder",
+        rps=np.full(n, 80.0),
+        profile_db=-24.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-4,
+        seed=24,
+    )
+    cfg = _tiny_fit_config(
+        n_fft=n_fft,
+        hop=hop,
+        k_cap=17,
+        iters=1,
+        lr=1e-3,
+        carrier_iters=1,
+        carrier_lr=1e-3,
+        frame_chunk=1,
+        harmonic_chunk=None,
+        training_recipe=RP.STAGE1_LADDER_RECIPE,
+    )
+    export = RP.fit_revised(
+        [(clip.clip_id, clip)],
+        rig_id="bench",
+        dynamics=RP.ShaftDynamics(lam=6.0, sigma=1.0, d_init=1.0, identified=False, diagnostics={}),
+        config=cfg,
+    )
+
+    assert export["training_recipe"] == "band_energy_ladder"
+    assert len(export["parameters"]["profile_db"][0]) == 17
+    trace = export["diagnostics"]["marginal_fit"]["rung_trace"]
+    assert [r["active_k"] for r in trace] == [16, 17]
+    assert export["training_provenance"]["optimizer"]["rung_schedule"] == [
+        {"active_k": 16, "iterations": 40},
+        {"active_k": 17, "iterations": 40},
+    ]
+    assert trace[-1]["newly_active_seed"]["orders"] == [17, 17]
 
 
 def test_the_map_state_recovers_a_planted_shaft_path():
@@ -1527,3 +1655,211 @@ def test_the_harmonic_chunk_is_a_memory_device_only():
     whole = RP.predict_spectrum(_with_harmonic_chunk(export, None), clip, n_fft=256, hop=128)
     chunked = RP.predict_spectrum(_with_harmonic_chunk(export, 1), clip, n_fft=256, hop=128)
     assert np.allclose(whole, chunked, rtol=1e-10)
+
+
+def test_backtracking_accepts_only_a_full_objective_decrease():
+    p = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float64))
+    named = {"p": p}
+    before = RP._snapshot_parameters(named)
+    with torch.no_grad():
+        p.fill_(4.0)  # full proposal makes (p-1)^2 worse than at p=0
+    proposed = RP._snapshot_parameters(named)
+
+    accepted, value, step, backtracks = RP._backtrack_segment(
+        named,
+        before,
+        proposed,
+        before_objective=1.0,
+        objective=lambda: float((p - 1.0).square().item()),
+        max_halvings=4,
+    )
+
+    assert accepted
+    assert step == pytest.approx(0.25)
+    assert backtracks == 2
+    assert value < 1.0
+    assert p.item() == pytest.approx(1.0)
+
+
+def test_backtracking_restores_the_block_when_every_half_step_fails():
+    p = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float64))
+    named = {"p": p}
+    before = RP._snapshot_parameters(named)
+    with torch.no_grad():
+        p.fill_(8.0)
+    proposed = RP._snapshot_parameters(named)
+
+    accepted, value, step, backtracks = RP._backtrack_segment(
+        named,
+        before,
+        proposed,
+        before_objective=0.0,
+        objective=lambda: float((p - 1.0).square().item()),
+        max_halvings=4,
+    )
+
+    assert not accepted
+    assert value == 0.0
+    assert step == 0.0 and backtracks == 4
+    assert p.item() == pytest.approx(0.0)
+
+def test_alternating_fit_exports_fixed_hyperparams_and_history():
+    n = 256 + 2 * 128
+    clip = _planted_clip(theta=np.zeros(n), n_frames=3, seed=11)
+    cfg = _tiny_fit_config(
+        fit_method="alternating_conditional_map",
+        training_recipe="full",
+        fixed_lambda=6.0,
+        fixed_sigma=3.10117415072719,
+        initial_d=2.0 * math.pi * 13.07,
+        alternating_cycles=1,
+        alternating_block_iters=1,
+        alternating_lr=0.001,
+        alternating_backtracks=2,
+        frames_per_step=1,
+        iters=1,
+    )
+    export = RP.fit_revised(
+        [(clip.clip_id, clip)],
+        rig_id="dregon",
+        dynamics=RP.ShaftDynamics(
+            lam=99.0, sigma=99.0, d_init=999.0, identified=True, diagnostics={}
+        ),
+        config=cfg,
+    )
+
+    assert export["fit_method"] == "alternating_conditional_map"
+    assert export["parameters"]["lam"] == pytest.approx(6.0)
+    assert export["parameters"]["sigma"] == pytest.approx(3.10117415072719)
+    alt = export["diagnostics"]["alternating_conditional_map"]
+    assert alt["valid"] and len(alt["objective_history"]) == 2
+    assert alt["loss_trace"][0] == pytest.approx(
+        export["diagnostics"]["initial_full_objective_after_reset"]
+    )
+    assert np.all(np.diff(np.asarray(alt["loss_trace"], dtype=float)) <= 1e-9)
+
+
+
+def test_alternating_contract_history_is_full_objective_monotone(tmp_path: Path):
+    export = _tiny_export(profile_db=(0.0, -3.0), n_mics=1, bias_mean_hz=0.0)
+    export["fit_method"] = "alternating_conditional_map"
+    export["lambda_source"] = "fixed_reference"
+    export["shared_phase_evidence"] = "not_identified_by_marginal_score"
+    export["diagnostics"]["alternating_conditional_map"] = {
+        "valid": True,
+        "loss_trace": [10.0, 9.0, 9.0],
+        "objective_history": [
+            {
+                "cycle": 1,
+                "block": "carrier",
+                "full_objective_before": 10.0,
+                "full_objective_after": 9.0,
+                "accepted": True,
+                "accepted_step": 0.5,
+            },
+            {
+                "cycle": 1,
+                "block": "spectral",
+                "full_objective_before": 9.0,
+                "full_objective_after": 9.0,
+                "accepted": False,
+                "accepted_step": 0.0,
+            },
+        ],
+    }
+    export["diagnostics"]["fixed_ou_hyperparameters"] = {
+        "lambda_": 6.0,
+        "sigma": 3.10117415072719,
+        "provenance": "test",
+    }
+    path = tmp_path / "alt.json"
+    path.write_text(json.dumps(export))
+
+    from experiments.stochastic_fit import revised_eval as RE
+
+    assert RE.read_candidate_export(path).fit_contract["fit_method"] == "alternating_conditional_map"
+
+    export["diagnostics"]["alternating_conditional_map"]["loss_trace"] = [10.0, 11.0]
+    path.write_text(json.dumps(export))
+    with pytest.raises(ValueError, match="non-increasing full objective"):
+        RE.read_candidate_export(path)
+
+
+@pytest.mark.parametrize(
+    ("rig_id", "carrier_source", "rps_key"),
+    [
+        ("dregon", "raw", "motors_command"),
+        ("dregon", "refined", "rps_refined"),
+        ("michaels", "raw", "rps"),
+    ],
+)
+def test_fixed_carrier_fit_export_read_predict_and_render_smoke(
+    tmp_path: Path, rig_id: str, carrier_source: str, rps_key: str
+) -> None:
+    n_fft, hop, n_frames = 64, 32, 2
+    n = n_fft + (n_frames - 1) * hop
+    clip = _line_clip(
+        f"{rig_id}_{carrier_source}",
+        rps=np.full(n, 70.0),
+        profile_db=-18.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-3,
+        seed=37,
+    )
+    clip.meta.update(
+        dataset="toy",
+        recording_id=f"{rig_id}_toy",
+        start_s=0.0,
+        duration_s=n / SR,
+        channels=[0],
+        rps_key=rps_key,
+    )
+    cfg = _tiny_fit_config(
+        n_fft=n_fft,
+        hop=hop,
+        fit_method="fixed_carrier_marginal",
+        training_recipe="full",
+        iters=1,
+        frame_chunk=1,
+        harmonic_chunk=None,
+        lbfgs_max_iter=2,
+        lbfgs_max_eval=4,
+        lbfgs_history_size=2,
+        lbfgs_line_search="strong_wolfe",
+        frames_per_step=None,
+        carrier_source=carrier_source,
+        provenance={"carrier_source": carrier_source, "regimes": {clip.clip_id: "toy"}, "rps_key": rps_key},
+    )
+    export = RP.fit_revised(
+        [(clip.clip_id, clip)],
+        rig_id=rig_id,
+        dynamics=RP.ShaftDynamics(lam=6.0, sigma=1.0, d_init=1.0, identified=True, diagnostics={}),
+        config=cfg,
+    )
+    assert export["fit_method"] == "fixed_carrier_marginal"
+    assert export["carrier_source"] == carrier_source
+    assert export["training_provenance"]["carrier_source"] == carrier_source
+    assert export["training_provenance"]["clips"][0]["rps_key"] == rps_key
+    assert "map_state" not in export["diagnostics"]
+    assert "carrier_fit" not in export["diagnostics"]
+    assert "coarsening_sensitivity" not in export["diagnostics"]
+    assert "bias_vs_nu_mean_confounding" not in export["diagnostics"]
+    assert np.all(np.asarray(export["parameters"]["bias_mean_hz"], dtype=float) == 0.0)
+    assert np.all(np.asarray(export["parameters"]["bias_hz"][clip.clip_id], dtype=float) == 0.0)
+    fit = export["diagnostics"]["marginal_fit"]
+    assert fit["valid"] is True
+    assert len(fit["closure_trace"]) == fit["eval_count"]
+
+    path = tmp_path / "fixed.json"
+    path.write_text(json.dumps(export))
+    from experiments.stochastic_fit import revised_eval as RE
+
+    read = RE.read_candidate_export(path)
+    assert read.provenance()["carrier_source"] == carrier_source
+    pred = RP.predict_spectrum(read.summary, clip, n_fft=n_fft, hop=hop)
+    rendered = RP.render_revised(read.summary, clip.rps, n_mics=1, seed=3)
+    assert pred.shape == (1, n_frames, n_fft // 2 + 1)
+    assert np.isfinite(pred).all()
+    assert rendered.audio.shape == (1, n)
+    assert np.isfinite(rendered.audio).all()

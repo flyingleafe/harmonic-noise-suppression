@@ -1,16 +1,12 @@
 {
   "schema": "revised-phase-fit/1",
-  "status": "AUTHORIZED C3 DREGON training manifest — round 3 fitting-only correction",
+  "status": "AUTHORIZED C4 DREGON fixed-carrier marginal training manifest \u2014 raw carrier",
   "notes": [
-    "Per-rig fit manifest for scripts/stochastic_fit_revised.py --rig dregon.",
-    "Calibrated composite temperature T = J/H = 5.192017220082491 from baseline_v1/calibration.json.",
-    "Front end: n_fft=16384, hop=1024, sr=16000, work grid 64000, band [30,7900] Hz.",
-    "Exactly the five room2 pure-noise cruise recordings used in results/S2/dregon_room2_cruise_refined.json; raw 16 s supports unchanged.",
-    "Raw telemetry track motors_command; no rps_refined, no held-out room1 leak.",
-    "Dataset pin: DREGON-frames = 261b09971c8ace16e3434f4a89406c6043403f8ac89a3f1202566cb8c712ba89.",
-    "Optimizer proposal from measured warm GPU smoke python-af021d: first 7.927 s, warm 2.367/2.364 s, 3.929 GB at K230 R4 M8 harmonic_chunk=8.",
-    "C3 fit budget: stage-1 band-energy ladder uses active orders 16/48/fullK for 40/40/120 Adam iterations at lr 0.1; stage-2 carrier-only Adam 40 iterations lr 0.05; frames_per_step=1 per clip, frame_chunk=1, harmonic_chunk=8, seed 0.",
-    "C2 fixes lambda=6 s^-1 as a reference assumption, initializes sigma=1 rad/s, fits sigma and scalar D in stage 1, and reports shared_phase_evidence=not_identified_by_marginal_score."
+    "AUTHORIZED C4 DREGON fixed_carrier_marginal fit manifest (raw carrier).",
+    "Supersedes C4 carrier recovery/alternation: supplied carrier is fixed; shared OU and independent Wiener phase are marginalized.",
+    "Optimizer: deterministic torch LBFGS strong_wolfe, max_iter=20, max_eval=30, history_size=10, full training frames, all K active from the first objective.",
+    "Warm start loads C3 global P/F/q/mic/sigma/D only; bias and MAP/state fields are skipped; exported bias fields remain exact zero for compatibility.",
+    "Canonical runner output: results/revised_phase/c4_fixed/dregon_raw.json."
   ],
   "front_end": {
     "sr": 16000,
@@ -26,16 +22,16 @@
     "rate_hz": 500.0
   },
   "optimizer": {
-    "algorithm": "Adam",
-    "iters": 120,
-    "lr": 0.1,
-    "carrier_iters": 40,
-    "carrier_lr": 0.05,
+    "algorithm": "LBFGS",
+    "iters": 20,
+    "lr": 1.0,
+    "carrier_iters": null,
+    "carrier_lr": null,
     "seed": 0,
     "frame_chunk": 1,
-    "frames_per_step": 1,
-    "frames_per_step_scope": "per_clip",
-    "training_recipe": "band_energy_ladder",
+    "frames_per_step": null,
+    "frames_per_step_scope": "full_training_frame_set",
+    "training_recipe": "full",
     "atom_dtype": "float32",
     "harmonic_chunk": 8,
     "warm_gpu_measurement": {
@@ -50,7 +46,17 @@
         2.364
       ],
       "peak_gb": 3.929
-    }
+    },
+    "fit_method": "fixed_carrier_marginal",
+    "warm_start_export": "results/revised_phase/c3/dregon.json",
+    "warm_start_export_sha256": "5d232ed9760b000a39583c54c8f9d9ee5e5baccfbedec2d63c5f6d5615956831",
+    "fixed_lambda": 6.0,
+    "lbfgs_max_iter": 20,
+    "lbfgs_max_eval": 30,
+    "lbfgs_history_size": 10,
+    "lbfgs_line_search": "strong_wolfe",
+    "fixed_sigma": 3.10117415072719,
+    "initial_d": 82.1212319648372
   },
   "composite": {
     "temperature": 5.192017220082491
@@ -140,5 +146,6 @@
     "recordings": [
       "free-flight_nosource_room1"
     ]
-  }
+  },
+  "carrier_source": "raw"
 }

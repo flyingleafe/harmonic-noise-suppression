@@ -349,6 +349,26 @@ class Window:
             key=self.key,
         )
 
+def widened_training_window(window: Window, guard_seconds: float) -> Window:
+    """The one shared symmetric fit-support guard used by prepare/check paths."""
+    guard = float(guard_seconds)
+    if guard < 0.0:
+        raise ValueError(f"training guard must be non-negative, got {guard_seconds!r}")
+    return Window(
+        window.recording,
+        float(window.start_s) - guard,
+        float(window.duration_s) + 2.0 * guard,
+        regime=window.regime,
+        role=window.role,
+    )
+
+
+def overlaps_guarded_training(scored: Window, training: Window, *, guard_seconds: float) -> bool:
+    """Does ``scored`` touch the symmetrically guarded training support?"""
+    return scored.overlaps(widened_training_window(training, guard_seconds))
+
+
+
 
 def union_seconds(windows: Sequence[Window]) -> float:
     """Seconds of UNIQUE material covered, per recording and summed.
@@ -421,14 +441,16 @@ def resolve_evaluation_windows(
     max_windows: int = 1,
     min_rps: float | None = None,
     max_rps: float | None = None,
+    guard_seconds: float = 0.0,
 ) -> tuple[list[Window], SupportReport]:
-    """Held-out windows of one recording, disjoint from its fit supports.
+    """Held-out windows of one recording, disjoint from its guarded fit supports.
 
     The fit supports are training/calibration material, so a predictive number
-    may only be read on what is left. A recording that cannot supply
-    ``max_windows`` x ``min_seconds`` of disjoint in-regime material inside its
-    label coverage is REPORTED as insufficient — the caller never receives a
-    padded, repeated or cycled window.
+    may only be read on what is left after the shared symmetric
+    ``guard_seconds`` margin. A recording that cannot supply ``max_windows`` x
+    ``min_seconds`` of disjoint in-regime material inside its label coverage is
+    REPORTED as insufficient — the caller never receives a padded, repeated or
+    cycled window.
     """
     found = C.windows(
         rec,
@@ -443,8 +465,8 @@ def resolve_evaluation_windows(
         Window(rec.recording_id, float(t0), float(dur), regime=regime, role="evaluation")
         for t0, dur in found
     ]
-    dropped = [w.key for w in candidates if any(w.overlaps(c) for c in cal)]
-    disjoint = [w for w in candidates if not any(w.overlaps(c) for c in cal)]
+    dropped = [w.key for w in candidates if any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
+    disjoint = [w for w in candidates if not any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
     kept = disjoint[: max(int(max_windows), 0)]
     note = ""
     if len(kept) < int(max_windows):
@@ -509,6 +531,7 @@ def resolve_support_windows(
     max_windows: int = 1,
     min_rps: float | None = None,
     max_rps: float | None = None,
+    guard_seconds: float = 0.0,
 ) -> tuple[list[Window], SupportReport]:
     """CONTEXT windows around a regime whose support is SHORTER than a window.
 
@@ -522,8 +545,8 @@ def resolve_support_windows(
     scored material may not.
 
     A context window is kept only when it lies inside the label coverage and
-    its scored interval is disjoint from every fit support. Everything that
-    cannot be supplied is reported, never padded.
+    its scored interval is disjoint from every guarded fit support. Everything
+    that cannot be supplied is reported, never padded.
     """
     lo, hi = rec.coverage
     cal = [w for w in calibration if w.recording == rec.recording_id]
@@ -544,7 +567,7 @@ def resolve_support_windows(
             rec.recording_id, float(start), float(context_seconds), regime=regime, role="evaluation"
         )
         support = Window(rec.recording_id, float(a), float(b - a), regime=regime)
-        if any(support.overlaps(c) for c in cal):
+        if any(overlaps_guarded_training(support, c, guard_seconds=guard_seconds) for c in cal):
             dropped.append(f"{support.key}:fit-support")
             continue
         if any(w.overlaps(k) for k in kept):
@@ -581,15 +604,16 @@ def check_explicit_windows(
     regime: str,
     calibration: Sequence[Window],
     requested: int | None = None,
+    guard_seconds: float = 0.0,
 ) -> tuple[list[Window], list[SupportReport]]:
-    """The same guard for manifest-declared windows: drop overlaps, report them."""
+    """The same guarded training-support rule for manifest-declared windows."""
     reports: list[SupportReport] = []
     kept: list[Window] = []
     for rid in sorted({w.recording for w in windows}):
         mine = [w for w in windows if w.recording == rid]
         cal = [w for w in calibration if w.recording == rid]
-        bad = [w for w in mine if any(w.overlaps(c) for c in cal)]
-        good = [w for w in mine if not any(w.overlaps(c) for c in cal)]
+        bad = [w for w in mine if any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
+        good = [w for w in mine if not any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
         want = int(requested if requested is not None else len(mine))
         kept.extend(good)
         reports.append(
@@ -813,10 +837,25 @@ class CandidateExport:
         return int(np.atleast_2d(np.asarray(self.summary["parameters"]["profile_db"])).shape[1])
 
     @property
-    def identified(self) -> bool:
-        """The dynamics-identification flag from the export's diagnostics."""
+    def carrier_source(self) -> str | None:
+        """``"raw"``/``"refined"`` for fixed-carrier C4 exports; absent on old C2/C3."""
+        source = self.summary.get("carrier_source")
+        return None if source is None else str(source)
+
+    @property
+    def fit_contract(self) -> dict[str, Any]:
+        """The declared estimator contract carried by the export."""
         diag = dict(self.summary.get("diagnostics") or {})
-        return bool(diag.get("identified", False))
+        return dict(
+            fit_method=self.summary.get("fit_method"),
+            carrier_source=self.carrier_source,
+            lambda_source=self.summary.get("lambda_source"),
+            shared_phase_evidence=self.summary.get("shared_phase_evidence"),
+            marginal_fit=diag.get("marginal_fit"),
+            carrier_fit=diag.get("carrier_fit"),
+            alternating_conditional_map=diag.get("alternating_conditional_map"),
+            fixed_ou_hyperparameters=diag.get("fixed_ou_hyperparameters"),
+        )
 
     @property
     def provenance_block(self) -> dict[str, Any]:
@@ -848,6 +887,8 @@ class CandidateExport:
             rig_id=self.rig_id,
             n_rotors=self.n_rotors,
             n_orders=self.n_orders,
+            fit_method=self.summary.get("fit_method"),
+            carrier_source=self.carrier_source,
             fit_manifest_sha256=prov.get("manifest_sha256"),
             front_end=prov.get("front_end"),
             training_clips=[w.as_dict() for w in self.training_windows()],
@@ -857,8 +898,185 @@ class CandidateExport:
         )
 
 
+def _numeric_finite(value: Any) -> bool:
+    """All numeric leaves are finite; non-numeric metadata is ignored."""
+    if isinstance(value, Mapping):
+        return all(_numeric_finite(v) for v in value.values())
+    if isinstance(value, (str, bytes)) or value is None:
+        return True
+    if isinstance(value, Sequence):
+        return all(_numeric_finite(v) for v in value)
+    try:
+        arr = np.asarray(value, dtype=np.float64)
+    except (TypeError, ValueError):
+        return True
+    return bool(np.isfinite(arr).all())
+
+
+def _valid_stage_fit(stage: Any) -> bool:
+    if not isinstance(stage, Mapping):
+        return False
+    s = dict(stage)
+    return bool(s.get("valid")) and _numeric_finite(s)
+
+
+def _valid_alternating_fit(stage: Any) -> bool:
+    if not isinstance(stage, Mapping):
+        return False
+    s = dict(stage)
+    if not bool(s.get("valid")) or not _numeric_finite(s):
+        return False
+    trace = np.asarray(s.get("loss_trace") or [], dtype=np.float64)
+    if trace.size < 2 or not np.isfinite(trace).all():
+        return False
+    if np.any(np.diff(trace) > 1e-9):
+        return False
+    hist = s.get("objective_history")
+    if not isinstance(hist, Sequence) or isinstance(hist, (str, bytes)) or not hist:
+        return False
+    for item in hist:
+        if not isinstance(item, Mapping):
+            return False
+        before = float(item.get("full_objective_before", float("nan")))
+        after = float(item.get("full_objective_after", float("nan")))
+        accepted = bool(item.get("accepted"))
+        step = float(item.get("accepted_step", float("nan")))
+        if not (math.isfinite(before) and math.isfinite(after) and after <= before + 1e-9):
+            return False
+        if accepted and not (0.0 < step <= 1.0 and after < before):
+            return False
+        if (not accepted) and not (step == 0.0 and abs(after - before) <= 1e-9):
+            return False
+    return True
+
+
+def _valid_fixed_ou_hyperparameters(diag: Mapping[str, Any]) -> bool:
+    fixed = diag.get("fixed_ou_hyperparameters")
+    if not isinstance(fixed, Mapping):
+        return False
+    vals = [fixed.get("lambda_"), fixed.get("sigma")]
+    return all(math.isfinite(float(v)) and float(v) > 0.0 for v in vals)
+
+
+
+
+def _valid_fixed_carrier_marginal_fit(stage: Any) -> bool:
+    """C4 fixed-carrier diagnostic: finite canonical full-J LBFGS provenance."""
+    if not isinstance(stage, Mapping):
+        return False
+    s = dict(stage)
+    if not bool(s.get("valid")) or not _numeric_finite(s):
+        return False
+    for key in (
+        "objective_start",
+        "objective_end",
+        "full_objective_initial",
+        "full_objective_final",
+        "grad_norm",
+        "eval_count",
+    ):
+        if key not in s:
+            return False
+        try:
+            value = float(s[key])
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(value):
+            return False
+    if float(s["objective_start"]) != float(s["full_objective_initial"]):
+        return False
+    if float(s["objective_end"]) != float(s["full_objective_final"]):
+        return False
+    if float(s["full_objective_final"]) > float(s["full_objective_initial"]) + 1e-9:
+        return False
+    if int(s["eval_count"]) <= 0:
+        return False
+    if not str(s.get("termination") or "").strip():
+        return False
+    trace = s.get("closure_trace")
+    if not isinstance(trace, Sequence) or isinstance(trace, (str, bytes)):
+        return False
+    if len(trace) != int(s["eval_count"]):
+        return False
+    for i, item in enumerate(trace, start=1):
+        if not isinstance(item, Mapping):
+            return False
+        if int(item.get("eval", -1)) != i:
+            return False
+        if not item.get("kind"):
+            return False
+        try:
+            value = float(item["full_objective"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if not math.isfinite(value):
+            return False
+    return True
+
+
+def _all_numeric_zero(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return all(_all_numeric_zero(v) for v in value.values())
+    if isinstance(value, (str, bytes)) or value is None:
+        return False
+    if isinstance(value, Sequence):
+        return all(_all_numeric_zero(v) for v in value)
+    try:
+        arr = np.asarray(value, dtype=np.float64)
+    except (TypeError, ValueError):
+        return False
+    return bool((arr == 0.0).all())
+
+
+def _validate_fixed_carrier_source(path: Path, summary: Mapping[str, Any]) -> None:
+    source = summary.get("carrier_source")
+    if source not in ("raw", "refined"):
+        raise ValueError(
+            f"{path}: fixed_carrier_marginal exports must declare top-level "
+            f"carrier_source='raw' or 'refined'; got {source!r}"
+        )
+    if str(summary.get("rig_id", "")) == "michaels" and source != "raw":
+        raise ValueError(f"{path}: Michael's fixed-carrier export must use carrier_source='raw'")
+    prov = dict(summary.get("training_provenance") or {})
+    prov_source = prov.get("carrier_source")
+    if prov_source is not None and str(prov_source) != str(source):
+        raise ValueError(
+            f"{path}: top-level carrier_source {source!r} disagrees with "
+            f"training_provenance.carrier_source {prov_source!r}"
+        )
+    clips = prov.get("clips")
+    if not isinstance(clips, Sequence) or isinstance(clips, (str, bytes)) or not clips:
+        raise ValueError(f"{path}: training_provenance.clips must name the selected rps_key")
+    keys: list[str] = []
+    for i, entry in enumerate(clips):
+        if not isinstance(entry, Mapping) or not entry.get("rps_key"):
+            raise ValueError(f"{path}: training_provenance.clips[{i}].rps_key is required")
+        keys.append(str(entry["rps_key"]))
+    if source == "refined":
+        bad = sorted({k for k in keys if k != REFINED_RPS_KEY})
+        if bad:
+            raise ValueError(
+                f"{path}: carrier_source='refined' requires every training rps_key to be "
+                f"{REFINED_RPS_KEY!r}; got {bad}"
+            )
+    else:
+        bad = sorted({k for k in keys if k not in RAW_RPS_KEYS})
+        if bad:
+            raise ValueError(
+                f"{path}: carrier_source='raw' requires raw telemetry rps_key values "
+                f"{RAW_RPS_KEYS}; got {bad}"
+            )
+
+
+def _validate_fixed_carrier_zero_bias(path: Path, params: Mapping[str, Any]) -> None:
+    for key in ("bias_mean_hz", "bias_hz"):
+        if key not in params:
+            raise ValueError(f"{path}: fixed_carrier_marginal requires parameters.{key}=0")
+        if not _all_numeric_zero(params[key]):
+            raise ValueError(f"{path}: fixed_carrier_marginal requires parameters.{key} to be exactly zero")
+
 def read_candidate_export(path: str | Path) -> CandidateExport:
-    """Read and pin a revised export; refuse a legacy one and refuse a stranger."""
+    """Read and pin a revised export; refuse legacy, C1, and malformed C2 records."""
     p = Path(path)
     summary = json.loads(p.read_text())
     fam = export_family(summary)
@@ -867,16 +1085,74 @@ def read_candidate_export(path: str | Path) -> CandidateExport:
             f"{p}: no model_family — this is a legacy descriptive export. The candidate arm "
             "needs a revised export; a legacy file belongs to a baseline family."
         )
-    for key in ("parameters", "training_provenance"):
+    for key in ("parameters", "training_provenance", "diagnostics"):
         if not isinstance(summary.get(key), dict):
             raise ValueError(f"{p}: model_family={fam!r} but {key!r} is missing or not a mapping")
-    identified = bool(dict(summary.get("diagnostics") or {}).get("identified", False))
-    if fam == "shared_shaft_ou" and not identified:
+    fit_method = summary.get("fit_method")
+    if fit_method not in (
+        "marginal_then_carrier",
+        "alternating_conditional_map",
+        "fixed_carrier_marginal",
+    ):
         raise ValueError(
-            f"{p}: model_family={fam!r} but diagnostics.identified is {identified!r}. "
-            "An unidentifiable dynamics fit has no meaningful lam/sigma to compare; it must not "
-            "be scored. If the field is missing, the export is malformed."
+            f"{p}: revised candidate exports must declare fit_method='marginal_then_carrier', "
+            f"'alternating_conditional_map', or 'fixed_carrier_marginal'; got {fit_method!r}"
         )
+    if summary.get("lambda_source") != "fixed_reference":
+        raise ValueError(
+            f"{p}: revised candidate exports must declare lambda_source='fixed_reference'; "
+            f"got {summary.get('lambda_source')!r}"
+        )
+    if summary.get("shared_phase_evidence") != "not_identified_by_marginal_score":
+        raise ValueError(
+            f"{p}: revised exports must not claim causal sharing; "
+            f"shared_phase_evidence={summary.get('shared_phase_evidence')!r}"
+        )
+    diag = dict(summary["diagnostics"])
+    if fit_method == "marginal_then_carrier":
+        for stage in ("marginal_fit", "carrier_fit"):
+            if not _valid_stage_fit(diag.get(stage)):
+                raise ValueError(f"{p}: diagnostics.{stage}.valid must be true with finite diagnostics")
+    elif fit_method == "alternating_conditional_map":
+        if not _valid_alternating_fit(diag.get("alternating_conditional_map")):
+            raise ValueError(
+                f"{p}: diagnostics.alternating_conditional_map must carry finite non-increasing "
+                "full objective history"
+            )
+        if not _valid_fixed_ou_hyperparameters(diag):
+            raise ValueError(
+                f"{p}: alternating_conditional_map exports must declare finite fixed OU hyperparameters"
+            )
+    else:
+        if not _valid_fixed_carrier_marginal_fit(diag.get("marginal_fit")):
+            raise ValueError(
+                f"{p}: diagnostics.marginal_fit must be valid, finite, carry canonical "
+                "objective_start/objective_end/full_objective_initial/full_objective_final, "
+                "grad_norm, eval_count, termination, and one closure_trace row per function evaluation"
+            )
+    params = dict(summary["parameters"])
+    for key in ("lam", "sigma", "d_scalar"):
+        v = float(params.get(key, float("nan")))
+        if not math.isfinite(v) or v <= 0.0:
+            raise ValueError(f"{p}: parameters.{key} must be finite and positive")
+    if not _numeric_finite(params):
+        raise ValueError(f"{p}: parameters contain non-finite numeric values")
+    if fit_method == "fixed_carrier_marginal":
+        _validate_fixed_carrier_source(p, summary)
+        _validate_fixed_carrier_zero_bias(p, params)
+        if diag.get("map_state"):
+            raise ValueError(f"{p}: fixed_carrier_marginal must not export diagnostics.map_state")
+        carrier_fit = diag.get("carrier_fit")
+        if isinstance(carrier_fit, Mapping) and bool(carrier_fit.get("valid")):
+            raise ValueError(
+                f"{p}: fixed_carrier_marginal must not claim a valid diagnostics.carrier_fit"
+            )
+        optimizer = dict(summary["training_provenance"]).get("optimizer") or diag["marginal_fit"].get("optimizer")
+        if not isinstance(optimizer, Mapping) or not optimizer:
+            raise ValueError(
+                f"{p}: fixed_carrier_marginal requires optimizer provenance in "
+                "training_provenance.optimizer or diagnostics.marginal_fit.optimizer"
+            )
     return CandidateExport(
         path=p,
         summary=summary,
@@ -897,18 +1173,13 @@ def training_leakage(
 
     The F5 "no held-out raw-sample support leakage" check at manifest level: a
     candidate that saw a scored window during fitting is not held out on it.
-    ``guard_seconds`` widens each training span symmetrically, so an analysis
-    or filter support that reaches into a scored window counts as overlap too.
+    ``guard_seconds`` is the SAME shared symmetric margin used when resolving
+    baseline/explicit held-out supports, so an analysis or filter support that
+    reaches into a scored window counts as overlap too.
     """
     hits: list[dict[str, Any]] = []
     for t in training:
-        wide = Window(
-            t.recording,
-            float(t.start_s) - float(guard_seconds),
-            float(t.duration_s) + 2.0 * float(guard_seconds),
-            regime=t.regime,
-            role=t.role,
-        )
+        wide = widened_training_window(t, guard_seconds)
         for s in scored:
             if wide.overlaps(s):
                 hits.append(

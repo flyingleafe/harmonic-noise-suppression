@@ -1,16 +1,16 @@
 {
   "schema": "revised-phase-fit/1",
-  "status": "AUTHORIZED C3 DREGON training manifest — round 3 fitting-only correction",
+  "status": "AUTHORIZED C4 DREGON alternating conditional MAP training manifest \u2014 round 4 DREGON-focused refinement",
   "notes": [
-    "Per-rig fit manifest for scripts/stochastic_fit_revised.py --rig dregon.",
-    "Calibrated composite temperature T = J/H = 5.192017220082491 from baseline_v1/calibration.json.",
-    "Front end: n_fft=16384, hop=1024, sr=16000, work grid 64000, band [30,7900] Hz.",
-    "Exactly the five room2 pure-noise cruise recordings used in results/S2/dregon_room2_cruise_refined.json; raw 16 s supports unchanged.",
-    "Raw telemetry track motors_command; no rps_refined, no held-out room1 leak.",
-    "Dataset pin: DREGON-frames = 261b09971c8ace16e3434f4a89406c6043403f8ac89a3f1202566cb8c712ba89.",
-    "Optimizer proposal from measured warm GPU smoke python-af021d: first 7.927 s, warm 2.367/2.364 s, 3.929 GB at K230 R4 M8 harmonic_chunk=8.",
-    "C3 fit budget: stage-1 band-energy ladder uses active orders 16/48/fullK for 40/40/120 Adam iterations at lr 0.1; stage-2 carrier-only Adam 40 iterations lr 0.05; frames_per_step=1 per clip, frame_chunk=1, harmonic_chunk=8, seed 0.",
-    "C2 fixes lambda=6 s^-1 as a reference assumption, initializes sigma=1 rad/s, fits sigma and scalar D in stage 1, and reports shared_phase_evidence=not_identified_by_marginal_score."
+    "Per-rig C4 fit manifest for scripts/stochastic_fit_revised.py --rig dregon; Michael C3 is preserved and not retrained.",
+    "C4 uses the same generative family, ALL k=1..130 active from the first objective, no harmonic ladder.",
+    "Fixed OU empirical prior copied from C3 DREGON training: lambda=6 s^-1, sigma=3.10117415072719 rad/s; fixed, not re-estimated and not a causal identification claim.",
+    "Warm start path results/revised_phase/c3/dregon.json is the C3 DREGON training export (sha256 5d232ed9760b000a39583c54c8f9d9ee5e5baccfbedec2d63c5f6d5615956831) on the remote worktree; training parameters, bias and MAP states are loaded where clip IDs match.",
+    "D is reset after warm start to 2*pi*13.07 rad^2/s = 82.12123284912244 as initialization only; the first reported C4 joint objective is after that reset.",
+    "One conditional joint objective: full training L_cond/T + one OU state prior + existing parameter/bias priors; conditional kernel is exp(-D|tau|) because theta is in the atom.",
+    "Block order per cycle: carrier first (bias_hz, bias_mean_hz, theta/nu; spectral fixed), then spectral (P/floor/D/speed-law/mic; carrier/bias fixed).",
+    "Three cycles, 20 Adam proposal steps per block, lr=0.05, frames_per_step=1 per clip; proposal acceptance requires FULL fixed-training J decrease; up to four half-steps along the parameter segment, restore on failure.",
+    "No D narrowing, no annealing, no held-out trajectory or held-out audio in the fit."
   ],
   "front_end": {
     "sr": 16000,
@@ -27,15 +27,15 @@
   },
   "optimizer": {
     "algorithm": "Adam",
-    "iters": 120,
-    "lr": 0.1,
-    "carrier_iters": 40,
+    "iters": 20,
+    "lr": 0.05,
+    "carrier_iters": 20,
     "carrier_lr": 0.05,
     "seed": 0,
     "frame_chunk": 1,
     "frames_per_step": 1,
     "frames_per_step_scope": "per_clip",
-    "training_recipe": "band_energy_ladder",
+    "training_recipe": "full",
     "atom_dtype": "float32",
     "harmonic_chunk": 8,
     "warm_gpu_measurement": {
@@ -50,7 +50,17 @@
         2.364
       ],
       "peak_gb": 3.929
-    }
+    },
+    "fit_method": "alternating_conditional_map",
+    "alternating_cycles": 3,
+    "alternating_block_iters": 20,
+    "alternating_lr": 0.05,
+    "alternating_backtracks": 4,
+    "warm_start_export": "results/revised_phase/c3/dregon.json",
+    "warm_start_export_sha256": "5d232ed9760b000a39583c54c8f9d9ee5e5baccfbedec2d63c5f6d5615956831",
+    "fixed_lambda": 6.0,
+    "fixed_sigma": 3.10117415072719,
+    "initial_d": 82.1212319648372
   },
   "composite": {
     "temperature": 5.192017220082491

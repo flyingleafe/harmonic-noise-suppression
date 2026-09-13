@@ -69,17 +69,35 @@ MANIFEST_SCHEMA: dict[str, Any] = {
         "band_hz": "[float, float], the fixed fit band ([30.0, 7900.0])",
     },
     "state": {"rate_hz": "float, latent state grid rate, independent of hop (e.g. 500.0)"},
+    "carrier_source": "top-level 'raw' or 'refined'; refined is only valid for DREGON rps_refined",
     "optimizer": {
         "harmonic_chunk": "optional int or null, orders per kernel call "
         "(null = all at once); a memory device only, no order is ever dropped",
-        "iters": "int, stage-1 marginal Adam iterations",
-        "lr": "float, stage-1 marginal Adam learning rate",
-        "carrier_iters": "int, stage-2 carrier-only Adam iterations",
-        "carrier_lr": "float, stage-2 carrier-only Adam learning rate",
+        "iters": "int, historical Adam iterations (kept for old manifests)",
+        "lr": "float, historical Adam learning rate (kept for old manifests)",
+        "carrier_iters": "optional int, stage-2 carrier-only Adam iterations",
+        "carrier_lr": "optional float, stage-2 carrier-only Adam learning rate",
         "seed": "int",
         "frame_chunk": "int, frames per backward chunk (memory bound, 1 at n_fft 16384)",
-        "frames_per_step": "int or null, frames sampled per step (null = all)",
+        "frames_per_step": "int or null; fixed_carrier_marginal requires null/full frame",
+        "training_recipe": "optional 'full' or 'band_energy_ladder'; fixed_carrier_marginal "
+        "requires 'full'",
         "atom_dtype": "optional 'float32' (default) or 'float64'",
+        "fit_method": "optional 'marginal_then_carrier' (C3/default), "
+        "'alternating_conditional_map' (superseded C4 conditional MAP) or "
+        "'fixed_carrier_marginal' (new fixed supplied-carrier marginal LBFGS)",
+        "lbfgs_max_iter": "fixed_carrier_marginal LBFGS max_iter (20)",
+        "lbfgs_max_eval": "fixed_carrier_marginal LBFGS max_eval (30)",
+        "lbfgs_history_size": "fixed_carrier_marginal LBFGS history_size (10)",
+        "lbfgs_line_search": "fixed_carrier_marginal line search, exactly 'strong_wolfe'",
+        "alternating_cycles": "optional int, C4 cycles (3)",
+        "alternating_block_iters": "optional int, C4 Adam proposal steps per block (20)",
+        "alternating_lr": "optional float, C4 proposal learning rate (0.05)",
+        "alternating_backtracks": "optional int, bounded half-steps on rejection (4)",
+        "warm_start_export": "optional path to a previous revised export for C4 global warm start",
+        "fixed_lambda": "optional positive float, fixed reference OU lambda",
+        "fixed_sigma": "optional positive float, DREGON fixed-method sigma initialization",
+        "initial_d": "optional positive float, D reset after warm start (initialization only)",
     },
     "composite": {
         "temperature": "float > 0, the frozen composite temperature T = J/H "
@@ -166,8 +184,12 @@ def _config(manifest: dict[str, Any], rig: str, where: Path, sha: str) -> RP.Fit
                 f"  manifest: {recorded}\n  preregistered: {expected}\n"
                 "The gate was fixed before any estimate was computed and is not a knob."
             )
+    carrier_source = str(manifest.get("carrier_source", "raw"))
     RP.check_rotor_track_key(
-        str(_req(manifest, f"rigs.{rig}.rps_key", where)), rig=rig, where=str(where)
+        str(_req(manifest, f"rigs.{rig}.rps_key", where)),
+        rig=rig,
+        where=str(where),
+        carrier_source=carrier_source,
     )
     delay = rig_node.get("delay_s")
     if delay is None:
@@ -184,8 +206,8 @@ def _config(manifest: dict[str, Any], rig: str, where: Path, sha: str) -> RP.Fit
         delay_s=delay_s,
         iters=int(_req(manifest, "optimizer.iters", where)),
         lr=float(_req(manifest, "optimizer.lr", where)),
-        carrier_iters=int(opt["carrier_iters"]) if "carrier_iters" in opt else None,
-        carrier_lr=float(opt["carrier_lr"]) if "carrier_lr" in opt else None,
+        carrier_iters=int(opt["carrier_iters"]) if opt.get("carrier_iters") is not None else None,
+        carrier_lr=float(opt["carrier_lr"]) if opt.get("carrier_lr") is not None else None,
         seed=int(_req(manifest, "optimizer.seed", where)),
         frame_chunk=int(_req(manifest, "optimizer.frame_chunk", where)),
         frames_per_step=(
@@ -193,6 +215,7 @@ def _config(manifest: dict[str, Any], rig: str, where: Path, sha: str) -> RP.Fit
             if _req(manifest, "optimizer.frames_per_step", where) is None
             else int(opt["frames_per_step"])
         ),
+        training_recipe=str(opt.get("training_recipe", "full")),
         temperature=float(_req(manifest, "composite.temperature", where)),
         bias_std_hz=float(_req(manifest, "priors.bias_std_hz", where)),
         bias_mean_std_hz=float(
@@ -203,6 +226,20 @@ def _config(manifest: dict[str, Any], rig: str, where: Path, sha: str) -> RP.Fit
         log_sigma_mean=float(manifest["priors"].get("log_sigma_mean", 0.0)),
         log_sigma_std=float(manifest["priors"].get("log_sigma_std", 2.0)),
         atom_dtype=str(opt.get("atom_dtype", "float32")),
+        fit_method=str(opt.get("fit_method", "marginal_then_carrier")),
+        carrier_source=carrier_source,
+        alternating_cycles=int(opt.get("alternating_cycles", 3)),
+        alternating_block_iters=int(opt.get("alternating_block_iters", 20)),
+        alternating_lr=float(opt.get("alternating_lr", 0.05)),
+        alternating_backtracks=int(opt.get("alternating_backtracks", 4)),
+        warm_start_export=opt.get("warm_start_export"),
+        fixed_lambda=(None if opt.get("fixed_lambda") is None else float(opt.get("fixed_lambda"))),
+        fixed_sigma=(None if opt.get("fixed_sigma") is None else float(opt.get("fixed_sigma"))),
+        initial_d=(None if opt.get("initial_d") is None else float(opt.get("initial_d"))),
+        lbfgs_max_iter=int(opt.get("lbfgs_max_iter", 20)),
+        lbfgs_max_eval=int(opt.get("lbfgs_max_eval", 30)),
+        lbfgs_history_size=int(opt.get("lbfgs_history_size", 10)),
+        lbfgs_line_search=str(opt.get("lbfgs_line_search", "strong_wolfe")),
         harmonic_chunk=opt.get("harmonic_chunk", 32),
         moments=RP.MomentConfig(
             window=int(_req(manifest, "moments.window", where)),
@@ -217,6 +254,7 @@ def _config(manifest: dict[str, Any], rig: str, where: Path, sha: str) -> RP.Fit
             rig=rig,
             dataset=str(_req(manifest, f"rigs.{rig}.dataset", where)),
             rps_key=str(_req(manifest, f"rigs.{rig}.rps_key", where)),
+            carrier_source=carrier_source,
             bench_diagnostic_only=rig == "bench",
             scored_arm=rig != "bench",
         ),
@@ -330,22 +368,28 @@ def main() -> None:
         d_init=math.exp(float(cfg.log_d_mean)),
         identified=False,
         diagnostics=dict(
-            estimator_stage="marginal_then_carrier",
+            estimator_stage=str(cfg.fit_method),
             lambda_source="fixed_reference",
             lambda_assumption_s_inv=RP.FIXED_REFERENCE_LAMBDA,
             initial_sigma_rad_s=RP.INITIAL_SIGMA,
             shared_phase_evidence="not_identified_by_marginal_score",
-            note="phase-moment estimates are diagnostics only in round 2; no moment gate controls export validity",
+            note="entry-point initialization only; manifest fit_method defines the estimator",
         ),
     )
+    stage = (
+        "fixed-carrier full-frame marginal LBFGS"
+        if cfg.fit_method == "fixed_carrier_marginal"
+        else "marginal expected-periodogram quasi-MAP"
+    )
     print(
-        f"\nstage 1: marginal expected-periodogram quasi-MAP over {len(rows)} clip(s)\n"
+        f"\nstage 1: {stage} over {len(rows)} clip(s)\n"
         f"  fixed lambda {dynamics.lam:.4g} 1/s (reference assumption, not measured); "
         f"sigma init {dynamics.sigma:.4g} rad/s; D init {dynamics.d_init:.4g} rad^2/s",
         flush=True,
     )
 
-    print("\nstage 2: frozen-global carrier diagnostics", flush=True)
+    if cfg.fit_method != "fixed_carrier_marginal":
+        print("\nstage 2: frozen-global carrier diagnostics", flush=True)
     export = RP.fit_revised(
         rows,
         rig_id=args.rig,
@@ -355,31 +399,37 @@ def main() -> None:
         progress=lambda m: print(f"  {m}", flush=True),
     )
     out = save(export, args.out)
-    sens = export["diagnostics"]["coarsening_sensitivity"]
-    flagged = (
-        "\n  FLAGGED: " + sens["needs_real_grid_refinement_reason"] + "; this export needs the "
-        "real planted 500 vs 1000 Hz grid comparison before acceptance"
-        if sens["needs_real_grid_refinement"]
-        else ""
-    )
     mf = export["diagnostics"]["marginal_fit"]
-    cf = export["diagnostics"]["carrier_fit"]
-    print(
-        f"\nwrote {out}  ({export['diagnostics']['runtime_s']:.0f}s fit, "
-        f"{time.time() - t0:.0f}s total)\n"
-        f"  marginal quasi-risk {mf['objective_start']:.4f} -> {mf['objective_end']:.4f} "
-        f"valid={mf['valid']}\n"
-        f"  carrier diagnostic MAP {cf['objective_start']:.4f} -> {cf['objective_end']:.4f} "
-        f"valid={cf['valid']}\n"
+    lines = [
+        f"\nwrote {out}  ({export['diagnostics']['runtime_s']:.0f}s fit, {time.time() - t0:.0f}s total)",
+        f"  marginal full J {mf['objective_start']:.4f} -> {mf['objective_end']:.4f} valid={mf['valid']}",
+    ]
+    cf = export["diagnostics"].get("carrier_fit")
+    if isinstance(cf, dict) and "objective_start" in cf:
+        lines.append(
+            f"  carrier diagnostic MAP {cf['objective_start']:.4f} -> {cf['objective_end']:.4f} "
+            f"valid={cf['valid']}"
+        )
+    lines.append(
         f"  fixed lambda {export['parameters']['lam']:.4g} 1/s; "
         f"sigma {export['parameters']['sigma']:.4g} rad/s; "
-        f"D {export['parameters']['d_scalar']:.4g} rad^2/s\n"
-        f"  shared_phase_evidence={export['shared_phase_evidence']}\n"
-        f"  coarsening sensitivity (a sanity indicator, NOT convergence): subsampling the "
-        f"fitted {sens['rate_hz']:.0f} Hz MAP path by two moves one frame's predicted spectrum "
-        f"by {sens['band_l1_rel_change'] * 100:.2f}% (band L1)" + flagged,
-        flush=True,
+        f"D {export['parameters']['d_scalar']:.4g} rad^2/s"
     )
+    lines.append(f"  shared_phase_evidence={export['shared_phase_evidence']}")
+    sens = export["diagnostics"].get("coarsening_sensitivity")
+    if isinstance(sens, dict):
+        flagged = (
+            "\n  FLAGGED: " + sens["needs_real_grid_refinement_reason"] + "; this export needs the "
+            "real planted 500 vs 1000 Hz grid comparison before acceptance"
+            if sens["needs_real_grid_refinement"]
+            else ""
+        )
+        lines.append(
+            f"  coarsening sensitivity (a sanity indicator, NOT convergence): subsampling the "
+            f"fitted {sens['rate_hz']:.0f} Hz MAP path by two moves one frame's predicted spectrum "
+            f"by {sens['band_l1_rel_change'] * 100:.2f}% (band L1)" + flagged
+        )
+    print("\n".join(lines), flush=True)
 
 
 if __name__ == "__main__":

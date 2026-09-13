@@ -289,6 +289,21 @@ _SPEC_DEFAULTS = {f.name: f.default for f in dataclasses.fields(Spec)}
 FLOOR_SHAPE_STD_DB = float(_SPEC_DEFAULTS["floor_shape_std_db"])
 FLOOR_SHAPE_OCT = float(_SPEC_DEFAULTS["floor_shape_oct"])
 AMP_EXP_INIT = float(_SPEC_DEFAULTS["amp_rps_exponent"])
+STAGE1_LADDER_RECIPE = "band_energy_ladder"
+STAGE1_LADDER_RUNG_ORDERS = (16, 48, None)
+STAGE1_LADDER_RUNG_ITERS = (40, 40, None)
+
+#: Per-clip low-percentile floor bias correction copied from
+#: :func:`experiments.stochastic_fit.fit.initialize`: for an exponential
+#: periodogram cell the 20th percentile is 0.223 times the mean, i.e. -6.5 dB.
+FLOOR_INIT_QUANTILE = 0.20
+FLOOR_INIT_DB_CORRECTION = 6.5
+
+#: A line seed, not a parameter floor: if the signed local band integral is
+#: non-positive, initialize at 10 dB below the local integrated floor. Fitting is
+#: still free to drive any order down.
+LINE_INIT_FLOOR_REL_DB = -10.0
+
 
 # ── preregistered moment gate ────────────────────────────────────────────────
 # PREREGISTERED: these five numbers were fixed on 2026-09-12, BEFORE any moment
@@ -407,8 +422,9 @@ class FitConfig:
     k_cap: int = 130
     #: one telemetry delay per rotor, in seconds; REQUIRED (no invented default)
     delay_s: tuple[float, ...] | None = None
-    #: Stage-1 marginal Adam schedule. These keep the historical names because
-    #: the frozen manifests already carry optimizer.iters/lr for the global fit.
+    #: Historical Adam schedules. These keep the frozen manifest names because
+    #: old C3 manifests already carry optimizer.iters/lr for the global fit.
+    #: ``fixed_carrier_marginal`` uses the LBFGS fields below instead.
     iters: int = 120
     lr: float = 0.1
     #: Stage-2 diagnostic carrier schedule. ``None`` falls back to ``iters/lr``
@@ -426,6 +442,38 @@ class FitConfig:
     #: its budget at ``k_cap = 230`` on the 4x work grid.
     harmonic_chunk: int | None = 32
     frames_per_step: int | None = None
+    #: Stage-1 recipe. ``"full"`` preserves the historical one-pass optimizer
+    #: for tiny tests and old manifests; ``"band_energy_ladder"`` is the round-3
+    #: continuation recipe: fit active orders 1..16, then 1..48, then full K.
+    training_recipe: str = "full"
+    #: Estimator contract. ``"marginal_then_carrier"`` is the historical C3
+    #: marginal global fit plus diagnostic carrier MAP. ``"alternating_conditional_map"``
+    #: is the superseded C4 recovery attempt. ``"fixed_carrier_marginal"`` is the
+    #: fixed supplied-carrier C4 path: no carrier state, no bias, marginalized
+    #: shared OU + independent Wiener broadening.
+    fit_method: str = "marginal_then_carrier"
+    #: Declared deterministic carrier source. Historical exports are implicitly
+    #: raw; the new fixed method records raw/refined at top-level and in
+    #: provenance so evaluation can distinguish conditioning labels from scoring
+    #: references.
+    carrier_source: str = "raw"
+    alternating_cycles: int = 3
+    alternating_block_iters: int = 20
+    alternating_lr: float = 0.05
+    alternating_backtracks: int = 4
+    lbfgs_max_iter: int = 20
+    lbfgs_max_eval: int = 30
+    lbfgs_history_size: int = 10
+    lbfgs_line_search: str = "strong_wolfe"
+    #: Optional C4 warm start from a previous revised export. Parameters are
+    #: loaded before any configured reset below; held-out clips are never read.
+    warm_start_export: str | None = None
+    #: Optional initialization resets after warm start. For fixed-carrier C4
+    #: these are initial values only; both sigma and D remain trainable. For the
+    #: superseded alternating MAP path they retain their historical names.
+    fixed_lambda: float | None = None
+    fixed_sigma: float | None = None
+    initial_d: float | None = None
     #: the frozen composite temperature ``T = J / H``; it DIVIDES the composite
     #: risk (``L / T``). Calibrated on planted/baseline data against the
     #: UNNORMALIZED risk of :func:`composite_risk` and then FROZEN; read, never
@@ -461,6 +509,55 @@ class FitConfig:
                 f"rate sr={self.sr!r} (the default is {SAMPLE_RATE_WORK} = 4 x 16000), got "
                 f"{self.sample_rate_work!r}"
             )
+        if self.training_recipe not in ("full", STAGE1_LADDER_RECIPE):
+            raise ValueError(
+                "optimizer.training_recipe must be 'full' or "
+                f"{STAGE1_LADDER_RECIPE!r}, got {self.training_recipe!r}"
+            )
+        if self.fit_method not in (
+            "marginal_then_carrier",
+            "alternating_conditional_map",
+            "fixed_carrier_marginal",
+        ):
+            raise ValueError(
+                "optimizer.fit_method must be 'marginal_then_carrier', "
+                "'alternating_conditional_map' or 'fixed_carrier_marginal', "
+                f"got {self.fit_method!r}"
+            )
+        if self.carrier_source not in ("raw", "refined"):
+            raise ValueError(
+                f"carrier_source must be 'raw' or 'refined', got {self.carrier_source!r}"
+            )
+        if self.fit_method in ("alternating_conditional_map", "fixed_carrier_marginal") and self.training_recipe != "full":
+            raise ValueError(
+                f"{self.fit_method} models every order from the first objective; "
+                "optimizer.training_recipe must be 'full' (no ladder)"
+            )
+        if self.fit_method == "alternating_conditional_map":
+            if int(self.alternating_cycles) <= 0 or int(self.alternating_block_iters) <= 0:
+                raise ValueError("alternating cycles and block_iters must be positive")
+            if float(self.alternating_lr) <= 0.0:
+                raise ValueError("alternating_lr must be positive")
+            if int(self.alternating_backtracks) < 0:
+                raise ValueError("alternating_backtracks must be non-negative")
+            for key, value in (
+                ("fixed_lambda", self.fixed_lambda),
+                ("fixed_sigma", self.fixed_sigma),
+                ("initial_d", self.initial_d),
+            ):
+                if value is None or not math.isfinite(float(value)) or float(value) <= 0.0:
+                    raise ValueError(
+                        f"alternating_conditional_map requires finite positive {key}; got {value!r}"
+                    )
+        if self.fit_method == "fixed_carrier_marginal":
+            if int(self.lbfgs_max_iter) <= 0 or int(self.lbfgs_max_eval) <= 0:
+                raise ValueError("fixed_carrier_marginal requires positive LBFGS max_iter/max_eval")
+            if int(self.lbfgs_history_size) <= 0:
+                raise ValueError("fixed_carrier_marginal requires positive LBFGS history_size")
+            if self.lbfgs_line_search != "strong_wolfe":
+                raise ValueError(
+                    "fixed_carrier_marginal requires optimizer.lbfgs_line_search='strong_wolfe'"
+                )
         self.n_fft_work  # noqa: B018 — validate the derived window here, not mid-fit
 
     @property
@@ -819,11 +916,11 @@ def composite_risk(power: Any, model: Any, weights: Any, *, band: Any = None) ->
 
 # ── what may be fitted at all: raw tracks, the frozen cohort, disjointness ──
 
-#: The RAW rotor tracks candidate 1 may be fitted on. ``rps_refined`` is an
-#: INFERRED label and ``clips.RPS_KEYS`` resolves ``auto`` to it FIRST, so both
-#: are refused: this candidate is fitted on telemetry, never on labels the
-#: project itself inferred.
+#: The RAW rotor tracks historical candidate-1 fits may be fitted on. The
+#: fixed-carrier C4 contract additionally allows the existing refined DREGON
+#: label when, and only when, the manifest declares ``carrier_source="refined"``.
 RAW_RPS_KEYS: tuple[str, ...] = ("rps", "motors_measured", "motors_command")
+REFINED_RPS_KEYS: tuple[str, ...] = ("rps_refined",)
 
 #: The FROZEN per-rig training cohort. It is PROVENANCE, not a preference: a
 #: manifest naming a different support is a different experiment, and it is
@@ -853,21 +950,29 @@ TRAINING_COHORT: dict[str, dict[str, Any]] = {
 }
 
 
-def check_rotor_track_key(rps_key: str, *, rig: str, where: str = "manifest") -> str:
-    """Refuse an INFERRED rotor track, before a single clip is loaded.
-
-    The entry point promises never to fit on inferred labels, and
-    :func:`clips.load_clip` takes the key verbatim, so this is where the
-    promise is kept.
-    """
+def check_rotor_track_key(
+    rps_key: str,
+    *,
+    rig: str,
+    where: str = "manifest",
+    carrier_source: str = "raw",
+) -> str:
+    """Validate that the manifest's declared carrier source matches its key."""
     key = str(rps_key)
-    if key in RAW_RPS_KEYS:
+    source = str(carrier_source)
+    if source == "raw" and key in RAW_RPS_KEYS:
         return key
+    if source == "refined" and rig == "dregon" and key in REFINED_RPS_KEYS:
+        return key
+    if source == "refined" and rig != "dregon":
+        raise ValueError(
+            f"{where}: carrier_source='refined' is only defined for DREGON; rig {rig!r} "
+            f"declares rps_key {key!r}"
+        )
+    accepted = list(RAW_RPS_KEYS) if source == "raw" else list(REFINED_RPS_KEYS)
     raise ValueError(
-        f"{where}: rigs.{rig}.rps_key is {key!r}. Candidate 1 is fitted on RAW telemetry and "
-        f"accepts only {list(RAW_RPS_KEYS)}: 'rps_refined' is an INFERRED label and 'auto' "
-        "resolves to it first (clips.RPS_KEYS), so either would fit the candidate on labels "
-        "this project inferred. Name the raw track explicitly — no default is substituted."
+        f"{where}: rigs.{rig}.rps_key is {key!r} but carrier_source is {source!r}. "
+        f"Accepted keys for that source are {accepted}; no default or 'auto' key is substituted."
     )
 
 
@@ -1155,84 +1260,6 @@ def valid_lag_pairs(valid: np.ndarray, lag: int) -> list[tuple[int, np.ndarray, 
     return out
 
 
-def _raw_phase_in_frame(
-    raw: np.ndarray, starts: np.ndarray, width: int, sr: int
-) -> np.ndarray:
-    """Integrated raw telemetry phase sampled inside each analysis frame.
-
-    ``Phi_raw(t_start + n)`` for ``n = 0..width-1``.  Demodulating by this
-    GLOBAL moving telemetry removes the carrier exactly, so the coefficient
-    phase is the residual ``k theta(t) + epsilon(t)`` and lagged increments
-    are residual increments directly.  A constant phase reference would cancel
-    in the increment; using the actual integrated phase avoids subtracting a
-    nominal advance separately.
-    """
-    raw = np.asarray(raw, dtype=np.float64)
-    phi = 2.0 * np.pi * np.cumsum(raw, axis=-1) / float(sr)
-    n = np.arange(width)
-    idx = starts[:, None] + n[None, :]
-    return phi[idx]
-
-
-def _stft_demod_integrated(
-    audio: np.ndarray,
-    raw: np.ndarray,
-    frames: np.ndarray,
-    k: float,
-    window: np.ndarray,
-    hop: int,
-    sr: int,
-) -> np.ndarray:
-    """Hann-windowed coefficient after demodulating by ``exp(-1j k Phi_raw(t))``
-    sampled inside the frame.
-
-    Returns ``(M, N)`` complex coefficients, one per microphone and frame.
-    The nominal carrier advance is removed by the within-window integration, so
-    the coefficient phase is the residual ``k theta(t) + epsilon(t)`` (up to
-    the finite-window average).  Lagged increments are therefore residual
-    increments directly; no further subtraction of a nominal advance is needed.
-    """
-    audio = np.asarray(audio, dtype=np.float64)
-    window = np.asarray(window, dtype=np.float64)
-    frames = np.asarray(frames, dtype=np.int64)
-    starts = frames * int(hop)
-    width = int(window.size)
-    phase = _raw_phase_in_frame(raw, starts, width, sr)  # (N, width)
-    n = np.arange(width)
-    seg = (
-        audio[:, starts[:, None] + n[None, :]]
-        * window[None, None, :]
-    )  # (M, N, width)
-    return (seg * np.exp(-1j * float(k) * phase)[None, :, :]).sum(axis=-1)
-
-
-def _pair_id(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
-    """Compact identifier of a (lo_frame, hi_frame) pair for set intersection."""
-    return (
-        np.asarray(lo, dtype=np.int64) << 32
-    ) | np.asarray(hi, dtype=np.int64)
-
-
-def _aligned_covariance(
-    res_a: np.ndarray, pid_a: np.ndarray, res_b: np.ndarray, pid_b: np.ndarray
-) -> tuple[float, int]:
-    """Mean product of ``res_a`` and ``res_b`` over their common pair ids.
-
-    The inputs are already circular-mean-removed.  The returned covariance is
-    a wrapped-phase sample covariance, not an exact posterior quantity.
-    """
-    if pid_a.size == 0 or pid_b.size == 0:
-        return 0.0, 0
-    common, ia, ib = np.intersect1d(
-        pid_a, pid_b, assume_unique=True, return_indices=True
-    )
-    if common.size == 0:
-        return 0.0, 0
-    a = np.asarray(res_a, dtype=np.float64)[ia]
-    b = np.asarray(res_b, dtype=np.float64)[ib]
-    return float(np.mean(a * b)), int(common.size)
-
-
 def estimate_shaft_dynamics(
     rows: Sequence[tuple[str, Clip]],
     *,
@@ -1241,58 +1268,40 @@ def estimate_shaft_dynamics(
 ) -> ShaftDynamics:
     """Moment initialization of ``(lam, sigma, D)`` from complex line phases.
 
-    The SHAFT term is identified from the OFF-DIAGONAL structure function of
-    same-rotor order pairs:
+    Phase increments of the gated, isolated lines give
 
-        ``Cov[dpsi_k(tau), dpsi_l(tau)] = k l 2 sigma^2
-            [tau/lam - (1 - exp(-lam tau))/lam^2]``,
+        ``Var[dpsi_k(tau)] = k^2 2 sigma^2 [tau/lam - (1 - exp(-lam tau))/lam^2]
+        + 2 D tau``,
 
-    which is zero for independent per-harmonic motions even when their
-    marginal variances are tuned to reproduce the same diagonals.  The
-    independent per-harmonic diffusion ``D`` is initialized from the DIAGONAL
-    residual after removing the shared OU term.
-
-    Phase increments are formed after demodulating by the integrated raw
-    telemetry phase ``exp(-1j k Phi_raw(t))`` inside each finite window, so the
-    lagged coefficient difference is a residual increment directly; no nominal
-    advance is subtracted twice.  This is the same convention the model uses for
-    its atoms.
+    where the ``k^2`` scaling separates the SHARED shaft term from the
+    independent per-harmonic term and the lag shape separates ``lam`` from
+    ``sigma``. The curve is fitted by ordinary least squares
+    (:func:`scipy.optimize.least_squares`) in log parameters.
 
     These moment data are initializers and diagnostics ONLY: they never re-enter
     the stage-2 objective as a second likelihood factor. ``lam`` and ``sigma``
-    are frozen constants in stage 2; ``D`` is only initialized here and then
-    refined by the spectral MAP.
+    are frozen constants in stage 2; ``D`` is only initialized here.
 
     The reported covariance is a DIAGNOSTIC (the residuals are correlated across
-    lags, orders and mics, and the wrapped-phase covariance is not an exact
-    posterior), reported alongside the empirical block-to-block variation across
-    clips.  If the lag range does not bracket ``1/lam`` or the off-diagonal
-    Jacobian is ill-conditioned, ``identified`` is ``False`` and
-    ``diagnostics['unidentifiable_reason']`` says why; no invented "measured"
-    value is ever substituted.
+    lags, orders and mics — it is not an exact sampling covariance), reported
+    alongside the empirical block-to-block variation across clips. If the lag
+    range does not bracket ``1/lam`` or the Jacobian is ill-conditioned,
+    ``identified`` is ``False`` and ``diagnostics['unidentifiable_reason']``
+    says why; no invented "measured" value is ever substituted.
     """
-    from collections import defaultdict
     from scipy.optimize import least_squares
 
     mc = config.moments
     k_lo, k_hi = gate.order_range
     band_lo, band_hi = config.band_hz
+    cells: list[dict[str, Any]] = []
+    passed: list[dict[str, Any]] = []
     rejected: dict[str, int] = {}
-    cross_failures: dict[str, int] = {}
     n_valid_cells_total = 0
     n_lag_pairs_total = 0
-    diag_cells: list[dict[str, Any]] = []
-    offdiag_cells: list[dict[str, Any]] = []
-    passed: list[dict[str, Any]] = []
-    order_residuals: dict[
-        tuple[str, int, float, float, int], tuple[np.ndarray, np.ndarray]
-    ] = {}
 
     def reject(reason: str) -> None:
         rejected[reason] = rejected.get(reason, 0) + 1
-
-    def cross_failure(reason: str) -> None:
-        cross_failures[reason] = cross_failures.get(reason, 0) + 1
 
     for clip_id, clip in rows:
         if clip.sr != config.sr:
@@ -1307,11 +1316,13 @@ def estimate_shaft_dynamics(
         starts = np.arange(n_frames) * mc.hop
         rate = _frame_means(raw, starts, mc.window)  # (R, N) frame-mean rev/s
         df = pg.df
-        # every line of every rotor/order, for the per-frame isolation test
+        # every line of every rotor/order, for the isolation test
         all_k = np.arange(1, config.k_cap + 1, dtype=np.float64)
         all_lines = rate[:, None, :] * all_k[None, :, None]  # (R, K, N)
+        # telemetry phase at frame starts, in rad
+        phi_raw = 2.0 * np.pi * np.cumsum(raw, axis=1) / config.sr
+        phi_at = phi_raw[:, starts]  # (R, N)
         frames = np.arange(n_frames)
-        window = np.hanning(mc.window + 1)[:mc.window]
         for r in range(rate.shape[0]):
             for k in range(max(1, k_lo), k_hi + 1):
                 centres = k * rate[r]
@@ -1320,54 +1331,45 @@ def estimate_shaft_dynamics(
                     continue
                 sep = np.abs(all_lines - centres[None, None, :])
                 sep[r, k - 1, :] = np.inf
-                # PER-FRAME isolation: a frame is usable only where THIS order is
-                # separated from every other rotor/order at THAT frame.  The old
-                # global ``sep.min()`` rejected an order for the whole clip if a
-                # crossing occurred anywhere.
-                min_sep = np.min(sep, axis=(0, 1))
-                isolated = min_sep >= gate.min_isolation_bins * df
-                if not isolated.any():
+                if float(sep.min()) < gate.min_isolation_bins * df:
                     reject("isolation")
                     continue
+                # THE PREREGISTERED THRESHOLD, applied per MICROPHONE and per
+                # FRAME. The constant is unchanged; only where and how finely
+                # it is applied is. ``min_frames`` counts USABLE samples, never
+                # the clip's total frame count.
                 snr = line_snr_db(pg.power, centres, df)  # (M, N)
-                valid = (snr >= gate.min_line_snr_db) & isolated[None, :]
+                valid = snr >= gate.min_line_snr_db
                 n_valid = int(valid.sum())
                 if n_valid < gate.min_frames:
                     reject("too few usable (mic, frame) cells")
                     continue
-                # Demodulate by the exact within-window integrated raw phase; the
-                # coefficient phase is the residual directly.
-                z = _stft_demod_integrated(
-                    clip.audio, raw[r], frames, float(k), window, mc.hop, config.sr
-                )
+                z = stft_at(clip.audio, frames, centres, mc.window, mc.hop, config.sr)
                 used_lags = 0
                 n_pairs_track = 0
                 for lag in mc.lags:
                     tau = lag * mc.hop / config.sr
-                    per_mic_resids: list[np.ndarray] = []
-                    found_pair = False
+                    per_mic: dict[int, list[np.ndarray]] = {}
                     for m, lo_i, hi_i in valid_lag_pairs(valid, lag):
                         dpsi = np.angle(z[m, hi_i] * np.conj(z[m, lo_i]))
-                        # per-clip bias and the OU mean show up as a constant
-                        # offset at fixed lag: remove the CIRCULAR mean, per mic
-                        res = _wrap(dpsi - np.angle(np.mean(np.exp(1j * dpsi))))
-                        pid = _pair_id(lo_i, hi_i)
-                        order_residuals[(str(clip_id), int(r), float(k), float(tau), int(m))] = (
-                            pid,
-                            res,
-                        )
-                        per_mic_resids.append(res)
-                        found_pair = True
-                    if not found_pair:
+                        telem = k * (phi_at[r, hi_i] - phi_at[r, lo_i])
+                        per_mic.setdefault(m, []).append(_wrap(dpsi - telem))
+                    if not per_mic:
                         continue
-                    resid = np.concatenate(per_mic_resids)
+                    parts: list[np.ndarray] = []
+                    for pieces in per_mic.values():
+                        res = np.concatenate(pieces)
+                        # the per-clip bias and the OU mean show up as a constant
+                        # offset at fixed lag: remove the CIRCULAR mean, per mic
+                        parts.append(_wrap(res - np.angle(np.mean(np.exp(1j * res)))))
+                    resid = np.concatenate(parts)
                     if resid.size < gate.min_frames:
                         continue
                     spread = float(np.sqrt(np.mean(resid**2)))
                     if spread > gate.max_wrap_spread_rad:
                         reject("wrap-censored")
                         continue
-                    diag_cells.append(
+                    cells.append(
                         dict(
                             clip_id=clip_id,
                             rotor=r,
@@ -1395,173 +1397,81 @@ def estimate_shaft_dynamics(
                         )
                     )
 
-    if not diag_cells:
+    if not cells:
         raise ValueError(
-            "no (clip, rotor, order, lag) diagonal cell passed the PREREGISTERED moment gate "
+            "no (clip, rotor, order, lag) cell passed the PREREGISTERED moment gate "
             f"{gate.as_dict()}; rejections: {rejected}. The gate is not to be relaxed to "
             "manufacture an estimate — report it and pick a different support."
         )
 
-    # Cross-order covariances: intersect the exact (frame, time, mic) supports
-    # of each same-rotor order pair.  No independence is assumed across mics or
-    # orders in the bootstrap/diagnostics; the intersection is per mic.
-    grouped: dict[
-        tuple[str, int, float, int], list[tuple[float, np.ndarray, np.ndarray]]
-    ] = defaultdict(list)
-    for key, (pid, res) in order_residuals.items():
-        clip_id_k, r, k, tau, m = key
-        grouped[(clip_id_k, r, tau, m)].append((k, pid, res))
+    k_arr = np.array([c["k"] for c in cells])
+    tau_arr = np.array([c["tau"] for c in cells])
+    var_arr = np.array([c["var"] for c in cells])
 
-    for (clip_id_k, r, tau, m), items in grouped.items():
-        items_sorted = sorted(items, key=lambda x: x[0])
-        for i in range(len(items_sorted)):
-            k_i, pid_i, res_i = items_sorted[i]
-            for j in range(i + 1, len(items_sorted)):
-                k_j, pid_j, res_j = items_sorted[j]
-                cov, n_common = _aligned_covariance(res_i, pid_i, res_j, pid_j)
-                if n_common >= gate.min_frames:
-                    offdiag_cells.append(
-                        dict(
-                            clip_id=clip_id_k,
-                            rotor=r,
-                            k=float(k_i),
-                            l=float(k_j),
-                            tau=float(tau),
-                            cov=float(cov),
-                            n=int(n_common),
-                        )
-                    )
-                else:
-                    cross_failure("cross-order pair too few common pairs")
+    def residual(log_p: np.ndarray, k: np.ndarray, tau: np.ndarray, var: np.ndarray) -> np.ndarray:
+        lam, sigma, d = np.exp(log_p)
+        model = k**2 * integrated_ou_increment_var(tau, lam=lam, sigma=sigma) + 2.0 * d * tau
+        return model - var
 
-    def offdiag_residual(
-        log_p: np.ndarray, kl: np.ndarray, tau: np.ndarray, cov: np.ndarray
-    ) -> np.ndarray:
-        lam, sigma = np.exp(log_p)
-        return kl * integrated_ou_increment_var(tau, lam=lam, sigma=sigma) - cov
-
-    def fit_offdiag(
-        kl: np.ndarray, tau: np.ndarray, cov: np.ndarray
-    ) -> Any:
+    def fit(k: np.ndarray, tau: np.ndarray, var: np.ndarray) -> Any:
+        # crude start: at fixed lam0 the curve is linear in (sigma^2, D), so one
+        # linear solve gives a start that is already the right order of magnitude
         lam0 = 1.0 / max(float(np.mean(tau)), 1e-6)
-        basis = kl * integrated_ou_increment_var(tau, lam=lam0, sigma=1.0)
-        coef, *_ = np.linalg.lstsq(basis[:, None], cov, rcond=None)
+        basis = np.stack(
+            [k**2 * integrated_ou_increment_var(tau, lam=lam0, sigma=1.0), 2.0 * tau], axis=1
+        )
+        coef, *_ = np.linalg.lstsq(basis, var, rcond=None)
         sigma0 = math.sqrt(max(float(coef[0]), 1e-6))
-        x0 = np.log([lam0, sigma0])
-        return least_squares(offdiag_residual, x0, args=(kl, tau, cov), method="trf")
+        d0 = max(float(coef[1]), 1e-6)
+        x0 = np.log([lam0, sigma0, d0])
+        return least_squares(residual, x0, args=(k, tau, var), method="trf")
 
-    def fit_d(
-        k: np.ndarray, tau: np.ndarray, var: np.ndarray, lam: float, sigma: float
-    ) -> tuple[float, Any]:
-        shaft = k**2 * integrated_ou_increment_var(tau, lam=lam, sigma=sigma)
-        resid = var - shaft
-        tau2 = 2.0 * tau
+    res = fit(k_arr, tau_arr, var_arr)
+    lam, sigma, d_init = (float(v) for v in np.exp(res.x))
 
-        def d_residual(d: np.ndarray) -> np.ndarray:
-            return tau2 * d[0] - resid
-
-        d0 = max(float(np.median(resid / tau2)), 1e-12)
-        r = least_squares(d_residual, [d0], bounds=(0.0, np.inf), method="trf")
-        return float(r.x[0]), r
-
-    offdiag_fit: Any | None = None
-    d_res: Any | None = None
-    lam = float("nan")
-    sigma = float("nan")
-    d_init = float("nan")
-
-    if len(offdiag_cells) >= 2:
-        kl_arr = np.array([c["k"] * c["l"] for c in offdiag_cells])
-        tau_off = np.array([c["tau"] for c in offdiag_cells])
-        cov_arr = np.array([c["cov"] for c in offdiag_cells])
-        try:
-            offdiag_fit = fit_offdiag(kl_arr, tau_off, cov_arr)
-            lam, sigma = (float(v) for v in np.exp(offdiag_fit.x))
-        except (ValueError, np.linalg.LinAlgError):
-            offdiag_fit = None
-
-    if offdiag_fit is not None and diag_cells:
-        k_arr = np.array([c["k"] for c in diag_cells])
-        tau_arr = np.array([c["tau"] for c in diag_cells])
-        var_arr = np.array([c["var"] for c in diag_cells])
-        d_init, d_res = fit_d(k_arr, tau_arr, var_arr, lam, sigma)
-
-    cond = (
-        float(np.linalg.cond(offdiag_fit.jac))
-        if (offdiag_fit is not None and offdiag_fit.jac.size)
-        else float("inf")
-    )
+    cond = float(np.linalg.cond(res.jac)) if res.jac.size else float("inf")
     cov: list[list[float]] | None = None
-    if offdiag_fit is not None:
-        try:
-            dof = max(offdiag_fit.fun.size - 2, 1)
-            s2 = 2.0 * float(offdiag_fit.cost) / dof
-            cov = (s2 * np.linalg.inv(offdiag_fit.jac.T @ offdiag_fit.jac)).tolist()
-        except np.linalg.LinAlgError:
-            cov = None
+    try:
+        dof = max(res.fun.size - 3, 1)
+        s2 = 2.0 * float(res.cost) / dof
+        cov = (s2 * np.linalg.inv(res.jac.T @ res.jac)).tolist()
+    except np.linalg.LinAlgError:
+        cov = None
 
     per_clip: dict[str, list[float]] = {}
-    clip_ids = sorted({str(c["clip_id"]) for c in diag_cells})
+    clip_ids = sorted({str(c["clip_id"]) for c in cells})
     if len(clip_ids) > 1:
         for cid in clip_ids:
-            off_sel = [c for c in offdiag_cells if str(c["clip_id"]) == cid]
-            diag_sel = [c for c in diag_cells if str(c["clip_id"]) == cid]
-            if len(off_sel) < 2 or len(diag_sel) < 2:
+            sel = np.array([str(c["clip_id"]) == cid for c in cells])
+            if int(sel.sum()) < 6:
                 continue
             try:
-                kl_c = np.array([c["k"] * c["l"] for c in off_sel])
-                tau_c = np.array([c["tau"] for c in off_sel])
-                cov_c = np.array([c["cov"] for c in off_sel])
-                r_c = fit_offdiag(kl_c, tau_c, cov_c)
-                lam_c, sigma_c = (float(v) for v in np.exp(r_c.x))
-                k_d = np.array([c["k"] for c in diag_sel])
-                tau_d = np.array([c["tau"] for c in diag_sel])
-                var_d = np.array([c["var"] for c in diag_sel])
-                d_c, _ = fit_d(k_d, tau_d, var_d, lam_c, sigma_c)
-                per_clip[cid] = [lam_c, sigma_c, float(d_c)]
-            except (ValueError, np.linalg.LinAlgError):
+                r_c = fit(k_arr[sel], tau_arr[sel], var_arr[sel])
+            except ValueError:
                 continue
+            per_clip[cid] = [float(v) for v in np.exp(r_c.x)]
     block = (
         np.std(np.log(np.array(list(per_clip.values()))), axis=0).tolist()
         if len(per_clip) > 1
         else None
     )
 
-    reasons: list[str] = []
-    if offdiag_fit is None:
+    tau_min, tau_max = float(tau_arr.min()), float(tau_arr.max())
+    n_orders = int(np.unique(k_arr).size)
+    n_lags = int(np.unique(tau_arr).size)
+    reasons = []
+    if not (lam * tau_min <= 0.5):
         reasons.append(
-            "no identifiable shared-shaft structure function from cross-order covariances"
+            f"shortest lag {tau_min:.4f} s is not short against 1/lam = {1.0 / lam:.4f} s"
         )
-        tau_min = tau_max = float("nan")
-        n_offdiag_orders = n_offdiag_lags = 0
-        n_offdiag_pairs = 0
-    else:
-        tau_min = float(tau_off.min())
-        tau_max = float(tau_off.max())
-        if not (lam * tau_min <= 0.5):
-            reasons.append(
-                f"shortest lag {tau_min:.4f} s is not short against 1/lam = {1.0 / lam:.4f} s"
-            )
-        if not (lam * tau_max >= 1.0):
-            reasons.append(
-                f"longest lag {tau_max:.4f} s does not reach 1/lam = {1.0 / lam:.4f} s"
-            )
-        if cond > 1e4:
-            reasons.append(f"off-diagonal Jacobian condition number {cond:.3g} > 1e4")
-        n_offdiag_orders = len({c["k"] for c in offdiag_cells} | {c["l"] for c in offdiag_cells})
-        n_offdiag_lags = int(np.unique(tau_off).size)
-        n_offdiag_pairs = len(
-            {(c["clip_id"], c["rotor"], c["k"], c["l"]) for c in offdiag_cells}
-        )
-        if n_offdiag_orders < 2:
-            reasons.append("fewer than two distinct orders in cross-order cells")
-        if n_offdiag_lags < 3:
-            reasons.append("fewer than three distinct lags in cross-order cells")
-
-    k_arr = np.array([c["k"] for c in diag_cells])
-    tau_arr = np.array([c["tau"] for c in diag_cells])
-    n_diag_orders = int(np.unique(k_arr).size)
-    n_diag_lags = int(np.unique(tau_arr).size)
+    if not (lam * tau_max >= 1.0):
+        reasons.append(f"longest lag {tau_max:.4f} s does not reach 1/lam = {1.0 / lam:.4f} s")
+    if cond > 1e4:
+        reasons.append(f"Jacobian condition number {cond:.3g} > 1e4")
+    if n_orders < 2:
+        reasons.append("fewer than two distinct orders passed the gate: k^2 scaling unobserved")
+    if n_lags < 3:
+        reasons.append("fewer than three distinct lags: the lag shape is unobserved")
 
     diagnostics: dict[str, Any] = dict(
         gate=gate.as_dict(),
@@ -1573,58 +1483,28 @@ def estimate_shaft_dynamics(
         ),
         orders_passed=passed,
         rejections=rejected,
-        crossorder_failures=cross_failures,
         gate_counts=dict(
             valid_mic_frame_cells=n_valid_cells_total,
             lag_pairs=n_lag_pairs_total,
-            note="the preregistered SNR threshold is applied per MICROPHONE and per FRAME, "
-            "isolation is a PER-FRAME mask, and lag pairs are formed only inside one "
-            "continuous run of valid frames, so no pair straddles a gated frame",
+            note="the preregistered SNR threshold is applied per MICROPHONE and per FRAME, and "
+            "lag pairs are formed only inside one continuous run of valid frames, so no pair "
+            "straddles a gated frame",
         ),
-        diagonal_cells=dict(
-            n_cells=len(diag_cells),
-            n_orders=n_diag_orders,
-            n_lags=n_diag_lags,
-            lag_range_s=[float(tau_arr.min()), float(tau_arr.max())],
-            cells=diag_cells,
-        ),
-        crossorder_cells=dict(
-            n_cells=len(offdiag_cells),
-            n_distinct_order_pairs=n_offdiag_pairs,
-            n_orders=n_offdiag_orders,
-            n_lags=n_offdiag_lags,
-            lag_range_s=[tau_min, tau_max],
-            cells=offdiag_cells,
-        ),
-        n_cells=len(diag_cells),
-        n_orders=n_diag_orders,
-        n_lags=n_diag_lags,
-        lag_range_s=[float(tau_arr.min()), float(tau_arr.max())],
+        n_cells=len(cells),
+        n_orders=n_orders,
+        n_lags=n_lags,
+        lag_range_s=[tau_min, tau_max],
         estimate=dict(lam=lam, sigma=sigma, d_init=d_init),
-        d_initialization_note=(
-            "D is initialized from diagonal residuals after subtracting the shared OU term; "
-            "it is then refined by the spectral MAP"
-        ),
         diagnostic_covariance_log_params=cov,
         diagnostic_covariance_note=(
-            "DIAGNOSTIC only: the off-diagonal Jacobian gives the (lam, sigma) covariance; "
-            "wrapped-phase residuals are correlated across lags, orders and mics, so this is "
-            "not an exact sampling covariance and no GLS diagonal approximation is exact"
+            "DIAGNOSTIC only: residuals are correlated across lags, orders and mics, so this "
+            "is not an exact sampling covariance and no GLS diagonal approximation is exact"
         ),
         per_clip_estimates=per_clip,
         block_variation_log_std=block,
         jacobian_cond=cond,
-        residual_rms=(
-            float(np.sqrt(np.mean(offdiag_fit.fun**2)))
-            if offdiag_fit is not None
-            else None
-        ),
-        diagonal_residual_rms=(
-            float(np.sqrt(np.mean(d_res.fun**2)))
-            if d_res is not None
-            else None
-        ),
-        cells=diag_cells,
+        residual_rms=float(np.sqrt(np.mean(res.fun**2))),
+        cells=cells,
     )
     if reasons:
         diagnostics["unidentifiable_reason"] = "; ".join(reasons)
@@ -1887,27 +1767,227 @@ class _RevisedModel(torch.nn.Module):
         self.bias_hz = zeros(len(self.clips), self.n_rotors)
         self.bias_mean_hz = zeros(self.n_rotors)
         self.state_innov = torch.nn.ParameterList(
-            [zeros(self.n_rotors, cd.n_states, 2) for cd in self.clips]
+            []
+            if config.fit_method == "fixed_carrier_marginal"
+            else [zeros(self.n_rotors, cd.n_states, 2) for cd in self.clips]
         )
+        self.active_k = self.K
+        self.initialization_diagnostics: dict[str, Any] = {}
         if observe:
             self._init_levels()
 
-    # ── initialization ──────────────────────────────────────────────────
+    def _clip_floor_curves(self, obs: Sequence[_ClipData]) -> dict[str, np.ndarray]:
+        """Per-clip per-frequency floor in OBSERVED periodogram units.
 
-    def _init_levels(self) -> None:
-        """Crude but real initialization of the levels from the observed data.
-
-        The floor mean is the in-band median periodogram; each order's power is
-        the excess of its nearest bin over that floor, converted with the
-        finite-window identity of a Hann-windowed tone (peak periodogram
-        ``A^2 n_fft / 6``, so ``P = A^2/2 = 3 I_peak / n_fft``) and divided by
-        the speed law at the clip's own rate.
+        This is the legacy robust convention applied at the clip boundary:
+        20th percentile of dB cells over frames and microphones, plus the 6.5 dB
+        exponential correction. A quiet standby clip never shares a percentile
+        pool with a loud cruise clip.
         """
+        curves: dict[str, np.ndarray] = {}
+        for cd in obs:
+            assert cd.power is not None
+            db = 10.0 * np.log10(np.maximum(cd.power.numpy(), 1e-20))
+            curves[cd.clip_id] = (
+                np.quantile(db.reshape(-1, db.shape[-1]), FLOOR_INIT_QUANTILE, axis=0)
+                + FLOOR_INIT_DB_CORRECTION
+            )
+        return curves
+
+    def _init_floor(self, obs: Sequence[_ClipData], floor_db_by_clip: dict[str, np.ndarray]) -> dict[str, Any]:
+        """Initialize the shared floor in source-side power, linearly aggregated.
+
+        Each clip contributes its own percentile floor curve after removing the
+        current speed-law exposure and the known render/decimation transfer.
+        The shared floor still uses the existing smooth control-point basis;
+        there is no per-clip gain and no second floor family.
+        """
+        band = self.band.detach().cpu().numpy()
+        transfer = np.maximum(self.transfer_power.detach().cpu().numpy(), 1e-8)
+        clip_power: list[np.ndarray] = []
+        clip_weight: list[float] = []
+        clip_reports: dict[str, Any] = {}
+        static = float(torch.nn.functional.softplus(self.floor_static_raw).detach().cpu().item())
+        for cd in obs:
+            rate = np.maximum(cd.frame_rate.detach().cpu().numpy(), SPEED_FLOOR_RPS)
+            gain = float(np.mean((rate / AMP_RPS_REF) ** AMP_EXP_INIT) + static)
+            power = 10.0 ** (floor_db_by_clip[cd.clip_id] / 10.0) / (transfer * max(gain, 1e-12))
+            clip_power.append(power)
+            clip_weight.append(float(cd.starts.size))
+            clip_reports[cd.clip_id] = dict(
+                n_frames=int(cd.starts.size),
+                speed_exposure=float(gain),
+                floor_db_p20_plus_6p5_band_median=float(np.median(floor_db_by_clip[cd.clip_id][band])),
+            )
+        weights = np.asarray(clip_weight, dtype=np.float64)
+        stacked = np.stack(clip_power, axis=0)
+        aggregate = np.average(stacked, axis=0, weights=weights)
+        aggregate_db = 10.0 * np.log10(np.maximum(aggregate, 1e-30))
+        floor_mean = float(np.median(aggregate_db[band]))
+        target = np.interp(np.log2(self.ctrl_hz), np.log2(self.freqs_np[1:]), (aggregate_db - floor_mean)[1:])
+        z = np.linalg.solve(
+            self.shape_chol.detach().cpu().numpy(),
+            target / max(FLOOR_SHAPE_STD_DB, 1e-12),
+        )
+        with torch.no_grad():
+            self.floor_mean_db.fill_(floor_mean)
+            self.floor_shape_z.copy_(torch.as_tensor(z, dtype=torch.float64, device=self._dev))
+            self.floor_tilt_db_oct.zero_()
+            self.mic_floor_db.zero_()
+        return dict(
+            method="per_clip_per_frequency_p20_db_plus_6p5",
+            aggregation="linear source power after speed and known-transfer normalization",
+            floor_mean_db=floor_mean,
+            floor_shape_db=(FLOOR_SHAPE_STD_DB * (self.shape_chol.detach().cpu().numpy() @ z)).tolist(),
+            clips=clip_reports,
+        )
+
+    def _line_band_half_widths(self, centres: np.ndarray) -> np.ndarray:
+        """Half-width in Hz for initialization band integrals.
+
+        Rule: start from the analysis resolution plus the existing raw-bias
+        prior, ``max(4 df, 0.5 df + 2*bias_std_hz)``; then cap at 45% of the
+        nearest simultaneous line distance. Overlaps therefore become
+        unobservable for initialization instead of double-counted, while
+        fractional-bin and modestly misaligned/broadened lines still integrate.
+        """
+        df = float(self.freqs_np[1] - self.freqs_np[0])
+        base = max(4.0 * df, 0.5 * df + 2.0 * float(self.config.bias_std_hz))
+        flat = centres.reshape(-1, centres.shape[-1])
+        out = np.full_like(centres, base, dtype=np.float64)
+        for n in range(flat.shape[1]):
+            c = flat[:, n]
+            sep = np.abs(c[:, None] - c[None, :])
+            np.fill_diagonal(sep, np.inf)
+            nearest = np.min(sep, axis=1).reshape(centres.shape[:-1])
+            ok = np.isfinite(nearest)
+            out[..., n][ok] = np.minimum(out[..., n][ok], 0.45 * nearest[ok])
+        return out
+
+    def _profile_seed(
+        self,
+        k_start: int,
+        k_stop: int,
+        obs: Sequence[_ClipData],
+        floor_db_by_clip: dict[str, np.ndarray],
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        """Source-side profile seeds for ``k_start..k_stop`` from signed band power."""
+        df = float(self.freqs_np[1] - self.freqs_np[0])
+        freqs = self.freqs_np
+        band_lo, band_hi = self.config.band_hz
+        transfer = self.transfer_power.detach().cpu().numpy()
+        reliable = (freqs >= band_lo) & (freqs <= band_hi) & (transfer > 1e-6)
+        transfer_safe = np.where(reliable, np.maximum(transfer, 1e-8), np.inf)
+        orders = np.arange(1, self.K + 1, dtype=np.float64)
+        values: list[list[list[float]]] = [[[] for _ in range(self.K)] for _ in range(self.n_rotors)]
+        floor_refs: list[list[list[float]]] = [[[] for _ in range(self.K)] for _ in range(self.n_rotors)]
+        for ci, cd in enumerate(obs):
+            assert cd.power is not None
+            power = cd.power.numpy().mean(axis=0).astype(np.float64)  # (N, F)
+            floor_obs = 10.0 ** (floor_db_by_clip[cd.clip_id] / 10.0)
+            obs_src = np.where(reliable[None, :], power / transfer_safe[None, :], 0.0)
+            floor_src = np.where(reliable, floor_obs / transfer_safe, np.nan)
+            obs_prefix = np.concatenate(
+                [np.zeros((power.shape[0], 1)), np.cumsum(obs_src, axis=1)], axis=1
+            )
+            count_prefix = np.concatenate([[0], np.cumsum(reliable.astype(np.int64))])
+            rate = cd.frame_rate.detach().cpu().numpy()
+            bias = self.bias_hz[ci].detach().cpu().numpy()[:, None]
+            carrier = np.maximum(rate + bias, SPEED_FLOOR_RPS)
+            centres = carrier[:, None, :] * orders[None, :, None]  # (R, K, N)
+            half = self._line_band_half_widths(centres)
+            amp_exp = float(self.amp_exp.detach().cpu().item())
+            for r in range(self.n_rotors):
+                for k in range(max(1, k_start), min(self.K, k_stop) + 1):
+                    kk = k - 1
+                    lo = np.searchsorted(freqs, centres[r, kk] - half[r, kk], side="left")
+                    hi = np.searchsorted(freqs, centres[r, kk] + half[r, kk], side="right")
+                    lo = np.clip(lo, 0, freqs.size)
+                    hi = np.clip(hi, 0, freqs.size)
+                    width = np.maximum(hi - lo, 1)
+                    visible = count_prefix[hi] - count_prefix[lo]
+                    ok = (hi > lo) & (visible > 0) & ((visible / width) >= 0.5) & (half[r, kk] >= 0.5 * df)
+                    if not ok.any():
+                        continue
+                    frames = np.flatnonzero(ok)
+                    obs_sum = (obs_prefix[frames, hi[ok]] - obs_prefix[frames, lo[ok]]) * df
+                    e_floor: list[float] = []
+                    for c_hz, half_hz, n_visible in zip(centres[r, kk, ok], half[r, kk, ok], visible[ok], strict=True):
+                        ann_lo = np.searchsorted(freqs, c_hz - 6.0 * half_hz - 2.0 * df, side="left")
+                        ann_hi = np.searchsorted(freqs, c_hz + 6.0 * half_hz + 2.0 * df, side="right")
+                        inner_lo = np.searchsorted(freqs, c_hz - 1.5 * half_hz, side="left")
+                        inner_hi = np.searchsorted(freqs, c_hz + 1.5 * half_hz, side="right")
+                        ann = floor_src[ann_lo:ann_hi].copy()
+                        ann[max(0, inner_lo - ann_lo) : max(0, inner_hi - ann_lo)] = np.nan
+                        local = float(np.nanmedian(ann)) if np.isfinite(ann).any() else float(np.nanmedian(floor_src))
+                        e_floor.append(local * float(n_visible) * df)
+                    e_floor_arr = np.asarray(e_floor, dtype=np.float64)
+                    e_excess = obs_sum - e_floor_arr
+                    p_signed = 2.0 * e_excess / float(self.config.sr)
+                    p_floor = 2.0 * e_floor_arr / float(self.config.sr)
+                    seed = np.maximum(p_floor * 10.0 ** (LINE_INIT_FLOOR_REL_DB / 10.0), 1e-30)
+                    speed_norm = np.maximum((carrier[r, frames] / AMP_RPS_REF) ** amp_exp, 1e-12)
+                    seeded = np.maximum(p_signed, seed) / speed_norm
+                    values[r][kk].extend(seeded.tolist())
+                    floor_refs[r][kk].extend((seed / speed_norm).tolist())
+        init = np.full((self.n_rotors, self.K), np.nan, dtype=np.float64)
+        coverage = np.zeros((self.n_rotors, self.K), dtype=np.int64)
+        line_floor_db = np.full((self.n_rotors, self.K), np.nan, dtype=np.float64)
+        power_ranges: list[list[dict[str, float | int | bool | None]]] = []
+        for r in range(self.n_rotors):
+            row_ranges: list[dict[str, float | int | bool | None]] = []
+            for kk in range(self.K):
+                arr = np.asarray(values[r][kk], dtype=np.float64)
+                fl = np.asarray(floor_refs[r][kk], dtype=np.float64)
+                coverage[r, kk] = int(arr.size)
+                if arr.size:
+                    mean_power = float(np.mean(arr))
+                    init[r, kk] = 10.0 * math.log10(max(mean_power, 1e-30))
+                    line_floor_db[r, kk] = 10.0 * math.log10(max(mean_power, 1e-30) / max(float(np.mean(fl)), 1e-30))
+                    db = 10.0 * np.log10(np.maximum(arr, 1e-30))
+                    row_ranges.append(
+                        dict(observed=True, n=int(arr.size), min_db=float(db.min()), median_db=float(np.median(db)), max_db=float(db.max()))
+                    )
+                else:
+                    row_ranges.append(dict(observed=False, n=0, min_db=None, median_db=None, max_db=None))
+            power_ranges.append(row_ranges)
+        for r in range(self.n_rotors):
+            good = np.isfinite(init[r])
+            if good.any():
+                x = np.flatnonzero(good)
+                init[r, ~good] = np.interp(np.flatnonzero(~good), x, init[r, good])
+            else:
+                pooled = init[np.isfinite(init)]
+                init[r, :] = float(np.median(pooled)) if pooled.size else -120.0
+        line_floor_out: list[list[float | None]] = [
+            [float(v) if np.isfinite(v) else None for v in row]
+            for row in line_floor_db[:, k_start - 1 : k_stop]
+        ]
+        diag = dict(
+            orders=[int(k_start), int(k_stop)],
+            bandwidth_rule=(
+                "half_width_hz=min(max(4*df,0.5*df+2*bias_std_hz),0.45*nearest_simultaneous_line); "
+                "require at least half the band on bins inside the frozen analysis band with transfer>1e-6"
+            ),
+            units="P_meansquare = 2 * sum((I-F)/transfer * df) / Fs_analysis, then divide by current speed law",
+            coverage=coverage[:, k_start - 1 : k_stop].tolist(),
+            line_floor_db=line_floor_out,
+            power_ranges=[row[k_start - 1 : k_stop] for row in power_ranges],
+            missing_policy="unobservable orders are initialized by smooth neighbour interpolation, never by zeros or masks",
+        )
+        return init[:, k_start - 1 : k_stop], diag
+
+    def _init_levels_legacy(self) -> None:
+        """Historical one-pass initializer retained for old manifests/tests."""
         band = self.band.detach().cpu().numpy()
         obs = [cd for cd in self.clips if cd.power is not None]
         if not obs:
             return
-        med = float(np.median(np.concatenate([cd.power.numpy()[..., band].ravel() for cd in obs])))
+        powers = []
+        for cd in obs:
+            assert cd.power is not None
+            powers.append(cd.power.numpy()[..., band].ravel())
+        med = float(np.median(np.concatenate(powers)))
         with torch.no_grad():
             self.floor_mean_db.fill_(10.0 * math.log10(max(med, 1e-30)))
             df = float(self.freqs_np[1] - self.freqs_np[0])
@@ -1935,6 +2015,42 @@ class _RevisedModel(torch.nn.Module):
             filled = hits > 0
             init = np.where(filled, prof / np.maximum(hits, 1.0), -120.0)
             self.profile_db.copy_(torch.as_tensor(init, dtype=torch.float64, device=self._dev))
+        self.initialization_diagnostics = dict(
+            training_recipe=self.config.training_recipe,
+            legacy_global_floor_db=float(self.floor_mean_db.detach().cpu().item()),
+            initial_profile_db=self.profile_db.detach().cpu().numpy().tolist(),
+        )
+
+
+    def _initialize_profile_orders(self, k_start: int, k_stop: int) -> dict[str, Any]:
+        obs = [cd for cd in self.clips if cd.power is not None]
+        if not obs:
+            return dict(orders=[int(k_start), int(k_stop)], skipped="no observed periodograms")
+        floor_db_by_clip = self._clip_floor_curves(obs)
+        seed, diag = self._profile_seed(k_start, k_stop, obs, floor_db_by_clip)
+        with torch.no_grad():
+            self.profile_db[:, k_start - 1 : k_stop].copy_(
+                torch.as_tensor(seed, dtype=torch.float64, device=self._dev)
+            )
+        return diag
+
+    def _init_levels(self) -> None:
+        """Initialize floor and lines from per-clip floors plus signed band energy."""
+        if self.config.training_recipe != STAGE1_LADDER_RECIPE:
+            self._init_levels_legacy()
+            return
+        obs = [cd for cd in self.clips if cd.power is not None]
+        if not obs:
+            return
+        floor_db_by_clip = self._clip_floor_curves(obs)
+        floor_diag = self._init_floor(obs, floor_db_by_clip)
+        profile_diag = self._initialize_profile_orders(1, self.K)
+        self.initialization_diagnostics = dict(
+            training_recipe=self.config.training_recipe,
+            floor=floor_diag,
+            initial_profile_db=self.profile_db.detach().cpu().numpy().tolist(),
+            harmonic_seed=profile_diag,
+        )
 
     # ── parameter views ─────────────────────────────────────────────────
 
@@ -1962,12 +2078,61 @@ class _RevisedModel(torch.nn.Module):
             "bias_mean_hz": self.bias_mean_hz,
         }
 
+    def fixed_carrier_global_parameters(self) -> dict[str, torch.nn.Parameter]:
+        """C4 fixed-carrier parameters: global spectrum/dynamics only.
+
+        The supplied carrier track is deterministic. There is no fitted bias and
+        no MAP state block in this estimator; stochastic broadening is
+        marginalized by the prior kernel in :meth:`frame_model`.
+        """
+        return {
+            "profile_db": self.profile_db,
+            "amp_exp": self.amp_exp,
+            "floor_mean_db": self.floor_mean_db,
+            "floor_shape_z": self.floor_shape_z,
+            "floor_tilt_db_oct": self.floor_tilt_db_oct,
+            "floor_exp": self.floor_exp,
+            "floor_static_raw": self.floor_static_raw,
+            "mic_floor_db": self.mic_floor_db,
+            "mic_gain_db": self.mic_gain_db,
+            "gain_all_db": self.gain_all_db,
+            "log_d": self.log_d,
+            "log_sigma": self.log_sigma,
+        }
+
     def carrier_parameters(self) -> dict[str, torch.nn.Parameter]:
         """Stage-2 parameters: diagnostic per-clip bias and state only."""
         out: dict[str, torch.nn.Parameter] = {"bias_hz": self.bias_hz}
         for i, p in enumerate(self.state_innov):
             out[f"state_innov[{self.clips[i].clip_id}]"] = p
         return out
+
+    def conditional_carrier_block_parameters(self) -> dict[str, torch.nn.Parameter]:
+        """C4 carrier block: clip biases, population bias and OU state only."""
+        out = {"bias_hz": self.bias_hz, "bias_mean_hz": self.bias_mean_hz}
+        for i, p in enumerate(self.state_innov):
+            out[f"state_innov[{self.clips[i].clip_id}]"] = p
+        return out
+
+    def conditional_spectral_block_parameters(self) -> dict[str, torch.nn.Parameter]:
+        """C4 spectral block: powers, floor, ``D``, speed law and mic terms.
+
+        The carrier state and both bias levels are held fixed. ``sigma`` is not
+        listed: C4 fixes the OU hyperparameters to the C3 DREGON training values.
+        """
+        return {
+            "profile_db": self.profile_db,
+            "amp_exp": self.amp_exp,
+            "floor_mean_db": self.floor_mean_db,
+            "floor_shape_z": self.floor_shape_z,
+            "floor_tilt_db_oct": self.floor_tilt_db_oct,
+            "floor_exp": self.floor_exp,
+            "floor_static_raw": self.floor_static_raw,
+            "mic_floor_db": self.mic_floor_db,
+            "mic_gain_db": self.mic_gain_db,
+            "gain_all_db": self.gain_all_db,
+            "log_d": self.log_d,
+        }
 
     def fitted_parameters(self) -> dict[str, torch.nn.Parameter]:
         """Backward-compatible alias for the stage-1 fitted block."""
@@ -2139,7 +2304,8 @@ class _RevisedModel(torch.nn.Module):
         # accumulated angle.
         phase = phase - phase[..., n_fft_work // 2 : n_fft_work // 2 + 1]
 
-        prof_amp = torch.sqrt(2.0 * 10.0 ** (self.profile_db / 10.0))  # (R, K)
+        active_k = min(max(1, int(self.active_k)), self.K)
+        prof_amp = torch.sqrt(2.0 * 10.0 ** (self.profile_db[:, :active_k] / 10.0))  # (R, active_k)
         speed_amp = torch.sqrt((rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF) ** self.amp_exp)
         # the window and the speed law are order-INDEPENDENT: form the envelope
         # once, so an order block carries only its own phase and its own level
@@ -2184,10 +2350,11 @@ class _RevisedModel(torch.nn.Module):
             dtype=self.atom_dtype,
             device=self._dev,
         )
-        for k0 in range(0, self.K, k_chunk):
+        for k0 in range(0, active_k, k_chunk):
+            k1 = min(k0 + k_chunk, active_k)
             args = (
-                prof_amp[:, k0 : min(k0 + k_chunk, self.K)],
-                self.k_orders[k0 : min(k0 + k_chunk, self.K)],
+                prof_amp[:, k0:k1],
+                self.k_orders[k0:k1],
                 phase,
                 env,
                 d_scalar,
@@ -2502,6 +2669,215 @@ def _bias_confounding(model: _RevisedModel) -> dict[str, Any]:
         return out
 
 
+def _snapshot_parameters(named: Mapping[str, torch.nn.Parameter]) -> dict[str, Tensor]:
+    """Detached parameter copy for accepted/rejected safeguarded proposals."""
+    return {name: p.detach().clone() for name, p in named.items()}
+
+
+def _restore_parameters(named: Mapping[str, torch.nn.Parameter], values: Mapping[str, Tensor]) -> None:
+    with torch.no_grad():
+        for name, p in named.items():
+            p.copy_(values[name])
+
+
+def _interpolate_parameters(
+    named: Mapping[str, torch.nn.Parameter],
+    start: Mapping[str, Tensor],
+    end: Mapping[str, Tensor],
+    alpha: float,
+) -> None:
+    with torch.no_grad():
+        for name, p in named.items():
+            p.copy_(start[name] + float(alpha) * (end[name] - start[name]))
+
+
+def _all_frame_indices(model: _RevisedModel) -> list[tuple[int, np.ndarray]]:
+    return [(ci, np.arange(cd.starts.size)) for ci, cd in enumerate(model.clips)]
+
+
+def _full_conditional_objective(model: _RevisedModel, *, config: FitConfig) -> float:
+    """The ONE C4 training objective, evaluated on every training frame.
+
+    This is the acceptance target for every block proposal: conditional spectral
+    composite risk divided by the frozen temperature, plus one exact OU state
+    prior and the existing parameter/bias priors. No minibatch estimate is used
+    for acceptance.
+    """
+    with torch.no_grad():
+        total = 0.0
+        for ci, fi in _all_frame_indices(model):
+            for chunk in _chunks(fi, config.frame_chunk):
+                total += float(model.chunk_risk(ci, chunk, scale=1.0).detach()) / float(
+                    config.temperature
+                )
+        prior = model.prior(state=True, globals=True, bias_population=True)
+        total += float(prior.detach())
+    return float(total)
+
+
+def _objective_finite_decreased(before: float, after: float) -> bool:
+    return bool(math.isfinite(float(after)) and float(after) < float(before))
+
+
+def _backtrack_segment(
+    named: Mapping[str, torch.nn.Parameter],
+    before_state: Mapping[str, Tensor],
+    proposed_state: Mapping[str, Tensor],
+    *,
+    before_objective: float,
+    objective: Callable[[], float],
+    max_halvings: int,
+) -> tuple[bool, float, float, int]:
+    """Accept a full proposal or a bounded half-step along its segment.
+
+    Returns ``(accepted, accepted_objective, accepted_step, backtracks)``. On
+    failure the original block parameters are restored.
+    """
+    proposed_objective = objective()
+    if _objective_finite_decreased(before_objective, proposed_objective):
+        return True, float(proposed_objective), 1.0, 0
+    for bt in range(1, int(max_halvings) + 1):
+        alpha = 0.5**bt
+        _interpolate_parameters(named, before_state, proposed_state, alpha)
+        value = objective()
+        if _objective_finite_decreased(before_objective, value):
+            return True, float(value), float(alpha), bt
+    _restore_parameters(named, before_state)
+    return False, float(before_objective), 0.0, int(max_halvings)
+
+
+def _run_proposal_steps(
+    model: _RevisedModel,
+    *,
+    named: dict[str, torch.nn.Parameter],
+    config: FitConfig,
+    block: str,
+    seed_offset: int,
+) -> dict[str, dict[str, float]]:
+    _enable_only_gradients(model, named)
+    opt = torch.optim.Adam(list(named.values()), lr=float(config.alternating_lr))
+    rng = np.random.default_rng(int(config.seed) + int(seed_offset))
+    grads: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
+    for it in range(int(config.alternating_block_iters)):
+        opt.zero_grad(set_to_none=True)
+        total = 0.0
+        for ci, cd in enumerate(model.clips):
+            fi, scale = _sample_frames(cd, rng, config.frames_per_step)
+            for chunk in _chunks(fi, config.frame_chunk):
+                loss = model.chunk_risk(ci, chunk, scale=scale) / float(config.temperature)
+                loss.backward()
+                total += float(loss.detach())
+        prior = model.prior(state=True, globals=True, bias_population=True)
+        prior.backward()
+        total += float(prior.detach())
+        step_norms = _grad_norms(named)
+        if it == 0:
+            grads["first_step"] = step_norms
+        grads["last_step"] = step_norms
+        opt.step()
+    return grads
+
+
+def _state_to_innov(theta: np.ndarray, nu: np.ndarray, *, lam: float, sigma: float, dt: float) -> np.ndarray:
+    """Inverse of :func:`simulate_state` for a stored MAP ``theta, nu`` path."""
+    theta = np.asarray(theta, dtype=np.float64)
+    nu = np.asarray(nu, dtype=np.float64)
+    if theta.shape != nu.shape:
+        raise ValueError(f"theta and nu shapes differ: {theta.shape} vs {nu.shape}")
+    if theta.ndim != 2:
+        raise ValueError(f"state arrays must be (rotor, state), got {theta.shape}")
+    out = np.zeros(theta.shape + (2,), dtype=np.float64)
+    a, b, c = ou_cholesky(lam, sigma, dt)
+    e = math.exp(-lam * dt)
+    f01 = -math.expm1(-lam * dt) / lam
+    if sigma <= 0.0 or a <= 0.0 or c <= 0.0:
+        raise ValueError("cannot invert OU state with non-positive sigma or Cholesky terms")
+    out[:, 0, 0] = nu[:, 0] / sigma
+    if theta.shape[1] > 1:
+        e0 = (theta[:, 1:] - theta[:, :-1] - f01 * nu[:, :-1]) / a
+        e1 = (nu[:, 1:] - e * nu[:, :-1] - b * e0) / c
+        out[:, 1:, 0] = e0
+        out[:, 1:, 1] = e1
+    return out
+
+
+def _apply_warm_start(model: _RevisedModel, *, config: FitConfig) -> dict[str, Any]:
+    """Load previous global parameters, then apply any configured C4 resets."""
+    report: dict[str, Any] = dict(applied=False)
+    if config.warm_start_export:
+        p = Path(config.warm_start_export)
+        export = json.loads(p.read_text())
+        model.load_parameters(export["parameters"])
+        report.update(
+            applied=True,
+            source=str(p),
+            source_fit_method=export.get("fit_method"),
+            source_rig_id=export.get("rig_id"),
+            source_digest=hashlib.sha256(p.read_bytes()).hexdigest(),
+            loaded_training_states=[],
+            missing_training_states=[],
+        )
+        if config.fit_method == "fixed_carrier_marginal":
+            report["map_state"] = "skipped: fixed_carrier_marginal has no MAP carrier state"
+        else:
+            stored = dict((export.get("diagnostics") or {}).get("map_state") or {})
+            with torch.no_grad():
+                for ci, cd in enumerate(model.clips):
+                    entry = stored.get(cd.clip_id)
+                    if not isinstance(entry, Mapping):
+                        report["missing_training_states"].append(cd.clip_id)
+                        continue
+                    theta = np.asarray(entry["theta_rad"], dtype=np.float64)
+                    nu = 2.0 * np.pi * np.asarray(entry["nu_hz"], dtype=np.float64)
+                    if theta.shape[1] != cd.n_states:
+                        report["missing_training_states"].append(
+                            f"{cd.clip_id}: state length {theta.shape[1]} != {cd.n_states}"
+                        )
+                        continue
+                    innov = _state_to_innov(
+                        theta, nu, lam=model.lam, sigma=model.sigma_value(), dt=model.dt_state
+                    )
+                    model.state_innov[ci].copy_(
+                        torch.as_tensor(innov, dtype=torch.float64, device=model._dev)
+                    )
+                    report["loaded_training_states"].append(cd.clip_id)
+    with torch.no_grad():
+        if config.fit_method == "fixed_carrier_marginal":
+            model.bias_hz.zero_()
+            model.bias_mean_hz.zero_()
+        if config.fixed_sigma is not None:
+            model.log_sigma.copy_(
+                torch.as_tensor(math.log(float(config.fixed_sigma)), dtype=torch.float64, device=model._dev)
+            )
+        if config.initial_d is not None:
+            model.log_d.copy_(
+                torch.as_tensor(math.log(float(config.initial_d)), dtype=torch.float64, device=model._dev)
+            )
+    report["ou_hyperparameter_initialization"] = dict(
+        lambda_=float(model.lam),
+        sigma=float(model.sigma_value()),
+        d_scalar=float(torch.exp(model.log_d).detach().cpu().item()),
+        sigma_reset=config.fixed_sigma is not None,
+        d_reset=config.initial_d is not None,
+        provenance=(
+            "warm-started C3 globals with optional manifest resets; sigma and D remain trainable"
+            if config.fit_method == "fixed_carrier_marginal"
+            else "historical C4 initialization"
+        ),
+    )
+    report["fixed_ou_hyperparameters"] = dict(
+        lambda_=float(model.lam),
+        sigma=float(model.sigma_value()),
+        provenance=(
+            "lambda fixed by reference; sigma is an initial trainable value"
+            if config.fit_method == "fixed_carrier_marginal"
+            else "C3 DREGON training empirical prior; fixed, not re-estimated, no causal claim"
+        ),
+    )
+    report["d_initial_after_reset"] = float(torch.exp(model.log_d).detach().cpu().item())
+    return report
+
+
 STATE_GRID_NOTE = (
     "cubic Hermite interpolation omits the OU bridge variance within a grid interval; the grid "
     "is justified by the planted TWO-SIDED check at 500 vs 1000 Hz, never by the export's "
@@ -2530,6 +2906,18 @@ def _grad_norms(named: dict[str, torch.nn.Parameter]) -> dict[str, float]:
         for name, p in named.items()
     }
 
+def _enable_only_gradients(
+    model: _RevisedModel, named: Mapping[str, torch.nn.Parameter]
+) -> None:
+    """Make ``named`` the only differentiable block and clear stale inactive grads."""
+    active = {id(p) for p in named.values()}
+    for p in model.parameters():
+        is_active = id(p) in active
+        p.requires_grad_(is_active)
+        if not is_active:
+            p.grad = None
+
+
 
 def _fit_summary(trace: list[float], grad_norms: dict[str, dict[str, float]]) -> dict[str, Any]:
     vals = np.asarray(trace, dtype=np.float64)
@@ -2548,39 +2936,214 @@ def _fit_summary(trace: list[float], grad_norms: dict[str, dict[str, float]]) ->
     )
 
 
+def _fixed_carrier_full_objective(
+    model: _RevisedModel, *, config: FitConfig, backward: bool
+) -> Tensor:
+    total = torch.zeros((), dtype=torch.float64, device=model._dev)
+    for ci, fi in _all_frame_indices(model):
+        for chunk in _chunks(fi, config.frame_chunk):
+            total = total + model.marginal_chunk_risk(ci, chunk, scale=1.0) / float(config.temperature)
+    total = total + model.prior(state=False, globals=True, bias_population=False, clip_bias=False)
+    if backward:
+        total.backward()
+    return total
+
+
+def _global_grad_norm(named: Mapping[str, torch.nn.Parameter]) -> float:
+    total = 0.0
+    for p in named.values():
+        if p.grad is not None:
+            total += float(p.grad.detach().double().norm().item()) ** 2
+    return math.sqrt(total)
+
+
+def _parameters_finite(named: Mapping[str, torch.nn.Parameter]) -> bool:
+    return all(bool(torch.isfinite(p.detach()).all().item()) for p in named.values())
+
+
+def _optimize_fixed_carrier_marginal(
+    model: _RevisedModel,
+    *,
+    config: FitConfig,
+    progress: Callable[[str], None] | None,
+) -> dict[str, Any]:
+    named = model.fixed_carrier_global_parameters()
+    _enable_only_gradients(model, named)
+    with torch.no_grad():
+        model.bias_hz.zero_()
+        model.bias_mean_hz.zero_()
+    closure_trace: list[dict[str, Any]] = []
+    eval_count = 0
+
+    def evaluate(kind: str, *, backward: bool) -> tuple[float, float | None]:
+        nonlocal eval_count
+        for p in named.values():
+            p.grad = None
+        loss = _fixed_carrier_full_objective(model, config=config, backward=backward)
+        value = float(loss.detach().cpu().item())
+        grad_norm = _global_grad_norm(named) if backward else None
+        eval_count += 1
+        closure_trace.append(
+            dict(eval=int(eval_count), kind=kind, full_objective=float(value), grad_norm=grad_norm)
+        )
+        return value, grad_norm
+
+    initial, _ = evaluate("initial_full_objective", backward=False)
+    opt = torch.optim.LBFGS(
+        list(named.values()),
+        max_iter=int(config.lbfgs_max_iter),
+        max_eval=int(config.lbfgs_max_eval),
+        history_size=int(config.lbfgs_history_size),
+        line_search_fn=config.lbfgs_line_search,
+    )
+
+    def closure() -> Tensor:
+        nonlocal eval_count
+        for p in named.values():
+            p.grad = None
+        loss = _fixed_carrier_full_objective(model, config=config, backward=True)
+        value = float(loss.detach().cpu().item())
+        grad_norm = _global_grad_norm(named)
+        eval_count += 1
+        closure_trace.append(
+            dict(eval=int(eval_count), kind="lbfgs_closure", full_objective=value, grad_norm=grad_norm)
+        )
+        return loss
+
+    if progress is not None:
+        progress(
+            "fixed-carrier marginal LBFGS: full-frame objective, strong_wolfe, "
+            f"max_iter {int(config.lbfgs_max_iter)}, max_eval {int(config.lbfgs_max_eval)}"
+        )
+    try:
+        opt.step(closure)
+        termination = "lbfgs_completed"
+    except RuntimeError as exc:
+        termination = f"lbfgs_runtime_error: {exc}"
+    final, final_grad = evaluate("final_full_objective", backward=True)
+    if progress is not None:
+        progress(f"fixed-carrier marginal full J {initial:.6f} -> {final:.6f}")
+    finite_trace = np.isfinite([entry["full_objective"] for entry in closure_trace]).all()
+    valid = bool(
+        math.isfinite(initial)
+        and math.isfinite(final)
+        and final <= initial
+        and math.isfinite(final_grad)
+        and finite_trace
+        and _parameters_finite(named)
+        and termination == "lbfgs_completed"
+    )
+    return dict(
+        valid=valid,
+        finite_parameters=_parameters_finite(named),
+        finite_objectives=bool(finite_trace),
+        objective_start=float(initial),
+        objective_end=float(final),
+        full_objective_initial=float(initial),
+        full_objective_final=float(final),
+        grad_norm=float(final_grad),
+        eval_count=int(eval_count),
+        iterations=int(config.lbfgs_max_iter),
+        termination=termination,
+        optimizer=dict(
+            name="lbfgs",
+            line_search=config.lbfgs_line_search,
+            max_iter=int(config.lbfgs_max_iter),
+            max_eval=int(config.lbfgs_max_eval),
+            history_size=int(config.lbfgs_history_size),
+            full_frame=True,
+        ),
+        closure_trace=closure_trace,
+        closure_trace_note=(
+            "Actual LBFGS objective function evaluations; line search may be non-monotonic and "
+            "entries are not accepted-iteration history."
+        ),
+        active_parameters=sorted(named),
+    )
+
+
+def _stage1_schedule(config: FitConfig) -> list[tuple[int, int]]:
+    if config.training_recipe != STAGE1_LADDER_RECIPE:
+        return [(int(config.k_cap), int(config.iters))]
+    orders = [
+        int(config.k_cap if k is None else min(int(k), int(config.k_cap)))
+        for k in STAGE1_LADDER_RUNG_ORDERS
+    ]
+    iters = [int(config.iters if n is None else int(n)) for n in STAGE1_LADDER_RUNG_ITERS]
+    out: list[tuple[int, int]] = []
+    for active_k, n_iter in zip(orders, iters, strict=True):
+        if n_iter <= 0:
+            continue
+        if out and active_k <= out[-1][0]:
+            continue
+        out.append((active_k, n_iter))
+    if not out or out[-1][0] != int(config.k_cap):
+        out.append((int(config.k_cap), int(config.iters)))
+    return out
+
+
 def _optimize_marginal(
     model: _RevisedModel,
     *,
     config: FitConfig,
     progress: Callable[[str], None] | None,
-) -> tuple[list[float], dict[str, dict[str, float]]]:
+) -> tuple[list[float], dict[str, dict[str, float]], list[dict[str, Any]]]:
     named = model.marginal_parameters()
+    _enable_only_gradients(model, named)
     opt = torch.optim.Adam(list(named.values()), lr=float(config.lr))
     rng = np.random.default_rng(int(config.seed))
     trace: list[float] = []
+    rung_trace: list[dict[str, Any]] = []
     grad_norms: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
-    every = max(1, int(config.iters) // 20)
-    for it in range(int(config.iters)):
-        opt.zero_grad(set_to_none=True)
-        total = 0.0
-        for ci, cd in enumerate(model.clips):
-            fi, scale = _sample_frames(cd, rng, config.frames_per_step)
-            for chunk in _chunks(fi, config.frame_chunk):
-                loss = model.marginal_chunk_risk(ci, chunk, scale=scale) / config.temperature
-                loss.backward()
-                total += float(loss.detach())
-        prior = model.prior(state=False, globals=True, bias_population=True)
-        prior.backward()
-        total += float(prior.detach())
-        step_norms = _grad_norms(named)
-        if it == 0:
-            grad_norms["first_step"] = step_norms
-        grad_norms["last_step"] = step_norms
-        opt.step()
-        trace.append(total)
-        if progress is not None and (it % every == 0 or it == int(config.iters) - 1):
-            progress(f"marginal iter {it:4d}  quasi-risk {total:.4f}")
-    return trace, grad_norms
+    previous_active = 0
+    global_it = 0
+    for rung_i, (active_k, n_iter) in enumerate(_stage1_schedule(config)):
+        if config.training_recipe == STAGE1_LADDER_RECIPE and active_k > previous_active:
+            seed_diag = model._initialize_profile_orders(previous_active + 1, active_k)
+        else:
+            seed_diag = dict(orders=[previous_active + 1, active_k], skipped="no newly active orders")
+        model.active_k = active_k
+        start_index = len(trace)
+        every = max(1, int(n_iter) // 20)
+        if progress is not None:
+            progress(
+                f"marginal rung {rung_i + 1}: active orders 1..{active_k} for {int(n_iter)} "
+                f"Adam steps at lr {float(config.lr):.4g}"
+            )
+        for local_it in range(int(n_iter)):
+            opt.zero_grad(set_to_none=True)
+            total = 0.0
+            for ci, cd in enumerate(model.clips):
+                fi, scale = _sample_frames(cd, rng, config.frames_per_step)
+                for chunk in _chunks(fi, config.frame_chunk):
+                    loss = model.marginal_chunk_risk(ci, chunk, scale=scale) / config.temperature
+                    loss.backward()
+                    total += float(loss.detach())
+            prior = model.prior(state=False, globals=True, bias_population=True)
+            prior.backward()
+            total += float(prior.detach())
+            step_norms = _grad_norms(named)
+            if global_it == 0:
+                grad_norms["first_step"] = step_norms
+            grad_norms["last_step"] = step_norms
+            opt.step()
+            trace.append(total)
+            if progress is not None and (local_it % every == 0 or local_it == int(n_iter) - 1):
+                progress(f"marginal iter {global_it:4d}  quasi-risk {total:.4f}")
+            global_it += 1
+        rung_trace.append(
+            dict(
+                rung=int(rung_i + 1),
+                active_k=int(active_k),
+                iterations=int(n_iter),
+                objective_start=float(trace[start_index]) if len(trace) > start_index else float("nan"),
+                objective_end=float(trace[-1]) if trace else float("nan"),
+                newly_active_seed=seed_diag,
+            )
+        )
+        previous_active = active_k
+    model.active_k = model.K
+    return trace, grad_norms, rung_trace
 
 
 def _optimize_carrier(
@@ -2591,6 +3154,7 @@ def _optimize_carrier(
     progress: Callable[[str], None] | None = None,
 ) -> tuple[list[float], dict[str, dict[str, float]]]:
     named = model.carrier_parameters()
+    _enable_only_gradients(model, named)
     opt = torch.optim.Adam(list(named.values()), lr=float(config.stage2_lr))
     rng = np.random.default_rng(int(config.seed) + 17)
     indices = list(range(len(model.clips))) if clip_indices is None else list(clip_indices)
@@ -2621,6 +3185,94 @@ def _optimize_carrier(
     return trace, grad_norms
 
 
+def _optimize_alternating_conditional_map(
+    model: _RevisedModel,
+    *,
+    config: FitConfig,
+    progress: Callable[[str], None] | None,
+) -> tuple[list[float], dict[str, Any]]:
+    """C4 safeguarded inexact block-coordinate MAP."""
+    history: list[dict[str, Any]] = []
+    grad_norms: dict[str, dict[str, dict[str, float]]] = {}
+    current = _full_conditional_objective(model, config=config)
+    trace = [float(current)]
+    if progress is not None:
+        progress(f"alternating initial full conditional J {current:.6f}")
+    blocks: tuple[tuple[str, Callable[[], dict[str, torch.nn.Parameter]]], ...] = (
+        ("carrier", model.conditional_carrier_block_parameters),
+        ("spectral", model.conditional_spectral_block_parameters),
+    )
+    for cycle in range(int(config.alternating_cycles)):
+        for block_i, (block_name, named_fn) in enumerate(blocks):
+            named = named_fn()
+            _enable_only_gradients(model, named)
+            before_state = _snapshot_parameters(named)
+            before = float(current)
+            grads = _run_proposal_steps(
+                model,
+                named=named,
+                config=config,
+                block=block_name,
+                seed_offset=101 + 31 * cycle + block_i,
+            )
+            proposed_state = _snapshot_parameters(named)
+            accepted, current, accepted_step, backtracks = _backtrack_segment(
+                named,
+                before_state,
+                proposed_state,
+                before_objective=before,
+                objective=lambda: _full_conditional_objective(model, config=config),
+                max_halvings=int(config.alternating_backtracks),
+            )
+            d_now = float(torch.exp(model.log_d).detach().cpu().item())
+            entry = dict(
+                cycle=int(cycle + 1),
+                block=block_name,
+                proposal_steps=int(config.alternating_block_iters),
+                lr=float(config.alternating_lr),
+                full_objective_before=float(before),
+                full_objective_after=float(current),
+                accepted=bool(accepted),
+                accepted_step=float(accepted_step),
+                backtracks=int(backtracks),
+                d_scalar=float(d_now),
+            )
+            history.append(entry)
+            trace.append(float(current))
+            grad_norms[f"cycle_{cycle + 1}_{block_name}"] = grads
+            if progress is not None:
+                status = "accepted" if accepted else "stalled"
+                progress(
+                    f"alternating cycle {cycle + 1} {block_name}: {status}, "
+                    f"J {before:.6f} -> {current:.6f}, step {accepted_step:g}, "
+                    f"backtracks {backtracks}, D {d_now:.6g}"
+                )
+    valid = bool(
+        len(trace) == 1 + 2 * int(config.alternating_cycles)
+        and np.isfinite(np.asarray(trace, dtype=np.float64)).all()
+        and all(
+            float(b) >= float(a)
+            for b, a in zip(trace[:-1], trace[1:], strict=True)
+        )
+    )
+    diagnostics = dict(
+        valid=valid,
+        objective_start=float(trace[0]),
+        objective_end=float(trace[-1]),
+        objective_history=history,
+        loss_trace=trace,
+        cycles=int(config.alternating_cycles),
+        block_order=["carrier", "spectral"],
+        acceptance_rule=(
+            "Adam supplies a block proposal on minibatches; accept only if the FULL fixed "
+            "training conditional objective decreases, else try bounded half-steps along the "
+            "parameter segment and restore the old block on failure"
+        ),
+        grad_norms=grad_norms,
+    )
+    return trace, diagnostics
+
+
 def fit_revised(
     rows: Sequence[tuple[str, Clip]],
     *,
@@ -2630,32 +3282,73 @@ def fit_revised(
     device: str | torch.device = "cpu",
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Fit round-2 by marginal quasi-MAP, then carrier-only diagnostics."""
+    """Fit the revised model under the manifest-declared estimator contract."""
     t0 = time.time()
     torch.manual_seed(int(config.seed))
+    if config.fixed_lambda is not None or config.fixed_sigma is not None:
+        init_sigma = float(config.fixed_sigma if config.fixed_sigma is not None else dynamics.sigma)
+        dynamics = dataclasses.replace(
+            dynamics,
+            lam=float(config.fixed_lambda if config.fixed_lambda is not None else dynamics.lam),
+            sigma=init_sigma,
+            diagnostics={
+                **dict(dynamics.diagnostics),
+                "ou_hyperparameter_manifest_initialization": dict(
+                    lambda_=float(config.fixed_lambda if config.fixed_lambda is not None else dynamics.lam),
+                    sigma=init_sigma,
+                    provenance=(
+                        "manifest initialization; sigma remains trainable"
+                        if config.fit_method == "fixed_carrier_marginal"
+                        else "manifest empirical prior; fixed for this fit"
+                    ),
+                ),
+            },
+        )
     model = _RevisedModel(rows, dynamics=dynamics, config=config, device=device, observe=True)
 
-    marginal_trace, marginal_grads = _optimize_marginal(model, config=config, progress=progress)
-    predictive_parameters = model.parameter_export()
+    warm_start = _apply_warm_start(model, config=config)
+    initial_full_objective_after_reset: float | None = None
+    marginal_trace: list[float] = []
+    carrier_trace: list[float] = []
+    marginal_grads: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
+    carrier_grads: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
+    rung_trace: list[dict[str, Any]] = []
+    alternating_trace: list[float] = []
+    alternating_fit: dict[str, Any] | None = None
+    fixed_fit: dict[str, Any] | None = None
+    if config.fit_method == "alternating_conditional_map":
+        alternating_trace, alternating_fit = _optimize_alternating_conditional_map(
+            model, config=config, progress=progress
+        )
+        initial_full_objective_after_reset = alternating_trace[0]
+        predictive_parameters = model.parameter_export()
+    elif config.fit_method == "fixed_carrier_marginal":
+        fixed_fit = _optimize_fixed_carrier_marginal(model, config=config, progress=progress)
+        predictive_parameters = model.parameter_export()
+    else:
+        marginal_trace, marginal_grads, rung_trace = _optimize_marginal(
+            model, config=config, progress=progress
+        )
+        predictive_parameters = model.parameter_export()
 
-    with torch.no_grad():
-        model.bias_hz.copy_(model.bias_mean_hz[None, :])
-        for p in model.state_innov:
-            p.zero_()
-    carrier_trace, carrier_grads = _optimize_carrier(model, config=config, progress=progress)
-
+        with torch.no_grad():
+            model.bias_hz.copy_(model.bias_mean_hz[None, :])
+            for p in model.state_innov:
+                p.zero_()
+        carrier_trace, carrier_grads = _optimize_carrier(model, config=config, progress=progress)
     with torch.no_grad():
         map_state: dict[str, Any] = {}
         off_regime: dict[str, Any] = {}
         for ci, cd in enumerate(model.clips):
-            theta, nu = model.theta_nu(ci)
-            map_state[cd.clip_id] = dict(
-                time_s=(np.arange(cd.n_states) * model.dt_state).tolist(),
-                theta_rad=theta.cpu().numpy().tolist(),
-                nu_hz=(nu.cpu().numpy() / (2.0 * np.pi)).tolist(),
-                diagnostic_bias_hz=model.bias_hz[ci].cpu().numpy().tolist(),
-                bias_note="stage-2 diagnostic clip bias; held-out prediction uses parameters.bias_mean_hz",
-            )
+            if config.fit_method != "fixed_carrier_marginal":
+                theta, nu = model.theta_nu(ci)
+                map_state[cd.clip_id] = dict(
+                    time_s=(np.arange(cd.n_states) * model.dt_state).tolist(),
+                    theta_rad=theta.cpu().numpy().tolist(),
+                    nu_hz=(nu.cpu().numpy() / (2.0 * np.pi)).tolist(),
+                    diagnostic_bias_hz=model.bias_hz[ci].cpu().numpy().tolist(),
+                    bias_note="stage-2 diagnostic clip bias; held-out prediction uses parameters.bias_mean_hz",
+                )
             off_regime[cd.clip_id] = off_regime_extrapolation(
                 (cd.raw_hz + torch.as_tensor(predictive_parameters["bias_mean_hz"], device=model._dev)[:, None])
                 .cpu()
@@ -2696,25 +3389,64 @@ def fit_revised(
             "quantity of THIS chain, not a calibrated absolute spectrum"
         ),
         state_rate_hz=float(config.state_rate_hz),
-        fit_method="marginal_then_carrier",
+        fit_method=config.fit_method,
+        carrier_source=config.carrier_source,
         lambda_source="fixed_reference",
         optimizer=dict(
-            name="adam",
-            stage1_marginal=dict(iters=int(config.iters), lr=float(config.lr)),
-            stage2_carrier=dict(iters=int(config.stage2_iters), lr=float(config.stage2_lr)),
+            name="lbfgs" if config.fit_method == "fixed_carrier_marginal" else "adam",
+            stage1_marginal=dict(iters=int(config.iters), lr=float(config.lr))
+            if config.fit_method != "fixed_carrier_marginal"
+            else None,
+            fixed_carrier_marginal=dict(
+                max_iter=int(config.lbfgs_max_iter),
+                max_eval=int(config.lbfgs_max_eval),
+                history_size=int(config.lbfgs_history_size),
+                line_search=config.lbfgs_line_search,
+                full_frame=True,
+            )
+            if config.fit_method == "fixed_carrier_marginal"
+            else None,
+            training_recipe=config.training_recipe,
+            rung_schedule=[
+                dict(active_k=int(active_k), iterations=int(n_iter))
+                for active_k, n_iter in _stage1_schedule(config)
+            ],
+            stage2_carrier=dict(iters=int(config.stage2_iters), lr=float(config.stage2_lr))
+            if config.fit_method == "marginal_then_carrier"
+            else None,
+            alternating_conditional_map=dict(
+                cycles=int(config.alternating_cycles),
+                block_iters=int(config.alternating_block_iters),
+                lr=float(config.alternating_lr),
+                backtrack_halvings=int(config.alternating_backtracks),
+                block_order=["carrier", "spectral"],
+            )
+            if config.fit_method == "alternating_conditional_map"
+            else None,
             frame_chunk=int(config.frame_chunk),
             harmonic_chunk=config.harmonic_chunk,
             frames_per_step=config.frames_per_step,
-            minibatch_estimator="uniform without replacement, own weights, scaled N_full/N_"
-            "sampled (unbiased for the full risk)",
+            minibatch_estimator=(
+                "none: fixed_carrier_marginal evaluates every training frame in each LBFGS closure"
+                if config.fit_method == "fixed_carrier_marginal"
+                else "uniform without replacement, own weights, scaled N_full/N_sampled "
+                "(unbiased for the proposal gradient only; block acceptance uses the full risk)"
+            ),
             atom_dtype=config.atom_dtype,
             device=str(device),
         ),
         seed=int(config.seed),
         composite_temperature=float(config.temperature),
         composite_semantics=(
-            "stage 1 is a marginal mean-prediction composite risk; stage 2 is a plug-in "
-            "conditional MAP diagnostic. The two objectives are not summed as evidence."
+            "fixed_carrier_marginal full-frame marginal composite risk; supplied carrier fixed, "
+            "shared OU and independent Wiener broadening marginalized, no MAP state or bias"
+            if config.fit_method == "fixed_carrier_marginal"
+            else (
+                "alternating_conditional_map"
+                if config.fit_method == "alternating_conditional_map"
+                else "stage 1 is a marginal mean-prediction composite risk; stage 2 is a plug-in "
+                "conditional MAP diagnostic. The two objectives are not summed as evidence."
+            )
         ),
         moment_gate=config.gate.as_dict(),
         moment_front_end=config.moments.as_dict(),
@@ -2725,9 +3457,15 @@ def fit_revised(
             log_d_std=float(config.log_d_std),
             log_sigma_mean=float(config.log_sigma_mean),
             log_sigma_std=float(config.log_sigma_std),
-            log_sigma_note="N(0, 2^2) on log sigma; sigma is fitted by the marginal stage",
+            log_sigma_note=(
+                "fixed empirical C3 DREGON training value; not re-estimated and not a causal claim"
+                if config.fit_method == "alternating_conditional_map"
+                else "N(0, 2^2) on log sigma; sigma is fitted by the marginal stage"
+            ),
             log_d_note="a broad Gaussian prior on a FITTED parameter; NOT conjugate to a "
             "moment-derived D",
+            fixed_ou_hyperparameters=warm_start.get("fixed_ou_hyperparameters"),
+            initial_d_after_reset=warm_start.get("d_initial_after_reset"),
         ),
         code_version=_git_head(),
     )
@@ -2736,10 +3474,12 @@ def fit_revised(
     export = dict(
         schema_version=SCHEMA_VERSION,
         model_family=MODEL_FAMILY,
-        fit_method="marginal_then_carrier",
+        fit_method=config.fit_method,
+        carrier_source=config.carrier_source,
         lambda_source="fixed_reference",
         shared_phase_evidence="not_identified_by_marginal_score",
         rig_id=str(rig_id),
+        training_recipe=config.training_recipe,
         parameters=predictive_parameters,
         training_provenance=training_provenance,
         diagnostics=dict(
@@ -2747,33 +3487,117 @@ def fit_revised(
             map_state_note="TRAINING ONLY: plug-in MAP carrier diagnostics; never a predictive "
             "input for held-out clips and never compared to refined tracks as ground truth",
             moments=dynamics.diagnostics,
+            initialization=model.initialization_diagnostics,
+            final_profile_db=predictive_parameters["profile_db"],
             shared_phase_evidence="not_identified_by_marginal_score",
-            marginal_fit=_fit_summary(marginal_trace, marginal_grads),
-            carrier_fit=_fit_summary(carrier_trace, carrier_grads),
-            loss_trace=carrier_trace,
-            grad_norms=dict(marginal=marginal_grads, carrier=carrier_grads),
-            bias_vs_nu_mean_confounding=_bias_confounding(model),
+            marginal_fit=(
+                fixed_fit
+                if config.fit_method == "fixed_carrier_marginal"
+                else (
+                    dict(_fit_summary(marginal_trace, marginal_grads), rung_trace=rung_trace)
+                    if config.fit_method == "marginal_then_carrier"
+                    else dict(valid=True, skipped="not used by alternating_conditional_map")
+                )
+            ),
+            carrier_fit=(
+                _fit_summary(carrier_trace, carrier_grads)
+                if config.fit_method == "marginal_then_carrier"
+                else (
+                    None
+                    if config.fit_method == "fixed_carrier_marginal"
+                    else dict(valid=True, skipped="absorbed into alternating_conditional_map")
+                )
+            ),
+            alternating_conditional_map=alternating_fit,
+            fixed_ou_hyperparameters=warm_start.get("fixed_ou_hyperparameters"),
+            warm_start=warm_start,
+            initial_full_objective_after_reset=initial_full_objective_after_reset,
+            loss_trace=(
+                [entry["full_objective"] for entry in fixed_fit["closure_trace"]]
+                if fixed_fit is not None
+                else (alternating_trace if config.fit_method == "alternating_conditional_map" else carrier_trace)
+            ),
+            grad_norms=(
+                dict(fixed_carrier_marginal=dict(final=fixed_fit["grad_norm"]))
+                if fixed_fit is not None
+                else (
+                    dict(alternating=alternating_fit.get("grad_norms", {}) if alternating_fit else {})
+                    if config.fit_method == "alternating_conditional_map"
+                    else dict(marginal=marginal_grads, carrier=carrier_grads)
+                )
+            ),
+            bias_vs_nu_mean_confounding=(
+                None if config.fit_method == "fixed_carrier_marginal" else _bias_confounding(model)
+            ),
             state_grid_note=STATE_GRID_NOTE,
-            coarsening_sensitivity=_coarsening_sensitivity(model),
+            coarsening_sensitivity=(
+                None if config.fit_method == "fixed_carrier_marginal" else _coarsening_sensitivity(model)
+            ),
             off_regime_extrapolation=off_regime,
             complexity=dict(
                 stochastic_mechanisms=2,
                 rig_dynamic_params=3,
                 rig_dynamic_params_detail=(
-                    "lambda fixed by reference assumption; sigma and scalar D fitted in marginal "
-                    "stage, then frozen for carrier diagnostics"
+                    "lambda fixed by reference; sigma and scalar D fitted under the full-frame "
+                    "fixed-carrier marginal objective"
+                    if config.fit_method == "fixed_carrier_marginal"
+                    else (
+                        "lambda and sigma fixed by empirical C3 DREGON training values for "
+                        "alternating_conditional_map; scalar D fitted under the full conditional objective"
+                        if config.fit_method == "alternating_conditional_map"
+                        else "lambda fixed by reference assumption; sigma and scalar D fitted in marginal "
+                        "stage, then frozen for carrier diagnostics"
+                    )
                 ),
-                latent_state_blocks=len(model.clips) * model.n_rotors,
-                latent_state_rate_hz=float(config.state_rate_hz),
+                latent_state_blocks=(
+                    0
+                    if config.fit_method == "fixed_carrier_marginal"
+                    else len(model.clips) * model.n_rotors
+                ),
+                latent_state_rate_hz=(
+                    None if config.fit_method == "fixed_carrier_marginal" else float(config.state_rate_hz)
+                ),
                 nuisance_blocks=dict(
-                    diagnostic_bias_per_clip_rotor=int(model.bias_hz.numel()),
-                    predictive_bias_population_mean=int(model.bias_mean_hz.numel()),
+                    diagnostic_bias_per_clip_rotor=(
+                        0 if config.fit_method == "fixed_carrier_marginal" else int(model.bias_hz.numel())
+                    ),
+                    predictive_bias_population_mean=(
+                        0 if config.fit_method == "fixed_carrier_marginal" else int(model.bias_mean_hz.numel())
+                    ),
                     profile_db=int(model.profile_db.numel()),
                 ),
-                inference_stages=2,
+                inference_stages=(
+                    1
+                    if config.fit_method == "fixed_carrier_marginal"
+                    else (
+                        2 * int(config.alternating_cycles)
+                        if config.fit_method == "alternating_conditional_map"
+                        else 2
+                    )
+                ),
                 approximations=[
-                    "stage-1 marginal expected periodogram integrates the OU state once",
-                    "stage-2 carrier paths are plug-in training diagnostics only",
+                    (
+                        "full-frame LBFGS on the fixed supplied-carrier marginal objective; no "
+                        "carrier recovery, bias, state allocation or state prior"
+                        if config.fit_method == "fixed_carrier_marginal"
+                        else (
+                            "inexact block-coordinate MAP: carrier and spectral Adam proposals are "
+                            "accepted only by full fixed-training conditional objective decrease"
+                            if config.fit_method == "alternating_conditional_map"
+                            else "stage-1 marginal expected periodogram integrates the OU state once"
+                        )
+                    ),
+                    (
+                        "C3 warm start contributes global parameters only; bias/MAP fields are skipped "
+                        "and fixed-method exported bias fields are exact zero for compatibility"
+                        if config.fit_method == "fixed_carrier_marginal"
+                        else (
+                            "C3 carrier paths warm-start training diagnostics where available; held-out "
+                            "prediction still uses raw telemetry plus population bias"
+                            if config.fit_method == "alternating_conditional_map"
+                            else "stage-2 carrier paths are plug-in training diagnostics only"
+                        )
+                    ),
                     "cubic Hermite state interpolation omits the intra-interval OU bridge "
                     "variance (grid approximation)",
                     "composite risk over overlapping windows: proper for the mean prediction, "
@@ -2788,6 +3612,18 @@ def fit_revised(
             runtime_s=time.time() - t0,
         ),
     )
+    if config.fit_method == "fixed_carrier_marginal":
+        diagnostics = export["diagnostics"]
+        diagnostics.pop("map_state", None)
+        diagnostics.pop("map_state_note", None)
+        diagnostics.pop("carrier_fit", None)
+        diagnostics.pop("bias_vs_nu_mean_confounding", None)
+        diagnostics.pop("coarsening_sensitivity", None)
+        diagnostics["fixed_carrier_marginal_note"] = (
+            "The supplied carrier is deterministic; shared OU and independent Wiener phase are "
+            "marginalized in the expected periodogram. No recovered carrier, no MAP state, and no "
+            "carrier_fit.valid are exported."
+        )
     return export
 
 
@@ -2812,6 +3648,13 @@ def _config_from_export(export: dict[str, Any], **overrides: Any) -> FitConfig:
     opt = prov.get("optimizer", {})
     stage1 = opt.get("stage1_marginal", {}) if isinstance(opt, dict) else {}
     stage2 = opt.get("stage2_carrier", {}) if isinstance(opt, dict) else {}
+    lbfgs = opt.get("fixed_carrier_marginal", {}) if isinstance(opt, dict) else {}
+    if stage1 is None:
+        stage1 = {}
+    if stage2 is None:
+        stage2 = {}
+    if lbfgs is None:
+        lbfgs = {}
     cfg = FitConfig(
         n_fft=int(fe["n_fft"]),
         hop=int(fe["hop"]),
@@ -2833,6 +3676,12 @@ def _config_from_export(export: dict[str, Any], **overrides: Any) -> FitConfig:
         frames_per_step=opt.get("frames_per_step"),
         temperature=float(prov.get("composite_temperature", 1.0)),
         atom_dtype=str(opt.get("atom_dtype", "float32")),
+        fit_method=str(export.get("fit_method", prov.get("fit_method", "marginal_then_carrier"))),
+        carrier_source=str(export.get("carrier_source", prov.get("carrier_source", "raw"))),
+        lbfgs_max_iter=int(lbfgs.get("max_iter", opt.get("lbfgs_max_iter", 20))),
+        lbfgs_max_eval=int(lbfgs.get("max_eval", opt.get("lbfgs_max_eval", 30))),
+        lbfgs_history_size=int(lbfgs.get("history_size", opt.get("lbfgs_history_size", 10))),
+        lbfgs_line_search=str(lbfgs.get("line_search", opt.get("lbfgs_line_search", "strong_wolfe"))),
     )
     priors = prov.get("priors", {})
     cfg.bias_std_hz = float(priors.get("bias_std_hz", params.get("bias_prior_std_hz", 0.5)))
@@ -2958,6 +3807,7 @@ def infer_carrier(
     trace, grad_norms = _optimize_carrier(model, config=cfg, clip_indices=[0])
     with torch.no_grad():
         theta, nu = model.theta_nu(0)
+        cd = model.clips[0]
         theta_np = theta.cpu().numpy()
         nu_hz = nu.cpu().numpy() / (2.0 * np.pi)
         bias = model.bias_hz[0].cpu().numpy()
@@ -3246,6 +4096,7 @@ __all__ = [
     "MODEL_FAMILY",
     "MOMENT_GATE",
     "RAW_RPS_KEYS",
+    "REFINED_RPS_KEYS",
     "SAMPLE_RATE_WORK",
     "SCHEMA_VERSION",
     "SPEED_FLOOR_RPS",

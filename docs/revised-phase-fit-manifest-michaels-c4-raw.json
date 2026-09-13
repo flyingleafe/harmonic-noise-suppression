@@ -1,19 +1,17 @@
 {
   "schema": "revised-phase-fit/1",
-  "status": "AUTHORIZED C3 Michael's marginal-then-carrier training manifest — round 3 fitting-only correction",
+  "status": "AUTHORIZED C4 Michael's fixed-carrier marginal training manifest \u2014 raw carrier",
   "notes": [
-    "Per-rig fit manifest for scripts/stochastic_fit_revised.py --rig michaels.",
-    "Calibrated composite temperature T = J/H = 15.214066879865468 from baseline_v1/calibration.json.",
+    "AUTHORIZED C4 Michael's fixed_carrier_marginal fit manifest (raw carrier).",
+    "Supersedes C4 carrier recovery/alternation: supplied carrier is fixed; shared OU and independent Wiener phase are marginalized.",
+    "Optimizer: deterministic torch LBFGS strong_wolfe, max_iter=20, max_eval=30, history_size=10, full training frames, all K active from the first objective.",
+    "Warm start loads C3 global P/F/q/mic/sigma/D only; bias and MAP/state fields are skipped; exported bias fields remain exact zero for compatibility.",
+    "Canonical runner output: results/revised_phase/c4_fixed/michaels_raw.json.",
     "Front end: n_fft=16384, hop=1024, sr=16000, work grid 64000, band [30,7900] Hz.",
     "Training recording FLY125 only; FLY124 is held out and refused by HELD_OUT_TOKENS.",
-    "Raw telemetry track rps (the project-corrected rev/s track, still RAW telemetry per RAW_RPS_KEYS); zero delay; one gain recording across regimes.",
     "Dataset pin: michaels-frames = 8e9d149560dd5d5fa8aaa87e7ea537d7e4d96e829e874dab7d9c92621cca6e46.",
     "Regimes are not redefined: standby = all rotors 20-45 rps; ramp = 45-65 event/context around the actual transition; cruise = all rotors >=65 rps.",
-    "Known FLY125 standby support is 13.5 s at 1.78..15.28 s; selected standby 2..10 s, not motors-off landing.",
-    "Selected non-overlapping supports: standby 2..10 s; ramp context 10..18 s containing the actual transition; cruise 32..48, 64..80, 96..112 s after raw-key audit.",
-    "Optimizer proposal from measured warm GPU smoke python-af021d: first 7.927 s, warm 2.367/2.364 s, 3.929 GB at K230 R4 M8 harmonic_chunk=8.",
-    "C3 fit budget: stage-1 band-energy ladder uses active orders 16/48/fullK for 40/40/120 Adam iterations at lr 0.1; stage-2 carrier-only Adam 40 iterations lr 0.05; frames_per_step=1 per clip, frame_chunk=1, harmonic_chunk=8, seed 0.",
-    "C2 fixes lambda=6 s^-1 as a reference assumption, initializes sigma=1 rad/s, fits sigma and scalar D in stage 1, and reports shared_phase_evidence=not_identified_by_marginal_score."
+    "Selected non-overlapping supports: standby 2..10 s; ramp context 10..18 s containing the actual transition; cruise 32..48, 64..80, 96..112 s after raw-key audit."
   ],
   "front_end": {
     "sr": 16000,
@@ -29,16 +27,16 @@
     "rate_hz": 500.0
   },
   "optimizer": {
-    "algorithm": "Adam",
-    "iters": 120,
-    "lr": 0.1,
-    "carrier_iters": 40,
-    "carrier_lr": 0.05,
+    "algorithm": "LBFGS",
+    "iters": 20,
+    "lr": 1.0,
+    "carrier_iters": null,
+    "carrier_lr": null,
     "seed": 0,
     "frame_chunk": 1,
-    "frames_per_step": 1,
-    "frames_per_step_scope": "per_clip",
-    "training_recipe": "band_energy_ladder",
+    "frames_per_step": null,
+    "frames_per_step_scope": "full_training_frame_set",
+    "training_recipe": "full",
     "atom_dtype": "float32",
     "harmonic_chunk": 8,
     "warm_gpu_measurement": {
@@ -53,7 +51,15 @@
         2.364
       ],
       "peak_gb": 3.929
-    }
+    },
+    "fit_method": "fixed_carrier_marginal",
+    "lbfgs_max_iter": 20,
+    "lbfgs_max_eval": 30,
+    "lbfgs_history_size": 10,
+    "lbfgs_line_search": "strong_wolfe",
+    "warm_start_export": "results/revised_phase/c3/michaels.json",
+    "warm_start_export_sha256": "22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc",
+    "fixed_lambda": 6.0
   },
   "composite": {
     "temperature": 15.214066879865468
@@ -138,5 +144,6 @@
         }
       ]
     }
-  }
+  },
+  "carrier_source": "raw"
 }
