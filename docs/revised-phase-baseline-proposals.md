@@ -1,10 +1,11 @@
 # Revised-phase baseline instrumentation — proposals and round-2 resolutions
 
-Status: **nothing is frozen and no baseline job has been run.** Round 1 built the
-instrument; round 2 (addenda 4-8) completed it against the ACTUAL candidate API
-and enforced every frozen criterion. Everything in §1-§5 still needs Main's
-ruling before `--prepare` runs on the real cohorts; §11-§18 record what round 2
-resolved, with the numbers it measured.
+Status: **PROPOSED — baseline calibration has been run remotely; Main must still
+approve before the manifest is frozen.** Round 1 built the instrument; round 2
+(addenda 4-8) completed it against the ACTUAL candidate API and enforced every
+frozen criterion. §1-§5 encode the proposal; §11-§18 record what round 2
+resolved, with the numbers it measured; §19 records the actual `--prepare`
+run on 2026-09-13.
 
 Exact commands (the only two that matter for a freeze):
 
@@ -639,3 +640,36 @@ accordingly.
 3. **Candidate training-support audit** — the non-overlapping standby/ramp/cruise
    supports for the candidate fit (e.g. FLY125 `[2,10]`, `[10,18]`, `[32,48]`)
    must be confirmed by the candidate owner before freeze.
+
+---
+
+## 19. Actual remote `--prepare` run (2026-09-13)
+
+Command:
+
+```bash
+omnirun submit --backend uni-cpu --gpus 0 --time 4h --mem 64 --outputs results/revised_phase/baseline_v1 -- \
+  bash -c 'mkdir -p results && curl -fsSL "https://d064390efe0e59d764d4f701b59d7b71.r2.cloudflarestorage.com/ml-data-new/revised-phase/s2-baseline-50796d9a.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=1af5a5336e9feaec0646a6394a4b6a42%2F20260913%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260913T015842Z&X-Amz-Expires=172800&X-Amz-SignedHeaders=host&X-Amz-Signature=730b39e1f27e94df9fa980f76b701443556fb712991432a38a6c97b7c183498c" | tar xzf - -C results && PYTHONPATH=$PWD/src python scripts/stochastic_fit_revised_eval.py --manifest docs/revised-phase-baseline-manifest-v1.json --prepare --out results/revised_phase/baseline_v1'
+```
+
+Job ID: `bash-0e3e78` (uni-cpu, 64 GB RAM, exit 0, ~1.3 h wall time).
+
+Input capsule: `s3://ml-data-new/revised-phase/s2-baseline-50796d9a.tar.gz` (SHA-256 of tar: `50796d9a…`).
+
+Output: `results/revised_phase/baseline_v1/calibration.json` (606 KB).
+
+Selected calibrated quantities:
+
+| cohort | regime | composite T | B | master_seed | pit_tolerance | ltas_tolerance_db | note |
+|---|---|---:|---:|---:|---:|---:|---|
+| dregon_room2_cruise | cruise | 5.192 | 16 | 9001 | 0.0729 | 0.0535 | 5-recording cluster bootstrap |
+| michaels_fly124 | standby | 15.214 | 16 | 9001 | — | — | insufficient clusters (only 2 windows) |
+| michaels_fly124 | ramp | 15.214 | 16 | 9001 | 0.4004 | 0.1295 | 1 fixed-event window, cruise-extrapolated baseline |
+| michaels_fly124 | cruise | 15.214 | 16 | 9001 | — | — | insufficient clusters (only 2 windows) |
+
+Import provenance verified: all modules resolved under the pushed worktree
+`.trees/5d51334311ae/src/experiments/stochastic_fit/`.
+
+The manifest remains `PROPOSED`; freeze requires Main approval of the
+4 s DREGON held-out duration, the FLY124 ramp fixed-event point, the standby
+declared provenance, and the per-cohort composite temperature rule.
