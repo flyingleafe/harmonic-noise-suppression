@@ -1,33 +1,52 @@
 {
   "schema": "revised-phase-fit/1",
-  "status": "FROZEN first-C1 DREGON training manifest — no candidate fit until Main review",
+  "status": "PROPOSED first-C1 DREGON training manifest — config not used for scientific fit until Main review",
   "notes": [
     "Per-rig fit manifest for scripts/stochastic_fit_revised.py --rig dregon.",
     "Calibrated composite temperature T = J/H = 5.192017220082491 from baseline_v1/calibration.json.",
-    "Frozen front end: n_fft=16384, hop=1024, sr=16000, work grid 64000, band [30,7900] Hz.",
-    "Exactly the five room2 pure-noise cruise recordings used in results/S2/dregon_room2_cruise_refined.json.",
+    "Front end: n_fft=16384, hop=1024, sr=16000, work grid 64000, band [30,7900] Hz.",
+    "Exactly the five room2 pure-noise cruise recordings used in results/S2/dregon_room2_cruise_refined.json; raw 16 s supports unchanged.",
     "Raw telemetry track motors_command; no rps_refined, no held-out room1 leak.",
     "Dataset pin: DREGON-frames = 261b09971c8ace16e3434f4a89406c6043403f8ac89a3f1202566cb8c712ba89.",
-    "Optimizer values below are pre-warm placeholders; update after uni-gpushort smoke timing."
+    "Optimizer proposal from measured warm GPU smoke python-af021d: first 7.927 s, warm 2.367/2.364 s, 3.929 GB at K230 R4 M8 harmonic_chunk=8.",
+    "Proposed C1 fit budget: Adam 120 iterations, lr 0.1, frames_per_step=1 per clip, frame_chunk=1, harmonic_chunk=8, seed 0."
   ],
   "front_end": {
     "sr": 16000,
     "sample_rate_work": 64000,
     "n_fft": 16384,
     "hop": 1024,
-    "band_hz": [30.0, 7900.0]
+    "band_hz": [
+      30.0,
+      7900.0
+    ]
   },
   "state": {
     "rate_hz": 500.0
   },
   "optimizer": {
-    "harmonic_chunk": 8,
-    "iters": 1,
-    "lr": 0.01,
+    "algorithm": "Adam",
+    "iters": 120,
+    "lr": 0.1,
     "seed": 0,
     "frame_chunk": 1,
-    "frames_per_step": null,
-    "atom_dtype": "float32"
+    "frames_per_step": 1,
+    "frames_per_step_scope": "per_clip",
+    "atom_dtype": "float32",
+    "harmonic_chunk": 8,
+    "warm_gpu_measurement": {
+      "source_job": "python-af021d",
+      "K": 230,
+      "R": 4,
+      "M": 8,
+      "harmonic_chunk": 8,
+      "first_s": 7.927,
+      "warm_s": [
+        2.367,
+        2.364
+      ],
+      "peak_gb": 3.929
+    }
   },
   "composite": {
     "temperature": 5.192017220082491
@@ -40,11 +59,22 @@
   "moments": {
     "window": 4096,
     "hop": 256,
-    "lags": [1, 2, 4, 8, 16, 32, 64],
+    "lags": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
     "gate": {
       "min_line_snr_db": 10.0,
       "min_isolation_bins": 4.0,
-      "order_range": [2, 40],
+      "order_range": [
+        2,
+        40
+      ],
       "min_frames": 32,
       "max_wrap_spread_rad": 1.2,
       "preregistered": true
@@ -55,7 +85,12 @@
       "dataset": "DREGON-frames",
       "rps_key": "motors_command",
       "k_cap": 130,
-      "delay_s": [0.0, 0.0, 0.0, 0.0],
+      "delay_s": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
       "clips": [
         {
           "recording": "free-flight_nosource_room2",
@@ -96,6 +131,8 @@
     }
   },
   "heldout": {
-    "recordings": ["free-flight_nosource_room1"]
+    "recordings": [
+      "free-flight_nosource_room1"
+    ]
   }
 }

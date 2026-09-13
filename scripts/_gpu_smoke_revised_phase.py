@@ -8,11 +8,13 @@ GPU smoke (default):
   import paths and exits 0 on success / nonzero on failure.
 
 CPU planted control (--cpu-planted-control):
-  Plants shared-shaft and independent-per-order clips at real-like rotor rates
-  (standby/ramp/cruise) and runs the production moment stage
-  (window=4096, hop=256, lags [1,2,4,8,16,32,64], preregistered 10 dB gate).
-  Reports whether dynamics are identified; if not, exits non-zero and writes a
-  diagnostic JSON.  Designed for uni-cpu.
+  Plants single-rotor and four-distinct-carrier shared-shaft controls plus
+  same-marginal independent-per-order controls at real-like rotor rates and
+  runs the production moment stage (window=4096, hop=256, lags
+  [1,2,4,8,16,32,64], preregistered 10 dB gate).  PASS requires recovery of
+  planted lambda/sigma=6/6 within a factor of two for shared motion and no
+  spurious shared-motion support for the independent controls.  Designed for
+  uni-cpu.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import math
 import sys
 import time
 from pathlib import Path
+from typing import Any, cast
 
 # In shared omnirun worktrees the script may be unpacked into a fresh tree
 # while PYTHONPATH still points at a stale cached src tree.  Force imports
@@ -30,11 +33,11 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "src"))
 
-import numpy as np
-import torch
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
 
-from experiments.stochastic_fit import revised_phase as RP
-from experiments.stochastic_fit.data import Clip
+from experiments.stochastic_fit import revised_phase as RP  # noqa: E402
+from experiments.stochastic_fit.data import Clip  # noqa: E402
 
 SR = 16000
 N_FFT = 16384
@@ -189,7 +192,9 @@ def _run_gpu_smoke(out: Path | None = None) -> int:
                 if torch.isfinite(p.grad).all():
                     finite_grads += 1
         if finite_grads != total_grads or total_grads == 0:
-            print(f"FAIL repeat {repeat}: missing or non-finite gradients ({finite_grads}/{total_grads})")
+            print(
+                f"FAIL repeat {repeat}: missing or non-finite gradients ({finite_grads}/{total_grads})"
+            )
             return 1
 
         elapsed = time.time() - t0
@@ -224,8 +229,12 @@ def _run_gpu_smoke(out: Path | None = None) -> int:
     )
     print("summary:")
     print(f"  repeats: {len(times)}")
-    print(f"  elapsed_s: mean={arr_t.mean():.3f} std={arr_t.std():.3f} min={arr_t.min():.3f} max={arr_t.max():.3f}")
-    print(f"  peak_allocated_gb: mean={arr_p.mean():.3f} std={arr_p.std():.3f} min={arr_p.min():.3f} max={arr_p.max():.3f}")
+    print(
+        f"  elapsed_s: mean={arr_t.mean():.3f} std={arr_t.std():.3f} min={arr_t.min():.3f} max={arr_t.max():.3f}"
+    )
+    print(
+        f"  peak_allocated_gb: mean={arr_p.mean():.3f} std={arr_p.std():.3f} min={arr_p.min():.3f} max={arr_p.max():.3f}"
+    )
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(summary, indent=2))
@@ -302,23 +311,35 @@ def _synthetic_harmonic_clip(
     return Clip(clip_id, "synthetic", audio.astype(np.float32), rps, SR)
 
 
-def _real_like_rps(duration_s: float = 16.0, seed: int = 0) -> np.ndarray:
-    """Four-rotor RPS trajectories: 4 s standby @20, 4 s ramp to 80, 8 s cruise @80."""
+def _real_like_rps(
+    duration_s: float = 16.0,
+    seed: int = 0,
+    *,
+    n_rotors: int = 4,
+    distinct: bool = True,
+) -> np.ndarray:
+    """Real-like RPS trajectories with optional distinct rotor carriers.
+
+    ``distinct=False`` is intentionally the four-identical-carrier negative
+    fixture: it must stay a four-rotor input and must not be silently collapsed
+    to the identifiable one-rotor case.
+    """
     rng = np.random.default_rng(seed)
     T = int(duration_s * SR)
     base = np.empty(T, dtype=np.float64)
     standby_samples = int(4.0 * SR)
     ramp_samples = int(8.0 * SR)
     base[:standby_samples] = 20.0
-    base[standby_samples:ramp_samples] = np.linspace(
-        20.0, 80.0, ramp_samples - standby_samples
-    )
+    base[standby_samples:ramp_samples] = np.linspace(20.0, 80.0, ramp_samples - standby_samples)
     base[ramp_samples:] = 80.0
-    # small rotor-to-rotor offsets plus telemetry-like jitter
-    rps = np.stack(
-        [base + rng.normal(0.0, 0.1, size=T) + offset for offset in [0.0, 0.2, -0.1, 0.15]]
-    )
+    offsets = np.array([0.0, 0.2, -0.1, 0.15], dtype=np.float64)[:n_rotors]
+    if not distinct:
+        offsets = np.zeros(n_rotors, dtype=np.float64)
+    jitter = rng.normal(0.0, 0.1 if distinct else 0.0, size=(n_rotors, T))
+    rps = base[None, :] + offsets[:, None] + jitter
     rps = np.clip(rps, 20.0, None)
+    if rps.shape != (n_rotors, T):
+        raise AssertionError(f"bad rps shape {rps.shape}, expected {(n_rotors, T)}")
     return rps
 
 
@@ -328,7 +349,14 @@ def _ou_path(T: int, lam: float, sigma: float, seed: int = 0) -> np.ndarray:
     dt = 1.0 / float(SR)
     innov = rng.standard_normal((T, 2))
     theta, _nu = RP.simulate_state(innov, lam=lam, sigma=sigma, dt=dt)
-    return np.asarray(theta[0])
+    path = np.asarray(theta, dtype=np.float64)
+    if path.shape != (T,):
+        raise AssertionError(f"simulate_state returned theta shape {path.shape}, expected {(T,)}")
+    if not np.isfinite(path).all():
+        raise AssertionError("OU path contains non-finite values")
+    if float(np.std(np.diff(path))) <= 0.0:
+        raise AssertionError("OU path has zero injected motion")
+    return path
 
 
 def _run_cpu_planted_control(out: Path | None) -> int:
@@ -337,44 +365,68 @@ def _run_cpu_planted_control(out: Path | None) -> int:
     print(f"revised_phase: {RP.__file__}")
     print(f"cwd: {Path.cwd().resolve()}")
 
-    # Single-rotor control: the production gate's isolation requirement is
-    # impossible to satisfy with four real-like rotors (their harmonics overlap),
-    # so we plant one rotor and compare shared-vs-independent per-order motion.
-    cfg = _production_moment_config(n_rotors=1)
-    rps = _real_like_rps(duration_s=16.0, seed=11)[:1]  # keep only rotor 0
-    T = rps.shape[1]
     lam_true, sigma_true, d_true = 6.0, 6.0, 0.05
+    orders = tuple(range(2, 41))
 
-    # shared shaft: all orders feel the same theta
-    theta_shared = _ou_path(T, lam=lam_true, sigma=sigma_true, seed=21)
-    shared_orders: dict[tuple[int, int], np.ndarray] = {(0, k): theta_shared for k in range(2, 41)}
-    clip_shared = _synthetic_harmonic_clip(
-        rps, shared_orders, d=d_true, n_mics=N_MICS, seed=31, clip_id="shared_shaft"
-    )
+    def within_factor2(x: float, truth: float) -> bool:
+        return math.isfinite(x) and (0.5 * truth <= x <= 2.0 * truth)
 
-    # independent per-order: each order gets its own OU path with the SAME marginals
-    independent_orders: dict[tuple[int, int], np.ndarray] = {
-        (0, k): _ou_path(T, lam=lam_true, sigma=sigma_true, seed=100 + k)
-        for k in range(2, 41)
-    }
-    clip_indep = _synthetic_harmonic_clip(
-        rps, independent_orders, d=d_true, n_mics=N_MICS, seed=41, clip_id="independent_per_order"
-    )
-
-    results: list[dict[str, object]] = []
-    for label, clip in [("shared_shaft", clip_shared), ("independent_per_order", clip_indep)]:
-        print(f"\nmoment stage: {label}")
-        dynamics = RP.estimate_shaft_dynamics([(clip.clip_id, clip)], gate=cfg.gate, config=cfg)
-        print(
-            f"  lam {dynamics.lam:.4g} 1/s   sigma {dynamics.sigma:.4g} rad/s   "
-            f"D_init {dynamics.d_init:.4g} rad^2/s   identified {dynamics.identified}"
+    def theta_stats(paths: dict[tuple[int, int], np.ndarray]) -> dict[str, object]:
+        increments = np.stack([np.diff(v) for v in paths.values()])
+        return dict(
+            n_paths=len(paths),
+            shape=[int(v) for v in increments.shape],
+            increment_std_min=float(np.min(np.std(increments, axis=1))),
+            increment_std_median=float(np.median(np.std(increments, axis=1))),
+            increment_std_max=float(np.max(np.std(increments, axis=1))),
+            nonzero=bool(np.min(np.std(increments, axis=1)) > 0.0),
         )
-        reason = dynamics.diagnostics.get("unidentifiable_reason")
-        if reason:
-            print(f"  reason: {reason}")
-        results.append(
-            dict(
-                label=label,
+
+    def shared_orders_for(rps: np.ndarray, seed0: int) -> dict[tuple[int, int], np.ndarray]:
+        T = rps.shape[1]
+        paths: dict[tuple[int, int], np.ndarray] = {}
+        for r in range(rps.shape[0]):
+            theta = _ou_path(T, lam=lam_true, sigma=sigma_true, seed=seed0 + r)
+            for k in orders:
+                paths[(r, k)] = theta
+        return paths
+
+    def independent_orders_for(rps: np.ndarray, seed0: int) -> dict[tuple[int, int], np.ndarray]:
+        T = rps.shape[1]
+        return {
+            (r, k): _ou_path(T, lam=lam_true, sigma=sigma_true, seed=seed0 + 1000 * r + k)
+            for r in range(rps.shape[0])
+            for k in orders
+        }
+
+    def run_case(
+        *,
+        label: str,
+        cfg: RP.FitConfig,
+        rps: np.ndarray,
+        theta_paths: dict[tuple[int, int], np.ndarray],
+        seed: int,
+        expected: str,
+    ) -> dict[str, Any]:
+        print(f"\nmoment stage: {label}")
+        delay_s = cfg.delay_s
+        if delay_s is None:
+            raise AssertionError(f"{label}: cfg.delay_s must be explicit")
+        if rps.shape[0] != len(delay_s):
+            raise AssertionError(f"{label}: rps rotors {rps.shape[0]} != cfg delays {len(delay_s)}")
+        if any(np.asarray(theta).shape != (rps.shape[1],) for theta in theta_paths.values()):
+            raise AssertionError(f"{label}: theta path shape mismatch against T={rps.shape[1]}")
+        stats = theta_stats(theta_paths)
+        if not stats["nonzero"]:
+            raise AssertionError(f"{label}: planted OU motion is zero")
+        rps_spread = np.std(rps, axis=0)
+        clip = _synthetic_harmonic_clip(
+            rps, theta_paths, d=d_true, n_mics=N_MICS, seed=seed, clip_id=label
+        )
+        try:
+            dynamics = RP.estimate_shaft_dynamics([(clip.clip_id, clip)], gate=cfg.gate, config=cfg)
+            reason = dynamics.diagnostics.get("unidentifiable_reason")
+            estimate: dict[str, Any] = dict(
                 lam=float(dynamics.lam),
                 sigma=float(dynamics.sigma),
                 d_init=float(dynamics.d_init),
@@ -382,44 +434,154 @@ def _run_cpu_planted_control(out: Path | None) -> int:
                 unidentifiable_reason=str(reason) if reason else None,
                 diagnostics=dynamics.diagnostics,
             )
-        )
-    # Shared shaft must be identified; independent per-order should report low shared sigma.
-    shared = next(r for r in results if r["label"] == "shared_shaft")
-    indep = next(r for r in results if r["label"] == "independent_per_order")
-    shared_ok = bool(shared["identified"])
-    shared_sigma = float(shared["sigma"])
-    indep_sigma = float(indep["sigma"])
-    indep_ok = indep_sigma < 0.5 * shared_sigma if shared_ok else False
+            print(
+                f"  lam {dynamics.lam:.4g} 1/s   sigma {dynamics.sigma:.4g} rad/s   "
+                f"D_init {dynamics.d_init:.4g} rad^2/s   identified {dynamics.identified}"
+            )
+            if reason:
+                print(f"  reason: {reason}")
+        except Exception as exc:
+            estimate = dict(
+                lam=float("nan"),
+                sigma=float("nan"),
+                d_init=float("nan"),
+                identified=False,
+                unidentifiable_reason=f"{type(exc).__name__}: {exc}",
+                diagnostics={},
+            )
+            print(f"  failed: {type(exc).__name__}: {exc}")
 
-    summary = dict(
-        status="identified" if (shared_ok and indep_ok) else "flagged",
-        shared_shaft_identified=shared_ok,
-        independent_control_low_sigma=indep_ok,
-        planted_lam=lam_true,
-        planted_sigma=sigma_true,
-        planted_d=d_true,
-        results=results,
-        config=dict(
-            window=cfg.moments.window,
-            hop=cfg.moments.hop,
-            lags=list(cfg.moments.lags),
-            gate=cfg.gate.as_dict(),
+        lam_est = float(cast(float, estimate["lam"]))
+        sigma_est = float(cast(float, estimate["sigma"]))
+        recovered_truth = (
+            bool(estimate["identified"])
+            and within_factor2(lam_est, lam_true)
+            and within_factor2(sigma_est, sigma_true)
+        )
+        spurious_shared_support = (
+            bool(estimate["identified"])
+            and within_factor2(lam_est, lam_true)
+            and within_factor2(sigma_est, sigma_true)
+        )
+        if expected == "shared_recovered":
+            passed = recovered_truth
+        elif expected == "independent_rejected":
+            passed = not spurious_shared_support
+        elif expected == "unidentifiable":
+            passed = not bool(estimate["identified"])
+        else:
+            raise ValueError(expected)
+        return dict(
+            label=label,
+            expected=expected,
+            passed=bool(passed),
+            recovered_planted_lam_sigma=bool(recovered_truth),
+            spurious_shared_support=bool(spurious_shared_support),
+            truth=dict(lam=lam_true, sigma=sigma_true, d=d_true),
+            estimate=estimate,
+            generation=dict(
+                rps_shape=[int(v) for v in rps.shape],
+                rps_min=float(np.min(rps)),
+                rps_max=float(np.max(rps)),
+                per_time_rotor_spread_median=float(np.median(rps_spread)),
+                theta=stats,
+                n_orders=len(orders),
+            ),
+        )
+
+    cfg1 = _production_moment_config(n_rotors=1)
+    rps1 = _real_like_rps(duration_s=16.0, seed=11, n_rotors=1, distinct=True)
+    cfg4 = _production_moment_config(n_rotors=4)
+    rps4_distinct = _real_like_rps(duration_s=16.0, seed=12, n_rotors=4, distinct=True)
+    rps4_identical = _real_like_rps(duration_s=16.0, seed=13, n_rotors=4, distinct=False)
+
+    cases = [
+        run_case(
+            label="single_rotor_shared_shaft",
+            cfg=cfg1,
+            rps=rps1,
+            theta_paths=shared_orders_for(rps1, 21),
+            seed=31,
+            expected="shared_recovered",
         ),
+        run_case(
+            label="single_rotor_independent_per_order",
+            cfg=cfg1,
+            rps=rps1,
+            theta_paths=independent_orders_for(rps1, 100),
+            seed=41,
+            expected="independent_rejected",
+        ),
+        run_case(
+            label="four_distinct_carrier_shared_shaft",
+            cfg=cfg4,
+            rps=rps4_distinct,
+            theta_paths=shared_orders_for(rps4_distinct, 200),
+            seed=51,
+            expected="shared_recovered",
+        ),
+        run_case(
+            label="four_distinct_carrier_independent_per_order",
+            cfg=cfg4,
+            rps=rps4_distinct,
+            theta_paths=independent_orders_for(rps4_distinct, 300),
+            seed=61,
+            expected="independent_rejected",
+        ),
+        run_case(
+            label="four_identical_carrier_shared_shaft_negative",
+            cfg=cfg4,
+            rps=rps4_identical,
+            theta_paths=shared_orders_for(rps4_identical, 400),
+            seed=71,
+            expected="unidentifiable",
+        ),
+    ]
+
+    all_passed = all(bool(case["passed"]) for case in cases)
+    summary = dict(
+        status="passed" if all_passed else "failed",
+        truth=dict(lam=lam_true, sigma=sigma_true, d=d_true),
+        criterion=(
+            "shared controls must identify lam/sigma within factor two of planted 6/6; "
+            "same-marginal independent controls must not identify planted shared motion; "
+            "four identical carriers must remain unidentifiable"
+        ),
+        source=dict(
+            script=str(Path(__file__).resolve()),
+            revised_phase=str(Path(RP.__file__).resolve()),
+            python=sys.executable,
+            torch=torch.__version__,
+        ),
+        config=dict(
+            window=cfg1.moments.window,
+            hop=cfg1.moments.hop,
+            lags=list(cfg1.moments.lags),
+            gate=cfg1.gate.as_dict(),
+            duration_s=16.0,
+            n_mics=N_MICS,
+            orders=[min(orders), max(orders)],
+        ),
+        cases=cases,
     )
 
     if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(summary, indent=2, default=str))
         print(f"\nwrote diagnostic summary to {out}")
 
     print("\nsummary:")
-    print(f"  shared shaft identified: {shared_ok}")
-    print(f"  independent control low sigma: {indep_ok}")
-    if shared_ok and indep_ok:
-        print("PASS: production moment config distinguishes shared shaft from independent per-order motion")
+    for case in cases:
+        estimate = cast(dict[str, Any], case["estimate"])
+        print(
+            f"  {case['label']}: {'PASS' if case['passed'] else 'FAIL'} "
+            f"identified={estimate['identified']} lam={estimate['lam']:.4g} sigma={estimate['sigma']:.4g}"
+        )
+    if all_passed:
+        print("PASS: planted controls satisfy preregistered production-window recovery criteria")
         return 0
-    else:
-        print("FLAGGED: production moment config did not cleanly separate shared vs independent motion")
-        return 2
+    print("FAIL: at least one planted control violated the preregistered recovery criteria")
+    return 2
 
 
 def main() -> int:

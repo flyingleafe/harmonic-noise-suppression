@@ -61,7 +61,7 @@ Baseline calibration has completed: job `bash-0e3e78` produced
 tracker error is 1.07900306844 rev/s and the baseline synthetic error is
 1.92206829696 rev/s, so the 30 % gap-closure target is 1.66914872840 rev/s;
 the positive-gap lower bound is 0.69278 rev/s and the composite temperature
-$T=5.19201722008$. For Michael's rig, $T=5.21406687987$, with per-regime
+$T=5.19201722008$. For Michael's rig, $T=15.214066879865468$, with per-regime
 baseline MAEs standby 0.31710268807, ramp 8.00709812144, cruise 0.755783384995
 rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a 5 % bootstrap
 upper bound of 3.17799446808 rev/s. These are **baseline** numbers, not
@@ -297,7 +297,7 @@ not yet frozen.** Job `bash-0e3e78` produced
 tracker error is 1.07900306844 rev/s and the baseline synthetic error is
 1.92206829696 rev/s, so the 30 % gap-closure target is 1.66914872840 rev/s;
 the positive-gap lower bound is 0.69278 rev/s and the composite temperature
-$T=5.19201722008$. For Michael's rig, $T=5.21406687987$, with per-regime
+$T=5.19201722008$. For Michael's rig, $T=15.214066879865468$, with per-regime
 baseline MAEs standby 0.31710268807, ramp 8.00709812144, cruise 0.755783384995
 rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a 5 % bootstrap
 upper bound of 3.17799446808 rev/s. These are **baseline** numbers, not

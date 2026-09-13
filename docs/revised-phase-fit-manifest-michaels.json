@@ -1,41 +1,55 @@
 {
   "schema": "revised-phase-fit/1",
-  "status": "FROZEN first-C1 Michael's training manifest — no candidate fit until Main review",
+  "status": "PROPOSED first-C1 Michael's training manifest — config not used for scientific fit until Main review",
   "notes": [
     "Per-rig fit manifest for scripts/stochastic_fit_revised.py --rig michaels.",
     "Calibrated composite temperature T = J/H = 15.214066879865468 from baseline_v1/calibration.json.",
-    "Frozen front end: n_fft=16384, hop=1024, sr=16000, work grid 64000, band [30,7900] Hz.",
+    "Front end: n_fft=16384, hop=1024, sr=16000, work grid 64000, band [30,7900] Hz.",
     "Training recording FLY125 only; FLY124 is held out and refused by HELD_OUT_TOKENS.",
-    "Raw telemetry track rps (the project-corrected rev/s track, still RAW telemetry per RAW_RPS_KEYS).",
+    "Raw telemetry track rps (the project-corrected rev/s track, still RAW telemetry per RAW_RPS_KEYS); zero delay; one gain recording across regimes.",
     "Dataset pin: michaels-frames = 8e9d149560dd5d5fa8aaa87e7ea537d7e4d96e829e874dab7d9c92621cca6e46.",
-    "Regime windows audited from FLY125 motors_command/RPS ( StampIndex dt ~0.0343 s ):",
-    "  standby: rotor mean <25 rps, available 0.0-1.16 s and 173.03-178.48 s;",
-    "  ramp:    25-65 rps, available 1.20-15.83 s and 171.00-172.99 s;",
-    "  cruise:  >=65 rps, available 15.86-170.97 s.",
-    "Selected non-overlapping supports: standby at the landing block (173-178.48 s),",
-    "ramp 2-15 s, and three 16 s cruise windows. The user-suggested standby 2-10 / ramp 10-18",
-    "windows straddle actual regime boundaries, so they are replaced by audited pure windows.",
-    "One recording gain across regimes; no independent per-clip gain.",
-    "Optimizer values below are pre-warm placeholders; update after uni-gpushort smoke timing."
+    "Regimes are not redefined: standby = all rotors 20-45 rps; ramp = 45-65 event/context around the actual transition; cruise = all rotors >=65 rps.",
+    "Known FLY125 standby support is 13.5 s at 1.78..15.28 s; selected standby 2..10 s, not motors-off landing.",
+    "Selected non-overlapping supports: standby 2..10 s; ramp context 10..18 s containing the actual transition; cruise 32..48, 64..80, 96..112 s after raw-key audit.",
+    "Optimizer proposal from measured warm GPU smoke python-af021d: first 7.927 s, warm 2.367/2.364 s, 3.929 GB at K230 R4 M8 harmonic_chunk=8.",
+    "Proposed C1 fit budget: Adam 120 iterations, lr 0.1, frames_per_step=1 per clip, frame_chunk=1, harmonic_chunk=8, seed 0."
   ],
   "front_end": {
     "sr": 16000,
     "sample_rate_work": 64000,
     "n_fft": 16384,
     "hop": 1024,
-    "band_hz": [30.0, 7900.0]
+    "band_hz": [
+      30.0,
+      7900.0
+    ]
   },
   "state": {
     "rate_hz": 500.0
   },
   "optimizer": {
-    "harmonic_chunk": 8,
-    "iters": 1,
-    "lr": 0.01,
+    "algorithm": "Adam",
+    "iters": 120,
+    "lr": 0.1,
     "seed": 0,
     "frame_chunk": 1,
-    "frames_per_step": null,
-    "atom_dtype": "float32"
+    "frames_per_step": 1,
+    "frames_per_step_scope": "per_clip",
+    "atom_dtype": "float32",
+    "harmonic_chunk": 8,
+    "warm_gpu_measurement": {
+      "source_job": "python-af021d",
+      "K": 230,
+      "R": 4,
+      "M": 8,
+      "harmonic_chunk": 8,
+      "first_s": 7.927,
+      "warm_s": [
+        2.367,
+        2.364
+      ],
+      "peak_gb": 3.929
+    }
   },
   "composite": {
     "temperature": 15.214066879865468
@@ -48,11 +62,22 @@
   "moments": {
     "window": 4096,
     "hop": 256,
-    "lags": [1, 2, 4, 8, 16, 32, 64],
+    "lags": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
     "gate": {
       "min_line_snr_db": 10.0,
       "min_isolation_bins": 4.0,
-      "order_range": [2, 40],
+      "order_range": [
+        2,
+        40
+      ],
       "min_frames": 32,
       "max_wrap_spread_rad": 1.2,
       "preregistered": true
@@ -63,20 +88,25 @@
       "dataset": "michaels-frames",
       "rps_key": "rps",
       "k_cap": 230,
-      "delay_s": [0.0, 0.0, 0.0, 0.0],
+      "delay_s": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
       "clips": [
         {
           "recording": "FLY125",
           "regime": "standby",
-          "start_s": 173.0,
-          "seconds": 4.5,
+          "start_s": 2.0,
+          "seconds": 8.0,
           "channels": null
         },
         {
           "recording": "FLY125",
           "regime": "ramp",
-          "start_s": 2.0,
-          "seconds": 13.0,
+          "start_s": 10.0,
+          "seconds": 8.0,
           "channels": null
         },
         {
