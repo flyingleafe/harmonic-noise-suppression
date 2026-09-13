@@ -24,6 +24,12 @@ import sys
 import time
 from pathlib import Path
 
+# In shared omnirun worktrees the script may be unpacked into a fresh tree
+# while PYTHONPATH still points at a stale cached src tree.  Force imports
+# from this script's own repository root first.
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "src"))
+
 import numpy as np
 import torch
 
