@@ -109,6 +109,17 @@ The document merges what used to be two pages, `bench-fit-derivations` and
 rotor-speed labels (§16 to §19). The line model's interpretation is revised in
 [bench-fit-revised-phase-model](bench-fit-revised-phase-model.html); read that
 page for the physics, this one for what was measured.
+
+Three things this page does **not** claim, and for which the revised documents
+fix the language: the HPP scoring reference is the published raw telemetry array
+for every arm; refined tracks may condition a DREGON C4 candidate but are not a
+scoring reference or independent physical truth; a renderer's realized shaft
+label is diagnostic only; the spectral objective is a **composite** score,
+never an exact joint NLL and never evidence; and **no revised candidate has
+passed or become an overall incumbent**. C2 and C3 have both failed overall
+under the guarded-v2 frozen protocol. C4 fixed-carrier fitting is under
+implementation, not trained and not scored. The current ledger is
+`docs/experiments/revised-phase-campaign.qmd`.
 :::
 
 # 1. The task
@@ -676,8 +687,15 @@ if cell:
     )
 ```
 
-The two estimates agree to 0.005 for orders 1 to 16. They use different parts of
-the data. So the mixture model is correct, and the coherent fraction is real.
+The two estimates agree to 0.005 for orders 1 to 16, from different parts of
+the data (equivalent width against centre-bin share, on this bench cell). That
+agreement is evidence for the **narrow-plus-broad descriptive template** — one
+single-scale line is inadequate, and the data carry at least two apparent
+linewidth scales. It is **not** evidence for a physical coherent power
+fraction: decomposing $E|X|^2$ into $|EX|^2$ plus variance depends on the
+initial phase alignment, so $w$ here measures apparent scales, not a
+deterministic tone's share of the power. Revised interpretation:
+`bench-fit-revised-phase-model.qmd` §2.2.
 
 ## 5.2 Width and mixture both change, and one width cannot hold both
 
@@ -1204,6 +1222,12 @@ _d(players(rows))
 
 # 13. The gate: a frozen tracker as the judge
 
+**Historical.** The gate numbers in this section were computed on renders made
+before the 2026-09-12 render-path correction (the render-correction callout in
+§16). They are historical and unverified under the corrected render path —
+neither a current pass nor a current fail — and they are not re-derived,
+re-scored or re-interpreted here.
+
 The strongest available test of "is this Michael's comb" is not a spectral
 statistic. It is a model that was trained on real data, frozen, and never told
 about this fit: `hppnet_l2_r2_s0`, read out with
@@ -1339,9 +1363,10 @@ list.
 
 # 15. Standby: one window, and why there is only one
 
-FLY125 holds exactly **one** contiguous standby run — 13.5 s starting at 1.78 s,
-out of 13.9 s of standby in a 178 s recording. So Stage 3 fits a single 12.5 s
-window and says so: more "clips" would be consecutive slices of one event.
+FLY125 holds exactly **one** contiguous standby run. The old fit's exact
+start is unknown; the conservative whole-event training envelope is
+**[1.78, 15.28] s**. Stage 3 fits a single window inside that envelope and
+says so: more "clips" would be consecutive slices of one event.
 Standby also needs a taller comb than cruise, not a shorter one: at 35 rev/s
 there are 226 orders under Nyquist against 121 in cruise.
 
@@ -1437,6 +1462,26 @@ $1.95\times10^{-5}$ Hz to $1.88\times10^{-5}$ Hz. The tied slope moves from
 0.573 to 0.568 Hz per order. The likelihood per cell moves by 0.001 nats. The
 excess over the leave-one-out reference moves by 0.017 nats.
 
+::: {.callout-note}
+## The old and new predictors are different laws, scored on the same observations
+
+The historical-forward `CombSpectrum` and the new moving filtered mean are
+**different prediction laws**. Any NLL gain tests the whole predictor revision
+— carrier integration, windowing, floor treatment, renderer anti-aliasing and
+the stochastic line model together — not an isolated proof of one mechanism
+such as OU shaft causality. They are scored on the **same observations,
+weights and units**, and old exports are rescored, never refitted.
+:::
+
+::: {.callout-note}
+## The old sampler is not exactly the new kernel
+
+The legacy renderer's sampler uses overlap-add increments, FM-coherent tone
+generation and realized-variance rescaling. Those choices prevent claiming that
+its output is exactly the new finite-window kernel; it is a related but
+distinct generator.
+:::
+
 **The cruise fit is not label-limited.** A correction of up to 1.5 rev/s in the
 carrier changed nothing that matters about the fitted line model. That is a
 negative result, and it is worth stating plainly, because the refit was
@@ -1509,6 +1554,23 @@ against 31 s on the GPU; the optimiser alone is 101 s against 6 s. The two arms
 agree to $2.2\times10^{-5}$ nats per cell, so the device is not part of the
 model. A full eight-clip cruise fit is now under three minutes.
 
+Remote verification of the revised-phase implementation (not the old
+`CombSpectrum` fits above): `bash-1a1663` on commit `b11c613b45e7` passed 115
+tests with 2 skipped in 41.88 s on CPU; `bash-060c82` on commit
+`4632edd383e1` (V100 16 GB) confirmed 13/13 finite forward and backward
+gradients with a 10.260 s cold wall time and 3.929 GB peak allocation. The cold
+wall time is not a steady fit cost. Round 1 C1 is now rejected at honest planted
+preflight `python-e25ee9`: true $\lambda/\sigma=6/6$ was not recovered, and the
+near-coincident four-rotor support had no isolated moment cells. The earlier
+`python-c049cf` pass is an invalid scalar-zero fixture, not scientific proof.
+Round 2 C2 was implemented in commit `08b8ef3c` and remote preflight
+`revised-phase-round2-pro-db69c3` passed 39 tests with 2 skipped in 56.72 s, but
+then failed the actual guarded-v2 frozen gates: DREGON PIT MAE, DREGON
+composite interval, DREGON LTAS and Michael's primary MAE ratio. Round 3 C3 is
+in progress with the same physics and only Stage 1 initialization/order-ladder
+changes. No revised candidate has passed or become an incumbent in this
+historical page.
+
 ## 16.4 Look and listen to the refit
 
 These panels and players are rendered FROM the refined-label fit, on the windows
@@ -1535,15 +1597,12 @@ if refit_panels:
     )
 ```
 
-::: {layout-ncol=1}
-![refit, cruise window 0](stage2-cruise/cruise_refined_00.png)
-
-![refit, cruise window 1](stage2-cruise/cruise_refined_01.png)
-
-![refit, cruise window 2](stage2-cruise/cruise_refined_02.png)
-:::
-
 ```{python}
+from IPython.display import Markdown, display as _md_display
+
+for i in range(3):
+    _md_display(Markdown(f"![refit, cruise window {i}](stage2-cruise/cruise_refined_{i:02d}.png)"))
+
 if refit_panels:
     _d(players([(r["clip"], f"cruise_refined_{i:02d}") for i, r in enumerate(refit_panels)]))
 ```
@@ -1560,40 +1619,28 @@ further from DREGON than from Michael's rig — but its channel pattern is out b
 **4.3 to 4.6 dB rms**, against 0.8 to 1.3 dB on Michael's. The fit reproduces
 DREGON's spectrum and not DREGON's array.
 
-::: {layout-ncol=1}
-![DREGON refit, free-flight window 0](stage2-cruise/dregon_refined_00.png)
-
-![DREGON refit, hovering window 0](stage2-cruise/dregon_refined_01.png)
-:::
+```{python}
+for i, label in enumerate(["free-flight", "hovering"]):
+    _md_display(Markdown(f"![DREGON refit, {label} window 0](stage2-cruise/dregon_refined_{i:02d}.png)"))
+```
 
 ```{python}
-if dregon_panels:
-    display(
-        pd.DataFrame(
-            [
-                {
-                    "window": r["clip"],
-                    "rotors (rev/s)": r["rotors"],
-                    "k_half": r["k_half"],
-                    "LTAS fitted |dev| dB": r["fitted_mean_abs_db"],
-                    "LTAS pre-fit |dev| dB": r["prefit_mean_abs_db"],
-                    "channel pattern rms dB": r["channel_rms_dev_db"],
-                }
-                for r in dregon_panels
-            ]
-        ).set_index("window")
-    )
-    _d(players([(r["clip"], f"dregon_refined_{i:02d}") for i, r in enumerate(dregon_panels)]))
-else:
-    _d(
-        HTML(
-            "<p><em>The DREGON refit has no panels in this checkout. Build them "
-            "with <code>python scripts/_stage2_panels.py --fit "
-            "results/S2/dregon_room2_cruise_refined.json --dataset DREGON-frames "
-            "--recording free-flight_nosource_room2 --prefix dregon_refined "
-            "--clips 2 --seconds 8</code>.</em></p>"
-        )
-    )
+display(
+    pd.DataFrame(
+        [
+            {
+                "window": r["clip"],
+                "rotors (rev/s)": r["rotors"],
+                "k_half": r["k_half"],
+                "LTAS fitted |dev| dB": r["fitted_mean_abs_db"],
+                "LTAS pre-fit |dev| dB": r["prefit_mean_abs_db"],
+                "channel pattern rms dB": r["channel_rms_dev_db"],
+            }
+            for r in dregon_panels
+        ]
+    ).set_index("window")
+)
+_d(players([(r["clip"], f"dregon_refined_{i:02d}") for i, r in enumerate(dregon_panels)]))
 ```
 
 ## 16.5 A/B: the refined fit against the raw fit, on the same window
@@ -1670,8 +1717,11 @@ ear notices.
 The first version of this comparison showed the raw-label arm with a bright band
 from 6.5 kHz to Nyquist that neither the real clip nor the refined arm had. It
 was not a refactor artefact and not a property of the labels. It was aliasing in
-the RENDER path, and it had been there for every synthetic clip this project has
-made.
+the **stochastic fit-to-render path** — `stage2.render_from_export` and
+`stage1_bayes.render_from_export` — and it affected the clips rendered through
+that path, including the ones on this page. What was examined is that path and
+those clips; nothing here establishes which other synthetic audio in this
+project went through it.
 
 The mechanism, measured three ways:
 
@@ -1692,24 +1742,60 @@ The mechanism, measured three ways:
 
 The fix is not to silence the lines — an order that is out of band for the fast
 rotor is inside it for the slow one, and the profile is one shared (rotor,
-order) grid. The render now **low-passes itself before decimation**, with a
-filter whose passband (7900 Hz, the fit's own band edge), stopband (8000 Hz, the
-output Nyquist) and attenuation (100 dB) are stated, and whose length follows
-from that specification through `kaiserord`. `stage2.antialias`, applied in both
-`stage2.render_from_export` and `stage1_bayes.render_from_export`.
+order) grid. The render now **low-passes itself before decimation**, on the
+render path only, with a filter whose passband (7900 Hz, the fit's own band
+edge), stopband (8000 Hz, the output Nyquist) and attenuation (100 dB) are
+stated, and whose length follows from that specification through `kaiserord`.
+`stage2.antialias`, applied in both `stage2.render_from_export` and
+`stage1_bayes.render_from_export`. The intended application is a single centred
+FIR pass on the render path; its realised response under that final
+specification has **not** been re-measured on this page.
 
-Measured after the fix, same window, same seed: the decimated 7.5–8 kHz band
-falls from 15.1 to 2.5 dB with the above-8 kHz contribution at −148 dB, the
-6–8 kHz band goes 11.6 → 7.9 dB against the real clip's 7.8 dB, and everything
-below 5 kHz is bit-for-bit what it was. The tone test now reads −4.9 dB at
-7.9 kHz (identical to the unfiltered path, so nothing the fit modelled is lost)
-and −163 dB at 8.1 kHz.
+The before/after band figures that follow are **PRELIMINARY**. They were taken
+with a **7800 Hz passband** filter variant, not through the final 7900 Hz pass
+/ 8000 Hz stop / 100 dB specification described above, and that final
+specification has not been re-measured. They are therefore indicative of the
+**mechanism**, not of the shipped filter.
+
+Measured after the fix with that 7800 Hz variant, same window, same seed: the
+decimated 7.5–8 kHz band falls from 15.1 to 2.5 dB with the above-8 kHz
+contribution at −148 dB, and the 6–8 kHz band goes 11.6 → 7.9 dB against the
+real clip's 7.8 dB. Below 5 kHz the **band powers are unchanged at the reported
+precision** — that is a band-power comparison, not sample-identical audio. The
+tone test reads −4.9 dB at 7.9 kHz, the same reading as the unfiltered path at
+that frequency, so nothing the fit modelled is lost **at that tone frequency**;
+that is a tone-level statement at one frequency, not a global one. At 8.1 kHz it
+reads −163 dB.
 
 The shared decimator is deliberately untouched: it is what REAL clips go
 through, and moving its band edge would move every recording in the project.
 Every render on this page was rebuilt through the fixed path; the numbers in
 §16.6 and §13 predate it.
 :::
+
+:::: {.callout-warning}
+## Gate numbers taken before the render correction are historical
+
+Every gate decision computed on pre-correction renders of this path — the
+numbers in §13 and §16.6 among them — was measured on clips carrying the
+aliasing artefact. They are **historical and unverified under the corrected
+render path**: neither a current pass nor a current fail. They are not
+re-derived, re-scored or re-interpreted here, and they are not deleted.
+::::
+
+:::: {.callout-warning}
+## Also on this path: the wrapper does not preserve absolute level
+
+A further defect exists on the examined render path: `stage2.render_from_export`
+reaches `srn.synthesize` with its RMS normalisation in force, so the **fitted
+absolute levels are not preserved through the wrapper as it stands**. Absolute
+levels of clips rendered through this path are affected by that.
+
+The resolution — physical units with no per-arm normalisation — is **pending**
+under the frozen revised-phase protocol and is not claimed here. No re-measured
+level, no estimated error and no before/after number is published for this
+defect in this document; those wait for actual baseline output.
+::::
 
 ```{python}
 if ab_dregon:
@@ -1741,6 +1827,11 @@ audible tonal comb. That difference, not the labels, is what the frozen tracker
 punishes in §16.6.
 
 ## 16.6 What the frozen tracker says about the refits
+
+**Historical.** These tracker numbers were computed on renders made before the
+2026-09-12 render-path correction above. They are historical and unverified
+under the corrected render path — neither a current pass nor a current fail —
+and they are not re-derived here.
 
 The likelihood is not the judge. The gate is a frozen rotor-speed model
 (`hppnet_l2_r2_s0`) scoring twelve independent synthetic draws, each on its own
@@ -2115,10 +2206,23 @@ Three things to read from it, each of which decides the next step:
 
 **The ramp is where the label is worst.** Refinement is gated off below
 45 rev/s and blended across the ramp, precisely because a slow shaft's comb is
-too weak to refine against. So the ramp clips carry raw telemetry, and the
-carrier error that the cruise fit could ignore is largest exactly where the
-speed law needs it. Fit the carrier offset (`rps_offset`, already in the model)
-on ramp clips, and report it.
+too weak to refine against. So the ramp clips historically carried raw
+telemetry, and the carrier error that the cruise fit could ignore was largest
+exactly where the speed law needed it. Those measurements stand as the
+historical motivation for considering label choice and carrier bias; the
+current C4 plan tests fixed supplied raw/refined labels instead of fitting a
+carrier correction.
+
+The operative recommendation that used to close this paragraph — "fit the
+carrier offset (`rps_offset`, already in the model) on ramp clips, and report
+it" — is **historical and superseded**. A fitted time-resolved `rps_offset`
+path beside a fitted shaft path is a second carrier path, and the two are
+non-identifiable up to a gauge. The current C4 parameterization is stricter:
+choose the supplied nominal carrier (raw or published refined for DREGON, raw
+for Michael's) before fitting, fix it, set all clip/population frequency biases
+and additional learned delay to zero, and marginalize stochastic phase
+broadening instead of recovering a carrier trajectory (see
+`bench-fit-revised-phase-model.qmd` §6.1.1).
 
 **The gate must move with the model.** The acceptance probe scores 8 s windows
 of cruise or standby. A model that claims the ramp must be judged on the ramp,
@@ -2220,19 +2324,23 @@ fixed**. Items 8 to 12 are **open**.
     family's 2.5, and the floor's exponent changes sign between two fits of the
     same recording. Cause is understood (§19.1): a 1.24-fold speed range cannot
     identify an exponent. Fix is §19.3.
-19. **Aliasing in every render, found on 2026-09-12 and fixed.** The renderer
-    synthesised comb lines up to 10.8 kHz at 44.1 kHz and the shared decimator's
-    default Kaiser stop band (40-50 dB) folded them into the top octave: 14.5 dB
-    of the decimated 7.5-8 kHz band came from above 8 kHz, against 5.7 dB of
-    genuine content, and a 9 kHz tone arrived only 30.6 dB down. Fixed by a
-    render-side low-pass with a stated specification (`stage2.antialias`,
-    7900 Hz pass / 8000 Hz stop / 100 dB). Two lessons: the tell was a bright
-    band that only ONE of two otherwise similar fits showed, and the reason it
-    showed there was an unconstrained boundary order (+6.8 dB against −10.9 dB
-    for its neighbours) — **an order outside the fit band is not measured, and
-    rendering it is extrapolation with a resampler as the only thing standing
-    between it and the output.** Every gate number recorded before that date was
-    measured on clips carrying this artefact.
+19. **Aliasing on the stochastic fit-to-render path, found on 2026-09-12 and
+    fixed.** What was examined is the fit-to-render path this page uses —
+    `stage2.render_from_export` and `stage1_bayes.render_from_export` — and the
+    clips rendered through it. On that path the renderer synthesised comb lines
+    up to 10.8 kHz at 44.1 kHz and the shared decimator's default Kaiser stop
+    band (40-50 dB) folded them into the top octave: 14.5 dB of the decimated
+    7.5-8 kHz band came from above 8 kHz, against 5.7 dB of genuine content,
+    and a 9 kHz tone arrived only 30.6 dB down. Fixed by a render-side low-pass
+    with a stated specification (`stage2.antialias`, 7900 Hz pass / 8000 Hz
+    stop / 100 dB). Two lessons: the tell was a bright band that only ONE of
+    two otherwise similar fits showed, and the reason it showed there was an
+    unconstrained boundary order (+6.8 dB against −10.9 dB for its neighbours)
+    — **an order outside the fit band is not measured, and rendering it is
+    extrapolation with a resampler as the only thing standing between it and
+    the output.** Gate numbers recorded on this path before that date were
+    measured on clips carrying the artefact: they are historical and unverified
+    under the corrected render path, neither a current pass nor a current fail.
 20. **Open: DREGON's width intercept.** 13 Hz at order 1, against
     $2\times10^{-5}$ Hz for Michael's at the same rotor speed. Six orders of
     magnitude, no term in the model that explains it, and the recording differs

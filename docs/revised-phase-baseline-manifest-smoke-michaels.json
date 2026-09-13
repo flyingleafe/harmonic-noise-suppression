@@ -1,0 +1,151 @@
+{
+ "schema": "revised-phase-baseline/1",
+ "status": "SMOKE instance for the MICHAEL cohort — an instrument test, NOT a scientific result.",
+ "notes": [
+  "One microphone, one held-out window per regime, two frozen render seeds, and family",
+  "selection switched off (the declared family is used directly) so the run exercises the",
+  "Michael gate wiring — the FLY124 MAE-ratio gate plus the conditional composite and",
+  "absolute-LTAS non-regression gates and their block-level tolerances — without paying for",
+  "the 16-window family comparison. The 'candidate' arm is the RAW-era FLY125 cruise export",
+  "used as a stand-in so --check has something real to measure; it is not a revised candidate",
+  "and consumes no candidate round."
+ ],
+ "scorer": {"experiment": "hppnet_l2_r2_s0", "ckpt": "best"},
+ "observation": {"sr": 16000, "n_fft": 16384, "hop": 1024, "f_min": 30.0, "f_max": 7900.0},
+ "gates": {
+  "alpha": 0.05,
+  "bootstrap_seed": 0,
+  "dregon_gap_fraction": 0.7,
+  "michaels_ratio_max": 1.05,
+  "composite_tolerance": 0.0
+ },
+ "null_variation": {
+  "rule": "baseline render-seed split half, paired per recording and per block, one-sided upper bound",
+  "seeds": [2001, 2002],
+  "metrics": ["pit_mae", "ltas_abs_db"]
+ },
+ "cohorts": [
+  {
+   "name": "michaels_fly124",
+   "rig": "michaels",
+   "role": "held_out",
+   "gate": "michaels_ratio",
+   "dataset": "michaels-frames",
+   "version": null,
+   "channels": "0",
+   "scoring_rps_key": "rps",
+   "recordings": ["FLY124"],
+   "fit_recording": "FLY125",
+   "family_selection": {"basis_recordings": ["FLY125"], "require_identity_coverage": false},
+   "regimes": [
+    {
+     "regime": "standby",
+     "min_rps": 20.0,
+     "max_rps": 45.0,
+     "family": "raw",
+     "select_family": false,
+     "evaluation": {"mode": "auto", "min_seconds": 8.0, "stride_s": 8.0, "max_windows": 1}
+    },
+    {
+     "regime": "ramp",
+     "min_rps": 45.0,
+     "max_rps": 65.0,
+     "family": "refined",
+     "select_family": false,
+     "evaluation": {
+      "mode": "support",
+      "context_seconds": 8.0,
+      "min_support_seconds": 0.5,
+      "max_windows": 1
+     },
+     "note": "FLY124's whole 45-65 rev/s band holds 1.24 s, the longest run 0.99 s, so the ramp is scored inside a CONTEXT window: the 8 s window carries the render and the analysis guard while the scored mask stays the pre-registered interval"
+    },
+    {
+     "regime": "cruise",
+     "min_rps": 65.0,
+     "max_rps": null,
+     "family": "refined",
+     "select_family": false,
+     "evaluation": {"mode": "auto", "min_seconds": 8.0, "stride_s": 8.0, "max_windows": 1}
+    }
+   ],
+   "families": {
+    "refined": {"cruise": {"path": "results/S2/cruise_8clip_refined.json"}},
+    "raw": {
+     "cruise": {
+      "path": "results/S2/cruise_8clip.json",
+      "provenance": {
+       "recordings": ["FLY125"],
+       "starts_s": [16.0, 32.0, 48.0, 64.0, 96.0, 112.0, 128.0, 144.0],
+       "seconds": 16.0,
+       "dataset": "michaels-frames",
+       "rps_key": "rps"
+      }
+     },
+     "standby": {
+      "path": "results/S2/standby.json",
+      "provenance": {
+       "recordings": ["FLY125"],
+       "starts_s": [1.78],
+       "seconds": 12.5,
+       "dataset": "michaels-frames",
+       "rps_key": "rps",
+       "note": "DECLARED and UNCERTAIN — see the proposals doc; Main's ruling pending"
+      }
+     }
+    }
+   },
+   "baseline_map": {
+    "standby": {
+     "from_regime": "standby",
+     "match": "aggregate",
+     "extrapolated": true,
+     "label": "FLY125 standby export applied to held-out FLY124 standby (cross-recording extrapolation)"
+    },
+    "ramp": {
+     "from_regime": "cruise",
+     "match": "aggregate",
+     "extrapolated": true,
+     "label": "FLY125 cruise export aggregate used for FLY124 RAMP — an explicit current-model extrapolation; no fitted ramp baseline exists"
+    },
+    "cruise": {
+     "from_regime": "cruise",
+     "match": "aggregate",
+     "extrapolated": true,
+     "label": "FLY125 cruise export aggregate applied to held-out FLY124 cruise (cross-recording extrapolation)"
+    }
+   }
+  }
+ ],
+ "arms": {
+  "real": {"kind": "real"},
+  "baseline": {"kind": "export_render"},
+  "candidate": {
+   "kind": "export_render",
+   "export": "results/S2/cruise_8clip.json",
+   "provenance": {
+    "recordings": ["FLY125"],
+    "starts_s": [16.0, 32.0, 48.0, 64.0, 96.0, 112.0, 128.0, 144.0],
+    "seconds": 16.0,
+    "dataset": "michaels-frames",
+    "rps_key": "rps"
+   },
+   "extrapolated": true,
+   "label": "SMOKE stand-in: the raw-era FLY125 cruise fit, aggregated and applied to FLY124",
+   "training_provenance": {
+    "clips": [
+     {"recording": "FLY125", "start_s": 16.0, "seconds": 16.0, "regime": "cruise", "rps_key": "rps"},
+     {"recording": "FLY125", "start_s": 32.0, "seconds": 16.0, "regime": "cruise", "rps_key": "rps"},
+     {"recording": "FLY125", "start_s": 48.0, "seconds": 16.0, "regime": "cruise", "rps_key": "rps"},
+     {"recording": "FLY125", "start_s": 64.0, "seconds": 16.0, "regime": "cruise", "rps_key": "rps"},
+     {"recording": "FLY125", "start_s": 96.0, "seconds": 16.0, "regime": "cruise", "rps_key": "rps"},
+     {"recording": "FLY125", "start_s": 112.0, "seconds": 16.0, "regime": "cruise", "rps_key": "rps"},
+     {"recording": "FLY125", "start_s": 128.0, "seconds": 16.0, "regime": "cruise", "rps_key": "rps"},
+     {"recording": "FLY125", "start_s": 144.0, "seconds": 16.0, "regime": "cruise", "rps_key": "rps"}
+    ]
+   },
+   "training_guard_seconds": 1.024
+  }
+ },
+ "out_dir": "results/revised_phase/smoke_michaels"
+}
