@@ -916,6 +916,17 @@ diagonal/GLS treatment above is likewise an **approximation**, not an exact
 weighting: use the diagnostic covariance and block variation, and do not call
 it exact.
 
+The intended simple candidate 1 uses the **off-diagonal** covariance to
+estimate $\lambda_g$ and $\sigma_g$, and initializes the scalar $D_g$ from the
+diagonal residual; there is no per-harmonic latent, no EM, no Kalman filter and
+no particle stage. The moment implementation was originally diagonal-only; the
+off-diagonal $\operatorname{Cov}/(kl)$ treatment, the exact nominal integrated
+heterodyne and the valid time-pair alignment / per-frame isolation are now
+**implemented** in `revised_phase.estimate_shaft_dynamics` (integrated raw
+heterodyne, per-frame isolation, common-pair covariance). A focused local run
+passed 4 targeted tests, and `tests/experiments/test_stochastic_fit_revised_phase.py`
+passed 42 tests with 2 skipped locally.
+
 The two asymptotes of $V_{\theta,r}$ then give $\sigma_{\nu,r}$ and
 $\lambda_r$ without any search:
 
@@ -1198,7 +1209,11 @@ M=\sum_{t,s}w_tw_s A_tA_s
 }
 $$
 
-plus the floor.
+plus the floor. The colored floor uses the **real atom** $w(t)A(t)$, not a
+rectangular mean-rate shortcut, and its proper complex covariance is carried
+through the **same** finite-window kernel as the lines: the expected floor
+power is $2R_{\text{floor}}$ times the windowed exposure, with the within-window
+amplitude modulation and the analysis window both represented exactly.
 
 :::: {.callout-warning}
 ## Never a posterior mean with the prior kernel multiplied on top
@@ -1265,8 +1280,10 @@ resolving a 0.1 Hz core needs a lag grid many seconds long, and covering the
 analysis band needs a fine step: tens of thousands of points per order, with a
 truncation choice hiding inside.
 
-The finite-window expected periodogram needs none of that. For one stationary
-line of unit power observed through the analysis window $w$,
+The finite-window expected periodogram needs none of that. The work grid is an
+analytic 64 kHz grid (integer 4$\times$16 kHz), with **no harmonic mask**: an
+order reaching the work Nyquist is an error, not a silent truncation. For one
+stationary line of unit power observed through the analysis window $w$,
 
 $$
 \boxed{
@@ -1544,8 +1561,11 @@ wrong.
   retuned after seeing candidate results.
 :::::
 
-**No measured $T$ exists.** No value, range or order of magnitude is stated
-here, because none has been computed; the definition above is what is frozen.
+**Calibration is running, not frozen.** $T=J/H$ is being calibrated on the
+actual unnormalized fit weights with B16 master seed 9001 and the
+preregistered draw count and supports. No frozen $T$ value exists yet; the
+definition above is what is frozen, and a non-positive or non-finite $J$ still
+fails loudly.
 
 ## 6.3 Optional future: a joint refinement stage
 
@@ -1677,6 +1697,19 @@ comparable, not prohibitive. It is not a production measurement: the prototype
 is unoptimised, the lag grid was fixed rather than adapted per order, and the
 laptop's thread contention is visible in the spread. Re-measure on the device
 that will run the fits before making any planning claim.
+
+### Verified remote proof
+
+Two remote jobs supply the current machine evidence:
+
+* `bash-1a1663` on commit `b11c613b45e7`: 115 tests passed, 2 skipped, on CPU
+  in 41.88 s.
+* `bash-060c82` on commit `4632edd383e1` (V100 16 GB, K230, R4M8): forward and
+  backward pass both report 13/13 finite gradients; 10.260 s **cold** wall time,
+  3.929 GB peak allocation.
+
+The cold wall time is a startup measurement and cannot be extrapolated as a
+steady per-iteration fit cost.
 
 ### Verdict
 
@@ -1855,9 +1888,13 @@ $$
    independent acoustic $\epsilon_{rk}$ is acoustic phase noise and **must
    never enter that shaft label**.
 
-6. **Filtering.** Pass the source phase through the shared render-only
-   anti-aliasing stage and then the **unchanged** decimator. No per-rotor
-   masks.
+6. **Filtering.** Render at an experimental 64 kHz synthesis grid (integer
+   4$\times$16 kHz), with **no harmonic mask**. Pass the source through the
+   shared render-only anti-aliasing/resample transfer. The window/filter
+   commutation is an explicit approximation, validated to $\le 2\%$ chirp L1
+   and $\le 0.1$ dB tone mass; the kernel itself is the exact finite-window
+   expectation at the declared quadrature. The shared real decimator is
+   unchanged. No per-rotor masks.
 
 Round-trip check: integrating the emitted $f_{\text{true}}$ label must
 reproduce the shared carrier phase of every order after division by $k$;

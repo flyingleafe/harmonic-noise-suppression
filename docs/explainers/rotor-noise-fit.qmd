@@ -1360,9 +1360,10 @@ list.
 
 # 15. Standby: one window, and why there is only one
 
-FLY125 holds exactly **one** contiguous standby run — 13.5 s starting at 1.78 s,
-out of 13.9 s of standby in a 178 s recording. So Stage 3 fits a single 12.5 s
-window and says so: more "clips" would be consecutive slices of one event.
+FLY125 holds exactly **one** contiguous standby run. The old fit's exact
+start is unknown; the conservative whole-event training envelope is
+**[1.78, 15.28] s**. Stage 3 fits a single window inside that envelope and
+says so: more "clips" would be consecutive slices of one event.
 Standby also needs a taller comb than cruise, not a shorter one: at 35 rev/s
 there are 226 orders under Nyquist against 121 in cruise.
 
@@ -1458,6 +1459,26 @@ $1.95\times10^{-5}$ Hz to $1.88\times10^{-5}$ Hz. The tied slope moves from
 0.573 to 0.568 Hz per order. The likelihood per cell moves by 0.001 nats. The
 excess over the leave-one-out reference moves by 0.017 nats.
 
+::: {.callout-note}
+## The old and new predictors are different laws, scored on the same observations
+
+The historical-forward `CombSpectrum` and the new moving filtered mean are
+**different prediction laws**. Any NLL gain tests the whole predictor revision
+— carrier integration, windowing, floor treatment, renderer anti-aliasing and
+the stochastic line model together — not an isolated proof of one mechanism
+such as OU shaft causality. They are scored on the **same observations,
+weights and units**, and old exports are rescored, never refitted.
+:::
+
+::: {.callout-note}
+## The old sampler is not exactly the new kernel
+
+The legacy renderer's sampler uses overlap-add increments, FM-coherent tone
+generation and realized-variance rescaling. Those choices prevent claiming that
+its output is exactly the new finite-window kernel; it is a related but
+distinct generator.
+:::
+
 **The cruise fit is not label-limited.** A correction of up to 1.5 rev/s in the
 carrier changed nothing that matters about the fitted line model. That is a
 negative result, and it is worth stating plainly, because the refit was
@@ -1530,6 +1551,19 @@ against 31 s on the GPU; the optimiser alone is 101 s against 6 s. The two arms
 agree to $2.2\times10^{-5}$ nats per cell, so the device is not part of the
 model. A full eight-clip cruise fit is now under three minutes.
 
+Remote verification of the revised-phase implementation (not the old
+`CombSpectrum` fits above): `bash-1a1663` on commit `b11c613b45e7` passed 115
+tests with 2 skipped in 41.88 s on CPU; `bash-060c82` on commit
+`4632edd383e1` (V100 16 GB) confirmed 13/13 finite forward and backward
+gradients with a 10.260 s cold wall time and 3.929 GB peak allocation. The cold
+wall time is not a steady fit cost. Since then, the off-diagonal moment fix has
+been implemented in `revised_phase.estimate_shaft_dynamics` (integrated raw
+heterodyne, per-frame isolation, common-pair covariance): a focused local run
+passed 4 targeted tests, and `tests/experiments/test_stochastic_fit_revised_phase.py`
+passed 42 tests with 2 skipped locally. The historical CPU and V100 proofs
+remain at their recorded commits. Zero of eight candidate rounds have been used;
+no revised candidate has been fitted, scored or accepted.
+
 ## 16.4 Look and listen to the refit
 
 These panels and players are rendered FROM the refined-label fit, on the windows
@@ -1556,15 +1590,12 @@ if refit_panels:
     )
 ```
 
-::: {layout-ncol=1}
-![refit, cruise window 0](stage2-cruise/cruise_refined_00.png)
-
-![refit, cruise window 1](stage2-cruise/cruise_refined_01.png)
-
-![refit, cruise window 2](stage2-cruise/cruise_refined_02.png)
-:::
-
 ```{python}
+from IPython.display import Markdown, display as _md_display
+
+for i in range(3):
+    _md_display(Markdown(f"![refit, cruise window {i}](stage2-cruise/cruise_refined_{i:02d}.png)"))
+
 if refit_panels:
     _d(players([(r["clip"], f"cruise_refined_{i:02d}") for i, r in enumerate(refit_panels)]))
 ```
@@ -1581,40 +1612,28 @@ further from DREGON than from Michael's rig — but its channel pattern is out b
 **4.3 to 4.6 dB rms**, against 0.8 to 1.3 dB on Michael's. The fit reproduces
 DREGON's spectrum and not DREGON's array.
 
-::: {layout-ncol=1}
-![DREGON refit, free-flight window 0](stage2-cruise/dregon_refined_00.png)
-
-![DREGON refit, hovering window 0](stage2-cruise/dregon_refined_01.png)
-:::
+```{python}
+for i, label in enumerate(["free-flight", "hovering"]):
+    _md_display(Markdown(f"![DREGON refit, {label} window 0](stage2-cruise/dregon_refined_{i:02d}.png)"))
+```
 
 ```{python}
-if dregon_panels:
-    display(
-        pd.DataFrame(
-            [
-                {
-                    "window": r["clip"],
-                    "rotors (rev/s)": r["rotors"],
-                    "k_half": r["k_half"],
-                    "LTAS fitted |dev| dB": r["fitted_mean_abs_db"],
-                    "LTAS pre-fit |dev| dB": r["prefit_mean_abs_db"],
-                    "channel pattern rms dB": r["channel_rms_dev_db"],
-                }
-                for r in dregon_panels
-            ]
-        ).set_index("window")
-    )
-    _d(players([(r["clip"], f"dregon_refined_{i:02d}") for i, r in enumerate(dregon_panels)]))
-else:
-    _d(
-        HTML(
-            "<p><em>The DREGON refit has no panels in this checkout. Build them "
-            "with <code>python scripts/_stage2_panels.py --fit "
-            "results/S2/dregon_room2_cruise_refined.json --dataset DREGON-frames "
-            "--recording free-flight_nosource_room2 --prefix dregon_refined "
-            "--clips 2 --seconds 8</code>.</em></p>"
-        )
-    )
+display(
+    pd.DataFrame(
+        [
+            {
+                "window": r["clip"],
+                "rotors (rev/s)": r["rotors"],
+                "k_half": r["k_half"],
+                "LTAS fitted |dev| dB": r["fitted_mean_abs_db"],
+                "LTAS pre-fit |dev| dB": r["prefit_mean_abs_db"],
+                "channel pattern rms dB": r["channel_rms_dev_db"],
+            }
+            for r in dregon_panels
+        ]
+    ).set_index("window")
+)
+_d(players([(r["clip"], f"dregon_refined_{i:02d}") for i, r in enumerate(dregon_panels)]))
 ```
 
 ## 16.5 A/B: the refined fit against the raw fit, on the same window

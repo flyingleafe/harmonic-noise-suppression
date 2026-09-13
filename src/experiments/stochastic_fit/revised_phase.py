@@ -1115,6 +1115,84 @@ def valid_lag_pairs(valid: np.ndarray, lag: int) -> list[tuple[int, np.ndarray, 
     return out
 
 
+def _raw_phase_in_frame(
+    raw: np.ndarray, starts: np.ndarray, width: int, sr: int
+) -> np.ndarray:
+    """Integrated raw telemetry phase sampled inside each analysis frame.
+
+    ``Phi_raw(t_start + n)`` for ``n = 0..width-1``.  Demodulating by this
+    GLOBAL moving telemetry removes the carrier exactly, so the coefficient
+    phase is the residual ``k theta(t) + epsilon(t)`` and lagged increments
+    are residual increments directly.  A constant phase reference would cancel
+    in the increment; using the actual integrated phase avoids subtracting a
+    nominal advance separately.
+    """
+    raw = np.asarray(raw, dtype=np.float64)
+    phi = 2.0 * np.pi * np.cumsum(raw, axis=-1) / float(sr)
+    n = np.arange(width)
+    idx = starts[:, None] + n[None, :]
+    return phi[idx]
+
+
+def _stft_demod_integrated(
+    audio: np.ndarray,
+    raw: np.ndarray,
+    frames: np.ndarray,
+    k: float,
+    window: np.ndarray,
+    hop: int,
+    sr: int,
+) -> np.ndarray:
+    """Hann-windowed coefficient after demodulating by ``exp(-1j k Phi_raw(t))``
+    sampled inside the frame.
+
+    Returns ``(M, N)`` complex coefficients, one per microphone and frame.
+    The nominal carrier advance is removed by the within-window integration, so
+    the coefficient phase is the residual ``k theta(t) + epsilon(t)`` (up to
+    the finite-window average).  Lagged increments are therefore residual
+    increments directly; no further subtraction of a nominal advance is needed.
+    """
+    audio = np.asarray(audio, dtype=np.float64)
+    window = np.asarray(window, dtype=np.float64)
+    frames = np.asarray(frames, dtype=np.int64)
+    starts = frames * int(hop)
+    width = int(window.size)
+    phase = _raw_phase_in_frame(raw, starts, width, sr)  # (N, width)
+    n = np.arange(width)
+    seg = (
+        audio[:, starts[:, None] + n[None, :]]
+        * window[None, None, :]
+    )  # (M, N, width)
+    return (seg * np.exp(-1j * float(k) * phase)[None, :, :]).sum(axis=-1)
+
+
+def _pair_id(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+    """Compact identifier of a (lo_frame, hi_frame) pair for set intersection."""
+    return (
+        np.asarray(lo, dtype=np.int64) << 32
+    ) | np.asarray(hi, dtype=np.int64)
+
+
+def _aligned_covariance(
+    res_a: np.ndarray, pid_a: np.ndarray, res_b: np.ndarray, pid_b: np.ndarray
+) -> tuple[float, int]:
+    """Mean product of ``res_a`` and ``res_b`` over their common pair ids.
+
+    The inputs are already circular-mean-removed.  The returned covariance is
+    a wrapped-phase sample covariance, not an exact posterior quantity.
+    """
+    if pid_a.size == 0 or pid_b.size == 0:
+        return 0.0, 0
+    common, ia, ib = np.intersect1d(
+        pid_a, pid_b, assume_unique=True, return_indices=True
+    )
+    if common.size == 0:
+        return 0.0, 0
+    a = np.asarray(res_a, dtype=np.float64)[ia]
+    b = np.asarray(res_b, dtype=np.float64)[ib]
+    return float(np.mean(a * b)), int(common.size)
+
+
 def estimate_shaft_dynamics(
     rows: Sequence[tuple[str, Clip]],
     *,
@@ -1123,40 +1201,58 @@ def estimate_shaft_dynamics(
 ) -> ShaftDynamics:
     """Moment initialization of ``(lam, sigma, D)`` from complex line phases.
 
-    Phase increments of the gated, isolated lines give
+    The SHAFT term is identified from the OFF-DIAGONAL structure function of
+    same-rotor order pairs:
 
-        ``Var[dpsi_k(tau)] = k^2 2 sigma^2 [tau/lam - (1 - exp(-lam tau))/lam^2]
-        + 2 D tau``,
+        ``Cov[dpsi_k(tau), dpsi_l(tau)] = k l 2 sigma^2
+            [tau/lam - (1 - exp(-lam tau))/lam^2]``,
 
-    where the ``k^2`` scaling separates the SHARED shaft term from the
-    independent per-harmonic term and the lag shape separates ``lam`` from
-    ``sigma``. The curve is fitted by ordinary least squares
-    (:func:`scipy.optimize.least_squares`) in log parameters.
+    which is zero for independent per-harmonic motions even when their
+    marginal variances are tuned to reproduce the same diagonals.  The
+    independent per-harmonic diffusion ``D`` is initialized from the DIAGONAL
+    residual after removing the shared OU term.
+
+    Phase increments are formed after demodulating by the integrated raw
+    telemetry phase ``exp(-1j k Phi_raw(t))`` inside each finite window, so the
+    lagged coefficient difference is a residual increment directly; no nominal
+    advance is subtracted twice.  This is the same convention the model uses for
+    its atoms.
 
     These moment data are initializers and diagnostics ONLY: they never re-enter
     the stage-2 objective as a second likelihood factor. ``lam`` and ``sigma``
-    are frozen constants in stage 2; ``D`` is only initialized here.
+    are frozen constants in stage 2; ``D`` is only initialized here and then
+    refined by the spectral MAP.
 
     The reported covariance is a DIAGNOSTIC (the residuals are correlated across
-    lags, orders and mics — it is not an exact sampling covariance), reported
-    alongside the empirical block-to-block variation across clips. If the lag
-    range does not bracket ``1/lam`` or the Jacobian is ill-conditioned,
-    ``identified`` is ``False`` and ``diagnostics['unidentifiable_reason']``
-    says why; no invented "measured" value is ever substituted.
+    lags, orders and mics, and the wrapped-phase covariance is not an exact
+    posterior), reported alongside the empirical block-to-block variation across
+    clips.  If the lag range does not bracket ``1/lam`` or the off-diagonal
+    Jacobian is ill-conditioned, ``identified`` is ``False`` and
+    ``diagnostics['unidentifiable_reason']`` says why; no invented "measured"
+    value is ever substituted.
     """
+    from collections import defaultdict
     from scipy.optimize import least_squares
 
     mc = config.moments
     k_lo, k_hi = gate.order_range
     band_lo, band_hi = config.band_hz
-    cells: list[dict[str, Any]] = []
-    passed: list[dict[str, Any]] = []
     rejected: dict[str, int] = {}
+    cross_failures: dict[str, int] = {}
     n_valid_cells_total = 0
     n_lag_pairs_total = 0
+    diag_cells: list[dict[str, Any]] = []
+    offdiag_cells: list[dict[str, Any]] = []
+    passed: list[dict[str, Any]] = []
+    order_residuals: dict[
+        tuple[str, int, float, float, int], tuple[np.ndarray, np.ndarray]
+    ] = {}
 
     def reject(reason: str) -> None:
         rejected[reason] = rejected.get(reason, 0) + 1
+
+    def cross_failure(reason: str) -> None:
+        cross_failures[reason] = cross_failures.get(reason, 0) + 1
 
     for clip_id, clip in rows:
         if clip.sr != config.sr:
@@ -1171,13 +1267,11 @@ def estimate_shaft_dynamics(
         starts = np.arange(n_frames) * mc.hop
         rate = _frame_means(raw, starts, mc.window)  # (R, N) frame-mean rev/s
         df = pg.df
-        # every line of every rotor/order, for the isolation test
+        # every line of every rotor/order, for the per-frame isolation test
         all_k = np.arange(1, config.k_cap + 1, dtype=np.float64)
         all_lines = rate[:, None, :] * all_k[None, :, None]  # (R, K, N)
-        # telemetry phase at frame starts, in rad
-        phi_raw = 2.0 * np.pi * np.cumsum(raw, axis=1) / config.sr
-        phi_at = phi_raw[:, starts]  # (R, N)
         frames = np.arange(n_frames)
+        window = np.hanning(mc.window + 1)[:mc.window]
         for r in range(rate.shape[0]):
             for k in range(max(1, k_lo), k_hi + 1):
                 centres = k * rate[r]
@@ -1186,45 +1280,54 @@ def estimate_shaft_dynamics(
                     continue
                 sep = np.abs(all_lines - centres[None, None, :])
                 sep[r, k - 1, :] = np.inf
-                if float(sep.min()) < gate.min_isolation_bins * df:
+                # PER-FRAME isolation: a frame is usable only where THIS order is
+                # separated from every other rotor/order at THAT frame.  The old
+                # global ``sep.min()`` rejected an order for the whole clip if a
+                # crossing occurred anywhere.
+                min_sep = np.min(sep, axis=(0, 1))
+                isolated = min_sep >= gate.min_isolation_bins * df
+                if not isolated.any():
                     reject("isolation")
                     continue
-                # THE PREREGISTERED THRESHOLD, applied per MICROPHONE and per
-                # FRAME. The constant is unchanged; only where and how finely
-                # it is applied is. ``min_frames`` counts USABLE samples, never
-                # the clip's total frame count.
                 snr = line_snr_db(pg.power, centres, df)  # (M, N)
-                valid = snr >= gate.min_line_snr_db
+                valid = (snr >= gate.min_line_snr_db) & isolated[None, :]
                 n_valid = int(valid.sum())
                 if n_valid < gate.min_frames:
                     reject("too few usable (mic, frame) cells")
                     continue
-                z = stft_at(clip.audio, frames, centres, mc.window, mc.hop, config.sr)
+                # Demodulate by the exact within-window integrated raw phase; the
+                # coefficient phase is the residual directly.
+                z = _stft_demod_integrated(
+                    clip.audio, raw[r], frames, float(k), window, mc.hop, config.sr
+                )
                 used_lags = 0
                 n_pairs_track = 0
                 for lag in mc.lags:
                     tau = lag * mc.hop / config.sr
-                    per_mic: dict[int, list[np.ndarray]] = {}
+                    per_mic_resids: list[np.ndarray] = []
+                    found_pair = False
                     for m, lo_i, hi_i in valid_lag_pairs(valid, lag):
                         dpsi = np.angle(z[m, hi_i] * np.conj(z[m, lo_i]))
-                        telem = k * (phi_at[r, hi_i] - phi_at[r, lo_i])
-                        per_mic.setdefault(m, []).append(_wrap(dpsi - telem))
-                    if not per_mic:
-                        continue
-                    parts: list[np.ndarray] = []
-                    for pieces in per_mic.values():
-                        res = np.concatenate(pieces)
-                        # the per-clip bias and the OU mean show up as a constant
+                        # per-clip bias and the OU mean show up as a constant
                         # offset at fixed lag: remove the CIRCULAR mean, per mic
-                        parts.append(_wrap(res - np.angle(np.mean(np.exp(1j * res)))))
-                    resid = np.concatenate(parts)
+                        res = _wrap(dpsi - np.angle(np.mean(np.exp(1j * dpsi))))
+                        pid = _pair_id(lo_i, hi_i)
+                        order_residuals[(str(clip_id), int(r), float(k), float(tau), int(m))] = (
+                            pid,
+                            res,
+                        )
+                        per_mic_resids.append(res)
+                        found_pair = True
+                    if not found_pair:
+                        continue
+                    resid = np.concatenate(per_mic_resids)
                     if resid.size < gate.min_frames:
                         continue
                     spread = float(np.sqrt(np.mean(resid**2)))
                     if spread > gate.max_wrap_spread_rad:
                         reject("wrap-censored")
                         continue
-                    cells.append(
+                    diag_cells.append(
                         dict(
                             clip_id=clip_id,
                             rotor=r,
@@ -1252,81 +1355,173 @@ def estimate_shaft_dynamics(
                         )
                     )
 
-    if not cells:
+    if not diag_cells:
         raise ValueError(
-            "no (clip, rotor, order, lag) cell passed the PREREGISTERED moment gate "
+            "no (clip, rotor, order, lag) diagonal cell passed the PREREGISTERED moment gate "
             f"{gate.as_dict()}; rejections: {rejected}. The gate is not to be relaxed to "
             "manufacture an estimate — report it and pick a different support."
         )
 
-    k_arr = np.array([c["k"] for c in cells])
-    tau_arr = np.array([c["tau"] for c in cells])
-    var_arr = np.array([c["var"] for c in cells])
+    # Cross-order covariances: intersect the exact (frame, time, mic) supports
+    # of each same-rotor order pair.  No independence is assumed across mics or
+    # orders in the bootstrap/diagnostics; the intersection is per mic.
+    grouped: dict[
+        tuple[str, int, float, int], list[tuple[float, np.ndarray, np.ndarray]]
+    ] = defaultdict(list)
+    for key, (pid, res) in order_residuals.items():
+        clip_id_k, r, k, tau, m = key
+        grouped[(clip_id_k, r, tau, m)].append((k, pid, res))
 
-    def residual(log_p: np.ndarray, k: np.ndarray, tau: np.ndarray, var: np.ndarray) -> np.ndarray:
-        lam, sigma, d = np.exp(log_p)
-        model = k**2 * integrated_ou_increment_var(tau, lam=lam, sigma=sigma) + 2.0 * d * tau
-        return model - var
+    for (clip_id_k, r, tau, m), items in grouped.items():
+        items_sorted = sorted(items, key=lambda x: x[0])
+        for i in range(len(items_sorted)):
+            k_i, pid_i, res_i = items_sorted[i]
+            for j in range(i + 1, len(items_sorted)):
+                k_j, pid_j, res_j = items_sorted[j]
+                cov, n_common = _aligned_covariance(res_i, pid_i, res_j, pid_j)
+                if n_common >= gate.min_frames:
+                    offdiag_cells.append(
+                        dict(
+                            clip_id=clip_id_k,
+                            rotor=r,
+                            k=float(k_i),
+                            l=float(k_j),
+                            tau=float(tau),
+                            cov=float(cov),
+                            n=int(n_common),
+                        )
+                    )
+                else:
+                    cross_failure("cross-order pair too few common pairs")
 
-    def fit(k: np.ndarray, tau: np.ndarray, var: np.ndarray) -> Any:
-        # crude start: at fixed lam0 the curve is linear in (sigma^2, D), so one
-        # linear solve gives a start that is already the right order of magnitude
+    def offdiag_residual(
+        log_p: np.ndarray, kl: np.ndarray, tau: np.ndarray, cov: np.ndarray
+    ) -> np.ndarray:
+        lam, sigma = np.exp(log_p)
+        return kl * integrated_ou_increment_var(tau, lam=lam, sigma=sigma) - cov
+
+    def fit_offdiag(
+        kl: np.ndarray, tau: np.ndarray, cov: np.ndarray
+    ) -> Any:
         lam0 = 1.0 / max(float(np.mean(tau)), 1e-6)
-        basis = np.stack(
-            [k**2 * integrated_ou_increment_var(tau, lam=lam0, sigma=1.0), 2.0 * tau], axis=1
-        )
-        coef, *_ = np.linalg.lstsq(basis, var, rcond=None)
+        basis = kl * integrated_ou_increment_var(tau, lam=lam0, sigma=1.0)
+        coef, *_ = np.linalg.lstsq(basis[:, None], cov, rcond=None)
         sigma0 = math.sqrt(max(float(coef[0]), 1e-6))
-        d0 = max(float(coef[1]), 1e-6)
-        x0 = np.log([lam0, sigma0, d0])
-        return least_squares(residual, x0, args=(k, tau, var), method="trf")
+        x0 = np.log([lam0, sigma0])
+        return least_squares(offdiag_residual, x0, args=(kl, tau, cov), method="trf")
 
-    res = fit(k_arr, tau_arr, var_arr)
-    lam, sigma, d_init = (float(v) for v in np.exp(res.x))
+    def fit_d(
+        k: np.ndarray, tau: np.ndarray, var: np.ndarray, lam: float, sigma: float
+    ) -> tuple[float, Any]:
+        shaft = k**2 * integrated_ou_increment_var(tau, lam=lam, sigma=sigma)
+        resid = var - shaft
+        tau2 = 2.0 * tau
 
-    cond = float(np.linalg.cond(res.jac)) if res.jac.size else float("inf")
+        def d_residual(d: np.ndarray) -> np.ndarray:
+            return tau2 * d[0] - resid
+
+        d0 = max(float(np.median(resid / tau2)), 1e-12)
+        r = least_squares(d_residual, [d0], bounds=(0.0, np.inf), method="trf")
+        return float(r.x[0]), r
+
+    offdiag_fit: Any | None = None
+    d_res: Any | None = None
+    lam = float("nan")
+    sigma = float("nan")
+    d_init = float("nan")
+
+    if len(offdiag_cells) >= 2:
+        kl_arr = np.array([c["k"] * c["l"] for c in offdiag_cells])
+        tau_off = np.array([c["tau"] for c in offdiag_cells])
+        cov_arr = np.array([c["cov"] for c in offdiag_cells])
+        try:
+            offdiag_fit = fit_offdiag(kl_arr, tau_off, cov_arr)
+            lam, sigma = (float(v) for v in np.exp(offdiag_fit.x))
+        except (ValueError, np.linalg.LinAlgError):
+            offdiag_fit = None
+
+    if offdiag_fit is not None and diag_cells:
+        k_arr = np.array([c["k"] for c in diag_cells])
+        tau_arr = np.array([c["tau"] for c in diag_cells])
+        var_arr = np.array([c["var"] for c in diag_cells])
+        d_init, d_res = fit_d(k_arr, tau_arr, var_arr, lam, sigma)
+
+    cond = (
+        float(np.linalg.cond(offdiag_fit.jac))
+        if (offdiag_fit is not None and offdiag_fit.jac.size)
+        else float("inf")
+    )
     cov: list[list[float]] | None = None
-    try:
-        dof = max(res.fun.size - 3, 1)
-        s2 = 2.0 * float(res.cost) / dof
-        cov = (s2 * np.linalg.inv(res.jac.T @ res.jac)).tolist()
-    except np.linalg.LinAlgError:
-        cov = None
+    if offdiag_fit is not None:
+        try:
+            dof = max(offdiag_fit.fun.size - 2, 1)
+            s2 = 2.0 * float(offdiag_fit.cost) / dof
+            cov = (s2 * np.linalg.inv(offdiag_fit.jac.T @ offdiag_fit.jac)).tolist()
+        except np.linalg.LinAlgError:
+            cov = None
 
     per_clip: dict[str, list[float]] = {}
-    clip_ids = sorted({str(c["clip_id"]) for c in cells})
+    clip_ids = sorted({str(c["clip_id"]) for c in diag_cells})
     if len(clip_ids) > 1:
         for cid in clip_ids:
-            sel = np.array([str(c["clip_id"]) == cid for c in cells])
-            if int(sel.sum()) < 6:
+            off_sel = [c for c in offdiag_cells if str(c["clip_id"]) == cid]
+            diag_sel = [c for c in diag_cells if str(c["clip_id"]) == cid]
+            if len(off_sel) < 2 or len(diag_sel) < 2:
                 continue
             try:
-                r_c = fit(k_arr[sel], tau_arr[sel], var_arr[sel])
-            except ValueError:
+                kl_c = np.array([c["k"] * c["l"] for c in off_sel])
+                tau_c = np.array([c["tau"] for c in off_sel])
+                cov_c = np.array([c["cov"] for c in off_sel])
+                r_c = fit_offdiag(kl_c, tau_c, cov_c)
+                lam_c, sigma_c = (float(v) for v in np.exp(r_c.x))
+                k_d = np.array([c["k"] for c in diag_sel])
+                tau_d = np.array([c["tau"] for c in diag_sel])
+                var_d = np.array([c["var"] for c in diag_sel])
+                d_c, _ = fit_d(k_d, tau_d, var_d, lam_c, sigma_c)
+                per_clip[cid] = [lam_c, sigma_c, float(d_c)]
+            except (ValueError, np.linalg.LinAlgError):
                 continue
-            per_clip[cid] = [float(v) for v in np.exp(r_c.x)]
     block = (
         np.std(np.log(np.array(list(per_clip.values()))), axis=0).tolist()
         if len(per_clip) > 1
         else None
     )
 
-    tau_min, tau_max = float(tau_arr.min()), float(tau_arr.max())
-    n_orders = int(np.unique(k_arr).size)
-    n_lags = int(np.unique(tau_arr).size)
-    reasons = []
-    if not (lam * tau_min <= 0.5):
+    reasons: list[str] = []
+    if offdiag_fit is None:
         reasons.append(
-            f"shortest lag {tau_min:.4f} s is not short against 1/lam = {1.0 / lam:.4f} s"
+            "no identifiable shared-shaft structure function from cross-order covariances"
         )
-    if not (lam * tau_max >= 1.0):
-        reasons.append(f"longest lag {tau_max:.4f} s does not reach 1/lam = {1.0 / lam:.4f} s")
-    if cond > 1e4:
-        reasons.append(f"Jacobian condition number {cond:.3g} > 1e4")
-    if n_orders < 2:
-        reasons.append("fewer than two distinct orders passed the gate: k^2 scaling unobserved")
-    if n_lags < 3:
-        reasons.append("fewer than three distinct lags: the lag shape is unobserved")
+        tau_min = tau_max = float("nan")
+        n_offdiag_orders = n_offdiag_lags = 0
+        n_offdiag_pairs = 0
+    else:
+        tau_min = float(tau_off.min())
+        tau_max = float(tau_off.max())
+        if not (lam * tau_min <= 0.5):
+            reasons.append(
+                f"shortest lag {tau_min:.4f} s is not short against 1/lam = {1.0 / lam:.4f} s"
+            )
+        if not (lam * tau_max >= 1.0):
+            reasons.append(
+                f"longest lag {tau_max:.4f} s does not reach 1/lam = {1.0 / lam:.4f} s"
+            )
+        if cond > 1e4:
+            reasons.append(f"off-diagonal Jacobian condition number {cond:.3g} > 1e4")
+        n_offdiag_orders = len({c["k"] for c in offdiag_cells} | {c["l"] for c in offdiag_cells})
+        n_offdiag_lags = int(np.unique(tau_off).size)
+        n_offdiag_pairs = len(
+            {(c["clip_id"], c["rotor"], c["k"], c["l"]) for c in offdiag_cells}
+        )
+        if n_offdiag_orders < 2:
+            reasons.append("fewer than two distinct orders in cross-order cells")
+        if n_offdiag_lags < 3:
+            reasons.append("fewer than three distinct lags in cross-order cells")
+
+    k_arr = np.array([c["k"] for c in diag_cells])
+    tau_arr = np.array([c["tau"] for c in diag_cells])
+    n_diag_orders = int(np.unique(k_arr).size)
+    n_diag_lags = int(np.unique(tau_arr).size)
 
     diagnostics: dict[str, Any] = dict(
         gate=gate.as_dict(),
@@ -1338,28 +1533,58 @@ def estimate_shaft_dynamics(
         ),
         orders_passed=passed,
         rejections=rejected,
+        crossorder_failures=cross_failures,
         gate_counts=dict(
             valid_mic_frame_cells=n_valid_cells_total,
             lag_pairs=n_lag_pairs_total,
-            note="the preregistered SNR threshold is applied per MICROPHONE and per FRAME, and "
-            "lag pairs are formed only inside one continuous run of valid frames, so no pair "
-            "straddles a gated frame",
+            note="the preregistered SNR threshold is applied per MICROPHONE and per FRAME, "
+            "isolation is a PER-FRAME mask, and lag pairs are formed only inside one "
+            "continuous run of valid frames, so no pair straddles a gated frame",
         ),
-        n_cells=len(cells),
-        n_orders=n_orders,
-        n_lags=n_lags,
-        lag_range_s=[tau_min, tau_max],
+        diagonal_cells=dict(
+            n_cells=len(diag_cells),
+            n_orders=n_diag_orders,
+            n_lags=n_diag_lags,
+            lag_range_s=[float(tau_arr.min()), float(tau_arr.max())],
+            cells=diag_cells,
+        ),
+        crossorder_cells=dict(
+            n_cells=len(offdiag_cells),
+            n_distinct_order_pairs=n_offdiag_pairs,
+            n_orders=n_offdiag_orders,
+            n_lags=n_offdiag_lags,
+            lag_range_s=[tau_min, tau_max],
+            cells=offdiag_cells,
+        ),
+        n_cells=len(diag_cells),
+        n_orders=n_diag_orders,
+        n_lags=n_diag_lags,
+        lag_range_s=[float(tau_arr.min()), float(tau_arr.max())],
         estimate=dict(lam=lam, sigma=sigma, d_init=d_init),
+        d_initialization_note=(
+            "D is initialized from diagonal residuals after subtracting the shared OU term; "
+            "it is then refined by the spectral MAP"
+        ),
         diagnostic_covariance_log_params=cov,
         diagnostic_covariance_note=(
-            "DIAGNOSTIC only: residuals are correlated across lags, orders and mics, so this "
-            "is not an exact sampling covariance and no GLS diagonal approximation is exact"
+            "DIAGNOSTIC only: the off-diagonal Jacobian gives the (lam, sigma) covariance; "
+            "wrapped-phase residuals are correlated across lags, orders and mics, so this is "
+            "not an exact sampling covariance and no GLS diagonal approximation is exact"
         ),
         per_clip_estimates=per_clip,
         block_variation_log_std=block,
         jacobian_cond=cond,
-        residual_rms=float(np.sqrt(np.mean(res.fun**2))),
-        cells=cells,
+        residual_rms=(
+            float(np.sqrt(np.mean(offdiag_fit.fun**2)))
+            if offdiag_fit is not None
+            else None
+        ),
+        diagonal_residual_rms=(
+            float(np.sqrt(np.mean(d_res.fun**2)))
+            if d_res is not None
+            else None
+        ),
+        cells=diag_cells,
     )
     if reasons:
         diagnostics["unidentifiable_reason"] = "; ".join(reasons)

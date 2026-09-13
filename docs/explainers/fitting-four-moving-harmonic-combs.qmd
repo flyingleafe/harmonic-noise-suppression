@@ -689,10 +689,20 @@ On high-SNR, non-crossing intervals:
 
 These moment estimates are **initializers and diagnostics only**. They do not
 re-enter the fit as a second likelihood factor, and no separate phase loss is
-stacked on the spectral objective. The diagonal/GLS weighting used to pool them
-is an **approximation**: take uncertainty from contiguous-block variation, and
-treat a negative raw estimate as an observation rather than an impossible
-logarithm or a zero.
+stacked on the spectral objective. Candidate 1 uses the **off-diagonal**
+covariance to estimate $\lambda_g$ and $\sigma_g$, and initializes the scalar
+$D_g$ from the diagonal residual; there is no per-harmonic latent, no EM, no
+Kalman filter and no particle stage. The moment implementation was originally
+diagonal-only; the off-diagonal $\operatorname{Cov}/(kl)$ treatment, the exact
+nominal integrated heterodyne and the valid time-pair alignment / per-frame
+isolation are now **implemented** in `revised_phase.estimate_shaft_dynamics`
+(integrated raw heterodyne, per-frame isolation, common-pair covariance). A
+focused local run passed 4 targeted tests, and
+`tests/experiments/test_stochastic_fit_revised_phase.py` passed 42 tests with 2
+skipped locally. The diagonal/GLS weighting used to pool them is an
+**approximation**: take uncertainty from contiguous-block variation, and treat
+a negative raw estimate as an observation rather than an impossible logarithm
+or a zero.
 
 Candidate 1 has one scalar $D_g$ per rig — moment-initialized, then fitted
 inside its one spectral composite MAP pass — so there is no per-order
@@ -853,7 +863,9 @@ no posterior curvature or uncertainty for any other parameter. It is frozen
 before any candidate is fitted and never retuned afterwards, and a
 non-positive or non-finite $J$ is a loud calibration failure, never a fallback
 to $T=1$. Definition, derivation and the full constraint list:
-`bench-fit-revised-phase-model.qmd` §6.2.4. No measured $T$ exists.
+`bench-fit-revised-phase-model.qmd` §6.2.4. Calibration is running with B16
+master seed 9001 on the actual unnormalized fit weights; no frozen $T$ value
+exists yet.
 
 A multichannel form is available where spatial covariance matters,
 

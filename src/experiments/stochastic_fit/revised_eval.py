@@ -1606,6 +1606,27 @@ def composite_temperature(
 # ── the other two measured quantities ───────────────────────────────────────
 
 
+def _ltas_bands_and_ref(x: np.ndarray, *, sr: int = SR, n: int = 8192) -> tuple[np.ndarray, float]:
+    """Band levels and the 200-400 Hz reference level from ONE Welch geometry.
+
+    ``range(0, max(size - n, 0) + 1, n // 2)`` includes the last complete
+    window and the exact-``n`` case, while still refusing material shorter
+    than one window.
+    """
+    xx = np.asarray(x, dtype=np.float64)
+    w = np.hanning(n + 1)[:n]
+    starts = range(0, max(xx.size - n, 0) + 1, n // 2)
+    if not len(starts):
+        raise ValueError(f"{xx.size} samples is shorter than the {n}-point LTAS window")
+    frames = np.stack([xx[s : s + n] * w for s in starts])
+    power = (np.abs(np.fft.rfft(frames, axis=-1)) ** 2).mean(0)
+    f = np.fft.rfftfreq(n, 1 / sr)
+    db = 10.0 * np.log10(power + 1e-300)
+    ref = db[(f >= 200.0) & (f <= 400.0)].mean()
+    bands = np.array([db[(f >= lo) & (f < hi)].mean() for lo, hi in stats.BANDS])
+    return bands, float(ref)
+
+
 def absolute_ltas_bands(x: np.ndarray, *, sr: int = SR, n: int = 8192) -> np.ndarray:
     """Band levels in dB with NO per-arm reference — the absolute LTAS.
 
@@ -1616,16 +1637,7 @@ def absolute_ltas_bands(x: np.ndarray, *, sr: int = SR, n: int = 8192) -> np.nda
     the absolute form is the primary quantity and the relative one is a
     secondary diagnostic (frozen addendum 3 section 17).
     """
-    xx = np.asarray(x, dtype=np.float64)
-    w = np.hanning(n + 1)[:n]
-    starts = range(0, max(xx.size - n, 0), n // 2)
-    if not len(starts):
-        raise ValueError(f"{xx.size} samples is shorter than the {n}-point LTAS window")
-    frames = np.stack([xx[s : s + n] * w for s in starts])
-    power = (np.abs(np.fft.rfft(frames, axis=-1)) ** 2).mean(0)
-    f = np.fft.rfftfreq(n, 1 / sr)
-    db = 10.0 * np.log10(power + 1e-300)
-    return np.array([db[(f >= lo) & (f < hi)].mean() for lo, hi in stats.BANDS])
+    return _ltas_bands_and_ref(x, sr=sr, n=n)[0]
 
 
 def ltas_deviation_db(real: np.ndarray, arm: np.ndarray, *, mic: int = 0) -> dict[str, Any]:
@@ -1633,13 +1645,16 @@ def ltas_deviation_db(real: np.ndarray, arm: np.ndarray, *, mic: int = 0) -> dic
 
     PRIMARY: absolute-level error, no normalization of either arm. SECONDARY
     (diagnostic only): the shape error after each clip is referenced to its own
-    200-400 Hz mean, i.e. ``accept_stats.ltas_bands``.
+    200-400 Hz mean. The secondary form is DERIVED from the same absolute
+    geometry, never recomputed by a separate function, so the two cannot drift
+    by an off-by-one window count.
     """
     r = np.asarray(real, dtype=np.float64)[mic]
     a = np.asarray(arm, dtype=np.float64)[mic]
-    abs_real, abs_arm = absolute_ltas_bands(r), absolute_ltas_bands(a)
+    abs_real, ref_real = _ltas_bands_and_ref(r)
+    abs_arm, ref_arm = _ltas_bands_and_ref(a)
     abs_dev = np.abs(abs_arm - abs_real)
-    rel_dev = np.abs(stats.ltas_bands(a) - stats.ltas_bands(r))
+    rel_dev = np.abs((abs_arm - ref_arm) - (abs_real - ref_real))
     return dict(
         mean_abs_db=float(abs_dev.mean()),
         max_abs_db=float(abs_dev.max()),
@@ -2232,6 +2247,8 @@ def conditional_non_regression_gate(
     name: str,
     quantity: str,
     recording: str,
+    regimes: Mapping[str, str] | None = None,
+    required_regimes: Sequence[str] | None = None,
 ) -> Gate:
     """Non-regression of a paired quantity over BLOCKS of one recording.
 
@@ -2240,6 +2257,12 @@ def conditional_non_regression_gate(
     block variation. The delta's one-sided upper bound is reported and
     required, and every statement is explicitly conditional — never an
     across-recording population claim. A ``None`` tolerance fails the gate.
+
+    If ``regimes`` is supplied, blocks are grouped by regime, the mean delta
+    is computed per regime, and the bootstrap resamples WITHIN each regime.
+    The aggregate delta is the equally-weighted mean across regimes, so a
+    single observed ramp block is held fixed while standby/cruise variation is
+    resampled inside those regimes.
     """
     if tolerance is None:
         return missing_tolerance_gate(
@@ -2261,31 +2284,87 @@ def conditional_non_regression_gate(
         )
         for k in keys
     ]
-    interval = cluster_interval([r["delta"] for r in rows], alpha=alpha, seed=seed)
-    mean_delta = float(np.mean([r["delta"] for r in rows])) if rows else float("nan")
+    regime_of = dict(regimes) if regimes is not None else {}
+    required = [str(r) for r in required_regimes] if required_regimes is not None else None
+    present_regimes = sorted({regime_of.get(k, "") for k in keys if regime_of.get(k)})
+    missing_regimes = sorted(set(required or []) - set(present_regimes)) if required is not None else []
+
+    if regime_of:
+        by_regime: dict[str, list[float]] = {}
+        for k in keys:
+            by_regime.setdefault(regime_of.get(k, "unknown"), []).append(
+                float(candidate[k]) - float(baseline[k])
+            )
+        per_regime_mean = {r: float(np.mean(v)) for r, v in by_regime.items() if v}
+        # Bootstrap within each regime, average with equal regime weights.
+        rng = np.random.default_rng(seed)
+        regime_names = sorted(per_regime_mean)
+        if not regime_names:
+            boot_means = np.array([])
+        else:
+            draws = []
+            for _ in range(20000):
+                draw_means = []
+                for r in regime_names:
+                    vals = by_regime[r]
+                    if len(vals) == 1:
+                        draw_means.append(vals[0])
+                    else:
+                        idx = rng.integers(0, len(vals), size=len(vals))
+                        draw_means.append(float(np.mean([vals[i] for i in idx])))
+                draws.append(float(np.mean(draw_means)))
+            boot_means = np.asarray(draws)
+        mean_delta = float(np.mean(list(per_regime_mean.values()))) if per_regime_mean else float("nan")
+        upper = float(np.quantile(boot_means, 1.0 - alpha)) if boot_means.size else None
+        interval = ClusterInterval(
+            n=int(len(keys)),
+            mean=mean_delta,
+            sem=None,
+            t_lower=None,
+            t_upper=None,
+            boot_lower=float(np.quantile(boot_means, alpha)) if boot_means.size else None,
+            boot_upper=upper,
+            lower=None,
+            upper=upper,
+            alpha=alpha,
+            note="regime-stratified bootstrap: resampled within regime, equal regime weights",
+        )
+    else:
+        interval = cluster_interval([r["delta"] for r in rows], alpha=alpha, seed=seed)
+        mean_delta = float(np.mean([r["delta"] for r in rows])) if rows else float("nan")
+        per_regime_mean = None
+
     checks = dict(
         mean_within_tolerance=bool(rows and mean_delta <= float(tolerance)),
         upper_bound_within_tolerance=bool(
             interval.upper is not None and interval.upper <= float(tolerance)
         ),
         fully_paired=bool(keys and len(keys) == len(baseline) == len(candidate)),
+        all_regimes_present=bool(required is None or not missing_regimes),
     )
+    detail: dict[str, Any] = dict(
+        checks=checks,
+        quantity=quantity,
+        tolerance=float(tolerance),
+        tolerance_source=f"block variation within {recording}",
+        mean_delta=mean_delta,
+        blocks=rows,
+        interval=interval.as_dict(),
+        conditioning=(
+            f"conditional on {recording} blocks only — the across-recording population "
+            "criterion was waived and no population claim is made"
+        ),
+    )
+    if required is not None:
+        detail["required_regimes"] = required
+        detail["present_regimes"] = present_regimes
+        detail["missing_regimes"] = missing_regimes
+    if per_regime_mean is not None:
+        detail["per_regime_mean_delta"] = per_regime_mean
     return Gate(
         name=name,
         passed=all(checks.values()),
-        detail=dict(
-            checks=checks,
-            quantity=quantity,
-            tolerance=float(tolerance),
-            tolerance_source=f"block variation within {recording}",
-            mean_delta=mean_delta,
-            blocks=rows,
-            interval=interval.as_dict(),
-            conditioning=(
-                f"conditional on {recording} blocks only — the across-recording population "
-                "criterion was waived and no population claim is made"
-            ),
-        ),
+        detail=detail,
     )
 
 
@@ -2296,6 +2375,7 @@ def michaels_ratio_gate(
     alpha: float,
     seed: int = 0,
     recording: str = "FLY124",
+    required_regimes: Sequence[str] | None = None,
 ) -> Gate:
     """Michael's fixed-recording gate on FLY124: ratio of equally weighted MAEs.
 
@@ -2309,8 +2389,9 @@ def michaels_ratio_gate(
     leverage and invites a near-zero denominator. Every regime and its own
     ratio are still reported separately. Uncertainty is block variation
     CONDITIONAL on this one recording; no across-recording population claim is
-    made or implied.
+    made or implied. A missing required regime fails the gate.
     """
+    required = [str(r) for r in required_regimes] if required_regimes else None
     per_regime: dict[str, Any] = {}
     for regime in sorted(blocks):
         rows = [
@@ -2340,12 +2421,13 @@ def michaels_ratio_gate(
     regimes = sorted(per_regime)
     base_maes = [per_regime[r]["baseline_mae"] for r in regimes]
     cand_maes = [per_regime[r]["candidate_mae"] for r in regimes]
+    missing_regimes = sorted(set(required or []) - set(regimes)) if required is not None else []
     finite = bool(regimes) and all(np.isfinite(base_maes)) and all(np.isfinite(cand_maes))
     e_base = float(np.mean(base_maes)) if finite else float("nan")
     e_cand = float(np.mean(cand_maes)) if finite else float("nan")
     aggregate = e_cand / e_base if finite and e_base else float("nan")
     checks = dict(
-        all_regimes_present=bool(finite and len(regimes) == len(blocks)),
+        all_regimes_present=bool(finite and not missing_regimes),
         aggregate_within=bool(np.isfinite(aggregate) and aggregate <= float(ratio_max)),
     )
     return Gate(
@@ -2356,6 +2438,8 @@ def michaels_ratio_gate(
             recording=recording,
             ratio_max=float(ratio_max),
             regimes=regimes,
+            required_regimes=required,
+            missing_regimes=missing_regimes,
             rig_baseline_mae=e_base,
             rig_candidate_mae=e_cand,
             aggregate_ratio=aggregate,

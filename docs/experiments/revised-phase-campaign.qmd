@@ -45,13 +45,34 @@ frozen protocol, with no number published for it.
 ## Current status, stated plainly
 
 **No candidate has been fitted, scored or accepted. Zero of eight candidate
-rounds have been used. No gate has been evaluated, and there are no results in
-this document.**
+rounds have been used. No gate has been evaluated on a candidate, and there are
+no candidate results in this document.**
+
+The off-diagonal moment fix is **implemented** in
+`revised_phase.estimate_shaft_dynamics` (integrated raw heterodyne, per-frame
+isolation, common-pair covariance): a focused local run passed 4 targeted
+tests, and `tests/experiments/test_stochastic_fit_revised_phase.py` passed 42
+tests with 2 skipped locally. The historical CPU proof (`bash-1a1663`, 115
+tests, 2 skipped) and the V100 gradient proof (`bash-060c82`, 10.260 s cold
+wall time, 3.929 GB peak allocation) remain at their recorded commits.
+
+Baseline calibration has completed: job `bash-0e3e78` produced
+`results/revised_phase/baseline_v1/calibration.json`. On DREGON cruise the real
+tracker error is 1.07900306844 rev/s and the baseline synthetic error is
+1.92206829696 rev/s, so the 30 % gap-closure target is 1.66914872840 rev/s;
+the positive-gap lower bound is 0.69278 rev/s and the composite temperature
+$T=5.19201722008$. For Michael's rig, $T=5.21406687987$, with per-regime
+baseline MAEs standby 0.31710268807, ramp 8.00709812144, cruise 0.755783384995
+rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a 5 % bootstrap
+upper bound of 3.17799446808 rev/s. These are **baseline** numbers, not
+candidate performance. The ramp LTAS gate is currently missing because the
+scored support falls below the arbitrary minimum of $2 \times 8192$ samples; a
+sibling fix to the generic window geometry and to calibration is in progress,
+so the full protocol is **not yet frozen**.
 
 The evaluator baseline is **not yet frozen**: no candidate fit may run before
 it is approved and the manifest is frozen. The three documents of the set are
-authored but **not yet rendered and not visually verified**; rendering and
-browser verification are a separate, later, explicitly authorized phase.
+rendered and browser-verified after the 2026-09-13 power-outage recovery.
 :::
 
 # 1. Objective
@@ -116,7 +137,8 @@ computed as if they were is invalid.
 :::
 
 There is **no standby or ramp acceptance for DREGON**, and DREGON standby/ramp
-need not be fitted at all.
+need not be fitted at all. Held-out predictive supports use a **4 s common
+length** across the five recordings.
 
 ## 2.2 Michael's rig — fixed-recording gate on FLY124
 
@@ -169,7 +191,12 @@ material. **Never** label a mostly-standby or mostly-cruise 8 s average as
 **Regime definitions are fixed and selected before any candidate.** Regime
 boundaries are never inferred from a candidate, and never from a refined or
 posterior track — consistent with the refined-track-is-diagnostic-only rule of
-§2.4.
+§2.4. The ramp regime on FLY124 is **one** event starting at approximately
+31.18 s, scored inside an 8 s context that starts at 27.68 s. Do not confuse the
+event with its context, and do not manufacture independent ramps.
+
+**Standby training envelope.** The old fit's exact standby start on FLY125 is
+unknown; the conservative whole-event training envelope is **[1.78, 15.28] s**.
 
 The regime masks and the scored times are retained as **provenance** in the
 saved record, so a reader can check which samples entered which regime's MAE.
@@ -264,8 +291,20 @@ along that one direction.
 - **Frozen before candidates**, on frozen baseline predictive draws, and never
   retuned after seeing candidate results.
 
-**No measured $T$ exists**; no value is recorded anywhere yet. Full derivation
-and the interpretation of $U_b$ and $H$:
+**Calibration is complete for the current window geometry, but the protocol is
+not yet frozen.** Job `bash-0e3e78` produced
+`results/revised_phase/baseline_v1/calibration.json`. On DREGON cruise the real
+tracker error is 1.07900306844 rev/s and the baseline synthetic error is
+1.92206829696 rev/s, so the 30 % gap-closure target is 1.66914872840 rev/s;
+the positive-gap lower bound is 0.69278 rev/s and the composite temperature
+$T=5.19201722008$. For Michael's rig, $T=5.21406687987$, with per-regime
+baseline MAEs standby 0.31710268807, ramp 8.00709812144, cruise 0.755783384995
+rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a 5 % bootstrap
+upper bound of 3.17799446808 rev/s. These are **baseline** numbers, not
+candidate performance. The ramp LTAS gate is currently missing because the
+scored support falls below the arbitrary minimum of $2 \times 8192$ samples; a
+sibling fix to the generic window geometry and to calibration is in progress.
+Full derivation and the interpretation of $U_b$ and $H$:
 `docs/explainers/bench-fit-revised-phase-model.qmd` §6.2.4.
 :::::
 
@@ -343,7 +382,7 @@ and planted correctness checks are **not** candidate rounds.
 
 | Round | Candidate | Model complexity | Fit complexity | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | candidate 1 (§5) — specified, not run | 3 rig dynamic parameters ($\lambda_g$, $\sigma_g$, $D_g$ — per rig, not per rotor), 1 shared carrier path, per-clip bias | moments initialize; $D_g$ then fitted inside one Adam composite MAP; one exact Gaussian state prior | pending | none |
+| 1 | candidate 1 (§5) — specified, not run | 3 rig dynamic parameters ($\lambda_g$, $\sigma_g$, $D_g$ — per rig, not per rotor), 1 shared carrier path, per-clip bias | moments initialize (off-diagonal Cov/$(kl)$ fix **implemented** in `revised_phase.estimate_shaft_dynamics`); $D_g$ then fitted inside one Adam composite MAP; one exact Gaussian state prior | specified, not run | 4 focused tests + 42 passed/2 skipped locally; historical 115 CPU / V100 gradient proofs |
 | 2 | not defined | — | — | unused | none |
 | 3 | not defined | — | — | unused | none |
 | 4 | not defined | — | — | unused | none |
@@ -444,12 +483,19 @@ $$
 1. Complex harmonic phase-increment **moments** on a **preregistered** isolated
    high-SNR order support — the SNR/isolation gate fixed **before** any
    estimate — to initialize and numerically estimate the rig $\lambda_g$ and
-   $\sigma_g$, and to initialize the scalar $D_g$ from residual moments. These
-   moment data are **initializers and diagnostics only**: they must not
-   re-enter as a second likelihood factor, and there is **no** separate phase
-   loss stacked on the spectral loss. The diagonal/GLS treatment is an
-   **approximation** — not exact — with diagnostic covariance and block
-   variation for uncertainty.
+   $\sigma_g$ from the **off-diagonal** covariance, and to initialize the scalar
+   $D_g$ from the diagonal residual. These moment data are **initializers and
+   diagnostics only**: they must not re-enter as a second likelihood factor, and
+   there is **no** separate phase loss stacked on the spectral loss. The moment
+   implementation was originally diagonal-only; the off-diagonal
+   $\operatorname{Cov}/(kl)$ treatment, the exact nominal integrated
+   heterodyne and the valid time-pair alignment / per-frame isolation are now
+   **implemented** in `revised_phase.estimate_shaft_dynamics` (integrated raw
+   heterodyne, per-frame isolation, common-pair covariance). A focused local run
+   passed 4 targeted tests, and
+   `tests/experiments/test_stochastic_fit_revised_phase.py` passed 42 tests with
+   2 skipped locally. The diagonal/GLS treatment is an **approximation** — not
+   exact — with diagnostic covariance and block variation for uncertainty.
 2. **One** joint ordinary **PyTorch Adam** plug-in / composite **MAP** pass
    over: the per-clip bias, the dense-grid shared $\theta/\nu$ path, the scalar
    $D_g$, the existing line and floor powers, and the tied speed law — under one
@@ -549,6 +595,17 @@ Only a genuinely uncertain behavioural risk earns a retained regression test.
   bootstrap intervals the instrument produces are **decision/uncertainty
   summaries, not fresh-unseen confirmation**. That caveat travels as a field in
   the saved metrics record, not only in prose.
+- Verified remote proof to date: `bash-1a1663` on commit `b11c613b45e7` passed
+  115 tests with 2 skipped in 41.88 s on CPU; `bash-060c82` on commit
+  `4632edd383e1` (V100 16 GB, K230, R4M8) confirmed 13/13 finite forward and
+  backward gradients, 10.260 s cold wall time and 3.929 GB peak allocation. The
+  cold wall time is not a steady fit cost. Since then, the off-diagonal moment
+  fix has been implemented in `revised_phase.estimate_shaft_dynamics`
+  (integrated raw heterodyne, per-frame isolation, common-pair covariance): a
+  focused local run passed 4 targeted tests, and
+  `tests/experiments/test_stochastic_fit_revised_phase.py` passed 42 tests with
+  2 skipped locally. **Zero of eight scientific rounds have been used; no fit
+  performance claim is made.**
 - A successful end additionally requires: updated `.qmd` sources, rendered
   `.html`, **actual browser visual verification**, this campaign document, and
   the machine evidence above.
@@ -582,8 +639,9 @@ is built so that a tolerance cannot be retro-fitted.
 **DREGON.** The primary cohort is exactly the five **no-source room2 cruise**
 recordings; they are the training/calibration pool and the five clustered
 units. Disjoint remaining cruise supports are the predictive evaluation, behind
-a window-support guard; if a recording cannot supply the required support, that
-is **reported** — never padded, repeated or cycled. All ten DREGON flights have
+a window-support guard, using a **4 s common length** across the five
+recordings; if a recording cannot supply the required support, that is
+**reported** — never padded, repeated or cycled. All ten DREGON flights have
 cruise. Room1 free-flight is **held out** from HPPNet; room1 noise-only may be
 a separately reported transfer diagnostic only. Do not add room1
 speech/whitenoise recordings to the noise-only primary gate.
