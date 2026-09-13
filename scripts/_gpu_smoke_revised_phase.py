@@ -302,13 +302,13 @@ def _synthetic_harmonic_clip(
     return Clip(clip_id, "synthetic", audio.astype(np.float32), rps, SR)
 
 
-def _real_like_rps(duration_s: float = 48.0, seed: int = 0) -> np.ndarray:
-    """Four-rotor RPS trajectories: 8 s standby @20, 8 s ramp to 80, 32 s cruise @80."""
+def _real_like_rps(duration_s: float = 16.0, seed: int = 0) -> np.ndarray:
+    """Four-rotor RPS trajectories: 4 s standby @20, 4 s ramp to 80, 8 s cruise @80."""
     rng = np.random.default_rng(seed)
     T = int(duration_s * SR)
     base = np.empty(T, dtype=np.float64)
-    standby_samples = int(8.0 * SR)
-    ramp_samples = int(16.0 * SR)
+    standby_samples = int(4.0 * SR)
+    ramp_samples = int(8.0 * SR)
     base[:standby_samples] = 20.0
     base[standby_samples:ramp_samples] = np.linspace(
         20.0, 80.0, ramp_samples - standby_samples
