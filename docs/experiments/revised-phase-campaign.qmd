@@ -25,7 +25,7 @@ companions, and where any of the three disagrees about a frozen criterion,
 |---|---|
 | `docs/experiments/revised-phase-campaign.qmd` | this file: objective, frozen criteria, round ledger, evidence policy |
 | `docs/explainers/bench-fit-revised-phase-model.qmd` | derivations: the phase model, the finite-window spectral mean, the renderer contract, the correctness checks |
-| `docs/explainers/fitting-four-moving-harmonic-combs.qmd` | the general strategy and the optional-future inference stack, plus candidate 1's pipeline and interface |
+| `docs/explainers/fitting-four-moving-harmonic-combs.qmd` | the general strategy and the optional-future inference stack, plus the C2 staged fitting interface |
 
 Background on the inherited descriptive baseline — what the previous stochastic
 family explains and where it fails — is `docs/experiments/stochastic-fit.md`
@@ -44,35 +44,42 @@ frozen protocol, with no number published for it.
 ::: {.callout-important}
 ## Current status, stated plainly
 
-**No candidate has been fitted, scored or accepted. Zero of eight candidate
-rounds have been used. No gate has been evaluated on a candidate, and there are
-no candidate results in this document.**
+**Round 1 is rejected; round 2 is implemented and awaiting real-fit results.**
+One of eight candidate rounds has been consumed. C1, the moment-first
+candidate, failed the honest planted preflight `python-e25ee9`: with true
+$\lambda/\sigma=6/6$ it recovered $1.2709\times10^9/1439.2$ and could not
+separate four near-coincident rotors into isolated cells. The earlier
+`python-c049cf` pass is retained only as an invalid scalar-zero fixture, not as
+scientific proof.
 
-The off-diagonal moment fix is **implemented** in
-`revised_phase.estimate_shaft_dynamics` (integrated raw heterodyne, per-frame
-isolation, common-pair covariance): a focused local run passed 4 targeted
-tests, and `tests/experiments/test_stochastic_fit_revised_phase.py` passed 42
-tests with 2 skipped locally. The historical CPU proof (`bash-1a1663`, 115
-tests, 2 skipped) and the V100 gradient proof (`bash-060c82`, 10.260 s cold
-wall time, 3.929 GB peak allocation) remain at their recorded commits.
+C2 is implemented in commit `08b8ef3c` (integrated here as `635fa919`): fixed
+$\lambda=6\,\mathrm{s}^{-1}$ as an explicit reference assumption; Stage 1 fits
+the training marginal expected periodogram for $\sigma$, $D$, powers, floor and
+bias; Stage 2 freezes those globals and fits the conditional carrier/bias MAP
+diagnostics with the residual kernel $\exp(-D|\tau|)$ and one OU state prior.
+Remote preflight `revised-phase-round2-pro-db69c3` passed 39 tests with 2
+skipped in 56.72 s. Real DREGON/Michael fitting and frozen evaluation are
+authorized and running elsewhere; no real-fit or gate result is recorded here.
 
-Baseline calibration has completed: job `bash-0e3e78` produced
+Baseline calibration is frozen: job `bash-0e3e78` produced
 `results/revised_phase/baseline_v1/calibration.json`. On DREGON cruise the real
 tracker error is 1.07900306844 rev/s and the baseline synthetic error is
 1.92206829696 rev/s, so the 30 % gap-closure target is 1.66914872840 rev/s;
 the positive-gap lower bound is 0.69278 rev/s and the composite temperature
 $T=5.19201722008$. For Michael's rig, $T=15.214066879865468$, with per-regime
 baseline MAEs standby 0.31710268807, ramp 8.00709812144, cruise 0.755783384995
-rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a 5 % bootstrap
-upper bound of 3.17799446808 rev/s. These are **baseline** numbers, not
-candidate performance. The ramp LTAS gate is currently missing because the
-scored support falls below the arbitrary minimum of $2 \times 8192$ samples; a
-sibling fix to the generic window geometry and to calibration is in progress,
-so the full protocol is **not yet frozen**.
+rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a point
+candidate maximum of 3.17799446808 rev/s (the deterministic 1.05× baseline
+bound). The single ramp event is 0.99 s inside an 8 s context.
+The repaired Michael ramp LTAS gate exists: baseline LTAS error
+4.851130861625892 dB against pooled null tolerance 0.0788731273157346 dB.
+These are **baseline** numbers, not candidate performance, and they are not
+scientific candidate results.
 
-The evaluator baseline is **not yet frozen**: no candidate fit may run before
-it is approved and the manifest is frozen. The three documents of the set are
-rendered and browser-verified after the 2026-09-13 power-outage recovery.
+The evaluator baseline, data supports, gates and manifest fingerprint rules are
+frozen. The protocol fingerprint separates immutable gates/data/baseline/seed
+settings from candidate/output run inputs, so per-round fit manifests may differ
+without invalidating the freeze.
 :::
 
 # 1. Objective
@@ -299,11 +306,12 @@ tracker error is 1.07900306844 rev/s and the baseline synthetic error is
 the positive-gap lower bound is 0.69278 rev/s and the composite temperature
 $T=5.19201722008$. For Michael's rig, $T=15.214066879865468$, with per-regime
 baseline MAEs standby 0.31710268807, ramp 8.00709812144, cruise 0.755783384995
-rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a 5 % bootstrap
-upper bound of 3.17799446808 rev/s. These are **baseline** numbers, not
-candidate performance. The ramp LTAS gate is currently missing because the
-scored support falls below the arbitrary minimum of $2 \times 8192$ samples; a
-sibling fix to the generic window geometry and to calibration is in progress.
+rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a point
+candidate maximum of 3.17799446808 rev/s (the deterministic 1.05× baseline
+bound). The repaired Michael ramp LTAS gate exists:
+the baseline LTAS error is 4.851130861625892 dB against a pooled null tolerance
+of 0.0788731273157346 dB. These are **baseline** numbers, not candidate
+performance.
 Full derivation and the interpretation of $U_b$ and $H$:
 `docs/explainers/bench-fit-revised-phase-model.qmd` §6.2.4.
 :::::
@@ -382,8 +390,8 @@ and planted correctness checks are **not** candidate rounds.
 
 | Round | Candidate | Model complexity | Fit complexity | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | candidate 1 (§5) — specified, not run | 3 rig dynamic parameters ($\lambda_g$, $\sigma_g$, $D_g$ — per rig, not per rotor), 1 shared carrier path, per-clip bias | moments initialize (off-diagonal Cov/$(kl)$ fix **implemented** in `revised_phase.estimate_shaft_dynamics`); $D_g$ then fitted inside one Adam composite MAP; one exact Gaussian state prior | specified, not run | 4 focused tests + 42 passed/2 skipped locally; historical 115 CPU / V100 gradient proofs |
-| 2 | not defined | — | — | unused | none |
+| 1 | C1 — moments-first hyperparameter initialization, then conditional spectral MAP | 3 rig dynamic parameters ($\lambda_g$, $\sigma_g$, $D_g$ — per rig, not per rotor), 1 shared carrier path, per-clip bias | off-diagonal moment estimator intended to freeze $\lambda_g,\sigma_g$ and initialize $D_g$, then one Adam composite MAP | **rejected at planted preflight** | honest `python-e25ee9` at `81d1a303`: planted true $\lambda/\sigma=6/6$ returned $1.2709\times10^9/1439.2$, `identified=False`; near-coincident four-rotor support had no isolated moment cells. Earlier `python-c049cf` pass was an invalid scalar-zero fixture, retained as non-proof. |
+| 2 | C2 — fixed-reference-$\lambda$ marginal-then-carrier fit | fixed $\lambda=6\,\mathrm{s}^{-1}$ reference assumption; fitted positive $\sigma_g,D_g$, existing powers/floor/speed law and bias law; same shared carrier family | Stage 1 training marginal expected-periodogram quasi-MAP over $\sigma,D,$ powers/floor/bias with the OU state integrated once and no innovation prior; Stage 2 freezes globals and fits per-clip bias plus $\theta/\nu$ conditional MAP using $\exp(-D|\tau|)$ and one OU prior | implemented; real fit/evaluation authorized and running; no results yet | core commit `08b8ef3c` integrated as `635fa919`; remote proof `revised-phase-round2-pro-db69c3` passed 39 tests, 2 skipped, 56.72 s. |
 | 3 | not defined | — | — | unused | none |
 | 4 | not defined | — | — | unused | none |
 | 5 | not defined | — | — | unused | none |
@@ -391,10 +399,10 @@ and planted correctness checks are **not** candidate rounds.
 | 7 | not defined | — | — | unused | none |
 | 8 | not defined | — | — | unused | none |
 
-**0 of 8 candidate rounds used. No candidate has been fitted, scored or
-accepted.** Rounds 2–8 are deliberately undefined: the candidate sequence is
-**adaptive to diagnostics**, and a round is defined only when a named
-acceptance failure calls for a specific complexity.
+**1 of 8 candidate rounds used. No candidate has been scored or accepted.**
+Rounds 3–8 are deliberately undefined: after any pass, remaining rounds are for
+single-change simplification while preserving the incumbent; otherwise a round
+is defined only when a named acceptance failure calls for a specific complexity.
 
 # 4. Selection rule
 
@@ -419,9 +427,9 @@ acceptance failure calls for a specific complexity.
   runtime. Runtime matters, but a faster **opaque** approximation is not
   automatically simpler mathematically.
 
-# 5. Candidate 1
+# 5. Current candidate: C2
 
-## 5.1 The model
+## 5.1 What C2 keeps from the family
 
 Per rig $g$ (Michael's rig, DREGON, bench), clip $c$, rotor $r$:
 
@@ -430,89 +438,65 @@ f_{\text{actual},r}(t)=f_{\text{raw},r}(t-\delta_r)+b_{c,r}+\nu_r(t)/(2\pi),
 $$
 
 $$
-d\nu_r=-\lambda_g\nu_r\,dt+\sqrt{2\lambda_g\sigma_g^2}\,dW_r,
+d\nu_r=-\lambda_{\mathrm{ref}}\nu_r\,dt
++\sqrt{2\lambda_{\mathrm{ref}}\sigma_g^2}\,dW_r,
 \qquad
 d\theta_r=\nu_r\,dt,
 \qquad
 d\epsilon_{rk}=\sqrt{2D_g}\,dW_{rk},
 $$
 
-$$
-\Phi_r(t)=2\pi\!\int_0^t\!\left[f_{\text{raw},r}(s-\delta_r)+b_{c,r}\right]ds
-+\theta_r(t),
-\qquad
-x_m(t)=\sum_{r,k}A_{mrk}(t)
-\cos\!\left[k\Phi_r(t)+\epsilon_{rk}(t)+\alpha_{mrk}\right]+u_m(t).
-$$
+with $\lambda_{\mathrm{ref}}=6\,\mathrm{s}^{-1}$ fixed for every rig as an
+explicit **reference correlation-time assumption**, not as measured controller
+physics. $\sigma_g$ and $D_g$ remain fitted positive rig parameters. The
+renderer and finite-window atoms are the same shared-carrier family as C1: one
+OU shaft state shared by all harmonics of a rotor, one scalar source-side
+diffusion $D_g$ shared across orders and microphones, raw telemetry plus delay
+and per-clip bias, no tonebank/noise split, no second carrier spline, no EM,
+no particle method, no Kalman filter and no new stochastic mechanism.
 
-- **One** OU shaft state $\nu_r$ and its exactly coupled integral $\theta_r$,
-  **shared across all orders and all microphones**.
-- **One scalar $D_g$ per rig** — one number for every rotor $r$ and every
-  order $k$, not $D_{rk}$ and not $D_r$: no per-rotor diffusion, no per-order
-  free diffusion and no order law. Units: phase rad²/s. **No hidden $k$
-  scaling** unless explicitly stated.
-- $\lambda_g$ and $\sigma_g$ are likewise **one number per rig** — rig-shared
-  across all four rotors — and **frozen** for candidate 1: moment-initialized,
-  then held fixed. If they are genuinely unidentifiable, that is **reported**
-  — a "measured" value is never fabricated.
-- $b_{c,r}$ is a **per-clip random effect** with a proper prior and a
-  population/recording mean.
-- Gauge: $\theta_r(t_0)=0$; the initial $\nu_r$ is stationary; the mean OU is
-  stationary-zero in law.
-- **No second carrier-correction spline, ever.** The per-frame carrier
-  correction *is* the posterior $\nu_r$.
-- Each harmonic's initial residual phase is drawn **uniform on $[0,2\pi)$**,
-  independently per harmonic and shared across microphones. The reason is
-  **not** the increment kernel — a deterministic initial phase cancels in
-  $\epsilon_{rk}(t)-\epsilon_{rk}(s)$, so the residual kernel is
-  $\exp(-D_g|\tau|)$ either way — but that uniform phases make every phasor
-  **zero-mean**, which is what cancels the cross-harmonic and cross-component
-  expectation terms in the summed powers
-  (`docs/explainers/bench-fit-revised-phase-model.qmd` §2.2).
-- The existing source harmonic power profile, floor and speed law are reused,
-  with **one recording-level gain shared across regimes** — a free per-clip or
-  per-regime gain would absorb the entire speed law.
-- No tonebank/noise split. No spatial stochastic extensions beyond the existing
-  fixed microphone response and floor.
-- The renderer emits audio **plus** the realized interval-average physical
-  shaft RPS (the independent acoustic $\epsilon$ never enters that label) and
-  the `reference_rps` raw array.
+The marginal fit cannot identify shared causal motion by itself. C2 therefore
+exports the method as `fit_method="marginal_then_carrier"`,
+`lambda_source="fixed_reference"` and
+`shared_phase_evidence="not_identified_by_marginal_score"`; moment functions are
+diagnostics, not production hyperparameter initializers.
 
-## 5.2 The fitting procedure
+## 5.2 The C2 fitting procedure
 
-1. Complex harmonic phase-increment **moments** on a **preregistered** isolated
-   high-SNR order support — the SNR/isolation gate fixed **before** any
-   estimate — to initialize and numerically estimate the rig $\lambda_g$ and
-   $\sigma_g$ from the **off-diagonal** covariance, and to initialize the scalar
-   $D_g$ from the diagonal residual. These moment data are **initializers and
-   diagnostics only**: they must not re-enter as a second likelihood factor, and
-   there is **no** separate phase loss stacked on the spectral loss. The moment
-   implementation was originally diagonal-only; the off-diagonal
-   $\operatorname{Cov}/(kl)$ treatment, the exact nominal integrated
-   heterodyne and the valid time-pair alignment / per-frame isolation are now
-   **implemented** in `revised_phase.estimate_shaft_dynamics` (integrated raw
-   heterodyne, per-frame isolation, common-pair covariance). A focused local run
-   passed 4 targeted tests, and
-   `tests/experiments/test_stochastic_fit_revised_phase.py` passed 42 tests with
-   2 skipped locally. The diagonal/GLS treatment is an **approximation** — not
-   exact — with diagnostic covariance and block variation for uncertainty.
-2. **One** joint ordinary **PyTorch Adam** plug-in / composite **MAP** pass
-   over: the per-clip bias, the dense-grid shared $\theta/\nu$ path, the scalar
-   $D_g$, the existing line and floor powers, and the tied speed law — under one
-   exact Gaussian integrated-OU state prior. **No EM, no Kalman filter, no
-   particle method, no per-harmonic $\epsilon$ latent inference, no dense
-   smoother.**
-3. The fit objective divided by the frozen scalar composite temperature $T$
-   (§2.3, defined there), with any prior weight calibrated **separately** on
-   frozen planted/baseline data and then **frozen** before any candidate fit.
-   Frame count is never evidence.
+1. **Stage 1: marginal global fit.** Optimize the training marginal expected
+   periodogram by ordinary Adam / quasi-MAP. Fit $\sigma_g$, $D_g$, existing
+   power/floor/speed-law parameters, clip bias terms and the population bias.
+   The integrated OU contribution is included once through the marginal mean;
+   state innovations are integrated out and no unused state-path prior energy
+   is added. The fixed reference $\lambda$ removes the unidentifiable timescale
+   degree of freedom.
+2. **Stage 2: frozen-global carrier diagnostic.** Freeze Stage 1 globals,
+   including $\lambda$, $\sigma$, $D$, powers, floor and population bias. Then
+   fit the per-clip bias plus the time-resolved $\theta/\nu$ path as a
+   conditional MAP diagnostic under one exact OU state prior. The independent
+   residual phase enters only through the conditional kernel
+   $\exp(-D|\tau|)$. Stage 2 carrier tracks are training diagnostics and are
+   never used to form held-out predictive atoms.
+3. Keep Stage 1's predictive population bias distinct from Stage 2's diagnostic
+   clip bias in the export. The two stage objectives are not summed as Bayesian
+   evidence, and their values are not compared as exact likelihoods.
 
-**Complexity budget:** three rig dynamic parameters
-($\lambda_g$, $\sigma_g$, $D_g$) — three numbers per rig, not three per rotor —
-one shared carrier path, ordinary Adam, moment initialization. Nothing else
-unless a *named* acceptance criterion fails.
+**Implemented schedule:** Stage 1 Adam 120 iterations at learning rate 0.1;
+Stage 2 carrier Adam 40 iterations at learning rate 0.05; one frame batch per
+clip; harmonic chunk 8; state grid 500 Hz; seed 0; work audio 64 kHz, analysis
+16 kHz; NFFT 16384, hop 1024.
 
-## 5.3 Multi-regime identifiability
+## 5.3 Historical C1, retained as rejected evidence
+
+C1 used the off-diagonal moment estimator to freeze $\lambda_g$ and
+$\sigma_g$ and initialize $D_g$ before a single conditional spectral MAP. That
+estimator was repaired in code, but the honest planted preflight
+`python-e25ee9` rejected the scientific route: it failed recovery at true
+$\lambda/\sigma=6/6$ and the real near-coincident four-rotor support lacked
+isolated moment cells. Those moment functions remain useful diagnostics and
+algebra checks; they are no longer production hyperparameter initializers.
+
+## 5.4 Multi-regime identifiability
 
 One joint model **per rig**, not independent per-regime vectors. Michael's rig
 gets one parameter law covering standby, ramp and cruise, trained on FLY125,
@@ -555,9 +539,9 @@ required before any fitted number is believed:
    unidentifiable allocation, and missing/weak-order gates declared
    beforehand. A crossing check on **joint complex observations** is reserved
    for a future candidate that actually implements that likelihood (the
-   optional complex state-space / $\epsilon$-latent stack); candidate 1 fits a
-   conditional expected-periodogram composite after marginalizing $\epsilon$,
-   so that check does not apply to it.
+   optional complex state-space / $\epsilon$-latent stack); C2 fits a marginal
+   expected-periodogram composite and a separate frozen-global conditional
+   carrier diagnostic, so that check does not apply to it.
 9. Finite parameter and device gradients.
 10. Only if a sparse method is ever introduced: small-$K$ sparse against a
     dense reference on objective value and recovery — with **no** exact-$O(K)$
@@ -572,8 +556,8 @@ Only a genuinely uncertain behavioural risk earns a retained regression test.
   number appears in this document that was not read from a source with that
   provenance attached.
 - **No fabricated results.** No invented percentage, p-value, runtime or
-  citation. **No claim that any candidate has been fitted, scored or passed**,
-  because none has.
+  citation. **No claim that C2 has been fitted on real data, scored or passed**
+  appears before the running real-fit/evaluation job returns.
 - Inherited measured results are **descriptive baselines**, cited to their
   source document or export — see `docs/experiments/stochastic-fit.md` and the
   two explainers.
@@ -599,13 +583,13 @@ Only a genuinely uncertain behavioural risk earns a retained regression test.
   115 tests with 2 skipped in 41.88 s on CPU; `bash-060c82` on commit
   `4632edd383e1` (V100 16 GB, K230, R4M8) confirmed 13/13 finite forward and
   backward gradients, 10.260 s cold wall time and 3.929 GB peak allocation. The
-  cold wall time is not a steady fit cost. Since then, the off-diagonal moment
-  fix has been implemented in `revised_phase.estimate_shaft_dynamics`
-  (integrated raw heterodyne, per-frame isolation, common-pair covariance): a
-  focused local run passed 4 targeted tests, and
-  `tests/experiments/test_stochastic_fit_revised_phase.py` passed 42 tests with
-  2 skipped locally. **Zero of eight scientific rounds have been used; no fit
-  performance claim is made.**
+  cold wall time is not a steady fit cost. Round 1 C1 is rejected by honest
+  planted preflight `python-e25ee9`; the earlier `python-c049cf` pass was an
+  invalid scalar-zero fixture. Round 2 C2 core is implemented in `08b8ef3c` and
+  integrated here as `635fa919`; remote proof
+  `revised-phase-round2-pro-db69c3` passed 39 tests with 2 skipped in 56.72 s.
+  **One of eight scientific rounds has been used; no real-fit performance claim
+  is made.**
 - A successful end additionally requires: updated `.qmd` sources, rendered
   `.html`, **actual browser visual verification**, this campaign document, and
   the machine evidence above.
@@ -688,7 +672,7 @@ Stop and escalate if:
 |---|---|
 | Candidate implementation | `src/experiments/stochastic_fit/revised_phase.py` (and, if genuinely needed, one cohesive sibling module), `scripts/stochastic_fit_revised.py`, `tests/experiments/test_stochastic_fit_revised_phase.py` |
 | Baseline / evaluation | `scripts/stochastic_fit_revised_eval.py`, the narrowly needed evaluation and render-AA helpers in `src/experiments/stochastic_fit/`, their tests, `docs/revised-phase-baseline-proposals.md` |
-| Documentation | the three documents listed at the head of this file, plus the narrow defect-prose corrections in `docs/explainers/rotor-noise-fit.qmd` |
+| Documentation | the four rendered documents listed at the head of this file, including `docs/explainers/rotor-noise-fit.qmd` |
 | Integration | the integration owner commits scoped changes after the ownership boundary; the documentation writer does not commit |
 
 No concurrent edits to the same files. Existing frames, clips and rig

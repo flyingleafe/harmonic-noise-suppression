@@ -1556,13 +1556,15 @@ Remote verification of the revised-phase implementation (not the old
 tests with 2 skipped in 41.88 s on CPU; `bash-060c82` on commit
 `4632edd383e1` (V100 16 GB) confirmed 13/13 finite forward and backward
 gradients with a 10.260 s cold wall time and 3.929 GB peak allocation. The cold
-wall time is not a steady fit cost. Since then, the off-diagonal moment fix has
-been implemented in `revised_phase.estimate_shaft_dynamics` (integrated raw
-heterodyne, per-frame isolation, common-pair covariance): a focused local run
-passed 4 targeted tests, and `tests/experiments/test_stochastic_fit_revised_phase.py`
-passed 42 tests with 2 skipped locally. The historical CPU and V100 proofs
-remain at their recorded commits. Zero of eight candidate rounds have been used;
-no revised candidate has been fitted, scored or accepted.
+wall time is not a steady fit cost. Round 1 C1 is now rejected at honest planted
+preflight `python-e25ee9`: true $\lambda/\sigma=6/6$ was not recovered, and the
+near-coincident four-rotor support had no isolated moment cells. The earlier
+`python-c049cf` pass is an invalid scalar-zero fixture, not scientific proof.
+Round 2 C2 is implemented in commit `08b8ef3c` and remote preflight
+`revised-phase-round2-pro-db69c3` passed 39 tests with 2 skipped in 56.72 s.
+Real DREGON/Michael fitting and frozen evaluation are authorized and running
+elsewhere; no revised candidate has been scored or accepted in this historical
+page.
 
 ## 16.4 Look and listen to the refit
 
