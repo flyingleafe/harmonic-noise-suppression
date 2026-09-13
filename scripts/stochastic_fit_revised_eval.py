@@ -157,12 +157,22 @@ def _canonical_manifest(man: dict[str, Any]) -> dict[str, Any]:
     observations, cohorts, baseline families, seeds — but excludes only the
     run inputs that change between --prepare and --check:
     ``arms.candidate``, ``candidate_arm_template``, ``out_dir``,
-    ``calibration_path``, and authoring/status/runtime keys.
+    ``calibration_path``, run/candidate artifact records, and
+    authoring/status/runtime keys.
     """
     import copy
 
     canon = copy.deepcopy(man)
-    for key in ("_digest", "_path", "status", "notes", "out_dir", "calibration_path"):
+    for key in (
+        "_digest",
+        "_path",
+        "status",
+        "notes",
+        "out_dir",
+        "calibration_path",
+        "calibration_input",
+        "candidate_artifacts",
+    ):
         canon.pop(key, None)
     arms = canon.get("arms")
     if isinstance(arms, dict) and "candidate" in arms:
