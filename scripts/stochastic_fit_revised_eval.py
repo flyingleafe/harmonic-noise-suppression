@@ -150,6 +150,34 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return man
 
 
+def _canonical_manifest(man: dict[str, Any]) -> dict[str, Any]:
+    """Deep copy with run-input and authoring keys removed.
+
+    The protocol fingerprint covers every design decision — gates,
+    observations, cohorts, baseline families, seeds — but excludes only the
+    run inputs that change between --prepare and --check:
+    ``arms.candidate``, ``candidate_arm_template``, ``out_dir``,
+    ``calibration_path``, and authoring/status/runtime keys.
+    """
+    import copy
+
+    canon = copy.deepcopy(man)
+    for key in ("_digest", "_path", "status", "notes", "out_dir", "calibration_path"):
+        canon.pop(key, None)
+    arms = canon.get("arms")
+    if isinstance(arms, dict) and "candidate" in arms:
+        arms.pop("candidate", None)
+    canon.pop("candidate_arm_template", None)
+    return canon
+
+
+def protocol_fingerprint(man: dict[str, Any]) -> str:
+    """SHA-256 of the canonical protocol content of a manifest."""
+    canon = _canonical_manifest(man)
+    raw = json.dumps(canon, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 _EXPORTS: dict[tuple[str, str, str], RE.ExportBundle] = {}
 
 
@@ -231,11 +259,6 @@ def frozen_inputs(man: dict[str, Any], scorer: dict[str, Any]) -> dict[str, Any]
 
 def verify_frozen_inputs(now: dict[str, Any], then: dict[str, Any]) -> None:
     """Fail if any referenced artifact moved since the calibration."""
-    if now["manifest"]["sha256"] != then["manifest"]["sha256"]:
-        die(
-            f"manifest digest {now['manifest']['sha256']} != calibration's "
-            f"{then['manifest']['sha256']} — thresholds may not be re-derived after the fact"
-        )
     if now["scorer"]["sha256"] != then["scorer"]["sha256"]:
         die("the scorer checkpoint digest differs from the calibration's — refusing to mix them")
     for key, rec in then.get("exports", {}).items():
@@ -257,6 +280,54 @@ def verify_frozen_inputs(now: dict[str, Any], then: dict[str, Any]) -> None:
                 f"{(cur or {}).get('resolved_version')} but the calibration used "
                 f"{rec['resolved_version']}"
             )
+
+
+def verify_protocol_fingerprint(man: dict[str, Any], cal: dict[str, Any]) -> str:
+    """Return the verified protocol fingerprint, refusing protocol drift.
+
+    A calibration produced before the protocol-fingerprint field carries its
+    original manifest SHA and path; we re-derive the protocol fingerprint from
+    that recorded manifest (after verifying it still hashes to the same value)
+    and compare it to the current manifest's protocol fingerprint. New
+    calibrations store the protocol fingerprint directly.
+    """
+    current = protocol_fingerprint(man)
+    cal_manifest = dict(cal.get("manifest") or {})
+    stored_protocol = cal_manifest.get("protocol_sha256")
+    if stored_protocol is not None:
+        if stored_protocol != current:
+            die(
+                f"protocol fingerprint {current[:12]} != calibration's "
+                f"{stored_protocol[:12]} — gates, observations, cohorts, baseline families or "
+                "seeds changed since the calibration was derived"
+            )
+        return current
+    # Adopt a pre-fingerprint calibration: verify the recorded manifest still
+    # hashes to its declared SHA, derive its protocol fingerprint without
+    # re-rendering, and compare to the current manifest.
+    orig_path = Path(cal_manifest.get("path", man["_path"]))
+    orig_sha = cal_manifest.get("sha256")
+    if orig_sha is None or not orig_path.is_file():
+        die(
+            "calibration has no protocol fingerprint and no verifiable original manifest; "
+            "re-run --prepare"
+        )
+    raw = orig_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != orig_sha:
+        die(
+            f"recorded manifest {orig_path} no longer hashes to {orig_sha[:12]}; "
+            "do not forge old provenance"
+        )
+    orig_man = json.loads(raw.decode())
+    orig_man["_digest"] = orig_sha
+    orig_man["_path"] = str(orig_path)
+    derived = protocol_fingerprint(orig_man)
+    if derived != current:
+        die(
+            f"derived protocol fingerprint {current[:12]} != calibration-era "
+            f"{derived[:12]} — gates, observations, cohorts, baseline families or seeds changed"
+        )
+    return current
 
 
 # ── arms ────────────────────────────────────────────────────────────────────
@@ -288,7 +359,7 @@ class ArmModel:
                     "kernel, raw telemetry plus the learned bias law, m=0, full prior kernel"
                 ),
                 candidate=self.candidate.provenance(),
-                identified=self.candidate.identified,
+                fit_contract=self.candidate.fit_contract,
             )
         return dict(model_family=self.kind, label=self.label)
 
@@ -354,13 +425,41 @@ class ArmModel:
         return None
 
 
-def arm_model(name: str, spec: dict[str, Any], *, regime: str, recording: str) -> ArmModel:
+def _resolve_candidate_export(
+    spec: dict[str, Any], rig: str | None, *, context: str
+) -> tuple[str, str | None]:
+    """Return ``(export_path, fit_manifest_sha256)`` for a candidate arm.
+
+    Supports a single export (legacy/smoke) or a ``per_rig`` mapping. The
+    per-rig form is required for a multi-rig evaluation so that each rig's
+    export is pinned and validated against that rig.
+    """
+    per_rig = spec.get("per_rig")
+    if per_rig is not None:
+        if rig is None:
+            die(f"{context}: per_rig candidate mapping requires a cohort rig")
+        entry = dict(per_rig).get(rig)
+        if entry is None:
+            die(f"{context}: no candidate export declared for rig {rig!r}")
+        return str(require(entry, "export", f"{context} rig {rig}")), entry.get("fit_manifest_sha256")
+    return str(require(spec, "export", context)), spec.get("fit_manifest_sha256")
+
+
+def arm_model(
+    name: str, spec: dict[str, Any], *, regime: str, recording: str, rig: str | None = None
+) -> ArmModel:
     """Resolve one arm's model by DISPATCHING on the export's family."""
     kind = str(require(spec, "kind", f"arm {name}"))
     if kind == "real":
         return ArmModel(name, "real", label="real audio", spec=spec)
     if kind == "revised_export":
-        cand = RE.read_candidate_export(require(spec, "export", f"arm {name}"))
+        export_path, _ = _resolve_candidate_export(spec, rig, context=f"arm {name}")
+        cand = RE.read_candidate_export(export_path)
+        if rig is not None and cand.rig_id != rig:
+            die(
+                f"arm {name}: candidate export rig_id is {cand.rig_id!r}, "
+                f"cohort rig is {rig!r}"
+            )
         return ArmModel(
             name,
             "revised",
@@ -560,9 +659,10 @@ def scored_ltas(
 ) -> dict[str, Any] | None:
     """Absolute-level LTAS on the LONGEST contiguous scored span, or ``None``.
 
-    The LTAS needs one 8192-point Welch window inside the scored support; a
-    ramp shorter than that has no LTAS, which is reported rather than papered
-    over with the surrounding context.
+    The LTAS needs ONE complete 8192-point Welch window inside the scored
+    support; with the half-hop geometry that is ``>= LTAS_N`` samples, not
+    ``2 * LTAS_N``. Material shorter than one window has no LTAS, which is
+    reported rather than papered over with the surrounding context.
     """
     spans: list[tuple[int, int]] = []
     m = np.asarray(support.sample_mask, dtype=bool)
@@ -573,7 +673,7 @@ def scored_ltas(
     if not spans:
         return None
     a, b = max(spans, key=lambda s: s[1] - s[0])
-    if (b - a) < 2 * LTAS_N:
+    if (b - a) < LTAS_N:
         return None
     out = RE.ltas_deviation_db(real[:, a:b], arm[:, a:b])
     out["scored_span_samples"] = [a, b]
@@ -679,7 +779,7 @@ def measure_window(
             entry["ltas"] = scored_ltas(real, audio, support)
             if entry["ltas"] is None:
                 entry["ltas_unavailable"] = (
-                    f"the longest contiguous scored span is shorter than {2 * LTAS_N} samples, "
+                    f"the longest contiguous scored span is shorter than {LTAS_N} samples, "
                     "so no absolute LTAS is computed for this window"
                 )
         if physical is not None:
@@ -1062,7 +1162,11 @@ def run_prepare(
     record: dict[str, Any] = dict(
         mode="prepare",
         schema=RE.SCHEMA,
-        manifest=dict(path=man["_path"], sha256=man["_digest"]),
+        manifest=dict(
+            path=man["_path"],
+            sha256=man["_digest"],
+            protocol_sha256=protocol_fingerprint(man),
+        ),
         import_provenance=provenance,
         scorer=tracker.record,
         frozen_inputs=frozen_inputs(man, tracker.record),
@@ -1319,7 +1423,11 @@ def summarize_prepare(record: dict[str, Any], man: dict[str, Any]) -> dict[str, 
 
 
 def candidate_leakage_guard(
-    cand_spec: dict[str, Any], scored: list[RE.Window], *, cohort_name: str
+    cand_spec: dict[str, Any],
+    scored: list[RE.Window],
+    *,
+    cohort_name: str,
+    rig: str | None = None,
 ) -> dict[str, Any]:
     """Refuse a candidate whose fit supports touch a scored support.
 
@@ -1333,10 +1441,18 @@ def candidate_leakage_guard(
     kind = str(cand_spec.get("kind"))
     guard = float(cand_spec.get("training_guard_seconds", RE.OBS_N_FFT / RE.SR))
     if kind == "revised_export":
-        cand = RE.read_candidate_export(str(cand_spec["export"]))
+        export_path, expected_sha = _resolve_candidate_export(
+            cand_spec, rig, context=f"cohort {cohort_name} candidate"
+        )
+        cand = RE.read_candidate_export(export_path)
+        if rig is not None and cand.rig_id != rig:
+            die(
+                f"cohort {cohort_name}: candidate export rig_id is {cand.rig_id!r}, "
+                f"cohort rig is {rig!r}"
+            )
         training = cand.training_windows()
         prov = cand.provenance()
-        expected = cand_spec.get("fit_manifest_sha256")
+        expected = expected_sha
         if expected is None:
             die(
                 f"cohort {cohort_name}: the candidate arm must name the frozen fit manifest as "
@@ -1387,9 +1503,9 @@ def candidate_leakage_guard(
 def run_check(
     man: dict[str, Any], out: Path, *, n_mics: int | None, provenance: dict[str, Any] | None = None
 ) -> int:
-    cal_path = out / "calibration.json"
+    cal_path = Path(man.get("calibration_path") or (out / "calibration.json"))
     if not cal_path.is_file():
-        die(f"{cal_path} not found — run --prepare first; --check never invents a calibration")
+        die(f"{cal_path} not found — --check never invents a calibration")
     cal = json.loads(cal_path.read_text())
     arms = dict(man["arms"])
     if "candidate" not in arms:
@@ -1398,6 +1514,7 @@ def run_check(
     tracker = Tracker(dict(man["scorer"]))
     now = frozen_inputs(man, tracker.record)
     verify_frozen_inputs(now, dict(cal.get("frozen_inputs") or {}))
+    protocol_sha = verify_protocol_fingerprint(man, cal)
     seeds = [int(s) for s in require(dict(man["null_variation"]), "seeds", "null_variation")]
 
     alpha = float(man["gates"]["alpha"])
@@ -1405,7 +1522,9 @@ def run_check(
     report: dict[str, Any] = dict(
         mode="check",
         schema=RE.SCHEMA,
-        manifest=dict(path=man["_path"], sha256=man["_digest"]),
+        manifest=dict(
+            path=man["_path"], sha256=man["_digest"], protocol_sha256=protocol_sha
+        ),
         import_provenance=provenance,
         scorer=tracker.record,
         frozen_inputs=now,
@@ -1418,11 +1537,13 @@ def run_check(
     gates: list[RE.Gate] = []
     for cohort in man["cohorts"]:
         name = str(cohort["name"])
+        rig = str(cohort.get("rig") or name)
         cal_c = dict(cal["calibration"]["cohorts"].get(name) or {})
         if not cal_c:
             die(f"calibration has no cohort {name!r}")
         bundles_by_regime = all_families(cohort)
         required = [str(r) for r in (cohort.get("recordings") or [])]
+        required_regimes = [str(rs["regime"]) for rs in cohort["regimes"]]
         cres: dict[str, Any] = dict(regimes={})
         blocks: dict[str, list[dict[str, Any]]] = {}
         all_reports: list[dict[str, Any]] = []
@@ -1433,6 +1554,7 @@ def run_check(
         base_ltas_blocks: dict[str, float] = {}
         cand_comp_blocks: dict[str, float] = {}
         base_comp_blocks: dict[str, float] = {}
+        block_regime: dict[str, str] = {}
         for regime_spec in cohort["regimes"]:
             regime = str(regime_spec["regime"])
             cal_r = dict(cal_c.get(regime) or {})
@@ -1443,12 +1565,12 @@ def run_check(
             ]
             windows, reports = resolve_windows(cohort, regime_spec, calibration)
             all_reports.extend(reports)
-            leakage = candidate_leakage_guard(cand_spec, windows, cohort_name=name)
+            leakage = candidate_leakage_guard(cand_spec, windows, cohort_name=name, rig=rig)
 
             def model_for(
                 arm: str, spec: dict[str, Any], w: RE.Window, _r: str = regime
             ) -> ArmModel:
-                return arm_model(arm, spec, regime=_r, recording=w.recording)
+                return arm_model(arm, spec, regime=_r, recording=w.recording, rig=rig)
 
             rows = measure_arm_set(
                 cohort,
@@ -1465,6 +1587,8 @@ def run_check(
             cand_ltas = per_recording(rows, "candidate", "ltas")
             cand_comp = RE.composite_score(frame_scores(rows, "candidate"))
             measured.extend(cand_pit)
+            for row in rows:
+                block_regime[row["window"]["key"]] = regime
             cand_pit_blocks |= per_window(rows, "candidate", "pit")
             cand_ltas_blocks |= per_window(rows, "candidate", "ltas")
             cand_comp_blocks |= composite_per_window(rows, "candidate")
@@ -1544,6 +1668,7 @@ def run_check(
                     alpha=alpha,
                     seed=bseed,
                     recording=recording,
+                    required_regimes=required_regimes,
                 )
             )
             pooled = dict(dict(cal_c.get("_cohort") or {}).get("block_null_variation") or {})
@@ -1558,6 +1683,8 @@ def run_check(
                     name="michaels_fly124_composite_non_regression",
                     quantity="composite spectral risk (nats/s of unique support)",
                     recording=recording,
+                    regimes=block_regime,
+                    required_regimes=required_regimes,
                 )
             )
             gates.append(
@@ -1570,6 +1697,8 @@ def run_check(
                     name="michaels_fly124_absolute_ltas_non_regression",
                     quantity="absolute-level LTAS band error (dB)",
                     recording=recording,
+                    regimes=block_regime,
+                    required_regimes=required_regimes,
                 )
             )
             cres["block_pairing"] = dict(
@@ -1585,7 +1714,9 @@ def run_check(
 
     decisions = dict(
         mode="check",
-        manifest=dict(path=man["_path"], sha256=man["_digest"]),
+        manifest=dict(
+            path=man["_path"], sha256=man["_digest"], protocol_sha256=protocol_sha
+        ),
         scorer=tracker.record,
         frozen_inputs=now,
         candidate_arm=cand_spec,

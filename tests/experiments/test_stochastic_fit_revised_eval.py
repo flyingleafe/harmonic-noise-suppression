@@ -19,6 +19,7 @@ was written against a decision that is frozen upstream:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from experiments.stochastic_fit import accept_stats as stats
 from experiments.stochastic_fit import revised_eval as RE
 
 SR = 16000.0
@@ -758,16 +760,27 @@ def test_pit_mae_refuses_a_support_that_selects_no_frame() -> None:
 # ── model-family dispatch, provenance and leakage ───────────────────────────
 
 
+def _c2_diagnostics(*, valid: bool = True) -> dict[str, Any]:
+    return {
+        "shared_phase_evidence": "not_identified_by_marginal_score",
+        "marginal_fit": {"valid": valid, "finite_gradients": True, "final_loss": 1.0},
+        "carrier_fit": {"valid": valid, "finite_gradients": True, "final_loss": 1.0},
+    }
+
+
 def _revised_export(path: Path, *, clips: list[dict[str, Any]], digest: str = "abc") -> Path:
     path.write_text(
         json.dumps(
             dict(
                 schema_version=1,
                 model_family="shared_shaft_ou",
+                fit_method="marginal_then_carrier",
+                lambda_source="fixed_reference",
+                shared_phase_evidence="not_identified_by_marginal_score",
                 rig_id="michaels",
-                parameters=dict(profile_db=[[0.0, -3.0], [0.0, -3.0]]),
+                parameters=dict(lam=6.0, sigma=1.0, d_scalar=1.0, profile_db=[[0.0, -3.0], [0.0, -3.0]]),
                 training_provenance=dict(manifest_sha256=digest, clips=clips),
-                diagnostics={"identified": True},
+                diagnostics=_c2_diagnostics(),
             )
         )
     )
@@ -825,20 +838,35 @@ def test_unnormalized_gain_total_weights_draws_like_the_composite() -> None:
     assert out["u_by_draw"] == pytest.approx([2.0 * 1024.0 / 16.0])
 
 
-def test_shared_shaft_ou_export_must_be_identified(tmp_path: Path) -> None:
-    """An unidentifiable dynamics fit must not become scoreable (addendum 10 §53)."""
+def test_revised_export_must_declare_valid_c2_contract(tmp_path: Path) -> None:
+    """C2 is accepted by its marginal-then-carrier contract, not a fake C1
+    dynamics-identification flag."""
     p = _revised_export(
-        tmp_path / "unidentified.json",
+        tmp_path / "bad_contract.json",
         clips=[dict(recording="FLY125", start_s=16.0, seconds=16.0, regime="cruise")],
     )
     data = json.loads(p.read_text())
-    data["diagnostics"] = {"identified": False}
+    data["diagnostics"]["identified"] = False
     p.write_text(json.dumps(data))
-    with pytest.raises(ValueError, match="diagnostics.identified"):
-        RE.read_candidate_export(p)
-    data["diagnostics"] = {}
+    assert RE.read_candidate_export(p).fit_contract["fit_method"] == "marginal_then_carrier"
+
+    for field, value, pattern in (
+        ("fit_method", "moment_then_map", "fit_method='marginal_then_carrier'"),
+        ("lambda_source", "estimated", "lambda_source='fixed_reference'"),
+        ("shared_phase_evidence", "identified", "must not claim causal sharing"),
+    ):
+        data = json.loads(_revised_export(p, clips=[dict(recording="FLY125", start_s=16.0, seconds=16.0, regime="cruise")]).read_text())
+        data[field] = value
+        p.write_text(json.dumps(data))
+        with pytest.raises(ValueError, match=pattern):
+            RE.read_candidate_export(p)
+    data = json.loads(p.read_text())
+    data["fit_method"] = "marginal_then_carrier"
+    data["lambda_source"] = "fixed_reference"
+    data["shared_phase_evidence"] = "not_identified_by_marginal_score"
+    data["diagnostics"]["marginal_fit"]["valid"] = False
     p.write_text(json.dumps(data))
-    with pytest.raises(ValueError, match="diagnostics.identified"):
+    with pytest.raises(ValueError, match="diagnostics.marginal_fit.valid"):
         RE.read_candidate_export(p)
 
 
@@ -916,6 +944,9 @@ def _minimal_revised_export(path: Path, *, n_fft: int, hop: int) -> Path:
             dict(
                 schema_version=RP.SCHEMA_VERSION,
                 model_family=RP.MODEL_FAMILY,
+                fit_method="marginal_then_carrier",
+                lambda_source="fixed_reference",
+                shared_phase_evidence="not_identified_by_marginal_score",
                 rig_id="test_rig",
                 parameters=dict(
                     lam=6.0,
@@ -970,7 +1001,7 @@ def _minimal_revised_export(path: Path, *, n_fft: int, hop: int) -> Path:
                     composite_temperature=1.0,
                     priors=dict(bias_std_hz=0.5, log_d_mean=0.0, log_d_std=2.0),
                 ),
-                diagnostics=dict(identified=True, map_state={}),
+                diagnostics=_c2_diagnostics(),
             )
         )
     )
@@ -1035,3 +1066,213 @@ def test_the_candidate_leakage_guard_pins_the_fit_manifest(tmp_path: Path) -> No
         runner.candidate_leakage_guard(
             spec, [RE.Window("FLY125", 20.0, 8.0, regime="cruise")], cohort_name="c"
         )
+
+
+# ── LTAS window geometry: one complete window, exact-N, 0.99 s ramp ─────────
+
+
+def test_absolute_ltas_bands_accepts_exactly_one_window() -> None:
+    """8192 samples must yield one Welch window; the old ``range(0, size-n, ...)``
+    gave ``range(0, 0, ...)`` and raised."""
+    x = np.random.default_rng(101).standard_normal(8192)
+    bands = RE.absolute_ltas_bands(x)
+    assert bands.shape == (len(stats.BANDS),)
+    assert np.isfinite(bands).all()
+
+
+def test_absolute_ltas_bands_fits_0_99s_ramp() -> None:
+    """0.99 s at 16 kHz = 15840 samples. Two complete 8192 windows fit
+    (starts 0 and 4096), so the LTAS is available."""
+    n = int(0.99 * RE.SR)
+    assert n == 15840
+    x = np.random.default_rng(102).standard_normal(n)
+    bands = RE.absolute_ltas_bands(x)
+    assert bands.shape == (len(stats.BANDS),)
+
+
+def test_ltas_deviation_derives_relative_from_absolute_geometry() -> None:
+    """A pure level change is invisible to the shape-only diagnostic because it
+    is derived from the same absolute geometry, not recomputed."""
+    rng = np.random.default_rng(103)
+    x = rng.standard_normal(32000)
+    quiet = x * 0.5
+    dev = RE.ltas_deviation_db(x[None, :], quiet[None, :])
+    assert dev["shape_only_mean_abs_db"] < 1e-6
+
+
+def test_scored_ltas_allows_0_99s_ramp_and_refuses_shorter() -> None:
+    """The gate needs one complete 8192-sample Welch window, not two."""
+    runner = _runner()
+    ok_n = int(0.99 * RE.SR)
+    real = np.random.default_rng(104).standard_normal((1, ok_n))
+    arm = real.copy()
+    support = RE.RegimeSupport(
+        window=RE.Window("FLY124", 0.0, ok_n / RE.SR, regime="ramp"),
+        regime="ramp",
+        min_rps=45.0,
+        max_rps=65.0,
+        sample_mask=np.ones(ok_n, dtype=bool),
+        sr=RE.SR,
+    )
+    out = runner.scored_ltas(real, arm, support)
+    assert out is not None
+    assert out["scored_span_samples"] == [0, ok_n]
+
+    short = 8191
+    support_short = RE.RegimeSupport(
+        window=RE.Window("FLY124", 0.0, short / RE.SR, regime="ramp"),
+        regime="ramp",
+        min_rps=45.0,
+        max_rps=65.0,
+        sample_mask=np.ones(short, dtype=bool),
+        sr=RE.SR,
+    )
+    assert runner.scored_ltas(real[:, :short], arm[:, :short], support_short) is None
+
+
+# ── protocol fingerprint: candidate/output are excluded, design is hashed ───
+
+
+def _base_manifest(tmp_path: Path) -> dict[str, Any]:
+    return {
+        "schema": "revised-phase-baseline/1",
+        "status": "PROPOSED",
+        "notes": ["a note"],
+        "scorer": {"experiment": "hppnet_l2_r2_s0", "ckpt": "best"},
+        "observation": {"sr": 16000, "n_fft": 16384, "hop": 1024, "f_min": 30.0, "f_max": 7900.0},
+        "gates": {
+            "alpha": 0.05,
+            "bootstrap_seed": 0,
+            "dregon_gap_fraction": 0.7,
+            "michaels_ratio_max": 1.05,
+            "composite_tolerance": 0.0,
+        },
+        "null_variation": {"seeds": [2001, 2002, 2003, 2004], "metrics": ["pit_mae", "ltas_abs_db"]},
+        "cohorts": [],
+        "arms": {"real": {"kind": "real"}, "baseline": {"kind": "export_render"}},
+        "candidate_arm_template": {"kind": "revised_export"},
+        "out_dir": "results/revised_phase/baseline_v1",
+    }
+
+
+def test_protocol_fingerprint_excludes_run_inputs_only(tmp_path: Path) -> None:
+    runner = _runner()
+    man = _base_manifest(tmp_path)
+    man["_path"] = str(tmp_path / "manifest.json")
+    man["_digest"] = hashlib.sha256(json.dumps(man).encode()).hexdigest()
+    base = runner.protocol_fingerprint(man)
+
+    # Adding a candidate, changing output path, or mutating authoring notes
+    # must NOT change the protocol fingerprint.
+    man["arms"]["candidate"] = {
+        "kind": "revised_export",
+        "export": str(tmp_path / "candidate.json"),
+        "fit_manifest_sha256": "abc",
+    }
+    man["out_dir"] = "results/revised_phase/round_1"
+    man["notes"] = ["a different note"]
+    assert runner.protocol_fingerprint(man) == base
+
+    # But a gate threshold, a seed, or a cohort change DOES change it.
+    man["gates"]["dregon_gap_fraction"] = 0.8
+    assert runner.protocol_fingerprint(man) != base
+
+
+def test_protocol_fingerprint_adopts_old_calibration_manifest(tmp_path: Path) -> None:
+    """A calibration recorded before protocol fingerprints can be adopted by
+    verifying its original manifest digest and deriving the protocol hash."""
+    import json as _json
+
+    runner = _runner()
+    man = _base_manifest(tmp_path)
+    path = tmp_path / "manifest.json"
+    path.write_text(_json.dumps(man))
+    man["_path"] = str(path)
+    man["_digest"] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    # Simulate an old calibration record with no protocol_sha256.
+    cal = {
+        "manifest": {"path": str(path), "sha256": man["_digest"]},
+        "frozen_inputs": {"manifest": {"path": str(path), "sha256": man["_digest"]}, "scorer": {"sha256": "same"}, "exports": {}, "datasets": {}},
+    }
+    sha = runner.verify_protocol_fingerprint(man, cal)
+    assert sha == runner.protocol_fingerprint(man)
+
+
+# ── per-rig candidate mapping and rig_id validation ─────────────────────────
+
+
+def _set_rig_id(path: Path, rig_id: str) -> None:
+    data = json.loads(path.read_text())
+    data["rig_id"] = rig_id
+    path.write_text(json.dumps(data))
+
+
+def _set_fit_manifest_sha(path: Path, sha: str) -> None:
+    data = json.loads(path.read_text())
+    data["training_provenance"]["manifest_sha256"] = sha
+    path.write_text(json.dumps(data))
+
+
+def test_per_rig_candidate_selects_export_by_cohort_rig(tmp_path: Path) -> None:
+    runner = _runner()
+    dregon = _minimal_revised_export(tmp_path / "dregon.json", n_fft=2048, hop=512)
+    michaels = _minimal_revised_export(tmp_path / "michaels.json", n_fft=2048, hop=512)
+    _set_rig_id(dregon, "dregon")
+    _set_rig_id(michaels, "michaels")
+    spec = {
+        "kind": "revised_export",
+        "per_rig": {
+            "dregon": {"export": str(dregon), "fit_manifest_sha256": "fit-d"},
+            "michaels": {"export": str(michaels), "fit_manifest_sha256": "fit-m"},
+        },
+    }
+    d = runner.arm_model("cand", spec, regime="cruise", recording="x", rig="dregon")
+    assert d.candidate is not None and d.candidate.rig_id == "dregon"
+    m = runner.arm_model("cand", spec, regime="cruise", recording="x", rig="michaels")
+    assert m.candidate is not None and m.candidate.rig_id == "michaels"
+    with pytest.raises(SystemExit, match="no candidate export declared"):
+        runner.arm_model("cand", spec, regime="cruise", recording="x", rig="other")
+
+
+def test_per_rig_candidate_validates_export_rig_id_against_cohort(tmp_path: Path) -> None:
+    runner = _runner()
+    export = _minimal_revised_export(tmp_path / "michaels.json", n_fft=2048, hop=512)
+    _set_rig_id(export, "michaels")
+    spec = {"kind": "revised_export", "export": str(export), "fit_manifest_sha256": "fit-m"}
+    # single-export form also validates when a rig is supplied
+    with pytest.raises(SystemExit, match="rig_id"):
+        runner.arm_model("cand", spec, regime="cruise", recording="x", rig="dregon")
+    # and the same via per_rig
+    spec_per_rig = {
+        "kind": "revised_export",
+        "per_rig": {"dregon": {"export": str(export), "fit_manifest_sha256": "fit-m"}},
+    }
+    with pytest.raises(SystemExit, match="rig_id"):
+        runner.arm_model("cand", spec_per_rig, regime="cruise", recording="x", rig="dregon")
+
+
+def test_per_rig_candidate_leakage_guard_pins_fit_manifest(tmp_path: Path) -> None:
+    runner = _runner()
+    dregon = _minimal_revised_export(tmp_path / "dregon.json", n_fft=2048, hop=512)
+    _set_rig_id(dregon, "dregon")
+    _set_fit_manifest_sha(dregon, "fit-d")
+    spec = {
+        "kind": "revised_export",
+        "per_rig": {
+            "dregon": {"export": str(dregon), "fit_manifest_sha256": "fit-d"},
+        },
+    }
+    scored = [RE.Window("free-flight_nosource_room2", 0.0, 8.0, regime="cruise")]
+    report = runner.candidate_leakage_guard(spec, scored, cohort_name="dregon_room2_cruise", rig="dregon")
+    assert report["clean"]
+    assert report["candidate"]["fit_manifest_sha256"] == "fit-d"
+    # wrong rig: a michaels entry pointing to the dregon export must fail rig_id validation
+    spec_mismatch = {
+        "kind": "revised_export",
+        "per_rig": {
+            "michaels": {"export": str(dregon), "fit_manifest_sha256": "fit-d"},
+        },
+    }
+    with pytest.raises(SystemExit, match="rig_id"):
+        runner.candidate_leakage_guard(spec_mismatch, scored, cohort_name="michaels_fly124", rig="michaels")
