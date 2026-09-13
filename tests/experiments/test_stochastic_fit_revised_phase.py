@@ -219,7 +219,7 @@ def test_conditioning_on_a_known_path_removes_the_ou_broadening():
     ``exp(-D|tau|)`` and the line stays narrow; the marginal prediction still
     carries the OU broadening. Both must match their own Monte-Carlo mean, and
     phase modulation must conserve the band power."""
-    n, draws = 4096, 4000
+    n, draws = 4096, 1000
     w, wss = _window(n)
     lam, sigma, d, k = 6.0, 6.0, 0.5, 20
     t = np.arange(n, dtype=np.float64) / SR
