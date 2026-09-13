@@ -349,6 +349,26 @@ class Window:
             key=self.key,
         )
 
+def widened_training_window(window: Window, guard_seconds: float) -> Window:
+    """The one shared symmetric fit-support guard used by prepare/check paths."""
+    guard = float(guard_seconds)
+    if guard < 0.0:
+        raise ValueError(f"training guard must be non-negative, got {guard_seconds!r}")
+    return Window(
+        window.recording,
+        float(window.start_s) - guard,
+        float(window.duration_s) + 2.0 * guard,
+        regime=window.regime,
+        role=window.role,
+    )
+
+
+def overlaps_guarded_training(scored: Window, training: Window, *, guard_seconds: float) -> bool:
+    """Does ``scored`` touch the symmetrically guarded training support?"""
+    return scored.overlaps(widened_training_window(training, guard_seconds))
+
+
+
 
 def union_seconds(windows: Sequence[Window]) -> float:
     """Seconds of UNIQUE material covered, per recording and summed.
@@ -421,14 +441,16 @@ def resolve_evaluation_windows(
     max_windows: int = 1,
     min_rps: float | None = None,
     max_rps: float | None = None,
+    guard_seconds: float = 0.0,
 ) -> tuple[list[Window], SupportReport]:
-    """Held-out windows of one recording, disjoint from its fit supports.
+    """Held-out windows of one recording, disjoint from its guarded fit supports.
 
     The fit supports are training/calibration material, so a predictive number
-    may only be read on what is left. A recording that cannot supply
-    ``max_windows`` x ``min_seconds`` of disjoint in-regime material inside its
-    label coverage is REPORTED as insufficient — the caller never receives a
-    padded, repeated or cycled window.
+    may only be read on what is left after the shared symmetric
+    ``guard_seconds`` margin. A recording that cannot supply ``max_windows`` x
+    ``min_seconds`` of disjoint in-regime material inside its label coverage is
+    REPORTED as insufficient — the caller never receives a padded, repeated or
+    cycled window.
     """
     found = C.windows(
         rec,
@@ -443,8 +465,8 @@ def resolve_evaluation_windows(
         Window(rec.recording_id, float(t0), float(dur), regime=regime, role="evaluation")
         for t0, dur in found
     ]
-    dropped = [w.key for w in candidates if any(w.overlaps(c) for c in cal)]
-    disjoint = [w for w in candidates if not any(w.overlaps(c) for c in cal)]
+    dropped = [w.key for w in candidates if any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
+    disjoint = [w for w in candidates if not any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
     kept = disjoint[: max(int(max_windows), 0)]
     note = ""
     if len(kept) < int(max_windows):
@@ -509,6 +531,7 @@ def resolve_support_windows(
     max_windows: int = 1,
     min_rps: float | None = None,
     max_rps: float | None = None,
+    guard_seconds: float = 0.0,
 ) -> tuple[list[Window], SupportReport]:
     """CONTEXT windows around a regime whose support is SHORTER than a window.
 
@@ -522,8 +545,8 @@ def resolve_support_windows(
     scored material may not.
 
     A context window is kept only when it lies inside the label coverage and
-    its scored interval is disjoint from every fit support. Everything that
-    cannot be supplied is reported, never padded.
+    its scored interval is disjoint from every guarded fit support. Everything
+    that cannot be supplied is reported, never padded.
     """
     lo, hi = rec.coverage
     cal = [w for w in calibration if w.recording == rec.recording_id]
@@ -544,7 +567,7 @@ def resolve_support_windows(
             rec.recording_id, float(start), float(context_seconds), regime=regime, role="evaluation"
         )
         support = Window(rec.recording_id, float(a), float(b - a), regime=regime)
-        if any(support.overlaps(c) for c in cal):
+        if any(overlaps_guarded_training(support, c, guard_seconds=guard_seconds) for c in cal):
             dropped.append(f"{support.key}:fit-support")
             continue
         if any(w.overlaps(k) for k in kept):
@@ -581,15 +604,16 @@ def check_explicit_windows(
     regime: str,
     calibration: Sequence[Window],
     requested: int | None = None,
+    guard_seconds: float = 0.0,
 ) -> tuple[list[Window], list[SupportReport]]:
-    """The same guard for manifest-declared windows: drop overlaps, report them."""
+    """The same guarded training-support rule for manifest-declared windows."""
     reports: list[SupportReport] = []
     kept: list[Window] = []
     for rid in sorted({w.recording for w in windows}):
         mine = [w for w in windows if w.recording == rid]
         cal = [w for w in calibration if w.recording == rid]
-        bad = [w for w in mine if any(w.overlaps(c) for c in cal)]
-        good = [w for w in mine if not any(w.overlaps(c) for c in cal)]
+        bad = [w for w in mine if any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
+        good = [w for w in mine if not any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
         want = int(requested if requested is not None else len(mine))
         kept.extend(good)
         reports.append(
@@ -944,18 +968,13 @@ def training_leakage(
 
     The F5 "no held-out raw-sample support leakage" check at manifest level: a
     candidate that saw a scored window during fitting is not held out on it.
-    ``guard_seconds`` widens each training span symmetrically, so an analysis
-    or filter support that reaches into a scored window counts as overlap too.
+    ``guard_seconds`` is the SAME shared symmetric margin used when resolving
+    baseline/explicit held-out supports, so an analysis or filter support that
+    reaches into a scored window counts as overlap too.
     """
     hits: list[dict[str, Any]] = []
     for t in training:
-        wide = Window(
-            t.recording,
-            float(t.start_s) - float(guard_seconds),
-            float(t.duration_s) + 2.0 * float(guard_seconds),
-            regime=t.regime,
-            role=t.role,
-        )
+        wide = widened_training_window(t, guard_seconds)
         for s in scored:
             if wide.overlaps(s):
                 hits.append(

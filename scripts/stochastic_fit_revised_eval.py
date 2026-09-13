@@ -53,6 +53,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -121,6 +122,74 @@ def checkpoint_record(experiment: str, ckpt: str) -> dict[str, Any]:
         sha256=hashlib.sha256(local.read_bytes()).hexdigest(),
     )
 
+def _load_env_file() -> None:
+    env = Path(".env")
+    if not env.exists():
+        return
+    for line in env.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            sys_key = key.strip().removeprefix("export ")
+            os.environ.setdefault(sys_key, value.strip().strip("'\""))
+
+
+def _download_s3_uri(uri: str, dest: Path) -> bytes:
+    """Download one small JSON artifact from Cloudflare R2/S3 URI."""
+    if not uri.startswith("s3://"):
+        die(f"candidate artifact URI must be s3://..., got {uri!r}")
+    bucket_key = uri.removeprefix("s3://")
+    bucket, _, key = bucket_key.partition("/")
+    if not bucket or not key:
+        die(f"candidate artifact URI is incomplete: {uri!r}")
+    _load_env_file()
+    import boto3
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        region_name="auto",
+    )
+    body = client.get_object(Bucket=bucket, Key=key)["Body"].read()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(body)
+    return body
+
+
+def ensure_candidate_artifacts(man: dict[str, Any]) -> list[dict[str, Any]]:
+    """Materialize per-rig candidate exports from pinned R2 records when absent."""
+    cand = dict(dict(man["arms"]).get("candidate") or {})
+    reject_candidate_guard_override(cand, context="arms.candidate")
+    artifacts = dict(man.get("candidate_artifacts") or {})
+    ensured: list[dict[str, Any]] = []
+    specs = {
+        str(rig): dict(spec)
+        for rig, spec in dict(cand.get("per_rig") or {}).items()
+        if isinstance(spec, dict) and spec.get("export")
+    }
+    if cand.get("export"):
+        specs.setdefault("candidate", cand)
+    for rig, spec in specs.items():
+        path = Path(str(spec["export"]))
+        expected = str(dict(artifacts.get(rig) or {}).get("sha256") or "")
+        uri = dict(artifacts.get(rig) or {}).get("r2_uri")
+        if path.is_file():
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        elif uri:
+            body = _download_s3_uri(str(uri), path)
+            digest = hashlib.sha256(body).hexdigest()
+            print(f"fetched {path} from {uri}", flush=True)
+        else:
+            die(f"candidate export {path} is missing and no candidate_artifacts.{rig}.r2_uri is set")
+        if expected and digest != expected:
+            die(f"candidate export {path} sha256 {digest} != expected {expected}")
+        ensured.append(dict(rig=rig, path=str(path), sha256=digest))
+    return ensured
+
+
+
 
 # ── the manifest and the frozen input record ────────────────────────────────
 
@@ -148,6 +217,30 @@ def load_manifest(path: Path) -> dict[str, Any]:
     man["_path"] = str(path)
     man["gates"] = gates
     return man
+
+def training_guard_seconds(man: dict[str, Any]) -> float:
+    """Protocol-level symmetric fit-support guard, hashed with observations."""
+    obs = dict(require(man, "observation", str(man.get("_path", "manifest"))))
+    guard = float(require(obs, "training_guard_seconds", "observation"))
+    if not np.isfinite(guard) or guard < 0.0:
+        die(f"observation.training_guard_seconds must be finite and non-negative, got {guard!r}")
+    return guard
+
+
+def reject_candidate_guard_override(spec: dict[str, Any], *, context: str) -> None:
+    """Candidate arms may not redefine the protocol guard."""
+    if "training_guard_seconds" in spec:
+        die(
+            f"{context}: training_guard_seconds belongs in observation, not in the candidate arm"
+        )
+    for rig, rig_spec in dict(spec.get("per_rig") or {}).items():
+        if isinstance(rig_spec, dict) and "training_guard_seconds" in rig_spec:
+            die(
+                f"{context}.per_rig.{rig}: training_guard_seconds belongs in observation, "
+                "not in the candidate arm"
+            )
+
+
 
 
 def _canonical_manifest(man: dict[str, Any]) -> dict[str, Any]:
@@ -258,7 +351,12 @@ def frozen_inputs(man: dict[str, Any], scorer: dict[str, Any]) -> dict[str, Any]
         exports=exports,
         datasets=datasets,
         observation=dict(
-            n_fft=RE.OBS_N_FFT, hop=RE.OBS_HOP, f_min=RE.OBS_F_MIN, f_max=RE.OBS_F_MAX, sr=RE.SR
+            n_fft=RE.OBS_N_FFT,
+            hop=RE.OBS_HOP,
+            f_min=RE.OBS_F_MIN,
+            f_max=RE.OBS_F_MAX,
+            sr=RE.SR,
+            training_guard_seconds=training_guard_seconds(man),
         ),
         rule=(
             "the frozen-manifest promise covers the referenced artifacts: manifest text, scorer "
@@ -449,8 +547,9 @@ def _resolve_candidate_export(
         if rig is None:
             die(f"{context}: per_rig candidate mapping requires a cohort rig")
         entry = dict(per_rig).get(rig)
-        if entry is None:
+        if not isinstance(entry, dict):
             die(f"{context}: no candidate export declared for rig {rig!r}")
+        entry = dict(entry)
         return str(require(entry, "export", f"{context} rig {rig}")), entry.get("fit_manifest_sha256")
     return str(require(spec, "export", context)), spec.get("fit_manifest_sha256")
 
@@ -559,11 +658,60 @@ def baseline_params(
     return mp
 
 
+def validate_explicit_windows(
+    cohort: dict[str, Any], regime_spec: dict[str, Any], windows: list[RE.Window]
+) -> list[dict[str, Any]]:
+    """Validate declared held-out windows against published raw support before scoring."""
+    if not windows:
+        return []
+    dataset, pinned = C.split_dataset(str(require(cohort, "dataset", f"cohort {cohort['name']}")))
+    version = cohort.get("version") or pinned
+    key = RE.assert_raw_reference(str(require(cohort, "scoring_rps_key", "cohort")))
+    min_rps = regime_spec.get("min_rps")
+    max_rps = regime_spec.get("max_rps")
+    out: list[dict[str, Any]] = []
+    for w in windows:
+        rec = C.load_recording(dataset, w.recording, version, key)
+        try:
+            native = rec.cut(w.start_s, w.duration_s, channels=cohort.get("channels"))
+        except ValueError as exc:
+            die(f"{w.key}: explicit window is outside published audio/RPS coverage: {exc}")
+        expected = int(round(float(w.duration_s) * float(rec.sr)))
+        if int(native.audio.shape[-1]) != expected:
+            die(f"{w.key}: expected {expected} native samples, got {native.audio.shape[-1]}")
+        rps = np.asarray(native.rps, dtype=np.float64)
+        if min_rps is not None and float(np.nanmin(rps)) < float(min_rps) - 1e-9:
+            die(f"{w.key}: explicit window drops below min_rps={float(min_rps):g}")
+        if max_rps is not None and float(np.nanmax(rps)) > float(max_rps) + 1e-9:
+            die(f"{w.key}: explicit window exceeds max_rps={float(max_rps):g}")
+        start_sample_f = (float(w.start_s) - float(rec.t_start)) * float(rec.sr)
+        start_sample = int(round(start_sample_f))
+        out.append(
+            dict(
+                window=w.key,
+                dataset=dataset,
+                resolved_version=version,
+                rps_key=key,
+                native_sample_rate=float(rec.sr),
+                native_start_sample=start_sample,
+                start_alignment_error_samples=float(start_sample_f - start_sample),
+                n_samples=int(native.audio.shape[-1]),
+                min_rps=float(np.nanmin(rps)),
+                max_rps=float(np.nanmax(rps)),
+            )
+        )
+    return out
+
+
 # ── window resolution ───────────────────────────────────────────────────────
 
 
 def resolve_windows(
-    cohort: dict[str, Any], regime_spec: dict[str, Any], calibration: list[RE.Window]
+    cohort: dict[str, Any],
+    regime_spec: dict[str, Any],
+    calibration: list[RE.Window],
+    *,
+    guard_seconds: float,
 ) -> tuple[list[RE.Window], list[dict[str, Any]]]:
     """Held-out windows plus the support report for every cohort recording.
 
@@ -585,8 +733,19 @@ def resolve_windows(
             )
             for w in ev.get("windows", [])
         ]
-        kept, reports = RE.check_explicit_windows(declared, regime=regime, calibration=calibration)
-        return kept, [r.as_dict() | dict(mode="explicit") for r in reports]
+        kept, explicit_reports = RE.check_explicit_windows(
+            declared, regime=regime, calibration=calibration, guard_seconds=guard_seconds
+        )
+        support = validate_explicit_windows(cohort, regime_spec, kept)
+        return kept, [
+            r.as_dict()
+            | dict(
+                mode="explicit",
+                training_guard_seconds=guard_seconds,
+                published_support=[s for s in support if s["window"].startswith(r.recording + "@")],
+            )
+            for r in explicit_reports
+        ]
     dataset, pinned = C.split_dataset(str(require(cohort, "dataset", f"cohort {cohort['name']}")))
     version = cohort.get("version") or pinned
     key = RE.assert_raw_reference(str(require(cohort, "scoring_rps_key", "cohort")))
@@ -606,6 +765,7 @@ def resolve_windows(
                 max_windows=int(ev.get("max_windows", 1)),
                 min_rps=regime_spec.get("min_rps"),
                 max_rps=regime_spec.get("max_rps"),
+                guard_seconds=guard_seconds,
             )
         elif mode == "auto":
             got, report = RE.resolve_evaluation_windows(
@@ -617,6 +777,7 @@ def resolve_windows(
                 max_windows=int(ev.get("max_windows", 1)),
                 min_rps=regime_spec.get("min_rps"),
                 max_rps=regime_spec.get("max_rps"),
+                guard_seconds=guard_seconds,
             )
         else:
             die(f"cohort {cohort['name']} regime {regime}: unknown evaluation mode {mode!r}")
@@ -903,7 +1064,7 @@ def composite_per_window(rows: list[dict[str, Any]], arm: str) -> dict[str, floa
 # ── modes ───────────────────────────────────────────────────────────────────
 
 
-def cohort_plan(cohort: dict[str, Any]) -> dict[str, Any]:
+def cohort_plan(cohort: dict[str, Any], *, guard_seconds: float) -> dict[str, Any]:
     """Cohort, supports and family eligibility — no scoring, no rendering."""
     name = str(require(cohort, "name", "cohort"))
     plan: dict[str, Any] = dict(
@@ -920,7 +1081,9 @@ def cohort_plan(cohort: dict[str, Any]) -> dict[str, Any]:
         regime = str(regime_spec["regime"])
         bundles = cohort_families(cohort, regime)
         calibration = [w for b in bundles.values() for w in b.calibration_windows()]
-        windows, reports = resolve_windows(cohort, regime_spec, calibration)
+        windows, reports = resolve_windows(
+            cohort, regime_spec, calibration, guard_seconds=guard_seconds
+        )
         plan["regimes"][regime] = dict(
             families={f: b.provenance() for f, b in bundles.items()},
             coverage={
@@ -1028,11 +1191,16 @@ def run_plan(man: dict[str, Any], out: Path, *, provenance: dict[str, Any] | Non
         manifest=dict(path=man["_path"], sha256=man["_digest"]),
         import_provenance=provenance,
         observation=dict(
-            n_fft=RE.OBS_N_FFT, hop=RE.OBS_HOP, f_min=RE.OBS_F_MIN, f_max=RE.OBS_F_MAX, sr=RE.SR
+            n_fft=RE.OBS_N_FFT,
+            hop=RE.OBS_HOP,
+            f_min=RE.OBS_F_MIN,
+            f_max=RE.OBS_F_MAX,
+            sr=RE.SR,
+            training_guard_seconds=training_guard_seconds(man),
         ),
         gates=man["gates"],
         caveat=RE.ADAPTIVE_SELECTION_CAVEAT,
-        cohorts=[cohort_plan(c) for c in man["cohorts"]],
+        cohorts=[cohort_plan(c, guard_seconds=training_guard_seconds(man)) for c in man["cohorts"]],
     )
     RE.write_json(out / "plan.json", payload)
     for c in payload["cohorts"]:
@@ -1169,6 +1337,7 @@ def run_prepare(
     if len(seeds) < 2:
         die("null_variation.seeds must hold at least two baseline render seeds")
     baseline_spec = dict(require(dict(man["arms"]), "baseline", "arms"))
+    guard_seconds = training_guard_seconds(man)
     record: dict[str, Any] = dict(
         mode="prepare",
         schema=RE.SCHEMA,
@@ -1194,7 +1363,7 @@ def run_prepare(
     for cohort in man["cohorts"]:
         name = str(cohort["name"])
         bundles_by_regime = all_families(cohort)
-        cres: dict[str, Any] = dict(plan=cohort_plan(cohort), regimes={})
+        cres: dict[str, Any] = dict(plan=cohort_plan(cohort, guard_seconds=guard_seconds), regimes={})
         temp_config = dict(man.get("composite_temperature") or {})
         temp_master = temp_config.get("master_seed")
         temp_B = temp_config.get("B")
@@ -1212,7 +1381,9 @@ def run_prepare(
                 require(dict(regime_spec), "family", f"{name}:{regime}")
             )
             calibration = [w for b in bundles.values() for w in b.calibration_windows()]
-            windows, reports = resolve_windows(cohort, regime_spec, calibration)
+            windows, reports = resolve_windows(
+                cohort, regime_spec, calibration, guard_seconds=guard_seconds
+            )
 
             for w in calibration:
                 if w.key not in all_mp_for_window:
@@ -1438,6 +1609,7 @@ def candidate_leakage_guard(
     *,
     cohort_name: str,
     rig: str | None = None,
+    guard_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Refuse a candidate whose fit supports touch a scored support.
 
@@ -1448,8 +1620,9 @@ def candidate_leakage_guard(
     windows in the manifest; an undeclared one is refused rather than assumed
     clean.
     """
+    reject_candidate_guard_override(cand_spec, context=f"cohort {cohort_name} candidate")
     kind = str(cand_spec.get("kind"))
-    guard = float(cand_spec.get("training_guard_seconds", RE.OBS_N_FFT / RE.SR))
+    guard = float(RE.OBS_N_FFT / RE.SR if guard_seconds is None else guard_seconds)
     if kind == "revised_export":
         export_path, expected_sha = _resolve_candidate_export(
             cand_spec, rig, context=f"cohort {cohort_name} candidate"
@@ -1521,6 +1694,7 @@ def run_check(
     if "candidate" not in arms:
         die("manifest has no 'candidate' arm: nothing to check")
     cand_spec = dict(arms["candidate"])
+    candidate_artifacts = ensure_candidate_artifacts(man)
     tracker = Tracker(dict(man["scorer"]))
     now = frozen_inputs(man, tracker.record)
     verify_frozen_inputs(now, dict(cal.get("frozen_inputs") or {}))
@@ -1543,6 +1717,7 @@ def run_check(
         render_seeds=seeds,
         caveat=RE.ADAPTIVE_SELECTION_CAVEAT,
         cohorts={},
+        candidate_artifacts=candidate_artifacts,
     )
     gates: list[RE.Gate] = []
     for cohort in man["cohorts"]:
@@ -1573,9 +1748,14 @@ def run_check(
             calibration = [
                 w for b in bundles_by_regime[regime].values() for w in b.calibration_windows()
             ]
-            windows, reports = resolve_windows(cohort, regime_spec, calibration)
+            guard_seconds = training_guard_seconds(man)
+            windows, reports = resolve_windows(
+                cohort, regime_spec, calibration, guard_seconds=guard_seconds
+            )
             all_reports.extend(reports)
-            leakage = candidate_leakage_guard(cand_spec, windows, cohort_name=name, rig=rig)
+            leakage = candidate_leakage_guard(
+                cand_spec, windows, cohort_name=name, rig=rig, guard_seconds=guard_seconds
+            )
 
             def model_for(
                 arm: str, spec: dict[str, Any], w: RE.Window, _r: str = regime
@@ -1762,6 +1942,7 @@ def run_verify_adapter(
     two disjoint seed halves of the SAME parameters give the Monte-Carlo floor
     the agreement must be read against.
     """
+    guard_seconds = training_guard_seconds(man)
     rows: list[dict[str, Any]] = []
     for cohort in man["cohorts"]:
         bundles_by_regime = all_families(cohort)
@@ -1769,7 +1950,7 @@ def run_verify_adapter(
             regime = str(regime_spec["regime"])
             bundles = bundles_by_regime[regime]
             calibration = [w for b in bundles.values() for w in b.calibration_windows()]
-            windows, _ = resolve_windows(cohort, regime_spec, calibration)
+            windows, _ = resolve_windows(cohort, regime_spec, calibration, guard_seconds=guard_seconds)
             for family in bundles:
                 for w in windows[:1]:
                     mp = baseline_params(

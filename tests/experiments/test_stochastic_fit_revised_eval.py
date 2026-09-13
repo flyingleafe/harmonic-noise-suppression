@@ -193,13 +193,17 @@ def test_out_of_regime_material_is_not_offered_as_support() -> None:
     assert got == [] and report.n_in_regime == 0 and not report.sufficient
 
 
-def test_explicit_windows_are_guarded_the_same_way() -> None:
+def test_explicit_windows_and_candidate_leakage_share_guard_boundary() -> None:
     fit = [RE.Window("FLY125", 16.0, 16.0, role="calibration")]
-    declared = [RE.Window("FLY125", 20.0, 8.0), RE.Window("FLY125", 40.0, 8.0)]
-    kept, reports = RE.check_explicit_windows(declared, regime="cruise", calibration=fit)
-    assert [w.start_s for w in kept] == [40.0]
-    assert reports[0].dropped_overlapping == ("FLY125@20.000000+8.000000",)
-    assert not reports[0].sufficient
+    adjacent = RE.Window("FLY125", 32.0, 4.0)
+    exact_boundary = RE.Window("FLY125", 33.024, 4.0)
+    kept, reports = RE.check_explicit_windows(
+        [adjacent, exact_boundary], regime="cruise", calibration=fit, guard_seconds=1.024
+    )
+    assert [w.start_s for w in kept] == [33.024]
+    assert reports[0].dropped_overlapping == ("FLY125@32.000000+4.000000",)
+    assert RE.training_leakage(fit, [adjacent], guard_seconds=1.024)["clean"] is False
+    assert RE.training_leakage(fit, [exact_boundary], guard_seconds=1.024)["clean"] is True
 
 
 def test_both_timebase_conventions_go_through_the_same_arithmetic() -> None:
@@ -1049,7 +1053,7 @@ def test_the_candidate_leakage_guard_pins_the_fit_manifest(tmp_path: Path) -> No
         kind="revised_export", export=str(export), fit_manifest_sha256="fit-manifest-digest"
     )
     report = runner.candidate_leakage_guard(spec, scored_clean, cohort_name="michaels_fly124")
-    assert report["clean"] and report["candidate"]["fit_manifest_sha256"] == "fit-manifest-digest"
+    assert report["clean"] and report["guard_seconds"] == pytest.approx(RE.OBS_N_FFT / RE.SR)
     # a wrong or missing fit-manifest digest is a hard stop
     with pytest.raises(SystemExit, match="fit_manifest_sha256"):
         runner.candidate_leakage_guard(
@@ -1060,6 +1064,10 @@ def test_the_candidate_leakage_guard_pins_the_fit_manifest(tmp_path: Path) -> No
             dict(kind="revised_export", export=str(export), fit_manifest_sha256="other"),
             scored_clean,
             cohort_name="c",
+        )
+    with pytest.raises(SystemExit, match="belongs in observation"):
+        runner.candidate_leakage_guard(
+            spec | {"training_guard_seconds": 0.0}, scored_clean, cohort_name="c"
         )
     # and a scored window that the candidate trained on is refused
     with pytest.raises(SystemExit, match="intersect scored held-out supports"):
@@ -1139,7 +1147,7 @@ def _base_manifest(tmp_path: Path) -> dict[str, Any]:
         "status": "PROPOSED",
         "notes": ["a note"],
         "scorer": {"experiment": "hppnet_l2_r2_s0", "ckpt": "best"},
-        "observation": {"sr": 16000, "n_fft": 16384, "hop": 1024, "f_min": 30.0, "f_max": 7900.0},
+        "observation": {"sr": 16000, "n_fft": 16384, "hop": 1024, "f_min": 30.0, "f_max": 7900.0, "training_guard_seconds": 1.024},
         "gates": {
             "alpha": 0.05,
             "bootstrap_seed": 0,
@@ -1173,7 +1181,10 @@ def test_protocol_fingerprint_excludes_run_inputs_only(tmp_path: Path) -> None:
     man["notes"] = ["a different note"]
     assert runner.protocol_fingerprint(man) == base
 
-    # But a gate threshold, a seed, or a cohort change DOES change it.
+    # But a guard, gate threshold, seed, or cohort change DOES change it.
+    man["observation"]["training_guard_seconds"] = 0.0
+    assert runner.protocol_fingerprint(man) != base
+    man["observation"]["training_guard_seconds"] = 1.024
     man["gates"]["dregon_gap_fraction"] = 0.8
     assert runner.protocol_fingerprint(man) != base
 
@@ -1266,6 +1277,20 @@ def test_per_rig_candidate_leakage_guard_pins_fit_manifest(tmp_path: Path) -> No
     scored = [RE.Window("free-flight_nosource_room2", 0.0, 8.0, regime="cruise")]
     report = runner.candidate_leakage_guard(spec, scored, cohort_name="dregon_room2_cruise", rig="dregon")
     assert report["clean"]
+    spec_override = {
+        "kind": "revised_export",
+        "per_rig": {
+            "dregon": {
+                "export": str(dregon),
+                "fit_manifest_sha256": "fit-d",
+                "training_guard_seconds": 0.0,
+            },
+        },
+    }
+    with pytest.raises(SystemExit, match="belongs in observation"):
+        runner.candidate_leakage_guard(
+            spec_override, scored, cohort_name="dregon_room2_cruise", rig="dregon"
+        )
     assert report["candidate"]["fit_manifest_sha256"] == "fit-d"
     # wrong rig: a michaels entry pointing to the dregon export must fail rig_id validation
     spec_mismatch = {
