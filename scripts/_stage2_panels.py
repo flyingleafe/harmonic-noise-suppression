@@ -87,31 +87,62 @@ def main() -> None:
     summary = json.loads(args.fit.read_text())
     OUT.mkdir(parents=True, exist_ok=True)
     index = []
+    # Pair each panel with the window that was actually FITTED. A summary from
+    # the frames-backed fit records its own recordings and window starts, so a
+    # pooled multi-recording fit pairs correctly; re-deriving the window list
+    # from one recording would render clip i of recording A against the
+    # parameters of clip i of recording B.
+    data = summary.get("data") or {}
+    starts = list(data.get("starts_s") or [])
+    regime = str(data.get("regime") or args.regime)
+    known = [str(r).rpartition(":")[2] for r in (data.get("recordings") or [])]
+
+    def recording_of(cid: str) -> str:
+        """The recording a clip id came from, in the dataset's own spelling.
+
+        Clip ids are built from ``recording.lower()``, but the published sample
+        key is case sensitive (``FLY125``), so the id cannot be parsed back —
+        it has to be matched against the recordings the fit recorded.
+        """
+        for name in known:
+            if cid.startswith(f"{name.lower()}_{regime}_"):
+                return name
+        return args.recording
+
     for i, (cid, entry) in enumerate(list(summary["clips"].items())[: args.clips]):
         p = entry["params"]
-        band = S2.REGIMES[args.regime]
-        spec = S2.cruise_windows(
-            args.recording,
-            dataset=args.dataset,
-            version=args.version,
-            rps_key=args.rps_key,
-            max_clips=40,
-            stride_s=band["stride_s"] or args.seconds,
-            seconds=args.seconds,
-            min_rps=float(band["min_rps"]),
-            max_rps=band["max_rps"],
-        )
-        start_s, dur = spec[i % len(spec)]
+        band = S2.REGIMES[regime]
+        if starts:
+            start_s = float(starts[i])
+            dur = float(data.get("seconds") or args.seconds)
+            recording = recording_of(cid)
+            dataset = str(data.get("dataset") or args.dataset)
+            rps_key = str(data.get("rps_key") or args.rps_key)
+        else:  # a pre-cutover summary: re-derive the window list
+            spec = S2.cruise_windows(
+                args.recording,
+                dataset=args.dataset,
+                version=args.version,
+                rps_key=args.rps_key,
+                max_clips=40,
+                stride_s=band["stride_s"] or args.seconds,
+                seconds=args.seconds,
+                min_rps=float(band["min_rps"]),
+                max_rps=band["max_rps"],
+            )
+            start_s, dur = spec[i % len(spec)]
+            recording, dataset, rps_key = args.recording, args.dataset, args.rps_key
         real_clip = C.decimate(
             C.load_clip(
-                args.dataset,
-                args.recording,
+                dataset,
+                recording,
                 start_s,
                 min(dur, args.seconds),
                 version=args.version,
                 channels=args.channels,
-                rps_key=args.rps_key,
-                clip_id=f"panel_{S2.FIT_RECORDING}_{start_s:.2f}_{min(dur, args.seconds):g}",
+                rps_key=rps_key,
+                # the cache key must name the DATA, never the loop index
+                clip_id=f"panel_{recording}_{start_s:.2f}_{min(dur, args.seconds):g}",
             ),
             S2.SR,
         )

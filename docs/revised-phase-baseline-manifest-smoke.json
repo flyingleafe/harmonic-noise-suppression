@@ -1,0 +1,98 @@
+{
+ "schema": "revised-phase-baseline/1",
+ "status": "SMOKE instance of the v1 manifest — an instrument test, NOT a scientific result.",
+ "notes": [
+  "Two DREGON recordings, one microphone, two render seeds: enough to exercise every code",
+  "path (family eligibility, identity pairing, the support guard, PIT, absolute LTAS, the",
+  "composite, the null-variation calibration and the gate arithmetic) at a cost that is not a",
+  "baseline job. The 'candidate' arm is the RAW-era DREGON export used as a stand-in so that",
+  "--check has something real to measure; it is not a revised candidate and consumes no",
+  "candidate round."
+ ],
+ "scorer": {"experiment": "hppnet_l2_r2_s0", "ckpt": "best"},
+ "observation": {"sr": 16000, "n_fft": 16384, "hop": 1024, "f_min": 30.0, "f_max": 7900.0},
+ "gates": {
+  "alpha": 0.05,
+  "bootstrap_seed": 0,
+  "dregon_gap_fraction": 0.7,
+  "michaels_ratio_max": 1.05,
+  "composite_tolerance": 0.0
+ },
+ "null_variation": {
+  "rule": "baseline render-seed split half, clustered at recording level, one-sided upper bound",
+  "seeds": [2001, 2002],
+  "metrics": ["pit_mae", "ltas_abs_db"]
+ },
+ "cohorts": [
+  {
+   "name": "dregon_room2_cruise",
+   "rig": "dregon",
+   "role": "primary",
+   "gate": "dregon_pit",
+   "dataset": "DREGON-frames",
+   "version": null,
+   "channels": "0",
+   "scoring_rps_key": "motors_command",
+   "recordings": ["free-flight_nosource_room2", "hovering_nosource_room2"],
+   "family_selection": {
+    "basis_recordings": ["free-flight_nosource_room2", "hovering_nosource_room2"],
+    "require_identity_coverage": true
+   },
+   "regimes": [
+    {
+     "regime": "cruise",
+     "min_rps": 65.0,
+     "max_rps": null,
+     "evaluation": {"mode": "auto", "min_seconds": 8.0, "stride_s": 8.0, "max_windows": 1}
+    }
+   ],
+   "families": {
+    "refined": {"cruise": {"path": "results/S2/dregon_room2_cruise_refined.json"}},
+    "raw": {
+     "cruise": {
+      "path": "results/S2/dregon_flight.json",
+      "provenance": {
+       "recordings": ["free-flight_nosource_room2"],
+       "starts_s": [1512727417.2050455],
+       "seconds": 16.0,
+       "dataset": "DREGON-frames",
+       "rps_key": "motors_command"
+      }
+     }
+    }
+   },
+   "baseline_map": {"cruise": {"from_regime": "cruise", "match": "identity"}}
+  }
+ ],
+ "arms": {
+  "real": {"kind": "real"},
+  "baseline": {"kind": "export_render"},
+  "candidate": {
+   "kind": "export_render",
+   "export": "results/S2/dregon_flight.json",
+   "provenance": {
+    "recordings": ["free-flight_nosource_room2"],
+    "starts_s": [1512727417.2050455],
+    "seconds": 16.0,
+    "dataset": "DREGON-frames",
+    "rps_key": "motors_command"
+   },
+   "extrapolated": true,
+   "label": "SMOKE stand-in: the raw-era DREGON free-flight fit, aggregated and applied to both recordings",
+   "training_provenance": {
+    "clips": [
+     {
+      "recording": "free-flight_nosource_room2",
+      "start_s": 1512727417.2050455,
+      "seconds": 16.0,
+      "regime": "cruise",
+      "rps_key": "motors_command"
+     }
+    ]
+   },
+   "training_guard_seconds": 1.024,
+   "seeds_note": "omitted on purpose: --check refuses a candidate-specific seed list and uses the frozen null_variation.seeds"
+  }
+ },
+ "out_dir": "results/revised_phase/smoke"
+}

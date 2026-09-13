@@ -1,0 +1,449 @@
+{
+ "cruise_refined": {
+  "label": "FLY125 cruise, refined labels",
+  "fit": "results/S2/cruise_8clip_refined.json",
+  "figure": "params_cruise_refined.png",
+  "data": {
+   "regime": "cruise",
+   "dataset": "michaels-frames",
+   "dataset_version": null,
+   "rps_key": "rps_refined",
+   "channels": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "n_fft": 16384,
+   "clips": [
+    "fly125_cruise_00",
+    "fly125_cruise_01",
+    "fly125_cruise_02",
+    "fly125_cruise_03",
+    "fly125_cruise_04",
+    "fly125_cruise_05",
+    "fly125_cruise_06",
+    "fly125_cruise_07"
+   ],
+   "starts_s": [
+    16.0,
+    32.0,
+    48.0,
+    64.0,
+    96.0,
+    112.0,
+    128.0,
+    144.0
+   ],
+   "seconds": 16.0,
+   "recordings": [
+    "FLY125"
+   ]
+  },
+  "seconds": 159.85332918167114,
+  "rig_ties": {
+   "rotor_delta": true
+  },
+  "tied": {
+   "gamma0_hz": 1.8774611817207187e-05,
+   "gamma_slope_hz": 0.5680860280990601,
+   "width_power": 1.0,
+   "amp_exp": 6.586696624755859,
+   "floor_exp": -2.7055556774139404,
+   "floor_tilt_db_oct": -1.7164504528045654
+  },
+  "clips": [
+   {
+    "clip": "fly125_cruise_00",
+    "group": "fly125",
+    "nll_fit": -0.1891,
+    "nll_loo": -0.2565,
+    "excess_over_loo": -0.173,
+    "n_cells": 967080,
+    "k_half": 1.728,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5681,
+    "amp_exp": 6.587,
+    "floor_exp": -2.706,
+    "floor_mean_db": -7.08
+   },
+   {
+    "clip": "fly125_cruise_01",
+    "group": "fly125",
+    "nll_fit": -0.4931,
+    "nll_loo": -0.5958,
+    "excess_over_loo": -0.0104,
+    "n_cells": 967080,
+    "k_half": 2.954,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5681,
+    "amp_exp": 6.587,
+    "floor_exp": -2.706,
+    "floor_mean_db": -7.82
+   },
+   {
+    "clip": "fly125_cruise_02",
+    "group": "fly125",
+    "nll_fit": -0.596,
+    "nll_loo": -0.3323,
+    "excess_over_loo": -0.209,
+    "n_cells": 967080,
+    "k_half": 2.096,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5681,
+    "amp_exp": 6.587,
+    "floor_exp": -2.706,
+    "floor_mean_db": -8.26
+   },
+   {
+    "clip": "fly125_cruise_03",
+    "group": "fly125",
+    "nll_fit": -0.5532,
+    "nll_loo": -0.4215,
+    "excess_over_loo": -0.2018,
+    "n_cells": 967080,
+    "k_half": 3.266,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5681,
+    "amp_exp": 6.587,
+    "floor_exp": -2.706,
+    "floor_mean_db": -8.14
+   },
+   {
+    "clip": "fly125_cruise_04",
+    "group": "fly125",
+    "nll_fit": -0.5936,
+    "nll_loo": -0.1407,
+    "excess_over_loo": -0.3916,
+    "n_cells": 967080,
+    "k_half": 2.45,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5681,
+    "amp_exp": 6.587,
+    "floor_exp": -2.706,
+    "floor_mean_db": -8.76
+   },
+   {
+    "clip": "fly125_cruise_05",
+    "group": "fly125",
+    "nll_fit": -0.5185,
+    "nll_loo": -0.159,
+    "excess_over_loo": -0.2334,
+    "n_cells": 967080,
+    "k_half": 1.787,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5681,
+    "amp_exp": 6.587,
+    "floor_exp": -2.706,
+    "floor_mean_db": -8.36
+   },
+   {
+    "clip": "fly125_cruise_06",
+    "group": "fly125",
+    "nll_fit": -0.4874,
+    "nll_loo": -0.1596,
+    "excess_over_loo": -0.2341,
+    "n_cells": 967080,
+    "k_half": 2.057,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5681,
+    "amp_exp": 6.587,
+    "floor_exp": -2.706,
+    "floor_mean_db": -8.01
+   },
+   {
+    "clip": "fly125_cruise_07",
+    "group": "fly125",
+    "nll_fit": -0.3659,
+    "nll_loo": -0.1739,
+    "excess_over_loo": -0.1701,
+    "n_cells": 967080,
+    "k_half": 2.581,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5681,
+    "amp_exp": 6.587,
+    "floor_exp": -2.706,
+    "floor_mean_db": -8.11
+   }
+  ]
+ },
+ "dregon_refined": {
+  "label": "DREGON room2 cruise, refined labels, five recordings pooled",
+  "fit": "results/S2/dregon_room2_cruise_refined.json",
+  "figure": "params_dregon_refined.png",
+  "data": {
+   "regime": "cruise",
+   "dataset": "DREGON-frames",
+   "dataset_version": null,
+   "rps_key": "rps_refined",
+   "channels": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "n_fft": 16384,
+   "clips": [
+    "free-flight_nosource_room2_cruise_00",
+    "hovering_nosource_room2_cruise_00",
+    "updown_nosource_room2_cruise_00",
+    "rectangle_nosource_room2_cruise_00",
+    "spinning_nosource_room2_cruise_00"
+   ],
+   "starts_s": [
+    1512727417.2050455,
+    1511903913.3944898,
+    1511903588.177404,
+    1511905733.5589993,
+    1511905207.3349512
+   ],
+   "seconds": 16.0,
+   "recordings": [
+    "free-flight_nosource_room2",
+    "hovering_nosource_room2",
+    "updown_nosource_room2",
+    "rectangle_nosource_room2",
+    "spinning_nosource_room2"
+   ]
+  },
+  "seconds": 99.78734183311462,
+  "rig_ties": {
+   "rotor_delta": true
+  },
+  "tied": {
+   "gamma0_hz": 13.067654609680176,
+   "gamma_slope_hz": 0.21139442920684814,
+   "width_power": 1.0,
+   "amp_exp": 8.756064414978027,
+   "floor_exp": -3.7107012271881104,
+   "floor_tilt_db_oct": -2.1025168895721436
+  },
+  "clips": [
+   {
+    "clip": "free-flight_nosource_room2_cruise_00",
+    "group": "dregon_room2",
+    "nll_fit": -1.4891,
+    "nll_loo": -1.2791,
+    "excess_over_loo": -0.2107,
+    "n_cells": 967080,
+    "k_half": 1.696,
+    "gamma0_hz": 13.0677,
+    "gamma_slope_hz": 0.2114,
+    "amp_exp": 8.756,
+    "floor_exp": -3.711,
+    "floor_mean_db": -11.39
+   },
+   {
+    "clip": "hovering_nosource_room2_cruise_00",
+    "group": "dregon_room2",
+    "nll_fit": -1.301,
+    "nll_loo": -1.1434,
+    "excess_over_loo": -0.0693,
+    "n_cells": 967080,
+    "k_half": 1.698,
+    "gamma0_hz": 13.0677,
+    "gamma_slope_hz": 0.2114,
+    "amp_exp": 8.756,
+    "floor_exp": -3.711,
+    "floor_mean_db": -10.19
+   },
+   {
+    "clip": "updown_nosource_room2_cruise_00",
+    "group": "dregon_room2",
+    "nll_fit": -1.5405,
+    "nll_loo": -1.3502,
+    "excess_over_loo": -0.0818,
+    "n_cells": 967080,
+    "k_half": 1.455,
+    "gamma0_hz": 13.0677,
+    "gamma_slope_hz": 0.2114,
+    "amp_exp": 8.756,
+    "floor_exp": -3.711,
+    "floor_mean_db": -11.19
+   },
+   {
+    "clip": "rectangle_nosource_room2_cruise_00",
+    "group": "dregon_room2",
+    "nll_fit": -1.6071,
+    "nll_loo": -1.4003,
+    "excess_over_loo": -0.1475,
+    "n_cells": 967080,
+    "k_half": 1.405,
+    "gamma0_hz": 13.0677,
+    "gamma_slope_hz": 0.2114,
+    "amp_exp": 8.756,
+    "floor_exp": -3.711,
+    "floor_mean_db": -11.44
+   },
+   {
+    "clip": "spinning_nosource_room2_cruise_00",
+    "group": "dregon_room2",
+    "nll_fit": -1.5554,
+    "nll_loo": -1.1219,
+    "excess_over_loo": -0.2085,
+    "n_cells": 967080,
+    "k_half": 1.6,
+    "gamma0_hz": 13.0677,
+    "gamma_slope_hz": 0.2114,
+    "amp_exp": 8.756,
+    "floor_exp": -3.711,
+    "floor_mean_db": -12.24
+   }
+  ]
+ },
+ "cruise_raw": {
+  "label": "FLY125 cruise, raw telemetry (the accepted 2026-09 fit)",
+  "fit": "results/S2/cruise_8clip.json",
+  "figure": "params_cruise_raw.png",
+  "data": null,
+  "seconds": 895.6674537658691,
+  "rig_ties": {
+   "tie_floor_shape": true,
+   "tie_tilt": true,
+   "tie_profile": true,
+   "tie_width": true,
+   "tie_mic_gain": true,
+   "tie_mic_floor": true,
+   "tie_speed_law": true,
+   "rotor_delta": true,
+   "delta_std_db": 2.5,
+   "rotor_width": false,
+   "width_scale_std": 0.2,
+   "level_prior_db": 10.0,
+   "profile_rank": 0,
+   "profile_mode_smooth_db": 3.0,
+   "profile_mode_scale_prior_db": 5.0,
+   "extra": {}
+  },
+  "tied": {
+   "gamma0_hz": 1.9532240912667476e-05,
+   "gamma_slope_hz": 0.5725914239883423,
+   "width_power": 1.0,
+   "amp_exp": 7.502281188964844,
+   "floor_exp": 6.792030334472656,
+   "floor_tilt_db_oct": -1.8165340423583984
+  },
+  "clips": [
+   {
+    "clip": "fly125_cruise_00",
+    "group": "fly125",
+    "nll_fit": -0.2296,
+    "nll_loo": -0.2565,
+    "excess_over_loo": -0.175,
+    "n_cells": 967080,
+    "k_half": 1.673,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5726,
+    "amp_exp": 7.502,
+    "floor_exp": 6.792,
+    "floor_mean_db": -9.28
+   },
+   {
+    "clip": "fly125_cruise_01",
+    "group": "fly125",
+    "nll_fit": -0.4935,
+    "nll_loo": -0.5958,
+    "excess_over_loo": -0.0107,
+    "n_cells": 967080,
+    "k_half": 2.777,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5726,
+    "amp_exp": 7.502,
+    "floor_exp": 6.792,
+    "floor_mean_db": -8.3
+   },
+   {
+    "clip": "fly125_cruise_02",
+    "group": "fly125",
+    "nll_fit": -0.5947,
+    "nll_loo": -0.3323,
+    "excess_over_loo": -0.2099,
+    "n_cells": 967080,
+    "k_half": 1.747,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5726,
+    "amp_exp": 7.502,
+    "floor_exp": 6.792,
+    "floor_mean_db": -8.32
+   },
+   {
+    "clip": "fly125_cruise_03",
+    "group": "fly125",
+    "nll_fit": -0.5511,
+    "nll_loo": -0.4215,
+    "excess_over_loo": -0.1993,
+    "n_cells": 967080,
+    "k_half": 2.858,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5726,
+    "amp_exp": 7.502,
+    "floor_exp": 6.792,
+    "floor_mean_db": -7.77
+   },
+   {
+    "clip": "fly125_cruise_04",
+    "group": "fly125",
+    "nll_fit": -0.4876,
+    "nll_loo": -0.114,
+    "excess_over_loo": -0.256,
+    "n_cells": 967080,
+    "k_half": 1.556,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5726,
+    "amp_exp": 7.502,
+    "floor_exp": 6.792,
+    "floor_mean_db": -8.11
+   },
+   {
+    "clip": "fly125_cruise_05",
+    "group": "fly125",
+    "nll_fit": -0.592,
+    "nll_loo": -0.1407,
+    "excess_over_loo": -0.3838,
+    "n_cells": 967080,
+    "k_half": 2.122,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5726,
+    "amp_exp": 7.502,
+    "floor_exp": 6.792,
+    "floor_mean_db": -8.52
+   },
+   {
+    "clip": "fly125_cruise_06",
+    "group": "fly125",
+    "nll_fit": -0.5204,
+    "nll_loo": -0.159,
+    "excess_over_loo": -0.2349,
+    "n_cells": 967080,
+    "k_half": 1.696,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5726,
+    "amp_exp": 7.502,
+    "floor_exp": 6.792,
+    "floor_mean_db": -8.22
+   },
+   {
+    "clip": "fly125_cruise_07",
+    "group": "fly125",
+    "nll_fit": -0.4897,
+    "nll_loo": -0.1596,
+    "excess_over_loo": -0.2396,
+    "n_cells": 967080,
+    "k_half": 2.18,
+    "gamma0_hz": 0.0,
+    "gamma_slope_hz": 0.5726,
+    "amp_exp": 7.502,
+    "floor_exp": 6.792,
+    "floor_mean_db": -7.73
+   }
+  ]
+ }
+}

@@ -501,6 +501,11 @@ def decimate(clip: Clip, target_sr: int = SR) -> Clip:
     ~0.99 x Nyquist instead of the ~7.9 kHz the published 16 kHz training sets
     stop at. The rps track is decimated by interpolation, which is exact for a
     track already interpolated onto the audio grid.
+
+    This is the path REAL clips take, and it is deliberately unchanged: a
+    render that carries energy above the output Nyquist must remove it itself
+    (:func:`stage2.antialias`) before calling this, not move the band edge for
+    every recording in the project.
     """
     if int(clip.sr) == int(target_sr):
         return clip

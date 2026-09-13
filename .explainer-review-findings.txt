@@ -1,0 +1,133 @@
+=== HUB-> Main
+Yes—with two qualifications. A frozen weighted marginal loss Σa_i[I_i/M_i+log M_i] is a valid composite score
+for old/new mean predictions despite STFT dependence because its expectation is minimized cellwise at
+M_i=E[I_i]; call it composite risk, not joint NLL/evidence. Freeze cells/weights/support for both arms, hold
+out contiguous raw support with a ≥window/filter guard, and obtain uncertainty only from paired recording
+clusters (DREGON) or explicitly conditional contiguous blocks (FLY124). Overlap weights prevent duplicated raw
+support dominating, but do not create independence or justify posterior curvature; likelihood
+temperature/prior calibration must stay separate. Carrier requirement: retain only raw telemetry + per-clip
+constant bias + one time-resolved OU state; delete/disable any second per-frame smooth correction. Biggest
+issue confirmed: Stage B must use either marginal OU expectation or a conditional posterior-path expectation,
+never inferred path plus stationary R again. I’m deriving exact contract/findings now.
+
+=== FINDING: Use only one time-resolved carrier state
+Section 6.1.1 says to keep the existing smooth flight offset while adding the OU shaft path, contradicting the
+single-state warning in the companion explainer. If phase contains both a free correction c(t) and θ̇(t)=ν(t),
+then for any g(t), c′(t)=c(t)+g(t) and ν′(t)=ν(t)−2πg(t) produce exactly the same waveform, so no acoustic
+observation can assign variation to “carrier correction” versus “shaft motion”; a smoothness prior merely
+chooses an arbitrary split. Use the identifiable baseline f_actual,r(t)=f_raw,r(t−δr)+b_clip,r+νr(t)/(2π),
+with stationary zero-mean OU νr and no second spline/per-frame latent; the per-frame correction is the
+posterior νr itself. Raw telemetry should condition the primary fit, while the existing refined trajectory is
+diagnostic only. A minimal planted check should deliberately enable both paths and verify the Hessian has the
+predicted gauge direction, then verify the one-state model recovers only their planted sum.
+
+=== FINDING: Choose conditional or marginal shaft expectation exactly once
+Section 6.2 leaves “generate through the latent oscillator” versus a marginal line shape unresolved, allowing
+Stage A’s inferred shaft path to be centered in the moving atom and the same OU variance to be integrated
+again through S_rk. For nominal phase φ0 and Gaussian phase ξ=kθ+ε with posterior or prior mean m and
+covariance C, the exact finite-window expectation is
+E|X(f)|²=∬w(t)w(s)exp{i[φ0(t)−φ0(s)+m(t)−m(s)−2πf(t−s)]}exp{−[Ctt+Css−2Cts]/2}dt ds: use prior m=0,C=Cprior
+for a held-out marginal prediction, or posterior m,C=Cpost for a conditional reconstruction, never posterior m
+with R_prior multiplied on top. The decisive falsification is a nearly perfectly observed planted shaft path,
+for which Cpost→0 and the conditional spectrum must collapse to that deterministic windowed moving atom (apart
+from ε); any remaining OU broadening demonstrates double counting.
+
+=== FINDING: Integrate the latent path inside every moving-frame atom
+The complex observation factors a nominal within-window atom G_rk,nq from one frame-level residual
+exp{i(kθ_r,n+ε_rk,n)}, which is exact only when the residual phase is constant across the entire window. For
+example, θ(t)=a sin(2πt/T) and θ(t)=0 agree at frame boundaries/centres but have different coefficients
+∫w(t)exp{ikθ(t)−i2πft}dt, so overlapping frames do not recover the missing subwindow dynamics. Put (θ,ν,ε) on
+a grid chosen from the fastest phase bandwidth, independently of STFT window and hop, and compute μ_mnq=Σ_rk
+h_mrk,q Σ_j∈window(n)w_nj A_rk,j exp{i[kΦ0_rj+kθ_rj+ε_rkj−2πf_qt_j]}; this is the conditional observation
+mean. Also propagate floor covariance through the same linear analysis operator: for a redundant complete
+STFT, Cov(Y)=AΣuAᴴ is singular because rows(A)>rank(A), so an exact Gaussian likelihood must operate on a
+nonredundant support or its true singular support; otherwise the complex objective must be labeled composite.
+Plant the sinusoidal subwindow path and duplicate-window rank-deficiency cases.
+
+=== FINDING: Make rendering condition on raw telemetry and emit the realized RPS
+The renderer equation is stationary and exports no speed label, so it does not specify how the fitted flight
+state becomes a primary predictive waveform/target pair. The coherent contract is
+Φ_r(t)=2π∫₀ᵗ[f_raw,r(s−δr)+b_clip,r]ds+θ_r(t), draw one fresh stationary OU ν_r and its exactly coupled
+integral θ_r, render φ_rk=kΦ_r+ε_rk, and emit the interval-average realized shaft label
+f_true,r,j=[Φ_r(t_{j+1})−Φ_r(t_j)]/(2πΔ); ε_rk is acoustic phase noise and must not enter that shaft label. Do
+not use a posterior/refined real trajectory as Φ and then add fresh OU noise. A minimal round-trip check is
+that integrating every emitted f_true label reproduces the shared carrier phase of every order after division
+by k, while changing the OU seed changes waveform carrier and stored truth together; posterior replay and
+refined-track conditioning should remain diagnostic modes only.
+
+=== FINDING: Define one overlap-aware composite risk for every old and new model
+“Compare held-out quasi-likelihood” does not yet define a valid common comparison when old exports were
+fitted/scored under different carrier, window, or cell conventions, and raw overlapping-cell counts cannot
+supply likelihood uncertainty. Freeze one held-out raw support with a window/filter guard, one STFT and
+normalization, one positive overlap-exposure weight a_i per marginal cell, and rescore every old and new
+export as L_c=Σ_i a_i[I_i/M_i+log M_i], normalized per unique raw duration. This remains a valid mean-
+prediction composite risk under arbitrary dependence because E[L_i]=M_i*/M_i+log M_i is uniquely minimized at
+M_i=M_i*, but it is not a joint NLL, evidence, posterior, or independent term count. Use paired whole-
+recording clusters for DREGON and explicitly conditional contiguous-block variation for FLY124; calibrate any
+fit-objective temperature/prior separately. A planted duplicate-frame case must leave the scientific
+uncertainty/effective exposure unchanged rather than doubling evidence.
+
+=== FINDING: Withdraw the unproved exact linear-time Kalman claim
+The one-step rank-one-plus-diagonal observation covariance does not prove that the structure is preserved by
+recursive conditioning. Even in y_k=h_kθ+ε_k+e_k with independent priors Var(θ)=p, Var(ε_k)=d_k, Var(e_k)=r_k
+and s_k=d_k+r_k, one update gives Cov(ε_i,ε_j|y)=d_i d_j p h_i h_j/[s_i s_j(1+pΣ_l h_l²/s_l)]≠0 for i≠j;
+prediction retains these induced residual correlations, and subsequent heterogeneous updates can add new low-
+rank directions. Thus “conditional on shaft angle” is not the filtered distribution needed by an exact Kalman
+recursion, and Woodbury on the initial S is insufficient to establish O(K). The implementable baseline is
+damped sparse Gauss–Newton/MAP, with conditional per-order smoothers and a small shaft smoother alternated as
+an O(NK)-per-sweep local approximation; compare its MAP objective and Laplace covariance against a dense
+small-K reference, and quote measured scaling rather than exact Kalman complexity.
+
+=== FINDING: Replace the false log-diffusion conjugacy claim
+A Gaussian prior on d_k=log D_rk is not conjugate to the noisy moment estimate D̂_rk. Under even the
+optimistic likelihood D̂|d∼N(exp d,s²), p(d|D̂)∝exp{−(D̂−exp d)²/(2s²)−(d−μ)²/(2τ²)} is non-Gaussian; the
+document also acknowledges D̂ can be negative, in which case log D̂ and any Gaussian weighted average are
+undefined. Use the block-bootstrap joint covariance of the raw moment estimates and numerically optimize d
+with the stated Gaussian hierarchy, or update d numerically inside the Laplace/generalized-EM fit; call both
+approximate. A one-order planted case with D̂<0 is sufficient to falsify the claimed closed-form posterior,
+and a positive noisy case should be checked against direct one-dimensional quadrature.
+
+=== FINDING: Keep staged alternation on one objective and one state prior
+Stages 4–6 can alternate coherently only when state, amplitudes, floor, and hyperparameters all optimize the
+same complex-track likelihood plus one OU/Wiener prior; adding Stage 7’s marginal spectral objective on the
+same samples and then refining all blocks would reuse the observations and the integrated state covariance as
+if they were independent evidence. The minimal implementable path is: use phase moments only for
+initialization; alternate damped MAP smoothing with conditional amplitude/floor least squares in one complex
+observation objective; update λ,σν,D by numerical generalized EM using the iterated-smoother/Laplace expected
+increments; then freeze dynamics and use the marginal spectral composite only for plug-in power/floor
+refinement on separately identified support or as a calibrated auxiliary composite, never as another exact
+likelihood factor. Because the complex exponential makes the smoothing law non-Gaussian, this is approximate
+MAP/Laplace generalized EM, whereas only the linear conditional amplitude solve and exact Gaussian state
+transitions are exact.
+
+=== FINDING: Freeze the human convention for the tracker RPS target
+Unavoidable human ambiguity: mathematics distinguishes the exogenous raw/reference trajectory from the
+renderer’s latent realized physical shaft speed, but it cannot decide which quantity the frozen tracker’s
+existing MAE convention is intended to call its target. Freeze that semantic choice in the manifest before
+comparison. The least disruptive contract is to report candidate and real tracker agreement against the same
+raw reference (without calling it ground truth) and additionally store f_true from the rendered shaft phase
+for diagnostic MAE; changing the primary target to f_true would answer a different supervised-task question
+even though f_true is the physically exact render label.
+
+=== HUB-> Main
+C1 is coherent with two minimal corrections. First, “conditional spectral expected M” with MAP θ and residual
+exp(−D|τ|) must integrate θ(t) inside the double window sum: M=Σ_{t,s}w_t w_s
+exp{i[φ0_t−φ0_s+k(θ̂_t−θ̂_s)−2πf(t−s)]}exp(−D|t−s|), plus floor; do not use a frame-center phase multiplier.
+This is conditional on the MAP shaft path but marginal over ε only, so label it plug-in/composite MAP, not a
+conditional Bayesian expectation (θ uncertainty is omitted). Second, scalar D must be indexed at least per rig
+(and source-side shared across microphones), with its units fixed as phase rad²/s and no hidden k scaling
+unless explicitly chosen. Joint Adam over θ and hyperparameters frozen is one objective+one exact OU prior and
+avoids EM/Kalman claims. Fatal only if the same phase-track moment data are then added as a second objective:
+use moments strictly to freeze λ,σ/initialize, or use disjoint support; overlap-tempered spectral composite
+supplies no posterior curvature. Heldout marginalization/full fresh OU once is correct. Plant D=0/MAP-path
+recovery, θ=0/scalar-D recovery, subwindow oscillation, and label-integrates-to-rendered-shaft tests.
+
+=== HUB-> Main
+Two small fit/render details for that formula: exp(−D|t−s|) is the stationary increment kernel only if each
+harmonic’s initial residual phase is drawn uniform (one source phase shared across microphones); render that
+convention, otherwise fixed ε(0)=0 creates nonstationary means/cross-terms and M no longer matches.
+Conditioning only on dense-grid MAP endpoints also omits integrated-OU bridge variance between grid points;
+either include the exact Gaussian bridge covariance in the kernel or explicitly call interpolation a grid
+approximation and require convergence as Δstate shrinks independently of STFT hop/window. Neither forces full
+complex smoothing.
+

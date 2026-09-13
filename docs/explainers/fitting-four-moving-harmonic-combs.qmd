@@ -1,0 +1,1419 @@
+---
+title: "Fitting four moving harmonic combs with crossings"
+subtitle: "A practical strategy for telemetry-guided latent phase inference"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    code-fold: true
+    html-math-method: katex
+execute:
+  echo: false
+  warning: false
+---
+
+::: {.callout-note}
+## Purpose
+
+This document describes the recommended fitting strategy when four rotors
+produce moving harmonic combs. Their fundamental-frequency trajectories are
+known approximately from telemetry. Harmonics from different rotors can become
+close and can cross.
+
+The goal is not only to reconstruct the mean spectrum. The fitted model must
+also generate the correct shared phase motion within each comb, independent
+residual phase motion at each harmonic, multichannel spatial structure, and
+behaviour through frequency crossings.
+:::
+
+:::: {.callout-important}
+## Status
+
+This is the **general strategy and future-complexity** document for the
+revised rotor-noise phase family, reconciled to the frozen campaign contracts
+(2026-09-12). **Candidate 1** — the model and the fitting procedure actually
+being implemented — is a strict and much smaller subset of what follows. It is
+defined in §1 and recorded, together with the frozen acceptance criteria and
+the round ledger, in `docs/experiments/revised-phase-campaign.qmd`. The
+companion derivations are in
+`docs/explainers/bench-fit-revised-phase-model.qmd`.
+
+Sections marked **optional future** are deliberately not the default: one
+scientifically motivated complexity is added only when a **named** acceptance
+criterion has actually failed. **No candidate has been fitted or evaluated.**
+::::
+
+# 1. Main recommendation
+
+Treat the recording as the output of four telemetry-anchored latent
+oscillators. Fit isolated regions first. Fit overlapping lines jointly. Use the
+complete harmonic family and all microphones to preserve rotor identity through
+crossings.
+
+Do not treat the problem as four independent spectral fits. Do not assign a
+time-frequency bin permanently to its nearest predicted line. Both approaches
+discard the information needed at a crossing.
+
+The fitting pipeline for the **general family** is:
+
+1. Integrate **raw** telemetry to obtain nominal phase trajectories.
+2. Estimate telemetry/audio delay and a per-clip frequency bias from isolated,
+   high-SNR harmonics.
+3. Estimate amplitude profiles and multichannel spatial signatures away from
+   crossings.
+4. Estimate shared shaft dynamics and independent harmonic diffusion from
+   cross-harmonic phase increments — as **initializers and diagnostics only**.
+5. *(optional future)* Construct time-dependent groups of overlapping harmonic
+   tracks.
+6. *(optional future)* Run joint complex-valued state smoothing inside each
+   overlap group.
+7. Fit powers and the stochastic floor against the frozen overlap-aware
+   spectral composite risk.
+8. *(optional future)* Refine all parameters jointly from the staged solution.
+9. Validate by round-trip simulation, including simulated crossings.
+
+**Candidate 1, which is what is actually being implemented, is much smaller.**
+Write $g$ for the **rig** index — Michael's rig, DREGON, the bench — and $r$
+for a rotor inside that rig; candidate 1's dynamic parameters carry $g$, not
+$r$. Its whole pipeline is:
+
+1. Integrate **raw** telemetry. No refined or posterior label enters the fit.
+2. Fit one delay $\delta_r$ and one per-clip bias $b_{c,r}$ — a random effect
+   with a proper prior and a population/recording mean.
+3. Initialize amplitudes and spatial signatures away from crossings.
+4. Initialize the dynamics from complex harmonic phase-increment **moments** on
+   a **preregistered** isolated high-SNR order support (the SNR/isolation gate
+   is fixed *before* any estimate): numerically estimate and then **freeze**
+   the rig parameters $\lambda_g,\sigma_g$ (one number each per rig, for all
+   four rotors), and initialize one scalar diffusion $D_g$ per rig from the
+   residual moments.
+5. Fit everything else — the per-clip bias, the dense-grid shared
+   $\theta_r/\nu_r$ path, the scalar $D_g$, the existing line and floor powers,
+   the tied speed law — in **one** ordinary PyTorch Adam plug-in composite
+   **MAP** pass, under **one** exact Gaussian integrated-OU state prior.
+6. Divide that objective by the frozen scalar **composite temperature** $T$,
+   and calibrate any prior weight separately on frozen planted/baseline data;
+   **freeze** both before any candidate is fitted. $T$ is a scalar
+   gain-direction sandwich correction, $T=J/H$, with a fixed formula, a fixed
+   seed and draw count, and a loud failure on non-positive or non-finite $J$
+   (Stage 7 below; full definition in
+   `bench-fit-revised-phase-model.qmd` §6.2.4). Frame count is never evidence.
+
+Its complexity budget is three rig dynamic parameters
+($\lambda_g$, $\sigma_g$, $D_g$) — three numbers per rig, not three per rotor
+and not four diffusion constants on a quadrotor — one shared carrier path,
+ordinary Adam and moment initialization. Nothing else is added unless a
+**named** acceptance
+criterion fails. Candidate 1 obeys both prohibitions above trivially: it sums
+all components continuously and never assigns a bin to a line.
+
+A single end-to-end fit from random initialization is unnecessarily fragile;
+the moment initialization exists for exactly that reason.
+
+# 2. Generative model
+
+## 2.1 Telemetry-guided nominal phase
+
+Let $\widehat f_r(t)$ be the measured fundamental frequency, in hertz, of rotor
+$r\in\{1,2,3,4\}$. Its nominal phase is
+
+$$
+\widehat\Phi_r(t)
+=2\pi\int_0^t\widehat f_r(s)\,ds.
+$$
+
+The actual carrier is not assumed to equal telemetry exactly. The identifiable
+parameterization has exactly three parts: a time offset $\delta_r$, a per-clip
+frequency bias $b_{c,r}$, and **one** stochastic residual:
+
+$$
+\boxed{
+\Phi_r(t)
+=2\pi\int_0^t
+\left[
+f_{\text{raw},r}(s-\delta_r)+b_{c,r}
+\right]ds
++\theta_r(t),
+}
+$$
+
+equivalently, in instantaneous-frequency form,
+
+$$
+f_{\text{actual},r}(t)
+=f_{\text{raw},r}(t-\delta_r)+b_{c,r}+\frac{\nu_r(t)}{2\pi}.
+$$
+
+Here $f_{\text{raw},r}$ is the **raw** published telemetry array. The refined
+or posterior trajectory is fit provenance and a diagnostic — never an input to
+the primary fit, and never a scoring reference. The bias $b_{c,r}$ is a
+per-clip random effect with a proper prior and a population/recording mean, not
+a free per-clip number. The gauge is fixed: $\theta_r(t_0)=0$, the initial
+$\nu_r$ is drawn from its stationary distribution, and the mean OU is
+stationary-zero in law. There is **no** second per-frame carrier correction
+and no calibration spline (§9).
+
+The time offset is important. A small telemetry/audio misalignment creates a
+systematic phase error when the rotor accelerates. The error grows with
+harmonic order.
+
+## 2.2 Shared shaft dynamics
+
+For each rotor, let the residual angular-frequency error be OU:
+
+$$
+d\nu_r(t)
+=-\lambda_r\nu_r(t)\,dt
++\sqrt{2\lambda_r\sigma_{\nu,r}^2}\,dW_r^{(0)}(t),
+$$
+
+and let
+
+$$
+d\theta_r(t)=\nu_r(t)\,dt.
+$$
+
+All harmonics of rotor $r$ share $\theta_r(t)$. Different rotors initially have
+independent shaft states.
+
+For candidate 1 these are **rig-level**: $\lambda_r\equiv\lambda_g$ and
+$\sigma_{\nu,r}\equiv\sigma_g$, one number each for all four rotors of rig $g$
+(§1), and both are **frozen** after moment initialization; the time-resolved
+object that is
+actually fitted is the state path itself. If they prove genuinely
+unidentifiable from the available support, that is **reported** — never
+replaced by a fabricated "measured" value.
+
+## 2.3 Independent harmonic phase diffusion
+
+Each order has an additional source-side residual:
+
+$$
+d\epsilon_{rk}(t)
+=\sqrt{2D_{rk}}\,dW_{rk}(t).
+$$
+
+For **candidate 1** this too is one scalar per **rig**: $D_{rk}\equiv D_g$ for
+every rotor $r$ and order $k$, so the candidate's dynamic parameters are the
+three rig numbers $(\lambda_g,\sigma_g,D_g)$ of §1. $D_g$ is shared across
+every order **and** every microphone, because $\epsilon$ is source-side; its
+units are phase rad$^2$/s, and there is **no hidden $k$ scaling**.
+Per-order $D_{rk}$, any order law, and the hierarchy
+$\log D_{rk}=d_0+d_1\log k+u_k$ are optional future complexity, admitted only
+on evidence.
+
+Each harmonic's **initial** residual phase is drawn **uniform on $[0,2\pi)$**,
+independently per harmonic and shared across microphones. This is a
+requirement rather than a matter of taste, but the reason is **not** the
+increment kernel: a deterministic $\epsilon_{rk}(0)$ cancels in
+$\epsilon_{rk}(t)-\epsilon_{rk}(s)$, so the increment kernel is
+$\exp(-D_g|t-s|)$ whatever the initial condition. The reason is that uniform
+initial phases make every phasor **zero-mean**, which is what cancels the
+cross-harmonic and cross-component expectation terms in the summed powers and
+removes any deterministic-carrier mean component
+(`bench-fit-revised-phase-model.qmd` §2.2). With $\epsilon_{rk}(0)=0$ those
+cross-terms survive and the predicted spectrum stops matching what the
+renderer produces.
+
+The phase of order $k$ is
+
+$$
+\boxed{
+\phi_{rk}(t)
+=k\Phi_r(t)+\epsilon_{rk}(t).
+}
+$$
+
+The acoustic signal at microphone $m$ is
+
+$$
+x_m(t)
+=\operatorname{Re}\left\{
+\sum_{r=1}^4\sum_k
+a_{mrk}(t)e^{i\phi_{rk}(t)}
+\right\}
++u_m(t),
+$$
+
+where $a_{mrk}(t)$ is a slowly varying complex transfer coefficient and
+$u_m(t)$ is the stochastic floor.
+
+If $\epsilon_{rk}$ represents source-side acoustic generation, the same
+$\epsilon_{rk}(t)$ must be used at all microphones. Microphone-side or
+propagation phase noise, if later required, must be introduced as a separate
+process.
+
+# 3. What a crossing means
+
+A crossing occurs when
+
+$$
+k\widehat f_r(t)\approx l\widehat f_s(t)
+$$
+
+for two distinct components $(r,k)$ and $(s,l)$.
+
+Their frequencies may coincide, but their identities do not. Identity remains
+attached to:
+
+- the telemetry trajectory before and after the crossing;
+- the other harmonics belonging to the same rotor;
+- the shared shaft state of that rotor;
+- its spatial transfer vector across microphones;
+- its slowly varying amplitude profile.
+
+At one exact crossing, one microphone and one Fourier coefficient cannot
+identify two arbitrary complex sources. The full trajectory can still be
+identifiable because information exists before, during, and after the crossing.
+
+The fit must therefore smooth through crossings. It must not make an
+independent source-assignment decision in every STFT cell.
+
+Candidate 1's crossing policy follows from exactly that, and it needs no new
+machinery:
+
+- unresolved overlaps are **excluded from the moment initialization**, with the
+  isolation and SNR gates declared before any estimate;
+- the conditional spectral model **sums all components continuously**, so a
+  crossing remains a set of **shared latent states** rather than a set of
+  independent nearest-bin labels;
+- no allocation is forced when a pair is genuinely unidentifiable — the
+  uncertainty, or the unresolved group, is reported instead (§8.3).
+
+# 4. Observation representation
+
+## 4.1 Retain complex observations
+
+Use complex analytic subbands or the complex STFT. Do not reduce the data to
+periodogram power before estimating phase dynamics and source identity.
+
+For a local time-frequency region, write
+
+$$
+\mathbf Y_{nq}
+=\sum_{(r,k)\in\mathcal C_{nq}}
+\mathbf h_{rk,q}
+A_{rk,n}
+G_{rk,nq}
+e^{i[k\theta_{r,n}+\epsilon_{rk,n}]}
++\boldsymbol\eta_{nq}.
+$$
+
+Here:
+
+- $\mathbf Y_{nq}\in\mathbb C^M$ contains all microphones;
+- $\mathcal C_{nq}$ contains the lines that overlap cell $(n,q)$;
+- $\mathbf h_{rk,q}$ is the multichannel spatial signature;
+- $A_{rk,n}\ge0$ is the source amplitude;
+- $G_{rk,nq}$ is a telemetry-derived window or chirp atom;
+- $\boldsymbol\eta_{nq}$ contains floor and modelling error.
+
+## 4.2 Telemetry-derived atoms
+
+For time-varying carriers, do not approximate every frame by a static sinusoid
+at its centre frequency unless the within-frame motion is negligible.
+
+For window $w_n(t)$, construct
+
+$$
+G_{rk,n}(f)
+=\int w_n(t)
+\exp\!\left\{
+i k\widehat\Phi_r(t)-i2\pi ft
+\right\}dt.
+$$
+
+This atom contains the actual:
+
+- frequency trajectory inside the frame;
+- fractional-bin offset;
+- analysis window;
+- harmonic-order scaling.
+
+The stochastic residual phases then modulate this nominal atom.
+
+:::: {.callout-warning}
+## The latent path is integrated inside the atom, never evaluated at its centre
+
+The nominal atom $G_{rk,n}$ above carries the *telemetry* motion inside the
+frame. It is **not** sufficient to multiply it by one frame-level residual
+$\exp\{i(k\theta_{r,n}+\epsilon_{rk,n})\}$: that factorisation is exact only if
+the residual phase is constant across the entire window. Counterexample:
+$\theta(t)=a\sin(2\pi t/T)$ and $\theta(t)=0$ agree at both frame boundaries
+and frame centres, yet
+
+$$
+\int w(t)\exp\left\{ik\theta(t)-i2\pi ft\right\}dt
+$$
+
+differs between them. **Overlapping frames do not recover the missing subwindow
+dynamics**, because overlapping frames re-use the same samples.
+
+The conditional observation mean is therefore
+
+$$
+\boxed{
+\mu_{mnq}
+=\sum_{r,k} h_{mrk,q}
+\sum_{j\in\text{window}(n)} w_{nj}A_{rk,j}\,
+\exp\!\left\{i\left[
+k\Phi_{0,rj}+k\theta_{rj}+\epsilon_{rkj}-2\pi f_qt_j
+\right]\right\},
+}
+$$
+
+with the latent path evaluated **inside** the sum. Amplitude changes inside a
+ramp enter the atom $a_j=w_{nj}A_{rk,j}$ too. Frame-mean speed, a frame-centre
+phase multiplier, a broaden-by-slope rule and a chirp-width heuristic are all
+excluded for moving carriers.
+::::
+
+## 4.3 Prefer heterodyned subbands for state fitting
+
+The full audio-rate likelihood is expensive. A practical compromise is to
+extract narrow complex subbands around predicted harmonic trajectories.
+
+For each candidate component:
+
+1. heterodyne by $e^{-ik\widehat\Phi_r(t)}$;
+2. low-pass filter to a band wide enough to contain carrier error, physical
+   linewidth, and nearby crossings;
+3. downsample to a rate that resolves the fastest expected phase dynamics;
+4. retain all components jointly when their extraction bands overlap.
+
+This produces a much smaller complex time series while preserving the phase
+information needed by the state-space model.
+
+## 4.4 The state grid, and what the observation array cannot be
+
+Two constraints follow from this representation, and both are easy to get
+wrong.
+
+**The state grid is set by the dynamics, not by the spectral window.** Put
+$(\theta,\nu)$ — and $\epsilon$, if it is ever represented explicitly — on a
+grid chosen from the fastest phase bandwidth, **independently** of the STFT
+window and hop. Overlap between analysis frames does not resolve subwindow
+dynamics (§4.2).
+
+:::: {.callout-warning}
+## Interpolating between grid points omits the OU bridge variance
+
+Conditioning only on dense-grid MAP endpoints and interpolating between them
+**omits the integrated-OU bridge variance** between those points. Call that a
+**grid approximation**, and demonstrate convergence as $\Delta_{\text{state}}$
+shrinks at fixed STFT hop and window. Including an exact Gaussian bridge
+covariance in the kernel would remove the approximation, and is optional future
+complexity. Neither choice forces full complex smoothing.
+::::
+
+**A redundant complete STFT has a singular covariance.** Propagate the floor
+covariance through the same linear analysis operator $A$: for a redundant
+complete STFT, $\operatorname{Cov}(Y)=A\Sigma_uA^{H}$ is singular, because
+$\operatorname{rows}(A)>\operatorname{rank}(A)$. An exact Gaussian likelihood
+would therefore have to operate on a non-redundant support or on its true
+singular support; otherwise the complex objective is a **composite** and must
+be labelled one. Plant the sinusoidal subwindow path and the duplicate-window
+rank-deficiency case.
+
+# 5. Dynamic covariance and initial parameter estimates
+
+## 5.1 Phase-increment covariance within a rotor
+
+After removing nominal telemetry phase, define
+
+$$
+\psi_{rk}(t)=k\theta_r(t)+\epsilon_{rk}(t).
+$$
+
+For lag $\tau$,
+
+$$
+\operatorname{Cov}
+\left[\Delta\boldsymbol\psi_r(\tau)\right]
+=V_{\theta,r}(\tau)\mathbf k\mathbf k^T
++2|\tau|\operatorname{diag}(D_{r1},\ldots,D_{rK}),
+$$
+
+where
+
+$$
+V_{\theta,r}(\tau)
+=2\sigma_{\nu,r}^2
+\left[
+\frac{|\tau|}{\lambda_r}
+-\frac{1-e^{-\lambda_r|\tau|}}{\lambda_r^2}
+\right].
+$$
+
+The off-diagonal terms contain only shared shaft motion:
+
+$$
+\operatorname{Cov}(\Delta\psi_{rk},\Delta\psi_{rl})
+=klV_{\theta,r}(\tau),
+\qquad k\ne l.
+$$
+
+Estimate $\lambda_r$ and $\sigma_{\nu,r}$ primarily from these off-diagonal
+terms. Then estimate $D_{rk}$ from the diagonal residuals.
+
+These moment estimates are **initializers and diagnostics only**. They never
+enter the fit as a second likelihood factor, and no separate phase loss is
+stacked on the spectral objective: the same phase-track data added twice would
+count the same observations, and the same integrated state covariance, as
+independent evidence. The pooling itself is done by diagonal or generalised
+least squares, which is an **approximation** — the pair estimates share shaft
+increments, share an order whenever two pairs overlap, and share overlapping
+time windows — so quote uncertainty from contiguous-block variation (a
+moving-block bootstrap over whole blocks), never from a pair count. A negative
+raw estimate is an **observation**, neither an impossible logarithm nor a zero.
+
+## 5.2 Order-normalised differences
+
+For two orders from the same rotor,
+
+$$
+\frac{\psi_{rk}}{k}-\frac{\psi_{rl}}{l}
+=\frac{\epsilon_{rk}}{k}-\frac{\epsilon_{rl}}{l}.
+$$
+
+The shaft cancels. Under independent Wiener residuals,
+
+$$
+\operatorname{Var}\!\left[
+\Delta\left(
+\frac{\psi_{rk}}{k}-\frac{\psi_{rl}}{l}
+\right)
+\right]
+=2|\tau|
+\left(
+\frac{D_{rk}}{k^2}+\frac{D_{rl}}{l^2}
+\right).
+$$
+
+Use this as both an initializer and a model check. Nonlinear growth in lag means
+that the independent residual is not well described by Wiener phase.
+
+## 5.3 Cross-rotor covariance
+
+The initial model predicts zero process covariance between different rotors.
+Estimate cross-rotor phase-increment covariance away from frequency crossings.
+Non-zero structure may indicate:
+
+- a shared power-supply or controller process;
+- structural vibration coupled across arms;
+- common propagation effects;
+- telemetry errors;
+- leakage between extracted subbands.
+
+Only add a shared cross-rotor state if this covariance persists after leakage
+and carrier calibration have been controlled.
+
+# 6. Time-dependent overlap groups — optional future
+
+:::: {.callout-warning}
+## Candidate 1 builds no groups at all
+
+The overlap **graph** of §6.1 and the temporal **hysteresis** of §6.2 are
+demoted to **optional future** complexity. Candidate 1's conditional spectral
+model sums **all** components continuously, so a crossing is merely an interval
+in which two terms of one sum coincide in frequency; it is not a set of
+components to be grouped, tracked and assigned. Unresolved overlaps are
+excluded from the **moment initialization**, and nothing else changes.
+Heterodyned phase extraction may reuse the existing tools; no new generic
+crossing machinery is built, and no nearest-component assignment is ever made.
+The physical principle of §6.3 — couple a crossing to the rotor's other
+harmonics — is exactly what candidate 1 realises by sharing one latent shaft
+state.
+::::
+
+## 6.1 Optional future: build an overlap graph
+
+At every time block, create one node for each visible component $(r,k)$.
+Connect two nodes when their predicted observation supports overlap.
+
+A conservative overlap threshold is
+
+$$
+B_{rk,n}
+=B_{\mathrm{window},n}
++B_{\mathrm{physical},rk}
++B_{\mathrm{telemetry},rk,n}
++B_{\mathrm{margin}}.
+$$
+
+Connect $(r,k)$ and $(s,l)$ when
+
+$$
+|k\widehat f_r(n)-l\widehat f_s(n)|
+<B_{rk,n}+B_{sl,n}.
+$$
+
+Every connected component of this graph would then be fitted jointly. Most
+components contain one line, and only local regions around crossings would
+require multi-source inference. This is machinery that a continuous sum does
+not need.
+
+## 6.2 Optional future: add temporal hysteresis
+
+If groups ever exist, do not create and destroy them at one-frame boundaries.
+Extend every crossing group several correlation times before and after the
+detected overlap, so that a smoother sees separated observations on both sides
+of the ambiguous interval. The extension should cover at least
+
+$$
+\max\left(
+1/\lambda_r,
+1/\lambda_s,
+\text{several phase-observation frames}
+\right).
+$$
+
+## 6.3 Couple a crossing to other harmonics
+
+A local pairwise crossing fit can still be ambiguous. Include evidence from
+other reliable orders of both rotors through their shared shaft states.
+
+It is not necessary to include every spectral bin in one dense observation
+matrix. The state for $\theta_r$ can be informed by non-crossing harmonic
+subbands while a small observation group handles the actual collision.
+
+# 7. Staged fitting procedure
+
+Candidate 1's staging is deliberately short. Stage 0 fixes the conventions,
+Stage 1 fits the delay and the per-clip bias, Stage 2 initializes amplitudes
+and spatial signatures, Stage 3 initializes the dynamics from phase moments —
+and then **one** objective does the rest. Stages 4, 5, 6 and 8 are retained
+below as **optional future** complexity, and Stage 7 is folded into that one
+objective as its plug-in power/floor block.
+
+:::: {.callout-important}
+## Alternated stages must share one objective and one state prior
+
+Stages alternate coherently only when state, amplitudes, floor and
+hyperparameters all optimize the **same** objective under **one** state prior.
+Adding a marginal spectral objective on the **same samples** and then refining
+all blocks reuses the observations **and** the integrated state covariance as
+if they were independent evidence. The permissible staged form is: moments
+**initialize only**; then one objective; then **freeze the dynamics** and use
+the spectral composite as a **plug-in** power/floor refinement whose
+reused-data composite semantics are stated out loud — never as another exact
+likelihood factor.
+::::
+
+## Stage 0: preprocessing and frozen conventions
+
+The observation conventions are frozen before anything is fitted:
+
+- the existing **16 kHz** convention;
+- **periodic Hann**, $N_{\text{FFT}}=16384$, **hop 1024** (64 ms);
+- fixed band **30--7900 Hz** — never lowered to conceal filter loss;
+- fixed microphones;
+- one resampling path for real and rendered audio;
+- an exactly defined analytic-signal / STFT normalization, and a stored phase
+  convention for every telemetry-derived atom.
+
+Then, before optimizing the physical model:
+
+1. Align audio channels and telemetry clocks approximately.
+2. Mark steady, accelerating, low-SNR, clipped, and missing-telemetry regions.
+3. Declare the missing/weak-order and SNR/isolation gates **before** any
+   estimate is computed.
+4. Detect candidate harmonic crossings with a deliberately wide margin, and use
+   that detection only to **exclude** unresolved overlaps from the moment
+   initialization.
+
+Do not silently interpolate long telemetry gaps. Treat the carrier as more
+uncertain in those intervals.
+
+## Stage 1: delay and per-clip bias — and nothing else
+
+Estimate $\delta_r$ and the per-clip bias $b_{c,r}$ from isolated high-SNR
+harmonics, fitting several orders simultaneously. **There is no calibration
+spline** (§9): the only time-resolved carrier object is the shaft state.
+
+For candidate calibration parameters, examine the residual phase
+
+$$
+\rho_{rk}(t)
+=\arg Y_{rk}(t)
+-k\widehat\Phi_r(t-\delta_r)
+-2\pi kb_{c,r}t,
+$$
+
+where $\widehat\Phi_r$ integrates the **raw** telemetry. A correct telemetry
+correction is shared across orders after division by $k$. Choose $\delta_r$ and
+$b_{c,r}$ to minimize the shared systematic residual curvature, not the error
+of one harmonic alone.
+
+Use a robust loss or exclude crossings during this stage. A wrong time offset
+can otherwise be absorbed into $\theta_r$ and falsely inflate the fitted OU
+variance; conversely a constant rate error leaves a $k$-proportional drift that
+mimics shaft motion exactly. Report finite-record bias and slow-OU
+confounding — never repair them with a second free path.
+
+## Stage 2: amplitude and spatial initialization
+
+Use non-overlapping regions to estimate:
+
+- the order power profiles $P_{rk}(c_r)$;
+- smooth amplitude changes over time;
+- the complex microphone vector $\mathbf h_{rk}$;
+- floor cross-spectral covariance $\mathbf\Sigma_F(f,n)$.
+
+Normalise the spatial vector to remove scale ambiguity, for example
+
+$$
+\|\mathbf h_{rk}\|_2=1,
+$$
+
+and store total power in $P_{rk}$. Fix one phase convention for
+$\mathbf h_{rk}$ so that propagation phase does not exchange arbitrarily with
+the latent source phase.
+
+Regularise spatial signatures smoothly across frequency or harmonic order when
+the array physics supports it. Do not allow them to jump during crossings.
+
+## Stage 3: phase-dynamics initialization
+
+On high-SNR, non-crossing intervals:
+
+1. extract residual harmonic phases from the complex subbands;
+2. compute the increment covariance at several lags;
+3. fit $V_{\theta,r}(\tau)$ to the off-diagonal terms and **freeze** the
+   rig parameters $\lambda_g$ and $\sigma_g$;
+4. initialize the scalar $D_g$ from the diagonal residuals;
+5. confirm that the leading within-rotor covariance eigenvector is proportional
+   to harmonic order;
+6. inspect order-normalised differences.
+
+These moment estimates are **initializers and diagnostics only**. They do not
+re-enter the fit as a second likelihood factor, and no separate phase loss is
+stacked on the spectral objective. The diagonal/GLS weighting used to pool them
+is an **approximation**: take uncertainty from contiguous-block variation, and
+treat a negative raw estimate as an observation rather than an impossible
+logarithm or a zero.
+
+Candidate 1 has one scalar $D_g$ per rig — moment-initialized, then fitted
+inside its one spectral composite MAP pass — so there is no per-order
+hierarchy to regularise. If a named acceptance failure later demands
+per-order diffusion, the order law
+
+$$
+\log D_{rk}
+=d_{0,r}+d_{1,r}\log k+u_{rk},
+\qquad
+u_{rk}\sim N(0,\sigma_{D,r}^2),
+$$
+
+is available as **optional future** complexity, with its hyperparameters
+**moment-initialized** and then fitted inside the same single spectral
+composite MAP. There is no conjugate closed form for it, and the
+block-bootstrap covariance of the raw moment estimates supplies error bars
+only, never an objective.
+
+## Candidate 1: one objective in place of Stages 4-8
+
+Everything that remains — the per-clip bias, the dense-grid shared
+$(\theta_r,\nu_r)$ path, the scalar $D_g$, the line powers, the floor and the
+tied speed law — is fitted in **one** ordinary **PyTorch Adam** plug-in /
+composite **MAP** pass, under **one** exact Gaussian integrated-OU state prior.
+The latent path is integrated inside every moving-frame atom (§4.2), on a state
+grid chosen by the phase-dynamics bandwidth (§4.4).
+
+There is no EM, no Kalman filter, no particle method, no per-harmonic
+$\epsilon$ latent inference and no dense smoother. The spectral composite is
+the plug-in power/floor block of that same objective — the old Stage 7 — with
+its reused-data composite semantics stated, never a second exact likelihood
+factor.
+
+The exact discrete-time shaft transition is retained here because candidate 1
+uses it: it is the prior over the state path, and it is what the renderer
+advances. For time interval $\Delta$,
+
+$$
+\begin{bmatrix}
+\theta_{r,n+1}\\
+\nu_{r,n+1}
+\end{bmatrix}
+=
+\begin{bmatrix}
+1 & (1-a_r)/\lambda_r\\
+0 & a_r
+\end{bmatrix}
+\begin{bmatrix}
+\theta_{r,n}\\
+\nu_{r,n}
+\end{bmatrix}
++q_{r,n},
+\qquad
+a_r=e^{-\lambda_r\Delta},
+$$
+
+with the exact integrated-OU process covariance, evaluated through a stable
+small-$\lambda_r\Delta$ expansion. The harmonic residual transition
+
+$$
+\epsilon_{rk,n+1}
+=\epsilon_{rk,n}
++\sqrt{2D_{rk}\Delta}\,\xi_{rk,n},
+$$
+
+started from uniform initial residual phases (§2.3), is the **renderer's and
+the general family's** transition ($D_{rk}\equiv D_g$ under candidate 1's
+rig tying, §2.3): it is how $\epsilon$ is generated, and it is what the
+optional smoother stack of Stage 4 would treat as a latent state. It is
+**not** a latent path candidate 1 infers.
+
+The observation model is nonlinear because it contains
+$e^{i(k\theta_r+\epsilon_{rk})}$. Candidate 1's Adam optimizes the **shared
+$\theta$ path** — together with the remaining parameter blocks: the per-clip
+bias, the scalar $D_g$, the line and floor powers, the tied speed law —
+directly through that nonlinearity instead of linearising it, while $\epsilon$
+is **integrated out analytically** through the residual kernel
+$\exp(-D_g|\tau|)$ in the conditional expected periodogram
+(`bench-fit-revised-phase-model.qmd` §6.2). There is **no per-harmonic
+$\epsilon$ latent inference** in candidate 1.
+
+## Stage 4: optional future — joint latent-state smoothing
+
+For each overlap group, the complex observations could be fitted jointly, with
+rotor state $s_{r,n}=(\theta_{r,n},\nu_{r,n})$ and one residual state
+$\epsilon_{rk,n}$ per included order, by MAP smoothing with iterative
+linearisation:
+
+1. initialize phases from isolated regions on both sides of the crossing;
+2. optimize phase increments rather than unconstrained absolute phases;
+3. linearize the complex observations around the current trajectory;
+4. solve the sparse Gaussian smoothing problem;
+5. update the nonlinear phases and repeat;
+6. damp, or use Levenberg--Marquardt, when a step crosses a phase branch;
+7. compute a Laplace covariance around the final MAP solution.
+
+This is an iterated extended Kalman smoother in spirit, and it is
+**approximate**: the complex exponential makes the smoothing law non-Gaussian,
+so only the linear conditional amplitude solve and the exact Gaussian state
+transitions are exact. If it is ever implemented it must be validated against a
+dense small-$K$ reference on objective value and recovery, and only **measured**
+scaling may be quoted (§12).
+
+## Stage 5: optional future — amplitude updates by conditional linear fitting
+
+Conditional on the phase trajectories and fixed spatial signatures, many
+amplitude parameters enter linearly, which invites variable projection or
+alternating optimization: smooth the phases with amplitudes held fixed, solve
+regularised complex least squares for the amplitudes with the phases held
+fixed, update the slow amplitude hyperparameters, and repeat. Constrain source
+amplitudes to be non-negative once the spatial phase convention is fixed, and
+apply temporal smoothness or the existing speed law; without that, crossing
+components can exchange arbitrary complex amplitude and phase. Candidate 1
+updates these blocks inside its single objective instead.
+
+## Stage 6: optional future — dynamic hyperparameter updates
+
+$\lambda_r$, $\sigma_{\nu,r}$ and the diffusion could be updated from expected
+transition sufficient statistics in an approximate generalized-EM loop —
+E-step: smooth the latent shaft and harmonic phases; M-step: update dynamics,
+amplitudes, spatial parameters and observation covariance. Keep informative
+bounds early, and in particular prevent the independent diffusion from
+absorbing all shared shaft motion before cross-order covariance has anchored
+$\lambda_r$ and $\sigma_{\nu,r}$. Candidate 1 does none of this: it freezes the
+rig parameters $\lambda_g$ and $\sigma_g$ from moments and fits the scalar
+$D_g$ inside its one objective.
+
+## Stage 7: the power and floor block, inside the one objective
+
+The average powers and the floor are refined against the frozen composite risk
+
+$$
+\mathcal{L}_c=\sum_i a_i\left[\frac{I_i}{M_i}+\log M_i\right],
+$$
+
+with positive overlap-exposure weights $a_i$ normalized per unique audio
+duration, on the fixed band and fixed microphones of Stage 0. **Duplicate
+identical observation windows split exposure**, keyed at **analysis-frame**
+identity — `(recording, absolute frame centre, window/NFFT)` — and not at clip
+span: duplicating one frame changes neither the score nor the effective
+exposure. It is a **composite risk**, valid
+for mean prediction under arbitrary dependence because
+$E[\mathcal L_i]=M_i^{*}/M_i+\log M_i$ is uniquely minimized at
+$M_i=M_i^{*}$ — and it is not a joint NLL, not evidence, not a posterior and
+not an independent term count. Cellwise Hessians and nominal frame counts
+cannot supply uncertainty, and no percentage NLL is reported.
+
+The objective the optimizer sees is this risk divided by one frozen scalar
+**composite temperature** $T$, plus one OU prior. $T=J/H$ is a **scalar
+gain-direction sandwich** correction, calibrated on frozen baseline predictive
+draws under a fixed master seed and a preregistered draw count and support,
+using the **same exposure, microphone and bin weights as the fit objective** —
+never the per-unique-second normalized reporting form of the score above;
+exposure bookkeeping and the fit temperature are different knobs. It calibrates
+**one direction only**: it does not make the composite a likelihood and gives
+no posterior curvature or uncertainty for any other parameter. It is frozen
+before any candidate is fitted and never retuned afterwards, and a
+non-positive or non-finite $J$ is a loud calibration failure, never a fallback
+to $T=1$. Definition, derivation and the full constraint list:
+`bench-fit-revised-phase-model.qmd` §6.2.4. No measured $T$ exists.
+
+A multichannel form is available where spatial covariance matters,
+
+$$
+\mathbf\Sigma_Y(n,q)
+=\mathbf\Sigma_F(n,q)
++\sum_{r,k}
+P_{rk,n}Q_{rk,nq}
+\mathbf h_{rk,q}\mathbf h_{rk,q}^H,
+$$
+
+whose kernel $Q_{rk,nq}$ must contain the physical phase correlation, the
+telemetry motion inside the frame, and the analysis window. It too is a
+composite: shared phase and window overlap create dependencies that a
+cell-independent objective omits, and a dense Gaussian likelihood over a
+redundant complete STFT array is singular (§4.4).
+
+## Stage 8: optional future — full joint refinement
+
+Refining every parameter block together, initialized from the staged solution
+and retaining the priors learned on isolated regions, is optional future
+complexity. If it is ever done, compare the joint and the staged solutions: a
+large parameter jump is a warning about non-identifiability, not automatic
+evidence of improvement.
+
+# 8. Choice of inference algorithm
+
+Candidate 1's choice is ordinary Adam on one composite MAP objective with one
+exact Gaussian state prior. That is the default — not because it is the most
+powerful method available, but because it is one objective, one prior, no
+approximation stack, and its failures are visible.
+
+## 8.1 Optional future: an iterated Gaussian smoother
+
+An iterated Gaussian smoother, or direct sparse MAP optimization of the latent
+phase trajectories, is the natural first extension, because telemetry supplies
+a strong nominal phase, the state transitions are Gaussian, the nonlinearity
+sits in a smooth complex exponential, the state precision matrix is sparse in
+time, most crossings are local, and a good initialization exists outside
+crossings. Automatic differentiation with sparse or banded linear algebra is
+appropriate, and one would optimize residual phase increments and small carrier
+corrections rather than the full audio-frequency phase. It is **not**
+candidate 1's default.
+
+## 8.2 Optional future: particle methods
+
+A particle smoother is **not** a default under any circumstances. It would be
+considered only if the posterior became meaningfully multimodal — two sources
+coincident for a long interval, nearly equal spatial signatures, weak or absent
+companion harmonics, telemetry uncertainty admitting several crossing
+assignments, or phase uncertainty exceeding several cycles. A
+Rao--Blackwellised method could then sample the few ambiguous shaft or identity
+hypotheses while conditionally smoothing approximately Gaussian states. Never
+begin with a particle filter over every $\epsilon_{rk}$: its dimension grows
+with the number of orders, and degeneracy follows.
+
+## 8.3 When the model is simply unidentifiable
+
+No inference algorithm can separate two arbitrary sources that have, over a
+long interval:
+
+- identical carrier trajectories;
+- identical spatial signatures;
+- no visible companion harmonics;
+- unconstrained amplitudes;
+- independent unknown phases.
+
+In that case report uncertainty over the allocation or represent the pair as an
+unresolved group. Do not force a unique decomposition.
+
+# 9. Handling carrier uncertainty
+
+Carrier uncertainty must be low dimensional and shared across harmonics. The
+admissible terms are:
+
+1. one audio/telemetry delay $\delta_r$ per rotor;
+2. one per-clip frequency bias $b_{c,r}$ — a random effect with a proper prior
+   and a population/recording mean, not a free per-clip number;
+3. one integrated-OU residual, already represented by $\theta_r$ and its
+   stationary speed state $\nu_r$.
+
+That is the whole list.
+
+:::: {.callout-warning}
+## Withdrawn: the "very smooth calibration spline"
+
+An earlier version of this section admitted, as a fourth term, "a very smooth
+calibration spline shared by all orders". **That item is deleted.** The reason
+is stronger than the weak-identifiability warning it used to carry: two
+time-resolved carrier paths are an exact **gauge non-identifiability**. If the
+phase contains a free correction $c(t)$ together with $\dot\theta(t)=\nu(t)$,
+then for any $g(t)$
+
+$$
+c'(t)=c(t)+g(t),
+\qquad
+\nu'(t)=\nu(t)-2\pi g(t)
+$$
+
+produces **exactly the same waveform**. No acoustic observation can split the
+variation between the two paths, and a smoothness prior merely chooses an
+arbitrary split. The identifiable parameterization is §2.1's, and the
+per-frame carrier correction *is* the posterior $\nu_r$.
+
+The planted check: enable both paths deliberately, verify that the Hessian has
+the predicted gauge (zero or near-zero) direction, then verify that the
+one-state model recovers only their planted **sum**.
+::::
+
+Telemetry may also, as an **option**, be incorporated as a noisy observation of
+the actual speed,
+
+$$
+\widehat f_r(t_j)
+=f_r(t_j+\delta_r)+e_{r,j},
+$$
+
+which is useful when telemetry precision and timing uncertainty are known. It
+is clearly optional, it is not part of candidate 1, and it never displaces the
+raw array's role as the primary scoring reference.
+
+# 10. Crossings and source identity
+
+## 10.1 Prevent label switching
+
+Rotor labels are defined by telemetry trajectories, not by instantaneous
+frequency ordering. A component must not change rotor identity because one
+trajectory passes another.
+
+Maintain labels by:
+
+- using **raw**-telemetry-derived atoms with persistent rotor identifiers;
+- sharing $\theta_r$ across all orders belonging to rotor $r$, so that identity
+  lives in a **shared latent state** rather than in a per-cell decision;
+- summing all overlapping components continuously in the observation model, so
+  that no assignment is made at all;
+- holding spatial signatures smooth through crossings;
+- anchoring the solution with separated observations on both sides.
+
+Candidate 1 needs neither a group graph nor a hysteresis stack for this (§6). A
+crossing is simply an interval in which two components of the same continuous
+sum coincide in frequency; unresolved overlaps are **excluded from the moment
+initialization** rather than allocated, and no allocation is forced when a pair
+is unidentifiable.
+
+## 10.2 Use all harmonic evidence
+
+Suppose order $k$ of rotor 1 crosses order $l$ of rotor 2. The ambiguous pair
+should inherit shaft estimates from other visible orders:
+
+$$
+\theta_1(t)
+\leftarrow
+\{\psi_{1j}(t)/j:j\ne k\},
+$$
+
+$$
+\theta_2(t)
+\leftarrow
+\{\psi_{2j}(t)/j:j\ne l\}.
+$$
+
+The crossing then becomes mainly an inference problem for the two independent
+residuals and amplitudes, rather than for two completely unknown phases.
+
+## 10.3 Do not ignore interference
+
+Expected powers from independent sources add after ensemble averaging. A single
+recording contains complex interference:
+
+$$
+|X_1+X_2|^2
+=|X_1|^2+|X_2|^2
++2\operatorname{Re}(X_1X_2^*).
+$$
+
+A power-only likelihood treats the last term as unexplained variation. Near a
+crossing it can bias amplitude and linewidth estimates. The complex observation
+likelihood represents it directly.
+
+# 11. Regularisation
+
+The following priors or penalties are recommended.
+
+## 11.1 Dynamics
+
+- candidate 1: the rig parameters $\lambda_g$ and $\sigma_g$, **frozen** after
+  moment initialization, plus one scalar $D_g$ per rig on a positive log
+  scale;
+- one recording-level gain shared across regimes, and a per-clip bias with a
+  proper prior — a free per-clip or per-regime level can absorb the entire
+  speed law, and a zero-mean per-clip nuisance alone does not fix slope
+  confounding unless it is orthogonal to log-speed;
+- separate between-recording variation from within-recording stochastic state;
+- optional future only: per-order $D_{rk}$, hierarchical smoothness of
+  $\log D_{rk}$ over $\log k$, and partial pooling of dynamics across rotors
+  where bench evidence supports it.
+
+## 11.2 Amplitudes
+
+- the existing speed-dependent power law;
+- slow temporal amplitude variation;
+- shrinkage for weak or absent harmonics;
+- no abrupt amplitude exchange at crossings.
+
+## 11.3 Spatial responses
+
+- fixed normalization and phase convention;
+- smoothness over nearby frequencies;
+- weak variation over time unless microphone or rotor geometry changes;
+- uncertainty propagated from clean-region estimation.
+
+## 11.4 Floor
+
+- smooth spectral covariance;
+- positive-definite multichannel covariance parameterization;
+- estimation from line-free regions where possible;
+- no freedom to create narrow moving features that imitate harmonics.
+
+# 12. Computational structure
+
+The implementation should exploit four forms of sparsity.
+
+1. **Frequency sparsity.** Each harmonic affects only a narrow band.
+2. **Crossing sparsity.** Most lines are isolated most of the time.
+3. **Temporal Markov sparsity.** State priors connect adjacent times.
+4. **Rotor sparsity.** Harmonics couple through only four shaft states.
+
+A practical batch can contain:
+
+- one time interval;
+- all four shaft states for that interval;
+- all reliable non-crossing harmonic summaries;
+- full complex observations only for active overlap groups.
+
+Use blockwise smoothing with overlap longer than the largest fitted correlation
+time. Reconcile adjacent blocks through shared boundary-state distributions,
+not by resetting phases independently.
+
+No complexity claim in this document is a theorem. In particular there is **no
+exact $O(K)$ structured-Kalman result**: conditioning on the shaft angle
+induces residual correlations between orders that a recursion does not remove,
+so rank-one-plus-diagonal structure at one step does not survive recursive
+conditioning (companion explainer §6.1.6). Quote **measured** scaling only.
+Candidate 1 sidesteps the question entirely: it runs ordinary Adam on one
+objective with batched FFTs, and its cost is whatever it is measured to be.
+
+# 13. Validation on planted data
+
+The crossing problem requires dedicated simulations. Static single-comb round
+trips are not sufficient.
+
+The canonical correctness list — the checks required before any fit of this
+family is believed — is §9 of `bench-fit-revised-phase-model.qmd`, and it
+governs here too: exact integrated-OU moments including the near-zero
+$\lambda\Delta$ limit, with correlated $\theta$/$\nu$ increments from one
+shared state; shaft-only, independent-only and combined planted phase
+covariance with its $k$ loading and order-normalised differences, plus the
+deliberate two-path Hessian gauge check of §9; conditional-versus-marginal
+collapse as $C_{\text{post}}\to0$, with $D=0$ MAP-path recovery and
+$\theta=0$ scalar-$D$ recovery; finite-window power for a pure tone and a
+planted chirp including fractional bins, floor and phase units; the
+subwindow-oscillation line and **state-grid convergence as
+$\Delta_{\text{state}}$ shrinks at fixed STFT hop and window**; overlap
+duplicates creating no exposure and no held-out raw-sample leakage; the
+rendered physical RPS integrating to the shared phase, excluding $\epsilon$,
+and matching the audio timeline and length after resampling; near-crossing
+behaviour on the continuously summed spectral components that share the same
+$\theta$, with the companion harmonics of both rotors, no nearest-bin
+classification and no forced unidentifiable allocation — a **joint complex
+observation** crossing check belongs to the optional $\epsilon$-latent /
+state-space stack (Stage 4, §8.1) and to a future candidate that implements
+that likelihood, not to candidate 1, which marginalizes $\epsilon$; finite
+parameter and device gradients; and — only if a sparse method is ever
+introduced — a small-$K$ comparison against a dense reference on objective and
+recovery, with no exact-$O(K)$ assertion.
+
+The crossing-specific cases below are additional to that list. They are
+diagnostics, not gates.
+
+## 13.1 Required planted cases
+
+1. Four separated combs with known dynamic parameters.
+2. One pairwise crossing with different spatial signatures.
+3. One pairwise crossing with one microphone only.
+4. Several simultaneous crossings involving different orders.
+5. Nearly parallel trajectories that remain close for a long interval.
+6. A missing companion-harmonic interval.
+7. Telemetry delay and bias.
+8. Low-SNR high orders.
+9. Equal shaft parameters but different $D_{rk}$.
+10. A deliberate shared cross-rotor disturbance.
+
+## 13.2 Metrics
+
+Measure more than reconstruction error:
+
+- carrier-delay and bias recovery;
+- $\lambda_r$ and $\sigma_{\nu,r}$ recovery;
+- $D_{rk}$ recovery;
+- shaft trajectory error modulo global phase;
+- phase-increment covariance calibration;
+- source allocation through crossings;
+- amplitude bias before, during, and after crossings;
+- uncertainty coverage;
+- multichannel spectral fit;
+- round-trip renderer recovery;
+- downstream rotor-tracker error.
+
+## 13.3 Crossing-specific acceptance rule
+
+A fit passes a crossing test only if rotor identity remains consistent across
+the crossing and uncertainty increases when the sources are weakly
+identifiable. A visually smooth but overconfident arbitrary allocation is a
+failure.
+
+# 14. Validation on real data
+
+Use the following hierarchy of evidence.
+
+1. **Non-crossing phase covariance:** does every rotor show its predicted
+   rank-one order loading?
+2. **Order-normalised differences:** does shaft motion cancel?
+3. **Crossing prediction:** parameters learned outside crossings must predict
+   the held-out crossings' observed periodograms through the continuously
+   summed spectral components. Predicting the **complex** observations inside
+   a crossing is the future $\epsilon$-latent candidate's test, not
+   candidate 1's.
+4. **Multiple microphones:** do spatial signatures learned outside crossings
+   remain valid inside them?
+5. **Multiple window lengths:** do physical parameters stay fixed when the
+   observation window changes?
+6. **Posterior predictive audio:** do generated recordings reproduce phase,
+   spectral, and amplitude statistics?
+7. **Downstream transfer:** does the fitted renderer improve blind flight
+   tracker behaviour, as read by the frozen gates?
+
+Hold out contiguous intervals containing complete crossings, behind a
+window/filter-length support guard so that no raw-sample support leaks.
+Randomly holding out overlapping STFT cells leaks information and gives an
+optimistic result.
+
+The frozen protocol these checks run under is recorded in
+`docs/experiments/revised-phase-campaign.qmd` and is not negotiable here:
+
+- **DREGON: cruise only.** The five independently recorded no-source room2
+  cruise recordings are the clustered units. There is no standby or ramp
+  acceptance for this rig, and DREGON standby/ramp need not be fitted at all.
+- **Michael's rig:** fit on FLY125 — standby, ramp and cruise under **one**
+  joint parameter law per rig, never independent per-regime vectors, with one
+  recording-level gain shared across regimes. **FLY124 stays held out**, and
+  every uncertainty statement about it is explicitly conditional on that one
+  recording.
+- **Reference agreement, not ground truth.** The primary tracker score uses
+  the **same raw telemetry array** for the real arm and for every synthetic
+  arm. Refined and posterior tracks are fit provenance and diagnostics only;
+  the renderer's realized shaft label supplies a diagnostic MAE.
+- **Held-out predictive synthesis** uses only raw held-out telemetry, the
+  training-derived bias law, and **one fresh OU draw** — no refined labels and
+  no corrections inferred from the held-out audio.
+- Do not mix physical rigs or bench cells into flight data. Bench is an
+  optional planted/physical diagnostic, not a reported scientific candidate
+  arm.
+
+# 15. Baselines
+
+Compare the proposed fit with at least these baselines:
+
+| Baseline | Question answered |
+|---|---|
+| Nearest-trajectory bin assignment | How much is gained by joint crossing inference? |
+| Independent moving Lorentzian lines | How much is gained by shared phase dynamics? |
+| Independent two-Cauchy lines | How much is gained over a flexible marginal spectrum? |
+| Joint multichannel spectral model without latent phase | How much is gained by complex temporal smoothing? |
+| Shared-shaft plus independent-residual model | The proposed mechanism; candidate 1 is its simplest form |
+
+Old exports are **rescored, never refitted**, under an identical observation
+and renderer protocol, using their **stated** covariance and their **actual
+exported units**. A smoothed observed periodogram is not a model prediction.
+
+The proposed model need not win every marginal spectral score. Its reason for
+existence is to explain both marginal line shapes and joint phase behaviour
+with one renderable physical mechanism — and acceptance is decided by the
+frozen gates, not by this descriptive ladder.
+
+# 16. Common failure modes
+
+## Identity swaps
+
+**Symptom:** fitted amplitudes or spatial vectors exchange rotor labels at a
+crossing.
+
+**Response:** strengthen temporal continuity, use companion harmonics, extend
+the smoothing interval, and fix rotor identity to telemetry rather than
+frequency rank.
+
+## Harmonic residual absorbs shaft motion
+
+**Symptom:** $D_{rk}$ becomes large and cross-order covariance is underfit.
+
+**Response:** initialize shaft parameters from off-diagonal covariance and
+regularise $D_{rk}$ hierarchically.
+
+## Shaft process absorbs telemetry misalignment
+
+**Symptom:** apparent shaft variance grows during acceleration and is correlated
+with $d\widehat f_r/dt$.
+
+**Response:** fit telemetry/audio delay before stochastic dynamics.
+
+## Amplitudes steal phase mismatch
+
+**Symptom:** amplitudes fluctuate rapidly or exchange power at crossings.
+
+**Response:** use complex observations, constrain amplitude smoothness, and fix
+the spatial phase convention.
+
+## Spatial response absorbs source identity
+
+**Symptom:** $\mathbf h_{rk}$ changes abruptly only during overlaps.
+
+**Response:** learn it away from crossings and keep it fixed or strongly
+regularised during joint inference.
+
+## Overconfident decomposition
+
+**Symptom:** the method reports precise individual sources during a prolonged
+unidentifiable collision.
+
+**Response:** inspect posterior curvature, allow unresolved groups, and report
+allocation uncertainty.
+
+## Two carrier paths at once
+
+**Symptom:** a fitted smooth carrier correction and a fitted shaft path are
+individually large and nearly cancel, and the split moves when the smoothness
+prior moves.
+
+**Response:** there is only one time-resolved carrier state (§9). Remove the
+second path; the per-frame correction *is* the posterior $\nu_r$.
+
+## The posterior path multiplied by the prior linewidth
+
+**Symptom:** a conditional reconstruction stays broad even when the shaft path
+is essentially known.
+
+**Response:** choose the branch once. With $C_{\text{post}}\to0$ the
+conditional spectrum must collapse to the deterministic windowed moving atom
+apart from $\epsilon$; any residual OU broadening is a double count.
+
+## A frame-centre residual phase
+
+**Symptom:** ramps fit worse than steady segments, and the misfit scales with
+the within-frame frequency excursion.
+
+**Response:** integrate the latent path inside every moving-frame atom (§4.2).
+Overlapping frames do not recover subwindow dynamics.
+
+## Duplicate windows counted as evidence
+
+**Symptom:** the score, or its uncertainty, improves when the same observation
+window is included twice.
+
+**Response:** overlap-exposure weights must **split** exposure across
+duplicate windows. The score and the effective exposure are invariant to
+duplication.
+
+# 17. Candidate 1: the concrete first implementation
+
+Candidate 1 is the smallest member of this family and it is what is actually
+being implemented. Its pipeline is the candidate list of §1; this section
+states the interface it exposes and the evidence it must carry. **No candidate
+has been fitted, scored or accepted.**
+
+## 17.1 Public API surface
+
+Four entry points, agreed before code:
+
+- `fit_revised(...)` — produces the fit export.
+- `predict_spectrum(export, clip, *, n_fft, hop)` — the expected periodogram,
+  shaped to match the data's own periodogram. The held-out path is raw-only
+  and optimizes nothing on that clip's audio.
+- `render_revised(export, rps, *, sample_rate, sample_rate_native, n_mics, seed)`
+  — audio, plus the realized interval-average shaft label and the
+  `reference_rps`, under the renderer contract of the companion explainer.
+- `infer_carrier(export, clip, ...)` — the diagnostic posterior track, never
+  invoked implicitly inside prediction or rendering.
+
+Both expected-PSD adapters — the marginal branch and the conditional plug-in
+branch — share **one** finite-window convention. Stored training MAP paths are
+**diagnostics**: they are never a default predictive input for a new clip.
+
+## 17.2 Export schema
+
+The export records `schema_version`, `model_family='shared_shaft_ou'`,
+`rig_id`, the physical parameters (delay, the per-clip bias law, rig-shared
+$\lambda_g$ and $\sigma_g$, the scalar $D_g$, line and floor powers, the
+tied speed law, the microphone response), the training provenance (dataset
+pins, recordings, supports, seeds, and the label key actually used), and the
+fit diagnostics including the training-only state posterior.
+
+## 17.3 Driver
+
+```
+python scripts/stochastic_fit_revised.py \
+  --manifest <frozen-manifest> --rig <michaels|dregon|bench> \
+  --device cuda --out <path>
+```
+
+The manifest is frozen **before** any fit; the gate runner is a separate
+script owned by the evaluation worker. The implementation of these files
+belongs to the candidate-implementation worker — this document specifies the
+science and the interface, not the file contents.
+
+## 17.4 The route to a trustworthy prototype
+
+1. Select one recording with several clean orders from all four rotors and at
+   least one crossing.
+2. Integrate **raw** telemetry with a phase-continuous interpolator.
+3. Estimate one delay and one per-clip bias for each rotor.
+4. Extract complex raw-telemetry-demodulated harmonic subbands.
+5. Estimate shaft structure functions from non-crossing order pairs, freeze
+   $\lambda_g$ and $\sigma_g$, and initialize the scalar $D_g$ from the
+   residual moments.
+6. Fit the one composite MAP objective, with all components summed
+   continuously — including the crossing interval, which needs no special
+   group.
+7. Run the same code on a planted crossing with known parameters, and on the
+   planted checks of §13.
+8. Compare against nearest-track assignment and a spectral-only fit as
+   descriptive baselines.
+
+# 18. Final recommendation
+
+The main inference object is the latent rotor state, not the fitted width of
+each spectral line.
+
+For four moving combs, the strategy actually recommended — candidate 1 — is
+
+$$
+\boxed{
+\begin{array}{c}
+\text{raw telemetry}+\text{delay}+\text{per-clip bias}
+\\[0.2em]
++\text{one shared shaft OU state per rotor, integrated inside every atom}
+\\[0.2em]
++\text{one scalar independent-phase diffusion per rig}
+\\[0.2em]
++\text{one composite MAP objective (ordinary Adam), one state prior}
+\end{array}
+}
+$$
+
+The general stack of this document — overlap graphs, temporal hysteresis,
+complex state smoothing, EM, particle methods — is held in reserve as optional
+future complexity, admitted one step at a time and only when a **named**
+acceptance criterion has actually failed.
+
+The other harmonics of each rotor are not merely additional lines to fit. They
+are repeated measurements of the same shaft trajectory. That shared latent
+state is what makes separation through crossings possible — and in candidate 1
+it is realised simply by summing every component continuously, never by
+assigning one.

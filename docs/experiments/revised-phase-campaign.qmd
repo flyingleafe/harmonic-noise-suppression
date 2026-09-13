@@ -1,0 +1,639 @@
+---
+title: "Revised rotor-noise phase campaign"
+subtitle: "Frozen objective, acceptance criteria, round ledger and evidence policy"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    code-fold: true
+    html-math-method: katex
+execute:
+  echo: false
+  warning: false
+---
+
+**Status:** in progress — started 2026-09-12. Owner: `Main` (scientific design
+and experimental-result review). Worktree `.worktrees/revised-phase`, branch
+`revised-phase`.
+
+This document is the authoritative record of the campaign. It has two
+companions, and where any of the three disagrees about a frozen criterion,
+**this document wins**:
+
+| Document | Role |
+|---|---|
+| `docs/experiments/revised-phase-campaign.qmd` | this file: objective, frozen criteria, round ledger, evidence policy |
+| `docs/explainers/bench-fit-revised-phase-model.qmd` | derivations: the phase model, the finite-window spectral mean, the renderer contract, the correctness checks |
+| `docs/explainers/fitting-four-moving-harmonic-combs.qmd` | the general strategy and the optional-future inference stack, plus candidate 1's pipeline and interface |
+
+Background on the inherited descriptive baseline — what the previous stochastic
+family explains and where it fails — is `docs/experiments/stochastic-fit.md`
+and its explainer `docs/explainers/stochastic-fit.qmd`. This document does not
+restate their numbers.
+
+`docs/explainers/rotor-noise-fit.qmd` is the historical record of the previous
+model: measured spectra, fits, parameters and its own gate. It stays historical.
+Two of its properties matter here. Its gate numbers were computed on renders
+made before the 2026-09-12 render-path correction, so they are **historical and
+unverified under the corrected render path** — neither a current pass nor a
+current fail — and the same examined path does not preserve fitted **absolute
+levels** through its RMS-normalising wrapper, which is a pending item of the
+frozen protocol, with no number published for it.
+
+::: {.callout-important}
+## Current status, stated plainly
+
+**No candidate has been fitted, scored or accepted. Zero of eight candidate
+rounds have been used. No gate has been evaluated, and there are no results in
+this document.**
+
+The evaluator baseline is **not yet frozen**: no candidate fit may run before
+it is approved and the manifest is frozen. The three documents of the set are
+authored but **not yet rendered and not visually verified**; rendering and
+browser verification are a separate, later, explicitly authorized phase.
+:::
+
+# 1. Objective
+
+The previous rotor-noise model is a *descriptive* two-component spectral fit:
+per line, a narrow core plus broad shoulders, with the two areas historically
+named "coherent" and "incoherent". The revised model replaces that
+interpretation with a physical mechanism — one latent shaft state per rotor,
+shared by all of its harmonics, plus independent per-harmonic phase diffusion —
+and the campaign asks one question about it:
+
+> Does synthetic audio rendered from the revised model move a **frozen,
+> real-trained** rotor-speed tracker's error closer to the error it makes on
+> **real** audio, without damaging the rigs and regimes the current model
+> already serves?
+
+"Closer" is a measured gap closure, defined in §2. The gap being closed is the
+positive difference between the frozen tracker's error on real recordings and
+its error on the best existing synthetic arm; that gap is **calibrated first**,
+before any candidate is evaluated, because a gap indistinguishable from zero
+makes the whole comparison meaningless (§7).
+
+Two things the objective deliberately is **not**. It is not "the best-scoring
+model": the deliverable is the **simplest** model and fitting procedure that
+satisfies all frozen criteria (§4). And it is not a proof that the synthetic
+trajectory reference is physical ground truth: the primary score is **reference
+agreement** against a shared raw telemetry array (§3).
+
+# 2. Frozen success criteria
+
+These are frozen. They are not softened, not loosely restated, and no threshold
+is moved to let a model through.
+
+## 2.1 DREGON — cruise only
+
+The scorer is the frozen real-trained HPPNet L2 tracker, `hppnet_l2_r2_s0`,
+*best* checkpoint, with the **actual checkpoint digest pinned in the manifest**
+and recorded in the saved output. It scores PIT MAE on matched **real** and on
+**baseline/candidate synthetic** audio. The positive real-vs-synthetic gap is
+calibrated first. The point target is
+
+$$
+E_{\text{new}} \le E_{\text{real}}
++ 0.70\left(E_{\text{best synth}} - E_{\text{real}}\right),
+$$
+
+that is, a closure of **at least 30 %** of the real–synthetic gap, and the
+**one-sided 95 % cluster interval must exclude no improvement**.
+
+::: {.callout-warning}
+## What a cluster is — and what the 12-row probes are not
+
+Clusters are **independently recorded trajectory sessions**: the five no-source
+room2 cruise recordings. They are explicitly **not** different physical
+aircraft, not different channels, not different analysis windows, and not
+different render seeds. Resampling is **matched and paired at recording
+level**, on concrete recording/window identity — never by position and never by
+modulo.
+
+The existing 12-row probes are **not** 12 independent recordings. Any interval
+computed as if they were is invalid.
+:::
+
+There is **no standby or ramp acceptance for DREGON**, and DREGON standby/ramp
+need not be fitted at all.
+
+## 2.2 Michael's rig — fixed-recording gate on FLY124
+
+The population-level 95 % criterion is **explicitly waived by the user**,
+because there is only one held-out eight-channel recording, FLY124. The gate is
+a fixed-recording gate, and **equal regime weighting applies to the primary MAE
+itself**, not to per-regime ratios. Form, separately for the baseline arm and
+the candidate arm,
+
+$$
+E_{\text{rig}}=\tfrac13\left(
+E_{\text{standby}}+E_{\text{ramp}}+E_{\text{cruise}}
+\right),
+$$
+
+and then require
+
+$$
+\frac{E_{\text{rig,new}}}{E_{\text{rig,best}}}\le 1.05 .
+$$
+
+::: {.callout-warning}
+## Do not average the three per-regime ratios
+
+$(r_{\text{standby}}+r_{\text{ramp}}+r_{\text{cruise}})/3$ with
+$r=E_{\text{new}}/E_{\text{base}}$ per regime is **explicitly rejected**. That
+construction gives a tiny standby MAE disproportionate leverage and admits
+near-zero denominators. Where an earlier shorthand said "equally weighted
+three-regime ratio", it means **the ratio of equally weighted MAEs**, exactly
+as written above.
+
+**Every regime and its own ratio are still reported separately**, as
+diagnostics. The gate is the single aggregate ratio.
+:::
+
+:::: {.callout-warning}
+## Score the declared regime support, not the whole window
+
+Each regime MAE is computed **only** on the outputs whose times lie inside that
+regime's **pre-registered raw-telemetry support**. This is not a formality: the
+Michael ramp can be **shorter than an 8 s context window**. Standby and cruise
+are likewise scored on their own **declared support**.
+
+The surrounding waveform is **context only**. The whole-window context plus the
+complete STFT/filter guard may legitimately extend beyond the scored target
+interval — that is expected, and it is **not** licence to score the extra
+material. **Never** label a mostly-standby or mostly-cruise 8 s average as
+"ramp MAE"; that is the single easiest way to fake this gate.
+
+**Regime definitions are fixed and selected before any candidate.** Regime
+boundaries are never inferred from a candidate, and never from a refined or
+posterior track — consistent with the refined-track-is-diagnostic-only rule of
+§2.4.
+
+The regime masks and the scored times are retained as **provenance** in the
+saved record, so a reader can check which samples entered which regime's MAE.
+::::
+
+Any block uncertainty is **conditional on FLY124** and is never an
+across-recording population-95 claim. Fitting is on **FLY125**; **FLY124 stays
+held out** for predictive checks. A frozen tracker having seen FLY125 is
+**provenance**, not automatic invalidity, for matched instrument calibration;
+no new airframes are demanded.
+
+## 2.3 The separate spectral and LTAS gates
+
+Evaluated separately from the tracker MAE, and never merged with it:
+
+- an **overlap-aware held-out composite improvement** gate on the frozen
+  composite risk
+  $\mathcal{L}_c=\sum_i a_i\left[I_i/M_i+\log M_i\right]$ — positive
+  overlap-exposure weights $a_i$ normalized per unique audio duration, fixed
+  band 30–7900 Hz, fixed mics, existing 16 kHz convention, periodic Hann,
+  NFFT 16384, hop 1024 (64 ms). Exposure is tied to the **actual analysis-frame
+  supports and cadence**, not to clip spans: at NFFT 16384 with hop 1024 the
+  1.024 s analysis frames overlap 16-fold, and weighting whole clips alone
+  would leave every frame inside a clip at weight 1. **Duplicate identical
+  observation windows split exposure**, keyed on `(recording, absolute frame
+  centre, window/NFFT)`: duplicating an **analysis frame** — not merely a whole
+  clip — must leave the score and the effective exposure unchanged, never
+  double the evidence. This is the invariant most likely to break in an
+  implementation. A fixed hop is a decision-risk setting and must never be
+  presented as exact information content.
+- a **baseline-calibrated LTAS** gate, stated on **absolute-level LTAS
+  error**. There is **no arm-specific peak or band normalization**; a
+  relative-shape LTAS may be reported as a **secondary diagnostic** only. If
+  any unit-mean periodogram scaling is used, the scale is derived **once from
+  the real clip** and the **same** scale is applied to **all** models and
+  arms. **Never** normalize a synthetic arm independently: per-arm
+  normalization would let an arm launder a level error into an apparent shape
+  match. The examined render path does not preserve fitted absolute levels
+  through its RMS-normalising wrapper (head of this document); that is a
+  pending item of the frozen protocol, and this gate cannot mean anything
+  until it is resolved.
+
+The composite risk is valid as a **mean-prediction composite risk under
+arbitrary dependence**, because $E[\mathcal L_i]=M_i^{*}/M_i+\log M_i$ is
+uniquely minimized at $M_i=M_i^{*}$. It is **not** a joint NLL, **not**
+evidence, **not** a posterior, and **not** an independent term count. Cellwise
+Hessians and nominal frame counts cannot supply uncertainty. **No percentage
+NLL** is reported, ever. The fit objective is divided by one frozen scalar
+**composite temperature** $T$, defined below; any prior weight is likewise
+calibrated separately on frozen planted/baseline data and then frozen before
+any candidate is fitted.
+
+::::: {.callout-note}
+## The frozen composite temperature $T$
+
+Calibrated in **one direction only**: a scalar **log-power gain** $\eta$ on the
+model mean, $M_i\mapsto M_i e^{\eta}$, evaluated on the **untempered actual fit
+risk** — not the per-unique-second normalized reporting form above. For a
+baseline predictive draw $b$ with periodogram $I_b$,
+
+$$
+U_b=\sum_i a_i\left(1-\frac{I_{b,i}}{M_i}\right),
+\qquad
+H=\sum_i a_i,
+\qquad
+J=\operatorname{Var}_b\!\left(U_b\right),
+\qquad
+\boxed{\,T=J/H\,},
+$$
+
+with $\operatorname{Var}_b$ the **sample** variance over the frozen baseline
+predictive draws; the fitted objective is $\mathcal L/T$ plus **one** OU prior.
+$U_b$ is the gradient of the composite risk in the gain direction and $H$ its
+expected curvature there, so $T=J/H$ is an ordinary **sandwich** correction
+along that one direction.
+
+- **Same weights as the fit.** $U_b$, $H$ and $J$ use the **same analysis
+  exposure weights $a_i$ and the same mic and bin weights as the fit
+  objective**, never the per-unique-second normalized reporting $\mathcal L_c$.
+  Exposure bookkeeping and the fit temperature are **different knobs**.
+- **Scope.** A **scalar gain-direction sandwich calibration** only: not
+  all-parameter posterior coverage, it does not make the composite a
+  likelihood, and it supplies **no** posterior curvature or uncertainty for any
+  other parameter.
+- **Determinism.** One **fixed master seed**; the Monte Carlo **draw count and
+  the draw supports are preregistered** and frozen in the manifest (§8) before
+  any candidate runs.
+- **Failure rule.** A **non-positive or non-finite $J$ is a calibration
+  failure**: the instrument fails loudly and must **not** fall back to a default
+  or to $T=1$, exactly as a manifest lacking its threshold calibration fails
+  loudly rather than defaulting to something permissive.
+- **Frozen before candidates**, on frozen baseline predictive draws, and never
+  retuned after seeing candidate results.
+
+**No measured $T$ exists**; no value is recorded anywhere yet. Full derivation
+and the interpretation of $U_b$ and $H$:
+`docs/explainers/bench-fit-revised-phase-model.qmd` §6.2.4.
+:::::
+
+Uncertainty comes only from the **DREGON whole-recording paired bootstrap**
+(five clustered units) and from **explicitly conditional contiguous-block
+variation on FLY124**.
+
+:::: {.callout-note}
+## The initial gate forms, frozen before any candidate
+
+- **DREGON composite:** paired mean $\Delta$composite $<0$ **and** the upper
+  one-sided 95 % bound $<0$.
+- **DREGON LTAS:** point non-regression, plus a
+  **baseline-variability-calibrated tolerance** for the uncertainty allowance.
+- **Michael's rig:** composite and LTAS non-regression tolerances,
+  **conditional on FLY124**, calibrated on baseline data **before** any
+  candidate is evaluated.
+
+The exact **null-variation calibration rule** behind those tolerances is frozen
+before candidates run and is a manifest item (§8): the instrument reads the
+calibration from the frozen manifest and **fails loudly if the manifest lacks
+it**, rather than defaulting to something permissive. Tolerances are never
+tuned after seeing candidate results (§8).
+::::
+
+## 2.4 Both rigs: what the score means
+
+- The **primary MAE uses the raw telemetry reference shared by all arms** — one
+  array, real arm and every synthetic arm, reported as **reference agreement**
+  and never as proven ground truth. The reference is never switched between
+  arms.
+- The renderer's **realized physical shaft RPS** label supplies a
+  **diagnostic** MAE only. It is never a gate and never the primary target.
+- **Refined / posterior tracks** are fit provenance and diagnostics only. They
+  are never a scoring reference and never a held-out predictive input.
+- Comparing raw-initialized inferred carrier corrections with the existing
+  refined tracks is **diagnostic only**: refined tracks are not ground truth,
+  and disagreement is not automatic failure. No spectral-fit claim may require
+  the inferred correction to equal a refined track.
+- Training a tracker on synthetic and testing it on real is **out of scope**.
+
+::: {.callout-note}
+## The target semantics are a human convention, frozen before comparison
+
+Mathematics separates the exogenous raw reference trajectory from the
+renderer's realized physical shaft speed. It cannot decide which of them the
+frozen tracker's existing MAE convention is *intended* to call its target. That
+choice is an unavoidable human convention and is frozen in the manifest before
+any arm is scored. Switching the primary target to the realized label would
+answer a **different** supervised-task question — even though the realized
+label is the physically exact render label.
+:::
+
+## 2.5 Held-out prediction versus conditional reconstruction
+
+Primary held-out predictive synthesis uses **only** raw held-out telemetry, the
+training-derived bias law, and **one fresh OU draw**. No refined labels, no
+corrections inferred from held-out audio, no MAP shaft path taken from held-out
+audio. Held-out prediction is the **marginal** branch of the spectral
+expectation, and that branch is evaluated with **moving atoms**: the
+raw-plus-bias carrier trajectory is integrated inside every finite window, on
+ramp support exactly as on cruise support. The stationary window-correlation
+kernel is admissible **only** on genuinely constant-speed bench cells, never
+as a slowly-varying shortcut for held-out prediction
+(`bench-fit-revised-phase-model.qmd` §6.2.1). Conditional reconstruction on
+the MAP path is a separate, explicitly labelled mode. Held-out guards include
+complete window/filter support — a disjoint contiguous support with a guard of
+at least one window/filter length — so that no raw-sample support leaks.
+
+# 3. Round ledger
+
+At most **eight scientifically distinct candidate rounds**. Baseline
+calibration, instrument repairs (the evaluator, the render anti-aliasing path)
+and planted correctness checks are **not** candidate rounds.
+
+| Round | Candidate | Model complexity | Fit complexity | Status | Evidence |
+|---|---|---|---|---|---|
+| 1 | candidate 1 (§5) — specified, not run | 3 rig dynamic parameters ($\lambda_g$, $\sigma_g$, $D_g$ — per rig, not per rotor), 1 shared carrier path, per-clip bias | moments initialize; $D_g$ then fitted inside one Adam composite MAP; one exact Gaussian state prior | pending | none |
+| 2 | not defined | — | — | unused | none |
+| 3 | not defined | — | — | unused | none |
+| 4 | not defined | — | — | unused | none |
+| 5 | not defined | — | — | unused | none |
+| 6 | not defined | — | — | unused | none |
+| 7 | not defined | — | — | unused | none |
+| 8 | not defined | — | — | unused | none |
+
+**0 of 8 candidate rounds used. No candidate has been fitted, scored or
+accepted.** Rounds 2–8 are deliberately undefined: the candidate sequence is
+**adaptive to diagnostics**, and a round is defined only when a named
+acceptance failure calls for a specific complexity.
+
+# 4. Selection rule
+
+- The final deliverable is the **simplest model AND fitting procedure** that
+  satisfies **all** frozen criteria — **not** the best-scoring candidate.
+- Start simple. Add exactly **one** scientifically motivated complexity, and
+  only when a **named** acceptance criterion has actually failed.
+- If a candidate passes early, **preserve its full export, config and
+  evidence**, then spend the remaining allowed rounds **simplifying**: one
+  change per remaining round — remove a component, tie a component, or simplify
+  the optimizer.
+- **Failed simplifications never erase a passing incumbent.**
+- **Thresholds are never moved to let a simpler model through.**
+- Selection compares: explicit stochastic mechanisms, independent parameter
+  blocks and degrees of freedom, latent states, and inference
+  stages/approximations. Favour exact transitions, explicit finite-window
+  kernels, and ordinary well-understood optimization. Avoid unproved structured
+  filtering tricks, new particle machinery, arbitrary composite sub-objectives
+  and per-harmonic free diffusion unless simpler forms measurably fail a
+  criterion.
+- Report **conceptual complexity** alongside the numerical scores and the
+  runtime. Runtime matters, but a faster **opaque** approximation is not
+  automatically simpler mathematically.
+
+# 5. Candidate 1
+
+## 5.1 The model
+
+Per rig $g$ (Michael's rig, DREGON, bench), clip $c$, rotor $r$:
+
+$$
+f_{\text{actual},r}(t)=f_{\text{raw},r}(t-\delta_r)+b_{c,r}+\nu_r(t)/(2\pi),
+$$
+
+$$
+d\nu_r=-\lambda_g\nu_r\,dt+\sqrt{2\lambda_g\sigma_g^2}\,dW_r,
+\qquad
+d\theta_r=\nu_r\,dt,
+\qquad
+d\epsilon_{rk}=\sqrt{2D_g}\,dW_{rk},
+$$
+
+$$
+\Phi_r(t)=2\pi\!\int_0^t\!\left[f_{\text{raw},r}(s-\delta_r)+b_{c,r}\right]ds
++\theta_r(t),
+\qquad
+x_m(t)=\sum_{r,k}A_{mrk}(t)
+\cos\!\left[k\Phi_r(t)+\epsilon_{rk}(t)+\alpha_{mrk}\right]+u_m(t).
+$$
+
+- **One** OU shaft state $\nu_r$ and its exactly coupled integral $\theta_r$,
+  **shared across all orders and all microphones**.
+- **One scalar $D_g$ per rig** — one number for every rotor $r$ and every
+  order $k$, not $D_{rk}$ and not $D_r$: no per-rotor diffusion, no per-order
+  free diffusion and no order law. Units: phase rad²/s. **No hidden $k$
+  scaling** unless explicitly stated.
+- $\lambda_g$ and $\sigma_g$ are likewise **one number per rig** — rig-shared
+  across all four rotors — and **frozen** for candidate 1: moment-initialized,
+  then held fixed. If they are genuinely unidentifiable, that is **reported**
+  — a "measured" value is never fabricated.
+- $b_{c,r}$ is a **per-clip random effect** with a proper prior and a
+  population/recording mean.
+- Gauge: $\theta_r(t_0)=0$; the initial $\nu_r$ is stationary; the mean OU is
+  stationary-zero in law.
+- **No second carrier-correction spline, ever.** The per-frame carrier
+  correction *is* the posterior $\nu_r$.
+- Each harmonic's initial residual phase is drawn **uniform on $[0,2\pi)$**,
+  independently per harmonic and shared across microphones. The reason is
+  **not** the increment kernel — a deterministic initial phase cancels in
+  $\epsilon_{rk}(t)-\epsilon_{rk}(s)$, so the residual kernel is
+  $\exp(-D_g|\tau|)$ either way — but that uniform phases make every phasor
+  **zero-mean**, which is what cancels the cross-harmonic and cross-component
+  expectation terms in the summed powers
+  (`docs/explainers/bench-fit-revised-phase-model.qmd` §2.2).
+- The existing source harmonic power profile, floor and speed law are reused,
+  with **one recording-level gain shared across regimes** — a free per-clip or
+  per-regime gain would absorb the entire speed law.
+- No tonebank/noise split. No spatial stochastic extensions beyond the existing
+  fixed microphone response and floor.
+- The renderer emits audio **plus** the realized interval-average physical
+  shaft RPS (the independent acoustic $\epsilon$ never enters that label) and
+  the `reference_rps` raw array.
+
+## 5.2 The fitting procedure
+
+1. Complex harmonic phase-increment **moments** on a **preregistered** isolated
+   high-SNR order support — the SNR/isolation gate fixed **before** any
+   estimate — to initialize and numerically estimate the rig $\lambda_g$ and
+   $\sigma_g$, and to initialize the scalar $D_g$ from residual moments. These
+   moment data are **initializers and diagnostics only**: they must not
+   re-enter as a second likelihood factor, and there is **no** separate phase
+   loss stacked on the spectral loss. The diagonal/GLS treatment is an
+   **approximation** — not exact — with diagnostic covariance and block
+   variation for uncertainty.
+2. **One** joint ordinary **PyTorch Adam** plug-in / composite **MAP** pass
+   over: the per-clip bias, the dense-grid shared $\theta/\nu$ path, the scalar
+   $D_g$, the existing line and floor powers, and the tied speed law — under one
+   exact Gaussian integrated-OU state prior. **No EM, no Kalman filter, no
+   particle method, no per-harmonic $\epsilon$ latent inference, no dense
+   smoother.**
+3. The fit objective divided by the frozen scalar composite temperature $T$
+   (§2.3, defined there), with any prior weight calibrated **separately** on
+   frozen planted/baseline data and then **frozen** before any candidate fit.
+   Frame count is never evidence.
+
+**Complexity budget:** three rig dynamic parameters
+($\lambda_g$, $\sigma_g$, $D_g$) — three numbers per rig, not three per rotor —
+one shared carrier path, ordinary Adam, moment initialization. Nothing else
+unless a *named* acceptance criterion fails.
+
+## 5.3 Multi-regime identifiability
+
+One joint model **per rig**, not independent per-regime vectors. Michael's rig
+gets one parameter law covering standby, ramp and cruise, trained on FLY125,
+with one recording-level gain shared across regimes; a zero-mean per-clip
+nuisance alone does **not** fix slope confounding unless it is orthogonal to
+log-speed. Start from the existing power speed law and the shared recording
+gain, and let log-speed dependence of the dynamics in **only** where the data
+identify it. DREGON is **cruise only**. Do not mix physical rigs or bench cells
+into flight data. Finite-record bias and slow-OU confounding are **reported**,
+never "fixed" by adding a second free path.
+
+# 6. Correctness checks required before belief
+
+The canonical list, with its derivations, is §9 of
+`docs/explainers/bench-fit-revised-phase-model.qmd`. In summary, and all
+required before any fitted number is believed:
+
+1. Exact integrated-OU planted covariance against the known covariance,
+   including the near-zero $\lambda\Delta$ limit, with correlated
+   $\theta$/$\nu$ increments from **one shared state**.
+2. Shaft-only, independent-only and combined planted phase covariance; the $k$
+   loading and order-normalised differences; biased-carrier plus bias/OU
+   ambiguity **reported**, including the deliberate two-path Hessian
+   gauge-direction check.
+3. Conditional zero-posterior-covariance removes the OU broadening while the
+   marginal prediction remains correct; $D=0$ MAP-path recovery; $\theta=0$
+   scalar-$D$ recovery.
+4. Pure tone and planted chirp finite-window power, including fractional bins,
+   the floor and the phase units.
+5. The subwindow-oscillation finite-window line, and **state-grid convergence**
+   as $\Delta_{\text{state}}$ shrinks at fixed STFT hop and window.
+6. Overlap duplicates create no exposure and no information; no held-out
+   raw-sample support leakage.
+7. The generated physical RPS integrates to the shared phase, excludes
+   $\epsilon$, and has the same timeline and length as the audio after
+   resampling.
+8. Near-crossing behaviour is tested on the **continuously summed spectral
+   components that share the same $\theta$**, together with the companion
+   harmonics of both rotors: no nearest-bin classification, no forced
+   unidentifiable allocation, and missing/weak-order gates declared
+   beforehand. A crossing check on **joint complex observations** is reserved
+   for a future candidate that actually implements that likelihood (the
+   optional complex state-space / $\epsilon$-latent stack); candidate 1 fits a
+   conditional expected-periodogram composite after marginalizing $\epsilon$,
+   so that check does not apply to it.
+9. Finite parameter and device gradients.
+10. Only if a sparse method is ever introduced: small-$K$ sparse against a
+    dense reference on objective value and recovery — with **no** exact-$O(K)$
+    assertion.
+
+Only a genuinely uncertain behavioural risk earns a retained regression test.
+
+# 7. Evidence policy
+
+- **Every number carries its scope and provenance**: which rig, which
+  recording, which fit, which export or date, and laptop versus cluster. No
+  number appears in this document that was not read from a source with that
+  provenance attached.
+- **No fabricated results.** No invented percentage, p-value, runtime or
+  citation. **No claim that any candidate has been fitted, scored or passed**,
+  because none has.
+- Inherited measured results are **descriptive baselines**, cited to their
+  source document or export — see `docs/experiments/stochastic-fit.md` and the
+  two explainers.
+- Machine evidence is produced by
+
+  ```
+  python scripts/stochastic_fit_revised_eval.py --manifest <frozen-manifest> --check
+  ```
+
+  which saves the underlying metrics **and** the gate decisions, and **exits
+  non-zero on unmet gates**. Metrics are exact identity and full precision,
+  paired on concrete recording/window identity.
+- **Old exports are rescored**, never refitted, under an identical observation
+  and renderer protocol, using their **stated** covariance and their **actual
+  exported units**. A smoothed observed periodogram is not a model prediction.
+- **Do not convert previously rounded or median numbers into new intervals.**
+  Use baseline variability and paired whole-recording data, recomputed.
+- Because the benchmark selection is **adaptive over up to eight rounds**, the
+  bootstrap intervals the instrument produces are **decision/uncertainty
+  summaries, not fresh-unseen confirmation**. That caveat travels as a field in
+  the saved metrics record, not only in prose.
+- A successful end additionally requires: updated `.qmd` sources, rendered
+  `.html`, **actual browser visual verification**, this campaign document, and
+  the machine evidence above.
+
+# 8. Freeze manifest contents
+
+Before any candidate fit, the manifest freezes:
+
+- the exact datasets and their pins;
+- the train / calibration / held-out **waveform supports**, with the
+  window/filter-length guard;
+- seed and draw identities;
+- the frozen tracker **checkpoint hash**;
+- the **baseline export hash**;
+- the score conventions (band, mics, window, NFFT, hop, weighting,
+  normalization);
+- the **threshold calibration**, including the exact **null-variation
+  calibration rule** of §2.3 — both read from the manifest, with a loud
+  failure if either is absent, rather than a permissive default;
+- the **composite temperature $T$ and its calibration inputs** of §2.3 — the
+  master seed, the Monte Carlo draw count, the draw supports and the resulting
+  $T$ — frozen before any candidate fit, with a non-positive or non-finite $J$
+  failing loudly rather than defaulting to $T=1$;
+- the concrete check command of §7.
+
+Tolerances are **never** tuned after seeing candidate results. The instrument
+is built so that a tolerance cannot be retro-fitted.
+
+# 9. Data supports and provenance
+
+**DREGON.** The primary cohort is exactly the five **no-source room2 cruise**
+recordings; they are the training/calibration pool and the five clustered
+units. Disjoint remaining cruise supports are the predictive evaluation, behind
+a window-support guard; if a recording cannot supply the required support, that
+is **reported** — never padded, repeated or cycled. All ten DREGON flights have
+cruise. Room1 free-flight is **held out** from HPPNet; room1 noise-only may be
+a separately reported transfer diagnostic only. Do not add room1
+speech/whitenoise recordings to the noise-only primary gate.
+
+**Michael's rig.** Training on **FLY125**, covering standby, ramp and cruise
+under one joint parameter law. **FLY124 is held out** for predictive checks,
+and every uncertainty statement about it is conditional on that single
+recording.
+
+**Bench.** An **optional planted/physical diagnostic only** — not an extra
+reported scientific candidate arm, and never mixed into flight data. The bench
+has no telemetry: its carrier is the audio-estimated comb rate.
+
+::: {.callout-warning}
+## There is no measured ramp fit
+
+The current **per-regime standby and cruise exports remain the descriptive best
+baseline**, and **no measured ramp fit exists**. A ramp baseline must **not** be
+invented, and per-window winners must **not** be silently chosen: the baseline
+family choice is made on calibration supports only and then frozen as **one**
+global choice per rig/regime, with the ramp extrapolation rule stated
+explicitly and labelled as an extrapolation of the current model.
+
+Existing baseline results are **frozen, not deleted** — including the refit on
+refined labels `results/S2/cruise_8clip_refined.json` (fitted `k_half`
+1.73-3.27, as recorded in
+`docs/explainers/bench-fit-revised-phase-model.qmd` §15).
+:::
+
+# 10. Stop / escalate conditions
+
+Stop and escalate if:
+
+- the DREGON real–synthetic gap is **indistinguishable from zero**;
+- the required **real coverage is absent**;
+- the **independent DREGON recordings are insufficient**;
+- unapproved **scope or risk** appears;
+- **material ambiguity** is unresolved;
+- or **8 candidates fail**.
+
+# 11. Ownership
+
+| Owner | Files |
+|---|---|
+| Candidate implementation | `src/experiments/stochastic_fit/revised_phase.py` (and, if genuinely needed, one cohesive sibling module), `scripts/stochastic_fit_revised.py`, `tests/experiments/test_stochastic_fit_revised_phase.py` |
+| Baseline / evaluation | `scripts/stochastic_fit_revised_eval.py`, the narrowly needed evaluation and render-AA helpers in `src/experiments/stochastic_fit/`, their tests, `docs/revised-phase-baseline-proposals.md` |
+| Documentation | the three documents listed at the head of this file, plus the narrow defect-prose corrections in `docs/explainers/rotor-noise-fit.qmd` |
+| Integration | the integration owner commits scoped changes after the ownership boundary; the documentation writer does not commit |
+
+No concurrent edits to the same files. Existing frames, clips and rig
+conventions are reused; no new frameworks. The real-clip decimator, raw data,
+refined labels, checkpoints and dependency locks are out of scope for every
+worker.

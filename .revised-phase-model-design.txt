@@ -1,0 +1,53 @@
+REVISED MODEL: MAIN SCIENTIFIC DECISION, after PhaseMathReview, 2026-09-12
+Companion accepted protocol: local://revised-phase-contract.txt. This document defines candidate ONE only, not authorization to fit before evaluator baseline freeze. Implementation may proceed; scientific fit/evaluation starts round1 when explicitly authorized. At most8 rounds total.
+
+A. One stochastic process and one carrier correction
+For each rig, clip c, rotor r:
+f0_r(t)=raw_r(t-delay_r)+b_c,r (Hz).
+dnu_r=-lambda_r nu_r dt + sqrt(2lambda_r sigma_r^2)dW_r; dtheta_r=nu_r dt.
+depsilon_rk=sqrt(2D_rk)dW_rk.
+Phi_r(t)=2pi integral f0_r + theta_r(t).
+x_m(t)=sum_rk A_mrk(t)cos(kPhi_r(t)+epsilon_rk(t)+alpha_mrk)+u_m(t).
+No second unconstrained per-frame spline/carrier correction. The time-resolved inferred carrier correction is E[nu_r(t)|audio,raw]/2pi; total includes b_c,r and delay. State grid chosen by dynamics bandwidth, independent of long spectral window; posterior correction must resolve subframe motion. Exact coupled integrated-OU discrete transition/covariance from supplied docs, numerically stable small-step expansions. b is perclip random effect with calibrated prior and a population/recording mean; constrain mean OU to stationaryzero in law, anchor theta(t0)=0 and source phase gauge. Finite-record bias/slowOU confounding must be reported, not fixed by two free paths.
+Independent acoustic epsilon never enters physical shaft RPS. Renderer must emit audio plus realized interval-average shaftRPS from deltaPhi/(2pi dt). One theta shared across harmonics AND microphones; epsilon source-shared across microphones. No tonebank/noise split for revised model.
+
+B. Honest inference/reconstruction/prediction distinction
+Fit raw-initialized complex harmonic observations. Moment/cross-order covariance only initializers/diagnostics. Main baseline inference is damped sparse MAP / iterative linearization for latent phases with conditional amplitude solves; approximate Laplace/generalizedEM dynamic updates, not exactO(K) Kalman. Do not add observations twice as if likelihood factors independent. Use one state prior. Explain approximations and verify dense smallK reference vs sparse method. Complex observations need actual integration of latent path inside window or equivalent sufficiently resolved heterodyned subbands; cannot factor residual exp(i theta_at_center) outside a long moving-frame atom unless approximation measured acceptable.
+Prior prediction and conditional reconstruction are DIFFERENT:
+E|X(f)|^2=sum_ts w_t w_s A_t A_s exp(i(phi0_t-phi0_s+m_t-m_s-2pi f(t-s))) exp(-0.5*(Ctt+Css-2Cts)).
+Heldout prediction uses m=0,C=prior. Conditional reconstruction uses posterior m,Cpost. NEVER center on posterior path and multiply full prior OU linewidth. Primary heldout predictive synth uses only raw heldout telemetry + training-derived bias law + one freshOU draw; no refined labels or inferred heldout-audio corrections. Posterior replay diagnostics allowed separately.
+Primary frozenHPP MAE compares real and ALL synthetic arms with identical raw telemetry reference, called telemetry-reference agreement not proven physicaltruth. Also save synthetic exact physicalshaftMAE as diagnostic, no target substitution across arms.
+
+C. Spectral observation and overlap
+Use existing16k convention, default long periodicHann NFFT16384 and overlapping hop1024 (64ms) for spectrum unless computational prototype proves a smaller/larger hop necessary BEFORE freeze. Retain complex observations at independently chosen faster state grid. Fixed band30..7900Hz, no lowering fit band to conceal filter loss.
+Predict moving-carrier expected spectrum by windowed time autocorrelation, not mean speed/chirp widening. For a stationary residual phase process with R_k(tau), deterministic moving atom a_j=w_j A_j exp(i k Phi0_j):
+E|X_k(f)|^2 = DFT_tau[R_k(tau) * autocorrelation(a)(tau)] / sum w^2,
+using zero-padded FFT autocorrelation and selecting correct original-grid bins. Include real-signal one-sided factors consistently with existing periodogram; validate pure fractional-bin tone and planted chirp exactly. Avoid transforming an infinite intrinsic line with arbitrary tau truncation. tau support fixed by window, R0=1. Amplitude changes inside ramp enter a_j too.
+For revised marginal residual R=exp(-D|tau| - k^2 sigma^2[|tau|/lambda - (1-exp(-lambda|tau|))/lambda^2]). Use expm1/stable small-argument series.
+Old descriptive model adapters must predict SAME observation, using their stated two-component covariance and actual exported units; no refitting old models or pretending smoothed observed periodogram is a modelprediction. Verify adapter against its real renderer's mean statistics; don't assume old params describe twoCauchy if implementation differs.
+Score is overlap-aware MARGINAL COMPOSITE risk L=sum a_i*(I_i/M_i+log M_i), positive weights normalized per unique audio duration and fixed band/mics. Duplicate identical observation windows must split exposure, not double score/evidence. It is proper for mean prediction despite correlation; NOT exact jointNLL, evidence or posterior. Cellwise Hessians/nominal frame count cannot provide uncertainty. DREGON whole-recording paired bootstrap; Michael block variation conditional on FLY124. Fitting composite temperature vs state priors must be calibrated on planted/baseline data separately and frozen. No dense Gaussian for redundant fullSTFT pretending nonsingular covariance.
+Use spectral composite as heldout comparison and, if needed, a calibrated auxiliary or plug-in power/floor stage. Do not claim phase+power on same raw samples are independent factors. Preferred minimal staged path: moments initialize, one complexMAP/Laplace objective fits dynamic/state blocks; freeze dynamics; spectral plug-in refines powers/floor with clearly stated reused-data composite semantics. If jointly alternating dynamic+spectral objective, explicitly one calibrated composite and one prior, not exactBayes.
+
+D. Multi-regime and nuisance identifiability
+One Michael rig parameter law for standby/ramp/cruise, trained on FLY125. One recording-level gain shared across regimes. No free perclip gain that absorbs speedlaw; zero-mean perclip nuisance alone does NOT solve slope confounding unless orthogonal to logspeed. Start with existing power speedlaw and shared recordinggain, smooth log-speed dependence of dynamics only where data identify it. Candidate1 may use minimal constant phase dynamics if planted/phase diagnostics support it; no unsupported extrapolation claim. DREGON primary uses cruise only (5 no-source room2 recording clusters, disjoint heldout supports), no need fit DREGON standby/ramp. Do not mix physical rigs/bench cells into flight data.
+Hierarchical logD=d0+d1logk+u_k, numeric MAP/shrinkage. Gaussian logD prior is NOT conjugate to noisyD moment estimates. Negative raw moment estimates are observations, not impossible logs or zeros masquerading as exact truth.
+
+E. Implementation interface and ownership
+Candidate worker owns new src/experiments/stochastic_fit/revised_phase.py (can split a genuinely large implementation into cohesive existing-package modules if needed; do not build frameworks), scripts/stochastic_fit_revised.py, and candidate-specific tests. Eval worker owns scripts/stochastic_fit_revised_eval.py plus existing-path AA/instruments. No concurrent edits to same files. Integration owner BaselineLauncher/coordinated baseline worker commits scoped results after ownership boundary. Existing frames/clips and rig conventions reused.
+Expose clear APIs agreed before code:
+fit_revised(...): fit export (schema_version, model_family='shared_shaft_ou', rig_id, training_provenance, parameters, fit diagnostics/state posterior for TRAININGONLY).
+predict_spectrum(export, clip, *, n_fft, hop): (M,N,F) expected periodogram matching data.periodogram; heldout path raw-only no optimizing on clip audio.
+render_revised(export, rps, *, sample_rate=16000, sample_rate_native=44100, n_mics=8, seed=0): structured result with audio(M,T) at sample_rate and physical_rps(R,T) interval-average exactphase label plus reference_rps. Pass sourcephase through shared render-onlyAA then unchanged decimator; no masks.
+infer_carrier(export, clip,...): diagnostic posterior track, never implicit inside predict/render.
+Use numpy/torch/scipy existing installed packages. GPU batched FFTs/state operations; no avoidable tensor blowups. Main reviews scientific choices, not boilerplate.
+
+F. Required observable correctness checks before candidate is believed
+1 Stable integratedOU moments vs known covariance incl nearzero lambda*dt; correlated theta/nu increments, one sharedstate.
+2 Shaftonly/independentonly/combined planted phasecovariance kload and normalized differences; biasedcarrier+bias/OU ambiguity reported.
+3 Conditional zero-posteriorcovariance removes OU broadening; marginal remains correct.
+4 Pure tone/chirp finite-window power including fractional bins, floor and phase units.
+5 Overlap duplicates do not create exposure/information; no heldout rawsample support leakage.
+6 Generated physicalRPS integrates to sharedphase, excludes epsilon, same timeline/length as audio after resampling.
+7 SmallK sparseMAP compared to dense reference on objective/recovery, no false exactO(K) assertion.
+8 Nearcrossing uses joint complex observations/companion harmonics; do not classify by nearest-bin labels or force unidentifiable allocation. Missing/weakorders gate declared before estimates.
+Only retain regression tests for actual uncertain behavioral risks. No projectwide commands during concurrent mutations; validate afterward via remote smoke/planted checks, no heavy laptop work.

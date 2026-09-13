@@ -33,8 +33,9 @@ the experiment records.
 * **Bit-exact against the retired loader.** The new 16 s FLY125 cruise cut and
   the legacy raw-tree cache (`.cache/native_clips/fly125_cruise_00_native.npz`,
   8 s at 44.1 kHz) agree on every overlapping sample — max abs diff 0.0 — and
-  the bench span/rate seed match too (Motor1_80: 9 s from 4.99 s, 78.221 rev/s
-  against the accepted fit's fitted carrier 78.221). What DOES change is the
+  the bench span and carrier match too (Motor1_80: 9 s from 4.99 s, comb-evidence
+  rate 78.221 rev/s against the accepted fit's carrier 78.221 — the bench variant
+  pins `rps_offset` off, so that rate is held fixed, not fitted). What DOES change is the
   carrier: refined minus raw is up to 1.52 rev/s on that window (mean 0.16).
 * **Retired with the cutover**: `native.py`, `stage1.py` (the derived-summary
   S1), `coherent.py`, `conditional.py`, `scripts/_s1_baseline.py`,
@@ -142,13 +143,18 @@ is smeared. `scripts/_dregon_transfer.py` runs the four-arm comparison.
 
 ## 5. Pages to look at (and listen to)
 
-* `docs/explainers/bench-fit-derivations.qmd` → `.html` — the derivations in
-  Simplified Technical English: the Whittle likelihood from first principles,
-  the coherent fraction of a random-walk tone in 10 steps, the needle/pedestal
-  mixture, the bench rig (20 cells), the DREGON bench→flight transfer with
-  HPPNet-vs-truth figures, **30 audio players**, and a complete defect list.
-* `docs/explainers/stage2-cruise.qmd` → `.html` — Michael's cruise and standby:
-  spectrograms, LTAS, per-microphone pattern, the gate tables, 15 players.
+* `docs/explainers/rotor-noise-fit.qmd` → `.html` — **the single record**, and
+  the merge of what used to be `bench-fit-derivations` and `stage2-cruise`
+  (both deleted 2026-09-12). The Whittle likelihood from first principles, the
+  coherent fraction of a random-walk tone in 10 steps, the needle/pedestal
+  mixture, the bench rig (20 cells), Michael's cruise and standby, the
+  bench→flight transfer, the 2026-09-12 refits on refined labels with their
+  gate results, the fitted parameters as figures, an audit of what was asked of
+  the fit, the multi-regime plan, and a complete defect list. 45 audio players,
+  29 tables.
+* `docs/explainers/bench-fit-revised-phase-model.qmd` → `.html` — the revised
+  line model (shared shaft state + independent per-harmonic diffusion), its
+  fitting algorithm step by step, and the cost analysis.
 * Assets: `docs/explainers/stage1-bench/` (20 panels, 60 WAVs),
   `docs/explainers/stage2-cruise/`, `docs/explainers/dregon-transfer/`.
 * Serve with `python -m http.server --directory docs/explainers`; verify with
@@ -244,5 +250,6 @@ is smeared. `scripts/_dregon_transfer.py` runs the four-arm comparison.
 
 * `docs/experiments/refined-rps-labels.md` — label refinement, gating, publication.
 * `docs/experiments/stage1-bench-fit.md` — the bench campaign and the gate blocker.
-* `docs/explainers/bench-fit-derivations.qmd`, `docs/explainers/stage2-cruise.qmd`.
+* `docs/explainers/rotor-noise-fit.qmd` (the merged record),
+  `docs/explainers/bench-fit-revised-phase-model.qmd`.
 * `src/data_processing/AGENTS.md`, `docs/data-catalog.md` — dataset contracts and pins.
