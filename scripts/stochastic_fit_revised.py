@@ -79,6 +79,8 @@ MANIFEST_SCHEMA: dict[str, Any] = {
         "seed": "int",
         "frame_chunk": "int, frames per backward chunk (memory bound, 1 at n_fft 16384)",
         "frames_per_step": "int or null, frames sampled per step (null = all)",
+        "training_recipe": "optional 'full' or 'band_energy_ladder'; the latter fits active "
+        "orders 1..16, then 1..48, then full K during stage 1",
         "atom_dtype": "optional 'float32' (default) or 'float64'",
     },
     "composite": {
@@ -193,6 +195,7 @@ def _config(manifest: dict[str, Any], rig: str, where: Path, sha: str) -> RP.Fit
             if _req(manifest, "optimizer.frames_per_step", where) is None
             else int(opt["frames_per_step"])
         ),
+        training_recipe=str(opt.get("training_recipe", "full")),
         temperature=float(_req(manifest, "composite.temperature", where)),
         bias_std_hz=float(_req(manifest, "priors.bias_std_hz", where)),
         bias_mean_std_hz=float(

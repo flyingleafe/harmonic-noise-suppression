@@ -289,6 +289,21 @@ _SPEC_DEFAULTS = {f.name: f.default for f in dataclasses.fields(Spec)}
 FLOOR_SHAPE_STD_DB = float(_SPEC_DEFAULTS["floor_shape_std_db"])
 FLOOR_SHAPE_OCT = float(_SPEC_DEFAULTS["floor_shape_oct"])
 AMP_EXP_INIT = float(_SPEC_DEFAULTS["amp_rps_exponent"])
+STAGE1_LADDER_RECIPE = "band_energy_ladder"
+STAGE1_LADDER_RUNG_ORDERS = (16, 48, None)
+STAGE1_LADDER_RUNG_ITERS = (40, 40, None)
+
+#: Per-clip low-percentile floor bias correction copied from
+#: :func:`experiments.stochastic_fit.fit.initialize`: for an exponential
+#: periodogram cell the 20th percentile is 0.223 times the mean, i.e. -6.5 dB.
+FLOOR_INIT_QUANTILE = 0.20
+FLOOR_INIT_DB_CORRECTION = 6.5
+
+#: A line seed, not a parameter floor: if the signed local band integral is
+#: non-positive, initialize at 10 dB below the local integrated floor. Fitting is
+#: still free to drive any order down.
+LINE_INIT_FLOOR_REL_DB = -10.0
+
 
 # ── preregistered moment gate ────────────────────────────────────────────────
 # PREREGISTERED: these five numbers were fixed on 2026-09-12, BEFORE any moment
@@ -426,6 +441,10 @@ class FitConfig:
     #: its budget at ``k_cap = 230`` on the 4x work grid.
     harmonic_chunk: int | None = 32
     frames_per_step: int | None = None
+    #: Stage-1 recipe. ``"full"`` preserves the historical one-pass optimizer
+    #: for tiny tests and old manifests; ``"band_energy_ladder"`` is the round-3
+    #: continuation recipe: fit active orders 1..16, then 1..48, then full K.
+    training_recipe: str = "full"
     #: the frozen composite temperature ``T = J / H``; it DIVIDES the composite
     #: risk (``L / T``). Calibrated on planted/baseline data against the
     #: UNNORMALIZED risk of :func:`composite_risk` and then FROZEN; read, never
@@ -460,6 +479,11 @@ class FitConfig:
                 "front_end.sample_rate_work must be a positive INTEGER multiple of the analysis "
                 f"rate sr={self.sr!r} (the default is {SAMPLE_RATE_WORK} = 4 x 16000), got "
                 f"{self.sample_rate_work!r}"
+            )
+        if self.training_recipe not in ("full", STAGE1_LADDER_RECIPE):
+            raise ValueError(
+                "optimizer.training_recipe must be 'full' or "
+                f"{STAGE1_LADDER_RECIPE!r}, got {self.training_recipe!r}"
             )
         self.n_fft_work  # noqa: B018 — validate the derived window here, not mid-fit
 
@@ -1664,25 +1688,223 @@ class _RevisedModel(torch.nn.Module):
         self.state_innov = torch.nn.ParameterList(
             [zeros(self.n_rotors, cd.n_states, 2) for cd in self.clips]
         )
+        self.active_k = self.K
+        self.initialization_diagnostics: dict[str, Any] = {}
         if observe:
             self._init_levels()
 
-    # ── initialization ──────────────────────────────────────────────────
+    def _clip_floor_curves(self, obs: Sequence[_ClipData]) -> dict[str, np.ndarray]:
+        """Per-clip per-frequency floor in OBSERVED periodogram units.
 
-    def _init_levels(self) -> None:
-        """Crude but real initialization of the levels from the observed data.
-
-        The floor mean is the in-band median periodogram; each order's power is
-        the excess of its nearest bin over that floor, converted with the
-        finite-window identity of a Hann-windowed tone (peak periodogram
-        ``A^2 n_fft / 6``, so ``P = A^2/2 = 3 I_peak / n_fft``) and divided by
-        the speed law at the clip's own rate.
+        This is the legacy robust convention applied at the clip boundary:
+        20th percentile of dB cells over frames and microphones, plus the 6.5 dB
+        exponential correction. A quiet standby clip never shares a percentile
+        pool with a loud cruise clip.
         """
+        curves: dict[str, np.ndarray] = {}
+        for cd in obs:
+            assert cd.power is not None
+            db = 10.0 * np.log10(np.maximum(cd.power.numpy(), 1e-20))
+            curves[cd.clip_id] = (
+                np.quantile(db.reshape(-1, db.shape[-1]), FLOOR_INIT_QUANTILE, axis=0)
+                + FLOOR_INIT_DB_CORRECTION
+            )
+        return curves
+
+    def _init_floor(self, obs: Sequence[_ClipData], floor_db_by_clip: dict[str, np.ndarray]) -> dict[str, Any]:
+        """Initialize the shared floor in source-side power, linearly aggregated.
+
+        Each clip contributes its own percentile floor curve after removing the
+        current speed-law exposure and the known render/decimation transfer.
+        The shared floor still uses the existing smooth control-point basis;
+        there is no per-clip gain and no second floor family.
+        """
+        band = self.band.detach().cpu().numpy()
+        transfer = np.maximum(self.transfer_power.detach().cpu().numpy(), 1e-8)
+        clip_power: list[np.ndarray] = []
+        clip_weight: list[float] = []
+        clip_reports: dict[str, Any] = {}
+        static = float(torch.nn.functional.softplus(self.floor_static_raw).detach().cpu().item())
+        for cd in obs:
+            rate = np.maximum(cd.frame_rate.detach().cpu().numpy(), SPEED_FLOOR_RPS)
+            gain = float(np.mean((rate / AMP_RPS_REF) ** AMP_EXP_INIT) + static)
+            power = 10.0 ** (floor_db_by_clip[cd.clip_id] / 10.0) / (transfer * max(gain, 1e-12))
+            clip_power.append(power)
+            clip_weight.append(float(cd.starts.size))
+            clip_reports[cd.clip_id] = dict(
+                n_frames=int(cd.starts.size),
+                speed_exposure=float(gain),
+                floor_db_p20_plus_6p5_band_median=float(np.median(floor_db_by_clip[cd.clip_id][band])),
+            )
+        weights = np.asarray(clip_weight, dtype=np.float64)
+        stacked = np.stack(clip_power, axis=0)
+        aggregate = np.average(stacked, axis=0, weights=weights)
+        aggregate_db = 10.0 * np.log10(np.maximum(aggregate, 1e-30))
+        floor_mean = float(np.median(aggregate_db[band]))
+        target = np.interp(np.log2(self.ctrl_hz), np.log2(self.freqs_np[1:]), (aggregate_db - floor_mean)[1:])
+        z = np.linalg.solve(
+            self.shape_chol.detach().cpu().numpy(),
+            target / max(FLOOR_SHAPE_STD_DB, 1e-12),
+        )
+        with torch.no_grad():
+            self.floor_mean_db.fill_(floor_mean)
+            self.floor_shape_z.copy_(torch.as_tensor(z, dtype=torch.float64, device=self._dev))
+            self.floor_tilt_db_oct.zero_()
+            self.mic_floor_db.zero_()
+        return dict(
+            method="per_clip_per_frequency_p20_db_plus_6p5",
+            aggregation="linear source power after speed and known-transfer normalization",
+            floor_mean_db=floor_mean,
+            floor_shape_db=(FLOOR_SHAPE_STD_DB * (self.shape_chol.detach().cpu().numpy() @ z)).tolist(),
+            clips=clip_reports,
+        )
+
+    def _line_band_half_widths(self, centres: np.ndarray) -> np.ndarray:
+        """Half-width in Hz for initialization band integrals.
+
+        Rule: start from the analysis resolution plus the existing raw-bias
+        prior, ``max(4 df, 0.5 df + 2*bias_std_hz)``; then cap at 45% of the
+        nearest simultaneous line distance. Overlaps therefore become
+        unobservable for initialization instead of double-counted, while
+        fractional-bin and modestly misaligned/broadened lines still integrate.
+        """
+        df = float(self.freqs_np[1] - self.freqs_np[0])
+        base = max(4.0 * df, 0.5 * df + 2.0 * float(self.config.bias_std_hz))
+        flat = centres.reshape(-1, centres.shape[-1])
+        out = np.full_like(centres, base, dtype=np.float64)
+        for n in range(flat.shape[1]):
+            c = flat[:, n]
+            sep = np.abs(c[:, None] - c[None, :])
+            np.fill_diagonal(sep, np.inf)
+            nearest = np.min(sep, axis=1).reshape(centres.shape[:-1])
+            ok = np.isfinite(nearest)
+            out[..., n][ok] = np.minimum(out[..., n][ok], 0.45 * nearest[ok])
+        return out
+
+    def _profile_seed(
+        self,
+        k_start: int,
+        k_stop: int,
+        obs: Sequence[_ClipData],
+        floor_db_by_clip: dict[str, np.ndarray],
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        """Source-side profile seeds for ``k_start..k_stop`` from signed band power."""
+        df = float(self.freqs_np[1] - self.freqs_np[0])
+        freqs = self.freqs_np
+        band_lo, band_hi = self.config.band_hz
+        transfer = self.transfer_power.detach().cpu().numpy()
+        reliable = (freqs >= band_lo) & (freqs <= band_hi) & (transfer > 1e-6)
+        transfer_safe = np.where(reliable, np.maximum(transfer, 1e-8), np.inf)
+        orders = np.arange(1, self.K + 1, dtype=np.float64)
+        values: list[list[list[float]]] = [[[] for _ in range(self.K)] for _ in range(self.n_rotors)]
+        floor_refs: list[list[list[float]]] = [[[] for _ in range(self.K)] for _ in range(self.n_rotors)]
+        for ci, cd in enumerate(obs):
+            assert cd.power is not None
+            power = cd.power.numpy().mean(axis=0).astype(np.float64)  # (N, F)
+            floor_obs = 10.0 ** (floor_db_by_clip[cd.clip_id] / 10.0)
+            obs_src = np.where(reliable[None, :], power / transfer_safe[None, :], 0.0)
+            floor_src = np.where(reliable, floor_obs / transfer_safe, np.nan)
+            obs_prefix = np.concatenate(
+                [np.zeros((power.shape[0], 1)), np.cumsum(obs_src, axis=1)], axis=1
+            )
+            count_prefix = np.concatenate([[0], np.cumsum(reliable.astype(np.int64))])
+            rate = cd.frame_rate.detach().cpu().numpy()
+            bias = self.bias_hz[ci].detach().cpu().numpy()[:, None]
+            carrier = np.maximum(rate + bias, SPEED_FLOOR_RPS)
+            centres = carrier[:, None, :] * orders[None, :, None]  # (R, K, N)
+            half = self._line_band_half_widths(centres)
+            amp_exp = float(self.amp_exp.detach().cpu().item())
+            for r in range(self.n_rotors):
+                for k in range(max(1, k_start), min(self.K, k_stop) + 1):
+                    kk = k - 1
+                    lo = np.searchsorted(freqs, centres[r, kk] - half[r, kk], side="left")
+                    hi = np.searchsorted(freqs, centres[r, kk] + half[r, kk], side="right")
+                    lo = np.clip(lo, 0, freqs.size)
+                    hi = np.clip(hi, 0, freqs.size)
+                    width = np.maximum(hi - lo, 1)
+                    visible = count_prefix[hi] - count_prefix[lo]
+                    ok = (hi > lo) & (visible > 0) & ((visible / width) >= 0.5) & (half[r, kk] >= 0.5 * df)
+                    if not ok.any():
+                        continue
+                    frames = np.flatnonzero(ok)
+                    obs_sum = (obs_prefix[frames, hi[ok]] - obs_prefix[frames, lo[ok]]) * df
+                    e_floor: list[float] = []
+                    for c_hz, half_hz, n_visible in zip(centres[r, kk, ok], half[r, kk, ok], visible[ok], strict=True):
+                        ann_lo = np.searchsorted(freqs, c_hz - 6.0 * half_hz - 2.0 * df, side="left")
+                        ann_hi = np.searchsorted(freqs, c_hz + 6.0 * half_hz + 2.0 * df, side="right")
+                        inner_lo = np.searchsorted(freqs, c_hz - 1.5 * half_hz, side="left")
+                        inner_hi = np.searchsorted(freqs, c_hz + 1.5 * half_hz, side="right")
+                        ann = floor_src[ann_lo:ann_hi].copy()
+                        ann[max(0, inner_lo - ann_lo) : max(0, inner_hi - ann_lo)] = np.nan
+                        local = float(np.nanmedian(ann)) if np.isfinite(ann).any() else float(np.nanmedian(floor_src))
+                        e_floor.append(local * float(n_visible) * df)
+                    e_floor_arr = np.asarray(e_floor, dtype=np.float64)
+                    e_excess = obs_sum - e_floor_arr
+                    p_signed = 2.0 * e_excess / float(self.config.sr)
+                    p_floor = 2.0 * e_floor_arr / float(self.config.sr)
+                    seed = np.maximum(p_floor * 10.0 ** (LINE_INIT_FLOOR_REL_DB / 10.0), 1e-30)
+                    speed_norm = np.maximum((carrier[r, frames] / AMP_RPS_REF) ** amp_exp, 1e-12)
+                    seeded = np.maximum(p_signed, seed) / speed_norm
+                    values[r][kk].extend(seeded.tolist())
+                    floor_refs[r][kk].extend((seed / speed_norm).tolist())
+        init = np.full((self.n_rotors, self.K), np.nan, dtype=np.float64)
+        coverage = np.zeros((self.n_rotors, self.K), dtype=np.int64)
+        line_floor_db = np.full((self.n_rotors, self.K), np.nan, dtype=np.float64)
+        power_ranges: list[list[dict[str, float | int | bool | None]]] = []
+        for r in range(self.n_rotors):
+            row_ranges: list[dict[str, float | int | bool | None]] = []
+            for kk in range(self.K):
+                arr = np.asarray(values[r][kk], dtype=np.float64)
+                fl = np.asarray(floor_refs[r][kk], dtype=np.float64)
+                coverage[r, kk] = int(arr.size)
+                if arr.size:
+                    mean_power = float(np.mean(arr))
+                    init[r, kk] = 10.0 * math.log10(max(mean_power, 1e-30))
+                    line_floor_db[r, kk] = 10.0 * math.log10(max(mean_power, 1e-30) / max(float(np.mean(fl)), 1e-30))
+                    db = 10.0 * np.log10(np.maximum(arr, 1e-30))
+                    row_ranges.append(
+                        dict(observed=True, n=int(arr.size), min_db=float(db.min()), median_db=float(np.median(db)), max_db=float(db.max()))
+                    )
+                else:
+                    row_ranges.append(dict(observed=False, n=0, min_db=None, median_db=None, max_db=None))
+            power_ranges.append(row_ranges)
+        for r in range(self.n_rotors):
+            good = np.isfinite(init[r])
+            if good.any():
+                x = np.flatnonzero(good)
+                init[r, ~good] = np.interp(np.flatnonzero(~good), x, init[r, good])
+            else:
+                pooled = init[np.isfinite(init)]
+                init[r, :] = float(np.median(pooled)) if pooled.size else -120.0
+        line_floor_out: list[list[float | None]] = [
+            [float(v) if np.isfinite(v) else None for v in row]
+            for row in line_floor_db[:, k_start - 1 : k_stop]
+        ]
+        diag = dict(
+            orders=[int(k_start), int(k_stop)],
+            bandwidth_rule=(
+                "half_width_hz=min(max(4*df,0.5*df+2*bias_std_hz),0.45*nearest_simultaneous_line); "
+                "require at least half the band on bins inside the frozen analysis band with transfer>1e-6"
+            ),
+            units="P_meansquare = 2 * sum((I-F)/transfer * df) / Fs_analysis, then divide by current speed law",
+            coverage=coverage[:, k_start - 1 : k_stop].tolist(),
+            line_floor_db=line_floor_out,
+            power_ranges=[row[k_start - 1 : k_stop] for row in power_ranges],
+            missing_policy="unobservable orders are initialized by smooth neighbour interpolation, never by zeros or masks",
+        )
+        return init[:, k_start - 1 : k_stop], diag
+
+    def _init_levels_legacy(self) -> None:
+        """Historical one-pass initializer retained for old manifests/tests."""
         band = self.band.detach().cpu().numpy()
         obs = [cd for cd in self.clips if cd.power is not None]
         if not obs:
             return
-        med = float(np.median(np.concatenate([cd.power.numpy()[..., band].ravel() for cd in obs])))
+        powers = []
+        for cd in obs:
+            assert cd.power is not None
+            powers.append(cd.power.numpy()[..., band].ravel())
+        med = float(np.median(np.concatenate(powers)))
         with torch.no_grad():
             self.floor_mean_db.fill_(10.0 * math.log10(max(med, 1e-30)))
             df = float(self.freqs_np[1] - self.freqs_np[0])
@@ -1710,6 +1932,42 @@ class _RevisedModel(torch.nn.Module):
             filled = hits > 0
             init = np.where(filled, prof / np.maximum(hits, 1.0), -120.0)
             self.profile_db.copy_(torch.as_tensor(init, dtype=torch.float64, device=self._dev))
+        self.initialization_diagnostics = dict(
+            training_recipe=self.config.training_recipe,
+            legacy_global_floor_db=float(self.floor_mean_db.detach().cpu().item()),
+            initial_profile_db=self.profile_db.detach().cpu().numpy().tolist(),
+        )
+
+
+    def _initialize_profile_orders(self, k_start: int, k_stop: int) -> dict[str, Any]:
+        obs = [cd for cd in self.clips if cd.power is not None]
+        if not obs:
+            return dict(orders=[int(k_start), int(k_stop)], skipped="no observed periodograms")
+        floor_db_by_clip = self._clip_floor_curves(obs)
+        seed, diag = self._profile_seed(k_start, k_stop, obs, floor_db_by_clip)
+        with torch.no_grad():
+            self.profile_db[:, k_start - 1 : k_stop].copy_(
+                torch.as_tensor(seed, dtype=torch.float64, device=self._dev)
+            )
+        return diag
+
+    def _init_levels(self) -> None:
+        """Initialize floor and lines from per-clip floors plus signed band energy."""
+        if self.config.training_recipe != STAGE1_LADDER_RECIPE:
+            self._init_levels_legacy()
+            return
+        obs = [cd for cd in self.clips if cd.power is not None]
+        if not obs:
+            return
+        floor_db_by_clip = self._clip_floor_curves(obs)
+        floor_diag = self._init_floor(obs, floor_db_by_clip)
+        profile_diag = self._initialize_profile_orders(1, self.K)
+        self.initialization_diagnostics = dict(
+            training_recipe=self.config.training_recipe,
+            floor=floor_diag,
+            initial_profile_db=self.profile_db.detach().cpu().numpy().tolist(),
+            harmonic_seed=profile_diag,
+        )
 
     # ── parameter views ─────────────────────────────────────────────────
 
@@ -1914,7 +2172,8 @@ class _RevisedModel(torch.nn.Module):
         # accumulated angle.
         phase = phase - phase[..., n_fft_work // 2 : n_fft_work // 2 + 1]
 
-        prof_amp = torch.sqrt(2.0 * 10.0 ** (self.profile_db / 10.0))  # (R, K)
+        active_k = min(max(1, int(self.active_k)), self.K)
+        prof_amp = torch.sqrt(2.0 * 10.0 ** (self.profile_db[:, :active_k] / 10.0))  # (R, active_k)
         speed_amp = torch.sqrt((rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF) ** self.amp_exp)
         # the window and the speed law are order-INDEPENDENT: form the envelope
         # once, so an order block carries only its own phase and its own level
@@ -1959,10 +2218,11 @@ class _RevisedModel(torch.nn.Module):
             dtype=self.atom_dtype,
             device=self._dev,
         )
-        for k0 in range(0, self.K, k_chunk):
+        for k0 in range(0, active_k, k_chunk):
+            k1 = min(k0 + k_chunk, active_k)
             args = (
-                prof_amp[:, k0 : min(k0 + k_chunk, self.K)],
-                self.k_orders[k0 : min(k0 + k_chunk, self.K)],
+                prof_amp[:, k0:k1],
+                self.k_orders[k0:k1],
                 phase,
                 env,
                 d_scalar,
@@ -2323,39 +2583,87 @@ def _fit_summary(trace: list[float], grad_norms: dict[str, dict[str, float]]) ->
     )
 
 
+def _stage1_schedule(config: FitConfig) -> list[tuple[int, int]]:
+    if config.training_recipe != STAGE1_LADDER_RECIPE:
+        return [(int(config.k_cap), int(config.iters))]
+    orders = [
+        int(config.k_cap if k is None else min(int(k), int(config.k_cap)))
+        for k in STAGE1_LADDER_RUNG_ORDERS
+    ]
+    iters = [int(config.iters if n is None else int(n)) for n in STAGE1_LADDER_RUNG_ITERS]
+    out: list[tuple[int, int]] = []
+    for active_k, n_iter in zip(orders, iters, strict=True):
+        if n_iter <= 0:
+            continue
+        if out and active_k <= out[-1][0]:
+            continue
+        out.append((active_k, n_iter))
+    if not out or out[-1][0] != int(config.k_cap):
+        out.append((int(config.k_cap), int(config.iters)))
+    return out
+
+
 def _optimize_marginal(
     model: _RevisedModel,
     *,
     config: FitConfig,
     progress: Callable[[str], None] | None,
-) -> tuple[list[float], dict[str, dict[str, float]]]:
+) -> tuple[list[float], dict[str, dict[str, float]], list[dict[str, Any]]]:
     named = model.marginal_parameters()
     opt = torch.optim.Adam(list(named.values()), lr=float(config.lr))
     rng = np.random.default_rng(int(config.seed))
     trace: list[float] = []
+    rung_trace: list[dict[str, Any]] = []
     grad_norms: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
-    every = max(1, int(config.iters) // 20)
-    for it in range(int(config.iters)):
-        opt.zero_grad(set_to_none=True)
-        total = 0.0
-        for ci, cd in enumerate(model.clips):
-            fi, scale = _sample_frames(cd, rng, config.frames_per_step)
-            for chunk in _chunks(fi, config.frame_chunk):
-                loss = model.marginal_chunk_risk(ci, chunk, scale=scale) / config.temperature
-                loss.backward()
-                total += float(loss.detach())
-        prior = model.prior(state=False, globals=True, bias_population=True)
-        prior.backward()
-        total += float(prior.detach())
-        step_norms = _grad_norms(named)
-        if it == 0:
-            grad_norms["first_step"] = step_norms
-        grad_norms["last_step"] = step_norms
-        opt.step()
-        trace.append(total)
-        if progress is not None and (it % every == 0 or it == int(config.iters) - 1):
-            progress(f"marginal iter {it:4d}  quasi-risk {total:.4f}")
-    return trace, grad_norms
+    previous_active = 0
+    global_it = 0
+    for rung_i, (active_k, n_iter) in enumerate(_stage1_schedule(config)):
+        if config.training_recipe == STAGE1_LADDER_RECIPE and active_k > previous_active:
+            seed_diag = model._initialize_profile_orders(previous_active + 1, active_k)
+        else:
+            seed_diag = dict(orders=[previous_active + 1, active_k], skipped="no newly active orders")
+        model.active_k = active_k
+        start_index = len(trace)
+        every = max(1, int(n_iter) // 20)
+        if progress is not None:
+            progress(
+                f"marginal rung {rung_i + 1}: active orders 1..{active_k} for {int(n_iter)} "
+                f"Adam steps at lr {float(config.lr):.4g}"
+            )
+        for local_it in range(int(n_iter)):
+            opt.zero_grad(set_to_none=True)
+            total = 0.0
+            for ci, cd in enumerate(model.clips):
+                fi, scale = _sample_frames(cd, rng, config.frames_per_step)
+                for chunk in _chunks(fi, config.frame_chunk):
+                    loss = model.marginal_chunk_risk(ci, chunk, scale=scale) / config.temperature
+                    loss.backward()
+                    total += float(loss.detach())
+            prior = model.prior(state=False, globals=True, bias_population=True)
+            prior.backward()
+            total += float(prior.detach())
+            step_norms = _grad_norms(named)
+            if global_it == 0:
+                grad_norms["first_step"] = step_norms
+            grad_norms["last_step"] = step_norms
+            opt.step()
+            trace.append(total)
+            if progress is not None and (local_it % every == 0 or local_it == int(n_iter) - 1):
+                progress(f"marginal iter {global_it:4d}  quasi-risk {total:.4f}")
+            global_it += 1
+        rung_trace.append(
+            dict(
+                rung=int(rung_i + 1),
+                active_k=int(active_k),
+                iterations=int(n_iter),
+                objective_start=float(trace[start_index]) if len(trace) > start_index else float("nan"),
+                objective_end=float(trace[-1]) if trace else float("nan"),
+                newly_active_seed=seed_diag,
+            )
+        )
+        previous_active = active_k
+    model.active_k = model.K
+    return trace, grad_norms, rung_trace
 
 
 def _optimize_carrier(
@@ -2410,7 +2718,7 @@ def fit_revised(
     torch.manual_seed(int(config.seed))
     model = _RevisedModel(rows, dynamics=dynamics, config=config, device=device, observe=True)
 
-    marginal_trace, marginal_grads = _optimize_marginal(model, config=config, progress=progress)
+    marginal_trace, marginal_grads, rung_trace = _optimize_marginal(model, config=config, progress=progress)
     predictive_parameters = model.parameter_export()
 
     with torch.no_grad():
@@ -2476,6 +2784,11 @@ def fit_revised(
         optimizer=dict(
             name="adam",
             stage1_marginal=dict(iters=int(config.iters), lr=float(config.lr)),
+            training_recipe=config.training_recipe,
+            rung_schedule=[
+                dict(active_k=int(active_k), iterations=int(n_iter))
+                for active_k, n_iter in _stage1_schedule(config)
+            ],
             stage2_carrier=dict(iters=int(config.stage2_iters), lr=float(config.stage2_lr)),
             frame_chunk=int(config.frame_chunk),
             harmonic_chunk=config.harmonic_chunk,
@@ -2515,6 +2828,7 @@ def fit_revised(
         lambda_source="fixed_reference",
         shared_phase_evidence="not_identified_by_marginal_score",
         rig_id=str(rig_id),
+        training_recipe=config.training_recipe,
         parameters=predictive_parameters,
         training_provenance=training_provenance,
         diagnostics=dict(
@@ -2522,8 +2836,10 @@ def fit_revised(
             map_state_note="TRAINING ONLY: plug-in MAP carrier diagnostics; never a predictive "
             "input for held-out clips and never compared to refined tracks as ground truth",
             moments=dynamics.diagnostics,
+            initialization=model.initialization_diagnostics,
+            final_profile_db=predictive_parameters["profile_db"],
             shared_phase_evidence="not_identified_by_marginal_score",
-            marginal_fit=_fit_summary(marginal_trace, marginal_grads),
+            marginal_fit=dict(_fit_summary(marginal_trace, marginal_grads), rung_trace=rung_trace),
             carrier_fit=_fit_summary(carrier_trace, carrier_grads),
             loss_trace=carrier_trace,
             grad_norms=dict(marginal=marginal_grads, carrier=carrier_grads),
@@ -2733,6 +3049,7 @@ def infer_carrier(
     trace, grad_norms = _optimize_carrier(model, config=cfg, clip_indices=[0])
     with torch.no_grad():
         theta, nu = model.theta_nu(0)
+        cd = model.clips[0]
         theta_np = theta.cpu().numpy()
         nu_hz = nu.cpu().numpy() / (2.0 * np.pi)
         bias = model.bias_hz[0].cpu().numpy()

@@ -481,6 +481,132 @@ def _tiny_fit_config(**kw) -> RP.FitConfig:
     base.update(kw)
     return RP.FitConfig(**base)  # type: ignore[arg-type]
 
+def _line_clip(
+    clip_id: str,
+    *,
+    rps: np.ndarray,
+    profile_db: float,
+    n_fft: int,
+    hop: int,
+    floor_std: float,
+    seed: int,
+) -> Clip:
+    """One observed harmonic whose carrier follows ``rps`` exactly."""
+    rng = np.random.default_rng(seed)
+    n = int(rps.size)
+    phase = 2.0 * np.pi * np.cumsum(rps.astype(np.float64)) / SR
+    audio = rng.standard_normal((1, n)) * floor_std
+    audio[0] += math.sqrt(2.0 * 10.0 ** (profile_db / 10.0)) * np.cos(phase + 0.17)
+    return Clip(clip_id, "synthetic", audio.astype(np.float32), rps[None], SR, rps[None].copy(), {})
+
+
+def test_initialization_keeps_quiet_and_loud_clip_floors_separate():
+    """A quiet standby clip must not be initialized against a pooled cruise floor."""
+    n_fft, hop, n_frames = 512, 256, 5
+    n = n_fft + (n_frames - 1) * hop
+    quiet = _line_clip(
+        "quiet",
+        rps=np.full(n, 80.0),
+        profile_db=-48.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-7,
+        seed=21,
+    )
+    loud = _line_clip(
+        "loud",
+        rps=np.full(n, 80.0),
+        profile_db=-18.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-3,
+        seed=22,
+    )
+    model = RP._RevisedModel(  # type: ignore[attr-defined]
+        [(quiet.clip_id, quiet), (loud.clip_id, loud)],
+        dynamics=RP.ShaftDynamics(lam=6.0, sigma=1.0, d_init=1.0, identified=False, diagnostics={}),
+        config=_tiny_fit_config(n_fft=n_fft, hop=hop, k_cap=2, iters=1, training_recipe=RP.STAGE1_LADDER_RECIPE),
+        observe=True,
+    )
+
+    clips = model.initialization_diagnostics["floor"]["clips"]
+    q = clips["quiet"]["floor_db_p20_plus_6p5_band_median"]
+    l = clips["loud"]["floor_db_p20_plus_6p5_band_median"]
+    assert l - q > 50.0
+    assert model.initialization_diagnostics["harmonic_seed"]["line_floor_db"][0][0] > 20.0
+
+
+def test_initialization_integrates_fractional_moving_harmonic_energy_in_physical_units():
+    """Fractional and moving line energy is integrated, not treated as floor."""
+    n_fft, hop, n_frames = 512, 256, 5
+    n = n_fft + (n_frames - 1) * hop
+    t = np.arange(n, dtype=np.float64) / SR
+    rps = 125.0 + 20.0 * np.sin(2.0 * np.pi * t / t[-1])
+    clip = _line_clip(
+        "moving",
+        rps=rps,
+        profile_db=-24.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-5,
+        seed=23,
+    )
+    model = RP._RevisedModel(  # type: ignore[attr-defined]
+        [(clip.clip_id, clip)],
+        dynamics=RP.ShaftDynamics(lam=6.0, sigma=1.0, d_init=1.0, identified=False, diagnostics={}),
+        config=_tiny_fit_config(n_fft=n_fft, hop=hop, k_cap=3, iters=1, training_recipe=RP.STAGE1_LADDER_RECIPE),
+        observe=True,
+    )
+
+    profile = float(model.profile_db.detach().cpu().numpy()[0, 0])
+    expected = -24.0 - RP.AMP_EXP_INIT * 10.0 * math.log10(float(np.mean(rps)) / RP.AMP_RPS_REF)
+    assert profile == pytest.approx(expected, abs=6.0)
+    assert model.initialization_diagnostics["harmonic_seed"]["line_floor_db"][0][0] > 20.0
+    assert "P_meansquare = 2" in model.initialization_diagnostics["harmonic_seed"]["units"]
+
+
+def test_band_energy_ladder_exports_full_k_and_rung_trace():
+    """The temporary active-order ladder must end with a full-K export."""
+    n_fft, hop, n_frames = 64, 32, 3
+    n = n_fft + (n_frames - 1) * hop
+    clip = _line_clip(
+        "ladder",
+        rps=np.full(n, 80.0),
+        profile_db=-24.0,
+        n_fft=n_fft,
+        hop=hop,
+        floor_std=1e-4,
+        seed=24,
+    )
+    cfg = _tiny_fit_config(
+        n_fft=n_fft,
+        hop=hop,
+        k_cap=17,
+        iters=1,
+        lr=1e-3,
+        carrier_iters=1,
+        carrier_lr=1e-3,
+        frame_chunk=1,
+        harmonic_chunk=None,
+        training_recipe=RP.STAGE1_LADDER_RECIPE,
+    )
+    export = RP.fit_revised(
+        [(clip.clip_id, clip)],
+        rig_id="bench",
+        dynamics=RP.ShaftDynamics(lam=6.0, sigma=1.0, d_init=1.0, identified=False, diagnostics={}),
+        config=cfg,
+    )
+
+    assert export["training_recipe"] == "band_energy_ladder"
+    assert len(export["parameters"]["profile_db"][0]) == 17
+    trace = export["diagnostics"]["marginal_fit"]["rung_trace"]
+    assert [r["active_k"] for r in trace] == [16, 17]
+    assert export["training_provenance"]["optimizer"]["rung_schedule"] == [
+        {"active_k": 16, "iterations": 40},
+        {"active_k": 17, "iterations": 40},
+    ]
+    assert trace[-1]["newly_active_seed"]["orders"] == [17, 17]
+
 
 def test_the_map_state_recovers_a_planted_shaft_path():
     """``D = 0`` and a planted ``theta`` drawn from the model's own prior: the
