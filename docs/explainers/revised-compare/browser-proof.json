@@ -1,0 +1,24 @@
+{
+  "what": "Browser visual verification of rotor-noise-fit.qmd §19.5 (real vs previous vs revised comparison), rendered 2026-09-13",
+  "html": "../rotor-noise-fit.html",
+  "render_command": "QUARTO_PYTHON=$PWD/.venv/bin/python quarto render docs/explainers/rotor-noise-fit.qmd --to html",
+  "browser": "Brave headless (CDP 127.0.0.1:9223, temporary profile /tmp/brave-profile-rnf195)",
+  "checks": {
+    "section_anchor": "look-and-listen-the-previous-model-against-the-revised-one reachable; TOC entry present",
+    "katex_errors": 0,
+    "audio_elements_total": 84,
+    "audio_elements_in_section": 15,
+    "audio_errors": 0,
+    "images_total": 27,
+    "broken_images": 0,
+    "document_horizontal_overflow_px": 0,
+    "note": "player tables scroll internally per the page's own `table {display:block; overflow-x:auto}` CSS, same as §16.5; document-level scrollWidth equals clientWidth"
+  },
+  "screenshots": [
+    "browser-19-5-part1.png",
+    "browser-19-5-part2.png",
+    "browser-19-5-part3.png",
+    "browser-19-5-part4.png"
+  ],
+  "verdict": "PASS — section renders with readable tables, rendered spectrograms, working audio players, no layout defects"
+}

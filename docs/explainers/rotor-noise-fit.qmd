@@ -68,6 +68,8 @@ dregon_real = load_root("results/S2/probe/dregon_refined_real_probe.json")
 standby_search = load_root("results/S2/standby_search.json")
 ab_fly125 = load_root("docs/explainers/refit/ab_fly125.json")
 ab_dregon = load_root("docs/explainers/refit/ab_dregon.json")
+revcmp_fly125 = load_root("docs/explainers/revised-compare/revcmp_fly125.json")
+revcmp_dregon = load_root("docs/explainers/revised-compare/revcmp_dregon.json")
 bench_rig = load_root("results/S1/bayes_rig.json")
 
 
@@ -2230,6 +2232,182 @@ because the transition frames are where a tracker actually fails and where the
 training data's value lies. Extending
 `scripts/_stage2_probe.py` to a ramp regime is a prerequisite for believing any
 multi-regime fit, not a follow-up.
+
+## 19.5 Look and listen: the previous model against the revised one
+
+The comparisons above put one family next to its own variants (§12, §16.4,
+§16.5). This one crosses families. Each window carries three arms: the real
+recording, the **previous model** (the coherent needle plus Lorentzian
+pedestal of §2), and the **revised model** — the round-3 C3 export, the best
+existing fit of the revised phase family, rendered through its primary
+held-out predictive renderer (`revised_phase.render_revised`: raw telemetry
+plus the learned bias law, fresh OU and residual-phase draws, physical levels,
+render-side antialias). C4, the fixed-carrier refit, is implemented but not
+trained, so C3 is the newest fitted thing this page can show.
+
+**The revised fit is joint where the protocol allows it.** Michael's C3
+export is ONE fit over FLY125's standby (2–10 s), ramp context (10–18 s) and
+three cruise supports (32–48, 64–80, 96–112 s), with one parameter law and one
+recording-level gain across regimes. The standby and cruise renders below come
+from that single vector; no per-regime refit exists behind them. The previous
+model needs a separate fit per regime: the cruise arm is the raw-label 2026-09
+fit (§11), the standby arm is the standby fit of §15. DREGON's revised fit is
+**cruise only**, by the frozen protocol — and §18.1 already showed DREGON
+holds no standby run anywhere.
+
+:::: {.callout-important}
+## What these renders are, and what they are not
+
+They are **descriptive single-draw shape comparisons** on the §16.5
+convention: same real window, same raw rotor trajectory, same seed per window,
+one common playback gain per window, LTAS stated as dB re each arm's own
+200–400 Hz band, per-microphone pattern relative to its own mean. **No number
+here is a gate.** C3 failed the frozen guarded-v2 gates on DREGON and its
+Michael arm passed them historically; the ledger and the gate numbers live in
+`docs/experiments/revised-phase-campaign.qmd`.
+
+Levels stay diagnostic. Every synthetic arm is scaled to one shared
+whole-array RMS (0.1), so the ear compares spectrum and texture, not fitted
+gain; the revised render is physical-level before that scaling, and its
+pre-scaling RMS is recorded in the index. The previous model's own render path
+does not preserve absolute levels (the pending item in §16), so no
+cross-family level comparison is claimed beyond that recorded diagnostic.
+
+Assets and provenance: `scripts/_revised_ab_render.py` wrote
+`docs/explainers/revised-compare/` from the C3 exports of job
+`revised-phase-c3-fits-ad2c57` — Michael's digest `22ba6cf2…`, DREGON's
+`5d232ed9…` — against the pinned frames datasets. The DREGON pair repeats
+§16.5's warning: the previous-model arm is the pooled **refined**-label rig
+fit rendered on the **raw** carrier, because no raw pooled DREGON fit exists,
+so that pair differs in family AND in fit labels. The Michael pair is
+label-matched: both arms condition on raw telemetry.
+::::
+
+```{python}
+def family_table(rows):
+    return pd.DataFrame(
+        [
+            dict(
+                window=r["clip"],
+                regime=r["regime"],
+                rotors=", ".join(f"{v:.0f}" for v in r["rotors"]),
+                **{f"LTAS {a} (dB)": round(v, 2) for a, v in r["ltas_mean_abs_db"].items()},
+                **{f"channels {a} (dB rms)": v for a, v in r["channel_rms_dev_db"].items()},
+            )
+            for r in rows
+        ]
+    ).set_index("window")
+
+
+def family_players(rows, slug):
+    arms = rows[0]["arms"]
+    head = "".join(f"<th>{a}</th>" for a in arms)
+    out = [
+        "<table style='width:100%;border-collapse:collapse'>",
+        f"<tr><th style='text-align:left'>window</th>{head}</tr>",
+    ]
+    for r in rows:
+        cells = "".join(
+            f"<td style='padding:4px'><audio controls preload='metadata' "
+            f"style='width:230px' src='revised-compare/revcmp_{slug}_{r['window']}_{a}.wav'>"
+            f"</audio></td>"
+            for a in arms
+        )
+        out.append(
+            f"<tr><td style='padding:4px'><b>{r['clip']} ({r['regime']})</b></td>{cells}</tr>"
+        )
+    out.append("</table>")
+    return HTML("\n".join(out))
+
+
+if revcmp_fly125:
+    display(family_table(revcmp_fly125))
+```
+
+Michael's rig first. The two cruise windows are exactly §16.5's A/B windows.
+The previous-model LTAS here (1.12 and 3.71 dB) lands within 0.2 dB of that
+section's `raw` column (1.11 and 3.85 dB) — a cross-check, not an identity:
+§16.5 rendered on the refined trajectory, this section on raw. The standby
+window is the C3 export's own standby training support.
+
+:::: {layout-ncol=1}
+![FLY125 cruise window 0 (16–24 s): real, previous, revised, and the LTAS of all three](revised-compare/revcmp_fly125_00.png)
+
+![FLY125 cruise window 1 (32–40 s, inside C3's 32–48 s support)](revised-compare/revcmp_fly125_01.png)
+
+![FLY125 standby (2–10 s), drawn from the same joint C3 vector as the cruise arms](revised-compare/revcmp_fly125_sb.png)
+::::
+
+```{python}
+if revcmp_fly125:
+    _d(family_players(revcmp_fly125, "fly125"))
+```
+
+Read the Michael rows in this order.
+
+1. **On the hard window the revised model is closer, on both statistics.**
+   Window 1 (32–40 s) is inside the C3 training support and is the window both
+   families find hardest: LTAS 2.69 dB against 3.71 dB, channel pattern 0.71
+   against 0.96 dB rms.
+2. **On window 0 the two are equal within the resolution of one draw**
+   (LTAS 1.23 against 1.12 dB), and the revised model is a little closer on
+   the channel pattern (0.83 against 0.91 dB rms). Window 0 lies outside the
+   C3 supports, at 16–24 s; the speeds are in-domain cruise, so this is a
+   prediction, not a replay.
+3. **Standby is where the joint law pays and where it costs.** Both standby
+   arms are rendered on the same 2–10 s trajectory. The revised arm holds the
+   channel pattern to 1.26 dB rms and reproduces the joint law's absolute
+   level, but its floor shape runs hot at the top of the band: +4.5 dB in the
+   highest LTAS band against real, where the dedicated standby fit sits at
+   −1.9 dB. The one-law extrapolation shows exactly the kind of error §19.1
+   predicted for quantities extrapolated out of the band they were measured
+   in — here in the floor's shape, not its level.
+
+DREGON next: the first two supports of the five-recording cohort both families
+were fitted on.
+
+```{python}
+if revcmp_dregon:
+    display(family_table(revcmp_dregon))
+```
+
+:::: {layout-ncol=1}
+![DREGON free-flight room2 window 0: real, previous, revised](revised-compare/revcmp_dregon_00.png)
+
+![DREGON hovering room2 window 0: real, previous, revised](revised-compare/revcmp_dregon_01.png)
+::::
+
+```{python}
+if revcmp_dregon:
+    _d(family_players(revcmp_dregon, "dregon"))
+```
+
+The DREGON rows say two things, one per family.
+
+1. **The revised model halves the array error the previous model is known
+   for.** §16.4 measured the previous fit's channel pattern at 4.3–4.6 dB rms
+   on DREGON; here it reads 4.27 and 4.20 dB, and the revised arm brings that
+   to 2.46 and 3.26 dB. Still worse than Michael's sub-1.3 dB, but the
+   per-microphone gains and floors of the revised parameterisation capture
+   part of what the previous rig fit could not.
+2. **The previous model keeps the closer mean spectrum** (LTAS 0.67 and 0.81
+   dB against 1.32 and 1.48), and the revised floor runs +1.4 to +2.8 dB hot
+   in the top bands. One draw, shape statistics — but the direction is
+   consistent across both recordings.
+
+Two diagnostics recorded in the index, stated without gate language. The
+revised renders are physical-level before the shared RMS scaling, and their
+whole-array RMS lands between −1.2 and +1.6 dB of the real clip on all five
+windows — a level diagnostic only; the frozen protocol's absolute-level
+resolution is still pending (§16). And the renderer's realized shaft speed —
+the diagnostic label, never a scoring target — wanders a mean 0.62–0.69
+rev/s from raw telemetry on Michael and 1.82–1.86 rev/s on DREGON, which is
+the rendered face of the two rigs' fitted phase diffusion: Michael's
+$D=1.63$ against DREGON's $D=844.7\,\mathrm{rad^2/s}$ (§16.2's width
+question, in the revised model's units). Listen for that difference: on
+DREGON both synthetic combs are broad, the revised one denser at the line
+centres; on Michael both rigs of ears hear a tonal comb, and the revised
+standby hiss runs hotter at high frequency than the real clip.
 
 # 20. Hacks, defects, and hindrances
 

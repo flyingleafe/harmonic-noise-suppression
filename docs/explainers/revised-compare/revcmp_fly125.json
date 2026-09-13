@@ -1,0 +1,245 @@
+[
+ {
+  "slug": "fly125",
+  "window": "00",
+  "regime": "cruise",
+  "clip": "FLY125@16.000+8",
+  "recording": "FLY125",
+  "start_s": 16.0,
+  "seconds": 8.0,
+  "rotors": [
+   90.0,
+   74.4,
+   81.5,
+   75.3
+  ],
+  "arms": [
+   "real",
+   "prev",
+   "revised"
+  ],
+  "ltas_mean_abs_db": {
+   "prev": 1.124,
+   "revised": 1.229
+  },
+  "channel_pattern_db": {
+   "real": [
+    0.9,
+    -5.56,
+    -0.05,
+    0.95,
+    3.95,
+    2.33,
+    0.18,
+    -2.71
+   ],
+   "prev": [
+    3.46,
+    -4.75,
+    0.1,
+    -0.39,
+    4.07,
+    2.17,
+    -1.91,
+    -2.75
+   ],
+   "revised": [
+    0.29,
+    -6.97,
+    0.63,
+    2.04,
+    5.01,
+    2.82,
+    -0.52,
+    -3.29
+   ]
+  },
+  "channel_rms_dev_db": {
+   "prev": 0.91,
+   "revised": 0.83
+  },
+  "playback_gain": 1.5039,
+  "peak_dbfs": {
+   "real": -3.35,
+   "prev": -3.1,
+   "revised": -5.29
+  },
+  "rms_dbfs_pre": {
+   "real": -24.33,
+   "prev": -20.7,
+   "revised": -25.53
+  },
+  "revised_rms_match_gain_db": 5.53,
+  "seed": 4242,
+  "rps_key": "rps",
+  "dataset": "michaels-frames",
+  "prev_fit": "results/S2/cruise_8clip.json",
+  "prev_arm_selector": "0",
+  "revised_export": ".worktrees/revised-phase-preflight/omnirun-outputs/revised-phase-c3-fits-ad2c57/results/revised_phase/c3/michaels.json",
+  "revised_export_sha256": "22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc",
+  "revised_render_mean_abs_physical_minus_reference_rps": 0.6234718082119132,
+  "figure": "revcmp_fly125_00.png"
+ },
+ {
+  "slug": "fly125",
+  "window": "01",
+  "regime": "cruise",
+  "clip": "FLY125@32.000+8",
+  "recording": "FLY125",
+  "start_s": 32.0,
+  "seconds": 8.0,
+  "rotors": [
+   92.0,
+   74.9,
+   81.0,
+   75.2
+  ],
+  "arms": [
+   "real",
+   "prev",
+   "revised"
+  ],
+  "ltas_mean_abs_db": {
+   "prev": 3.707,
+   "revised": 2.689
+  },
+  "channel_pattern_db": {
+   "real": [
+    0.89,
+    -6.31,
+    -0.02,
+    0.98,
+    4.02,
+    2.6,
+    0.33,
+    -2.49
+   ],
+   "prev": [
+    3.78,
+    -6.78,
+    -0.49,
+    -0.36,
+    4.18,
+    2.9,
+    -1.24,
+    -1.99
+   ],
+   "revised": [
+    0.32,
+    -7.01,
+    0.54,
+    1.98,
+    5.0,
+    2.9,
+    -0.49,
+    -3.25
+   ]
+  },
+  "channel_rms_dev_db": {
+   "prev": 0.96,
+   "revised": 0.71
+  },
+  "playback_gain": 1.7431,
+  "peak_dbfs": {
+   "real": -8.21,
+   "prev": -3.1,
+   "revised": -4.27
+  },
+  "rms_dbfs_pre": {
+   "real": -24.96,
+   "prev": -20.36,
+   "revised": -25.31
+  },
+  "revised_rms_match_gain_db": 5.31,
+  "seed": 4243,
+  "rps_key": "rps",
+  "dataset": "michaels-frames",
+  "prev_fit": "results/S2/cruise_8clip.json",
+  "prev_arm_selector": "1",
+  "revised_export": ".worktrees/revised-phase-preflight/omnirun-outputs/revised-phase-c3-fits-ad2c57/results/revised_phase/c3/michaels.json",
+  "revised_export_sha256": "22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc",
+  "revised_render_mean_abs_physical_minus_reference_rps": 0.6865760882203906,
+  "figure": "revcmp_fly125_01.png"
+ },
+ {
+  "slug": "fly125",
+  "window": "sb",
+  "regime": "standby",
+  "clip": "FLY125@2.000+8",
+  "recording": "FLY125",
+  "start_s": 2.0,
+  "seconds": 8.0,
+  "rotors": [
+   29.9,
+   33.9,
+   39.2,
+   35.2
+  ],
+  "arms": [
+   "real",
+   "prev",
+   "revised"
+  ],
+  "ltas_mean_abs_db": {
+   "prev": 0.496,
+   "revised": 1.649
+  },
+  "channel_pattern_db": {
+   "real": [
+    0.83,
+    -4.89,
+    1.01,
+    0.79,
+    3.31,
+    1.56,
+    -0.62,
+    -1.98
+   ],
+   "prev": [
+    1.06,
+    -4.14,
+    2.4,
+    1.64,
+    3.33,
+    1.07,
+    -1.48,
+    -3.87
+   ],
+   "revised": [
+    -0.74,
+    -5.34,
+    2.26,
+    3.1,
+    4.51,
+    1.83,
+    -1.37,
+    -4.25
+   ]
+  },
+  "channel_rms_dev_db": {
+   "prev": 0.81,
+   "revised": 1.26
+  },
+  "playback_gain": 1.545,
+  "peak_dbfs": {
+   "real": -19.95,
+   "prev": -3.1,
+   "revised": -5.09
+  },
+  "rms_dbfs_pre": {
+   "real": -39.3,
+   "prev": -20.04,
+   "revised": -40.45
+  },
+  "revised_rms_match_gain_db": 20.45,
+  "seed": 4282,
+  "rps_key": "rps",
+  "dataset": "michaels-frames",
+  "prev_fit": "results/S2/standby.json",
+  "prev_arm_selector": "0",
+  "revised_export": ".worktrees/revised-phase-preflight/omnirun-outputs/revised-phase-c3-fits-ad2c57/results/revised_phase/c3/michaels.json",
+  "revised_export_sha256": "22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc",
+  "revised_render_mean_abs_physical_minus_reference_rps": 0.6784434701160986,
+  "figure": "revcmp_fly125_sb.png"
+ }
+]
