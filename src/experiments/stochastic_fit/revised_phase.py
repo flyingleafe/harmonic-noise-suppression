@@ -3083,10 +3083,10 @@ def fit_revised(
     alternating_trace: list[float] = []
     alternating_fit: dict[str, Any] | None = None
     if config.fit_method == "alternating_conditional_map":
-        initial_full_objective_after_reset = _full_conditional_objective(model, config=config)
         alternating_trace, alternating_fit = _optimize_alternating_conditional_map(
             model, config=config, progress=progress
         )
+        initial_full_objective_after_reset = alternating_trace[0]
         predictive_parameters = model.parameter_export()
     else:
         marginal_trace, marginal_grads, rung_trace = _optimize_marginal(
