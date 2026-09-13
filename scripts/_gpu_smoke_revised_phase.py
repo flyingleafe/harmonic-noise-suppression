@@ -66,7 +66,6 @@ def _tiny_export() -> dict[str, object]:
             k_cap=K_CAP,
             n_mics=N_MICS,
             n_rotors=N_ROTORS,
-            delay_s=[0.0] * N_ROTORS,
         ),
         training_provenance=dict(
             manifest_path=None,
