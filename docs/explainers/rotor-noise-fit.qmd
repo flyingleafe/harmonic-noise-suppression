@@ -111,12 +111,15 @@ rotor-speed labels (§16 to §19). The line model's interpretation is revised in
 page for the physics, this one for what was measured.
 
 Three things this page does **not** claim, and for which the revised documents
-fix the language: the scoring reference is the published telemetry array — raw
-as the shared reference, refined tracks as fit provenance and diagnostics, and
-a renderer's realized shaft label as a diagnostic only; the spectral objective
-is a **composite** score, never an exact joint NLL and never evidence; and **no
-revised candidate has been fitted, scored or accepted** (the campaign record is
-`docs/experiments/revised-phase-campaign.qmd`).
+fix the language: the HPP scoring reference is the published raw telemetry array
+for every arm; refined tracks may condition a DREGON C4 candidate but are not a
+scoring reference or independent physical truth; a renderer's realized shaft
+label is diagnostic only; the spectral objective is a **composite** score,
+never an exact joint NLL and never evidence; and **no revised candidate has
+passed or become an overall incumbent**. C2 and C3 have both failed overall
+under the guarded-v2 frozen protocol. C4 fixed-carrier fitting is under
+implementation, not trained and not scored. The current ledger is
+`docs/experiments/revised-phase-campaign.qmd`.
 :::
 
 # 1. The task
@@ -1560,11 +1563,13 @@ wall time is not a steady fit cost. Round 1 C1 is now rejected at honest planted
 preflight `python-e25ee9`: true $\lambda/\sigma=6/6$ was not recovered, and the
 near-coincident four-rotor support had no isolated moment cells. The earlier
 `python-c049cf` pass is an invalid scalar-zero fixture, not scientific proof.
-Round 2 C2 is implemented in commit `08b8ef3c` and remote preflight
-`revised-phase-round2-pro-db69c3` passed 39 tests with 2 skipped in 56.72 s.
-Real DREGON/Michael fitting and frozen evaluation are authorized and running
-elsewhere; no revised candidate has been scored or accepted in this historical
-page.
+Round 2 C2 was implemented in commit `08b8ef3c` and remote preflight
+`revised-phase-round2-pro-db69c3` passed 39 tests with 2 skipped in 56.72 s, but
+then failed the actual guarded-v2 frozen gates: DREGON PIT MAE, DREGON
+composite interval, DREGON LTAS and Michael's primary MAE ratio. Round 3 C3 is
+in progress with the same physics and only Stage 1 initialization/order-ladder
+changes. No revised candidate has passed or become an incumbent in this
+historical page.
 
 ## 16.4 Look and listen to the refit
 
@@ -2201,19 +2206,23 @@ Three things to read from it, each of which decides the next step:
 
 **The ramp is where the label is worst.** Refinement is gated off below
 45 rev/s and blended across the ramp, precisely because a slow shaft's comb is
-too weak to refine against. So the ramp clips carry raw telemetry, and the
-carrier error that the cruise fit could ignore is largest exactly where the
-speed law needs it. Those measurements stand, and they are what motivates a
-per-clip carrier bias.
+too weak to refine against. So the ramp clips historically carried raw
+telemetry, and the carrier error that the cruise fit could ignore was largest
+exactly where the speed law needed it. Those measurements stand as the
+historical motivation for considering label choice and carrier bias; the
+current C4 plan tests fixed supplied raw/refined labels instead of fitting a
+carrier correction.
 
 The operative recommendation that used to close this paragraph — "fit the
 carrier offset (`rps_offset`, already in the model) on ramp clips, and report
 it" — is **historical and superseded**. A fitted time-resolved `rps_offset`
 path beside a fitted shaft path is a second carrier path, and the two are
-non-identifiable up to a gauge. The approved parameterization is: raw
-telemetry with a per-rotor delay, a **per-clip constant bias**, and a
-**single OU shaft state** — no second time-resolved correction of any kind
-(see `bench-fit-revised-phase-model.qmd` §6.1.1).
+non-identifiable up to a gauge. The current C4 parameterization is stricter:
+choose the supplied nominal carrier (raw or published refined for DREGON, raw
+for Michael's) before fitting, fix it, set all clip/population frequency biases
+and additional learned delay to zero, and marginalize stochastic phase
+broadening instead of recovering a carrier trajectory (see
+`bench-fit-revised-phase-model.qmd` §6.1.1).
 
 **The gate must move with the model.** The acceptance probe scores 8 s windows
 of cruise or standby. A model that claims the ramp must be judged on the ramp,

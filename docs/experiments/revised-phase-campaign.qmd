@@ -41,46 +41,82 @@ current fail — and the same examined path does not preserve fitted **absolute
 levels** through its RMS-normalising wrapper, which is a pending item of the
 frozen protocol, with no number published for it.
 
-::: {.callout-important}
+:::: {.callout-important}
 ## Current status, stated plainly
 
-**Round 1 is rejected; round 2 is implemented and awaiting real-fit results.**
-One of eight candidate rounds has been consumed. C1, the moment-first
-candidate, failed the honest planted preflight `python-e25ee9`: with true
+**Round 3 C3 is completed and failed overall; round 4 C4 is replanned and under implementation.**
+Three of eight candidate rounds have concluded. C1, the moment-first candidate,
+failed the honest planted preflight `python-e25ee9`: with true
 $\lambda/\sigma=6/6$ it recovered $1.2709\times10^9/1439.2$ and could not
 separate four near-coincident rotors into isolated cells. The earlier
 `python-c049cf` pass is retained only as an invalid scalar-zero fixture, not as
 scientific proof.
 
-C2 is implemented in commit `08b8ef3c` (integrated here as `635fa919`): fixed
+C2 was implemented in commit `08b8ef3c` (integrated here as `635fa919`): fixed
 $\lambda=6\,\mathrm{s}^{-1}$ as an explicit reference assumption; Stage 1 fits
 the training marginal expected periodogram for $\sigma$, $D$, powers, floor and
 bias; Stage 2 freezes those globals and fits the conditional carrier/bias MAP
 diagnostics with the residual kernel $\exp(-D|\tau|)$ and one OU state prior.
 Remote preflight `revised-phase-round2-pro-db69c3` passed 39 tests with 2
-skipped in 56.72 s. Real DREGON/Michael fitting and frozen evaluation are
-authorized and running elsewhere; no real-fit or gate result is recorded here.
+skipped in 56.72 s, so C2's later failure is a scientific candidate failure,
+not an infrastructure failure.
 
-Baseline calibration is frozen: job `bash-0e3e78` produced
-`results/revised_phase/baseline_v1/calibration.json`. On DREGON cruise the real
-tracker error is 1.07900306844 rev/s and the baseline synthetic error is
-1.92206829696 rev/s, so the 30 % gap-closure target is 1.66914872840 rev/s;
-the positive-gap lower bound is 0.69278 rev/s and the composite temperature
-$T=5.19201722008$. For Michael's rig, $T=15.214066879865468$, with per-regime
-baseline MAEs standby 0.31710268807, ramp 8.00709812144, cruise 0.755783384995
-rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a point
-candidate maximum of 3.17799446808 rev/s (the deterministic 1.05× baseline
-bound). The single ramp event is 0.99 s inside an 8 s context.
-The repaired Michael ramp LTAS gate exists: baseline LTAS error
-4.851130861625892 dB against pooled null tolerance 0.0788731273157346 dB.
-These are **baseline** numbers, not candidate performance, and they are not
-scientific candidate results.
+The guarded-v2 C2 gate record is
+`revised-phase-round2-v2--82591d/results/revised_phase/round2/eval_v2/`.
+DREGON PIT MAE failed the point target:
+$9.347665728259988$ rev/s versus target $1.897062542673336$ rev/s. DREGON
+composite improved on mean
+($\Delta=-11474.552935701178$ nats/s) but failed the interval criterion because
+the one-sided upper bound is $6214.002329963836>0$. DREGON absolute-level LTAS
+failed non-regression: baseline $2.136169143073238$ dB, candidate
+$2.4230805972169502$ dB, tolerance $0.05595793956082849$ dB. Michael's rig
+failed the primary MAE non-regression gate: candidate
+$12.596737088255045$ rev/s versus baseline $3.026661398168452$ rev/s, ratio
+$4.161924784806722>1.05$. Its standby ratio is $105.14307827306017$, ramp
+improves with ratio $0.4393874978452157$, and cruise ratio is
+$1.2316223434050422$. Michael's composite and LTAS gates pass.
+
+The authoritative C3 scorecard is
+`../revised-phase-preflight/omnirun-outputs/revised-phase-c3-eval-733d43/results/revised_phase/c3/eval_v2/`.
+C3 failed DREGON on all three guarded-v2 gates: PIT MAE
+$69.31143066855915$ rev/s is above the target
+$1.897062542673336$ rev/s; DREGON composite mean improves
+($\Delta=-10853.753018558247$ nats/s) but the one-sided upper bound is
+$6414.079147675613>0$; DREGON absolute-level LTAS is
+$2.4337617952979103$ dB versus baseline $2.136169143073238$ dB with tolerance
+$0.05595793956082849$ dB. C3 therefore **fails overall**.
+
+C3's Michael's-rig arm is historical evidence for that rig only: all Michael's
+generator gates passed. The equally weighted primary MAE was
+$1.8937824784309534$ rev/s versus baseline $3.026661398168452$ rev/s, ratio
+$0.625700145902331\le1.05$; composite $\Delta=-9460.661947159193$ nats/s has
+upper bound $-6881.751360910363$; LTAS $\Delta=-0.3048848082681604$ dB has
+upper bound $-0.0585890125868509$ dB. Preserve the historical export digest
+`22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc`, but do
+not treat it as a current fixed-carrier incumbent. There is **no overall
+passing bundle**.
+
+C3 fitted DREGON with $\sigma=3.10117415072719$ rad/s and
+$D=844.692917$ rad$^2$/s, i.e. $D/(2\pi)=134.43705313526206$ Hz. Michael's
+C3 fit used $D=1.63078$ rad$^2$/s and $\sigma=4.20719$ rad/s. The DREGON
+failure is consistent with a blurred-comb hypothesis, but that is not proven
+physical causality.
+
+C4 has been **replanned**: do **not** recover carriers. Treat the supplied
+nominal carrier tracks as fixed inputs. For DREGON, evaluate both raw and the
+published `rps_refined` labels as conditioning tracks; a full-gate-passing arm
+may be selected, and among passes the lower held-out composite risk wins. That
+label choice is only model-supported under this family, not independent physical
+truth. For Michael's rig, raw labels are assumed already close to truth and are
+the only C4 input. The earlier alternating recovery/bias preflight was abandoned
+before any remote fit; never count it as a round and never claim recovery was
+fixed.
 
 The evaluator baseline, data supports, gates and manifest fingerprint rules are
 frozen. The protocol fingerprint separates immutable gates/data/baseline/seed
 settings from candidate/output run inputs, so per-round fit manifests may differ
 without invalidating the freeze.
-:::
+::::
 
 # 1. Objective
 
@@ -189,18 +225,12 @@ regime's **pre-registered raw-telemetry support**. This is not a formality: the
 Michael ramp can be **shorter than an 8 s context window**. Standby and cruise
 are likewise scored on their own **declared support**.
 
-The surrounding waveform is **context only**. The whole-window context plus the
-complete STFT/filter guard may legitimately extend beyond the scored target
-interval — that is expected, and it is **not** licence to score the extra
-material. **Never** label a mostly-standby or mostly-cruise 8 s average as
-"ramp MAE"; that is the single easiest way to fake this gate.
-
 **Regime definitions are fixed and selected before any candidate.** Regime
 boundaries are never inferred from a candidate, and never from a refined or
-posterior track — consistent with the refined-track-is-diagnostic-only rule of
-§2.4. The ramp regime on FLY124 is **one** event starting at approximately
-31.18 s, scored inside an 8 s context that starts at 27.68 s. Do not confuse the
-event with its context, and do not manufacture independent ramps.
+posterior track. The ramp regime on FLY124 is **one** event starting at
+approximately 31.18 s, scored inside an 8 s context that starts at 27.68 s. Do
+not confuse the event with its context, and do not manufacture independent
+ramps.
 
 **Standby training envelope.** The old fit's exact standby start on FLY125 is
 unknown; the conservative whole-event training envelope is **[1.78, 15.28] s**.
@@ -298,19 +328,33 @@ along that one direction.
 - **Frozen before candidates**, on frozen baseline predictive draws, and never
   retuned after seeing candidate results.
 
-**Calibration is complete for the current window geometry, but the protocol is
-not yet frozen.** Job `bash-0e3e78` produced
-`results/revised_phase/baseline_v1/calibration.json`. On DREGON cruise the real
-tracker error is 1.07900306844 rev/s and the baseline synthetic error is
-1.92206829696 rev/s, so the 30 % gap-closure target is 1.66914872840 rev/s;
-the positive-gap lower bound is 0.69278 rev/s and the composite temperature
-$T=5.19201722008$. For Michael's rig, $T=15.214066879865468$, with per-regime
-baseline MAEs standby 0.31710268807, ramp 8.00709812144, cruise 0.755783384995
-rev/s, giving an equal-regime-mean of 3.02666139817 rev/s and a point
-candidate maximum of 3.17799446808 rev/s (the deterministic 1.05× baseline
-bound). The repaired Michael ramp LTAS gate exists:
-the baseline LTAS error is 4.851130861625892 dB against a pooled null tolerance
-of 0.0788731273157346 dB. These are **baseline** numbers, not candidate
+**Guarded-v2 baseline calibration is frozen.** Job
+`revised-phase-round2-v2--82591d` produced
+`results/revised_phase/baseline_v2/calibration.json`. The v2 split preserves
+five DREGON room2 cruise recordings, 4 s held-out supports, and the symmetric
+1.024 s window/filter guard; three metadata-only early-valid-window repairs were
+applied before any candidate outcome. The v1 split is invalid for candidate
+judgement because its baseline prepare path lacked that guard. C2 was not
+refitted for v2: the same C2 training exports were reused and rescored under the
+corrected split.
+
+The v2 baseline recalibrated only the three DREGON measurements touched by the
+guarded split. Temperature calibration, family selection and Michael's rig
+numbers are unchanged. On DREGON cruise the real tracker error is
+$1.2187080817581784$ rev/s and the baseline synthetic error is
+$2.1877858830655468$ rev/s, so the 30 % gap-closure target is
+$1.897062542673336$ rev/s. The mean positive gap is
+$0.9690778013073683$ rev/s; its one-sided lower bound is
+$0.830218608973161$ rev/s. The old v1 target near $1.669$ rev/s is historical,
+not current. The DREGON LTAS tolerance is $0.05595793956082849$ dB. For
+Michael's rig, $T=15.214066879865468$, with per-regime baseline MAEs standby
+$0.3171026880710335$, ramp $8.007098121439082$, cruise
+$0.7557833849952398$ rev/s, giving an equal-regime-mean of
+$3.026661398168452$ rev/s and a point candidate maximum of
+$3.177994468076875$ rev/s (the deterministic 1.05× baseline bound). The
+repaired Michael ramp LTAS gate exists: the baseline LTAS error is
+$4.851130861625892$ dB against a pooled null tolerance of
+$0.0788731273157346$ dB. These are **baseline** numbers, not candidate
 performance.
 Full derivation and the interpretation of $U_b$ and $H$:
 `docs/explainers/bench-fit-revised-phase-model.qmd` §6.2.4.
@@ -341,17 +385,19 @@ tuned after seeing candidate results (§8).
 ## 2.4 Both rigs: what the score means
 
 - The **primary MAE uses the raw telemetry reference shared by all arms** — one
-  array, real arm and every synthetic arm, reported as **reference agreement**
-  and never as proven ground truth. The reference is never switched between
-  arms.
+  array, real arm, baseline synthetic arm and every candidate synthetic arm,
+  reported as **reference agreement** and never as proven ground truth. The HPP
+  target stays raw even when a DREGON candidate is conditioned on `rps_refined`.
 - The renderer's **realized physical shaft RPS** label supplies a
   **diagnostic** MAE only. It is never a gate and never the primary target.
-- **Refined / posterior tracks** are fit provenance and diagnostics only. They
-  are never a scoring reference and never a held-out predictive input.
-- Comparing raw-initialized inferred carrier corrections with the existing
-  refined tracks is **diagnostic only**: refined tracks are not ground truth,
-  and disagreement is not automatic failure. No spectral-fit claim may require
-  the inferred correction to equal a refined track.
+- **Refined tracks may condition a DREGON candidate** in C4 because they are an
+  already-published acoustic proxy. They are not a scoring reference, not an
+  independent truth claim and not a way to ease the HPP gate. A better held-out
+  fit says only that these labels are better supported under this model.
+- Comparing older inferred carrier corrections with the existing refined tracks
+  is **diagnostic only**: refined tracks are not ground truth, disagreement is
+  not automatic failure, and the abandoned recovery path is not evidence for or
+  against saved carrier paths.
 - Training a tracker on synthetic and testing it on real is **out of scope**.
 
 ::: {.callout-note}
@@ -368,19 +414,19 @@ label is the physically exact render label.
 
 ## 2.5 Held-out prediction versus conditional reconstruction
 
-Primary held-out predictive synthesis uses **only** raw held-out telemetry, the
-training-derived bias law, and **one fresh OU draw**. No refined labels, no
-corrections inferred from held-out audio, no MAP shaft path taken from held-out
-audio. Held-out prediction is the **marginal** branch of the spectral
-expectation, and that branch is evaluated with **moving atoms**: the
-raw-plus-bias carrier trajectory is integrated inside every finite window, on
-ramp support exactly as on cruise support. The stationary window-correlation
-kernel is admissible **only** on genuinely constant-speed bench cells, never
-as a slowly-varying shortcut for held-out prediction
-(`bench-fit-revised-phase-model.qmd` §6.2.1). Conditional reconstruction on
-the MAP path is a separate, explicitly labelled mode. Held-out guards include
-complete window/filter support — a disjoint contiguous support with a guard of
-at least one window/filter length — so that no raw-sample support leaks.
+Primary held-out predictive synthesis uses the **declared supplied carrier**:
+raw for Michael's, raw or published `rps_refined` for the two DREGON C4 arms.
+It uses no fitted clip/population frequency bias, no learned delay, no
+corrections inferred from held-out audio and no MAP shaft path taken from
+held-out audio. Held-out prediction is the **marginal** branch of the spectral
+expectation, evaluated with **moving atoms**: the supplied carrier trajectory is
+integrated inside every finite window, on ramp support exactly as on cruise
+support. The stationary window-correlation kernel is admissible **only** on
+genuinely constant-speed bench cells, never as a slowly-varying shortcut for
+held-out prediction (`bench-fit-revised-phase-model.qmd` §6.2.1). Held-out
+guards include complete window/filter support — a disjoint contiguous support
+with a guard of at least one window/filter length — so that no raw-sample
+support leaks.
 
 # 3. Round ledger
 
@@ -391,18 +437,19 @@ and planted correctness checks are **not** candidate rounds.
 | Round | Candidate | Model complexity | Fit complexity | Status | Evidence |
 |---|---|---|---|---|---|
 | 1 | C1 — moments-first hyperparameter initialization, then conditional spectral MAP | 3 rig dynamic parameters ($\lambda_g$, $\sigma_g$, $D_g$ — per rig, not per rotor), 1 shared carrier path, per-clip bias | off-diagonal moment estimator intended to freeze $\lambda_g,\sigma_g$ and initialize $D_g$, then one Adam composite MAP | **rejected at planted preflight** | honest `python-e25ee9` at `81d1a303`: planted true $\lambda/\sigma=6/6$ returned $1.2709\times10^9/1439.2$, `identified=False`; near-coincident four-rotor support had no isolated moment cells. Earlier `python-c049cf` pass was an invalid scalar-zero fixture, retained as non-proof. |
-| 2 | C2 — fixed-reference-$\lambda$ marginal-then-carrier fit | fixed $\lambda=6\,\mathrm{s}^{-1}$ reference assumption; fitted positive $\sigma_g,D_g$, existing powers/floor/speed law and bias law; same shared carrier family | Stage 1 training marginal expected-periodogram quasi-MAP over $\sigma,D,$ powers/floor/bias with the OU state integrated once and no innovation prior; Stage 2 freezes globals and fits per-clip bias plus $\theta/\nu$ conditional MAP using $\exp(-D|\tau|)$ and one OU prior | implemented; real fit/evaluation authorized and running; no results yet | core commit `08b8ef3c` integrated as `635fa919`; remote proof `revised-phase-round2-pro-db69c3` passed 39 tests, 2 skipped, 56.72 s. |
-| 3 | not defined | — | — | unused | none |
-| 4 | not defined | — | — | unused | none |
+| 2 | C2 — fixed-reference-$\lambda$ marginal-then-carrier fit | fixed $\lambda=6\,\mathrm{s}^{-1}$ reference assumption; fitted positive $\sigma_g,D_g$, existing powers/floor/speed law and bias law; same shared carrier family | Stage 1 training marginal expected-periodogram quasi-MAP over $\sigma,D,$ powers/floor/bias with the OU state integrated once and no innovation prior; Stage 2 freezes globals and fits per-clip bias plus $\theta/\nu$ conditional MAP using $\exp(-D|\tau|)$ and one OU prior | **failed guarded-v2 frozen gates** | preflight passed, but actual v2 gates failed: DREGON PIT MAE $9.347665728259988>1.897062542673336$ target; DREGON composite upper bound $6214.002329963836>0$; DREGON LTAS $2.4230805972169502$ dB exceeds baseline $2.136169143073238$ dB plus tolerance $0.05595793956082849$ dB; Michael MAE ratio $4.161924784806722>1.05$. |
+| 3 | C3 — C2 physics with corrected initialization and Stage 1 harmonic ladder | unchanged from C2: fixed $\lambda=6\,\mathrm{s}^{-1}$, learned $\sigma_g,D_g$, same shared carrier family | only Stage 1 initialization changes: per-clip/per-frequency floor, local band-energy line-power seeds in linear physical power, active orders 16/48/full-$K$ with 40/40/120 Adam iterations; Stage 2 carrier remains 40 iterations | **failed overall** | scorecard `../revised-phase-preflight/omnirun-outputs/revised-phase-c3-eval-733d43/results/revised_phase/c3/eval_v2/`: DREGON failed all three gates; Michael's passed primary/composite/LTAS. |
+| 4 | C4 — fixed supplied carrier, no recovery | fixed $\lambda=6\,\mathrm{s}^{-1}$; fit $\sigma,D,$ profiles/floor/speed laws/mic parameters; supplied nominal carrier is raw or refined for DREGON and raw for Michael's; all clip/population frequency bias and extra delay are zero | one full-training marginal composite risk divided by $T$ plus existing global priors; LBFGS strong-Wolfe, max 20 iter / 30 eval, history 10; all $K=130$ DREGON and $K=230$ Michael orders active from the start; no OU innovation MAP prior or state-path optimization | **under implementation, not trained** | replaces the abandoned alternating recovery plan before any remote fit; no scorecard, no acceptance, no incumbent. |
 | 5 | not defined | — | — | unused | none |
 | 6 | not defined | — | — | unused | none |
 | 7 | not defined | — | — | unused | none |
 | 8 | not defined | — | — | unused | none |
 
-**1 of 8 candidate rounds used. No candidate has been scored or accepted.**
-Rounds 3–8 are deliberately undefined: after any pass, remaining rounds are for
-single-change simplification while preserving the incumbent; otherwise a round
-is defined only when a named acceptance failure calls for a specific complexity.
+**3 of 8 candidate rounds have concluded. No overall candidate has passed and
+no overall incumbent exists.** Round 4 is defined but not yet trained or scored.
+After any pass, remaining rounds are for single-change simplification while
+preserving the incumbent; otherwise a round is defined only when a named
+acceptance failure calls for a specific complexity.
 
 # 4. Selection rule
 
@@ -427,7 +474,7 @@ is defined only when a named acceptance failure calls for a specific complexity.
   runtime. Runtime matters, but a faster **opaque** approximation is not
   automatically simpler mathematically.
 
-# 5. Current candidate: C2
+# 5. Current candidate methods: C2 and C3 failed overall, C4 in progress
 
 ## 5.1 What C2 keeps from the family
 
@@ -486,7 +533,94 @@ Stage 2 carrier Adam 40 iterations at learning rate 0.05; one frame batch per
 clip; harmonic chunk 8; state grid 500 Hz; seed 0; work audio 64 kHz, analysis
 16 kHz; NFFT 16384, hop 1024.
 
-## 5.3 Historical C1, retained as rejected evidence
+## 5.3 C3 result and carrier diagnostics
+
+C3 kept the C2 physical model and the guarded-v2 protocol fixed. It added no new
+Gaussian state, per-order diffusion, second floor family, refined-label
+initialization, permanent power floors, changed metric weights or changed
+thresholds. It tested one fitting hypothesis: C2's Stage 1 may have initialized
+the harmonic comb too close to the floor.
+
+The algorithmic delta was intentionally narrow:
+
+1. estimate the floor per clip and per frequency using the existing floor-basis
+   convention, then aggregate in linear physical power with the declared speed
+   normalization;
+2. initialize each harmonic from local **band excess power** around the moving
+   raw carrier, integrating signed $(I-F)\,df$ before applying a modest
+   noise-supported seed floor;
+3. fit Stage 1 with active orders 16, 48 and then full-$K$, for 40, 40 and 120
+   Adam iterations respectively, initializing newly admitted orders from the
+   cached band-energy profile instead of resetting the already fitted orders;
+4. restore full-$K$ before export, prediction and rendering; Stage 2 remains the
+   same 40-iteration carrier diagnostic.
+
+The C3 scorecard failed overall because all three DREGON gates failed. It still
+created a useful partial Michael's incumbent: Michael's primary ratio
+$0.625700145902331$, composite upper bound $-6881.751360910363$ nats/s and LTAS
+upper bound $-0.0585890125868509$ dB all pass their frozen gates. The partial
+incumbent's export digest is
+`22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc`.
+
+Small-array carrier diagnostics are stored in
+`../revised-phase-preflight/results/revised_phase/carrier_diagnostics/`. They
+use the reconstruction
+$f_{\mathrm{model}}=f_{\mathrm{raw}}+\mathrm{diagnostic\_bias}_{Hz}+\nu_{Hz}$,
+where $\nu_{Hz}$ is already in hertz; refined sidecars are anchored by
+`ft + audio_t_start`; and C2/C3 are compared on shared coverage with fixed rotor
+IDs and no PIT. These diagnostics are not validation. The refined reference is
+diagnostic-only, and Michael's generator passing does **not** validate the
+inferred real carrier paths.
+
+Aggregated C3 diagnostics: DREGON cruise model-minus-raw MAE is
+$2.462446$ Hz, model-minus-refined MAE is $2.200515$ Hz and dynamic standard
+deviation is $0.643403$ Hz. Michael's C3 cruise values are $1.380027$ Hz,
+$1.384311$ Hz and $1.668539$ Hz. The median centered correction correlations
+are near zero (DREGON $-0.022$, Michael's $-0.008$), but these diagnostics do
+not statistically prove independence. The larger raw distance is not, by
+itself, tracker-error worsening because raw telemetry is the shared scoring
+reference, not ground truth for real carrier paths.
+
+## 5.4 C4 fixed-carrier experiment now in progress
+
+C4 is an experiment under implementation, not trained, not scored and not an
+accepted default. It keeps the same stochastic phase family but removes carrier
+recovery from the fit. The deterministic nominal carrier is supplied and fixed:
+
+$$
+f_{r}^{\mathrm{nom}}(t)\in\{f_{r}^{\mathrm{raw}}(t),
+ f_{r}^{\mathrm{refined}}(t)\},
+\qquad
+\phi_{rk}(t)=k\,2\pi\int_0^t f_{r}^{\mathrm{nom}}(s)\,ds
++k\theta_r+\epsilon_{rk}.
+$$
+
+For the implemented C4 estimator, $\theta_r$ is an initial phase / renderer
+phase convention, not a recovered time-varying carrier-correction trajectory.
+Set every clip and population frequency bias to zero and fit no additional
+learned delay. Stochastic shared phase broadening remains **prior-marginalized**
+in the expected spectrum; it is not estimated as a physical carrier correction
+path. Renderer draws may still contain stochastic phase-frequency perturbations,
+so "fixed carrier" means the supplied nominal track is fixed, not that every
+sampled phase derivative exactly equals telemetry.
+
+DREGON has two arms: `Draw`, conditioned on raw labels, and `Dref`, conditioned
+on the published `rps_refined` labels. The two arms differ only in that supplied
+carrier input. Both use the same C3 global warm start and reset only DREGON's
+initial $D$ to $2\pi\cdot13.07=82.1212319648372$. Michael's has one raw arm,
+warmed from C3 globals but with fixed raw carrier and zero bias. For all arms,
+$\lambda=6\,\mathrm{s}^{-1}$ remains fixed; $\sigma$, $D$, profile/floor/speed
+laws and microphone parameters are fit; all orders ($K=130$ for DREGON,
+$K=230$ for Michael's) are active from the start.
+
+The objective is one full-training marginal composite risk divided by the
+frozen $T$ plus existing global priors. It has **no** OU innovation MAP prior
+and no state-path optimization. The optimizer is deterministic PyTorch LBFGS
+with strong Wolfe line search, `max_iter=20`, `max_eval=30`, `history_size=10`.
+Closure traces are function evaluations and need not be monotone; the accepted
+iterate is the object to compare. This is a local optimizer, not a global convex
+fit, not exact joint likelihood, and not causal identification.
+## 5.4 Historical C1, retained as rejected evidence
 
 C1 used the off-diagonal moment estimator to freeze $\lambda_g$ and
 $\sigma_g$ and initialize $D_g$ before a single conditional spectral MAP. That
@@ -556,8 +690,9 @@ Only a genuinely uncertain behavioural risk earns a retained regression test.
   number appears in this document that was not read from a source with that
   provenance attached.
 - **No fabricated results.** No invented percentage, p-value, runtime or
-  citation. **No claim that C2 has been fitted on real data, scored or passed**
-  appears before the running real-fit/evaluation job returns.
+  citation. C2 and C3 are completed scientific failures overall; C3's Michael's
+  arm is historical fixed-candidate evidence only, and no overall passing bundle
+  exists.
 - Inherited measured results are **descriptive baselines**, cited to their
   source document or export — see `docs/experiments/stochastic-fit.md` and the
   two explainers.
@@ -588,8 +723,13 @@ Only a genuinely uncertain behavioural risk earns a retained regression test.
   invalid scalar-zero fixture. Round 2 C2 core is implemented in `08b8ef3c` and
   integrated here as `635fa919`; remote proof
   `revised-phase-round2-pro-db69c3` passed 39 tests with 2 skipped in 56.72 s.
-  **One of eight scientific rounds has been used; no real-fit performance claim
-  is made.**
+  Round 3 C3 is evaluated by
+  `revised-phase-c3-eval-733d43/results/revised_phase/c3/eval_v2/` and failed
+  overall while passing every Michael's generator gate. Round 4 C4 fixed-carrier
+  fitting is under implementation and has not been trained or scored. The
+  earlier alternating carrier-recovery preflight was abandoned before any remote
+  fit. **Three of eight scientific rounds have concluded; no overall candidate
+  has passed and no overall incumbent exists.**
 - A successful end additionally requires: updated `.qmd` sources, rendered
   `.html`, **actual browser visual verification**, this campaign document, and
   the machine evidence above.

@@ -27,23 +27,29 @@ residual phase motion at each harmonic, multichannel spatial structure, and
 behaviour through frequency crossings.
 :::
 
-:::: {.callout-important}
+::::: {.callout-important}
 ## Status
 
 This is the **general strategy and future-complexity** document for the
 revised rotor-noise phase family, reconciled to the frozen campaign contracts
-(2026-09-13). **C2** — the current implemented candidate — is a strict and
-smaller subset of what follows. It is defined in §1 and recorded, together with
-the frozen acceptance criteria and the round ledger, in
-`docs/experiments/revised-phase-campaign.qmd`. The companion derivations are in
+(2026-09-13). **C2** and **C3** were strict and smaller subsets of what follows.
+They are defined in §1 and recorded, together with the frozen acceptance
+criteria and the round ledger, in `docs/experiments/revised-phase-campaign.qmd`.
+The companion derivations are in
 `docs/explainers/bench-fit-revised-phase-model.qmd`.
 
 Sections marked **optional future** are deliberately not the default: one
 scientifically motivated complexity is added only when a **named** acceptance
-criterion has actually failed. Round 1 C1 is rejected at planted preflight; C2
-is implemented and remote-preflighted, while real DREGON/Michael fitting and
-frozen evaluation are running elsewhere and are not results in this document.
-:::::
+criterion has actually failed. Round 1 C1 is rejected at planted preflight.
+Round 2 C2 passed implementation preflight but failed the actual guarded-v2
+frozen gates: DREGON PIT MAE, DREGON composite interval, DREGON LTAS and
+Michael's primary MAE non-regression. Round 3 C3 is completed and failed
+overall: all three DREGON gates failed, while Michael's primary, composite and
+LTAS gates all passed. Round 4 C4 is replanned as a fixed-carrier fit under
+implementation. It has not been trained or scored; the earlier alternating
+carrier-recovery preflight was abandoned before any remote fit and is not a
+scientific result.
+::::::
 
 # 1. Main recommendation
 
@@ -58,13 +64,16 @@ discard the information needed at a crossing.
 
 The fitting pipeline for the **general family** is:
 
-1. Integrate **raw** telemetry to obtain nominal phase trajectories.
-2. Estimate telemetry/audio delay and a per-clip frequency bias from isolated,
-   high-SNR harmonics.
+1. Select the supplied nominal carrier track before fitting: raw telemetry or
+   published `rps_refined` for DREGON; raw telemetry for Michael's rig.
+2. Integrate that supplied carrier to obtain nominal phase trajectories. Do not
+   fit telemetry/audio delay, clip bias, population bias or any time-varying
+   carrier correction for the current C4 fit.
 3. Estimate amplitude profiles and multichannel spatial signatures away from
    crossings.
-4. Estimate shared shaft dynamics and independent harmonic diffusion from
-   cross-harmonic phase increments — as **initializers and diagnostics only**.
+4. Estimate shared shaft dynamics and independent harmonic diffusion only
+   through the marginal expected-periodogram model. Cross-harmonic phase
+   increments remain **diagnostics only**.
 5. *(optional future)* Construct time-dependent groups of overlapping harmonic
    tracks.
 6. *(optional future)* Run joint complex-valued state smoothing inside each
@@ -74,9 +83,9 @@ The fitting pipeline for the **general family** is:
 8. *(optional future)* Refine all parameters jointly from the staged solution.
 9. Validate by round-trip simulation, including simulated crossings.
 
-**C2, which is what is actually implemented, is much smaller.** Write $g$ for
+**C2, the implemented round-2 candidate, was much smaller.** Write $g$ for
 the **rig** index — Michael's rig, DREGON, the bench — and $r$ for a rotor
-inside that rig. Its whole pipeline is:
+inside that rig. Its whole pipeline was:
 
 1. Integrate **raw** telemetry. No refined or posterior label enters the fit.
 2. Fit one delay $\delta_r$ and one per-clip bias $b_{c,r}$ — a random effect
@@ -100,59 +109,75 @@ inside that rig. Its whole pipeline is:
    temperature** $T$, with fixed seed/draw support and loud failure on
    non-positive or non-finite calibration terms.
 
-Its complexity budget is two fitted rig dynamic scale parameters
+Its complexity budget was two fitted rig dynamic scale parameters
 ($\sigma_g$, $D_g$), one fixed reference $\lambda$, one shared carrier family,
-ordinary Adam, and two labelled estimator stages. Nothing else is added unless
-a **named** acceptance criterion fails. C2 obeys both prohibitions above
-trivially: it sums all components continuously and never assigns a bin to a
-line.
+ordinary Adam, and two labelled estimator stages. C2 failed the guarded-v2
+scorecard, so it is not an incumbent. C3 later produced a Michael's-only
+partial incumbent, but no overall passing bundle exists.
+
+**C3 was a fitting-only correction to C2.** It kept every model and scoring
+contract above, including fixed $\lambda=6\,\mathrm{s}^{-1}$ and learned
+$\sigma_g,D_g$. Only Stage 1 changed: the floor seed was per clip and per
+frequency, line powers were initialized from local signed band excess power in
+linear physical units, and active orders were admitted as 16, 48, full-$K$ with
+40/40/120 Adam iterations. Stage 2 remained 40 carrier iterations. C3 failed
+overall: DREGON PIT MAE was $69.31143066855915$ rev/s against target
+$1.897062542673336$ rev/s, DREGON composite upper bound was
+$6414.079147675613>0$, and DREGON LTAS was $2.4337617952979103$ dB against
+baseline $2.136169143073238$ dB with tolerance $0.05595793956082849$ dB.
+Michael's passed all gates in the C3 generator evaluation
+(`22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc`), but
+that is historical fixed-candidate evidence, not a current fixed-carrier pass.
+There is no overall passing bundle.
+
+**C4 is an experiment, not the default recommendation.** It keeps the same
+stochastic family, fixes $\lambda=6\,\mathrm{s}^{-1}$, uses all orders from the
+start ($K=130$ for DREGON, $K=230$ for Michael's), and fixes the supplied
+nominal carrier. DREGON runs two arms: raw and published refined. Michael's runs
+raw only. DREGON uses the C3 global warm start and resets only the initial
+$D$ to $2\pi\cdot13.07=82.1212319648372$; Michael's warms from C3 globals with
+bias fixed to zero. The fit optimizes the full-training marginal composite risk
+$L_{\mathrm{marginal}}/T$ plus existing global priors by deterministic LBFGS
+(strong Wolfe, 20 iterations, 30 function evaluations, history 10). It has no
+OU innovation MAP prior, no state-path optimization, no carrier-first cycle and
+no recovered $\theta(t)$ path. Closure traces are function evaluations, not
+monotone accepted iterates. The result, if any, is a local optimizer result, not
+global convex convergence, exact joint likelihood or causal identification.
 
 # 2. Generative model
 
 ## 2.1 Telemetry-guided nominal phase
 
-Let $\widehat f_r(t)$ be the measured fundamental frequency, in hertz, of rotor
-$r\in\{1,2,3,4\}$. Its nominal phase is
-
-$$
-\widehat\Phi_r(t)
-=2\pi\int_0^t\widehat f_r(s)\,ds.
-$$
-
-The actual carrier is not assumed to equal telemetry exactly. The identifiable
-parameterization has exactly three parts: a time offset $\delta_r$, a per-clip
-frequency bias $b_{c,r}$, and **one** stochastic residual:
+Let $f_r^{\mathrm{nom}}(t)$ be the supplied fundamental-frequency track, in
+hertz, of rotor $r\in\{1,2,3,4\}$. For the current C4 fit, this nominal carrier
+is fixed before fitting. The model allows stochastic broadening around it, but
+does **not** fit a time offset, a per-clip frequency bias or a population
+frequency bias:
 
 $$
 \boxed{
-\Phi_r(t)
-=2\pi\int_0^t
-\left[
-f_{\text{raw},r}(s-\delta_r)+b_{c,r}
-\right]ds
-+\theta_r(t),
+\Phi_r^{\mathrm{nom}}(t)
+:=2\pi\int_0^t f_r^{\mathrm{nom}}(s)\,ds,
+\qquad
+f_r^{\mathrm{nom}}\in\{f_r^{\mathrm{raw}},f_r^{\mathrm{refined}}\}.
 }
 $$
 
-equivalently, in instantaneous-frequency form,
+The harmonic phase is
 
 $$
-f_{\text{actual},r}(t)
-=f_{\text{raw},r}(t-\delta_r)+b_{c,r}+\frac{\nu_r(t)}{2\pi}.
+\phi_{rk}(t)=k\Phi_r^{\mathrm{nom}}(t)+k\theta_r(t)+\epsilon_{rk}(t).
 $$
 
-Here $f_{\text{raw},r}$ is the **raw** published telemetry array. The refined
-or posterior trajectory is fit provenance and a diagnostic — never an input to
-the primary fit, and never a scoring reference. The bias $b_{c,r}$ is a
-per-clip random effect with a proper prior and a population/recording mean, not
-a free per-clip number. The gauge is fixed: $\theta_r(t_0)=0$, the initial
-$\nu_r$ is drawn from its stationary distribution, and the mean OU is
-stationary-zero in law. There is **no** second per-frame carrier correction
-and no calibration spline (§9).
-
-The time offset is important. A small telemetry/audio misalignment creates a
-systematic phase error when the rotor accelerates. The error grows with
-harmonic order.
+Here $f_r^{\mathrm{raw}}$ is the published raw telemetry array and
+$f_r^{\mathrm{refined}}$ is the published acoustic-refinement sidecar. Refined
+conditioning is allowed only for the DREGON C4 arm; the HPP scoring target still
+uses raw labels for every arm. A lower held-out fit risk supports a label under
+this model, but is not independent proof of physical truth. In the current C4
+estimator, $\theta_r$ is marginalized as stochastic phase broadening rather than
+optimized as a recovered carrier-correction trajectory. There is no fitted
+second per-frame carrier correction, no learned delay and no calibration spline
+(§9).
 
 ## 2.2 Shared shaft dynamics
 
@@ -575,8 +600,10 @@ subbands while a small observation group handles the actual collision.
 C2's staging is deliberately short and explicitly labelled. Stage 0 fixes the
 conventions. Stage 1 fits marginal global parameters with the OU state
 integrated out once. Stage 2 freezes those globals and fits conditional carrier
-tracks as diagnostics. Stages 4, 5, 6 and 8 are retained below as **optional
-future** complexity.
+tracks as diagnostics. C3 changed only the Stage 1 initialization and harmonic
+ladder. C4, if run, is a conditional-coordinate fitting experiment over the
+same family (§1), not a new accepted default. Stages 4, 5, 6 and 8 are retained
+below as **optional future** complexity.
 
 ::::: {.callout-important}
 ## The two C2 stages are not one evidence calculation
@@ -826,11 +853,12 @@ posterior curvature or uncertainty for any other parameter. It is frozen before
 any candidate is fitted and never retuned afterwards, and a non-positive or
 non-finite $J$ is a loud calibration failure, never a fallback to $T=1$.
 Definition, derivation and the full constraint list:
-`bench-fit-revised-phase-model.qmd` §6.2.4. Baseline calibration has completed:
-$T=5.19201722008$ for DREGON cruise and $T=15.214066879865468$ for Michael's
-rig, with Michael's repaired ramp LTAS baseline 4.851130861625892 dB against a
-pooled null tolerance of 0.0788731273157346 dB. C2 real fitting/evaluation is
-authorized and running elsewhere; no result is reported here.
+`bench-fit-revised-phase-model.qmd` §6.2.4. Guarded-v2 baseline calibration is
+frozen: $T=5.19201722008$ for DREGON cruise and $T=15.214066879865468$ for
+Michael's rig, with Michael's repaired ramp LTAS baseline 4.851130861625892 dB
+against a pooled null tolerance of 0.0788731273157346 dB. C2 used the same
+training exports under the corrected split and failed the actual guarded-v2
+scorecard; C3 is the current in-progress fitting-only correction.
 
 A multichannel form is available where spatial covariance matters,
 
@@ -1234,12 +1262,15 @@ frequency rank.
 **Response:** initialize shaft parameters from off-diagonal covariance and
 regularise $D_{rk}$ hierarchically.
 
-## Shaft process absorbs telemetry misalignment
+## Shaft process absorbs carrier mismatch
 
 **Symptom:** apparent shaft variance grows during acceleration and is correlated
 with $d\widehat f_r/dt$.
 
-**Response:** fit telemetry/audio delay before stochastic dynamics.
+**Response:** current C4 does not repair this by fitting delay or bias. It runs
+the declared supplied-carrier arms, reports the fit difference, and treats any
+remaining mismatch as a candidate failure or as motivation for a later named
+round.
 
 ## Amplitudes steal phase mismatch
 
