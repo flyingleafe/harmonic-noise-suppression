@@ -445,6 +445,25 @@ class FitConfig:
     #: for tiny tests and old manifests; ``"band_energy_ladder"`` is the round-3
     #: continuation recipe: fit active orders 1..16, then 1..48, then full K.
     training_recipe: str = "full"
+    #: Estimator contract. ``"marginal_then_carrier"`` is the C3 path kept for
+    #: existing Michael's exports. ``"alternating_conditional_map"`` is the C4
+    #: inexact block-coordinate MAP: one conditional spectral objective plus one
+    #: exact OU state prior, safeguarded by full-objective descent checks.
+    fit_method: str = "marginal_then_carrier"
+    alternating_cycles: int = 3
+    alternating_block_iters: int = 20
+    alternating_lr: float = 0.05
+    alternating_backtracks: int = 4
+    #: Optional C4 warm start from a previous revised export. Parameters are
+    #: loaded before the C4 reset below; held-out clips are never read.
+    warm_start_export: str | None = None
+    #: C4 empirical OU hyperparameters. They are fixed values copied from the
+    #: C3 DREGON training fit, not re-estimated and not a causal identification
+    #: claim. ``initial_d`` is an initialization only; the alternating spectral
+    #: block may move ``D`` under the same full objective.
+    fixed_lambda: float | None = None
+    fixed_sigma: float | None = None
+    initial_d: float | None = None
     #: the frozen composite temperature ``T = J / H``; it DIVIDES the composite
     #: risk (``L / T``). Calibrated on planted/baseline data against the
     #: UNNORMALIZED risk of :func:`composite_risk` and then FROZEN; read, never
@@ -485,6 +504,32 @@ class FitConfig:
                 "optimizer.training_recipe must be 'full' or "
                 f"{STAGE1_LADDER_RECIPE!r}, got {self.training_recipe!r}"
             )
+        if self.fit_method not in ("marginal_then_carrier", "alternating_conditional_map"):
+            raise ValueError(
+                "optimizer.fit_method must be 'marginal_then_carrier' or "
+                f"'alternating_conditional_map', got {self.fit_method!r}"
+            )
+        if self.fit_method == "alternating_conditional_map" and self.training_recipe != "full":
+            raise ValueError(
+                "alternating_conditional_map models every order from the first objective; "
+                "optimizer.training_recipe must be 'full' (no ladder)"
+            )
+        if self.fit_method == "alternating_conditional_map":
+            if int(self.alternating_cycles) <= 0 or int(self.alternating_block_iters) <= 0:
+                raise ValueError("alternating cycles and block_iters must be positive")
+            if float(self.alternating_lr) <= 0.0:
+                raise ValueError("alternating_lr must be positive")
+            if int(self.alternating_backtracks) < 0:
+                raise ValueError("alternating_backtracks must be non-negative")
+            for key, value in (
+                ("fixed_lambda", self.fixed_lambda),
+                ("fixed_sigma", self.fixed_sigma),
+                ("initial_d", self.initial_d),
+            ):
+                if value is None or not math.isfinite(float(value)) or float(value) <= 0.0:
+                    raise ValueError(
+                        f"alternating_conditional_map requires finite positive {key}; got {value!r}"
+                    )
         self.n_fft_work  # noqa: B018 — validate the derived window here, not mid-fit
 
     @property
@@ -2002,6 +2047,33 @@ class _RevisedModel(torch.nn.Module):
             out[f"state_innov[{self.clips[i].clip_id}]"] = p
         return out
 
+    def conditional_carrier_block_parameters(self) -> dict[str, torch.nn.Parameter]:
+        """C4 carrier block: clip biases, population bias and OU state only."""
+        out = {"bias_hz": self.bias_hz, "bias_mean_hz": self.bias_mean_hz}
+        for i, p in enumerate(self.state_innov):
+            out[f"state_innov[{self.clips[i].clip_id}]"] = p
+        return out
+
+    def conditional_spectral_block_parameters(self) -> dict[str, torch.nn.Parameter]:
+        """C4 spectral block: powers, floor, ``D``, speed law and mic terms.
+
+        The carrier state and both bias levels are held fixed. ``sigma`` is not
+        listed: C4 fixes the OU hyperparameters to the C3 DREGON training values.
+        """
+        return {
+            "profile_db": self.profile_db,
+            "amp_exp": self.amp_exp,
+            "floor_mean_db": self.floor_mean_db,
+            "floor_shape_z": self.floor_shape_z,
+            "floor_tilt_db_oct": self.floor_tilt_db_oct,
+            "floor_exp": self.floor_exp,
+            "floor_static_raw": self.floor_static_raw,
+            "mic_floor_db": self.mic_floor_db,
+            "mic_gain_db": self.mic_gain_db,
+            "gain_all_db": self.gain_all_db,
+            "log_d": self.log_d,
+        }
+
     def fitted_parameters(self) -> dict[str, torch.nn.Parameter]:
         """Backward-compatible alias for the stage-1 fitted block."""
         return self.marginal_parameters()
@@ -2537,6 +2609,188 @@ def _bias_confounding(model: _RevisedModel) -> dict[str, Any]:
         return out
 
 
+def _snapshot_parameters(named: Mapping[str, torch.nn.Parameter]) -> dict[str, Tensor]:
+    """Detached parameter copy for accepted/rejected safeguarded proposals."""
+    return {name: p.detach().clone() for name, p in named.items()}
+
+
+def _restore_parameters(named: Mapping[str, torch.nn.Parameter], values: Mapping[str, Tensor]) -> None:
+    with torch.no_grad():
+        for name, p in named.items():
+            p.copy_(values[name])
+
+
+def _interpolate_parameters(
+    named: Mapping[str, torch.nn.Parameter],
+    start: Mapping[str, Tensor],
+    end: Mapping[str, Tensor],
+    alpha: float,
+) -> None:
+    with torch.no_grad():
+        for name, p in named.items():
+            p.copy_(start[name] + float(alpha) * (end[name] - start[name]))
+
+
+def _all_frame_indices(model: _RevisedModel) -> list[tuple[int, np.ndarray]]:
+    return [(ci, np.arange(cd.starts.size)) for ci, cd in enumerate(model.clips)]
+
+
+def _full_conditional_objective(model: _RevisedModel, *, config: FitConfig) -> float:
+    """The ONE C4 training objective, evaluated on every training frame.
+
+    This is the acceptance target for every block proposal: conditional spectral
+    composite risk divided by the frozen temperature, plus one exact OU state
+    prior and the existing parameter/bias priors. No minibatch estimate is used
+    for acceptance.
+    """
+    with torch.no_grad():
+        total = 0.0
+        for ci, fi in _all_frame_indices(model):
+            for chunk in _chunks(fi, config.frame_chunk):
+                total += float(model.chunk_risk(ci, chunk, scale=1.0).detach()) / float(
+                    config.temperature
+                )
+        prior = model.prior(state=True, globals=True, bias_population=True)
+        total += float(prior.detach())
+    return float(total)
+
+
+def _objective_finite_decreased(before: float, after: float) -> bool:
+    return bool(math.isfinite(float(after)) and float(after) < float(before))
+
+
+def _backtrack_segment(
+    named: Mapping[str, torch.nn.Parameter],
+    before_state: Mapping[str, Tensor],
+    proposed_state: Mapping[str, Tensor],
+    *,
+    before_objective: float,
+    objective: Callable[[], float],
+    max_halvings: int,
+) -> tuple[bool, float, float, int]:
+    """Accept a full proposal or a bounded half-step along its segment.
+
+    Returns ``(accepted, accepted_objective, accepted_step, backtracks)``. On
+    failure the original block parameters are restored.
+    """
+    proposed_objective = objective()
+    if _objective_finite_decreased(before_objective, proposed_objective):
+        return True, float(proposed_objective), 1.0, 0
+    for bt in range(1, int(max_halvings) + 1):
+        alpha = 0.5**bt
+        _interpolate_parameters(named, before_state, proposed_state, alpha)
+        value = objective()
+        if _objective_finite_decreased(before_objective, value):
+            return True, float(value), float(alpha), bt
+    _restore_parameters(named, before_state)
+    return False, float(before_objective), 0.0, int(max_halvings)
+
+
+def _run_proposal_steps(
+    model: _RevisedModel,
+    *,
+    named: dict[str, torch.nn.Parameter],
+    config: FitConfig,
+    block: str,
+    seed_offset: int,
+) -> dict[str, dict[str, float]]:
+    opt = torch.optim.Adam(list(named.values()), lr=float(config.alternating_lr))
+    rng = np.random.default_rng(int(config.seed) + int(seed_offset))
+    grads: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
+    for it in range(int(config.alternating_block_iters)):
+        opt.zero_grad(set_to_none=True)
+        total = 0.0
+        for ci, cd in enumerate(model.clips):
+            fi, scale = _sample_frames(cd, rng, config.frames_per_step)
+            for chunk in _chunks(fi, config.frame_chunk):
+                loss = model.chunk_risk(ci, chunk, scale=scale) / float(config.temperature)
+                loss.backward()
+                total += float(loss.detach())
+        prior = model.prior(state=True, globals=True, bias_population=True)
+        prior.backward()
+        total += float(prior.detach())
+        step_norms = _grad_norms(named)
+        if it == 0:
+            grads["first_step"] = step_norms
+        grads["last_step"] = step_norms
+        opt.step()
+    return grads
+
+
+def _state_to_innov(theta: np.ndarray, nu: np.ndarray, *, lam: float, sigma: float, dt: float) -> np.ndarray:
+    """Inverse of :func:`simulate_state` for a stored MAP ``theta, nu`` path."""
+    theta = np.asarray(theta, dtype=np.float64)
+    nu = np.asarray(nu, dtype=np.float64)
+    if theta.shape != nu.shape:
+        raise ValueError(f"theta and nu shapes differ: {theta.shape} vs {nu.shape}")
+    if theta.ndim != 2:
+        raise ValueError(f"state arrays must be (rotor, state), got {theta.shape}")
+    out = np.zeros(theta.shape + (2,), dtype=np.float64)
+    a, b, c = ou_cholesky(lam, sigma, dt)
+    e = math.exp(-lam * dt)
+    f01 = -math.expm1(-lam * dt) / lam
+    if sigma <= 0.0 or a <= 0.0 or c <= 0.0:
+        raise ValueError("cannot invert OU state with non-positive sigma or Cholesky terms")
+    out[:, 0, 0] = nu[:, 0] / sigma
+    if theta.shape[1] > 1:
+        e0 = (theta[:, 1:] - theta[:, :-1] - f01 * nu[:, :-1]) / a
+        e1 = (nu[:, 1:] - e * nu[:, :-1] - b * e0) / c
+        out[:, 1:, 0] = e0
+        out[:, 1:, 1] = e1
+    return out
+
+
+def _apply_warm_start(model: _RevisedModel, *, config: FitConfig) -> dict[str, Any]:
+    """Load C3 training parameters/state, then apply the C4 D/sigma reset."""
+    report: dict[str, Any] = dict(applied=False)
+    if config.warm_start_export:
+        p = Path(config.warm_start_export)
+        export = json.loads(p.read_text())
+        model.load_parameters(export["parameters"])
+        report.update(
+            applied=True,
+            source=str(p),
+            source_fit_method=export.get("fit_method"),
+            source_rig_id=export.get("rig_id"),
+            source_digest=hashlib.sha256(p.read_bytes()).hexdigest(),
+            loaded_training_states=[],
+            missing_training_states=[],
+        )
+        stored = dict((export.get("diagnostics") or {}).get("map_state") or {})
+        with torch.no_grad():
+            for ci, cd in enumerate(model.clips):
+                entry = stored.get(cd.clip_id)
+                if not isinstance(entry, Mapping):
+                    report["missing_training_states"].append(cd.clip_id)
+                    continue
+                theta = np.asarray(entry["theta_rad"], dtype=np.float64)
+                nu = 2.0 * np.pi * np.asarray(entry["nu_hz"], dtype=np.float64)
+                if theta.shape[1] != cd.n_states:
+                    report["missing_training_states"].append(
+                        f"{cd.clip_id}: state length {theta.shape[1]} != {cd.n_states}"
+                    )
+                    continue
+                innov = _state_to_innov(theta, nu, lam=model.lam, sigma=model.sigma_value(), dt=model.dt_state)
+                model.state_innov[ci].copy_(torch.as_tensor(innov, dtype=torch.float64, device=model._dev))
+                report["loaded_training_states"].append(cd.clip_id)
+    with torch.no_grad():
+        if config.fixed_sigma is not None:
+            model.log_sigma.copy_(
+                torch.as_tensor(math.log(float(config.fixed_sigma)), dtype=torch.float64, device=model._dev)
+            )
+        if config.initial_d is not None:
+            model.log_d.copy_(
+                torch.as_tensor(math.log(float(config.initial_d)), dtype=torch.float64, device=model._dev)
+            )
+    report["fixed_ou_hyperparameters"] = dict(
+        lambda_=float(model.lam),
+        sigma=float(model.sigma_value()),
+        provenance="C3 DREGON training empirical prior; fixed, not re-estimated, no causal claim",
+    )
+    report["d_initial_after_reset"] = float(torch.exp(model.log_d).detach().cpu().item())
+    return report
+
+
 STATE_GRID_NOTE = (
     "cubic Hermite interpolation omits the OU bridge variance within a grid interval; the grid "
     "is justified by the planted TWO-SIDED check at 500 vs 1000 Hz, never by the export's "
@@ -2704,6 +2958,93 @@ def _optimize_carrier(
     return trace, grad_norms
 
 
+def _optimize_alternating_conditional_map(
+    model: _RevisedModel,
+    *,
+    config: FitConfig,
+    progress: Callable[[str], None] | None,
+) -> tuple[list[float], dict[str, Any]]:
+    """C4 safeguarded inexact block-coordinate MAP."""
+    history: list[dict[str, Any]] = []
+    grad_norms: dict[str, dict[str, dict[str, float]]] = {}
+    current = _full_conditional_objective(model, config=config)
+    trace = [float(current)]
+    if progress is not None:
+        progress(f"alternating initial full conditional J {current:.6f}")
+    blocks: tuple[tuple[str, Callable[[], dict[str, torch.nn.Parameter]]], ...] = (
+        ("carrier", model.conditional_carrier_block_parameters),
+        ("spectral", model.conditional_spectral_block_parameters),
+    )
+    for cycle in range(int(config.alternating_cycles)):
+        for block_i, (block_name, named_fn) in enumerate(blocks):
+            named = named_fn()
+            before_state = _snapshot_parameters(named)
+            before = float(current)
+            grads = _run_proposal_steps(
+                model,
+                named=named,
+                config=config,
+                block=block_name,
+                seed_offset=101 + 31 * cycle + block_i,
+            )
+            proposed_state = _snapshot_parameters(named)
+            accepted, current, accepted_step, backtracks = _backtrack_segment(
+                named,
+                before_state,
+                proposed_state,
+                before_objective=before,
+                objective=lambda: _full_conditional_objective(model, config=config),
+                max_halvings=int(config.alternating_backtracks),
+            )
+            d_now = float(torch.exp(model.log_d).detach().cpu().item())
+            entry = dict(
+                cycle=int(cycle + 1),
+                block=block_name,
+                proposal_steps=int(config.alternating_block_iters),
+                lr=float(config.alternating_lr),
+                full_objective_before=float(before),
+                full_objective_after=float(current),
+                accepted=bool(accepted),
+                accepted_step=float(accepted_step),
+                backtracks=int(backtracks),
+                d_scalar=float(d_now),
+            )
+            history.append(entry)
+            trace.append(float(current))
+            grad_norms[f"cycle_{cycle + 1}_{block_name}"] = grads
+            if progress is not None:
+                status = "accepted" if accepted else "stalled"
+                progress(
+                    f"alternating cycle {cycle + 1} {block_name}: {status}, "
+                    f"J {before:.6f} -> {current:.6f}, step {accepted_step:g}, "
+                    f"backtracks {backtracks}, D {d_now:.6g}"
+                )
+    valid = bool(
+        len(trace) == 1 + 2 * int(config.alternating_cycles)
+        and np.isfinite(np.asarray(trace, dtype=np.float64)).all()
+        and all(
+            float(b) >= float(a)
+            for b, a in zip(trace[:-1], trace[1:], strict=True)
+        )
+    )
+    diagnostics = dict(
+        valid=valid,
+        objective_start=float(trace[0]),
+        objective_end=float(trace[-1]),
+        objective_history=history,
+        loss_trace=trace,
+        cycles=int(config.alternating_cycles),
+        block_order=["carrier", "spectral"],
+        acceptance_rule=(
+            "Adam supplies a block proposal on minibatches; accept only if the FULL fixed "
+            "training conditional objective decreases, else try bounded half-steps along the "
+            "parameter segment and restore the old block on failure"
+        ),
+        grad_norms=grad_norms,
+    )
+    return trace, diagnostics
+
+
 def fit_revised(
     rows: Sequence[tuple[str, Clip]],
     *,
@@ -2713,20 +3054,51 @@ def fit_revised(
     device: str | torch.device = "cpu",
     progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Fit round-2 by marginal quasi-MAP, then carrier-only diagnostics."""
+    """Fit the revised model under the manifest-declared estimator contract."""
     t0 = time.time()
     torch.manual_seed(int(config.seed))
+    if config.fixed_lambda is not None or config.fixed_sigma is not None:
+        dynamics = dataclasses.replace(
+            dynamics,
+            lam=float(config.fixed_lambda if config.fixed_lambda is not None else dynamics.lam),
+            sigma=float(config.fixed_sigma if config.fixed_sigma is not None else dynamics.sigma),
+            diagnostics={
+                **dict(dynamics.diagnostics),
+                "fixed_ou_hyperparameters": dict(
+                    lambda_=float(config.fixed_lambda if config.fixed_lambda is not None else dynamics.lam),
+                    sigma=float(config.fixed_sigma if config.fixed_sigma is not None else dynamics.sigma),
+                    provenance="manifest empirical prior; fixed for this fit",
+                ),
+            },
+        )
     model = _RevisedModel(rows, dynamics=dynamics, config=config, device=device, observe=True)
 
-    marginal_trace, marginal_grads, rung_trace = _optimize_marginal(model, config=config, progress=progress)
-    predictive_parameters = model.parameter_export()
+    warm_start = _apply_warm_start(model, config=config)
+    initial_full_objective_after_reset: float | None = None
+    marginal_trace: list[float] = []
+    carrier_trace: list[float] = []
+    marginal_grads: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
+    carrier_grads: dict[str, dict[str, float]] = {"first_step": {}, "last_step": {}}
+    rung_trace: list[dict[str, Any]] = []
+    alternating_trace: list[float] = []
+    alternating_fit: dict[str, Any] | None = None
+    if config.fit_method == "alternating_conditional_map":
+        initial_full_objective_after_reset = _full_conditional_objective(model, config=config)
+        alternating_trace, alternating_fit = _optimize_alternating_conditional_map(
+            model, config=config, progress=progress
+        )
+        predictive_parameters = model.parameter_export()
+    else:
+        marginal_trace, marginal_grads, rung_trace = _optimize_marginal(
+            model, config=config, progress=progress
+        )
+        predictive_parameters = model.parameter_export()
 
-    with torch.no_grad():
-        model.bias_hz.copy_(model.bias_mean_hz[None, :])
-        for p in model.state_innov:
-            p.zero_()
-    carrier_trace, carrier_grads = _optimize_carrier(model, config=config, progress=progress)
-
+        with torch.no_grad():
+            model.bias_hz.copy_(model.bias_mean_hz[None, :])
+            for p in model.state_innov:
+                p.zero_()
+        carrier_trace, carrier_grads = _optimize_carrier(model, config=config, progress=progress)
     with torch.no_grad():
         map_state: dict[str, Any] = {}
         off_regime: dict[str, Any] = {}
@@ -2779,7 +3151,7 @@ def fit_revised(
             "quantity of THIS chain, not a calibrated absolute spectrum"
         ),
         state_rate_hz=float(config.state_rate_hz),
-        fit_method="marginal_then_carrier",
+        fit_method=config.fit_method,
         lambda_source="fixed_reference",
         optimizer=dict(
             name="adam",
@@ -2790,18 +3162,28 @@ def fit_revised(
                 for active_k, n_iter in _stage1_schedule(config)
             ],
             stage2_carrier=dict(iters=int(config.stage2_iters), lr=float(config.stage2_lr)),
+            alternating_conditional_map=dict(
+                cycles=int(config.alternating_cycles),
+                block_iters=int(config.alternating_block_iters),
+                lr=float(config.alternating_lr),
+                backtrack_halvings=int(config.alternating_backtracks),
+                block_order=["carrier", "spectral"],
+            )
+            if config.fit_method == "alternating_conditional_map"
+            else None,
             frame_chunk=int(config.frame_chunk),
             harmonic_chunk=config.harmonic_chunk,
             frames_per_step=config.frames_per_step,
             minibatch_estimator="uniform without replacement, own weights, scaled N_full/N_"
-            "sampled (unbiased for the full risk)",
+            "sampled (unbiased for the proposal gradient only; block acceptance uses the full risk)",
             atom_dtype=config.atom_dtype,
             device=str(device),
         ),
         seed=int(config.seed),
         composite_temperature=float(config.temperature),
         composite_semantics=(
-            "stage 1 is a marginal mean-prediction composite risk; stage 2 is a plug-in "
+            "alternating_conditional_map" if config.fit_method == "alternating_conditional_map"
+            else "stage 1 is a marginal mean-prediction composite risk; stage 2 is a plug-in "
             "conditional MAP diagnostic. The two objectives are not summed as evidence."
         ),
         moment_gate=config.gate.as_dict(),
@@ -2813,9 +3195,15 @@ def fit_revised(
             log_d_std=float(config.log_d_std),
             log_sigma_mean=float(config.log_sigma_mean),
             log_sigma_std=float(config.log_sigma_std),
-            log_sigma_note="N(0, 2^2) on log sigma; sigma is fitted by the marginal stage",
+            log_sigma_note=(
+                "fixed empirical C3 DREGON training value; not re-estimated and not a causal claim"
+                if config.fit_method == "alternating_conditional_map"
+                else "N(0, 2^2) on log sigma; sigma is fitted by the marginal stage"
+            ),
             log_d_note="a broad Gaussian prior on a FITTED parameter; NOT conjugate to a "
             "moment-derived D",
+            fixed_ou_hyperparameters=warm_start.get("fixed_ou_hyperparameters"),
+            initial_d_after_reset=warm_start.get("d_initial_after_reset"),
         ),
         code_version=_git_head(),
     )
@@ -2824,7 +3212,7 @@ def fit_revised(
     export = dict(
         schema_version=SCHEMA_VERSION,
         model_family=MODEL_FAMILY,
-        fit_method="marginal_then_carrier",
+        fit_method=config.fit_method,
         lambda_source="fixed_reference",
         shared_phase_evidence="not_identified_by_marginal_score",
         rig_id=str(rig_id),
@@ -2839,10 +3227,26 @@ def fit_revised(
             initialization=model.initialization_diagnostics,
             final_profile_db=predictive_parameters["profile_db"],
             shared_phase_evidence="not_identified_by_marginal_score",
-            marginal_fit=dict(_fit_summary(marginal_trace, marginal_grads), rung_trace=rung_trace),
-            carrier_fit=_fit_summary(carrier_trace, carrier_grads),
-            loss_trace=carrier_trace,
-            grad_norms=dict(marginal=marginal_grads, carrier=carrier_grads),
+            marginal_fit=(
+                dict(_fit_summary(marginal_trace, marginal_grads), rung_trace=rung_trace)
+                if config.fit_method == "marginal_then_carrier"
+                else dict(valid=True, skipped="not used by alternating_conditional_map")
+            ),
+            carrier_fit=(
+                _fit_summary(carrier_trace, carrier_grads)
+                if config.fit_method == "marginal_then_carrier"
+                else dict(valid=True, skipped="absorbed into alternating_conditional_map")
+            ),
+            alternating_conditional_map=alternating_fit,
+            fixed_ou_hyperparameters=warm_start.get("fixed_ou_hyperparameters"),
+            warm_start=warm_start,
+            initial_full_objective_after_reset=initial_full_objective_after_reset,
+            loss_trace=alternating_trace if config.fit_method == "alternating_conditional_map" else carrier_trace,
+            grad_norms=(
+                dict(alternating=alternating_fit.get("grad_norms", {}) if alternating_fit else {})
+                if config.fit_method == "alternating_conditional_map"
+                else dict(marginal=marginal_grads, carrier=carrier_grads)
+            ),
             bias_vs_nu_mean_confounding=_bias_confounding(model),
             state_grid_note=STATE_GRID_NOTE,
             coarsening_sensitivity=_coarsening_sensitivity(model),
@@ -2851,7 +3255,10 @@ def fit_revised(
                 stochastic_mechanisms=2,
                 rig_dynamic_params=3,
                 rig_dynamic_params_detail=(
-                    "lambda fixed by reference assumption; sigma and scalar D fitted in marginal "
+                    "lambda and sigma fixed by empirical C3 DREGON training values for "
+                    "alternating_conditional_map; scalar D fitted under the full conditional objective"
+                    if config.fit_method == "alternating_conditional_map"
+                    else "lambda fixed by reference assumption; sigma and scalar D fitted in marginal "
                     "stage, then frozen for carrier diagnostics"
                 ),
                 latent_state_blocks=len(model.clips) * model.n_rotors,
@@ -2861,10 +3268,24 @@ def fit_revised(
                     predictive_bias_population_mean=int(model.bias_mean_hz.numel()),
                     profile_db=int(model.profile_db.numel()),
                 ),
-                inference_stages=2,
+                inference_stages=(
+                    2 * int(config.alternating_cycles)
+                    if config.fit_method == "alternating_conditional_map"
+                    else 2
+                ),
                 approximations=[
-                    "stage-1 marginal expected periodogram integrates the OU state once",
-                    "stage-2 carrier paths are plug-in training diagnostics only",
+                    (
+                        "inexact block-coordinate MAP: carrier and spectral Adam proposals are "
+                        "accepted only by full fixed-training conditional objective decrease"
+                        if config.fit_method == "alternating_conditional_map"
+                        else "stage-1 marginal expected periodogram integrates the OU state once"
+                    ),
+                    (
+                        "C3 carrier paths warm-start training diagnostics where available; held-out "
+                        "prediction still uses raw telemetry plus population bias"
+                        if config.fit_method == "alternating_conditional_map"
+                        else "stage-2 carrier paths are plug-in training diagnostics only"
+                    ),
                     "cubic Hermite state interpolation omits the intra-interval OU bridge "
                     "variance (grid approximation)",
                     "composite risk over overlapping windows: proper for the mean prediction, "

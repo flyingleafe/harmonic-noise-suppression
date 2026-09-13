@@ -82,6 +82,16 @@ MANIFEST_SCHEMA: dict[str, Any] = {
         "training_recipe": "optional 'full' or 'band_energy_ladder'; the latter fits active "
         "orders 1..16, then 1..48, then full K during stage 1",
         "atom_dtype": "optional 'float32' (default) or 'float64'",
+        "fit_method": "optional 'marginal_then_carrier' (C3/default) or "
+        "'alternating_conditional_map' (C4 safeguarded conditional MAP)",
+        "alternating_cycles": "optional int, C4 cycles (3)",
+        "alternating_block_iters": "optional int, C4 Adam proposal steps per block (20)",
+        "alternating_lr": "optional float, C4 proposal learning rate (0.05)",
+        "alternating_backtracks": "optional int, bounded half-steps on rejection (4)",
+        "warm_start_export": "optional path to a previous revised export for C4 training-only warm start",
+        "fixed_lambda": "optional positive float, C4 fixed empirical OU lambda",
+        "fixed_sigma": "optional positive float, C4 fixed empirical OU sigma",
+        "initial_d": "optional positive float, C4 D reset after warm start (initialization only)",
     },
     "composite": {
         "temperature": "float > 0, the frozen composite temperature T = J/H "
@@ -206,6 +216,15 @@ def _config(manifest: dict[str, Any], rig: str, where: Path, sha: str) -> RP.Fit
         log_sigma_mean=float(manifest["priors"].get("log_sigma_mean", 0.0)),
         log_sigma_std=float(manifest["priors"].get("log_sigma_std", 2.0)),
         atom_dtype=str(opt.get("atom_dtype", "float32")),
+        fit_method=str(opt.get("fit_method", "marginal_then_carrier")),
+        alternating_cycles=int(opt.get("alternating_cycles", 3)),
+        alternating_block_iters=int(opt.get("alternating_block_iters", 20)),
+        alternating_lr=float(opt.get("alternating_lr", 0.05)),
+        alternating_backtracks=int(opt.get("alternating_backtracks", 4)),
+        warm_start_export=opt.get("warm_start_export"),
+        fixed_lambda=(None if opt.get("fixed_lambda") is None else float(opt.get("fixed_lambda"))),
+        fixed_sigma=(None if opt.get("fixed_sigma") is None else float(opt.get("fixed_sigma"))),
+        initial_d=(None if opt.get("initial_d") is None else float(opt.get("initial_d"))),
         harmonic_chunk=opt.get("harmonic_chunk", 32),
         moments=RP.MomentConfig(
             window=int(_req(manifest, "moments.window", where)),

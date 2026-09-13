@@ -1,0 +1,154 @@
+{
+  "schema": "revised-phase-fit/1",
+  "status": "AUTHORIZED C4 DREGON alternating conditional MAP training manifest \u2014 round 4 DREGON-focused refinement",
+  "notes": [
+    "Per-rig C4 fit manifest for scripts/stochastic_fit_revised.py --rig dregon; Michael C3 is preserved and not retrained.",
+    "C4 uses the same generative family, ALL k=1..130 active from the first objective, no harmonic ladder.",
+    "Fixed OU empirical prior copied from C3 DREGON training: lambda=6 s^-1, sigma=3.10117415072719 rad/s; fixed, not re-estimated and not a causal identification claim.",
+    "Warm start path results/revised_phase/c3/dregon.json is the C3 DREGON training export (sha256 5d232ed9760b000a39583c54c8f9d9ee5e5baccfbedec2d63c5f6d5615956831) on the remote worktree; training parameters, bias and MAP states are loaded where clip IDs match.",
+    "D is reset after warm start to 2*pi*13.07 rad^2/s = 82.12123284912244 as initialization only; the first reported C4 joint objective is after that reset.",
+    "One conditional joint objective: full training L_cond/T + one OU state prior + existing parameter/bias priors; conditional kernel is exp(-D|tau|) because theta is in the atom.",
+    "Block order per cycle: carrier first (bias_hz, bias_mean_hz, theta/nu; spectral fixed), then spectral (P/floor/D/speed-law/mic; carrier/bias fixed).",
+    "Three cycles, 20 Adam proposal steps per block, lr=0.05, frames_per_step=1 per clip; proposal acceptance requires FULL fixed-training J decrease; up to four half-steps along the parameter segment, restore on failure.",
+    "No D narrowing, no annealing, no held-out trajectory or held-out audio in the fit."
+  ],
+  "front_end": {
+    "sr": 16000,
+    "sample_rate_work": 64000,
+    "n_fft": 16384,
+    "hop": 1024,
+    "band_hz": [
+      30.0,
+      7900.0
+    ]
+  },
+  "state": {
+    "rate_hz": 500.0
+  },
+  "optimizer": {
+    "algorithm": "Adam",
+    "iters": 20,
+    "lr": 0.05,
+    "carrier_iters": 20,
+    "carrier_lr": 0.05,
+    "seed": 0,
+    "frame_chunk": 1,
+    "frames_per_step": 1,
+    "frames_per_step_scope": "per_clip",
+    "training_recipe": "full",
+    "atom_dtype": "float32",
+    "harmonic_chunk": 8,
+    "warm_gpu_measurement": {
+      "source_job": "python-af021d",
+      "K": 230,
+      "R": 4,
+      "M": 8,
+      "harmonic_chunk": 8,
+      "first_s": 7.927,
+      "warm_s": [
+        2.367,
+        2.364
+      ],
+      "peak_gb": 3.929
+    },
+    "fit_method": "alternating_conditional_map",
+    "alternating_cycles": 3,
+    "alternating_block_iters": 20,
+    "alternating_lr": 0.05,
+    "alternating_backtracks": 4,
+    "warm_start_export": "results/revised_phase/c3/dregon.json",
+    "warm_start_export_sha256": "5d232ed9760b000a39583c54c8f9d9ee5e5baccfbedec2d63c5f6d5615956831",
+    "fixed_lambda": 6.0,
+    "fixed_sigma": 3.10117415072719,
+    "initial_d": 82.1212319648372
+  },
+  "composite": {
+    "temperature": 5.192017220082491
+  },
+  "priors": {
+    "bias_std_hz": 0.5,
+    "log_d_mean": 0.0,
+    "log_d_std": 2.0,
+    "log_sigma_mean": 0.0,
+    "log_sigma_std": 2.0
+  },
+  "moments": {
+    "window": 4096,
+    "hop": 256,
+    "lags": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "gate": {
+      "min_line_snr_db": 10.0,
+      "min_isolation_bins": 4.0,
+      "order_range": [
+        2,
+        40
+      ],
+      "min_frames": 32,
+      "max_wrap_spread_rad": 1.2,
+      "preregistered": true
+    }
+  },
+  "rigs": {
+    "dregon": {
+      "dataset": "DREGON-frames",
+      "rps_key": "motors_command",
+      "k_cap": 130,
+      "delay_s": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "clips": [
+        {
+          "recording": "free-flight_nosource_room2",
+          "regime": "cruise",
+          "start_s": 1512727417.2050455,
+          "seconds": 16.0,
+          "channels": null
+        },
+        {
+          "recording": "hovering_nosource_room2",
+          "regime": "cruise",
+          "start_s": 1511903913.3944898,
+          "seconds": 16.0,
+          "channels": null
+        },
+        {
+          "recording": "updown_nosource_room2",
+          "regime": "cruise",
+          "start_s": 1511903588.177404,
+          "seconds": 16.0,
+          "channels": null
+        },
+        {
+          "recording": "rectangle_nosource_room2",
+          "regime": "cruise",
+          "start_s": 1511905733.5589993,
+          "seconds": 16.0,
+          "channels": null
+        },
+        {
+          "recording": "spinning_nosource_room2",
+          "regime": "cruise",
+          "start_s": 1511905207.3349512,
+          "seconds": 16.0,
+          "channels": null
+        }
+      ]
+    }
+  },
+  "heldout": {
+    "recordings": [
+      "free-flight_nosource_room1"
+    ]
+  }
+}

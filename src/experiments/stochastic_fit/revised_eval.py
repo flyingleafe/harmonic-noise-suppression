@@ -846,6 +846,8 @@ class CandidateExport:
             shared_phase_evidence=self.summary.get("shared_phase_evidence"),
             marginal_fit=diag.get("marginal_fit"),
             carrier_fit=diag.get("carrier_fit"),
+            alternating_conditional_map=diag.get("alternating_conditional_map"),
+            fixed_ou_hyperparameters=diag.get("fixed_ou_hyperparameters"),
         )
 
     @property
@@ -909,6 +911,44 @@ def _valid_stage_fit(stage: Any) -> bool:
     return bool(s.get("valid")) and _numeric_finite(s)
 
 
+def _valid_alternating_fit(stage: Any) -> bool:
+    if not isinstance(stage, Mapping):
+        return False
+    s = dict(stage)
+    if not bool(s.get("valid")) or not _numeric_finite(s):
+        return False
+    trace = np.asarray(s.get("loss_trace") or [], dtype=np.float64)
+    if trace.size < 2 or not np.isfinite(trace).all():
+        return False
+    if np.any(np.diff(trace) > 1e-9):
+        return False
+    hist = s.get("objective_history")
+    if not isinstance(hist, Sequence) or isinstance(hist, (str, bytes)) or not hist:
+        return False
+    for item in hist:
+        if not isinstance(item, Mapping):
+            return False
+        before = float(item.get("full_objective_before", float("nan")))
+        after = float(item.get("full_objective_after", float("nan")))
+        accepted = bool(item.get("accepted"))
+        step = float(item.get("accepted_step", float("nan")))
+        if not (math.isfinite(before) and math.isfinite(after) and after <= before + 1e-9):
+            return False
+        if accepted and not (0.0 < step <= 1.0 and after < before):
+            return False
+        if (not accepted) and not (step == 0.0 and abs(after - before) <= 1e-9):
+            return False
+    return True
+
+
+def _valid_fixed_ou_hyperparameters(diag: Mapping[str, Any]) -> bool:
+    fixed = diag.get("fixed_ou_hyperparameters")
+    if not isinstance(fixed, Mapping):
+        return False
+    vals = [fixed.get("lambda_"), fixed.get("sigma")]
+    return all(math.isfinite(float(v)) and float(v) > 0.0 for v in vals)
+
+
 def read_candidate_export(path: str | Path) -> CandidateExport:
     """Read and pin a revised export; refuse legacy, C1, and malformed C2 records."""
     p = Path(path)
@@ -922,10 +962,11 @@ def read_candidate_export(path: str | Path) -> CandidateExport:
     for key in ("parameters", "training_provenance", "diagnostics"):
         if not isinstance(summary.get(key), dict):
             raise ValueError(f"{p}: model_family={fam!r} but {key!r} is missing or not a mapping")
-    if summary.get("fit_method") != "marginal_then_carrier":
+    fit_method = summary.get("fit_method")
+    if fit_method not in ("marginal_then_carrier", "alternating_conditional_map"):
         raise ValueError(
-            f"{p}: revised candidate exports must declare fit_method='marginal_then_carrier'; "
-            f"got {summary.get('fit_method')!r}"
+            f"{p}: revised candidate exports must declare fit_method='marginal_then_carrier' "
+            f"or 'alternating_conditional_map'; got {fit_method!r}"
         )
     if summary.get("lambda_source") != "fixed_reference":
         raise ValueError(
@@ -934,13 +975,24 @@ def read_candidate_export(path: str | Path) -> CandidateExport:
         )
     if summary.get("shared_phase_evidence") != "not_identified_by_marginal_score":
         raise ValueError(
-            f"{p}: marginal_then_carrier exports must not claim causal sharing; "
+            f"{p}: revised exports must not claim causal sharing; "
             f"shared_phase_evidence={summary.get('shared_phase_evidence')!r}"
         )
     diag = dict(summary["diagnostics"])
-    for stage in ("marginal_fit", "carrier_fit"):
-        if not _valid_stage_fit(diag.get(stage)):
-            raise ValueError(f"{p}: diagnostics.{stage}.valid must be true with finite diagnostics")
+    if fit_method == "marginal_then_carrier":
+        for stage in ("marginal_fit", "carrier_fit"):
+            if not _valid_stage_fit(diag.get(stage)):
+                raise ValueError(f"{p}: diagnostics.{stage}.valid must be true with finite diagnostics")
+    else:
+        if not _valid_alternating_fit(diag.get("alternating_conditional_map")):
+            raise ValueError(
+                f"{p}: diagnostics.alternating_conditional_map must carry finite non-increasing "
+                "full objective history"
+            )
+        if not _valid_fixed_ou_hyperparameters(diag):
+            raise ValueError(
+                f"{p}: alternating_conditional_map exports must declare finite fixed OU hyperparameters"
+            )
     params = dict(summary["parameters"])
     for key in ("lam", "sigma", "d_scalar"):
         v = float(params.get(key, float("nan")))

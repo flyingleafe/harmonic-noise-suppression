@@ -19,7 +19,9 @@ continuity that the removed whole-frame order mask destroyed.
 from __future__ import annotations
 
 import math
+import json
 from itertools import combinations
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -1480,3 +1482,131 @@ def test_the_harmonic_chunk_is_a_memory_device_only():
     whole = RP.predict_spectrum(_with_harmonic_chunk(export, None), clip, n_fft=256, hop=128)
     chunked = RP.predict_spectrum(_with_harmonic_chunk(export, 1), clip, n_fft=256, hop=128)
     assert np.allclose(whole, chunked, rtol=1e-10)
+
+
+def test_backtracking_accepts_only_a_full_objective_decrease():
+    p = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float64))
+    named = {"p": p}
+    before = RP._snapshot_parameters(named)
+    with torch.no_grad():
+        p.fill_(4.0)  # full proposal makes (p-1)^2 worse than at p=0
+    proposed = RP._snapshot_parameters(named)
+
+    accepted, value, step, backtracks = RP._backtrack_segment(
+        named,
+        before,
+        proposed,
+        before_objective=1.0,
+        objective=lambda: float((p - 1.0).square().item()),
+        max_halvings=4,
+    )
+
+    assert accepted
+    assert step == pytest.approx(0.25)
+    assert backtracks == 2
+    assert value < 1.0
+    assert p.item() == pytest.approx(1.0)
+
+
+def test_backtracking_restores_the_block_when_every_half_step_fails():
+    p = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float64))
+    named = {"p": p}
+    before = RP._snapshot_parameters(named)
+    with torch.no_grad():
+        p.fill_(8.0)
+    proposed = RP._snapshot_parameters(named)
+
+    accepted, value, step, backtracks = RP._backtrack_segment(
+        named,
+        before,
+        proposed,
+        before_objective=0.0,
+        objective=lambda: float((p - 1.0).square().item()),
+        max_halvings=4,
+    )
+
+    assert not accepted
+    assert value == 0.0
+    assert step == 0.0 and backtracks == 4
+    assert p.item() == pytest.approx(0.0)
+
+def test_alternating_fit_exports_fixed_hyperparams_and_history():
+    n = 256 + 2 * 128
+    clip = _planted_clip(theta=np.zeros(n), n_frames=3, seed=11)
+    cfg = _tiny_fit_config(
+        fit_method="alternating_conditional_map",
+        training_recipe="full",
+        fixed_lambda=6.0,
+        fixed_sigma=3.10117415072719,
+        initial_d=2.0 * math.pi * 13.07,
+        alternating_cycles=1,
+        alternating_block_iters=1,
+        alternating_lr=0.001,
+        alternating_backtracks=2,
+        frames_per_step=1,
+        iters=1,
+    )
+    export = RP.fit_revised(
+        [(clip.clip_id, clip)],
+        rig_id="dregon",
+        dynamics=RP.ShaftDynamics(
+            lam=99.0, sigma=99.0, d_init=999.0, identified=True, diagnostics={}
+        ),
+        config=cfg,
+    )
+
+    assert export["fit_method"] == "alternating_conditional_map"
+    assert export["parameters"]["lam"] == pytest.approx(6.0)
+    assert export["parameters"]["sigma"] == pytest.approx(3.10117415072719)
+    alt = export["diagnostics"]["alternating_conditional_map"]
+    assert alt["valid"] and len(alt["objective_history"]) == 2
+    assert alt["loss_trace"][0] == pytest.approx(
+        export["diagnostics"]["initial_full_objective_after_reset"]
+    )
+    assert np.all(np.diff(np.asarray(alt["loss_trace"], dtype=float)) <= 1e-9)
+
+
+
+def test_alternating_contract_history_is_full_objective_monotone(tmp_path: Path):
+    export = _tiny_export(profile_db=(0.0, -3.0), n_mics=1, bias_mean_hz=0.0)
+    export["fit_method"] = "alternating_conditional_map"
+    export["lambda_source"] = "fixed_reference"
+    export["shared_phase_evidence"] = "not_identified_by_marginal_score"
+    export["diagnostics"]["alternating_conditional_map"] = {
+        "valid": True,
+        "loss_trace": [10.0, 9.0, 9.0],
+        "objective_history": [
+            {
+                "cycle": 1,
+                "block": "carrier",
+                "full_objective_before": 10.0,
+                "full_objective_after": 9.0,
+                "accepted": True,
+                "accepted_step": 0.5,
+            },
+            {
+                "cycle": 1,
+                "block": "spectral",
+                "full_objective_before": 9.0,
+                "full_objective_after": 9.0,
+                "accepted": False,
+                "accepted_step": 0.0,
+            },
+        ],
+    }
+    export["diagnostics"]["fixed_ou_hyperparameters"] = {
+        "lambda_": 6.0,
+        "sigma": 3.10117415072719,
+        "provenance": "test",
+    }
+    path = tmp_path / "alt.json"
+    path.write_text(json.dumps(export))
+
+    from experiments.stochastic_fit import revised_eval as RE
+
+    assert RE.read_candidate_export(path).fit_contract["fit_method"] == "alternating_conditional_map"
+
+    export["diagnostics"]["alternating_conditional_map"]["loss_trace"] = [10.0, 11.0]
+    path.write_text(json.dumps(export))
+    with pytest.raises(ValueError, match="non-increasing full objective"):
+        RE.read_candidate_export(path)

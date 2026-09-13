@@ -855,7 +855,7 @@ def test_revised_export_must_declare_valid_c2_contract(tmp_path: Path) -> None:
     assert RE.read_candidate_export(p).fit_contract["fit_method"] == "marginal_then_carrier"
 
     for field, value, pattern in (
-        ("fit_method", "moment_then_map", "fit_method='marginal_then_carrier'"),
+        ("fit_method", "moment_then_map", "fit_method=.*marginal_then_carrier"),
         ("lambda_source", "estimated", "lambda_source='fixed_reference'"),
         ("shared_phase_evidence", "identified", "must not claim causal sharing"),
     ):

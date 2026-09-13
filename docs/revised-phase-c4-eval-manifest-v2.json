@@ -1,0 +1,325 @@
+{
+ "schema": "revised-phase-baseline/1",
+ "status": "ROUND4 C4 check manifest: DREGON alternating_conditional_map C4 + unchanged Michael C3 on frozen v2 protocol/calibration.",
+ "notes": [
+  "Round4 C4 check: protocol/gates/cohorts/guard/calibration unchanged from frozen v2.",
+  "DREGON candidate is C4 alternating_conditional_map fitted from C3 DREGON training warm start.",
+  "Michael candidate is unchanged C3 export sha256 22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc; no retraining."
+ ],
+ "scorer": {
+  "experiment": "hppnet_l2_r2_s0",
+  "ckpt": "best",
+  "note": "the runner records the resolved checkpoint path, size and SHA-256 in every output"
+ },
+ "observation": {
+  "sr": 16000,
+  "n_fft": 16384,
+  "hop": 1024,
+  "f_min": 30.0,
+  "f_max": 7900.0,
+  "window": "periodic Hann",
+  "note": "frozen convention; the band is never narrowed to hide filter loss",
+  "training_guard_seconds": 1.024
+ },
+ "gates": {
+  "alpha": 0.05,
+  "bootstrap_seed": 0,
+  "dregon_gap_fraction": 0.7,
+  "michaels_ratio_max": 1.05,
+  "composite_tolerance": 0.0
+ },
+ "null_variation": {
+  "rule": "baseline render-seed split half, clustered at recording level, one-sided upper bound",
+  "seeds": [
+   2001,
+   2002,
+   2003,
+   2004
+  ],
+  "metrics": [
+   "pit_mae",
+   "ltas_abs_db"
+  ],
+  "composite_note": "the composite score is deterministic given the export and the real clip, so its null variation is exactly zero"
+ },
+ "composite_temperature": {
+  "rule": "T = J / H on the actual unnormalized composite risk weights; the fit divides: L / T",
+  "master_seed": 9001,
+  "B": 16,
+  "note": "B internal predictive MC draws of the legacy baseline on the calibration supports, derived from master_seed; proposed to Main before any candidate fit"
+ },
+ "cohorts": [
+  {
+   "name": "dregon_room2_cruise",
+   "rig": "dregon",
+   "role": "primary",
+   "gate": "dregon_pit",
+   "dataset": "DREGON-frames",
+   "version": null,
+   "channels": null,
+   "scoring_rps_key": "motors_command",
+   "scoring_rps_note": "the five room2 no-source flights publish motors_command / motors_command_raw / rps_refined only; motors_command is their raw telemetry",
+   "recordings": [
+    "free-flight_nosource_room2",
+    "hovering_nosource_room2",
+    "updown_nosource_room2",
+    "rectangle_nosource_room2",
+    "spinning_nosource_room2"
+   ],
+   "family_selection": {
+    "basis_recordings": [
+     "free-flight_nosource_room2",
+     "hovering_nosource_room2",
+     "updown_nosource_room2",
+     "rectangle_nosource_room2",
+     "spinning_nosource_room2"
+    ],
+    "require_identity_coverage": true
+   },
+   "regimes": [
+    {
+     "regime": "cruise",
+     "min_rps": 65.0,
+     "max_rps": null,
+     "evaluation": {
+      "mode": "explicit",
+      "windows": [
+       {
+        "recording": "free-flight_nosource_room2",
+        "start_s": 1512727397.2050455,
+        "duration_s": 4.0,
+        "lineage": "v1-valid-unchanged"
+       },
+       {
+        "recording": "hovering_nosource_room2",
+        "start_s": 1511903905.3944898,
+        "duration_s": 4.0,
+        "lineage": "v1-valid-unchanged"
+       },
+       {
+        "recording": "updown_nosource_room2",
+        "start_s": 1511903578.348311,
+        "duration_s": 4.0,
+        "lineage": "v2-earliest-legal-continuous-native-aligned-guarded-run"
+       },
+       {
+        "recording": "rectangle_nosource_room2",
+        "start_s": 1511905725.952559,
+        "duration_s": 4.0,
+        "lineage": "v2-earliest-legal-continuous-native-aligned-guarded-run"
+       },
+       {
+        "recording": "spinning_nosource_room2",
+        "start_s": 1511905200.978012,
+        "duration_s": 4.0,
+        "lineage": "v2-earliest-legal-continuous-native-aligned-guarded-run"
+       }
+      ],
+      "guard_rule": "each explicit evaluation window must be disjoint from every training/calibration support widened symmetrically by observation.training_guard_seconds; no auto/stride fallback"
+     },
+     "note": "v2 metadata-only repair: explicit five-recording 4s cruise split after applying the hashed 1.024s symmetric training guard; same recordings/raw motors_command/all rotors >=65."
+    }
+   ],
+   "families": {
+    "refined": {
+     "cruise": {
+      "path": "results/S2/dregon_room2_cruise_refined.json"
+     }
+    },
+    "raw": {
+     "cruise": {
+      "path": "results/S2/dregon_flight.json",
+      "provenance": {
+       "recordings": [
+        "free-flight_nosource_room2"
+       ],
+       "starts_s": [
+        1512727417.2050455
+       ],
+       "seconds": 16.0,
+       "dataset": "DREGON-frames",
+       "rps_key": "motors_command",
+       "note": "DECLARED: this legacy export carries no data block. It names one recording only, so it cannot cover the five-recording cohort by identity and is reported ineligible rather than cycled."
+      }
+     }
+    }
+   },
+   "baseline_map": {
+    "cruise": {
+     "from_regime": "cruise",
+     "match": "identity"
+    }
+   }
+  },
+  {
+   "name": "michaels_fly124",
+   "rig": "michaels",
+   "role": "held_out",
+   "gate": "michaels_ratio",
+   "dataset": "michaels-frames",
+   "version": null,
+   "channels": null,
+   "scoring_rps_key": "rps",
+   "recordings": [
+    "FLY124"
+   ],
+   "fit_recording": "FLY125",
+   "family_selection": {
+    "basis_recordings": [
+     "FLY125"
+    ],
+    "require_identity_coverage": false
+   },
+   "regimes": [
+    {
+     "regime": "standby",
+     "min_rps": 20.0,
+     "max_rps": 45.0,
+     "family": "raw",
+     "select_family": false,
+     "family_note": "only one standby export exists (results/S2/standby.json, raw era), so there is nothing to select between",
+     "evaluation": {
+      "mode": "auto",
+      "min_seconds": 8.0,
+      "stride_s": 8.0,
+      "max_windows": 2
+     }
+    },
+    {
+     "regime": "ramp",
+     "min_rps": 45.0,
+     "max_rps": 65.0,
+     "family": "refined",
+     "select_family": false,
+     "evaluation": {
+      "mode": "support",
+      "context_seconds": 8.0,
+      "min_support_seconds": 0.95,
+      "max_windows": 1
+     },
+     "note": "FLY124 ramp is ONE fixed-event point benchmark: ~0.99s of 45-65 rev/s material inside an 8s context window; the scored support is the pre-registered ramp interval, not the whole window"
+    },
+    {
+     "regime": "cruise",
+     "min_rps": 65.0,
+     "max_rps": null,
+     "evaluation": {
+      "mode": "auto",
+      "min_seconds": 8.0,
+      "stride_s": 8.0,
+      "max_windows": 2
+     }
+    }
+   ],
+   "families": {
+    "refined": {
+     "cruise": {
+      "path": "results/S2/cruise_8clip_refined.json"
+     }
+    },
+    "raw": {
+     "cruise": {
+      "path": "results/S2/cruise_8clip.json",
+      "provenance": {
+       "recordings": [
+        "FLY125"
+       ],
+       "starts_s": [
+        16.0,
+        32.0,
+        48.0,
+        64.0,
+        96.0,
+        112.0,
+        128.0,
+        144.0
+       ],
+       "seconds": 16.0,
+       "dataset": "michaels-frames",
+       "rps_key": "rps",
+       "note": "DECLARED: legacy export, no data block. Starts taken from the refined-era export's identical window grid; Main must confirm before freezing."
+      }
+     },
+     "standby": {
+      "path": "results/S2/standby.json",
+      "provenance": {
+       "recordings": [
+        "FLY125"
+       ],
+       "starts_s": [
+        1.78
+       ],
+       "seconds": 13.5,
+       "dataset": "michaels-frames",
+       "rps_key": "rps",
+       "note": "ACCEPTED conservative envelope: whole known standby event [1.78, 15.28]s. Exact start unknown; this is the declared training provenance for the raw-era standby export. Calibration fits may use any non-overlapping [2,10]-style standby support; do not force a refit or drop the regime."
+      }
+     }
+    }
+   },
+   "baseline_map": {
+    "standby": {
+     "from_regime": "standby",
+     "match": "aggregate",
+     "extrapolated": true,
+     "label": "FLY125 standby export, applied to held-out FLY124 standby (cross-recording extrapolation)"
+    },
+    "cruise": {
+     "from_regime": "cruise",
+     "match": "aggregate",
+     "extrapolated": true,
+     "label": "FLY125 cruise export aggregate, applied to held-out FLY124 cruise (cross-recording extrapolation)"
+    },
+    "ramp": {
+     "from_regime": "cruise",
+     "match": "aggregate",
+     "extrapolated": true,
+     "label": "FLY125 cruise export aggregate used for FLY124 RAMP \u2014 an explicit current-model extrapolation; no fitted ramp baseline exists and none is invented"
+    }
+   }
+  }
+ ],
+ "arms": {
+  "real": {
+   "kind": "real"
+  },
+  "baseline": {
+   "kind": "export_render"
+  },
+  "candidate": {
+   "kind": "revised_export",
+   "label": "round4 C4: DREGON alternating_conditional_map + unchanged Michael C3",
+   "per_rig": {
+    "dregon": {
+     "export": "results/revised_phase/c4/dregon.json",
+     "fit_manifest_sha256": "3bc94036eb56520d0aa343d9676f9cf508cec3c507bdbd36a1544325ad41be6d"
+    },
+    "michaels": {
+     "export": "results/revised_phase/c3/michaels.json",
+     "fit_manifest_sha256": "53619ca8d73cbac8d24c6f6da810cc7878c72501e71a7f7e000d7497332f5d8f"
+    }
+   }
+  }
+ },
+ "candidate_arm_template": {
+  "note": "NOT an arm: the shape --check expects once a candidate exists. Copy it to arms.candidate. A 'model_family' export must use kind 'revised_export' (dispatched to revised_phase.render_revised / predict_spectrum); a legacy file must use 'export_render'. Each door refuses the other's file. Render seeds are NEVER declared here: --check uses the frozen null_variation.seeds for every arm.",
+  "kind": "revised_export",
+  "export": "results/revised_phase/round2/v2/<rig>/candidate.json",
+  "fit_manifest_sha256": "<the frozen fit manifest digest the candidate was fitted under>",
+  "label": "candidate 1: shared_shaft_ou"
+ },
+ "out_dir": "results/revised_phase/c4/eval_v2",
+ "calibration_path": "results/revised_phase/baseline_v2/calibration.json",
+ "calibration_input": {
+  "path": "results/revised_phase/baseline_v2/calibration.json",
+  "sha256": "b0832ba9c5f8b5a290e0043ed7e396b63bf5cfe17710e09c59ce5143f3a1ac3c",
+  "source": "omnirun-outputs/revised-phase-round2-v2--82591d/results/revised_phase/baseline_v2/calibration.json",
+  "lineage": "unchanged frozen v2 calibration reused for C3 check"
+ },
+ "candidate_artifacts": {
+  "dregon": {},
+  "michaels": {
+   "sha256": "22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc"
+  }
+ }
+}
