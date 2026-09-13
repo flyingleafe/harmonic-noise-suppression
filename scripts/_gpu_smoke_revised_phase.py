@@ -122,7 +122,7 @@ def main() -> int:
         k_cap=cfg.k_cap,
         delay_s=cfg.delay_s,
         frame_chunk=1,
-        harmonic_chunk=32,
+        harmonic_chunk=8,
         temperature=1.0,
         atom_dtype="float32",
     )
