@@ -273,7 +273,7 @@ def _production_moment_config() -> RP.FitConfig:
 
 def _synthetic_harmonic_clip(
     rps: np.ndarray,
-    thetas: dict[int, np.ndarray],
+    thetas: dict[tuple[int, int], np.ndarray],
     d: float,
     *,
     n_mics: int = 8,
@@ -282,43 +282,44 @@ def _synthetic_harmonic_clip(
 ) -> Clip:
     """A clip whose audio is a sum of harmonics with optional phase noise.
 
-    ``thetas`` maps an order ``k`` to a shaft-phase path (radians); the same
-    path across orders gives a shared shaft, different paths give independent
-    per-order motions.  ``d`` is the independent acoustic diffusion in
-    rad^2/s, added as a Wiener phase per harmonic.
+    ``thetas`` maps ``(rotor_index, order_k)`` to a shaft-phase path (radians);
+    the same path across orders of one rotor gives a shared shaft, different
+    paths give independent per-order motions.  ``d`` is the independent
+    acoustic diffusion in rad^2/s, added as a Wiener phase per harmonic.
     """
     rng = np.random.default_rng(seed)
     R, T = rps.shape
-    assert R == 1
     sr = float(SR)
     audio = np.zeros((n_mics, T), dtype=np.float64)
     phase_raw = 2.0 * math.pi * np.cumsum(rps, axis=1) / sr
-    for k, theta in thetas.items():
+    for (r, k), theta in thetas.items():
         eps = np.zeros(T, dtype=np.float64)
         if d > 0.0:
             eps = np.cumsum(rng.normal(0.0, np.sqrt(2.0 * d / sr), size=T))
         for m in range(n_mics):
             alpha = rng.uniform(0.0, 2.0 * math.pi)
-            audio[m] += np.cos(k * phase_raw[0] + k * theta + eps + alpha)
+            audio[m] += np.cos(k * phase_raw[r] + k * theta + eps + alpha)
     return Clip(clip_id, "synthetic", audio.astype(np.float32), rps, SR)
 
 
 def _real_like_rps(duration_s: float = 48.0, seed: int = 0) -> np.ndarray:
-    """A single-rotor RPS trajectory: 8 s standby @20, 8 s ramp to 80, 32 s cruise @80."""
+    """Four-rotor RPS trajectories: 8 s standby @20, 8 s ramp to 80, 32 s cruise @80."""
     rng = np.random.default_rng(seed)
     T = int(duration_s * SR)
-    rps = np.empty(T, dtype=np.float64)
+    base = np.empty(T, dtype=np.float64)
     standby_samples = int(8.0 * SR)
     ramp_samples = int(16.0 * SR)
-    rps[:standby_samples] = 20.0
-    rps[standby_samples:ramp_samples] = np.linspace(
+    base[:standby_samples] = 20.0
+    base[standby_samples:ramp_samples] = np.linspace(
         20.0, 80.0, ramp_samples - standby_samples
     )
-    rps[ramp_samples:] = 80.0
-    # tiny telemetry-like jitter so the trajectory is not perfectly piecewise-linear
-    rps += rng.normal(0.0, 0.05, size=T)
+    base[ramp_samples:] = 80.0
+    # small rotor-to-rotor offsets plus telemetry-like jitter
+    rps = np.stack(
+        [base + rng.normal(0.0, 0.1, size=T) + offset for offset in [0.0, 0.2, -0.1, 0.15]]
+    )
     rps = np.clip(rps, 20.0, None)
-    return rps[None, :]
+    return rps
 
 
 def _ou_path(T: int, lam: float, sigma: float, seed: int = 0) -> np.ndarray:
@@ -341,17 +342,23 @@ def _run_cpu_planted_control(out: Path | None) -> int:
     T = rps.shape[1]
     lam_true, sigma_true, d_true = 6.0, 6.0, 0.05
 
-    # shared shaft: all orders feel the same theta
-    theta_shared = _ou_path(T, lam=lam_true, sigma=sigma_true, seed=21)
-    shared_orders = {k: theta_shared for k in range(2, 41)}
+    # shared shaft: all orders of each rotor feel the same rotor theta
+    shared_orders: dict[tuple[int, int], np.ndarray] = {}
+    for r in range(rps.shape[0]):
+        theta_shared = _ou_path(T, lam=lam_true, sigma=sigma_true, seed=21 + r)
+        for k in range(2, 41):
+            shared_orders[(r, k)] = theta_shared
     clip_shared = _synthetic_harmonic_clip(
         rps, shared_orders, d=d_true, n_mics=N_MICS, seed=31, clip_id="shared_shaft"
     )
 
-    # independent per-order: each order gets its own OU path with the SAME marginals
-    independent_orders: dict[int, np.ndarray] = {}
-    for k in range(2, 41):
-        independent_orders[k] = _ou_path(T, lam=lam_true, sigma=sigma_true, seed=100 + k)
+    # independent per-order: each (rotor, order) gets its own OU path with the SAME marginals
+    independent_orders: dict[tuple[int, int], np.ndarray] = {}
+    for r in range(rps.shape[0]):
+        for k in range(2, 41):
+            independent_orders[(r, k)] = _ou_path(
+                T, lam=lam_true, sigma=sigma_true, seed=100 * r + k
+            )
     clip_indep = _synthetic_harmonic_clip(
         rps, independent_orders, d=d_true, n_mics=N_MICS, seed=41, clip_id="independent_per_order"
     )
