@@ -35,8 +35,8 @@ Two worktrees now matter:
 
 | Tier | Authority | Current commit / path | Role |
 |---|---:|---|---|
-| SMALL source/config/tests | this worktree | `fe075f2f53020f46f8a09256117e970251a0799b` | fixed-carrier implementation, 3 fit manifests, 2 eval manifests, focused tests |
-| LARGE documents | independent docs worker | `a5f51651d04ed71ff20168b7a28b3441eb251ec8` | four long QMD explainers/campaign docs updated and rendered |
+| SMALL source/config/tests | this worktree | `/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.worktrees/revised-phase-preflight` at `fe075f2f53020f46f8a09256117e970251a0799b` | fixed-carrier implementation, 3 fit manifests, 2 eval manifests, focused tests |
+| LARGE documents | independent docs worker | `/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.worktrees/revised-phase` at `a5f51651d04ed71ff20168b7a28b3441eb251ec8` | four long QMD explainers/campaign docs updated and rendered |
 | This handoff | SMALL | `docs/experiments/revised-phase-handoff-2026-09-13.qmd` | closeout summary for the next agent |
 
 Large docs updated by the docs worker, not by SMALL:
@@ -75,6 +75,8 @@ Estimator semantics:
 - Shared integrated-OU phase broadening and independent Wiener residual broadening are marginalized in the expected periodogram. They are **not** estimated trajectories.
 - Lambda is fixed at `6.0 s^-1` as the reference assumption.
 - `sigma`, scalar `D`, profiles, floors, speed laws and mic power parameters remain trainable globals.
+- C3 warm starts are staged from `omnirun-outputs/revised-phase-c3-fits-ad2c57/results/revised_phase/c3/{dregon,michaels}.json` into `results/revised_phase/c3/{rig}.json`: DREGON SHA-256 `5d232ed9760b000a39583c54c8f9d9ee5e5baccfbedec2d63c5f6d5615956831`, Michael SHA-256 `22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc`. Fixed C4 loads **globals only** from those files; no bias and no MAP-state warm start.
+- DREGON fixed C4 resets the initial `D` to `82.1212319648372` and initial `sigma` to `3.10117415072719`; both are then free. Michael fixed C4 keeps the C3 global initial `D`/`sigma`; both are then free.
 - Bias fields remain in `parameters` only for compatibility and must be exactly zero; they are not optimized.
 - No MAP state, no fitted clip/population bias, no learned delay, no `carrier_fit.valid`, no recovered-carrier claim.
 
@@ -128,16 +130,16 @@ Frozen protocol/data/checkpoint/calibration:
 | Michael composite temperature | `15.214066879865468` |
 | DREGON PIT target | `1.897062542673336` |
 | DREGON LTAS baseline/tolerance | `2.136169143073238` / `0.05595793956082849` |
-| Michael MAE ratio gate | `<= 1.05` |
+| Michael MAE ratio gate | `E=(E_standby+E_ramp+E_cruise)/3`, `ratio=E_candidate/E_baseline <= 1.05`; baseline `3.026661398168452` |
 
 Prior C2 and C3 gate artifacts:
 
-| Round artifact | Overall | DREGON PIT mean candidate / target | DREGON composite delta | DREGON LTAS candidate | Michael ratio |
-|---|---:|---:|---:|---:|---:|
-| `omnirun-outputs/revised-phase-round2-v2--82591d/results/revised_phase/round2/eval_v2/gates.json` | fail | `9.347665728259988` / `1.897062542673336` | `-11474.552935701178` | `2.4230805972169502` | fail; cruise `1.2316223434050422`, ramp `0.4393874978452157`, standby `105.14307827306017` |
-| `omnirun-outputs/revised-phase-c3-eval-733d43/results/revised_phase/c3/eval_v2/gates.json` | fail | `69.31143066855915` / `1.897062542673336` | `-10853.753018558247` | `2.4337617952979103` | pass; cruise `1.362783915197165`, ramp `0.4217332138492895`, standby `4.019261956560474` |
+| Round artifact | Overall | DREGON PIT mean candidate / target | DREGON composite delta | DREGON LTAS candidate | Michael gate ratio | Diagnostic per-regime ratios |
+|---|---:|---:|---:|---:|---:|---|
+| `omnirun-outputs/revised-phase-round2-v2--82591d/results/revised_phase/round2/eval_v2/gates.json` | fail | `9.347665728259988` / `1.897062542673336` | `-11474.552935701178` | `2.4230805972169502` | fail; `4.161924784806722` | diagnostic only: cruise `1.2316223434050422`, ramp `0.4393874978452157`, standby `105.14307827306017` |
+| `omnirun-outputs/revised-phase-c3-eval-733d43/results/revised_phase/c3/eval_v2/gates.json` | fail | `69.31143066855915` / `1.897062542673336` | `-10853.753018558247` | `2.4337617952979103` | pass; about `0.6257` | diagnostic only: cruise `1.362783915197165`, ramp `0.4217332138492895`, standby `4.019261956560474` |
 
-C3 Michael's pass is **historical generator/fixed-candidate evidence only**. It is not proof that the new fixed-carrier C4 Michael arm passes.
+C3 Michael's pass is **historical generator/fixed-candidate evidence only**. It is not proof that the new fixed-carrier C4 Michael arm passes. The diagnostic per-regime ratios above are not individual gates; the gate is the ratio of equal-regime means, not the mean of ratios.
 
 # 6. Verification actually run in SMALL
 
@@ -220,6 +222,7 @@ Import provenance check:
 Do **not** resume carrier recovery or alternating recovery just because files still exist historically. Specifically do not revive:
 
 - C4 carrier recovery/preflight;
+- honest production moment preflight `python-e25ee9`, which **failed**; the earlier PASS used an invalid scalar `theta[0]` fixture and must not be reused as proof;
 - `alternating_conditional_map` as the active C4 plan;
 - fitted carrier delay or fitted bias as a shortcut;
 - MAP carrier trajectories as ground truth;
@@ -251,7 +254,7 @@ First action is **not** another design round. First action is operational:
 Constraints remain frozen:
 
 - at most eight revised candidate rounds;
-- simplicity first; add complexity only after a named acceptance failure;
+- simplicity first; add complexity only after a named acceptance failure; after any early pass, user preference is to spend remaining rounds simplifying while preserving the incumbent;
 - one seed unless uncertainty would change the decision and the user agrees;
 - fixed raw HPP scoring target;
 - no changed gates, calibration, checkpoint, data regime, split, or protocol;
@@ -266,7 +269,10 @@ The prior submission blockage was a transport limit, not a scientific constraint
 Non-destructive options if a future user-authorized runner needs remote execution:
 
 - use scoped existing-auth push of the relevant campaign branch, no force push, no auth modification; or
-- create a public-base `930e57` runtime-only single-commit thin submission branch whose source hash matches SMALL; or
-- stage large inputs via the existing R2 capsule pattern.
+- create a public-base `930e57` runtime-only single-commit thin submission branch whose source hash matches SMALL.
+
+In either code-transport path, stage large inputs via the existing R2 capsule pattern; the R2 input capsule is required **in addition to** code push/thin bundle, not an alternative fix for a large code bundle.
+
+This HTML handoff is committed in the latest HEAD and enlarges the checkout. A future thin runtime branch should omit generated docs; the actual source-code reference remains `fe075f2f53020f46f8a09256117e970251a0799b`.
 
 This is **not** a user push ban. It is also **not** authorization to edit daemon/global infrastructure.

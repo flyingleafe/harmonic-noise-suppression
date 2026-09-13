@@ -2254,13 +2254,13 @@ Operational decision
 <tr class="odd">
 <td>SMALL source/config/tests</td>
 <td style="text-align: right;">this worktree</td>
-<td><code>fe075f2f53020f46f8a09256117e970251a0799b</code></td>
+<td><code>/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.worktrees/revised-phase-preflight</code> at <code>fe075f2f53020f46f8a09256117e970251a0799b</code></td>
 <td>fixed-carrier implementation, 3 fit manifests, 2 eval manifests, focused tests</td>
 </tr>
 <tr class="even">
 <td>LARGE documents</td>
 <td style="text-align: right;">independent docs worker</td>
-<td><code>a5f51651d04ed71ff20168b7a28b3441eb251ec8</code></td>
+<td><code>/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.worktrees/revised-phase</code> at <code>a5f51651d04ed71ff20168b7a28b3441eb251ec8</code></td>
 <td>four long QMD explainers/campaign docs updated and rendered</td>
 </tr>
 <tr class="odd">
@@ -2307,6 +2307,8 @@ Operational decision
 <li>Shared integrated-OU phase broadening and independent Wiener residual broadening are marginalized in the expected periodogram. They are <strong>not</strong> estimated trajectories.</li>
 <li>Lambda is fixed at <code>6.0 s^-1</code> as the reference assumption.</li>
 <li><code>sigma</code>, scalar <code>D</code>, profiles, floors, speed laws and mic power parameters remain trainable globals.</li>
+<li>C3 warm starts are staged from <code>omnirun-outputs/revised-phase-c3-fits-ad2c57/results/revised_phase/c3/{dregon,michaels}.json</code> into <code>results/revised_phase/c3/{rig}.json</code>: DREGON SHA-256 <code>5d232ed9760b000a39583c54c8f9d9ee5e5baccfbedec2d63c5f6d5615956831</code>, Michael SHA-256 <code>22ba6cf29edb687f43d178403e4e710c9d49e6993cfc7a6ca438b5666f3274fc</code>. Fixed C4 loads <strong>globals only</strong> from those files; no bias and no MAP-state warm start.</li>
+<li>DREGON fixed C4 resets the initial <code>D</code> to <code>82.1212319648372</code> and initial <code>sigma</code> to <code>3.10117415072719</code>; both are then free. Michael fixed C4 keeps the C3 global initial <code>D</code>/<code>sigma</code>; both are then free.</li>
 <li>Bias fields remain in <code>parameters</code> only for compatibility and must be exactly zero; they are not optimized.</li>
 <li>No MAP state, no fitted clip/population bias, no learned delay, no <code>carrier_fit.valid</code>, no recovered-carrier claim.</li>
 </ul>
@@ -2471,19 +2473,20 @@ Operational decision
 </tr>
 <tr class="even">
 <td>Michael MAE ratio gate</td>
-<td><code>&lt;= 1.05</code></td>
+<td><code>E=(E_standby+E_ramp+E_cruise)/3</code>, <code>ratio=E_candidate/E_baseline &lt;= 1.05</code>; baseline <code>3.026661398168452</code></td>
 </tr>
 </tbody>
 </table>
 <p>Prior C2 and C3 gate artifacts:</p>
 <table class="caption-top table">
 <colgroup>
-<col style="width: 13%">
-<col style="width: 17%">
-<col style="width: 17%">
-<col style="width: 17%">
-<col style="width: 17%">
-<col style="width: 17%">
+<col style="width: 11%">
+<col style="width: 15%">
+<col style="width: 15%">
+<col style="width: 15%">
+<col style="width: 15%">
+<col style="width: 15%">
+<col style="width: 11%">
 </colgroup>
 <thead>
 <tr class="header">
@@ -2492,7 +2495,8 @@ Operational decision
 <th style="text-align: right;">DREGON PIT mean candidate / target</th>
 <th style="text-align: right;">DREGON composite delta</th>
 <th style="text-align: right;">DREGON LTAS candidate</th>
-<th style="text-align: right;">Michael ratio</th>
+<th style="text-align: right;">Michael gate ratio</th>
+<th>Diagnostic per-regime ratios</th>
 </tr>
 </thead>
 <tbody>
@@ -2502,7 +2506,8 @@ Operational decision
 <td style="text-align: right;"><code>9.347665728259988</code> / <code>1.897062542673336</code></td>
 <td style="text-align: right;"><code>-11474.552935701178</code></td>
 <td style="text-align: right;"><code>2.4230805972169502</code></td>
-<td style="text-align: right;">fail; cruise <code>1.2316223434050422</code>, ramp <code>0.4393874978452157</code>, standby <code>105.14307827306017</code></td>
+<td style="text-align: right;">fail; <code>4.161924784806722</code></td>
+<td>diagnostic only: cruise <code>1.2316223434050422</code>, ramp <code>0.4393874978452157</code>, standby <code>105.14307827306017</code></td>
 </tr>
 <tr class="even">
 <td><code>omnirun-outputs/revised-phase-c3-eval-733d43/results/revised_phase/c3/eval_v2/gates.json</code></td>
@@ -2510,11 +2515,12 @@ Operational decision
 <td style="text-align: right;"><code>69.31143066855915</code> / <code>1.897062542673336</code></td>
 <td style="text-align: right;"><code>-10853.753018558247</code></td>
 <td style="text-align: right;"><code>2.4337617952979103</code></td>
-<td style="text-align: right;">pass; cruise <code>1.362783915197165</code>, ramp <code>0.4217332138492895</code>, standby <code>4.019261956560474</code></td>
+<td style="text-align: right;">pass; about <code>0.6257</code></td>
+<td>diagnostic only: cruise <code>1.362783915197165</code>, ramp <code>0.4217332138492895</code>, standby <code>4.019261956560474</code></td>
 </tr>
 </tbody>
 </table>
-<p>C3 Michael’s pass is <strong>historical generator/fixed-candidate evidence only</strong>. It is not proof that the new fixed-carrier C4 Michael arm passes.</p>
+<p>C3 Michael’s pass is <strong>historical generator/fixed-candidate evidence only</strong>. It is not proof that the new fixed-carrier C4 Michael arm passes. The diagnostic per-regime ratios above are not individual gates; the gate is the ratio of equal-regime means, not the mean of ratios.</p>
 </section>
 <section id="verification-actually-run-in-small" class="level1">
 <h1>6. Verification actually run in SMALL</h1>
@@ -2581,6 +2587,7 @@ Operational decision
 <p>Do <strong>not</strong> resume carrier recovery or alternating recovery just because files still exist historically. Specifically do not revive:</p>
 <ul>
 <li>C4 carrier recovery/preflight;</li>
+<li>honest production moment preflight <code>python-e25ee9</code>, which <strong>failed</strong>; the earlier PASS used an invalid scalar <code>theta[0]</code> fixture and must not be reused as proof;</li>
 <li><code>alternating_conditional_map</code> as the active C4 plan;</li>
 <li>fitted carrier delay or fitted bias as a shortcut;</li>
 <li>MAP carrier trajectories as ground truth;</li>
@@ -2616,7 +2623,7 @@ Operational decision
 <p>Constraints remain frozen:</p>
 <ul>
 <li>at most eight revised candidate rounds;</li>
-<li>simplicity first; add complexity only after a named acceptance failure;</li>
+<li>simplicity first; add complexity only after a named acceptance failure; after any early pass, user preference is to spend remaining rounds simplifying while preserving the incumbent;</li>
 <li>one seed unless uncertainty would change the decision and the user agrees;</li>
 <li>fixed raw HPP scoring target;</li>
 <li>no changed gates, calibration, checkpoint, data regime, split, or protocol;</li>
@@ -2631,9 +2638,10 @@ Operational decision
 <p>Non-destructive options if a future user-authorized runner needs remote execution:</p>
 <ul>
 <li>use scoped existing-auth push of the relevant campaign branch, no force push, no auth modification; or</li>
-<li>create a public-base <code>930e57</code> runtime-only single-commit thin submission branch whose source hash matches SMALL; or</li>
-<li>stage large inputs via the existing R2 capsule pattern.</li>
+<li>create a public-base <code>930e57</code> runtime-only single-commit thin submission branch whose source hash matches SMALL.</li>
 </ul>
+<p>In either code-transport path, stage large inputs via the existing R2 capsule pattern; the R2 input capsule is required <strong>in addition to</strong> code push/thin bundle, not an alternative fix for a large code bundle.</p>
+<p>This HTML handoff is committed in the latest HEAD and enlarges the checkout. A future thin runtime branch should omit generated docs; the actual source-code reference remains <code>fe075f2f53020f46f8a09256117e970251a0799b</code>.</p>
 <p>This is <strong>not</strong> a user push ban. It is also <strong>not</strong> authorization to edit daemon/global infrastructure.</p>
 </section>
 
