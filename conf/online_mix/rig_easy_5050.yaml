@@ -1,0 +1,122 @@
+# ARM: EASY -- noise drawn from CLOSE NEIGHBOURHOODS of the two real rigs'
+# cruise fits, so every training rig sits near one of the two rigs the model is
+# evaluated on.
+# DERIVED from conf/online_mix/rig_fitted_5050.yaml -- do not hand-edit; it is a
+# mechanical rewrite of the base policy in which each stochastic source's
+# parameter SOURCE is replaced and NOTHING else moves. `ranges:` (the two rigs'
+# point fits, written by `experiments.stochastic_fit.run popexport`) gives way
+# to `preset_bank:`, a bank of finished parameter sets drawn offline by
+# `experiments.stochastic_fit.rig_sampler`; the weights, the full-flight
+# trajectory, `rps_scale_range`, `render_reuse`, the level draw, the silence
+# source, the speech source and the mixing policy are the base policy's.
+#
+# Both stochastic sources carry the SAME bank. The bank already mixes both
+# rigs' neighbourhoods 50 / 50, and keeping two sources preserves the base
+# policy's 0.4 / 0.4 / 0.2 weights and its TWO independent render pools, so the
+# reuse regime is unchanged and only the parameter family moves.
+#
+# What a window takes from the bank entry: the rig's IDENTITY -- timbre, floor
+# shape, line widths (and the shaft jitter derived from them), the
+# per-(mic, rotor) pattern, the floor's static share and the FITTED SPEED LAW
+# (`amp_exp`, `floor_exp`). A fitted rig's speed law travels with the rig,
+# exactly as `popexport` wrote it into the base policy, so `amp_rps_exponent`,
+# `amp_rps_exponent_floor` and `mic_gain_db` below are inert while a bank is
+# present; they are kept so this file stays a one-key diff.
+# What each entry takes from the BASE POLICY's own `ranges:` (drawn per entry at
+# build time, per rig, through `srn.sample_params`): the measured amplitude OU
+# process, the floor level/tilt drift, the per-mic modulation, the shaft-jitter
+# time constant and its per-clip log spread, the phase diffusion and the label
+# error. So the arms keep the base policy's DYNAMICS regime and differ from it
+# only in the rig family.
+# What the pool still imposes per window: `amp_rps_ref` (the window's own
+# hover), the gamma/jitter size scaling that goes with `rps_scale_range`, the
+# band taper, the level draw and the trajectory itself.
+#
+# bank: data/rig_banks/rig_easy_n2048.json, whose own provenance block records
+# the anchors, their SHA-256, the seed, the guard statistics and the git HEAD:
+#   python scripts/_build_rig_bank.py --mode neighbourhood \
+#       --name rig_easy_n2048 --n 2048 --strength 2.0 --seed 20260914 \
+#       --anchor results/S2/cruise_8clip.json:fly125_cruise_00 \
+#       --dynamics conf/online_mix/rig_fitted_5050.yaml:1 \
+#       --anchor results/S2/dregon_room2_cruise_refined.json\
+# :free-flight_nosource_room2_cruise_00 \
+#       --dynamics conf/online_mix/rig_fitted_5050.yaml:0
+#   The bank's speed exponents are BOUNDED to the fitted range
+#   (amp_exp [4.398, 14.111], floor_exp [0, 6.792]); see the arm's .md.
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+sources:
+  noise:
+  - kind: stochastic
+    weight: 0.4
+    line_mode: fm
+    n_harmonics: 80
+    render_reuse: 48
+    n_mics: 8
+    n_rotors: 4
+    drone_profile_range:
+    - 0.0
+    - 1.0
+    mic_gain_db:
+    - -7.0
+    - 0.0
+    amp_rps_exponent: 2.5
+    amp_rps_ref: 80.0
+    rps_scale_range:
+    - 0.45
+    - 1.2
+    rps:
+      kind: full_flight
+      aggressiveness: 1.0
+      flight_reuse: 32
+    amp_rps_exponent_floor: 2.5
+    preset_bank: data/rig_banks/rig_easy_n2048.json
+  - kind: stochastic
+    weight: 0.4
+    line_mode: fm
+    n_harmonics: 80
+    render_reuse: 48
+    n_mics: 8
+    n_rotors: 4
+    drone_profile_range:
+    - 0.0
+    - 1.0
+    mic_gain_db:
+    - -8.0
+    - 0.0
+    amp_rps_exponent: 2.5
+    amp_rps_ref: 80.0
+    rps_scale_range:
+    - 0.45
+    - 1.2
+    rps:
+      kind: full_flight
+      aggressiveness: 1.0
+      flight_reuse: 32
+    amp_rps_exponent_floor: 2.5
+    preset_bank: data/rig_banks/rig_easy_n2048.json
+  - kind: silence
+    weight: 0.2
+    n_channels: 8
+  speech:
+  - dataset: librispeech
+    subpath: LibriSpeech/train-clean-100
+policy:
+  stages:
+  - until: null
+    source_prob: 1.0
+    snr_db:
+      uniform:
+        low: -30.0
+        high: 0.0
+    speech_per_channel: independent
+    snr_per_channel: false
+    augmentations:
+      probability: 0.5
+      choices:
+      - random_gain:
+          min_db: -6.0
+          max_db: 6.0
+      - random_polarity: {}

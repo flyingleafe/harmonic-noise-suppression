@@ -144,6 +144,12 @@ def test_heldout_near_zero_profile_mode_has_a_bounded_initialization() -> None:
 
 
 def test_planted_population_recovers_predictive_profile_distribution() -> None:
+    # The VI stage draws from torch's GLOBAL generator, so this test's recovery
+    # ratios depended on how many torch draws earlier tests in the module had
+    # consumed: it passed alone and failed in-module at 0.2989 against its own
+    # 0.3 bound. Seeded here, as every other test in this module seeds its own
+    # numpy generator.
+    torch.manual_seed(11)
     freqs = np.linspace(0.0, 512.0, 129)
     times = np.linspace(0.0, 1.6, 17)
     rps = np.stack((np.full(17, 30.0), np.full(17, 47.0)))

@@ -1,0 +1,1131 @@
+---
+title: "A whole-flight rotor-noise model, assembled from operating-point fits"
+subtitle: "Blending the pre-revision stage-2 fits along the instantaneous rotor speed: construction, verification, and everything it gets wrong"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    code-fold: true
+    html-math-method: katex
+execute:
+  echo: false
+  warning: false
+---
+
+```{=html}
+<style>
+/* Long unbroken tokens — fit paths, clip ids, SHA-256 digests — must wrap
+   inside a table cell or a list item instead of pushing the column wider
+   than the content column. */
+table td, table th, li code, td code { overflow-wrap: anywhere; word-break: break-word; }
+</style>
+```
+
+```{python}
+import json
+from pathlib import Path
+
+import pandas as pd
+from IPython.display import HTML, Markdown
+from IPython.display import display as _d
+
+ROOT = Path.cwd()
+while not (ROOT / "results").exists() and ROOT != ROOT.parent:
+    ROOT = ROOT.parent
+ASSETS = "flight-startup"
+
+
+def load_root(p):
+    """Rooted at the repository — the convention of `rotor-noise-fit.qmd`."""
+    p = ROOT / p
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+IDX = {
+    (kind, rig): load_root(f"docs/explainers/{ASSETS}/{kind}_{rig}.json")
+    for kind in ("startup", "flight")
+    for rig in ("michaels", "dregon")
+}
+CHECKS = load_root(f"docs/explainers/{ASSETS}/verify.json")
+RIGS = ("michaels", "dregon")
+RIG_NAME = {"michaels": "Michael's FLY125", "dregon": "DREGON room 2"}
+
+
+def players(rows, width=250):
+    """One HTML row per arm pair — the page's only audio widget."""
+    out = [
+        "<table style='width:100%;border-collapse:collapse'>",
+        "<tr><th style='text-align:left'>window</th><th>real</th><th>flight model</th></tr>",
+    ]
+    for label, stem in rows:
+        cells = "".join(
+            f"<td style='padding:4px'><audio controls preload='metadata' "
+            f"style='width:{width}px' src='{ASSETS}/{stem}_{arm}.wav'></audio></td>"
+            for arm in ("real", "model")
+        )
+        out.append(f"<tr><td style='padding:4px'><b>{label}</b></td>{cells}</tr>")
+    out.append("</table>")
+    return HTML("\n".join(out))
+
+
+def at(series, t, ramp_s=0.05):
+    return float(series[int(round(t / ramp_s))])
+```
+
+::::: {.callout-note}
+## What this page is, and what it does not claim
+
+This page documents a **sandbox assembly**, not a model fit. It takes the
+**pre-revision** stage-2 fits — the previous coherent-lines + Lorentzian-width
+family, the same vectors §16 to §19 of
+[rotor-noise-fit](rotor-noise-fit.html) reports — and glues them into one
+generator that can be driven over a **whole flight**, from stopped rotors
+through spin-up, standby, the ramp and cruise.
+
+Nothing was refitted. No new likelihood was evaluated. **This is not a
+revised-phase campaign candidate, it has not been scored by any gate, and it
+makes no gate claim of any kind.** It is not an incumbent, it is not a
+candidate, and it is not evidence about spin-up physics.
+
+Every number below comes from
+`docs/explainers/flight-startup/{startup,flight}_<rig>.json` or
+`verify.json`, written by `scripts/_flight_startup_render.py`. The model lives
+in `src/experiments/stochastic_fit/flight_model.py`.
+:::::
+
+## 1. What this is
+
+A stage-2 fit is a fit of **one operating point**. Each parameter vector was
+estimated on a window where the rotors barely move — FLY125's standby near
+35 rev/s, its cruise near 80 rev/s, DREGON's room-2 cruise near 80 rev/s — so a
+single vector has no business rendering a flight in which the speed goes from
+zero to cruise. The renderer will happily accept such a trajectory, and §20 of
+[rotor-noise-fit](rotor-noise-fit.html) already says what that means: the ramp
+between standby and cruise is an extrapolation no fit has seen.
+
+This assembly does the cheap thing instead. Each fit becomes an **anchor**
+tagged with the mean rotor speed of its own fitted support. A zero-speed anchor
+is added implicitly, and it is **silence**. The model then interpolates between
+anchors as a function of the instantaneous smoothed mean rotor speed.
+
+That buys four properties a single-vector render does not have: exact silence
+when the rotors are stopped, a continuous level and spectrum through the
+standby-to-cruise ramp, a render whose comb frequency tracks the real telemetry
+over the whole flight, and — because the anchors go through the repo's declared
+physical-level path (§2.4) and are rendered with `normalize_rms=None` — an
+ABSOLUTE level that can be compared to the recording with no gain at all. It
+buys nothing else. In particular it does not make any statement about what
+happens *between* the anchors that was not already contained in the two
+endpoints.
+
+## 2. Construction
+
+### 2.1 The anchors
+
+```{python}
+cols = {}
+for rig in RIGS:
+    for a in IDX[("flight", rig)]["anchors"]:
+        cols[f"{rig} / {a['label']}"] = {
+            "fit file": a["fit"],
+            "clip selector": a["selector"],
+            "support window (telemetry)": a["support"],
+            "anchor speed (rev/s), measured": round(a["speed_rps"], 2),
+            "amp_exp, fitted": a["amp_exp_fitted"],
+            "floor_exp, fitted": a["floor_exp_fitted"],
+            "floor_exp, used by the model": a["floor_exp_used"],
+            "floor_exp rebased?": "YES" if a["floor_exp_rebased"] else "no",
+            "K (shared order grid)": IDX[("flight", rig)]["n_orders"],
+            "fit sha256": a["sha256"][:12] + "…" + a["sha256"][-8:],
+        }
+_d(pd.DataFrame(cols))
+```
+
+```{python}
+seen = {}
+for rig in RIGS:
+    for a in IDX[("flight", rig)]["anchors"]:
+        seen[a["fit"]] = a["sha256"]
+_d(
+    Markdown(
+        "Full SHA-256 of every anchor fit file:\n\n"
+        + "\n".join(f"* `{p}`<br/>`{h}`" for p, h in seen.items())
+    )
+)
+```
+
+The anchor speed is **measured, not declared**: the driver loads the raw
+telemetry of each fit's own support window and takes the mean over rotors and
+time. FLY125's standby fit lands at
+`{python} f"{IDX[('flight','michaels')]['anchors'][0]['speed_rps']:.2f}"` rev/s
+and its cruise fit at
+`{python} f"{IDX[('flight','michaels')]['anchors'][1]['speed_rps']:.2f}"` rev/s;
+DREGON's single anchor lands at
+`{python} f"{IDX[('flight','dregon')]['anchors'][0]['speed_rps']:.2f}"` rev/s.
+Michael's rig therefore has two anchors and DREGON has one, which is the whole
+reason the two rigs behave differently below.
+
+### 2.2 The weights
+
+Let the anchor speeds be $0 = s_0 < s_1 < \dots < s_A$, where $s_0$ is the
+implicit silence anchor. The weight of anchor $a \ge 1$ is the piecewise-linear
+hat that is one at its own speed and zero at its neighbours',
+
+$$
+w_a(s) \;=\;
+\max\!\left(0,\;
+\min\!\left(\frac{s - s_{a-1}}{s_a - s_{a-1}},\;
+            \frac{s_{a+1} - s}{s_{a+1} - s_a}\right)\right),
+$$
+
+with the top anchor clamped rather than extrapolated, $w_A(s) = 1$ for
+$s \ge s_A$. The silence anchor takes whatever is left,
+$w_0(s) = 1 - \sum_{a \ge 1} w_a(s)$, and it multiplies nothing — which is
+exactly why the model is silent at $s = 0$, where every $w_{a \ge 1}$ is
+$0$ identically.
+
+The render is a time-domain blend of per-anchor renders,
+
+$$
+y(t) \;=\; \sum_{a=1}^{A} w_a\!\big(s(t)\big)\, x_a(t),
+\qquad
+s(t) \;=\; \frac{1}{R}\sum_{r=1}^{R}\big(\mathrm{rps}_r * u\big)(t),
+$$
+
+where $u$ is a centred 50 ms moving average (edge-padded, so a trajectory that
+starts at rest still reads as rest at $t = 0$) and $x_a$ is anchor $a$ rendered
+over the **whole** trajectory by `stage2.render_from_export` with
+`normalize_rms=None`, so every arm carries the model's own absolute level.
+
+![Blend weights as pure functions of speed. Left: Michael's two anchors and the implicit silence anchor. Right: DREGON's single anchor, whose weight is just $s/s_1$ below the anchor.](flight-startup/blend_weights.png)
+
+### 2.3 Why the anchors are rendered phase-locked
+
+Blending two *independent* renders would be a mistake: two anchors driven by
+different random draws add in **power**, so the blend would be louder and
+flatter than either endpoint and the mid-blend comb would be a pair of
+decorrelated tone banks rather than one tone bank at an interpolated amplitude.
+
+So every anchor is rendered with the **same seed**, the same microphone count,
+the same work rate, and — critically — the same $(R, K)$ order grid. That last
+condition is what makes the random draws identical: `params_from_export`
+derives `n_harmonics` from the profile's second axis, and
+`stochastic_rotor_noise.synthesize` draws in a sequence determined purely by
+shapes (the floor's white noise is `(mics, samples)`, the per-(mic, order)
+propagation phases are `(mics, top)`, and every Gaussian-process draw
+short-circuits because the pre-revision fits set all GP standard deviations to
+zero). Give two anchors the same $K$ and they consume the same draws, so their
+floor noise, propagation phases and shaft phase are bit-identical. The blend is
+then an **amplitude** interpolation of one comb, which §3.2 measures.
+
+### 2.4 The level coordinate: the declared physical path
+
+A stage-2 fit normalises its periodogram to unit mean and exports the
+parameters in **that** unit. The scale it divided out is recorded as the clip's
+`scores.power_scale`, and it differs by more than 15 dB between Michael's two
+anchors:
+
+```{python}
+cols = {}
+for rig in RIGS:
+    for a in IDX[("flight", rig)]["anchors"]:
+        cols[f"{rig} / {a['label']}"] = {
+            "scores.power_scale": f"{a['power_scale']:.6e}",
+            "folded into profile_db, floor_mean_db (dB)": a["power_scale_folded_db"],
+            "render-units term (dB)": a["render_units_rate_factor_db"],
+            "work grid (Hz)": a["render_units_sample_rate_work"],
+        }
+_d(pd.DataFrame(cols))
+```
+
+`flight_model.physical_export` folds both offsets in, reusing the repo's own
+declared functions rather than a local factor:
+`revised_eval._to_physical` for the per-clip `power_scale` fold (it applies to
+`revised_eval.ABSOLUTE_POWER_DB_FIELDS`, i.e. `profile_db` and
+`floor_mean_db`), then `revised_eval.to_renderer_units` for the declared
+sample-rate term $10\log_{10}(f_\text{work}/f_\text{analysis})$. The term is
+taken at the grid the render actually runs on — 44.1 kHz, `stage2`'s own
+default — which contributes
+`{python} f"{IDX[('flight','michaels')]['anchors'][0]['render_units_rate_factor_db']:+.3f}"` dB
+rather than the declared 64 kHz path's +6.021 dB. That term is common to every
+anchor, so it sets the absolute level and cannot change the level step between
+anchors; the `power_scale` fold is what changes the step, by
+`{python} f"{IDX[('flight','michaels')]['anchors'][1]['power_scale_folded_db'] - IDX[('flight','michaels')]['anchors'][0]['power_scale_folded_db']:+.2f}"` dB
+on Michael's pair.
+
+This is only meaningful with `normalize_rms=None`, which `render_flight`
+passes: `synthesize`'s default rescales the whole waveform and erases exactly
+the quantity being established. `flight_model.assemble` **refuses** an anchor
+that has not been through this path — the first version of this model fed
+`render_from_export` the raw per-clip `params`, and §6.5 records what that
+measured.
+
+What the path yields is the source-side level of ONE declared observation
+chain (`stage2.RENDER_TRANSFER_SPEC`), not a calibrated absolute source
+spectrum. But because `power_scale` came from the real recording's own
+periodogram, the result is in that recording's digital units, which is what
+makes the comparisons in §4 direct and gain-free.
+
+## 3. Does it hold together
+
+### 3.1 Exact zero-speed silence
+
+```{python}
+rows = []
+for rig in RIGS:
+    sc = CHECKS[rig]["silence_check"]
+    rows.append(
+        {
+            "rig": rig,
+            "peak |x| over 1.0 s of stopped rotors": repr(sc["peak_abs"]),
+            "max blend weight": repr(sc["max_weight"]),
+            "max smoothed speed (rev/s)": repr(sc["max_speed_rps"]),
+            "exactly zero": "PASS" if sc["exact"] else "FAIL",
+        }
+    )
+_d(pd.DataFrame(rows).set_index("rig"))
+```
+
+Both rigs render one second of stopped rotors as **exactly** `0.0`, not merely
+small. That is a statement about the weights, not about the anchors: every
+anchor render at zero speed is *not* silent, because a stage-2 export keeps a
+speed-independent `floor_static_rel` term. What is zero is the weight that
+multiplies it.
+
+**What this proves:** the assembly cannot leak a tone or a floor into a
+stopped-rotor stretch of a flight, so a long trajectory can contain genuine
+silence. **What it does not prove:** that silence is the *right* answer — see
+§6.1, where it is the single worst thing about this model.
+
+### 3.2 The anchors really are phase-locked
+
+```{python}
+v = CHECKS["michaels"]
+rows = [
+    {
+        "pair": f"same seed ({v['seed']}), {v['same_seed_pair'][0]} vs {v['same_seed_pair'][1]}",
+        "min": min(v["same_seed_per_mic_corr"]),
+        "max": max(v["same_seed_per_mic_corr"]),
+        "per-mic": str(v["same_seed_per_mic_corr"]),
+    },
+    {
+        "pair": f"different seeds ({v['seed']} vs {v['other_seed']}), cruise vs cruise",
+        "min": min(v["different_seed_per_mic_corr"]),
+        "max": max(v["different_seed_per_mic_corr"]),
+        "per-mic": str(v["different_seed_per_mic_corr"]),
+    },
+]
+_d(pd.DataFrame(rows).set_index("pair"))
+_d(
+    Markdown(
+        f"Both arms rendered on a constant {v['speed_rps']:.2f} rev/s trajectory, "
+        f"high-passed at {v['highpass_hz']:.0f} Hz before correlating (below that, "
+        "a single dominant order makes the correlation a statement about one "
+        f"tone's phase, not about the render), K = {v['n_orders']}."
+    )
+)
+```
+
+Two anchors sharing a seed correlate at
+`{python} f"{min(CHECKS['michaels']['same_seed_per_mic_corr']):.2f}"`–`{python} f"{max(CHECKS['michaels']['same_seed_per_mic_corr']):.2f}"`
+per microphone; the same anchor under a different seed correlates at
+`{python} f"{min(CHECKS['michaels']['different_seed_per_mic_corr']):.3f}"`–`{python} f"{max(CHECKS['michaels']['different_seed_per_mic_corr']):.3f}"`.
+
+**What this proves:** the mechanism works — the anchors are realizations of the
+same noise and the same phases, so summing them with weights interpolates
+amplitude rather than adding power. **What it does not prove:** that the
+correlation *should* be 1. It is not 1, and should not be: the two anchors have
+genuinely different spectra, so even with identical draws their waveforms
+differ. The number to watch is the contrast between the two rows, not the
+absolute value of the first.
+
+DREGON has one anchor, so it has no same-seed pair to report; the different-seed
+row is still measured for it in `verify.json` and reads
+`{python} f"{min(CHECKS['dregon']['different_seed_per_mic_corr']):.3f}"`–`{python} f"{max(CHECKS['dregon']['different_seed_per_mic_corr']):.3f}"`.
+
+### 3.3 At an anchor's own speed, the blend is that anchor
+
+```{python}
+rows = []
+for rig in RIGS:
+    b = CHECKS[rig]["blend_at_anchor"]
+    rows.append(
+        {
+            "rig": rig,
+            "anchor": b["anchor"],
+            "its weight": b["weights"],
+            "other weights": ", ".join(b["other_weights"]) or "—",
+            "max |weight − 1|": f"{b['weight_max_dev_from_one']:.2e}",
+            "max |blend − anchor|": f"{b['max_abs_residual']:.3e}",
+            "anchor RMS": f"{b['anchor_rms']:.6f}",
+            "anchor peak": f"{b['anchor_peak']:.3f}",
+        }
+    )
+_d(pd.DataFrame(rows).set_index("rig"))
+```
+
+**What this proves:** the weights are a partition, not a rescaling — evaluated
+at an anchor's own speed the blend returns that anchor's render, to a residual
+of
+`{python} f"{CHECKS['michaels']['blend_at_anchor']['max_abs_residual']:.1e}"`
+(Michael) and
+`{python} f"{CHECKS['dregon']['blend_at_anchor']['max_abs_residual']:.1e}"`
+(DREGON) against anchor peaks of
+`{python} f"{CHECKS['michaels']['blend_at_anchor']['anchor_peak']:.1f}"` and
+`{python} f"{CHECKS['dregon']['blend_at_anchor']['anchor_peak']:.1f}"`. The
+residual is not zero and the reason is understood and uninteresting: the 50 ms
+moving average of a *constant* trajectory is not bit-exactly constant
+(cumulative-sum rounding), so the hat weight lands within
+`{python} f"{max(CHECKS[r]['blend_at_anchor']['weight_max_dev_from_one'] for r in RIGS):.0e}"`
+of 1 rather than on it. Scaled by the anchor's peak that is exactly the
+residual observed. The neighbouring anchor's weight is exactly `0`, so it
+contributes nothing. **What it does not prove:** anything about the blend
+*between* anchors, which is where all the approximation lives.
+
+## 4. The whole flight
+
+Both rigs are rendered over the raw telemetry of a real flight with one seed
+(`{python} str(IDX[('flight','michaels')]['seed'])`) and **no gain of any
+kind**. Because the anchors come through the physical-level path (§2.4) and
+are rendered with `normalize_rms=None`, the model's output is already in the
+real recording's own digital units — `power_scale` is the normalisation of
+*that* recording's periodogram — so every level below is a prediction, not a
+fit. The quantity reported as the **physical level residual** is the gain that
+*would* have been needed to match the trailing steady segment; zero means the
+model predicted the recording's absolute level.
+
+```{python}
+rows = []
+for rig in RIGS:
+    r = IDX[("flight", rig)]
+    reg = r["diagnostics"]["region_fraction"]
+    rows.append(
+        {
+            "rig": rig,
+            "window": f"{r['recording']} @{r['start_s']:.3f} +{r['seconds']:g} s",
+            "K": r["n_orders"],
+            "real RMS (dBFS)": r["rms_dbfs"]["real"],
+            "model RMS (dBFS)": r["rms_dbfs"]["model"],
+            "physical residual, last "
+            f"{r['match_window_s']:g} s (dB)": r["physical_level_residual_db"],
+            "gain applied": "none" if not r["match_gain_applied"] else "yes",
+            "ramp corr": r["ramp_correlation"],
+            **{f"frac {k}": v for k, v in reg.items()},
+        }
+    )
+_d(pd.DataFrame(rows).set_index("rig").T.fillna("—"))
+```
+
+The `frac` rows are the share of samples in each blend region. Michael's
+window exercises all three — silence-to-standby, standby-to-cruise, and above
+the cruise anchor — which is the point of choosing FLY125 `[0, 90)` s.
+
+### 4.1 Michael's FLY125
+
+![FLY125 `[0, 90)` s. Top: real and model spectrograms of microphone 0, the model panel on the real panel's colour scale. Bottom left: per-50 ms level of both arms, both at their own absolute level. Bottom right: smoothed mean speed with the anchor blend weights.](flight-startup/flight_michaels.png)
+
+```{python}
+_d(players([("FLY125 [0, 90) s", "flight_michaels")]))
+```
+
+```{python}
+r = IDX[("flight", "michaels")]
+rows = []
+for key, tag in (("segments", "broadband"), ("segments_hp300", "above 300 Hz")):
+    for name, seg in r[key].items():
+        rows.append(
+            {
+                "segment": f"{name}, {tag}",
+                "span (s)": f"[{seg['span_s'][0]:g}, {seg['span_s'][1]:g})",
+                "real (dB)": seg["real"],
+                "model (dB)": seg["model"],
+                "model − real (dB)": seg["model_minus_real_db"],
+            }
+        )
+_d(pd.DataFrame(rows).set_index("segment"))
+bb, hp = r["segments_step_db"], r["segments_hp300_step_db"]
+_d(
+    Markdown(
+        f"**Level step, {bb['between'][0]} → {bb['between'][1]}.** Broadband: real "
+        f"**{bb['real']:+.2f} dB**, model **{bb['model']:+.2f} dB** "
+        f"(**{bb['model_minus_real']:+.2f} dB**). Above 300 Hz: real "
+        f"**{hp['real']:+.2f} dB**, model **{hp['model']:+.2f} dB** "
+        f"(**{hp['model_minus_real']:+.2f} dB**)."
+    )
+)
+```
+
+Read the *above 300 Hz* rows first. There the model predicts Michael's absolute
+level, with no gain, to
+`{python} f"{r['segments_hp300']['standby']['model_minus_real_db']:+.2f}"` dB in
+standby and
+`{python} f"{r['segments_hp300']['cruise']['model_minus_real_db']:+.2f}"` dB in
+cruise, 70 s apart and two different fitted vectors. The step it predicts
+between the two regimes is
+`{python} f"{hp['model']:+.2f}"` dB against the recording's
+`{python} f"{hp['real']:+.2f}"` dB.
+
+Broadband the residual is larger and it is *not* spread across the spectrum.
+§4.3 localises it.
+
+### 4.2 DREGON room 2
+
+![`free-flight_nosource_room2` `[+0, 70)` s from 1512727390.5. Same four panels; DREGON has a single anchor, so its weight is simply $s/s_1$ below 80.8 rev/s and 1 above. The model panel saturates against the real panel's colour scale because the model really is hotter — see §4.3.](flight-startup/flight_dregon.png)
+
+```{python}
+_d(players([("free-flight_nosource_room2 [0, 70) s", "flight_dregon")]))
+```
+
+```{python}
+rows = []
+for rig in RIGS:
+    rr = IDX[("flight", rig)]
+    lt, name = rr["settled_ltas"], rr["settled_ltas"]["segment"]
+    rows.append(
+        {
+            "rig": rig,
+            "settled segment": f"{name} [{lt['span_s'][0]:g}, {lt['span_s'][1]:g})",
+            "broadband model − real (dB)": rr["segments"][name]["model_minus_real_db"],
+            ">300 Hz model − real (dB)": rr["segments_hp300"][name]["model_minus_real_db"],
+            "LTAS shape mean |dev| (dB)": lt["mean_abs_db"],
+        }
+    )
+_d(pd.DataFrame(rows).set_index("rig").T)
+```
+
+DREGON's window sits at or near its single anchor throughout, so the blend is
+barely doing anything there and what is being tested is the fit plus the level
+path. Above 300 Hz the model lands
+`{python} f"{IDX[('flight','dregon')]['segments_hp300']['cruise']['model_minus_real_db']:+.2f}"` dB
+from the recording; broadband it is
+`{python} f"{IDX[('flight','dregon')]['segments']['cruise']['model_minus_real_db']:+.2f}"` dB
+too loud. The shape-only LTAS deviation (dB re 200–400 Hz, the acceptance
+probe's own seven bands from 100 Hz to 7.9 kHz) averages
+`{python} f"{IDX[('flight','michaels')]['settled_ltas']['mean_abs_db']:.2f}"` dB
+for Michael and
+`{python} f"{IDX[('flight','dregon')]['settled_ltas']['mean_abs_db']:.2f}"` dB
+for DREGON — but that statistic is referenced to 200–400 Hz and starts at
+100 Hz, so it is nearly blind to what §4.3 finds. What the DREGON panel shows
+that no level number does is **texture**: the real clip is full of broadband
+transients and striations that a stationary model does not produce.
+
+### 4.3 Where the residual is: the first two rotor orders
+
+```{python}
+rows = {}
+for rig in RIGS:
+    ab = IDX[("flight", rig)]["settled_absolute_bands"]
+    rows[rig] = {
+        f"{lo:g}–{hi:g} Hz": d
+        for lo, hi, d in zip(ab["edges_hz"], ab["edges_hz"][1:], ab["model_minus_real_db"])
+    }
+_d(pd.DataFrame(rows))
+```
+
+ABSOLUTE band levels, model minus real, over each rig's settled segment — not
+shape-normalised, and reaching down to 20 Hz where the LTAS statistic does not
+go. Above 300 Hz every band on both rigs is within
+`{python} f"{max(abs(d) for rig in RIGS for lo, d in zip(IDX[('flight',rig)]['settled_absolute_bands']['edges_hz'], IDX[('flight',rig)]['settled_absolute_bands']['model_minus_real_db']) if lo >= 300):.1f}"` dB.
+The entire broadband residual sits in 50–200 Hz.
+
+```{python}
+rows = []
+for rig in RIGS:
+    lo_ = IDX[("flight", rig)]["settled_low_orders"]
+    for tag, key in (("line (k)", "line_model_minus_real_db"), ("null (k+0.5)", "null_model_minus_real_db")):
+        rows.append(
+            {
+                "rig": rig,
+                "at": tag,
+                **{f"k={k}": d for k, d in zip(lo_["orders"], lo_[key])},
+            }
+        )
+_d(pd.DataFrame(rows).set_index(["rig", "at"]))
+```
+
+This separates a LINE error from a FLOOR error: the comb bins carry the lines,
+and the half-integer orders are the null where no rotor line can exist (the
+acceptance probe's own convention). The answer is unambiguous. On DREGON the
+nulls — the broadband floor — agree to between
+`{python} f"{min(IDX[('flight','dregon')]['settled_low_orders']['null_model_minus_real_db']):+.1f}"`
+and
+`{python} f"{max(IDX[('flight','dregon')]['settled_low_orders']['null_model_minus_real_db']):+.1f}"` dB
+at every probed order, while the LINES are over-predicted by
+`{python} f"{IDX[('flight','dregon')]['settled_low_orders']['line_model_minus_real_db'][0]:+.1f}"` dB
+at order 1 (`{python} f"{IDX[('flight','dregon')]['settled_low_orders']['line_hz'][0]:.0f}"` Hz)
+and
+`{python} f"{IDX[('flight','dregon')]['settled_low_orders']['line_model_minus_real_db'][1]:+.1f}"` dB
+at order 2, falling to
+`{python} f"{IDX[('flight','dregon')]['settled_low_orders']['line_model_minus_real_db'][-1]:+.1f}"` dB
+by order 10. Michael shows the same pattern
+(`{python} f"{IDX[('flight','michaels')]['settled_low_orders']['line_model_minus_real_db'][0]:+.1f}"` dB
+at order 1), with noisier nulls because its real clip carries low-frequency
+rumble in exactly that region.
+
+This is **not** an out-of-band extrapolation. Every one of these fits declares
+`f_min = 30.0` Hz and `f_max = 7900.0` Hz in its own `spec`, so 50–200 Hz is
+**inside** the fitted band: the first two rotor orders were fitted, and the
+render still puts 19–26 dB too much power in them on DREGON. §4.4 finds out
+why.
+
+### 4.4 Render or fit? The three-curve diagnosis
+
+That excess is a blocking question, not a curiosity: the transfer-run training
+banks go through `stage2.params_from_export`, i.e. this same render path, so a
+20 dB low-order error would be baked into every training clip. So the question
+is where it lives — in the RENDER or in the FIT.
+
+The discriminating measurement compares three quantities per order, on each
+anchor's OWN fit support (so nothing is attributable to the blend), on the
+fit's own front end (16384-point Hann, no overlap), one microphone:
+
+1. **real** — the real clip's mean periodogram;
+2. **predicted_m** — `revised_eval.predicted_m`, the legacy family's own
+   forward law for the same physical export, i.e. what the FIT says the
+   periodogram is. This is the reference, 0 dB;
+3. **render** — `stage2.render_from_export`'s output, re-analysed on the same
+   grid.
+
+If (2) tracks (1) and (3) does not, the error is in the render. If (2) and (3)
+agree and both sit above (1), it is in the fit.
+
+```{python}
+DIAG = load_root(f"docs/explainers/{ASSETS}/low_order_diagnosis.json")
+for rig in RIGS:
+    d = DIAG[rig]
+    tab = pd.DataFrame(
+        [
+            {
+                "band": r["band"],
+                "w_k": r["coherent_share"],
+                "real": r["real"],
+                "render": r["render"],
+                "render, split fixed": r["render_split_outside"],
+                "closed form": r["predicted_render_error_db"],
+            }
+            for r in d["rows"]
+        ]
+    ).set_index("band")
+    _d(Markdown(f"**{rig}** — {d['anchor']} anchor on `{d['support']}`, mic {d['mic']}, dB re `predicted_m`"))
+    _d(tab.fillna("—"))
+```
+
+**Verdict: the RENDER path.** `predicted_m` tracks the real clip to within
+`{python} f"{max(abs(r['real']) for rig in RIGS for r in DIAG[rig]['rows'] if r['coherent_share'] is None):.1f}"` dB
+in every band above 300 Hz on both rigs, and the render tracks `predicted_m`
+there to within
+`{python} f"{max(abs(r['render']) for rig in RIGS for r in DIAG[rig]['rows'] if r['coherent_share'] is None):.1f}"` dB.
+At order 1 the render sits
+`{python} f"{DIAG['michaels']['rows'][0]['render']:+.2f}"` dB (Michael) and
+`{python} f"{DIAG['dregon']['rows'][0]['render']:+.2f}"` dB (DREGON) above the
+fit's own forward law, and at order 2
+`{python} f"{DIAG['michaels']['rows'][1]['render']:+.2f}"` /
+`{python} f"{DIAG['dregon']['rows'][1]['render']:+.2f}"` dB. The fit is not
+asking for that power; the renderer is adding it.
+
+#### The mechanism, with a closed form
+
+`synthesize` splits every order's power into a coherent share
+$w_k = e^{-(k/k_\text{half})^2}$ rendered as a tone bank and an incoherent
+share $1 - w_k$ rendered as narrowband noise. The incoherent share is added
+into `floor_spec` and `floor_audio` is realized from that sum. All the line
+numbers below are in `synthesize`'s `line_mode in ("coherent", "fm")` branch
+of `src/data_processing/stochastic_rotor_noise.py`, as of this render — the
+branch is the stable reference, the numbers are not. The incoherent add is
+`:1670`. The level of the tone bank is set by a ratio whose two sides then
+refer to **different spectra**:
+
+* `floor_mean = np.mean(psd["floor"])` — the floor ALONE (`:1685`);
+* `want = mean(coherent lines) / (floor_mean * floor_mic[m])` (`:1691`–`:1693`);
+* `have = var(line_audio[m]) / var(floor_audio[m])` — and `floor_audio`
+  INCLUDES the incoherent comb (`:1694`);
+* `scale = sqrt(want / have)` (`:1695`).
+
+So `scale` comes out high by exactly the factor the incoherent comb raises the
+broadband floor by,
+
+$$
+I \;=\; 1 \;+\; \frac{\overline{\,g_m \cdot \text{incoherent}\,}}
+                     {\overline{\text{floor}} \cdot \text{floor\_mic}_m},
+$$
+
+which is ONE factor on the WHOLE tone bank. The per-order error is therefore
+
+$$
+\Delta_k \;=\; 10\log_{10}\!\big(w_k\, I + (1 - w_k)\big),
+$$
+
+large only where the coherent share is large — the first two or three orders —
+and zero where the order's power is almost entirely incoherent. With $I$
+computed from the model spectra alone
+(`{python} f"{DIAG['michaels']['coherent_bank_inflation_db_this_mic']:+.2f}"` dB
+for Michael's mic 0,
+`{python} f"{DIAG['dregon']['coherent_bank_inflation_db_this_mic']:+.2f}"` dB
+for DREGON's) that expression is the **closed form** column above. It has no
+free parameters and it reproduces the measured render error to within
+`{python} f"{max(abs(r['render'] - r['predicted_render_error_db']) for rig in RIGS for r in DIAG[rig]['rows'] if r['predicted_render_error_db'] is not None):.2f}"` dB
+at every order on both rigs.
+
+The last confirmation is the **`render, split fixed`** column: the same render
+with the coherent/incoherent split performed OUTSIDE `synthesize`, as two
+independent renders that each carry half the floor power and neither of which
+performs a split — so inside each one `want` and `have` refer to the same
+spectrum. It lands within
+`{python} f"{max(abs(r['render_split_outside']) for rig in RIGS for r in DIAG[rig]['rows']):.2f}"` dB
+of the fit's own forward law at **every** order and every band, both rigs. That
+is a measurement of what the corrected mixing gives, not a patch.
+
+::::: {.callout-important}
+## The fix is one line, and this page has not applied it
+
+`want`'s denominator must be the mean of the SAME spectrum `floor_audio` was
+realized from — `np.mean(floor_spec[m])` — not `floor_mean * floor_mic[m]`.
+That is making the two sides of a ratio refer to one quantity, not a
+correction factor.
+
+It is not applied here because this page is a sandbox assembly and
+`stochastic_rotor_noise.synthesize` is on the training-data path used by
+everything else in the project; the change belongs to whoever owns that
+module, with its own tests. What this page owns is the diagnosis and the
+reproduction: `docs/explainers/flight-startup/low_order_diagnosis.json`.
+:::::
+
+#### The hypothesis this refutes
+
+The natural first guess was a units confusion between a per-hertz DENSITY
+weight and a MEAN-SQUARE power — the distinction
+`revised_phase`'s docstring draws at lines 45–47, with the declared conversion
+$P_\text{candidate} = 2 P_\text{legacy}/f_s$ at line 52 and in
+`revised_eval.legacy_profile_db_to_candidate` (`revised_eval.py:280`). A
+density-versus-mean-square error is a factor of the LINE WIDTH, and the widths
+are $\gamma_0 + \gamma_1 k$, so it would fall off with $k$.
+
+It is refuted, and the two rigs refute it sharply because their width laws
+differ:
+
+* Michael's cruise anchor has $\gamma_0 =
+  `{python} f"{DIAG['michaels']['gamma0']:.2f}"`$,
+  $\gamma_1 = `{python} f"{DIAG['michaels']['gamma_slope']:.3f}"`$ — widths
+  sweep a factor of ten over $k = 1\ldots10$;
+* DREGON's has $\gamma_0 = `{python} f"{DIAG['dregon']['gamma0']:.2f}"`$,
+  $\gamma_1 = `{python} f"{DIAG['dregon']['gamma_slope']:.3f}"`$ — widths
+  barely move, 13.3 to 15.2 Hz, so a width-conversion error would be nearly
+  FLAT in $k$.
+
+Yet both rigs show the same steep fall-off, and both are reproduced by a
+closed form containing no width at all. Setting `coherence_k_half = 0` (no
+split, widths untouched) removes the excess; `line_mode="stochastic"` (same
+widths, no tone bank) removes it too. And the declared legacy conversion is a
+LEGACY→CANDIDATE *seeding* factor: `params_from_export` is right not to apply
+it, because the legacy renderer consumes legacy units — which `predicted_m`
+confirms, agreeing with the render to ≤0.5 dB everywhere the coherent bank is
+not involved.
+
+#### What is left in the FIT, and a separate tilt
+
+The render bug is not the whole story, and the `real` column says so. Against
+the fit's own forward law the real clip sits
+`{python} f"{DIAG['dregon']['rows'][0]['real']:+.2f}"` dB at order 1 on DREGON
+and `{python} f"{DIAG['michaels']['rows'][0]['real']:+.2f}"` dB on Michael: the
+FIT itself over-predicts the lowest order, by about 8 dB on DREGON. The two
+contributions add — on DREGON, $13.3 + 8.2 \approx 21.4$ dB, which is the
+`{python} f"{IDX[('flight','dregon')]['settled_absolute_bands']['model_minus_real_db'][1]:+.1f}"` dB
+50–100 Hz excess §4.3 measured on the flight window. Fixing the render leaves
+a real, smaller, fit-side low-order over-prediction.
+
+Separately, and NOT explained by this mechanism: above 300 Hz the render and
+the fit agree to ≤0.5 dB, so any broadband tilt there is fit-side. Measured on
+mic 0, the real clip sits
+`{python} f"{DIAG['michaels']['rows'][6]['real']:+.2f}"` dB (300–700 Hz) to
+`{python} f"{DIAG['michaels']['rows'][10]['real']:+.2f}"` dB (4.5–7.9 kHz)
+below the fit on Michael — essentially flat, a uniform ~1.5 dB
+over-prediction — and
+`{python} f"{DIAG['dregon']['rows'][6]['real']:+.2f}"` to
+`{python} f"{DIAG['dregon']['rows'][10]['real']:+.2f}"` dB on DREGON, i.e. a
+mild tilt in which the model's HIGH bands are relatively ~1.5 dB LOW against
+its own 300–700 Hz agreement. Note the sign: relative to its own low-mid
+level the model is DARKER at high frequency, not brighter, which is the same
+direction as the shape-only LTAS deviations in §4.2
+(`{python} str(IDX[('flight','michaels')]['settled_ltas']['model_minus_real_db'])`,
+all negative above the 200–400 Hz reference). This is logged as its own
+finding; the coherent-bank mechanism cannot produce it, because it does not
+touch anything above order 3.
+
+## 5. Startup close-up
+
+Six seconds from rest, where the assembly is doing the most work and has the
+least support. Same seed, same physical level path, and again **no gain**: the
+levels below are absolute on both arms. The physical residual is quoted over
+the last 1.0 s of the window here rather than the last 5 s, because the window
+is only 6 s long.
+
+::: {layout-ncol=1}
+![FLY125 `[0, 6)` s.](flight-startup/startup_michaels.png)
+
+![`free-flight_nosource_room2` `[+0, 6)` s.](flight-startup/startup_dregon.png)
+:::
+
+```{python}
+_d(
+    players(
+        [
+            ("FLY125 [0, 6) s", "startup_michaels"),
+            ("free-flight_nosource_room2 [0, 6) s", "startup_dregon"),
+        ]
+    )
+)
+```
+
+```{python}
+ts = [0.0, 1.0, 2.0, 3.0, 4.0, 5.5]
+rows = []
+for rig in RIGS:
+    r = IDX[("startup", rig)]
+    for arm in ("real", "model"):
+        rows.append(
+            {
+                "rig": rig,
+                "arm": arm,
+                **{f"t={t:g} s": round(at(r["ramp_db"][arm], t), 2) for t in ts},
+            }
+        )
+    rows.append(
+        {
+            "rig": rig,
+            "arm": "speed (rev/s)",
+            **{f"t={t:g} s": round(at(r["speed_rps_ramp"], t), 1) for t in ts},
+        }
+    )
+_d(pd.DataFrame(rows).set_index(["rig", "arm"]))
+```
+
+```{python}
+rows = []
+for rig in RIGS:
+    r = IDX[("startup", rig)]
+    rows.append(
+        {
+            "rig": rig,
+            "ramp correlation": r["ramp_correlation"],
+            "real onset (s)": r["onset_s"]["real"] or "never reached",
+            "model onset (s)": r["onset_s"]["model"] or "never reached",
+            "real onset base (dB)": r["onset_base_db"]["real"],
+            "model onset base (dB)": r["onset_base_db"]["model"],
+            "real RMS (dBFS)": r["rms_dbfs"]["real"],
+            "model RMS (dBFS)": r["rms_dbfs"]["model"],
+            "physical residual, last 1 s (dB)": r["physical_level_residual_db"],
+        }
+    )
+_d(pd.DataFrame(rows).set_index("rig").T)
+```
+
+On Michael's startup window the model predicts the recording's absolute level
+over the settled standby second to
+`{python} f"{IDX[('startup','michaels')]['physical_level_residual_db']:+.2f}"` dB.
+On DREGON it is
+`{python} f"{IDX[('startup','dregon')]['physical_level_residual_db']:+.2f}"` dB
+too loud, which is the same broadband low-order excess §4.3 localises, measured
+on a shorter window.
+
+DREGON's ramp shape is the better one: correlation
+`{python} f"{IDX[('startup','dregon')]['ramp_correlation']:.3f}"`, with the
+model climbing out of silence and reaching its plateau at about 3.5 s, which is
+when the real rotors reach hover speed.
+
+Michael's correlation is the lower one,
+`{python} f"{IDX[('startup','michaels')]['ramp_correlation']:.3f}"`, and the
+reason is in the real arm, not the model. FLY125's broadband RMS is dominated by
+**sub-200 Hz rumble that is present from $t = 0$**: the real 50 ms level spans
+only
+`{python} f"{max(IDX[('startup','michaels')]['ramp_db']['real']) - min(IDX[('startup','michaels')]['ramp_db']['real']):.1f}"` dB
+over the whole spool-up, while the model — which has no rumble and no ambient —
+spans
+`{python} f"{max(IDX[('startup','michaels')]['ramp_db']['model']) - min(IDX[('startup','michaels')]['ramp_db']['model']):.1f}"` dB.
+Correlating a nearly flat series against a 60 dB ramp cannot score well however
+right the model is. The onset criterion says the same thing from the other side:
+the real arm never rises 20 dB above its own first 100 ms, so its onset is
+undefined, while the model's "onset" is just the first sample that is not
+exactly zero.
+
+The onset bases in the table are the reason those two onset times must not be
+compared: the real base is a genuine recorder/ambient floor
+(`{python} f"{IDX[('startup','dregon')]['onset_base_db']['real']:.1f}"` dB for
+DREGON) while the model's is the
+`{python} f"{IDX[('startup','dregon')]['onset_base_db']['model']:.1f}"` dB
+logarithm guard on exact silence.
+
+### 5.1 Where the comb lands
+
+```{python}
+ct = IDX[("startup", "michaels")]["comb_track"]
+_d(
+    Markdown(
+        f"Strongest line in {ct['band_hz'][0]:.0f}–{ct['band_hz'][1]:.0f} Hz, "
+        f"tracked every 100 ms. Over the settled window "
+        f"{ct['settled_window_s']} s the implied order is "
+        + ", ".join(f"**{k} {v:.2f}**" for k, v in ct["settled_implied_order"].items())
+        + " — the same line, to a fraction of an order."
+    )
+)
+sl = slice(0, len(ct["t_s"]))
+_d(
+    pd.DataFrame(
+        {
+            "t (s)": ct["t_s"][sl],
+            "speed (rev/s)": ct["speed_rps"][sl],
+            "real peak (Hz)": ct["peak_hz"]["real"][sl],
+            "model peak (Hz)": ct["peak_hz"]["model"][sl],
+            "real implied order": ct["implied_order"]["real"][sl],
+            "model implied order": ct["implied_order"]["model"][sl],
+        }
+    ).set_index("t (s)")
+)
+```
+
+Read the last four rows and then stop. Once FLY125 settles into standby both
+arms put the strongest line at the same place — about
+`{python} f"{ct['peak_hz']['real'][-1]:.0f}"` Hz real against
+`{python} f"{ct['peak_hz']['model'][-1]:.0f}"` Hz model — at the same implied
+order. Everywhere earlier the tracker **hops between orders** in both arms,
+which is a limitation of a single-peak tracker during a transient, not a
+measurement of a sweep.
+
+```{python}
+ctd = IDX[("startup", "dregon")]["comb_track"]
+_d(
+    Markdown(
+        "DREGON's tracker does **not** agree. Over its own settled window "
+        f"{ctd['settled_window_s']} s the implied order of the strongest "
+        f"{ctd['band_hz'][0]:.0f}–{ctd['band_hz'][1]:.0f} Hz line is "
+        + ", ".join(f"**{k} {v:.2f}**" for k, v in ctd["settled_implied_order"].items())
+        + " — different orders in the two arms. That is a weaker statement than "
+        "it looks: at 80 rev/s this band holds roughly orders 19 to 50, so "
+        "which one happens to be loudest is a fragile pick. It is reported "
+        "because it is measured, not because it diagnoses anything."
+    )
+)
+```
+
+::::: {.callout-warning}
+## Open, not established: does FLY125's real comb sweep further than the telemetry says?
+
+By eye, the real 6 s spectrogram shows a line pair descending from about
+2.95 kHz to about 1.75 kHz near 2.5 s and returning — an excursion of about
+1.69× — while the model's lines look flatter. It is tempting to conclude that
+the telemetry understates the real speed excursion. **That conclusion does not
+survive measurement, and this page does not make it.**
+
+The mean-over-rotors telemetry itself peaks at
+`{python} f"{ct['speed_excursion']['peak_rps']:.1f}"` rev/s near 1.55 s and
+troughs at `{python} f"{ct['speed_excursion']['trough_rps']:.1f}"` rev/s near
+2.5 s — an excursion of
+`{python} f"{ct['speed_excursion']['peak_rps'] / ct['speed_excursion']['trough_rps']:.2f}"`×,
+**larger** than the 1.69× the eye reads off the acoustic panel. An earlier
+1.28× figure was wrong: it came from two point samples at 1.5 s and 2.5 s that
+missed a short peak. And the single-peak tracker above hops across
+`{python} f"{min(ct['implied_order']['real']):.0f}"` to
+`{python} f"{max(ct['implied_order']['real']):.0f}"` implied order on the real
+arm during the transient, so it cannot assign a constant order to the visible
+sweep either.
+
+Two measurements, no verdict: the telemetry excursion
+(`{python} f"{ct['speed_excursion']['peak_rps'] / ct['speed_excursion']['trough_rps']:.2f}"`×)
+and the eyeballed acoustic excursion (1.69×) are the same size to within the
+precision of reading a spectrogram, and the order assignment through the
+transient is unresolved. Settling it needs a multi-line tracker keyed to the
+shaft, which nothing here has.
+:::::
+
+## 6. What is wrong with it
+
+::::: {.callout-important}
+## Six things, none of them softened
+
+**6.1 Exact zero-speed silence and a correct stopped-rotor floor are mutually
+exclusive here.** Silence comes from the hat weight, and the hat weight scales
+the **whole** anchor render — including `floor_static_rel`, the
+speed-independent term that *is* the recording chain's own floor. So the model
+predicts a silence neither recording has. With rotors stopped the real arms sit
+at
+`{python} f"{IDX[('startup','michaels')]['onset_base_db']['real']:.0f}"` dB
+(Michael) and
+`{python} f"{IDX[('startup','dregon')]['onset_base_db']['real']:.0f}"` dB
+(DREGON), and the model sits at
+`{python} f"{at(IDX[('startup','michaels')]['ramp_db']['model'], 0.0):.0f}"` dB
+and exactly zero respectively. Fixing this needs the static floor pulled out of
+the anchors and given its own speed-independent weight. That is a
+reparameterisation, not a tweak, and it is not done here.
+
+**6.2 The two rigs' floor ramps are not built the same way.** Michael's fitted
+floor exponents are positive
+(`{python} f"{IDX[('flight','michaels')]['anchors'][0]['floor_exp_fitted']:.2f}"`
+standby,
+`{python} f"{IDX[('flight','michaels')]['anchors'][1]['floor_exp_fitted']:.2f}"`
+cruise) and are used **exactly as fitted**, so Michael's floor carries its own
+fitted speed law *on top of* the hat weight. DREGON's fitted floor exponent is
+`{python} f"{IDX[('flight','dregon')]['anchors'][0]['floor_exp_fitted']:.3f}"`
+— negative, so its floor **diverges** as the rotors stop. The evidence, measured
+in `verify.json` rather than asserted: `motors_command` on the DREGON startup
+window is exactly zero for
+`{python} f"{CHECKS['dregon']['floor_divergence']['cruise']['zero_telemetry_fraction'] * 100:.1f}"` %
+of its samples, and rendering that anchor **unmodified** over the window
+produces
+`{python} str(CHECKS['dregon']['floor_divergence']['cruise']['nonfinite_samples'])`
+non-finite samples out of
+`{python} str(CHECKS['dregon']['floor_divergence']['cruise']['total_samples'])`
+(`{python} f"{CHECKS['dregon']['floor_divergence']['cruise']['nonfinite_fraction'] * 100:.1f}"` %)
+— `0 ** negative` is `inf`, smeared across a synthesis window by the
+65536-sample overlap-add. A zero weight cannot
+repair that, because `0 * inf` is `nan`. So `assemble` rebases a negative floor
+exponent to 0 and folds the anchor's own floor gain at its own speed into
+`floor_mean_db`. The transformation is recorded verbatim in the render
+diagnostics:
+
+> `{python} IDX[('flight','dregon')]['diagnostics']['anchor_notes']['cruise'][0]`
+
+Consequence: DREGON's sub-anchor floor ramp is an **assembly artefact** — the
+hat weight is the only thing fading it — whereas Michael's is a product of a
+fitted exponent and the weight. The two rigs' spin-up floors are therefore not
+comparable, and neither is a measurement.
+
+**6.3 Nothing was ever fitted between rest and the anchors.** No part of the
+spin-up is a measurement. The blend is an interpolation rule chosen for
+continuity and exact silence; it is only as good as its endpoints, and between
+them it is asserting, not reporting.
+
+**6.4 The interpolation is exact for some parameters and approximate for
+others.** It is exact parameter interpolation for everything entering the render
+linearly in amplitude at fixed phase — the per-(rotor, order) line amplitudes
+`profile_db` and the fixed per-(mic, rotor) line gains `mic_gain_db`, because a
+weighted sum of two phase-locked tone banks *is* the tone bank of the weighted
+sum of their amplitudes. It is an approximation for every parameter that shapes
+the spectrum non-linearly: line widths (`gamma0`, `gamma_slope`), floor shape
+(`floor_shape_db`, `floor_tilt_db_oct`), the coherent/incoherent split
+(`coherence_k_half`) and the speed exponents. Mid-blend the render carries a
+**mixture** of two widths and two floor shapes, not the interpolated width and
+shape.
+
+**6.5 FIXED, and worth keeping visible: the assembly first skipped the
+declared physical-level path.** The first version of this model handed
+`stage2.render_from_export` the RAW per-clip `params` dict. Those levels are
+expressed in each clip's own `scores.power_scale` unit, so the two Michael
+anchors were blended while sitting
+`{python} f"{IDX[('flight','michaels')]['anchors'][1]['power_scale_folded_db'] - IDX[('flight','michaels')]['anchors'][0]['power_scale_folded_db']:.2f}"` dB
+apart on a scale nobody had reconciled.
+
+**What the defect measured.** The standby-to-cruise level step came out
+**+4.26 dB** against the recording's **+14.40 dB** — a 10.14 dB
+under-prediction — and matching the model to the real clip took a **−25.41 dB**
+gain on the Michael flight window and **−31.93 dB** on DREGON's. The page then
+said the anchors "were never mutually calibrated". That diagnosis was wrong:
+they were calibrated, in `scores.power_scale`, and the assembly had not read
+it.
+
+**What it measures now.** Anchors go through `flight_model.physical_export`
+(§2.4), which reuses `revised_eval._to_physical` and
+`revised_eval.to_renderer_units`; `assemble` refuses an anchor that has not.
+With no gain applied anywhere, the broadband step is
+`{python} f"{IDX[('flight','michaels')]['segments_step_db']['model']:+.2f}"` dB
+against
+`{python} f"{IDX[('flight','michaels')]['segments_step_db']['real']:+.2f}"` dB
+and above 300 Hz it is
+`{python} f"{IDX[('flight','michaels')]['segments_hp300_step_db']['model']:+.2f}"` dB
+against
+`{python} f"{IDX[('flight','michaels')]['segments_hp300_step_db']['real']:+.2f}"` dB.
+Michael's flight ramp correlation went from 0.5693 to
+`{python} f"{IDX[('flight','michaels')]['ramp_correlation']:.4f}"`.
+
+**What is still wrong.** Folding `power_scale` did not make the step exact: it
+**overshoots** by
+`{python} f"{IDX[('flight','michaels')]['segments_step_db']['model_minus_real']:+.2f}"` dB
+broadband and
+`{python} f"{IDX[('flight','michaels')]['segments_hp300_step_db']['model_minus_real']:+.2f}"` dB
+above 300 Hz, and DREGON's absolute level is
+`{python} f"{IDX[('flight','dregon')]['segments']['cruise']['model_minus_real_db']:+.2f}"` dB
+high broadband. §4.3 localises all of it to the first two rotor orders, inside
+the fitted band, with the broadband floor correct to about a dB; §4.4 then
+attributes most of it — +13.3 dB of it on DREGON — to a one-line defect in
+`stochastic_rotor_noise.synthesize`'s coherent/incoherent mixing, and the rest
+to a genuine fit-side over-prediction of order 1. Relative loudness across
+regimes is usable to a few dB above 300 Hz and NOT usable broadband until that
+render defect is fixed.
+
+**6.6 The common order grid is $K = \max$, with $-200$ dB padding.** The
+anchors must share $K$ for the random draws to match (§2.3), and the natural
+choice — $K = \min$ — would have been destructive here: FLY125's standby fit
+legitimately reaches order 230 (7900 Hz at 35 rev/s) against the cruise fit's
+111, and 15.6 % of the standby fit's line power sits above order 111, i.e. in
+the 4–7.9 kHz band a spool-up render is judged on. So the shorter profile is
+padded at $-200$ dB instead, which is silence in float64. The padded orders are
+harmless for the shorter anchor: at *its* speed they sit above the output
+Nyquist anyway. Michael's model therefore runs at
+$K = `{python} str(IDX[('flight','michaels')]['n_orders'])`$ and DREGON's at
+$K = `{python} str(IDX[('flight','dregon')]['n_orders'])`$.
+:::::
+
+### 6.7 One more limitation, of the assets rather than the model
+
+FLY125's flight window is 90 s, not the 120 s originally wanted. The binding
+constraint is peak memory, not CPU: one anchor render measures 3.26 GB peak RSS
+at 30 s and 5.45 GB at 60 s — `synthesize` holds several
+`(mics, frames, 32769)` float64 spectra at a 65536-sample FFT — which projects
+to about 9.8 GB at 120 s against 12 GB available on the machine this was run on.
+The whole asset run — both rigs, both windows, every figure and every check —
+takes 212 s of wall clock and peaks at 7.6 GB resident. Nothing
+structural is lost: FLY125 is at rest until 2 s, holds standby near 35.5 rev/s
+from 2 to 16 s, ramps from 16 to 20 s and holds cruise near 80 rev/s from 20 s
+on, so `[0, 90)` already spans every blend region and 90–120 s would add only
+more cruise.
+
+## 7. What it is good for
+
+Useful, today:
+
+* **Listening to a whole flight.** The assets above are the first renders in
+  this project that go from stopped rotors to cruise in one continuous clip
+  with the comb tracking real telemetry throughout.
+* **An absolute-level prediction, above 300 Hz.** With no gain of any kind the
+  model lands within
+  `{python} f"{max(abs(IDX[('flight',rig)]['segments_hp300'][s]['model_minus_real_db']) for rig, s in (('michaels','standby'),('michaels','cruise'),('dregon','cruise'))):.2f}"`
+  dB of the recording's own level in all three settled regimes, across two
+  rigs and three fitted vectors. That is a materially stronger claim than a
+  spectrum-shape comparison, and it is a property of the declared level path
+  (§2.4), not of the blend.
+* **Finding a defect on the shared render path.** §4.4: because the physical
+  level path made an absolute comparison possible at all, the first two rotor
+  orders came out
+  `{python} f"{DIAG['dregon']['rows'][0]['render']:.0f}"` and
+  `{python} f"{DIAG['dregon']['rows'][1]['render']:.0f}"` dB above the legacy
+  fit's OWN forward law — a one-line inconsistency in
+  `stochastic_rotor_noise.synthesize`'s coherent/incoherent mixing, reproduced
+  by a closed form with no free parameters. That path is the training-data path
+  for the whole project, and none of it is visible under
+  `normalize_rms=0.1`.
+* **Exposing what the operating-point fits do not pin down.** After the render
+  defect is accounted for, the fit still over-predicts order 1 by about
+  `{python} f"{-DIAG['dregon']['rows'][0]['real']:.0f}"` dB on DREGON (§4.4),
+  and the DREGON fit's floor exponent cannot be evaluated at zero speed at all
+  (§6.2).
+* **A continuity baseline.** Any future model that claims to handle a whole
+  flight should beat piecewise-linear interpolation between two fits, and now
+  there is something to beat.
+
+Do **not** use it for:
+
+* **Acceptance scoring or any gate claim.** It has not been scored, it is not a
+  candidate, and the pre-revision family it is built from is not the revised
+  phase model.
+* **Training-data generation, broadband.** §4.4 and §6.1: the render path puts
+  up to
+  `{python} f"{max(DIAG[rig]['rows'][0]['render'] for rig in RIGS):.0f}"`
+  dB too much power in order 1 on top of a fit-side over-prediction of the same
+  order, and the stopped-rotor floor is absent entirely, so a trainer fed these
+  clips would learn a low-frequency balance and a silence that no recording
+  has. Above 300 Hz the level is defensible; below it, not until the render
+  defect is fixed.
+* **Any statement about spin-up physics.** Nothing between rest and the anchors
+  was fitted, measured, or validated. §6.3.
+* **Cross-rig comparison of the spin-up floor.** §6.2: the two rigs' floors are
+  built by different rules, one of which is an assembly artefact.
+```

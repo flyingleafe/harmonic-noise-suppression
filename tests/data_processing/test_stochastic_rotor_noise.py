@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from typing import Any
 
@@ -868,3 +869,131 @@ def test_per_rotor_floor_threshold_reaches_the_renderer_from_its_range():
         for peaks, centers in srn.line_peaks_by_rotor(profile)
     ]
     assert min(per_rotor) >= 0.95
+
+
+def test_preset_bank_renders_its_own_entries_and_refuses_a_mismatched_one(tmp_path):
+    """A bank REPLACES the ranges draw, uniformly and reproducibly.
+
+    The two entries carry profiles no range draw can produce (a rotor-dependent
+    ramp; ``sample_params`` median-centres its profiles and would never land on
+    one exactly), so an entry appearing in the rendered parameters proves the
+    bank was the source. The mismatch half is the other half of the contract: a
+    bank built for a different rig count must be refused when it is LOADED, not
+    when some later window happens to render it.
+    """
+
+    def entry(n_rotors: int, gamma0: float) -> dict[str, Any]:
+        k = 40
+        profile = np.arange(n_rotors)[:, None] + np.linspace(0.0, -20.0, k)[None, :]
+        return srn.params_to_entry(
+            srn.StochasticParams(
+                sample_rate=SR,
+                n_rotors=n_rotors,
+                n_harmonics=k,
+                profile_db=profile,
+                gamma0=np.full(n_rotors, gamma0),
+                gamma_slope=np.full(n_rotors, 0.2),
+                floor_ctrl_hz=np.geomspace(30.0, SR / 2, srn.FLOOR_SHAPE_N_CTRL),
+                floor_ctrl_db=np.zeros(srn.FLOOR_SHAPE_N_CTRL),
+                floor_tilt_db_oct=-3.0,
+                floor_mean_db=-20.0,
+            )
+        )
+
+    def write(path, entries):
+        path.write_text(
+            json.dumps({"format": srn.PRESET_BANK_FORMAT, "entries": entries}),
+        )
+        return path
+
+    bank = write(tmp_path / "bank.json", [entry(4, 2.0), entry(4, 9.0)])
+    common: dict[str, Any] = dict(
+        sample_rate=SR, duration_s=0.5, n_harmonics=40, n_mics=2, n_rotors=4
+    )
+    pool = srn.StochasticNoisePool(preset_bank=bank, **common)
+    seen = set()
+    for seed in range(8):
+        audio, _, params, _ = pool.render(np.random.default_rng(seed), 0.5)
+        assert np.isfinite(audio).all()
+        # the profile is the bank's, untouched; gamma is the bank's scaled by
+        # the window's own hover, which is the pool's job and not the bank's
+        drawn = pool._bank
+        assert drawn is not None
+        assert np.array_equal(params.profile_db, np.asarray(drawn[0].profile_db)) or (
+            np.array_equal(params.profile_db, np.asarray(drawn[1].profile_db))
+        )
+        seen.add(round(float(params.gamma0[0] / params.gamma_slope[0]), 6))
+    assert len(seen) == 2, "both entries must be drawn over eight windows"
+
+    first = pool.render(np.random.default_rng(3), 0.5)
+    second = srn.StochasticNoisePool(preset_bank=bank, **common).render(
+        np.random.default_rng(3), 0.5
+    )
+    assert np.array_equal(first[0], second[0])
+    assert np.array_equal(first[2].profile_db, second[2].profile_db)
+
+    wrong = write(tmp_path / "wrong.json", [entry(2, 2.0)])
+    with pytest.raises(ValueError, match="n_rotors 2 against the pool's 4"):
+        srn.StochasticNoisePool(preset_bank=wrong, **common)
+
+
+def test_coherent_share_lands_at_the_level_the_spectrum_asks_for():
+    """With the coherence split on, the tone bank must carry the power the model
+    gives it — no more.
+
+    ``synthesize`` scales the tone bank by ``sqrt(want / have)``, where ``have``
+    is measured against the REALIZED floor path. When ``coherence_k_half`` is
+    set, that path carries the incoherent share of the comb as well as the
+    floor, so ``want`` has to be taken against the same spectrum; against the
+    bare floor instead, the bank comes out high by ``sqrt(1 + incoherent /
+    floor)``, which is a low-order-only error because only low orders have a
+    large coherent share ``w_k``. This configuration puts the floor 40 dB under
+    the comb, which makes that factor large: the line-to-floor ratio of order 1
+    reads 17.7 dB over the model's own with the bare-floor denominator and 1.1
+    dB with the right one.
+
+    The comparison is a RATIO of two bands of the same render — the order-1 line
+    against a line-free 3-4 kHz band — so the one global constant of the
+    overlap-add transform cancels and the assertion is against the model
+    spectrum alone.
+    """
+    speed, n_fft = 80.0, 2048
+    params = srn.StochasticParams(
+        sample_rate=SR,
+        n_rotors=1,
+        n_harmonics=8,  # top line at 640 Hz, so 3-4 kHz is pure floor
+        profile_db=np.linspace(20.0, -10.0, 8)[None, :],
+        gamma0=np.array([2.0]),
+        gamma_slope=np.array([0.2]),
+        floor_ctrl_hz=np.geomspace(30.0, SR / 2, srn.FLOOR_SHAPE_N_CTRL),
+        floor_ctrl_db=np.zeros(srn.FLOOR_SHAPE_N_CTRL),
+        floor_tilt_db_oct=0.0,
+        floor_mean_db=-40.0,
+        harm_gp_std_db=0.0,
+        floor_gp_std_db=0.0,
+        floor_tilt_gp_std=0.0,
+        coherence_k_half=3.0,  # w_1 = 0.895, i.e. order 1 is almost all tone
+        amp_rps_ref=speed,
+    )
+    rps = np.full((1, SR), speed)
+    audio, diag = srn.synthesize(
+        params,
+        rps,
+        rng=np.random.default_rng(0),
+        n_mics=1,
+        n_fft=n_fft,
+        normalize_rms=None,
+        line_mode="fm",
+    )
+    freqs = diag["freqs"]
+    model = diag["floor"].mean(axis=0) + diag["lines"][0].mean(axis=0)
+    realized = _power_spectrum(np.asarray(audio[0], dtype=np.float64), n_fft=n_fft)[0]
+
+    df = float(freqs[1] - freqs[0])
+    line = np.abs(freqs - speed) <= 2.5 * df
+    floor_band = (freqs >= 3000.0) & (freqs <= 4000.0)
+
+    def ratio_db(spectrum: np.ndarray) -> float:
+        return float(10.0 * np.log10(spectrum[line].sum() / spectrum[floor_band].sum()))
+
+    assert ratio_db(realized) == pytest.approx(ratio_db(model), abs=2.0)

@@ -1,0 +1,276 @@
+{
+ "michaels": {
+  "rig": "michaels",
+  "anchor": "cruise",
+  "fit": "results/S2/cruise_8clip.json",
+  "selector": "fly125_cruise_00",
+  "support": "FLY125@32.000+16",
+  "mic": 0,
+  "n_fft": 16384,
+  "mean_rate_rps": 80.863,
+  "reference": "predicted_m (the legacy fit's own forward law), 0 dB",
+  "coherence_k_half": 1.6734,
+  "coherent_bank_inflation_db": [
+   15.99,
+   14.82,
+   10.81,
+   8.32,
+   10.42,
+   10.98,
+   10.19,
+   13.52
+  ],
+  "coherent_bank_inflation_db_this_mic": 15.99,
+  "gamma0": 0.0,
+  "gamma_slope": 0.5726,
+  "rows": [
+   {
+    "band": "k=1",
+    "centre_hz": 80.9,
+    "coherent_share": 0.6997,
+    "real": -3.15,
+    "predicted_m": 0.0,
+    "render": 14.29,
+    "render_split_outside": 0.22,
+    "predicted_render_error_db": 14.49
+   },
+   {
+    "band": "k=2",
+    "centre_hz": 161.7,
+    "coherent_share": 0.2397,
+    "real": 0.81,
+    "predicted_m": 0.0,
+    "render": 9.82,
+    "render_split_outside": -0.07,
+    "predicted_render_error_db": 10.12
+   },
+   {
+    "band": "k=3",
+    "centre_hz": 242.6,
+    "coherent_share": 0.0402,
+    "real": -3.0,
+    "predicted_m": 0.0,
+    "render": 3.41,
+    "render_split_outside": 0.07,
+    "predicted_render_error_db": 4.08
+   },
+   {
+    "band": "k=4",
+    "centre_hz": 323.5,
+    "coherent_share": 0.0033,
+    "real": -1.36,
+    "predicted_m": 0.0,
+    "render": -0.03,
+    "render_split_outside": 0.05,
+    "predicted_render_error_db": 0.52
+   },
+   {
+    "band": "k=5",
+    "centre_hz": 404.3,
+    "coherent_share": 0.0001,
+    "real": -3.81,
+    "predicted_m": 0.0,
+    "render": -0.73,
+    "render_split_outside": -0.65,
+    "predicted_render_error_db": 0.02
+   },
+   {
+    "band": "k=6",
+    "centre_hz": 485.2,
+    "coherent_share": 0.0,
+    "real": -1.36,
+    "predicted_m": 0.0,
+    "render": -0.57,
+    "render_split_outside": -0.61,
+    "predicted_render_error_db": 0.0
+   },
+   {
+    "band": "300-700 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": -1.33,
+    "predicted_m": 0.0,
+    "render": -0.13,
+    "render_split_outside": -0.21,
+    "predicted_render_error_db": null
+   },
+   {
+    "band": "700-1500 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": -1.64,
+    "predicted_m": 0.0,
+    "render": -0.28,
+    "render_split_outside": -0.32,
+    "predicted_render_error_db": null
+   },
+   {
+    "band": "1500-3200 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": -1.56,
+    "predicted_m": 0.0,
+    "render": -0.12,
+    "render_split_outside": -0.2,
+    "predicted_render_error_db": null
+   },
+   {
+    "band": "3200-4500 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": -0.97,
+    "predicted_m": 0.0,
+    "render": -0.04,
+    "render_split_outside": -0.03,
+    "predicted_render_error_db": null
+   },
+   {
+    "band": "4500-7900 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": -1.57,
+    "predicted_m": 0.0,
+    "render": 0.08,
+    "render_split_outside": 0.08,
+    "predicted_render_error_db": null
+   }
+  ]
+ },
+ "dregon": {
+  "rig": "dregon",
+  "anchor": "cruise",
+  "fit": "results/S2/dregon_room2_cruise_refined.json",
+  "selector": "free-flight_nosource_room2_cruise_00",
+  "support": "free-flight_nosource_room2@1512727417.205+16",
+  "mic": 0,
+  "n_fft": 16384,
+  "mean_rate_rps": 80.76,
+  "reference": "predicted_m (the legacy fit's own forward law), 0 dB",
+  "coherence_k_half": 1.6963,
+  "coherent_bank_inflation_db": [
+   14.59,
+   12.31,
+   8.64,
+   7.71,
+   17.77,
+   12.7,
+   12.82,
+   6.8
+  ],
+  "coherent_bank_inflation_db_this_mic": 14.59,
+  "gamma0": 13.0677,
+  "gamma_slope": 0.2114,
+  "rows": [
+   {
+    "band": "k=1",
+    "centre_hz": 80.8,
+    "coherent_share": 0.7064,
+    "real": -8.15,
+    "predicted_m": 0.0,
+    "render": 13.27,
+    "render_split_outside": -0.04,
+    "predicted_render_error_db": 13.14
+   },
+   {
+    "band": "k=2",
+    "centre_hz": 161.5,
+    "coherent_share": 0.249,
+    "real": -4.33,
+    "predicted_m": 0.0,
+    "render": 9.25,
+    "render_split_outside": 0.07,
+    "predicted_render_error_db": 8.98
+   },
+   {
+    "band": "k=3",
+    "centre_hz": 242.3,
+    "coherent_share": 0.0438,
+    "real": -1.59,
+    "predicted_m": 0.0,
+    "render": 3.33,
+    "render_split_outside": 0.13,
+    "predicted_render_error_db": 3.45
+   },
+   {
+    "band": "k=4",
+    "centre_hz": 323.0,
+    "coherent_share": 0.0038,
+    "real": -1.8,
+    "predicted_m": 0.0,
+    "render": 0.67,
+    "render_split_outside": -0.03,
+    "predicted_render_error_db": 0.44
+   },
+   {
+    "band": "k=5",
+    "centre_hz": 403.8,
+    "coherent_share": 0.0002,
+    "real": -1.34,
+    "predicted_m": 0.0,
+    "render": -0.15,
+    "render_split_outside": 0.27,
+    "predicted_render_error_db": 0.02
+   },
+   {
+    "band": "k=6",
+    "centre_hz": 484.6,
+    "coherent_share": 0.0,
+    "real": -0.93,
+    "predicted_m": 0.0,
+    "render": -0.13,
+    "render_split_outside": -0.1,
+    "predicted_render_error_db": 0.0
+   },
+   {
+    "band": "300-700 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": -1.37,
+    "predicted_m": 0.0,
+    "render": 0.11,
+    "render_split_outside": -0.06,
+    "predicted_render_error_db": null
+   },
+   {
+    "band": "700-1500 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": -0.98,
+    "predicted_m": 0.0,
+    "render": -0.16,
+    "render_split_outside": -0.29,
+    "predicted_render_error_db": null
+   },
+   {
+    "band": "1500-3200 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": -0.56,
+    "predicted_m": 0.0,
+    "render": 0.07,
+    "render_split_outside": 0.04,
+    "predicted_render_error_db": null
+   },
+   {
+    "band": "3200-4500 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": -0.03,
+    "predicted_m": 0.0,
+    "render": 0.12,
+    "render_split_outside": 0.11,
+    "predicted_render_error_db": null
+   },
+   {
+    "band": "4500-7900 Hz",
+    "centre_hz": null,
+    "coherent_share": null,
+    "real": 0.18,
+    "predicted_m": 0.0,
+    "render": 0.47,
+    "render_split_outside": 0.48,
+    "predicted_render_error_db": null
+   }
+  ]
+ }
+}

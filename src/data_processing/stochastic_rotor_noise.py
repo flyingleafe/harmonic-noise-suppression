@@ -88,12 +88,23 @@ clip from a parameter set and a rotor-speed trajectory, and
 ``sample_timeframe(rng, duration_s) -> td.Frame`` interface the other noise
 pools use. Synthesis is numpy and scipy only, so it runs in the DataLoader
 workers with no GPU and no producer process.
+
+A pool may also read its parameters from a PRESET BANK
+(:func:`load_preset_bank`) instead of drawing them from :class:`StochasticRanges`
+— a JSON file of serialized :class:`StochasticParams` field dicts, one per
+entry, from which every window picks one uniformly. The bank exists for
+parameter families that the ranges vocabulary cannot express: a bank entry is a
+complete parameter set in the renderer's own coordinates, so whoever builds the
+bank (offline, upstream, e.g. from a fit or a fit-neighbourhood sampler) owns
+the family, and this module owns only the format.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import json
+from dataclasses import MISSING, dataclass, fields, replace
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -505,6 +516,120 @@ class StochasticParams:
     def with_(self, **changes: Any) -> StochasticParams:
         """A copy with fields replaced — the slider path."""
         return replace(self, **changes)
+
+
+# ── Preset banks ────────────────────────────────────────────────────────────
+
+#: Version tag of the bank file format, checked on load. A bank is a dict with
+#: ``entries`` (a list of :func:`params_to_entry` dicts) and whatever
+#: provenance its builder wants to record alongside them.
+PRESET_BANK_FORMAT = "stochastic_preset_bank/1"
+
+
+def params_to_entry(params: StochasticParams) -> dict[str, Any]:
+    """One parameter set as a JSON-native dict — the bank file's entry form.
+
+    Arrays become nested lists and numpy scalars become Python numbers;
+    everything else is already JSON-native. :func:`params_from_entry` is the
+    exact inverse.
+    """
+    out: dict[str, Any] = {}
+    for field in fields(params):
+        value = getattr(params, field.name)
+        if isinstance(value, np.ndarray):
+            out[field.name] = value.tolist()
+        elif isinstance(value, (np.floating, np.integer, np.bool_)):
+            out[field.name] = value.item()
+        else:
+            out[field.name] = value
+    return out
+
+
+#: Fields with no default, i.e. the ones :class:`StochasticParams` cannot be
+#: built without. A bank entry missing any of them is a broken bank, not a
+#: partially specified one.
+_PARAMS_REQUIRED = tuple(
+    field.name
+    for field in fields(StochasticParams)
+    if field.default is MISSING and field.default_factory is MISSING
+)
+
+
+def params_from_entry(entry: dict[str, Any], *, where: str = "entry") -> StochasticParams:
+    """One parameter set from its bank entry, arrays restored.
+
+    Fails loudly — naming ``where`` and the offending field — on an unknown
+    field, a missing required field, a value no JSON round trip can produce, a
+    ragged array or a non-finite number. The point is that a broken bank is
+    rejected when it is LOADED, while the message can still name the entry,
+    rather than deep inside a render in a DataLoader worker.
+    """
+    known = {field.name for field in fields(StochasticParams)}
+    unknown = sorted(set(entry) - known)
+    if unknown:
+        raise ValueError(f"{where}: unknown StochasticParams field(s) {unknown}")
+    missing = [name for name in _PARAMS_REQUIRED if name not in entry]
+    if missing:
+        raise ValueError(f"{where}: missing required StochasticParams field(s) {missing}")
+    kwargs: dict[str, Any] = {}
+    for name, value in entry.items():
+        if isinstance(value, list):
+            try:
+                array = np.asarray(value, dtype=np.float64)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{where}: field {name!r} is not a numeric array: {exc}") from exc
+            if not np.isfinite(array).all():
+                raise ValueError(f"{where}: field {name!r} has non-finite entries")
+            kwargs[name] = array
+        elif value is None or isinstance(value, (bool, int, float, str)):
+            kwargs[name] = value
+        else:
+            raise TypeError(
+                f"{where}: field {name!r} holds a {type(value).__name__}, which no bank "
+                "file can carry — expected a number, a string, a bool, None or a list"
+            )
+    return StochasticParams(**kwargs)
+
+
+@lru_cache(maxsize=8)
+def load_preset_bank(path: str | Path) -> tuple[StochasticParams, ...]:
+    """Every parameter set of a preset-bank file, in file order.
+
+    The file is ``{"format": PRESET_BANK_FORMAT, "entries": [...], ...}``; any
+    other key (the builder's provenance) is ignored here and kept for the
+    reader. Cached per path because every DataLoader worker builds its own
+    pools and several sources may share one bank.
+
+    The bank is JSON and not a stacked ``.npz`` on purpose: entries drawn
+    around different anchors have different order-ladder lengths, so there is
+    no rectangular array to stack.
+    """
+    try:
+        text = Path(path).read_text()
+    except FileNotFoundError as exc:
+        # A bank is a BUILD PRODUCT, not a checked-in asset: it is gitignored,
+        # it is tens of megabytes, and a remote job gets a clean checkout with
+        # no ``data/`` tree. So say what to run instead of just what is absent.
+        raise FileNotFoundError(
+            f"{path}: preset bank missing. Banks are gitignored build products — rebuild it "
+            "with the `python scripts/_build_rig_bank.py ...` command recorded in the header "
+            "of the policy that names this file (conf/online_mix/*.yaml) and in the sibling "
+            "experiment doc (conf/experiment/<name>.md); the build takes about a minute and "
+            "skips itself if the file is already current"
+        ) from exc
+    raw = json.loads(text)
+    if not isinstance(raw, dict) or "entries" not in raw:
+        raise ValueError(f"{path}: not a preset bank — expected a dict with an 'entries' list")
+    fmt = str(raw.get("format", ""))
+    if fmt != PRESET_BANK_FORMAT:
+        raise ValueError(f"{path}: bank format {fmt!r}, expected {PRESET_BANK_FORMAT!r}")
+    entries = raw["entries"]
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"{path}: bank carries no entries")
+    return tuple(
+        params_from_entry(entry, where=f"{path}: entry {index}")
+        for index, entry in enumerate(entries)
+    )
 
 
 def _profile_db(
@@ -1569,14 +1694,20 @@ def synthesize(
         # of the two mean spectra is the ratio the two parts must end up with —
         # and taking it from the floor's realized variance keeps every constant
         # of the transform out of the arithmetic.
-        floor_mean = float(np.mean(psd["floor"])) or 1.0
         audio = np.empty((n_mics, n_samples), dtype=np.float32)
         for m in range(n_mics):
-            # the realized floor of mic m carries its own floor gain, so the
-            # wanted ratio must be taken against that same gained floor —
-            # otherwise the gain leaks into the lines through ``scale``
-            want = float(np.mean(np.tensordot(gains[m], psd_lines["lines"], axes=(0, 0)))) / (
-                floor_mean * float(floor_mic[m])
+            # BOTH SIDES OF THE RATIO MUST NAME THE SAME SPECTRUM. ``have`` is
+            # measured against the realized ``floor_audio[m]``, so ``want``
+            # must be taken against the spectrum that audio was realized FROM
+            # — ``floor_spec[m]``, which carries the microphone's own floor
+            # gain and, when the coherence split is on, the incoherent share of
+            # the comb. Dividing by the bare floor instead left the tone bank
+            # high by sqrt(1 + incoherent/floor): measured +19.9, +14.0 and
+            # +3.0 dB at orders 1, 2 and 3 of a fitted rig with
+            # ``coherence_k_half`` 1.56, i.e. exactly the orders whose coherent
+            # share w_k is large, and nothing at all above order 3.
+            want = float(np.mean(np.tensordot(gains[m], psd_lines["lines"], axes=(0, 0)))) / max(
+                float(np.mean(floor_spec[m])), 1e-30
             )
             have = float(np.var(line_audio[m])) / max(float(np.var(floor_audio[m])), 1e-30)
             scale = np.sqrt(want / have) if have > 0 else 0.0
@@ -1723,6 +1854,7 @@ class StochasticNoisePool:
         line_bin_integrate: bool = False,
         n_fft: int = DEFAULT_N_FFT,
         ranges: StochasticRanges | dict[str, Any] | None = None,
+        preset_bank: str | Path | None = None,
         seed: int = 0,
     ):
         self.sample_rate = int(sample_rate)
@@ -1822,12 +1954,76 @@ class StochasticNoisePool:
         self.ranges = (
             ranges if isinstance(ranges, StochasticRanges) else StochasticRanges.from_dict(ranges)
         )
+        # A PRESET BANK replaces the per-window ``sample_params`` draw: every
+        # window picks one of these finished parameter sets instead. It exists
+        # for families the ranges vocabulary cannot state (see the module
+        # docstring); when it is absent nothing about this pool changes.
+        self.preset_bank = None if preset_bank is None else str(preset_bank)
+        self._bank: tuple[StochasticParams, ...] | None = None
+        if self.preset_bank is not None:
+            self._bank = load_preset_bank(self.preset_bank)
+            self._check_bank()
         self._base_seed = int(seed)
         self._flight: _FlightCache | None = None
         # Interface parity with the other pools: the analytic model has no
         # geometry, and the frame carries placeholders.
         self.mic_pos = np.zeros((self.n_mics, 3), dtype=np.float64)
         self.rotor_pos = np.zeros((self.n_rotors, 3), dtype=np.float64)
+
+    def _check_bank(self) -> None:
+        """Refuse a bank that does not match this pool, naming the mismatch.
+
+        Everything checked here would otherwise surface as a shape error deep
+        inside :func:`synthesize`, in a DataLoader worker, on some later
+        window — or, worse, not at all: a bank whose comb is shorter than the
+        policy asks for renders quietly with a truncated series.
+        """
+        assert self._bank is not None
+        for index, params in enumerate(self._bank):
+            where = f"{self.preset_bank}: entry {index}"
+            if int(params.sample_rate) != self.sample_rate:
+                raise ValueError(
+                    f"{where}: sample_rate {params.sample_rate} against the pool's "
+                    f"{self.sample_rate}"
+                )
+            if int(params.n_rotors) != self.n_rotors:
+                raise ValueError(
+                    f"{where}: n_rotors {params.n_rotors} against the pool's {self.n_rotors}"
+                )
+            profile = np.shape(params.profile_db)
+            if profile != (int(params.n_rotors), int(params.n_harmonics)):
+                raise ValueError(
+                    f"{where}: profile_db is {profile}, not "
+                    f"(n_rotors, n_harmonics) = {(params.n_rotors, params.n_harmonics)}"
+                )
+            if int(params.n_harmonics) < self.n_harmonics:
+                raise ValueError(
+                    f"{where}: n_harmonics {params.n_harmonics} is shorter than the pool's "
+                    f"comb length {self.n_harmonics}"
+                )
+            for name, shape in (
+                ("fixed_mic_gain_db", (self.n_mics, self.n_rotors)),
+                ("fixed_mic_floor_db", (self.n_mics,)),
+                ("fixed_mic_gain_all_db", (self.n_mics,)),
+            ):
+                value = getattr(params, name)
+                if value is not None and np.shape(value) != shape:
+                    raise ValueError(f"{where}: {name} is {np.shape(value)}, expected {shape}")
+            # "Zero speed is silence" is this model's own invariant
+            # (``build_psd``), and the amplitude law is ``(rps / ref) ** e``,
+            # so a NEGATIVE exponent is ``0 ** negative`` — infinite line
+            # power on the ground phase of a full flight, and NaN audio once
+            # the tone bank scales it. A bank entry is the only way such an
+            # exponent can reach the renderer, and it is cheaper to refuse the
+            # bank than to debug a NaN loss.
+            for name in ("amp_rps_exponent", "amp_rps_exponent_floor"):
+                exponent = getattr(params, name)
+                if exponent is not None and float(exponent) < 0.0:
+                    raise ValueError(
+                        f"{where}: {name} is {float(exponent)!r} — a rig whose level diverges "
+                        "as its rotors stop cannot be rendered on a trajectory that reaches "
+                        "zero speed"
+                    )
 
     @classmethod
     def from_config(cls, cfg: Any, *, duration_s: float, sample_rate: int) -> StochasticNoisePool:
@@ -1896,6 +2092,7 @@ class StochasticNoisePool:
             line_bin_integrate=bool(g("line_bin_integrate", False)),
             n_fft=int(g("n_fft", DEFAULT_N_FFT)),
             ranges=ranges,
+            preset_bank=g("preset_bank"),
             seed=int(g("seed", 0)),
         )
 
@@ -2002,16 +2199,24 @@ class StochasticNoisePool:
         else:
             ref = hover
         n_harm = int(np.clip(np.ceil(self.sample_rate / 2.0 / max(ref, 1.0)), 40, self.n_harm_max))
-        params = sample_params(
-            rng,
-            self.ranges,
-            n_rotors=rps.shape[0],
-            n_harmonics=n_harm,
-            n_harmonics_range=self.n_harmonics_range,
-            sample_rate=self.sample_rate,
-            band_taper_frac=self.band_taper_frac,
-            line_bin_integrate=self.line_bin_integrate,
-        )
+        if self._bank is None:
+            params = sample_params(
+                rng,
+                self.ranges,
+                n_rotors=rps.shape[0],
+                n_harmonics=n_harm,
+                n_harmonics_range=self.n_harmonics_range,
+                sample_rate=self.sample_rate,
+                band_taper_frac=self.band_taper_frac,
+                line_bin_integrate=self.line_bin_integrate,
+            )
+        else:
+            # One entry per window, uniform over the bank. The bank's comb is
+            # sized once, by whoever built it, for the SLOWEST speed this
+            # stream can render, so ``n_harm`` has nothing left to decide: the
+            # lines that fall past this window's Nyquist are masked by
+            # ``fm_lines`` and carry no power in ``build_psd``.
+            params = self._bank[int(rng.integers(len(self._bank)))]
         # Linewidth scales with the aircraft too. The half width of harmonic k
         # is the shaft's own speed jitter times k, and a shaft that turns at
         # 200 rev/s does not jitter by the same ABSOLUTE amount as one at 20 —
@@ -2020,14 +2225,27 @@ class StochasticNoisePool:
         # makes a small fast aircraft a different aircraft and not just a
         # sharper version of a big one.
         size = float(hover) / max(self.amp_rps_ref, 1e-6)
-        params = params.with_(
-            amp_rps_exponent=self.amp_rps_exponent,
-            amp_rps_exponent_floor=self.amp_rps_exponent_floor,
+        changes: dict[str, Any] = dict(
             amp_rps_ref=float(hover),
             gamma0=params.gamma0 * size,
             gamma_slope=params.gamma_slope * size,
             shaft_jitter_rps=params.shaft_jitter_rps * size,
         )
+        if self._bank is None:
+            changes["amp_rps_exponent"] = self.amp_rps_exponent
+            changes["amp_rps_exponent_floor"] = self.amp_rps_exponent_floor
+        else:
+            # A bank entry carries its own SPEED LAW, and it is not the pool's
+            # to overwrite: these exponents are a measured property of the rig
+            # the entry describes (the fits behind the shipped banks sit at
+            # 7.5 and 8.8 dB per dB of rotor speed, against the hand-written
+            # 2.5 a policy declares), and the entry's floor level was rebased
+            # against its own floor exponent, so replacing one without the
+            # other moves the comb's prominence. The band taper is the
+            # opposite case — a statement about where the stream's band ENDS,
+            # which belongs to the stream and not to the rig.
+            changes["band_taper_frac"] = self.band_taper_frac
+        params = params.with_(**changes)
         # One gain for a whole flight when asked for, else the old per-window
         # draw. See _FlightCache.level.
         cached = getattr(self._flight, "level", None) if self.level_per_flight else None
@@ -2088,6 +2306,7 @@ class StochasticNoisePool:
 
 
 __all__ = [
+    "PRESET_BANK_FORMAT",
     "StochasticNoisePool",
     "StochasticParams",
     "StochasticRanges",
@@ -2096,7 +2315,10 @@ __all__ = [
     "floor_shape_db",
     "line_peak_db",
     "line_peaks_by_rotor",
+    "load_preset_bank",
     "model_psd_db",
+    "params_from_entry",
+    "params_to_entry",
     "sample_gp",
     "sample_params",
     "synthesize",

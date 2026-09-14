@@ -4,7 +4,14 @@
 /data/*
 /datasets/*
 wandb/
-results/
+results/*
+# EXCEPTION: the two stage-2 rig fits the transfer-arm noise banks are built
+# from. The banks themselves stay build products, but omnirun ships a clean
+# pushed checkout, so their inputs must travel or the remote build step fails.
+!results/S2/
+results/S2/*
+!results/S2/cruise_8clip.json
+!results/S2/dregon_room2_cruise_refined.json
 # dload / online-mix / download scratch caches
 .cache/
 # zoo checkpoint index (R2 is the source of truth; this is a local cache)

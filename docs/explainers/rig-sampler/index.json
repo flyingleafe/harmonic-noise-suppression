@@ -1,0 +1,917 @@
+{
+ "seed": 20260914,
+ "seconds": 4.0,
+ "rms_target": 0.1,
+ "widths_strength1": {
+  "sigma": {
+   "rotor_gain_db": 3.577,
+   "slope_db_dec": 1.456,
+   "parity_ln": 0.08,
+   "resid_redraw_frac": 0.407,
+   "resid_length_dec": 0.073,
+   "gamma_ln": 0.045,
+   "floor_mean_db": 1.066,
+   "floor_tilt_db_oct": 0.21,
+   "floor_shape_db": 2.175,
+   "floor_shape_ar1": 0.838,
+   "mic_gain_db": 1.122,
+   "mic_floor_db": 0.199,
+   "gain_all_db": 0.127,
+   "coherence_ln": 0.198,
+   "amp_exp": 2.733,
+   "floor_exp": 2.733,
+   "floor_static_rel_ln": 0.332
+  },
+  "provenance": {
+   "rotor_gain_db": "between_clip.rotor_gain_db.pooled_rms",
+   "slope_db_dec": "between_refit.slope_db_dec.sigma (FALLBACK: tied between clips)",
+   "parity_ln": "between_refit.parity_ln.sigma (FALLBACK: tied between clips)",
+   "resid_redraw_frac": "between_refit.resid_redraw_frac.median (FALLBACK: tied)",
+   "resid_length_dec": "residual_correlation.length_variogram_dec_median",
+   "gamma_ln": "between_refit.gamma_ln.sigma (FALLBACK: tied between clips)",
+   "floor_mean_db": "between_clip.floor_mean_db.pooled_rms",
+   "floor_tilt_db_oct": "between_refit.floor_tilt_db_oct.sigma (FALLBACK: tied)",
+   "floor_shape_db": "between_refit.floor_shape_db.sigma, mean-removed (FALLBACK: tied)",
+   "floor_shape_ar1": "between_refit.floor_shape_db.lag1_corr_mean",
+   "mic_gain_db": "between_refit.mic_gain_db.sigma (FALLBACK: tied between clips)",
+   "mic_floor_db": "between_refit.mic_floor_db.sigma (FALLBACK: tied between clips)",
+   "gain_all_db": "between_refit.gain_all_db.sigma (FALLBACK: tied between clips)",
+   "coherence_ln": "between_clip.coherence_k_half_ln.pooled_rms",
+   "amp_exp": "between_refit.amp_exp.sigma (FALLBACK: tied between clips)",
+   "floor_exp": "between_refit.amp_exp.sigma reused; floor_exp's own refit sigma is 3.53 and includes a +6.79 -> -2.71 sign flip between two fits of the same audio, an identifiability artefact rather than a neighbourhood",
+   "floor_static_rel_ln": "between_refit.floor_static_rel_ln.sigma (FALLBACK: tied)"
+  },
+  "guards": {
+   "trend_margin_db": 3.0,
+   "gamma_excursion_cap": 1.5,
+   "real_pair_rms_db": 4.97,
+   "real_pair_band_db": 7.31,
+   "ltas_envelope_x": 2.0,
+   "level_band_hz": [
+    300.0,
+    7900.0
+   ]
+  }
+ },
+ "structure_json": "results/rig_sampler/structure.json",
+ "path_interpolation": {
+  "rotor_gain_db": "linear in dB (geometric in power)",
+  "trend_slope_db_dec": "linear (already a log-log slope)",
+  "parity_envelope_db": "linear in dB, elementwise on the shared order grid",
+  "residual_db": "linear in dB, elementwise on the shared order grid",
+  "gamma0": "linear in bins, NOT log: FLY125's gamma0 is numerically zero (2e-5) and a geometric path from zero is degenerate",
+  "gamma_slope": "log-linear (strictly positive in every fit, spans 14.7x)",
+  "coherence_k_half": "log-linear (strictly positive scale)",
+  "floor_mean_db": "linear in dB",
+  "floor_tilt_db_oct": "linear in dB/octave",
+  "floor_shape_db": "linear in dB per control point; if the two fits' floor_ctrl_hz grids differ, B's shape is resampled onto A's grid linearly in log frequency",
+  "floor_static_rel": "linear in the power ratio itself (it is a power share, and 0 is legal)",
+  "amp_exp": "linear",
+  "floor_exp": "linear, then hard-clamped to >= 0 level-preservingly",
+  "mic_gain_db": "linear in dB",
+  "mic_floor_db": "linear in dB",
+  "gain_all_db": "linear in dB, after the overall level has been removed from it",
+  "carrier": "linear in rev/s (the hybrid rig's operating point; inert for rendering)",
+  "overall_level_db": "linear in dBFS, carried as ONE scalar in gain_all_db; see level_free()"
+ },
+ "provenance": {
+  "michael_cruise": {
+   "fit": "results/S2/cruise_8clip.json",
+   "sha256": "65d1794accf6d00a3903236871164f1b0da19e4c7d219463fe280ede83627510",
+   "clip_id": "fly125_cruise_00",
+   "dataset": "michaels-frames",
+   "recording": "FLY125",
+   "start_s": 16.0,
+   "rps_key": "rps",
+   "rates_rev_s": [
+    89.75182253621816,
+    74.57012898274138,
+    81.04524777853861,
+    74.65652302109675
+   ],
+   "n_orders": 111,
+   "power_scale_folded_db": -24.07711333296525
+  },
+  "dregon_cruise": {
+   "fit": "results/S2/dregon_room2_cruise_refined.json",
+   "sha256": "be37e1362b754caf3b661dac9b83869553e315d5a0d5dd21ec848e3936325ede",
+   "clip_id": "free-flight_nosource_room2_cruise_00",
+   "dataset": "DREGON-frames",
+   "recording": "free-flight_nosource_room2",
+   "start_s": 1512727417.2050455,
+   "rps_key": "motors_command",
+   "rates_rev_s": [
+    83.77203878362178,
+    75.81278245747835,
+    84.18530753241629,
+    79.60070061707422
+   ],
+   "n_orders": 109,
+   "power_scale_folded_db": -22.305106633968606
+  }
+ },
+ "rigs": {
+  "michael_cruise": {
+   "guards": {
+    "strength_1": {
+     "n_samples": 8,
+     "attempts": 8,
+     "rejected": 0,
+     "rejection_rate": 0.0,
+     "guard_fired": {}
+    },
+    "strength_2": {
+     "n_samples": 4,
+     "attempts": 6,
+     "rejected": 2,
+     "rejection_rate": 0.3333333333333333,
+     "guard_fired": {
+      "ltas": 2
+     }
+    }
+   },
+   "realised_spread": {
+    "strength_1": {
+     "rotor_gain_db_std": 2.5641541689180167,
+     "rotor_gain_db_target": 3.577,
+     "slope_db_dec_std": 1.3505307673563507,
+     "slope_db_dec_target": 1.456,
+     "gamma_ratio_ln_std": 0.027353745310119967,
+     "gamma_ratio_ln_target": 0.045,
+     "gamma_ratio_range": [
+      0.9610881718249878,
+      1.032479006303634
+     ]
+    },
+    "strength_2": {
+     "rotor_gain_db_std": 4.268922321491879,
+     "rotor_gain_db_target": 7.154,
+     "slope_db_dec_std": 2.804987841830482,
+     "slope_db_dec_target": 2.912,
+     "gamma_ratio_ln_std": 0.0752686129969664,
+     "gamma_ratio_ln_target": 0.09,
+     "gamma_ratio_range": [
+      0.9086429035461591,
+      1.0660128984577397
+     ]
+    }
+   },
+   "width_check": {
+    "n_draws": 64,
+    "rotor_gain_db": [
+     3.630298589880907,
+     3.577
+    ],
+    "slope_db_dec": [
+     1.5242347376162617,
+     1.456
+    ],
+    "parity_ln": [
+     0.0805594298744884,
+     0.08
+    ]
+   },
+   "ltas_deviation": {
+    "s1_00": {
+     "rms_db": 2.7200379790063574,
+     "band_max_db": 7.749510854281269,
+     "level_db": -1.1017871966853436,
+     "model_rms_db": 1.0957393112618339,
+     "model_band_max_db": 2.2584977432214437,
+     "pre_gain_dbfs": -20.74382874177836
+    },
+    "s1_01": {
+     "rms_db": 3.212257218675558,
+     "band_max_db": 7.116107290677121,
+     "level_db": 1.8363432977011,
+     "model_rms_db": 1.9233112148773759,
+     "model_band_max_db": 3.138594404517816,
+     "pre_gain_dbfs": -15.730086912258079
+    },
+    "s1_02": {
+     "rms_db": 4.844595552987206,
+     "band_max_db": 13.354070663195266,
+     "level_db": 3.317920687153091,
+     "model_rms_db": 4.498502770799049,
+     "model_band_max_db": 7.475982866406655,
+     "pre_gain_dbfs": -13.543878054221988
+    },
+    "s1_03": {
+     "rms_db": 1.6516139793371711,
+     "band_max_db": 4.411085532655228,
+     "level_db": -0.031203134575288467,
+     "model_rms_db": 1.5529989224926954,
+     "model_band_max_db": 4.141360172112792,
+     "pre_gain_dbfs": -18.637833831381087
+    },
+    "s1_04": {
+     "rms_db": 3.3631771312577605,
+     "band_max_db": 7.099548745737398,
+     "level_db": 2.709534875849011,
+     "model_rms_db": 2.4115770599466364,
+     "model_band_max_db": 5.11035620870679,
+     "pre_gain_dbfs": -18.313962594512354
+    },
+    "s1_05": {
+     "rms_db": 1.7710699458865538,
+     "band_max_db": 3.383675046420386,
+     "level_db": -0.34845446047422596,
+     "model_rms_db": 2.038284986447797,
+     "model_band_max_db": 2.7785344159000473,
+     "pre_gain_dbfs": -20.113422272388796
+    },
+    "s1_06": {
+     "rms_db": 2.9255855642494226,
+     "band_max_db": 6.395448415083024,
+     "level_db": 0.6047817215298197,
+     "model_rms_db": 1.94769413238031,
+     "model_band_max_db": 3.6967469589395456,
+     "pre_gain_dbfs": -22.48945227595391
+    },
+    "s1_07": {
+     "rms_db": 2.433793463013281,
+     "band_max_db": 5.013906760860749,
+     "level_db": 0.7246995058570589,
+     "model_rms_db": 2.4406025614458344,
+     "model_band_max_db": 4.212128793963476,
+     "pre_gain_dbfs": -21.760179016303766
+    },
+    "s2_00": {
+     "rms_db": 4.395644150810763,
+     "band_max_db": 10.656695500515877,
+     "level_db": -0.9600217258898697,
+     "model_rms_db": 1.6893472323895542,
+     "model_band_max_db": 3.1414801017798375,
+     "pre_gain_dbfs": -20.80489830448733
+    },
+    "s2_01": {
+     "rms_db": 7.892055214075751,
+     "band_max_db": 17.55365688633455,
+     "level_db": 6.333797277097261,
+     "model_rms_db": 5.033563372946025,
+     "model_band_max_db": 9.728580350376337,
+     "pre_gain_dbfs": -8.05254140707514
+    },
+    "s2_02": {
+     "rms_db": 7.7493167214125664,
+     "band_max_db": 14.37197497899999,
+     "level_db": 5.168406138536049,
+     "model_rms_db": 7.874040841162072,
+     "model_band_max_db": 12.630463756813493,
+     "pre_gain_dbfs": -14.127786197077432
+    },
+    "s2_03": {
+     "rms_db": 3.8366795375074463,
+     "band_max_db": 10.599025608526823,
+     "level_db": 0.8409137693625129,
+     "model_rms_db": 3.0273111497825287,
+     "model_band_max_db": 9.259523816898367,
+     "pre_gain_dbfs": -17.12016706166897
+    }
+   },
+   "ltas_real_clip": {
+    "absolute_rms_db": 5.785205793157728,
+    "absolute_band_max_db": 17.86600880521488,
+    "absolute_level_db": -1.1923931048380045,
+    "level_matched_rms_db": 6.309438534112116,
+    "level_matched_band_max_db": 13.887541425879093
+   },
+   "common_gain": 0.9599376695358421,
+   "anchor_pre_gain_dbfs": -19.64486068880254,
+   "wavs": {
+    "anchor": "docs/explainers/rig-sampler/michael_cruise_anchor.wav",
+    "s1_00": "docs/explainers/rig-sampler/michael_cruise_s1_00.wav",
+    "s1_01": "docs/explainers/rig-sampler/michael_cruise_s1_01.wav",
+    "s1_02": "docs/explainers/rig-sampler/michael_cruise_s1_02.wav",
+    "s1_03": "docs/explainers/rig-sampler/michael_cruise_s1_03.wav"
+   },
+   "figures": [
+    "docs/explainers/rig-sampler/profiles_michael_cruise.png",
+    "docs/explainers/rig-sampler/ltas_michael_cruise.png",
+    "docs/explainers/rig-sampler/spectrograms_michael_cruise.png"
+   ],
+   "over_wide": {
+    "strength": 6.0,
+    "max_attempts": 16,
+    "raised": false,
+    "attempts": 5,
+    "guards_fired": [
+     "gamma_excursion",
+     "ltas",
+     "ltas",
+     "speed_law",
+     "trend_falls",
+     "gamma_excursion",
+     "ltas",
+     "speed_law",
+     "trend_falls",
+     "ltas"
+    ]
+   }
+  },
+  "dregon_cruise": {
+   "guards": {
+    "strength_1": {
+     "n_samples": 8,
+     "attempts": 8,
+     "rejected": 0,
+     "rejection_rate": 0.0,
+     "guard_fired": {}
+    },
+    "strength_2": {
+     "n_samples": 4,
+     "attempts": 5,
+     "rejected": 1,
+     "rejection_rate": 0.2,
+     "guard_fired": {
+      "parity_sign": 1
+     }
+    }
+   },
+   "realised_spread": {
+    "strength_1": {
+     "rotor_gain_db_std": 2.5644125456312103,
+     "rotor_gain_db_target": 3.577,
+     "slope_db_dec_std": 1.3785328865530557,
+     "slope_db_dec_target": 1.456,
+     "gamma_ratio_ln_std": 0.03788071162576955,
+     "gamma_ratio_ln_target": 0.045,
+     "gamma_ratio_range": [
+      0.9210958896478936,
+      1.026137895501519
+     ]
+    },
+    "strength_2": {
+     "rotor_gain_db_std": 5.6104967080343595,
+     "rotor_gain_db_target": 7.154,
+     "slope_db_dec_std": 2.6090690661078257,
+     "slope_db_dec_target": 2.912,
+     "gamma_ratio_ln_std": 0.04868411783728622,
+     "gamma_ratio_ln_target": 0.09,
+     "gamma_ratio_range": [
+      0.9176340312257272,
+      1.0335139757481413
+     ]
+    }
+   },
+   "width_check": {
+    "n_draws": 64,
+    "rotor_gain_db": [
+     3.6310501060317724,
+     3.577
+    ],
+    "slope_db_dec": [
+     1.5268355845157136,
+     1.456
+    ],
+    "parity_ln": [
+     0.1920987095696892,
+     0.08
+    ]
+   },
+   "ltas_deviation": {
+    "s1_00": {
+     "rms_db": 1.6610661037053964,
+     "band_max_db": 2.796476399224873,
+     "level_db": 0.9594892813576751,
+     "model_rms_db": 1.5021689893918093,
+     "model_band_max_db": 2.578249236041092,
+     "pre_gain_dbfs": -7.721636679524449
+    },
+    "s1_01": {
+     "rms_db": 2.9134969717291574,
+     "band_max_db": 4.831618823604586,
+     "level_db": 2.6489420709936136,
+     "model_rms_db": 2.6024103602674655,
+     "model_band_max_db": 5.377036757757743,
+     "pre_gain_dbfs": -2.9803436244786985
+    },
+    "s1_02": {
+     "rms_db": 1.2887438727343206,
+     "band_max_db": 3.036430813027172,
+     "level_db": 0.5019045287720326,
+     "model_rms_db": 2.6978449423503617,
+     "model_band_max_db": 5.29741197066728,
+     "pre_gain_dbfs": -6.806728985006407
+    },
+    "s1_03": {
+     "rms_db": 2.122190485744809,
+     "band_max_db": 4.2649065897476,
+     "level_db": 1.0090032859835762,
+     "model_rms_db": 2.0309397708123527,
+     "model_band_max_db": 4.650782871204914,
+     "pre_gain_dbfs": -7.9374284963606545
+    },
+    "s1_04": {
+     "rms_db": 2.039159256604359,
+     "band_max_db": 3.2912974046625916,
+     "level_db": 1.5123192250722366,
+     "model_rms_db": 2.6221177691678883,
+     "model_band_max_db": 4.416580494895978,
+     "pre_gain_dbfs": -5.808041560379839
+    },
+    "s1_05": {
+     "rms_db": 2.6202705559423936,
+     "band_max_db": 5.729430529851349,
+     "level_db": -1.2332098394464361,
+     "model_rms_db": 2.352349104879264,
+     "model_band_max_db": 7.167997920477546,
+     "pre_gain_dbfs": -12.190982876194628
+    },
+    "s1_06": {
+     "rms_db": 4.016447346902559,
+     "band_max_db": 7.9169306046388925,
+     "level_db": 3.0668467238287995,
+     "model_rms_db": 2.6737472248418723,
+     "model_band_max_db": 4.604482059232282,
+     "pre_gain_dbfs": -0.24516665512355035
+    },
+    "s1_07": {
+     "rms_db": 2.229615770357533,
+     "band_max_db": 5.011531965171475,
+     "level_db": 1.9444691765532987,
+     "model_rms_db": 3.080386258097384,
+     "model_band_max_db": 6.27326007239169,
+     "pre_gain_dbfs": -5.3278917399733805
+    },
+    "s2_00": {
+     "rms_db": 3.7658180292139316,
+     "band_max_db": 5.926524140693421,
+     "level_db": 3.0051537598940676,
+     "model_rms_db": 3.5127870281088756,
+     "model_band_max_db": 5.802821536741856,
+     "pre_gain_dbfs": -5.2036423141124075
+    },
+    "s2_01": {
+     "rms_db": 6.8514774743312685,
+     "band_max_db": 11.068060886180417,
+     "level_db": 6.33962560282757,
+     "model_rms_db": 6.526032018592171,
+     "model_band_max_db": 12.677583863456379,
+     "pre_gain_dbfs": 2.249428286669624
+    },
+    "s2_02": {
+     "rms_db": 9.803767129771206,
+     "band_max_db": 14.433352018336446,
+     "level_db": 9.459037059868336,
+     "model_rms_db": 6.692029994448795,
+     "model_band_max_db": 9.26256177002751,
+     "pre_gain_dbfs": 0.4293258485348964
+    },
+    "s2_03": {
+     "rms_db": 6.111790472252827,
+     "band_max_db": 16.209892366066384,
+     "level_db": 3.905508895629206,
+     "model_rms_db": 5.64179453623426,
+     "model_band_max_db": 14.681125535136381,
+     "pre_gain_dbfs": -4.227597452980941
+    }
+   },
+   "ltas_real_clip": {
+    "absolute_rms_db": 7.445137459755709,
+    "absolute_band_max_db": 22.776926780604242,
+    "absolute_level_db": -3.4276154149342632,
+    "level_matched_rms_db": 13.822077945486328,
+    "level_matched_band_max_db": 16.926713027832214
+   },
+   "common_gain": 0.2318193191236563,
+   "anchor_pre_gain_dbfs": -7.3029925185897575,
+   "wavs": {
+    "anchor": "docs/explainers/rig-sampler/dregon_cruise_anchor.wav",
+    "s1_00": "docs/explainers/rig-sampler/dregon_cruise_s1_00.wav",
+    "s1_01": "docs/explainers/rig-sampler/dregon_cruise_s1_01.wav",
+    "s1_02": "docs/explainers/rig-sampler/dregon_cruise_s1_02.wav",
+    "s1_03": "docs/explainers/rig-sampler/dregon_cruise_s1_03.wav"
+   },
+   "figures": [
+    "docs/explainers/rig-sampler/profiles_dregon_cruise.png",
+    "docs/explainers/rig-sampler/ltas_dregon_cruise.png",
+    "docs/explainers/rig-sampler/spectrograms_dregon_cruise.png"
+   ],
+   "over_wide": {
+    "strength": 6.0,
+    "max_attempts": 16,
+    "raised": false,
+    "attempts": 3,
+    "guards_fired": [
+     "speed_law",
+     "ltas",
+     "ltas"
+    ]
+   }
+  }
+ },
+ "path_cloud": {
+  "anchor_a": "michael_cruise",
+  "anchor_b": "dregon_cruise",
+  "levels_removed_dbfs": [
+   9.8614803973829,
+   12.328016776609749
+  ],
+  "n_draws": 12,
+  "t": [
+   0.032754706649825535,
+   0.10566634392270992,
+   0.1937132284319219,
+   0.2507608104595051,
+   0.33865137837358605,
+   0.47776947096177413,
+   0.5790583022728213,
+   0.610631971725838,
+   0.7012624479550861,
+   0.8129606818616697,
+   0.8784942605726714,
+   0.9870615482007845
+  ],
+  "attempts": 12,
+  "rejection_rate": 0.0,
+  "guard_fired": {},
+  "endpoint_check": {
+   "t0": {
+    "field_max_abs": {
+     "profile_db": 1.7763568394002505e-15,
+     "profile_db_shape": "(4, 109) vs (4, 111)",
+     "gamma0": 0.0,
+     "gamma_slope": 0.0,
+     "floor_ctrl_hz": 0.0,
+     "floor_shape_db": 0.0,
+     "floor_tilt_db_oct": 0.0,
+     "floor_static_rel": 0.0,
+     "amp_exp": 0.0,
+     "mic_gain_db": 0.0,
+     "mic_floor_db": 0.0,
+     "gain_all_db": 0.0,
+     "coherence_k_half": 0.0
+    },
+    "floor_anchor_level_db": 0.0,
+    "floor_exp": [
+     6.792030334472656,
+     6.792030334472656
+    ],
+    "ltas_band_max_db": 3.552713678800501e-15,
+    "ltas_rms_db": 7.752656836003963e-16
+   },
+   "t1": {
+    "field_max_abs": {
+     "profile_db": 7.105427357601002e-15,
+     "gamma0": 0.0,
+     "gamma_slope": 2.7755575615628914e-17,
+     "floor_ctrl_hz": 0.0,
+     "floor_shape_db": 0.0,
+     "floor_tilt_db_oct": 0.0,
+     "floor_static_rel": 0.0,
+     "amp_exp": 0.0,
+     "mic_gain_db": 0.0,
+     "mic_floor_db": 0.0,
+     "gain_all_db": 0.0,
+     "coherence_k_half": 0.0
+    },
+    "floor_anchor_level_db": -3.552713678800501e-15,
+    "floor_exp": [
+     0.0,
+     -3.7107012271881104
+    ],
+    "ltas_band_max_db": 3.552713678800501e-15,
+    "ltas_rms_db": 1.0963912441901294e-15
+   }
+  },
+  "cloud_slope_db_dec": [
+   -28.578027076116815,
+   -7.885473984906134
+  ],
+  "anchor_slope_db_dec": {
+   "michael_cruise": [
+    -9.933026273223792,
+    -19.282281093969633,
+    -16.1972917336078,
+    -7.328192237256622
+   ],
+   "dregon_cruise": [
+    -19.431174982435614,
+    -22.847365937479868,
+    -18.39386598101852,
+    -27.12205150609095
+   ]
+  },
+  "cloud_gamma_slope": [
+   0.20559174473498368,
+   0.5176264413308791
+  ],
+  "anchor_gamma_slope": [
+   0.5725914239883423,
+   0.21139442920684814
+  ],
+  "cloud_rotor_gain_db": [
+   -33.949010580035775,
+   -11.497686975005529
+  ],
+  "n_orders": 109,
+  "orders_dropped": [
+   2,
+   0
+  ],
+  "wavs": {
+   "path_t0p03": {
+    "t": 0.032754706649825535,
+    "wav": "docs/explainers/rig-sampler/path_t0p03.wav",
+    "pre_gain_dbfs": -16.21362462890137
+   },
+   "path_t0p34": {
+    "t": 0.33865137837358605,
+    "wav": "docs/explainers/rig-sampler/path_t0p34.wav",
+    "pre_gain_dbfs": -21.66453258765065
+   },
+   "path_t0p61": {
+    "t": 0.610631971725838,
+    "wav": "docs/explainers/rig-sampler/path_t0p61.wav",
+    "pre_gain_dbfs": -15.35033381219466
+   },
+   "path_t0p99": {
+    "t": 0.9870615482007845,
+    "wav": "docs/explainers/rig-sampler/path_t0p99.wav",
+    "pre_gain_dbfs": -15.99284370430606
+   }
+  },
+  "figures": [
+   "docs/explainers/rig-sampler/path_profiles.png",
+   "docs/explainers/rig-sampler/path_ltas.png"
+  ],
+  "coverage_of_real": {
+   "1": {
+    "n_draws": 32,
+    "acceptance_rate": 1.0,
+    "t": [
+     0.006842766858078754,
+     0.06162318859791361,
+     0.07542317986303496,
+     0.1056761451082006,
+     0.15138609756448995,
+     0.1828913673877716,
+     0.2024383054272341,
+     0.22368608151300295,
+     0.2632883117876498,
+     0.297090557670854,
+     0.32232196717317957,
+     0.37273531512298336,
+     0.3819067996267599,
+     0.43280099153894186,
+     0.4426330502275604,
+     0.48147723305451046,
+     0.5286323735083873,
+     0.5575507949318016,
+     0.5866868459585804,
+     0.5959769635624397,
+     0.64302693558756,
+     0.6799525889607453,
+     0.709079230315252,
+     0.7262801110434133,
+     0.7549585283071506,
+     0.7903311457175767,
+     0.8369203243774475,
+     0.851256236292431,
+     0.878948221191581,
+     0.9143259083531015,
+     0.9669469059818948,
+     0.9871715461349211
+    ],
+    "michael_cruise": 1.0,
+    "michael_cruise_all_bands": 0.8095238095238095,
+    "dregon_cruise": 1.0,
+    "dregon_cruise_all_bands": 1.0
+   },
+   "2": {
+    "n_draws": 32,
+    "acceptance_rate": 0.8421052631578947,
+    "t": [
+     0.009137891644466017,
+     0.03818681914264407,
+     0.06430166546777971,
+     0.09857377185708292,
+     0.14087196009304104,
+     0.17639628752526246,
+     0.2134545460893294,
+     0.22607182991049757,
+     0.2745367265740306,
+     0.30419825490438346,
+     0.34152834621571054,
+     0.3555701165472748,
+     0.39821533377928237,
+     0.4232279117006857,
+     0.46734654998058467,
+     0.48234874805386496,
+     0.501034684788962,
+     0.5463700748763988,
+     0.5755255852969341,
+     0.6046110358857654,
+     0.6429454656821598,
+     0.6584966391360948,
+     0.7106753104261249,
+     0.7258823791026828,
+     0.7711382455195313,
+     0.7871779619787551,
+     0.8343357877995837,
+     0.8463814676161225,
+     0.9047631091029872,
+     0.9234391280542752,
+     0.9680134941049332,
+     0.9817306705041765
+    ],
+    "michael_cruise": 1.0,
+    "michael_cruise_all_bands": 0.8095238095238095,
+    "dregon_cruise": 1.0,
+    "dregon_cruise_all_bands": 1.0
+   }
+  }
+ },
+ "anchor_levels": {
+  "per_rig": {
+   "michael_cruise": {
+    "band_level_db": 9.8614803973829,
+    "band_level_db_unconverted": 29.53540768004379,
+    "power_scale_folded_db": -24.07711333296525,
+    "rate_factor_db": 4.403186068119139,
+    "real_clip_band_level_db": 11.666047938933634,
+    "fit_level_error_db": -1.8045675415507336,
+    "rms_dbfs": 24.884310700864162,
+    "real_clip_rms_dbfs": -23.623328068138328
+   },
+   "dregon_cruise": {
+    "band_level_db": 12.328016776609749,
+    "band_level_db_unconverted": 30.229937354881073,
+    "power_scale_folded_db": -22.305106633968606,
+    "rate_factor_db": 4.403186068119139,
+    "real_clip_band_level_db": 11.75290070569869,
+    "fit_level_error_db": 0.5751160709110597,
+    "rms_dbfs": 40.63478274713839,
+    "real_clip_rms_dbfs": -22.870143112810617
+   }
+  },
+  "level_band_hz": [
+   300.0,
+   7900.0
+  ],
+  "offset_band_db": 2.4665363792268487,
+  "offset_real_clips_band_db": 0.08685276676505538,
+  "offset_whole_array_rms_db": 15.750472046274226,
+  "note": "render_level_db = the anchor's own render level in LEVEL_BAND_HZ at normalize_rms=None on its own telemetry, with BOTH halves of the declared conversion applied (scores.power_scale folded per clip, plus to_renderer_units' 10 log10(work/analysis) = +4.4032 dB at the 44.1 kHz work grid). Band-restricted because 50-200 Hz carries a known k=1-3 render excess that dominates a whole-array RMS; see rig_sampler.LEVEL_BAND_HZ."
+ },
+ "ltas_envelope": {
+  "anchor_to_real": {
+   "michael_cruise": {
+    "rms_db": 2.0868515487880472,
+    "band_max_db": 3.442339337028182,
+    "level_db": 1.9002819277375904,
+    "rms_db_full_band": 5.785205793157728,
+    "band_max_db_full_band": 17.86600880521488,
+    "level_db_full_band": -1.1923931048380045
+   },
+   "dregon_cruise": {
+    "rms_db": 0.5879004314284069,
+    "band_max_db": 1.1770046443508289,
+    "level_db": -0.3722751346353218,
+    "rms_db_full_band": 7.445137459755709,
+    "band_max_db_full_band": 22.776926780604242,
+    "level_db_full_band": -3.4276154149342632
+   }
+  },
+  "real_pair": {
+   "rms_db": 4.967214259465287,
+   "band_max_db": 7.312944033512782,
+   "rms_db_full_band": 11.006302992621563,
+   "band_max_db_full_band": 27.07484002803055
+  },
+  "multiple": 2.0,
+  "tolerance_rms_db": 9.94,
+  "note": "the envelope is twice the measured REAL-to-REAL difference between the two drones, in LEVEL_BAND_HZ. It is not tied to the anchor-to-real deviation, which on the corrected coordinate is only 0.6-2.1 dB rms (the fits already agree with real above 300 Hz) and would be tighter than the between-clip spread. Structural guards (amp_exp/floor_exp >= 0, parity sign, falling trend, gamma excursion, finite render) are not re-scoped."
+ },
+ "easy_arm": {
+  "sweep": {
+   "michael_cruise": {
+    "2": {
+     "n_draws": 32,
+     "bracket_fraction": 1.0,
+     "bracket_fraction_all_bands": 0.9523809523809523,
+     "bands_missed_hz": [
+      70.71067811865471
+     ],
+     "attempts": 42,
+     "acceptance_rate": 0.7619047619047619,
+     "guard_fired": {
+      "speed_law": 5,
+      "ltas": 4,
+      "trend_falls": 1
+     },
+     "rotor_gain_db_std": 6.5866868307637345,
+     "slope_db_dec_std": 2.959954726583064,
+     "amp_exp_mean": 7.521982229286986,
+     "amp_exp_max": 18.680321378340608,
+     "amp_exp_over_measured_max": 0.0625
+    },
+    "2.5": {
+     "n_draws": 32,
+     "bracket_fraction": 1.0,
+     "bracket_fraction_all_bands": 0.9523809523809523,
+     "bands_missed_hz": [
+      70.71067811865471
+     ],
+     "attempts": 62,
+     "acceptance_rate": 0.5161290322580645,
+     "guard_fired": {
+      "speed_law": 9,
+      "ltas": 22,
+      "trend_falls": 4
+     },
+     "rotor_gain_db_std": 7.923565999681146,
+     "slope_db_dec_std": 3.3394753933077417,
+     "amp_exp_mean": 7.9862085701058145,
+     "amp_exp_max": 21.47483142568455,
+     "amp_exp_over_measured_max": 0.09375
+    },
+    "3": {
+     "n_draws": 32,
+     "bracket_fraction": 1.0,
+     "bracket_fraction_all_bands": 1.0,
+     "bands_missed_hz": [],
+     "attempts": 90,
+     "acceptance_rate": 0.35555555555555557,
+     "guard_fired": {
+      "ltas": 43,
+      "speed_law": 14,
+      "trend_falls": 12
+     },
+     "rotor_gain_db_std": 8.743213823803398,
+     "slope_db_dec_std": 4.088619182467478,
+     "amp_exp_mean": 8.26347129681825,
+     "amp_exp_max": 22.67405992980029,
+     "amp_exp_over_measured_max": 0.09375
+    }
+   },
+   "dregon_cruise": {
+    "2": {
+     "n_draws": 32,
+     "bracket_fraction": 1.0,
+     "bracket_fraction_all_bands": 0.9047619047619048,
+     "bands_missed_hz": [
+      70.71067811865471,
+      89.08987181403387
+     ],
+     "attempts": 34,
+     "acceptance_rate": 0.9411764705882353,
+     "guard_fired": {
+      "ltas": 2
+     },
+     "rotor_gain_db_std": 6.320835286573517,
+     "slope_db_dec_std": 2.8566978500826146,
+     "amp_exp_mean": 8.863122350372652,
+     "amp_exp_max": 22.255436410283856,
+     "amp_exp_over_measured_max": 0.15625
+    },
+    "2.5": {
+     "n_draws": 32,
+     "bracket_fraction": 1.0,
+     "bracket_fraction_all_bands": 0.9047619047619048,
+     "bands_missed_hz": [
+      70.71067811865471,
+      89.08987181403387
+     ],
+     "attempts": 51,
+     "acceptance_rate": 0.6274509803921569,
+     "guard_fired": {
+      "ltas": 12,
+      "parity_sign": 3,
+      "speed_law": 6
+     },
+     "rotor_gain_db_std": 7.3637844829717904,
+     "slope_db_dec_std": 3.420296526020599,
+     "amp_exp_mean": 8.656029541623255,
+     "amp_exp_max": 21.702100804229165,
+     "amp_exp_over_measured_max": 0.21875
+    },
+    "3": {
+     "n_draws": 32,
+     "bracket_fraction": 1.0,
+     "bracket_fraction_all_bands": 1.0,
+     "bands_missed_hz": [],
+     "attempts": 69,
+     "acceptance_rate": 0.463768115942029,
+     "guard_fired": {
+      "ltas": 26,
+      "parity_sign": 10,
+      "speed_law": 13
+     },
+     "rotor_gain_db_std": 8.797618786075002,
+     "slope_db_dec_std": 3.9788073424896275,
+     "amp_exp_mean": 10.174440872260874,
+     "amp_exp_max": 24.29130808207939,
+     "amp_exp_over_measured_max": 0.375
+    }
+   }
+  },
+  "extended_probe": {},
+  "bracket_target": 0.9,
+  "chosen_strength": 2.0,
+  "chosen_in_requested_range": true,
+  "n_draws_per_setting": 32,
+  "note": "bracketing fraction = share of 1/3-octave bands (50 Hz - 7.9 kHz) where the cloud's per-band min/max over the draws contains the real clip's band level, absolute levels, power_scale folded, normalize_rms=None"
+ }
+}

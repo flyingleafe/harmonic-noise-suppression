@@ -1,0 +1,36 @@
+# @package _global_
+# SCv2 on a bank of WIDE path-cloud draws under the unified regime — the hard
+# arm of the rig-sampler transfer pair. Identical to rig_fitted_scv2_unified in
+# every respect except the training stream: same architecture, same 2 s clips at
+# batch 128, same full-panel validation/stopping, synthetic only. The stream is
+# conf/online_mix/rig_hard_5050.yaml, which is the fitted policy with each
+# stochastic source's `ranges:` replaced by `preset_bank:
+# data/rig_banks/rig_hard_n512.json` — 512 parameter sets drawn by
+# `experiments.stochastic_fit.rig_sampler` from a wide cloud along the path
+# between the two rigs' cruise fits
+# (results/S2/cruise_8clip.json:fly125_cruise_00 and
+# results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00),
+# the mixing coordinate uniform on [0, 1], every draw passed through the
+# sampler's guards. So rigs resembling either real rig are present and neither
+# is especially likely.
+# Compared with rig_fitted_scv2_unified (the same two rigs as POINT fits),
+# rig_easy_scv2_unified (close neighbourhoods of the same two fits),
+# ctrl_diverse_scv2_unified (wide ranges) and real_r4_scv2_unified (real data
+# in training; best val/real_r3 2.99).
+defaults:
+  - real_r1_scv2
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: rig_hard_scv2_unified
+# fp16 went non-finite at step ~500 on the FM stream (run tgr8l18p); the
+# matrix's one-time bf16 policy applies to every FM-tone-bank stream.
+amp_dtype: bfloat16
+samples_per_validation: null
+batch_size: 128
+num_workers: 12
+data:
+  train:
+    params:
+      path: conf/online_mix/rig_hard_5050.yaml
+      duration_s: 2.0
