@@ -1,0 +1,243 @@
+# Easy and hard sim-to-real transfer: the rig-sampler pair
+
+**Status:** in progress — submitted 2026-09-14 23:46 UTC, runs in flight. Jobs
+`rig-easy-e7e4ce` and `rig-hard-6ed3cf` (vast), both from commit `7525ce8c`
+("transfer arms: rig neighbourhood sampler, preset-bank streams, renderer
+fix"). Per-experiment docs: `conf/experiment/rig_easy_scv2_unified.md`,
+`conf/experiment/rig_hard_scv2_unified.md`.
+
+## Motivation
+
+`rig_fitted_scv2_unified` trained an SCv2 RPS predictor on the two rigs' cruise
+fits as POINT presets. It transferred unevenly — best `real_r3` 9.97 rev/s at
+epoch 22, plateau 13.42, `r1`/`r2` ratio 1.93 — and after epoch 22 every real
+view degraded while the synthetic half kept improving: overfitting to two fixed
+parameter vectors. The real-data reference is `real_r4_scv2_unified` at
+`val/real_r3` **2.99**.
+
+The pair asks whether the limit is the *point-ness* of the training
+distribution and, if the answer is yes, how far the distribution can be widened
+before it stops helping. Nothing but the noise family changes.
+
+* **Easy** — `rig_easy_scv2_unified`: draws from CLOSE neighbourhoods of the two
+  real rigs' fits. The training distribution is measured to COVER the real
+  rigs, so this arm should transfer. If it does not, the limit is the fit's
+  fidelity, not its point-ness: a neighbourhood of a wrong point is still
+  wrong.
+* **Hard** — `rig_hard_scv2_unified`: the same cloud width smeared along the
+  PATH between the two fits, mixing coordinate uniform on [0, 1]. Rigs
+  resembling either real rig are present, neither is especially likely, so the
+  model cannot memorise a fingerprint and has to learn the operation.
+
+The decision rule stated when the pair was launched: the easy arm's real
+validation loss is EXPECTED to fall well. The informative outcome is the hard
+arm — if a model trained on a wide cloud in which neither target rig is
+privileged also transfers to real audio, the sim-to-real problem for this task
+is essentially closed, because the real rigs stop being special.
+
+## Setup
+
+Both arms are `rig_fitted_scv2_unified` with one field changed: the training
+stream. Same `real_r1_scv2` architecture, `override /validation: rps_unified`,
+bfloat16, batch 128, 12 workers, 2 s clips, `samples_per_validation: null`,
+synthetic only. The streams (`conf/online_mix/rig_easy_5050.yaml`,
+`rig_hard_5050.yaml`) are the fitted policy with each stochastic source's
+`ranges:` replaced by `preset_bank:`; weights, the full-flight trajectory,
+`rps_scale_range`, `render_reuse: 48`, the level draw, the silence source, the
+speech source and the mixing policy are the base policy's.
+
+**Banks.** `scripts/_build_rig_bank.py`, 2048 draws each, seed 20260914,
+anchors `results/S2/cruise_8clip.json:fly125_cruise_00` (Michael's) and
+`results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00`,
+both on the physical level scale.
+
+* Easy: `--mode neighbourhood --strength 2.0`, 1024 draws per anchor. Strength
+  2.0 is the measured COVERAGE setting: the cloud brackets the real clip in
+  100 % of 1/3-octave bands above 300 Hz on both rigs (95.2 % / 90.5 % of all
+  bands including the low ones); 2.5 and 3.0 add nothing above 300 Hz and cost
+  acceptance. Guards reject 23.8 % of Michael's draws and 5.9 % of DREGON's
+  (1.29 attempts per accepted draw, 77.9 % first try; `ltas` 383, `speed_law`
+  190, `trend_falls` 39, `parity_sign` 24).
+* Hard: `--mode path --spread 2.0`. Same width, different location. The
+  realised mixing coordinate survives the truncation: ten-bin counts
+  [208, 194, 212, 216, 187, 199, 207, 199, 214, 212], mean *t* 0.503,
+  Kolmogorov–Smirnov distance to U(0, 1) **0.0127** against a 95 % threshold of
+  **0.0301**. Acceptance 1.21 attempts per draw, 82.7 % first try (`ltas` 293,
+  `speed_law` 162, `trend_falls` 2, `parity_sign` 1).
+
+**Sampler structure** (`src/experiments/stochastic_fit/rig_sampler.py`, widths
+in `results/rig_sampler/structure.json`). Per rotor, over orders `k = 1..K`
+with `x = log10 k`,
+`profile_db[r,k] = gain + slope*(x - mean x) + env(k)*s(k) + resid(k)`. The two
+structural invariants of a rotor comb are HARD guards — reject and redraw,
+never clip:
+
+* the parity split keeps its sign and DECAYS with order (13.6 dB over k ≤ 16,
+  3.1 dB over k = 33..48, 0.0 dB above k ≈ 80 on FLY125 cruise rotor 0), so
+  `env(k)` is a measured envelope rather than one amplitude; 0 of the 124
+  measured rotor profiles has an inverted low-band split;
+* the harmonic profile falls with order like a power law in `log` order.
+
+Linewidths move only slightly; the per-rotor gains and profile shapes move
+freely. Widths are measured across the SIX stage-2 fits in `structure.json`'s
+provenance (Michael cruise base/refined/dyn, Michael standby, DREGON room-2
+cruise refined, DREGON flight), in three tiers, with the strength ladder:
+`strength = 1` is the between-refit spread (another refit of the same audio),
+`~3` reaches the between-rotor spread within one rig (slope 4.40 against
+1.46 dB/decade), `~5` the between-rig spread (slope 6.93). So strength 2.0 is
+"a noticeably different rotor set on the same airframe".
+
+**Exponent bound.** The speed exponents are bounded to the FITTED range —
+`amp_exp` to [4.398, 14.111], `floor_exp` to [0, 6.792]
+(`structure.json:between_rig.per_fit`; `floor_exp`'s measured minimum is −3.711
+and is raised to 0 because a negative floor exponent diverges at zero rotor
+speed). The measured between-refit width (sigma 2.733) is legitimate but its
+TAIL is supported by no fit: unbounded, the easy bank reached 24.7 dB/dB and
+the hard bank 31.9 dB/dB, at which an idle window's comb sits ~20 dB under the
+same rig at cruise. The bound clipped 706 `amp_exp` / 510 `floor_exp` draws of
+2050 (easy) and 672 / 449 of 2049 (hard); realised `amp_exp` 8.85 ± 3.57 and
+8.76 ± 3.50, `floor_exp` 2.79 ± 2.94 and 2.93 ± 2.82, all filling their bounds.
+
+**Level path.** Every anchor is loaded through both halves of the declared
+conversion: `scores.power_scale` folded per clip, then `to_renderer_units`'
+`10 log10(work/analysis)` = **+4.4032 dB** at the 44.1 kHz work grid these
+renders use. On that scale, with NO gain applied anywhere, each anchor's render
+agrees with its OWN real clip to **−1.81 dB** (FLY125 cruise) and **+0.58 dB**
+(DREGON room-2 cruise) in the 300 Hz–7.9 kHz level band, RMS band deviation
+2.09 and 0.59 dB. The band coordinate is the honest one: the same two exports
+differ by +2.467 dB on it and by +15.750 dB on a whole-array RMS, and
++2.467 = +0.087 (the two REAL recordings) + 0.575 (DREGON's fit error) + 1.805
+(FLY125's fit error) — the recordings are within 0.09 dB of each other, so the
+residual offset is fit error and it is small.
+
+**Reproducibility and transport.** Banks are gitignored BUILD PRODUCTS (24.6 /
+24.4 MB) and `omnirun` ships a clean pushed checkout, so each job REBUILDS its
+bank first (56 s / 65 s on one core) and skips the build if the file is already
+current. The builds are bit-reproducible — file SHA-256
+`58b24d2d…3dd307d` (easy) and `b0a977a0…11209a6` (hard) — and the provenance's
+`inputs_digest` covers the anchors, the donor ranges, every width and the
+source of the builder, the sampler and the renderer, so a rebuild with matching
+inputs is skipped and a code change is not. The two anchor fits were
+un-ignored (`.gitignore`: `!results/S2/cruise_8clip.json`,
+`!results/S2/dregon_room2_cruise_refined.json`) so they travel with the
+checkout instead of needing R2 transport before the build step.
+
+**Known caveat, belonging to the arms rather than the plumbing.** The
+per-microphone pattern is perturbed per entry (sigma 1.12 dB gain, 0.20 dB
+floor) but NOT permuted across channel indices, so the index-locked mechanism
+behind the fitted run's `r1`/`r2` ratio of 1.93 is softened, not removed. The
+perturbation is small against DREGON's −13 to +11 dB span.
+
+## Preparation findings
+
+### A renderer defect on the shared training path
+
+Making the level path absolute (above) made an absolute per-order comparison
+possible for the first time, and it found a one-line defect in
+`stochastic_rotor_noise.synthesize`'s `line_mode in ("coherent", "fm")` branch.
+The tone bank's level is set by `scale = sqrt(want / have)`, and the two sides
+of that ratio referred to DIFFERENT spectra: `want`'s denominator was the bare
+floor, while `have`'s was the variance of `floor_audio`, which INCLUDES the
+incoherent share of the comb. `scale` therefore came out high by exactly
+`sqrt(I)` with
+
+`I = 1 + mean(g_m · incoherent) / (mean(floor) · floor_mic_m)`,
+
+one factor on the whole tone bank, giving a per-order error
+`Δ_k = 10 log10(w_k·I + (1 − w_k))` that is large only where the coherent share
+`w_k` is large. Measured against the fit's own forward law (`predicted_m`), on
+each anchor's own fit support, one microphone:
+
+| order | Michael, measured | Michael, closed form | DREGON, measured | DREGON, closed form |
+|---|---:|---:|---:|---:|
+| 1 | +14.29 | +14.49 | +13.27 | +13.14 |
+| 2 | +9.82 | +10.12 | +9.25 | +8.98 |
+| 3 | +3.41 | +4.08 | +3.33 | +3.45 |
+
+The closed form has NO free parameters and its worst residual against the
+measurement is **0.75 dB**. In every band above 300 Hz the render tracks
+`predicted_m` to ≤0.5 dB, and at orders 4–6 to ≤0.73 dB. Performing the
+coherent/incoherent split OUTSIDE `synthesize` — two renders neither of which
+splits — lands within 0.65 dB of the forward law at every order and every band
+on both rigs, which measures what the
+corrected mixing gives rather than patching it. Diagnosis and reproduction:
+`docs/explainers/flight-assembly.qmd` §4.4,
+`docs/explainers/flight-startup/low_order_diagnosis.json`. The fix (`want`'s
+denominator is `np.mean(floor_spec[m])`, the spectrum `floor_audio` was
+realized from) is in `7525ce8c`, which is what both arms run.
+
+**Consequence for the historical rows — say it plainly.** EVERY earlier
+stochastic training set carried this defect, and `synthesize`'s default
+`normalize_rms=0.1` hid it: rescaling the whole waveform erases the absolute
+level while leaving line-to-floor ratios intact, so the inflation never showed
+up as a loudness error, only as too much power in orders 1–3. The historical
+stochastic rows — including `rig_fitted_scv2_unified` and
+`ctrl_diverse_scv2_unified` — are therefore **not comparable value-for-value**
+with these two arms: they are the closest available reference for the QUESTION,
+but they were trained on a different noise distribution than the one the fixed
+renderer produces. Read them as direction, not as a delta.
+
+The same applies to any earlier LTAS number produced through that branch. The
+revised-phase campaign's absolute-level LTAS gate runs the legacy arm through
+`stage2.render_from_export`, i.e. through `synthesize`, and its DREGON figures
+are a baseline of 2.1362 dB against a baseline-variability tolerance of
+0.0560 dB — a tolerance three orders of magnitude smaller than the low-order
+inflation. Those gate numbers are **not reproducible against the fixed
+renderer** and must be re-derived before they are cited again.
+
+### Surviving fit-side error, deliberately not corrected
+
+Once the render defect is accounted for, the FIT still over-predicts the lowest
+orders: order 1 sits about **3 dB** high on Michael's rig and about **8 dB**
+high on DREGON (`predicted_m` against the real clip, same supports). That is
+not fixed here, on purpose — it is a property of the family under test, and the
+question these arms ask is whether that family, sampled as a distribution,
+transfers. Correcting it would change the object being measured.
+
+A side diagnostic prepared alongside, `results/multires_rescore/table.md`
+(previous vs revised C3 composite risk at three window lengths), is DIAGNOSTIC
+ONLY and in sample for the previous arm; it is not evidence for or against
+either arm here.
+
+## What will be measured
+
+Real-split validation, selecting on **`real_overall`, not `overall_macro`** —
+the fitted-preset run's synthetic half improved monotonically while every real
+view degraded, so the macro neither stopped the run nor reduced the LR. The
+three comparison rows:
+
+| row | stream | role |
+|---|---|---|
+| `rig_fitted_scv2_unified` | two fitted rigs as POINT presets | the previous tight arm: best `real_r3` 9.97 at ep 22, plateau 13.42, `r1`/`r2` 1.93 |
+| `ctrl_diverse_scv2_unified` | wide measured ranges | diversity without the fits |
+| `real_r4_scv2_unified` | REAL noise in training | the reference: `val/real_r3` **2.99** |
+
+Readings, per the launch decision rule:
+
+* **Easy transfers, hard does not** — the expected outcome. Point-ness was part
+  of the limit, and transfer needs the training distribution to sit ON the
+  target rigs. Useful, bounded: every new rig needs its own fit.
+* **Both transfer** — the sim-to-real problem for this task is essentially
+  closed. A model trained on a wide cloud in which neither target rig is
+  privileged would have learned the operation rather than either fingerprint,
+  so a new rig needs no fit at all.
+* **Neither transfers** — the limit is the family's FIDELITY, not the width or
+  the placement of the cloud. A neighbourhood of a wrong point is still wrong,
+  and the surviving low-order over-prediction (3 / 8 dB) plus the index-locked
+  microphone pattern become the next things to fix.
+
+## Results
+
+**PENDING** — both runs are in flight.
+
+| arm | job | backend | status |
+|---|---|---|---|
+| `rig_easy_scv2_unified` | `rig-easy-e7e4ce` | vast | running |
+| `rig_hard_scv2_unified` | `rig-hard-6ed3cf` | vast | running |
+
+To be filled when they land: best `real_overall` and the per-view `real_r1` /
+`real_r2` / `real_r3` rev/s MAE at that epoch for each arm, the epoch it
+occurred at, whether the post-best real degradation of the fitted run recurs,
+and the `r1`/`r2` ratio against the fitted run's 1.93.
+
+## Conclusion
