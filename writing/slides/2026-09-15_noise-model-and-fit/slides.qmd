@@ -388,15 +388,18 @@ The two real rigs average -13 and -22 dB per decade.
 
 ## Transfer result: both clouds
 
-| Training noise | best real MAE (rev/s) | round |
+| Training noise | best round | saved checkpoint |
 |:--|--:|--:|
-| Real flights (`real_r4_scv2_unified`) | **2.99** | 48 |
-| Hard cloud (`rig_hard_scv2_unified`) | **5.37** | 102 |
-| Easy cloud (`rig_easy_scv2_unified`) | **5.72** | 29 |
-| Previous fitted presets (`rig_fitted_scv2_unified`) | 9.97 | 23 |
-| Wide hand-set ranges (`ctrl_diverse_scv2_unified`) | 14.27 | 4 |
+| Real flights (`real_r4_scv2_unified`) | **2.99** (r48) | **3.11** (r24) |
+| Hard cloud (`rig_hard_scv2_unified`) | **5.37** (r102) | **5.41** (r124) |
+| Easy cloud (`rig_easy_scv2_unified`) | **5.72** (r29) | **6.09** (r57) |
+| Previous fitted presets (`rig_fitted_scv2_unified`) | 9.97 (r23) | — |
+| Wide hand-set ranges (`ctrl_diverse_scv2_unified`) | 14.27 (r4) | — |
 
 ::: {.small}
+Real-split PIT MAE in rev/s. The left column is the best validation round. The right column is the
+file the selection rule saved, which uses a median-smoothed score.
+
 Synthetic-only training reaches 5.4 rev/s on real drones. The previous fitted presets reached 10.0.
 The hard cloud matches the easy cloud. Neither real rig is likely in the hard cloud.
 :::
