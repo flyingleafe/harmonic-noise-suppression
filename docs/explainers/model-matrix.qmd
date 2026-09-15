@@ -1,0 +1,146 @@
+---
+title: "Four models, four distributions"
+subtitle: "24 clips: real cruise, matched-RPS synthetic, stream trajectories on the rig fits, stream trajectories on the hard cloud"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-fold: true
+    html-math-method: katex
+execute:
+  echo: false
+  warning: false
+---
+
+```{python}
+import json
+from pathlib import Path
+
+import pandas as pd
+from IPython.display import Markdown, display
+
+ROOT = Path.cwd()
+while not (ROOT / "results").exists() and ROOT != ROOT.parent:
+    ROOT = ROOT.parent
+M = json.loads((ROOT / "results" / "model_matrix" / "matrix.json").read_text())
+FIGDIR = "model-matrix"
+
+MODELS = list(M["models"])
+CATS = {
+    "A": "A · real cruise",
+    "B": "B · matched-RPS synthetic",
+    "C": "C · stream trajectories, rig fits",
+    "D": "D · stream trajectories, hard cloud",
+}
+LABEL = {
+    "hppnet-real-best": "HPPNet L2, real-best (gating)",
+    "hppnet-easy": "HPPNet L2, easy cloud",
+    "scv2-real-R4": "SCv2, real R4",
+    "scv2-hard": "SCv2, hard cloud",
+}
+clips = {c["key"]: c for c in M["clips"]}
+```
+
+## What this is
+
+Four trained models are run on 24 clips. The clips come from four
+distributions. Every score is a per-clip PIT MAE in rev/s, with **one rotor
+assignment per clip** — the convention `losses.pit.pit_mse_loss` and
+`metrics.rps.batched_pit_mae` both use, so these numbers are comparable with
+every other rotor-speed result in the project.
+
+| category | what it is |
+|:--|:--|
+| **A** | 6 real cruise clips of the frozen split: 3 Michael FLY124, 3 DREGON room 1 |
+| **B** | the same 6 RPS tracks, re-rendered from the matching rig's fitted model |
+| **C** | 6 RPS trajectories from the training stream's own generator, rendered from the rig fits (3 Michael, 3 DREGON) |
+| **D** | the same 6 trajectories, each rendered from a random hard-cloud parameter draw |
+
+## Summary
+
+```{python}
+for stat in ("mean", "median"):
+    rows = []
+    for m in MODELS:
+        row = {"model": LABEL[m]}
+        for cat in CATS:
+            agg = M["aggregates"][m][cat]
+            for part, name in (("michaels", "mich"), ("dregon", "dreg"), ("all", "all")):
+                row[f"{cat} {name}"] = round(agg[part][stat], 2)
+        rows.append(row)
+    display(Markdown(f"**{stat.capitalize()} over clips — PIT MAE (rev/s), mic 0**"))
+    display(pd.DataFrame(rows).set_index("model"))
+```
+
+`mich` / `dreg` is the rig the clip belongs to: the recording for **A**, the rig
+fit that rendered it for **B** and **C**. For **D** it is the trajectory half
+whose **C** twin used that fit — a **D** clip's own parameters are a hard-cloud
+draw, not a rig.
+
+## Where a mean hides a failure
+
+```{python}
+display(Markdown("\n".join(f"- {w.strip()}" for w in M["warnings"])))
+```
+
+## Per clip
+
+```{python}
+rows = []
+for key, c in clips.items():
+    row = {"clip": key, "category": c["category"], "rig": c["rig"]}
+    row.update({LABEL[m]: round(v, 2) for m, v in c["pit_mae"].items()})
+    rows.append(row)
+df = pd.DataFrame(rows).set_index("clip")
+display(df)
+```
+
+## Figures
+
+Each figure: the clip spectrogram on top, then the regime strip, then the rotor
+speeds. Target tracks are thick and light. Each model's **four raw output
+series** are drawn thin over them — no matching, no permutation, so a line may
+sit near a target that is not its own rotor. That is what the model emits.
+
+```{python}
+order = ["A", "B", "C", "D"]
+for cat in order:
+    display(Markdown(f"### {CATS[cat]}"))
+    for key, c in clips.items():
+        if c["category"] != cat:
+            continue
+        scores = "  ·  ".join(f"{LABEL[m]} **{v:.2f}**" for m, v in c["pit_mae"].items())
+        display(Markdown(f"**{key}** — {c['recording']}\n\n{scores}\n\n![]({FIGDIR}/{key}.png)\n"))
+```
+
+## Provenance
+
+```{python}
+prov = {
+    "git HEAD": M["git_head"],
+    "metric": M["metric"] if isinstance(M["metric"], str) else json.dumps(M["metric"]),
+    "split": f"{M['clip_set']['split']} @ {M['clip_set']['split_version']}",
+    "clips": M["clip_set"]["n_clips"],
+    "duration_s": M["clip_set"]["duration_s"],
+    "mics rendered": M["clip_set"]["n_mics_rendered"],
+}
+display(pd.DataFrame(prov.items(), columns=["field", "value"]).set_index("field"))
+display(Markdown("**Checkpoints**"))
+ck = [
+    {
+        "model": LABEL[m],
+        "experiment": v["experiment"],
+        "checkpoint": v["ckpt"],
+        "sha256": v["digest"].removeprefix("sha256:")[:16],
+        "salience decoder": v["salience_decoder"],
+    }
+    for m, v in M["models"].items()
+]
+display(pd.DataFrame(ck).set_index("model"))
+```
+
+Full per-clip provenance — render seeds, anchor fit digests, hard-cloud entry
+indices and their mixing coordinates — is in
+`results/model_matrix/matrix.json`. Rebuild everything with
+`PYTHONPATH="$PWD/src:$PWD/scripts" python scripts/_model_matrix.py`.
