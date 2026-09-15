@@ -380,7 +380,7 @@
   "posterior": {
     "zoom_grid": {
       "path": "posterior_zoom_grid.png",
-      "caption": "**12 random rigs, 20 s each.** One airborne sample per posterior draw (`posterior.json` + `draws/*.json`), each panel on its own y-range because the drawn operating points span 96-213 rev/s. Rotor colours are the mixer order.",
+      "caption": "**12 random rigs, 20 s each.** One airborne sample per posterior draw (`posterior.json` + `draws/*.json`), each panel on its own y-range because the drawn operating points span 96-245 rev/s. Rotor colours are the mixer order.",
       "n_draws": 12
     },
     "flight_grid": {
