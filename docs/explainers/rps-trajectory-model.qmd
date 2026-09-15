@@ -61,6 +61,10 @@ ALL_RIGS = RIGS + [r for r in (INDEX.get("skipped") or {}) if r not in RIGS]
 SUM_BY_RIG = {r["rig"]: r for r in SUMMARY["rigs"]}
 FLIGHTS = {rig: load(RES / "stats" / "real" / f"{rig}.flights.json") for rig in ALL_RIGS}
 GRIDS = INDEX.get("grids") or {}
+ROUND = INDEX.get("round", "unknown")
+#: Appended to every generated caption, so no figure can be read as another
+#: round's evidence.
+ROUND_TAG = f" *Fits shown: `{ROUND}`.*"
 
 
 def stats_of(arm, rig):
@@ -173,9 +177,10 @@ def figure(entry, rig=None, column="column-page"):
     """
     if not entry:
         return ""
+    tag = ROUND_TAG if entry.get("path", "").endswith(".png") and rig != "explore" else ""
     return (
         f"::: {{.{column}}}\n"
-        f"![{entry['caption']}]({ASSETS}/{entry['path']})\n"
+        f"![{entry['caption']}{tag}]({ASSETS}/{entry['path']})\n"
         ":::\n"
     )
 ```
@@ -204,39 +209,71 @@ quarto render docs/explainers/rps-trajectory-model.qmd
 
 ```{python}
 #| output: asis
-ok = [rig for rig in RIGS if INDEX["figures"].get(rig)]
-print(
-    f"**State of this render.** Round label `{INDEX.get('round', 'unknown')}`. "
-    f"{len(ok)} rigs carry figures. The figure folder holds "
-    f"{INDEX.get('n_figures', 0)} figures. The common analysis rate is "
-    f"{INDEX.get('rate_hz', 100.0):g} Hz."
-)
+def round_verdicts(payload):
+    """(passes, per-rig (rig, better, verdict)) of one round record."""
+    rows = []
+    for entry in payload.get("rigs", []):
+        new, base = entry.get("new"), entry.get("base")
+        if not (new and base):
+            continue
+        verdict, strict = passes(new, base)
+        rows.append((entry["rig"], sum(strict.values()), verdict))
+    return sum(1 for _, _, v in rows if v), rows
+
+
+SCORED = {name: round_verdicts(p) for name, p in ROUNDS.items() if p}
+BEST = max(SCORED, key=lambda k: (SCORED[k][0], k)) if SCORED else None
 PROV = INDEX.get("fit_provenance") or {}
-LEGACY = {rig: why for rig, why in PROV.items() if "re-expressed" in why}
-skipped = INDEX.get("skipped") or {}
-if skipped:
-    print(
-        "\n\n::: {.callout-warning}\n## Some figures are still missing\n\n"
-        + "\n".join(f"- `{rig}` — {why}" for rig, why in skipped.items())
-        + "\n\nRun `python scripts/rps_traj_explainer_figs.py` again after those "
-        "fits are written. The page then fills the empty cells by itself.\n:::\n"
+STALE = {rig: why for rig, why in PROV.items() if why != "current"}
+ok = [rig for rig in RIGS if INDEX["figures"].get(rig)]
+
+print("# Where the campaign ended\n")
+if BEST:
+    n_pass, rows = SCORED[BEST]
+    best_line = "; ".join(
+        f"`{rig}` {better}/5{' **PASS**' if verdict else ''}"
+        for rig, better, verdict in rows
     )
-if LEGACY:
+    last = list(SCORED)[-1]
     print(
-        "\n\n::: {.callout-important}\n## Some fits come from an earlier round\n\n"
-        f"The model code in `src/experiments/rps_traj/model.py` is ahead of "
-        f"`results/rps_traj/fits/new/` for {len(LEGACY)} rigs: "
-        f"{', '.join('`' + r + '`' for r in LEGACY)}. Two steps between rounds "
-        f"are exact re-expressions, so the figure generator re-writes those "
-        f"stored fits instead of dropping them. White measurement noise becomes "
-        f"the measurement process at zero memory time. Per-rotor flight offsets "
-        f"split into a common part of zero plus the same per-rotor part. Each "
-        f"sample figure of those rigs therefore shows the earlier fit exactly, "
-        f"and its caption and panel title say so.\n\n"
-        f"- rig posterior: {INDEX.get('posterior_source', 'n/a')}\n"
-        f"- draws: {INDEX.get('draws_source', 'n/a')}\n\n"
-        "The five-family tables, the verdicts and the round log do not depend "
-        "on this. They read the stored statistics, which are frozen.\n:::\n"
+        f"The campaign ran {len(SCORED)} rounds and stopped at the round cap. "
+        f"The best round is **`{BEST}`**, with {n_pass} of {len(rows)} rigs "
+        f"passing the frozen rule: {best_line}.\n"
+    )
+    if last != BEST:
+        n_last, rows_last = SCORED[last]
+        print(
+            f"The last round is **`{last}`**, with {n_last} of {len(rows_last)} "
+            f"rigs passing. It is a **rescore**, not a new fit: it keeps the "
+            f"dynamics of `{BEST}` and changes the per-flight offset only, from "
+            f"one offset per rotor to a common offset plus a per-rotor offset. "
+            f"The split helps the rigs whose flights differ by a common level "
+            f"and costs `michaels` its pass, because that rig's offset is "
+            f"really one rotor's trim.\n"
+        )
+    print(
+        f"**Every figure on this page shows the `{ROUND}` fits**, and every "
+        f"caption repeats that label. Those fits carry the `{BEST}` dynamics, "
+        f"so the figures are also the picture of the best round's model, with "
+        f"its final offset model.\n"
+    )
+print(
+    f"This render reads round label `{ROUND}`. {len(ok)} rigs carry figures. "
+    f"The figure folder holds {INDEX.get('n_figures', 0)} figures. The common "
+    f"analysis rate is {INDEX.get('rate_hz', 100.0):g} Hz."
+)
+if STALE:
+    print(
+        "\n\n**Stale fits in this render.** "
+        + "; ".join(f"`{rig}`: {why}" for rig, why in STALE.items())
+        + ". Run `python scripts/rps_traj_explainer_figs.py` again after those "
+        "fits are written.\n"
+    )
+if INDEX.get("skipped"):
+    print(
+        "\n\n**Missing figures.** "
+        + "; ".join(f"`{rig}`: {why}" for rig, why in INDEX["skipped"].items())
+        + ".\n"
     )
 ```
 
@@ -471,23 +508,7 @@ likelihood of the samples. The score is then applied afterwards, by a separate
 program. The baseline arm has the opposite property: it optimises the score
 itself. Any win by the new arm is therefore a win against a favoured opponent.
 
-```{python}
-#| output: asis
-if LEGACY:
-    print(
-        f"**What this render shows.** The text above describes the fit in "
-        f"`src/experiments/rps_traj/model.py` today. "
-        f"`results/rps_traj/fits/new/` is one step behind it for "
-        f"{len(LEGACY)} rigs, so those rigs' sample figures show the earlier "
-        f"fit. Each such caption and panel title says so."
-    )
-else:
-    print(
-        f"**What this render shows.** Every fit on this page loads into the "
-        f"current model code with no re-writing. The round label is "
-        f"`{INDEX.get('round', 'unknown')}`."
-    )
-```
+
 
 # How the two are judged {#how-the-two-are-judged}
 
@@ -689,7 +710,7 @@ are short.
 ```{python}
 #| output: asis
 for entry in INDEX.get("explore", []):
-    print(figure(entry))
+    print(figure(entry, rig="explore"))
     print()
 ```
 

@@ -391,15 +391,17 @@ def car2_psd_grid(
 
 @dataclass
 class Params:
-    """The 31 parameters of the new model.
+    """The 32 parameters of the new model.
 
     ``mu`` (4) rev/s in mixer rotor order; ``theta`` rad; per mode
     ``tau_slow`` (s, in ``(tau_c, TAU_SLOW_MAX_S)``), ``sigma_slow`` (rev/s),
     ``f0`` (Hz), ``zeta``, ``sigma_osc`` (rev/s); the measurement process'
-    ``tau_e`` (s) and ``sigma_e`` (rev/s), shared across rotors; ``s`` (4) rev/s
-    per-flight offset stds per ROTOR.  Every ``sigma`` is a STATIONARY std, so a
-    mode's variance is ``sigma_slow^2 + sigma_osc^2`` and a rotor's measurement
-    variance is ``sigma_e^2``.
+    ``tau_e`` (s) and ``sigma_e`` (rev/s), shared across rotors; the per-flight
+    offset ``delta_flight = 1 c + r`` with ``s_c`` rev/s (std of the common
+    level ``c``) and ``s_r`` (4) rev/s (std of the per-rotor part ``r``).  Every
+    ``sigma`` is a STATIONARY std, so a mode's variance is
+    ``sigma_slow^2 + sigma_osc^2`` and a rotor's measurement variance is
+    ``sigma_e^2``.
     """
 
     mu: np.ndarray

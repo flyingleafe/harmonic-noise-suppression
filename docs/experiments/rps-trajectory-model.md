@@ -486,11 +486,13 @@ properties of these fits matter when reading a verdict:
 ## The model
 
 Rotor speeds in rev/s, mixer order `[RFront, LFront, LBack, RBack]`
-(`src/experiments/rps_traj/model.py`, round 3 form):
+(`src/experiments/rps_traj/model.py`, the final round-4/5 form):
 
 ```
 w(t)   = mu + delta_flight + M R(theta) v(t) + e(t)
 v_i(t) = OU(tau_slow_i, sigma_slow_i) + CAR2(f0_i, zeta_i, sigma_osc_i)
+e_j(t) = OU(tau_e, sigma_e),  independent across rotors
+delta_flight = 1 c + r,  c ~ N(0, s_c^2),  r ~ N(0, diag(s_r^2))
 ```
 
 - `M` is `tracking.rotors.MIXER`, columns `[common, roll, pitch, yaw]`.
@@ -498,75 +500,135 @@ v_i(t) = OU(tau_slow_i, sigma_slow_i) + CAR2(f0_i, zeta_i, sigma_osc_i)
   pitch. The exploration found the two loud modes to be a collective/yaw
   MIXTURE, so the loud pair must be free to rotate inside that plane. `theta` is
   reported in `(-pi/4, pi/4]`; `theta -> theta + pi/2` with a swap of the mode-0
-  and mode-3 parameters leaves the model invariant.
+  and mode-3 parameters leaves the model invariant (`Params.canonical`).
 - `CAR2` is the white-noise-driven damped harmonic oscillator
   `x'' + 2 zeta w0 x' + w0^2 x = xi`, `w0 = 2 pi f0`, with `sigma_osc` its
-  stationary standard deviation. It is `f^-4` above its corner and flat below
-  it, and with `zeta` free it is also the optional per-rig resonance the
-  exploration asked for: `zeta < 1/sqrt(2)` peaks at `f0` (the MikroKopter's
-  3 Hz loop), `zeta ~ 1` is a Matern-3/2-like shoulder, `zeta > 1` is overdamped
-  (the M100's featureless power law).
-- `e(t)` is per-rotor iid white MEASUREMENT noise with one standard deviation
-  `sigma_w`. It carries what a rig's telemetry chain adds on top of the shaft —
-  DREGON's 45 Hz staircase, michaels' hold-resampling and interpolation residue
-  — and is labelled "measurement" precisely so a training sampler can drop it.
-- `delta_flight ~ N(0, diag(s^2))` per ROTOR, one draw per flight. The frozen
-  `rotor_var` pools all airborne samples about the POOLED mean, so
-  flight-to-flight level differences are part of what is scored, and they are
-  per-rotor: michaels' rotor 0 carries 2.5x its neighbours' variance purely
-  because its between-flight trim moves 17 rev/s.
+  stationary standard deviation. It is flat below `f0` and `f^-4` above, where a
+  sum of Lorentzians is capped at `f^-2`, and with `zeta` free it is also the
+  optional per-rig resonance the exploration asked for: `zeta < 1/sqrt(2)` peaks
+  at `f0` (the MikroKopter's 3 Hz loop), `zeta ~ 1` is a Matern-3/2-like
+  shoulder, `zeta > 1` is overdamped (the M100's featureless power law).
+- `e(t)` is the MEASUREMENT process: one OU per rotor with shared
+  `(tau_e, sigma_e)`, independent across rotors. The artefacts it absorbs are
+  COLOURED and incoherent — DREGON's 45 Hz sample-and-hold, michaels'
+  hold-resampling and interpolation residue, per-rotor ESC jitter — so a white
+  term cannot take them, and in round 3 the shaft modes took them instead:
+  DREGON's rotor cross-correlation came out at 0.46 against a real 0.17. It is
+  labelled "measurement" so a training sampler can drop it and keep the shaft.
+  `tau_e` is bounded to (1e-3, 1.0) s, because the correlation times it models
+  are milliseconds to tens of milliseconds (michaels' median hold 68 ms,
+  DREGON's 19 ms) and a second would be shaft behaviour. That bound also keeps
+  the filter well posed: the measurement process is the only term with no
+  observation-noise floor under it, so the innovation covariance loses rank as
+  `tau_e` grows, which the optimiser found on the first try.
+- `delta_flight` is one draw per flight, split into a part COMMON to the four
+  rotors and a per-rotor part. The frozen `rotor_var` pools all airborne samples
+  about the POOLED mean, so between-flight level differences are scored, and
+  they are partly common (neurobem's gentle and aggressive flights differ by
+  ~41 rev/s on all four rotors at once) and partly per-rotor (michaels' rotor 0
+  carries 2.5x its neighbours' variance because its own trim moves 17 rev/s).
+  `s_c` and `s_r` are moment-estimated from the POPULATION covariance `C` of the
+  per-flight airborne rotor means: `s_c^2` is the mean of `C`'s six off-diagonal
+  entries (floored at 0) and `s_r^2 = max(diag(C) - s_c^2, 0)`. Below
+  `S_MIN_FLIGHTS` = 3 flights both are 0, because the offset cannot be told
+  apart from the pooled mean.
+- **ESC clamp.** The sampler clamps its output to the rig's real airborne
+  extremes `(rps_min, rps_max)` over all its flights (`airborne_extremes`,
+  carried in the fit as `NewFit.clip`). A real ESC has a floor and a ceiling and
+  a Gaussian model does not know that.
 
-**Parameters** (30, `Params`): `mu` (4, rev/s), `theta` (rad), and per mode
-`tau_slow` (s), `sigma_slow` (rev/s), `f0` (Hz), `zeta`, `sigma_osc` (rev/s) =
-20, plus `sigma_w` (rev/s) and `s` (4, rev/s). `mu` and `s` are ESTIMATED from
-the pooled airborne rotor means and the per-flight offsets, so the optimiser
-vector is 22-dimensional.
+**Parameters** (32, `Params`, `N_PARAMS`): `mu` (4, rev/s), `theta` (rad), per
+mode `tau_slow` (s), `sigma_slow` (rev/s), `f0` (Hz), `zeta` and `sigma_osc`
+(rev/s) = 20, the measurement `tau_e` (s) and `sigma_e` (rev/s), and the offset
+`s_c` (rev/s) plus `s_r` (4, rev/s). `mu`, `s_c` and `s_r` are ESTIMATED from
+the airborne samples and do not enter the likelihood at all, so the optimiser
+vector is 23-dimensional (`N_FIT_PARAMS`). The state is 16-dimensional: 4 slow
+OUs, 4 oscillator pairs, 4 measurement OUs.
 
 **Hard ranges, imposed by parametrisation rather than by an optimiser box.**
-`f0` in (0.05, 20) Hz, `zeta` in (0.2, 3.0), and
+`f0` in (0.05, 20) Hz, `zeta` in (0.2, 3.0), `tau_e` in (1e-3, 1.0) s, and
 `tau_slow = tau_c + (10 - tau_c) sigmoid(u)` with `tau_c = 1/(2 pi f0)`, so the
 oscillator is ALWAYS the faster component (no label-switching gauge) and
-`tau_slow` never exceeds 10 s — half the block length and the longest lag the
-frozen ACF scores. Slower variation is `delta_flight`'s job, and that term is
-estimated rather than fitted, so the cap removes a double count rather than
-capability.
+`tau_slow` never exceeds 10 s — the longest lag the frozen ACF scores. Slower
+variation is `delta_flight`'s job, and that term is estimated rather than
+fitted, so the cap removes a double count rather than capability.
 
-**One object, not two.** Both components are defined by their EXACT
-discrete-time state space on the grid, `Phi = expm(A dt)` and
-`Q = P - Phi P Phi^T` with `P` the continuous stationary covariance (exact,
-because the process is stationary), and the spectrum the likelihood evaluates is
-computed from that same `(Phi, Q, H)`:
+**One object, not three.** Both shaft components and the measurement process are
+defined by their EXACT discrete state space on the fit grid, `Phi = expm(A dt)`
+and `Q = P - Phi P Phi^T` with `P` the continuous stationary covariance (exact,
+because the process is stationary), and `Params.spectral_matrix` is computed from
+that same `(Phi, Q, H)`:
 
 ```
 S(w) = (2/fs) H (e^{iw} I - Phi)^-1 Q (e^{-iw} I - Phi^T)^-1 H^T
 ```
 
-so the sampler cannot drift away from the likelihood. This is also why the
-continuous-time Lorentzian formula is not used: on a 100 Hz grid it misses the
-power folded down from above Nyquist (74 % low at 39.5 Hz for `tau` = 0.3 s),
-which an earlier fit paid for by inflating `sigma_w` and shortening `tau_slow`.
+so the sampler, the likelihood and the reported spectrum cannot drift apart.
+This is also why the continuous-time Lorentzian formula is not used: on a 100 Hz
+grid it misses the power folded down from above Nyquist (74 % low at 39.5 Hz for
+`tau` = 0.3 s), which an earlier fit paid for by inflating the measurement term
+and shortening `tau_slow`.
 
-**Why the likelihood is cheap.** `M^T M = 4 I`, so `A = M R(theta) = 2 Q` with
-`Q` orthogonal, and
-`S(f) = A diag(S_i(f)) A^T + c I = Q diag(4 S_i(f) + c) Q^T` with
-`c = sigma_w^2 / (fs/2)`. The model spectral matrix is diagonalised by the
-rotated mixer basis at every frequency, so `log det S` and `tr(S^-1 I)` close in
-scalar form with no 4x4 factorisation in the optimiser loop, and the periodogram
-enters only through five real arrays
-(`(M^T I M)_{00}, _{03}, _{11}, _{22}, _{33}`), block-averaged once before the
-fit.
+**The likelihood is EXACT** (`fit_rig`, rounds 4-5). It is the Gaussian
+likelihood of the state-space model under a STEADY-STATE Kalman filter:
 
-**Fit protocol per round** (Whittle MAP, rounds 1-3). Airborne segments are cut
-into `BLOCK_S` = 20 s Hann blocks at 50 % overlap; a segment shorter than
-`MIN_BLOCK_S` = 5 s contributes nothing and a segment between 5 s and 20 s
-contributes one whole-segment block. Each block is block-mean detrended, and
-from round 3 the bins below `MIN_BIN_RAYLEIGH` = 2/T are dropped (0.1 Hz for a
-20 s block), because the first Rayleigh bins of a Hann-tapered demeaned block
-are leakage-dominated and they were exactly the bins the round-2 fit used to
-justify parking unresolvable slow power. Priors are log-normal:
-`TAU_SLOW_PRIOR` (2.0 s, 1.5), `SIGMA_PRIOR` (1.0, 3.0), `SIGMA_W_PRIOR`
-(0.1, 3.0). The per-rig Whittle band is `FIT_BAND_HZ`. Eight random restarts
-around a data-driven start; the reported fit is the best posterior.
+- every airborne segment is cut into `BLOCK_S` = 30 s blocks that overlap
+  `BURN_S` = 5 s on the left, and the innovations of those burn-in samples are
+  excluded from the NLL, so every scored innovation comes from a filter that has
+  already forgotten its initial condition. The first block of a segment starts
+  at the segment start with the stationary prior, which is exact, and a block
+  must contribute at least `MIN_SCORED_S` = 5 s of scored samples;
+- all blocks of one shape are batched into one `(B, T, 4)` tensor and driven
+  through one recursion `x_{t+1} = (Phi - K H) x_t + K y_t` with
+  `e_t = y_t - H x_t`; block lengths are padded up to a multiple of
+  `PAD_QUANTUM` = 256 samples, which splits the difference between one group per
+  segment (138 single-block groups cost neurobem 18 s per evaluation) and one
+  maximum-length group (measured on michaels: 155 ms per evaluation at 256,
+  271 ms at 512, 293 ms at 1024);
+- the gain `K` and the innovation covariance `S` come from the discrete Riccati
+  fixed point (`steady_state_gain`, relative tolerance 1e-9, at most 2000
+  iterations), iterated in torch so the gain is differentiable in the
+  parameters;
+- `NLL = 0.5 sum_t [log det S + e_t' S^-1 e_t]` over the scored samples, and the
+  recursion carries a hand-written adjoint (`_Predictor`, a
+  `torch.autograd.Function`) rather than a taped graph;
+- `y` is each block demeaned per rotor, the simpler of the two ways to remove
+  the unknown per-block level (the other being a diffuse state). The likelihood
+  is therefore that of a rank-4 projection of the block, which is why `mu` and
+  the offsets are estimated rather than fitted.
+
+**Per-rig fit rate** (`FIT_RATE_HZ`) replaced round 3's per-rig fit BAND: a band
+tells a frequency-domain fit which bins to believe, whereas an exact
+time-domain likelihood is a statement about a sampled series, so the honest knob
+is the rate at which the telemetry is believable. michaels is fitted at 25 Hz
+(logged at 29.41 Hz, interpolation above ~12 Hz, spectra diving two decades at
+the 25-30 Hz interpolation null); every other rig is genuine ESC feedback at
+>= 100 Hz native and is fitted at 100 Hz. Decimation to the fit rate uses the
+same zero-phase Butterworth shape as the common grid, cornered at
+`0.4 * fs_out`.
+
+**Optimiser.** MAP with log-normal priors `TAU_SLOW_PRIOR` (2.0 s, 1.5),
+`SIGMA_PRIOR` (1.0, 3.0), `TAU_E_PRIOR` (0.05 s, 2.0) and `SIGMA_E_PRIOR`
+(0.1, 3.0), maximised by L-BFGS-B on the analytic gradient with **4 restarts**:
+restart 0 warm-starts from the previous round's fit (or a data-driven start) and
+the rest are jittered around it; the best finite posterior wins. Per-rig wall
+time at round 4 (uni-cpu, one job per rig) is 240 s on michaels to ~4400 s on
+blackbird.
+
+**History.** Rounds 1-3 used a different likelihood and a smaller model, and the
+round tables below are scored against the same baseline throughout, so the
+numbers remain comparable:
+
+| | rounds 1-2 | round 3 | rounds 4-5 |
+|---|---|---|---|
+| shaft per mode | two OUs | OU + CAR(2) | OU + CAR(2) |
+| measurement | white `sigma_w` | white `sigma_w` | per-rotor OU `(tau_e, sigma_e)` |
+| offset | mode-space (R1), per-rotor `s` (R2) | per-rotor `s` | `1 c + r` (R5), per-rotor only (R4) |
+| likelihood | block Whittle, 20 s Hann blocks at 50 % overlap, block-mean detrended | the same plus bins below 2/T dropped | exact steady-state Kalman, 30 s blocks, 5 s burn-in |
+| band or rate | per-rig band `FIT_BAND_HZ`: 0.02-5 Hz on michaels and dregon (R1), 0.02-40 Hz everywhere (R2) | 0.02-40 Hz, michaels capped at 12 Hz | per-rig rate `FIT_RATE_HZ` (michaels 25 Hz, else 100 Hz) |
+| parameters | 30 | 30 | 32 |
+| search | 8 random restarts | 8 random restarts | L-BFGS-B, 4 restarts |
+| output clamp | none | none | ESC floor and ceiling |
 
 ## Rounds
 
@@ -765,7 +827,7 @@ user after reading the round-3 diagnosis:
 five families, and the term that did it is the coloured measurement process —
 its `xcorr` fell from the baseline's 0.135 to 0.047 because the per-rotor
 incoherent junk no longer has to be absorbed by the shaft modes, and
-`rotor_mean` beat the baseline with no mean calibration at all. Four rigs
+`rotor_mean` beat the baseline with no mean calibration at all. Three rigs
 (dregon, pitcn_quad, blackbird_quad) reach 4/5. The one systematic defect left
 is the mean families on the three rigs with large between-flight level
 differences, and the airborne-rule retention column of
@@ -830,27 +892,46 @@ Gaussian. What makes it defensible is the reparametrisation, not the density —
 - `log mean(mu)` — the one scale coordinate;
 - three RELATIVE trims `(M^T mu / 4)[1:] / mean(mu)`, i.e. roll, pitch and yaw
   trim as a fraction of the hover level;
-- `theta`, `u_slow`, `log f0` and `logit zeta`, already dimensionless;
-- every `sigma` and the per-rotor offset `s` as `log(sigma / mean(mu))`, i.e. as
-  a relative fluctuation.
+- `theta`, `u_slow`, `log f0`, `logit zeta` and `log tau_e`, already
+  dimensionless — a time constant does not scale with the drone's size;
+- every `sigma` as `log(sigma / mean(mu))`, i.e. as a relative fluctuation:
+  `sigma_slow` and `sigma_osc` per mode, the measurement process' `sigma_e`,
+  and both parts of the per-flight offset (`s_c` common, `s_r` per rotor).
+
+That is the 32 coordinates of `results/rps_traj/posterior.json`: 1 scale + 3
+trims + 1 rotation + 4 x 4 mode parameters + 2 measurement + 1 common offset +
+4 per-rotor offsets.
 
 Sampling maps back through the same transform, so a draw is "a drone this big,
 fluctuating this much RELATIVE to its size". That matters because the rigs differ
 in absolute size by 3.6x: a Gaussian over raw parameters would mostly encode how
 big the drone is, and a draw combining one rig's hover level with another's
-absolute jitter would be nonsense. Four invariants survive the round trip by
-construction: `mu > 0`, `f0` inside its range (clipped, because that coordinate
-is a plain log), `zeta` inside its range and `tau_slow` inside
+absolute jitter would be nonsense. The invariants survive the round trip by
+construction: `mu > 0`, `f0` and `tau_e` inside their ranges (clipped, because
+those coordinates are plain logs), `zeta` inside its range and `tau_slow` inside
 `(1/(2 pi f0), 10 s)` (both by their sigmoid parametrisations, so no clipping is
 needed however wide the Gaussian gets).
 
-Artefacts: `results/rps_traj/posterior.json` (round 3: `rig_posterior`, 30
-coordinates, fitted on the 7 rigs, `|z|max` 1.83-2.38) and
+**The offset coordinates are fitted only where they exist.** A rig with no
+between-flight level difference — blackbird has ONE flight, dregon's flights
+share a level — has `s = 0`, which `rig_vector` has to write as
+`log(S_FLOOR / scale)`, i.e. -12.1 and -11.3 against an informative rig's -1.6
+to -4.2. Averaging those in dragged that coordinate's mean to -5.7 and inflated
+its std to 3.9, and a +2 sigma draw then asked for a per-flight offset EIGHT
+TIMES the hover level (one shipped round-5 draw had `s_c` = 3267 rev/s against
+`mu` = 130). A floored zero is a different fact from a small value, so
+`fit_posterior` leaves it out of that coordinate's moments and
+`informative_mask` leaves it out of any distance report.
+
+Artefacts, from the round-4 fits: `results/rps_traj/posterior.json`
+(`rig_posterior`, 32 coordinates, fitted on the 7 rigs; each rig sits within
+1.51-2.38 sigma of the fitted Gaussian on its informative coordinates —
+`posterior.json` against `fits/new/*.json` through `informative_mask`) and
 `results/rps_traj/draws/0..11.json` plus `draws.json` — 12 draws, each validated
-over 60 s at 100 Hz with every rotor strictly positive (4 redraws in total),
-drawn hover levels 67-573 rev/s. Re-run
-`python scripts/rps_traj_posterior.py` after a round; the dimension and the rig
-list are printed by `python scripts/_rps_traj_rounds_table.py`.
+over 60 s at 100 Hz with every rotor strictly positive (2 redraws in total),
+drawn hover levels 87.0-260.4 rev/s and instantaneous speeds 31.2-323.2 rev/s.
+Re-run `python scripts/rps_traj_posterior.py` after a refit; the dimension and
+the rig list are printed by `python scripts/_rps_traj_rounds_table.py`.
 
 **Read this as a sampler, not as a population.** It is fitted on SEVEN rigs, six
 of which are one airframe each with one flight-controller tune; the diagonal
@@ -858,27 +939,52 @@ Gaussian has no covariance structure between coordinates that the rigs
 demonstrably share (a rig's four modes are not independent); and two of the seven
 contribute one and four flights.
 
-## Conclusion so far
+## Conclusion
 
 The exploration answered the question the campaign opened with: real rotor-speed
 trajectories are a two-time-scale, collective/yaw-dominated, heavy-tailed,
 optionally resonant process, and the incumbent synthesiser reproduces none of
 those five properties even at its best fitted parameters. The frozen judge and
-the fitted baseline make "better" a decidable question, and three rounds have
-narrowed the model class by elimination:
+the fitted baseline made "better" a decidable question, and five rounds narrowed
+the model class by elimination:
 
 - a sum of OU processes is excluded by the measured spectral slope (round 2);
 - OU plus CAR(2) reaches the measured shape and PASSES where the oscillator
   stays in the shoulder — blackbird 5/5, michaels 4/5 with an ACF better than
   the baseline's (round 3);
-- the remaining failures are one mechanism, not six: nothing assigns the
+- the round-3 failures were one mechanism, not six: nothing assigned the
   oscillator to the shoulder and the OU to the plateau, so on rigs with loud
-  per-rotor measurement chains the oscillator goes hunting at 10-20 Hz and the
-  slow structure falls back to a bare OU whose time constant is not identifiable
-  from block-Whittle bins.
+  per-rotor measurement chains the oscillator went hunting at 10-20 Hz and the
+  slow structure fell back to a bare OU whose time constant block-Whittle bins
+  cannot identify;
+- the exact Kalman likelihood plus a coloured per-rotor measurement process
+  removes that mechanism, and round 4 is the campaign's best round: michaels
+  PASSES 5/5 with no mean calibration, and dregon, pitcn_quad and
+  blackbird_quad each reach 4/5 and miss by ONE family. dregon and pitcn miss on
+  `acf` by 0.024 and 0.006 against a baseline whose own objective optimises the
+  ACF directly; blackbird misses on `rotor_var` (0.181 → 0.219). The other three
+  rigs lose the MEAN families: neurobem_quad through airborne-rule truncation
+  (retention 0.686) and nanobench_cf21b and vid_m100 by 0.02-0.1 rev/s, i.e.
+  Monte-Carlo scale on a 88-278 rev/s operating point;
+- the per-flight offset must be chosen PER RIG (round 5). Splitting it into a
+  common and a per-rotor part is the right fix for the rigs whose offset is
+  common-mode (neurobem retention 0.686 → 0.873, `overall_mean` 3.65 → 1.11,
+  `rotor_var` 0.139 → 0.064) and the wrong one for the rig whose offset is
+  genuinely one rotor's trim (michaels loses its round-4 PASS, mean families
+  0.050 → 0.186 and 0.107 → 0.202). A per-rig choice between the two, or a full
+  offset covariance, is the obvious next step and needs no refit of the
+  dynamics.
 
-Round 4 attacks exactly those two levers (a likelihood that can see slow
-structure, a measurement term that can absorb high-frequency chain artefacts).
+The campaign stops here, at its five-round cap, with the per-rig offset choice
+as the one identified and unspent lever. What it establishes is a structural
+result rather than a scoreboard: the families the incumbent cannot reach are the
+ones the new model wins. Pooled per-rotor variance improves on 5 of 7 rigs in
+round 4 and inter-rotor correlation on 6 of 7, and the three misses are small
+(nanobench `rotor_var` +0.004, blackbird +0.038, neurobem `xcorr` +0.024 at
+round 5), while the mode spectra and mode ACFs are reproduced in shape rather
+than in slope only (`results/rps_traj/diag/*_spectra.png`, `*_acf.png`). The
+outstanding failures are a per-rig offset model and Monte-Carlo-scale mean
+differences, not the dynamics.
 
 ### Open questions
 
@@ -896,12 +1002,14 @@ structure, a measurement term that can absorb high-frequency chain artefacts).
   that gap on its own. `ground_level` already measures the real idle plateau per
   flight (michaels 8.2, dregon 16.0, vid_m100 12.7, blackbird 71.9 rev/s;
   neurobem, pitcn and nanobench mostly start airborne).
-- **Single-flight and few-flight rigs.** blackbird_quad is ONE 199 s flight and
-  its per-flight offset `s` fitted to exactly zero, because a single flight
-  carries no between-flight information; michaels and vid_m100 have four flights
-  each. A rig's `s` below `S_MIN_FLIGHTS` = 3 flights is switched off entirely.
-  The one rig that passes 5/5 is therefore also the one with the least
-  information, and that should not be over-read.
+- **Single-flight and few-flight rigs.** blackbird_quad is ONE 199 s flight, so
+  it carries no between-flight information and both parts of its offset fit to
+  exactly zero (`s_c` = 0, `s_r` = [0, 0, 0, 0] in
+  `results/rps_traj/fits/new/blackbird_quad.json`); michaels and vid_m100 have
+  four flights each. A rig with fewer than `S_MIN_FLIGHTS` = 3 flights has the
+  offset term switched off entirely. Blackbird scored 5/5 in round 3 and 4/5 in
+  round 4 on the least information of any rig, which is a reason not to
+  over-read either number.
 - **Measurement chains differ per rig, and the model has one term for them.**
   DREGON is a 45 Hz staircase quantised to 0.30 rev/s, michaels a 17 Hz
   asynchronous update resampled at 29.41 Hz with no anti-alias filter, PI-TCN
@@ -918,7 +1026,9 @@ structure, a measurement term that can absorb high-frequency chain artefacts).
 the online-mix policies and every `rig_*` stream still draw trajectories exactly
 as before. Nothing in `src/experiments/rps_traj/` is wired into training, and no
 `conf/online_mix/*` or `conf/experiment/*` file was modified by this campaign.
-The new model has PASSED on 1 of 7 rigs (2 of 7 with an uncommitted mean
-calibration), which is not a mandate to replace the incumbent; the decision to
-route a fitted trajectory model into the streams waits on review, and on the
-round-4 verdict. `baseline.py` fits the incumbent but never edits it.
+At its best round the new model PASSES on 1 of 7 rigs (michaels 5/5, round 4)
+with three more rigs one family short, which is not a mandate to replace the
+incumbent, and round 5 showed that the per-flight offset model has to be chosen
+per rig before any stream draws from it. The decision to route a fitted
+trajectory model into the streams waits on review. `baseline.py` fits the
+incumbent but never edits it.
