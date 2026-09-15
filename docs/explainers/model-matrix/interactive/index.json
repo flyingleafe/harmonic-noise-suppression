@@ -1,0 +1,329 @@
+{
+ "generated_by": "scripts/_model_matrix_interactive.py",
+ "reads": {
+  "matrix": "results/model_matrix/matrix.json",
+  "predictions": "results/model_matrix/preds",
+  "renders": "results/model_matrix/renders/clips"
+ },
+ "git_head": "279ad0f5f36a152defc8e86ae57f6a3a5115d031",
+ "metric": {
+  "name": "PIT MAE (rev/s)",
+  "assignment": "ONE rotor permutation per clip, chosen on the time-averaged absolute error",
+  "implementation": "metrics.rps.batched_pit_mae",
+  "matches": [
+   "src/losses/pit.py:94-106",
+   "src/metrics/rps.py:65-69"
+  ],
+  "per_frame_matching_used": false,
+  "channels": "mic 0 only"
+ },
+ "tracks": "model tracks are RAW model output: no matching, no permutation",
+ "models": {
+  "hppnet-real-best": {
+   "colour": "#111111",
+   "experiment": "hppnet_l2_r2_s0",
+   "ckpt": "best",
+   "uri": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+   "digest": "sha256:6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1",
+   "salience_decoder": true,
+   "recorded_training_score": {
+    "error": "ClientError('An error occurred (404) when calling the HeadObject operation: Not Found')"
+   }
+  },
+  "hppnet-easy": {
+   "colour": "#1f77b4",
+   "experiment": "rig_easy_hppnet_l2_unified",
+   "ckpt": "best_real_overall",
+   "uri": "r2://ml-data/artifacts/rig_easy_hppnet_l2_unified/checkpoints/best_real_overall.ckpt",
+   "digest": "sha256:1d62414e9551ee5030a4f895016251166a852a3f921843f64b904016ea6e01fd",
+   "salience_decoder": true,
+   "recorded_training_score": {
+    "source": "r2://ml-data/artifacts/rig_easy_hppnet_l2_unified/checkpoints/best_checkpoints.json",
+    "score": "real_overall",
+    "checkpoint": "best_real_overall.ckpt",
+    "validation_round": 60,
+    "optimizer_step": 30500,
+    "raw": 5.5164223349145045,
+    "smoothed": 5.5164223349145045
+   }
+  },
+  "scv2-real-R4": {
+   "colour": "#2ca02c",
+   "experiment": "real_r4_scv2_unified",
+   "ckpt": "best_real_overall",
+   "uri": "r2://ml-data/artifacts/real_r4_scv2_unified/checkpoints/best_real_overall.ckpt",
+   "digest": "sha256:93f62d19c9022f43dcf9e1e53d0a1b65c26aee3d6dcb70223f988675a9686749",
+   "salience_decoder": false,
+   "recorded_training_score": {
+    "source": "r2://ml-data/artifacts/real_r4_scv2_unified/checkpoints/best_checkpoints.json",
+    "score": "real_overall",
+    "checkpoint": "best_real_overall.ckpt",
+    "validation_round": 24,
+    "optimizer_step": 12500,
+    "raw": 3.1149980849208863,
+    "smoothed": 3.129819782148745
+   }
+  },
+  "scv2-hard": {
+   "colour": "#d62728",
+   "experiment": "rig_hard_scv2_unified",
+   "ckpt": "best_real_overall",
+   "uri": "r2://ml-data/artifacts/rig_hard_scv2_unified/checkpoints/best_real_overall.ckpt",
+   "digest": "sha256:f55fca962ae9fc4c2b109fb9ecdef3f9108b25be6bc15d1e1380343be6502d8d",
+   "salience_decoder": false,
+   "recorded_training_score": {
+    "source": "r2://ml-data/artifacts/rig_hard_scv2_unified/checkpoints/best_checkpoints.json",
+    "score": "real_overall",
+    "checkpoint": "best_real_overall.ckpt",
+    "validation_round": 124,
+    "optimizer_step": 62500,
+    "raw": 5.411805445353526,
+    "smoothed": 5.521749515539488
+   }
+  }
+ },
+ "draw_order": [
+  "hppnet-easy",
+  "scv2-real-R4",
+  "scv2-hard",
+  "hppnet-real-best"
+ ],
+ "regime_colour": {
+  "zero": "#e8eef5",
+  "standby": "#bcd4ea",
+  "ramp": "#f7c98b",
+  "cruise": "#9fd3a8"
+ },
+ "regimes": [
+  "zero",
+  "standby",
+  "ramp",
+  "cruise"
+ ],
+ "spectrogram": {
+  "transform": "prepare_regime.spectrogram_db: |rfft| of a 2048-point Hann frame, hop 512, in dB",
+  "colourmap": "magma",
+  "db_limits": "per-clip 5th and 99.8th percentile, as in the static figure",
+  "freq_rows": 512,
+  "channel": "mic 0"
+ },
+ "speed_decimals": 2,
+ "clips": [
+  {
+   "key": "A_real_dregon_clip02",
+   "category": "A",
+   "json": "A_real_dregon_clip02.json",
+   "spectrogram": "A_real_dregon_clip02.spec.png",
+   "frames": 251,
+   "json_bytes": 32070,
+   "spectrogram_bytes": 325962
+  },
+  {
+   "key": "A_real_dregon_clip09",
+   "category": "A",
+   "json": "A_real_dregon_clip09.json",
+   "spectrogram": "A_real_dregon_clip09.spec.png",
+   "frames": 251,
+   "json_bytes": 32040,
+   "spectrogram_bytes": 326939
+  },
+  {
+   "key": "A_real_dregon_clip20",
+   "category": "A",
+   "json": "A_real_dregon_clip20.json",
+   "spectrogram": "A_real_dregon_clip20.spec.png",
+   "frames": 251,
+   "json_bytes": 32070,
+   "spectrogram_bytes": 330446
+  },
+  {
+   "key": "A_real_michaels_clip27",
+   "category": "A",
+   "json": "A_real_michaels_clip27.json",
+   "spectrogram": "A_real_michaels_clip27.spec.png",
+   "frames": 251,
+   "json_bytes": 31977,
+   "spectrogram_bytes": 324268
+  },
+  {
+   "key": "A_real_michaels_clip30",
+   "category": "A",
+   "json": "A_real_michaels_clip30.json",
+   "spectrogram": "A_real_michaels_clip30.spec.png",
+   "frames": 251,
+   "json_bytes": 32001,
+   "spectrogram_bytes": 323166
+  },
+  {
+   "key": "A_real_michaels_clip34",
+   "category": "A",
+   "json": "A_real_michaels_clip34.json",
+   "spectrogram": "A_real_michaels_clip34.spec.png",
+   "frames": 251,
+   "json_bytes": 31977,
+   "spectrogram_bytes": 330582
+  },
+  {
+   "key": "B_matched_dregon_clip02",
+   "category": "B",
+   "json": "B_matched_dregon_clip02.json",
+   "spectrogram": "B_matched_dregon_clip02.spec.png",
+   "frames": 251,
+   "json_bytes": 32008,
+   "spectrogram_bytes": 328138
+  },
+  {
+   "key": "B_matched_dregon_clip09",
+   "category": "B",
+   "json": "B_matched_dregon_clip09.json",
+   "spectrogram": "B_matched_dregon_clip09.spec.png",
+   "frames": 251,
+   "json_bytes": 32008,
+   "spectrogram_bytes": 333307
+  },
+  {
+   "key": "B_matched_dregon_clip20",
+   "category": "B",
+   "json": "B_matched_dregon_clip20.json",
+   "spectrogram": "B_matched_dregon_clip20.spec.png",
+   "frames": 251,
+   "json_bytes": 31990,
+   "spectrogram_bytes": 331106
+  },
+  {
+   "key": "B_matched_michaels_clip27",
+   "category": "B",
+   "json": "B_matched_michaels_clip27.json",
+   "spectrogram": "B_matched_michaels_clip27.spec.png",
+   "frames": 251,
+   "json_bytes": 31976,
+   "spectrogram_bytes": 355405
+  },
+  {
+   "key": "B_matched_michaels_clip30",
+   "category": "B",
+   "json": "B_matched_michaels_clip30.json",
+   "spectrogram": "B_matched_michaels_clip30.spec.png",
+   "frames": 251,
+   "json_bytes": 31973,
+   "spectrogram_bytes": 351524
+  },
+  {
+   "key": "B_matched_michaels_clip34",
+   "category": "B",
+   "json": "B_matched_michaels_clip34.json",
+   "spectrogram": "B_matched_michaels_clip34.spec.png",
+   "frames": 251,
+   "json_bytes": 31981,
+   "spectrogram_bytes": 353350
+  },
+  {
+   "key": "C_stream_dregonfit_t3",
+   "category": "C",
+   "json": "C_stream_dregonfit_t3.json",
+   "spectrogram": "C_stream_dregonfit_t3.spec.png",
+   "frames": 251,
+   "json_bytes": 31993,
+   "spectrogram_bytes": 333214
+  },
+  {
+   "key": "C_stream_dregonfit_t4",
+   "category": "C",
+   "json": "C_stream_dregonfit_t4.json",
+   "spectrogram": "C_stream_dregonfit_t4.spec.png",
+   "frames": 251,
+   "json_bytes": 30328,
+   "spectrogram_bytes": 326088
+  },
+  {
+   "key": "C_stream_dregonfit_t5",
+   "category": "C",
+   "json": "C_stream_dregonfit_t5.json",
+   "spectrogram": "C_stream_dregonfit_t5.spec.png",
+   "frames": 251,
+   "json_bytes": 32019,
+   "spectrogram_bytes": 323494
+  },
+  {
+   "key": "C_stream_michaelsfit_t0",
+   "category": "C",
+   "json": "C_stream_michaelsfit_t0.json",
+   "spectrogram": "C_stream_michaelsfit_t0.spec.png",
+   "frames": 251,
+   "json_bytes": 31045,
+   "spectrogram_bytes": 343519
+  },
+  {
+   "key": "C_stream_michaelsfit_t1",
+   "category": "C",
+   "json": "C_stream_michaelsfit_t1.json",
+   "spectrogram": "C_stream_michaelsfit_t1.spec.png",
+   "frames": 251,
+   "json_bytes": 32004,
+   "spectrogram_bytes": 348803
+  },
+  {
+   "key": "C_stream_michaelsfit_t2",
+   "category": "C",
+   "json": "C_stream_michaelsfit_t2.json",
+   "spectrogram": "C_stream_michaelsfit_t2.spec.png",
+   "frames": 251,
+   "json_bytes": 32055,
+   "spectrogram_bytes": 345446
+  },
+  {
+   "key": "D_stream_hard_t0",
+   "category": "D",
+   "json": "D_stream_hard_t0.json",
+   "spectrogram": "D_stream_hard_t0.spec.png",
+   "frames": 251,
+   "json_bytes": 30638,
+   "spectrogram_bytes": 338428
+  },
+  {
+   "key": "D_stream_hard_t1",
+   "category": "D",
+   "json": "D_stream_hard_t1.json",
+   "spectrogram": "D_stream_hard_t1.spec.png",
+   "frames": 251,
+   "json_bytes": 32110,
+   "spectrogram_bytes": 323838
+  },
+  {
+   "key": "D_stream_hard_t2",
+   "category": "D",
+   "json": "D_stream_hard_t2.json",
+   "spectrogram": "D_stream_hard_t2.spec.png",
+   "frames": 251,
+   "json_bytes": 32064,
+   "spectrogram_bytes": 331142
+  },
+  {
+   "key": "D_stream_hard_t3",
+   "category": "D",
+   "json": "D_stream_hard_t3.json",
+   "spectrogram": "D_stream_hard_t3.spec.png",
+   "frames": 251,
+   "json_bytes": 32074,
+   "spectrogram_bytes": 339044
+  },
+  {
+   "key": "D_stream_hard_t4",
+   "category": "D",
+   "json": "D_stream_hard_t4.json",
+   "spectrogram": "D_stream_hard_t4.spec.png",
+   "frames": 251,
+   "json_bytes": 30371,
+   "spectrogram_bytes": 341074
+  },
+  {
+   "key": "D_stream_hard_t5",
+   "category": "D",
+   "json": "D_stream_hard_t5.json",
+   "spectrogram": "D_stream_hard_t5.spec.png",
+   "frames": 251,
+   "json_bytes": 32116,
+   "spectrogram_bytes": 337110
+  }
+ ]
+}

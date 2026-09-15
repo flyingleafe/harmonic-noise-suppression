@@ -14,17 +14,31 @@ execute:
 ---
 
 ```{python}
+import base64
 import json
 from pathlib import Path
 
 import pandas as pd
-from IPython.display import Markdown, display
+import plotly.graph_objects as go
+import plotly.io as pio
+from IPython.display import HTML, Markdown, display
+from plotly.subplots import make_subplots
 
 ROOT = Path.cwd()
 while not (ROOT / "results").exists() and ROOT != ROOT.parent:
     ROOT = ROOT.parent
 M = json.loads((ROOT / "results" / "model_matrix" / "matrix.json").read_text())
-FIGDIR = "model-matrix"
+FIGDIR = ROOT / "docs" / "explainers" / "model-matrix"
+
+# The interactive figure payloads: one JSON and one spectrogram PNG per clip,
+# exported from the same caches the scores come from. Rebuild them with
+# `PYTHONPATH="$PWD/src:$PWD/scripts" python scripts/_model_matrix_interactive.py`.
+IDIR = FIGDIR / "interactive"
+INDEX = json.loads((IDIR / "index.json").read_text())
+PAYLOAD = {e["key"]: json.loads((IDIR / e["json"]).read_text()) for e in INDEX["clips"]}
+COLOUR = {tag: v["colour"] for tag, v in INDEX["models"].items()}
+DRAW_ORDER = list(INDEX["draw_order"])
+REGIME_COLOUR = dict(INDEX["regime_colour"])
 
 MODELS = list(M["models"])
 CATS = {
@@ -98,20 +112,259 @@ display(df)
 
 ## Figures
 
-Each figure: the clip spectrogram on top, then the regime strip, then the rotor
-speeds. Target tracks are thick and light. Each model's **four raw output
-series** are drawn thin over them — no matching, no permutation, so a line may
-sit near a target that is not its own rotor. That is what the model emits.
+Each figure: the clip spectrogram on top, the rotor speeds below it on the same
+time axis, with the four flight regimes as shaded bands behind the tracks.
+Target tracks are thick and light. Each model's **four raw output series** are
+drawn thin over them — no matching, no permutation, so a line may sit near a
+target that is not its own rotor. That is what the model emits.
+
+**Click a model in the legend** to hide or show its four tracks together;
+double-click one to isolate it. Drag to zoom (both panels move together),
+double-click the plot to reset, hover a track for its time and speed.
 
 ```{python}
-order = ["A", "B", "C", "D"]
-for cat in order:
+
+def spectrogram_image(entry: dict) -> dict:
+    """The clip's mic-0 spectrogram as a base64 `layout.images` entry.
+
+    The pixels stay pixels: one PNG per clip, embedded in the page and stretched
+    to the panel's own time/frequency extent, instead of a quarter-million
+    heatmap data points per figure.
+    """
+    spec = entry["spectrogram"]
+    raw = (IDIR / spec["file"]).read_bytes()
+    f_lo, f_hi = spec["freq_khz"]
+    return {
+        "source": "data:image/png;base64," + base64.b64encode(raw).decode(),
+        "xref": "x",
+        "yref": "y",
+        "x": 0.0,
+        "y": f_hi,
+        "sizex": entry["duration_s"],
+        "sizey": f_hi - f_lo,
+        "xanchor": "left",
+        "yanchor": "top",
+        "sizing": "stretch",
+        "layer": "below",
+    }
+
+
+def speed_range(entry: dict) -> tuple[float, float]:
+    """The rotor-speed axis, fitted to the clip as the static figure fits it.
+
+    Twenty tracks inside a 20 rev/s cruise band would be one stripe on a fixed
+    0-105 axis, so the axis follows the data — floored below zero when the clip
+    actually stops a rotor, and never tighter than 30 rev/s so a flat clip is
+    not visually exaggerated.
+    """
+    lo, hi = entry["speed_range"]
+    pad = max(3.0, 0.08 * (hi - lo))
+    lo, hi = lo - pad, hi + pad
+    if entry["visits_zero"]:
+        lo = min(lo, -3.0)
+    if hi - lo < 30.0:
+        mid = 0.5 * (lo + hi)
+        lo, hi = mid - 15.0, mid + 15.0
+    return lo, hi
+
+
+def figure(entry: dict) -> go.Figure:
+    """One clip: spectrogram over rotor speeds, one legend entry per model."""
+    t = entry["time_s"]
+    duration = entry["duration_s"]
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.42, 0.58],
+    )
+
+    # ─ upper panel: the spectrogram, with an invisible corner trace so the
+    # panel has data ranges of its own for the image to be pinned to.
+    fig.add_trace(
+        go.Scatter(
+            x=[0.0, duration],
+            y=entry["spectrogram"]["freq_khz"],
+            mode="markers",
+            marker={"opacity": 0.0},
+            hoverinfo="skip",
+            showlegend=False,
+        ),
+        row=1,
+        col=1,
+    )
+
+    # ─ lower panel: every track, target first so the models sit over it.
+    tracks = [("target", "target (4 rotors)", "#9aa3ad", 5.0, entry["target"])] + [
+        (tag, LABEL[tag], COLOUR[tag], 1.4, entry["preds"][tag]) for tag in DRAW_ORDER
+    ]
+    for group, name, colour, width, series in tracks:
+        for r, y in enumerate(series):
+            fig.add_trace(
+                go.Scatter(
+                    x=t,
+                    y=y,
+                    mode="lines",
+                    name=name,
+                    legendgroup=group,
+                    showlegend=r == 0,  # ONE legend entry per model, not per line
+                    line={"color": colour, "width": width},
+                    opacity=0.9 if group == "target" else 1.0,
+                    hovertemplate="%{x:.2f} s · %{y:.2f} rev/s"
+                    f"<extra>{name} · rotor {r}</extra>",
+                ),
+                row=2,
+                col=1,
+            )
+
+    # ─ the regime bands, painted BEHIND the tracks by `layer="below"`. They are
+    # added after the traces on purpose: `add_vrect`/`add_vline` drop a shape
+    # aimed at a subplot that has no data yet, so adding them first loses them.
+    #
+    # The strip colours were picked for the static figure's own thin strip over a
+    # white panel. Here they fill the whole panel, so they are held at 40 % —
+    # otherwise a cruise-only clip turns the panel solid green and swallows the
+    # light target band the models are read against.
+    for span in entry["regimes"]:
+        fig.add_vrect(
+            x0=span["t0"],
+            x1=span["t1"],
+            fillcolor=REGIME_COLOUR[span["regime"]],
+            opacity=0.40,
+            line_width=0,
+            layer="below",
+            row=2,
+            col=1,
+        )
+        if span["t1"] - span["t0"] >= 0.42 * duration / 8.0:  # room for the word
+            fig.add_annotation(
+                x=0.5 * (span["t0"] + span["t1"]),
+                y=0.97,
+                xref="x2",
+                yref="y2 domain",
+                text=span["regime"],
+                showarrow=False,
+                font={"size": 11, "color": "#4b5563"},
+                yanchor="top",
+            )
+        if span["t0"] > 0.0:  # the boundary rule, carried through both panels
+            for row in (1, 2):
+                fig.add_vline(
+                    x=span["t0"],
+                    line={"color": "#444444", "width": 1.0, "dash": "4px,3px"},
+                    opacity=0.75,
+                    layer="above",
+                    row=row,
+                    col=1,
+                )
+
+    scores = "   ".join(
+        f"<b>{LABEL[tag]}</b> {entry['pit_mae'][tag]:.2f}"
+        for tag in LABEL
+        if tag in entry["pit_mae"]
+    )
+    fig.update_layout(
+        title={
+            "text": f"<b>{entry['key']}</b> · {entry['recording']}<br>"
+            f"<span style='font-size:12px'>mic-0 PIT MAE (rev/s)   {scores}</span>",
+            "font": {"size": 15},
+            "x": 0.0,
+            "xanchor": "left",
+            "y": 0.975,
+            "yanchor": "top",
+        },
+        height=620,
+        autosize=True,
+        margin={"l": 66, "r": 14, "t": 74, "b": 78},
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        hovermode="closest",
+        dragmode="zoom",
+        legend={
+            "orientation": "h",
+            "yanchor": "top",
+            "y": -0.10,
+            "x": 0.0,
+            "xanchor": "left",
+            "groupclick": "togglegroup",  # one click hides a model's four tracks
+            "font": {"size": 12},
+        },
+    )
+    fig.update_xaxes(
+        range=[0.0, duration],
+        showgrid=False,
+        zeroline=False,
+        linecolor="#333333",
+        mirror=False,
+        row=1,
+        col=1,
+    )
+    fig.update_xaxes(
+        range=[0.0, duration],
+        title_text="time (s)",
+        showgrid=False,
+        zeroline=False,
+        linecolor="#333333",
+        row=2,
+        col=1,
+    )
+    fig.update_yaxes(
+        range=entry["spectrogram"]["freq_khz"],
+        title_text="frequency (kHz)",
+        showgrid=False,
+        zeroline=False,
+        linecolor="#333333",
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        range=list(speed_range(entry)),
+        title_text="rotor speed (rev/s)",
+        gridcolor="#e5e7eb",
+        zeroline=False,
+        linecolor="#333333",
+        row=2,
+        col=1,
+    )
+    fig.update_layout(images=[spectrogram_image(entry)])
+    return fig
+
+
+CONFIG = {
+    "displaylogo": False,
+    "responsive": True,
+    "modeBarButtonsToRemove": ["select2d", "lasso2d"],
+    "toImageButtonOptions": {"format": "png", "scale": 2},
+}
+
+#: Plotly's own JS is inlined ONCE, with the first figure: the page is built with
+#: `embed-resources: true` and must not reach a CDN when it is opened. The HTML
+#: goes out as a `text/html` output rather than as `asis` stdout, so Quarto wraps
+#: it in a raw block and never re-reads the 4.8 MB bundle as markdown.
+first = True
+for cat in ("A", "B", "C", "D"):
     display(Markdown(f"### {CATS[cat]}"))
     for key, c in clips.items():
         if c["category"] != cat:
             continue
-        scores = "  ·  ".join(f"{LABEL[m]} **{v:.2f}**" for m, v in c["pit_mae"].items())
-        display(Markdown(f"**{key}** — {c['recording']}\n\n{scores}\n\n![]({FIGDIR}/{key}.png)\n"))
+        # No repeated caption line: the figure's own title carries the clip key,
+        # the source recording and all four scores.
+        display(
+            HTML(
+                pio.to_html(
+                    figure(PAYLOAD[key]),
+                    config=CONFIG,
+                    include_plotlyjs=first,
+                    include_mathjax=False,
+                    full_html=False,
+                    default_width="100%",
+                    default_height="620px",
+                    div_id=f"fig-{key}",
+                )
+            )
+        )
+        first = False
 ```
 
 ## Provenance
