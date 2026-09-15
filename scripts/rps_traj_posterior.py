@@ -30,6 +30,7 @@ from experiments.rps_traj.data import RATE_HZ  # noqa: E402
 from experiments.rps_traj.model import NewFit, Params  # noqa: E402
 from experiments.rps_traj.posterior import (  # noqa: E402
     fit_posterior,
+    informative_mask,
     rig_vector,
 )
 
@@ -73,7 +74,11 @@ def main() -> int:
     print(f"  std  {np.array2string(post.std, precision=2, floatmode='fixed')}")
     for rig, fit in fits.items():
         v = rig_vector(fit.params)
-        z = (v - post.mean) / post.std
+        # Only over the coordinates the posterior was fitted on: a rig with no
+        # between-flight level difference stores a placeholder in its offset
+        # coordinates, and that placeholder is not an outlier.
+        keep = informative_mask(fit.params)
+        z = (v[keep] - post.mean[keep]) / post.std[keep]
         print(f"  {rig:<18} |z|max {np.max(np.abs(z)):.2f}  scale {np.exp(v[0]):7.1f} rev/s")
 
     draws_dir = out.parent / "draws"

@@ -87,6 +87,14 @@ LOG_DIMS = np.array(
 #: what keeps every rotor mean positive.
 TRIM_CLIP = 0.3
 
+#: Largest per-flight offset std a DRAW may have, as a fraction of its own
+#: hover level.  The widest real one is neurobem's 0.19 (its gentle and
+#: aggressive flights differ by 42 of 217 rev/s), so half the hover level is
+#: already beyond anything measured; without the cap a wide Gaussian tail asks
+#: for an offset several times the operating point, which is not a drone — the
+#: first round-5 draw set had ``s_c`` = 3267 rev/s against ``mu`` = 130.
+OFFSET_REL_MAX = 0.5
+
 #: Floors on a fitted coordinate's std: absolute, and relative to |mean| for
 #: the log coordinates.
 STD_FLOOR = 0.05
@@ -94,7 +102,7 @@ STD_FLOOR_REL = 0.1
 
 
 def rig_vector(params: Params) -> np.ndarray:
-    """``(30,)`` scale-free coordinates of one rig's parameters."""
+    """``(32,)`` scale-free coordinates of one rig's parameters."""
     scale = float(np.mean(params.mu))
     if scale <= 0.0:
         raise ValueError(f"mean(mu) must be positive, got {scale}")
@@ -120,8 +128,13 @@ def rig_vector(params: Params) -> np.ndarray:
 
 
 def params_from_rig_vector(v: np.ndarray) -> Params:
-    """Inverse of :func:`rig_vector`; trims and ``f0`` are clipped to their
-    ranges, everything else is bounded by its own parametrisation."""
+    """Inverse of :func:`rig_vector`.
+
+    Trims, ``f0`` and both per-flight offsets are CLIPPED to their ranges
+    (their coordinates are plain logs or ratios, so a wide Gaussian tail can
+    leave the plausible region); ``tau_slow``, ``tau_e`` and ``zeta`` need no
+    clipping because their coordinates are logits of bounded transforms.
+    """
     v = np.asarray(v, dtype=np.float64).reshape(-1)
     if v.size != RIG_DIM:
         raise ValueError(f"expected a {RIG_DIM}-dim rig vector, got {v.size}")
@@ -138,8 +151,8 @@ def params_from_rig_vector(v: np.ndarray) -> Params:
         sigma_osc=scale * np.exp(v[IDX_LOG_SIGMA_OSC]),
         tau_e=float(np.clip(np.exp(v[IDX_LOG_TAU_E]), TAU_E_MIN_S, TAU_E_MAX_S)),
         sigma_e=scale * float(np.exp(v[IDX_LOG_SIGMA_E])),
-        s_c=scale * float(np.exp(v[IDX_LOG_S_C])),
-        s_r=scale * np.exp(v[IDX_LOG_S_R]),
+        s_c=scale * min(float(np.exp(v[IDX_LOG_S_C])), OFFSET_REL_MAX),
+        s_r=scale * np.minimum(np.exp(v[IDX_LOG_S_R]), OFFSET_REL_MAX),
     )
 
 
@@ -181,6 +194,22 @@ class Posterior:
         return cls.from_dict(json.loads(text))
 
 
+def informative_mask(params: Params) -> np.ndarray:
+    """``(32,)`` True where this rig's coordinate carries information.
+
+    Only the per-flight offsets can be uninformative: a rig with no
+    between-flight level difference has ``s = 0``, which :func:`rig_vector` must
+    write as ``log(S_FLOOR / scale)`` — a placeholder, not a measurement.
+    :func:`fit_posterior` leaves those out of the moments, and anything
+    reporting how far a rig sits from the posterior has to leave them out too,
+    or a placeholder reads as a 14-sigma outlier.
+    """
+    mask = np.ones(RIG_DIM, dtype=bool)
+    mask[IDX_LOG_S_C] = params.s_c > S_FLOOR
+    mask[IDX_LOG_S_R] = np.asarray(params.s_r) > S_FLOOR
+    return mask
+
+
 def fit_posterior(fits: Mapping[str, NewFit | Params]) -> Posterior:
     """Diagonal Gaussian fitted to the rigs' scale-free vectors.
 
@@ -189,20 +218,38 @@ def fit_posterior(fits: Mapping[str, NewFit | Params]) -> Posterior:
     width — additionally at :data:`STD_FLOOR_REL` x ``|mean|``.  With seven rigs
     the raw std of a coordinate they happen to agree on is far too tight to
     sample from; the floors say "we have seven drones, not a population".
+
+    THE OFFSET COORDINATES ARE FITTED ONLY WHERE THEY EXIST.  A rig with no
+    between-flight level difference — blackbird has ONE flight, dregon's flights
+    share a level — has ``s = 0``, which :func:`rig_vector` has to write as
+    ``log(S_FLOOR / scale)``, i.e. -12.1 and -11.3 against an informative
+    rig's -1.6 to -4.2.  Averaging those in dragged the mean to -5.7 and
+    inflated the std to 3.9, so a +2 sigma draw asked for a per-flight offset
+    EIGHT TIMES the hover level (the shipped round-5 draw 11 had
+    ``s_c`` = 3267 rev/s against ``mu`` = 130).  A floored zero is a different
+    fact from a small value, not a small value, so it is excluded from that
+    coordinate's moments; if no rig is informative the coordinate keeps the
+    floor and the default width.
     """
     if not fits:
         raise ValueError("no fits to build a posterior from")
     rigs = tuple(sorted(fits))
-    vectors = np.stack(
-        [
-            rig_vector(fit.params if isinstance(fit, NewFit) else fit)
-            for rig in rigs
-            for fit in (fits[rig],)
-        ],
-        axis=0,
-    )
-    mean = vectors.mean(axis=0)
-    std = vectors.std(axis=0)
+    params: list[Params] = []
+    for rig in rigs:
+        entry = fits[rig]
+        params.append(entry.params if isinstance(entry, NewFit) else entry)
+    vectors = np.stack([rig_vector(p) for p in params], axis=0)
+
+    informative = np.stack([informative_mask(p) for p in params], axis=0)
+
+    mean = np.empty(RIG_DIM)
+    std = np.empty(RIG_DIM)
+    for dim in range(RIG_DIM):
+        keep = vectors[informative[:, dim], dim]
+        column = keep if keep.size else vectors[:, dim]
+        mean[dim] = column.mean()
+        std[dim] = column.std()
+
     floor = np.full(RIG_DIM, STD_FLOOR)
     floor[LOG_DIMS] = np.maximum(floor[LOG_DIMS], STD_FLOOR_REL * np.abs(mean[LOG_DIMS]))
     return Posterior(mean=mean, std=np.maximum(std, floor), rigs=rigs)
@@ -216,6 +263,7 @@ __all__ = [
     "TRIM_CLIP",
     "Posterior",
     "fit_posterior",
+    "informative_mask",
     "params_from_rig_vector",
     "rig_vector",
 ]
