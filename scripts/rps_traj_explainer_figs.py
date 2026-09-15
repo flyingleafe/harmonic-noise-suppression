@@ -39,6 +39,7 @@ import json
 import re
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -229,12 +230,24 @@ def _rotor_lines(ax: Axes, t: np.ndarray, rps: np.ndarray, lw: float = 0.8) -> N
         ax.plot(t, rps[i], lw=lw, color=ROTOR_COLORS[i], label=ROTOR_NAMES[i])
 
 
-def _finite_range(arrays: list[np.ndarray], pad: float = 0.04) -> tuple[float, float]:
+def _finite_range(
+    arrays: list[np.ndarray], pad: float = 0.04, robust: bool = False
+) -> tuple[float, float]:
+    """Shared y-range over several series.
+
+    With ``robust`` the range covers the 0.2 to 99.8 percentile instead of the
+    full extent. One logger glitch — blackbird ends its recording with a single
+    1100 rev/s sample — otherwise flattens a whole row of a grid. Rare samples
+    then fall outside the axes, and the caption says so.
+    """
     vals = np.concatenate([np.asarray(a, dtype=np.float64).ravel() for a in arrays])
     vals = vals[np.isfinite(vals)]
     if vals.size == 0:
         return 0.0, 1.0
-    lo, hi = float(vals.min()), float(vals.max())
+    if robust and vals.size > 100:
+        lo, hi = (float(v) for v in np.percentile(vals, [0.2, 99.8]))
+    else:
+        lo, hi = float(vals.min()), float(vals.max())
     span = max(hi - lo, 1e-6)
     return lo - pad * span, hi + pad * span
 
@@ -255,11 +268,10 @@ MISSING_ARM_NOTE = (
 #: four decimals. This is a RE-EXPRESSION of a stored fit, never a new fit.
 LEGACY_TAU_E_S = 1e-3
 LEGACY_NOTE = (
-    " The new-model arm here is the **round-3 fit**, not the round-4 fit the "
-    "text describes: `fits/new/` has not been re-run yet. Round 3's white "
-    "measurement term is re-expressed exactly as the measurement OU with "
-    "`tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a "
-    "faithful picture of the round-3 model."
+    " The new-model arm here comes from an **earlier round** of the fit, not "
+    "from the round the text describes: `fits/new/` has not been re-run yet. "
+    "The stored parameters are re-expressed exactly in the current "
+    "parameterisation, so the panel is a faithful picture of that earlier fit."
 )
 
 
@@ -268,37 +280,55 @@ def _missing_arm_note(new: NewFit | None) -> str:
 
 
 def _arm_label(arm: str, new: NewFit | None) -> str:
-    """Panel title of one arm; the new arm says so when it is a round-3 fit."""
+    """Panel title of one arm; the new arm says so when it is an older fit."""
     if arm == "new" and new is not None and getattr(new, "legacy_note", ""):
-        return "new model, ROUND-3 fit (round 4 not run yet)"
+        return "new model, EARLIER-ROUND fit (re-expressed)"
     return ARM_LABEL[arm]
 
 
-def upgrade_legacy_params(params: dict[str, Any]) -> dict[str, Any] | None:
-    """A round-3 parameter dict in the CURRENT parameterisation, or ``None``.
+def upgrade_legacy_params(params: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
+    """An older parameter dict in the CURRENT parameterisation, or ``None``.
 
-    Only one older layout is re-expressible: round 3's, which differs from the
-    current one by its white measurement term (:data:`LEGACY_TAU_E_S`). Rounds
-    1 and 2 carried ``tau_fast``/``sigma_fast`` instead of the oscillator and
-    are a different model family — those return ``None``.
+    Two steps between rounds are exact re-expressions, so a stored fit still
+    describes the same process after them:
+
+    * round 3's WHITE measurement noise of std ``sigma_w`` is the zero-memory
+      limit of the measurement OU, so it becomes ``sigma_e = sigma_w`` at
+      :data:`LEGACY_TAU_E_S` (lag-1 correlation 4.5e-5 on the 100 Hz grid);
+    * round 4's per-rotor flight offsets ``s`` split into a common part and a
+      per-rotor part, so they become ``s_c = 0`` and ``s_r = s``.
+
+    Anything else returns ``None``: rounds 1 and 2 carried
+    ``tau_fast``/``sigma_fast`` instead of the oscillator, which is a different
+    model family and cannot be re-expressed.
     """
-    if "tau_e" in params or "sigma_w" not in params:
-        return None
     if not {"f0", "zeta", "sigma_osc"} <= set(params):
         return None
-    out = {k: v for k, v in params.items() if k not in ("sigma_w", "corner_tau")}
-    out["tau_e"] = LEGACY_TAU_E_S
-    out["sigma_e"] = float(params["sigma_w"])
-    return out
+    out = {k: v for k, v in params.items() if k != "corner_tau"}
+    notes: list[str] = []
+    if "sigma_w" in out and "tau_e" not in out:
+        sigma_w = float(out.pop("sigma_w"))
+        out["tau_e"] = LEGACY_TAU_E_S
+        out["sigma_e"] = sigma_w
+        notes.append(
+            f"white sigma_w = {sigma_w:.4g} rev/s as the measurement OU at "
+            f"tau_e = {LEGACY_TAU_E_S:g} s"
+        )
+    if "s" in out and "s_c" not in out:
+        offsets = out.pop("s")
+        out["s_c"] = 0.0
+        out["s_r"] = offsets
+        notes.append("per-rotor flight offsets s as s_c = 0 plus s_r = s")
+    return (out, "; ".join(notes)) if notes else None
 
 
 def load_new_fit(path: Path, legacy: bool = True) -> tuple[NewFit | None, str]:
     """``(fit, provenance)`` for one ``fits/new/<rig>.json``.
 
     A fit written by an earlier round carries a different parameter set. With
-    ``legacy`` a round-3 fit is re-expressed by :func:`upgrade_legacy_params`
-    and carries a ``legacy_note`` attribute, which every caption repeats;
-    without it, or for an older layout, the fit is reported as unusable and
+    ``legacy`` an exactly re-expressible fit goes through
+    :func:`upgrade_legacy_params` and carries a ``legacy_note`` attribute,
+    which every caption repeats; otherwise the fit is reported as unusable and
     the figures drop their new-model panel.
     """
     payload = json.loads(path.read_text())
@@ -309,19 +339,17 @@ def load_new_fit(path: Path, legacy: bool = True) -> tuple[NewFit | None, str]:
     upgraded = upgrade_legacy_params(payload.get("params") or {}) if legacy else None
     if upgraded is None:
         return None, reason
-    fit = NewFit.from_dict({**payload, "params": upgraded})
-    # Provenance that the current NewFit has no field for, read back through
-    # getattr by _fit_band / _fit_nyquist / _missing_arm_note.
+    params, how = upgraded
+    fit = NewFit.from_dict({**payload, "params": params})
+    # Provenance the current NewFit has no field for, read back through getattr
+    # by _fit_band / _fit_nyquist / _missing_arm_note.
     fit.legacy_note = LEGACY_NOTE  # type: ignore[attr-defined]
-    fit.fit_rate_hz = float("nan")  # round 3 recorded no likelihood rate
+    if "tau_e" not in (payload.get("params") or {}):
+        fit.fit_rate_hz = float("nan")  # round 3 recorded no likelihood rate
     band = payload.get("band_hz")
     if band and len(tuple(band)) == 2:
         fit.band_hz = (float(band[0]), float(band[1]))  # type: ignore[attr-defined]
-    return fit, (
-        f"round-3 fit re-expressed in the current parameterisation "
-        f"(white sigma_w = {payload['params']['sigma_w']:.4g} rev/s as the "
-        f"measurement OU at tau_e = {LEGACY_TAU_E_S:g} s); {reason}"
-    )
+    return fit, f"earlier-round fit re-expressed exactly ({how}); {reason}"
 
 
 def _fit_band(fit: NewFit) -> tuple[float, float] | None:
@@ -469,132 +497,230 @@ def _model_segments(
     return [sampler(n, np.random.default_rng([seed, k])) for k, n in enumerate(kept)]
 
 
-# ─── figure 1: the zoom ───────────────────────────────────────────────────────
+# ─── figures 1-2: the comparison grids (one ROW per rig, three COLUMNS) ───────
+
+#: Airframe of each rig, for the row labels (`docs/data-catalog.md`).
+RIG_VEHICLE = {
+    "michaels": "DJI Matrice 100",
+    "dregon": "MikroKopter quad",
+    "neurobem_quad": "UZH RPG racing quad",
+    "pitcn_quad": "NYU ARPL dragonfly17",
+    "nanobench_cf21b": "Crazyflie 2.1 Brushless",
+    "vid_m100": "DJI M100 + M3508",
+    "blackbird_quad": "MIT Blackbird quad",
+}
+
+#: Column titles of both grids, in arm order.
+COLUMN_TITLE = {
+    "real": "real telemetry",
+    "base": "current sampler, fitted",
+    "new": "new model, fitted",
+}
 
 
-def fig_zoom(
-    rig: str,
-    flights: list[Flight],
-    base: BaselineFit,
-    new: NewFit | None,
-    out: Path,
-    seed: int,
-) -> dict[str, Any]:
+@dataclass
+class Row:
+    """One rig's row of a comparison grid: the same window from each arm."""
+
+    rig: str
+    series: dict[str, np.ndarray]
+    fs: float
+    ylim: tuple[float, float]
+    xmax: float
+    label: str
+    caption: str
+    meta: dict[str, Any]
+
+
+def _row_label(rig: str, new: NewFit | None, extra: str = "") -> str:
+    """Row label: rig, airframe, and any caveat this row carries."""
+    notes = [extra] if extra else []
+    if new is None:
+        notes.append("no usable new fit")
+    elif getattr(new, "legacy_note", ""):
+        notes.append("new = earlier-round fit")
+    tail = f"\n({'; '.join(notes)})" if notes else ""
+    return f"{_rig_label(rig)}\n{RIG_VEHICLE.get(rig, 'quad')}{tail}"
+
+
+def zoom_row(
+    rig: str, flights: list[Flight], base: BaselineFit, new: NewFit | None, seed: int
+) -> Row:
+    """A 20 s window of each arm, from the middle of the longest real segment."""
     flight, start, n = _zoom_window(flights, ZOOM_S)
-    real = np.asarray(flight.rps[:, start : start + n], dtype=np.float64)
-    t = np.arange(n) / flight.fs
-    draws = {
-        "real": real,
+    series = {
+        "real": np.asarray(flight.rps[:, start : start + n], dtype=np.float64),
         "base": base.sampler(flight.fs)(n, np.random.default_rng([seed, 1])),
     }
     if new is not None:
-        draws["new"] = new.sampler(flight.fs)(n, np.random.default_rng([seed, 2]))
-    arms = list(draws)
-    ylim = _finite_range(list(draws.values()))
-
-    fig, axes = plt.subplots(
-        len(arms), 1, figsize=(10.5, 2.4 * len(arms)), sharex=True, sharey=True, squeeze=False
-    )
-    for ax, arm in zip(axes.ravel(), arms, strict=True):
-        _rotor_lines(ax, t, draws[arm])
-        ax.set_title(_arm_label(arm, new), loc="left", fontsize=10, color=ARM_COLOR[arm])
-        ax.set_ylabel("rev/s")
-        ax.grid(alpha=0.25)
-    axes[0, 0].set_ylim(*ylim)
-    axes[0, 0].set_xlim(0.0, t[-1] if n else 1.0)
-    axes[-1, 0].set_xlabel("time (s)")
-    axes[0, 0].legend(ncol=4, fontsize=9, loc="upper right", framealpha=0.9)
-    fig.suptitle(
-        f"{_rig_label(rig)} — {n / flight.fs:.0f} s zoom "
-        f"(real: {flight.flight}, t0 = {start / flight.fs:.1f} s airborne)",
-        fontsize=11,
-    )
-    fig.tight_layout()
-    name = _save(fig, out, f"{rig}_zoom.png")
-    return {
-        "path": name,
-        "caption": (
-            f"**{_rig_label(rig)}, {n / flight.fs:.0f} s zoom.** Real telemetry from "
-            f"the middle of the longest airborne segment of `{flight.flight}` "
-            f"(starting {start / flight.fs:.1f} s into the recording) against one "
-            f"sample of each fitted sampler, drawn on the same 100 Hz grid and "
-            f"plotted on one shared y-range ({ylim[0]:.0f}-{ylim[1]:.0f} rev/s). "
-            f"Colours are the mixer rotor order." + _missing_arm_note(new)
+        series["new"] = new.sampler(flight.fs)(n, np.random.default_rng([seed, 2]))
+    ylim = _finite_range(list(series.values()))
+    return Row(
+        rig=rig,
+        series=series,
+        fs=flight.fs,
+        ylim=ylim,
+        xmax=n / flight.fs,
+        label=_row_label(rig, new),
+        caption=(
+            f"**{_rig_label(rig)}, {n / flight.fs:.0f} s zoom.** Real telemetry "
+            f"from the middle of the longest airborne segment of "
+            f"`{flight.flight}`, starting {start / flight.fs:.1f} s into the "
+            f"recording. One sample of each fitted sampler follows it, on the "
+            f"same 100 Hz grid and the same y-range "
+            f"({ylim[0]:.0f}-{ylim[1]:.0f} rev/s). The colours are the mixer "
+            f"rotor order." + _missing_arm_note(new)
         ),
-        "arms": arms,
-        "flight": flight.flight,
-        "t0_s": round(start / flight.fs, 2),
-        "window_s": round(n / flight.fs, 2),
-    }
+        meta={
+            "arms": list(series),
+            "flight": flight.flight,
+            "t0_s": round(start / flight.fs, 2),
+            "window_s": round(n / flight.fs, 2),
+        },
+    )
 
 
-# ─── figure 2: the whole flight ───────────────────────────────────────────────
-
-
-def fig_flight(
-    rig: str,
-    flights: list[Flight],
-    base: BaselineFit,
-    new: NewFit | None,
-    out: Path,
-    seed: int,
-) -> dict[str, Any]:
+def flight_row(
+    rig: str, flights: list[Flight], base: BaselineFit, new: NewFit | None, seed: int
+) -> Row:
+    """A whole real recording against ``full_flight`` of each fit."""
     flight = _ground_flight(flights)
     real = np.asarray(flight.rps, dtype=np.float64)
     duration = float(real.shape[1] / flight.fs)
     model_s = max(duration, MIN_FLIGHT_S)
-    draws = {
+    series = {
         "real": real,
         "base": base.full_flight(model_s, flight.fs, np.random.default_rng([seed, 3])),
     }
     if new is not None:
-        draws["new"] = new.full_flight(model_s, flight.fs, np.random.default_rng([seed, 4]))
-    arms = list(draws)
-    ylim = _finite_range(list(draws.values()))
-    has_ground = ground_level(flight) is not None
-
-    fig, axes = plt.subplots(
-        len(arms), 1, figsize=(11.0, 2.4 * len(arms)), sharex=True, sharey=True, squeeze=False
-    )
-    for ax, arm in zip(axes.ravel(), arms, strict=True):
-        x = draws[arm]
-        _rotor_lines(ax, np.arange(x.shape[1]) / flight.fs, x, lw=0.6)
-        ax.set_title(_arm_label(arm, new), loc="left", fontsize=10, color=ARM_COLOR[arm])
-        ax.set_ylabel("rev/s")
-        ax.grid(alpha=0.25)
-    axes[0, 0].set_ylim(*ylim)
-    axes[0, 0].set_xlim(0.0, max(duration, model_s))
-    axes[-1, 0].set_xlabel("time (s)")
-    axes[0, 0].legend(ncol=4, fontsize=9, loc="lower right", framealpha=0.9)
-    fig.suptitle(
-        f"{_rig_label(rig)} — whole recording {flight.flight} ({duration:.0f} s, "
-        f"{'idle plateau present' if has_ground else 'no ground phase logged'}) "
-        f"vs full_flight() of the fits",
-        fontsize=11,
-    )
-    fig.tight_layout()
-    name = _save(fig, out, f"{rig}_flight.png")
-    return {
-        "path": name,
-        "caption": (
+        series["new"] = new.full_flight(model_s, flight.fs, np.random.default_rng([seed, 4]))
+    idle = ground_level(flight)
+    return Row(
+        rig=rig,
+        series=series,
+        fs=flight.fs,
+        ylim=_finite_range(list(series.values()), robust=True),
+        xmax=max(duration, model_s),
+        label=_row_label(rig, new, "" if idle is not None else "real: no ground phase"),
+        caption=(
             f"**{_rig_label(rig)}, whole flight.** The complete recording "
-            f"`{flight.flight}` ({duration:.0f} s, {_airborne_s(flight):.0f} s of it "
-            f"airborne under the frozen rule"
+            f"`{flight.flight}` lasts {duration:.0f} s. The frozen rule keeps "
+            f"{_airborne_s(flight):.0f} s of it as airborne."
             + (
-                f", idle plateau at {ground_level(flight):.0f} rev/s)"
-                if has_ground
-                else ", the source starts and ends already airborne)"
+                f" The idle plateau sits at {idle:.0f} rev/s."
+                if idle is not None
+                else " This source starts and ends already airborne, so it shows no ground phase."
             )
-            + f" against `full_flight({model_s:.0f} s)`: ground, spin-up, warm-up "
-            f"idle, take-off ramp, the airborne process, landing, spin-down. Only "
-            f"the airborne part is fitted — the phase envelope is the shared "
-            f"scaffold `flight.wrap_airborne` and the fitted idle level." + _missing_arm_note(new)
+            + f" Both fits then draw `full_flight({model_s:.0f} s)`: ground, "
+            f"spin-up, warm-up idle, take-off ramp, the airborne process, "
+            f"landing, spin-down. Only the airborne part is fitted. The phase "
+            f"envelope is the shared scaffold `flight.wrap_airborne`. The "
+            f"y-range covers the 0.2 to 99.8 percentile of all three cells, so "
+            f"a rare logger glitch can fall outside the axes." + _missing_arm_note(new)
         ),
-        "arms": arms,
-        "flight": flight.flight,
-        "duration_s": round(duration, 2),
-        "model_duration_s": round(model_s, 2),
-        "has_ground": bool(has_ground),
+        meta={
+            "arms": list(series),
+            "flight": flight.flight,
+            "duration_s": round(duration, 2),
+            "model_duration_s": round(model_s, 2),
+            "has_ground": idle is not None,
+        },
+    )
+
+
+def _draw_row(axes: Any, row: Row, lw: float, titles: bool) -> None:
+    """Fill three axes with one row: real, current sampler, new model."""
+    for col, arm in enumerate(ARMS):
+        ax = axes[col]
+        x = row.series.get(arm)
+        if x is None:
+            ax.text(
+                0.5,
+                0.5,
+                "no usable fit\nfor this arm",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color="#b3261e",
+                transform=ax.transAxes,
+            )
+            ax.set_xticks([])
+            ax.set_yticks([])
+        else:
+            _rotor_lines(ax, np.arange(x.shape[1]) / row.fs, x, lw=lw)
+            ax.set_ylim(*row.ylim)
+            ax.set_xlim(0.0, row.xmax)
+            ax.grid(alpha=0.25)
+            ax.tick_params(labelsize=7)
+            if col:
+                ax.set_yticklabels([])
+        if titles:
+            ax.set_title(COLUMN_TITLE[arm], fontsize=10, color=ARM_COLOR[arm])
+    axes[0].set_ylabel(row.label, fontsize=8)
+
+
+def fig_row(row: Row, out: Path, name: str) -> dict[str, Any]:
+    """One rig's row as its own figure, for the per-rig tabs."""
+    fig, axes = plt.subplots(1, 3, figsize=(13.0, 3.0), squeeze=False)
+    _draw_row(axes[0], row, lw=0.7, titles=True)
+    for ax in axes[0]:
+        ax.set_xlabel("time (s)", fontsize=8)
+    _rotor_legend(fig, axes[0][0])
+    fig.tight_layout(rect=(0.0, 0.06, 1.0, 1.0))
+    path = _save(fig, out, name)
+    return {"path": path, "caption": row.caption, **row.meta}
+
+
+def fig_grid(rows: list[Row], out: Path, name: str, kind: str) -> dict[str, Any]:
+    """The comparison grid: one row per rig, three columns per row."""
+    fig, axes = plt.subplots(len(rows), 3, figsize=(13.5, 2.6 * len(rows)), squeeze=False)
+    for r, row in enumerate(rows):
+        _draw_row(axes[r], row, lw=0.55 if kind == "flight" else 0.7, titles=r == 0)
+    for ax in axes[-1]:
+        ax.set_xlabel("time (s)", fontsize=9)
+    _rotor_legend(fig, axes[0][0])
+    window = (
+        f"{ZOOM_S:.0f} s airborne windows"
+        if kind == "zoom"
+        else "whole recordings and whole sampled flights"
+    )
+    fig.suptitle(f"{len(rows)} rigs, three arms, {window} — rev/s against time", fontsize=12)
+    fig.tight_layout(rect=(0.0, 0.02, 1.0, 0.985))
+    path = _save(fig, out, name)
+    legacy = [row.rig for row in rows if "earlier-round" in row.label]
+    missing = [row.rig for row in rows if "new" not in row.series]
+    caption = (
+        f"**All {len(rows)} rigs at a glance"
+        + (f", {ZOOM_S:.0f} s each.**" if kind == "zoom" else ", whole flights.**")
+        + " Each row is one rig. The left cell is its real telemetry, the middle "
+        "cell is the current sampler fitted to that rig, the right cell is the "
+        "new model fitted to that rig. A row shares one y-range across its "
+        "three cells, so the cells are directly comparable. Rotor colours are "
+        "the mixer order in every cell. Row scales differ, because the rigs run "
+        "from 78 to 278 rev/s."
+    )
+    if kind == "flight":
+        caption += (
+            " A row label says so when the real source carries no ground phase. "
+            "Those recordings start and end already airborne."
+        )
+    if legacy:
+        caption += (
+            f" The right cell of {', '.join('`' + r + '`' for r in legacy)} comes "
+            f"from an earlier round of the fit, re-expressed exactly in the "
+            f"current parameterisation."
+        )
+    if missing:
+        caption += (
+            f" The right cell of {', '.join('`' + r + '`' for r in missing)} is "
+            f"empty, because no fit there loads."
+        )
+    return {
+        "path": path,
+        "caption": caption,
+        "rigs": [row.rig for row in rows],
+        "legacy_rigs": legacy,
+        "missing_rigs": missing,
     }
 
 
@@ -863,7 +989,7 @@ def load_draws(
         if older is None:
             stale += 1
             continue
-        out.append((path.stem, Params.from_dict(older)))
+        out.append((path.stem, Params.from_dict(older[0])))
         upgraded += 1
     n_stored = len(out)
     rng = np.random.default_rng(seed)
@@ -949,7 +1075,16 @@ def fig_posterior_zoom(draws: list[tuple[str, Params]], out: Path, seed: int) ->
         name, params = draws[k]
         x = params.sample_airborne(n_samples, np.random.default_rng([seed, 11, k]))
         _rotor_lines(ax, np.arange(n_samples) / RATE_HZ, x, lw=0.6)
-        ax.set_title(f"draw {name} — mean {np.mean(params.mu):.0f} rev/s", fontsize=9)
+        # The title carries BOTH levels: a drawn flight offset can dwarf the
+        # drawn operating point, and then "mean mu" alone misreads the panel.
+        mu_mean = float(np.mean(params.mu))
+        level = float(np.mean(x))
+        title = (
+            f"draw {name} — mu {mu_mean:.0f} rev/s"
+            if abs(level - mu_mean) <= 0.05 * max(mu_mean, 1.0)
+            else f"draw {name} — mu {mu_mean:.0f}, this flight {level:.0f} rev/s"
+        )
+        ax.set_title(title, fontsize=9)
         ax.grid(alpha=0.25)
         ax.tick_params(labelsize=7)
         if k % ncol == 0:
@@ -1187,6 +1322,7 @@ def main() -> int:
         "rigs": [],
         "figures": {},
         "posterior": {},
+        "grids": {},
         "skipped": {},
         "fit_provenance": {},
         "fit_facts": {},
@@ -1194,6 +1330,8 @@ def main() -> int:
     }
 
     fits: dict[str, NewFit] = {}
+    zoom_rows: list[Row] = []
+    flight_rows: list[Row] = []
     for rig in rigs:
         base_path = root / "fits" / "base" / f"{rig}.json"
         new_path = root / "fits" / "new" / f"{rig}.json"
@@ -1228,9 +1366,13 @@ def main() -> int:
             }
             index["fit_facts"][rig]["legacy"] = bool(getattr(new, "legacy_note", ""))
         flights = load_rig(rig)
+        zr = zoom_row(rig, flights, base, new, args.seed)
+        fr = flight_row(rig, flights, base, new, args.seed)
+        zoom_rows.append(zr)
+        flight_rows.append(fr)
         entries = {
-            "zoom": fig_zoom(rig, flights, base, new, out, args.seed),
-            "flight": fig_flight(rig, flights, base, new, out, args.seed),
+            "zoom": fig_row(zr, out, f"{rig}_zoom.png"),
+            "flight": fig_row(fr, out, f"{rig}_flight.png"),
             "spectra": fig_spectra(rig, flights, base, new, out, args.seed),
         }
         stat_paths = {arm: root / "stats" / arm / f"{rig}.json" for arm in ARMS}
@@ -1245,6 +1387,14 @@ def main() -> int:
             key: entries[key] for key in index["per_rig_order"] if key in entries
         }
         print(f"[done] {rig}: {', '.join(e['path'] for e in entries.values())}", flush=True)
+
+    if zoom_rows:
+        index["grids"] = {
+            "zoom": fig_grid(zoom_rows, out, "grid_zoom.png", "zoom"),
+            "flight": fig_grid(flight_rows, out, "grid_flight.png", "flight"),
+        }
+        index["grid_order"] = ["zoom", "flight"]
+        print("[done] comparison grids: grid_zoom.png, grid_flight.png", flush=True)
 
     post, post_provenance = load_posterior(root, fits)
     index["posterior_source"] = post_provenance
@@ -1278,6 +1428,7 @@ def main() -> int:
 
     index["n_figures"] = (
         sum(len(v) for v in index["figures"].values())
+        + len(index.get("grids", {}))
         + len(index.get("posterior", {}))
         + len(index["explore"])
     )
