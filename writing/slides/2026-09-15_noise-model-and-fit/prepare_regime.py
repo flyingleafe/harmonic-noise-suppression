@@ -13,9 +13,10 @@ DRAWN RAW, SCORED WITH PIT. Each model emits four rotor-speed series and those
 four series are drawn exactly as emitted: no permutation, no assignment. A
 model's line may therefore sit near a different target track than "its own"
 rotor, which is the truth about what the model outputs. The reported MAE is
-the project's per-frame PIT metric (:func:`_regime_decomp.pit_align`,
-unchanged), which is permutation-invariant and so does not care how the rows
-are ordered. Nothing in this file solves an assignment.
+the project's clip-level PIT metric (:func:`_regime_decomp.pit_abs_error_clip`,
+one assignment per clip, the same convention the training loss uses),
+which is permutation-invariant, so it does not care how the rows are ordered.
+Nothing in this file solves an assignment for drawing.
 
 The regime labelling and the checkpoint selection are imported from
 ``scripts/_regime_decomp.py`` — the figures and the table are the same numbers,
@@ -53,7 +54,7 @@ from _regime_decomp import (  # noqa: E402
     REGIMES,
     VALID,
     frame_regimes4,
-    pit_abs_error,
+    pit_abs_error_clip,
     predict_clip,
 )
 
@@ -352,7 +353,7 @@ def draw(
         0.004,
         "model tracks drawn RAW, as each model emits them — no matching, so a line "
         "may sit near a target that is not its own rotor;  the MAE above is the "
-        "per-frame PIT score",
+        "per-clip PIT score",
         ha="center",
         va="bottom",
         fontsize=11,
@@ -401,7 +402,7 @@ def main() -> int:
             # DRAWN RAW: the model emits four series, so four series are drawn.
             # No permutation, no assignment. PIT belongs to the score only.
             preds[tag] = pred[:, :width]
-            maes[tag] = float(pit_abs_error(pred[:, :width], target[:, :width]).mean())
+            maes[tag] = float(pit_abs_error_clip(pred[:, :width], target[:, :width]).mean())
         width = min(min(p.shape[1] for p in preds.values()), target.shape[1])
         rig = (
             "michaels"

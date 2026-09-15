@@ -1,0 +1,1578 @@
+{
+ "generated_by": "scripts/_model_matrix.py",
+ "git_head": "279ad0f5f36a152defc8e86ae57f6a3a5115d031",
+ "metric": "PIT MAE, one rotor assignment per clip (metrics.rps.batched_pit_mae); mic 0",
+ "drawing": "writing/slides/2026-09-15_noise-model-and-fit/prepare_regime.py:draw, model tracks RAW (no permutation)",
+ "models": {
+  "hppnet-real-best": {
+   "colour": "#111111",
+   "experiment": "hppnet_l2_r2_s0",
+   "ckpt": "best",
+   "uri": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+   "digest": "sha256:6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1",
+   "salience_decoder": true,
+   "recorded_training_score": {
+    "error": "ClientError('An error occurred (404) when calling the HeadObject operation: Not Found')"
+   }
+  },
+  "hppnet-easy": {
+   "colour": "#1f77b4",
+   "experiment": "rig_easy_hppnet_l2_unified",
+   "ckpt": "best_real_overall",
+   "uri": "r2://ml-data/artifacts/rig_easy_hppnet_l2_unified/checkpoints/best_real_overall.ckpt",
+   "digest": "sha256:1d62414e9551ee5030a4f895016251166a852a3f921843f64b904016ea6e01fd",
+   "salience_decoder": true,
+   "recorded_training_score": {
+    "source": "r2://ml-data/artifacts/rig_easy_hppnet_l2_unified/checkpoints/best_checkpoints.json",
+    "score": "real_overall",
+    "checkpoint": "best_real_overall.ckpt",
+    "validation_round": 60,
+    "optimizer_step": 30500,
+    "raw": 5.5164223349145045,
+    "smoothed": 5.5164223349145045
+   }
+  },
+  "scv2-real-R4": {
+   "colour": "#2ca02c",
+   "experiment": "real_r4_scv2_unified",
+   "ckpt": "best_real_overall",
+   "uri": "r2://ml-data/artifacts/real_r4_scv2_unified/checkpoints/best_real_overall.ckpt",
+   "digest": "sha256:93f62d19c9022f43dcf9e1e53d0a1b65c26aee3d6dcb70223f988675a9686749",
+   "salience_decoder": false,
+   "recorded_training_score": {
+    "source": "r2://ml-data/artifacts/real_r4_scv2_unified/checkpoints/best_checkpoints.json",
+    "score": "real_overall",
+    "checkpoint": "best_real_overall.ckpt",
+    "validation_round": 24,
+    "optimizer_step": 12500,
+    "raw": 3.1149980849208863,
+    "smoothed": 3.129819782148745
+   }
+  },
+  "scv2-hard": {
+   "colour": "#d62728",
+   "experiment": "rig_hard_scv2_unified",
+   "ckpt": "best_real_overall",
+   "uri": "r2://ml-data/artifacts/rig_hard_scv2_unified/checkpoints/best_real_overall.ckpt",
+   "digest": "sha256:f55fca962ae9fc4c2b109fb9ecdef3f9108b25be6bc15d1e1380343be6502d8d",
+   "salience_decoder": false,
+   "recorded_training_score": {
+    "source": "r2://ml-data/artifacts/rig_hard_scv2_unified/checkpoints/best_checkpoints.json",
+    "score": "real_overall",
+    "checkpoint": "best_real_overall.ckpt",
+    "validation_round": 124,
+    "optimizer_step": 62500,
+    "raw": 5.411805445353526,
+    "smoothed": 5.521749515539488
+   }
+  }
+ },
+ "draw_order": [
+  "hppnet-easy",
+  "scv2-real-R4",
+  "scv2-hard",
+  "hppnet-real-best"
+ ],
+ "figures": [
+  {
+   "figure": "A_real_dregon_clip02.png",
+   "category": "A",
+   "key": "A_real_dregon_clip02",
+   "rig": "dregon",
+   "rig_split_group": "dregon",
+   "why": "DREGON free-flight_speech-low_room1, cruise share 100%; the most dynamic of that condition's 5 top-share clips (4.2 rev/s peak-to-peak about 80 rev/s). One clip per interferer condition so the DREGON half is not three copies of one room state",
+   "pit_mae": {
+    "hppnet-real-best": 2.2009613513946533,
+    "hppnet-easy": 2.1827027797698975,
+    "scv2-real-R4": 2.5740251541137695,
+    "scv2-hard": 2.8476269245147705
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "frozen real split",
+    "split": "dload:DREGON-LM-V4-michaels-valid-full",
+    "split_version": "9604f3ffc2c9",
+    "clip_index": 2,
+    "sample_id": "sample_00002",
+    "recording_id": "free-flight_speech-low_room1",
+    "cruise_share": 1.0,
+    "mean_rotor_ptp_rev_s": 4.178562164306641,
+    "channel": 0
+   },
+   "draw_note": "A_real_dregon_clip02.png: A real cruise \u00b7 dregon/free-flight_speech-low_room1 sample_00002 A_real_dregon_clip02, 8.0 s, mic 0, 0-8 kHz (-32 to 17 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.18, scv2-real-R4 2.57, scv2-hard 2.85, hppnet-real-best 2.20 rev/s. WHY: DREGON free-flight_speech-low_room1, cruise share 100%; the most dynamic of that condition's 5 top-share clips (4.2 rev/s peak-to-peak about 80 rev/s). One clip per interferer condition so the DREGON half is not three copies of one room state"
+  },
+  {
+   "figure": "A_real_dregon_clip09.png",
+   "category": "A",
+   "key": "A_real_dregon_clip09",
+   "rig": "dregon",
+   "rig_split_group": "dregon",
+   "why": "DREGON free-flight_whitenoise-low_room1, cruise share 100%; the most dynamic of that condition's 5 top-share clips (8.7 rev/s peak-to-peak about 81 rev/s). One clip per interferer condition so the DREGON half is not three copies of one room state",
+   "pit_mae": {
+    "hppnet-real-best": 2.064887046813965,
+    "hppnet-easy": 3.015564203262329,
+    "scv2-real-R4": 2.71273136138916,
+    "scv2-hard": 2.786592483520508
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "frozen real split",
+    "split": "dload:DREGON-LM-V4-michaels-valid-full",
+    "split_version": "9604f3ffc2c9",
+    "clip_index": 9,
+    "sample_id": "sample_00009",
+    "recording_id": "free-flight_whitenoise-low_room1",
+    "cruise_share": 1.0,
+    "mean_rotor_ptp_rev_s": 8.678018569946289,
+    "channel": 0
+   },
+   "draw_note": "A_real_dregon_clip09.png: A real cruise \u00b7 dregon/free-flight_whitenoise-low_room1 sample_00009 A_real_dregon_clip09, 8.0 s, mic 0, 0-8 kHz (-31 to 18 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 3.02, scv2-real-R4 2.71, scv2-hard 2.79, hppnet-real-best 2.06 rev/s. WHY: DREGON free-flight_whitenoise-low_room1, cruise share 100%; the most dynamic of that condition's 5 top-share clips (8.7 rev/s peak-to-peak about 81 rev/s). One clip per interferer condition so the DREGON half is not three copies of one room state"
+  },
+  {
+   "figure": "A_real_dregon_clip20.png",
+   "category": "A",
+   "key": "A_real_dregon_clip20",
+   "rig": "dregon",
+   "rig_split_group": "dregon",
+   "why": "DREGON free-flight_nosource_room1, cruise share 100%; the most dynamic of that condition's 6 top-share clips (5.6 rev/s peak-to-peak about 80 rev/s). One clip per interferer condition so the DREGON half is not three copies of one room state",
+   "pit_mae": {
+    "hppnet-real-best": 1.7787823677062988,
+    "hppnet-easy": 2.803856372833252,
+    "scv2-real-R4": 1.9551531076431274,
+    "scv2-hard": 3.3331680297851562
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "frozen real split",
+    "split": "dload:DREGON-LM-V4-michaels-valid-full",
+    "split_version": "9604f3ffc2c9",
+    "clip_index": 20,
+    "sample_id": "sample_00020",
+    "recording_id": "free-flight_nosource_room1",
+    "cruise_share": 1.0,
+    "mean_rotor_ptp_rev_s": 5.617851257324219,
+    "channel": 0
+   },
+   "draw_note": "A_real_dregon_clip20.png: A real cruise \u00b7 dregon/free-flight_nosource_room1 sample_00020 A_real_dregon_clip20, 8.0 s, mic 0, 0-8 kHz (-30 to 18 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.80, scv2-real-R4 1.96, scv2-hard 3.33, hppnet-real-best 1.78 rev/s. WHY: DREGON free-flight_nosource_room1, cruise share 100%; the most dynamic of that condition's 6 top-share clips (5.6 rev/s peak-to-peak about 80 rev/s). One clip per interferer condition so the DREGON half is not three copies of one room state"
+  },
+  {
+   "figure": "A_real_michaels_clip27.png",
+   "category": "A",
+   "key": "A_real_michaels_clip27",
+   "rig": "michaels",
+   "rig_split_group": "michaels",
+   "why": "Michael FLY124, cruise share 100% (the split's maximum, shared by 7 FLY124 clips); rank 1 of those by rotor-mean peak-to-peak, 10.0 rev/s about a 80 rev/s mean \u2014 the most MOVING cruise Michael has",
+   "pit_mae": {
+    "hppnet-real-best": 1.2229223251342773,
+    "hppnet-easy": 2.8252437114715576,
+    "scv2-real-R4": 2.0152289867401123,
+    "scv2-hard": 3.8397209644317627
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "frozen real split",
+    "split": "dload:DREGON-LM-V4-michaels-valid-full",
+    "split_version": "9604f3ffc2c9",
+    "clip_index": 27,
+    "sample_id": "sample_00027",
+    "recording_id": "michaels_FLY124",
+    "cruise_share": 1.0,
+    "mean_rotor_ptp_rev_s": 10.033332824707031,
+    "channel": 0
+   },
+   "draw_note": "A_real_michaels_clip27.png: A real cruise \u00b7 michaels/michaels_FLY124 sample_00027 A_real_michaels_clip27, 8.0 s, mic 0, 0-8 kHz (-24 to 25 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.83, scv2-real-R4 2.02, scv2-hard 3.84, hppnet-real-best 1.22 rev/s. WHY: Michael FLY124, cruise share 100% (the split's maximum, shared by 7 FLY124 clips); rank 1 of those by rotor-mean peak-to-peak, 10.0 rev/s about a 80 rev/s mean \u2014 the most MOVING cruise Michael has"
+  },
+  {
+   "figure": "A_real_michaels_clip30.png",
+   "category": "A",
+   "key": "A_real_michaels_clip30",
+   "rig": "michaels",
+   "rig_split_group": "michaels",
+   "why": "Michael FLY124, cruise share 100% (the split's maximum, shared by 7 FLY124 clips); rank 3 of those by rotor-mean peak-to-peak, 4.9 rev/s about a 80 rev/s mean \u2014 the most MOVING cruise Michael has",
+   "pit_mae": {
+    "hppnet-real-best": 0.7280717492103577,
+    "hppnet-easy": 1.4145816564559937,
+    "scv2-real-R4": 1.221235990524292,
+    "scv2-hard": 3.6142730712890625
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "frozen real split",
+    "split": "dload:DREGON-LM-V4-michaels-valid-full",
+    "split_version": "9604f3ffc2c9",
+    "clip_index": 30,
+    "sample_id": "sample_00030",
+    "recording_id": "michaels_FLY124",
+    "cruise_share": 1.0,
+    "mean_rotor_ptp_rev_s": 4.850915908813477,
+    "channel": 0
+   },
+   "draw_note": "A_real_michaels_clip30.png: A real cruise \u00b7 michaels/michaels_FLY124 sample_00030 A_real_michaels_clip30, 8.0 s, mic 0, 0-8 kHz (-25 to 24 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 1.41, scv2-real-R4 1.22, scv2-hard 3.61, hppnet-real-best 0.73 rev/s. WHY: Michael FLY124, cruise share 100% (the split's maximum, shared by 7 FLY124 clips); rank 3 of those by rotor-mean peak-to-peak, 4.9 rev/s about a 80 rev/s mean \u2014 the most MOVING cruise Michael has"
+  },
+  {
+   "figure": "A_real_michaels_clip34.png",
+   "category": "A",
+   "key": "A_real_michaels_clip34",
+   "rig": "michaels",
+   "rig_split_group": "michaels",
+   "why": "Michael FLY124, cruise share 100% (the split's maximum, shared by 7 FLY124 clips); rank 2 of those by rotor-mean peak-to-peak, 7.4 rev/s about a 80 rev/s mean \u2014 the most MOVING cruise Michael has",
+   "pit_mae": {
+    "hppnet-real-best": 0.987194836139679,
+    "hppnet-easy": 2.8013193607330322,
+    "scv2-real-R4": 1.8067903518676758,
+    "scv2-hard": 4.270569801330566
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "frozen real split",
+    "split": "dload:DREGON-LM-V4-michaels-valid-full",
+    "split_version": "9604f3ffc2c9",
+    "clip_index": 34,
+    "sample_id": "sample_00034",
+    "recording_id": "michaels_FLY124",
+    "cruise_share": 1.0,
+    "mean_rotor_ptp_rev_s": 7.418968200683594,
+    "channel": 0
+   },
+   "draw_note": "A_real_michaels_clip34.png: A real cruise \u00b7 michaels/michaels_FLY124 sample_00034 A_real_michaels_clip34, 8.0 s, mic 0, 0-8 kHz (-23 to 25 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.80, scv2-real-R4 1.81, scv2-hard 4.27, hppnet-real-best 0.99 rev/s. WHY: Michael FLY124, cruise share 100% (the split's maximum, shared by 7 FLY124 clips); rank 2 of those by rotor-mean peak-to-peak, 7.4 rev/s about a 80 rev/s mean \u2014 the most MOVING cruise Michael has"
+  },
+  {
+   "figure": "B_matched_dregon_clip02.png",
+   "category": "B",
+   "key": "B_matched_dregon_clip02",
+   "rig": "dregon",
+   "rig_split_group": "dregon",
+   "why": "the dregon rig's FITTED model driven by real clip 2's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone",
+   "pit_mae": {
+    "hppnet-real-best": 2.023634195327759,
+    "hppnet-easy": 2.4736719131469727,
+    "scv2-real-R4": 3.3149218559265137,
+    "scv2-hard": 1.6644072532653809
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "fitted rig render on a real RPS track",
+    "rps_from": {
+     "split": "dload:DREGON-LM-V4-michaels-valid-full",
+     "clip_index": 2,
+     "sample_id": "sample_00002",
+     "recording_id": "free-flight_speech-low_room1"
+    },
+    "rig_fit": {
+     "rig": "dregon",
+     "fit": "results/S2/dregon_room2_cruise_refined.json",
+     "fit_sha256": "be37e1362b754caf3b661dac9b83869553e315d5a0d5dd21ec848e3936325ede",
+     "anchor_clip": "free-flight_nosource_room2_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:0",
+     "dynamics_seed": [
+      20260915,
+      1,
+      0
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 8.756064414978027,
+     "amp_rps_exponent_floor": 0.0,
+     "n_harmonics": 109,
+     "entry_sha256": "16ac84f10a6aad4dbf600ecbf42914859625d3c9821460083bdc8b231060b8c9"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0004",
+     "render_seed": [
+      20260915,
+      200,
+      4
+     ],
+     "wav_sha256": "2e6c479d3ef026d6e43883fa3d424be21c55e31cab7eef11e47c568c99c69fd1",
+     "peak": 1.0021438598632812,
+     "rms_mic0": 0.13844795525074005,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "B_matched_dregon_clip02.png: B matched-RPS \u00b7 dregon fit/dregon fit on free-flight_speech-low_room1 sample_00002 RPS B_matched_dregon_clip02, 8.0 s, mic 0, 0-8 kHz (-22 to 31 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.47, scv2-real-R4 3.31, scv2-hard 1.66, hppnet-real-best 2.02 rev/s. WHY: the dregon rig's FITTED model driven by real clip 2's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone"
+  },
+  {
+   "figure": "B_matched_dregon_clip09.png",
+   "category": "B",
+   "key": "B_matched_dregon_clip09",
+   "rig": "dregon",
+   "rig_split_group": "dregon",
+   "why": "the dregon rig's FITTED model driven by real clip 9's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone",
+   "pit_mae": {
+    "hppnet-real-best": 2.5828099250793457,
+    "hppnet-easy": 2.7701756954193115,
+    "scv2-real-R4": 3.635629177093506,
+    "scv2-hard": 1.8716787099838257
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "fitted rig render on a real RPS track",
+    "rps_from": {
+     "split": "dload:DREGON-LM-V4-michaels-valid-full",
+     "clip_index": 9,
+     "sample_id": "sample_00009",
+     "recording_id": "free-flight_whitenoise-low_room1"
+    },
+    "rig_fit": {
+     "rig": "dregon",
+     "fit": "results/S2/dregon_room2_cruise_refined.json",
+     "fit_sha256": "be37e1362b754caf3b661dac9b83869553e315d5a0d5dd21ec848e3936325ede",
+     "anchor_clip": "free-flight_nosource_room2_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:0",
+     "dynamics_seed": [
+      20260915,
+      1,
+      0
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 8.756064414978027,
+     "amp_rps_exponent_floor": 0.0,
+     "n_harmonics": 109,
+     "entry_sha256": "16ac84f10a6aad4dbf600ecbf42914859625d3c9821460083bdc8b231060b8c9"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0005",
+     "render_seed": [
+      20260915,
+      200,
+      5
+     ],
+     "wav_sha256": "594d232de8db1530c502240a76de34dd49d53a796f244dc7c1076cf9d5a29e7d",
+     "peak": 0.9115712642669678,
+     "rms_mic0": 0.09294842928647995,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "B_matched_dregon_clip09.png: B matched-RPS \u00b7 dregon fit/dregon fit on free-flight_whitenoise-low_room1 sample_00009 RPS B_matched_dregon_clip09, 8.0 s, mic 0, 0-8 kHz (-22 to 27 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.77, scv2-real-R4 3.64, scv2-hard 1.87, hppnet-real-best 2.58 rev/s. WHY: the dregon rig's FITTED model driven by real clip 9's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone"
+  },
+  {
+   "figure": "B_matched_dregon_clip20.png",
+   "category": "B",
+   "key": "B_matched_dregon_clip20",
+   "rig": "dregon",
+   "rig_split_group": "dregon",
+   "why": "the dregon rig's FITTED model driven by real clip 20's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone",
+   "pit_mae": {
+    "hppnet-real-best": 2.5262703895568848,
+    "hppnet-easy": 2.749638795852661,
+    "scv2-real-R4": 3.0672528743743896,
+    "scv2-hard": 1.5543335676193237
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "fitted rig render on a real RPS track",
+    "rps_from": {
+     "split": "dload:DREGON-LM-V4-michaels-valid-full",
+     "clip_index": 20,
+     "sample_id": "sample_00020",
+     "recording_id": "free-flight_nosource_room1"
+    },
+    "rig_fit": {
+     "rig": "dregon",
+     "fit": "results/S2/dregon_room2_cruise_refined.json",
+     "fit_sha256": "be37e1362b754caf3b661dac9b83869553e315d5a0d5dd21ec848e3936325ede",
+     "anchor_clip": "free-flight_nosource_room2_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:0",
+     "dynamics_seed": [
+      20260915,
+      1,
+      0
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 8.756064414978027,
+     "amp_rps_exponent_floor": 0.0,
+     "n_harmonics": 109,
+     "entry_sha256": "16ac84f10a6aad4dbf600ecbf42914859625d3c9821460083bdc8b231060b8c9"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0003",
+     "render_seed": [
+      20260915,
+      200,
+      3
+     ],
+     "wav_sha256": "c5bf19dfb466960f2063cc20572b06a390bdd0197716b9aa3b4064988a3d37e2",
+     "peak": 0.8085532188415527,
+     "rms_mic0": 0.11269209533929825,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "B_matched_dregon_clip20.png: B matched-RPS \u00b7 dregon fit/dregon fit on free-flight_nosource_room1 sample_00020 RPS B_matched_dregon_clip20, 8.0 s, mic 0, 0-8 kHz (-21 to 29 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.75, scv2-real-R4 3.07, scv2-hard 1.55, hppnet-real-best 2.53 rev/s. WHY: the dregon rig's FITTED model driven by real clip 20's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone"
+  },
+  {
+   "figure": "B_matched_michaels_clip27.png",
+   "category": "B",
+   "key": "B_matched_michaels_clip27",
+   "rig": "michaels",
+   "rig_split_group": "michaels",
+   "why": "the michaels rig's FITTED model driven by real clip 27's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone",
+   "pit_mae": {
+    "hppnet-real-best": 1.7554398775100708,
+    "hppnet-easy": 2.1697189807891846,
+    "scv2-real-R4": 2.070047378540039,
+    "scv2-hard": 3.785233974456787
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "fitted rig render on a real RPS track",
+    "rps_from": {
+     "split": "dload:DREGON-LM-V4-michaels-valid-full",
+     "clip_index": 27,
+     "sample_id": "sample_00027",
+     "recording_id": "michaels_FLY124"
+    },
+    "rig_fit": {
+     "rig": "michaels",
+     "fit": "results/S2/cruise_8clip.json",
+     "fit_sha256": "65d1794accf6d00a3903236871164f1b0da19e4c7d219463fe280ede83627510",
+     "anchor_clip": "fly125_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:1",
+     "dynamics_seed": [
+      20260915,
+      1,
+      1
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 7.502281188964844,
+     "amp_rps_exponent_floor": 6.792,
+     "n_harmonics": 111,
+     "entry_sha256": "419277ad81437c9f8d403368c14c57ffc2020574d7f9a4281fb3b6eff224d17e"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0000",
+     "render_seed": [
+      20260915,
+      200,
+      0
+     ],
+     "wav_sha256": "b869d2e3453aacf71ce08a0ddca25a44883162d0d9692645d68fdb7a80ed4769",
+     "peak": 0.7802848219871521,
+     "rms_mic0": 0.08684767037630081,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "B_matched_michaels_clip27.png: B matched-RPS \u00b7 michaels fit/michaels fit on michaels_FLY124 sample_00027 RPS B_matched_michaels_clip27, 8.0 s, mic 0, 0-8 kHz (-14 to 27 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.17, scv2-real-R4 2.07, scv2-hard 3.79, hppnet-real-best 1.76 rev/s. WHY: the michaels rig's FITTED model driven by real clip 27's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone"
+  },
+  {
+   "figure": "B_matched_michaels_clip30.png",
+   "category": "B",
+   "key": "B_matched_michaels_clip30",
+   "rig": "michaels",
+   "rig_split_group": "michaels",
+   "why": "the michaels rig's FITTED model driven by real clip 30's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone",
+   "pit_mae": {
+    "hppnet-real-best": 1.2364075183868408,
+    "hppnet-easy": 0.7437629699707031,
+    "scv2-real-R4": 1.091986894607544,
+    "scv2-hard": 3.390659809112549
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "fitted rig render on a real RPS track",
+    "rps_from": {
+     "split": "dload:DREGON-LM-V4-michaels-valid-full",
+     "clip_index": 30,
+     "sample_id": "sample_00030",
+     "recording_id": "michaels_FLY124"
+    },
+    "rig_fit": {
+     "rig": "michaels",
+     "fit": "results/S2/cruise_8clip.json",
+     "fit_sha256": "65d1794accf6d00a3903236871164f1b0da19e4c7d219463fe280ede83627510",
+     "anchor_clip": "fly125_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:1",
+     "dynamics_seed": [
+      20260915,
+      1,
+      1
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 7.502281188964844,
+     "amp_rps_exponent_floor": 6.792,
+     "n_harmonics": 111,
+     "entry_sha256": "419277ad81437c9f8d403368c14c57ffc2020574d7f9a4281fb3b6eff224d17e"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0002",
+     "render_seed": [
+      20260915,
+      200,
+      2
+     ],
+     "wav_sha256": "1a975f589028f45ec5c7447031c90fc4e72c9d0d62792165b239714fce68fc63",
+     "peak": 0.6899038553237915,
+     "rms_mic0": 0.08581162989139557,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "B_matched_michaels_clip30.png: B matched-RPS \u00b7 michaels fit/michaels fit on michaels_FLY124 sample_00030 RPS B_matched_michaels_clip30, 8.0 s, mic 0, 0-8 kHz (-14 to 27 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 0.74, scv2-real-R4 1.09, scv2-hard 3.39, hppnet-real-best 1.24 rev/s. WHY: the michaels rig's FITTED model driven by real clip 30's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone"
+  },
+  {
+   "figure": "B_matched_michaels_clip34.png",
+   "category": "B",
+   "key": "B_matched_michaels_clip34",
+   "rig": "michaels",
+   "rig_split_group": "michaels",
+   "why": "the michaels rig's FITTED model driven by real clip 34's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone",
+   "pit_mae": {
+    "hppnet-real-best": 1.3827905654907227,
+    "hppnet-easy": 1.578608512878418,
+    "scv2-real-R4": 1.448204755783081,
+    "scv2-hard": 3.875596046447754
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "fitted rig render on a real RPS track",
+    "rps_from": {
+     "split": "dload:DREGON-LM-V4-michaels-valid-full",
+     "clip_index": 34,
+     "sample_id": "sample_00034",
+     "recording_id": "michaels_FLY124"
+    },
+    "rig_fit": {
+     "rig": "michaels",
+     "fit": "results/S2/cruise_8clip.json",
+     "fit_sha256": "65d1794accf6d00a3903236871164f1b0da19e4c7d219463fe280ede83627510",
+     "anchor_clip": "fly125_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:1",
+     "dynamics_seed": [
+      20260915,
+      1,
+      1
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 7.502281188964844,
+     "amp_rps_exponent_floor": 6.792,
+     "n_harmonics": 111,
+     "entry_sha256": "419277ad81437c9f8d403368c14c57ffc2020574d7f9a4281fb3b6eff224d17e"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0001",
+     "render_seed": [
+      20260915,
+      200,
+      1
+     ],
+     "wav_sha256": "0de9c1e396935e9f9eb2f71c312d40b69a933792baf551bcc83f88d396c702c9",
+     "peak": 0.7338181734085083,
+     "rms_mic0": 0.08219987154006958,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "B_matched_michaels_clip34.png: B matched-RPS \u00b7 michaels fit/michaels fit on michaels_FLY124 sample_00034 RPS B_matched_michaels_clip34, 8.0 s, mic 0, 0-8 kHz (-15 to 27 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 1.58, scv2-real-R4 1.45, scv2-hard 3.88, hppnet-real-best 1.38 rev/s. WHY: the michaels rig's FITTED model driven by real clip 34's own RPS track: same labels as the A clip above it, synthetic audio, so the A-to-B gap is audio realism alone"
+  },
+  {
+   "figure": "C_stream_dregonfit_t3.png",
+   "category": "C",
+   "key": "C_stream_dregonfit_t3",
+   "rig": "dregon",
+   "rig_split_group": "dregon",
+   "why": "stream trajectory 3 (seed [20260915, 100, 3]) rendered from the dregon FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution",
+   "pit_mae": {
+    "hppnet-real-best": 2.537208080291748,
+    "hppnet-easy": 2.8964133262634277,
+    "scv2-real-R4": 3.385119676589966,
+    "scv2-hard": 1.6663029193878174
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 3,
+    "trajectory_seed": [
+     20260915,
+     100,
+     3
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_03.npz",
+    "trajectory_sha256": "27f4288f1a765c30a853db2d6029644c2de2eecbb488e6201ce31ea2efac4bb9",
+    "hover_rev_s": 88.18613158592474,
+    "speed_range_rev_s": [
+     69.59543880965636,
+     89.28056360324153
+    ],
+    "rig_fit": {
+     "rig": "dregon",
+     "fit": "results/S2/dregon_room2_cruise_refined.json",
+     "fit_sha256": "be37e1362b754caf3b661dac9b83869553e315d5a0d5dd21ec848e3936325ede",
+     "anchor_clip": "free-flight_nosource_room2_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:0",
+     "dynamics_seed": [
+      20260915,
+      1,
+      0
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 8.756064414978027,
+     "amp_rps_exponent_floor": 0.0,
+     "n_harmonics": 109,
+     "entry_sha256": "16ac84f10a6aad4dbf600ecbf42914859625d3c9821460083bdc8b231060b8c9"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0012",
+     "render_seed": [
+      20260915,
+      200,
+      12
+     ],
+     "wav_sha256": "97680b9eccebf51512b674f01d5d37f509c2fe022357f2e8c23e2012fac746e7",
+     "peak": 0.9863983392715454,
+     "rms_mic0": 0.11305852979421616,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "C_stream_dregonfit_t3.png: C stream traj \u00b7 dregon fit/trajectory 3 \u00b7 dregon fitted rig C_stream_dregonfit_t3, 8.0 s, mic 0, 0-8 kHz (-19 to 29 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.90, scv2-real-R4 3.39, scv2-hard 1.67, hppnet-real-best 2.54 rev/s. WHY: stream trajectory 3 (seed [20260915, 100, 3]) rendered from the dregon FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution"
+  },
+  {
+   "figure": "C_stream_dregonfit_t4.png",
+   "category": "C",
+   "key": "C_stream_dregonfit_t4",
+   "rig": "dregon",
+   "rig_split_group": "dregon",
+   "why": "stream trajectory 4 (seed [20260915, 100, 4]) rendered from the dregon FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution",
+   "pit_mae": {
+    "hppnet-real-best": 44.35261917114258,
+    "hppnet-easy": 2.9312503337860107,
+    "scv2-real-R4": 3.608382225036621,
+    "scv2-hard": 1.4178329706192017
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 4,
+    "trajectory_seed": [
+     20260915,
+     100,
+     4
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_04.npz",
+    "trajectory_sha256": "8082e4b1320fed78de58849492a29007f8ae5fbf2363ba51733e55fc5a091684",
+    "hover_rev_s": 45.43686071365302,
+    "speed_range_rev_s": [
+     39.219846774200555,
+     55.74460276122661
+    ],
+    "rig_fit": {
+     "rig": "dregon",
+     "fit": "results/S2/dregon_room2_cruise_refined.json",
+     "fit_sha256": "be37e1362b754caf3b661dac9b83869553e315d5a0d5dd21ec848e3936325ede",
+     "anchor_clip": "free-flight_nosource_room2_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:0",
+     "dynamics_seed": [
+      20260915,
+      1,
+      0
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 8.756064414978027,
+     "amp_rps_exponent_floor": 0.0,
+     "n_harmonics": 109,
+     "entry_sha256": "16ac84f10a6aad4dbf600ecbf42914859625d3c9821460083bdc8b231060b8c9"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0014",
+     "render_seed": [
+      20260915,
+      200,
+      14
+     ],
+     "wav_sha256": "0c58340b2817a942e3d3ddc4b6a9b2e0f1f1fa955ca8e5f9fcd30cdd4acc9daa",
+     "peak": 0.6893792152404785,
+     "rms_mic0": 0.11220847815275192,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "C_stream_dregonfit_t4.png: C stream traj \u00b7 dregon fit/trajectory 4 \u00b7 dregon fitted rig C_stream_dregonfit_t4, 8.0 s, mic 0, 0-8 kHz (-25 to 29 dB); regimes {'standby': 212, 'cruise': 39}; mic-0 PIT MAE hppnet-easy 2.93, scv2-real-R4 3.61, scv2-hard 1.42, hppnet-real-best 44.35 rev/s. WHY: stream trajectory 4 (seed [20260915, 100, 4]) rendered from the dregon FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution"
+  },
+  {
+   "figure": "C_stream_dregonfit_t5.png",
+   "category": "C",
+   "key": "C_stream_dregonfit_t5",
+   "rig": "dregon",
+   "rig_split_group": "dregon",
+   "why": "stream trajectory 5 (seed [20260915, 100, 5]) rendered from the dregon FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution",
+   "pit_mae": {
+    "hppnet-real-best": 2.2130119800567627,
+    "hppnet-easy": 1.4209039211273193,
+    "scv2-real-R4": 0.668913722038269,
+    "scv2-hard": 1.3026604652404785
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 5,
+    "trajectory_seed": [
+     20260915,
+     100,
+     5
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_05.npz",
+    "trajectory_sha256": "79e1e6b1b975f9c1a341c7c6d7de66c2053ff76e29bf627d4946d115ac78518a",
+    "hover_rev_s": 69.87260461706659,
+    "speed_range_rev_s": [
+     61.38093191132082,
+     72.70873525538192
+    ],
+    "rig_fit": {
+     "rig": "dregon",
+     "fit": "results/S2/dregon_room2_cruise_refined.json",
+     "fit_sha256": "be37e1362b754caf3b661dac9b83869553e315d5a0d5dd21ec848e3936325ede",
+     "anchor_clip": "free-flight_nosource_room2_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:0",
+     "dynamics_seed": [
+      20260915,
+      1,
+      0
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 8.756064414978027,
+     "amp_rps_exponent_floor": 0.0,
+     "n_harmonics": 109,
+     "entry_sha256": "16ac84f10a6aad4dbf600ecbf42914859625d3c9821460083bdc8b231060b8c9"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0016",
+     "render_seed": [
+      20260915,
+      200,
+      16
+     ],
+     "wav_sha256": "f70b3bda6519fa6cd3005e29ac7bb018e54485a55ce14c36e85833efc1c63ff3",
+     "peak": 0.9001004695892334,
+     "rms_mic0": 0.12482550740242004,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "C_stream_dregonfit_t5.png: C stream traj \u00b7 dregon fit/trajectory 5 \u00b7 dregon fitted rig C_stream_dregonfit_t5, 8.0 s, mic 0, 0-8 kHz (-24 to 30 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 1.42, scv2-real-R4 0.67, scv2-hard 1.30, hppnet-real-best 2.21 rev/s. WHY: stream trajectory 5 (seed [20260915, 100, 5]) rendered from the dregon FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution"
+  },
+  {
+   "figure": "C_stream_michaelsfit_t0.png",
+   "category": "C",
+   "key": "C_stream_michaelsfit_t0",
+   "rig": "michaels",
+   "rig_split_group": "michaels",
+   "why": "stream trajectory 0 (seed [20260915, 100, 0]) rendered from the michaels FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution",
+   "pit_mae": {
+    "hppnet-real-best": 6.906336784362793,
+    "hppnet-easy": 9.280134201049805,
+    "scv2-real-R4": 21.864967346191406,
+    "scv2-hard": 1.2658427953720093
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 0,
+    "trajectory_seed": [
+     20260915,
+     100,
+     0
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_00.npz",
+    "trajectory_sha256": "374c9b686214c6bd4f4f0293b42e84ce9bb43480932b3d641e8189e43df93a81",
+    "hover_rev_s": 62.91190348692691,
+    "speed_range_rev_s": [
+     23.961750117647853,
+     62.25245069212826
+    ],
+    "rig_fit": {
+     "rig": "michaels",
+     "fit": "results/S2/cruise_8clip.json",
+     "fit_sha256": "65d1794accf6d00a3903236871164f1b0da19e4c7d219463fe280ede83627510",
+     "anchor_clip": "fly125_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:1",
+     "dynamics_seed": [
+      20260915,
+      1,
+      1
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 7.502281188964844,
+     "amp_rps_exponent_floor": 6.792,
+     "n_harmonics": 111,
+     "entry_sha256": "419277ad81437c9f8d403368c14c57ffc2020574d7f9a4281fb3b6eff224d17e"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0006",
+     "render_seed": [
+      20260915,
+      200,
+      6
+     ],
+     "wav_sha256": "6df236f5440badf5730a35ae2821af966396461ad2e4231d1feac35206a80b97",
+     "peak": 1.7145479917526245,
+     "rms_mic0": 0.08456192165613174,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "C_stream_michaelsfit_t0.png: C stream traj \u00b7 michaels fit/trajectory 0 \u00b7 michaels fitted rig C_stream_michaelsfit_t0, 8.0 s, mic 0, 0-8 kHz (-32 to 24 dB); regimes {'standby': 197, 'cruise': 54}; mic-0 PIT MAE hppnet-easy 9.28, scv2-real-R4 21.86, scv2-hard 1.27, hppnet-real-best 6.91 rev/s. WHY: stream trajectory 0 (seed [20260915, 100, 0]) rendered from the michaels FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution"
+  },
+  {
+   "figure": "C_stream_michaelsfit_t1.png",
+   "category": "C",
+   "key": "C_stream_michaelsfit_t1",
+   "rig": "michaels",
+   "rig_split_group": "michaels",
+   "why": "stream trajectory 1 (seed [20260915, 100, 1]) rendered from the michaels FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution",
+   "pit_mae": {
+    "hppnet-real-best": 1.4019505977630615,
+    "hppnet-easy": 0.8855451345443726,
+    "scv2-real-R4": 1.3443336486816406,
+    "scv2-hard": 1.3271760940551758
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 1,
+    "trajectory_seed": [
+     20260915,
+     100,
+     1
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_01.npz",
+    "trajectory_sha256": "03b7d308124b61d36132fdcc89019b00ffcdc0e657f452352694344a37f9ddc9",
+    "hover_rev_s": 62.907559683568856,
+    "speed_range_rev_s": [
+     50.22816612718656,
+     64.71265077799409
+    ],
+    "rig_fit": {
+     "rig": "michaels",
+     "fit": "results/S2/cruise_8clip.json",
+     "fit_sha256": "65d1794accf6d00a3903236871164f1b0da19e4c7d219463fe280ede83627510",
+     "anchor_clip": "fly125_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:1",
+     "dynamics_seed": [
+      20260915,
+      1,
+      1
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 7.502281188964844,
+     "amp_rps_exponent_floor": 6.792,
+     "n_harmonics": 111,
+     "entry_sha256": "419277ad81437c9f8d403368c14c57ffc2020574d7f9a4281fb3b6eff224d17e"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0008",
+     "render_seed": [
+      20260915,
+      200,
+      8
+     ],
+     "wav_sha256": "2f8086427a4d114e192e49a4434ffcff2613d24033964d062e170da0657b3ef7",
+     "peak": 0.767852783203125,
+     "rms_mic0": 0.07452137768268585,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "C_stream_michaelsfit_t1.png: C stream traj \u00b7 michaels fit/trajectory 1 \u00b7 michaels fitted rig C_stream_michaelsfit_t1, 8.0 s, mic 0, 0-8 kHz (-19 to 25 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 0.89, scv2-real-R4 1.34, scv2-hard 1.33, hppnet-real-best 1.40 rev/s. WHY: stream trajectory 1 (seed [20260915, 100, 1]) rendered from the michaels FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution"
+  },
+  {
+   "figure": "C_stream_michaelsfit_t2.png",
+   "category": "C",
+   "key": "C_stream_michaelsfit_t2",
+   "rig": "michaels",
+   "rig_split_group": "michaels",
+   "why": "stream trajectory 2 (seed [20260915, 100, 2]) rendered from the michaels FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution",
+   "pit_mae": {
+    "hppnet-real-best": 1.5697872638702393,
+    "hppnet-easy": 0.47355917096138,
+    "scv2-real-R4": 1.4741122722625732,
+    "scv2-hard": 1.0652210712432861
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 2,
+    "trajectory_seed": [
+     20260915,
+     100,
+     2
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_02.npz",
+    "trajectory_sha256": "2267d58e9e1bb278d3bd76f2d43d81928d8717c0c26dd851208c9cfa14624f27",
+    "hover_rev_s": 80.48390307578741,
+    "speed_range_rev_s": [
+     69.30578963408799,
+     84.6128032825853
+    ],
+    "rig_fit": {
+     "rig": "michaels",
+     "fit": "results/S2/cruise_8clip.json",
+     "fit_sha256": "65d1794accf6d00a3903236871164f1b0da19e4c7d219463fe280ede83627510",
+     "anchor_clip": "fly125_cruise_00",
+     "dynamics_from": "conf/online_mix/rig_fitted_5050.yaml:1",
+     "dynamics_seed": [
+      20260915,
+      1,
+      1
+     ],
+     "comb_sized_for_rps": 32.4,
+     "exponents_clipped": [
+      "floor_exp"
+     ],
+     "amp_rps_exponent": 7.502281188964844,
+     "amp_rps_exponent_floor": 6.792,
+     "n_harmonics": 111,
+     "entry_sha256": "419277ad81437c9f8d403368c14c57ffc2020574d7f9a4281fb3b6eff224d17e"
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0010",
+     "render_seed": [
+      20260915,
+      200,
+      10
+     ],
+     "wav_sha256": "52def0cc8f66c54760a06020051cea5885b77f1d24adf66ba550db59671ed91f",
+     "peak": 0.9398150444030762,
+     "rms_mic0": 0.08597233146429062,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "C_stream_michaelsfit_t2.png: C stream traj \u00b7 michaels fit/trajectory 2 \u00b7 michaels fitted rig C_stream_michaelsfit_t2, 8.0 s, mic 0, 0-8 kHz (-16 to 27 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 0.47, scv2-real-R4 1.47, scv2-hard 1.07, hppnet-real-best 1.57 rev/s. WHY: stream trajectory 2 (seed [20260915, 100, 2]) rendered from the michaels FITTED rig: new labels from the training generator, a rig the arms were fitted against, so the B-to-C gap is the trajectory distribution"
+  },
+  {
+   "figure": "D_stream_hard_t0.png",
+   "category": "D",
+   "key": "D_stream_hard_t0",
+   "rig": "hard",
+   "rig_split_group": "michaels",
+   "why": "stream trajectory 0 again, rendered from hard-cloud entry 363 at mixing coordinate t=0.481 (nearer the michaels anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution",
+   "pit_mae": {
+    "hppnet-real-best": 23.991697311401367,
+    "hppnet-easy": 3.2610621452331543,
+    "scv2-real-R4": 18.12867546081543,
+    "scv2-hard": 0.9293369650840759
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 0,
+    "trajectory_seed": [
+     20260915,
+     100,
+     0
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_00.npz",
+    "trajectory_sha256": "374c9b686214c6bd4f4f0293b42e84ce9bb43480932b3d641e8189e43df93a81",
+    "hover_rev_s": 62.91190348692691,
+    "speed_range_rev_s": [
+     23.961750117647853,
+     62.25245069212826
+    ],
+    "rig_source": {
+     "bank": "data/rig_banks/rig_hard_n2048.json",
+     "bank_sha256": "b0a977a0d5eb9832b2ddabcbe77fa6b14d5772876eefe79a3d5e0870111209a6",
+     "entries_sha256": "00e9d9e281534f716b3ad9d1c1bdb744ee4e4771cab543b15ff733564c0778fa",
+     "entry_index": 363,
+     "mixing_coordinate_t": 0.48065349189955187,
+     "path_anchor_order": [
+      "results/S2/cruise_8clip.json:fly125_cruise_00",
+      "results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00"
+     ],
+     "dynamics_donor_anchor": "results/S2/cruise_8clip.json:fly125_cruise_00",
+     "builder_substream": 363,
+     "choice_seed": [
+      20260915,
+      300,
+      0
+     ],
+     "choice_rule": "6 distinct entries, uniform without replacement",
+     "amp_rps_exponent": 14.111,
+     "amp_rps_exponent_floor": 0.0
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0007",
+     "render_seed": [
+      20260915,
+      200,
+      7
+     ],
+     "wav_sha256": "441ada17469ce94fd3dd1e28927a14a04cc81d92815ab6a5a9d3383070d4a866",
+     "peak": 1.3871314525604248,
+     "rms_mic0": 0.13621723651885986,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "D_stream_hard_t0.png: D stream traj \u00b7 hard cloud/trajectory 0 \u00b7 hard entry 363 (t=0.481) D_stream_hard_t0, 8.0 s, mic 0, 0-8 kHz (-21 to 27 dB); regimes {'standby': 197, 'cruise': 54}; mic-0 PIT MAE hppnet-easy 3.26, scv2-real-R4 18.13, scv2-hard 0.93, hppnet-real-best 23.99 rev/s. WHY: stream trajectory 0 again, rendered from hard-cloud entry 363 at mixing coordinate t=0.481 (nearer the michaels anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution"
+  },
+  {
+   "figure": "D_stream_hard_t1.png",
+   "category": "D",
+   "key": "D_stream_hard_t1",
+   "rig": "hard",
+   "rig_split_group": "michaels",
+   "why": "stream trajectory 1 again, rendered from hard-cloud entry 52 at mixing coordinate t=0.965 (nearer the dregon anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution",
+   "pit_mae": {
+    "hppnet-real-best": 4.316587448120117,
+    "hppnet-easy": 2.016396999359131,
+    "scv2-real-R4": 9.030004501342773,
+    "scv2-hard": 1.6958422660827637
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 1,
+    "trajectory_seed": [
+     20260915,
+     100,
+     1
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_01.npz",
+    "trajectory_sha256": "03b7d308124b61d36132fdcc89019b00ffcdc0e657f452352694344a37f9ddc9",
+    "hover_rev_s": 62.907559683568856,
+    "speed_range_rev_s": [
+     50.22816612718656,
+     64.71265077799409
+    ],
+    "rig_source": {
+     "bank": "data/rig_banks/rig_hard_n2048.json",
+     "bank_sha256": "b0a977a0d5eb9832b2ddabcbe77fa6b14d5772876eefe79a3d5e0870111209a6",
+     "entries_sha256": "00e9d9e281534f716b3ad9d1c1bdb744ee4e4771cab543b15ff733564c0778fa",
+     "entry_index": 52,
+     "mixing_coordinate_t": 0.9647142798615963,
+     "path_anchor_order": [
+      "results/S2/cruise_8clip.json:fly125_cruise_00",
+      "results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00"
+     ],
+     "dynamics_donor_anchor": "results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00",
+     "builder_substream": 52,
+     "choice_seed": [
+      20260915,
+      300,
+      0
+     ],
+     "choice_rule": "6 distinct entries, uniform without replacement",
+     "amp_rps_exponent": 4.398,
+     "amp_rps_exponent_floor": 0.40788004282798657
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0009",
+     "render_seed": [
+      20260915,
+      200,
+      9
+     ],
+     "wav_sha256": "0e58fec1f6f0f2612a706f651330462dea1416f1d13edd69a0db153acda53490",
+     "peak": 0.9261693358421326,
+     "rms_mic0": 0.09168530255556107,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "D_stream_hard_t1.png: D stream traj \u00b7 hard cloud/trajectory 1 \u00b7 hard entry 52 (t=0.965) D_stream_hard_t1, 8.0 s, mic 0, 0-8 kHz (-25 to 28 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.02, scv2-real-R4 9.03, scv2-hard 1.70, hppnet-real-best 4.32 rev/s. WHY: stream trajectory 1 again, rendered from hard-cloud entry 52 at mixing coordinate t=0.965 (nearer the dregon anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution"
+  },
+  {
+   "figure": "D_stream_hard_t2.png",
+   "category": "D",
+   "key": "D_stream_hard_t2",
+   "rig": "hard",
+   "rig_split_group": "michaels",
+   "why": "stream trajectory 2 again, rendered from hard-cloud entry 680 at mixing coordinate t=0.851 (nearer the dregon anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution",
+   "pit_mae": {
+    "hppnet-real-best": 3.4982664585113525,
+    "hppnet-easy": 1.256091833114624,
+    "scv2-real-R4": 1.9647938013076782,
+    "scv2-hard": 1.0038342475891113
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 2,
+    "trajectory_seed": [
+     20260915,
+     100,
+     2
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_02.npz",
+    "trajectory_sha256": "2267d58e9e1bb278d3bd76f2d43d81928d8717c0c26dd851208c9cfa14624f27",
+    "hover_rev_s": 80.48390307578741,
+    "speed_range_rev_s": [
+     69.30578963408799,
+     84.6128032825853
+    ],
+    "rig_source": {
+     "bank": "data/rig_banks/rig_hard_n2048.json",
+     "bank_sha256": "b0a977a0d5eb9832b2ddabcbe77fa6b14d5772876eefe79a3d5e0870111209a6",
+     "entries_sha256": "00e9d9e281534f716b3ad9d1c1bdb744ee4e4771cab543b15ff733564c0778fa",
+     "entry_index": 680,
+     "mixing_coordinate_t": 0.8506263182895161,
+     "path_anchor_order": [
+      "results/S2/cruise_8clip.json:fly125_cruise_00",
+      "results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00"
+     ],
+     "dynamics_donor_anchor": "results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00",
+     "builder_substream": 680,
+     "choice_seed": [
+      20260915,
+      300,
+      0
+     ],
+     "choice_rule": "6 distinct entries, uniform without replacement",
+     "amp_rps_exponent": 6.774961402075701,
+     "amp_rps_exponent_floor": 0.0
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0011",
+     "render_seed": [
+      20260915,
+      200,
+      11
+     ],
+     "wav_sha256": "eb50b30f4e18cc585471925c06cc8075ffc8c6353fcf5eeffa05151798810997",
+     "peak": 1.2921545505523682,
+     "rms_mic0": 0.1315063238143921,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "D_stream_hard_t2.png: D stream traj \u00b7 hard cloud/trajectory 2 \u00b7 hard entry 680 (t=0.851) D_stream_hard_t2, 8.0 s, mic 0, 0-8 kHz (-18 to 31 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 1.26, scv2-real-R4 1.96, scv2-hard 1.00, hppnet-real-best 3.50 rev/s. WHY: stream trajectory 2 again, rendered from hard-cloud entry 680 at mixing coordinate t=0.851 (nearer the dregon anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution"
+  },
+  {
+   "figure": "D_stream_hard_t3.png",
+   "category": "D",
+   "key": "D_stream_hard_t3",
+   "rig": "hard",
+   "rig_split_group": "dregon",
+   "why": "stream trajectory 3 again, rendered from hard-cloud entry 582 at mixing coordinate t=0.465 (nearer the michaels anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution",
+   "pit_mae": {
+    "hppnet-real-best": 2.2311840057373047,
+    "hppnet-easy": 2.6734838485717773,
+    "scv2-real-R4": 3.659374952316284,
+    "scv2-hard": 1.815767765045166
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 3,
+    "trajectory_seed": [
+     20260915,
+     100,
+     3
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_03.npz",
+    "trajectory_sha256": "27f4288f1a765c30a853db2d6029644c2de2eecbb488e6201ce31ea2efac4bb9",
+    "hover_rev_s": 88.18613158592474,
+    "speed_range_rev_s": [
+     69.59543880965636,
+     89.28056360324153
+    ],
+    "rig_source": {
+     "bank": "data/rig_banks/rig_hard_n2048.json",
+     "bank_sha256": "b0a977a0d5eb9832b2ddabcbe77fa6b14d5772876eefe79a3d5e0870111209a6",
+     "entries_sha256": "00e9d9e281534f716b3ad9d1c1bdb744ee4e4771cab543b15ff733564c0778fa",
+     "entry_index": 582,
+     "mixing_coordinate_t": 0.4650652753333586,
+     "path_anchor_order": [
+      "results/S2/cruise_8clip.json:fly125_cruise_00",
+      "results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00"
+     ],
+     "dynamics_donor_anchor": "results/S2/cruise_8clip.json:fly125_cruise_00",
+     "builder_substream": 582,
+     "choice_seed": [
+      20260915,
+      300,
+      0
+     ],
+     "choice_rule": "6 distinct entries, uniform without replacement",
+     "amp_rps_exponent": 4.398,
+     "amp_rps_exponent_floor": 5.870312063728088
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0013",
+     "render_seed": [
+      20260915,
+      200,
+      13
+     ],
+     "wav_sha256": "822476b244fb3a57aee4b2f4365ea4403a4f395ac0b369f401e2d02bd0b532ae",
+     "peak": 0.7291536331176758,
+     "rms_mic0": 0.08823801577091217,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "D_stream_hard_t3.png: D stream traj \u00b7 hard cloud/trajectory 3 \u00b7 hard entry 582 (t=0.465) D_stream_hard_t3, 8.0 s, mic 0, 0-8 kHz (-19 to 27 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 2.67, scv2-real-R4 3.66, scv2-hard 1.82, hppnet-real-best 2.23 rev/s. WHY: stream trajectory 3 again, rendered from hard-cloud entry 582 at mixing coordinate t=0.465 (nearer the michaels anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution"
+  },
+  {
+   "figure": "D_stream_hard_t4.png",
+   "category": "D",
+   "key": "D_stream_hard_t4",
+   "rig": "hard",
+   "rig_split_group": "dregon",
+   "why": "stream trajectory 4 again, rendered from hard-cloud entry 1650 at mixing coordinate t=0.145 (nearer the michaels anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution",
+   "pit_mae": {
+    "hppnet-real-best": 44.35270309448242,
+    "hppnet-easy": 1.276944875717163,
+    "scv2-real-R4": 45.996238708496094,
+    "scv2-hard": 1.4195321798324585
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 4,
+    "trajectory_seed": [
+     20260915,
+     100,
+     4
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_04.npz",
+    "trajectory_sha256": "8082e4b1320fed78de58849492a29007f8ae5fbf2363ba51733e55fc5a091684",
+    "hover_rev_s": 45.43686071365302,
+    "speed_range_rev_s": [
+     39.219846774200555,
+     55.74460276122661
+    ],
+    "rig_source": {
+     "bank": "data/rig_banks/rig_hard_n2048.json",
+     "bank_sha256": "b0a977a0d5eb9832b2ddabcbe77fa6b14d5772876eefe79a3d5e0870111209a6",
+     "entries_sha256": "00e9d9e281534f716b3ad9d1c1bdb744ee4e4771cab543b15ff733564c0778fa",
+     "entry_index": 1650,
+     "mixing_coordinate_t": 0.1453569803036625,
+     "path_anchor_order": [
+      "results/S2/cruise_8clip.json:fly125_cruise_00",
+      "results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00"
+     ],
+     "dynamics_donor_anchor": "results/S2/cruise_8clip.json:fly125_cruise_00",
+     "builder_substream": 1651,
+     "choice_seed": [
+      20260915,
+      300,
+      0
+     ],
+     "choice_rule": "6 distinct entries, uniform without replacement",
+     "amp_rps_exponent": 4.398,
+     "amp_rps_exponent_floor": 0.0
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0015",
+     "render_seed": [
+      20260915,
+      200,
+      15
+     ],
+     "wav_sha256": "b99f9b335475b9f00f2caf25a0494c188178b6f4b5a4e64d0cf7ed358b293aa6",
+     "peak": 0.6990007758140564,
+     "rms_mic0": 0.10436799377202988,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "D_stream_hard_t4.png: D stream traj \u00b7 hard cloud/trajectory 4 \u00b7 hard entry 1650 (t=0.145) D_stream_hard_t4, 8.0 s, mic 0, 0-8 kHz (-23 to 28 dB); regimes {'standby': 212, 'cruise': 39}; mic-0 PIT MAE hppnet-easy 1.28, scv2-real-R4 46.00, scv2-hard 1.42, hppnet-real-best 44.35 rev/s. WHY: stream trajectory 4 again, rendered from hard-cloud entry 1650 at mixing coordinate t=0.145 (nearer the michaels anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution"
+  },
+  {
+   "figure": "D_stream_hard_t5.png",
+   "category": "D",
+   "key": "D_stream_hard_t5",
+   "rig": "hard",
+   "rig_split_group": "dregon",
+   "why": "stream trajectory 5 again, rendered from hard-cloud entry 979 at mixing coordinate t=0.543 (nearer the dregon anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution",
+   "pit_mae": {
+    "hppnet-real-best": 3.467383623123169,
+    "hppnet-easy": 1.4001139402389526,
+    "scv2-real-R4": 4.611156940460205,
+    "scv2-hard": 1.3220531940460205
+   },
+   "frames": 251,
+   "duration_s": 8.0,
+   "provenance": {
+    "source": "the training stream's own full_flight generator",
+    "policy": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0].rps",
+    "kind": "full_flight",
+    "generator": "data_processing.stochastic_rotor_noise.StochasticNoisePool.sample_rps -> rps_synthesis.generate_full_flight",
+    "trajectory_index": 5,
+    "trajectory_seed": [
+     20260915,
+     100,
+     5
+    ],
+    "trajectory_cache": "results/model_matrix/trajectories/traj_05.npz",
+    "trajectory_sha256": "79e1e6b1b975f9c1a341c7c6d7de66c2053ff76e29bf627d4946d115ac78518a",
+    "hover_rev_s": 69.87260461706659,
+    "speed_range_rev_s": [
+     61.38093191132082,
+     72.70873525538192
+    ],
+    "rig_source": {
+     "bank": "data/rig_banks/rig_hard_n2048.json",
+     "bank_sha256": "b0a977a0d5eb9832b2ddabcbe77fa6b14d5772876eefe79a3d5e0870111209a6",
+     "entries_sha256": "00e9d9e281534f716b3ad9d1c1bdb744ee4e4771cab543b15ff733564c0778fa",
+     "entry_index": 979,
+     "mixing_coordinate_t": 0.5425801114045758,
+     "path_anchor_order": [
+      "results/S2/cruise_8clip.json:fly125_cruise_00",
+      "results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00"
+     ],
+     "dynamics_donor_anchor": "results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00",
+     "builder_substream": 979,
+     "choice_seed": [
+      20260915,
+      300,
+      0
+     ],
+     "choice_rule": "6 distinct entries, uniform without replacement",
+     "amp_rps_exponent": 6.441514113326579,
+     "amp_rps_exponent_floor": 6.792
+    },
+    "render": {
+     "sample": "results/model_matrix/renders/clips/sample_0017",
+     "render_seed": [
+      20260915,
+      200,
+      17
+     ],
+     "wav_sha256": "a298726138f51562710db5f3c3a1d0e7a0b3e59813736050123a043d5c40db1b",
+     "peak": 1.463431477546692,
+     "rms_mic0": 0.05087897926568985,
+     "n_mics": 8,
+     "sample_rate": 16000,
+     "n_fft": 2048,
+     "hop_length": 512,
+     "duration_s": 8.0,
+     "level_mode": "window",
+     "normalize_rms": 0.1,
+     "speech_or_interferer": "none: rotor noise only",
+     "render_path": "StochasticNoisePool.render (bank branch) -> stochastic_rotor_noise.synthesize",
+     "stream_source": "conf/online_mix/rig_easy_5050.yaml:sources.noise[0]"
+    }
+   },
+   "draw_note": "D_stream_hard_t5.png: D stream traj \u00b7 hard cloud/trajectory 5 \u00b7 hard entry 979 (t=0.543) D_stream_hard_t5, 8.0 s, mic 0, 0-8 kHz (-27 to 22 dB); regimes {'cruise': 251}; mic-0 PIT MAE hppnet-easy 1.40, scv2-real-R4 4.61, scv2-hard 1.32, hppnet-real-best 3.47 rev/s. WHY: stream trajectory 5 again, rendered from hard-cloud entry 979 at mixing coordinate t=0.543 (nearer the dregon anchor for its dynamics). The C twin above holds the trajectory fixed, so the C-to-D gap is the rig family \u2014 and D is the hard arm's own training distribution"
+  }
+ ]
+}
