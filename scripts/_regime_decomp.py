@@ -50,7 +50,7 @@ for _p in (REPO_ROOT / "src", REPO_ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from valid_regime_eval import RIGS, VALID, clip_rigs, pit_abs_error  # noqa: E402
+from valid_regime_eval import RIGS, VALID, clip_rigs  # noqa: E402
 
 #: Regime order used by every table, JSON key and figure in this decomposition.
 REGIMES = ("zero", "standby", "ramp", "cruise")
@@ -135,6 +135,31 @@ def frame_regimes4(target: np.ndarray) -> np.ndarray:
     labels[~ramp & (target.max(axis=0) < THRESHOLDS["zero_max_rev_s"])] = "zero"
     labels[ramp] = "ramp"
     return labels
+
+
+def pit_abs_error_clip(pred: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """``(R, F)`` absolute error under ONE permutation for the whole clip.
+
+    This is the convention the training loss and the reported metric both use:
+    :func:`losses.pit.pit_mse_loss` reduces over time before searching
+    permutations (``src/losses/pit.py:94-106``) and
+    :func:`metrics.rps.batched_pit_mae` does the same
+    (``src/metrics/rps.py:65-69``), so each clip is scored under a single rotor
+    identity.
+
+    A regime cell is a SUBSET of a clip's frames. Matching per frame would let
+    a model be scored under one identity in ``standby`` and another in
+    ``cruise`` of the same clip, which buys error the model did not earn; on
+    these checkpoints that free lunch measures ~1% (0.05-0.06 rev/s). Hence the
+    permutation is fixed per clip here and only the POOLING is per regime.
+    """
+    from scipy.optimize import linear_sum_assignment
+
+    cost = np.abs(pred[:, None, :] - target[None, :, :]).mean(axis=-1)
+    rows, cols = linear_sum_assignment(cost)
+    out = np.empty_like(target, dtype=np.float64)
+    out[cols] = np.abs(pred[rows] - target[cols])
+    return out
 
 
 def pit_align(pred: np.ndarray, target: np.ndarray) -> np.ndarray:
@@ -308,7 +333,7 @@ def decompose(
             pred = predict_clip(model, frame, salience)
             width = min(pred.shape[1], target.shape[1])
             target, pred = target[:, :width], pred[:, :width]
-            err = pit_abs_error(pred, target)
+            err = pit_abs_error_clip(pred, target)
             labels = frame_regimes4(target)
             rig = rigs[i] if i < len(rigs) else "dregon"
 
@@ -514,9 +539,9 @@ def main() -> int:
         "  best round the run ever logged, col 3 is the round whose file is on R2 as\n"
         "  best_real_overall.ckpt (aliased on the median-smoothed score, hence later\n"
         "  and worse). Col 4 recomputes training's own clip-level metric on that file\n"
-        "  here and must agree with col 3. Col 5 is the per-frame Hungarian PIT MAE the\n"
-        "  regime table decomposes; it is <= col 4 by construction, since per-frame\n"
-        "  matching takes the minimum in every frame. EVERY per-regime number above\n"
+        "  here and must agree with col 3. Col 5 is the same clip-level PIT the\n"
+        "  regime table decomposes, so it must equal col 4; an earlier version pooled\n"
+        "  per-frame matching here, which ran ~1% low. EVERY per-regime number above\n"
         "  belongs to the selected checkpoint (col 3/4), not to the best round (col 2)."
     )
 
