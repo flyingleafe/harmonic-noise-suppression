@@ -228,12 +228,27 @@ Readings, per the launch decision rule:
 
 ## Results
 
-**PENDING** — both runs are in flight.
+**PENDING** — all three runs are in flight. The first two job pairs are dead
+and must not be read as results: `rig-easy-e7e4ce` / `rig-hard-6ed3cf` were
+placed on 4.93 GiB GPUs and OOM'd at the first epoch, and `rig-easy-130d76` /
+`rig-hard-7655b0` were cancelled before placement. A third easy submission,
+`rig-easy-dce43e`, failed placement (`InstanceUnreachable`, sshd refusing) and
+was re-queued onto the same id. Everything upstream of the GPU was verified on
+the box each time: the bank rebuilt remotely and self-checked at 0.000 dB
+Nyquist fold in all six bands with the path coordinate's KS distance at 0.0127.
 
-| arm | job | backend | status |
+| arm | job | GPU | status |
 |---|---|---|---|
-| `rig_easy_scv2_unified` | `rig-easy-e7e4ce` | vast | running |
-| `rig_hard_scv2_unified` | `rig-hard-6ed3cf` | vast | running |
+| `rig_easy_scv2_unified` | `rig-easy-dce43e` | vast A100 | running |
+| `rig_hard_scv2_unified` | `rig-hard-1b2f06` | vast A100 | running |
+| `rig_easy_hppnet_l2_unified` | `rig-easy-hppnet-l2-4fa419` | vast A100 | running |
+
+The salience arm was added once the GPU salience validation seam was merged
+from the unmerged `unified-runs` branch (`31228688`, merge `92c6cd79`): the
+unified panel now dispatches its readout by task and scores salience through
+the model's own `decode_logits` on the logits' device. It is the noise-family
+counterpart of `real_r4_hppnet_l2_unified` and the model-family counterpart of
+`rig_easy_scv2_unified`.
 
 To be filled when they land: best `real_overall` and the per-view `real_r1` /
 `real_r2` / `real_r3` rev/s MAE at that epoch for each arm, the epoch it

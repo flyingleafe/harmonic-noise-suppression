@@ -1470,9 +1470,14 @@ regime below removes training-time validation media rendering entirely.
 2. Rerun all sixteen direct regressors — SimpleConv, SCv2, transformer and
    causal GRU at each of R1/R2/R3/R4 — **in parallel** after handoff. The
    committed configs are `real_r{1,2,3,4}_{sc,scv2,tm,gru}_unified`.
-3. Do **not** rerun salience models yet. First implement GPU salience decoding
-   and give salience models the same full-panel MAE views, aggregates, stopping
-   semantics and subset-best checkpoints. Salience reruns follow that work.
+3. ~~Do **not** rerun salience models yet.~~ **SUPERSEDED 2026-09-15.** The GPU
+   salience seam landed: `31228688` on `unified-runs`, merged to main as
+   `92c6cd79`. `training/validation.py` dispatches the panel readout by task
+   and scores salience through the model's own `decode_logits` on the logits'
+   device, with the batched shared-map tracker in `models/salience_tracker.py`;
+   the `task=rps_prediction` gate in `loop.py` is gone. Salience reruns are
+   unblocked, and the first one is running (`rig_easy_hppnet_l2_unified`, see
+   `rig-sampler-transfer-pair.md`).
 4. The old six-run checkpoint-continuation plan is superseded. Its R4 SCv2
    result remains diagnostic evidence, not a final matrix row.
 5. No real rerun was submitted during this implementation/handoff session.
@@ -1566,10 +1571,15 @@ an unrelated `WindowStream.__new__` test fixture missing the constructor's
 new `min_in_grid`/`grid` fields; that fixture is repaired and its five tests
 pass. A final full-suite rerun remains for the next implementation session.
 
-The full-panel validator currently accepts direct `rps_prediction` outputs.
-The next task is the deferred salience seam: vectorized GPU decoding from
-salience/layer outputs to RPS, exact MAE-optimal PIT parity, then the same
-views/controller/checkpoint path. Do not launch salience reruns before it.
+The full-panel validator accepted only direct `rps_prediction` outputs when
+this was written. **No longer true as of 2026-09-15:** the deferred salience
+seam landed (`31228688`, merged as `92c6cd79`). `rps_readout_for(task)` picks
+the panel's readout, salience is decoded by the model's own `decode_logits` on
+the logits' device, and the shared-map tracker is batched
+(`models/salience_tracker.py`, with `tests/models/test_salience_tracker.py`
+and the extended `tests/training/test_validation.py`). Salience reruns are
+unblocked; fifteen unified salience configs are committed and
+`rig_easy_hppnet_l2_unified` is the first one running.
 
 ## Unified rerun submission and the salience seam — 2026-09-08
 
