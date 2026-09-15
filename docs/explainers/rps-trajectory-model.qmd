@@ -1,0 +1,807 @@
+---
+title: "Rotor-speed trajectories: a fitted generative model per rig"
+subtitle: "Seven public telemetry rigs, one frozen statistics judge, and a per-rig state-space model measured against the current hand-set sampler"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    code-fold: true
+    html-math-method: katex
+execute:
+  echo: false
+  warning: false
+---
+
+```{=html}
+<style>
+/* Break long tokens only INSIDE code spans — rig ids, flight ids, config
+   paths. Breaking ordinary words gives "recorde d" in a narrow column. */
+table td code, table th code, li code { overflow-wrap: anywhere; }
+table { font-size: 0.9em; }
+table td, table th { hyphens: none; }
+/* Wide tables and figures live in .column-page, so keep their cells from
+   wrapping on every space. */
+.column-page table { font-size: 0.86em; }
+</style>
+```
+
+```{python}
+# Every chunk on this page only READS JSON that
+# `scripts/rps_traj_explainer_figs.py` and the campaign runners already wrote,
+# so the render stays well under a minute and no figure is computed twice.
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path.cwd()
+while not (ROOT / "results").exists() and ROOT != ROOT.parent:
+    ROOT = ROOT.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from experiments.rps_traj.stats import FAMILIES, TrajStats, discrepancy, passes
+
+ASSETS = "rps-trajectory-model"
+FIGDIR = ROOT / "docs" / "explainers" / ASSETS
+RES = ROOT / "results" / "rps_traj"
+
+
+def load(path):
+    p = Path(path)
+    p = p if p.is_absolute() else ROOT / p
+    return json.loads(p.read_text()) if p.is_file() else None
+
+
+INDEX = load(FIGDIR / "figure_index.json") or {"figures": {}, "posterior": {}, "explore": []}
+SUMMARY = load(RES / "summary.json") or {"rigs": []}
+ROUNDS = {
+    p.stem: load(p)
+    for p in sorted((RES / "rounds").glob("round*.json"), key=lambda q: q.stem)
+}
+RIGS = list(INDEX.get("rigs") or [r["rig"] for r in SUMMARY["rigs"]])
+SUM_BY_RIG = {r["rig"]: r for r in SUMMARY["rigs"]}
+FLIGHTS = {rig: load(RES / "stats" / "real" / f"{rig}.flights.json") for rig in RIGS}
+
+
+def stats_of(arm, rig):
+    payload = load(RES / "stats" / arm / f"{rig}.json")
+    return TrajStats.from_dict(payload) if payload else None
+
+
+def discrepancies(rig):
+    """The five families of both arms, recomputed from the stored statistics."""
+    real = stats_of("real", rig)
+    out = {}
+    for arm in ("base", "new"):
+        model = stats_of(arm, rig)
+        out[arm] = discrepancy(model, real) if (model and real) else None
+    return out
+
+
+DISC = {rig: discrepancies(rig) for rig in RIGS}
+
+#: Per-rig facts the campaign artifacts do not carry: the airframe, the native
+#: telemetry rate, the channel the speed comes from and the licence. Every row
+#: is `docs/data-catalog.md` (§ "Per-rotor telemetry rigs", § "DREGON
+#: recording inventory", § "Michael's DJI Matrice 100 rig").
+RIG_META = {
+    "michaels": dict(
+        vehicle="DJI Matrice 100",
+        native="29.4 Hz (DatCon log)",
+        channel="`Motor:Speed:*` RPM / 60, gain-calibrated",
+        licence="own recordings (WP13/WP14 + 2026-08 test pair)",
+    ),
+    "dregon": dict(
+        vehicle="MikroKopter quad (Inria)",
+        native="~929 Hz stamps; measured channel holds at ~45 Hz",
+        channel="`motor.measured` where logged, else cleaned `motor.command`",
+        licence="personal / educational / academic use only",
+    ),
+    "neurobem_quad": dict(
+        vehicle="UZH RPG racing quad, 0.772 kg",
+        native="400 Hz (4 segments of one flight: 164 Hz)",
+        channel="ESC feedback, Betaflight blackbox `mot k` rad/s / 2&pi;",
+        licence="**none stated** (UZH copyright line + citation request)",
+    ),
+    "pitcn_quad": dict(
+        vehicle="NYU ARPL `dragonfly17`, 0.25 kg",
+        native="100 Hz (uniform)",
+        channel="`/dragonfly17/motor_rpm` RPM / 60",
+        licence="**none published** (release repos GPL-3.0 / MIT + citation)",
+    ),
+    "nanobench_cf21b": dict(
+        vehicle="Crazyflie 2.1 Brushless, 45 g",
+        native="100 Hz (exact grid)",
+        channel="bidirectional DSHOT eRPM / 6 pole pairs",
+        licence="**none** (no licence file; GitHub declares none)",
+    ),
+    "vid_m100": dict(
+        vehicle="DJI M100 + M3508 (ZJU FAST)",
+        native="~930 Hz stamps (MCU clock)",
+        channel="M3508/C620 CAN feedback, RPM / 60",
+        licence="AGPL-3.0 tools; data &quot;research use&quot;",
+    ),
+    "blackbird_quad": dict(
+        vehicle="MIT Blackbird custom quad",
+        native="~187 Hz event stamps",
+        channel="optical motor encoders (tachometer), RPM / 60",
+        licence="MIT (tooling); data &quot;research use&quot;",
+    ),
+}
+
+FAMILY_LABEL = {
+    "overall_mean": "overall mean (rev/s)",
+    "rotor_mean": "per-rotor mean (rev/s)",
+    "rotor_var": "per-rotor variance (log ratio)",
+    "acf": "autocorrelation (RMS)",
+    "xcorr": "cross-correlation (RMS)",
+}
+
+
+def md_table(headers, rows):
+    """A markdown pipe table; every cell is already a string."""
+    line = "| " + " | ".join(headers) + " |"
+    rule = "|" + "|".join("---" for _ in headers) + "|"
+    body = ["| " + " | ".join(r) + " |" for r in rows]
+    return "\n".join([line, rule, *body])
+
+
+def num(x, digits=4):
+    if x is None:
+        return "n/a"
+    try:
+        value = float(x)
+    except (TypeError, ValueError):
+        return str(x)
+    if value != value:  # NaN
+        return "n/a"
+    if value in (float("inf"), float("-inf")):
+        return "inf"
+    return f"{value:.{digits}f}"
+
+
+def rig_label(rig):
+    return f"`{rig}`"
+
+
+def figure(entry, rig=None):
+    """One figure as markdown, caption included, path from the index.
+
+    Wrapped in `.column-page`: Quarto's page column is ~1135 px wide, which is
+    where these 11 to 13 inch panels at 110 dpi land almost exactly 1:1. The
+    article column would shrink them by a quarter; `.column-screen-inset`
+    would stretch them past their pixel width and soften every tick label.
+    """
+    if not entry:
+        return ""
+    return (
+        "::: {.column-page}\n"
+        f"![{entry['caption']}]({ASSETS}/{entry['path']})\n"
+        ":::\n"
+    )
+```
+
+::: {.callout-note}
+## What this page is
+
+The project's noise simulator needs a **rotor-speed trajectory** for every
+training example: four rev/s tracks that a rotor-acoustics renderer turns into
+audio. The trajectories in use today come from a hand-written generator with
+hand-set constants. This page reports the campaign that replaces them with a
+**generative model fitted per rig**, against **seven public telemetry
+corpora**, judged by a **frozen statistics rule** that was fixed before the
+first fit.
+
+Everything numeric on this page — every table, every figure, the round log —
+is read from `results/rps_traj/` at render time. Regenerate with:
+
+```bash
+python scripts/rps_traj_explainer_figs.py
+quarto render docs/explainers/rps-trajectory-model.qmd
+```
+:::
+
+```{python}
+#| output: asis
+ok = [rig for rig in RIGS if INDEX["figures"].get(rig)]
+n_fig = INDEX.get("n_figures", 0)
+print(
+    f"**State of this render.** Round label `{INDEX.get('round', 'unknown')}`, "
+    f"{len(ok)} rigs with figures, {n_fig} figures in "
+    f"`docs/explainers/{ASSETS}/figure_index.json`, common analysis rate "
+    f"{INDEX.get('rate_hz', 100.0):g} Hz."
+)
+PROV = INDEX.get("fit_provenance") or {}
+LEGACY = {rig: why for rig, why in PROV.items() if "re-expressed" in why}
+skipped = INDEX.get("skipped") or {}
+if skipped:
+    print(
+        "\n\n::: {.callout-warning}\n## Figures missing for "
+        + ", ".join(f"`{rig}`" for rig in skipped)
+        + "\n\n"
+        + "\n".join(f"- `{rig}` — {why}" for rig, why in skipped.items())
+        + "\n\nRe-run `python scripts/rps_traj_explainer_figs.py` after the "
+        "round's fits are written.\n:::\n"
+    )
+if LEGACY:
+    print(
+        "\n\n::: {.callout-important}\n## The new-model arm shown here is the "
+        "round-3 fit\n\n"
+        f"`results/rps_traj/fits/new/` still holds the **round-3** fits of "
+        f"{len(LEGACY)} rigs. Round 3's measurement term was white noise of "
+        f"std `sigma_w`; the current model's measurement term is a per-rotor "
+        f"Ornstein-Uhlenbeck process, and the white case is its `tau_e` &rarr; 0 "
+        f"limit. The figure generator therefore re-expresses each stored fit "
+        f"exactly, at `tau_e = 1 ms` (lag-1 correlation 4.5e-5 on the 100 Hz "
+        f"grid), and every affected caption says so. **The samples are a "
+        f"faithful picture of the round-3 model, not of the round-4 fit "
+        f"described in [The fit](#the-fit).** The five-family tables and the "
+        f"round log are unaffected: they read the stored statistics, which are "
+        f"frozen and round-independent.\n\n"
+        f"- rig posterior: {INDEX.get('posterior_source', 'n/a')}\n"
+        f"- draws: {INDEX.get('draws_source', 'n/a')}\n\n"
+        "Re-running `python scripts/rps_traj_explainer_figs.py` after the "
+        "round-4 fits land replaces every sample-based figure and removes this "
+        "note, with no edit to this page.\n:::\n"
+    )
+```
+
+# What the current sampler does
+
+The recollection to check was: *controls to mixer to rotors, with a mixture of
+an OU model and an intermittent-maneuver model*. The first half is right, the
+second half is not.
+
+**Right: the generator is control-space, then mixed to rotors.** Every
+trajectory generator in `src/data_processing/rps_synthesis.py` builds four
+control modes — collective, roll, pitch, yaw — and maps them to four rotor
+speeds through the fixed mixer of `src/tracking/rotors.py`:
+`rps_from_modes(m)` is `MIXER @ m`, `modes_from_rps(w)` is `MIXER.T @ w / 4`,
+and `MIXER` has entries $\pm 1$ with orthogonal columns, so
+$M^{\mathsf T} M = 4 I$. Rotor order is `[RFront, LFront, LBack, RBack]`
+throughout.
+
+**Wrong: there is no mixture.** The choice of generator is a deterministic
+config switch, not a random draw. `StochasticNoisePool.sample_rps` calls
+`generate_full_flight` when `rps.kind` is `full_flight` and
+`generate_intermittent` otherwise; `StaticCombNoisePool._sample_rps_window`
+and `generated_noise._rps_excitation_batch` repeat the same switch. **Every
+named online-mix policy sets `kind: full_flight`** —
+`conf/online_mix/rig_fitted_5050.yaml`, `rig_easy_5050.yaml`,
+`rig_hard_5050.yaml`, `ctrl_diverse.yaml` — so every recent training run has
+used the whole-flight generator and nothing else. The `5050` in those names is
+the **noise-source** mixture (two stochastic arms at 0.4 and silence at 0.2),
+not a trajectory-model mixture.
+
+**The OU generator exists but is not used online.** `rps_synthesis.generate`
+(with `OUModeParams` / `RPSSynthConfig` / `DEFAULT_CONFIG`) is an exact
+discrete Ornstein-Uhlenbeck path per mode. It is called by utilities —
+`comb_bench.py`, `frame_datasets.py` — and by no online-mix policy. It also
+has the campaign's only pre-existing *fit*: `rps_synthesis.fit_config`
+estimates per-mode `(mean, std, tau)` from real traces by a lag-1
+autocorrelation. Nothing invokes it.
+
+**What the used generator actually is.** `generate_intermittent` builds, per
+mode, a trim plus a telegraph of maneuvers: Poisson onsets at `rate_hz`,
+Gaussian rectangular amplitudes with `maneuver_std`, exponential durations
+with `mean_maneuver_s`, all passed through a first-order motor lag
+(`motor_tau`) and added to an OU cruise jitter (`cruise_std`, `cruise_tau`).
+`generate_full_flight` wraps that cruise in a phase schedule — ground,
+spin-up, warm-up idle, take-off, cruise, landing, spin-down, ground — whose
+durations come from `FlightPhaseRanges`.
+
+**None of its constants were fitted.** The two shipped profiles
+(`DroneProfile` for DREGON and for Michael's rig) are hand-coded from the
+control-mode projection of a handful of recordings, `FlightPhaseRanges` is
+documented as *loosely calibrated*, and there is no fitting routine for
+`DroneProfile` anywhere in the tree. Two consequences are already recorded in
+the code: the synthetic rotor spread is 9.4 rev/s where the real spread is
+13.7 rev/s at `aggressiveness = 1`, and the default idle level misses the real
+one by 10 to 30 rev/s.
+
+**The whole-flight path also has a rate story.** Full flights are generated at
+`flight_fs = 200` Hz, cached, re-used 32 times, and interpolated up to the
+16 kHz audio grid inside the mixing pool.
+
+For this campaign the current sampler is therefore not a straw man but a
+**fitted** opponent: `experiments.rps_traj.baseline` optimises 22 of its free
+parameters per rig (Powell, weighted five-family discrepancy) and the new
+model has to beat *that*.
+
+# The telemetry we have now
+
+```{python}
+#| output: asis
+rows = []
+for rig in RIGS:
+    payload = FLIGHTS.get(rig) or {"flights": []}
+    fl = payload["flights"]
+    meta = RIG_META.get(rig, {})
+    rec = sum(f["duration_s"] for f in fl)
+    air = sum(f["airborne_s"] for f in fl)
+    sources = sorted({f["source"].split(":")[0] for f in fl})
+    rows.append(
+        [
+            rig_label(rig),
+            meta.get("vehicle", "?"),
+            ", ".join(f"`{s}`" for s in sources) or "?",
+            f"{len(fl)}",
+            f"{rec:.0f} s",
+            f"{air:.0f} s",
+            meta.get("native", "?"),
+            meta.get("channel", "?"),
+            meta.get("licence", "?"),
+        ]
+    )
+print("::: {.column-page}\n")
+print(
+    md_table(
+        [
+            "rig",
+            "vehicle",
+            "frames dataset",
+            "flights",
+            "rec (s)",
+            "air (s)",
+            "native rate",
+            "speed source",
+            "licence",
+        ],
+        rows,
+    )
+)
+total_rec = sum(
+    sum(f["duration_s"] for f in (FLIGHTS.get(r) or {"flights": []})["flights"]) for r in RIGS
+)
+total_air = sum(
+    sum(f["airborne_s"] for f in (FLIGHTS.get(r) or {"flights": []})["flights"]) for r in RIGS
+)
+print(
+    f"\n: Flights, recorded seconds (`rec`) and airborne seconds (`air`) are "
+    f"computed from `results/rps_traj/stats/real/<rig>.flights.json`. Corpus "
+    f"total: {total_rec / 60:.0f} min recorded, {total_air / 60:.0f} min "
+    f"airborne under the frozen airborne rule.\n"
+)
+print(":::\n")
+```
+
+**Airborne** is the frozen rule, never tuned per rig: the threshold is half
+the 90th percentile of the rotor-mean speed, every rotor must exceed it, runs
+are eroded by 1 s at both ends and kept only if at least 5 s long. It throws
+away the ground, the spin-up, the idle and the landing, so the model is a
+model of the airborne regime and the whole-flight pictures below are the
+airborne process inside a shared phase scaffold.
+
+## Access record
+
+Seven accepted rigs, and the candidates that failed the inclusion rule:
+
+- **DronePropA** (`S235234092500321X`, 130 flights, 3 vehicles) — **rejected**:
+  the published channels are PWM / ESC *command* in volt-%, no RPM field.
+- **IEEE DataPort drone-sensor-fusion** — **skipped**: login wall, no speed
+  field visible in the exposed schema. PX4 *can* log `esc_report.esc_rpm`, but
+  capability is not dataset evidence.
+- **Zenodo 16992976** (IDF_DS) — **rejected**: fixed-wing, actuator commands
+  only, no rotor RPM.
+- **Pelican** (AscTec, 3 h 50 min) — **excluded**: its "actual" motor channel
+  is an uncalibrated autopilot integer 0-218, not rev/s.
+- **Blackbird** — host dead since ~2024 (`blackbird-dataset.mit.edu` is
+  NXDOMAIN, legacy S3 returns `AccessDenied`, the 4.79 TB academic torrent
+  carries camera media only). **One** flight was recovered from a third-party
+  mirror of the publisher's own CSV export, so this rig is a single 199 s
+  flight instead of the intended 45.
+- **PI-TCN** — both Google Drive ids in the README are 404. All 68 bags were
+  recovered from the authors' follow-up repository
+  `arplaboratory/long-horizon-dynamics`.
+- **VID** — the QNAP share works non-interactively. The publisher bundles
+  D435 camera streams into every bag, so the fetcher streams each bag over
+  HTTP (39 GB read) and keeps only the motor records (22 MB).
+- **NeuroBEM, NanoBench, PI-TCN** — no dataset licence is stated anywhere.
+  They are used here as research material with attribution, and that is a
+  publication decision, not a code one.
+
+# One common sample rate: 100 Hz
+
+Every rig lands on one **100 Hz** analysis grid (`data.RATE_HZ`). Four reasons,
+in the order that settles the choice:
+
+1. **It is above the consumer.** The rotor-speed track is consumed on the
+   STFT grid of the audio pipeline: 16 kHz with hop 512, i.e. **31.25 Hz**.
+   100 Hz is more than three times that, so resampling into the consumer's
+   grid never has to invent detail.
+2. **It is at or above every trustworthy native band.** The measured bands
+   worth believing are Michael's ~8 Hz (29.4 Hz log, partly held), DREGON's
+   ~5 Hz (a 45 Hz sample-and-hold), and 100 Hz native for PI-TCN and
+   NanoBench. Nothing in the corpus carries credible content near 50 Hz.
+3. **The model is continuous-time.** The airborne process is an
+   Ornstein-Uhlenbeck component plus a second-order oscillator per mode, both
+   expressed as continuous-time state spaces and discretised exactly. The fit
+   rate and the sampling rate are therefore free choices, not a property of
+   the model.
+4. **Decimation is explicit.** Sources faster than 100 Hz are low-passed with
+   a zero-phase 4th-order Butterworth at 40 Hz
+   (`data.ANTIALIAS_HZ`, `sosfiltfilt`) and then resampled; Michael's 29.4 Hz
+   is interpolated up and carries no real content above ~15 Hz. Both
+   directions are recorded per flight in `Flight.source`.
+
+# What the telemetry says
+
+The exploration pass measured the corpus before any model existed. Its
+conclusions, condensed:
+
+- **Both developed channels are measurement-limited, in opposite ways.**
+  DREGON's `motor.measured` is a ~45 Hz staircase (95.3 % of consecutive
+  native samples are bit-identical, 52 distinct values per flight); Michael's
+  log is amplitude-fine (1 RPM steps) and time-coarse (29.41 Hz, 42 % of
+  increments exactly zero).
+- **40 to 50 % of the variance is below 0.5 Hz**, and another 36 to 40 % in
+  0.5 to 5 Hz, on every series that can be compared across rigs.
+- **The collective and yaw modes carry almost everything** (78 to 81 % of the
+  rotor variance on three of four series); roll and pitch sit about 10 dB
+  below. The leading eigenvector is a collective/yaw *mixture*, not a mixer
+  column, which is why the model needs a rotation inside that plane.
+- **The four modes do not share a spectral shape**, so one shared spectrum
+  with per-mode gains cannot fit them.
+- **Coupling is diagonal-pair coupling** — same-rotation-sense pairs — and it
+  is instantaneous, not lagged. On 4 of 7 rigs the diagonal pairs dominate the
+  adjacent ones; on the system-identification rigs (chirp, random, square
+  inputs) roll and pitch are deliberately excited and swamp that signature.
+- **The autocorrelation has two time scales** (1/e at 0.4 to 0.7 s, with a 1
+  to 10 s tail), so no single exponential fits it.
+- **A resonance is optional.** The only clean one in the corpus is +4.3 dB at
+  3.0 Hz with $Q \approx 6$ in the DREGON *command* channel — the MikroKopter
+  attitude loop. A DJI M100's rotor speed is a featureless power law. The
+  model must therefore be able to switch its oscillator off.
+- **Increments are heavy-tailed at every measurable lag** (excess kurtosis 2.7
+  to 27). The model below has Gaussian increments and does not reproduce this;
+  see [Limitations](#limitations).
+
+```{python}
+#| output: asis
+for entry in INDEX.get("explore", []):
+    print(figure(entry))
+    print()
+```
+
+# The model
+
+## The airborne process
+
+Rotor speeds $w(t) \in \mathbb{R}^4$ in mixer order are
+
+$$
+w(t) \;=\; \mu \;+\; \delta_{\text{flight}} \;+\; M\,R(\theta)\,v(t) \;+\; e(t),
+$$
+
+with $M$ the fixed mixer (columns collective, roll, pitch, yaw) and
+$R(\theta)$ a rotation **inside the (collective, yaw) plane**, which is the
+one degree of freedom the eigen-analysis says the data needs. Each mode
+$v_i$ is the sum of two independent continuous-time components:
+
+$$
+\mathrm{d}x^{\text{slow}}_i = -\frac{x^{\text{slow}}_i}{\tau_{\text{slow},i}}\,\mathrm{d}t
+  + \sqrt{\tfrac{2\,\sigma_{\text{slow},i}^{2}}{\tau_{\text{slow},i}}}\,\mathrm{d}W,
+\qquad
+\ddot{x}^{\text{osc}}_i + 2\zeta_i \omega_i \dot{x}^{\text{osc}}_i + \omega_i^{2} x^{\text{osc}}_i = \xi_i,
+\quad \omega_i = 2\pi f_{0,i},
+$$
+
+so mode $i$ has a red low-frequency shoulder of size
+$\sigma_{\text{slow},i}$ and an oscillator of centre frequency $f_{0,i}$,
+damping $\zeta_i$ and stationary std $\sigma_{\text{osc},i}$. Both are
+discretised **exactly** on the sampling grid, as $(\Phi, Q, P)$ state spaces;
+one code path serves the likelihood, the sampler, the analytic spectrum and
+the analytic autocorrelation, so those four cannot drift apart.
+
+Two terms sit outside the mode basis:
+
+- $\delta_{\text{flight}} \sim \mathcal{N}(0, \operatorname{diag}(s^2))$ is
+  **one offset draw per flight, per rotor** — flights of the same rig differ in
+  trim, payload and battery, and the frozen `rotor_var` statistic pools every
+  flight about one mean, so that spread has to exist in the model.
+- $e(t)$ is the **measurement term**, independent across rotors. It absorbs
+  what the telemetry chain adds and the shaft does not do: the DREGON
+  staircase, Michael's hold-resampling, ESC quantisation.
+
+Ordering is imposed by parametrisation, not by a penalty:
+$f_0 \in (0.05, 20)$ Hz, $\zeta \in (0.2, 3)$ (so a mode can be firmly
+overdamped, i.e. no resonance at all), and $\tau_{\text{slow}}$ is bounded
+below by the oscillator's own corner time $\tau_c = 1/(2\pi f_0)$ and above by
+10 s — half the block length and the longest lag the frozen judge scores.
+Slower variation is $\delta_{\text{flight}}$'s job.
+
+## The fit
+
+<!-- R4 — round-4 brief; update this paragraph (and only this paragraph) when
+     the fit changes again. Round 3 was a Whittle MAP fit over a per-rig band
+     with a white measurement term. -->
+
+Round 4 fits each rig by **exact likelihood in the time domain**: the model is
+a linear Gaussian state space, so the Kalman recursion gives the exact
+log-likelihood of the airborne samples instead of the Whittle
+(block-periodogram) approximation used in rounds 1 to 3. Four changes come
+with it. The measurement term $e(t)$ becomes a **per-rotor
+Ornstein-Uhlenbeck** process (a shared time constant $\tau_e$ and std
+$\sigma_e$) rather than white noise, so it can carry the correlated
+high-frequency junk of a hold-resampled channel without pretending the shaft
+made it. The likelihood is evaluated at a **per-rig fit rate** — 25 Hz for
+`michaels`, whose telemetry is logged at 29.4 Hz, and 100 Hz elsewhere — so no
+rig is fitted to its own interpolation artifacts. The sampler **clamps** to
+the rig's real airborne floor and ceiling, which is what an ESC does. And
+$\mu$ and $s$ stay **estimated** from the pooled and per-flight airborne means
+rather than fitted, because they are identified directly and fitting them
+would only let the optimiser trade them against the process. MAP priors
+(log-normal) keep $\tau_{\text{slow}}$ and the stds away from degenerate
+corners. The reported NLL is therefore an exact time-domain figure and is
+**not comparable** with the Whittle values of rounds 1 to 3.
+
+```{python}
+#| output: asis
+if LEGACY:
+    print(
+        f"**What this render actually shows.** The round-4 fit above is the "
+        f"model as implemented in `src/experiments/rps_traj/model.py` today. "
+        f"`results/rps_traj/fits/new/` still holds the round-3 fits of "
+        f"{len(LEGACY)} rigs, so every sample-based figure below is the "
+        f"round-3 model, re-expressed exactly in the current parameterisation "
+        f"and labelled as such in its caption and panel title. The discrepancy "
+        f"tables, the verdicts and the round log come from the stored frozen "
+        f"statistics and are round-3 numbers throughout."
+    )
+else:
+    print(
+        "**What this render actually shows.** Every figure and table below "
+        f"comes from `{INDEX.get('round', 'the current round')}` artifacts: the "
+        "fits load into the current model with no re-expression."
+    )
+```
+
+## The judge, frozen before the first fit
+
+Five families are computed on the airborne segments of the real flights and on
+model samples drawn over **the same segment durations**, then compared:
+
+```{python}
+#| output: asis
+print(
+    md_table(
+        ["family", "what it measures", "distance"],
+        [
+            ["`overall_mean`", "pooled mean rotor speed", "absolute difference (rev/s)"],
+            ["`rotor_mean`", "per-rotor means, 4 values", "RMS difference (rev/s)"],
+            ["`rotor_var`", "per-rotor variances, 4 values", "RMS of $|\\ln(\\text{model}/\\text{real})|$"],
+            ["`acf`", "per-rotor autocorrelation, 24 log-spaced lags 0.05-10 s", "RMS difference"],
+            ["`xcorr`", "zero-lag 4&times;4 rotor cross-correlation", "RMS difference over the 6 pairs"],
+        ],
+    )
+)
+```
+
+**Pass rule.** A candidate passes a rig when **no family regresses** (beyond
+$10^{-9}$) and **at least three families strictly improve** against the
+fitted current sampler. The rule, the lag grid, the airborne rule and the
+segment-duration matching were all fixed before the first fit and have not
+moved since.
+
+## The round log
+
+```{python}
+#| output: asis
+NOTES = {
+    "round1": "two-OU modes, band 0.02-5 Hz, offsets in mode space",
+    "round2": "full band, offsets in rotor space, tau_slow <= 10 s, antithetic offsets, n_rep 40",
+    "round3": "OU + CAR(2) per mode, michaels band <= 12 Hz, Whittle bins below 2/T dropped",
+    "round4": "exact Kalman likelihood, per-rotor OU measurement term, per-rig fit rate, ESC clamp",
+}
+rows = []
+for name, payload in ROUNDS.items():
+    if not payload:
+        continue
+    per_rig = []
+    n_pass = 0
+    for entry in payload.get("rigs", []):
+        new, base = entry.get("new"), entry.get("base")
+        if not (new and base):
+            continue
+        verdict, strict = passes(new, base)
+        n_pass += int(verdict)
+        mark = "**PASS**" if verdict else "fail"
+        per_rig.append(f"{entry['rig'].replace('_quad', '')} {sum(strict.values())}/5 {mark}")
+    rows.append(
+        [
+            f"`{name}`",
+            NOTES.get(name, ""),
+            f"{n_pass}/{len(payload.get('rigs', []))}",
+            "; ".join(per_rig),
+        ]
+    )
+print(md_table(["round", "what changed", "rigs passed", "per rig: strict-better families and verdict"], rows))
+print(
+    "\n: Read from `results/rps_traj/rounds/round*.json`. The strict-better "
+    "count and the verdict are recomputed here with the frozen rule from each "
+    "round's own stored family values, so this table cannot disagree with the "
+    "acceptance code. NLL values are deliberately absent: round 4 changed the "
+    "likelihood, so they are not comparable across rounds.\n"
+)
+```
+
+What each round taught, in one line each:
+
+- **Round 1** compared a band-limited model against full-band statistics, gave
+  every rotor the same variance, and left `tau_slow` unidentifiable. Fail on
+  all 7.
+- **Round 2** moved to the full band and to rotor-space offsets, and proved a
+  structural limit: a sum of OU components cannot be flat and then steeper
+  than $f^{-2}$, which is exactly what 88 % of the Whittle bins (5 to 40 Hz)
+  demanded. 0 of 7.
+- **Round 3** added a CAR(2) oscillator per mode and capped Michael's band at
+  12 Hz. First pass (`blackbird_quad`), `michaels` at 4 of 5 families, but on
+  four rigs the oscillators were chasing per-rotor high-frequency measurement
+  junk instead of vehicle dynamics. 1 of 7.
+- **Round 4** is the response to that diagnosis: give the measurement chain
+  its own correlated term, stop scoring a rig above its own usable band, and
+  replace the block-periodogram approximation with the exact likelihood.
+
+# Per rig
+
+Each tab holds the same four figures and the same discrepancy table. The
+verdict is the frozen rule applied to the stored statistics.
+
+::: {.panel-tabset}
+
+```{python}
+#| output: asis
+for rig in RIGS:
+    figs = INDEX["figures"].get(rig, {})
+    entry = SUM_BY_RIG.get(rig, {})
+    disc = DISC.get(rig) or {}
+    print(f"## {rig}\n")
+
+    # Provenance: the FIT artefact wins over summary.json, which can be a
+    # round behind it while a round lands rig by rig; only the keys that
+    # actually exist are printed.
+    facts = (INDEX.get("fit_facts") or {}).get(rig) or {}
+    merged = {**entry, **{k: v for k, v in facts.items() if k != "legacy"}}
+    bits = []
+    for key, fmt in (
+        ("n_flights", "{} flights"),
+        ("airborne_s", "{:.0f} s airborne"),
+        ("n_segments", "{} segments"),
+        ("fit_rate_hz", "fit rate {:g} Hz"),
+        ("rps_min", "clamp {:.0f}"),
+        ("rps_max", "to {:.0f} rev/s"),
+        ("n_blocks", "{} blocks"),
+        ("n_scored", "{} scored samples"),
+        ("n_iter", "{} iterations"),
+        ("wall_s", "{:.0f} s wall"),
+    ):
+        value = merged.get(key)
+        if value is None or (isinstance(value, float) and value != value):
+            continue
+        if key == "rps_max" and value == float("inf"):
+            continue
+        bits.append(fmt.format(value))
+    band = merged.get("band_hz")
+    if band:
+        bits.append(f"scored band {band[0]:g}-{band[1]:g} Hz")
+    if bits:
+        source = "`fits/new/` + `summary.json`" if facts else "`summary.json`"
+        print("**Fit provenance.** " + ", ".join(bits) + f" ({source}).\n")
+    if facts and not facts.get("legacy"):
+        print(
+            f"This rig's new-model arm IS the current round: "
+            f"`fits/new/{rig}.json` loads into the model code with no "
+            f"re-expression. Its five-family row below still comes from the "
+            f"stored statistics, so check whether `stats/new/{rig}.json` was "
+            f"written by the same run.\n"
+        )
+
+    if disc.get("base") and disc.get("new"):
+        verdict, strict = passes(disc["new"], disc["base"])
+        rows = []
+        for fam in FAMILIES:
+            b, n = disc["base"][fam], disc["new"][fam]
+            better = "**yes**" if strict.get(fam) else ("no" if n <= b else "**regression**")
+            rows.append([FAMILY_LABEL[fam], num(b), num(n), better])
+        print(md_table(["family", "current sampler", "new model", "strictly better?"], rows))
+        print(
+            f"\n: `{rig}` — {sum(strict.values())} of {len(FAMILIES)} families "
+            f"strictly better, verdict **{'PASS' if verdict else 'FAIL'}** under "
+            f"the frozen rule. Recomputed from "
+            f"`results/rps_traj/stats/{{real,base,new}}/{rig}.json`.\n"
+        )
+    else:
+        print(f"*No stored statistics for `{rig}` in this results tree.*\n")
+
+    # Parameters, keyed off what the fitted JSON actually contains.
+    params = entry.get("params") or {}
+    if params:
+        rows = []
+        for key, value in params.items():
+            if isinstance(value, list):
+                rows.append([f"`{key}`", ", ".join(num(v, 3) for v in value)])
+            else:
+                rows.append([f"`{key}`", num(value, 4)])
+        print(md_table(["parameter", "value (mixer rotor order, or per mode)"], rows))
+        print(f"\n: `{rig}` — the fitted parameters as stored in `summary.json`.\n")
+
+    for key in INDEX.get("per_rig_order", []):
+        if figs.get(key):
+            print(figure(figs[key], rig))
+            print()
+```
+
+:::
+
+# Random rigs from the posterior
+
+The seven fits are seven points. To sample a *new* drone, the campaign fits a
+diagonal Gaussian over the rigs' **scale-free** coordinates (log operating
+point, relative trims, the rotation, the bounded transforms of the time
+constants and dampings, the log stds relative to the rig's own scale) and
+draws from it. Each per-coordinate width is floored, absolutely and
+relatively: with seven drones the raw population spread of a coordinate they
+happen to agree on would be far too tight to sample from, and a floor says
+"seven drones, not a population".
+
+```{python}
+#| output: asis
+post = INDEX.get("posterior", {})
+for key in INDEX.get("posterior_order", list(post)):
+    if post.get(key):
+        print(figure(post[key]))
+        print()
+```
+
+**Reading these.** The drawn drones keep the *shape* of the corpus — a red
+low-frequency shoulder, a collective/yaw-dominated covariance, a two-time-scale
+autocorrelation — while their operating point, spread and oscillator move over
+the range the seven rigs span. That is the intended product of the campaign: a
+trajectory sampler that can be asked for a *rig it has never seen* instead of
+being pinned to DREGON's and Michael's hand-set profiles. The planes figure is
+also the honest limit of the construction: a diagonal Gaussian cannot carry
+the correlations between coordinates that the rigs clearly have (a bigger
+drone is not simply a louder one), so some draws sit in corners no real rig
+occupies.
+
+# Limitations {#limitations}
+
+- **Gaussian increments against heavy tails.** The exploration pass measured
+  excess kurtosis 2.7 to 46 on the increments of every series, at every lag it
+  could measure. This model is a linear Gaussian state space: its increments
+  are Gaussian by construction. It matches the second-order structure the
+  frozen judge scores and does **not** reproduce the tails. A heavy-tailed or
+  stochastic-volatility innovation is the obvious next step, and it was kept
+  out of this campaign on purpose — the judge cannot see it, so fitting it
+  would be unfalsifiable here.
+- **Measurement chains are modelled, not undone.** The per-rotor measurement
+  term absorbs the DREGON staircase and Michael's hold-resampling so that they
+  stop distorting the *dynamics*. It does not recover the real shaft motion
+  above the usable band, and for `dregon` that band ends at about 5 Hz. A
+  sampled trajectory therefore reproduces the *telemetry* of a rig, including
+  its instrument, not the shaft.
+- **Single-flight and thin rigs.** `blackbird_quad` is one 199 s flight, so
+  its per-flight offset term is switched off (fewer than three flights) and
+  its rotor order is inferred from the data rather than published. `michaels`
+  and `vid_m100` have four flights each. Any per-rig spread those rigs
+  contribute to the posterior is thin evidence.
+- **Pooled physical vehicles.** `michaels` pools four DatCon logs that share
+  one flight-controller serial, `ACType|M100` and firmware, with a yaw-trim
+  agreement of 1.20 rev/s about 5.43 rev/s. That is one physical drone by
+  evidence, but two recording campaigns.
+- **Not modelled: regime switching.** The airborne process is stationary. Real
+  flights switch between hover, translation and aggressive tracking, and
+  several rigs are system-identification runs (chirp, random, square) whose
+  "regime" is the excitation schedule. A mixture or a slowly switching state
+  would be a different model, and the frozen statistics — pooled over
+  segments — would barely notice the difference.
+- **Not modelled: maneuver bursts.** The current sampler's one genuinely
+  non-Gaussian feature is its telegraph of rectangular maneuvers. The new
+  model replaces it with a stationary oscillator plus a slow component. Burst
+  structure (a step, then a settle) is therefore absent, which is visible in
+  the zoomed panels of the aggressive rigs.
+- **The whole-flight wrapper is scaffold, not fit.** Ground, spin-up, idle,
+  take-off, landing and spin-down come from `flight.wrap_airborne` and
+  `FlightPhaseRanges`, with the idle level read off the real pre-take-off
+  plateau. Only the airborne part is fitted, because only the airborne part is
+  judged.

@@ -39,6 +39,35 @@ def test_registry_integrity():
             assert key in spec.provenance or key == "license", f"{name} missing provenance[{key!r}]"
 
 
+def test_every_source_frames_spec_names_its_registry_entry():
+    """A renamed ``frames_dataset`` must not silently orphan its derivation:
+    `derive <spec>` publishes under the SPEC name but its meta/builder come
+    from ``gen['source']``, so the two names have to agree."""
+    from data_processing import derivations
+
+    for spec_name, entry in derivations.SPECS.items():
+        if entry["generator"] != "source_frames":
+            continue
+        source = entry["gen"]["source"]
+        assert source in sources.REGISTRY, f"{spec_name}: unknown source {source!r}"
+        assert sources.get(source).frames_name == spec_name, (
+            f"{spec_name}: source {source!r} publishes as {sources.get(source).frames_name!r}"
+        )
+
+
+def test_telemetry_sources_are_buildable_and_fetchable():
+    """The rps-campaign rigs: no audio, so ``modality`` must say so, and each
+    has to be obtainable (fetcher/download/dload raw) AND buildable — a
+    telemetry entry with no builder would publish an empty frames dataset."""
+    telemetry = {n: s for n, s in sources.REGISTRY.items() if s.modality == "telemetry"}
+    assert set(telemetry) == {"NeuroBEM", "Blackbird", "VID", "NanoBench", "PI-TCN"}
+    for name, spec in telemetry.items():
+        assert spec.builder is not None, f"{name} has no builder"
+        assert spec.fetcher is not None or spec.download is not None or spec.raw_dataset, (
+            f"{name} has no way to obtain its raw files"
+        )
+
+
 def test_dataset_meta_marks_layout():
     for name in sources.list_names():
         entry = sources.get(name)

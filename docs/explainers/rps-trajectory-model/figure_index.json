@@ -1,0 +1,581 @@
+{
+  "round": "round3",
+  "rate_hz": 100.0,
+  "seed": 0,
+  "results_root": "results/rps_traj",
+  "per_rig_order": [
+    "zoom",
+    "flight",
+    "stats",
+    "spectra"
+  ],
+  "rigs": [
+    "michaels",
+    "dregon",
+    "neurobem_quad",
+    "pitcn_quad",
+    "nanobench_cf21b",
+    "vid_m100",
+    "blackbird_quad"
+  ],
+  "figures": {
+    "michaels": {
+      "zoom": {
+        "path": "michaels_zoom.png",
+        "caption": "**michaels, 20 s zoom.** Real telemetry from the middle of the longest airborne segment of `FLY125` (starting 83.4 s into the recording) against one sample of each fitted sampler, drawn on the same 100 Hz grid and plotted on one shared y-range (53-119 rev/s). Colours are the mixer rotor order.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "FLY125",
+        "t0_s": 83.43,
+        "window_s": 20.0
+      },
+      "flight": {
+        "path": "michaels_flight.png",
+        "caption": "**michaels, whole flight.** The complete recording `FLY125` (179 s, 154 s of it airborne under the frozen rule, idle plateau at 8 rev/s) against `full_flight(179 s)`: ground, spin-up, warm-up idle, take-off ramp, the airborne process, landing, spin-down. Only the airborne part is fitted \u2014 the phase envelope is the shared scaffold `flight.wrap_airborne` and the fitted idle level.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "FLY125",
+        "duration_s": 178.63,
+        "model_duration_s": 178.63,
+        "has_ground": true
+      },
+      "stats": {
+        "path": "michaels_stats.png",
+        "caption": "**michaels, the frozen statistics.** Top: the per-rotor autocorrelation on the frozen log lag grid (0.05-10 s, 24 lags). Bottom left to right: the 4x4 zero-lag cross-correlation of the real telemetry and of both arms' samples, then the five discrepancy families. The verdict shown is the frozen rule \u2014 no family may regress and at least three must strictly improve \u2014 and reads **PASS** here (5/5 families strictly better).",
+        "verdict": true,
+        "strict": {
+          "overall_mean": true,
+          "rotor_mean": true,
+          "rotor_var": true,
+          "acf": true,
+          "xcorr": true
+        }
+      },
+      "spectra": {
+        "path": "michaels_spectra.png",
+        "caption": "**michaels, mode spectra.** Welch spectra of the four control modes (`M^T w / 4`) on the fit's block geometry: 20 s Hann blocks at 50 % overlap, block-mean detrended, whole-segment blocks down to 5 s. Real telemetry (34 blocks) against samples of the fits over the same segment lengths, plus the new model's analytic mode spectrum (dashed). Likelihood rate 25 Hz; the frozen statistics are full-band regardless.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "n_real_blocks": 34,
+        "band_hz": null,
+        "fit_nyquist_hz": 12.5
+      }
+    },
+    "dregon": {
+      "zoom": {
+        "path": "dregon_zoom.png",
+        "caption": "**dregon, 20 s zoom.** Real telemetry from the middle of the longest airborne segment of `free-flight_nosource_room2` (starting 28.3 s into the recording) against one sample of each fitted sampler, drawn on the same 100 Hz grid and plotted on one shared y-range (63-102 rev/s). Colours are the mixer rotor order. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "free-flight_nosource_room2",
+        "t0_s": 28.32,
+        "window_s": 20.0
+      },
+      "flight": {
+        "path": "dregon_flight.png",
+        "caption": "**dregon, whole flight.** The complete recording `free-flight_nosource_room2` (74 s, 69 s of it airborne under the frozen rule, idle plateau at 17 rev/s) against `full_flight(74 s)`: ground, spin-up, warm-up idle, take-off ramp, the airborne process, landing, spin-down. Only the airborne part is fitted \u2014 the phase envelope is the shared scaffold `flight.wrap_airborne` and the fitted idle level. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "free-flight_nosource_room2",
+        "duration_s": 73.58,
+        "model_duration_s": 73.58,
+        "has_ground": true
+      },
+      "stats": {
+        "path": "dregon_stats.png",
+        "caption": "**dregon, the frozen statistics.** Top: the per-rotor autocorrelation on the frozen log lag grid (0.05-10 s, 24 lags). Bottom left to right: the 4x4 zero-lag cross-correlation of the real telemetry and of both arms' samples, then the five discrepancy families. The verdict shown is the frozen rule \u2014 no family may regress and at least three must strictly improve \u2014 and reads **FAIL** here (3/5 families strictly better).",
+        "verdict": false,
+        "strict": {
+          "overall_mean": true,
+          "rotor_mean": true,
+          "rotor_var": true,
+          "acf": false,
+          "xcorr": false
+        }
+      },
+      "spectra": {
+        "path": "dregon_spectra.png",
+        "caption": "**dregon, mode spectra.** Welch spectra of the four control modes (`M^T w / 4`) on the fit's block geometry: 20 s Hann blocks at 50 % overlap, block-mean detrended, whole-segment blocks down to 5 s. Real telemetry (28 blocks) against samples of the fits over the same segment lengths, plus the new model's analytic mode spectrum (dashed). Shading: scored band 0.02-40 Hz; the frozen statistics are full-band regardless. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "n_real_blocks": 28,
+        "band_hz": [
+          0.02,
+          40.0
+        ],
+        "fit_nyquist_hz": null
+      }
+    },
+    "neurobem_quad": {
+      "zoom": {
+        "path": "neurobem_quad_zoom.png",
+        "caption": "**neurobem, 20 s zoom.** Real telemetry from the middle of the longest airborne segment of `2021-02-05-15-04-42_seg_2` (starting 19.5 s into the recording) against one sample of each fitted sampler, drawn on the same 100 Hz grid and plotted on one shared y-range (33-397 rev/s). Colours are the mixer rotor order. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "2021-02-05-15-04-42_seg_2",
+        "t0_s": 19.5,
+        "window_s": 20.0
+      },
+      "flight": {
+        "path": "neurobem_quad_flight.png",
+        "caption": "**neurobem, whole flight.** The complete recording `2021-02-18-18-08-45_seg_1` (39 s, 37 s of it airborne under the frozen rule, idle plateau at 153 rev/s) against `full_flight(60 s)`: ground, spin-up, warm-up idle, take-off ramp, the airborne process, landing, spin-down. Only the airborne part is fitted \u2014 the phase envelope is the shared scaffold `flight.wrap_airborne` and the fitted idle level. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "2021-02-18-18-08-45_seg_1",
+        "duration_s": 39.07,
+        "model_duration_s": 60.0,
+        "has_ground": true
+      },
+      "stats": {
+        "path": "neurobem_quad_stats.png",
+        "caption": "**neurobem, the frozen statistics.** Top: the per-rotor autocorrelation on the frozen log lag grid (0.05-10 s, 24 lags). Bottom left to right: the 4x4 zero-lag cross-correlation of the real telemetry and of both arms' samples, then the five discrepancy families. The verdict shown is the frozen rule \u2014 no family may regress and at least three must strictly improve \u2014 and reads **FAIL** here (2/5 families strictly better).",
+        "verdict": false,
+        "strict": {
+          "overall_mean": false,
+          "rotor_mean": false,
+          "rotor_var": true,
+          "acf": true,
+          "xcorr": false
+        }
+      },
+      "spectra": {
+        "path": "neurobem_quad_spectra.png",
+        "caption": "**neurobem, mode spectra.** Welch spectra of the four control modes (`M^T w / 4`) on the fit's block geometry: 20 s Hann blocks at 50 % overlap, block-mean detrended, whole-segment blocks down to 5 s. Real telemetry (77 blocks) against samples of the fits over the same segment lengths, plus the new model's analytic mode spectrum (dashed). Shading: scored band 0.02-40 Hz; the frozen statistics are full-band regardless. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "n_real_blocks": 77,
+        "band_hz": [
+          0.02,
+          40.0
+        ],
+        "fit_nyquist_hz": null
+      }
+    },
+    "pitcn_quad": {
+      "zoom": {
+        "path": "pitcn_quad_zoom.png",
+        "caption": "**pitcn, 20 s zoom.** Real telemetry from the middle of the longest airborne segment of `gt_8_10` (starting 104.6 s into the recording) against one sample of each fitted sampler, drawn on the same 100 Hz grid and plotted on one shared y-range (112-294 rev/s). Colours are the mixer rotor order. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "gt_8_10",
+        "t0_s": 104.64,
+        "window_s": 20.0
+      },
+      "flight": {
+        "path": "pitcn_quad_flight.png",
+        "caption": "**pitcn, whole flight.** The complete recording `gt_8_10` (226 s, 220 s of it airborne under the frozen rule, idle plateau at 99 rev/s) against `full_flight(226 s)`: ground, spin-up, warm-up idle, take-off ramp, the airborne process, landing, spin-down. Only the airborne part is fitted \u2014 the phase envelope is the shared scaffold `flight.wrap_airborne` and the fitted idle level. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "gt_8_10",
+        "duration_s": 225.89,
+        "model_duration_s": 225.89,
+        "has_ground": true
+      },
+      "stats": {
+        "path": "pitcn_quad_stats.png",
+        "caption": "**pitcn, the frozen statistics.** Top: the per-rotor autocorrelation on the frozen log lag grid (0.05-10 s, 24 lags). Bottom left to right: the 4x4 zero-lag cross-correlation of the real telemetry and of both arms' samples, then the five discrepancy families. The verdict shown is the frozen rule \u2014 no family may regress and at least three must strictly improve \u2014 and reads **FAIL** here (2/5 families strictly better).",
+        "verdict": false,
+        "strict": {
+          "overall_mean": true,
+          "rotor_mean": true,
+          "rotor_var": false,
+          "acf": false,
+          "xcorr": false
+        }
+      },
+      "spectra": {
+        "path": "pitcn_quad_spectra.png",
+        "caption": "**pitcn, mode spectra.** Welch spectra of the four control modes (`M^T w / 4`) on the fit's block geometry: 20 s Hann blocks at 50 % overlap, block-mean detrended, whole-segment blocks down to 5 s. Real telemetry (233 blocks) against samples of the fits over the same segment lengths, plus the new model's analytic mode spectrum (dashed). Shading: scored band 0.02-40 Hz; the frozen statistics are full-band regardless. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "n_real_blocks": 233,
+        "band_hz": [
+          0.02,
+          40.0
+        ],
+        "fit_nyquist_hz": null
+      }
+    },
+    "nanobench_cf21b": {
+      "zoom": {
+        "path": "nanobench_cf21b_zoom.png",
+        "caption": "**nanobench cf21b, 20 s zoom.** Real telemetry from the middle of the longest airborne segment of `random_20251017_run1` (starting 20.0 s into the recording) against one sample of each fitted sampler, drawn on the same 100 Hz grid and plotted on one shared y-range (156-388 rev/s). Colours are the mixer rotor order. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "random_20251017_run1",
+        "t0_s": 20.0,
+        "window_s": 20.0
+      },
+      "flight": {
+        "path": "nanobench_cf21b_flight.png",
+        "caption": "**nanobench cf21b, whole flight.** The complete recording `melon_20251017_run1` (65 s, 57 s of it airborne under the frozen rule, the source starts and ends already airborne) against `full_flight(65 s)`: ground, spin-up, warm-up idle, take-off ramp, the airborne process, landing, spin-down. Only the airborne part is fitted \u2014 the phase envelope is the shared scaffold `flight.wrap_airborne` and the fitted idle level. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "melon_20251017_run1",
+        "duration_s": 64.99,
+        "model_duration_s": 64.99,
+        "has_ground": false
+      },
+      "stats": {
+        "path": "nanobench_cf21b_stats.png",
+        "caption": "**nanobench cf21b, the frozen statistics.** Top: the per-rotor autocorrelation on the frozen log lag grid (0.05-10 s, 24 lags). Bottom left to right: the 4x4 zero-lag cross-correlation of the real telemetry and of both arms' samples, then the five discrepancy families. The verdict shown is the frozen rule \u2014 no family may regress and at least three must strictly improve \u2014 and reads **FAIL** here (1/5 families strictly better).",
+        "verdict": false,
+        "strict": {
+          "overall_mean": false,
+          "rotor_mean": false,
+          "rotor_var": true,
+          "acf": false,
+          "xcorr": false
+        }
+      },
+      "spectra": {
+        "path": "nanobench_cf21b_spectra.png",
+        "caption": "**nanobench cf21b, mode spectra.** Welch spectra of the four control modes (`M^T w / 4`) on the fit's block geometry: 20 s Hann blocks at 50 % overlap, block-mean detrended, whole-segment blocks down to 5 s. Real telemetry (39 blocks) against samples of the fits over the same segment lengths, plus the new model's analytic mode spectrum (dashed). Shading: scored band 0.02-40 Hz; the frozen statistics are full-band regardless. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "n_real_blocks": 39,
+        "band_hz": [
+          0.02,
+          40.0
+        ],
+        "fit_nyquist_hz": null
+      }
+    },
+    "vid_m100": {
+      "zoom": {
+        "path": "vid_m100_zoom.png",
+        "caption": "**vid m100, 20 s zoom.** Real telemetry from the middle of the longest airborne segment of `outdoor_8_yaw` (starting 54.8 s into the recording) against one sample of each fitted sampler, drawn on the same 100 Hz grid and plotted on one shared y-range (64-128 rev/s). Colours are the mixer rotor order. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "outdoor_8_yaw",
+        "t0_s": 54.77,
+        "window_s": 20.0
+      },
+      "flight": {
+        "path": "vid_m100_flight.png",
+        "caption": "**vid m100, whole flight.** The complete recording `outdoor_8_yaw` (184 s, 162 s of it airborne under the frozen rule, idle plateau at 12 rev/s) against `full_flight(184 s)`: ground, spin-up, warm-up idle, take-off ramp, the airborne process, landing, spin-down. Only the airborne part is fitted \u2014 the phase envelope is the shared scaffold `flight.wrap_airborne` and the fitted idle level. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "outdoor_8_yaw",
+        "duration_s": 184.31,
+        "model_duration_s": 184.31,
+        "has_ground": true
+      },
+      "stats": {
+        "path": "vid_m100_stats.png",
+        "caption": "**vid m100, the frozen statistics.** Top: the per-rotor autocorrelation on the frozen log lag grid (0.05-10 s, 24 lags). Bottom left to right: the 4x4 zero-lag cross-correlation of the real telemetry and of both arms' samples, then the five discrepancy families. The verdict shown is the frozen rule \u2014 no family may regress and at least three must strictly improve \u2014 and reads **FAIL** here (2/5 families strictly better).",
+        "verdict": false,
+        "strict": {
+          "overall_mean": false,
+          "rotor_mean": false,
+          "rotor_var": true,
+          "acf": false,
+          "xcorr": true
+        }
+      },
+      "spectra": {
+        "path": "vid_m100_spectra.png",
+        "caption": "**vid m100, mode spectra.** Welch spectra of the four control modes (`M^T w / 4`) on the fit's block geometry: 20 s Hann blocks at 50 % overlap, block-mean detrended, whole-segment blocks down to 5 s. Real telemetry (17 blocks) against samples of the fits over the same segment lengths, plus the new model's analytic mode spectrum (dashed). Shading: scored band 0.02-40 Hz; the frozen statistics are full-band regardless. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "n_real_blocks": 17,
+        "band_hz": [
+          0.02,
+          40.0
+        ],
+        "fit_nyquist_hz": null
+      }
+    },
+    "blackbird_quad": {
+      "zoom": {
+        "path": "blackbird_quad_zoom.png",
+        "caption": "**blackbird, 20 s zoom.** Real telemetry from the middle of the longest airborne segment of `clover/yawForward/maxSpeed5p0` (starting 96.5 s into the recording) against one sample of each fitted sampler, drawn on the same 100 Hz grid and plotted on one shared y-range (64-281 rev/s). Colours are the mixer rotor order. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "clover/yawForward/maxSpeed5p0",
+        "t0_s": 96.53,
+        "window_s": 20.0
+      },
+      "flight": {
+        "path": "blackbird_quad_flight.png",
+        "caption": "**blackbird, whole flight.** The complete recording `clover/yawForward/maxSpeed5p0` (209 s, 199 s of it airborne under the frozen rule, idle plateau at 72 rev/s) against `full_flight(209 s)`: ground, spin-up, warm-up idle, take-off ramp, the airborne process, landing, spin-down. Only the airborne part is fitted \u2014 the phase envelope is the shared scaffold `flight.wrap_airborne` and the fitted idle level. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "flight": "clover/yawForward/maxSpeed5p0",
+        "duration_s": 209.37,
+        "model_duration_s": 209.37,
+        "has_ground": true
+      },
+      "stats": {
+        "path": "blackbird_quad_stats.png",
+        "caption": "**blackbird, the frozen statistics.** Top: the per-rotor autocorrelation on the frozen log lag grid (0.05-10 s, 24 lags). Bottom left to right: the 4x4 zero-lag cross-correlation of the real telemetry and of both arms' samples, then the five discrepancy families. The verdict shown is the frozen rule \u2014 no family may regress and at least three must strictly improve \u2014 and reads **PASS** here (5/5 families strictly better).",
+        "verdict": true,
+        "strict": {
+          "overall_mean": true,
+          "rotor_mean": true,
+          "rotor_var": true,
+          "acf": true,
+          "xcorr": true
+        }
+      },
+      "spectra": {
+        "path": "blackbird_quad_spectra.png",
+        "caption": "**blackbird, mode spectra.** Welch spectra of the four control modes (`M^T w / 4`) on the fit's block geometry: 20 s Hann blocks at 50 % overlap, block-mean detrended, whole-segment blocks down to 5 s. Real telemetry (18 blocks) against samples of the fits over the same segment lengths, plus the new model's analytic mode spectrum (dashed). Shading: scored band 0.02-40 Hz; the frozen statistics are full-band regardless. The new-model arm here is the **round-3 fit**, not the round-4 fit the text describes: `fits/new/` has not been re-run yet. Round 3's white measurement term is re-expressed exactly as the measurement OU with `tau_e = 1 ms`, which is white on the 100 Hz grid, so the panel is a faithful picture of the round-3 model.",
+        "arms": [
+          "real",
+          "base",
+          "new"
+        ],
+        "n_real_blocks": 18,
+        "band_hz": [
+          0.02,
+          40.0
+        ],
+        "fit_nyquist_hz": null
+      }
+    }
+  },
+  "posterior": {
+    "zoom_grid": {
+      "path": "posterior_zoom_grid.png",
+      "caption": "**12 random rigs, 20 s each.** One airborne sample per posterior draw (`posterior.json` + `draws/*.json`), each panel on its own y-range because the drawn operating points span 68-561 rev/s. Rotor colours are the mixer order.",
+      "n_draws": 12
+    },
+    "flight_grid": {
+      "path": "posterior_flight_grid.png",
+      "caption": "**6 random rigs, whole flights.** `full_flight(179 s)` per draw \u2014 the length is the median over rigs of the rig's longest recording. A draw carries airborne parameters only, so every level the whole-flight wrapper needs is the mean fitted ratio over the fitted rigs times the draw's own `mu` (idle_rps = 0.31 x mu, rps_max = 1.29 x mu, rps_min = 0.70 x mu); every other phase is the shared `flight.wrap_airborne` scaffold.",
+      "duration_s": 178.6,
+      "level_ratios": {
+        "idle_rps": 0.308,
+        "rps_min": 0.6989,
+        "rps_max": 1.2851
+      }
+    },
+    "planes": {
+      "path": "posterior_planes.png",
+      "caption": "**Where the draws sit relative to the rigs.** Three planes of the rig vector: the operating point against the relative airborne spread, the collective mode's oscillator (`f0`, `zeta`), and its slow component (`tau_slow`, `sigma_slow`). Red diamonds are the 7 fitted rigs, grey dots the 12 draws. The posterior is a diagonal Gaussian in scale-free coordinates with a floored per-coordinate width, so the draws must spread wider than the rigs \u2014 with 7 drones the raw spread would be far too tight to sample from.",
+      "n_rigs": 7,
+      "n_draws": 12
+    }
+  },
+  "skipped": {},
+  "fit_provenance": {
+    "michaels": "current",
+    "dregon": "round-3 fit re-expressed in the current parameterisation (white sigma_w = 0.002309 rev/s as the measurement OU at tau_e = 0.001 s); not loadable by the current model (KeyError('tau_e'))",
+    "neurobem_quad": "round-3 fit re-expressed in the current parameterisation (white sigma_w = 0.0003168 rev/s as the measurement OU at tau_e = 0.001 s); not loadable by the current model (KeyError('tau_e'))",
+    "pitcn_quad": "round-3 fit re-expressed in the current parameterisation (white sigma_w = 0.9832 rev/s as the measurement OU at tau_e = 0.001 s); not loadable by the current model (KeyError('tau_e'))",
+    "nanobench_cf21b": "round-3 fit re-expressed in the current parameterisation (white sigma_w = 0.0001588 rev/s as the measurement OU at tau_e = 0.001 s); not loadable by the current model (KeyError('tau_e'))",
+    "vid_m100": "round-3 fit re-expressed in the current parameterisation (white sigma_w = 0.0008764 rev/s as the measurement OU at tau_e = 0.001 s); not loadable by the current model (KeyError('tau_e'))",
+    "blackbird_quad": "round-3 fit re-expressed in the current parameterisation (white sigma_w = 0.001015 rev/s as the measurement OU at tau_e = 0.001 s); not loadable by the current model (KeyError('tau_e'))"
+  },
+  "fit_facts": {
+    "michaels": {
+      "rps_min": 54.81968786666666,
+      "rps_max": 100.806706,
+      "fs": 100.0,
+      "fit_rate_hz": 25.0,
+      "nll": -7512.5394182994105,
+      "n_iter": 701,
+      "wall_s": 535.4523839059984,
+      "n_blocks": 16,
+      "n_scored": 9871,
+      "n_flights": 4,
+      "n_restarts": 4,
+      "legacy": false
+    },
+    "dregon": {
+      "rps_min": 0.0,
+      "rps_max": Infinity,
+      "fs": 100.0,
+      "fit_rate_hz": NaN,
+      "nll": -349038.54838098295,
+      "n_iter": 478,
+      "wall_s": 177.04258963398752,
+      "n_blocks": 28,
+      "n_scored": 0,
+      "n_flights": 10,
+      "n_restarts": 8,
+      "legacy": true
+    },
+    "neurobem_quad": {
+      "rps_min": 0.0,
+      "rps_max": Infinity,
+      "fs": 100.0,
+      "fit_rate_hz": NaN,
+      "nll": -458400.45494131325,
+      "n_iter": 389,
+      "wall_s": 1496.8940329610195,
+      "n_blocks": 180,
+      "n_scored": 0,
+      "n_flights": 247,
+      "n_restarts": 8,
+      "legacy": true
+    },
+    "pitcn_quad": {
+      "rps_min": 0.0,
+      "rps_max": Infinity,
+      "fs": 100.0,
+      "fit_rate_hz": NaN,
+      "nll": -803331.458345712,
+      "n_iter": 297,
+      "wall_s": 452.83481028300594,
+      "n_blocks": 247,
+      "n_scored": 0,
+      "n_flights": 68,
+      "n_restarts": 8,
+      "legacy": true
+    },
+    "nanobench_cf21b": {
+      "rps_min": 0.0,
+      "rps_max": Infinity,
+      "fs": 100.0,
+      "fit_rate_hz": NaN,
+      "nll": -230497.91231300845,
+      "n_iter": 173,
+      "wall_s": 199.40355285501573,
+      "n_blocks": 44,
+      "n_scored": 0,
+      "n_flights": 15,
+      "n_restarts": 8,
+      "legacy": true
+    },
+    "vid_m100": {
+      "rps_min": 0.0,
+      "rps_max": Infinity,
+      "fs": 100.0,
+      "fit_rate_hz": NaN,
+      "nll": -311537.8323755922,
+      "n_iter": 122,
+      "wall_s": 220.65606297799968,
+      "n_blocks": 28,
+      "n_scored": 0,
+      "n_flights": 4,
+      "n_restarts": 8,
+      "legacy": true
+    },
+    "blackbird_quad": {
+      "rps_min": 0.0,
+      "rps_max": Infinity,
+      "fs": 100.0,
+      "fit_rate_hz": NaN,
+      "nll": -191883.96036820527,
+      "n_iter": 358,
+      "wall_s": 132.26201283500995,
+      "n_blocks": 18,
+      "n_scored": 0,
+      "n_flights": 1,
+      "n_restarts": 8,
+      "legacy": true
+    }
+  },
+  "explore": [
+    {
+      "path": "explore_dregon_channel_fidelity.png",
+      "caption": "DREGON's `motor.measured` is a ~45 Hz sample-and-hold, not a 1002 Hz measurement: 95.3 % of consecutive native samples are bit-identical and the measured-minus-command residual accounts for 106 % of the 5-15 Hz band variance. Above ~5 Hz the channel shows its own staircase.",
+      "source": "results/rps_traj/explore/dregon_channel_fidelity.png"
+    },
+    {
+      "path": "explore_michaels_quant.png",
+      "caption": "Michael's telemetry has the opposite defect: 1 RPM amplitude steps (0.02 % of the operating point) but only a 29.41 Hz log rate, partly held (P(delta = 0) ~ 0.42, median hold 68 ms). The 12-14.7 Hz band sits 2000x above the quantisation floor, so the near-Nyquist content is folding and hold-resampling, not shaft motion.",
+      "source": "results/rps_traj/explore/michaels_quant.png"
+    },
+    {
+      "path": "explore_michaels_psd.png",
+      "caption": "A DJI M100's rotor speed is a nearly featureless power law: the best hump in the band is +2.0 dB at 8.70 Hz with no -3 dB crossing inside the band, broadband slope -20.9 dB/decade.",
+      "source": "results/rps_traj/explore/michaels_psd.png"
+    },
+    {
+      "path": "explore_dregon_room2_command_psd.png",
+      "caption": "The only clean resonance in the corpus is in the DREGON command channel: +4.3 dB at 3.00 Hz, -3 dB width 2.80-3.30 Hz (Q ~ 6), second peak 6.7 dB. That is the MikroKopter attitude loop. A resonance must therefore be a per-rig parameter that is allowed to vanish.",
+      "source": "results/rps_traj/explore/dregon_room2_command_psd.png"
+    },
+    {
+      "path": "explore_michaels_eigen.png",
+      "caption": "The four control modes do not share a spectral shape. The collective and yaw modes carry 78 % of the rotor variance, roll and pitch sit ~10 dB below across the whole band, and the leading eigenvector is a collective/yaw mixture (cosines 0.55 / 0.67), not a mixer column.",
+      "source": "results/rps_traj/explore/michaels_eigen.png"
+    },
+    {
+      "path": "explore_michaels_acf.png",
+      "caption": "The autocorrelation has two time scales \u2014 0.98 at 0.02 s, 0.82 at 0.1 s, 0.16 at 1 s, 0.007 at 10 s, 1/e crossing 0.43 s \u2014 so no single exponential (AR(1)) fits it.",
+      "source": "results/rps_traj/explore/michaels_acf.png"
+    }
+  ],
+  "posterior_source": "stored `posterior.json` is unreadable by the current model (ValueError('cannot reshape array of size 30 into shape (31,)')); refitted here from the 7 loadable fits",
+  "posterior_order": [
+    "zoom_grid",
+    "flight_grid",
+    "planes"
+  ],
+  "posterior_rigs": [
+    "blackbird_quad",
+    "dregon",
+    "michaels",
+    "nanobench_cf21b",
+    "neurobem_quad",
+    "pitcn_quad",
+    "vid_m100"
+  ],
+  "posterior_template_rig": "blackbird_quad",
+  "draws_source": "12 of 12 from `draws/*.json`, 12 re-expressed from round 3",
+  "n_figures": 37
+}

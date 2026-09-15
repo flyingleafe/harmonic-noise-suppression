@@ -1592,6 +1592,77 @@ SPECS: dict[str, dict[str, Any]] = {
         "note": "Adopt-in-place; raw via the registry's pinned http spec.",
         "gen": {"recipe_version": 1, "source": "AVQ", "raw": {"kind": "download"}},
     },
+    # ── Per-rotor telemetry frames (rps only, no audio) ─────────────────────
+    #
+    # The rps-trajectory campaign's public rigs. Each is derivable: the raw
+    # tree comes from the registry's custom fetcher and the builder IS the
+    # recipe, so `recipe_version` tracks the builder's conventions (units,
+    # clock choice, rotor merge) and nothing else.
+    "NeuroBEM-frames": {
+        "generator": "source_frames",
+        "adopt_only": False,
+        "note": "Rig neurobem_quad (UZH RPG 0.772 kg agile quad): 247 "
+        "Vicon-dropout-free segments over 95 flights, 75.3 min, 400 Hz ESC "
+        "feedback (4 segments of one flight are logged at 164 Hz — group by "
+        "meta.system.native_rate_hz, never assume 400). rps = published "
+        "'mot k' [rad/s] / 2*pi. LICENCE CAVEAT: none published — the project "
+        "page carries only a UZH copyright line and a citation request.",
+        "gen": {"recipe_version": 1, "source": "NeuroBEM", "raw": {"kind": "download"}},
+    },
+    "Blackbird-frames": {
+        "generator": "source_frames",
+        "adopt_only": False,
+        "note": "Rig blackbird_quad (MIT Blackbird): rps = the optical motor "
+        "encoders' MotorRPM / 60 on the message header clock, ~187 Hz event "
+        "index. The canonical host blackbird-dataset.mit.edu has been offline "
+        "since ~2024 and the 4.8 TB academic-torrent carries no telemetry, so "
+        "the fetch currently recovers 1 of the pinned 45-flight subset "
+        "(clover/yawForward/maxSpeed5p0, 209 s) from a third-party mirror; the "
+        "other 44 resolve unchanged the day MIT restores the host (the flight "
+        "list IS the recipe, so recipe_version stays 1). LICENCE CAVEAT: MIT "
+        "licence covers the tooling only; the data is 'released for research "
+        "use' with no dataset licence document.",
+        "gen": {"recipe_version": 1, "source": "Blackbird", "raw": {"kind": "download"}},
+    },
+    "VID-frames": {
+        "generator": "source_frames",
+        "adopt_only": False,
+        "note": "Rigs vid_m100 (4 flights: indoor loadless hover, indoor "
+        "loaded 8-character, indoor rope-pulled random, outdoor 8-character "
+        "with yaw) and vid_m3508_bench (4 single-motor bench runs, n_rotors=1 "
+        "— NOT a campaign rig). rps = M3508/C620 CAN feedback rpm/60 at ~1 kHz "
+        "on the MCU hardware clock, rotors 2..4 interpolated onto rotor 1's "
+        "stamps (<0.3 ms apart); dropouts and the 3-8 corrupt CAN samples per "
+        "flight stay NaN. rps_command is target_rpm at ~100 Hz. The fetcher "
+        "streams the publisher's 5-17 GB camera bags over HTTP and keeps only "
+        "the motor topics (data/VID/*.motors.npz, 22 MB). LICENCE CAVEAT: "
+        "AGPL-3.0 covers the tools; the data is 'released for research use'.",
+        "gen": {"recipe_version": 1, "source": "VID", "raw": {"kind": "download"}},
+    },
+    "NanoBench-frames": {
+        "generator": "source_frames",
+        "adopt_only": False,
+        "note": "Rig nanobench_cf21b (Crazyflie 2.1 Brushless, 45 g): 15 "
+        "mocap-room flights (square/random/chirp train, melon test), 750 s, "
+        "exact 100 Hz grid. rps = the published mechanical rad/s / 2*pi (the "
+        "publisher already divided the DSHOT eRPM by 6 pole pairs). LICENCE "
+        "CAVEAT: the repository has no licence file and GitHub declares none "
+        "(checked 2026-09-15); used here for research with attribution.",
+        "gen": {"recipe_version": 1, "source": "NanoBench", "raw": {"kind": "download"}},
+    },
+    "PITCN-frames": {
+        "generator": "source_frames",
+        "adopt_only": False,
+        "note": "Rig pitcn_quad (NYU ARPL 'dragonfly17', 0.25 kg): 68 "
+        "trajectory bags, 61.4 min, uniform 100 Hz. rps = the 'float64[4] rpm' "
+        "field of /dragonfly17/motor_rpm / 60 (ESC feedback, not the "
+        "controller command). The PI-TCN README's own Drive links are dead, so "
+        "the fetcher pulls the 68 original bags from the authors' "
+        "long-horizon-dynamics data.zip. LICENCE CAVEAT: no dataset licence is "
+        "published; the releasing code repositories are GPL-3.0/MIT and ask "
+        "that the RA-L 2022 paper be cited.",
+        "gen": {"recipe_version": 1, "source": "PI-TCN", "raw": {"kind": "download"}},
+    },
     # ── Purpose-built subsets / companions ───────────────────────────────────
     "AVQ-egonoise": {
         "generator": "frame_subset",

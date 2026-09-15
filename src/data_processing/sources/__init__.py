@@ -36,6 +36,7 @@ import tdseries as td
 from data_processing.sources import (
     aerosonicdb,
     avq,
+    blackbird,
     dregon,
     droneaudio,
     hornbase,
@@ -43,7 +44,11 @@ from data_processing.sources import (
     kaist,
     michaels,
     mimii,
+    nanobench,
+    neurobem,
+    pitcn,
     spcup19,
+    vid,
 )
 from data_processing.sources._common import LAYOUT
 
@@ -197,6 +202,53 @@ REGISTRY: dict[str, SourceDataset] = {
             provenance=avq.PROVENANCE,
             download=DownloadSpec("http", {"urls": {"avq.zip": avq.URL}}, extract=True),
             builder=avq.build,
+        ),
+        # ── Per-rotor telemetry (no audio) ────────────────────────────────
+        #
+        # Public rotor-speed corpora for the rps-trajectory campaign: every
+        # frame carries `rps` (rev/s, dims ("rotor", "time")) + `meta`, no
+        # audio. Each has a custom fetcher (none of these publishers offers a
+        # pinnable zenodo/HF/mendeley artifact), so the raw tree materializes
+        # into .cache/source_raw/<name> and the builder IS the recipe.
+        SourceDataset(
+            name="NeuroBEM",
+            provenance=neurobem.PROVENANCE,
+            fetcher=neurobem.download_neurobem,
+            builder=neurobem.build,
+            frames_dataset="NeuroBEM-frames",
+            modality="telemetry",
+        ),
+        SourceDataset(
+            name="Blackbird",
+            provenance=blackbird.PROVENANCE,
+            fetcher=blackbird.download_blackbird,
+            builder=blackbird.build,
+            frames_dataset="Blackbird-frames",
+            modality="telemetry",
+        ),
+        SourceDataset(
+            name="VID",
+            provenance=vid.PROVENANCE,
+            fetcher=vid.download_vid,
+            builder=vid.build,
+            frames_dataset="VID-frames",
+            modality="telemetry",
+        ),
+        SourceDataset(
+            name="NanoBench",
+            provenance=nanobench.PROVENANCE,
+            fetcher=nanobench.download_nanobench,
+            builder=nanobench.build,
+            frames_dataset="NanoBench-frames",
+            modality="telemetry",
+        ),
+        SourceDataset(
+            name="PI-TCN",
+            provenance=pitcn.PROVENANCE,
+            fetcher=pitcn.download_pitcn,
+            builder=pitcn.build,
+            frames_dataset="PITCN-frames",
+            modality="telemetry",
         ),
         # ── Raw-only dload datasets (consumed as files; no frames builder) ──
         SourceDataset(

@@ -287,7 +287,47 @@ plain pinned uploads and are **not** re-derived — `derivations.HISTORICAL_PINS
 (V1 mono, Paper 2 baseline; V2 motor combos; V3 per-channel mono; `test`
 smoke recipe). Recipes are in git history (the deleted creation CLIs).
 
-## Pinned catalog (`dload.lock` — 49 datasets)
+## Per-rotor telemetry rigs (rps only, no audio)
+
+The public rotor-speed corpora of the rps-trajectory campaign. Every frame
+carries `rps` (rev/s, dims `("rotor", "time")`) + `meta` and **no audio**;
+registry entries are `modality="telemetry"` with a custom fetcher (no
+publisher here offers a pinnable zenodo/HF/mendeley artifact), so the raw tree
+materializes into `.cache/source_raw/<name>` and the builder IS the recipe.
+`experiments.rps_traj.data.load_rig` reads them and permutes the rotor axis to
+the mixer order `[RFront, LFront, LBack, RBack]` (`ROTOR_TO_MIXER`).
+
+| Dataset | Rig | Flights | Airborne | Native rate | Speed source | Licence |
+|---|---|---|---|---|---|---|
+| `NeuroBEM-frames` | `neurobem_quad` (UZH RPG, 0.772 kg, agile) | 247 dropout-free segments over 95 flights (75.3 min recorded) | 2479 s | 400 Hz (4 segments of one flight: 164 Hz) | `esc_feedback` (betaflight blackbox, `mot k` rad/s ÷ 2π) | **none stated** — project page carries only a UZH copyright line + citation request |
+| `Blackbird-frames` | `blackbird_quad` (MIT Blackbird) | **1 of the pinned 45** (209 s) — canonical host offline since ~2024 | 199 s | ~187 Hz event stamps | `tachometer` (custom optical motor encoders, RPM ÷ 60) | MIT (tooling only); data "released for research use" |
+| `VID-frames` | `vid_m100` (DJI M100 + M3508, 4 flights) + `vid_m3508_bench` (4 single-motor bench runs, `n_rotors=1`, **not a campaign rig**) | 4 + 4 | 397 s (`vid_m100`) | ~930 Hz event stamps (MCU hardware clock) | `esc_feedback` (M3508/C620 CAN, rpm ÷ 60) | AGPL-3.0 (tools only); data "released for research use" |
+| `NanoBench-frames` | `nanobench_cf21b` (Crazyflie 2.1 Brushless, 45 g) | 15 (750 s recorded; melon = test split) | 668 s | 100 Hz (exact grid) | `esc_feedback` (DSHOT eRPM ÷ 6 pole pairs, published as rad/s ÷ 2π) | **none** — no licence file, GitHub declares none (2026-09-15) |
+| `PITCN-frames` | `pitcn_quad` (NYU ARPL `dragonfly17`, 0.25 kg) | 68 bags (61.4 min recorded) | 3345 s | 100 Hz (uniform) | `esc_feedback` (`/dragonfly17/motor_rpm` `float64[4] rpm` ÷ 60) | **none published**; releasing repos are GPL-3.0/MIT + citation request |
+
+Access notes worth keeping (all verified 2026-09-15, full evidence in each
+module's `PROVENANCE`):
+
+- **Blackbird** — `blackbird-dataset.mit.edu` is NXDOMAIN, the legacy S3
+  buckets return `AccessDenied`, and the 4.79 TB academic torrent contains
+  only camera `.tar`/`.mp4` members (zero telemetry). The one recoverable
+  flight (`clover/yawForward/maxSpeed5p0`) comes from a third-party mirror of
+  the publisher's own CSV export. The other 44 flights of the pinned subset
+  resolve with no code change the day MIT restores the host, so
+  `recipe_version` stays 1 — the flight list *is* the recipe.
+- **VID** — the publisher bundles D435 camera streams into every flight bag
+  (5–17 GB each) and offers no telemetry-only variant, so the fetcher *streams*
+  each bag over HTTP through its own rosbag1 reader and stores only the motor
+  records (`data/VID/*.motors.npz`, 22 MB for 8 sequences).
+- **PI-TCN** — both Drive links in the README are dead (HTTP 404, not a quota
+  interstitial); the 68 original bags are fetched from the authors' follow-up
+  repo `arplaboratory/long-horizon-dynamics` (`data.zip`).
+- **NeuroBEM** — only `processed_data.zip` + `Flights.txt` are fetched (the
+  zip is deleted after extraction); `raw_data/`, `pdf/`, `predictions/` are
+  not. Four segments of `2021-02-18-16-43-54` are logged at 164 Hz, not 400:
+  **group by `meta.system.native_rate_hz`**, never assume the nominal rate.
+
+## Pinned catalog (`dload.lock` — 54 datasets)
 
 Tests assert every `dload.lock` name is a `SPECS` entry, a `sources.REGISTRY`
 entry, or listed in `HISTORICAL_PINS`.
@@ -326,6 +366,11 @@ entry, or listed in `HISTORICAL_PINS`.
   `{recording_id: 16-hex SHA-256 prefix}` manifest, verified at generation, so
   a re-refinement mints a new derivation identity rather than reusing a
   memoized snapshot.
+- **Per-rotor telemetry rigs** (5, `tdframe-v1`, `rps` only — no audio;
+  inventory + licence caveats in "Per-rotor telemetry rigs" above):
+  `NeuroBEM-frames` (247), `PITCN-frames` (68), `NanoBench-frames` (15),
+  `VID-frames` (8), `Blackbird-frames` (1). All derivable
+  (`recipe_version 1`, generator `source_frames`, `raw: {kind: download}`).
 - **External harmonic-noise datasets** (10, `tdframe-v1`; registry
   `src/data_processing/sources/`, driver `scripts/derive.py`, plan
   `docs/external-datasets-plan.md`):
