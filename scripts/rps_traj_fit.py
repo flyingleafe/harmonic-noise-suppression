@@ -353,6 +353,18 @@ def main() -> int:
     if args.round:
         snapshot = _write(out / "rounds" / f"{args.round}.json", summary)
         print(f"wrote {snapshot}")
+        # ALSO one record per rig.  The campaign's expensive rounds run as one
+        # job per rig, and seven jobs would each write their own single-rig
+        # summary.json over the last one; per-rig records let
+        # scripts/rps_traj_merge_round.py rebuild the combined summary exactly,
+        # including the provenance (NLL, iterations, wall time, retention) that
+        # only the job that did the fit knows.
+        for record in records:
+            part = _write(
+                out / "rounds" / args.round / f"{record['rig']}.json",
+                json.dumps(record, indent=2, allow_nan=False),
+            )
+            print(f"wrote {part}")
     return 0 if (overall or not scored) else 1
 
 
