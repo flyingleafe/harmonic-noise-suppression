@@ -10,10 +10,11 @@ from __future__ import annotations
 import math
 import statistics
 from collections import deque
-from collections.abc import Mapping, Sized
+from collections.abc import Callable, Mapping, Sized
 from dataclasses import dataclass
 from typing import Any, cast
 
+import tdseries as td
 import torch
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import ConcatDataset, Dataset
@@ -137,6 +138,42 @@ def build_validation_plan(cfg: Any) -> ValidationPlan:
     )
 
 
+RPSReadout = Callable[[torch.nn.Module, td.Frame, dict[str, torch.Tensor]], torch.Tensor]
+"""``(model, pred_frame, inputs) -> (B, R, T)`` rev/s on the STFT frame grid."""
+
+
+def _direct_readout(
+    model: torch.nn.Module, pred_frame: td.Frame, inputs: dict[str, torch.Tensor]
+) -> torch.Tensor:
+    return get_tensor(pred_frame, "rps_pred")
+
+
+def _salience_readout(
+    model: torch.nn.Module, pred_frame: td.Frame, inputs: dict[str, torch.Tensor]
+) -> torch.Tensor:
+    # The model's deployed decoder (``SalienceRPSPredictor.decode_logits``):
+    # shared-map tracking or per-layer CRF, on the logits' device.
+    return model.decode_logits(  # type: ignore[operator]
+        get_tensor(pred_frame, "salience"), int(inputs["mixture"].shape[-1])
+    )
+
+
+_READOUTS: dict[str, RPSReadout] = {
+    "rps_prediction": _direct_readout,
+    "salience_rps": _salience_readout,
+}
+
+
+def rps_readout_for(task_name: str) -> RPSReadout:
+    """The readout that turns a task's prediction Frame into ``(B, R, T)`` rev/s."""
+    try:
+        return _READOUTS[task_name]
+    except KeyError:
+        raise ValueError(
+            f"multi-validation supports tasks {sorted(_READOUTS)}, got {task_name!r}"
+        ) from None
+
+
 def validate_rps(
     *,
     model: torch.nn.Module,
@@ -147,6 +184,7 @@ def validate_rps(
     device: torch.device,
     amp: bool,
     amp_dtype: torch.dtype | None,
+    readout: RPSReadout = _direct_readout,
 ) -> tuple[dict[str, float], float]:
     """Run one batched inference pass and reduce all RPS scores on the GPU."""
     model.eval()
@@ -167,7 +205,7 @@ def validate_rps(
                 outputs = codec.call_model(model, inputs)
                 pred_frame = codec.to_frame(outputs, batch)
                 loss = loss_fn(pred_frame, batch)
-            pred = get_tensor(pred_frame, "rps_pred")
+            pred = readout(model, pred_frame, inputs)
             target = get_tensor(batch, "rps")
             per_sample = batched_pit_mae(pred, target).to(torch.float64)
             batch_size = int(per_sample.shape[0])
@@ -207,7 +245,9 @@ __all__ = [
     "MULTI_VALIDATION_STATE_KEY",
     "ResolvedView",
     "ValidationPlan",
+    "RPSReadout",
     "build_validation_plan",
+    "rps_readout_for",
     "validate_rps",
     "MultiValidationVerdict",
     "MultiMetricController",

@@ -519,230 +519,8 @@ def roundtrip_error(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Segment-aware trajectory extraction
+# Trajectory extraction (the shared-map tracker)
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-def _extract_peaks_per_frame(
-    salience: np.ndarray,
-    freqs: np.ndarray,
-    threshold: float = 0.0,
-    min_spacing: int = 2,
-) -> list:
-    """Extract per-frame peaks from a salience map.
-
-    For binary salience (ground truth), every active bin is a peak.
-    For soft predictions, local maxima above threshold are used.
-
-    Args:
-        salience: (n_bins, T) array
-        freqs: (n_bins,) frequency grid
-        threshold: minimum activation
-        min_spacing: minimum bin spacing between peaks (for soft salience)
-
-    Returns:
-        List of length T, each entry is (n_peaks_t,) float array of frequencies.
-    """
-    n_bins, T = salience.shape
-    peaks = []
-
-    for t in range(T):
-        col = salience[:, t]
-        active = col > threshold
-
-        if not active.any():
-            peaks.append(np.array([], dtype=np.float64))
-            continue
-
-        # Check if binary (all values are 0 or 1 at active positions)
-        vals = col[active]
-        is_binary = np.all((vals == 0.0) | (vals == 1.0))
-
-        if is_binary:
-            peaks.append(freqs[active])
-        else:
-            # Soft salience: use local maxima
-            local_max = np.zeros(n_bins, dtype=bool)
-            for b in range(1, n_bins - 1):
-                if col[b] > threshold and col[b] >= col[b - 1] and col[b] >= col[b + 1]:
-                    local_max[b] = True
-            # Suppress weak neighbors within min_spacing
-            lm_bins = np.where(local_max)[0]
-            lm_vals = col[lm_bins]
-            order = np.argsort(-lm_vals)
-            keep = np.ones(len(lm_bins), dtype=bool)
-            for i in range(len(order)):
-                if not keep[order[i]]:
-                    continue
-                b_i = lm_bins[order[i]]
-                for j in range(i + 1, len(order)):
-                    if abs(lm_bins[order[j]] - b_i) < min_spacing:
-                        keep[order[j]] = False
-            peaks.append(freqs[lm_bins[keep]])
-
-    return peaks
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Robust Hungarian-based tracking
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-def _hungarian_tracking(
-    peaks_per_frame: list,
-    num_rotors: int,
-    freqs: np.ndarray,
-    max_jump_bins: int = 3,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Track rotors using optimal (Hungarian) frame-to-frame assignment.
-
-    This replaces the greedy nearest-neighbour assignment with minimum-cost
-    bipartite matching, which avoids unnecessary identity swaps that the
-    greedy algorithm can introduce when two trajectories are close in
-    frequency.
-
-    Parameters
-    ----------
-    peaks_per_frame :
-        List of (n_peaks_t,) frequency arrays per frame.
-    num_rotors :
-        Number of rotor tracks to maintain.
-    freqs :
-        (n_bins,) full frequency grid (used for merge detection).
-    max_jump_bins :
-        Maximum number of CQT bins a rotor is allowed to "jump" between
-        consecutive frames.  Assignments beyond this distance are rejected
-        and the previous frequency is carried forward.  This suppresses
-        tracking jitter caused by adjacent-bin ambiguity.
-
-    Returns
-    -------
-    rps : (num_rotors, T)
-        A frame with no peak above the threshold decodes to 0.0 rev/s for
-        every rotor (silence == zero rotor speed), not to a hold-over.
-    merge_mask : (T,) bool  — True at frames where two or more active
-                 trajectories share the same bin.
-    """
-    from scipy.optimize import linear_sum_assignment
-
-    K = num_rotors
-    T = len(peaks_per_frame)
-    rps = np.full((K, T), np.nan, dtype=np.float64)
-    current = np.full(K, np.nan, dtype=np.float64)
-    merge_mask = np.zeros(T, dtype=bool)
-
-    for t in range(T):
-        p_freqs = np.asarray(peaks_per_frame[t], dtype=np.float64)
-        n_peaks = len(p_freqs)
-
-        # ── No peaks: the frame is dark, thus every rotor is STOPPED ──
-        # Project convention (docs/experiments/honest-base-frontends.md):
-        # silence == zero rotor speed. A dark frame decodes to 0.0 rev/s for
-        # every rotor — never a hold-over of the last speed and never NaN.
-        # ``current`` is NOT cleared, thus a momentary dropout does not reset
-        # track identity; only the emitted value is zero.
-        if n_peaks == 0:
-            rps[:, t] = 0.0
-            continue
-
-        # ── First frame or all tracks dead ──
-        if t == 0 or np.all(np.isnan(current)):
-            order = np.argsort(p_freqs)
-            n_use = min(K, n_peaks)
-            for i in range(n_use):
-                current[i] = p_freqs[order[i]]
-                rps[i, t] = current[i]
-            for i in range(n_use, K):
-                current[i] = p_freqs[order[0]]
-                rps[i, t] = current[i]
-            continue
-
-        # ── Build cost matrix ──
-        active = ~np.isnan(current)
-        n_active = active.sum()
-
-        # Cost matrix: (n_active, n_peaks)
-        act_freqs = current[active]
-        cost = np.full((n_active, n_peaks), 1e12, dtype=np.float64)
-        for i in range(n_active):
-            for j in range(n_peaks):
-                cost[i, j] = abs(act_freqs[i] - p_freqs[j])
-
-        row_ind, col_ind = linear_sum_assignment(cost)
-
-        # ── Apply assignments (with max-jump rejection) ──
-        active_indices = np.where(active)[0]
-
-        # Track which peaks are claimed by multiple active rotors
-        peak_claimed_by = {}  # peak_idx → [rotor_indices]
-
-        for ri, pj in zip(row_ind, col_ind):
-            if cost[ri, pj] >= 1e11:
-                continue  # dummy assignment
-            orig_r = active_indices[ri]
-
-            # Max-jump check
-            dist_bins = abs(freqs - p_freqs[pj]).argmin()
-            prev_bin = (
-                abs(freqs - current[orig_r]).argmin() if not np.isnan(current[orig_r]) else -1
-            )
-            if prev_bin >= 0 and abs(dist_bins - prev_bin) > max_jump_bins:
-                # Reject: carry forward previous value
-                rps[orig_r, t] = current[orig_r]
-                continue
-
-            peak_claimed_by.setdefault(int(pj), []).append(orig_r)
-            current[orig_r] = p_freqs[pj]
-            rps[orig_r, t] = p_freqs[pj]
-
-        # Detect merges: any peak claimed by ≥ 2 rotors, OR
-        # more active rotors than available peaks (unison/stripe).
-        for _pj, rotors in peak_claimed_by.items():
-            if len(rotors) >= 2:
-                merge_mask[t] = True
-        # Also merge when we have fewer peaks than active rotors
-        if n_peaks < n_active and n_peaks > 0:
-            merge_mask[t] = True
-
-        # Carry forward unassigned active rotors
-        for r in range(K):
-            if not np.isnan(current[r]) and np.isnan(rps[r, t]):
-                rps[r, t] = current[r]
-
-        # Assign unclaimed peaks to dead rotors
-        dead = np.where(np.isnan(current))[0]
-        assigned_pj = set(col_ind[cost[row_ind, col_ind] < 1e11])
-        unassigned = [j for j in range(n_peaks) if j not in assigned_pj]
-        for i, pj in enumerate(unassigned[: len(dead)]):
-            current[dead[i]] = p_freqs[pj]
-            rps[dead[i], t] = p_freqs[pj]
-
-    return rps, merge_mask
-
-
-def _detect_adjacent_merges(rps: np.ndarray, freqs: np.ndarray) -> np.ndarray:
-    """Post-hoc detection: frames where two trajectories are in adjacent bins.
-
-    This catches "stripe" merges — trajectories that are close but not
-    identical after tracking.  These are ambiguous identity points.
-    """
-    K, T = rps.shape
-    mask = np.zeros(T, dtype=bool)
-    for t in range(T):
-        f = rps[:, t]
-        valid = ~np.isnan(f)
-        if valid.sum() < 2:
-            continue
-        fv = f[valid]
-        bins = np.array([abs(freqs - fv[i]).argmin() for i in range(len(fv))], dtype=int)
-        for i in range(len(bins)):
-            for j in range(i + 1, len(bins)):
-                if abs(bins[i] - bins[j]) <= 1:
-                    mask[t] = True
-                    break
-            if mask[t]:
-                break
-    return mask
 
 
 def salience_to_rps_segmented(
@@ -757,9 +535,11 @@ def salience_to_rps_segmented(
     freqs: np.ndarray | None = None,
     threshold: float = 0.0,
     max_jump_bins: int = 3,
-    merge_mode: str = "same_bin",
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Extract RPS trajectories with merge-point detection via Hungarian tracking.
+    """Threshold + peaks + frame-to-frame assignment tracking on the map's device.
+
+    The tracker itself is :func:`models.salience_tracker.track_shared_map`;
+    this resolves the frequency grid and accepts an unbatched map.
 
     Args:
         salience: (B, n_bins, T) or (n_bins, T) salience map.
@@ -768,23 +548,21 @@ def salience_to_rps_segmented(
         n_bins, bins_per_octave: explicit grid override (non-integer-octave
             grids, e.g. Basic Pitch contour). When given, the frequency grid is
             taken from these and ``n_octaves``/``over_sample`` are ignored.
+        freqs: explicit grid (e.g. a linear output grid); overrides the rest.
         threshold: Minimum activation for peak detection (0.0 for binary).
-        max_jump_bins: Max CQT bins a rotor can jump between frames.
-        merge_mode: ``"same_bin"`` (default) — only exact same-bin collisions
-                    are merge points.  ``"adjacent"`` — same or adjacent bins.
+        max_jump_bins: Max grid bins a rotor can jump between frames.
 
     Returns:
-        rps: (B, num_rotors, T) or (num_rotors, T) reconstructed RPS (Hz).
+        rps: (B, num_rotors, T) or (num_rotors, T) reconstructed RPS (rev/s).
             Frames with no peak above ``threshold`` decode to 0.0 for every
             rotor — the project-wide silence == zero-rotor-speed convention.
-        merge_mask: (B, T) or (T,) bool — merge-point frames.
+        merge_mask: (B, T) or (T,) bool — lit frames with fewer peaks than rotors.
     """
+    from models.salience_tracker import track_shared_map
+
     was_batched = salience.dim() == 3
     if not was_batched:
         salience = salience.unsqueeze(0)
-
-    B, _n_bins, T = salience.shape
-    # Explicit ``freqs`` (e.g. a linear output grid) overrides the geometric grid.
     if freqs is None:
         freqs = cqt_freq_grid(
             fmin=fmin,
@@ -793,32 +571,12 @@ def salience_to_rps_segmented(
             n_bins=n_bins,
             bins_per_octave=bins_per_octave,
         )
-    else:
-        freqs = np.asarray(freqs, dtype=np.float64)
-
-    salience_np = salience.cpu().numpy()
-
-    rps_list, mask_list = [], []
-    for b in range(B):
-        peaks = _extract_peaks_per_frame(salience_np[b], freqs, threshold)
-        rps_np, merge_np = _hungarian_tracking(
-            peaks, num_rotors, freqs, max_jump_bins=max_jump_bins
-        )
-
-        if merge_mode == "adjacent":
-            adj_merge = _detect_adjacent_merges(rps_np, freqs)
-            merge_np = merge_np | adj_merge
-
-        rps_list.append(torch.from_numpy(rps_np).float().to(salience.device))
-        mask_list.append(torch.from_numpy(merge_np).to(salience.device))
-
-    rps = torch.stack(rps_list, dim=0)
-    merge_mask = torch.stack(mask_list, dim=0)
-
+    rps, merge_mask = track_shared_map(
+        salience, freqs, num_rotors, threshold=threshold, max_jump_bins=max_jump_bins
+    )
     if not was_batched:
         rps = rps.squeeze(0)
         merge_mask = merge_mask.squeeze(0)
-
     return rps, merge_mask
 
 

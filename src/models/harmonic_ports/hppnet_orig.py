@@ -281,7 +281,9 @@ class CQTLogSpecgram(nn.Module):
         if audio.dim() == 3:
             audio = audio.squeeze(1)
         mag = self.cqt(audio)  # (B, F, T)
-        return self.amplitude_to_db(mag).transpose(1, 2)  # (B, T, F)
+        # A leading channel axis makes ``top_db`` floor per clip rather than
+        # over the whole batch (see `harmof0_orig.WaveformToLogSpecgram`).
+        return self.amplitude_to_db(mag.unsqueeze(1)).squeeze(1).transpose(1, 2)  # (B, T, F)
 
 
 class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):

@@ -1570,3 +1570,223 @@ The full-panel validator currently accepts direct `rps_prediction` outputs.
 The next task is the deferred salience seam: vectorized GPU decoding from
 salience/layer outputs to RPS, exact MAE-optimal PIT parity, then the same
 views/controller/checkpoint path. Do not launch salience reruns before it.
+
+## Unified rerun submission and the salience seam — 2026-09-08
+
+Branch `unified-runs` (from `main` `f3b0e90`). All sixteen
+`real_r{1,2,3,4}_{sc,scv2,tm,gru}_unified` runs were submitted in parallel to
+Vast A100-80GB (16 vCPU / 64 GB, omnirun group `unified-r1r4`, code
+`f3b0e90`). Health at the first check: optimizer step 500 at round 0, all
+thirteen scores, `validation_history.jsonl` and `last.ckpt` on R2 after every
+round, the fourteen subset-best aliases plus `best_checkpoints.json` after
+round 4, W&B system metrics at 94–100% GPU utilization, 45–60 s per 500
+updates on most hosts (one SXM4 host ran SCv2 at 135 s; Vast hosts vary).
+
+**The causal GRU diverges under float16 on 2-second clips.** `real_r1_gru`
+went non-finite on `static_mix` at update 1,500 (training loss had fallen
+1787 → 20 by update 1,000); `real_r3_gru` hit persistent non-finite gradients
+right after round 0 (`GradScaler skipped every retry batch`). The 1-second
+originals of the same recipe trained to completion under fp16, and the other
+three trunks are unaffected, so this is fp16 range on the longer recurrence,
+not the recipe. The four GRU rungs were cancelled and resubmitted at code
+`93611ef` with `amp_dtype: bfloat16` (written into the four configs with the
+reason). All four passed the steps at which fp16 died (R1 at 4,500, R3 at
+6,000 when checked) at ~80 s per 500 updates — bf16 cuDNN GRU is ~40% slower
+than fp16. The GRU column therefore differs from the other three in autocast
+dtype; it is a precision detail, disclosed here and in the configs.
+
+`real_r2_scv2` (fp16, on the one SXM4 host that ran at 135 s per round) also
+failed: its training loss rose from round 8 (7.2 → 8.8), the panel worsened
+(27.2 → 29.6), and round 10 came back non-finite at update 5,500, while the
+R1/R3/R4 SCv2 rungs were at 22–25k updates and improving. Same remedy:
+resubmitted under `amp_dtype: bfloat16` (config comment records it). Policy
+from here: a run that goes non-finite under fp16 is resubmitted under bf16
+once; a second failure is the recipe's, not the dtype's.
+
+### Vast ran out of funds at ~03:15 UTC — every run is resumable from R2
+
+All fifteen live instances stopped within the same minute (Vast: balance 0,
+credit 14.29 below the 16.83 threshold); W&B marked every run `crashed` at
+03:14–03:20 and the omnirun daemon kept reporting them `running`. Nothing was
+lost that matters: `last.ckpt` and `train_state.pt` (optimizer, scheduler,
+scaler, controller windows, optimizer-step counter) are uploaded to R2 after
+every round, so each run resumes from its last completed round; at most the
+partial round in flight (<500 updates) is repeated. The dead jobs were
+cancelled (instances destroyed, none remain). State at the stop:
+
+| run | optimizer step | overall_macro | lr | W&B id |
+|---|---:|---:|---:|---|
+| `real_r1_sc_unified` | 34,500 | 23.02 | 1.00e-03 | `sgjdjezs` |
+| `real_r1_scv2_unified` | 33,000 | 19.99 | 5.00e-04 | `1scbu9d6` |
+| `real_r1_tm_unified` | 30,000 | 18.41 | 1.00e-03 | `l1umrr6s` |
+| `real_r1_gru_unified` | 12,500 | 30.47 | 1.00e-03 | `kbs78t8r` |
+| `real_r2_sc_unified` | 37,500 | 15.13 | 2.50e-04 | `dyktp6k6` |
+| `real_r2_scv2_unified` | 3,500 | 22.82 | 1.00e-03 | `a47qq9hh` |
+| `real_r2_tm_unified` | 30,500 | 17.45 | 2.50e-04 | `j47e0cxg` |
+| `real_r2_gru_unified` | 12,000 | 19.95 | 1.00e-03 | `1z12x0aq` |
+| `real_r3_sc_unified` | 35,000 | 14.12 | 1.00e-03 | `we7arczl` |
+| `real_r3_scv2_unified` | 30,000 | 15.55 | 2.50e-04 | `hagkdlsp` |
+| `real_r3_tm_unified` | 30,000 | 16.92 | 2.50e-04 | `o31jtckp` |
+| `real_r3_gru_unified` | 15,000 | 18.72 | 1.00e-03 | `rtc0ibc4` |
+| `real_r4_sc_unified` | 25,500 | 12.91 | 2.50e-04 | `2xswdg6j` |
+| `real_r4_scv2_unified` | 29,000 | 14.12 | 1.25e-04 | `ltdj9hl2` |
+| `real_r4_tm_unified` | 29,500 | 11.5 | 2.50e-04 | `24qqsgmp` |
+| `real_r4_gru_unified` | 12,000 | 11.58 | 1.00e-03 | `ckp5647j` |
+
+`real_r2_scv2_unified` is the bf16 restart (the earlier fp16 run is
+superseded). Its second bf16 attempt hung on its host at 02:16 before the
+funds ran out and was cancelled; the R2 state is the bf16 run's round 6.
+
+Resume, once the balance is topped up (same code `a8b34fd`; `resume=true`
+pulls the state from R2, `logging.resume_id` continues the same W&B history):
+
+```bash
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r1_sc_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r1_sc_unified resume=true logging.resume_id=sgjdjezs'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r1_scv2_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r1_scv2_unified resume=true logging.resume_id=1scbu9d6'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r1_tm_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r1_tm_unified resume=true logging.resume_id=l1umrr6s'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r1_gru_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r1_gru_unified resume=true logging.resume_id=kbs78t8r'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r2_sc_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r2_sc_unified resume=true logging.resume_id=dyktp6k6'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r2_scv2_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r2_scv2_unified resume=true logging.resume_id=a47qq9hh'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r2_tm_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r2_tm_unified resume=true logging.resume_id=j47e0cxg'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r2_gru_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r2_gru_unified resume=true logging.resume_id=1z12x0aq'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r3_sc_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r3_sc_unified resume=true logging.resume_id=we7arczl'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r3_scv2_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r3_scv2_unified resume=true logging.resume_id=hagkdlsp'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r3_tm_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r3_tm_unified resume=true logging.resume_id=o31jtckp'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r3_gru_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r3_gru_unified resume=true logging.resume_id=rtc0ibc4'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r4_sc_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r4_sc_unified resume=true logging.resume_id=2xswdg6j'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r4_scv2_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r4_scv2_unified resume=true logging.resume_id=ltdj9hl2'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r4_tm_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r4_tm_unified resume=true logging.resume_id=24qqsgmp'
+omnirun submit --backend vast --gpus 1 --gpu-type A100-80 --cpus 16 --mem 64 --time 20h --group unified-r1r4 --name real_r4_gru_unified -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=real_r4_gru_unified resume=true logging.resume_id=ckp5647j'
+```
+
+### Salience models now validate on the same panel
+
+The `task.name == "rps_prediction"` guard is gone. `training.validation`
+reads the prediction through a task-dispatched `RPSReadout`
+(`rps_readout_for`): direct regressors give `rps_pred`; `salience_rps` models
+give `salience` logits which the model's own `decode_logits(logits,
+n_samples)` turns into `(B, R, T_stft)` rev/s on the GPU. `decode_logits` is
+the deployed decoder — `predict_rps` is now forward + `decode_logits`, and
+`scripts/rps_dump.py`'s shared-map route goes through it — so the monitor
+scores what evaluation reports.
+
+*Per-layer models (L2/L3)* already decoded on the GPU (`LayerCRFReadout` →
+`salience_crf.crf_decode_layers`); they only needed the seam.
+
+*Shared-map models (L0/L1)* decoded on the CPU: `sigmoid` → per-frame peaks →
+one SciPy `linear_sum_assignment` per frame per sample → jump-cap rejection.
+That is `models/salience_tracker.py` now, batched over samples with one
+`(B, ...)` step per frame. The assignment is exact: costs are
+`|f_track − f_peak|` on a line, so a minimum-cost injective assignment can be
+taken order-preserving (L1 Monge), and a prefix-minimum DP with a "hold"
+option finds it in `R` `cummin` steps. The one behavioural difference is the
+tie-break — L1 assignment ties are systematic (two tracks below two peaks cost
+the same crossed or uncrossed) and SciPy's choice was implementation-defined;
+the DP returns the monotone optimum. Alternatives were measured against the
+generating trajectories of synthetic maps with dropouts (8 clips × 100 frames
+× 6–10 seeds, mean PIT-MAE in rev/s):
+
+| dropout | SciPy reference | verbatim rule, monotone tie-break | cap inside the cost | stale tracks jump uncapped |
+|---:|---:|---:|---:|---:|
+| 0.00 | 0.40 | 0.39 | 0.42 | 0.47 |
+| 0.05 | 2.37 | 2.42 | 2.47 | 13.9 |
+| 0.15 | 6.55 | 6.52 | 6.77 | 19.8 |
+| 0.30 | 11.78 | 11.81 | 12.06 | 23.6 |
+
+The verbatim rule is within ±1% of the reference everywhere; the "principled"
+capped cost is 3–4% worse because the reference's arbitrary tie choices
+happen to drag stale duplicate tracks onto live peaks. So the published rule
+is kept, tie-break aside. `tests/models/test_salience_tracker.py` carries the
+SciPy tracker as its oracle and checks bit-equality on maps with unique
+assignments (linear and CQT grids), peak-detection parity on soft, binary and
+saturated columns, the hold-on-dropout rule, batch-composition independence,
+and Hungarian-optimal cost on random rectangular problems.
+
+**Two front-end bugs surfaced by batched inference.** `HarmoF0Orig` and
+`HPPNetOrig` applied `torchaudio.AmplitudeToDB(top_db=80)` to a 3-D
+`(B, T, F)` tensor, which torchaudio floors relative to the max over the
+WHOLE batch; the published models process one clip at a time. A batch of two
+clips changed a clip's logits by up to 7.1 and its decoded rates by up to 32
+rev/s. Both front ends now floor per clip (a leading channel axis), so the
+batched forward equals the per-clip forward that `rps_dump.py` scored; every
+existing HarmoF0/HPPNet checkpoint was trained with the batch-coupled floor
+and is evaluated per clip, so the fix changes training for the reruns only.
+LateDeep's residual batch dependence is float noise (mean |Δlogit| 6e-5,
+identical for `[a, b]` and `[a, a]`), which the threshold decoder can turn
+into a one-frame flip — inherent to L0 decoding, not a coupling.
+
+`scripts/rps_dump.py` still reads L2/L3 ports by per-frame peak + parabola
+(`LayerPeakRPSMetric`) rather than the deployed CRF; the paper's L2 rows and
+the deployed decoder disagree there. The unified validator uses the CRF. To
+be reconciled when the tables are regenerated.
+
+Throughput of the full panel on trained salience checkpoints is measured by
+`scripts/salience_val_bench.py` on `uni-gpushort` (six checkpoints, L0 and L2
+of each family, B32, cold and warm passes, per-clip spot check); numbers go
+below when the job returns. Fresh unified salience configs follow that gate.
+
+Status at this checkpoint: `salience-val-bench-280fdb` (A100-80, B32) has
+been Slurm-pending on `gpushort` for over 4 h — every A100 on the partition
+is allocated (`sbg1/4/5/19` 4/4 GPUs each) and it is first in line on
+`(Resources)`; a V100-16 copy at B8 (`salience-val-bench-v100-a6f3c3`,
+functional check + scores, timing not representative) is pending
+`(Priority)` behind it. Both stay queued.
+
+Full `pytest -q` on the branch: **1,656 passed, 3 skipped, 2 failed**, both
+failures pre-existing on `main` and outside this work —
+`tests/scripts/test_rps_claim_tables.py::test_every_mapped_name_obeys_the_doc_naming`
+(the `hf0/hppnet_l{1,2,3}_r2_s0` names introduced by `67beae9`) and
+`tests/tracking/test_joint_regression.py::test_v3b_joint_solve_reproduces_the_pinned_reference`
+(a 2.4e-6 relative drift against a 1e-10 pin; `src/tracking` is untouched
+here).
+
+### Salience validation benchmark (Vast A100-SXM4-80GB, 2026-09-08)
+
+`scripts/salience_val_bench.py`, job `salience-val-bench-0f6a9d` (the two
+`uni-gpushort` copies stayed Slurm-pending for 8 h and were cancelled; the
+user released Vast for it). Full 1,320-sample panel, validation batch 32,
+fp16 autocast, trained checkpoints, one cold and one warm pass each:
+
+| checkpoint | family / level | cold / warm s | peak VRAM GB | real_r3 | real_r1 | synth | macro |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `hb_sal_hf0_orig` | HarmoF0 L0 | 17.3 / 15.5 | 6.2 | 10.90 | 17.11 | 23.20 | 17.05 |
+| `hf0_l2_r2_s0` | HarmoF0 L2 | 9.7 / 9.7 | 6.2 | 2.28 | 2.71 | 21.57 | 11.93 |
+| `hb_sal_hppnet_orig` | HPPNet L0 | 18.0 / 18.2 | 16.4 | 7.55 | 9.08 | 17.19 | 12.37 |
+| `hppnet_l2_r2_s0` | HPPNet L2 | 12.2 / 12.2 | 16.4 | 2.21 | 2.88 | 28.64 | 15.43 |
+| `hb_sal_multif0` | LateDeep L0 | 36.4 / 36.1 | 9.5 | 12.71 | 10.45 | 33.92 | 23.32 |
+| `hb_sal_multif0_l4` | LateDeep L2 | 24.8 / 24.7 | 9.5 | 3.45 | 2.99 | 29.98 | 16.72 |
+| `hb_sal_multif0_nsr` | LateDeep L1 | 38.0 / 38.5 | 9.7 | 11.98 | 13.98 | 27.62 | 19.80 |
+
+Reading. (1) Every level validates in 10–40 s on the full panel — down from
+minutes per real-only pass on the CPU tracker — so the 500-update cadence is
+affordable for salience models too. (2) L0/L1 cost is the tracker's per-frame
+loop, not the model: it scales with the number of batches, not the batch size
+(HarmoF0 hop 512 → 251 frames → 15 s; LateDeep hop 256 → 501 frames → 36 s),
+so the salience configs raise the validation batch to 64 (ports: HPPNet peaks
+at 16.4 GB at B32) and 128 (LateDeep: 9.5 GB at B32), which cuts L0/L1
+validation to ~5–10 s. L2 (CRF) is 10–25 s and shrinks the same way. (3) The
+batched fp16 readout matches the per-clip fp32 `predict_rps` route on the
+spot-checked clips to the digit, except where fp16 flips a threshold/CRF
+decision on one clip (HPPNet L0 5.13 → 5.32, LateDeep L2 0.11 → 1.05) —
+inherent to hard decoders, and the same for both routes. (4) The L0 scores of
+the old checkpoints on the GPU tracker sit where the paper table put them
+(HarmoF0 L0 10.90 here vs 10.79 in the table, per-clip SciPy tracker), which
+is the ±1 % tie-break margin measured on synthetic maps.
+
+### Unified salience matrix — defined, NOT submitted
+
+Fifteen configs, `conf/experiment/real_r{1,2,3,4}_{hf0,hppnet}_l2_unified`
+(the matrix rows: the comb gather is retired, so the salience trunks of the
+paper are the L2 ports) plus the Block S ladder at R4,
+`real_r4_{hf0,hppnet}_{l0,l1}_unified` and `real_r4_multif0_{l0,l1,l2}_unified`.
+One recipe for all of them and for the regressors: the rung's policy, 2 s
+clips, batch 128 (the old salience rows used 16), AdamW 1e-3 / 1e-4, no
+warm-up, no warm start, fp16 autocast (bf16 fallback on a non-finite exit, as
+for the GRU), `validation/rps_unified` with `overall_macro` as the control and
+the validation batch above. Per level: L0 `{harmof0,hppnet}_orig` /
+`multif0_salience` with `salience_bce_orig` / `salience_bce_multif0`; L1
+`{harmof0,hppnet}_l1` / `multif0_salience_nsr_hb` with
+`salience_bce_nsr_orig` / `salience_bce_nsr_hb`; L2 `{harmof0,hppnet}_l2` /
+`multif0_salience_l4` with `salience_layers_r150` / `_h256`. The ports carry
+the per-clip dB floor fix above. All 455 configs compose; the four
+representative configs pass `train.py validate_only=true`.

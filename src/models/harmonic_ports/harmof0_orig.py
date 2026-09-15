@@ -258,7 +258,12 @@ class WaveformToLogSpecgram(nn.Module):
         ).to(dt) + power[:, :, cast(torch.Tensor, self.log_idxs_ceiling)] * cast(
             torch.Tensor, self.log_idxs_ceiling_w
         ).to(dt)
-        return self.amplitude_to_db(specgram)
+        # ``AmplitudeToDB(top_db)`` floors relative to the max over everything
+        # but the leading batch axis of a 4-D input — and over the WHOLE tensor
+        # for a 3-D one, i.e. across the batch. The published model runs one
+        # clip at a time, so its floor is per clip; a leading channel axis
+        # keeps it per clip here too, batched or not.
+        return self.amplitude_to_db(specgram.unsqueeze(1)).squeeze(1)
 
 
 class HarmoF0Orig(LayerCRFReadout, SalienceRPSPredictor):

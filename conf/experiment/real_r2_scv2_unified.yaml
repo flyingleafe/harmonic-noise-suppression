@@ -7,6 +7,12 @@ defaults:
 experiment_name: real_r2_scv2_unified
 samples_per_validation: null
 batch_size: 128
+# The first submission (float16 autocast) degraded from validation round 8
+# (train loss 7.2 -> 8.8, overall_macro 27.2 -> 29.6) and stopped non-finite
+# at optimizer update 5,500; the R1/R3/R4 SCv2 rungs trained on under fp16.
+# Resubmitted under bfloat16 like the GRU rungs (fp32 exponent range, no loss
+# scaling). If it degrades again the cause is the recipe, not the dtype.
+amp_dtype: bfloat16
 data:
   train:
     params:

@@ -14,8 +14,9 @@ src/models/
                         DIRECT_FACTORY_TYPES; build_model(), build_noise_gen_model(), model_types()
   frontends/            Spectral front-ends (build_frontend, register_frontend)
   rps_predictor.py      SimpleConv* family (encoders, pools, temporal heads, GatedProjection)
-  salience_rps.py       Salience-map RPS baselines (multif0_salience, basic_pitch_salience)
-  salience_crf.py       Per-rotor salience layers + CRF readout (lossless encode/decode pair)
+  salience_rps.py       Salience-map RPS baselines; `decode_logits` = readout seam
+  salience_tracker.py   Shared-map (L0/L1) readout, GPU-batched
+  salience_crf.py       Per-rotor salience layers + CRF readout (L2/3)
   multif0/              Multi-F0 HCQT+CNN (Cuesta 2020): LateDeep etc., hcqt.py, nnaudio_cqt.py
   basic_pitch/          Basic Pitch PyTorch port (Bittner 2022) — own AGENTS.md
   harmonic_ports/       HarmoF0/HPPNet/hFT on a linear rate grid + *_orig controls + layer_readout.py

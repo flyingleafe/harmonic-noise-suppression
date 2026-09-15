@@ -1,0 +1,35 @@
+# @package _global_
+# Unified salience rerun: LateDeep (MultiF0) at L2 — per-rotor Gaussian layers on the linear 0–150 rev/s / 300-bin grid, CRF readout, on real rung R4
+# (conf/online_mix/hb_m3s2_dload.yaml). Same regime as the unified regressors: 2-second clips, batch
+# 128, no warm-up, no warm start, the full deterministic real + synthetic panel
+# every 500 optimizer updates through the model's own on-device decoder
+# (`decode_logits`), log-scale any-subset LR/stopping, subset-best checkpoints.
+# The validation batch is sized from the A100 benchmark of 2026-09-08
+# (`scripts/salience_val_bench.py`; docs/experiments/paper-regime-matrix.md).
+# Batch doc: docs/experiments/paper-regime-matrix.md.
+defaults:
+  - override /data: e12_real_fullflight
+  - override /model: multif0_salience_l4
+  - override /loss: salience_layers_r150_h256
+  - override /metrics: salience_layers_r150_h256
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: real_r4_multif0_l2_unified
+epochs: 200
+patience: 20
+batch_size: 128
+num_workers: 6
+samples_per_validation: null
+data:
+  train:
+    params:
+      path: conf/online_mix/hb_m3s2_dload.yaml
+      duration_s: 2.0
+validation:
+  batch_size: 128
+optim:
+  lr: 0.001
+  weight_decay: 0.0001
+  monitor: rps_mae
+  monitor_mode: min

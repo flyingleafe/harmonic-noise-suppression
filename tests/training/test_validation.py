@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
+import tdseries as td
 import torch
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 from data_processing.collate import frame_collate
 from losses import PITMSELoss
-from tasks.codecs import RPSPredictionCodec
+from losses._common import get_tensor
+from metrics.rps import batched_pit_mae
+from tasks.codecs import RPSPredictionCodec, SalienceRPSCodec
 from tests.training._fixtures import TinyRPSModel
 from training.validation import (
     MultiMetricController,
     build_validation_plan,
+    rps_readout_for,
     validate_rps,
 )
 
@@ -98,6 +103,76 @@ def test_gpu_style_validation_reduces_overlapping_views_in_one_pass():
     assert set(scores) == {"r1", "r2", "synthetic", "overall"}
     assert scores["overall"] == pytest.approx(0.5 * scores["r2"] + 0.5 * scores["synthetic"])
     assert all(torch.isfinite(torch.tensor(value)) for value in [*scores.values(), loss])
+
+
+class _StubSalienceModel(torch.nn.Module):
+    """Emits a fixed salience map and decodes it to a fixed RPS table, so the
+    validator's scores can be checked against the table independently."""
+
+    def __init__(self, table: torch.Tensor) -> None:
+        super().__init__()
+        self.table = table
+        self.cursor = 0
+        self.seen: list[tuple[tuple[int, ...], int]] = []
+
+    def forward(self, mixture: torch.Tensor) -> torch.Tensor:
+        return torch.zeros(mixture.shape[0], 6, 10)
+
+    def decode_logits(self, logits: torch.Tensor, n_samples: int) -> torch.Tensor:
+        self.seen.append((tuple(logits.shape), n_samples))
+        out = self.table[self.cursor : self.cursor + logits.shape[0]]
+        self.cursor += logits.shape[0]
+        return out
+
+
+def test_salience_task_is_scored_through_the_model_decoder():
+    cfg = OmegaConf.create(
+        {
+            "datasets": {"real": _dataset(1, 8), "synthetic": _dataset(2, 4)},
+            "views": {
+                "r1": {
+                    "dataset": "real",
+                    "start": 0,
+                    "stop": 8,
+                    "channels": [0],
+                    "channels_per_clip": 2,
+                },
+                "synthetic": {"dataset": "synthetic"},
+            },
+            "aggregates": {},
+            "primary": ["r1", "synthetic"],
+            "control": "synthetic",
+        }
+    )
+    plan = build_validation_plan(cfg)
+    frames = [cast(td.Frame, plan.dataset[i]) for i in range(plan.size)]
+    targets = torch.stack([get_tensor(frame, "rps") for frame in frames])
+    table = targets + torch.arange(plan.size, dtype=torch.float32)[:, None, None]
+    model = _StubSalienceModel(table)
+    loader = DataLoader(plan.dataset, batch_size=5, collate_fn=frame_collate)
+
+    scores, _loss = validate_rps(
+        model=model,
+        codec=SalienceRPSCodec(frame_rate=(125, 4)),
+        loss_fn=lambda pred_frame, batch: torch.zeros(()),
+        valid_loader=loader,
+        plan=plan,
+        device=torch.device("cpu"),
+        amp=False,
+        amp_dtype=None,
+        readout=rps_readout_for("salience_rps"),
+    )
+
+    n_samples = get_tensor(frames[0], "mixture").shape[-1]
+    assert model.seen == [((5, 6, 10), n_samples), ((5, 6, 10), n_samples), ((2, 6, 10), n_samples)]
+    per_sample = batched_pit_mae(table, targets)
+    assert scores["r1"] == pytest.approx(float(per_sample[0:8:2].mean()))
+    assert scores["synthetic"] == pytest.approx(float(per_sample[8:].mean()))
+
+
+def test_readout_dispatch_rejects_unsupported_tasks():
+    with pytest.raises(ValueError, match="multi-validation supports tasks"):
+        rps_readout_for("speech_enhancement")
 
 
 def test_any_subset_progress_delays_lr_reduction_and_all_subset_stagnation_stops():
