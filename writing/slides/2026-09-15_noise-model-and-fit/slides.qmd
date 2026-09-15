@@ -409,6 +409,74 @@ Both arms degrade after their best round: easy 5.72 to 7.91, hard 5.37 to 6.23. 
 selection matters.
 :::
 
+## Where the error is
+
+| Training noise | overall | zero | standby | ramp | cruise |
+|:--|--:|--:|--:|--:|--:|
+| Real flights | **3.11** | 2.44 | 3.20 | 8.13 | 2.88 |
+| Hard cloud | **5.40** | 10.61 | 8.91 | 13.80 | 3.41 |
+| Easy cloud | **6.08** | 2.37 | 13.70 | 18.79 | 4.79 |
+| share of frames | | 12.7% | 11.6% | 3.8% | 72.0% |
+
+::: {.small}
+Real-split PIT MAE in rev/s, saved checkpoints. Regimes are set on the target speeds only:
+ramp is $|\mathrm{d}\bar n/\mathrm{d}t| \ge 20$ rev/s$^2$; then zero below 1 rev/s, standby below
+45 rev/s, cruise above.
+
+Cruise carries 72% of the frames. Both clouds are close to real-trained there. Standby and ramp
+are where synthetic training still loses.
+:::
+
+## Where the error is, per rig
+
+**Michael's rig**
+
+| Training noise | overall | zero | standby | ramp | cruise |
+|:--|--:|--:|--:|--:|--:|
+| Real flights | **2.56** | 4.91 | 3.06 | 8.99 | 1.69 |
+| Hard cloud | **6.26** | 13.68 | 7.90 | 15.28 | 4.02 |
+| Easy cloud | **7.24** | 2.38 | 13.27 | 17.31 | 4.78 |
+| share of frames | | 8.8% | 26.9% | 3.0% | 61.2% |
+
+**DREGON**
+
+| Training noise | overall | zero | standby | ramp | cruise |
+|:--|--:|--:|--:|--:|--:|
+| Real flights | **3.39** | 1.46 | 5.59 | 7.71 | 3.50 |
+| Hard cloud | **4.73** | 9.40 | 26.03 | 13.08 | 3.09 |
+| Easy cloud | **5.22** | 2.36 | 21.02 | 19.51 | 4.79 |
+| share of frames | | 15.3% | 1.1% | 4.3% | 79.4% |
+
+::: {.small}
+The hard cloud beats the easy cloud on both rigs. DREGON standby holds only 1.1% of its frames, so
+that cell is thin.
+:::
+
+
+## Real data: Michael's rig
+
+![](assets/pred_real_michaels_sample_00022.png){width="100%"}
+
+## Real data: Michael's rig, spin-up
+
+![](assets/pred_real_michaels_sample_00026.png){width="100%"}
+
+## Real data: Michael's rig, third clip
+
+![](assets/pred_real_michaels_sample_00035.png){width="100%"}
+
+## Real data: DREGON
+
+![](assets/pred_real_dregon_sample_00008.png){width="100%"}
+
+## Real data: DREGON, second clip
+
+![](assets/pred_real_dregon_sample_00013.png){width="100%"}
+
+## Real data: DREGON, worst clip
+
+![](assets/pred_real_dregon_sample_00020.png){width="100%"}
+
 ## Pending
 
 ::: {.pending}
