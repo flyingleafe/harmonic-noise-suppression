@@ -1,0 +1,12 @@
+# Rendered deliverables — several MB each with embed-resources; `make` rebuilds.
+slides.html
+slides.pdf
+slides_files/
+.quarto/
+
+# Figures are build products of prepare.py
+assets/
+__pycache__/
+
+# Visual check output
+check/
