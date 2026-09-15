@@ -1,9 +1,19 @@
 # Easy and hard sim-to-real transfer: the rig-sampler pair
 
-**Status:** in progress — submitted 2026-09-14 23:46 UTC, runs in flight. Jobs
-`rig-easy-e7e4ce` and `rig-hard-6ed3cf` (vast), both from commit `7525ce8c`
-("transfer arms: rig neighbourhood sampler, preset-bank streams, renderer
-fix"). Per-experiment docs: `conf/experiment/rig_easy_scv2_unified.md`,
+> **OPEN DECISION — BLOCKS THE NEXT RUNS (raised 2026-09-15).** Two defects in
+> the preset banks were found after this pair finished. Both change the
+> training distribution, so the follow-up arms (curriculum, mixed) must NOT be
+> launched until the user picks a fix and the banks are rebuilt. Detail and the
+> concrete options: [§ Open decision: rebuild the
+> banks](#open-decision-rebuild-the-banks). Two answers are needed: (a) trim
+> the unconstrained ladder edge, enable `band_taper_frac`, or both; (b) DREGON
+> anchor raw or refined.
+
+**Status:** complete, with an open decision before the follow-up arms. Jobs
+`rig-easy-dce43e` and `rig-hard-1b2f06` (vast, A100) ran to completion from
+commit `7525ce8c` ("transfer arms: rig neighbourhood sampler, preset-bank
+streams, renderer fix"). Per-experiment docs:
+`conf/experiment/rig_easy_scv2_unified.md`,
 `conf/experiment/rig_hard_scv2_unified.md`.
 
 ## Motivation
@@ -256,3 +266,100 @@ occurred at, whether the post-best real degradation of the fitted run recurs,
 and the `r1`/`r2` ratio against the fitted run's 1.93.
 
 ## Conclusion
+
+The pair answered its question: widening the distribution helps, and the wide
+cloud is not worse than the close one (hard 5.37 vs easy 5.72 best real MAE,
+against 9.97 for the point-preset run and 2.99 for real audio). The gap to
+real audio is still 1.8x, and the regime split says where it lives: both
+synthetic arms are close to real at cruise and far from it in the
+transitions, where they collapse the four rotors onto nearly one speed
+(output spread 0.28 easy / 0.19 hard against 4.71 for the real-trained model).
+
+## Open decision: rebuild the banks
+
+**Status: PENDING — the user has not answered. Do not launch the curriculum or
+mixed arms before this is settled.** Raised 2026-09-15 while reading the model
+matrix figures (`docs/explainers/model-matrix.qmd`).
+
+Two defects were found in the preset banks that both finished arms trained on.
+Each one changes the training distribution, so fixing either makes
+`rig-easy-dce43e` and `rig-hard-1b2f06` non-reproducible from the new banks;
+that argues for fixing them NOW, before more arms are spent on the old
+distribution, rather than after.
+
+### Defect 1 — the comb's last order is an unconstrained parameter, and it is loud
+
+Michael's anchor fit (`results/S2/cruise_8clip.json:fly125_cruise_00`) has a
+`profile_db` grid of 111 orders whose LAST order stands 9 to 39 dB above its
+neighbours:
+
+|rotor|orders K-7 … K-1 (dB)|order K = 111 (dB)|jump|
+|---|---|---|---|
+|0|-30.2 … -30.6|**-12.8**|+18|
+|1|-37.3 … -36.8|**-27.3**|+9.5|
+|2|-38.2 … -34.8|**-23.1**|+11.7|
+|3|-29.8 … -21.7|**+17.6**|+39 — the rotor's global max, above its order 2|
+
+The cause is the fitting band. At the fit's own cruise speeds (75-92 rev/s)
+order 111 sits at 8.3-10.2 kHz, outside the 30-7900 Hz band the likelihood
+scores, so it was never constrained and absorbed whatever the band edge
+needed. Harmless where it was fitted. On stream trajectories that dip to
+24 rev/s it sweeps INTO the band: on `results/model_matrix/trajectories/traj_00`
+(24.0-62.3 rev/s) order 111 tracks 2660-6910 Hz, which is exactly the dominant
+sweeping line visible in `C_stream_michaelsfit_t0` and the +10 dB 5-6.5 kHz
+hump measured there. `band_taper_frac` is `0.0` in these renders, so the comb
+ends on a hard edge and nothing fades the inflated order. Decimation is
+innocent: a 2x-grid brick-wall reference reproduces the hump, and the fold
+term stays under +1.16 dB.
+
+Options: **(a)** drop the orders whose frequency at the fit's own speeds fell
+outside the fitting band — deletes a parameter the data never constrained;
+**(b)** enable `band_taper_frac` so the comb end always fades — fixes the
+symptom generally, leaves the bad parameter in place; **(c)** both.
+Recommendation: (c), with (a) as the correctness fix and (b) as defence in
+depth.
+
+### Defect 2 — the two rigs' anchors disagree on label provenance
+
+The banks' provenance block records:
+
+|rig|anchor fit|labels|
+|---|---|---|
+|Michael's|`results/S2/cruise_8clip.json:fly125_cruise_00`|**raw**|
+|DREGON|`results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00`|**`rps_refined`**|
+
+So one rig is anchored on raw telemetry and the other on model-supported
+refined labels, which the campaign treats as not independent truth. Nothing in
+the docs said so before this note. It is a candidate explanation for the
+per-rig asymmetry in the results (DREGON cells beat Michael cells for the hard
+arm, 4.80 vs 6.28 overall). A raw-label pooled DREGON flight fit exists:
+`results/S2/dregon_flight.json`.
+
+Both anchors are FLIGHT fits, not bench fits; no bench fit enters either bank.
+For context on how the flight fit compares, from
+`docs/explainers/dregon-transfer/index.json` (median 8-mic RPS MAE of a reader
+on synthetic clips, and LTAS deviation against real):
+
+|arm|median MAE|spread|LTAS dev|
+|---|---|---|---|
+|real audio|1.069|0.271|—|
+|flight-fitted|**2.077**|**0.773**|**1.54 dB**|
+|bench, blind|2.488|0.256|9.37 dB|
+|bench comb + flight floor|2.473|0.344|10.86 dB|
+
+The flight fit has by far the best spectrum and the best MAE, and the WORST
+clip-to-clip spread: it matches the average well and individual clips
+unevenly.
+
+Options: keep refined and document the asymmetry, or switch DREGON to
+`results/S2/dregon_flight.json` so both rigs are raw-label.
+
+### What happens once it is answered
+
+1. Rebuild both banks with `scripts/_build_rig_bank.py` (bit-reproducible;
+   it re-checks the >7.5 kHz fold and aborts above 0.05 dB).
+2. Re-render the affected model-matrix category-C and category-D clips and
+   confirm the sweeping line is gone.
+3. Re-run `rig_easy_scv2_unified` and `rig_hard_scv2_unified` on the new
+   banks, and decide whether `rig_easy_hppnet_l2_unified` is re-run too.
+4. Then launch the curriculum and mixed arms.

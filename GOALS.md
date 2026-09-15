@@ -52,6 +52,13 @@ Compute/wallclock is the binding throughput constraint, not code-writing speed. 
 Last bets review: 2026-05-04 (**pre-supervisor discussion** — to be revisited)
 Next mandatory review: week 7–8 from start of experimental work (mid-point)
 
+**Blocked on a user decision (2026-09-15):** the rig-sampler preset banks need
+a rebuild before the curriculum and mixed transfer arms run. Two questions are
+open, both stated with evidence and options in
+`docs/experiments/rig-sampler-transfer-pair.md` § "Open decision: rebuild the
+banks". Read that section before touching `data/rig_banks/` or launching a
+`rig_*` arm.
+
 Three concurrent bets, all RPS-clustered, on purpose: that is where months of prior work give momentum and the unique research angle. Headlines below; per-bet detail cards live under `docs/experiments/bets/` once started.
 
 ### Bet 1 — Pseudo-RPS replaces oracle telemetry

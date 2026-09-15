@@ -1,5 +1,14 @@
 """Build a PRESET BANK of render-ready rig parameters for a training stream.
 
+PENDING USER DECISION (2026-09-15) — READ BEFORE REBUILDING A BANK. The banks
+in `data/rig_banks/` have two known defects: the anchors' LAST comb order was
+never constrained by the fit (it sat outside the 30-7900 Hz band at the fit's
+own speeds) and renders as a loud sweeping line at stream speeds, and the two
+rigs' anchors disagree on label provenance (Michael raw, DREGON `rps_refined`).
+The fix is a user decision, stated with evidence and options in
+`docs/experiments/rig-sampler-transfer-pair.md` § "Open decision: rebuild the
+banks". Rebuilding a bank before that is answered reproduces the defects.
+
 The bank is what lets an online-mix policy train on the rig-neighbourhood
 sampler's family: `experiments.stochastic_fit.rig_sampler` draws exports, this
 script turns each one into the renderer's own coordinates and writes them as one

@@ -4,6 +4,14 @@ training_config: conf/experiment/rig_easy_hppnet_l2_unified.yaml
 batch: docs/experiments/rig-sampler-transfer-pair.md
 ---
 
+> **The bank this run trains on has TWO KNOWN DEFECTS and a pending user
+> decision (2026-09-15).** Do not re-run this experiment, and do not rebuild
+> `data/rig_banks/`, before reading
+> `docs/experiments/rig-sampler-transfer-pair.md` § "Open decision: rebuild
+> the banks": the fitted comb's last order is unconstrained and loud, and the
+> two rigs' anchors disagree on label provenance (Michael raw, DREGON
+> refined).
+
 # `rig_easy_hppnet_l2_unified`
 
 ## Motivation
