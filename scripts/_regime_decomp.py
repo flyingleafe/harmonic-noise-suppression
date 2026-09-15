@@ -140,11 +140,17 @@ def frame_regimes4(target: np.ndarray) -> np.ndarray:
 def pit_align(pred: np.ndarray, target: np.ndarray) -> np.ndarray:
     """``pred`` rows permuted onto ``target``'s rows, independently per frame.
 
-    The scoring convention matches per frame, so a predicted track only becomes
-    comparable to a target track after the same per-frame assignment is applied
-    to it. ``|pit_align(pred, target) - target|`` is exactly the error
-    :func:`valid_regime_eval.pit_abs_error` pools, just kept in target-row
-    order so it can be drawn on top of the target it was matched to.
+    THE METRIC'S ALIGNMENT, AND ONLY THE METRIC'S. The scoring convention
+    matches per frame, so ``|pit_align(pred, target) - target|`` is exactly the
+    error :func:`valid_regime_eval.pit_abs_error` pools, kept in target-row
+    order.
+
+    Nothing draws through this. Two rotors of a real quadrotor sit within a
+    rev/s of each other most of the time, so the per-frame assignment flips at
+    near-zero cost difference and a line drawn through it hops between target
+    rows while the model's output has not changed — one flip every ~5 frames as
+    measured on this split. The figures plot the model's four output series and
+    the four target series as they are, with no permutation anywhere.
     """
     from scipy.optimize import linear_sum_assignment
 

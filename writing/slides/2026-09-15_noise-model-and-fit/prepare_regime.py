@@ -7,14 +7,19 @@ One PNG per chosen validation clip:
              viewer can see which part of the clip is zero / standby / ramp /
              cruise before reading the tracks;
   * bottom — the four TARGET rotor-speed tracks as thick light lines with the
-             predicted tracks of both transfer arms drawn thin on top, after
-             the SAME per-frame Hungarian matching the scores use
-             (:func:`_regime_decomp.pit_align`), so each predicted line sits on
-             the target row it was actually charged against.
+             predicted tracks of all three models drawn thin on top.
 
-The regime labelling, the matching and the checkpoint selection are imported
-from ``scripts/_regime_decomp.py`` — the figures and the table are the same
-numbers, computed once.
+DRAWN RAW, SCORED WITH PIT. Each model emits four rotor-speed series and those
+four series are drawn exactly as emitted: no permutation, no assignment. A
+model's line may therefore sit near a different target track than "its own"
+rotor, which is the truth about what the model outputs. The reported MAE is
+the project's per-frame PIT metric (:func:`_regime_decomp.pit_align`,
+unchanged), which is permutation-invariant and so does not care how the rows
+are ordered. Nothing in this file solves an assignment.
+
+The regime labelling and the checkpoint selection are imported from
+``scripts/_regime_decomp.py`` — the figures and the table are the same numbers,
+computed once.
 
     PYTHONPATH="$PWD/src:$PWD/scripts" python \
         writing/slides/2026-09-15_noise-model-and-fit/prepare_regime.py
@@ -49,7 +54,6 @@ from _regime_decomp import (  # noqa: E402
     VALID,
     frame_regimes4,
     pit_abs_error,
-    pit_align,
     predict_clip,
 )
 
@@ -224,7 +228,7 @@ def draw(
         left=0.075,
         right=0.995,
         top=0.925,
-        bottom=0.145,
+        bottom=0.175,
     )
     ax_spec = fig.add_subplot(grid[0])
     ax_strip = fig.add_subplot(grid[1], sharex=ax_spec)
@@ -295,11 +299,11 @@ def draw(
             label="target (4 rotors)" if r == 0 else None,
         )
     for depth, (_, tag, colour) in enumerate(ARMS):
-        aligned = preds[tag]
-        for r in range(aligned.shape[0]):
+        emitted = preds[tag]
+        for r in range(emitted.shape[0]):
             ax_rps.plot(
                 t,
-                aligned[r],
+                emitted[r],
                 color=colour,
                 lw=1.4,
                 zorder=3 + depth,
@@ -334,12 +338,25 @@ def draw(
     fig.legend(
         handles=handles,
         loc="lower center",
-        bbox_to_anchor=(0.53, 0.0),
+        bbox_to_anchor=(0.53, 0.042),
         ncol=len(handles),
         frameon=False,
         fontsize=12,
         handlelength=1.8,
         columnspacing=1.4,
+    )
+    # The one line that keeps the figure and the table from being confused. It
+    # sits below the legend so it can never cover a track.
+    fig.text(
+        0.53,
+        0.004,
+        "model tracks drawn RAW, as each model emits them — no matching, so a line "
+        "may sit near a target that is not its own rotor;  the MAE above is the "
+        "per-frame PIT score",
+        ha="center",
+        va="bottom",
+        fontsize=11,
+        color="#444444",
     )
 
     path = ASSETS / f"pred_real_{rig}_{sample_id}.png"
@@ -381,7 +398,9 @@ def main() -> int:
             model, salience = models[tag]
             pred = predict_clip(model, frame, salience)
             width = min(pred.shape[1], target.shape[1])
-            preds[tag] = pit_align(pred[:, :width], target[:, :width])
+            # DRAWN RAW: the model emits four series, so four series are drawn.
+            # No permutation, no assignment. PIT belongs to the score only.
+            preds[tag] = pred[:, :width]
             maes[tag] = float(pit_abs_error(pred[:, :width], target[:, :width]).mean())
         width = min(min(p.shape[1] for p in preds.values()), target.shape[1])
         rig = (

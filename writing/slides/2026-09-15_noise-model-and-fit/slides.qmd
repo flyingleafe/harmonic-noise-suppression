@@ -425,6 +425,10 @@ ramp is $|\mathrm{d}\bar n/\mathrm{d}t| \ge 20$ rev/s$^2$; then zero below 1 rev
 
 Cruise carries 72% of the frames. Both clouds are close to real-trained there. Standby and ramp
 are where synthetic training still loses.
+
+Both clouds collapse the four rotors into nearly one speed during transitions. Track spread across
+the four outputs on the spin-up clips: easy 0.28, hard 0.19, real-trained 4.71 rev/s. In steady
+cruise all three spread 8 to 16 rev/s.
 :::
 
 ## Where the error is, per rig
