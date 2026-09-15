@@ -413,9 +413,9 @@ selection matters.
 
 | Training noise | overall | zero | standby | ramp | cruise |
 |:--|--:|--:|--:|--:|--:|
-| Real flights | **3.11** | 2.44 | 3.20 | 8.13 | 2.88 |
-| Hard cloud | **5.40** | 10.61 | 8.91 | 13.80 | 3.41 |
-| Easy cloud | **6.08** | 2.37 | 13.70 | 18.79 | 4.79 |
+| Real flights | **3.06** | 2.44 | 3.20 | 8.13 | 2.88 |
+| Hard cloud | **5.35** | 10.61 | 8.91 | 13.80 | 3.41 |
+| Easy cloud | **6.04** | 2.37 | 13.70 | 18.79 | 4.79 |
 | share of frames | | 12.7% | 11.6% | 3.8% | 72.0% |
 
 ::: {.small}
@@ -448,8 +448,8 @@ are where synthetic training still loses.
 | share of frames | | 15.3% | 1.1% | 4.3% | 79.4% |
 
 ::: {.small}
-The hard cloud beats the easy cloud on both rigs. DREGON standby holds only 1.1% of its frames, so
-that cell is thin.
+The hard cloud beats the easy cloud on both rigs. Two cells are too thin to read as a result:
+DREGON standby holds 1.9 s of distinct audio, Michael's ramp holds 3.6 s.
 :::
 
 
