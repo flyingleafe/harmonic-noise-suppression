@@ -1,0 +1,49 @@
+# @package _global_
+# Salience transfer arm: HPPNet port at L2 — per-rotor Gaussian layers on the
+# linear 0–150 rev/s / 300-bin grid, CRF readout — trained on the EASY rig
+# cloud (`conf/online_mix/rig_easy_5050.yaml`: noise drawn from close
+# neighbourhoods of the Michael and DREGON fits, strength 2.0, sized so the
+# sampled LTAS cloud covers the real rigs).
+#
+# The salience counterpart of `rig_easy_scv2_unified`. Everything outside the
+# model/loss/metrics is the unified regime of `real_r4_hppnet_l2_unified`:
+# 2-second clips, batch 128, no warm-up, no warm start, the full deterministic
+# real + synthetic panel every 500 optimizer updates through the model's own
+# on-device decoder (`decode_logits`), log-scale any-subset LR/stopping,
+# subset-best checkpoints. The validation batch is the one the A100 benchmark
+# of 2026-09-08 sized (`scripts/salience_val_bench.py`).
+#
+# The noise stream is the ONLY difference from `real_r4_hppnet_l2_unified`,
+# which trains on the real rung R4 pool — so the pair reads as sim-vs-real for
+# the same salience trunk, exactly as `rig_easy_scv2_unified` does against
+# `real_r4_scv2_unified` for the direct regressor.
+#
+# The bank is a gitignored build product; the job rebuilds it first. Build
+# command and provenance: conf/experiment/rig_easy_scv2_unified.md.
+# Batch doc: docs/experiments/rig-sampler-transfer-pair.md.
+defaults:
+  - override /data: e12_real_fullflight
+  - override /model: hppnet_l2
+  - override /loss: salience_layers_r150
+  - override /metrics: salience_layers_r150
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: rig_easy_hppnet_l2_unified
+epochs: 200
+patience: 20
+batch_size: 128
+num_workers: 6
+samples_per_validation: null
+data:
+  train:
+    params:
+      path: conf/online_mix/rig_easy_5050.yaml
+      duration_s: 2.0
+validation:
+  batch_size: 64
+optim:
+  lr: 0.001
+  weight_decay: 0.0001
+  monitor: rps_mae
+  monitor_mode: min
