@@ -1,6 +1,6 @@
 ---
-title: "The rotor-noise model, and how it was fitted"
-subtitle: "What the model is, how well it matches real drones, and what we sample from it"
+title: "Progress update"
+subtitle: "Rotor-noise model, fits, sampled rigs, transfer to real data"
 author: "Dmitrii Mukhutdinov"
 date: 2026-09-15
 format:
@@ -37,13 +37,62 @@ execute:
   echo: false
 ---
 
+## Where I am
+
+- I have not written up the existing results well yet because I pursued better ones.
+- I iterated on the probabilistic noise model fit.
+- As a result, transfer from synthetic-only data to real data is almost achieved.
+- Curriculum training and mixed training results are pending.
+
 ## What the noise is
 
 ![](assets/real_noise.png){width="94%"}
 
 ::: {.notes}
 Two real drones, microphone 0, cruise. Both pictures show the same two things: a comb of
-horizontal lines, and a broadband floor under it. The lines move when the rotors change speed.
+horizontal lines over a broadband floor. The lines move when the rotors change speed.
+:::
+
+## The model: definition
+
+One rotor $r$ makes lines at multiples of its shaft rate $n_r(t)$. Order $k$ sits at $k\,n_r(t)$.
+
+$$x(t) \;=\; \sum_{r,k} a_{rk}(t)\, s_{rk}(t) \;+\; f(t)$$
+
+$$s_{rk}(t) \;=\; \sqrt{w_k}\,\cos\phi_{rk}(t) \;+\; \sqrt{1-w_k}\,\eta_{rk}(t)$$
+
+$$\phi_{rk}(t) = 2\pi k \!\int_0^{t}\! n_r(\tau)\,d\tau$$
+
+$$w_k = \exp\!\big[-(k/k_{1/2})^2\big], \qquad \gamma_k = \gamma_0 + \gamma_1 k$$
+
+::: {.small}
+$a_{rk}$ is line amplitude. It follows a power law in speed: $a \propto (n/n_0)^{p}$, $n_0 = 80$ rev/s.
+$w_k$ is the coherent share. $\eta_{rk}$ is narrowband noise of width $\gamma_k$. $f$ is the floor.
+:::
+
+::: {.notes}
+Fitted per rig: the line powers per (rotor, order), the width law gamma_0 and gamma_1, the
+coherence half-order, the floor shape and tilt, the two speed exponents, the per-microphone gains.
+:::
+
+## The model: what is optimized
+
+Per clip, on the periodogram $I(f_j)$ of every frame, against the model spectrum $S_\theta(f_j)$:
+
+$$\hat\theta \;=\; \arg\min_{\theta}\; \mathcal{W}(\theta) \;-\; \log p(\theta)$$
+
+$$\mathcal{W}(\theta) \;=\; \sum_{j}\left[\frac{I(f_j)}{S_\theta(f_j)} + \log S_\theta(f_j)\right] \quad \text{(Whittle)}$$
+
+::: {.small}
+The Whittle term is exact for a Gaussian process observed on a fine frequency grid. Its expected
+value is minimal only at $S_\theta = S^{*}$, the true spectrum.
+
+$p(\theta)$ holds the priors: smooth floor shape, bounded widths, bounded speed exponents.
+:::
+
+::: {.notes}
+This is a MAP estimate, not a full posterior. The rotor speeds are taken from telemetry and are
+not fitted.
 :::
 
 ## The model, in one figure
@@ -57,19 +106,7 @@ The lines follow the telemetry, so the comb moves with the flight.
 
 ::: {.notes}
 The fitted quantities, in the order they act: line power per rotor and order, the line width law,
-the coherent share per order, the floor shape on control frequencies, and the floor tilt.
-:::
-
-## The speed law
-
-![](assets/speed_law.png){width="72%"}
-
-$$\Delta L \;=\; p \cdot 10 \log_{10}\!\left(n / n_0\right), \qquad n_0 = 80\ \text{rev/s}$$
-
-::: {.small}
-The comb level follows a power law in rotor speed. The fitted exponents are
-$p = 7.50$ for Michael cruise, 4.40 for Michael standby and 8.76 for DREGON cruise.
-Standby runs at 34.6 rev/s. The measured step from standby to cruise is 14.4 dB.
+the coherent share per order, the floor shape on control frequencies, the floor tilt.
 :::
 
 ## How the fit works
@@ -93,17 +130,17 @@ The same model family, refitted on flight audio. The bench fit is carried over a
 ::::
 
 ::: {.small}
-Each clip is fitted on its own by MAP with a Whittle likelihood. Within one rig the fits are then tied:
-the line power per order, the width law, the coherent share, the floor shape and tilt, and both speed
-exponents are shared by every clip of that rig. Only three things move per clip: the per-rotor gain,
-the floor level, and the coherence half-order.
-:::
+Each clip is fitted on its own by MAP with a Whittle likelihood. Within one rig the fits are then
+tied. Every clip of that rig shares the line power per order, the width law, the coherent share,
+the floor shape, the floor tilt, both speed exponents. Only three things move per clip: the
+per-rotor gain, the floor level, the coherence half-order.
+::::
 
 ![](../../../docs/explainers/flight-startup/blend_weights.png){width="56%"}
 
 ::: {.small}
-A rig with several clips keeps one fit per operating point. At playback the fits are blended by mean
-rotor speed, and the blend is exactly silent at zero speed.
+A rig with several clips keeps one fit per operating point. At playback the fits are blended by
+mean rotor speed. The blend is exactly silent at zero speed.
 :::
 
 ## Bench: one motor, constant speed
@@ -173,7 +210,7 @@ to 0.83 dB.
 
 Two anchors are blended by rotor speed: standby at 34.6 rev/s and cruise at 80.9 rev/s.
 
-The level ramp tracks the real one at correlation 0.89. No gain is applied, and the level sits 5.17 dB high.
+The level ramp tracks the real one at correlation 0.89. No gain is applied. The level sits 5.17 dB high.
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -218,16 +255,6 @@ Keeping the bench comb and taking only the flight floor does not help.
 ::: {.tiny}
 *Audio (real / flight refit / bench blind) plays in the HTML deck.*
 :::
-:::
-
-## Where the model is right, and where it is wrong
-
-![](assets/band_residual.png){width="80%"}
-
-::: {.small}
-Above 300 Hz the level is right to about 1.8 dB, and no gain was fitted to make that happen.
-Between 50 and 200 Hz the first rotor orders are far too loud, by 9 to 22 dB.
-The error is in the lines, not in the floor: between the lines the model agrees to about 1 dB.
 :::
 
 ## Michael's rig: samples around the fit
@@ -359,62 +386,34 @@ The two real rigs average -13 and -22 dB per decade.
 :::
 ::::
 
-## Pending: easy arm {.smaller}
+## Transfer result: both clouds
 
-::: {.pending}
-[**PENDING**]{.tag} &nbsp; **`rig-easy-dce43e`** — `rig_easy_scv2_unified`, SimpleConv v2, vast A100. Running now; no numbers yet.
-
-Will report: best `real_overall` MAE, and `real_r1` / `real_r2` / `real_r3` MAE.
-:::
-
-**Reference rows that already exist**
-
-| Run | Split | MAE (rev/s) |
-|:--|:--|--:|
-| `rig_fitted_scv2_unified` | best `real_r3` | 9.97 |
-| `real_r4_scv2_unified` (trained on real) | best | 2.99 |
-| HPPNet L2, historical | all-split PIT | 2.27 |
+| Training noise | best real MAE (rev/s) | round |
+|:--|--:|--:|
+| Real flights (`real_r4_scv2_unified`) | **2.99** | 48 |
+| Hard cloud (`rig_hard_scv2_unified`) | **5.37** | 102 |
+| Easy cloud (`rig_easy_scv2_unified`) | **5.72** | 29 |
+| Previous fitted presets (`rig_fitted_scv2_unified`) | 9.97 | 23 |
+| Wide hand-set ranges (`ctrl_diverse_scv2_unified`) | 14.27 | 4 |
 
 ::: {.small}
-The question this arm answers: does training on jittered copies of the two fitted rigs beat training on the fits themselves?
+Synthetic-only training reaches 5.4 rev/s on real drones. The previous fitted presets reached 10.0.
+The hard cloud matches the easy cloud. Neither real rig is likely in the hard cloud.
 :::
 
-## Pending: hard arm {.smaller}
+::: {.notes}
+Both arms degrade after their best round: easy 5.72 to 7.91, hard 5.37 to 6.23. Checkpoint
+selection matters.
+:::
+
+## Pending
 
 ::: {.pending}
-[**PENDING**]{.tag} &nbsp; **`rig-hard-1b2f06`** — `rig_hard_scv2_unified`, SimpleConv v2, vast A100. Running now; no numbers yet.
+[**PENDING**]{.tag} &nbsp; Curriculum training. Synthetic first, then real.
 
-Will report: best `real_overall` MAE, and `real_r1` / `real_r2` / `real_r3` MAE.
+[**PENDING**]{.tag} &nbsp; Mixed training. Synthetic and real in one pool.
 :::
-
-**Reference rows that already exist**
-
-| Run | Split | MAE (rev/s) |
-|:--|:--|--:|
-| `rig_fitted_scv2_unified` | best `real_r3` | 9.97 |
-| `real_r4_scv2_unified` (trained on real) | best | 2.99 |
-| HPPNet L2, historical | all-split PIT | 2.27 |
 
 ::: {.small}
-The question this arm answers: does the wide path cloud of the previous slide generalise better to the real rigs than the narrow clouds do?
-:::
-
-## Pending: salience arm {.smaller}
-
-::: {.pending}
-[**PENDING**]{.tag} &nbsp; **`rig-easy-hppnet-l2-4fa419`** — `rig_easy_hppnet_l2_unified`, HPPNet L2 salience head, vast A100. Running now; no numbers yet.
-
-Will report: best `real_overall` MAE, and `real_r1` / `real_r2` / `real_r3` MAE.
-:::
-
-**Reference rows that already exist**
-
-| Run | Split | MAE (rev/s) |
-|:--|:--|--:|
-| `rig_fitted_scv2_unified` | best `real_r3` | 9.97 |
-| `real_r4_scv2_unified` (trained on real) | best | 2.99 |
-| HPPNet L2, historical | all-split PIT | 2.27 |
-
-::: {.small}
-The question this arm answers: does the salience head keep its 2.27 advantage when it is trained on synthetic rigs instead of real flights?
+Both use the same panel. Both are compared against the 2.99 real-data row.
 :::
