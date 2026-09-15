@@ -28,7 +28,9 @@ without both the new model would be charged for a term the comparison cannot
 see.  Each record also carries the airborne-rule RETENTION of the sampled
 flights, which is the diagnostic behind a model whose mean looks biased.
 
-Exit status is 0 only if every rig passes.
+Exit status is 0 whenever the fits and records were written — a FAIL verdict is
+a finding, not a failure.  ``scripts/rps_traj_compare.py`` is the judge and
+returns non-zero when a rig does not pass.
 """
 
 from __future__ import annotations
@@ -55,7 +57,11 @@ from experiments.rps_traj.data import (  # noqa: E402
     airborne_segments,
     load_rig,
 )
-from experiments.rps_traj.model import SAMPLE_PAD_S, fit_rig  # noqa: E402
+from experiments.rps_traj.model import (  # noqa: E402
+    SAMPLE_PAD_S,
+    NewFit,
+    fit_rig,
+)
 from experiments.rps_traj.stats import (  # noqa: E402
     FAMILIES,
     TrajStats,
@@ -161,7 +167,8 @@ def _params_line(fit: Any) -> str:
             row("f0", p.f0) + " Hz",
             row("zeta", p.zeta),
             row("sig_osc", p.sigma_osc) + " rev/s",
-            row("s", p.s) + " rev/s",
+            f"    s_c {p.s_c:.2f} rev/s (common)",
+            row("s_r", p.s_r) + " rev/s (per rotor)",
         ]
     )
 
@@ -190,6 +197,76 @@ def airborne_retention(
             total += rps.size
             kept += sum(rps[:, sl].size for sl in airborne_segments(rps, fs))
     return float(kept) / float(total) if total else float("nan")
+
+
+def rescore_rig(rig: str, out: Path, *, seed: int, n_rep: int) -> dict[str, Any]:
+    """Re-score a rig from its EXISTING fits, with only the offset model changed.
+
+    Round 5 changed nothing about the dynamics — it split the per-flight offset
+    into a common and a per-rotor part (:func:`model.pooled_means`) — so
+    refitting the 23 dynamic parameters would burn hours to land on the same
+    answer.  This path therefore loads the previous round's ``fits/new`` and
+    ``fits/base``, re-estimates ONLY ``(s_c, s_r)`` from the flights' airborne
+    means, and recomputes the sampled statistics and the verdict.  The record
+    it writes says so in ``dynamics_from``.
+    """
+    from experiments.rps_traj.model import pooled_means  # noqa: PLC0415
+
+    flights = load_rig(rig)
+    durations = sample_durations(flights)
+    fs = float(flights[0].fs)
+    real = compute_stats(flights)
+    _write(out / "stats" / "real" / f"{rig}.json", real.to_json())
+
+    payload = json.loads((out / "fits" / "new" / f"{rig}.json").read_text())
+    mu, s_c, s_r = pooled_means(flights, fs)
+    params = dict(payload["params"])
+    params.pop("s", None)
+    params["mu"] = mu.tolist()
+    params["s_c"], params["s_r"] = s_c, s_r.tolist()
+    payload["params"] = params
+    new_fit = NewFit.from_dict(payload)
+    _write(out / "fits" / "new" / f"{rig}.json", new_fit.to_json())
+
+    new_stats = stats_from_samples(
+        new_fit.sampler(fs, antithetic_offsets=True), durations, fs=fs, n_rep=n_rep, seed=seed
+    )
+    _write(out / "stats" / "new" / f"{rig}.json", new_stats.to_json())
+
+    base_fit = _load_or_fit_baseline(flights, rig, seed, out, reuse=True)
+    base_stats = stats_from_samples(base_fit.sampler(fs), durations, fs=fs, n_rep=n_rep, seed=seed)
+    _write(out / "stats" / "base" / f"{rig}.json", base_stats.to_json())
+
+    record: dict[str, Any] = {
+        "rig": rig,
+        "dynamics_from": payload.get("round", "round4"),
+        "rescored": True,
+        "n_flights": len(flights),
+        "airborne_s": float(sum(durations) - SAMPLE_PAD_S * len(durations)),
+        "n_segments": len(durations),
+        "fit_rate_hz": new_fit.fit_rate_hz,
+        "n_scored": new_fit.n_scored,
+        "nll": new_fit.nll,
+        "n_iter": new_fit.n_iter,
+        "wall_s": new_fit.wall_s,
+        "n_blocks": new_fit.n_blocks,
+        "params": new_fit.params.to_dict(),
+        "new": discrepancy(new_stats, real),
+        "base": discrepancy(base_stats, real),
+        "new_retention": airborne_retention(
+            new_fit.sampler(fs, antithetic_offsets=True), durations, fs, n_rep, seed
+        ),
+        "base_retention": airborne_retention(base_fit.sampler(fs), durations, fs, n_rep, seed),
+    }
+    print(
+        f"\n[{rig}] RESCORED from {record['dynamics_from']} dynamics; "
+        f"{len(flights)} flights, {record['airborne_s']:.0f} s airborne\n"
+        + _params_line(new_fit)
+        + f"\n    airborne-rule retention: new {record['new_retention']:.1%}"
+        f", base {record['base_retention']:.1%}"
+    )
+    record["verdict"] = report_rig(rig, real, base_stats, new_stats)
+    return record
 
 
 def run_rig(
@@ -307,12 +384,19 @@ def main() -> int:
         help="load fits/base/<rig>.json instead of refitting the baseline",
     )
     ap.add_argument("--round", help="also snapshot the summary to rounds/<name>.json")
+    ap.add_argument(
+        "--rescore",
+        action="store_true",
+        help="re-score from the existing fits (offset model only; no refit)",
+    )
     args = ap.parse_args()
 
     rigs = [r.strip() for r in str(args.rigs).split(",") if r.strip()]
     out = Path(args.out)
     records = [
-        run_rig(
+        rescore_rig(rig, out, seed=args.seed, n_rep=args.n_rep)
+        if args.rescore
+        else run_rig(
             rig,
             out,
             seed=args.seed,
@@ -342,6 +426,7 @@ def main() -> int:
             "rate_hz": RATE_HZ,
             "seed": args.seed,
             "n_rep": args.n_rep,
+            "rescored": bool(args.rescore),
             "overall": overall if scored else None,
             "rigs": records,
         },
@@ -365,7 +450,11 @@ def main() -> int:
                 json.dumps(record, indent=2, allow_nan=False),
             )
             print(f"wrote {part}")
-    return 0 if (overall or not scored) else 1
+    # ALWAYS 0: this script's job is to FIT and RECORD, and it did.  A FAIL
+    # verdict is a finding, not a failure, and returning 1 for it made every
+    # honest single-rig job show up as "failed" in ``omnirun ps``.  The
+    # PASS/FAIL exit code belongs to the judge, ``rps_traj_compare.py``.
+    return 0
 
 
 if __name__ == "__main__":

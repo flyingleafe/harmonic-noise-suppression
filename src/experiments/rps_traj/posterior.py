@@ -17,9 +17,9 @@ one rig's hover level with another's absolute jitter would be nonsense.
   idle and at cruise, so a ratio is the right invariant);
 * ``theta``, ``u_slow``, ``log f0``, ``logit zeta`` and ``log tau_e`` — already
   dimensionless (a time constant does not scale with the drone's size);
-* every ``sigma``, including the measurement process' ``sigma_e``, and the
-  per-ROTOR per-flight offset ``s`` as ``log(sigma / mean(mu))``, i.e. as a
-  relative fluctuation.
+* every ``sigma``, including the measurement process' ``sigma_e`` and both
+  parts of the per-flight offset (``s_c`` common, ``s_r`` per rotor), as
+  ``log(sigma / mean(mu))``, i.e. as a relative fluctuation.
 
 Sampling maps back through the same transform, so a draw is "a drone this big,
 fluctuating this much RELATIVE to its size".  Four invariants survive the round
@@ -71,15 +71,16 @@ IDX_LOGIT_ZETA = slice(17, 21)
 IDX_LOG_SIGMA_OSC = slice(21, 25)
 IDX_LOG_TAU_E = 25
 IDX_LOG_SIGMA_E = 26
-IDX_LOG_S = slice(27, 31)
+IDX_LOG_S_C = 27
+IDX_LOG_S_R = slice(28, 32)
 
 #: Coordinates that are logs of a positive quantity: their prior width is
 #: floored relatively as well as absolutely (see :func:`fit_posterior`).
 LOG_DIMS = np.array(
-    [IDX_LOG_SCALE, IDX_LOG_TAU_E, IDX_LOG_SIGMA_E]
+    [IDX_LOG_SCALE, IDX_LOG_TAU_E, IDX_LOG_SIGMA_E, IDX_LOG_S_C]
     + list(range(9, 17))
     + list(range(21, 25))
-    + list(range(27, 31))
+    + list(range(28, 32))
 )
 
 #: Relative trims are clipped to this range when mapping a draw back, which is
@@ -111,8 +112,9 @@ def rig_vector(params: Params) -> np.ndarray:
             [
                 np.log(params.tau_e),
                 np.log(max(params.sigma_e, SIGMA_E_FLOOR) / scale),
+                np.log(max(params.s_c, S_FLOOR) / scale),
             ],
-            np.log(np.maximum(params.s, S_FLOOR) / scale),
+            np.log(np.maximum(params.s_r, S_FLOOR) / scale),
         ]
     )
 
@@ -136,7 +138,8 @@ def params_from_rig_vector(v: np.ndarray) -> Params:
         sigma_osc=scale * np.exp(v[IDX_LOG_SIGMA_OSC]),
         tau_e=float(np.clip(np.exp(v[IDX_LOG_TAU_E]), TAU_E_MIN_S, TAU_E_MAX_S)),
         sigma_e=scale * float(np.exp(v[IDX_LOG_SIGMA_E])),
-        s=scale * np.exp(v[IDX_LOG_S]),
+        s_c=scale * float(np.exp(v[IDX_LOG_S_C])),
+        s_r=scale * np.exp(v[IDX_LOG_S_R]),
     )
 
 

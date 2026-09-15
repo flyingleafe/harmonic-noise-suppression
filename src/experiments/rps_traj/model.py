@@ -30,10 +30,15 @@ The model (round 4).  Rotor speeds in rev/s, mixer order
   them, so in round 3 the shaft modes did it instead and DREGON's rotor
   cross-correlation came out at 0.46 against a real 0.17.  It is labelled
   "measurement" so a training sampler can drop it and keep the shaft.
-* ``delta_flight ~ N(0, diag(s^2))`` per ROTOR, one draw per flight: the frozen
-  ``rotor_var`` pools all airborne samples about the *pooled* mean, and the
-  level differences are per-rotor (michaels' rotor 0 carries 2.5x its
-  neighbours' variance purely because its between-flight trim moves 17 rev/s).
+* ``delta_flight = 1 c + r``, one draw per flight, with ``c ~ N(0, s_c^2)``
+  COMMON to the four rotors and ``r ~ N(0, diag(s_r^2))`` per rotor.  The frozen
+  ``rotor_var`` pools all airborne samples about the *pooled* mean, so the
+  between-flight level differences are part of what is scored; they are partly
+  common (neurobem's gentle and aggressive flights differ by ~41 rev/s on all
+  four rotors at once) and partly per-rotor (michaels' rotor 0 carries 2.5x its
+  neighbours' variance because its own trim moves 17 rev/s), and a model with
+  only the per-rotor part manufactures rotor spreads no real flight has — which
+  is what cost round 4 a third of neurobem's samples to the airborne rule.
 
 THE LIKELIHOOD IS NOW EXACT.  Rounds 1-3 used a Whittle (frequency-domain)
 approximation, which weights every Rayleigh bin of a linear grid equally and so
@@ -186,7 +191,7 @@ RICCATI_TOL = 1e-9
 RICCATI_MAX_ITER = 2000
 
 #: Number of parameters, and the optimiser vector's length.
-N_PARAMS = 31
+N_PARAMS = 32
 N_FIT_PARAMS = 23
 
 #: State dimension: 4 slow OUs, 4 oscillator pairs, 4 measurement OUs.
@@ -406,10 +411,11 @@ class Params:
     sigma_osc: np.ndarray
     tau_e: float
     sigma_e: float
-    s: np.ndarray
+    s_c: float
+    s_r: np.ndarray
 
     def __post_init__(self) -> None:
-        for name in ("mu", "tau_slow", "sigma_slow", "f0", "zeta", "sigma_osc", "s"):
+        for name in ("mu", "tau_slow", "sigma_slow", "f0", "zeta", "sigma_osc", "s_r"):
             setattr(
                 self,
                 name,
@@ -418,6 +424,7 @@ class Params:
         self.theta = float(self.theta)
         self.tau_e = float(self.tau_e)
         self.sigma_e = float(self.sigma_e)
+        self.s_c = float(self.s_c)
 
     # ── derived ──
     @property
@@ -448,7 +455,7 @@ class Params:
         a = self.mixing
         out = (a * a) @ self.mode_var + self.sigma_e**2
         if include_offset:
-            out = out + self.s**2
+            out = out + self.s_c**2 + self.s_r**2
         return out
 
     def component_state_spaces(
@@ -560,7 +567,8 @@ class Params:
             sigma_osc=self.sigma_osc[order],
             tau_e=self.tau_e,
             sigma_e=self.sigma_e,
-            s=self.s,
+            s_c=self.s_c,
+            s_r=self.s_r,
         )
 
     # ── (de)serialisation ──
@@ -583,8 +591,12 @@ class Params:
                 v_from_f0(self.f0),
                 v_from_zeta(self.zeta),
                 np.log(self.sigma_osc),
-                [v_from_tau_e(self.tau_e), np.log(max(self.sigma_e, SIGMA_E_FLOOR))],
-                np.log(np.maximum(self.s, S_FLOOR)),
+                [
+                    v_from_tau_e(self.tau_e),
+                    np.log(max(self.sigma_e, SIGMA_E_FLOOR)),
+                    np.log(max(self.s_c, S_FLOOR)),
+                ],
+                np.log(np.maximum(self.s_r, S_FLOOR)),
             ]
         )
 
@@ -604,7 +616,8 @@ class Params:
             sigma_osc=np.exp(v[21:25]),
             tau_e=tau_e_from_v(v[25]),
             sigma_e=float(np.exp(v[26])),
-            s=np.exp(v[27:31]),
+            s_c=float(np.exp(v[27])),
+            s_r=np.exp(v[28:32]),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -619,7 +632,8 @@ class Params:
             "corner_tau": self.corner_tau.tolist(),
             "tau_e": self.tau_e,
             "sigma_e": self.sigma_e,
-            "s": self.s.tolist(),
+            "s_c": self.s_c,
+            "s_r": self.s_r.tolist(),
         }
 
     def to_json(self) -> str:
@@ -637,7 +651,8 @@ class Params:
             sigma_osc=payload["sigma_osc"],
             tau_e=payload["tau_e"],
             sigma_e=payload["sigma_e"],
-            s=payload["s"],
+            s_c=payload["s_c"],
+            s_r=payload["s_r"],
         )
 
     @classmethod
@@ -686,7 +701,9 @@ class Params:
         """
         n = int(n_samples)
         v = self._component_paths(n, rng, float(fs))
-        drawn = rng.standard_normal(NUM_ROTORS) * self.s
+        drawn = float(rng.standard_normal()) * self.s_c + (
+            rng.standard_normal(NUM_ROTORS) * self.s_r
+        )
         delta = drawn if offset is None else np.asarray(offset, dtype=np.float64)
         out = (self.mu + delta)[:, None] + self.mixing @ v
         for j in range(NUM_ROTORS):
@@ -707,7 +724,7 @@ class Params:
         With ``antithetic_offsets`` the closure pairs consecutive calls: the
         second flight of each pair reuses the NEGATED offset of the first.  That
         is Monte-Carlo variance reduction, not a different model — each flight's
-        offset keeps its marginal ``N(0, diag(s^2))`` law, so ``rotor_var``,
+        offset keeps its marginal law, so ``rotor_var``,
         ``acf`` and ``xcorr`` are unchanged in distribution — but the offsets
         over an EVEN number of sampled flights cancel exactly, so the pooled
         model mean is ``mu`` instead of carrying an ``s / sqrt(N)`` error (worth
@@ -1122,7 +1139,7 @@ def _fit_vector(params: Params) -> torch.Tensor:
     )
 
 
-def _params_from_fit_vector(vec: np.ndarray, mu: np.ndarray, s: np.ndarray) -> Params:
+def _params_from_fit_vector(vec: np.ndarray, mu: np.ndarray, s_c: float, s_r: np.ndarray) -> Params:
     v = np.asarray(vec, dtype=np.float64)
     f0 = f0_from_v(v[9:13])
     return Params(
@@ -1135,7 +1152,8 @@ def _params_from_fit_vector(vec: np.ndarray, mu: np.ndarray, s: np.ndarray) -> P
         sigma_osc=np.exp(v[17:21]),
         tau_e=tau_e_from_v(v[21]),
         sigma_e=float(np.exp(v[22])),
-        s=s,
+        s_c=s_c,
+        s_r=s_r,
     )
 
 
@@ -1265,16 +1283,32 @@ def _nanmean_rotors(x: np.ndarray) -> np.ndarray:
     return np.where(count > 0, total / np.maximum(count, 1), np.nan)
 
 
-def pooled_means(flights: Sequence[Flight], fs: float) -> tuple[np.ndarray, np.ndarray]:
-    """``(mu, s)``: the pooled airborne rotor mean and the per-flight offset std.
+def pooled_means(flights: Sequence[Flight], fs: float) -> tuple[np.ndarray, float, np.ndarray]:
+    """``(mu, s_c, s_r)``: the pooled airborne rotor mean and the per-flight
+    offset's COMMON and PER-ROTOR standard deviations.
 
-    ``s`` is the population std over flights of the per-flight airborne ROTOR
-    means, floored at :data:`S_FLOOR`; with fewer than :data:`S_MIN_FLIGHTS`
-    flights the offset term is switched off (``s = 0``) because it cannot be
-    told apart from the pooled mean.  The population (not sample) std is the
-    right estimator: the frozen ``rotor_var`` pools every airborne sample about
-    the POOLED mean, so it sees exactly the population variance of the flight
-    means, and the model reproduces it without a Bessel correction.
+    ``delta_flight = 1 c + r`` with ``c ~ N(0, s_c^2)`` shared by all four
+    rotors and ``r ~ N(0, diag(s_r^2))``, moment-estimated from the population
+    covariance ``C`` of the per-flight airborne rotor means: ``s_c^2`` is the
+    mean of ``C``'s six off-diagonal entries (floored at 0, since a negative
+    average cross-covariance is not a common mode) and ``s_r^2 = max(diag(C) -
+    s_c^2, 0)``.  With fewer than :data:`S_MIN_FLIGHTS` flights both are 0,
+    because the offset cannot be told apart from the pooled mean.
+
+    WHY THE SPLIT (round 5).  Round 4 estimated a per-rotor offset only, and on
+    neurobem it came out at ~41 rev/s on ALL FOUR rotors — that is one common
+    level difference between its gentle and aggressive flights, not four
+    independent ones.  Drawing it independently per rotor manufactures rotor
+    SPREADS no real flight has, and the frozen airborne rule then throws away
+    31 % of the samples (retention 0.69) from the low side and biases every
+    mean statistic.  Splitting the covariance into a common part and a residual
+    reproduces the same ``rotor_var`` while keeping a sampled flight's four
+    rotors as close together as the real ones.
+
+    The population (not sample) covariance is the right estimator: the frozen
+    ``rotor_var`` pools every airborne sample about the POOLED mean, so it sees
+    exactly the population variance of the flight means, and the model
+    reproduces it without a Bessel correction.
     """
     per_flight = [x for x in (_airborne_stack(f, fs) for f in flights) if x is not None]
     if not per_flight:
@@ -1282,9 +1316,13 @@ def pooled_means(flights: Sequence[Flight], fs: float) -> tuple[np.ndarray, np.n
     pooled = np.concatenate(per_flight, axis=1)
     mu = _nanmean_rotors(pooled)
     if len(per_flight) < S_MIN_FLIGHTS:
-        return mu, np.zeros(NUM_ROTORS)
+        return mu, 0.0, np.zeros(NUM_ROTORS)
     offsets = np.stack([_nanmean_rotors(x) - mu for x in per_flight], axis=0)
-    return mu, np.maximum(offsets.std(axis=0), S_FLOOR)
+    cov = (offsets.T @ offsets) / float(offsets.shape[0])
+    off_diag = cov[~np.eye(NUM_ROTORS, dtype=bool)]
+    var_c = max(float(off_diag.mean()), 0.0)
+    var_r = np.maximum(np.diag(cov) - var_c, 0.0)
+    return mu, float(np.sqrt(var_c)), np.sqrt(var_r)
 
 
 def airborne_extremes(flights: Sequence[Flight], fs: float) -> tuple[float, float]:
@@ -1303,7 +1341,9 @@ def airborne_extremes(flights: Sequence[Flight], fs: float) -> tuple[float, floa
     return lo, hi
 
 
-def _start_params(flights: Sequence[Flight], fs: float, mu: np.ndarray, s: np.ndarray) -> Params:
+def _start_params(
+    flights: Sequence[Flight], fs: float, mu: np.ndarray, s_c: float, s_r: np.ndarray
+) -> Params:
     """The data-driven start: mode variances split 70/30 slow/oscillator,
     ``tau_slow`` 2 s, ``f0`` 1 Hz, ``zeta`` 1 (critically damped, no resonance
     assumed), ``theta`` 0, and a small fast measurement process."""
@@ -1328,7 +1368,8 @@ def _start_params(flights: Sequence[Flight], fs: float, mu: np.ndarray, s: np.nd
         sigma_osc=np.sqrt(0.3 * mode_var),
         tau_e=0.05,
         sigma_e=max(0.05 * rms, 1e-3),
-        s=s,
+        s_c=s_c,
+        s_r=s_r,
     )
 
 
@@ -1372,10 +1413,10 @@ def fit_rig(
         raise ValueError("flights disagree on the sample rate")
     rate = fit_rate_hz(rig) if fit_rate is None else float(fit_rate)
 
-    mu, s = pooled_means(flights, fs)
+    mu, s_c, s_r = pooled_means(flights, fs)
     rps_min, rps_max = airborne_extremes(flights, fs)
     batches = likelihood_batches(flights, rate, fs)
-    start_params = start or _start_params(flights, fs, mu, s)
+    start_params = start or _start_params(flights, fs, mu, s_c, s_r)
     start_vec = _fit_vector(start_params).numpy()
     bounds = _fit_bounds()
     lo = np.array([b[0] for b in bounds])
@@ -1400,7 +1441,7 @@ def fit_rig(
     if best is None:
         raise RuntimeError(f"every restart of the {rig!r} fit failed")
 
-    params = _params_from_fit_vector(best[1], mu, s).canonical()
+    params = _params_from_fit_vector(best[1], mu, s_c, s_r).canonical()
     if idle_rps is None:
         idle_rps = _idle_level(flights, mu)
     return NewFit(

@@ -66,7 +66,8 @@ def _params(**over: object) -> Params:
         "sigma_osc": [2.0, 0.5, 0.5, 1.5],
         "tau_e": 0.05,
         "sigma_e": 0.3,
-        "s": [0.0, 0.0, 0.0, 0.0],
+        "s_c": 0.0,
+        "s_r": [0.0, 0.0, 0.0, 0.0],
     }
     base.update(over)
     return Params(**base)  # type: ignore[arg-type]
@@ -184,7 +185,7 @@ def test_steady_state_nll_equals_the_time_varying_filter() -> None:
     steady-state gain is only legitimate once the filter has forgotten its
     initial condition, which is what BURN_S buys.
     """
-    p = _params(sigma_e=0.4, s=[0.0] * 4)
+    p = _params(sigma_e=0.4, s_c=0.0, s_r=[0.0] * 4)
     phi, q, p_stat, h, k, s = _kalman_pieces(p, RATE_HZ)
 
     n_t, burn = 1500, 500
@@ -258,7 +259,7 @@ def test_custom_adjoint_matches_autograd() -> None:
 
 def test_padding_and_masking_do_not_change_the_likelihood() -> None:
     """Blocks are zero-padded to batch them; the mask must make that exact."""
-    p = _params(sigma_e=0.4, s=[0.0] * 4)
+    p = _params(sigma_e=0.4, s_c=0.0, s_r=[0.0] * 4)
     phi, _q, _p_stat, h, k, s = _kalman_pieces(p, RATE_HZ)
     n_t, burn = 900, 200
     y = p.sample_airborne(n_t, np.random.default_rng(1))
@@ -322,7 +323,7 @@ def test_sampler_realises_the_analytic_rotor_variance() -> None:
     """Pooled over independent 600 s flights the sampler's per-rotor variance
     is the analytic one to 5 %, and a single 600 s flight is within the
     estimator's own sampling error."""
-    p = _params(sigma_e=0.2, s=[0.0, 0.0, 0.0, 0.0])
+    p = _params(sigma_e=0.2, s_c=0.0, s_r=[0.0, 0.0, 0.0, 0.0])
     analytic = p.rotor_var(include_offset=False)
     sampler = p.sampler()
     rng = np.random.default_rng(5)
@@ -343,16 +344,18 @@ def test_sampler_realises_the_analytic_rotor_variance() -> None:
 
 
 def test_per_rotor_offset_lifts_one_rotors_pooled_variance() -> None:
-    """The offset is per ROTOR, which is the only way the model can give one
-    rotor more pooled variance than its neighbours — michaels' rotor 0 carries
-    52.2 (rev/s)^2 against ~21 for the other three."""
-    p = _params(sigma_e=0.1, s=[6.0, 0.2, 0.2, 0.5])
+    """The offset's PER-ROTOR part is the only way the model can give one rotor
+    more pooled variance than its neighbours — michaels' rotor 0 carries
+    52.2 (rev/s)^2 against ~21 for the other three, purely from its own trim."""
+    p = _params(sigma_e=0.1, s_c=0.0, s_r=[6.0, 0.2, 0.2, 0.5])
     analytic = p.rotor_var()
     assert analytic[0] > 1.5 * analytic[1]
 
+    # 300 flights: the offset variance is estimated from ONE draw per flight, so
+    # with 120 it carried a 13 % sampling error of its own.
     rng = np.random.default_rng(11)
     sampler = p.sampler()
-    pooled = np.concatenate([sampler(60 * int(RATE_HZ), rng) for _ in range(120)], axis=1)
+    pooled = np.concatenate([sampler(60 * int(RATE_HZ), rng) for _ in range(300)], axis=1)
     assert np.all(np.abs(pooled.var(axis=1) / analytic - 1.0) < 0.15)
 
 
@@ -362,7 +365,9 @@ def test_antithetic_offsets_cancel_exactly() -> None:
     offset, so the pooled variance is still s^2."""
     # No process and no measurement noise: each flight is exactly mu + delta,
     # which makes the cancellation exact rather than statistical.
-    p = _params(sigma_slow=[0.0] * 4, sigma_osc=[0.0] * 4, sigma_e=0.0, s=[6.0, 1.0, 1.0, 2.0])
+    p = _params(
+        sigma_slow=[0.0] * 4, sigma_osc=[0.0] * 4, sigma_e=0.0, s_c=0.0, s_r=[6.0, 1.0, 1.0, 2.0]
+    )
     # 200 flights = 100 independent offset draws, each used twice with opposite
     # sign, so the variance estimate has ~14 % sampling error of its own.
     n, n_flights = 100, 200
@@ -377,7 +382,7 @@ def test_antithetic_offsets_cancel_exactly() -> None:
     assert np.allclose(anti.mean(axis=0), p.mu, atol=1e-12)
     assert np.max(np.abs(plain.mean(axis=0) - p.mu)) > 0.05
     assert np.allclose(anti[0::2] - p.mu, -(anti[1::2] - p.mu))
-    assert np.all(np.abs(anti.var(axis=0) / p.s**2 - 1.0) < 0.3)
+    assert np.all(np.abs(anti.var(axis=0) / p.s_r**2 - 1.0) < 0.3)
 
 
 def test_full_flight_starts_and_ends_on_the_ground() -> None:
@@ -468,7 +473,7 @@ def test_parameter_ranges_hold_for_any_coordinate() -> None:
 
     rng = np.random.default_rng(0)
     for _ in range(200):
-        p = Params.from_vector(rng.normal(0.0, 6.0, 31))
+        p = Params.from_vector(rng.normal(0.0, 6.0, 32))
         assert np.all(p.f0 >= F0_MIN_HZ) and np.all(p.f0 <= F0_MAX_HZ)
         assert np.all(p.zeta >= ZETA_MIN) and np.all(p.zeta <= ZETA_MAX)
         assert np.all(p.tau_slow >= p.corner_tau)
@@ -480,7 +485,7 @@ def test_parameter_ranges_hold_for_any_coordinate() -> None:
 
 def test_rig_vector_round_trips() -> None:
     """Scale-free coordinates lose nothing but the ``s`` floor."""
-    p = _params(sigma_e=0.2, s=[1.0, 0.2, 0.2, 0.5])
+    p = _params(sigma_e=0.2, s_c=2.0, s_r=[1.0, 0.2, 0.2, 0.5])
     back = params_from_rig_vector(rig_vector(p))
 
     assert np.allclose(back.mu, p.mu)
@@ -492,7 +497,8 @@ def test_rig_vector_round_trips() -> None:
     assert np.allclose(back.sigma_osc, p.sigma_osc)
     assert back.tau_e == pytest.approx(p.tau_e)
     assert back.sigma_e == pytest.approx(p.sigma_e)
-    assert np.allclose(back.s, p.s)
+    assert back.s_c == pytest.approx(p.s_c)
+    assert np.allclose(back.s_r, p.s_r)
 
 
 def test_posterior_draws_are_positive_drones_of_a_plausible_size() -> None:

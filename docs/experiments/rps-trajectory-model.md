@@ -728,13 +728,16 @@ not a level error.
 
 ## Round 4 — Kalman likelihood
 
-**Status: in flight** (agent `ModelImpl`). Design, as decided by the user after
-reading the round-3 diagnosis:
+**Status: done** (7 uni-cpu jobs at commit `374c9f7d`). Design, as decided by the
+user after reading the round-3 diagnosis:
 
 - **Exact Kalman likelihood** in place of the Whittle approximation, so the
   1.6-10 s structure has evidence instead of a prior. The block-Whittle
   likelihood cannot see a corner below the lowest kept Rayleigh bin; a
-  state-space likelihood evaluated on the whole airborne segment can.
+  state-space likelihood evaluated on the whole airborne segment can. Blocks are
+  30 s with a 5 s burn-in whose innovations are not scored, all blocks of a
+  shape are one batched recursion, and the gain comes from the differentiable
+  discrete Riccati fixed point.
 - **Per-rotor OU measurement term** in place of the single iid white `sigma_w`.
   The high-frequency content the oscillator was chasing is per-rotor measurement
   chain (DREGON's staircase, michaels' hold-resampling, PI-TCN's 4 RPM
@@ -746,27 +749,80 @@ reading the round-3 diagnosis:
 - **ESC floor and ceiling clamp**, so a sampled trajectory cannot leave the
   physically reachable rotor-speed range.
 
-<!-- fill from results/rps_traj/rounds/round4.json -->
+| rig | overall_mean (rev/s) | rotor_mean (rev/s) | rotor_var (log) | acf | xcorr | strict | verdict |
+|---|---|---|---|---|---|---|---|
+| michaels | 0.0725 -> 0.0503 | 0.1217 -> 0.1065 | 0.4841 -> 0.1429 | 0.0614 -> 0.0510 | 0.1352 -> 0.0468 | 5/5 | **PASS** |
+| dregon | 0.1078 -> 0.0451 | 0.1201 -> 0.0483 | 0.3313 -> 0.1401 | 0.0622 -> 0.0857 ! | 0.1749 -> 0.0766 | 4/5 | FAIL |
+| neurobem_quad | 0.6624 -> 3.6537 ! | 0.6907 -> 3.6936 ! | 1.2048 -> 0.1387 | 0.3351 -> 0.1550 | 0.0736 -> 0.1423 ! | 2/5 | FAIL |
+| pitcn_quad | 0.2361 -> 0.0019 | 0.2554 -> 0.0503 | 0.2620 -> 0.1531 | 0.1164 -> 0.1220 ! | 0.2322 -> 0.0418 | 4/5 | FAIL |
+| nanobench_cf21b | 0.0170 -> 0.0947 ! | 0.1455 -> 0.1065 | 0.0983 -> 0.1027 ! | 0.1997 -> 0.2644 ! | 0.0666 -> 0.0318 | 2/5 | FAIL |
+| vid_m100 | 0.0038 -> 0.0375 ! | 0.0547 -> 0.1125 ! | 0.3372 -> 0.1271 | 0.1386 -> 0.1702 ! | 0.5219 -> 0.1702 | 2/5 | FAIL |
+| blackbird_quad | 0.8440 -> 0.3235 | 0.9668 -> 0.3387 | 0.1810 -> 0.2185 ! | 0.1594 -> 0.1004 | 0.7014 -> 0.0949 | 4/5 | FAIL |
+
+1/7 PASS (no family may regress and >= 3 must strictly improve; `!` marks a regression). Estimator: `n_rep` 40, seed 0, 100 Hz grid.
+
+**Read.** The exact likelihood is what the model needed: michaels PASSES all
+five families, and the term that did it is the coloured measurement process —
+its `xcorr` fell from the baseline's 0.135 to 0.047 because the per-rotor
+incoherent junk no longer has to be absorbed by the shaft modes, and
+`rotor_mean` beat the baseline with no mean calibration at all. Four rigs
+(dregon, pitcn_quad, blackbird_quad) reach 4/5. The one systematic defect left
+is the mean families on the three rigs with large between-flight level
+differences, and the airborne-rule retention column of
+`results/rps_traj/rounds/round4.json` names the mechanism: neurobem keeps only
+68.6 % of its sampled rotor samples, because a per-rotor offset of ~41 rev/s on
+all four rotors manufactures rotor spreads no real flight has, and the frozen
+rule drops those samples from the low side only.
+
+Per-rig cost (uni-cpu, one job per rig): michaels 240 s / 468 iterations,
+nanobench 291 s, vid_m100 582 s, neurobem 979 s, pitcn 1546 s, dregon 1937 s,
+blackbird ~4400 s. The gradient is a hand-written adjoint rather than autograd
+through the recursion, which is a measured 19x: autograd's backward was 94 % of
+the cost (18.2 s of a 19.4 s gradient on neurobem) at ~160 us of graph-traversal
+overhead per time step.
+
+## Round 5 — the per-flight offset splits in two
+
+**Status: done** (laptop rescore; the DYNAMICS ARE THE ROUND-4 FITS, only the
+offset model changed, which is why `rounds/round5.json` carries
+`"rescored": true` and `dynamics_from`). `delta_flight = 1 c + r` with
+`c ~ N(0, s_c^2)` common to all four rotors and `r ~ N(0, diag(s_r^2))` per
+rotor, both moment-estimated from the population covariance of the per-flight
+airborne rotor means: `s_c^2` is the mean of its six off-diagonal entries
+(floored at 0) and `s_r^2 = max(diag - s_c^2, 0)`.
 
 | rig | overall_mean (rev/s) | rotor_mean (rev/s) | rotor_var (log) | acf | xcorr | strict | verdict |
 |---|---|---|---|---|---|---|---|
-| michaels | | | | | | | |
-| dregon | | | | | | | |
-| neurobem_quad | | | | | | | |
-| pitcn_quad | | | | | | | |
-| nanobench_cf21b | | | | | | | |
-| vid_m100 | | | | | | | |
-| blackbird_quad | | | | | | | |
+| michaels | 0.0725 -> 0.1856 ! | 0.1217 -> 0.2024 ! | 0.4841 -> 0.2349 | 0.0614 -> 0.0508 | 0.1352 -> 0.0473 | 3/5 | FAIL |
+| dregon | 0.1078 -> 0.0369 | 0.1201 -> 0.0433 | 0.3313 -> 0.0946 | 0.0622 -> 0.0857 ! | 0.1749 -> 0.0765 | 4/5 | FAIL |
+| neurobem_quad | 0.6624 -> 1.1082 ! | 0.6907 -> 1.1103 ! | 1.2048 -> 0.0643 | 0.3351 -> 0.1076 | 0.0736 -> 0.0977 ! | 2/5 | FAIL |
+| pitcn_quad | 0.2361 -> 0.0571 | 0.2554 -> 0.0668 | 0.2620 -> 0.1244 | 0.1164 -> 0.1220 ! | 0.2322 -> 0.0418 | 4/5 | FAIL |
+| nanobench_cf21b | 0.0170 -> 0.1027 ! | 0.1455 -> 0.1088 | 0.0983 -> 0.1014 ! | 0.1997 -> 0.2644 ! | 0.0666 -> 0.0318 | 2/5 | FAIL |
+| vid_m100 | 0.0038 -> 0.0190 ! | 0.0547 -> 0.0458 | 0.3372 -> 0.0793 | 0.1386 -> 0.1702 ! | 0.5219 -> 0.1702 | 3/5 | FAIL |
+| blackbird_quad | 0.8440 -> 0.3235 | 0.9668 -> 0.3387 | 0.1810 -> 0.2185 ! | 0.1594 -> 0.1004 | 0.7014 -> 0.0949 | 4/5 | FAIL |
 
-Fill with `python scripts/_rps_traj_rounds_table.py --rounds 4 --no-corpus`,
-which recomputes the strict count and the verdict with the frozen rule and
-refuses to print a table that disagrees with the stored verdict.
+0/7 PASS (no family may regress and >= 3 must strictly improve; `!` marks a regression). Estimator: `n_rep` 40, seed 0, 100 Hz grid.
+
+**Read.** The split does exactly what it was meant to do where the diagnosis
+pointed, and costs elsewhere. neurobem's retention rises 0.686 -> 0.873, its
+`overall_mean` falls 3.65 -> 1.11, its `rotor_var` 0.139 -> 0.064 and its `acf`
+0.155 -> 0.108 — its offset is 42.1 rev/s common with only 0-10.7 rev/s
+per-rotor, i.e. it really was one level difference between gentle and aggressive
+flights. dregon, pitcn_quad and vid_m100 also improve. But michaels LOSES its
+round-4 PASS: its offset splits as 4.4 rev/s common plus [5.5, 0, 2.0, 0]
+per rotor, and forcing part of its rotor-0 excess through a common term costs
+both mean families (0.050 -> 0.186 and 0.107 -> 0.202) while `rotor_var` gets
+worse too (0.143 -> 0.235). So the honest summary of round 5 is: the right fix
+for the rigs whose offset is common-mode, the wrong one for the rig whose offset
+is genuinely one rotor's trim. A per-rig choice between the two offset models —
+or a full offset covariance — is the obvious next step, and it needs no refit of
+the dynamics.
 
 ## Rig posterior
 
 `src/experiments/rps_traj/posterior.py` fits a distribution OVER RIGS, so a
 training stream can draw "a plausible drone" rather than one of the fitted
-seven. Seven rigs is not much to learn a 30-dimensional distribution from, so
+seven. Seven rigs is not much to learn a 32-dimensional distribution from, so
 the density is deliberately the simplest thing that can be sampled: a DIAGONAL
 Gaussian. What makes it defensible is the reparametrisation, not the density —
 `rig_vector` makes every coordinate dimensionless:
