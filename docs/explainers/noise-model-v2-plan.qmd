@@ -1220,7 +1220,7 @@ is what makes the high orders the measurement of the dynamics: a width of one
 | survey bench points (135 / 18 cells) | stationary | 1–4 constants per point | total periodogram | all | per-cell dynamics for the rig population |
 | Michael's FLY125 cruise | free flight, label ≈ truth | `rps` label | **front-end STFT** 16 kHz, NFFT 2048, hop 512 | all (`k`-scaling resolves the shaft at high `k`) | dynamics, profile vs speed, floor, mic gains |
 | Michael's standby / ramp | free flight | label | — | — | **not fitted**; rendered from the bench dynamics through the trajectory sampler; still scored by the frozen gate |
-| DREGON room2 free flight | free flight, label error ~1 Hz std at `k = 70` | `motors_command` | — | — | **not fitted**; evaluation support only |
+| DREGON room2 free flight | free flight, label error ~1 Hz std at `k = 70` | `motors_command` | front-end STFT | none (comb frozen from the bench) | **floor only**: level, colour and slow variation of the wind-dominated floor; the comb parameters are frozen from the bench, the carrier is fixed. Evaluation support for HPPNet and LTAS |
 
 : Fit protocol after review. The bench decision is the user's; the window per class is the reasoning of section [Likelihood and window](#likelihood-and-window) as corrected at review.
 
@@ -1378,7 +1378,7 @@ The cap is **5 rounds**. Backends are `uni-cpu` and `uni-gpushort`.
 
 # Decisions for the reviewer {#decisions-for-the-reviewer}
 
-Seven choices are open. Each one has a proposal and the number behind it.
+Eight choices are open. Each one has a proposal and the number behind it.
 
 - **Decided at review (2026-09-16), recorded, no longer open:** DREGON is
   fitted on the single-motor bench and validated on the four-motor static
@@ -1419,6 +1419,17 @@ Seven choices are open. Each one has a proposal and the number behind it.
   parity fit; DREGON free flight is not gated by this likelihood (label error
   ~1 Hz at `k = 70` removes the dynamic advantage at high order) but by HPPNet
   and LTAS. Decide whether the margin is per support or pooled.
+- **The floor in flight, and the band of the likelihood gate.** Below
+  ~200-300 Hz the DREGON cruise spectrum is wind, not rotor. A model whose
+  floor was fitted on a clamped motor in a quiet room sits 20-30 dB under it
+  and pays `I/M` of 100-1000 per cell (the tail concentration of
+  `results/noise_v2/short_whittle/findings.md`); the oracle carries the wind
+  for free. Proposal: the coloured floor (level, colour, slow variation) is a
+  flight quantity fitted on the flight support with the comb frozen from the
+  bench, and the likelihood gate is reported **per band** — comb band and
+  floor band — so a pass on the comb band is what counts. The rendered
+  training noise needs the flight floor regardless. Decide the band edge and
+  whether the floor level may vary per frame.
 - **The stationarity rule on the bench.** Proposal: the longest sub-segment
   where the demodulated residual at `k ≈ 70` stays inside ±1 Hz
   (`utils.demod.residual_frequency`). Alternative: a slow polynomial carrier
