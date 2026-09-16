@@ -99,10 +99,12 @@ The campaign record is `docs/experiments/noise-model-v2.md`.
 9. The round plan is five rounds: Pyro parity, shaft prior, rig hierarchy, one
    named fix, then simplification. The primary HPPNet criterion carries over
    unchanged.
-10. The reviewer must settle nine open choices: the window, the proxy, the
-    two thresholds, which orders enter the DREGON likelihood given the label
-    precision `k_max(T)`, whether `(λ_L, σ_L)` are free per label chain, the
-    above-band wobble, the `D_k` order structure, and the DREGON label arm.
+10. Decided at review: DREGON is fitted on the bench (total periodogram) and
+    validated on the four-motor static recording; flight fits use the
+    front-end STFT; the shaft is one OU process; the flat `D` is replaced by a
+    shared short-`τ` path OU. Seven choices remain open: the path term in R1,
+    Michael's standby/ramp, the proxy, the two thresholds, the bench
+    stationarity rule, and the four-motor validation tolerance.
     Section [Decisions for the reviewer](#decisions-for-the-reviewer) lists
     them.
 
@@ -626,8 +628,9 @@ That also settles what the `k²`-scaling Lorentzian core of C2/C3 was fitting.
 It was **label error** — Michael's 29 Hz sample-and-hold, and DREGON room 2's
 command-against-shaft motor response, which sits below 16 Hz and is exactly
 what a refined label removes. It was not rotor physics. Model v2 therefore
-fits `(λ_L, σ_L)` per **label chain** and fixes the above-band wobble from
-telemetry.
+fits the shaft on the bench, where there is no label, and treats a flight fit
+that lands in the label-residual regime (`λ` above ~30 s⁻¹) as a diagnosis of
+the label chain.
 
 ## The acoustics: the bench measures the shaft term directly
 
@@ -676,9 +679,9 @@ so `D_k` is absorbing model error rather than measuring diffusion, and the
 planted control independently returns a planted `D_k ∝ k` as flat — fitted
 log-log slope `-5.74` against a true `+1`
 (`shaft.json:acoustics.dregon_bench.verdict`, `shaft.json:planted_control`).
-Read `σ_ν`, `λ` and `D_θ` from this instrument; do not read `D_k` from it. The
-prior on `log D_g` therefore still cannot come from an acoustic `V_k`
-decomposition, and `p_g = 0` stays fixed in R1 and R2 by default.
+Read `σ_ν`, `λ` and `D_θ` from this instrument; do not read `D_k` from it. A
+`k`-independent `D` therefore has no measurement behind it; v2 drops it as a
+parameter (section [Model v2](#model-v2)).
 
 Michael's FLY125 cruise still saturates: 3 of its 4 rotors exceed 0.15 rad² at
 the shortest usable lag and 0 of 4 are identified
@@ -1143,76 +1146,111 @@ supports, it is tight (`criteria/findings.md:360-364`).
 
 # Model v2
 
-Model v2 keeps the harmonic structure of C4. The changes are in the shaft
-term, the priors and the fitting machinery. The shaft term has **two honest
-parts**, because the telemetry and the label chain say two different things
-(section [Shaft-phase prior from telemetry](#shaft-phase-prior-from-telemetry)).
+::: {.callout-important}
+## Revised at review (2026-09-16)
 
-## The generative equations
+The first version of this section split the shaft term into a fitted
+"label residual" and a fixed "above-band wobble", and kept a per-harmonic
+diffusion `D` with no `k` scaling. The review replaced both. The telemetry
+shows **one** OU speed error whose `f⁻²` tail continues above the label band
+(section [Above the label band](#above-the-label-band-is-the-speed-error-white)),
+so the shaft is one process. No physical phase-noise source is `k`-independent
+(path length, mic motion and wake turbulence all give phase `∝ f`), so the flat
+`D` is replaced by a **second shared OU on the shaft phase with a short
+correlation time**. The fit protocol changed with it: DREGON is fitted on the
+bench, not in free flight.
+:::
 
-Per rig `g`, rotor `r`, order `k` and microphone `m`, with the supplied
-carrier `f_r(t)` **fixed**:
+Model v2 keeps the harmonic structure of C4. Per rig `g`, rotor `r`, order
+`k` and microphone `m`, with the carrier `f_r(t)` **fixed** (a constant per
+rotor on the bench; the label in flight):
 
-**Part (i) — the label residual, below the label band, fitted.** The speed
-error that the supplied label fails to carry is an OU process with free
-`(λ_L, σ_L)` **per label chain**, not per rig physics:
+**Shaft speed error — one OU process, fitted.**
 
-$$d\nu_r=-\lambda_L\,\nu_r\,dt+\sqrt{2\lambda_L\sigma_L^2}\;dW_r^{(0)},
+$$d\nu_r=-\lambda\,\nu_r\,dt+\sqrt{2\lambda\sigma_\nu^2}\;dW_r^{(\nu)},
 \qquad d\theta_r=\nu_r\,dt.$$
 
-**Part (ii) — the high-frequency wobble, above the label band, fixed.** Above
-the label bandwidth the phase error is a stationary bounded wobble of variance
-`V_θ^res` (section
-[Shaft-phase prior from telemetry](#shaft-phase-prior-from-telemetry)). Its
-`(σ_ν, λ)` come from the telemetry of the rig, or from the population values,
-and they are **not fitted**:
+`ν_r` is the shaft angular-speed error in rad/s, `θ_r` its angle error. The
+telemetry gives `λ = 0.67–14.4 s⁻¹` (identified rigs) and the DREGON bench
+acoustics `σ_ν ≈ 1.8 rad/s`, `λ ≈ 5.5 s⁻¹`, `D_θ = σ_ν²/λ ≈ 0.6 rad²/s`. The
+part of this process above the label band is generated by the renderer as
+filtered noise with this PSD; it is not a separate term.
 
-$$\psi_{rk}(t)=k\,\theta^{\text{res}}_r(t),\qquad
-\operatorname{Var}\theta^{\text{res}}_r=\frac{2\sigma_\nu^2\lambda}{3\pi\,\omega_c^3},
-\qquad \omega_c=2\pi\cdot 16\ \text{rad/s}.$$
+**Path phase — a second shared OU, short correlation time, fitted.** Mic
+motion, frame vibration and wake turbulence change the source-to-mic path
+length `δr(t)`; the phase they add to order `k` is `2πf·δr/c ∝ k`, shared by
+every harmonic of the rotor like the shaft term, with a correlation time of
+milliseconds to ~100 ms instead of 0.1–1 s:
 
-**Part (iii) — the per-harmonic Wiener phase, unchanged.** It stays the only
-diffusion source besides part (i):
+$$d\eta_r=-\lambda_p\,\eta_r\,dt+\sqrt{2\lambda_p\sigma_p^2}\;dW_r^{(p)},
+\qquad \lambda_p\gg\lambda .$$
 
-$$d\varepsilon_{rk}=\sqrt{2D_{gk}}\;dW_{rk},
-\qquad D_{gk}=D_g\,k^{p_g}.$$
+`η_r` is a phase-per-order (rad at `k = 1`); it is bounded (OU on the phase
+itself, not on its rate), so it adds `k`-proportional sidebands, not a `k²`
+diffusion. This term replaces the C2–C4 per-harmonic Wiener `ε_rk` and its
+`k`-independent `D`. A `k`-independent floor is kept only as a nuisance bound
+from the bench (`D < 1.45 rad²/s`) and is not a default parameter.
 
-The total phase of order `k` of rotor `r` at microphone `m` is
+**Total phase**
 
-$$\phi_{rk}(t)=2\pi k\int_0^t f_r(s)\,ds+k\,\theta_r(t)+\psi_{rk}(t)+\varepsilon_{rk}(t)+\alpha_{mrk}.$$
+$$\phi_{mrk}(t)=2\pi k\int_0^t f_r(s)\,ds+k\,\theta_r(t)+k\,\eta_r(t)+\alpha_{mrk}.$$
 
-`ν_r` is the shared shaft angular-frequency error in rad/s. `θ_r` is its
-shared angle error in rad. `ε_rk` is the harmonic-specific source-side phase,
-and `D` has rad²/s. Residual and source initial phases are independent uniform
-per harmonic, so the components add in **power**. `ε` is shared across
-microphones and independent across `(r, k)`
-(`docs/explainers/bench-fit-revised-phase-model.qmd:95-114`).
+Line powers `P_mrk` (profile vs order and speed), the coloured floor and the
+mic gains are unchanged from C4. Initial phases `α_mrk` are independent
+uniform, so components add in power.
 
-The lag equations that the fit actually uses are
+**Lag equations.** With `V_θ(τ)` the integrated-OU structure function and
+`ρ_p(τ) = e^{-λ_p|τ|}` the path-OU autocorrelation,
 
-$$V_{\theta,r}(\tau)=2\sigma_L^2\left[\frac{|\tau|}{\lambda_L}-\frac{1-e^{-\lambda_L|\tau|}}{\lambda_L^2}\right],$$
+$$V_\theta(\tau)=2\sigma_\nu^2\left[\frac{|\tau|}{\lambda}-\frac{1-e^{-\lambda|\tau|}}{\lambda^2}\right],
+\qquad
+R_{rk}(\tau)=\exp\!\left[-\tfrac{k^2}{2}V_\theta(\tau)-k^2\sigma_p^2\bigl(1-\rho_p(\tau)\bigr)\right].$$
 
-$$R_{rk}(\tau)=\exp\!\left[-D_{gk}|\tau|-k^2V_{\theta,r}(\tau)-k^2\operatorname{Var}\theta^{\text{res}}_r\left(1-\rho_{\text{res}}(\tau)\right)\right],$$
+Both widths scale with `k`: Gaussian shoulders `kσ_ν/2π`, Lorentzian core
+`k²D_θ/2π`, path sidebands of width `λ_p/2π` and depth `k²σ_p²`. That scaling
+is what makes the high orders the measurement of the dynamics: a width of one
+7.8 Hz bin at `k = 10` is 0.78 Hz at `k = 1`.
 
-with `ρ_res` the normalised autocorrelation of the bounded wobble. The
-wobble term saturates at `k²·Var θ_res`, so it adds fixed sidebands rather
-than a width. The long-lag core scale of the fitted part is
-`(D_gk + k²σ_L²/λ_L)/(2π)`, which is not necessarily the windowed line
-half-width (`bench-fit-revised-phase-model.qmd:329-394,429-460`).
+## Where and how the rig is fitted
+
+| support | class | carrier | periodogram | orders | fits |
+|---|---|---|---|---|---|
+| DREGON single-motor bench `motor_Motor{1-4}_{50..90}` | stationary | one constant per recording, fit parameter | **total periodogram** of the stationary segment, no STFT | all | everything: `σ_ν, λ, σ_p, λ_p`, profile, floor, mic gains |
+| DREGON `motor_allMotors_70` | stationary, 4 rotors | four constants, initialised from the survey split | total periodogram | all | **validation only**: must reproduce the per-rotor fits (larger widths and uncertain low orders expected) |
+| survey bench points (135 / 18 cells) | stationary | 1–4 constants per point | total periodogram | all | per-cell dynamics for the rig population |
+| Michael's FLY125 cruise | free flight, label ≈ truth | `rps` label | **front-end STFT** 16 kHz, NFFT 2048, hop 512 | all (`k`-scaling resolves the shaft at high `k`) | dynamics, profile vs speed, floor, mic gains |
+| Michael's standby / ramp | free flight | label | — | — | **not fitted**; rendered from the bench dynamics through the trajectory sampler; still scored by the frozen gate |
+| DREGON room2 free flight | free flight, label error ~1 Hz std at `k = 70` | `motors_command` | — | — | **not fitted**; evaluation support only |
+
+: Fit protocol after review. The bench decision is the user's; the window per class is the reasoning of section [Likelihood and window](#likelihood-and-window) as corrected at review.
+
+Why two periodogram types. On a stationary bench record the whole-record
+periodogram is the sufficient statistic: finest resolution (0.03 Hz over
+30 s), and the Whittle form already carries the per-bin variance. Stationarity
+has to be checked at the linewidth scale, not at the survey's 1 rev/s: a drift
+of 0.3 rev/s moves order 70 by 21 Hz. The check is the residual frequency of
+a high order after demodulation (`utils.demod.residual_frequency`); the fit
+uses the longest sub-segment inside ±1 Hz at `k ≈ 70`, or a slow polynomial
+carrier inside the periodogram atom. In flight the carrier moves, and a long
+window smears order `k` by `k·|df/dt|·T`, which exceeds the intrinsic width at
+high `k`; the model predicts that smear (the atom integrates the label's phase),
+but a predicted smear carries no information about the width under it. A
+front-end STFT keeps the smear below the intrinsic width at high `k` and loses
+only widths below one bin.
 
 ## What changes against C4
 
 | Element | C2 / C3 / C4 | v2 |
 |---|---|---|
-| shaft term | one OU speed error, interpreted as rotor physics | **two parts**: a fitted label-residual OU below the label band, plus a fixed bounded wobble above it |
-| `λ` | fixed at `λ_ref = 6 s⁻¹`, a reference assumption | `λ_L` **free per label chain**, prior centred on the label-free bench measurement 5.48 s⁻¹ |
-| `σ` | free, prior `log σ ~ N(0, 2²)` | `σ_L` free, prior centred on the bench 1.77 rad/s; the above-band `σ_ν` is fixed from telemetry |
-| `D_gk` | `D_g`, no `k` scaling, prior `log D ~ N(0, 2²)` | `D_g·k^{p_g}`, `p_g = 0` fixed in R1 and R2, freed only if a named gate fails on the high orders |
+| shaft term | one OU speed error, `λ_ref = 6 s⁻¹` fixed | one OU speed error, `(σ_ν, λ)` free with priors from the bench and the telemetry |
+| per-harmonic phase | Wiener `ε_rk`, `D_g` with no `k` scaling | replaced by a shared short-`τ` OU on the phase, `(σ_p, λ_p)`, sidebands `∝ k` |
+| `D` | free, prior `log D ~ N(0, 2²)`; DREGON fit 844.69 | not a parameter; `< 1.45 rad²/s` kept as a nuisance bound |
+| DREGON fit support | free flight, command label | single-motor bench; four-motor static as validation |
+| periodogram | NFFT 16384 / hop 1024 on every support | total periodogram on the bench; NFFT 2048 / hop 512 in flight |
 | rig coupling | none; hand-set banks for sampling | population Gaussian over rigs, including the survey's 18 bench cells |
-| carrier | recovered (C2/C3) or fixed (C4) | fixed, no recovery |
+| carrier | recovered (C2/C3) or fixed (C4) | fixed; constants on the bench are fit parameters |
 | objective | two stages, Adam (C2/C3); L-BFGS marginal (C4) | one objective, one optimiser |
-| line power profile, speed law, coloured floor, mic gains | as C4 | unchanged from C4 |
-| expected periodogram | exact moving-frame atom, window convolution | unchanged |
+| line power profile, speed law, coloured floor, mic gains | as C4 | unchanged |
 
 : What v2 changes. C2/C3/C4 column from `docs/explainers/bench-fit-revised-phase-model.qmd:292-310` and `src/experiments/stochastic_fit/revised_phase.py:481-487,1763-1767`.
 
@@ -1221,64 +1259,50 @@ half-width (`bench-fit-revised-phase-model.qmd:329-394,429-460`).
 C2/C3 put `log σ, log D ~ N(0, 2²)` on the dynamics, which is a statement that
 nothing is known (`src/experiments/stochastic_fit/revised_phase.py:481-487`).
 Pyro is in v2 to replace that with the measured numbers. Every prior below is
-a **proposal**, and every one of its numbers comes from the measured
-quantities of section
-[Shaft-phase prior from telemetry](#shaft-phase-prior-from-telemetry) or from
-the line-shape bound of section
-[Likelihood and window](#likelihood-and-window).
-
-The OU block has **two free parameters, not three**: the fit samples
-`(log σ_L, log λ_L)` and `D_θ,L = σ_L²/λ_L` follows. The centre comes from the
-label-free bench, de-biased by the planted control; the width has to reach the
-label-dominated regime as well, because what part (i) describes on a labelled
-rig is the shaft error **plus** whatever the label chain adds.
+a **proposal**; the shaft numbers come from the bench acoustics and the
+telemetry of section
+[Shaft-phase prior from telemetry](#shaft-phase-prior-from-telemetry). The
+path term has no measurement yet: its prior is wide and stated as such.
 
 | parameter | prior | central 95 % | derived from |
 |---|---|---|---|
-| `log σ_L` | `N(ln 1.77, 0.95²)` | 0.28-11.4 rad/s | centre: the bench median 1.77 rad/s (de-biased 1.4, band 1.1-1.8). Width: reaches the bench full range 0.23-3.20 and the label-residual `ν_res` RMS of 2.7-11.3 rad/s |
-| `log λ_L` | `N(ln 5.5, 1.50²)` | 0.29-103 s⁻¹ | centre: the bench median 5.48 s⁻¹ (de-biased 1.8-5.5). Width: covers the bench full range 0.31-16.2 and the lower half of the label-residual corner band 38-485 s⁻¹ |
-| `D_θ,L = σ_L²/λ_L` | implied | 0.57 rad²/s at the centre | the bench median is 0.599 (IQR 0.38-0.66, de-biased 0.6-1.2); the implied centre agrees to 5 % |
-| `log D_g` | `N(ln 0.3, 0.80²)` | 0.06-1.44 rad²/s | the held-out line-shape bound `D < 1.45 rad²/s` on Michael's `k = 2`, which sets the upper edge; C3's Michael's fit is 1.6308 |
-| `σ_ν`, `λ` (above band) | **fixed per rig** | — | telemetry; measured `Var θ_res = S_max/2` = `2.5e-5` to `6.8e-3 rad²` |
+| `log σ_ν` | `N(ln 1.77, 0.6²)` | 0.55-5.7 rad/s | bench median 1.77 rad/s (de-biased 1.4, band 1.1-1.8); width covers the bench full range 0.23-3.20 |
+| `log λ` | `N(ln 5.5, 0.9²)` | 0.94-32 s⁻¹ | bench median 5.48 s⁻¹ (de-biased 1.8-5.5); covers the telemetry corners 0.67-14.4 |
+| `D_θ = σ_ν²/λ` | implied | 0.57 rad²/s at the centre | bench median 0.599 (IQR 0.38-0.66, de-biased 0.6-1.2) |
+| `log σ_p` | `N(ln 0.03, 1.5²)` | 0.002-0.6 rad at `k = 1` | **unmeasured**; centre from a 1 mm path change at 340 m/s at `f = 80 Hz` (`2π·80·0.001/340 ≈ 1.5e-3` rad) times a margin; the bench fit in R1 measures it |
+| `log λ_p` | `N(ln 30, 1.0²)` | 4-210 s⁻¹ | **unmeasured**; ms-100 ms correlation times of vibration and wake turbulence; must stay above `λ` |
+| `D` (k-independent floor) | not a parameter | — | bench bound `< 1.45 rad²/s` from the unresolved line core |
 
-: Proposed priors. Sources: `results/noise_v2/shaft/shaft.json` (`acoustics.dregon_bench`, `planted_control`, `label_band`) via `results/noise_v2/shaft/findings.md`, and `results/noise_v2/criteria/findings.md:81-87`.
+: Proposed priors. Sources: `results/noise_v2/shaft/shaft.json` (`acoustics.dregon_bench`, `planted_control`, `label_band`) via `results/noise_v2/shaft/findings.md`; `results/noise_v2/criteria/findings.md:81-87` for the `D` bound. The path-term rows are order-of-magnitude placeholders to be replaced by the R1 bench fit.
 
-Bench points with four rotors carry **four constant carriers as fit
-parameters**, initialised from the survey's per-rotor split. The priors above
-are unchanged by that: the carriers are per-point nuisance parameters, not
-population parameters.
+Bench points with two to four rotors carry their constant carriers as fit
+parameters, initialised from the survey's per-rotor split (coincident rotors
+from `f̄`). They are per-point nuisance parameters, not population parameters.
 
-Three consequences are worth stating, because they are what the priors buy.
+Three consequences of the shaft prior.
 
-1. **`λ_ref = 6 s⁻¹` sits 0.06 prior standard deviations from the centre.**
-   The C2/C3 assumption is not overturned; it is absorbed as the
-   prior mean, and R1 can fix `λ` there for the parity test without fighting
-   the prior.
-2. **A fit that lands above `λ_L ≈ 40 s⁻¹` is a diagnosis, not a number.**
-   That is the label-residual regime, which means the label chain and not the
-   shaft dominates the residual on that arm — exactly the DREGON room-2
-   situation.
-3. **`D = 844.69 rad²/s` is unreachable under this prior**, at
-   `ln(844.69/0.3)/0.8 = 9.9` prior standard deviations. The C3 DREGON fit
-   cannot recur by accident.
+1. **`λ_ref = 6 s⁻¹` sits 0.1 prior standard deviations from the centre.** The
+   C2/C3 assumption is absorbed as the prior mean; R1 can fix `λ` there for the
+   parity test without fighting the prior.
+2. **A fit that lands above `λ ≈ 30 s⁻¹` is a diagnosis, not a number.** That
+   is the label-residual regime of the telemetry study, which means a label
+   chain and not the shaft dominates that arm — the DREGON room-2 situation,
+   and the reason DREGON is fitted on the bench.
+3. **`D = 844.69 rad²/s` has no parameter to land on.** The only diffusion in
+   the model is `k²D_θ`, prior-centred at 0.57 rad²/s.
 
-The prior on `log D_g` still cannot come from the acoustic `V_k`
-decomposition. The bench now measures the shaft term, but `D_k` itself remains
-unidentified on both rigs, so the line-shape bound is what is left, and that is
-a weaker instrument: an upper limit from one rig at two orders.
-
-The rig-level hierarchy is the object that replaces today's hand-set banks.
-`(log λ_L, log σ_L, log D_g, floor shape, profile slope)` for every rig — DREGON,
-Michael's, and the survey's 18 bench cells — is drawn from a population
-Gaussian with unknown mean and scale. The population posterior is what the
-training sampler draws rigs from.
+The rig-level hierarchy replaces today's hand-set banks.
+`(log σ_ν, log λ, log σ_p, log λ_p, floor shape, profile slope)` for every rig
+— DREGON, Michael's, and the survey's 18 bench cells — is drawn from a
+population Gaussian with unknown mean and scale. The population posterior is
+what the training sampler draws rigs from.
 
 ## Deferred, and named
 
 - carrier recovery — closed by the user decision "carriers are fixed";
 - heavy tails in the line amplitudes;
-- order-dependent `λ_L`;
-- non-stationary `D`.
+- a `k`-independent per-harmonic diffusion (`D`), kept only as a bound;
+- order-dependent `λ`.
 
 # Pyro implementation plan
 
@@ -1354,13 +1378,22 @@ The cap is **5 rounds**. Backends are `uni-cpu` and `uni-gpushort`.
 
 # Decisions for the reviewer {#decisions-for-the-reviewer}
 
-Nine choices are open. Each one has a proposal and the number behind it.
+Seven choices are open. Each one has a proposal and the number behind it.
 
-- **The fit and scoring window.** Proposal `T = 1.024 s`, periodic Hann, 50 %
-  overlap. It is set by the p95 carrier drift `T_max(k = 2) = 0.95 s` and by
-  the 4.0 s shortest DREGON support. `T = 2.048 s` buys 3.2 dB of line SNR on
-  Michael's and loses two thirds of the DREGON segments. Decide which rig
-  wins.
+- **Decided at review (2026-09-16), recorded, no longer open:** DREGON is
+  fitted on the single-motor bench and validated on the four-motor static
+  recording; bench fits use the total periodogram, flight fits the front-end
+  STFT (NFFT 2048, hop 512); the `T = 1.024 s` window is retired; the shaft is
+  one OU process; the `k`-independent `D` is replaced by a shared short-`τ`
+  path OU. The DREGON label arm is moot (no free-flight fit).
+- **The path term in R1.** Proposal: fit `(σ_p, λ_p)` on the bench from R1,
+  with the wide priors above. Alternative: fix `σ_p = 0` in R1 (pure shaft
+  model) and free it in R2 only if the bench residual at high orders shows
+  sidebands the shaft cannot make. Decide.
+- **Michael's standby and ramp.** Proposal: not fitted; rendered from the
+  bench dynamics through the trajectory sampler, still scored by the frozen
+  gate. Alternative: keep FLY125 standby in the flight fit for the speed law
+  at low rates. Decide.
 - **The spectrogram proxy.** Proposal `ltas_abs_db`, with `mr_ltas` kept as a
   secondary. `ltas_abs_db` has the largest `σ` response by a factor of four;
   `mr_ltas` has the better `D` response on DREGON but is dead on Michael's.
@@ -1373,48 +1406,17 @@ Nine choices are open. Each one has a proposal and the number behind it.
   would let it pass and certify no improvement. Note the DREGON oracle spread
   of 1.142 dB, which exceeds the 0.646 dB gap the gate measures.
 - **The likelihood threshold.** Proposal: the same closure fraction on the
-  frozen composite risk at NFFT 16384, which is the only NFFT that resolves a
-  sub-0.46 Hz core. The absolute values need the composite table, which was
-  not computed. Decide whether R1 blocks on that table, and whether the
+  composite risk at the flight STFT (NFFT 2048, hop 512), oracle = speed-matched
+  disjoint real segment. The absolute values come from
+  `scripts/noise_v2_short_whittle.py` (previous-generation model at the short
+  STFT), once run. Decide whether R1 blocks on that table, and whether the
   composite gate is per rig or pooled.
-- **Which orders enter the DREGON likelihood, given the label precision.**
-  On DREGON room-2 cruise the label holds only `k = 1` inside `±0.5 Hz` at
-  `T = 4.096 s`, and only on 31 % of cells; at `k ≥ 2` it is 0-6 %. Two causes
-  are mixed. The label's own error `δ` displaces harmonic `k` by `k·δ`, and
-  the 38.5 Hz per-rotor isolation band already holds the neighbouring rotors'
-  lines of the same order at `k ≥ 2`. C4 activates all `K = 130` DREGON
-  orders. Decide whether v2 keeps them, restricts the DREGON likelihood to the
-  orders below `k_max(T)`, or scores the high orders only through the LTAS
-  proxy.
-- **`(λ_L, σ_L)` free per label chain.** Proposal: free in R2 with the
-  log-normal priors above, and fixed at `λ_ref = 6` in R1 for the parity test.
-  Two facts push this way. The one label-free instrument centres the prior but
-  does not pin it: the DREGON bench measures `λ = 5.48 s⁻¹` and
-  `σ_ν = 1.77 rad/s`, and the planted control says the estimator recovers `λ`
-  at 3.07×, so the true value may sit anywhere in 1.8-5.5 s⁻¹. And the
-  parameters describe the label chain — command, sample-and-hold measured, or
-  refined — not controller physics, so one rig with two labels has two values.
-  Decide whether the pair is shared across a rig's label arms or fitted per
-  arm.
-- **The fixed above-band wobble.** Proposal: take `(σ_ν, λ)` per rig from the
-  telemetry and enter the wobble as a stationary phase modulation of variance
-  `2σ_ν²λ/(3πω_c³)`, checked against the two measurements — `S_max/2` from the
-  shaft study and the integrated residual of the residual study. The wobble is
-  small: rms `0.003-0.055 rad` at `k = 1`, `0.09-1.65 rad` at `k = 30`. The
-  residual study also shows what to generate, a filtered noise with an `f⁻²`
-  PSD above the band edge and a 100 ms correlation length, and not white
-  noise. Decide whether R1 carries it at all, or whether it enters with the
-  high orders in R2.
-- **The `D_k` order structure.** Proposal `D_gk = D_g·k^{p_g}` with
-  `p_g = 0` fixed in R1 and R2. The corrected bench acoustics now identify the
-  shaft term on 12 of 12 recordings, but `D_k` itself is still unidentified:
-  the fitted `2D_kτ` at the shortest lag is 1.32 times the measured `V` of the
-  same order, and the planted control returns a planted `D_k ∝ k` as flat.
-  So no bench evidence forces `p_g` free.
-  Decide whether R2 tests `p_g` anyway on the new bench points.
-- **The DREGON label arm.** Both carriers are indistinguishable to the
-  line-shape criterion: 6.4 dB against 7.1 dB at `k = 1`, with half-power
-  widths inside 0.13 Hz. Raw `motors_command` stays the HPP reference. A
-  winning refined arm would be model-supported and not physical truth
-  (`revised-phase-campaign.qmd:105-113,387-400`). Decide whether the refined
-  arm is a reported diagnostic or a candidate.
+- **The stationarity rule on the bench.** Proposal: the longest sub-segment
+  where the demodulated residual at `k ≈ 70` stays inside ±1 Hz
+  (`utils.demod.residual_frequency`). Alternative: a slow polynomial carrier
+  inside the periodogram atom over the whole record. Decide.
+- **Four-motor validation tolerance.** Proposal: the four-motor fit passes
+  when `|Δ log σ_ν|, |Δ log λ|, |Δ log D_θ|` lie inside the per-rotor spread
+  of the single-motor fits, with widths allowed larger and low orders flagged.
+  The numeric spread is frozen from the R1 per-rotor fits. Decide whether that
+  is acceptable as a criterion frozen after R1's first stage.
