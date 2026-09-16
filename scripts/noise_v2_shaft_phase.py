@@ -1904,7 +1904,8 @@ def telemetry_verdict(rep: dict[str, Any]) -> dict[str, Any]:
     d_ou = pooled.get("D_theta_ou_rad2_s")
     d_q = q.get("D_q_at_update_rate")
     pref = pooled.get("preferred_by_aic")
-    source = "highpass_0.5"
+    source = "highpass_headline"
+    band_lo_headline = float(HP_HEADLINE) if isinstance(HP_HEADLINE, (int, float)) else PSD_F_LO_HZ
     if corner is None:
         label = "unidentified"
     elif pref == "white" or corner > 0.8 * band_hi:
@@ -1932,6 +1933,15 @@ def telemetry_verdict(rep: dict[str, Any]) -> dict[str, Any]:
     return {
         "verdict": label,
         "estimator": source,
+        # Whether the fitted corner is inside the fit band of the estimator
+        # that spoke. Everything downstream keys sigma/lam off this flag.
+        "corner_in_band": bool(
+            (wide if source == DETREND_KEY else pooled).get("corner_hz") is not None
+            and corner is not None
+            and (PSD_F_LO_WIDE_HZ if source == DETREND_KEY else band_lo_headline) * 1.2
+            <= corner
+            <= 0.8 * band_hi
+        ),
         "sigma_nu_rad_s": sigma,
         "lam_1_s": lam,
         "corner_hz": corner,
@@ -2459,10 +2469,15 @@ def summary_rows(res: dict[str, Any]) -> list[list[str]]:
                 rig + (" (aux)" if rep.get("auxiliary") else ""),
                 f"telemetry {rep['fs_hz']:.0f} Hz",
                 _f(v.get("verdict")),
-                _f(v.get("sigma_nu_rad_s")),
-                _f(v.get("lam_1_s")),
-                _f(1.0 / v["lam_1_s"] if v.get("lam_1_s") else None),
-                _f(v.get("D_theta_rad2_s")),
+                # sigma and lam are printed ONLY where the Lorentzian corner
+                # lands inside the fit band. Below the band the band sees the
+                # f^-2 tail alone, on which only sigma^2/lam is identified and
+                # (sigma, lam) run away together along that ridge: one rig
+                # returned sigma = 949 rad/s = 151 rev/s, which no rotor does.
+                _f(v.get("sigma_nu_rad_s") if v.get("corner_in_band") else None),
+                _f(v.get("lam_1_s") if v.get("corner_in_band") else None),
+                _f(1.0 / v["lam_1_s"] if (v.get("lam_1_s") and v.get("corner_in_band")) else None),
+                _f(v.get("D_theta_rad2_s") if v.get("corner_in_band") else None),
                 _f(v.get("tau_slope1p5_s")),
                 _f(v.get("delta_aic_ou_minus_white"), "{:+.0f}"),
                 _f(v.get("D_q_over_D_theta"), "{:.2f}"),
@@ -2539,7 +2554,8 @@ def write_findings(res: dict[str, Any], out_dir: Path) -> Path:
         A(
             f"- **{rig}** ({rep['rps_key']}, {rep['fs_hz']:.0f} Hz, {rep['n_flights']} flights, "
             f"{rep.get('analysed_seconds', 0):.0f} s analysed). Verdict **{v.get('verdict')}**: "
-            f"the Lorentzian fit gives `sigma_nu = {_f(v.get('sigma_nu_rad_s'))} rad/s`, "
+            f"the Lorentzian fit gives `sigma_nu = "
+            f"{_f(v.get('sigma_nu_rad_s') if v.get('corner_in_band') else None)} rad/s`, "
             f"`lam = {_f(v.get('lam_1_s'))} 1/s` (corner {_f(v.get('corner_hz'))} Hz, "
             f"fit band {_f(v.get('band_hz', [None, None])[0])}-{_f(v.get('band_hz', [None, None])[1])} Hz), "
             f"`D_theta = sigma^2/lam = {_f(v.get('D_theta_rad2_s'))} rad^2/s`, and "
