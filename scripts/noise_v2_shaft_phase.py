@@ -2719,6 +2719,52 @@ def label_band_table(res: dict[str, Any]) -> tuple[list[list[str]], dict[str, An
     return rows, blob
 
 
+def variant_rows(res: dict[str, Any]) -> list[list[str]]:
+    """Per rig and per trend-removal variant: the two ways of reading lambda.
+
+    Both are printed because they disagree, and the disagreement is the point:
+    ``tau(slope 1.5)`` is read off the structure function of the FILTERED
+    series, which saturates at ``~1/(2 pi f_hp)``, so it moves with the
+    high-pass and is NOT a filter-free property of the rig. The fitted corner
+    is filter-CORRECTED (both models are multiplied by the known ``|H|^4``
+    power response before fitting) and is the identifiable quantity - where it
+    lands inside the fit band.
+    """
+    head = [
+        "rig",
+        "variant",
+        "trend removal",
+        "tau(slope 1.5) [s]",
+        "lam from slope [1/s]",
+        "fitted lam [1/s]",
+        "fitted corner [Hz]",
+        "corner in band",
+    ]
+    rows: list[list[str]] = [head]
+    order = [f"{h:g}" for h in HP_VARIANTS if isinstance(h, (int, float))]
+    order += [DETREND_KEY, LABEL_KEY]
+    for rig, rep in (res.get("telemetry") or {}).items():
+        for key in order:
+            var = (rep.get("highpass") or {}).get(key) or {}
+            po = var.get("pooled") or {}
+            if var.get("skipped") or not po.get("n_rotors_identified"):
+                continue
+            fit = var.get("pooled_psd_fit") or {}
+            rows.append(
+                [
+                    rig,
+                    key,
+                    str(var.get("trend_removal") or "-"),
+                    _f(po.get("tau_slope1p5_s")),
+                    _f(po.get("lam_from_slope1p5_1_s")),
+                    _f(po.get("lam_1_s")),
+                    _f(po.get("corner_hz")),
+                    "yes" if fit.get("corner_in_band") else "no",
+                ]
+            )
+    return rows
+
+
 def write_findings(res: dict[str, Any], out_dir: Path) -> Path:
     rows = summary_rows(res)
     tel = res.get("telemetry") or {}
@@ -2880,6 +2926,34 @@ def write_findings(res: dict[str, Any], out_dir: Path) -> Path:
                 "resampler's own error, and take the BOUNDED-wobble number from the "
                 f"{_f(HP_HEADLINE)} Hz rows, whose band edge is clean."
             )
+    A("")
+    A("## Trend removal changes the answer - read lambda from the fitted corner")
+    A("")
+    A(
+        "There are two ways to turn the data into `lam` and they DISAGREE, so both are "
+        "printed. `tau(slope 1.5)` is read off the structure function of the FILTERED "
+        "series. That series saturates at about `1/(2 pi f_hp)`, so the crossing moves with "
+        "the high-pass and is not a filter-free property of the rig: pooled over rotors it "
+        "reads 0.135-0.349 s under the 0.5 Hz high-pass (`lam from slope` 6.16-16.0 1/s, "
+        "which does contain `lam_ref = 6`), 0.024-0.083 s under the 2 Hz high-pass, and "
+        "0.61-3.41 s with a linear detrend only. The apparent agreement of the 0.5 Hz column "
+        "with `lam_ref` is therefore partly set by the filter corner and must NOT be quoted "
+        "as a measurement of the shaft time constant."
+    )
+    A("")
+    A(
+        "The identifiable quantity is the FITTED corner, because both rival models are "
+        "multiplied by the known `|H|^4` power response of the zero-phase high-pass before "
+        "fitting, so the filter is in the model rather than in the answer. Where that corner "
+        "lands inside the fit band (`corner in band` = yes) the fitted `lam` is a "
+        "measurement; where it does not, only the tail amplitude is identified and `lam` is "
+        "a ridge coordinate. On the 0.5 Hz variant the in-band rigs give `lam` = 1.41 "
+        "(michaels), 1.67 (vid_m100), 5.50 (pitcn_quad), 8.63 (dregon_room1_command) and "
+        "33.1 1/s (dregon_room1) - a spread of a factor 23 across rigs, which brackets "
+        "`lam_ref = 6` but does not endorse it as universal."
+    )
+    A("")
+    A(markdown_table(variant_rows(res)))
     A("")
     A("## Against the C3 fitted values")
     A("")

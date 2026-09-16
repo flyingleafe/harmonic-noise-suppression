@@ -65,6 +65,54 @@ A rig whose 16 Hz row is `skipped` has its own Nyquist below that corner (Michae
 The 16 Hz residual SATURATES: its structure function reaches S_max = 5.0e-05-1.4e-02 rad^2 and stops growing, with a local slope already down to -3.88-0.23 at 50 ms, so the phase it drives is a BOUNDED wobble, not a random walk: at order k the standing deviation is k sqrt(S_max/2) = k x 0.005-0.082 rad.
 The label-residual variant does NOT saturate - it keeps growing past 50 ms with a local slope of -0.80-1.18 and reaches S(1 s) = 2.80e-03-8.22e-01 rad^2. That growth is NOT band-limited content: the resampler here is LINEAR INTERPOLATION both ways (native onto a 31.25 Hz grid with `np.interp`, then back onto the native grid with `np.interp`), and linear interpolation has a lossy PASSBAND - it attenuates and phase-distorts frequencies well below its own Nyquist - so the residual carries low-frequency passband error as well as the out-of-band content. Read the low-frequency growth of the label-residual rows as the resampler's own error, and take the BOUNDED-wobble number from the 16 Hz rows, whose band edge is clean.
 
+## Trend removal changes the answer - read lambda from the fitted corner
+
+There are two ways to turn the data into `lam` and they DISAGREE, so both are printed. `tau(slope 1.5)` is read off the structure function of the FILTERED series. That series saturates at about `1/(2 pi f_hp)`, so the crossing moves with the high-pass and is not a filter-free property of the rig: pooled over rotors it reads 0.135-0.349 s under the 0.5 Hz high-pass (`lam from slope` 6.16-16.0 1/s, which does contain `lam_ref = 6`), 0.024-0.083 s under the 2 Hz high-pass, and 0.61-3.41 s with a linear detrend only. The apparent agreement of the 0.5 Hz column with `lam_ref` is therefore partly set by the filter corner and must NOT be quoted as a measurement of the shaft time constant.
+
+The identifiable quantity is the FITTED corner, because both rival models are multiplied by the known `|H|^4` power response of the zero-phase high-pass before fitting, so the filter is in the model rather than in the answer. Where that corner lands inside the fit band (`corner in band` = yes) the fitted `lam` is a measurement; where it does not, only the tail amplitude is identified and `lam` is a ridge coordinate. On the 0.5 Hz variant the in-band rigs give `lam` = 1.41 (michaels), 1.67 (vid_m100), 5.50 (pitcn_quad), 8.63 (dregon_room1_command) and 33.1 1/s (dregon_room1) - a spread of a factor 23 across rigs, which brackets `lam_ref = 6` but does not endorse it as universal.
+
+| rig | variant | trend removal | tau(slope 1.5) [s] | lam from slope [1/s] | fitted lam [1/s] | fitted corner [Hz] | corner in band |
+|---|---|---|---|---|---|---|---|
+| neurobem_quad | 16 | butterworth | 0.0113 | 190 | 0.0898 | 0.0143 | no |
+| neurobem_quad | 0.5 | butterworth | 0.275 | 7.82 | 0.0142 | 0.00226 | no |
+| neurobem_quad | 2 | butterworth | 0.0371 | 57.9 | 25.4 | 4.05 | yes |
+| neurobem_quad | detrend | linear detrend per segment | 3.41 | 0.631 | 0.0141 | 0.00224 | no |
+| neurobem_quad | label_residual | native minus resample to 31.25 Hz and back | 0.0177 | 122 | 128 | 20.4 | yes |
+| blackbird_quad | 16 | butterworth | 0.00539 | 399 | 6.46 | 1.03 | yes |
+| blackbird_quad | 0.5 | butterworth | 0.338 | 6.36 | 0.00532 | 0.000846 | no |
+| blackbird_quad | 2 | butterworth | 0.083 | 25.9 | 0.00505 | 0.000803 | no |
+| blackbird_quad | detrend | linear detrend per segment | 0.999 | 2.15 | 0.00291 | 0.000464 | no |
+| blackbird_quad | label_residual | native minus resample to 31.25 Hz and back | 0.0178 | 121 | 214 | 34 | yes |
+| vid_m100 | 16 | butterworth | 0.0126 | 170 | 24.2 | 3.86 | no |
+| vid_m100 | 0.5 | butterworth | 0.135 | 16 | 1.67 | 0.266 | no |
+| vid_m100 | 2 | butterworth | 0.0779 | 27.6 | 0.0334 | 0.00532 | no |
+| vid_m100 | detrend | linear detrend per segment | 2.27 | 0.95 | 2.39 | 0.38 | yes |
+| vid_m100 | label_residual | native minus resample to 31.25 Hz and back | 0.0185 | 116 | 153 | 24.3 | yes |
+| nanobench_cf21b | 16 | butterworth | 0.0105 | 204 | 0.11 | 0.0175 | no |
+| nanobench_cf21b | 0.5 | butterworth | 0.177 | 12.1 | 0.0381 | 0.00606 | no |
+| nanobench_cf21b | 2 | butterworth | 0.0717 | 30 | 0.0579 | 0.00922 | no |
+| nanobench_cf21b | detrend | linear detrend per segment | 0.674 | 3.19 | 0.674 | 0.107 | yes |
+| nanobench_cf21b | label_residual | native minus resample to 31.25 Hz and back | 0.0156 | 138 | 129 | 20.6 | yes |
+| pitcn_quad | 16 | butterworth | 0.0671 | 32.1 | 5.21 | 0.83 | no |
+| pitcn_quad | 0.5 | butterworth | 0.349 | 6.16 | 5.5 | 0.876 | yes |
+| pitcn_quad | 2 | butterworth | 0.0237 | 90.6 | 46.7 | 7.44 | yes |
+| pitcn_quad | detrend | linear detrend per segment | 0.641 | 3.35 | 2.74 | 0.435 | yes |
+| pitcn_quad | label_residual | native minus resample to 31.25 Hz and back | - | - | 169 | 26.9 | yes |
+| dregon_room1 | 16 | butterworth | 0.00788 | 273 | 4.78 | 0.76 | no |
+| dregon_room1 | 0.5 | butterworth | 0.198 | 10.9 | 33.1 | 5.26 | yes |
+| dregon_room1 | 2 | butterworth | 0.0351 | 61.4 | 51.9 | 8.26 | yes |
+| dregon_room1 | detrend | linear detrend per segment | 0.627 | 3.49 | 14.4 | 2.3 | yes |
+| dregon_room1 | label_residual | native minus resample to 31.25 Hz and back | 0.0161 | 133 | 485 | 77.2 | yes |
+| dregon_room1_command | 16 | butterworth | 0.00748 | 288 | 10.5 | 1.67 | no |
+| dregon_room1_command | 0.5 | butterworth | 0.23 | 9.34 | 8.63 | 1.37 | yes |
+| dregon_room1_command | 2 | butterworth | 0.0633 | 34 | 8.55 | 1.36 | no |
+| dregon_room1_command | detrend | linear detrend per segment | 0.881 | 2.48 | 2.84 | 0.452 | yes |
+| dregon_room1_command | label_residual | native minus resample to 31.25 Hz and back | 0.0179 | 120 | 38.4 | 6.11 | yes |
+| michaels | 0.5 | butterworth | 0.222 | 9.68 | 1.41 | 0.224 | no |
+| michaels | 2 | butterworth | 0.0364 | 59.1 | 5.69 | 0.906 | no |
+| michaels | detrend | linear detrend per segment | 0.611 | 3.53 | 2.59 | 0.412 | yes |
+| michaels | label_residual | native minus resample to 31.25 Hz and back | - | - | 173 | 27.5 | no |
+
 ## Against the C3 fitted values
 
 | rig | C3 sigma [rad/s] | C3 D [rad^2/s] | measured D_theta (telemetry) | measured D_theta (acoustics) | sigma at lam_ref=6 (telemetry) | sigma at lam_ref=6 (acoustics) | C3 sigma / measured |
