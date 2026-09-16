@@ -202,6 +202,10 @@ class Config:
     #: an order is usable for the split.
     split_lobes: float = 2.0
     split_max_peaks: int = 4
+    #: Odd shaft orders that must clear `odd_margin_db` before the octave of a
+    #: multi-rotor reading counts as resolved. Below this the reading is still
+    #: admitted, flagged `octave_unresolved`.
+    multi_odd_min_orders: int = 2
     #: Peak height over the LOCAL MEDIAN of the band.
     split_peak_db: float = 6.0
     #: Consecutive usable orders a rate cluster must appear in.
@@ -559,17 +563,6 @@ def shaft_rate(sp: Spectrum, cfg: Config, neighbour_frac: float = 0.0) -> dict[s
     }
 
 
-def _max_consecutive(positions: set[int]) -> int:
-    """Longest run of consecutive integers in ``positions``."""
-    best = run = 0
-    prev: int | None = None
-    for i in sorted(positions):
-        run = run + 1 if prev is not None and i == prev + 1 else 1
-        best = max(best, run)
-        prev = i
-    return best
-
-
 def split_min_order(sp: Spectrum, scale: float, cfg: Config) -> int:
     """First harmonic order of the DETECTED comb at which two rotors
     ``--split-min-sep`` apart in shaft rate are two lines, not one.
@@ -599,11 +592,15 @@ def resolve_rotors(
     the band's LOCAL MEDIAN; each peak is one rotor candidate at ``peak/k``
     (times ``scale``). A rate is a RESOLVED ROTOR only when it repeats: rates
     within ``--split-cluster-tol`` of each other across at least
-    ``--split-min-orders`` CONSECUTIVE usable orders. Noise peaks do not
-    survive that, and neither does a sideband that only exists at one order.
+    ``--split-min-orders`` orders, which need NOT be consecutive — a rotor line
+    that is buried under a neighbour at one order is still that rotor at the
+    next. Noise peaks do not survive the repeat requirement, and neither does a
+    sideband that exists at one order only.
 
     Fewer resolved rates than rotors means the rotors are coincident to within
-    the tolerance, not that the reading failed.
+    the tolerance, not that the reading failed. ``n_orders_with_lines`` — the
+    number of orders that carry ANY qualifying peak — is the line evidence the
+    multi-rotor usability gate uses in place of the harmonic-sum margin.
     """
     f_top = min(cfg.f_max_hz, 0.45 * sp.fs)
     k_min = split_min_order(sp, scale, cfg)
@@ -639,7 +636,7 @@ def resolve_rotors(
     # seeds a cluster, everything inside the tolerance joins it, and the rest
     # is re-seeded. Single-linkage would merge a 3 rev/s four-rotor spread into
     # one cluster, and fixed bins would split one rotor across a bin edge.
-    pos = {k: i for i, k in enumerate(orders)}
+    orders_with_lines = sorted({k for _, k in found})
     pool = sorted(found)
     clusters: list[dict[str, Any]] = []
     while pool:
@@ -661,12 +658,8 @@ def resolve_rotors(
             }
         )
         pool = [rk for rk in pool if abs(rk[0] - centre) > cfg.split_cluster_tol]
-    kept = [
-        c
-        for c in clusters
-        if _max_consecutive({pos[k] for k in c["orders"]}) >= cfg.split_min_orders
-    ]
-    kept.sort(key=lambda c: (-_max_consecutive({pos[k] for k in c["orders"]}), -len(c["orders"])))
+    kept = [c for c in clusters if len(c["orders"]) >= cfg.split_min_orders]
+    kept.sort(key=lambda c: -len(c["orders"]))
     kept = kept[:n_rotors]
     kept.sort(key=lambda c: c["rate"])
     speeds = [float(c["rate"]) for c in kept]
@@ -698,6 +691,8 @@ def resolve_rotors(
         "order_min": k_min,
         "order_max": orders[-1] if orders else None,
         "n_orders_used": len(orders),
+        "n_orders_with_lines": len(orders_with_lines),
+        "orders_with_lines": orders_with_lines,
         "split_comb_rev_s": round(float(comb_rev_s), 4),
         "order_support": [sorted(c["orders"]) for c in kept],
         "example": example,
@@ -764,10 +759,32 @@ def estimate(x_ct: np.ndarray, fs: int, n_rotors: int, cfg: Config) -> dict[str,
 
     ``n_rotors > 1`` selects MULTI-ROTOR MODE: a 30 s window, a fixed 4 s
     periodic-Hann Welch segment (df = 0.25 Hz), the ±6 % neighbourhood of the
-    candidate dropped from the rival set, and the per-rotor line split. A
-    single-rotor rig keeps the 16 s window, the resolution-target segment and
-    the literal family-only rival rule: it has no neighbouring rotor to
-    mistake for a rival and nothing to split.
+    candidate dropped from the rival set, the per-rotor line split, and a
+    LINE-EVIDENCE usability gate instead of the harmonic-sum margin. A
+    single-rotor rig keeps the 16 s window, the resolution-target segment, the
+    literal family-only rival rule and the 3 dB margin gate: it has no
+    neighbouring rotor to mistake for a rival and nothing to split.
+
+    Why the gate differs. A single-comb harmonic-sum margin cannot be cleared
+    by a four-rotor rig at all: with four rotors the tonal energy per rotor and
+    its prominence over a four-times-higher broadband floor both fall, so the
+    accepted comb of ``motor_allMotors_70`` scores 6.43 dB where the same rig
+    and throttle with ONE motor scores 15.34-17.82 dB, and its best rival sits
+    0.77 dB below it whatever the rival-exclusion rule is (a ``--family-max 8``
+    pass flips no verdict). The margin therefore measures rotor count, not
+    readability, and is reported but NOT gated on for a multi-rotor rig. What
+    is gated on is the evidence that the comb is really there:
+
+    * ``f̄`` stable to ``--max-half-delta`` between the two window halves,
+    * a qualifying peak (``--split-peak-db`` over the band's local median
+      inside ``k·f̄ ± --split-frac``) at ``--split-min-orders`` or more orders
+      of the line comb, consecutive or not,
+    * the window at least ``--min-window-s`` long.
+
+    The octave decision no longer refuses a recording: when the odd shaft
+    orders of the accepted rate do not clear ``--odd-margin-db`` at
+    ``--multi-odd-min-orders`` orders, the reading is admitted and flagged
+    ``octave_unresolved``.
     """
     x = np.asarray(x_ct, dtype=np.float32)
     if x.ndim == 1:
@@ -794,6 +811,8 @@ def estimate(x_ct: np.ndarray, fs: int, n_rotors: int, cfg: Config) -> dict[str,
         "order_min": None,
         "order_max": None,
         "n_orders_used": 0,
+        "n_orders_with_lines": 0,
+        "orders_with_lines": [],
         "split_comb_rev_s": None,
         "order_support": [],
         "example": None,
@@ -835,10 +854,25 @@ def estimate(x_ct: np.ndarray, fs: int, n_rotors: int, cfg: Config) -> dict[str,
         0.5 * df_rev_s,
         0.25,
     )
+    # Odd-shaft-order evidence for the ACCEPTED rate: the direct test that the
+    # accepted comb is the shaft rate and not its blade-pass double. In
+    # multi-rotor mode a weak result no longer refuses the reading, it flags it.
+    odd_med, _odd_frac, odd_proms = odd_margin(main["rate_rev_s"], sp, cfg)
+    n_odd_orders = sum(1 for p in odd_proms if p >= cfg.odd_margin_db)
+    octave_unresolved = bool(multi and n_odd_orders < cfg.multi_odd_min_orders)
+
     reasons: list[str] = []
     if win_s + 1e-6 < cfg.min_window_s:
         reasons.append(f"window {win_s:.2f} s < {cfg.min_window_s:.0f} s")
-    if not (main["margin_db"] >= cfg.min_margin_db):
+    if multi:
+        # LINE EVIDENCE, not margin: the margin of a multi-rotor rig measures
+        # rotor count (see the docstring), so it is reported, not gated on.
+        if rotor["n_orders_with_lines"] < cfg.split_min_orders:
+            reasons.append(
+                f"lines at {rotor['n_orders_with_lines']} orders of the line comb "
+                f"< {cfg.split_min_orders}"
+            )
+    elif not (main["margin_db"] >= cfg.min_margin_db):
         reasons.append(
             f"harmonic-sum margin {main['margin_db']:.2f} dB < {cfg.min_margin_db:.0f} dB"
         )
@@ -851,17 +885,19 @@ def estimate(x_ct: np.ndarray, fs: int, n_rotors: int, cfg: Config) -> dict[str,
             f"mapped shaft rate {main['rate_rev_s']:.2f} rev/s outside {cfg.lo:g}-{cfg.hi:g}"
         )
 
-    # One resolved line means the rotors are coincident inside the tolerance:
-    # publish the harmonic-sum mean comb rate f_bar (40 orders of evidence)
-    # rather than the single cluster's median (a handful of peaks).
-    n_res = max(1, int(rotor["n_resolved"]))
-    speeds = (
-        [round(float(v), 4) for v in rotor["speeds"]]
-        if n_res >= 2
-        else [round(float(main["rate_rev_s"]), 4)]
-    )
+    # One entry per rotor: the resolved rates first, then `f_bar` for every
+    # rotor the split could not separate (coincident within the tolerance), with
+    # a mask saying which entries are resolved lines and which are the mean.
+    n_res = int(rotor["n_resolved"]) if multi else 1
+    f_bar = round(float(main["rate_rev_s"]), 4)
+    resolved = [round(float(v), 4) for v in rotor["speeds"]] if multi else [f_bar]
+    speeds = resolved + [f_bar] * max(0, int(n_rotors) - len(resolved))
+    resolved_mask = [True] * len(resolved) + [False] * (len(speeds) - len(resolved))
+    n_res = max(1, n_res)
     return {
         "speed_rev_s": speeds,
+        "resolved_mask": resolved_mask,
+        "resolved_rev_s": resolved if multi else [],
         "rate_rev_s": round(float(main["rate_rev_s"]), 4),
         "n_resolved": n_res,
         "multiplicity_unresolved": bool(n_res < int(n_rotors)),
@@ -873,6 +909,11 @@ def estimate(x_ct: np.ndarray, fs: int, n_rotors: int, cfg: Config) -> dict[str,
         "split_orders_used": rotor["n_orders_used"],
         "split_comb_rev_s": rotor["split_comb_rev_s"],
         "split_order_support": rotor["order_support"],
+        "split_orders_with_lines": rotor["n_orders_with_lines"],
+        "gate": "line_evidence" if multi else "harmonic_sum_margin",
+        "octave_unresolved": octave_unresolved,
+        "odd_order_evidence_n": n_odd_orders,
+        "odd_order_median_db": round(float(odd_med), 3),
         "split_example": rotor["example"],
         "rival_neighbour_frac": neighbour,
         "octave_verdict": main["octave_verdict"],
@@ -1647,6 +1688,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--split-peak-db", type=float, default=Config.split_peak_db)
     ap.add_argument("--split-min-orders", type=int, default=Config.split_min_orders)
     ap.add_argument("--split-max-peaks", type=int, default=Config.split_max_peaks)
+    ap.add_argument("--multi-odd-min-orders", type=int, default=Config.multi_odd_min_orders)
     ap.add_argument(
         "--family-max",
         type=int,
@@ -1698,6 +1740,7 @@ def main(argv: list[str] | None = None) -> int:
         split_peak_db=args.split_peak_db,
         split_min_orders=args.split_min_orders,
         split_max_peaks=args.split_max_peaks,
+        multi_odd_min_orders=args.multi_odd_min_orders,
         family_max=args.family_max,
     )
     wanted = list(READERS) if args.corpora == "all" else args.corpora.split(",")
