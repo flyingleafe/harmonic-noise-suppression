@@ -327,7 +327,7 @@ module's `PROVENANCE`):
   not. Four segments of `2021-02-18-16-43-54` are logged at 164 Hz, not 400:
   **group by `meta.system.native_rate_hz`**, never assume the nominal rate.
 
-## Pinned catalog (`dload.lock` — 55 datasets)
+## Pinned catalog (`dload.lock` — 56 datasets)
 
 Tests assert every `dload.lock` name is a `SPECS` entry, a `sources.REGISTRY`
 entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
@@ -421,6 +421,31 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
     Spec adopt-only (a GPU annotator sits in the loop); consumed as
     `kind: frames` in `conf/online_mix/beatvk_avq_dload.yaml` (beat-VK R2 arm).
     Labels are cruise-only (66–117 rev/s), not telemetry — pseudo-ground-truth.
+- **noise-model-v2 bench/static fit points** (1, `tdframe-v1`):
+  `noise-v2-bench-points` (73; every static/bench drone-noise recording the
+  project holds that yields ONE speed per rotor — 20 DREGON single-motor bench
+  runs at 50–90 % throttle, 7 SPCUP19 AGH single-rotor takes, 45
+  DroneAudioSet `drone-only` recordings over 4 design cells, 1 SPCUP19 ChuMS
+  propeller-rig run — 12 distinct rig/condition points). Per Frame: the
+  stationary part of the audio at its native rate with every channel kept
+  (≤ 30 s) + `meta.rig`, `meta.corpus`, `meta.speed_rev_s` (one entry per
+  resolved rotor), `meta.speed_source`, `meta.speed_tolerance` (0.25 rev/s on
+  72 of 73), `meta.source_id`/`source_offset_s`. Generator `noise_v2_bench`.
+  **The speeds are estimator output, not telemetry** — a long-window Welch
+  harmonic sum with an odd-harmonic octave check
+  (`scripts/noise_v2_bench_speed.py`), accepted only where the harmonic-sum
+  peak clears the best non-family rival by ≥ 3 dB, the two disjoint halves of
+  the window agree to ≤ 1 rev/s, and the window is ≥ 8 s. The accepted labels
+  are the committed manifest `src/data_processing/noise_v2_bench_points.json`,
+  hashed into the spec (`gen.manifest`), so a re-estimation mints a new
+  derivation identity. Audio comes from the pinned `DREGON-frames` /
+  `SPCUP19-egonoise` parents plus the publishers' own files for the
+  DroneAudioSet `drone-only` parquet (3.1 GiB of the 88 GiB pin) and the
+  SPCUP19 ChuMS rig archive — neither pin is key-indexed, so streaming them
+  whole to reach 168 + 9 recordings is avoided. Cross-checks, corpus verdicts
+  and the rejected list: `results/noise_v2/survey/` (`survey_table.md`,
+  `findings.md`); the DREGON throttle law is reproduced to 0.555 rev/s mean
+  error and the SPCUP AGH blind readings to 0.148 rev/s on 6 of 7 takes.
 - **VK decompositions** (2 materialized, `tdframe-v1`; consumer
   `DecompFrameDataset`, `docs/experiments/amplitude-target-training.md`):
   `decomp-frames-v1` — the coupled Vold-Kalman decomposition of the three
