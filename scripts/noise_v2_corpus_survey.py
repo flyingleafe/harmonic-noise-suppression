@@ -363,6 +363,115 @@ def _reject_histogram(rows: list[dict]) -> dict[str, int]:
     return dict(sorted(hist.items(), key=lambda kv: -kv[1]))
 
 
+def _rival_family(ratio: float, max_mn: int = 12, tol: float = 0.03) -> tuple[int, int] | None:
+    """The simplest ``m/n`` (both <= ``max_mn``) the rival/accepted ratio matches."""
+    best: tuple[int, int] | None = None
+    for n in range(1, max_mn + 1):
+        for m in range(1, max_mn + 1):
+            if abs(ratio * n / m - 1.0) <= tol and (best is None or max(m, n) < max(best)):
+                best = (m, n)
+    return best
+
+
+def multi_rotor_summary(rows: list[dict], family_max: int = 4) -> dict[str, Any]:
+    """What the multi-rotor mode did, over the MERGED reading files.
+
+    The per-file cross-checks cannot see the other files' rows, so the
+    corpus-wide view of the mode is computed here: how often the ±6 %
+    neighbourhood exclusion moved the limiting rival and how often that alone
+    cleared the 3 dB bar, the per-family n_res histogram, and what the limiting
+    rival of a REJECTED multi-rotor recording actually is — a deeper ``m/n``
+    relative of the accepted comb (the same comb read every n-th tooth, which
+    the published ``m, n <= family_max`` exclusion does not cover) or a genuine
+    independent comb.
+    """
+    multi = [r for r in rows if r.get("mode") == "multi_rotor"]
+    if not multi:
+        return {}
+    moved = [r for r in multi if abs(r["margin_db"] - r["margin_family_only_db"]) > 1e-9]
+    flipped = [r for r in moved if r["margin_family_only_db"] < 3.0 <= r["margin_db"]]
+    rejected = [r for r in multi if not r["usable"] and r.get("runner_up_rev_s")]
+    deep: dict[str, int] = {}
+    deep_rows: list[dict[str, Any]] = []
+    for r in rejected:
+        ratio = float(r["runner_up_rev_s"]) / max(float(r["rate_rev_s"]), 1e-9)
+        mn = _rival_family(ratio)
+        if mn is None:
+            deep["independent comb (no m/n, m,n<=12)"] = (
+                deep.get("independent comb (no m/n, m,n<=12)", 0) + 1
+            )
+            continue
+        label = f"m/n relative with max(m,n)={max(mn)}"
+        deep[label] = deep.get(label, 0) + 1
+        if max(mn) > family_max:
+            deep_rows.append(
+                {
+                    "id": r["id"],
+                    "family": r["family"],
+                    "ratio": round(ratio, 4),
+                    "m_over_n": list(mn),
+                    "margin_db": r["margin_db"],
+                }
+            )
+    fams: dict[str, list[dict]] = {}
+    for r in multi:
+        fams.setdefault(str(r["family"]), []).append(r)
+    return {
+        "n_recordings": len(multi),
+        "family_max": family_max,
+        "neighbourhood_exclusion": {
+            "n_rows_rival_moved": len(moved),
+            "median_gain_db": round(
+                float(np.median([r["margin_db"] - r["margin_family_only_db"] for r in moved])), 3
+            )
+            if moved
+            else None,
+            "max_gain_db": round(max(r["margin_db"] - r["margin_family_only_db"] for r in moved), 3)
+            if moved
+            else None,
+            "n_rows_flipped_over_3db": len(flipped),
+            "flipped": [
+                {
+                    "id": r["id"],
+                    "margin_family_only_db": r["margin_family_only_db"],
+                    "margin_db": r["margin_db"],
+                }
+                for r in flipped
+            ],
+        },
+        "rejected_rival_is": dict(sorted(deep.items(), key=lambda kv: -kv[1])),
+        "n_rejected_with_deep_family_rival": len(deep_rows),
+        "deep_family_rival_rows": deep_rows,
+        "per_family": {
+            fam: {
+                "n": len(rs),
+                "n_usable": sum(1 for r in rs if r["usable"]),
+                "median_margin_db": round(float(np.median([r["margin_db"] for r in rs])), 3),
+                "median_margin_family_only_db": round(
+                    float(np.median([r["margin_family_only_db"] for r in rs])), 3
+                ),
+                "n_resolved_histogram": {
+                    str(n): sum(1 for r in rs if r["n_resolved"] == n)
+                    for n in sorted({r["n_resolved"] for r in rs})
+                },
+                "n_resolved_histogram_usable": {
+                    str(n): sum(1 for r in rs if r["usable"] and r["n_resolved"] == n)
+                    for n in sorted({r["n_resolved"] for r in rs if r["usable"]})
+                },
+                "rejected_rival_deep_family": sum(
+                    1
+                    for r in rs
+                    if not r["usable"]
+                    and r.get("runner_up_rev_s")
+                    and (mn := _rival_family(r["runner_up_rev_s"] / max(r["rate_rev_s"], 1e-9)))
+                    and max(mn) > family_max
+                ),
+            }
+            for fam, rs in sorted(fams.items())
+        },
+    }
+
+
 def survey_table(entries: list[dict], rows: list[dict]) -> str:
     head = (
         "| Corpus | Location | Type | Rigs | Telemetry | Speed source | fs / ch / duration "
@@ -500,10 +609,12 @@ def draw_speeds(rows: list[dict], out_dir: Path, fig_dir: Path) -> str:
 def draw_multirotor_split(rows: list[dict], out_dir: Path, fig_dir: Path) -> str | None:
     """One panel per multi-rotor rig: the high-order band the split is read in.
 
-    The example per rig is the reading with the most resolved rotors (ties
-    broken by margin), so the panel shows what the rule actually saw: the band
-    ``k·f_line ± 6 %``, its local median, the ``+6 dB`` peak threshold, and a
-    marker at every resolved rotor line ``k·f_i/scale``.
+    Only the corpora that can become fit points are shown (the ``no rig
+    identity`` and ``control`` corpora are not). The example per rig is its
+    best reading — usable first, then most resolved rotors, then margin — so
+    the panel shows what the rule actually saw: the band ``k·f_line ± 6 %``,
+    its local median, the ``+6 dB`` peak threshold, and a marker at every
+    resolved rotor line ``k·f_i/scale``.
     """
     import matplotlib
 
@@ -513,19 +624,25 @@ def draw_multirotor_split(rows: list[dict], out_dir: Path, fig_dir: Path) -> str
     best: dict[str, dict] = {}
     for r in rows:
         ex = r.get("split_example")
-        if not ex or r.get("mode") != "multi_rotor":
+        if not ex or r.get("mode") != "multi_rotor" or r["family"] not in _SOURCE_OF_FAMILY:
             continue
         key = str(r["rig"])
         cur = best.get(key)
-        rank = (int(r["n_resolved"]), float(r["margin_db"]))
-        if cur is None or rank > (int(cur["n_resolved"]), float(cur["margin_db"])):
+        rank = (bool(r["usable"]), int(r["n_resolved"]), float(r["margin_db"]))
+        if cur is None or rank > (
+            bool(cur["usable"]),
+            int(cur["n_resolved"]),
+            float(cur["margin_db"]),
+        ):
             best[key] = r
     if not best:
         return None
     rigs = sorted(best)
     ncol = min(3, len(rigs))
     nrow = int(np.ceil(len(rigs) / ncol))
-    fig, axes = plt.subplots(nrow, ncol, figsize=(4.4 * ncol, 3.0 * nrow), dpi=150, squeeze=False)
+    fig, axes = plt.subplots(
+        nrow, ncol, figsize=(4.6 * ncol, 3.2 * nrow), dpi=150, squeeze=False, layout="constrained"
+    )
     for ax, rig in zip(axes.ravel(), rigs, strict=False):
         r = best[rig]
         ex = r["split_example"]
@@ -544,10 +661,11 @@ def draw_multirotor_split(rows: list[dict], out_dir: Path, fig_dir: Path) -> str
                 label="resolved rotor" if i == 0 else None,
             )
         ax.set_title(
-            f"{rig}\n{r['id']}: order {k} of {ex['comb_rev_s']:.2f} rev/s, "
+            f"{rig} — {'usable' if r['usable'] else 'rejected'}\n"
+            f"{r['id'][:34]}: order {k} of {ex['comb_rev_s']:.1f} rev/s, "
             f"n_res {r['n_resolved']}/{r['n_rotors']}"
-            + (" (unresolved)" if r["multiplicity_unresolved"] else ""),
-            fontsize=7.5,
+            + (", unresolved" if r["multiplicity_unresolved"] else ""),
+            fontsize=7.0,
         )
         ax.set_xlabel("frequency (Hz)", fontsize=8)
         ax.set_ylabel("power (dB)", fontsize=8)
@@ -561,7 +679,7 @@ def draw_multirotor_split(rows: list[dict], out_dir: Path, fig_dir: Path) -> str
         "rotor lines",
         fontsize=10,
     )
-    fig.tight_layout()
+
     out_dir.mkdir(parents=True, exist_ok=True)
     fig_dir.mkdir(parents=True, exist_ok=True)
     name = "survey_multirotor_split.png"
@@ -723,6 +841,9 @@ def main(argv: list[str] | None = None) -> int:
         "tolerance_rule": speeds.get("tolerance_rule"),
         "estimator_config": speeds.get("config"),
         "cross_checks": speeds.get("cross_checks"),
+        "multi_rotor": multi_rotor_summary(
+            rows, int((speeds.get("config") or {}).get("family_max", 4))
+        ),
         "n_recordings": len(rows),
         "n_usable": len(usable),
         "n_fit_points": len(points),

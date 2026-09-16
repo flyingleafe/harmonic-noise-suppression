@@ -1032,11 +1032,12 @@ def read_avq(
 
     The first survey pass refused AVQ as "free flight" without reading the
     spec table. Four of its twelve sequences are ego-noise-only recordings at a
-    CONSTANT throttle setting (:data:`AVQ_CONSTANT_EGONOISE`): the drone hangs
-    on its tether/stand with no source playing, which is bench class. They are
-    long (40-210 s), so each is cut into consecutive ``window_s`` blocks and
-    read independently — one reading per block, which also measures how stable
-    a "constant" setting is over three minutes.
+    CONSTANT throttle setting (:data:`AVQ_CONSTANT_EGONOISE`) with no source
+    playing — one throttle per recording and no manoeuvre, which is the
+    bench-class definition the survey uses. They are long (40-210 s), so each
+    is cut into consecutive ``window_s`` blocks and read independently: one
+    reading per block, which also measures how constant the setting is over
+    three minutes.
 
     Audio comes from ``dload:AVQ`` (8 ch, 44.1 kHz). ``AVQ-egonoise`` holds the
     same sequences but channel 0 only at 16 kHz.
@@ -1059,8 +1060,7 @@ def read_avq(
                     "id": f"{rid}_w{w}",
                     "rig": "avq_quadrotor",
                     "rig_model": "quadrotor (AVQ, QMUL)",
-                    "condition": f"tethered constant throttle {spec['throttle']:g}%, "
-                    "ego-noise only",
+                    "condition": f"constant throttle {spec['throttle']:g}%, ego-noise only",
                     "throttle": float(spec["throttle"]),
                     "sequence": rid,
                     "window_index": w,
@@ -1656,6 +1656,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--no-figures", action="store_true")
     ap.add_argument("--tag", default="", help="suffix for the output file names")
+    ap.add_argument(
+        "--figures-from",
+        type=Path,
+        nargs="+",
+        default=None,
+        help="redraw the figures (and print the cross-checks) from existing "
+        "bench_speeds JSONs instead of reading any audio — the corpus pass runs on "
+        "the cluster with --no-figures, so the committed readings stay the figure source",
+    )
     args = ap.parse_args(argv)
 
     if args.fetch_daset:
@@ -1663,6 +1672,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.fetch_chums:
         fetch_chums(args.chums_mat)
+    if args.figures_from:
+        rows: list[dict] = []
+        for path in args.figures_from:
+            rows += json.loads(Path(path).read_text())["rows"]
+        checks = cross_checks(rows)
+        names = draw_figures(rows, checks, args.out, [args.fig_dir])
+        print(f"redrew {names} from {len(rows)} readings in {len(args.figures_from)} file(s)")
+        return 0
+
     cfg = Config(
         lo=args.lo,
         hi=args.hi,
