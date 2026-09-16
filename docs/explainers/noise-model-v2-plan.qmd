@@ -1405,12 +1405,20 @@ Seven choices are open. Each one has a proposal and the number behind it.
   weakest fraction that still excludes the current best. Closure `≥ 0.40`
   would let it pass and certify no improvement. Note the DREGON oracle spread
   of 1.142 dB, which exceeds the 0.646 dB gap the gate measures.
-- **The likelihood threshold.** Proposal: the same closure fraction on the
-  composite risk at the flight STFT (NFFT 2048, hop 512), oracle = speed-matched
-  disjoint real segment. The absolute values come from
-  `scripts/noise_v2_short_whittle.py` (previous-generation model at the short
-  STFT), once run. Decide whether R1 blocks on that table, and whether the
-  composite gate is per rig or pooled.
+- **The likelihood threshold.** The oracle (Welch mean periodogram of a
+  speed-matched disjoint real segment, one spectrum held fixed over the
+  scored support) is a **stationary** predictor: inside a support the carrier
+  moves and the oracle's lines do not. A model that predicts the dynamics from
+  the label frame by frame must **beat** it wherever the label is accurate to
+  better than one bin. Reference values at the flight STFT (NFFT 2048, hop
+  512, `results/noise_v2/short_whittle/findings.md`): the old flight-fitted
+  model already sits at the oracle on Michael's cruise (−107 nats/s) and 66 k
+  nats/s above it pooled (standby, 14 dB hot); the old bench-fitted model is
+  3.97 M nats/s above it on DREGON cruise. Proposal: gate = composite risk
+  **below the oracle** on Michael's cruise by a margin frozen in R1 from the
+  parity fit; DREGON free flight is not gated by this likelihood (label error
+  ~1 Hz at `k = 70` removes the dynamic advantage at high order) but by HPPNet
+  and LTAS. Decide whether the margin is per support or pooled.
 - **The stationarity rule on the bench.** Proposal: the longest sub-segment
   where the demodulated residual at `k ≈ 70` stays inside ±1 Hz
   (`utils.demod.residual_frequency`). Alternative: a slow polynomial carrier
