@@ -95,9 +95,23 @@ HP_HZ = (0.5, 2.0)
 #: matter how the model is corrected. The detrend-only variant is the only
 #: instrument in this script that can see it, and its band starts at
 #: :data:`PSD_F_LO_WIDE_HZ`.
-HP_VARIANTS: tuple[float | None, ...] = (0.5, 2.0, None)
+HP_VARIANTS: tuple[float | str | None, ...] = (16.0, 0.5, 2.0, None, "label")
+#: The HEADLINE variant. The label a renderer can actually carry is sampled at
+#: the STFT hop rate :data:`LABEL_RATE_HZ`, so it holds nothing above half of
+#: that; only the residual ABOVE that band is phase noise the model must
+#: generate, and that is what the 16 Hz high-pass isolates.
+HP_HEADLINE: float | str = 16.0
+#: Working rotor-speed label rate (Hz): the STFT hop rate of the production
+#: analysis, and close to Michael's own ~30 Hz log.
+LABEL_RATE_HZ = 31.25
+#: Key of the exact label-residual variant: the native series MINUS the same
+#: series resampled to :data:`LABEL_RATE_HZ` and back, i.e. exactly what a
+#: label carried at the working rate cannot represent.
+LABEL_KEY = "label_residual"
 #: Key a variant carries in the JSON.
 DETREND_KEY = "detrend"
+#: Variants whose PSD model carries no analytic filter response.
+NO_RESPONSE_KEYS = (DETREND_KEY, "label_residual")
 #: Butterworth order of that high-pass, applied zero-phase with ``sosfiltfilt``
 #: (so the POWER response is ``|H|^4``, which every model here multiplies by).
 HP_ORDER = 4
@@ -624,25 +638,24 @@ def fit_speed_psd(
     # A flat start plus two decades of lam either side of the band, so the
     # optimiser is not launched inside a plateau.
     best_ou: tuple[float, np.ndarray] | None = None
+    # BOUNDED. When the Lorentzian corner sits below the fit band the band sees
+    # only the f^-2 tail, where only sigma^2/lam is identified and (sigma, lam)
+    # can run away together along that ridge - unbounded, one rig returned
+    # sigma = 2.7e29 rad/s. The bounds are physical: a rotor-speed error is
+    # below 1e4 rad/s and a controller time constant is between 0.1 ms and
+    # 1000 s. A fit that lands ON a bound is reported with corner_in_band
+    # False and its sigma/lam must be read as the ridge, not as measurements.
+    lo = np.log([1e-4, 1e-3])
+    hi = np.log([1e4, 1e4])
+
+    def ou_resid(th: np.ndarray) -> np.ndarray:
+        model = np.maximum(ou_psd(fb, *np.exp(th)) * resp, 1e-300)
+        return np.sqrt(np.maximum(2.0 * shape * (np.log(model) + pb / model), 0.0))
+
     for lam0 in (0.3, 1.0, 6.0, 30.0, 200.0):
         s0 = math.sqrt(max(float(np.trapezoid(pb, fb)), 1e-30))
-        x0 = np.log([max(s0, 1e-6), lam0])
-        res = least_squares(
-            lambda th: np.sqrt(
-                np.maximum(
-                    2.0
-                    * shape
-                    * (
-                        np.log(np.maximum(ou_psd(fb, *np.exp(th)) * resp, 1e-300))
-                        + pb / np.maximum(ou_psd(fb, *np.exp(th)) * resp, 1e-300)
-                    ),
-                    0.0,
-                )
-            ),
-            x0,
-            method="lm",
-            max_nfev=4000,
-        )
+        x0 = np.clip(np.log([max(s0, 1e-6), lam0]), lo + 1e-6, hi - 1e-6)
+        res = least_squares(ou_resid, x0, bounds=(lo, hi), method="trf", max_nfev=4000)
         val = nll_ou(res.x)
         if best_ou is None or val < best_ou[0]:
             best_ou = (val, res.x)
@@ -678,8 +691,11 @@ def fit_speed_psd(
     out["delta_aic_ou_minus_white"] = out["ou"]["aic"] - out["white"]["aic"]
     out["delta_bic_ou_minus_white"] = out["ou"]["bic"] - out["white"]["bic"]
     out["preferred"] = "ou" if out["delta_aic_ou_minus_white"] < 0 else "white"
-    lo, hi = fb[0], fb[-1]
-    out["corner_in_band"] = bool(lo <= lam_hat / (2 * np.pi) <= hi)
+    f_lo_b, f_hi_b = fb[0], fb[-1]
+    out["corner_in_band"] = bool(f_lo_b <= lam_hat / (2 * np.pi) <= f_hi_b)
+    out["ou"]["at_bound"] = bool(
+        sigma_hat > 0.9e4 or sigma_hat < 1.1e-4 or lam_hat < 1.1e-3 or lam_hat > 0.9e4
+    )
     return out
 
 
@@ -719,10 +735,27 @@ def analyse_telemetry_rig(
     total_s = 0.0
     n_rotors = tracks[0].rps.shape[0]
     for f_hp in HP_VARIANTS:
-        sos = None if f_hp is None else hp_sos(fs, f_hp)
-        key = DETREND_KEY if f_hp is None else f"{f_hp:g}"
-        f_lo = PSD_F_LO_WIDE_HZ if f_hp is None else PSD_F_LO_HZ
-        min_len = int(10.0 * fs) if f_hp is None else int(4 * fs / f_hp)
+        numeric = isinstance(f_hp, (int, float))
+        if numeric and float(f_hp) >= 0.45 * fs:
+            # a high-pass corner above this rig's own Nyquist is not a filter
+            rep["highpass"][f"{float(f_hp):g}"] = {
+                "f_hp_hz": f_hp,
+                "skipped": f"corner {f_hp} Hz is at or above 0.45 fs = {0.45 * fs:.2f} Hz",
+                "per_rotor": [],
+                "pooled": pool_rotors([]),
+            }
+            continue
+        sos = hp_sos(fs, float(f_hp)) if numeric else None
+        key = f"{float(f_hp):g}" if numeric else (LABEL_KEY if f_hp == "label" else DETREND_KEY)
+        if numeric:
+            f_lo = max(PSD_F_LO_HZ, float(f_hp))
+            min_len = int(4 * fs / float(f_hp))
+        elif f_hp == "label":
+            f_lo = PSD_F_LO_HZ
+            min_len = int(4.0 * fs)
+        else:
+            f_lo = PSD_F_LO_WIDE_HZ
+            min_len = int(10.0 * fs)
         per_rotor: list[dict[str, Any]] = []
         nu_all: list[list[np.ndarray]] = [[] for _ in range(n_rotors)]
         th_all: list[list[np.ndarray]] = [[] for _ in range(n_rotors)]
@@ -735,21 +768,30 @@ def analyse_telemetry_rig(
                     y, frac_bad = _interp_nans(track.rps[r, sl])
                     if frac_bad > 0.05 or y.size < min_len:
                         continue
-                    if sos is None:
+                    if sos is not None:
+                        resid = sosfiltfilt(sos, y - y.mean())
+                    elif f_hp == "label":
+                        # EXACTLY what a label carried at the working rate
+                        # cannot represent: the native series minus the same
+                        # series linearly resampled to LABEL_RATE_HZ and back,
+                        # which is how a renderer reads a telemetry track.
+                        t = np.arange(y.size) / fs
+                        n_lab = max(int(t[-1] * LABEL_RATE_HZ) + 1, 2)
+                        t_lab = np.arange(n_lab) / LABEL_RATE_HZ
+                        resid = y - np.interp(t, t_lab, np.interp(t_lab, t, y))
+                    else:
                         # linear detrend only: the least aggressive trend
                         # removal that still leaves theta = int nu bounded
                         t = np.arange(y.size) / fs
                         a, b = np.polyfit(t, y, 1)
                         resid = y - (a * t + b)
-                    else:
-                        resid = sosfiltfilt(sos, y - y.mean())
                     nu = 2.0 * np.pi * resid
                     nu_all[r].append(nu)
                     th_all[r].append(np.cumsum(nu) / fs)
                 if f_hp == HP_VARIANTS[0]:
                     total_s += (sl.stop - sl.start) / track.fs
         if sos is not None:
-            f_grid = np.geomspace(max(1e-3, 0.02 * float(f_hp or 1.0)), 0.5 * fs, 600)
+            f_grid = np.geomspace(max(1e-3, 0.02 * float(f_hp)), 0.5 * fs, 600)  # type: ignore[arg-type]
             resp_grid = hp_power_response(sos, f_grid, fs)
         for r in range(n_rotors):
             if not nu_all[r]:
@@ -784,15 +826,23 @@ def analyse_telemetry_rig(
             per_rotor.append(row)
         pooled = pool_rotors(per_rotor)
         rep["highpass"][key] = {
-            "f_hp_hz": f_hp,
-            "hp_order": None if f_hp is None else HP_ORDER,
+            "f_hp_hz": f_hp if numeric else None,
+            "hp_order": HP_ORDER if numeric else None,
             "zero_phase": f_hp is not None,
-            "trend_removal": "linear detrend per segment" if f_hp is None else "butterworth",
+            "trend_removal": (
+                "butterworth"
+                if numeric
+                else (
+                    f"native minus resample to {LABEL_RATE_HZ:g} Hz and back"
+                    if f_hp == "label"
+                    else "linear detrend per segment"
+                )
+            ),
             "psd_band_lo_hz": f_lo,
             "per_rotor": per_rotor,
             "pooled": pooled,
         }
-        if f_hp in (HP_VARIANTS[0], None):
+        if f_hp in (HP_HEADLINE, None):
             # PSD of the pooled rotors, for the figure
             f_psd, p_psd, n_seg = welch_psd([x for r in range(n_rotors) for x in nu_all[r]], fs)
             fit = fit_speed_psd(f_psd, p_psd, fs, n_seg, sos, f_lo)
@@ -1844,7 +1894,7 @@ def telemetry_verdict(rep: dict[str, Any]) -> dict[str, Any]:
     detrend-only variant - whose band starts at 0.05 Hz - supplies
     ``lam``/``sigma`` and the verdict says which instrument spoke.
     """
-    pooled = rep["highpass"][f"{HP_HZ[0]:g}"]["pooled"]
+    pooled = rep["highpass"][f"{float(HP_HEADLINE):g}"]["pooled"]
     wide = (rep["highpass"].get(DETREND_KEY) or {}).get("pooled") or {}
     q = rep["quantisation"]
     fs = rep["fs_hz"]
@@ -1859,7 +1909,9 @@ def telemetry_verdict(rep: dict[str, Any]) -> dict[str, Any]:
         label = "unidentified"
     elif pref == "white" or corner > 0.8 * band_hi:
         label = "wiener"
-    elif corner < 1.2 * PSD_F_LO_HZ:
+    elif corner < 1.2 * (
+        float(HP_HEADLINE) if isinstance(HP_HEADLINE, (int, float)) else PSD_F_LO_HZ
+    ):
         w_corner = wide.get("corner_hz")
         if (
             w_corner is not None
@@ -1917,22 +1969,29 @@ def telemetry_verdict(rep: dict[str, Any]) -> dict[str, Any]:
 
 
 def _saturated(row: dict[str, Any]) -> bool:
-    """True when the phase excursion already exceeds the linear regime at the
-    SHORTEST usable lag of the LOWEST order, so no cell of this support can be
-    read: the harmonic is blurred rather than a line, and the fit that comes
-    back from such a support is meaningless."""
+    """True when NO order has a cell inside the estimator's linear regime.
+
+    The test is the SMALLEST ``V/k^2`` any order reports at its shortest
+    usable lag. Testing only the lowest order is wrong: on a two-blade rotor
+    the odd orders are 10 dB down, so order 1 carries a large additive-noise
+    offset and would declare a perfectly readable support saturated (it
+    declared all twelve DREGON bench recordings saturated).
+
+    A saturated support is one whose harmonics are blurred rather than lines;
+    any fit returned from it is meaningless and is not pooled into a verdict.
+    """
     src = (
         row.get("V_k_unwrapped_rad2")
         if row.get("primary_estimator") == "unwrapped"
         else row.get("V_k_rad2")
     ) or {}
-    if not src:
-        return True
-    k0 = min(int(k) for k in src)
-    series = [v for v in (src[str(k0)] or []) if v is not None and np.isfinite(v)]
-    if not series:
-        return True
-    return bool(series[0] / k0**2 > ACOUSTIC_V_LINEAR_MAX)
+    best = math.inf
+    for key, series in src.items():
+        k = int(key)
+        vals = [v for v in (series or []) if v is not None and np.isfinite(v) and v > 0]
+        if vals:
+            best = min(best, vals[0] / k**2)
+    return bool(best > ACOUSTIC_V_LINEAR_MAX)
 
 
 def acoustic_verdict(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2060,7 +2119,7 @@ def fig_structure_functions(res: dict[str, Any], paths: list[Path]) -> None:
     for ax, rig in zip(axes.ravel(), rigs, strict=False):
         rep = tel[rig]
         tau = np.asarray(rep["lags_s"], dtype=float)
-        hp = rep["highpass"][f"{HP_HZ[0]:g}"]
+        hp = rep["highpass"][f"{float(HP_HEADLINE):g}"]
         for row in hp["per_rotor"]:
             if not row.get("S_rad2"):
                 continue
@@ -2075,7 +2134,7 @@ def fig_structure_functions(res: dict[str, Any], paths: list[Path]) -> None:
                     color="k",
                     alpha=0.5,
                 )
-        hp2 = rep["highpass"][f"{HP_HZ[1]:g}"]
+        hp2 = rep["highpass"][f"{HP_HZ[0]:g}"]
         for row in hp2["per_rotor"]:
             if not row.get("S_rad2"):
                 continue
@@ -2129,7 +2188,7 @@ def fig_structure_functions(res: dict[str, Any], paths: list[Path]) -> None:
         ax.axis("off")
     fig.suptitle(
         "Shaft-angle-error structure function, native-rate telemetry. "
-        f"Colour: {HP_HZ[0]:g} Hz high-pass per rotor; grey: {HP_HZ[1]:g} Hz; "
+        f"Colour: {float(HP_HEADLINE):g} Hz high-pass per rotor; grey: {HP_HZ[0]:g} Hz; "
         "orange dashed: linear detrend only (the only variant whose long lags "
         "are not annihilated by the high-pass); dotted black: fitted OU through "
         "the same trend removal; dashed/dash-dot black: slope 1 / slope 2; "
@@ -2155,7 +2214,7 @@ def fig_speed_psd(res: dict[str, Any], paths: list[Path]) -> None:
         ax.loglog(f[m], p[m], lw=0.9, color="C0", label="Welch, 0.5 Hz high-pass")
         fit = rep["psd"]["fit"]
         if fit.get("identified"):
-            sos = hp_sos(rep["fs_hz"], HP_HZ[0])
+            sos = hp_sos(rep["fs_hz"], float(HP_HEADLINE))
             resp = hp_power_response(sos, f[m], rep["fs_hz"])
             ou = ou_psd(f[m], fit["ou"]["sigma_nu_rad_s"], fit["ou"]["lam_1_s"]) * resp
             ax.loglog(f[m], ou, "C3", lw=1.4, label="OU (Lorentzian)")
@@ -2560,7 +2619,7 @@ def write_findings(res: dict[str, Any], out_dir: Path) -> Path:
     )
     A(
         f"- **High-pass choice.** The slow trend is removed with a zero-phase order-{HP_ORDER} "
-        f"Butterworth high-pass at {HP_HZ[0]:g} Hz (headline) and {HP_HZ[1]:g} Hz (reported "
+        f"Butterworth high-pass at {float(HP_HEADLINE):g} Hz (headline) and {HP_HZ[0]:g}/{HP_HZ[1]:g} Hz (reported "
         "alongside). A high-pass at `f_hp` makes `theta` stationary, so `S(tau)` SATURATES "
         "above `tau ~ 1/(2 pi f_hp)` instead of growing; the fitted OU curve drawn on the "
         "same figure passes through the same filter, which is why data and model can be "
