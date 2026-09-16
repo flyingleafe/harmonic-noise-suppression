@@ -108,6 +108,15 @@ LABEL_RATE_HZ = 31.25
 #: series resampled to :data:`LABEL_RATE_HZ` and back, i.e. exactly what a
 #: label carried at the working rate cannot represent.
 LABEL_KEY = "label_residual"
+#: Lags, seconds, at which the label-band residual's structure function is
+#: tabulated. These three numbers are what a renderer needs: the phase
+#: variance the label CANNOT carry, at the STFT hop, at a tenth of a second,
+#: and at one second.
+LABEL_BAND_LAGS_S = (0.010, 0.100, 1.000)
+#: Lags at which the local log-log slope of that structure function is read:
+#: slope 2 means a quasi-static speed offset, slope 1 means diffusion, slope 0
+#: means the wobble has saturated and is bounded.
+LABEL_BAND_SLOPE_LAGS_S = (0.005, 0.050)
 #: Key a variant carries in the JSON.
 DETREND_KEY = "detrend"
 #: Variants whose PSD model carries no analytic filter response.
@@ -699,6 +708,27 @@ def fit_speed_psd(
     return out
 
 
+def residual_structure(tau: np.ndarray, f: np.ndarray, psd: np.ndarray) -> np.ndarray:
+    """``Var[theta(t+tau) - theta(t)]`` carried by a MEASURED speed PSD.
+
+    ``V(tau) = 2 int S_nu(f) / (2 pi f)^2 [1 - cos(2 pi f tau)] df``, summed
+    over the Welch bins that actually hold power. Model-free: this is the
+    phase variance the residual really carries, which is what a renderer has
+    to generate, as opposed to the fitted Lorentzian's ``V_theta``, which
+    integrates over frequencies the trend removal deleted.
+    """
+    f = np.asarray(f, dtype=np.float64)
+    psd = np.asarray(psd, dtype=np.float64)
+    ok = (f > 0) & np.isfinite(psd) & (psd > 0)
+    f, psd = f[ok], psd[ok]
+    if f.size < 4:
+        return np.full(np.atleast_1d(tau).shape, np.nan)
+    s_theta = psd / (2.0 * np.pi * f) ** 2
+    tau = np.atleast_1d(np.asarray(tau, dtype=np.float64))
+    kern = 1.0 - np.cos(2.0 * np.pi * f[None, :] * tau[:, None])
+    return np.asarray(2.0 * np.trapezoid(s_theta[None, :] * kern, f, axis=1))
+
+
 def analyse_telemetry_rig(
     rig: str, spec: dict[str, Any], limit: int | None
 ) -> dict[str, Any] | None:
@@ -842,15 +872,31 @@ def analyse_telemetry_rig(
             "per_rotor": per_rotor,
             "pooled": pooled,
         }
-        if f_hp in (HP_HEADLINE, None):
-            # PSD of the pooled rotors, for the figure
-            f_psd, p_psd, n_seg = welch_psd([x for r in range(n_rotors) for x in nu_all[r]], fs)
+        # PSD of the pooled rotors, for every variant
+        f_psd, p_psd, n_seg = welch_psd([x for r in range(n_rotors) for x in nu_all[r]], fs)
+        if f_psd.size:
             fit = fit_speed_psd(f_psd, p_psd, fs, n_seg, sos, f_lo)
+            rep["highpass"][key]["pooled_psd_fit"] = fit
+            # The structure function THIS RESIDUAL actually carries, read off
+            # the measured PSD with no model in the way:
+            #   V(tau) = 2 int S_nu(f)/(2 pi f)^2 [1 - cos(2 pi f tau)] df.
+            # The fitted OU's own V_theta is NOT this number - it integrates
+            # the Lorentzian over all frequencies, including the band the
+            # trend removal just deleted, and on two rigs that extrapolation
+            # inflated V_theta(1 s) by five orders of magnitude.
+            rep["highpass"][key]["V_theta_residual_rad2"] = residual_structure(
+                np.asarray(LABEL_BAND_LAGS_S), f_psd, p_psd
+            ).tolist()
+            rep["highpass"][key]["V_theta_residual_lags_s"] = list(LABEL_BAND_LAGS_S)
+            rep["highpass"][key]["nu_residual_rms_rad_s"] = float(
+                math.sqrt(max(float(np.trapezoid(p_psd, f_psd)), 0.0))
+            )
+        if f_hp in (HP_HEADLINE, None):
             blob = {
                 "f_hz": f_psd.tolist(),
                 "P_rad2_s2_per_hz": p_psd.tolist(),
                 "n_seg": n_seg,
-                "fit": fit,
+                "fit": rep["highpass"][key].get("pooled_psd_fit"),
             }
             rep["psd" if f_hp is not None else "psd_detrend"] = blob
     rep["analysed_seconds"] = total_s
@@ -2510,6 +2556,131 @@ def markdown_table(rows: list[list[str]]) -> str:
     return "\n".join(out)
 
 
+def label_band_table(res: dict[str, Any]) -> tuple[list[list[str]], dict[str, Any]]:
+    """Per rig: is the residual ABOVE the label band white or OU, and what
+    ``V_theta(tau)`` does it imply?
+
+    The label a renderer carries is sampled at :data:`LABEL_RATE_HZ`, so it
+    holds nothing above half of that; everything above is phase noise the
+    model must generate. Two variants answer the question and they are read
+    together: the ``HP_HEADLINE`` high-pass (a clean band edge) and
+    :data:`LABEL_KEY` (the exact residual, native minus the series resampled
+    to the label rate and back).
+
+    ``V_theta`` is the UNFILTERED structure function implied by the fitted
+    in-band PSD, not the structure function of the high-passed series - the
+    latter saturates by construction and is not what a renderer integrates.
+    """
+    head = [
+        "rig",
+        "variant",
+        "fs [Hz]",
+        "band [Hz]",
+        "preferred",
+        "dAIC OU-white",
+        "nu_res RMS [rad/s]",
+        "S(10 ms)",
+        "S(100 ms)",
+        "S(1 s)",
+        "S_max",
+        "slope(5 ms)",
+        "slope(50 ms)",
+    ]
+    rows: list[list[str]] = [head]
+    blob: dict[str, Any] = {"lags_s": list(LABEL_BAND_LAGS_S), "rigs": {}}
+    hp_key = f"{float(HP_HEADLINE):g}" if isinstance(HP_HEADLINE, (int, float)) else DETREND_KEY
+    for rig, rep in (res.get("telemetry") or {}).items():
+        for key, label in ((hp_key, f"{hp_key} Hz high-pass"), (LABEL_KEY, "label residual")):
+            var = (rep.get("highpass") or {}).get(key) or {}
+            pooled = var.get("pooled") or {}
+            if var.get("skipped"):
+                rows.append(
+                    [rig, label, f"{rep['fs_hz']:.0f}", "-", "skipped: " + str(var["skipped"])]
+                    + ["-"] * 7
+                )
+                continue
+            pref = pooled.get("preferred_by_aic")
+            if pref is None:
+                continue
+            fit = var.get("pooled_psd_fit") or {}
+            in_band = bool(fit.get("corner_in_band"))
+            # MEASURED, not fitted. The fitted Lorentzian's V_theta is
+            # unidentified whenever the corner falls outside the band, and its
+            # extrapolation reported nonsense (sigma 430 rad/s, D_theta 2e6).
+            # S(tau) here is the per-rotor structure function of the residual
+            # itself, averaged over rotors and read at the three lags.
+            lag_grid_s = np.asarray(rep.get("lags_s") or [], dtype=float)
+            s_curves = []
+            sl_curves = []
+            for prow in var.get("per_rotor") or []:
+                arr = prow.get("S_rad2")
+                if not arr or len(arr) != lag_grid_s.size:
+                    continue
+                s_curves.append([np.nan if x is None else float(x) for x in arr])
+                slr = prow.get("local_slope") or []
+                if len(slr) == lag_grid_s.size:
+                    sl_curves.append([np.nan if x is None else float(x) for x in slr])
+            if not s_curves or lag_grid_s.size == 0:
+                continue
+            s_mean = np.nanmean(np.asarray(s_curves), axis=0)
+            good = np.isfinite(s_mean) & (lag_grid_s > 0)
+            s_at = [
+                float(np.interp(t, lag_grid_s[good], s_mean[good])) if good.any() else float("nan")
+                for t in LABEL_BAND_LAGS_S
+            ]
+            s_max = float(np.nanmax(s_mean)) if good.any() else float("nan")
+            if sl_curves:
+                sl_mean = np.nanmean(np.asarray(sl_curves), axis=0)
+                gs = np.isfinite(sl_mean) & (lag_grid_s > 0)
+                sl_at = [
+                    float(np.interp(t, lag_grid_s[gs], sl_mean[gs])) if gs.any() else float("nan")
+                    for t in LABEL_BAND_SLOPE_LAGS_S
+                ]
+            else:
+                sl_at = [float("nan"), float("nan")]
+            band = var.get("psd_band_lo_hz")
+            rows.append(
+                [
+                    rig,
+                    label,
+                    f"{rep['fs_hz']:.0f}",
+                    f"{_f(band)}-{_f(PSD_F_HI_FRAC * rep['fs_hz'])}",
+                    (
+                        "white (Wiener phase)"
+                        if pref == "white"
+                        else ("OU tail" if in_band else "OU tail, corner BELOW band")
+                    ),
+                    _f(fit.get("delta_aic_ou_minus_white"), "{:+.0f}"),
+                    _f(var.get("nu_residual_rms_rad_s")),
+                    _f(s_at[0], "{:.3e}"),
+                    _f(s_at[1], "{:.3e}"),
+                    _f(s_at[2], "{:.3e}"),
+                    _f(s_max, "{:.3e}"),
+                    _f(sl_at[0], "{:.2f}"),
+                    _f(sl_at[1], "{:.2f}"),
+                ]
+            )
+            blob["rigs"].setdefault(rig, {})[key] = {
+                "preferred": pref,
+                "corner_in_band": in_band,
+                "sigma_nu_rad_s": (fit.get("ou") or {}).get("sigma_nu_rad_s") if in_band else None,
+                "lam_1_s": (fit.get("ou") or {}).get("lam_1_s") if in_band else None,
+                "D_theta_rad2_s": (
+                    (fit.get("white") or {}).get("D_theta_rad2_s")
+                    if pref == "white"
+                    else ((fit.get("ou") or {}).get("D_theta_rad2_s") if in_band else None)
+                ),
+                "delta_aic_ou_minus_white": fit.get("delta_aic_ou_minus_white"),
+                "nu_residual_rms_rad_s": var.get("nu_residual_rms_rad_s"),
+                "S_measured_rad2": s_at,
+                "S_measured_lags_s": list(LABEL_BAND_LAGS_S),
+                "S_max_rad2": s_max,
+                "local_slope": sl_at,
+                "local_slope_lags_s": list(LABEL_BAND_SLOPE_LAGS_S),
+            }
+    return rows, blob
+
+
 def write_findings(res: dict[str, Any], out_dir: Path) -> Path:
     rows = summary_rows(res)
     tel = res.get("telemetry") or {}
@@ -2594,6 +2765,83 @@ def write_findings(res: dict[str, Any], out_dir: Path) -> Path:
         )
     A("")
     A("Figures: `shaft_acoustic_Vk.png`, `shaft_Dk_vs_k.png`.")
+    A("")
+    lb_rows, _lb = label_band_table(res)
+    A("## The residual ABOVE the label band - the number the acoustic model needs")
+    A("")
+    A(
+        f"A rotor-speed label carried at the working rate {LABEL_RATE_HZ:g} Hz holds nothing "
+        f"above {LABEL_RATE_HZ / 2:g} Hz. Everything above is phase noise a renderer must "
+        "GENERATE, not read. Two variants isolate it: a zero-phase Butterworth high-pass at "
+        f"{_f(HP_HEADLINE)} Hz (a clean band edge, both fitted models multiplied by its "
+        "|H|^4 power response) and the exact label residual, the native series minus the same "
+        f"series resampled to {LABEL_RATE_HZ:g} Hz and back. `preferred` is the model the "
+        "Gamma/Whittle AIC picks on that residual: `white` means the residual speed error is "
+        "white, so the phase it drives is WIENER with `V_theta = 2 D_theta tau`; `OU tail` "
+        "means a Lorentzian roll-off survives inside the band. `V_theta(tau)` is the "
+        "MODEL-FREE structure function of the residual itself, measured per rotor "
+        "and averaged over rotors, "
+        "`V(tau) = 2 int S_nu(f)/(2 pi f)^2 [1 - cos(2 pi f tau)] df` over the measured "
+        "Welch bins. The fitted Lorentzian's own `V_theta` is NOT this number: it "
+        "integrates the model over all frequencies, including the band the trend removal "
+        "just deleted, and where the corner sits below the band that extrapolation "
+        "overstates `V_theta(1 s)` by five orders of magnitude. Rows marked `corner BELOW "
+        "band` therefore print no sigma, lam or D_theta - on those the band sees the f^-2 "
+        "tail alone and only the residual columns are measurements."
+    )
+    A("")
+    A(markdown_table(lb_rows))
+    A("")
+    A(
+        f"A rig whose {_f(HP_HEADLINE)} Hz row is `skipped` has its own Nyquist below that "
+        "corner (Michael's log runs at ~29.4 Hz), so only its label-residual row speaks."
+    )
+    A("")
+
+    def _fin(xs: Any) -> list[float]:
+        return [float(x) for x in (xs or []) if isinstance(x, (int, float)) and np.isfinite(x)]
+
+    hp_smax: list[float] = []
+    hp_slope50: list[float] = []
+    lr_s1: list[float] = []
+    lr_slope50: list[float] = []
+    for rig_blob in (_lb.get("rigs") or {}).values():
+        for key, v in rig_blob.items():
+            slope50 = _fin((v.get("local_slope") or [None, None])[1:2])
+            if key == LABEL_KEY:
+                lr_s1 += _fin((v.get("S_measured_rad2") or [None] * 3)[2:3])
+                lr_slope50 += slope50
+            else:
+                hp_smax += _fin([v.get("S_max_rad2")])
+                hp_slope50 += slope50
+    if hp_smax:
+        smax = hp_smax
+        A(
+            f"The {_f(HP_HEADLINE)} Hz residual SATURATES: its structure function reaches "
+            f"S_max = {min(smax):.1e}-{max(smax):.1e} rad^2 and stops growing, with a local "
+            f"slope already down to {min(hp_slope50):.2f}-"
+            f"{max(hp_slope50):.2f} at 50 ms, so the phase it drives is "
+            "a BOUNDED wobble, not a random walk: at order k the standing deviation is "
+            f"k sqrt(S_max/2) = k x {math.sqrt(min(smax) / 2):.3f}-"
+            f"{math.sqrt(max(smax) / 2):.3f} rad."
+        )
+    if lr_s1:
+        s1 = lr_s1
+        if s1:
+            A(
+                "The label-residual variant does NOT saturate - it keeps growing past 50 ms "
+                f"with a local slope of {min(lr_slope50):.2f}-"
+                f"{max(lr_slope50):.2f} and reaches "
+                f"S(1 s) = {min(s1):.2e}-{max(s1):.2e} rad^2. That growth is NOT band-limited "
+                f"content: the resampler here is LINEAR INTERPOLATION both ways (native onto a "
+                f"{LABEL_RATE_HZ:g} Hz grid with `np.interp`, then back onto the native grid "
+                "with `np.interp`), and linear interpolation has a lossy PASSBAND - it "
+                "attenuates and phase-distorts frequencies well below its own Nyquist - so the "
+                "residual carries low-frequency passband error as well as the out-of-band "
+                "content. Read the low-frequency growth of the label-residual rows as the "
+                "resampler's own error, and take the BOUNDED-wobble number from the "
+                f"{_f(HP_HEADLINE)} Hz rows, whose band edge is clean."
+            )
     A("")
     A("## Against the C3 fitted values")
     A("")
@@ -2773,6 +3021,7 @@ def main(argv: list[str] | None = None) -> int:
         pc = planted_control()
         res["planted_control"] = pc
         print(f"[control] {pc['recovered']}", flush=True)
+    res["label_band"] = label_band_table(res)[1]
     res["comparison"] = build_comparison(res)
     res["runtime_s"] = time.time() - t0
 
