@@ -16,6 +16,8 @@ The model under test is `V_k(tau) = k^2 V_theta(tau) + 2 D_k tau` with `V_theta(
 | dregon_room1 | telemetry 1001 Hz | integrated-OU (corner under the 0.5 Hz high-pass; located detrend-only) | 8.82 | 14.4 | 0.0693 | 5.6 | 0.00788 | -378933 | 0.00 |
 | dregon_room1_command (aux) | telemetry 1001 Hz | integrated-OU (corner under the 0.5 Hz high-pass; located detrend-only) | 8.01 | 2.84 | 0.352 | 22.2 | 0.00748 | -443845 | 0.00 |
 | michaels | telemetry 29 Hz | wiener | - | - | - | - | - | +736 | 0.00 |
+| dregon_bench | acoustics (12/12 supports) | integrated-OU | 1.77 | 5.48 | 0.182 | 0.599 | 0.392 | n/a | n/a |
+| michaels_fly125 | acoustics (0/4 supports) | unidentified (saturated: V_theta exceeds 0.15 rad^2 at the shortest usable lag, so the harmonic is blurred rather than a line) | - | - | - | - | - | n/a | n/a |
 
 Figure: `shaft_summary_table.png`.
 
@@ -34,6 +36,8 @@ Figures: `shaft_structure_functions.png`, `shaft_speed_psd.png`.
 
 ## What the acoustics say
 
+- **dregon_bench**: 12 of 12 supports identified. Verdict **integrated-OU**: `sigma_nu = 1.77 rad/s` (range 0.23 - 3.2), `lam = 5.48 1/s` (range 0.31 - 16.2), `D_theta = 0.599 rad^2/s`. Model votes by AIC: {'ou_free_D': 12}. The per-order diffusion `D_k` is NOT IDENTIFIED: the fitted `2 D_k tau` at the shortest lag is 1.3x the measured `V` of the same order (NOT identified: the fitted 2 D_k tau at the shortest lag exceeds the measured V of that order, so D_k is absorbing model error), and the planted control independently returns a planted `D_k prop k` as flat. Read `sigma_nu`, `lam` and `D_theta` from this instrument; do NOT read `D_k` or its `k` exponent from it.
+- **michaels_fly125**: 0 of 4 supports identified. Verdict **unidentified (saturated: V_theta exceeds 0.15 rad^2 at the shortest usable lag, so the harmonic is blurred rather than a line)**: `sigma_nu = - rad/s` (range - - -), `lam = - 1/s` (range - - -), `D_theta = - rad^2/s`. Model votes by AIC: None. The per-order diffusion `D_k` is NOT IDENTIFIED: the fitted `2 D_k tau` at the shortest lag is -x the measured `V` of the same order (None), and the planted control independently returns a planted `D_k prop k` as flat. Read `sigma_nu`, `lam` and `D_theta` from this instrument; do NOT read `D_k` or its `k` exponent from it.
 
 Figures: `shaft_acoustic_Vk.png`, `shaft_Dk_vs_k.png`.
 
@@ -117,7 +121,7 @@ The identifiable quantity is the FITTED corner, because both rival models are mu
 
 | rig | C3 sigma [rad/s] | C3 D [rad^2/s] | measured D_theta (telemetry) | measured D_theta (acoustics) | sigma at lam_ref=6 (telemetry) | sigma at lam_ref=6 (acoustics) | C3 sigma / measured |
 |---|---|---|---|---|---|---|---|
-| DREGON airframe | 3.1 | 845 | 5.6 | - | 5.8 | - | tel 0.5x / ac -x |
+| DREGON airframe | 3.1 | 845 | 5.6 | 0.599 | 5.8 | 1.9 | tel 0.5x / ac 1.6x |
 | Michael's M100 | 4.21 | 1.63 | 0.0256 | - | 0.392 | - | tel 10.7x / ac -x |
 
 ## Caveats

@@ -2094,6 +2094,33 @@ def acoustic_verdict(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if m.sum() >= 3:
             dk_slope.append(float(np.polyfit(np.log(ks[m]), np.log(dks[m]), 1)[0]))
     lam_med = float(np.median(lam)) if lam else None
+    # Is D_k a MEASUREMENT? Only if the fitted per-order diffusion alone can
+    # reproduce the smallest measured V. 2 D_k tau at the shortest lag is
+    # compared with the measured V of that order: if the fit needs a D_k whose
+    # own contribution exceeds what was measured, D_k is soaking up model
+    # error and is not identified. The planted control says the same thing
+    # from the other side - it returns a planted D_k prop k as flat.
+    dk_ratio: list[float] = []
+    for r in ok:
+        f = r["fits"].get("ou_free_D") or {}
+        src = (
+            r.get("V_k_unwrapped_rad2")
+            if r.get("primary_estimator") == "unwrapped"
+            else r.get("V_k_rad2")
+        ) or {}
+        lags = r.get("lags_s") or []
+        if not (f.get("identified") and src and lags):
+            continue
+        for k, dk in zip(f.get("orders") or [], f.get("D_k_rad2_s") or [], strict=False):
+            ser = src.get(str(int(k))) or []
+            meas = [
+                (lags[i], v)
+                for i, v in enumerate(ser)
+                if isinstance(v, (int, float)) and np.isfinite(v) and v > 0
+            ]
+            if meas and dk > 0:
+                t0, v0 = meas[0]
+                dk_ratio.append(float(2.0 * dk * t0 / v0))
     verdict = "unidentified"
     if lam_med is not None:
         verdict = "integrated-OU" if lam_med < 200.0 else "wiener"
@@ -2110,6 +2137,14 @@ def acoustic_verdict(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "D_theta_rad2_s_median": float(np.median(dth)) if dth else None,
         "D_theta_rad2_s_range": [float(np.min(dth)), float(np.max(dth))] if dth else None,
         "D_k_loglog_slope_median": float(np.median(dk_slope)) if dk_slope else None,
+        "D_k_over_measured_V_median": float(np.median(dk_ratio)) if dk_ratio else None,
+        "D_k_identified": bool(dk_ratio and float(np.median(dk_ratio)) < 1.0),
+        "D_k_note": (
+            "NOT identified: the fitted 2 D_k tau at the shortest lag exceeds the measured "
+            "V of that order, so D_k is absorbing model error"
+            if (dk_ratio and float(np.median(dk_ratio)) >= 1.0)
+            else "consistent with the measured short-lag variance"
+        ),
         "D_k_loglog_slope_range": (
             [float(np.min(dk_slope)), float(np.max(dk_slope))] if dk_slope else None
         ),
@@ -2842,10 +2877,13 @@ def write_findings(res: dict[str, Any], out_dir: Path) -> Path:
             f"(range {_f((v.get('lam_1_s_range') or [None, None])[0])} - "
             f"{_f((v.get('lam_1_s_range') or [None, None])[1])}), "
             f"`D_theta = {_f(v.get('D_theta_rad2_s_median'))} rad^2/s`. "
-            f"The per-order diffusion scales as `D_k ~ k^{_f(v.get('D_k_loglog_slope_median'), '{:.2f}')}` "
-            f"(range {_f((v.get('D_k_loglog_slope_range') or [None, None])[0], '{:.2f}')} - "
-            f"{_f((v.get('D_k_loglog_slope_range') or [None, None])[1], '{:.2f}')}). "
-            f"Model votes by AIC: {v.get('best_model_votes')}."
+            f"Model votes by AIC: {v.get('best_model_votes')}. "
+            f"The per-order diffusion `D_k` is {'IDENTIFIED' if v.get('D_k_identified') else 'NOT IDENTIFIED'}: "
+            f"the fitted `2 D_k tau` at the shortest lag is "
+            f"{_f(v.get('D_k_over_measured_V_median'), '{:.1f}')}x the measured `V` of the same "
+            f"order ({v.get('D_k_note')}), and the planted control independently returns a "
+            f"planted `D_k prop k` as flat. Read `sigma_nu`, `lam` and `D_theta` from this "
+            f"instrument; do NOT read `D_k` or its `k` exponent from it."
         )
     A("")
     A("Figures: `shaft_acoustic_Vk.png`, `shaft_Dk_vs_k.png`.")
