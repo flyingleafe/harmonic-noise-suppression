@@ -422,42 +422,56 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
     `kind: frames` in `conf/online_mix/beatvk_avq_dload.yaml` (beat-VK R2 arm).
     Labels are cruise-only (66–117 rev/s), not telemetry — pseudo-ground-truth.
 - **noise-model-v2 bench/static fit points** (1, `tdframe-v1`):
-  `noise-v2-bench-points` (78; every static/bench drone-noise recording the
-  project holds that yields ONE speed per rotor — 20 DREGON single-motor bench
-  runs at 50–90 % throttle, 7 SPCUP19 AGH single-rotor takes, 47
-  DroneAudioSet `drone-only` recordings over 4 design cells, 4 AVQ
-  constant-throttle ego-noise windows (S1 at 50 % and 100 %) — 12 distinct
-  rig/condition cells). Per Frame: the stationary part of the audio at its
-  native rate with every channel kept (≤ 30 s) + `meta.rig`, `meta.corpus`,
-  `meta.speed_rev_s` (one entry per RESOLVED rotor), `meta.speed_source`,
-  `meta.speed_tolerance` (median 0.25 rev/s, worst 0.88),
-  `label.n_rotors_resolved` / `label.multiplicity_unresolved` (51 of 78 points
-  read one rate for four coincident rotors), `meta.source_id` /
-  `source_offset_s`. Generator `noise_v2_bench`, `recipe_version` 2.
+  `noise-v2-bench-points` (135; every static/bench drone-noise recording the
+  project holds that yields one speed per rotor — 20 DREGON single-motor bench
+  runs at 50–90 % throttle + the four-motor `allMotors_70` control, 7 SPCUP19
+  AGH single-rotor takes + 7 four-rotor SPCUP19 stationary windows over 3 team
+  rigs, 2 SPCUP19 ChuMS propeller-rig runs (2 and 3 propellers), 92
+  DroneAudioSet `drone-only` recordings over 4 design cells, 6 AVQ
+  constant-throttle ego-noise windows — **18 distinct rig/condition cells**).
+  Per Frame: the stationary part of the audio at its native rate with every
+  channel kept (≤ 30 s) + `meta.rig`, `meta.corpus`, `meta.speed_rev_s` (**one
+  entry per rotor**: the resolved rates then the mean comb rate `f̄` for the
+  rotors the split could not separate), `meta.resolved_mask`,
+  `meta.speed_source`, `meta.speed_tolerance` (median 0.25 rev/s),
+  `label.n_rotors_resolved` / `label.multiplicity_unresolved` (99 of 135
+  points read `f̄` for at least one coincident rotor; 7 resolve all four),
+  `meta.source_id` / `source_offset_s`. Generator `noise_v2_bench`,
+  `recipe_version` 2.
   **The speeds are estimator output, not telemetry** — a long-window Welch
   harmonic sum with an odd-harmonic octave check
-  (`scripts/noise_v2_bench_speed.py`), accepted only where the harmonic-sum
-  peak clears the best rival comb by ≥ 3 dB (own small-rational `m/n ≤ 4`
-  family always excluded, plus the ±6 % candidate neighbourhood on a
-  multi-rotor rig, because those candidates are the rig's other rotors), the
-  two disjoint halves of the window agree to ≤ 1 rev/s, and the window is
-  ≥ 8 s. The accepted labels are the committed manifest
+  (`scripts/noise_v2_bench_speed.py`). Two gates, because a single-comb margin
+  cannot be cleared by a multi-rotor rig at all (the accepted comb of
+  `motor_allMotors_70` scores 6.43 dB where one motor on the same rig at the
+  same throttle scores 15.3–17.8 dB): a **single-rotor** recording needs a
+  ≥ 3 dB margin over the best rival comb (own `m/n ≤ 4` family excluded), a
+  **multi-rotor** recording needs LINE EVIDENCE instead — a peak 6 dB over the
+  band's local median inside `k·f̄ ± 6 %` at ≥ 3 orders of the line comb — and
+  both need the two window halves to agree to ≤ 1 rev/s and a ≥ 8 s window.
+  The margin is still stored per point but is not gated on for multi-rotor
+  rigs. Weak odd-shaft-order evidence no longer refuses a reading; it flags
+  `octave_unresolved` (37 of 148 usable readings), and the factor-2 failures it
+  admits are removed by a per-cell median check (9 readings). The accepted
+  labels are the committed manifest
   `src/data_processing/noise_v2_bench_points.json`, hashed into the spec
   (`gen.manifest`), so a re-estimation mints a new derivation identity — the
-  first pass's `@8f49bb0f77d3` (73 points, 11 cells) is superseded by
-  `@0dc685bf949a` and no longer pinned. Audio comes from the pinned
-  `DREGON-frames` / `SPCUP19-egonoise` / `AVQ` parents plus the publishers'
-  own files for the DroneAudioSet `drone-only` parquet (3.1 GiB of the 88 GiB
-  pin) and the SPCUP19 ChuMS rig archive — neither pin is key-indexed, so
-  streaming them whole to reach 168 + 9 recordings is avoided. Cross-checks,
-  corpus verdicts and the rejected list: `results/noise_v2/survey/`
-  (`survey_table.md`, `findings.md`); the DREGON throttle law is reproduced to
-  0.555 rev/s mean error, the SPCUP AGH blind readings to 0.148 rev/s on 6 of
-  7 takes, and the DroneAudioSet cell medians to ≤ 1.8 % of the paper's
-  168/235/259 Hz blade-pass lines (the `drone2 low` cell disagrees by +36.7 %).
-  The SPCUP19 static/hover and ChuMS multi-rotor rigs stay out: their comb
-  score collapses (15.3–17.8 dB with one motor against 6.4 dB with four on the
-  same DREGON rig and throttle), which no rival-exclusion rule can fix.
+  first pass's `@8f49bb0f77d3` (73 points, 11 cells) and the margin-gated
+  second pass `@0dc685bf949a` (78 points) are superseded by `@00f32a1210d6`
+  and no longer pinned. Audio comes from the pinned `DREGON-frames` /
+  `SPCUP19-egonoise` / `AVQ` parents plus the publishers' own files for the
+  DroneAudioSet `drone-only` parquet (3.1 GiB of the 88 GiB pin) and the
+  SPCUP19 ChuMS rig archive — neither pin is key-indexed, so streaming them
+  whole to reach 168 + 9 recordings is avoided. Cross-checks, corpus verdicts
+  and the rejected list: `results/noise_v2/survey/` (`survey_table.md`,
+  `findings.md`); the DREGON throttle law is reproduced to 0.555 rev/s mean
+  error (unchanged by the gate change, which leaves single-rotor mode
+  untouched), `allMotors_70` resolves four rotors at 64.65/67.66/68.74/
+  69.57 rev/s against its 68.6 rev/s law value, the SPCUP AGH blind readings
+  to 0.148 rev/s on 6 of 7 takes, and the DroneAudioSet cell medians to
+  ≤ 2.7 % of the paper's 168/235/259 Hz blade-pass lines (the `drone2 low`
+  cell disagrees by +35.7 %). The ChuMS rig is read with a 16 s window: its
+  propeller speeds drift, so the 30 s multi-rotor window smears its lines
+  (`3prop_repeat2`: no line cluster at 30 s, three propellers at 16 s).
 - **VK decompositions** (2 materialized, `tdframe-v1`; consumer
   `DecompFrameDataset`, `docs/experiments/amplitude-target-training.md`):
   `decomp-frames-v1` — the coupled Vold-Kalman decomposition of the three
