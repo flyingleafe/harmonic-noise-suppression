@@ -9,16 +9,23 @@ The estimator (per recording)
 
 1. **Stationary window.** 1 s RMS blocks; the longest run of blocks inside
    ``--level-tol-db`` of the run median is the stationary part; the window is
-   its centre, ``--window-s`` long (at least ``--min-window-s``).
+   its centre, ``--window-s`` long — ``--multi-window-s`` (30 s) on a
+   multi-rotor rig, where the rotor lines have to be separated — and at least
+   ``--min-window-s``.
 2. **Welch spectrum.** Per channel, median-averaged, ``nperseg`` chosen for a
-   target resolution of ``--target-df-hz``; the per-channel power spectra are
-   averaged (incoherent — no beamforming), then converted to dB. The broadband
-   floor is a wide running median of the dB spectrum.
+   target resolution of ``--target-df-hz``; on a multi-rotor rig the segment
+   is instead a fixed ``--multi-seg-s`` (4 s) periodic Hann, so the line width
+   is the same 0.25 Hz on every corpus and the resolvable order is a number,
+   not a guess. The per-channel power spectra are averaged (incoherent — no
+   beamforming), then converted to dB. The broadband floor is a wide running
+   median of the dB spectrum.
 3. **Harmonic-sum score.** For a shaft-rate candidate ``f`` (rev/s == Hz of
    shaft rotation) the score is the mean over harmonics ``k = 1..K`` of the
    line prominence over the floor inside a narrow band at ``k·f``, clipped to
    ``--prom-clip-db``. Candidates run over ``--lo``..``--hi`` rev/s on a coarse
-   grid, then a local parabolic refinement.
+   grid, then a local parabolic refinement. On a multi-rotor rig the argmax is
+   the MEAN comb rate ``f̄``: the four rotors sit inside a few rev/s and their
+   teeth add.
 4. **Odd-harmonic octave check.** The DREGON-style failure is a *doubling*: a
    two-bladed rotor puts most energy on the blade-pass line at ``2·f``, so the
    argmax lands there. The half ``f/2`` is accepted only when its ODD
@@ -26,26 +33,43 @@ The estimator (per recording)
    already the shaft rate) clear the floor by ``--odd-margin-db`` on at least
    ``--odd-min-frac`` of the tested orders. Verdict is reported per recording
    (``as_found`` / ``halved`` / ``halved_twice``).
-5. **Per-rotor split.** At high harmonic order the four rotor combs separate.
-   Peaks within ±``--split-frac`` of ``k·f`` are collected at several orders;
-   the order with the most resolved peaks gives the per-rotor fundamentals and
-   the spread. One peak → one speed (a single-rotor bench, or four rotors the
-   spectrum cannot separate).
+5. **Rival margin.** A rival is a candidate comb that is NOT a small-rational
+   relative of the accepted rate and — on a multi-rotor rig — NOT inside
+   ±``--neighbour-frac`` (6 %) of it. That neighbourhood is the correction of a
+   measured artefact: on a four-rotor rig the OTHER rotors sit 1-3 rev/s from
+   the mean comb rate (1.4-4.3 % at 70 rev/s), so the literal rule scored one
+   rotor of the rig against another and refused every four-rotor static rig by
+   construction (``motor_allMotors_70`` reads a 1.41 dB margin on the same rig
+   and throttle that gives 7.5-8.2 dB with one motor running).
+6. **Per-rotor split (multi-rotor rigs).** The rotors separate at high harmonic
+   order, where their line spacing ``k·Δf`` exceeds the spectral resolution.
+   Orders from ``k_min = ceil(2·(4/T)/Δf_min)`` (``Δf_min`` =
+   ``--split-min-sep``, 0.3 rev/s; ``4/T`` is the periodic-Hann main-lobe
+   width, 1 Hz at ``T`` = 4 s) up to the 3 kHz cap are searched: inside
+   ``k·f̄ ± 6 %`` up to ``--split-max-peaks`` (4) peaks ``--split-peak-db``
+   (6 dB) above the LOCAL MEDIAN are converted to rates ``peak/k``, and rates
+   that cluster to within ``--split-cluster-tol`` (0.3 rev/s) across at least
+   ``--split-min-orders`` (3) CONSECUTIVE usable orders are the resolved rotor
+   rates ``f_i``. Fewer resolved rates than rotors is reported as
+   ``multiplicity_unresolved`` — rotors coincident to within 0.3 rev/s, not a
+   failed reading.
 
 **Tolerance rule (applied, not only stated).** A recording is ``usable`` when
 
-* the harmonic-sum peak clears the best candidate OUTSIDE its own octave family
-  (``f/2``, ``f``, ``2·f``) by ``--min-margin-db`` (default 3 dB), and
-* the reading is stable to ``--max-half-delta`` (default 1 rev/s) between two
-  disjoint halves of the window, and
+* the harmonic-sum peak clears the best rival comb (own family excluded, and
+  the ±6 % neighbourhood excluded on a multi-rotor rig) by ``--min-margin-db``
+  (default 3 dB), and
+* the mean comb rate is stable to ``--max-half-delta`` (default 1 rev/s)
+  between two disjoint halves of the window, and
 * the window is at least ``--min-window-s`` long (default 8 s).
 
 The reported tolerance is ``max(half_delta, 0.5·df_rev_s, 0.25)`` rev/s.
 
 Cross-checks written into the output: the DREGON throttle law
 (``rate = 0.975·throttle + 0.37`` rev/s), the SPCUP19 AGH single-rotor blind
-readings, the KAIST stated 3010 RPM, and the DroneAudioSet paper's stated
-spectral lines (168/235 Hz for D_large, 156/259 Hz for D_small).
+readings, the KAIST stated 3010 RPM, the DroneAudioSet paper's stated spectral
+lines (168/235 Hz for D_large, 156/259 Hz for D_small) and the AVQ
+constant-throttle ego-noise sequences (spec-table settings 50/100/150 %).
 
 Run (laptop smoke, then the corpus-wide pass on uni-cpu):
 
@@ -60,6 +84,7 @@ import json
 import math
 import re
 import sys
+import traceback
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -100,6 +125,20 @@ DASET_PAPER_LINE_HZ = {
     ("D_small", "high"): 259.0,
 }
 
+#: AVQ constant-throttle EGO-NOISE-ONLY sequences and their throttle setting,
+#: from the dataset spec table (webspace.eecs.qmul.ac.uk/lin.wang/demo/avq.html,
+#: columns Type = EO and Drone = "constant (X%)"): the only AVQ recordings that
+#: are bench-class. ``S2_seq2`` is EO but DYNAMIC throttle, and ``S2_seq5``/
+#: ``S2_seq6`` are constant 100 % but speech+ego-noise MIXTURES, so none of the
+#: three is a fit-point candidate. Durations are the table's, for the read-back
+#: check.
+AVQ_CONSTANT_EGONOISE = {
+    "S1_seq1": {"throttle": 50.0, "table_duration_s": 120.0},
+    "S1_seq2": {"throttle": 100.0, "table_duration_s": 120.0},
+    "S1_seq3": {"throttle": 150.0, "table_duration_s": 40.0},
+    "S2_seq1": {"throttle": 100.0, "table_duration_s": 210.0},
+}
+
 #: Rotor counts per corpus/condition family.
 N_ROTORS = {
     "dregon_bench_single": 1,
@@ -111,6 +150,7 @@ N_ROTORS = {
     "drone_audio": 4,
     "zenodo": 4,
     "chums_bench": 1,
+    "avq_bench": 4,
 }
 
 
@@ -140,10 +180,30 @@ class Config:
     odd_orders: tuple[int, ...] = (1, 3, 5, 7, 9, 11)
     min_margin_db: float = 3.0
     max_half_delta: float = 1.0
-    split_frac: float = 0.05
-    split_orders: tuple[int, ...] = (8, 12, 16, 20, 24, 28, 32)
-    split_prom_db: float = 6.0
     max_channels: int = 8
+    # ── multi-rotor mode (any rig with more than one rotor running) ──────────
+    #: Window length on a multi-rotor rig: the rotor lines are 1-3 rev/s apart,
+    #: so the reading needs both a long window and a fixed line width.
+    multi_window_s: float = 30.0
+    #: Welch segment on a multi-rotor rig (periodic Hann): df = 0.25 Hz.
+    multi_seg_s: float = 4.0
+    #: Half-width of the candidate NEIGHBOURHOOD excluded from the rival set on
+    #: a multi-rotor rig: a rotor 1-3 rev/s from the mean comb rate is 1.4-4.3 %
+    #: away at 70 rev/s, i.e. inside this band, and is not a rival comb.
+    neighbour_frac: float = 0.06
+    #: Smallest rotor-to-rotor difference the split is asked to resolve.
+    split_min_sep_rev_s: float = 0.3
+    #: Half-width of the band searched around ``k*f_bar`` for the rotor lines.
+    split_frac: float = 0.06
+    #: Lobes of the periodic-Hann main lobe (4/T) two lines must be apart before
+    #: an order is usable for the split.
+    split_lobes: float = 2.0
+    split_max_peaks: int = 4
+    #: Peak height over the LOCAL MEDIAN of the band.
+    split_peak_db: float = 6.0
+    #: Consecutive usable orders a rate cluster must appear in.
+    split_min_orders: int = 3
+    split_cluster_tol: float = 0.3
 
 
 # ── Spectrum primitives ──────────────────────────────────────────────────────
@@ -165,8 +225,17 @@ def _floor_median(y: np.ndarray, half: int, stride: int = 8) -> np.ndarray:
     return np.interp(np.arange(y.size), idx, sub)
 
 
-def welch_db(x_ct: np.ndarray, fs: int, cfg: Config) -> tuple[np.ndarray, np.ndarray, float]:
-    """``(freqs, power_db, df)`` — channel-averaged median Welch spectrum in dB."""
+def welch_db(
+    x_ct: np.ndarray, fs: int, cfg: Config, seg_s: float | None = None
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """``(freqs, power_db, df)`` — channel-averaged median Welch spectrum in dB.
+
+    ``seg_s`` fixes the segment length in seconds (multi-rotor mode: a 4 s
+    periodic Hann, df = 0.25 Hz, so the resolvable harmonic order is the same
+    number on every corpus); otherwise the segment is the largest power of two
+    that meets ``--target-df-hz`` without dropping below
+    ``min_welch_segments`` half-overlapped segments.
+    """
     from scipy.signal import welch
 
     x = np.asarray(x_ct, dtype=np.float64)
@@ -174,11 +243,15 @@ def welch_db(x_ct: np.ndarray, fs: int, cfg: Config) -> tuple[np.ndarray, np.nda
         x = x[None, :]
     x = x[: cfg.max_channels]
     n = x.shape[-1]
-    # Resolution target, but never fewer than `min_welch_segments` half-overlapped
-    # segments: a 6 s half-window must still average, or a single noisy bin wins.
-    nper = int(2 ** math.ceil(math.log2(max(64.0, fs / cfg.target_df_hz))))
-    nper = min(nper, int(2 ** math.floor(math.log2(max(256, 2 * n // cfg.min_welch_segments)))))
-    nper = min(nper, n)
+    if seg_s is not None:
+        nper = min(n, max(256, int(round(seg_s * fs))))
+    else:
+        # Resolution target, but never fewer than `min_welch_segments`
+        # half-overlapped segments: a 6 s half-window must still average, or a
+        # single noisy bin wins.
+        nper = int(2 ** math.ceil(math.log2(max(64.0, fs / cfg.target_df_hz))))
+        nper = min(nper, int(2 ** math.floor(math.log2(max(256, 2 * n // cfg.min_welch_segments)))))
+        nper = min(nper, n)
     f, p = welch(
         x,
         fs=fs,
@@ -245,8 +318,8 @@ class Spectrum:
         return (float(seg[j]), float(self.f[lo + j]))
 
 
-def make_spectrum(x_ct: np.ndarray, fs: int, cfg: Config) -> Spectrum:
-    f, p_db, df = welch_db(x_ct, fs, cfg)
+def make_spectrum(x_ct: np.ndarray, fs: int, cfg: Config, seg_s: float | None = None) -> Spectrum:
+    f, p_db, df = welch_db(x_ct, fs, cfg, seg_s=seg_s)
     return Spectrum(f=f, p_db=p_db, floor=_floor_db(p_db, df, cfg), df=df, fs=fs)
 
 
@@ -322,6 +395,24 @@ def _in_family(f: float, ref: float, ratios: tuple[float, ...], tol: float = 0.0
     return any(abs(f / (r * ref) - 1.0) <= tol for r in ratios)
 
 
+def _is_rival(f: float, refs: tuple[float, ...], neighbour_frac: float) -> bool:
+    """Is candidate ``f`` a genuine RIVAL comb of the accepted rates ``refs``?
+
+    Two exclusions. A small-rational relative ``m/n · ref`` is the same comb
+    read every n-th tooth, not a rival. And within ``neighbour_frac`` of a
+    ``ref`` sits a NEIGHBOURING ROTOR of the same rig (1-3 rev/s from the mean
+    comb rate on a four-rotor rig, i.e. 1.4-4.3 % at 70 rev/s): scoring one
+    rotor of the rig against another refuses every multi-rotor rig by
+    construction, which is what the first survey pass did.
+    """
+    for ref in refs:
+        if _in_family(f, ref, _FAMILY_RATIOS):
+            return False
+        if neighbour_frac > 0.0 and abs(f / max(ref, 1e-9) - 1.0) <= neighbour_frac:
+            return False
+    return True
+
+
 def odd_margin(half: float, sp: Spectrum, cfg: Config) -> tuple[float, float, list[float]]:
     """Evidence that ``half`` (not ``2·half``) is the shaft rate.
 
@@ -341,7 +432,7 @@ def odd_margin(half: float, sp: Spectrum, cfg: Config) -> tuple[float, float, li
     return (float(np.median(arr)), float(np.mean(arr >= cfg.odd_margin_db)), proms)
 
 
-def shaft_rate(sp: Spectrum, cfg: Config) -> dict[str, Any]:
+def shaft_rate(sp: Spectrum, cfg: Config, neighbour_frac: float = 0.0) -> dict[str, Any]:
     """Shaft rate of a stationary spectrum, with the octave decision.
 
     Three quantities, because a two-bladed rotor puts most of its energy on the
@@ -359,13 +450,21 @@ def shaft_rate(sp: Spectrum, cfg: Config) -> dict[str, Any]:
       — for the accepted rate and for every rival alike. Without this the
       margin of a blade-pass-dominated rig is diluted by its own missing odd
       teeth (DroneAudioSet: 7.4 dB at the shaft rate against 12.0 dB at the
-      blade-pass line of the same rotor).
+      blade-pass line of the same rotor). ``neighbour_frac`` > 0 (multi-rotor
+      mode) additionally drops every candidate inside ±that fraction of the
+      accepted rate from the rival set: those candidates are the rig's OTHER
+      rotors, whose teeth the accepted comb shares.
     """
     grid = np.arange(cfg.lo, cfg.hi + 1e-9, cfg.coarse_step)
     vals = score_many(grid, sp, cfg)
     fam = np.maximum(vals, score_many(2.0 * grid, sp, cfg))
     f_det, s_det = _refine(float(grid[int(np.argmax(vals))]), sp, cfg)
-    s_fam = max(s_det, score(2.0 * f_det, sp, cfg))
+    s_double = score(2.0 * f_det, sp, cfg)
+    s_fam = max(s_det, s_double)
+    # The comb the LINES actually sit on. A two-bladed rotor radiates on the
+    # blade-pass line, so the shaft-rate comb has teeth at even orders only and
+    # a "line at every order" test (the per-rotor split) has to run on 2*f.
+    f_line = 2.0 * f_det if s_double > s_det else f_det
 
     verdict, halvings = "as_found", 0
     f_final = f_det
@@ -393,23 +492,28 @@ def shaft_rate(sp: Spectrum, cfg: Config) -> dict[str, Any]:
     s_final = score(f_final, sp, cfg)
 
     # Runner-up: the strongest comb-family score that is NOT a small-rational
-    # relative of the detected rate (nor of the mapped shaft rate). The
-    # octave-only exclusion of the written rule is reported alongside — on a
-    # clean two-bladed bench the literal version's runner-up is the third
-    # sub/super-harmonic, the same comb read every third tooth, not a rival.
+    # relative of the detected rate (nor of the mapped shaft rate) and not
+    # inside the excluded neighbourhood. The octave-only exclusion of the
+    # written rule is reported alongside — on a clean two-bladed bench the
+    # literal version's runner-up is the third sub/super-harmonic, the same
+    # comb read every third tooth, not a rival.
     maxima = _local_maxima(fam)
     runner_f, runner_v = float("nan"), -99.0
     oct_f, oct_v = float("nan"), -99.0
+    fam_f, fam_v = float("nan"), -99.0
     refs = (f_det, f_final)
     for idx in maxima:
         f_c = float(grid[idx])
         v_c = float(fam[idx])
         if not any(_in_family(f_c, r, _OCTAVE_RATIOS) for r in refs) and v_c > oct_v:
             oct_f, oct_v = f_c, v_c
-        if not any(_in_family(f_c, r, _FAMILY_RATIOS) for r in refs) and v_c > runner_v:
+        if _is_rival(f_c, refs, 0.0) and v_c > fam_v:
+            fam_f, fam_v = f_c, v_c
+        if _is_rival(f_c, refs, neighbour_frac) and v_c > runner_v:
             runner_f, runner_v = f_c, v_c
     margin = s_fam - runner_v if runner_v > -99.0 else float("inf")
     margin_oct = s_fam - oct_v if oct_v > -99.0 else float("inf")
+    margin_fam = s_fam - fam_v if fam_v > -99.0 else float("inf")
 
     return {
         "rate_rev_s": f_final,
@@ -417,6 +521,7 @@ def shaft_rate(sp: Spectrum, cfg: Config) -> dict[str, Any]:
         "detected_rev_s": f_det,
         "detected_score_db": s_det,
         "family_score_db": s_fam,
+        "line_comb_rev_s": f_line,
         "halvings": halvings,
         "octave_verdict": verdict,
         "octave_trace": trace,
@@ -425,48 +530,160 @@ def shaft_rate(sp: Spectrum, cfg: Config) -> dict[str, Any]:
         "margin_db": margin,
         "octave_only_runner_up_rev_s": oct_f,
         "margin_octave_only_db": margin_oct,
+        "rival_neighbour_frac": neighbour_frac,
+        "family_only_runner_up_rev_s": fam_f,
+        "margin_family_only_db": margin_fam,
     }
 
 
-def per_rotor(sp: Spectrum, f0: float, n_rotors: int, cfg: Config) -> dict[str, Any]:
-    """Per-rotor fundamentals from line splitting at high harmonic order."""
-    best: dict[str, Any] = {"n_distinct": 1, "order": None, "speeds": [f0], "spread_rev_s": 0.0}
-    for k in cfg.split_orders:
-        centre = k * f0
-        if centre > min(cfg.f_max_hz, 0.45 * sp.fs):
-            break
-        half = cfg.split_frac * centre
-        lo = int(max(0, math.floor((centre - half) / sp.df)))
-        hi = int(min(sp.prom.size - 1, math.ceil((centre + half) / sp.df)))
-        if hi - lo < 8:
-            continue
-        seg = sp.prom[lo : hi + 1]
-        idx = _local_maxima(seg)
-        idx = idx[seg[idx] >= cfg.split_prom_db]
-        if idx.size == 0:
-            continue
-        # keep the n_rotors strongest, merge peaks closer than 0.15 rev/s at k
-        cand = sorted((float(sp.f[lo + i]) / k, float(seg[i])) for i in idx)
-        merged: list[tuple[float, float]] = []
-        for f_c, v in cand:
-            if merged and abs(f_c - merged[-1][0]) < 0.15:
-                if v > merged[-1][1]:
-                    merged[-1] = (f_c, v)
-                continue
-            merged.append((f_c, v))
-        merged.sort(key=lambda t: -t[1])
-        keep = sorted(f for f, _ in merged[:n_rotors])
-        if len(keep) > best["n_distinct"]:
-            best = {
-                "n_distinct": len(keep),
-                "order": k,
-                "speeds": [round(f, 4) for f in keep],
-                "spread_rev_s": round(max(keep) - min(keep), 4),
-            }
+def _max_consecutive(positions: set[int]) -> int:
+    """Longest run of consecutive integers in ``positions``."""
+    best = run = 0
+    prev: int | None = None
+    for i in sorted(positions):
+        run = run + 1 if prev is not None and i == prev + 1 else 1
+        best = max(best, run)
+        prev = i
     return best
 
 
-def _stationary_window(x_ct: np.ndarray, fs: int, cfg: Config) -> tuple[int, int, float]:
+def split_min_order(sp: Spectrum, scale: float, cfg: Config) -> int:
+    """First harmonic order of the DETECTED comb at which two rotors
+    ``--split-min-sep`` apart in shaft rate are two lines, not one.
+
+    A periodic Hann main lobe is 4 bins wide (1 Hz at T = 4 s). Two rotors
+    ``d`` rev/s apart in shaft rate are ``d/scale`` Hz apart per order of the
+    detected comb (``scale`` = shaft rate / detected rate, so 0.5 when the
+    detected comb is the blade-pass line), hence the first usable order is
+    ``ceil(lobes · 4 · df · scale / d)`` — order 7 on an ``as_found`` comb and
+    order 4 of the blade-pass comb (shaft order 8) on a halved one, at
+    T = 4 s and d = 0.3 rev/s.
+    """
+    need_hz = cfg.split_lobes * 4.0 * sp.df
+    sep_hz_per_order = cfg.split_min_sep_rev_s / max(scale, 1e-9)
+    return max(1, int(math.ceil(need_hz / max(sep_hz_per_order, 1e-9))))
+
+
+def resolve_rotors(
+    sp: Spectrum, comb_rev_s: float, scale: float, n_rotors: int, cfg: Config
+) -> dict[str, Any]:
+    """Per-rotor shaft rates from line splitting at high harmonic order.
+
+    The rotors of one rig sit within a few rev/s of each other, so their lines
+    coincide at low order and separate at high order. For every order from
+    :func:`split_min_order` up to the 3 kHz cap, the band ``k·comb ± --split-frac``
+    is searched for up to ``--split-max-peaks`` peaks ``--split-peak-db`` above
+    the band's LOCAL MEDIAN; each peak is one rotor candidate at ``peak/k``
+    (times ``scale``). A rate is a RESOLVED ROTOR only when it repeats: rates
+    within ``--split-cluster-tol`` of each other across at least
+    ``--split-min-orders`` CONSECUTIVE usable orders. Noise peaks do not
+    survive that, and neither does a sideband that only exists at one order.
+
+    Fewer resolved rates than rotors means the rotors are coincident to within
+    the tolerance, not that the reading failed.
+    """
+    f_top = min(cfg.f_max_hz, 0.45 * sp.fs)
+    k_min = split_min_order(sp, scale, cfg)
+    k_top = int(math.floor(f_top / max(comb_rev_s, 1e-9)))
+    orders: list[int] = []
+    bands: dict[int, dict[str, Any]] = {}
+    found: list[tuple[float, int]] = []  # (shaft rate rev/s, order)
+    for k in range(k_min, k_top + 1):
+        centre = k * comb_rev_s
+        half = cfg.split_frac * centre
+        lo = int(max(0, math.floor((centre - half) / sp.df)))
+        hi = int(min(sp.p_db.size - 1, math.ceil((centre + half) / sp.df)))
+        if hi - lo < 8:
+            continue
+        orders.append(k)
+        band = sp.p_db[lo : hi + 1]
+        med = float(np.median(band))
+        idx = _local_maxima(band)
+        idx = idx[band[idx] >= med + cfg.split_peak_db]
+        peaks = sorted(
+            ((float(band[i] - med), float(sp.f[lo + i])) for i in idx), key=lambda t: -t[0]
+        )[: cfg.split_max_peaks]
+        bands[k] = {
+            "order": k,
+            "f_hz": np.ascontiguousarray(sp.f[lo : hi + 1]),
+            "p_db": np.ascontiguousarray(band),
+            "median_db": med,
+            "peak_hz": [hz for _, hz in peaks],
+        }
+        found += [(hz / k * scale, k) for _, hz in peaks]
+
+    # Cluster the rates by SUPPORT, not by chaining: the most-supported rate
+    # seeds a cluster, everything inside the tolerance joins it, and the rest
+    # is re-seeded. Single-linkage would merge a 3 rev/s four-rotor spread into
+    # one cluster, and fixed bins would split one rotor across a bin edge.
+    pos = {k: i for i, k in enumerate(orders)}
+    pool = sorted(found)
+    clusters: list[dict[str, Any]] = []
+    while pool:
+        seed = max(
+            pool,
+            key=lambda rk: (
+                len({k for r, k in pool if abs(r - rk[0]) <= cfg.split_cluster_tol}),
+                -rk[0],
+            ),
+        )[0]
+        near = [rk for rk in pool if abs(rk[0] - seed) <= cfg.split_cluster_tol]
+        centre = float(np.median([r for r, _ in near]))
+        near = [rk for rk in pool if abs(rk[0] - centre) <= cfg.split_cluster_tol]
+        clusters.append(
+            {
+                "rate": centre,
+                "rates": [r for r, _ in near],
+                "orders": {k for _, k in near},
+            }
+        )
+        pool = [rk for rk in pool if abs(rk[0] - centre) > cfg.split_cluster_tol]
+    kept = [
+        c
+        for c in clusters
+        if _max_consecutive({pos[k] for k in c["orders"]}) >= cfg.split_min_orders
+    ]
+    kept.sort(key=lambda c: (-_max_consecutive({pos[k] for k in c["orders"]}), -len(c["orders"])))
+    kept = kept[:n_rotors]
+    kept.sort(key=lambda c: c["rate"])
+    speeds = [float(c["rate"]) for c in kept]
+
+    # Figure example: the lowest order that carries one peak per resolved rotor
+    # (the cleanest illustration of the split), else the order with most peaks.
+    example: dict[str, Any] | None = None
+    if bands:
+        want = max(1, len(speeds))
+        ranked = sorted(
+            bands.values(),
+            key=lambda b: (abs(len(b["peak_hz"]) - want), b["order"]),
+        )
+        best = ranked[0]
+        example = {
+            "order": int(best["order"]),
+            "comb_rev_s": round(float(comb_rev_s), 4),
+            "scale": round(float(scale), 4),
+            "f_hz": [round(v, 3) for v in best["f_hz"].tolist()],
+            "p_db": [round(v, 2) for v in best["p_db"].tolist()],
+            "median_db": round(float(best["median_db"]), 2),
+            "threshold_db": round(float(best["median_db"] + cfg.split_peak_db), 2),
+            "peak_hz": [round(v, 3) for v in best["peak_hz"]],
+        }
+    return {
+        "speeds": [round(v, 4) for v in speeds] if speeds else [],
+        "n_resolved": len(speeds),
+        "spread_rev_s": round(max(speeds) - min(speeds), 4) if speeds else 0.0,
+        "order_min": k_min,
+        "order_max": orders[-1] if orders else None,
+        "n_orders_used": len(orders),
+        "split_comb_rev_s": round(float(comb_rev_s), 4),
+        "order_support": [sorted(c["orders"]) for c in kept],
+        "example": example,
+    }
+
+
+def _stationary_window(
+    x_ct: np.ndarray, fs: int, cfg: Config, window_s: float
+) -> tuple[int, int, float]:
     """``(start, stop, active_s)`` — the stationary, motor-ON part of a recording.
 
     Blocks more than ``--active-range-db`` below the loudest block are the
@@ -474,13 +691,13 @@ def _stationary_window(x_ct: np.ndarray, fs: int, cfg: Config) -> tuple[int, int
     file, and the silent tail carries a fixed 88 rev/s room tone that the
     harmonic sum will happily lock onto). The window is the longest run of
     ACTIVE blocks within ``--level-tol-db`` of the active median, truncated to
-    ``--window-s`` around its centre; a shorter run yields a shorter window,
+    ``window_s`` around its centre; a shorter run yields a shorter window,
     which the ``--min-window-s`` gate then judges.
     """
     n = x_ct.shape[-1]
     blk = fs
     nb = n // blk
-    want = int(round(cfg.window_s * fs))
+    want = int(round(window_s * fs))
     if nb < 2:
         return 0, n, n / fs
     mono = x_ct[0] if x_ct.ndim == 2 else x_ct
@@ -520,25 +737,46 @@ def _stationary_window(x_ct: np.ndarray, fs: int, cfg: Config) -> tuple[int, int
 
 
 def estimate(x_ct: np.ndarray, fs: int, n_rotors: int, cfg: Config) -> dict[str, Any]:
-    """The full reading of one recording."""
+    """The full reading of one recording.
+
+    ``n_rotors > 1`` selects MULTI-ROTOR MODE: a 30 s window, a fixed 4 s
+    periodic-Hann Welch segment (df = 0.25 Hz), the ±6 % neighbourhood of the
+    candidate dropped from the rival set, and the per-rotor line split. A
+    single-rotor rig keeps the 16 s window, the resolution-target segment and
+    the literal family-only rival rule: it has no neighbouring rotor to
+    mistake for a rival and nothing to split.
+    """
     x = np.asarray(x_ct, dtype=np.float32)
     if x.ndim == 1:
         x = x[None, :]
     n_total = x.shape[-1]
-    start, stop, active_s = _stationary_window(x, fs, cfg)
+    multi = n_rotors > 1
+    seg_s = cfg.multi_seg_s if multi else None
+    neighbour = cfg.neighbour_frac if multi else 0.0
+    start, stop, active_s = _stationary_window(
+        x, fs, cfg, cfg.multi_window_s if multi else cfg.window_s
+    )
     seg = x[:, start:stop]
     win_s = seg.shape[-1] / fs
-    sp = make_spectrum(seg, fs, cfg)
-    main = shaft_rate(sp, cfg)
-    # Splitting is read on the DETECTED comb (where the line energy is) and
-    # scaled back to shaft rev/s by the same factor the octave mapping applied.
-    scale = main["rate_rev_s"] / max(main["detected_rev_s"], 1e-9)
-    rotor = per_rotor(sp, main["detected_rev_s"], n_rotors, cfg)
-    rotor = {
-        **rotor,
-        "speeds": [round(f * scale, 4) for f in rotor["speeds"]],
-        "spread_rev_s": round(rotor["spread_rev_s"] * scale, 4),
+    sp = make_spectrum(seg, fs, cfg, seg_s=seg_s)
+    main = shaft_rate(sp, cfg, neighbour_frac=neighbour)
+    # Splitting is read on the LINE comb — the comb that has a tooth at every
+    # order, which on a two-bladed rotor is the blade-pass line, not the shaft
+    # rate — and scaled back to shaft rev/s.
+    scale = main["rate_rev_s"] / max(main["line_comb_rev_s"], 1e-9)
+    rotor: dict[str, Any] = {
+        "speeds": [],
+        "n_resolved": 1,
+        "spread_rev_s": 0.0,
+        "order_min": None,
+        "order_max": None,
+        "n_orders_used": 0,
+        "split_comb_rev_s": None,
+        "order_support": [],
+        "example": None,
     }
+    if multi:
+        rotor = resolve_rotors(sp, main["line_comb_rev_s"], scale, n_rotors, cfg)
 
     # Two disjoint halves of the same window. A half is half as long, so its
     # odd-harmonic evidence is weaker and its own argmax may land on the
@@ -550,8 +788,8 @@ def estimate(x_ct: np.ndarray, fs: int, n_rotors: int, cfg: Config) -> dict[str,
     halves: list[float] = []
     if half_n / fs >= cfg.min_window_s / 2.0:
         for a, b in ((0, half_n), (half_n, 2 * half_n)):
-            sp_h = make_spectrum(seg[:, a:b], fs, cfg)
-            halves.append(float(shaft_rate(sp_h, cfg)["rate_rev_s"]))
+            sp_h = make_spectrum(seg[:, a:b], fs, cfg, seg_s=seg_s)
+            halves.append(float(shaft_rate(sp_h, cfg, neighbour_frac=neighbour)["rate_rev_s"]))
     folded = list(halves)
     half_fold = False
     if len(folded) == 2:
@@ -590,13 +828,30 @@ def estimate(x_ct: np.ndarray, fs: int, n_rotors: int, cfg: Config) -> dict[str,
             f"mapped shaft rate {main['rate_rev_s']:.2f} rev/s outside {cfg.lo:g}-{cfg.hi:g}"
         )
 
-    speeds = rotor["speeds"] if rotor["n_distinct"] > 1 else [round(main["rate_rev_s"], 4)]
+    # One resolved line means the rotors are coincident inside the tolerance:
+    # publish the harmonic-sum mean comb rate f_bar (40 orders of evidence)
+    # rather than the single cluster's median (a handful of peaks).
+    n_res = max(1, int(rotor["n_resolved"]))
+    speeds = (
+        [round(float(v), 4) for v in rotor["speeds"]]
+        if n_res >= 2
+        else [round(float(main["rate_rev_s"]), 4)]
+    )
     return {
         "speed_rev_s": speeds,
         "rate_rev_s": round(float(main["rate_rev_s"]), 4),
-        "n_distinct": rotor["n_distinct"],
+        "n_resolved": n_res,
+        "multiplicity_unresolved": bool(n_res < int(n_rotors)),
+        "n_rotors_expected": int(n_rotors),
+        "mode": "multi_rotor" if multi else "single_rotor",
         "spread_rev_s": rotor["spread_rev_s"],
-        "spread_order": rotor["order"],
+        "split_order_min": rotor["order_min"],
+        "split_order_max": rotor["order_max"],
+        "split_orders_used": rotor["n_orders_used"],
+        "split_comb_rev_s": rotor["split_comb_rev_s"],
+        "split_order_support": rotor["order_support"],
+        "split_example": rotor["example"],
+        "rival_neighbour_frac": neighbour,
         "octave_verdict": main["octave_verdict"],
         "octave_trace": main["octave_trace"],
         "detected_rev_s": round(float(main["detected_rev_s"]), 4),
@@ -605,6 +860,10 @@ def estimate(x_ct: np.ndarray, fs: int, n_rotors: int, cfg: Config) -> dict[str,
         "runner_up_rev_s": None
         if math.isnan(main["runner_up_rev_s"])
         else round(float(main["runner_up_rev_s"]), 3),
+        "margin_family_only_db": round(float(main["margin_family_only_db"]), 3),
+        "family_only_runner_up_rev_s": None
+        if math.isnan(main["family_only_runner_up_rev_s"])
+        else round(float(main["family_only_runner_up_rev_s"]), 3),
         "score_db": round(float(main["score_db"]), 3),
         "margin_octave_only_db": round(float(main["margin_octave_only_db"]), 3),
         "octave_only_runner_up_rev_s": None
@@ -741,6 +1000,58 @@ def read_kaist(limit: int | None) -> Iterator[tuple[dict, np.ndarray, int]]:
         )
         if limit and seen >= limit:
             return
+
+
+def read_avq(
+    limit: int | None, dataset: str = "AVQ", window_s: float = 30.0
+) -> Iterator[tuple[dict, np.ndarray, int]]:
+    """AVQ CONSTANT-throttle ego-noise-only sequences, cut into ``window_s`` blocks.
+
+    The first survey pass refused AVQ as "free flight" without reading the
+    spec table. Four of its twelve sequences are ego-noise-only recordings at a
+    CONSTANT throttle setting (:data:`AVQ_CONSTANT_EGONOISE`): the drone hangs
+    on its tether/stand with no source playing, which is bench class. They are
+    long (40-210 s), so each is cut into consecutive ``window_s`` blocks and
+    read independently — one reading per block, which also measures how stable
+    a "constant" setting is over three minutes.
+
+    Audio comes from ``dload:AVQ`` (8 ch, 44.1 kHz). ``AVQ-egonoise`` holds the
+    same sequences but channel 0 only at 16 kHz.
+    """
+    seen = 0
+    for frame in _frames(dataset):
+        rid = str(_mpath(frame, "recording_id", ""))
+        spec = AVQ_CONSTANT_EGONOISE.get(rid)
+        if spec is None:
+            continue
+        audio, fs = _frame_audio(frame)
+        block = int(round(window_s * fs))
+        n_blocks = max(1, audio.shape[-1] // block)
+        for w in range(n_blocks):
+            a = w * block
+            b = min(audio.shape[-1], a + block)
+            yield (
+                {
+                    "corpus": "AVQ",
+                    "id": f"{rid}_w{w}",
+                    "rig": "avq_quadrotor",
+                    "rig_model": "quadrotor (AVQ, QMUL)",
+                    "condition": f"tethered constant throttle {spec['throttle']:g}%, "
+                    "ego-noise only",
+                    "throttle": float(spec["throttle"]),
+                    "sequence": rid,
+                    "window_index": w,
+                    "offset_s": round(a / fs, 3),
+                    "table_duration_s": spec["table_duration_s"],
+                    "n_rotors": N_ROTORS["avq_bench"],
+                    "family": "avq_bench",
+                },
+                np.ascontiguousarray(audio[:, a:b]),
+                fs,
+            )
+            seen += 1
+            if limit and seen >= limit:
+                return
 
 
 def daset_cells(paths: list[str]) -> dict[str, dict[str, str]]:
@@ -938,6 +1249,7 @@ READERS = {
     "zenodo": lambda a: read_zenodo(a.limit, a.zenodo_dir),
     "kaist": lambda a: read_kaist(a.limit),
     "chums": lambda a: read_chums(a.limit, a.chums_mat),
+    "avq": lambda a: read_avq(a.limit, a.avq_dataset, a.multi_window_s),
 }
 
 
@@ -1026,12 +1338,87 @@ def cross_checks(rows: list[dict]) -> dict[str, Any]:
             k: {
                 "n": len(v),
                 "mean_rev_s": round(float(np.mean(v)), 3),
+                "median_rev_s": round(float(np.median(v)), 3),
                 "std_rev_s": round(float(np.std(v)), 3),
-                "blade_pass_hz": round(2.0 * float(np.mean(v)), 2),
+                "blade_pass_hz": round(2.0 * float(np.median(v)), 2),
             }
             for k, v in sorted(cells.items())
         }
         out["daset_paper_lines_hz"] = {f"{k[0]}|{k[1]}": v for k, v in DASET_PAPER_LINE_HZ.items()}
+
+    avq = [r for r in rows if r["family"] == "avq_bench"]
+    if avq:
+        by_seq: dict[str, list[dict]] = {}
+        for r in avq:
+            by_seq.setdefault(str(r["sequence"]), []).append(r)
+        out["avq_constant_egonoise"] = {
+            "spec_table": {k: v["throttle"] for k, v in AVQ_CONSTANT_EGONOISE.items()},
+            "per_sequence": {
+                seq: {
+                    "throttle_pct": rs[0]["throttle"],
+                    "n_windows": len(rs),
+                    "n_usable": sum(1 for r in rs if r["usable"]),
+                    "mean_rev_s": round(float(np.mean([r["rate_rev_s"] for r in rs])), 3),
+                    "window_spread_rev_s": round(
+                        float(np.max([r["rate_rev_s"] for r in rs]))
+                        - float(np.min([r["rate_rev_s"] for r in rs])),
+                        3,
+                    ),
+                    "n_resolved": [r["n_resolved"] for r in rs],
+                    "margin_db": [r["margin_db"] for r in rs],
+                }
+                for seq, rs in sorted(by_seq.items())
+            },
+        }
+
+    multi = [r for r in rows if r.get("mode") == "multi_rotor"]
+    if multi:
+        fams: dict[str, list[dict]] = {}
+        for r in multi:
+            fams.setdefault(str(r["family"]), []).append(r)
+        out["multi_rotor_mode"] = {
+            "n_recordings": len(multi),
+            "neighbour_frac": multi[0]["rival_neighbour_frac"],
+            "per_family": {
+                fam: {
+                    "n": len(rs),
+                    "n_usable": sum(1 for r in rs if r["usable"]),
+                    "n_usable_family_only_rule": sum(
+                        1
+                        for r in rs
+                        if r["margin_family_only_db"] >= 3.0
+                        and (r["half_delta_rev_s"] or 99.0) <= 1.0
+                        and r["window_s"] >= 8.0
+                    ),
+                    "median_margin_db": round(float(np.median([r["margin_db"] for r in rs])), 3),
+                    "median_margin_family_only_db": round(
+                        float(np.median([r["margin_family_only_db"] for r in rs])), 3
+                    ),
+                    "n_resolved_histogram": {
+                        str(n): sum(1 for r in rs if r["n_resolved"] == n)
+                        for n in sorted({r["n_resolved"] for r in rs})
+                    },
+                    "n_resolved_histogram_usable": {
+                        str(n): sum(1 for r in rs if r["usable"] and r["n_resolved"] == n)
+                        for n in sorted({r["n_resolved"] for r in rs if r["usable"]})
+                    },
+                }
+                for fam, rs in sorted(fams.items())
+            },
+            "dregon_all_motors": {
+                r["id"]: {
+                    "speed_rev_s": r["speed_rev_s"],
+                    "n_resolved": r["n_resolved"],
+                    "margin_db": r["margin_db"],
+                    "margin_family_only_db": r["margin_family_only_db"],
+                    "split_order_min": r["split_order_min"],
+                    "split_order_max": r["split_order_max"],
+                    "usable": r["usable"],
+                }
+                for r in multi
+                if r["family"] == "dregon_bench"
+            },
+        }
     return out
 
 
@@ -1215,6 +1602,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--fetch-daset", action="store_true", help="download the drone-only shards")
     ap.add_argument("--fetch-chums", action="store_true", help="download the ChuMS rotor-rig mat")
+    ap.add_argument(
+        "--avq-dataset",
+        default="AVQ",
+        help="dload dataset the AVQ ego-noise sequences are read from "
+        "(AVQ = 8 ch 44.1 kHz; AVQ-egonoise = channel 0 at 16 kHz)",
+    )
     ap.add_argument("--window-s", type=float, default=Config.window_s)
     ap.add_argument("--min-window-s", type=float, default=Config.min_window_s)
     ap.add_argument("--min-margin-db", type=float, default=Config.min_margin_db)
@@ -1224,6 +1617,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--level-tol-db", type=float, default=Config.level_tol_db)
     ap.add_argument("--lo", type=float, default=Config.lo)
     ap.add_argument("--hi", type=float, default=Config.hi)
+    ap.add_argument("--multi-window-s", type=float, default=Config.multi_window_s)
+    ap.add_argument("--multi-seg-s", type=float, default=Config.multi_seg_s)
+    ap.add_argument("--neighbour-frac", type=float, default=Config.neighbour_frac)
+    ap.add_argument("--split-min-sep", type=float, default=Config.split_min_sep_rev_s)
+    ap.add_argument("--split-peak-db", type=float, default=Config.split_peak_db)
+    ap.add_argument("--split-min-orders", type=int, default=Config.split_min_orders)
+    ap.add_argument("--split-max-peaks", type=int, default=Config.split_max_peaks)
     ap.add_argument("--no-figures", action="store_true")
     ap.add_argument("--tag", default="", help="suffix for the output file names")
     args = ap.parse_args(argv)
@@ -1243,6 +1643,13 @@ def main(argv: list[str] | None = None) -> int:
         odd_margin_db=args.odd_margin_db,
         active_range_db=args.active_range_db,
         level_tol_db=args.level_tol_db,
+        multi_window_s=args.multi_window_s,
+        multi_seg_s=args.multi_seg_s,
+        neighbour_frac=args.neighbour_frac,
+        split_min_sep_rev_s=args.split_min_sep,
+        split_peak_db=args.split_peak_db,
+        split_min_orders=args.split_min_orders,
+        split_max_peaks=args.split_max_peaks,
     )
     wanted = list(READERS) if args.corpora == "all" else args.corpora.split(",")
     unknown = [w for w in wanted if w not in READERS]
@@ -1258,9 +1665,11 @@ def main(argv: list[str] | None = None) -> int:
         n = 0
         try:
             # A reader raises SystemExit when its raw tree is absent (the cluster
-            # has no data/ working copy, for instance); that is a survey fact per
-            # corpus, not a reason to lose every other corpus's readings. The
-            # raise happens inside the generator body, so it is caught here.
+            # has no data/ working copy, for instance), and a dload/HuggingFace
+            # pull can fail on one corpus alone (the AVQ pin holds a 352 MB
+            # multipart object whose ETag some boto3 builds reject). Either is a
+            # survey fact about that corpus, not a reason to lose every other
+            # corpus's readings; the failure is recorded in `skipped_corpora`.
             for meta, audio, fs in READERS[name](args):
                 reading = estimate(audio, fs, int(meta["n_rotors"]), cfg)
                 row = {**meta, **reading}
@@ -1268,13 +1677,16 @@ def main(argv: list[str] | None = None) -> int:
                 n += 1
                 print(
                     f"  {row['corpus']}/{row['id']}: {row['speed_rev_s']} rev/s "
-                    f"({row['octave_verdict']}, margin {row['margin_db']} dB, "
+                    f"(n_res {row['n_resolved']}/{row['n_rotors_expected']}, "
+                    f"{row['octave_verdict']}, margin {row['margin_db']} dB, "
+                    f"family-only {row['margin_family_only_db']} dB, "
                     f"usable={row['usable']})",
                     flush=True,
                 )
-        except SystemExit as exc:
-            failures.append({"corpus": name, "error": str(exc)})
-            print(f"[{name}] SKIPPED: {exc}", flush=True)
+        except (SystemExit, Exception) as exc:  # noqa: B014 - SystemExit is not an Exception
+            failures.append({"corpus": name, "error": f"{type(exc).__name__}: {exc}"})
+            print(f"[{name}] SKIPPED: {type(exc).__name__}: {exc}", flush=True)
+            traceback.print_exc()
             continue
         print(f"[{name}] {n} recordings", flush=True)
 
@@ -1287,8 +1699,12 @@ def main(argv: list[str] | None = None) -> int:
             "min_margin_db": cfg.min_margin_db,
             "max_half_delta_rev_s": cfg.max_half_delta,
             "min_window_s": cfg.min_window_s,
+            "neighbour_frac": cfg.neighbour_frac,
             "statement": (
-                "usable iff the harmonic-sum peak clears the best non-octave runner-up by "
+                "usable iff the harmonic-sum peak clears the best RIVAL comb (its own "
+                "small-rational family excluded always, and on a multi-rotor rig the "
+                f"+-{100 * cfg.neighbour_frac:g} % neighbourhood of the candidate too, since "
+                "those candidates are the rig's other rotors) by "
                 f">= {cfg.min_margin_db:g} dB AND the two disjoint halves of the window agree "
                 f"to <= {cfg.max_half_delta:g} rev/s AND the stationary window is "
                 f">= {cfg.min_window_s:g} s"

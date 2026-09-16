@@ -1032,7 +1032,8 @@ def _noise_v2_frame(point: dict[str, Any], audio_ct: np.ndarray, sr: int) -> td.
         },
         label={
             "speed_rev_s_mean": round(float(np.mean(point["speed_rev_s"])), 4),
-            "n_rotors_resolved": int(point.get("n_distinct", 1)),
+            "n_rotors_resolved": int(point.get("n_resolved", 1)),
+            "multiplicity_unresolved": bool(point.get("multiplicity_unresolved", False)),
             "octave_verdict": point.get("octave_verdict"),
         },
         extra={
@@ -1060,19 +1061,24 @@ def _noise_v2_from_frames(
     from data_processing.streams import iter_published_frames
 
     name, version = _split_dload_uri(parent_uri)
-    wanted = {str(p["source_id"]): p for p in points}
+    # A recording can carry SEVERAL fit points (the AVQ ego-noise sequences are
+    # read in consecutive 30 s windows), so the lookup is one-to-many.
+    wanted: dict[str, list[dict[str, Any]]] = {}
+    for point in points:
+        wanted.setdefault(str(point["source_id"]), []).append(point)
     seen: set[str] = set()
     for frame in iter_published_frames(name, version):
         rid = str(get_meta(frame, "recording_id", ""))
-        point = wanted.get(rid)
-        if point is None:
+        group = wanted.get(rid)
+        if group is None:
             continue
         audio = frame["audio"]
         data = np.asarray(audio.data, dtype=np.float32)
         if data.ndim == 1:
             data = data[None, :]
         seen.add(rid)
-        yield point["key"], _noise_v2_frame(point, data, int(audio.tindex.sr))
+        for point in group:
+            yield point["key"], _noise_v2_frame(point, data, int(audio.tindex.sr))
     missing = set(wanted) - seen
     if missing:
         raise ValueError(f"{name} did not yield the required recordings {sorted(missing)}")
@@ -2132,24 +2138,29 @@ SPECS: dict[str, dict[str, Any]] = {
         "note": "The bench/static fit points of the noise-model-v2 corpus survey: "
         "one Frame per usable static recording, native-rate audio of the stationary "
         "part (all channels, <= 30 s) + meta.rig / meta.corpus / meta.speed_rev_s "
-        "(one per resolved rotor) / meta.speed_source / meta.speed_tolerance. "
-        "Speeds are ESTIMATOR OUTPUT, not telemetry: the committed manifest "
-        "src/data_processing/noise_v2_bench_points.json (hashed into this spec, so "
-        "a re-estimation mints a new identity) is the label set, produced by "
-        "scripts/noise_v2_bench_speed.py under the tolerance rule stated there "
-        "(harmonic-sum margin >= 3 dB over the best non-octave rival AND the two "
-        "disjoint halves of the window agreeing to <= 1 rev/s AND a >= 8 s window). "
-        "Audio: the pinned DREGON-frames / SPCUP19-egonoise parents plus the "
-        "publisher's own files for DroneAudioSet drone-only and the SPCUP19 ChuMS "
-        "propeller rig (neither is key-indexed in dload, so streaming the pinned "
-        "88 GiB DroneAudioSet to reach 168 recordings is avoided). Survey + "
-        "verdicts: results/noise_v2/survey/.",
+        "(one per RESOLVED rotor) / meta.speed_source / meta.speed_tolerance / "
+        "label.n_rotors_resolved / label.multiplicity_unresolved (rotors coincident "
+        "to within 0.3 rev/s). Speeds are ESTIMATOR OUTPUT, not telemetry: the "
+        "committed manifest src/data_processing/noise_v2_bench_points.json (hashed "
+        "into this spec, so a re-estimation mints a new identity) is the label set, "
+        "produced by scripts/noise_v2_bench_speed.py under the tolerance rule stated "
+        "there (harmonic-sum margin >= 3 dB over the best rival comb — own "
+        "small-rational family excluded, and on a multi-rotor rig the +-6 % "
+        "neighbourhood too, since those candidates are the rig's other rotors — AND "
+        "the two disjoint halves of the window agreeing to <= 1 rev/s AND a >= 8 s "
+        "window). Audio: the pinned DREGON-frames / SPCUP19-egonoise / AVQ parents "
+        "(AVQ contributes the four CONSTANT-throttle ego-noise sequences of its spec "
+        "table, read in consecutive 30 s windows) plus the publisher's own files for "
+        "DroneAudioSet drone-only and the SPCUP19 ChuMS propeller rig (neither is "
+        "key-indexed in dload, so streaming the pinned 88 GiB DroneAudioSet to reach "
+        "168 recordings is avoided). Survey + verdicts: results/noise_v2/survey/.",
         "gen": {
-            "recipe_version": 1,
+            "recipe_version": 2,
             "manifest": noise_v2_manifest_identity(),
             "parents": {
                 "DREGON-frames": PARENTS["DREGON-frames"],
                 "SPCUP19-egonoise": PARENTS["SPCUP19-egonoise"],
+                "AVQ": PARENTS["AVQ"],
             },
             "daset": {
                 "repo_id": "ahlab-drone-project/DroneAudioSet",

@@ -126,20 +126,30 @@ CORPORA: list[dict[str, Any]] = [
         "near-equal on every mic, so the reading is accepted per recording",
     },
     {
-        "corpus": "AVQ",
-        "families": [],
-        "location": "dload:AVQ / AVQ-egonoise",
-        "type": "onboard 8-ch array, FREE FLIGHT (2 sessions, 12 sequences)",
-        "rigs": "1 quadrotor",
-        "telemetry": "none (blind VK pseudo-labels only, dload:AVQ-egonoise-vkrps)",
-        "speed_source": "none",
-        "format": "8 ch, 44.1 kHz, 12 sequences (705 s of pure ego-noise)",
+        "corpus": "AVQ constant-throttle ego-noise",
+        "families": ["avq_bench"],
+        "location": "dload:AVQ (sequences S1_seq1/S1_seq2/S1_seq3/S2_seq1; the same "
+        "recordings are in dload:AVQ-egonoise at channel 0, 16 kHz)",
+        "type": "BENCH/CONSTANT-THROTTLE EGO-NOISE: the four sequences the AVQ spec "
+        "table marks Type = EO with Drone = constant — S1 seq1 50 % (120 s), S1 seq2 "
+        "100 % (120 s), S1 seq3 150 % (40 s), S2 seq1 100 % (210 s) — read in "
+        "consecutive 30 s windows. The other eight sequences are excluded by type: "
+        "S2_seq2 is EO at DYNAMIC throttle, S2_seq5/seq6 are constant 100 % but "
+        "speech+ego-noise MIXTURES, and S1_seq5/S2_seq3/seq4/seq7/seq8 are speech "
+        "with the drone muted or dynamic",
+        "rigs": "1 quadrotor (onboard 8-mic circular array + camera, QMUL)",
+        "telemetry": "none logged; the THROTTLE SETTING per sequence is in the spec "
+        "table (50/100/150 %), which is what makes these four sequences bench class",
+        "speed_source": "estimated (same estimator, multi-rotor mode)",
+        "format": "8 ch, 44.1 kHz; 40-210 s per sequence -> 30 s windows",
         "licence": "free for academic/research use (courtesy of Lin Wang, QMUL)",
-        "verdict": "REJECTED",
-        "reason": "free flight, so no recording has one speed per rotor to fit to, and "
-        "the corpus is the hardest case on record: 175 of 187 blind windows are "
-        "octave-suspect and its median fvk_ratio_double 1.044 is below the calibrated "
-        "1.065 cut (blind-corpus-annotation.md). Not a bench/static candidate by type",
+        "verdict": "USABLE",
+        "reason": "the first survey pass refused the whole corpus as 'free flight' "
+        "without reading the spec table. The table's Drone column is explicit: four "
+        "sequences hold ego-noise only at a CONSTANT throttle setting, which is the "
+        "bench-class definition used here (stationary window, one speed per rotor). "
+        "The blind-campaign octave warning (median fvk_ratio_double 1.044) was "
+        "measured on the FLIGHT sequences, not on these",
     },
     {
         "corpus": "drone_audio (Al-Emadi IWCMC 2019)",
@@ -320,6 +330,23 @@ def corpus_stats(rows: list[dict], families: list[str]) -> dict[str, Any]:
             if usable
             else None
         ),
+        "n_resolved_by_rig": {
+            rig: {
+                "n_usable": len([r for r in usable if r["rig"] == rig]),
+                "n_rotors": max(int(r.get("n_rotors", 1)) for r in usable if r["rig"] == rig),
+                "histogram": {
+                    str(n): len([r for r in usable if r["rig"] == rig and r["n_resolved"] == n])
+                    for n in sorted({r["n_resolved"] for r in usable if r["rig"] == rig})
+                },
+                "n_multiplicity_unresolved": len(
+                    [r for r in usable if r["rig"] == rig and r["multiplicity_unresolved"]]
+                ),
+                "max_spread_rev_s": round(
+                    max(float(r["spread_rev_s"] or 0.0) for r in usable if r["rig"] == rig), 3
+                ),
+            }
+            for rig in rigs
+        },
         "reject_reasons": _reject_histogram(mine),
     }
 
@@ -373,9 +400,10 @@ def survey_table(entries: list[dict], rows: list[dict]) -> str:
     out += [
         "## Fit points (one row per usable recording)",
         "",
-        "| Corpus | Recording | Rig | Condition | Speed(s) rev/s | Tol rev/s | Spread rev/s "
-        "| Rotors seen | Octave | Margin dB | Half Δ rev/s | Window s | ch | fs |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Corpus | Recording | Rig | Condition | f_i rev/s (one per resolved rotor) "
+        "| f̄ rev/s | Tol rev/s | Spread rev/s | n_res / n_rotors | Octave | Margin dB "
+        "| Margin family-only dB | Half Δ rev/s | Window s | ch | fs |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in sorted(usable, key=lambda r: (r["corpus"], r["id"])):
         out.append(
@@ -387,11 +415,14 @@ def survey_table(entries: list[dict], rows: list[dict]) -> str:
                     r["rig"],
                     str(r["condition"]),
                     _fmt(r["speed_rev_s"]),
+                    _fmt(r["rate_rev_s"]),
                     _fmt(r["speed_tolerance_rev_s"]),
                     _fmt(r["spread_rev_s"]),
-                    str(r["n_distinct"]),
+                    f"{r['n_resolved']} / {r['n_rotors']}"
+                    + (" (unresolved)" if r["multiplicity_unresolved"] else ""),
                     r["octave_verdict"],
                     _fmt(r["margin_db"]),
+                    _fmt(r["margin_family_only_db"]),
                     _fmt(r["half_delta_rev_s"]),
                     _fmt(r["window_s"]),
                     str(r["channels"]),
@@ -466,6 +497,80 @@ def draw_speeds(rows: list[dict], out_dir: Path, fig_dir: Path) -> str:
     return name
 
 
+def draw_multirotor_split(rows: list[dict], out_dir: Path, fig_dir: Path) -> str | None:
+    """One panel per multi-rotor rig: the high-order band the split is read in.
+
+    The example per rig is the reading with the most resolved rotors (ties
+    broken by margin), so the panel shows what the rule actually saw: the band
+    ``k·f_line ± 6 %``, its local median, the ``+6 dB`` peak threshold, and a
+    marker at every resolved rotor line ``k·f_i/scale``.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    best: dict[str, dict] = {}
+    for r in rows:
+        ex = r.get("split_example")
+        if not ex or r.get("mode") != "multi_rotor":
+            continue
+        key = str(r["rig"])
+        cur = best.get(key)
+        rank = (int(r["n_resolved"]), float(r["margin_db"]))
+        if cur is None or rank > (int(cur["n_resolved"]), float(cur["margin_db"])):
+            best[key] = r
+    if not best:
+        return None
+    rigs = sorted(best)
+    ncol = min(3, len(rigs))
+    nrow = int(np.ceil(len(rigs) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.4 * ncol, 3.0 * nrow), dpi=150, squeeze=False)
+    for ax, rig in zip(axes.ravel(), rigs, strict=False):
+        r = best[rig]
+        ex = r["split_example"]
+        f_hz = np.asarray(ex["f_hz"], dtype=float)
+        p_db = np.asarray(ex["p_db"], dtype=float)
+        k, scale = int(ex["order"]), float(ex["scale"])
+        ax.plot(f_hz, p_db, lw=0.8, color="#333333")
+        ax.axhline(ex["median_db"], color="#1f77b4", ls="--", lw=0.9, label="band median")
+        ax.axhline(ex["threshold_db"], color="#2ca02c", ls=":", lw=0.9, label="median + 6 dB")
+        for i, speed in enumerate(r["speed_rev_s"]):
+            ax.axvline(
+                float(speed) * k / max(scale, 1e-9),
+                color="#d62728",
+                lw=1.0,
+                alpha=0.85,
+                label="resolved rotor" if i == 0 else None,
+            )
+        ax.set_title(
+            f"{rig}\n{r['id']}: order {k} of {ex['comb_rev_s']:.2f} rev/s, "
+            f"n_res {r['n_resolved']}/{r['n_rotors']}"
+            + (" (unresolved)" if r["multiplicity_unresolved"] else ""),
+            fontsize=7.5,
+        )
+        ax.set_xlabel("frequency (Hz)", fontsize=8)
+        ax.set_ylabel("power (dB)", fontsize=8)
+        ax.tick_params(labelsize=7)
+        ax.grid(alpha=0.25)
+        ax.legend(fontsize=6, loc="upper right")
+    for ax in axes.ravel()[len(rigs) :]:
+        ax.axis("off")
+    fig.suptitle(
+        "Per-rotor split: the high-order band, its 6 dB peak threshold and the resolved "
+        "rotor lines",
+        fontsize=10,
+    )
+    fig.tight_layout()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    name = "survey_multirotor_split.png"
+    fig.savefig(out_dir / name)
+    fig.savefig(fig_dir / name)
+    plt.close(fig)
+    return name
+
+
 def _condition_key(row: dict) -> str:
     if row.get("throttle") is not None:
         return f"{int(row['throttle'])}%"
@@ -483,6 +588,7 @@ _SOURCE_OF_FAMILY = {
     "spcup_static": "SPCUP19-egonoise",
     "daset": "DroneAudioSet-drone-only",
     "chums_bench": "SPCUP19-ChuMS-bench",
+    "avq_bench": "AVQ",
 }
 
 #: Longest audio slice published per fit point (s).
@@ -531,22 +637,27 @@ def fit_points(rows: list[dict], outliers: dict[str, str]) -> list[dict]:
         source = _SOURCE_OF_FAMILY.get(r["family"])
         if source is None:
             continue
+        # ``offset_s`` is the reader's own cut inside the source recording (the
+        # AVQ sequences are read in consecutive 30 s windows), so the published
+        # slice is addressed relative to the FULL parent recording.
+        offset = float(r.get("offset_s") or 0.0)
         centre = float(r["window_start_s"]) + 0.5 * float(r["window_s"])
         length = min(PUBLISH_MAX_S, max(float(r["active_s"]), float(r["window_s"])))
-        start = max(0.0, min(centre - 0.5 * length, float(r["duration_s"]) - length))
+        start = offset + max(0.0, min(centre - 0.5 * length, float(r["duration_s"]) - length))
         points.append(
             {
                 "key": f"{r['corpus'].replace('/', '-')}__{r['id']}",
                 "corpus": r["corpus"],
                 "source": source,
-                "source_id": r.get("raw_path") or r["id"],
+                "source_id": r.get("raw_path") or r.get("sequence") or r["id"],
                 "rig": r["rig"],
                 "rig_model": r.get("rig_model"),
                 "condition": r["condition"],
                 "throttle": r.get("throttle"),
                 "throttle_level": r.get("throttle_level"),
                 "n_rotors": int(r["n_rotors"]),
-                "n_distinct": int(r["n_distinct"]),
+                "n_resolved": int(r["n_resolved"]),
+                "multiplicity_unresolved": bool(r["multiplicity_unresolved"]),
                 "octave_verdict": r["octave_verdict"],
                 "speed_rev_s": [round(float(v), 4) for v in r["speed_rev_s"]],
                 "speed_tolerance_rev_s": round(float(r["speed_tolerance_rev_s"]), 4),
@@ -557,6 +668,7 @@ def fit_points(rows: list[dict], outliers: dict[str, str]) -> list[dict]:
                 "publish_s": round(length, 3),
                 "margin_db": r["margin_db"],
                 "half_delta_rev_s": r["half_delta_rev_s"],
+                "margin_family_only_db": r["margin_family_only_db"],
             }
         )
     return points
@@ -595,7 +707,12 @@ def main(argv: list[str] | None = None) -> int:
     for entry in CORPORA:
         entries.append({**entry, "stats": corpus_stats(rows, entry["families"])})
 
-    figures = [] if args.no_figures else [draw_speeds(rows, args.out, args.fig_dir)]
+    figures: list[str] = []
+    if not args.no_figures:
+        figures.append(draw_speeds(rows, args.out, args.fig_dir))
+        split_fig = draw_multirotor_split(rows, args.out, args.fig_dir)
+        if split_fig is not None:
+            figures.append(split_fig)
 
     usable = [r for r in rows if r["usable"]]
     outliers = cell_octave_outliers(rows)
