@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -656,12 +657,50 @@ def _val(row: dict[str, Any], name: str) -> float | None:
     return None if v is None else float(v)
 
 
+def _rho(pts: list[tuple[float, float]]) -> float | None:
+    """Spearman rho of a scale/value ladder, or ``None`` below three points.
+
+    Three is the minimum a rank correlation can say anything with, and the
+    sigma degradation branch (x1, x3, x10) has exactly three.
+    """
+    if len(pts) < 3:
+        return None
+    rho = float(np.asarray(sstats.spearmanr([p[0] for p in pts], [p[1] for p in pts])[0]))
+    return rho if np.isfinite(rho) else None
+
+
+def ladder_points(
+    rows: list[dict[str, Any]],
+    *,
+    name: str,
+    tag: str,
+    scales: list[float],
+    support: str | None = None,
+) -> list[tuple[float, float]]:
+    """``[(scale, value)]`` of one ladder, averaged over supports unless one is named."""
+    out: list[tuple[float, float]] = []
+    for s in scales:
+        arm = "c3" if s == 1.0 else f"{tag}_x{s:g}"
+        sel = [r for r in rows if r["arm"] == arm and (support is None or r["support"] == support)]
+        vals = [v for v in (_val(r, name) for r in sel) if v is not None]
+        if vals:
+            out.append((float(s), float(np.mean(vals))))
+    return out
+
+
 def summarise(payload: dict[str, Any]) -> dict[str, Any]:
     rows = payload["rows"]
-    rigs = sorted({r["rig"] for r in rows})
-    out: dict[str, Any] = dict(per_rig=[], ladders=[])
-    for rig in rigs:
-        rr = [r for r in rows if r["rig"] == rig]
+    groups = sorted({(r["rig"], r["regime"]) for r in rows}) + sorted(
+        {(r["rig"], "__pooled__") for r in rows}
+    )
+    out: dict[str, Any] = dict(per_group=[], ladders=[])
+    d_scales = list(payload["front_end"]["d_scales"])
+    s_scales = list(payload["front_end"]["sigma_scales"])
+    for rig, regime in groups:
+        rr = [
+            r for r in rows if r["rig"] == rig and (regime == "__pooled__" or r["regime"] == regime)
+        ]
+        supports = sorted({r["support"] for r in rr})
         for name in CANDIDATE_NAMES:
 
             def arm_values(arm: str, rows_=rr, name_=name) -> list[float]:
@@ -678,33 +717,33 @@ def summarise(payload: dict[str, Any]) -> dict[str, Any]:
             floor = float(np.mean(oracle)) if oracle else None
             best_mean = float(np.mean(best)) if best else None
             c3_mean = float(np.mean(c3)) if c3 else None
-            # ladder monotonicity, per support then pooled
-            rhos_d, rhos_s = [], []
-            for support in sorted({r["support"] for r in rr}):
-                for scales, tag, store in (
-                    (payload["front_end"]["d_scales"], "d", rhos_d),
-                    (payload["front_end"]["sigma_scales"], "sigma", rhos_s),
-                ):
-                    pts = []
-                    for s in scales:
-                        arm = "c3" if s == 1.0 else f"{tag}_x{s:g}"
-                        sel = [r for r in rr if r["support"] == support and r["arm"] == arm]
-                        if not sel:
-                            continue
-                        v = _val(sel[0], name)
-                        if v is not None:
-                            pts.append((float(s), v))
-                    if len(pts) >= 4:
-                        rho = float(
-                            np.asarray(
-                                sstats.spearmanr([p[0] for p in pts], [p[1] for p in pts])[0]
-                            )
-                        )
-                        if np.isfinite(rho):
-                            store.append(float(rho))
-            out["per_rig"].append(
+            # ladder response, per support (so a rho is not an artefact of pooling)
+            rho: dict[str, list[float]] = dict(d=[], d_up=[], sigma=[], sigma_up=[])
+            minima: dict[str, float | None] = dict(d=None, sigma=None)
+            spans: dict[str, float | None] = dict(d=None, sigma=None)
+            for tag, scales in (("d", d_scales), ("sigma", s_scales)):
+                for support in supports:
+                    pts = ladder_points(rr, name=name, tag=tag, scales=scales, support=support)
+                    full = _rho(pts)
+                    if full is not None:
+                        rho[tag].append(full)
+                    # the DEGRADATION branch: scales at or above the export's own
+                    # value. A V-shaped ladder is not monotone over the whole
+                    # range, and the branch away from the minimum is what a
+                    # threshold has to be monotone on.
+                    up = _rho([p for p in pts if p[0] >= 1.0])
+                    if up is not None:
+                        rho[f"{tag}_up"].append(up)
+                # the POOLED ladder's own minimum and dynamic range: a median of
+                # per-support argmins can land on a scale no support prefers
+                pooled = ladder_points(rr, name=name, tag=tag, scales=scales)
+                if pooled:
+                    minima[tag] = float(min(pooled, key=lambda p: p[1])[0])
+                    spans[tag] = float(max(p[1] for p in pooled) - min(p[1] for p in pooled))
+            out["per_group"].append(
                 dict(
                     rig=rig,
+                    regime=regime,
                     candidate=name,
                     units=CANDIDATE_UNITS[name],
                     oracle_floor=floor,
@@ -729,10 +768,17 @@ def summarise(payload: dict[str, Any]) -> dict[str, Any]:
                         if (best_mean is None or floor is None or not spread)
                         else float((best_mean - floor) / spread)
                     ),
-                    spearman_rho_d=float(np.median(rhos_d)) if rhos_d else None,
-                    spearman_rho_d_min=float(np.min(rhos_d)) if rhos_d else None,
-                    spearman_rho_sigma=float(np.median(rhos_s)) if rhos_s else None,
-                    spearman_rho_sigma_min=float(np.min(rhos_s)) if rhos_s else None,
+                    spearman_rho_d=float(np.median(rho["d"])) if rho["d"] else None,
+                    spearman_rho_d_branch=float(np.median(rho["d_up"])) if rho["d_up"] else None,
+                    spearman_rho_d_branch_min=float(np.min(rho["d_up"])) if rho["d_up"] else None,
+                    spearman_rho_sigma=float(np.median(rho["sigma"])) if rho["sigma"] else None,
+                    spearman_rho_sigma_branch=(
+                        float(np.median(rho["sigma_up"])) if rho["sigma_up"] else None
+                    ),
+                    ladder_min_d_scale=minima["d"],
+                    ladder_min_sigma_scale=minima["sigma"],
+                    ladder_span_d=spans["d"],
+                    ladder_span_sigma=spans["sigma"],
                     gap_closure_current_best=(
                         None
                         if (
@@ -746,10 +792,7 @@ def summarise(payload: dict[str, Any]) -> dict[str, Any]:
                     n_supports=len(oracle),
                 )
             )
-            for scales, tag in (
-                (payload["front_end"]["d_scales"], "d"),
-                (payload["front_end"]["sigma_scales"], "sigma"),
-            ):
+            for tag, scales in (("d", d_scales), ("sigma", s_scales)):
                 for s in scales:
                     arm = "c3" if s == 1.0 else f"{tag}_x{s:g}"
                     vals = arm_values(arm)
@@ -758,6 +801,7 @@ def summarise(payload: dict[str, Any]) -> dict[str, Any]:
                     out["ladders"].append(
                         dict(
                             rig=rig,
+                            regime=regime,
                             candidate=name,
                             ladder=tag,
                             scale=float(s),
@@ -775,26 +819,28 @@ def summarise(payload: dict[str, Any]) -> dict[str, Any]:
 def figure_bars(
     payload: dict[str, Any], summary: dict[str, Any], fig_dir: Path, out_dir: Path
 ) -> list[str]:
-    per = summary["per_rig"]
-    rigs = sorted({r["rig"] for r in per})
+    per = [r for r in summary["per_group"] if r["regime"] != "__pooled__"]
+    groups = sorted({(r["rig"], r["regime"]) for r in per})
+    labels = [f"{rig}\n{regime}" for rig, regime in groups]
     fig, axes = plt.subplots(
-        1, len(CANDIDATE_NAMES), figsize=(3.1 * len(CANDIDATE_NAMES), 3.6), squeeze=False
+        1, len(CANDIDATE_NAMES), figsize=(3.3 * len(CANDIDATE_NAMES), 4.0), squeeze=False
     )
     width = 0.21
     series = (
-        ("oracle_split_half", "C8", "oracle (split half)"),
-        ("oracle_floor", "C2", "oracle (disjoint)"),
+        ("oracle_split_half", "C8", "oracle (split half, half length)"),
+        ("oracle_floor", "C2", "oracle (speed-matched disjoint)"),
         ("current_best", "C0", "current best"),
-        ("c3", "C3", "C3"),
+        ("c3", "C3", "C3 (known bad)"),
     )
     for ci, name in enumerate(CANDIDATE_NAMES):
         ax = axes[0][ci]
-        xs = np.arange(len(rigs))
+        xs = np.arange(len(groups))
         for oi, (field, col, lab) in enumerate(series):
-            vals = []
-            errs = []
-            for rig in rigs:
-                row = next(r for r in per if r["rig"] == rig and r["candidate"] == name)
+            vals, errs = [], []
+            for rig, regime in groups:
+                row = next(
+                    r for r in per if (r["rig"], r["regime"], r["candidate"]) == (rig, regime, name)
+                )
                 vals.append(np.nan if row[field] is None else row[field])
                 spread_field = (
                     "oracle_split_half_spread" if field == "oracle_split_half" else "oracle_spread"
@@ -806,14 +852,15 @@ def figure_bars(
                 )
             ax.bar(xs + (oi - 1.5) * width, vals, width, yerr=errs, capsize=2, color=col, label=lab)
         ax.set_xticks(xs)
-        ax.set_xticklabels(rigs, fontsize=8)
+        ax.set_xticklabels(labels, fontsize=7)
         ax.set_title(name, fontsize=9)
         ax.set_ylabel(CANDIDATE_UNITS[name].split(",")[0], fontsize=7)
         ax.tick_params(labelsize=7)
         ax.grid(alpha=0.25, axis="y")
     axes[0][0].legend(fontsize=6)
     fig.suptitle(
-        "candidate proxies: oracle floor (error bar = spread across supports), current-best synthetic, C3",
+        "candidate proxies per rig and regime: oracle floor (error bar = spread across supports), "
+        "current-best synthetic, C3",
         fontsize=10,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.9))
@@ -832,7 +879,7 @@ def figure_ladders(
         return []
     names = []
     for tag, label in (("d", "D scale"), ("sigma", "sigma scale")):
-        rows = [r for r in lad if r["ladder"] == tag]
+        rows = [r for r in lad if r["ladder"] == tag and r["regime"] == "cruise"]
         if not rows:
             continue
         rigs = sorted({r["rig"] for r in rows})
@@ -861,7 +908,11 @@ def figure_ladders(
                         color="C1",
                     )
                 per = next(
-                    (p for p in summary["per_rig"] if p["rig"] == rig and p["candidate"] == cand),
+                    (
+                        p
+                        for p in summary["per_group"]
+                        if (p["rig"], p["regime"], p["candidate"]) == (rig, "cruise", cand)
+                    ),
                     None,
                 )
                 if per is not None and per["oracle_floor"] is not None:
@@ -879,7 +930,10 @@ def figure_ladders(
                     ax.set_ylabel(f"{rig}", fontsize=8)
                 ax.set_xlabel(label, fontsize=7)
         axes[0][0].legend(fontsize=6)
-        fig.suptitle(f"degradation ladder against the {label} (C3 base, real carrier)", fontsize=10)
+        fig.suptitle(
+            f"CRUISE degradation ladder against the {label} (C3 base, rendered on the real carrier)",
+            fontsize=10,
+        )
         fig.tight_layout(rect=(0, 0, 1, 0.94))
         name = f"criteria_proxy_ladder_{tag}.png"
         for d in (fig_dir, out_dir):
@@ -948,6 +1002,11 @@ def main() -> None:
     ap.add_argument("--supports-per-rig", type=int, default=None)
     ap.add_argument("--no-ladder", action="store_true")
     ap.add_argument("--mics", type=int, default=8)
+    ap.add_argument(
+        "--redraw",
+        action="store_true",
+        help="recompute nothing: re-summarise and redraw from the existing proxy.json",
+    )
     args = ap.parse_args()
 
     out_dir = Path(args.out)
@@ -956,17 +1015,26 @@ def main() -> None:
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     t0 = time.time()
-    payload = run(
-        rigs=[v for v in str(args.rigs).replace(",", " ").split()],
-        supports_per_rig=args.supports_per_rig,
-        ladder=not args.no_ladder,
-        n_mics=int(args.mics),
-    )
-    example = payload.pop("_spectro_example")
+    example: dict[str, Any] | None = None
+    prior_figures: list[str] = []
+    if args.redraw:
+        payload = json.loads((out_dir / "proxy.json").read_text())
+        payload.pop("summary", None)
+        prior_figures = list(payload.pop("figures", []) or [])
+    else:
+        payload = run(
+            rigs=[v for v in str(args.rigs).replace(",", " ").split()],
+            supports_per_rig=args.supports_per_rig,
+            ladder=not args.no_ladder,
+            n_mics=int(args.mics),
+        )
+        example = payload.pop("_spectro_example")
     payload["summary"] = summarise(payload)
     figures = figure_bars(payload, payload["summary"], fig_dir, out_dir)
     figures += figure_ladders(payload, payload["summary"], fig_dir, out_dir)
     figures += figure_spectrograms(example, fig_dir, out_dir)
+    # a redraw does not re-render, so a figure it cannot rebuild keeps its name
+    figures += [f for f in prior_figures if f not in figures]
     payload["figures"] = figures
     payload["provenance"] = dict(
         git_head=git_head(),
