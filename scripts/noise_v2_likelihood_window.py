@@ -91,6 +91,13 @@ NFFTS_DEFAULT = (2048, 4096, 16384)
 #: shape; the baseline is the median PSD of the outer half of the baseband.
 OUTER_FRACTION = 0.5
 
+#: Second, NARROW band limit of the envelope measurement. The comb's own
+#: isolation limit B is 15-38 Hz here, so an envelope read through it is
+#: resolution-limited at 13-32 ms and cannot show a slow amplitude drift at
+#: all. +-2 Hz resolves 0.25 s and slower, which is the scale a Welch window
+#: has to stay inside.
+ENVELOPE_NARROW_HZ = 2.0
+
 # ── the frozen supports ─────────────────────────────────────────────────────
 
 #: The five DREGON room-2 cruise scoring windows of
@@ -551,6 +558,48 @@ def line_shape(f: np.ndarray, psd: np.ndarray, *, b_hz: float) -> LineShape:
     )
 
 
+def carrier_drift(
+    rps: np.ndarray, orders: list[int], *, sr: int = SR, smooth_s: float = 0.1
+) -> dict[str, Any]:
+    """How fast the telemetry carrier moves, and the window that survives it.
+
+    A Welch window of length ``T`` resolves ``1.44 / T`` Hz (the periodic
+    Hann's own half-power width). Over that window, harmonic ``k`` of a rotor
+    drifting at ``|df_r/dt|`` rev/s per s moves ``k |df_r/dt| T`` Hz. The
+    window stops being a line measurement when the drift exceeds the
+    resolution, i.e. above
+
+        T_max(k) = sqrt(1.44 / (k |df_r/dt|)).
+
+    This is the non-stationarity limit that actually binds the window, and it
+    is a property of the telemetry, not of the audio.
+    """
+    r = np.atleast_2d(np.asarray(rps, dtype=np.float64))
+    w = max(int(round(float(smooth_s) * sr)), 3)
+    kernel = np.ones(w) / float(w)
+    slopes = []
+    for row in r:
+        smooth = np.convolve(row, kernel, mode="valid")
+        slopes.append(np.abs(np.diff(smooth)) * float(sr))
+    arr = np.concatenate(slopes) if slopes else np.zeros(1)
+    med = float(np.median(arr))
+    p95 = float(np.percentile(arr, 95))
+    return dict(
+        abs_slope_rps_per_s=dict(median=med, p95=p95, max=float(arr.max())),
+        smooth_s=float(smooth_s),
+        t_max_s_at_median=[
+            dict(order=int(k), t_max_s=(None if med <= 0 else float(np.sqrt(1.44 / (k * med)))))
+            for k in orders
+        ],
+        t_max_s_at_p95=[
+            dict(order=int(k), t_max_s=(None if p95 <= 0 else float(np.sqrt(1.44 / (k * p95)))))
+            for k in orders
+        ],
+        rule="T_max(k) = sqrt(1.44 / (k * |d rps/dt|)): the window at which the line's drift "
+        "equals the periodic Hann half-power width",
+    )
+
+
 def rebin_to(f_fine: np.ndarray, s_fine: np.ndarray, f_coarse: np.ndarray) -> np.ndarray:
     """Sum a fine shape into the coarse grid's bins (nearest-centre assignment)."""
     df = float(f_coarse[1] - f_coarse[0])
@@ -671,7 +720,8 @@ def lineshape_stage(
     )
     per_cell: dict[tuple[str, str, int, float], dict[str, list[float]]] = {}
     shape_bank: dict[tuple[str, str, int, float], list[LineShape]] = {}
-    env_bank: dict[tuple[str, str, int], list[float]] = {}
+    env_bank: dict[tuple[str, str, int, str], list[float]] = {}
+    res_bank: dict[tuple[str, str, int, str], float] = {}
 
     for rig in rigs:
         scored_list: list[Support] = []
@@ -715,18 +765,24 @@ def lineshape_stage(
                 if hi is not None:
                     keep &= np.all(rps <= hi, axis=0)
                 row.setdefault("regime_fraction", {})[label] = float(keep.mean())
+                row.setdefault("carrier_drift", {})[label] = carrier_drift(rps, orders)
                 for k in orders:
                     centres = float(k) * rates
                     if centres.max() > BAND_HZ[1] or centres.min() < BAND_HZ[0]:
                         continue
                     for r in range(rps.shape[0]):
                         z = demodulate(audio, rps[r], k)
-                        # the envelope's own band-limited amplitude, once per cell
-                        env, sr_bb = line_envelope(z, b_hz=b_hz)
-                        for mi in range(env.shape[0]):
-                            tau = one_over_e_time(env[mi], sr_bb)
-                            if tau is not None:
-                                env_bank.setdefault((rig, label, k), []).append(tau)
+                        # the line amplitude's own envelope, at TWO band limits: the
+                        # comb's isolation limit B (fast, and resolution-limited at
+                        # 1 / 2B) and a narrow +-2 Hz band that can only carry the
+                        # SLOW amplitude modulation
+                        for tag, bw in (("", b_hz), ("_narrow", ENVELOPE_NARROW_HZ)):
+                            env, sr_bb = line_envelope(z, b_hz=bw)
+                            for mi in range(env.shape[0]):
+                                tau = one_over_e_time(env[mi], sr_bb)
+                                if tau is not None:
+                                    env_bank.setdefault((rig, label, k, tag), []).append(tau)
+                                res_bank[(rig, label, k, tag)] = 1.0 / (2.0 * float(bw))
                         shapes: dict[float, list[LineShape]] = {}
                         halves: dict[float, tuple[list[LineShape], list[LineShape]]] = {}
                         n_half = audio.shape[1] // 2
@@ -859,14 +915,18 @@ def lineshape_stage(
                 "(the preregistered moment-gate threshold)",
             )
         )
-    for (rig, label, k), taus in sorted(env_bank.items()):
+    for (rig, label, k, tag), taus in sorted(env_bank.items()):
         payload["envelope"].append(
             dict(
                 rig=rig,
                 label=label,
                 order=int(k),
+                band=("isolation_B" if tag == "" else f"narrow_{ENVELOPE_NARROW_HZ:g}Hz"),
                 envelope_1e_time_s=_stats(taus),
-                note="amplitude-envelope autocorrelation 1/e time of the band-limited line",
+                resolution_limit_s=res_bank.get((rig, label, k, tag)),
+                note="amplitude-envelope autocorrelation 1/e time of the band-limited complex "
+                "line; a median at the resolution limit means the envelope is not resolved "
+                "by that band, not that it is that fast",
             )
         )
     for (rig, label, k, t_win), bank in sorted(shape_bank.items()):
