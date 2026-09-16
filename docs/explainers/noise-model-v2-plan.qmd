@@ -1,6 +1,6 @@
 ---
 title: "Noise model v2: the plan before the first fit"
-subtitle: "What the last campaign measured, what three new studies add, and the five rounds that follow"
+subtitle: "What the last campaign measured, what four new studies add, and the five rounds that follow"
 format:
   html:
     toc: true
@@ -30,8 +30,9 @@ This page is a **proposal under review**. No v2 fit has run. Every number on
 this page comes from a committed artefact, and every table names its file.
 The files are `docs/experiments/revised-phase-campaign.qmd`,
 `docs/experiments/revised-phase-handoff-2026-09-13.qmd`,
-`results/noise_v2/survey/findings.md`, `results/noise_v2/shaft/findings.md`
-and `results/noise_v2/criteria/findings.md`.
+`results/noise_v2/survey/findings.md`, `results/noise_v2/shaft/findings.md`,
+`results/noise_v2/residual/findings.md` and
+`results/noise_v2/criteria/findings.md`.
 
 The campaign record is `docs/experiments/noise-model-v2.md`.
 :::
@@ -49,27 +50,38 @@ The campaign record is `docs/experiments/noise-model-v2.md`.
 3. The held-out line shape refutes that fitted value directly. Michael's
    `k = 2` line is narrower than 0.46 Hz, which implies `D < 1.45 rad²/s`;
    the C3 DREGON value predicts 268.9 Hz, which is 7.0 times the whole comb
-   isolation bandwidth (`criteria/findings.md:63-87`).
-4. The shaft is not a Wiener process, and it leaves nothing above the label
-   band. Seven of eight telemetry rigs prefer a Lorentzian speed spectrum over
-   a flat one, by `ΔAIC(OU − white) = -2.0e4 … -1.1e6`; the eighth is
-   Michael's 29 Hz log, whose corner sits above its own band. The identified
-   corner is `λ = 0.674-14.4 s⁻¹` on the five rigs that have one, which
-   contains the fixed `λ_ref = 6` of C2/C3 — but the spread reaches a factor
-   of 77 once the trend removal is varied, so `λ` is bracketed and not pinned
-   (`shaft/findings.md`). The 1/f² speed tail integrates to a 1/f⁴ phase
-   spectrum, a **bounded** wobble of
-   measured variance `2.5e-5` to `6.8e-3 rad²`. The `k²`-scaling Lorentzian
-   core that the acoustic fit needs is therefore **label error**, not rotor
-   physics.
+   isolation bandwidth (`criteria/findings.md:63-87`). The same statistic also
+   measures **label precision**: the line is sought inside `±0.5 Hz` of the
+   position the label predicts, so a label error `δ` displaces harmonic `k` by
+   `k·δ` and the tolerance at `T = 4.096 s` is `0.12/k` rev/s. Michael's
+   `k = 2` holds it on 95 % of cells, `k = 8` on 23 %, DREGON `k = 1` on 31 %.
+4. The speed error is **one** Ornstein-Uhlenbeck process, at every frequency.
+   Seven of eight telemetry rigs prefer a Lorentzian speed spectrum over a
+   flat one, by `ΔAIC(OU − white) = -2.0e4 … -1.1e6`; the eighth is Michael's
+   29 Hz log, whose corner sits above its own band. The identified corner is
+   `λ = 0.674-14.4 s⁻¹` on the five rigs that have one, which contains the
+   fixed `λ_ref = 6` of C2/C3 — but the spread reaches a factor of 77 once the
+   trend removal is varied, so `λ` is bracketed and not pinned
+   (`shaft/findings.md`). Its `f⁻²` tail continues **above** the label band:
+   the residual a 31.25 Hz label cannot carry is red on all 7 rigs that can
+   see it, with `ρ(50 ms) = 0.12-0.60` against a filtered-white null of
+   `0.002-0.047` (`residual/findings.md`). The phase error is therefore
+   integrated-OU and never Wiener, and above the label band it is a bounded
+   wobble of rms `0.003-0.055 rad` at `k = 1`, scaling as `k`. The
+   `k²`-scaling Lorentzian core that the acoustic fit needs is **label
+   error**, not rotor physics.
    The DREGON single-motor bench, the one label-free instrument, measures that
    term directly on 12 of 12 recordings: `σ_ν = 1.77 rad/s`, `λ = 5.48 s⁻¹`,
    `D_θ = 0.599 rad²/s` — `λ` lands on `λ_ref = 6`, and `D_θ` is 1400 times
    below C3's fitted `D`.
-5. The corpus survey adds **73 fit points** over **12 rig/condition points**
-   from four corpora, published as `noise-v2-bench-points@8f49bb0f77d3`
-   (`survey/findings.md:155-177`). The estimator is validated against the
-   DREGON throttle law to 0.555 rev/s mean absolute error.
+5. The corpus survey adds **135 fit points** over **18 rig/condition cells**
+   from six corpora, published as `noise-v2-bench-points@00f32a1210d6`
+   (`survey/findings.md:206-237`). Two corrections after review produced them:
+   AVQ is constant-throttle ego-noise and not free flight, and a multi-rotor
+   rig is gated on line evidence instead of the single-comb 3 dB margin. The
+   estimator is validated against the DREGON throttle law to 0.555 rev/s mean
+   absolute error, unchanged, and the four-rotor control on the same rig now
+   resolves four rotors at 64.6-69.6 rev/s against its law value of 68.6.
 6. The proposed fit window is `T = 1.024 s`, periodic Hann, 50 % overlap. The
    binding number is the carrier drift: `T_max(k = 2) = 0.95 s` at the p95
    slope on Michael's standby (`criteria/findings.md:135-157`).
@@ -88,10 +100,11 @@ The campaign record is `docs/experiments/noise-model-v2.md`.
    named fix, then simplification. The primary HPPNet criterion carries over
    unchanged.
 10. The reviewer must settle nine open choices: the window, the proxy, the
-    two thresholds, which DREGON orders to fit, whether `(λ_L, σ_L)` are free
-    per label chain, the above-band wobble, the `D_k` order structure, and the
-    DREGON label arm. Section
-    [Decisions for the reviewer](#decisions-for-the-reviewer) lists them.
+    two thresholds, which orders enter the DREGON likelihood given the label
+    precision `k_max(T)`, whether `(λ_L, σ_L)` are free per label chain, the
+    above-band wobble, the `D_k` order structure, and the DREGON label arm.
+    Section [Decisions for the reviewer](#decisions-for-the-reviewer) lists
+    them.
 
 # Where the last campaign stopped
 
@@ -126,10 +139,10 @@ OU contribution from a residual diffusion
 (`docs/explainers/bench-fit-revised-phase-model.qmd:462-464,652-655`).
 
 Section [Shaft-phase prior from telemetry](#shaft-phase-prior-from-telemetry)
-sharpens it into a quantitative statement: a Lorentzian speed error produces
-no diffusion above the label band at all, so `D = 845 rad²/s` is a command
-carrier misplaced by more than the line width, and the whole `k²`-scaling
-Lorentzian core is label error.
+sharpens it into a quantitative statement: an OU speed error leaves a bounded
+wobble above the label band and no diffusion at all, so `D = 845 rad²/s` is a
+command carrier misplaced by more than the line width, and the whole
+`k²`-scaling Lorentzian core is label error.
 
 The C2 fix was to recover the carrier. It failed for its own reasons, and the
 user decision "carriers are fixed" closes it. Two things are left.
@@ -173,144 +186,231 @@ point** — a stationary window with one known speed per rotor. Scripts are
 Numbers are in `results/noise_v2/survey/{survey.json,survey_table.md}` and the
 narrative is `results/noise_v2/survey/findings.md`.
 
-## Verdict per corpus
+::: {.callout-important}
+## Corrected after review
 
-::: {.column-page}
+Two readings in the first version of this page were wrong. Both are corrected
+below, and both changed the counts.
 
-| Corpus | Read | Usable | Verdict | Reason |
-|---|---|---|---|---|
-| DREGON single-motor bench | 21 | 20 | **USABLE** | one throttle and one rotor per recording, plus a non-acoustic reference (the throttle law) to score the estimator against |
-| SPCUP19 AGH single rotors | 8 | 7 | **USABLE** | single-source static takes; the blind campaign accepted all 8 under the one-source rule, so the readings are independently checkable |
-| DroneAudioSet (drone-only) | 168 | 50 | **PARTLY USABLE** | rig-mounted static at a fixed throttle; 118 recordings fall below the 3 dB margin, mostly the `M_up` group, which sees several blade-pass lines 16 Hz apart instead of one comb |
-| SPCUP19 ChuMS propeller rig | 9 | 1 | **PARTLY USABLE** | a genuine bench rig, but several propellers run at un-matched speeds; only `3prop_repeat2` clears the margin rule |
-| SPCUP19 static / hover (4 rigs) | 18 | 0 | **REJECTED** | four combs inside a few rev/s make every rival comb score almost as well, so no window clears the 3 dB margin |
-| KAIST rotating machine | 5 | 0 | **CONTROL ONLY** | out-of-domain control: bearing-fault lines are real, strong and not octaves of the shaft, so this corpus measures what the gate refuses |
-| `drone_audio` (`yes_drone`) | 24 | 0 | **REJECTED** | the clips are 1.02 s, an eighth of the 8 s stationary window the tolerance rule needs, and there is no take-level grouping |
-| `zenodo_drone_noises` | 7 | 1 | **REJECTED** | no rig identity, so a per-rig noise parameter cannot be attached even where the estimator reads a speed |
-| AVQ | — | — | **REJECTED** | free flight, so no recording has one speed per rotor |
-| DronePrint / MAVD / DroneNoise DB / ESC-50 | — | — | **REJECTED** | access or type: far-field free flight, not a rotor corpus, or not resolvable to a drone dataset |
+**1. AVQ is not free flight.** The first pass rejected it by type without
+reading its specification table. That table (QMUL, column `Type` = EO, column
+`Drone` = constant) marks four sequences as ego-noise only at a **constant
+throttle**: S1 seq1 50 % (120 s), S1 seq2 100 % (120 s), S1 seq3 150 % (40 s),
+S2 seq1 100 % (210 s). One throttle per recording and no manoeuvre is the
+bench-class definition used here, so AVQ is **usable**. Read in consecutive
+30 s windows it gives 78.0 / 97.8 / 111.4 rev/s for 50 / 100 / 150 %, which is
+monotone in the table's own throttle column, and **6 fit points over 2 cells**
+(`survey/findings.md:174-204`).
 
-: Corpus verdicts. Full table with locations, licences and per-recording reasons: `results/noise_v2/survey/survey_table.md`. Counts: `results/noise_v2/survey/findings.md:108-123`.
-
+**2. The 3 dB margin was the wrong gate for a multi-rotor rig.** The margin
+scores the accepted comb against the best rival comb. It collapses by
+construction once four combs diverge at high order: the tonal energy per rotor
+falls, the broadband floor is four times higher, and no single comb is
+distinguished. The margin then measures rotor count, not readability. Measured
+on one rig at one throttle: one motor at 70 % scores 15.3-17.8 dB of comb
+score with 5.6-9.8 dB of margin, and four motors on the same rig at the same
+throttle score **6.4 dB** with 0.77 dB of margin
+(`survey/findings.md:90-96`). Four-rotor static rigs were rejected on that
+number alone. They are now judged on **line evidence**.
 :::
 
-The ChuMS package is a discovery. The published SPCUP19 frames expose it as
-216 unlabelled arrays. `UAV_rotor_recordings.mat` in fact holds 9 runs of
-73-75 s on 8 calibrated microphones, with their positions in the file and a
-per-microphone OASPL of 88.9-98.4 dB, at 1, 2 or 3 propellers with three
-repeats each. No RPM is recorded anywhere in it
-(`survey/findings.md:125-132`).
+## The gate
 
-The four-rotor static corpora fail for a geometric reason, and one control
-proves it. `motor_allMotors_70` is the same rig and throttle that gives a
-7.5-8.2 dB margin on one motor. With four motors the margin is **1.41 dB**,
-because a candidate rate between the rotors collects teeth from all of them.
-All 18 SPCUP static and hover windows fail the same way, with margins of
--0.53 to +2.03 dB (`survey/findings.md:134-140`).
+**Single-rotor rig, unchanged.** Margin `≥ 3 dB` over the best rival comb, the
+two disjoint window halves inside 1 rev/s, window `≥ 8 s`.
 
-## Cross-checks
+**Multi-rotor rig, new.** All three of
+
+- `f̄`, the mean comb rate, stable to `≤ 1 rev/s` between the two window
+  halves;
+- a peak `≥ 6 dB` over the band's local median inside `k·f̄ ± 6 %` at
+  **`≥ 3` orders** of the line comb, consecutive or not;
+- window `≥ 8 s`
+
+(`survey/findings.md:74-84`). The margin is still computed and stored for
+every reading. It is no longer gated on for a multi-rotor rig.
+
+The per-rotor split reads the same lines. Inside `k·f̄ ± 6 %`, up to four
+peaks 6 dB over the local median become rate candidates `peak/k`; a candidate
+becomes a **resolved rotor** when it repeats within 0.3 rev/s at `≥ 3` orders.
+The split runs on the **line comb** — the comb with a tooth at every order,
+which on a two-bladed rotor is the blade-pass line and not the shaft rate
+(`survey/findings.md:60-72`).
 
 ::: {.column-screen-inset}
-![Measured speed per fit point, per corpus. Source: `results/noise_v2/survey/survey.json`.](noise-model-v2-plan/survey_speeds.png)
+![The per-rotor split, per rig: the high-order band, its local median, the 6 dB peak threshold and the resolved rotor lines. Source: `results/noise_v2/survey/survey.json`.](noise-model-v2-plan/survey_multirotor_split.png)
 :::
 
-**DREGON bench against the validated throttle law.** The law is
-`rate = 0.975 · throttle + 0.37 rev/s`. 20 of 20 single-motor recordings are
-usable, with mean absolute error **0.555 rev/s**, maximum 1.42 rev/s and RMS
-0.703 rev/s. The per-throttle means are 49.04 / 58.83 / 68.42 / 78.36 /
-88.07 rev/s against the campaign's 49.11 / 58.98 / 68.53 / 78.37 / 88.17. An
-independent refit of the survey's own readings gives slope **0.97577**,
-intercept **0.2395 rev/s**, `R² = 0.997444` and residual RMS 0.699 rev/s,
-against the campaign's 0.975 / 0.37 / 0.99788 / 0.63. The residual is the
-documented motor-to-motor spread, not estimator error
-(`survey/findings.md:61-69`).
+Neither cheaper repair works. Excluding the `±6 %` neighbourhood of the
+candidate — which stops one rotor of a rig being scored against another — moved
+the limiting rival on 44 of 240 multi-rotor readings (median gain 0.556 dB,
+max 2.33 dB) and flipped one verdict. A `--family-max 8` counterfactual, 43
+`m/n` ratios instead of 11, flipped none and left the SPCUP static median
+margin at +0.04 dB (`survey/findings.md:98-107`).
+
+## Validation
+
+**The four-rotor control on the DREGON bench.** `motor_allMotors_70` is now
+usable and resolves **four rotors at 64.65 / 67.66 / 68.74 / 69.57 rev/s**
+(mean 67.66, spread 4.92) against the single-motor throttle law's 68.6 rev/s
+at 70 %. Line evidence: peaks at 27 orders of the line comb, halves agreeing
+to 0.8 rev/s. The first pass read three rotors from one order and rejected the
+recording (`survey/findings.md:136-142`).
+
+**The DREGON single-motor law is untouched.** The law is
+`rate = 0.975 · throttle + 0.37 rev/s`. 20 of 20 recordings are usable, with
+mean absolute error **0.5552 rev/s**, maximum 1.42 and RMS 0.703; an
+independent refit of the survey's own readings gives slope 0.97577, intercept
+0.2395 rev/s and `R² = 0.997444`. Every one of those numbers is identical to
+the first pass, because single-rotor mode is untouched by the gate change
+(`survey/findings.md:129-134`). That makes the comparison a regression test
+rather than a coincidence.
 
 ::: {.column-page}
 ![The 20 DREGON single-motor readings against the validated throttle law.](noise-model-v2-plan/bench_speeds_dregon_law.png)
 :::
 
-**SPCUP19 AGH against the accepted blind readings.** 7 of 8 takes are usable.
-Six agree to `≤ 0.27 rev/s`, with mean absolute error **0.148 rev/s** (take 0
-79.82 vs 79.71, take 2 113.54 vs 113.78, take 3 97.48 vs 97.43, take 5 98.08
-vs 97.81, take 6 96.78 vs 96.59, take 7 96.78 vs 96.81). Take 1 reads
-**132.30 vs 66.33 rev/s**, a factor 1.995: its odd harmonics at 66 rev/s do
-not clear the 6 dB rule. The blind campaign had already flagged that take,
-with `fvk_ratio_double = 1.021`, the weakest odd-harmonic evidence of its set.
-The mean absolute error over all seven is therefore 9.55 rev/s, carried
-entirely by that one octave (`survey/findings.md:71-79`).
-
-**DroneAudioSet against the paper's stated lines.** The paper
-(arXiv:2510.15383, Fig. 7) states 168 / 235 Hz for `D_large` low and high and
-156 / 259 Hz for `D_small` low and high.
+**DroneAudioSet against the paper's stated lines** (arXiv:2510.15383, Fig. 7).
 
 | cell | n | median rev/s | 2f (Hz) | paper (Hz) | error |
 |---|---|---|---|---|---|
-| `drone1` low | 1 | 83.44 | 166.9 | 168 (`D_large` low) | -0.7 % |
-| `drone1` high | 9 | 118.88 | 237.8 | 235 (`D_large` high) | +1.2 % |
-| `drone2` high | 16 | 129.39 | 258.8 | 259 (`D_small` high) | -0.1 % |
-| `drone2` low | 19 | 106.63 | 213.3 | 156 (`D_small` low) | **+36.7 %** |
+| `drone1` low | 17 | 84.96 | 169.9 | 168 (`D_large` low) | +1.1 % |
+| `drone1` high | 25 | 118.68 | 237.4 | 235 (`D_large` high) | +1.0 % |
+| `drone2` high | 28 | 126.03 | 252.1 | 259 (`D_small` high) | -2.7 % |
+| `drone2` low | 28 | 105.83 | 211.7 | 156 (`D_small` low) | **+35.7 %** |
 
-: Cell medians over the fit points and the blade-pass line they imply. Source: `results/noise_v2/survey/findings.md:88-106`.
+: Cell medians over the fit points and the blade-pass line they imply. Source: `results/noise_v2/survey/findings.md:156-172`.
 
-Three of the four cells match to `≤ 1.2 %`. That identifies the anonymous path
-tokens: `drone1` is `D_large` (DJI F450, 9.4 in props) and `drone2` is
-`D_small` (DJI F330, 8 in props). It also settles what the paper's marked
-"fundamental" is: the blade-pass line at twice the shaft rate, not the shaft
-rate. 168 Hz of shaft would be 10 080 RPM on a 9.4 in propeller. The
-`drone2` low cell is the single disagreement. The measured line sits at 213 Hz
-on 19 recordings from 3 microphone groups and 2 distances, so the
-disagreement is in the published figure or in the session it was drawn from,
-and not in one reading.
+Three of four cells match to `≤ 2.7 %`, now on 17-28 readings per cell against
+1-22 in the first pass. That keeps both conclusions: `drone1` is `D_large`
+(DJI F450) and `drone2` is `D_small` (DJI F330), and the paper's marked
+"fundamental" is the blade-pass line at twice the shaft rate. `drone2` low is
+the one real disagreement with the published figure.
+
+**SPCUP19 AGH against the accepted blind readings**: 7 of 8 usable, unchanged.
+Six agree to `≤ 0.27 rev/s` (mean absolute error 0.148 rev/s). Take 1 reads
+132.30 against 66.33 rev/s, a factor 1.995, which the blind campaign had
+already flagged; take 4 is refused by the single-rotor margin rule at 1.62 dB
+(`survey/findings.md:144-147`).
+
+**KAIST rotating machine**, the out-of-domain control: 0 of 5 usable,
+unchanged. It is a single-rotor corpus, so it exercises the unchanged 3 dB
+gate and does not falsify the new one. The falsification checks for the new
+gate are the four-rotor control above and the cell-median consistency check
+below (`survey/findings.md:149-154`).
+
+## Verdict per corpus
 
 ::: {.column-page}
-![The two gate axes, on the two corpora that carry a non-acoustic reference: harmonic-sum margin over the non-octave runner-up against the half-to-half rate difference. The dashed lines are the 3 dB and 1 rev/s rules. Every DREGON bench reading but one clears both; every KAIST reading fails at least one.](noise-model-v2-plan/bench_speeds_gates.png)
+
+| corpus | read | usable, pass 1 | usable, now | verdict |
+|---|---|---|---|---|
+| DREGON bench (single motor + all-motors) | 21 | 20 | **21** | USABLE |
+| SPCUP19 AGH single rotors | 8 | 7 | 7 | USABLE |
+| DroneAudioSet (drone-only) | 168 | 50 | **98** | PARTLY USABLE |
+| SPCUP19 static / hover (4 rigs) | 18 | 0 | **7** | PARTLY USABLE |
+| SPCUP19 ChuMS propeller rig (16 s window) | 9 | 1 | **2** | PARTLY USABLE |
+| AVQ constant-throttle ego-noise | 16 windows | — | **9** | USABLE |
+| KAIST rotating machine | 5 | 0 | 0 | CONTROL ONLY |
+| `drone_audio` (`yes_drone`) | 24 | 0 | 0 | REJECTED (1.02 s clips) |
+| `zenodo_drone_noises` | 7 | 1 | 4 | REJECTED (no rig identity) |
+| DronePrint / MAVD / DroneNoise DB / ESC-50 | — | — | — | REJECTED (access or type) |
+
+: Usable readings per corpus, first pass against this pass. Full table with locations, licences and per-recording reasons: `results/noise_v2/survey/survey_table.md`. Counts: `results/noise_v2/survey/findings.md:206-226`; the corpus-level verdict strings in `survey.json` are the script's own constants and still read REJECTED for the SPCUP static family.
+
 :::
+
+**Totals: 276 readings, 148 usable, 135 fit points over 18 rig/condition
+cells** — against 79 usable, 73 fit points and 11 cells in the first pass.
+
+Rejections, 128 readings: 70 DroneAudioSet (lines at fewer than 3 orders,
+mostly the `M_up` mic group above the airframe), 24 `drone_audio` clips (1.02 s
+against the 8 s rule), 11 SPCUP static, 7 ChuMS, 7 AVQ windows, 5 KAIST (the
+control), 3 `zenodo` (no rig identity), 1 SPCUP AGH take
+(`survey/findings.md:254-258`).
+
+The ChuMS package stays a discovery. The published SPCUP19 frames expose it as
+216 unlabelled arrays. `UAV_rotor_recordings.mat` in fact holds 9 runs of
+73-75 s on 8 calibrated microphones, with their positions in the file and a
+per-microphone OASPL of 88.9-98.4 dB, at 1, 2 or 3 propellers with three
+repeats each. No RPM is recorded anywhere in it. It is read with a **16 s**
+window, because its propeller speeds drift and the 30 s multi-rotor window
+smears the lines: `3prop_repeat2` gives no line cluster at 30 s against three
+resolved propellers at 77.08 / 77.52 / 78.07 rev/s at 16 s
+(`survey/findings.md:248-252`).
 
 ## What the fit points are
 
-**73 fit points** over **12 distinct rig/condition points**:
+**135 fit points** over **18 rig/condition cells**, points each
+(`survey/findings.md:228-237`):
 
-- `dregon_mikrokopter_single_motor` at 50/60/70/80/90 % throttle — 20 points,
-  5 conditions, 1 rotor each;
-- `spcup_AGH` single rotor — 7 points, 1 condition, 1 rotor each,
-  66-114 rev/s;
-- `daset_drone1` (DJI F450) low and high, `daset_drone2` (DJI F330) low and
-  high — 45 points, 4 conditions, 2-4 resolved rotors each;
-- `spcup_ChuMS_3prop_bench` — 1 point, 3 propellers.
+- `dregon_mikrokopter_single_motor` at 50/60/70/80/90 % — 4 each, 20 total;
+- `dregon_mikrokopter_quad` at 70 % — 1, the four-rotor control;
+- `spcup_AGH` single rotor — 7; `spcup_AGH` stationary — 5;
+- `spcup_Diagonal_Unloading` stationary — 1; `spcup_Idea_ssu` stationary — 1;
+- `spcup_ChuMS_2prop_bench` — 1; `spcup_ChuMS_3prop_bench` — 1;
+- `daset_drone1` low/high — 16 + 23; `daset_drone2` low/high — 27 + 26;
+- `avq_quadrotor` at 50 % — 2; at 100 % — 4.
 
-The published tolerance is `max(half-to-half difference, 0.5·df, 0.25) rev/s`.
-It is 0.25 rev/s on 72 of the 73 points and 0.56 rev/s on the ChuMS run
-(`survey/findings.md:33-38,155-169`). Five usable DroneAudioSet readings sit
-at a factor 0.50-0.51 of their own cell median, which is an octave failure on
-that recording. They are excluded, so 50 usable DroneAudioSet readings become
-45 fit points (`survey/findings.md:149-153`).
+The published tolerance is `max(half-to-half difference, 0.5·df, 0.25) rev/s`,
+median 0.25 rev/s over the 135 points. Nine usable readings sat at a factor
+0.48-0.52 of their own cell median — a factor-2 failure on that recording, not
+a different speed — and were dropped, so 148 usable readings become 135 fit
+points (`survey/findings.md:260-266`).
 
-The dataset is published as **`noise-v2-bench-points@8f49bb0f77d3`**
+::: {.column-screen-inset}
+![Measured speed per reading, per corpus and condition; circles usable, crosses rejected. Source: `results/noise_v2/survey/survey.json`.](noise-model-v2-plan/survey_speeds.png)
+:::
+
+How many rotors each point resolves:
+
+| rotor rates resolved | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| fit points | 76 | 42 | 10 | 7 |
+
+: Resolved rotor rates per fit point, over the 135 points. 99 of the 135 carry `multiplicity_unresolved`: at least two rotors coincide within 0.3 rev/s, and `speed_rev_s` repeats `f̄` for them. The first pass resolved at most three rotors and never four. Source: `src/data_processing/noise_v2_bench_points.json`, `survey.json:corpora[].stats.n_resolved_by_rig`, narrative `survey/findings.md:268-275`.
+
+Said plainly: most four-rotor points carry a **mean rate plus a partial
+split**, not four independent speeds. That is what the v2 likelihood is built
+for. A bench point with four rotors enters with **four constant carriers as
+fit parameters**, initialised from the split, so the per-rotor offsets are
+fitted rather than assumed.
+
+The dataset is published as **`noise-v2-bench-points@00f32a1210d6`**
 (`dload.lock:55`, full digest
-`8f49bb0f77d3fb3c85a70b0ccffc7b9893d673e6e7e0cdab84dbf239c513f337`;
-manifest `src/data_processing/noise_v2_bench_points.json`, generator
-`noise_v2_bench` in `src/data_processing/derivations.py:2129`). Every point
-carries the stationary audio at its native rate with every channel kept,
-`meta.rig`, `meta.corpus`, `meta.speed_rev_s` (one entry per resolved rotor),
-`meta.speed_source`, `meta.speed_tolerance`, and the source recording id and
-offset. The labels are estimator output, so the committed manifest is hashed
-into the derivation spec. A re-estimation mints a new dataset identity instead
-of republishing different labels.
+`00f32a1210d656ad0ebe60b70ddd6a60a3d204be4b07a79cc02f857dd3d1a159`; 135
+samples, 14 shards, 1.9 GiB as reported by `dload pull`; manifest
+`src/data_processing/noise_v2_bench_points.json`, generator `noise_v2_bench` in
+`src/data_processing/derivations.py`). It supersedes the first pass's
+`@8f49bb0f77d3` (73 points, 11 cells) and the margin-gated second pass
+`@0dc685bf949a` (78 points); neither is pinned any more
+(`docs/data-catalog.md`). Every point carries the stationary audio at its
+native rate with every channel kept, `meta.rig`, `meta.corpus`,
+`meta.speed_rev_s` (one entry per rotor: the resolved rates first, then `f̄`
+for the rotors the split could not separate), `meta.resolved_mask`,
+`meta.speed_source`, `meta.speed_tolerance`, `label.n_rotors_resolved`,
+`label.multiplicity_unresolved`, and the source recording id and offset. The
+labels are estimator output, so the committed manifest is hashed into the
+derivation spec. A re-estimation mints a new dataset identity instead of
+republishing different labels.
 
 ::: {.callout-warning}
 ## Three limits to carry into the model work
 
-1. **The 12 rig/condition points are not 12 rigs.** Five of them are the same
-   DREGON motor at five throttles. The genuinely new rigs are two DJI
-   airframes, the AGH single rotor and the Dotterel 3-propeller rig.
-2. **The per-rotor spread is small where it resolves** — 0.3-3.5 rev/s on
-   DroneAudioSet cells, 3.5 rev/s on `motor_allMotors_70`. A shared shaft
-   speed error across rotors is not contradicted, but these points constrain
-   the **mean** speed only.
+1. **18 cells are not 18 rigs.** Five are the same DREGON motor at five
+   throttles. The genuinely distinct rigs are the MikroKopter (single motor and
+   four motors), two DJI airframes at two throttles each, the AGH quadrotor
+   (single rotor and stationary), two more SPCUP team rigs, the Dotterel
+   propeller rig at 2 and 3 propellers, and the AVQ quadrotor at two settings.
+2. **The new quantity costs octave certainty.** 37 of the 148 usable readings
+   carry `octave_unresolved`, and 9 factor-2 failures had to be removed by the
+   cell median. That check only works where a cell holds `≥ 3` readings, which
+   the SPCUP stationary and ChuMS cells do not. Treat those as the weakest
+   cells, and read `meta.octave_unresolved` before using a label.
 3. **No new corpus adds telemetry.** Every extra point is an estimate with a
-   0.25 rev/s tolerance. Use them for rig-to-rig transfer of the noise
-   parameters, and not for anything that needs a speed trajectory
-   (`survey/findings.md:179-197`).
+   0.25 rev/s median tolerance, and none carries a speed track. Use the points
+   for rig-to-rig transfer of the noise parameters, and not for anything that
+   needs a speed trajectory (`survey/findings.md:277-293`).
 :::
 
 # Shaft-phase prior from telemetry
@@ -427,86 +527,74 @@ were not wrong to use it. The spread is also far too wide to justify fixing
 **give `λ` a broad measured prior and let the data move it**, per rig and per
 label chain.
 
-## The 16 Hz label-band residual
+## Above the label band: is the speed error white?
 
-A rotor-speed label carried at the working rate 31.25 Hz holds nothing above
-15.625 Hz. Everything above is phase noise that a renderer must **generate**,
-not read. Two variants isolate it.
+A label carried at 31.25 Hz holds nothing above 15.625 Hz, so a renderer has
+to generate that part itself. The question is whether it can generate it as
+white noise.
 
-- **16 Hz high-pass** — a zero-phase order-4 Butterworth high-pass at 16 Hz, a
-  clean band edge. This is the above-band variant, and it is the one to trust.
-- **Label residual** — the native series minus the same series resampled to
-  31.25 Hz and back. This is an **upper bound** on what a real label chain
-  leaks, not the leak itself: the resampler here is linear interpolation in
-  both directions, and linear interpolation has a lossy passband, so the
-  residual carries the resampler's own low-frequency error as well as the
-  out-of-band content.
+The method is three steps
+(`results/noise_v2/residual/findings.md`, script
+`scripts/noise_v2_residual_acf.py`). High-pass the logged speed at 16 Hz with
+a zero-phase order-4 Butterworth, which keeps exactly what a 31.25 Hz label
+cannot carry. Compare the autocorrelation of that residual against a **null**:
+white noise of the same length through the same filter, averaged over 8 draws,
+because a high-pass makes even white noise look correlated. Measure the slope
+of the raw speed PSD above 16 Hz, where white noise would be flat.
 
-The numbers below are **model-free**. They are the measured structure function
-`S(τ)`, the per-rotor mean of `S_rad2` in `shaft.json`, and not a fitted
-curve. The fitted `σ_ν`, `λ` and `D_θ` of the 16 Hz rows are not quoted at
-all, because on those rows the Lorentzian corner falls outside the fit band
-and the pair is unidentified.
+::: {.column-screen-inset}
 
-::: {.column-page}
+| rig | fs (Hz) | `ν_res` rms (rad/s) | ρ(1 sample) | ρ(10 ms) | ρ(50 ms) | 1/e lag (ms) | slope 16-fs/2 | slope 2-16 | verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| `neurobem_quad` | 400.0 | 6.11 | +0.936 | +0.169 | +0.328 | 8.4 | -4.36 | -1.14 | red |
+| `blackbird_quad` | 187.0 | 1.72 | +0.385 | -0.109 | +0.131 | 5.5 | -2.23 | -3.55 | red |
+| `vid_m100` | 1014.2 | 1.63 | +0.798 | +0.239 | +0.203 | 3.7 | -1.50 | -1.95 | red |
+| `nanobench_cf21b` | 100.0 | 5.52 | +0.440 | +0.440 | +0.603 | 10.7 | -29.85 | -1.96 | red |
+| `pitcn_quad` | 100.0 | 8.41 | -0.048 | -0.048 | +0.274 | 6.0 | -2.56 | -0.42 | red |
+| `dregon_room1` | 1001.0 | 2.64 | +0.907 | -0.057 | +0.124 | 5.3 | -2.19 | -1.19 | red |
+| `dregon_room1_command` | 1001.0 | 0.66 | +0.899 | -0.062 | +0.124 | 4.5 | -2.26 | -2.68 | red |
+| `michaels` | 29.2 | — | — | — | — | — | — | — | n/a |
 
-| rig | variant | fs (Hz) | band (Hz) | `ν_res` RMS (rad/s) | `S(10 ms)` | `S(100 ms)` | `S(1 s)` | `S_max` (rad²) | slope @5 ms | slope @50 ms |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `neurobem_quad` | 16 Hz HP | 400 | 16-160 | 6.84 | 3.178e-3 | 4.569e-3 | 4.555e-3 | 7.977e-3 | 1.92 | -0.27 |
-| `neurobem_quad` | label residual | 400 | 0.5-160 | 9.67 | 6.940e-3 | 7.382e-2 | 5.826e-1 | 4.171 | 1.95 | 0.62 |
-| `blackbird_quad` | 16 Hz HP | 187 | 16-74.8 | 1.71 | 2.155e-4 | 2.426e-4 | 2.460e-4 | 3.980e-4 | 1.47 | -0.29 |
-| `blackbird_quad` | label residual | 187 | 0.5-74.8 | 2.75 | 6.771e-4 | 1.105e-2 | 7.992e-2 | 7.111e-1 | 1.78 | 1.06 |
-| `vid_m100` | 16 Hz HP | 1014 | 16-406 | 1.65 | 1.440e-4 | 2.760e-4 | 2.498e-4 | 4.420e-4 | 1.64 | -1.37 |
-| `vid_m100` | label residual | 1014 | 0.5-406 | 2.74 | 5.626e-4 | 5.869e-3 | 4.410e-2 | 2.829e-1 | 1.87 | 0.25 |
-| `nanobench_cf21b` | 16 Hz HP | 100 | 16-40 | 5.03 | 3.052e-3 | 6.187e-3 | 5.618e-3 | 1.097e-2 | 1.53 | -3.88 |
-| `nanobench_cf21b` | label residual | 100 | 0.5-40 | 8.38 | 9.141e-3 | 4.521e-2 | 4.690e-2 | 7.057e-2 | 1.64 | -0.80 |
-| `pitcn_quad` | 16 Hz HP | 100 | 16-40 | 8.41 | 7.078e-3 | 8.201e-3 | 8.448e-3 | 1.353e-2 | 0.93 | -0.43 |
-| `pitcn_quad` | label residual | 100 | 0.5-40 | 11.3 | 1.270e-2 | 1.018e-1 | 8.220e-1 | 6.397 | 1.39 | 0.39 |
-| `dregon_room1` | 16 Hz HP | 1001 | 16-400 | 2.59 | 4.309e-4 | 5.058e-4 | 5.007e-4 | 8.588e-4 | 1.71 | 0.23 |
-| `dregon_room1` | label residual | 1001 | 0.5-400 | 3.48 | 1.003e-3 | 1.960e-2 | 2.106e-1 | 1.896 | 1.85 | 1.18 |
-| `dregon_room1_command` | 16 Hz HP | 1001 | 16-400 | 0.598 | 2.431e-5 | 3.105e-5 | 2.961e-5 | 4.996e-5 | 1.65 | -0.13 |
-| `dregon_room1_command` | label residual | 1001 | 0.5-400 | 0.828 | 6.453e-5 | 1.164e-3 | 1.045e-2 | 7.370e-2 | 1.83 | 1.06 |
-| `michaels` | 16 Hz HP | 29 | — | — | — | — | — | — | — | — |
-| `michaels` | label residual | 29 | 0.5-11.7 | 1.12 | 1.586e-3 | 1.634e-3 | 2.802e-3 | 1.561e-2 | -0.04 | -0.01 |
-
-: Measured residual structure functions, per-rotor mean of `S_rad2`. Source: `results/noise_v2/shaft/findings.md:44-61`, data `results/noise_v2/shaft/shaft.json`. Michael's 16 Hz row is skipped because the 16 Hz corner sits at or above `0.45 f_s = 13.14 Hz` of its own 29.4 Hz log, so only its label-residual row speaks.
+: The residual above the label band, per rig. `slope 2-16` is the band the label does carry and is shown for contrast. The autocorrelation is unbiased, pooled over segments and averaged over rotors; the rms values are averaged over rotors in quadrature. Source: `results/noise_v2/residual/findings.md:15-26`, data `results/noise_v2/residual/residual.json`.
 
 :::
 
-**Reading the 16 Hz rows.** `S(τ)` rises with a slope of 0.93-1.92 at 5 ms,
-which is smooth drift, and then **saturates**: by 50 ms the local slope is
-already `-3.88` to `+0.23`, and `S_max` runs from
-`5.0e-05` to `1.4e-02 rad²`. A saturating structure function is a
-**stationary bounded wobble**, not diffusion. At order `k` the standing
-deviation is `k·sqrt(S_max/2) = k × 0.005-0.082 rad`. On DREGON
-`motors_measured` it is `sqrt(8.588e-4/2) = 0.021 rad` at `k = 1`, 0.41 rad at
-`k = 20` and 1.04 rad at `k = 50`.
+::: {.column-screen-inset}
+![Autocorrelation of the residual against the filtered-white null, per rig. The grey band is the white band `±2/√N`.](noise-model-v2-plan/residual_acf.png)
+:::
 
-The closed form agrees, within a factor of two. Integrating the 1/f² speed
-tail once gives a 1/f⁴ phase spectrum, so
+::: {.column-screen-inset}
+![PSD of the raw speed error per rig, with the fitted slope below and above 16 Hz. A white residual would be flat to the right of the dashed line.](noise-model-v2-plan/residual_psd.png)
+:::
 
-$$\operatorname{Var}\theta^{\text{res}}
-=\frac{2\sigma_\nu^2\lambda}{3\pi\,\omega_c^3},
-\qquad \omega_c=2\pi\cdot 16\ \text{rad/s}.$$
+**The answer is no.** On every rig whose Nyquist sits above 16 Hz the residual
+is correlated. The PSD keeps falling above the band edge, at `≈ f⁻²` on the
+four rigs that measure the shaft (slopes -1.50 to -2.56). The autocorrelation
+at 50 ms is +0.12 to +0.60, against a filtered-white null of 0.002 to 0.047 at
+the same lag (`residual.json:rigs.*.null_filtered_white`). The curve also
+swings negative, down to -0.91 at the worst rig against -0.44 for the deepest
+null, and crosses zero between 8.6 and 14.3 ms: the residual **rings** at the
+edge of the label band. It then dies — by 100 ms every rig is inside
+`|ρ| ≤ 0.05`.
 
-DREGON room 1's identified pair `σ_ν = 8.82 rad/s`, `λ = 14.4 s⁻¹` gives
-`2.35e-4 rad²`, against the measured `S_max/2 = 4.29e-4 rad²`. **Trust the
-measurement**: the closed form wants the `(σ_ν, λ)` of the process below the
-label band, and the 16 Hz residual's own corner is outside its fit band, so
-the formula is fed from the wideband fit and is an estimate of the right order
-rather than a substitute.
+**So there is one process, not two.** The speed error is a single
+Ornstein-Uhlenbeck process with a Lorentzian PSD, corner
+`λ = 0.674-14.4 s⁻¹`, whose `f⁻²` tail simply continues above the label band;
+the phase error is therefore integrated-OU at every frequency, and never
+Wiener. Above the label band that phase error is a bounded wobble of rms
+**0.003-0.055 rad at `k = 1`**, scaling as `k` — 0.09 to 1.65 rad at
+`k = 30` — which a renderer must generate as filtered noise with that PSD and
+cannot read from the label
+(`residual/findings.md:36-88`).
 
-**So there is no diffusion and no Lorentzian core from the shaft above the
-label band.** What is left is a weak set of `≥ 16 Hz` sidebands that only
-matter at high order.
+Three instrument caveats, one line each.
 
-**Reading the label-residual rows.** These do **not** saturate. They keep
-growing past 50 ms, with local slopes of `-0.80` to `+1.18`, and reach
-`S(1 s) = 2.8e-3` to `8.2e-1 rad²`. Read as a diffusion that is an upper
-bound, `D_θ = S(1 s)/2` gives 0.0052 rad²/s for the DREGON command track,
-0.105 for DREGON `motors_measured`, and 0.29-0.41 for the aggressive flight of
-`neurobem` and `pitcn`. Part of that growth is the resampler's own passband
-error, so the true label-chain leak is somewhere below those numbers.
+- `neurobem` (-4.36) and `nanobench` (-29.85) are steeper than -3, which is
+  the logger's own reconstruction roll-off and not the shaft.
+- DREGON `motors_measured` is logged near 1 kHz but only changes near 45 Hz,
+  so above 16 Hz it is the staircase of a sample-and-hold.
+- Michael's logs at 29.2 Hz, so nothing above 14.6 Hz exists in it and the rig
+  cannot answer the question at all.
 
 ## Against the C3 fitted values
 
@@ -515,7 +603,7 @@ error, so the true label-chain leak is somewhere below those numbers.
 | DREGON airframe | 3.1012 | 1.603 | 844.69 | **0.599** measured (IQR 0.38-0.66) | ≤ 0.105 (`motors_measured`), ≤ 0.0052 (command) | 4.29e-4, bounded |
 | Michael's M100 | 4.2072 | 2.950 | 1.6308 | — (FLY125 saturates, 0/4 identified) | 0.0256 measured in band; `≤ 0.0014` from its own label residual | — (29 Hz log has no 16 Hz band) |
 
-: C3 values from `docs/experiments/revised-phase-handoff-2026-09-13.qmd:139-142`, at the fixed `λ_ref = 6 s⁻¹`. Bench acoustics from `shaft.json:acoustics.dregon_bench`; bound and wobble from the two tables above. The corpus-wide label-residual bound is `D_θ ≤ 0.41 rad²/s` and `Var θ_res = 2.5e-5` to `6.8e-3 rad²`. On Michael's the study measures `D_θ = 0.0256 rad²/s` in band, which is `σ = 0.392 rad/s` at `λ_ref = 6` against C3's fitted 4.21 — a factor 10.7 (`shaft/findings.md:70-73`).
+: C3 values from `docs/experiments/revised-phase-handoff-2026-09-13.qmd:139-142`, at the fixed `λ_ref = 6 s⁻¹`. Bench acoustics from `shaft.json:acoustics.dregon_bench`; the label-residual bound and the above-band wobble from `results/noise_v2/shaft/findings.md:44-61` (`shaft.json:label_band`). The corpus-wide label-residual bound is `D_θ ≤ 0.41 rad²/s` and `Var θ_res = 2.5e-5` to `6.8e-3 rad²`. On Michael's the study measures `D_θ = 0.0256 rad²/s` in band, which is `σ = 0.392 rad/s` at `λ_ref = 6` against C3's fitted 4.21 — a factor 10.7 (`shaft/findings.md:70-73`).
 
 The comparison is the whole argument. C3's DREGON `σ²/λ_ref = 1.603 rad²/s` is
 **2.7 times** the bench's label-free measurement of the same quantity
@@ -633,40 +721,69 @@ and `rps_refined`, and the five FLY124 windows the frozen evaluator resolves
 with carrier `rps`. Every guarded training support is excluded, widened by the
 hashed 1.024 s training guard (`criteria/findings.md:12-33`).
 
-## The line is visible on Michael's only, and only at low order
+## What the line statistic measures: label precision
 
-| rig / carrier | k=1 | k=2 | k=4 | k=8 | k=16 | k=32 |
+The statistic is built like this. Harmonic `k` of rotor `r` is demodulated
+with the **label's** own integrated phase `2πk∫f_r dt`. The complex baseband
+is Welch-averaged at `T = 4.096 s`, so its bins are 0.24 Hz wide. The "line"
+is the largest bin inside `±2` bins — `±0.49 Hz` — of the position the label
+predicts, which is 0 Hz after demodulation. The "floor" is the median PSD over
+`0.5B ≤ |f| ≤ B`, which is 19-38 Hz away on the DREGON cruise comb
+(`likelihood.json:lineshape.front_end`,
+`scripts/noise_v2_likelihood_window.py:508-518`).
+
+The quantity is therefore **label precision per order and per window**. A
+label that is off by `δ` rev/s puts harmonic `k` at `k·δ` Hz from the centre
+of the search box. The peak keeps its full prominence over the floor while it
+stays inside one bin,
+
+$$k\,\delta<\frac{1}{2T}=0.12\ \text{Hz}\quad\text{at }T=4.096\ \text{s},$$
+
+and it leaves the box altogether above `k·δ = 0.49 Hz`. That has to hold for
+the whole 4 s. On Michael's `k = 2` the tolerance is 0.06 rev/s, and 95 % of
+cells meet it. At `k = 8` it is 0.015 rev/s, and 23 % do. At `k ≥ 16` none do.
+On DREGON the label meets 0.12 rev/s at `k = 1` on 31 % of cells.
+
+::: {.column-page}
+
+| rig / label | k=1 | k=2 | k=4 | k=8 | k=16 | k=32 |
 |---|---|---|---|---|---|---|
-| `dregon` / `motors_command` | 6.4 | 4.3 | 3.5 | 2.7 | 2.7 | 1.8 |
-| `dregon` / `rps_refined` | 7.1 | 4.2 | 3.6 | 1.9 | 2.7 | 1.8 |
-| `michaels` / `rps` | 4.7 | **24.4** | **13.6** | 7.6 | 3.3 | 2.3 |
+| `dregon` / `motors_command` | 0.31 (6.4) | 0.06 (4.3) | 0.03 (3.5) | 0.00 (2.7) | 0.00 (2.7) | 0.00 (1.8) |
+| `dregon` / `rps_refined` | 0.28 (7.1) | 0.03 (4.2) | 0.03 (3.6) | 0.00 (1.9) | 0.00 (2.7) | 0.00 (1.8) |
+| `michaels` / `rps` | 0.33 (4.7) | **0.95** (24.4) | **0.85** (13.6) | 0.23 (7.6) | 0.00 (3.3) | 0.00 (2.3) |
 
-: Median line SNR (dB) over the local baseband floor at `T = 4.096 s`. Source: `results/noise_v2/criteria/findings.md:39-51`.
+: Label precision: fraction of cells with the line inside `±0.5 Hz` of the label at `T = 4.096 s`, with the median line SNR in dB in brackets. A cell is one (support, rotor, mic) triple — 32 per order on DREGON, 40 on Michael's — and it counts when the peak inside the box clears the preregistered 10 dB gate over the floor. Source: `likelihood.json:lineshape.cells`; medians and gate fractions in `results/noise_v2/criteria/findings.md:39-51`.
 
-At `T = 4.096 s` the fraction of (support, rotor, mic) cells that pass the
-10 dB moment gate is 0.31 at `k = 1` and 0.00-0.06 at every `k ≥ 2` for DREGON
-`motors_command`. On Michael's it is 0.95 at `k = 2`, 0.85 at `k = 4`, 0.23 at
-`k = 8` and 0.00 at `k ≥ 16`. A per-harmonic line-shape check is therefore
-measurable on Michael's cruise at `k = 2` and `k = 4` only.
+:::
+
+The mid- and high-order lines are real. They stand out as horizontal bands
+well above 1 kHz in the NFFT-2048 log spectrogram of the same DREGON cruise
+support, at 7.81 Hz bins
+(`noise-model-v2-plan/criteria_proxy_spectrogram.png`). What the table reports
+at high `k` is that the label does not locate them to 0.12 Hz over 4 s, so the
+demodulated peak lands off centre and the prominence is spent on the wrong
+bins. The displacement is `k·δ`, and a **fixed-carrier** model has to absorb
+it. C3 absorbed it on DREGON by widening every line instead: `D = 844.69
+rad²/s`, a 134.44 Hz linewidth at every order.
 
 The two DREGON carriers are indistinguishable for this purpose. At `k = 1`,
-`motors_command` gives 6.4 dB and `rps_refined` 7.1 dB, and the half-power
-widths agree to 0.13 Hz at every window. **A line-shape criterion cannot
-argue for or against the refined label.**
+`motors_command` gives 6.4 dB of median line SNR and `rps_refined` 7.1 dB, and
+the half-power widths agree to 0.13 Hz at every window. **A line-shape
+criterion cannot argue for or against the refined label.**
 
 ::: {.callout-important}
-## Read the DREGON null as an instrument limit too
+## Read the DREGON row as an instrument limit too
 
 The four DREGON rotors run within a few rev/s of each other, so the per-rotor
 isolation band is only `B = f_r/2 = 38.5 Hz` wide. At `k ≥ 2` that band
-already contains the neighbouring rotors' lines of the same order: the
-spacing between two rotors' `k`-th harmonics is `k·Δf_r`, and it passes 38.5 Hz
-while `k` is still small. The measurement therefore says two things at once —
-the comb above `k = 1` is not above the floor, **and** this demodulation
-cannot isolate one rotor's harmonic from its neighbours' at those orders. The
-second statement is a property of the instrument, not of the recording. Which
-DREGON orders the v2 fit should use is a reviewer decision, not a settled
-fact.
+already contains the neighbouring rotors' lines of the same order: the spacing
+between two rotors' `k`-th harmonics is `k·Δf_r`, and it passes 38.5 Hz while
+`k` is still small. So the low DREGON fractions carry two statements at once.
+The label does not place the harmonic inside `±0.5 Hz`, **and** this
+demodulation cannot separate one rotor's harmonic from its neighbours' at
+those orders. The second one is a property of the instrument, not of the
+recording. Which DREGON orders the v2 fit should use is a reviewer decision,
+not a settled fact.
 :::
 
 ::: {.column-page}
@@ -749,8 +866,25 @@ $$T_{\max}(k)=\sqrt{\frac{1.44}{k\,|df_r/dt|}}.$$
 On the Michael's standby support the median slope is 0.230 rev/s per s, the
 p95 is 0.801 and the maximum is 2.14. That gives
 `T_max(k = 2) = 1.77 s` at the median and **0.95 s at the p95**
-(`criteria/findings.md:135-141`, data
-`likelihood.json:lineshape.supports[*].carrier_drift`).
+(`criteria/findings.md:135-141`).
+
+Read the same rule the other way round. At a fixed window `T` the orders that
+stay inside the window's own resolution are
+
+$$k_{\max}(T)=\frac{1.44}{T^2\,|df_r/dt|}.$$
+
+| label chain | drift (rev/s per s) | `k_max` at 1.024 s | `k_max` at 4.096 s | `T_max(k = 2)` (s) |
+|---|---|---|---|---|
+| Michael's `rps`, standby, median | 0.230 | 6.0 | 0.37 | 1.77 |
+| Michael's `rps`, standby, p95 | 0.801 | 1.7 | 0.11 | 0.95 |
+| Michael's `rps`, standby, max | 2.14 | 0.6 | 0.04 | 0.58 |
+
+: `k_max(T)` per label chain, from the drift slopes of `criteria/findings.md:135-141`. The committed `likelihood.json` does not carry the `carrier_drift` block that `criteria/findings.md:136` names, so only these three slopes are quotable and DREGON has none. DREGON's label precision is read from the pass fractions above instead.
+
+The standby support is the worst of the five. At `T = 4.096 s` even its median
+slope gives `k_max < 2`, while the `k = 2` line is held on 95 % of Michael's
+cells pooled over standby, ramp and cruise. Read `k_max` as a per-support
+bound and not as a corpus number.
 
 ## Composite risk per arm per NFFT: not computed
 
@@ -840,10 +974,11 @@ Three things the data does settle about this check
   line-sensitive likelihood needs. 2048 and 4096 smear the core into the floor
   and belong in a robustness check, not in the primary.
 - **`T = 1.024 s`** for the line-shape companion measurement.
-- **Where the check has signal:** `k = 2` and `k = 4` on Michael's cruise. On
-  DREGON room-2 cruise a per-harmonic line criterion has no measurable line at
-  any window between 0.128 s and 4.096 s, so the DREGON arm of this check can
-  only be a broadband or floor statement.
+- **Where the check has signal:** Michael's `k = 2` and `k = 4`, where the
+  label holds the line inside `±0.5 Hz` on 95 % and 85 % of cells. On DREGON
+  room-2 cruise no order above `k = 1` is held that well at any window between
+  0.128 s and 4.096 s, so the DREGON arm of this check has to be a broadband
+  or floor statement unless the fit carries a per-rotor carrier offset.
 
 # Spectrogram proxy
 
@@ -1073,7 +1208,7 @@ half-width (`bench-fit-revised-phase-model.qmd:329-394,429-460`).
 | `λ` | fixed at `λ_ref = 6 s⁻¹`, a reference assumption | `λ_L` **free per label chain**, prior centred on the label-free bench measurement 5.48 s⁻¹ |
 | `σ` | free, prior `log σ ~ N(0, 2²)` | `σ_L` free, prior centred on the bench 1.77 rad/s; the above-band `σ_ν` is fixed from telemetry |
 | `D_gk` | `D_g`, no `k` scaling, prior `log D ~ N(0, 2²)` | `D_g·k^{p_g}`, `p_g = 0` fixed in R1 and R2, freed only if a named gate fails on the high orders |
-| rig coupling | none; hand-set banks for sampling | population Gaussian over rigs, including the 12 bench points |
+| rig coupling | none; hand-set banks for sampling | population Gaussian over rigs, including the survey's 18 bench cells |
 | carrier | recovered (C2/C3) or fixed (C4) | fixed, no recovery |
 | objective | two stages, Adam (C2/C3); L-BFGS marginal (C4) | one objective, one optimiser |
 | line power profile, speed law, coloured floor, mic gains | as C4 | unchanged from C4 |
@@ -1108,6 +1243,11 @@ rig is the shaft error **plus** whatever the label chain adds.
 
 : Proposed priors. Sources: `results/noise_v2/shaft/shaft.json` (`acoustics.dregon_bench`, `planted_control`, `label_band`) via `results/noise_v2/shaft/findings.md`, and `results/noise_v2/criteria/findings.md:81-87`.
 
+Bench points with four rotors carry **four constant carriers as fit
+parameters**, initialised from the survey's per-rotor split. The priors above
+are unchanged by that: the carriers are per-point nuisance parameters, not
+population parameters.
+
 Three consequences are worth stating, because they are what the priors buy.
 
 1. **`λ_ref = 6 s⁻¹` sits 0.06 prior standard deviations from the centre.**
@@ -1129,7 +1269,7 @@ a weaker instrument: an upper limit from one rig at two orders.
 
 The rig-level hierarchy is the object that replaces today's hand-set banks.
 `(log λ_L, log σ_L, log D_g, floor shape, profile slope)` for every rig — DREGON,
-Michael's, and the 12 bench points of the survey — is drawn from a population
+Michael's, and the survey's 18 bench cells — is drawn from a population
 Gaussian with unknown mean and scale. The population posterior is what the
 training sampler draws rigs from.
 
@@ -1237,13 +1377,15 @@ Nine choices are open. Each one has a proposal and the number behind it.
   sub-0.46 Hz core. The absolute values need the composite table, which was
   not computed. Decide whether R1 blocks on that table, and whether the
   composite gate is per rig or pooled.
-- **Which DREGON orders the v2 fit should use.** On DREGON room-2 cruise no
-  harmonic above `k = 1` clears the 10 dB gate — the median line SNR is
-  1.8-4.3 dB at `k ≥ 2`. That is partly the rig and partly the instrument: the
-  38.5 Hz per-rotor isolation band already holds the neighbouring rotors'
-  lines at `k ≥ 2`. C4 activates all `K = 130` DREGON orders. Decide whether
-  v2 keeps them, restricts the DREGON likelihood to `k = 1` plus a broadband
-  term, or scores the high orders only through the LTAS proxy.
+- **Which orders enter the DREGON likelihood, given the label precision.**
+  On DREGON room-2 cruise the label holds only `k = 1` inside `±0.5 Hz` at
+  `T = 4.096 s`, and only on 31 % of cells; at `k ≥ 2` it is 0-6 %. Two causes
+  are mixed. The label's own error `δ` displaces harmonic `k` by `k·δ`, and
+  the 38.5 Hz per-rotor isolation band already holds the neighbouring rotors'
+  lines of the same order at `k ≥ 2`. C4 activates all `K = 130` DREGON
+  orders. Decide whether v2 keeps them, restricts the DREGON likelihood to the
+  orders below `k_max(T)`, or scores the high orders only through the LTAS
+  proxy.
 - **`(λ_L, σ_L)` free per label chain.** Proposal: free in R2 with the
   log-normal priors above, and fixed at `λ_ref = 6` in R1 for the parity test.
   Two facts push this way. The one label-free instrument centres the prior but
@@ -1256,10 +1398,13 @@ Nine choices are open. Each one has a proposal and the number behind it.
   arm.
 - **The fixed above-band wobble.** Proposal: take `(σ_ν, λ)` per rig from the
   telemetry and enter the wobble as a stationary phase modulation of variance
-  `2σ_ν²λ/(3πω_c³)`, checked against the measured `S_max/2`. The variance is
-  small — `2.5e-5` to `6.8e-3 rad²` — so at low order it is negligible, and at
-  `k = 50` on DREGON it is 1.04 rad. Decide whether R1 carries it at all, or
-  whether it enters with the high orders in R2.
+  `2σ_ν²λ/(3πω_c³)`, checked against the two measurements — `S_max/2` from the
+  shaft study and the integrated residual of the residual study. The wobble is
+  small: rms `0.003-0.055 rad` at `k = 1`, `0.09-1.65 rad` at `k = 30`. The
+  residual study also shows what to generate, a filtered noise with an `f⁻²`
+  PSD above the band edge and a 100 ms correlation length, and not white
+  noise. Decide whether R1 carries it at all, or whether it enters with the
+  high orders in R2.
 - **The `D_k` order structure.** Proposal `D_gk = D_g·k^{p_g}` with
   `p_g = 0` fixed in R1 and R2. The corrected bench acoustics now identify the
   shaft term on 12 of 12 recordings, but `D_k` itself is still unidentified:
