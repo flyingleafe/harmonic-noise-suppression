@@ -83,7 +83,7 @@ The campaign record is `docs/experiments/noise-model-v2.md`.
 9. The round plan is five rounds: Pyro parity, shaft prior, rig hierarchy, one
    named fix, then simplification. The primary HPPNet criterion carries over
    unchanged.
-10. The reviewer must settle eight open choices: the window, the proxy, the
+10. The reviewer must settle nine open choices: the window, the proxy, the
     two thresholds, which DREGON orders to fit, whether `(λ_L, σ_L)` are free
     per label chain, the above-band wobble, the `D_k` order structure, and the
     DREGON label arm. Section
@@ -1146,7 +1146,7 @@ The cap is **5 rounds**. Backends are `uni-cpu` and `uni-gpushort`.
 
 # Decisions for the reviewer {#decisions-for-the-reviewer}
 
-Eight choices are open. Each one has a proposal and the number behind it.
+Nine choices are open. Each one has a proposal and the number behind it.
 
 - **The fit and scoring window.** Proposal `T = 1.024 s`, periodic Hann, 50 %
   overlap. It is set by the p95 carrier drift `T_max(k = 2) = 0.95 s` and by

@@ -290,7 +290,7 @@ improvement; Michael's regime-mean ratio `≤ 1.05` against 3.027 rev/s
 
 ## Status
 
-**Awaiting review.** Nothing is submitted. Eight decisions are open, and they
+**Awaiting review.** Nothing is submitted. Nine decisions are open, and they
 are listed with their numbers in
 `docs/explainers/noise-model-v2-plan.qmd`, section "Decisions for the
 reviewer": the window, the proxy, the proxy threshold, the likelihood
