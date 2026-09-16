@@ -858,7 +858,11 @@ def lineshape_stage(
                                 )
                                 if null is not None:
                                     acc["l1_null"].append(null)
-                                if mi == 0 and r == 0:
+                                if scored.regime == "cruise":
+                                    # ONE regime per figure: B = f_r / 2 differs by a
+                                    # factor of 2.4 between standby and cruise, and a
+                                    # median over both would rebin two different bands
+                                    # onto one grid. Every rotor and mic is banked.
                                     shape_bank.setdefault(key, []).append(ls)
                                 payload["cells"].append(
                                     dict(
@@ -930,13 +934,10 @@ def lineshape_stage(
             )
         )
     for (rig, label, k, t_win), bank in sorted(shape_bank.items()):
-        # the median normalised shape over supports, on this window's own grid
-        grid = bank[0]
-        stack = []
-        for ls in bank:
-            if ls.shape.sum() <= 0.0:
-                continue
-            stack.append(rebin_to(ls.f, ls.shape, grid.f))
+        # median normalised shape over every banked (support, rotor, mic) of the
+        # CRUISE supports, rebinned onto the widest banked grid
+        grid = max(bank, key=lambda ls: ls.f.size)
+        stack = [rebin_to(ls.f, ls.shape, grid.f) for ls in bank if ls.shape.sum() > 0.0]
         if not stack:
             continue
         norm = np.median(np.stack([s / s.sum() for s in stack]), axis=0)
@@ -1194,26 +1195,46 @@ def figure_lineshape(payload: dict[str, Any], fig_dir: Path, out_dir: Path) -> l
             continue
         ncol = min(3, len(orders))
         nrow = int(np.ceil(len(orders) / ncol))
-        fig, axes = plt.subplots(nrow, ncol, figsize=(4.4 * ncol, 3.1 * nrow), squeeze=False)
+        fig, axes = plt.subplots(nrow, ncol, figsize=(4.6 * ncol, 3.3 * nrow), squeeze=False)
         wins = sorted({s["window_s"] for s in rows})
         cmap = plt.get_cmap("viridis")
+        agg = payload.get("aggregate", [])
         for ax, k in zip(axes.ravel(), orders, strict=False):
+            b_hz = None
             for wi, t_win in enumerate(wins):
                 sel = [s for s in rows if s["order"] == k and s["window_s"] == t_win]
                 if not sel:
                     continue
                 s = sel[0]
+                b_hz = s["b_hz"]
                 f = np.asarray(s["f_hz"])
                 p = np.asarray(s["normalised_shape"])
                 dens = p / max(float(f[1] - f[0]), 1e-12)
+                # a log axis cannot show a clipped zero; floor four decades under
+                # the peak so the visible dynamic range is the same in every panel
+                floor = max(float(dens.max()) * 1e-4, 1e-12)
                 ax.semilogy(
                     f,
-                    np.maximum(dens, 1e-9),
+                    np.maximum(dens, floor),
                     color=cmap(wi / max(len(wins) - 1, 1)),
                     lw=1.2,
                     label=f"T={t_win:g} s",
                 )
-            ax.set_title(f"k = {k}", fontsize=9)
+            snr = next(
+                (
+                    a["line_snr_db"]["median"]
+                    for a in agg
+                    if (a["rig"], a["label"], a["order"]) == (rig, label, k)
+                    and a["window_s"] == max(wins)
+                ),
+                None,
+            )
+            title = f"k = {k}"
+            if snr is not None:
+                title += f"   (median line SNR {snr:.1f} dB at T={max(wins):g} s)"
+            ax.set_title(title, fontsize=9)
+            if b_hz is not None:
+                ax.set_xlim(-b_hz, b_hz)
             ax.set_xlabel("baseband offset (Hz)", fontsize=8)
             ax.set_ylabel("normalised density (1/Hz)", fontsize=8)
             ax.tick_params(labelsize=7)
@@ -1223,7 +1244,8 @@ def figure_lineshape(payload: dict[str, Any], fig_dir: Path, out_dir: Path) -> l
         axes.ravel()[0].legend(fontsize=6, ncol=2)
         fig.suptitle(
             f"{rig} / carrier {label}: demodulated line shape against the Welch window\n"
-            "median over held-out supports; baseline-subtracted, unit area inside |f| <= B",
+            "median over every held-out CRUISE support, rotor and mic; baseline-subtracted, "
+            "unit area inside the comb's isolation limit |f| <= B = f_r / 2",
             fontsize=10,
         )
         fig.tight_layout(rect=(0, 0, 1, 0.93))
@@ -1232,11 +1254,10 @@ def figure_lineshape(payload: dict[str, Any], fig_dir: Path, out_dir: Path) -> l
             fig.savefig(d / name, dpi=140)
         plt.close(fig)
         names.append(name)
-    # one summary panel of the three window statistics
     agg = payload.get("aggregate", [])
     if agg:
         combos = sorted({(a["rig"], a["label"]) for a in agg})
-        fig, axes = plt.subplots(3, len(combos), figsize=(4.4 * len(combos), 8.4), squeeze=False)
+        fig, axes = plt.subplots(4, len(combos), figsize=(4.6 * len(combos), 11.4), squeeze=False)
         for ci, (rig, label) in enumerate(combos):
             rows = [a for a in agg if a["rig"] == rig and a["label"] == label]
             orders = sorted({a["order"] for a in rows})
@@ -1270,7 +1291,23 @@ def figure_lineshape(payload: dict[str, Any], fig_dir: Path, out_dir: Path) -> l
                     lw=1.1,
                     ms=3,
                 )
-            for ax in (axes[0][ci], axes[1][ci], axes[2][ci]):
+                axes[2][ci].plot(
+                    t,
+                    [a["window_invariance_l1_null"]["median"] for a in sel],
+                    ":",
+                    color=col,
+                    lw=1.0,
+                )
+                axes[3][ci].plot(
+                    t, [a["line_snr_db"]["median"] for a in sel], "o-", color=col, lw=1.1, ms=3
+                )
+            t_ref = np.asarray(sorted({a["window_s"] for a in rows}), dtype=np.float64)
+            axes[0][ci].plot(t_ref, 1.44 / t_ref, "k--", lw=1.4, label="1.44/T (Hann resolution)")
+            axes[3][ci].axhline(
+                RP.GATE_MIN_LINE_SNR_DB, color="k", ls="--", lw=1.4, label="10 dB gate"
+            )
+            for row in range(4):
+                ax = axes[row][ci]
                 ax.set_xscale("log")
                 ax.grid(alpha=0.25)
                 ax.set_xlabel("Welch window T (s)", fontsize=8)
@@ -1279,13 +1316,16 @@ def figure_lineshape(payload: dict[str, Any], fig_dir: Path, out_dir: Path) -> l
             axes[0][ci].set_title(f"{rig} / {label}", fontsize=9)
             axes[0][ci].set_ylabel("half-power width (Hz)", fontsize=8)
             axes[1][ci].set_ylabel("power share within +-2 bins", fontsize=8)
-            axes[2][ci].set_ylabel("L1(shape at T, shape at 2T)", fontsize=8)
+            axes[2][ci].set_ylabel("L1(T, 2T)   dotted: split-half null", fontsize=8)
+            axes[3][ci].set_ylabel("median line SNR (dB)", fontsize=8)
             axes[0][ci].legend(fontsize=6, ncol=2)
+            axes[3][ci].legend(fontsize=6)
         fig.suptitle(
-            "window statistics of the demodulated line (median over supports, rotors, mics)",
+            "window statistics of the demodulated line (median over supports, rotors, mics)\n"
+            "a measured width ON the 1.44/T line means the line is UNRESOLVED at that window",
             fontsize=10,
         )
-        fig.tight_layout(rect=(0, 0, 1, 0.95))
+        fig.tight_layout(rect=(0, 0, 1, 0.955))
         name = "criteria_lineshape_summary.png"
         for d in (fig_dir, out_dir):
             fig.savefig(d / name, dpi=140)
@@ -1357,7 +1397,12 @@ def main() -> None:
     )
     ap.add_argument("--out", type=Path, default=OUT_DEFAULT)
     ap.add_argument("--fig-dir", type=Path, default=FIG_DEFAULT)
-    ap.add_argument("--stage", choices=("all", "lineshape", "composite"), default="all")
+    ap.add_argument(
+        "--stage",
+        choices=("all", "lineshape", "composite", "figures"),
+        default="all",
+        help="'figures' recomputes nothing and redraws from the existing likelihood.json",
+    )
     ap.add_argument("--rigs", default="dregon,michaels")
     ap.add_argument("--orders", default=",".join(str(k) for k in ORDERS_DEFAULT))
     ap.add_argument("--windows", default=",".join(f"{w:g}" for w in WINDOWS_DEFAULT))
