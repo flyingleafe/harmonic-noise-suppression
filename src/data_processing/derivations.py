@@ -89,6 +89,7 @@ PARENTS = {
     "AVQ": "dload:AVQ@50dd53d1a6c0ab81fe02e4a40a57557a0a2b1c1b85152470edd12aa6d0725f39",
     "AVQ-egonoise": "dload:AVQ-egonoise@b43b374b007a0d5c9575dd2feacd31a05097d0c436629819b936273f17cf7703",
     "DREGON-LM-V4-michaels-valid-full": "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9",
+    "SPCUP19-egonoise": "dload:SPCUP19-egonoise@043e0a4e8264ebed3588c7706f6b23d25164e442d0e8129a7602f05b2852298b",
 }
 
 
@@ -951,6 +952,271 @@ def generate_avq_vkrps(gen: dict[str, Any]) -> Iterator[Sample]:
         "commit); it cannot be re-materialized by a pure dload pipeline."
     )
     yield  # pragma: no cover - generator form required for fingerprinting
+
+
+# ─── noise-v2 bench/static fit points ────────────────────────────────────────
+
+#: The committed fit-point manifest: one entry per usable bench/static recording
+#: of the noise-model-v2 corpus survey (rig, condition, publish window, one
+#: speed per rotor, tolerance). Produced by ``scripts/noise_v2_bench_speed.py``
+#: + ``scripts/noise_v2_corpus_survey.py --manifest-out``; a git artifact, like
+#: the refined-label sidecars, because the labels are estimator OUTPUT and the
+#: derivation is only reproducible if its identity names those bytes.
+NOISE_V2_MANIFEST = Path(__file__).resolve().parent / "noise_v2_bench_points.json"
+
+#: The ChuMS propeller-rig archive (SPCUP19 team package, single 1.36 GiB
+#: member). The INRIA host stalls on a plain streamed GET but serves byte
+#: ranges, so the fetch below is range-chunked.
+_CHUMS_ZIP_URL = "https://dregon.inria.fr/SPCup2019_egonoise/SPCUP19_ChuMS_data.zip"
+_CHUMS_MEMBER = "UAV_rotor_recordings.mat"
+
+
+def noise_v2_manifest_identity() -> dict[str, Any]:
+    """Identity of the committed fit-point manifest, for the spec/fingerprint."""
+    import hashlib
+
+    raw = NOISE_V2_MANIFEST.read_bytes()
+    data = json.loads(raw)
+    return {
+        "path": NOISE_V2_MANIFEST.name,
+        "sha256": hashlib.sha256(raw).hexdigest()[:16],
+        "n_points": len(data["points"]),
+    }
+
+
+def _load_noise_v2_manifest(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read the manifest, failing unless its bytes are the ones the spec names."""
+    import hashlib
+
+    if not NOISE_V2_MANIFEST.exists():
+        raise ValueError(f"fit-point manifest missing: {NOISE_V2_MANIFEST}")
+    raw = NOISE_V2_MANIFEST.read_bytes()
+    got = hashlib.sha256(raw).hexdigest()[:16]
+    if got != spec["sha256"]:
+        raise ValueError(
+            "noise-v2 fit-point manifest does not match the spec — regenerate the "
+            f"spec identity (spec {spec['sha256']}, disk {got})"
+        )
+    points = list(json.loads(raw)["points"])
+    if len(points) != int(spec["n_points"]):
+        raise ValueError(f"manifest holds {len(points)} points, spec says {spec['n_points']}")
+    return points
+
+
+def _noise_v2_frame(point: dict[str, Any], audio_ct: np.ndarray, sr: int) -> td.Frame:
+    """One fit point: the stationary audio slice + its speed label, as a Frame."""
+    from data_processing.sources._common import audio_frame, meta_frame
+
+    start = int(round(float(point["publish_start_s"]) * sr))
+    stop = min(audio_ct.shape[-1], start + int(round(float(point["publish_s"]) * sr)))
+    start = max(0, min(start, max(0, stop - 1)))
+    clip = np.ascontiguousarray(np.asarray(audio_ct, dtype=np.float32)[:, start:stop])
+    meta = meta_frame(
+        point["key"],
+        "noise-v2-bench-points",
+        system={
+            "category": "drone" if point.get("category", "drone") == "drone" else "machine",
+            "make_model": point.get("rig_model"),
+            "n_rotors": int(point["n_rotors"]),
+        },
+        observation={
+            "type": "bench_static",
+            "source_motion": "static",
+            "relative_trajectory": "none",
+            "n_channels": int(clip.shape[0]),
+        },
+        operating={
+            "condition": point.get("condition"),
+            "throttle_percent": point.get("throttle"),
+            "throttle_level": point.get("throttle_level"),
+        },
+        label={
+            "speed_rev_s_mean": round(float(np.mean(point["speed_rev_s"])), 4),
+            "n_rotors_resolved": int(point.get("n_distinct", 1)),
+            "octave_verdict": point.get("octave_verdict"),
+        },
+        extra={
+            "rig": point["rig"],
+            "corpus": point["corpus"],
+            "speed_rev_s": [float(v) for v in point["speed_rev_s"]],
+            "speed_source": point["speed_source"],
+            "speed_tolerance": float(point["speed_tolerance_rev_s"]),
+            "spread_rev_s": float(point.get("spread_rev_s") or 0.0),
+            "source_dataset": point["source"],
+            "source_id": point["source_id"],
+            "source_offset_s": round(start / sr, 4),
+            "duration_s": round(clip.shape[-1] / sr, 3),
+            "sample_rate": int(sr),
+        },
+    )
+    return audio_frame(clip, int(sr), meta)
+
+
+def _noise_v2_from_frames(
+    parent_uri: str, points: list[dict[str, Any]]
+) -> Iterator[tuple[str, td.Frame]]:
+    """Fit points whose audio lives in a pinned ``tdframe-v1`` parent."""
+    from data_processing.frames import get_meta
+    from data_processing.streams import iter_published_frames
+
+    name, version = _split_dload_uri(parent_uri)
+    wanted = {str(p["source_id"]): p for p in points}
+    seen: set[str] = set()
+    for frame in iter_published_frames(name, version):
+        rid = str(get_meta(frame, "recording_id", ""))
+        point = wanted.get(rid)
+        if point is None:
+            continue
+        audio = frame["audio"]
+        data = np.asarray(audio.data, dtype=np.float32)
+        if data.ndim == 1:
+            data = data[None, :]
+        seen.add(rid)
+        yield point["key"], _noise_v2_frame(point, data, int(audio.tindex.sr))
+    missing = set(wanted) - seen
+    if missing:
+        raise ValueError(f"{name} did not yield the required recordings {sorted(missing)}")
+
+
+def _noise_v2_from_daset(
+    gen: dict[str, Any], points: list[dict[str, Any]]
+) -> Iterator[tuple[str, td.Frame]]:
+    """Fit points from the DroneAudioSet ``drone-only`` HuggingFace parquet."""
+    import pyarrow.parquet as pq
+
+    from data_processing import downloaders
+    from data_processing.sources.droneaudio import _arrow_list_scalar_to_ct
+    from data_processing.streams import REPO_ROOT
+
+    spec = gen["daset"]
+    root = Path(spec.get("raw_dir") or REPO_ROOT / ".cache/source_raw/noise_v2/daset_hf")
+    downloaders.hf_fetch(spec["repo_id"], root, allow_patterns=list(spec["allow_patterns"]))
+    wanted = {str(p["source_id"]): p for p in points}
+    seen: set[str] = set()
+    for path in sorted(Path(root).rglob("*.parquet")):
+        pf = pq.ParquetFile(str(path))
+        for batch in pf.iter_batches(batch_size=2):
+            col = batch.column("audio")
+            arrays = col.field("array")
+            srs = col.field("sampling_rate").to_pylist()
+            fps = batch.column("file_path").to_pylist()
+            for i in range(batch.num_rows):
+                point = wanted.get(str(fps[i]))
+                if point is None:
+                    continue
+                seen.add(str(fps[i]))
+                yield (
+                    point["key"],
+                    _noise_v2_frame(point, _arrow_list_scalar_to_ct(arrays[i]), int(srs[i])),
+                )
+    missing = set(wanted) - seen
+    if missing:
+        raise ValueError(f"DroneAudioSet drone-only is missing {sorted(missing)}")
+
+
+def _fetch_chums_mat(dest_dir: Path) -> Path:
+    """Download + extract the ChuMS propeller-rig ``.mat`` (range-chunked)."""
+    import zipfile
+
+    import requests
+
+    dest_dir = Path(dest_dir)
+    mat = dest_dir / _CHUMS_MEMBER
+    if mat.exists():
+        return mat
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = dest_dir / "SPCUP19_ChuMS_data.zip"
+    session = requests.Session()
+    total = int(
+        session.head(_CHUMS_ZIP_URL, allow_redirects=True, timeout=120).headers["content-length"]
+    )
+    if not zip_path.exists() or zip_path.stat().st_size != total:
+        chunk = 64 << 20
+        with open(zip_path, "wb") as fh:
+            for begin in range(0, total, chunk):
+                end = min(begin + chunk, total) - 1
+                resp = session.get(
+                    _CHUMS_ZIP_URL, headers={"Range": f"bytes={begin}-{end}"}, timeout=600
+                )
+                resp.raise_for_status()
+                fh.write(resp.content)
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extract(_CHUMS_MEMBER, dest_dir)
+    zip_path.unlink(missing_ok=True)
+    return mat
+
+
+def _noise_v2_from_chums(
+    gen: dict[str, Any], points: list[dict[str, Any]]
+) -> Iterator[tuple[str, td.Frame]]:
+    """Fit points from the SPCUP19 ChuMS propeller rig (8 mics per run)."""
+    import re
+
+    from scipy.io import loadmat
+
+    from data_processing.streams import REPO_ROOT
+
+    spec = gen.get("chums") or {}
+    root = Path(spec.get("raw_dir") or REPO_ROOT / ".cache/source_raw/noise_v2/chums")
+    mat = loadmat(str(_fetch_chums_mat(root)), squeeze_me=True, struct_as_record=False)
+    node = np.atleast_1d(mat["TestResults"])[0]
+    wanted = {str(p["source_id"]): p for p in points}
+    seen: set[str] = set()
+    for test in np.atleast_1d(node.Test):
+        details = str(getattr(test, "Details", ""))
+        props = re.match(r"(\d+)", details)
+        repeat = re.search(r"Repeat:(\d+)", details)
+        key = f"{props.group(1) if props else '1'}prop_repeat{repeat.group(1) if repeat else '1'}"
+        point = wanted.get(key)
+        if point is None:
+            continue
+        mics = np.atleast_1d(getattr(test, "Data", []))
+        sigs = [np.asarray(d.RawTruncatedCalibrated, dtype=np.float32).reshape(-1) for d in mics]
+        n = min(s.size for s in sigs)
+        audio = np.stack([s[:n] for s in sigs], axis=0)
+        seen.add(key)
+        yield (
+            point["key"],
+            _noise_v2_frame(point, audio, int(round(float(getattr(mics[0], "Fs", 44100))))),
+        )
+    missing = set(wanted) - seen
+    if missing:
+        raise ValueError(f"ChuMS rig is missing {sorted(missing)}")
+
+
+def generate_noise_v2_bench_points(gen: dict[str, Any]) -> Iterator[Sample]:
+    """The bench/static fit points of the noise-model-v2 corpus survey.
+
+    One Frame per usable recording: the stationary part of the audio at its
+    native rate with every channel kept (capped at ``max_seconds``), plus
+    ``meta.rig`` / ``meta.corpus`` / ``meta.speed_rev_s`` (one entry per
+    resolved rotor) / ``meta.speed_source`` / ``meta.speed_tolerance``.
+
+    The speeds are estimator output, not telemetry: the committed manifest
+    (``noise_v2_bench_points.json``, hashed into this spec) is the label set,
+    and every point names the recording it was cut from. Audio comes from the
+    pinned parents where the corpus is published (DREGON bench, SPCUP19) and
+    from the publisher otherwise (DroneAudioSet ``drone-only`` parquet on
+    HuggingFace, the SPCUP19 ChuMS rig archive).
+    """
+    from data_processing.streams import frame_to_sample
+
+    points = _load_noise_v2_manifest(gen["manifest"])
+    by_source: dict[str, list[dict[str, Any]]] = {}
+    for point in points:
+        by_source.setdefault(str(point["source"]), []).append(point)
+    parents = dict(gen["parents"])
+    for source, group in sorted(by_source.items()):
+        if source in parents:
+            stream = _noise_v2_from_frames(parents[source], group)
+        elif source == "DroneAudioSet-drone-only":
+            stream = _noise_v2_from_daset(gen, group)
+        elif source == "SPCUP19-ChuMS-bench":
+            stream = _noise_v2_from_chums(gen, group)
+        else:
+            raise ValueError(f"unknown fit-point source {source!r}")
+        for key, frame in stream:
+            yield key, frame_to_sample(frame)
 
 
 # ─── SE validation sets (specs; generator body wired to the stream builders) ──
@@ -1859,6 +2125,39 @@ SPECS: dict[str, dict[str, Any]] = {
             ],
         },
     },
+    # ── noise-model-v2 bench/static fit points ──────────────────────────────
+    "noise-v2-bench-points": {
+        "generator": "noise_v2_bench",
+        "adopt_only": False,
+        "note": "The bench/static fit points of the noise-model-v2 corpus survey: "
+        "one Frame per usable static recording, native-rate audio of the stationary "
+        "part (all channels, <= 30 s) + meta.rig / meta.corpus / meta.speed_rev_s "
+        "(one per resolved rotor) / meta.speed_source / meta.speed_tolerance. "
+        "Speeds are ESTIMATOR OUTPUT, not telemetry: the committed manifest "
+        "src/data_processing/noise_v2_bench_points.json (hashed into this spec, so "
+        "a re-estimation mints a new identity) is the label set, produced by "
+        "scripts/noise_v2_bench_speed.py under the tolerance rule stated there "
+        "(harmonic-sum margin >= 3 dB over the best non-octave rival AND the two "
+        "disjoint halves of the window agreeing to <= 1 rev/s AND a >= 8 s window). "
+        "Audio: the pinned DREGON-frames / SPCUP19-egonoise parents plus the "
+        "publisher's own files for DroneAudioSet drone-only and the SPCUP19 ChuMS "
+        "propeller rig (neither is key-indexed in dload, so streaming the pinned "
+        "88 GiB DroneAudioSet to reach 168 recordings is avoided). Survey + "
+        "verdicts: results/noise_v2/survey/.",
+        "gen": {
+            "recipe_version": 1,
+            "manifest": noise_v2_manifest_identity(),
+            "parents": {
+                "DREGON-frames": PARENTS["DREGON-frames"],
+                "SPCUP19-egonoise": PARENTS["SPCUP19-egonoise"],
+            },
+            "daset": {
+                "repo_id": "ahlab-drone-project/DroneAudioSet",
+                "allow_patterns": ["drone-only/*"],
+            },
+            "chums": {"url": _CHUMS_ZIP_URL, "member": _CHUMS_MEMBER},
+        },
+    },
 }
 
 
@@ -1909,6 +2208,7 @@ _GENERATORS = {
     "beatvk_valid": generate_beatvk_valid,
     "avq_vkrps": generate_avq_vkrps,
     "se_valid": generate_se_valid,
+    "noise_v2_bench": generate_noise_v2_bench_points,
 }
 
 #: Manifest layout per generator family (adopt sanity check + derive meta).
@@ -1922,6 +2222,7 @@ _LAYOUTS = {
     "raw_subset": "raw-files",
     "pcm16_mono": PCM16_LAYOUT,
     "beatvk_valid": "tdframe-v1",
+    "noise_v2_bench": "tdframe-v1",
     "avq_vkrps": "tdframe-v1",
     "se_valid": "tdframe-v1",
 }
@@ -1960,6 +2261,15 @@ def dataset_meta(name: str) -> dict[str, Any]:
                 "warmup_max": _BEATVK_WARMUP_MAX,
             },
         }
+    if kind == "noise_v2_bench":
+        meta["description"] = (
+            "noise-model-v2 bench/static fit points: stationary native-rate audio "
+            "(all channels) + one estimated shaft speed per resolved rotor, with a "
+            "tolerance. Labels are estimator output (see meta.speed_source), not "
+            "telemetry; survey and verdicts in results/noise_v2/survey/."
+        )
+        meta["modality"] = "audio"
+        meta["label_manifest"] = entry["gen"]["manifest"]
     return meta
 
 
