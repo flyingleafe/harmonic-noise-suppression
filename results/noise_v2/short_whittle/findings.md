@@ -129,3 +129,22 @@ The criteria study measured ~20 s of `predict_spectrum` (the CANDIDATE path) per
 * pooled `michaels`/`oracle_np` at 2048/512: -459,805.1097 nats/s, -57.0195 nats/band-cell, 39.520 unique s over 5 supports, 1235 frames
 * pooled `michaels`/`oracle_np` at 4096/1024: -459,338.5705 nats/s, -28.4949 nats/band-cell, 39.040 unique s over 5 supports, 610 frames
 * pooled `michaels`/`oracle_np` at 16384/1024: -456,757.4049 nats/s, -7.0846 nats/band-cell, 35.200 unique s over 5 supports, 550 frames
+
+## Band cuts on DREGON (added at review, 2026-09-17)
+
+`--f-min` moves the lower band edge (the upper edge stays 7900 Hz). DREGON room2
+cruise, old bench-fitted export, 2048/512, model − oracle in nats per unique
+second (`results/noise_v2/short_whittle_<f>hz/`):
+
+| lower edge (Hz) | model − oracle | share of the 30 Hz gap |
+|---:|---:|---:|
+| 30 | 3,972,108 | 100 % |
+| 200 | 2,343,618 | 59 % |
+| 400 | 717,451 | 18 % |
+| 1000 | 382,260 | 10 % |
+| 2000 | 238,305 | 6 % |
+
+At 1024/256 the 200 Hz cut gives 697,155 (56 % of 1,251,035). 82 % of the gap
+is below 400 Hz (wind and orders 2-5); above 1 kHz the bench export is still
+382 k nats/s off, about six times Michael's whole gap: comb misplacement on the
+command label plus the missing room floor.

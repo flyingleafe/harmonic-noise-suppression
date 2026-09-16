@@ -223,10 +223,11 @@ def run(
     supports_per_rig: int | None,
     n_mics: int,
     cached: dict[str, Any] | None,
+    f_min: float = RE.OBS_F_MIN,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = dict(
         schema=f"noise-v2-{TOPIC}/1",
-        band_hz=list(LW.BAND_HZ),
+        band_hz=[max(float(LW.BAND_HZ[0]), float(f_min)), float(LW.BAND_HZ[1])],
         objective=(
             "frozen composite spectral risk: revised_eval.marginal_frame_nll + FrameScore + "
             "composite_score, positive exposure-weighted sum a_i (I_i/M_i + log M_i) on "
@@ -314,7 +315,7 @@ def run(
             for scored, clip, ref_clip in clips.values():
                 mics = min(int(n_mics), int(clip.audio.shape[0]))
                 pg = periodogram(clip, n_fft=n_fft, hop=hop)
-                band = RE.observation_band(pg.freqs)
+                band = RE.observation_band(pg.freqs, f_min=max(RE.OBS_F_MIN, f_min))
                 power = np.asarray(pg.power, dtype=np.float64)[:mics]
                 t0 = time.time()
                 m_model = RE.predicted_m(mp, pg, n_mics=mics)
@@ -697,6 +698,12 @@ def main() -> None:
     )
     ap.add_argument("--supports-per-rig", type=int, default=None)
     ap.add_argument("--mics", type=int, default=8)
+    ap.add_argument(
+        "--f-min",
+        type=float,
+        default=RE.OBS_F_MIN,
+        help="lower band edge, Hz (default: the frozen 30 Hz)",
+    )
     ap.add_argument("--out", type=Path, default=OUT_DEFAULT)
     ap.add_argument(
         "--reuse",
@@ -726,6 +733,7 @@ def main() -> None:
         supports_per_rig=args.supports_per_rig,
         n_mics=int(args.mics),
         cached=cached,
+        f_min=float(args.f_min),
     )
     payload["provenance"] = dict(
         git_head=LW.git_head(),
