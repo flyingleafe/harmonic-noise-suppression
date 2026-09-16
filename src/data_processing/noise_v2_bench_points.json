@@ -1,6 +1,7 @@
 {
   "produced_by": "scripts/noise_v2_corpus_survey.py --manifest-out",
   "speeds_source": [
+    "bench_speeds_dload.json",
     "bench_speeds_remote.json",
     "bench_speeds_local.json"
   ],
@@ -8,17 +9,123 @@
     "min_margin_db": 3.0,
     "max_half_delta_rev_s": 1.0,
     "min_window_s": 8.0,
-    "statement": "usable iff the harmonic-sum peak clears the best non-octave runner-up by >= 3 dB AND the two disjoint halves of the window agree to <= 1 rev/s AND the stationary window is >= 8 s"
+    "neighbour_frac": 0.06,
+    "statement": "usable iff the harmonic-sum peak clears the best RIVAL comb (its own small-rational family excluded always, and on a multi-rotor rig the +-6 % neighbourhood of the candidate too, since those candidates are the rig's other rotors) by >= 3 dB AND the two disjoint halves of the window agree to <= 1 rev/s AND the stationary window is >= 8 s"
   },
   "publish_max_s": 30.0,
   "cell_octave_outliers": {
-    "drone1_high_50cm_M_center_File3": "factor 0.50 of its daset_drone1|drone1 high cell median 118.40 rev/s (octave failure on this recording)",
-    "drone1_high_50cm_M_up_File3": "factor 0.50 of its daset_drone1|drone1 high cell median 118.40 rev/s (octave failure on this recording)",
-    "drone2_high_25cm_M_center_File2": "factor 0.51 of its daset_drone2|drone2 high cell median 129.28 rev/s (octave failure on this recording)",
-    "drone2_high_25cm_M_up_File2": "factor 0.51 of its daset_drone2|drone2 high cell median 129.28 rev/s (octave failure on this recording)",
-    "drone2_low_25cm_M_center_File5": "factor 0.51 of its daset_drone2|drone2 low cell median 106.76 rev/s (octave failure on this recording)"
+    "drone1_high_50cm_M_center_File3": "factor 0.50 of its daset_drone1|drone1 high cell median 118.82 rev/s (octave failure on this recording)",
+    "drone1_high_50cm_M_up_File3": "factor 0.50 of its daset_drone1|drone1 high cell median 118.82 rev/s (octave failure on this recording)",
+    "drone2_high_25cm_M_center_File2": "factor 0.50 of its daset_drone2|drone2 high cell median 129.56 rev/s (octave failure on this recording)",
+    "drone2_high_25cm_M_up_File2": "factor 0.50 of its daset_drone2|drone2 high cell median 129.56 rev/s (octave failure on this recording)",
+    "drone2_low_25cm_M_center_File5": "factor 0.51 of its daset_drone2|drone2 low cell median 106.60 rev/s (octave failure on this recording)"
   },
   "points": [
+    {
+      "key": "AVQ__S1_seq1_w1",
+      "corpus": "AVQ",
+      "source": "AVQ",
+      "source_id": "S1_seq1",
+      "rig": "avq_quadrotor",
+      "rig_model": "quadrotor (AVQ, QMUL)",
+      "condition": "constant throttle 50%, ego-noise only",
+      "throttle": 50.0,
+      "throttle_level": null,
+      "n_rotors": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        78.0
+      ],
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.0,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 30.0,
+      "publish_s": 30.0,
+      "margin_db": 4.68,
+      "half_delta_rev_s": 0.02,
+      "margin_family_only_db": 4.68
+    },
+    {
+      "key": "AVQ__S1_seq1_w3",
+      "corpus": "AVQ",
+      "source": "AVQ",
+      "source_id": "S1_seq1",
+      "rig": "avq_quadrotor",
+      "rig_model": "quadrotor (AVQ, QMUL)",
+      "condition": "constant throttle 50%, ego-noise only",
+      "throttle": 50.0,
+      "throttle_level": null,
+      "n_rotors": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        77.79
+      ],
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.0,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 90.0,
+      "publish_s": 30.0,
+      "margin_db": 4.371,
+      "half_delta_rev_s": 0.06,
+      "margin_family_only_db": 4.371
+    },
+    {
+      "key": "AVQ__S1_seq2_w0",
+      "corpus": "AVQ",
+      "source": "AVQ",
+      "source_id": "S1_seq2",
+      "rig": "avq_quadrotor",
+      "rig_model": "quadrotor (AVQ, QMUL)",
+      "condition": "constant throttle 100%, ego-noise only",
+      "throttle": 100.0,
+      "throttle_level": null,
+      "n_rotors": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        97.6042,
+        97.9705
+      ],
+      "speed_tolerance_rev_s": 0.54,
+      "spread_rev_s": 0.3663,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 0.0,
+      "publish_s": 30.0,
+      "margin_db": 3.795,
+      "half_delta_rev_s": 0.54,
+      "margin_family_only_db": 3.795
+    },
+    {
+      "key": "AVQ__S1_seq2_w3",
+      "corpus": "AVQ",
+      "source": "AVQ",
+      "source_id": "S1_seq2",
+      "rig": "avq_quadrotor",
+      "rig_model": "quadrotor (AVQ, QMUL)",
+      "condition": "constant throttle 100%, ego-noise only",
+      "throttle": 100.0,
+      "throttle_level": null,
+      "n_rotors": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        98.24
+      ],
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.0,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 90.0,
+      "publish_s": 30.0,
+      "margin_db": 4.799,
+      "half_delta_rev_s": 0.12,
+      "margin_family_only_db": 4.799
+    },
     {
       "key": "DREGON-bench__motor_Motor1_50",
       "corpus": "DREGON-bench",
@@ -30,7 +137,8 @@
       "throttle": 50.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         49.0
@@ -41,7 +149,8 @@
       "publish_start_s": 6.0,
       "publish_s": 30.0,
       "margin_db": 4.744,
-      "half_delta_rev_s": 0.06
+      "half_delta_rev_s": 0.06,
+      "margin_family_only_db": 4.744
     },
     {
       "key": "DREGON-bench__motor_Motor1_60",
@@ -54,7 +163,8 @@
       "throttle": 60.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "halved",
       "speed_rev_s": [
         58.69
@@ -65,7 +175,8 @@
       "publish_start_s": 8.0,
       "publish_s": 30.0,
       "margin_db": 5.363,
-      "half_delta_rev_s": 0.01
+      "half_delta_rev_s": 0.01,
+      "margin_family_only_db": 5.363
     },
     {
       "key": "DREGON-bench__motor_Motor1_70",
@@ -78,7 +189,8 @@
       "throttle": 70.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "halved",
       "speed_rev_s": [
         68.3
@@ -89,7 +201,8 @@
       "publish_start_s": 5.0,
       "publish_s": 30.0,
       "margin_db": 9.749,
-      "half_delta_rev_s": 0.08
+      "half_delta_rev_s": 0.08,
+      "margin_family_only_db": 9.749
     },
     {
       "key": "DREGON-bench__motor_Motor1_80",
@@ -102,7 +215,8 @@
       "throttle": 80.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         78.06
@@ -113,7 +227,8 @@
       "publish_start_s": 4.0,
       "publish_s": 12.0,
       "margin_db": 8.401,
-      "half_delta_rev_s": 0.06
+      "half_delta_rev_s": 0.06,
+      "margin_family_only_db": 8.401
     },
     {
       "key": "DREGON-bench__motor_Motor1_90",
@@ -126,7 +241,8 @@
       "throttle": 90.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         88.18
@@ -137,7 +253,8 @@
       "publish_start_s": 4.0,
       "publish_s": 13.0,
       "margin_db": 10.014,
-      "half_delta_rev_s": 0.35
+      "half_delta_rev_s": 0.35,
+      "margin_family_only_db": 10.014
     },
     {
       "key": "DREGON-bench__motor_Motor2_50",
@@ -150,7 +267,8 @@
       "throttle": 50.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         48.36
@@ -161,7 +279,8 @@
       "publish_start_s": 4.0,
       "publish_s": 12.0,
       "margin_db": 4.026,
-      "half_delta_rev_s": 0.04
+      "half_delta_rev_s": 0.04,
+      "margin_family_only_db": 4.026
     },
     {
       "key": "DREGON-bench__motor_Motor2_60",
@@ -174,7 +293,8 @@
       "throttle": 60.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "halved",
       "speed_rev_s": [
         58.07
@@ -185,7 +305,8 @@
       "publish_start_s": 4.0,
       "publish_s": 12.0,
       "margin_db": 5.519,
-      "half_delta_rev_s": 0.31
+      "half_delta_rev_s": 0.31,
+      "margin_family_only_db": 5.519
     },
     {
       "key": "DREGON-bench__motor_Motor2_70",
@@ -198,7 +319,8 @@
       "throttle": 70.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         67.52
@@ -209,7 +331,8 @@
       "publish_start_s": 4.0,
       "publish_s": 12.0,
       "margin_db": 5.564,
-      "half_delta_rev_s": 0.0
+      "half_delta_rev_s": 0.0,
+      "margin_family_only_db": 5.564
     },
     {
       "key": "DREGON-bench__motor_Motor2_80",
@@ -222,7 +345,8 @@
       "throttle": 80.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         77.18
@@ -233,7 +357,8 @@
       "publish_start_s": 4.0,
       "publish_s": 12.0,
       "margin_db": 7.173,
-      "half_delta_rev_s": 0.28
+      "half_delta_rev_s": 0.28,
+      "margin_family_only_db": 7.173
     },
     {
       "key": "DREGON-bench__motor_Motor2_90",
@@ -246,7 +371,8 @@
       "throttle": 90.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         86.7
@@ -257,7 +383,8 @@
       "publish_start_s": 5.0,
       "publish_s": 12.0,
       "margin_db": 9.76,
-      "half_delta_rev_s": 0.1
+      "half_delta_rev_s": 0.1,
+      "margin_family_only_db": 9.76
     },
     {
       "key": "DREGON-bench__motor_Motor3_50",
@@ -270,7 +397,8 @@
       "throttle": 50.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         49.065
@@ -281,7 +409,8 @@
       "publish_start_s": 3.0,
       "publish_s": 12.0,
       "margin_db": 5.137,
-      "half_delta_rev_s": 0.275
+      "half_delta_rev_s": 0.275,
+      "margin_family_only_db": 5.137
     },
     {
       "key": "DREGON-bench__motor_Motor3_60",
@@ -294,7 +423,8 @@
       "throttle": 60.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         58.9
@@ -305,7 +435,8 @@
       "publish_start_s": 3.0,
       "publish_s": 13.0,
       "margin_db": 5.282,
-      "half_delta_rev_s": 0.01
+      "half_delta_rev_s": 0.01,
+      "margin_family_only_db": 5.282
     },
     {
       "key": "DREGON-bench__motor_Motor3_70",
@@ -318,7 +449,8 @@
       "throttle": 70.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "halved",
       "speed_rev_s": [
         68.56
@@ -329,7 +461,8 @@
       "publish_start_s": 5.0,
       "publish_s": 12.0,
       "margin_db": 8.196,
-      "half_delta_rev_s": 0.03
+      "half_delta_rev_s": 0.03,
+      "margin_family_only_db": 8.196
     },
     {
       "key": "DREGON-bench__motor_Motor3_80",
@@ -342,7 +475,8 @@
       "throttle": 80.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         78.82
@@ -353,7 +487,8 @@
       "publish_start_s": 4.0,
       "publish_s": 13.0,
       "margin_db": 8.885,
-      "half_delta_rev_s": 0.0
+      "half_delta_rev_s": 0.0,
+      "margin_family_only_db": 8.885
     },
     {
       "key": "DREGON-bench__motor_Motor3_90",
@@ -366,7 +501,8 @@
       "throttle": 90.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         88.24
@@ -377,7 +513,8 @@
       "publish_start_s": 5.0,
       "publish_s": 12.0,
       "margin_db": 11.448,
-      "half_delta_rev_s": 0.26
+      "half_delta_rev_s": 0.26,
+      "margin_family_only_db": 11.448
     },
     {
       "key": "DREGON-bench__motor_Motor4_50",
@@ -390,7 +527,8 @@
       "throttle": 50.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         49.74
@@ -401,7 +539,8 @@
       "publish_start_s": 3.0,
       "publish_s": 13.0,
       "margin_db": 4.592,
-      "half_delta_rev_s": 0.02
+      "half_delta_rev_s": 0.02,
+      "margin_family_only_db": 4.592
     },
     {
       "key": "DREGON-bench__motor_Motor4_60",
@@ -414,7 +553,8 @@
       "throttle": 60.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "halved",
       "speed_rev_s": [
         59.66
@@ -425,7 +565,8 @@
       "publish_start_s": 2.0,
       "publish_s": 13.0,
       "margin_db": 5.107,
-      "half_delta_rev_s": 0.3275
+      "half_delta_rev_s": 0.3275,
+      "margin_family_only_db": 5.107
     },
     {
       "key": "DREGON-bench__motor_Motor4_70",
@@ -438,7 +579,8 @@
       "throttle": 70.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "halved",
       "speed_rev_s": [
         69.31
@@ -449,7 +591,8 @@
       "publish_start_s": 3.0,
       "publish_s": 13.0,
       "margin_db": 7.267,
-      "half_delta_rev_s": 0.03
+      "half_delta_rev_s": 0.03,
+      "margin_family_only_db": 7.267
     },
     {
       "key": "DREGON-bench__motor_Motor4_80",
@@ -462,7 +605,8 @@
       "throttle": 80.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         79.38
@@ -473,7 +617,8 @@
       "publish_start_s": 5.0,
       "publish_s": 12.0,
       "margin_db": 9.251,
-      "half_delta_rev_s": 0.02
+      "half_delta_rev_s": 0.02,
+      "margin_family_only_db": 9.251
     },
     {
       "key": "DREGON-bench__motor_Motor4_90",
@@ -486,7 +631,8 @@
       "throttle": 90.0,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         89.14
@@ -497,7 +643,35 @@
       "publish_start_s": 5.0,
       "publish_s": 12.0,
       "margin_db": 9.939,
-      "half_delta_rev_s": 0.02
+      "half_delta_rev_s": 0.02,
+      "margin_family_only_db": 9.939
+    },
+    {
+      "key": "DroneAudioSet__drone1_high_25cm_M_center_File2",
+      "corpus": "DroneAudioSet",
+      "source": "DroneAudioSet-drone-only",
+      "source_id": "drone-only-recordings/drone1-only/mic-dist-25cm/throttle-high/mic1_soundskrit-File2.wav",
+      "rig": "daset_drone1",
+      "rig_model": null,
+      "condition": "rig-mounted static, throttle high, mic M_center at 25cm",
+      "throttle": null,
+      "throttle_level": "high",
+      "n_rotors": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        118.6875,
+        119.1875
+      ],
+      "speed_tolerance_rev_s": 0.32,
+      "spread_rev_s": 0.5,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 61.0,
+      "publish_s": 30.0,
+      "margin_db": 5.614,
+      "half_delta_rev_s": 0.32,
+      "margin_family_only_db": 5.614
     },
     {
       "key": "DroneAudioSet__drone1_high_25cm_M_center_File3",
@@ -510,21 +684,47 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        116.6992,
-        116.8823,
-        117.1875,
-        117.4316
+        116.875,
+        117.41
       ],
-      "speed_tolerance_rev_s": 0.67,
-      "spread_rev_s": 0.7324,
+      "speed_tolerance_rev_s": 0.88,
+      "spread_rev_s": 0.535,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.5,
       "publish_s": 30.0,
-      "margin_db": 5.505,
-      "half_delta_rev_s": 0.67
+      "margin_db": 5.058,
+      "half_delta_rev_s": 0.88,
+      "margin_family_only_db": 5.058
+    },
+    {
+      "key": "DroneAudioSet__drone1_high_25cm_M_up_File2",
+      "corpus": "DroneAudioSet",
+      "source": "DroneAudioSet-drone-only",
+      "source_id": "drone-only-recordings/drone1-only/mic-dist-25cm/throttle-high/mic3_8array-up-File2.wav",
+      "rig": "daset_drone1",
+      "rig_model": null,
+      "condition": "rig-mounted static, throttle high, mic M_up at 25cm",
+      "throttle": null,
+      "throttle_level": "high",
+      "n_rotors": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        118.62
+      ],
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.0,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 60.5,
+      "publish_s": 30.0,
+      "margin_db": 5.723,
+      "half_delta_rev_s": 0.14,
+      "margin_family_only_db": 5.723
     },
     {
       "key": "DroneAudioSet__drone1_high_25cm_M_up_File3",
@@ -537,21 +737,21 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        116.8213,
-        117.0044,
-        117.2485,
-        117.5537
+        116.6875,
+        117.1875
       ],
-      "speed_tolerance_rev_s": 0.64,
-      "spread_rev_s": 0.7324,
+      "speed_tolerance_rev_s": 0.7,
+      "spread_rev_s": 0.5,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.0,
       "publish_s": 30.0,
-      "margin_db": 4.748,
-      "half_delta_rev_s": 0.64
+      "margin_db": 4.324,
+      "half_delta_rev_s": 0.7,
+      "margin_family_only_db": 4.324
     },
     {
       "key": "DroneAudioSet__drone1_high_50cm_M_center_File2",
@@ -564,21 +764,21 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        119.6289,
-        120.2393,
-        120.9106,
-        121.0938
+        119.6406,
+        120.0625
       ],
-      "speed_tolerance_rev_s": 0.58,
-      "spread_rev_s": 1.4648,
+      "speed_tolerance_rev_s": 0.72,
+      "spread_rev_s": 0.4219,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 61.0,
       "publish_s": 30.0,
-      "margin_db": 5.063,
-      "half_delta_rev_s": 0.58
+      "margin_db": 5.874,
+      "half_delta_rev_s": 0.72,
+      "margin_family_only_db": 5.874
     },
     {
       "key": "DroneAudioSet__drone1_high_50cm_M_center_File5",
@@ -591,21 +791,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        120.7886,
-        121.3379,
-        121.6431,
-        122.0093
+        121.69
       ],
-      "speed_tolerance_rev_s": 0.42,
-      "spread_rev_s": 1.2207,
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 61.0,
       "publish_s": 30.0,
-      "margin_db": 5.605,
-      "half_delta_rev_s": 0.42
+      "margin_db": 5.925,
+      "half_delta_rev_s": 0.24,
+      "margin_family_only_db": 5.925
     },
     {
       "key": "DroneAudioSet__drone1_high_50cm_M_center_File6",
@@ -618,48 +817,47 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        118.8354,
-        119.0186,
-        119.5068,
-        119.751
+        119.24
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.9155,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 62.5,
       "publish_s": 30.0,
-      "margin_db": 5.487,
-      "half_delta_rev_s": 0.02
+      "margin_db": 5.32,
+      "half_delta_rev_s": 0.12,
+      "margin_family_only_db": 5.32
     },
     {
-      "key": "DroneAudioSet__drone1_high_50cm_M_center_silence",
+      "key": "DroneAudioSet__drone1_high_50cm_M_up_File2",
       "corpus": "DroneAudioSet",
       "source": "DroneAudioSet-drone-only",
-      "source_id": "drone-only-recordings/drone1-only/mic-dist-50cm/throttle-high/mic1_soundskrit-silence.wav",
+      "source_id": "drone-only-recordings/drone1-only/mic-dist-50cm/throttle-high/mic3_8array-up-File2.wav",
       "rig": "daset_drone1",
       "rig_model": null,
-      "condition": "rig-mounted static, throttle high, mic M_center at 50cm",
+      "condition": "rig-mounted static, throttle high, mic M_up at 50cm",
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        117.7368,
-        118.2251,
-        118.6523,
-        119.0796
+        119.4583,
+        119.8333
       ],
-      "speed_tolerance_rev_s": 0.8,
-      "spread_rev_s": 1.3428,
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.375,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
-      "publish_start_s": 0.5,
+      "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 5.593,
-      "half_delta_rev_s": 0.8
+      "margin_db": 4.453,
+      "half_delta_rev_s": 0.095,
+      "margin_family_only_db": 4.453
     },
     {
       "key": "DroneAudioSet__drone1_high_50cm_M_up_File5",
@@ -672,21 +870,21 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        120.7886,
-        121.0938,
-        121.2769,
-        121.521
+        120.875,
+        121.2739
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.7324,
+      "spread_rev_s": 0.3989,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 4.348,
-      "half_delta_rev_s": 0.1
+      "margin_db": 4.918,
+      "half_delta_rev_s": 0.2,
+      "margin_family_only_db": 4.918
     },
     {
       "key": "DroneAudioSet__drone1_high_50cm_M_up_File6",
@@ -699,21 +897,21 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        118.3472,
-        118.6523,
-        118.9575,
-        119.5679
+        118.75,
+        119.1406
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.2207,
+      "speed_tolerance_rev_s": 0.64,
+      "spread_rev_s": 0.3906,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 62.0,
       "publish_s": 30.0,
-      "margin_db": 4.679,
-      "half_delta_rev_s": 0.14
+      "margin_db": 4.271,
+      "half_delta_rev_s": 0.64,
+      "margin_family_only_db": 4.271
     },
     {
       "key": "DroneAudioSet__drone1_high_50cm_M_up_silence",
@@ -726,21 +924,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        117.9199,
-        118.103,
-        118.4692,
-        118.6523
+        118.58
       ],
-      "speed_tolerance_rev_s": 0.84,
-      "spread_rev_s": 0.7324,
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 0.0,
       "publish_s": 30.0,
-      "margin_db": 5.344,
-      "half_delta_rev_s": 0.84
+      "margin_db": 5.698,
+      "half_delta_rev_s": 0.05,
+      "margin_family_only_db": 5.698
     },
     {
       "key": "DroneAudioSet__drone1_low_25cm_M_center_File3",
@@ -753,21 +950,48 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 3,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        82.4585,
-        82.7026,
-        84.1675,
-        84.4116
+        78.3967,
+        82.7083,
+        83.2201
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.9531,
+      "spread_rev_s": 4.8234,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.5,
       "publish_s": 30.0,
-      "margin_db": 4.016,
-      "half_delta_rev_s": 0.035
+      "margin_db": 4.77,
+      "half_delta_rev_s": 0.055,
+      "margin_family_only_db": 4.77
+    },
+    {
+      "key": "DroneAudioSet__drone1_low_25cm_M_center_File5",
+      "corpus": "DroneAudioSet",
+      "source": "DroneAudioSet-drone-only",
+      "source_id": "drone-only-recordings/drone1-only/mic-dist-25cm/throttle-low/mic1_soundskrit-File5.wav",
+      "rig": "daset_drone1",
+      "rig_model": null,
+      "condition": "rig-mounted static, throttle low, mic M_center at 25cm",
+      "throttle": null,
+      "throttle_level": "low",
+      "n_rotors": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        88.17
+      ],
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.0,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 61.0,
+      "publish_s": 30.0,
+      "margin_db": 3.555,
+      "half_delta_rev_s": 0.0,
+      "margin_family_only_db": 1.582
     },
     {
       "key": "DroneAudioSet__drone2_high_25cm_M_center_File1",
@@ -780,21 +1004,47 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        133.667,
-        134.5215,
-        134.7046,
-        135.0708
+        134.3158,
+        134.6597
       ],
-      "speed_tolerance_rev_s": 0.78,
-      "spread_rev_s": 1.4038,
+      "speed_tolerance_rev_s": 0.84,
+      "spread_rev_s": 0.3439,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 61.0,
       "publish_s": 30.0,
-      "margin_db": 4.535,
-      "half_delta_rev_s": 0.78
+      "margin_db": 5.116,
+      "half_delta_rev_s": 0.84,
+      "margin_family_only_db": 5.116
+    },
+    {
+      "key": "DroneAudioSet__drone2_high_25cm_M_center_File3",
+      "corpus": "DroneAudioSet",
+      "source": "DroneAudioSet-drone-only",
+      "source_id": "drone-only-recordings/drone2-only/mic-dist-25cm/throttle-high/mic1_soundskrit-File3.wav",
+      "rig": "daset_drone2",
+      "rig_model": null,
+      "condition": "rig-mounted static, throttle high, mic M_center at 25cm",
+      "throttle": null,
+      "throttle_level": "high",
+      "n_rotors": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        129.74
+      ],
+      "speed_tolerance_rev_s": 0.6,
+      "spread_rev_s": 0.0,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 30.5,
+      "publish_s": 30.0,
+      "margin_db": 9.666,
+      "half_delta_rev_s": 0.6,
+      "margin_family_only_db": 9.666
     },
     {
       "key": "DroneAudioSet__drone2_high_25cm_M_center_File5",
@@ -807,48 +1057,21 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        128.9469,
-        129.3132,
-        129.5573,
-        129.7201
+        129.3259,
+        129.75
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.7731,
+      "speed_tolerance_rev_s": 0.54,
+      "spread_rev_s": 0.4241,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 61.0,
       "publish_s": 30.0,
-      "margin_db": 6.633,
-      "half_delta_rev_s": 0.06
-    },
-    {
-      "key": "DroneAudioSet__drone2_high_25cm_M_down_File1",
-      "corpus": "DroneAudioSet",
-      "source": "DroneAudioSet-drone-only",
-      "source_id": "drone-only-recordings/drone2-only/mic-dist-25cm/throttle-high/mic2_8array-down-File1.wav",
-      "rig": "daset_drone2",
-      "rig_model": null,
-      "condition": "rig-mounted static, throttle high, mic M_down at 25cm",
-      "throttle": null,
-      "throttle_level": "high",
-      "n_rotors": 4,
-      "n_distinct": 4,
-      "octave_verdict": "as_found",
-      "speed_rev_s": [
-        134.0332,
-        134.2367,
-        134.4808,
-        134.6436
-      ],
-      "speed_tolerance_rev_s": 0.98,
-      "spread_rev_s": 0.6104,
-      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
-      "publish_start_s": 60.5,
-      "publish_s": 30.0,
-      "margin_db": 5.002,
-      "half_delta_rev_s": 0.98
+      "margin_db": 6.862,
+      "half_delta_rev_s": 0.54,
+      "margin_family_only_db": 6.862
     },
     {
       "key": "DroneAudioSet__drone2_high_25cm_M_down_File2",
@@ -861,19 +1084,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 2,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        129.9642,
-        130.9408
+        130.65
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.9766,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 7.09,
-      "half_delta_rev_s": 0.115
+      "margin_db": 5.938,
+      "half_delta_rev_s": 0.16,
+      "margin_family_only_db": 5.938
     },
     {
       "key": "DroneAudioSet__drone2_high_25cm_M_down_File3",
@@ -886,20 +1110,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 3,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        128.9469,
-        129.3538,
-        129.6387
+        129.56
       ],
-      "speed_tolerance_rev_s": 0.3,
-      "spread_rev_s": 0.6917,
+      "speed_tolerance_rev_s": 0.66,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.0,
       "publish_s": 30.0,
-      "margin_db": 8.201,
-      "half_delta_rev_s": 0.3
+      "margin_db": 7.548,
+      "half_delta_rev_s": 0.66,
+      "margin_family_only_db": 7.548
     },
     {
       "key": "DroneAudioSet__drone2_high_25cm_M_down_File5",
@@ -912,21 +1136,21 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        129.0894,
-        129.2725,
-        129.4556,
-        129.7607
+        129.4479,
+        129.7625
       ],
-      "speed_tolerance_rev_s": 0.42,
-      "spread_rev_s": 0.6714,
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.3146,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 53.5,
       "publish_s": 30.0,
-      "margin_db": 6.014,
-      "half_delta_rev_s": 0.42
+      "margin_db": 5.443,
+      "half_delta_rev_s": 0.24,
+      "margin_family_only_db": 5.443
     },
     {
       "key": "DroneAudioSet__drone2_high_25cm_M_up_File1",
@@ -939,21 +1163,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        134.3994,
-        134.5825,
-        134.7656,
-        135.0098
+        134.32
       ],
-      "speed_tolerance_rev_s": 1.0,
-      "spread_rev_s": 0.6104,
+      "speed_tolerance_rev_s": 0.74,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 4.783,
-      "half_delta_rev_s": 1.0
+      "margin_db": 5.85,
+      "half_delta_rev_s": 0.74,
+      "margin_family_only_db": 5.85
     },
     {
       "key": "DroneAudioSet__drone2_high_25cm_M_up_File3",
@@ -966,21 +1189,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        128.9876,
-        129.2318,
-        129.3945,
-        129.598
+        129.04
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.6104,
+      "speed_tolerance_rev_s": 0.4,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.0,
       "publish_s": 30.0,
-      "margin_db": 9.815,
-      "half_delta_rev_s": 0.08
+      "margin_db": 10.031,
+      "half_delta_rev_s": 0.4,
+      "margin_family_only_db": 10.031
     },
     {
       "key": "DroneAudioSet__drone2_high_25cm_M_up_File5",
@@ -993,21 +1215,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        128.8452,
-        129.0283,
-        129.2114,
-        129.4556
+        129.3
       ],
-      "speed_tolerance_rev_s": 0.4,
-      "spread_rev_s": 0.6104,
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 6.754,
-      "half_delta_rev_s": 0.4
+      "margin_db": 6.794,
+      "half_delta_rev_s": 0.04,
+      "margin_family_only_db": 6.794
     },
     {
       "key": "DroneAudioSet__drone2_high_50cm_M_center_File1",
@@ -1020,21 +1241,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        135.5591,
-        135.7422,
-        136.2305,
-        136.8408
+        136.54
       ],
-      "speed_tolerance_rev_s": 0.4,
-      "spread_rev_s": 1.2817,
+      "speed_tolerance_rev_s": 0.78,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 61.0,
       "publish_s": 30.0,
-      "margin_db": 8.949,
-      "half_delta_rev_s": 0.4
+      "margin_db": 6.106,
+      "half_delta_rev_s": 0.78,
+      "margin_family_only_db": 6.106
     },
     {
       "key": "DroneAudioSet__drone2_high_50cm_M_center_File2",
@@ -1047,99 +1267,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        103.3936,
-        103.9429,
-        104.126,
-        104.6753
+        103.74
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.2817,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 61.0,
       "publish_s": 30.0,
-      "margin_db": 4.596,
-      "half_delta_rev_s": 0.12
-    },
-    {
-      "key": "DroneAudioSet__drone2_high_50cm_M_center_File5",
-      "corpus": "DroneAudioSet",
-      "source": "DroneAudioSet-drone-only",
-      "source_id": "drone-only-recordings/drone2-only/mic-dist-50cm/throttle-high/mic1_soundskrit-File5.wav",
-      "rig": "daset_drone2",
-      "rig_model": null,
-      "condition": "rig-mounted static, throttle high, mic M_center at 50cm",
-      "throttle": null,
-      "throttle_level": "high",
-      "n_rotors": 4,
-      "n_distinct": 4,
-      "octave_verdict": "as_found",
-      "speed_rev_s": [
-        103.7598,
-        104.248,
-        104.6753,
-        104.9194
-      ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.1597,
-      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
-      "publish_start_s": 61.0,
-      "publish_s": 30.0,
-      "margin_db": 3.588,
-      "half_delta_rev_s": 0.12
-    },
-    {
-      "key": "DroneAudioSet__drone2_high_50cm_M_down_File1",
-      "corpus": "DroneAudioSet",
-      "source": "DroneAudioSet-drone-only",
-      "source_id": "drone-only-recordings/drone2-only/mic-dist-50cm/throttle-high/mic2_8array-down-File1.wav",
-      "rig": "daset_drone2",
-      "rig_model": null,
-      "condition": "rig-mounted static, throttle high, mic M_down at 50cm",
-      "throttle": null,
-      "throttle_level": "high",
-      "n_rotors": 4,
-      "n_distinct": 2,
-      "octave_verdict": "as_found",
-      "speed_rev_s": [
-        135.9863,
-        136.4136
-      ],
-      "speed_tolerance_rev_s": 0.36,
-      "spread_rev_s": 0.4272,
-      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
-      "publish_start_s": 60.5,
-      "publish_s": 30.0,
-      "margin_db": 5.993,
-      "half_delta_rev_s": 0.36
-    },
-    {
-      "key": "DroneAudioSet__drone2_high_50cm_M_down_File2",
-      "corpus": "DroneAudioSet",
-      "source": "DroneAudioSet-drone-only",
-      "source_id": "drone-only-recordings/drone2-only/mic-dist-50cm/throttle-high/mic2_8array-down-File2.wav",
-      "rig": "daset_drone2",
-      "rig_model": null,
-      "condition": "rig-mounted static, throttle high, mic M_down at 50cm",
-      "throttle": null,
-      "throttle_level": "high",
-      "n_rotors": 4,
-      "n_distinct": 3,
-      "octave_verdict": "as_found",
-      "speed_rev_s": [
-        103.7598,
-        106.3232,
-        106.6081
-      ],
-      "speed_tolerance_rev_s": 0.56,
-      "spread_rev_s": 2.8483,
-      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
-      "publish_start_s": 60.5,
-      "publish_s": 30.0,
-      "margin_db": 3.56,
-      "half_delta_rev_s": 0.56
+      "margin_db": 3.809,
+      "half_delta_rev_s": 0.08,
+      "margin_family_only_db": 3.809
     },
     {
       "key": "DroneAudioSet__drone2_high_50cm_M_up_File1",
@@ -1152,21 +1293,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        135.498,
-        135.9863,
-        136.5356,
-        136.7798
+        136.37
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.2817,
+      "speed_tolerance_rev_s": 0.72,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 9.583,
-      "half_delta_rev_s": 0.05
+      "margin_db": 5.863,
+      "half_delta_rev_s": 0.72,
+      "margin_family_only_db": 5.863
     },
     {
       "key": "DroneAudioSet__drone2_high_50cm_M_up_File2",
@@ -1179,21 +1319,20 @@
       "throttle": null,
       "throttle_level": "high",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        102.9663,
-        103.2715,
-        103.7598,
-        104.187
+        103.78
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.2207,
+      "speed_tolerance_rev_s": 0.42,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 4.689,
-      "half_delta_rev_s": 0.12
+      "margin_db": 3.952,
+      "half_delta_rev_s": 0.42,
+      "margin_family_only_db": 3.952
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_center_File2",
@@ -1206,21 +1345,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        105.6519,
-        105.835,
-        106.3843,
-        107.0557
+        106.94
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.4038,
+      "speed_tolerance_rev_s": 0.3575,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 61.0,
       "publish_s": 30.0,
-      "margin_db": 4.602,
-      "half_delta_rev_s": 0.2
+      "margin_db": 4.393,
+      "half_delta_rev_s": 0.3575,
+      "margin_family_only_db": 4.393
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_center_File3",
@@ -1233,19 +1371,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 2,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        106.4453,
-        106.8115
+        106.82
       ],
-      "speed_tolerance_rev_s": 0.46,
-      "spread_rev_s": 0.3662,
+      "speed_tolerance_rev_s": 0.555,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.5,
       "publish_s": 30.0,
-      "margin_db": 4.867,
-      "half_delta_rev_s": 0.46
+      "margin_db": 6.158,
+      "half_delta_rev_s": 0.555,
+      "margin_family_only_db": 6.158
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_center_File6",
@@ -1258,21 +1397,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        108.3374,
-        108.6426,
-        108.9478,
-        109.1309
+        109.06
       ],
-      "speed_tolerance_rev_s": 0.49,
-      "spread_rev_s": 0.7935,
+      "speed_tolerance_rev_s": 0.26,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 62.5,
       "publish_s": 30.0,
-      "margin_db": 5.841,
-      "half_delta_rev_s": 0.49
+      "margin_db": 7.192,
+      "half_delta_rev_s": 0.26,
+      "margin_family_only_db": 7.192
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_center_silence",
@@ -1285,21 +1423,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        107.9712,
-        108.5815,
-        108.8257,
-        109.1309
+        108.76
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.1597,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 0.5,
       "publish_s": 30.0,
-      "margin_db": 8.52,
-      "half_delta_rev_s": 0.05
+      "margin_db": 8.31,
+      "half_delta_rev_s": 0.02,
+      "margin_family_only_db": 8.31
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_down_File2",
@@ -1312,20 +1449,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 3,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        106.7505,
-        106.9336,
-        107.1777
+        106.8
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.4272,
+      "speed_tolerance_rev_s": 0.54,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 4.775,
-      "half_delta_rev_s": 0.0
+      "margin_db": 4.719,
+      "half_delta_rev_s": 0.54,
+      "margin_family_only_db": 4.719
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_down_File3",
@@ -1338,21 +1475,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        105.8757,
-        106.1605,
-        106.4046,
-        106.6081
+        106.38
       ],
-      "speed_tolerance_rev_s": 0.48,
-      "spread_rev_s": 0.7324,
+      "speed_tolerance_rev_s": 0.36,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.0,
       "publish_s": 30.0,
-      "margin_db": 5.309,
-      "half_delta_rev_s": 0.48
+      "margin_db": 5.383,
+      "half_delta_rev_s": 0.36,
+      "margin_family_only_db": 5.383
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_down_File5",
@@ -1365,21 +1501,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        108.8867,
-        109.4157,
-        109.5785,
-        109.7412
+        109.22
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.8545,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 4.697,
-      "half_delta_rev_s": 0.16
+      "margin_db": 5.78,
+      "half_delta_rev_s": 0.04,
+      "margin_family_only_db": 5.78
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_down_File6",
@@ -1392,21 +1527,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        108.2153,
-        108.4595,
-        108.8867,
-        109.2529
+        108.68
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.0376,
+      "speed_tolerance_rev_s": 0.3,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 62.0,
       "publish_s": 30.0,
-      "margin_db": 5.706,
-      "half_delta_rev_s": 0.14
+      "margin_db": 6.746,
+      "half_delta_rev_s": 0.3,
+      "margin_family_only_db": 6.746
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_down_silence",
@@ -1419,21 +1553,46 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        107.9712,
-        108.2153,
-        108.3984,
-        108.7646
+        108.62
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.7935,
+      "speed_tolerance_rev_s": 0.53,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 0.0,
       "publish_s": 30.0,
-      "margin_db": 8.163,
-      "half_delta_rev_s": 0.16
+      "margin_db": 8.392,
+      "half_delta_rev_s": 0.53,
+      "margin_family_only_db": 8.392
+    },
+    {
+      "key": "DroneAudioSet__drone2_low_25cm_M_up_File2",
+      "corpus": "DroneAudioSet",
+      "source": "DroneAudioSet-drone-only",
+      "source_id": "drone-only-recordings/drone2-only/mic-dist-25cm/throttle-low/mic3_8array-up-File2.wav",
+      "rig": "daset_drone2",
+      "rig_model": null,
+      "condition": "rig-mounted static, throttle low, mic M_up at 25cm",
+      "throttle": null,
+      "throttle_level": "low",
+      "n_rotors": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        106.82
+      ],
+      "speed_tolerance_rev_s": 0.33,
+      "spread_rev_s": 0.0,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 60.5,
+      "publish_s": 30.0,
+      "margin_db": 3.971,
+      "half_delta_rev_s": 0.33,
+      "margin_family_only_db": 3.971
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_up_File3",
@@ -1446,20 +1605,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 3,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        105.835,
-        106.6284,
-        106.9946
+        106.4
       ],
-      "speed_tolerance_rev_s": 0.58,
-      "spread_rev_s": 1.1597,
+      "speed_tolerance_rev_s": 0.25,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.0,
       "publish_s": 30.0,
-      "margin_db": 4.304,
-      "half_delta_rev_s": 0.58
+      "margin_db": 5.324,
+      "half_delta_rev_s": 0.08,
+      "margin_family_only_db": 5.324
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_up_File5",
@@ -1472,21 +1631,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "halved_twice",
       "speed_rev_s": [
-        27.2195,
-        27.3415,
-        27.3872,
-        27.4635
+        27.28
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.244,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 6.426,
-      "half_delta_rev_s": 0.0656
+      "margin_db": 7.48,
+      "half_delta_rev_s": 0.0063,
+      "margin_family_only_db": 7.48
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_up_File6",
@@ -1499,21 +1657,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        107.7881,
-        108.2153,
-        108.8867,
-        109.314
+        109.12
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.5259,
+      "speed_tolerance_rev_s": 0.48,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 62.0,
       "publish_s": 30.0,
-      "margin_db": 5.92,
-      "half_delta_rev_s": 0.24
+      "margin_db": 7.216,
+      "half_delta_rev_s": 0.48,
+      "margin_family_only_db": 7.216
     },
     {
       "key": "DroneAudioSet__drone2_low_25cm_M_up_silence",
@@ -1526,21 +1683,46 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        107.666,
-        108.0322,
-        108.3984,
-        108.7036
+        108.52
       ],
-      "speed_tolerance_rev_s": 0.27,
-      "spread_rev_s": 1.0376,
+      "speed_tolerance_rev_s": 0.32,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 0.0,
       "publish_s": 30.0,
-      "margin_db": 8.917,
-      "half_delta_rev_s": 0.27
+      "margin_db": 9.067,
+      "half_delta_rev_s": 0.32,
+      "margin_family_only_db": 9.067
+    },
+    {
+      "key": "DroneAudioSet__drone2_low_50cm_M_center_File2",
+      "corpus": "DroneAudioSet",
+      "source": "DroneAudioSet-drone-only",
+      "source_id": "drone-only-recordings/drone2-only/mic-dist-50cm/throttle-low/mic1_soundskrit-File2.wav",
+      "rig": "daset_drone2",
+      "rig_model": null,
+      "condition": "rig-mounted static, throttle low, mic M_center at 50cm",
+      "throttle": null,
+      "throttle_level": "low",
+      "n_rotors": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
+      "octave_verdict": "as_found",
+      "speed_rev_s": [
+        105.1
+      ],
+      "speed_tolerance_rev_s": 0.57,
+      "spread_rev_s": 0.0,
+      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
+      "publish_start_s": 15.0,
+      "publish_s": 30.0,
+      "margin_db": 4.291,
+      "half_delta_rev_s": 0.57,
+      "margin_family_only_db": 4.291
     },
     {
       "key": "DroneAudioSet__drone2_low_50cm_M_center_File3",
@@ -1553,21 +1735,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        99.4263,
-        102.1118,
-        102.478,
-        102.7222
+        102.78
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 3.2959,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 46.0,
       "publish_s": 30.0,
-      "margin_db": 3.181,
-      "half_delta_rev_s": 0.12
+      "margin_db": 4.191,
+      "half_delta_rev_s": 0.24,
+      "margin_family_only_db": 4.191
     },
     {
       "key": "DroneAudioSet__drone2_low_50cm_M_down_File2",
@@ -1580,21 +1761,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        103.5563,
-        103.8818,
-        104.0853,
-        107.9508
+        104.06
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 4.3945,
+      "speed_tolerance_rev_s": 0.295,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 60.5,
       "publish_s": 30.0,
-      "margin_db": 4.038,
-      "half_delta_rev_s": 0.14
+      "margin_db": 4.655,
+      "half_delta_rev_s": 0.295,
+      "margin_family_only_db": 4.655
     },
     {
       "key": "DroneAudioSet__drone2_low_50cm_M_down_File3",
@@ -1607,47 +1787,46 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 3,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        101.9694,
-        102.2135,
-        102.4984
+        102.7775
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 0.529,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.0,
       "publish_s": 30.0,
-      "margin_db": 5.058,
-      "half_delta_rev_s": 0.04
+      "margin_db": 5.572,
+      "half_delta_rev_s": 0.14,
+      "margin_family_only_db": 5.572
     },
     {
-      "key": "DroneAudioSet__drone2_low_50cm_M_down_File6",
+      "key": "DroneAudioSet__drone2_low_50cm_M_down_silence",
       "corpus": "DroneAudioSet",
       "source": "DroneAudioSet-drone-only",
-      "source_id": "drone-only-recordings/drone2-only/mic-dist-50cm/throttle-low/mic2_8array-down-File6.wav",
+      "source_id": "drone-only-recordings/drone2-only/mic-dist-50cm/throttle-low/mic2_8array-down-silence.wav",
       "rig": "daset_drone2",
       "rig_model": null,
       "condition": "rig-mounted static, throttle low, mic M_down at 50cm",
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        105.5501,
-        105.7536,
-        106.1198,
-        110.9619
+        104.38
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 5.4118,
+      "speed_tolerance_rev_s": 0.28,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
-      "publish_start_s": 62.0,
+      "publish_start_s": 0.0,
       "publish_s": 30.0,
-      "margin_db": 3.059,
-      "half_delta_rev_s": 0.1
+      "margin_db": 3.319,
+      "half_delta_rev_s": 0.28,
+      "margin_family_only_db": 3.319
     },
     {
       "key": "DroneAudioSet__drone2_low_50cm_M_up_File2",
@@ -1660,21 +1839,21 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 2,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        104.187,
-        104.6143,
-        104.9194,
-        105.2856
+        104.375,
+        104.8021
       ],
-      "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 1.0986,
+      "speed_tolerance_rev_s": 0.68,
+      "spread_rev_s": 0.4271,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 30.5,
       "publish_s": 30.0,
-      "margin_db": 3.455,
-      "half_delta_rev_s": 0.14
+      "margin_db": 3.03,
+      "half_delta_rev_s": 0.68,
+      "margin_family_only_db": 3.03
     },
     {
       "key": "DroneAudioSet__drone2_low_50cm_M_up_File3",
@@ -1687,47 +1866,20 @@
       "throttle": null,
       "throttle_level": "low",
       "n_rotors": 4,
-      "n_distinct": 4,
+      "n_resolved": 1,
+      "multiplicity_unresolved": true,
       "octave_verdict": "as_found",
       "speed_rev_s": [
-        99.3042,
-        102.2949,
-        102.5391,
-        102.8442
+        102.32
       ],
       "speed_tolerance_rev_s": 0.25,
-      "spread_rev_s": 3.54,
+      "spread_rev_s": 0.0,
       "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
       "publish_start_s": 45.0,
       "publish_s": 30.0,
-      "margin_db": 3.24,
-      "half_delta_rev_s": 0.08
-    },
-    {
-      "key": "SPCUP19-ChuMS-bench__3prop_repeat2",
-      "corpus": "SPCUP19-ChuMS-bench",
-      "source": "SPCUP19-ChuMS-bench",
-      "source_id": "3prop_repeat2",
-      "rig": "spcup_ChuMS_3prop_bench",
-      "rig_model": "Skylark M4-680 (Dotterel) propeller rig",
-      "condition": "3 propellers. Repeat:2",
-      "throttle": null,
-      "throttle_level": null,
-      "n_rotors": 3,
-      "n_distinct": 3,
-      "octave_verdict": "as_found",
-      "speed_rev_s": [
-        76.9223,
-        77.2588,
-        77.5111
-      ],
-      "speed_tolerance_rev_s": 0.56,
-      "spread_rev_s": 0.5888,
-      "speed_source": "estimated(welch-harmonic-sum + odd-harmonic octave check, scripts/noise_v2_bench_speed.py)",
-      "publish_start_s": 20.0,
-      "publish_s": 30.0,
-      "margin_db": 3.261,
-      "half_delta_rev_s": 0.56
+      "margin_db": 4.293,
+      "half_delta_rev_s": 0.19,
+      "margin_family_only_db": 4.293
     },
     {
       "key": "SPCUP19-egonoise__AGH__ego-noise__single_rotors__0",
@@ -1740,7 +1892,8 @@
       "throttle": null,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         79.82
@@ -1751,7 +1904,8 @@
       "publish_start_s": 0.0,
       "publish_s": 17.0,
       "margin_db": 5.473,
-      "half_delta_rev_s": 0.16
+      "half_delta_rev_s": 0.16,
+      "margin_family_only_db": 5.473
     },
     {
       "key": "SPCUP19-egonoise__AGH__ego-noise__single_rotors__1",
@@ -1764,7 +1918,8 @@
       "throttle": null,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         132.3
@@ -1775,7 +1930,8 @@
       "publish_start_s": 0.0,
       "publish_s": 16.0,
       "margin_db": 6.102,
-      "half_delta_rev_s": 0.1
+      "half_delta_rev_s": 0.1,
+      "margin_family_only_db": 6.102
     },
     {
       "key": "SPCUP19-egonoise__AGH__ego-noise__single_rotors__2",
@@ -1788,7 +1944,8 @@
       "throttle": null,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         113.54
@@ -1799,7 +1956,8 @@
       "publish_start_s": 0.0,
       "publish_s": 16.0,
       "margin_db": 5.991,
-      "half_delta_rev_s": 0.0
+      "half_delta_rev_s": 0.0,
+      "margin_family_only_db": 5.991
     },
     {
       "key": "SPCUP19-egonoise__AGH__ego-noise__single_rotors__3",
@@ -1812,7 +1970,8 @@
       "throttle": null,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         97.48
@@ -1823,7 +1982,8 @@
       "publish_start_s": 0.0,
       "publish_s": 16.0,
       "margin_db": 4.521,
-      "half_delta_rev_s": 0.02
+      "half_delta_rev_s": 0.02,
+      "margin_family_only_db": 4.521
     },
     {
       "key": "SPCUP19-egonoise__AGH__ego-noise__single_rotors__5",
@@ -1836,7 +1996,8 @@
       "throttle": null,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         98.08
@@ -1847,7 +2008,8 @@
       "publish_start_s": 0.0,
       "publish_s": 16.0,
       "margin_db": 5.183,
-      "half_delta_rev_s": 0.32
+      "half_delta_rev_s": 0.32,
+      "margin_family_only_db": 5.183
     },
     {
       "key": "SPCUP19-egonoise__AGH__ego-noise__single_rotors__6",
@@ -1860,7 +2022,8 @@
       "throttle": null,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         96.78
@@ -1871,7 +2034,8 @@
       "publish_start_s": 0.0,
       "publish_s": 17.0,
       "margin_db": 5.019,
-      "half_delta_rev_s": 0.02
+      "half_delta_rev_s": 0.02,
+      "margin_family_only_db": 5.019
     },
     {
       "key": "SPCUP19-egonoise__AGH__ego-noise__single_rotors__7",
@@ -1884,7 +2048,8 @@
       "throttle": null,
       "throttle_level": null,
       "n_rotors": 1,
-      "n_distinct": 1,
+      "n_resolved": 1,
+      "multiplicity_unresolved": false,
       "octave_verdict": "as_found",
       "speed_rev_s": [
         96.78
@@ -1895,7 +2060,8 @@
       "publish_start_s": 0.0,
       "publish_s": 16.0,
       "margin_db": 5.71,
-      "half_delta_rev_s": 0.0
+      "half_delta_rev_s": 0.0,
+      "margin_family_only_db": 5.71
     }
   ]
 }

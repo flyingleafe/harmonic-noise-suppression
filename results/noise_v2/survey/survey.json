@@ -1,5 +1,6 @@
 {
   "speeds_source": [
+    "results/noise_v2/survey/bench_speeds_dload.json",
     "results/noise_v2/survey/bench_speeds_remote.json",
     "results/noise_v2/survey/bench_speeds_local.json"
   ],
@@ -7,7 +8,8 @@
     "min_margin_db": 3.0,
     "max_half_delta_rev_s": 1.0,
     "min_window_s": 8.0,
-    "statement": "usable iff the harmonic-sum peak clears the best non-octave runner-up by >= 3 dB AND the two disjoint halves of the window agree to <= 1 rev/s AND the stationary window is >= 8 s"
+    "neighbour_frac": 0.06,
+    "statement": "usable iff the harmonic-sum peak clears the best RIVAL comb (its own small-rational family excluded always, and on a multi-rotor rig the +-6 % neighbourhood of the candidate too, since those candidates are the rig's other rotors) by >= 3 dB AND the two disjoint halves of the window agree to <= 1 rev/s AND the stationary window is >= 8 s"
   },
   "estimator_config": {
     "lo": 15.0,
@@ -37,18 +39,17 @@
     ],
     "min_margin_db": 3.0,
     "max_half_delta": 1.0,
-    "split_frac": 0.05,
-    "split_orders": [
-      8,
-      12,
-      16,
-      20,
-      24,
-      28,
-      32
-    ],
-    "split_prom_db": 6.0,
-    "max_channels": 8
+    "max_channels": 8,
+    "multi_window_s": 30.0,
+    "multi_seg_s": 4.0,
+    "neighbour_frac": 0.06,
+    "split_min_sep_rev_s": 0.3,
+    "split_frac": 0.06,
+    "split_lobes": 2.0,
+    "split_max_peaks": 4,
+    "split_peak_db": 6.0,
+    "split_min_orders": 3,
+    "split_cluster_tol": 0.3
   },
   "cross_checks": {
     "dregon_throttle_law": {
@@ -163,30 +164,152 @@
         }
       }
     },
+    "avq_constant_egonoise": {
+      "spec_table": {
+        "S1_seq1": 50.0,
+        "S1_seq2": 100.0,
+        "S1_seq3": 150.0,
+        "S2_seq1": 100.0
+      },
+      "per_sequence": {
+        "S1_seq1": {
+          "throttle_pct": 50.0,
+          "n_windows": 4,
+          "n_usable": 2,
+          "mean_rev_s": 68.312,
+          "window_spread_rev_s": 38.54,
+          "n_resolved": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "margin_db": [
+            5.569,
+            4.68,
+            2.227,
+            4.371
+          ]
+        },
+        "S1_seq2": {
+          "throttle_pct": 100.0,
+          "n_windows": 4,
+          "n_usable": 2,
+          "mean_rev_s": 77.422,
+          "window_spread_rev_s": 81.912,
+          "n_resolved": [
+            2,
+            3,
+            1,
+            1
+          ],
+          "margin_db": [
+            3.795,
+            -0.29,
+            2.353,
+            4.799
+          ]
+        },
+        "S1_seq3": {
+          "throttle_pct": 150.0,
+          "n_windows": 1,
+          "n_usable": 0,
+          "mean_rev_s": 111.38,
+          "window_spread_rev_s": 0.0,
+          "n_resolved": [
+            2
+          ],
+          "margin_db": [
+            3.333
+          ]
+        },
+        "S2_seq1": {
+          "throttle_pct": 100.0,
+          "n_windows": 7,
+          "n_usable": 0,
+          "mean_rev_s": 71.979,
+          "window_spread_rev_s": 48.454,
+          "n_resolved": [
+            2,
+            2,
+            1,
+            1,
+            3,
+            1,
+            2
+          ],
+          "margin_db": [
+            2.188,
+            -0.813,
+            -0.435,
+            0.743,
+            -0.667,
+            1.579,
+            0.486
+          ]
+        }
+      }
+    },
+    "multi_rotor_mode": {
+      "n_recordings": 31,
+      "neighbour_frac": 0.06,
+      "per_family": {
+        "drone_audio": {
+          "n": 24,
+          "n_usable": 0,
+          "n_usable_family_only_rule": 0,
+          "median_margin_db": 0.216,
+          "median_margin_family_only_db": 0.089,
+          "n_resolved_histogram": {
+            "1": 24
+          },
+          "n_resolved_histogram_usable": {}
+        },
+        "zenodo": {
+          "n": 7,
+          "n_usable": 1,
+          "n_usable_family_only_rule": 1,
+          "median_margin_db": 1.802,
+          "median_margin_family_only_db": 0.864,
+          "n_resolved_histogram": {
+            "1": 5,
+            "3": 2
+          },
+          "n_resolved_histogram_usable": {
+            "1": 1
+          }
+        }
+      },
+      "dregon_all_motors": {}
+    },
     "daset_cells": {
       "drone1|high": {
-        "n": 11,
-        "mean_rev_s": 108.21,
-        "std_rev_s": 23.109,
-        "blade_pass_hz": 216.42
+        "n": 13,
+        "mean_rev_s": 110.008,
+        "median_rev_s": 118.82,
+        "std_rev_s": 21.629,
+        "blade_pass_hz": 237.64
       },
       "drone1|low": {
-        "n": 1,
-        "mean_rev_s": 82.86,
-        "std_rev_s": 0.0,
-        "blade_pass_hz": 165.72
+        "n": 2,
+        "mean_rev_s": 85.515,
+        "median_rev_s": 85.515,
+        "std_rev_s": 2.655,
+        "blade_pass_hz": 171.03
       },
       "drone2|high": {
-        "n": 18,
-        "mean_rev_s": 118.641,
-        "std_rev_s": 22.286,
-        "blade_pass_hz": 237.28
+        "n": 15,
+        "mean_rev_s": 119.177,
+        "median_rev_s": 129.56,
+        "std_rev_s": 23.238,
+        "blade_pass_hz": 259.12
       },
       "drone2|low": {
-        "n": 20,
-        "mean_rev_s": 99.957,
-        "std_rev_s": 20.237,
-        "blade_pass_hz": 199.91
+        "n": 22,
+        "mean_rev_s": 100.464,
+        "median_rev_s": 106.6,
+        "std_rev_s": 19.377,
+        "blade_pass_hz": 213.2
       }
     },
     "daset_paper_lines_hz": {
@@ -196,11 +319,1760 @@
       "D_small|high": 259.0
     }
   },
-  "n_recordings": 260,
-  "n_usable": 79,
-  "n_fit_points": 73,
-  "n_rig_condition_points": 12,
+  "multi_rotor": {
+    "n_recordings": 240,
+    "family_max": 4,
+    "neighbourhood_exclusion": {
+      "n_rows_rival_moved": 46,
+      "median_gain_db": 0.51,
+      "max_gain_db": 2.334,
+      "n_rows_flipped_over_3db": 1,
+      "flipped": [
+        {
+          "id": "drone1_low_25cm_M_center_File5",
+          "margin_family_only_db": 1.582,
+          "margin_db": 3.555
+        }
+      ]
+    },
+    "rejected_rival_is": {
+      "m/n relative with max(m,n)=5": 51,
+      "m/n relative with max(m,n)=7": 24,
+      "m/n relative with max(m,n)=9": 23,
+      "independent comb (no m/n, m,n<=12)": 21,
+      "m/n relative with max(m,n)=6": 19,
+      "m/n relative with max(m,n)=8": 17,
+      "m/n relative with max(m,n)=11": 12,
+      "m/n relative with max(m,n)=10": 11,
+      "m/n relative with max(m,n)=12": 5
+    },
+    "n_rejected_with_deep_family_rival": 162,
+    "deep_family_rival_rows": [
+      {
+        "id": "S1_seq1_w0",
+        "family": "avq_bench",
+        "ratio": 0.2003,
+        "m_over_n": [
+          1,
+          5
+        ],
+        "margin_db": 5.569
+      },
+      {
+        "id": "S1_seq1_w2",
+        "family": "avq_bench",
+        "ratio": 0.447,
+        "m_over_n": [
+          4,
+          9
+        ],
+        "margin_db": 2.227
+      },
+      {
+        "id": "S1_seq2_w1",
+        "family": "avq_bench",
+        "ratio": 5.985,
+        "m_over_n": [
+          6,
+          1
+        ],
+        "margin_db": -0.29
+      },
+      {
+        "id": "S1_seq2_w2",
+        "family": "avq_bench",
+        "ratio": 0.167,
+        "m_over_n": [
+          1,
+          6
+        ],
+        "margin_db": 2.353
+      },
+      {
+        "id": "S1_seq3_w0",
+        "family": "avq_bench",
+        "ratio": 0.1993,
+        "m_over_n": [
+          1,
+          5
+        ],
+        "margin_db": 3.333
+      },
+      {
+        "id": "S2_seq1_w3",
+        "family": "avq_bench",
+        "ratio": 0.9189,
+        "m_over_n": [
+          9,
+          10
+        ],
+        "margin_db": 0.743
+      },
+      {
+        "id": "S2_seq1_w5",
+        "family": "avq_bench",
+        "ratio": 0.9319,
+        "m_over_n": [
+          10,
+          11
+        ],
+        "margin_db": 1.579
+      },
+      {
+        "id": "S2_seq1_w6",
+        "family": "avq_bench",
+        "ratio": 0.9177,
+        "m_over_n": [
+          9,
+          10
+        ],
+        "margin_db": 0.486
+      },
+      {
+        "id": "motor_allMotors_70",
+        "family": "dregon_bench",
+        "ratio": 1.6417,
+        "m_over_n": [
+          5,
+          3
+        ],
+        "margin_db": 0.771
+      },
+      {
+        "id": "drone1_high_25cm_M_center_File1",
+        "family": "daset",
+        "ratio": 0.9377,
+        "m_over_n": [
+          11,
+          12
+        ],
+        "margin_db": 0.91
+      },
+      {
+        "id": "drone1_high_25cm_M_center_File4",
+        "family": "daset",
+        "ratio": 0.9296,
+        "m_over_n": [
+          10,
+          11
+        ],
+        "margin_db": 2.1
+      },
+      {
+        "id": "drone1_high_25cm_M_center_File5",
+        "family": "daset",
+        "ratio": 0.9399,
+        "m_over_n": [
+          11,
+          12
+        ],
+        "margin_db": 1.641
+      },
+      {
+        "id": "drone1_high_25cm_M_center_File6",
+        "family": "daset",
+        "ratio": 0.895,
+        "m_over_n": [
+          7,
+          8
+        ],
+        "margin_db": 1.616
+      },
+      {
+        "id": "drone1_high_25cm_M_center_silence",
+        "family": "daset",
+        "ratio": 0.1663,
+        "m_over_n": [
+          1,
+          6
+        ],
+        "margin_db": 4.424
+      },
+      {
+        "id": "drone1_high_25cm_M_down_File1",
+        "family": "daset",
+        "ratio": 0.7141,
+        "m_over_n": [
+          5,
+          7
+        ],
+        "margin_db": 1.51
+      },
+      {
+        "id": "drone1_high_25cm_M_down_File2",
+        "family": "daset",
+        "ratio": 0.4017,
+        "m_over_n": [
+          2,
+          5
+        ],
+        "margin_db": 2.733
+      },
+      {
+        "id": "drone1_high_25cm_M_down_File3",
+        "family": "daset",
+        "ratio": 0.1669,
+        "m_over_n": [
+          1,
+          6
+        ],
+        "margin_db": 1.658
+      },
+      {
+        "id": "drone1_high_25cm_M_down_File4",
+        "family": "daset",
+        "ratio": 0.1995,
+        "m_over_n": [
+          1,
+          5
+        ],
+        "margin_db": 1.574
+      },
+      {
+        "id": "drone1_high_25cm_M_down_File5",
+        "family": "daset",
+        "ratio": 1.207,
+        "m_over_n": [
+          6,
+          5
+        ],
+        "margin_db": 0.426
+      },
+      {
+        "id": "drone1_high_25cm_M_down_File6",
+        "family": "daset",
+        "ratio": 0.9049,
+        "m_over_n": [
+          8,
+          9
+        ],
+        "margin_db": 0.256
+      },
+      {
+        "id": "drone1_high_25cm_M_down_silence",
+        "family": "daset",
+        "ratio": 0.7902,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 2.113
+      },
+      {
+        "id": "drone1_high_25cm_M_up_File1",
+        "family": "daset",
+        "ratio": 0.938,
+        "m_over_n": [
+          11,
+          12
+        ],
+        "margin_db": 1.976
+      },
+      {
+        "id": "drone1_high_25cm_M_up_File4",
+        "family": "daset",
+        "ratio": 0.9346,
+        "m_over_n": [
+          10,
+          11
+        ],
+        "margin_db": 1.809
+      },
+      {
+        "id": "drone1_high_25cm_M_up_File6",
+        "family": "daset",
+        "ratio": 0.8946,
+        "m_over_n": [
+          7,
+          8
+        ],
+        "margin_db": 1.997
+      },
+      {
+        "id": "drone1_high_25cm_M_up_silence",
+        "family": "daset",
+        "ratio": 0.1668,
+        "m_over_n": [
+          1,
+          6
+        ],
+        "margin_db": 5.156
+      },
+      {
+        "id": "drone1_high_50cm_M_center_File1",
+        "family": "daset",
+        "ratio": 0.9069,
+        "m_over_n": [
+          8,
+          9
+        ],
+        "margin_db": 2.914
+      },
+      {
+        "id": "drone1_high_50cm_M_center_File4",
+        "family": "daset",
+        "ratio": 1.0957,
+        "m_over_n": [
+          9,
+          8
+        ],
+        "margin_db": 1.512
+      },
+      {
+        "id": "drone1_high_50cm_M_center_silence",
+        "family": "daset",
+        "ratio": 1.1131,
+        "m_over_n": [
+          8,
+          7
+        ],
+        "margin_db": 5.554
+      },
+      {
+        "id": "drone1_high_50cm_M_down_File1",
+        "family": "daset",
+        "ratio": 0.5396,
+        "m_over_n": [
+          5,
+          9
+        ],
+        "margin_db": 1.734
+      },
+      {
+        "id": "drone1_high_50cm_M_down_File2",
+        "family": "daset",
+        "ratio": 1.2489,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": 1.852
+      },
+      {
+        "id": "drone1_high_50cm_M_down_File3",
+        "family": "daset",
+        "ratio": 0.4007,
+        "m_over_n": [
+          2,
+          5
+        ],
+        "margin_db": 2.18
+      },
+      {
+        "id": "drone1_high_50cm_M_down_File4",
+        "family": "daset",
+        "ratio": 0.8371,
+        "m_over_n": [
+          5,
+          6
+        ],
+        "margin_db": -0.253
+      },
+      {
+        "id": "drone1_high_50cm_M_down_File5",
+        "family": "daset",
+        "ratio": 1.1195,
+        "m_over_n": [
+          8,
+          7
+        ],
+        "margin_db": 1.561
+      },
+      {
+        "id": "drone1_high_50cm_M_down_File6",
+        "family": "daset",
+        "ratio": 1.251,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": 1.818
+      },
+      {
+        "id": "drone1_high_50cm_M_down_silence",
+        "family": "daset",
+        "ratio": 1.2016,
+        "m_over_n": [
+          6,
+          5
+        ],
+        "margin_db": 2.43
+      },
+      {
+        "id": "drone1_high_50cm_M_up_File1",
+        "family": "daset",
+        "ratio": 0.9066,
+        "m_over_n": [
+          8,
+          9
+        ],
+        "margin_db": 2.723
+      },
+      {
+        "id": "drone1_high_50cm_M_up_File4",
+        "family": "daset",
+        "ratio": 0.1987,
+        "m_over_n": [
+          1,
+          5
+        ],
+        "margin_db": 2.439
+      },
+      {
+        "id": "drone1_low_25cm_M_center_File6",
+        "family": "daset",
+        "ratio": 0.9293,
+        "m_over_n": [
+          10,
+          11
+        ],
+        "margin_db": 2.307
+      },
+      {
+        "id": "drone1_low_25cm_M_center_silence",
+        "family": "daset",
+        "ratio": 0.9071,
+        "m_over_n": [
+          8,
+          9
+        ],
+        "margin_db": 1.861
+      },
+      {
+        "id": "drone1_low_25cm_M_down_File1",
+        "family": "daset",
+        "ratio": 1.25,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": 0.462
+      },
+      {
+        "id": "drone1_low_25cm_M_down_File3",
+        "family": "daset",
+        "ratio": 2.3588,
+        "m_over_n": [
+          7,
+          3
+        ],
+        "margin_db": 0.365
+      },
+      {
+        "id": "drone1_low_25cm_M_down_File5",
+        "family": "daset",
+        "ratio": 1.4402,
+        "m_over_n": [
+          7,
+          5
+        ],
+        "margin_db": 1.179
+      },
+      {
+        "id": "drone1_low_25cm_M_down_File6",
+        "family": "daset",
+        "ratio": 0.9276,
+        "m_over_n": [
+          10,
+          11
+        ],
+        "margin_db": 2.263
+      },
+      {
+        "id": "drone1_low_25cm_M_down_silence",
+        "family": "daset",
+        "ratio": 0.3999,
+        "m_over_n": [
+          2,
+          5
+        ],
+        "margin_db": 1.634
+      },
+      {
+        "id": "drone1_low_25cm_M_up_File2",
+        "family": "daset",
+        "ratio": 0.2,
+        "m_over_n": [
+          1,
+          5
+        ],
+        "margin_db": 1.669
+      },
+      {
+        "id": "drone1_low_25cm_M_up_File3",
+        "family": "daset",
+        "ratio": 0.2035,
+        "m_over_n": [
+          1,
+          5
+        ],
+        "margin_db": 3.326
+      },
+      {
+        "id": "drone1_low_25cm_M_up_File4",
+        "family": "daset",
+        "ratio": 0.1238,
+        "m_over_n": [
+          1,
+          8
+        ],
+        "margin_db": 0.408
+      },
+      {
+        "id": "drone1_low_25cm_M_up_File6",
+        "family": "daset",
+        "ratio": 1.852,
+        "m_over_n": [
+          9,
+          5
+        ],
+        "margin_db": -0.923
+      },
+      {
+        "id": "drone1_low_25cm_M_up_silence",
+        "family": "daset",
+        "ratio": 5.4955,
+        "m_over_n": [
+          11,
+          2
+        ],
+        "margin_db": -2.962
+      },
+      {
+        "id": "drone1_low_50cm_M_center_File1",
+        "family": "daset",
+        "ratio": 1.0815,
+        "m_over_n": [
+          10,
+          9
+        ],
+        "margin_db": 1.05
+      },
+      {
+        "id": "drone1_low_50cm_M_center_File2",
+        "family": "daset",
+        "ratio": 1.1064,
+        "m_over_n": [
+          9,
+          8
+        ],
+        "margin_db": 1.562
+      },
+      {
+        "id": "drone1_low_50cm_M_center_File3",
+        "family": "daset",
+        "ratio": 0.8725,
+        "m_over_n": [
+          6,
+          7
+        ],
+        "margin_db": 1.951
+      },
+      {
+        "id": "drone1_low_50cm_M_center_File4",
+        "family": "daset",
+        "ratio": 0.9297,
+        "m_over_n": [
+          10,
+          11
+        ],
+        "margin_db": 0.595
+      },
+      {
+        "id": "drone1_low_50cm_M_center_silence",
+        "family": "daset",
+        "ratio": 1.553,
+        "m_over_n": [
+          8,
+          5
+        ],
+        "margin_db": 1.208
+      },
+      {
+        "id": "drone1_low_50cm_M_down_File1",
+        "family": "daset",
+        "ratio": 0.8328,
+        "m_over_n": [
+          5,
+          6
+        ],
+        "margin_db": 0.784
+      },
+      {
+        "id": "drone1_low_50cm_M_down_File2",
+        "family": "daset",
+        "ratio": 1.2521,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": -0.96
+      },
+      {
+        "id": "drone1_low_50cm_M_down_File3",
+        "family": "daset",
+        "ratio": 0.8883,
+        "m_over_n": [
+          7,
+          8
+        ],
+        "margin_db": 3.971
+      },
+      {
+        "id": "drone1_low_50cm_M_down_File4",
+        "family": "daset",
+        "ratio": 2.2538,
+        "m_over_n": [
+          9,
+          4
+        ],
+        "margin_db": -0.049
+      },
+      {
+        "id": "drone1_low_50cm_M_down_File5",
+        "family": "daset",
+        "ratio": 1.5704,
+        "m_over_n": [
+          8,
+          5
+        ],
+        "margin_db": 0.879
+      },
+      {
+        "id": "drone1_low_50cm_M_down_File6",
+        "family": "daset",
+        "ratio": 1.6659,
+        "m_over_n": [
+          5,
+          3
+        ],
+        "margin_db": 0.03
+      },
+      {
+        "id": "drone1_low_50cm_M_down_silence",
+        "family": "daset",
+        "ratio": 2.3298,
+        "m_over_n": [
+          7,
+          3
+        ],
+        "margin_db": -0.359
+      },
+      {
+        "id": "drone1_low_50cm_M_up_File2",
+        "family": "daset",
+        "ratio": 4.5052,
+        "m_over_n": [
+          9,
+          2
+        ],
+        "margin_db": -1.733
+      },
+      {
+        "id": "drone1_low_50cm_M_up_File3",
+        "family": "daset",
+        "ratio": 3.4877,
+        "m_over_n": [
+          7,
+          2
+        ],
+        "margin_db": -1.602
+      },
+      {
+        "id": "drone1_low_50cm_M_up_File4",
+        "family": "daset",
+        "ratio": 8.8681,
+        "m_over_n": [
+          9,
+          1
+        ],
+        "margin_db": -0.136
+      },
+      {
+        "id": "drone2_high_25cm_M_center_File4",
+        "family": "daset",
+        "ratio": 0.8777,
+        "m_over_n": [
+          6,
+          7
+        ],
+        "margin_db": 0.717
+      },
+      {
+        "id": "drone2_high_25cm_M_center_File6",
+        "family": "daset",
+        "ratio": 0.8166,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 1.286
+      },
+      {
+        "id": "drone2_high_25cm_M_center_silence",
+        "family": "daset",
+        "ratio": 0.8142,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 0.294
+      },
+      {
+        "id": "drone2_high_25cm_M_down_File1",
+        "family": "daset",
+        "ratio": 0.8007,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 4.577
+      },
+      {
+        "id": "drone2_high_25cm_M_down_File4",
+        "family": "daset",
+        "ratio": 0.7181,
+        "m_over_n": [
+          5,
+          7
+        ],
+        "margin_db": 0.148
+      },
+      {
+        "id": "drone2_high_25cm_M_down_File6",
+        "family": "daset",
+        "ratio": 0.8168,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 3.015
+      },
+      {
+        "id": "drone2_high_25cm_M_down_silence",
+        "family": "daset",
+        "ratio": 0.8136,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 1.474
+      },
+      {
+        "id": "drone2_high_25cm_M_up_File4",
+        "family": "daset",
+        "ratio": 0.88,
+        "m_over_n": [
+          6,
+          7
+        ],
+        "margin_db": 0.87
+      },
+      {
+        "id": "drone2_high_25cm_M_up_File6",
+        "family": "daset",
+        "ratio": 0.8161,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 1.921
+      },
+      {
+        "id": "drone2_high_25cm_M_up_silence",
+        "family": "daset",
+        "ratio": 0.8173,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 0.218
+      },
+      {
+        "id": "drone2_high_50cm_M_center_File3",
+        "family": "daset",
+        "ratio": 4.9966,
+        "m_over_n": [
+          5,
+          1
+        ],
+        "margin_db": 0.742
+      },
+      {
+        "id": "drone2_high_50cm_M_center_File4",
+        "family": "daset",
+        "ratio": 0.6896,
+        "m_over_n": [
+          7,
+          10
+        ],
+        "margin_db": 3.423
+      },
+      {
+        "id": "drone2_high_50cm_M_center_File5",
+        "family": "daset",
+        "ratio": 1.2419,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": 2.261
+      },
+      {
+        "id": "drone2_high_50cm_M_center_File6",
+        "family": "daset",
+        "ratio": 2.4963,
+        "m_over_n": [
+          5,
+          2
+        ],
+        "margin_db": 0.481
+      },
+      {
+        "id": "drone2_high_50cm_M_center_silence",
+        "family": "daset",
+        "ratio": 2.5085,
+        "m_over_n": [
+          5,
+          2
+        ],
+        "margin_db": 0.555
+      },
+      {
+        "id": "drone2_high_50cm_M_down_File1",
+        "family": "daset",
+        "ratio": 0.8022,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 2.275
+      },
+      {
+        "id": "drone2_high_50cm_M_down_File2",
+        "family": "daset",
+        "ratio": 1.2272,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": 2.265
+      },
+      {
+        "id": "drone2_high_50cm_M_down_File3",
+        "family": "daset",
+        "ratio": 1.2484,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": 0.052
+      },
+      {
+        "id": "drone2_high_50cm_M_down_File4",
+        "family": "daset",
+        "ratio": 0.7733,
+        "m_over_n": [
+          7,
+          9
+        ],
+        "margin_db": 1.775
+      },
+      {
+        "id": "drone2_high_50cm_M_down_File5",
+        "family": "daset",
+        "ratio": 1.2473,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": 1.655
+      },
+      {
+        "id": "drone2_high_50cm_M_down_File6",
+        "family": "daset",
+        "ratio": 1.2481,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": -0.55
+      },
+      {
+        "id": "drone2_high_50cm_M_down_silence",
+        "family": "daset",
+        "ratio": 1.2534,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": 0.14
+      },
+      {
+        "id": "drone2_high_50cm_M_up_File3",
+        "family": "daset",
+        "ratio": 4.9687,
+        "m_over_n": [
+          5,
+          1
+        ],
+        "margin_db": 1.556
+      },
+      {
+        "id": "drone2_high_50cm_M_up_File4",
+        "family": "daset",
+        "ratio": 0.1674,
+        "m_over_n": [
+          1,
+          6
+        ],
+        "margin_db": 2.791
+      },
+      {
+        "id": "drone2_high_50cm_M_up_File5",
+        "family": "daset",
+        "ratio": 0.9024,
+        "m_over_n": [
+          8,
+          9
+        ],
+        "margin_db": 2.426
+      },
+      {
+        "id": "drone2_high_50cm_M_up_File6",
+        "family": "daset",
+        "ratio": 2.4968,
+        "m_over_n": [
+          5,
+          2
+        ],
+        "margin_db": 0.017
+      },
+      {
+        "id": "drone2_high_50cm_M_up_silence",
+        "family": "daset",
+        "ratio": 1.251,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": 0.961
+      },
+      {
+        "id": "drone2_low_25cm_M_center_File1",
+        "family": "daset",
+        "ratio": 0.437,
+        "m_over_n": [
+          3,
+          7
+        ],
+        "margin_db": 0.54
+      },
+      {
+        "id": "drone2_low_25cm_M_center_File4",
+        "family": "daset",
+        "ratio": 0.3741,
+        "m_over_n": [
+          3,
+          8
+        ],
+        "margin_db": 0.042
+      },
+      {
+        "id": "drone2_low_25cm_M_down_File1",
+        "family": "daset",
+        "ratio": 1.5616,
+        "m_over_n": [
+          8,
+          5
+        ],
+        "margin_db": 0.775
+      },
+      {
+        "id": "drone2_low_25cm_M_down_File4",
+        "family": "daset",
+        "ratio": 1.6692,
+        "m_over_n": [
+          5,
+          3
+        ],
+        "margin_db": 0.421
+      },
+      {
+        "id": "drone2_low_25cm_M_up_File1",
+        "family": "daset",
+        "ratio": 0.2197,
+        "m_over_n": [
+          2,
+          9
+        ],
+        "margin_db": 0.137
+      },
+      {
+        "id": "drone2_low_25cm_M_up_File4",
+        "family": "daset",
+        "ratio": 0.553,
+        "m_over_n": [
+          5,
+          9
+        ],
+        "margin_db": 1.379
+      },
+      {
+        "id": "drone2_low_50cm_M_center_File1",
+        "family": "daset",
+        "ratio": 0.8049,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 0.542
+      },
+      {
+        "id": "drone2_low_50cm_M_center_File4",
+        "family": "daset",
+        "ratio": 0.6935,
+        "m_over_n": [
+          5,
+          7
+        ],
+        "margin_db": -0.034
+      },
+      {
+        "id": "drone2_low_50cm_M_center_File5",
+        "family": "daset",
+        "ratio": 0.1668,
+        "m_over_n": [
+          1,
+          6
+        ],
+        "margin_db": 1.459
+      },
+      {
+        "id": "drone2_low_50cm_M_center_File6",
+        "family": "daset",
+        "ratio": 0.7858,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 1.948
+      },
+      {
+        "id": "drone2_low_50cm_M_center_silence",
+        "family": "daset",
+        "ratio": 0.7881,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 1.803
+      },
+      {
+        "id": "drone2_low_50cm_M_down_File1",
+        "family": "daset",
+        "ratio": 1.0897,
+        "m_over_n": [
+          10,
+          9
+        ],
+        "margin_db": 0.208
+      },
+      {
+        "id": "drone2_low_50cm_M_down_File4",
+        "family": "daset",
+        "ratio": 0.9118,
+        "m_over_n": [
+          8,
+          9
+        ],
+        "margin_db": -0.301
+      },
+      {
+        "id": "drone2_low_50cm_M_down_File5",
+        "family": "daset",
+        "ratio": 1.1845,
+        "m_over_n": [
+          6,
+          5
+        ],
+        "margin_db": -0.203
+      },
+      {
+        "id": "drone2_low_50cm_M_down_File6",
+        "family": "daset",
+        "ratio": 0.7892,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 2.927
+      },
+      {
+        "id": "drone2_low_50cm_M_up_File1",
+        "family": "daset",
+        "ratio": 1.2063,
+        "m_over_n": [
+          6,
+          5
+        ],
+        "margin_db": 0.063
+      },
+      {
+        "id": "drone2_low_50cm_M_up_File5",
+        "family": "daset",
+        "ratio": 0.1464,
+        "m_over_n": [
+          1,
+          7
+        ],
+        "margin_db": 0.513
+      },
+      {
+        "id": "drone2_low_50cm_M_up_File6",
+        "family": "daset",
+        "ratio": 0.7898,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 1.337
+      },
+      {
+        "id": "drone2_low_50cm_M_up_silence",
+        "family": "daset",
+        "ratio": 0.7872,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 2.296
+      },
+      {
+        "id": "2prop_repeat3",
+        "family": "chums_bench",
+        "ratio": 0.2003,
+        "m_over_n": [
+          1,
+          5
+        ],
+        "margin_db": 2.055
+      },
+      {
+        "id": "3prop_repeat1",
+        "family": "chums_bench",
+        "ratio": 1.5542,
+        "m_over_n": [
+          8,
+          5
+        ],
+        "margin_db": 0.705
+      },
+      {
+        "id": "3prop_repeat2",
+        "family": "chums_bench",
+        "ratio": 0.2001,
+        "m_over_n": [
+          1,
+          5
+        ],
+        "margin_db": 1.884
+      },
+      {
+        "id": "3prop_repeat3",
+        "family": "chums_bench",
+        "ratio": 0.2015,
+        "m_over_n": [
+          1,
+          5
+        ],
+        "margin_db": 0.959
+      },
+      {
+        "id": "AGH__static_clean__0",
+        "family": "spcup_static",
+        "ratio": 2.2765,
+        "m_over_n": [
+          7,
+          3
+        ],
+        "margin_db": -0.21
+      },
+      {
+        "id": "AGH__static_clean__1",
+        "family": "spcup_static",
+        "ratio": 0.8333,
+        "m_over_n": [
+          5,
+          6
+        ],
+        "margin_db": -0.073
+      },
+      {
+        "id": "AGH__static_clean__2",
+        "family": "spcup_static",
+        "ratio": 1.265,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": -0.353
+      },
+      {
+        "id": "AGH__static_clean__3",
+        "family": "spcup_static",
+        "ratio": 5.6297,
+        "m_over_n": [
+          11,
+          2
+        ],
+        "margin_db": -0.026
+      },
+      {
+        "id": "AGH__static_clean__4",
+        "family": "spcup_static",
+        "ratio": 2.2262,
+        "m_over_n": [
+          9,
+          4
+        ],
+        "margin_db": -0.003
+      },
+      {
+        "id": "AGH__static_clean__5",
+        "family": "spcup_static",
+        "ratio": 2.7491,
+        "m_over_n": [
+          11,
+          4
+        ],
+        "margin_db": 0.096
+      },
+      {
+        "id": "AGH__static_clean__6",
+        "family": "spcup_static",
+        "ratio": 2.4849,
+        "m_over_n": [
+          5,
+          2
+        ],
+        "margin_db": -0.003
+      },
+      {
+        "id": "AGH__static_clean__7",
+        "family": "spcup_static",
+        "ratio": 0.9267,
+        "m_over_n": [
+          9,
+          10
+        ],
+        "margin_db": -0.123
+      },
+      {
+        "id": "AGH__static_clean__8",
+        "family": "spcup_static",
+        "ratio": 0.5497,
+        "m_over_n": [
+          5,
+          9
+        ],
+        "margin_db": 0.013
+      },
+      {
+        "id": "AGH__static_clean__9",
+        "family": "spcup_static",
+        "ratio": 0.574,
+        "m_over_n": [
+          4,
+          7
+        ],
+        "margin_db": -0.278
+      },
+      {
+        "id": "AGH__static_corrupted__0",
+        "family": "spcup_static",
+        "ratio": 1.1608,
+        "m_over_n": [
+          7,
+          6
+        ],
+        "margin_db": -0.585
+      },
+      {
+        "id": "AGH__static_corrupted__1",
+        "family": "spcup_static",
+        "ratio": 0.8586,
+        "m_over_n": [
+          6,
+          7
+        ],
+        "margin_db": 1.442
+      },
+      {
+        "id": "Diagonal_Unloading__recordings__static__static_10m",
+        "family": "spcup_static",
+        "ratio": 0.9187,
+        "m_over_n": [
+          9,
+          10
+        ],
+        "margin_db": 0.001
+      },
+      {
+        "id": "Diagonal_Unloading__recordings__static__static_2m",
+        "family": "spcup_static",
+        "ratio": 0.8529,
+        "m_over_n": [
+          5,
+          6
+        ],
+        "margin_db": 1.996
+      },
+      {
+        "id": "Idea_ssu__stationary_1",
+        "family": "spcup_static",
+        "ratio": 1.4035,
+        "m_over_n": [
+          7,
+          5
+        ],
+        "margin_db": 1.73
+      },
+      {
+        "id": "Idea_ssu__stationary_2",
+        "family": "spcup_static",
+        "ratio": 1.4255,
+        "m_over_n": [
+          7,
+          5
+        ],
+        "margin_db": 0.408
+      },
+      {
+        "id": "Shout_COOEE__SPCUP19_Shout_COOEE_StaticSubmission1",
+        "family": "spcup_static",
+        "ratio": 0.7764,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": -0.069
+      },
+      {
+        "id": "Shout_COOEE__SPCUP19_Shout_COOEE_StaticSubmission2",
+        "family": "spcup_static",
+        "ratio": 0.8298,
+        "m_over_n": [
+          5,
+          6
+        ],
+        "margin_db": -0.223
+      },
+      {
+        "id": "B_S2_D1_067-bebop",
+        "family": "drone_audio",
+        "ratio": 0.6246,
+        "m_over_n": [
+          5,
+          8
+        ],
+        "margin_db": -0.035
+      },
+      {
+        "id": "B_S2_D1_068-bebop",
+        "family": "drone_audio",
+        "ratio": 0.8455,
+        "m_over_n": [
+          5,
+          6
+        ],
+        "margin_db": 0.211
+      },
+      {
+        "id": "B_S2_D1_069-bebop",
+        "family": "drone_audio",
+        "ratio": 1.257,
+        "m_over_n": [
+          5,
+          4
+        ],
+        "margin_db": -0.287
+      },
+      {
+        "id": "B_S2_D1_070-bebop",
+        "family": "drone_audio",
+        "ratio": 1.0606,
+        "m_over_n": [
+          12,
+          11
+        ],
+        "margin_db": -0.878
+      },
+      {
+        "id": "B_S2_D1_071-bebop",
+        "family": "drone_audio",
+        "ratio": 1.0748,
+        "m_over_n": [
+          11,
+          10
+        ],
+        "margin_db": 0.077
+      },
+      {
+        "id": "B_S2_D1_072-bebop",
+        "family": "drone_audio",
+        "ratio": 0.6237,
+        "m_over_n": [
+          5,
+          8
+        ],
+        "margin_db": 3.281
+      },
+      {
+        "id": "B_S2_D1_073-bebop",
+        "family": "drone_audio",
+        "ratio": 0.7733,
+        "m_over_n": [
+          7,
+          9
+        ],
+        "margin_db": 1.55
+      },
+      {
+        "id": "B_S2_D1_074-bebop",
+        "family": "drone_audio",
+        "ratio": 0.8107,
+        "m_over_n": [
+          4,
+          5
+        ],
+        "margin_db": 1.663
+      },
+      {
+        "id": "B_S2_D1_075-bebop",
+        "family": "drone_audio",
+        "ratio": 0.8982,
+        "m_over_n": [
+          7,
+          8
+        ],
+        "margin_db": 1.796
+      },
+      {
+        "id": "B_S2_D1_076-bebop",
+        "family": "drone_audio",
+        "ratio": 0.581,
+        "m_over_n": [
+          4,
+          7
+        ],
+        "margin_db": -0.638
+      },
+      {
+        "id": "B_S2_D1_077-bebop",
+        "family": "drone_audio",
+        "ratio": 0.6422,
+        "m_over_n": [
+          5,
+          8
+        ],
+        "margin_db": 1.359
+      },
+      {
+        "id": "B_S2_D1_078-bebop",
+        "family": "drone_audio",
+        "ratio": 1.7169,
+        "m_over_n": [
+          7,
+          4
+        ],
+        "margin_db": 0.222
+      },
+      {
+        "id": "B_S2_D1_079-bebop",
+        "family": "drone_audio",
+        "ratio": 3.2981,
+        "m_over_n": [
+          10,
+          3
+        ],
+        "margin_db": 0.322
+      },
+      {
+        "id": "B_S2_D1_080-bebop",
+        "family": "drone_audio",
+        "ratio": 0.6907,
+        "m_over_n": [
+          7,
+          10
+        ],
+        "margin_db": -0.239
+      },
+      {
+        "id": "B_S2_D1_081-bebop",
+        "family": "drone_audio",
+        "ratio": 0.9237,
+        "m_over_n": [
+          9,
+          10
+        ],
+        "margin_db": 1.682
+      },
+      {
+        "id": "B_S2_D1_082-bebop",
+        "family": "drone_audio",
+        "ratio": 0.8894,
+        "m_over_n": [
+          7,
+          8
+        ],
+        "margin_db": -0.382
+      },
+      {
+        "id": "B_S2_D1_083-bebop",
+        "family": "drone_audio",
+        "ratio": 0.6254,
+        "m_over_n": [
+          5,
+          8
+        ],
+        "margin_db": -0.276
+      },
+      {
+        "id": "B_S2_D1_084-bebop",
+        "family": "drone_audio",
+        "ratio": 0.8613,
+        "m_over_n": [
+          6,
+          7
+        ],
+        "margin_db": 0.996
+      },
+      {
+        "id": "B_S2_D1_085-bebop",
+        "family": "drone_audio",
+        "ratio": 0.9345,
+        "m_over_n": [
+          10,
+          11
+        ],
+        "margin_db": -1.051
+      },
+      {
+        "id": "B_S2_D1_086-bebop",
+        "family": "drone_audio",
+        "ratio": 1.1323,
+        "m_over_n": [
+          7,
+          6
+        ],
+        "margin_db": -0.074
+      },
+      {
+        "id": "B_S2_D1_087-bebop",
+        "family": "drone_audio",
+        "ratio": 0.9392,
+        "m_over_n": [
+          11,
+          12
+        ],
+        "margin_db": 0.572
+      },
+      {
+        "id": "B_S2_D1_088-bebop",
+        "family": "drone_audio",
+        "ratio": 0.8355,
+        "m_over_n": [
+          5,
+          6
+        ],
+        "margin_db": 0.811
+      },
+      {
+        "id": "B_S2_D1_089-bebop",
+        "family": "drone_audio",
+        "ratio": 0.7729,
+        "m_over_n": [
+          7,
+          9
+        ],
+        "margin_db": 1.982
+      },
+      {
+        "id": "B_S2_D1_090-bebop",
+        "family": "drone_audio",
+        "ratio": 0.7234,
+        "m_over_n": [
+          5,
+          7
+        ],
+        "margin_db": -0.964
+      },
+      {
+        "id": "n116",
+        "family": "zenodo",
+        "ratio": 2.249,
+        "m_over_n": [
+          9,
+          4
+        ],
+        "margin_db": 2.306
+      },
+      {
+        "id": "n118",
+        "family": "zenodo",
+        "ratio": 0.8361,
+        "m_over_n": [
+          5,
+          6
+        ],
+        "margin_db": 2.395
+      },
+      {
+        "id": "n119",
+        "family": "zenodo",
+        "ratio": 0.9197,
+        "m_over_n": [
+          9,
+          10
+        ],
+        "margin_db": 0.448
+      },
+      {
+        "id": "n120",
+        "family": "zenodo",
+        "ratio": 1.0705,
+        "m_over_n": [
+          11,
+          10
+        ],
+        "margin_db": 0.864
+      },
+      {
+        "id": "n121",
+        "family": "zenodo",
+        "ratio": 0.903,
+        "m_over_n": [
+          8,
+          9
+        ],
+        "margin_db": 1.802
+      },
+      {
+        "id": "n122",
+        "family": "zenodo",
+        "ratio": 0.6994,
+        "m_over_n": [
+          5,
+          7
+        ],
+        "margin_db": 0.133
+      }
+    ],
+    "per_family": {
+      "avq_bench": {
+        "n": 16,
+        "n_usable": 4,
+        "median_margin_db": 2.208,
+        "median_margin_family_only_db": 1.905,
+        "n_resolved_histogram": {
+          "1": 9,
+          "2": 5,
+          "3": 2
+        },
+        "n_resolved_histogram_usable": {
+          "1": 3,
+          "2": 1
+        },
+        "rejected_rival_deep_family": 8
+      },
+      "chums_bench": {
+        "n": 6,
+        "n_usable": 0,
+        "median_margin_db": 0.976,
+        "median_margin_family_only_db": 0.913,
+        "n_resolved_histogram": {
+          "1": 6
+        },
+        "n_resolved_histogram_usable": {},
+        "rejected_rival_deep_family": 4
+      },
+      "daset": {
+        "n": 168,
+        "n_usable": 52,
+        "median_margin_db": 1.964,
+        "median_margin_family_only_db": 1.813,
+        "n_resolved_histogram": {
+          "1": 127,
+          "2": 33,
+          "3": 4,
+          "4": 4
+        },
+        "n_resolved_histogram_usable": {
+          "1": 40,
+          "2": 11,
+          "3": 1
+        },
+        "rejected_rival_deep_family": 101
+      },
+      "dregon_bench": {
+        "n": 1,
+        "n_usable": 0,
+        "median_margin_db": 0.771,
+        "median_margin_family_only_db": 0.771,
+        "n_resolved_histogram": {
+          "1": 1
+        },
+        "n_resolved_histogram_usable": {},
+        "rejected_rival_deep_family": 1
+      },
+      "drone_audio": {
+        "n": 24,
+        "n_usable": 0,
+        "median_margin_db": 0.216,
+        "median_margin_family_only_db": 0.089,
+        "n_resolved_histogram": {
+          "1": 24
+        },
+        "n_resolved_histogram_usable": {},
+        "rejected_rival_deep_family": 24
+      },
+      "spcup_static": {
+        "n": 18,
+        "n_usable": 0,
+        "median_margin_db": -0.014,
+        "median_margin_family_only_db": -0.082,
+        "n_resolved_histogram": {
+          "1": 16,
+          "2": 1,
+          "4": 1
+        },
+        "n_resolved_histogram_usable": {},
+        "rejected_rival_deep_family": 18
+      },
+      "zenodo": {
+        "n": 7,
+        "n_usable": 1,
+        "median_margin_db": 1.802,
+        "median_margin_family_only_db": 0.864,
+        "n_resolved_histogram": {
+          "1": 5,
+          "3": 2
+        },
+        "n_resolved_histogram_usable": {
+          "1": 1
+        },
+        "rejected_rival_deep_family": 6
+      }
+    }
+  },
+  "n_recordings": 276,
+  "n_usable": 84,
+  "n_fit_points": 78,
+  "n_rig_condition_points": 13,
   "rig_condition_points": [
+    "avq_quadrotor|100%",
+    "avq_quadrotor|50%",
     "daset_drone1|drone1 high",
     "daset_drone1|drone1 low",
     "daset_drone2|drone2 high",
@@ -211,15 +2083,14 @@
     "dregon_mikrokopter_single_motor|80%",
     "dregon_mikrokopter_single_motor|90%",
     "spcup_AGH|single_rotor",
-    "spcup_ChuMS_3prop_bench|3 propellers. Repeat:2",
-    "zenodo_unknown_n118|unlabelled drone-noise"
+    "zenodo_unknown_n117|unlabelled drone-noise"
   ],
   "cell_octave_outliers": {
-    "drone1_high_50cm_M_center_File3": "factor 0.50 of its daset_drone1|drone1 high cell median 118.40 rev/s (octave failure on this recording)",
-    "drone1_high_50cm_M_up_File3": "factor 0.50 of its daset_drone1|drone1 high cell median 118.40 rev/s (octave failure on this recording)",
-    "drone2_high_25cm_M_center_File2": "factor 0.51 of its daset_drone2|drone2 high cell median 129.28 rev/s (octave failure on this recording)",
-    "drone2_high_25cm_M_up_File2": "factor 0.51 of its daset_drone2|drone2 high cell median 129.28 rev/s (octave failure on this recording)",
-    "drone2_low_25cm_M_center_File5": "factor 0.51 of its daset_drone2|drone2 low cell median 106.76 rev/s (octave failure on this recording)"
+    "drone1_high_50cm_M_center_File3": "factor 0.50 of its daset_drone1|drone1 high cell median 118.82 rev/s (octave failure on this recording)",
+    "drone1_high_50cm_M_up_File3": "factor 0.50 of its daset_drone1|drone1 high cell median 118.82 rev/s (octave failure on this recording)",
+    "drone2_high_25cm_M_center_File2": "factor 0.50 of its daset_drone2|drone2 high cell median 129.56 rev/s (octave failure on this recording)",
+    "drone2_high_25cm_M_up_File2": "factor 0.50 of its daset_drone2|drone2 high cell median 129.56 rev/s (octave failure on this recording)",
+    "drone2_low_25cm_M_center_File5": "factor 0.51 of its daset_drone2|drone2 low cell median 106.60 rev/s (octave failure on this recording)"
   },
   "publish_max_s": 30.0,
   "corpora": [
@@ -255,8 +2126,19 @@
           89.14
         ],
         "median_tolerance_rev_s": 0.25,
+        "n_resolved_by_rig": {
+          "dregon_mikrokopter_single_motor": {
+            "n_usable": 20,
+            "n_rotors": 1,
+            "histogram": {
+              "1": 20
+            },
+            "n_multiplicity_unresolved": 0,
+            "max_spread_rev_s": 0.0
+          }
+        },
         "reject_reasons": {
-          "harmonic-sum margin 0.51": 1
+          "harmonic-sum margin 0.77": 1
         }
       }
     },
@@ -288,6 +2170,17 @@
           132.3
         ],
         "median_tolerance_rev_s": 0.25,
+        "n_resolved_by_rig": {
+          "spcup_AGH": {
+            "n_usable": 7,
+            "n_rotors": 1,
+            "histogram": {
+              "1": 7
+            },
+            "n_multiplicity_unresolved": 0,
+            "max_spread_rev_s": 0.0
+          }
+        },
         "reject_reasons": {
           "harmonic-sum margin 1.62": 1
         }
@@ -314,40 +2207,35 @@
         "rig_condition_points": [],
         "speed_range_rev_s": null,
         "median_tolerance_rev_s": null,
+        "n_resolved_by_rig": {},
         "reject_reasons": {
-          "harmonic-sum margin 0.11": 1,
-          "half-to-half 24.62 rev/s": 1,
-          "harmonic-sum margin -0.53": 1,
-          "half-to-half 91.58 rev/s": 1,
+          "harmonic-sum margin -0.07": 2,
+          "harmonic-sum margin -0.00": 2,
           "harmonic-sum margin -0.21": 1,
-          "half-to-half 64.59 rev/s": 1,
-          "harmonic-sum margin -0.07": 1,
-          "half-to-half 65.38 rev/s": 1,
-          "harmonic-sum margin -0.06": 1,
-          "half-to-half 42.34 rev/s": 1,
-          "harmonic-sum margin 0.28": 1,
-          "half-to-half 66.23 rev/s": 1,
-          "harmonic-sum margin 0.12": 1,
-          "harmonic-sum margin -0.20": 1,
-          "half-to-half 114.68 rev/s": 1,
-          "harmonic-sum margin -0.46": 1,
-          "half-to-half 8.96 rev/s": 1,
-          "window 7.00 s": 1,
-          "harmonic-sum margin -0.16": 1,
-          "window too short": 1,
-          "harmonic-sum margin -0.24": 1,
-          "half-to-half 36.90 rev/s": 1,
-          "harmonic-sum margin 1.46": 1,
-          "harmonic-sum margin 0.29": 1,
-          "half-to-half 11.03 rev/s": 1,
-          "harmonic-sum margin 2.03": 1,
-          "harmonic-sum margin 1.76": 1,
-          "harmonic-sum margin 1.96": 1,
-          "half-to-half 4.02 rev/s": 1,
+          "harmonic-sum margin -0.35": 1,
+          "half-to-half 81.96 rev/s": 1,
+          "harmonic-sum margin -0.03": 1,
+          "half-to-half 71.45 rev/s": 1,
+          "harmonic-sum margin 0.10": 1,
+          "half-to-half 92.88 rev/s": 1,
+          "harmonic-sum margin -0.12": 1,
+          "half-to-half 100.13 rev/s": 1,
           "harmonic-sum margin 0.01": 1,
-          "half-to-half 30.68 rev/s": 1,
-          "harmonic-sum margin 0.03": 1,
-          "half-to-half 40.68 rev/s": 1
+          "half-to-half 5.69 rev/s": 1,
+          "window 7.00 s": 1,
+          "harmonic-sum margin -0.28": 1,
+          "window too short": 1,
+          "harmonic-sum margin -0.58": 1,
+          "half-to-half 14.54 rev/s": 1,
+          "harmonic-sum margin 1.44": 1,
+          "harmonic-sum margin 0.00": 1,
+          "half-to-half 7.65 rev/s": 1,
+          "harmonic-sum margin 2.00": 1,
+          "harmonic-sum margin 1.73": 1,
+          "harmonic-sum margin 0.41": 1,
+          "half-to-half 1.52 rev/s": 1,
+          "harmonic-sum margin -0.22": 1,
+          "half-to-half 4.20 rev/s": 1
         }
       }
     },
@@ -367,31 +2255,26 @@
       "reason": "a genuine bench rig that the published SPCUP19-egonoise frames expose only as 216 unlabelled arrays (Freq/SPL/RawTruncatedCalibrated per mic); the recordings are stationary but the rig runs several propellers at uncontrolled speeds, so only the runs that clear the 3 dB margin are kept",
       "stats": {
         "n_recordings": 9,
-        "n_usable": 1,
-        "usable_rigs": [
-          "spcup_ChuMS_3prop_bench"
-        ],
-        "rig_condition_points": [
-          "spcup_ChuMS_3prop_bench|3 propellers. Repeat:2"
-        ],
-        "speed_range_rev_s": [
-          77.14,
-          77.14
-        ],
-        "median_tolerance_rev_s": 0.56,
+        "n_usable": 0,
+        "usable_rigs": [],
+        "rig_condition_points": [],
+        "speed_range_rev_s": null,
+        "median_tolerance_rev_s": null,
+        "n_resolved_by_rig": {},
         "reject_reasons": {
           "harmonic-sum margin 0.48": 1,
           "half-to-half 12.38 rev/s": 1,
           "harmonic-sum margin -1.26": 1,
           "half-to-half 69.40 rev/s": 1,
           "harmonic-sum margin 0.24": 1,
-          "harmonic-sum margin 0.33": 1,
-          "harmonic-sum margin -0.50": 1,
-          "half-to-half 1.54 rev/s": 1,
-          "harmonic-sum margin 2.63": 1,
-          "harmonic-sum margin -0.03": 1,
-          "half-to-half 2.06 rev/s": 1,
-          "harmonic-sum margin 0.12": 1
+          "harmonic-sum margin 0.42": 1,
+          "harmonic-sum margin 0.99": 1,
+          "harmonic-sum margin 2.06": 1,
+          "harmonic-sum margin 0.71": 1,
+          "half-to-half 1.40 rev/s": 1,
+          "harmonic-sum margin 1.88": 1,
+          "half-to-half 1.22 rev/s": 1,
+          "harmonic-sum margin 0.96": 1
         }
       }
     },
@@ -411,7 +2294,7 @@
       "reason": "the largest static multichannel drone corpus and the only one with two airframes; the recordings are stationary but the four rotors are not near-equal on every mic, so the reading is accepted per recording",
       "stats": {
         "n_recordings": 168,
-        "n_usable": 50,
+        "n_usable": 52,
         "usable_rigs": [
           "daset_drone1",
           "daset_drone2"
@@ -423,196 +2306,259 @@
           "daset_drone2|low"
         ],
         "speed_range_rev_s": [
-          27.3,
-          136.57
+          27.28,
+          136.54
         ],
-        "median_tolerance_rev_s": 0.25,
+        "median_tolerance_rev_s": 0.295,
+        "n_resolved_by_rig": {
+          "daset_drone1": {
+            "n_usable": 15,
+            "n_rotors": 4,
+            "histogram": {
+              "1": 7,
+              "2": 7,
+              "3": 1
+            },
+            "n_multiplicity_unresolved": 15,
+            "max_spread_rev_s": 4.823
+          },
+          "daset_drone2": {
+            "n_usable": 37,
+            "n_rotors": 4,
+            "histogram": {
+              "1": 33,
+              "2": 4
+            },
+            "n_multiplicity_unresolved": 37,
+            "max_spread_rev_s": 0.427
+          }
+        },
         "reject_reasons": {
-          "harmonic-sum margin 0.48": 2,
-          "harmonic-sum margin 1.84": 2,
-          "harmonic-sum margin 1.34": 2,
-          "harmonic-sum margin 2.76": 2,
-          "half-to-half 1.28 rev/s": 2,
-          "half-to-half 3.29 rev/s": 2,
-          "half-to-half 1.08 rev/s": 2,
-          "half-to-half 2.78 rev/s": 2,
-          "harmonic-sum margin 0.02": 2,
-          "harmonic-sum margin 1.08": 2,
-          "harmonic-sum margin 2.34": 2,
-          "half-to-half 12.03 rev/s": 2,
-          "harmonic-sum margin 1.12": 1,
-          "half-to-half 1.48 rev/s": 1,
-          "harmonic-sum margin 1.13": 1,
-          "half-to-half 10.66 rev/s": 1,
-          "harmonic-sum margin 1.04": 1,
-          "half-to-half 39.38 rev/s": 1,
-          "harmonic-sum margin 1.65": 1,
-          "half-to-half 3.18 rev/s": 1,
-          "harmonic-sum margin 2.43": 1,
-          "harmonic-sum margin 2.26": 1,
-          "harmonic-sum margin 1.48": 1,
-          "harmonic-sum margin 0.20": 1,
-          "half-to-half 13.98 rev/s": 1,
-          "harmonic-sum margin 0.86": 1,
-          "half-to-half 11.32 rev/s": 1,
-          "harmonic-sum margin 0.43": 1,
-          "half-to-half 7.09 rev/s": 1,
-          "half-to-half 1.32 rev/s": 1,
-          "harmonic-sum margin 1.22": 1,
-          "harmonic-sum margin -0.06": 1,
-          "half-to-half 78.75 rev/s": 1,
-          "half-to-half 50.02 rev/s": 1,
-          "harmonic-sum margin 1.41": 1,
-          "half-to-half 15.62 rev/s": 1,
-          "harmonic-sum margin 0.42": 1,
-          "half-to-half 6.14 rev/s": 1,
-          "harmonic-sum margin 1.69": 1,
-          "harmonic-sum margin -0.25": 1,
-          "half-to-half 11.68 rev/s": 1,
-          "harmonic-sum margin 1.45": 1,
-          "harmonic-sum margin 2.19": 1,
-          "harmonic-sum margin 2.32": 1,
-          "harmonic-sum margin 1.73": 1,
-          "half-to-half 1.42 rev/s": 1,
-          "half-to-half 1.26 rev/s": 1,
-          "harmonic-sum margin 1.17": 1,
-          "half-to-half 12.94 rev/s": 1,
-          "harmonic-sum margin 0.75": 1,
-          "half-to-half 3.08 rev/s": 1,
-          "harmonic-sum margin 0.54": 1,
-          "half-to-half 40.04 rev/s": 1,
-          "harmonic-sum margin 0.21": 1,
-          "harmonic-sum margin 1.07": 1,
-          "harmonic-sum margin -0.03": 1,
-          "harmonic-sum margin -2.22": 1,
-          "half-to-half 49.61 rev/s": 1,
-          "harmonic-sum margin 0.72": 1,
-          "harmonic-sum margin -0.37": 1,
-          "harmonic-sum margin 1.25": 1,
-          "harmonic-sum margin -0.14": 1,
-          "half-to-half 60.65 rev/s": 1,
-          "harmonic-sum margin -0.10": 1,
-          "harmonic-sum margin 0.47": 1,
-          "half-to-half 1.04 rev/s": 1,
-          "harmonic-sum margin 0.70": 1,
-          "harmonic-sum margin 2.47": 1,
-          "half-to-half 61.65 rev/s": 1,
-          "harmonic-sum margin 0.71": 1,
-          "half-to-half 111.36 rev/s": 1,
-          "harmonic-sum margin -0.16": 1,
-          "half-to-half 3.28 rev/s": 1,
-          "harmonic-sum margin -0.46": 1,
-          "harmonic-sum margin -2.10": 1,
-          "half-to-half 123.71 rev/s": 1,
-          "harmonic-sum margin 0.37": 1,
-          "half-to-half 4.89 rev/s": 1,
-          "harmonic-sum margin 2.11": 1,
-          "harmonic-sum margin 2.52": 1,
+          "harmonic-sum margin 1.56": 3,
+          "harmonic-sum margin 1.51": 2,
+          "harmonic-sum margin 2.11": 2,
+          "harmonic-sum margin 2.43": 2,
+          "harmonic-sum margin 1.74": 2,
+          "harmonic-sum margin -0.36": 2,
+          "harmonic-sum margin 2.26": 2,
+          "harmonic-sum margin 1.46": 2,
+          "harmonic-sum margin 1.95": 2,
+          "harmonic-sum margin 0.78": 2,
+          "harmonic-sum margin 0.29": 2,
+          "harmonic-sum margin 2.27": 2,
+          "harmonic-sum margin 0.14": 2,
+          "harmonic-sum margin 0.54": 2,
           "harmonic-sum margin 0.91": 1,
-          "harmonic-sum margin 1.14": 1,
-          "harmonic-sum margin 0.50": 1,
-          "harmonic-sum margin 0.80": 1,
-          "harmonic-sum margin 0.30": 1,
-          "harmonic-sum margin -1.07": 1,
-          "window 2.00 s": 1,
-          "harmonic-sum margin 2.84": 1,
-          "window too short": 1,
-          "harmonic-sum margin -0.17": 1,
-          "half-to-half 8.72 rev/s": 1,
-          "harmonic-sum margin 0.39": 1,
-          "half-to-half 4.34 rev/s": 1,
-          "harmonic-sum margin 0.74": 1,
-          "half-to-half 31.88 rev/s": 1,
-          "half-to-half 4.79 rev/s": 1,
-          "harmonic-sum margin -0.38": 1,
-          "harmonic-sum margin -0.97": 1,
-          "half-to-half 69.34 rev/s": 1,
-          "harmonic-sum margin -0.33": 1,
-          "half-to-half 124.76 rev/s": 1,
-          "harmonic-sum margin 0.79": 1,
-          "harmonic-sum margin -0.05": 1,
-          "harmonic-sum margin 2.03": 1,
-          "half-to-half 96.99 rev/s": 1,
-          "harmonic-sum margin 0.98": 1,
-          "half-to-half 1.90 rev/s": 1,
-          "harmonic-sum margin 2.22": 1,
-          "harmonic-sum margin -0.23": 1,
-          "harmonic-sum margin 0.81": 1,
-          "half-to-half 1.56 rev/s": 1,
-          "harmonic-sum margin -0.30": 1,
-          "harmonic-sum margin 0.97": 1,
-          "half-to-half 10.45 rev/s": 1,
-          "harmonic-sum margin 2.14": 1,
-          "half-to-half 1.36 rev/s": 1,
-          "harmonic-sum margin 1.26": 1,
-          "half-to-half 22.84 rev/s": 1,
-          "harmonic-sum margin 2.78": 1,
-          "half-to-half 1.34 rev/s": 1,
-          "harmonic-sum margin 1.83": 1,
-          "harmonic-sum margin 1.55": 1,
-          "half-to-half 75.63 rev/s": 1,
-          "harmonic-sum margin 1.44": 1,
-          "harmonic-sum margin 1.70": 1,
-          "harmonic-sum margin 1.80": 1,
-          "harmonic-sum margin 0.85": 1,
-          "harmonic-sum margin 2.33": 1,
-          "harmonic-sum margin 1.28": 1,
-          "half-to-half 1.10 rev/s": 1,
-          "harmonic-sum margin 2.01": 1,
-          "half-to-half 78.22 rev/s": 1,
+          "half-to-half 2.26 rev/s": 1,
+          "harmonic-sum margin 2.10": 1,
+          "harmonic-sum margin 1.64": 1,
+          "half-to-half 9.36 rev/s": 1,
+          "harmonic-sum margin 1.62": 1,
+          "half-to-half 34.48 rev/s": 1,
+          "half-to-half 39.48 rev/s": 1,
+          "harmonic-sum margin 2.73": 1,
+          "harmonic-sum margin 1.66": 1,
+          "harmonic-sum margin 1.57": 1,
+          "harmonic-sum margin 0.43": 1,
+          "half-to-half 15.01 rev/s": 1,
+          "harmonic-sum margin 0.26": 1,
+          "half-to-half 11.24 rev/s": 1,
           "harmonic-sum margin 1.98": 1,
-          "harmonic-sum margin -1.20": 1,
-          "harmonic-sum margin 2.57": 1,
-          "harmonic-sum margin 1.53": 1,
-          "harmonic-sum margin 1.23": 1,
-          "half-to-half 25.08 rev/s": 1,
-          "harmonic-sum margin -1.81": 1,
-          "half-to-half 80.23 rev/s": 1,
-          "harmonic-sum margin -0.04": 1,
-          "half-to-half 67.03 rev/s": 1,
-          "mapped shaft rate": 1,
-          "harmonic-sum margin 2.92": 1,
-          "harmonic-sum margin 0.25": 1,
-          "harmonic-sum margin 1.06": 1,
-          "half-to-half 1.73 rev/s": 1,
-          "harmonic-sum margin 2.94": 1,
-          "harmonic-sum margin 2.40": 1,
-          "harmonic-sum margin 1.27": 1,
-          "harmonic-sum margin -0.27": 1,
-          "half-to-half 12.74 rev/s": 1,
-          "harmonic-sum margin 0.90": 1,
-          "half-to-half 1.83 rev/s": 1,
-          "harmonic-sum margin 2.93": 1,
-          "harmonic-sum margin 0.16": 1,
-          "half-to-half 16.05 rev/s": 1,
+          "half-to-half 6.09 rev/s": 1,
+          "harmonic-sum margin 1.81": 1,
+          "harmonic-sum margin 2.19": 1,
+          "half-to-half 9.46 rev/s": 1,
+          "harmonic-sum margin 2.00": 1,
+          "half-to-half 101.66 rev/s": 1,
+          "harmonic-sum margin 2.91": 1,
+          "half-to-half 3.80 rev/s": 1,
+          "half-to-half 1.01 rev/s": 1,
+          "harmonic-sum margin 1.73": 1,
+          "half-to-half 7.73 rev/s": 1,
+          "harmonic-sum margin 1.85": 1,
+          "harmonic-sum margin 2.18": 1,
+          "harmonic-sum margin -0.25": 1,
+          "half-to-half 9.96 rev/s": 1,
+          "harmonic-sum margin 1.82": 1,
+          "harmonic-sum margin 2.72": 1,
+          "half-to-half 98.41 rev/s": 1,
+          "harmonic-sum margin 2.44": 1,
+          "half-to-half 4.10 rev/s": 1,
+          "half-to-half 3.01 rev/s": 1,
+          "harmonic-sum margin 2.32": 1,
+          "harmonic-sum margin 0.49": 1,
+          "half-to-half 30.45 rev/s": 1,
+          "harmonic-sum margin 2.31": 1,
+          "half-to-half 21.48 rev/s": 1,
+          "harmonic-sum margin 1.86": 1,
+          "half-to-half 124.10 rev/s": 1,
+          "harmonic-sum margin 0.46": 1,
+          "half-to-half 1.19 rev/s": 1,
+          "harmonic-sum margin 1.04": 1,
+          "harmonic-sum margin 0.37": 1,
+          "half-to-half 60.50 rev/s": 1,
+          "harmonic-sum margin 1.18": 1,
+          "harmonic-sum margin 1.63": 1,
+          "half-to-half 3.32 rev/s": 1,
+          "harmonic-sum margin 1.67": 1,
+          "half-to-half 61.68 rev/s": 1,
+          "harmonic-sum margin 0.41": 1,
+          "half-to-half 69.08 rev/s": 1,
+          "harmonic-sum margin 2.53": 1,
+          "harmonic-sum margin -0.92": 1,
+          "half-to-half 5.80 rev/s": 1,
+          "harmonic-sum margin -2.96": 1,
+          "half-to-half 123.71 rev/s": 1,
+          "harmonic-sum margin 1.05": 1,
+          "half-to-half 1.36 rev/s": 1,
+          "harmonic-sum margin 0.59": 1,
+          "half-to-half 2.66 rev/s": 1,
+          "half-to-half 4.02 rev/s": 1,
+          "harmonic-sum margin 2.85": 1,
+          "harmonic-sum margin 1.21": 1,
+          "half-to-half 9.08 rev/s": 1,
+          "harmonic-sum margin -0.96": 1,
+          "half-to-half 16.88 rev/s": 1,
+          "window 2.00 s": 1,
+          "window too short": 1,
+          "harmonic-sum margin -0.05": 1,
+          "half-to-half 61.40 rev/s": 1,
+          "harmonic-sum margin 0.88": 1,
+          "half-to-half 3.66 rev/s": 1,
+          "harmonic-sum margin 0.03": 1,
+          "half-to-half 2.89 rev/s": 1,
+          "harmonic-sum margin 0.30": 1,
+          "half-to-half 4.94 rev/s": 1,
+          "harmonic-sum margin -1.73": 1,
+          "half-to-half 22.43 rev/s": 1,
+          "harmonic-sum margin -1.60": 1,
+          "half-to-half 69.35 rev/s": 1,
+          "harmonic-sum margin -0.14": 1,
+          "half-to-half 4.08 rev/s": 1,
+          "half-to-half 4.18 rev/s": 1,
+          "harmonic-sum margin 1.90": 1,
+          "harmonic-sum margin 1.54": 1,
+          "harmonic-sum margin 0.72": 1,
+          "half-to-half 2.76 rev/s": 1,
+          "harmonic-sum margin 1.29": 1,
+          "half-to-half 22.82 rev/s": 1,
+          "half-to-half 1.30 rev/s": 1,
+          "harmonic-sum margin 0.15": 1,
+          "half-to-half 4.20 rev/s": 1,
+          "half-to-half 22.88 rev/s": 1,
+          "harmonic-sum margin 1.47": 1,
+          "harmonic-sum margin 0.87": 1,
+          "half-to-half 3.86 rev/s": 1,
+          "harmonic-sum margin 1.92": 1,
+          "half-to-half 22.80 rev/s": 1,
+          "harmonic-sum margin 0.22": 1,
+          "harmonic-sum margin 0.74": 1,
+          "half-to-half 9.03 rev/s": 1,
+          "half-to-half 78.49 rev/s": 1,
+          "harmonic-sum margin 0.48": 1,
+          "harmonic-sum margin 0.56": 1,
+          "half-to-half 75.98 rev/s": 1,
+          "harmonic-sum margin 0.05": 1,
           "harmonic-sum margin 1.78": 1,
-          "harmonic-sum margin -0.98": 1,
-          "half-to-half 91.16 rev/s": 1,
-          "harmonic-sum margin 1.43": 1,
-          "harmonic-sum margin 2.41": 1
+          "half-to-half 2.49 rev/s": 1,
+          "harmonic-sum margin 1.65": 1,
+          "half-to-half 25.54 rev/s": 1,
+          "harmonic-sum margin -0.55": 1,
+          "harmonic-sum margin 2.79": 1,
+          "half-to-half 9.40 rev/s": 1,
+          "half-to-half 78.40 rev/s": 1,
+          "harmonic-sum margin 0.02": 1,
+          "harmonic-sum margin 0.96": 1,
+          "half-to-half 4.17 rev/s": 1,
+          "harmonic-sum margin 0.04": 1,
+          "half-to-half 23.98 rev/s": 1,
+          "half-to-half 1.35 rev/s": 1,
+          "harmonic-sum margin 0.42": 1,
+          "half-to-half 66.54 rev/s": 1,
+          "half-to-half 1.16 rev/s": 1,
+          "harmonic-sum margin 1.38": 1,
+          "half-to-half 30.68 rev/s": 1,
+          "harmonic-sum margin -0.03": 1,
+          "half-to-half 42.73 rev/s": 1,
+          "half-to-half 2.68 rev/s": 1,
+          "harmonic-sum margin 1.80": 1,
+          "harmonic-sum margin 0.21": 1,
+          "half-to-half 47.24 rev/s": 1,
+          "harmonic-sum margin -0.30": 1,
+          "half-to-half 59.14 rev/s": 1,
+          "harmonic-sum margin -0.20": 1,
+          "half-to-half 4.36 rev/s": 1,
+          "harmonic-sum margin 2.93": 1,
+          "harmonic-sum margin 0.06": 1,
+          "half-to-half 129.07 rev/s": 1,
+          "half-to-half 92.26 rev/s": 1,
+          "harmonic-sum margin 0.51": 1,
+          "half-to-half 55.33 rev/s": 1,
+          "harmonic-sum margin 1.34": 1,
+          "harmonic-sum margin 2.30": 1
         }
       }
     },
     {
-      "corpus": "AVQ",
-      "families": [],
-      "location": "dload:AVQ / AVQ-egonoise",
-      "type": "onboard 8-ch array, FREE FLIGHT (2 sessions, 12 sequences)",
-      "rigs": "1 quadrotor",
-      "telemetry": "none (blind VK pseudo-labels only, dload:AVQ-egonoise-vkrps)",
-      "speed_source": "none",
-      "format": "8 ch, 44.1 kHz, 12 sequences (705 s of pure ego-noise)",
+      "corpus": "AVQ constant-throttle ego-noise",
+      "families": [
+        "avq_bench"
+      ],
+      "location": "dload:AVQ (sequences S1_seq1/S1_seq2/S1_seq3/S2_seq1; the same recordings are in dload:AVQ-egonoise at channel 0, 16 kHz)",
+      "type": "BENCH/CONSTANT-THROTTLE EGO-NOISE: the four sequences the AVQ spec table marks Type = EO with Drone = constant \u2014 S1 seq1 50 % (120 s), S1 seq2 100 % (120 s), S1 seq3 150 % (40 s), S2 seq1 100 % (210 s) \u2014 read in consecutive 30 s windows. The other eight sequences are excluded by type: S2_seq2 is EO at DYNAMIC throttle, S2_seq5/seq6 are constant 100 % but speech+ego-noise MIXTURES, and S1_seq5/S2_seq3/seq4/seq7/seq8 are speech with the drone muted or dynamic",
+      "rigs": "1 quadrotor (onboard 8-mic circular array + camera, QMUL)",
+      "telemetry": "none logged; the THROTTLE SETTING per sequence is in the spec table (50/100/150 %), which is what makes these four sequences bench class",
+      "speed_source": "estimated (same estimator, multi-rotor mode)",
+      "format": "8 ch, 44.1 kHz; 40-210 s per sequence -> 30 s windows",
       "licence": "free for academic/research use (courtesy of Lin Wang, QMUL)",
-      "verdict": "REJECTED",
-      "reason": "free flight, so no recording has one speed per rotor to fit to, and the corpus is the hardest case on record: 175 of 187 blind windows are octave-suspect and its median fvk_ratio_double 1.044 is below the calibrated 1.065 cut (blind-corpus-annotation.md). Not a bench/static candidate by type",
+      "verdict": "USABLE",
+      "reason": "the first survey pass refused the whole corpus as 'free flight' without reading the spec table. The table's Drone column is explicit: four sequences hold ego-noise only at a CONSTANT throttle setting, which is the bench-class definition used here (stationary window, one speed per rotor). The blind-campaign octave warning (median fvk_ratio_double 1.044) was measured on the FLIGHT sequences, not on these",
       "stats": {
-        "n_recordings": 0,
-        "n_usable": 0,
-        "usable_rigs": [],
-        "rig_condition_points": [],
-        "speed_range_rev_s": null,
-        "median_tolerance_rev_s": null,
-        "reject_reasons": {}
+        "n_recordings": 16,
+        "n_usable": 4,
+        "usable_rigs": [
+          "avq_quadrotor"
+        ],
+        "rig_condition_points": [
+          "avq_quadrotor|100.0",
+          "avq_quadrotor|50.0"
+        ],
+        "speed_range_rev_s": [
+          77.79,
+          98.24
+        ],
+        "median_tolerance_rev_s": 0.25,
+        "n_resolved_by_rig": {
+          "avq_quadrotor": {
+            "n_usable": 4,
+            "n_rotors": 4,
+            "histogram": {
+              "1": 3,
+              "2": 1
+            },
+            "n_multiplicity_unresolved": 4,
+            "max_spread_rev_s": 0.366
+          }
+        },
+        "reject_reasons": {
+          "half-to-half 6.56 rev/s": 1,
+          "harmonic-sum margin 2.23": 1,
+          "harmonic-sum margin -0.29": 1,
+          "half-to-half 80.92 rev/s": 1,
+          "harmonic-sum margin 2.35": 1,
+          "half-to-half 80.84 rev/s": 1,
+          "half-to-half 1.50 rev/s": 1,
+          "harmonic-sum margin 2.19": 1,
+          "half-to-half 4.24 rev/s": 1,
+          "harmonic-sum margin -0.81": 1,
+          "harmonic-sum margin -0.43": 1,
+          "half-to-half 48.50 rev/s": 1,
+          "harmonic-sum margin 0.74": 1,
+          "harmonic-sum margin -0.67": 1,
+          "harmonic-sum margin 1.58": 1,
+          "harmonic-sum margin 0.49": 1,
+          "half-to-half 48.24 rev/s": 1
+        }
       }
     },
     {
@@ -636,33 +2582,33 @@
         "rig_condition_points": [],
         "speed_range_rev_s": null,
         "median_tolerance_rev_s": null,
+        "n_resolved_by_rig": {},
         "reject_reasons": {
           "window 1.02 s": 24,
           "window too short": 24,
-          "harmonic-sum margin 0.07": 1,
-          "harmonic-sum margin 0.72": 1,
-          "harmonic-sum margin -0.49": 1,
-          "harmonic-sum margin -0.71": 1,
-          "harmonic-sum margin -0.17": 1,
-          "harmonic-sum margin 1.58": 1,
-          "harmonic-sum margin -0.07": 1,
-          "harmonic-sum margin 0.10": 1,
-          "harmonic-sum margin 0.83": 1,
-          "harmonic-sum margin -0.26": 1,
-          "harmonic-sum margin -0.72": 1,
-          "harmonic-sum margin -0.54": 1,
+          "harmonic-sum margin -0.03": 1,
+          "harmonic-sum margin 0.21": 1,
+          "harmonic-sum margin -0.29": 1,
+          "harmonic-sum margin -0.88": 1,
+          "harmonic-sum margin 0.08": 1,
+          "harmonic-sum margin 1.55": 1,
+          "harmonic-sum margin 1.66": 1,
+          "harmonic-sum margin 1.80": 1,
+          "harmonic-sum margin -0.64": 1,
+          "harmonic-sum margin 1.36": 1,
+          "harmonic-sum margin 0.22": 1,
+          "harmonic-sum margin 0.32": 1,
+          "harmonic-sum margin -0.24": 1,
+          "harmonic-sum margin 1.68": 1,
           "harmonic-sum margin -0.38": 1,
-          "harmonic-sum margin -0.66": 1,
-          "harmonic-sum margin -0.56": 1,
-          "harmonic-sum margin 0.42": 1,
-          "harmonic-sum margin -1.15": 1,
-          "harmonic-sum margin 1.13": 1,
-          "harmonic-sum margin -0.21": 1,
-          "harmonic-sum margin 0.09": 1,
-          "harmonic-sum margin -0.65": 1,
-          "harmonic-sum margin 0.05": 1,
-          "harmonic-sum margin 1.40": 1,
-          "harmonic-sum margin -0.22": 1
+          "harmonic-sum margin -0.28": 1,
+          "harmonic-sum margin 1.00": 1,
+          "harmonic-sum margin -1.05": 1,
+          "harmonic-sum margin -0.07": 1,
+          "harmonic-sum margin 0.57": 1,
+          "harmonic-sum margin 0.81": 1,
+          "harmonic-sum margin 1.98": 1,
+          "harmonic-sum margin -0.96": 1
         }
       }
     },
@@ -684,25 +2630,37 @@
         "n_recordings": 7,
         "n_usable": 1,
         "usable_rigs": [
-          "zenodo_unknown_n118"
+          "zenodo_unknown_n117"
         ],
         "rig_condition_points": [
-          "zenodo_unknown_n118|unlabelled drone-noise clip (noises-train-drones)"
+          "zenodo_unknown_n117|unlabelled drone-noise clip (noises-train-drones)"
         ],
         "speed_range_rev_s": [
-          111.2,
-          111.2
+          97.14,
+          97.14
         ],
-        "median_tolerance_rev_s": 0.72,
+        "median_tolerance_rev_s": 0.25,
+        "n_resolved_by_rig": {
+          "zenodo_unknown_n117": {
+            "n_usable": 1,
+            "n_rotors": 4,
+            "histogram": {
+              "1": 1
+            },
+            "n_multiplicity_unresolved": 1,
+            "max_spread_rev_s": 0.0
+          }
+        },
         "reject_reasons": {
-          "harmonic-sum margin 1.66": 1,
-          "harmonic-sum margin 2.50": 1,
-          "harmonic-sum margin 1.62": 1,
-          "harmonic-sum margin 0.09": 1,
-          "half-to-half 7.38 rev/s": 1,
-          "harmonic-sum margin -1.05": 1,
-          "harmonic-sum margin 0.42": 1,
-          "half-to-half 6.19 rev/s": 1
+          "harmonic-sum margin 2.31": 1,
+          "harmonic-sum margin 2.39": 1,
+          "half-to-half 1.08 rev/s": 1,
+          "harmonic-sum margin 0.45": 1,
+          "harmonic-sum margin 0.86": 1,
+          "half-to-half 40.49 rev/s": 1,
+          "harmonic-sum margin 1.80": 1,
+          "half-to-half 58.29 rev/s": 1,
+          "harmonic-sum margin 0.13": 1
         }
       }
     },
@@ -727,6 +2685,7 @@
         "rig_condition_points": [],
         "speed_range_rev_s": null,
         "median_tolerance_rev_s": null,
+        "n_resolved_by_rig": {},
         "reject_reasons": {
           "harmonic-sum margin -6.24": 1,
           "harmonic-sum margin -7.75": 1,
@@ -756,6 +2715,7 @@
         "rig_condition_points": [],
         "speed_range_rev_s": null,
         "median_tolerance_rev_s": null,
+        "n_resolved_by_rig": {},
         "reject_reasons": {}
       }
     },
@@ -778,6 +2738,7 @@
         "rig_condition_points": [],
         "speed_range_rev_s": null,
         "median_tolerance_rev_s": null,
+        "n_resolved_by_rig": {},
         "reject_reasons": {}
       }
     },
@@ -800,6 +2761,7 @@
         "rig_condition_points": [],
         "speed_range_rev_s": null,
         "median_tolerance_rev_s": null,
+        "n_resolved_by_rig": {},
         "reject_reasons": {}
       }
     },
@@ -822,11 +2784,13 @@
         "rig_condition_points": [],
         "speed_range_rev_s": null,
         "median_tolerance_rev_s": null,
+        "n_resolved_by_rig": {},
         "reject_reasons": {}
       }
     }
   ],
   "figures": [
-    "survey_speeds.png"
+    "survey_speeds.png",
+    "survey_multirotor_split.png"
   ]
 }
