@@ -75,12 +75,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-import matplotlib
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from scipy.optimize import least_squares
-from scipy.signal import butter, sosfilt_zi, sosfiltfilt, sosfreqz, welch
+import matplotlib.pyplot as plt  # noqa: E402
+from scipy.optimize import least_squares  # noqa: E402
+from scipy.signal import butter, sosfiltfilt, sosfreqz, welch  # noqa: E402
 
 # ─── frozen analysis constants ────────────────────────────────────────────────
 
@@ -483,9 +483,7 @@ def quantisation(track: NativeTrack) -> dict[str, Any]:
     step = float(np.percentile(nz, 0.5))
     ratios = nz / step
     out["step_rps_measured"] = step
-    out["near_integer_fraction"] = float(
-        (np.abs(ratios - np.round(ratios)) < 0.05).mean()
-    )
+    out["near_integer_fraction"] = float((np.abs(ratios - np.round(ratios)) < 0.05).mean())
     out["distinct_values"] = int(np.unique(np.round(track.raw_rps / step)).size)
     declared = DECLARED_STEP_RPS.get(track.rig)
     if declared is not None:
@@ -517,7 +515,9 @@ def lag_grid(fs: float, hi_s: float = S_LAG_MAX_S, n: int = S_N_LAGS) -> np.ndar
     return np.unique(np.round(np.geomspace(lo, hi, n) * fs).astype(np.int64))
 
 
-def structure_function(theta_parts: list[np.ndarray], lags: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def structure_function(
+    theta_parts: list[np.ndarray], lags: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     """``(S, n)`` for ``S(tau) = Var[theta(t+tau) - theta(t)]`` pooled over parts."""
     num = np.zeros(lags.size)
     cnt = np.zeros(lags.size)
@@ -548,7 +548,9 @@ def local_slope(tau: np.ndarray, s: np.ndarray) -> np.ndarray:
     return out
 
 
-def slope_crossing(tau: np.ndarray, slope: np.ndarray, target: float = SLOPE_TARGET) -> float | None:
+def slope_crossing(
+    tau: np.ndarray, slope: np.ndarray, target: float = SLOPE_TARGET
+) -> float | None:
     """First lag where the local slope drops through ``target`` (log-interpolated)."""
     ok = np.isfinite(slope)
     t, s = tau[ok], slope[ok]
@@ -807,6 +809,7 @@ def analyse_telemetry_rig(
 
 def pool_rotors(per_rotor: list[dict[str, Any]]) -> dict[str, Any]:
     """Median over rotors of the identified per-rotor quantities."""
+
     def med(path: list[str]) -> float | None:
         vals = []
         for row in per_rotor:
@@ -836,9 +839,7 @@ def pool_rotors(per_rotor: list[dict[str, Any]]) -> dict[str, Any]:
         "tau_slope1p5_s": med(["tau_slope1p5_s"]),
         "lam_from_slope1p5_1_s": med(["lam_from_slope1p5_1_s"]),
         "nu_rms_rad_s": med(["nu_rms_rad_s"]),
-        "preferred_by_aic": (
-            max(set(prefs), key=prefs.count) if prefs else None
-        ),
+        "preferred_by_aic": (max(set(prefs), key=prefs.count) if prefs else None),
         "n_rotors_preferring_ou": int(sum(p == "ou" for p in prefs)),
     }
 
@@ -920,7 +921,6 @@ RATE_ERROR_INVARIANT = (
     "|gamma(tau)| is invariant to a constant rate error: the lagged product "
     "gains only the t-independent factor exp(-i 2 pi k d tau)"
 )
-
 
 
 def _raw_g2(zd: np.ndarray, lag: int) -> np.ndarray:
@@ -1026,7 +1026,6 @@ def cross_g2(
     n_increments = max((zk.shape[1] - lag) / max(oversamp, float(lag)), 2.0)
     floor = np.clip(np.asarray(sur, dtype=np.float64) + 1.0 / n_increments, 0.0, 0.95)
     return (g2 - floor) / (1.0 - floor), floor
-
 
 
 def unwrapped_V(zd: np.ndarray, lag: int, oversamp: float) -> tuple[np.ndarray, float]:
@@ -1163,15 +1162,13 @@ def fit_Vk(
                     return k**2 * v_theta(t, sigma, lam) + 2.0 * dk[j] * np.abs(t)
 
                 if estimator == "unwrapped":
-                    out[sel] = (
-                        0.5 * (vk(a[sel]) + vk(b[sel]) - 2.0 * vk(c0)[None, :])
-                    ) @ s_w + ck[j]
+                    out[sel] = (0.5 * (vk(a[sel]) + vk(b[sel]) - 2.0 * vk(c0)[None, :])) @ s_w + ck[
+                        j
+                    ]
                 else:
                     cc = np.exp(-0.5 * np.clip(vk(a[sel]), 0.0, 700.0)) @ s_w
                     c00 = float(np.exp(-0.5 * np.clip(vk(c0), 0.0, 700.0)) @ s_w)
-                    out[sel] = (
-                        -2.0 * np.log(np.maximum(cc / max(c00, 1e-300), 1e-300)) + ck[j]
-                    )
+                    out[sel] = -2.0 * np.log(np.maximum(cc / max(c00, 1e-300), 1e-300)) + ck[j]
             return out
 
         return predict
@@ -1293,12 +1290,9 @@ def analyse_acoustic_support(
             "isolation_hz": list(isolation),
         }
     dm = demod_orders(audio, fs, centres, window, hop, k_max)
-    z, ts = dm["z"], dm["ts"]
+    z = dm["z"]
     margins = {k: band_margin_db(z, k) for k in range(1, k_max + 1)}
-    keep = {
-        k: np.flatnonzero(margins[k] >= MARGIN_MIN_DB)
-        for k in range(1, k_max + 1)
-    }
+    keep = {k: np.flatnonzero(margins[k] >= MARGIN_MIN_DB) for k in range(1, k_max + 1)}
     if isolation is not None:
         for k in range(1, k_max + 1):
             if isolation[k - 1] < 2.0 * res_bw_hz:
@@ -1334,8 +1328,9 @@ def analyse_acoustic_support(
     # correlation, and its whole effect is the constant c_k the fit carries.
     lag_lo = max(ACOUSTIC_LAG_LO_S, float(window) / fs)
     lags = np.unique(
-        np.round(np.geomspace(lag_lo, max(lag_hi, 1.05 * lag_lo), ACOUSTIC_N_LAGS)
-                 * dm["frame_rate_hz"]).astype(int)
+        np.round(
+            np.geomspace(lag_lo, max(lag_hi, 1.05 * lag_lo), ACOUSTIC_N_LAGS) * dm["frame_rate_hz"]
+        ).astype(int)
     )
     lags = lags[(lags >= int(round(oversamp))) & (lags < dm["n_frames"] - 2)]
     if lags.size < 3:
@@ -1387,29 +1382,27 @@ def analyse_acoustic_support(
     # the §5.1 cross-order estimate of the SAME shaft structure function
     cross: list[dict[str, Any]] = []
     for i, k in enumerate(orders):
-        for l in orders[i + 1 :]:
-            common = np.intersect1d(keep[k], keep[l])
+        for m2 in orders[i + 1 :]:
+            common = np.intersect1d(keep[k], keep[m2])
             if common.size < 2:
                 continue
             vals = []
             for j, lag in enumerate(lags):
                 pk = sur[k][common][:, int(lag) :] * np.conj(sur[k][common][:, : -int(lag)])
-                pl = sur[l][common][:, int(lag) :] * np.conj(sur[l][common][:, : -int(lag)])
+                pl = sur[m2][common][:, int(lag) :] * np.conj(sur[m2][common][:, : -int(lag)])
                 q = pk * np.conj(pl)
                 num = np.abs(q.sum(axis=1))
                 den = np.sqrt((np.abs(pk) ** 2).sum(axis=1) * (np.abs(pl) ** 2).sum(axis=1))
                 f_raw = (num / np.maximum(den, 1e-300)) ** 2
-                arr, floor = cross_g2(
-                    zd[k][common], zd[l][common], f_raw, int(lag), oversamp
-                )
+                arr, floor = cross_g2(zd[k][common], zd[m2][common], f_raw, int(lag), oversamp)
                 m, se, n, _ = g2_stats(arr, floor)
                 vd, _unused = g2_to_V(m, se, n)
-                vk, vl = Vk[k][j], Vk[l][j]
+                vk, vl = Vk[k][j], Vk[m2][j]
                 if vd is None or vk is None or vl is None:
                     vals.append(None)
                     continue
-                vals.append(0.5 * (vk + vl - vd) / (k * l))
-            cross.append({"k": k, "l": l, "n_mics": int(common.size), "V_theta_rad2": vals})
+                vals.append(0.5 * (vk + vl - vd) / (k * m2))
+            cross.append({"k": k, "l": m2, "n_mics": int(common.size), "V_theta_rad2": vals})
 
     marg = {int(k): float(np.median(margins[k])) for k in orders}
     fits = fit_cells(orders, taus, Vu, Us, window, fs, marg, estimator="unwrapped")
@@ -1491,9 +1484,7 @@ def fit_cells(
     snr = np.array([max(10.0 ** (margins.get(int(k), 6.0) / 10.0) - 1.0, 1e-3) for k in uk_a])
     c_meas = 1.0 / snr if estimator == "unwrapped" else 2.0 * np.log1p(1.0 / snr)
     fits: dict[str, Any] = {
-        m: fit_Vk(
-            ks_a, tau_a, v_a, w_a, m, s_grid, s_w, c_meas, estimator=estimator, v_cut=cut
-        )
+        m: fit_Vk(ks_a, tau_a, v_a, w_a, m, s_grid, s_w, c_meas, estimator=estimator, v_cut=cut)
         for m in ACOUSTIC_MODELS
     }
     fits["best_by_aic"] = min(
@@ -1804,7 +1795,7 @@ def run_michaels_acoustic(limit: int | None) -> dict[str, Any]:
                     float(np.mean(rps[q])) * kk
                     for q in range(rps.shape[0])
                     for kk in range(1, K_MAX_ACOUSTIC + 3)
-                    if not (q == r)
+                    if q != r
                 ]
             )
             iso = []
@@ -1896,9 +1887,9 @@ def telemetry_verdict(rep: dict[str, Any]) -> dict[str, Any]:
         "sigma_nu_rad_s_hp05": pooled.get("sigma_nu_rad_s"),
         "lam_1_s_hp05": pooled.get("lam_1_s"),
         "D_theta_rad2_s_hp05": d_ou,
-        "sigma_nu_rad_s_hp2": (rep["highpass"].get("2") or {}).get("pooled", {}).get(
-            "sigma_nu_rad_s"
-        ),
+        "sigma_nu_rad_s_hp2": (rep["highpass"].get("2") or {})
+        .get("pooled", {})
+        .get("sigma_nu_rad_s"),
         "lam_1_s_hp2": (rep["highpass"].get("2") or {}).get("pooled", {}).get("lam_1_s"),
         "sigma_nu_rad_s_detrend": wide.get("sigma_nu_rad_s"),
         "lam_1_s_detrend": wide.get("lam_1_s"),
@@ -1978,9 +1969,7 @@ def acoustic_verdict(rows: list[dict[str, Any]]) -> dict[str, Any]:
         dks = np.asarray(f["D_k_rad2_s"], dtype=float)
         m = np.isfinite(dks) & (dks > 0) & (ks > 0)
         if m.sum() >= 3:
-            dk_slope.append(
-                float(np.polyfit(np.log(ks[m]), np.log(dks[m]), 1)[0])
-            )
+            dk_slope.append(float(np.polyfit(np.log(ks[m]), np.log(dks[m]), 1)[0]))
     lam_med = float(np.median(lam)) if lam else None
     verdict = "unidentified"
     if lam_med is not None:
@@ -2045,9 +2034,7 @@ def build_comparison(res: dict[str, Any]) -> dict[str, Any]:
             if d:
                 sig_eq = math.sqrt(d * ref["lam_ref"])
                 row.setdefault("sigma_at_lam_ref", {})[src] = sig_eq
-                row.setdefault("ratio_c3_over_measured", {})[src] = (
-                    ref["sigma_rad_s"] / sig_eq
-                )
+                row.setdefault("ratio_c3_over_measured", {})[src] = ref["sigma_rad_s"] / sig_eq
         out["rows"].append(row)
     return out
 
@@ -2265,8 +2252,15 @@ def fig_acoustic_Vk(res: dict[str, Any], paths: list[Path]) -> None:
             v = np.array([np.nan if x is None else x for x in series], dtype=float)
             if v.size != tau.size:
                 continue
-            ax.loglog(tau, v / k**2, color=cmap((k - 1) / max(K_MAX_ACOUSTIC - 1, 1)),
-                      marker="o", ms=2.2, lw=1.0, label=f"k={k}")
+            ax.loglog(
+                tau,
+                v / k**2,
+                color=cmap((k - 1) / max(K_MAX_ACOUSTIC - 1, 1)),
+                marker="o",
+                ms=2.2,
+                lw=1.0,
+                label=f"k={k}",
+            )
         f = row["fits"].get("ou_free_D", {})
         if f.get("identified") and f.get("sigma_nu_rad_s"):
             ax.loglog(
@@ -2322,8 +2316,9 @@ def fig_Dk_vs_k(res: dict[str, Any], paths: list[Path]) -> None:
         lim = ax.get_ylim()
         kk = np.array([1.0, float(K_MAX_ACOUSTIC)])
         for pw, ls in ((0.0, "--"), (1.0, "-."), (2.0, ":")):
-            ax.plot(kk, np.sqrt(lim[0] * lim[1]) * (kk / kk[0]) ** pw, "k", ls=ls, lw=0.8,
-                    alpha=0.6)
+            ax.plot(
+                kk, np.sqrt(lim[0] * lim[1]) * (kk / kk[0]) ** pw, "k", ls=ls, lw=0.8, alpha=0.6
+            )
         ax.set_ylim(lim)
     for ax in axes[len(groups) :]:
         ax.axis("off")
@@ -2420,9 +2415,7 @@ def summary_rows(res: dict[str, Any]) -> list[list[str]]:
                 _f(v.get("lam_1_s_median")),
                 _f(1.0 / v["lam_1_s_median"] if v.get("lam_1_s_median") else None),
                 _f(v.get("D_theta_rad2_s_median")),
-                _f(
-                    U_SLOPE_1P5 / v["lam_1_s_median"] if v.get("lam_1_s_median") else None
-                ),
+                _f(U_SLOPE_1P5 / v["lam_1_s_median"] if v.get("lam_1_s_median") else None),
                 "n/a",
                 "n/a",
             ]
@@ -2474,7 +2467,11 @@ def write_findings(res: dict[str, Any], out_dir: Path) -> Path:
     for rig, rep in tel.items():
         v = rep.get("verdict") or {}
         q = rep.get("quantisation") or {}
-        aux = " This rig is AUXILIARY: it is a command track, not a speed measurement." if rep.get("auxiliary") else ""
+        aux = (
+            " This rig is AUXILIARY: it is a command track, not a speed measurement."
+            if rep.get("auxiliary")
+            else ""
+        )
         A(
             f"- **{rig}** ({rep['rps_key']}, {rep['fs_hz']:.0f} Hz, {rep['n_flights']} flights, "
             f"{rep.get('analysed_seconds', 0):.0f} s analysed). Verdict **{v.get('verdict')}**: "
@@ -2621,15 +2618,15 @@ def resolve_rigs(spec: list[str]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--rigs", nargs="+", default=["all"], help="rig/support names or aliases")
     ap.add_argument("--limit", type=int, default=None, help="max flights/recordings per rig")
     ap.add_argument("--out", type=Path, default=ROOT / "results/noise_v2/shaft")
     ap.add_argument("--figdir", type=Path, default=ROOT / "docs/explainers/noise-model-v2-plan")
     ap.add_argument("--no-figures", action="store_true")
-    ap.add_argument(
-        "--no-control", action="store_true", help="skip the planted acoustic control"
-    )
+    ap.add_argument("--no-control", action="store_true", help="skip the planted acoustic control")
     args = ap.parse_args(argv)
 
     wanted = resolve_rigs(args.rigs)

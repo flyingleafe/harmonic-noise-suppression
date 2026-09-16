@@ -435,19 +435,21 @@ def draw_speeds(rows: list[dict], out_dir: Path, fig_dir: Path) -> str:
         rs = groups[corpus]
         labels = sorted({_condition_key(r) for r in rs})
         pos = {k: i for i, k in enumerate(labels)}
+        rng = np.random.default_rng(7)
         for r in rs:
-            x = pos[_condition_key(r)]
-            style = dict(marker="o", s=26) if r["usable"] else dict(marker="x", s=26)
+            x = pos[_condition_key(r)] + float(rng.uniform(-0.22, 0.22))
+            style = dict(marker="o", s=14) if r["usable"] else dict(marker="x", s=16)
             for value in r["speed_rev_s"]:
                 ax.scatter(
-                    x + 0.0,
+                    x,
                     float(value),
-                    color="#1f77b4" if r["usable"] else "#999999",
-                    alpha=0.85,
+                    color="#1f77b4" if r["usable"] else "#d62728",
+                    alpha=0.8,
+                    linewidths=0.8,
                     **style,
                 )
         ax.set_xticks(range(len(labels)))
-        ax.set_xticklabels(labels, rotation=60, ha="right", fontsize=6)
+        ax.set_xticklabels(labels, rotation=55, ha="right", fontsize=6.5)
         ax.set_title(corpus, fontsize=8)
         ax.grid(alpha=0.3)
     axes[0].set_ylabel("estimated shaft speed (rev/s)")
