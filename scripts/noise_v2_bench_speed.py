@@ -179,6 +179,9 @@ class Config:
     odd_min_frac: float = 0.5
     odd_orders: tuple[int, ...] = (1, 3, 5, 7, 9, 11)
     min_margin_db: float = 3.0
+    #: Depth of the excluded ``m/n`` comb family (m, n <= this). 4 is the
+    #: published rule; the survey reports what a deeper exclusion would do.
+    family_max: int = 4
     max_half_delta: float = 1.0
     max_channels: int = 8
     # ── multi-rotor mode (any rig with more than one rotor running) ──────────
@@ -387,15 +390,34 @@ def _local_maxima(vals: np.ndarray) -> np.ndarray:
 #: Small-rational relatives of a comb: a candidate at ``m/n · f`` scores on a
 #: sub- or superset of ``f``'s own teeth, so it is the SAME family, not a rival.
 #: ``2·f`` (the blade-pass doubling) and ``f/2`` are the octave members.
-_FAMILY_RATIOS = (0.25, 1.0 / 3.0, 0.5, 2.0 / 3.0, 0.75, 1.0, 4.0 / 3.0, 1.5, 2.0, 3.0, 4.0)
 _OCTAVE_RATIOS = (0.5, 1.0, 2.0)
+
+
+def family_ratios(max_mn: int) -> tuple[float, ...]:
+    """Every distinct ``m/n`` with ``m, n <= max_mn``.
+
+    ``max_mn = 4`` is the published rule (11 ratios). The depth matters: a
+    candidate at ``5/3 · f`` also reads only teeth of ``f``'s comb, and that is
+    the limiting "rival" of most four-rotor static recordings (measured:
+    results/noise_v2/survey/findings.md), so the depth is a knob the survey can
+    report a counterfactual for without changing the published rule.
+    """
+    return tuple(sorted({m / n for m in range(1, max_mn + 1) for n in range(1, max_mn + 1)}))
+
+
+_FAMILY_RATIOS = family_ratios(4)
 
 
 def _in_family(f: float, ref: float, ratios: tuple[float, ...], tol: float = 0.03) -> bool:
     return any(abs(f / (r * ref) - 1.0) <= tol for r in ratios)
 
 
-def _is_rival(f: float, refs: tuple[float, ...], neighbour_frac: float) -> bool:
+def _is_rival(
+    f: float,
+    refs: tuple[float, ...],
+    neighbour_frac: float,
+    ratios: tuple[float, ...] = _FAMILY_RATIOS,
+) -> bool:
     """Is candidate ``f`` a genuine RIVAL comb of the accepted rates ``refs``?
 
     Two exclusions. A small-rational relative ``m/n · ref`` is the same comb
@@ -406,7 +428,7 @@ def _is_rival(f: float, refs: tuple[float, ...], neighbour_frac: float) -> bool:
     construction, which is what the first survey pass did.
     """
     for ref in refs:
-        if _in_family(f, ref, _FAMILY_RATIOS):
+        if _in_family(f, ref, ratios):
             return False
         if neighbour_frac > 0.0 and abs(f / max(ref, 1e-9) - 1.0) <= neighbour_frac:
             return False
@@ -498,6 +520,7 @@ def shaft_rate(sp: Spectrum, cfg: Config, neighbour_frac: float = 0.0) -> dict[s
     # literal version's runner-up is the third sub/super-harmonic, the same
     # comb read every third tooth, not a rival.
     maxima = _local_maxima(fam)
+    ratios = family_ratios(cfg.family_max)
     runner_f, runner_v = float("nan"), -99.0
     oct_f, oct_v = float("nan"), -99.0
     fam_f, fam_v = float("nan"), -99.0
@@ -507,9 +530,9 @@ def shaft_rate(sp: Spectrum, cfg: Config, neighbour_frac: float = 0.0) -> dict[s
         v_c = float(fam[idx])
         if not any(_in_family(f_c, r, _OCTAVE_RATIOS) for r in refs) and v_c > oct_v:
             oct_f, oct_v = f_c, v_c
-        if _is_rival(f_c, refs, 0.0) and v_c > fam_v:
+        if _is_rival(f_c, refs, 0.0, ratios) and v_c > fam_v:
             fam_f, fam_v = f_c, v_c
-        if _is_rival(f_c, refs, neighbour_frac) and v_c > runner_v:
+        if _is_rival(f_c, refs, neighbour_frac, ratios) and v_c > runner_v:
             runner_f, runner_v = f_c, v_c
     margin = s_fam - runner_v if runner_v > -99.0 else float("inf")
     margin_oct = s_fam - oct_v if oct_v > -99.0 else float("inf")
@@ -1624,6 +1647,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--split-peak-db", type=float, default=Config.split_peak_db)
     ap.add_argument("--split-min-orders", type=int, default=Config.split_min_orders)
     ap.add_argument("--split-max-peaks", type=int, default=Config.split_max_peaks)
+    ap.add_argument(
+        "--family-max",
+        type=int,
+        default=Config.family_max,
+        help="exclude every m/n comb relative with m,n <= this from the rival set "
+        "(4 = the published rule)",
+    )
     ap.add_argument("--no-figures", action="store_true")
     ap.add_argument("--tag", default="", help="suffix for the output file names")
     args = ap.parse_args(argv)
@@ -1650,6 +1680,7 @@ def main(argv: list[str] | None = None) -> int:
         split_peak_db=args.split_peak_db,
         split_min_orders=args.split_min_orders,
         split_max_peaks=args.split_max_peaks,
+        family_max=args.family_max,
     )
     wanted = list(READERS) if args.corpora == "all" else args.corpora.split(",")
     unknown = [w for w in wanted if w not in READERS]
