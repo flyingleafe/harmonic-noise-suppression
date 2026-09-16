@@ -1940,7 +1940,14 @@ def telemetry_verdict(rep: dict[str, Any]) -> dict[str, Any]:
     detrend-only variant - whose band starts at 0.05 Hz - supplies
     ``lam``/``sigma`` and the verdict says which instrument spoke.
     """
-    pooled = rep["highpass"][f"{float(HP_HEADLINE):g}"]["pooled"]
+    hp_key = f"{float(HP_HEADLINE):g}"
+    headline = rep["highpass"].get(hp_key) or {}
+    if headline.get("skipped"):
+        # this rig's own Nyquist is below the label band edge (Michael's log
+        # runs at ~29.4 Hz), so the exact label residual is its headline
+        headline = rep["highpass"].get(LABEL_KEY) or {}
+        hp_key = LABEL_KEY
+    pooled = headline.get("pooled") or {}
     wide = (rep["highpass"].get(DETREND_KEY) or {}).get("pooled") or {}
     q = rep["quantisation"]
     fs = rep["fs_hz"]
@@ -1979,6 +1986,7 @@ def telemetry_verdict(rep: dict[str, Any]) -> dict[str, Any]:
     return {
         "verdict": label,
         "estimator": source,
+        "headline_variant": hp_key,
         # Whether the fitted corner is inside the fit band of the estimator
         # that spoke. Everything downstream keys sigma/lam off this flag.
         "corner_in_band": bool(
@@ -2159,6 +2167,27 @@ def build_comparison(res: dict[str, Any]) -> dict[str, Any]:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+#: Short tag per verdict, for figure titles. The full sentence belongs in
+#: findings.md; on a three-column panel grid it overlaps its neighbours.
+VERDICT_TAGS = (
+    ("quasi-static", "quasi-static"),
+    ("integrated-OU (corner under", "int-OU (corner < HP)"),
+    ("integrated-OU", "integrated-OU"),
+    ("wiener", "Wiener"),
+    ("saturated", "saturated"),
+    ("unidentified", "unidentified"),
+)
+
+
+def verdict_tag(verdict: Any) -> str:
+    """The short form of a verdict string, for a figure title."""
+    text = str(verdict or "-")
+    for needle, tag in VERDICT_TAGS:
+        if text.startswith(needle):
+            return tag
+    return text.split("(")[0].strip()[:24]
+
+
 def _panel_grid(n: int) -> tuple[int, int]:
     cols = min(3, max(1, n))
     rows = int(math.ceil(n / cols))
@@ -2232,9 +2261,13 @@ def fig_structure_functions(res: dict[str, Any], paths: list[Path]) -> None:
             ax.loglog(tau, 2.0 * dq * tau, color="crimson", lw=1.2, alpha=0.8)
         v = rep["verdict"]
         ax.set_title(
-            f"{rig}  fs={rep['fs_hz']:.0f} Hz\n{v['verdict']}"
-            + (f", 1/lam={1.0 / v['lam_1_s']:.3f} s" if v.get("lam_1_s") else ""),
-            fontsize=8.5,
+            f"{rig}  fs={rep['fs_hz']:.0f} Hz\n{verdict_tag(v.get('verdict'))}"
+            + (
+                f", 1/lam={1.0 / v['lam_1_s']:.3f} s"
+                if (v.get("lam_1_s") and v.get("corner_in_band"))
+                else ""
+            ),
+            fontsize=8.0,
         )
         ax.set_xlabel("lag tau [s]")
         ax.set_ylabel("S(tau) = Var[theta(t+tau)-theta(t)]  [rad^2]")
@@ -2452,8 +2485,12 @@ def fig_Dk_vs_k(res: dict[str, Any], paths: list[Path]) -> None:
 
 
 def fig_summary_table(res: dict[str, Any], paths: list[Path]) -> None:
-    lines = summary_rows(res)
-    fig, ax = plt.subplots(figsize=(13.5, 0.42 * (len(lines) + 2) + 0.8))
+    lines = [list(r) for r in summary_rows(res)]
+    # the rendered table has no room for a whole sentence: tag the verdict and
+    # let findings.md carry the full wording
+    for row in lines[1:]:
+        row[2] = verdict_tag(row[2])
+    fig, ax = plt.subplots(figsize=(17.0, 0.40 * (len(lines) + 2) + 0.7))
     ax.axis("off")
     tab = ax.table(
         cellText=[r[1:] for r in lines[1:]],
@@ -2463,8 +2500,9 @@ def fig_summary_table(res: dict[str, Any], paths: list[Path]) -> None:
         cellLoc="center",
     )
     tab.auto_set_font_size(False)
-    tab.set_fontsize(6.8)
-    tab.scale(1.0, 1.25)
+    tab.set_fontsize(7.4)
+    tab.scale(1.0, 1.45)
+    tab.auto_set_column_width(col=list(range(len(lines[0]) - 1)))
     ax.set_title(
         "Shaft-phase prior, measured. Verdict / sigma_nu [rad/s] / lam [1/s] / "
         "D_theta [rad^2/s] / quantisation share",
