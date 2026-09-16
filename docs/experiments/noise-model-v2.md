@@ -11,6 +11,21 @@ No v2 fit has run. This document records the four measurement studies that
 set up v2, the model and round plan they support, and the decisions that are
 waiting on the user.
 
+
+## Review decisions (2026-09-16)
+
+- **DREGON is fitted on the bench, not in free flight.** The rig parameters are
+  fitted rotor by rotor on the single-motor bench recordings
+  (`motor_Motor{1-4}_{50..90}`). The static four-motor recording
+  (`motor_allMotors_70`) is the validation: the four-motor fit procedure must
+  give parameters compatible with the per-rotor fits (slightly larger
+  linewidths and more uncertain low-order estimates are expected, from
+  inseparability and wind noise). Reason: free-flight DREGON telemetry
+  disagrees with the audio by about 1 Hz std at the k = 70 harmonic
+  (demodulation at several orders, Dmitrii's notebook), so free-flight labels
+  do not carry a fit. Free-flight DREGON stays the HPPNet evaluation support
+  on the real carrier, as frozen.
+
 ## Motivation
 
 The revised-phase campaign stopped after four rounds with one rig passing and
