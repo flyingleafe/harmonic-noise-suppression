@@ -176,13 +176,42 @@ Source: `results/noise_v2/shaft/findings.md`, numbers
   leak, not the leak: the study's resampler is linear interpolation in both
   directions, which has a lossy passband, so part of the measured growth
   (`D_θ = S(1 s)/2 = 0.0014-0.41 rad²/s`) is the estimator's own error.
-- **Acoustic negative result.** The bench and FLY125 acoustic arms identify
-  nothing: 0 of 12 DREGON bench supports and 0 of 4 Michael's supports, with
-  `V_θ` already above 0.15 rad² at the shortest usable lag. One harmonic
-  cannot be separated from its neighbours faster than one shaft revolution, so
-  the acoustic lag grid starts at the frame rate of a 6-revolution window. No
-  bench evidence therefore constrains `D_k` against `k`
-  [`results/noise_v2/shaft/findings_with_acoustics.md:19-20,37-42`].
+- **The bench acoustics measure the shaft term directly.** The DREGON
+  single-motor bench is the only instrument with no label at all, and the
+  corrected saturation gate identifies the shaft term on **12 of 12
+  recordings**, integrated-OU on every one by AIC: median `σ_ν = 1.77 rad/s`
+  (IQR 1.39-1.93, full range 0.23-3.20), `λ = 5.48 s⁻¹` (IQR 3.25-8.29, full
+  0.31-16.2), `D_θ = 0.599 rad²/s` (IQR 0.38-0.66, full 0.018-2.81). `λ` lands
+  on the assumed `λ_ref = 6` to 9 %, and C3's fitted `σ = 3.101 rad/s` is 1.75
+  times the bench median. This is filter-free: the acoustic estimator has no
+  high-pass, so none of the trend-removal ambiguity above applies to it.
+- **Two instruments, one verdict on C3's DREGON `D`.** They refute
+  `D = 844.69 rad²/s` by three to four orders of magnitude. In the frequency
+  domain that `D` predicts a 268.9 Hz half-power width against a 38.5 Hz
+  isolation band, while the measured core is unresolved at every window up to
+  4.096 s (intrinsic width `< 0.46 Hz`, per-harmonic `D < 1.45 rad²/s` on
+  Michael's cruise). In the time domain the bench gives
+  `D_θ = 0.38-0.66 rad²/s` with `σ_ν = 1.4-1.9 rad/s` and
+  `λ = 3.3-8.3 s⁻¹`. The two bounds are different quantities and both matter:
+  the line width bounds the `k`-independent per-harmonic `D`, `V_k/k²` bounds
+  the shaft `D_θ`, and the observed broadening is the sum of the two.
+- **`D_k` and its `k` exponent are still UNIDENTIFIED.** The fitted `2D_kτ` at
+  the shortest lag is 1.32 times the measured `V` of the same order, so `D_k`
+  absorbs model error, and the planted control returns a planted `D_k ∝ k` as
+  flat (fitted log-log slope -5.74 against a true +1). Read `σ_ν`, `λ` and
+  `D_θ` from this instrument; do not read `D_k` from it, and keep `p_g = 0`.
+- **The bench numbers carry a measured systematic.** The planted control
+  plants `σ_ν = 0.4 rad/s`, `λ = 6 s⁻¹` and `D_k ∝ k` at 22 dB SNR and
+  recovers `σ_ν` at 1.26×, `λ` at 3.07× and `D_θ` at 0.52×. De-biased, the
+  bench gives `σ_ν ≈ 1.4 rad/s` (1.1-1.8), `λ ≈ 1.8-5.5 s⁻¹` and
+  `D_θ ≈ 0.6-1.2 rad²/s`; even the pessimistic end is within a factor of 3 of
+  `λ_ref = 6`. The de-biased bands set the v2 prior widths.
+- **Michael's FLY125 still saturates**: 3 of 4 rotors exceed 0.15 rad² at the
+  shortest usable lag and 0 of 4 are identified. That is consistent with the
+  line-shape bound `D < 1.45 rad²/s` on the same rig but adds no number of its
+  own. The cause is bandwidth: one harmonic cannot be separated from its
+  neighbours faster than one shaft revolution, so the acoustic lag grid starts
+  at the frame rate of a 6-revolution window.
 
 ## Proposed criteria
 
@@ -259,7 +288,14 @@ The model v2 shaft term has two honest parts: a fitted label-residual OU with
 free `(λ_L, σ_L)` **per label chain** below the label band, and a bounded
 wobble above it whose `(σ_ν, λ)` are **fixed** from the telemetry. The
 per-harmonic Wiener `D_gk = D_g·k^{p_g}` stays, with `p_g = 0` fixed in R1 and
-R2. Priors come from the telemetry instead of `N(0, 2²)`, and a population
+R2. The OU block has two free parameters, not three: the fit samples
+`(log σ_L, log λ_L)` and `D_θ,L = σ_L²/λ_L` follows. Their priors replace
+`N(0, 2²)` and are **centred on the label-free bench measurement** —
+`log σ_L ~ N(ln 1.77, 0.95²)`, `log λ_L ~ N(ln 5.5, 1.50²)` — widened by the
+planted-control systematic and far enough to reach the label-dominated regime,
+so a fit landing above `λ_L ≈ 40 s⁻¹` is a diagnosis that the label chain and
+not the shaft dominates that arm. `log D_g ~ N(ln 0.3, 0.80²)` comes from the
+line-shape bound, because `D_k` is still unidentified. A population
 Gaussian over rigs — DREGON, Michael's, and the 12 bench points — replaces the
 hand-set banks. Carrier recovery, heavy tails, order-dependent `λ_L` and
 non-stationary `D` are deferred by name.
