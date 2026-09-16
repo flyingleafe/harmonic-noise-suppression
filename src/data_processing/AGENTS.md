@@ -5,7 +5,7 @@
 Everything between raw recordings and a training loop's `td.Frame`s: raw-source
 registry, frozen derived-dataset specs, the single copy of the mixing math, the
 online-mix compiler, torch `Dataset` adapters. Every dataset is declared once
-and materialized only through `scripts/derive.py`. Design (the *why*):
+and materialized only through `scripts/derive.py`. Design:
 `docs/refactor-data-pipelines.md`. VK/refinement tracking: `src/tracking`.
 
 ## Map
@@ -13,8 +13,8 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
 **Layer 1 — raw sources (`sources/`)**, torch-free.
 - `sources/__init__.py` — `REGISTRY`: one `SourceDataset` per raw dataset
   (pinned `DownloadSpec` / `fetcher` / `raw_dataset` + `builder(raw_dir) ->
-  Iterator[(key, td.Frame)]`, `tdframe-v1`). DREGON is one entry like MIMII.
-  Helpers `get`/`raw_root`/`iter_frames`/`geometry`.
+  Iterator[(key, td.Frame)]`, `tdframe-v1`). Helpers
+  `get`/`raw_root`/`iter_frames`/`geometry`.
 - `sources/_common.py` — builder helpers, `LAYOUT = "tdframe-v1"`.
 - `sources/dregon.py` — DREGON builder + raw loaders (`load_timeframe`,
   `load_dregon_timeframes`, `get_geometry`, `clean_command_spikes`).
@@ -45,7 +45,7 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
 - `streams.py` — dload ↔ tdseries bridge: `DloadFrameDataset`, the `tdframe-v1`
   codec (`frame_to_sample`/`sample_to_frame`), combinators (`to_frames`/
   `frame_windows`/`mix_frames`), `ensure_local`/`resolve_source` (`dload:`
-  URIs), `iter_published_frames`, `open_repository`.
+  URIs), `iter_published_frames`.
 - `online_mixing.py` — the online-mix compiler: policy YAML → one infinite
   `dload.Pipeline` of `td.Frame`s (`build_online_mix_pipeline` =
   `build_noise_stream` + `build_speech_stream`); `make_rng(seed, sample_id)`.
@@ -53,8 +53,7 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   `DNLMFrameDataset`, `SEValidFrameDataset`, `OnlineMixFrameDataset`,
   `NoiseGenFrameDataset`, `StaticCombGenDataset`, `DecompFrameDataset`
   (`dataset` is a **list**; each record keeps its `drone` rig id), and the
-  validation compositors (`FixedSynthFrameDataset`, `ConcatFrameDataset`,
-  `MixtureMatchedValidDataset`, …).
+  validation compositors (`FixedSynthFrameDataset`, `ConcatFrameDataset`, …).
 - `noise_rps_dataset.py` — `NoiseRPSDataset`: chunkable noise+RPS over DREGON
   `in_flight_noise` + Michael's (`frames:NAME[@VER]`, `dload:` URIs, paths).
 - Noise engines (`sources.noise[].kind`): `generated_noise.py`
@@ -64,38 +63,39 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   `static_comb`), `stochastic_rotor_noise.py` (`StochasticNoisePool`,
   `stochastic` — the generative direction of `tracking.joint_decompose`),
   `silence_noise.py` (`SilenceNoisePool`, `silence`: zero-RPS floors).
+- `trajectory_model/` — the FITTED rps trajectory model (`params`, `sampler`,
+  `flight`, `posterior`, `source`): `rps.kind: fitted_traj` in the three pools,
+  fed by `rps-traj-fits`; `experiments.rps_traj` fits it.
 - Augmentation: `noise_augmentations.py` (`policy.noise_augmentations`),
   `time_warp.py` (`policy.noise_time_warp`), `rps_corruption.py` (clean-RPS
-  corruption → extra `rps_cond` entry; telemetry label-noise
-  `tachometer_corrupt` / `presmooth_track`).
+  corruption → extra `rps_cond` entry; label-noise `tachometer_corrupt` /
+  `presmooth_track`).
 - `rps_gating.py` + `refined_label_track.py` — refined rps labels
   (`refined_labels/`, produced by `scripts/refine_dregon_rps.py`).
-- `harmonicity.py` (analysis-stage `measure_harmonicity`), `rps_synthesis.py`
-  / `collate.py` (mixer constants from `tracking.rotors`), `comb_bench*.py`.
+- `harmonicity.py` (`measure_harmonicity`), `rps_synthesis.py` / `collate.py`
+  (mixer constants from `tracking.rotors`), `comb_bench*.py`.
 
 ## Contracts / invariants
 
 - **Fixes are baked in at derivation time.** `DREGON-frames` `motors_command`
   is already `clean_command_spikes`-cleaned; `michaels-frames` `rps` is
-  aligned and rev/s-calibrated (`MICHAELS_RPS_SCALE` inside `load_raw_aligned`).
+  aligned and rev/s-calibrated (`MICHAELS_RPS_SCALE` in `load_raw_aligned`).
   Consumers re-apply nothing (`adapt_recording_frame` → `rps`;
   `resolve_motor_tracks` no-cleaning path).
 - Published `*-frames` carry TWO rps tracks: the raw one via
   `PUBLISHED_RPS_KEYS` (`*_room2` logs only `motors_command`) and
   `rps_refined` (regime-gated; **standby is never refined**), attached by the
-  `source_frames` derivation on the frame's AUDIO `t_start`. Details:
-  `docs/experiments/refined-rps-labels.md`.
+  `source_frames` derivation on the frame's AUDIO `t_start`
+  (`docs/experiments/refined-rps-labels.md`).
 - Telemetry is time-last `(…, M)` on `StampIndex`-backed Series.
 - Two SNR conventions: offline/LibriMix (`mix_at_snr`, speech is the
   reference) vs online (`scale_source_to_snr`, noise is the reference).
 - Manifest layouts, dispatched on `meta["layout"]`: `sample-dir-v1`
   (`sample_NNNNN/` dirs + `_meta` sample; `dregon_lm`, `dn_lm`), `tdframe-v1`
-  (one Frame per recording/clip; all frame generators), `raw-files` /
+  (one Frame per recording/clip; all frame generators), `raw-files`,
   `pcm16-mono-v1`.
 - `adopt_only` specs are historical uploads whose bytes predate the spec;
   re-deriving would push a near-duplicate (mixing RNG is not byte-stable).
-  `DREGON-frames`/`michaels-frames` are no longer adopt-only (re-derived for
-  `rps_refined`).
   `michaels-test-frames` (FLY103/FLY108) is a **TEST set**: no training
   derivation may root on it.
 - Online-mix determinism: content is deterministic per `(base_seed, epoch,
@@ -113,8 +113,7 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   `(rotor, time)` on the STFT frame grid. `channel=<int>` selects one mic;
   `flatten_channels=True` expands each sample into `n_channels` mono-view
   Frames (`meta.channel` tagged; `conf/data/dregon_lm_v4_8ch_flat.yaml`).
-  DCUNet/DCCRN stay 1-channel. Streamed: `DloadFrameDataset`
-  (`conf/data/dregon_lm_v4_stream.yaml`).
+  DCUNet/DCCRN stay 1-channel. Streamed: `DloadFrameDataset`.
 - **Train on the online stream**: `OnlineMixFrameDataset.from_yaml(policy)`
   via a `conf/data/*.yaml` wrapper; infinite, so the experiment sets
   `samples_per_validation`; validation stays a fixed map-style set.
@@ -126,21 +125,19 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   duration-weighted).
 - **Check a policy before training**: `python scripts/check_stream.py
   --experiment <name>` — real chunk→frame expansion, stage boundaries,
-  empirical augmentation fire rates; nonzero exit on FAIL. Mandatory after any
-  data-path refactor.
+  empirical fire rates; nonzero exit on FAIL. Mandatory after a data refactor.
 - **RPS helpers**: `sources.dregon.load_timeframe` / `load_dregon_timeframes`;
   `mixing.resolve_motor_tracks(tf) -> (detect_key, rps_key, needs_cleaning)`;
-  `mixing.find_inflight_window(tf, key, min_motor_rps, clean=…) -> (t0, t1)`
-  (pass `min_motor_rps=30.0`; the default 0 is backward-compat).
+  `mixing.find_inflight_window(tf, key, min_motor_rps, clean=…)` (pass
+  `min_motor_rps=30.0`; the default 0 is backward-compat).
 
 ## Conventions
 
 - Torch stays out of layers 1–2 so fingerprinting and `adopt` run anywhere.
 - Public interface is config-in/stream-out: no source-cache prep scripts or
   cache flags; the memoized speech decode is the `librispeech-pcm16` derivation.
-- Publish a derived subset (`frame_subset`) once a fixed small selection
-  becomes an experiment's durable noise pool; `audio_pool` `include_keys` is
-  for ad-hoc restriction only (it downloads every shard to find matches).
+- Publish a derived subset (`frame_subset`) for a durable noise pool;
+  `audio_pool` `include_keys` is ad-hoc only (it pulls every shard to match).
 
 ## Gotchas
 
@@ -149,8 +146,8 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
   (`data/new-drone-noises`, effectively ignored); don't copy it.
 - `new-drone-noises` holds exactly FLY103/FLY108 (mono, 48 kHz, audio is a
   sub-window of a ~2× longer log) — the held-out TEST set.
-- `load_timeframe(target_sr=…)`: `librosa.resample` on the `(n_ch, N)` array
-  with `axis=-1`, `res_type="soxr_hq"`; the wrong axis hangs.
+- `load_timeframe(target_sr=…)`: resample with `axis=-1` (`soxr_hq`); the
+  wrong axis hangs.
 - `real_valid` splits have no `vocals.wav` — RPS evaluation only.
 - V4-Michaels leakage split: original LibriSpeech pin (never generated
   `vocals.wav`), exclude DREGON `free-flight_nosource_room1`, train `FLY125`,
@@ -158,13 +155,16 @@ and materialized only through `scripts/derive.py`. Design (the *why*):
 - Michael's telemetry published before 2026-07-31 is uncalibrated
   (`rps_scale` 1.0 in frame meta).
 - Keep the 50k unaugmented warmup stage (G5: removing it regresses).
+- `rps.kind: fitted_traj` draws ONE drone per flight (`rigs:` weights; the
+  reserved name `posterior` is the global fit) and shifts its mean; the ESC
+  clamp and the idle level move with it. Bad policies fail at pool build.
 
 ## Further reading
 
 - `docs/refactor-data-pipelines.md` — architecture; § "Online-mix policy
   reference" (every `kind`, `generated`/`interp`, `gp`, `audio_pool` holdouts,
   `noise_augmentations`, SE task mode, `check_stream`).
-- `docs/data-catalog.md` — DREGON recording inventory and telemetry, Michael's
-  calibration constants and history, dataset variants, every `dload.lock` pin.
+- `docs/data-catalog.md` — DREGON inventory and telemetry, Michael's
+  calibration history, dataset variants, every `dload.lock` pin.
 - `docs/data-and-artifacts.md` — dload/R2 workflow, cache env vars, omnirun.
 - `docs/derived-datasets-plan.md`, `docs/external-datasets-plan.md`.

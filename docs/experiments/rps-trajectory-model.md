@@ -486,7 +486,8 @@ properties of these fits matter when reading a verdict:
 ## The model
 
 Rotor speeds in rev/s, mixer order `[RFront, LFront, LBack, RBack]`
-(`src/experiments/rps_traj/model.py`, the final round-4/5 form):
+(`src/data_processing/trajectory_model/params.py`, the final round-4/5 form;
+the fit is `src/experiments/rps_traj/model.py`):
 
 ```
 w(t)   = mu + delta_flight + M R(theta) v(t) + e(t)
@@ -882,7 +883,9 @@ the dynamics.
 
 ## Rig posterior
 
-`src/experiments/rps_traj/posterior.py` fits a distribution OVER RIGS, so a
+`src/experiments/rps_traj/posterior.py` fits a distribution OVER RIGS (its
+coordinates and its draw live in
+`src/data_processing/trajectory_model/posterior.py`), so a
 training stream can draw "a plausible drone" rather than one of the fitted
 seven. Seven rigs is not much to learn a 32-dimensional distribution from, so
 the density is deliberately the simplest thing that can be sampled: a DIAGONAL
@@ -1020,15 +1023,42 @@ differences, not the dynamics.
   the campaign's own reading is to trust `command` below 5 Hz and claim nothing
   above it. The only clean resonance in the corpus lives in that channel.
 
-### What this does NOT change
+### Wired into training
 
-**The training sampler is untouched.** `src/data_processing/rps_synthesis.py`,
-the online-mix policies and every `rig_*` stream still draw trajectories exactly
-as before. Nothing in `src/experiments/rps_traj/` is wired into training, and no
-`conf/online_mix/*` or `conf/experiment/*` file was modified by this campaign.
-At its best round the new model PASSES on 1 of 7 rigs (michaels 5/5, round 4)
-with three more rigs one family short, which is not a mandate to replace the
-incumbent, and round 5 showed that the per-flight offset model has to be chosen
-per rig before any stream draws from it. The decision to route a fitted
-trajectory model into the streams waits on review. `baseline.py` fits the
-incumbent but never edits it.
+The model now feeds the streams as an OPTION, next to the incumbent and not in
+place of it. `src/data_processing/rps_synthesis.py`, every existing `rps.kind`
+and every shipped policy behave exactly as before.
+
+- **The kind.** `rps.kind: fitted_traj`, implemented in
+  `src/data_processing/trajectory_model/` (the sampling half of this campaign's
+  code moved there so `data_processing` never imports `experiments`; the
+  likelihood, the priors and the optimiser stay in `src/experiments/rps_traj/`,
+  which imports the model from it). All three synthetic engines accept it —
+  `StochasticNoisePool`, `StaticCombNoisePool` and the `generated` producer —
+  and cache and window the flight exactly as they do a `full_flight` one, so
+  `flight_fs` and `flight_reuse` keep their meaning.
+- **The dataset.** `rps-traj-fits` (`dload.lock`-pinned, built by
+  `scripts/rps_traj_publish_fits.py`): the seven per-rig fits verbatim plus the
+  rig posterior. A policy names it as `fits: dload:rps-traj-fits`.
+- **The policy.** `conf/online_mix/traj_fitted_5050.yaml`, a mechanical
+  derivative of `conf/online_mix/rig_easy_5050.yaml` whose only change is the
+  `rps:` block of both stochastic sources. No `conf/experiment/*` entry: nothing
+  is scheduled to train on it yet.
+
+**The policy the wiring imposes** follows from the results above rather than
+from the fits alone. At its best round the model PASSES on 1 of 7 rigs
+(michaels 5/5, round 4) with three more one family short, which is not a
+mandate to replace the incumbent — so a stream MIXES: `rigs:` is a weighted
+mixture drawn per flight, and the reserved name `posterior` draws a fresh drone
+from the global fit instead of reusing a measured rig. Round 5 showed the
+per-flight offset has to be chosen per rig, so each flight takes the offset of
+the rig it drew and nothing is pooled across rigs. A fit's `mu` is ONE
+aircraft's ONE operating point, so `mean_shift` / `mean_scale` move the hover
+level per flight, and the rig's measured ESC clamp and its idle level move with
+it; without that every michaels flight in a stream would hover at exactly
+78.4 rev/s. The measurement process is labelled as such for this moment:
+`measurement_noise: false` drops it and keeps the shaft, because a stream that
+renders audio FROM the labels should not render DREGON's 45 Hz sample-and-hold
+as sound.
+
+`baseline.py` fits the incumbent but never edits it.

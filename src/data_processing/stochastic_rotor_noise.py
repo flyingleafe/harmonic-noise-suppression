@@ -110,7 +110,7 @@ from typing import Any
 import numpy as np
 import tdseries as td
 
-from data_processing import rps_synthesis
+from data_processing import rps_synthesis, trajectory_model
 from data_processing.frames import make_recording_frame
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -1819,6 +1819,25 @@ class StochasticNoisePool:
     ``sample_timeframe(rng, duration_s) -> td.Frame`` interface is the one the
     other noise pools use, and synthesis is cheap enough for the DataLoader
     workers.
+
+    THE TRAJECTORY (``rps.kind``). ``synthetic_intermittent`` draws a
+    cruise-only window per clip and ``full_flight`` windows a cached whole
+    flight, both from the hand-written scaffold in
+    :mod:`data_processing.rps_synthesis`. ``fitted_traj`` windows a cached
+    whole flight from the FITTED model instead
+    (:mod:`data_processing.trajectory_model.source`, which documents every key
+    of the block)::
+
+        rps:
+          kind: fitted_traj
+          fits: dload:rps-traj-fits
+          rigs: {michaels: 1.0, dregon: 1.0, posterior: 1.0}
+          mean_shift: [-5.0, 5.0]
+          flight_fs: 200
+          flight_reuse: 32
+
+    ``flight_fs`` and ``flight_reuse`` mean what they mean for ``full_flight``,
+    and the windowing is the same code; only the flight's origin changes.
     """
 
     def __init__(
@@ -1842,6 +1861,7 @@ class StochasticNoisePool:
         band_taper_frac: float = 0.0,
         level_per_flight: bool = False,
         flight_phases: dict[str, Any] | None = None,
+        fitted_traj: Any = None,  # the whole ``rps`` block, mapping or OmegaConf node
         drone_profile_range: tuple[float, float] = (0.0, 1.0),
         mic_gain_db: tuple[float, float] = (-12.0, 0.0),
         amp_rps_exponent: float = 2.5,
@@ -1911,6 +1931,14 @@ class StochasticNoisePool:
         # to 0.52 of hover, so a default stream never shows a rotor between 10
         # and 30 rev/s — and that is most of what a real ramp passes through.
         self.flight_phases = dict(flight_phases) if flight_phases else None
+        # ``rps.kind: fitted_traj``: the whole ``rps`` block, resolved into the
+        # fitted-model source here so a bad policy fails when the pool is
+        # built and not in a DataLoader worker on some later window.
+        self._traj = (
+            trajectory_model.build_from_config(fitted_traj or {})
+            if self.rps_kind == trajectory_model.FITTED_KIND
+            else None
+        )
         self.drone_profile_range = (float(drone_profile_range[0]), float(drone_profile_range[1]))
         self.mic_gain_db = (float(mic_gain_db[0]), float(mic_gain_db[1]))
         self.amp_rps_exponent = float(amp_rps_exponent)
@@ -2074,6 +2102,7 @@ class StochasticNoisePool:
                 if rps.get("phases") is not None
                 else None
             ),
+            fitted_traj=rps,
             drone_profile_range=pair("drone_profile_range", (0.0, 1.0)),
             mic_gain_db=pair("mic_gain_db", (-12.0, 0.0)),
             amp_rps_exponent=float(g("amp_rps_exponent", 2.5)),
@@ -2103,11 +2132,12 @@ class StochasticNoisePool:
         """``(R, T)`` rotor speeds at the audio rate for one window.
 
         ``synthetic_intermittent`` draws a cruise window directly;
-        ``full_flight`` windows a cached low-rate flight, so successive windows
-        visit the ground, warm-up, takeoff, cruise and landing phases in
-        proportion to their durations. Either way the window is multiplied by
-        one draw from ``rps_scale_range``, which is exact: a stopped rotor stays
-        stopped, and every other speed moves with its own comb.
+        ``full_flight`` and ``fitted_traj`` window a cached low-rate flight, so
+        successive windows visit the ground, warm-up, takeoff, cruise and
+        landing phases in proportion to their durations. Either way the window
+        is multiplied by one draw from ``rps_scale_range``, which is exact: a
+        stopped rotor stays stopped, and every other speed moves with its own
+        comb.
         """
         n_samples = int(round(duration_s * self.sample_rate))
         # Log-uniform: the scale is a RATIO, and a decade of speed sampled
@@ -2124,7 +2154,7 @@ class StochasticNoisePool:
             if isinstance(self.aggressiveness, tuple)
             else self.aggressiveness
         )
-        if self.rps_kind != "full_flight":
+        if self.rps_kind not in trajectory_model.FLIGHT_KINDS:
             blend = float(rng.uniform(*self.drone_profile_range))
             return (
                 scale
@@ -2139,22 +2169,25 @@ class StochasticNoisePool:
             )
 
         if self._flight is None or self._flight.uses >= self.flight_reuse:
-            blend = float(rng.uniform(*self.drone_profile_range))
-            phases = (
-                rps_synthesis.FlightPhaseRanges(**self.flight_phases)
-                if self.flight_phases
-                else None
-            )
-            flight = rps_synthesis.generate_full_flight(
-                None,
-                self.flight_fs,
-                drone_profile=blend,
-                aggressiveness=aggressiveness,
-                phases=phases,
-                mode_scales=self.mode_scales,
-                rotor_trim_rel=self.rotor_trim_rel,
-                rng=rng,
-            )
+            if self._traj is not None:
+                flight = self._traj.flight(rng, self.flight_fs)
+            else:
+                blend = float(rng.uniform(*self.drone_profile_range))
+                phases = (
+                    rps_synthesis.FlightPhaseRanges(**self.flight_phases)
+                    if self.flight_phases
+                    else None
+                )
+                flight = rps_synthesis.generate_full_flight(
+                    None,
+                    self.flight_fs,
+                    drone_profile=blend,
+                    aggressiveness=aggressiveness,
+                    phases=phases,
+                    mode_scales=self.mode_scales,
+                    rotor_trim_rel=self.rotor_trim_rel,
+                    rng=rng,
+                )
             self._flight = _FlightCache(
                 rps=flight,
                 t_low=np.arange(flight.shape[1]) / self.flight_fs,

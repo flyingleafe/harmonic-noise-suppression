@@ -17,8 +17,7 @@ import pytest
 import torch
 from scipy.linalg import solve_discrete_lyapunov
 
-from experiments.rps_traj.data import RATE_HZ, Flight
-from experiments.rps_traj.model import (
+from data_processing.trajectory_model import (
     F0_MAX_HZ,
     F0_MIN_HZ,
     TAU_SLOW_MAX_S,
@@ -26,33 +25,33 @@ from experiments.rps_traj.model import (
     ZETA_MIN,
     NewFit,
     Params,
-    _Batch,
-    _batch_nll,
-    _car2_path,
-    _fit_vector,
-    _Predictor,
-    _psd_matrix_sqrt,
-    _state_space_torch,
-    _unpack,
+    Posterior,
     car2_psd_grid,
     car2_state_space,
     corner_tau_s,
+    ou_psd_grid,
+    ou_state_space,
+    params_from_rig_vector,
+    rig_vector,
+    state_space_psd,
+    tau_slow_from_u,
+)
+from data_processing.trajectory_model.params import _car2_path, _psd_matrix_sqrt
+from experiments.rps_traj.data import RATE_HZ, Flight
+from experiments.rps_traj.model import (
+    _Batch,
+    _batch_nll,
+    _fit_vector,
+    _Predictor,
+    _state_space_torch,
+    _unpack,
     cross_periodogram,
     fit_rate_hz,
     fit_rig,
     likelihood_batches,
-    ou_psd_grid,
-    ou_state_space,
-    state_space_psd,
     steady_state_gain,
-    tau_slow_from_u,
 )
-from experiments.rps_traj.posterior import (
-    Posterior,
-    fit_posterior,
-    params_from_rig_vector,
-    rig_vector,
-)
+from experiments.rps_traj.posterior import fit_posterior
 
 
 def _params(**over: object) -> Params:

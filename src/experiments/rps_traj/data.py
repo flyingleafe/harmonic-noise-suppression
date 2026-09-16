@@ -40,8 +40,10 @@ from typing import Any
 import numpy as np
 from scipy.signal import butter, sosfiltfilt
 
-#: The campaign's common analysis rate (Hz). Frozen.
-RATE_HZ = 100.0
+# The campaign's common analysis rate (Hz). Frozen, and the grid the shipped
+# fits are stated on, so it has exactly one definition — in the model package —
+# and stays part of this module's vocabulary (``RATE_HZ`` in ``__all__``).
+from data_processing.trajectory_model import RATE_HZ
 
 #: Anti-alias corner (Hz) applied before decimating telemetry faster than
 #: :data:`RATE_HZ` onto the common grid, and its Butterworth order.

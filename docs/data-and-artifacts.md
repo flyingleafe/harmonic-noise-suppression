@@ -115,6 +115,35 @@ fingerprint keys on the spec, so an unbumped edit silently serves the stale
 snapshot. `derivations.py` stays importable without torch, so fingerprinting /
 `adopt` run anywhere. Full design + gotchas: `docs/derived-datasets-plan.md`.
 
+### `rps-traj-fits` — the fitted rotor-speed trajectory model
+
+A raw tree (not a derivation): 15 KiB of JSON that the training streams read
+every time they draw a trajectory, so it is versioned like data rather than
+carried in git. Built from the campaign's results directory and committed with
+the CLI:
+
+```bash
+python scripts/rps_traj_publish_fits.py --results results/rps_traj \
+    --out data/rps-traj-fits
+dload commit rps-traj-fits --from data/rps-traj-fits
+dload pin rps-traj-fits && git add dload.lock
+```
+
+Contents: `manifest.json` (campaign round, publishing git commit, rigs, model
+version, a note on sample rates), `fits/<rig>.json` — the seven per-rig fits
+verbatim, each with the 32 model parameters, the warm-up idle level and the
+rig's measured ESC floor/ceiling — `posterior.json` (the GLOBAL fit: a diagonal
+Gaussian over 32 scale-free rig coordinates, one draw = one fresh drone) and a
+`README.md`. The publish script is idempotent (an unchanged tree keeps its
+`created` stamp, so re-running it does not push a new version) and refuses to
+publish when the fits directory and the global fit disagree about which rigs
+they cover.
+
+Consumed by `rps.kind: fitted_traj` in the noise pools
+(`src/data_processing/trajectory_model/source.py`); a policy points at it with
+`fits: dload:rps-traj-fits`, and any directory with the same layout also works.
+Campaign write-up: `docs/experiments/rps-trajectory-model.md`.
+
 ### Morning on GPU server — train
 
 ```bash

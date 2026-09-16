@@ -57,6 +57,7 @@ _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent if (_HERE.parent / "src").is_dir() else Path.cwd().resolve()
 sys.path.insert(0, str(_ROOT / "src"))
 
+from data_processing.trajectory_model import NewFit, Params, Posterior  # noqa: E402
 from experiments.rps_traj.baseline import BaselineFit  # noqa: E402
 from experiments.rps_traj.data import (  # noqa: E402
     RATE_HZ,
@@ -66,8 +67,7 @@ from experiments.rps_traj.data import (  # noqa: E402
     ground_level,
     load_rig,
 )
-from experiments.rps_traj.model import NewFit, Params  # noqa: E402
-from experiments.rps_traj.posterior import Posterior, fit_posterior  # noqa: E402
+from experiments.rps_traj.posterior import fit_posterior  # noqa: E402
 from experiments.rps_traj.stats import (  # noqa: E402
     FAMILIES,
     LAGS_S,

@@ -63,12 +63,13 @@ must reproduce what the data does, but a candidate that matches lags
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
+from data_processing.trajectory_model import Sampler
 from experiments.rps_traj.data import RATE_HZ, Flight, airborne_segments
 
 #: ACF lags in samples of the 100 Hz grid: 24 log-spaced lags from 0.05 s to
@@ -323,10 +324,10 @@ def passes(new: dict[str, float], base: dict[str, float]) -> tuple[bool, dict[st
 
 # ─── model statistics from a sampler ──────────────────────────────────────────
 
-#: A trajectory sampler: ``sampler(n_samples, rng) -> (n_rotors, n_samples)``
-#: rev/s on the 100 Hz grid. All randomness MUST come from ``rng`` — that is
-#: what makes :func:`stats_from_samples` reproducible.
-Sampler = Callable[[int, np.random.Generator], np.ndarray]
+# The sampler protocol (``sampler(n_samples, rng) -> (n_rotors, n_samples)``
+# rev/s, all randomness from ``rng``) is
+# :data:`data_processing.trajectory_model.Sampler`, shared with the model that
+# implements it and with the training streams that drive it.
 
 
 def stats_from_samples(

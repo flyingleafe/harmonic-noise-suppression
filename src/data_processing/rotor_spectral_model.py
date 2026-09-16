@@ -40,7 +40,7 @@ from typing import Any
 import numpy as np
 import tdseries as td
 
-from data_processing import rps_synthesis
+from data_processing import rps_synthesis, trajectory_model
 from data_processing.frames import make_recording_frame
 
 # ── Profile sampling ────────────────────────────────────────────────────────
@@ -267,6 +267,7 @@ class StaticCombNoisePool:
         rps_kind: str = "synthetic_intermittent",
         flight_fs: float = 200.0,
         flight_reuse: int = 32,
+        fitted_traj: Any = None,  # the whole ``rps`` block, mapping or OmegaConf node
         drone_profile_range: tuple[float, float] = (0.0, 1.0),
         mic_gain_db: tuple[float, float] = (-12.0, 0.0),
         rps_scale_range: tuple[float, float] = (1.0, 1.0),
@@ -294,6 +295,14 @@ class StaticCombNoisePool:
         self.rps_kind = str(rps_kind)
         self.flight_fs = float(flight_fs)
         self.flight_reuse = int(flight_reuse)
+        # "fitted_traj" windows a full flight from the FITTED trajectory model
+        # instead of the scaffold; the block is resolved here so a bad policy
+        # fails when the pool is built (see trajectory_model.source).
+        self._traj = (
+            trajectory_model.build_from_config(fitted_traj or {})
+            if self.rps_kind == trajectory_model.FITTED_KIND
+            else None
+        )
         self._flight: dict[str, Any] | None = None  # cached full-flight state
         self._flight_uses = 0
         self.drone_profile_range: tuple[float, float] = (
@@ -359,6 +368,7 @@ class StaticCombNoisePool:
             rps_kind=str(rps.get("kind", "synthetic_intermittent")),
             flight_fs=float(rps.get("flight_fs", 200.0)),
             flight_reuse=int(rps.get("flight_reuse", 32)),
+            fitted_traj=rps,
             drone_profile_range=_pair("drone_profile_range", (0.0, 1.0)),
             mic_gain_db=_pair("mic_gain_db", (-12.0, 0.0)),
             rps_scale_range=_pair("rps_scale_range", (1.0, 1.0)),
@@ -378,12 +388,13 @@ class StaticCombNoisePool:
         """Return one ``(R, T)`` rps window at audio rate.
 
         ``synthetic_intermittent`` generates a fresh cruise-only window directly;
-        ``full_flight`` windows a cached low-rate full flight (regenerated every
+        ``full_flight`` (the scaffold) and ``fitted_traj`` (the fitted model)
+        window a cached low-rate full flight (regenerated every
         ``flight_reuse`` calls), so successive windows visit warm-up / takeoff /
         cruise / landing / ground (zero RPS) in proportion to their durations.
         """
         scale = float(rng.uniform(*self.rps_scale_range))
-        if self.rps_kind != "full_flight":
+        if self.rps_kind not in trajectory_model.FLIGHT_KINDS:
             blend = float(rng.uniform(*self.drone_profile_range))
             return (
                 scale
@@ -398,16 +409,19 @@ class StaticCombNoisePool:
             )
 
         if self._flight is None or self._flight_uses >= self.flight_reuse:
-            blend = float(rng.uniform(*self.drone_profile_range))
-            # low-rate trajectory (RPS is slow; the per-sample motor low-pass is a
-            # python loop, so audio-rate over a whole flight would be too slow).
-            flight = rps_synthesis.generate_full_flight(
-                None,
-                self.flight_fs,
-                drone_profile=blend,
-                aggressiveness=self.aggressiveness,
-                rng=rng,
-            )  # (R, Nlow)
+            if self._traj is not None:
+                flight = self._traj.flight(rng, self.flight_fs)  # (R, Nlow)
+            else:
+                blend = float(rng.uniform(*self.drone_profile_range))
+                # low-rate trajectory (RPS is slow; the per-sample motor low-pass is a
+                # python loop, so audio-rate over a whole flight would be too slow).
+                flight = rps_synthesis.generate_full_flight(
+                    None,
+                    self.flight_fs,
+                    drone_profile=blend,
+                    aggressiveness=self.aggressiveness,
+                    rng=rng,
+                )  # (R, Nlow)
             self._flight = {"rps": flight, "t_low": np.arange(flight.shape[1]) / self.flight_fs}
             self._flight_uses = 0
         self._flight_uses += 1

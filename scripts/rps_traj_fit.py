@@ -51,17 +51,14 @@ sys.path.insert(0, str(_HERE))
 
 from rps_traj_compare import report_rig  # noqa: E402  (sibling script, after the path pin)
 
+from data_processing.trajectory_model import NewFit  # noqa: E402
 from experiments.rps_traj.data import (  # noqa: E402
     RATE_HZ,
     Flight,
     airborne_segments,
     load_rig,
 )
-from experiments.rps_traj.model import (  # noqa: E402
-    SAMPLE_PAD_S,
-    NewFit,
-    fit_rig,
-)
+from experiments.rps_traj.model import SAMPLE_PAD_S, fit_rig  # noqa: E402
 from experiments.rps_traj.stats import (  # noqa: E402
     FAMILIES,
     TrajStats,
@@ -133,7 +130,7 @@ def warm_start(round_path: Path, rig: str) -> Any:
     white on any grid this campaign uses — and everything else carries over
     unchanged.
     """
-    from experiments.rps_traj.model import Params  # noqa: PLC0415
+    from data_processing.trajectory_model import Params  # noqa: PLC0415
 
     if not round_path.is_file():
         return None

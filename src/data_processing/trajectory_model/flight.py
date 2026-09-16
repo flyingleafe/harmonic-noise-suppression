@@ -1,17 +1,17 @@
 """Wrap a stationary airborne rotor-speed process into a WHOLE flight.
 
-Every model in this campaign is a model of the *airborne* regime — that is
-what the frozen statistics score, because :func:`data.airborne_segments` throws
-everything else away.  The explainer, however, wants a plausible whole flight:
-ground silence, spin-up, a warm-up idle, a take-off ramp, the airborne process,
-a landing ramp, spin-down, ground silence again.
+The trajectory model is a model of the *airborne* regime — that is what the
+campaign's frozen statistics score, because the airborne rule throws everything
+else away.  A training stream, however, needs a plausible whole flight: ground
+silence, spin-up, a warm-up idle, a take-off ramp, the airborne process, a
+landing ramp, spin-down, ground silence again.
 
-:func:`wrap_airborne` is that wrapper, shared by every fit class so the
-new model and the baseline produce the same kind of picture and differ only in
-the airborne part.  Phase durations come from
-:class:`data_processing.rps_synthesis.FlightPhaseRanges` (the existing
+:func:`wrap_airborne` is that wrapper, shared by every fit class so the fitted
+model and the incumbent synthesiser produce the same kind of envelope and differ
+only in the airborne part.  Phase durations come from
+:class:`data_processing.rps_synthesis.FlightPhaseRanges` (the incumbent
 scaffold, loosely calibrated to the DREGON/Michael's recordings); the ramps are
-raised cosines, which is all the smoothness a plot needs and keeps the whole
+raised cosines, which is all the smoothness a stream needs and keeps the whole
 thing a deterministic function of ``rng``.
 """
 
@@ -22,7 +22,7 @@ from collections.abc import Callable
 import numpy as np
 
 from data_processing.rps_synthesis import FlightPhaseRanges
-from experiments.rps_traj.data import RATE_HZ
+from data_processing.trajectory_model.params import RATE_HZ
 
 #: Fraction of the total a wrapped flight keeps for the airborne phase: if the
 #: sampled fixed phases would leave less, they are all scaled down together.

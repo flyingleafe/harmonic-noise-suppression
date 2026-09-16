@@ -26,13 +26,9 @@ _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent if (_HERE.parent / "src").is_dir() else Path.cwd().resolve()
 sys.path.insert(0, str(_ROOT / "src"))
 
+from data_processing.trajectory_model import NewFit, Params, rig_vector  # noqa: E402
 from experiments.rps_traj.data import RATE_HZ  # noqa: E402
-from experiments.rps_traj.model import NewFit, Params  # noqa: E402
-from experiments.rps_traj.posterior import (  # noqa: E402
-    fit_posterior,
-    informative_mask,
-    rig_vector,
-)
+from experiments.rps_traj.posterior import fit_posterior, informative_mask  # noqa: E402
 
 #: Check length (s) and the per-slot redraw budget.
 CHECK_S = 60.0

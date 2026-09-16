@@ -1866,7 +1866,8 @@ SPECS: dict[str, dict[str, Any]] = {
 #: superseded DREGON-LM V1/V2/V3/test recipes and the rps_* probe sets. Their
 #: recipes live in git history (the deleted creation CLIs); they are consumed
 #: as pinned uploads and are NOT re-derived. Tests assert every dload.lock
-#: dataset is either a SPECS entry, a sources.REGISTRY entry, or listed here.
+#: dataset is either a SPECS entry, a sources.REGISTRY entry, an
+#: :data:`ARTEFACT_PINS` entry, or listed here.
 HISTORICAL_PINS = {
     "DREGON-LM-train": "mono V1 recipe (Paper 2 baseline), superseded by V4",
     "DREGON-LM-valid": "mono V1 recipe, superseded by V4",
@@ -1879,6 +1880,20 @@ HISTORICAL_PINS = {
     "DREGON-LM-rps_eval_long_samples": "one-off RPS eval probe set",
     "DREGON-LM-rps_eval_specific_samples": "one-off RPS eval probe set",
     "DREGON-LM-rps_train_specific_samples": "one-off RPS eval probe set",
+}
+
+
+#: Small ARTEFACT trees: fitted model parameters a training stream reads, not
+#: data derived from recordings. They are versioned like data because the
+#: streams consume them per sample, but they have no parent dataset and no
+#: generator — a publish script turns a campaign's results into the tree, and
+#: `dload commit NAME --from data/NAME` uploads it.
+ARTEFACT_PINS = {
+    "rps-traj-fits": (
+        "the fitted rotor-speed trajectory model (per-rig fits + the rig "
+        "posterior), published by scripts/rps_traj_publish_fits.py and read by "
+        "rps.kind: fitted_traj"
+    ),
 }
 
 

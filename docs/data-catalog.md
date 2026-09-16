@@ -327,10 +327,10 @@ module's `PROVENANCE`):
   not. Four segments of `2021-02-18-16-43-54` are logged at 164 Hz, not 400:
   **group by `meta.system.native_rate_hz`**, never assume the nominal rate.
 
-## Pinned catalog (`dload.lock` — 54 datasets)
+## Pinned catalog (`dload.lock` — 55 datasets)
 
 Tests assert every `dload.lock` name is a `SPECS` entry, a `sources.REGISTRY`
-entry, or listed in `HISTORICAL_PINS`.
+entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
 
 - **Raw sources** (7, CLI convention, from `data/`): `DREGON`, `librispeech`,
   `drone_audio`, `music`, `new-drone-noises`, `recording_with_motor_speed`,
@@ -449,6 +449,13 @@ entry, or listed in `HISTORICAL_PINS`.
   decode of the librispeech pin at 16 kHz — the derived-dataset replacement for
   the deleted `packed_int16` speech cache; point a policy's
   `sources.speech[].dataset` at it to skip per-encounter FLAC decode).
+- **Fitted-model artefacts** (1, CLI convention, from `data/`, declared in
+  `derivations.ARTEFACT_PINS`): `rps-traj-fits` — 15 KiB of JSON, the
+  rotor-speed trajectory campaign's seven per-rig fits plus the rig posterior
+  (the global fit), published by `scripts/rps_traj_publish_fits.py` and read
+  per flight by `rps.kind: fitted_traj`
+  (`docs/experiments/rps-trajectory-model.md`). Not derived from recordings:
+  it is fitted parameters, versioned like data because the streams consume it.
 
 Consumption paths: `DloadFrameDataset` / `dload:NAME[@VER][/subpath]` URIs /
 `frames:NAME` specs — `streams.py`'s module docstring and

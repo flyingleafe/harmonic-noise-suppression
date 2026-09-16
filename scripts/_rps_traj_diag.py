@@ -57,16 +57,16 @@ _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent if (_HERE.parent / "src").is_dir() else Path.cwd().resolve()
 sys.path.insert(0, str(_ROOT / "src"))
 
+from data_processing.trajectory_model import (  # noqa: E402
+    NewFit,
+    Params,
+    rotation,
+)
 from experiments.rps_traj.data import (  # noqa: E402
     RATE_HZ,
     Flight,
     airborne_segments,
     load_rig,
-)
-from experiments.rps_traj.model import (  # noqa: E402
-    NewFit,
-    Params,
-    rotation,
 )
 from experiments.rps_traj.stats import (  # noqa: E402
     LAG_SAMPLES,

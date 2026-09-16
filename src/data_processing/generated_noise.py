@@ -49,12 +49,24 @@ import tdseries as td
 import torch
 import torch.multiprocessing as tmp
 
-from data_processing import rps_synthesis
+from data_processing import rps_synthesis, trajectory_model
 from data_processing.frames import make_recording_frame
 
 # Convenience blend factor for `rps_synthesis.generate_intermittent(drone_profile=...)`
 # keyed by codebook drone name. Unknown names default to the DREGON end (0.0).
 _DRONE_PROFILE_BLEND = {"dregon": 0.0, "michaels": 1.0}
+
+
+def _traj_source(params: dict[str, Any]) -> trajectory_model.FittedTrajectorySource | None:
+    """The fitted-trajectory source of ``rps.kind: fitted_traj``, else ``None``.
+
+    Built once per producer sampler (loading the fits is memoized), inside the
+    spawned producer process — the pool's params dict carries the plain ``rps``
+    block, which pickles, and not the source.
+    """
+    if str(params["rps_kind"]) != trajectory_model.FITTED_KIND:
+        return None
+    return trajectory_model.build_from_config(params.get("rps_cfg") or {})
 
 
 def _rps_excitation_batch(
@@ -67,6 +79,7 @@ def _rps_excitation_batch(
     aggressiveness: float,
     rng: np.random.Generator,
     flight_fs: float = 200.0,
+    traj: trajectory_model.FittedTrajectorySource | None = None,
 ) -> np.ndarray:
     """RPS excitation for one producer batch → ``(gen_bs, R, T)`` at audio rate.
 
@@ -75,6 +88,8 @@ def _rps_excitation_batch(
     landing→ground) at a modest ``flight_fs`` and windows ``gen_bs`` slices from
     it, so the batch spans the low-/zero-RPS regimes (the generator can then be
     driven into silence at zero RPS — provided it was trained on those regions).
+    ``fitted_traj`` is the same whole-flight windowing, with the flight drawn
+    from the FITTED trajectory model in ``traj`` instead of the scaffold.
     """
     if rps_kind == "synthetic_intermittent":
         return rps_synthesis.generate_intermittent_batch(
@@ -85,11 +100,16 @@ def _rps_excitation_batch(
             aggressiveness=aggressiveness,
             rng=rng,
         )
-    if rps_kind != "full_flight":
+    if rps_kind == trajectory_model.FITTED_KIND:
+        if traj is None:
+            raise ValueError("rps.kind 'fitted_traj' needs a trajectory source (pass traj=)")
+        flight = traj.flight(rng, flight_fs)  # (R, Nlow)
+    elif rps_kind == "full_flight":
+        flight = rps_synthesis.generate_full_flight(
+            None, flight_fs, drone_profile=drone_profile, aggressiveness=aggressiveness, rng=rng
+        )  # (R, Nlow)
+    else:
         raise ValueError(f"unsupported rps.kind {rps_kind!r}")
-    flight = rps_synthesis.generate_full_flight(
-        None, flight_fs, drone_profile=drone_profile, aggressiveness=aggressiveness, rng=rng
-    )  # (R, Nlow)
     r_n, n_low = flight.shape
     t_low = np.arange(n_low) / flight_fs
     total_s = float(t_low[-1])
@@ -363,6 +383,8 @@ def _make_interp_sampler(
     perrotor_noise = float(interp.get("perrotor_noise", 0.0))
     rotor_jitter = float(interp.get("rotor_jitter_std", 0.0))
 
+    traj = _traj_source(params)
+
     def _sample() -> _GenBatch:
         alpha = float(rng.uniform(a_lo, a_hi))
         z_base = (1.0 - alpha) * z0 + alpha * z1
@@ -396,6 +418,7 @@ def _make_interp_sampler(
             aggressiveness=params["aggressiveness"],
             rng=rng,
             flight_fs=params["flight_fs"],
+            traj=traj,
         )
         rels = np.empty((gen_bs, n_mics, n_rotors, 3), dtype=np.float32)
         for b in range(gen_bs):
@@ -431,6 +454,7 @@ def _make_single_sampler(
         )
     z = _batch_code(z_single, gb.rotor_deltas, gen_bs)
     blend = _DRONE_PROFILE_BLEND.get(drone, 0.0)
+    traj = _traj_source(params)
 
     def _sample() -> _GenBatch:
         rps_np = _rps_excitation_batch(
@@ -442,6 +466,7 @@ def _make_single_sampler(
             aggressiveness=params["aggressiveness"],
             rng=rng,
             flight_fs=params["flight_fs"],
+            traj=traj,
         )  # (bs, R, T)
         rel_b = rel.unsqueeze(0).expand(gen_bs, -1, -1, -1)
         sigma_t = (
@@ -547,6 +572,7 @@ class GeneratedNoisePool:
         aggressiveness: float = 1.0,
         rps_kind: str = "synthetic_intermittent",
         flight_fs: float = 200.0,
+        rps_cfg: dict[str, Any] | None = None,  # the whole ``rps`` block
         random_phase: bool = True,
         n_slots: int = 512,
         gen_batch: int = 32,
@@ -596,6 +622,7 @@ class GeneratedNoisePool:
             "aggressiveness": float(aggressiveness),
             "rps_kind": str(rps_kind),
             "flight_fs": float(flight_fs),
+            "rps_cfg": dict(rps_cfg) if rps_cfg else None,
             "random_phase": bool(random_phase),
             "gen_batch": int(gen_batch),
             "refresh": bool(refresh),
@@ -633,10 +660,10 @@ class GeneratedNoisePool:
 
         rps = g("rps", {}) or {}
         rps_kind = rps.get("kind", "synthetic_intermittent")
-        if rps_kind not in ("synthetic_intermittent", "full_flight"):
+        if rps_kind not in ("synthetic_intermittent", *trajectory_model.FLIGHT_KINDS):
             raise ValueError(
-                "generated noise supports rps.kind 'synthetic_intermittent' or "
-                f"'full_flight', got {rps_kind!r}"
+                "generated noise supports rps.kind 'synthetic_intermittent', "
+                f"'full_flight' or 'fitted_traj', got {rps_kind!r}"
             )
         buf = g("buffer", {}) or {}
         checkpoint = g("checkpoint")
@@ -655,6 +682,7 @@ class GeneratedNoisePool:
             aggressiveness=float(rps.get("aggressiveness", 1.0)),
             rps_kind=str(rps_kind),
             flight_fs=float(rps.get("flight_fs", 200.0)),
+            rps_cfg=_to_plain(rps),
             random_phase=bool(g("random_phase", True)),
             n_slots=int(buf.get("slots", 512)),
             gen_batch=int(g("gen_batch", 32)),

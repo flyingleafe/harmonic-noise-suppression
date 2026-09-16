@@ -131,7 +131,8 @@ def test_parents_match_dload_lock():
 
 def test_lock_coverage():
     """Every dload.lock dataset is covered: a derivation spec, a raw source
-    registry entry (or its frames dataset), or a declared historical pin."""
+    registry entry (or its frames dataset), a published artefact tree, or a
+    declared historical pin."""
     from data_processing import sources
 
     lock = _lock_datasets()
@@ -141,9 +142,10 @@ def test_lock_coverage():
             name in der.SPECS
             or name in sources.REGISTRY
             or name in frames_names
+            or name in der.ARTEFACT_PINS
             or name in der.HISTORICAL_PINS
         )
-        assert covered, f"{name}: no spec, source entry, or historical-pin declaration"
+        assert covered, f"{name}: no spec, source entry, artefact pin, or historical pin"
 
 
 def test_build_pipeline_is_fingerprintable():
