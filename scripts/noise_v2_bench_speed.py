@@ -1255,24 +1255,27 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[dict] = []
     for name in wanted:
         print(f"[{name}] reading ...", flush=True)
+        n = 0
         try:
-            stream = READERS[name](args)
-        except SystemExit as exc:  # a missing raw tree is a survey fact, not a crash
+            # A reader raises SystemExit when its raw tree is absent (the cluster
+            # has no data/ working copy, for instance); that is a survey fact per
+            # corpus, not a reason to lose every other corpus's readings. The
+            # raise happens inside the generator body, so it is caught here.
+            for meta, audio, fs in READERS[name](args):
+                reading = estimate(audio, fs, int(meta["n_rotors"]), cfg)
+                row = {**meta, **reading}
+                rows.append(row)
+                n += 1
+                print(
+                    f"  {row['corpus']}/{row['id']}: {row['speed_rev_s']} rev/s "
+                    f"({row['octave_verdict']}, margin {row['margin_db']} dB, "
+                    f"usable={row['usable']})",
+                    flush=True,
+                )
+        except SystemExit as exc:
             failures.append({"corpus": name, "error": str(exc)})
             print(f"[{name}] SKIPPED: {exc}", flush=True)
             continue
-        n = 0
-        for meta, audio, fs in stream:
-            reading = estimate(audio, fs, int(meta["n_rotors"]), cfg)
-            row = {**meta, **reading}
-            rows.append(row)
-            n += 1
-            print(
-                f"  {row['corpus']}/{row['id']}: {row['speed_rev_s']} rev/s "
-                f"({row['octave_verdict']}, margin {row['margin_db']} dB, "
-                f"usable={row['usable']})",
-                flush=True,
-            )
         print(f"[{name}] {n} recordings", flush=True)
 
     checks = cross_checks(rows)
