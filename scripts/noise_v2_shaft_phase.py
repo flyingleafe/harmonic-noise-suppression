@@ -305,7 +305,7 @@ def d_from_white_psd(s0: float) -> float:
 
 
 def hp_sos(fs: float, f_hp: float) -> np.ndarray:
-    return butter(HP_ORDER, f_hp / (0.5 * fs), btype="highpass", output="sos")
+    return np.asarray(butter(HP_ORDER, f_hp / (0.5 * fs), btype="highpass", output="sos"))
 
 
 def hp_power_response(sos: np.ndarray, f: np.ndarray, fs: float) -> np.ndarray:
@@ -331,7 +331,7 @@ def filtered_theta_structure(
     s_theta = ou_psd(f, sigma, lam) * resp / (2.0 * np.pi * f) ** 2
     tau = np.atleast_1d(np.asarray(tau, dtype=np.float64))
     kern = 1.0 - np.cos(2.0 * np.pi * f[None, :] * tau[:, None])
-    return 2.0 * np.trapezoid(s_theta[None, :] * kern, f, axis=1)
+    return np.asarray(2.0 * np.trapezoid(s_theta[None, :] * kern, f, axis=1))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -572,7 +572,7 @@ def welch_psd(parts: list[np.ndarray], fs: float) -> tuple[np.ndarray, np.ndarra
     for p in parts:
         if p.size < nper:
             continue
-        f, pxx = welch(p, fs=fs, window="hann", nperseg=nper, noverlap=nov, detrend=False)
+        f, pxx = welch(p, fs=fs, window="hann", nperseg=nper, noverlap=nov, detrend=False)  # type: ignore[arg-type]
         k = 1 + (p.size - nper) // (nper - nov)
         acc = pxx * k if acc is None else acc + pxx * k
         freqs = f
@@ -690,7 +690,7 @@ def analyse_telemetry_rig(
     if not tracks:
         return None
     fs = float(np.median([t.fs for t in tracks]))
-    rep = dict(
+    rep: dict[str, Any] = dict(
         rig=rig,
         dataset=spec["dataset"],
         rps_key=tracks[0].key,
@@ -704,7 +704,7 @@ def analyse_telemetry_rig(
     per_flight_q = [quantisation(t) for t in tracks]
     steps = [q.get("step_rps_measured") for q in per_flight_q if q.get("step_rps_measured")]
     rep["quantisation"]["step_rps_measured_median_over_flights"] = (
-        float(np.median(steps)) if steps else None
+        float(np.median(np.asarray(steps, dtype=float))) if steps else None
     )
     rep["quantisation"]["held_fraction_median_over_flights"] = float(
         np.median([q["held_fraction"] for q in per_flight_q])
@@ -749,7 +749,7 @@ def analyse_telemetry_rig(
                 if f_hp == HP_VARIANTS[0]:
                     total_s += (sl.stop - sl.start) / track.fs
         if sos is not None:
-            f_grid = np.geomspace(max(1e-3, 0.02 * float(f_hp)), 0.5 * fs, 600)
+            f_grid = np.geomspace(max(1e-3, 0.02 * float(f_hp or 1.0)), 0.5 * fs, 600)
             resp_grid = hp_power_response(sos, f_grid, fs)
         for r in range(n_rotors):
             if not nu_all[r]:
@@ -1317,7 +1317,7 @@ def analyse_acoustic_support(
         cands = [z[k + 0.5]] + ([z[k - 0.5]] if k >= 2 else [])
         sur[k] = min(cands, key=lambda c: float(np.mean(np.abs(c) ** 2)))
 
-    oversamp = float(window / hop)
+    ov: float = float(window) / float(hop)
     lag_hi = min(ACOUSTIC_LAG_HI_S, (dm["n_frames"] - 2) / dm["frame_rate_hz"] / 3.0)
     # The grid starts at ONE WINDOW, not at the hop. Below the window the
     # analysis frames overlap, so even pure noise is strongly coherent
@@ -1332,7 +1332,7 @@ def analyse_acoustic_support(
             np.geomspace(lag_lo, max(lag_hi, 1.05 * lag_lo), ACOUSTIC_N_LAGS) * dm["frame_rate_hz"]
         ).astype(int)
     )
-    lags = lags[(lags >= int(round(oversamp))) & (lags < dm["n_frames"] - 2)]
+    lags = lags[(lags >= int(round(ov))) & (lags < dm["n_frames"] - 2)]
     if lags.size < 3:
         return {
             "support": name,
@@ -1355,7 +1355,7 @@ def analyse_acoustic_support(
         mics = keep[k]
         for lag in lags:
             f_raw = _raw_g2(sur[k][mics], int(lag))
-            arr, floor = coherence_g2(zd[k][mics], f_raw, int(lag), oversamp)
+            arr, floor = coherence_g2(zd[k][mics], f_raw, int(lag), ov)
             m, se, n, fbar = g2_stats(arr, floor)
             v, v_se = g2_to_V(m, se, n)
             gs.append(m)
@@ -1364,7 +1364,7 @@ def analyse_acoustic_support(
             ns.append(n)
             vs.append(v)
             vse.append(v_se)
-            vu_mic, n_ind = unwrapped_V(zd[k][mics], int(lag), oversamp)
+            vu_mic, n_ind = unwrapped_V(zd[k][mics], int(lag), ov)
             v_un = float(np.mean(vu_mic))
             vu.append(v_un)
             # Var of a variance from n_ind independent samples is 2 V^2 / n_ind.
@@ -1394,7 +1394,7 @@ def analyse_acoustic_support(
                 num = np.abs(q.sum(axis=1))
                 den = np.sqrt((np.abs(pk) ** 2).sum(axis=1) * (np.abs(pl) ** 2).sum(axis=1))
                 f_raw = (num / np.maximum(den, 1e-300)) ** 2
-                arr, floor = cross_g2(zd[k][common], zd[m2][common], f_raw, int(lag), oversamp)
+                arr, floor = cross_g2(zd[k][common], zd[m2][common], f_raw, int(lag), ov)
                 m, se, n, _ = g2_stats(arr, floor)
                 vd, _unused = g2_to_V(m, se, n)
                 vk, vl = Vk[k][j], Vk[m2][j]
@@ -1420,7 +1420,7 @@ def analyse_acoustic_support(
         "frame_rate_hz": dm["frame_rate_hz"],
         "resolution_hz": res_bw_hz,
         "n_frames": dm["n_frames"],
-        "oversampling": oversamp,
+        "oversampling": ov,
         "orders_used": orders,
         "n_orders_used": len(orders),
         "margin_db_median": {str(k): float(np.median(v)) for k, v in margins.items()},
@@ -2096,12 +2096,17 @@ def fig_structure_functions(res: dict[str, Any], paths: list[Path]) -> None:
         ]
         if finite:
             anchor_i = len(tau) // 2
-            base = np.nanmedian(
-                [
-                    (row.get("S_rad2") or [None])[anchor_i]
-                    for row in hp["per_rotor"]
-                    if row.get("S_rad2") and row["S_rad2"][anchor_i] is not None
-                ]
+            base = float(
+                np.nanmedian(
+                    np.asarray(
+                        [
+                            (row.get("S_rad2") or [None])[anchor_i]
+                            for row in hp["per_rotor"]
+                            if row.get("S_rad2") and row["S_rad2"][anchor_i] is not None
+                        ],
+                        dtype=float,
+                    )
+                )
             )
             t0 = tau[anchor_i]
             if np.isfinite(base) and base > 0:
