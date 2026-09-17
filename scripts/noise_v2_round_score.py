@@ -7,6 +7,22 @@ plus its findings:
     python scripts/noise_v2_round_score.py --round 1 --fits results/noise_v2/rounds/round1/fits
     python scripts/noise_v2_round_score.py --round 1 --legacy-export baseline --out-tag legacy_smoke
 
+One rig at a time (one remote job each, because the DREGON and Michael's fits
+land at different times), then compose the round record from the scored arms:
+
+    python scripts/noise_v2_round_score.py --round 1 --fits <fits> --rigs michaels \
+        --candidate michaels_v2_fly125cruise --arm-out <dir>/arm_michaels.json \
+        --dump-audio <dir>/audio --job <omnirun job> --audio-uri s3://...
+    python scripts/noise_v2_round_score.py --round 1 --compose <dir>/arm_*.json \
+        --supports-index results/noise_v2/rounds/round1/supports/index.json
+
+``--compose`` re-evaluates the joint frozen HPPNet gate on the union of the
+arms' per-support PIT MAEs, carries each rig's proxy group and the Michael's
+likelihood gate, and reports every HPPNet number against BOTH bars: LEGACY
+PARITY (the previous best, which is the top-level pass) and the frozen
+0.70-gap DREGON STRETCH target. The candidate table states each fit's own
+``optimiser.converged`` status next to the numbers it produced.
+
 The measurement protocol is the previous campaign's, reproduced from the code
 that produced the recorded numbers; it is written down in
 ``experiments.noise_model.gates`` and not restated here. What this script owns:
@@ -397,6 +413,35 @@ def _comb_mean_check(fit: dict[str, Any], fits: dict[str, dict[str, Any]]) -> di
     )
 
 
+def fit_provenance(arm: Arm) -> dict[str, Any]:
+    """What the candidate row must state about the fit it renders from.
+
+    Convergence is NOT summarised away: the fit's own ``optimiser.converged``
+    flag, which criterion fired, the final gradient norm, the tolerance it was
+    tested against and the wall clock are carried into the round record so that
+    every quoted gate number sits next to the status of the fit that produced
+    it.
+    """
+    if arm.kind != "v2" or arm.fit is None:
+        return dict(kind=arm.kind, source=arm.source)
+    fit = arm.fit
+    opt = dict(fit.get("optimiser") or {})
+    return dict(
+        support=fit.get("support"),
+        path=fit.get("_path"),
+        mode=fit.get("mode"),
+        n_fit_windows=len(fit.get("supports") or []),
+        converged=opt.get("converged"),
+        which_converged=opt.get("which_converged"),
+        grad_norm=opt.get("grad_norm"),
+        tol_nats_per_cell=opt.get("tol_nats_per_cell"),
+        lbfgs_restart_gain_per_cell=opt.get("lbfgs_restart_gain_per_cell"),
+        wall_s=opt.get("wall_s"),
+        whittle_nats=(fit.get("objective") or {}).get("whittle_nats"),
+        comb_mean_check=arm.source.get("comb_mean_check"),
+    )
+
+
 # ── measurement ─────────────────────────────────────────────────────────────
 
 
@@ -503,7 +548,32 @@ def measure_support(
     row["ltas_abs_db_first_seed"] = float(row["per_seed"][0]["ltas_abs_db"])
     row["ltas_abs_db_seed_mean"] = float(np.mean(ltas))
     row["ltas_abs_db_seed_spread"] = float(max(ltas) - min(ltas))
-    return row | dict(_clip=clip, _real=real, _render=renders[int(seeds[0])], _arm=arm)
+    return row | dict(
+        _clip=clip, _real=real, _render=renders[int(seeds[0])], _renders=renders, _arm=arm
+    )
+
+
+def _dump_audio(root: Path, support: GT.ScoredSupport, row: dict[str, Any]) -> None:
+    """Write the scored audio of one support: the real clip and every seed.
+
+    One ``.npz`` per support, float32, in the evaluator's absolute units and on
+    the frozen timeline. This is the render the gates were read from, kept as
+    evidence; it is not committed (the round record names the job that wrote
+    it).
+    """
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    name = support.key.replace("/", "_").replace(":", "_")
+    arrays: dict[str, np.ndarray] = {"real": np.asarray(row["_real"], dtype=np.float32)}
+    for seed, audio in row["_renders"].items():
+        arrays[f"render_seed_{int(seed)}"] = np.asarray(audio, dtype=np.float32)
+    np.savez(
+        root / f"{name}.npz",
+        rig=np.array(support.rig),
+        regime=np.array(support.regime),
+        sr=np.array(16000),
+        **arrays,
+    )
 
 
 def _arm_for_recording(arm: Arm, support: GT.ScoredSupport) -> Arm:
@@ -595,6 +665,112 @@ def likelihood_cell(
     return cell, detail
 
 
+# ── the two bars ────────────────────────────────────────────────────────────
+
+#: The LEGACY PARITY bar of each rig: the previous best the v2 candidate has to
+#: match. DREGON is the legacy synthetic cruise PIT MAE itself
+#: (``gates.DREGON_BASELINE_PIT_MAE``); Michael's is 1.05 x the legacy
+#: equal-regime mean, which is exactly the frozen Michael's gate bound
+#: (``gates.MICHAELS_PIT_BOUND``).
+PARITY_BAR: dict[str, float] = {
+    "dregon": GT.DREGON_BASELINE_PIT_MAE,
+    "michaels": GT.MICHAELS_PIT_BOUND,
+}
+
+#: The STRETCH bar. Only DREGON has one: the frozen 0.70-gap-closure target
+#: ``real + 0.7 x (baseline - real)``, which is what ``gates.hppnet_gate``
+#: itself applies. No stretch bar was ever defined for Michael's — its frozen
+#: gate IS the parity bar — so it is reported as null, never invented.
+STRETCH_BAR: dict[str, float | None] = {
+    "dregon": GT.DREGON_PIT_TARGET,
+    "michaels": None,
+}
+
+
+def _bar_row(value: float | None, bar: float | None) -> dict[str, Any]:
+    within = None if (value is None or bar is None or not np.isfinite(value)) else value <= bar
+    return dict(
+        bar_rev_s=bar,
+        within=within,
+        margin_rev_s=(
+            None if (value is None or bar is None or not np.isfinite(value)) else bar - value
+        ),
+    )
+
+
+def bars(hppnet: dict[str, Any]) -> dict[str, Any]:
+    """Both bars on the two HPPNet numbers, read off one frozen gate result.
+
+    The frozen gate of ``gates.hppnet_gate`` applies the STRETCH bar on DREGON
+    and the PARITY bar on Michael's; this function does not re-measure
+    anything, it only reports each rig's number against both bars so that a
+    candidate which reaches parity but not the stretch target is visible as
+    such. A rig whose cohort is incomplete is ``within: null`` — never a pass.
+    """
+    if "dregon_cruise" not in hppnet:
+        unavailable = str(hppnet.get("unavailable") or "the HPPNet probe did not run")
+        return dict(
+            unavailable=unavailable,
+            dregon=None,
+            michaels=None,
+            parity_pass=False,
+            stretch_pass=False,
+        )
+    d, m = hppnet["dregon_cruise"], hppnet["michaels_fly124"]
+    d_mean = float(d["mean_candidate_rev_s"])
+    d_upper = d["candidate_interval"].get("upper")
+    d_complete = bool(d["checks"]["cohort_complete"] and d["checks"]["enough_clusters"])
+    m_mean = float(m["rig_candidate_mae"])
+    m_complete = bool(m["checks"]["cohort_complete"] and m["checks"]["all_regimes_present"])
+    dregon = dict(
+        quantity="five-recording cruise PIT MAE mean, one-sided 95 % upper bound beside it",
+        cohort_complete=d_complete,
+        mean_rev_s=(d_mean if d_complete else None),
+        interval_upper_rev_s=(d_upper if d_complete else None),
+        parity=_bar_row(d_mean if d_complete else None, PARITY_BAR["dregon"]),
+        parity_interval_upper=_bar_row(
+            d_upper if d_complete else None, PARITY_BAR["dregon"]
+        ),
+        stretch=_bar_row(d_mean if d_complete else None, STRETCH_BAR["dregon"]),
+        stretch_interval_upper=_bar_row(
+            d_upper if d_complete else None, STRETCH_BAR["dregon"]
+        ),
+        frozen_gate_pass=bool(d["pass"]),
+        missing_supports=list(d["missing_supports"]),
+    )
+    michaels = dict(
+        quantity="equal-regime mean PIT MAE over standby/ramp/cruise (ratio of means)",
+        cohort_complete=m_complete,
+        mean_rev_s=(m_mean if m_complete else None),
+        ratio=(float(m["aggregate_ratio"]) if m_complete else None),
+        parity=_bar_row(m_mean if m_complete else None, PARITY_BAR["michaels"]),
+        stretch=dict(
+            bar_rev_s=None,
+            within=None,
+            margin_rev_s=None,
+            note=(
+                "no stretch bar is defined for Michael's: the frozen gate "
+                f"(<= {GT.MICHAELS_RATIO_MAX} x {GT.MICHAELS_BASELINE_REGIME_MEAN:.6f}) IS the "
+                "legacy parity bar"
+            ),
+        ),
+        frozen_gate_pass=bool(m["pass"]),
+        missing_supports=list(m["missing_supports"]),
+    )
+    parity_pass = bool(dregon["parity"]["within"] and michaels["parity"]["within"])
+    stretch_pass = bool(dregon["stretch"]["within"] and michaels["parity"]["within"])
+    return dict(
+        rule=(
+            "PARITY = the legacy previous-best bar on BOTH HPPNet numbers; STRETCH = the frozen "
+            "0.70-gap DREGON target with Michael's parity bar unchanged"
+        ),
+        dregon=dregon,
+        michaels=michaels,
+        parity_pass=parity_pass,
+        stretch_pass=stretch_pass,
+    )
+
+
 # ── the round ───────────────────────────────────────────────────────────────
 
 
@@ -608,6 +784,8 @@ def run(
     n_mics: int,
     rigs: tuple[str, ...],
     with_probe: bool,
+    candidate: str = "v2",
+    dump_audio: Path | None = None,
 ) -> dict[str, Any]:
     lw = _module("noise_v2_likelihood_window")
     proxy_mod = _module("noise_v2_spectrogram_proxy")
@@ -628,6 +806,11 @@ def run(
             kind="legacy" if legacy else "v2",
             label={r: a.label for r, a in arms.items()},
             source={r: a.source for r, a in arms.items()},
+        ),
+        candidate=dict(
+            name=str(candidate),
+            rigs=list(rigs),
+            fits={r: fit_provenance(a) for r, a in arms.items()},
         ),
         fits=(
             sorted(str(p) for p in Path(fits_dir).glob("*.json"))
@@ -679,6 +862,8 @@ def run(
             if cell is not None:
                 cells.append(cell)
         rows[support.key] = {k: v for k, v in row.items() if not k.startswith("_")}
+        if dump_audio is not None:
+            _dump_audio(dump_audio, support, row)
         print(
             f"[{support.rig} {support.key}] "
             f"pit={row.get('pit_mae')} real={row.get('real_pit_mae')} "
@@ -711,7 +896,11 @@ def run(
         )
     )
     payload["gates"] = gates
+    payload["bars"] = bars(gates["hppnet"])
     payload["pass"] = bool(all(bool(g.get("pass")) for g in gates.values()))
+    payload["frozen_gates_pass"] = payload["pass"]
+    payload["parity_pass"] = bool(payload["bars"]["parity_pass"])
+    payload["stretch_pass"] = bool(payload["bars"]["stretch_pass"])
     return payload
 
 
@@ -751,11 +940,8 @@ def _optional_module(name: str) -> Any:
 
 
 def findings(payload: dict[str, Any]) -> str:
-    out: list[str] = []
-    g = payload["gates"]
     verdict = "PASS" if payload["pass"] else "FAIL"
-    out.append(f"# Noise model v2 — round {payload['round']} gate score ({verdict})")
-    out.append("")
+    out: list[str] = [f"# Noise model v2 — round {payload['round']} gate score ({verdict})", ""]
     out.append(
         f"Arm: {payload['arm']['kind']} — "
         + "; ".join(f"{r}: {lbl}" for r, lbl in payload["arm"]["label"].items())
@@ -765,6 +951,14 @@ def findings(payload: dict[str, Any]) -> str:
         f"{payload['protocol']['n_mics']} mics, git `{payload['git']}`."
     )
     out.append("")
+    out += findings_body(payload)
+    return "\n".join(out)
+
+
+def findings_body(payload: dict[str, Any]) -> list[str]:
+    """Every gate section of one scored record, from the verdict table down."""
+    out: list[str] = []
+    g = payload["gates"]
     out.append("## Gate verdicts")
     out.append("")
     out.append("| gate | verdict | number | threshold |")
@@ -958,7 +1152,460 @@ def findings(payload: dict[str, Any]) -> str:
         "manifest `baseline_map` cross-recording extrapolation of the FLY125 exports."
     )
     out.append("")
+    return out
+
+
+# ── composing the round record ──────────────────────────────────────────────
+
+ROUND_SCHEMA = "noise-v2-round-score/1"
+PROXY_GROUP: dict[str, str] = {"dregon": "dregon_cruise", "michaels": "michaels_cruise"}
+
+
+def load_arm(path: Path) -> dict[str, Any]:
+    """One scored arm record written by a ``run`` pass of this script."""
+    d = json.loads(Path(path).read_text())
+    for key in ("candidate", "gates", "measurements", "protocol"):
+        if key not in d:
+            die(f"{path}: not a scored arm record of this script (no {key!r})")
+    d["_path"] = str(path)
+    return d
+
+
+def compose(
+    *,
+    round_no: int,
+    arm_paths: list[Path],
+    previous: Path | None,
+    supports_index: Path | None,
+    blocker: str | None,
+) -> dict[str, Any]:
+    """The round record: one candidate row per scored arm, gates recombined.
+
+    Each arm was scored on its own rig (one remote job per rig), so the joint
+    HPPNet gate is REEVALUATED here on the union of the arms' per-support PIT
+    MAEs through :func:`gates.hppnet_gate` — the same frozen function, no
+    re-measurement and no arithmetic of its own. The proxy gate's two groups
+    are independent by construction, so each is carried from the arm that
+    measured it; the likelihood gate exists only on Michael's cruise cells.
+    Where several arms cover one rig, the FIRST listed is the primary one that
+    enters the joint gate; the others stay as fully scored candidate rows.
+    """
+    arms = [load_arm(p) for p in arm_paths]
+    primary: dict[str, dict[str, Any]] = {}
+    for arm in arms:
+        for rig in arm["candidate"]["rigs"]:
+            primary.setdefault(rig, arm)
+    pred: dict[str, float] = {}
+    real: dict[str, float] = {}
+    for rig, arm in primary.items():
+        for key, row in arm["measurements"].items():
+            if str(row["support"]["rig"]) != rig:
+                continue
+            if "pit_mae" in row:
+                pred[key] = float(row["pit_mae"])
+            if "real_pit_mae" in row:
+                real[key] = float(row["real_pit_mae"])
+    gates: dict[str, Any] = {}
+    gates["hppnet"] = (
+        GT.hppnet_gate(pred, real)
+        if pred
+        else dict(
+            name="hppnet_pit_mae",
+            status="not_run",
+            unavailable="no arm carries a probed PIT MAE",
+            **{"pass": False},
+        )
+    )
+    groups: dict[str, Any] = {}
+    proxy_template: dict[str, Any] = {}
+    for rig, arm in primary.items():
+        proxy = arm["gates"].get("proxy") or {}
+        proxy_template = {k: v for k, v in proxy.items() if k not in ("groups", "pass")}
+        blk = (proxy.get("groups") or {}).get(PROXY_GROUP[rig])
+        if blk is not None:
+            groups[PROXY_GROUP[rig]] = blk
+    missing_groups = [g for g in PROXY_GROUP.values() if g not in groups]
+    gates["proxy"] = dict(
+        proxy_template,
+        groups=groups,
+        missing_groups=missing_groups,
+        **{"pass": bool(groups and not missing_groups and all(b["pass"] for b in groups.values()))},
+    )
+    likelihood = next(
+        (a["gates"]["likelihood"] for a in arms if "per_band" in (a["gates"].get("likelihood") or {})),
+        None,
+    )
+    if likelihood is None:
+        likelihood = next(
+            (a["gates"]["likelihood"] for a in arms if "michaels" in a["candidate"]["rigs"]),
+            dict(
+                name="likelihood_composite_risk",
+                status="not_run",
+                unavailable="no Michael's arm was scored, so no likelihood cell exists",
+                **{"pass": False},
+            ),
+        )
+    gates["likelihood"] = likelihood
+    merged_bars = bars(gates["hppnet"])
+    rows: list[dict[str, Any]] = []
+    for arm in arms:
+        cand = arm["candidate"]
+        rows.append(
+            dict(
+                name=cand["name"],
+                rigs=cand["rigs"],
+                primary_for=[r for r, a in primary.items() if a is arm],
+                fits=cand["fits"],
+                git=arm.get("git"),
+                job=arm.get("job"),
+                audio=arm.get("audio"),
+                arm_record=arm["_path"],
+                render_seeds=arm["protocol"]["render_seeds"],
+                n_mics=arm["protocol"]["n_mics"],
+                scorer=arm["protocol"].get("scorer"),
+                bars=arm.get("bars"),
+                hppnet=_candidate_hppnet(arm),
+                proxy={
+                    g: dict(
+                        mean_ltas_abs_db=b["mean_ltas_abs_db"],
+                        spread_ltas_abs_db=b["spread_ltas_abs_db"],
+                        gate_db=b["gate_db"],
+                        margin_db=b["margin_db"],
+                        mean_mr_ltas=b["mean_mr_ltas"],
+                        n_supports=b["n_supports"],
+                        **{"pass": b["pass"]},
+                    )
+                    for g, b in ((arm["gates"].get("proxy") or {}).get("groups") or {}).items()
+                    if b["n_supports"]
+                },
+                likelihood=_candidate_likelihood(arm),
+                render_wall_s=sum(
+                    float(e["render_seconds"])
+                    for row in arm["measurements"].values()
+                    for e in row["per_seed"]
+                ),
+            )
+        )
+    payload: dict[str, Any] = dict(
+        schema=ROUND_SCHEMA,
+        round=int(round_no),
+        git=git_rev(),
+        status="scored" if pred else "partially_scored",
+        arm=dict(
+            kind="v2",
+            label={
+                r: a["arm"]["label"].get(r, a["candidate"]["name"]) for r, a in primary.items()
+            },
+            source={r: a["arm"]["source"].get(r) for r, a in primary.items()},
+        ),
+        fits=sorted({f["path"] for a in arms for f in a["candidate"]["fits"].values() if f.get("path")}),
+        candidates=rows,
+        protocol=_composed_protocol(arms),
+        measurements={k: v for a in arms for k, v in a["measurements"].items()},
+        likelihood_cells=[c for a in arms for c in (a.get("likelihood_cells") or [])],
+        gates=gates,
+        bars=merged_bars,
+    )
+    payload["pass"] = bool(merged_bars["parity_pass"])
+    payload["parity_pass"] = bool(merged_bars["parity_pass"])
+    payload["stretch_pass"] = bool(merged_bars["stretch_pass"])
+    payload["frozen_gates_pass"] = bool(all(bool(g.get("pass")) for g in gates.values()))
+    payload["pass_rule"] = (
+        "top-level pass = LEGACY PARITY on both HPPNet gates; stretch_pass is the frozen "
+        "0.70-gap DREGON target; frozen_gates_pass additionally requires the proxy and "
+        "likelihood gates"
+    )
+    if supports_index is not None and Path(supports_index).is_file():
+        payload["support_availability"] = _support_availability(Path(supports_index))
+    if previous is not None and Path(previous).is_file():
+        prev = json.loads(Path(previous).read_text())
+        if prev.get("legacy_smoke"):
+            payload["legacy_smoke"] = prev["legacy_smoke"]
+    payload["blocker"] = blocker or _auto_blocker(payload, primary)
+    return payload
+
+
+def _candidate_hppnet(arm: dict[str, Any]) -> dict[str, Any]:
+    """The candidate row's own HPPNet numbers, on the rigs it was scored on."""
+    hp = arm["gates"].get("hppnet") or {}
+    if "dregon_cruise" not in hp:
+        return dict(status="not_run", reason=hp.get("unavailable"))
+    out: dict[str, Any] = {}
+    for rig, key in (("dregon", "dregon_cruise"), ("michaels", "michaels_fly124")):
+        if rig not in arm["candidate"]["rigs"]:
+            continue
+        blk = hp[key]
+        out[rig] = (
+            dict(
+                mean_rev_s=blk["mean_candidate_rev_s"],
+                interval=blk["candidate_interval"],
+                real_arm_mean_rev_s=blk["real_arm"]["mean_rev_s"],
+                real_arm_relative=blk["real_arm"]["relative"],
+                frozen_gate_pass=blk["pass"],
+                per_support={c["support"]: c["candidate"] for c in blk["clusters"]},
+            )
+            if rig == "dregon"
+            else dict(
+                rig_mean_rev_s=blk["rig_candidate_mae"],
+                ratio=blk["aggregate_ratio"],
+                per_regime={
+                    r: dict(
+                        candidate_mae=v["candidate_mae"],
+                        baseline_mae=v["baseline_mae"],
+                        ratio=v["ratio"],
+                        n_blocks=v["n_blocks"],
+                    )
+                    for r, v in blk["per_regime"].items()
+                },
+                frozen_gate_pass=blk["pass"],
+            )
+        )
+    return out
+
+
+def _candidate_likelihood(arm: dict[str, Any]) -> dict[str, Any]:
+    lk = arm["gates"].get("likelihood") or {}
+    if "per_band" not in lk:
+        return dict(status="not_run", reason=lk.get("unavailable"))
+    return dict(
+        decisive_band=lk["decisive_band"],
+        per_band={
+            b: dict(
+                model_nats_per_s=lk["per_band"][b]["model_nats_per_s"],
+                oracle_nats_per_s=lk["per_band"][b]["oracle_nats_per_s"],
+                margin_nats_per_s=lk["per_band"][b]["margin_nats_per_s"],
+                below_oracle=lk["per_band"][b]["below_oracle"],
+            )
+            for b in ("comb", "floor", "full")
+        },
+        **{"pass": lk["pass"]},
+    )
+
+
+def _composed_protocol(arms: list[dict[str, Any]]) -> dict[str, Any]:
+    seeds = sorted({int(s) for a in arms for s in a["protocol"]["render_seeds"]})
+    mics = sorted({int(a["protocol"]["n_mics"]) for a in arms})
+    scorer = next((a["protocol"]["scorer"] for a in arms if a["protocol"].get("scorer")), None)
+    return dict(
+        render_seeds=seeds,
+        n_mics=(mics[0] if len(mics) == 1 else mics),
+        hppnet=dict(
+            experiment=GT.SCORER_EXPERIMENT,
+            checkpoint=GT.SCORER_CKPT,
+            sha256=GT.SCORER_SHA256,
+            verified=bool(scorer and scorer.get("sha256") == GT.SCORER_SHA256),
+            record=scorer,
+        ),
+        proxy="ltas_abs_db on mic 0; mr_ltas report-only",
+        likelihood=dict(
+            n_fft=GT.LIKELIHOOD_N_FFT,
+            hop=GT.LIKELIHOOD_HOP,
+            pool="FLY124 cruise supports",
+            band_edge_hz=GT.BAND_EDGE_HZ,
+            decisive_band="comb",
+        ),
+        note=next(a["protocol"].get("note") for a in arms),
+    )
+
+
+def _support_availability(index: Path) -> dict[str, Any]:
+    d = json.loads(index.read_text())
+    sets = {
+        name: dict(required=int(blk["n_specs"]), materialized=int(blk["n_built"]))
+        for name, blk in (d.get("sets") or {}).items()
+    }
+    return dict(
+        source=str(index),
+        n_supports_materialized=int(d.get("n_supports") or 0),
+        sets=sets,
+        updated=d.get("updated"),
+    )
+
+
+def _auto_blocker(payload: dict[str, Any], primary: dict[str, dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for rig in ("dregon", "michaels"):
+        if rig not in primary:
+            parts.append(f"no {rig} arm was scored")
+    for name, gate in payload["gates"].items():
+        if gate.get("status") == "not_run":
+            parts.append(f"the {name} gate is not_run: {gate.get('unavailable')}")
+    missing = payload["gates"]["proxy"].get("missing_groups") or []
+    if missing:
+        parts.append("proxy groups without any measured support: " + ", ".join(missing))
+    if not parts:
+        return (
+            "none: every gate of this round was evaluated on rendered candidate audio and the "
+            "frozen probe."
+        )
+    return "; ".join(parts) + "."
+
+
+def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
+    parity = "PASS" if payload["parity_pass"] else "FAIL"
+    stretch = "PASS" if payload["stretch_pass"] else "FAIL"
+    out: list[str] = [
+        f"# Noise model v2 — round {payload['round']} gate score: "
+        f"PARITY {parity} / STRETCH {stretch}",
+        "",
+        f"Top-level pass (legacy parity on both HPPNet gates): **{str(payload['pass']).lower()}**. "
+        f"Stretch (frozen 0.70-gap DREGON target): **{str(payload['stretch_pass']).lower()}**. "
+        f"All three frozen gates: **{str(payload['frozen_gates_pass']).lower()}**. "
+        f"Record `results/noise_v2/rounds/round{payload['round']}.json`, git `{payload['git']}`.",
+        "",
+        "## Candidates",
+        "",
+        "| candidate | rig(s) | fit JSON | converged | fit wall (s) | render+probe job |",
+        "|---|---|---|---|---:|---|",
+    ]
+    for row in payload["candidates"]:
+        for rig, fit in row["fits"].items():
+            conv = fit.get("converged")
+            label = (
+                "—"
+                if conv is None
+                else (
+                    "yes"
+                    if conv
+                    else f"**NO** ({fit.get('which_converged')}, |grad| {_fmt(fit.get('grad_norm'), '.0f')})"
+                )
+            )
+            out.append(
+                f"| `{row['name']}` | {rig} | `{fit.get('path')}` | {label} | "
+                f"{_fmt(fit.get('wall_s'), '.0f')} | `{row.get('job') or '—'}` |"
+            )
+    out.append("")
+    out.append("## The two bars")
+    out.append("")
+    out.append("| rig | gate quantity | number | PARITY bar | parity | STRETCH bar | stretch |")
+    out.append("|---|---|---:|---:|---|---:|---|")
+    b = payload["bars"]
+    for rig in ("dregon", "michaels"):
+        blk = b.get(rig)
+        if not blk:
+            out.append(
+                f"| {rig} | — | not run | {_fmt(PARITY_BAR[rig])} | — | "
+                f"{_fmt(STRETCH_BAR[rig])} | — |"
+            )
+            continue
+        out.append(
+            f"| {rig} | {blk['quantity']} | {_fmt(blk['mean_rev_s'])} | "
+            f"{_fmt(blk['parity']['bar_rev_s'])} | {_verdict(blk['parity']['within'])} "
+            f"(margin {_fmt(blk['parity']['margin_rev_s'], '+.6f')}) | "
+            f"{_fmt(blk['stretch']['bar_rev_s'])} | {_verdict(blk['stretch']['within'])} "
+            f"(margin {_fmt(blk['stretch']['margin_rev_s'], '+.6f')}) |"
+        )
+    out.append("")
+    out.append(
+        "PARITY is the legacy previous best: DREGON synthetic cruise PIT MAE "
+        f"{GT.DREGON_BASELINE_PIT_MAE:.6f} rev/s (real arm {GT.DREGON_REAL_PIT_MAE:.6f}), "
+        f"Michael's {GT.MICHAELS_RATIO_MAX} x {GT.MICHAELS_BASELINE_REGIME_MEAN:.6f} = "
+        f"{GT.MICHAELS_PIT_BOUND:.6f} rev/s. STRETCH exists only on DREGON: "
+        f"{GT.DREGON_PIT_TARGET:.6f} = real + {GT.DREGON_GAP_FRACTION} x (baseline - real); "
+        "Michael's frozen gate IS its parity bar."
+    )
+    out.append("")
+    out.append("## Per-candidate numbers")
+    out.append("")
+    out.append(
+        "| candidate | HPPNet | proxy `ltas_abs_db` (gate) | `mr_ltas` | likelihood comb margin |"
+    )
+    out.append("|---|---:|---:|---:|---:|")
+    for row in payload["candidates"]:
+        hp = row["hppnet"]
+        if hp.get("status") == "not_run":
+            hp_txt = "not run"
+        elif "dregon" in hp:
+            hp_txt = (
+                f"{_fmt(hp['dregon']['mean_rev_s'])} rev/s "
+                f"(95 % upper {_fmt(hp['dregon']['interval'].get('upper'))})"
+            )
+        else:
+            hp_txt = (
+                f"{_fmt(hp['michaels']['rig_mean_rev_s'])} rev/s "
+                f"(ratio {_fmt(hp['michaels']['ratio'], '.4f')})"
+            )
+        proxy = row["proxy"]
+        proxy_txt = "; ".join(
+            f"{_fmt(v['mean_ltas_abs_db'], '.4f')} ({_fmt(v['gate_db'], '.4f')})"
+            for v in proxy.values()
+        )
+        mr_txt = "; ".join(_fmt(v["mean_mr_ltas"], ".4f") for v in proxy.values())
+        lk = row["likelihood"]
+        lk_txt = (
+            "not run"
+            if lk.get("status") == "not_run"
+            else f"{lk['per_band']['comb']['margin_nats_per_s']:+,.4f} nats/s"
+        )
+        out.append(
+            f"| `{row['name']}` | {hp_txt} | {proxy_txt or '—'} | {mr_txt or '—'} | {lk_txt} |"
+        )
+    out.append("")
+    for row in payload["candidates"]:
+        audio = row.get("audio") or {}
+        if audio:
+            out.append(
+                f"Rendered audio of `{row['name']}` (uncommitted): `{audio.get('uri') or '—'}` "
+                f"(job `{row.get('job') or '—'}`, written to `{audio.get('dir')}` in the job's "
+                "worktree)."
+            )
+    out.append("")
+    out += findings_body(payload)
+    smoke = payload.get("legacy_smoke")
+    if smoke:
+        out.append("## Legacy smoke comparability (recorded earlier, NOT re-run)")
+        out.append("")
+        out.append(f"| legacy replay (`{smoke.get('job')}`) | observed | frozen scalar | relative delta |")
+        out.append("|---|---:|---:|---:|")
+        for label, key in (
+            ("DREGON cruise synthetic PIT MAE", "dregon_cruise_pit_mae"),
+            ("Michael's equal-regime synthetic PIT MAE", "michaels_equal_regime_pit_mae"),
+        ):
+            blk = smoke.get(key) or {}
+            out.append(
+                f"| {label} | {_fmt(blk.get('observed'))} | {_fmt(blk.get('frozen'))} | "
+                f"{_fmt(blk.get('relative_delta'), '.2e')} |"
+            )
+        out.append("")
+        out.append(f"Status `{smoke.get('status')}`: {smoke.get('reason')}")
+        out.append("")
+    out.append("## Exact blocker")
+    out.append("")
+    out.append(str(payload.get("blocker")))
+    out.append("")
+    if provenance:
+        out.append(provenance.strip())
+        out.append("")
+        out.append("### Addendum — this scoring pass")
+        out.append("")
+        out.append(
+            "The `Provenance` section above is kept verbatim from the earlier, unscored record; "
+            "the gates it calls `not_run` are the ones measured here, and whatever is still not "
+            "run is named in `Exact blocker`. This pass:"
+        )
+        out.append("")
+        for row in payload["candidates"]:
+            out.append(
+                f"* `{row['name']}` — fit git `{row.get('git')}`, render/probe job "
+                f"`{row.get('job') or 'local'}`, arm record `{row['arm_record']}`, render wall "
+                f"{_fmt(row.get('render_wall_s'), '.0f')} s."
+            )
+        out.append("")
     return "\n".join(out)
+
+
+def _verdict(within: Any) -> str:
+    return "—" if within is None else ("**PASS**" if within else "**FAIL**")
+
+
+def carried_provenance(path: Path) -> str | None:
+    """The ``## Provenance`` section of the previous findings, kept verbatim."""
+    if not Path(path).is_file():
+        return None
+    text = Path(path).read_text()
+    marker = "\n## Provenance"
+    idx = text.find(marker)
+    return None if idx < 0 else text[idx + 1 :]
 
 
 def _fmt(value: Any, spec: str = ".6f") -> str:
@@ -1005,7 +1652,73 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the HPPNet probe (proxy and likelihood only); the round then cannot pass",
     )
+    ap.add_argument(
+        "--candidate",
+        default=None,
+        help="name of this arm's candidate row in the round record (default: the --out-tag)",
+    )
+    ap.add_argument(
+        "--arm-out",
+        type=Path,
+        default=None,
+        help="write the scored arm record here instead of round<N>[_tag].json",
+    )
+    ap.add_argument(
+        "--dump-audio",
+        type=Path,
+        default=None,
+        help="write one .npz per support (real clip plus every render seed) into this directory",
+    )
+    ap.add_argument("--job", default=None, help="the omnirun job id this pass runs under")
+    ap.add_argument(
+        "--audio-uri", default=None, help="where the dumped audio is retrievable (s3 URI)"
+    )
+    ap.add_argument(
+        "--compose",
+        type=Path,
+        nargs="+",
+        default=None,
+        metavar="ARM_JSON",
+        help=(
+            "compose the round record from scored arm records instead of scoring: the first "
+            "record covering a rig is the primary one that enters the joint frozen gate"
+        ),
+    )
+    ap.add_argument(
+        "--supports-index",
+        type=Path,
+        default=None,
+        help="with --compose: the supports index whose availability is recorded",
+    )
+    ap.add_argument(
+        "--blocker",
+        default=None,
+        help="with --compose: the blocker sentence (default: derived from what was not run)",
+    )
     args = ap.parse_args(argv)
+    tag = f"_{args.out_tag}" if args.out_tag else ""
+    out_json = Path(args.out) / f"round{int(args.round)}{tag}.json"
+    out_dir = Path(args.out) / f"round{int(args.round)}{tag}" / "score"
+    if args.compose:
+        previous = out_json if out_json.is_file() else None
+        provenance = carried_provenance(out_dir / "findings.md")
+        payload = compose(
+            round_no=int(args.round),
+            arm_paths=[Path(p) for p in args.compose],
+            previous=previous,
+            supports_index=args.supports_index,
+            blocker=args.blocker,
+        )
+        RE.write_json(out_json, payload)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "findings.md").write_text(compose_findings(payload, provenance=provenance))
+        print(f"wrote {out_json} and {out_dir / 'findings.md'}")
+        print(
+            f"round {payload['round']}: parity "
+            f"{'PASS' if payload['parity_pass'] else 'FAIL'}, stretch "
+            f"{'PASS' if payload['stretch_pass'] else 'FAIL'}"
+        )
+        return 0
     legacy = args.legacy_export is not None
     if not legacy and args.fits is None:
         die("pass --fits <dir> with the round's fit JSONs, or --legacy-export baseline")
@@ -1021,10 +1734,18 @@ def main(argv: list[str] | None = None) -> int:
         n_mics=int(args.mics),
         rigs=tuple(str(args.rigs).replace(",", " ").split()),
         with_probe=not args.no_probe,
+        candidate=str(args.candidate or args.out_tag or ("legacy" if legacy else "v2")),
+        dump_audio=args.dump_audio,
     )
-    tag = f"_{args.out_tag}" if args.out_tag else ""
-    out_json = Path(args.out) / f"round{payload['round']}{tag}.json"
-    out_dir = Path(args.out) / f"round{payload['round']}{tag}" / "score"
+    if args.job:
+        payload["job"] = str(args.job)
+    if args.dump_audio or args.audio_uri:
+        payload["audio"] = dict(
+            dir=(str(args.dump_audio) if args.dump_audio else None), uri=args.audio_uri
+        )
+    if args.arm_out:
+        out_json = Path(args.arm_out)
+        out_dir = out_json.parent
     RE.write_json(out_json, payload)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "findings.md").write_text(findings(payload))
