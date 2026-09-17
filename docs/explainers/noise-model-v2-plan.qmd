@@ -104,11 +104,16 @@ The campaign record is `docs/experiments/noise-model-v2.md`.
    unchanged.
 10. Decided at review: DREGON is fitted on the bench (total periodogram) and
     validated on the four-motor static recording; flight fits use the
-    front-end STFT; the shaft is one OU process; the flat `D` is replaced by a
-    shared short-`τ` path OU. Seven choices remain open: the path term in R1,
-    Michael's standby/ramp, the proxy, the two thresholds, the bench
-    stationarity rule, and the four-motor validation tolerance.
-    Section [Decisions for the reviewer](#decisions-for-the-reviewer) lists
+    front-end STFT; the shaft is one OU process; the flat `D` is replaced by
+    an independent per-order phase process measured on the bench, retained
+    **order-conditionally** — the long-lag study found a ceiling only at
+    `k = 4` and `k = 8` (`τ_c` 2.15 s and 1.12 s), while `k = 2` was still
+    growing at 5 s
+    (`results/noise_v2/rounds/round1/fits/findings.md:222-224`). The path
+    term is **per microphone**, shared across rotors and `∝ f`; it has no
+    positive evidence and is a named candidate, not fitted in R1. All nine
+    open choices were approved as proposed on 2026-09-17; section
+    [Decisions (approved 2026-09-17)](#decisions-for-the-reviewer) lists
     them.
 
 # Where the last campaign stopped
