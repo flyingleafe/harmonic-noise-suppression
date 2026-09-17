@@ -467,7 +467,7 @@ def test_render_reproduces_the_per_order_lag_law():
 # ── the objective and the fit ───────────────────────────────────────────────
 
 
-def test_bench_map_recovers_planted_dynamics_and_carrier():
+def test_bench_map_recovers_planted_dynamics_at_the_frozen_carrier():
     """A planted bench support must be recovered by the MAP fit end to end.
 
     Small by design (one rotor, eight orders, 1 s, two microphones): what it
@@ -499,18 +499,18 @@ def test_bench_map_recovers_planted_dynamics_and_carrier():
     obs = truth * rng.standard_exponential(truth.shape)
 
     batch = MD.bench_batch(
-        name="planted", power=obs, sr=SR, carrier_mean=np.array([f0 + 0.3]), k_cap=k_cap
+        name="planted", power=obs, sr=SR, carrier_mean=np.array([f0]), n_samples=n, k_cap=k_cap
     )
+    # the bench carrier is FROZEN at the support's own (window-refined) value:
+    # no site, no refinement, and the batch carries it through unchanged
     assert batch.carrier_init is not None
-    # one bin of this 1.024 s support at the top modelled order is
-    # 0.977 / 8 = 0.12 rev/s, so the refinement is resolution-limited here; on
-    # a real 30 s bench support at order 110 the same code lands at 3e-4 rev/s
-    assert abs(float(batch.carrier_init[0]) - f0) < 0.12
+    assert float(batch.carrier_init[0]) == f0
+    assert "carrier" not in MD.free_blocks("bench")
     out = FT.fit_support(
         batch, mode="bench", optim=FT.OptimSpec(adam_steps=150, adam_lr=0.05, lbfgs_iters=60)
     )
     got = MD.params_to_dict(out.params)
-    assert abs(got["carrier_rev_s"][0] - f0) < 0.05
+    assert got["carrier_rev_s"][0] == f0
     assert 0.4 < got["sigma_nu"] < 2.0
     prof = np.asarray(got["profile"]["profile_db"])[0]
     assert np.abs(prof - np.linspace(-14.0, -26.0, k_cap)).max() < 3.0

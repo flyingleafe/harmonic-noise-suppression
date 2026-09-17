@@ -111,8 +111,9 @@ class TestBenchStationarityRule:
         assert rule["orders"] == [order]
         # the steady span is [0, 8) and BENCH_EDGE_S trims the first 2 s
         assert rule["start_s"] == pytest.approx(S.BENCH_EDGE_S, abs=0.5)
-        # the 2 s residual average sees the ramp about a second early
-        assert 6.3 <= rule["end_s"] <= 8.3
+        # the 2 s residual average sees the ramp about a second late now that
+        # the wide-band test (rule rev 1) no longer clips the span early
+        assert 6.3 <= rule["end_s"] <= 8.7
         assert rule["duration_s"] >= S.BENCH_MIN_SEGMENT_S
         # the carrier is recovered from the survey speed it was handed
         assert rule["carrier_rev_s"][0] == pytest.approx(base, abs=0.01)
@@ -152,6 +153,43 @@ class TestBenchStationarityRule:
         rule = S.stationary_segment(audio, sr, [68.0, 55.0])
         assert rule["passed"] is False
         assert rule["longest_inside_s"] < S.BENCH_MIN_SEGMENT_S
+
+    def test_a_window_with_no_motor_is_refused_even_though_silence_is_steady(self):
+        """Rule rev 2's level gate. Silence has a perfectly stationary
+        filtered-noise residual, so rev 1 preferred it: 12 of the 21 DREGON
+        bench windows landed on the post-spin-down tail, 10-33 dB down."""
+        sr, order, base = 16000.0, 70, 68.0
+        n = int(9 * sr)
+        speed = np.full(n, base)
+        motor = _bench_audio(sr, speed, order, noise=0.02)
+        rng = np.random.default_rng(3)
+        quiet = 0.02 * rng.standard_normal(int(11 * sr))
+        rule = S.stationary_segment(np.concatenate([motor, quiet])[None, :], sr, [base])
+
+        # the accepted window is the motor's, not the longer quiet tail
+        assert rule["start_s"] >= S.BENCH_EDGE_S - 1e-6
+        assert rule["end_s"] <= 9.5
+        assert rule["level_deficit_db"] < S.BENCH_LEVEL_TOL_DB
+        # and the window is certified by the margin measured INSIDE it
+        assert rule["line_margin_db"][0] >= S.BENCH_LINE_MARGIN_DB
+        assert rule["passed"] is True
+
+    def test_the_carrier_and_margin_are_measured_on_the_selected_window(self):
+        """Rule rev 2 refines the carrier on the window, not the recording: a
+        recording that is two thirds silence diluted rev 1's residual mean to
+        ~zero and left the carrier at the survey value."""
+        sr, order, true_speed = 16000.0, 70, 68.03
+        motor = _bench_audio(sr, np.full(int(7 * sr), true_speed), order)
+        quiet = 0.02 * np.random.default_rng(5).standard_normal(int(14 * sr))
+        rule = S.stationary_segment(np.concatenate([motor, quiet])[None, :], sr, [68.0])
+
+        assert rule["carrier_rev_s"][0] == pytest.approx(true_speed, abs=0.01)
+        # the whole-recording pass is recorded beside it and is the worse
+        # estimate: two thirds of the record has no line to demodulate
+        assert abs(rule["carrier_recording_rev_s"][0] - true_speed) >= abs(
+            rule["carrier_rev_s"][0] - true_speed
+        )
+        assert rule["line_margin_db"][0] > rule["line_margin_recording_db"][0]
 
 
 class TestSpecsAndCache:

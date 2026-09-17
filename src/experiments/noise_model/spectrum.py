@@ -612,6 +612,17 @@ def refine_bench_carrier(
 ) -> tuple[float, dict[str, Any]]:
     """Refine ONE constant bench carrier by the harmonic log-power sum.
 
+    NO LONGER IN THE FIT PATH (bench rule rev 2): the bench carrier is frozen
+    at the support index's window-refined value and this function is retained
+    for the multirotor per-rotor locator and for the R1 carrier audit
+    (``scripts/noise_v2_bench_diag.py refine_score``). Its score is a RAW
+    log-power sum, so it is decided by the loudest lines in the band: on the
+    DREGON bench those are a fixed ~89 Hz rig comb at 22-28 dB over the floor
+    while the rotor's own orders carry 2-9 dB, and it ranked a spurious carrier
+    (k = 14/28/42/56 of that comb) above the true one on
+    ``bench_dregon_Motor1_70``. Any new caller should normalise each order by
+    its local floor and cap the per-order contribution.
+
     The survey/manifest speed is good to about 1 rev/s, which at order 110 is
     110 Hz — 3300 bins of a 30 s periodogram. A Whittle fit started there sees
     no line at all, so the carrier is refined on the support's own periodogram

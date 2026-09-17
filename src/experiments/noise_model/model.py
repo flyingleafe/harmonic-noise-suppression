@@ -145,15 +145,16 @@ PRIORS = Priors()
 def free_blocks(mode: str) -> tuple[str, ...]:
     """Which blocks a mode fits. Anything else must arrive frozen."""
     if mode == "bench":
-        return ("dynamics", "profile", "floor", "mic", "carrier")
+        # no "carrier": the bench carrier is FROZEN at the support index's
+        # window-refined value (rule rev 2), so there is no carrier site and no
+        # N(survey, 0.5^2) prior to fight
+        return ("dynamics", "profile", "floor", "mic")
     if mode == "flight":
         return ("dynamics", "profile", "floor", "mic")
     if mode == "flight_floor_only":
         return ("floor", "mic")
-    # the two ATTRIBUTION modes of the four-motor validation: a transfer gap
-    # that one of them closes is a gap in that block alone
-    if mode == "bench_carrier_only":
-        return ("carrier",)
+    # the ATTRIBUTION mode of the four-motor validation: a transfer gap that it
+    # closes is a gap in that block alone
     if mode == "bench_dynamics_only":
         return ("dynamics",)
     raise ValueError(f"unknown mode {mode!r}")
@@ -214,54 +215,41 @@ def bench_batch(
     sr: int,
     carrier_mean: np.ndarray,
     k_cap: int,
+    n_samples: int | None = None,
     device: Any = "cpu",
     apply_transfer: bool = True,
     floor_lag: int | None = None,
-    refine_carrier: bool = True,
 ) -> SupportBatch:
     """Build the bench objective of one stationary support.
 
-    ``power`` is ``(M, 1, F)`` — the support's whole-segment periodogram — and
-    the segment length is recovered from it (``F = n // 2 + 1``), so the model
-    grid cannot disagree with the observation's own bin spacing.
+    ``power`` is ``(M, 1, F)`` — the support's whole-segment periodogram.
+    ``n_samples`` is the segment length; without it the length is recovered as
+    ``2 (F - 1)``, which is ``n - 1`` for an ODD segment and stretches the
+    model's bin grid against the data's by ``1/n`` (``bench_dregon_Motor1_70``:
+    116682 against 116683, i.e. 0.45 bins at 7.2 kHz). Pass the support's own
+    ``n_fft``.
 
-    ``carrier_mean`` is the SURVEY speed and stays the prior mean (the approved
-    ``N(survey, 0.5^2)`` nuisance prior). ``refine_carrier`` additionally reads
-    the support's own comb to pick the fit's STARTING value: 1 rev/s of survey
-    tolerance is 3300 bins of a 30 s periodogram at order 110, and a Whittle
-    objective started there sees no line at all.
+    ``carrier_mean`` is the support's FROZEN carrier — the index's
+    window-refined value — and the bench model has no carrier parameter: the
+    in-fit ``refine_bench_carrier`` re-refinement and the ``N(survey, 0.5^2)``
+    nuisance prior are both gone (rule rev 2). The re-refinement searched
+    +-1 rev/s around a survey value while the index carrier is a demodulation
+    measurement good to ~0.003 rev/s, and on a support with no comb it let the
+    MAP carrier walk 3.8 prior sigmas onto a fixed-frequency interferer
+    (``results/noise_v2/rounds/round1/bench_diag/findings.md``).
     """
     p = np.asarray(power, dtype=np.float64)
     if p.ndim != 3 or p.shape[1] != 1:
         raise ValueError(f"a bench support carries ONE frame; got power {p.shape}")
-    n = 2 * (int(p.shape[2]) - 1)
+    n = 2 * (int(p.shape[2]) - 1) if n_samples is None else int(n_samples)
+    if n // 2 + 1 != int(p.shape[2]):
+        raise ValueError(f"{n} samples give {n // 2 + 1} bins, not the {int(p.shape[2])} supplied")
     grid = SP.bench_grid(
         n=n, sr=sr, device=device, apply_transfer=apply_transfer, floor_lag=floor_lag
     )
     band, lo, hi = _band_masks(grid.freqs_hz, grid.band, device)
     carrier = np.atleast_1d(np.asarray(carrier_mean, dtype=np.float64))
-    init = carrier.copy()
-    refine: list[dict[str, Any]] = []
-    if refine_carrier:
-        claimed = np.zeros(grid.freqs_hz.size, dtype=bool)
-        # rotors in survey order; each refinement masks the bins the previous
-        # rotors claimed so coincident rotors cannot collapse onto one speed
-        for r in range(carrier.size):
-            best, diag = SP.refine_bench_carrier(
-                p[:, 0, :],
-                grid.freqs_hz,
-                float(carrier[r]),
-                sr=sr,
-                exclude=claimed if carrier.size > 1 else None,
-            )
-            init[r] = best
-            refine.append(diag)
-            if carrier.size > 1:
-                df = float(grid.freqs_hz[1] - grid.freqs_hz[0])
-                for kk in range(1, SP.k_max_for_carrier(best, sr, k_cap=k_cap) + 1):
-                    j = int(round(kk * best / df))
-                    claimed[max(0, j - 2) : j + 3] = True
-    k_max = SP.k_max_for_carrier(init, sr, k_cap=k_cap)
+    k_max = SP.k_max_for_carrier(carrier, sr, k_cap=k_cap)
     # The high-order lag integration grid must be fixed BEFORE the Pyro graph
     # is built.  It uses the approved shaft-prior centre and a 40-nat tail;
     # r_tau itself retains every sampled dynamics parameter in the graph.
@@ -285,13 +273,13 @@ def bench_batch(
         n_mics=int(p.shape[0]),
         k_max=k_max,
         carrier_mean=torch.as_tensor(carrier, dtype=torch.float64, device=device),
-        carrier_init=torch.as_tensor(init, dtype=torch.float64, device=device),
+        carrier_init=torch.as_tensor(carrier, dtype=torch.float64, device=device),
         bench_order_groups=groups,
         diagnostics=dict(
             grid=dict(grid.diagnostics),
-            carrier_survey_rev_s=carrier.tolist(),
-            carrier_init_rev_s=init.tolist(),
-            carrier_refinement=refine,
+            carrier_rev_s=carrier.tolist(),
+            carrier_source="frozen: the support index's window-refined carrier",
+            n_samples_source=("support n_fft" if n_samples is not None else "2 (F - 1)"),
             lag_integration=dict(
                 source="approved dynamics-prior centre (fixed before MAP)",
                 sigma_nu=lag_sigma,
@@ -625,11 +613,16 @@ def sample_params(
     carrier = None
     if batch.mode == "bench":
         if batch.carrier_mean is None:
-            raise ValueError("a bench batch needs carrier_mean (the survey speeds)")
+            raise ValueError("a bench batch needs carrier_mean (its frozen carrier)")
+        # a CONSTANT of the model, not a site: the support index's
+        # window-refined carrier is a demodulation measurement good to
+        # ~0.003 rev/s and the fit has nothing to add to it (rule rev 2). A
+        # frozen mapping may still override it, which is what the four-motor
+        # attribution modes read.
         carrier = (
-            _normal(site, "carrier_rev_s", batch.carrier_mean, priors.carrier_sd_rev_s, (r,))
-            if "carrier" in free
-            else take("carrier", "carrier_rev_s", (r,))
+            take("carrier", "carrier_rev_s", (r,))
+            if "carrier_rev_s" in fz
+            else torch.as_tensor(batch.carrier_mean, dtype=torch.float64)
         )
 
     return V2Params(

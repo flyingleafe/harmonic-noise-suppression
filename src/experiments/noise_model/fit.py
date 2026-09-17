@@ -27,9 +27,10 @@ objective whose model is 40 dB under the data has a gradient dominated by
   measured against a UNIT-profile forward pass so the seed is in the model's
   own units (window response, lag law and transfer included),
 * the per-microphone broadband gain from each microphone's band-mean level,
-* the bench carrier from :func:`.spectrum.refine_bench_carrier` — the survey
-  speed is good to ~1 rev/s, which is 3300 bins of a 30 s periodogram at order
-  110, while the FITTED carrier keeps the approved ``N(survey, 0.5^2)`` prior.
+* NOT the bench carrier: it is FROZEN at the support index's window-refined
+  value (bench rule rev 2), a constant of the model with no site and no
+  ``N(survey, 0.5^2)`` prior, so ``initial_values`` only READS it for its
+  probe passes.
 
 The dynamics start at their prior medians, which is the point of having
 measured them.
@@ -182,10 +183,9 @@ def initial_values(
 
     carrier = None
     if batch.mode == "bench":
-        carrier = batch.carrier_init if batch.carrier_init is not None else batch.carrier_mean
+        # the frozen carrier: a constant of the model, so no init entry
+        carrier = batch.carrier_mean
         assert carrier is not None
-        if "carrier" in free:
-            out["carrier_rev_s"] = carrier.detach().clone()
 
     # TWO probe forward passes in the model's OWN units — window response, lag
     # law, floor colour and transfer all included — so the seeds below are

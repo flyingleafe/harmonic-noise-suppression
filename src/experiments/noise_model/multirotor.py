@@ -289,7 +289,7 @@ def within_record_spec(spec: RotorSpec, duration_s: float) -> RotorSpec:
     ``lam T <= 3.8`` and the shaft error is not ergodic inside the record: a
     single realisation is ``nu(0) T`` -- a constant FREQUENCY OFFSET -- plus a
     small Brownian wander. The campaign fits a constant carrier per rotor
-    (``spectrum.refine_bench_carrier`` then a fitted parameter), so that
+    (the support index's window-refined carrier, frozen), so that
     offset is ESTIMATED, not suffered, and what is left to decohere the line
     inside the record is the wander about the record's own mean speed:
 

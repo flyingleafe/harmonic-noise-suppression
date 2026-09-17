@@ -33,23 +33,28 @@ that scalar instead of propagating it —
 ``tests/experiments/test_noise_model_supports.py`` plants a sinusoid and
 asserts the two routes agree.)
 
-**Bench stationarity rule.** For a DREGON single-motor recording there is no
-telemetry at all, so the carrier is the corpus survey's speed estimate and the
-stationary span has to be measured from the audio. The approved rule
-demodulates one high order (the brightest in 60-80, chosen with the survey
-speed) and keeps the longest span where the residual frequency stays inside
-+-1 Hz. Four things the rule needs to be usable, all recorded per recording:
+**Bench stationarity rule (revision 2, 2026-09-17).** For a DREGON
+single-motor recording there is no telemetry at all, so the carrier is the
+corpus survey's speed estimate and the stationary span has to be measured from
+the audio. The rule demodulates one high order (the brightest in 60-80, chosen
+with the survey speed) and keeps the longest span where the residual frequency
+stays inside +-1 Hz AND the motor is RUNNING. Five things the rule needs to be
+usable, all recorded per recording:
 
 1. The survey speed is quantised to ~0.01 rev/s, which at order 70 misplaces
    the line by up to 2.8 Hz (measured) — more than the whole tolerance, and
    enough to smear every order above ~60 in a fit. The carrier is therefore
    REFINED from the survey speed by integrating the demodulated residual
-   (:func:`refine_carrier`); ``survey_rev_s`` keeps the manifest value and
-   ``carrier_shift_rev_s`` the correction (measured: up to 0.076 rev/s).
+   (:func:`refine_carrier`), ON THE SELECTED WINDOW: refining over the whole
+   recording diluted the residual mean to ~zero on the recordings whose motor
+   runs for a third of the record and left revision 1's carriers 0.09 to
+   0.20 rev/s low, i.e. 42 to 242 bins at the chosen order. ``survey_rev_s``
+   keeps the manifest value, ``carrier_shift_rev_s`` the correction and
+   ``carrier_recording_rev_s`` what the whole-recording pass would have said.
+   This carrier is FROZEN: the fit has no bench carrier parameter.
 2. "Brightest" is measured as the order's MARGIN over the floor 6-18 Hz away
    (:func:`line_margins`), not as raw level, so the same number that picks the
-   order also says whether that order carries a line at all. Measured over the
-   21 DREGON recordings: 3.4-12.1 dB.
+   order also says whether that order carries a line at all.
 3. The residual is read from a NARROW 1.5 Hz band, averaged over the
    microphones and then over :data:`BENCH_RESIDUAL_SMOOTH_S`, not
    instantaneous. At order ~70 the raw instantaneous residual has a 20-60 Hz
@@ -58,12 +63,26 @@ speed) and keeps the longest span where the residual frequency stays inside
    not a speed drift, and a +-1 Hz test on it accepts nothing longer than
    30 ms. Mic-averaged over a 1.5 Hz band and smoothed over 2 s the jitter is
    0.16-0.33 Hz, so +-1 Hz is the 3-6 sigma DRIFT test it was meant to be.
-4. A narrow band alone is not enough: a carrier that drifts FASTER than the
-   band can follow leaves it altogether, and the residual of the filtered
-   noise that remains sits near zero — an absent line reads as perfect
-   stationarity. Every accepted window must therefore ALSO keep the residual
-   of a WIDE (+-0.45 f0) band inside :data:`BENCH_WIDE_TOL_HZ`, which still
-   contains a drifting line and reports its drift.
+4. A residual test alone is WORSE than not enough: silence satisfies it
+   perfectly, because a window with no line has a stationary filtered-noise
+   residual. Revision 1 therefore walked 12 of the 21 DREGON bench windows
+   onto the post-spin-down tail, 10-33 dB below the loudest window of the same
+   recording, and 20 bench fits were run on material with no comb in it
+   (``results/noise_v2/rounds/round1/bench_diag/findings.md``). Every accepted
+   sample must now ALSO lie where the band-limited median level over a sliding
+   :data:`BENCH_MIN_SEGMENT_S` window is within :data:`BENCH_LEVEL_TOL_DB` of
+   the recording's loudest such window (:func:`band_limited_level_db`).
+5. The accepted window is CERTIFIED by the line margin measured INSIDE it, at
+   the order already chosen, against :data:`BENCH_LINE_MARGIN_DB`. Revision 1
+   measured that margin over the whole recording, so a silent window inherited
+   the credit for a line it did not contain.
+
+Revision 1's WIDE-band (+-0.45 f0) residual test is GONE. On a running motor
+that band contains the fixed ~89 Hz interferer family the bench diagnosis
+found at 22-28 dB over the floor, so it measured pollution rather than drift:
+with the level gate in place it certified less than the 4 s minimum on 10 of
+the 21 recordings. Point 5 is its replacement — an absent line now fails on
+its margin, in the window, rather than on a proxy.
 """
 
 from __future__ import annotations
@@ -75,6 +94,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from scipy.ndimage import median_filter
+from scipy.signal import butter, sosfiltfilt
 
 from data_processing.derivations import NOISE_V2_MANIFEST
 from experiments.stochastic_fit import clips as C
@@ -120,15 +141,17 @@ BENCH_REFINE_BANDS = (8.0, 4.0, 2.0)
 #: ~1.6 Hz wide (``D_k/(2 pi)`` at k ~ 70), so 1.5 Hz keeps the line and little
 #: else: widening it to 3 Hz doubles the jitter and costs 17 of 21 recordings.
 BENCH_DEMOD_BAND_HZ = 1.5
-#: Half-band of the WIDE locator read-out, as a fraction of the rotor speed
-#: (about +-30 Hz), and the tolerance its residual must hold. A line that
-#: drifts FASTER than the narrow band can follow leaves that band within a
-#: fraction of the averaging window and the narrow residual then reads filtered
-#: noise, i.e. near-perfect stationarity. The wide band still contains the
-#: drifting line, so its residual reports the drift; a real bench recording
-#: keeps both residuals near zero.
-BENCH_WIDE_BAND_FRAC = 0.45
-BENCH_WIDE_TOL_HZ = 3.0
+#: The LEVEL gate (rule rev 2). A candidate sample must sit in a region whose
+#: band-limited median level over a sliding ``BENCH_MIN_SEGMENT_S`` window is
+#: within this of the loudest such window of the recording. Measured over the
+#: 21 DREGON bench recordings, the deficit of a motor-on window is 0.5-2.1 dB
+#: and of a post-spin-down one 17.8-32.8 dB, so 6 dB separates them with room
+#: on both sides
+#: (``results/noise_v2/rounds/round1/bench_diag/patch1_check.json``).
+BENCH_LEVEL_TOL_DB = 6.0
+#: Band the level gate measures in: the observation band of the model.
+BAND_LEVEL_F_MIN = 30.0
+BAND_LEVEL_F_MAX = 7900.0
 #: Averaging length of the residual FREQUENCY, in seconds. The residual is
 #: averaged over the microphones first and then over this window: at order ~70
 #: the raw instantaneous residual has a 20-60 Hz standard deviation and even
@@ -444,25 +467,70 @@ def refine_carrier(
     return f
 
 
+def band_limited_level_db(
+    audio: np.ndarray, sr: float, *, window_s: float = BENCH_MIN_SEGMENT_S, block_s: float = 0.01
+) -> np.ndarray:
+    """Per-sample sliding-window band-limited level of ``(M, T)`` audio, in dB.
+
+    The level is the MEDIAN, over a sliding ``window_s`` window, of the
+    mic-mean squared band-limited (30 Hz .. :data:`BAND_LEVEL_F_MAX`) signal,
+    computed on a ``block_s`` grid and expanded back to the sample grid. A
+    median rather than a mean so a spin-up transient or a single knock cannot
+    lift a silent window over the gate.
+    """
+    x = np.asarray(audio, dtype=np.float64)
+    x = x[None, :] if x.ndim == 1 else x
+    f_hi = min(BAND_LEVEL_F_MAX, 0.45 * float(sr))
+    sos = butter(4, [BAND_LEVEL_F_MIN, f_hi], btype="bandpass", fs=float(sr), output="sos")
+    p = np.mean(sosfiltfilt(sos, x, axis=-1) ** 2, axis=0)
+    nb = max(1, int(round(block_s * sr)))
+    n_blk = p.size // nb
+    blk = p[: n_blk * nb].reshape(n_blk, nb).mean(axis=1)
+    w = max(1, int(round(window_s / block_s)))
+    lvl = 10.0 * np.log10(np.maximum(median_filter(blk, size=w, mode="nearest"), 1e-30))
+    return np.repeat(lvl, nb)[: p.size] if n_blk else np.full(p.size, -300.0)
+
+
 def stationary_segment(
     audio: np.ndarray, sr: float, survey_rev_s: Sequence[float]
 ) -> dict[str, Any]:
-    """The approved bench rule, per recording.
+    """The approved bench rule, per recording (revision 2 of 2026-09-17).
 
     Per rotor: pick the brightest order in 60-80 (by its margin over the
     neighbouring floor), refine that rotor's carrier onto the line, and read
-    the residual frequency from a NARROW band and a WIDE band, both averaged
-    over the microphones and then over :data:`BENCH_RESIDUAL_SMOOTH_S`.
+    the residual frequency from the NARROW band, averaged over the microphones
+    and then over :data:`BENCH_RESIDUAL_SMOOTH_S`.
 
-    A window is stationary when, for EVERY rotor, the narrow residual is inside
-    +-1 Hz and the wide residual is inside :data:`BENCH_WIDE_TOL_HZ` — the
-    second test is what stops a carrier that drifts straight out of the narrow
-    band from reading as perfectly steady filtered noise. A recording whose
-    order carries no line at all (margin below :data:`BENCH_LINE_MARGIN_DB`)
-    fails the rule outright, and a recording whose longest stationary span is
-    shorter than :data:`BENCH_MIN_SEGMENT_S` fails it too, falling back to the
-    most stationary window of the minimum length so the material stays usable
-    with its failure on the record.
+    A sample is INSIDE when, for every rotor, that residual is within
+    :data:`BENCH_RESIDUAL_TOL_HZ` AND the recording's band-limited level there
+    is within :data:`BENCH_LEVEL_TOL_DB` of its loudest ``BENCH_MIN_SEGMENT_S``
+    window (:func:`band_limited_level_db`). The level gate is not a refinement:
+    the residual test is satisfied PERFECTLY by silence — a window with no line
+    has a stationary filtered-noise residual — and revision 1, which scored
+    stationarity alone, put 12 of the 21 DREGON bench windows 10-33 dB below
+    the loudest window of their own recording, i.e. on the post-spin-down tail
+    (``results/noise_v2/rounds/round1/bench_diag/census.json``).
+
+    The accepted window is then CERTIFIED by the line margin measured INSIDE
+    it, at the order already chosen: revision 1 measured that margin over the
+    whole recording, so a silent window inherited the credit for a line it did
+    not contain (``bench_dregon_Motor1_70``: 2.70 dB over the recording,
+    6.04 dB in a motor-on window). A window whose margin does not clear
+    :data:`BENCH_LINE_MARGIN_DB` fails the rule.
+
+    The wide-band residual test of revision 1 is GONE. Its ``+-0.45 f0`` band
+    contains, on a running motor, the fixed ~89 Hz interferer family the bench
+    diagnosis found at 22-28 dB over the floor, so it measured pollution rather
+    than drift and failed on exactly the material the rule exists to keep: with
+    the level gate in place it certified less than the 4 s minimum on 10 of the
+    21 recordings. The in-window margin is its replacement.
+
+    The reported carrier is refined on the SELECTED WINDOW, not on the
+    recording, and it is the value the fit FREEZES (there is no bench carrier
+    parameter any more). Revision 1 refined over the whole recording, two
+    thirds of which was silence on these recordings, which diluted the residual
+    mean to ~zero and left the index carrier at the survey value — 0.09 to
+    0.20 rev/s low, 42 to 242 bins at the chosen order.
     """
     x = np.asarray(audio, dtype=np.float64)
     x = x[None, :] if x.ndim == 1 else x
@@ -474,66 +542,95 @@ def stationary_segment(
     inner = slice(edge, n - edge)
 
     orders: list[int] = []
-    carriers: list[float] = []
-    line_margin_db: list[float] = []
+    survey_margin_db: list[float] = []
+    prelim: list[float] = []
     narrow: list[np.ndarray] = []
-    wide: list[np.ndarray] = []
     for f_survey in survey_rev_s:
         k, margin_db = select_order(x, sr, float(f_survey))
+        # the window search needs a carrier to demodulate with, so this pass is
+        # over the recording; the REPORTED carrier is re-refined on the window
         f0 = refine_carrier(x[0], sr, float(f_survey), k)
-        carrier = np.full(n, f0)
-        res = []
-        for band in (BENCH_DEMOD_BAND_HZ, BENCH_WIDE_BAND_FRAC * f0):
-            z = demodulate(x, carrier, float(band), sr, order=k)
-            mic_mean = np.mean(residual_frequency(z, sr, smooth_s=0.0), axis=0)
-            res.append(_moving_mean(mic_mean, smooth)[inner])
+        z = demodulate(x, np.full(n, f0), BENCH_DEMOD_BAND_HZ, sr, order=k)
+        mic_mean = np.mean(residual_frequency(z, sr, smooth_s=0.0), axis=0)
         orders.append(k)
-        carriers.append(f0)
-        line_margin_db.append(margin_db)
-        narrow.append(res[0])
-        wide.append(res[1])
+        survey_margin_db.append(margin_db)
+        prelim.append(f0)
+        narrow.append(_moving_mean(mic_mean, smooth)[inner])
 
     worst = np.max(np.abs(np.stack(narrow)), axis=0)
-    worst_wide = np.max(np.abs(np.stack(wide)), axis=0)
-    line_present = min(line_margin_db) >= BENCH_LINE_MARGIN_DB
-    inside = (worst <= BENCH_RESIDUAL_TOL_HZ) & (worst_wide <= BENCH_WIDE_TOL_HZ)
+    level_db_full = band_limited_level_db(x, sr)
+    level_db = level_db_full[inner]
+    motor_on = level_db >= level_db.max() - BENCH_LEVEL_TOL_DB
+    inside = (worst <= BENCH_RESIDUAL_TOL_HZ) & motor_on
     a, b = _longest_run(inside)
     longest_inside_s = (b - a) / sr
-    passed = bool(line_present and longest_inside_s >= BENCH_MIN_SEGMENT_S)
     if longest_inside_s < BENCH_MIN_SEGMENT_S:
         # Still give the recording a defensible window: the most stationary
-        # span of the minimum length, i.e. the sliding BENCH_MIN_SEGMENT_S that
-        # minimises the WORST residual in it, walked on a 0.1 s grid.
+        # span of the minimum length AMONG THE SPANS THAT CARRY THE MOTOR,
+        # walked on a 0.1 s grid; if none does, the loudest span.
         m = min(int(round(BENCH_MIN_SEGMENT_S * sr)), worst.size)
         step = max(1, int(round(BENCH_FALLBACK_STEP_S * sr)))
         offsets = np.arange(0, worst.size - m + 1, step)
-        a = int(offsets[int(np.argmin([worst[i : i + m].max() for i in offsets]))])
+        on = np.array([bool(motor_on[i : i + m].all()) for i in offsets])
+        pool = offsets[on] if on.any() else offsets
+        key = (
+            [worst[i : i + m].max() for i in pool]
+            if on.any()
+            else [-level_db[i : i + m].mean() for i in pool]
+        )
+        a = int(pool[int(np.argmin(key))])
         b = a + m
-    start = (edge + a) / sr
-    stop = (edge + b) / sr
     keep = slice(a, b)
+    i0, i1 = edge + a, edge + b
+    start, stop = i0 / sr, i1 / sr
+
+    # window-local carrier, residual and line margin: everything the index
+    # reports is measured on the material the support actually contains
+    carriers: list[float] = []
+    line_margin_db: list[float] = []
+    res_std: list[float] = []
+    res_mean: list[float] = []
+    win_worst: list[np.ndarray] = []
+    xw = x[:, i0:i1]
+    for f_survey, k in zip(survey_rev_s, orders):
+        f0 = refine_carrier(xw[0], sr, float(f_survey), k, edge_s=min(0.5, 0.1 * (b - a) / sr))
+        z = demodulate(xw, np.full(xw.shape[-1], f0), BENCH_DEMOD_BAND_HZ, sr, order=k)
+        r = np.mean(residual_frequency(z, sr, smooth_s=0.0), axis=0)
+        r = _moving_mean(r, min(smooth, max(1, r.size // 2)))
+        carriers.append(f0)
+        line_margin_db.append(float(line_margins(xw, sr, f0).get(k, -np.inf)))
+        res_std.append(float(np.std(r)))
+        res_mean.append(float(np.mean(r)))
+        win_worst.append(np.abs(r))
+    line_present = bool(min(line_margin_db) >= BENCH_LINE_MARGIN_DB)
+    passed = bool(line_present and longest_inside_s >= BENCH_MIN_SEGMENT_S)
     return dict(
+        rule="noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
         passed=passed,
-        line_present=bool(line_present),
+        line_present=line_present,
         start_s=float(start),
         end_s=float(stop),
         duration_s=float(stop - start),
         longest_inside_s=float(longest_inside_s),
         frac_inside=float(np.mean(inside)),
         frac_narrow_ok=float(np.mean(worst <= BENCH_RESIDUAL_TOL_HZ)),
-        frac_wide_ok=float(np.mean(worst_wide <= BENCH_WIDE_TOL_HZ)),
+        frac_motor_on=float(np.mean(motor_on)),
+        level_db=float(level_db[keep].mean()),
+        level_deficit_db=float(level_db.max() - level_db[keep].mean()),
+        level_tol_db=float(BENCH_LEVEL_TOL_DB),
+        level_band_hz=[BAND_LEVEL_F_MIN, min(BAND_LEVEL_F_MAX, 0.45 * float(sr))],
         orders=[int(k) for k in orders],
         line_margin_db=[float(v) for v in line_margin_db],
+        line_margin_recording_db=[float(v) for v in survey_margin_db],
         carrier_rev_s=[float(v) for v in carriers],
+        carrier_recording_rev_s=[float(v) for v in prelim],
         survey_rev_s=[float(v) for v in survey_rev_s],
         carrier_shift_rev_s=[float(c - s) for c, s in zip(carriers, survey_rev_s)],
-        residual_std_hz=[float(np.std(r[keep])) for r in narrow],
-        residual_mean_hz=[float(np.mean(r[keep])) for r in narrow],
-        residual_max_abs_hz=float(np.max(worst[keep])),
-        residual_wide_max_abs_hz=float(np.max(worst_wide[keep])),
+        residual_std_hz=[float(v) for v in res_std],
+        residual_mean_hz=[float(v) for v in res_mean],
+        residual_max_abs_hz=float(np.max(np.max(np.stack(win_worst), axis=0))),
         smooth_s=float(BENCH_RESIDUAL_SMOOTH_S),
         tol_hz=float(BENCH_RESIDUAL_TOL_HZ),
-        wide_tol_hz=float(BENCH_WIDE_TOL_HZ),
         margin_tol_db=float(BENCH_LINE_MARGIN_DB),
         n_mics_averaged=int(x.shape[0]),
     )
@@ -832,6 +929,16 @@ def index_row(support: Support) -> dict[str, Any]:
         name=support.name,
         spec=support.meta.get("spec"),
         kind=support.kind,
+        level_db=st.get("level_db"),
+        level_deficit_db=st.get("level_deficit_db"),
+        line_margin_db=st.get("line_margin_db"),
+        line_margin_recording_db=st.get("line_margin_recording_db"),
+        carrier_recording_rev_s=(
+            [round(v, 6) for v in st["carrier_recording_rev_s"]]
+            if "carrier_recording_rev_s" in st
+            else None
+        ),
+        rule=st.get("rule"),
         family=support.meta.get("family"),
         recording_id=support.meta.get("recording_id"),
         dataset=support.meta.get("dataset"),
@@ -948,6 +1055,7 @@ def support_set(name: str) -> list[SupportSpec]:
 
 
 __all__ = [
+    "band_limited_level_db",
     "BENCH_MIN_SEGMENT_S",
     "BENCH_RESIDUAL_TOL_HZ",
     "CACHE_DIR",
