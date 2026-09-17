@@ -1072,7 +1072,7 @@ def findings_body(payload: dict[str, Any]) -> list[str]:
         out.append(
             f"Real arm reproduction: measured {_fmt(d['real_arm']['mean_rev_s'])} rev/s against "
             f"the frozen {d['frozen_real_rev_s']:.6f} "
-            f"(relative {_fmt(d['real_arm']['relative'])})."
+            f"(relative {_fmt(d['real_arm']['relative'], '.3e')})."
         )
         out.append("")
     m = hp.get("michaels_fly124") if "dregon_cruise" in hp else None
