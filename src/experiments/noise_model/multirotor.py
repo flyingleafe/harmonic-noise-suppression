@@ -92,21 +92,33 @@ __all__ = [
     "estimate_e1",
     "estimate_e2",
     "estimate_steering",
+    "interfering_lines",
     "joint_coherence_time_s",
     "line_half_width_hz",
+    "line_snr_db",
     "make_config",
+    "neighbour_contrast_db",
+    "offset_spread_ratio",
     "per_rotor_scores",
     "profile_error_db",
+    "record_resolvability_score",
+    "refine_offsets",
+    "refined_tracks",
     "resolvability_score",
     "rotor_from_fit",
     "scale_carriers",
     "simulate_scene",
     "window_coherent_fraction",
+    "within_record_spec",
 ]
 
 #: Speed of sound (m/s) used to turn an array aperture into a delay bound.
 SPEED_OF_SOUND = 343.0
 
+
+#: Fewest orders the steering delay matched filter needs to break its own
+#: aliasing period ``1 / (k f)``.
+MIN_STEERING_ORDERS = 4
 #: ``exp(-1)``: the coherence-time threshold. One nat of the lag law.
 COHERENCE_THRESHOLD = math.exp(-1.0)
 
@@ -201,6 +213,9 @@ class MultiRotorScene:
     power_true: np.ndarray  # (R, K) planted mic-averaged order power
     steering: np.ndarray  # (M, R, K) complex c_rkm / sqrt(2 P_rk)
     delays_s: np.ndarray  # (M, R)
+    #: (R,) realised mean shaft speed error of THIS record, rev/s. Truth for
+    #: :func:`refine_offsets`; not visible to any estimator.
+    shaft_offset_rev_s: np.ndarray
     k_max: int
     floor_psd: np.ndarray = field(repr=False, default_factory=lambda: np.zeros(0))
     diagnostics: dict[str, Any] = field(default_factory=dict)
@@ -265,13 +280,56 @@ def _first_crossing(tau: np.ndarray, rho: np.ndarray, level: float) -> float:
     return float(t0 + (r0 - level) * (t1 - t0) / (r0 - r1))
 
 
-def coherence_time_s(spec: RotorSpec, k: float, *, cap_s: float = 1e3) -> float:
-    """Lag at which ``R_rk`` first falls to ``exp(-1)``, capped at ``cap_s``."""
+def within_record_spec(spec: RotorSpec, duration_s: float) -> RotorSpec:
+    """``spec`` with the shaft scale replaced by its WITHIN-RECORD part.
+
+    The lag law's ``sigma_nu`` is the STATIONARY spread of the shaft speed
+    error, i.e. an ensemble statement. Every DREGON single-motor fit came back
+    with ``lam`` between 0.002 and 0.16 s^-1, so over one 24 s support
+    ``lam T <= 3.8`` and the shaft error is not ergodic inside the record: a
+    single realisation is ``nu(0) T`` -- a constant FREQUENCY OFFSET -- plus a
+    small Brownian wander. The campaign fits a constant carrier per rotor
+    (``spectrum.refine_bench_carrier`` then a fitted parameter), so that
+    offset is ESTIMATED, not suffered, and what is left to decohere the line
+    inside the record is the wander about the record's own mean speed:
+
+        sigma_eff^2 = sigma_nu^2 min(1, 2 lam T / 3)
+
+    (the variance of a Brownian ``nu`` about its own time average over ``T``,
+    with diffusion ``2 lam sigma_nu^2``, saturating at the stationary value
+    once ``lam T >= 1.5``). For ``Motor4_70`` -- ``sigma_nu = 1.94`` rad/s at
+    ``lam = 0.0027`` s^-1 -- this is a factor 4.8 narrower, and it is the
+    difference between "unresolvable" and "resolvable" at 0.83 Hz.
+    """
+    factor = math.sqrt(min(1.0, 2.0 * float(spec.lam) * float(duration_s) / 3.0))
+    return replace(spec, sigma_nu=float(spec.sigma_nu) * factor)
+
+
+def _maybe_within(spec: RotorSpec, duration_s: float | None) -> RotorSpec:
+    return spec if duration_s is None else within_record_spec(spec, duration_s)
+
+
+def coherence_time_s(
+    spec: RotorSpec, k: float, *, cap_s: float = 1e3, within_record_s: float | None = None
+) -> float:
+    """Lag at which ``R_rk`` first falls to ``exp(-1)``, capped at ``cap_s``.
+
+    ``within_record_s`` applies :func:`within_record_spec` first, which is
+    what a carrier-refined estimator actually faces.
+    """
     tau = _lag_grid(cap_s)
-    return min(_first_crossing(tau, _r_of(spec, tau, k), COHERENCE_THRESHOLD), float(cap_s))
+    s = _maybe_within(spec, within_record_s)
+    return min(_first_crossing(tau, _r_of(s, tau, k), COHERENCE_THRESHOLD), float(cap_s))
 
 
-def joint_coherence_time_s(a: RotorSpec, b: RotorSpec, k: float, *, cap_s: float = 1e3) -> float:
+def joint_coherence_time_s(
+    a: RotorSpec,
+    b: RotorSpec,
+    k: float,
+    *,
+    cap_s: float = 1e3,
+    within_record_s: float | None = None,
+) -> float:
     """``exp(-1)`` time of ``R_ak R_bk``.
 
     The beat of a PAIR is observable only while BOTH lines stay coherent: the
@@ -279,12 +337,20 @@ def joint_coherence_time_s(a: RotorSpec, b: RotorSpec, k: float, *, cap_s: float
     phasors, so the product's decay -- not either factor's -- is the limit.
     """
     tau = _lag_grid(cap_s)
-    rho = _r_of(a, tau, k) * _r_of(b, tau, k)
+    rho = _r_of(_maybe_within(a, within_record_s), tau, k) * _r_of(
+        _maybe_within(b, within_record_s), tau, k
+    )
     return min(_first_crossing(tau, rho, COHERENCE_THRESHOLD), float(cap_s))
 
 
 def resolvability_score(
-    a: RotorSpec, b: RotorSpec, k: float, *, duration_s: float, delta_hz: float | None = None
+    a: RotorSpec,
+    b: RotorSpec,
+    k: float,
+    *,
+    duration_s: float,
+    delta_hz: float | None = None,
+    within_record: bool = True,
 ) -> float:
     """``k delta min(tau_c(k), T)``: beat cycles of the pair actually observed.
 
@@ -293,18 +359,47 @@ def resolvability_score(
     the scale of one coherence time (``lam tau << 1``), ``tau_c(k) ~ C / k``
     and the score is nearly INDEPENDENT of ``k`` -- a prediction the sweep
     checks directly.
+
+    ``within_record`` (the default) scores the CARRIER-REFINED problem via
+    :func:`within_record_spec`; ``False`` scores the raw ensemble linewidth,
+    which is what a reader that trusts the survey carrier faces.
     """
     d = (
         abs(float(a.carrier_rev_s) - float(b.carrier_rev_s))
         if delta_hz is None
         else float(delta_hz)
     )
-    tau_c = joint_coherence_time_s(a, b, k, cap_s=max(10.0 * float(duration_s), 1.0))
+    tau_c = joint_coherence_time_s(
+        a,
+        b,
+        k,
+        cap_s=max(10.0 * float(duration_s), 1.0),
+        within_record_s=float(duration_s) if within_record else None,
+    )
     return float(k) * d * min(tau_c, float(duration_s))
 
 
+def offset_spread_ratio(rotors: tuple[RotorSpec, ...], *, delta_hz: float) -> float:
+    """``max_r sigma_nu_r / (2 pi delta)``: can carrier refinement even ORDER
+    the rotors?
+
+    The realised per-record speed offset of rotor ``r`` is drawn from
+    ``N(0, (sigma_nu / 2 pi)^2)`` in rev/s. Once that spread approaches the
+    spacing the refined carriers can cross, and no estimator can say which
+    recovered profile belongs to which rotor: the labels, not the profiles,
+    become unidentifiable. Reported alongside the score because it is a
+    DIFFERENT failure.
+    """
+    worst = max(float(r.sigma_nu) for r in rotors) / (2.0 * math.pi)
+    return worst / max(float(delta_hz), 1e-12)
+
+
 def per_rotor_scores(
-    rotors: tuple[RotorSpec, ...], orders: np.ndarray, *, duration_s: float
+    rotors: tuple[RotorSpec, ...],
+    orders: np.ndarray,
+    *,
+    duration_s: float,
+    within_record: bool = True,
 ) -> np.ndarray:
     """``(R, K)`` worst-neighbour score: the rotor is only as separable as its
     hardest neighbour makes it."""
@@ -315,7 +410,10 @@ def per_rotor_scores(
                 continue
             for q, k in enumerate(orders):
                 out[i, q] = min(
-                    out[i, q], resolvability_score(a, b, float(k), duration_s=duration_s)
+                    out[i, q],
+                    resolvability_score(
+                        a, b, float(k), duration_s=duration_s, within_record=within_record
+                    ),
                 )
     return out
 
@@ -424,9 +522,13 @@ def simulate_scene(cfg: SceneConfig) -> MultiRotorScene:
     # ── the comb ──
     audio = np.zeros((m_n, n))
     two_pi = 2.0 * np.pi
+    shaft_offset = np.zeros(r_n)
     for r_i, spec in enumerate(cfg.rotors):
         innov = rng_state.standard_normal((n, 2))
         theta, _nu = simulate_state(innov, lam=spec.lam, sigma=spec.sigma_nu, dt=dt)
+        # the REALISED mean speed error of this record, rev/s: the quantity a
+        # bench fit's refined constant carrier absorbs.
+        shaft_offset[r_i] = float(theta[-1] - theta[0]) / (two_pi * (n - 1) * dt)
         for k in range(1, k_max + 1):
             s_e = float(parity_select(np.asarray(spec.sigma_eps), float(k))) * float(k) ** (
                 0.5 * spec.p
@@ -468,6 +570,7 @@ def simulate_scene(cfg: SceneConfig) -> MultiRotorScene:
         power_true=power_true,
         steering=steer,
         delays_s=delays,
+        shaft_offset_rev_s=shaft_offset,
         k_max=int(k_max),
         floor_psd=psd * scale**2,
         diagnostics=dict(
@@ -501,7 +604,9 @@ def _cell_edges(lines_hz: np.ndarray) -> np.ndarray:
     return np.stack([lo, hi], axis=1)
 
 
-def line_half_width_hz(spec: RotorSpec, k: float, *, width_sigmas: float = 3.5) -> float:
+def line_half_width_hz(
+    spec: RotorSpec, k: float, *, width_sigmas: float = 3.5, within_record_s: float | None = None
+) -> float:
     """Half-width (Hz) of one line's core, from its own coherence time.
 
     On the scale of a coherence time the shaft term is ballistic
@@ -511,9 +616,122 @@ def line_half_width_hz(spec: RotorSpec, k: float, *, width_sigmas: float = 3.5) 
     from ``k sigma_nu`` keeps the per-order pedestal in it: a rotor whose
     ``sigma_eps`` dominates has a short ``tau_c`` and gets a wide band, which
     is what the pedestal needs.
+
+    ``within_record_s`` gives the width a CARRIER-REFINED reader sees
+    (:func:`within_record_spec`); without it the width is the ensemble one,
+    which for a small-``lam`` rotor is mostly an offset the refinement removes.
     """
-    tau_c = coherence_time_s(spec, k, cap_s=100.0)
+    tau_c = coherence_time_s(spec, k, cap_s=100.0, within_record_s=within_record_s)
     return float(width_sigmas / (math.sqrt(2.0) * 2.0 * math.pi * max(tau_c, 1e-9)))
+
+
+def refine_offsets(
+    scene: MultiRotorScene,
+    orders: np.ndarray,
+    *,
+    bound_rev_s: float = 0.5,
+    margin_hz: float = 2.0,
+    max_band_fraction: float = 0.4,
+) -> dict[str, Any]:
+    """Per-rotor residual speed offset (rev/s), the campaign's carrier refit.
+
+    Inside one support the shaft error is a near-constant frequency offset
+    (:func:`within_record_spec`), and every v2 bench fit refines and then FITS
+    its carriers, so an estimator that reads the survey carrier is measuring
+    an artefact, not a linewidth. This is that refinement: demodulate by the
+    rotor's OWN order-``k`` phase, low-pass, and read where the residual line
+    actually sits. The offset is magnified by ``k``, so a moderate order
+    resolves it far better than order 1.
+
+    TWO BOUNDS FIGHT HERE, and both are reported.
+
+    * The search window must not reach the rotor's NEIGHBOUR, so it is
+      ``+- min(bound, half the nearest carrier spacing)`` (``room``). A
+      realised offset larger than that is the label-identifiability failure
+      :func:`offset_spread_ratio` predicts -- flagged ``clipped``, never
+      silently absorbed.
+    * The analysis band must not reach the neighbouring ORDER, so
+      ``k * room + margin <= max_band_fraction * f``, which caps the usable
+      order at ``k_max_usable``. Orders above it are skipped; if none
+      survives, ``n_orders_used`` is 0 and the offset is left at zero.
+
+    The score is the campaign's own: ``sum_k log P_k(k delta)`` over the
+    surviving orders, with ``P_k`` the baseband periodogram after
+    demodulating by ``k phi_r`` -- :func:`spectrum.refine_bench_carrier`'s
+    harmonic log-power sum, moved into the demodulated domain so the known
+    track drift is already out of the way. A harmonic sum is what makes this
+    robust: a single order whose line is under the floor contributes noise to
+    the sum instead of deciding it.
+    """
+    cfg = scene.cfg
+    carriers = cfg.carriers_rev_s
+    r_n = cfg.n_rotors
+    band_cap = float(max_band_fraction) * float(carriers.min())
+    room = np.array(
+        [
+            min(
+                float(bound_rev_s),
+                0.5
+                * min(
+                    (abs(carriers[r] - carriers[j]) for j in range(r_n) if j != r),
+                    default=float(bound_rev_s),
+                ),
+            )
+            for r in range(r_n)
+        ]
+    )
+    k_use = np.maximum(((band_cap - margin_hz) / np.maximum(room, 1e-9)).astype(np.int64), 0)
+    grid = np.linspace(-1.0, 1.0, 2001)  # in units of room[r]
+    best = np.zeros(r_n)
+    clipped = np.zeros(r_n, dtype=bool)
+    n_used = np.zeros(r_n, dtype=np.int64)
+    score_gain = np.zeros(r_n)
+    for r in range(r_n):
+        score = np.zeros(grid.size)
+        used = 0
+        for k_ in np.asarray(orders, dtype=np.int64):
+            k = int(k_)
+            if k > int(k_use[r]) or k > scene.k_max:
+                continue
+            bw = float(k) * room[r] + margin_hz
+            y, sr_d = _demodulate(scene.audio, float(k) * scene.track_turns[r], cfg.sr, bw)
+            n_d = y.shape[1]
+            w = hann_window(n_d)
+            p = (np.abs(np.fft.fft(y * w[None, :], axis=1)) ** 2).sum(axis=0)
+            f = np.fft.fftshift(np.fft.fftfreq(n_d, d=1.0 / sr_d))
+            p = np.fft.fftshift(p)
+            lp = np.log(np.maximum(p, 1e-300))
+            score = score + np.interp(grid * (float(k) * room[r]), f, lp)
+            used += 1
+        if used == 0:
+            continue
+        j = int(np.argmax(score))
+        best[r] = grid[j] * room[r]
+        n_used[r] = used
+        score_gain[r] = float((score[j] - np.median(score)) / used)
+        clipped[r] = abs(grid[j]) > 0.9
+    return dict(
+        offsets_rev_s=best,
+        score_gain=score_gain,
+        n_orders_used=n_used,
+        clipped=clipped,
+        room_rev_s=room,
+        k_max_usable=k_use,
+        bound_rev_s=float(bound_rev_s),
+    )
+
+
+def refined_tracks(
+    scene: MultiRotorScene, offsets_rev_s: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(carriers, phi)`` with a constant per-rotor speed offset folded in.
+
+    ``phi_r(t) + delta f_r t`` in turns: the estimator's track, refined the way
+    the bench fit refines its constants.
+    """
+    off = np.asarray(offsets_rev_s, dtype=np.float64).reshape(-1)
+    t = np.arange(scene.audio.shape[1]) / float(scene.sr)
+    return scene.cfg.carriers_rev_s + off, scene.track_turns + off[:, None] * t[None, :]
 
 
 def _smooth_floor(p_mean: np.ndarray, block: int = 2048) -> np.ndarray:
@@ -537,6 +755,7 @@ def estimate_e1(
     *,
     width_sigmas: float = 3.5,
     merge_factor: float = 1.0,
+    offsets_rev_s: np.ndarray | None = None,
 ) -> dict[str, Any]:
     """Current practice: read the line powers off the full-length periodogram.
 
@@ -572,10 +791,18 @@ def estimate_e1(
     k_all = np.arange(1, scene.k_max + 1, dtype=np.int64)
     rot_idx = np.repeat(np.arange(cfg.n_rotors), k_all.size)
     ord_idx = np.tile(k_all, cfg.n_rotors)
-    freq = cfg.carriers_rev_s[rot_idx] * ord_idx
+    carriers = cfg.carriers_rev_s + (
+        0.0 if offsets_rev_s is None else np.asarray(offsets_rev_s, dtype=np.float64).reshape(-1)
+    )
+    freq = carriers[rot_idx] * ord_idx
     half = np.array(
         [
-            line_half_width_hz(cfg.rotors[r], float(k), width_sigmas=width_sigmas)
+            line_half_width_hz(
+                cfg.rotors[r],
+                float(k),
+                width_sigmas=width_sigmas,
+                within_record_s=cfg.duration_s,
+            )
             for r, k in zip(rot_idx, ord_idx, strict=True)
         ]
     )
@@ -634,19 +861,20 @@ def estimate_e1(
 
 
 def _demodulate(
-    audio: np.ndarray, phi_mean: np.ndarray, k: int, sr: int, bandwidth_hz: float
+    audio: np.ndarray, phase_turns: np.ndarray, sr: int, bandwidth_hz: float
 ) -> tuple[np.ndarray, float]:
-    """``(M, n_d)`` band-limited analytic baseband of order ``k``, and its rate.
+    """``(M, n_d)`` band-limited analytic baseband about ``phase_turns``.
 
-    ``y_m = x_m exp(-i 2 pi k phi_mean)`` puts the order's group at baseband
-    and its negative-frequency image near ``-2 k f``; keeping only
-    ``|f| <= bandwidth`` deletes the image and every other order. The
-    resampling is spectral (select the retained bins of the length-``N``
-    complex FFT and inverse transform the short vector), which is exact for a
-    signal already confined to the band and costs one FFT pair per mic.
+    ``y_m = x_m exp(-i 2 pi phase)`` puts the chosen line at baseband and its
+    negative-frequency image near ``-2 k f``; keeping only ``|f| <=
+    bandwidth`` deletes the image and every line further away than the
+    bandwidth. The resampling is spectral (select the retained bins of the
+    length-``N`` complex FFT and inverse transform the short vector), which is
+    exact for a signal already confined to the band and costs one FFT pair per
+    mic.
     """
     n = audio.shape[1]
-    y = audio * np.exp(-2j * np.pi * float(k) * np.remainder(phi_mean, 1.0))[None, :]
+    y = audio * np.exp(-2j * np.pi * np.remainder(phase_turns, 1.0))[None, :]
     half = int(min(max(math.ceil(bandwidth_hz * n / sr), 4), (n - 1) // 2))
     yf = np.fft.fft(y, axis=1)
     sel = np.concatenate([yf[:, : half + 1], yf[:, n - half :]], axis=1)
@@ -654,25 +882,58 @@ def _demodulate(
     return np.fft.ifft(sel, axis=1) * (n_d / n), float(n_d) / (n / float(sr))
 
 
-def _basis(
-    phi: np.ndarray, phi_mean: np.ndarray, k: int, n_d: int, sr: int, duration_s: float
-) -> np.ndarray:
-    """``(n_d, R)`` beat bases ``exp(i 2 pi k (phi_r - phi_mean))`` on the
-    decimated grid. The phase difference is smooth and tiny (``k delta T`` turns
-    at most), so it is read off the full-rate track by linear interpolation."""
-    n = phi.shape[1]
+def _resample_phase(phase_turns: np.ndarray, n_d: int, sr: int, duration_s: float) -> np.ndarray:
+    """``phase_turns`` read on the decimated grid by linear interpolation.
+
+    The phase difference of two comb lines inside one analysis band advances
+    by at most ``bandwidth`` turns per second and is smooth on the 16 kHz
+    grid, so linear interpolation costs ``O((2 pi f / sr)^2)`` rad -- below
+    1e-6 rad for every band this module opens.
+    """
+    n = phase_turns.size
     t_full = np.arange(n) / float(sr)
     t_d = np.arange(n_d) * (duration_s / n_d)
-    diff = phi - phi_mean[None, :]
-    cols = [np.interp(t_d, t_full, float(k) * diff[r]) for r in range(phi.shape[0])]
-    return np.exp(2j * np.pi * np.stack(cols, axis=1))
+    return np.interp(t_d, t_full, phase_turns)
 
 
-def _window_length(k: int, delta_hz: float, sr_d: float, n_d: int, n_rotors: int) -> int:
-    """Samples per LS window: two beat cycles of the closest pair, at least
-    ``R + 2`` samples, at most the whole record."""
-    want = 2.0 / max(float(k) * float(delta_hz), 1e-9)
-    return int(min(max(int(round(want * sr_d)), n_rotors + 2), n_d))
+def interfering_lines(
+    carriers_rev_s: np.ndarray,
+    rotor: int,
+    order: int,
+    *,
+    k_max: int,
+    bandwidth_hz: float,
+    guard: float = 0.9,
+) -> list[tuple[int, int, float]]:
+    """``[(rotor, order, offset_hz)]``: every comb line inside the band.
+
+    THE REASON THIS EXISTS. "The R lines of order ``k``" is only a group while
+    ``k delta`` stays below the carrier itself. At ``delta = 0.83`` Hz and
+    ``f = 67.7`` rev/s the order-104 lines of the four rotors are spread over
+    260 Hz while consecutive ORDERS are 68 Hz apart, so the neighbours of a
+    high-order line are other orders of other rotors, not its own order's
+    partners. An estimator that demodulates the mean track and solves against
+    four order-``k`` bases is then solving the wrong problem: it has three
+    wrong columns and misses the lines that actually overlap.
+
+    So the design matrix is built from the band, not from the order: every
+    ``(s, k')`` whose line ``k' f_s`` lies within ``guard * bandwidth`` of the
+    target ``k f_r``, the target itself first (offset exactly 0).
+    """
+    f = np.asarray(carriers_rev_s, dtype=np.float64)
+    f0 = float(order) * float(f[rotor])
+    lim = float(guard) * float(bandwidth_hz)
+    out = [(int(rotor), int(order), 0.0)]
+    for s in range(f.size):
+        lo = max(1, int(math.floor((f0 - lim) / f[s])))
+        hi = min(int(k_max), int(math.ceil((f0 + lim) / f[s])))
+        for kp in range(lo, hi + 1):
+            if s == rotor and kp == order:
+                continue
+            off = kp * float(f[s]) - f0
+            if abs(off) <= lim:
+                out.append((int(s), int(kp), float(off)))
+    return out
 
 
 def _solve_windows(
@@ -727,7 +988,12 @@ def coefficient_ratio(coef_windows: np.ndarray) -> np.ndarray:
 
 
 def estimate_steering(
-    ratio: np.ndarray, orders: np.ndarray, carriers_rev_s: np.ndarray, *, delay_bound_s: float
+    ratio: np.ndarray,
+    orders: np.ndarray,
+    carriers_rev_s: np.ndarray,
+    *,
+    delay_bound_s: float,
+    weights: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Per-rotor steering from the RESOLVABLE orders' mic-relative ratios.
 
@@ -735,23 +1001,61 @@ def estimate_steering(
     orders ``orders``. The model is ``c_rkm = a_rk g_rm exp(-i 2 pi k f_r
     eta_rm)`` with ``a_rk`` an unknown per-(rotor, order) amplitude and phase,
     so only the mic-RELATIVE steering is identifiable -- which is all the
-    joint solve needs. The gain is the median modulus over the orders; the
-    delay difference is found by a matched filter over ``eta`` (no phase
-    unwrapping: the orders need not be consecutive, and a grid search over a
-    bounded physical delay is both robust and cheap).
+    joint solve needs. The delay difference is found by a matched filter over
+    ``eta`` (no phase unwrapping: the orders need not be consecutive, and a
+    grid search over a bounded physical delay is both robust and cheap).
+
+    ``weights`` is ``(R, K_s)``, normally the per-rotor estimated line power.
+    It is not a refinement either: the fitted profiles have 30-40 dB nulls,
+    so the same high order that pins one rotor's delay is under the floor for
+    another. Weighting by power per ROTOR is what keeps a null from voting.
 
     Returns ``(gain (M, R), delay (M, R))`` with mic 0 as the reference.
     """
-    gain = np.median(np.abs(ratio), axis=2)  # (M, R)
     k = np.asarray(orders, dtype=np.float64)
+    w = (
+        np.ones((ratio.shape[1], k.size))
+        if weights is None
+        else np.asarray(weights, dtype=np.float64)
+    )
+    w = w / np.maximum(w.sum(axis=1, keepdims=True), 1e-300)
+    gain = np.einsum("mrk,rk->mr", np.abs(ratio), w)
     grid = np.linspace(-2.0 * delay_bound_s, 2.0 * delay_bound_s, 4001)
     phase = ratio / np.maximum(np.abs(ratio), 1e-300)
     delay = np.zeros(gain.shape)
     for r in range(gain.shape[1]):
         kern = np.exp(2j * np.pi * np.outer(grid, k * float(carriers_rev_s[r])))  # (G, K_s)
-        sc = np.abs(phase[:, r, :] @ kern.T)  # (M, G)
+        sc = np.abs((phase[:, r, :] * w[r][None, :]) @ kern.T)  # (M, G)
         delay[:, r] = grid[np.argmax(sc, axis=1)]
     return gain, delay
+
+
+def _extrapolate_zero_window(
+    p_long: np.ndarray, p_short: np.ndarray, t_long: float, t_short: float
+) -> np.ndarray:
+    """Gaussian extrapolation of a windowed power estimate to zero window.
+
+    A constant-``psi`` design matrix attenuates the recovered power by the
+    Bartlett average of the residual-phase autocorrelation, which for every
+    process in the v2 law is ``1 - a T_w^2 + O(T_w^4)`` at small ``T_w``. Two
+    window lengths therefore identify ``a`` and the zero-window limit:
+
+        log P(0) = (T_l^2 log P_s - T_s^2 log P_l) / (T_l^2 - T_s^2).
+
+    Doing it this way rather than dividing by the lag law's
+    :func:`window_coherent_fraction` means the estimator needs NO knowledge of
+    the dynamics -- which matters here, because inside one support the shaft
+    term's ensemble width is dominated by a constant offset (see
+    :func:`within_record_spec`) and the ensemble correction would over-correct
+    by several dB on a small-``lam`` rotor. The correction is clamped to 10 dB:
+    beyond that the two solves are noise and the raw value is the honest one.
+    """
+    tl2, ts2 = float(t_long) ** 2, float(t_short) ** 2
+    ok = (p_long > 0.0) & (p_short > 0.0) & (tl2 > ts2 * 1.05)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log0 = (tl2 * np.log(p_short) - ts2 * np.log(p_long)) / (tl2 - ts2)
+        gain = np.clip(log0 - np.log(np.where(p_long > 0.0, p_long, 1.0)), 0.0, math.log(10.0))
+    return np.where(ok, p_long * np.exp(gain), p_long)
 
 
 def estimate_e2(
@@ -759,141 +1063,266 @@ def estimate_e2(
     orders: np.ndarray,
     *,
     multi: bool = False,
-    steering_orders: np.ndarray | None = None,
+    offsets_rev_s: np.ndarray | None = None,
+    extrapolate: bool = True,
+    steering: tuple[np.ndarray, np.ndarray] | None = None,
     bandwidth_margin_hz: float = 4.0,
-    correct_decoherence: bool = True,
+    max_band_fraction: float = 0.4,
+    n_beat_cycles: float = 2.0,
+    window_cap_factor: float = 1.0,
+    min_windows: int = 8,
+    steering_score_min: float = 3.0,
+    n_steering_orders: int = 16,
 ) -> dict[str, Any]:
     """Phase-aware per-rotor order power.
 
-    For each order ``k``: demodulate every mic by the MEAN track phase, keep
-    the beat band, build the ``(n_d, R)`` design matrix
-    ``A[t, r] = exp(i 2 pi k (phi_r(t) - phi_bar(t)))`` and solve
-    ``min_c || y - A c ||^2`` over windows of two beat cycles.
+    ONE SOLVE PER TARGET LINE ``(r, k)``. The audio is demodulated by that
+    line's own known phase ``k phi_r(t)`` and low-passed to a band that holds
+    the line's core and whatever else is near it; the design matrix has one
+    column per comb line inside the band (:func:`interfering_lines`), each
+    column being the KNOWN relative phase ``exp(i 2 pi (k' phi_s - k
+    phi_r))``; the complex amplitudes are solved by least squares over windows
+    long enough for the nearest interferer's beat to be seen
+    (``n_beat_cycles`` of it) and the target column's power is read off.
 
-    THE DESIGN MATRIX. ``y_m(t)`` is the analytic baseband, so the real comb's
-    ``Re[c exp(i Theta)]`` contributes ``c / 2`` to it; the recovered power is
-    therefore ``P = |2 c_LS|^2 / 2 = 2 |c_LS|^2``, debiased by the LS noise
-    variance and divided by :func:`window_coherent_fraction` -- the Bartlett
-    average of the lag law over the window, which is what a constant-``psi``
-    design matrix loses. That correction uses the KNOWN dynamics; in the rig
-    fit the dynamics are sampled jointly, so it is a parameter of the
-    likelihood rather than a calibration.
+    Demodulating per line rather than per order is not a refinement, it is
+    required: past ``k ~ f / delta`` the order-``k`` lines of the rotors are
+    spread wider than the spacing between ORDERS, so an order group is not a
+    group any more (see :func:`interfering_lines`).
 
-    ``multi=True`` imposes ONE steering vector per rotor: the columns become
-    ``s_rm(k) A[t, r]`` stacked over mics, so two rotors whose beat bases are
-    nearly collinear in time are still separated if their steering vectors
-    differ. The steering is estimated by :func:`estimate_steering` from
-    ``steering_orders`` (default: the orders given, restricted to those whose
-    per-rotor criterion score is largest).
+    THE UNITS. ``y_m(t)`` is the analytic baseband, so the real comb's
+    ``Re[c exp(i Theta)]`` contributes ``c / 2`` and the recovered power is
+    ``P = |2 c_LS|^2 / 2 = 2 |c_LS|^2``. Two corrections, neither using a
+    fitted dynamics parameter:
+
+    * the LS noise variance ``sigma^2 [ (A^H A)^-1 ]_rr`` is SUBTRACTED from
+      ``|c_LS|^2`` -- a complex LS coefficient's squared modulus is biased up
+      by exactly its own variance, and near the floor that bias is the whole
+      number;
+    * the window's coherent loss is removed by
+      :func:`_extrapolate_zero_window` from a second solve at half the window.
+
+    ``offsets_rev_s`` (normally :func:`refine_offsets`' output) folds a
+    constant per-rotor speed offset into the track before demodulating, which
+    is what the bench fit's refined-and-fitted carrier does.
+
+    ``multi=True`` imposes ONE steering vector per rotor: column ``(s, k')``
+    becomes ``g_sm exp(-i 2 pi k' f_s eta_sm)`` times the same time basis,
+    stacked over mics, so two lines whose time bases are nearly collinear are
+    still separated when their rotors' steering vectors differ. The steering
+    is taken from ``steering`` (a ``(gain, delay)`` pair, normally the
+    ``E2-single`` pass' own :func:`estimate_steering` output) or estimated
+    inside this call from the per-line mic ratios.
     """
     cfg = scene.cfg
     order_list = np.asarray(orders, dtype=np.int64)
-    phi_mean = scene.mean_track_turns
-    delta = cfg.min_spacing_hz
-    spread = float(np.max(np.abs(cfg.carriers_rev_s - cfg.carriers_rev_s.mean())))
-    drift = float(cfg.track_drift_std_hz)
+    carriers, track = (
+        (cfg.carriers_rev_s, scene.track_turns)
+        if offsets_rev_s is None
+        else refined_tracks(scene, offsets_rev_s)
+    )
     r_n, m_n = cfg.n_rotors, cfg.n_mics
+    k_max = scene.k_max
+    band_cap = float(max_band_fraction) * float(carriers.min())
+    delta_min = float(np.min(np.diff(np.sort(carriers)))) if carriers.size > 1 else float("inf")
+    steer_orders = np.zeros(0, dtype=np.int64)
 
-    def one_order(k: int) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
-        bw = float(k) * (spread + 4.0 * drift) + bandwidth_margin_hz
-        y, sr_d = _demodulate(scene.audio, phi_mean, k, cfg.sr, bw)
+    def core_bw(r: int, k: int) -> float:
+        """Band that holds the target line: its within-record width, the part
+        of the planted track drift the demodulation cannot remove (none, the
+        track is known) and a fixed margin."""
+        half = line_half_width_hz(
+            cfg.rotors[r], float(k), width_sigmas=4.0, within_record_s=cfg.duration_s
+        )
+        return 2.0 * half + bandwidth_margin_hz
+
+    def band_for(r: int, k: int) -> float:
+        spread = float(np.max(np.abs(carriers - carriers[r]))) * float(k)
+        return float(min(max(core_bw(r, k), min(spread, band_cap)), band_cap))
+
+    def solve_line(
+        r: int, k: int, gain_del: tuple[np.ndarray, np.ndarray] | None
+    ) -> dict[str, Any]:
+        """One target line. ``gain_del`` present -> the mic-stacked joint solve
+        with the rank-one steering constraint; absent -> per-mic solves whose
+        powers are averaged and whose mic ratio is returned."""
+        bw = band_for(r, k)
+        lines = interfering_lines(carriers, r, k, k_max=k_max, bandwidth_hz=bw, guard=0.9)
+        y, sr_d = _demodulate(scene.audio, float(k) * track[r], cfg.sr, bw)
         n_d = y.shape[1]
-        basis = _basis(scene.track_turns, phi_mean, k, n_d, cfg.sr, cfg.duration_s)
-        n_w = _window_length(k, delta, sr_d, n_d, r_n)
-        power = np.zeros((m_n, r_n))
-        coef_w: list[np.ndarray] = []
-        conds = []
+        cols = [
+            _resample_phase(kp * track[s] - float(k) * track[r], n_d, cfg.sr, cfg.duration_s)
+            for s, kp, _off in lines
+        ]
+        basis = np.exp(2j * np.pi * np.stack(cols, axis=1))  # (n_d, L)
+        near = min((abs(o) for _s, _k, o in lines[1:]), default=float("inf"))
+        # TWO constraints on the window, and where they conflict the cap wins.
+        # Long enough: the nearest interferer's beat must turn ``n_beat_cycles``
+        # times inside it, or the two columns are collinear and the split is
+        # arbitrary. Short enough: beyond one coherence time the constant-psi
+        # column stops matching the line and the recovered power falls like
+        # ``tau_c / T_w`` -- a loss no small-``T_w`` expansion can undo. Taking
+        # the cap keeps the estimate nearly unbiased and lets the leakage show,
+        # which is the failure the criterion is about.
+        tau_c = coherence_time_s(
+            cfg.rotors[r], float(k), cap_s=cfg.duration_s, within_record_s=cfg.duration_s
+        )
+        want = (
+            float(n_beat_cycles) / near
+            if math.isfinite(near)
+            else cfg.duration_s / float(min_windows)
+        )
+        want = min(want, float(window_cap_factor) * tau_c)
+        n_w = int(min(max(int(round(want * sr_d)), len(lines) + 2), n_d))
+        n_h = max(n_w // 2, len(lines) + 2)
+        info: dict[str, Any] = dict(
+            n_columns=len(lines),
+            window_s=n_w / sr_d,
+            window_short_s=n_h / sr_d,
+            bandwidth_hz=bw,
+            nearest_line_hz=near,
+            beat_cycles=near * n_w / sr_d if math.isfinite(near) else np.inf,
+            coherence_time_s=tau_c,
+            ratio=np.zeros(m_n, dtype=complex),
+        )
+        if gain_del is not None:
+            g, dly = gain_del
+            s_vec = np.stack(
+                [
+                    g[:, s] * np.exp(-2j * np.pi * kp * carriers[s] * dly[:, s])
+                    for s, kp, _o in lines
+                ],
+                axis=1,
+            )  # (M, L)
+            big_y = y.reshape(-1)
+            big_a = (s_vec[:, None, :] * basis[None, :, :]).reshape(-1, len(lines))
+            c_w, var_w, cond = _solve_windows_stacked(big_y, big_a, n_w, m_n, n_d)
+            info["power"] = 2.0 * max(float((np.abs(c_w[:, 0]) ** 2 - var_w[:, 0]).mean()), 0.0)
+            if n_h < n_w:
+                c_h, var_h, _c = _solve_windows_stacked(big_y, big_a, n_h, m_n, n_d)
+                info["power_short"] = 2.0 * max(
+                    float((np.abs(c_h[:, 0]) ** 2 - var_h[:, 0]).mean()), 0.0
+                )
+            else:
+                info["power_short"] = info["power"]
+            info["cond"] = cond
+            return info
+        pw = np.zeros(m_n)
+        pw_s = np.zeros(m_n)
+        coef_w = []
+        cs = []
         for m in range(m_n):
             c_w, var_w, cond = _solve_windows(y[m], basis, n_w)
-            power[m] = np.maximum((np.abs(c_w) ** 2 - var_w).mean(axis=0), 0.0)
-            coef_w.append(c_w)
-            conds.append(cond)
-        ratio = coefficient_ratio(np.stack(coef_w))  # (M, R)
-        return (
-            power,
-            ratio,
-            dict(
-                bandwidth_hz=bw,
-                sr_d=sr_d,
-                n_d=n_d,
-                window_s=n_w / sr_d,
-                cond=float(np.median(conds)),
-            ),
+            pw[m] = max(float((np.abs(c_w[:, 0]) ** 2 - var_w[:, 0]).mean()), 0.0)
+            coef_w.append(c_w[:, :1])
+            cs.append(cond)
+            if n_h < n_w:
+                c_h, var_h, _c = _solve_windows(y[m], basis, n_h)
+                pw_s[m] = max(float((np.abs(c_h[:, 0]) ** 2 - var_h[:, 0]).mean()), 0.0)
+            else:
+                pw_s[m] = pw[m]
+        info["power"] = 2.0 * float(pw.mean())
+        info["power_short"] = 2.0 * float(pw_s.mean())
+        info["ratio"] = coefficient_ratio(np.stack(coef_w))[:, 0]
+        info["cond"] = float(np.median(cs))
+        return info
+
+    def run(
+        order_set: np.ndarray, gain_del: tuple[np.ndarray, np.ndarray] | None
+    ) -> dict[str, Any]:
+        shape = (r_n, order_set.size)
+        acc: dict[str, Any] = dict(
+            power=np.zeros(shape),
+            power_short=np.zeros(shape),
+            ratio=np.zeros((m_n, *shape), dtype=complex),
+            n_columns=np.zeros(shape, dtype=np.int64),
+            cond=np.zeros(shape),
+            window_s=np.zeros(shape),
+            window_short_s=np.zeros(shape),
+            bandwidth_hz=np.zeros(shape),
+            nearest_line_hz=np.zeros(shape),
+            beat_cycles=np.zeros(shape),
+            coherence_time_s=np.zeros(shape),
         )
+        for r in range(r_n):
+            for q, k_ in enumerate(order_set):
+                one = solve_line(r, int(k_), gain_del)
+                acc["ratio"][:, r, q] = one.pop("ratio")
+                for key, val in one.items():
+                    acc[key][r, q] = val
+        return acc
 
-    per_order: dict[int, tuple[np.ndarray, np.ndarray, dict[str, Any]]] = {}
-    for k in order_list:
-        per_order[int(k)] = one_order(int(k))
+    single = run(order_list, None)
+    gain_del = steering
+    if multi and gain_del is None:
+        # The steering vectors are read off a CONSECUTIVE block of orders that
+        # are already separable (record score above ``steering_score_min``) and
+        # then imposed on the rest. Consecutive matters: the delay matched
+        # filter's alias period is ``1 / (Delta k f)``, so a sparse ladder of
+        # high orders aliases inside the array's own delay range while a
+        # consecutive block puts the first alias at ``1 / f`` = 15 ms, far
+        # outside it.
+        k0 = max(
+            int(math.ceil(float(steering_score_min) / max(delta_min * cfg.duration_s, 1e-9))), 1
+        )
+        block = np.arange(k0, min(k0 + int(n_steering_orders), k_max + 1), dtype=np.int64)
+        if block.size < MIN_STEERING_ORDERS:
+            block = np.arange(max(k_max - int(n_steering_orders) + 1, 1), k_max + 1, dtype=np.int64)
+        steer = run(block, None)
+        gain, delay = estimate_steering(
+            steer["ratio"],
+            block,
+            carriers,
+            delay_bound_s=float(scene.diagnostics["delay_bound_s"]),
+            weights=steer["power"],
+        )
+        gain = gain / np.sqrt((gain**2).mean(axis=0, keepdims=True))
+        gain_del = (gain, delay)
+        steer_orders = block
+    acc = run(order_list, gain_del) if multi else single
+    power = acc["power"]
+    power_short = acc["power_short"]
+    ratios = single["ratio"]
+    n_cols = acc["n_columns"]
+    conds = acc["cond"]
+    win_s = acc["window_s"]
+    win_short_s = acc["window_short_s"]
+    bws = acc["bandwidth_hz"]
+    nearest = acc["nearest_line_hz"]
 
-    gamma = np.array(
-        [
-            [
-                window_coherent_fraction(cfg.rotors[r], float(k), per_order[int(k)][2]["window_s"])
-                if correct_decoherence
-                else 1.0
-                for k in order_list
-            ]
-            for r in range(r_n)
-        ]
-    )
-    single = np.stack([per_order[int(k)][0].mean(axis=0) for k in order_list], axis=1)  # (R, K)
-    single = 2.0 * single / np.maximum(gamma, 1e-6)
-    diag: dict[str, Any] = dict(
+    out = power.copy()
+    if extrapolate:
+        for r in range(r_n):
+            for q in range(order_list.size):
+                out[r, q] = float(
+                    _extrapolate_zero_window(
+                        np.array([power[r, q]]),
+                        np.array([power_short[r, q]]),
+                        win_s[r, q],
+                        win_short_s[r, q],
+                    )[0]
+                )
+    res: dict[str, Any] = dict(
+        power=out,
+        power_raw=power,
+        estimator="E2-multi" if multi else "E2-single",
         orders=order_list,
-        window_s=np.array([per_order[int(k)][2]["window_s"] for k in order_list]),
-        bandwidth_hz=np.array([per_order[int(k)][2]["bandwidth_hz"] for k in order_list]),
-        cond=np.array([per_order[int(k)][2]["cond"] for k in order_list]),
-        gamma=gamma,
+        n_columns=n_cols,
+        cond=conds,
+        window_s=win_s,
+        window_short_s=win_short_s,
+        bandwidth_hz=bws,
+        nearest_line_hz=nearest,
+        beat_cycles=acc["beat_cycles"],
+        coherence_time_s=acc["coherence_time_s"],
+        offsets_rev_s=np.zeros(r_n) if offsets_rev_s is None else np.asarray(offsets_rev_s),
+        steering_orders=steer_orders,
     )
+    if gain_del is not None:
+        res["steering_gain"], res["steering_delay"] = gain_del
     if not multi:
-        return dict(power=single, estimator="E2-single", **diag)
-
-    if steering_orders is None:
-        score = per_rotor_scores(cfg.rotors, order_list, duration_s=cfg.duration_s).min(axis=0)
-        snr = single.sum(axis=0)
-        rank = np.lexsort((-snr, -(score >= 1.0).astype(float)))
-        steering_orders = order_list[np.sort(rank[: min(16, order_list.size)])]
-    steering_orders = np.asarray(steering_orders, dtype=np.int64)
-    missing = [int(k) for k in steering_orders if int(k) not in per_order]
-    for k in missing:
-        per_order[k] = one_order(k)
-    coef_s = np.stack([per_order[int(k)][1] for k in steering_orders], axis=2)  # (M, R, K_s)
-    gain, delay = estimate_steering(
-        coef_s,
-        steering_orders,
-        cfg.carriers_rev_s,
-        delay_bound_s=float(scene.diagnostics["delay_bound_s"]),
-    )
-    gain = gain / np.sqrt((gain**2).mean(axis=0, keepdims=True))  # mean |s|^2 = 1 per rotor
-
-    multi_power = np.zeros((r_n, order_list.size))
-    conds = np.zeros(order_list.size)
-    for q, k in enumerate(order_list):
-        k = int(k)
-        _pw, _cf, info = per_order[k]
-        y, sr_d = _demodulate(scene.audio, phi_mean, k, cfg.sr, info["bandwidth_hz"])
-        n_d = y.shape[1]
-        basis = _basis(scene.track_turns, phi_mean, k, n_d, cfg.sr, cfg.duration_s)
-        s = gain * np.exp(-2j * np.pi * float(k) * cfg.carriers_rev_s[None, :] * delay)  # (M, R)
-        # stack the mics along time: column r becomes s_rm A[t, r], so the
-        # Gram matrix accumulates sum_m conj(s_rm) s_sm <A_r, A_s> -- two
-        # rotors with different steering decorrelate even at zero beat.
-        big_y = y.reshape(-1)
-        big_a = (s[:, None, :] * basis[None, :, :]).reshape(-1, r_n)
-        n_w = _window_length(k, delta, sr_d, n_d, r_n)
-        c_w, var_w, cond = _solve_windows_stacked(big_y, big_a, n_w, m_n, n_d)
-        multi_power[:, q] = 2.0 * np.maximum((np.abs(c_w) ** 2 - var_w).mean(axis=0), 0.0)
-        conds[q] = cond
-    multi_power = multi_power / np.maximum(gamma, 1e-6)
-    diag["cond_multi"] = conds
-    return dict(
-        power=multi_power,
-        estimator="E2-multi",
-        steering_orders=steering_orders,
-        steering_gain=gain,
-        steering_delay=delay,
-        **diag,
-    )
+        res["mic_ratio"] = ratios
+    return res
 
 
 def _solve_windows_stacked(
@@ -965,3 +1394,68 @@ def make_config(
         rotors=tuple(replace(r, carrier_rev_s=float(c)) for r, c in zip(rotors, car, strict=True)),
         **kw,
     )
+
+
+def record_resolvability_score(k: float, delta_hz: float, duration_s: float) -> float:
+    """``k delta T``: beat cycles of a pair inside the whole RECORD.
+
+    The identifiability bound of a least squares against KNOWN bases, as
+    opposed to :func:`resolvability_score`'s coherence bound. The Gram matrix
+    of two beat bases over ``T`` is conditioned as soon as their relative
+    phase turns once, and that is a property of the tracks alone -- no
+    dynamics parameter enters. Where the two scores disagree, the sweep says
+    which one the data obeys.
+    """
+    return float(k) * float(delta_hz) * float(duration_s)
+
+
+def line_snr_db(scene: MultiRotorScene, orders: np.ndarray, bandwidth_hz: np.ndarray) -> np.ndarray:
+    """``(R, K)`` planted line power over the floor power in its own band.
+
+    The floor's in-band variance is ``(2 / N) sum_{|f - k f_r| <= bw} psd``,
+    the same Parseval bookkeeping :func:`simulate_scene` uses to set the
+    level. A cell whose SNR is negative is not a statement about
+    resolvability at all -- the line is not in the recording -- so the sweep
+    gates its verdict on this number instead of reporting an error that only
+    measures the floor.
+    """
+    n = scene.audio.shape[1]
+    freqs = np.fft.rfftfreq(n, d=1.0 / scene.sr)
+    order_list = np.asarray(orders, dtype=np.int64)
+    out = np.zeros((scene.cfg.n_rotors, order_list.size))
+    for r in range(scene.cfg.n_rotors):
+        for q, k in enumerate(order_list):
+            f0 = float(scene.cfg.carriers_rev_s[r]) * float(k)
+            sel = np.abs(freqs - f0) <= float(bandwidth_hz[r, q])
+            fp = 2.0 * float(scene.floor_psd[sel].sum()) / n
+            out[r, q] = 10.0 * math.log10(
+                max(float(scene.power_true[r, int(k) - 1]), 1e-300) / max(fp, 1e-300)
+            )
+    return out
+
+
+def neighbour_contrast_db(
+    scene: MultiRotorScene, orders: np.ndarray, bandwidth_hz: np.ndarray
+) -> np.ndarray:
+    """``(R, K)`` dB by which the loudest OTHER line in the band beats the
+    target.
+
+    A separation error only shows up as a profile error in proportion to the
+    contrast: leaking 1% of a neighbour 30 dB louder is a 10 dB error, leaking
+    1% of an equal neighbour is 0.04 dB. Reported next to the criterion score
+    so the sweep's failures can be read as ``contrast + leakage(score)``
+    rather than as an unexplained scatter.
+    """
+    order_list = np.asarray(orders, dtype=np.int64)
+    carriers = scene.cfg.carriers_rev_s
+    out = np.full((scene.cfg.n_rotors, order_list.size), -np.inf)
+    for r in range(scene.cfg.n_rotors):
+        for q, k in enumerate(order_list):
+            lines = interfering_lines(
+                carriers, r, int(k), k_max=scene.k_max, bandwidth_hz=float(bandwidth_hz[r, q])
+            )
+            tgt = max(float(scene.power_true[r, int(k) - 1]), 1e-300)
+            others = [float(scene.power_true[s, kp - 1]) for s, kp, _o in lines[1:]]
+            if others:
+                out[r, q] = 10.0 * math.log10(max(max(others), 1e-300) / tgt)
+    return out
