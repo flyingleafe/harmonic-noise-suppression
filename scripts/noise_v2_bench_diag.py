@@ -107,7 +107,9 @@ def envelope_db(audio: np.ndarray, sr: float, step_s: float = ENVELOPE_S) -> np.
     return 20.0 * np.log10(np.sqrt((x[: n * w].reshape(n, w) ** 2).mean(axis=1)) + 1e-20)
 
 
-def loudest_window(env: np.ndarray, dur_s: float, step_s: float = ENVELOPE_S) -> tuple[float, float]:
+def loudest_window(
+    env: np.ndarray, dur_s: float, step_s: float = ENVELOPE_S
+) -> tuple[float, float]:
     """``(start_s, mean_db)`` of the loudest ``dur_s`` window on the grid."""
     nb = max(1, int(round(dur_s / step_s)))
     if env.size <= nb:
@@ -134,6 +136,12 @@ def _fwhm_hz(arr: np.ndarray, j: int, span: int, df: float) -> float:
     while b < b0 - 1 and arr[b + 1] > thr:
         b += 1
     return float((b - a + 1) * df)
+
+
+def bgrid(batch: MD.SupportBatch) -> SP.BenchGrid:
+    """The batch's bench grid, narrowed for the type checker."""
+    assert isinstance(batch.grid, SP.BenchGrid), f"{batch.name} is not a bench batch"
+    return batch.grid
 
 
 def band_of(support: SU.Support) -> np.ndarray:
@@ -333,9 +341,7 @@ def registration(
             )
 
     lines = {
-        nm: line_table(
-            pm, med, df, f, ks, kind="jitter", sigma_hz=sigma_hz, sigma_rev=sigma_rev
-        )
+        nm: line_table(pm, med, df, f, ks, kind="jitter", sigma_hz=sigma_hz, sigma_rev=sigma_rev)
         for nm, f in carriers.items()
     }
     return dict(
@@ -350,12 +356,18 @@ def registration(
         carrier_prior_sigmas={
             nm: round((f - float(row["survey_rev_s"][0])) / 0.5, 3) for nm, f in carriers.items()
         },
-        interferer=interferer_comb(pm, med, df, support.sr, carriers),
+        interferer=interferer_comb(pm, med, df, support.sr, carriers, sigma_rev=sigma_rev),
     )
 
 
 def interferer_comb(
-    pm: np.ndarray, med: np.ndarray, df: float, sr: int, carriers: dict[str, float]
+    pm: np.ndarray,
+    med: np.ndarray,
+    df: float,
+    sr: int,
+    carriers: dict[str, float],
+    *,
+    sigma_rev: float = 0.0,
 ) -> dict[str, Any]:
     """The loudest narrow lines and whether a fitted carrier aliases onto them.
 
@@ -382,10 +394,100 @@ def interferer_comb(
         hits = []
         for ln in lines:
             k = ln["f_hz"] / f
-            if abs(k - round(k)) * f < 2.0 * df and round(k) >= 1:
-                hits.append(dict(k=int(round(k)), f_hz=ln["f_hz"], snr_db=ln["snr_db"]))
+            kk = int(round(k))
+            # the SAME window the per-order line table uses, so a carrier whose
+            # order k is inside that order's own read window counts as a hit
+            tol = 2.0 * df + JITTER_SIGMAS * kk * sigma_rev
+            if kk >= 1 and abs(kk * f - ln["f_hz"]) <= tol:
+                hits.append(
+                    dict(
+                        k=kk,
+                        f_hz=ln["f_hz"],
+                        snr_db=ln["snr_db"],
+                        offset_hz=round(abs(kk * f - ln["f_hz"]), 3),
+                        offset_bins=round(abs(kk * f - ln["f_hz"]) / df, 2),
+                    )
+                )
         alias[nm] = hits
     return dict(loudest_lines=lines, aliased_orders=alias)
+
+
+def refine_score_audit(
+    support: SU.Support, row: dict[str, Any], fit: dict[str, Any] | None
+) -> dict[str, Any]:
+    """``refine_bench_carrier``'s OWN score at each candidate carrier.
+
+    The score is ``sum_{k >= k_min} log P(k f)`` at the nearest bin, exactly as
+    :func:`spectrum.refine_bench_carrier` computes it. Two forms are reported:
+    the function's own (whose highest order is ``floor(f_top / f)``, so the
+    number of summands moves with ``f``) and a common-order form that sums the
+    same ``k`` range for every candidate. Whether the refinement's mode is a
+    genuinely higher score or an artefact of the moving order count is then a
+    fact on the record rather than an inference.
+    """
+    p = mic_mean(support.power)
+    df = float(support.freqs_hz[1] - support.freqs_hz[0])
+    lp = np.log(np.maximum(p, 1e-24))
+    f_top = min(SP.BAND_F_MAX, 0.45 * float(support.sr))
+    k_min = 4
+
+    def own(f0: float, k_top: int | None = None) -> tuple[float, int]:
+        kt = int(math.floor(f_top / f0)) if k_top is None else int(k_top)
+        if kt < k_min:
+            return float("nan"), 0
+        idx = np.rint(np.arange(k_min, kt + 1) * f0 / df).astype(np.int64)
+        ok = (idx > 0) & (idx < lp.size)
+        return float(lp[idx[ok]].sum()), int(ok.sum())
+
+    best, diag = SP.refine_bench_carrier(
+        np.asarray(support.power, dtype=np.float64)[:, 0, :],
+        support.freqs_hz,
+        float(row["survey_rev_s"][0]),
+        sr=int(support.sr),
+    )
+    from_index, diag_index = SP.refine_bench_carrier(
+        np.asarray(support.power, dtype=np.float64)[:, 0, :],
+        support.freqs_hz,
+        float(row["carriers_rev_s"][0]),
+        sr=int(support.sr),
+        half_width_rev_s=0.35,
+        n_grid=1401,
+    )
+    cands = {
+        "survey": float(row["survey_rev_s"][0]),
+        "index": float(row["carriers_rev_s"][0]),
+        "coarse": float(diag["coarse_rev_s"]),
+        "refined_from_survey": float(best),
+        "refined_from_index_tight": float(from_index),
+    }
+    if fit is not None:
+        cands["fitted"] = float(fit["params"]["carrier_rev_s"][0])
+    k_common = min(int(math.floor(f_top / f)) for f in cands.values())
+    scores = {}
+    for nm, f0 in cands.items():
+        s_own, n_own = own(f0)
+        s_com, n_com = own(f0, k_common)
+        scores[nm] = dict(
+            carrier_rev_s=round(f0, 6),
+            score=round(s_own, 3),
+            n_orders=n_own,
+            score_common_orders=round(s_com, 3),
+            n_orders_common=n_com,
+        )
+    return dict(
+        k_min=k_min,
+        k_common=k_common,
+        note="sum of log P at the nearest bin of k f, refine_bench_carrier's own score",
+        harmonic_score_reported=float(diag["harmonic_score"]),
+        shift_from_survey_rev_s=float(diag["shift_rev_s"]),
+        shift_from_index_tight_rev_s=float(diag_index["shift_rev_s"]),
+        scores=scores,
+        score_of_refined_minus_index=round(
+            scores["refined_from_survey"]["score_common_orders"]
+            - scores["index"]["score_common_orders"],
+            3,
+        ),
+    )
 
 
 # ── scale ───────────────────────────────────────────────────────────────────
@@ -407,8 +509,9 @@ def scale_block(
     dur = float(support.segment[1] - support.segment[0])
     ls, ll = loudest_window(env, dur)
     _, l7 = loudest_window(env, control_dur_s)
-    e0, e1 = int(support.segment[0] / ENVELOPE_S), max(
-        int(support.segment[0] / ENVELOPE_S) + 1, int(support.segment[1] / ENVELOPE_S)
+    e0, e1 = (
+        int(support.segment[0] / ENVELOPE_S),
+        max(int(support.segment[0] / ENVELOPE_S) + 1, int(support.segment[1] / ENVELOPE_S)),
     )
     # length control: the SAME audio start, a shorter window, same loader
     short = SU.bench_support(
@@ -441,7 +544,9 @@ def scale_block(
             dur_s=round(float(short.segment[1] - short.segment[0]), 4),
             n_fft=int(short.n_fft),
             median_in_band_db=round(db(np.median(p_short[band_of(short)])), 3),
-            level_change_db=round(db(np.median(p_short[band_of(short)])) - db(np.median(pm[band])), 3),
+            level_change_db=round(
+                db(np.median(p_short[band_of(short)])) - db(np.median(pm[band])), 3
+            ),
             length_ratio_db=round(10.0 * np.log10(short.n_fft / support.n_fft), 3),
         ),
     )
@@ -473,7 +578,7 @@ def objective_of(
     kk = batch.k_max if k_max is None else int(k_max)
     gg = batch.bench_order_groups if groups is None else groups
     with torch.no_grad():
-        m = SP.bench_model(batch.grid, par, k_max=kk, groups=gg)
+        m = SP.bench_model(bgrid(batch), par, k_max=kk, groups=gg)
         total = float(MD.whittle_risk(batch, m))
         comb = float(composite_risk(batch.power, m, batch.weights, band=batch.band_hi))
         floor = float(composite_risk(batch.power, m, batch.weights, band=batch.band_lo))
@@ -493,7 +598,7 @@ def lines_unit_response(
     batch: MD.SupportBatch, par: SP.V2Params, f0: float, *, k_cap: int = 130
 ) -> tuple[SP.V2Params, int, Any, np.ndarray, np.ndarray]:
     """``(base params at f0, k_max, groups, floor-only spectrum, unit-line spectrum)``."""
-    sr = batch.grid.sr
+    sr = bgrid(batch).sr
     kk = int(SP.k_max_for_carrier(np.array([f0]), sr, k_cap=k_cap))
     width = max(kk, int(np.asarray(par.profile_db).shape[1]))
     base = dataclasses.replace(
@@ -506,16 +611,16 @@ def lines_unit_response(
         sigma_nu=math.exp(MD.PRIORS.log_sigma_nu[0]),
         lam=math.exp(MD.PRIORS.log_lam[0]),
         sr=sr,
-        n=batch.grid.n,
+        n=bgrid(batch).n,
     )
     with torch.no_grad():
         quiet = (
-            SP.bench_model(batch.grid, with_profile(base, -300.0), k_max=kk, groups=groups)
+            SP.bench_model(bgrid(batch), with_profile(base, -300.0), k_max=kk, groups=groups)
             .mean(dim=(0, 1))
             .numpy()
         )
         unit = (
-            SP.bench_model(batch.grid, with_profile(base, 0.0), k_max=kk, groups=groups)
+            SP.bench_model(bgrid(batch), with_profile(base, 0.0), k_max=kk, groups=groups)
             .mean(dim=(0, 1))
             .numpy()
         )
@@ -545,8 +650,8 @@ def oracle_comb(
     base, kk, groups, quiet, lines_unit = lines_unit_response(batch, par, f0, k_cap=k_cap)
     obs = batch.power.numpy().mean(axis=(0, 1))
     excess = obs - quiet
-    df = float(batch.grid.freqs_hz[1] - batch.grid.freqs_hz[0])
-    f_top = float(batch.grid.freqs_hz[np.asarray(batch.band)].max())
+    df = float(bgrid(batch).freqs_hz[1] - bgrid(batch).freqs_hz[0])
+    f_top = float(bgrid(batch).freqs_hz[np.asarray(batch.band)].max())
     width = int(np.asarray(base.profile_db).shape[1])
     prof = np.full((1, width), -300.0)
     measured: dict[int, float] = {}
@@ -605,7 +710,7 @@ def initialiser_block(batch: MD.SupportBatch, sigma_rev: float) -> dict[str, Any
     seed = MD.sample_params_from_values(batch, mode="bench", values=init)
     f_init = float(np.asarray(init["carrier_rev_s"])[0])
     _, kk, _, _, lines_unit = lines_unit_response(batch, seed, f_init)
-    df = float(batch.grid.freqs_hz[1] - batch.grid.freqs_hz[0])
+    df = float(bgrid(batch).freqs_hz[1] - bgrid(batch).freqs_hz[0])
     obs = batch.power.numpy().mean(axis=(0, 1))
     med = median_filter(obs, size=2 * FLOOR_BINS + 1, mode="nearest")
     peak_pred, peak_data, snr_data = [], [], []
@@ -704,9 +809,7 @@ def patched_stationary_segment(
     level = SU._moving_mean(np.mean(x**2, axis=0), smooth)[inner]
     level_db = 10.0 * np.log10(np.maximum(level, 1e-30))
     motor_on = level_db >= level_db.max() - float(level_tol_db)
-    inside = (
-        (worst <= SU.BENCH_RESIDUAL_TOL_HZ) & (worst_wide <= SU.BENCH_WIDE_TOL_HZ) & motor_on
-    )
+    inside = (worst <= SU.BENCH_RESIDUAL_TOL_HZ) & (worst_wide <= SU.BENCH_WIDE_TOL_HZ) & motor_on
     a, b = SU._longest_run(inside)
     longest = (b - a) / sr
     if longest < SU.BENCH_MIN_SEGMENT_S:
@@ -722,7 +825,7 @@ def patched_stationary_segment(
         )
         a = int(pool[int(np.argmin(key))])
         b = a + m
-    i0, i1 = int(round((edge + a))), int(round((edge + b)))
+    i0, i1 = int(round(edge + a)), int(round(edge + b))
     return dict(
         start_s=(edge + a) / sr,
         end_s=(edge + b) / sr,
@@ -747,7 +850,9 @@ def cmd_verify_patch1(args: argparse.Namespace) -> None:
         rec = C.load_recording(SU.DREGON_DATASET, row["recording_id"], None, SU.DREGON_RPS_KEY)
         point = SU.bench_manifest()[SU.dregon_bench_point_key(row["recording_id"])]
         res = patched_stationary_segment(
-            rec.audio, rec.sr, [float(v) for v in point["speed_rev_s"]],
+            rec.audio,
+            rec.sr,
+            [float(v) for v in point["speed_rev_s"]],
             level_tol_db=float(args.level_tol_db),
         )
         out.append(
@@ -789,7 +894,7 @@ def cmd_verify_patch1(args: argparse.Namespace) -> None:
 # ── commands ────────────────────────────────────────────────────────────────
 
 
-def cmd_census(_: argparse.Namespace) -> None:
+def cmd_census(_args: argparse.Namespace) -> None:
     """Every DREGON bench support: is its window on the motor or after it?"""
     rows = index_rows()
     out = []
@@ -846,14 +951,16 @@ def cmd_diag(args: argparse.Namespace) -> None:
             support=name,
             base_support=base,
             provenance=prov,
+            fit_git=(fit or {}).get("git"),
+            fit_selected_seed=((fit or {}).get("restarts") or {}).get("selected_seed"),
             geometry=dict(
                 sr=int(support.sr),
                 n_samples_periodogram=int(support.n_fft),
-                n_samples_model_grid=int(batch.grid.n),
+                n_samples_model_grid=int(bgrid(batch).n),
                 bin_hz_data=float(support.freqs_hz[1] - support.freqs_hz[0]),
-                bin_hz_model=float(batch.grid.diagnostics["bin_hz"]),
+                bin_hz_model=float(bgrid(batch).diagnostics["bin_hz"]),
                 bin_hz_relative_error=float(
-                    batch.grid.diagnostics["bin_hz"] / (support.freqs_hz[1] - support.freqs_hz[0])
+                    bgrid(batch).diagnostics["bin_hz"] / (support.freqs_hz[1] - support.freqs_hz[0])
                     - 1.0
                 ),
                 duration_s=round(support.duration_s, 6),
@@ -863,9 +970,15 @@ def cmd_diag(args: argparse.Namespace) -> None:
                 n_cells=batch.n_cells,
             ),
             stationarity=support.meta.get("stationarity"),
-            scale=scale_block(support, row, fit if not name.endswith(CONTROL_SUFFIX) else None,
-                              control_dur_s=7.0),
-            registration=registration(support, row, fit if not name.endswith(CONTROL_SUFFIX) else None),
+            scale=scale_block(
+                support, row, fit if not name.endswith(CONTROL_SUFFIX) else None, control_dur_s=7.0
+            ),
+            registration=registration(
+                support, row, fit if not name.endswith(CONTROL_SUFFIX) else None
+            ),
+            refine_score=refine_score_audit(
+                support, row, fit if not name.endswith(CONTROL_SUFFIX) else None
+            ),
             initialiser=initialiser_block(batch, sigma_rev),
             wall_s=round(time.time() - t0, 1),
         )
@@ -898,10 +1011,12 @@ def cmd_objective(args: argparse.Namespace) -> None:
         split = {}
         if not control and fit is not None:
             prof = np.asarray(fit["params"]["profile"]["profile_db"], dtype=np.float64)
-            f_top = float(batch.grid.freqs_hz[np.asarray(batch.band)].max())
+            f_top = float(bgrid(batch).freqs_hz[np.asarray(batch.band)].max())
             k_in = int(math.floor(f_top / float(fit["params"]["carrier_rev_s"][0])))
-            for tag, sl in (("in_band_orders_only", slice(k_in, None)),
-                            ("out_of_band_orders_only", slice(0, k_in))):
+            for tag, sl in (
+                ("in_band_orders_only", slice(k_in, None)),
+                ("out_of_band_orders_only", slice(0, k_in)),
+            ):
                 pp = prof.copy()
                 pp[0, sl] = -300.0
                 split[tag] = objective_of(
@@ -909,7 +1024,10 @@ def cmd_objective(args: argparse.Namespace) -> None:
                     dataclasses.replace(par, profile_db=torch.as_tensor(pp, dtype=torch.float64)),
                 )
             split["k_in_band"] = k_in
-        carriers = {"index": float(row["carriers_rev_s"][0]), "survey": float(row["survey_rev_s"][0])}
+        carriers = {
+            "index": float(row["carriers_rev_s"][0]),
+            "survey": float(row["survey_rev_s"][0]),
+        }
         if fit is not None and not control:
             carriers["fit_refined"] = float(fit["diagnostics"]["batch"]["carrier_init_rev_s"][0])
             carriers["fitted"] = float(fit["params"]["carrier_rev_s"][0])
@@ -919,11 +1037,13 @@ def cmd_objective(args: argparse.Namespace) -> None:
         implied = reg["lines"]["index"]["implied_carrier_rev_s"]
         if implied:
             carriers["measured_from_lines"] = float(implied)
-        oracle = {
-            nm: oracle_comb(batch, par, f0, sigma_rev) for nm, f0 in carriers.items()
-        }
+        oracle = {nm: oracle_comb(batch, par, f0, sigma_rev) for nm, f0 in carriers.items()}
         oracle_peak = oracle_comb(
-            batch, par, carriers.get("measured_from_lines", carriers["index"]), sigma_rev, mode="peak"
+            batch,
+            par,
+            carriers.get("measured_from_lines", carriers["index"]),
+            sigma_rev,
+            mode="peak",
         )
         degenerate = {}
         if not control and fit is not None:
@@ -932,9 +1052,7 @@ def cmd_objective(args: argparse.Namespace) -> None:
                 lam=torch.as_tensor(0.5),
             )
             f0 = carriers.get("measured_from_lines", carriers["index"])
-            degenerate = oracle_comb(
-                batch, dataclasses.replace(par, **dyn), f0, sigma_rev
-            )
+            degenerate = oracle_comb(batch, dataclasses.replace(par, **dyn), f0, sigma_rev)
             degenerate["dynamics"] = dict(
                 sigma_nu=float(dyn["sigma_nu"]), lam=0.5, note="index residual std in rad/s"
             )
@@ -950,6 +1068,37 @@ def cmd_objective(args: argparse.Namespace) -> None:
             )
             for f0 in scan_f
         ]
+        # (d) THE PIPELINE MAIN PROPOSES: no in-fit refinement at all. The batch
+        # geometry comes from the index carrier (``refine_carrier=False``, so
+        # ``k_max`` and the order groups are the index carrier's), the comb is
+        # read off the data at that carrier, and everything else is as fitted.
+        d_batch = MD.bench_batch(
+            name=support.name + "__no_refine",
+            power=np.asarray(support.power, dtype=np.float64),
+            sr=int(support.sr),
+            carrier_mean=np.asarray(support.carrier_rev_s, dtype=np.float64).mean(axis=1),
+            k_cap=130,
+            refine_carrier=False,
+        )
+        d_arm = oracle_comb(d_batch, par, carriers["index"], sigma_rev)
+        d_arm["batch_k_max"] = int(d_batch.k_max)
+        d_arm["batch_carrier_init_rev_s"] = float(np.asarray(d_batch.carrier_init)[0])
+        # the index carrier can reach one order further than the fitted profile
+        # is wide (k_max 117 against 116 on Motor1_70), so the two reference
+        # evaluations that reuse the FITTED profile stay at its width
+        d_k = min(int(d_batch.k_max), int(np.asarray(par.profile_db).shape[1]))
+        d_arm["reference_k_max"] = d_k
+        d_groups = SP.order_groups(
+            d_k,
+            sigma_nu=math.exp(MD.PRIORS.log_sigma_nu[0]),
+            lam=math.exp(MD.PRIORS.log_lam[0]),
+            sr=bgrid(d_batch).sr,
+            n=bgrid(d_batch).n,
+        )
+        d_arm["floor_only"] = objective_of(
+            d_batch, with_profile(par, -300.0), k_max=d_k, groups=d_groups
+        )
+        d_arm["as_fitted_on_this_batch"] = objective_of(d_batch, par, k_max=d_k, groups=d_groups)
         payload = dict(
             schema=SCHEMA,
             support=name,
@@ -961,15 +1110,25 @@ def cmd_objective(args: argparse.Namespace) -> None:
             c_oracle=oracle,
             c_oracle_peak_matched=oracle_peak,
             c_oracle_degenerate_dynamics=degenerate,
+            d_index_no_refine=d_arm,
             comb_block_split=split,
             oracle_carrier_scan=scan,
-            fit_json_whittle_nats=(fit["objective"]["whittle_nats"] if fit else None),
+            # a control window has no fit of its own; quoting the base
+            # support's objective beside a control's would invite a comparison
+            # across two different windows, which the log M term forbids
+            fit_json_whittle_nats=(
+                fit["objective"]["whittle_nats"] if (fit and not control) else None
+            ),
+            fit_git=None if control else (fit or {}).get("git"),
+            fit_selected_seed=(
+                None if control else ((fit or {}).get("restarts") or {}).get("selected_seed")
+            ),
             wall_s=round(time.time() - t0, 1),
         )
         write(OUT_DIR / f"objective_{name}.json", payload)
 
 
-def cmd_figures(_: argparse.Namespace) -> None:
+def cmd_figures(_args: argparse.Namespace) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -977,9 +1136,10 @@ def cmd_figures(_: argparse.Namespace) -> None:
 
     rows = index_rows()
     name = "bench_dregon_Motor1_70"
-    sup, _ = load_target(name, rows)
-    on, prov_on = load_target(name + CONTROL_SUFFIX, rows)
+    sup, _prov = load_target(name, rows)
+    on, _prov_on = load_target(name + CONTROL_SUFFIX, rows)
     row, fit = rows[name], fit_json(name)
+    assert fit is not None, f"{name} has no committed fit JSON"
     par = MD.params_from_dict(fit["params"])
     batch = batch_for(sup)
     sigma_rev = float(row["residual_std_hz"][0]) / int(row["orders"][0])
@@ -994,7 +1154,7 @@ def cmd_figures(_: argparse.Namespace) -> None:
     df = float(sup.freqs_hz[1] - sup.freqs_hz[0])
     with torch.no_grad():
         m_fit = (
-            SP.bench_model(batch.grid, par, k_max=batch.k_max, groups=batch.bench_order_groups)
+            SP.bench_model(bgrid(batch), par, k_max=batch.k_max, groups=batch.bench_order_groups)
             .mean(dim=(0, 1))
             .numpy()
         )
@@ -1008,12 +1168,12 @@ def cmd_figures(_: argparse.Namespace) -> None:
         orc["k_max"],
         sigma_nu=math.exp(MD.PRIORS.log_sigma_nu[0]),
         lam=math.exp(MD.PRIORS.log_lam[0]),
-        sr=batch.grid.sr,
-        n=batch.grid.n,
+        sr=bgrid(batch).sr,
+        n=bgrid(batch).n,
     )
     with torch.no_grad():
         m_orc = (
-            SP.bench_model(batch.grid, par_o, k_max=orc["k_max"], groups=groups)
+            SP.bench_model(bgrid(batch), par_o, k_max=orc["k_max"], groups=groups)
             .mean(dim=(0, 1))
             .numpy()
         )
@@ -1033,9 +1193,14 @@ def cmd_figures(_: argparse.Namespace) -> None:
         ax.plot(f, 10 * np.log10(m_orc[sl]), color="tab:blue", lw=1.2, label="oracle comb")
         for fc, col, lab in ((f_index, "tab:green", "index"), (f_fit, "tab:red", "fitted")):
             if f[0] <= k * fc <= f[-1]:
-                ax.axvline(k * fc, color=col, ls=":", lw=1.0, label=f"k x {lab}" if k == 1 else None)
+                ax.axvline(
+                    k * fc, color=col, ls=":", lw=1.0, label=f"k x {lab}" if k == 1 else None
+                )
         ax.set_xlim(float(f[0]), float(f[-1]))
-        ax.set_title(f"k = {k}  ({c:.1f} Hz)" + ("" if f[0] <= k * f_fit <= f[-1] else "  [k x fitted off-panel]"))
+        ax.set_title(
+            f"k = {k}  ({c:.1f} Hz)"
+            + ("" if f[0] <= k * f_fit <= f[-1] else "  [k x fitted off-panel]")
+        )
         ax.set_xlabel("Hz")
         ax.set_ylabel("dB")
     axes.ravel()[0].legend(fontsize=7)
@@ -1062,17 +1227,19 @@ def cmd_figures(_: argparse.Namespace) -> None:
         orc_on["k_max"],
         sigma_nu=math.exp(MD.PRIORS.log_sigma_nu[0]),
         lam=math.exp(MD.PRIORS.log_lam[0]),
-        sr=bon.grid.sr,
-        n=bon.grid.n,
+        sr=bgrid(bon).sr,
+        n=bgrid(bon).n,
     )
     with torch.no_grad():
         m_on = (
-            SP.bench_model(bon.grid, par_on_o, k_max=orc_on["k_max"], groups=g_on)
+            SP.bench_model(bgrid(bon), par_on_o, k_max=orc_on["k_max"], groups=g_on)
             .mean(dim=(0, 1))
             .numpy()
         )
         m_on_fl = (
-            SP.bench_model(bon.grid, with_profile(par_on_o, -300.0), k_max=orc_on["k_max"], groups=g_on)
+            SP.bench_model(
+                bgrid(bon), with_profile(par_on_o, -300.0), k_max=orc_on["k_max"], groups=g_on
+            )
             .mean(dim=(0, 1))
             .numpy()
         )
@@ -1083,8 +1250,16 @@ def cmd_figures(_: argparse.Namespace) -> None:
         j = int(round(k * f_on / d_on))
         sl = slice(max(0, j - half), min(pon.size, j + half + 1))
         ax.plot(on.freqs_hz[sl], 10 * np.log10(pon[sl]), color="0.3", lw=0.8, label="data")
-        ax.plot(on.freqs_hz[sl], 10 * np.log10(m_on[sl]), color="tab:blue", lw=1.2, label="oracle comb")
-        ax.plot(on.freqs_hz[sl], 10 * np.log10(m_on_fl[sl]), color="tab:orange", lw=1.0, label="floor only")
+        ax.plot(
+            on.freqs_hz[sl], 10 * np.log10(m_on[sl]), color="tab:blue", lw=1.2, label="oracle comb"
+        )
+        ax.plot(
+            on.freqs_hz[sl],
+            10 * np.log10(m_on_fl[sl]),
+            color="tab:orange",
+            lw=1.0,
+            label="floor only",
+        )
         ax.axvline(k * f_on, color="tab:blue", ls=":", lw=1.0)
         ax.set_title(f"k = {k}  ({k * f_on:.1f} Hz)")
         ax.set_xlabel("Hz")
@@ -1103,11 +1278,16 @@ def cmd_figures(_: argparse.Namespace) -> None:
     obj_on = json.loads((OUT_DIR / f"objective_{name}{CONTROL_SUFFIX}.json").read_text())
     fig, axes = plt.subplots(1, 3, figsize=(17, 4.8))
     tag = "jitter__capped_snr"
-    for d_, lab, col in ((diag, "committed window", "tab:red"), (diag_on, "motor-on control", "tab:blue")):
+    for d_, lab, col in (
+        (diag, "committed window", "tab:red"),
+        (diag_on, "motor-on control", "tab:blue"),
+    ):
         v = d_["registration"]["scores"][tag]
         f = v["curve_f0"] + np.arange(len(v["curve"])) * v["curve_step_rev_s"]
         y = np.asarray(v["curve"], dtype=np.float64)
-        axes[0].plot(f, y - np.median(y), color=col, lw=1.0, label=f"{lab} (argmax {v['argmax_rev_s']:.3f})")
+        axes[0].plot(
+            f, y - np.median(y), color=col, lw=1.0, label=f"{lab} (argmax {v['argmax_rev_s']:.3f})"
+        )
     for fc, col, lab in (
         (f_index, "tab:green", f"index {f_index:.3f}"),
         (f_ref, "tab:orange", f"fit refined {f_ref:.3f}"),
@@ -1124,8 +1304,15 @@ def cmd_figures(_: argparse.Namespace) -> None:
         (diag_on, "index", "motor-on @ index", "tab:blue"),
     ):
         t = d_["registration"]["lines"][key]
-        axes[1].plot(t["k"], t["snr_db"], ".-", ms=3, lw=0.7, color=col,
-                     label=f"{lab}: {t['n_above_6db']}/{t['n_orders']} orders > 6 dB")
+        axes[1].plot(
+            t["k"],
+            t["snr_db"],
+            ".-",
+            ms=3,
+            lw=0.7,
+            color=col,
+            label=f"{lab}: {t['n_above_6db']}/{t['n_orders']} orders > 6 dB",
+        )
     axes[1].axhline(LINE_SNR_THRESHOLD_DB, color="0.5", ls="--", lw=1.0)
     axes[1].set_xlabel("order k")
     axes[1].set_ylabel("line SNR [dB over local median floor]")
@@ -1134,18 +1321,34 @@ def cmd_figures(_: argparse.Namespace) -> None:
     bars: list[tuple[str, float, str]] = [
         ("(a) fitted", obj["a_fitted"]["nats_per_cell"], "tab:red"),
         ("(b) floor only", obj["b_floor_only"]["nats_per_cell"], "tab:orange"),
-        ("(c) oracle@index", obj["c_oracle"]["index"]["objective_at_best_offset"]["nats_per_cell"], "tab:green"),
-        ("(c) oracle@fitted", obj["c_oracle"]["fitted"]["objective_at_best_offset"]["nats_per_cell"], "0.3"),
+        (
+            "(c) oracle@index",
+            obj["c_oracle"]["index"]["objective_at_best_offset"]["nats_per_cell"],
+            "tab:green",
+        ),
+        (
+            "(c) oracle@fitted",
+            obj["c_oracle"]["fitted"]["objective_at_best_offset"]["nats_per_cell"],
+            "0.3",
+        ),
         ("CTRL floor only", obj_on["b_floor_only"]["nats_per_cell"], "tab:orange"),
-        ("CTRL oracle", obj_on["c_oracle"]["batch_refined"]["objective_at_best_offset"]["nats_per_cell"], "tab:blue"),
+        (
+            "CTRL oracle",
+            obj_on["c_oracle"]["batch_refined"]["objective_at_best_offset"]["nats_per_cell"],
+            "tab:blue",
+        ),
     ]
     axes[2].bar(range(len(bars)), [v for _, v, _ in bars], color=[c for _, _, c in bars])
     axes[2].set_xticks(range(len(bars)))
     axes[2].set_xticklabels([n for n, _, _ in bars], rotation=30, ha="right", fontsize=7)
     for i, (_, v, _) in enumerate(bars):
-        axes[2].annotate(f"{v:.2f}", (i, v), ha="center", va="bottom" if v < 0 else "top", fontsize=7)
+        axes[2].annotate(
+            f"{v:.2f}", (i, v), ha="center", va="bottom" if v < 0 else "top", fontsize=7
+        )
     axes[2].set_ylabel("Whittle nats / cell (lower is better)")
-    axes[2].set_title("objective: committed support vs motor-on control\n(levels differ between windows; compare within a window)")
+    axes[2].set_title(
+        "objective: committed support vs motor-on control\n(levels differ between windows; compare within a window)"
+    )
     fig.tight_layout()
     fig.savefig(OUT_DIR / "fig_registration_Motor1_70.png", dpi=110)
     plt.close(fig)
@@ -1182,10 +1385,13 @@ OBJ_DEFAULT = [TARGETS[0], TARGETS[2], TARGETS[0] + CONTROL_SUFFIX]
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("census").set_defaults(fn=cmd_census)
-    for cmd, fn, default in (("diag", cmd_diag, DIAG_DEFAULT), ("objective", cmd_objective, OBJ_DEFAULT)):
+    for cmd, fn, default in (
+        ("diag", cmd_diag, DIAG_DEFAULT),
+        ("objective", cmd_objective, OBJ_DEFAULT),
+    ):
         p = sub.add_parser(cmd)
         p.add_argument("--support", action="append", default=None)
         p.set_defaults(fn=fn, _default_supports=default)
