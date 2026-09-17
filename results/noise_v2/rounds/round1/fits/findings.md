@@ -1,32 +1,32 @@
 # Noise model v2 — round 1 fits
 
-158 fit JSON(s) under `results/noise_v2/rounds/round1/fits`. Every number below is read from a `noise-v2-fit/1` payload in that directory; nothing is recomputed here.
+159 fit JSON(s) under `results/noise_v2/rounds/round1/fits`. Every number below is read from a `noise-v2-fit/1` payload in that directory; nothing is recomputed here.
 
 ## Per-support parameters
 
 | support | mode | R | k_max | sigma_nu | lam | sigma_eps even/odd | lam_eps even/odd | carrier rev/s | floor dB | whittle nats | comb | floor | cells | conv | wall s |
 |---|---|--:|--:|--:|--:|---|---|---|--:|--:|--:|--:|--:|:-:|--:|
-| `bench_dregon_Motor1_50` | bench | 1 | 130 | 42.6816 | 134690.690 | 0.0846 / 0.0294 | 176.529 / 0.303 | 49.019 | -56.49 | -2.75659e+07 | -2.65298e+07 | -1.03611e+06 | 2351768 | y | 4111 |
-| `bench_dregon_Motor1_60` | bench | 1 | 130 | 1.6829 | 229.548 | 0.0078 / 0.0112 | 0.052 / 0.064 | 58.761 | -51.43 | -4.21678e+06 | -4.07353e+06 | -143249 | 387912 | N | 761 |
-| `bench_dregon_Motor1_70` | bench | 1 | 116 | 0.1852 | 0.157 | 0.0332 / 0.0002 | 0.221 / 0.010 | 70.179 | -76.10 | -6.869e+06 | -6.66207e+06 | -206935 | 418304 | N | 1768 |
-| `bench_dregon_Motor1_80` | bench | 1 | 102 | 0.8362 | 14.654 | 0.0947 / 0.0274 | 107.457 / 0.175 | 78.227 | -48.72 | -1.22033e+07 | -1.17817e+07 | -421594 | 1204568 | y | 2829 |
-| `bench_dregon_Motor1_90` | bench | 1 | 90 | 3.9342 | 445.977 | 0.1933 / 0.1686 | 1.612 / 126.957 | 87.919 | -46.93 | -4.22127e+06 | -4.08368e+06 | -137587 | 439616 | N | 1703 |
-| `bench_dregon_Motor2_50` | bench | 1 | 130 | 0.4573 | 61.212 | 0.3972 / 0.2217 | 1.218 / 216.797 | 48.425 | -57.02 | -1.18422e+07 | -1.14513e+07 | -390946 | 998488 | N | 3753 |
-| `bench_dregon_Motor2_60` | bench | 1 | 130 | 0.1563 | 0.003 | 0.0001 / 0.0009 | 0.005 / 0.018 | 57.345 | -76.43 | -6.88753e+06 | -6.67668e+06 | -210852 | 407160 | N | 884 |
-| `bench_dregon_Motor2_70` | bench | 1 | 118 | 0.1803 | 0.002 | 0.0029 / 0.0032 | 0.022 / 0.025 | 67.255 | -76.14 | -6.90538e+06 | -6.69394e+06 | -211444 | 409304 | N | 743 |
-| `bench_dregon_Motor2_80` | bench | 1 | 102 | 0.7270 | 0.003 | 0.0035 / 0.0046 | 0.008 / 0.008 | 78.016 | -76.61 | -3.89345e+06 | -3.77549e+06 | -117964 | 229448 | N | 342 |
-| `bench_dregon_Motor2_90` | bench | 1 | 93 | 0.3079 | 0.009 | 0.0024 / 0.0033 | 0.006 / 0.008 | 86.706 | -76.18 | -5.44142e+06 | -5.27619e+06 | -165231 | 322384 | N | 663 |
-| `bench_dregon_Motor3_50` | bench | 1 | 130 | 0.0840 | 0.045 | 0.0979 / 2.0472 | 0.340 / 2.051 | 48.703 | -74.33 | -8.60633e+06 | -8.35621e+06 | -250119 | 521240 | N | 1152 |
-| `bench_dregon_Motor3_60` | bench | 1 | 130 | 0.1641 | 0.000 | 0.0031 / 0.0047 | 0.012 / 0.022 | 59.096 | -74.87 | -6.43718e+06 | -6.25254e+06 | -184640 | 383552 | N | 543 |
-| `bench_dregon_Motor3_70` | bench | 1 | 115 | 0.1664 | 0.090 | 0.0010 / 0.0360 | 0.029 / 0.240 | 69.579 | -72.60 | -5.44625e+06 | -5.27117e+06 | -175081 | 342512 | N | 179 |
-| `bench_dregon_Motor3_80` | bench | 1 | 101 | 2.1576 | 445.845 | 0.0669 / 0.0001 | 2937.435 / 0.021 | 78.649 | -48.43 | -1.17775e+07 | -1.13789e+07 | -398593 | 1204568 | N | 864 |
-| `bench_dregon_Motor3_90` | bench | 1 | 90 | 0.1232 | 0.000 | 0.0026 / 0.0027 | 0.019 / 0.025 | 88.565 | -76.48 | -6.09634e+06 | -5.91164e+06 | -184699 | 360968 | N | 603 |
-| `bench_dregon_Motor4_50` | bench | 1 | 130 | 0.4555 | 26.996 | 0.4884 / 0.2116 | 0.871 / 436.880 | 49.787 | -59.55 | -1.37839e+07 | -1.32871e+07 | -496783 | 1204568 | N | 2260 |
-| `bench_dregon_Motor4_60` | bench | 1 | 130 | 0.5113 | 109.724 | 0.0000 / 0.0000 | 0.000 / 0.002 | 59.791 | -60.77 | -8.59396e+06 | -8.33821e+06 | -255754 | 646984 | N | 1027 |
-| `bench_dregon_Motor4_70` | bench | 1 | 116 | 1.9355 | 0.003 | 0.0001 / 0.0000 | 0.000 / 0.000 | 69.494 | -74.61 | -6.72322e+06 | -6.52307e+06 | -200149 | 408032 | N | 800 |
-| `bench_dregon_Motor4_80` | bench | 1 | 99 | 0.2043 | 0.038 | 0.0020 / 0.0022 | 0.017 / 0.019 | 81.194 | -75.85 | -5.51328e+06 | -5.34868e+06 | -164602 | 327808 | y | 523 |
-| `bench_dregon_Motor4_90` | bench | 1 | 89 | 4.1787 | 1477.298 | 0.0860 / 0.0123 | 289.638 / 0.196 | 89.400 | -50.84 | -5.70643e+06 | -5.516e+06 | -190427 | 602240 | N | 827 |
-| `bench_dregon_allMotors_70` | bench | 4 | 115 | 0.9979 | 128.984 | 0.3878 / 0.2843 | 14.090 / 3.802 | 63.928, 67.685, 68.752, 69.571 | -36.90 | -1.08642e+07 | -1.0682e+07 | -182239 | 1367848 | N | 2916 |
+| `bench_dregon_Motor1_50` | bench | 1 | 130 | 4.8494 | 4357.958 | 114.2038 / 0.1815 | 0.000 / 1008.849 | 49.017 | -58.42 | -2.75815e+07 | -2.6533e+07 | -1.04845e+06 | 2351768 | N | 2259 |
+| `bench_dregon_Motor1_60` | bench | 1 | 130 | 2.1358 | 358.090 | 0.0000 / 0.0658 | 0.003 / 0.286 | 58.761 | -51.52 | -4.2175e+06 | -4.0738e+06 | -143696 | 387912 | N | 823 |
+| `bench_dregon_Motor1_70` | bench | 1 | 116 | 0.1887 | 0.091 | 0.0311 / 0.0031 | 0.319 / 0.103 | 70.196 | -76.14 | -6.86928e+06 | -6.66256e+06 | -206722 | 418304 | N | 844 |
+| `bench_dregon_Motor1_80` | bench | 1 | 102 | 0.8343 | 14.335 | 0.0948 / 0.0307 | 107.104 / 0.189 | 78.227 | -48.76 | -1.22033e+07 | -1.17816e+07 | -421656 | 1204568 | y | 1596 |
+| `bench_dregon_Motor1_90` | bench | 1 | 90 | 4.6839 | 1105.273 | 0.3628 / 0.2811 | 4.187 / 152.416 | 87.926 | -49.04 | -4.23078e+06 | -4.08827e+06 | -142509 | 439616 | N | 809 |
+| `bench_dregon_Motor2_50` | bench | 1 | 130 | 0.4586 | 62.659 | 0.4058 / 0.2235 | 1.184 / 213.794 | 48.425 | -57.03 | -1.18423e+07 | -1.14516e+07 | -390744 | 998488 | N | 1436 |
+| `bench_dregon_Motor2_60` | bench | 1 | 130 | 0.1620 | 0.002 | 0.0020 / 0.0017 | 0.025 / 0.045 | 57.337 | -75.98 | -6.89401e+06 | -6.68294e+06 | -211067 | 407160 | N | 980 |
+| `bench_dregon_Motor2_70` | bench | 1 | 118 | 2.1249 | 0.002 | 0.0001 / 0.0072 | 0.000 / 0.009 | 67.583 | -76.31 | -6.91434e+06 | -6.70249e+06 | -211844 | 409304 | N | 972 |
+| `bench_dregon_Motor2_80` | bench | 1 | 102 | 0.7376 | 0.004 | 0.0049 / 0.0054 | 0.007 / 0.006 | 78.015 | -76.23 | -3.89349e+06 | -3.77552e+06 | -117970 | 229448 | N | 445 |
+| `bench_dregon_Motor2_90` | bench | 1 | 93 | 0.3077 | 0.010 | 0.0031 / 0.0033 | 0.010 / 0.012 | 86.706 | -76.28 | -5.44138e+06 | -5.27617e+06 | -165206 | 322384 | N | 776 |
+| `bench_dregon_Motor3_50` | bench | 1 | 130 | 0.0869 | 0.049 | 0.0233 / 1.8320 | 0.537 / 2.837 | 48.703 | -74.37 | -8.60631e+06 | -8.35609e+06 | -250224 | 521240 | N | 1006 |
+| `bench_dregon_Motor3_60` | bench | 1 | 130 | 1.4921 | 0.002 | 0.0087 / 0.0020 | 0.000 / 0.003 | 59.298 | -75.53 | -6.44728e+06 | -6.26254e+06 | -184736 | 383552 | N | 692 |
+| `bench_dregon_Motor3_70` | bench | 1 | 115 | 0.1692 | 0.015 | 0.0000 / 0.0267 | 0.001 / 0.225 | 69.582 | -72.95 | -5.45217e+06 | -5.27695e+06 | -175221 | 342512 | N | 688 |
+| `bench_dregon_Motor3_80` | bench | 1 | 101 | 33.2351 | 100031.043 | 0.1225 / 0.1634 | 1.072 / 433.364 | 78.649 | -48.19 | -1.17772e+07 | -1.13825e+07 | -394656 | 1204568 | N | 1473 |
+| `bench_dregon_Motor3_90` | bench | 1 | 90 | 0.1302 | 0.709 | 0.0030 / 0.0060 | 0.010 / 0.038 | 88.566 | -76.38 | -6.0966e+06 | -5.91186e+06 | -184739 | 360968 | N | 716 |
+| `bench_dregon_Motor4_50` | bench | 1 | 130 | 0.5330 | 40.081 | 0.5050 / 0.2102 | 0.686 / 438.406 | 49.787 | -59.69 | -1.3784e+07 | -1.32871e+07 | -496927 | 1204568 | N | 1560 |
+| `bench_dregon_Motor4_60` | bench | 1 | 130 | 0.7502 | 213.769 | 0.0000 / 0.0066 | 0.000 / 0.274 | 59.791 | -60.78 | -8.59845e+06 | -8.34181e+06 | -256643 | 646984 | N | 1176 |
+| `bench_dregon_Motor4_70` | bench | 1 | 116 | 1.9767 | 0.002 | 0.0008 / 0.0082 | 0.001 / 0.025 | 69.443 | -74.75 | -6.72391e+06 | -6.52378e+06 | -200127 | 408032 | N | 853 |
+| `bench_dregon_Motor4_80` | bench | 1 | 99 | 0.4842 | 0.009 | 0.0034 / 0.0048 | 0.007 / 0.010 | 81.212 | -75.59 | -5.51329e+06 | -5.34866e+06 | -164630 | 327808 | N | 589 |
+| `bench_dregon_Motor4_90` | bench | 1 | 89 | 8.0254 | 5957.236 | 0.0875 / 0.0640 | 226.935 / 61.741 | 89.399 | -51.26 | -5.70708e+06 | -5.51666e+06 | -190422 | 602240 | N | 868 |
+| `bench_dregon_allMotors_70` | bench | 4 | 115 | 1.0281 | 131.974 | 0.3886 / 0.2678 | 13.909 / 4.423 | 63.928, 67.685, 68.752, 69.571 | -36.97 | -1.08644e+07 | -1.06822e+07 | -182250 | 1367848 | N | 3721 |
 | `bench_point_AVQ__S1_seq1_w1` | bench | 4 | 102 | 2.3079 | 112.447 | 1.3951 / 0.0268 | 0.077 / 0.172 | 77.862, 77.979, 77.943, 78.592 | -42.59 | -1.63075e+07 | -1.58891e+07 | -418452 | 1720808 | N | 2958 |
 | `bench_point_AVQ__S1_seq1_w3` | bench | 4 | 102 | 1.3509 | 10.677 | 0.1449 / 0.0179 | 31.000 / 0.133 | 77.677, 77.710, 77.989, 78.506 | -40.51 | -1.54484e+07 | -1.50778e+07 | -370573 | 1720808 | N | 5614 |
 | `bench_point_AVQ__S1_seq2_w0` | bench | 4 | 81 | 5.3980 | 260.647 | 0.0024 / 0.1354 | 0.110 / 37.685 | 97.912, 98.240, 99.462, 97.631 | -38.59 | -1.38738e+07 | -1.35726e+07 | -301235 | 1720808 | N | 2071 |
@@ -41,14 +41,14 @@
 | `bench_point_DREGON-bench__motor_Motor2_50` | bench | 1 | 130 | 0.4464 | 84.689 | 0.1533 / 0.2184 | 10.156 / 282.103 | 48.441 | -57.60 | -8.00697e+06 | -7.73713e+06 | -269843 | 688328 | y | 2621 |
 | `bench_point_DREGON-bench__motor_Motor2_60` | bench | 1 | 130 | 1.6426 | 551.258 | 0.1795 / 0.0378 | 1.589 / 0.197 | 58.192 | -53.90 | -7.60448e+06 | -7.33161e+06 | -272870 | 688328 | N | 2610 |
 | `bench_point_DREGON-bench__motor_Motor2_70` | bench | 1 | 118 | 20.9582 | 42717.153 | 0.1026 / 0.0920 | 181.757 / 0.356 | 67.679 | -52.62 | -7.11958e+06 | -6.8785e+06 | -241079 | 688328 | N | 2569 |
-| `bench_point_DREGON-bench__motor_Motor2_80` | bench | 1 | 103 | 2.2028 | 238.155 | 0.0900 / 0.0117 | 256.249 / 0.179 | 77.318 | -49.87 | -6.89815e+06 | -6.66878e+06 | -229368 | 688328 | N | 1828 |
+| `bench_point_DREGON-bench__motor_Motor2_80` | bench | 1 | 103 | 2.2310 | 247.162 | 0.0896 / 0.0158 | 254.995 / 0.207 | 77.318 | -49.87 | -6.89814e+06 | -6.66879e+06 | -229346 | 688328 | N | 1006 |
 | `bench_point_DREGON-bench__motor_Motor2_90` | bench | 1 | 92 | 0.9011 | 108.427 | 0.0579 / 0.1188 | 173.378 / 165.014 | 86.937 | -49.00 | -6.58504e+06 | -6.37524e+06 | -209799 | 688328 | N | 2115 |
 | `bench_point_DREGON-bench__motor_Motor3_50` | bench | 1 | 130 | 137.7273 | 700013.305 | 0.0639 / 0.0353 | 0.331 / 0.251 | 49.160 | -54.20 | -7.78847e+06 | -7.51886e+06 | -269611 | 688328 | N | 1877 |
 | `bench_point_DREGON-bench__motor_Motor3_60` | bench | 1 | 130 | 3.4621 | 576.859 | 0.0064 / 0.0043 | 0.079 / 0.062 | 59.048 | -51.10 | -7.85785e+06 | -7.62074e+06 | -237109 | 745688 | N | 1830 |
 | `bench_point_DREGON-bench__motor_Motor3_70` | bench | 1 | 116 | 11.5999 | 4903.763 | 0.3796 / 0.0234 | 0.774 / 0.180 | 68.723 | -53.77 | -6.95796e+06 | -6.71346e+06 | -244504 | 688328 | N | 2580 |
 | `bench_point_DREGON-bench__motor_Motor3_80` | bench | 1 | 101 | 299.9612 | 5200651.879 | 0.3437 / 0.0605 | 0.657 / 0.392 | 78.656 | -48.12 | -7.21592e+06 | -6.9632e+06 | -252715 | 745688 | N | 681 |
 | `bench_point_DREGON-bench__motor_Motor3_90` | bench | 1 | 90 | 277.8057 | 2175545.401 | 0.0393 / 0.0014 | 0.369 / 0.055 | 88.479 | -50.12 | -6.43188e+06 | -6.22102e+06 | -210853 | 688328 | N | 2513 |
-| `bench_point_DREGON-bench__motor_Motor4_50` | bench | 1 | 130 | 1.6379 | 397.592 | 0.1040 / 0.0946 | 2481.000 / 5.066 | 49.796 | -60.28 | -8.44735e+06 | -8.13564e+06 | -311712 | 745688 | N | 2746 |
+| `bench_point_DREGON-bench__motor_Motor4_50` | bench | 1 | 130 | 1.0336 | 126.639 | 0.0386 / 0.1929 | 7.773 / 552.228 | 49.796 | -59.69 | -8.45332e+06 | -8.13869e+06 | -314627 | 745688 | N | 1009 |
 | `bench_point_DREGON-bench__motor_Motor4_60` | bench | 1 | 130 | 2.0270 | 1294.616 | 0.0692 / 0.0125 | 57.511 / 0.071 | 59.813 | -49.68 | -7.89144e+06 | -7.65808e+06 | -233365 | 745688 | N | 2734 |
 | `bench_point_DREGON-bench__motor_Motor4_70` | bench | 1 | 115 | 68.3250 | 394311.546 | 0.1081 / 0.0249 | 295.393 / 0.202 | 69.513 | -51.02 | -7.53493e+06 | -7.2629e+06 | -272026 | 745688 | N | 2689 |
 | `bench_point_DREGON-bench__motor_Motor4_80` | bench | 1 | 100 | 1.9450 | 369.378 | 0.1074 / 0.0380 | 293.232 / 0.248 | 79.610 | -50.87 | -6.6102e+06 | -6.3714e+06 | -238801 | 688328 | N | 2541 |
@@ -164,14 +164,15 @@
 | `bench_point_SPCUP19-egonoise__Idea_ssu__stationary_1` | bench | 4 | 82 | 1.7847 | 12.465 | 0.0196 / 10.3262 | 0.023 / 115.498 | 95.495, 94.664, 97.211, 92.175 | -35.94 | -1.9771e+06 | -1.96821e+06 | -8889.07 | 215101 | N | 2625 |
 | `dregon_room2_floor` | flight_floor_only | 4 | 88 | 0.3220 | 0.017 | 0.0018 / 0.0010 | 0.011 / 0.007 | label | -36.15 | -1.76496e+07 | -1.74812e+07 | -168417 | 2056320 | N | 2377 |
 | `michaels_fly125_cruise` | flight | 4 | 81 | 8.3785 | 199.781 | 0.0016 / 0.5953 | 0.049 / 75.633 | label | -32.79 | -2.4362e+07 | -2.36846e+07 | -677432 | 2064384 | N | 6470 |
+| `michaels_fly125_cruise` | flight | 4 | 81 | 5.9857 | 0.500 | 0.0013 / 0.6835 | 2.000 / 75.633 | label | -33.05 | -2.43351e+07 | -2.36592e+07 | -675891 | 2064384 | N | 4799 |
 
 ## Population median [IQR]
 
 | set | n | sigma_nu | lam | sigma_eps even | sigma_eps odd | lam_eps even | lam_eps odd |
 |---|--:|---|---|---|---|---|---|
-| DREGON single-motor bench (all throttles) | 20 | 0.4564 [0.1768, 1.746] | 0.1237 [0.002807, 139.7] | 0.005609 [0.002322, 0.08816] | 0.004661 [0.001855, 0.03105] | 0.04025 [0.01067, 1.316] | 0.02525 [0.01628, 0.2558] |
-| survey bench points | 135 | 3.554 [1.354, 9.075] | 138.7 [5.202, 580.2] | 0.158 [0.08168, 0.2584] | 0.3561 [0.09581, 0.9627] | 0.7742 [0.1432, 97.53] | 0.623 [0.2475, 11.43] |
-| flight | 2 | 4.35 [2.336, 6.364] | 99.9 [49.96, 149.8] | 0.001686 [0.00165, 0.001721] | 0.2981 [0.1495, 0.4467] | 0.03028 [0.02072, 0.03984] | 37.82 [18.91, 56.73] |
+| DREGON single-motor bench (all throttles) | 20 | 0.7439 [0.278, 2.128] | 0.4002 [0.007736, 249.8] | 0.006812 [0.00173, 0.1017] | 0.01745 [0.005216, 0.1679] | 0.01004 [0.0008963, 0.7823] | 0.2073 [0.02173, 84.41] |
+| survey bench points | 135 | 3.554 [1.332, 9.075] | 126.6 [5.202, 580.2] | 0.158 [0.07958, 0.2584] | 0.3561 [0.09759, 0.9627] | 0.7742 [0.1432, 88.81] | 0.623 [0.2475, 12.87] |
+| flight | 3 | 5.986 [3.154, 7.182] | 0.5 [0.2584, 100.1] | 0.001614 [0.00148, 0.001686] | 0.5953 [0.2981, 0.6394] | 0.0494 [0.03028, 1.025] | 75.63 [37.82, 75.63] |
 
 ## Four-motor validation
 
@@ -179,12 +180,44 @@
 
 | parameter | four-motor | per-rotor geo-mean | ratio | per-rotor min/max |
 |---|--:|--:|--:|---|
-| `sigma_nu` | 0.9979 | 0.322 | 3.099 | 0.1664 / 1.936 |
-| `lam` | 129 | 0.01676 | 7694.341 | 0.002062 / 0.1572 |
-| `sigma_eps_even` | 0.3878 | 0.001757 | 220.695 | 9.493e-05 / 0.03321 |
-| `sigma_eps_odd` | 0.2843 | 0.0009626 | 295.307 | 4.645e-05 / 0.03598 |
-| `lam_eps_even` | 14.09 | 0.01116 | 1262.725 | 0.0001115 / 0.2212 |
-| `lam_eps_odd` | 3.802 | 0.007474 | 508.726 | 5.319e-05 / 0.24 |
+| `sigma_nu` | 1.028 | 0.6051 | 1.699 | 0.1692 / 2.125 |
+| `lam` | 132 | 0.008895 | 14836.144 | 0.002147 / 0.09123 |
+| `sigma_eps_even` | 0.3886 | 0.0003183 | 1220.714 | 5.917e-06 / 0.03112 |
+| `sigma_eps_odd` | 0.2678 | 0.008351 | 32.065 | 0.003104 / 0.02672 |
+| `lam_eps_even` | 13.91 | 0.001064 | 13078.369 | 5.265e-06 / 0.3192 |
+| `lam_eps_odd` | 4.423 | 0.04796 | 92.219 | 0.009117 / 0.2254 |
+
+## Multi-start restarts
+
+Each support was fitted from several starts: start 0 from the data-driven initialisation, the others from a log-normal perturbation of the dynamics init (`OptimSpec.init_jitter`; a bare seed change is a no-op because a bench fit is deterministic). The REPORTED fit above is the start with the lowest polished objective. `best-median` and `best-worst` are that objective's advantage over the median and the worst start, per observed cell, against the same 0.0001 nats/cell tolerance the convergence test uses; `starts agree` is yes only when even the worst start is inside it. The dynamics columns are min / median / max over the starts.
+
+| support | starts | best nats/cell | best-median | best-worst | starts agree | L-BFGS conv | sigma_nu | lam | sigma_eps even | sigma_eps odd | lam_eps even | lam_eps odd |
+|---|--:|--:|--:|--:|:-:|:-:|---|---|---|---|---|---|
+| `bench_dregon_Motor1_50` | 4 | -11.7280 | 0.00658 | 0.00667 | N | N | 4.85 / 37.6 / 44.9 | 4.36e+03 / 1.08e+05 / 1.48e+05 | 0.0823 / 0.0842 / 114 | 0.0117 / 0.0321 / 0.181 | 2.38e-05 / 177 / 183 | 0.266 / 0.957 / 1.01e+03 |
+| `bench_dregon_Motor1_60` | 4 | -10.8723 | 0.00132 | 0.00157 | N | N | 1.71 / 1.75 / 2.14 | 232 / 248 / 358 | 3.82e-05 / 0.00551 / 0.0348 | 0.0149 / 0.0362 / 0.0658 | 0.00276 / 0.0342 / 0.0819 | 0.0737 / 0.197 / 0.286 |
+| `bench_dregon_Motor1_70` | 4 | -16.4217 | 0.0191 | 0.0448 | N | N | 0.172 / 0.19 / 1.18 | 1.74e-05 / 0.0463 / 0.22 | 0.0101 / 0.0224 / 0.0341 | 0.000279 / 0.000853 / 0.0031 | 0.0432 / 0.275 / 0.511 | 0.00346 / 0.0538 / 0.103 |
+| `bench_dregon_Motor1_80` | 4 | -10.1308 | 0.000254 | 0.000414 | N | y | 0.816 / 0.822 / 0.834 | 13.3 / 14 / 14.3 | 0.0938 / 0.0943 / 0.0948 | 0.0214 / 0.0301 / 0.0473 | 103 / 104 / 107 | 0.189 / 0.453 / 3.14 |
+| `bench_dregon_Motor1_90` | 4 | -9.6238 | 0.0109 | 0.0216 | N | N | 4 / 4.6 / 5.38 | 475 / 873 / 1.44e+03 | 0.205 / 0.343 / 0.363 | 0.171 / 0.224 / 0.281 | 1.11 / 3.08 / 6 | 123 / 138 / 158 |
+| `bench_dregon_Motor2_50` | 4 | -11.8603 | 0.000163 | 0.00034 | N | N | 0.459 / 0.466 / 0.494 | 62.7 / 63.2 / 71.7 | 0.336 / 0.378 / 0.406 | 0.222 / 0.223 / 0.224 | 1.18 / 1.29 / 1.58 | 213 / 215 / 216 |
+| `bench_dregon_Motor2_60` | 4 | -16.9319 | 0.000192 | 0.0164 | N | N | 0.156 / 0.162 / 0.164 | 2.44e-06 / 0.00129 / 0.00151 | 8.91e-09 / 0.00153 / 0.00204 | 2.05e-06 / 0.00184 / 0.00269 | 3.85e-05 / 0.0112 / 0.0249 | 0.000791 / 0.025 / 0.045 |
+| `bench_dregon_Motor2_70` | 4 | -16.8929 | 0.0214 | 0.0222 | N | N | 0.181 / 0.183 / 2.12 | 0.00215 / 0.0145 / 0.0162 | 2.5e-06 / 0.000844 / 0.00281 | 0.0016 / 0.00526 / 0.00813 | 5.26e-06 / 0.00737 / 0.0489 | 0.00912 / 0.0428 / 0.0935 |
+| `bench_dregon_Motor2_80` | 4 | -16.9689 | 0.000152 | 0.00026 | N | N | 0.712 / 0.73 / 0.738 | 0.00222 / 0.00346 / 0.00385 | 0.00292 / 0.00383 / 0.00488 | 0.00321 / 0.00363 / 0.00536 | 0.00652 / 0.00878 / 0.0145 | 0.00597 / 0.00979 / 0.0145 |
+| `bench_dregon_Motor2_90` | 4 | -16.8786 | 1.93e-05 | 6.64e-05 | y | N | 0.303 / 0.307 / 0.312 | 0.00963 / 0.00995 / 0.0103 | 0.00227 / 0.00292 / 0.00352 | 0.00208 / 0.00302 / 0.00359 | 0.00683 / 0.013 / 0.0203 | 0.0116 / 0.0179 / 0.0288 |
+| `bench_dregon_Motor3_50` | 4 | -16.5112 | 0.000202 | 0.0006 | N | N | 0.0842 / 0.0853 / 0.0869 | 0.0393 / 0.0458 / 0.0488 | 0.0125 / 0.0557 / 0.121 | 1.83 / 1.93 / 2.06 | 0.174 / 0.28 / 0.537 | 1.89 / 2.42 / 2.84 |
+| `bench_dregon_Motor3_60` | 4 | -16.8094 | 0.00957 | 0.0256 | N | N | 0.166 / 1.33 / 1.51 | 0.00126 / 0.00163 / 0.00188 | 3.88e-18 / 0.00328 / 0.00874 | 0.00195 / 0.00225 / 0.00429 | 3.12e-12 / 0.000199 / 0.00609 | 0.0034 / 0.0162 / 0.051 |
+| `bench_dregon_Motor3_70` | 4 | -15.9182 | 0.00393 | 0.0209 | N | N | 0.166 / 0.169 / 0.175 | 0.0145 / 0.119 / 0.295 | 5.92e-06 / 0.00173 / 0.00867 | 0.0134 / 0.0242 / 0.0335 | 0.000919 / 0.0751 / 0.305 | 0.214 / 0.367 / 1.03 |
+| `bench_dregon_Motor3_80` | 4 | -9.7771 | 0.0044 | 0.0168 | N | N | 2.17 / 3.48 / 33.2 | 460 / 1.4e+03 / 1e+05 | 0.0649 / 0.0942 / 0.367 | 0.000143 / 0.0633 / 0.163 | 0.794 / 364 / 2.93e+03 | 0.033 / 139 / 433 |
+| `bench_dregon_Motor3_90` | 4 | -16.8896 | 0.000692 | 0.00611 | N | N | 0.119 / 0.129 / 0.13 | 0.00445 / 0.13 / 0.709 | 0.000126 / 0.00189 / 0.00305 | 0.00137 / 0.00267 / 0.00599 | 0.0101 / 0.0188 / 0.035 | 0.0378 / 0.0499 / 0.0634 |
+| `bench_dregon_Motor4_50` | 4 | -11.4431 | 0.000186 | 0.00038 | N | N | 0.479 / 0.517 / 0.626 | 32.2 / 37 / 56.8 | 0.358 / 0.465 / 0.505 | 0.209 / 0.21 / 0.211 | 0.686 / 0.923 / 1 | 436 / 441 / 446 |
+| `bench_dregon_Motor4_60` | 4 | -13.2901 | 0.00504 | 0.00834 | N | N | 0.476 / 0.575 / 0.75 | 89.7 / 132 / 214 | 9.56e-11 / 3.83e-08 / 3.83e-07 | 5.01e-05 / 0.00483 / 0.00663 | 4.49e-06 / 5.95e-05 / 0.000372 | 0.00419 / 0.0739 / 0.274 |
+| `bench_dregon_Motor4_70` | 4 | -16.4789 | 0.00109 | 0.00201 | N | N | 1.91 / 1.94 / 1.98 | 0.00172 / 0.00246 / 0.00272 | 0.000368 / 0.000828 / 0.01 | 0.000206 / 0.00588 / 0.00819 | 0.000337 / 0.00107 / 0.00133 | 0.000179 / 0.0135 / 0.025 |
+| `bench_dregon_Motor4_80` | 4 | -16.8186 | 8.39e-05 | 0.000173 | N | N | 0.204 / 0.205 / 0.484 | 0.00903 / 0.0358 / 0.0377 | 0.00109 / 0.00207 / 0.0034 | 0.00146 / 0.0021 / 0.00477 | 0.00665 / 0.0274 / 0.0564 | 0.0102 / 0.0357 / 0.0817 |
+| `bench_dregon_Motor4_90` | 4 | -9.4764 | 0.000758 | 0.00114 | N | N | 4.1 / 6.15 / 15.8 | 1.43e+03 / 3.76e+03 / 2.15e+04 | 0.084 / 0.0861 / 0.0875 | 0.0112 / 0.0138 / 0.064 | 227 / 282 / 291 | 0.178 / 0.31 / 61.7 |
+| `bench_dregon_allMotors_70` | 4 | -7.9427 | 0.000375 | 0.00243 | N | N | 1.03 / 1.6 / 1.95 | 132 / 178 / 304 | 0.383 / 0.408 / 0.461 | 0.23 / 0.254 / 1.81 | 5.78 / 10.2 / 13.9 | 0.0869 / 5.8 / 9.4 |
+| `bench_point_DREGON-bench__motor_Motor2_80` | 3 | -10.0216 | 0.00256 | 0.00463 | N | N | 2.23 / 98.2 / 102 | 247 / 5.76e+05 / 6.07e+05 | 0.0734 / 0.078 / 0.0896 | 0.0158 / 0.03 / 0.0342 | 215 / 236 / 255 | 0.207 / 0.583 / 1.21 |
+| `bench_point_DREGON-bench__motor_Motor4_50` | 3 | -11.3363 | 6.64e-05 | 0.00771 | N | N | 0.982 / 1.03 / 1.66 | 114 / 127 / 376 | 0.0386 / 0.1 / 0.104 | 0.0489 / 0.192 / 0.193 | 1.14 / 7.77 / 2.7e+03 | 29.1 / 552 / 571 |
+
+1 of 23 supports have every start inside the tolerance. The widest disagreement is `bench_dregon_Motor1_70` at 0.0448 nats/cell, 448 times the tolerance. `lam` alone spans a factor of 3.03 (median over supports) and up to 1.26e+04 across the starts of one support: on this evidence the R1 bench MAP problem is multi-modal, and a number computed from a single start is a draw from that multiplicity rather than an estimate.
 
 ## Fitted `lam_eps` against the measured OU verdict
 
@@ -192,43 +225,48 @@ The long-lag study (`results/noise_v2/decoherence_long`) found a per-order ceili
 
 | set | n | lam_eps even median [IQR] | lam_eps odd median [IQR] | within a factor of 3 of the measured window |
 |---|--:|---|---|--:|
-| DREGON single-motor bench (all throttles) | 20 | 0.04025 [0.01067, 1.316] | 0.02525 [0.01628, 0.2558] | 10 / 40 |
-| survey bench points | 135 | 0.7742 [0.1432, 97.53] | 0.623 [0.2475, 11.43] | 109 / 270 |
-| flight | 2 | 0.03028 [0.02072, 0.03984] | 37.82 [18.91, 56.73] | 0 / 4 |
+| DREGON single-motor bench (all throttles) | 20 | 0.01004 [0.0008963, 0.7823] | 0.2073 [0.02173, 84.41] | 9 / 40 |
+| survey bench points | 135 | 0.7742 [0.1432, 88.81] | 0.623 [0.2475, 12.87] | 109 / 270 |
+| flight | 3 | 0.0494 [0.03028, 1.025] | 75.63 [37.82, 75.63] | 1 / 6 |
 
 ## Prior edges and non-convergence
 
-- `bench_dregon_Motor1_50`: lam = 134690.69 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
-- `bench_dregon_Motor1_50`: sigma_nu = 42.6816 outside the prior's central 95 %
-- `bench_dregon_Motor1_60`: lam = 229.55 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_dregon_Motor1_50`: lam = 4357.96 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_dregon_Motor1_50`: sigma_nu = 4.8494 outside the prior's central 95 %
+- `bench_dregon_Motor1_50`: NOT converged (L-BFGS restart still improving)
+- `bench_dregon_Motor1_60`: lam = 358.09 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_dregon_Motor1_60`: sigma_nu = 2.1358 outside the prior's central 95 %
 - `bench_dregon_Motor1_60`: NOT converged (L-BFGS restart still improving)
 - `bench_dregon_Motor1_70`: NOT converged (L-BFGS restart still improving)
-- `bench_dregon_Motor1_90`: lam = 445.98 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
-- `bench_dregon_Motor1_90`: sigma_nu = 3.9342 outside the prior's central 95 %
+- `bench_dregon_Motor1_90`: lam = 1105.27 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_dregon_Motor1_90`: sigma_nu = 4.6839 outside the prior's central 95 %
 - `bench_dregon_Motor1_90`: NOT converged (L-BFGS restart still improving)
-- `bench_dregon_Motor2_50`: lam = 61.21 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_dregon_Motor2_50`: lam = 62.66 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_dregon_Motor2_50`: NOT converged (L-BFGS restart still improving)
 - `bench_dregon_Motor2_60`: NOT converged (L-BFGS restart still improving)
+- `bench_dregon_Motor2_70`: sigma_nu = 2.1249 outside the prior's central 95 %
 - `bench_dregon_Motor2_70`: NOT converged (L-BFGS restart still improving)
 - `bench_dregon_Motor2_80`: NOT converged (L-BFGS restart still improving)
 - `bench_dregon_Motor2_90`: NOT converged (L-BFGS restart still improving)
-- `bench_dregon_Motor3_50`: sigma_nu = 0.0840 outside the prior's central 95 %
+- `bench_dregon_Motor3_50`: sigma_nu = 0.0869 outside the prior's central 95 %
 - `bench_dregon_Motor3_50`: NOT converged (L-BFGS restart still improving)
 - `bench_dregon_Motor3_60`: NOT converged (L-BFGS restart still improving)
 - `bench_dregon_Motor3_70`: NOT converged (L-BFGS restart still improving)
-- `bench_dregon_Motor3_80`: lam = 445.84 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
-- `bench_dregon_Motor3_80`: sigma_nu = 2.1576 outside the prior's central 95 %
+- `bench_dregon_Motor3_80`: lam = 100031.04 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_dregon_Motor3_80`: sigma_nu = 33.2351 outside the prior's central 95 %
 - `bench_dregon_Motor3_80`: NOT converged (L-BFGS restart still improving)
 - `bench_dregon_Motor3_90`: NOT converged (L-BFGS restart still improving)
+- `bench_dregon_Motor4_50`: lam = 40.08 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_dregon_Motor4_50`: NOT converged (L-BFGS restart still improving)
-- `bench_dregon_Motor4_60`: lam = 109.72 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_dregon_Motor4_60`: lam = 213.77 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_dregon_Motor4_60`: NOT converged (L-BFGS restart still improving)
-- `bench_dregon_Motor4_70`: sigma_nu = 1.9355 outside the prior's central 95 %
+- `bench_dregon_Motor4_70`: sigma_nu = 1.9767 outside the prior's central 95 %
 - `bench_dregon_Motor4_70`: NOT converged (L-BFGS restart still improving)
-- `bench_dregon_Motor4_90`: lam = 1477.30 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
-- `bench_dregon_Motor4_90`: sigma_nu = 4.1787 outside the prior's central 95 %
+- `bench_dregon_Motor4_80`: NOT converged (L-BFGS restart still improving)
+- `bench_dregon_Motor4_90`: lam = 5957.24 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_dregon_Motor4_90`: sigma_nu = 8.0254 outside the prior's central 95 %
 - `bench_dregon_Motor4_90`: NOT converged (L-BFGS restart still improving)
-- `bench_dregon_allMotors_70`: lam = 128.98 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_dregon_allMotors_70`: lam = 131.97 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_dregon_allMotors_70`: NOT converged (L-BFGS restart still improving)
 - `bench_point_AVQ__S1_seq1_w1`: lam = 112.45 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_point_AVQ__S1_seq1_w1`: sigma_nu = 2.3079 outside the prior's central 95 %
@@ -259,8 +297,8 @@ The long-lag study (`results/noise_v2/decoherence_long`) found a per-order ceili
 - `bench_point_DREGON-bench__motor_Motor2_70`: lam = 42717.15 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_point_DREGON-bench__motor_Motor2_70`: sigma_nu = 20.9582 outside the prior's central 95 %
 - `bench_point_DREGON-bench__motor_Motor2_70`: NOT converged (L-BFGS restart still improving)
-- `bench_point_DREGON-bench__motor_Motor2_80`: lam = 238.16 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
-- `bench_point_DREGON-bench__motor_Motor2_80`: sigma_nu = 2.2028 outside the prior's central 95 %
+- `bench_point_DREGON-bench__motor_Motor2_80`: lam = 247.16 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_point_DREGON-bench__motor_Motor2_80`: sigma_nu = 2.2310 outside the prior's central 95 %
 - `bench_point_DREGON-bench__motor_Motor2_80`: NOT converged (L-BFGS restart still improving)
 - `bench_point_DREGON-bench__motor_Motor2_90`: lam = 108.43 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_point_DREGON-bench__motor_Motor2_90`: NOT converged (L-BFGS restart still improving)
@@ -279,7 +317,7 @@ The long-lag study (`results/noise_v2/decoherence_long`) found a per-order ceili
 - `bench_point_DREGON-bench__motor_Motor3_90`: lam = 2175545.40 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_point_DREGON-bench__motor_Motor3_90`: sigma_nu = 277.8057 outside the prior's central 95 %
 - `bench_point_DREGON-bench__motor_Motor3_90`: NOT converged (L-BFGS restart still improving)
-- `bench_point_DREGON-bench__motor_Motor4_50`: lam = 397.59 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
+- `bench_point_DREGON-bench__motor_Motor4_50`: lam = 126.64 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_point_DREGON-bench__motor_Motor4_50`: NOT converged (L-BFGS restart still improving)
 - `bench_point_DREGON-bench__motor_Motor4_60`: lam = 1294.62 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `bench_point_DREGON-bench__motor_Motor4_60`: sigma_nu = 2.0270 outside the prior's central 95 %
@@ -537,4 +575,6 @@ The long-lag study (`results/noise_v2/decoherence_long`) found a per-order ceili
 - `dregon_room2_floor`: NOT converged (L-BFGS restart still improving)
 - `michaels_fly125_cruise`: lam = 199.78 > 30 (label-chain regime, see the explainer's third consequence of the shaft prior)
 - `michaels_fly125_cruise`: sigma_nu = 8.3785 outside the prior's central 95 %
+- `michaels_fly125_cruise`: NOT converged (L-BFGS restart still improving)
+- `michaels_fly125_cruise`: sigma_nu = 5.9857 outside the prior's central 95 %
 - `michaels_fly125_cruise`: NOT converged (L-BFGS restart still improving)
