@@ -1,6 +1,6 @@
 # Noise model v2 — round 1 gate score: PARITY FAIL / STRETCH FAIL
 
-Top-level pass (legacy parity on both HPPNet gates): **false**. Stretch (frozen 0.70-gap DREGON target): **false**. All three frozen gates: **false**. Record `results/noise_v2/rounds/round1.json`, git `a66ecb9529cc`.
+Top-level pass (legacy parity on both HPPNet gates): **false**. Stretch (frozen 0.70-gap DREGON target): **false**. All three frozen gates: **false**. Record `results/noise_v2/rounds/round1.json`, git `066651e8eb31`.
 
 ## Candidates
 
@@ -8,6 +8,10 @@ Top-level pass (legacy parity on both HPPNet gates): **false**. Stretch (frozen 
 |---|---|---|---|---:|---|
 | `dregon_v2_floor_benchcomb` | dregon | `results/noise_v2/rounds/round1/fits/dregon_room2_floor__flight_floor_only.json` | **NO** (none, |grad| 2318) | 2377 | `nv2-r1-score-dregon-662433` |
 | `michaels_v2_fly125cruise` | michaels | `results/noise_v2/rounds/round1/fits/michaels_fly125_cruise__flight.json` | **NO** (none, |grad| 8555) | 6470 | `nv2-r1-score-michaels2-c3bbbd` |
+| `michaels_v2_retry_pinned_lam` | michaels | `results/noise_v2/rounds/round1/fits/michaels_fly125_cruise__flight_retry.json` | **NO** (none, |grad| 2863) | 4799 | `nv2-r1-score-michaels-re-eafb5e` |
+
+* `dregon_v2_floor_benchcomb` — COMBS DEFECTIVE (BenchDiag in progress) — NOT a parity result, an end-to-end proof of the DREGON render+probe pipeline. The four bench_dregon_Motor*_70 fits this arm freezes its comb from put the in-band per-order profile ~40 dB BELOW the floor (Motor1_70, orders 2-30, -113...-125 dB against a -77 dB floor), so the rendered audio carries essentially no harmonic comb and the frozen tracker has nothing to lock onto; that is what the 78.803342 rev/s reads. The pipeline itself is verified on the same job by the real arm, which reproduces the frozen DREGON real PIT MAE 1.2187080818 to 2.7e-09 relative. Re-run with corrected combs: --fit dregon=<new floor fit path>.
+* `michaels_v2_retry_pinned_lam` — The one permitted Michael's retry (R1Basin, fit git 2e96fa29), with lam=0.5 s^-1 and lam_eps=[2.0, 75.63307] PINNED on Main's long-lag decision; also NOT converged. It is WORSE than the unpinned fit on every gate the render feeds: equal-regime 19.376405 vs 16.799053 rev/s, cruise 1.138637 vs 0.809363 rev/s, proxy 1.6330 vs 1.4156 dB, comb-band likelihood margin -1200.59 vs -1497.61 nats/s. The unpinned fit therefore stays the primary Michael's arm of the joint gate.
 
 ## The two bars
 
@@ -24,9 +28,11 @@ PARITY is the legacy previous best: DREGON synthetic cruise PIT MAE 2.187786 rev
 |---|---:|---:|---:|---:|
 | `dregon_v2_floor_benchcomb` | 78.803342 rev/s (95 % upper 79.482310) | 3.7518 (1.9786) | 2.6359 | not run |
 | `michaels_v2_fly125cruise` | 16.799053 rev/s (ratio 5.5504) | 1.4156 (1.2197) | 1.6456 | -1,497.6146 nats/s |
+| `michaels_v2_retry_pinned_lam` | 19.376405 rev/s (ratio 6.4019) | 1.6330 (1.2197) | 1.5963 | -1,200.5896 nats/s |
 
 Rendered audio of `dregon_v2_floor_benchcomb` (uncommitted): `s3://omnirun-artifacts/nv2-r1-score-dregon-662433/outputs/results/noise_v2/rounds/round1/render/audio/dregon_v2` (job `nv2-r1-score-dregon-662433`, written to `results/noise_v2/rounds/round1/render/audio/dregon_v2` in the job's worktree).
 Rendered audio of `michaels_v2_fly125cruise` (uncommitted): `s3://omnirun-artifacts/nv2-r1-score-michaels2-c3bbbd/outputs/results/noise_v2/rounds/round1/render/audio/michaels_v2` (job `nv2-r1-score-michaels2-c3bbbd`, written to `results/noise_v2/rounds/round1/render/audio/michaels_v2` in the job's worktree).
+Rendered audio of `michaels_v2_retry_pinned_lam` (uncommitted): `s3://omnirun-artifacts/nv2-r1-score-michaels-re-eafb5e/outputs/results/noise_v2/rounds/round1/render/audio/michaels_v2_retry` (job `nv2-r1-score-michaels-re-eafb5e`, written to `results/noise_v2/rounds/round1/render/audio/michaels_v2_retry` in the job's worktree).
 
 ## Gate verdicts
 
@@ -49,11 +55,11 @@ Rendered audio of `michaels_v2_fly125cruise` (uncommitted): `s3://omnirun-artifa
 | dregon | `updown_nosource_room2@1511903578.348311+4.000000` | cruise | 1.694930 | 78.003475 | 5.051474 |
 | dregon | `rectangle_nosource_room2@1511905725.952559+4.000000` | cruise | 1.685142 | 78.142193 | 8.567542 |
 | dregon | `spinning_nosource_room2@1511905200.978012+4.000000` | cruise | 1.186931 | 79.008035 | 6.496934 |
-| michaels | `FLY124@8.000000+8.000000` | standby | 0.398474 | 32.640554 | 1.259826 |
-| michaels | `FLY124@16.000000+8.000000` | standby | 0.289978 | 32.623536 | 1.072229 |
-| michaels | `FLY124@27.680000+8.000000` | ramp | 3.171148 | 16.955751 | 1.930254 |
-| michaels | `FLY124@40.000000+8.000000` | cruise | 0.884854 | 1.108014 | 0.068582 |
-| michaels | `FLY124@56.000000+8.000000` | cruise | 0.290248 | 0.510712 | 0.018152 |
+| michaels | `FLY124@8.000000+8.000000` | standby | 0.398474 | 34.855680 | 1.629714 |
+| michaels | `FLY124@16.000000+8.000000` | standby | 0.289978 | 34.843977 | 1.397137 |
+| michaels | `FLY124@27.680000+8.000000` | ramp | 3.171148 | 22.140809 | 0.858307 |
+| michaels | `FLY124@40.000000+8.000000` | cruise | 0.884854 | 1.407458 | 0.321942 |
+| michaels | `FLY124@56.000000+8.000000` | cruise | 0.290248 | 0.869698 | 0.296574 |
 
 DREGON cruise: candidate mean 78.803342 rev/s over 5 recording-level clusters, one-sided 95 % interval [78.124375, 79.482310] (t and 20000-draw cluster bootstrap, conservative), against the frozen target 1.897063 = 1.218708 + 0.7 x (2.187786 - 1.218708). Margin -76.906280 rev/s.
 
@@ -78,8 +84,8 @@ Equal-regime mean 16.799053 rev/s against the frozen baseline 3.026661; ratio 5.
 | dregon_cruise | `updown_nosource_room2@1511903578.348311+4.000000` | 5.5492 | 0.0200 | 3.8886 | -5.5492 |
 | dregon_cruise | `rectangle_nosource_room2@1511905725.952559+4.000000` | 2.2950 | 0.0786 | 1.8778 | -2.2199 |
 | dregon_cruise | `spinning_nosource_room2@1511905200.978012+4.000000` | 2.7120 | 0.0175 | 1.6265 | -2.7120 |
-| michaels_cruise | `FLY124@40.000000+8.000000` | 0.5852 | 0.0658 | 1.2045 | +0.1672 |
-| michaels_cruise | `FLY124@56.000000+8.000000` | 2.2460 | 0.0873 | 2.0867 | +2.2460 |
+| michaels_cruise | `FLY124@40.000000+8.000000` | 0.5852 | 0.2170 | 1.2045 | +0.1672 |
+| michaels_cruise | `FLY124@56.000000+8.000000` | 2.2460 | 0.2730 | 2.0867 | +2.2460 |
 
 dregon_cruise: mean 3.7518 dB (spread 3.2542 over 5 supports) against the closure-0.7 gate 1.9786 dB = 2.4308 - 0.7 x (2.4308 - 1.7848); margin -1.7732 dB. Secondary `mr_ltas` 2.6359 dB (reported, never decisive).
 
@@ -116,7 +122,7 @@ Status `not_comparable`: The gitignored baseline calibration that selects the ol
 
 ## Exact blocker
 
-None for the round score itself: both candidates that exist were rendered on the frozen supports and probed with the frozen HPPNet checkpoint (sha256 verified in-job), and every gate is measured. What is NOT in this record: (a) a converged Michael's retry (R1Basin owns the one permitted retry; when it lands it becomes a second Michael's candidate row scored the same way); (b) best-of-4 multi-start DREGON bench fits — R1Fit's job nv2-r1-dregon-restarts-a7084c will REWRITE the 21 bench_dregon_*__bench.json files, so the frozen comb of the DREGON arm (log-mean of the four Motor*_70 fits) and therefore its numbers will move; (c) neither committed fit converged (both report optimiser.converged=false, which_converged=none), so both candidate rows are labelled as such.
+None for the round score itself: all three candidates that exist were rendered on the frozen supports and probed with the frozen HPPNet checkpoint (sha256 verified in-job), and every gate is measured; the real arm reproduces the frozen DREGON real PIT MAE to 2.7e-09. What the numbers are NOT: a parity verdict on a healthy DREGON comb — the four Motor*_70 bench combs frozen into the DREGON arm are defective (in-band profile ~40 dB below the floor; BenchDiag in progress), so that row is a pipeline proof and must be re-scored when corrected combs land, which needs only --fit dregon=<path>. Also outstanding: R1Fit's nv2-r1-dregon-restarts-a7084c will REWRITE the 21 bench_dregon_*__bench.json files as best-of-4, moving the frozen comb again; and no fit in this round converged (all three report optimiser.converged=false, which_converged=none).
 
 ## Provenance
 
@@ -147,3 +153,11 @@ The `Provenance` section above is kept verbatim from the earlier, unscored recor
 
 * `dregon_v2_floor_benchcomb` — fit git `a66ecb9529cc`, render/probe job `nv2-r1-score-dregon-662433`, arm record `results/noise_v2/rounds/round1/render/arm_dregon_v2.json`, render wall 130 s.
 * `michaels_v2_fly125cruise` — fit git `8093285f352c`, render/probe job `nv2-r1-score-michaels2-c3bbbd`, arm record `results/noise_v2/rounds/round1/render/arm_michaels_v2.json`, render wall 253 s.
+
+### Addendum — this scoring pass
+
+The `Provenance` section above is kept verbatim from the earlier, unscored record; the gates it calls `not_run` are the ones measured here, and whatever is still not run is named in `Exact blocker`. This pass:
+
+* `dregon_v2_floor_benchcomb` — fit git `a66ecb9529cc`, render/probe job `nv2-r1-score-dregon-662433`, arm record `results/noise_v2/rounds/round1/render/arm_dregon_v2.json`, render wall 130 s.
+* `michaels_v2_fly125cruise` — fit git `8093285f352c`, render/probe job `nv2-r1-score-michaels2-c3bbbd`, arm record `results/noise_v2/rounds/round1/render/arm_michaels_v2.json`, render wall 253 s.
+* `michaels_v2_retry_pinned_lam` — fit git `7ad5e82ffca9`, render/probe job `nv2-r1-score-michaels-re-eafb5e`, arm record `results/noise_v2/rounds/round1/render/arm_michaels_v2_retry.json`, render wall 250 s.

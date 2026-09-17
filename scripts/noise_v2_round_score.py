@@ -1257,6 +1257,7 @@ def compose(
     supports_index: Path | None,
     blocker: str | None,
     arm_jobs: dict[str, str] | None = None,
+    arm_notes: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """The round record: one candidate row per scored arm, gates recombined.
 
@@ -1336,6 +1337,7 @@ def compose(
         rows.append(
             dict(
                 name=cand["name"],
+                note=(arm_notes or {}).get(str(cand["name"])),
                 rigs=cand["rigs"],
                 primary_for=[r for r, a in primary.items() if a is arm],
                 fits=cand["fits"],
@@ -1577,6 +1579,11 @@ def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
                 f"| `{row['name']}` | {rig} | `{fit.get('path')}` | {label} | "
                 f"{_fmt(fit.get('wall_s'), '.0f')} | `{row.get('job') or '—'}` |"
             )
+    notes = [(row["name"], row["note"]) for row in payload["candidates"] if row.get("note")]
+    if notes:
+        out.append("")
+        for name, note in notes:
+            out.append(f"* `{name}` — {note}")
     out.append("")
     out.append("## The two bars")
     out.append("")
@@ -1785,6 +1792,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--job", default=None, help="the omnirun job id this pass runs under")
     ap.add_argument(
+        "--candidate-note",
+        action="append",
+        default=[],
+        metavar="CANDIDATE=TEXT",
+        help=(
+            "with --compose: a caveat printed under that candidate's row (e.g. a defective "
+            "frozen input that makes its numbers a pipeline proof, not a parity result)"
+        ),
+    )
+    ap.add_argument(
         "--audio-uri", default=None, help="where the dumped audio is retrievable (s3 URI)"
     )
     ap.add_argument(
@@ -1835,6 +1852,10 @@ def main(argv: list[str] | None = None) -> int:
             arm_jobs=dict(
                 str(spec).split("=", 1)
                 for spec in args.arm_job  # type: ignore[misc]
+            ),
+            arm_notes=dict(
+                str(spec).split("=", 1)
+                for spec in args.candidate_note  # type: ignore[misc]
             ),
         )
         RE.write_json(out_json, payload)
