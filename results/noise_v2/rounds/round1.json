@@ -1,0 +1,60 @@
+{
+ "schema": "noise-v2-round-score/1",
+ "round": 1,
+ "git": "b5d369de",
+ "status": "not_run",
+ "pass": false,
+ "fits": [],
+ "support_availability": {
+  "source": "results/noise_v2/rounds/round1/supports/index.json",
+  "n_supports_materialized": 0,
+  "sets": {
+   "dregon-bench": {"required": 21, "materialized": 0},
+   "bench-points": {"required": 135, "materialized": 0},
+   "dregon-floor": {"required": 10, "materialized": 0},
+   "michaels-cruise": {"required": 13, "materialized": 0}
+  },
+  "blocker": "The initial uni-cpu support builds and their one retries could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials. The initial submissions also lacked PYTHONPATH=src before execution; the retries reached dload and failed on credentials. No cache/index entry is treated as material."
+ },
+ "protocol": {
+  "render_seeds": [2001, 2002, 2003, 2004],
+  "n_mics": 8,
+  "hppnet": {
+   "experiment": "hppnet_l2_r2_s0",
+   "checkpoint": "best",
+   "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1",
+   "final_probe": "not_run"
+  },
+  "proxy": "ltas_abs_db on mic 0; mr_ltas report-only",
+  "likelihood": {"n_fft": 2048, "hop": 512, "pool": "FLY124 cruise supports", "band_edge_hz": 300.0, "decisive_band": "comb"}
+ },
+ "gates": {
+  "hppnet": {
+   "name": "hppnet_pit_mae",
+   "status": "not_run",
+   "pass": false,
+   "reason": "No scientifically valid R1 candidate fit exists. DREGON and Michael's supports materialized 0/N, so there is no candidate audio to render or score under the frozen HPPNet checkpoint protocol."
+  },
+  "proxy": {
+   "name": "proxy_ltas_abs_db",
+   "status": "not_run",
+   "pass": false,
+   "reason": "No scientifically valid R1 candidate fit exists, so candidate audio is unavailable for mic-0 ltas_abs_db or report-only mr_ltas."
+  },
+  "likelihood": {
+   "name": "likelihood_composite_risk",
+   "status": "not_run",
+   "pass": false,
+   "reason": "No scientifically valid R1 candidate fit or candidate expected periodogram exists for the two frozen FLY124 cruise supports; no model-versus-oracle likelihood is reported."
+  }
+ },
+ "legacy_smoke": {
+  "status": "not_comparable",
+  "job": "noise-v2-r1-legacy-smoke-453b44",
+  "git": "5d1ae657123f",
+  "dregon_cruise_pit_mae": {"observed": 2.1877857781959653, "frozen": 2.1877858830655468, "relative_delta": 4.793411556569538e-08},
+  "michaels_equal_regime_pit_mae": {"observed": 3.1994856005743766, "frozen": 3.026661398168452, "relative_delta": 0.05710060679747908},
+  "reason": "The gitignored baseline calibration that selects the old export family and per-recording route was unavailable. The DREGON number happens to reproduce its frozen scalar, but the Michael's replay does not; because the inputs are not proven identical, the 2% legacy-smoke criterion is intentionally not applied."
+ },
+ "blocker": "R1CoreRecovery confirmed that no scientifically valid R1 fit path exists: every required remote support materialized 0/N after one retry because dload credentials were unavailable."
+}
