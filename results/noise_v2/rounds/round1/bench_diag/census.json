@@ -1,0 +1,452 @@
+{
+ "schema": "noise-v2-bench-diag/1",
+ "what": "window level of every dregon-bench support vs the loudest window of its recording",
+ "envelope_step_s": 0.5,
+ "n_supports": 21,
+ "n_deficit_ge_6db": 13,
+ "n_deficit_ge_10db": 12,
+ "n_deficit_ge_20db": 10,
+ "supports": [
+  {
+   "name": "bench_dregon_Motor1_50",
+   "stationary_pass": true,
+   "duration_s": 41.0,
+   "segment": [
+    2.0,
+    43.0
+   ],
+   "recording_s": 45.0,
+   "window_mean_db": -59.07,
+   "loudest_same_length": {
+    "start_s": 0.0,
+    "mean_db": -58.84
+   },
+   "loudest_7s": {
+    "start_s": 5.5,
+    "mean_db": -54.96
+   },
+   "deficit_db": 0.23,
+   "deficit_vs_7s_db": 4.12
+  },
+  {
+   "name": "bench_dregon_Motor1_60",
+   "stationary_pass": true,
+   "duration_s": 6.763,
+   "segment": [
+    2.049,
+    8.811
+   ],
+   "recording_s": 45.0,
+   "window_mean_db": -56.47,
+   "loudest_same_length": {
+    "start_s": 4.0,
+    "mean_db": -51.53
+   },
+   "loudest_7s": {
+    "start_s": 4.0,
+    "mean_db": -51.53
+   },
+   "deficit_db": 4.95,
+   "deficit_vs_7s_db": 4.95
+  },
+  {
+   "name": "bench_dregon_Motor1_70",
+   "stationary_pass": false,
+   "duration_s": 7.293,
+   "segment": [
+    35.707,
+    43.0
+   ],
+   "recording_s": 45.0,
+   "window_mean_db": -71.95,
+   "loudest_same_length": {
+    "start_s": 17.5,
+    "mean_db": -47.68
+   },
+   "loudest_7s": {
+    "start_s": 17.5,
+    "mean_db": -47.66
+   },
+   "deficit_db": 24.28,
+   "deficit_vs_7s_db": 24.29
+  },
+  {
+   "name": "bench_dregon_Motor1_80",
+   "stationary_pass": true,
+   "duration_s": 21.0,
+   "segment": [
+    2.0,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -56.41,
+   "loudest_same_length": {
+    "start_s": 0.5,
+    "mean_db": -55.86
+   },
+   "loudest_7s": {
+    "start_s": 4.0,
+    "mean_db": -44.35
+   },
+   "deficit_db": 0.55,
+   "deficit_vs_7s_db": 12.06
+  },
+  {
+   "name": "bench_dregon_Motor1_90",
+   "stationary_pass": true,
+   "duration_s": 7.664,
+   "segment": [
+    2.0,
+    9.664
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -50.05,
+   "loudest_same_length": {
+    "start_s": 4.5,
+    "mean_db": -42.27
+   },
+   "loudest_7s": {
+    "start_s": 4.5,
+    "mean_db": -42.27
+   },
+   "deficit_db": 7.77,
+   "deficit_vs_7s_db": 7.78
+  },
+  {
+   "name": "bench_dregon_Motor2_50",
+   "stationary_pass": true,
+   "duration_s": 17.407,
+   "segment": [
+    5.593,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -61.39,
+   "loudest_same_length": {
+    "start_s": 1.5,
+    "mean_db": -57.7
+   },
+   "loudest_7s": {
+    "start_s": 4.0,
+    "mean_db": -53.36
+   },
+   "deficit_db": 3.69,
+   "deficit_vs_7s_db": 8.03
+  },
+  {
+   "name": "bench_dregon_Motor2_60",
+   "stationary_pass": true,
+   "duration_s": 7.098,
+   "segment": [
+    15.902,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -72.11,
+   "loudest_same_length": {
+    "start_s": 4.0,
+    "mean_db": -50.74
+   },
+   "loudest_7s": {
+    "start_s": 4.0,
+    "mean_db": -50.74
+   },
+   "deficit_db": 21.37,
+   "deficit_vs_7s_db": 21.37
+  },
+  {
+   "name": "bench_dregon_Motor2_70",
+   "stationary_pass": true,
+   "duration_s": 7.136,
+   "segment": [
+    15.864,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -72.92,
+   "loudest_same_length": {
+    "start_s": 4.0,
+    "mean_db": -46.05
+   },
+   "loudest_7s": {
+    "start_s": 4.0,
+    "mean_db": -46.05
+   },
+   "deficit_db": 26.87,
+   "deficit_vs_7s_db": 26.87
+  },
+  {
+   "name": "bench_dregon_Motor2_80",
+   "stationary_pass": false,
+   "duration_s": 4.0,
+   "segment": [
+    18.3,
+    22.3
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -74.18,
+   "loudest_same_length": {
+    "start_s": 10.0,
+    "mean_db": -42.03
+   },
+   "loudest_7s": {
+    "start_s": 8.5,
+    "mean_db": -42.11
+   },
+   "deficit_db": 32.16,
+   "deficit_vs_7s_db": 32.08
+  },
+  {
+   "name": "bench_dregon_Motor2_90",
+   "stationary_pass": true,
+   "duration_s": 5.62,
+   "segment": [
+    17.38,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -72.37,
+   "loudest_same_length": {
+    "start_s": 11.0,
+    "mean_db": -40.09
+   },
+   "loudest_7s": {
+    "start_s": 9.5,
+    "mean_db": -40.22
+   },
+   "deficit_db": 32.28,
+   "deficit_vs_7s_db": 32.15
+  },
+  {
+   "name": "bench_dregon_Motor3_50",
+   "stationary_pass": true,
+   "duration_s": 9.087,
+   "segment": [
+    13.913,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -70.9,
+   "loudest_same_length": {
+    "start_s": 4.0,
+    "mean_db": -51.29
+   },
+   "loudest_7s": {
+    "start_s": 3.0,
+    "mean_db": -51.25
+   },
+   "deficit_db": 19.61,
+   "deficit_vs_7s_db": 19.65
+  },
+  {
+   "name": "bench_dregon_Motor3_60",
+   "stationary_pass": true,
+   "duration_s": 6.687,
+   "segment": [
+    16.313,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -72.14,
+   "loudest_same_length": {
+    "start_s": 9.5,
+    "mean_db": -46.53
+   },
+   "loudest_7s": {
+    "start_s": 9.0,
+    "mean_db": -46.54
+   },
+   "deficit_db": 25.61,
+   "deficit_vs_7s_db": 25.6
+  },
+  {
+   "name": "bench_dregon_Motor3_70",
+   "stationary_pass": true,
+   "duration_s": 5.971,
+   "segment": [
+    17.029,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -74.82,
+   "loudest_same_length": {
+    "start_s": 6.5,
+    "mean_db": -43.67
+   },
+   "loudest_7s": {
+    "start_s": 6.5,
+    "mean_db": -43.72
+   },
+   "deficit_db": 31.15,
+   "deficit_vs_7s_db": 31.1
+  },
+  {
+   "name": "bench_dregon_Motor3_80",
+   "stationary_pass": true,
+   "duration_s": 21.0,
+   "segment": [
+    2.0,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -53.36,
+   "loudest_same_length": {
+    "start_s": 0.5,
+    "mean_db": -52.75
+   },
+   "loudest_7s": {
+    "start_s": 4.0,
+    "mean_db": -41.36
+   },
+   "deficit_db": 0.62,
+   "deficit_vs_7s_db": 12.0
+  },
+  {
+   "name": "bench_dregon_Motor3_90",
+   "stationary_pass": true,
+   "duration_s": 6.293,
+   "segment": [
+    16.707,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -72.36,
+   "loudest_same_length": {
+    "start_s": 7.5,
+    "mean_db": -39.56
+   },
+   "loudest_7s": {
+    "start_s": 7.5,
+    "mean_db": -39.55
+   },
+   "deficit_db": 32.8,
+   "deficit_vs_7s_db": 32.81
+  },
+  {
+   "name": "bench_dregon_Motor4_50",
+   "stationary_pass": true,
+   "duration_s": 21.0,
+   "segment": [
+    2.0,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -59.33,
+   "loudest_same_length": {
+    "start_s": 1.0,
+    "mean_db": -58.67
+   },
+   "loudest_7s": {
+    "start_s": 4.5,
+    "mean_db": -51.44
+   },
+   "deficit_db": 0.65,
+   "deficit_vs_7s_db": 7.89
+  },
+  {
+   "name": "bench_dregon_Motor4_60",
+   "stationary_pass": true,
+   "duration_s": 11.279,
+   "segment": [
+    11.721,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -67.2,
+   "loudest_same_length": {
+    "start_s": 2.5,
+    "mean_db": -49.44
+   },
+   "loudest_7s": {
+    "start_s": 6.5,
+    "mean_db": -49.4
+   },
+   "deficit_db": 17.76,
+   "deficit_vs_7s_db": 17.81
+  },
+  {
+   "name": "bench_dregon_Motor4_70",
+   "stationary_pass": true,
+   "duration_s": 7.114,
+   "segment": [
+    15.886,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -70.7,
+   "loudest_same_length": {
+    "start_s": 6.5,
+    "mean_db": -44.52
+   },
+   "loudest_7s": {
+    "start_s": 6.5,
+    "mean_db": -44.52
+   },
+   "deficit_db": 26.17,
+   "deficit_vs_7s_db": 26.17
+  },
+  {
+   "name": "bench_dregon_Motor4_80",
+   "stationary_pass": true,
+   "duration_s": 5.715,
+   "segment": [
+    17.285,
+    23.0
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -71.93,
+   "loudest_same_length": {
+    "start_s": 11.5,
+    "mean_db": -42.65
+   },
+   "loudest_7s": {
+    "start_s": 10.0,
+    "mean_db": -42.79
+   },
+   "deficit_db": 29.28,
+   "deficit_vs_7s_db": 29.14
+  },
+  {
+   "name": "bench_dregon_Motor4_90",
+   "stationary_pass": false,
+   "duration_s": 10.499,
+   "segment": [
+    4.888,
+    15.387
+   ],
+   "recording_s": 25.0,
+   "window_mean_db": -40.96,
+   "loudest_same_length": {
+    "start_s": 6.5,
+    "mean_db": -38.9
+   },
+   "loudest_7s": {
+    "start_s": 10.0,
+    "mean_db": -38.6
+   },
+   "deficit_db": 2.06,
+   "deficit_vs_7s_db": 2.36
+  },
+  {
+   "name": "bench_dregon_allMotors_70",
+   "stationary_pass": true,
+   "duration_s": 23.847,
+   "segment": [
+    14.425,
+    38.272
+   ],
+   "recording_s": 45.0,
+   "window_mean_db": -35.86,
+   "loudest_same_length": {
+    "start_s": 13.5,
+    "mean_db": -35.86
+   },
+   "loudest_7s": {
+    "start_s": 26.0,
+    "mean_db": -35.46
+   },
+   "deficit_db": 0.0,
+   "deficit_vs_7s_db": 0.4
+  }
+ ]
+}

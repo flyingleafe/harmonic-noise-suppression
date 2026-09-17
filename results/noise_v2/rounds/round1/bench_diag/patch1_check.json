@@ -1,0 +1,527 @@
+{
+ "schema": "noise-v2-bench-diag/1",
+ "what": "supports.stationary_segment + the in-window level test of patch 1, on all 21 recordings",
+ "level_tol_db": 6.0,
+ "level_deficit_db": {
+  "min": 0.48,
+  "max": 2.14
+ },
+ "margin_in_window_db": {
+  "min": 3.71,
+  "max": 16.29
+ },
+ "n_margin_in_window_below_3db": 0,
+ "n_longest_inside_below_min": 10,
+ "supports": [
+  {
+   "name": "bench_dregon_Motor1_50",
+   "old_segment": [
+    2.0,
+    43.0
+   ],
+   "old_duration_s": 41.0,
+   "old_stationary_pass": true,
+   "new_segment": [
+    4.933,
+    37.721
+   ],
+   "new_duration_s": 32.789,
+   "new_longest_inside_s": 32.789,
+   "new_level_deficit_db": 1.29,
+   "margin_whole_recording_db": 9.04,
+   "margin_in_window_db": 9.17,
+   "orders": [
+    63
+   ],
+   "carrier_rev_s": [
+    49.0073
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor1_60",
+   "old_segment": [
+    2.049,
+    8.811
+   ],
+   "old_duration_s": 6.763,
+   "old_stationary_pass": true,
+   "new_segment": [
+    17.535,
+    23.919
+   ],
+   "new_duration_s": 6.384,
+   "new_longest_inside_s": 6.384,
+   "new_level_deficit_db": 1.12,
+   "margin_whole_recording_db": 8.95,
+   "margin_in_window_db": 16.29,
+   "orders": [
+    74
+   ],
+   "carrier_rev_s": [
+    58.7534
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor1_70",
+   "old_segment": [
+    35.707,
+    43.0
+   ],
+   "old_duration_s": 7.293,
+   "old_stationary_pass": false,
+   "new_segment": [
+    23.659,
+    29.614
+   ],
+   "new_duration_s": 5.956,
+   "new_longest_inside_s": 5.956,
+   "new_level_deficit_db": 0.55,
+   "margin_whole_recording_db": 2.7,
+   "margin_in_window_db": 6.04,
+   "orders": [
+    62
+   ],
+   "carrier_rev_s": [
+    68.3174
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor1_80",
+   "old_segment": [
+    2.0,
+    23.0
+   ],
+   "old_duration_s": 21.0,
+   "old_stationary_pass": true,
+   "new_segment": [
+    3.382,
+    16.092
+   ],
+   "new_duration_s": 12.711,
+   "new_longest_inside_s": 12.711,
+   "new_level_deficit_db": 0.83,
+   "margin_whole_recording_db": 3.53,
+   "margin_in_window_db": 3.71,
+   "orders": [
+    67
+   ],
+   "carrier_rev_s": [
+    78.0596
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor1_90",
+   "old_segment": [
+    2.0,
+    9.664
+   ],
+   "old_duration_s": 7.664,
+   "old_stationary_pass": true,
+   "new_segment": [
+    10.027,
+    16.083
+   ],
+   "new_duration_s": 6.055,
+   "new_longest_inside_s": 6.055,
+   "new_level_deficit_db": 0.5,
+   "margin_whole_recording_db": 3.22,
+   "margin_in_window_db": 4.57,
+   "orders": [
+    61
+   ],
+   "carrier_rev_s": [
+    88.1844
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor2_50",
+   "old_segment": [
+    5.593,
+    23.0
+   ],
+   "old_duration_s": 17.407,
+   "old_stationary_pass": true,
+   "new_segment": [
+    5.593,
+    16.37
+   ],
+   "new_duration_s": 10.777,
+   "new_longest_inside_s": 10.777,
+   "new_level_deficit_db": 1.65,
+   "margin_whole_recording_db": 12.54,
+   "margin_in_window_db": 14.87,
+   "orders": [
+    63
+   ],
+   "carrier_rev_s": [
+    48.4086
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor2_60",
+   "old_segment": [
+    15.902,
+    23.0
+   ],
+   "old_duration_s": 7.098,
+   "old_stationary_pass": true,
+   "new_segment": [
+    8.7,
+    12.7
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 1.537,
+   "new_level_deficit_db": 2.14,
+   "margin_whole_recording_db": 9.88,
+   "margin_in_window_db": 9.92,
+   "orders": [
+    63
+   ],
+   "carrier_rev_s": [
+    58.0979
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor2_70",
+   "old_segment": [
+    15.864,
+    23.0
+   ],
+   "old_duration_s": 7.136,
+   "old_stationary_pass": true,
+   "new_segment": [
+    7.1,
+    11.1
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 1.347,
+   "new_level_deficit_db": 0.48,
+   "margin_whole_recording_db": 3.44,
+   "margin_in_window_db": 6.45,
+   "orders": [
+    70
+   ],
+   "carrier_rev_s": [
+    67.5225
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor2_80",
+   "old_segment": [
+    18.3,
+    22.3
+   ],
+   "old_duration_s": 4.0,
+   "old_stationary_pass": false,
+   "new_segment": [
+    6.1,
+    10.1
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 2.08,
+   "new_level_deficit_db": 1.34,
+   "margin_whole_recording_db": 7.69,
+   "margin_in_window_db": 11.09,
+   "orders": [
+    63
+   ],
+   "carrier_rev_s": [
+    77.1895
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor2_90",
+   "old_segment": [
+    17.38,
+    23.0
+   ],
+   "old_duration_s": 5.62,
+   "old_stationary_pass": true,
+   "new_segment": [
+    7.0,
+    11.0
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 0.587,
+   "new_level_deficit_db": 1.24,
+   "margin_whole_recording_db": 5.17,
+   "margin_in_window_db": 7.87,
+   "orders": [
+    72
+   ],
+   "carrier_rev_s": [
+    86.7182
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor3_50",
+   "old_segment": [
+    13.913,
+    23.0
+   ],
+   "old_duration_s": 9.087,
+   "old_stationary_pass": true,
+   "new_segment": [
+    7.9,
+    11.9
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 3.584,
+   "new_level_deficit_db": 1.79,
+   "margin_whole_recording_db": 4.91,
+   "margin_in_window_db": 10.35,
+   "orders": [
+    63
+   ],
+   "carrier_rev_s": [
+    49.1086
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor3_60",
+   "old_segment": [
+    16.313,
+    23.0
+   ],
+   "old_duration_s": 6.687,
+   "old_stationary_pass": true,
+   "new_segment": [
+    12.7,
+    16.7
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 1.348,
+   "new_level_deficit_db": 1.69,
+   "margin_whole_recording_db": 6.44,
+   "margin_in_window_db": 8.54,
+   "orders": [
+    70
+   ],
+   "carrier_rev_s": [
+    58.9305
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor3_70",
+   "old_segment": [
+    17.029,
+    23.0
+   ],
+   "old_duration_s": 5.971,
+   "old_stationary_pass": true,
+   "new_segment": [
+    5.1,
+    9.1
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 0.495,
+   "new_level_deficit_db": 1.12,
+   "margin_whole_recording_db": 11.1,
+   "margin_in_window_db": 7.64,
+   "orders": [
+    63
+   ],
+   "carrier_rev_s": [
+    68.5746
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor3_80",
+   "old_segment": [
+    2.0,
+    23.0
+   ],
+   "old_duration_s": 21.0,
+   "old_stationary_pass": true,
+   "new_segment": [
+    3.556,
+    16.767
+   ],
+   "new_duration_s": 13.211,
+   "new_longest_inside_s": 13.211,
+   "new_level_deficit_db": 1.29,
+   "margin_whole_recording_db": 3.86,
+   "margin_in_window_db": 3.94,
+   "orders": [
+    65
+   ],
+   "carrier_rev_s": [
+    78.8134
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor3_90",
+   "old_segment": [
+    16.707,
+    23.0
+   ],
+   "old_duration_s": 6.293,
+   "old_stationary_pass": true,
+   "new_segment": [
+    8.2,
+    12.2
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 0.895,
+   "new_level_deficit_db": 1.36,
+   "margin_whole_recording_db": 4.48,
+   "margin_in_window_db": 8.21,
+   "orders": [
+    70
+   ],
+   "carrier_rev_s": [
+    88.2489
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor4_50",
+   "old_segment": [
+    2.0,
+    23.0
+   ],
+   "old_duration_s": 21.0,
+   "old_stationary_pass": true,
+   "new_segment": [
+    2.979,
+    16.171
+   ],
+   "new_duration_s": 13.192,
+   "new_longest_inside_s": 13.192,
+   "new_level_deficit_db": 1.25,
+   "margin_whole_recording_db": 10.21,
+   "margin_in_window_db": 10.36,
+   "orders": [
+    63
+   ],
+   "carrier_rev_s": [
+    49.7686
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor4_60",
+   "old_segment": [
+    11.721,
+    23.0
+   ],
+   "old_duration_s": 11.279,
+   "old_stationary_pass": true,
+   "new_segment": [
+    2.0,
+    7.244
+   ],
+   "new_duration_s": 5.244,
+   "new_longest_inside_s": 5.244,
+   "new_level_deficit_db": 1.73,
+   "margin_whole_recording_db": 4.73,
+   "margin_in_window_db": 14.37,
+   "orders": [
+    62
+   ],
+   "carrier_rev_s": [
+    59.6802
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor4_70",
+   "old_segment": [
+    15.886,
+    23.0
+   ],
+   "old_duration_s": 7.114,
+   "old_stationary_pass": true,
+   "new_segment": [
+    9.2,
+    13.2
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 1.15,
+   "new_level_deficit_db": 0.57,
+   "margin_whole_recording_db": 3.3,
+   "margin_in_window_db": 7.46,
+   "orders": [
+    68
+   ],
+   "carrier_rev_s": [
+    69.3183
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor4_80",
+   "old_segment": [
+    17.285,
+    23.0
+   ],
+   "old_duration_s": 5.715,
+   "old_stationary_pass": true,
+   "new_segment": [
+    7.7,
+    11.7
+   ],
+   "new_duration_s": 4.0,
+   "new_longest_inside_s": 1.133,
+   "new_level_deficit_db": 1.33,
+   "margin_whole_recording_db": 3.43,
+   "margin_in_window_db": 6.87,
+   "orders": [
+    60
+   ],
+   "carrier_rev_s": [
+    79.376
+   ]
+  },
+  {
+   "name": "bench_dregon_Motor4_90",
+   "old_segment": [
+    4.888,
+    15.387
+   ],
+   "old_duration_s": 10.499,
+   "old_stationary_pass": false,
+   "new_segment": [
+    5.18,
+    15.387
+   ],
+   "new_duration_s": 10.207,
+   "new_longest_inside_s": 10.207,
+   "new_level_deficit_db": 1.97,
+   "margin_whole_recording_db": 2.67,
+   "margin_in_window_db": 3.81,
+   "orders": [
+    69
+   ],
+   "carrier_rev_s": [
+    89.1223
+   ]
+  },
+  {
+   "name": "bench_dregon_allMotors_70",
+   "old_segment": [
+    14.425,
+    38.272
+   ],
+   "old_duration_s": 23.847,
+   "old_stationary_pass": true,
+   "new_segment": [
+    14.425,
+    38.272
+   ],
+   "new_duration_s": 23.847,
+   "new_longest_inside_s": 23.847,
+   "new_level_deficit_db": 1.37,
+   "margin_whole_recording_db": 5.79,
+   "margin_in_window_db": 6.43,
+   "orders": [
+    67,
+    64,
+    63,
+    63
+   ],
+   "carrier_rev_s": [
+    64.6396,
+    67.6618,
+    68.7379,
+    69.5718
+   ]
+  }
+ ]
+}
