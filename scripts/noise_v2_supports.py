@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -55,6 +56,36 @@ def git_head() -> str:
         ).stdout.strip()
     except Exception as exc:  # pragma: no cover - provenance never aborts a run
         return f"unavailable: {exc}"
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def require_credentials() -> None:
+    """Fail with the fix instead of a bare ``botocore.NoCredentialsError``.
+
+    Every support reads a published frames dataset over ``dload``, which takes
+    its R2 credentials from the AWS environment chain. A remote job that has
+    ``.env`` in its worktree but never sourced it dies several gigabytes into a
+    stream with ``Unable to locate credentials`` and no hint of the cause, so
+    the check runs before the first byte. ``.env`` is consulted the same way
+    :mod:`data_processing.streams` consults it (shell-provided wins).
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # pragma: no cover - python-dotenv is a project dependency
+        pass
+    else:
+        load_dotenv(REPO_ROOT / ".env", override=False)
+    from utils.checkpoints import R2_ENV_VARS
+
+    missing = [name for name in R2_ENV_VARS if not os.environ.get(name)]
+    if missing:
+        raise SystemExit(
+            f"R2 credentials missing ({', '.join(missing)}) — "
+            "`set -a; source .env; set +a` before running, or export "
+            "R2_ACCOUNT_ID / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY"
+        )
 
 
 def build(set_name: str, *, out_dir: Path, limit: int | None = None) -> dict[str, Any]:
@@ -333,6 +364,7 @@ def main() -> None:
             print(spec.text)
         return
 
+    require_credentials()
     out_dir = Path(args.out)
     print(f"building set {args.set_name} into {out_dir}", flush=True)
     payload = build(args.set_name, out_dir=out_dir, limit=args.limit)
