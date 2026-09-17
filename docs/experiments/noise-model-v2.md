@@ -1,15 +1,56 @@
 # Noise model v2: the pre-implementation phase
 
-**Status:** awaiting review — 2026-09-15 → . Campaign `noise-model-v2`, branch
+**Status:** running (R1) — 2026-09-15 → . Campaign `noise-model-v2`, branch
 `main`. Explainer: `docs/explainers/noise-model-v2-plan.qmd` (the full
 proposal, with every figure). Predecessor: `docs/experiments/stochastic-fit.md`
 and the revised-phase rounds C1-C4 in
 `docs/experiments/revised-phase-campaign.qmd` +
 `docs/experiments/revised-phase-handoff-2026-09-13.qmd`.
 
-No v2 fit has run. This document records the four measurement studies that
-set up v2, the model and round plan they support, and the decisions that are
-waiting on the user.
+The proposal was approved on 2026-09-17 with every open decision taken as
+proposed, and the fitting rounds are running (R1 of a cap of 5). This document
+records the four measurement studies that set up v2, the model and round plan
+they support, and the approved decisions.
+
+
+## Approved decisions (2026-09-17)
+
+1. **Per-order term.** Independent per-order OU on the phase, driven
+   `∝ k^{1/2}` with `p = 1` fixed and one `(σ_ε, λ_ε)` pair per parity of
+   `k`, with the form — ceiling against random walk — tested in R1 by
+   extending the lag grid to 1-5 s.
+2. **Path term.** Per microphone, shared across rotors and `∝ f`, is a named
+   candidate and is not fitted in R1.
+3. **Michael's standby and ramp.** Not fitted; rendered through the trajectory
+   sampler and still scored.
+4. **Spectrogram proxy.** `ltas_abs_db` is the primary quantity and `mr_ltas`
+   is reported as a secondary one.
+5. **Proxy threshold.** Closure `≥ 0.70`, i.e. 1.979 dB on DREGON cruise and
+   1.220 dB on Michael's cruise.
+6. **Likelihood gate.** Composite risk below the speed-matched stationary
+   oracle on Michael's cruise by a margin frozen in R1 from the parity fit,
+   pooled over the cruise supports and reported per band with the comb band
+   decisive; DREGON free flight is not gated by the likelihood.
+7. **Floor.** The floor is a flight quantity fitted on the flight support with
+   the comb frozen from the bench, the band edge is 300 Hz, and the floor
+   level is constant per support in R1, with per-frame variation named as a
+   later fix.
+8. **Bench stationarity rule.** The longest sub-segment where the demodulated
+   residual at `k ≈ 70` stays inside ±1 Hz
+   (`utils.demod.residual_frequency`).
+9. **Four-motor validation tolerance.** Frozen from R1: the per-rotor spread
+   of the single-motor fits is reported in R1 and then frozen as the
+   criterion.
+
+Revised round plan, cap 5:
+
+| Round | Content |
+|---|---|
+| R1 | Pyro model; bench fits (DREGON per rotor plus the 135 survey bench points); four-motor validation; the decoherence lag extension to 1-5 s; Michael's FLY125 cruise fit; the DREGON floor fit; an HPPNet probe; round record |
+| R2 | Shaft prior, and the refinements Michael's cruise fit needs |
+| R3 | Hierarchy over rigs including the bench points |
+| R4 | One named fix |
+| R5 | Simplify the passing incumbent |
 
 
 ## Review decisions (2026-09-16)
@@ -407,14 +448,11 @@ improvement; Michael's regime-mean ratio `≤ 1.05` against 3.027 rev/s
 
 ## Status
 
-**Awaiting review.** Nothing is submitted. Nine decisions are open, and they
-are listed with their numbers in
-`docs/explainers/noise-model-v2-plan.qmd`, section "Decisions for the
-reviewer": the window, the proxy, the proxy threshold, the likelihood
-threshold, which orders enter the DREGON likelihood given the label precision,
-whether `(λ_L, σ_L)` are free per label chain, the fixed above-band wobble,
-the `D_k` order structure, and the DREGON
-label arm.
+**Running (R1).** The proposal was approved on 2026-09-17 with every open
+decision taken as proposed; the nine approved decisions are listed above
+(section "Approved decisions (2026-09-17)") and in
+`docs/explainers/noise-model-v2-plan.qmd`, section "Decisions (approved
+2026-09-17)".
 
 Three prerequisites must be cleared before R1 is submitted.
 

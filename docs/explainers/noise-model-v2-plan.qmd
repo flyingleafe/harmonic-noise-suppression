@@ -26,7 +26,10 @@ table td, table th { hyphens: none; }
 ::: {.callout-note}
 ## Status
 
-This page is a **proposal under review**. No v2 fit has run. Every number on
+The proposal on this page was **approved on 2026-09-17**, with every open
+decision taken as proposed; the nine decisions are listed in the
+[decisions section](#decisions-for-the-reviewer) at the end of this page. The
+fitting rounds are now running (R1 of a cap of 5). Every number on
 this page comes from a committed artefact, and every table names its file.
 The files are `docs/experiments/revised-phase-campaign.qmd`,
 `docs/experiments/revised-phase-handoff-2026-09-13.qmd`,
@@ -1510,8 +1513,8 @@ The cap is **5 rounds**. Backends are `uni-cpu` and `uni-gpushort`.
 
 | Round | Question | Pass = |
 |---|---|---|
-| R1 | Pyro parity: the C4 model, fixed `λ_ref`, MAP, DREGON raw and refined, Michael's | likelihood parity test passes; gates scored; the DREGON refined-label arm has a result |
-| R2 | Shaft prior: `λ` free with the telemetry and bench prior, `D_k` structure from the bench | frozen gates |
+| R1 | Pyro model; bench fits (DREGON per rotor plus the 135 survey bench points); four-motor validation; the decoherence lag extension to 1-5 s; Michael's FLY125 cruise fit; the DREGON floor fit; an HPPNet probe | parity test passes; bench parameters and the per-order form reported; the four-motor tolerance frozen; gates scored; round record written |
+| R2 | Shaft prior, and the refinements Michael's cruise fit needs | frozen gates |
 | R3 | Hierarchy over rigs including the bench points; population posterior for sampling | gates, plus posterior predictive on a held-out bench point |
 | R4 | Fix the one named failure of R1-R3 — one complexity per failure | gates |
 | R5 | Simplify the passing incumbent; publish the fits; wire the engine | gates unchanged |
@@ -1520,71 +1523,41 @@ The cap is **5 rounds**. Backends are `uni-cpu` and `uni-gpushort`.
 
 :::
 
-# Decisions for the reviewer {#decisions-for-the-reviewer}
+# Decisions (approved 2026-09-17) {#decisions-for-the-reviewer}
 
-Nine choices are open. Each one has a proposal and the number behind it.
+Every open choice was decided as proposed on 2026-09-17.
 
-- **Decided at review (2026-09-16), recorded, no longer open:** DREGON is
-  fitted on the single-motor bench and validated on the four-motor static
-  recording; bench fits use the total periodogram, flight fits the front-end
-  STFT (NFFT 2048, hop 512); the `T = 1.024 s` window is retired; the shaft is
-  one OU process; the `k`-independent `D` is replaced by a shared short-`τ`
-  path OU. The DREGON label arm is moot (no free-flight fit).
-- **The per-order term's form.** The bench measures an independent per-order
-  phase term `V_ε = 0.09·k^1.1·τ^0.43` rad², odd orders 2-4× the even ones,
-  even orders diffusive to 500 ms and odd saturating. Proposal: one OU per
-  order, driven `∝ k^{1/2}`, one `(σ_ε, λ_ε)` pair per parity. Alternative:
-  a single pair with `p` free, or the C2-C4 Wiener form with `D_k ∝ k`
-  (which cannot saturate). Decide.
-- **The path term.** Per microphone, shared across rotors, `∝ f`. Proposal:
-  not fitted in R1 (no evidence of that signature); admitted only if a round
-  fails with a mic-common, frequency-proportional phase residual. Decide.
-- **Michael's standby and ramp.** Proposal: not fitted; rendered from the
-  bench dynamics through the trajectory sampler, still scored by the frozen
-  gate. Alternative: keep FLY125 standby in the flight fit for the speed law
-  at low rates. Decide.
-- **The spectrogram proxy.** Proposal `ltas_abs_db`, with `mr_ltas` kept as a
-  secondary. `ltas_abs_db` has the largest `σ` response by a factor of four;
-  `mr_ltas` has the better `D` response on DREGON but is dead on Michael's.
-  Decide whether the gate is one quantity or two.
-- **The proxy threshold.** Two options, both of which the current best fails.
-  Closure `≥ 0.70` gives 1.979 dB on DREGON cruise and 1.220 dB on Michael's
-  cruise, a margin of 0.147 / 0.112 dB against the current best. Closure
-  `≥ 0.50` gives 2.108 and 1.309 dB, a margin of 0.018 / 0.023 dB — the
-  weakest fraction that still excludes the current best. Closure `≥ 0.40`
-  would let it pass and certify no improvement. Note the DREGON oracle spread
-  of 1.142 dB, which exceeds the 0.646 dB gap the gate measures.
-- **The likelihood threshold.** The oracle (Welch mean periodogram of a
-  speed-matched disjoint real segment, one spectrum held fixed over the
-  scored support) is a **stationary** predictor: inside a support the carrier
-  moves and the oracle's lines do not. A model that predicts the dynamics from
-  the label frame by frame must **beat** it wherever the label is accurate to
-  better than one bin. Reference values at the flight STFT (NFFT 2048, hop
-  512, `results/noise_v2/short_whittle/findings.md`): the old flight-fitted
-  model already sits at the oracle on Michael's cruise (−107 nats/s) and 66 k
-  nats/s above it pooled (standby, 14 dB hot); the old bench-fitted model is
-  3.97 M nats/s above it on DREGON cruise. Proposal: gate = composite risk
-  **below the oracle** on Michael's cruise by a margin frozen in R1 from the
-  parity fit; DREGON free flight is not gated by this likelihood (label error
-  ~1 Hz at `k = 70` removes the dynamic advantage at high order) but by HPPNet
-  and LTAS. Decide whether the margin is per support or pooled.
-- **The floor in flight, and the band of the likelihood gate.** Below
-  ~200-300 Hz the DREGON cruise spectrum is wind, not rotor. A model whose
-  floor was fitted on a clamped motor in a quiet room sits 20-30 dB under it
-  and pays `I/M` of 100-1000 per cell (the tail concentration of
-  `results/noise_v2/short_whittle/findings.md`); the oracle carries the wind
-  for free. Proposal: the coloured floor (level, colour, slow variation) is a
-  flight quantity fitted on the flight support with the comb frozen from the
-  bench, and the likelihood gate is reported **per band** — comb band and
-  floor band — so a pass on the comb band is what counts. The rendered
-  training noise needs the flight floor regardless. Decide the band edge and
-  whether the floor level may vary per frame.
-- **The stationarity rule on the bench.** Proposal: the longest sub-segment
-  where the demodulated residual at `k ≈ 70` stays inside ±1 Hz
-  (`utils.demod.residual_frequency`). Alternative: a slow polynomial carrier
-  inside the periodogram atom over the whole record. Decide.
-- **Four-motor validation tolerance.** Proposal: the four-motor fit passes
-  when `|Δ log σ_ν|, |Δ log λ|, |Δ log D_θ|` lie inside the per-rotor spread
-  of the single-motor fits, with widths allowed larger and low orders flagged.
-  The numeric spread is frozen from the R1 per-rotor fits. Decide whether that
-  is acceptable as a criterion frozen after R1's first stage.
+Decided earlier at review (2026-09-16), recorded, no longer open: DREGON is
+fitted on the single-motor bench and validated on the four-motor static
+recording; bench fits use the total periodogram, flight fits the front-end
+STFT (NFFT 2048, hop 512); the `T = 1.024 s` window is retired; the shaft is
+one OU process; the `k`-independent `D` is replaced by an independent
+per-order phase process measured on the bench; the per-microphone path term is
+named, not fitted. The DREGON label arm is moot (no free-flight fit).
+
+1. **Per-order term.** Independent per-order OU on the phase, driven
+   `∝ k^{1/2}` with `p = 1` fixed and one `(σ_ε, λ_ε)` pair per parity of
+   `k`, with the form — ceiling against random walk — tested in R1 by
+   extending the lag grid to 1-5 s.
+2. **Path term.** Per microphone, shared across rotors and `∝ f`, is a named
+   candidate and is not fitted in R1.
+3. **Michael's standby and ramp.** Not fitted; rendered through the trajectory
+   sampler and still scored.
+4. **Spectrogram proxy.** `ltas_abs_db` is the primary quantity and `mr_ltas`
+   is reported as a secondary one.
+5. **Proxy threshold.** Closure `≥ 0.70`, i.e. 1.979 dB on DREGON cruise and
+   1.220 dB on Michael's cruise.
+6. **Likelihood gate.** Composite risk below the speed-matched stationary
+   oracle on Michael's cruise by a margin frozen in R1 from the parity fit,
+   pooled over the cruise supports and reported per band with the comb band
+   decisive; DREGON free flight is not gated by the likelihood.
+7. **Floor.** The floor is a flight quantity fitted on the flight support with
+   the comb frozen from the bench, the band edge is 300 Hz, and the floor
+   level is constant per support in R1, with per-frame variation named as a
+   later fix.
+8. **Bench stationarity rule.** The longest sub-segment where the demodulated
+   residual at `k ≈ 70` stays inside ±1 Hz
+   (`utils.demod.residual_frequency`).
+9. **Four-motor validation tolerance.** Frozen from R1: the per-rotor spread
+   of the single-motor fits is reported in R1 and then frozen as the
+   criterion.
