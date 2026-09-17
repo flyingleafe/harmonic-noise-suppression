@@ -784,9 +784,13 @@ differenced against a second realisation returns 1 resolvable cell against 91
 for the bench.
 
 What it means for the model: the per-harmonic term the first draft of this
-page dropped comes back as an **independent per-order OU on the phase**,
-driven `∝ k^{1/2}`, with a correlation time of 0.1-1 s, one pair
-`(σ_ε, λ_ε)` per parity in the simplest form (section [Model v2](#model-v2)).
+page dropped comes back as an **independent per-order process on the
+phase**, driven `∝ k^{1/2}`, written as an OU with a correlation time of
+0.3-1 s in the simplest form, one pair `(σ_ε, λ_ε)` per parity (section
+[Model v2](#model-v2)). The OU's ceiling is an inference from sub-linear
+growth, not an observation: no plateau is seen inside the 500 ms lag range.
+R1 extends the lag range to 1-5 s on the long bench recordings and replaces
+the OU by a rate-modulated random walk if the variance keeps growing.
 
 # Likelihood and window
 
@@ -1278,8 +1282,14 @@ $$V_\varepsilon(k,\tau)=\operatorname{Var}[\varepsilon_{rk}(t+\tau)-\varepsilon_
 
 uncorrelated across orders (mean `ρ = 0.03`), mostly shared across
 microphones (`ρ = 0.21`, source-side), and larger for odd orders than for
-even ones by 2-4×. A process with that lag law is an OU on the phase with a
-correlation time of 0.1-1 s, driven with a strength `∝ k`:
+even ones by 2-4×. **What is measured is sub-linear growth up to 500 ms; a
+ceiling is not observed** — the lag range ends there because the motor runs
+~11 s per recording. Sub-linear growth is what an OU on the phase gives
+inside its correlation time, so OU with `1/λ_ε ≈ 0.3-1 s` is the simplest
+process that fits; a random walk with a slowly varying rate or a long-memory
+process fits the same range without a ceiling. The choice is tested in R1 on
+the 31 s `motor_Motor1_70` recording and the 30-120 s survey bench points at
+lags of 1-5 s. The working form is the OU, driven with a strength `∝ k`:
 
 $$d\varepsilon_{rk}=-\lambda_\varepsilon\,\varepsilon_{rk}\,dt+\sqrt{2\lambda_\varepsilon}\;\sigma_\varepsilon\,k^{p/2}\,dW_{rk},
 \qquad p\approx 1,$$
