@@ -454,25 +454,28 @@ def figures(records: list[dict[str, Any]], out_dir: Path) -> list[str]:
     axa.grid(alpha=0.25, which="both")
     axa.legend(fontsize=7)
 
+    bins = np.array([5e-3, 2e-2, 1e-1, 3e-1, 1.0, 3.0])
+    centres = np.sqrt(bins[:-1] * bins[1:])
     for est in ESTIMATORS:
         xs, ys = [], []
         for case in delta_cases:
             for rec in by_case[case]:
                 gate = np.asarray(rec["snr_db"]) >= SNR_GATE_DB
                 cyc = np.asarray(rec["beat_cycles"])
-                err = np.abs(np.asarray(rec["error_db"][est]))
-                sel = gate & np.isfinite(cyc) & np.isfinite(err)
+                err = np.minimum(np.abs(np.asarray(rec["error_db"][est])), 60.0)
+                sel = gate & np.isfinite(cyc)
                 xs.append(cyc[sel])
                 ys.append(np.maximum(err[sel], 1e-2))
-        axb.scatter(
-            np.concatenate(xs),
-            np.concatenate(ys),
-            s=7,
-            alpha=0.45,
-            color=colours[est],
-            label=est,
-            edgecolors="none",
+        x = np.concatenate(xs)
+        y = np.concatenate(ys)
+        med = np.array(
+            [
+                np.median(y[(x >= a) & (x < b)]) if ((x >= a) & (x < b)).any() else np.nan
+                for a, b in zip(bins[:-1], bins[1:], strict=True)
+            ]
         )
+        axb.plot(centres, med, "o-", ms=4, lw=1.4, color=colours[est], label=est)
+        axb.scatter(x, y, s=4, alpha=0.12, color=colours[est], edgecolors="none")
     axb.axvline(1.0, color="k", ls="--", lw=1)
     axb.axhline(FAIL_DB, color="0.4", ls=":", lw=1)
     axb.set_xscale("log")
