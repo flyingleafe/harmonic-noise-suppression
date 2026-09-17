@@ -125,6 +125,30 @@ LEGACY_BASELINE: dict[tuple[str, str], dict[str, Any]] = {
     ),
 }
 
+#: The OTHER eligible family of a rig's cruise export. Which family the frozen
+#: evaluator actually selected is recorded only in the gitignored
+#: ``results/revised_phase/baseline_v2/calibration.json``, so the smoke must be
+#: able to state and to vary it: ``--legacy-family michaels=raw``. On DREGON
+#: the raw export (``results/S2/dregon_flight.json``) names one recording only
+#: and the frozen manifest reports it INELIGIBLE for the five-recording cohort,
+#: so there is nothing to vary there.
+LEGACY_FAMILY_ALTERNATIVES: dict[tuple[str, str], dict[str, Any]] = {
+    ("michaels", "raw"): dict(
+        path="results/S2/cruise_8clip.json",
+        family="raw",
+        regime="cruise",
+        match="aggregate",
+        declared=dict(
+            recordings=["FLY125"],
+            starts_s=[16.0, 32.0, 48.0, 64.0, 96.0, 112.0, 128.0, 144.0],
+            seconds=16.0,
+            dataset="michaels-frames",
+            version=None,
+            rps_key="rps",
+        ),
+    ),
+}
+
 
 def die(message: str) -> None:
     raise SystemExit(f"error: {message}")
@@ -210,13 +234,25 @@ class Arm:
         return np.asarray(RE.predicted_m(self.legacy[regime], pg, n_mics=int(n_mics)), np.float64)
 
 
-def legacy_arm(rig: str) -> Arm:
-    """The OLD model's arm: the frozen evaluator's own baseline route."""
+def legacy_arm(rig: str, *, family: str | None = None) -> Arm:
+    """The OLD model's arm: the frozen evaluator's own baseline route.
+
+    ``family`` overrides the CRUISE-derived entries with the rig's other
+    eligible export family (see :data:`LEGACY_FAMILY_ALTERNATIVES`); the
+    standby entry has only one export and is never overridden.
+    """
     per_regime: dict[str, RE.ModelParams] = {}
     source: dict[str, Any] = {}
-    for (arm_rig, regime), cfg in LEGACY_BASELINE.items():
+    alt = LEGACY_FAMILY_ALTERNATIVES.get((rig, str(family))) if family else None
+    if family and alt is None:
+        die(f"no alternative {family!r} export is registered for rig {rig!r}")
+    for (arm_rig, regime), base_cfg in LEGACY_BASELINE.items():
         if arm_rig != rig:
             continue
+        cfg = dict(base_cfg)
+        if alt is not None and str(base_cfg["regime"]) == "cruise":
+            cfg = dict(alt)
+            cfg["overrides_family"] = base_cfg["family"]
         bundle = RE.read_export(
             cfg["path"], family=cfg["family"], regime=cfg["regime"], declared=cfg["declared"]
         )
@@ -235,7 +271,11 @@ def legacy_arm(rig: str) -> Arm:
     return Arm(
         rig=rig,
         kind="legacy",
-        label="legacy stage-2 baseline (the frozen evaluator's selected family)",
+        label=(
+            f"legacy stage-2 baseline, {family} family on the cruise export"
+            if family
+            else "legacy stage-2 baseline (the frozen evaluator's selected family)"
+        ),
         source=source,
         legacy=per_regime,
     )
@@ -563,6 +603,7 @@ def run(
     round_no: int,
     fits_dir: Path | None,
     legacy: bool,
+    legacy_families: dict[str, str],
     seeds: tuple[int, ...],
     n_mics: int,
     rigs: tuple[str, ...],
@@ -574,7 +615,7 @@ def run(
     arms: dict[str, Arm] = {}
     for rig in rigs:
         if legacy:
-            arms[rig] = legacy_arm(rig)
+            arms[rig] = legacy_arm(rig, family=legacy_families.get(rig))
         else:
             render_mod, spectrum_fn = _v2_modules()
             assert fits_dir is not None
@@ -751,10 +792,10 @@ def findings(payload: dict[str, Any]) -> str:
     if "per_band" in lk:
         for band in ("comb", "floor", "full"):
             blk = lk["per_band"][band]
-            decisive = " (decisive)" if band == lk["decisive_band"] else ""
+            decisive = band == lk["decisive_band"]
+            verdict = ("PASS" if blk["below_oracle"] else "FAIL") if decisive else "report"
             out.append(
-                f"| likelihood {band}{decisive} | "
-                f"{'PASS' if blk['below_oracle'] else 'FAIL' if band == 'comb' else 'report'} | "
+                f"| likelihood {band}{' (decisive)' if decisive else ''} | {verdict} | "
                 f"model {blk['model_nats_per_s']:,.4f} nats/s | "
                 f"oracle {blk['oracle_nats_per_s']:,.4f}, margin "
                 f"{blk['margin_nats_per_s']:+,.4f} |"
@@ -764,6 +805,12 @@ def findings(payload: dict[str, Any]) -> str:
     out.append("")
     out.append("## HPPNet PIT MAE per support (rev/s)")
     out.append("")
+    if "dregon_cruise" not in hp:
+        out.append(
+            f"The HPPNet probe did not run in this pass ({hp.get('unavailable')}), so no PIT "
+            "MAE is reported and the round cannot pass."
+        )
+        out.append("")
     out.append("| rig | support | regime | real | candidate | seed spread |")
     out.append("|---|---|---|---:|---:|---:|")
     for key, row in payload["measurements"].items():
@@ -933,6 +980,17 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="smoke the pipeline on the OLD model (the frozen evaluator's baseline exports)",
     )
+    ap.add_argument(
+        "--legacy-family",
+        action="append",
+        default=[],
+        metavar="RIG=FAMILY",
+        help=(
+            "with --legacy-export: read that rig's cruise export from another eligible family "
+            "(e.g. michaels=raw); the frozen selection itself lives in the gitignored "
+            "calibration.json"
+        ),
+    )
     ap.add_argument("--out", type=Path, default=OUT_DEFAULT)
     ap.add_argument(
         "--out-tag",
@@ -955,6 +1013,10 @@ def main(argv: list[str] | None = None) -> int:
         round_no=int(args.round),
         fits_dir=args.fits,
         legacy=legacy,
+        legacy_families=dict(
+            str(spec).split("=", 1)
+            for spec in args.legacy_family  # type: ignore[misc]
+        ),
         seeds=tuple(int(s) for s in str(args.seeds).replace(",", " ").split()),
         n_mics=int(args.mics),
         rigs=tuple(str(args.rigs).replace(",", " ").split()),
