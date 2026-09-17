@@ -713,6 +713,81 @@ the fitted 5.48, and even that pessimistic end is within a factor of 3 of
 ![Per-order diffusion `D_k` against order `k`, with the `k⁰` (dashed), `k¹` (dash-dot) and `k²` (dotted) guides. `D_k` is **not** identified on either rig — it absorbs model error at the shortest lag, and the planted control flattens a true `k¹` — so no exponent can be read off this panel.](noise-model-v2-plan/shaft_Dk_vs_k.png)
 :::
 
+## Per-order decoherence, measured on the bench {#per-order-decoherence-measured-on-the-bench}
+
+Source: `results/noise_v2/decoherence/findings.md` and `decoherence.json`,
+produced by `scripts/noise_v2_order_decoherence.py` (12 DREGON single-motor
+recordings `motor_Motor{1-4}_{70,80,90}`, 8 microphones, orders 1-40).
+
+The question: do the harmonics of one rotor move in lockstep? The earlier
+probes (`docs/experiments/vk-decomposition.md`, coherence probe 2026-08-14;
+`docs/experiments/stochastic-fit.md`, coherent share per order) said no, as a
+correlation. This measurement gives the size.
+
+Method. Each order is demodulated with one refined constant carrier
+(`utils.demod`), the phase increment over lag `τ` is formed per order and
+microphone, and the increments are split as `Δφ_k = k·Δθ + ε_k`: the shared
+part `Δθ` is the weighted least-squares slope over the orders `k ≤ 10`, the
+residual `ε_k` is what is left at every order. The variance of `ε_k` is read
+from the circular mean of the de-rotated increment phasor (unwrapped phase
+slips at high orders), the leakage of the shaft estimate `k²·Var[e]` is
+measured from three disjoint order groups and subtracted, and the motor's
+running window (~11 s of each 25 s file) is detected from the level track.
+
+| k | `V_ε(50 ms)` [rad²] | `V_ε(500 ms)` [rad²] | `Var[kΔθ](50 ms)` [rad²] | ratio at 50 ms |
+|---|---|---|---|---|
+| 4 | 0.054 | 0.11 | 0.013 | 4.3 |
+| 10 | 0.17 | 0.65 | 0.079 | 2.1 |
+| 20 | 0.38 | 2.4 | 0.31 | 1.2 |
+| 30 | 0.93 | 3.3 | 0.71 | 1.3 |
+| 40 | 1.3 | 4.3 | 1.26 | 1.1 |
+
+: Independent per-order phase variance against the shared shaft part, pooled over the 12 recordings (`decoherence/findings.md` § "The numbers"; full table there for k = 1-40).
+
+::: {.column-screen-inset}
+![Structure functions: the independent per-order term per order family and the shared shaft term, with the two controls.](noise-model-v2-plan/decoherence_structure.png)
+:::
+
+::: {.column-screen-inset}
+![The independent term against order at 50 ms and 500 ms with the fitted power law.](noise-model-v2-plan/decoherence_vs_k.png)
+:::
+
+::: {.column-page}
+![Cross-order (left) and cross-microphone (right) correlation of the residual at 50 ms.](noise-model-v2-plan/decoherence_corr.png)
+:::
+
+Findings.
+
+1. **The independent term is real and large.** Power law over `k ∈ [4, 40]`,
+   `τ ∈ [10, 500] ms`: `V_ε = 0.09 · k^1.08 · τ^0.43` rad² (`τ` in s; CI
+   `a` 0.05-0.38, `p` 0.64-1.44, `q` 0.36-0.74; 2000 bootstrap draws over
+   recordings). It exceeds the shared shaft term at every order above 4.
+2. **It is independent across orders**: mean off-diagonal correlation 0.03
+   over 630 order pairs at 50 ms, with no odd/even block. The parity shows in
+   the variance: each odd order carries 3.7× the independent noise of its even
+   neighbours at 50 ms (median 0.77 vs 0.23 rad²), and the two families scale
+   differently in lag — even `q = 0.88` (still diffusive at 500 ms), odd
+   `q = 0.46` (saturating).
+3. **It is mostly source-side**: cross-microphone correlation 0.21, against
+   0.00 for a noise-only control and 0.30 for a control with the term fully
+   shared across microphones.
+4. **The shaft term is smaller than first fitted.** The shared part alone
+   gives `V_θ(50 ms) = 7.9e-4`, `V_θ(500 ms) = 0.017 rad²`, i.e.
+   `σ_ν ≈ 0.45 rad/s` at `λ = 5.5` (0.31-0.65 across recordings). The earlier
+   bench fit of `σ_ν = 1.77` had absorbed the per-order term into the shaft.
+
+Controls, all through the identical pipeline: a render with only a shared
+integrated-OU shaft and a white floor returns the analytic SNR floor (0.96×,
+flat in `τ`, no `k²` shape); a planted independent `D_k = 0.1·k` Wiener is
+recovered at 0.67× with exponents `p = 0.85`, `q = 1.09`; a null render
+differenced against a second realisation returns 1 resolvable cell against 91
+for the bench.
+
+What it means for the model: the per-harmonic term the first draft of this
+page dropped comes back as an **independent per-order OU on the phase**,
+driven `∝ k^{1/2}`, with a correlation time of 0.1-1 s, one pair
+`(σ_ε, λ_ε)` per parity in the simplest form (section [Model v2](#model-v2)).
+
 # Likelihood and window
 
 Source: `results/noise_v2/criteria/findings.md` and
@@ -1171,8 +1246,11 @@ $$d\nu_r=-\lambda\,\nu_r\,dt+\sqrt{2\lambda\sigma_\nu^2}\;dW_r^{(\nu)},
 \qquad d\theta_r=\nu_r\,dt.$$
 
 `ν_r` is the shaft angular-speed error in rad/s, `θ_r` its angle error. The
-telemetry gives `λ = 0.67–14.4 s⁻¹` (identified rigs) and the DREGON bench
-acoustics `σ_ν ≈ 1.8 rad/s`, `λ ≈ 5.5 s⁻¹`, `D_θ = σ_ν²/λ ≈ 0.6 rad²/s`. The
+telemetry gives `λ = 0.67–14.4 s⁻¹` (identified rigs). The DREGON bench
+acoustics first read `σ_ν ≈ 1.8 rad/s` at `λ ≈ 5.5 s⁻¹`; the per-order
+decomposition below shows that fit had absorbed the independent per-order
+term into the shaft, and the shared part alone is `σ_ν ≈ 0.45 rad/s`
+(0.31-0.65 across recordings at `λ = 5.5`), `V_θ(500 ms) = 0.017 rad²`. The
 part of this process above the label band is generated by the renderer as
 filtered noise with this PSD; it is not a separate term.
 
@@ -1187,13 +1265,35 @@ $$d\eta_r=-\lambda_p\,\eta_r\,dt+\sqrt{2\lambda_p\sigma_p^2}\;dW_r^{(p)},
 
 `η_r` is a phase-per-order (rad at `k = 1`); it is bounded (OU on the phase
 itself, not on its rate), so it adds `k`-proportional sidebands, not a `k²`
-diffusion. This term replaces the C2–C4 per-harmonic Wiener `ε_rk` and its
-`k`-independent `D`. A `k`-independent floor is kept only as a nuisance bound
-from the bench (`D < 1.45 rad²/s`) and is not a default parameter.
+diffusion. It is shared by all orders of a rotor.
+
+**Per-order decoherence — independent per harmonic, measured on the bench,
+fitted.** The harmonics of one rotor do not move in lockstep. The bench
+decomposition `Δφ_k = k·Δθ + ε_k` (section
+[Per-order decoherence](#per-order-decoherence-measured-on-the-bench))
+measures an independent residual with
+
+$$V_\varepsilon(k,\tau)=\operatorname{Var}[\varepsilon_{rk}(t+\tau)-\varepsilon_{rk}(t)]
+\approx 0.09\,k^{1.1}\,\tau^{0.43}\ \text{rad}^2\quad(\tau\ \text{in s}),$$
+
+uncorrelated across orders (mean `ρ = 0.03`), mostly shared across
+microphones (`ρ = 0.21`, source-side), and larger for odd orders than for
+even ones by 2-4×. A process with that lag law is an OU on the phase with a
+correlation time of 0.1-1 s, driven with a strength `∝ k`:
+
+$$d\varepsilon_{rk}=-\lambda_\varepsilon\,\varepsilon_{rk}\,dt+\sqrt{2\lambda_\varepsilon}\;\sigma_\varepsilon\,k^{p/2}\,dW_{rk},
+\qquad p\approx 1,$$
+
+independent across `(r, k)`, one `(σ_ε, λ_ε)` per parity of `k` in the
+simplest form that reproduces the bench (even orders diffusive to 500 ms,
+odd orders saturating). Physically it is the blade-passage timing of each
+harmonic relative to the shaft angle. This is the C2-C4 per-harmonic term
+with the measured `k` scaling and a finite correlation time instead of a
+flat Wiener `D`.
 
 **Total phase**
 
-$$\phi_{mrk}(t)=2\pi k\int_0^t f_r(s)\,ds+k\,\theta_r(t)+k\,\eta_r(t)+\alpha_{mrk}.$$
+$$\phi_{mrk}(t)=2\pi k\int_0^t f_r(s)\,ds+k\,\theta_r(t)+k\,\eta_r(t)+\varepsilon_{rk}(t)+\alpha_{mrk}.$$
 
 Line powers `P_mrk` (profile vs order and speed), the coloured floor and the
 mic gains are unchanged from C4. Initial phases `α_mrk` are independent
@@ -1204,12 +1304,15 @@ uniform, so components add in power.
 
 $$V_\theta(\tau)=2\sigma_\nu^2\left[\frac{|\tau|}{\lambda}-\frac{1-e^{-\lambda|\tau|}}{\lambda^2}\right],
 \qquad
-R_{rk}(\tau)=\exp\!\left[-\tfrac{k^2}{2}V_\theta(\tau)-k^2\sigma_p^2\bigl(1-\rho_p(\tau)\bigr)\right].$$
+R_{rk}(\tau)=\exp\!\left[-\tfrac{k^2}{2}V_\theta(\tau)-k^2\sigma_p^2\bigl(1-\rho_p(\tau)\bigr)-\sigma_\varepsilon^2k^{p}\bigl(1-e^{-\lambda_\varepsilon|\tau|}\bigr)\right].$$
 
-Both widths scale with `k`: Gaussian shoulders `kσ_ν/2π`, Lorentzian core
-`k²D_θ/2π`, path sidebands of width `λ_p/2π` and depth `k²σ_p²`. That scaling
-is what makes the high orders the measurement of the dynamics: a width of one
-7.8 Hz bin at `k = 10` is 0.78 Hz at `k = 1`.
+Every width scales with `k`: Gaussian shoulders `kσ_ν/2π`, Lorentzian core
+`k²D_θ/2π`, path sidebands of width `λ_p/2π` and depth `k²σ_p²`, and the
+per-order term of width `λ_ε/2π` and depth `σ_ε²k^p`. That scaling is what
+makes the high orders the measurement of the dynamics: a width of one 7.8 Hz
+bin at `k = 10` is 0.78 Hz at `k = 1`. On the bench the per-order term is
+the largest of the three above `k ≈ 4` (ratio to the shaft term 1-5 at
+`k ≥ 10`, 50 ms).
 
 ## Where and how the rig is fitted
 
@@ -1243,7 +1346,7 @@ only widths below one bin.
 | Element | C2 / C3 / C4 | v2 |
 |---|---|---|
 | shaft term | one OU speed error, `λ_ref = 6 s⁻¹` fixed | one OU speed error, `(σ_ν, λ)` free with priors from the bench and the telemetry |
-| per-harmonic phase | Wiener `ε_rk`, `D_g` with no `k` scaling | replaced by a shared short-`τ` OU on the phase, `(σ_p, λ_p)`, sidebands `∝ k` |
+| per-harmonic phase | Wiener `ε_rk`, `D_g` with no `k` scaling | independent per-order OU `ε_rk` with strength `∝ k^{1/2}` and correlation time `1/λ_ε` (measured on the bench), plus a shared short-`τ` path OU `(σ_p, λ_p)` |
 | `D` | free, prior `log D ~ N(0, 2²)`; DREGON fit 844.69 | not a parameter; `< 1.45 rad²/s` kept as a nuisance bound |
 | DREGON fit support | free flight, command label | single-motor bench; four-motor static as validation |
 | periodogram | NFFT 16384 / hop 1024 on every support | total periodogram on the bench; NFFT 2048 / hop 512 in flight |
@@ -1266,11 +1369,14 @@ path term has no measurement yet: its prior is wide and stated as such.
 
 | parameter | prior | central 95 % | derived from |
 |---|---|---|---|
-| `log σ_ν` | `N(ln 1.77, 0.6²)` | 0.55-5.7 rad/s | bench median 1.77 rad/s (de-biased 1.4, band 1.1-1.8); width covers the bench full range 0.23-3.20 |
+| `log σ_ν` | `N(ln 0.45, 0.7²)` | 0.11-1.8 rad/s | shared-term bench median 0.45 rad/s (0.31-0.65 across recordings, `decoherence/findings.md`); the upper edge reaches the earlier undecomposed 1.77 |
 | `log λ` | `N(ln 5.5, 0.9²)` | 0.94-32 s⁻¹ | bench median 5.48 s⁻¹ (de-biased 1.8-5.5); covers the telemetry corners 0.67-14.4 |
 | `D_θ = σ_ν²/λ` | implied | 0.57 rad²/s at the centre | bench median 0.599 (IQR 0.38-0.66, de-biased 0.6-1.2) |
 | `log σ_p` | `N(ln 0.03, 1.5²)` | 0.002-0.6 rad at `k = 1` | **unmeasured**; centre from a 1 mm path change at 340 m/s at `f = 80 Hz` (`2π·80·0.001/340 ≈ 1.5e-3` rad) times a margin; the bench fit in R1 measures it |
 | `log λ_p` | `N(ln 30, 1.0²)` | 4-210 s⁻¹ | **unmeasured**; ms-100 ms correlation times of vibration and wake turbulence; must stay above `λ` |
+| `log σ_ε` | `N(ln 0.3, 0.6²)` | 0.09-1.0 rad at `k = 1` | bench fit `a = 0.09 k^1.1 τ^0.43` (`a` CI 0.05-0.38); at `λ_ε ≈ 2 s⁻¹` the saturated variance `σ_ε²k` matches `V_ε(500 ms)` |
+| `log λ_ε` | `N(ln 2, 1.0²)` | 0.3-14 s⁻¹ | even orders still diffusive at 500 ms (`q = 0.88`), odd saturating (`q = 0.46`): one pair per parity, or `p` free |
+| `p` | fixed 1 | — | bench `p = 1.08` (CI 0.64-1.44) |
 | `D` (k-independent floor) | not a parameter | — | bench bound `< 1.45 rad²/s` from the unresolved line core |
 
 : Proposed priors. Sources: `results/noise_v2/shaft/shaft.json` (`acoustics.dregon_bench`, `planted_control`, `label_band`) via `results/noise_v2/shaft/findings.md`; `results/noise_v2/criteria/findings.md:81-87` for the `D` bound. The path-term rows are order-of-magnitude placeholders to be replaced by the R1 bench fit.
@@ -1292,7 +1398,7 @@ Three consequences of the shaft prior.
    the model is `k²D_θ`, prior-centred at 0.57 rad²/s.
 
 The rig-level hierarchy replaces today's hand-set banks.
-`(log σ_ν, log λ, log σ_p, log λ_p, floor shape, profile slope)` for every rig
+`(log σ_ν, log λ, log σ_p, log λ_p, log σ_ε, log λ_ε, floor shape, profile slope)` for every rig
 — DREGON, Michael's, and the survey's 18 bench cells — is drawn from a
 population Gaussian with unknown mean and scale. The population posterior is
 what the training sampler draws rigs from.
@@ -1302,6 +1408,7 @@ what the training sampler draws rigs from.
 - carrier recovery — closed by the user decision "carriers are fixed";
 - heavy tails in the line amplitudes;
 - a `k`-independent per-harmonic diffusion (`D`), kept only as a bound;
+- separate `(σ_ε, λ_ε)` per order beyond the parity split;
 - order-dependent `λ`.
 
 # Pyro implementation plan
@@ -1378,7 +1485,7 @@ The cap is **5 rounds**. Backends are `uni-cpu` and `uni-gpushort`.
 
 # Decisions for the reviewer {#decisions-for-the-reviewer}
 
-Eight choices are open. Each one has a proposal and the number behind it.
+Nine choices are open. Each one has a proposal and the number behind it.
 
 - **Decided at review (2026-09-16), recorded, no longer open:** DREGON is
   fitted on the single-motor bench and validated on the four-motor static
@@ -1386,6 +1493,12 @@ Eight choices are open. Each one has a proposal and the number behind it.
   STFT (NFFT 2048, hop 512); the `T = 1.024 s` window is retired; the shaft is
   one OU process; the `k`-independent `D` is replaced by a shared short-`τ`
   path OU. The DREGON label arm is moot (no free-flight fit).
+- **The per-order term's form.** The bench measures an independent per-order
+  phase term `V_ε = 0.09·k^1.1·τ^0.43` rad², odd orders 2-4× the even ones,
+  even orders diffusive to 500 ms and odd saturating. Proposal: one OU per
+  order, driven `∝ k^{1/2}`, one `(σ_ε, λ_ε)` pair per parity. Alternative:
+  a single pair with `p` free, or the C2-C4 Wiener form with `D_k ∝ k`
+  (which cannot saturate). Decide.
 - **The path term in R1.** Proposal: fit `(σ_p, λ_p)` on the bench from R1,
   with the wide priors above. Alternative: fix `σ_p = 0` in R1 (pure shaft
   model) and free it in R2 only if the bench residual at high orders shows
