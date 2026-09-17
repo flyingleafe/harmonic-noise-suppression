@@ -161,6 +161,12 @@ def mean_comb(paths: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
     static record is the VALIDATION support, not a fitting one). Dynamics and
     the per-order profile are averaged in their own natural scale — rates and
     scales in log, dB levels in dB — over the fits that carry them.
+
+    "The fits that carry them" is literal for the profile: every support caps
+    its orders at its OWN Nyquist, so the four Motor*_70 fits are 116 to 118
+    orders wide and stacking them raises. Order ``k`` is therefore the dB-mean
+    over exactly the fits that reach ``k``, and the frozen profile is as wide
+    as the widest of them.
     """
     import numpy as np
 
@@ -169,21 +175,30 @@ def mean_comb(paths: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
         raise ValueError("--frozen-mean needs at least one bench fit JSON")
     par = [f["params"] for f in fits]
     log_mean = lambda key: float(np.exp(np.mean([np.log(float(q[key])) for q in par])))  # noqa: E731
-    prof = np.stack(
-        [np.asarray(q["profile"]["profile_db"], dtype=np.float64)[0] for q in par]
-    )  # (n_fits, K)
+    widest = max(
+        int(np.asarray(q["profile"]["profile_db"], dtype=np.float64).shape[1]) for q in par
+    )
+    prof = np.full((len(par), widest), np.nan, dtype=np.float64)
+    for i, q in enumerate(par):
+        row = np.asarray(q["profile"]["profile_db"], dtype=np.float64)[0]
+        prof[i, : row.size] = row
     frozen = dict(
         sigma_nu=log_mean("sigma_nu"),
         lam=log_mean("lam"),
         sigma_eps=[log_mean("sigma_eps_even"), log_mean("sigma_eps_odd")],
         lam_eps=[log_mean("lam_eps_even"), log_mean("lam_eps_odd")],
-        profile_db=prof.mean(axis=0)[None, :].tolist(),
+        profile_db=np.nanmean(prof, axis=0)[None, :].tolist(),
         amp_exp=float(np.mean([float(q["profile"]["amp_exp"]) for q in par])),
     )
     return frozen, dict(
         frozen_comb_from=[f["support"] for f in fits],
         frozen_comb_paths=[str(p) for p in paths],
-        rule="log-mean of the rates and scales, dB-mean of the per-order profile",
+        rule="log-mean of the rates and scales, dB-mean of the per-order profile over the "
+        "fits that reach each order",
+        profile_orders=widest,
+        profile_orders_per_fit=[
+            int(np.asarray(q["profile"]["profile_db"], dtype=np.float64).shape[1]) for q in par
+        ],
     )
 
 
