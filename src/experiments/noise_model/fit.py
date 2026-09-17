@@ -154,8 +154,14 @@ def initial_values(
     mode: str,
     priors: MD.Priors = MD.PRIORS,
     frozen: dict[str, Any] | None = None,
+    pin: dict[str, Any] | None = None,
 ) -> dict[str, Tensor]:
-    """Site-name -> initial value for the free blocks of ``mode``."""
+    """Site-name -> initial value for the free blocks of ``mode``.
+
+    A pinned dynamics coordinate gets NO entry: the site either disappears
+    (fully pinned) or shrinks to its free width, and a stale key would be
+    ignored by ``init_to_value`` — a pin that silently does not pin.
+    """
     free = MD.free_blocks(mode)
     band = batch.band.detach().cpu().numpy()
     obs_mean, floor_db = _observed_db(batch)
@@ -163,10 +169,16 @@ def initial_values(
     out: dict[str, Tensor] = {}
 
     if "dynamics" in free:
-        out["sigma_nu"] = t(math.exp(priors.log_sigma_nu[0]))
-        out["lam"] = t(math.exp(priors.log_lam[0]))
-        out["sigma_eps"] = t([math.exp(priors.log_sigma_eps[0])] * 2)
-        out["lam_eps"] = t([math.exp(priors.log_lam_eps[0])] * 2)
+        for name, centre in (
+            ("sigma_nu", math.exp(priors.log_sigma_nu[0])),
+            ("lam", math.exp(priors.log_lam[0])),
+            ("sigma_eps", math.exp(priors.log_sigma_eps[0])),
+            ("lam_eps", math.exp(priors.log_lam_eps[0])),
+        ):
+            n_free = int(MD.pin_free_mask(pin, name).sum())
+            if n_free == 0:
+                continue
+            out[name] = t(centre) if MD.DYN_SITES[name] == 1 else t([centre] * n_free)
 
     carrier = None
     if batch.mode == "bench":
@@ -180,7 +192,9 @@ def initial_values(
     # offsets in dB against the model and not against a hand-derived formula:
     # ``quiet`` is the floor alone (every order at -300 dB) and ``unit`` adds a
     # comb whose every line carries unit power.
-    seed_params = _seed_params(batch, mode=mode, priors=priors, frozen=frozen, carrier=carrier)
+    seed_params = _seed_params(
+        batch, mode=mode, priors=priors, frozen=frozen, pin=pin, carrier=carrier
+    )
     with torch.no_grad():
         quiet = MD.forward(batch, _with_profile(seed_params, -300.0))
         unit = MD.forward(batch, _with_profile(seed_params, 0.0))
@@ -247,12 +261,15 @@ def _seed_params(
     priors: MD.Priors,
     frozen: dict[str, Any] | None,
     carrier: Tensor | None,
+    pin: dict[str, Any] | None = None,
 ) -> SP.V2Params:
     """A concrete parameter set at the priors' centres (no Pyro site involved).
 
     Used ONLY by :func:`initial_values` for its two probe forward passes; a
     frozen block uses its frozen value so a ``--floor-only`` seed is measured
-    against the real comb rather than against a prior-mean one.
+    against the real comb rather than against a prior-mean one, and a PINNED
+    dynamics coordinate uses its pinned value so the profile/floor seeds are
+    calibrated at the dynamics the fit will actually run at.
     """
     free = MD.free_blocks(mode)
     fz = dict(frozen or {})
@@ -271,10 +288,26 @@ def _seed_params(
 
     zero = torch.zeros((), dtype=torch.float64)
     return SP.V2Params(
-        sigma_nu=pick("dynamics", "sigma_nu", math.exp(priors.log_sigma_nu[0])),
-        lam=pick("dynamics", "lam", math.exp(priors.log_lam[0])),
-        sigma_eps=pick("dynamics", "sigma_eps", [math.exp(priors.log_sigma_eps[0])] * 2, (2,)),
-        lam_eps=pick("dynamics", "lam_eps", [math.exp(priors.log_lam_eps[0])] * 2, (2,)),
+        sigma_nu=(
+            MD.pin_applied(pin, "sigma_nu", math.exp(priors.log_sigma_nu[0]))
+            if "dynamics" in free
+            else pick("dynamics", "sigma_nu", math.exp(priors.log_sigma_nu[0]))
+        ),
+        lam=(
+            MD.pin_applied(pin, "lam", math.exp(priors.log_lam[0]))
+            if "dynamics" in free
+            else pick("dynamics", "lam", math.exp(priors.log_lam[0]))
+        ),
+        sigma_eps=(
+            MD.pin_applied(pin, "sigma_eps", math.exp(priors.log_sigma_eps[0]))
+            if "dynamics" in free
+            else pick("dynamics", "sigma_eps", [math.exp(priors.log_sigma_eps[0])] * 2, (2,))
+        ),
+        lam_eps=(
+            MD.pin_applied(pin, "lam_eps", math.exp(priors.log_lam_eps[0]))
+            if "dynamics" in free
+            else pick("dynamics", "lam_eps", [math.exp(priors.log_lam_eps[0])] * 2, (2,))
+        ),
         profile_db=pick("profile", "profile_db", np.zeros((r, k)), (r, k)),
         floor=SP.FloorParams(
             mean_db=pick("floor", "floor_mean_db", 0.0),
@@ -350,17 +383,25 @@ def fit_support(
     mode: str,
     priors: MD.Priors = MD.PRIORS,
     frozen: dict[str, Any] | None = None,
+    pin: dict[str, Any] | None = None,
     optim: OptimSpec = OptimSpec(),
     forward_kw: dict[str, Any] | None = None,
     progress: int = 0,
 ) -> FitOutcome:
-    """MAP-fit one support (or one pooled set of flight windows)."""
+    """MAP-fit one support (or one pooled set of flight windows).
+
+    ``pin`` (in :func:`model.dynamics_pin`'s site spelling) holds individual
+    dynamics coordinates FIXED while the rest of the block is fitted. It is a
+    constant of the model, not a parameter under a tight prior: the guide
+    allocates nothing for it, the log-prior counts nothing for it, and the
+    recorded ``params`` carry the pinned value.
+    """
     torch.manual_seed(int(optim.seed))
     pyro.set_rng_seed(int(optim.seed))
     pyro.clear_param_store()
 
     full = batch
-    init = initial_values(batch, mode=mode, priors=priors, frozen=frozen)
+    init = initial_values(batch, mode=mode, priors=priors, frozen=frozen, pin=pin)
     if optim.init_jitter > 0.0:
         # a log-normal multi-start on the dynamics block only: the profile,
         # floor and carrier initialisations are read off the data and a random
@@ -375,7 +416,13 @@ def fit_support(
     def model_for(b: MD.SupportBatch) -> Any:
         def fn() -> Any:
             return MD.support_model(
-                b, mode=mode, priors=priors, frozen=frozen, temperature=1.0, forward_kw=forward_kw
+                b,
+                mode=mode,
+                priors=priors,
+                frozen=frozen,
+                pin=pin,
+                temperature=1.0,
+                forward_kw=forward_kw,
             )
 
         return fn
@@ -475,7 +522,9 @@ def fit_support(
     final_loss = min(first_pass, restart)
 
     med = guide.median()
-    fitted = MD.sample_params_from_values(full, mode=mode, priors=priors, frozen=frozen, values=med)
+    fitted = MD.sample_params_from_values(
+        full, mode=mode, priors=priors, frozen=frozen, pin=pin, values=med
+    )
     with torch.no_grad():
         m_model = MD.forward(full, fitted, **(forward_kw or {}))
         objective = MD.objective_breakdown(full, m_model)
@@ -484,6 +533,7 @@ def fit_support(
         objective=objective,
         optimiser=dict(
             **optim.as_dict(),
+            pinned_dynamics=(dict(pin) if pin else None),
             adam_final_loss=adam_final,
             adam_first_loss=float(adam_losses[0]) if adam_losses else float("nan"),
             adam_wall_s=adam_s,

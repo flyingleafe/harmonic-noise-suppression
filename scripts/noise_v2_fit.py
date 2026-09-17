@@ -106,7 +106,12 @@ def worker(unit: Unit) -> dict[str, Any]:
         name, kind = str(p["name"]), "flight"
 
     outcome = FT.fit_support(
-        batch, mode=mode, frozen=frozen, optim=optim, progress=int(p.get("progress", 0))
+        batch,
+        mode=mode,
+        frozen=frozen,
+        pin=MD.dynamics_pin(p.get("pin")),
+        optim=optim,
+        progress=int(p.get("progress", 0)),
     )
     # a RESTART lands beside its siblings and is reduced to one reported fit
     # afterwards; a single-seed fit is the reported fit itself
@@ -713,6 +718,20 @@ def _specs(args: argparse.Namespace) -> list[str]:
     return [s.text if hasattr(s, "text") else str(s) for s in specs]
 
 
+def _pin_from_args(args: argparse.Namespace) -> dict[str, float] | None:
+    """``["lam=20", "lam_eps_odd=8"]`` -> ``{"lam": 20.0, "lam_eps_odd": 8.0}``."""
+    items = getattr(args, "pin", None)
+    if not items:
+        return None
+    out: dict[str, float] = {}
+    for item in items:
+        key, sep, value = str(item).partition("=")
+        if not sep:
+            raise SystemExit(f"--pin wants NAME=VALUE, got {item!r}")
+        out[key.strip()] = float(value)
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -746,6 +765,16 @@ def main(argv: list[str] | None = None) -> int:
             "applied to every restart but the first",
         )
         p.add_argument("--progress", type=int, default=0, help="print the Adam loss every N steps")
+        p.add_argument(
+            "--pin",
+            nargs="*",
+            default=None,
+            metavar="NAME=VALUE",
+            help="hold one dynamics coordinate FIXED while the rest of the block is fitted, "
+            "e.g. --pin lam=20 lam_eps_odd=8. Names: sigma_nu, lam, sigma_eps_even/odd, "
+            "lam_eps_even/odd. Used when a rate is not identifiable from the data and the "
+            "identified ridge coordinate is what the fit should move along",
+        )
         p.add_argument(
             "--threads",
             type=int,
@@ -818,6 +847,7 @@ def main(argv: list[str] | None = None) -> int:
                             optim=optim,
                             progress=int(args.progress),
                             threads=int(args.threads),
+                            pin=_pin_from_args(args),
                             restart_tag=tag,
                         ),
                     )
@@ -849,6 +879,7 @@ def main(argv: list[str] | None = None) -> int:
                     max_frames=None if int(args.max_frames) <= 0 else int(args.max_frames),
                     progress=int(args.progress),
                     threads=int(args.threads),
+                    pin=_pin_from_args(args),
                 ),
             )
         ]

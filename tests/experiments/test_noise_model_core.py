@@ -565,6 +565,52 @@ def test_floor_only_mode_freezes_the_comb():
     assert got["floor"]["floor_mean_db"] != pytest.approx(float(par.floor.mean_db), rel=1e-6)
 
 
+def test_pinned_dynamics_coordinates_are_held_and_the_rest_is_still_fitted():
+    """``pin`` must hold exactly the named coordinates — including ONE parity of
+    the two-vector sites — while the rest of the dynamics block is fitted.
+
+    This is the identified-ridge recipe's contract: a rate the data cannot
+    constrain is a CONSTANT of the model (no guide parameter, no prior term),
+    not a parameter under a tight prior, and the recorded parameters carry the
+    pinned value verbatim.
+    """
+    k_cap, f0, n_mics = 8, 211.0, 2
+    par = _params(
+        n_rotors=1,
+        n_mics=n_mics,
+        k_cap=k_cap,
+        profile_db=np.linspace(-14.0, -26.0, k_cap)[None, :],
+        carrier=[f0],
+        sigma_nu=0.9,
+        lam=5.5,
+        sigma_eps=(0.2, 0.2),
+        lam_eps=(2.0, 2.0),
+        floor_mean_db=-46.0,
+        tilt=0.0,
+    )
+    grid = SP.bench_grid(n=1 << 14, sr=SR)
+    truth = SP.bench_model(grid, par, k_max=k_cap).numpy()
+    obs = truth * np.random.default_rng(11).standard_exponential(truth.shape)
+    batch = MD.bench_batch(
+        name="pinned", power=obs, sr=SR, carrier_mean=np.array([f0]), k_cap=k_cap
+    )
+    pin = MD.dynamics_pin({"lam": 7.25, "lam_eps_odd": 3.5})
+    assert pin == {"lam": 7.25, "lam_eps": [None, 3.5]}
+    out = FT.fit_support(
+        batch,
+        mode="bench",
+        pin=pin,
+        optim=FT.OptimSpec(adam_steps=60, adam_lr=0.05, lbfgs_iters=20),
+    )
+    got = MD.params_to_dict(out.params)
+    assert got["lam"] == pytest.approx(7.25, rel=1e-12)
+    assert got["lam_eps_odd"] == pytest.approx(3.5, rel=1e-12)
+    # the free coordinates moved off their prior-centre initialisation
+    assert got["lam_eps_even"] != pytest.approx(math.exp(MD.PRIORS.log_lam_eps[0]), rel=1e-6)
+    assert got["sigma_nu"] != pytest.approx(math.exp(MD.PRIORS.log_sigma_nu[0]), rel=1e-6)
+    assert out.optimiser["pinned_dynamics"] == {"lam": 7.25, "lam_eps": [None, 3.5]}
+
+
 def test_expected_periodogram_frames_match_the_evaluator_grid():
     """``expected_periodogram`` must use ``data.periodogram``'s own framing."""
     k_cap, f0 = 5, 180.0

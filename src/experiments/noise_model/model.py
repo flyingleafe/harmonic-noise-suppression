@@ -58,18 +58,22 @@ from .spectrum import BenchGrid, FlightGrid, FloorParams, V2Params
 
 __all__ = [
     "BAND_SPLIT_HZ",
+    "DYN_SITES",
     "PRIORS",
     "Priors",
     "SupportBatch",
     "batch_slice",
     "bench_batch",
+    "dynamics_pin",
     "flight_batch",
-    "free_blocks",
     "forward",
+    "free_blocks",
     "frozen_from_params",
     "objective_breakdown",
     "params_from_dict",
     "params_to_dict",
+    "pin_applied",
+    "pin_free_mask",
     "sample_params",
     "sample_params_from_values",
     "support_model",
@@ -84,6 +88,11 @@ BAND_SPLIT_HZ = 300.0
 #: the rest from a bench fit; a full flight fit frees everything but
 #: ``"carrier"`` (the label IS the carrier in flight).
 BLOCKS = ("dynamics", "profile", "floor", "mic", "carrier")
+
+#: The four dynamics SITES. ``sigma_eps`` and ``lam_eps`` are one ``(2,)``
+#: site each — ``(even, odd)``, selected by :func:`.lag.parity_select` — not
+#: two scalars, which is why a pin of one parity is a PARTIAL pin of a site.
+DYN_SITES: dict[str, int] = dict(sigma_nu=1, lam=1, sigma_eps=2, lam_eps=2)
 
 
 @dataclass(frozen=True)
@@ -418,6 +427,96 @@ def _lognormal(
     return site(name, d)
 
 
+# ── pinning individual dynamics coordinates ─────────────────────────────────
+
+
+def dynamics_pin(spec: dict[str, Any] | None) -> dict[str, Any] | None:
+    """``{"lam": 200.0, "lam_eps_odd": 75.0}`` in the SITE spelling the model
+    reads: ``{"lam": 200.0, "lam_eps": [None, 75.0]}``.
+
+    Accepted keys are the six parameter names the fit JSON quotes
+    (``sigma_nu``, ``lam``, ``sigma_eps_even/odd``, ``lam_eps_even/odd``) and
+    the bare two-vector site names, which pin BOTH parities. ``None`` is the
+    free marker, so a half-pinned site round-trips through JSON.
+    """
+    if not spec:
+        return None
+    out: dict[str, Any] = {}
+    for key, value in spec.items():
+        if key in DYN_SITES:
+            out[key] = value
+            continue
+        site, _, parity = str(key).rpartition("_")
+        if site not in DYN_SITES or DYN_SITES[site] != 2 or parity not in ("even", "odd"):
+            raise ValueError(
+                f"cannot pin {key!r}; pin one of {sorted(DYN_SITES)} or "
+                "<site>_even / <site>_odd for the two-vector sites"
+            )
+        entries = list(out.get(site, [None, None]))
+        entries[0 if parity == "even" else 1] = value
+        out[site] = entries
+    return out
+
+
+def _pin_entries(value: Any, n: int) -> list[Any]:
+    """``value`` as ``n`` per-coordinate entries, ``None`` where still free."""
+    if value is None:
+        return [None] * n
+    entries = [value] * n if np.ndim(value) == 0 else list(value)
+    if len(entries) != n:
+        raise ValueError(f"a pin of a {n}-coordinate site needs {n} entries, got {value!r}")
+    return entries
+
+
+def pin_free_mask(pin: dict[str, Any] | None, name: str) -> np.ndarray:
+    """Which coordinates of dynamics site ``name`` are still SAMPLED."""
+    n = DYN_SITES[name]
+    if pin is None or name not in pin:
+        return np.ones(n, dtype=bool)
+    return np.array([v is None for v in _pin_entries(pin[name], n)], dtype=bool)
+
+
+def pin_applied(pin: dict[str, Any] | None, name: str, centre: float) -> Tensor:
+    """A CONCRETE value of site ``name``: the pin where pinned, ``centre``
+    elsewhere. This is what a probe forward pass must use, so the seeds it
+    calibrates are measured at the dynamics the fit will actually run at."""
+    n = DYN_SITES[name]
+    entries = _pin_entries(None if pin is None else pin.get(name), n)
+    vals = [float(centre) if v is None else float(v) for v in entries]
+    out = torch.as_tensor(vals, dtype=torch.float64)
+    return out.reshape(()) if n == 1 else out
+
+
+def _dyn_site(
+    site: SiteFn, name: str, prior: tuple[float, float], *, pin: dict[str, Any] | None
+) -> Tensor:
+    """Dynamics site ``name``, minus whatever ``pin`` holds fixed.
+
+    A partially pinned two-vector site samples ONE site of exactly its free
+    width, so ``AutoDelta`` allocates no parameter for a pinned coordinate and
+    the log-prior counts no pinned coordinate either — a pin is a constant in
+    the model, not a tightly-prior'd parameter.
+    """
+    n = DYN_SITES[name]
+    mask = pin_free_mask(pin, name)
+    if mask.all():
+        return _lognormal(site, name, prior, () if n == 1 else (n,))
+    entries = _pin_entries(pin[name] if pin else None, n)
+    if not mask.any():
+        out = torch.as_tensor([float(v) for v in entries], dtype=torch.float64)
+        return out.reshape(()) if n == 1 else out
+    drawn = _lognormal(site, name, prior, (int(mask.sum()),))
+    parts: list[Tensor] = []
+    j = 0
+    for v in entries:
+        if v is None:
+            parts.append(drawn[j])
+            j += 1
+        else:
+            parts.append(torch.as_tensor(float(v), dtype=torch.float64))
+    return torch.stack(parts)
+
+
 def sample_params_from_values(
     batch: SupportBatch,
     *,
@@ -425,6 +524,7 @@ def sample_params_from_values(
     values: dict[str, Tensor],
     priors: Priors = PRIORS,
     frozen: dict[str, Any] | None = None,
+    pin: dict[str, Any] | None = None,
 ) -> V2Params:
     """Assemble :class:`.spectrum.V2Params` from a guide's ``median()`` dict.
 
@@ -438,7 +538,7 @@ def sample_params_from_values(
             raise KeyError(f"guide has no site {name!r} (sites: {sorted(values)})")
         return torch.as_tensor(values[name], dtype=torch.float64)
 
-    return sample_params(batch, mode=mode, priors=priors, frozen=frozen, site=lookup)
+    return sample_params(batch, mode=mode, priors=priors, frozen=frozen, pin=pin, site=lookup)
 
 
 def sample_params(
@@ -447,13 +547,17 @@ def sample_params(
     mode: str,
     priors: Priors = PRIORS,
     frozen: dict[str, Any] | None = None,
+    pin: dict[str, Any] | None = None,
     site: SiteFn = _pyro_site,
 ) -> V2Params:
     """Sample (or read frozen) every parameter of one support's forward model.
 
     A frozen block creates NO Pyro site, so ``AutoDelta`` never allocates a
     guide parameter for it: ``--floor-only`` really holds the comb fixed rather
-    than fitting it under a tight prior.
+    than fitting it under a tight prior. ``pin`` does the same for INDIVIDUAL
+    dynamics coordinates of an otherwise free dynamics block
+    (:func:`dynamics_pin`, :func:`_dyn_site`) — the identified-ridge
+    reparameterisation R1 uses when a rate is not identifiable from the data.
     """
     free = free_blocks(mode)
     fz = dict(frozen or {})
@@ -472,10 +576,10 @@ def sample_params(
         return v.to(device=batch.power.device)
 
     if "dynamics" in free:
-        sigma_nu = _lognormal(site, "sigma_nu", priors.log_sigma_nu)
-        lam = _lognormal(site, "lam", priors.log_lam)
-        sigma_eps = _lognormal(site, "sigma_eps", priors.log_sigma_eps, (2,))
-        lam_eps = _lognormal(site, "lam_eps", priors.log_lam_eps, (2,))
+        sigma_nu = _dyn_site(site, "sigma_nu", priors.log_sigma_nu, pin=pin)
+        lam = _dyn_site(site, "lam", priors.log_lam, pin=pin)
+        sigma_eps = _dyn_site(site, "sigma_eps", priors.log_sigma_eps, pin=pin)
+        lam_eps = _dyn_site(site, "lam_eps", priors.log_lam_eps, pin=pin)
     else:
         sigma_nu = take("dynamics", "sigma_nu")
         lam = take("dynamics", "lam")
@@ -585,13 +689,14 @@ def support_model(
     mode: str,
     priors: Priors = PRIORS,
     frozen: dict[str, Any] | None = None,
+    pin: dict[str, Any] | None = None,
     temperature: float = 1.0,
     forward_kw: dict[str, Any] | None = None,
 ) -> V2Params:
     """The Pyro model of one support: priors, forward model, one Whittle factor."""
     if not (math.isfinite(temperature) and temperature > 0.0):
         raise ValueError(f"temperature must be finite and positive, got {temperature!r}")
-    params = sample_params(batch, mode=mode, priors=priors, frozen=frozen)
+    params = sample_params(batch, mode=mode, priors=priors, frozen=frozen, pin=pin)
     m_model = forward(batch, params, **(forward_kw or {}))
     pyro.factor("whittle", -whittle_risk(batch, m_model) / float(temperature))
     return params
