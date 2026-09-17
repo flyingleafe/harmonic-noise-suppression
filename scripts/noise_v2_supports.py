@@ -339,8 +339,22 @@ def findings(index: dict[str, Any]) -> str:
     out.append("")
     out.append(
         "The `.npz` caches are NOT committed (`results/**` is gitignored and they are "
-        "hundreds of MB); `index.json` and this file are. Any consumer regenerates a cache "
-        "with `python scripts/noise_v2_supports.py build --set <set>`."
+        "hundreds of MB); `index.json` and this file are. Every row carries its `spec`, "
+        "so a consumer rebuilds one support with `supports.load_support(<spec>)` and a "
+        "whole set with"
+    )
+    out.append("")
+    out.append("```bash")
+    out.append("set -a; . ./.env; set +a          # R2 credentials for the dload stream")
+    out.append("PYTHONPATH=src python scripts/noise_v2_supports.py build --set <set>")
+    out.append("```")
+    out.append("")
+    out.append(
+        "Sourcing the credentials is not optional: a remote job's worktree is a bare git "
+        "checkout with NO `.env` in it (omnirun ships the secrets to `$JOB_DIR/.env` and "
+        "sources them in its own bootstrap), so a build whose environment carries no R2 "
+        "keys now stops on the credential check instead of streaming into a botocore "
+        "`NoCredentialsError`."
     )
     out.append("")
     return "\n".join(out)
