@@ -966,15 +966,26 @@ def findings_body(payload: dict[str, Any]) -> list[str]:
     hp = g["hppnet"]
     if "dregon_cruise" in hp:
         d, m = hp["dregon_cruise"], hp["michaels_fly124"]
+        measured_d = bool(d["clusters"])
+        measured_m = any(r["n_blocks"] for r in m["per_regime"].values())
         out.append(
-            f"| HPPNet DREGON cruise | {'PASS' if d['pass'] else 'FAIL'} | "
-            f"{d['mean_candidate_rev_s']:.6f} rev/s (95 % upper "
-            f"{_fmt(d['candidate_interval']['upper'])}) | <= {d['target_rev_s']:.6f} |"
+            f"| HPPNet DREGON cruise | {'PASS' if d['pass'] else ('FAIL' if measured_d else 'NOT RUN')} | "
+            + (
+                f"{d['mean_candidate_rev_s']:.6f} rev/s (95 % upper "
+                f"{_fmt(d['candidate_interval']['upper'])})"
+                if measured_d
+                else f"no DREGON support measured ({len(d['missing_supports'])} missing)"
+            )
+            + f" | <= {d['target_rev_s']:.6f} |"
         )
         out.append(
-            f"| HPPNet Michael's ratio | {'PASS' if m['pass'] else 'FAIL'} | "
-            f"{m['aggregate_ratio']:.6f} ({m['rig_candidate_mae']:.6f} rev/s) | "
-            f"<= {m['ratio_max']:.2f} ({m['point_bound_rev_s']:.6f} rev/s) |"
+            f"| HPPNet Michael's ratio | {'PASS' if m['pass'] else ('FAIL' if measured_m else 'NOT RUN')} | "
+            + (
+                f"{m['aggregate_ratio']:.6f} ({m['rig_candidate_mae']:.6f} rev/s)"
+                if measured_m
+                else f"no FLY124 support measured ({len(m['missing_supports'])} missing)"
+            )
+            + f" | <= {m['ratio_max']:.2f} ({m['point_bound_rev_s']:.6f} rev/s) |"
         )
     for group, blk in g["proxy"]["groups"].items():
         out.append(
@@ -1014,7 +1025,16 @@ def findings_body(payload: dict[str, Any]) -> list[str]:
             f"{_fmt(row.get('pit_mae'))} | {_fmt(row.get('pit_mae_seed_spread'))} |"
         )
     out.append("")
-    if "dregon_cruise" in hp:
+    if "dregon_cruise" in hp and not hp["dregon_cruise"]["clusters"]:
+        d = hp["dregon_cruise"]
+        out.append(
+            "DREGON cruise: NOT RUN — no DREGON support was measured in this round "
+            f"({len(d['missing_supports'])} of {len(GT.DREGON_CRUISE_SUPPORTS)} missing), so "
+            f"neither the cluster mean nor its one-sided 95 % bound exists to put against the "
+            f"frozen target {d['target_rev_s']:.6f} rev/s."
+        )
+        out.append("")
+    elif "dregon_cruise" in hp:
         d = hp["dregon_cruise"]
         out.append(
             f"DREGON cruise: candidate mean {d['mean_candidate_rev_s']:.6f} rev/s over "
@@ -1033,7 +1053,8 @@ def findings_body(payload: dict[str, Any]) -> list[str]:
             f"(relative {_fmt(d['real_arm']['relative'])})."
         )
         out.append("")
-        m = hp["michaels_fly124"]
+    m = hp.get("michaels_fly124") if "dregon_cruise" in hp else None
+    if m and any(r["n_blocks"] for r in m["per_regime"].values()):
         out.append("Michael's FLY124 per regime (rev/s):")
         out.append("")
         out.append("| regime | blocks | candidate | frozen baseline | ratio |")
@@ -1041,14 +1062,19 @@ def findings_body(payload: dict[str, Any]) -> list[str]:
         for regime in ("standby", "ramp", "cruise"):
             r = m["per_regime"][regime]
             out.append(
-                f"| {regime} | {r['n_blocks']} | {r['candidate_mae']:.6f} | "
-                f"{r['baseline_mae']:.6f} | {r['ratio']:.4f} |"
+                f"| {regime} | {r['n_blocks']} | {_fmt(r['candidate_mae'])} | "
+                f"{r['baseline_mae']:.6f} | {_fmt(r['ratio'], '.4f')} |"
             )
         out.append("")
         out.append(
             f"Equal-regime mean {m['rig_candidate_mae']:.6f} rev/s against the frozen baseline "
             f"{m['rig_baseline_mae']:.6f}; ratio {m['aggregate_ratio']:.6f} against the "
             f"{m['ratio_max']} bound ({m['arithmetic']})."
+        )
+    elif m:
+        out.append(
+            "Michael's FLY124: NOT RUN — no FLY124 support was measured in this round "
+            f"({len(m['missing_supports'])} of {len(GT.MICHAELS_SUPPORTS)} missing)."
         )
     out.append("")
     out.append("## Proxy `ltas_abs_db` per support (dB, mic 0, absolute level)")
@@ -1178,6 +1204,7 @@ def compose(
     previous: Path | None,
     supports_index: Path | None,
     blocker: str | None,
+    arm_jobs: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """The round record: one candidate row per scored arm, gates recombined.
 
@@ -1191,6 +1218,10 @@ def compose(
     enters the joint gate; the others stay as fully scored candidate rows.
     """
     arms = [load_arm(p) for p in arm_paths]
+    for arm in arms:
+        job = (arm_jobs or {}).get(str(arm["candidate"]["name"]))
+        if job:
+            _attribute_job(arm, job)
     primary: dict[str, dict[str, Any]] = {}
     for arm in arms:
         for rig in arm["candidate"]["rigs"]:
@@ -1325,6 +1356,25 @@ def compose(
     return payload
 
 
+ARTIFACT_BUCKET = "s3://omnirun-artifacts"
+
+
+def _attribute_job(arm: dict[str, Any], job: str) -> None:
+    """Name the omnirun job that scored this arm, and where its audio lives.
+
+    The job id is only known to the submitter, never inside the job, so it is
+    stamped here; the audio URI follows from the bucket layout
+    ``<bucket>/<job>/outputs/<repo-relative path>`` the job's outputs are
+    collected into.
+    """
+    arm["job"] = str(job)
+    audio = dict(arm.get("audio") or {})
+    if audio.get("dir"):
+        audio["uri"] = f"{ARTIFACT_BUCKET}/{job}/outputs/{str(audio['dir']).lstrip('./')}"
+        arm["audio"] = audio
+
+
+
 def _candidate_hppnet(arm: dict[str, Any]) -> dict[str, Any]:
     """The candidate row's own HPPNet numbers, on the rigs it was scored on."""
     hp = arm["gates"].get("hppnet") or {}
@@ -1451,7 +1501,8 @@ def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
         f"Top-level pass (legacy parity on both HPPNet gates): **{str(payload['pass']).lower()}**. "
         f"Stretch (frozen 0.70-gap DREGON target): **{str(payload['stretch_pass']).lower()}**. "
         f"All three frozen gates: **{str(payload['frozen_gates_pass']).lower()}**. "
-        f"Record `results/noise_v2/rounds/round{payload['round']}.json`, git `{payload['git']}`.",
+        f"Record `results/noise_v2/rounds/round{payload['round']}.json`, "
+        f"git `{str(payload['git'])[:12]}`.",
         "",
         "## Candidates",
         "",
@@ -1489,7 +1540,8 @@ def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
             )
             continue
         out.append(
-            f"| {rig} | {blk['quantity']} | {_fmt(blk['mean_rev_s'])} | "
+            f"| {rig} | {blk['quantity']} | "
+            f"{'not run' if blk['mean_rev_s'] is None else _fmt(blk['mean_rev_s'])} | "
             f"{_fmt(blk['parity']['bar_rev_s'])} | {_verdict(blk['parity']['within'])} "
             f"(margin {_fmt(blk['parity']['margin_rev_s'], '+.6f')}) | "
             f"{_fmt(blk['stretch']['bar_rev_s'])} | {_verdict(blk['stretch']['within'])} "
@@ -1586,7 +1638,7 @@ def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
         out.append("")
         for row in payload["candidates"]:
             out.append(
-                f"* `{row['name']}` — fit git `{row.get('git')}`, render/probe job "
+                f"* `{row['name']}` — fit git `{str(row.get('git'))[:12]}`, render/probe job "
                 f"`{row.get('job') or 'local'}`, arm record `{row['arm_record']}`, render wall "
                 f"{_fmt(row.get('render_wall_s'), '.0f')} s."
             )
@@ -1695,6 +1747,16 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="with --compose: the blocker sentence (default: derived from what was not run)",
     )
+    ap.add_argument(
+        "--arm-job",
+        action="append",
+        default=[],
+        metavar="CANDIDATE=JOB",
+        help=(
+            "with --compose: the omnirun job that scored that candidate (the job id is not "
+            "visible inside the job); the dumped audio URI follows from it"
+        ),
+    )
     args = ap.parse_args(argv)
     tag = f"_{args.out_tag}" if args.out_tag else ""
     out_json = Path(args.out) / f"round{int(args.round)}{tag}.json"
@@ -1708,6 +1770,10 @@ def main(argv: list[str] | None = None) -> int:
             previous=previous,
             supports_index=args.supports_index,
             blocker=args.blocker,
+            arm_jobs=dict(
+                str(spec).split("=", 1)
+                for spec in args.arm_job  # type: ignore[misc]
+            ),
         )
         RE.write_json(out_json, payload)
         out_dir.mkdir(parents=True, exist_ok=True)

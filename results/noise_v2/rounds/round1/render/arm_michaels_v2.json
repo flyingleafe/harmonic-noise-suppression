@@ -1,8 +1,6 @@
 {
- "schema": "noise-v2-round-score/1",
  "round": 1,
- "git": "463fd10b993bc6175f3798516438e5c95f44f27f",
- "status": "scored",
+ "git": "8093285f352cd33e31e56b424bb64c5dbe35f06d",
  "arm": {
   "kind": "v2",
   "label": {
@@ -16,178 +14,186 @@
    }
   }
  },
- "fits": [
-  "results/noise_v2/rounds/round1/fits/michaels_fly125_cruise__flight.json"
- ],
- "candidates": [
-  {
-   "name": "michaels_v2_fly125cruise",
-   "rigs": [
-    "michaels"
-   ],
-   "primary_for": [
-    "michaels"
-   ],
-   "fits": {
-    "michaels": {
-     "support": "michaels_fly125_cruise",
-     "path": "results/noise_v2/rounds/round1/fits/michaels_fly125_cruise__flight.json",
-     "mode": "flight",
-     "n_fit_windows": 8,
-     "converged": false,
-     "which_converged": "none",
-     "grad_norm": 8555.254220404773,
-     "tol_nats_per_cell": 0.0001,
-     "lbfgs_restart_gain_per_cell": 0.01875590460371862,
-     "wall_s": 6470.073075294495,
-     "whittle_nats": -24362038.627839252,
-     "comb_mean_check": null
-    }
-   },
-   "git": "8093285f352cd33e31e56b424bb64c5dbe35f06d",
-   "job": "nv2-r1-score-michaels2-c3bbbd",
-   "audio": {
-    "dir": "results/noise_v2/rounds/round1/render/audio/michaels_v2",
-    "uri": "s3://omnirun-artifacts/nv2-r1-score-michaels2-c3bbbd/outputs/results/noise_v2/rounds/round1/render/audio/michaels_v2"
-   },
-   "arm_record": "results/noise_v2/rounds/round1/render/arm_michaels_v2.json",
-   "render_seeds": [
-    2001,
-    2002,
-    2003,
-    2004
-   ],
-   "n_mics": 8,
-   "scorer": {
-    "experiment": "hppnet_l2_r2_s0",
-    "ckpt": "best",
-    "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
-    "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/8093285f352c/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
-    "bytes": 2746881,
-    "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
-   },
-   "bars": {
-    "rule": "PARITY = the legacy previous-best bar on BOTH HPPNet numbers; STRETCH = the frozen 0.70-gap DREGON target with Michael's parity bar unchanged",
-    "dregon": {
-     "quantity": "five-recording cruise PIT MAE mean, one-sided 95 % upper bound beside it",
-     "cohort_complete": false,
-     "mean_rev_s": null,
-     "interval_upper_rev_s": null,
-     "parity": {
-      "bar_rev_s": 2.1877858830655468,
-      "within": null,
-      "margin_rev_s": null
-     },
-     "parity_interval_upper": {
-      "bar_rev_s": 2.1877858830655468,
-      "within": null,
-      "margin_rev_s": null
-     },
-     "stretch": {
-      "bar_rev_s": 1.897062542673336,
-      "within": null,
-      "margin_rev_s": null
-     },
-     "stretch_interval_upper": {
-      "bar_rev_s": 1.897062542673336,
-      "within": null,
-      "margin_rev_s": null
-     },
-     "frozen_gate_pass": false,
-     "missing_supports": [
-      "free-flight_nosource_room2@1512727397.205045+4.000000",
-      "hovering_nosource_room2@1511903905.394490+4.000000",
-      "updown_nosource_room2@1511903578.348311+4.000000",
-      "rectangle_nosource_room2@1511905725.952559+4.000000",
-      "spinning_nosource_room2@1511905200.978012+4.000000"
-     ]
-    },
-    "michaels": {
-     "quantity": "equal-regime mean PIT MAE over standby/ramp/cruise (ratio of means)",
-     "cohort_complete": true,
-     "mean_rev_s": 16.79905319257055,
-     "ratio": 5.550357632583644,
-     "parity": {
-      "bar_rev_s": 3.177994468076875,
-      "within": false,
-      "margin_rev_s": -13.621058724493675
-     },
-     "stretch": {
-      "bar_rev_s": null,
-      "within": null,
-      "margin_rev_s": null,
-      "note": "no stretch bar is defined for Michael's: the frozen gate (<= 1.05 x 3.026661) IS the legacy parity bar"
-     },
-     "frozen_gate_pass": false,
-     "missing_supports": []
-    },
-    "parity_pass": false,
-    "stretch_pass": false
-   },
-   "hppnet": {
-    "michaels": {
-     "rig_mean_rev_s": 16.79905319257055,
-     "ratio": 5.550357632583644,
-     "per_regime": {
-      "cruise": {
-       "candidate_mae": 0.8093633413949513,
-       "baseline_mae": 0.7557833849952398,
-       "ratio": 1.0708932710925485,
-       "n_blocks": 2
-      },
-      "ramp": {
-       "candidate_mae": 16.955751131907093,
-       "baseline_mae": 8.007098121439082,
-       "ratio": 2.1175900275916324,
-       "n_blocks": 1
-      },
-      "standby": {
-       "candidate_mae": 32.6320451044096,
-       "baseline_mae": 0.3171026880710335,
-       "ratio": 102.90687002028746,
-       "n_blocks": 2
-      }
-     },
-     "frozen_gate_pass": false
-    }
-   },
-   "proxy": {
-    "michaels_cruise": {
-     "mean_ltas_abs_db": 1.4155900477817385,
-     "spread_ltas_abs_db": 1.6608054768771348,
-     "gate_db": 1.2196683027095454,
-     "margin_db": -0.19592174507219307,
-     "mean_mr_ltas": 1.6456128379068944,
-     "n_supports": 2,
-     "pass": false
-    }
-   },
-   "likelihood": {
-    "decisive_band": "comb",
-    "per_band": {
-     "comb": {
-      "model_nats_per_s": -373414.11865094333,
-      "oracle_nats_per_s": -371916.50407051947,
-      "margin_nats_per_s": -1497.6145804238622,
-      "below_oracle": true
-     },
-     "floor": {
-      "model_nats_per_s": -8487.711891061714,
-      "oracle_nats_per_s": -8713.266324862545,
-      "margin_nats_per_s": 225.55443380083125,
-      "below_oracle": false
-     },
-     "full": {
-      "model_nats_per_s": -381901.83054200513,
-      "oracle_nats_per_s": -380629.77039538196,
-      "margin_nats_per_s": -1272.0601466231747,
-      "below_oracle": true
-     }
-    },
-    "pass": true
-   },
-   "render_wall_s": 253.45532369613647
+ "candidate": {
+  "name": "michaels_v2_fly125cruise",
+  "rigs": [
+   "michaels"
+  ],
+  "fits": {
+   "michaels": {
+    "support": "michaels_fly125_cruise",
+    "path": "results/noise_v2/rounds/round1/fits/michaels_fly125_cruise__flight.json",
+    "mode": "flight",
+    "n_fit_windows": 8,
+    "converged": false,
+    "which_converged": "none",
+    "grad_norm": 8555.254220404773,
+    "tol_nats_per_cell": 0.0001,
+    "lbfgs_restart_gain_per_cell": 0.01875590460371862,
+    "wall_s": 6470.073075294495,
+    "whittle_nats": -24362038.627839252,
+    "comb_mean_check": null
+   }
   }
+ },
+ "fits": [
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor1_50__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor1_60__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor1_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor1_80__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor1_90__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor2_50__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor2_60__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor2_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor2_80__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor2_90__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor3_50__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor3_60__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor3_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor3_80__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor3_90__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor4_50__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor4_60__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor4_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor4_80__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_Motor4_90__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_dregon_allMotors_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_AVQ__S1_seq1_w1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_AVQ__S1_seq1_w3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_AVQ__S1_seq2_w0__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_AVQ__S1_seq2_w3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_AVQ__S2_seq1_w3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_AVQ__S2_seq1_w5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor1_50__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor1_60__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor1_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor1_80__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor1_90__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor2_50__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor2_60__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor2_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor2_80__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor2_90__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor3_50__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor3_60__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor3_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor3_80__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor3_90__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor4_50__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor4_60__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor4_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor4_80__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_Motor4_90__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DREGON-bench__motor_allMotors_70__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_center_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_center_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_center_File4__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_down_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_down_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_down_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_up_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_up_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_up_File4__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_25cm_M_up_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_center_File1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_center_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_center_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_center_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_down_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_down_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_down_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_down_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_down_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_up_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_up_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_up_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_high_50cm_M_up_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_25cm_M_center_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_25cm_M_center_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_25cm_M_center_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_25cm_M_down_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_25cm_M_down_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_25cm_M_down_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_25cm_M_down_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_25cm_M_up_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_25cm_M_up_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_50cm_M_center_File1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_50cm_M_center_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_50cm_M_center_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_50cm_M_center_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_50cm_M_down_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_50cm_M_up_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone1_low_50cm_M_up_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_center_File1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_center_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_center_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_center_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_down_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_down_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_down_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_down_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_up_File1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_up_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_up_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_25cm_M_up_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_center_File1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_center_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_center_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_center_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_down_File1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_down_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_down_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_down_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_down_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_up_File1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_up_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_up_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_up_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_high_50cm_M_up_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_center_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_center_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_center_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_center_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_down_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_down_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_down_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_down_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_down_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_up_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_up_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_up_File4__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_up_File5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_up_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_25cm_M_up_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_center_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_center_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_center_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_center_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_down_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_down_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_down_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_down_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_up_File2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_up_File3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_up_File6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_DroneAudioSet__drone2_low_50cm_M_up_silence__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-ChuMS-bench__2prop_repeat3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-ChuMS-bench__3prop_repeat2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__0__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__2__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__3__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__6__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__7__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__static_clean__0__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__static_clean__1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__static_clean__4__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__static_clean__5__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__AGH__static_corrupted__1__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__Diagonal_Unloading__recordings__static__static_2m__bench.json",
+  "results/noise_v2/rounds/round1/fits/bench_point_SPCUP19-egonoise__Idea_ssu__stationary_1__bench.json",
+  "results/noise_v2/rounds/round1/fits/michaels_fly125_cruise__flight.json"
  ],
  "protocol": {
   "render_seeds": [
@@ -197,27 +203,18 @@
    2004
   ],
   "n_mics": 8,
-  "hppnet": {
+  "scorer": {
    "experiment": "hppnet_l2_r2_s0",
-   "checkpoint": "best",
-   "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1",
-   "verified": true,
-   "record": {
-    "experiment": "hppnet_l2_r2_s0",
-    "ckpt": "best",
-    "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
-    "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/8093285f352c/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
-    "bytes": 2746881,
-    "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
-   }
+   "ckpt": "best",
+   "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+   "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/8093285f352c/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
+   "bytes": 2746881,
+   "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
   },
-  "proxy": "ltas_abs_db on mic 0; mr_ltas report-only",
-  "likelihood": {
+  "proxy_seed": 2001,
+  "likelihood_front_end": {
    "n_fft": 2048,
-   "hop": 512,
-   "pool": "FLY124 cruise supports",
-   "band_edge_hz": 300.0,
-   "decisive_band": "comb"
+   "hop": 512
   },
   "note": "PIT MAE per support is the mean over the frozen render seeds (the evaluator's per_window quantity); the proxy reads the first seed's render with the per-seed spread recorded beside it"
  },
@@ -2455,6 +2452,34 @@
    "closure": 0.7,
    "mic": 0,
    "groups": {
+    "dregon_cruise": {
+     "checks": {
+      "cohort_complete": false,
+      "within_gate": false
+     },
+     "gate_db": 1.9786091435875266,
+     "reference": {
+      "oracle_db": 1.784816176956543,
+      "c3_db": 2.4307927323931553,
+      "current_best_db": 2.126453600529959,
+      "oracle_spread_db": 1.141525996979129,
+      "n_supports": 5.0
+     },
+     "mean_ltas_abs_db": NaN,
+     "spread_ltas_abs_db": NaN,
+     "margin_db": null,
+     "mean_mr_ltas": null,
+     "n_supports": 0,
+     "missing_supports": [
+      "free-flight_nosource_room2@1512727397.205045+4.000000",
+      "hovering_nosource_room2@1511903905.394490+4.000000",
+      "updown_nosource_room2@1511903578.348311+4.000000",
+      "rectangle_nosource_room2@1511905725.952559+4.000000",
+      "spinning_nosource_room2@1511905200.978012+4.000000"
+     ],
+     "supports": [],
+     "pass": false
+    },
     "michaels_cruise": {
      "checks": {
       "cohort_complete": true,
@@ -2497,9 +2522,6 @@
      "pass": false
     }
    },
-   "missing_groups": [
-    "dregon_cruise"
-   ],
    "pass": false
   },
   "likelihood": {
@@ -2707,48 +2729,11 @@
   "stretch_pass": false
  },
  "pass": false,
+ "frozen_gates_pass": false,
  "parity_pass": false,
  "stretch_pass": false,
- "frozen_gates_pass": false,
- "pass_rule": "top-level pass = LEGACY PARITY on both HPPNet gates; stretch_pass is the frozen 0.70-gap DREGON target; frozen_gates_pass additionally requires the proxy and likelihood gates",
- "support_availability": {
-  "source": "results/noise_v2/rounds/round1/supports/index.json",
-  "n_supports_materialized": 179,
-  "sets": {
-   "bench-points": {
-    "required": 135,
-    "materialized": 135
-   },
-   "dregon-bench": {
-    "required": 21,
-    "materialized": 21
-   },
-   "dregon-floor": {
-    "required": 10,
-    "materialized": 10
-   },
-   "michaels-cruise": {
-    "required": 13,
-    "materialized": 13
-   }
-  },
-  "updated": "2026-09-17T10:29:45+0100"
- },
- "legacy_smoke": {
-  "status": "not_comparable",
-  "job": "noise-v2-r1-legacy-smoke-453b44",
-  "git": "5d1ae657123f",
-  "dregon_cruise_pit_mae": {
-   "observed": 2.1877857781959653,
-   "frozen": 2.1877858830655468,
-   "relative_delta": 4.793411556569538e-08
-  },
-  "michaels_equal_regime_pit_mae": {
-   "observed": 3.1994856005743766,
-   "frozen": 3.026661398168452,
-   "relative_delta": 0.05710060679747908
-  },
-  "reason": "The gitignored baseline calibration that selects the old export family and per-recording route was unavailable. The DREGON number happens to reproduce its frozen scalar, but the Michael's replay does not; because the inputs are not proven identical, the 2% legacy-smoke criterion is intentionally not applied."
- },
- "blocker": "The DREGON arm is NOT scored: the floor-only flight fit results/noise_v2/rounds/round1/fits/dregon_room2_floor__flight_floor_only.json does not exist yet (owner R1Fit, uni-cpu job nv2-r1-dregon-floor-fffda7, submitted 2026-09-17T19:41Z from ebaecd66, still in its optimiser phase). Without it there is no DREGON candidate audio, so the HPPNet DREGON cruise number, the proxy dregon_cruise group and therefore the joint frozen HPPNet gate are not_run; the Michael's arm is fully scored. The likelihood gate needs only Michael's cruise cells and is evaluated."
+ "audio": {
+  "dir": "results/noise_v2/rounds/round1/render/audio/michaels_v2",
+  "uri": null
+ }
 }
