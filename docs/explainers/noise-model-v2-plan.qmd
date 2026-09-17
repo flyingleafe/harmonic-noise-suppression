@@ -756,25 +756,42 @@ running window (~11 s of each 25 s file) is detected from the level track.
 ![Cross-order (left) and cross-microphone (right) correlation of the residual at 50 ms.](noise-model-v2-plan/decoherence_corr.png)
 :::
 
-Findings.
+How to read the figure. The increment over lag `τ` is the angle of
+`z_k(t+τ)·conj(z_k(t))`, always inside `(−π, π]`: rotations are never counted,
+and the variance is `−2 ln|⟨e^{iΔφ}⟩|`, the circular spread. That is the
+quantity a spectrum depends on, and it has a hard ceiling: once the phase has
+wandered by more than about a radian over the lag, the increments are uniform
+on the circle and the estimate saturates near 3 rad² (grey dash-dot line).
+Points at the ceiling mean "decorrelated over this lag", not a value.
 
-1. **The independent term is real and large.** Power law over `k ∈ [4, 40]`,
-   `τ ∈ [10, 500] ms`: `V_ε = 0.09 · k^1.08 · τ^0.43` rad² (`τ` in s; CI
-   `a` 0.05-0.38, `p` 0.64-1.44, `q` 0.36-0.74; 2000 bootstrap draws over
-   recordings). It exceeds the shared shaft term at every order above 4.
-2. **It is independent across orders**: mean off-diagonal correlation 0.03
-   over 630 order pairs at 50 ms, with no odd/even block. The parity shows in
-   the variance: each odd order carries 3.7× the independent noise of its even
-   neighbours at 50 ms (median 0.77 vs 0.23 rad²), and the two families scale
-   differently in lag — even `q = 0.88` (still diffusive at 500 ms), odd
-   `q = 0.46` (saturating).
-3. **It is mostly source-side**: cross-microphone correlation 0.21, against
-   0.00 for a noise-only control and 0.30 for a control with the term fully
-   shared across microphones.
-4. **The shaft term is smaller than first fitted.** The shared part alone
-   gives `V_θ(50 ms) = 7.9e-4`, `V_θ(500 ms) = 0.017 rad²`, i.e.
-   `σ_ν ≈ 0.45 rad/s` at `λ = 5.5` (0.31-0.65 across recordings). The earlier
-   bench fit of `σ_ν = 1.77` had absorbed the per-order term into the shaft.
+Findings, as the panels show them.
+
+1. **Low orders show nothing beyond shaft and noise.** `k = 2, 4` on the bench
+   sit flat at 0.05-0.1 rad², the same as control (i), whose flat level is the
+   microphone-noise phase floor at that SNR (it does not grow with lag; the
+   rise below 20 ms is the low-pass filter's own correlation).
+2. **High orders decohere.** `k ≥ 16` on the bench rises with lag like control
+   (ii), from 0.1-0.5 rad² at 50 ms to the ceiling by 0.5-1 s, far above the
+   shaft term (`k²·V_θ`, dotted) and the noise floor. Order 8 is in between.
+   The harmonics of one rotor do not keep a fixed phase relation over 0.1-1 s.
+3. **The residual is independent across orders**: mean off-diagonal
+   correlation 0.03 over 630 order pairs at 50 ms, no odd/even block. Odd
+   orders carry 2-4× the variance of their even neighbours where both are
+   measurable.
+4. **Mostly source-side**: cross-microphone correlation 0.21, against 0.00 for
+   the noise-only control and 0.30 for a term fully shared across
+   microphones.
+5. **The shaft term is smaller than first fitted.** The shared part alone gives
+   `V_θ(50 ms) = 7.9e-4`, `V_θ(500 ms) = 0.017 rad²`, i.e. `σ_ν ≈ 0.45 rad/s`
+   at `λ = 5.5` (0.31-0.65 across recordings). The earlier bench fit of
+   `σ_ν = 1.77` had absorbed the per-order wander into the shaft.
+
+The pooled power law `V_ε = 0.09·k^1.08·τ^0.43` (CI `a` 0.05-0.38, `p`
+0.64-1.44, `q` 0.36-0.74) is a fit across the flat low-order regime and the
+growing high-order regime, so its exponents average two behaviours; the
+`k`-scaling and the lag law of the growing regime alone are squeezed between
+the noise floor at low `k` and the ceiling at high `k` and are not pinned by
+this data.
 
 Controls, all through the identical pipeline: a render with only a shared
 integrated-OU shaft and a white floor returns the analytic SNR floor (0.96×,
@@ -783,14 +800,17 @@ recovered at 0.67× with exponents `p = 0.85`, `q = 1.09`; a null render
 differenced against a second realisation returns 1 resolvable cell against 91
 for the bench.
 
-What it means for the model: the per-harmonic term the first draft of this
-page dropped comes back as an **independent per-order process on the
-phase**, driven `∝ k^{1/2}`, written as an OU with a correlation time of
-0.3-1 s in the simplest form, one pair `(σ_ε, λ_ε)` per parity (section
-[Model v2](#model-v2)). The OU's ceiling is an inference from sub-linear
-growth, not an observation: no plateau is seen inside the 500 ms lag range.
-R1 extends the lag range to 1-5 s on the long bench recordings and replaces
-the OU by a rate-modulated random walk if the variance keeps growing.
+What it means for the model: at `k ≳ 16` the harmonics of one rotor wander
+independently of each other and of the shaft over 0.1-1 s, at levels that
+dominate the shaft term. The model needs an **independent per-order phase
+process**, growing in `k` and in lag; its functional form (OU with a ceiling,
+random walk with a `k`-dependent rate, or a two-timescale process) and its
+exact `k`-scaling are **not** fixed by this measurement. The working form in
+section [Model v2](#model-v2) is an OU driven `∝ k^{1/2}` with
+`1/λ_ε ≈ 0.3-1 s`, one pair `(σ_ε, λ_ε)` per parity, chosen as the simplest
+process with a ceiling; R1 fits the form on the bench, with the lag range
+extended to 1-5 s on the 31 s `motor_Motor1_70` recording and the 30-120 s
+survey bench points.
 
 # Likelihood and window
 
