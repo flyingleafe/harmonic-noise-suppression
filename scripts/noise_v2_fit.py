@@ -468,6 +468,7 @@ def findings(out_dir: Path) -> str:
                 n_cells=o["n_cells"],
                 converged=q["converged"],
                 wall_s=q["wall_s"],
+                restarts=f.get("restarts"),
                 path=str(path),
             )
         )
@@ -542,8 +543,10 @@ def findings(out_dir: Path) -> str:
             "## Four-motor validation",
             "",
             "`motor_allMotors_70` against the four `Motor{1-4}_70` single-motor fits: the "
-            "ratio of the four-rotor value to the geometric mean of the per-rotor ones, and "
-            "the per-rotor spread that decision 9 of 2026-09-17 freezes as the tolerance.",
+            "ratio of the four-rotor value to the geometric mean of the per-rotor ones and "
+            "the per-rotor spread, as read off the fits. This is a raw parameter comparison "
+            "only — what the four-motor support does or does not validate is measured in "
+            "its own workstream, not here.",
             "",
             "| parameter | four-motor | per-rotor geo-mean | ratio | per-rotor min/max |",
             "|---|--:|--:|--:|---|",
@@ -563,6 +566,98 @@ def findings(out_dir: Path) -> str:
                 f" {v.min():.4g} / {v.max():.4g} |"
             )
 
+    multi = [r for r in rows if r.get("restarts")]
+    if multi:
+        tol = 1e-4
+        lines += [
+            "",
+            "## Multi-start restarts",
+            "",
+            "Each support was fitted from several starts: start 0 from the data-driven "
+            "initialisation, the others from a log-normal perturbation of the dynamics "
+            "init (`OptimSpec.init_jitter`; a bare seed change is a no-op because a bench "
+            "fit is deterministic). The REPORTED fit above is the start with the lowest "
+            "polished objective. `best-median` and `best-worst` are that objective's "
+            "advantage over the median and the worst start, per observed cell, against "
+            f"the same {tol:g} nats/cell tolerance the convergence test uses; "
+            "`starts agree` is yes only when even the worst start is inside it. The "
+            "dynamics columns are min / median / max over the starts.",
+            "",
+            "| support | starts | best nats/cell | best-median | best-worst | starts agree |"
+            " L-BFGS conv | sigma_nu | lam | sigma_eps even | sigma_eps odd | lam_eps even |"
+            " lam_eps odd |",
+            "|---|--:|--:|--:|--:|:-:|:-:|---|---|---|---|---|---|",
+        ]
+        for r in sorted(multi, key=lambda x: x["support"]):
+            b = r["restarts"]
+            cells = max(1, int(r["n_cells"]))
+            cols = []
+            for key in DYN_KEYS:
+                s = b["params"][key]
+                cols.append(f"{s['min']:.3g} / {s['median']:.3g} / {s['max']:.3g}")
+            agree = b["best_minus_worst_per_cell"] < tol
+            lines.append(
+                f"| `{r['support']}` | {b['n_restarts']} |"
+                f" {r['whittle'] / cells:.4f} | {b['best_minus_median_per_cell']:.3g} |"
+                f" {b['best_minus_worst_per_cell']:.3g} | {'y' if agree else 'N'} |"
+                f" {'y' if r['converged'] else 'N'} | " + " | ".join(cols) + " |"
+            )
+        agree_n = sum(1 for r in multi if r["restarts"]["best_minus_worst_per_cell"] < tol)
+        worst = max(multi, key=lambda r: r["restarts"]["best_minus_worst_per_cell"])
+        spreads = np.asarray(
+            [
+                r["restarts"]["params"]["lam"]["max_over_min"] or np.nan
+                for r in multi
+                if r["restarts"]["params"]["lam"]["max_over_min"]
+            ],
+            dtype=np.float64,
+        )
+        lines += [
+            "",
+            f"{agree_n} of {len(multi)} supports have every start inside the tolerance. The "
+            f"widest disagreement is `{worst['support']}` at "
+            f"{worst['restarts']['best_minus_worst_per_cell']:.3g} nats/cell, "
+            f"{worst['restarts']['best_minus_worst_per_cell'] / tol:.0f} times the tolerance. "
+            f"`lam` alone spans a factor of {np.nanmedian(spreads):.3g} (median over supports) "
+            f"and up to {np.nanmax(spreads):.3g} across the starts of one support: on this "
+            "evidence the R1 bench MAP problem is multi-modal, and a number computed from a "
+            "single start is a draw from that multiplicity rather than an estimate.",
+        ]
+
+    # the long-lag decoherence measurement (results/noise_v2/decoherence_long,
+    # commit 82d0547e): a ceiling at k = 4 and k = 8 with tau_c 2.15 s and
+    # 1.12 s, k = 2 still growing at 5 s, k >= 16 over the estimator's ceiling
+    OU_TAU_C_S = {4: 2.15, 8: 1.12}
+    lo, hi = (1.0 / max(OU_TAU_C_S.values()), 1.0 / min(OU_TAU_C_S.values()))
+    lines += [
+        "",
+        "## Fitted `lam_eps` against the measured OU verdict",
+        "",
+        "The long-lag study (`results/noise_v2/decoherence_long`) found a per-order "
+        f"ceiling only at k = 4 and k = 8, with tau_c {OU_TAU_C_S[4]:g} s and "
+        f"{OU_TAU_C_S[8]:g} s, i.e. lam_eps between {lo:.3g} and {hi:.3g} /s; k = 2 was "
+        "still growing at 5 s and k >= 16 sat over the estimator's ceiling, so the verdict "
+        "is order-conditional and the model is NOT being asked to reproduce a universal "
+        "OU. The question here is only whether the fitted rates land anywhere near the "
+        "orders where a ceiling was measured.",
+        "",
+        "| set | n | lam_eps even median [IQR] | lam_eps odd median [IQR] | within a factor of "
+        "3 of the measured window |",
+        "|---|--:|---|---|--:|",
+    ]
+    for gname, subset in groups.items():
+        if not subset:
+            continue
+        inside = sum(
+            1
+            for r in subset
+            for key in ("lam_eps_even", "lam_eps_odd")
+            if lo / 3.0 <= r[key] <= hi * 3.0
+        )
+        lines.append(
+            f"| {gname} | {len(subset)} | {stats('lam_eps_even', subset)} |"
+            f" {stats('lam_eps_odd', subset)} | {inside} / {2 * len(subset)} |"
+        )
     edges = []
     for r in rows:
         if r["lam"] > 30.0:
