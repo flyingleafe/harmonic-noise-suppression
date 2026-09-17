@@ -108,7 +108,14 @@ def worker(unit: Unit) -> dict[str, Any]:
     outcome = FT.fit_support(
         batch, mode=mode, frozen=frozen, optim=optim, progress=int(p.get("progress", 0))
     )
-    path = out_dir / f"{name}__{mode}.json"
+    # a RESTART lands beside its siblings and is reduced to one reported fit
+    # afterwards; a single-seed fit is the reported fit itself
+    tag = p.get("restart_tag")
+    if tag:
+        path = out_dir / "restarts" / f"{name}__{mode}__{tag}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        path = out_dir / f"{name}__{mode}.json"
     FT.write_fit(
         path,
         support=name,
@@ -129,6 +136,7 @@ def worker(unit: Unit) -> dict[str, Any]:
         whittle_nats=outcome.objective["whittle_nats"],
         per_band=outcome.objective["per_band"],
         n_cells=outcome.objective["n_cells"],
+        seed=int(optim.seed),
         sigma_nu=d["sigma_nu"],
         lam=d["lam"],
         sigma_eps_even=d["sigma_eps_even"],
@@ -188,6 +196,225 @@ def expand_frozen(frozen: dict[str, Any], *, n_rotors: int) -> dict[str, Any]:
     if prof.shape[0] != n_rotors:
         out["profile_db"] = np.repeat(prof[:1], n_rotors, axis=0).tolist()
     return out
+
+
+# ── restarts ────────────────────────────────────────────────────────────────
+
+
+DYN_KEYS = (
+    "sigma_nu",
+    "lam",
+    "sigma_eps_even",
+    "sigma_eps_odd",
+    "lam_eps_even",
+    "lam_eps_odd",
+)
+
+
+def reduce_restarts(out_dir: Path, *, mode: str = "bench") -> list[dict[str, Any]]:
+    """Collapse each support's per-seed restarts into ONE reported fit.
+
+    The reported fit is the best restart — the lowest polished objective — and
+    it carries a ``restarts`` block: every restart's objective and dynamics,
+    the best-minus-median and best-minus-worst objective PER OBSERVED CELL, and
+    the min/median/max of each dynamics parameter over the restarts. A support
+    whose restarts disagree by far more than the convergence tolerance
+    (1e-4 nats/cell) was not fitted so much as sampled, and this block is the
+    evidence for it rather than a claim about it.
+    """
+    import numpy as np
+
+    rdir = out_dir / "restarts"
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for path in sorted(rdir.glob(f"*__{mode}__s*.json")):
+        try:
+            f = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            continue
+        if f.get("schema") != "noise-v2-fit/1":
+            continue
+        f["_path"] = str(path)
+        groups.setdefault(str(f["support"]), []).append(f)
+
+    written: list[dict[str, Any]] = []
+    for support, items in sorted(groups.items()):
+        loss = np.asarray([float(f["optimiser"]["lbfgs_loss_after"]) for f in items])
+        best = items[int(np.argmin(loss))]
+        cells = max(1, int(best["objective"]["n_cells"]))
+        params = {}
+        for key in DYN_KEYS:
+            v = np.asarray([float(f["params"][key]) for f in items], dtype=np.float64)
+            params[key] = dict(
+                values=v.tolist(),
+                min=float(v.min()),
+                median=float(np.median(v)),
+                max=float(v.max()),
+                max_over_min=float(v.max() / v.min()) if v.min() > 0.0 else None,
+            )
+        block = dict(
+            n_restarts=len(items),
+            seeds=[int(f["optimiser"]["seed"]) for f in items],
+            selected_seed=int(best["optimiser"]["seed"]),
+            paths=[f["_path"] for f in items],
+            loss=loss.tolist(),
+            whittle_nats=[float(f["objective"]["whittle_nats"]) for f in items],
+            converged=[bool(f["optimiser"]["converged"]) for f in items],
+            loss_best=float(loss.min()),
+            loss_median=float(np.median(loss)),
+            loss_worst=float(loss.max()),
+            best_minus_median_per_cell=float((np.median(loss) - loss.min()) / cells),
+            best_minus_worst_per_cell=float((loss.max() - loss.min()) / cells),
+            params=params,
+            rule="reported fit = restart with the lowest polished objective",
+        )
+        payload = {k: v for k, v in best.items() if k != "_path"}
+        payload["restarts"] = block
+        path = out_dir / f"{support}__{mode}.json"
+        path.write_text(json.dumps(payload, indent=1) + "\n")
+        written.append(
+            dict(
+                support=support,
+                path=str(path),
+                n_restarts=len(items),
+                selected_seed=block["selected_seed"],
+                best_minus_median_per_cell=block["best_minus_median_per_cell"],
+                best_minus_worst_per_cell=block["best_minus_worst_per_cell"],
+            )
+        )
+    return written
+
+
+# ── four-motor validation ───────────────────────────────────────────────────
+
+
+def four_motor_validation(spec: str, quad_path: str, single_paths: list[str]) -> dict[str, Any]:
+    """Predict ``motor_allMotors_70`` from the single-motor fits and MEASURE the gap.
+
+    The four-motor static record is the validation support, never a fitting
+    one, so the question is not whether two parameter vectors look alike — the
+    MAP problem is badly identified and they need not — but how much objective
+    a four-rotor forward model built from the FOUR SINGLE-MOTOR fits gives away
+    against the four-motor support's own fit on the same support.
+
+    What comes from the single-motor fits is what the airframe is supposed to
+    carry from rig to rig: the shared shaft dynamics (log-mean over the four,
+    the same rule the floor fit's frozen comb uses) and one per-order profile
+    per rotor (rotor ``r`` gets ``Motor{r}``'s own profile, truncated to the
+    validation support's order cap). What comes from the four-motor fit is
+    everything that is a property of THAT recording and not of a rotor: the
+    refined carriers, the mic line gains, the floor and the mic gains. The
+    reported discrepancy is therefore the comb's, not the room's.
+    """
+    import numpy as np
+    import torch
+
+    from experiments.noise_model import model as MD
+    from experiments.noise_model import supports as SU
+
+    quad = json.loads(Path(quad_path).read_text())
+    singles = [json.loads(Path(p).read_text()) for p in single_paths]
+    if not singles:
+        raise ValueError("--singles needs at least one single-motor bench fit JSON")
+
+    support = SU.load_support(spec)
+    batch = MD.bench_batch(
+        name=support.name,
+        power=np.asarray(support.power, dtype=np.float64),
+        sr=int(support.sr),
+        carrier_mean=np.asarray(support.carrier_rev_s, dtype=np.float64).mean(axis=1),
+        k_cap=K_CAP,
+    )
+    n_rotors, k_max = batch.n_rotors, batch.k_max
+
+    own = dict(quad["params"])
+    pred = dict(own)
+    par = [f["params"] for f in singles]
+    log_mean = lambda key: float(np.exp(np.mean([np.log(float(q[key])) for q in par])))  # noqa: E731
+    pred["sigma_nu"] = log_mean("sigma_nu")
+    pred["lam"] = log_mean("lam")
+    pred["sigma_eps_even"] = log_mean("sigma_eps_even")
+    pred["sigma_eps_odd"] = log_mean("sigma_eps_odd")
+    pred["lam_eps_even"] = log_mean("lam_eps_even")
+    pred["lam_eps_odd"] = log_mean("lam_eps_odd")
+    prof = np.zeros((n_rotors, k_max), dtype=np.float64)
+    own_prof = np.asarray(own["profile"]["profile_db"], dtype=np.float64)
+    for r in range(n_rotors):
+        src = np.asarray(par[r % len(par)]["profile"]["profile_db"], dtype=np.float64)[0]
+        take = min(k_max, src.size)
+        prof[r, :take] = src[:take]
+        if take < k_max:  # the single-motor rig ran below this support's cap
+            prof[r, take:] = own_prof[r, take:]
+    pred["profile"] = dict(own["profile"])
+    pred["profile"]["profile_db"] = prof.tolist()
+    pred["profile"]["amp_exp"] = float(np.mean([float(q["profile"]["amp_exp"]) for q in par]))
+
+    def score(d: dict[str, Any]) -> dict[str, Any]:
+        params = MD.params_from_dict(d)
+        with torch.no_grad():
+            m = MD.forward(batch, params)
+            obj = MD.objective_breakdown(batch, m)
+            power = batch.power
+            out: dict[str, Any] = dict(obj)
+            for name, band in (("floor", batch.band_lo), ("comb", batch.band_hi)):
+                i_sum = float(power[:, :, band].sum())
+                m_sum = float(m[:, :, band].sum())
+                out[f"level_ratio_db_{name}"] = 10.0 * float(np.log10(i_sum / m_sum))
+            out["nats_per_cell"] = obj["whittle_nats"] / max(1, obj["n_cells"])
+        return out
+
+    own_score, pred_score = score(own), score(pred)
+    keys = (
+        "sigma_nu",
+        "lam",
+        "sigma_eps_even",
+        "sigma_eps_odd",
+        "lam_eps_even",
+        "lam_eps_odd",
+    )
+    params_table = {}
+    for key in keys:
+        v = np.asarray([float(q[key]) for q in par], dtype=np.float64)
+        geo = float(np.exp(np.mean(np.log(v))))
+        params_table[key] = dict(
+            four_motor=float(own[key]),
+            single_geo_mean=geo,
+            ratio=float(own[key]) / geo,
+            per_rotor=v.tolist(),
+            per_rotor_spread=float(v.max() / v.min()),
+        )
+    gap = pred_score["nats_per_cell"] - own_score["nats_per_cell"]
+    return dict(
+        schema="noise-v2-four-motor/1",
+        support=support.name,
+        spec=spec,
+        n_rotors=n_rotors,
+        k_max=k_max,
+        quad_fit=str(quad_path),
+        single_fits=[str(p) for p in single_paths],
+        single_supports=[f["support"] for f in singles],
+        rule=(
+            "dynamics = log-mean over the single-motor fits, rotor r's profile = Motor{r}'s "
+            "own profile truncated to this support's order cap; carriers, mic line gains, "
+            "floor and mic gains from the four-motor fit itself"
+        ),
+        own_fit=own_score,
+        prediction=pred_score,
+        params=params_table,
+        tolerance=dict(
+            nats_per_cell=float(gap),
+            nats_total=float(pred_score["whittle_nats"] - own_score["whittle_nats"]),
+            level_ratio_db_comb=float(pred_score["level_ratio_db_comb"]),
+            level_ratio_db_floor=float(pred_score["level_ratio_db_floor"]),
+            own_level_ratio_db_comb=float(own_score["level_ratio_db_comb"]),
+            own_level_ratio_db_floor=float(own_score["level_ratio_db_floor"]),
+            note=(
+                "R1 four-motor tolerance, FROZEN at the measurement: the Whittle cost per "
+                "observed cell a four-rotor forward model built from the single-motor fits "
+                "gives away against the four-motor support's own fit, plus the band level "
+                "ratios of both. A later round predicting this support must not exceed it."
+            ),
+        ),
+    )
 
 
 # ── findings ────────────────────────────────────────────────────────────────
@@ -394,6 +621,20 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--adam-lr", type=float, default=0.02)
         p.add_argument("--lbfgs-iters", type=int, default=200)
         p.add_argument("--seed", type=int, default=0)
+        p.add_argument(
+            "--seeds",
+            type=int,
+            default=1,
+            help="RESTARTS per support: seeds <seed> .. <seed>+N-1, reduced to the best "
+            "fit plus a restart-spread block (bench only)",
+        )
+        p.add_argument(
+            "--init-jitter",
+            type=float,
+            default=0.8,
+            help="log-space sd of the multi-start perturbation of the dynamics init, "
+            "applied to every restart but the first",
+        )
         p.add_argument("--progress", type=int, default=0, help="print the Adam loss every N steps")
         p.add_argument(
             "--threads",
@@ -421,6 +662,12 @@ def main(argv: list[str] | None = None) -> int:
     f = sub.add_parser("findings")
     f.add_argument("--out", default=OUT_DIR)
 
+    v = sub.add_parser("validate", help="four-motor validation of the single-motor fits")
+    v.add_argument("--out", default=OUT_DIR)
+    v.add_argument("--support", default="bench_dregon_motor:allMotors:70")
+    v.add_argument("--quad", default=f"{OUT_DIR}/bench_dregon_allMotors_70__bench.json")
+    v.add_argument("--singles", nargs="+", required=True, help="single-motor bench fit JSONs")
+
     args = ap.parse_args(argv)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -431,24 +678,40 @@ def main(argv: list[str] | None = None) -> int:
         print(text)
         return 0
 
+    if args.cmd == "validate":
+        payload = four_motor_validation(str(args.support), str(args.quad), list(args.singles))
+        path = out_dir / "four_motor_validation.json"
+        path.write_text(json.dumps(payload, indent=1) + "\n")
+        print(json.dumps(payload["tolerance"], indent=1))
+        print(f"# wrote {path}", flush=True)
+        return 0
+
     specs = _specs(args)
     grid_dir = Path(args.grid_dir) if args.grid_dir else out_dir / "grid"
 
+    seeds = [int(args.seed) + i for i in range(max(1, int(getattr(args, "seeds", 1))))]
     if args.cmd == "bench":
-        units = [
-            Unit(
-                uid=spec.replace(":", "_"),
-                params=dict(
-                    mode="bench",
-                    spec=spec,
-                    out_dir=str(out_dir),
-                    optim=_optim_from_args(args),
-                    progress=int(args.progress),
-                    threads=int(args.threads),
-                ),
-            )
-            for spec in specs
-        ]
+        units = []
+        for spec in specs:
+            for s in seeds:
+                optim = _optim_from_args(args)
+                optim["seed"] = s
+                optim["init_jitter"] = 0.0 if s == seeds[0] else float(args.init_jitter)
+                tag = f"s{s}" if len(seeds) > 1 else None
+                units.append(
+                    Unit(
+                        uid=spec.replace(":", "_") + (f"__{tag}" if tag else ""),
+                        params=dict(
+                            mode="bench",
+                            spec=spec,
+                            out_dir=str(out_dir),
+                            optim=optim,
+                            progress=int(args.progress),
+                            threads=int(args.threads),
+                            restart_tag=tag,
+                        ),
+                    )
+                )
     else:
         frozen = None
         frozen_from = None
@@ -495,6 +758,9 @@ def main(argv: list[str] | None = None) -> int:
     result = gridrun_from_args(
         args, units, worker, grid_dir, summarize=summarize, blas_threads=int(args.threads)
     )
+    if args.cmd == "bench" and len(seeds) > 1:
+        for row in reduce_restarts(out_dir):
+            print(f"# reduced {row['support']}: {json.dumps(row)}", flush=True)
     text = findings(out_dir)
     (out_dir / "findings.md").write_text(text)
     print(f"# wrote {out_dir / 'findings.md'}", flush=True)

@@ -94,6 +94,14 @@ class OptimSpec:
     #: objective gain per observed cell an L-BFGS RESTART may still find and
     #: the fit still count as converged (nats/cell)
     tol_nats_per_cell: float = 1e-4
+    #: log-space sd of the MULTI-START perturbation of the free dynamics
+    #: initialisation. A bench fit is otherwise deterministic — the guide is
+    #: initialised at a data-driven point, Adam sees every cell and L-BFGS is
+    #: deterministic — so a bare change of ``seed`` reproduces the same fit to
+    #: the last digit and says nothing about the landscape. With a jitter, the
+    #: restarts are genuine multi-starts and their spread is the evidence about
+    #: how well the MAP problem is posed.
+    init_jitter: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return dict(
@@ -106,6 +114,7 @@ class OptimSpec:
             lbfgs_line_search="strong_wolfe",
             seed=self.seed,
             tol_nats_per_cell=self.tol_nats_per_cell,
+            init_jitter=self.init_jitter,
             guide="AutoDelta",
             temperature=1.0,
             note="pyro 1.9.1 has no PyroLBFGS; the polish is torch.optim.LBFGS on the "
@@ -352,6 +361,16 @@ def fit_support(
 
     full = batch
     init = initial_values(batch, mode=mode, priors=priors, frozen=frozen)
+    if optim.init_jitter > 0.0:
+        # a log-normal multi-start on the dynamics block only: the profile,
+        # floor and carrier initialisations are read off the data and a random
+        # start for them would test the initialiser, not the landscape
+        jrng = np.random.default_rng(int(optim.seed))
+        for key in ("sigma_nu", "lam", "sigma_eps", "lam_eps"):
+            if key in init:
+                v = init[key]
+                shift = jrng.normal(0.0, float(optim.init_jitter), size=tuple(v.shape))
+                init[key] = v * torch.as_tensor(np.exp(shift), dtype=torch.float64)
 
     def model_for(b: MD.SupportBatch) -> Any:
         def fn() -> Any:

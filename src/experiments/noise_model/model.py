@@ -141,6 +141,12 @@ def free_blocks(mode: str) -> tuple[str, ...]:
         return ("dynamics", "profile", "floor", "mic")
     if mode == "flight_floor_only":
         return ("floor", "mic")
+    # the two ATTRIBUTION modes of the four-motor validation: a transfer gap
+    # that one of them closes is a gap in that block alone
+    if mode == "bench_carrier_only":
+        return ("carrier",)
+    if mode == "bench_dynamics_only":
+        return ("dynamics",)
     raise ValueError(f"unknown mode {mode!r}")
 
 
