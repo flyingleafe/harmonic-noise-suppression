@@ -62,6 +62,17 @@ same rate, the same per-(order, microphone) line-to-noise ratio and only a
 shared integrated-OU shaft, and its residual - the floor - is subtracted. The
 second control adds a known independent per-order Wiener phase
 (``D_k = 0.1 k`` rad^2/s) to the same render and must come back out.
+
+``--long`` answers the follow-up question the 0.5 s ladder cannot: the term it
+returned grows as ``tau^q`` with ``q`` near 1, which is a Wiener phase per
+order and has NO ceiling, while a per-order OU PHASE saturates after
+``tau_c = 1/lambda_eps`` and is the same curve below it. The long mode runs
+the identical estimator and the identical controls out to 5 s on the windows
+long enough to hold three of that lag - the level-detected 31 s active run of
+``motor_Motor1_70`` and every single-rotor ``noise-v2-bench-points`` point
+whose published span reaches 20 s - and fits both shapes per order, reporting
+``q``, ``tau_c`` and the AIC difference. Control (i) calibrates a plateau and
+control (ii) a continued growth at exactly those lags.
 """
 
 from __future__ import annotations
@@ -72,6 +83,7 @@ import math
 import re
 import sys
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -169,6 +181,49 @@ TABLE_LAGS_MS = (50, 500)
 #: Lag at which the correlation matrices are read.
 CORR_LAG_MS = 50
 
+# ── the long-lag extension (``--long``, ``--max-lag-s``) ─────────────────────
+#: The ladder above is frozen. ``--max-lag-s`` admits the entries of this
+#: extension at or below it, so the default (0.5 s, i.e. none of them) runs
+#: exactly the published analysis.
+LAGS_MS_LONG = (2000, 3000, 5000)
+#: Longest lag admitted when ``--long`` is given without ``--max-lag-s``.
+LONG_MAX_LAG_S = 5.0
+#: A lag is only tabulated when this many of it fit inside the analysis
+#: window. A window holding fewer than three disjoint increments does not
+#: estimate their variance, it reports one draw of it.
+LAG_WINDOW_FRAC = 3.0
+#: Longest analysis window kept in ``--long`` mode, seconds, i.e. no cap: the
+#: published :data:`MAX_SEG_S` exists because the 0.5 s ladder needed no more,
+#: and the 5 s ladder needs 15 s of window. The window is the detected active
+#: run and its length is reported per support.
+MAX_SEG_LONG_S = 45.0
+#: Shortest published span of a single-rotor ``noise-v2-bench-points`` point
+#: that enters the long support set, seconds.
+LONG_SPAN_MIN_S = 20.0
+#: Lags quoted in the long-lag table, milliseconds.
+LONG_TABLE_LAGS_MS = (500, 1000, 2000, 5000)
+#: Lag at which an order is declared to be AT the estimator ceiling, i.e. the
+#: end of the published ladder.
+LONG_CEIL_LAG_MS = 500
+#: Shortest lag entering the long-lag shape comparison, milliseconds. Below it
+#: the curve is still climbing out of the additive-noise floor, which is flat
+#: in ``tau`` and would pull both shapes the same wrong way.
+LONG_FIT_TAU_LO_MS = 200.0
+#: Fewest curve points a shape comparison accepts (two free parameters plus a
+#: variance, so four points is the smallest honest fit).
+LONG_FIT_MIN_POINTS = 4
+#: Growth of a curve across the fitted lags - ``V(tau_max)/V(tau_min)`` - at
+#: or below which it carries no ``tau`` dependence at all. Neither shape is
+#: then being chosen on evidence: the curve is a plateau already reached (or
+#: an additive-noise floor, which is what control (i) returns).
+FLAT_GROWTH_RATIO = 1.25
+#: AIC difference that decides between the two long-lag shapes. Below it the
+#: two fit equally well and the answer is "undetermined".
+AIC_DECISIVE = 2.0
+#: The bench recording whose level-detected active run is the longest single
+#: stationary window this project holds (31 s of continuous motor).
+LONG_LEVEL_RECORDING = "motor_Motor1_70"
+
 #: In-band line gate, dB: peak of the ``|z_k|^2`` spectrum over the median of
 #: the same spectrum inside the demodulation band.
 SNR_MIN_DB = 10.0
@@ -257,6 +312,7 @@ CTRL_REFERENCE = {
 ORDERS = np.arange(1, K_MAX + 1)
 
 DEFAULT_OUT = ROOT / "results" / "noise_v2" / "decoherence"
+DEFAULT_OUT_LONG = ROOT / "results" / "noise_v2" / "decoherence_long"
 DEFAULT_FIGS = ROOT / "docs" / "explainers" / "noise-model-v2-plan"
 SURVEY_DIR = ROOT / "results" / "noise_v2" / "survey"
 
@@ -289,8 +345,44 @@ def phase_floor(snr: np.ndarray) -> np.ndarray:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def load_bench(limit: int | None = None) -> list[tuple[str, np.ndarray]]:
+@dataclass
+class Job:
+    """One recording to analyse and how its analysis window is cut.
+
+    ``window`` is a published ``(start_s, span_s)`` slice - the stationary
+    window of a ``noise-v2-bench-points`` point - and when it is absent the
+    window is detected from the level track (:func:`active_window`).
+    """
+
+    name: str
+    audio: np.ndarray
+    rate_seed: float | None = None  # rev/s from the fit-point manifest
+    window: tuple[float, float] | None = None
+    max_seg_s: float = MAX_SEG_S
+    window_source: str = "level"
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+def _is_survey_setpoint(rid: str) -> bool:
+    m = BENCH_RE.match(rid)
+    return m is not None and int(m.group(2)) in SETPOINTS
+
+
+def load_bench(limit: int | None = None) -> list[Job]:
     """Every ``motor_Motor{1-4}_{70,80,90}`` recording of the DREGON bench split."""
+    return sorted(
+        (
+            Job(name=rid, audio=audio)
+            for rid, audio in dregon_motor_audio(_is_survey_setpoint, limit)
+        ),
+        key=lambda j: j.name,
+    )
+
+
+def dregon_motor_audio(
+    want: Callable[[str], bool], limit: int | None = None
+) -> list[tuple[str, np.ndarray]]:
+    """``(recording id, (M, T) native audio)`` of the motor-split frames ``want`` selects."""
     from data_processing.frames import meta_dict
     from data_processing.streams import iter_published_frames
 
@@ -300,13 +392,90 @@ def load_bench(limit: int | None = None) -> list[tuple[str, np.ndarray]]:
         if meta.get("split") != "motor":
             continue
         rid = str(meta.get("recording_id"))
-        m = BENCH_RE.match(rid)
-        if not m or int(m.group(2)) not in SETPOINTS:
+        if not want(rid):
             continue
+        sr = float(frame["audio"].tindex.sr)
+        if sr != FS_NATIVE:
+            raise RuntimeError(f"{rid} is at {sr} Hz, the ladder is frozen at {FS_NATIVE} Hz")
         out.append((rid, np.asarray(frame["audio"].data, np.float64)))
         if limit is not None and len(out) >= limit:
             break
-    return sorted(out, key=lambda r: r[0])
+    return out
+
+
+def long_bench_points() -> list[dict[str, Any]]:
+    """Single-rotor fit points whose published span reaches :data:`LONG_SPAN_MIN_S`.
+
+    The list comes from the committed manifest that DEFINES the published
+    ``noise-v2-bench-points`` dataset (``derivations.NOISE_V2_MANIFEST``), so
+    the speed label, the window and the identity are the dataset's own.
+    """
+    from data_processing.derivations import NOISE_V2_MANIFEST
+
+    points = json.loads(NOISE_V2_MANIFEST.read_text())["points"]
+    keep = [
+        p for p in points if int(p["n_rotors"]) == 1 and float(p["publish_s"]) >= LONG_SPAN_MIN_S
+    ]
+    return sorted(keep, key=lambda p: str(p["key"]))
+
+
+def load_long(limit: int | None = None) -> list[Job]:
+    """The long support set: the longest bench run plus every long single-rotor point.
+
+    ``motor_Motor1_70`` enters twice on purpose - once on the level-detected
+    active run (the longest window this bench holds) and once on its published
+    30 s fit-point window - so that the long-lag shape can be read against the
+    window rule as well as against the lag.
+
+    The point audio is the source recording sliced exactly as
+    :func:`data_processing.derivations._noise_v2_frame` slices it, which is
+    what the published dataset holds; all long single-rotor points come from
+    the DREGON motor split.
+    """
+    points = long_bench_points()
+    foreign = sorted({str(p["source"]) for p in points} - {"DREGON-frames"})
+    if foreign:
+        raise RuntimeError(f"long fit points from unsupported sources: {foreign}")
+    ids = {str(p["source_id"]) for p in points} | {LONG_LEVEL_RECORDING}
+    audio = dict(dregon_motor_audio(lambda rid: rid in ids))
+    missing = sorted(ids - set(audio))
+    if missing:
+        raise RuntimeError(f"DREGON-frames did not yield {missing}")
+
+    # The manifest speed of the same recording seeds the carrier, so the long
+    # run needs nothing from the gitignored survey directory (it is the same
+    # estimate: the manifest speeds ARE the survey's output).
+    seeds = {str(p["source_id"]): float(p["speed_rev_s"][0]) for p in points}
+    jobs = [
+        Job(
+            name=LONG_LEVEL_RECORDING,
+            audio=audio[LONG_LEVEL_RECORDING],
+            rate_seed=seeds.get(LONG_LEVEL_RECORDING),
+            max_seg_s=MAX_SEG_LONG_S,
+            window_source="level",
+            meta={"dataset": "DREGON-frames", "recording_id": LONG_LEVEL_RECORDING},
+        )
+    ]
+    for p in points:
+        jobs.append(
+            Job(
+                name=str(p["key"]),
+                audio=audio[str(p["source_id"])],
+                rate_seed=float(p["speed_rev_s"][0]),
+                window=(float(p["publish_start_s"]), float(p["publish_s"])),
+                window_source="published",
+                meta={
+                    "dataset": "noise-v2-bench-points",
+                    "recording_id": str(p["source_id"]),
+                    "throttle": p.get("throttle"),
+                    "publish_start_s": float(p["publish_start_s"]),
+                    "publish_s": float(p["publish_s"]),
+                    "speed_rev_s": [float(v) for v in p["speed_rev_s"]],
+                    "speed_tolerance_rev_s": float(p["speed_tolerance_rev_s"]),
+                },
+            )
+        )
+    return jobs if limit is None else jobs[:limit]
 
 
 def survey_rates() -> dict[str, float]:
@@ -353,16 +522,48 @@ def active_window(audio: np.ndarray, fs: float = FS_NATIVE) -> tuple[int, int]:
     return best[0] * hop, best[1] * hop
 
 
-def analysis_segment(audio: np.ndarray) -> tuple[np.ndarray, float, float]:
+def analysis_segment(
+    audio: np.ndarray, max_seg_s: float = MAX_SEG_S
+) -> tuple[np.ndarray, float, float]:
     """``(mean-removed segment, start seconds, length seconds)`` of the stationary run."""
     a, b = active_window(audio)
     a += int(ACTIVE_EDGE_S * FS_NATIVE)
     b -= int(ACTIVE_EDGE_S * FS_NATIVE)
-    b = min(b, a + int(MAX_SEG_S * FS_NATIVE))
+    b = min(b, a + int(max_seg_s * FS_NATIVE))
     if b - a < MIN_SEG_S * FS_NATIVE:
         raise RuntimeError(f"stationary run {(b - a) / FS_NATIVE:.2f} s below {MIN_SEG_S} s")
     seg = audio[:, a:b]
     return seg - seg.mean(axis=1, keepdims=True), a / FS_NATIVE, (b - a) / FS_NATIVE
+
+
+def published_segment(
+    audio: np.ndarray, start_s: float, span_s: float
+) -> tuple[np.ndarray, float, float]:
+    """``(mean-removed segment, start seconds, length seconds)`` of a published window.
+
+    The slice is the one ``derivations._noise_v2_frame`` publishes for that
+    fit point, so the segment analysed here is the dataset's own sample.
+    """
+    start = int(round(start_s * FS_NATIVE))
+    stop = min(audio.shape[-1], start + int(round(span_s * FS_NATIVE)))
+    start = max(0, min(start, max(0, stop - 1)))
+    if stop - start < MIN_SEG_S * FS_NATIVE:
+        raise RuntimeError(
+            f"published window {(stop - start) / FS_NATIVE:.2f} s below {MIN_SEG_S} s"
+        )
+    seg = audio[:, start:stop]
+    return (
+        seg - seg.mean(axis=1, keepdims=True),
+        start / FS_NATIVE,
+        (stop - start) / FS_NATIVE,
+    )
+
+
+def job_segment(job: Job) -> tuple[np.ndarray, float, float]:
+    """The analysis window of one job, published slice or detected active run."""
+    if job.window is None:
+        return analysis_segment(job.audio, job.max_seg_s)
+    return published_segment(job.audio, *job.window)
 
 
 def pre_decimate(seg: np.ndarray) -> np.ndarray:
@@ -566,7 +767,9 @@ class Support:
     rate_survey: float | None = None
 
 
-def analyse_support(name: str, z: np.ndarray, rate: float, band: float) -> Support:
+def analyse_support(
+    name: str, z: np.ndarray, rate: float, band: float, lags_ms: tuple[int, ...] = LAGS_MS
+) -> Support:
     """The whole decomposition for one demodulated recording."""
     snr_pm, snr_eff = line_snr(z, band)
     keep = 10.0 * np.log10(snr_pm) >= SNR_MIN_DB
@@ -593,9 +796,14 @@ def analyse_support(name: str, z: np.ndarray, rate: float, band: float) -> Suppo
         slip=slip,
         n_frames=int(zt.shape[-1]),
     )
-    for ms in LAGS_MS:
+    for ms in lags_ms:
         lag = int(round(ms * 1e-3 * FS_PHASE))
-        if lag < 1 or lag >= zt.shape[-1] - 20:
+        # A lag needs LAG_WINDOW_FRAC of itself inside the window: the
+        # circular mean over fewer than that many disjoint increments is one
+        # draw of the variance, not an estimate of it. Every published lag
+        # clears this on every published window, so the rule only ever bites
+        # in --long mode.
+        if lag < 1 or lag >= zt.shape[-1] - 20 or LAG_WINDOW_FRAC * lag > zt.shape[-1]:
             continue
         b_g, b_comb, dtheta, d_g = group_leakage(shaft, lag)
         v_obs, eps = circular_residual(zt, dtheta, lag)
@@ -742,7 +950,9 @@ def calibrated_render(
     raise AssertionError("unreachable")
 
 
-def build_controls(sup: Support, n: int) -> tuple[dict[str, Support], dict[str, Any]]:
+def build_controls(
+    sup: Support, n: int, lags_ms: tuple[int, ...] = LAGS_MS
+) -> tuple[dict[str, Support], dict[str, Any]]:
     """The five synthetic supports of one recording.
 
     ``matched``
@@ -781,11 +991,13 @@ def build_controls(sup: Support, n: int) -> tuple[dict[str, Support], dict[str, 
         ),
     }
     sups = {
-        "matched": analyse_support(f"{sup.name}|ctrl_matched", z_m, rate, band),
-        "nominal": analyse_support(f"{sup.name}|ctrl_nominal", z_n, rate, band),
+        "matched": analyse_support(f"{sup.name}|ctrl_matched", z_m, rate, band, lags_ms),
+        "nominal": analyse_support(f"{sup.name}|ctrl_nominal", z_n, rate, band, lags_ms),
     }
     for name, x in extra.items():
-        sups[name] = analyse_support(f"{sup.name}|ctrl_{name}", demod_ladder(x, rate), rate, band)
+        sups[name] = analyse_support(
+            f"{sup.name}|ctrl_{name}", demod_ladder(x, rate), rate, band, lags_ms
+        )
     prov = {
         "sigma_matched": sigma,
         "sigma_nominal": SHAFT_SIGMA_NU,
@@ -969,10 +1181,10 @@ def stack_field(rows: list[dict[str, Any]], ms: int, key: str) -> np.ndarray:
     return np.stack(out)
 
 
-def pooled_curves(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def pooled_curves(rows: list[dict[str, Any]], lags_ms: tuple[int, ...] = LAGS_MS) -> dict[str, Any]:
     """Recording-mean structure functions, per lag."""
     out: dict[str, Any] = {}
-    for ms in LAGS_MS:
+    for ms in lags_ms:
         entries = [r["orders"].get(str(ms)) for r in rows]
         entries = [e for e in entries if e]
         if not entries:
@@ -1153,6 +1365,448 @@ def bootstrap_fit(
             "hi95": float(np.percentile(vals, 97.5)),
         }
     return out
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The long-lag question: does V_eps flatten or keep growing?
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# A per-order Wiener phase (the generator the 10-500 ms ladder returned,
+# ``V_eps = a k^p tau^q`` with q near 1) has no ceiling: its increment
+# variance grows for ever. A per-order OU PHASE has one: ``V`` saturates at
+# ``2 sigma_eps^2 / lambda_eps`` after ``tau_c = 1/lambda_eps``. The two are
+# indistinguishable below ``tau_c``, so the choice is only decidable at lags
+# long enough to reach it - which is what ``--long`` measures.
+
+
+def fit_growth_power(tau: np.ndarray, v: np.ndarray) -> tuple[dict[str, float], float]:
+    """``V = a tau^q`` by least squares on ``log V``; ``(parameters, residual sum)``."""
+    design = np.stack([np.ones_like(tau), np.log(tau)], axis=1)
+    y = np.log(v)
+    coef, *_ = np.linalg.lstsq(design, y, rcond=None)
+    rss = float(np.sum((y - design @ coef) ** 2))
+    return {"a": float(math.exp(coef[0])), "q": float(coef[1])}, rss
+
+
+def fit_growth_saturating(tau: np.ndarray, v: np.ndarray) -> tuple[dict[str, float], float]:
+    """``V = c (1 - exp(-tau/tau_c))`` by least squares on ``log V``.
+
+    Same response variable and same number of free parameters as the power
+    law, so the two residual sums are directly comparable. The fit is
+    multi-started over ``tau_c`` because the objective is flat once ``tau_c``
+    leaves the measured range.
+    """
+    from scipy import optimize
+
+    y = np.log(v)
+
+    def resid(p: np.ndarray) -> np.ndarray:
+        c, t_c = math.exp(p[0]), math.exp(p[1])
+        return np.log(np.maximum(c * -np.expm1(-tau / t_c), 1e-300)) - y
+
+    best: tuple[dict[str, float], float] | None = None
+    for t0 in (0.1, 0.3, 1.0, 3.0, 10.0, 100.0):
+        p0 = np.array([math.log(max(float(v.max()), 1e-12)), math.log(t0)])
+        sol = optimize.least_squares(resid, p0, bounds=([-40.0, -9.0], [40.0, 14.0]))
+        rss = float(np.sum(np.asarray(sol.fun) ** 2))
+        if best is None or rss < best[1]:
+            best = ({"c": float(math.exp(sol.x[0])), "tau_c": float(math.exp(sol.x[1]))}, rss)
+    assert best is not None
+    return best
+
+
+def _aic(rss: float, n: int) -> float:
+    """Gaussian AIC of a two-parameter fit with an estimated variance."""
+    return n * math.log(max(rss, 1e-300) / n) + 2.0 * 3.0
+
+
+def compare_growth(
+    tau: np.ndarray, v: np.ndarray, obs: np.ndarray, *, ceil_trust: float = math.inf
+) -> dict[str, Any]:
+    """Both long-lag shapes on one order's curve, with the AIC difference and a verdict.
+
+    ``obs`` is the OBSERVED residual of the same cells. Above :data:`V_CEIL`
+    the circular estimator has no headroom left - ``|gamma|`` has reached its
+    own sampling floor - so such a lag reports a bend that belongs to the
+    instrument, not to the process, and is excluded from the fit.
+
+    ``ceil_trust`` is the plateau above which a saturating fit means nothing,
+    measured on control (ii): that control carries a planted random walk and
+    therefore has NO ceiling, so the smallest plateau this comparison invents
+    for it is the level at which the estimator's own compression already looks
+    like saturation. A fitted plateau at or above it is reported as
+    undetermined, not as a ceiling.
+    """
+    ok = (
+        np.isfinite(v)
+        & (v > 0.0)
+        & (tau >= LONG_FIT_TAU_LO_MS * 1e-3 - 1e-9)
+        & (np.isfinite(obs) & (obs <= V_CEIL))
+    )
+    n = int(ok.sum())
+    n_ceil = int((np.isfinite(obs) & (obs > V_CEIL) & (tau >= LONG_FIT_TAU_LO_MS * 1e-3)).sum())
+    if n < LONG_FIT_MIN_POINTS:
+        return {"n_points": n, "n_lags_at_ceiling": n_ceil, "verdict": "no fit"}
+    t, y = tau[ok], v[ok]
+    power, rss_p = fit_growth_power(t, y)
+    sat, rss_s = fit_growth_saturating(t, y)
+    aic_p, aic_s = _aic(rss_p, n), _aic(rss_s, n)
+    d_aic = aic_p - aic_s
+    # A time constant beyond the longest lag fitted means the saturating
+    # curve has straightened into the power law inside the data: it may fit
+    # marginally better, but it is not evidence of a ceiling.
+    reached = sat["tau_c"] <= float(t.max())
+    growth = float(y[np.argmax(t)] / y[np.argmin(t)])
+    if growth <= FLAT_GROWTH_RATIO:
+        # No tau dependence left to choose a shape on: the curve is already at
+        # its plateau over the whole fitted range (or is a flat floor).
+        verdict = "flat"
+    elif d_aic > AIC_DECISIVE and reached:
+        verdict = "ceiling"
+    elif d_aic < -AIC_DECISIVE:
+        verdict = "growing"
+    elif not reached:
+        verdict = "growing (no ceiling inside the fitted lags)"
+    else:
+        verdict = "undetermined"
+    trusted = sat["c"] < ceil_trust
+    if verdict in ("ceiling", "flat") and not trusted:
+        verdict = "undetermined (plateau where control (ii) fakes one)"
+    return {
+        "n_points": n,
+        "n_lags_at_ceiling": n_ceil,
+        "tau_lo_s": float(t.min()),
+        "tau_hi_s": float(t.max()),
+        "growth_ratio": growth,
+        "power": {**power, "rss": rss_p, "aic": aic_p},
+        "saturating": {**sat, "rss": rss_s, "aic": aic_s},
+        "d_aic": float(d_aic),
+        "tau_c_reached": bool(reached),
+        "ceil_trust": ceil_trust,
+        "plateau_trusted": bool(trusted),
+        "verdict": verdict,
+    }
+
+
+def _lag_value(row: dict[str, Any], ms: int, key: str, k: int) -> float:
+    entry = row["orders"].get(str(ms))
+    if not entry or key not in entry:
+        return float("nan")
+    return float(entry[key][k - 1])
+
+
+def long_orders(rate: float) -> list[int]:
+    """The orders of :data:`K_FAMILY` whose line sits below the anti-alias corner."""
+    return [k for k in K_FAMILY if k * rate <= AA_CORNER_HZ]
+
+
+def long_curves(
+    rows: list[dict[str, Any]],
+    key: str,
+    lags_ms: tuple[int, ...],
+    *,
+    ceil_trust: float = math.inf,
+) -> dict[str, Any]:
+    """Per-order long-lag curves and shape comparisons, per support and pooled.
+
+    ``key`` selects the quantity read: ``v_net`` for the data and for the
+    planted control (floor-subtracted), ``v_leak_corrected`` for the floor
+    control, whose residual IS the floor and whose net is identically zero.
+    """
+    tau = np.asarray([ms * 1e-3 for ms in lags_ms], dtype=np.float64)
+    per_support: list[dict[str, Any]] = []
+    for row in rows:
+        orders: dict[str, Any] = {}
+        for k in long_orders(float(row["rate_rps"])):
+            v = np.asarray([_lag_value(row, ms, key, k) for ms in lags_ms], dtype=np.float64)
+            obs_curve = np.asarray(
+                [_lag_value(row, ms, "v_obs", k) for ms in lags_ms], dtype=np.float64
+            )
+            obs = _lag_value(row, LONG_CEIL_LAG_MS, "v_obs", k)
+            orders[str(k)] = {
+                "v": v.tolist(),
+                "v_obs": obs_curve.tolist(),
+                "v_table": {str(ms): float(v[i]) for i, ms in enumerate(lags_ms)},
+                "err_table": {
+                    str(ms): _lag_value(row, ms, "net_err", k)
+                    for ms in lags_ms
+                    if ms in LONG_TABLE_LAGS_MS
+                },
+                "ceil_table": {
+                    str(ms): bool(np.isfinite(obs_curve[i]) and obs_curve[i] > V_CEIL)
+                    for i, ms in enumerate(lags_ms)
+                },
+                "v_obs_ceil_lag": obs,
+                "at_ceiling": bool(np.isfinite(obs) and obs > V_CEIL),
+                "fit": compare_growth(tau, v, obs_curve, ceil_trust=ceil_trust),
+            }
+        per_support.append(
+            {
+                "id": row["id"],
+                "rate_rps": row["rate_rps"],
+                "seg_len_s": row["seg_len_s"],
+                "window_source": row.get("window_source"),
+                "k_max_below_corner": long_orders(float(row["rate_rps"]))[-1],
+                "orders": orders,
+            }
+        )
+    pooled: dict[str, Any] = {}
+    for k in sorted({int(kk) for s in per_support for kk in s["orders"]}):
+        stack = np.stack(
+            [
+                np.asarray(s["orders"][str(k)]["v"], dtype=np.float64)
+                for s in per_support
+                if str(k) in s["orders"]
+            ]
+        )
+        obs_stack = np.stack(
+            [
+                np.asarray(s["orders"][str(k)]["v_obs"], dtype=np.float64)
+                for s in per_support
+                if str(k) in s["orders"]
+            ]
+        )
+        with np.errstate(invalid="ignore"):
+            v = np.nanmean(stack, axis=0)
+            obs_curve = np.nanmean(obs_stack, axis=0)
+        obs_mean = float(obs_curve[lags_ms.index(LONG_CEIL_LAG_MS)])
+        pooled[str(k)] = {
+            "v": v.tolist(),
+            "v_obs": obs_curve.tolist(),
+            "v_table": {str(ms): float(v[i]) for i, ms in enumerate(lags_ms)},
+            "ceil_table": {
+                str(ms): bool(np.isfinite(obs_curve[i]) and obs_curve[i] > V_CEIL)
+                for i, ms in enumerate(lags_ms)
+            },
+            "n_supports": int(stack.shape[0]),
+            "v_obs_ceil_lag": obs_mean,
+            "at_ceiling": bool(np.isfinite(obs_mean) and obs_mean > V_CEIL),
+            "fit": compare_growth(tau, v, obs_curve, ceil_trust=ceil_trust),
+        }
+    return {"per_support": per_support, "pooled": pooled}
+
+
+def long_verdict(sources: dict[str, Any]) -> str:
+    """The honest pooled answer, read off the pooled fits and calibrated on the controls."""
+    data = sources["data"]["pooled"]
+    free = sorted(
+        (k for k, blob in data.items() if not blob["at_ceiling"] and "power" in blob["fit"]),
+        key=int,
+    )
+    counts: dict[str, list[str]] = {}
+    for k in free:
+        counts.setdefault(data[k]["fit"]["verdict"].split(" (")[0], []).append(k)
+    floor = sources["matched"]["pooled"]
+    plant = sources["matched_planted"]["pooled"]
+
+    def read(blob: dict[str, Any]) -> str:
+        rows = [
+            (k, b["fit"])
+            for k, b in sorted(blob.items(), key=lambda kv: int(kv[0]))
+            if b["fit"].get("n_points", 0) >= LONG_FIT_MIN_POINTS and not b["at_ceiling"]
+        ]
+        if not rows:
+            return "no fittable order"
+        q = float(np.median([f["power"]["q"] for _, f in rows]))
+        ver = sorted({f["verdict"].split(" (")[0] for _, f in rows})
+        return f"median q = {q:+.2f}, verdicts {'/'.join(ver)} over {len(rows)} orders"
+
+    if not free:
+        return (
+            "Every order of the long support set is already at the estimator ceiling by "
+            f"{LONG_CEIL_LAG_MS} ms, so the long lags carry no information about the shape and "
+            "the question is UNDETERMINED on this bench."
+        )
+    parts = [f"orders {', '.join(k for k in free)} are below the ceiling at {LONG_CEIL_LAG_MS} ms"]
+    for name, ks in sorted(counts.items(), key=lambda kv: -len(kv[1])):
+        parts.append(f"{name}: k = {', '.join(sorted(ks, key=int))}")
+    return (
+        "; ".join(parts)
+        + f". Calibration - control (i) (shaft + floor only, must be flat): {read(floor)}; "
+        f"control (ii) (planted D_k = {CTRL_D1} k random walk, must keep growing): {read(plant)}."
+    )
+
+
+def _order_sentence(k: int, blob: dict[str, Any]) -> str:
+    """One order's answer, with the parameter the winning shape implies."""
+    fit = blob["fit"]
+    tab = blob["v_table"]
+
+    def at(ms: int) -> str:
+        val = tab.get(str(ms))
+        return _f(val) if val is not None else "-"
+
+    head = (
+        f"**k = {k}**: V_eps = {at(500)} rad^2 at 0.5 s, {at(1000)} at 1 s, {at(2000)} at 2 s, "
+        f"{at(5000)} at 5 s"
+    )
+    if blob["at_ceiling"]:
+        return (
+            f"{head} - but its observed residual is already at the {V_CEIL:.0f} rad^2 estimator "
+            f"ceiling at {LONG_CEIL_LAG_MS} ms, so the shape cannot be read and the answer is "
+            "UNDETERMINED for this order."
+        )
+    if "power" not in fit:
+        return (
+            f"{head} - only {fit['n_points']} of the fitted lags are readable "
+            f"({fit['n_lags_at_ceiling']} of them sit over the {V_CEIL:.0f} rad^2 estimator "
+            f"ceiling), fewer than the {LONG_FIT_MIN_POINTS} a two-parameter shape needs, so no "
+            "fit and the answer is UNDETERMINED for this order."
+        )
+    q = fit["power"]["q"]
+    t_c, c, d = fit["saturating"]["tau_c"], fit["saturating"]["c"], fit["d_aic"]
+    core = f"{head}; q = {q:+.2f}, tau_c = {t_c:.2f} s, dAIC = {d:+.1f}"
+    verdict = fit["verdict"]
+    if verdict == "ceiling":
+        lam = 1.0 / t_c
+        return (
+            f"{core} - the saturating shape wins by more than {AIC_DECISIVE:.0f} AIC and its knee "
+            f"is inside the measured lags, so this order has a CEILING: an OU phase with "
+            f"lambda_eps = {lam:.3g} /s and sigma_eps = {math.sqrt(max(c * lam, 0.0)):.3g} rad/s^0.5 "
+            f"(plateau {c:.3g} rad^2)."
+        )
+    if verdict.startswith("growing"):
+        why = (
+            f"the power law wins by {-d:.1f} AIC"
+            if d < -AIC_DECISIVE
+            else f"the saturating fit only reaches its knee at tau_c = {t_c:.2g} s, beyond the "
+            "longest lag measured, i.e. it has straightened into the power law inside the data"
+        )
+        return (
+            f"{core} - {why}, so this order KEEPS GROWING out to the longest lag; as a Wiener "
+            f"phase that is D_k = {0.5 * fit['power']['a']:.3g} rad^2/s at q = {q:.2f}."
+        )
+    if verdict == "flat":
+        return (
+            f"{core} - the curve grows by only a factor {fit['growth_ratio']:.2f} across the "
+            f"fitted lags, so it carries no `tau` dependence at all: this order is already AT its "
+            f"plateau by {fit['tau_lo_s']:.1f} s, which is a ceiling reached before the long lags "
+            f"begin (plateau about {c:.3g} rad^2)."
+        )
+    if verdict.startswith("undetermined (plateau"):
+        return (
+            f"{core} - a saturating shape does fit it (plateau {c:.3g} rad^2), but control (ii), "
+            f"which has NO ceiling by construction, is fitted one at {fit['ceil_trust']:.3g} rad^2 "
+            "through the same estimator, so a plateau at this level is the read-out compressing "
+            "and not the process saturating: UNDETERMINED for this order."
+        )
+    return (
+        f"{core} - the two shapes fit equally well (|dAIC| <= {AIC_DECISIVE:.0f}) and the "
+        f"saturating knee sits at tau_c = {t_c:.2g} s, so this order is UNDETERMINED: these lags "
+        "on these windows do not separate a ceiling from continued growth."
+    )
+
+
+def long_paragraph(sources: dict[str, Any]) -> str:
+    """The per-order answers and the pooled one, in prose."""
+    data = sources["data"]["pooled"]
+    ks = sorted((int(k) for k in data), key=int)
+    lines = [_order_sentence(k, data[str(k)]) for k in ks]
+    free = [k for k in ks if not data[str(k)]["at_ceiling"] and "power" in data[str(k)]["fit"]]
+    tally: dict[str, list[int]] = {}
+    for k in free:
+        tally.setdefault(data[str(k)]["fit"]["verdict"].split(" (")[0], []).append(k)
+    if not free:
+        pooled = (
+            f"Pooled: no order of this support set is below the estimator ceiling at "
+            f"{LONG_CEIL_LAG_MS} ms, so the long lags cannot answer the question at all."
+        )
+    else:
+        got = "; ".join(
+            f"{name} at k = {', '.join(str(k) for k in ks_)}"
+            for name, ks_ in sorted(tally.items(), key=lambda kv: -len(kv[1]))
+        )
+        dominant = max(tally.items(), key=lambda kv: len(kv[1]))[0]
+        shape = {
+            "ceiling": "the independent per-order phase is an OU phase with a finite plateau, "
+            "not a random walk",
+            "flat": "the independent per-order term has no lag dependence left at these lags - "
+            "it is at its plateau before 1 s, which is a ceiling reached earlier than this run "
+            "can resolve",
+            "growing": "the independent per-order phase keeps diffusing out to the longest lag "
+            "fitted, i.e. the Wiener-per-order generator is not contradicted",
+            "undetermined": "these lags do not separate the two, so the choice must be made on "
+            "grounds other than this measurement",
+        }[dominant]
+        pooled = (
+            f"Pooled over the {len(free)} orders that are below the ceiling at "
+            f"{LONG_CEIL_LAG_MS} ms ({got}), the answer is **{dominant.upper()}**: {shape}."
+        )
+    floor = sources["matched"]["pooled"]
+    plant = sources["matched_planted"]["pooled"]
+
+    def median_q(blob: dict[str, Any]) -> float:
+        qs = [
+            b["fit"]["power"]["q"]
+            for b in blob.values()
+            if "power" in b["fit"] and not b["at_ceiling"]
+        ]
+        return float(np.median(qs)) if qs else float("nan")
+
+    trust = ceiling_trust_level(sources["matched_planted"])
+    calib = (
+        f"The instrument is calibrated by the two controls at the same lags: control (i), which "
+        f"carries no per-order term at all, returns a floor with median q = "
+        f"{median_q(floor):+.2f} (flat is q = 0), and control (ii), which carries a planted "
+        f"random walk, returns median q = {median_q(plant):+.2f} (a random walk is q = 1). "
+        + (
+            f"Control (ii) also sets the level above which a saturating fit means nothing: it has "
+            f"no ceiling by construction, yet this comparison fits it one at a plateau of "
+            f"{trust:.3g} rad^2, so any plateau at or above that is the estimator's own "
+            "compression and is reported as undetermined."
+            if math.isfinite(trust)
+            else "Control (ii) is never fitted a ceiling at these levels, so no plateau had to be "
+            "discounted as the estimator's own compression."
+        )
+    )
+    return "\n\n".join([*lines, pooled, calib])
+
+
+def ceiling_trust_level(planted: dict[str, Any]) -> float:
+    """The lowest plateau at which the estimator FAKES a ceiling, from control (ii).
+
+    Control (ii) carries a planted per-order random walk and therefore has no
+    ceiling at all. Any of its orders that the shape comparison nevertheless
+    calls a ceiling is the circular estimator compressing as ``V`` approaches
+    its own read-out limit; the smallest such plateau is the level above which
+    a saturating fit on the data carries no information. ``inf`` when the
+    control is never fitted a ceiling, i.e. nothing has to be discounted.
+    """
+    cs = [
+        b["fit"]["saturating"]["c"]
+        for b in planted["pooled"].values()
+        if b["fit"].get("verdict") == "ceiling"
+    ]
+    return float(min(cs)) if cs else math.inf
+
+
+def long_lag_reads(
+    groups: dict[str, list[dict[str, Any]]], lags_ms: tuple[int, ...]
+) -> dict[str, Any]:
+    """The whole long-lag block: data, both controls, the fits and the verdict."""
+    # The controls are read FIRST and with no trust bar of their own, because
+    # control (ii) is what measures the bar the data is then read against.
+    floor = long_curves(groups["matched"], "v_leak_corrected", lags_ms)
+    plant = long_curves(groups["matched_planted"], "v_net", lags_ms)
+    trust = ceiling_trust_level(plant)
+    sources = {
+        "data": long_curves(groups["data"], "v_net", lags_ms, ceil_trust=trust),
+        "matched": floor,
+        "matched_planted": plant,
+    }
+    return {
+        "lags_ms": list(lags_ms),
+        "tau_s": [ms * 1e-3 for ms in lags_ms],
+        "table_lags_ms": list(LONG_TABLE_LAGS_MS),
+        "fit_tau_lo_ms": LONG_FIT_TAU_LO_MS,
+        "ceil_lag_ms": LONG_CEIL_LAG_MS,
+        "aic_decisive": AIC_DECISIVE,
+        "flat_growth_ratio": FLAT_GROWTH_RATIO,
+        "ceiling_trust_plateau": trust if math.isfinite(trust) else None,
+        "sources": sources,
+        "verdict": long_verdict(sources),
+        "verdict_paragraph": long_paragraph(sources),
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1342,6 +1996,87 @@ def fig_corr(res: dict[str, Any], path: Path) -> None:
     ax.grid(alpha=0.3)
     fig.suptitle(
         "Is the per-order residual independent across orders and across microphones?", fontsize=11
+    )
+    _save(fig, path)
+
+
+def fig_long(res: dict[str, Any], path: Path) -> None:
+    """The long-lag curves of the data and of both controls, with the two fits."""
+    long = res["long_lag"]
+    tau = np.asarray(long["tau_s"], dtype=np.float64)
+    fine = np.geomspace(max(tau.min(), 1e-3), tau.max(), 200)
+    cmap = plt.get_cmap("viridis")
+    panels = (
+        ("DREGON single-rotor bench: $V_\\varepsilon$ net", "data"),
+        ("control (i): shaft + floor only\n(the measured floor, must be flat)", "matched"),
+        (
+            f"control (ii): $+\\,D_k = {CTRL_D1}\\,k$ random walk\n"
+            "(net; dashed = planted $2D_k\\tau$)",
+            "matched_planted",
+        ),
+    )
+    fig, axs = plt.subplots(1, 3, figsize=(16.0, 5.4), sharey=True)
+    for ax, (title, src) in zip(axs, panels):
+        pooled = long["sources"][src]["pooled"]
+        ks = sorted((int(k) for k in pooled), key=int)
+        for i, k in enumerate(ks):
+            blob = pooled[str(k)]
+            colour = cmap(i / max(len(ks) - 1, 1))
+            y = np.asarray(blob["v"], dtype=np.float64)
+            over = np.asarray(blob["v_obs"], dtype=np.float64) > V_CEIL
+            ok = np.isfinite(y) & (y > 0)
+            # Filled markers are cells the estimator can still read; open ones
+            # sit over its ceiling and take part in no fit.
+            ax.plot(tau[ok], y[ok], "-", lw=1.3, color=colour, label=f"k={k}")
+            ax.plot(tau[ok & ~over], y[ok & ~over], "o", ms=3.5, color=colour)
+            ax.plot(
+                tau[ok & over],
+                y[ok & over],
+                "o",
+                ms=4.5,
+                mfc="none",
+                mec=colour,
+                mew=1.0,
+            )
+            if src == "matched_planted":
+                ax.plot(fine, 2.0 * CTRL_D1 * k * fine, "--", lw=1.0, color=colour, alpha=0.8)
+            fit = blob["fit"]
+            if "power" not in fit:
+                continue
+            # The fitted shapes are drawn only where they were fitted.
+            band = np.geomspace(fit["tau_lo_s"], fit["tau_hi_s"], 100)
+            ax.plot(
+                band,
+                fit["power"]["a"] * band ** fit["power"]["q"],
+                lw=1.2,
+                ls=(0, (4, 2)),
+                color=colour,
+                alpha=0.8,
+            )
+            ax.plot(
+                band,
+                fit["saturating"]["c"] * -np.expm1(-band / fit["saturating"]["tau_c"]),
+                lw=1.2,
+                ls=(0, (1, 1.5)),
+                color=colour,
+                alpha=0.8,
+            )
+        ax.axhline(V_CEIL, color="grey", lw=0.9, ls="-.")
+        ax.axvspan(tau.min(), LONG_FIT_TAU_LO_MS * 1e-3, color="0.95", zorder=0)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel(r"lag $\tau$ [s]")
+        ax.set_title(title, fontsize=10)
+        ax.grid(alpha=0.3, which="both")
+    axs[0].set_ylabel(r"variance [rad$^2$]")
+    axs[0].set_ylim(1e-3, 3e1)
+    axs[0].legend(fontsize=7, ncol=2, loc="upper left")
+    fig.suptitle(
+        "Long-lag shape of the independent per-order term: dashed = fitted "
+        "$a\\tau^q$, dotted = fitted $c(1-e^{-\\tau/\\tau_c})$ (open markers: observed residual "
+        "over the estimator ceiling, excluded from both fits; grey dash-dot: that ceiling; "
+        "grey band: below the fit range)",
+        fontsize=11,
     )
     _save(fig, path)
 
@@ -1700,6 +2435,183 @@ def write_findings(res: dict[str, Any], out_dir: Path) -> Path:
     return path
 
 
+def long_order_rows(blob: dict[str, Any], lags: tuple[int, ...]) -> list[list[str]]:
+    """One table of a long-lag source: per order, the curve, both fits, the verdict."""
+    head = (
+        ["k"]
+        + [f"V({ms / 1000:g} s)" for ms in lags]
+        + ["n fit", "q", "a", "tau_c [s]", "c", "dAIC", "verdict"]
+    )
+    rows = [head]
+    for k in sorted((int(k) for k in blob), key=int):
+        cell = blob[str(k)]
+        fit = cell["fit"]
+        power = fit.get("power", {})
+        sat = fit.get("saturating", {})
+        # A lag whose OBSERVED residual is over the estimator ceiling carries
+        # no shape and is excluded from the fit; its value is still tabulated,
+        # in brackets, because the bend it shows is the instrument's.
+        cells = [
+            f"({_f(cell['v_table'].get(str(ms)))})"
+            if cell["ceil_table"].get(str(ms))
+            else _f(cell["v_table"].get(str(ms)))
+            for ms in lags
+        ]
+        rows.append(
+            [
+                f"{k}" + ("*" if cell["at_ceiling"] else ""),
+                *cells,
+                _f(fit.get("n_points"), "{:d}"),
+                _f(power.get("q"), "{:+.2f}"),
+                _f(power.get("a")),
+                _f(sat.get("tau_c"), "{:.2f}"),
+                _f(sat.get("c")),
+                _f(fit.get("d_aic"), "{:+.1f}"),
+                fit.get("verdict", "-"),
+            ]
+        )
+    return rows
+
+
+def write_long_findings(res: dict[str, Any], out_dir: Path) -> Path:
+    """Findings of the long-lag extension: numbers first, then the verdict."""
+    long = res["long_lag"]
+    lags = tuple(ms for ms in LONG_TABLE_LAGS_MS if ms in long["lags_ms"])
+    src = long["sources"]
+    lines: list[str] = []
+    lines.append("# Order decoherence at long lags - findings\n")
+    lines.append(
+        "Source: `scripts/noise_v2_order_decoherence.py --long --max-lag-s 5`. Numbers: "
+        "`results/noise_v2/decoherence_long/decoherence_long.json`. Figure: "
+        "`docs/explainers/noise-model-v2-plan/decoherence_long.png`.\n"
+    )
+    lines.append(
+        "The 0.5 s study returned an independent per-order term that grows as "
+        "`V_eps(k, tau) = a k^p tau^q` with `q` near 1 - a Wiener phase per order, which has NO "
+        "ceiling. A per-order OU PHASE has one: `V_eps` saturates at `2 sigma_eps^2/lambda_eps` "
+        "after `tau_c = 1/lambda_eps`, and below `tau_c` the two shapes are the same curve. The "
+        "question is therefore only decidable at lags long enough to reach `tau_c`, which is what "
+        "this run measures: the same estimator, the same controls, lags out to "
+        f"{max(long['lags_ms']) / 1000:g} s on the windows long enough to hold "
+        f"{LAG_WINDOW_FRAC:.0f} of them.\n"
+    )
+
+    lines.append("## The supports\n")
+    rows = [["support", "window [s]", "from [s]", "rate [rev/s]", "cells", "lags [s]", "window"]]
+    for r in res["recordings"]:
+        got = sorted(int(ms) for ms in r["orders"])
+        rows.append(
+            [
+                f"`{r['id']}`",
+                _f(r["seg_len_s"], "{:.1f}"),
+                _f(r["seg_start_s"], "{:.1f}"),
+                _f(r["rate_rps"], "{:.3f}"),
+                str(r["n_cells_total"]),
+                ", ".join(f"{ms / 1000:g}" for ms in got if ms >= LONG_CEIL_LAG_MS),
+                str(r.get("window_source")),
+            ]
+        )
+    lines.append(markdown_table(rows) + "\n")
+    lines.append(
+        f"`{LONG_LEVEL_RECORDING}` enters twice: once on the level-detected active run - the "
+        "longest continuous single-rotor window this project holds - and once on its published "
+        "`noise-v2-bench-points` window. The other two supports are the remaining single-rotor "
+        f"points whose published span reaches {LONG_SPAN_MIN_S:.0f} s. Orders are the "
+        f"{', '.join(str(k) for k in K_FAMILY)} family, all of them below the "
+        f"{AA_CORNER_HZ:.0f} Hz anti-alias corner at these rates "
+        f"(order {K_FAMILY[-1]} of the fastest support sits at "
+        f"{K_FAMILY[-1] * max(r['rate_rps'] for r in res['recordings']):.0f} Hz).\n"
+    )
+
+    lines.append("## The numbers\n")
+    lines.append(
+        "`V` is `V_eps` in rad^2: observed, minus the measured leakage of the shaft estimate, "
+        "minus the additive-noise floor of that support's paired control. `q` and `a` are the "
+        "power law `V = a tau^q`, `tau_c` and `c` the saturating `V = c (1 - exp(-tau/tau_c))`, "
+        f"both fitted by least squares on `log V` over the lags from "
+        f"{long['fit_tau_lo_ms'] / 1000:g} s up; `n fit` is how many lags that left. "
+        "`dAIC = AIC(power) - AIC(saturating)`, so a POSITIVE value favours the ceiling; the "
+        f"decision bar is {AIC_DECISIVE:.0f}.\n"
+    )
+    lines.append(
+        f"Two read-out limits are marked. A bracketed `V` is a lag whose OBSERVED residual is "
+        f"over the {V_CEIL:.0f} rad^2 estimator ceiling: there `|gamma|` has reached its own "
+        "sampling floor, the curve bends because the instrument has run out, and the lag takes "
+        "part in NO fit (control (ii) is what proves this - its planted random walk crosses the "
+        "ceiling at the high orders and the raw curve then flattens). A `*` on `k` marks an order "
+        f"already over the ceiling at {LONG_CEIL_LAG_MS} ms, i.e. one that has no readable long "
+        f"lag at all. A `tau_c` beyond the longest FITTED lag means the saturating curve has "
+        "straightened into the power law inside the data, which is not evidence of a ceiling; "
+        f"a `verdict` of `flat` means the curve grows by less than {FLAT_GROWTH_RATIO:.2f} across "
+        "the fitted lags, so there is no lag dependence left for either shape to explain.\n"
+    )
+    n_sup = len(res["recordings"])
+    lines.append(f"### Pooled over the {n_sup} long support{'s' if n_sup != 1 else ''}\n")
+    lines.append(markdown_table(long_order_rows(src["data"]["pooled"], lags)) + "\n")
+    for sup in src["data"]["per_support"]:
+        lines.append(
+            f"### `{sup['id']}` ({sup['seg_len_s']:.1f} s, {sup['rate_rps']:.3f} rev/s, "
+            f"{sup['window_source']} window)\n"
+        )
+        lines.append(markdown_table(long_order_rows(sup["orders"], lags)) + "\n")
+
+    lines.append("## The controls at the same lags\n")
+    lines.append(
+        "Control (i) is the paired floor render - the same rate, the same per-(order, microphone) "
+        "line-to-noise ratio, a shared integrated-OU shaft and nothing else - so the quantity "
+        "tabulated for it is its own leakage-corrected residual, i.e. the additive-noise floor, "
+        "which must be FLAT in `tau` (`q` near 0). Control (ii) is that render plus a planted "
+        f"independent per-order Wiener phase, `D_k = {CTRL_D1} k` rad^2/s, whose net term must "
+        "keep growing as `2 D_k tau` (`q` near 1). They calibrate what a plateau and what "
+        "continued growth look like through this estimator at these lags.\n"
+    )
+    for name, title in (
+        ("matched", "Control (i): shaft + floor only (the floor; must be flat)"),
+        ("matched_planted", f"Control (ii): planted D_k = {CTRL_D1} k (must keep growing)"),
+    ):
+        lines.append(f"### {title}\n")
+        lines.append(markdown_table(long_order_rows(src[name]["pooled"], lags)) + "\n")
+    trust = long["ceiling_trust_plateau"]
+    lines.append(
+        f"Control (ii) is also what sets the level above which a saturating fit means "
+        f"nothing. It has no ceiling by construction, yet the same comparison fits it one at "
+        f"a plateau of {trust:.3g} rad^2 (its verdict row `ceiling`): as `V` approaches the "
+        f"{V_CEIL:.0f} rad^2 read-out limit the circular mean compresses, and the curve bends "
+        f"before the lag mask removes it. Every data order whose fitted plateau reaches "
+        f"{trust:.3g} rad^2 is therefore reported as `undetermined (plateau where control "
+        "(ii) fakes one)` rather than as a ceiling - this run cannot tell those two apart, "
+        "and saying otherwise would be reading the instrument, not the rotor.\n"
+        if trust is not None
+        else "Control (ii) is never fitted a ceiling at these levels, so no data plateau had "
+        "to be discounted as the estimator's own compression.\n"
+    )
+
+    lines.append("## The verdict\n")
+    lines.append(long["verdict"] + "\n")
+    lines.append(long["verdict_paragraph"] + "\n")
+
+    lines.append("## What this run does NOT settle\n")
+    lines.append(
+        f"- The windows are {min(r['seg_len_s'] for r in res['recordings']):.0f}-"
+        f"{max(r['seg_len_s'] for r in res['recordings']):.0f} s, so a {max(long['lags_ms']) / 1000:g} s "
+        f"lag has only about {min(r['seg_len_s'] for r in res['recordings']) / (max(long['lags_ms']) / 1000):.0f} "
+        "disjoint increments in it; the long end of every curve is the noisiest part of it.\n"
+        "- All four supports are ONE rotor of ONE rig (DREGON Motor 1 at 50, 60 and 70 % "
+        "throttle). A ceiling or its absence here is a statement about this rotor, not about "
+        "every rig in the corpus.\n"
+        "- The high orders are at the estimator ceiling long before 1 s, so the shape can only "
+        "ever be read on the low orders. Nothing here contradicts or confirms the high-order "
+        "behaviour.\n"
+        "- `V_eps` is a floor-subtracted difference of two circular-estimator read-outs; at the "
+        "long lags the two terms are close, so its relative error is larger than the short-lag "
+        "one. The `net_err` column of the JSON carries the standard error of each cell.\n"
+    )
+
+    path = out_dir / "findings.md"
+    path.write_text("\n".join(lines))
+    return path
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Verdicts
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1977,20 +2889,34 @@ def pool_correlations(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def run(limit: int | None, out_dir: Path, fig_dir: Path) -> dict[str, Any]:
+def admitted_lags(max_lag_s: float) -> tuple[int, ...]:
+    """The published ladder plus the long-lag entries ``max_lag_s`` admits."""
+    return LAGS_MS + tuple(ms for ms in LAGS_MS_LONG if ms <= max_lag_s * 1000.0 + 1e-9)
+
+
+def run(
+    limit: int | None,
+    out_dir: Path,
+    fig_dir: Path,
+    *,
+    long_mode: bool = False,
+    max_lag_s: float = 0.5,
+) -> dict[str, Any]:
+    lags_ms = admitted_lags(max_lag_s)
     rates = survey_rates()
-    bench = load_bench(limit)
+    bench = load_long(limit) if long_mode else load_bench(limit)
     if not bench:
         raise RuntimeError("no DREGON bench recording found in DREGON-frames")
-    print(f"{len(bench)} bench recordings")
+    print(f"{len(bench)} bench recordings, lags {[ms for ms in lags_ms]} ms")
 
     # Each list holds one row per recording. The reference in CTRL_REFERENCE is
     # the support whose residual is subtracted as that row's floor.
     groups: dict[str, list[dict[str, Any]]] = {name: [] for name in ("data", *CTRL_REFERENCE)}
-    for rid, audio in bench:
-        seg, start_s, len_s = analysis_segment(audio)
+    for job in bench:
+        rid = job.name
+        seg, start_s, len_s = job_segment(job)
         work = pre_decimate(seg)
-        rate0 = rates.get(rid)
+        rate0 = job.rate_seed or rates.get(job.meta.get("recording_id", rid))
         if rate0:
             rate = rate0
         else:
@@ -2003,9 +2929,9 @@ def run(limit: int | None, out_dir: Path, fig_dir: Path) -> dict[str, Any]:
         for order in REFINE_ORDERS:
             rate, _ = refine_rate(work, rate, order)
         z = demod_ladder(work, rate)
-        sup = analyse_support(rid, z, rate, BAND_FRAC * rate)
+        sup = analyse_support(rid, z, rate, BAND_FRAC * rate, lags_ms)
         sup.seg_start_s, sup.seg_len_s, sup.rate_survey = start_s, len_s, rate0
-        ctrl, prov = build_controls(sup, work.shape[-1])
+        ctrl, prov = build_controls(sup, work.shape[-1], lags_ms)
         ctrl["data"] = sup
 
         for name, ref_name in (("data", "matched"), *CTRL_REFERENCE.items()):
@@ -2024,6 +2950,8 @@ def run(limit: int | None, out_dir: Path, fig_dir: Path) -> dict[str, Any]:
                     "snr_eff_db": (10.0 * np.log10(sp.snr_eff)).round(2).tolist(),
                     "n_cells_total": int(sp.keep.sum()),
                     "slip_median": float(np.median(sp.slip)),
+                    "window_source": job.window_source,
+                    "support_meta": job.meta,
                     "control_provenance": prov,
                     "orders": reduce_support(sp, ref),
                     "correlations": correlation_reads(sp),
@@ -2045,7 +2973,11 @@ def run(limit: int | None, out_dir: Path, fig_dir: Path) -> dict[str, Any]:
             "k_max": K_MAX,
             "band_frac": BAND_FRAC,
             "refine_orders": list(REFINE_ORDERS),
-            "lags_ms": list(LAGS_MS),
+            "lags_ms": list(lags_ms),
+            "max_lag_s": max_lag_s,
+            "long_support_set": long_mode,
+            "lag_window_frac": LAG_WINDOW_FRAC,
+            "long_fit_tau_lo_ms": LONG_FIT_TAU_LO_MS,
             "snr_min_db": SNR_MIN_DB,
             "k_shaft": K_SHAFT,
             "n_groups": N_GROUPS,
@@ -2061,11 +2993,11 @@ def run(limit: int | None, out_dir: Path, fig_dir: Path) -> dict[str, Any]:
         "n_recordings": len(rec_rows),
         "recordings": rec_rows,
         "controls": {name: groups[name] for name in CTRL_REFERENCE},
-        "pooled": pooled_curves(rec_rows),
+        "pooled": pooled_curves(rec_rows, lags_ms),
         "correlations": pool_correlations(rec_rows),
     }
     for name in CTRL_REFERENCE:
-        res[f"pooled_control_{name}"] = pooled_curves(groups[name])
+        res[f"pooled_control_{name}"] = pooled_curves(groups[name], lags_ms)
     res["correlations"]["mic_rho_controls"] = {
         name: pool_correlations(groups[name])["mic_rho"] for name in CTRL_REFERENCE
     }
@@ -2088,15 +3020,23 @@ def run(limit: int | None, out_dir: Path, fig_dir: Path) -> dict[str, Any]:
     obs = np.nanmean(stack_field(rec_rows, lag_a, "v_obs"), axis=0)
     res["leakage_share"] = float(leak[FIT_K_HI - 1] / max(obs[FIT_K_HI - 1], 1e-12))
     res["parity"] = parity_reads(res["pooled"])
-    verdicts(res)
+    if res["fit"]["net"]:
+        verdicts(res)
+    if any(ms in lags_ms for ms in LAGS_MS_LONG):
+        res["long_lag"] = long_lag_reads(groups, lags_ms)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "decoherence.json").write_text(json.dumps(res, indent=1, allow_nan=True))
-    print(f"  wrote {_rel(out_dir / 'decoherence.json')}")
-    fig_structure(res, fig_dir / "decoherence_structure.png")
-    fig_vs_k(res, fig_dir / "decoherence_vs_k.png")
-    fig_corr(res, fig_dir / "decoherence_corr.png")
-    path = write_findings(res, out_dir)
+    name = "decoherence_long.json" if long_mode else "decoherence.json"
+    (out_dir / name).write_text(json.dumps(res, indent=1, allow_nan=True))
+    print(f"  wrote {_rel(out_dir / name)}")
+    if long_mode:
+        fig_long(res, fig_dir / "decoherence_long.png")
+        path = write_long_findings(res, out_dir)
+    else:
+        fig_structure(res, fig_dir / "decoherence_structure.png")
+        fig_vs_k(res, fig_dir / "decoherence_vs_k.png")
+        fig_corr(res, fig_dir / "decoherence_corr.png")
+        path = write_findings(res, out_dir)
     print(f"  wrote {_rel(path)}")
     return res
 
@@ -2106,20 +3046,52 @@ def main(argv: list[str] | None = None) -> int:
         description="Shared versus independent harmonic phase noise on the DREGON single-motor bench.",
     )
     ap.add_argument("--limit", type=int, default=None, help="analyse only the first N recordings")
-    ap.add_argument("--out", type=Path, default=DEFAULT_OUT, help="results directory")
+    ap.add_argument(
+        "--out",
+        "--out-dir",
+        dest="out",
+        type=Path,
+        default=None,
+        help=f"results directory (default {_rel(DEFAULT_OUT)}, {_rel(DEFAULT_OUT_LONG)} with --long)",
+    )
     ap.add_argument("--figs", type=Path, default=DEFAULT_FIGS, help="figure directory")
+    ap.add_argument(
+        "--long",
+        action="store_true",
+        help="the long-window support set: the level-detected active run of "
+        f"{LONG_LEVEL_RECORDING} plus every single-rotor noise-v2-bench-points point whose "
+        f"published span reaches {LONG_SPAN_MIN_S:.0f} s. Writes decoherence_long.json, "
+        "findings.md and decoherence_long.png, and answers the long-lag shape question. "
+        f"Implies --max-lag-s {LONG_MAX_LAG_S:g}.",
+    )
+    ap.add_argument(
+        "--max-lag-s",
+        type=float,
+        default=None,
+        help=f"longest lag admitted from the long extension {LAGS_MS_LONG} (seconds); the "
+        "published ladder out to 1 s always runs. Default 0.5, i.e. the published ladder alone; "
+        f"--long defaults it to {LONG_MAX_LAG_S:g}",
+    )
     args = ap.parse_args(argv)
-    res = run(args.limit, args.out, args.figs)
+    out = args.out or (DEFAULT_OUT_LONG if args.long else DEFAULT_OUT)
+    max_lag_s = (
+        args.max_lag_s if args.max_lag_s is not None else (LONG_MAX_LAG_S if args.long else 0.5)
+    )
+    res = run(args.limit, out, args.figs, long_mode=args.long, max_lag_s=max_lag_s)
+    if "long_lag" in res:
+        print("\n" + res["long_lag"]["verdict"])
     fit = res["fit"]["net"]
     rec = res["control_recovery"]["matched"]
-    print(f"\nV_eps = {fit['a']:.4g} k^{fit['p']:.3f} tau^{fit['q']:.3f}")
+    if fit:
+        print(f"\nV_eps = {fit['a']:.4g} k^{fit['p']:.3f} tau^{fit['q']:.3f}")
     print(
         f"control (i) floor: flat to {rec['floor_flatness']:.0%}, k-slope {rec['floor_k_slope']:+.2f}"
     )
     print(f"control (ii) recovery ratio median {rec['ratio_median']:.2f}")
     print(f"null subtraction: {res['null_check']['n_resolvable']} resolvable cells")
-    print(f"cross-order: {res['correlations']['order_verdict']}")
-    print(f"cross-mic:   {res['correlations']['mic_verdict']}")
+    if "order_verdict" in res["correlations"]:
+        print(f"cross-order: {res['correlations']['order_verdict']}")
+        print(f"cross-mic:   {res['correlations']['mic_verdict']}")
     return 0
 
 
