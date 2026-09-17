@@ -7,10 +7,10 @@ were produced by `scripts/noise_v2_basin.py` (schema `noise-v2-basin/1`) on
 
 | job | what | wall | outputs |
 | --- | --- | --- | --- |
-| `nv2-r1-basin-mich-shaft-bb1368` | Michael's shaft grid + six 1-D profiles | 888 s + 501 s | `michaels_fly125_cruise__flight__grid_shaft.json`, `…__profiles.json` |
-| `nv2-r1-basin-mich-order-354905` | Michael's odd per-order grid | 883 s | `michaels_fly125_cruise__flight__grid_order_odd.json` |
-| `nv2-r1-basin-bench-bbed0e` | converged bench control, all three scans | 39 s + 38 s + 25 s | `bench_dregon_Motor1_80__bench__*.json` |
-| `nv2-r1-basin-slices-a92306` | `sigma_nu` profiled at three candidate `lam` pins | 191 s | `michaels_fly125_cruise__flight__slices_sigma_nu_at_lam.json` |
+| `nv2-r1-basin-mich-shaft-bb1368` | Michael's shaft grid + six 1-D profiles | 884.4 s + 501.2 s (226 + 352 objective evals) | `michaels_fly125_cruise__flight__grid_shaft.json`, `…__profiles.json` |
+| `nv2-r1-basin-mich-order-354905` | Michael's odd per-order grid | 883.0 s (226 evals) | `michaels_fly125_cruise__flight__grid_order_odd.json` |
+| `nv2-r1-basin-bench-bbed0e` | converged bench control, all three scans | 20.3 + 20.1 + 11.2 s | `bench_dregon_Motor1_80__bench__*.json` |
+| `nv2-r1-basin-slices-a92306` | `sigma_nu` profiled at three candidate `lam` pins | 131.1 s (46 evals) | `michaels_fly125_cruise__flight__slices_sigma_nu_at_lam.json` |
 | `nv2-r1-michaels-retry-a3bfe1` | the ONE permitted retry fit | see §8 | `../fits/michaels_fly125_cruise__flight_retry.json` |
 
 Code at `bb1669c4` (scan) and `2e96fa29` (ridge-profiled verdict, slices); the
