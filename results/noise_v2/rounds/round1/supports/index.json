@@ -1,0 +1,847 @@
+{
+ "schema": "noise-v2-supports-index/1",
+ "sets": {
+  "bench-points": {
+   "schema": "noise-v2-supports/1",
+   "set": "bench-points",
+   "n_specs": 135,
+   "n_built": 0,
+   "supports": [],
+   "failures": [
+    {
+     "name": "bench_point_AVQ__S1_seq1_w1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_AVQ__S1_seq1_w3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_AVQ__S1_seq2_w0",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_AVQ__S1_seq2_w3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_AVQ__S2_seq1_w3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_AVQ__S2_seq1_w5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor1_50",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor1_60",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor1_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor1_80",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor1_90",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor2_50",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor2_60",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor2_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor2_80",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor2_90",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor3_50",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor3_60",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor3_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor3_80",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor3_90",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor4_50",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor4_60",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor4_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor4_80",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_Motor4_90",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DREGON-bench__motor_allMotors_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_center_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_center_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_center_File4",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_down_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_down_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_down_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_up_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_up_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_up_File4",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_25cm_M_up_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_center_File1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_center_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_center_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_center_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_down_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_down_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_down_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_down_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_down_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_up_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_up_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_up_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_high_50cm_M_up_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_25cm_M_center_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_25cm_M_center_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_25cm_M_center_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_25cm_M_down_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_25cm_M_down_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_25cm_M_down_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_25cm_M_down_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_25cm_M_up_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_25cm_M_up_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_50cm_M_center_File1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_50cm_M_center_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_50cm_M_center_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_50cm_M_center_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_50cm_M_down_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_50cm_M_up_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone1_low_50cm_M_up_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_center_File1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_center_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_center_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_center_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_down_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_down_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_down_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_down_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_up_File1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_up_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_up_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_25cm_M_up_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_center_File1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_center_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_center_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_center_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_down_File1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_down_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_down_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_down_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_down_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_up_File1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_up_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_up_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_up_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_high_50cm_M_up_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_center_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_center_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_center_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_center_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_down_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_down_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_down_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_down_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_down_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_up_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_up_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_up_File4",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_up_File5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_up_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_25cm_M_up_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_center_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_center_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_center_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_center_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_down_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_down_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_down_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_down_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_up_File2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_up_File3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_up_File6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_DroneAudioSet__drone2_low_50cm_M_up_silence",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-ChuMS-bench__2prop_repeat3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-ChuMS-bench__3prop_repeat2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__0",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__2",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__3",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__6",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__ego-noise__single_rotors__7",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__static_clean__0",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__static_clean__1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__static_clean__4",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__static_clean__5",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__AGH__static_corrupted__1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__Diagonal_Unloading__recordings__static__static_2m",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_point_SPCUP19-egonoise__Idea_ssu__stationary_1",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    }
+   ],
+   "rule": {
+    "sr": 16000,
+    "obs_n_fft": 2048,
+    "obs_hop": 512,
+    "bench_order_range": [
+     60,
+     80
+    ],
+    "bench_demod_band_hz": 1.5,
+    "bench_residual_smooth_s": 2.0,
+    "bench_residual_tol_hz": 1.0,
+    "bench_min_segment_s": 4.0,
+    "bench_edge_s": 2.0
+   },
+   "provenance": {
+    "git_head": "955532017a5cdb3824a87f33b8e9b9b9afd758a8",
+    "timestamp": "2026-09-17T04:53:58+0100",
+    "wall_seconds": 0.0,
+    "command": "unavailable after uni-cpu initial attempt + one retry",
+    "initial_job": "noise-v2-r1-supports-ben-4289ab",
+    "retry_job": "noise-v2-r1-supports-ben-68dcaa"
+   }
+  },
+  "dregon-bench": {
+   "schema": "noise-v2-supports/1",
+   "set": "dregon-bench",
+   "n_specs": 21,
+   "n_built": 0,
+   "supports": [],
+   "failures": [
+    {
+     "name": "bench_dregon_Motor1_50",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor1_60",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor1_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor1_80",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor1_90",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor2_50",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor2_60",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor2_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor2_80",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor2_90",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor3_50",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor3_60",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor3_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor3_80",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor3_90",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor4_50",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor4_60",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor4_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor4_80",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_Motor4_90",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "bench_dregon_allMotors_70",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    }
+   ],
+   "rule": {
+    "sr": 16000,
+    "obs_n_fft": 2048,
+    "obs_hop": 512,
+    "bench_order_range": [
+     60,
+     80
+    ],
+    "bench_demod_band_hz": 1.5,
+    "bench_residual_smooth_s": 2.0,
+    "bench_residual_tol_hz": 1.0,
+    "bench_min_segment_s": 4.0,
+    "bench_edge_s": 2.0
+   },
+   "provenance": {
+    "git_head": "955532017a5cdb3824a87f33b8e9b9b9afd758a8",
+    "timestamp": "2026-09-17T04:53:58+0100",
+    "wall_seconds": 0.0,
+    "command": "unavailable after uni-cpu initial attempt + one retry",
+    "initial_job": "noise-v2-r1-supports-dre-9a4ec7",
+    "retry_job": "noise-v2-r1-supports-dre-65aeea"
+   }
+  },
+  "dregon-floor": {
+   "schema": "noise-v2-supports/1",
+   "set": "dregon-floor",
+   "n_specs": 10,
+   "n_built": 0,
+   "supports": [],
+   "failures": [
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727397.205+4_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_dregon_hovering_nosource_room2@1511903905.394+4_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903578.348+4_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905725.953+4_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_dregon_spinning_nosource_room2@1511905200.978+4_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_dregon_hovering_nosource_room2@1511903911.394+8_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    }
+   ],
+   "rule": {
+    "sr": 16000,
+    "obs_n_fft": 2048,
+    "obs_hop": 512,
+    "bench_order_range": [
+     60,
+     80
+    ],
+    "bench_demod_band_hz": 1.5,
+    "bench_residual_smooth_s": 2.0,
+    "bench_residual_tol_hz": 1.0,
+    "bench_min_segment_s": 4.0,
+    "bench_edge_s": 2.0
+   },
+   "provenance": {
+    "git_head": "955532017a5cdb3824a87f33b8e9b9b9afd758a8",
+    "timestamp": "2026-09-17T04:53:58+0100",
+    "wall_seconds": 0.0,
+    "command": "unavailable after uni-cpu initial attempt + one retry",
+    "initial_job": "noise-v2-r1-supports-dre-a3d231",
+    "retry_job": "noise-v2-r1-supports-dre-3ba512"
+   }
+  },
+  "michaels-cruise": {
+   "schema": "noise-v2-supports/1",
+   "set": "michaels-cruise",
+   "n_specs": 13,
+   "n_built": 0,
+   "supports": [],
+   "failures": [
+    {
+     "name": "flight_michaels_FLY125@16.000+8_rps_refined",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY125@32.000+8_rps_refined",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY125@48.000+8_rps_refined",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY125@64.000+8_rps_refined",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY125@96.000+8_rps_refined",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY125@112.000+8_rps_refined",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY125@128.000+8_rps_refined",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY125@144.000+8_rps_refined",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY124@8.000+8_rps",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY124@16.000+8_rps",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY124@27.680+8_rps",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY124@40.000+8_rps",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    },
+    {
+     "name": "flight_michaels_FLY124@56.000+8_rps",
+     "error": "uni-cpu retry could not access dload manifests: botocore.exceptions.NoCredentialsError: Unable to locate credentials (initial submission failed before execution because PYTHONPATH=src was absent)"
+    }
+   ],
+   "rule": {
+    "sr": 16000,
+    "obs_n_fft": 2048,
+    "obs_hop": 512,
+    "bench_order_range": [
+     60,
+     80
+    ],
+    "bench_demod_band_hz": 1.5,
+    "bench_residual_smooth_s": 2.0,
+    "bench_residual_tol_hz": 1.0,
+    "bench_min_segment_s": 4.0,
+    "bench_edge_s": 2.0
+   },
+   "provenance": {
+    "git_head": "955532017a5cdb3824a87f33b8e9b9b9afd758a8",
+    "timestamp": "2026-09-17T04:53:58+0100",
+    "wall_seconds": 0.0,
+    "command": "unavailable after uni-cpu initial attempt + one retry",
+    "initial_job": "noise-v2-r1-supports-mic-de9917",
+    "retry_job": "noise-v2-r1-supports-mic-8cd90b"
+   }
+  }
+ },
+ "n_supports": 0,
+ "updated": "2026-09-17T04:53:58+0100"
+}

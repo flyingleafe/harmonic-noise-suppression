@@ -215,10 +215,25 @@ def findings(index: dict[str, Any]) -> str:
         )
         if block["failures"]:
             out.append("")
-            out.append(
-                "FAILURES: " + "; ".join(f"`{f['name']}` {f['error']}" for f in block["failures"])
-            )
+            if not rows:
+                out.append(
+                    f"FAILURES: all {len(block['failures'])} requested supports are unavailable: "
+                    f"{block['failures'][0]['error']}. Individual support names are in `index.json`."
+                )
+            else:
+                out.append(
+                    "FAILURES: "
+                    + "; ".join(f"`{f['name']}` {f['error']}" for f in block["failures"])
+                )
         out.append("")
+
+        if not rows:
+            out.append(
+                "No support material was resolved. The requested count is recorded above; "
+                "segments, carrier estimates, and residual statistics are unavailable."
+            )
+            out.append("")
+            continue
 
         if name == "dregon-bench":
             n_pass = sum(1 for r in rows if r["stationary_pass"])
