@@ -52,6 +52,7 @@ from pyro.infer import SVI, Trace_ELBO
 from pyro.infer.autoguide import AutoDelta, init_to_value
 from pyro.optim.optim import PyroOptim
 from torch import Tensor
+from torch.distributions import constraints
 
 from experiments.stochastic_fit.model import FLOOR_SHAPE_N_CTRL
 from experiments.stochastic_fit.revised_phase import (
@@ -302,6 +303,38 @@ def _grad_norm(params: Sequence[Tensor]) -> float:
     return float(math.sqrt(sum(float((p.grad**2).sum()) for p in params if p.grad is not None)))
 
 
+#: Half-width of the box a POSITIVE site's unconstrained coordinate is held in
+#: during the L-BFGS polish. A strong-Wolfe probe extrapolates before it
+#: brackets, and one such probe on ``bench_dregon_Motor3_70`` pushed
+#: ``log sigma_nu`` far enough negative that ``exp`` underflowed to exactly
+#: 0.0 — outside the site's support, which raises inside ``log_prob`` and kills
+#: the fit. e^±60 spans 9e-27 to 1e26, so the box cannot bind on any plausible
+#: optimum; it only stops a runaway probe, and the polish records whether any
+#: coordinate ended up against it.
+LOG_BOX = 60.0
+
+
+def _log_space_params(guide: AutoDelta) -> list[Tensor]:
+    """The guide tensors that live in log space (their site is positive).
+
+    ``AutoDelta`` names each parameter ``<site>_unconstrained`` and transforms
+    it with the site's own bijector, so a site supported on ``(0, inf)`` — the
+    four dynamics sites — is the exponential of its parameter, and only those
+    can underflow out of their support.
+    """
+    trace = guide.prototype_trace
+    if trace is None:
+        raise RuntimeError("the guide must have run before its log-space sites are known")
+    out: list[Tensor] = []
+    for name, p in guide.named_parameters():
+        node = trace.nodes.get(name.removesuffix("_unconstrained"))
+        support = getattr(node.get("fn"), "support", None) if node is not None else None
+        base = getattr(support, "base_constraint", support)
+        if isinstance(base, constraints.greater_than) and float(base.lower_bound) == 0.0:
+            out.append(p)
+    return out
+
+
 def fit_support(
     batch: MD.SupportBatch,
     *,
@@ -367,7 +400,14 @@ def fit_support(
         polish = MD.batch_slice(full, np.unique(idx))
     loss_fn = model_for(polish)
     params = [p for p in guide.parameters() if p.requires_grad]
+    boxed = _log_space_params(guide)
     elbo_of = lambda: elbo.differentiable_loss(loss_fn, guide)  # noqa: E731
+
+    def box() -> None:
+        """Hold every log-space coordinate inside ``LOG_BOX``."""
+        with torch.no_grad():
+            for p in boxed:
+                p.clamp_(-LOG_BOX, LOG_BOX)
 
     def run_lbfgs(max_iter: int) -> tuple[float, int]:
         """One L-BFGS pass; returns its final loss and its evaluation count."""
@@ -381,6 +421,9 @@ def fit_support(
 
         def closure() -> Tensor:
             nonlocal count
+            # the probe point, not just the accepted step: strong Wolfe
+            # extrapolates first and it is the EXTRAPOLATION that underflows
+            box()
             opt.zero_grad(set_to_none=False)
             loss = elbo_of()
             loss.backward()
@@ -388,6 +431,9 @@ def fit_support(
             return loss
 
         opt.step(closure)
+        # L-BFGS leaves the parameters at its own accepted point, which the
+        # closure never saw
+        box()
         with torch.no_grad():
             return float(elbo_of()), count
 
@@ -429,6 +475,7 @@ def fit_support(
             lbfgs_restart_gain_per_cell=float(gain_per_cell),
             lbfgs_evals=int(evals),
             lbfgs_restart_evals=int(restart_evals),
+            log_box_hits=int(sum(int((p.detach().abs() >= LOG_BOX - 1e-9).sum()) for p in boxed)),
             lbfgs_wall_s=lbfgs_s,
             lbfgs_frames_used=int(polish.power.shape[1]),
             lbfgs_cells=int(polish.n_cells),

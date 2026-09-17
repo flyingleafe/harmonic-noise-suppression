@@ -59,8 +59,11 @@ def worker(unit: Unit) -> dict[str, Any]:
     from experiments.noise_model import model as MD
     from experiments.noise_model import supports as SU
 
-    torch.set_num_threads(1)
     p = dict(unit.params)
+    # one unit per core by default: the bench grid runs `--jobs` units at once
+    # and a torch thread pool per unit would oversubscribe the node. A single
+    # pooled FLIGHT fit is one unit, so there `--threads` is the whole node.
+    torch.set_num_threads(max(1, int(p.get("threads", 1))))
     mode = str(p["mode"])
     out_dir = Path(p["out_dir"])
     optim = FT.OptimSpec(**p["optim"])
@@ -392,6 +395,12 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--lbfgs-iters", type=int, default=200)
         p.add_argument("--seed", type=int, default=0)
         p.add_argument("--progress", type=int, default=0, help="print the Adam loss every N steps")
+        p.add_argument(
+            "--threads",
+            type=int,
+            default=1,
+            help="torch threads per unit (a one-unit flight fit wants the whole node)",
+        )
         add_gridrun_args(p, jobs=4)
         if name == "flight":
             p.add_argument(
@@ -435,6 +444,7 @@ def main(argv: list[str] | None = None) -> int:
                     out_dir=str(out_dir),
                     optim=_optim_from_args(args),
                     progress=int(args.progress),
+                    threads=int(args.threads),
                 ),
             )
             for spec in specs
@@ -465,6 +475,7 @@ def main(argv: list[str] | None = None) -> int:
                     frame_stride=int(args.frame_stride),
                     max_frames=None if int(args.max_frames) <= 0 else int(args.max_frames),
                     progress=int(args.progress),
+                    threads=int(args.threads),
                 ),
             )
         ]
@@ -479,7 +490,11 @@ def main(argv: list[str] | None = None) -> int:
             fits=[r.get("fit_json") for r in payloads],
         )
 
-    result = gridrun_from_args(args, units, worker, grid_dir, summarize=summarize)
+    # the BLAS pools get the same width as the torch pool, or a `--threads 8`
+    # flight fit would still do its linear algebra on one core
+    result = gridrun_from_args(
+        args, units, worker, grid_dir, summarize=summarize, blas_threads=int(args.threads)
+    )
     text = findings(out_dir)
     (out_dir / "findings.md").write_text(text)
     print(f"# wrote {out_dir / 'findings.md'}", flush=True)
