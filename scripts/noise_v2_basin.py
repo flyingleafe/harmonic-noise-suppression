@@ -280,6 +280,16 @@ def _ridge_report(axis_ridge: np.ndarray, axis_rate: np.ndarray, z: np.ndarray) 
     tol = 1e-4
     near = np.isfinite(along) & (along - np.nanmin(along) < tol)
     band = [float(axis_rate[near].min()), float(axis_rate[near].max())] if near.any() else None
+    profiled = np.nanmin(np.where(finite, z, np.inf), axis=0)
+    ridge_arg = np.nanargmin(np.where(finite, z, np.inf), axis=0)
+    profiled_bands = {}
+    for level in (1e-4, 1e-2, 5e-2):
+        ok = profiled - np.nanmin(profiled) < level
+        profiled_bands[f"within_{level:g}"] = (
+            [float(axis_rate[ok].min()), float(axis_rate[ok].max()), int(ok.sum())]
+            if ok.any()
+            else None
+        )
     return dict(
         argmin_ridge=float(axis_ridge[j_best]),
         argmin_rate=float(axis_rate[i_best]),
@@ -294,6 +304,18 @@ def _ridge_report(axis_ridge: np.ndarray, axis_rate: np.ndarray, z: np.ndarray) 
         tol_nats_per_cell=tol,
         rate_band_within_tol=band,
         n_rate_points_within_tol=int(near.sum()),
+        # PROFILED over the ridge coordinate: the best objective attainable at
+        # each rate. This, not the row through the best ridge value, is the
+        # identifiability statement about the rate — the ridge of the shaft
+        # term is not horizontal in (D, lam), it tracks constant sigma_nu.
+        profiled_over_ridge_per_cell=[float(v) for v in profiled],
+        profiled_argmin_rate=float(axis_rate[int(np.nanargmin(profiled))]),
+        profiled_range_per_cell=float(np.nanmax(profiled) - np.nanmin(profiled)),
+        profiled_range_per_cell_rate_ge_1=float(
+            np.nanmax(profiled[axis_rate >= 1.0]) - np.nanmin(profiled[axis_rate >= 1.0])
+        ),
+        profiled_ridge_argmin=[float(axis_ridge[j]) for j in ridge_arg],
+        profiled_rate_band=profiled_bands,
     )
 
 
@@ -424,6 +446,66 @@ def profiles(obj: Objective, *, points: int, span: float, log: bool = True) -> d
                 f"  profile {key}: range {out[key]['map_range_per_cell']:.4g} nats/cell", flush=True
             )
     return dict(term="profiles", span_decades=float(span), points=int(points), profiles=out)
+
+
+def slices(
+    obj: Objective,
+    *,
+    sweep: str,
+    at: dict[str, list[float]],
+    points: int,
+    span: float,
+    log: bool = True,
+) -> dict[str, Any]:
+    """``sweep``'s 1-D profile at each HELD value of another parameter.
+
+    What a 2-D ``(ridge, rate)`` grid cannot answer when its ridge axis is
+    only two decades wide: at a rate far from the fit the identified ridge
+    coordinate can leave the grid, and the per-rate minimum is then an upper
+    bound. Sweeping the ridge coordinate itself at a NAMED rate profiles it
+    honestly, which is what comparing two candidate pins needs.
+    """
+    fitted = obj.fitted_point()
+    axis = _decade_axis(fitted[sweep], span=span, n=points)
+    out = []
+    for key, values in at.items():
+        for held in values:
+            row_risk, row_map = [], []
+            for v in axis:
+                r = obj.at(**_point(fitted, **{sweep: float(v), key: float(held)}))
+                row_risk.append(r["risk_per_cell"])
+                row_map.append(r["map_per_cell"])
+            m = np.asarray(row_map)
+            j = int(np.nanargmin(m))
+            out.append(
+                dict(
+                    held_parameter=key,
+                    held_value=float(held),
+                    swept_parameter=sweep,
+                    axis=[float(v) for v in axis],
+                    risk_per_cell=[float(v) for v in row_risk],
+                    map_per_cell=[float(v) for v in row_map],
+                    argmin=float(axis[j]),
+                    min_per_cell=float(m[j]),
+                    at_grid_edge=bool(j in (0, m.size - 1)),
+                )
+            )
+            if log:
+                print(
+                    f"  slice {key}={held:g}: min {m[j]:.6f} nats/cell at "
+                    f"{sweep}={axis[j]:.6g}{' (EDGE)' if out[-1]['at_grid_edge'] else ''}",
+                    flush=True,
+                )
+    best = min(s["min_per_cell"] for s in out)
+    for s in out:
+        s["excess_over_best_per_cell"] = float(s["min_per_cell"] - best)
+    return dict(
+        term=f"slices_{sweep}",
+        span_decades=float(span),
+        points=int(points),
+        best_min_per_cell=float(best),
+        slices=out,
+    )
 
 
 def _plateau_decades(axis: np.ndarray, z: np.ndarray, *, tol: float) -> float:
@@ -587,7 +669,7 @@ def main(argv: list[str] | None = None) -> int:
         "--what",
         nargs="*",
         default=["shaft", "order-odd", "profiles"],
-        choices=["shaft", "order-odd", "order-even", "profiles"],
+        choices=["shaft", "order-odd", "order-even", "profiles", "slices"],
     )
     s.add_argument("--points", type=int, default=15, help="grid points per axis")
     s.add_argument("--profile-points", type=int, default=21)
@@ -603,12 +685,29 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--max-frames", type=int, default=256)
     s.add_argument("--threads", type=int, default=1)
     s.add_argument("--plot", action="store_true", help="also write the PNG")
+    s.add_argument(
+        "--sweep",
+        default=None,
+        help="with --what slices: the parameter to sweep, e.g. sigma_nu",
+    )
+    s.add_argument(
+        "--at",
+        default=None,
+        metavar="NAME=V1,V2,...",
+        help="with --what slices: the parameter HELD at each of these values, "
+        "e.g. --at lam=0.5,5.5,268.27",
+    )
 
     p = sub.add_parser("plot")
     p.add_argument("--dir", default=OUT_DIR)
     p.add_argument("--name", required=True, help="fit stem, e.g. michaels_fly125_cruise__flight")
     p.add_argument("--field", default="map", choices=["map", "risk"])
     p.add_argument("--out", default=None)
+
+    r = sub.add_parser(
+        "reverdict", help="recompute a grid JSON's verdict block in place (no supports needed)"
+    )
+    r.add_argument("--grid", nargs="+", required=True, help="grid JSON(s) to update")
 
     args = ap.parse_args(argv)
 
@@ -621,6 +720,21 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(args.out) if args.out else d / f"{args.name}__basin.png"
         plot(paths, out, field=args.field, title=f"v2 objective geometry — {args.name}")
         print(f"# wrote {out}", flush=True)
+        return 0
+
+    if args.cmd == "reverdict":
+        for path in args.grid:
+            q = Path(path)
+            grid = json.loads(q.read_text())
+            ridge = np.asarray(grid["ridge_axis"], dtype=np.float64)
+            rate = np.asarray(grid["rate_axis"], dtype=np.float64)
+            grid["verdict"] = dict(
+                risk=_ridge_report(
+                    ridge, rate, np.asarray(grid["risk_per_cell"], dtype=np.float64)
+                ),
+                map=_ridge_report(ridge, rate, np.asarray(grid["map_per_cell"], dtype=np.float64)),
+            )
+            _write(grid, q)
         return 0
 
     import torch
@@ -681,6 +795,18 @@ def main(argv: list[str] | None = None) -> int:
                 rate_hi=float(args.rate_hi),
             )
             key = f"grid_order_{parity}"
+        elif what == "slices":
+            if not (args.sweep and args.at):
+                raise SystemExit("--what slices needs --sweep NAME and --at NAME=V1,V2,...")
+            key_at, _, values = str(args.at).partition("=")
+            payload = slices(
+                obj,
+                sweep=str(args.sweep),
+                at={key_at: [float(v) for v in values.split(",")]},
+                points=int(args.points),
+                span=float(args.span),
+            )
+            key = f"slices_{args.sweep}_at_{key_at}"
         else:
             payload = profiles(obj, points=int(args.profile_points), span=float(args.span))
             key = "profiles"
