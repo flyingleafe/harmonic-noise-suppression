@@ -387,29 +387,51 @@ def v2_arm(rig: str, fits_dir: Path, *, render_mod: Any, spectrum_fn: Any) -> Ar
 
 
 def _comb_mean_check(fit: dict[str, Any], fits: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """Is the rendered DREGON comb really the mean of the four bench fits?"""
+    """Is the rendered DREGON comb really the declared mean of the four bench fits?
+
+    The floor-only fit records the rule it froze its comb with in
+    ``frozen_from.rule``; R1's rule is the LOG mean of the rates and scales, so
+    both means are recomputed here and the one the fit declares is the
+    deviation that counts. Nothing is assumed: a fit that names no rule is
+    checked against the arithmetic mean and says so.
+    """
     missing = [s for s in DREGON_COMB_SUPPORTS if s not in fits]
     if missing:
         return dict(available=False, missing_bench_fits=missing)
+    declared = str(((fit.get("frozen_from") or {}).get("rule")) or "")
+    kind = "log" if "log-mean" in declared else "arithmetic"
     params = [fits[s]["params"] for s in DREGON_COMB_SUPPORTS]
     rows: dict[str, Any] = {}
     for key in COMB_PARAM_KEYS:
         if key not in fit["params"] or any(key not in p for p in params):
             continue
-        mean = float(np.mean([float(p[key]) for p in params]))
+        values = [float(p[key]) for p in params]
+        mean = float(np.mean(values))
+        log_mean = (
+            float(np.exp(np.mean(np.log(values)))) if all(v > 0.0 for v in values) else None
+        )
+        reference = log_mean if kind == "log" and log_mean is not None else mean
         got = float(fit["params"][key])
         rows[key] = dict(
+            bench_values=values,
             bench_mean=mean,
+            bench_log_mean=log_mean,
+            reference=reference,
             rendered=got,
-            relative=(abs(got - mean) / abs(mean) if mean else None),
+            relative=(abs(got - reference) / abs(reference) if reference else None),
         )
     rel = [r["relative"] for r in rows.values() if r["relative"] is not None]
     return dict(
         available=bool(rows),
         bench_fits=list(DREGON_COMB_SUPPORTS),
+        declared_rule=(declared or None),
+        reference_mean=kind,
         per_parameter=rows,
         max_relative=(max(rel) if rel else None),
-        rule="the floor-only flight fit must carry the bench comb mean unchanged",
+        rule=(
+            "the floor-only flight fit must carry the bench comb mean unchanged, under the rule "
+            "it declares in frozen_from.rule"
+        ),
     )
 
 
