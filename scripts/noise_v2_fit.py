@@ -76,6 +76,9 @@ def worker(unit: Unit) -> dict[str, Any]:
             power=np.asarray(support.power, dtype=np.float64),
             sr=int(support.sr),
             carrier_mean=np.asarray(support.carrier_rev_s, dtype=np.float64).mean(axis=1),
+            # the support's own sample count: recovering it as 2 (F - 1) is
+            # n - 1 for an odd segment and stretches the model's bin grid
+            n_samples=int(support.n_fft),
             k_cap=K_CAP,
         )
         name, kind = support.name, support.kind

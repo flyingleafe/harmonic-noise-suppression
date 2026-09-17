@@ -161,23 +161,50 @@ def merge_index(out_dir: Path, payload: dict[str, Any]) -> dict[str, Any]:
     return index
 
 
+def _r1_carriers() -> dict[str, list[float]]:
+    """The round-1 index's carriers, for the shift column (empty if absent)."""
+    path = Path("results/noise_v2/rounds/round1/supports/index.json")
+    if not path.exists():
+        return {}
+    idx = json.loads(path.read_text())
+    out: dict[str, list[float]] = {}
+    for s in idx.get("sets", {}).values():
+        for r in s.get("supports", []):
+            out[str(r["name"])] = [float(v) for v in (r.get("carriers_rev_s") or [])]
+    return out
+
+
 def _bench_table(rows: list[dict[str, Any]]) -> list[str]:
+    r1 = _r1_carriers()
     out = [
-        "| support | pass | segment (s) | dur (s) | longest +-1 Hz (s) | order | survey (rev/s) "
-        "| carrier (rev/s) | shift | residual std (Hz) | mics | bins |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| support | pass | segment (s) | dur (s) | longest +-1 Hz (s) | level deficit (dB) "
+        "| in-window margin (dB) | order | survey (rev/s) | carrier (rev/s) | shift vs survey "
+        "| shift vs R1 | residual std (Hz) | mics | bins |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
+    fmt = lambda vs, spec: ", ".join(format(v, spec) for v in vs)  # noqa: E731
     for r in rows:
         seg = f"{r['segment'][0]:.2f}-{r['segment'][1]:.2f}"
-        survey = ", ".join(f"{v:.4f}" for v in (r.get("survey_rev_s") or []))
-        carrier = ", ".join(f"{v:.4f}" for v in r["carriers_rev_s"])
-        shift = ", ".join(f"{v:+.4f}" for v in (r.get("carrier_shift_rev_s") or []))
-        std = ", ".join(f"{v:.3f}" for v in (r.get("residual_std_hz") or []))
+        carriers = [float(v) for v in r["carriers_rev_s"]]
+        old = r1.get(str(r["name"]))
+        vs_r1 = (
+            fmt([c - o for c, o in zip(carriers, old)], "+.4f")
+            if old and len(old) == len(carriers)
+            else "-"
+        )
+        deficit = r.get("level_deficit_db")
+        margin = r.get("line_margin_db")
         longest = r.get("longest_inside_s")
         out.append(
             f"| `{r['name']}` | {'PASS' if r['stationary_pass'] else 'FAIL'} | {seg} | "
-            f"{r['duration_s']:.3f} | {longest:.2f} | {r.get('orders')} | {survey} | {carrier} | "
-            f"{shift} | {std} | {r['n_mics']} | {r['n_bins']} |"
+            f"{r['duration_s']:.3f} | {longest:.2f} | "
+            f"{'-' if deficit is None else format(deficit, '.2f')} | "
+            f"{'-' if margin is None else fmt(margin, '.2f')} | {r.get('orders')} | "
+            f"{fmt([float(v) for v in (r.get('survey_rev_s') or [])], '.4f')} | "
+            f"{fmt(carriers, '.4f')} | "
+            f"{fmt([float(v) for v in (r.get('carrier_shift_rev_s') or [])], '+.4f')} | {vs_r1} | "
+            f"{fmt([float(v) for v in (r.get('residual_std_hz') or [])], '.3f')} | "
+            f"{r['n_mics']} | {r['n_bins']} |"
         )
     return out
 
@@ -220,13 +247,26 @@ def _point_table(rows: list[dict[str, Any]]) -> list[str]:
 def findings(index: dict[str, Any]) -> str:
     """One findings file over every set present in the index."""
     out: list[str] = [
-        "# Noise model v2, round 1 — supports",
+        "# Noise model v2 — supports",
         "",
         "Every support is one observation window at 16 kHz in the frozen periodogram",
         "convention `|rfft(x*w)|^2 / sum(w^2)` (periodic Hann, one-sided,",
         "`revised_eval.window_periodogram`): bench = ONE frame over the whole segment,",
         "flight = NFFT 2048 / hop 512. Numbers below are read from `index.json`, which is",
         "written by `scripts/noise_v2_supports.py build`.",
+        "",
+        "BENCH STATIONARITY RULE REVISION 2 (2026-09-17). A candidate sample must now also",
+        "lie where the band-limited (30 Hz - 7.9 kHz) median level over a sliding",
+        "`BENCH_MIN_SEGMENT_S` window is within `BENCH_LEVEL_TOL_DB` = 6 dB of the",
+        "recording's loudest such window, the accepted window is certified by the line",
+        "margin measured INSIDE it (not over the recording), the carrier is refined on the",
+        "window and FROZEN (the fit has no carrier parameter), and revision 1's wide-band",
+        "residual test is gone. Revision 1 scored frequency-residual stationarity alone,",
+        "which silence satisfies perfectly, and put 12 of the 21 DREGON bench windows",
+        "10-33 dB below the loudest window of their own recording — see",
+        "`results/noise_v2/rounds/round1/bench_diag/findings.md`. `level_deficit_db`,",
+        "`line_margin_db` and `carrier_recording_rev_s` in `index.json` are the new",
+        "per-recording evidence.",
         "",
     ]
     sets = index.get("sets", {})
@@ -271,9 +311,12 @@ def findings(index: dict[str, Any]) -> str:
             lengths = sorted(r["longest_inside_s"] for r in rows)
             passed = [r["duration_s"] for r in rows if r["stationary_pass"]]
             out.append(
-                f"The +-1 Hz rule (order {SUP.BENCH_ORDER_RANGE[0]}-{SUP.BENCH_ORDER_RANGE[1]}, "
-                f"residual averaged over {SUP.BENCH_RESIDUAL_SMOOTH_S:g} s, minimum "
-                f"{SUP.BENCH_MIN_SEGMENT_S:g} s): **{n_pass} of {len(rows)} recordings pass**."
+                f"The rev-2 rule (order {SUP.BENCH_ORDER_RANGE[0]}-{SUP.BENCH_ORDER_RANGE[1]}, "
+                f"residual +-{SUP.BENCH_RESIDUAL_TOL_HZ:g} Hz averaged over "
+                f"{SUP.BENCH_RESIDUAL_SMOOTH_S:g} s, level gate within "
+                f"{SUP.BENCH_LEVEL_TOL_DB:g} dB, in-window margin >= "
+                f"{SUP.BENCH_LINE_MARGIN_DB:g} dB, minimum {SUP.BENCH_MIN_SEGMENT_S:g} s): "
+                f"**{n_pass} of {len(rows)} recordings pass**."
             )
             out.append("")
             if passed:
@@ -286,13 +329,31 @@ def findings(index: dict[str, Any]) -> str:
             if fails:
                 out.append("")
                 out.append(
-                    "Failing recordings (kept with the most stationary "
-                    f"{SUP.BENCH_MIN_SEGMENT_S:g} s window, flagged `FAIL`): "
+                    "Failing recordings (window kept and cached, flagged `FAIL`; under rule "
+                    "rev 2 a bench recording fails on the LINE MARGIN measured inside its own "
+                    f"window, against {SUP.BENCH_LINE_MARGIN_DB:g} dB): "
                     + "; ".join(
-                        f"`{r['name']}` longest {r['longest_inside_s']:.2f} s, "
-                        f"worst residual {r['residual_max_abs_hz']:.2f} Hz"
+                        f"`{r['name']}` margin "
+                        + ", ".join(f"{v:.2f}" for v in (r.get("line_margin_db") or []))
+                        + " dB (recording "
+                        + ", ".join(f"{v:.2f}" for v in (r.get("line_margin_recording_db") or []))
+                        + f" dB), window {r['duration_s']:.2f} s, level deficit "
+                        f"{r['level_deficit_db']:.2f} dB"
                         for r in fails
                     )
+                )
+            deficits = [
+                r["level_deficit_db"] for r in rows if r.get("level_deficit_db") is not None
+            ]
+            margins = [v for r in rows for v in (r.get("line_margin_db") or [])]
+            if deficits and margins:
+                out.append("")
+                out.append(
+                    f"Level gate (rev 2): every window sits {min(deficits):.2f}-"
+                    f"{max(deficits):.2f} dB below the loudest {SUP.BENCH_MIN_SEGMENT_S:g} s "
+                    "window of its own recording, against 0.2-32.8 dB under rev 1 "
+                    "(`results/noise_v2/rounds/round1/bench_diag/census.json`). In-window line "
+                    f"margins run {min(margins):.2f}-{max(margins):.2f} dB."
                 )
             out.append("")
             out.append(
