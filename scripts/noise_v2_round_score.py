@@ -350,7 +350,14 @@ def read_fits(fits_dir: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
-def v2_arm(rig: str, fits_dir: Path, *, render_mod: Any, spectrum_fn: Any) -> Arm:
+def v2_arm(
+    rig: str,
+    fits_dir: Path,
+    *,
+    render_mod: Any,
+    spectrum_fn: Any,
+    fit_path: Path | None = None,
+) -> Arm:
     """The round's v2 arm: one fit per rig, selected by its ``support`` name.
 
     DREGON renders from the flight floor-only fit ``dregon_room2_floor``, whose
@@ -358,15 +365,31 @@ def v2_arm(rig: str, fits_dir: Path, *, render_mod: Any, spectrum_fn: Any) -> Ar
     fits; those four are read as well and the mean is VERIFIED rather than
     assumed. Michael's renders from ``michaels_fly125_cruise`` for all three
     FLY124 regimes.
+
+    ``fit_path`` names ONE file instead, which is what a second candidate on
+    the same support needs: a retry fit carries the same ``support`` name as
+    the fit it retries, so selection by support name alone cannot tell the two
+    apart. The named file must still carry that rig's support.
     """
     fits = read_fits(fits_dir)
     want = MICHAELS_FIT_SUPPORT if rig == "michaels" else DREGON_FIT_SUPPORT
-    if want not in fits:
+    if fit_path is not None:
+        fit = json.loads(Path(fit_path).read_text())
+        if str(fit.get("schema")) != FIT_SCHEMA:
+            die(f"{fit_path}: not a {FIT_SCHEMA} fit")
+        if str(fit.get("support")) != want:
+            die(
+                f"{fit_path}: carries support {fit.get('support')!r}, but the {rig} arm is "
+                f"defined on {want!r}"
+            )
+        fit["_path"] = str(fit_path)
+    elif want not in fits:
         die(
             f"{fits_dir}: no fit carries support {want!r} (found {sorted(fits)}); the {rig} arm "
             "is not defined by any other file"
         )
-    fit = fits[want]
+    else:
+        fit = fits[want]
     source: dict[str, Any] = dict(support=want, path=fit["_path"], kind=fit.get("kind"))
     label = (
         "v2 FLY125 cruise fit (drives FLY124 standby/ramp through the trajectory sampler)"
@@ -808,6 +831,7 @@ def run(
     with_probe: bool,
     candidate: str = "v2",
     dump_audio: Path | None = None,
+    fit_files: dict[str, Path] | None = None,
 ) -> dict[str, Any]:
     lw = _module("noise_v2_likelihood_window")
     proxy_mod = _module("noise_v2_spectrogram_proxy")
@@ -819,7 +843,13 @@ def run(
         else:
             render_mod, spectrum_fn = _v2_modules()
             assert fits_dir is not None
-            arms[rig] = v2_arm(rig, fits_dir, render_mod=render_mod, spectrum_fn=spectrum_fn)
+            arms[rig] = v2_arm(
+                rig,
+                fits_dir,
+                render_mod=render_mod,
+                spectrum_fn=spectrum_fn,
+                fit_path=(fit_files or {}).get(rig),
+            )
     probe = Probe.load() if with_probe else None
     payload: dict[str, Any] = dict(
         round=int(round_no),
@@ -1738,6 +1768,16 @@ def main(argv: list[str] | None = None) -> int:
         help="write the scored arm record here instead of round<N>[_tag].json",
     )
     ap.add_argument(
+        "--fit",
+        action="append",
+        default=[],
+        metavar="RIG=PATH",
+        help=(
+            "render that rig from this exact fit file instead of the one --fits selects by "
+            "support name (a retry fit shares its support name with the fit it retries)"
+        ),
+    )
+    ap.add_argument(
         "--dump-audio",
         type=Path,
         default=None,
@@ -1824,6 +1864,9 @@ def main(argv: list[str] | None = None) -> int:
         with_probe=not args.no_probe,
         candidate=str(args.candidate or args.out_tag or ("legacy" if legacy else "v2")),
         dump_audio=args.dump_audio,
+        fit_files={
+            str(spec).split("=", 1)[0]: Path(str(spec).split("=", 1)[1]) for spec in args.fit
+        },
     )
     if args.job:
         payload["job"] = str(args.job)
