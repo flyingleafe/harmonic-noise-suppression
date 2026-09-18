@@ -48,6 +48,17 @@ ratios, which are measured from separated renders.)
 | expected wall | ~40–45 min (`nv2-r2-dregon-floor2-01c39a`, the same fit without the free scalar: 43 min 18 s, 01:49:20 → 02:32:38Z) |
 | output the job writes | `results/noise_v2/rounds/round2/fits/dregon_room2_floor__flight_floor_only_v2.json` |
 
+### Backup job (the node is ~2.8x slower than `floor2`'s)
+
+`nv2-r2-dregon-floor3-6ee9e2` ran Adam 1500 in ~42 min against `floor2`'s 15
+min (900 s), which puts its L-BFGS polish (`floor2`: 1579 s) at ~74 min and the
+whole fit right at the `--time 2h` wall (11:15:55Z). A BYTE-IDENTICAL backup was
+therefore submitted at 10:42Z with a 5 h wall:
+`nv2-r2-dregon-floor3b-f97a58` (same code SHA `fca85d9c`, same worktree, same
+in-job script, same `--outputs`). Harvest whichever finishes and CANCEL the
+other (`omnirun cancel <job>`): the two are the same computation with the same
+seed, so either payload is the refit.
+
 ## The command
 
 ```
