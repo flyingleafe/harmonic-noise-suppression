@@ -130,6 +130,11 @@ def _mutate(fit: dict[str, Any], **kw: Any) -> dict[str, Any]:
         p["floor"]["floor_mean_db"] = float(p["floor"]["floor_mean_db"]) + float(
             kw["floor_mean_shift_db"]
         )
+    if "sigma_nu_scale" in kw:
+        # the shaft OU's noise is in rev/s, so a cruise-fitted sigma_nu is a
+        # LARGER fraction of a standby carrier: the relative smearing of the
+        # comb is regime-dependent even though the parameter is not
+        p["sigma_nu"] = float(p["sigma_nu"]) * float(kw["sigma_nu_scale"])
     return out
 
 
@@ -221,6 +226,32 @@ ARMS: tuple[ArmSpec, ...] = (
             amp_exp=float(c["level_matched_exp"]),
             floor_exp=float(c["level_matched_exp"]),
             floor_static_rel=PRIOR_STATIC_REL,
+        ),
+    ),
+    ArmSpec(
+        "v2_prior_exps_nofloor",
+        "v2",
+        "prior-mean exponents with the floor muted: the fitted comb alone",
+        "residual: is what is left after the envelopes the FLOOR, or the comb itself?",
+        lambda f, _c: _mutate(
+            f,
+            amp_exp=PRIOR_EXP,
+            floor_exp=PRIOR_EXP,
+            floor_static_rel=PRIOR_STATIC_REL,
+            mute_floor=True,
+        ),
+    ),
+    ArmSpec(
+        "v2_prior_exps_lowjitter",
+        "v2",
+        "prior-mean exponents with the shaft jitter at a quarter of the fitted sigma_nu",
+        "residual: the cruise-fitted shaft jitter is a 2.2x larger FRACTION of a standby carrier",
+        lambda f, _c: _mutate(
+            f,
+            amp_exp=PRIOR_EXP,
+            floor_exp=PRIOR_EXP,
+            floor_static_rel=PRIOR_STATIC_REL,
+            sigma_nu_scale=0.25,
         ),
     ),
 )
