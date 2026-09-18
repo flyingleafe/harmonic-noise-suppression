@@ -53,9 +53,10 @@ SCHEMA = "noise-v2-render-regime/1"
 OUT_DEFAULT = Path("results/noise_v2/rounds/round2/render_regime")
 FIT_DEFAULT = Path("results/noise_v2/rounds/round1/fits/michaels_fly125_cruise__flight.json")
 
-#: The two frozen FLY124 supports this study is about, by regime, plus the
-#: cruise support that is already at parity and serves as the control.
-STUDY_REGIMES = ("standby", "ramp", "cruise")
+#: The two frozen FLY124 supports this study is about, plus the cruise support
+#: that is already at parity. CRUISE FIRST: the level-matched-exponent variant
+#: reads the real cruise level as its reference.
+STUDY_REGIMES = ("cruise", "standby", "ramp")
 
 #: Periodogram geometry of the level/comb diagnostics. 8192 at 16 kHz is
 #: 1.95 Hz per bin: the order-2 lines of two rotors 5 rev/s apart are ten bins
@@ -73,6 +74,12 @@ COMB_ORDERS = (2, 4, 8)
 #: Mute level of a disabled block. 200 dB below the fitted value is numerically
 #: gone and still finite.
 MUTE_DB = 200.0
+
+#: The prior means of the two speed exponents and of the floor's static
+#: pedestal (``model.Priors.amp_exp``, ``floor_exp``, ``log_floor_static``):
+#: what the patch proposal pins them to when the pool cannot identify them.
+PRIOR_EXP = 2.0
+PRIOR_STATIC_REL = 2.5e-3
 
 
 def die(message: str) -> None:
@@ -191,6 +198,29 @@ ARMS: tuple[ArmSpec, ...] = (
         "H2 in its strongest form: the floor level alone",
         lambda f, c: _mutate(
             f, floor_exp=0.0, floor_mean_shift_db=float(c["floor_match_shift_db"])
+        ),
+    ),
+    ArmSpec(
+        "v2_prior_exps",
+        "v2",
+        "v2 with BOTH exponents at their prior means (amp_exp = floor_exp = 2, "
+        "static_rel at its own prior mean)",
+        "the patch: what the fit would render if the unidentified exponents were pinned",
+        lambda f, _c: _mutate(
+            f, amp_exp=PRIOR_EXP, floor_exp=PRIOR_EXP, floor_static_rel=PRIOR_STATIC_REL
+        ),
+    ),
+    ArmSpec(
+        "v2_level_matched_exps",
+        "v2",
+        "v2 with BOTH exponents at the value the REAL clips' own cruise-to-regime level "
+        "ratio implies",
+        "the ceiling of a single global speed envelope: what is left is the comb profile itself",
+        lambda f, c: _mutate(
+            f,
+            amp_exp=float(c["level_matched_exp"]),
+            floor_exp=float(c["level_matched_exp"]),
+            floor_static_rel=PRIOR_STATIC_REL,
         ),
     ),
 )
@@ -409,6 +439,9 @@ def run(
         supports={},
     )
     figures: dict[str, Any] = {}
+    # cross-support reference of the level-matched-exponent variant: the real
+    # cruise clip's own band level and speed
+    anchor: dict[str, float] = {}
     for support in study_supports(regimes):
         clip = RE.load_window(
             support.window,
@@ -490,6 +523,19 @@ def run(
                     row["arms"]["real"]["band_level_db_mic0"] - entry["band_level_db_mic0"]
                 )
                 entry["floor_match_shift_db"] = cache["floor_match_shift_db"]
+            if spec_arm.kind == "real":
+                speed = float(np.mean(f0_rotor) / RD.AMP_RPS_REF)
+                level = float(entry["band_level_db_mic0"])
+                if not anchor:
+                    anchor.update(speed=speed, level_db=level)
+                ratio = speed / float(anchor["speed"])
+                cache["level_matched_exp"] = (
+                    PRIOR_EXP
+                    if abs(np.log10(ratio)) < 0.02
+                    else float((level - float(anchor["level_db"])) / (10.0 * np.log10(ratio)))
+                )
+                row["level_matched_exp"] = cache["level_matched_exp"]
+                row["level_matched_anchor"] = dict(anchor)
             if probe_obj is not None and spec_arm.probe:
                 pit = probe_obj.tracker.pit(
                     audio,
@@ -588,6 +634,8 @@ def verdicts(payload: dict[str, Any]) -> dict[str, Any]:
                 v2_floor_exp0=arm(regime, "v2_floor_exp0", "pit_mae"),
                 v2_both_exp0=arm(regime, "v2_both_exp0", "pit_mae"),
                 v2_floor_matched=arm(regime, "v2_floor_matched", "pit_mae"),
+                v2_prior_exps=arm(regime, "v2_prior_exps", "pit_mae"),
+                v2_level_matched_exps=arm(regime, "v2_level_matched_exps", "pit_mae"),
             ),
             level_offset_db=dict(
                 legacy=arm(regime, "legacy", "ltas_level_offset_db"),
@@ -615,8 +663,8 @@ def verdicts(payload: dict[str, Any]) -> dict[str, Any]:
 
 # ── figures ─────────────────────────────────────────────────────────────────
 
-FIG_ARMS = ("real", "legacy", "v2", "v2_nocomb", "v2_floor_exp0", "v2_both_exp0")
-FIG_PANELS = ("real", "legacy", "v2", "v2_floor_exp0", "v2_both_exp0")
+FIG_ARMS = ("real", "legacy", "v2", "v2_nocomb", "v2_floor_exp0", "v2_prior_exps")
+FIG_PANELS = ("real", "legacy", "v2", "v2_floor_exp0", "v2_prior_exps")
 FIG_COLOURS = {
     "real": "#111111",
     "legacy": "#1f77b4",
@@ -626,6 +674,8 @@ FIG_COLOURS = {
     "v2_nocomb": "#bbbbbb",
     "v2_amp_exp0": "#9467bd",
     "v2_floor_matched": "#8c564b",
+    "v2_prior_exps": "#2ca02c",
+    "v2_level_matched_exps": "#17becf",
 }
 FIG_STYLE = {
     "real": ("-", 2.6),
@@ -634,6 +684,8 @@ FIG_STYLE = {
     "v2_nocomb": ("--", 1.2),
     "v2_floor_exp0": (":", 2.0),
     "v2_both_exp0": ("--", 1.8),
+    "v2_prior_exps": ("--", 2.0),
+    "v2_level_matched_exps": ("-.", 1.8),
 }
 
 
@@ -967,14 +1019,38 @@ PATCH_PROPOSAL: list[str] = [
     "legitimately), or fit one support per regime and render each regime from its own. No "
     "renderer or model change is needed for this one — it is the fit pool.",
     "",
-    "Expected effect, from the variants measured above: fixing the floor envelope alone "
-    "(`v2_floor_exp0`) removes the 34 dB / 17 dB standby / ramp level error and restores a visible "
-    "comb (k=2 comb-to-floor from 4.4 dB back to 13.5 dB at standby against a real 15.1 dB); "
-    "fixing both envelopes (`v2_both_exp0`) additionally puts the ramp level within 1.2 dB of real. "
-    "Neither variant is a FIT, so neither is a parity claim: the numbers below are what the same "
-    "fitted comb and floor do once their speed laws stop extrapolating.",
-    "",
 ]
+
+
+def patch_expectation(payload: dict[str, Any]) -> list[str]:
+    """The MEASURED effect of each proposed change, from this run's variants."""
+    out = [
+        "### Expected effect — measured, not guessed",
+        "",
+        "No variant below is a FIT, so none of them is a parity claim: each is the SAME fitted "
+        "comb and floor with one speed law stopped from extrapolating, scored by the same frozen "
+        "HPPNet on the same frozen support.",
+        "",
+        "| support | v2 as fitted | (a)+(b) both exponents at the prior mean `v2_prior_exps` "
+        "| the best a single global envelope can do `v2_level_matched_exps` | legacy (the bar) "
+        "| real |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for regime in ("standby", "ramp", "cruise"):
+        row = _by_regime(payload, regime)
+        if row is None:
+            continue
+
+        def pit(name: str, row: dict[str, Any] = row) -> str:
+            return _f(row["arms"].get(name, {}).get("pit_mae"))
+
+        out.append(
+            f"| {regime} | {pit('v2')} | {pit('v2_prior_exps')} "
+            f"| {pit('v2_level_matched_exps')} (exp "
+            f"{_f(row.get('level_matched_exp'), '.2f')}) | {pit('legacy')} | {pit('real')} |"
+        )
+    out.append("")
+    return out
 
 
 def findings(payload: dict[str, Any], *, job: str | None, figures: list[str]) -> str:
@@ -1068,6 +1144,7 @@ def findings(payload: dict[str, Any], *, job: str | None, figures: list[str]) ->
     out.append("")
     out.extend(hypothesis_section(payload))
     out.extend(PATCH_PROPOSAL)
+    out.extend(patch_expectation(payload))
     if figures:
         out.append("## Figures")
         out.append("")
