@@ -452,8 +452,8 @@ def run(
 ) -> dict[str, Any]:
     rs = _module("noise_v2_round_score")
     fit = json.loads(Path(fit_path).read_text())
-    if str(fit.get("schema")) != "noise-v2-fit/1":
-        die(f"{fit_path}: not a noise-v2-fit/1 payload")
+    if str(fit.get("schema")) not in RD.READABLE_SCHEMAS:
+        die(f"{fit_path}: schema {fit.get('schema')!r} is none of {list(RD.READABLE_SCHEMAS)}")
     probe_obj = rs.Probe.load() if probe else None
     legacy = rs.legacy_arm("michaels")
     payload: dict[str, Any] = dict(

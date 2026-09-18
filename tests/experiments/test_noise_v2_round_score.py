@@ -10,6 +10,7 @@ and an incomplete cohort is never a pass on either.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -92,3 +93,31 @@ def test_bars_without_a_probe_report_the_reason_and_fail() -> None:
     assert b["unavailable"] == "no probe run"
     assert b["dregon"] is None and b["michaels"] is None
     assert b["parity_pass"] is False and b["stretch_pass"] is False
+
+
+def _fit_json(path: Path, schema: str, support: str) -> None:
+    path.write_text(json.dumps(dict(schema=schema, support=support, params={})))
+
+
+def test_read_fits_takes_both_fit_schemas_and_prefers_the_current_one(tmp_path: Path) -> None:
+    # one support fitted under both parameterisations, in both filename orders:
+    # the round is scored on the CURRENT schema whichever way the glob sorts
+    _fit_json(tmp_path / "a_michaels_v2.json", "noise-v2-fit/2", "michaels_fly125_all")
+    _fit_json(tmp_path / "z_michaels_v1.json", "noise-v2-fit/1", "michaels_fly125_all")
+    _fit_json(tmp_path / "a_dregon_v1.json", "noise-v2-fit/1", "dregon_room2_floor")
+    _fit_json(tmp_path / "z_dregon_v2.json", "noise-v2-fit/2", "dregon_room2_floor")
+    _fit_json(tmp_path / "cruise.json", "noise-v2-fit/1", "michaels_fly125_cruise")
+    _fit_json(tmp_path / "alien.json", "some-other-record/1", "michaels_fly125_all")
+
+    fits = RS.read_fits(tmp_path)
+
+    assert set(fits) == {"michaels_fly125_all", "michaels_fly125_cruise", "dregon_room2_floor"}
+    assert fits["michaels_fly125_all"]["_path"].endswith("a_michaels_v2.json")
+    assert fits["dregon_room2_floor"]["_path"].endswith("z_dregon_v2.json")
+    assert fits["michaels_fly125_cruise"]["schema"] == "noise-v2-fit/1"
+
+
+def test_read_fits_rejects_a_directory_with_no_readable_fit(tmp_path: Path) -> None:
+    _fit_json(tmp_path / "alien.json", "some-other-record/1", "michaels_fly125_all")
+    with pytest.raises(SystemExit):
+        RS.read_fits(tmp_path)

@@ -37,3 +37,12 @@ FIT_SCHEMA = "noise-v2-fit/2"
 payloads by mapping their per-order OU onto an equivalent width, so old fits
 render and can be frozen into a new one.
 """
+
+READABLE_FIT_SCHEMAS: tuple[str, ...] = (FIT_SCHEMA, "noise-v2-fit/1")
+"""Every fit-JSON schema the readers of this campaign accept.
+
+This round's and R1/R2's: a ``/1`` payload's per-order OU is mapped onto an
+equivalent width by :func:`.model.gamma_from_params`, so the renderer, the
+regime study and the round score read both. One tuple so a new schema tag is
+accepted in one place instead of five.
+"""

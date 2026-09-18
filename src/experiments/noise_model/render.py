@@ -61,7 +61,7 @@ from experiments.stochastic_fit.revised_phase import (
 )
 from experiments.stochastic_fit.stage2 import antialias
 
-from . import FIT_SCHEMA
+from . import READABLE_FIT_SCHEMAS
 from . import model as MD
 from . import spectrum as SP
 
@@ -70,7 +70,7 @@ __all__ = ["expected_periodogram", "render_noise"]
 
 #: The fit schemas the renderer reads: its own, and R1/R2's, whose per-order
 #: OU :func:`.model.gamma_from_params` maps onto an equivalent width.
-READABLE_SCHEMAS = (FIT_SCHEMA, "noise-v2-fit/1")
+READABLE_SCHEMAS = READABLE_FIT_SCHEMAS
 
 
 def _check_schema(fit: dict[str, Any]) -> dict[str, Any]:

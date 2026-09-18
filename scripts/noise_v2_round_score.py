@@ -27,7 +27,8 @@ The measurement protocol is the previous campaign's, reproduced from the code
 that produced the recorded numbers; it is written down in
 ``experiments.noise_model.gates`` and not restated here. What this script owns:
 
-* **the arm.** ``--fits DIR`` reads the round's ``noise-v2-fit/1`` JSONs and
+* **the arm.** ``--fits DIR`` reads the round's noise-model fit JSONs (schema
+  ``noise-v2-fit/2``, and R1/R2's ``/1``) and
   renders through ``experiments.noise_model.render.render_noise``. Each rig's
   arm is ONE fit, selected by its ``support`` name: DREGON renders from
   ``dregon_room2_floor`` (the flight floor-only fit, whose comb block is the
@@ -73,6 +74,7 @@ from typing import Any
 
 import numpy as np
 
+from experiments.noise_model import READABLE_FIT_SCHEMAS
 from experiments.noise_model import gates as GT
 from experiments.stochastic_fit import revised_eval as RE
 from experiments.stochastic_fit import stage2 as S2
@@ -80,7 +82,12 @@ from experiments.stochastic_fit.data import Clip, periodogram
 
 OUT_DEFAULT = Path("results/noise_v2/rounds")
 ORACLE_JSON = Path("results/noise_v2/short_whittle/short_whittle.json")
-FIT_SCHEMA = "noise-v2-fit/1"
+#: The fit schemas an arm may be rendered from — the renderer's own pair
+#: (``experiments.noise_model.render.READABLE_SCHEMAS``): this round's ``/2``
+#: and R1/R2's ``/1``, whose per-order OU the renderer maps onto a width. The
+#: renderer is imported dynamically (see ``_v2_modules``), so the pair is taken
+#: from the package, which stays importable with no v2 renderer present.
+FIT_SCHEMAS: tuple[str, ...] = READABLE_FIT_SCHEMAS
 
 #: The fit each rig's arm is RENDERED from, by the ``"support"`` field of the
 #: fit JSON (R1Core's naming). The DREGON arm is the flight floor-only fit
@@ -339,22 +346,31 @@ def legacy_identity_params(arm: Arm, *, regime: str, recording: str) -> RE.Model
 
 
 def read_fits(fits_dir: Path) -> dict[str, dict[str, Any]]:
-    """Every ``noise-v2-fit/1`` JSON of a round, indexed by its ``support``."""
+    """Every readable fit JSON of a round, indexed by its ``support``.
+
+    Both schemas of :data:`FIT_SCHEMAS` are taken. Where one support carries a
+    fit under each, the CURRENT schema wins: a round that re-fitted a support
+    under the new parameterisation is scored on the new fit.
+    """
     files = sorted(Path(fits_dir).glob("*.json"))
     if not files:
         die(f"{fits_dir}: no fit JSON found — the round's fits must be committed before scoring")
     out: dict[str, dict[str, Any]] = {}
     for p in files:
         d = json.loads(p.read_text())
-        if str(d.get("schema")) != FIT_SCHEMA:
+        schema = str(d.get("schema"))
+        if schema not in FIT_SCHEMAS:
             continue
         support = str(d.get("support") or "")
         if not support:
-            die(f"{p}: a {FIT_SCHEMA} fit must name its support")
+            die(f"{p}: a {schema} fit must name its support")
+        prev = out.get(support)
+        if prev is not None and FIT_SCHEMAS.index(str(prev["schema"])) < FIT_SCHEMAS.index(schema):
+            continue
         d["_path"] = str(p)
         out[support] = d
     if not out:
-        die(f"{fits_dir}: no file carries schema {FIT_SCHEMA!r}")
+        die(f"{fits_dir}: no file carries any of the fit schemas {list(FIT_SCHEMAS)}")
     return out
 
 
@@ -385,8 +401,8 @@ def v2_arm(
     named = " or ".join(repr(name) for name in admissible)
     if fit_path is not None:
         fit = json.loads(Path(fit_path).read_text())
-        if str(fit.get("schema")) != FIT_SCHEMA:
-            die(f"{fit_path}: not a {FIT_SCHEMA} fit")
+        if str(fit.get("schema")) not in FIT_SCHEMAS:
+            die(f"{fit_path}: schema {fit.get('schema')!r} is none of {list(FIT_SCHEMAS)}")
         if str(fit.get("support")) not in admissible:
             die(
                 f"{fit_path}: carries support {fit.get('support')!r}, but the {rig} arm is "
@@ -1955,7 +1971,9 @@ def _fmt(value: Any, spec: str = ".6f") -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="score one noise-model-v2 round against the gates")
     ap.add_argument("--round", type=int, required=True)
-    ap.add_argument("--fits", type=Path, default=None, help="directory of noise-v2-fit/1 JSONs")
+    ap.add_argument(
+        "--fits", type=Path, default=None, help=f"directory of fit JSONs {list(FIT_SCHEMAS)}"
+    )
     ap.add_argument(
         "--legacy-export",
         choices=["baseline"],
