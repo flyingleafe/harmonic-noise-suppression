@@ -32,10 +32,11 @@ that produced the recorded numbers; it is written down in
   arm is ONE fit, selected by its ``support`` name: DREGON renders from
   ``dregon_room2_floor`` (the flight floor-only fit, whose comb block is the
   mean of the four ``bench_dregon_Motor{1-4}_70`` bench fits — read as well and
-  verified, not assumed), Michael's from ``michaels_fly125_cruise``, which
-  drives all three FLY124 regimes (standby and ramp are not fitted — approved
-  decision 3 — and are rendered on their own real carrier through the
-  renderer's trajectory sampler). ``--legacy-export baseline`` instead renders
+  verified, not assumed), Michael's from one of the FLY125 flight pools
+  (``michaels_fly125_all``, R2's pooled standby + ramp + cruise fit, or
+  ``michaels_fly125_cruise``, R1's cruise-only pool), which drives all three
+  FLY124 regimes through the renderer's trajectory sampler on each support's
+  own real carrier. ``--legacy-export baseline`` instead renders
   the OLD model — the legacy stage-2 exports the frozen evaluator selected per
   cohort/regime — so the whole pipeline can be smoke tested against the
   recorded current-best numbers (DREGON cruise synthetic PIT MAE
@@ -87,7 +88,14 @@ FIT_SCHEMA = "noise-v2-fit/1"
 #: those four are read too, purely to verify that mean.
 DREGON_FIT_SUPPORT = "dregon_room2_floor"
 DREGON_COMB_SUPPORTS: tuple[str, ...] = tuple(f"bench_dregon_Motor{i}_70" for i in (1, 2, 3, 4))
-MICHAELS_FIT_SUPPORT = "michaels_fly125_cruise"
+#: The Michael's arm is defined on a FLY125 flight pool, and there are two
+#: named pools: R2's ``michaels_fly125_all`` (8 cruise + 1 standby + 1 ramp
+#: window, so both speed exponents are fitted over a 4.68x speed span) and
+#: R1's cruise-only ``michaels_fly125_cruise`` (1.44x, both exponents
+#: extrapolated onto standby and ramp). Directory selection takes the FIRST
+#: of these that the fits directory carries; ``--fit michaels=PATH`` may name
+#: either.
+MICHAELS_FIT_SUPPORTS: tuple[str, ...] = ("michaels_fly125_all", "michaels_fly125_cruise")
 #: The comb parameters the DREGON arm carries over from the bench.
 COMB_PARAM_KEYS: tuple[str, ...] = (
     "sigma_nu",
@@ -363,39 +371,48 @@ def v2_arm(
     DREGON renders from the flight floor-only fit ``dregon_room2_floor``, whose
     comb block is the mean of the four ``bench_dregon_Motor{1-4}_70`` bench
     fits; those four are read as well and the mean is VERIFIED rather than
-    assumed. Michael's renders from ``michaels_fly125_cruise`` for all three
-    FLY124 regimes.
+    assumed. Michael's renders from a FLY125 flight pool — R2's pooled
+    ``michaels_fly125_all`` if the directory carries it, else R1's cruise-only
+    ``michaels_fly125_cruise`` — for all three FLY124 regimes.
 
     ``fit_path`` names ONE file instead, which is what a second candidate on
     the same support needs: a retry fit carries the same ``support`` name as
     the fit it retries, so selection by support name alone cannot tell the two
-    apart. The named file must still carry that rig's support.
+    apart. The named file must still carry one of that rig's supports.
     """
     fits = read_fits(fits_dir)
-    want = MICHAELS_FIT_SUPPORT if rig == "michaels" else DREGON_FIT_SUPPORT
+    admissible = MICHAELS_FIT_SUPPORTS if rig == "michaels" else (DREGON_FIT_SUPPORT,)
+    named = " or ".join(repr(name) for name in admissible)
     if fit_path is not None:
         fit = json.loads(Path(fit_path).read_text())
         if str(fit.get("schema")) != FIT_SCHEMA:
             die(f"{fit_path}: not a {FIT_SCHEMA} fit")
-        if str(fit.get("support")) != want:
+        if str(fit.get("support")) not in admissible:
             die(
                 f"{fit_path}: carries support {fit.get('support')!r}, but the {rig} arm is "
-                f"defined on {want!r}"
+                f"defined on {named}"
             )
+        want = str(fit.get("support"))
         fit["_path"] = str(fit_path)
-    elif want not in fits:
-        die(
-            f"{fits_dir}: no fit carries support {want!r} (found {sorted(fits)}); the {rig} arm "
-            "is not defined by any other file"
-        )
     else:
+        present = [name for name in admissible if name in fits]
+        if not present:
+            die(
+                f"{fits_dir}: no fit carries support {named} (found {sorted(fits)}); the {rig} "
+                "arm is not defined by any other file"
+            )
+        want = present[0]
         fit = fits[want]
     source: dict[str, Any] = dict(support=want, path=fit["_path"], kind=fit.get("kind"))
-    label = (
-        "v2 FLY125 cruise fit (drives FLY124 standby/ramp through the trajectory sampler)"
-        if rig == "michaels"
-        else "v2 DREGON room-2 floor fit with the bench comb (mean of Motor1-4 @70)"
-    )
+    if rig != "michaels":
+        label = "v2 DREGON room-2 floor fit with the bench comb (mean of Motor1-4 @70)"
+    elif want == "michaels_fly125_all":
+        label = (
+            "v2 FLY125 pooled fit (8 cruise + 1 standby + 1 ramp window; drives all three "
+            "FLY124 regimes through the trajectory sampler)"
+        )
+    else:
+        label = "v2 FLY125 cruise fit (drives FLY124 standby/ramp through the trajectory sampler)"
     if rig == "dregon":
         source["comb_mean_check"] = _comb_mean_check(fit, fits)
     return Arm(
