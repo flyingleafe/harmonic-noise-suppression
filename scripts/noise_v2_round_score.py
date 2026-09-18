@@ -1253,6 +1253,7 @@ def compose(
     arm_jobs: dict[str, str] | None = None,
     arm_notes: dict[str, str] | None = None,
     compare: Path | None = None,
+    not_run: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """The round record: one candidate row per scored arm, gates recombined.
 
@@ -1407,6 +1408,12 @@ def compose(
             payload["legacy_smoke"] = prev["legacy_smoke"]
     if compare is not None and Path(compare).is_file():
         payload["previous_round"] = _round_over_round(Path(compare), payload)
+    for rig, reason in (not_run or {}).items():
+        if rig not in PROXY_GROUP:
+            die(f"--not-run names {rig!r}, which is not a rig of this study")
+        if rig in primary:
+            die(f"--not-run names {rig!r}, but an arm of this round scored it")
+        payload.setdefault("not_run", {})[rig] = str(reason)
     payload["blocker"] = blocker or _auto_blocker(payload, primary)
     return payload
 
@@ -1694,17 +1701,19 @@ def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
     out.append("| rig | gate quantity | number | PARITY bar | parity | STRETCH bar | stretch |")
     out.append("|---|---|---:|---:|---|---:|---|")
     b = payload["bars"]
+    not_run = payload.get("not_run") or {}
     for rig in ("dregon", "michaels"):
         blk = b.get(rig)
+        absent = f"NOT RUN ({not_run[rig]})" if rig in not_run else "not run"
         if not blk:
             out.append(
-                f"| {rig} | — | not run | {_fmt(PARITY_BAR[rig])} | — | "
+                f"| {rig} | — | {absent} | {_fmt(PARITY_BAR[rig])} | — | "
                 f"{_fmt(STRETCH_BAR[rig])} | — |"
             )
             continue
         out.append(
             f"| {rig} | {blk['quantity']} | "
-            f"{'not run' if blk['mean_rev_s'] is None else _fmt(blk['mean_rev_s'])} | "
+            f"{absent if blk['mean_rev_s'] is None else _fmt(blk['mean_rev_s'])} | "
             f"{_fmt(blk['parity']['bar_rev_s'])} | {_verdict(blk['parity']['within'])} "
             f"(margin {_fmt(blk['parity']['margin_rev_s'], '+.6f')}) | "
             f"{_fmt(blk['stretch']['bar_rev_s'])} | {_verdict(blk['stretch']['within'])} "
@@ -1719,6 +1728,9 @@ def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
         f"{GT.DREGON_PIT_TARGET:.6f} = real + {GT.DREGON_GAP_FRACTION} x (baseline - real); "
         "Michael's frozen gate IS its parity bar."
     )
+    for rig, reason in not_run.items():
+        out.append("")
+        out.append(f"`{rig}`: NOT RUN ({reason}). Every {rig} cell of this record is a dash.")
     out.append("")
     rr = payload.get("previous_round")
     if rr:
@@ -2050,6 +2062,17 @@ def main(argv: list[str] | None = None) -> int:
             "round-over-round delta table beside this round's"
         ),
     )
+    ap.add_argument(
+        "--not-run",
+        action="append",
+        default=[],
+        metavar="RIG=REASON",
+        help=(
+            "with --compose: why that rig has no arm in this round (e.g. "
+            "michaels='fit in flight: <job>'); printed where its number would be, so an "
+            "absent rig is never a silent dash"
+        ),
+    )
     args = ap.parse_args(argv)
     tag = f"_{args.out_tag}" if args.out_tag else ""
     out_json = Path(args.out) / f"round{int(args.round)}{tag}.json"
@@ -2064,6 +2087,10 @@ def main(argv: list[str] | None = None) -> int:
             supports_index=args.supports_index,
             blocker=args.blocker,
             compare=args.compare,
+            not_run=dict(
+                str(spec).split("=", 1)
+                for spec in args.not_run  # type: ignore[misc]
+            ),
             arm_jobs=dict(
                 str(spec).split("=", 1)
                 for spec in args.arm_job  # type: ignore[misc]
