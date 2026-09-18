@@ -1,4 +1,4 @@
-# R2 Michael's score arm — attempt 1 FAILED (code gate), attempt 2 submitted
+# R2 Michael's score arm — attempt 1 FAILED (code gate), attempt 2 submitted and STILL QUEUED
 
 Written by `R2MichaelsHarvest`. Nothing in `arm_michaels_v2.json` exists yet;
 this note is the handover (job ids + exact commands) in case the harness dies
@@ -98,3 +98,39 @@ the DREGON arm's note).
 Bars: Michael's PARITY equal-regime ≤ 3.177994 rev/s (legacy per-regime
 0.317 standby / 8.007 ramp / 0.756 cruise), DREGON PARITY ≤ 2.187786, STRETCH
 ≤ 1.897063. Proxy `ltas_abs_db` ≤ 1.219668 dB Michael's, 1.978609 dB DREGON.
+
+## Status at handover: STILL UNPLACED after 3 h 34 min
+
+`R2MichaelsHarvest` polled `omnirun status nv2-r2-score-michaels2-78d01c`
+every ~20 s from 11:04Z to **14:39Z** — it never left `queued`. This is slot
+contention, not a job problem: `uni-gpushort` is held by another project
+(`kla-loglinear`: `ff-kl-256-k16-s2-l32e3-b46ca7` and
+`ff-kl-256-k64-s2-l32e3-2432c8`, both 5.1 h in) with **162 jobs queued**
+cluster-wide at 14:40Z. Each `omnirun status`/`ps` call retries placement, so
+polling IS the placement mechanism; attempt 1 got a slot after 63 min, this
+one has not.
+
+The work itself is 6 minutes: R1's equivalent arm
+(`nv2-r1-score-michaels-re-eafb5e`) ran 22:23:23Z → 22:29:30Z, exit 0, on the
+same backend with the same rig. `--time 45m` is therefore ample once placed —
+do NOT resubmit with a longer wall, and do NOT move it to `uni` (Main's
+standing instruction at 12:40Z: hold on `uni-gpushort`, user constraint).
+
+**So: nothing is lost by waiting.** The job is submitted at a SHA
+(`e6c06769`) that carries both the harvested fit and the arm-selection fix, it
+writes its arm to `round2/render/arm_michaels_v2.json`, and the harvest +
+compose recipe above is complete. Whoever picks this up: poll the job id, then
+run steps 1-3. If the job is eventually `failed` or `timeout`, read
+`omnirun logs nv2-r2-score-michaels2-78d01c` — the failure mode to expect is
+NOT the support-name gate (fixed and verified) but an upload/wall issue.
+
+If `arm_dregon_v2b.json` exists by compose time it is the PRIMARY DREGON arm
+and `arm_dregon_v2.json` follows it in the `--compose` list (R2FloorFix owns
+it; job `nv2-r2-score-dregon-v2b-41d97e`, note
+`round2/render/submit_note_v2b.md`, also unplaced as of 14:40Z).
+
+What IS already committed and needs nothing further: the fit
+(`michaels_fly125_all__flight.json`, `c089d978`), its findings
+(`round2/fits/findings_flight.md`, `855d923b`), the render-regime k = 2
+sanity (`round2/render_regime_flight/`, same commit), the scorer fix
+(`e6c06769`).
