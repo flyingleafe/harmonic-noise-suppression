@@ -10540,8 +10540,677 @@
     "wall_seconds": 2.052,
     "command": "scripts/noise_v2_supports.py build --set michaels-all --out results/noise_v2/rounds/round2/supports"
    }
+  },
+  "dregon-floor": {
+   "schema": "noise-v2-supports/1",
+   "set": "dregon-floor",
+   "n_specs": 10,
+   "n_built": 10,
+   "supports": [
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727397.205+4_motors_command",
+     "spec": "flight_dregon:free-flight_nosource_room2:1512727397.2050455:4.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "free-flight_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 122,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 4.0,
+     "segment": [
+      1512727397.2050455,
+      1512727401.2050455
+     ],
+     "carriers_rev_s": [
+      84.41831,
+      76.614871,
+      81.635053,
+      78.87329
+     ],
+     "carrier_min_rev_s": [
+      83.340306,
+      75.081706,
+      80.072958,
+      76.699113
+     ],
+     "carrier_max_rev_s": [
+      85.829699,
+      77.976677,
+      83.019451,
+      80.060216
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_free-flight_nosource_room2@1512727397.205+4_motors_command.npz",
+     "npz_bytes": 5043862
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command",
+     "spec": "flight_dregon:free-flight_nosource_room2:1512727403.2050455:8.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "free-flight_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      1512727403.2050455,
+      1512727411.2050455
+     ],
+     "carriers_rev_s": [
+      84.183189,
+      77.305957,
+      82.542859,
+      80.344602
+     ],
+     "carrier_min_rev_s": [
+      82.115114,
+      74.739127,
+      79.697978,
+      77.953387
+     ],
+     "carrier_max_rev_s": [
+      87.03399,
+      80.425878,
+      85.318154,
+      82.719018
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command.npz",
+     "npz_bytes": 10173862
+    },
+    {
+     "name": "flight_dregon_hovering_nosource_room2@1511903905.394+4_motors_command",
+     "spec": "flight_dregon:hovering_nosource_room2:1511903905.3944898:4.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "hovering_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 122,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 4.0,
+     "segment": [
+      1511903905.3944898,
+      1511903909.3944898
+     ],
+     "carriers_rev_s": [
+      85.0849,
+      76.98386,
+      82.088004,
+      79.27052
+     ],
+     "carrier_min_rev_s": [
+      81.935571,
+      74.960219,
+      80.325775,
+      77.136897
+     ],
+     "carrier_max_rev_s": [
+      86.978524,
+      83.500346,
+      84.72815,
+      84.396985
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_hovering_nosource_room2@1511903905.394+4_motors_command.npz",
+     "npz_bytes": 5043826
+    },
+    {
+     "name": "flight_dregon_hovering_nosource_room2@1511903911.394+8_motors_command",
+     "spec": "flight_dregon:hovering_nosource_room2:1511903911.3944898:8.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "hovering_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      1511903911.3944898,
+      1511903919.3944898
+     ],
+     "carriers_rev_s": [
+      84.854508,
+      76.140097,
+      81.905107,
+      79.096297
+     ],
+     "carrier_min_rev_s": [
+      82.688136,
+      74.357347,
+      79.663631,
+      76.993072
+     ],
+     "carrier_max_rev_s": [
+      86.430277,
+      78.070024,
+      84.619883,
+      81.819121
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_hovering_nosource_room2@1511903911.394+8_motors_command.npz",
+     "npz_bytes": 10173826
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905725.953+4_motors_command",
+     "spec": "flight_dregon:rectangle_nosource_room2:1511905725.952559:4.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "rectangle_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 122,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 4.0,
+     "segment": [
+      1511905725.952559,
+      1511905729.952559
+     ],
+     "carriers_rev_s": [
+      84.276551,
+      76.712489,
+      82.023814,
+      79.77137
+     ],
+     "carrier_min_rev_s": [
+      69.894897,
+      69.052334,
+      69.894616,
+      69.894761
+     ],
+     "carrier_max_rev_s": [
+      90.004332,
+      89.807043,
+      89.809572,
+      89.840361
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_rectangle_nosource_room2@1511905725.953+4_motors_command.npz",
+     "npz_bytes": 5043826
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command",
+     "spec": "flight_dregon:rectangle_nosource_room2:1511905731.952559:8.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "rectangle_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      1511905731.952559,
+      1511905739.952559
+     ],
+     "carriers_rev_s": [
+      85.765929,
+      76.359685,
+      82.727471,
+      79.738908
+     ],
+     "carrier_min_rev_s": [
+      80.29076,
+      74.556915,
+      80.130487,
+      76.870503
+     ],
+     "carrier_max_rev_s": [
+      88.299694,
+      79.148732,
+      85.814882,
+      82.831475
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command.npz",
+     "npz_bytes": 10173826
+    },
+    {
+     "name": "flight_dregon_spinning_nosource_room2@1511905200.978+4_motors_command",
+     "spec": "flight_dregon:spinning_nosource_room2:1511905200.978012:4.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "spinning_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 122,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 4.0,
+     "segment": [
+      1511905200.978012,
+      1511905204.978012
+     ],
+     "carriers_rev_s": [
+      84.780916,
+      76.393494,
+      82.437784,
+      79.619583
+     ],
+     "carrier_min_rev_s": [
+      72.328729,
+      72.000158,
+      72.20792,
+      72.309891
+     ],
+     "carrier_max_rev_s": [
+      87.09749,
+      82.129743,
+      84.719513,
+      84.366997
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_spinning_nosource_room2@1511905200.978+4_motors_command.npz",
+     "npz_bytes": 5043814
+    },
+    {
+     "name": "flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command",
+     "spec": "flight_dregon:spinning_nosource_room2:1511905206.978012:8.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "spinning_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      1511905206.978012,
+      1511905214.978012
+     ],
+     "carriers_rev_s": [
+      83.338191,
+      78.45801,
+      81.598133,
+      81.59336
+     ],
+     "carrier_min_rev_s": [
+      79.761749,
+      75.026692,
+      77.264145,
+      78.309812
+     ],
+     "carrier_max_rev_s": [
+      87.112464,
+      81.281078,
+      84.540484,
+      84.60545
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command.npz",
+     "npz_bytes": 10173814
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903578.348+4_motors_command",
+     "spec": "flight_dregon:updown_nosource_room2:1511903578.348311:4.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "updown_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 122,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 4.0,
+     "segment": [
+      1511903578.348311,
+      1511903582.348311
+     ],
+     "carriers_rev_s": [
+      82.941068,
+      75.728556,
+      81.027888,
+      78.059711
+     ],
+     "carrier_min_rev_s": [
+      67.616781,
+      67.065417,
+      67.517191,
+      67.395917
+     ],
+     "carrier_max_rev_s": [
+      85.613109,
+      79.061119,
+      84.840065,
+      80.332081
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_updown_nosource_room2@1511903578.348+4_motors_command.npz",
+     "npz_bytes": 5043790
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command",
+     "spec": "flight_dregon:updown_nosource_room2:1511903584.348311:8.0:motors_command",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_dregon",
+     "recording_id": "updown_nosource_room2",
+     "dataset": "DREGON-frames",
+     "rps_key": "motors_command",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      1511903584.348311,
+      1511903592.348311
+     ],
+     "carriers_rev_s": [
+      84.314811,
+      76.688208,
+      81.514045,
+      79.685927
+     ],
+     "carrier_min_rev_s": [
+      70.820497,
+      61.606675,
+      69.755637,
+      67.031027
+     ],
+     "carrier_max_rev_s": [
+      89.030946,
+      84.370275,
+      88.203238,
+      85.302285
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command.npz",
+     "npz_bytes": 10173790
+    }
+   ],
+   "failures": [],
+   "rule": {
+    "sr": 16000,
+    "obs_n_fft": 2048,
+    "obs_hop": 512,
+    "bench_order_range": [
+     60,
+     80
+    ],
+    "bench_demod_band_hz": 1.5,
+    "bench_residual_smooth_s": 2.0,
+    "bench_residual_tol_hz": 1.0,
+    "bench_min_segment_s": 4.0,
+    "bench_edge_s": 2.0
+   },
+   "provenance": {
+    "git_head": "fca85d9ca2984ce6b1c8f514e8f08201bd4ec096",
+    "timestamp": "2026-09-18T11:41:51+0100",
+    "wall_seconds": 0.898,
+    "command": "scripts/noise_v2_supports.py build --set dregon-floor --out results/noise_v2/rounds/round2/supports"
+   }
   }
  },
- "n_supports": 166,
- "updated": "2026-09-18T02:25:27+0100"
+ "n_supports": 176,
+ "updated": "2026-09-18T11:41:51+0100"
 }

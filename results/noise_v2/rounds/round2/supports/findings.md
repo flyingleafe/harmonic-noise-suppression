@@ -19,8 +19,8 @@ which silence satisfies perfectly, and put 12 of the 21 DREGON bench windows
 `line_margin_db` and `carrier_recording_rev_s` in `index.json` are the new
 per-recording evidence.
 
-Sets present: bench-points, dregon-bench, michaels-all. 
-Total supports cached: 166.
+Sets present: bench-points, dregon-bench, dregon-floor, michaels-all. 
+Total supports cached: 176.
 
 ## bench-points
 
@@ -206,6 +206,24 @@ Carrier refinement (survey speed -> demodulated line): |shift| up to 0.0806 rev/
 | `bench_dregon_Motor4_90` | FAIL | 5.44-17.08 | 11.640 | 11.64 | 1.23 | 1.93 | [64] | 89.1400 | 89.1724 | +0.0324 | +0.0501 | 0.176 | 8 | 93121 |
 | `bench_dregon_allMotors_70` | PASS | 3.85-38.25 | 34.400 | 34.40 | 1.15 | 3.78, 3.72, 3.78, 6.12 | [67, 64, 63, 63] | 64.6471, 67.6588, 68.7396, 69.5655 | 64.6363, 67.6596, 68.7364, 69.5652 | -0.0108, +0.0008, -0.0032, -0.0003 | -0.0033, -0.0022, -0.0015, -0.0066 | 0.276, 0.242, 0.249, 0.232 | 8 | 275201 |
 
+## dregon-floor
+
+10 of 10 specs built (0.9 s, git `fca85d9ca298`).
+
+
+| support | recording | start (s) | dur (s) | label | mics | frames | rotors | carrier mean (rev/s) | carrier span (rev/s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `flight_dregon_free-flight_nosource_room2@1512727397.205+4_motors_command` | free-flight_nosource_room2 | 1512727397.205 | 4.000 | `motors_command` | 8 | 122 | 4 | 84.42, 76.61, 81.64, 78.87 | 75.08-85.83 |
+| `flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command` | free-flight_nosource_room2 | 1512727403.205 | 8.000 | `motors_command` | 8 | 247 | 4 | 84.18, 77.31, 82.54, 80.34 | 74.74-87.03 |
+| `flight_dregon_hovering_nosource_room2@1511903905.394+4_motors_command` | hovering_nosource_room2 | 1511903905.394 | 4.000 | `motors_command` | 8 | 122 | 4 | 85.08, 76.98, 82.09, 79.27 | 74.96-86.98 |
+| `flight_dregon_hovering_nosource_room2@1511903911.394+8_motors_command` | hovering_nosource_room2 | 1511903911.394 | 8.000 | `motors_command` | 8 | 247 | 4 | 84.85, 76.14, 81.91, 79.10 | 74.36-86.43 |
+| `flight_dregon_rectangle_nosource_room2@1511905725.953+4_motors_command` | rectangle_nosource_room2 | 1511905725.953 | 4.000 | `motors_command` | 8 | 122 | 4 | 84.28, 76.71, 82.02, 79.77 | 69.05-90.00 |
+| `flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command` | rectangle_nosource_room2 | 1511905731.953 | 8.000 | `motors_command` | 8 | 247 | 4 | 85.77, 76.36, 82.73, 79.74 | 74.56-88.30 |
+| `flight_dregon_spinning_nosource_room2@1511905200.978+4_motors_command` | spinning_nosource_room2 | 1511905200.978 | 4.000 | `motors_command` | 8 | 122 | 4 | 84.78, 76.39, 82.44, 79.62 | 72.00-87.10 |
+| `flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command` | spinning_nosource_room2 | 1511905206.978 | 8.000 | `motors_command` | 8 | 247 | 4 | 83.34, 78.46, 81.60, 81.59 | 75.03-87.11 |
+| `flight_dregon_updown_nosource_room2@1511903578.348+4_motors_command` | updown_nosource_room2 | 1511903578.348 | 4.000 | `motors_command` | 8 | 122 | 4 | 82.94, 75.73, 81.03, 78.06 | 67.07-85.61 |
+| `flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command` | updown_nosource_room2 | 1511903584.348 | 8.000 | `motors_command` | 8 | 247 | 4 | 84.31, 76.69, 81.51, 79.69 | 61.61-89.03 |
+
 ## michaels-all
 
 10 of 10 specs built (2.1 s, git `fa0c49932719`).
@@ -228,6 +246,7 @@ Carrier refinement (survey speed -> demodulated line): |shift| up to 0.0806 rev/
 
 * `bench-points`: 1749.6 MB of `.npz` (power as float32)
 * `dregon-bench`: 132.6 MB of `.npz` (power as float32)
+* `dregon-floor`: 76.1 MB of `.npz` (power as float32)
 * `michaels-all`: 101.7 MB of `.npz` (power as float32)
 
 The `.npz` caches are NOT committed (`results/**` is gitignored and they are hundreds of MB); `index.json` and this file are. Every row carries its `spec`, so a consumer rebuilds one support with `supports.load_support(<spec>)` and a whole set with
