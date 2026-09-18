@@ -520,8 +520,9 @@ def test_bench_map_recovers_planted_dynamics_at_the_frozen_carrier():
     )
 
 
-def test_floor_only_mode_freezes_the_comb():
-    """``--floor-only`` must create no comb site and leave the comb untouched."""
+def test_floor_only_mode_freezes_the_combs_shape_and_frees_only_its_level():
+    """``--floor-only`` must create no PER-ORDER comb site: the comb's shape and
+    dynamics arrive frozen and the only comb freedom is one shared level."""
     k_cap, n_mics = 6, 2
     n_fft, hop, n_frames = 512, 256, 4
     n = n_fft + (n_frames - 1) * hop
@@ -560,9 +561,79 @@ def test_floor_only_mode_freezes_the_comb():
         ),
     )
     got = MD.params_to_dict(out.params)
-    assert got["profile"]["profile_db"] == MD.params_to_dict(par)["profile"]["profile_db"]
+    # the recorded comb is the frozen one shifted by the ONE free scalar, so
+    # every order moved by the same amount: no per-order comb site exists
+    planted = np.asarray(MD.params_to_dict(par)["profile"]["profile_db"], dtype=np.float64)
+    assert out.comb_gain_db is not None
+    shift = np.asarray(got["profile"]["profile_db"], dtype=np.float64) - planted
+    assert np.abs(shift - out.comb_gain_db).max() < 1e-12
     assert got["sigma_nu"] == pytest.approx(float(par.sigma_nu), rel=1e-12)
     assert got["floor"]["floor_mean_db"] != pytest.approx(float(par.floor.mean_db), rel=1e-6)
+
+
+def test_floor_only_fit_recovers_the_level_of_a_transplanted_comb():
+    """A frozen comb handed over 20 dB below the truth must be re-levelled.
+
+    This is the DREGON transplant in miniature: the comb is frozen from another
+    rig, ``render_noise`` mean-centres both mic-gain blocks so ``profile_db`` is
+    the only absolute comb scale there is, and without a free level the fit
+    renders a comb 20 dB under the one the data carries
+    (``results/noise_v2/rounds/round2/render_dregon/findings.md``).
+    """
+    planted_offset_db = 20.0
+    k_cap, n_mics = 6, 2
+    n_fft, hop, n_frames = 512, 256, 8
+    n = n_fft + (n_frames - 1) * hop
+    rps = np.full((1, n), 180.0)
+    grid = SP.flight_grid(sr=SR, n_fft=n_fft, hop=hop)
+    par = _params(
+        n_rotors=1,
+        n_mics=n_mics,
+        k_cap=k_cap,
+        profile_db=np.linspace(-16.0, -24.0, k_cap)[None, :],
+        amp_exp=2.0,
+        floor_exp=2.0,
+        static_rel=0.01,
+    )
+    starts = np.arange(n_frames) * hop
+    with torch.no_grad():
+        truth = SP.flight_model(
+            grid, par, rate_work=SP.flight_rate_work(grid, rps, starts), k_max=k_cap
+        ).numpy()
+    obs = truth * np.random.default_rng(17).standard_exponential(truth.shape)
+    batch = MD.flight_batch(
+        name="transplant",
+        members=[("w0", obs, rps, starts)],
+        sr=SR,
+        n_fft=n_fft,
+        hop=hop,
+        k_cap=k_cap,
+    )
+    frozen = MD.frozen_from_params(MD.params_to_dict(par))
+    frozen["profile_db"] = (
+        np.asarray(frozen["profile_db"], dtype=np.float64) - planted_offset_db
+    ).tolist()
+    out = FT.fit_support(
+        batch,
+        mode="flight_floor_only",
+        frozen=frozen,
+        optim=FT.OptimSpec(
+            adam_steps=60, adam_lr=0.05, adam_batch=None, lbfgs_iters=40, lbfgs_frames=None
+        ),
+    )
+    assert out.comb_gain_db == pytest.approx(planted_offset_db, abs=1.0)
+    # and the re-levelled comb IS the truth's comb again, to the same tolerance
+    got = np.asarray(MD.params_to_dict(out.params)["profile"]["profile_db"], dtype=np.float64)
+    assert np.abs(got - np.asarray(MD.params_to_dict(par)["profile"]["profile_db"])).max() < 1.0
+    # and the recorded initialisation is the INITIALISATION: AutoDelta adopts
+    # the tensors it is initialised from and updates them in place, so a fit
+    # that hands it the init dict itself reports every fit as one that never
+    # moved (this is what made the R2 DREGON floor fit look frozen at its seed)
+    init = FT.initial_values(batch, mode="flight_floor_only", frozen=frozen)
+    assert out.diagnostics["init_comb_gain_db"] == pytest.approx(
+        float(init["comb_gain_db"]), rel=1e-12
+    )
+    assert out.diagnostics["init_comb_gain_db"] != pytest.approx(out.comb_gain_db, rel=1e-9)
 
 
 def test_pinned_dynamics_coordinates_are_held_and_the_rest_is_still_fitted():

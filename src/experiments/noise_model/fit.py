@@ -131,6 +131,11 @@ class FitOutcome:
     objective: dict[str, Any]
     optimiser: dict[str, Any]
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    #: the fitted ``comb_gain_db`` when the mode frees it (``flight_floor_only``
+    #: does), ``None`` otherwise. It is NOT a field of
+    #: :class:`~experiments.noise_model.spectrum.V2Params`: the model folds it
+    #: into ``profile_db``, so it has to be carried here to be recorded.
+    comb_gain_db: float | None = None
 
     @property
     def converged(self) -> bool:
@@ -187,7 +192,7 @@ def initial_values(
         carrier = batch.carrier_mean
         assert carrier is not None
 
-    # TWO probe forward passes in the model's OWN units — window response, lag
+    # Probe forward passes in the model's OWN units — window response, lag
     # law, floor colour and transfer all included — so the seeds below are
     # offsets in dB against the model and not against a hand-derived formula:
     # ``quiet`` is the floor alone (every order at -300 dB) and ``unit`` adds a
@@ -200,6 +205,14 @@ def initial_values(
         unit = MD.forward(batch, _with_profile(seed_params, 0.0))
         lines_unit = (unit - quiet).clamp_min(1e-30).mean(dim=(0, 1)).cpu().numpy()
         floor_unit = quiet.mean(dim=(0, 1)).cpu().numpy()
+        # a THIRD pass when the transplanted comb's own level is free: the comb
+        # at its FROZEN profile, so the seed below measures how far that comb
+        # sits from the observed line excess instead of guessing
+        lines_frozen = (
+            (MD.forward(batch, seed_params) - quiet).clamp_min(1e-30).mean(dim=(0, 1)).cpu().numpy()
+            if "comb_gain" in free
+            else None
+        )
 
     floor_offset_db = 0.0
 
@@ -219,38 +232,67 @@ def initial_values(
         floor_lin = np.maximum(floor_unit, 1e-30) * 10.0 ** (floor_offset_db / 10.0)
         excess = np.maximum(obs_mean - floor_lin, 1e-12)
         prof = np.full((batch.n_rotors, batch.k_max), priors.profile_db[0], dtype=np.float64)
-        if carrier is not None:
-            lo_r = hi_r = np.atleast_1d(np.asarray(carrier.cpu(), dtype=np.float64))
-        else:
-            assert batch.rate_work is not None
-            rw = batch.rate_work.detach()
-            lo_r = rw.amin(dim=(1, 2)).cpu().numpy()
-            hi_r = rw.amax(dim=(1, 2)).cpu().numpy()
-        df = float(batch.grid.freqs_hz[1] - batch.grid.freqs_hz[0])
-        f_top = float(batch.grid.freqs_hz[band].max())
-        for r in range(int(lo_r.size)):
-            for k in range(1, batch.k_max + 1):
-                f_lo, f_hi = k * float(lo_r[r]), k * float(hi_r[r])
-                if f_hi < SP.BAND_F_MIN or f_lo > f_top:
-                    continue
-                # the window spans where the line went over the batch, plus the
-                # window's own main lobe: a moving carrier smears the
-                # frame-mean peak across k * (f_max - f_min)
-                j0 = max(0, int(math.floor(f_lo / df)) - 3)
-                j1 = min(excess.size, int(math.ceil(f_hi / df)) + 4)
-                num = float(np.max(excess[j0:j1]))
-                den = float(np.max(lines_unit[j0:j1]))
-                if den > 0.0 and num > 0.0:
-                    prof[r, k - 1] = float(np.clip(10.0 * math.log10(num / den), -120.0, 40.0))
+        for r, k, j0, j1 in _line_windows(batch, band=band, carrier=carrier):
+            num = float(np.max(excess[j0:j1]))
+            den = float(np.max(lines_unit[j0:j1]))
+            if den > 0.0 and num > 0.0:
+                prof[r, k - 1] = float(np.clip(10.0 * math.log10(num / den), -120.0, 40.0))
         out["profile_db"] = t(prof)
         if batch.mode == "flight":
             out["amp_exp"] = t(priors.amp_exp[0])
+
+    if "comb_gain" in free:
+        assert lines_frozen is not None
+        floor_lin = np.maximum(floor_unit, 1e-30) * 10.0 ** (floor_offset_db / 10.0)
+        excess = np.maximum(obs_mean - floor_lin, 1e-12)
+        shifts: list[float] = []
+        for _r, _k, j0, j1 in _line_windows(batch, band=band, carrier=carrier):
+            num = float(np.max(excess[j0:j1]))
+            den = float(np.max(lines_frozen[j0:j1]))
+            if den > 0.0 and num > 0.0:
+                shifts.append(10.0 * math.log10(num / den))
+        # the MEDIAN over the lines: one order whose window catches a tonal the
+        # frozen comb never had must not set the level of the whole comb. Held
+        # inside the prior's 3 sd, which is where a seed stops being a seed.
+        wide = 3.0 * priors.comb_gain_db[1]
+        out["comb_gain_db"] = t(float(np.clip(np.median(shifts), -wide, wide)) if shifts else 0.0)
 
     if "mic" in free:
         p = batch.power.detach().cpu().numpy()
         per_mic_db = 10.0 * np.log10(np.maximum(p[:, :, band].mean(axis=(1, 2)), 1e-30))
         out["gain_all_db"] = t(per_mic_db - per_mic_db.mean())
         out["mic_line_gain_db"] = torch.zeros(batch.n_mics, batch.n_rotors, dtype=torch.float64)
+    return out
+
+
+def _line_windows(
+    batch: MD.SupportBatch, *, band: np.ndarray, carrier: Tensor | None
+) -> list[tuple[int, int, int, int]]:
+    """``(rotor, order, j0, j1)`` per comb line: the bins that line covers.
+
+    The window spans where the line went over the batch, plus the analysis
+    window's own main lobe: a moving carrier smears the frame-mean peak across
+    ``k * (f_max - f_min)``. Lines wholly outside the fitted band are dropped.
+    """
+    if carrier is not None:
+        lo_r = hi_r = np.atleast_1d(np.asarray(carrier.cpu(), dtype=np.float64))
+    else:
+        assert batch.rate_work is not None
+        rw = batch.rate_work.detach()
+        lo_r = rw.amin(dim=(1, 2)).cpu().numpy()
+        hi_r = rw.amax(dim=(1, 2)).cpu().numpy()
+    df = float(batch.grid.freqs_hz[1] - batch.grid.freqs_hz[0])
+    f_top = float(batch.grid.freqs_hz[band].max())
+    n_bins = int(np.asarray(batch.grid.freqs_hz).size)
+    out: list[tuple[int, int, int, int]] = []
+    for r in range(int(lo_r.size)):
+        for k in range(1, batch.k_max + 1):
+            f_lo, f_hi = k * float(lo_r[r]), k * float(hi_r[r])
+            if f_hi < SP.BAND_F_MIN or f_lo > f_top:
+                continue
+            j0 = max(0, int(math.floor(f_lo / df)) - 3)
+            j1 = min(n_bins, int(math.ceil(f_hi / df)) + 4)
+            out.append((r, k, j0, j1))
     return out
 
 
@@ -265,7 +307,7 @@ def _seed_params(
 ) -> SP.V2Params:
     """A concrete parameter set at the priors' centres (no Pyro site involved).
 
-    Used ONLY by :func:`initial_values` for its two probe forward passes; a
+    Used ONLY by :func:`initial_values` for its probe forward passes; a
     frozen block uses its frozen value so a ``--floor-only`` seed is measured
     against the real comb rather than against a prior-mean one, and a PINNED
     dynamics coordinate uses its pinned value so the profile/floor seeds are
@@ -427,7 +469,15 @@ def fit_support(
 
         return fn
 
-    guide = AutoDelta(model_for(full), init_loc_fn=init_to_value(values=init))
+    # CLONE into the guide. ``AutoDelta`` keeps the very tensors ``init_to_value``
+    # hands it as its own (unconstrained) parameters and then updates them IN
+    # PLACE, so passing ``init`` itself would make the recorded
+    # ``diagnostics.init_*`` read the FITTED value and report every fit as one
+    # that never left its initialisation.
+    guide = AutoDelta(
+        model_for(full),
+        init_loc_fn=init_to_value(values={k: v.detach().clone() for k, v in init.items()}),
+    )
     elbo = Trace_ELBO()
 
     rng = np.random.default_rng(int(optim.seed))
@@ -530,6 +580,7 @@ def fit_support(
         objective = MD.objective_breakdown(full, m_model)
     return FitOutcome(
         params=fitted,
+        comb_gain_db=(float(med["comb_gain_db"]) if "comb_gain_db" in med else None),
         objective=objective,
         optimiser=dict(
             **optim.as_dict(),
@@ -559,6 +610,7 @@ def fit_support(
             adam_loss_head=adam_losses[:5],
             adam_loss_tail=adam_losses[-5:],
             init_floor_mean_db=float(init["floor_mean_db"]) if "floor_mean_db" in init else None,
+            init_comb_gain_db=float(init["comb_gain_db"]) if "comb_gain_db" in init else None,
         ),
     )
 
@@ -579,6 +631,12 @@ def write_fit(
 ) -> Path:
     """Write the ``noise-v2-fit/1`` JSON and return its path."""
     p = MD.params_to_dict(outcome.params)
+    if outcome.comb_gain_db is not None:
+        # the level the transplanted comb was re-levelled BY. ``profile_db``
+        # above already carries it (the model folds it in), so a reader must
+        # NEVER apply it again: it is recorded so the shift is auditable
+        # against the bench profile the fit froze.
+        p["profile"]["comb_gain_db"] = outcome.comb_gain_db
     k = np.arange(1, int(np.asarray(p["profile"]["profile_db"]).shape[1]) + 1)
     payload: dict[str, Any] = dict(
         schema=FIT_SCHEMA,
@@ -620,6 +678,14 @@ def write_fit(
     )
     if extra:
         payload.update(extra)
+    if outcome.comb_gain_db is not None:
+        payload["frozen_from"] = dict(
+            payload.get("frozen_from") or {},
+            comb_gain_db=outcome.comb_gain_db,
+            comb_gain_rule="one free scalar re-levels the whole frozen comb; "
+            "params.profile.profile_db ALREADY includes it and must not be shifted again",
+            comb_gain_prior=list(priors.comb_gain_db),
+        )
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=1))

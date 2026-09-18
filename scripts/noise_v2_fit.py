@@ -152,6 +152,7 @@ def worker(unit: Unit) -> dict[str, Any]:
         lam_eps_even=d["lam_eps_even"],
         lam_eps_odd=d["lam_eps_odd"],
         carrier_rev_s=d["carrier_rev_s"],
+        comb_gain_db=outcome.comb_gain_db,
         n_rotors=batch.n_rotors,
         k_max=batch.k_max,
     )
@@ -789,7 +790,12 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument(
                 "--name", required=True, help="pooled fit name, e.g. michaels_fly125_cruise"
             )
-            p.add_argument("--floor-only", action="store_true")
+            p.add_argument(
+                "--floor-only",
+                action="store_true",
+                help="freeze the comb's shape and dynamics from --frozen-mean and fit the "
+                "floor, the mic gains and ONE shared comb level (comb_gain_db)",
+            )
             p.add_argument(
                 "--frozen-mean",
                 nargs="*",

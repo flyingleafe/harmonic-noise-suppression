@@ -84,9 +84,11 @@ __all__ = [
 #: risk; above it the comb does, and the comb band is the decisive one.
 BAND_SPLIT_HZ = 300.0
 
-#: Every fitted block. ``--floor-only`` frees ``{"floor", "mic"}`` and freezes
-#: the rest from a bench fit; a full flight fit frees everything but
-#: ``"carrier"`` (the label IS the carrier in flight).
+#: Every fitted block. ``--floor-only`` frees ``{"floor", "mic", "comb_gain"}``
+#: and freezes the rest from a bench fit; a full flight fit frees everything but
+#: ``"carrier"`` (the label IS the carrier in flight). ``"comb_gain"`` is not a
+#: block of the export: it is the ONE scalar a frozen comb still needs (see
+#: :func:`free_blocks`) and it is folded into ``profile_db``.
 BLOCKS = ("dynamics", "profile", "floor", "mic", "carrier")
 
 #: The four dynamics SITES. ``sigma_eps`` and ``lam_eps`` are one ``(2,)``
@@ -108,6 +110,15 @@ class Priors:
     floor_mean_db: tuple[float, float] = (-70.0, 40.0)
     floor_tilt_db_oct: tuple[float, float] = (0.0, 10.0)
     amp_exp: tuple[float, float] = (2.0, 2.0)
+    #: Rig-to-rig level offset of a TRANSPLANTED comb, in dB, and the only
+    #: absolute comb scale a frozen-comb flight fit has left: ``render_noise``
+    #: mean-centres ``mic_line_gain_db`` over mics per rotor and
+    #: ``mic_gains_db`` over mics, so ``profile_db`` alone carries the comb's
+    #: level and it arrives frozen at the BENCH rig's. Zero-mean (no offset is
+    #: the null) and wide: the measured bench → DREGON-flight swing is 31.7 dB
+    #: (``results/noise_v2/rounds/round2/render_dregon/findings.md``), which
+    #: this prior must not fight.
+    comb_gain_db: tuple[float, float] = (0.0, 20.0)
     #: LOG space: the floor's speed exponent is POSITIVE by construction. A
     #: rotor floor cannot get louder as the rotors slow, and on a pool that
     #: barely varies in speed a Normal prior let it go to -10.19, which put the
@@ -136,6 +147,7 @@ class Priors:
             "floor_mean_db": list(self.floor_mean_db),
             "floor_tilt_db_oct": list(self.floor_tilt_db_oct),
             "amp_exp": list(self.amp_exp),
+            "comb_gain_db": list(self.comb_gain_db),
             "log_floor_exp": list(self.log_floor_exp),
             "log_floor_static": list(self.log_floor_static),
             "mic_line_gain_db_sd": self.mic_line_gain_db,
@@ -160,7 +172,12 @@ def free_blocks(mode: str) -> tuple[str, ...]:
     if mode == "flight":
         return ("dynamics", "profile", "floor", "mic")
     if mode == "flight_floor_only":
-        return ("floor", "mic")
+        # the comb arrives FROZEN from a bench rig, so its absolute level is
+        # that rig's, and nothing downstream can re-level it: render_noise
+        # mean-centres mic_line_gain_db over mics per rotor and mic_gains_db
+        # over mics, which leaves profile_db as the ONLY absolute comb scale.
+        # One shared scalar, no more — the comb's SHAPE stays frozen.
+        return ("floor", "mic", "comb_gain")
     # the ATTRIBUTION mode of the four-motor validation: a transfer gap that it
     # closes is a gap in that block alone
     if mode == "bench_dynamics_only":
@@ -549,9 +566,11 @@ def sample_params(
     """Sample (or read frozen) every parameter of one support's forward model.
 
     A frozen block creates NO Pyro site, so ``AutoDelta`` never allocates a
-    guide parameter for it: ``--floor-only`` really holds the comb fixed rather
-    than fitting it under a tight prior. ``pin`` does the same for INDIVIDUAL
-    dynamics coordinates of an otherwise free dynamics block
+    guide parameter for it: ``--floor-only`` really holds the comb's SHAPE and
+    dynamics fixed rather than fitting them under a tight prior — its only comb
+    freedom is the single ``comb_gain_db`` scalar of the ``"comb_gain"`` block,
+    which re-levels the transplanted comb as a whole. ``pin`` does the same for
+    INDIVIDUAL dynamics coordinates of an otherwise free dynamics block
     (:func:`dynamics_pin`, :func:`_dyn_site`) — the identified-ridge
     reparameterisation R1 uses when a rate is not identifiable from the data.
     """
@@ -589,6 +608,12 @@ def sample_params(
     else:
         profile_db = take("profile", "profile_db", (r, k))
         amp_exp = take("profile", "amp_exp") if flight else zero
+
+    if "comb_gain" in free:
+        # ONE shared scalar, folded into profile_db right here, so write_fit,
+        # params_to_dict, render_noise and expected_periodogram need no change
+        # at all: the comb they read is already at its fitted level
+        profile_db = profile_db + _normal(site, "comb_gain_db", *priors.comb_gain_db)
 
     if "floor" in free:
         floor = FloorParams(
