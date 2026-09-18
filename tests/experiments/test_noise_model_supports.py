@@ -121,19 +121,25 @@ class TestLineMargin:
         assert abs(short - long) < 1.0
         assert min(short, long) > S.BENCH_LINE_MARGIN_DB
 
-    def test_a_pure_noise_order_scores_near_zero_at_any_length(self):
-        """No length-dependent bias on noise either. The margin locates the
-        line by its largest bin in a +-4 Hz search before integrating, so pure
-        noise scores a few dB rather than exactly 0 and the brightest of 21
-        orders can reach ~5 dB; the TYPICAL order must stay under the rule."""
+    def test_the_noise_percentile_calibrates_the_margin_threshold(self):
+        """BENCH_LINE_MARGIN_DB must stay above a pure-noise order's 97.5th
+        percentile on the window lengths the rule actually produces (11.6-34.4 s
+        = 6-17 blocks). The percentile is length-dependent even though the
+        statistic's expectation is not: at the 4 s minimum there are two blocks
+        and the +-4 Hz location search over ~13 bins inflates it."""
         sr, base = 16000.0, 68.0
-        noise = np.random.default_rng(12).standard_normal(int(30 * sr))[None, :]
-        medians = []
+        pct = {}
         for seconds in (4, 30):
-            m = S.line_margins(noise[:, : int(seconds * sr)], sr, base)
-            medians.append(float(np.median(list(m.values()))))
-            assert medians[-1] < S.BENCH_LINE_MARGIN_DB
-        assert abs(medians[0] - medians[1]) < 1.5
+            vals: list[float] = []
+            for seed in range(12):
+                x = np.random.default_rng(100 + seed).standard_normal(int(seconds * sr))
+                vals += list(S.line_margins(x[None, :], sr, base).values())
+            v = np.asarray(vals)
+            pct[seconds] = float(np.percentile(v, 97.5))
+        assert pct[30] == pytest.approx(1.59, abs=0.2)
+        assert pct[30] <= S.BENCH_LINE_MARGIN_DB
+        # the 4 s regime needs a higher threshold and is recorded as such
+        assert pct[4] > S.BENCH_LINE_MARGIN_DB
 
 
 class TestBenchStationarityRule:

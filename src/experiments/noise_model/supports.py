@@ -129,12 +129,19 @@ BENCH_ORDER_RANGE = (60, 80)
 BENCH_ORDER_TOL_HZ = 4.0
 #: The floor annulus the order's peak is measured against, in Hz from the line.
 BENCH_MARGIN_BAND_HZ = (6.0, 18.0)
-#: How far the order's peak must clear that floor for the order to carry a LINE
-#: at all. Measured over the 21 DREGON bench recordings: 3.4-12.1 dB, so every
-#: recording clears 3 dB and a recording with no usable line at any order in
-#: 60-80 fails the rule outright instead of having its residual read from
-#: filtered noise.
-BENCH_LINE_MARGIN_DB = 3.0
+#: How far the order's line must clear the floor 6-18 Hz away, as a BAND-POWER
+#: ratio (:func:`line_margins`), for the order to carry a line at all.
+#: Recalibrated for the band-power statistic: a pure-noise order scores a
+#: median 0.56 dB with a 0.51 dB spread on the windows that exist (11.6-34.4 s,
+#: i.e. 6-17 two-second blocks), and its 97.5th percentile over 252 noise
+#: orders is 1.59 dB, so 2 dB is the 2-sigma line. The old 3.0 dB was
+#: calibrated on the peak-BIN statistic, which reads several dB higher for the
+#: same line. NOTE the noise percentile is LENGTH-dependent even though the
+#: statistic's expectation is not: at the rule's 4 s minimum there are only two
+#: blocks and the 97.5th percentile is 5.20 dB, so a minimum-length fallback
+#: window would need a 5.5 dB threshold to be 2 sigma. None of the 21 DREGON
+#: windows is one.
+BENCH_LINE_MARGIN_DB = 2.0
 #: Half-width of the band the line's POWER is integrated over when the margin
 #: is measured. 1 Hz covers 3x the 0.16-0.33 Hz smoothed jitter and the
 #: measured high-order decoherence width, and makes the margin independent of
