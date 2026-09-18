@@ -1,4 +1,4 @@
-# R2 DREGON render diagnosis — the frozen-scorer job
+# R2 DREGON render diagnosis — the frozen-scorer job (LANDED and harvested)
 
 Written by `DregonRender`. The numbers in `findings.md` and `render_dregon.json`
 already exist: the frozen HPPNet ran on this LAPTOP's CPU (~5 s per arm, 20 arms
@@ -38,13 +38,33 @@ cd .worktrees/submit-DregonRender && COLUMNS=200 omnirun submit \
 No `--figures`: the four committed PNGs are the laptop pass's and are identical
 by construction (same seed, same renders).
 
-## What the harvest step must do
+## The harvest — done
 
-1. `set -a; . ./.env; set +a; aws s3 sync --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" s3://omnirun-artifacts/<job>/outputs/results/ results/` into a scratch tree, NOT over the committed record.
-2. Compare the cluster `render_dregon.json` arm-by-arm against the committed one
-   (`pit_mae`, `band_level_db_mic0`). They must agree; the renders are
-   deterministic in `--seed 2001` and neither the renderer nor the tracker has
-   a nondeterministic path on this input.
-3. If they agree, the committed record stands as is and the only edit is this
-   note (job id + agreement). If they do NOT agree, the CLUSTER number wins and
-   the committed record is replaced by the cluster's.
+The job **succeeded** at 2026-09-18T09:01:24Z (3 min 54 s wall, exit 0). Synced
+with
+
+```
+set -a; . ./.env; set +a; aws s3 sync --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+  s3://omnirun-artifacts/nv2-r2-dregon-render-0aa14f/outputs/results/ /tmp/dregon_cluster/
+```
+
+into a scratch tree, then compared arm by arm against the laptop pass. The two
+agree: worst `pit_mae` difference over the 20 arms **0.00433 rev/s**
+(`hovering/v2_comb_bench_ratio`, the loudest arm; every other arm is under
+1e-3), worst `band_level_db_mic0` difference **1.3e-7 dB**. The cluster's
+`protocol.scorer.sha256` is `6e50e025ba…`, the frozen digest.
+
+The committed record is now the MERGE: the diagnostics and the four PNGs come
+from the laptop pass, and every `pit_mae` / `pit_per_mic` / `pit_per_rotor` /
+`n_scored_frames` in `render_dregon.json` is the CLUSTER's, copied by
+`--merge-probe` (which re-verified the 0.01 dB band-level gate on every shared
+arm before copying and would have aborted otherwise):
+
+```
+PYTHONPATH=src python scripts/noise_v2_render_dregon.py --figures \
+  --job nv2-r2-dregon-render-0aa14f \
+  --merge-probe /tmp/dregon_cluster/noise_v2/rounds/round2/render_dregon/render_dregon.json \
+  --out results/noise_v2/rounds/round2/render_dregon
+```
+
+So every HPPNet number in `findings.md` is a `uni-gpushort` number.
