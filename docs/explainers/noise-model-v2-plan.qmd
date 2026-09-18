@@ -1456,6 +1456,176 @@ what the training sampler draws rigs from.
 - separate `(σ_ε, λ_ε)` per order beyond the parity split;
 - order-dependent `λ`.
 
+# Model R3: shaft OU plus a free Lorentzian width per line {#model-r3}
+
+::: {.callout-important}
+## Proposed after rounds 1–2 (2026-09-18)
+
+Two rounds of fitting the model above showed it is over-parametrised in
+exactly one place. The flight window (128 ms of lag) identifies `σ_ν` and the
+**product** `σ_ε²λ_ε` and nothing else of the dynamics
+(`results/noise_v2/rounds/round1/basin/findings.md`: profiled objective flat
+to 0.03 nats/cell over three decades of `λ`, 0.02 over three decades of
+`λ_ε`; the even-order term absent, `σ_ε,even = 0.0016`). The bench identifies
+`λ` on one converged control and lets it span `10³–10⁵` across restarts on
+the rest (`round2/fits/findings.md`). The bench structure functions read as
+"shaft only" at `k = 2, 4` and "shaft plus a random walk" at `k ≥ 16`, with
+no `k^p` law joining them (`results/noise_v2/decoherence/findings.md`). The
+path term was never fitted and has no evidence. R3 therefore keeps the shaft
+OU, replaces the per-order OU by **one free Lorentzian width per rotor and
+order**, and deletes the rest. Nothing in the harmonic structure, the floor,
+the microphone gains, the window or the likelihood changes.
+:::
+
+## Generation
+
+Rig with rotors `r = 1..R`, orders `k = 1..K_r` (`K_r` the highest order below
+the analysis Nyquist), microphones `m = 1..M`. The carrier `f_r(t)` (rev/s) is
+**given**: the window-refined constant on the bench, the telemetry label in
+flight. The microphone signal is
+
+$$x_m(t)=\sum_{r=1}^{R}\sum_{k=1}^{K_r} A_{mrk}(t)\cos\phi_{mrk}(t)\;+\;n_m(t),$$
+
+with the phase of line `(r,k)` at microphone `m`
+
+$$\phi_{mrk}(t)=2\pi k\!\int_0^t f_r(s)\,ds\;+\;k\,\theta_r(t)\;+\;\psi_{rk}(t)\;+\;\alpha_{mrk}.$$
+
+**Shaft** (one per rotor, shared by all its orders and all microphones): an
+OU speed error `ν_r` (rad/s) integrated into an angle error `θ_r` (rad),
+
+$$d\nu_r=-\lambda\,\nu_r\,dt+\sqrt{2\lambda}\,\sigma_\nu\,dW^{(\nu)}_r,\qquad d\theta_r=\nu_r\,dt,$$
+
+started stationary, `ν_r ~ N(0, σ_ν²)`. Its increment variance is
+
+$$V_\theta(\tau)=2\sigma_\nu^2\left[\frac{|\tau|}{\lambda}-\frac{1-e^{-\lambda|\tau|}}{\lambda^2}\right].$$
+
+**Per-line width** (one per rotor and order, independent across `(r,k)`,
+shared across microphones): a Wiener phase
+
+$$d\psi_{rk}=\sqrt{4\pi\gamma_{rk}}\;dW_{rk},\qquad
+\operatorname{Var}[\psi_{rk}(t+\tau)-\psi_{rk}(t)]=4\pi\gamma_{rk}|\tau|,$$
+
+so `E e^{iΔψ} = e^{−2πγ_rk|τ|}` and the line is a Lorentzian of half-width at
+half-maximum `γ_rk` in Hz. There is no law across `k`: `γ_rk` is a free
+non-negative number per line. A line at the resolution limit of its window
+has `γ_rk ≈ 1/(2T)`; the shaft term alone is the "no per-order noise" case.
+
+**Amplitude and level.** With `P_rk = 10^{p_rk/10}` the fitted line power of
+order `k` of rotor `r` (`p_rk` in dB, the profile),
+
+$$A_{mrk}(t)=\sqrt{2P_{rk}}\;\Bigl(\tfrac{f_r(t)}{f_{\mathrm{ref}}}\Bigr)^{a/2}\;10^{(g_{mr}-\bar g_{\cdot r})/20}\;10^{(G_m-\bar G)/20}\,,$$
+
+`a` the comb's speed exponent (flight only; `a = 0` on the bench, where the
+speed is one constant absorbed by `p_rk`), `g_mr` the per-microphone line
+gain of rotor `r` (mean-pinned over microphones, so it carries no absolute
+level), `G_m` the per-microphone overall gain (mean-pinned). In a
+frozen-comb flight fit one extra scalar `c` (dB) is added to every `p_rk`:
+the level of a transplanted comb. `α_mrk` is a fixed uniform phase per
+`(m,r,k)`, so components add in power.
+
+**Floor.** White noise per microphone shaped by the square root of
+
+$$S_m(f,t)=10^{h_m/10}\;
+\Bigl[\tfrac1R\!\sum_r\!\Bigl(\tfrac{f_r(t)}{f_{\mathrm{ref}}}\Bigr)^{b}+s\Bigr]\;
+10^{\left(\mu_F+\sum_{j=1}^{14}B_j(f)\,\sigma_B\,(Lz)_j+t_F\log_2(f/f_{t})\right)/10},$$
+
+`μ_F` the floor level (dB), `z` the 14 standard-normal control-point
+coordinates of a GP-interpolated spectral shape (`L` its Cholesky factor,
+`B_j` the interpolation basis on a log-frequency grid, `σ_B` the fixed shape
+scale), `t_F` a tilt in dB/octave about `f_t`, `b` the floor's speed exponent
+and `s` its static fraction (flight only; both absent on the bench), `h_m` the
+per-microphone floor gain.
+
+**Transfer.** Everything is synthesised on a 64 kHz work grid, anti-aliased
+and decimated to 16 kHz; the fit sees the same chain as a fixed power
+transfer `H(f)`.
+
+## Likelihood
+
+A **support** is a set of frames `i` of one recording. Bench: one frame, the
+whole stationary window (`T = 12–34 s`, one periodogram, bins `1/T`). Flight:
+periodic-Hann frames, `N = 2048`, hop 512 at 16 kHz (`T = 128 ms`), pooled
+over windows. The observation is the periodogram
+
+$$I_{mif}=\frac{\bigl|\sum_n w_n\,x_m(t_{i,n})\,e^{-2\pi i f n/\mathrm{sr}}\bigr|^2}{\sum_n w_n^2}$$
+
+on the band `30 Hz ≤ f ≤ min(7900, 0.45·sr)` Hz. Its expectation under the
+model is, with `w_acf(τ)` the window's autocorrelation,
+
+$$M_{mif}(\Theta)=H(f)\,10^{(G_m-\bar G)/10}\Bigl[\sum_r 10^{(g_{mr}-\bar g_{\cdot r})/10}\,M^{\mathrm{line}}_{rif}+10^{h_m/10}\,M^{\mathrm{floor}}_{if}\Bigr],$$
+
+$$M^{\mathrm{line}}_{rif}=\frac{1}{\sum_n w_n^2}\sum_{|\tau|<T} w_{\mathrm{acf}}(\tau)\sum_k P_{rk}\Bigl(\tfrac{\bar f_{ri}}{f_{\mathrm{ref}}}\Bigr)^{a} R_{rk}(\tau)\cos\!\bigl(2\pi k \bar f_{ri}\tau\bigr)\,e^{-2\pi i f\tau},$$
+
+$$R_{rk}(\tau)=\exp\!\Bigl[-\tfrac{k^2}{2}V_\theta(\tau)-2\pi\gamma_{rk}|\tau|\Bigr],$$
+
+where on the bench `f̄_ri = f_r` and in flight the atom follows the label's
+trajectory inside the frame (a chirped atom, as in C4), and `M^floor` is the
+windowed transform of the floor autocovariance with the frame's speed
+envelope. Lines and floor are independent, so their expected periodograms
+add. The fit objective is the composite Whittle risk with a MAP prior,
+
+$$\mathcal L(\Theta)=\sum_i w_i\sum_{m}\sum_{f\in\mathrm{band}}\Bigl[\frac{I_{mif}}{M_{mif}(\Theta)}+\log M_{mif}(\Theta)\Bigr]\;-\;\log p(\Theta),$$
+
+`w_i` the exposure weights of the frozen convention (1 on the bench; in
+flight they normalise overlapping frames per unique second). Below 300 Hz the
+floor dominates the risk, above it the comb; the comb band is the decisive
+one. This objective and the periodogram convention are those of R1–R2 — the
+change is only `R_rk`.
+
+## Parameters, with their priors
+
+Symbols as in the formulas; code names as in `noise-v2-fit/1`. LN(m, s):
+log-normal with median `m` and log-sd `s`; N(μ, σ): normal.
+
+::: {.column-page}
+
+| symbol | code name | shape | fitted on | R3 prior | why (R1–R2 evidence) |
+|---|---|---|---|---|---|
+| `σ_ν` (rad/s) | `sigma_nu` | per rotor | bench; flight | bench LN(0.3, 0.7); flight LN(0.3, 0.5) | bench fits 0.16–1.0; flight ran to 5–8 because it was the only width at `k = 1–2` (7.8 Hz bins). With `γ_rk` carrying width, `σ_ν` should sit near the telemetry residual; if it still wants > 2 rad/s that is a model error to report, not a prior to loosen |
+| `λ` (s⁻¹) | `lam` | per rotor | bench only | LN(2, 1.0); flight **pinned** to the bench value (DREGON) or 0.5 (Michael's) | unidentified by 128 ms lags; on the bench the converged control gave 14.6 while the long-lag study (`k = 2` still growing at 2 s) says ≲ 0.5 — R3 bench fits with free `γ_rk` decide it, then it is frozen |
+| `γ_rk` (Hz) | `gamma_hz` | per rotor × order | bench; flight (Michael's) | LN(`1/(2T)`, 2.0): bench 0.015–0.04 Hz, flight ≈ 4 Hz; `γ ≥ 0` | centre = "unresolved"; 2 log-sd = ×7, so a visible line is free (2σ reaches 50× the resolution) and a line under the floor stays at the resolution instead of wandering. Initialised from each line's measured −3 dB width |
+| `p_rk` (dB) | `profile_db` | per rotor × order | bench; flight (Michael's) | line SNR ≥ 2 dB: N(measured, 10); below: N(`μ_F` − 15, 8) | data-driven init lands within 0.4–1.5 dB (`round1/bench_diag/findings.md`); invisible orders parked at the old N(−45, 40) mean formed a 400 Hz pedestal above the floor (R1 `Motor1_70`, `k ≥ 105`) |
+| `c` (dB) | `comb_gain_db` | scalar | frozen-comb flight fit (DREGON) | N(0, 20) | the only absolute comb scale of a transplanted comb (`round2/render_dregon/findings.md`); R2 DREGON gave −3.2 |
+| `a` | `amp_exp` | scalar | pooled flight | N(2, 1); **pinned at 2** when the pool's speed span `max/min < 1.5` | cruise-only pool gave 10.0 (4 sd) and a 70 dB standby error; the pooled 4.7× span gave 3.9 |
+| `b` | `floor_exp` | scalar | pooled flight | LN(2, 0.5); same span pin | R2 DREGON (span < 1.5×) gave 38.8 (4.2 log-sd) |
+| `s` | `floor_static_rel` | scalar | pooled flight | LN(2.5e-3, 1.0); same span pin | R2 DREGON gave 17 (4.4 sd); Michael's 2e-3 |
+| `μ_F` (dB) | `floor_mean_db` | scalar | all | N(measured band median, 10) | tracks the data within 1 dB; the old sd 40 had no reason |
+| `z` | `floor_shape_z` | 14 | all | N(0, 1) each | behaves (±9 on some points) |
+| `t_F` (dB/oct) | `floor_tilt_db_oct` | scalar | all | N(0, 5) | −6.2 DREGON, +0.3 Michael's |
+| `g_mr` (dB) | `mic_line_gain_db` | mic × rotor, mean-pinned | all | N(0, 6) | ±1–6 dB in every fit |
+| `h_m` (dB) | `mic_floor_db` | mic | all | N(0, 6) | same |
+| `G_m` (dB) | `gain_all_db` | mic, mean-pinned | all | N(0, 6) | same |
+| `f_r` | `carrier_rev_s` | per rotor | **none** | — | frozen at the window-refined value (R2); the R1 carrier site walked 3.8σ onto an 89 Hz interferer |
+| `σ_ε, λ_ε` (even/odd), `p` | — | — | — | **removed** | product identified, split flat, even term absent; replaced by `γ_rk` |
+| `σ_p, λ_p` (path) | — | — | — | **removed** | never fitted, no evidence |
+
+: R3 parameters. Dynamics per rotor: `2 + K_r` (was 6 shared). Each `γ_rk` is a local one-line problem; the old `(σ_ε, λ_ε)` pair was a global ridge.
+
+:::
+
+## Fit blocks per mode
+
+| mode | free | frozen / pinned |
+|---|---|---|
+| bench (one recording, one or four rotors) | `σ_ν, λ, γ_rk, p_rk, μ_F, z, t_F, g_mr, h_m, G_m` | `f_r`; `a = b = s = 0` |
+| flight, full pool (Michael's) | `σ_ν, γ_rk, p_rk, a, b, s, μ_F, z, t_F, g_mr, h_m, G_m` | `f_r(t)`; `λ = 0.5`; `a, b, s` pinned at their prior medians if the pool spans < 1.5× in speed |
+| flight, frozen comb (DREGON) | `σ_ν, c, b, s, μ_F, z, t_F, g_mr, h_m, G_m` | `f_r(t)`; `γ_rk, p_rk` from the four bench fits; `λ` from the bench; `b, s` pinned on the cruise-only pool |
+
+## Identification, and the check that goes with it
+
+Low orders: `γ_rk` returns the resolution floor, the line shape is the shaft's
+alone (a core of width `∝ kσ_ν` in the frozen-rate regime), and that is what
+pins `σ_ν` and, on 30 s windows, `λ`. High orders: whatever exceeds the `k²`
+shaft prediction is `γ_rk`. The two are separated by the `k²` scaling across
+orders and by line shape within a line. One degeneracy is possible and is
+tested after every bench fit rather than assumed away: in the Brownian limit
+of the shaft (`λ|τ| ≫ 1`) its term is also Lorentzian, `∝ k²σ_ν²/λ`, and a
+free `γ_rk ∝ k²` could absorb it. **Pass**: the fitted `γ_rk` at `k ≤ 4` sits
+at the resolution floor. **Fail**: it ramps as `k²` — then the shaft has been
+absorbed and `λ` takes the long-lag pin. The renderer draws `ψ_rk` as a
+random walk per line with the fitted `γ_rk`, so a fit that passes this check
+renders exactly the lag law it was fitted with.
+
 # Pyro implementation plan
 
 Package `src/experiments/noise_model/` (sandbox), on torch and pyro.
@@ -1520,7 +1690,7 @@ The cap is **5 rounds**. Backends are `uni-cpu` and `uni-gpushort`.
 |---|---|---|
 | R1 | Pyro model; bench fits (DREGON per rotor plus the 135 survey bench points); four-motor validation; the decoherence lag extension to 1-5 s; Michael's FLY125 cruise fit; the DREGON floor fit; an HPPNet probe | parity test passes; bench parameters and the per-order form reported; the four-motor tolerance frozen; gates scored; round record written |
 | R2 | Shaft prior, and the refinements Michael's cruise fit needs | frozen gates |
-| R3 | Hierarchy over rigs including the bench points; population posterior for sampling | gates, plus posterior predictive on a held-out bench point |
+| R3 | Model R3 ([section](#model-r3)): shaft OU plus a free Lorentzian width per line, measured priors, speed-span pins; bench refits, Michael's pooled refit, DREGON frozen-comb refit with the label-registration check on the five score windows | frozen gates; the low-order `γ_rk` check passes on every bench fit |
 | R4 | Fix the one named failure of R1-R3 — one complexity per failure | gates |
 | R5 | Simplify the passing incumbent; publish the fits; wire the engine | gates unchanged |
 
