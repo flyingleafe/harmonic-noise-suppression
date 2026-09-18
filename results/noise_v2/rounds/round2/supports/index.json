@@ -269,7 +269,7 @@
      "rotor_ids": [
       "Motor1"
      ],
-     "stationary_pass": false,
+     "stationary_pass": true,
      "residual_std_hz": [
       0.134026
      ],
@@ -549,7 +549,7 @@
      "rotor_ids": [
       "Motor2"
      ],
-     "stationary_pass": false,
+     "stationary_pass": true,
      "residual_std_hz": [
       0.142771
      ],
@@ -969,7 +969,7 @@
      "rotor_ids": [
       "Motor3"
      ],
-     "stationary_pass": false,
+     "stationary_pass": true,
      "residual_std_hz": [
       0.15704
      ],
@@ -1039,7 +1039,7 @@
      "rotor_ids": [
       "Motor3"
      ],
-     "stationary_pass": false,
+     "stationary_pass": true,
      "residual_std_hz": [
       0.133033
      ],
@@ -1319,7 +1319,7 @@
      "rotor_ids": [
       "Motor4"
      ],
-     "stationary_pass": false,
+     "stationary_pass": true,
      "residual_std_hz": [
       0.135731
      ],
@@ -9874,5 +9874,7 @@
   }
  },
  "n_supports": 156,
- "updated": "2026-09-18T01:20:18+0100"
+ "updated": "2026-09-18T01:20:18+0100",
+ "margin_threshold_db": 2.0,
+ "pass_flags_recomputed": "BENCH_LINE_MARGIN_DB 3.0 -> 2.0 (band-power recalibration); margins unchanged"
 }
