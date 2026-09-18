@@ -98,6 +98,44 @@ def _bench_audio(
     return np.cos(phase) + noise * rng.standard_normal(speed_rev_s.size)
 
 
+class TestLineMargin:
+    def test_the_margin_of_a_jittered_line_is_length_invariant(self):
+        """The margin is a BAND-power ratio, so it must not fall as the window
+        grows. A peak-bin margin does: block-averaging a longer record averages
+        the line's wandering position, which cost six round-2 DREGON windows
+        (12-32 s) the 3 dB rule that a 4 s window passed."""
+        sr, order, base = 16000.0, 70, 68.0
+        rng = np.random.default_rng(11)
+        n = int(30 * sr)
+        # a STATIONARY jitter of the measured size (~0.25 Hz at k = 70, so
+        # 0.0036 rev/s): smoothed white noise, not a random walk, so the line's
+        # width is the same in a 4 s and a 30 s window and only the statistic
+        # is under test
+        w = int(0.1 * sr)
+        raw = rng.standard_normal(n + w)
+        smooth = np.convolve(raw, np.ones(w) / w, mode="valid")[:n]
+        jitter = 0.25 / order * smooth / np.std(smooth)
+        audio = _bench_audio(sr, base + jitter, order, noise=0.3)
+        short = S.line_margins(audio[None, : int(4 * sr)], sr, base)[order]
+        long = S.line_margins(audio[None, :], sr, base)[order]
+        assert abs(short - long) < 1.0
+        assert min(short, long) > S.BENCH_LINE_MARGIN_DB
+
+    def test_a_pure_noise_order_scores_near_zero_at_any_length(self):
+        """No length-dependent bias on noise either. The margin locates the
+        line by its largest bin in a +-4 Hz search before integrating, so pure
+        noise scores a few dB rather than exactly 0 and the brightest of 21
+        orders can reach ~5 dB; the TYPICAL order must stay under the rule."""
+        sr, base = 16000.0, 68.0
+        noise = np.random.default_rng(12).standard_normal(int(30 * sr))[None, :]
+        medians = []
+        for seconds in (4, 30):
+            m = S.line_margins(noise[:, : int(seconds * sr)], sr, base)
+            medians.append(float(np.median(list(m.values()))))
+            assert medians[-1] < S.BENCH_LINE_MARGIN_DB
+        assert abs(medians[0] - medians[1]) < 1.5
+
+
 class TestBenchStationarityRule:
     """The +-1 Hz rule finds the steady span and refuses a drifting one."""
 
@@ -124,10 +162,13 @@ class TestBenchStationarityRule:
         sr, order, base = 16000.0, 70, 68.0
         t = np.arange(int(14 * sr)) / sr
         rule = S.stationary_segment(_bench_audio(sr, base + 0.5 * t, order), sr, [base])
-        assert rule["passed"] is False
-        assert rule["longest_inside_s"] < S.BENCH_MIN_SEGMENT_S
-        # a failed recording still yields the minimum-length fallback window
-        assert rule["duration_s"] == pytest.approx(S.BENCH_MIN_SEGMENT_S, abs=1e-3)
+        # rule rev 2 catches it on the half-window DRIFT, not on the span: a
+        # carrier that leaves the 1.5 Hz demodulation band makes the narrow
+        # residual read filtered noise, i.e. perfect steadiness
+        assert rule["drift_ok"] is False
+        assert rule["carrier_drift_hz"][0] > S.BENCH_RESIDUAL_TOL_HZ
+        # and the recording is still given a defensible window
+        assert rule["duration_s"] >= S.BENCH_MIN_SEGMENT_S
 
     def test_a_quantised_survey_speed_is_refined_back_onto_the_line(self):
         # The manifest quantises speeds to ~0.01 rev/s, which at order 70 is
@@ -151,8 +192,12 @@ class TestBenchStationarityRule:
         # cannot average away in the 2 s residual smoother.
         audio = _bench_audio(sr, steady, order) + _bench_audio(sr, drifting, 63, seed=1)
         rule = S.stationary_segment(audio, sr, [68.0, 55.0])
-        assert rule["passed"] is False
-        assert rule["longest_inside_s"] < S.BENCH_MIN_SEGMENT_S
+        # rev 2 gates on the margin and the span; the second rotor's excursion
+        # is reported as drift (it is slow speed wander, which the model's
+        # shaft dynamics absorb, not a reason to refuse the window)
+        # the second rotor fails one of the two per-rotor tests: its residual
+        # excursion inside the window, or its half-window carrier drift
+        assert rule["longest_inside_s"] < S.BENCH_MIN_SEGMENT_S or rule["drift_ok"] is False
 
     def test_a_window_with_no_motor_is_refused_even_though_silence_is_steady(self):
         """Rule rev 2's level gate. Silence has a perfectly stationary

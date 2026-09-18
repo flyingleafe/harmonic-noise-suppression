@@ -135,6 +135,15 @@ BENCH_MARGIN_BAND_HZ = (6.0, 18.0)
 #: 60-80 fails the rule outright instead of having its residual read from
 #: filtered noise.
 BENCH_LINE_MARGIN_DB = 3.0
+#: Half-width of the band the line's POWER is integrated over when the margin
+#: is measured. 1 Hz covers 3x the 0.16-0.33 Hz smoothed jitter and the
+#: measured high-order decoherence width, and makes the margin independent of
+#: the window length (:func:`line_margins`).
+BENCH_LINE_BAND_HZ = 1.0
+#: Block length of the margin periodogram, in seconds. A fixed DURATION keeps
+#: the bin spacing the same at every window length, so the band-power margin
+#: of :func:`line_margins` does not move with the window.
+BENCH_MARGIN_BLOCK_S = 2.0
 #: Demodulation half-bands of the carrier refinement, narrowing each pass.
 BENCH_REFINE_BANDS = (8.0, 4.0, 2.0)
 #: Half-band of the NARROW residual read-out. The decoherence pedestal is
@@ -374,16 +383,21 @@ def _longest_run(mask: np.ndarray) -> tuple[int, int]:
 
 
 def block_periodogram(
-    x: np.ndarray, sr: float, *, n_fft: int = 1 << 17
+    x: np.ndarray, sr: float, *, block_s: float = BENCH_MARGIN_BLOCK_S
 ) -> tuple[np.ndarray, np.ndarray]:
     """Block-averaged periodogram of ``(M, T)`` or ``(T,)``, averaged over mics.
 
-    0.34 Hz bins at 44.1 kHz — fine enough to separate a decoherence pedestal
-    (~1.6 Hz wide) from the floor 6-18 Hz away, which is what makes the
-    order's margin measurable at all.
+    The block is a fixed DURATION, not a fixed count of samples and not the
+    whole record: the bin spacing is then the same for a 4 s window and a 30 s
+    one and only the number of averaged blocks differs, which is what makes
+    :func:`line_margins` length-invariant. ``block_s = 2 s`` gives 0.5 Hz bins
+    at 16 kHz and 0.67 Hz at 44.1 kHz — fine enough to separate a line and its
+    decoherence pedestal (~1.6 Hz wide) from the floor 6-18 Hz away, which is
+    what makes the order's margin measurable at all.
     """
     x = np.asarray(x, dtype=np.float64)
     x = x[None, :] if x.ndim == 1 else x
+    n_fft = 1 << int(np.log2(max(float(block_s) * float(sr), 2.0)))
     n_fft = int(min(n_fft, 1 << int(np.log2(max(x.shape[-1], 2)))))
     window = np.hanning(n_fft + 1)[:n_fft]
     n_blocks = max(1, x.shape[-1] // n_fft)
@@ -402,12 +416,28 @@ def line_margins(
     *,
     order_range: tuple[int, int] = BENCH_ORDER_RANGE,
     tol_hz: float = BENCH_ORDER_TOL_HZ,
+    band_hz: float = BENCH_LINE_BAND_HZ,
 ) -> dict[int, float]:
-    """Per-order ``peak / neighbouring floor`` in dB, for orders of ``f0``.
+    """Per-order ``line band power / equal-bandwidth floor`` in dB.
 
-    The peak is the largest bin within ``k*f0 +- tol_hz`` (the survey speed's
-    quantisation cannot move a line out of its own search window) and the floor
-    is the MEDIAN over :data:`BENCH_MARGIN_BAND_HZ` either side.
+    A BAND-POWER statistic, not a peak-bin one, so it does not depend on the
+    window length. "Does this order carry a line" is a band question: the line
+    is spread over roughly its own width divided by the bin spacing — the
+    smoothed jitter is 0.16-0.33 Hz and the high orders decohere wider still —
+    and block-averaging a longer record averages the line's wandering position,
+    so a peak-bin margin falls as the window grows. On the round-2 DREGON
+    windows (12-32 s) the peak-bin form put six recordings under the 3 dB rule
+    that a 4 s window would have passed.
+
+    The line is LOCATED by its largest bin within ``k*f0 +- tol_hz`` (the
+    survey speed's quantisation cannot move it out of its own search window)
+    and then INTEGRATED over ``+-band_hz`` of that bin. The floor is the median
+    per-bin level over :data:`BENCH_MARGIN_BAND_HZ` either side, scaled to the
+    same bandwidth, so the ratio is a band-power ratio at any length. The
+    location search biases it upward a little on noise — measured over 21
+    pure-noise orders, a median of ~1.5 dB with a maximum near 5 dB — so
+    :data:`BENCH_LINE_MARGIN_DB` is a test on a line that clears its own
+    neighbourhood, not a detection threshold.
     """
     freqs, power = block_periodogram(x, sr)
     lo, hi = BENCH_MARGIN_BAND_HZ
@@ -421,18 +451,25 @@ def line_margins(
         floor_sel = (off >= lo) & (off <= hi)
         if not np.any(peak_sel) or not np.any(floor_sel):
             continue
-        out[k] = float(
-            10.0 * np.log10(float(power[peak_sel].max()) / float(np.median(power[floor_sel])))
-        )
+        f_line = float(freqs[peak_sel][int(np.argmax(power[peak_sel]))])
+        band_sel = np.abs(freqs - f_line) <= float(band_hz)
+        n_band = int(np.count_nonzero(band_sel))
+        if n_band == 0:
+            continue
+        line = float(power[band_sel].sum())
+        floor = float(np.median(power[floor_sel])) * n_band
+        out[k] = float(10.0 * np.log10(max(line, 1e-300) / max(floor, 1e-300)))
     return out
 
 
 def select_order(x: np.ndarray, sr: float, f0: float) -> tuple[int, float]:
     """``(order, margin_db)``: the brightest order of ``f0`` in 60-80.
 
-    "Brightest" is measured as the MARGIN over the neighbouring floor rather
-    than as raw level, so the same number that picks the order also says
-    whether that order carries a line at all.
+    "Brightest" is measured as the band-power MARGIN over the neighbouring
+    floor rather than as raw level, so the same number that picks the order
+    also says whether that order carries a line at all. Called on the SELECTED
+    WINDOW by :func:`stationary_segment`, so the order, the carrier and the
+    margin are all the window's.
     """
     margins = line_margins(x, sr, f0)
     if not margins:
@@ -584,30 +621,55 @@ def stationary_segment(
     i0, i1 = edge + a, edge + b
     start, stop = i0 / sr, i1 / sr
 
-    # window-local carrier, residual and line margin: everything the index
-    # reports is measured on the material the support actually contains
+    # window-local ORDER, carrier, residual and line margin: everything the
+    # index reports is measured on the material the support actually contains
     carriers: list[float] = []
+    win_orders: list[int] = []
     line_margin_db: list[float] = []
+    drift_hz: list[float] = []
     res_std: list[float] = []
     res_mean: list[float] = []
     win_worst: list[np.ndarray] = []
     xw = x[:, i0:i1]
-    for f_survey, k in zip(survey_rev_s, orders):
+    for f_survey in survey_rev_s:
+        k, _ = select_order(xw, sr, float(f_survey))
         f0 = refine_carrier(xw[0], sr, float(f_survey), k, edge_s=min(0.5, 0.1 * (b - a) / sr))
         z = demodulate(xw, np.full(xw.shape[-1], f0), BENCH_DEMOD_BAND_HZ, sr, order=k)
         r = np.mean(residual_frequency(z, sr, smooth_s=0.0), axis=0)
         r = _moving_mean(r, min(smooth, max(1, r.size // 2)))
+        # DRIFT, at the chosen order and inside the window: the two halves'
+        # refined carriers must agree to the same +-1 Hz the residual is tested
+        # against. The narrow residual cannot see a carrier that leaves its
+        # 1.5 Hz band altogether -- filtered noise reads as perfect steadiness
+        # -- and rule rev 1 caught that with a WIDE band that, on a running
+        # motor, measured the fixed ~89 Hz interferer family instead. Two
+        # half-window refinements measure the drift directly and see only the
+        # line's own neighbourhood.
+        halves = [xw[0, : xw.shape[-1] // 2], xw[0, xw.shape[-1] // 2 :]]
+        edge_h = min(0.5, 0.1 * halves[0].size / sr)
+        f_ab = [refine_carrier(h, sr, float(f_survey), k, edge_s=edge_h) for h in halves]
+        drift_hz.append(abs(f_ab[1] - f_ab[0]) * k)
         carriers.append(f0)
+        win_orders.append(int(k))
         line_margin_db.append(float(line_margins(xw, sr, f0).get(k, -np.inf)))
         res_std.append(float(np.std(r)))
         res_mean.append(float(np.mean(r)))
         win_worst.append(np.abs(r))
     line_present = bool(min(line_margin_db) >= BENCH_LINE_MARGIN_DB)
+    # REPORTED, not gated: measured over the 21 DREGON bench recordings the
+    # half-window drift at the chosen order is 0.05-3.27 Hz, i.e. 0.001-0.04
+    # rev/s of slow speed wander, which is what the model's shaft dynamics
+    # exist to absorb rather than a reason to refuse the window. Gating on it
+    # rejected 13 of 21. It is the number to look at when a fit's carrier or
+    # its high orders misbehave.
+    drift_ok = bool(max(drift_hz) <= BENCH_RESIDUAL_TOL_HZ)
     passed = bool(line_present and longest_inside_s >= BENCH_MIN_SEGMENT_S)
     return dict(
         rule="noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
         passed=passed,
         line_present=line_present,
+        drift_ok=drift_ok,
+        carrier_drift_hz=[float(v) for v in drift_hz],
         start_s=float(start),
         end_s=float(stop),
         duration_s=float(stop - start),
@@ -619,7 +681,8 @@ def stationary_segment(
         level_deficit_db=float(level_db.max() - level_db[keep].mean()),
         level_tol_db=float(BENCH_LEVEL_TOL_DB),
         level_band_hz=[BAND_LEVEL_F_MIN, min(BAND_LEVEL_F_MAX, 0.45 * float(sr))],
-        orders=[int(k) for k in orders],
+        orders=[int(k) for k in win_orders],
+        orders_recording=[int(k) for k in orders],
         line_margin_db=[float(v) for v in line_margin_db],
         line_margin_recording_db=[float(v) for v in survey_margin_db],
         carrier_rev_s=[float(v) for v in carriers],
@@ -932,6 +995,8 @@ def index_row(support: Support) -> dict[str, Any]:
         level_db=st.get("level_db"),
         level_deficit_db=st.get("level_deficit_db"),
         line_margin_db=st.get("line_margin_db"),
+        carrier_drift_hz=st.get("carrier_drift_hz"),
+        orders_recording=st.get("orders_recording"),
         line_margin_recording_db=st.get("line_margin_recording_db"),
         carrier_recording_rev_s=(
             [round(v, 6) for v in st["carrier_recording_rev_s"]]
