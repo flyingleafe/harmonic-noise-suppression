@@ -149,6 +149,11 @@ class FitOutcome:
     #: :class:`~experiments.noise_model.spectrum.V2Params`: the model folds it
     #: into ``profile_db``, so it has to be carried here to be recorded.
     comb_gain_db: float | None = None
+    #: the fitted per-order ``low_order_gain_db`` when the mode frees it
+    #: (``flight_floor_lowk``), ``None`` otherwise. Folded into ``profile_db``
+    #: by the model exactly as ``comb_gain_db`` is, so it too is carried here
+    #: to be recorded rather than re-applied.
+    low_order_gain_db: list[float] | None = None
 
     @property
     def converged(self) -> bool:
@@ -187,9 +192,12 @@ def measure_batch(
     priors: MD.Priors = MD.PRIORS,
     frozen: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
+    low_orders: int | None = None,
 ) -> MD.Measured:
     """The data-driven prior centres of one batch (see :func:`seeds`)."""
-    return seeds(batch, mode=mode, priors=priors, frozen=frozen, pin=pin).measured
+    return seeds(
+        batch, mode=mode, priors=priors, frozen=frozen, pin=pin, low_orders=low_orders
+    ).measured
 
 
 def initial_values(
@@ -199,6 +207,7 @@ def initial_values(
     priors: MD.Priors = MD.PRIORS,
     frozen: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
+    low_orders: int | None = None,
 ) -> dict[str, Tensor]:
     """Site-name -> initial value for the free sites of ``mode``.
 
@@ -206,7 +215,9 @@ def initial_values(
     all, and a stale key would be ignored by ``init_to_value`` — a pin that
     silently does not pin.
     """
-    return seeds(batch, mode=mode, priors=priors, frozen=frozen, pin=pin).init
+    return seeds(
+        batch, mode=mode, priors=priors, frozen=frozen, pin=pin, low_orders=low_orders
+    ).init
 
 
 def seeds(
@@ -216,6 +227,7 @@ def seeds(
     priors: MD.Priors = MD.PRIORS,
     frozen: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
+    low_orders: int | None = None,
 ) -> Seeds:
     """Measure the support and seed every free site from the measurement."""
     free = MD.free_blocks(mode)
@@ -328,16 +340,31 @@ def seeds(
     if "comb_gain" in free:
         assert lines_frozen is not None
         shifts: list[float] = []
-        for _r, _k, j0, j1 in windows:
+        per_order: dict[int, list[float]] = {}
+        for _r, kk_line, j0, j1 in windows:
             num = float(np.max(excess[j0:j1]))
             den = float(np.max(lines_frozen[j0:j1]))
             if den > 0.0 and num > 0.0:
                 shifts.append(10.0 * math.log10(num / den))
+                per_order.setdefault(int(kk_line), []).append(shifts[-1])
         # the MEDIAN over the lines: one order whose window catches a tonal the
         # frozen comb never had must not set the level of the whole comb. Held
         # inside the prior's 3 sd, which is where a seed stops being a seed.
         wide = 3.0 * priors.comb_gain_db[1]
-        out["comb_gain_db"] = t(float(np.clip(np.median(shifts), -wide, wide)) if shifts else 0.0)
+        comb_seed = float(np.clip(np.median(shifts), -wide, wide)) if shifts else 0.0
+        out["comb_gain_db"] = t(comb_seed)
+        if "low_order_gain" in free:
+            # what each low order wants ON TOP of that scalar: its own measured
+            # shift (median over the rotors, which share the site) minus the
+            # shared one, so the seed of the whole block is zero where the
+            # comb's low orders already sit at the right level
+            n_low = min(int(low_orders or priors.low_orders), batch.k_max)
+            low = np.zeros(n_low, dtype=np.float64)
+            for i in range(n_low):
+                vals = per_order.get(i + 1)
+                if vals:
+                    low[i] = float(np.clip(float(np.median(vals)) - comb_seed, -wide, wide))
+            out["low_order_gain_db"] = t(low)
 
     if "mic" in free:
         p = batch.power.detach().cpu().numpy()
@@ -526,6 +553,7 @@ def fit_support(
     priors: MD.Priors = MD.PRIORS,
     frozen: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
+    low_orders: int | None = None,
     optim: OptimSpec = OptimSpec(),
     forward_kw: dict[str, Any] | None = None,
     progress: int = 0,
@@ -546,7 +574,7 @@ def fit_support(
     pyro.set_rng_seed(int(optim.seed))
     pyro.clear_param_store()
 
-    measured = seeds(batch, mode=mode, priors=priors, frozen=frozen, pin=pin)
+    measured = seeds(batch, mode=mode, priors=priors, frozen=frozen, pin=pin, low_orders=low_orders)
     full = replace(batch, measured=measured.measured)
     init = dict(measured.init)
     if optim.init_jitter > 0.0:
@@ -568,6 +596,7 @@ def fit_support(
                 priors=priors,
                 frozen=frozen,
                 pin=pin,
+                low_orders=low_orders,
                 temperature=1.0,
                 forward_kw=forward_kw,
             )
@@ -678,7 +707,7 @@ def fit_support(
 
     med = guide.median()
     fitted = MD.sample_params_from_values(
-        full, mode=mode, priors=priors, frozen=frozen, pin=pin, values=med
+        full, mode=mode, priors=priors, frozen=frozen, pin=pin, low_orders=low_orders, values=med
     )
     with torch.no_grad():
         m_model = MD.forward(full, fitted, **(forward_kw or {}))
@@ -686,6 +715,11 @@ def fit_support(
     return FitOutcome(
         params=fitted,
         comb_gain_db=(float(med["comb_gain_db"]) if "comb_gain_db" in med else None),
+        low_order_gain_db=(
+            np.asarray(med["low_order_gain_db"].detach().cpu(), dtype=np.float64).tolist()
+            if "low_order_gain_db" in med
+            else None
+        ),
         objective=objective,
         optimiser=dict(
             **optim.as_dict(),
@@ -841,6 +875,10 @@ def write_fit(
         # NEVER apply it again: it is recorded so the shift is auditable
         # against the bench profile the fit froze.
         p["profile"]["comb_gain_db"] = outcome.comb_gain_db
+    if outcome.low_order_gain_db is not None:
+        # the per-order dB the frozen comb's low orders were re-levelled BY,
+        # on top of comb_gain_db. ``profile_db`` above already carries both.
+        p["profile"]["low_order_gain_db"] = outcome.low_order_gain_db
     k = np.arange(1, int(np.asarray(p["profile"]["profile_db"]).shape[1]) + 1)
     payload: dict[str, Any] = dict(
         schema=FIT_SCHEMA,
@@ -886,6 +924,16 @@ def write_fit(
             comb_gain_rule="one free scalar re-levels the whole frozen comb; "
             "params.profile.profile_db ALREADY includes it and must not be shifted again",
             comb_gain_prior=list(priors.comb_gain_db),
+        )
+    if outcome.low_order_gain_db is not None:
+        payload["frozen_from"] = dict(
+            payload.get("frozen_from") or {},
+            low_order_gain_db=outcome.low_order_gain_db,
+            low_orders=len(outcome.low_order_gain_db),
+            low_order_gain_rule="one gain PER ORDER below low_orders, shared by the rotors, "
+            "on top of comb_gain_db; params.profile.profile_db ALREADY includes both and "
+            "must not be shifted again. Above low_orders the frozen comb keeps its shape",
+            low_order_gain_prior=list(priors.low_order_gain_db),
         )
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)

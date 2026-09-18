@@ -14,6 +14,9 @@
     # FROZEN at the mean of the four Motor*_70 bench fits
     python scripts/noise_v2_fit.py flight --set dregon-floor --name dregon_room2_floor \
         --floor-only --frozen-mean results/noise_v2/rounds/round1/fits/bench_dregon_Motor*_70__bench.json
+    # the same with a per-order gain for the orders the score windows resolve
+    python scripts/noise_v2_fit.py flight --set dregon-floor --name dregon_room2_floor \
+        --floor-low-k --low-orders 8 --frozen-mean results/noise_v2/rounds/round3/fits/bench_dregon_Motor*_70__bench.json
     # the round-1 fit findings table over everything already written
     python scripts/noise_v2_fit.py findings
 
@@ -133,6 +136,7 @@ def worker(unit: Unit) -> dict[str, Any]:
         mode=mode,
         frozen=frozen,
         pin=MD.dynamics_pin(p.get("pin")),
+        low_orders=p.get("low_orders"),
         optim=optim,
         progress=int(p.get("progress", 0)),
     )
@@ -172,6 +176,7 @@ def worker(unit: Unit) -> dict[str, Any]:
         span_pins=outcome.diagnostics.get("span_pins"),
         carrier_rev_s=d["carrier_rev_s"],
         comb_gain_db=outcome.comb_gain_db,
+        low_order_gain_db=outcome.low_order_gain_db,
         n_rotors=batch.n_rotors,
         k_max=batch.k_max,
     )
@@ -862,6 +867,20 @@ def main(argv: list[str] | None = None) -> int:
                 "floor, the mic gains and ONE shared comb level (comb_gain_db)",
             )
             p.add_argument(
+                "--floor-low-k",
+                action="store_true",
+                help="mode flight_floor_lowk: --floor-only PLUS one gain per ORDER below "
+                "--low-orders, shared across rotors. The transplanted comb keeps its bench "
+                "shape above the cut; below it the flight recording sets the level, which is "
+                "what a score window with no resolvable comb above k ~ 8 needs",
+            )
+            p.add_argument(
+                "--low-orders",
+                type=int,
+                default=8,
+                help="width of the per-order low-order gain block of --floor-low-k",
+            )
+            p.add_argument(
                 "--frozen-mean",
                 nargs="*",
                 default=None,
@@ -935,9 +954,11 @@ def main(argv: list[str] | None = None) -> int:
             frozen, frozen_from = mean_comb(list(args.frozen_mean))
             n_rotors = int(SU.load_support(specs[0]).carrier_rev_s.shape[0])
             frozen = expand_frozen(frozen, n_rotors=n_rotors)
-        mode = "flight_floor_only" if args.floor_only else "flight"
-        if args.floor_only and frozen is None:
-            raise SystemExit("--floor-only needs --frozen-mean <bench fit JSONs>")
+        low_k = bool(getattr(args, "floor_low_k", False))
+        floor_only = bool(args.floor_only) or low_k
+        mode = ("flight_floor_lowk" if low_k else "flight_floor_only") if floor_only else "flight"
+        if floor_only and frozen is None:
+            raise SystemExit("--floor-only / --floor-low-k needs --frozen-mean <bench fit JSONs>")
         units = [
             Unit(
                 uid=f"{args.name}__{mode}",
@@ -954,6 +975,7 @@ def main(argv: list[str] | None = None) -> int:
                     progress=int(args.progress),
                     threads=int(args.threads),
                     pin=_pin_from_args(args),
+                    low_orders=int(args.low_orders) if low_k else None,
                 ),
             )
         ]

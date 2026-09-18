@@ -176,6 +176,14 @@ class Priors:
     #: (``results/noise_v2/rounds/round2/render_dregon/findings.md``), which
     #: this prior must not fight.
     comb_gain_db: tuple[float, float] = (0.0, 20.0)
+    #: Per-ORDER dB gain of the frozen comb's low orders in
+    #: ``flight_floor_lowk``, shared across rotors (at 2048-point frames the
+    #: DREGON rotors are not resolvable at k <= 8). As wide and zero-mean as
+    #: ``comb_gain_db``, and for the same reason: the measured rig-to-rig
+    #: swing is tens of dB and the prior must not fight it.
+    low_order_gain_db: tuple[float, float] = (0.0, 20.0)
+    #: default width of that block
+    low_orders: int = 8
     #: LOG space: the floor's speed exponent is POSITIVE by construction. A
     #: rotor floor cannot get louder as the rotors slow (R2: -10.19 on a
     #: near-constant pool put the standby floor +37.0 dB over the real clip,
@@ -229,6 +237,8 @@ class Priors:
             "floor_tilt_db_oct": list(self.floor_tilt_db_oct),
             "amp_exp": list(self.amp_exp),
             "comb_gain_db": list(self.comb_gain_db),
+            "low_order_gain_db": list(self.low_order_gain_db),
+            "low_orders_default": self.low_orders,
             "log_floor_exp": list(self.log_floor_exp),
             "log_floor_static": list(self.log_floor_static),
             "mic_line_gain_db_sd": self.mic_line_gain_db,
@@ -283,13 +293,28 @@ def free_blocks(mode: str) -> tuple[str, ...]:
         return ("dynamics", "profile", "floor", "mic")
     if mode == "flight":
         return ("dynamics", "profile", "floor", "mic")
-    if mode == "flight_floor_only":
+    if mode in ("flight_floor_only", "flight_floor_lowk"):
         # the comb arrives FROZEN from a bench rig, so its absolute level is
         # that rig's, and nothing downstream can re-level it: render_noise
         # mean-centres mic_line_gain_db over mics per rotor and mic_gains_db
         # over mics, which leaves profile_db as the ONLY absolute comb scale.
         # One shared scalar, no more — the comb's SHAPE stays frozen.
-        return ("floor", "mic", "comb_gain")
+        #
+        # ``flight_floor_lowk`` frees ONE more thing, and only below
+        # ``low_orders``: a per-order gain shared by the rotors. The
+        # transplanted bench comb keeps its shape above that order; below it
+        # the flight recording sets the level, because the registration study
+        # (``results/noise_v2/rounds/round3/registration/findings.md``) finds
+        # no resolvable comb above k ~ 8 in the DREGON score windows while
+        # k = 1-7 carry the merged low-order power HPPNet tracks. A single
+        # scalar spread over 80+ orders that are simply ABSENT from the
+        # recording drags those low orders ~20 dB too quiet (R2: the seed
+        # wanted +8.5 dB, the one-scalar fit landed at -3.2 dB).
+        return (
+            ("floor", "mic", "comb_gain")
+            if mode == "flight_floor_only"
+            else ("floor", "mic", "comb_gain", "low_order_gain")
+        )
     # the ATTRIBUTION mode of the four-motor validation: a transfer gap that it
     # closes is a gap in that block alone
     if mode == "bench_dynamics_only":
@@ -662,12 +687,13 @@ def sample_params_from_values(
     priors: Priors = PRIORS,
     frozen: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
+    low_orders: int | None = None,
 ) -> V2Params:
     """Assemble :class:`.spectrum.V2Params` from a guide's ``median()`` dict.
 
     The SAME construction the model samples through, with the site draw
-    replaced by a lookup: a MAP parameter set and the model's own parameter set
-    cannot disagree about shapes, parities or which block is frozen.
+    replaced by a lookup: a MAP parameter set and the model's own parameter
+    set cannot disagree about shapes or which block is frozen.
     """
 
     def lookup(name: str, _d: Any) -> Tensor:
@@ -675,7 +701,15 @@ def sample_params_from_values(
             raise KeyError(f"guide has no site {name!r} (sites: {sorted(values)})")
         return torch.as_tensor(values[name], dtype=torch.float64)
 
-    return sample_params(batch, mode=mode, priors=priors, frozen=frozen, pin=pin, site=lookup)
+    return sample_params(
+        batch,
+        mode=mode,
+        priors=priors,
+        frozen=frozen,
+        pin=pin,
+        low_orders=low_orders,
+        site=lookup,
+    )
 
 
 def sample_params(
@@ -685,6 +719,7 @@ def sample_params(
     priors: Priors = PRIORS,
     frozen: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
+    low_orders: int | None = None,
     site: SiteFn = _pyro_site,
 ) -> V2Params:
     """Sample (or read frozen) every parameter of one support's forward model.
@@ -770,6 +805,17 @@ def sample_params(
         # params_to_dict, render_noise and expected_periodogram need no change
         # at all: the comb they read is already at its fitted level
         profile_db = profile_db + _normal(site, "comb_gain_db", *priors.comb_gain_db)
+
+    if "low_order_gain" in free:
+        # ...and, below ``low_orders``, one gain PER ORDER shared by the
+        # rotors, on top of that scalar and folded in the same way. Above the
+        # cut the transplanted comb keeps its bench shape exactly.
+        kk = min(int(low_orders if low_orders is not None else priors.low_orders), k)
+        if kk < 1:
+            raise ValueError(f"flight_floor_lowk needs low_orders >= 1, got {low_orders!r}")
+        low = _normal(site, "low_order_gain_db", 0.0, priors.low_order_gain_db[1], (kk,))
+        pad = torch.zeros(k, dtype=torch.float64, device=profile_db.device)
+        profile_db = profile_db + torch.cat([low, pad[kk:]])[None, :]
 
     if "floor" in free:
         if batch.measured is None:
@@ -878,13 +924,16 @@ def support_model(
     priors: Priors = PRIORS,
     frozen: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
+    low_orders: int | None = None,
     temperature: float = 1.0,
     forward_kw: dict[str, Any] | None = None,
 ) -> V2Params:
     """The Pyro model of one support: priors, forward model, one Whittle factor."""
     if not (math.isfinite(temperature) and temperature > 0.0):
         raise ValueError(f"temperature must be finite and positive, got {temperature!r}")
-    params = sample_params(batch, mode=mode, priors=priors, frozen=frozen, pin=pin)
+    params = sample_params(
+        batch, mode=mode, priors=priors, frozen=frozen, pin=pin, low_orders=low_orders
+    )
     m_model = forward(batch, params, **(forward_kw or {}))
     pyro.factor("whittle", -whittle_risk(batch, m_model) / float(temperature))
     return params
@@ -1006,4 +1055,8 @@ def frozen_from_params(d: dict[str, Any]) -> dict[str, Any]:
         mic_floor_db=d["floor"]["mic_floor_db"],
         gain_all_db=d["mic_gains_db"],
         carrier_rev_s=d.get("carrier_rev_s"),
+        # already folded into profile_db above (the model adds it there), so a
+        # reader must NEVER apply it again; carried so the shift stays
+        # auditable against the bench comb the fit froze
+        low_order_gain_db=d["profile"].get("low_order_gain_db"),
     )

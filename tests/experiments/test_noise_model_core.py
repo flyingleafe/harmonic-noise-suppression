@@ -829,3 +829,64 @@ def test_the_low_order_gamma_check_names_the_shaft_absorbing_ramp_only():
 
     wide = FT.gamma_low_order_check(res * np.array([[10.0, 10.0, 10.0, 10.0]]), batch=batch)
     assert wide["verdict"] == "fail_above_floor"
+
+
+def test_flight_floor_lowk_recovers_a_per_order_low_order_gain():
+    """``flight_floor_lowk`` must re-level the frozen comb's LOW orders per
+    order while the shared scalar stays put.
+
+    The DREGON transplant in miniature: the comb is frozen from another rig and
+    its low orders arrive 15 dB off while the rest of it is right. One shared
+    scalar cannot fix that without dragging the whole comb (R2: the low orders
+    ended ~20 dB too quiet), so the mode frees one gain per order below the
+    cut, shared across rotors. What must come back is the per-order gain at
+    k <= K_low and a comb_gain_db still near zero.
+    """
+    planted_low_db, k_low = 15.0, 4
+    k_cap, n_mics = 8, 2
+    n_fft, hop, n_frames = 512, 256, 8
+    n = n_fft + (n_frames - 1) * hop
+    rps = np.full((1, n), 180.0)
+    grid = SP.flight_grid(sr=SR, n_fft=n_fft, hop=hop)
+    par = _params(
+        n_rotors=1,
+        n_mics=n_mics,
+        k_cap=k_cap,
+        profile_db=np.linspace(-16.0, -24.0, k_cap)[None, :],
+        amp_exp=2.0,
+        floor_exp=2.0,
+        static_rel=0.01,
+    )
+    starts = np.arange(n_frames) * hop
+    with torch.no_grad():
+        truth = SP.flight_model(
+            grid, par, rate_work=SP.flight_rate_work(grid, rps, starts), k_max=k_cap
+        ).numpy()
+    obs = truth * np.random.default_rng(23).standard_exponential(truth.shape)
+    batch = MD.flight_batch(
+        name="lowk", members=[("w0", obs, rps, starts)], sr=SR, n_fft=n_fft, hop=hop, k_cap=k_cap
+    )
+    frozen = MD.frozen_from_params(MD.params_to_dict(par))
+    prof = np.asarray(frozen["profile_db"], dtype=np.float64)
+    prof[:, :k_low] -= planted_low_db  # only the LOW orders are wrong
+    frozen["profile_db"] = prof.tolist()
+
+    assert MD.free_blocks("flight_floor_lowk") == ("floor", "mic", "comb_gain", "low_order_gain")
+    out = FT.fit_support(
+        batch,
+        mode="flight_floor_lowk",
+        frozen=frozen,
+        low_orders=k_low,
+        optim=FT.OptimSpec(
+            adam_steps=120, adam_lr=0.05, adam_batch=None, lbfgs_iters=60, lbfgs_frames=None
+        ),
+    )
+    assert out.low_order_gain_db is not None
+    got = np.asarray(out.low_order_gain_db, dtype=np.float64)
+    assert got.shape == (k_low,)
+    assert np.abs(got - planted_low_db).max() < 2.0
+    assert out.comb_gain_db == pytest.approx(0.0, abs=2.0)
+    # and the recorded comb IS the truth again: both gains are folded into it
+    fitted = np.asarray(MD.params_to_dict(out.params)["profile"]["profile_db"], dtype=np.float64)
+    planted = np.asarray(MD.params_to_dict(par)["profile"]["profile_db"], dtype=np.float64)
+    assert np.abs(fitted - planted).max() < 2.5
