@@ -1052,10 +1052,35 @@ def index_row(support: Support) -> dict[str, Any]:
 DREGON_BENCH_ROTORS = ("Motor1", "Motor2", "Motor3", "Motor4")
 DREGON_BENCH_THROTTLES = (50, 60, 70, 80, 90)
 
+#: Every Michael's flight support in this campaign is this long, so the pooled
+#: windows of one fit carry the same exposure per window.
+MICHAELS_FLIGHT_DUR_S = 8.0
 #: FLY125's cruise windows, as ``results/S2/cruise_8clip_refined.json`` defines
 #: them (``data.starts_s``, 16 s each); R1 takes the first 8 s of each, so the
 #: eight supports are disjoint and share the legacy export's material.
 MICHAELS_CRUISE_STARTS = (16.0, 32.0, 48.0, 64.0, 96.0, 112.0, 128.0, 144.0)
+#: FLY125's STANDBY windows, by the regime-band rule the cruise windows obey:
+#: every rotor inside ``gates.REGIME_BANDS["standby"]`` = 20-45 rev/s for the
+#: window's whole span, read off the label at telemetry resolution
+#: (:func:`clips.windows`). FLY125 holds exactly ONE contiguous standby run,
+#: 1.80-15.25 s (13.45 s of a 177.70 s recording), so the band admits six 8 s
+#: windows at a 1 s stride (starts 2.0 .. 7.0) of which only ONE can be taken
+#: without overlapping another; R2 takes the earliest. It is the material the
+#: legacy standby export fits (``results/S2/standby.json``: FLY125 @1.78 +
+#: 13.5 s) and is already declared training material
+#: (``noise_v2_likelihood_window.TRAINING_SUPPORTS``: FLY125 @2+8).
+MICHAELS_STANDBY_STARTS = (2.0,)
+#: FLY125's RAMP window, by the rule the FROZEN FLY124 ramp support uses: the
+#: longest contiguous 45-65 rev/s interval, CENTRED in an 8 s CONTEXT window.
+#: FLY124's scored ramp is a 0.99 s event at 31.18 s inside ``@27.68+8``, i.e.
+#: context start = event centre - 4 s (``docs/revised-phase-baseline-proposals.md``
+#: 580-581). No 8 s window lies INSIDE the ramp band on either recording —
+#: FLY125's spool-up crosses 45-65 rev/s in 0.335 s (15.420-15.755 s, centre
+#: 15.5875 s), 0.55 s of the whole flight — so the context window starts at
+#: 11.5875 s and carries the transition itself, which is what the scored ramp
+#: support is and what a pooled speed law needs in order to interpolate the
+#: ramp carrier instead of extrapolating to it.
+MICHAELS_RAMP_STARTS = (11.5875,)
 #: The frozen FLY124 evaluation supports (standby, standby, ramp, cruise,
 #: cruise), 8 s each — ``scripts/noise_v2_likelihood_window.py:115-121``.
 MICHAELS_FROZEN = (
@@ -1098,9 +1123,34 @@ def set_bench_points() -> list[SupportSpec]:
 
 
 def set_michaels_cruise() -> list[SupportSpec]:
-    specs = [flight_michaels("FLY125", start, 8.0) for start in MICHAELS_CRUISE_STARTS]
-    specs += [flight_michaels("FLY124", start, 8.0) for start, _ in MICHAELS_FROZEN]
+    specs = [
+        flight_michaels("FLY125", start, MICHAELS_FLIGHT_DUR_S) for start in MICHAELS_CRUISE_STARTS
+    ]
+    specs += [
+        flight_michaels("FLY124", start, MICHAELS_FLIGHT_DUR_S) for start, _ in MICHAELS_FROZEN
+    ]
     return specs
+
+
+def set_michaels_all() -> list[SupportSpec]:
+    """The R2 flight pool: FLY125 standby, ramp and cruise in ONE set.
+
+    R1's Michael's fit pooled CRUISE ONLY — the objective saw carriers
+    68.2-97.9 rev/s, a 1.44x span on which neither speed-law exponent is
+    identified. It took ``amp_exp`` 10.02 and ``floor_exp`` -10.19, which
+    cancel in sample and, extrapolated to the 36.4 rev/s standby carrier, pull
+    the comb 32.7 dB down and the floor 37.0 dB up
+    (``results/noise_v2/rounds/round2/render_regime/findings.md``). This set
+    adds the two other regimes the recording has material for, so the pooled
+    carriers span 36-98 rev/s and the scored ramp carrier (56.8 rev/s) is
+    INSIDE the fitted range instead of 0.53x below its lowest point.
+
+    FLY124 carries no row here: it is the frozen evaluation cohort and this
+    set exists to be FITTED (``michaels-cruise`` holds those rows so one index
+    still describes the round's scoring windows).
+    """
+    starts = MICHAELS_STANDBY_STARTS + MICHAELS_RAMP_STARTS + MICHAELS_CRUISE_STARTS
+    return [flight_michaels("FLY125", start, MICHAELS_FLIGHT_DUR_S) for start in starts]
 
 
 def set_dregon_floor() -> list[SupportSpec]:
@@ -1116,6 +1166,7 @@ SUPPORT_SETS: dict[str, Callable[[], list[SupportSpec]]] = {
     "dregon-bench": set_dregon_bench,
     "bench-points": set_bench_points,
     "michaels-cruise": set_michaels_cruise,
+    "michaels-all": set_michaels_all,
     "dregon-floor": set_dregon_floor,
 }
 

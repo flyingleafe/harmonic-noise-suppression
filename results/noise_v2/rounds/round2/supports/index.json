@@ -9871,10 +9871,677 @@
     "wall_seconds": 12.127,
     "command": "scripts/noise_v2_supports.py build --set bench-points --out results/noise_v2/rounds/round2/supports"
    }
+  },
+  "michaels-all": {
+   "schema": "noise-v2-supports/1",
+   "set": "michaels-all",
+   "n_specs": 10,
+   "n_built": 10,
+   "supports": [
+    {
+     "name": "flight_michaels_FLY125@2.000+8_rps_refined",
+     "spec": "flight_michaels:FLY125:2.0:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      2.0,
+      10.0
+     ],
+     "carriers_rev_s": [
+      29.928022,
+      33.913511,
+      39.270069,
+      35.200326
+     ],
+     "carrier_min_rev_s": [
+      21.144389,
+      26.305702,
+      32.004801,
+      27.780825
+     ],
+     "carrier_max_rev_s": [
+      31.044742,
+      35.093906,
+      40.33172,
+      36.447814
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@2.000+8_rps_refined.npz",
+     "npz_bytes": 10173382
+    },
+    {
+     "name": "flight_michaels_FLY125@11.588+8_rps_refined",
+     "spec": "flight_michaels:FLY125:11.5875:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      11.5875,
+      19.5875
+     ],
+     "carriers_rev_s": [
+      59.64751,
+      54.437438,
+      60.483094,
+      55.547177
+     ],
+     "carrier_min_rev_s": [
+      30.967094,
+      34.403503,
+      40.067873,
+      36.483194
+     ],
+     "carrier_max_rev_s": [
+      95.994308,
+      78.366501,
+      83.735214,
+      78.92785
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@11.588+8_rps_refined.npz",
+     "npz_bytes": 10173430
+    },
+    {
+     "name": "flight_michaels_FLY125@16.000+8_rps_refined",
+     "spec": "flight_michaels:FLY125:16.0:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      16.0,
+      24.0
+     ],
+     "carriers_rev_s": [
+      89.955786,
+      74.301676,
+      81.423472,
+      75.394874
+     ],
+     "carrier_min_rev_s": [
+      71.801431,
+      69.759094,
+      75.368426,
+      69.09417
+     ],
+     "carrier_max_rev_s": [
+      95.947468,
+      78.440294,
+      85.276461,
+      79.520824
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@16.000+8_rps_refined.npz",
+     "npz_bytes": 10173394
+    },
+    {
+     "name": "flight_michaels_FLY125@32.000+8_rps_refined",
+     "spec": "flight_michaels:FLY125:32.0:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      32.0,
+      40.0
+     ],
+     "carriers_rev_s": [
+      91.802946,
+      74.912862,
+      80.989574,
+      75.232754
+     ],
+     "carrier_min_rev_s": [
+      89.685939,
+      72.591312,
+      78.430985,
+      73.439749
+     ],
+     "carrier_max_rev_s": [
+      94.384057,
+      77.33664,
+      83.380575,
+      78.290204
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@32.000+8_rps_refined.npz",
+     "npz_bytes": 10173394
+    },
+    {
+     "name": "flight_michaels_FLY125@48.000+8_rps_refined",
+     "spec": "flight_michaels:FLY125:48.0:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      48.0,
+      56.0
+     ],
+     "carriers_rev_s": [
+      89.410574,
+      75.011939,
+      81.321085,
+      77.437523
+     ],
+     "carrier_min_rev_s": [
+      86.110448,
+      68.750782,
+      77.875208,
+      73.80436
+     ],
+     "carrier_max_rev_s": [
+      93.504134,
+      79.569436,
+      85.645322,
+      84.233709
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@48.000+8_rps_refined.npz",
+     "npz_bytes": 10173394
+    },
+    {
+     "name": "flight_michaels_FLY125@64.000+8_rps_refined",
+     "spec": "flight_michaels:FLY125:64.0:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      64.0,
+      72.0
+     ],
+     "carriers_rev_s": [
+      91.056871,
+      74.482382,
+      82.843706,
+      74.484265
+     ],
+     "carrier_min_rev_s": [
+      87.171989,
+      69.872914,
+      78.805305,
+      69.569362
+     ],
+     "carrier_max_rev_s": [
+      94.143121,
+      78.225213,
+      85.999738,
+      78.919766
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@64.000+8_rps_refined.npz",
+     "npz_bytes": 10173394
+    },
+    {
+     "name": "flight_michaels_FLY125@96.000+8_rps_refined",
+     "spec": "flight_michaels:FLY125:96.0:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      96.0,
+      104.0
+     ],
+     "carriers_rev_s": [
+      90.088911,
+      74.618312,
+      81.285155,
+      76.744847
+     ],
+     "carrier_min_rev_s": [
+      83.682998,
+      71.462915,
+      75.141839,
+      72.610284
+     ],
+     "carrier_max_rev_s": [
+      93.83342,
+      80.583896,
+      85.1782,
+      79.74726
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@96.000+8_rps_refined.npz",
+     "npz_bytes": 10173398
+    },
+    {
+     "name": "flight_michaels_FLY125@112.000+8_rps_refined",
+     "spec": "flight_michaels:FLY125:112.0:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      112.0,
+      120.0
+     ],
+     "carriers_rev_s": [
+      91.61747,
+      74.049503,
+      80.97218,
+      75.979463
+     ],
+     "carrier_min_rev_s": [
+      87.188232,
+      69.568128,
+      75.978873,
+      70.955719
+     ],
+     "carrier_max_rev_s": [
+      97.405808,
+      81.254828,
+      86.278648,
+      83.626821
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@112.000+8_rps_refined.npz",
+     "npz_bytes": 10173410
+    },
+    {
+     "name": "flight_michaels_FLY125@128.000+8_rps_refined",
+     "spec": "flight_michaels:FLY125:128.0:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      128.0,
+      136.0
+     ],
+     "carriers_rev_s": [
+      91.61422,
+      74.211651,
+      81.803559,
+      73.918025
+     ],
+     "carrier_min_rev_s": [
+      88.526152,
+      70.805424,
+      79.326657,
+      70.720252
+     ],
+     "carrier_max_rev_s": [
+      95.159691,
+      76.852193,
+      84.997738,
+      76.009684
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@128.000+8_rps_refined.npz",
+     "npz_bytes": 10173410
+    },
+    {
+     "name": "flight_michaels_FLY125@144.000+8_rps_refined",
+     "spec": "flight_michaels:FLY125:144.0:8.0:rps_refined",
+     "kind": "flight",
+     "level_db": null,
+     "level_deficit_db": null,
+     "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
+     "line_margin_recording_db": null,
+     "carrier_recording_rev_s": null,
+     "rule": null,
+     "family": "flight_michaels",
+     "recording_id": "FLY125",
+     "dataset": "michaels-frames",
+     "rps_key": "rps_refined",
+     "sr": 16000,
+     "n_mics": 8,
+     "n_frames": 247,
+     "n_rotors": 4,
+     "n_fft": 2048,
+     "hop": 512,
+     "n_bins": 1025,
+     "duration_s": 8.0,
+     "segment": [
+      144.0,
+      152.0
+     ],
+     "carriers_rev_s": [
+      91.565036,
+      74.237875,
+      82.855846,
+      75.272913
+     ],
+     "carrier_min_rev_s": [
+      86.837036,
+      69.71398,
+      77.023234,
+      70.700664
+     ],
+     "carrier_max_rev_s": [
+      97.104745,
+      78.254052,
+      87.011326,
+      82.105377
+     ],
+     "throttle": null,
+     "rig": null,
+     "rotor_ids": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "stationary_pass": true,
+     "residual_std_hz": null,
+     "residual_max_abs_hz": null,
+     "longest_inside_s": null,
+     "orders": null,
+     "survey_rev_s": null,
+     "carrier_shift_rev_s": null,
+     "npz": "flight_michaels_FLY125@144.000+8_rps_refined.npz",
+     "npz_bytes": 10173410
+    }
+   ],
+   "failures": [],
+   "rule": {
+    "sr": 16000,
+    "obs_n_fft": 2048,
+    "obs_hop": 512,
+    "bench_order_range": [
+     60,
+     80
+    ],
+    "bench_demod_band_hz": 1.5,
+    "bench_residual_smooth_s": 2.0,
+    "bench_residual_tol_hz": 1.0,
+    "bench_min_segment_s": 4.0,
+    "bench_edge_s": 2.0
+   },
+   "provenance": {
+    "git_head": "fa0c499327198663f2a638912be5ae551e2f37e8",
+    "timestamp": "2026-09-18T02:25:27+0100",
+    "wall_seconds": 2.052,
+    "command": "scripts/noise_v2_supports.py build --set michaels-all --out results/noise_v2/rounds/round2/supports"
+   }
   }
  },
- "n_supports": 156,
- "updated": "2026-09-18T01:20:18+0100",
- "margin_threshold_db": 2.0,
- "pass_flags_recomputed": "BENCH_LINE_MARGIN_DB 3.0 -> 2.0 (band-power recalibration); margins unchanged"
+ "n_supports": 166,
+ "updated": "2026-09-18T02:25:27+0100"
 }

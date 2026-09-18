@@ -212,7 +212,7 @@ def initial_values(
         out["floor_tilt_db_oct"] = t(0.0)
         out["mic_floor_db"] = torch.zeros(batch.n_mics, dtype=torch.float64)
         if batch.mode == "flight":
-            out["floor_exp"] = t(priors.floor_exp[0])
+            out["floor_exp"] = t(math.exp(priors.log_floor_exp[0]))
             out["floor_static_rel"] = t(math.exp(priors.log_floor_static[0]))
 
     if "profile" in free:
@@ -316,7 +316,7 @@ def _seed_params(
             ),
             tilt_db_oct=pick("floor", "floor_tilt_db_oct", 0.0),
             mic_floor_db=pick("floor", "mic_floor_db", np.zeros(m), (m,)),
-            exp=pick("floor", "floor_exp", priors.floor_exp[0]) if flight else zero,
+            exp=pick("floor", "floor_exp", math.exp(priors.log_floor_exp[0])) if flight else zero,
             static_rel=(
                 pick("floor", "floor_static_rel", math.exp(priors.log_floor_static[0]))
                 if flight

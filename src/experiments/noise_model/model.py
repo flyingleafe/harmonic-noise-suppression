@@ -108,7 +108,15 @@ class Priors:
     floor_mean_db: tuple[float, float] = (-70.0, 40.0)
     floor_tilt_db_oct: tuple[float, float] = (0.0, 10.0)
     amp_exp: tuple[float, float] = (2.0, 2.0)
-    floor_exp: tuple[float, float] = (2.0, 2.0)
+    #: LOG space: the floor's speed exponent is POSITIVE by construction. A
+    #: rotor floor cannot get louder as the rotors slow, and on a pool that
+    #: barely varies in speed a Normal prior let it go to -10.19, which put the
+    #: standby floor +37.0 dB over the real clip
+    #: (``results/noise_v2/rounds/round2/render_regime/findings.md``). The rest
+    #: of the project already carries this invariant as a hard clamp on an
+    #: export (``rig_sampler.check_sample``, ``_rebase_divergent_floor``); here
+    #: it is the site's own support instead of a repair after the fact.
+    log_floor_exp: tuple[float, float] = (math.log(2.0), 0.7)
     log_floor_static: tuple[float, float] = (math.log(2.5e-3), 2.0)
     mic_line_gain_db: float = 6.0
     mic_floor_db: float = 6.0
@@ -128,7 +136,7 @@ class Priors:
             "floor_mean_db": list(self.floor_mean_db),
             "floor_tilt_db_oct": list(self.floor_tilt_db_oct),
             "amp_exp": list(self.amp_exp),
-            "floor_exp": list(self.floor_exp),
+            "log_floor_exp": list(self.log_floor_exp),
             "log_floor_static": list(self.log_floor_static),
             "mic_line_gain_db_sd": self.mic_line_gain_db,
             "mic_floor_db_sd": self.mic_floor_db,
@@ -588,7 +596,7 @@ def sample_params(
             shape_z=_normal(site, "floor_shape_z", 0.0, 1.0, (FLOOR_SHAPE_N_CTRL,)),
             tilt_db_oct=_normal(site, "floor_tilt_db_oct", *priors.floor_tilt_db_oct),
             mic_floor_db=_normal(site, "mic_floor_db", 0.0, priors.mic_floor_db, (m,)),
-            exp=_normal(site, "floor_exp", *priors.floor_exp) if flight else zero,
+            exp=_lognormal(site, "floor_exp", priors.log_floor_exp) if flight else zero,
             static_rel=(
                 _lognormal(site, "floor_static_rel", priors.log_floor_static) if flight else zero
             ),

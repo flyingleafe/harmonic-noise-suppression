@@ -6,7 +6,7 @@ writes one ``.npz`` per support, and records what it chose. Everything a later
 reader needs to trust a number (which segment, which carrier, which label key,
 whether the bench stationarity rule passed) travels in ``index.json``.
 
-Four sets:
+Five sets:
 
 ``dregon-bench``
     The 20 DREGON single-motor cells ``Motor{1-4}_{50,60,70,80,90}`` plus the
@@ -22,6 +22,14 @@ Four sets:
     ``results/S2/cruise_8clip_refined.json``, so the eight are disjoint and the
     material is the legacy export's) plus the five frozen FLY124 evaluation
     supports.
+``michaels-all``
+    The R2 flight pool: FLY125's ONE standby window, its ramp CONTEXT window
+    and the same eight cruise windows, all 8 s, FLY125 only. R1 fitted cruise
+    alone (carriers 68.2-97.9 rev/s, a 1.44x span) and its speed-law exponents
+    were unidentified there; this set spans 36-98 rev/s so they are fitted
+    rather than extrapolated. See :func:`supports.set_michaels_all` for how
+    each regime's windows are chosen and why the recording offers only one of
+    each outside cruise.
 ``dregon-floor``
     The five frozen room-2 scoring windows (4 s, all mics) and, for the floor
     fit, five DISJOINT 8 s segments of the SAME recordings — starting after the

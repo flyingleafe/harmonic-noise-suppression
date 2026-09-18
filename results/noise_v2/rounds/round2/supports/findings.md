@@ -19,8 +19,8 @@ which silence satisfies perfectly, and put 12 of the 21 DREGON bench windows
 `line_margin_db` and `carrier_recording_rev_s` in `index.json` are the new
 per-recording evidence.
 
-Sets present: bench-points, dregon-bench. 
-Total supports cached: 156.
+Sets present: bench-points, dregon-bench, michaels-all. 
+Total supports cached: 166.
 
 ## bench-points
 
@@ -206,10 +206,29 @@ Carrier refinement (survey speed -> demodulated line): |shift| up to 0.0806 rev/
 | `bench_dregon_Motor4_90` | FAIL | 5.44-17.08 | 11.640 | 11.64 | 1.23 | 1.93 | [64] | 89.1400 | 89.1724 | +0.0324 | +0.0501 | 0.176 | 8 | 93121 |
 | `bench_dregon_allMotors_70` | PASS | 3.85-38.25 | 34.400 | 34.40 | 1.15 | 3.78, 3.72, 3.78, 6.12 | [67, 64, 63, 63] | 64.6471, 67.6588, 68.7396, 69.5655 | 64.6363, 67.6596, 68.7364, 69.5652 | -0.0108, +0.0008, -0.0032, -0.0003 | -0.0033, -0.0022, -0.0015, -0.0066 | 0.276, 0.242, 0.249, 0.232 | 8 | 275201 |
 
+## michaels-all
+
+10 of 10 specs built (2.1 s, git `fa0c49932719`).
+
+
+| support | recording | start (s) | dur (s) | label | mics | frames | rotors | carrier mean (rev/s) | carrier span (rev/s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `flight_michaels_FLY125@2.000+8_rps_refined` | FLY125 | 2.000 | 8.000 | `rps_refined` | 8 | 247 | 4 | 29.93, 33.91, 39.27, 35.20 | 21.14-40.33 |
+| `flight_michaels_FLY125@11.588+8_rps_refined` | FLY125 | 11.588 | 8.000 | `rps_refined` | 8 | 247 | 4 | 59.65, 54.44, 60.48, 55.55 | 30.97-95.99 |
+| `flight_michaels_FLY125@16.000+8_rps_refined` | FLY125 | 16.000 | 8.000 | `rps_refined` | 8 | 247 | 4 | 89.96, 74.30, 81.42, 75.39 | 69.09-95.95 |
+| `flight_michaels_FLY125@32.000+8_rps_refined` | FLY125 | 32.000 | 8.000 | `rps_refined` | 8 | 247 | 4 | 91.80, 74.91, 80.99, 75.23 | 72.59-94.38 |
+| `flight_michaels_FLY125@48.000+8_rps_refined` | FLY125 | 48.000 | 8.000 | `rps_refined` | 8 | 247 | 4 | 89.41, 75.01, 81.32, 77.44 | 68.75-93.50 |
+| `flight_michaels_FLY125@64.000+8_rps_refined` | FLY125 | 64.000 | 8.000 | `rps_refined` | 8 | 247 | 4 | 91.06, 74.48, 82.84, 74.48 | 69.57-94.14 |
+| `flight_michaels_FLY125@96.000+8_rps_refined` | FLY125 | 96.000 | 8.000 | `rps_refined` | 8 | 247 | 4 | 90.09, 74.62, 81.29, 76.74 | 71.46-93.83 |
+| `flight_michaels_FLY125@112.000+8_rps_refined` | FLY125 | 112.000 | 8.000 | `rps_refined` | 8 | 247 | 4 | 91.62, 74.05, 80.97, 75.98 | 69.57-97.41 |
+| `flight_michaels_FLY125@128.000+8_rps_refined` | FLY125 | 128.000 | 8.000 | `rps_refined` | 8 | 247 | 4 | 91.61, 74.21, 81.80, 73.92 | 70.72-95.16 |
+| `flight_michaels_FLY125@144.000+8_rps_refined` | FLY125 | 144.000 | 8.000 | `rps_refined` | 8 | 247 | 4 | 91.57, 74.24, 82.86, 75.27 | 69.71-97.10 |
+
 ## Bytes
 
 * `bench-points`: 1749.6 MB of `.npz` (power as float32)
 * `dregon-bench`: 132.6 MB of `.npz` (power as float32)
+* `michaels-all`: 101.7 MB of `.npz` (power as float32)
 
 The `.npz` caches are NOT committed (`results/**` is gitignored and they are hundreds of MB); `index.json` and this file are. Every row carries its `spec`, so a consumer rebuilds one support with `supports.load_support(<spec>)` and a whole set with
 
