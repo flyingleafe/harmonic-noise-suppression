@@ -11,6 +11,7 @@ demodulated per-order increment variance). CPU-small by construction.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 import pytest
@@ -43,8 +44,7 @@ def _params(
     carrier=None,
     sigma_nu: float = 0.8,
     lam: float = 5.5,
-    sigma_eps=(0.25, 0.6),
-    lam_eps=(2.0, 6.0),
+    gamma_hz: Any = 0.0,
     floor_mean_db: float = -40.0,
     shape_z=None,
     tilt: float = -2.0,
@@ -59,8 +59,7 @@ def _params(
     return SP.V2Params(
         sigma_nu=_t(sigma_nu),
         lam=_t(lam),
-        sigma_eps=_t(sigma_eps),
-        lam_eps=_t(lam_eps),
+        gamma_hz=_t(np.broadcast_to(np.asarray(gamma_hz, dtype=np.float64), (n_rotors, k_cap))),
         profile_db=_t(prof),
         floor=SP.FloorParams(
             mean_db=_t(floor_mean_db),
@@ -80,49 +79,81 @@ def _params(
 # ── the lag law ─────────────────────────────────────────────────────────────
 
 
-def test_lag_law_without_per_order_term_is_c4s_prior_lag_law():
-    """``sigma_eps = 0`` must leave EXACTLY C4's shaft-only prior ``R_k(tau)``.
+def test_lag_law_without_a_line_width_is_c4s_prior_lag_law():
+    """``gamma_hz = 0`` must leave EXACTLY C4's shaft-only prior ``R_k(tau)``.
 
-    The v2 law adds an independent per-order term to C4's; if the shaft factor
-    itself had drifted (a factor of two in ``V_theta``, ``k`` instead of
-    ``k^2``), every line width in the campaign would move and no other test
-    here would localise it.
+    The R3 law adds an independent per-line Lorentzian to C4's shaft factor;
+    if the shaft factor itself had drifted (a factor of two in ``V_theta``,
+    ``k`` instead of ``k^2``), every line width in the campaign would move and
+    no other test here would localise it.
     """
     tau = np.linspace(0.0, 2.0, 257)
     k = np.array([1.0, 2.0, 7.0, 20.0, 21.0, 130.0])[:, None]
     for sigma_nu, lam in ((0.45, 5.5), (1.8, 0.67), (0.31, 14.4)):
-        got = r_tau(tau[None, :], k, sigma_nu=sigma_nu, lam=lam, sigma_eps=0.0, lam_eps=2.0)
+        got = r_tau(tau[None, :], k, sigma_nu=sigma_nu, lam=lam, gamma_hz=0.0)
         want = RP.prior_r_tau(tau[None, :], k, lam=lam, sigma=sigma_nu, d=0.0)
         assert np.abs(got - want).max() < 1e-9
 
 
-def test_lag_law_splits_the_per_order_term_by_parity():
-    """The parity pair must select on ``k``, and saturate at ``exp(-sigma^2 k^p)``."""
-    tau = np.array([0.0, 1e4])  # 0 and "infinity" against lam_eps
-    k = np.array([20.0, 21.0])[:, None]
-    got = r_tau(tau[None, :], k, sigma_nu=1e-12, lam=5.5, sigma_eps=(0.2, 0.5), lam_eps=(3.0, 3.0))
-    assert got[0, 0] == pytest.approx(1.0, abs=1e-12)
-    assert got[0, 1] == pytest.approx(math.exp(-(0.2**2) * 20.0), rel=1e-9)
-    assert got[1, 1] == pytest.approx(math.exp(-(0.5**2) * 21.0), rel=1e-9)
+def test_lag_law_takes_one_width_per_line_and_agrees_across_backends():
+    """``gamma_hz`` is per ORDER (and per rotor), and numpy and torch agree.
+
+    The widths are a ``(R, K)`` block with no law across ``k``, so the test
+    plants a different width in every line of two rotors and checks each line
+    carries its OWN ``exp(-2 pi gamma |tau|)``. The torch path is the one the
+    fit differentiates and the numpy path is the one the diagnostics use; a
+    disagreement between them would put the renderer and the fit on different
+    laws.
+    """
+    tau = np.linspace(0.0, 0.5, 65)
+    k = np.arange(1.0, 5.0)
+    gamma = np.array([[0.3, 1.0, 4.0, 9.0], [0.05, 0.2, 0.5, 2.0]])  # (R, K)
+    got = r_tau(
+        tau[None, None, :],
+        k[None, :, None],
+        sigma_nu=1e-12,
+        lam=5.5,
+        gamma_hz=gamma[:, :, None],
+    )
+    want = np.exp(-2.0 * math.pi * gamma[:, :, None] * tau[None, None, :])
+    assert got.shape == (2, 4, 65)
+    assert np.abs(got - want).max() < 1e-9
+
+    tor = r_tau(
+        torch.as_tensor(tau)[None, None, :],
+        torch.as_tensor(k)[None, :, None],
+        sigma_nu=torch.tensor(1e-12, dtype=torch.float64),
+        lam=torch.tensor(5.5, dtype=torch.float64),
+        gamma_hz=torch.as_tensor(gamma)[:, :, None],
+    )
+    assert float((tor.detach().numpy() - got).__abs__().max()) < 1e-12
+
+
+def test_lag_law_rejects_a_width_without_a_lag_axis():
+    """A ``(K,)`` width beside a ``(K, 1)`` order column would broadcast into
+    a ``(K, K)`` outer product — every order carrying every other order's
+    width, silently. The law refuses it instead."""
+    tau = np.linspace(0.0, 0.1, 17)
+    k = np.arange(1.0, 5.0)[:, None]
+    with pytest.raises(ValueError, match="lag axis"):
+        r_tau(tau[None, :], k, sigma_nu=0.3, lam=2.0, gamma_hz=np.array([0.1, 0.2, 0.3, 0.4]))
 
 
 def test_lag_law_is_differentiable_in_every_parameter():
-    """The fit needs a gradient in all six dynamics parameters, not just sigma."""
+    """The fit needs a gradient in all three dynamics parameters."""
     tau = torch.linspace(0.0, 0.5, 65, dtype=torch.float64)
     k = torch.arange(1.0, 9.0, dtype=torch.float64)[:, None]
     args = {
         "sigma_nu": torch.tensor(0.45, dtype=torch.float64, requires_grad=True),
         "lam": torch.tensor(5.5, dtype=torch.float64, requires_grad=True),
-        "sigma_eps": torch.tensor([0.3, 0.5], dtype=torch.float64, requires_grad=True),
-        "lam_eps": torch.tensor([2.0, 1.5], dtype=torch.float64, requires_grad=True),
+        "gamma_hz": torch.full((8, 1), 0.05, dtype=torch.float64, requires_grad=True),
     }
     r_tau(
         tau[None, :],
         k,
         sigma_nu=args["sigma_nu"],
         lam=args["lam"],
-        sigma_eps=args["sigma_eps"],
-        lam_eps=args["lam_eps"],
+        gamma_hz=args["gamma_hz"],
     ).sum().backward()
     for name, v in args.items():
         assert v.grad is not None, name
@@ -130,12 +161,53 @@ def test_lag_law_is_differentiable_in_every_parameter():
         assert float(v.grad.abs().sum()) > 0.0, name
 
 
+def test_a_planted_lorentzian_width_is_recovered_from_the_line_it_makes():
+    """Plant ``gamma`` in ONE order and read its HWHM back off the line.
+
+    The whole point of R3's parameter is that it IS the line's half-width at
+    half maximum in Hz: a wrong ``2 pi``, a factor of two in the increment
+    variance or a Gaussian-instead-of-Lorentzian convention all move this
+    number. Read off the bench forward model's own periodogram with the shaft
+    switched off, on a 4 s window whose 0.25 Hz bins resolve a 2 Hz width
+    forty-fold.
+    """
+    n, k, f0, gamma = 1 << 16, 6, 149.0, 2.0
+    prof = np.full((1, k), -300.0)
+    prof[0, k - 1] = -10.0
+    par = _params(
+        n_rotors=1,
+        n_mics=1,
+        k_cap=k,
+        profile_db=prof,
+        carrier=[f0],
+        sigma_nu=1e-9,
+        lam=1.0,
+        gamma_hz=gamma,
+        floor_mean_db=-300.0,
+    )
+    grid = SP.bench_grid(n=n, sr=SR, floor_lag=1 << 13, apply_transfer=False)
+    m = SP.bench_model(grid, par, k_max=k)[0, 0].numpy()
+    df = SR / n
+    centre = int(round(k * f0 / df))
+    half = int(round(40.0 / df))
+    seg, freqs = (
+        m[centre - half : centre + half + 1],
+        grid.freqs_hz[centre - half : centre + half + 1],
+    )
+    above = np.nonzero(seg >= 0.5 * seg.max())[0]
+    hwhm = 0.5 * float(freqs[above[-1]] - freqs[above[0]] + df)
+    assert abs(hwhm - gamma) / gamma < 0.05
+
+
 def test_bench_spectrum_has_a_gradient_for_every_dynamics_parameter():
-    """Every one of the six dynamics values must move the expected spectrum.
+    """Every dynamics value — including EVERY line's own width — must move the
+    expected spectrum.
 
     This is deliberately a forward-model check, rather than only differentiating
     ``r_tau``: it catches a NumPy/detach conversion while a Pyro sample is being
-    carried through the finite-window transform.
+    carried through the finite-window transform, and it is the evidence that
+    the ``(R, K)`` width block reaches the objective line by line rather than
+    as one shared number.
     """
     par = _params(
         n_rotors=1,
@@ -143,12 +215,12 @@ def test_bench_spectrum_has_a_gradient_for_every_dynamics_parameter():
         k_cap=8,
         profile_db=np.linspace(-14.0, -27.0, 8)[None, :],
         carrier=[173.0],
+        gamma_hz=0.05,
     )
     dynamics = {
         "sigma_nu": par.sigma_nu.requires_grad_(),
         "lam": par.lam.requires_grad_(),
-        "sigma_eps": par.sigma_eps.requires_grad_(),
-        "lam_eps": par.lam_eps.requires_grad_(),
+        "gamma_hz": par.gamma_hz.requires_grad_(),
     }
     grid = SP.bench_grid(n=1024, sr=SR, apply_transfer=False, floor_lag=1024)
     m = SP.bench_model(grid, par, k_max=8)
@@ -174,12 +246,14 @@ def test_bench_matches_the_shared_finite_window_kernel():
     """
     n, n_mics, k_cap, f0 = 2048, 3, 7, 137.3
     prof = np.linspace(-10.0, -35.0, k_cap)[None, :]
+    gamma = np.linspace(0.5, 6.0, k_cap)[None, :]
     par = _params(
         n_rotors=1,
         n_mics=n_mics,
         k_cap=k_cap,
         profile_db=prof,
         carrier=[f0],
+        gamma_hz=gamma,
         shape_z=np.random.default_rng(3).standard_normal(NC),
         mic_floor_db=[0.0, 1.5, -0.7],
         mic_line_db=[[0.0], [2.0], [-1.0]],
@@ -199,8 +273,7 @@ def test_bench_matches_the_shared_finite_window_kernel():
         k[:, None],
         sigma_nu=0.8,
         lam=5.5,
-        sigma_eps=_t([0.25, 0.6]),
-        lam_eps=_t([2.0, 6.0]),
+        gamma_hz=_t(gamma[0])[:, None],
     )
     lines = expected_periodogram_from_atoms(
         torch.polar(amp[:, None] * w[None, :], kph), rho, n_fft=n, window_sumsq=sumsq
@@ -245,10 +318,10 @@ def test_bench_order_truncation_does_not_change_the_prediction():
 
 
 def test_flight_matches_c4_frame_model_where_the_laws_coincide():
-    """FLIGHT mode must equal C4's ``frame_model`` to 1e-6 at ``sigma_eps = 0``.
+    """FLIGHT mode must equal C4's ``frame_model`` to 1e-6 at ``gamma_hz = 0``.
 
     v2's flight forward model is C4's with ONE substitution — the prior lag law
-    at the kernel call. With the per-order term switched off and C4's ``D``
+    at the kernel call. With the line widths at zero and C4's ``D``
     driven to zero the two laws are identical, so any other difference (the
     within-window carrier integral, the phase centring, the speed law, the
     floor's envelope, the transfer, the grid power factor) shows up here.
@@ -310,8 +383,7 @@ def test_flight_matches_c4_frame_model_where_the_laws_coincide():
         profile_db=np.linspace(-12.0, -30.0, k_cap)[None, :],
         sigma_nu=0.8,
         lam=5.5,
-        sigma_eps=(0.0, 0.0),
-        lam_eps=(2.0, 2.0),
+        gamma_hz=0.0,
         floor_mean_db=-46.0,
         shape_z=np.asarray(c4.floor_shape_z.detach()),
         tilt=-1.7,
@@ -351,8 +423,7 @@ def test_bench_linewidth_matches_the_frozen_rate_gaussian():
         carrier=[f0],
         sigma_nu=sigma_nu,
         lam=lam,
-        sigma_eps=(0.0, 0.0),
-        lam_eps=(2.0, 2.0),
+        gamma_hz=0.0,
         floor_mean_db=-200.0,
     )
     grid = SP.bench_grid(n=n, sr=SR, floor_lag=n, apply_transfer=False)
@@ -382,15 +453,14 @@ def _planted_fit(*, k_cap: int, f0: float, n_mics: int) -> dict:
         carrier=[f0],
         sigma_nu=0.45,
         lam=5.5,
-        sigma_eps=(0.2, 0.35),
-        lam_eps=(2.0, 3.0),
+        gamma_hz=np.linspace(0.4, 3.0, k_cap)[None, :],
         floor_mean_db=-52.0,
         tilt=-3.0,
         amp_exp=0.0,
         floor_exp=0.0,
         static_rel=1.0,
     )
-    return dict(schema="noise-v2-fit/1", params=MD.params_to_dict(par))
+    return dict(schema="noise-v2-fit/2", params=MD.params_to_dict(par))
 
 
 def test_render_level_matches_the_model_in_absolute_units():
@@ -424,23 +494,24 @@ def test_render_level_matches_the_model_in_absolute_units():
 
 
 def test_render_reproduces_the_per_order_lag_law():
-    """Order 20 demodulated out of the render must carry the fitted ``V_eps``.
+    """One order demodulated out of the render must carry ``4 pi gamma tau``.
 
-    The renderer draws an OU per order; the fit assumes its increment variance
-    is ``2 sigma_eps^2 k^p (1 - exp(-lam_eps tau))``. A Wiener draw, a wrong
-    parity or a missing ``k^{p/2}`` in the drive all show up as a wrong
-    ``V_eps(20, tau)``, measured here with :mod:`utils.demod` on a render whose
-    shaft term is switched off so only the per-order process is left.
+    The renderer draws a Wiener phase per line; the fit assumes its increment
+    variance is ``4 pi gamma_rk |tau|``, which is what makes the line the
+    Lorentzian of half-width ``gamma_rk`` the law describes. A stationary OU
+    (the R1 draw, which SATURATES), a missing factor of two or a
+    ``2 pi``-instead-of-``4 pi`` all show up as a wrong ``V_psi(k, tau)``:
+    measured here with :mod:`utils.demod` on a render whose shaft term is
+    switched off, so only the per-line process is left, and at two lags, so a
+    saturating process cannot pass by matching one of them.
     """
     from utils.demod import demodulate
 
-    k, f0, dur, sigma_eps, lam_eps = 20, 149.0, 8.0, 0.35, 3.0
+    k, f0, dur, gamma = 20, 149.0, 8.0, 1.5
     fit = _planted_fit(k_cap=k, f0=f0, n_mics=1)
     p = fit["params"]
     p["sigma_nu"] = 1e-9
-    p["sigma_eps_even"] = p["sigma_eps_odd"] = sigma_eps
-    p["lam_eps_even"] = p["lam_eps_odd"] = lam_eps
-    p["floor_mean_db"] = -300.0
+    p["gamma_hz"] = np.full((1, k), gamma).tolist()
     p["floor"]["floor_mean_db"] = -300.0
     prof = np.full((1, k), -300.0)
     prof[0, k - 1] = -6.0
@@ -460,7 +531,7 @@ def test_render_reproduces_the_per_order_lag_law():
     for tau_s in (0.05, 0.2):
         lag = int(round(tau_s * SR))
         got = float(np.var(phi[lag:] - phi[:-lag]))
-        want = 2.0 * sigma_eps**2 * k * (1.0 - math.exp(-lam_eps * tau_s))
+        want = 4.0 * math.pi * gamma * tau_s
         assert abs(got - want) / want < 0.2, (tau_s, got, want)
 
 
@@ -470,13 +541,15 @@ def test_render_reproduces_the_per_order_lag_law():
 def test_bench_map_recovers_planted_dynamics_at_the_frozen_carrier():
     """A planted bench support must be recovered by the MAP fit end to end.
 
-    Small by design (one rotor, eight orders, 1 s, two microphones): what it
-    proves is that the Pyro model, the ``AutoDelta`` guide, the initialisation,
-    the Adam phase, the L-BFGS polish, the carrier refinement and the JSON all
-    compose — a wrong sign on the Whittle factor or a mis-scoped frozen block
-    cannot pass it.
+    Small by design (one rotor, eight orders, 1 s, four microphones): what it
+    proves is that the Pyro model, the ``AutoDelta`` guide, the measurement
+    pass, the Adam phase, the L-BFGS polish and the JSON all compose — a wrong
+    sign on the Whittle factor or a mis-scoped frozen block cannot pass it.
+    Four microphones, because the tolerance below is a statement about the
+    estimator and an R3 line lands in ~one bin: with two exponential cells per
+    line the 3 dB band is a coin toss about the draw, with eight it is not.
     """
-    k_cap, f0, n_mics = 8, 211.0, 2
+    k_cap, f0, n_mics = 8, 211.0, 4
     par = _params(
         n_rotors=1,
         n_mics=n_mics,
@@ -485,8 +558,7 @@ def test_bench_map_recovers_planted_dynamics_at_the_frozen_carrier():
         carrier=[f0],
         sigma_nu=0.9,
         lam=5.5,
-        sigma_eps=(0.2, 0.2),
-        lam_eps=(2.0, 2.0),
+        gamma_hz=0.05,
         floor_mean_db=-46.0,
         tilt=0.0,
     )
@@ -636,9 +708,9 @@ def test_floor_only_fit_recovers_the_level_of_a_transplanted_comb():
     assert out.diagnostics["init_comb_gain_db"] != pytest.approx(out.comb_gain_db, rel=1e-9)
 
 
-def test_pinned_dynamics_coordinates_are_held_and_the_rest_is_still_fitted():
-    """``pin`` must hold exactly the named coordinates — including ONE parity of
-    the two-vector sites — while the rest of the dynamics block is fitted.
+def test_a_pinned_dynamics_scalar_is_held_and_the_rest_is_still_fitted():
+    """``pin`` must hold exactly the named dynamics scalar while the rest of
+    the block is fitted.
 
     This is the identified-ridge recipe's contract: a rate the data cannot
     constrain is a CONSTANT of the model (no guide parameter, no prior term),
@@ -654,8 +726,7 @@ def test_pinned_dynamics_coordinates_are_held_and_the_rest_is_still_fitted():
         carrier=[f0],
         sigma_nu=0.9,
         lam=5.5,
-        sigma_eps=(0.2, 0.2),
-        lam_eps=(2.0, 2.0),
+        gamma_hz=0.05,
         floor_mean_db=-46.0,
         tilt=0.0,
     )
@@ -665,8 +736,10 @@ def test_pinned_dynamics_coordinates_are_held_and_the_rest_is_still_fitted():
     batch = MD.bench_batch(
         name="pinned", power=obs, sr=SR, carrier_mean=np.array([f0]), k_cap=k_cap
     )
-    pin = MD.dynamics_pin({"lam": 7.25, "lam_eps_odd": 3.5})
-    assert pin == {"lam": 7.25, "lam_eps": [None, 3.5]}
+    pin = MD.dynamics_pin({"lam": 7.25})
+    assert pin == {"lam": 7.25}
+    with pytest.raises(ValueError, match="cannot pin"):
+        MD.dynamics_pin({"lam_eps_odd": 3.5})
     out = FT.fit_support(
         batch,
         mode="bench",
@@ -675,11 +748,40 @@ def test_pinned_dynamics_coordinates_are_held_and_the_rest_is_still_fitted():
     )
     got = MD.params_to_dict(out.params)
     assert got["lam"] == pytest.approx(7.25, rel=1e-12)
-    assert got["lam_eps_odd"] == pytest.approx(3.5, rel=1e-12)
     # the free coordinates moved off their prior-centre initialisation
-    assert got["lam_eps_even"] != pytest.approx(math.exp(MD.PRIORS.log_lam_eps[0]), rel=1e-6)
     assert got["sigma_nu"] != pytest.approx(math.exp(MD.PRIORS.log_sigma_nu[0]), rel=1e-6)
-    assert out.optimiser["pinned_dynamics"] == {"lam": 7.25, "lam_eps": [None, 3.5]}
+    assert np.asarray(got["gamma_hz"]).shape == (1, k_cap)
+    assert out.optimiser["pinned_dynamics"] == {"lam": 7.25}
+
+
+def test_a_round_one_fit_still_renders_through_the_schema_loader():
+    """A ``noise-v2-fit/1`` payload must still render, with its per-order OU
+    mapped onto the equivalent Lorentzian width.
+
+    R1 and R2 published fits in ``/1``; R3 must not orphan them. The mapping
+    ``gamma_rk = sigma_eps^2 k^p lam_eps / (2 pi)`` (by the parity of ``k``)
+    is the short-lag equivalence of the two laws, and this checks it lands on
+    the right numbers AND that the renderer accepts the old schema tag.
+    """
+    k_cap, f0 = 6, 149.0
+    fit = _planted_fit(k_cap=k_cap, f0=f0, n_mics=2)
+
+    params = {kk: v for kk, v in fit["params"].items() if kk != "gamma_hz"}
+    params.update(sigma_eps_even=0.2, sigma_eps_odd=0.5, lam_eps_even=3.0, lam_eps_odd=4.0, p=1.0)
+    old = dict(schema="noise-v2-fit/1", params=params)
+
+    gamma = MD.gamma_from_params(params)
+    k = np.arange(1, k_cap + 1)
+    want = np.where(k % 2 == 0, 0.2**2 * 3.0, 0.5**2 * 4.0) * k / (2.0 * math.pi)
+    assert gamma.shape == (1, k_cap)
+    assert np.abs(gamma[0] - want).max() < 1e-12
+
+    n = SR  # one second is enough: this is a schema check, not a level check
+    audio = RD.render_noise(old, np.full((1, n), f0), sr=SR, n_mics=2, seed=3)
+    assert isinstance(audio, np.ndarray)
+    assert audio.shape == (2, n) and np.isfinite(audio).all()
+    # and the frozen mapping a later fit would read carries the same widths
+    assert np.allclose(np.asarray(MD.frozen_from_params(params)["gamma_hz"]), gamma)
 
 
 def test_expected_periodogram_frames_match_the_evaluator_grid():
