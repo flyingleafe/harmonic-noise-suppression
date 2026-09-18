@@ -138,6 +138,23 @@ def _mutate(fit: dict[str, Any], **kw: Any) -> dict[str, Any]:
     return out
 
 
+def _pool_span(fit: dict[str, Any]) -> dict[str, Any]:
+    """The carrier range the fit's OWN objective saw, as it recorded it.
+
+    ``diagnostics.batch.carrier_{min,max}_rev_s`` is what the flight batch
+    reports; the ratio of the two is the only leverage the pool gives the two
+    speed exponents.
+    """
+    batch = ((fit.get("diagnostics") or {}).get("batch") or {}) if fit else {}
+    lo, hi = batch.get("carrier_min_rev_s"), batch.get("carrier_max_rev_s")
+    if lo is None or hi is None or float(lo) <= 0.0:
+        return dict(pool_carrier_rev_s=None, pool_speed_span=None)
+    return dict(
+        pool_carrier_rev_s=[float(lo), float(hi)],
+        pool_speed_span=float(hi) / float(lo),
+    )
+
+
 @dataclass(frozen=True)
 class ArmSpec:
     """One rendered arm of the comparison."""
@@ -452,7 +469,11 @@ def run(
             floor_exp=float(fit["params"]["floor"]["floor_exp"]),
             floor_static_rel=float(fit["params"]["floor"]["floor_static_rel"]),
             floor_mean_db=float(fit["params"]["floor"]["floor_mean_db"]),
+            sigma_nu=float(fit["params"]["sigma_nu"]),
+            lam=float(fit["params"]["lam"]),
             amp_rps_ref=float(RD.AMP_RPS_REF),
+            n_pool_windows=len(fit.get("supports") or []),
+            **_pool_span(fit),
         ),
         protocol=dict(
             seed=int(seed),
@@ -656,18 +677,7 @@ def verdicts(payload: dict[str, Any]) -> dict[str, Any]:
                     env(regime, "comb_minus_floor_db") - env("cruise", "comb_minus_floor_db")
                 )
             ),
-            pit=dict(
-                real=arm(regime, "real", "pit_mae"),
-                legacy=arm(regime, "legacy", "pit_mae"),
-                v2=arm(regime, "v2", "pit_mae"),
-                v2_nocomb=arm(regime, "v2_nocomb", "pit_mae"),
-                v2_amp_exp0=arm(regime, "v2_amp_exp0", "pit_mae"),
-                v2_floor_exp0=arm(regime, "v2_floor_exp0", "pit_mae"),
-                v2_both_exp0=arm(regime, "v2_both_exp0", "pit_mae"),
-                v2_floor_matched=arm(regime, "v2_floor_matched", "pit_mae"),
-                v2_prior_exps=arm(regime, "v2_prior_exps", "pit_mae"),
-                v2_level_matched_exps=arm(regime, "v2_level_matched_exps", "pit_mae"),
-            ),
+            pit={a.name: arm(regime, a.name, "pit_mae") for a in ARMS if a.probe},
             level_offset_db=dict(
                 legacy=arm(regime, "legacy", "ltas_level_offset_db"),
                 v2=arm(regime, "v2", "ltas_level_offset_db"),
@@ -705,8 +715,10 @@ FIG_COLOURS = {
     "v2_nocomb": "#bbbbbb",
     "v2_amp_exp0": "#9467bd",
     "v2_floor_matched": "#8c564b",
-    "v2_prior_exps": "#2ca02c",
+    "v2_prior_exps": "#006d2c",
     "v2_level_matched_exps": "#17becf",
+    "v2_prior_exps_nofloor": "#e377c2",
+    "v2_prior_exps_lowjitter": "#bcbd22",
 }
 FIG_STYLE = {
     "real": ("-", 2.6),
@@ -736,6 +748,23 @@ def _smooth_log(
     centres = np.sqrt(edges[:-1] * edges[1:])
     ok = np.isfinite(out)
     return centres[ok], 10.0 * np.log10(np.maximum(out[ok], 1e-300))
+
+
+def _save(fig: Any, path: Path, *, colors: int = 128) -> str:
+    """Save a figure and palette-quantise it: these PNGs go into the repo.
+
+    A full-colour 160 dpi spectrogram of NOISE is ~5 MB and compresses badly;
+    an adaptive 128-colour palette is visually identical here and a few hundred
+    kilobytes.
+    """
+    from PIL import Image
+
+    fig.savefig(path)
+    with Image.open(path) as im:
+        im.convert("RGB").quantize(colors=int(colors), method=Image.Quantize.MEDIANCUT).save(
+            path, optimize=True
+        )
+    return str(path)
 
 
 def write_figures(payload: dict[str, Any], figures: dict[str, Any], out: Path) -> list[str]:
@@ -805,9 +834,8 @@ def write_figures(payload: dict[str, Any], figures: dict[str, Any], out: Path) -
         ax2.grid(alpha=0.25, axis="y")
         fig.tight_layout()
         path = out / f"ltas_{regime}.png"
-        fig.savefig(path)
+        written.append(_save(fig, path))
         plt.close(fig)
-        written.append(str(path))
 
         panels = [n for n in FIG_PANELS if n in fig_data["waves"]]
         fig, axs = plt.subplots(
@@ -868,9 +896,8 @@ def write_figures(payload: dict[str, Any], figures: dict[str, Any], out: Path) -
         )
         fig.tight_layout()
         path = out / f"spectrogram_{regime}.png"
-        fig.savefig(path)
+        written.append(_save(fig, path))
         plt.close(fig)
-        written.append(str(path))
     return written
 
 
@@ -901,6 +928,77 @@ def _ctf(row: dict[str, Any], arm: str, k: int) -> float | None:
         if int(c["k"]) == int(k):
             return c["mean_db"]
     return None
+
+
+def residual_paragraph(payload: dict[str, Any]) -> list[str]:
+    """What is LEFT once both envelopes stop extrapolating, and why."""
+    standby = _by_regime(payload, "standby")
+    ramp = _by_regime(payload, "ramp")
+    if standby is None or ramp is None:
+        return []
+
+    def pit(row: dict[str, Any], name: str) -> str:
+        return _f(row["arms"].get(name, {}).get("pit_mae"))
+
+    out = [
+        "The residual, and what it is NOT: with both exponents at their prior mean the ramp is "
+        f"already at the real clip's own number ({pit(ramp, 'v2_prior_exps')} vs real "
+        f"{pit(ramp, 'real')} rev/s, legacy {pit(ramp, 'legacy')}), but standby only falls to "
+        f"{pit(standby, 'v2_prior_exps')} against a legacy {pit(standby, 'legacy')}. Two "
+        "further renders separate what remains: the comb ALONE, floor muted "
+        f"({pit(standby, 'v2_prior_exps_nofloor')} rev/s at standby, "
+        f"{pit(ramp, 'v2_prior_exps_nofloor')} at ramp), and the same render with the shaft "
+        f"jitter at a quarter of the fitted `sigma_nu` = "
+        f"{_f(payload['fit'].get('sigma_nu'), '.2f')} rev/s "
+        f"({pit(standby, 'v2_prior_exps_lowjitter')} rev/s at standby, "
+        f"{pit(ramp, 'v2_prior_exps_lowjitter')} at ramp) — `sigma_nu` is in rev/s, so the SAME "
+        "fitted jitter is a "
+        f"{_f(float(payload['fit'].get('amp_rps_ref') or 80.0) / max(standby['mean_reference_rps'], 1e-9), '.1f')}x "
+        "larger fraction of a standby carrier than of the reference.",
+        "",
+        _residual_verdict(standby),
+        "",
+    ]
+    return out
+
+
+def _residual_verdict(standby: dict[str, Any]) -> str:
+    """Which of the two residual renders actually moves standby."""
+
+    def v(name: str) -> float | None:
+        got = standby["arms"].get(name, {}).get("pit_mae")
+        return None if got is None else float(got)
+
+    base, nofloor, jitter = (
+        v("v2_prior_exps"),
+        v("v2_prior_exps_nofloor"),
+        v("v2_prior_exps_lowjitter"),
+    )
+    if base is None or nofloor is None or jitter is None:
+        return "_The two residual renders are not in this pass._"
+    best = min(nofloor, jitter)
+    if best > 0.6 * base:
+        return (
+            f"**Neither moves it**: muting the floor gives {nofloor:.3f} rev/s and quartering the "
+            f"jitter {jitter:.3f}, against {base:.3f} with both envelopes pinned. The standby "
+            "residual is therefore in the COMB ITSELF — a per-order profile fitted where 81 "
+            "orders reach 7.5 kHz, reused where they reach 3.3 kHz — and no reparameterisation "
+            "of the speed laws will remove it. That is what makes (c) (a standby support in the "
+            "fit) load-bearing rather than optional."
+        )
+    if nofloor <= jitter:
+        return (
+            f"**The floor still masks the comb**: muting it takes standby from {base:.3f} to "
+            f"{nofloor:.3f} rev/s (quartering the jitter only reaches {jitter:.3f}). The floor "
+            "block itself — its cruise-fitted shape and level, not only its speed law — has to "
+            "be refitted where the comb is weak."
+        )
+    return (
+        f"**The cruise-fitted shaft jitter smears the standby comb**: quartering `sigma_nu` takes "
+        f"standby from {base:.3f} to {jitter:.3f} rev/s (muting the floor only reaches "
+        f"{nofloor:.3f}). A jitter parameterised in rev/s rather than in revolutions is the next "
+        "defect in line."
+    )
 
 
 def hypothesis_section(payload: dict[str, Any]) -> list[str]:
@@ -963,14 +1061,27 @@ def hypothesis_section(payload: dict[str, Any]) -> list[str]:
         f"| **H3** — the render encodes a different speed | {'SUPPORTED' if h3 else '**REFUTED**'} | {ev} |"
     )
     # H4 — something regime-independent
+    sb = _by_regime(payload, "standby") or rows[0][1]
+    sb_floor0 = sb["arms"]["v2_floor_exp0"]
     ev = (
-        f"cruise `{cruise['support']['key']}` runs the SAME code path and is at parity: v2 PIT "
+        f"cruise `{cruise['support']['key']}` runs the SAME code path, the same mic gains and the "
+        "same seed, and is at parity: v2 PIT "
         f"{_f(cruise['arms']['v2'].get('pit_mae'))} rev/s, level offset "
         f"{_f(cruise['arms']['v2']['ltas_level_offset_db'], '+.2f')} dB, LTAS "
-        f"{_f(cruise['arms']['v2']['ltas_mean_abs_db'], '.2f')} dB; peak |x| "
-        + ", ".join(f"{name} {_f(row['arms']['v2']['peak_abs'], '.3f')}" for name, row in rows)
-        + f", cruise {_f(cruise['arms']['v2']['peak_abs'], '.3f')} (nothing clips; the renderer "
-        "has no normalisation and the mic gains are shared by every regime)"
+        f"{_f(cruise['arms']['v2']['ltas_mean_abs_db'], '.2f')} dB. Peak |x| of the v2 render vs "
+        "the real clip: "
+        + ", ".join(
+            f"{name} {_f(row['arms']['v2']['peak_abs'], '.2f')} vs "
+            f"{_f(row['arms']['real']['peak_abs'], '.2f')}"
+            for name, row in rows
+        )
+        + f", cruise {_f(cruise['arms']['v2']['peak_abs'], '.2f')} vs "
+        f"{_f(cruise['arms']['real']['peak_abs'], '.2f')} — the standby render is loud, not "
+        "clipped (the probe reads float64 in memory and the renderer applies no normalisation), "
+        "and a level error alone does not do this: `v2_floor_exp0` sits within "
+        f"{_f(abs(float(sb_floor0['ltas_level_offset_db'])), '.1f')} dB "
+        "of the real standby level and still scores "
+        f"{_f(sb_floor0.get('pit_mae'))} rev/s"
     )
     out.append(f"| **H4** — a regime-independent defect cruise tolerates | **REFUTED** | {ev} |")
     out.append("")
@@ -981,23 +1092,56 @@ def hypothesis_section(payload: dict[str, Any]) -> list[str]:
             f"{name} {_f(row['envelope']['top_comb_line_hz'], '.0f')} Hz" for name, row in rows
         )
         + f", cruise {_f(cruise['envelope']['top_comb_line_hz'], '.0f')} Hz. Above that line the "
-        "standby render is pure floor, which is why its shape error survives even after the level "
-        "is fixed."
+        "standby render is pure floor."
     )
     out.append("")
+    out.extend(residual_paragraph(payload))
     return out
 
 
+def patch_preamble(payload: dict[str, Any]) -> list[str]:
+    """The diagnosis sentence, with the fit's OWN recorded pool span in it."""
+    f = payload["fit"]
+    pool = f.get("pool_carrier_rev_s")
+    span = f.get("pool_speed_span")
+    standby = _by_regime(payload, "standby")
+    cruise = _by_regime(payload, "cruise")
+    gap_db = (
+        0.0
+        if standby is None or cruise is None
+        else abs(
+            float(standby["envelope"]["comb_minus_floor_db"])
+            - float(cruise["envelope"]["comb_minus_floor_db"])
+        )
+    )
+    where = (
+        "the pool's carrier range is not recorded in this fit"
+        if pool is None
+        else f"the fit's own objective saw carriers {pool[0]:.1f}-{pool[1]:.1f} rev/s, a span of "
+        f"{span:.3f}x"
+    )
+    outside = (
+        ""
+        if pool is None or standby is None
+        else f" The standby support runs at {standby['mean_reference_rps']:.1f} rev/s — "
+        f"{standby['mean_reference_rps'] / float(pool[0]):.2f}x the LOWEST carrier the fit ever "
+        "saw, so both envelopes are pure extrapolation there."
+    )
+    return [
+        "## Minimal patch proposal (NOT applied — Main's call)",
+        "",
+        "Both supported hypotheses are ONE defect: the two speed-envelope exponents are fitted on "
+        f"a pool that barely varies in speed ({where}, {f['n_pool_windows']} FLY125 cruise "
+        f"windows), where they trade almost exactly against `profile_db` and `floor_mean_db`. The "
+        f"optimiser took `amp_exp` = {f['amp_exp']:.2f} and `floor_exp` = {f['floor_exp']:.2f} "
+        "against a `N(2, 2)` prior that 24 M Whittle cells simply outvote; in sample the two "
+        "extremes cancel, and outside it they pull the comb and the floor "
+        f"{gap_db:.0f} dB apart." + outside + " Two changes, smallest first:",
+        "",
+    ]
+
+
 PATCH_PROPOSAL: list[str] = [
-    "## Minimal patch proposal (NOT applied — Main's call)",
-    "",
-    "Both supported hypotheses are ONE defect: on a cruise-only pool the two speed-envelope "
-    "exponents are barely identified (the FLY125 cruise windows span 74.8-92.1 rev/s per rotor, "
-    "under +-12 % of the 80 rev/s reference), so 24.4 M Whittle nats drag them to `amp_exp` "
-    "= 10.02 and `floor_exp` = -10.19 against a `N(2, 2)` prior that cannot hold them. In sample "
-    "the two extremes cancel; extrapolated down to 0.45 of the reference speed they move the comb "
-    "and the floor 70 dB apart. Two changes, smallest first:",
-    "",
     "**(a) the floor exponent may not be negative** — a rotor floor cannot get LOUDER as the "
     "rotors slow. One site changes parameterisation (`src/experiments/noise_model/model.py`):",
     "",
@@ -1053,6 +1197,52 @@ PATCH_PROPOSAL: list[str] = [
 ]
 
 
+def _equal_regime_note(payload: dict[str, Any]) -> list[str]:
+    """Where the frozen Michael's bar would stand under each variant.
+
+    INDICATIVE, not the gate: the frozen gate averages per-regime means over
+    all five Michael's supports (two standby, one ramp, two cruise) and this
+    study measures one support per regime.
+    """
+    arms = ("v2", "v2_prior_exps", "v2_level_matched_exps", "legacy", "real")
+    rows = [_by_regime(payload, r) for r in ("standby", "ramp", "cruise")]
+    if any(r is None for r in rows):
+        return []
+    out = [
+        "Equal-regime mean of the three supports measured here, against the frozen "
+        f"Michael's parity bar {GT.MICHAELS_PIT_BOUND:.6f} rev/s "
+        f"(1.05 x the legacy {GT.MICHAELS_BASELINE_REGIME_MEAN:.6f}) — INDICATIVE only, the "
+        "gate averages five supports:",
+        "",
+    ]
+    out.append("| arm | " + " | ".join(arms) + " |")
+    out.append("|---|" + "---:|" * len(arms))
+    cells: list[str] = []
+    means: dict[str, float] = {}
+    for name in arms:
+        vals = [r["arms"].get(name, {}).get("pit_mae") for r in rows if r is not None]
+        if any(v is None for v in vals):
+            cells.append("—")
+            continue
+        mean = float(np.mean([float(v) for v in vals]))
+        means[name] = mean
+        cells.append(f"{mean:.3f}{' ✓' if mean <= GT.MICHAELS_PIT_BOUND else ' ✗'}")
+    out.append("| equal-regime mean (3 supports) | " + " | ".join(cells) + " |")
+    out.append("")
+    if "legacy" in means:
+        out.append(
+            f"Read the DIFFERENCES, not the absolutes: the legacy arm itself scores "
+            f"{means['legacy']:.3f} on this three-support subset against its own frozen "
+            f"{GT.MICHAELS_BASELINE_REGIME_MEAN:.6f} over five supports (this subset's single "
+            f"ramp support is the harder one — legacy {_f(rows[1]['arms']['legacy'].get('pit_mae') if rows[1] else None)} "
+            f"here against the frozen legacy ramp reference "
+            f"{GT.MICHAELS_BASELINE_PIT_MAE.get('ramp', float('nan')):.6f}), so the subset is "
+            "harsher than the gate and no row of it is a gate verdict."
+        )
+        out.append("")
+    return out
+
+
 def patch_expectation(payload: dict[str, Any]) -> list[str]:
     """The MEASURED effect of each proposed change, from this run's variants."""
     out = [
@@ -1081,6 +1271,7 @@ def patch_expectation(payload: dict[str, Any]) -> list[str]:
             f"{_f(row.get('level_matched_exp'), '.2f')}) | {pit('legacy')} | {pit('real')} |"
         )
     out.append("")
+    out.extend(_equal_regime_note(payload))
     return out
 
 
@@ -1174,6 +1365,7 @@ def findings(payload: dict[str, Any], *, job: str | None, figures: list[str]) ->
                 )
     out.append("")
     out.extend(hypothesis_section(payload))
+    out.extend(patch_preamble(payload))
     out.extend(PATCH_PROPOSAL)
     out.extend(patch_expectation(payload))
     if figures:
