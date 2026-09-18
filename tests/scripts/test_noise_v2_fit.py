@@ -20,9 +20,9 @@ def _fit(
     seed: int = 0,
     dyn: float = 1.0,
 ) -> dict[str, Any]:
-    """A minimal ``noise-v2-fit/1`` payload: the fields the reductions read."""
+    """A minimal ``noise-v2-fit/2`` payload: the fields the reductions read."""
     return dict(
-        schema="noise-v2-fit/1",
+        schema="noise-v2-fit/2",
         support=support,
         kind="bench",
         mode="bench",
@@ -31,10 +31,7 @@ def _fit(
         params=dict(
             sigma_nu=0.45 * dyn,
             lam=5.5 * dyn,
-            sigma_eps_even=0.3 * dyn,
-            sigma_eps_odd=0.3 * dyn,
-            lam_eps_even=2.0 * dyn,
-            lam_eps_odd=2.0 * dyn,
+            gamma_hz=[[0.01 * dyn * k for k in range(1, k_max + 1)]],
             carrier_rev_s=[70.0],
             profile=dict(
                 profile_db=[[profile_db] * k_max],
@@ -67,8 +64,16 @@ def test_mean_comb_averages_each_order_over_the_fits_that_reach_it(tmp_path: Pat
     assert prof[0, 4] == pytest.approx(-25.0)
     assert prof[0, 5] == pytest.approx(-20.0)
     assert not np.isnan(prof).any()
+    # the per-line widths travel with the comb, log-meaned over the fits that
+    # reach each order: order 1 is 0.01 in all three, so the log-mean is 0.01
+    gam = np.asarray(frozen["gamma_hz"], dtype=np.float64)
+    assert gam.shape == (1, 6)
+    assert gam[0, 0] == pytest.approx(0.01)
+    assert gam[0, 3] == pytest.approx(0.04)
     # a one-rotor comb frozen onto a four-rotor airframe keeps its width
-    assert np.asarray(NVF.expand_frozen(frozen, n_rotors=4)["profile_db"]).shape == (4, 6)
+    expanded = NVF.expand_frozen(frozen, n_rotors=4)
+    assert np.asarray(expanded["profile_db"]).shape == (4, 6)
+    assert np.asarray(expanded["gamma_hz"]).shape == (4, 6)
 
 
 def test_reduce_restarts_reports_the_best_start_and_the_spread(tmp_path: Path):
@@ -95,3 +100,9 @@ def test_reduce_restarts_reports_the_best_start_and_the_spread(tmp_path: Path):
     assert block["best_minus_worst_per_cell"] == pytest.approx(0.06)
     assert block["params"]["lam"]["max_over_min"] == pytest.approx(4.0)
     assert block["params"]["lam"]["median"] == pytest.approx(11.0)
+    # and the widths: the ladder per restart plus their log-mean spread, so a
+    # support whose starts disagree about the line widths says so
+    g = block["params"]["gamma_hz"]
+    assert g["k"] == [1, 2, 4]
+    assert g["values"][0] == pytest.approx([0.01, 0.02, 0.04])
+    assert g["log_mean"]["max_over_min"] == pytest.approx(4.0)

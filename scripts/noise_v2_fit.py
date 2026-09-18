@@ -17,7 +17,7 @@
     # the round-1 fit findings table over everything already written
     python scripts/noise_v2_fit.py findings
 
-Every fit lands at ``<out>/<support>__<mode>.json`` in the ``noise-v2-fit/1``
+Every fit lands at ``<out>/<support>__<mode>.json`` in the ``noise-v2-fit/2``
 schema (:func:`experiments.noise_model.fit.write_fit`), and the bench modes run
 through :mod:`utils.gridrun` so 135 points are one restartable unit grid: a
 unit whose JSON already exists is skipped, a unit that raises leaves a ``.err``
@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -41,10 +42,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from utils.gridrun import Unit, add_gridrun_args, gridrun_from_args, unit_path  # noqa: E402
 
-OUT_DIR = "results/noise_v2/rounds/round1/fits"
+OUT_DIR = "results/noise_v2/rounds/round3/fits"
 #: profile width. 130 is C4's ``k_cap``; the forward model additionally caps
 #: every support at the highest order below its own Nyquist.
 K_CAP = 130
+#: The orders every summary quotes ``gamma_rk`` at. Low orders are where the
+#: shaft-absorption check lives, high ones are where a free width is supposed
+#: to earn its place.
+GAMMA_LADDER = (1, 2, 4, 8, 16, 32)
+#: The fit schemas the reductions read: this round's and R1/R2's.
+SCHEMAS = ("noise-v2-fit/2", "noise-v2-fit/1")
+
+
+def gamma_ladder(gamma_hz: Any) -> dict[str, Any]:
+    """``gamma_rk`` at :data:`GAMMA_LADDER`, per rotor, plus its log-mean."""
+    import numpy as np
+
+    g = np.atleast_2d(np.asarray(gamma_hz, dtype=np.float64))
+    ks = [k for k in GAMMA_LADDER if k <= int(g.shape[1])]
+    return dict(
+        k=ks,
+        value=[g[:, k - 1].tolist() for k in ks],
+        log_mean=float(np.exp(np.mean(np.log(np.maximum(g, 1e-12))))),
+    )
 
 
 # ── one unit ────────────────────────────────────────────────────────────────
@@ -147,10 +167,9 @@ def worker(unit: Unit) -> dict[str, Any]:
         seed=int(optim.seed),
         sigma_nu=d["sigma_nu"],
         lam=d["lam"],
-        sigma_eps_even=d["sigma_eps_even"],
-        sigma_eps_odd=d["sigma_eps_odd"],
-        lam_eps_even=d["lam_eps_even"],
-        lam_eps_odd=d["lam_eps_odd"],
+        gamma_hz=gamma_ladder(np.asarray(d["gamma_hz"], dtype=np.float64)),
+        gamma_low_order_check=outcome.diagnostics.get("gamma_low_order_check"),
+        span_pins=outcome.diagnostics.get("span_pins"),
         carrier_rev_s=d["carrier_rev_s"],
         comb_gain_db=outcome.comb_gain_db,
         n_rotors=batch.n_rotors,
@@ -168,16 +187,19 @@ def mean_comb(paths: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
     ``Motor{1-4}_70`` single-motor fits: the flight support has four rotors on
     one airframe and no bench fit of the four TOGETHER is a fit (the four-motor
     static record is the VALIDATION support, not a fitting one). Dynamics and
-    the per-order profile are averaged in their own natural scale — rates and
-    scales in log, dB levels in dB — over the fits that carry them.
+    the per-order profile are averaged in their own natural scale — rates,
+    scales and the per-line WIDTHS in log, dB levels in dB — over the fits
+    that carry them.
 
-    "The fits that carry them" is literal for the profile: every support caps
-    its orders at its OWN Nyquist, so the four Motor*_70 fits are 116 to 118
-    orders wide and stacking them raises. Order ``k`` is therefore the dB-mean
-    over exactly the fits that reach ``k``, and the frozen profile is as wide
-    as the widest of them.
+    "The fits that carry them" is literal for the profile and the widths:
+    every support caps its orders at its OWN Nyquist, so the four Motor*_70
+    fits are 116 to 118 orders wide and stacking them ragged. Order ``k`` is
+    therefore the mean over exactly the fits that reach ``k``, and the frozen
+    comb is as wide as the widest of them.
     """
     import numpy as np
+
+    from experiments.noise_model import model as MD
 
     fits = [json.loads(Path(p).read_text()) for p in paths]
     if not fits:
@@ -188,22 +210,26 @@ def mean_comb(paths: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
         int(np.asarray(q["profile"]["profile_db"], dtype=np.float64).shape[1]) for q in par
     )
     prof = np.full((len(par), widest), np.nan, dtype=np.float64)
+    gam = np.full((len(par), widest), np.nan, dtype=np.float64)
     for i, q in enumerate(par):
         row = np.asarray(q["profile"]["profile_db"], dtype=np.float64)[0]
         prof[i, : row.size] = row
+        # a /1 fit's per-order OU is mapped onto its equivalent width first,
+        # so a frozen comb may mix rounds without mixing laws
+        grow = MD.gamma_from_params(q)[0]
+        gam[i, : grow.size] = np.maximum(grow, 1e-12)
     frozen = dict(
         sigma_nu=log_mean("sigma_nu"),
         lam=log_mean("lam"),
-        sigma_eps=[log_mean("sigma_eps_even"), log_mean("sigma_eps_odd")],
-        lam_eps=[log_mean("lam_eps_even"), log_mean("lam_eps_odd")],
+        gamma_hz=np.exp(np.nanmean(np.log(gam), axis=0))[None, :].tolist(),
         profile_db=np.nanmean(prof, axis=0)[None, :].tolist(),
         amp_exp=float(np.mean([float(q["profile"]["amp_exp"]) for q in par])),
     )
     return frozen, dict(
         frozen_comb_from=[f["support"] for f in fits],
         frozen_comb_paths=[str(p) for p in paths],
-        rule="log-mean of the rates and scales, dB-mean of the per-order profile over the "
-        "fits that reach each order",
+        rule="log-mean of the rates, scales and per-line widths, dB-mean of the per-order "
+        "profile, over the fits that reach each order",
         profile_orders=widest,
         profile_orders_per_fit=[
             int(np.asarray(q["profile"]["profile_db"], dtype=np.float64).shape[1]) for q in par
@@ -219,20 +245,16 @@ def expand_frozen(frozen: dict[str, Any], *, n_rotors: int) -> dict[str, Any]:
     prof = np.asarray(frozen["profile_db"], dtype=np.float64)
     if prof.shape[0] != n_rotors:
         out["profile_db"] = np.repeat(prof[:1], n_rotors, axis=0).tolist()
+    gam = np.asarray(frozen["gamma_hz"], dtype=np.float64)
+    if gam.shape[0] != n_rotors:
+        out["gamma_hz"] = np.repeat(gam[:1], n_rotors, axis=0).tolist()
     return out
 
 
 # ── restarts ────────────────────────────────────────────────────────────────
 
 
-DYN_KEYS = (
-    "sigma_nu",
-    "lam",
-    "sigma_eps_even",
-    "sigma_eps_odd",
-    "lam_eps_even",
-    "lam_eps_odd",
-)
+DYN_KEYS = ("sigma_nu", "lam")
 
 
 def reduce_restarts(out_dir: Path, *, mode: str = "bench") -> list[dict[str, Any]]:
@@ -240,13 +262,18 @@ def reduce_restarts(out_dir: Path, *, mode: str = "bench") -> list[dict[str, Any
 
     The reported fit is the best restart — the lowest polished objective — and
     it carries a ``restarts`` block: every restart's objective and dynamics,
-    the best-minus-median and best-minus-worst objective PER OBSERVED CELL, and
-    the min/median/max of each dynamics parameter over the restarts. A support
-    whose restarts disagree by far more than the convergence tolerance
-    (1e-4 nats/cell) was not fitted so much as sampled, and this block is the
-    evidence for it rather than a claim about it.
+    the best-minus-median and best-minus-worst objective PER OBSERVED CELL,
+    the min/median/max of each dynamics SCALAR over the restarts and the same
+    for ``gamma_rk`` at :data:`GAMMA_LADDER` (a whole ``(R, K)`` block per
+    restart does not belong in a summary, but the ladder and the log-mean
+    over orders say whether the widths agree). A support whose restarts
+    disagree by far more than the convergence tolerance (1e-4 nats/cell) was
+    not fitted so much as sampled, and this block is the evidence for it
+    rather than a claim about it.
     """
     import numpy as np
+
+    from experiments.noise_model import model as MD
 
     rdir = out_dir / "restarts"
     groups: dict[str, list[dict[str, Any]]] = {}
@@ -255,7 +282,7 @@ def reduce_restarts(out_dir: Path, *, mode: str = "bench") -> list[dict[str, Any
             f = json.loads(path.read_text())
         except json.JSONDecodeError:
             continue
-        if f.get("schema") != "noise-v2-fit/1":
+        if f.get("schema") not in SCHEMAS:
             continue
         f["_path"] = str(path)
         groups.setdefault(str(f["support"]), []).append(f)
@@ -275,6 +302,23 @@ def reduce_restarts(out_dir: Path, *, mode: str = "bench") -> list[dict[str, Any
                 max=float(v.max()),
                 max_over_min=float(v.max() / v.min()) if v.min() > 0.0 else None,
             )
+        gam = [gamma_ladder(MD.gamma_from_params(f["params"])) for f in items]
+        ladder_k = gam[0]["k"]
+        params["gamma_hz"] = dict(
+            k=ladder_k,
+            # rotor-max at each ladder order, one row per restart
+            values=[[max(v) for v in g["value"]] for g in gam],
+            log_mean=dict(
+                values=[g["log_mean"] for g in gam],
+                min=float(np.min([g["log_mean"] for g in gam])),
+                median=float(np.median([g["log_mean"] for g in gam])),
+                max=float(np.max([g["log_mean"] for g in gam])),
+                max_over_min=float(
+                    np.max([g["log_mean"] for g in gam])
+                    / max(np.min([g["log_mean"] for g in gam]), 1e-12)
+                ),
+            ),
+        )
         block = dict(
             n_restarts=len(items),
             seeds=[int(f["optimiser"]["seed"]) for f in items],
@@ -356,10 +400,10 @@ def four_motor_validation(spec: str, quad_path: str, single_paths: list[str]) ->
     log_mean = lambda key: float(np.exp(np.mean([np.log(float(q[key])) for q in par])))  # noqa: E731
     pred["sigma_nu"] = log_mean("sigma_nu")
     pred["lam"] = log_mean("lam")
-    pred["sigma_eps_even"] = log_mean("sigma_eps_even")
-    pred["sigma_eps_odd"] = log_mean("sigma_eps_odd")
-    pred["lam_eps_even"] = log_mean("lam_eps_even")
-    pred["lam_eps_odd"] = log_mean("lam_eps_odd")
+    # the widths travel per ORDER, rotor r taking Motor{r}'s own line widths
+    # exactly as it takes Motor{r}'s profile; a /1 single-motor fit is mapped
+    gam = np.zeros((n_rotors, k_max), dtype=np.float64)
+    own_gam = MD.gamma_from_params(own)
     prof = np.zeros((n_rotors, k_max), dtype=np.float64)
     own_prof = np.asarray(own["profile"]["profile_db"], dtype=np.float64)
     for r in range(n_rotors):
@@ -368,6 +412,11 @@ def four_motor_validation(spec: str, quad_path: str, single_paths: list[str]) ->
         prof[r, :take] = src[:take]
         if take < k_max:  # the single-motor rig ran below this support's cap
             prof[r, take:] = own_prof[r, take:]
+        src_g = MD.gamma_from_params(par[r % len(par)])[0]
+        gam[r, : min(k_max, src_g.size)] = src_g[: min(k_max, src_g.size)]
+        if src_g.size < k_max:
+            gam[r, src_g.size :] = own_gam[r, src_g.size :]
+    pred["gamma_hz"] = gam.tolist()
     pred["profile"] = dict(own["profile"])
     pred["profile"]["profile_db"] = prof.tolist()
     pred["profile"]["amp_exp"] = float(np.mean([float(q["profile"]["amp_exp"]) for q in par]))
@@ -387,14 +436,7 @@ def four_motor_validation(spec: str, quad_path: str, single_paths: list[str]) ->
         return out
 
     own_score, pred_score = score(own), score(pred)
-    keys = (
-        "sigma_nu",
-        "lam",
-        "sigma_eps_even",
-        "sigma_eps_odd",
-        "lam_eps_even",
-        "lam_eps_odd",
-    )
+    keys = ("sigma_nu", "lam")
     params_table = {}
     for key in keys:
         v = np.asarray([float(q[key]) for q in par], dtype=np.float64)
@@ -448,15 +490,20 @@ def findings(out_dir: Path) -> str:
     """The per-support parameter table and the population summary."""
     import numpy as np
 
+    from experiments.noise_model import model as MD
+
     rows = []
     for path in sorted(out_dir.glob("*.json")):
         try:
             f = json.loads(path.read_text())
         except json.JSONDecodeError:
             continue
-        if f.get("schema") != "noise-v2-fit/1":
+        if f.get("schema") not in SCHEMAS:
             continue
         p, o, q = f["params"], f["objective"], f["optimiser"]
+        gam = MD.gamma_from_params(p)
+        check = f["diagnostics"].get("gamma_low_order_check") or {}
+        pins = f["diagnostics"].get("span_pins") or {}
         rows.append(
             dict(
                 support=f["support"],
@@ -465,10 +512,13 @@ def findings(out_dir: Path) -> str:
                 k_max=f["k_max"],
                 sigma_nu=p["sigma_nu"],
                 lam=p["lam"],
-                sigma_eps_even=p["sigma_eps_even"],
-                sigma_eps_odd=p["sigma_eps_odd"],
-                lam_eps_even=p["lam_eps_even"],
-                lam_eps_odd=p["lam_eps_odd"],
+                gamma=gam,
+                gamma_log_mean=float(np.exp(np.mean(np.log(np.maximum(gam, 1e-12))))),
+                gamma_check=check.get("verdict", "—"),
+                gamma_k4_over_k1=check.get("k4_over_k1"),
+                gamma_over_res=check.get("max_over_resolution"),
+                span_pinned=list(pins.get("pinned") or []),
+                speed_span=pins.get("speed_span"),
                 carrier=p["carrier_rev_s"],
                 floor_level_db=f["diagnostics"].get("floor_level_db"),
                 whittle=o["whittle_nats"],
@@ -482,7 +532,7 @@ def findings(out_dir: Path) -> str:
             )
         )
     if not rows:
-        return "# Noise model v2 — round 1 fits\n\nNo fit JSON found.\n"
+        return "# Noise model v2 — round 3 fits\n\nNo fit JSON found.\n"
 
     def stats(key: str, subset: list[dict[str, Any]]) -> str:
         v = np.asarray([r[key] for r in subset], dtype=np.float64)
@@ -491,25 +541,34 @@ def findings(out_dir: Path) -> str:
             return "—"
         return f"{np.median(v):.4g} [{np.quantile(v, 0.25):.4g}, {np.quantile(v, 0.75):.4g}]"
 
+    def gam_at(r: dict[str, Any], k: int) -> str:
+        g = np.asarray(r["gamma"], dtype=np.float64)
+        return f"{float(np.max(g[:, k - 1])):.4g}" if g.shape[1] >= k else "—"
+
     lines = [
-        "# Noise model v2 — round 1 fits",
+        "# Noise model v2 — round 3 fits (Model R3)",
         "",
         f"{len(rows)} fit JSON(s) under `{out_dir}`. Every number below is read from a "
-        "`noise-v2-fit/1` payload in that directory; nothing is recomputed here.",
+        "`noise-v2-fit/2` payload in that directory (a `/1` payload's per-order OU is mapped "
+        "onto its equivalent Lorentzian width first); nothing is recomputed here. The "
+        "`gamma` columns are the rotor-max width in Hz at that order.",
         "",
         "## Per-support parameters",
         "",
-        "| support | mode | R | k_max | sigma_nu | lam | sigma_eps even/odd | lam_eps even/odd |"
-        " carrier rev/s | floor dB | whittle nats | comb | floor | cells | conv | wall s |",
-        "|---|---|--:|--:|--:|--:|---|---|---|--:|--:|--:|--:|--:|:-:|--:|",
+        "| support | mode | R | k_max | sigma_nu | lam | "
+        + " | ".join(f"g(k={k})" for k in GAMMA_LADDER)
+        + " | low-k check | pinned | carrier rev/s | floor dB | whittle nats | comb | floor |"
+        " cells | conv | wall s |",
+        "|---|---|--:|--:|--:|--:|" + "--:|" * len(GAMMA_LADDER) + ":-:|---|---|--:|--:|--:|--:|"
+        "--:|:-:|--:|",
     ]
     for r in rows:
         car = ", ".join(f"{c:.3f}" for c in r["carrier"]) if r["carrier"] else "label"
         lines.append(
             f"| `{r['support']}` | {r['mode']} | {r['n_rotors']} | {r['k_max']} |"
-            f" {r['sigma_nu']:.4f} | {r['lam']:.3f} |"
-            f" {r['sigma_eps_even']:.4f} / {r['sigma_eps_odd']:.4f} |"
-            f" {r['lam_eps_even']:.3f} / {r['lam_eps_odd']:.3f} | {car} |"
+            f" {r['sigma_nu']:.4f} | {r['lam']:.3f} | "
+            + " | ".join(gam_at(r, k) for k in GAMMA_LADDER)
+            + f" | {r['gamma_check']} | {','.join(r['span_pinned']) or '—'} | {car} |"
             f" {format(r['floor_level_db'], '.2f') if r['floor_level_db'] is not None else '—'} |"
             f" {r['whittle']:.6g} | {r['comb']:.6g} | {r['floor']:.6g} | {r['n_cells']} |"
             f" {'y' if r['converged'] else 'N'} | {r['wall_s']:.0f} |"
@@ -526,17 +585,15 @@ def findings(out_dir: Path) -> str:
         "",
         "## Population median [IQR]",
         "",
-        "| set | n | sigma_nu | lam | sigma_eps even |"
-        " sigma_eps odd | lam_eps even | lam_eps odd |",
-        "|---|--:|---|---|---|---|---|---|",
+        "| set | n | sigma_nu | lam | gamma log-mean over orders (Hz) |",
+        "|---|--:|---|---|---|",
     ]
     for gname, subset in groups.items():
         if not subset:
             continue
         lines.append(
             f"| {gname} | {len(subset)} | {stats('sigma_nu', subset)} | {stats('lam', subset)} |"
-            f" {stats('sigma_eps_even', subset)} | {stats('sigma_eps_odd', subset)} |"
-            f" {stats('lam_eps_even', subset)} | {stats('lam_eps_odd', subset)} |"
+            f" {stats('gamma_log_mean', subset)} |"
         )
 
     quad = [r for r in rows if "allMotors" in r["support"]]
@@ -560,14 +617,7 @@ def findings(out_dir: Path) -> str:
             "| parameter | four-motor | per-rotor geo-mean | ratio | per-rotor min/max |",
             "|---|--:|--:|--:|---|",
         ]
-        for key in (
-            "sigma_nu",
-            "lam",
-            "sigma_eps_even",
-            "sigma_eps_odd",
-            "lam_eps_even",
-            "lam_eps_odd",
-        ):
+        for key in ("sigma_nu", "lam", "gamma_log_mean"):
             v = np.asarray([r[key] for r in singles], dtype=np.float64)
             geo = float(np.exp(np.mean(np.log(v))))
             lines.append(
@@ -593,9 +643,8 @@ def findings(out_dir: Path) -> str:
             "dynamics columns are min / median / max over the starts.",
             "",
             "| support | starts | best nats/cell | best-median | best-worst | starts agree |"
-            " L-BFGS conv | sigma_nu | lam | sigma_eps even | sigma_eps odd | lam_eps even |"
-            " lam_eps odd |",
-            "|---|--:|--:|--:|--:|:-:|:-:|---|---|---|---|---|---|",
+            " L-BFGS conv | sigma_nu | lam | gamma log-mean |",
+            "|---|--:|--:|--:|--:|:-:|:-:|---|---|---|",
         ]
         for r in sorted(multi, key=lambda x: x["support"]):
             b = r["restarts"]
@@ -604,6 +653,8 @@ def findings(out_dir: Path) -> str:
             for key in DYN_KEYS:
                 s = b["params"][key]
                 cols.append(f"{s['min']:.3g} / {s['median']:.3g} / {s['max']:.3g}")
+            g = (b["params"].get("gamma_hz") or {}).get("log_mean")
+            cols.append(f"{g['min']:.3g} / {g['median']:.3g} / {g['max']:.3g}" if g else "—")
             agree = b["best_minus_worst_per_cell"] < tol
             lines.append(
                 f"| `{r['support']}` | {b['n_restarts']} |"
@@ -633,51 +684,64 @@ def findings(out_dir: Path) -> str:
             "single start is a draw from that multiplicity rather than an estimate.",
         ]
 
-    # the long-lag decoherence measurement (results/noise_v2/decoherence_long,
-    # commit 82d0547e): a ceiling at k = 4 and k = 8 with tau_c 2.15 s and
-    # 1.12 s, k = 2 still growing at 5 s, k >= 16 over the estimator's ceiling
-    OU_TAU_C_S = {4: 2.15, 8: 1.12}
-    lo, hi = (1.0 / max(OU_TAU_C_S.values()), 1.0 / min(OU_TAU_C_S.values()))
+    # the low-order check that decides whether the shaft was absorbed
     lines += [
         "",
-        "## Fitted `lam_eps` against the measured OU verdict",
+        "## The low-order `gamma_rk` check",
         "",
-        "The long-lag study (`results/noise_v2/decoherence_long`) found a per-order "
-        f"ceiling only at k = 4 and k = 8, with tau_c {OU_TAU_C_S[4]:g} s and "
-        f"{OU_TAU_C_S[8]:g} s, i.e. lam_eps between {lo:.3g} and {hi:.3g} /s; k = 2 was "
-        "still growing at 5 s and k >= 16 sat over the estimator's ceiling, so the verdict "
-        "is order-conditional and the model is NOT being asked to reproduce a universal "
-        "OU. The question here is only whether the fitted rates land anywhere near the "
-        "orders where a ceiling was measured.",
+        "R3's one possible degeneracy: in the Brownian limit the shaft term is Lorentzian "
+        "too, so a `gamma_rk` ramping as `k^2` would absorb it. PASS is every fitted width "
+        "at `k <= 4` sitting within a factor of 3 of the window's resolution floor "
+        "`1 / (2 T)`; `fail_k2_ramp` is `gamma_4 / gamma_1 >= 8`, and then `lam` takes the "
+        "long-lag pin instead of the bench value.",
         "",
-        "| set | n | lam_eps even median [IQR] | lam_eps odd median [IQR] | within a factor of "
-        "3 of the measured window |",
-        "|---|--:|---|---|--:|",
+        "| support | verdict | max gamma(k<=4) / resolution | gamma_4 / gamma_1 |",
+        "|---|:-:|--:|--:|",
     ]
-    for gname, subset in groups.items():
-        if not subset:
-            continue
-        inside = sum(
-            1
-            for r in subset
-            for key in ("lam_eps_even", "lam_eps_odd")
-            if lo / 3.0 <= r[key] <= hi * 3.0
-        )
-        lines.append(
-            f"| {gname} | {len(subset)} | {stats('lam_eps_even', subset)} |"
-            f" {stats('lam_eps_odd', subset)} | {inside} / {2 * len(subset)} |"
-        )
-    edges = []
     for r in rows:
-        if r["lam"] > 30.0:
+        lines.append(
+            f"| `{r['support']}` | {r['gamma_check']} |"
+            f" {format(r['gamma_over_res'], '.3g') if r['gamma_over_res'] is not None else '—'} |"
+            f" {format(r['gamma_k4_over_k1'], '.3g') if r['gamma_k4_over_k1'] is not None else '—'} |"
+        )
+    failed = [r["support"] for r in rows if r["gamma_check"] not in ("pass", "—")]
+    lines += [
+        "",
+        (
+            f"{len(rows) - len(failed)} of {len(rows)} fits pass. Failing: "
+            + ", ".join(f"`{s}`" for s in failed)
+            if failed
+            else "Every fit passes the check."
+        ),
+    ]
+    edges = []
+    # the R3 priors' own central 95 %, not a remembered number
+    lam_lo, lam_hi = (
+        math.exp(MD.PRIORS.log_lam[0] - 2.0 * MD.PRIORS.log_lam[1]),
+        math.exp(MD.PRIORS.log_lam[0] + 2.0 * MD.PRIORS.log_lam[1]),
+    )
+    for r in rows:
+        flight = str(r["mode"]).startswith("flight")
+        s_lo, s_hi = (
+            math.exp(
+                MD.PRIORS.sigma_nu_prior(flight)[0] - 2.0 * MD.PRIORS.sigma_nu_prior(flight)[1]
+            ),
+            math.exp(
+                MD.PRIORS.sigma_nu_prior(flight)[0] + 2.0 * MD.PRIORS.sigma_nu_prior(flight)[1]
+            ),
+        )
+        if not flight and not (lam_lo <= r["lam"] <= lam_hi):
             edges.append(
-                f"`{r['support']}`: lam = {r['lam']:.2f} > 30 (label-chain regime, see the "
-                "explainer's third consequence of the shaft prior)"
+                f"`{r['support']}`: lam = {r['lam']:.2f} outside the prior's central 95 % "
+                f"[{lam_lo:.3g}, {lam_hi:.3g}]"
             )
-        if not (0.11 <= r["sigma_nu"] <= 1.8):
+        if not (s_lo <= r["sigma_nu"] <= s_hi):
             edges.append(
-                f"`{r['support']}`: sigma_nu = {r['sigma_nu']:.4f} outside the prior's central 95 %"
+                f"`{r['support']}`: sigma_nu = {r['sigma_nu']:.4f} outside the prior's "
+                f"central 95 % [{s_lo:.3g}, {s_hi:.3g}]"
             )
+        if r["gamma_check"] not in ("pass", "—"):
+            edges.append(f"`{r['support']}`: low-order gamma check {r['gamma_check']}")
         if not r["converged"]:
             edges.append(f"`{r['support']}`: NOT converged (L-BFGS restart still improving)")
     lines += ["", "## Prior edges and non-convergence", ""]
@@ -723,7 +787,7 @@ def _specs(args: argparse.Namespace) -> list[str]:
 
 
 def _pin_from_args(args: argparse.Namespace) -> dict[str, float] | None:
-    """``["lam=20", "lam_eps_odd=8"]`` -> ``{"lam": 20.0, "lam_eps_odd": 8.0}``."""
+    """``["lam=0.5"]`` -> ``{"lam": 0.5}``."""
     items = getattr(args, "pin", None)
     if not items:
         return None
@@ -775,8 +839,9 @@ def main(argv: list[str] | None = None) -> int:
             default=None,
             metavar="NAME=VALUE",
             help="hold one dynamics coordinate FIXED while the rest of the block is fitted, "
-            "e.g. --pin lam=20 lam_eps_odd=8. Names: sigma_nu, lam, sigma_eps_even/odd, "
-            "lam_eps_even/odd. Used when a rate is not identifiable from the data and the "
+            "e.g. --pin lam=0.5. Names: sigma_nu, lam (R3's two dynamics scalars; the "
+            "per-line gamma_hz block is frozen wholesale, never pinned coordinate-wise). "
+            "Used when a rate is not identifiable from the data and the "
             "identified ridge coordinate is what the fit should move along",
         )
         p.add_argument(

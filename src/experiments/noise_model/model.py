@@ -195,7 +195,7 @@ class Priors:
 
     def gamma_loc(self, k: np.ndarray | Tensor) -> Tensor:
         """``log(gamma_per_order_hz * k)``: the prior's log-median per order."""
-        kk = torch.as_tensor(np.asarray(k, dtype=np.float64), dtype=torch.float64)
+        kk = torch.as_tensor(np.array(k, dtype=np.float64), dtype=torch.float64)
         return torch.log(float(self.gamma_per_order_hz) * kk)
 
     def speed_law_medians(self) -> dict[str, float]:
