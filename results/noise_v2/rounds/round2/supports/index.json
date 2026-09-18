@@ -14,10 +14,16 @@
      "level_db": -51.171997531149934,
      "level_deficit_db": 0.36595360584917813,
      "line_margin_db": [
-      8.713750854041693
+      8.320404901705814
+     ],
+     "carrier_drift_hz": [
+      1.5826353564358513
+     ],
+     "orders_recording": [
+      63
      ],
      "line_margin_recording_db": [
-      9.040147571268504
+      8.280588501819686
      ],
      "carrier_recording_rev_s": [
       49.007255
@@ -69,22 +75,28 @@
       0.015129
      ],
      "npz": "bench_dregon_Motor1_50.npz",
-     "npz_bytes": 12123342
+     "npz_bytes": 12123690
     },
     {
      "name": "bench_dregon_Motor1_60",
      "spec": "bench_dregon_motor:Motor1:60",
      "kind": "bench",
-     "level_db": -46.687547069363795,
-     "level_deficit_db": 0.4796880323569823,
+     "level_db": -46.691238296583414,
+     "level_deficit_db": 0.48337925957660133,
      "line_margin_db": [
-      10.560906029252575
+      10.845686132297194
+     ],
+     "carrier_drift_hz": [
+      1.7110488321105777
+     ],
+     "orders_recording": [
+      70
      ],
      "line_margin_recording_db": [
-      8.953535015870564
+      13.537096798769282
      ],
      "carrier_recording_rev_s": [
-      58.753396
+      58.766358
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -95,22 +107,22 @@
      "n_mics": 8,
      "n_frames": 1,
      "n_rotors": 1,
-     "n_fft": 605120,
-     "hop": 605120,
-     "n_bins": 302561,
-     "duration_s": 37.82,
+     "n_fft": 411297,
+     "hop": 411297,
+     "n_bins": 205649,
+     "duration_s": 25.706063,
      "segment": [
       4.15,
-      41.97
+      29.856009070294785
      ],
      "carriers_rev_s": [
-      58.756125
+      58.765896
      ],
      "carrier_min_rev_s": [
-      58.756125
+      58.765896
      ],
      "carrier_max_rev_s": [
-      58.756125
+      58.765896
      ],
      "throttle": 60.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -119,21 +131,21 @@
      ],
      "stationary_pass": true,
      "residual_std_hz": [
-      0.186541
+      0.361768
      ],
-     "residual_max_abs_hz": 0.4412605289609489,
-     "longest_inside_s": 37.82,
+     "residual_max_abs_hz": 0.9227743253047651,
+     "longest_inside_s": 25.706009070294783,
      "orders": [
-      74
+      70
      ],
      "survey_rev_s": [
       58.69
      ],
      "carrier_shift_rev_s": [
-      0.066125
+      0.075896
      ],
      "npz": "bench_dregon_Motor1_60.npz",
-     "npz_bytes": 14530970
+     "npz_bytes": 9879810
     },
     {
      "name": "bench_dregon_Motor1_70",
@@ -142,13 +154,19 @@
      "level_db": -43.79433695019596,
      "level_deficit_db": 0.3725817866767116,
      "line_margin_db": [
-      2.3896910816445742
+      1.7009555402622067
+     ],
+     "carrier_drift_hz": [
+      0.3209452170151508
+     ],
+     "orders_recording": [
+      76
      ],
      "line_margin_recording_db": [
-      2.702984794744218
+      1.599057564151936
      ],
      "carrier_recording_rev_s": [
-      68.317422
+      68.309227
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -168,13 +186,13 @@
       35.99
      ],
      "carriers_rev_s": [
-      68.31656
+      68.313679
      ],
      "carrier_min_rev_s": [
-      68.31656
+      68.313679
      ],
      "carrier_max_rev_s": [
-      68.31656
+      68.313679
      ],
      "throttle": 70.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -183,21 +201,21 @@
      ],
      "stationary_pass": false,
      "residual_std_hz": [
-      0.152303
+      0.225686
      ],
-     "residual_max_abs_hz": 0.531615696434646,
+     "residual_max_abs_hz": 0.4917460544448211,
      "longest_inside_s": 31.69,
      "orders": [
-      62
+      76
      ],
      "survey_rev_s": [
       68.3
      ],
      "carrier_shift_rev_s": [
-      0.01656
+      0.013679
      ],
      "npz": "bench_dregon_Motor1_70.npz",
-     "npz_bytes": 12177042
+     "npz_bytes": 12177402
     },
     {
      "name": "bench_dregon_Motor1_80",
@@ -206,13 +224,19 @@
      "level_db": -39.73775308551608,
      "level_deficit_db": 0.4189842518630513,
      "line_margin_db": [
-      3.4466072530861247
+      2.939434694304777
+     ],
+     "carrier_drift_hz": [
+      0.0454923860030334
+     ],
+     "orders_recording": [
+      63
      ],
      "line_margin_recording_db": [
-      3.534167014208758
+      4.102131543760899
      ],
      "carrier_recording_rev_s": [
-      78.059623
+      78.081356
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -232,36 +256,36 @@
       15.69
      ],
      "carriers_rev_s": [
-      78.052757
+      78.100964
      ],
      "carrier_min_rev_s": [
-      78.052757
+      78.100964
      ],
      "carrier_max_rev_s": [
-      78.052757
+      78.100964
      ],
      "throttle": 80.0,
      "rig": "dregon_mikrokopter_single_motor",
      "rotor_ids": [
       "Motor1"
      ],
-     "stationary_pass": true,
+     "stationary_pass": false,
      "residual_std_hz": [
-      0.131521
+      0.134026
      ],
-     "residual_max_abs_hz": 0.2792260135602908,
+     "residual_max_abs_hz": 0.42149801453555635,
      "longest_inside_s": 11.71,
      "orders": [
-      67
+      63
      ],
      "survey_rev_s": [
       78.06
      ],
      "carrier_shift_rev_s": [
-      -0.007243
+      0.040964
      ],
      "npz": "bench_dregon_Motor1_80.npz",
-     "npz_bytes": 4504782
+     "npz_bytes": 4505126
     },
     {
      "name": "bench_dregon_Motor1_90",
@@ -270,13 +294,19 @@
      "level_db": -38.20465248669542,
      "level_deficit_db": 0.6167844665651074,
      "line_margin_db": [
-      2.512057997667812
+      1.8222353296492328
+     ],
+     "carrier_drift_hz": [
+      1.3082361345055489
+     ],
+     "orders_recording": [
+      63
      ],
      "line_margin_recording_db": [
-      3.2183634618359713
+      1.7621336383372928
      ],
      "carrier_recording_rev_s": [
-      88.18444
+      88.170948
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -296,13 +326,13 @@
       17.19
      ],
      "carriers_rev_s": [
-      88.178348
+      88.165687
      ],
      "carrier_min_rev_s": [
-      88.178348
+      88.165687
      ],
      "carrier_max_rev_s": [
-      88.178348
+      88.165687
      ],
      "throttle": 90.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -311,21 +341,21 @@
      ],
      "stationary_pass": false,
      "residual_std_hz": [
-      0.220466
+      0.202333
      ],
-     "residual_max_abs_hz": 0.43992009639089397,
+     "residual_max_abs_hz": 0.5540789364507739,
      "longest_inside_s": 12.79,
      "orders": [
-      61
+      63
      ],
      "survey_rev_s": [
       88.18
      ],
      "carrier_shift_rev_s": [
-      -0.001652
+      -0.014313
      ],
      "npz": "bench_dregon_Motor1_90.npz",
-     "npz_bytes": 4919510
+     "npz_bytes": 4919862
     },
     {
      "name": "bench_dregon_Motor2_50",
@@ -334,10 +364,16 @@
      "level_db": -49.02376357688104,
      "level_deficit_db": 0.3935893499115153,
      "line_margin_db": [
-      16.050440093838215
+      12.019520538041036
+     ],
+     "carrier_drift_hz": [
+      0.18364118712988642
+     ],
+     "orders_recording": [
+      63
      ],
      "line_margin_recording_db": [
-      12.543426430832676
+      11.458792250679817
      ],
      "carrier_recording_rev_s": [
       48.408561
@@ -389,7 +425,7 @@
       0.074642
      ],
      "npz": "bench_dregon_Motor2_50.npz",
-     "npz_bytes": 4719818
+     "npz_bytes": 4720166
     },
     {
      "name": "bench_dregon_Motor2_60",
@@ -398,10 +434,16 @@
      "level_db": -46.233969350690586,
      "level_deficit_db": 0.5026097654081951,
      "line_margin_db": [
-      18.150995593730283
+      14.687237704631674
+     ],
+     "carrier_drift_hz": [
+      3.2674721800222457
+     ],
+     "orders_recording": [
+      63
      ],
      "line_margin_recording_db": [
-      9.876677110237003
+      7.347128796278547
      ],
      "carrier_recording_rev_s": [
       58.097916
@@ -453,7 +495,7 @@
       0.074116
      ],
      "npz": "bench_dregon_Motor2_60.npz",
-     "npz_bytes": 4612282
+     "npz_bytes": 4612630
     },
     {
      "name": "bench_dregon_Motor2_70",
@@ -462,13 +504,19 @@
      "level_db": -41.43456480207282,
      "level_deficit_db": 0.30714125449460283,
      "line_margin_db": [
-      2.3481852432800423
+      2.396984584380644
+     ],
+     "carrier_drift_hz": [
+      1.9361498211844719
+     ],
+     "orders_recording": [
+      62
      ],
      "line_margin_recording_db": [
-      3.443102996937716
+      2.610472235405907
      ],
      "carrier_recording_rev_s": [
-      67.522453
+      67.532585
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -488,13 +536,13 @@
       15.65
      ],
      "carriers_rev_s": [
-      67.534753
+      67.552235
      ],
      "carrier_min_rev_s": [
-      67.534753
+      67.552235
      ],
      "carrier_max_rev_s": [
-      67.534753
+      67.552235
      ],
      "throttle": 70.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -503,21 +551,21 @@
      ],
      "stationary_pass": false,
      "residual_std_hz": [
-      0.133809
+      0.142771
      ],
-     "residual_max_abs_hz": 0.35874661500111843,
+     "residual_max_abs_hz": 0.343363310420189,
      "longest_inside_s": 11.8,
      "orders": [
-      70
+      60
      ],
      "survey_rev_s": [
       67.52
      ],
      "carrier_shift_rev_s": [
-      0.014753
+      0.032235
      ],
      "npz": "bench_dregon_Motor2_70.npz",
-     "npz_bytes": 4539302
+     "npz_bytes": 4539630
     },
     {
      "name": "bench_dregon_Motor2_80",
@@ -526,13 +574,19 @@
      "level_db": -38.6704864436697,
      "level_deficit_db": 0.289359770319912,
      "line_margin_db": [
-      7.112291397310928
+      4.011422822958874
+     ],
+     "carrier_drift_hz": [
+      1.7939743550673768
+     ],
+     "orders_recording": [
+      70
      ],
      "line_margin_recording_db": [
-      7.691692070650827
+      3.1486484179225327
      ],
      "carrier_recording_rev_s": [
-      77.189493
+      77.187606
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -581,7 +635,7 @@
       0.030461
      ],
      "npz": "bench_dregon_Motor2_80.npz",
-     "npz_bytes": 4777406
+     "npz_bytes": 4777758
     },
     {
      "name": "bench_dregon_Motor2_90",
@@ -590,13 +644,19 @@
      "level_db": -35.60401197821999,
      "level_deficit_db": 0.4939522912628149,
      "line_margin_db": [
-      5.436755139061806
+      3.0223246417498792
+     ],
+     "carrier_drift_hz": [
+      0.34961851947008427
+     ],
+     "orders_recording": [
+      77
      ],
      "line_margin_recording_db": [
-      5.166060044996125
+      2.6690308168788346
      ],
      "carrier_recording_rev_s": [
-      86.718157
+      86.699199
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -616,13 +676,13 @@
       16.93
      ],
      "carriers_rev_s": [
-      86.7188
+      86.69492
      ],
      "carrier_min_rev_s": [
-      86.7188
+      86.69492
      ],
      "carrier_max_rev_s": [
-      86.7188
+      86.69492
      ],
      "throttle": 90.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -631,21 +691,21 @@
      ],
      "stationary_pass": true,
      "residual_std_hz": [
-      0.18577
+      0.197434
      ],
-     "residual_max_abs_hz": 0.40606753167524834,
+     "residual_max_abs_hz": 0.7372071582997336,
      "longest_inside_s": 11.66,
      "orders": [
-      72
+      77
      ],
      "survey_rev_s": [
       86.7
      ],
      "carrier_shift_rev_s": [
-      0.0188
+      -0.00508
      ],
      "npz": "bench_dregon_Motor2_90.npz",
-     "npz_bytes": 4485530
+     "npz_bytes": 4485882
     },
     {
      "name": "bench_dregon_Motor3_50",
@@ -654,10 +714,16 @@
      "level_db": -47.294608545288334,
      "level_deficit_db": 0.5374152192956743,
      "line_margin_db": [
-      10.645311514351352
+      7.529956951613518
+     ],
+     "carrier_drift_hz": [
+      0.5221180374430503
+     ],
+     "orders_recording": [
+      63
      ],
      "line_margin_recording_db": [
-      4.914416192074315
+      5.024028503913972
      ],
      "carrier_recording_rev_s": [
       49.108561
@@ -709,7 +775,7 @@
       0.070348
      ],
      "npz": "bench_dregon_Motor3_50.npz",
-     "npz_bytes": 4550870
+     "npz_bytes": 4551210
     },
     {
      "name": "bench_dregon_Motor3_60",
@@ -718,10 +784,16 @@
      "level_db": -42.273759376614244,
      "level_deficit_db": 0.712165004865092,
      "line_margin_db": [
-      9.913697821227123
+      6.3661326982725805
+     ],
+     "carrier_drift_hz": [
+      2.157160918966241
+     ],
+     "orders_recording": [
+      70
      ],
      "line_margin_recording_db": [
-      6.440378137948675
+      7.483106831639816
      ],
      "carrier_recording_rev_s": [
       58.930544
@@ -773,7 +845,7 @@
       0.049028
      ],
      "npz": "bench_dregon_Motor3_60.npz",
-     "npz_bytes": 4838838
+     "npz_bytes": 4839186
     },
     {
      "name": "bench_dregon_Motor3_70",
@@ -782,10 +854,16 @@
      "level_db": -39.75333999433494,
      "level_deficit_db": 0.42672001166464923,
      "line_margin_db": [
-      13.88157702571487
+      7.637312605787501
+     ],
+     "carrier_drift_hz": [
+      0.6337526584545117
+     ],
+     "orders_recording": [
+      63
      ],
      "line_margin_recording_db": [
-      11.096971166599747
+      6.51085538595082
      ],
      "carrier_recording_rev_s": [
       68.57456
@@ -808,13 +886,13 @@
       16.75
      ],
      "carriers_rev_s": [
-      68.602561
+      68.633804
      ],
      "carrier_min_rev_s": [
-      68.602561
+      68.633804
      ],
      "carrier_max_rev_s": [
-      68.602561
+      68.633804
      ],
      "throttle": 70.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -823,21 +901,21 @@
      ],
      "stationary_pass": true,
      "residual_std_hz": [
-      0.224475
+      0.249013
      ],
-     "residual_max_abs_hz": 0.6323834662908585,
+     "residual_max_abs_hz": 0.6367690821061183,
      "longest_inside_s": 11.88,
      "orders": [
-      63
+      70
      ],
      "survey_rev_s": [
       68.56
      ],
      "carrier_shift_rev_s": [
-      0.042561
+      0.073804
      ],
      "npz": "bench_dregon_Motor3_70.npz",
-     "npz_bytes": 4570058
+     "npz_bytes": 4570398
     },
     {
      "name": "bench_dregon_Motor3_80",
@@ -846,13 +924,19 @@
      "level_db": -36.774887616030384,
      "level_deficit_db": 0.6012682833183334,
      "line_margin_db": [
-      3.96098525215806
+      2.2650502407326316
+     ],
+     "carrier_drift_hz": [
+      1.279875895842224
+     ],
+     "orders_recording": [
+      62
      ],
      "line_margin_recording_db": [
-      3.86047507455417
+      2.679443048335037
      ],
      "carrier_recording_rev_s": [
-      78.813403
+      78.802182
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -872,36 +956,36 @@
       16.44
      ],
      "carriers_rev_s": [
-      78.825136
+      78.814056
      ],
      "carrier_min_rev_s": [
-      78.825136
+      78.814056
      ],
      "carrier_max_rev_s": [
-      78.825136
+      78.814056
      ],
      "throttle": 80.0,
      "rig": "dregon_mikrokopter_single_motor",
      "rotor_ids": [
       "Motor3"
      ],
-     "stationary_pass": true,
+     "stationary_pass": false,
      "residual_std_hz": [
-      0.15186
+      0.15704
      ],
-     "residual_max_abs_hz": 0.4047260122630576,
+     "residual_max_abs_hz": 0.3926700895029005,
      "longest_inside_s": 12.38,
      "orders": [
-      65
+      80
      ],
      "survey_rev_s": [
       78.82
      ],
      "carrier_shift_rev_s": [
-      0.005136
+      -0.005944
      ],
      "npz": "bench_dregon_Motor3_80.npz",
-     "npz_bytes": 4762062
+     "npz_bytes": 4762426
     },
     {
      "name": "bench_dregon_Motor3_90",
@@ -910,13 +994,19 @@
      "level_db": -34.12280748998815,
      "level_deficit_db": 0.8754832432899491,
      "line_margin_db": [
-      2.603758063116926
+      2.8479325667353175
+     ],
+     "carrier_drift_hz": [
+      1.835488421982447
+     ],
+     "orders_recording": [
+      64
      ],
      "line_margin_recording_db": [
-      4.479474590458603
+      2.1312810850684563
      ],
      "carrier_recording_rev_s": [
-      88.248915
+      88.241123
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -936,13 +1026,13 @@
       16.64
      ],
      "carriers_rev_s": [
-      88.262222
+      88.243878
      ],
      "carrier_min_rev_s": [
-      88.262222
+      88.243878
      ],
      "carrier_max_rev_s": [
-      88.262222
+      88.243878
      ],
      "throttle": 90.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -951,21 +1041,21 @@
      ],
      "stationary_pass": false,
      "residual_std_hz": [
-      0.11097
+      0.133033
      ],
-     "residual_max_abs_hz": 0.30174992620139196,
+     "residual_max_abs_hz": 0.29101471555072084,
      "longest_inside_s": 11.8,
      "orders": [
-      70
+      61
      ],
      "survey_rev_s": [
       88.24
      ],
      "carrier_shift_rev_s": [
-      0.022222
+      0.003878
      ],
      "npz": "bench_dregon_Motor3_90.npz",
-     "npz_bytes": 4539298
+     "npz_bytes": 4539642
     },
     {
      "name": "bench_dregon_Motor4_50",
@@ -974,10 +1064,16 @@
      "level_db": -47.894181015571334,
      "level_deficit_db": 0.40154015298512746,
      "line_margin_db": [
-      10.69320868530006
+      8.407030971222877
+     ],
+     "carrier_drift_hz": [
+      1.1582408014169587
+     ],
+     "orders_recording": [
+      63
      ],
      "line_margin_recording_db": [
-      10.213823256750956
+      6.687171292044561
      ],
      "carrier_recording_rev_s": [
       49.768619
@@ -1029,7 +1125,7 @@
       0.065653
      ],
      "npz": "bench_dregon_Motor4_50.npz",
-     "npz_bytes": 4631498
+     "npz_bytes": 4631842
     },
     {
      "name": "bench_dregon_Motor4_60",
@@ -1038,13 +1134,19 @@
      "level_db": -44.537778975241416,
      "level_deficit_db": 0.7942285753232312,
      "line_margin_db": [
-      5.545349812243627
+      10.7400012010152
+     ],
+     "carrier_drift_hz": [
+      1.0748865061416168
+     ],
+     "orders_recording": [
+      63
      ],
      "line_margin_recording_db": [
-      4.725347359510576
+      3.7908332379041667
      ],
      "carrier_recording_rev_s": [
-      59.680207
+      59.697594
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -1064,13 +1166,13 @@
       14.66
      ],
      "carriers_rev_s": [
-      59.691409
+      59.740576
      ],
      "carrier_min_rev_s": [
-      59.691409
+      59.740576
      ],
      "carrier_max_rev_s": [
-      59.691409
+      59.740576
      ],
      "throttle": 60.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -1079,21 +1181,21 @@
      ],
      "stationary_pass": true,
      "residual_std_hz": [
-      0.177265
+      0.341576
      ],
-     "residual_max_abs_hz": 0.5453790676606132,
+     "residual_max_abs_hz": 0.77626041639326,
      "longest_inside_s": 11.83,
      "orders": [
-      62
+      63
      ],
      "survey_rev_s": [
       59.66
      ],
      "carrier_shift_rev_s": [
-      0.031409
+      0.080576
      ],
      "npz": "bench_dregon_Motor4_60.npz",
-     "npz_bytes": 4550810
+     "npz_bytes": 4551138
     },
     {
      "name": "bench_dregon_Motor4_70",
@@ -1102,13 +1204,19 @@
      "level_db": -40.14850886585443,
      "level_deficit_db": 0.7142919481148837,
      "line_margin_db": [
-      1.4928257036828463
+      1.2833477211471056
+     ],
+     "carrier_drift_hz": [
+      0.9422231198118851
+     ],
+     "orders_recording": [
+      78
      ],
      "line_margin_recording_db": [
-      3.30109320142651
+      1.5434070854961688
      ],
      "carrier_recording_rev_s": [
-      69.318293
+      69.311002
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -1128,13 +1236,13 @@
       15.8
      ],
      "carriers_rev_s": [
-      69.322242
+      69.332501
      ],
      "carrier_min_rev_s": [
-      69.322242
+      69.332501
      ],
      "carrier_max_rev_s": [
-      69.322242
+      69.332501
      ],
      "throttle": 70.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -1143,21 +1251,21 @@
      ],
      "stationary_pass": false,
      "residual_std_hz": [
-      0.165847
+      0.152793
      ],
-     "residual_max_abs_hz": 0.4490257400435734,
+     "residual_max_abs_hz": 0.38889755644637464,
      "longest_inside_s": 11.99,
      "orders": [
-      68
+      69
      ],
      "survey_rev_s": [
       69.31
      ],
      "carrier_shift_rev_s": [
-      0.012242
+      0.022501
      ],
      "npz": "bench_dregon_Motor4_70.npz",
-     "npz_bytes": 4612238
+     "npz_bytes": 4612602
     },
     {
      "name": "bench_dregon_Motor4_80",
@@ -1166,10 +1274,16 @@
      "level_db": -37.90039786408559,
      "level_deficit_db": 0.7818518375838153,
      "line_margin_db": [
-      4.3431380857757125
+      2.1309831037505256
+     ],
+     "carrier_drift_hz": [
+      1.6769254462269316
+     ],
+     "orders_recording": [
+      60
      ],
      "line_margin_recording_db": [
-      3.429752725330382
+      1.6571320423510274
      ],
      "carrier_recording_rev_s": [
       79.375952
@@ -1192,36 +1306,36 @@
       17.01
      ],
      "carriers_rev_s": [
-      79.378134
+      79.375123
      ],
      "carrier_min_rev_s": [
-      79.378134
+      79.375123
      ],
      "carrier_max_rev_s": [
-      79.378134
+      79.375123
      ],
      "throttle": 80.0,
      "rig": "dregon_mikrokopter_single_motor",
      "rotor_ids": [
       "Motor4"
      ],
-     "stationary_pass": true,
+     "stationary_pass": false,
      "residual_std_hz": [
-      0.092193
+      0.135731
      ],
-     "residual_max_abs_hz": 0.37788274775380964,
+     "residual_max_abs_hz": 0.3351530248603289,
      "longest_inside_s": 11.71,
      "orders": [
-      60
+      62
      ],
      "survey_rev_s": [
       79.38
      ],
      "carrier_shift_rev_s": [
-      -0.001866
+      -0.004877
      ],
      "npz": "bench_dregon_Motor4_80.npz",
-     "npz_bytes": 4504730
+     "npz_bytes": 4505086
     },
     {
      "name": "bench_dregon_Motor4_90",
@@ -1230,13 +1344,19 @@
      "level_db": -34.89764370995793,
      "level_deficit_db": 1.2283052083773,
      "line_margin_db": [
-      1.1310258184782778
+      1.929591695660566
+     ],
+     "carrier_drift_hz": [
+      0.4431283918065674
+     ],
+     "orders_recording": [
+      64
      ],
      "line_margin_recording_db": [
-      2.6732171786619907
+      2.1873580780985136
      ],
      "carrier_recording_rev_s": [
-      89.122307
+      89.154918
      ],
      "rule": "noise-v2 bench rule rev 2: level gate + narrow residual + in-window margin",
      "family": "bench_dregon_motor",
@@ -1256,13 +1376,13 @@
       17.08
      ],
      "carriers_rev_s": [
-      89.126601
+      89.172441
      ],
      "carrier_min_rev_s": [
-      89.126601
+      89.172441
      ],
      "carrier_max_rev_s": [
-      89.126601
+      89.172441
      ],
      "throttle": 90.0,
      "rig": "dregon_mikrokopter_single_motor",
@@ -1271,21 +1391,21 @@
      ],
      "stationary_pass": false,
      "residual_std_hz": [
-      0.090562
+      0.175507
      ],
-     "residual_max_abs_hz": 0.20883945505884313,
+     "residual_max_abs_hz": 0.5042949700532443,
      "longest_inside_s": 11.64,
      "orders": [
-      69
+      64
      ],
      "survey_rev_s": [
       89.14
      ],
      "carrier_shift_rev_s": [
-      -0.013399
+      0.032441
      ],
      "npz": "bench_dregon_Motor4_90.npz",
-     "npz_bytes": 4477918
+     "npz_bytes": 4478234
     },
     {
      "name": "bench_dregon_allMotors_70",
@@ -1294,16 +1414,28 @@
      "level_db": -28.904380340373525,
      "level_deficit_db": 1.1469922947199365,
      "line_margin_db": [
-      5.1234508102825345,
-      5.107960222405592,
-      5.1234508102825345,
-      9.373212132903024
+      3.778969694767582,
+      3.722292142919952,
+      3.778969694767582,
+      6.12422889511844
+     ],
+     "carrier_drift_hz": [
+      0.3132716375484961,
+      0.2907408567461971,
+      0.015639584666942596,
+      2.174147768621353
+     ],
+     "orders_recording": [
+      67,
+      64,
+      63,
+      63
      ],
      "line_margin_recording_db": [
-      5.890373144323659,
-      5.7861359242381125,
-      5.846751950662359,
-      8.34758966484467
+      5.205675433189333,
+      5.0508095310700964,
+      5.106469957163185,
+      6.7912074423618
      ],
      "carrier_recording_rev_s": [
       64.639557,
@@ -1382,7 +1514,7 @@
       -0.000261
      ],
      "npz": "bench_dregon_allMotors_70.npz",
-     "npz_bytes": 19824438
+     "npz_bytes": 19825062
     }
    ],
    "failures": [],
@@ -1401,9 +1533,9 @@
     "bench_edge_s": 2.0
    },
    "provenance": {
-    "git_head": "7a7303014e64b885104cf496b794c14bc4228f47",
-    "timestamp": "2026-09-18T00:46:27+0100",
-    "wall_seconds": 78.362,
+    "git_head": "2972bd9f2ca9e56d8904927a46ff6f4e1892b60e",
+    "timestamp": "2026-09-18T01:20:03+0100",
+    "wall_seconds": 73.6,
     "command": "scripts/noise_v2_supports.py build --set dregon-bench --out results/noise_v2/rounds/round2/supports"
    }
   },
@@ -1420,6 +1552,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1482,6 +1616,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1544,6 +1680,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1606,6 +1744,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1668,6 +1808,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1730,6 +1872,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1792,6 +1936,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1842,6 +1988,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1892,6 +2040,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1942,6 +2092,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -1992,6 +2144,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2042,6 +2196,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2092,6 +2248,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2142,6 +2300,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2192,6 +2352,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2242,6 +2404,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2292,6 +2456,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2342,6 +2508,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2392,6 +2560,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2442,6 +2612,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2492,6 +2664,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2542,6 +2716,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2592,6 +2768,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2642,6 +2820,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2692,6 +2872,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2742,6 +2924,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2792,6 +2976,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2854,6 +3040,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2916,6 +3104,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -2978,6 +3168,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3040,6 +3232,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3102,6 +3296,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3164,6 +3360,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3226,6 +3424,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3288,6 +3488,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3350,6 +3552,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3412,6 +3616,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3474,6 +3680,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3536,6 +3744,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3598,6 +3808,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3660,6 +3872,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3722,6 +3936,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3784,6 +4000,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3846,6 +4064,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3908,6 +4128,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -3970,6 +4192,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4032,6 +4256,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4094,6 +4320,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4156,6 +4384,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4218,6 +4448,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4280,6 +4512,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4342,6 +4576,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4404,6 +4640,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4466,6 +4704,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4528,6 +4768,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4590,6 +4832,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4652,6 +4896,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4714,6 +4960,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4776,6 +5024,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4838,6 +5088,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4900,6 +5152,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -4962,6 +5216,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5024,6 +5280,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5086,6 +5344,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5148,6 +5408,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5210,6 +5472,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5272,6 +5536,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5334,6 +5600,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5396,6 +5664,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5458,6 +5728,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5520,6 +5792,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5582,6 +5856,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5644,6 +5920,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5706,6 +5984,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5768,6 +6048,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5830,6 +6112,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5892,6 +6176,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -5954,6 +6240,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6016,6 +6304,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6078,6 +6368,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6140,6 +6432,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6202,6 +6496,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6264,6 +6560,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6326,6 +6624,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6388,6 +6688,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6450,6 +6752,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6512,6 +6816,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6574,6 +6880,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6636,6 +6944,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6698,6 +7008,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6760,6 +7072,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6822,6 +7136,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6884,6 +7200,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -6946,6 +7264,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7008,6 +7328,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7070,6 +7392,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7132,6 +7456,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7194,6 +7520,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7256,6 +7584,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7318,6 +7648,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7380,6 +7712,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7442,6 +7776,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7504,6 +7840,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7566,6 +7904,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7628,6 +7968,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7690,6 +8032,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7752,6 +8096,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7814,6 +8160,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7876,6 +8224,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -7938,6 +8288,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8000,6 +8352,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8062,6 +8416,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8124,6 +8480,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8186,6 +8544,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8248,6 +8608,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8310,6 +8672,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8372,6 +8736,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8434,6 +8800,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8496,6 +8864,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8558,6 +8928,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8616,6 +8988,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8670,6 +9044,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8732,6 +9108,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8794,6 +9172,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8844,6 +9224,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8894,6 +9276,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8944,6 +9328,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -8994,6 +9380,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -9044,6 +9432,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -9094,6 +9484,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -9144,6 +9536,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -9206,6 +9600,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -9268,6 +9664,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -9330,6 +9728,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -9392,6 +9792,8 @@
      "level_db": null,
      "level_deficit_db": null,
      "line_margin_db": null,
+     "carrier_drift_hz": null,
+     "orders_recording": null,
      "line_margin_recording_db": null,
      "carrier_recording_rev_s": null,
      "rule": "published stationary frame (manifest tolerance rule, <= 30 s)",
@@ -9464,13 +9866,13 @@
     "bench_edge_s": 2.0
    },
    "provenance": {
-    "git_head": "7a7303014e64b885104cf496b794c14bc4228f47",
-    "timestamp": "2026-09-18T00:46:51+0100",
-    "wall_seconds": 21.545,
+    "git_head": "2972bd9f2ca9e56d8904927a46ff6f4e1892b60e",
+    "timestamp": "2026-09-18T01:20:18+0100",
+    "wall_seconds": 12.127,
     "command": "scripts/noise_v2_supports.py build --set bench-points --out results/noise_v2/rounds/round2/supports"
    }
   }
  },
  "n_supports": 156,
- "updated": "2026-09-18T00:46:51+0100"
+ "updated": "2026-09-18T01:20:18+0100"
 }

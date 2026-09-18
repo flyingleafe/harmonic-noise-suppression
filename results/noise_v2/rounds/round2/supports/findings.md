@@ -24,7 +24,7 @@ Total supports cached: 156.
 
 ## bench-points
 
-135 of 135 specs built (21.5 s, git `7a7303014e64`).
+135 of 135 specs built (12.1 s, git `2972bd9f2ca9`).
 
 135 published points, 10 rigs, channel counts [1, 8], durations 12.0-30.0 s (median 30.0 s). Each is taken whole: the publishing derivation already cut it to its stationary span (<= 30 s).
 
@@ -168,48 +168,48 @@ Total supports cached: 156.
 
 ## dregon-bench
 
-21 of 21 specs built (78.4 s, git `7a7303014e64`).
+21 of 21 specs built (73.6 s, git `2972bd9f2ca9`).
 
-The rev-2 rule (order 60-80, residual +-1 Hz averaged over 2 s, level gate within 6 dB, in-window margin >= 3 dB, minimum 4 s): **15 of 21 recordings pass**.
+The rev-2 rule (order 60-80, residual +-1 Hz averaged over 2 s, level gate within 6 dB, in-window margin >= 3 dB, minimum 4 s): **12 of 21 recordings pass**.
 
-Passing segments run 11.66-37.82 s (median 12.04 s, total 248.1 s of stationary bench material).
+Passing segments run 11.66-34.40 s (median 12.27 s, total 200.2 s of stationary bench material).
 
-Failing recordings (window kept and cached, flagged `FAIL`; under rule rev 2 a bench recording fails on the LINE MARGIN measured inside its own window, against 3 dB): `bench_dregon_Motor1_70` margin 2.39 dB (recording 2.70 dB), window 31.69 s, level deficit 0.37 dB; `bench_dregon_Motor1_90` margin 2.51 dB (recording 3.22 dB), window 12.79 s, level deficit 0.62 dB; `bench_dregon_Motor2_70` margin 2.35 dB (recording 3.44 dB), window 11.80 s, level deficit 0.31 dB; `bench_dregon_Motor3_90` margin 2.60 dB (recording 4.48 dB), window 11.80 s, level deficit 0.88 dB; `bench_dregon_Motor4_70` margin 1.49 dB (recording 3.30 dB), window 11.99 s, level deficit 0.71 dB; `bench_dregon_Motor4_90` margin 1.13 dB (recording 2.67 dB), window 11.64 s, level deficit 1.23 dB
+Failing recordings (window kept and cached, flagged `FAIL`; under rule rev 2 a bench recording fails on the LINE MARGIN measured inside its own window, against 3 dB): `bench_dregon_Motor1_70` margin 1.70 dB (recording 1.60 dB), window 31.69 s, level deficit 0.37 dB; `bench_dregon_Motor1_80` margin 2.94 dB (recording 4.10 dB), window 11.71 s, level deficit 0.42 dB; `bench_dregon_Motor1_90` margin 1.82 dB (recording 1.76 dB), window 12.79 s, level deficit 0.62 dB; `bench_dregon_Motor2_70` margin 2.40 dB (recording 2.61 dB), window 11.80 s, level deficit 0.31 dB; `bench_dregon_Motor3_80` margin 2.27 dB (recording 2.68 dB), window 12.38 s, level deficit 0.60 dB; `bench_dregon_Motor3_90` margin 2.85 dB (recording 2.13 dB), window 11.80 s, level deficit 0.88 dB; `bench_dregon_Motor4_70` margin 1.28 dB (recording 1.54 dB), window 11.99 s, level deficit 0.71 dB; `bench_dregon_Motor4_80` margin 2.13 dB (recording 1.66 dB), window 11.71 s, level deficit 0.78 dB; `bench_dregon_Motor4_90` margin 1.93 dB (recording 2.19 dB), window 11.64 s, level deficit 1.23 dB
 
-Level gate (rev 2): every window sits 0.29-1.23 dB below the loudest 4 s window of its own recording, against 0.2-32.8 dB under rev 1 (`results/noise_v2/rounds/round1/bench_diag/census.json`). In-window line margins run 1.13-18.15 dB.
+Level gate (rev 2): every window sits 0.29-1.23 dB below the loudest 4 s window of its own recording, against 0.2-32.8 dB under rev 1 (`results/noise_v2/rounds/round1/bench_diag/census.json`). In-window line margins run 1.28-14.69 dB.
 
-Longest +-1 Hz spans over all 21 recordings: min 11.64 s, median 11.99 s, max 37.82 s.
+Longest +-1 Hz spans over all 21 recordings: min 11.64 s, median 11.99 s, max 34.40 s.
 
-Carrier refinement (survey speed -> demodulated line): |shift| up to 0.0746 rev/s, median 0.0166 rev/s. At order 70 a 0.01 rev/s error already displaces the line by 0.7 Hz, most of the tolerance, which is why the carrier is refined before the rule is applied.
+Carrier refinement (survey speed -> demodulated line): |shift| up to 0.0806 rev/s, median 0.0305 rev/s. At order 70 a 0.01 rev/s error already displaces the line by 0.7 Hz, most of the tolerance, which is why the carrier is refined before the rule is applied.
 
 | support | pass | segment (s) | dur (s) | longest +-1 Hz (s) | level deficit (dB) | in-window margin (dB) | order | survey (rev/s) | carrier (rev/s) | shift vs survey | shift vs R1 | residual std (Hz) | mics | bins |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `bench_dregon_Motor1_50` | PASS | 5.72-37.27 | 31.550 | 31.55 | 0.37 | 8.71 | [63] | 49.0000 | 49.0151 | +0.0151 | +0.0079 | 0.308 | 8 | 252401 |
-| `bench_dregon_Motor1_60` | PASS | 4.15-41.97 | 37.820 | 37.82 | 0.48 | 10.56 | [74] | 58.6900 | 58.7561 | +0.0661 | +0.0027 | 0.187 | 8 | 302561 |
-| `bench_dregon_Motor1_70` | FAIL | 4.30-35.99 | 31.690 | 31.69 | 0.37 | 2.39 | [62] | 68.3000 | 68.3166 | +0.0166 | -0.0009 | 0.152 | 8 | 253521 |
-| `bench_dregon_Motor1_80` | PASS | 3.98-15.69 | 11.710 | 11.71 | 0.42 | 3.45 | [67] | 78.0600 | 78.0528 | -0.0072 | -0.0069 | 0.132 | 8 | 93681 |
-| `bench_dregon_Motor1_90` | FAIL | 4.40-17.19 | 12.790 | 12.79 | 0.62 | 2.51 | [61] | 88.1800 | 88.1783 | -0.0017 | -0.0061 | 0.220 | 8 | 102321 |
-| `bench_dregon_Motor2_50` | PASS | 3.83-16.10 | 12.270 | 12.27 | 0.39 | 16.05 | [63] | 48.3600 | 48.4346 | +0.0746 | +0.0261 | 0.380 | 8 | 98161 |
-| `bench_dregon_Motor2_60` | PASS | 4.07-16.06 | 11.990 | 11.99 | 0.50 | 18.15 | [63] | 58.0700 | 58.1441 | +0.0741 | +0.0462 | 0.276 | 8 | 95921 |
-| `bench_dregon_Motor2_70` | FAIL | 3.85-15.65 | 11.800 | 11.80 | 0.31 | 2.35 | [70] | 67.5200 | 67.5348 | +0.0148 | +0.0123 | 0.134 | 8 | 94401 |
-| `bench_dregon_Motor2_80` | PASS | 4.21-16.63 | 12.420 | 12.42 | 0.29 | 7.11 | [63] | 77.1800 | 77.2105 | +0.0305 | +0.0210 | 0.227 | 8 | 99361 |
-| `bench_dregon_Motor2_90` | PASS | 5.27-16.93 | 11.660 | 11.66 | 0.49 | 5.44 | [72] | 86.7000 | 86.7188 | +0.0188 | +0.0006 | 0.186 | 8 | 93281 |
-| `bench_dregon_Motor3_50` | PASS | 3.04-14.87 | 11.830 | 11.83 | 0.54 | 10.65 | [63] | 49.0650 | 49.1353 | +0.0703 | +0.0268 | 0.188 | 8 | 94641 |
-| `bench_dregon_Motor3_60` | PASS | 3.75-16.33 | 12.580 | 12.58 | 0.71 | 9.91 | [70] | 58.9000 | 58.9490 | +0.0490 | +0.0185 | 0.187 | 8 | 100641 |
-| `bench_dregon_Motor3_70` | PASS | 4.87-16.75 | 11.880 | 11.88 | 0.43 | 13.88 | [63] | 68.5600 | 68.6026 | +0.0426 | +0.0280 | 0.224 | 8 | 95041 |
-| `bench_dregon_Motor3_80` | PASS | 4.06-16.44 | 12.380 | 12.38 | 0.60 | 3.96 | [65] | 78.8200 | 78.8251 | +0.0051 | +0.0117 | 0.152 | 8 | 99041 |
-| `bench_dregon_Motor3_90` | FAIL | 4.84-16.64 | 11.800 | 11.80 | 0.88 | 2.60 | [70] | 88.2400 | 88.2622 | +0.0222 | +0.0133 | 0.111 | 8 | 94401 |
-| `bench_dregon_Motor4_50` | PASS | 3.76-15.80 | 12.040 | 12.04 | 0.40 | 10.69 | [63] | 49.7400 | 49.8057 | +0.0657 | +0.0370 | 0.366 | 8 | 96321 |
-| `bench_dregon_Motor4_60` | PASS | 2.83-14.66 | 11.830 | 11.83 | 0.79 | 5.55 | [62] | 59.6600 | 59.6914 | +0.0314 | +0.0112 | 0.177 | 8 | 94641 |
-| `bench_dregon_Motor4_70` | FAIL | 3.81-15.80 | 11.990 | 11.99 | 0.71 | 1.49 | [68] | 69.3100 | 69.3222 | +0.0122 | +0.0039 | 0.166 | 8 | 95921 |
-| `bench_dregon_Motor4_80` | PASS | 5.30-17.01 | 11.710 | 11.71 | 0.78 | 4.34 | [60] | 79.3800 | 79.3781 | -0.0019 | +0.0022 | 0.092 | 8 | 93681 |
-| `bench_dregon_Motor4_90` | FAIL | 5.44-17.08 | 11.640 | 11.64 | 1.23 | 1.13 | [69] | 89.1400 | 89.1266 | -0.0134 | +0.0043 | 0.091 | 8 | 93121 |
-| `bench_dregon_allMotors_70` | PASS | 3.85-38.25 | 34.400 | 34.40 | 1.15 | 5.12, 5.11, 5.12, 9.37 | [67, 64, 63, 63] | 64.6471, 67.6588, 68.7396, 69.5655 | 64.6363, 67.6596, 68.7364, 69.5652 | -0.0108, +0.0008, -0.0032, -0.0003 | -0.0033, -0.0022, -0.0015, -0.0066 | 0.276, 0.242, 0.249, 0.232 | 8 | 275201 |
+| `bench_dregon_Motor1_50` | PASS | 5.72-37.27 | 31.550 | 31.55 | 0.37 | 8.32 | [63] | 49.0000 | 49.0151 | +0.0151 | +0.0079 | 0.308 | 8 | 252401 |
+| `bench_dregon_Motor1_60` | PASS | 4.15-29.86 | 25.706 | 25.71 | 0.48 | 10.85 | [70] | 58.6900 | 58.7659 | +0.0759 | +0.0125 | 0.362 | 8 | 205649 |
+| `bench_dregon_Motor1_70` | FAIL | 4.30-35.99 | 31.690 | 31.69 | 0.37 | 1.70 | [76] | 68.3000 | 68.3137 | +0.0137 | -0.0037 | 0.226 | 8 | 253521 |
+| `bench_dregon_Motor1_80` | FAIL | 3.98-15.69 | 11.710 | 11.71 | 0.42 | 2.94 | [63] | 78.0600 | 78.1010 | +0.0410 | +0.0413 | 0.134 | 8 | 93681 |
+| `bench_dregon_Motor1_90` | FAIL | 4.40-17.19 | 12.790 | 12.79 | 0.62 | 1.82 | [63] | 88.1800 | 88.1657 | -0.0143 | -0.0188 | 0.202 | 8 | 102321 |
+| `bench_dregon_Motor2_50` | PASS | 3.83-16.10 | 12.270 | 12.27 | 0.39 | 12.02 | [63] | 48.3600 | 48.4346 | +0.0746 | +0.0261 | 0.380 | 8 | 98161 |
+| `bench_dregon_Motor2_60` | PASS | 4.07-16.06 | 11.990 | 11.99 | 0.50 | 14.69 | [63] | 58.0700 | 58.1441 | +0.0741 | +0.0462 | 0.276 | 8 | 95921 |
+| `bench_dregon_Motor2_70` | FAIL | 3.85-15.65 | 11.800 | 11.80 | 0.31 | 2.40 | [60] | 67.5200 | 67.5522 | +0.0322 | +0.0298 | 0.143 | 8 | 94401 |
+| `bench_dregon_Motor2_80` | PASS | 4.21-16.63 | 12.420 | 12.42 | 0.29 | 4.01 | [63] | 77.1800 | 77.2105 | +0.0305 | +0.0210 | 0.227 | 8 | 99361 |
+| `bench_dregon_Motor2_90` | PASS | 5.27-16.93 | 11.660 | 11.66 | 0.49 | 3.02 | [77] | 86.7000 | 86.6949 | -0.0051 | -0.0232 | 0.197 | 8 | 93281 |
+| `bench_dregon_Motor3_50` | PASS | 3.04-14.87 | 11.830 | 11.83 | 0.54 | 7.53 | [63] | 49.0650 | 49.1353 | +0.0703 | +0.0268 | 0.188 | 8 | 94641 |
+| `bench_dregon_Motor3_60` | PASS | 3.75-16.33 | 12.580 | 12.58 | 0.71 | 6.37 | [70] | 58.9000 | 58.9490 | +0.0490 | +0.0185 | 0.187 | 8 | 100641 |
+| `bench_dregon_Motor3_70` | PASS | 4.87-16.75 | 11.880 | 11.88 | 0.43 | 7.64 | [70] | 68.5600 | 68.6338 | +0.0738 | +0.0592 | 0.249 | 8 | 95041 |
+| `bench_dregon_Motor3_80` | FAIL | 4.06-16.44 | 12.380 | 12.38 | 0.60 | 2.27 | [80] | 78.8200 | 78.8141 | -0.0059 | +0.0007 | 0.157 | 8 | 99041 |
+| `bench_dregon_Motor3_90` | FAIL | 4.84-16.64 | 11.800 | 11.80 | 0.88 | 2.85 | [61] | 88.2400 | 88.2439 | +0.0039 | -0.0050 | 0.133 | 8 | 94401 |
+| `bench_dregon_Motor4_50` | PASS | 3.76-15.80 | 12.040 | 12.04 | 0.40 | 8.41 | [63] | 49.7400 | 49.8057 | +0.0657 | +0.0370 | 0.366 | 8 | 96321 |
+| `bench_dregon_Motor4_60` | PASS | 2.83-14.66 | 11.830 | 11.83 | 0.79 | 10.74 | [63] | 59.6600 | 59.7406 | +0.0806 | +0.0604 | 0.342 | 8 | 94641 |
+| `bench_dregon_Motor4_70` | FAIL | 3.81-15.80 | 11.990 | 11.99 | 0.71 | 1.28 | [69] | 69.3100 | 69.3325 | +0.0225 | +0.0142 | 0.153 | 8 | 95921 |
+| `bench_dregon_Motor4_80` | FAIL | 5.30-17.01 | 11.710 | 11.71 | 0.78 | 2.13 | [62] | 79.3800 | 79.3751 | -0.0049 | -0.0008 | 0.136 | 8 | 93681 |
+| `bench_dregon_Motor4_90` | FAIL | 5.44-17.08 | 11.640 | 11.64 | 1.23 | 1.93 | [64] | 89.1400 | 89.1724 | +0.0324 | +0.0501 | 0.176 | 8 | 93121 |
+| `bench_dregon_allMotors_70` | PASS | 3.85-38.25 | 34.400 | 34.40 | 1.15 | 3.78, 3.72, 3.78, 6.12 | [67, 64, 63, 63] | 64.6471, 67.6588, 68.7396, 69.5655 | 64.6363, 67.6596, 68.7364, 69.5652 | -0.0108, +0.0008, -0.0032, -0.0003 | -0.0033, -0.0022, -0.0015, -0.0066 | 0.276, 0.242, 0.249, 0.232 | 8 | 275201 |
 
 ## Bytes
 
 * `bench-points`: 1749.6 MB of `.npz` (power as float32)
-* `dregon-bench`: 137.3 MB of `.npz` (power as float32)
+* `dregon-bench`: 132.6 MB of `.npz` (power as float32)
 
 The `.npz` caches are NOT committed (`results/**` is gitignored and they are hundreds of MB); `index.json` and this file are. Every row carries its `spec`, so a consumer rebuilds one support with `supports.load_support(<spec>)` and a whole set with
 
