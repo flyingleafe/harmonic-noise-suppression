@@ -1,0 +1,178 @@
+{
+ "rule": "reported fit = restart with the lowest polished objective",
+ "reducer": "scripts/noise_v2_fit.py:reduce_restarts",
+ "jobs": {
+  "bench": "nv2-r2-dregon-restarts2-3b1ffe",
+  "floor": "nv2-r2-dregon-floor2-01c39a"
+ },
+ "rows": [
+  {
+   "support": "bench_dregon_Motor1_50",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor1_50__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 2,
+   "best_minus_median_per_cell": 0.007336163119904256,
+   "best_minus_worst_per_cell": 0.007345414209646801
+  },
+  {
+   "support": "bench_dregon_Motor1_60",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor1_60__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 3,
+   "best_minus_median_per_cell": 0.0004254068109840942,
+   "best_minus_worst_per_cell": 0.0012220188223156982
+  },
+  {
+   "support": "bench_dregon_Motor1_70",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor1_70__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 3,
+   "best_minus_median_per_cell": 0.0003214374546004312,
+   "best_minus_worst_per_cell": 0.0006496392317974353
+  },
+  {
+   "support": "bench_dregon_Motor1_80",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor1_80__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 2,
+   "best_minus_median_per_cell": 1.7903231922893153e-05,
+   "best_minus_worst_per_cell": 4.7476157187528406e-05
+  },
+  {
+   "support": "bench_dregon_Motor1_90",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor1_90__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 3,
+   "best_minus_median_per_cell": 0.0005366580878179725,
+   "best_minus_worst_per_cell": 0.001219250202286808
+  },
+  {
+   "support": "bench_dregon_Motor2_50",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor2_50__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 2,
+   "best_minus_median_per_cell": 1.481364419058345e-05,
+   "best_minus_worst_per_cell": 8.541305965402325e-05
+  },
+  {
+   "support": "bench_dregon_Motor2_60",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor2_60__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 2,
+   "best_minus_median_per_cell": 0.0035888179660938987,
+   "best_minus_worst_per_cell": 0.005270639454297899
+  },
+  {
+   "support": "bench_dregon_Motor2_70",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor2_70__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 1,
+   "best_minus_median_per_cell": 0.0011387039731366442,
+   "best_minus_worst_per_cell": 0.019404569914165927
+  },
+  {
+   "support": "bench_dregon_Motor2_80",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor2_80__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 1,
+   "best_minus_median_per_cell": 4.018685194289384e-05,
+   "best_minus_worst_per_cell": 0.00019451399175077268
+  },
+  {
+   "support": "bench_dregon_Motor2_90",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor2_90__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 2,
+   "best_minus_median_per_cell": 0.0029745165309872485,
+   "best_minus_worst_per_cell": 0.005621693554627342
+  },
+  {
+   "support": "bench_dregon_Motor3_50",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor3_50__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 0,
+   "best_minus_median_per_cell": 4.0001619999307264e-05,
+   "best_minus_worst_per_cell": 7.145619176464374e-05
+  },
+  {
+   "support": "bench_dregon_Motor3_60",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor3_60__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 1,
+   "best_minus_median_per_cell": 4.775204329598691e-05,
+   "best_minus_worst_per_cell": 0.0001519669786239222
+  },
+  {
+   "support": "bench_dregon_Motor3_70",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor3_70__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 1,
+   "best_minus_median_per_cell": 7.846704023126158e-05,
+   "best_minus_worst_per_cell": 0.0003134450791211767
+  },
+  {
+   "support": "bench_dregon_Motor3_80",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor3_80__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 0,
+   "best_minus_median_per_cell": 0.0024645714689561196,
+   "best_minus_worst_per_cell": 0.05683427747687974
+  },
+  {
+   "support": "bench_dregon_Motor3_90",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor3_90__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 2,
+   "best_minus_median_per_cell": 0.00011093299541273591,
+   "best_minus_worst_per_cell": 0.020078020083396864
+  },
+  {
+   "support": "bench_dregon_Motor4_50",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor4_50__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 0,
+   "best_minus_median_per_cell": 0.0016670452173931454,
+   "best_minus_worst_per_cell": 0.002132553306552477
+  },
+  {
+   "support": "bench_dregon_Motor4_60",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor4_60__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 2,
+   "best_minus_median_per_cell": 0.013637110543091956,
+   "best_minus_worst_per_cell": 0.022763879384152027
+  },
+  {
+   "support": "bench_dregon_Motor4_70",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor4_70__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 2,
+   "best_minus_median_per_cell": 0.017476144362851418,
+   "best_minus_worst_per_cell": 0.019628995912062547
+  },
+  {
+   "support": "bench_dregon_Motor4_80",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor4_80__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 3,
+   "best_minus_median_per_cell": 0.00022386322983542224,
+   "best_minus_worst_per_cell": 0.0002877682218981523
+  },
+  {
+   "support": "bench_dregon_Motor4_90",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_Motor4_90__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 3,
+   "best_minus_median_per_cell": 0.00010340901107769433,
+   "best_minus_worst_per_cell": 0.00015375927207295892
+  },
+  {
+   "support": "bench_dregon_allMotors_70",
+   "path": "results/noise_v2/rounds/round2/fits/bench_dregon_allMotors_70__bench.json",
+   "n_restarts": 4,
+   "selected_seed": 0,
+   "best_minus_median_per_cell": 0.0002394332713056422,
+   "best_minus_worst_per_cell": 0.00035460552157452253
+  }
+ ]
+}
