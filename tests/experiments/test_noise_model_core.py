@@ -797,3 +797,35 @@ def test_expected_periodogram_frames_match_the_evaluator_grid():
     )
     assert m.shape == (2, pg.power.shape[1], n_fft // 2 + 1)
     assert np.isfinite(m).all() and (m > 0).all()
+
+
+def test_the_low_order_gamma_check_names_the_shaft_absorbing_ramp_only():
+    """The check must pass unresolved low orders and fail a VISIBLE k^2 ramp.
+
+    Widths under the window's resolution are one statement — "the shaft alone
+    sets this line's shape" — and their ratio is noise, so the floor test is
+    decisive; a ramp is only a verdict once the widths are above the floor,
+    which is the degeneracy the explainer's identification section names.
+    """
+    n = 1 << 14  # 1.024 s at 16 kHz: resolution 1 / (2 T) = 0.488 Hz
+    batch = MD.bench_batch(
+        name="check",
+        power=np.ones((1, 1, n // 2 + 1)),
+        sr=SR,
+        carrier_mean=np.array([200.0]),
+        n_samples=n,
+        k_cap=4,
+    )
+    res = batch.resolution_hz
+    assert res == pytest.approx(0.5 * SR / n)
+
+    tiny = FT.gamma_low_order_check(np.array([[1e-4, 3e-3, 6e-3, 1e-2]]), batch=batch)
+    assert tiny["verdict"] == "pass", "all four widths are a fraction of a bin"
+    assert tiny["k4_over_k1"] > FT.GAMMA_RAMP_RATIO, "a ratio that must NOT decide it"
+
+    ramp = FT.gamma_low_order_check(res * np.array([[4.0, 16.0, 36.0, 64.0]]), batch=batch)
+    assert ramp["verdict"] == "fail_k2_ramp"
+    assert not ramp["passed"]
+
+    wide = FT.gamma_low_order_check(res * np.array([[10.0, 10.0, 10.0, 10.0]]), batch=batch)
+    assert wide["verdict"] == "fail_above_floor"

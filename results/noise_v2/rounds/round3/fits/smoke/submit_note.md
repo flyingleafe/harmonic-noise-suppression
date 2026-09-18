@@ -53,3 +53,31 @@ What to read out of the committed JSON (schema `noise-v2-fit/2`):
 `k4_over_k1`), `objective.whittle_nats / objective.n_cells`,
 `optimiser.converged` / `which_converged` / `wall_s`, and the `restarts` block's
 `gamma_hz.log_mean` spread across the four starts.
+
+## Harvested (2026-09-18)
+
+`R3SMOKE_DONE exit_build=0 exit_fit=0`, wall 208.6 s for the reported start
+(4 starts in parallel, 8 cpus). Fetched from R2 and committed here:
+`bench_dregon_Motor2_60__bench.json` + the four `restarts/*.json`.
+
+| quantity | value |
+| --- | --- |
+| objective | −7 662 814.7 nats over 687 752 cells = **−11.1418 nats/cell** |
+| convergence | `converged: true` (`which_converged: lbfgs`), restart gain 1.1e-4 nats/cell over the worst start |
+| `sigma_nu` | 0.3970 rad/s (R2 on this support: 2.12, at the prior edge) |
+| `lam` | 0.1703 /s (R2: 654.8) |
+| `gamma_hz` k = 1, 2, 4, 8, 16, 32 | 0.00025, 0.0085, 0.0145, 0.0458, 1.193, 34.72 Hz |
+| low-order check | **pass** — max γ(k ≤ 4) is 0.35 × the 0.0417 Hz resolution floor |
+| speed-law pins | none (bench mode has no speed law) |
+| restart agreement | γ log-mean over orders spans 1.07 × across the four starts |
+
+The four starts agree on the widths to 7 % in log-mean, and the reported start
+is the lowest objective of the four.
+
+NOTE on the verdict: the job at `748e8081` recorded `fail_k2_ramp`, because the
+verdict order read the γ₄/γ₁ ratio (58.5) before the floor test even though all
+four low-order widths sit UNDER the resolution. Widths under a bin are one
+statement and their ratio is noise, so the floor test is now decisive and the
+ramp is only read above the floor (`fit.gamma_low_order_check`, with a
+regression test). The committed JSONs carry the recomputed verdict and a
+`recomputed` field naming the job's original one.

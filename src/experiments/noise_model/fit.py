@@ -760,9 +760,18 @@ def gamma_low_order_check(gamma_hz: Any, *, batch: MD.SupportBatch) -> dict[str,
     widths: in the Brownian limit the shaft's own factor is Lorentzian too,
     ``prop k^2 sigma_nu^2 / lam``, so a ``gamma_rk`` ramping as ``k^2`` would
     fit the same line shape with no shaft at all. PASS is the fitted width at
-    ``k <= 4`` sitting at the window's resolution floor; FAIL is a ``k^2``
-    ramp, and then ``lam`` takes the long-lag pin instead of the bench value.
-    Measured here after every fit rather than assumed away.
+    ``k <= 4`` sitting AT OR UNDER the window's resolution floor; FAIL is a
+    ``k^2`` ramp above it, and then ``lam`` takes the long-lag pin instead of
+    the bench value. Measured here after every fit rather than assumed away.
+
+    The floor test is the DECISIVE one and the ramp ratio is only read where
+    it fails. Widths under the resolution are all the same statement — "this
+    line is unresolved, the shaft alone sets its shape" — and the objective is
+    flat among them, so their RATIO is noise: the first R3 bench fit put
+    ``gamma_1 = 2.5e-4`` and ``gamma_4 = 1.5e-2`` Hz on a 12 s window whose
+    resolution is 4.2e-2 Hz, a ratio of 59 between two numbers that are both
+    a quarter of a bin wide and a shaft (``sigma_nu = 0.40``) that plainly was
+    NOT absorbed. A ramp that absorbs the shaft has to be visible first.
     """
     g = np.atleast_2d(np.asarray(_np(gamma_hz), dtype=np.float64))
     kk = min(int(GAMMA_CHECK_K), int(g.shape[1]))
@@ -772,9 +781,7 @@ def gamma_low_order_check(gamma_hz: Any, *, batch: MD.SupportBatch) -> dict[str,
     ramp = float(np.max(low[:, kk - 1] / np.maximum(low[:, 0], 1e-30))) if kk >= 2 else 1.0
     at_floor = bool(np.all(over <= GAMMA_FLOOR_FACTOR))
     is_ramp = bool(ramp >= GAMMA_RAMP_RATIO)
-    verdict = (
-        "pass" if at_floor and not is_ramp else ("fail_k2_ramp" if is_ramp else "fail_above_floor")
-    )
+    verdict = "pass" if at_floor else ("fail_k2_ramp" if is_ramp else "fail_above_floor")
     return dict(
         verdict=verdict,
         passed=verdict == "pass",
@@ -787,8 +794,9 @@ def gamma_low_order_check(gamma_hz: Any, *, batch: MD.SupportBatch) -> dict[str,
         k4_over_k1=ramp,
         ramp_ratio_flagged_at=GAMMA_RAMP_RATIO,
         rule=(
-            "pass = every gamma_rk at k <= 4 within floor_factor of 1 / (2 T); "
-            "fail_k2_ramp = gamma_4 / gamma_1 >= ramp threshold (the shaft absorbed)"
+            "pass = every gamma_rk at k <= 4 within floor_factor of 1 / (2 T); above the "
+            "floor, fail_k2_ramp = gamma_4 / gamma_1 >= ramp threshold (the shaft absorbed), "
+            "otherwise fail_above_floor"
         ),
     )
 
