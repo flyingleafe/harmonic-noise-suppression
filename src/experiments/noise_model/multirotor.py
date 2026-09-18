@@ -19,11 +19,11 @@ SIGNAL MODEL (the campaign model of ``docs/explainers/noise-model-v2-plan.qmd``,
   known to the phase-aware estimator (it is a track) and NOT to the
   periodogram reader (which registers on the constant) -- that asymmetry is one
   of the two levers under test.
-* ``psi_rk(t) = exp(i [k theta_r(t) + eps_rk(t)])`` is the v2 decoherence:
-  one integrated-OU shaft error per rotor plus an independent per-order phase
-  OU with parity-selected ``(sigma_eps, lam_eps)``. Both are drawn with the
-  same exact transitions :mod:`.render` uses (``simulate_state``,
-  ``_ar1_causal``), so ``E[psi_rk(t + tau) conj(psi_rk(t))] = R_rk(tau)`` is
+* ``u_rk(t) = exp(i [k theta_r(t) + psi_rk(t)])`` is the v2 decoherence:
+  one integrated-OU shaft error per rotor (``simulate_state``, the exact
+  transition :mod:`.render` uses) plus Model R3's independent per-line Wiener
+  phase of half-width ``gamma_rk`` Hz, drawn as the same random walk the
+  renderer draws, so ``E[u_rk(t + tau) conj(u_rk(t))] = R_rk(tau)`` is
   exactly :func:`.lag.r_tau` -- the estimators below are therefore calibrated
   against the law the Pyro fit assumes, not against a re-derivation of it.
 * ``c_rkm = sqrt(2 P_rk) g_rm exp(-i 2 pi k f_r eta_rm) exp(i beta_rk)``:
@@ -79,8 +79,9 @@ from experiments.stochastic_fit.revised_phase import (
     simulate_state,
 )
 
+from . import model as MD
 from . import spectrum as SP
-from .lag import parity_select, r_tau
+from .lag import r_tau
 
 __all__ = [
     "FloorSpec",
@@ -131,9 +132,9 @@ class RotorSpec:
     """One rotor: its constant carrier, its profile and its v2 dynamics.
 
     ``profile_db`` is a ``(K,)`` row of per-order line powers in dB, i.e. one
-    row of a fit's ``params.profile.profile_db``. ``sigma_eps`` and
-    ``lam_eps`` are ``(even, odd)`` pairs exactly as :func:`.lag.r_tau` takes
-    them.
+    row of a fit's ``params.profile.profile_db``, and ``gamma_hz`` is the
+    matching ``(K,)`` row of Model R3 per-line Lorentzian half-widths in Hz,
+    exactly as :func:`.lag.r_tau` takes them.
     """
 
     name: str
@@ -141,9 +142,7 @@ class RotorSpec:
     profile_db: np.ndarray
     sigma_nu: float
     lam: float
-    sigma_eps: tuple[float, float]
-    lam_eps: tuple[float, float]
-    p: float = SP.P_ORDER_EXPONENT
+    gamma_hz: np.ndarray
 
     @property
     def n_orders(self) -> int:
@@ -230,7 +229,11 @@ class MultiRotorScene:
 
 
 def rotor_from_fit(fit: dict[str, Any], *, name: str, rotor: int = 0) -> RotorSpec:
-    """A :class:`RotorSpec` read verbatim out of a ``noise-v2-fit/1`` payload."""
+    """A :class:`RotorSpec` read verbatim out of a fit payload.
+
+    Reads ``noise-v2-fit/2`` and, through :func:`.model.gamma_from_params`,
+    the ``/1`` payloads of R1 and R2 as well.
+    """
     p = fit["params"]
     prof = np.asarray(p["profile"]["profile_db"], dtype=np.float64)
     return RotorSpec(
@@ -239,13 +242,24 @@ def rotor_from_fit(fit: dict[str, Any], *, name: str, rotor: int = 0) -> RotorSp
         profile_db=prof[rotor].copy(),
         sigma_nu=float(p["sigma_nu"]),
         lam=float(p["lam"]),
-        sigma_eps=(float(p["sigma_eps_even"]), float(p["sigma_eps_odd"])),
-        lam_eps=(float(p["lam_eps_even"]), float(p["lam_eps_odd"])),
-        p=float(p.get("p", SP.P_ORDER_EXPONENT)),
+        gamma_hz=MD.gamma_from_params(p)[rotor].copy(),
     )
 
 
 # ── the criterion ───────────────────────────────────────────────────────────
+
+
+def gamma_at(spec: RotorSpec, k: float) -> float:
+    """The width of order ``k``, clamped to the spec's widest fitted order.
+
+    The resolvability criterion probes orders a spec need not carry (a rotor
+    is specified up to its own Nyquist, the criterion asks about any line).
+    R3 has no law across ``k`` to extrapolate with, so the honest stand-in is
+    the widest order the spec does carry, and it is the conservative one: it
+    over-states the width, i.e. under-states resolvability.
+    """
+    g = np.atleast_1d(np.asarray(spec.gamma_hz, dtype=np.float64))
+    return float(g[min(max(int(k) - 1, 0), int(g.size) - 1)])
 
 
 def _r_of(spec: RotorSpec, tau: np.ndarray, k: float) -> np.ndarray:
@@ -255,9 +269,7 @@ def _r_of(spec: RotorSpec, tau: np.ndarray, k: float) -> np.ndarray:
             float(k),
             sigma_nu=spec.sigma_nu,
             lam=spec.lam,
-            sigma_eps=list(spec.sigma_eps),
-            lam_eps=list(spec.lam_eps),
-            p=spec.p,
+            gamma_hz=gamma_at(spec, k),
         ),
         dtype=np.float64,
     )
@@ -530,18 +542,14 @@ def simulate_scene(cfg: SceneConfig) -> MultiRotorScene:
         # bench fit's refined constant carrier absorbs.
         shaft_offset[r_i] = float(theta[-1] - theta[0]) / (two_pi * (n - 1) * dt)
         for k in range(1, k_max + 1):
-            s_e = float(parity_select(np.asarray(spec.sigma_eps), float(k))) * float(k) ** (
-                0.5 * spec.p
-            )
-            l_e = float(parity_select(np.asarray(spec.lam_eps), float(k)))
-            e = math.exp(-l_e * dt)
-            z = rng_eps.standard_normal(n)
-            drive = z * (s_e * math.sqrt(max(1.0 - e * e, 0.0)))
-            drive[0] = s_e * z[0]
-            eps = _ar1_causal(drive, e)
+            # Model R3's per-line Wiener phase, the SAME draw render.py makes:
+            # increments N(0, 4 pi gamma dt), so the rendered line carries the
+            # Lorentzian of half-width gamma_rk the lag law assumes.
+            step = math.sqrt(4.0 * math.pi * max(float(np.asarray(spec.gamma_hz)[k - 1]), 0.0) * dt)
+            psi = np.cumsum(rng_eps.standard_normal(n) * step)
             # the angle is reduced modulo one turn BEFORE the trig, exactly as
             # spectrum._comb_autocovariance does: k phi reaches 4e7 turns.
-            ang = two_pi * (np.remainder(k * phi[r_i], 1.0)) + k * theta + eps
+            ang = two_pi * (np.remainder(k * phi[r_i], 1.0)) + k * theta + psi
             amp = math.sqrt(2.0 * float(power_true[r_i, k - 1]))
             ec, es = amp * np.cos(ang), amp * np.sin(ang)
             for m in range(m_n):
@@ -613,9 +621,9 @@ def line_half_width_hz(
     (``lam tau_c << 1`` for every fitted rotor), so ``R_rk`` is Gaussian with
     ``sigma_f = 1 / (sqrt(2) 2 pi tau_c)`` and ``width_sigmas`` standard
     deviations hold the core. Deriving the width from ``tau_c`` rather than
-    from ``k sigma_nu`` keeps the per-order pedestal in it: a rotor whose
-    ``sigma_eps`` dominates has a short ``tau_c`` and gets a wide band, which
-    is what the pedestal needs.
+    from ``k sigma_nu`` keeps the per-line width in it: a rotor whose
+    ``gamma_rk`` dominates has a short ``tau_c`` and gets a wide band, which
+    is what a broad line needs.
 
     ``within_record_s`` gives the width a CARRIER-REFINED reader sees
     (:func:`within_record_spec`); without it the width is the ensemble one,

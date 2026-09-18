@@ -40,8 +40,7 @@ def _spec(name: str, carrier: float, *, n_orders: int = 6, db: float = -30.0, **
         profile_db=profile,
         sigma_nu=kw.pop("sigma_nu", 1e-9),
         lam=kw.pop("lam", 1.0),
-        sigma_eps=kw.pop("sigma_eps", (0.0, 0.0)),
-        lam_eps=kw.pop("lam_eps", (1.0, 1.0)),
+        gamma_hz=np.asarray(kw.pop("gamma_hz", np.zeros(n_orders)), dtype=np.float64),
     )
 
 

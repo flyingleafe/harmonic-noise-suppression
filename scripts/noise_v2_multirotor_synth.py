@@ -133,11 +133,9 @@ def load_rotors() -> tuple[tuple[MR.RotorSpec, ...], list[dict[str, Any]]]:
                 fitted_carrier_rev_s=float(np.atleast_1d(p["carrier_rev_s"])[0]),
                 sigma_nu=float(p["sigma_nu"]),
                 lam=float(p["lam"]),
-                sigma_eps_even=float(p["sigma_eps_even"]),
-                sigma_eps_odd=float(p["sigma_eps_odd"]),
-                lam_eps_even=float(p["lam_eps_even"]),
-                lam_eps_odd=float(p["lam_eps_odd"]),
-                p=float(p["p"]),
+                gamma_hz_ladder={
+                    int(k): float(MR.MD.gamma_from_params(p)[0, int(k) - 1]) for k in LADDER
+                },
                 k_max=int(fit["k_max"]),
                 n_orders=int(np.asarray(p["profile"]["profile_db"]).shape[1]),
                 profile_db_ladder={
