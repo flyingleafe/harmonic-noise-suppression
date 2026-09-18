@@ -1,7 +1,7 @@
 {
  "schema": "noise-v2-round-score/1",
  "round": 2,
- "git": "46e624e6a3984fb789401ced71f3ee59ed6030a4",
+ "git": "9579ca94592c0e46bc94b3bdca65d8c1e3979f25",
  "status": "scored",
  "arm": {
   "kind": "v2",
@@ -17,7 +17,7 @@
    },
    "dregon": {
     "support": "dregon_room2_floor",
-    "path": "results/noise_v2/rounds/round2/fits/dregon_room2_floor__flight_floor_only.json",
+    "path": "results/noise_v2/rounds/round2/fits/dregon_room2_floor__flight_floor_only_v2.json",
     "kind": "flight",
     "comb_mean_check": {
      "available": true,
@@ -117,6 +117,7 @@
  },
  "fits": [
   "results/noise_v2/rounds/round2/fits/dregon_room2_floor__flight_floor_only.json",
+  "results/noise_v2/rounds/round2/fits/dregon_room2_floor__flight_floor_only_v2.json",
   "results/noise_v2/rounds/round2/fits/michaels_fly125_all__flight.json"
  ],
  "candidates": [
@@ -287,7 +288,7 @@
    "render_wall_s": 331.8646731376648
   },
   {
-   "name": "dregon_v2_r2_floor_benchcomb",
+   "name": "dregon_v2_r2_floor_combgain",
    "note": null,
    "rigs": [
     "dregon"
@@ -295,6 +296,248 @@
    "primary_for": [
     "dregon"
    ],
+   "fits": {
+    "dregon": {
+     "support": "dregon_room2_floor",
+     "path": "results/noise_v2/rounds/round2/fits/dregon_room2_floor__flight_floor_only_v2.json",
+     "mode": "flight_floor_only",
+     "n_fit_windows": 5,
+     "converged": false,
+     "which_converged": "none",
+     "grad_norm": 1230.0208801377182,
+     "tol_nats_per_cell": 0.0001,
+     "lbfgs_restart_gain_per_cell": 0.003190051905820592,
+     "wall_s": 5905.484201431274,
+     "whittle_nats": -17696690.330697946,
+     "comb_mean_check": {
+      "available": true,
+      "bench_fits": [
+       "bench_dregon_Motor1_70",
+       "bench_dregon_Motor2_70",
+       "bench_dregon_Motor3_70",
+       "bench_dregon_Motor4_70"
+      ],
+      "declared_rule": "log-mean of the rates and scales, dB-mean of the per-order profile over the fits that reach each order",
+      "reference_mean": "log",
+      "per_parameter": {
+       "sigma_nu": {
+        "bench_values": [
+         4.992893077369557,
+         4.421566014690938,
+         143.17991767317966,
+         1.1517095868112126
+        ],
+        "bench_mean": 38.436521588012845,
+        "bench_log_mean": 7.767627084404963,
+        "reference": 7.767627084404963,
+        "rendered": 7.767627084404963,
+        "relative": 0.0
+       },
+       "lam": {
+        "bench_values": [
+         571.6596378975828,
+         587.0994759679915,
+         667449.128255902,
+         0.07483446491170297
+        ],
+        "bench_mean": 167151.99055105812,
+        "bench_log_mean": 359.8257693305063,
+        "reference": 359.8257693305063,
+        "rendered": 359.8257693305063,
+        "relative": 0.0
+       },
+       "sigma_eps_even": {
+        "bench_values": [
+         0.0007834054483646473,
+         0.03580058703141159,
+         4.399806658215015,
+         0.23681567698985861
+        ],
+        "bench_mean": 1.1683015819211624,
+        "bench_log_mean": 0.07352418078863125,
+        "reference": 0.07352418078863125,
+        "rendered": 0.07352418078863125,
+        "relative": 0.0
+       },
+       "sigma_eps_odd": {
+        "bench_values": [
+         0.017853539698114245,
+         0.10312350349627275,
+         0.06298921727557119,
+         0.1621727931586724
+        ],
+        "bench_mean": 0.08653476340715764,
+        "bench_log_mean": 0.0658539076522832,
+        "reference": 0.0658539076522832,
+        "rendered": 0.0658539076522832,
+        "relative": 0.0
+       },
+       "lam_eps_even": {
+        "bench_values": [
+         0.01500434459065058,
+         0.07521559615035853,
+         0.007873141627682998,
+         1.4753180544252469
+        ],
+        "bench_mean": 0.39335278419848474,
+        "bench_log_mean": 0.06017133722400396,
+        "reference": 0.06017133722400396,
+        "rendered": 0.06017133722400396,
+        "relative": 0.0
+       },
+       "lam_eps_odd": {
+        "bench_values": [
+         0.11853288867479457,
+         0.04073333043097414,
+         0.1918884623476024,
+         495.27220100600096
+        ],
+        "bench_mean": 123.90583892186358,
+        "bench_log_mean": 0.8230389734953835,
+        "reference": 0.8230389734953835,
+        "rendered": 0.8230389734953835,
+        "relative": 0.0
+       }
+      },
+      "max_relative": 0.0,
+      "rule": "the floor-only flight fit must carry the bench comb mean unchanged, under the rule it declares in frozen_from.rule"
+     }
+    }
+   },
+   "git": "643b3058c81ceac61385d3ebf6b982f5fcca2370",
+   "job": "nv2-r2-score-dregon-v2b--bce8f6",
+   "audio": {
+    "dir": "results/noise_v2/rounds/round2/render/audio/dregon_v2b",
+    "uri": "s3://omnirun-artifacts/nv2-r2-score-dregon-v2b--bce8f6/outputs/results/noise_v2/rounds/round2/render/audio/dregon_v2b"
+   },
+   "arm_record": "results/noise_v2/rounds/round2/render/arm_dregon_v2b.json",
+   "render_seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "n_mics": 8,
+   "scorer": {
+    "experiment": "hppnet_l2_r2_s0",
+    "ckpt": "best",
+    "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+    "local_path": "/content/omnirun/projects/harmonic-noise-suppression/.trees/643b3058c81c/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
+    "bytes": 2746881,
+    "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
+   },
+   "bars": {
+    "rule": "PARITY = the legacy previous-best bar on BOTH HPPNet numbers; STRETCH = the frozen 0.70-gap DREGON target with Michael's parity bar unchanged",
+    "dregon": {
+     "quantity": "five-recording cruise PIT MAE mean, one-sided 95 % upper bound beside it",
+     "cohort_complete": true,
+     "mean_rev_s": 72.34060592731475,
+     "interval_upper_rev_s": 74.83065050859463,
+     "parity": {
+      "bar_rev_s": 2.1877858830655468,
+      "within": false,
+      "margin_rev_s": -70.15282004424921
+     },
+     "parity_interval_upper": {
+      "bar_rev_s": 2.1877858830655468,
+      "within": false,
+      "margin_rev_s": -72.64286462552909
+     },
+     "stretch": {
+      "bar_rev_s": 1.897062542673336,
+      "within": false,
+      "margin_rev_s": -70.44354338464142
+     },
+     "stretch_interval_upper": {
+      "bar_rev_s": 1.897062542673336,
+      "within": false,
+      "margin_rev_s": -72.93358796592129
+     },
+     "frozen_gate_pass": false,
+     "missing_supports": []
+    },
+    "michaels": {
+     "quantity": "equal-regime mean PIT MAE over standby/ramp/cruise (ratio of means)",
+     "cohort_complete": false,
+     "mean_rev_s": null,
+     "ratio": null,
+     "parity": {
+      "bar_rev_s": 3.177994468076875,
+      "within": null,
+      "margin_rev_s": null
+     },
+     "stretch": {
+      "bar_rev_s": null,
+      "within": null,
+      "margin_rev_s": null,
+      "note": "no stretch bar is defined for Michael's: the frozen gate (<= 1.05 x 3.026661) IS the legacy parity bar"
+     },
+     "frozen_gate_pass": false,
+     "missing_supports": [
+      "FLY124@8.000000+8.000000",
+      "FLY124@16.000000+8.000000",
+      "FLY124@27.680000+8.000000",
+      "FLY124@40.000000+8.000000",
+      "FLY124@56.000000+8.000000"
+     ]
+    },
+    "parity_pass": false,
+    "stretch_pass": false
+   },
+   "hppnet": {
+    "dregon": {
+     "mean_rev_s": 72.34060592731475,
+     "interval": {
+      "n_clusters": 5,
+      "mean": 72.34060592731475,
+      "sem": 1.1680222974984216,
+      "t_lower": 69.85056134603488,
+      "t_upper": 74.83065050859463,
+      "bootstrap_lower": 70.58933961414436,
+      "bootstrap_upper": 74.21471438116825,
+      "lower": 69.85056134603488,
+      "upper": 74.83065050859463,
+      "alpha": 0.05,
+      "rule": "one-sided bounds at alpha, conservative: lower = min(t, cluster bootstrap), upper = max(t, cluster bootstrap)",
+      "caveat": "Benchmark selection is adaptive over up to 8 candidate rounds, so these bootstrap and t intervals are decision/uncertainty summaries, not fresh-unseen confirmation. This record is not an independent final generalization proof.",
+      "note": ""
+     },
+     "real_arm_mean_rev_s": 1.2187080830713461,
+     "real_arm_relative": 1.077508072999151e-09,
+     "frozen_gate_pass": false,
+     "per_support": {
+      "free-flight_nosource_room2@1512727397.205045+4.000000": 69.60828635001334,
+      "hovering_nosource_room2@1511903905.394490+4.000000": 70.22249705342894,
+      "updown_nosource_room2@1511903578.348311+4.000000": 76.18318361882297,
+      "rectangle_nosource_room2@1511905725.952559+4.000000": 73.01814205388683,
+      "spinning_nosource_room2@1511905200.978012+4.000000": 72.67092056042168
+     }
+    }
+   },
+   "proxy": {
+    "dregon_cruise": {
+     "mean_ltas_abs_db": 3.5024321463626755,
+     "spread_ltas_abs_db": 3.346193519575091,
+     "gate_db": 1.9786091435875266,
+     "margin_db": -1.523823002775149,
+     "mean_mr_ltas": 2.5832577119610667,
+     "n_supports": 5,
+     "pass": false
+    }
+   },
+   "likelihood": {
+    "status": "not_run",
+    "reason": "no Michael's cruise likelihood cell was built"
+   },
+   "render_wall_s": 163.52563190460205
+  },
+  {
+   "name": "dregon_v2_r2_floor_benchcomb",
+   "note": null,
+   "rigs": [
+    "dregon"
+   ],
+   "primary_for": [],
    "fits": {
     "dregon": {
      "support": "dregon_room2_floor",
@@ -4227,67 +4470,67 @@
     "gap_fraction": 0.7,
     "frozen_real_rev_s": 1.2187080817581784,
     "frozen_baseline_rev_s": 2.1877858830655468,
-    "mean_candidate_rev_s": 75.09396780283319,
+    "mean_candidate_rev_s": 72.34060592731475,
     "candidate_interval": {
      "n_clusters": 5,
-     "mean": 75.09396780283319,
-     "sem": 0.2148221429787415,
-     "t_lower": 74.63599990769215,
-     "t_upper": 75.55193569797423,
-     "bootstrap_lower": 74.77429727501934,
-     "bootstrap_upper": 75.4149237034523,
-     "lower": 74.63599990769215,
-     "upper": 75.55193569797423,
+     "mean": 72.34060592731475,
+     "sem": 1.1680222974984216,
+     "t_lower": 69.85056134603488,
+     "t_upper": 74.83065050859463,
+     "bootstrap_lower": 70.58933961414436,
+     "bootstrap_upper": 74.21471438116825,
+     "lower": 69.85056134603488,
+     "upper": 74.83065050859463,
      "alpha": 0.05,
      "rule": "one-sided bounds at alpha, conservative: lower = min(t, cluster bootstrap), upper = max(t, cluster bootstrap)",
      "caveat": "Benchmark selection is adaptive over up to 8 candidate rounds, so these bootstrap and t intervals are decision/uncertainty summaries, not fresh-unseen confirmation. This record is not an independent final generalization proof.",
      "note": ""
     },
-    "margin_rev_s": -73.19690526015985,
+    "margin_rev_s": -70.44354338464142,
     "clusters": [
      {
       "recording": "free-flight_nosource_room2",
       "support": "free-flight_nosource_room2@1512727397.205045+4.000000",
-      "candidate": 74.5764554445063,
-      "real": 0.6381290529672442,
+      "candidate": 69.60828635001334,
+      "real": 0.6381290464390907,
       "baseline": null
      },
      {
       "recording": "hovering_nosource_room2",
       "support": "hovering_nosource_room2@1511903905.394490+4.000000",
-      "candidate": 74.69377478775743,
-      "real": 0.8884082380953187,
+      "candidate": 70.22249705342894,
+      "real": 0.8884082358149041,
       "baseline": null
      },
      {
       "recording": "updown_nosource_room2",
       "support": "updown_nosource_room2@1511903578.348311+4.000000",
-      "candidate": 75.33102591056924,
-      "real": 1.6949303635708053,
+      "candidate": 76.18318361882297,
+      "real": 1.6949303617640943,
       "baseline": null
      },
      {
       "recording": "rectangle_nosource_room2",
       "support": "rectangle_nosource_room2@1511905725.952559+4.000000",
-      "candidate": 75.11245244224747,
-      "real": 1.6851416023541912,
+      "candidate": 73.01814205388683,
+      "real": 1.6851416058637487,
       "baseline": null
      },
      {
       "recording": "spinning_nosource_room2",
       "support": "spinning_nosource_room2@1511905200.978012+4.000000",
-      "candidate": 75.75613042908554,
-      "real": 1.1869311681807437,
+      "candidate": 72.67092056042168,
+      "real": 1.1869311654748933,
       "baseline": null
      }
     ],
     "cluster_unit": "independently recorded trajectory session (one 4 s cruise window each)",
     "missing_supports": [],
     "real_arm": {
-     "mean_rev_s": 1.2187080850336607,
+     "mean_rev_s": 1.2187080830713461,
      "frozen_rev_s": 1.2187080817581784,
-     "delta": 3.2754823298120073e-09,
-     "relative": 2.687667685838768e-09,
+     "delta": 1.3131677967237465e-09,
+     "relative": 1.077508072999151e-09,
      "role": "protocol reproduction check on the real arm, never a gate input"
     },
     "paired_improvement_interval": null,
@@ -4466,57 +4709,57 @@
       "oracle_spread_db": 1.141525996979129,
       "n_supports": 5.0
      },
-     "mean_ltas_abs_db": 3.6328055935639347,
-     "spread_ltas_abs_db": 3.214485098161106,
-     "margin_db": -1.6541964499764081,
-     "mean_mr_ltas": 2.628501518657567,
+     "mean_ltas_abs_db": 3.5024321463626755,
+     "spread_ltas_abs_db": 3.346193519575091,
+     "margin_db": -1.523823002775149,
+     "mean_mr_ltas": 2.5832577119610667,
      "n_supports": 5,
      "missing_supports": [],
      "supports": [
       {
        "support": "free-flight_nosource_room2@1512727397.205045+4.000000",
        "regime": "cruise",
-       "ltas_abs_db": 4.206058872225511,
-       "ltas_max_abs_db": 5.993915125796109,
-       "level_offset_db": -4.206058872225511,
-       "shape_only_mean_abs_db": 1.4638274803965472,
-       "mr_ltas": 3.834391060490605
+       "ltas_abs_db": 4.154129832999134,
+       "ltas_max_abs_db": 6.020363346280881,
+       "level_offset_db": -4.154129832999134,
+       "shape_only_mean_abs_db": 1.4660833411916576,
+       "mr_ltas": 3.806849820276057
       },
       {
        "support": "hovering_nosource_room2@1511903905.394490+4.000000",
        "regime": "cruise",
-       "ltas_abs_db": 3.654570557301205,
-       "ltas_max_abs_db": 6.2923018817955185,
-       "level_offset_db": -3.654570557301205,
-       "shape_only_mean_abs_db": 2.590829146208196,
-       "mr_ltas": 1.995944237796879
+       "ltas_abs_db": 3.6150646213634117,
+       "ltas_max_abs_db": 6.348458623859367,
+       "level_offset_db": -3.6150646213634117,
+       "shape_only_mean_abs_db": 2.5871442661083535,
+       "mr_ltas": 1.9698478742631005
       },
       {
        "support": "updown_nosource_room2@1511903578.348311+4.000000",
        "regime": "cruise",
-       "ltas_abs_db": 5.475876742355404,
-       "ltas_max_abs_db": 8.800783188267225,
-       "level_offset_db": -5.475876742355404,
-       "shape_only_mean_abs_db": 3.318426035550659,
-       "mr_ltas": 4.081447172942334
+       "ltas_abs_db": 5.267654578427106,
+       "ltas_max_abs_db": 8.670489791005823,
+       "level_offset_db": -5.267654578427106,
+       "shape_only_mean_abs_db": 3.3091183105962,
+       "mr_ltas": 3.822563083670998
       },
       {
        "support": "rectangle_nosource_room2@1511905725.952559+4.000000",
        "regime": "cruise",
-       "ltas_abs_db": 2.261391644194298,
-       "ltas_max_abs_db": 5.145001552947317,
-       "level_offset_db": -2.000399100159595,
-       "shape_only_mean_abs_db": 3.1024520780780596,
-       "mr_ltas": 1.7502138718227271
+       "ltas_abs_db": 1.921461058852015,
+       "ltas_max_abs_db": 4.768015204467778,
+       "level_offset_db": -1.5632516446392657,
+       "shape_only_mean_abs_db": 3.0636954722064353,
+       "mr_ltas": 1.8356479515288193
       },
       {
        "support": "spinning_nosource_room2@1511905200.978012+4.000000",
        "regime": "cruise",
-       "ltas_abs_db": 2.566130151743256,
-       "ltas_max_abs_db": 5.360962506266764,
-       "level_offset_db": -2.5016449639687286,
-       "shape_only_mean_abs_db": 2.5951961856007375,
-       "mr_ltas": 1.4805112502352908
+       "ltas_abs_db": 2.553850640171711,
+       "ltas_max_abs_db": 5.472783050177551,
+       "level_offset_db": -2.513210023004439,
+       "shape_only_mean_abs_db": 2.5790768216514794,
+       "mr_ltas": 1.4813798300663592
       }
      ],
      "pass": false
@@ -4676,27 +4919,27 @@
   "dregon": {
    "quantity": "five-recording cruise PIT MAE mean, one-sided 95 % upper bound beside it",
    "cohort_complete": true,
-   "mean_rev_s": 75.09396780283319,
-   "interval_upper_rev_s": 75.55193569797423,
+   "mean_rev_s": 72.34060592731475,
+   "interval_upper_rev_s": 74.83065050859463,
    "parity": {
     "bar_rev_s": 2.1877858830655468,
     "within": false,
-    "margin_rev_s": -72.90618191976765
+    "margin_rev_s": -70.15282004424921
    },
    "parity_interval_upper": {
     "bar_rev_s": 2.1877858830655468,
     "within": false,
-    "margin_rev_s": -73.36414981490869
+    "margin_rev_s": -72.64286462552909
    },
    "stretch": {
     "bar_rev_s": 1.897062542673336,
     "within": false,
-    "margin_rev_s": -73.19690526015985
+    "margin_rev_s": -70.44354338464142
    },
    "stretch_interval_upper": {
     "bar_rev_s": 1.897062542673336,
     "within": false,
-    "margin_rev_s": -73.65487315530089
+    "margin_rev_s": -72.93358796592129
    },
    "frozen_gate_pass": false,
    "missing_supports": []
@@ -4782,8 +5025,8 @@
     "unit": "rev/s",
     "better": "lower",
     "previous": 78.80334220831591,
-    "current": 75.09396780283319,
-    "delta": -3.70937440548272,
+    "current": 72.34060592731475,
+    "delta": -6.462736281001156,
     "improved": true
    },
    {
@@ -4791,8 +5034,8 @@
     "unit": "rev/s",
     "better": "lower",
     "previous": 79.48230953990732,
-    "current": 75.55193569797423,
-    "delta": -3.93037384193309,
+    "current": 74.83065050859463,
+    "delta": -4.65165903131269,
     "improved": true
    },
    {
@@ -4818,8 +5061,8 @@
     "unit": "dB",
     "better": "lower",
     "previous": 3.751842845479758,
-    "current": 3.6328055935639347,
-    "delta": -0.11903725191582337,
+    "current": 3.5024321463626755,
+    "delta": -0.24941069911708258,
     "improved": true
    },
    {
@@ -4836,8 +5079,8 @@
     "unit": "\u2014",
     "better": "lower",
     "previous": 2.6359335982118246,
-    "current": 2.628501518657567,
-    "delta": -0.007432079554257509,
+    "current": 2.5832577119610667,
+    "delta": -0.05267588625075792,
     "improved": true
    },
    {
