@@ -46,6 +46,18 @@ metric needs it to.
 | candidate | `dregon_v2_r2_floor_combgain` |
 | arm it writes | `results/noise_v2/rounds/round2/render/arm_dregon_v2b.json` (+ `render/score/findings.md`, `render/audio/dregon_v2b/*.npz`) |
 
+### Status at handover: STILL UNPLACED after 2.1 h
+
+Polled every ~10–15 min from 11:15Z to 13:17:44Z: `status: queued` throughout,
+never `starting`. `omnirun explain nv2-r2-score-dregon-v2b-41d97e` reports all
+three `uni-gpushort` slots as "provider at capacity (active jobs fill it)" with
+an estimated wait of 2640 s; the partition is starved by another project
+(`kla-loglinear`, 3 slots held, ~100 jobs queued), and
+`nv2-r2-score-michaels2-78d01c` is queued ahead of it (2.3 h). Main's standing
+instruction is to HOLD on `uni-gpushort` — no repin to `uni` — so the job is
+left queued and a follow-up harvests it; every `omnirun status`/`ps` call
+retries placement. Nothing about the job is wrong: it is a queue wait.
+
 ## The command
 
 ```
