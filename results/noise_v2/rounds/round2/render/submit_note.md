@@ -1,7 +1,10 @@
-# R2 DREGON arm — submitted, awaiting harvest
+# R2 DREGON arm — submitted, LANDED and harvested
 
-Written by `R2ScoreDregon`. The scored arm record is NOT here yet; this note is
-the handover so a follow-up task can harvest it if this agent dies.
+Written by `R2ScoreDregon`. The job **succeeded** at 2026-09-18T08:08:47Z (exit
+code 0, 4 min wall); its outputs were synced and committed, so this note is now
+only the record of how the arm was produced. The scored arm is
+`round2/render/arm_dregon_v2.json` (committed in `12546c11`) and the round
+record it feeds is `results/noise_v2/rounds/round2.json` (`e3c80203`).
 
 ## The job
 
