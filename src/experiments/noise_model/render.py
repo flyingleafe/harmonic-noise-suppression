@@ -18,14 +18,13 @@ WHAT IS DRAWN, per rotor ``r`` and order ``k`` (the total phase of the model,
 
 * ``(theta_r, nu_r)`` — ONE fresh integrated-OU shaft draw per rotor at the
   work rate, through :func:`revised_phase.simulate_state`'s EXACT transition;
-* ``eps_rk`` — an INDEPENDENT stationary OU per order, rate ``lam_eps`` and
-  stationary variance ``sigma_eps^2 k^p``, both taken by the PARITY of ``k``.
-  Drawn by the exact AR(1) of that OU (``e = exp(-lam_eps dt)``, innovation
-  ``sigma sqrt(1 - e^2)``, stationary first sample) through the shared
-  ``_ar1_causal``, so the rendered process has exactly the autocorrelation
-  :func:`.lag.r_tau` assumes — which
-  ``test_render_reproduces_per_order_lag_law`` measures by demodulating order
-  20 out of the render and comparing ``V_eps(k, tau)`` to the law;
+* ``psi_rk`` — an INDEPENDENT WIENER phase per line, drawn as the random walk
+  of Model R3: increments ``N(0, 4 pi gamma_rk dt)``, cumulatively summed, so
+  ``Var[psi(t + tau) - psi(t)] = 4 pi gamma_rk |tau|`` and the line is a
+  Lorentzian of half-width ``gamma_rk`` Hz — exactly the factor
+  ``exp(-2 pi gamma_rk |tau|)`` :func:`.lag.r_tau` assumes, which
+  ``test_render_reproduces_the_per_order_lag_law`` measures by demodulating
+  one order out of the render;
 * ``alpha_mrk`` — the fixed per-(rotor, order) microphone response phase, drawn
   once per render and CONSTANT in time, exactly as
   :func:`revised_phase.render_revised` draws it and for the same reason (it is
@@ -56,7 +55,6 @@ from experiments.stochastic_fit.data import Clip
 from experiments.stochastic_fit.revised_phase import (
     AMP_RPS_REF,
     SPEED_FLOOR_RPS,
-    _ar1_causal,
     floor_geometry,
     floor_power_spectrum,
     simulate_state,
@@ -66,15 +64,19 @@ from experiments.stochastic_fit.stage2 import antialias
 from . import FIT_SCHEMA
 from . import model as MD
 from . import spectrum as SP
-from .lag import parity_select
 
 __all__ = ["expected_periodogram", "render_noise"]
 
 
+#: The fit schemas the renderer reads: its own, and R1/R2's, whose per-order
+#: OU :func:`.model.gamma_from_params` maps onto an equivalent width.
+READABLE_SCHEMAS = (FIT_SCHEMA, "noise-v2-fit/1")
+
+
 def _check_schema(fit: dict[str, Any]) -> dict[str, Any]:
     schema = fit.get("schema")
-    if schema != FIT_SCHEMA:
-        raise ValueError(f"expected schema {FIT_SCHEMA!r}, got {schema!r}")
+    if schema not in READABLE_SCHEMAS:
+        raise ValueError(f"expected schema in {READABLE_SCHEMAS}, got {schema!r}")
     return fit["params"]
 
 
@@ -144,9 +146,16 @@ def render_noise(
             raise ValueError(
                 f"fit carries {profile_db.shape[0]} rotor profiles, asked to render {n_rotors}"
             )
-    sigma_eps = np.asarray([p["sigma_eps_even"], p["sigma_eps_odd"]], dtype=np.float64)
-    lam_eps = np.asarray([p["lam_eps_even"], p["lam_eps_odd"]], dtype=np.float64)
-    p_exp = float(p.get("p", SP.P_ORDER_EXPONENT))
+    # (R, K) widths: a /2 payload's own, or a /1 payload's per-order OU mapped
+    # onto the equivalent Lorentzian (model.gamma_from_params)
+    gamma_hz = MD.gamma_from_params(p)
+    if gamma_hz.shape[0] != n_rotors:
+        if gamma_hz.shape[0] == 1:
+            gamma_hz = np.repeat(gamma_hz, n_rotors, axis=0)
+        else:
+            raise ValueError(
+                f"fit carries {gamma_hz.shape[0]} rotor widths, asked to render {n_rotors}"
+            )
 
     oversample = int(sr_work) // int(sr)
     if oversample * int(sr) != int(sr_work):
@@ -167,7 +176,7 @@ def render_noise(
         raise ValueError(f"no order of a {float(f0.max()):.1f} rev/s rotor fits below {sr / 2} Hz")
 
     ss = np.random.SeedSequence(int(seed))
-    rng_state, rng_eps, rng_alpha, rng_floor = (np.random.default_rng(s) for s in ss.spawn(4))
+    rng_state, rng_psi, rng_alpha, rng_floor = (np.random.default_rng(s) for s in ss.spawn(4))
 
     lam = float(p["lam"])
     sigma_nu = float(p["sigma_nu"])
@@ -198,19 +207,13 @@ def render_noise(
         line_amp = np.sqrt(2.0 * 10.0 ** (profile_db[r, :k_max] / 10.0))
         speed_amp = np.sqrt(speed[r] ** amp_exp)
         for k in range(1, k_max + 1):
-            s_e = float(parity_select(sigma_eps, float(k))) * float(k) ** (0.5 * p_exp)
-            l_e = float(parity_select(lam_eps, float(k)))
-            # the EXACT AR(1) of the order's OU: stationary first sample, then
-            # e = exp(-lam_eps dt) with innovation sigma sqrt(1 - e^2). This is
-            # the process whose autocorrelation exp(-lam_eps |tau|) the lag law
-            # assumes; a cumulative-sum Wiener here would render a different
-            # model from the fitted one.
-            e = math.exp(-l_e * dt)
-            z = rng_eps.standard_normal(n_work)
-            drive = z * (s_e * math.sqrt(max(1.0 - e * e, 0.0)))
-            drive[0] = s_e * z[0]
-            eps = _ar1_causal(drive, e)
-            arg = k * phase[r] + eps
+            # the line's own Wiener phase: increments N(0, 4 pi gamma dt),
+            # cumulatively summed. Its increment variance IS the exponent the
+            # lag law carries, so the rendered line is the Lorentzian of
+            # half-width gamma_rk the fit was written in terms of.
+            step = math.sqrt(4.0 * math.pi * max(float(gamma_hz[r, k - 1]), 0.0) * dt)
+            psi = np.cumsum(rng_psi.standard_normal(n_work) * step)
+            arg = k * phase[r] + psi
             env = line_amp[k - 1] * speed_amp
             alpha = rng_alpha.uniform(0.0, 2.0 * np.pi, size=n_mics)
             # cos(arg + alpha_m) by angle addition: TWO full-length trig passes

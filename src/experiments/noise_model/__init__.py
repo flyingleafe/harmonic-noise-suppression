@@ -13,13 +13,13 @@ section "What changes against C4"):
 
 * the shaft speed error keeps its one OU process, but ``(sigma_nu, lam)`` are
   free with priors measured on the bench and in the telemetry;
-* the flat per-harmonic Wiener ``D`` is replaced by an independent per-order
-  OU ON THE PHASE driven ``propto k^{p/2}`` with ``p = 1`` fixed and one
-  ``(sigma_eps, lam_eps)`` pair per PARITY of the order (:mod:`.lag`);
+* the flat per-harmonic Wiener ``D`` is replaced by ONE free Lorentzian
+  half-width ``gamma_rk`` (Hz) per rotor and order — Model R3, which retired
+  R1's per-order OU pair ``(sigma_eps, lam_eps)``, its exponent ``p`` and the
+  never-fitted path term (:mod:`.lag`);
 * DREGON is fitted on the single-motor bench, on the whole-segment
-  periodogram, with the carrier a constant fit parameter (:mod:`.spectrum`
-  BENCH mode) instead of in free flight;
-* the per-microphone path phase term is NAMED and not fitted in R1.
+  periodogram, with the carrier FROZEN at the support index's window-refined
+  value (:mod:`.spectrum` BENCH mode) instead of in free flight.
 
 Modules: :mod:`.supports` (the fit supports and their cache), :mod:`.lag` (the
 residual-phase autocorrelation), :mod:`.spectrum` (the expected periodogram),
@@ -29,5 +29,11 @@ exact discrete-time renderer).
 
 from __future__ import annotations
 
-FIT_SCHEMA = "noise-v2-fit/1"
-"""The fit-JSON schema tag every writer in this package stamps."""
+FIT_SCHEMA = "noise-v2-fit/2"
+"""The fit-JSON schema tag every writer in this package stamps.
+
+``/2`` replaced the four ``*_eps`` scalars and ``p`` of ``/1`` by the
+``gamma_hz`` block; :func:`.model.gamma_from_params` still reads ``/1``
+payloads by mapping their per-order OU onto an equivalent width, so old fits
+render and can be frozen into a new one.
+"""

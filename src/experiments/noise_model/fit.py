@@ -1,4 +1,4 @@
-"""MAP fit of the v2 model and the ``noise-v2-fit/1`` JSON it writes.
+"""MAP fit of the v2 model and the ``noise-v2-fit/2`` JSON it writes.
 
 ONE objective and ONE optimiser pair, per the round plan: an ``AutoDelta``
 guide over the free blocks of :mod:`.model`, driven by ``pyro.optim.Adam``
@@ -15,25 +15,34 @@ cold, weakly-informed start; L-BFGS is what actually resolves a comb's
 per-order profile, where the curvature across 130 orders spans decades. A fit
 that only ran Adam is marked ``converged: false`` unless the polish agrees.
 
-INITIALISATION is not a detail on this model. ``AutoDelta``'s default
-``init_to_median`` would start every order of the profile at the prior mean
-(-45 dB) and the floor at -70 dB, tens of dB from a real support, and a Whittle
-objective whose model is 40 dB under the data has a gradient dominated by
-``I / M``. :func:`initial_values` therefore seeds
+MEASUREMENT AND INITIALISATION are not a detail on this model, and in R3 they
+are the same pass (:func:`seeds`): two priors are centred on what the support
+shows, so the measurement is carried on the batch (:class:`.model.Measured`)
+and the guide is initialised from the very same numbers. ``AutoDelta``'s
+default ``init_to_median`` would start every order of the profile at a prior
+mean tens of dB from a real support, and a Whittle objective whose model is
+40 dB under the data has a gradient dominated by ``I / M``. What one pass
+measures:
 
-* the floor level from the band median of the observed 20th-percentile dB
-  curve plus C4's +6.5 dB exponential-percentile correction,
-* each order of the profile from the observed peak excess over that floor,
-  measured against a UNIT-profile forward pass so the seed is in the model's
-  own units (window response, lag law and transfer included),
+* the floor level, from the band median of the observed 20th-percentile dB
+  curve plus C4's +6.5 dB exponential-percentile correction — the centre of
+  the ``floor_mean_db`` prior as well as its initialisation,
+* each order's line power and its SNR over that floor, measured against a
+  UNIT-profile forward pass so the seed is in the model's own units (window
+  response, lag law and transfer included); the SNR picks which of the
+  profile prior's two regimes the line is in,
+* each visible line's -3 dB half width, floored at the window's resolution
+  and clipped to the width prior's central 95 %, as the ``gamma_rk``
+  initialisation (the prior itself is the physical law, never the
+  measurement),
 * the per-microphone broadband gain from each microphone's band-mean level,
 * NOT the bench carrier: it is FROZEN at the support index's window-refined
   value (bench rule rev 2), a constant of the model with no site and no
-  ``N(survey, 0.5^2)`` prior, so ``initial_values`` only READS it for its
-  probe passes.
+  ``N(survey, 0.5^2)`` prior, so the pass only READS it for its probe passes.
 
-The dynamics start at their prior medians, which is the point of having
-measured them.
+``sigma_nu`` and ``lam`` start at their prior medians, which is the point of
+having measured them. Every fit records the low-order ``gamma_rk`` check
+(:func:`gamma_low_order_check`) and which speed laws the pool's span pinned.
 """
 
 from __future__ import annotations
@@ -42,7 +51,7 @@ import json
 import math
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -65,13 +74,17 @@ from experiments.stochastic_fit.revised_phase import (
 from . import FIT_SCHEMA
 from . import model as MD
 from . import spectrum as SP
-from .lag import saturated_coherence
 
 __all__ = [
     "FitOutcome",
     "OptimSpec",
+    "Seeds",
     "fit_support",
+    "gamma_low_order_check",
     "initial_values",
+    "measure_batch",
+    "seeds",
+    "span_pin_record",
     "write_fit",
 ]
 
@@ -154,6 +167,31 @@ def _observed_db(batch: MD.SupportBatch) -> tuple[np.ndarray, np.ndarray]:
     return mean, floor_db
 
 
+@dataclass(frozen=True)
+class Seeds:
+    """What ONE pass over the support's data yields: the prior centres the R3
+    model needs (:class:`.model.Measured`) and the guide's initial values.
+
+    They come from the same probe forward passes, so a site's initialisation
+    and the prior it is initialised under cannot drift apart.
+    """
+
+    measured: MD.Measured
+    init: dict[str, Tensor]
+
+
+def measure_batch(
+    batch: MD.SupportBatch,
+    *,
+    mode: str,
+    priors: MD.Priors = MD.PRIORS,
+    frozen: dict[str, Any] | None = None,
+    pin: dict[str, Any] | None = None,
+) -> MD.Measured:
+    """The data-driven prior centres of one batch (see :func:`seeds`)."""
+    return seeds(batch, mode=mode, priors=priors, frozen=frozen, pin=pin).measured
+
+
 def initial_values(
     batch: MD.SupportBatch,
     *,
@@ -162,35 +200,45 @@ def initial_values(
     frozen: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
 ) -> dict[str, Tensor]:
-    """Site-name -> initial value for the free blocks of ``mode``.
+    """Site-name -> initial value for the free sites of ``mode``.
 
-    A pinned dynamics coordinate gets NO entry: the site either disappears
-    (fully pinned) or shrinks to its free width, and a stale key would be
-    ignored by ``init_to_value`` — a pin that silently does not pin.
+    A pinned, frozen or span-pinned site gets NO entry: it has no Pyro site at
+    all, and a stale key would be ignored by ``init_to_value`` — a pin that
+    silently does not pin.
     """
+    return seeds(batch, mode=mode, priors=priors, frozen=frozen, pin=pin).init
+
+
+def seeds(
+    batch: MD.SupportBatch,
+    *,
+    mode: str,
+    priors: MD.Priors = MD.PRIORS,
+    frozen: dict[str, Any] | None = None,
+    pin: dict[str, Any] | None = None,
+) -> Seeds:
+    """Measure the support and seed every free site from the measurement."""
     free = MD.free_blocks(mode)
+    fz = dict(frozen or {})
+    span_pinned = MD.span_pinned_sites(batch, priors=priors)
     band = batch.band.detach().cpu().numpy()
     obs_mean, floor_db = _observed_db(batch)
     t = lambda v: torch.as_tensor(np.asarray(v, dtype=np.float64), dtype=torch.float64)  # noqa: E731
     out: dict[str, Tensor] = {}
-
-    if "dynamics" in free:
-        for name, centre in (
-            ("sigma_nu", math.exp(priors.log_sigma_nu[0])),
-            ("lam", math.exp(priors.log_lam[0])),
-            ("sigma_eps", math.exp(priors.log_sigma_eps[0])),
-            ("lam_eps", math.exp(priors.log_lam_eps[0])),
-        ):
-            n_free = int(MD.pin_free_mask(pin, name).sum())
-            if n_free == 0:
-                continue
-            out[name] = t(centre) if MD.DYN_SITES[name] == 1 else t([centre] * n_free)
+    flight = batch.mode == "flight"
 
     carrier = None
     if batch.mode == "bench":
         # the frozen carrier: a constant of the model, so no init entry
         carrier = batch.carrier_mean
         assert carrier is not None
+
+    if "dynamics" in free:
+        out["sigma_nu"] = t(math.exp(priors.sigma_nu_prior(flight)[0]))
+        if not flight and not MD.is_pinned(pin, "lam"):
+            # in flight ``lam`` is a CONSTANT (the bench value or the approved
+            # default), so it has no site to initialise
+            out["lam"] = t(math.exp(priors.log_lam[0]))
 
     # Probe forward passes in the model's OWN units — window response, lag
     # law, floor colour and transfer all included — so the seeds below are
@@ -214,39 +262,73 @@ def initial_values(
             else None
         )
 
-    floor_offset_db = 0.0
-
+    floor_offset_db = float(
+        np.median(floor_db[band] - 10.0 * np.log10(np.maximum(floor_unit[band], 1e-30)))
+    )
+    floor_mean_db = float(np.asarray(seed_params.floor.mean_db)) + floor_offset_db
     if "floor" in free:
-        floor_offset_db = float(
-            np.median(floor_db[band] - 10.0 * np.log10(np.maximum(floor_unit[band], 1e-30)))
-        )
-        out["floor_mean_db"] = t(float(np.asarray(seed_params.floor.mean_db)) + floor_offset_db)
+        out["floor_mean_db"] = t(floor_mean_db)
         out["floor_shape_z"] = torch.zeros(FLOOR_SHAPE_N_CTRL, dtype=torch.float64)
         out["floor_tilt_db_oct"] = t(0.0)
         out["mic_floor_db"] = torch.zeros(batch.n_mics, dtype=torch.float64)
-        if batch.mode == "flight":
+        if flight and "floor_exp" not in span_pinned:
             out["floor_exp"] = t(math.exp(priors.log_floor_exp[0]))
+        if flight and "floor_static_rel" not in span_pinned:
             out["floor_static_rel"] = t(math.exp(priors.log_floor_static[0]))
+    else:
+        floor_mean_db = float(np.asarray(seed_params.floor.mean_db))
 
+    # ── what every line of the comb measures ────────────────────────────────
+    floor_lin = np.maximum(floor_unit, 1e-30) * 10.0 ** (floor_offset_db / 10.0)
+    excess = np.maximum(obs_mean - floor_lin, 1e-12)
+    df = float(batch.grid.freqs_hz[1] - batch.grid.freqs_hz[0])
+    shape = (batch.n_rotors, batch.k_max)
+    orders = np.broadcast_to(np.arange(1, batch.k_max + 1, dtype=np.float64), shape)
+    gamma_median = float(priors.gamma_per_order_hz) * orders
+    # a line the data never shows sits at the prior's two centres: the
+    # below-floor profile regime and the physical width law
+    prof = np.full(shape, floor_mean_db + float(priors.profile_below_offset_db), dtype=np.float64)
+    snr = np.full(shape, -99.0, dtype=np.float64)
+    gamma = gamma_median.copy()
+    windows = _line_windows(batch, band=band, carrier=carrier)
+    for r, k, j0, j1 in windows:
+        num = float(np.max(excess[j0:j1]))
+        den = float(np.max(lines_unit[j0:j1]))
+        if den <= 0.0 or num <= 0.0:
+            continue
+        prof[r, k - 1] = float(np.clip(10.0 * math.log10(num / den), -120.0, 40.0))
+        jpk = int(j0 + np.argmax(excess[j0:j1]))
+        snr[r, k - 1] = 10.0 * math.log10(num / max(float(floor_lin[jpk]), 1e-30))
+        if snr[r, k - 1] >= priors.line_visible_snr_db:
+            # the line's own -3 dB half width, floored at the window's
+            # resolution and held inside the prior's central 95 %: a width
+            # measured on a noisy peak must seed the fit, not steer it
+            gamma[r, k - 1] = float(
+                np.clip(
+                    max(_half_width_hz(excess, jpk, j0, j1, df), batch.resolution_hz),
+                    gamma_median[r, k - 1] * math.exp(-2.0 * priors.gamma_log_sd),
+                    gamma_median[r, k - 1] * math.exp(2.0 * priors.gamma_log_sd),
+                )
+            )
+    measured = MD.Measured(
+        floor_mean_db=floor_mean_db,
+        profile_db=prof,
+        line_snr_db=snr,
+        gamma_hz=gamma,
+        resolution_hz=batch.resolution_hz,
+    )
+
+    if "dynamics" in free and "gamma_hz" not in fz:
+        out["gamma_hz"] = t(gamma)
     if "profile" in free:
-        floor_lin = np.maximum(floor_unit, 1e-30) * 10.0 ** (floor_offset_db / 10.0)
-        excess = np.maximum(obs_mean - floor_lin, 1e-12)
-        prof = np.full((batch.n_rotors, batch.k_max), priors.profile_db[0], dtype=np.float64)
-        for r, k, j0, j1 in _line_windows(batch, band=band, carrier=carrier):
-            num = float(np.max(excess[j0:j1]))
-            den = float(np.max(lines_unit[j0:j1]))
-            if den > 0.0 and num > 0.0:
-                prof[r, k - 1] = float(np.clip(10.0 * math.log10(num / den), -120.0, 40.0))
         out["profile_db"] = t(prof)
-        if batch.mode == "flight":
+        if flight and "amp_exp" not in span_pinned:
             out["amp_exp"] = t(priors.amp_exp[0])
 
     if "comb_gain" in free:
         assert lines_frozen is not None
-        floor_lin = np.maximum(floor_unit, 1e-30) * 10.0 ** (floor_offset_db / 10.0)
-        excess = np.maximum(obs_mean - floor_lin, 1e-12)
         shifts: list[float] = []
-        for _r, _k, j0, j1 in _line_windows(batch, band=band, carrier=carrier):
+        for _r, _k, j0, j1 in windows:
             num = float(np.max(excess[j0:j1]))
             den = float(np.max(lines_frozen[j0:j1]))
             if den > 0.0 and num > 0.0:
@@ -262,7 +344,26 @@ def initial_values(
         per_mic_db = 10.0 * np.log10(np.maximum(p[:, :, band].mean(axis=(1, 2)), 1e-30))
         out["gain_all_db"] = t(per_mic_db - per_mic_db.mean())
         out["mic_line_gain_db"] = torch.zeros(batch.n_mics, batch.n_rotors, dtype=torch.float64)
-    return out
+    return Seeds(measured=measured, init=out)
+
+
+def _half_width_hz(excess: np.ndarray, jpk: int, j0: int, j1: int, df: float) -> float:
+    """The measured HALF width at half maximum of the peak at ``jpk``, in Hz.
+
+    Walked outwards over the observed line excess rather than fitted: the
+    quantity is an INITIALISATION for ``gamma_rk``, and a three-parameter
+    Lorentzian fit per line on 130 orders would cost more than the fit it
+    seeds. The walk stops at the line window's own edges, so a width can never
+    run into the neighbouring order.
+    """
+    half = 0.5 * float(excess[jpk])
+    lo = jpk
+    while lo > j0 and float(excess[lo - 1]) >= half:
+        lo -= 1
+    hi = jpk
+    while hi < j1 - 1 and float(excess[hi + 1]) >= half:
+        hi += 1
+    return 0.5 * float(hi - lo + 1) * float(df)
 
 
 def _line_windows(
@@ -329,27 +430,27 @@ def _seed_params(
         return v
 
     zero = torch.zeros((), dtype=torch.float64)
+    gamma_centre = float(priors.gamma_per_order_hz) * np.broadcast_to(
+        np.arange(1, k + 1, dtype=np.float64), (r, k)
+    )
     return SP.V2Params(
         sigma_nu=(
-            MD.pin_applied(pin, "sigma_nu", math.exp(priors.log_sigma_nu[0]))
+            MD.pin_applied(pin, "sigma_nu", math.exp(priors.sigma_nu_prior(flight)[0]))
             if "dynamics" in free
-            else pick("dynamics", "sigma_nu", math.exp(priors.log_sigma_nu[0]))
+            else pick("dynamics", "sigma_nu", math.exp(priors.sigma_nu_prior(flight)[0]))
         ),
         lam=(
-            MD.pin_applied(pin, "lam", math.exp(priors.log_lam[0]))
+            # in flight the rate is a CONSTANT: the frozen bench value if a
+            # mapping carries one, otherwise the approved pin
+            MD.pin_applied(
+                pin,
+                "lam",
+                MD.flight_lam(priors, fz) if flight else math.exp(priors.log_lam[0]),
+            )
             if "dynamics" in free
             else pick("dynamics", "lam", math.exp(priors.log_lam[0]))
         ),
-        sigma_eps=(
-            MD.pin_applied(pin, "sigma_eps", math.exp(priors.log_sigma_eps[0]))
-            if "dynamics" in free
-            else pick("dynamics", "sigma_eps", [math.exp(priors.log_sigma_eps[0])] * 2, (2,))
-        ),
-        lam_eps=(
-            MD.pin_applied(pin, "lam_eps", math.exp(priors.log_lam_eps[0]))
-            if "dynamics" in free
-            else pick("dynamics", "lam_eps", [math.exp(priors.log_lam_eps[0])] * 2, (2,))
-        ),
+        gamma_hz=pick("dynamics", "gamma_hz", gamma_centre, (r, k)),
         profile_db=pick("profile", "profile_db", np.zeros((r, k)), (r, k)),
         floor=SP.FloorParams(
             mean_db=pick("floor", "floor_mean_db", 0.0),
@@ -369,7 +470,6 @@ def _seed_params(
         gain_all_db=pick("mic", "gain_all_db", np.zeros(m), (m,)),
         carrier_rev_s=carrier,
         amp_exp=pick("profile", "amp_exp", priors.amp_exp[0]) if flight else zero,
-        p=priors.p,
     )
 
 
@@ -432,24 +532,29 @@ def fit_support(
 ) -> FitOutcome:
     """MAP-fit one support (or one pooled set of flight windows).
 
-    ``pin`` (in :func:`model.dynamics_pin`'s site spelling) holds individual
-    dynamics coordinates FIXED while the rest of the block is fitted. It is a
-    constant of the model, not a parameter under a tight prior: the guide
-    allocates nothing for it, the log-prior counts nothing for it, and the
-    recorded ``params`` carry the pinned value.
+    The support is MEASURED first (:func:`seeds`): the R3 profile and floor
+    priors are centred on the data, so the measurement is attached to the
+    batch the model is built on and travels with every minibatch of it.
+
+    ``pin`` (in :func:`model.dynamics_pin`'s spelling) holds a named dynamics
+    scalar FIXED while the rest of the block is fitted. It is a constant of
+    the model, not a parameter under a tight prior: the guide allocates
+    nothing for it, the log-prior counts nothing for it, and the recorded
+    ``params`` carry the pinned value.
     """
     torch.manual_seed(int(optim.seed))
     pyro.set_rng_seed(int(optim.seed))
     pyro.clear_param_store()
 
-    full = batch
-    init = initial_values(batch, mode=mode, priors=priors, frozen=frozen, pin=pin)
+    measured = seeds(batch, mode=mode, priors=priors, frozen=frozen, pin=pin)
+    full = replace(batch, measured=measured.measured)
+    init = dict(measured.init)
     if optim.init_jitter > 0.0:
         # a log-normal multi-start on the dynamics block only: the profile,
         # floor and carrier initialisations are read off the data and a random
         # start for them would test the initialiser, not the landscape
         jrng = np.random.default_rng(int(optim.seed))
-        for key in ("sigma_nu", "lam", "sigma_eps", "lam_eps"):
+        for key in ("sigma_nu", "lam", "gamma_hz"):
             if key in init:
                 v = init[key]
                 shift = jrng.normal(0.0, float(optim.init_jitter), size=tuple(v.shape))
@@ -611,8 +716,99 @@ def fit_support(
             adam_loss_tail=adam_losses[-5:],
             init_floor_mean_db=float(init["floor_mean_db"]) if "floor_mean_db" in init else None,
             init_comb_gain_db=float(init["comb_gain_db"]) if "comb_gain_db" in init else None,
+            init_gamma_hz=(
+                np.asarray(init["gamma_hz"], dtype=np.float64).tolist()
+                if "gamma_hz" in init
+                else None
+            ),
+            gamma_low_order_check=gamma_low_order_check(fitted.gamma_hz, batch=full),
+            span_pins=span_pin_record(full, priors=priors),
+            measured=dict(
+                floor_mean_db=measured.measured.floor_mean_db,
+                resolution_hz=measured.measured.resolution_hz,
+                n_lines_visible=int(
+                    (measured.measured.line_snr_db >= priors.line_visible_snr_db).sum()
+                ),
+                n_lines=int(measured.measured.line_snr_db.size),
+                line_visible_snr_db=priors.line_visible_snr_db,
+            ),
         ),
     )
+
+
+# ── the post-fit checks ─────────────────────────────────────────────────────
+
+#: A fitted low-order width may sit this many times over the window's
+#: resolution floor and still count as "at the floor". Well inside one log-sd
+#: of the width prior (e^1 = 2.7 at k = 1 against a 0.01 Hz median on a 30 s
+#: bench window), and far under the x 16 a k^2 ramp from k = 1 to k = 4 would
+#: produce — which is the failure this check exists to name.
+GAMMA_FLOOR_FACTOR = 3.0
+
+#: A k = 4 to k = 1 width ratio at or over this is the shaft-absorbing ramp.
+#: Half of the k^2 value (16), so a ramp has to be unambiguous to be called.
+GAMMA_RAMP_RATIO = 8.0
+
+#: The orders the check reads. "Low orders" of the R3 identification section.
+GAMMA_CHECK_K = 4
+
+
+def gamma_low_order_check(gamma_hz: Any, *, batch: MD.SupportBatch) -> dict[str, Any]:
+    """The R3 low-order ``gamma_rk`` check (explainer, "Identification").
+
+    The one degeneracy R3 can have is the shaft being absorbed by the free
+    widths: in the Brownian limit the shaft's own factor is Lorentzian too,
+    ``prop k^2 sigma_nu^2 / lam``, so a ``gamma_rk`` ramping as ``k^2`` would
+    fit the same line shape with no shaft at all. PASS is the fitted width at
+    ``k <= 4`` sitting at the window's resolution floor; FAIL is a ``k^2``
+    ramp, and then ``lam`` takes the long-lag pin instead of the bench value.
+    Measured here after every fit rather than assumed away.
+    """
+    g = np.atleast_2d(np.asarray(_np(gamma_hz), dtype=np.float64))
+    kk = min(int(GAMMA_CHECK_K), int(g.shape[1]))
+    low = g[:, :kk]
+    res = float(batch.resolution_hz)
+    over = low / max(res, 1e-30)
+    ramp = float(np.max(low[:, kk - 1] / np.maximum(low[:, 0], 1e-30))) if kk >= 2 else 1.0
+    at_floor = bool(np.all(over <= GAMMA_FLOOR_FACTOR))
+    is_ramp = bool(ramp >= GAMMA_RAMP_RATIO)
+    verdict = (
+        "pass" if at_floor and not is_ramp else ("fail_k2_ramp" if is_ramp else "fail_above_floor")
+    )
+    return dict(
+        verdict=verdict,
+        passed=verdict == "pass",
+        k_checked=list(range(1, kk + 1)),
+        gamma_hz=low.tolist(),
+        resolution_hz=res,
+        gamma_over_resolution=over.tolist(),
+        max_over_resolution=float(over.max()),
+        floor_factor=GAMMA_FLOOR_FACTOR,
+        k4_over_k1=ramp,
+        ramp_ratio_flagged_at=GAMMA_RAMP_RATIO,
+        rule=(
+            "pass = every gamma_rk at k <= 4 within floor_factor of 1 / (2 T); "
+            "fail_k2_ramp = gamma_4 / gamma_1 >= ramp threshold (the shaft absorbed)"
+        ),
+    )
+
+
+def span_pin_record(batch: MD.SupportBatch, *, priors: MD.Priors = MD.PRIORS) -> dict[str, Any]:
+    """Which speed laws this pool's carrier span pinned, and at what value."""
+    pinned = MD.span_pinned_sites(batch, priors=priors)
+    medians = priors.speed_law_medians()
+    return dict(
+        speed_span=float(batch.speed_span),
+        threshold=float(priors.speed_span_pin),
+        pinned=list(pinned),
+        values={name: medians[name] for name in pinned},
+        rule="a pool spanning less than the threshold in max/min carrier cannot identify the "
+        "speed laws, so they are constants at their prior medians (no site, no prior term)",
+    )
+
+
+def _np(v: Any) -> np.ndarray:
+    return np.asarray(v.detach().cpu() if isinstance(v, Tensor) else v, dtype=np.float64)
 
 
 # ── the record ──────────────────────────────────────────────────────────────
@@ -629,7 +825,7 @@ def write_fit(
     priors: MD.Priors = MD.PRIORS,
     extra: dict[str, Any] | None = None,
 ) -> Path:
-    """Write the ``noise-v2-fit/1`` JSON and return its path."""
+    """Write the ``noise-v2-fit/2`` JSON and return its path."""
     p = MD.params_to_dict(outcome.params)
     if outcome.comb_gain_db is not None:
         # the level the transplanted comb was re-levelled BY. ``profile_db``
@@ -655,18 +851,15 @@ def write_fit(
         priors=priors.as_dict(),
         diagnostics=dict(
             outcome.diagnostics,
-            saturated_coherence=dict(
-                k=[1, 10, 20, 40],
+            profile_orders=k.tolist(),
+            gamma_hz_at=dict(
+                k=[kk for kk in (1, 2, 4, 8, 16, 32) if kk <= int(k.size)],
                 value=[
-                    float(
-                        saturated_coherence(
-                            kk, sigma_eps=[p["sigma_eps_even"], p["sigma_eps_odd"]], p=p["p"]
-                        )
-                    )
-                    for kk in (1, 10, 20, 40)
+                    np.asarray(p["gamma_hz"], dtype=np.float64)[:, kk - 1].tolist()
+                    for kk in (1, 2, 4, 8, 16, 32)
+                    if kk <= int(k.size)
                 ],
             ),
-            profile_orders=k.tolist(),
             # ``floor_mean_db`` and the MEAN of ``mic_floor_db`` are a ridge in
             # C4's parameterisation (the model reads their sum); their SUM is
             # the identified broadband floor level and is what the findings

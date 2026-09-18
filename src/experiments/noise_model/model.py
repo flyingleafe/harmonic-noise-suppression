@@ -2,26 +2,48 @@
 
 WHAT PYRO IS HERE FOR. C2/C3 put ``log sigma, log D ~ N(0, 2^2)`` on the
 dynamics, which is a statement that nothing is known
-(``revised_phase.py:481-487``). Every number this campaign measured — the bench
-shaft scale, the telemetry rate, the per-order decoherence — is a prior here
-instead (``docs/explainers/noise-model-v2-plan.qmd``, "The priors"):
+(``revised_phase.py:481-487``). Every number this campaign measured is a prior
+here instead (``docs/explainers/noise-model-v2-plan.qmd``, "Model R3"):
 
-    log sigma_nu ~ N(ln 0.45, 0.7^2)      shared-term bench median, 0.11-1.8
-    log lam      ~ N(ln 5.5,  0.9^2)      bench median, covers telemetry 0.67-14.4
-    log sigma_eps~ N(ln 0.3,  0.6^2)      per PARITY of the order
-    log lam_eps  ~ N(ln 2,    1.0^2)      per PARITY of the order
-    p = 1 fixed;  the per-microphone PATH term is named and NOT fitted in R1.
+    sigma_nu ~ LN(0.3, 0.7)   bench;  LN(0.3, 0.5) in flight
+    lam      ~ LN(2.0, 1.0)   bench only; PINNED in flight
+    gamma_rk ~ LN(0.01 k, 1.0) per rotor and order
+    p_rk     ~ N(measured, 10) where the line is visible, N(mu_F - 15, 8) below
+    mu_F     ~ N(measured band median, 10)
+
+``gamma_rk``'s prior is the BENCH DECOHERENCE LAW, not the window resolution:
+the measured per-order phase structure function ``V_eps ~ 0.09 k^1.1
+tau^0.43`` rad^2 (``results/noise_v2/decoherence/findings.md``) is an
+effective diffusion of about ``0.1 k`` rad^2/s, i.e. a half-width of about
+``0.01 k`` Hz. It is deliberately tight and physically anchored so that it
+cannot absorb the shaft: the shaft's own core is Gaussian of width
+``~ k sigma_nu / (2 pi)`` Hz, some five times above this median at the bench
+shaft scale, while one log-sd of 1.0 still lets a genuinely broad line reach
+``x 7`` at 2 sd. The R1 per-order OU ``(sigma_eps, lam_eps)`` pair, its
+exponent ``p`` and the never-fitted path term are GONE: the flight window
+identified only the product ``sigma_eps^2 lam_eps`` and the bench found no
+``k^p`` law joining the orders (``rounds/round1/basin/findings.md``,
+``results/noise_v2/decoherence/findings.md``).
 
 Positivity is carried by ``LogNormal`` under ``constraints.positive`` — no
 softplus, so an ``AutoDelta`` MAP is the mode of the real posterior in the
-constrained space and not of a reparameterised surrogate. The profile, the
-floor and the microphone terms keep C4's weak treatment: the floor shape is the
-standard-normal GP coordinate of
-:meth:`revised_phase._RevisedModel.floor_shape_db` (C4's ONLY real prior on the
-nuisance block, ``revised_phase.py:2429-2432``) and the levels get proper but
-wide Gaussians, because a Pyro site needs a distribution and an improper flat
-prior is not one. Bench carriers are per-support NUISANCE parameters with the
-approved ``N(survey, 0.5 rev/s ^2)``.
+constrained space and not of a reparameterised surrogate. The profile and the
+floor level are centred on what the initialiser MEASURED on the support
+(:class:`Measured`, filled by :func:`.fit.measure_batch` and carried on the
+batch), because a prior mean 40 dB from the data is what parked R1's invisible
+orders in a 400 Hz pedestal over the floor. The floor shape keeps C4's only
+real nuisance prior (the standard-normal GP coordinate of
+:meth:`revised_phase._RevisedModel.floor_shape_db`) and the microphone levels
+keep proper but wide Gaussians.
+
+THE SPEED-SPAN PIN. ``a`` (``amp_exp``), ``b`` (``floor_exp``) and ``s``
+(``floor_static_rel``) are speed laws: a pool that barely changes speed cannot
+see them, and on R2's cruise-only DREGON pool (span 1.14x) they ran to 38.8
+and 17 — four sd of their priors — and put the standby floor 37 dB over the
+real clip. When a pool's carrier span ``max/min`` is under
+:attr:`Priors.speed_span_pin` they are therefore CONSTANTS at their prior
+medians, with no site and no prior term (:func:`span_pinned_sites`), and the
+fit JSON records which ones were pinned and on what span.
 
 THE LIKELIHOOD is the campaign's composite risk, unchanged and imported:
 
@@ -29,9 +51,9 @@ THE LIKELIHOOD is the campaign's composite risk, unchanged and imported:
 
 with ``w_i = 1`` on the bench (one frame, one window, nothing to weight) and
 :func:`revised_phase.composite_weights` exposure weights in flight. ``T = 1``
-for the R1 MAP and is RECORDED; the frozen composite temperatures of C4
+for the MAP and is RECORDED; the frozen composite temperatures of C4
 (5.192017220082491 DREGON, 15.214066879865468 Michael's) rescale a POSTERIOR,
-not a mode, so they do not belong in an R1 MAP and are not silently applied.
+not a mode, so they do not belong in a MAP and are not silently applied.
 
 The two-band split at 300 Hz (the approved floor band edge) is reported in the
 objective, never fitted separately: the comb band is decisive for the
@@ -60,22 +82,27 @@ __all__ = [
     "BAND_SPLIT_HZ",
     "DYN_SITES",
     "PRIORS",
+    "SPEED_LAW_SITES",
+    "Measured",
     "Priors",
     "SupportBatch",
     "batch_slice",
     "bench_batch",
     "dynamics_pin",
     "flight_batch",
+    "flight_lam",
     "forward",
     "free_blocks",
     "frozen_from_params",
+    "gamma_from_params",
+    "is_pinned",
     "objective_breakdown",
     "params_from_dict",
     "params_to_dict",
     "pin_applied",
-    "pin_free_mask",
     "sample_params",
     "sample_params_from_values",
+    "span_pinned_sites",
     "support_model",
     "whittle_risk",
 ]
@@ -91,25 +118,55 @@ BAND_SPLIT_HZ = 300.0
 #: :func:`free_blocks`) and it is folded into ``profile_db``.
 BLOCKS = ("dynamics", "profile", "floor", "mic", "carrier")
 
-#: The four dynamics SITES. ``sigma_eps`` and ``lam_eps`` are one ``(2,)``
-#: site each — ``(even, odd)``, selected by :func:`.lag.parity_select` — not
-#: two scalars, which is why a pin of one parity is a PARTIAL pin of a site.
-DYN_SITES: dict[str, int] = dict(sigma_nu=1, lam=1, sigma_eps=2, lam_eps=2)
+#: The dynamics SITES that a ``--pin`` can hold fixed, with their width. R3's
+#: third dynamics site, ``gamma_hz``, is a whole ``(R, K)`` block and is
+#: pinned by FREEZING it (``flight_floor_only``), never coordinate by
+#: coordinate.
+DYN_SITES: dict[str, int] = dict(sigma_nu=1, lam=1)
+
+#: The three speed-law sites the span rule pins.
+SPEED_LAW_SITES = ("amp_exp", "floor_exp", "floor_static_rel")
 
 
 @dataclass(frozen=True)
 class Priors:
-    """The approved priors. ``(mean, sd)`` pairs; log-parameters in log space."""
+    """The R3 priors (``noise-model-v2-plan.qmd``, "Parameters, with their
+    priors"). ``(mean, sd)`` pairs; log-parameters in log space."""
 
-    log_sigma_nu: tuple[float, float] = (math.log(0.45), 0.7)
-    log_lam: tuple[float, float] = (math.log(5.5), 0.9)
-    log_sigma_eps: tuple[float, float] = (math.log(0.3), 0.6)
-    log_lam_eps: tuple[float, float] = (math.log(2.0), 1.0)
-    #: weak, proper stand-ins for C4's improper flat nuisance block
-    profile_db: tuple[float, float] = (-45.0, 40.0)
-    floor_mean_db: tuple[float, float] = (-70.0, 40.0)
-    floor_tilt_db_oct: tuple[float, float] = (0.0, 10.0)
-    amp_exp: tuple[float, float] = (2.0, 2.0)
+    #: bench: 0.16-1.0 measured over the R2 bench fits
+    log_sigma_nu: tuple[float, float] = (math.log(0.3), 0.7)
+    #: flight: the same centre, tighter — with ``gamma_rk`` carrying the line
+    #: width, ``sigma_nu`` should sit at the telemetry residual, and a fit that
+    #: still wants > 2 rad/s is a model error to report, not a prior to loosen
+    log_sigma_nu_flight: tuple[float, float] = (math.log(0.3), 0.5)
+    #: bench only; 128 ms of flight lag cannot see it (R1 basin: 0.03
+    #: nats/cell over three decades), so in flight it is PINNED
+    log_lam: tuple[float, float] = (math.log(2.0), 1.0)
+    #: ``gamma_rk ~ LN(gamma_per_order_hz * k, gamma_log_sd)``: the bench
+    #: decoherence law ``V_eps ~ 0.09 k^1.1 tau^0.43`` rad^2 is an effective
+    #: diffusion of ~ ``0.1 k`` rad^2/s, i.e. a HWHM of ~ ``0.01 k`` Hz. Tight
+    #: and physical so it cannot absorb the shaft (whose core is Gaussian at
+    #: ~ ``k sigma_nu / 2 pi`` Hz, about five times wider at the bench shaft
+    #: scale); one log-sd still allows x 7 at 2 sd for a genuinely broad line.
+    gamma_per_order_hz: float = 0.01
+    gamma_log_sd: float = 1.0
+    #: the pinned rate of the flight shaft when no bench fit supplies one
+    #: (Michael's); the DREGON frozen-comb fit takes the bench value instead
+    flight_lam: float = 0.5
+    #: the profile's TWO regimes. A line whose measured excess over the floor
+    #: reaches ``line_visible_snr_db`` is centred on that measurement; one
+    #: below it is centred ``profile_below_offset_db`` under the floor level,
+    #: because R1's invisible orders parked at a flat N(-45, 40) built a
+    #: 400 Hz pedestal over the floor (``round1/bench_diag/findings.md``)
+    line_visible_snr_db: float = 2.0
+    profile_db_sd: float = 10.0
+    profile_below_offset_db: float = -15.0
+    profile_below_sd: float = 8.0
+    #: centred on the measured band median; the old sd 40 had no reason
+    floor_mean_db_sd: float = 10.0
+    floor_tilt_db_oct: tuple[float, float] = (0.0, 5.0)
+    #: the pooled flight speed exponent; 3.9 on the 4.7x-span pool
+    amp_exp: tuple[float, float] = (2.0, 1.0)
     #: Rig-to-rig level offset of a TRANSPLANTED comb, in dB, and the only
     #: absolute comb scale a frozen-comb flight fit has left: ``render_noise``
     #: mean-centres ``mic_line_gain_db`` over mics per rotor and
@@ -120,31 +177,55 @@ class Priors:
     #: this prior must not fight.
     comb_gain_db: tuple[float, float] = (0.0, 20.0)
     #: LOG space: the floor's speed exponent is POSITIVE by construction. A
-    #: rotor floor cannot get louder as the rotors slow, and on a pool that
-    #: barely varies in speed a Normal prior let it go to -10.19, which put the
-    #: standby floor +37.0 dB over the real clip
-    #: (``results/noise_v2/rounds/round2/render_regime/findings.md``). The rest
-    #: of the project already carries this invariant as a hard clamp on an
-    #: export (``rig_sampler.check_sample``, ``_rebase_divergent_floor``); here
-    #: it is the site's own support instead of a repair after the fact.
-    log_floor_exp: tuple[float, float] = (math.log(2.0), 0.7)
-    log_floor_static: tuple[float, float] = (math.log(2.5e-3), 2.0)
+    #: rotor floor cannot get louder as the rotors slow (R2: -10.19 on a
+    #: near-constant pool put the standby floor +37.0 dB over the real clip,
+    #: ``round2/render_regime/findings.md``), and R3 tightens it because the
+    #: span pin below, not the prior, is what protects a short-span pool.
+    log_floor_exp: tuple[float, float] = (math.log(2.0), 0.5)
+    log_floor_static: tuple[float, float] = (math.log(2.5e-3), 1.0)
     mic_line_gain_db: float = 6.0
     mic_floor_db: float = 6.0
     gain_all_db: float = 6.0
-    #: the approved bench carrier nuisance prior, in rev/s
-    carrier_sd_rev_s: float = 0.5
-    #: ``p`` is fixed, not sampled (approved decision 1 of 2026-09-17)
-    p: float = SP.P_ORDER_EXPONENT
+    #: a pool whose carrier span ``max / min`` is under this cannot identify
+    #: the three speed laws, so they are held at their prior medians
+    speed_span_pin: float = 1.5
+
+    def sigma_nu_prior(self, mode_is_flight: bool) -> tuple[float, float]:
+        return self.log_sigma_nu_flight if mode_is_flight else self.log_sigma_nu
+
+    def gamma_loc(self, k: np.ndarray | Tensor) -> Tensor:
+        """``log(gamma_per_order_hz * k)``: the prior's log-median per order."""
+        kk = torch.as_tensor(np.asarray(k, dtype=np.float64), dtype=torch.float64)
+        return torch.log(float(self.gamma_per_order_hz) * kk)
+
+    def speed_law_medians(self) -> dict[str, float]:
+        return dict(
+            amp_exp=float(self.amp_exp[0]),
+            floor_exp=math.exp(self.log_floor_exp[0]),
+            floor_static_rel=math.exp(self.log_floor_static[0]),
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "log_sigma_nu": list(self.log_sigma_nu),
+            "log_sigma_nu_bench": list(self.log_sigma_nu),
+            "log_sigma_nu_flight": list(self.log_sigma_nu_flight),
             "log_lam": list(self.log_lam),
-            "log_sigma_eps_per_parity": list(self.log_sigma_eps),
-            "log_lam_eps_per_parity": list(self.log_lam_eps),
-            "profile_db": list(self.profile_db),
-            "floor_mean_db": list(self.floor_mean_db),
+            "gamma_hz": {
+                "family": "LogNormal",
+                "median_hz": f"{self.gamma_per_order_hz:g} * k",
+                "log_sd": self.gamma_log_sd,
+                "source": "bench decoherence law V_eps ~ 0.09 k^1.1 tau^0.43 rad^2",
+            },
+            "flight_lam_pin": self.flight_lam,
+            "profile_db": {
+                "visible": ["measured", self.profile_db_sd],
+                "below": [
+                    f"floor_mean_db {self.profile_below_offset_db:+g}",
+                    self.profile_below_sd,
+                ],
+                "line_visible_snr_db": self.line_visible_snr_db,
+            },
+            "floor_mean_db": ["measured band median", self.floor_mean_db_sd],
             "floor_tilt_db_oct": list(self.floor_tilt_db_oct),
             "amp_exp": list(self.amp_exp),
             "comb_gain_db": list(self.comb_gain_db),
@@ -153,13 +234,44 @@ class Priors:
             "mic_line_gain_db_sd": self.mic_line_gain_db,
             "mic_floor_db_sd": self.mic_floor_db,
             "gain_all_db_sd": self.gain_all_db,
-            "carrier_sd_rev_s": self.carrier_sd_rev_s,
-            "p_fixed": self.p,
-            "path_term": "named, not fitted in R1",
+            "speed_span_pin": self.speed_span_pin,
         }
 
 
 PRIORS = Priors()
+
+
+@dataclass(frozen=True)
+class Measured:
+    """What the initialiser MEASURED on one batch, in the model's own units.
+
+    Filled by :func:`.fit.measure_batch` and carried on the batch, because two
+    R3 priors are data-driven: the profile's centre (and which of its two
+    regimes a line is in) and the floor level's. ``gamma_hz`` is the measured
+    -3 dB half width per line, the ``gamma_hz`` INITIALISATION — the prior
+    itself is the physical law of :class:`Priors`.
+    """
+
+    floor_mean_db: float
+    profile_db: np.ndarray
+    line_snr_db: np.ndarray
+    gamma_hz: np.ndarray
+    resolution_hz: float
+
+    def profile_prior(self, priors: Priors) -> tuple[Tensor, Tensor]:
+        """``(loc, scale)`` of the two-regime profile prior, per line."""
+        snr = np.asarray(self.line_snr_db, dtype=np.float64)
+        visible = snr >= float(priors.line_visible_snr_db)
+        loc = np.where(
+            visible,
+            np.asarray(self.profile_db, dtype=np.float64),
+            float(self.floor_mean_db) + float(priors.profile_below_offset_db),
+        )
+        scale = np.where(visible, float(priors.profile_db_sd), float(priors.profile_below_sd))
+        return (
+            torch.as_tensor(loc, dtype=torch.float64),
+            torch.as_tensor(scale, dtype=torch.float64),
+        )
 
 
 def free_blocks(mode: str) -> tuple[str, ...]:
@@ -183,6 +295,18 @@ def free_blocks(mode: str) -> tuple[str, ...]:
     if mode == "bench_dynamics_only":
         return ("dynamics",)
     raise ValueError(f"unknown mode {mode!r}")
+
+
+def span_pinned_sites(batch: SupportBatch, *, priors: Priors = PRIORS) -> tuple[str, ...]:
+    """The speed-law sites this batch's carrier span cannot identify.
+
+    A bench support has ONE speed and never carries these sites at all; a
+    flight pool spanning less than :attr:`Priors.speed_span_pin` in ``max/min``
+    carrier gets them as constants at their prior medians.
+    """
+    if batch.mode != "flight":
+        return ()
+    return () if batch.speed_span >= float(priors.speed_span_pin) else SPEED_LAW_SITES
 
 
 # ── the observation ─────────────────────────────────────────────────────────
@@ -218,12 +342,33 @@ class SupportBatch:
     #: detach a piece of the spectral model from the MAP gradient.
     bench_order_groups: list[tuple[int, np.ndarray]] | None = None
     exposure_scale: float = 1.0
+    #: ``max / min`` carrier over the pool: the span the speed-law pin reads.
+    #: One on the bench, where there is one speed and no speed law at all.
+    speed_span: float = 1.0
+    #: What the initialiser measured on this batch, in the model's own units.
+    #: Two R3 priors are centred on it, so a model built on a batch that was
+    #: never measured is an error rather than a fit under R1's flat priors.
+    measured: Measured | None = None
     members: tuple[str, ...] = ()
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
     @property
     def n_cells(self) -> int:
         return int(self.power.shape[0]) * int(self.power.shape[1]) * int(self.band.sum())
+
+    @property
+    def window_s(self) -> float:
+        """The analysis window's length in seconds: the support's own on the
+        bench (one whole-segment periodogram), the STFT frame's in flight."""
+        g = self.grid
+        n = int(g.n) if isinstance(g, BenchGrid) else int(g.n_fft)
+        return n / float(g.sr)
+
+    @property
+    def resolution_hz(self) -> float:
+        """``1 / (2 T)``: the narrowest half-width this window can resolve, and
+        the floor the low-order ``gamma_rk`` check measures against."""
+        return 0.5 / self.window_s
 
 
 def _band_masks(freqs: np.ndarray, band: np.ndarray, device: Any) -> tuple[Tensor, Tensor, Tensor]:
@@ -276,13 +421,16 @@ def bench_batch(
     carrier = np.atleast_1d(np.asarray(carrier_mean, dtype=np.float64))
     k_max = SP.k_max_for_carrier(carrier, sr, k_cap=k_cap)
     # The high-order lag integration grid must be fixed BEFORE the Pyro graph
-    # is built.  It uses the approved shaft-prior centre and a 40-nat tail;
-    # r_tau itself retains every sampled dynamics parameter in the graph.
-    # This avoids a parameter-dependent Python/NumPy truncation in the
-    # likelihood while retaining the whole-window result for low orders.
+    # is built.  It uses the R3 prior centres and a 40-nat tail; r_tau itself
+    # retains every sampled dynamics parameter in the graph. This avoids a
+    # parameter-dependent Python/NumPy truncation in the likelihood while
+    # retaining the whole-window result for low orders. Both terms of the law
+    # only shorten a line's support, so the prior centre is the conservative
+    # (longest) grid: a fitted width larger than the centre decays faster.
     lag_sigma = math.exp(PRIORS.log_sigma_nu[0])
     lag_lam = math.exp(PRIORS.log_lam[0])
-    groups = SP.order_groups(k_max, sigma_nu=lag_sigma, lam=lag_lam, sr=sr, n=n)
+    lag_gamma = PRIORS.gamma_per_order_hz * np.arange(1, k_max + 1, dtype=np.float64)
+    groups = SP.order_groups(k_max, sigma_nu=lag_sigma, lam=lag_lam, gamma_hz=lag_gamma, sr=sr, n=n)
     return SupportBatch(
         mode="bench",
         name=name,
@@ -306,9 +454,10 @@ def bench_batch(
             carrier_source="frozen: the support index's window-refined carrier",
             n_samples_source=("support n_fft" if n_samples is not None else "2 (F - 1)"),
             lag_integration=dict(
-                source="approved dynamics-prior centre (fixed before MAP)",
+                source="R3 dynamics-prior centres (fixed before MAP)",
                 sigma_nu=lag_sigma,
                 lam=lag_lam,
+                gamma_hz_per_order=PRIORS.gamma_per_order_hz,
                 tail_nats=SP.LAG_SUPPORT_NATS,
                 orders=len(groups),
             ),
@@ -367,6 +516,10 @@ def flight_batch(
     w = composite_weights(keys, hop=hop, n_fft=n_fft) * scale
     band, lo, hi = _band_masks(grid.freqs_hz, grid.band, device)
     c_all = np.concatenate(carriers, axis=1)
+    # the span the speed-law pin reads: ONE number per pool, the widest ratio
+    # of carriers any rotor of it reaches
+    c_lo = float(np.min(c_all[c_all > 0.0])) if np.any(c_all > 0.0) else 0.0
+    span = float(c_all.max() / c_lo) if c_lo > 0.0 else float("inf")
     return SupportBatch(
         mode="flight",
         name=name,
@@ -382,6 +535,7 @@ def flight_batch(
         rate_work=rate_t,
         members=tuple(m[0] for m in members),
         exposure_scale=scale,
+        speed_span=span,
         diagnostics=dict(
             grid=dict(grid.diagnostics),
             n_frames_total=n_total,
@@ -390,6 +544,7 @@ def flight_batch(
             exposure_scale=scale,
             carrier_min_rev_s=float(c_all.min()),
             carrier_max_rev_s=float(c_all.max()),
+            speed_span=span,
         ),
     )
 
@@ -440,94 +595,63 @@ def _lognormal(
     return site(name, d)
 
 
-# ── pinning individual dynamics coordinates ─────────────────────────────────
+# ── pinning a dynamics scalar ───────────────────────────────────────────────
 
 
-def dynamics_pin(spec: dict[str, Any] | None) -> dict[str, Any] | None:
-    """``{"lam": 200.0, "lam_eps_odd": 75.0}`` in the SITE spelling the model
-    reads: ``{"lam": 200.0, "lam_eps": [None, 75.0]}``.
+def dynamics_pin(spec: dict[str, Any] | None) -> dict[str, float] | None:
+    """``{"lam": 0.5}`` validated against the pinnable dynamics sites.
 
-    Accepted keys are the six parameter names the fit JSON quotes
-    (``sigma_nu``, ``lam``, ``sigma_eps_even/odd``, ``lam_eps_even/odd``) and
-    the bare two-vector site names, which pin BOTH parities. ``None`` is the
-    free marker, so a half-pinned site round-trips through JSON.
+    R3 has exactly two scalar dynamics sites (:data:`DYN_SITES`), and a pin is
+    a CONSTANT of the model rather than a tightly-prior'd parameter: the guide
+    allocates nothing for it and the log-prior counts nothing for it. The
+    per-line ``gamma_hz`` block is not pinned coordinate by coordinate — a
+    mode that must hold the comb fixed freezes the whole block instead.
     """
     if not spec:
         return None
-    out: dict[str, Any] = {}
+    out: dict[str, float] = {}
     for key, value in spec.items():
-        if key in DYN_SITES:
-            out[key] = value
+        if str(key) not in DYN_SITES:
+            raise ValueError(f"cannot pin {key!r}; pin one of {sorted(DYN_SITES)}")
+        if value is None:
             continue
-        site, _, parity = str(key).rpartition("_")
-        if site not in DYN_SITES or DYN_SITES[site] != 2 or parity not in ("even", "odd"):
-            raise ValueError(
-                f"cannot pin {key!r}; pin one of {sorted(DYN_SITES)} or "
-                "<site>_even / <site>_odd for the two-vector sites"
-            )
-        entries = list(out.get(site, [None, None]))
-        entries[0 if parity == "even" else 1] = value
-        out[site] = entries
-    return out
+        out[str(key)] = float(value)
+    return out or None
 
 
-def _pin_entries(value: Any, n: int) -> list[Any]:
-    """``value`` as ``n`` per-coordinate entries, ``None`` where still free."""
-    if value is None:
-        return [None] * n
-    entries = [value] * n if np.ndim(value) == 0 else list(value)
-    if len(entries) != n:
-        raise ValueError(f"a pin of a {n}-coordinate site needs {n} entries, got {value!r}")
-    return entries
+def is_pinned(pin: dict[str, Any] | None, name: str) -> bool:
+    """Whether dynamics site ``name`` is a constant rather than a site."""
+    return bool(pin) and pin is not None and pin.get(name) is not None
 
 
-def pin_free_mask(pin: dict[str, Any] | None, name: str) -> np.ndarray:
-    """Which coordinates of dynamics site ``name`` are still SAMPLED."""
-    n = DYN_SITES[name]
-    if pin is None or name not in pin:
-        return np.ones(n, dtype=bool)
-    return np.array([v is None for v in _pin_entries(pin[name], n)], dtype=bool)
+def flight_lam(priors: Priors, frozen: dict[str, Any] | None) -> float:
+    """The PINNED shaft rate of a flight fit.
+
+    128 ms of lag does not identify ``lam`` (R1 basin: 0.03 nats/cell over
+    three decades), so flight never samples it: a frozen mapping's bench value
+    where one exists — the DREGON frozen-comb fit — and
+    :attr:`Priors.flight_lam` otherwise, which is Michael's.
+    """
+    fz = frozen or {}
+    return float(fz["lam"]) if "lam" in fz else float(priors.flight_lam)
 
 
 def pin_applied(pin: dict[str, Any] | None, name: str, centre: float) -> Tensor:
-    """A CONCRETE value of site ``name``: the pin where pinned, ``centre``
-    elsewhere. This is what a probe forward pass must use, so the seeds it
+    """A CONCRETE value of site ``name``: the pin if pinned, ``centre``
+    otherwise. This is what a probe forward pass must use, so the seeds it
     calibrates are measured at the dynamics the fit will actually run at."""
-    n = DYN_SITES[name]
-    entries = _pin_entries(None if pin is None else pin.get(name), n)
-    vals = [float(centre) if v is None else float(v) for v in entries]
-    out = torch.as_tensor(vals, dtype=torch.float64)
-    return out.reshape(()) if n == 1 else out
+    value = float(pin[name]) if pin is not None and is_pinned(pin, name) else float(centre)
+    return torch.as_tensor(value, dtype=torch.float64)
 
 
 def _dyn_site(
     site: SiteFn, name: str, prior: tuple[float, float], *, pin: dict[str, Any] | None
 ) -> Tensor:
-    """Dynamics site ``name``, minus whatever ``pin`` holds fixed.
-
-    A partially pinned two-vector site samples ONE site of exactly its free
-    width, so ``AutoDelta`` allocates no parameter for a pinned coordinate and
-    the log-prior counts no pinned coordinate either — a pin is a constant in
-    the model, not a tightly-prior'd parameter.
-    """
-    n = DYN_SITES[name]
-    mask = pin_free_mask(pin, name)
-    if mask.all():
-        return _lognormal(site, name, prior, () if n == 1 else (n,))
-    entries = _pin_entries(pin[name] if pin else None, n)
-    if not mask.any():
-        out = torch.as_tensor([float(v) for v in entries], dtype=torch.float64)
-        return out.reshape(()) if n == 1 else out
-    drawn = _lognormal(site, name, prior, (int(mask.sum()),))
-    parts: list[Tensor] = []
-    j = 0
-    for v in entries:
-        if v is None:
-            parts.append(drawn[j])
-            j += 1
-        else:
-            parts.append(torch.as_tensor(float(v), dtype=torch.float64))
-    return torch.stack(parts)
+    """Dynamics site ``name``, or its pinned constant."""
+    if is_pinned(pin, name):
+        assert pin is not None
+        return torch.as_tensor(float(pin[name]), dtype=torch.float64)
+    return _lognormal(site, name, prior)
 
 
 def sample_params_from_values(
@@ -566,45 +690,77 @@ def sample_params(
     """Sample (or read frozen) every parameter of one support's forward model.
 
     A frozen block creates NO Pyro site, so ``AutoDelta`` never allocates a
-    guide parameter for it: ``--floor-only`` really holds the comb's SHAPE and
-    dynamics fixed rather than fitting them under a tight prior — its only comb
-    freedom is the single ``comb_gain_db`` scalar of the ``"comb_gain"`` block,
-    which re-levels the transplanted comb as a whole. ``pin`` does the same for
-    INDIVIDUAL dynamics coordinates of an otherwise free dynamics block
-    (:func:`dynamics_pin`, :func:`_dyn_site`) — the identified-ridge
-    reparameterisation R1 uses when a rate is not identifiable from the data.
+    guide parameter for it: ``--floor-only`` really holds the comb's SHAPE,
+    its per-line widths and the shaft fixed rather than fitting them under a
+    tight prior — its only comb freedom is the single ``comb_gain_db`` scalar
+    of the ``"comb_gain"`` block, which re-levels the transplanted comb as a
+    whole. Three further sites are CONSTANTS rather than parameters where the
+    data cannot see them: ``lam`` in flight (128 ms of lag does not identify
+    it: the frozen mapping's bench value, or :attr:`Priors.flight_lam`), and
+    the three speed laws on a pool that barely changes speed
+    (:func:`span_pinned_sites`). ``pin`` does the same for a named dynamics
+    scalar of an otherwise free block.
     """
     free = free_blocks(mode)
     fz = dict(frozen or {})
     r, m, k = batch.n_rotors, batch.n_mics, batch.k_max
     flight = batch.mode == "flight"
+    span_pinned = span_pinned_sites(batch, priors=priors)
+    medians = priors.speed_law_medians()
 
     def take(block: str, key: str, shape: tuple[int, ...] | None = None) -> Tensor:
         v = torch.as_tensor(np.asarray(fz[key], dtype=np.float64), dtype=torch.float64)
         if shape is not None and tuple(v.shape) != shape:
             if v.numel() == 1:
                 v = v.reshape(()).expand(shape).clone()
-            elif key == "profile_db" and v.ndim == 2 and int(v.shape[1]) >= shape[1]:
+            elif key in ("profile_db", "gamma_hz") and v.ndim == 2 and int(v.shape[1]) >= shape[1]:
                 v = v[: shape[0], : shape[1]].clone()
+            elif key in ("profile_db", "gamma_hz") and v.ndim == 2 and int(v.shape[0]) == 1:
+                v = v[:, : shape[1]].expand(shape).clone()
             else:
                 raise ValueError(f"frozen {key} has shape {tuple(v.shape)}, need {shape}")
         return v.to(device=batch.power.device)
 
+    def speed_law(name: str, draw: Any) -> Tensor:
+        """A speed law: its site, or its prior median where the span pins it."""
+        if not flight:
+            return torch.zeros((), dtype=torch.float64)
+        if name in span_pinned:
+            return torch.as_tensor(medians[name], dtype=torch.float64)
+        return draw()
+
     if "dynamics" in free:
-        sigma_nu = _dyn_site(site, "sigma_nu", priors.log_sigma_nu, pin=pin)
-        lam = _dyn_site(site, "lam", priors.log_lam, pin=pin)
-        sigma_eps = _dyn_site(site, "sigma_eps", priors.log_sigma_eps, pin=pin)
-        lam_eps = _dyn_site(site, "lam_eps", priors.log_lam_eps, pin=pin)
+        sigma_nu = _dyn_site(site, "sigma_nu", priors.sigma_nu_prior(flight), pin=pin)
+        if flight:
+            # PINNED in flight: the bench value a frozen mapping carries, or
+            # the approved default. 128 ms of lag cannot see the shaft rate
+            # (R1 basin: 0.03 nats/cell over three decades of lam).
+            lam = pin_applied(pin, "lam", flight_lam(priors, fz))
+        else:
+            lam = _dyn_site(site, "lam", priors.log_lam, pin=pin)
+        if "gamma_hz" in fz:
+            gamma_hz = take("dynamics", "gamma_hz", (r, k))
+        else:
+            orders = np.broadcast_to(np.arange(1, k + 1, dtype=np.float64), (r, k))
+            gamma_hz = site(
+                "gamma_hz",
+                dist.LogNormal(priors.gamma_loc(orders), float(priors.gamma_log_sd)).to_event(2),
+            )
     else:
         sigma_nu = take("dynamics", "sigma_nu")
         lam = take("dynamics", "lam")
-        sigma_eps = take("dynamics", "sigma_eps", (2,))
-        lam_eps = take("dynamics", "lam_eps", (2,))
+        gamma_hz = take("dynamics", "gamma_hz", (r, k))
 
     zero = torch.zeros((), dtype=torch.float64)
     if "profile" in free:
-        profile_db = _normal(site, "profile_db", priors.profile_db[0], priors.profile_db[1], (r, k))
-        amp_exp = _normal(site, "amp_exp", *priors.amp_exp) if flight else zero
+        if batch.measured is None:
+            raise ValueError(
+                f"batch {batch.name!r} was never measured: the R3 profile and floor priors are "
+                "centred on the data (fit.measure_batch, carried on SupportBatch.measured)"
+            )
+        loc, scale = batch.measured.profile_prior(priors)
+        profile_db = site("profile_db", dist.Normal(loc[:r, :k], scale[:r, :k]).to_event(2))
+        amp_exp = speed_law("amp_exp", lambda: _normal(site, "amp_exp", *priors.amp_exp))
     else:
         profile_db = take("profile", "profile_db", (r, k))
         amp_exp = take("profile", "amp_exp") if flight else zero
@@ -616,14 +772,22 @@ def sample_params(
         profile_db = profile_db + _normal(site, "comb_gain_db", *priors.comb_gain_db)
 
     if "floor" in free:
+        if batch.measured is None:
+            raise ValueError(f"batch {batch.name!r} was never measured (see fit.measure_batch)")
         floor = FloorParams(
-            mean_db=_normal(site, "floor_mean_db", *priors.floor_mean_db),
+            mean_db=_normal(
+                site,
+                "floor_mean_db",
+                float(batch.measured.floor_mean_db),
+                priors.floor_mean_db_sd,
+            ),
             shape_z=_normal(site, "floor_shape_z", 0.0, 1.0, (FLOOR_SHAPE_N_CTRL,)),
             tilt_db_oct=_normal(site, "floor_tilt_db_oct", *priors.floor_tilt_db_oct),
             mic_floor_db=_normal(site, "mic_floor_db", 0.0, priors.mic_floor_db, (m,)),
-            exp=_lognormal(site, "floor_exp", priors.log_floor_exp) if flight else zero,
-            static_rel=(
-                _lognormal(site, "floor_static_rel", priors.log_floor_static) if flight else zero
+            exp=speed_law("floor_exp", lambda: _lognormal(site, "floor_exp", priors.log_floor_exp)),
+            static_rel=speed_law(
+                "floor_static_rel",
+                lambda: _lognormal(site, "floor_static_rel", priors.log_floor_static),
             ),
         )
     else:
@@ -661,15 +825,13 @@ def sample_params(
     return V2Params(
         sigma_nu=sigma_nu,
         lam=lam,
-        sigma_eps=sigma_eps,
-        lam_eps=lam_eps,
+        gamma_hz=gamma_hz,
         profile_db=profile_db,
         floor=floor,
         mic_line_gain_db=mic_line,
         gain_all_db=gain_all,
         carrier_rev_s=carrier,
         amp_exp=amp_exp,
-        p=priors.p,
     )
 
 
@@ -732,38 +894,25 @@ def support_model(
 
 
 def params_to_dict(params: V2Params) -> dict[str, Any]:
-    """The ``params`` block of the ``noise-v2-fit/1`` JSON."""
+    """The ``params`` block of the ``noise-v2-fit/2`` JSON.
+
+    ``gamma_hz`` is the ``(R, K)`` block of per-line Lorentzian half-widths
+    that replaced R1's four ``*_eps`` scalars and the fixed exponent ``p``.
+    """
     f = lambda v: float(np.asarray(v.detach().cpu() if isinstance(v, Tensor) else v))  # noqa: E731
     a = lambda v: np.asarray(  # noqa: E731
         v.detach().cpu() if isinstance(v, Tensor) else v, dtype=np.float64
     ).tolist()
-    se = np.atleast_1d(
-        np.asarray(
-            params.sigma_eps.detach().cpu()
-            if isinstance(params.sigma_eps, Tensor)
-            else params.sigma_eps,
-            dtype=np.float64,
-        )
-    )
-    le = np.atleast_1d(
-        np.asarray(
-            params.lam_eps.detach().cpu() if isinstance(params.lam_eps, Tensor) else params.lam_eps,
-            dtype=np.float64,
-        )
-    )
-    se = np.broadcast_to(se, (2,)) if se.size == 1 else se
-    le = np.broadcast_to(le, (2,)) if le.size == 1 else le
+    prof = np.atleast_2d(np.asarray(a(params.profile_db), dtype=np.float64))
+    gamma = np.asarray(a(params.gamma_hz), dtype=np.float64)
+    gamma = np.broadcast_to(np.atleast_2d(gamma), prof.shape) if gamma.size else gamma
     return dict(
         sigma_nu=f(params.sigma_nu),
         lam=f(params.lam),
-        sigma_eps_even=float(se[0]),
-        sigma_eps_odd=float(se[1]),
-        lam_eps_even=float(le[0]),
-        lam_eps_odd=float(le[1]),
-        p=float(params.p),
+        gamma_hz=gamma.tolist(),
         carrier_rev_s=(a(params.carrier_rev_s) if params.carrier_rev_s is not None else None),
         profile=dict(
-            profile_db=a(params.profile_db),
+            profile_db=prof.tolist(),
             amp_exp=f(params.amp_exp),
             mic_line_gain_db=a(params.mic_line_gain_db),
         ),
@@ -779,9 +928,39 @@ def params_to_dict(params: V2Params) -> dict[str, Any]:
     )
 
 
+def gamma_from_params(d: dict[str, Any]) -> np.ndarray:
+    """``(R, K)`` widths of a ``/2`` payload, or a ``/1`` payload MAPPED.
+
+    A ``noise-v2-fit/1`` fit carried a per-order OU instead: phase variance
+    ``sigma_eps^2 k^p`` relaxing at ``lam_eps``, both by the PARITY of ``k``.
+    At lags short against ``1 / lam_eps`` — the regime every fitted rate of R1
+    and R2 sat in on its own window — its exponent is
+    ``sigma_eps^2 k^p lam_eps |tau|``, which is R3's ``2 pi gamma_rk |tau|``
+    with
+
+        gamma_rk = sigma_eps(parity of k)^2 k^p lam_eps(parity of k) / (2 pi).
+
+    That is the equivalence used here, so an old fit renders as the same line
+    shape it was fitted with wherever its per-order term was diffusive; where
+    it had saturated, the mapped Lorentzian is WIDER than the old pedestal was
+    (the saturated case is the one R3 removed for having no evidence).
+    """
+    if "gamma_hz" in d:
+        return np.atleast_2d(np.asarray(d["gamma_hz"], dtype=np.float64))
+    prof = np.atleast_2d(np.asarray(d["profile"]["profile_db"], dtype=np.float64))
+    k = np.arange(1, prof.shape[1] + 1, dtype=np.float64)
+    even = np.remainder(k, 2.0) == 0.0
+    se = np.where(even, float(d["sigma_eps_even"]), float(d["sigma_eps_odd"]))
+    le = np.where(even, float(d["lam_eps_even"]), float(d["lam_eps_odd"]))
+    p = float(d.get("p", 1.0))
+    gamma = se**2 * k**p * le / (2.0 * math.pi)
+    return np.broadcast_to(gamma[None, :], prof.shape).copy()
+
+
 def params_from_dict(d: dict[str, Any], *, device: Any = "cpu") -> V2Params:
     """Inverse of :func:`params_to_dict` (what the renderer and a frozen-comb
-    flight fit read)."""
+    flight fit read), for a ``/2`` payload or a mapped ``/1`` one
+    (:func:`gamma_from_params`)."""
 
     def t(v: Any) -> Tensor:
         return torch.as_tensor(np.asarray(v, dtype=np.float64), dtype=torch.float64, device=device)
@@ -790,8 +969,7 @@ def params_from_dict(d: dict[str, Any], *, device: Any = "cpu") -> V2Params:
     return V2Params(
         sigma_nu=t(d["sigma_nu"]),
         lam=t(d["lam"]),
-        sigma_eps=t([d["sigma_eps_even"], d["sigma_eps_odd"]]),
-        lam_eps=t([d["lam_eps_even"], d["lam_eps_odd"]]),
+        gamma_hz=t(gamma_from_params(d)),
         profile_db=t(prof["profile_db"]),
         floor=FloorParams(
             mean_db=t(floor["floor_mean_db"]),
@@ -805,17 +983,18 @@ def params_from_dict(d: dict[str, Any], *, device: Any = "cpu") -> V2Params:
         gain_all_db=t(d["mic_gains_db"]),
         carrier_rev_s=None if d.get("carrier_rev_s") is None else t(d["carrier_rev_s"]),
         amp_exp=t(prof["amp_exp"]),
-        p=float(d.get("p", SP.P_ORDER_EXPONENT)),
     )
 
 
 def frozen_from_params(d: dict[str, Any]) -> dict[str, Any]:
-    """The ``frozen`` mapping :func:`sample_params` reads, from a fit's params."""
+    """The ``frozen`` mapping :func:`sample_params` reads, from a fit's params.
+
+    Reads a ``/1`` payload as well, through :func:`gamma_from_params`.
+    """
     return dict(
         sigma_nu=d["sigma_nu"],
         lam=d["lam"],
-        sigma_eps=[d["sigma_eps_even"], d["sigma_eps_odd"]],
-        lam_eps=[d["lam_eps_even"], d["lam_eps_odd"]],
+        gamma_hz=gamma_from_params(d).tolist(),
         profile_db=d["profile"]["profile_db"],
         amp_exp=d["profile"]["amp_exp"],
         mic_line_gain_db=d["profile"]["mic_line_gain_db"],

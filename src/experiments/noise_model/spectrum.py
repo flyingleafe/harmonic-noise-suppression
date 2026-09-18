@@ -85,7 +85,7 @@ from experiments.stochastic_fit.revised_phase import (
 )
 from experiments.stochastic_fit.stage2 import render_transfer_power
 
-from .lag import P_ORDER_EXPONENT, order_lag_support_s, r_tau
+from .lag import order_lag_support_s, r_tau
 
 __all__ = [
     "BAND_F_MIN",
@@ -101,6 +101,7 @@ __all__ = [
     "flight_grid",
     "flight_model",
     "flight_rate_work",
+    "gamma_block",
     "k_max_for_carrier",
     "order_groups",
     "refine_bench_carrier",
@@ -158,25 +159,24 @@ class FloorParams:
 class V2Params:
     """Every fitted quantity of one support's forward model.
 
-    ``sigma_eps``/``lam_eps`` are ``(even, odd)`` pairs (see :mod:`.lag`);
-    ``carrier_rev_s`` is ``(R,)`` on the bench (a fitted constant per rotor)
-    and unused in flight, where the label supplies the carrier;
-    ``mic_line_gain_db`` is ``(M, R)`` and ``gain_all_db`` is ``(M,)``, both
-    mean-pinned exactly as C4 pins them, so neither can absorb the overall
-    level.
+    ``gamma_hz`` is the ``(R, K)`` block of per-line Lorentzian half-widths in
+    Hz (Model R3); a scalar or a ``(K,)`` row is accepted and means "the same
+    width for every rotor". ``carrier_rev_s`` is ``(R,)`` on the bench (the
+    support index's frozen value) and unused in flight, where the label
+    supplies the carrier; ``mic_line_gain_db`` is ``(M, R)`` and
+    ``gain_all_db`` is ``(M,)``, both mean-pinned exactly as C4 pins them, so
+    neither can absorb the overall level.
     """
 
     sigma_nu: Any
     lam: Any
-    sigma_eps: Any
-    lam_eps: Any
+    gamma_hz: Any
     profile_db: Any
     floor: FloorParams
     mic_line_gain_db: Any
     gain_all_db: Any
     carrier_rev_s: Any = None
     amp_exp: Any = 0.0
-    p: float = P_ORDER_EXPONENT
 
 
 # ── geometry ────────────────────────────────────────────────────────────────
@@ -460,27 +460,62 @@ def k_max_for_carrier(carrier_rev_s: Any, sr: int, *, k_cap: int | None = None) 
     return max(1, k if k_cap is None else min(k, int(k_cap)))
 
 
+def gamma_block(gamma_hz: Any, *, n_rotors: int, k_max: int, ref: Tensor) -> Tensor:
+    """``gamma_hz`` as the ``(R, K)`` block the forward model indexes.
+
+    A scalar or a ``(K,)`` row means "the same width for every rotor", which
+    is what a one-rotor bench fit transplanted onto a four-rotor airframe
+    carries; an ``(R, K')`` block with ``K' >= k_max`` is truncated to the
+    support's own order cap, exactly as the profile is.
+    """
+    g = _as_t(gamma_hz, ref)
+    if g.ndim == 0:
+        return g.reshape(1, 1).expand(n_rotors, k_max)
+    if g.ndim == 1:
+        g = g[None, :]
+    if int(g.shape[1]) < k_max:
+        raise ValueError(f"gamma_hz has {int(g.shape[1])} orders, need {k_max}")
+    g = g[:, :k_max]
+    if int(g.shape[0]) == 1 and n_rotors > 1:
+        return g.expand(n_rotors, k_max)
+    if int(g.shape[0]) != n_rotors:
+        raise ValueError(f"gamma_hz carries {int(g.shape[0])} rotors, need {n_rotors}")
+    return g
+
+
 def order_groups(
     k_max: int,
     *,
     sigma_nu: float,
     lam: float,
+    gamma_hz: Any = 0.0,
     sr: int,
     n: int,
     threshold_nats: float = LAG_SUPPORT_NATS,
     min_len: int = 256,
 ) -> list[tuple[int, np.ndarray]]:
-    """``[(lag_len, orders)]``: orders bucketed by a fixed shaft-lag geometry.
+    """``[(lag_len, orders)]``: orders bucketed by a fixed lag geometry.
 
     The support is a POWER OF TWO so a handful of buckets covers every order.
-    Callers choose ``sigma_nu`` and ``lam`` before they build the Pyro graph;
-    the lag law evaluated on that grid remains fully differentiable in the
-    sampled dynamics parameters.
+    Callers choose ``sigma_nu``, ``lam`` and ``gamma_hz`` before they build the
+    Pyro graph — the PRIOR centres, never a live tensor — and the lag law
+    evaluated on that grid remains fully differentiable in the sampled
+    dynamics parameters. Both terms of the R3 law shorten a line's support, so
+    a grid cut at the prior centre is never too short for a fitted width that
+    turns out larger (:func:`.lag.order_lag_support_s`).
     """
     k = np.arange(1, int(k_max) + 1, dtype=np.float64)
+    g = np.asarray(gamma_hz, dtype=np.float64)
+    if g.ndim and g.shape[-1] > int(k_max):
+        g = g[..., : int(k_max)]
     tau = np.atleast_1d(
         order_lag_support_s(
-            k, sigma_nu=sigma_nu, lam=lam, threshold_nats=threshold_nats, tau_cap_s=n / float(sr)
+            k,
+            sigma_nu=sigma_nu,
+            lam=lam,
+            gamma_hz=g,
+            threshold_nats=threshold_nats,
+            tau_cap_s=n / float(sr),
         )
     )
     want = np.ceil(tau * float(sr)).astype(np.int64) + 1
@@ -512,25 +547,25 @@ def _comb_autocovariance(
     if int(profile.shape[1]) < k_max:
         raise ValueError(f"profile has {int(profile.shape[1])} orders, need {k_max}")
     out = torch.zeros(n_rotors, grid.n, dtype=grid.win_acf.dtype, device=grid.win_acf.device)
+    gamma = gamma_block(params.gamma_hz, n_rotors=n_rotors, k_max=k_max, ref=grid.win_acf)
     two_pi = 2.0 * math.pi
     for length, orders in groups:
         k = torch.as_tensor(orders, dtype=out.dtype, device=out.device)  # (Kg,)
         tau = grid.tau_s[:length]
+        gam = gamma[:, orders - 1, None]  # (R, Kg, 1)
         rho = r_tau(
-            tau[None, :],
-            k[:, None],
+            tau[None, None, :],
+            k[None, :, None],
             sigma_nu=params.sigma_nu,
             lam=params.lam,
-            sigma_eps=params.sigma_eps,
-            lam_eps=params.lam_eps,
-            p=params.p,
-        )  # (Kg, length)
+            gamma_hz=gam,
+        )  # (R, Kg, length)
         power = 10.0 ** (profile[:, orders - 1] / 10.0)  # (R, Kg)
         # the line's angle is k f_r tau: reduced modulo one turn BEFORE the
         # cosine, in float64, so 8 kHz x 30 s (1.5e6 rad) costs 1e-10 rad
         # instead of eating the mantissa.
         ang = torch.remainder(k[None, :, None] * carrier[:, None, None] * tau[None, None, :], 1.0)
-        block = (power[:, :, None] * rho[None] * torch.cos(two_pi * ang)).sum(dim=1)  # (R, length)
+        block = (power[:, :, None] * rho * torch.cos(two_pi * ang)).sum(dim=1)  # (R, length)
         if length == grid.n:
             out = out + block
         else:
@@ -749,7 +784,7 @@ def flight_model(
     within-window carrier integral, the per-window phase centring, the line
     amplitude, the speed law, the shared kernel, the floor through the same
     kernel, the transfer applied once — is C4's, and the differential test
-    pins the two to 1e-6 where the laws coincide (``sigma_eps = 0``).
+    pins the two to 1e-6 where the laws coincide (``gamma_hz = 0``).
     """
     ref = grid.window_work
     rate = rate_work.to(dtype=ref.dtype, device=ref.device)
@@ -758,6 +793,7 @@ def flight_model(
     kk = int(profile.shape[1]) if k_max is None else int(k_max)
     if kk > int(profile.shape[1]):
         raise ValueError(f"k_max {kk} exceeds the profile's {int(profile.shape[1])} orders")
+    gamma = gamma_block(params.gamma_hz, n_rotors=n_rotors, k_max=kk, ref=ref)
 
     phase = (2.0 * math.pi / float(grid.sr_work)) * torch.cumsum(rate, dim=-1)
     phase = phase - phase[..., n_work // 2 : n_work // 2 + 1]
@@ -775,14 +811,12 @@ def flight_model(
         kph = torch.remainder(k[None, :, None, None] * phase[:, None], 2.0 * math.pi)
         atoms = torch.polar(prof_amp[:, k0:k1, None, None] * env[:, None], kph)
         rho = r_tau(
-            grid.tau_s_work[None, :],
-            k[:, None],
+            grid.tau_s_work[None, None, :],
+            k[None, :, None],
             sigma_nu=params.sigma_nu,
             lam=params.lam,
-            sigma_eps=params.sigma_eps,
-            lam_eps=params.lam_eps,
-            p=params.p,
-        )[None, :, None, :]
+            gamma_hz=gamma[:, k0:k1, None],
+        )[:, :, None, :]  # (R, K, 1, n_work)
         block = expected_periodogram_from_atoms(
             atoms, rho, n_fft=grid.n_fft_work, window_sumsq=grid.window_work_sumsq
         )
