@@ -430,9 +430,7 @@ def _comb_mean_check(fit: dict[str, Any], fits: dict[str, dict[str, Any]]) -> di
             continue
         values = [float(p[key]) for p in params]
         mean = float(np.mean(values))
-        log_mean = (
-            float(np.exp(np.mean(np.log(values)))) if all(v > 0.0 for v in values) else None
-        )
+        log_mean = float(np.exp(np.mean(np.log(values)))) if all(v > 0.0 for v in values) else None
         reference = log_mean if kind == "log" and log_mean is not None else mean
         got = float(fit["params"][key])
         rows[key] = dict(
@@ -609,16 +607,13 @@ def _dump_audio(root: Path, support: GT.ScoredSupport, row: dict[str, Any]) -> N
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     name = support.key.replace("/", "_").replace(":", "_")
-    arrays: dict[str, np.ndarray] = {"real": np.asarray(row["_real"], dtype=np.float32)}
+    arrays: dict[str, Any] = {"real": np.asarray(row["_real"], dtype=np.float32)}
     for seed, audio in row["_renders"].items():
         arrays[f"render_seed_{int(seed)}"] = np.asarray(audio, dtype=np.float32)
-    np.savez(
-        root / f"{name}.npz",
-        rig=np.array(support.rig),
-        regime=np.array(support.regime),
-        sr=np.array(16000),
-        **arrays,
-    )
+    arrays["rig"] = np.array(support.rig)
+    arrays["regime"] = np.array(support.regime)
+    arrays["sr"] = np.array(16000)
+    np.savez(root / f"{name}.npz", **arrays)
 
 
 def _arm_for_recording(arm: Arm, support: GT.ScoredSupport) -> Arm:
@@ -767,19 +762,18 @@ def bars(hppnet: dict[str, Any]) -> dict[str, Any]:
     d_complete = bool(d["checks"]["cohort_complete"] and d["checks"]["enough_clusters"])
     m_mean = float(m["rig_candidate_mae"])
     m_complete = bool(m["checks"]["cohort_complete"] and m["checks"]["all_regimes_present"])
+    d_parity = _bar_row(d_mean if d_complete else None, PARITY_BAR["dregon"])
+    d_stretch = _bar_row(d_mean if d_complete else None, STRETCH_BAR["dregon"])
+    m_parity = _bar_row(m_mean if m_complete else None, PARITY_BAR["michaels"])
     dregon = dict(
         quantity="five-recording cruise PIT MAE mean, one-sided 95 % upper bound beside it",
         cohort_complete=d_complete,
         mean_rev_s=(d_mean if d_complete else None),
         interval_upper_rev_s=(d_upper if d_complete else None),
-        parity=_bar_row(d_mean if d_complete else None, PARITY_BAR["dregon"]),
-        parity_interval_upper=_bar_row(
-            d_upper if d_complete else None, PARITY_BAR["dregon"]
-        ),
-        stretch=_bar_row(d_mean if d_complete else None, STRETCH_BAR["dregon"]),
-        stretch_interval_upper=_bar_row(
-            d_upper if d_complete else None, STRETCH_BAR["dregon"]
-        ),
+        parity=d_parity,
+        parity_interval_upper=_bar_row(d_upper if d_complete else None, PARITY_BAR["dregon"]),
+        stretch=d_stretch,
+        stretch_interval_upper=_bar_row(d_upper if d_complete else None, STRETCH_BAR["dregon"]),
         frozen_gate_pass=bool(d["pass"]),
         missing_supports=list(d["missing_supports"]),
     )
@@ -788,7 +782,7 @@ def bars(hppnet: dict[str, Any]) -> dict[str, Any]:
         cohort_complete=m_complete,
         mean_rev_s=(m_mean if m_complete else None),
         ratio=(float(m["aggregate_ratio"]) if m_complete else None),
-        parity=_bar_row(m_mean if m_complete else None, PARITY_BAR["michaels"]),
+        parity=m_parity,
         stretch=dict(
             bar_rev_s=None,
             within=None,
@@ -802,8 +796,8 @@ def bars(hppnet: dict[str, Any]) -> dict[str, Any]:
         frozen_gate_pass=bool(m["pass"]),
         missing_supports=list(m["missing_supports"]),
     )
-    parity_pass = bool(dregon["parity"]["within"] and michaels["parity"]["within"])
-    stretch_pass = bool(dregon["stretch"]["within"] and michaels["parity"]["within"])
+    parity_pass = bool(d_parity["within"] and m_parity["within"])
+    stretch_pass = bool(d_stretch["within"] and m_parity["within"])
     return dict(
         rule=(
             "PARITY = the legacy previous-best bar on BOTH HPPNet numbers; STRETCH = the frozen "
@@ -1258,6 +1252,7 @@ def compose(
     blocker: str | None,
     arm_jobs: dict[str, str] | None = None,
     arm_notes: dict[str, str] | None = None,
+    compare: Path | None = None,
 ) -> dict[str, Any]:
     """The round record: one candidate row per scored arm, gates recombined.
 
@@ -1316,7 +1311,11 @@ def compose(
         **{"pass": bool(groups and not missing_groups and all(b["pass"] for b in groups.values()))},
     )
     likelihood = next(
-        (a["gates"]["likelihood"] for a in arms if "per_band" in (a["gates"].get("likelihood") or {})),
+        (
+            a["gates"]["likelihood"]
+            for a in arms
+            if "per_band" in (a["gates"].get("likelihood") or {})
+        ),
         None,
     )
     if likelihood is None:
@@ -1378,12 +1377,12 @@ def compose(
         status="scored" if pred else "partially_scored",
         arm=dict(
             kind="v2",
-            label={
-                r: a["arm"]["label"].get(r, a["candidate"]["name"]) for r, a in primary.items()
-            },
+            label={r: a["arm"]["label"].get(r, a["candidate"]["name"]) for r, a in primary.items()},
             source={r: a["arm"]["source"].get(r) for r, a in primary.items()},
         ),
-        fits=sorted({f["path"] for a in arms for f in a["candidate"]["fits"].values() if f.get("path")}),
+        fits=sorted(
+            {f["path"] for a in arms for f in a["candidate"]["fits"].values() if f.get("path")}
+        ),
         candidates=rows,
         protocol=_composed_protocol(arms),
         measurements={k: v for a in arms for k, v in a["measurements"].items()},
@@ -1406,6 +1405,8 @@ def compose(
         prev = json.loads(Path(previous).read_text())
         if prev.get("legacy_smoke"):
             payload["legacy_smoke"] = prev["legacy_smoke"]
+    if compare is not None and Path(compare).is_file():
+        payload["previous_round"] = _round_over_round(Path(compare), payload)
     payload["blocker"] = blocker or _auto_blocker(payload, primary)
     return payload
 
@@ -1426,7 +1427,6 @@ def _attribute_job(arm: dict[str, Any], job: str) -> None:
     if audio.get("dir"):
         audio["uri"] = f"{ARTIFACT_BUCKET}/{job}/outputs/{str(audio['dir']).lstrip('./')}"
         arm["audio"] = audio
-
 
 
 def _candidate_hppnet(arm: dict[str, Any]) -> dict[str, Any]:
@@ -1526,6 +1526,110 @@ def _support_availability(index: Path) -> dict[str, Any]:
     )
 
 
+#: The gate scalars compared round over round: where each lives in a round
+#: record, and which direction counts as an improvement. ``lower`` is the
+#: normal case (an error); the likelihood comb margin is model-minus-oracle, so
+#: a LESS negative number is the better one.
+ROUND_QUANTITIES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    (
+        "dregon cruise PIT MAE (5-recording mean)",
+        "rev/s",
+        "lower",
+        ("bars", "dregon", "mean_rev_s"),
+    ),
+    (
+        "dregon cruise PIT MAE (95 % upper)",
+        "rev/s",
+        "lower",
+        ("bars", "dregon", "interval_upper_rev_s"),
+    ),
+    ("michaels equal-regime PIT MAE", "rev/s", "lower", ("bars", "michaels", "mean_rev_s")),
+    ("michaels ratio vs the legacy regime mean", "x", "lower", ("bars", "michaels", "ratio")),
+    (
+        "proxy ltas_abs_db, dregon cruise",
+        "dB",
+        "lower",
+        ("gates", "proxy", "groups", "dregon_cruise", "mean_ltas_abs_db"),
+    ),
+    (
+        "proxy ltas_abs_db, michaels cruise",
+        "dB",
+        "lower",
+        ("gates", "proxy", "groups", "michaels_cruise", "mean_ltas_abs_db"),
+    ),
+    (
+        "mr_ltas, dregon cruise (report-only)",
+        "—",
+        "lower",
+        ("gates", "proxy", "groups", "dregon_cruise", "mean_mr_ltas"),
+    ),
+    (
+        "mr_ltas, michaels cruise (report-only)",
+        "—",
+        "lower",
+        ("gates", "proxy", "groups", "michaels_cruise", "mean_mr_ltas"),
+    ),
+    (
+        "likelihood comb-band margin vs oracle",
+        "nats/s",
+        "higher",
+        ("gates", "likelihood", "per_band", "comb", "margin_nats_per_s"),
+    ),
+)
+
+
+def _dig(record: dict[str, Any], path: tuple[str, ...]) -> float | None:
+    """One scalar of a round record, or ``None`` where the round did not run it."""
+    node: Any = record
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    if node is None or isinstance(node, bool):
+        return None
+    try:
+        value = float(node)
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) else None
+
+
+def _round_over_round(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    """This round's gate scalars beside the previous round's, with the delta.
+
+    Nothing is recomputed: both sides are read out of the two round records as
+    written, and a quantity absent from either round stays ``None`` rather than
+    being filled in from anywhere else.
+    """
+    prev = json.loads(Path(path).read_text())
+    rows: list[dict[str, Any]] = []
+    for label, unit, direction, keys in ROUND_QUANTITIES:
+        was, now = _dig(prev, keys), _dig(payload, keys)
+        delta = (now - was) if (was is not None and now is not None) else None
+        rows.append(
+            dict(
+                quantity=label,
+                unit=unit,
+                better=direction,
+                previous=was,
+                current=now,
+                delta=delta,
+                improved=(
+                    None
+                    if delta is None or delta == 0.0
+                    else bool((delta < 0.0) if direction == "lower" else (delta > 0.0))
+                ),
+            )
+        )
+    return dict(
+        source=str(path),
+        round=prev.get("round"),
+        git=prev.get("git"),
+        candidates=[c.get("name") for c in (prev.get("candidates") or [])],
+        quantities=rows,
+    )
+
+
 def _auto_blocker(payload: dict[str, Any], primary: dict[str, dict[str, Any]]) -> str:
     parts: list[str] = []
     for rig in ("dregon", "michaels"):
@@ -1616,6 +1720,35 @@ def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
         "Michael's frozen gate IS its parity bar."
     )
     out.append("")
+    rr = payload.get("previous_round")
+    if rr:
+        out.append(f"## Round {rr.get('round')} → round {payload['round']}")
+        out.append("")
+        out.append(
+            f"| quantity | unit | round {rr.get('round')} | round {payload['round']} | "
+            f"Δ (R{payload['round']} − R{rr.get('round')}) | direction | moved |"
+        )
+        out.append("|---|---|---:|---:|---:|---|---|")
+        for q in rr["quantities"]:
+            spec = ".4f" if q["unit"] in ("dB", "x", "—") else ".6f"
+            moved = (
+                "—" if q["improved"] is None else ("**better**" if q["improved"] else "**worse**")
+            )
+            out.append(
+                f"| {q['quantity']} | {q['unit']} | {_fmt(q['previous'], spec)} | "
+                f"{_fmt(q['current'], spec)} | "
+                f"{'—' if q['delta'] is None else format(float(q['delta']), '+' + spec)} | "
+                f"{q['better']} is better | {moved} |"
+            )
+        out.append("")
+        out.append(
+            f"Both sides are read verbatim out of `{rr.get('source')}` (git "
+            f"`{str(rr.get('git'))[:12]}`, candidates "
+            + ", ".join(f"`{c}`" for c in (rr.get("candidates") or []))
+            + ") and this record; a dash is a quantity one of the two rounds did not measure, "
+            "never a substituted number."
+        )
+        out.append("")
     out.append("## Per-candidate numbers")
     out.append("")
     out.append(
@@ -1666,7 +1799,9 @@ def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
     if smoke:
         out.append("## Legacy smoke comparability (recorded earlier, NOT re-run)")
         out.append("")
-        out.append(f"| legacy replay (`{smoke.get('job')}`) | observed | frozen scalar | relative delta |")
+        out.append(
+            f"| legacy replay (`{smoke.get('job')}`) | observed | frozen scalar | relative delta |"
+        )
         out.append("|---|---:|---:|---:|")
         for label, key in (
             ("DREGON cruise synthetic PIT MAE", "dregon_cruise_pit_mae"),
@@ -1702,7 +1837,67 @@ def compose_findings(payload: dict[str, Any], *, provenance: str | None) -> str:
                 f"{_fmt(row.get('render_wall_s'), '.0f')} s."
             )
         out.append("")
+    else:
+        out += _own_provenance(payload)
     return "\n".join(out)
+
+
+def _own_provenance(payload: dict[str, Any]) -> list[str]:
+    """The round's OWN provenance, when there is no earlier findings to carry.
+
+    Round 1 inherited a `## Provenance` section from the unscored record it
+    overwrote; a fresh round has none, so the section is written from the record
+    itself: the frozen definitions' source, the probe checkpoint and whether its
+    digest was verified in the job, and one line per candidate naming the fit it
+    renders from, the fit's convergence status, the omnirun job that scored it
+    and where its rendered audio lives.
+    """
+    hp = payload["protocol"]["hppnet"]
+    out: list[str] = ["## Provenance", ""]
+    out.append(
+        "The frozen support identities, render seeds, one-sided interval, regime-mean ratio, "
+        "proxy thresholds, probe checkpoint digest and likelihood/oracle definition are all "
+        "read from `src/experiments/noise_model/gates.py`; this record adds no scalar of its "
+        f"own. Probe `{hp['experiment']}/{hp['checkpoint']}`, sha256 `{hp['sha256']}`, "
+        f"verified in-job: **{str(bool(hp.get('verified'))).lower()}** (the scoring pass dies "
+        "on a digest mismatch, so a scored arm cannot exist without the match). Render seeds "
+        f"{payload['protocol']['render_seeds']}, {payload['protocol']['n_mics']} microphones. "
+        f"Record git `{str(payload['git'])[:12]}`."
+    )
+    out.append("")
+    out.append("| candidate | rig(s) | fit | fit git | converged | job | audio |")
+    out.append("|---|---|---|---|---|---|---|")
+    for row in payload["candidates"]:
+        for rig, fit in row["fits"].items():
+            conv = fit.get("converged")
+            out.append(
+                f"| `{row['name']}` | {rig} | `{fit.get('path')}` | "
+                f"`{str(row.get('git'))[:12]}` | "
+                f"{'—' if conv is None else ('yes' if conv else '**NO**')} | "
+                f"`{row.get('job') or 'local'}` | "
+                f"`{(row.get('audio') or {}).get('uri') or '—'}` |"
+            )
+    out.append("")
+    for row in payload["candidates"]:
+        out.append(
+            f"* `{row['name']}` — arm record `{row['arm_record']}`, render wall "
+            f"{_fmt(row.get('render_wall_s'), '.0f')} s, "
+            f"{len(row['rigs'])} rig(s) {', '.join(row['rigs'])}, primary for "
+            f"{', '.join(row['primary_for']) or 'nothing'}."
+        )
+    avail = payload.get("support_availability")
+    if avail:
+        sets = ", ".join(
+            f"{name} {blk['materialized']}/{blk['required']}"
+            for name, blk in (avail.get("sets") or {}).items()
+        )
+        out.append("")
+        out.append(
+            f"Support availability from `{avail.get('source')}` "
+            f"(updated {avail.get('updated')}): {sets}."
+        )
+    out.append("")
+    return out
 
 
 def _verdict(within: Any) -> str:
@@ -1836,12 +2031,31 @@ def main(argv: list[str] | None = None) -> int:
             "visible inside the job); the dumped audio URI follows from it"
         ),
     )
+    ap.add_argument(
+        "--previous",
+        type=Path,
+        default=None,
+        help=(
+            "with --compose: the round record whose legacy-smoke row is carried forward "
+            "verbatim (default: this round's own earlier record, which a first pass has not "
+            "written yet)"
+        ),
+    )
+    ap.add_argument(
+        "--compare",
+        type=Path,
+        default=None,
+        help=(
+            "with --compose: the previous round's record; its gate scalars enter the "
+            "round-over-round delta table beside this round's"
+        ),
+    )
     args = ap.parse_args(argv)
     tag = f"_{args.out_tag}" if args.out_tag else ""
     out_json = Path(args.out) / f"round{int(args.round)}{tag}.json"
     out_dir = Path(args.out) / f"round{int(args.round)}{tag}" / "score"
     if args.compose:
-        previous = out_json if out_json.is_file() else None
+        previous = args.previous or (out_json if out_json.is_file() else None)
         provenance = carried_provenance(out_dir / "findings.md")
         payload = compose(
             round_no=int(args.round),
@@ -1849,6 +2063,7 @@ def main(argv: list[str] | None = None) -> int:
             previous=previous,
             supports_index=args.supports_index,
             blocker=args.blocker,
+            compare=args.compare,
             arm_jobs=dict(
                 str(spec).split("=", 1)
                 for spec in args.arm_job  # type: ignore[misc]
