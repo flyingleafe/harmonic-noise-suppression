@@ -148,3 +148,99 @@ invisible 73–91 % of the comb, where the rig fit's profile is prior-driven and
 the per-rotor fits' is prior-driven too — two priors compared to each other.
 
 `fig_profiles.png` shows all of it per rotor, with the ≥ 6 dB lines marked.
+
+## 4. Stage 3 — the rig fit against the combination of the four per-rotor fits
+
+Three arms, all on `bench_dregon_allMotors_70` with the R2/R3 window and the
+same 1973192 cells. `F0` is the committed R3 fit, re-used unchanged; `F1` and
+`F2` are job `nv2-r3-fourmotor-3d587f` (uni-cpu, 4 starts each, code `d27f58be`,
+recipe and support-rebuild check in `submit_note.md`). Payload
+`stage3_arms.json`, fits under `fits/F1` and `fits/F2`.
+
+| arm | what changed | nats/cell | conv | grad norm | best−worst start | wall s |
+|---|---|--:|:-:|--:|--:|--:|
+| F0 | — (the committed R3 fit) | −8.159631 | N (`none`) | 321.1 | 4.08e-4 | 3576 |
+| F1 | `profile_db` init + prior from E2-multi (1 dB k ≤ 16, 3 dB 17–48, model default above; 139 lines given a centre and a width, 314 given a centre) | **−8.160531** | N (`none`) | 726.0 | 2.80e-4 | 3595 |
+| F2 | F1 + carrier offsets `+0.00545 / +0.00090 / +0.01725 / +0.01090` rev/s | −8.160092 | N (`none`) | 235.9 | 3.37e-4 | 4521 |
+
+No arm converges (as R3's own rig fit did not), and no arm's four starts agree
+to the 1e-4 nats/cell tolerance. F1 beats F0 by **9.0e-4 nats/cell** and F2 by
+4.6e-4 — real improvements on that scale, so the estimator's profile does buy
+likelihood; F2 is worse than F1, i.e. **the carrier offsets do not pay for
+themselves** and the 0.59-bin rotor-3 offset is not confirmed by the fit.
+
+### Dynamics
+
+| arm | `sigma_nu` | `lam` | γ(1) | γ(2) | γ(4) | γ(8) | γ(16) | γ log-mean | low-k check |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|:-:|
+| F0 | 0.5484 | 44.95 | 12.77 | 0.2287 | 0.5722 | 2.213 | 5.428 | 1.861 | `fail_above_floor` |
+| F1 | 0.5315 | 44.65 | 22.18 | 0.2346 | 0.5951 | 2.272 | 6.047 | 2.278 | `fail_above_floor` |
+| F2 | 0.5301 | 44.64 | 13.68 | 0.2477 | 0.6313 | 2.278 | 6.288 | 2.662 | `fail_above_floor` |
+| per-rotor log-mean | 0.7423 | 0.0608 | 0.00137 | 0.00368 | 0.02368 | 0.685 | 1.188 | 3.507 | — |
+
+Ratios to the per-rotor log-mean: `sigma_nu` 0.74 / 0.72 / 0.71, `lam` **739 /
+734 / 734**, γ log-mean 0.53 / 0.65 / 0.76. **The dynamics are not restored by
+any arm.** All three keep γ(k = 1) at 12.8–22.2 Hz against a per-rotor log-mean
+of 0.0014 Hz and a window resolution floor of 0.0145 Hz — the `fail_above_floor`
+verdict — and all three sit at `lam ≈ 45` against a per-rotor 0.06. The
+profile prior does not touch that; the k = 1 width is still absorbing the
+mismatch between four frozen label carriers and four real shaft speeds, and F2
+shows that shifting those carriers by the estimator's offsets does not remove it
+(γ(1) 12.77 → 13.68).
+
+### The criterion
+
+Per rotor, median `|profile_db(fit) − profile_db(Motor r)|` over **in-band
+orders k ≤ 48** (n = 48 per rotor) and the fraction inside 3 dB. The threshold
+used here for "harmonic profiles largely restored" is **median ≤ 3 dB AND
+≥ 70 % inside 3 dB, for every rotor**.
+
+| arm | median \|Δ\| (rotor 1/2/3/4) | fraction within 3 dB | verdict |
+|---|---|---|:-:|
+| F0 | 10.96 / 4.30 / 3.88 / 6.56 | 0.17 / 0.42 / 0.40 / 0.21 | **no** |
+| F1 | 9.60 / 3.71 / 3.54 / 6.97 | 0.21 / 0.48 / 0.38 / 0.21 | **no** |
+| F2 | **7.98 / 3.26 / 3.52 / 6.76** | 0.23 / 0.48 / 0.42 / 0.15 | **no** |
+
+Restricted to the k ≤ 48 lines that clear 6 dB over the local floor (n = 8 / 19 /
+22 / 18):
+
+| arm | median \|Δ\| | fraction within 3 dB | verdict |
+|---|---|---|:-:|
+| F0 | 3.10 / 2.25 / 3.17 / 6.56 | 0.50 / 0.63 / 0.45 / 0.17 | no |
+| F1 | 3.68 / 2.13 / 3.40 / 6.77 | 0.50 / 0.68 / 0.41 / 0.17 | no |
+| F2 | 3.74 / 2.19 / 3.20 / 7.07 | 0.50 / 0.68 / 0.41 / 0.17 | no |
+
+**Plainly: "harmonic profiles largely restored" does NOT hold, for F0, F1 or
+F2.** Every arm fails the median on rotors 1 and 4 and fails the 70 % fraction
+on all four. The estimator prior moves the medians in the right direction
+(F0 → F2 takes rotor 1 from 10.96 to 7.98 dB and rotor 2 from 4.30 to 3.26) and
+buys objective, but it moves nothing across the threshold, and it leaves the
+fraction inside 3 dB at 0.15–0.48 against the 0.70 required.
+
+## 5. What this means, and what it does not
+
+1. **The stage-2 remedy is not the binding constraint.** The synthetic study's
+   recommendation (E2-multi as a profile init plus per-order prior widths) was
+   derived at a ≥ 20 dB line SNR. The real support delivers a median 2.6–3.5 dB,
+   E2-multi is the WORST of the three estimators there, and entering it as a
+   1 dB / 3 dB prior improves the objective by 9e-4 nats/cell while leaving the
+   criterion failed. The prior widths are also unsupported at this SNR: the
+   study's 1 dB budget for k ≤ 16 is against a measured real disagreement of
+   4–8 dB.
+2. **The comparison is bounded below by the target's own uncertainty.** 73–91 %
+   of in-band lines are invisible in the four-motor recording, and the four
+   single-motor fits' profiles at those orders are prior-driven too. On the
+   visible lines the gap is already 2.1–3.7 dB on rotors 1–3 for every arm,
+   which is the size of the difference between two recordings of the same motor
+   at different mounting — not obviously a rig-fit failure at all. **Rotor 4 is
+   the exception: 6.6–7.1 dB on visible lines in every arm**, and it is also the
+   rotor whose single-motor fit has the largest half-window drift (2.17 Hz at
+   order 63).
+3. **The live defect is the dynamics, not the profile.** `lam` 734× the
+   per-rotor value and γ(k = 1) at 12.8–22.2 Hz, four orders of magnitude over
+   the per-rotor widths and 880–1500× the window resolution, survive every arm.
+   That is the frozen-label-carrier absorption named in the R3 findings, and
+   this workstream now shows it is **not** fixed by refining the carriers within
+   ±0.05 rev/s (F2) nor by pinning the profile (F1). The next thing to test is
+   freeing the four bench carriers as sites rather than offsetting them by a
+   pre-measured constant.

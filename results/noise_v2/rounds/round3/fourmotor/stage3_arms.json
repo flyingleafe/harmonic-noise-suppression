@@ -1,0 +1,942 @@
+{
+ "schema": "noise-v2-fourmotor/1",
+ "stage": "3",
+ "git_sha": "34f117e3",
+ "criterion": {
+  "k_max": 48,
+  "median_abs_db": 3.0,
+  "frac_within_3db": 0.7,
+  "note": "in-band orders only; target is the four bench_dregon_Motor{r}_70 R3 fits"
+ },
+ "rotor_dynamics": {
+  "sigma_nu": [
+   0.8477534487604035,
+   0.7786182704015061,
+   0.589565326209629,
+   0.780250537709747
+  ],
+  "lam": [
+   0.35825025610103456,
+   0.01353401006160542,
+   0.3553001449048951,
+   0.007932601893033603
+  ],
+  "sigma_nu_log_mean": 0.7423180851884967,
+  "lam_log_mean": 0.06080034059031183,
+  "gamma_log_mean_per_k": {
+   "1": 0.0013699112581023545,
+   "2": 0.0036829432350375195,
+   "4": 0.023682965616885505,
+   "8": 0.6850551161808129,
+   "16": 1.187762395993241
+  },
+  "gamma_log_mean_all": 3.506813223146807
+ },
+ "arms": [
+  {
+   "arm": "F0",
+   "fit": "results/noise_v2/rounds/round3/fits/bench_dregon_allMotors_70__bench.json",
+   "support": "bench_dregon_allMotors_70",
+   "k_max": 114,
+   "converged": false,
+   "which_converged": "none",
+   "grad_norm": 321.073097471619,
+   "wall_s": 3575.601790904999,
+   "whittle_nats": -16100518.76581397,
+   "n_cells": 1973192,
+   "nats_per_cell": -8.159631077874819,
+   "sigma_nu": 0.5484065519151771,
+   "lam": 44.95085782371664,
+   "carrier_rev_s": [
+    64.63627746589795,
+    67.65962789442041,
+    68.73640855567362,
+    69.56523874692691
+   ],
+   "gamma_ladder": {
+    "1": 12.771468059671411,
+    "2": 0.22866914313115633,
+    "4": 0.5721686333679998,
+    "8": 2.2130634946922916,
+    "16": 5.427659373703094
+   },
+   "gamma_log_mean": 1.860637071099068,
+   "gamma_low_order_check": {
+    "verdict": "fail_above_floor",
+    "passed": false,
+    "k_checked": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "gamma_hz": [
+     [
+      0.1882767482792579,
+      0.0018681594800863822,
+      0.0011172721021642722,
+      0.0007798961565986025
+     ],
+     [
+      0.01974419958068944,
+      0.024082074068166,
+      0.023004313684337876,
+      0.0937073089977524
+     ],
+     [
+      0.24234111649988557,
+      0.22866914313115633,
+      0.7357742913598756,
+      0.5721686333679998
+     ],
+     [
+      12.771468059671411,
+      0.0001211462441574988,
+      0.0015430371501937389,
+      0.006112925055720384
+     ]
+    ],
+    "resolution_hz": 0.014534883720930232,
+    "gamma_over_resolution": [
+     [
+      12.953440281612943,
+      0.1285293722299431,
+      0.07686832062890192,
+      0.05365685557398386
+     ],
+     [
+      1.3584009311514336,
+      1.6568466958898207,
+      1.582696781482446,
+      6.447062859045365
+     ],
+     [
+      16.673068815192128,
+      15.732437047423556,
+      50.62127124555944,
+      39.36520197571839
+     ],
+     [
+      878.6770025053931,
+      0.008334861598035918,
+      0.10616095593332923,
+      0.4205692438335624
+     ]
+    ],
+    "max_over_resolution": 878.6770025053931,
+    "floor_factor": 3.0,
+    "k4_over_k1": 4.7460677559905555,
+    "ramp_ratio_flagged_at": 8.0,
+    "rule": "pass = every gamma_rk at k <= 4 within floor_factor of 1 / (2 T); above the floor, fail_k2_ramp = gamma_4 / gamma_1 >= ramp threshold (the shaft absorbed), otherwise fail_above_floor"
+   },
+   "profile_init": null,
+   "dynamics_ratio": {
+    "sigma_nu": 0.738775685056791,
+    "lam": 739.3191779402514,
+    "gamma_log_mean": 0.5305777504253398,
+    "gamma_per_k": {
+     "1": 9322.84334779675,
+     "2": 62.088696061270355,
+     "4": 24.159501078701666,
+     "8": 3.2304896969898365,
+     "16": 4.569650792121878
+    }
+   },
+   "criterion": {
+    "k_max": 48,
+    "median_db": 3.0,
+    "fraction": 0.7,
+    "per_rotor": [
+     {
+      "rotor": 1,
+      "n": 48,
+      "median_abs_db": 10.959878119778885,
+      "frac_within_3db": 0.16666666666666666,
+      "passes": false
+     },
+     {
+      "rotor": 2,
+      "n": 48,
+      "median_abs_db": 4.297432727267193,
+      "frac_within_3db": 0.4166666666666667,
+      "passes": false
+     },
+     {
+      "rotor": 3,
+      "n": 48,
+      "median_abs_db": 3.8767832050144513,
+      "frac_within_3db": 0.3958333333333333,
+      "passes": false
+     },
+     {
+      "rotor": 4,
+      "n": 48,
+      "median_abs_db": 6.558517823485101,
+      "frac_within_3db": 0.20833333333333334,
+      "passes": false
+     }
+    ],
+    "verdict": false
+   },
+   "criterion_snr6": {
+    "k_max": 48,
+    "median_db": 3.0,
+    "fraction": 0.7,
+    "per_rotor": [
+     {
+      "rotor": 1,
+      "n": 8,
+      "median_abs_db": 3.10086528938011,
+      "frac_within_3db": 0.5,
+      "passes": false
+     },
+     {
+      "rotor": 2,
+      "n": 19,
+      "median_abs_db": 2.2461178518469396,
+      "frac_within_3db": 0.631578947368421,
+      "passes": false
+     },
+     {
+      "rotor": 3,
+      "n": 22,
+      "median_abs_db": 3.1669801418377013,
+      "frac_within_3db": 0.5,
+      "passes": false
+     },
+     {
+      "rotor": 4,
+      "n": 18,
+      "median_abs_db": 6.558517823485101,
+      "frac_within_3db": 0.16666666666666666,
+      "passes": false
+     }
+    ],
+    "verdict": false
+   },
+   "bands": [
+    {
+     "band": "k<=16",
+     "per_rotor": [
+      {
+       "rotor": 1,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 13.850933894105378,
+       "frac_within_3db": 0.125
+      },
+      {
+       "rotor": 2,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 4.903986492208205,
+       "frac_within_3db": 0.375
+      },
+      {
+       "rotor": 3,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 4.350873160964145,
+       "frac_within_3db": 0.4375
+      },
+      {
+       "rotor": 4,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 5.496744392991118,
+       "frac_within_3db": 0.25
+      }
+     ]
+    },
+    {
+     "band": "k17-48",
+     "per_rotor": [
+      {
+       "rotor": 1,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 10.383226399468722,
+       "frac_within_3db": 0.1875
+      },
+      {
+       "rotor": 2,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 3.735741282012107,
+       "frac_within_3db": 0.4375
+      },
+      {
+       "rotor": 3,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 3.616017368971942,
+       "frac_within_3db": 0.375
+      },
+      {
+       "rotor": 4,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 7.287560024872846,
+       "frac_within_3db": 0.1875
+      }
+     ]
+    },
+    {
+     "band": "k49+",
+     "per_rotor": [
+      {
+       "rotor": 1,
+       "n": 63,
+       "n_in_band": 63,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 9.759128911887629,
+       "frac_within_3db": 0.14285714285714285
+      },
+      {
+       "rotor": 2,
+       "n": 58,
+       "n_in_band": 58,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 5.990083116493761,
+       "frac_within_3db": 0.2413793103448276
+      },
+      {
+       "rotor": 3,
+       "n": 56,
+       "n_in_band": 56,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 6.61583069463914,
+       "frac_within_3db": 0.23214285714285715
+      },
+      {
+       "rotor": 4,
+       "n": 55,
+       "n_in_band": 55,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 5.203292192705277,
+       "frac_within_3db": 0.3090909090909091
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "arm": "F1",
+   "fit": "results/noise_v2/rounds/round3/fourmotor/fits/F1/bench_dregon_allMotors_70__bench.json",
+   "support": "bench_dregon_allMotors_70",
+   "k_max": 114,
+   "converged": false,
+   "which_converged": "none",
+   "grad_norm": 726.040606183059,
+   "wall_s": 3595.0571665763855,
+   "whittle_nats": -16102293.95826983,
+   "n_cells": 1973192,
+   "nats_per_cell": -8.160530733081135,
+   "sigma_nu": 0.5314992659614135,
+   "lam": 44.64565629577871,
+   "carrier_rev_s": [
+    64.63627746589795,
+    67.65962789442041,
+    68.73640855567362,
+    69.56523874692691
+   ],
+   "gamma_ladder": {
+    "1": 22.18070829391626,
+    "2": 0.2346085608396993,
+    "4": 0.5950533212606567,
+    "8": 2.2722200683987044,
+    "16": 6.046736736509825
+   },
+   "gamma_log_mean": 2.2782459638412886,
+   "gamma_low_order_check": {
+    "verdict": "fail_above_floor",
+    "passed": false,
+    "k_checked": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "gamma_hz": [
+     [
+      22.18070829391626,
+      0.0018817670548188596,
+      0.003384675231827994,
+      0.0026654180309174692
+     ],
+     [
+      0.026357319450576056,
+      0.026880554260914312,
+      0.04680998807452567,
+      0.1149286041866443
+     ],
+     [
+      0.29326250638706813,
+      0.2346085608396993,
+      0.7697688668388981,
+      0.5950533212606567
+     ],
+     [
+      12.991712735124539,
+      0.0017999008564706848,
+      0.006792064887209495,
+      0.015271164697777263
+     ]
+    ],
+    "resolution_hz": 0.014534883720930232,
+    "gamma_over_resolution": [
+     [
+      1526.0327306214388,
+      0.12946557337153755,
+      0.232865655949766,
+      0.18338076052712188
+     ],
+     [
+      1.8133835781996326,
+      1.8493821331509046,
+      3.220527179527366,
+      7.907087968041128
+     ],
+     [
+      20.176460439430286,
+      16.141068985771312,
+      52.96009803851619,
+      40.939668502733184
+     ],
+     [
+      893.8298361765683,
+      0.12383317892518311,
+      0.46729406424001324,
+      1.0506561312070757
+     ]
+    ],
+    "max_over_resolution": 1526.0327306214388,
+    "floor_factor": 3.0,
+    "k4_over_k1": 4.36040563237672,
+    "ramp_ratio_flagged_at": 8.0,
+    "rule": "pass = every gamma_rk at k <= 4 within floor_factor of 1 / (2 T); above the floor, fail_k2_ramp = gamma_4 / gamma_1 >= ramp threshold (the shaft absorbed), otherwise fail_above_floor"
+   },
+   "profile_init": {
+    "source": "results/noise_v2/rounds/round3/fourmotor/profile_init_e2multi.npz",
+    "n_centres": 139,
+    "n_widths": 139,
+    "carrier_offset_rev_s": [
+     0.00545,
+     0.0009000000000000008,
+     0.017249999999999998,
+     0.0109
+    ]
+   },
+   "dynamics_ratio": {
+    "sigma_nu": 0.7159993492903381,
+    "lam": 734.2994440872051,
+    "gamma_log_mean": 0.6496627618498956,
+    "gamma_per_k": {
+     "1": 16191.346820991674,
+     "2": 63.701378453993264,
+     "4": 25.125794247507372,
+     "8": 3.3168427105053198,
+     "16": 5.090863927758354
+    }
+   },
+   "criterion": {
+    "k_max": 48,
+    "median_db": 3.0,
+    "fraction": 0.7,
+    "per_rotor": [
+     {
+      "rotor": 1,
+      "n": 48,
+      "median_abs_db": 9.601112775668064,
+      "frac_within_3db": 0.20833333333333334,
+      "passes": false
+     },
+     {
+      "rotor": 2,
+      "n": 48,
+      "median_abs_db": 3.7069358920803204,
+      "frac_within_3db": 0.4791666666666667,
+      "passes": false
+     },
+     {
+      "rotor": 3,
+      "n": 48,
+      "median_abs_db": 3.5418906559777703,
+      "frac_within_3db": 0.375,
+      "passes": false
+     },
+     {
+      "rotor": 4,
+      "n": 48,
+      "median_abs_db": 6.9745172264711925,
+      "frac_within_3db": 0.20833333333333334,
+      "passes": false
+     }
+    ],
+    "verdict": false
+   },
+   "criterion_snr6": {
+    "k_max": 48,
+    "median_db": 3.0,
+    "fraction": 0.7,
+    "per_rotor": [
+     {
+      "rotor": 1,
+      "n": 8,
+      "median_abs_db": 3.6825694280036636,
+      "frac_within_3db": 0.5,
+      "passes": false
+     },
+     {
+      "rotor": 2,
+      "n": 19,
+      "median_abs_db": 2.1333369110548404,
+      "frac_within_3db": 0.6842105263157895,
+      "passes": false
+     },
+     {
+      "rotor": 3,
+      "n": 22,
+      "median_abs_db": 3.40200035852148,
+      "frac_within_3db": 0.4090909090909091,
+      "passes": false
+     },
+     {
+      "rotor": 4,
+      "n": 18,
+      "median_abs_db": 6.768094615084738,
+      "frac_within_3db": 0.16666666666666666,
+      "passes": false
+     }
+    ],
+    "verdict": false
+   },
+   "bands": [
+    {
+     "band": "k<=16",
+     "per_rotor": [
+      {
+       "rotor": 1,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 13.874686150006731,
+       "frac_within_3db": 0.1875
+      },
+      {
+       "rotor": 2,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 4.0392995349739955,
+       "frac_within_3db": 0.4375
+      },
+      {
+       "rotor": 3,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 4.380014326849796,
+       "frac_within_3db": 0.4375
+      },
+      {
+       "rotor": 4,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 4.715483085362834,
+       "frac_within_3db": 0.25
+      }
+     ]
+    },
+    {
+     "band": "k17-48",
+     "per_rotor": [
+      {
+       "rotor": 1,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 9.0482895047565,
+       "frac_within_3db": 0.21875
+      },
+      {
+       "rotor": 2,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 3.0889783523250927,
+       "frac_within_3db": 0.5
+      },
+      {
+       "rotor": 3,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 3.4147205991689695,
+       "frac_within_3db": 0.34375
+      },
+      {
+       "rotor": 4,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 8.644595391268957,
+       "frac_within_3db": 0.1875
+      }
+     ]
+    },
+    {
+     "band": "k49+",
+     "per_rotor": [
+      {
+       "rotor": 1,
+       "n": 63,
+       "n_in_band": 63,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 8.551207543424496,
+       "frac_within_3db": 0.15873015873015872
+      },
+      {
+       "rotor": 2,
+       "n": 58,
+       "n_in_band": 58,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 5.517194700396189,
+       "frac_within_3db": 0.1724137931034483
+      },
+      {
+       "rotor": 3,
+       "n": 56,
+       "n_in_band": 56,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 5.079513347831693,
+       "frac_within_3db": 0.35714285714285715
+      },
+      {
+       "rotor": 4,
+       "n": 55,
+       "n_in_band": 55,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 7.426746922304474,
+       "frac_within_3db": 0.2727272727272727
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "arm": "F2",
+   "fit": "results/noise_v2/rounds/round3/fourmotor/fits/F2/bench_dregon_allMotors_70__bench.json",
+   "support": "bench_dregon_allMotors_70",
+   "k_max": 114,
+   "converged": false,
+   "which_converged": "none",
+   "grad_norm": 235.88439582722654,
+   "wall_s": 4521.312763214111,
+   "whittle_nats": -16101427.2934989,
+   "n_cells": 1973192,
+   "nats_per_cell": -8.160091513394997,
+   "sigma_nu": 0.530118878479184,
+   "lam": 44.64413436086334,
+   "carrier_rev_s": [
+    64.64172746589794,
+    67.66052789442041,
+    68.75365855567362,
+    69.57613874692692
+   ],
+   "gamma_ladder": {
+    "1": 13.681965848537107,
+    "2": 0.2476707570678027,
+    "4": 0.6313242797953464,
+    "8": 2.278024827718874,
+    "16": 6.28746283841637
+   },
+   "gamma_log_mean": 2.6615242595240596,
+   "gamma_low_order_check": {
+    "verdict": "fail_above_floor",
+    "passed": false,
+    "k_checked": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "gamma_hz": [
+     [
+      0.240865652299995,
+      0.0019152422010363592,
+      0.0035903335570640622,
+      0.0026444142514021793
+     ],
+     [
+      0.03727778037645176,
+      0.028377180408162544,
+      0.046617864623461215,
+      0.11308281630563075
+     ],
+     [
+      0.26322270674389686,
+      0.2476707570678027,
+      0.7952744480954761,
+      0.6313242797953464
+     ],
+     [
+      13.681965848537107,
+      0.0023551870486569117,
+      0.009752109153662624,
+      0.013096118556812997
+     ]
+    ],
+    "resolution_hz": 0.014534883720930232,
+    "gamma_over_resolution": [
+     [
+      16.571556878239655,
+      0.1317686634313015,
+      0.2470149487260075,
+      0.18193570049646995
+     ],
+     [
+      2.5647112898998814,
+      1.952350012081583,
+      3.207309086094132,
+      7.780097761827395
+     ],
+     [
+      18.109722223980103,
+      17.039748086264826,
+      54.71488202896876,
+      43.43511044991983
+     ],
+     [
+      941.319250379353,
+      0.16203686894759553,
+      0.6709451097719886,
+      0.9010129567087342
+     ]
+    ],
+    "max_over_resolution": 941.319250379353,
+    "floor_factor": 3.0,
+    "k4_over_k1": 3.0335179606633647,
+    "ramp_ratio_flagged_at": 8.0,
+    "rule": "pass = every gamma_rk at k <= 4 within floor_factor of 1 / (2 T); above the floor, fail_k2_ramp = gamma_4 / gamma_1 >= ramp threshold (the shaft absorbed), otherwise fail_above_floor"
+   },
+   "profile_init": {
+    "source": "results/noise_v2/rounds/round3/fourmotor/profile_init_e2multi.npz",
+    "n_centres": 139,
+    "n_widths": 139,
+    "carrier_offset_rev_s": [
+     0.00545,
+     0.0009000000000000008,
+     0.017249999999999998,
+     0.0109
+    ]
+   },
+   "dynamics_ratio": {
+    "sigma_nu": 0.7141397859713616,
+    "lam": 734.274412403162,
+    "gamma_log_mean": 0.7589580882028741,
+    "gamma_per_k": {
+     "1": 9987.483326102312,
+     "2": 67.2480516972398,
+     "4": 26.657315220067886,
+     "8": 3.3253161299179523,
+     "16": 5.293535861739934
+    }
+   },
+   "criterion": {
+    "k_max": 48,
+    "median_db": 3.0,
+    "fraction": 0.7,
+    "per_rotor": [
+     {
+      "rotor": 1,
+      "n": 48,
+      "median_abs_db": 7.984481125643544,
+      "frac_within_3db": 0.22916666666666666,
+      "passes": false
+     },
+     {
+      "rotor": 2,
+      "n": 48,
+      "median_abs_db": 3.25762404606904,
+      "frac_within_3db": 0.4791666666666667,
+      "passes": false
+     },
+     {
+      "rotor": 3,
+      "n": 48,
+      "median_abs_db": 3.51545556163331,
+      "frac_within_3db": 0.4166666666666667,
+      "passes": false
+     },
+     {
+      "rotor": 4,
+      "n": 48,
+      "median_abs_db": 6.755383291160637,
+      "frac_within_3db": 0.14583333333333334,
+      "passes": false
+     }
+    ],
+    "verdict": false
+   },
+   "criterion_snr6": {
+    "k_max": 48,
+    "median_db": 3.0,
+    "fraction": 0.7,
+    "per_rotor": [
+     {
+      "rotor": 1,
+      "n": 8,
+      "median_abs_db": 3.7358324044773106,
+      "frac_within_3db": 0.5,
+      "passes": false
+     },
+     {
+      "rotor": 2,
+      "n": 19,
+      "median_abs_db": 2.194054650316005,
+      "frac_within_3db": 0.6842105263157895,
+      "passes": false
+     },
+     {
+      "rotor": 3,
+      "n": 22,
+      "median_abs_db": 3.199957667016278,
+      "frac_within_3db": 0.4090909090909091,
+      "passes": false
+     },
+     {
+      "rotor": 4,
+      "n": 18,
+      "median_abs_db": 7.073294568669407,
+      "frac_within_3db": 0.16666666666666666,
+      "passes": false
+     }
+    ],
+    "verdict": false
+   },
+   "bands": [
+    {
+     "band": "k<=16",
+     "per_rotor": [
+      {
+       "rotor": 1,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 13.77419304781088,
+       "frac_within_3db": 0.1875
+      },
+      {
+       "rotor": 2,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 4.2800946881472655,
+       "frac_within_3db": 0.4375
+      },
+      {
+       "rotor": 3,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 4.33833742504914,
+       "frac_within_3db": 0.4375
+      },
+      {
+       "rotor": 4,
+       "n": 16,
+       "n_in_band": 16,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 4.703110972416233,
+       "frac_within_3db": 0.25
+      }
+     ]
+    },
+    {
+     "band": "k17-48",
+     "per_rotor": [
+      {
+       "rotor": 1,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 7.490664658255088,
+       "frac_within_3db": 0.25
+      },
+      {
+       "rotor": 2,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 2.7669785665777766,
+       "frac_within_3db": 0.5
+      },
+      {
+       "rotor": 3,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 3.3227988181322843,
+       "frac_within_3db": 0.40625
+      },
+      {
+       "rotor": 4,
+       "n": 32,
+       "n_in_band": 32,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 8.048819590572894,
+       "frac_within_3db": 0.09375
+      }
+     ]
+    },
+    {
+     "band": "k49+",
+     "per_rotor": [
+      {
+       "rotor": 1,
+       "n": 63,
+       "n_in_band": 63,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 6.185050573175417,
+       "frac_within_3db": 0.23809523809523808
+      },
+      {
+       "rotor": 2,
+       "n": 58,
+       "n_in_band": 58,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 5.204557640506593,
+       "frac_within_3db": 0.15517241379310345
+      },
+      {
+       "rotor": 3,
+       "n": 56,
+       "n_in_band": 56,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 4.260565670852664,
+       "frac_within_3db": 0.30357142857142855
+      },
+      {
+       "rotor": 4,
+       "n": 55,
+       "n_in_band": 55,
+       "frac_collapsed": 0.0,
+       "median_abs_db": 7.38399038240064,
+       "frac_within_3db": 0.21818181818181817
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

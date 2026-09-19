@@ -1,0 +1,17 @@
+{
+ "n_units": 4,
+ "n_converged": 0,
+ "not_converged": [
+  "bench_dregon_allMotors_70",
+  "bench_dregon_allMotors_70",
+  "bench_dregon_allMotors_70",
+  "bench_dregon_allMotors_70"
+ ],
+ "slowest_s": 4494.846294879913,
+ "fits": [
+  "results/noise_v2/rounds/round3/fourmotor/fits/F1/restarts/bench_dregon_allMotors_70__bench__s0.json",
+  "results/noise_v2/rounds/round3/fourmotor/fits/F1/restarts/bench_dregon_allMotors_70__bench__s1.json",
+  "results/noise_v2/rounds/round3/fourmotor/fits/F1/restarts/bench_dregon_allMotors_70__bench__s2.json",
+  "results/noise_v2/rounds/round3/fourmotor/fits/F1/restarts/bench_dregon_allMotors_70__bench__s3.json"
+ ]
+}

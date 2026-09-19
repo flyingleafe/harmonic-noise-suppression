@@ -1,0 +1,35 @@
+  adam     0  loss -7.00657e+06
+  adam     0  loss -6.98236e+06
+  adam     0  loss -7.37993e+06
+  adam     0  loss -6.69999e+06
+  adam   500  loss -1.59454e+07
+  adam   500  loss -1.59447e+07
+  adam   500  loss -1.59396e+07
+  adam   500  loss -1.59509e+07
+  adam  1000  loss -1.60495e+07
+  adam  1000  loss -1.60503e+07
+  adam  1000  loss -1.60489e+07
+  adam  1000  loss -1.60564e+07
+('bench_dregon_motor_allMotors_70__s1', 'ok')
+('bench_dregon_motor_allMotors_70__s0', 'ok')
+('bench_dregon_motor_allMotors_70__s3', 'ok')
+('bench_dregon_motor_allMotors_70__s2', 'ok')
+{
+ "n_units": 4,
+ "n_converged": 0,
+ "not_converged": [
+  "bench_dregon_allMotors_70",
+  "bench_dregon_allMotors_70",
+  "bench_dregon_allMotors_70",
+  "bench_dregon_allMotors_70"
+ ],
+ "slowest_s": 4525.079734802246,
+ "fits": [
+  "results/noise_v2/rounds/round3/fourmotor/fits/F2/restarts/bench_dregon_allMotors_70__bench__s0.json",
+  "results/noise_v2/rounds/round3/fourmotor/fits/F2/restarts/bench_dregon_allMotors_70__bench__s1.json",
+  "results/noise_v2/rounds/round3/fourmotor/fits/F2/restarts/bench_dregon_allMotors_70__bench__s2.json",
+  "results/noise_v2/rounds/round3/fourmotor/fits/F2/restarts/bench_dregon_allMotors_70__bench__s3.json"
+ ]
+}
+# reduced bench_dregon_allMotors_70: {"support": "bench_dregon_allMotors_70", "path": "results/noise_v2/rounds/round3/fourmotor/fits/F2/bench_dregon_allMotors_70__bench.json", "n_restarts": 4, "selected_seed": 3, "best_minus_median_per_cell": 0.00027349130408081966, "best_minus_worst_per_cell": 0.000336612655130006}
+# wrote results/noise_v2/rounds/round3/fourmotor/fits/F2/findings.md
