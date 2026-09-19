@@ -1,0 +1,22 @@
+{
+ "schema": "noise-v2-reduce-check/1",
+ "rule": "scripts/noise_v2_fit.py:reduce_restarts re-run in the main checkout over the fetched restarts/ payloads, then compared byte-for-byte with the job's own reduction; the job's payloads are what is committed",
+ "job": "nv2-r3-bench-9ebc3b",
+ "n_supports": 21,
+ "byte_identical": 16,
+ "differing": [
+  "bench_dregon_Motor1_50__bench.json",
+  "bench_dregon_Motor1_70__bench.json",
+  "bench_dregon_Motor1_90__bench.json",
+  "bench_dregon_Motor3_80__bench.json",
+  "bench_dregon_Motor4_70__bench.json"
+ ],
+ "differing_fields": [
+  "restarts.params.gamma_hz.log_mean.values",
+  "restarts.params.gamma_hz.log_mean.min",
+  "restarts.params.gamma_hz.log_mean.median",
+  "restarts.params.gamma_hz.log_mean.max"
+ ],
+ "max_relative_difference": 2.2e-16,
+ "note": "last-ULP only: exp(mean(log gamma)) evaluated on this CPU against the job node's. Every selected restart, fitted parameter, objective, convergence flag, best-minus-worst spread and gamma ladder VALUE reproduced exactly."
+}
