@@ -33,12 +33,14 @@ import copy
 import matplotlib.pyplot as plt
 import numpy as np
 import tdseries as td
+import torch
 import torch.nn.functional as F
 import yaml
 from omegaconf import OmegaConf
 
 import zoo
 from data_processing.online_mixing import build_online_mix_pipeline
+from metrics._common import get_array
 from metrics.salience_layers import LayerPeakRPSMetric, peak_readout
 
 OUT = Path("results/synthetic_probe")
@@ -95,6 +97,16 @@ def sample_clips(path: str, n: int) -> list[tuple[np.ndarray, np.ndarray, dict]]
 def score(
     fm: Any, metric: LayerPeakRPSMetric, audio: np.ndarray, rps: np.ndarray, sr: int, mic: int
 ) -> tuple[np.ndarray, np.ndarray, float]:
+    """One microphone's PIT-aligned ``(R, F)`` prediction, label and MAE.
+
+    Two model kinds, one readout contract. A SALIENCE port (the frozen HPPNet
+    scorer) is read by ``LayerPeakRPSMetric``'s peak + parabola; a rate
+    REGRESSOR (e.g. the SCv2 family) emits ``rps_pred`` on its own frame grid
+    and is taken as is — the same split `experiments.rps_bench.Readout` makes.
+    In both cases the label is resampled onto the model's frames by the
+    metric's own ``F.interpolate(..., align_corners=False)``, and the rotor
+    assignment is the MAE-optimal permutation over the whole window.
+    """
     x = audio[mic].astype(np.float32)
     inp = td.Frame(
         {
@@ -104,7 +116,7 @@ def score(
         }
     )
     # The rps label lives on the STFT grid; interpolate onto the model's frames.
-    tgt_rps = rps if rps.shape[-1] > 8 else rps
+    tgt_rps = np.asarray(rps)
     tgt = td.Frame(
         {
             "rps": td.Series(
@@ -114,9 +126,20 @@ def score(
             )
         }
     )
-    layers, rps_grid = metric._unpack(fm(inp), tgt)
-    pred = peak_readout(F.logsigmoid(layers), metric._freqs)[0].numpy()
-    truth = rps_grid[0].numpy()
+    out = fm(inp)
+    if "rps_pred" in out:
+        pred_t = torch.as_tensor(get_array(out, "rps_pred")).double()  # (R, T)
+        label = torch.as_tensor(tgt_rps.astype(np.float32)).float().unsqueeze(0)
+        truth = (
+            F.interpolate(label, size=int(pred_t.shape[-1]), mode="linear", align_corners=False)[0]
+            .double()
+            .numpy()
+        )
+        pred = pred_t.numpy()
+    else:
+        layers, rps_grid = metric._unpack(out, tgt)
+        pred = peak_readout(F.logsigmoid(layers), metric._freqs)[0].numpy()
+        truth = rps_grid[0].numpy()
     from itertools import permutations
 
     perm = min(
