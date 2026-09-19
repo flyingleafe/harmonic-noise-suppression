@@ -20,16 +20,24 @@ arm with its Lorentzian pedestal muted (V7, `coherence_k_half = 0`).
 
 | field | value |
 | --- | --- |
-| job | `nv2-r3-humps-44954e` |
+| job | `nv2-r3-humps-671f38` (placed on colab at submit) |
 | backend | `colab`, `--gpus 1 --time 30m` |
-| code SHA | `dc94a0376ec2745d474a03e0d0976984c5b22057` (`dc94a037`, pushed to `origin/main`) |
+| code SHA | `09f3fda5fcff9e91e8ff30bcbdc0c1e509c23a60` (`09f3fda5`, pushed to `origin/main`) |
 | submitted | 2026-09-19, via `omnirun --daemon localhost:18787` (ssh tunnel) |
-| status at submit | `queued` — "no slot free right now"; any later `omnirun ps/status/tick` retries placement |
-| submitted from | detached worktree `.worktrees/submit-DregonHumps` at `dc94a037` |
+| submitted from | detached worktree `.worktrees/submit-DregonHumps` at `09f3fda5` |
 | fit scored | `results/noise_v2/rounds/round3/fits/dregon_room2_floor__flight_floor_lowk.json` (`converged` **False**) |
 | windows | `free-flight`, `hovering`, `updown` (frozen DREGON room-2 cruise supports) |
-| seed | 2001, 8 mics, 17 arms × 3 windows |
+| seed | 2001, 8 mics, 21 arms × 3 windows |
 | writes | `results/noise_v2/rounds/round3/dregon_humps/dregon_humps.json` (+ `findings.md`) |
+| superseded | `nv2-r3-humps-44954e` at `dc94a037`, CANCELLED while still queued |
+
+`nv2-r3-humps-44954e` was cancelled before it ever ran: the first cut solved the
+level match on the RAW excess in the 64 Hz hump band, which is two thirds
+floor-curvature bias, and it compared widths only at that match, where every
+width gets a different comb shift. `09f3fda5` matches on null-subtracted
+carrier-locked power over k = 1..8 at B = 16 Hz and adds the width sweep at a
+FIXED +21 dB, so width is also compared at equal comb energy. No number from the
+cancelled job exists.
 
 ## The command
 
@@ -51,11 +59,11 @@ derives bucket and endpoint from `R2_ACCOUNT_ID`.
 ## Harvest
 
 ```
-omnirun --daemon localhost:18787 status nv2-r3-humps-44954e
-omnirun --daemon localhost:18787 logs   nv2-r3-humps-44954e | tail -40
+omnirun --daemon localhost:18787 status nv2-r3-humps-671f38
+omnirun --daemon localhost:18787 logs   nv2-r3-humps-671f38 | tail -40
 set -a; . ./.env; set +a
 aws s3 sync --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  s3://omnirun-artifacts/nv2-r3-humps-44954e/outputs/results/ /tmp/r3humps_pull/
+  s3://omnirun-artifacts/nv2-r3-humps-671f38/outputs/results/ /tmp/r3humps_pull/
 ```
 
 Sync into a SCRATCH dir. The harvested `dregon_humps.json` is the PROBE pass;
@@ -65,7 +73,7 @@ it by
 ```
 PYTHONPATH=src python scripts/noise_v2_render_dregon.py --study humps --figures \
   --merge-probe /tmp/r3humps_pull/noise_v2/rounds/round3/dregon_humps/dregon_humps.json \
-  --job nv2-r3-humps-44954e --out results/noise_v2/rounds/round3/dregon_humps
+  --job nv2-r3-humps-671f38 --out results/noise_v2/rounds/round3/dregon_humps
 ```
 
 `--merge-probe` compares the mic-0 band level of every shared arm first and dies
