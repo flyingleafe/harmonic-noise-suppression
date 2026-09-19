@@ -271,3 +271,63 @@ value), and because neither failure is the degeneracy the check exists to catch.
   restart, fitted parameter, objective, convergence flag, ladder VALUE and
   `best_minus_worst_per_cell` reproduced exactly. Recorded in
   `restarts/reduce.json`; the COMMITTED payloads are the job's own.
+
+## The DREGON floor refit, mode `flight_floor_lowk`
+
+Job `nv2-r3-dregon-floor-lowk-c3b27b` (uni-cpu, 16 cpus, succeeded,
+`R3FLOOR_DONE exit_build=0 exit_floor=0`), code SHA `67318397`, pool
+`--set dregon-floor` (the five disjoint 8 s room-2 fit segments, 2 056 320
+cells), comb + per-line `gamma` frozen from the four R3
+`bench_dregon_Motor{1,2,3,4}_70__bench.json` by the driver's log-mean rule
+(`frozen_from.rule`, `profile_orders` 118 from per-fit 117/118/116/115).
+Committed as `dregon_room2_floor__flight_floor_lowk.json`.
+
+**NOT CONVERGED**: `optimiser.converged` false, `which_converged` `none`,
+`lbfgs_restart_gain_per_cell` 5.98e-3 against the 1e-4 tolerance,
+`grad_norm` 3217.4, wall 4744 s. Every number below is from that fit and
+carries that label.
+
+| quantity | value |
+| --- | --- |
+| `comb_gain_db` | **-6.918 dB** (seed `init_comb_gain_db` +8.361 dB) |
+| `low_order_gain_db`, k = 1..8 | +13.86, +3.67, -0.87, -4.89, +0.65, -9.20, -0.97, -5.70 dB |
+| `diagnostics.floor_level_db` | **-36.693 dB** |
+| `params.floor.floor_mean_db` | -38.273 dB, against `init_floor_mean_db` -38.518 (moved +0.245 dB) |
+| objective | -17 670 197.6 nats over 2 056 320 cells = **-8.5931 nats/cell** |
+| per band | comb -17 495 092.5 over 1 984 920 cells, floor -175 105.1 over 71 400 |
+| `sigma_nu`, `lam` (frozen, not fitted) | 0.7423 rad/s, 0.06080 /s |
+| convergence | NOT converged (see above) |
+
+`lam` is exactly the log-mean of the four frozen bench fits' `lam`
+(0.35825, 0.01353, 0.35530, 0.00793 -> 0.060800), and `sigma_nu` likewise
+(0.8478, 0.7786, 0.5896, 0.7803 -> 0.742318): in flight the rate is a constant
+taken from the frozen mapping, which is the R3 spec's `lam` pin, applied
+automatically and verified here against the committed bench payloads.
+
+**The speed laws are NOT span-pinned on this pool, contrary to the round plan's
+expectation.** `diagnostics.span_pins` records `speed_span` 1.7439 against
+`threshold` 1.5 and `pinned` `[]`: the five room-2 fit segments span a factor
+1.74 in carrier, ABOVE the pin threshold, so the span rule declines to pin. It
+makes no difference to this fit — `flight_floor_lowk` frees only
+`floor`, `mic`, `comb_gain` and `low_order_gain`, so the speed laws carry no
+site in this mode either way and `params.p` is `null` — but the pool is not the
+narrow cruise-only pool the plan assumed, and a FULL flight fit on it would fit
+`b` and `s` rather than pin them.
+
+### Against the R2 floor fits, same pool and same 2 056 320 cells
+
+| fit | law | mode | `comb_gain_db` | floor dB | nats/cell | conv |
+|---|---|---|--:|--:|--:|:-:|
+| `round2/.../flight_floor_only.json` | `/1` | `flight_floor_only` | — (frozen level) | -36.694 | -8.6065 | N |
+| `round2/.../flight_floor_only_v2.json` | `/1` | `flight_floor_only` | -3.232 | -37.827 | -8.6060 | N |
+| `round3/.../flight_floor_lowk.json` | `/2` | `flight_floor_lowk` | -6.918 | -36.693 | **-8.5931** | N |
+
+The R3 refit is 0.0134 nats/cell WORSE than R2's `floor2` on the same data.
+That is a change of model (the `/2` law's frozen per-line widths, log-meaned
+from four bench fits of which one — `Motor1_70` — fails the low-order check)
+together with a change of mode (eight extra free gains), and all three fits are
+non-converged, so it is a comparison of three stopped optimisations, not of
+three optima. What the low-order gains DO say is that the flight recording
+wants the transplanted bench comb re-levelled by +13.9 dB at k = 1 and pulled
+DOWN by 5-9 dB at k = 6 and k = 8, on top of a -6.9 dB shared level: a single
+scalar cannot represent that shape, which is the whole reason the mode exists.
