@@ -535,6 +535,119 @@ def test_render_reproduces_the_per_order_lag_law():
         assert abs(got - want) / want < 0.2, (tau_s, got, want)
 
 
+def _regime_pair(*, k_cap: int, n_mics: int, gap_db: float) -> dict[str, dict]:
+    """A standby/cruise pair of planted fits ``gap_db`` apart in LEVEL.
+
+    Both speed exponents are zero in :func:`_planted_fit`, so within one fit
+    the level does not move with the carrier: the only thing that can change
+    the composed level is the composition itself.
+    """
+    standby = _planted_fit(k_cap=k_cap, f0=35.0, n_mics=n_mics)
+    cruise = _planted_fit(k_cap=k_cap, f0=80.0, n_mics=n_mics)
+    prof = np.asarray(cruise["params"]["profile"]["profile_db"], dtype=np.float64)
+    cruise["params"]["profile"]["profile_db"] = (prof + gap_db).tolist()
+    cruise["params"]["floor"]["floor_mean_db"] = (
+        float(standby["params"]["floor"]["floor_mean_db"]) + gap_db
+    )
+    return dict(standby=standby, cruise=cruise)
+
+
+def _block_level_db(audio: np.ndarray, block: int) -> np.ndarray:
+    n = (audio.shape[-1] // block) * block
+    p = (audio[:, :n] ** 2).reshape(audio.shape[0], -1, block).mean(axis=(0, 2))
+    return 10.0 * np.log10(np.maximum(p, 1e-300))
+
+
+def test_regime_composition_crosses_the_bands_without_a_level_step():
+    """A track that crosses 45 -> 65 rev/s must render CONTINUOUSLY, and must
+    reproduce each regime's own render where that regime is the only one gated
+    in.
+
+    The two planted fits sit 12 dB apart, so the composition's failure modes
+    are visible: a hard switch at either threshold would put a ~12 dB step in
+    the block-level track (the 3 dB criterion below), and summing the two
+    renders from ONE stream (correlated shaft and line phases) would put a
+    bump of up to 3 dB in the middle of the blend, where the measured power
+    must instead be the weight-interpolated power of the two regimes.
+    """
+    from data_processing.rps_gating import CRUISE_MIN_RPS, STANDBY_MAX_RPS
+
+    k_cap, n_mics, seed = 12, 2, 4
+    fits = _regime_pair(k_cap=k_cap, n_mics=n_mics, gap_db=12.0)
+    # 0.5 s of standby, a 2.5 s spool-up 35 -> 80 rev/s, 1 s of cruise
+    hold, ramp = int(0.5 * SR), int(2.5 * SR)
+    track = np.concatenate([np.full(hold, 35.0), np.linspace(35.0, 80.0, ramp), np.full(SR, 80.0)])
+    rps = track[None, :]
+    w = RD.regime_blend_weight(rps, sr=SR)
+    assert float(w.min()) == 0.0 and float(w.max()) == 1.0
+    assert np.all(w[track <= STANDBY_MAX_RPS] == 0.0)
+    assert np.all(w[track >= CRUISE_MIN_RPS] == 1.0)
+
+    out, diag = RD.render_noise_regimes(
+        fits, rps, sr=SR, n_mics=n_mics, seed=seed, return_diagnostics=True
+    )
+    assert out.shape == (n_mics, track.size)
+    assert diag["per_regime"]["standby"]["rendered"] and diag["per_regime"]["cruise"]["rendered"]
+
+    seeds = RD.regime_seeds(seed)
+    alone = {
+        regime: np.asarray(
+            RD.render_noise(fits[regime], rps, sr=SR, n_mics=n_mics, seed=seeds[regime])
+        )
+        for regime in ("standby", "cruise")
+    }
+    # outside the blend the composition IS that regime's own render
+    only_standby = track < STANDBY_MAX_RPS
+    only_cruise = track > CRUISE_MIN_RPS
+    assert only_standby.sum() > SR // 4 and only_cruise.sum() > SR // 2
+    assert np.allclose(out[:, only_standby], alone["standby"][:, only_standby], atol=0.0)
+    assert np.allclose(out[:, only_cruise], alone["cruise"][:, only_cruise], atol=0.0)
+
+    # continuity: no step between adjacent 64 ms blocks anywhere on the track
+    block = 1024
+    levels = _block_level_db(out, block)
+    steps = np.abs(np.diff(levels))
+    assert float(steps.max()) <= 3.0, float(steps.max())
+    # and the 12 dB the two regimes differ by IS crossed, so the test is not
+    # passing because nothing happens
+    assert float(levels.max() - levels.min()) > 8.0
+
+    # the blend is a POWER interpolation of the two regimes' own renders
+    p_std = 10.0 ** (_block_level_db(alone["standby"], block) / 10.0)
+    p_cru = 10.0 ** (_block_level_db(alone["cruise"], block) / 10.0)
+    w_blk = w[: (w.size // block) * block].reshape(-1, block).mean(axis=1)
+    want_db = 10.0 * np.log10((1.0 - w_blk) * p_std + w_blk * p_cru)
+    assert float(np.abs(levels - want_db).max()) < 1.5, float(np.abs(levels - want_db).max())
+
+
+def test_regime_expected_periodogram_is_the_same_power_blend():
+    """The composition's expected ``M`` must be the per-frame weighted sum, and
+    on a single-regime track it must BE that regime's own prediction — the
+    likelihood gate reads this, so a silent fall-back to one fit would move
+    every margin."""
+    k_cap, n_mics = 6, 2
+    fits = _regime_pair(k_cap=k_cap, n_mics=n_mics, gap_db=12.0)
+    n = 4096 + 512
+    cruise_only = np.full((1, n), 80.0)
+    got = RD.expected_periodogram_regimes(
+        fits, cruise_only, n_fft=2048, hop=512, sr=SR, n_mics=n_mics
+    )
+    want = RD.expected_periodogram(
+        fits["cruise"], cruise_only, n_fft=2048, hop=512, sr=SR, n_mics=n_mics
+    )
+    assert np.allclose(got, want, rtol=0.0, atol=0.0)
+
+    mid = np.full((1, n), 0.5 * (STANDBY_MAX := 45.0) + 0.5 * (CRUISE_MIN := 65.0))
+    assert STANDBY_MAX < float(mid[0, 0]) < CRUISE_MIN
+    blend = RD.expected_periodogram_regimes(fits, mid, n_fft=2048, hop=512, sr=SR, n_mics=n_mics)
+    half = 0.5 * (
+        RD.expected_periodogram(fits["standby"], mid, n_fft=2048, hop=512, sr=SR, n_mics=n_mics)
+        + RD.expected_periodogram(fits["cruise"], mid, n_fft=2048, hop=512, sr=SR, n_mics=n_mics)
+    )
+    # the mid-band carrier gets weight exactly 1/2 from the smoothstep
+    assert np.allclose(blend, half, rtol=1e-12, atol=0.0)
+
+
 # ── the objective and the fit ───────────────────────────────────────────────
 
 

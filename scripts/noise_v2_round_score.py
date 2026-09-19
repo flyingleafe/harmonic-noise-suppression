@@ -103,6 +103,10 @@ DREGON_COMB_SUPPORTS: tuple[str, ...] = tuple(f"bench_dregon_Motor{i}_70" for i 
 #: of these that the fits directory carries; ``--fit michaels=PATH`` may name
 #: either.
 MICHAELS_FIT_SUPPORTS: tuple[str, ...] = ("michaels_fly125_all", "michaels_fly125_cruise")
+#: The STANDBY-only fit of the per-regime Michael's candidate, named by
+#: ``--fit michaels_standby=PATH``. There is no DREGON counterpart: DREGON is
+#: scored on cruise windows only.
+MICHAELS_STANDBY_FIT_SUPPORTS: tuple[str, ...] = ("michaels_fly125_standby",)
 #: The comb parameters the DREGON arm carries over from the bench.
 COMB_PARAM_KEYS: tuple[str, ...] = (
     "sigma_nu",
@@ -220,11 +224,22 @@ class Arm:
     source: dict[str, Any]
     fit: dict[str, Any] | None = None
     legacy: dict[str, RE.ModelParams] | None = None  # per regime
+    #: the per-REGIME v2 composition: one fit per regime of
+    #: ``render.REGIME_ORDER``, rendered through ``render_noise_regimes``
+    regime_fits: dict[str, dict[str, Any]] | None = None
     _render: Any = None
     _spectrum: Any = None
+    _render_regimes: Any = None
+    _spectrum_regimes: Any = None
 
     def render(self, rps: np.ndarray, *, regime: str, n_mics: int, seed: int) -> np.ndarray:
         if self.kind == "v2":
+            if self.regime_fits is not None:
+                assert self._render_regimes is not None
+                audio = self._render_regimes(
+                    self.regime_fits, np.atleast_2d(rps), n_mics=int(n_mics), seed=int(seed)
+                )
+                return np.asarray(audio, dtype=np.float64)
             assert self.fit is not None and self._render is not None
             audio = self._render(self.fit, np.atleast_2d(rps), n_mics=int(n_mics), seed=int(seed))
             return np.asarray(audio, dtype=np.float64)
@@ -248,6 +263,18 @@ class Arm:
     ) -> np.ndarray | None:
         """``(M, N, F)`` expected periodogram on the given front end."""
         if self.kind == "v2":
+            if self.regime_fits is not None:
+                if self._spectrum_regimes is None:
+                    return None
+                m = self._spectrum_regimes(
+                    self.regime_fits,
+                    np.asarray(clip.rps, dtype=np.float64),
+                    n_fft=int(n_fft),
+                    hop=int(hop),
+                    sr=int(clip.sr),
+                    n_mics=int(n_mics),
+                )
+                return np.asarray(m, dtype=np.float64)[:n_mics]
             if self._spectrum is None:
                 return None
             assert self.fit is not None
@@ -442,6 +469,82 @@ def v2_arm(
     )
 
 
+def _named_fit(path: Path, *, rig: str, admissible: tuple[str, ...], role: str) -> dict[str, Any]:
+    fit = json.loads(Path(path).read_text())
+    if str(fit.get("schema")) not in FIT_SCHEMAS:
+        die(f"{path}: schema {fit.get('schema')!r} is none of {list(FIT_SCHEMAS)}")
+    named = " or ".join(repr(name) for name in admissible)
+    if str(fit.get("support")) not in admissible:
+        die(
+            f"{path}: carries support {fit.get('support')!r}, but the {rig} arm's {role} fit is "
+            f"defined on {named}"
+        )
+    fit["_path"] = str(path)
+    return fit
+
+
+def v2_regime_arm(
+    rig: str,
+    *,
+    render_mod: Any,
+    cruise_path: Path,
+    standby_path: Path,
+) -> Arm:
+    """The PER-REGIME v2 arm: a standby-only fit and a cruise-only fit, gated.
+
+    Selected by naming both files — ``--fit michaels=<cruise json> --fit
+    michaels_standby=<standby json>``; there is no directory-selection route,
+    because a per-regime candidate is a pair and a directory carries no
+    pairing. Both are rendered on the support's own carrier by
+    ``render.render_noise_regimes``, which uses the standby fit below
+    ``rps_gating.STANDBY_MAX_RPS`` = 45 rev/s (slowest rotor), the cruise fit
+    at or above ``CRUISE_MIN_RPS`` = 65 and the weight-interpolated power of
+    the two in between — the previous generation's own regime thresholds, with
+    its hard per-label export lookup replaced by the carrier itself.
+
+    Only Michael's has a standby fit: DREGON is scored on cruise windows only.
+    """
+    if rig != "michaels":
+        die(f"--fit {rig}_standby: only the michaels arm is defined per regime")
+    for name in ("render_noise_regimes", "expected_periodogram_regimes"):
+        if getattr(render_mod, name, None) is None:
+            die(
+                f"experiments.noise_model.render carries no {name}; this code is older than the "
+                "per-regime composition and cannot score a per-regime candidate"
+            )
+    cruise = _named_fit(
+        cruise_path, rig=rig, admissible=MICHAELS_FIT_SUPPORTS, role="cruise/pooled"
+    )
+    standby = _named_fit(
+        standby_path, rig=rig, admissible=MICHAELS_STANDBY_FIT_SUPPORTS, role="standby"
+    )
+    return Arm(
+        rig=rig,
+        kind="v2",
+        label=(
+            "v2 FLY125 PER-REGIME pair: the standby-only fit below 45 rev/s, the cruise-only fit "
+            "above 65, their powers interpolated across the ramp band (render_noise_regimes)"
+        ),
+        source=dict(
+            composition="render.render_noise_regimes",
+            per_regime={
+                "standby": dict(support=standby.get("support"), path=standby["_path"]),
+                "cruise": dict(support=cruise.get("support"), path=cruise["_path"]),
+            },
+            rule=(
+                "per-sample sqrt-weight sum of the two regimes' renders, weight = "
+                "rps_gating.regime_weight (smoothstep in the slowest rotor, 0 at 45 rev/s, 1 at "
+                "65, settle_s disabled), so the composed power interpolates the two fitted "
+                "regimes' levels across the ramp band"
+            ),
+        ),
+        fit=cruise,
+        regime_fits={"standby": standby, "cruise": cruise},
+        _render_regimes=render_mod.render_noise_regimes,
+        _spectrum_regimes=render_mod.expected_periodogram_regimes,
+    )
+
+
 def _comb_mean_check(fit: dict[str, Any], fits: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Is the rendered DREGON comb really the declared mean of the four bench fits?
 
@@ -489,18 +592,7 @@ def _comb_mean_check(fit: dict[str, Any], fits: dict[str, dict[str, Any]]) -> di
     )
 
 
-def fit_provenance(arm: Arm) -> dict[str, Any]:
-    """What the candidate row must state about the fit it renders from.
-
-    Convergence is NOT summarised away: the fit's own ``optimiser.converged``
-    flag, which criterion fired, the final gradient norm, the tolerance it was
-    tested against and the wall clock are carried into the round record so that
-    every quoted gate number sits next to the status of the fit that produced
-    it.
-    """
-    if arm.kind != "v2" or arm.fit is None:
-        return dict(kind=arm.kind, source=arm.source)
-    fit = arm.fit
+def _fit_row(fit: dict[str, Any]) -> dict[str, Any]:
     opt = dict(fit.get("optimiser") or {})
     return dict(
         support=fit.get("support"),
@@ -514,8 +606,57 @@ def fit_provenance(arm: Arm) -> dict[str, Any]:
         lbfgs_restart_gain_per_cell=opt.get("lbfgs_restart_gain_per_cell"),
         wall_s=opt.get("wall_s"),
         whittle_nats=(fit.get("objective") or {}).get("whittle_nats"),
-        comb_mean_check=arm.source.get("comb_mean_check"),
     )
+
+
+def fit_provenance(arm: Arm) -> dict[str, Any]:
+    """What the candidate row must state about the fit it renders from.
+
+    Convergence is NOT summarised away: the fit's own ``optimiser.converged``
+    flag, which criterion fired, the final gradient norm, the tolerance it was
+    tested against and the wall clock are carried into the round record so that
+    every quoted gate number sits next to the status of the fit that produced
+    it.
+
+    A PER-REGIME arm renders from a PAIR, so it reports a row per regime and
+    the summary a table can print without hiding either member: ``converged``
+    is true only if BOTH fits converged, ``grad_norm`` and
+    ``lbfgs_restart_gain_per_cell`` are the worst of the two, ``wall_s`` their
+    sum, and ``whittle_nats`` is null because the two objectives are over
+    different cells and are not addable.
+    """
+    if arm.kind != "v2" or arm.fit is None:
+        return dict(kind=arm.kind, source=arm.source)
+    if arm.regime_fits is not None:
+        per = {regime: _fit_row(f) for regime, f in arm.regime_fits.items()}
+        rows = list(per.values())
+
+        def _worst(key: str) -> float | None:
+            vals = [r[key] for r in rows if r.get(key) is not None]
+            return max(float(v) for v in vals) if vals else None
+
+        conv = [r["converged"] for r in rows]
+        walls = [float(r["wall_s"]) for r in rows if r.get("wall_s") is not None]
+        return dict(
+            support="+".join(str(r["support"]) for r in rows),
+            path=" + ".join(str(r["path"]) for r in rows),
+            mode="+".join(sorted({str(r["mode"]) for r in rows})),
+            n_fit_windows=sum(int(r["n_fit_windows"]) for r in rows),
+            converged=(all(bool(c) for c in conv) if all(c is not None for c in conv) else None),
+            which_converged={regime: r["which_converged"] for regime, r in per.items()},
+            grad_norm=_worst("grad_norm"),
+            tol_nats_per_cell=next(
+                (r["tol_nats_per_cell"] for r in rows if r.get("tol_nats_per_cell") is not None),
+                None,
+            ),
+            lbfgs_restart_gain_per_cell=_worst("lbfgs_restart_gain_per_cell"),
+            wall_s=(sum(walls) if walls else None),
+            whittle_nats=None,
+            per_regime=per,
+            composition=arm.source.get("composition"),
+            composition_rule=arm.source.get("rule"),
+        )
+    return _fit_row(arm.fit) | dict(comb_mean_check=arm.source.get("comb_mean_check"))
 
 
 # ── measurement ─────────────────────────────────────────────────────────────
@@ -869,6 +1010,22 @@ def run(
             arms[rig] = legacy_arm(rig, family=legacy_families.get(rig))
         else:
             render_mod, spectrum_fn = _v2_modules()
+            standby_path = (fit_files or {}).get(f"{rig}_standby")
+            if standby_path is not None:
+                cruise_path = (fit_files or {}).get(rig)
+                if cruise_path is None:
+                    die(
+                        f"--fit {rig}_standby names the standby half of a per-regime candidate; "
+                        f"--fit {rig}=<cruise fit json> must name the other half"
+                    )
+                assert cruise_path is not None
+                arms[rig] = v2_regime_arm(
+                    rig,
+                    render_mod=render_mod,
+                    cruise_path=cruise_path,
+                    standby_path=standby_path,
+                )
+                continue
             assert fits_dir is not None
             arms[rig] = v2_arm(
                 rig,
@@ -2020,10 +2177,13 @@ def main(argv: list[str] | None = None) -> int:
         "--fit",
         action="append",
         default=[],
-        metavar="RIG=PATH",
+        metavar="RIG[_standby]=PATH",
         help=(
             "render that rig from this exact fit file instead of the one --fits selects by "
-            "support name (a retry fit shares its support name with the fit it retries)"
+            "support name (a retry fit shares its support name with the fit it retries). "
+            "'--fit michaels_standby=PATH' additionally makes the arm PER-REGIME: the standby "
+            "fit is rendered below 45 rev/s, the '--fit michaels=' cruise fit above 65, and "
+            "their powers are interpolated across the ramp band"
         ),
     )
     ap.add_argument(
@@ -2148,6 +2308,15 @@ def main(argv: list[str] | None = None) -> int:
     legacy = args.legacy_export is not None
     if not legacy and args.fits is None:
         die("pass --fits <dir> with the round's fit JSONs, or --legacy-export baseline")
+    rigs = tuple(str(args.rigs).replace(",", " ").split())
+    fit_files = {str(spec).split("=", 1)[0]: Path(str(spec).split("=", 1)[1]) for spec in args.fit}
+    for key, path in fit_files.items():
+        if key not in rigs and key.removesuffix("_standby") not in rigs:
+            die(
+                f"--fit {key}=...: {key!r} is neither a scored rig {list(rigs)} nor '<rig>_standby'"
+            )
+        if not Path(path).is_file():
+            die(f"--fit {key}={path}: no such file")
     payload = run(
         round_no=int(args.round),
         fits_dir=args.fits,
@@ -2158,13 +2327,11 @@ def main(argv: list[str] | None = None) -> int:
         ),
         seeds=tuple(int(s) for s in str(args.seeds).replace(",", " ").split()),
         n_mics=int(args.mics),
-        rigs=tuple(str(args.rigs).replace(",", " ").split()),
+        rigs=rigs,
         with_probe=not args.no_probe,
         candidate=str(args.candidate or args.out_tag or ("legacy" if legacy else "v2")),
         dump_audio=args.dump_audio,
-        fit_files={
-            str(spec).split("=", 1)[0]: Path(str(spec).split("=", 1)[1]) for spec in args.fit
-        },
+        fit_files=fit_files,
     )
     if args.job:
         payload["job"] = str(args.job)

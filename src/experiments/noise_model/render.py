@@ -47,6 +47,7 @@ fitted floor and the synthesised floor cannot drift apart.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal, overload
 
 import numpy as np
@@ -65,7 +66,14 @@ from . import READABLE_FIT_SCHEMAS
 from . import model as MD
 from . import spectrum as SP
 
-__all__ = ["expected_periodogram", "render_noise"]
+__all__ = [
+    "expected_periodogram",
+    "expected_periodogram_regimes",
+    "regime_blend_weight",
+    "regime_seeds",
+    "render_noise",
+    "render_noise_regimes",
+]
 
 
 #: The fit schemas the renderer reads: its own, and R1/R2's, whose per-order
@@ -313,4 +321,215 @@ def expected_periodogram(
             if got.shape[0] < n_mics:
                 raise ValueError(f"fit carries {got.shape[0]} microphones, asked for {n_mics}")
             out[:, sl, :] = got[:n_mics]
+    return out
+
+
+# ── the per-regime composition ──────────────────────────────────────────────
+
+#: The regimes :func:`render_noise_regimes` composes, SLOWEST FIRST. There is
+#: no ``ramp`` entry: the ramp is the interpolation between these two, not a
+#: third fit (the previous generation had no ramp export either).
+REGIME_ORDER: tuple[str, ...] = ("standby", "cruise")
+
+
+def regime_blend_weight(
+    rps_rev_s: np.ndarray, *, sr: int = SP.FLIGHT_SR, policy: Any = None
+) -> np.ndarray:
+    """``(T,)`` weight on the CRUISE fit, in [0, 1] — the gating rule itself.
+
+    This is :func:`data_processing.rps_gating.regime_weight`, the previous
+    generation's own regime rule, with its ``settle_s`` term switched off: the
+    smoothstep ``3x^2 - 2x^3`` in the SLOWEST rotor's rate, exactly 0 at
+    ``STANDBY_MAX_RPS`` = 45 rev/s and exactly 1 at ``CRUISE_MIN_RPS`` = 65
+    rev/s, so the two thresholds here and in every refined label are the same
+    constants. ``settle_s`` exists to delay TRUST in a refined label for a
+    second after a spool-up; a model's parameters have no such history, and
+    keeping it would make this weight depend on how much of the recording came
+    before the window rather than on the carrier alone.
+    """
+    from data_processing.rps_gating import GatePolicy, regime_weight
+
+    rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
+    ft = np.arange(rps.shape[1], dtype=np.float64) / float(sr)
+    return np.asarray(
+        regime_weight(ft, rps, policy if policy is not None else GatePolicy(settle_s=0.0)),
+        dtype=np.float64,
+    )
+
+
+def regime_seeds(seed: int, regimes: Sequence[str] = REGIME_ORDER) -> dict[str, int]:
+    """One INDEPENDENT stream per regime, spawned from the arm's single seed.
+
+    The regimes' renders are summed inside the blend, so they must not share a
+    stream: with the same seed the two renders' shaft and line phases are
+    correlated and the sum would gain up to 3 dB where both weights are near
+    1/2, which is exactly the level artefact the blend exists to avoid. Spawned
+    from one ``SeedSequence`` they are independent, so their POWERS add and the
+    blend interpolates the two regimes' levels (see
+    :func:`render_noise_regimes`). The mapping is deterministic in ``seed``,
+    which is what lets a single-regime segment of a composed render be
+    reproduced by :func:`render_noise` alone.
+    """
+    children = np.random.SeedSequence(int(seed)).spawn(len(regimes))
+    return {
+        str(name): int(child.generate_state(1, dtype=np.uint32)[0])
+        for name, child in zip(regimes, children, strict=True)
+    }
+
+
+def _regime_fits(fits_by_regime: Mapping[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    missing = [r for r in REGIME_ORDER if r not in fits_by_regime]
+    if missing:
+        raise ValueError(f"the regime composition needs a fit per regime; missing {missing}")
+    extra = [r for r in fits_by_regime if r not in REGIME_ORDER]
+    if extra:
+        raise ValueError(f"unknown regime(s) {extra}; this composition is over {REGIME_ORDER}")
+    return {r: fits_by_regime[r] for r in REGIME_ORDER}
+
+
+def render_noise_regimes(
+    fits_by_regime: Mapping[str, dict[str, Any]],
+    rps_rev_s: np.ndarray,
+    *,
+    sr: int = SP.FLIGHT_SR,
+    n_mics: int = 8,
+    seed: int = 0,
+    sr_work: int = SP.SAMPLE_RATE_WORK,
+    return_diagnostics: bool = False,
+) -> np.ndarray | tuple[np.ndarray, dict[str, Any]]:
+    """Synthesise ONE carrier track from a PER-REGIME pair of fits.
+
+    ``fits_by_regime`` carries one payload per entry of :data:`REGIME_ORDER` —
+    a standby-only fit and a cruise-only fit of the same rig. Each is rendered
+    on the WHOLE track by :func:`render_noise` (so each regime's own render is
+    reproduced sample for sample where it is the only contributor, with
+    ``seed=regime_seeds(seed)[regime]``), and the two are combined per sample:
+
+        out = sqrt(1 - w) * standby + sqrt(w) * cruise,
+        w = regime_blend_weight(rps) -> 0 at <= 45 rev/s, 1 at >= 65 rev/s
+
+    so that, the two streams being independent, the composed POWER is exactly
+    ``(1 - w) P_standby + w P_cruise``: the standby fit alone below
+    ``rps_gating.STANDBY_MAX_RPS``, the cruise fit alone at or above
+    ``rps_gating.CRUISE_MIN_RPS``, and a continuous interpolation of the two
+    regimes' LEVELS across the ramp band in between. The weight is a
+    smoothstep in the SLOWEST rotor's rate, so the composition is continuous
+    and has zero slope at both thresholds; nothing is filtered in time.
+
+    WHY THIS RULE. The previous-generation arm had no pooled fit either: it
+    selected a per-regime stage-2 export and the regime bands are the same 45 /
+    65 rev/s constants (``data_processing.rps_gating``, whose smoothstep is
+    reused here verbatim). Its selection was a HARD switch on the support's
+    DECLARED regime label — standby took ``results/S2/standby.json`` and BOTH
+    ramp and cruise took the cruise export
+    (``noise_v2_round_score.LEGACY_BASELINE``, ``from_regime: cruise``) — which
+    needs a label per window and cannot render a track that crosses a band at
+    all. This composition keeps the legacy per-regime PARAMETERS and the legacy
+    thresholds and replaces the label lookup by the carrier itself, so the ramp
+    is interpolated between the two fitted regimes instead of being handed to
+    cruise whole.
+
+    A regime whose weight is zero everywhere is NOT rendered: a cruise-only
+    window costs exactly one render, and only a window that actually crosses
+    the band costs two.
+    """
+    fits = _regime_fits(fits_by_regime)
+    rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
+    w = regime_blend_weight(rps, sr=sr)
+    gains = {"standby": np.sqrt(np.maximum(1.0 - w, 0.0)), "cruise": np.sqrt(np.maximum(w, 0.0))}
+    seeds = regime_seeds(int(seed), REGIME_ORDER)
+    out = np.zeros((int(n_mics), rps.shape[1]), dtype=np.float64)
+    per_regime: dict[str, Any] = {}
+    for regime in REGIME_ORDER:
+        gain = gains[regime]
+        if not bool(np.any(gain > 0.0)):
+            per_regime[regime] = dict(rendered=False, seed=seeds[regime], weight_max=0.0)
+            continue
+        audio = np.asarray(
+            render_noise(
+                fits[regime],
+                rps,
+                sr=sr,
+                n_mics=n_mics,
+                seed=seeds[regime],
+                sr_work=sr_work,
+            ),
+            dtype=np.float64,
+        )
+        out += audio * gain[None, :]
+        per_regime[regime] = dict(
+            rendered=True,
+            seed=seeds[regime],
+            weight_max=float(gain.max() ** 2),
+            rms=np.sqrt((audio**2).mean(axis=1)).tolist(),
+        )
+    if not return_diagnostics:
+        return out
+    return out, dict(
+        seed=int(seed),
+        sr=int(sr),
+        sr_work=int(sr_work),
+        n_mics=int(n_mics),
+        n_rotors=int(rps.shape[0]),
+        regimes=list(REGIME_ORDER),
+        per_regime=per_regime,
+        cruise_weight=dict(
+            min=float(w.min()),
+            max=float(w.max()),
+            mean=float(w.mean()),
+            fraction_in_blend=float(np.mean((w > 0.0) & (w < 1.0))),
+        ),
+        rms=np.sqrt((out**2).mean(axis=1)).tolist(),
+        rule=(
+            "per-sample sqrt-weight sum of the standby and cruise renders; the weight is "
+            "rps_gating.regime_weight (smoothstep in the slowest rotor, 0 at 45 rev/s, 1 at 65) "
+            "with settle_s disabled, so the composed POWER interpolates the two regimes' levels"
+        ),
+        normalisation="none (absolute fitted level)",
+    )
+
+
+def expected_periodogram_regimes(
+    fits_by_regime: Mapping[str, dict[str, Any]],
+    rps_rev_s: np.ndarray,
+    *,
+    n_fft: int = SP.FLIGHT_N_FFT,
+    hop: int = SP.FLIGHT_HOP,
+    sr: int = SP.FLIGHT_SR,
+    n_mics: int = 8,
+    frame_chunk: int = 16,
+    sr_work: int = SP.SAMPLE_RATE_WORK,
+) -> np.ndarray:
+    """The composition's expected ``M``: the same power blend, per FRAME.
+
+    ``(1 - w_i) M_standby + w_i M_cruise`` with ``w_i`` the composed weight at
+    frame ``i``'s CENTRE sample, which is the expectation of what
+    :func:`render_noise_regimes` draws (the two streams are independent, so
+    their powers add) and therefore the predicted periodogram the likelihood
+    gate must read for this candidate.
+    """
+    fits = _regime_fits(fits_by_regime)
+    rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
+    w = regime_blend_weight(rps, sr=sr)
+    starts = np.arange(1 + (int(rps.shape[1]) - int(n_fft)) // int(hop)) * int(hop)
+    centres = np.clip(starts + int(n_fft) // 2, 0, w.size - 1)
+    w_frame = w[centres]
+    out: np.ndarray | None = None
+    for regime, weight in (("standby", 1.0 - w_frame), ("cruise", w_frame)):
+        if not bool(np.any(weight > 0.0)):
+            continue
+        m = expected_periodogram(
+            fits[regime],
+            rps,
+            n_fft=n_fft,
+            hop=hop,
+            sr=sr,
+            n_mics=n_mics,
+            frame_chunk=frame_chunk,
+            sr_work=sr_work,
+        )
+        term = np.asarray(m, dtype=np.float64) * weight[None, :, None]
+        out = term if out is None else out + term
+    if out is None:  # pragma: no cover - the weights sum to one by construction
+        raise ValueError("no regime carries any weight on this carrier track")
     return out
