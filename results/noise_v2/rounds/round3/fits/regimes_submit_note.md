@@ -20,16 +20,26 @@ regime exports were selected.
 
 | field | standby | cruise |
 | --- | --- | --- |
-| job | `nv2-r3-michaels-standby-28a220` | `nv2-r3-michaels-cruise-03bf4e` |
-| backend | `uni-cpu`, `--gpus 0 --cpus 8 --mem 48 --time 2h` | `uni-cpu`, `--gpus 0 --cpus 8 --mem 48 --time 3h` |
-| submitted | 2026-09-19T01:30:12Z, `running` 01:30:23Z | 2026-09-19T01:30:30Z, `running` 01:30:44Z |
+| job | `nv2-r3-michaels-standby--6c860e` | `nv2-r3-michaels-cruise-03bf4e` |
+| backend | `uni-cpu`, `--gpus 0 --cpus 8 --mem 48 --time 5h` | `uni-cpu`, `--gpus 0 --cpus 8 --mem 48 --time 3h` |
+| submitted | 2026-09-19T01:54:39Z, `running` 01:54:51Z | 2026-09-19T01:30:30Z, `running` 01:30:44Z |
+| code SHA | `58e895fb` | `a996e5e5` (identical fit path; the delta is the renderer/scorer composition) |
 | pool | `michaels-standby`: FLY125 @2.0+4, @6.0+4, @10.0+4 (3 windows, 12.0 s) | `michaels-cruise` filtered to FLY125 by the driver: 8 windows @16/32/48/64/96/112/128/144 + 8 s (64.0 s) |
 | output | `round3/fits/michaels_fly125_standby__flight.json` | `round3/fits/michaels_fly125_cruise__flight.json` |
-| expected wall | < 1 h (12 s of material, k_max 130) | 1.0–1.5 h (R1's identical pool) |
 
-Both from the detached worktree `.worktrees/submit-R3Standby` at code SHA
-`a996e5e51c514f52ba29cb0a9ed44adccd8d1f16` (`a996e5e5`, pushed on `main`) via
-`omnirun --daemon localhost:18787`.
+The standby fit was FIRST submitted as `nv2-r3-michaels-standby-28a220` with
+`--time 2h` (01:30:12Z) and **cancelled** at 01:57Z, before it could be killed
+by its own wall: a standby-only pool renders 130 orders (`k_max` =
+`min(K_CAP, floor(8000 / 40.1)) = 130`) against the pooled fit's 81, so its
+Adam phase ran at ~16 steps/min (750 steps in 48 min, i.e. ~96 min for 1500)
+and the pooled R3 job's own split (Adam 2069 s of a 5621 s wall) puts L-BFGS
+at ~1.5 h on top. 2 h could not hold both phases; nothing was lost by
+cancelling (the driver checkpoints nothing mid-run) and the recipe is
+UNCHANGED in the resubmission — only `--time`.
+
+Both from the detached worktree `.worktrees/submit-R3Standby` via
+`omnirun --daemon localhost:18787`; expected wall 3.0–3.5 h (standby) and
+1.0–1.5 h (cruise).
 
 ## The standby pool, and why its windows are 4 s
 
@@ -132,11 +142,11 @@ neither touches `round3/supports/`, which is `R3Bench`'s.
 ## Harvest
 
 ```
-omnirun --daemon localhost:18787 status nv2-r3-michaels-standby-28a220
-omnirun --daemon localhost:18787 logs  nv2-r3-michaels-standby-28a220 | tail -40  # R3STANDBY_DONE exit_fit=0
+omnirun --daemon localhost:18787 status nv2-r3-michaels-standby--6c860e
+omnirun --daemon localhost:18787 logs  nv2-r3-michaels-standby--6c860e | tail -40  # R3STANDBY_DONE exit_fit=0
 set -a; . ./.env; set +a
 aws s3 sync --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  s3://omnirun-artifacts/nv2-r3-michaels-standby-28a220/outputs/results/ /tmp/r3standby_pull/
+  s3://omnirun-artifacts/nv2-r3-michaels-standby--6c860e/outputs/results/ /tmp/r3standby_pull/
 cp /tmp/r3standby_pull/noise_v2/rounds/round3/fits/michaels_fly125_standby__flight.json \
    results/noise_v2/rounds/round3/fits/
 git add -f results/noise_v2/rounds/round3/fits/michaels_fly125_standby__flight.json
