@@ -1,19 +1,21 @@
 # Noise model v2: the pre-implementation phase
 
-**Status:** running (R2 opening) — 2026-09-15 → . Campaign `noise-model-v2`,
-branch `main`. R1 is scored and FAILS: both HPPNet parity gates, the DREGON
-stretch gate and the two proxy gates are false
-[`results/noise_v2/rounds/round1.json`,
-`results/noise_v2/rounds/round1/score/findings.md`]. Explainer:
+**Status:** running (R4 opening) — 2026-09-15 → . Campaign `noise-model-v2`,
+branch `main`. R1, R2 and R3 are all scored and all FAIL the top-level gate.
+R3 is the best round: Michael's parity gate passes with margin +1.556325 rev/s
+and its proxy is 0.062 dB short, while DREGON stays two orders of magnitude
+off parity [`results/noise_v2/rounds/round3.json`,
+`results/noise_v2/rounds/round3/score/findings.md`]. Explainer:
 `docs/explainers/noise-model-v2-plan.qmd` (the full proposal, with every
-figure). Predecessor: `docs/experiments/stochastic-fit.md` and the
+figure, and Model R3 in section `#model-r3`). Predecessor:
+`docs/experiments/stochastic-fit.md` and the
 revised-phase rounds C1-C4 in `docs/experiments/revised-phase-campaign.qmd` +
 `docs/experiments/revised-phase-handoff-2026-09-13.qmd`.
 
 The proposal was approved on 2026-09-17 with every open decision taken as
 proposed. This document records the four measurement studies that set up v2,
 the model and round plan they support, the approved decisions, and the round
-records (section "Round 1" below).
+records (sections "Round 1", "Round 2" and "Round 3" below).
 
 
 ## Narrowed objective (2026-09-17)
@@ -66,8 +68,8 @@ Revised round plan, cap 5:
 | Round | Content |
 |---|---|
 | R1 | Pyro model; bench fits (DREGON per rotor plus the 135 survey bench points); four-motor validation; the decoherence lag extension to 1-5 s; Michael's FLY125 cruise fit; the DREGON floor fit; an HPPNet probe; round record — **scored, FAIL**, see "Round 1" |
-| R2 | Bench rule (level gate + narrow in-window residual + in-window line margin, wide test dropped); bench carrier refined in window then frozen, no in-fit refinement; standby/ramp render diagnosis; profile-block convergence; shaft prior, and the refinements Michael's cruise fit needs |
-| R3 | Hierarchy over rigs including the bench points |
+| R2 | Bench rule (level gate + narrow in-window residual + in-window line margin, wide test dropped); bench carrier refined in window then frozen, no in-fit refinement; `comb_gain_db` re-levelling scalar; standby/ramp render diagnosis; profile-block convergence — **scored, FAIL**, see "Round 2" |
+| R3 | Model R3: shaft OU plus a free Lorentzian width per line, measured priors, speed-span pins, schema `/2`, DREGON `flight_floor_lowk`, per-regime render composition; bench refits, Michael's pooled and per-regime refits, DREGON label registration and hump studies — **scored, FAIL**, see "Round 3" |
 | R4 | One named fix |
 | R5 | Simplify the passing incumbent |
 
@@ -450,8 +452,8 @@ Round plan, cap 5, backends `uni-cpu` and `uni-gpushort`:
 | Round | Question | Pass = |
 |---|---|---|
 | R1 | Pyro parity: C4 model, fixed `λ_ref`, MAP, DREGON raw + refined, Michael's | likelihood parity test; gates scored; DREGON refined-label arm result |
-| R2 | Shaft prior: `λ` free with telemetry/bench prior, `D_k` structure from bench | frozen gates |
-| R3 | Hierarchy over rigs incl. bench points; population posterior for sampling | gates + posterior predictive on a held-out bench point |
+| R2 | Shaft prior: `λ` free with telemetry/bench prior, `D_k` structure from bench | frozen gates — **FAIL**, see "Round 2" |
+| R3 | Model R3 (explainer `#model-r3`): free per-line Lorentzian width, measured priors, speed-span pins; bench refits, Michael's pooled + per-regime refits, DREGON frozen-comb refit with the label-registration check | frozen gates; the low-order `γ_rk` check passes on every bench fit — **FAIL** (gates), 19/21 (`γ_rk`), see "Round 3" |
 | R4 | Fix the one named failure of R1-R3 (one complexity per failure) | gates |
 | R5 | Simplify the passing incumbent; publish fits; wire engine | gates unchanged |
 
@@ -661,14 +663,302 @@ refined in window and then frozen, with no in-fit refinement. Standby and ramp
 get a render diagnosis instead of another fit. And profile-block convergence is
 carried as the open fitting-method question.
 
+## Round 2
+
+**Verdict: FAIL.** The DREGON parity and stretch gates fail and both proxy
+gates fail; Michael's parity gate PASSES for the first time, and the comb-band
+likelihood passes. No fit in the round converged. Record
+`results/noise_v2/rounds/round2.json` (git `9579ca94592c`),
+`round2/score/findings.md`.
+
+### Model change and root causes fixed
+
+R2 changed the four things R1's conclusion named, plus one model freedom.
+
+1. **Bench stationarity rule, revision 2.** A candidate window must also sit
+   within `BENCH_LEVEL_TOL_DB` = 6 dB of the loudest band-limited window of its
+   own recording; the line margin is certified INSIDE the accepted window, not
+   over the recording; revision 1's wide-band residual test is dropped
+   [`round2/supports/findings.md:9-20`].
+2. **The carrier is refined in window and then frozen** — the fit has no
+   carrier parameter, so R1's in-fit re-refinement onto the fixed 89.268 Hz
+   room interferer cannot recur [`round2/supports/findings.md:9-20`].
+3. **`comb_gain_db`,** one re-levelling scalar on the frozen bench comb in the
+   DREGON floor-only flight fit: **−3.2323 dB**
+   [`round2/fits/dregon_room2_floor__flight_floor_only_v2.json`].
+4. **Standby and ramp got a render diagnosis instead of a fit**
+   [`round2/render_regime/findings.md`].
+5. **Profile-block convergence** was carried as the open fitting-method
+   question, not fixed.
+
+| quantity | R1 | R2 |
+|---|---|---|
+| bench windows within the level gate | 12 of 21 sat 10-33 dB below their recording's loudest window | every window 0.29-1.23 dB below it |
+| in-window line margin | not measured in window | 1.28-14.69 dB; 17 of 21 pass the 2 dB rule |
+| carrier refinement shift | — | \|shift\| ≤ 0.0806 rev/s, median 0.0305 |
+| k = 1 modelled line peak over own fitted floor | min +7.9 dB, 4 fits under +20 dB | min +42.7, median +51.3, max +61.2 dB (21/21 above floor at k = 1, 2, 4, 8) |
+| L-BFGS converged, reported fit | 1 / 21 | 3 / 21 |
+| best-worst restart spread, nats/cell: median [max] | 0.00243 [0.0448] | 0.00122 [0.0568] |
+
+Sources: `round2/supports/findings.md:173-183` (first three rows),
+`round2/fits/findings.md`, section "Against round 1" (last three). The R1
+DREGON root cause is fixed — the comb is identified on every rev-2 window —
+and the conditioning improved without closing: 18 of 21 R2 fits are still
+stopped by the iteration budget, and the worst restart spread got worse.
+
+### Results
+
+| gate | candidate | number | bar | verdict |
+|---|---|---:|---:|---|
+| HPPNet DREGON cruise PIT MAE (rev/s) | `dregon_v2_r2_floor_combgain` | 72.340606 (95 % upper 74.830651) | 2.187786 parity / 1.897063 stretch | **FAIL** (−70.152820 / −70.443543) |
+| HPPNet Michael's equal-regime mean (rev/s) | `michaels_v2_r2_all` | 2.456399 (ratio 0.811587) | 3.177994 (ratio ≤ 1.05) | **PASS** (+0.721596) |
+| proxy `ltas_abs_db` dregon_cruise (dB) | `dregon_v2_r2_floor_combgain` | 3.5024 (spread 3.3462) | 1.9786 | **FAIL** (−1.5238) |
+| proxy `ltas_abs_db` michaels_cruise (dB) | `michaels_v2_r2_all` | 2.1491 (spread 1.7716) | 1.2197 | **FAIL** (−0.9294) |
+| likelihood comb band (nats/s) | `michaels_v2_r2_all` | −372 886.6588 | oracle −371 916.5041 | **PASS**, margin −970.1548 |
+| likelihood floor / full band (nats/s) | `michaels_v2_r2_all` | −8 641.4811 / −381 528.1399 | oracle −8 713.2663 / −380 629.7704 | report, +71.7852 / −898.3696 |
+
+Source: `round2/score/findings.md:15-18,51-59`. A third candidate,
+`dregon_v2_r2_floor_benchcomb` (no re-levelling scalar), scores 75.093968 rev/s
+and 3.6328 dB [`round2/score/findings.md:42-44`].
+
+| regime | blocks | `michaels_v2_r2_all` | legacy baseline | ratio |
+|---|---:|---:|---:|---:|
+| standby | 2 | 3.006774 | 0.317103 | 9.4820 |
+| ramp | 1 | 3.393256 | 8.007098 | 0.4238 |
+| cruise | 2 | 0.969167 | 0.755783 | 1.2823 |
+
+Michael's FLY124 per regime, rev/s [`round2/score/findings.md:82-88`]. The
+pooled FLY125 fit passes the aggregate bar while standby is 9.5× its legacy
+baseline: one speed law is paying for the regime it does not fit.
+
+### Conclusion
+
+R2 fixes R1's DREGON diagnosis and does not move the DREGON gate: 78.803342 →
+72.340606 rev/s against a 1.897063 bar. Michael's crosses its parity bar
+(5.550358 → 0.811587 of the legacy regime mean) while its proxy gets WORSE
+(1.4156 → 2.1491 dB) and its likelihood comb margin improves (−1497.6146 →
+−970.1548 nats/s) [`round2/score/findings.md:22-34`]. The two named failures
+carried into R3 are the multi-modal bench MAP surface and the standby regime.
+
+## Round 3
+
+**Verdict: FAIL.** DREGON parity and stretch fail and both proxy gates fail;
+Michael's parity gate passes with the largest margin of the campaign and the
+comb-band likelihood passes. No fit in the round converged. Record
+`results/noise_v2/rounds/round3.json` (git `3fcae519cddb`),
+`round3/score/findings.md`. Three arms were scored: the per-regime Michael's
+candidate `michaels_v2_r3_regimes` (primary for michaels), the pooled
+`michaels_v2_r3_all`, and `dregon_v2_r3_floor_lowk` (primary for dregon)
+[`round3/score/findings.md:7-11`].
+
+### Model change: Model R3
+
+Full statement and figures: `docs/explainers/noise-model-v2-plan.qmd`, section
+["Model R3: shaft OU plus a free Lorentzian width per line"](../explainers/noise-model-v2-plan.qmd#model-r3).
+What R3 changed:
+
+1. **A free Lorentzian half-width `gamma_rk` per line** (per rotor, per order)
+   replaces R1/R2's per-order OU jitter block; the four scalars
+   `sigma_eps_even/odd` and `lam_eps_even/odd` are gone.
+2. **Measured priors** replace the R1/R2 widths: `lam`'s central 95 % is
+   [0.271, 14.8] /s, `sigma_nu`'s is [0.074, 1.22] rad/s on the bench and
+   [0.11, 0.815] in flight [`round3/fits/findings.md:119-149`].
+3. **Pins.** In flight `lam` has no Pyro site at all —
+   `priors.flight_lam_pin = 0.5` is a constant, not a fitted-then-held value
+   [`round3/fits/findings_flight.md:69-78`]. A `speed_span` under 1.5× pins
+   `amp_exp`, `floor_exp` and `floor_static_rel` at their prior medians; the
+   pooled Michael's pool spans 4.678× and pins nothing, the R3 cruise-only pool
+   spans 1.436× and pins all three [`round3/fits/findings_regimes.md:59-99`].
+4. **Fit schema `noise-v2-fit/2`**, which records `gamma_hz` and the low-order
+   `gamma_rk` check; a `/1` payload is read by mapping its per-order OU onto
+   the equivalent Lorentzian width [`round3/fits/findings.md:1-13`].
+5. **DREGON mode `flight_floor_lowk`**: eight per-order gains
+   `low_order_gain_db` (k = 1..8) on top of R2's single `comb_gain_db`
+   [`round3/fits/findings.md:275-299`].
+6. **Per-regime composition `render.render_noise_regimes`**: a standby fit
+   below `STANDBY_MAX_RPS` = 45 rev/s, a cruise fit at or above
+   `CRUISE_MIN_RPS` = 65, their POWERS interpolated by the previous
+   generation's own `rps_gating` smoothstep in between, from independent seed
+   streams so the composed power is exactly `(1−w) P_standby + w P_cruise`
+   [`round3/fits/findings_regimes.md:106-146`].
+
+### Fits: the conditioning the new law buys
+
+| quantity | R2 (`round2/fits`) | R3 (`round3/fits`) |
+|---|---|---|
+| DREGON bench supports | 21 | 21 |
+| L-BFGS converged, reported fit | 3 / 21 | **12 / 21** |
+| all four starts inside 1e-4 nats/cell | 3 / 21 | 6 / 21 |
+| best-worst nats/cell: median [min, max] | 0.00122 [4.75e-05, 0.0568] | 0.000269 [6.44e-06, 0.00645] |
+| `lam` max/min over starts: median [max] | 1.95 [1.94e+05] | 1.3 [3.97] |
+| `sigma_nu`: min / median / max | 0.4482 / 1.716 / 143.2 | 0.3964 / 0.7803 / 1.772 |
+| `lam` /s: min / median / max | 0.07483 / 73.87 / 6.674e+05 | 0.007933 / 0.3583 / 1370 |
+| low-order `gamma` check passed | n/a (`/1` law) | **19 / 21** |
+| whittle nats/cell, median (SAME windows) | −10.0841 | −10.1274 |
+
+Source: `round3/fits/findings.md:207-224`. The windows are unchanged from R2 up
+to float ULP, so `nats/cell` is comparable: **R3 is lower (better) on 21 of 21
+supports**, per-support delta −0.1776 to −0.0068, median −0.0373. The free
+per-line width takes the broadening the R2 law could only buy with a fast
+shaft. The two low-order failures are `bench_dregon_Motor1_70`
+(`fail_k2_ramp`, 3.12× the resolution floor with a ramp of 10.3) and
+`bench_dregon_allMotors_70` (`fail_above_floor`, 879× resolution, ramp 4.75 —
+under the ramp threshold, so NOT the `k²` shaft-absorbing degeneracy the check
+exists to catch) [`round3/fits/findings.md:226-249`].
+
+The pooled Michael's flight fit is 0.02905 nats/cell better than R2's on the
+same pool and cells with four dynamics scalars fewer, drops `sigma_nu` from
+5.1716 to 1.23332 rad/s, pulls `floor_exp` from 3.22426 to its prior median
+2.00468 and flips the floor tilt from +0.30305 to −0.75078 dB/oct; it is NOT
+converged (restart gain 9.0618e-03 against tol 1e-4, \|grad\| 5430.15), the
+same failure mode as R1 and R2 with the restart gain halved once more
+[`round3/fits/findings_flight.md:44-60,69-78,120-133`].
+
+### Results
+
+| gate | candidate | number | bar | verdict |
+|---|---|---:|---:|---|
+| HPPNet DREGON cruise PIT MAE (rev/s) | `dregon_v2_r3_floor_lowk` | 71.866599 (95 % upper 75.029755) | 2.187786 parity / 1.897063 stretch | **FAIL** (−69.678813 / −69.969536) |
+| HPPNet Michael's equal-regime mean (rev/s) | `michaels_v2_r3_regimes` | 1.621670 (ratio 0.535795) | 3.177994 (ratio ≤ 1.05) | **PASS** (+1.556325) |
+| proxy `ltas_abs_db` dregon_cruise (dB) | `dregon_v2_r3_floor_lowk` | 3.7480 (spread 3.2995) | 1.9786 | **FAIL** (−1.7694) |
+| proxy `ltas_abs_db` michaels_cruise (dB) | `michaels_v2_r3_regimes` | 1.2816 (spread 1.6179) | 1.2197 | **FAIL** (−0.0620) |
+| likelihood comb band (nats/s) | `michaels_v2_r3_regimes` | −373 666.3040 | oracle −371 916.5041 | **PASS**, margin −1 749.8000 |
+| likelihood floor / full band (nats/s) | `michaels_v2_r3_regimes` | −8 345.2279 / −382 011.5319 | oracle −8 713.2663 / −380 629.7704 | report, +368.0384 / −1 381.7615 |
+
+Source: `round3/score/findings.md:15-18,50-58`. The pooled Michael's arm scores
+2.334258 rev/s (ratio 0.771232), proxy 1.8863 dB, comb margin −862.8349 nats/s
+[`round3/score/findings.md:42-44`].
+
+| regime | blocks | `michaels_v2_r3_regimes` | `michaels_v2_r3_all` | legacy baseline |
+|---|---:|---:|---:|---:|
+| standby | 2 | **0.785384** (ratio 2.4768) | 3.163707 (9.9769) | 0.317103 |
+| ramp | 1 | 3.267119 (0.4080) | 3.145259 (0.3928) | 8.007098 |
+| cruise | 2 | 0.812507 (1.0751) | 0.693809 (0.9180) | 0.755783 |
+
+Source: `round3/score/findings.md:81-87` and
+`round3/fits/findings_regimes.md:154-165`. The per-regime composition improves
+standby **4.03×** over the pooled arm at a cost of 0.119 rev/s on cruise and
+0.122 on the ramp; the proxy moves from −0.667 dB to −0.062 dB of its gate,
+which is inside one seed's own LTAS spread, and the whole remaining deficit
+sits in ONE support (FLY124@56+8, 2.0906 dB against 0.4727 dB)
+[`round3/fits/findings_regimes.md:167-191`]. Both regime fits are NOT converged
+(standby restart gain 6.057e-04, cruise 2.995e-03, tolerance 1e-04)
+[`round3/fits/findings_regimes.md:59-81`].
+
+### Root cause of the DREGON failure: it is not registration, not width
+
+R3 spent three studies on the DREGON gate and all three came back negative.
+
+**The labels are not misregistered.** Over the 40 rotor reads (5 windows × 4
+rotors × 2 label tracks) the registration check returns **0 MISREGISTERED, 1
+REGISTERED and 39 NO_COMB**; re-registering at the best offset would buy
+0.03 dB (median, order-tracked; 0.18 dB on the likelihood's own framing), not
+the 25.03 dB the gate's band-level match asks for. There is no resolvable comb
+above k ≈ 8 to find: the resolved comb in these windows is at most **−36.0 dB**
+of the window's own band power. The label carriers themselves drift
+3.49-25.00 rev/s WITHIN a 4 s score window.
+
+| window | verdict | max \|delta*\| (rev/s) | max S gain % | rotors with a comb |
+|---|---|---:|---:|---:|
+| `free-flight` | NO_COMB (4/4 rotors) | 1.434 | 17.06 | 0/4 |
+| `hovering` | NO_COMB (4/4 rotors) | 1.348 | 15.41 | 0/4 |
+| `updown` | NO_COMB (4/4 rotors) | 1.434 | 6.38 | 0/4 |
+| `rectangle` | NO_COMB (4/4 rotors) | 1.440 | 23.78 | 0/4 |
+| `spinning` | REGISTERED (1/4 rotors) | 0.100 | 3.03 | 1/4 |
+
+Source: `round3/registration/findings.md:87-95`; drift
+[`round3/registration/findings.md:9-15`]; conclusion and the −36.0 dB bound
+[`round3/registration/findings.md:114-121`]. The null is calibrated: the same
+check finds a synthetic comb planted ON the label down to −24 dB on every
+rotor, loses it at −36 dB without a false MISREGISTERED, and flags a
+deliberate +0.4 rev/s offset as MISREGISTERED
+[`round3/registration/findings.md:99-112`].
+
+**The render matches the real per-cell power to within ~2 dB in every class.**
+`I/M` (render against the fit's own `expected_periodogram`) is −0.35 dB median
+and +0.00 to +0.05 dB in power-sum for comb k ≤ 8, comb 8 < k ≤ 40 and floor
+alike — the −0.35 dB is exactly the median-vs-mean bias of a four-seed Rayleigh
+estimator, so there is no render or forward-model bug. `R/M` (real against
+model) is a nearly UNIFORM +2.18 to +2.46 dB on `hovering` and +3.28 to
++4.08 dB on `updown` across all three classes — on `updown` the floor is missed
+by MORE than the comb.
+
+| window | ratio (power-sum, dB) | comb k ≤ 8 | comb 8 < k ≤ 40 | floor |
+|---|---|---:|---:|---:|
+| `hovering` | I/M | +0.04 | +0.01 | +0.01 |
+| `hovering` | R/M | +2.46 | +2.29 | +2.18 |
+| `updown` | I/M | +0.05 | +0.02 | +0.00 |
+| `updown` | R/M | +3.28 | +4.08 | +4.04 |
+
+Source: `round3/dregon_humps/render_vs_model.md:16-25`. There is no hidden
++20 dB comb in the real periodogram for a re-weighted objective to find, so
+re-weighting the Whittle risk onto carrier-tracked cells cannot move
+`comb_gain_db` by +21 dB [`round3/dregon_humps/render_vs_model.md:38-57`].
+
+**Widening the lines never helps; level does.** The fitted `gamma_rk`
+(0.0014 Hz at k = 1) is orders of magnitude below the legacy law
+13.068 + 0.211k Hz, but at the resolution a 4 s DREGON window affords both are
+unresolvably narrow: measured k = 1 widths agree to ~1 Hz (real 11.8, legacy
+11.0, v2 12.2 Hz on `hovering`). What differs is PROMINENCE — legacy's k = 1
+line is **+18.8 dB** over its local base against **+7.5 dB** for both real and
+v2 — and widening at a fixed comb gain DILUTES it (the legacy-law arm falls to
++3.4 dB and its width grows to 40.8 Hz).
+
+| arm | free-flight | hovering | updown | mean |
+|---|---:|---:|---:|---:|
+| `real` | 0.638 | 0.888 | 1.695 | 1.074 |
+| `legacy` | 1.496 | 1.895 | 2.499 | 1.963 |
+| `v2` (as fitted) | 62.105 | 73.448 | 73.112 | 69.555 |
+| `v2_plus21db` (needle comb, +21 dB) | 5.118 | 2.759 | 6.800 | **4.893** |
+| `v2_gx3` | 70.781 | 80.226 | 72.713 | 74.573 |
+| `v2_gx10` | 75.931 | 76.435 | 78.288 | 76.885 |
+| `v2_gx30` | 74.707 | 78.315 | 79.275 | 77.433 |
+| `v2_glegacy` (legacy width law) | 80.371 | 80.587 | 77.685 | 79.548 |
+| `v2_gx3_plus12db` | 36.634 | 29.889 | 33.646 | 33.390 |
+| `v2_gx10_plus12db` | 37.683 | 37.830 | 42.709 | 39.407 |
+| `v2_gx30_plus12db` | 36.715 | 46.691 | 56.892 | 46.766 |
+| `v2_glegacy_plus12db` | 51.931 | 39.016 | 52.184 | 47.710 |
+
+HPPNet PIT MAE, rev/s, seed 2001 [`round3/dregon_humps/widen.md:50-63`];
+widths and prominences [`round3/dregon_humps/widen.md:9-46,83-118`]. The
+four-way verdict of the hump study is NO / NO / NO / **YES**: real DREGON's
+carrier-locked power is not broader than a needle comb's (0/3 windows), a
+widened comb does not beat the needle comb at matched hump fraction (0/3) nor
+at matched comb power (0/3), and re-levelling the needle comb alone at least
+halves the PIT MAE (3/3) [`round3/dregon_humps/findings.md:5-10`]. The level
+dose-response bottoms out at +21 dB (4.893 rev/s) and worsens again at +24
+(6.225) [`round3/dregon_humps/findings.md:41-64`].
+
+So what HPPNet keys on is not per-cell power at the comb cells: it is
+structure the power spectrum does not determine — per-mic/cross-mic and
+cross-order phase coherence, temporal continuity of a line. The +21 dB
+re-level is a way to give the tracker enough per-cell contrast to lock, not a
+correction to the model [`round3/dregon_humps/render_vs_model.md:44-51`].
+
+### Conclusion
+
+R3 is the best round of the campaign on everything except DREGON. Michael's
+equal-regime mean falls 2.456399 → 1.621670 rev/s (ratio 0.535795), driven
+entirely by the per-regime composition collapsing standby 3.163707 → 0.785384;
+the Michael's proxy is 0.062 dB from passing; the bench law is better on 21 of
+21 supports and converges on 12 of 21 against R2's 3. Two things went the wrong
+way: the DREGON 95 % upper bound (+0.199104 rev/s, the between-recording spread
+grew) and the likelihood comb margin (−970.154760 → −1 749.799951 nats/s)
+[`round3/score/findings.md:24-34`]. The DREGON gate is where the campaign's
+remaining gap lives and R3 closed the three cheap explanations for it: the
+labels register, the render is faithful to its own model to ~0.05 dB, and line
+width is not the missing ingredient. The open R4 question is a STATISTICS
+question — phase coherence and line continuity — not a level or width question.
+
 ## Status
 
-**R1 scored, FAIL; R2 opening.** The round record is the section "Round 1"
-above; the machine-readable record is `results/noise_v2/rounds/round1.json`
-(git `066651e8eb31`). The nine approved decisions are listed above (section
-"Approved decisions (2026-09-17)") and in
+**R3 scored, FAIL; R4 opening.** The round records are the sections "Round 1",
+"Round 2" and "Round 3" above; the machine-readable records are
+`results/noise_v2/rounds/round{1,2,3}.json` (git `066651e8eb31`,
+`9579ca94592c`, `3fcae519cddb`). The nine approved decisions are listed above
+(section "Approved decisions (2026-09-17)") and in
 `docs/explainers/noise-model-v2-plan.qmd`, section "Decisions (approved
-2026-09-17)".
+2026-09-17)"; Model R3 is in that file's section `#model-r3`.
 
 Of the three prerequisites R1 was blocked on:
 
@@ -680,7 +970,22 @@ Of the three prerequisites R1 was blocked on:
    (`results/revised_phase/baseline_v2/calibration.json`) was unavailable in
    the scoring job, which forced two re-derivations — the DREGON paired
    improvement interval and the per-band oracle risk — and left the legacy
-   smoke `not_comparable` [`round1/score/findings.md:112,114-121`].
+   smoke `not_comparable` [`round1/score/findings.md:112,114-121`]. It was
+   still unavailable in R2 and R3, whose records carry the same
+   `not_comparable` status [`round3/score/findings.md:125-132`].
 3. **Cleared.** The likelihood gate has its number: the R1 comb-band
    model-minus-oracle margin −1 497.6146 nats/s, frozen for later rounds
-   [`round1/score/findings.md:94-104`].
+   [`round1/score/findings.md:94-104`]. R2 read −970.154760 and R3
+   −1 749.799951 nats/s against it [`round3/score/findings.md:24-34`].
+
+Carried into R4, in the order the records name them:
+
+1. **DREGON is a statistics problem, not a level or width problem.** R3's
+   three studies exclude misregistration, a render/forward-model bug and line
+   width; what is left is phase coherence and line continuity
+   [`round3/dregon_humps/render_vs_model.md:44-57`].
+2. **Nothing has converged, in any round.** R3 reaches 12/21 on the bench but
+   every flight fit still stops on the L-BFGS iteration cap
+   [`round3/fits/findings.md:207-224`, `round3/fits/findings_flight.md:12-20`].
+3. **The Michael's proxy is 0.062 dB from passing** and the whole deficit sits
+   in one support [`round3/fits/findings_regimes.md:231-239`].
