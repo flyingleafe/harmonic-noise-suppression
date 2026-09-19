@@ -2743,14 +2743,24 @@ def hump_verdicts(payload: dict[str, Any]) -> dict[str, Any]:
 
 # ── the hump study's figures and findings ───────────────────────────────────
 
-HUMP_FIG_ARMS = ("real", "legacy", "v2", "v2_matched", "v2_g67_matched", "v2_g130_matched")
+HUMP_FIG_ARMS = (
+    "real",
+    "legacy",
+    "v2",
+    "v2_plus21db",
+    "v2_g67_plus21db",
+    "v2_g130_plus21db",
+)
 HUMP_FIG_COLOURS = {
     "real": "black",
     "legacy": "tab:orange",
     "v2": "tab:blue",
     "v2_matched": "tab:green",
+    "v2_plus21db": "tab:green",
     "v2_g67_matched": "tab:red",
+    "v2_g67_plus21db": "tab:red",
     "v2_g130_matched": "tab:purple",
+    "v2_g130_plus21db": "tab:purple",
     "legacy_needle": "tab:brown",
 }
 
@@ -2820,6 +2830,7 @@ def write_hump_figures(payload: dict[str, Any], figures: dict[str, Any], out: Pa
         len(PROFILE_ORDERS),
         figsize=(4.4 * len(PROFILE_ORDERS), 3.1 * len(recs)),
         squeeze=False,
+        layout="constrained",
     )
     for i, rec in enumerate(recs):
         blob = figures[rec]
