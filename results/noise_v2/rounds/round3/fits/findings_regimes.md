@@ -82,8 +82,9 @@ index describes the round, and `noise_v2_fit._specs:787` drops them.
 
 Two expectations from the submission note were WRONG and the fits say so:
 
-1. **The standby pool does NOT span under 1.5x.** It spans **1.93x** —
-   20.8–40.1 rev/s — because the four rotors themselves differ that much
+1. **The standby pool does NOT span under 1.5x.** It spans **1.9278x** —
+   `diagnostics.batch.carrier_min_rev_s` 20.930 to `carrier_max_rev_s` 40.350
+   rev/s — because the four rotors themselves differ that much
    while the rig idles (the @10+4 window alone carries 30.99 / 34.54 / 40.15 /
    36.54 rev/s). So the standby fit identified its OWN speed law inside the
    standby band (`amp_exp` 4.13, `floor_exp` 4.93) instead of inheriting the
@@ -208,7 +209,7 @@ on the composed render, seed 2001, 8 mics. `mean_db` over rotors, in dB:
 | | legacy | 16.42 | 8.83 | 6.34 | -3.36 | 0.590 |
 | | **composed** | **17.07** | 10.49 | 6.59 | -3.00 | 0.501 |
 | | cruise fit alone | 25.87 | 11.64 | 9.61 | +2.82 | 4.524 |
-| ramp (w 0 -> 1, 16.2 % of samples in the blend) | real | 6.89 | 2.81 | 1.75 | +9.33 | — |
+| ramp (w 0 -> 1, 16.18 % of samples in the blend) | real | 6.89 | 2.81 | 1.75 | +9.33 | — |
 | | legacy | 6.20 | 3.41 | 4.05 | +6.35 | 4.188 |
 | | **composed** | **8.89** | 1.89 | 3.17 | +7.28 | 3.625 |
 | | standby fit alone | 1.39 | 1.70 | 2.97 | +9.41 | 2.381 |
