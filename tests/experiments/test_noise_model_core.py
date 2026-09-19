@@ -705,6 +705,60 @@ def test_bench_map_recovers_planted_dynamics_at_the_frozen_carrier():
     )
 
 
+def test_a_profile_init_moves_only_the_orders_it_carries_a_width_for():
+    """``ProfileInit`` is a PRIOR, per line, and only where it says so.
+
+    The four-motor rig fit enters the multi-rotor estimator's profile this way
+    (``scripts/noise_v2_fourmotor.py``), so the contract a consumer sees is:
+    an order handed a centre AND a tight width ends at that centre even when
+    the data disagrees by 12 dB, while an order handed a centre but NO width
+    keeps following the data. (It does not stay put to the decibel: pinning
+    half the comb 12 dB up moves the floor and the dynamics with it, so the
+    free orders shift a few dB — what must hold is that they follow the data
+    and not the offer.) Planted the same way as the MAP test above.
+    """
+    k_cap, f0, n_mics = 8, 211.0, 4
+    truth_db = np.linspace(-14.0, -26.0, k_cap)
+    par = _params(
+        n_rotors=1,
+        n_mics=n_mics,
+        k_cap=k_cap,
+        profile_db=truth_db[None, :],
+        carrier=[f0],
+        sigma_nu=0.9,
+        lam=5.5,
+        gamma_hz=0.05,
+        floor_mean_db=-46.0,
+        tilt=0.0,
+    )
+    n = 1 << 14
+    grid = SP.bench_grid(n=n, sr=SR)
+    obs = SP.bench_model(grid, par, k_max=k_cap).numpy() * np.random.default_rng(
+        4
+    ).standard_exponential((n_mics, 1, n // 2 + 1))
+    batch = MD.bench_batch(
+        name="planted", power=obs, sr=SR, carrier_mean=np.array([f0]), n_samples=n, k_cap=k_cap
+    )
+    optim = FT.OptimSpec(adam_steps=150, adam_lr=0.05, lbfgs_iters=60)
+    free = np.asarray(
+        MD.params_to_dict(FT.fit_support(batch, mode="bench", optim=optim).params)["profile"][
+            "profile_db"
+        ]
+    )[0]
+
+    # a centre 12 dB above the truth on every order, but a WIDTH only below k = 5
+    centre = truth_db + 12.0
+    sigma = np.array([0.05] * 4 + [np.nan] * 4)
+    init = FT.ProfileInit(profile_db=centre[None, :], sigma_db=sigma[None, :], source="unit-test")
+    out = FT.fit_support(batch, mode="bench", optim=optim, profile_init=init)
+    got = np.asarray(MD.params_to_dict(out.params)["profile"]["profile_db"])[0]
+
+    assert np.abs(got[:4] - centre[:4]).max() < 1.0
+    assert np.abs(got[4:] - free[4:]).max() < np.abs(got[4:] - centre[4:]).min()
+    assert out.diagnostics["profile_init"]["n_widths"] == 4
+    assert out.diagnostics["profile_init"]["n_centres"] == 4
+
+
 def test_floor_only_mode_freezes_the_combs_shape_and_frees_only_its_level():
     """``--floor-only`` must create no PER-ORDER comb site: the comb's shape and
     dynamics arrive frozen and the only comb freedom is one shared level."""

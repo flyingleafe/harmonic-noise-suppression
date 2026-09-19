@@ -267,6 +267,14 @@ class Measured:
     line_snr_db: np.ndarray
     gamma_hz: np.ndarray
     resolution_hz: float
+    #: ``(R, K)`` per-line prior centre from OUTSIDE the batch, NaN where the
+    #: two-regime rule above keeps its say, and the matching per-line sd. The
+    #: four-motor rig fit enters the multi-rotor estimator's profile here
+    #: (``scripts/noise_v2_fourmotor.py``): it is a point estimate with a
+    #: measured per-order error budget, so it belongs in the prior's centre and
+    #: width, never in the likelihood.
+    profile_prior_db: np.ndarray | None = None
+    profile_prior_sd_db: np.ndarray | None = None
 
     def profile_prior(self, priors: Priors) -> tuple[Tensor, Tensor]:
         """``(loc, scale)`` of the two-regime profile prior, per line."""
@@ -278,6 +286,12 @@ class Measured:
             float(self.floor_mean_db) + float(priors.profile_below_offset_db),
         )
         scale = np.where(visible, float(priors.profile_db_sd), float(priors.profile_below_sd))
+        if self.profile_prior_db is not None:
+            ext = np.asarray(self.profile_prior_db, dtype=np.float64)
+            loc = np.where(np.isfinite(ext), ext, loc)
+        if self.profile_prior_sd_db is not None:
+            sd = np.asarray(self.profile_prior_sd_db, dtype=np.float64)
+            scale = np.where(np.isfinite(sd), sd, scale)
         return (
             torch.as_tensor(loc, dtype=torch.float64),
             torch.as_tensor(scale, dtype=torch.float64),

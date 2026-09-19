@@ -70,6 +70,41 @@ def gamma_ladder(gamma_hz: Any) -> dict[str, Any]:
     )
 
 
+def load_profile_init(p: dict[str, Any]) -> Any:
+    """The unit's ``--profile-init`` file, with ``--profile-prior-sigma`` applied.
+
+    The ladder is ``k:sd`` pairs read left to right: ``16:1,48:3`` gives 1 dB
+    up to k = 16, 3 dB from 17 to 48 and NaN (the model's own prior) above. It
+    only ever REPLACES the file's widths, and only where the file supplies a
+    centre — an order the estimator never measured must not acquire a prior.
+    """
+    import numpy as np
+
+    from experiments.noise_model import fit as FT
+
+    path = p.get("profile_init")
+    if not path:
+        return None
+    init = FT.load_profile_init(path)
+    spec = p.get("profile_prior_sigma")
+    if not spec:
+        return init
+    db = np.atleast_2d(np.asarray(init.profile_db, dtype=np.float64))
+    k = np.arange(1, db.shape[1] + 1)
+    sigma = np.full(db.shape[1], np.nan)
+    lo = 1
+    for tier in str(spec).split(","):
+        hi_s, _, sd_s = tier.partition(":")
+        hi = int(hi_s)
+        sigma[(k >= lo) & (k <= hi)] = float(sd_s)
+        lo = hi + 1
+    import dataclasses
+
+    return dataclasses.replace(
+        init, sigma_db=np.where(np.isfinite(db), np.broadcast_to(sigma[None, :], db.shape), np.nan)
+    )
+
+
 # ── one unit ────────────────────────────────────────────────────────────────
 
 
@@ -91,14 +126,20 @@ def worker(unit: Unit) -> dict[str, Any]:
     out_dir = Path(p["out_dir"])
     optim = FT.OptimSpec(**p["optim"])
     frozen = p.get("frozen")
+    prof_init = load_profile_init(p)
 
     if mode == "bench":
         support = SU.load_support(str(p["spec"]))
+        carrier = np.asarray(support.carrier_rev_s, dtype=np.float64).mean(axis=1)
+        if p.get("apply_carrier_offset"):
+            if prof_init is None or prof_init.carrier_offset_rev_s is None:
+                raise SystemExit("--apply-carrier-offset needs a --profile-init with offsets")
+            carrier = carrier + prof_init.carrier_offset_rev_s
         batch = MD.bench_batch(
             name=support.name,
             power=np.asarray(support.power, dtype=np.float64),
             sr=int(support.sr),
-            carrier_mean=np.asarray(support.carrier_rev_s, dtype=np.float64).mean(axis=1),
+            carrier_mean=carrier,
             # the support's own sample count: recovering it as 2 (F - 1) is
             # n - 1 for an odd segment and stretches the model's bin grid
             n_samples=int(support.n_fft),
@@ -138,6 +179,7 @@ def worker(unit: Unit) -> dict[str, Any]:
         pin=MD.dynamics_pin(p.get("pin")),
         low_orders=p.get("low_orders"),
         optim=optim,
+        profile_init=prof_init,
         progress=int(p.get("progress", 0)),
     )
     # a RESTART lands beside its siblings and is reduced to one reported fit
@@ -850,6 +892,31 @@ def main(argv: list[str] | None = None) -> int:
             "identified ridge coordinate is what the fit should move along",
         )
         p.add_argument(
+            "--profile-init",
+            default=None,
+            metavar="NPZ",
+            help="an .npz (or .json) carrying profile_db (R, K) in the model's units and, "
+            "optionally, sigma_db (R, K) and carrier_offset_rev_s (R,). The profile is "
+            "INITIALISED there wherever the centre is finite, and the Gaussian profile prior "
+            "is re-centred and re-scaled wherever the width is finite too; NaN leaves the "
+            "model's own initialisation and two-regime prior untouched. Written by "
+            "scripts/noise_v2_fourmotor.py from the multi-rotor estimator",
+        )
+        p.add_argument(
+            "--profile-prior-sigma",
+            default=None,
+            metavar="K:SD,...",
+            help="override the file's per-order prior widths with a piecewise-constant "
+            "ladder, e.g. '16:1,48:3' = 1 dB for k <= 16, 3 dB for 17 <= k <= 48 and the "
+            "model's own prior above. Only orders the file gives a centre for are affected",
+        )
+        p.add_argument(
+            "--apply-carrier-offset",
+            action="store_true",
+            help="add the --profile-init file's carrier_offset_rev_s to the support's frozen "
+            "bench carriers (bench mode only)",
+        )
+        p.add_argument(
             "--threads",
             type=int,
             default=1,
@@ -941,6 +1008,9 @@ def main(argv: list[str] | None = None) -> int:
                             progress=int(args.progress),
                             threads=int(args.threads),
                             pin=_pin_from_args(args),
+                            profile_init=args.profile_init,
+                            profile_prior_sigma=args.profile_prior_sigma,
+                            apply_carrier_offset=bool(args.apply_carrier_offset),
                             restart_tag=tag,
                         ),
                     )
@@ -975,6 +1045,8 @@ def main(argv: list[str] | None = None) -> int:
                     progress=int(args.progress),
                     threads=int(args.threads),
                     pin=_pin_from_args(args),
+                    profile_init=args.profile_init,
+                    profile_prior_sigma=args.profile_prior_sigma,
                     low_orders=int(args.low_orders) if low_k else None,
                 ),
             )

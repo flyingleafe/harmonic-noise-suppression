@@ -78,15 +78,78 @@ from . import spectrum as SP
 __all__ = [
     "FitOutcome",
     "OptimSpec",
+    "ProfileInit",
     "Seeds",
     "fit_support",
     "gamma_low_order_check",
     "initial_values",
+    "load_profile_init",
     "measure_batch",
     "seeds",
     "span_pin_record",
     "write_fit",
 ]
+
+
+@dataclass(frozen=True)
+class ProfileInit:
+    """A per-line ``profile_db`` centre measured OUTSIDE the likelihood.
+
+    ``profile_db`` is ``(R, K)`` in the model's own units and ``sigma_db`` the
+    matching per-line prior width. **NaN means "leave the model alone"**: a NaN
+    centre keeps the initialiser's measured value, a NaN width keeps the R3
+    two-regime prior, so a file can never pin an order its source never
+    measured. Both are re-shaped to the batch's ``(R, K)`` by
+    :meth:`aligned` — padded with NaN when the source is narrower, cut when it
+    is wider.
+
+    Written by ``scripts/noise_v2_fourmotor.py estimate`` from the multi-rotor
+    estimator of :mod:`.multirotor`, whose per-order error budget is the sd.
+    """
+
+    profile_db: np.ndarray
+    sigma_db: np.ndarray | None = None
+    carrier_offset_rev_s: np.ndarray | None = None
+    source: str = ""
+
+    def aligned(self, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+        """``(centre, sd)`` on the batch's ``(R, K)`` grid, NaN-padded."""
+        r_n, k_n = int(shape[0]), int(shape[1])
+        db = np.atleast_2d(np.asarray(self.profile_db, dtype=np.float64))
+        if int(db.shape[0]) != r_n:
+            raise ValueError(f"profile init has {int(db.shape[0])} rotors, the batch has {r_n}")
+        sd = (
+            np.full_like(db, np.nan)
+            if self.sigma_db is None
+            else np.atleast_2d(np.asarray(self.sigma_db, dtype=np.float64))
+        )
+        if sd.shape != db.shape:
+            raise ValueError(f"sigma_db {sd.shape} does not match profile_db {db.shape}")
+        out_db = np.full((r_n, k_n), np.nan)
+        out_sd = np.full((r_n, k_n), np.nan)
+        m = min(k_n, int(db.shape[1]))
+        out_db[:, :m] = db[:, :m]
+        out_sd[:, :m] = sd[:, :m]
+        return out_db, out_sd
+
+
+def load_profile_init(path: Any) -> ProfileInit:
+    """Read a ``.npz`` (or ``.json``) ``profile_db`` / ``sigma_db`` payload."""
+    p = Path(path)
+    if p.suffix == ".json":
+        d = json.loads(p.read_text())
+    else:
+        with np.load(p, allow_pickle=False) as z:
+            d = {k: z[k] for k in z.files}
+    if "profile_db" not in d:
+        raise ValueError(f"{p}: no profile_db")
+    off = d.get("carrier_offset_rev_s")
+    return ProfileInit(
+        profile_db=np.asarray(d["profile_db"], dtype=np.float64),
+        sigma_db=None if d.get("sigma_db") is None else np.asarray(d["sigma_db"], dtype=np.float64),
+        carrier_offset_rev_s=None if off is None else np.asarray(off, dtype=np.float64).reshape(-1),
+        source=str(p),
+    )
 
 
 @dataclass(frozen=True)
@@ -228,8 +291,15 @@ def seeds(
     frozen: dict[str, Any] | None = None,
     pin: dict[str, Any] | None = None,
     low_orders: int | None = None,
+    profile_init: ProfileInit | None = None,
 ) -> Seeds:
-    """Measure the support and seed every free site from the measurement."""
+    """Measure the support and seed every free site from the measurement.
+
+    ``profile_init`` overrides the measured profile per line where it carries a
+    finite number: the initialisation everywhere it does, and the prior's
+    centre and width wherever it also carries a finite sd. See
+    :class:`ProfileInit`.
+    """
     free = MD.free_blocks(mode)
     fz = dict(frozen or {})
     span_pinned = MD.span_pinned_sites(batch, priors=priors)
@@ -322,18 +392,33 @@ def seeds(
                     gamma_median[r, k - 1] * math.exp(2.0 * priors.gamma_log_sd),
                 )
             )
+    ext_db: np.ndarray | None = None
+    ext_sd: np.ndarray | None = None
+    if profile_init is not None:
+        ext_db, ext_sd = profile_init.aligned(shape)
     measured = MD.Measured(
         floor_mean_db=floor_mean_db,
         profile_db=prof,
         line_snr_db=snr,
         gamma_hz=gamma,
         resolution_hz=batch.resolution_hz,
+        # the prior moves only where a WIDTH was supplied: an order the study
+        # could not measure keeps the model's own two-regime centre even though
+        # its initialisation comes from the estimator
+        profile_prior_db=(
+            None
+            if ext_db is None or ext_sd is None
+            else np.where(np.isfinite(ext_sd), ext_db, np.nan)
+        ),
+        profile_prior_sd_db=ext_sd,
     )
 
     if "dynamics" in free and "gamma_hz" not in fz:
         out["gamma_hz"] = t(gamma)
     if "profile" in free:
-        out["profile_db"] = t(prof)
+        out["profile_db"] = t(
+            prof if ext_db is None else np.where(np.isfinite(ext_db), ext_db, prof)
+        )
         if flight and "amp_exp" not in span_pinned:
             out["amp_exp"] = t(priors.amp_exp[0])
 
@@ -546,6 +631,23 @@ def _log_space_params(guide: AutoDelta) -> list[Tensor]:
     return out
 
 
+def _profile_init_record(
+    profile_init: ProfileInit | None, measured: MD.Measured
+) -> dict[str, Any] | None:
+    """What the fit JSON says about an external profile: where it came from and
+    how many lines it actually moved."""
+    if profile_init is None:
+        return None
+    loc, sd = measured.profile_prior_db, measured.profile_prior_sd_db
+    off = profile_init.carrier_offset_rev_s
+    return dict(
+        source=profile_init.source,
+        n_centres=0 if loc is None else int(np.isfinite(loc).sum()),
+        n_widths=0 if sd is None else int(np.isfinite(sd).sum()),
+        carrier_offset_rev_s=None if off is None else [float(v) for v in off],
+    )
+
+
 def fit_support(
     batch: MD.SupportBatch,
     *,
@@ -556,6 +658,7 @@ def fit_support(
     low_orders: int | None = None,
     optim: OptimSpec = OptimSpec(),
     forward_kw: dict[str, Any] | None = None,
+    profile_init: ProfileInit | None = None,
     progress: int = 0,
 ) -> FitOutcome:
     """MAP-fit one support (or one pooled set of flight windows).
@@ -569,12 +672,23 @@ def fit_support(
     the model, not a parameter under a tight prior: the guide allocates
     nothing for it, the log-prior counts nothing for it, and the recorded
     ``params`` carry the pinned value.
+
+    ``profile_init`` enters the profile's INITIALISATION and, where it carries
+    a width, its prior centre and sd (:class:`ProfileInit`).
     """
     torch.manual_seed(int(optim.seed))
     pyro.set_rng_seed(int(optim.seed))
     pyro.clear_param_store()
 
-    measured = seeds(batch, mode=mode, priors=priors, frozen=frozen, pin=pin, low_orders=low_orders)
+    measured = seeds(
+        batch,
+        mode=mode,
+        priors=priors,
+        frozen=frozen,
+        pin=pin,
+        low_orders=low_orders,
+        profile_init=profile_init,
+    )
     full = replace(batch, measured=measured.measured)
     init = dict(measured.init)
     if optim.init_jitter > 0.0:
@@ -757,6 +871,7 @@ def fit_support(
             ),
             gamma_low_order_check=gamma_low_order_check(fitted.gamma_hz, batch=full),
             span_pins=span_pin_record(full, priors=priors),
+            profile_init=_profile_init_record(profile_init, measured.measured),
             measured=dict(
                 floor_mean_db=measured.measured.floor_mean_db,
                 resolution_hz=measured.measured.resolution_hz,
