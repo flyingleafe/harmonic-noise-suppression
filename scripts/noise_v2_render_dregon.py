@@ -1714,12 +1714,20 @@ HUMP_GAMMAS: tuple[float, ...] = (13.0, 30.0, 67.0, 130.0)
 #: Extra comb shifts, at the FITTED (needle) widths: the level dose-response
 #: that separates "the comb is too quiet" from "the comb is the wrong shape".
 HUMP_LEVEL_SWEEP_DB: tuple[float, ...] = (6.0, 12.0, 18.0, 21.0, 24.0)
+#: The shift the width sweep is REPEATED at: the dose-response's own optimum,
+#: where the needle comb is loud enough for the tracker to lock on. At the
+#: fitted level every width scores the same (nothing is tracked at all), so a
+#: width comparison there compares two failures.
+WIDTH_AT_SHIFT_DB = 21.0
 
-#: Orders and half-width the level match is read over: k=1 is excluded because
-#: its B=64 annulus falls below the 30 Hz band edge, and B=64 is the
-#: assignment's hump band.
-MATCH_ORDERS: tuple[int, ...] = tuple(range(2, 9))
-MATCH_B = 64.0
+#: Orders and half-width the level match is read over. B=16 Hz, NOT the 64 Hz
+#: hump band: at 64 Hz the raw excess is mostly floor-curvature bias (the
+#: half-order null reads +27 % of band power at k=1 and +7 % at k=2 on a real
+#: window), and the match is solved on the NULL-SUBTRACTED sum, which is
+#: carrier-locked power only. k=1 is included: at B=16 its annuli are inside
+#: the band, and it is the order the R3 fit's `low_order_gain_db` loads most.
+MATCH_ORDERS: tuple[int, ...] = tuple(range(1, 9))
+MATCH_B = 16.0
 MATCH_SHIFT_BOUNDS = (-12.0, 42.0)
 
 PROFILE_ORDERS = (2, 4, 8)
@@ -1727,6 +1735,12 @@ PROFILE_STEP_HZ = 1.0
 #: The null offset: bands halfway between two orders, where a smooth floor
 #: reads exactly what it reads on-order and a comb reads nothing.
 NULL_OFFSET = 0.5
+
+#: An order's width is only fitted where its carrier-locked power is above the
+#: estimator's own scatter. The half-order null of a real window reads
+#: +-0.5 % of band power order to order, so a peak tracked excess at or below
+#: this is reported as "below noise" instead of as a width.
+WIDTH_MIN_TRACKED_FRAC = 0.005
 
 
 def _mic_power(audio: np.ndarray, *, n: int, hop: int) -> tuple[dict[str, np.ndarray], np.ndarray]:
@@ -1900,9 +1914,10 @@ def effective_width_hz(
         n_points=int(ok.sum()),
         at_grid_edge=False,
         concentration=None,
-        tracked_frac=None,
+        tracked_frac=(float(e[ok][-1]) if int(ok.sum()) else None),
+        below_noise=True,
     )
-    if int(ok.sum()) < 3 or float(e[ok].max()) <= 0.0:
+    if int(ok.sum()) < 3 or float(e[ok].max()) <= WIDTH_MIN_TRACKED_FRAC:
         return empty
     e, b = e[ok], b[ok]
     grid = np.exp(np.linspace(np.log(0.3), np.log(600.0), 400))
@@ -1924,6 +1939,7 @@ def effective_width_hz(
         at_grid_edge=bool(g <= 0.31 or g >= 599.0),
         concentration=(float(e[0] / e[-1]) if e[-1] > 0.0 else None),
         tracked_frac=float(e[-1]),
+        below_noise=False,
     )
 
 
@@ -2098,7 +2114,8 @@ def hump_diagnostics(
             )
             for i, k in enumerate(sweep["orders"])
         ]
-    out["match_fraction"] = match_fraction(out["excess_mic_mean"])
+    out["match_fraction"] = match_fraction(out["excess_mic_mean"], out["null_mic_mean"])
+    out["match_fraction_mic0"] = match_fraction(out["excess_mic0"], out["null_mic0"])
     grid = np.arange(-1.5 * fbar, 1.5 * fbar + 1e-9, PROFILE_STEP_HZ)
     profiles: list[dict[str, Any]] = []
     curves: dict[int, dict[str, np.ndarray]] = {}
@@ -2132,22 +2149,49 @@ def hump_diagnostics(
     return out
 
 
-def match_fraction(excess: dict[str, Any]) -> float:
-    """The level-match statistic: tracked excess over ``MATCH_ORDERS`` at 64 Hz."""
+def match_fraction(excess: dict[str, Any], null: dict[str, Any]) -> float:
+    """The level-match statistic: CARRIER-LOCKED power over ``MATCH_ORDERS``.
+
+    The on-order excess minus the half-order null at ``MATCH_B``, summed over
+    the orders and divided by band power. The null subtraction is what makes it
+    a comb statistic rather than a floor-shape statistic.
+    """
     orders = list(excess["orders"])
     ib = list(excess["bandwidths_hz"]).index(MATCH_B)
+    jb = list(null["bandwidths_hz"]).index(MATCH_B)
     total = 0.0
     for k in MATCH_ORDERS:
         v = excess["excess_frac"][orders.index(int(k))][ib]
-        if v is not None:
-            total += float(v)
+        w = null["excess_frac"][list(null["orders"]).index(int(k))][jb]
+        if v is not None and w is not None:
+            total += float(v) - float(w)
     return float(total)
 
 
 def arm_match_fraction(audio: np.ndarray, f0_tracks: np.ndarray, *, sr: int) -> float:
     """:func:`match_fraction` of a signal, on the mic-MEAN coarse front end."""
     power, centres = _mic_power(audio, n=HUMP_N, hop=HUMP_HOP)
-    return match_fraction(order_excess(power["mic_mean"], centres, f0_tracks, sr=sr, n=HUMP_N))
+    return match_fraction(
+        order_excess(
+            power["mic_mean"],
+            centres,
+            f0_tracks,
+            sr=sr,
+            n=HUMP_N,
+            ks=MATCH_ORDERS,
+            bs=(MATCH_B,),
+        ),
+        order_excess(
+            power["mic_mean"],
+            centres,
+            f0_tracks,
+            sr=sr,
+            n=HUMP_N,
+            ks=MATCH_ORDERS,
+            bs=(MATCH_B,),
+            off=NULL_OFFSET,
+        ),
+    )
 
 
 # ── the arms ────────────────────────────────────────────────────────────────
@@ -2221,6 +2265,19 @@ def hump_arms() -> tuple[HumpArm, ...]:
                 f"L+{int(s)}",
                 f"v2 at the fitted widths with the comb {s:g} dB up: the level dose-response",
                 shift_db=s,
+            )
+        )
+    for g in HUMP_GAMMAS:
+        out.append(
+            HumpArm(
+                f"v2_g{int(g)}_plus{int(WIDTH_AT_SHIFT_DB)}db",
+                "v2",
+                f"W{g:g}",
+                f"v2 at a k-independent {g:g} Hz with the comb {WIDTH_AT_SHIFT_DB:g} dB up "
+                "— the width comparison at EQUAL comb power, at the level where the needle "
+                "comb is tracked",
+                gamma_hz=g,
+                shift_db=WIDTH_AT_SHIFT_DB,
             )
         )
     return tuple(out)
@@ -2604,11 +2661,20 @@ def hump_verdicts(payload: dict[str, Any]) -> dict[str, Any]:
         v2 = _harm(row, "v2")
         wide = [row["arms"][n] for n in row["arms"] if n.endswith("_matched") and "_g" in n]
         narrow = row["arms"].get("v2_matched")
+        loud = row["arms"].get(f"v2_plus{int(WIDTH_AT_SHIFT_DB)}db")
+        loud_wide = [
+            row["arms"][n]
+            for n in row["arms"]
+            if n.endswith(f"_plus{int(WIDTH_AT_SHIFT_DB)}db") and "_g" in n
+        ]
         pits = {n: e.get("pit_mae") for n, e in row["arms"].items()}
         have_pit = all(v is not None for v in pits.values())
         widths_real = {k: _width_at(real, k) for k in (1, 2, 4, 8)}
         widths_v2 = {k: _width_at(v2, k) for k in (1, 2, 4, 8)}
         best_wide = min((e["pit_mae"] for e in wide if e.get("pit_mae") is not None), default=None)
+        best_loud_wide = min(
+            (e["pit_mae"] for e in loud_wide if e.get("pit_mae") is not None), default=None
+        )
         out[key] = dict(
             broad_humps_in_real=dict(
                 supported=bool(all(_wider_than(widths_real[k], widths_v2[k], 2.0) for k in (1, 2))),
@@ -2628,6 +2694,22 @@ def hump_verdicts(payload: dict[str, Any]) -> dict[str, Any]:
                 narrow_matched_pit=(narrow or {}).get("pit_mae"),
                 criterion=(
                     "at the SAME hump fraction, a widened comb tracks better than the needle comb"
+                ),
+            ),
+            width_is_the_lever_at_equal_power=dict(
+                supported=bool(
+                    have_pit
+                    and best_loud_wide is not None
+                    and loud is not None
+                    and loud.get("pit_mae") is not None
+                    and best_loud_wide < loud["pit_mae"]
+                ),
+                best_wide_pit=best_loud_wide,
+                needle_pit=(loud or {}).get("pit_mae"),
+                shift_db=WIDTH_AT_SHIFT_DB,
+                criterion=(
+                    f"at the SAME comb power ({WIDTH_AT_SHIFT_DB:g} dB up, where the needle "
+                    "comb IS tracked), a widened comb tracks better than the needle comb"
                 ),
             ),
             level_is_the_lever=dict(
@@ -2665,6 +2747,28 @@ HUMP_FIG_COLOURS = {
     "v2_g130_matched": "tab:purple",
     "legacy_needle": "tab:brown",
 }
+
+
+def _detrend_db(prof: np.ndarray, grid: np.ndarray, fbar: float, k: int) -> np.ndarray:
+    """A profile in dB over the log-linear trend through its two valleys.
+
+    Display only. The floor's -7 dB/oct tilt is several dB across one order
+    spacing and swamps every panel; the trend through the two inter-order
+    valleys (0.35-0.65 fbar on each side, in log f) removes it and puts 0 dB at
+    the valleys, which is where :func:`profile_stats` reads its reference.
+    """
+    freqs = np.maximum(float(k) * float(fbar) + grid, 1.0)
+    lo = (grid <= -0.35 * fbar) & (grid >= -0.65 * fbar)
+    hi = (grid >= 0.35 * fbar) & (grid <= 0.65 * fbar)
+    if lo.any() and hi.any():
+        xl, xh = float(np.log(freqs[lo]).mean()), float(np.log(freqs[hi]).mean())
+        yl = float(np.log(max(float(np.median(prof[lo])), 1e-300)))
+        yh = float(np.log(max(float(np.median(prof[hi])), 1e-300)))
+        slope = (yh - yl) / max(xh - xl, 1e-12)
+        base = np.exp(yl + slope * (np.log(freqs) - xl))
+    else:
+        base = np.full_like(prof, max(float(np.median(prof)), 1e-300))
+    return 10.0 * np.log10(np.maximum(prof, 1e-300) / np.maximum(base, 1e-300))
 
 
 def write_hump_figures(payload: dict[str, Any], figures: dict[str, Any], out: Path) -> list[str]:
@@ -2721,20 +2825,20 @@ def write_hump_figures(payload: dict[str, Any], figures: dict[str, Any], out: Pa
                 if arm is None:
                     continue
                 grid = arm["grid"]
-                prof = arm["profiles"][int(k)]["rotor_mean"]
-                side = (np.abs(grid) >= 0.4 * fbar) & (np.abs(grid) <= 0.6 * fbar)
-                ref = float(np.median(prof[side]))
+                sel = np.abs(grid) <= 0.75 * fbar
+                db = _detrend_db(arm["profiles"][int(k)]["rotor_mean"], grid, fbar, k)
                 ax.plot(
-                    grid,
-                    10.0 * np.log10(np.maximum(prof, 1e-300) / max(ref, 1e-300)),
+                    grid[sel],
+                    db[sel],
                     color=HUMP_FIG_COLOURS.get(name, "grey"),
                     lw=1.0,
                     label=name,
                 )
             ax.axvline(0.0, color="green", lw=0.5, ls=":")
+            ax.axhline(0.0, color="grey", lw=0.4)
             ax.grid(alpha=0.3)
             ax.set_xlabel("delta f [Hz]")
-            ax.set_ylabel(f"{rec.split('_')[0]}\ndB over inter-order")
+            ax.set_ylabel(f"{rec.split('_')[0]}\ndB over the valley trend")
             ax.set_title(f"k = {k}, rotor-centred")
             if i == 0 and j == 0:
                 ax.legend(fontsize=6)
@@ -2748,17 +2852,16 @@ def write_hump_figures(payload: dict[str, Any], figures: dict[str, Any], out: Pa
         fbar = float(row["mean_reference_rps"])
         for j, k in enumerate((4, 8)):
             ax = axes[i][j]
-            for name in ("real", "legacy", "v2", "v2_matched"):
+            for name in ("real", "legacy", "v2", "v2_matched", "v2_g67_matched"):
                 arm = blob["arms"].get(name)
                 if arm is None:
                     continue
                 grid = arm["grid"]
-                prof = arm["profiles"][int(k)]["mean_carrier"]
                 sel = np.abs(grid) <= 0.6 * fbar
-                ref = float(np.median(prof[(np.abs(grid) >= 0.4 * fbar) & sel]))
+                db = _detrend_db(arm["profiles"][int(k)]["mean_carrier"], grid, fbar, k)
                 ax.plot(
                     grid[sel],
-                    10.0 * np.log10(np.maximum(prof[sel], 1e-300) / max(ref, 1e-300)),
+                    db[sel],
                     color=HUMP_FIG_COLOURS.get(name, "grey"),
                     lw=1.0,
                     label=name,
@@ -2792,23 +2895,35 @@ def write_hump_figures(payload: dict[str, Any], figures: dict[str, Any], out: Pa
                     ms=11,
                     color=axes[0].lines[-1].get_color(),
                 )
-            widths = []
-            wpits = []
-            for g in HUMP_GAMMAS:
-                arm = r["arms"].get(f"v2_g{int(g)}_matched")
-                if arm is not None and arm.get("pit_mae") is not None:
-                    widths.append(float(g))
-                    wpits.append(float(arm["pit_mae"]))
-            narrow = r["arms"].get("v2_matched")
-            if narrow is not None and narrow.get("pit_mae") is not None:
-                widths = [0.6] + widths
-                wpits = [float(narrow["pit_mae"])] + wpits
-            axes[1].plot(widths, wpits, "o-", lw=1.0, label=rec)
+            for suffix, style in (
+                ("_matched", "o--"),
+                (f"_plus{int(WIDTH_AT_SHIFT_DB)}db", "s-"),
+            ):
+                widths: list[float] = []
+                wpits: list[float] = []
+                base = r["arms"].get(
+                    "v2_matched" if suffix == "_matched" else f"v2_plus{int(WIDTH_AT_SHIFT_DB)}db"
+                )
+                if base is not None and base.get("pit_mae") is not None:
+                    widths.append(0.6)
+                    wpits.append(float(base["pit_mae"]))
+                for g in HUMP_GAMMAS:
+                    a2 = r["arms"].get(f"v2_g{int(g)}{suffix}")
+                    if a2 is not None and a2.get("pit_mae") is not None:
+                        widths.append(float(g))
+                        wpits.append(float(a2["pit_mae"]))
+                axes[1].plot(
+                    widths,
+                    wpits,
+                    style,
+                    lw=1.0,
+                    label=f"{rec} {'matched' if suffix == '_matched' else f'+{WIDTH_AT_SHIFT_DB:g} dB'}",
+                )
             axes[0].axhline(float(r["arms"]["real"]["pit_mae"]), color="grey", lw=0.5, ls=":")
             axes[1].axhline(
                 float(r["arms"]["legacy"]["pit_mae"]), color="tab:orange", lw=0.5, ls=":"
             )
-        axes[0].set_xlabel("comb shift [dB] (star: the hump-fraction match)")
+        axes[0].set_xlabel("comb shift [dB] (star: the carrier-locked-power match)")
         axes[0].set_ylabel("PIT MAE [rev/s]")
         axes[0].set_yscale("log")
         axes[0].set_title("level dose-response, needle comb (grey: real)")
@@ -2816,7 +2931,7 @@ def write_hump_figures(payload: dict[str, Any], figures: dict[str, Any], out: Pa
         axes[1].set_ylabel("PIT MAE [rev/s]")
         axes[1].set_xscale("log")
         axes[1].set_yscale("log")
-        axes[1].set_title("width at the MATCHED hump fraction (orange: legacy)")
+        axes[1].set_title("width, at the match (dashed) and at equal power (solid)")
         for ax in axes:
             ax.grid(alpha=0.3)
             ax.legend(fontsize=7)
@@ -2864,6 +2979,7 @@ def hump_findings(payload: dict[str, Any], *, job: str | None, figures: Sequence
     v0 = list(payload["verdicts"].values())
     broad = [x["broad_humps_in_real"]["supported"] for x in v0]
     width_lever = [x["width_is_the_lever"]["supported"] for x in v0]
+    width_equal = [x["width_is_the_lever_at_equal_power"]["supported"] for x in v0]
     level_lever = [x["level_is_the_lever"]["supported"] for x in v0]
     o.append("## Verdict")
     o.append("")
@@ -2873,10 +2989,16 @@ def hump_findings(payload: dict[str, Any], *, job: str | None, figures: Sequence
         f"({sum(broad)}/{len(broad)} windows)."
     )
     o.append(
-        f"* **Is that width the thing HPPNet needs?** "
+        f"* **Is that width the thing HPPNet needs — at the same hump fraction?** "
         f"{'YES' if all(width_lever) else ('PARTLY' if any(width_lever) else 'NO')} "
-        f"({sum(width_lever)}/{len(width_lever)} windows: at the same hump fraction a "
-        f"widened comb beats the needle comb)."
+        f"({sum(width_lever)}/{len(width_lever)} windows: a widened comb beats the needle "
+        f"comb at the matched k<=8 carrier-locked power)."
+    )
+    o.append(
+        f"* **Is that width the thing HPPNet needs — at the same comb POWER "
+        f"({WIDTH_AT_SHIFT_DB:g} dB up, where the needle comb is tracked)?** "
+        f"{'YES' if all(width_equal) else ('PARTLY' if any(width_equal) else 'NO')} "
+        f"({sum(width_equal)}/{len(width_equal)} windows)."
     )
     o.append(
         f"* **Is comb LEVEL the thing HPPNet needs?** "
@@ -3013,9 +3135,10 @@ def hump_findings(payload: dict[str, Any], *, job: str | None, figures: Sequence
         "in-frame drift with it: the `v2` row, whose fitted gamma_rk is under 1 Hz at "
         "every k <= 12, IS the instrumental floor this is read against. `>600` means the "
         "curve was still growing at B = 64 Hz — no width is identifiable below the order "
-        "spacing; `—` means the order carries no positive tracked excess at all. The "
-        "bracketed number is the assumption-free concentration, excess(4 Hz) / "
-        "excess(64 Hz)."
+        f"spacing; `—` means the order's carrier-locked power is at or below "
+        f"{100.0 * WIDTH_MIN_TRACKED_FRAC:g} % of band power, the estimator's own "
+        "order-to-order scatter, so no width is fitted at all. The bracketed number is "
+        "the assumption-free concentration, excess(4 Hz) / excess(64 Hz)."
     )
     o.append("")
     o.append("| window | arm | " + " | ".join(f"k={k}" for k in (1, 2, 3, 4, 6, 8, 12)) + " |")
@@ -3239,11 +3362,27 @@ def hump_reading(payload: dict[str, Any]) -> list[str]:
     return o
 
 
+def _best_level(rows: Sequence[dict[str, Any]]) -> tuple[float, list[float | None], float | None]:
+    """The comb shift of the level sweep with the lowest MEAN PIT MAE."""
+    best: tuple[float, list[float | None], float | None] = (0.0, [], None)
+    for s in (0.0, *HUMP_LEVEL_SWEEP_DB):
+        name = "v2" if s == 0.0 else f"v2_plus{int(s)}db"
+        pits = [(r["arms"].get(name) or {}).get("pit_mae") for r in rows]
+        ok = [p for p in pits if p is not None]
+        if len(ok) != len(rows):
+            continue
+        mean = float(np.mean(ok))
+        if best[2] is None or mean < best[2]:
+            best = (float(s), list(pits), mean)
+    return best
+
+
 def hump_proposal(payload: dict[str, Any]) -> list[str]:
     """The R4 proposal, keyed to the verdicts and quoting their numbers."""
     rows = list(payload["supports"].values())
     v = list(payload["verdicts"].values())
     width_lever = any(x["width_is_the_lever"]["supported"] for x in v)
+    width_equal = any(x["width_is_the_lever_at_equal_power"]["supported"] for x in v)
     level_lever = any(x["level_is_the_lever"]["supported"] for x in v)
     broad = [x["broad_humps_in_real"] for x in v]
     w1 = [b["effective_hwhm_real_hz"].get(1) or b["effective_hwhm_real_hz"].get("1") for b in broad]
@@ -3256,6 +3395,13 @@ def hump_proposal(payload: dict[str, Any]) -> list[str]:
         g: [(r["arms"].get(f"v2_g{int(g)}_matched") or {}).get("pit_mae") for r in rows]
         for g in HUMP_GAMMAS
     }
+    loud_key = f"v2_plus{int(WIDTH_AT_SHIFT_DB)}db"
+    loud_pits = [(r["arms"].get(loud_key) or {}).get("pit_mae") for r in rows]
+    loud_wide_pits = {
+        g: [(r["arms"].get(f"v2_g{int(g)}_{loud_key[3:]}") or {}).get("pit_mae") for r in rows]
+        for g in HUMP_GAMMAS
+    }
+    best_level = _best_level(rows)
     o = ["## R4 proposal", ""]
     o.append(
         "The three options this study was asked to decide between, each with the number "
@@ -3284,6 +3430,18 @@ def hump_proposal(payload: dict[str, Any]) -> list[str]:
             + " Hz), i.e. a log-normal prior on gamma_rk with median ~5 Hz at k=1 and a "
             "factor-3 sd would cover them — but it is worth nothing to the gate."
         )
+    )
+    o.append("")
+    o.append(
+        "The same comparison at EQUAL comb power, which is the one without a confound "
+        f"(the match gives each width a DIFFERENT shift): at {WIDTH_AT_SHIFT_DB:g} dB up, "
+        "where the needle comb is tracked at "
+        + ", ".join(_f(p) for p in loud_pits)
+        + " rev/s, the same comb widened scores "
+        + "; ".join(
+            f"{g:g} Hz: " + ", ".join(_f(p) for p in loud_wide_pits[g]) for g in HUMP_GAMMAS
+        )
+        + f" rev/s — {'better' if width_equal else 'WORSE in every window'}."
     )
     o.append("")
     o.append(
@@ -3318,7 +3476,12 @@ def hump_proposal(payload: dict[str, Any]) -> list[str]:
             + ", ".join(_f((r["arms"]["v2"]).get("pit_mae")) for r in rows)
             + " to "
             + ", ".join(_f(p) for p in matched_pits)
-            + " rev/s. `comb_gain_db` is ALREADY free in this fit and the flight Whittle "
+            + " rev/s, and the dose-response's own optimum "
+            f"({_f(best_level[0], '+.0f')} dB) reaches "
+            + ", ".join(_f(p) for p in best_level[1])
+            + f" rev/s (mean {_f(best_level[2])}) against legacy "
+            + ", ".join(_f((r["arms"]["legacy"]).get("pit_mae")) for r in rows)
+            + ". `comb_gain_db` is ALREADY free in this fit and the flight Whittle "
             "objective chose "
             f"{_f(payload['fit']['comb_gain_db'])} dB for it: the bottleneck is the "
             "objective, not the parameterisation."
