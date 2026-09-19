@@ -268,6 +268,8 @@ class TestSpecsAndCache:
             "dregon-bench": 21,
             "bench-points": 135,
             "michaels-cruise": 13,
+            "michaels-all": 10,
+            "michaels-standby": 3,
             "dregon-floor": 10,
         }
         # the floor segments never touch the five frozen scoring windows
@@ -295,6 +297,42 @@ class TestSpecsAndCache:
         )
         assert len(starts) == 8
         assert all(b - a >= 8.0 for a, b in zip(starts, starts[1:]))
+
+    def test_the_standby_pool_is_disjoint_and_inside_the_standby_band(self):
+        """Every ``michaels-standby`` window keeps all four rotors inside
+        ``gates.REGIME_BANDS["standby"]`` (20-45 rev/s) for its WHOLE span, and
+        no two windows overlap — the two properties the standby-only fit is
+        defined by. The band is read off the same label and at the same
+        telemetry resolution ``clips.windows`` uses, so the test is the rule
+        rather than a restatement of the committed starts."""
+        specs = S.support_set("michaels-standby")
+        assert len(specs) == 3
+        assert {s.args["recording"] for s in specs} == {"FLY125"}
+        assert {s.args["rps_key"] for s in specs} == {"rps_refined"}
+        spans = sorted((float(s.args["start_s"]), float(s.args["dur_s"])) for s in specs)
+        assert all(d == S.MICHAELS_STANDBY_POOL_DUR_S for _, d in spans)
+        for (t0, d0), (t1, _) in zip(spans, spans[1:]):
+            assert t0 + d0 <= t1 + 1e-9
+        # the pooled R2/R3 standby window starts here too, so both fits share
+        # their earliest 4 s of standby material
+        assert spans[0][0] == S.MICHAELS_STANDBY_STARTS[0]
+
+        try:
+            from experiments.stochastic_fit import clips as C
+
+            rec = C.load_recording("michaels-frames", "FLY125", None, "rps_refined")
+        except Exception as exc:  # pragma: no cover - dataset-gated
+            pytest.skip(f"michaels-frames FLY125 unavailable: {exc}")
+        lo_band, hi_band = 20.0, 45.0
+        for t0, dur in spans:
+            times = np.arange(rec.t_start + t0, rec.t_start + t0 + dur, 1.0 / 200.0)
+            block = rec.rps_at(times)
+            assert float(np.nanmin(block)) >= lo_band
+            assert float(np.nanmax(block)) <= hi_band
+        # and 8 s windows really do NOT admit three disjoint ones: the run the
+        # band selects is 13.50 s long, which is why the pool length is 4 s
+        eight = C.windows(rec, seconds=8.0, max_clips=64, min_rps=lo_band, max_rps=hi_band)
+        assert len(eight) < 3
 
     def test_npz_cache_round_trips(self, tmp_path):
         sr, seconds = 16000, 2.0

@@ -1070,6 +1070,24 @@ MICHAELS_CRUISE_STARTS = (16.0, 32.0, 48.0, 64.0, 96.0, 112.0, 128.0, 144.0)
 #: 13.5 s) and is already declared training material
 #: (``noise_v2_likelihood_window.TRAINING_SUPPORTS``: FLY125 @2+8).
 MICHAELS_STANDBY_STARTS = (2.0,)
+#: The STANDBY-ONLY pool of the per-regime candidate, and why it is 4 s.
+#: :func:`set_michaels_standby` wants every disjoint window the standby band
+#: admits, not one: a standby-only fit sees a 1.1x carrier span, so its
+#: likelihood is driven by how much standby MATERIAL it has. FLY125's single
+#: standby run is 1.775-15.270 s (13.50 s, measured on ``rps_refined`` at the
+#: 200 Hz telemetry grid :func:`clips.windows` reads), so at the campaign's
+#: 8 s length the band admits exactly ONE disjoint window - under the three
+#: the pool rule asks for - and at 4 s it admits THREE: 2.0, 6.0, 10.0 s,
+#: 12.0 s of material in all. The candidate grid is the 1 s stride R2's single
+#: standby start came off (:data:`MICHAELS_STANDBY_STARTS`), packed
+#: earliest-first so no two windows overlap; the first window is exactly R2's,
+#: so the per-regime fit and the pooled fit share their earliest 4 s.
+#: All three lie inside material already declared as Michael's TRAINING
+#: material (``noise_v2_likelihood_window.TRAINING_SUPPORTS``: FLY125 @2+8 and
+#: @10+8 cover 2.0-18.0 s), so this pool adds no new training span and no
+#: held-out measurement moves.
+MICHAELS_STANDBY_POOL_DUR_S = 4.0
+MICHAELS_STANDBY_POOL_STARTS = (2.0, 6.0, 10.0)
 #: FLY125's RAMP window, by the rule the FROZEN FLY124 ramp support uses: the
 #: longest contiguous 45-65 rev/s interval, CENTRED in an 8 s CONTEXT window.
 #: FLY124's scored ramp is a 0.99 s event at 31.18 s inside ``@27.68+8``, i.e.
@@ -1153,6 +1171,33 @@ def set_michaels_all() -> list[SupportSpec]:
     return [flight_michaels("FLY125", start, MICHAELS_FLIGHT_DUR_S) for start in starts]
 
 
+def set_michaels_standby() -> list[SupportSpec]:
+    """The STANDBY-ONLY flight pool of the per-regime candidate: FLY125 only.
+
+    R3's pooled fit (``michaels-all``) buys its ramp and cruise numbers with
+    standby: one speed law over a 4.7x carrier span puts the HPPNet standby
+    PIT MAE at 3.164 rev/s against the legacy 0.317, while cruise (0.694 vs
+    0.756) and ramp (3.145 vs 8.007) improve
+    (``results/noise_v2/rounds/round3/render/submit_note_michaels.md``). The
+    previous-generation model never pooled the two: it fitted standby on its
+    own export and cruise on its own, and the renderer chose between them by
+    carrier. This set is the standby half of that arrangement.
+
+    The windows are every DISJOINT window the standby band admits, at the
+    longest campaign length that admits at least three
+    (:data:`MICHAELS_STANDBY_POOL_DUR_S`, :data:`MICHAELS_STANDBY_POOL_STARTS`
+    — three 4 s windows at 2.0, 6.0, 10.0 s, because 8 s admits only one). All
+    three carry every rotor inside ``gates.REGIME_BANDS["standby"]`` = 20-45
+    rev/s for their whole span.
+
+    FLY124 carries no row: it is the frozen evaluation cohort.
+    """
+    return [
+        flight_michaels("FLY125", start, MICHAELS_STANDBY_POOL_DUR_S)
+        for start in MICHAELS_STANDBY_POOL_STARTS
+    ]
+
+
 def set_dregon_floor() -> list[SupportSpec]:
     specs = [flight_dregon(rec, start, DREGON_SCORED_DUR_S) for rec, start in DREGON_SCORED]
     specs += [
@@ -1167,6 +1212,7 @@ SUPPORT_SETS: dict[str, Callable[[], list[SupportSpec]]] = {
     "bench-points": set_bench_points,
     "michaels-cruise": set_michaels_cruise,
     "michaels-all": set_michaels_all,
+    "michaels-standby": set_michaels_standby,
     "dregon-floor": set_dregon_floor,
 }
 
