@@ -111,7 +111,7 @@ If colab stalls > 40 min with no log lines, cancel and resubmit once on
 ## Harvested (2026-09-19) — no kaggle fallback needed
 
 `succeeded`, exit 0, colab GPU: submitted 02:51:12Z, started 02:55:16Z,
-finished 02:04:53Z→03:04:54Z (≈10 min wall, render 167 s). Polled at 3-min
+finished 03:04:54Z (≈10 min wall, render 167 s). Polled at 3-min
 intervals; the 40-min cancel-and-resubmit clause never triggered.
 `arm_dregon_v2.json` synced from R2 into `/tmp/r3score_dregon_pull/`, copied out
 ALONE and committed (`0843f3ab`); the job's `--outputs` tree also carried
