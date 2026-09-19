@@ -3569,6 +3569,214 @@ def hump_proposal(payload: dict[str, Any]) -> list[str]:
     return o
 
 
+# ── render against the fit's own forward model, by cell class ───────────────
+#
+# Does the RENDER put on the wire what the fit's expected periodogram M says it
+# should? Three cell classes on the score window's own front end: the
+# carrier-tracked comb cells at k <= 8, the same at 8 < k <= 40, and everything
+# else in band. I/M answers "render or forward-model bug"; REAL/M is the fit's
+# own residual by the same classes, and answers "is the fit under-weighting the
+# comb cells".
+
+LEVELS_SCHEMA = "noise-v2-dregon-levels/1"
+LEVELS_RECORDINGS = ("hovering_nosource_room2", "updown_nosource_room2")
+LEVELS_SEEDS = (2001, 2002, 2003, 2004)
+LEVELS_CLASSES = ((1, 8), (9, 40))
+LEVELS_HALF_BINS = 1.0
+
+
+def cell_classes(
+    freqs: np.ndarray, rps_frames: np.ndarray, *, n_fft: int, sr: int
+) -> dict[str, np.ndarray]:
+    """``(frames, bins)`` boolean masks: comb cells per order class, and floor.
+
+    A cell is a comb cell of class ``(k_lo, k_hi)`` when it is within
+    ``LEVELS_HALF_BINS`` bins of ``k f_r`` of THAT frame's own label carrier for
+    some rotor and some ``k`` in the class. The floor class is every remaining
+    in-band cell, so the three classes partition the 30-7900 Hz band.
+    """
+    df = float(sr) / float(n_fft)
+    band = (freqs >= SP.BAND_F_MIN) & (freqs <= SP.BAND_F_MAX)
+    n_frames = int(rps_frames.shape[1])
+    masks: dict[str, Any] = {
+        f"comb_k{lo}_{hi}": np.zeros((n_frames, freqs.size), bool) for lo, hi in LEVELS_CLASSES
+    }
+    for j in range(n_frames):
+        for r in range(int(rps_frames.shape[0])):
+            f0 = float(rps_frames[r, j])
+            for lo, hi in LEVELS_CLASSES:
+                key = f"comb_k{lo}_{hi}"
+                for k in range(int(lo), int(hi) + 1):
+                    line = f0 * float(k)
+                    if line < SP.BAND_F_MIN or line > SP.BAND_F_MAX:
+                        continue
+                    masks[key][j] |= np.abs(freqs - line) <= LEVELS_HALF_BINS * df
+    for key in list(masks):
+        masks[key] = masks[key] & band[None, :]
+    taken = np.zeros((n_frames, freqs.size), dtype=bool)
+    for m in masks.values():
+        taken = taken | m
+    masks["floor"] = np.broadcast_to(band[None, :], taken.shape) & ~taken
+    return masks
+
+
+def _ratio_stats(num: np.ndarray, den: np.ndarray, mask: np.ndarray) -> dict[str, Any]:
+    """Median and quartiles of ``10 log10(num/den)`` over the masked cells."""
+    sel = np.broadcast_to(mask[None, :, :], num.shape)
+    ratio = 10.0 * np.log10(np.maximum(num[sel], 1e-300) / np.maximum(den[sel], 1e-300))
+    return dict(
+        median_db=float(np.median(ratio)),
+        q25_db=float(np.percentile(ratio, 25)),
+        q75_db=float(np.percentile(ratio, 75)),
+        mean_power_ratio_db=float(
+            10.0 * np.log10(max(float(num[sel].sum()), 1e-300) / max(float(den[sel].sum()), 1e-300))
+        ),
+        n_cells=int(sel.sum()),
+    )
+
+
+def run_levels(
+    *, fit_path: Path, out: Path, n_mics: int, recordings: Sequence[str]
+) -> dict[str, Any]:
+    from experiments.stochastic_fit.data import Clip, periodogram
+
+    fit = json.loads(Path(fit_path).read_text())
+    payload: dict[str, Any] = dict(
+        schema=LEVELS_SCHEMA,
+        git=git_rev(),
+        fit=dict(path=str(fit_path), mode=fit.get("mode")),
+        protocol=dict(
+            n_fft=HUMP_N,
+            hop=HUMP_HOP,
+            n_mics=int(n_mics),
+            seeds=list(LEVELS_SEEDS),
+            classes=[f"comb_k{lo}_{hi}" for lo, hi in LEVELS_CLASSES] + ["floor"],
+            half_bins=LEVELS_HALF_BINS,
+            note=(
+                "I = periodogram of the v2 render (seed-averaged POWER), M = "
+                "render.expected_periodogram of the same fit on the same label track, "
+                "R = periodogram of the real clip. Same framing (data.periodogram), "
+                "same absolute units."
+            ),
+        ),
+        supports={},
+    )
+    for recording in recordings:
+        found = [s for s in GT.DREGON_CRUISE_SUPPORTS if s.recording == recording]
+        if not found:
+            die(f"no frozen DREGON cruise support carries recording {recording!r}")
+        support = found[0]
+        clip = RE.load_window(
+            support.window,
+            dataset=GT.DATASET["dregon"],
+            version=None,
+            channels=None,
+            rps_key=GT.RAW_RPS_KEY["dregon"],
+        )
+        sr = int(clip.sr)
+        real = np.asarray(clip.audio, dtype=np.float64)[:n_mics]
+        reference = np.atleast_2d(np.asarray(clip.rps, dtype=np.float64))
+        pg_real = periodogram(
+            Clip(clip.clip_id, clip.group, real.astype(np.float32), reference, sr),
+            n_fft=HUMP_N,
+            hop=HUMP_HOP,
+        )
+        m = RD.expected_periodogram(
+            fit, reference, n_fft=HUMP_N, hop=HUMP_HOP, sr=sr, n_mics=int(n_mics)
+        )
+        acc = np.zeros_like(m)
+        for seed in LEVELS_SEEDS:
+            audio = RD.render_noise(fit, reference, n_mics=int(n_mics), seed=int(seed))[:n_mics]
+            pg = periodogram(
+                Clip("render", "synthetic", audio.astype(np.float32), reference, sr),
+                n_fft=HUMP_N,
+                hop=HUMP_HOP,
+            )
+            acc += np.asarray(pg.power, dtype=np.float64)
+        render = acc / float(len(LEVELS_SEEDS))
+        obs = np.asarray(pg_real.power, dtype=np.float64)
+        masks = cell_classes(
+            np.asarray(pg_real.freqs, dtype=np.float64),
+            np.asarray(pg_real.rps, dtype=np.float64),
+            n_fft=HUMP_N,
+            sr=sr,
+        )
+        payload["supports"][support.key] = dict(
+            support=support.as_dict(),
+            shapes=dict(model=list(m.shape), render=list(render.shape), real=list(obs.shape)),
+            render_over_model={k: _ratio_stats(render, m, v) for k, v in masks.items()},
+            real_over_model={k: _ratio_stats(obs, m, v) for k, v in masks.items()},
+            real_over_render={k: _ratio_stats(obs, render, v) for k, v in masks.items()},
+        )
+        print(f"[{recording}] done", flush=True)
+    Path(out).mkdir(parents=True, exist_ok=True)
+    return payload
+
+
+def levels_findings(payload: dict[str, Any]) -> str:
+    o = ["# DREGON round 3: render against the fit's own forward model", ""]
+    o.append(
+        "`I` = periodogram of the v2 render (seeds "
+        + ", ".join(str(s) for s in payload["protocol"]["seeds"])
+        + ", power-averaged), `M` = `render.expected_periodogram` of the SAME fit on the "
+        "same label track, `R` = the real clip's periodogram — one framing "
+        f"({payload['protocol']['n_fft']}/{payload['protocol']['hop']}), one set of "
+        "absolute units, all 8 mics. Cells are classed by each frame's OWN label "
+        "carriers: a comb cell is within "
+        f"{payload['protocol']['half_bins']:g} bin of `k f_r(t)` for some rotor; the three "
+        "classes partition 30-7900 Hz."
+    )
+    o.append("")
+    o.append("| window | ratio | comb k<=8 | comb 8<k<=40 | floor |")
+    o.append("|---|---|---:|---:|---:|")
+    for row in payload["supports"].values():
+        rec = _short(row["support"]["recording"])
+        for label, key in (
+            ("I/M (render vs model)", "render_over_model"),
+            ("R/M (real vs model)", "real_over_model"),
+            ("R/I (real vs render)", "real_over_render"),
+        ):
+            cells = []
+            for cls in payload["protocol"]["classes"]:
+                s = row[key][cls]
+                cells.append(f"{s['median_db']:+.2f} ({s['q25_db']:+.1f}/{s['q75_db']:+.1f})")
+            o.append(f"| `{rec}` | {label} | " + " | ".join(cells) + " |")
+    o.append("")
+    o.append(
+        "Median dB with the quartiles beside it. Power-sum ratios (the same cells, "
+        "total power rather than per-cell median):"
+    )
+    o.append("")
+    o.append("| window | ratio | comb k<=8 | comb 8<k<=40 | floor |")
+    o.append("|---|---|---:|---:|---:|")
+    for row in payload["supports"].values():
+        rec = _short(row["support"]["recording"])
+        for label, key in (
+            ("I/M", "render_over_model"),
+            ("R/M", "real_over_model"),
+            ("R/I", "real_over_render"),
+        ):
+            o.append(
+                f"| `{rec}` | {label} | "
+                + " | ".join(
+                    f"{row[key][cls]['mean_power_ratio_db']:+.2f}"
+                    for cls in payload["protocol"]["classes"]
+                )
+                + " |"
+            )
+    o.append("")
+    o.append(
+        "Cell counts per window: "
+        + ", ".join(
+            f"{cls} {next(iter(payload['supports'].values()))['render_over_model'][cls]['n_cells']}"
+            for cls in payload["protocol"]["classes"]
+        )
+        + "."
+    )
+    o.append("")
+    return "\n".join(o)
+
+
 PIT_KEYS = ("pit_mae", "pit_per_mic", "pit_per_rotor", "n_scored_frames")
 LEVEL_TOL_DB = 0.01
 
@@ -3611,7 +3819,7 @@ def merge_pit(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--study", choices=("r2", "humps"), default="r2")
+    ap.add_argument("--study", choices=("r2", "humps", "levels"), default="r2")
     ap.add_argument("--fit", type=Path, default=None)
     ap.add_argument("--bench-dir", type=Path, default=BENCH_DEFAULT)
     ap.add_argument("--arm-npz", type=Path, default=ARM_NPZ_DEFAULT)
@@ -3630,9 +3838,25 @@ def main(argv: list[str] | None = None) -> int:
         "--merge-probe", type=Path, default=None, help="a probe pass's JSON to merge PIT from"
     )
     args = ap.parse_args(argv)
-    humps = args.study == "humps"
+    humps = args.study in ("humps", "levels")
     fit_path = args.fit or (HUMP_FIT_DEFAULT if humps else FIT_DEFAULT)
     out = Path(args.out or (HUMP_OUT_DEFAULT if humps else OUT_DEFAULT))
+
+    if args.study == "levels":
+        payload = run_levels(
+            fit_path=fit_path,
+            out=out,
+            n_mics=int(args.n_mics),
+            recordings=tuple(r for r in str(args.recordings).split(",") if r) or LEVELS_RECORDINGS,
+        )
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "render_vs_model.json").write_text(
+            json.dumps(payload, indent=1, sort_keys=True) + "\n"
+        )
+        (out / "render_vs_model.md").write_text(levels_findings(payload))
+        print(f"wrote {out / 'render_vs_model.json'}")
+        print(f"wrote {out / 'render_vs_model.md'}")
+        return 0
 
     if humps:
         payload = run_humps(
