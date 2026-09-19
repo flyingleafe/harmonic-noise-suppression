@@ -3,7 +3,7 @@
   "mode": "flight_floor_lowk",
   "path": "results/noise_v2/rounds/round3/fits/dregon_room2_floor__flight_floor_lowk.json"
  },
- "git": "d15c8386b3fb1401d0ee1ca3e7d135b6642a1be9",
+ "git": "1255f43841c3bf9be8227f1b0409baadf25301e2",
  "protocol": {
   "arms": [
    {
@@ -23,32 +23,8 @@
     "name": "v2_plus21db"
    },
    {
-    "label": "gamma_rk x3",
-    "name": "v2_gx3"
-   },
-   {
-    "label": "gamma_rk x10",
-    "name": "v2_gx10"
-   },
-   {
-    "label": "gamma_rk x30",
-    "name": "v2_gx30"
-   },
-   {
-    "label": "gamma_rk = 13.068 + 0.211k Hz (the legacy width law)",
-    "name": "v2_glegacy"
-   },
-   {
-    "label": "gamma_rk x3, comb 12 dB up",
-    "name": "v2_gx3_plus12db"
-   },
-   {
     "label": "gamma_rk x10, comb 12 dB up",
     "name": "v2_gx10_plus12db"
-   },
-   {
-    "label": "gamma_rk x30, comb 12 dB up",
-    "name": "v2_gx30_plus12db"
    },
    {
     "label": "gamma_rk = 13.068 + 0.211k Hz (the legacy width law), comb 12 dB up",
@@ -72,14 +48,6 @@
    30.0
   ],
   "scorer": {
-   "bytes": 2746881,
-   "ckpt": "best",
-   "experiment": "hppnet_l2_r2_s0",
-   "local_path": "/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
-   "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
-   "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
-  },
-  "scorer_second": {
    "bytes": 6047905,
    "ckpt": "best_real_r2.ckpt",
    "experiment": "real_r4_scv2_unified",
@@ -114,8 +82,7 @@
     "legacy": {
      "kind": "legacy",
      "label": "legacy stage-2 baseline, identity-matched",
-     "pit_mae": 1.4955336463153466,
-     "pit_mae_second": 1.2727861082743086,
+     "pit_mae": 1.2727861082743086,
      "widths": [
       {
        "four_rotor_span_hz": 7.7502522488847205,
@@ -143,8 +110,7 @@
     "real": {
      "kind": "real",
      "label": "the real DREGON room-2 clip",
-     "pit_mae": 0.6381291075338,
-     "pit_mae_second": 0.9833632045321994,
+     "pit_mae": 0.9833632045321994,
      "widths": [
       {
        "four_rotor_span_hz": 7.7502522488847205,
@@ -172,8 +138,7 @@
     "v2": {
      "kind": "v2",
      "label": "the round-3 v2 candidate as fitted",
-     "pit_mae": 62.105486094237094,
-     "pit_mae_second": 11.269734083290492,
+     "pit_mae": 11.269734083290492,
      "widths": [
       {
        "four_rotor_span_hz": 7.7502522488847205,
@@ -198,39 +163,10 @@
       }
      ]
     },
-    "v2_glegacy": {
-     "kind": "v2",
-     "label": "gamma_rk = 13.068 + 0.211k Hz (the legacy width law)",
-     "pit_mae": 80.37103443322869,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.7502522488847205,
-       "k": 1,
-       "peak_over_base_db": 3.6624879835368995,
-       "resolution_hz": 1.953125,
-       "width_hz": 39.20163352199229
-      },
-      {
-       "four_rotor_span_hz": 15.500504497769441,
-       "k": 2,
-       "peak_over_base_db": 2.6598358670231326,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      },
-      {
-       "four_rotor_span_hz": 31.001008995538882,
-       "k": 4,
-       "peak_over_base_db": 1.3718354087217546,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
     "v2_glegacy_plus12db": {
      "kind": "v2",
      "label": "gamma_rk = 13.068 + 0.211k Hz (the legacy width law), comb 12 dB up",
-     "pit_mae": 51.93142532446761,
-     "pit_mae_second": 2.237495269094195,
+     "pit_mae": 2.237495269094195,
      "widths": [
       {
        "four_rotor_span_hz": 7.7502522488847205,
@@ -255,39 +191,10 @@
       }
      ]
     },
-    "v2_gx10": {
-     "kind": "v2",
-     "label": "gamma_rk x10",
-     "pit_mae": 75.93136534311918,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.7502522488847205,
-       "k": 1,
-       "peak_over_base_db": 7.222978635745674,
-       "resolution_hz": 1.953125,
-       "width_hz": 11.66872583420437
-      },
-      {
-       "four_rotor_span_hz": 15.500504497769441,
-       "k": 2,
-       "peak_over_base_db": 5.148104629860518,
-       "resolution_hz": 1.953125,
-       "width_hz": 20.04298662446326
-      },
-      {
-       "four_rotor_span_hz": 31.001008995538882,
-       "k": 4,
-       "peak_over_base_db": 1.5541442937613137,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
     "v2_gx10_plus12db": {
      "kind": "v2",
      "label": "gamma_rk x10, comb 12 dB up",
-     "pit_mae": 37.683499995274104,
-     "pit_mae_second": 1.4181394993312775,
+     "pit_mae": 1.4181394993312775,
      "widths": [
       {
        "four_rotor_span_hz": 7.7502522488847205,
@@ -312,123 +219,10 @@
       }
      ]
     },
-    "v2_gx3": {
-     "kind": "v2",
-     "label": "gamma_rk x3",
-     "pit_mae": 70.78055380021948,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.7502522488847205,
-       "k": 1,
-       "peak_over_base_db": 7.311436100788599,
-       "resolution_hz": 1.953125,
-       "width_hz": 11.605248859466776
-      },
-      {
-       "four_rotor_span_hz": 15.500504497769441,
-       "k": 2,
-       "peak_over_base_db": 5.155151848130757,
-       "resolution_hz": 1.953125,
-       "width_hz": 20.113264705609566
-      },
-      {
-       "four_rotor_span_hz": 31.001008995538882,
-       "k": 4,
-       "peak_over_base_db": 1.4432009434396127,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
-    "v2_gx30": {
-     "kind": "v2",
-     "label": "gamma_rk x30",
-     "pit_mae": 74.70740953925672,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.7502522488847205,
-       "k": 1,
-       "peak_over_base_db": 7.104677889647705,
-       "resolution_hz": 1.953125,
-       "width_hz": 11.768030835955043
-      },
-      {
-       "four_rotor_span_hz": 15.500504497769441,
-       "k": 2,
-       "peak_over_base_db": 5.1872089860493595,
-       "resolution_hz": 1.953125,
-       "width_hz": 19.974112473095396
-      },
-      {
-       "four_rotor_span_hz": 31.001008995538882,
-       "k": 4,
-       "peak_over_base_db": 1.4224913732800517,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
-    "v2_gx30_plus12db": {
-     "kind": "v2",
-     "label": "gamma_rk x30, comb 12 dB up",
-     "pit_mae": 36.71519131938912,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.7502522488847205,
-       "k": 1,
-       "peak_over_base_db": 17.976360709062007,
-       "resolution_hz": 1.953125,
-       "width_hz": 10.289254290484052
-      },
-      {
-       "four_rotor_span_hz": 15.500504497769441,
-       "k": 2,
-       "peak_over_base_db": 15.227139173673727,
-       "resolution_hz": 1.953125,
-       "width_hz": 17.50223472170283
-      },
-      {
-       "four_rotor_span_hz": 31.001008995538882,
-       "k": 4,
-       "peak_over_base_db": 3.0854827163550103,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
-    "v2_gx3_plus12db": {
-     "kind": "v2",
-     "label": "gamma_rk x3, comb 12 dB up",
-     "pit_mae": 36.63449241181943,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.7502522488847205,
-       "k": 1,
-       "peak_over_base_db": 18.025863358804013,
-       "resolution_hz": 1.953125,
-       "width_hz": 10.303508816675379
-      },
-      {
-       "four_rotor_span_hz": 15.500504497769441,
-       "k": 2,
-       "peak_over_base_db": 15.218853473928744,
-       "resolution_hz": 1.953125,
-       "width_hz": 17.57062168319226
-      },
-      {
-       "four_rotor_span_hz": 31.001008995538882,
-       "k": 4,
-       "peak_over_base_db": 3.383189707601319,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
     "v2_plus21db": {
      "kind": "v2",
      "label": "v2 with the comb 21 dB up (the level optimum)",
-     "pit_mae": 5.117989697123255,
-     "pit_mae_second": 2.3751348597662787,
+     "pit_mae": 2.3751348597662787,
      "widths": [
       {
        "four_rotor_span_hz": 7.7502522488847205,
@@ -468,8 +262,7 @@
     "legacy": {
      "kind": "legacy",
      "label": "legacy stage-2 baseline, identity-matched",
-     "pit_mae": 1.895237346919333,
-     "pit_mae_second": 1.5471830027444022,
+     "pit_mae": 1.5471830027444022,
      "widths": [
       {
        "four_rotor_span_hz": 8.030208903504914,
@@ -497,8 +290,7 @@
     "real": {
      "kind": "real",
      "label": "the real DREGON room-2 clip",
-     "pit_mae": 0.888408290362967,
-     "pit_mae_second": 1.3137310270279172,
+     "pit_mae": 1.3137310270279172,
      "widths": [
       {
        "four_rotor_span_hz": 8.030208903504914,
@@ -525,8 +317,7 @@
     "v2": {
      "kind": "v2",
      "label": "the round-3 v2 candidate as fitted",
-     "pit_mae": 73.44791115827854,
-     "pit_mae_second": 11.375832971776763,
+     "pit_mae": 11.375832971776763,
      "widths": [
       {
        "four_rotor_span_hz": 8.030208903504914,
@@ -551,39 +342,10 @@
       }
      ]
     },
-    "v2_glegacy": {
-     "kind": "v2",
-     "label": "gamma_rk = 13.068 + 0.211k Hz (the legacy width law)",
-     "pit_mae": 80.58729841929667,
-     "widths": [
-      {
-       "four_rotor_span_hz": 8.030208903504914,
-       "k": 1,
-       "peak_over_base_db": 3.4149993239025944,
-       "resolution_hz": 1.953125,
-       "width_hz": 40.769399288488145
-      },
-      {
-       "four_rotor_span_hz": 16.060417807009827,
-       "k": 2,
-       "peak_over_base_db": 0.09155319907335566,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      },
-      {
-       "four_rotor_span_hz": 32.120835614019654,
-       "k": 4,
-       "peak_over_base_db": 0.08766875139762507,
-       "resolution_hz": 1.953125,
-       "width_hz": -1.3631783404585245
-      }
-     ]
-    },
     "v2_glegacy_plus12db": {
      "kind": "v2",
      "label": "gamma_rk = 13.068 + 0.211k Hz (the legacy width law), comb 12 dB up",
-     "pit_mae": 39.01550127762044,
-     "pit_mae_second": 2.2977209866993014,
+     "pit_mae": 2.2977209866993014,
      "widths": [
       {
        "four_rotor_span_hz": 8.030208903504914,
@@ -608,39 +370,10 @@
       }
      ]
     },
-    "v2_gx10": {
-     "kind": "v2",
-     "label": "gamma_rk x10",
-     "pit_mae": 76.43518049664348,
-     "widths": [
-      {
-       "four_rotor_span_hz": 8.030208903504914,
-       "k": 1,
-       "peak_over_base_db": 7.364395866072555,
-       "resolution_hz": 1.953125,
-       "width_hz": 12.247643521437752
-      },
-      {
-       "four_rotor_span_hz": 16.060417807009827,
-       "k": 2,
-       "peak_over_base_db": 2.379656255141332,
-       "resolution_hz": 1.953125,
-       "width_hz": 7.784804415117865
-      },
-      {
-       "four_rotor_span_hz": 32.120835614019654,
-       "k": 4,
-       "peak_over_base_db": 0.2176327186642468,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
     "v2_gx10_plus12db": {
      "kind": "v2",
      "label": "gamma_rk x10, comb 12 dB up",
-     "pit_mae": 37.82960710869659,
-     "pit_mae_second": 1.8742895202031211,
+     "pit_mae": 1.8742895202031211,
      "widths": [
       {
        "four_rotor_span_hz": 8.030208903504914,
@@ -665,123 +398,10 @@
       }
      ]
     },
-    "v2_gx3": {
-     "kind": "v2",
-     "label": "gamma_rk x3",
-     "pit_mae": 80.22579435863528,
-     "widths": [
-      {
-       "four_rotor_span_hz": 8.030208903504914,
-       "k": 1,
-       "peak_over_base_db": 7.4146238361848695,
-       "resolution_hz": 1.953125,
-       "width_hz": 12.189416647079437
-      },
-      {
-       "four_rotor_span_hz": 16.060417807009827,
-       "k": 2,
-       "peak_over_base_db": 2.3077057774768868,
-       "resolution_hz": 1.953125,
-       "width_hz": 7.613535560473097
-      },
-      {
-       "four_rotor_span_hz": 32.120835614019654,
-       "k": 4,
-       "peak_over_base_db": 0.225020340668476,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
-    "v2_gx30": {
-     "kind": "v2",
-     "label": "gamma_rk x30",
-     "pit_mae": 78.3149513455384,
-     "widths": [
-      {
-       "four_rotor_span_hz": 8.030208903504914,
-       "k": 1,
-       "peak_over_base_db": 7.352725547017286,
-       "resolution_hz": 1.953125,
-       "width_hz": 12.29058778511524
-      },
-      {
-       "four_rotor_span_hz": 16.060417807009827,
-       "k": 2,
-       "peak_over_base_db": 2.4145141322896273,
-       "resolution_hz": 1.953125,
-       "width_hz": 8.001446512352995
-      },
-      {
-       "four_rotor_span_hz": 32.120835614019654,
-       "k": 4,
-       "peak_over_base_db": 0.17400021767691562,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
-    "v2_gx30_plus12db": {
-     "kind": "v2",
-     "label": "gamma_rk x30, comb 12 dB up",
-     "pit_mae": 46.69092398928884,
-     "widths": [
-      {
-       "four_rotor_span_hz": 8.030208903504914,
-       "k": 1,
-       "peak_over_base_db": 17.806042011925648,
-       "resolution_hz": 1.953125,
-       "width_hz": 10.719900117665714
-      },
-      {
-       "four_rotor_span_hz": 16.060417807009827,
-       "k": 2,
-       "peak_over_base_db": 12.171055401761677,
-       "resolution_hz": 1.953125,
-       "width_hz": 17.92071221126214
-      },
-      {
-       "four_rotor_span_hz": 32.120835614019654,
-       "k": 4,
-       "peak_over_base_db": 1.5966621665286518,
-       "resolution_hz": 1.953125,
-       "width_hz": 49.48652782775046
-      }
-     ]
-    },
-    "v2_gx3_plus12db": {
-     "kind": "v2",
-     "label": "gamma_rk x3, comb 12 dB up",
-     "pit_mae": 29.888727498598485,
-     "widths": [
-      {
-       "four_rotor_span_hz": 8.030208903504914,
-       "k": 1,
-       "peak_over_base_db": 17.933926521885482,
-       "resolution_hz": 1.953125,
-       "width_hz": 10.530824408953343
-      },
-      {
-       "four_rotor_span_hz": 16.060417807009827,
-       "k": 2,
-       "peak_over_base_db": 12.278799962169051,
-       "resolution_hz": 1.953125,
-       "width_hz": 17.755643897226797
-      },
-      {
-       "four_rotor_span_hz": 32.120835614019654,
-       "k": 4,
-       "peak_over_base_db": 2.027473694299946,
-       "resolution_hz": 1.953125,
-       "width_hz": 6.047332511190511
-      }
-     ]
-    },
     "v2_plus21db": {
      "kind": "v2",
      "label": "v2 with the comb 21 dB up (the level optimum)",
-     "pit_mae": 2.759277877688657,
-     "pit_mae_second": 2.4218715013019625,
+     "pit_mae": 2.4218715013019625,
      "widths": [
       {
        "four_rotor_span_hz": 8.030208903504914,
@@ -821,8 +441,7 @@
     "legacy": {
      "kind": "legacy",
      "label": "legacy stage-2 baseline, identity-matched",
-     "pit_mae": 2.498841588895072,
-     "pit_mae_second": 1.962698664930132,
+     "pit_mae": 1.962698664930132,
      "widths": [
       {
        "four_rotor_span_hz": 7.144734487769,
@@ -850,8 +469,7 @@
     "real": {
      "kind": "real",
      "label": "the real DREGON room-2 clip",
-     "pit_mae": 1.694930333840801,
-     "pit_mae_second": 2.5458136011683754,
+     "pit_mae": 2.5458136011683754,
      "widths": [
       {
        "four_rotor_span_hz": 7.144734487769,
@@ -877,8 +495,7 @@
     "v2": {
      "kind": "v2",
      "label": "the round-3 v2 candidate as fitted",
-     "pit_mae": 73.11178593700811,
-     "pit_mae_second": 11.244625113372294,
+     "pit_mae": 11.244625113372294,
      "widths": [
       {
        "four_rotor_span_hz": 7.144734487769,
@@ -902,37 +519,10 @@
       }
      ]
     },
-    "v2_glegacy": {
-     "kind": "v2",
-     "label": "gamma_rk = 13.068 + 0.211k Hz (the legacy width law)",
-     "pit_mae": 77.68538868988455,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.144734487769,
-       "k": 1,
-       "peak_over_base_db": 3.623344129469261,
-       "resolution_hz": 1.953125,
-       "width_hz": 39.046029965026136
-      },
-      {
-       "k": 2,
-       "peak_over_base_db": NaN,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      },
-      {
-       "k": 4,
-       "peak_over_base_db": NaN,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
     "v2_glegacy_plus12db": {
      "kind": "v2",
      "label": "gamma_rk = 13.068 + 0.211k Hz (the legacy width law), comb 12 dB up",
-     "pit_mae": 52.183531444530836,
-     "pit_mae_second": 2.1380202533706787,
+     "pit_mae": 2.1380202533706787,
      "widths": [
       {
        "four_rotor_span_hz": 7.144734487769,
@@ -956,38 +546,10 @@
       }
      ]
     },
-    "v2_gx10": {
-     "kind": "v2",
-     "label": "gamma_rk x10",
-     "pit_mae": 78.28774120567668,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.144734487769,
-       "k": 1,
-       "peak_over_base_db": 7.5858521447549325,
-       "resolution_hz": 1.953125,
-       "width_hz": 11.509337254320217
-      },
-      {
-       "four_rotor_span_hz": 14.289468975538,
-       "k": 2,
-       "peak_over_base_db": 0.8532171273214597,
-       "resolution_hz": 1.953125,
-       "width_hz": 2.906706090293521
-      },
-      {
-       "k": 4,
-       "peak_over_base_db": NaN,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
     "v2_gx10_plus12db": {
      "kind": "v2",
      "label": "gamma_rk x10, comb 12 dB up",
-     "pit_mae": 42.70911468261661,
-     "pit_mae_second": 2.243972454752241,
+     "pit_mae": 2.243972454752241,
      "widths": [
       {
        "four_rotor_span_hz": 7.144734487769,
@@ -1012,121 +574,10 @@
       }
      ]
     },
-    "v2_gx3": {
-     "kind": "v2",
-     "label": "gamma_rk x3",
-     "pit_mae": 72.71334021010713,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.144734487769,
-       "k": 1,
-       "peak_over_base_db": 7.5036739515476025,
-       "resolution_hz": 1.953125,
-       "width_hz": 11.544290529403028
-      },
-      {
-       "four_rotor_span_hz": 14.289468975538,
-       "k": 2,
-       "peak_over_base_db": 0.8985238833282647,
-       "resolution_hz": 1.953125,
-       "width_hz": 2.9864451348377847
-      },
-      {
-       "k": 4,
-       "peak_over_base_db": NaN,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
-    "v2_gx30": {
-     "kind": "v2",
-     "label": "gamma_rk x30",
-     "pit_mae": 79.2752299866902,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.144734487769,
-       "k": 1,
-       "peak_over_base_db": 7.66264933487995,
-       "resolution_hz": 1.953125,
-       "width_hz": 11.479989617357123
-      },
-      {
-       "four_rotor_span_hz": 14.289468975538,
-       "k": 2,
-       "peak_over_base_db": 0.7879344147168376,
-       "resolution_hz": 1.953125,
-       "width_hz": 2.8202737205450528
-      },
-      {
-       "k": 4,
-       "peak_over_base_db": NaN,
-       "resolution_hz": 1.953125,
-       "width_hz": null
-      }
-     ]
-    },
-    "v2_gx30_plus12db": {
-     "kind": "v2",
-     "label": "gamma_rk x30, comb 12 dB up",
-     "pit_mae": 56.89241498935878,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.144734487769,
-       "k": 1,
-       "peak_over_base_db": 18.301203009716925,
-       "resolution_hz": 1.953125,
-       "width_hz": 10.328583127483665
-      },
-      {
-       "four_rotor_span_hz": 14.289468975538,
-       "k": 2,
-       "peak_over_base_db": 10.552476710159013,
-       "resolution_hz": 1.953125,
-       "width_hz": 10.356232110211725
-      },
-      {
-       "four_rotor_span_hz": 28.578937951076,
-       "k": 4,
-       "peak_over_base_db": 0.9266222851870685,
-       "resolution_hz": 1.953125,
-       "width_hz": 4.487110147025059
-      }
-     ]
-    },
-    "v2_gx3_plus12db": {
-     "kind": "v2",
-     "label": "gamma_rk x3, comb 12 dB up",
-     "pit_mae": 33.645987082553745,
-     "widths": [
-      {
-       "four_rotor_span_hz": 7.144734487769,
-       "k": 1,
-       "peak_over_base_db": 18.2725245824814,
-       "resolution_hz": 1.953125,
-       "width_hz": 10.39187714908908
-      },
-      {
-       "four_rotor_span_hz": 14.289468975538,
-       "k": 2,
-       "peak_over_base_db": 10.780566617037966,
-       "resolution_hz": 1.953125,
-       "width_hz": 10.161712642473692
-      },
-      {
-       "four_rotor_span_hz": 28.578937951076,
-       "k": 4,
-       "peak_over_base_db": 0.9080980159233687,
-       "resolution_hz": 1.953125,
-       "width_hz": 3.8573051161716525
-      }
-     ]
-    },
     "v2_plus21db": {
      "kind": "v2",
      "label": "v2 with the comb 21 dB up (the level optimum)",
-     "pit_mae": 6.800397767324119,
-     "pit_mae_second": 3.0888492247414967,
+     "pit_mae": 3.0888492247414967,
      "widths": [
       {
        "four_rotor_span_hz": 7.144734487769,

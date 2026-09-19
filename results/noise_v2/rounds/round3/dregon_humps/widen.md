@@ -62,6 +62,19 @@ Each frame read on its own label carrier, averaged over four rotors and eight mi
 | `v2_gx30_plus12db` | 36.715 | 46.691 | 56.892 | 46.766 |
 | `v2_glegacy_plus12db` | 51.931 | 39.016 | 52.184 | 47.710 |
 
+## Second tracker `real_r4_scv2_unified` / `best_real_r2.ckpt` (rev/s)
+
+Same renders, same eight microphones, same regime support; sha256 `93f62d19c9022f43dcf9e1e53d0a1b65c26aee3d6dcb70223f988675a9686749`. The rate REGRESSOR's own `rps_pred` track is read directly and PIT-assigned, where the HPPNet column reads salience layers by peak + parabola (`scripts/_synthetic_probe.py::score`).
+
+| arm | free-flight | hovering | updown | mean | HPPNet mean |
+|---|---:|---:|---:|---:|---:|
+| `real` | 0.983 | 1.314 | 2.546 | 1.614 | 1.074 |
+| `legacy` | 1.273 | 1.547 | 1.963 | 1.594 | 1.963 |
+| `v2` | 11.270 | 11.376 | 11.245 | 11.297 | 69.555 |
+| `v2_plus21db` | 2.375 | 2.422 | 3.089 | 2.629 | 4.893 |
+| `v2_gx10_plus12db` | 1.418 | 1.874 | 2.244 | 1.845 | 39.407 |
+| `v2_glegacy_plus12db` | 2.237 | 2.298 | 2.138 | 2.224 | 47.710 |
+
 | arm | what it is |
 |---|---|
 | `real` | the real DREGON room-2 clip |
@@ -117,37 +130,58 @@ law 47.7) and all of them lose to the un-widened needle comb at +21 dB
 also DILUTES the line: the legacy-law arm's k=1 prominence falls from +7.5 to
 +3.4 dB and its width grows to 40.8 Hz.
 
-**Second tracker.** The SCv2 probe (`ctrl_diverse_scv2_unified`,
-`best_real_r2.ckpt`) was NOT run: this agent's run budget ended with the HPPNet
-arms scored. Nothing about it is claimed here.
-## The SCv2 second tracker: loads, but the frozen PIT protocol cannot score it
+**Second tracker: the render's penalty is 6x smaller for a regressor than for
+HPPNet, but the ORDERING is the same.** `real_r4_scv2_unified` /
+`best_real_r2.ckpt` (the real-trained SCv2 regressor; validation round 24,
+`real_r2` 3.43, `real_r3` 3.12 rev/s; sha256 `93f62d19…6749`) was run on the
+same six arms, the same renders (the merge refuses unless every arm's measured
+-3 dB line width matches bit for bit), the same eight microphones and the same
+regime support. It reads its own `rps_pred` track rather than salience layers
+— the regressor branch added to `scripts/_synthetic_probe.py::score`, which
+leaves the HPPNet path numerically identical (it reproduces this file's real
+column, 0.6381291290613775 / 0.8884082796921247 / 1.694930322906428, to the
+last digit).
 
-`ctrl_diverse_scv2_unified` / `best_real_r2.ckpt` **loads** through
-`zoo.load(name, ckpt=ckpt)`: reference
-`r2://ml-data/artifacts/ctrl_diverse_scv2_unified/checkpoints/best_real_r2.ckpt`,
-6,047,905 bytes, sha256
-`176e1f2606e0c36e60e60d152109b4395ecfe6a6f9e6a6953b2951ba3152fa90`
-(verified locally through `stochastic_fit_revised_eval.Tracker`, which records
-the digest at construction).
+Read against HPPNet (means over the three windows): real 1.61 against 1.07,
+legacy 1.59 against 1.96, **v2 as fitted 11.30 against 69.56**, v2 +21 dB 2.63
+against 4.89, gamma x10 at +12 dB 1.85 against 39.41, the legacy width law at
++12 dB 2.22 against 47.71. Three things follow.
 
-It cannot be scored by the PIT protocol the HPPNet column uses. That protocol
-is `Tracker.pit` → `revised_eval.pit_mae(score, fm, LayerPeakRPSMetric(), …)`,
-and `LayerPeakRPSMetric` unpacks the model's `salience` output
-(`src/metrics/salience_layers.py:81,99`). SCv2 is a rate REGRESSOR, not a
-salience model, so the call dies at
+1. **The defect is real and both trackers see it.** v2 as fitted is the worst
+   arm for both, by 7x over its own real clip for SCv2 (11.30 against 1.61) and
+   by 65x for HPPNet. No tracker mistakes the as-fitted render for real audio.
+2. **The SIZE of the penalty is tracker-specific.** HPPNet's 70 rev/s is a
+   total loss of lock — it is a salience model that needs the comb to stand out
+   of the floor and the v2 comb does not. The regressor degrades to 11 rev/s
+   instead: it regresses a rate from the whole spectrum and keeps a usable,
+   heavily biased estimate when the comb is buried. Any claim of the form "the
+   render costs N rev/s" must therefore name its tracker; only the ORDERING is
+   portable.
+3. **The re-levelled and widened arms are nearly transparent to the
+   regressor.** gamma x10 at +12 dB scores 1.85 against real 1.61 and legacy
+   1.59 — inside the real clip's own window-to-window spread (0.98-2.55) — while
+   HPPNet still puts it at 39.4. So the level lever that R3 identified fixes
+   the regressor almost completely and the salience tracker only partly; the
+   remaining HPPNet gap at +21 dB (4.89 against real 1.07) is the part of the
+   comb's SHAPE, not its level, that is still wrong.
+
+Commands, both from this checkout:
 
 ```
-scripts/_synthetic_probe.py:117  layers, rps_grid = metric._unpack(fm(inp), tgt)
-src/metrics/salience_layers.py:99  logits = torch.as_tensor(get_array(pred, self.pred_key))
-KeyError: 'salience'
+python scripts/noise_v2_widen_dregon.py --probe \
+  --probe-experiment real_r4_scv2_unified --probe-ckpt best_real_r2.ckpt \
+  --arms real,legacy,v2,v2_plus21db,v2_gx10_plus12db,v2_glegacy_plus12db \
+  --stem widen_scv2 --out results/noise_v2/rounds/round3/dregon_humps
+python scripts/noise_v2_widen_dregon.py --stem widen \
+  --out results/noise_v2/rounds/round3/dregon_humps \
+  --merge-second results/noise_v2/rounds/round3/dregon_humps/widen_scv2.json
 ```
 
-Scoring it therefore needs a regressor PIT path (its own metric and the
-Hungarian assignment applied to the predicted rate tracks rather than to
-salience peaks), which is a protocol change, not a probe swap — beyond this
-agent's assignment and beyond its remaining budget. The colab job submitted for
-it (`nv2-r3-scv2-32e9bf`, arms `real, legacy, v2, v2_plus21db,
-v2_gx10_plus12db, v2_glegacy_plus12db`) was cancelled once the failure was
-reproduced locally, so no SCv2 number exists and none is claimed. The runner
-now carries `--probe-experiment/--probe-ckpt/--arms/--stem`, so the moment a
-regressor metric is wired into `Tracker`, the same command produces the column.
+The earlier record in this file that the SCv2 column was blocked applied to
+`ctrl_diverse_scv2_unified` and to the salience-only PIT path. Both are
+superseded: the path now scores regressors, and `ctrl_diverse` was dropped
+because it is the synthetic-diverse CONTROL arm and does not track real DREGON
+at all — measured here at 41.5 / 46.8 / 49.0 rev/s on the three REAL clips,
+consistent with its own validation (`real_nosource` 14.3, `real_r3` 20.2,
+`real_r2` 29.0 rev/s measured on the frozen valid split), so it is not a "best
+SCv2" and no column from it is reported.

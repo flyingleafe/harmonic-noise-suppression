@@ -373,6 +373,53 @@ def write_figures(figures: dict[str, Any], out: Path) -> list[str]:
     return written
 
 
+#: A second tracker's pass is merged onto this one only if it rendered the SAME
+#: audio. The renders are deterministic in ``--seed``, so the -3 dB line widths
+#: must agree bit for bit; anything looser would let two different signals be
+#: compared tracker to tracker.
+SECOND_KEY = "pit_mae_second"
+WIDTH_TOL_HZ = 1e-9
+
+
+def merge_second_tracker(base: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    """Copy a SECOND tracker's PIT numbers onto this pass's arms.
+
+    Only the arms the second pass carries are annotated (it may have been run
+    on an ``--arms`` subset); every shared arm's measured line widths are
+    compared first, so a merge across two different renders is fatal rather
+    than silent. JSON only: the findings file is written by a full run.
+    """
+    if str(second.get("schema")) != SCHEMA:
+        die(f"the second-tracker payload is not a {SCHEMA} record")
+    scorer = (second.get("protocol") or {}).get("scorer")
+    if not scorer:
+        die("the second-tracker payload carries no scorer record: it was not a --probe pass")
+    base["protocol"]["scorer_second"] = scorer
+    merged = 0
+    for key, row in base["supports"].items():
+        srow = (second.get("supports") or {}).get(key)
+        if srow is None:
+            continue
+        for name, entry in row["arms"].items():
+            se = (srow.get("arms") or {}).get(name)
+            if se is None or se.get("pit_mae") is None:
+                continue
+            for a, b in zip(entry["widths"], se["widths"], strict=True):
+                wa, wb = a["width_hz"], b["width_hz"]
+                if (wa is None) != (wb is None) or (
+                    wa is not None and abs(float(wa) - float(wb)) > WIDTH_TOL_HZ
+                ):
+                    die(
+                        f"{key}/{name}: the second-tracker pass rendered a different signal "
+                        f"(k={a['k']} line width {wa} against {wb} Hz)"
+                    )
+            entry[SECOND_KEY] = float(se["pit_mae"])
+            merged += 1
+    if merged == 0:
+        die("the second-tracker payload shares no scored arm with this pass")
+    return base
+
+
 def findings(payload: dict[str, Any], figures: list[str], *, job: str | None) -> str:
     rows = list(payload["supports"].values())
     recs = [str(r["support"]["recording"]).split("_")[0] for r in rows]
@@ -428,6 +475,32 @@ def findings(payload: dict[str, Any], figures: list[str], *, job: str | None) ->
                 + f" | {(np.mean(ok) if ok else float('nan')):.3f} |"
             )
         o.append("")
+    second = (payload["protocol"] or {}).get("scorer_second")
+    shared = [n for n in names if any(SECOND_KEY in r["arms"][n] for r in rows)]
+    if second and shared:
+        o.append(f"## Second tracker `{second['experiment']}` / `{second['ckpt']}` (rev/s)")
+        o.append("")
+        o.append(
+            f"Same renders, same eight microphones, same regime support; sha256 "
+            f"`{second['sha256']}`. The rate REGRESSOR's own `rps_pred` track is read "
+            "directly and PIT-assigned, where the HPPNet column reads salience layers by "
+            "peak + parabola (`scripts/_synthetic_probe.py::score`)."
+        )
+        o.append("")
+        o.append("| arm | " + " | ".join(recs) + " | mean | HPPNet mean |")
+        o.append("|---|" + "---:|" * (len(recs) + 2))
+        for n in shared:
+            v = [r["arms"][n].get(SECOND_KEY) for r in rows]
+            ok = [x for x in v if x is not None]
+            h = [r["arms"][n].get("pit_mae") for r in rows]
+            hok = [x for x in h if x is not None]
+            o.append(
+                f"| `{n}` | "
+                + " | ".join("—" if x is None else f"{x:.3f}" for x in v)
+                + f" | {(np.mean(ok) if ok else float('nan')):.3f}"
+                + f" | {(np.mean(hok) if hok else float('nan')):.3f} |"
+            )
+        o.append("")
     o.append("| arm | what it is |")
     o.append("|---|---|")
     for a in payload["protocol"]["arms"]:
@@ -453,7 +526,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--probe-experiment", default=None, help="a SECOND tracker's experiment")
     ap.add_argument("--probe-ckpt", default="best")
     ap.add_argument("--stem", default="widen", help="output file stem")
+    ap.add_argument(
+        "--merge-second",
+        type=Path,
+        default=None,
+        help="a SECOND tracker's pass to merge PIT from into <out>/<stem>.json (JSON only)",
+    )
     args = ap.parse_args(argv)
+    out = Path(args.out)
+    if args.merge_second is not None:
+        base_path = out / f"{args.stem}.json"
+        payload = merge_second_tracker(
+            json.loads(base_path.read_text()), json.loads(Path(args.merge_second).read_text())
+        )
+        base_path.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
+        print(f"merged {args.merge_second} into {base_path}")
+        return 0
     payload = run(
         fit_path=args.fit,
         out=args.out,
@@ -464,7 +552,6 @@ def main(argv: list[str] | None = None) -> int:
         probe_ckpt=str(args.probe_ckpt),
     )
     figs = payload.pop("_figures")
-    out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     written = write_figures(figs, out) if args.figures else []
     (out / f"{args.stem}.json").write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
