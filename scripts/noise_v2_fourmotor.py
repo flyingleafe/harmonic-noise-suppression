@@ -734,8 +734,39 @@ def figure(out_dir: Path, payload: dict[str, Any]) -> Path:
 # ── stage 3 ─────────────────────────────────────────────────────────────────
 
 
-def arm_row(name: str, path: Path, k_max_cap: int) -> dict[str, Any]:
-    """One fit arm scored against the four per-rotor fits."""
+def _criterion(prof: np.ndarray, target: np.ndarray, sel: np.ndarray) -> dict[str, Any]:
+    """The stage-3 criterion on one cell selection: per rotor the median
+    ``|Delta|`` and the fraction inside 3 dB, and the verdict."""
+    rows = []
+    for r in range(prof.shape[0]):
+        d = np.abs(prof[r][sel[r]] - target[r][sel[r]])
+        rows.append(
+            dict(
+                rotor=r + 1,
+                n=int(d.size),
+                median_abs_db=float(np.median(d)) if d.size else None,
+                frac_within_3db=float(np.mean(d <= 3.0)) if d.size else None,
+                passes=bool(
+                    d.size and np.median(d) <= CRIT_MEDIAN_DB and np.mean(d <= 3.0) >= CRIT_FRACTION
+                ),
+            )
+        )
+    return dict(
+        k_max=CRIT_K_MAX,
+        median_db=CRIT_MEDIAN_DB,
+        fraction=CRIT_FRACTION,
+        per_rotor=rows,
+        verdict=bool(rows and all(row["passes"] for row in rows)),
+    )
+
+
+def arm_row(name: str, path: Path, k_max_cap: int, snr: np.ndarray | None = None) -> dict[str, Any]:
+    """One fit arm scored against the four per-rotor fits.
+
+    ``snr`` is the stage-2 per-line SNR of the four-motor support; where it is
+    given the criterion is reported a SECOND time over the lines that clear
+    6 dB, which are the only ones the likelihood has anything to say about.
+    """
     fit = json.loads(Path(path).read_text())
     p = fit["params"]
     carriers = np.asarray(p["carrier_rev_s"], dtype=np.float64).reshape(-1)
@@ -747,20 +778,7 @@ def arm_row(name: str, path: Path, k_max_cap: int) -> dict[str, Any]:
     gamma = MD.gamma_from_params(p)[:, :k_max]
     k = np.arange(1, k_max + 1)
     sel = ok & (k[None, :] <= CRIT_K_MAX)
-    per_rotor = []
-    for r in range(prof.shape[0]):
-        d = np.abs(prof[r][sel[r]] - target[r][sel[r]])
-        per_rotor.append(
-            dict(
-                rotor=r + 1,
-                n=int(d.size),
-                median_abs_db=float(np.median(d)) if d.size else None,
-                frac_within_3db=float(np.mean(d <= 3.0)) if d.size else None,
-                passes=bool(
-                    d.size and np.median(d) <= CRIT_MEDIAN_DB and np.mean(d <= 3.0) >= CRIT_FRACTION
-                ),
-            )
-        )
+    dyn = rotor_dynamics()
     return dict(
         arm=name,
         fit=str(path),
@@ -779,12 +797,20 @@ def arm_row(name: str, path: Path, k_max_cap: int) -> dict[str, Any]:
         gamma_ladder={str(j): float(np.max(gamma[:, j - 1])) for j in GAMMA_LADDER},
         gamma_log_mean=float(np.exp(np.mean(np.log(np.maximum(gamma, 1e-12))))),
         gamma_low_order_check=(fit.get("diagnostics") or {}).get("gamma_low_order_check"),
-        criterion=dict(
-            k_max=CRIT_K_MAX,
-            median_db=CRIT_MEDIAN_DB,
-            fraction=CRIT_FRACTION,
-            per_rotor=per_rotor,
-            verdict=bool(per_rotor and all(row["passes"] for row in per_rotor)),
+        profile_init=(fit.get("diagnostics") or {}).get("profile_init"),
+        dynamics_ratio=dict(
+            sigma_nu=float(p["sigma_nu"]) / dyn["sigma_nu_log_mean"],
+            lam=float(p["lam"]) / dyn["lam_log_mean"],
+            gamma_log_mean=float(np.exp(np.mean(np.log(np.maximum(gamma, 1e-12)))))
+            / dyn["gamma_log_mean_all"],
+            gamma_per_k={
+                str(j): float(np.max(gamma[:, j - 1])) / dyn["gamma_log_mean_per_k"][str(j)]
+                for j in GAMMA_LADDER
+            },
+        ),
+        criterion=_criterion(prof, target, sel),
+        criterion_snr6=(
+            None if snr is None else _criterion(prof, target, sel & (snr[:, :k_max] >= 6.0))
         ),
         bands=band_stats(prof - target, ok),
     )
@@ -793,10 +819,16 @@ def arm_row(name: str, path: Path, k_max_cap: int) -> dict[str, Any]:
 def compare(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    est_path = out_dir / "estimators.json"
+    snr = (
+        np.asarray(json.loads(est_path.read_text())["line_snr_db"], dtype=np.float64)
+        if est_path.exists()
+        else None
+    )
     rows = []
     for item in args.arm:
         name, _, path = item.partition("=")
-        rows.append(arm_row(name, Path(path), int(args.k_max_cap)))
+        rows.append(arm_row(name, Path(path), int(args.k_max_cap), snr))
     payload = dict(
         schema=SCHEMA,
         stage="3",
@@ -823,6 +855,14 @@ def compare(args: argparse.Namespace) -> int:
             f"frac3={[None if v is None else round(v, 2) for v in frac]} "
             f"verdict={row['criterion']['verdict']}"
         )
+        if row["criterion_snr6"] is not None:
+            med6 = [r["median_abs_db"] for r in row["criterion_snr6"]["per_rotor"]]
+            n6 = [r["n"] for r in row["criterion_snr6"]["per_rotor"]]
+            print(
+                f"     over 6 dB: median|d|="
+                f"{[None if v is None else round(v, 2) for v in med6]} n={n6} "
+                f"verdict={row['criterion_snr6']['verdict']}"
+            )
     return 0
 
 
