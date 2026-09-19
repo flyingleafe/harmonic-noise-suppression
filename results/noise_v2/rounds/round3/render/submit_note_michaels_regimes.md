@@ -1,8 +1,16 @@
-# R3 PER-REGIME Michael's score arm — submitted on colab, awaiting harvest
+# R3 PER-REGIME Michael's score arm — HARVESTED
 
-Written by `R3Standby`. `arm_michaels_v2_regimes.json` does not exist yet;
-this note is the handover (job id + exact commands) in case the harness dies
-first. The two fits it scores ARE committed.
+Written by `R3Standby`. `nv2-r3-score-michaels-re-ac8bc5` **succeeded**
+(colab, GPU, 06:08:50Z → ~06:35Z, exit 0);
+`arm_michaels_v2_regimes.json` is fetched and committed, with
+`protocol.scorer.sha256` verified equal to `6e50e025…2877b1` and
+`candidate.fits.michaels.per_regime` naming both fits with `converged: false`.
+Numbers: equal-regime **1.621670** rev/s (bar 3.177994, margin 1.556325;
+pooled R3 2.334258), standby **0.785384** / ramp **3.267119** / cruise
+**0.812507**, proxy `ltas_abs_db` 1.281622 (margin -0.061953, still a FAIL),
+likelihood comb margin -1749.800 nats/s below oracle, gate pass. Full table
+and the per-support rows: `round3/fits/findings_regimes.md`. Everything below
+is the submission handover as written before the result landed.
 
 ## The job
 

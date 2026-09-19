@@ -1,8 +1,14 @@
-# R3 PER-REGIME Michael's fits — submitted, awaiting harvest
+# R3 PER-REGIME Michael's fits — submitted, HARVESTED
 
-Written by `R3Standby`. Nothing in this file is a result: both fits are
-RUNNING. This note is the handover — job ids, exact commands, harvest steps —
-and it states the instruction the per-regime candidate exists to serve.
+Written by `R3Standby`. Both fits are committed and both are **NOT
+converged**; the numbers live in `round3/fits/findings_regimes.md`. Job
+summary: standby `nv2-r3-michaels-standby--6c860e` succeeded 05:14Z, exit 0,
+wall 11 863.2 s (3.30 h), harvested and committed; cruise
+`nv2-r3-michaels-cruise-03bf4e` succeeded 02:20Z, exit 0, wall 2 917.9 s (48.6
+min), harvested and committed. The score arm that renders both through
+`render.render_noise_regimes` is `nv2-r3-score-michaels-re-ac8bc5`
+(`round3/render/submit_note_michaels_regimes.md`). Everything below is the
+submission handover as written before the results landed.
 
 ## Why two fits instead of one pool
 
