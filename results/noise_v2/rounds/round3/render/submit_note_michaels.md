@@ -75,3 +75,33 @@ Bars: Michael's PARITY equal-regime ≤ 3.177994 rev/s (legacy per-regime
 0.317103 standby / 8.007098 ramp / 0.755783 cruise), proxy `ltas_abs_db` ≤
 1.219668 dB. The round record is composed by whoever owns both arms
 (`--compose ... --arm-job michaels_v2_r3_all=nv2-r3-score-michaels-ed8576`).
+
+## Harvested (2026-09-19)
+
+`succeeded`, exit 0, ran 00:40:46Z → 01:00:55Z (20 min wall, colab, GPU).
+`arm_michaels_v2.json` fetched from R2 into a scratch dir, copied out alone and
+committed (`03b18fbd`); `protocol.scorer.sha256` verified equal to
+`6e50e025…2877b1` and `gates.hppnet` / `gates.proxy.ltas_abs_db` / `bars` all
+present. The runner's own `round3/render/findings.md` was NOT committed (it is
+`R3Bench`'s file for the round; the michaels copy stays in the job's artifact
+tree, `s3://omnirun-artifacts/nv2-r3-score-michaels-ed8576/`).
+
+Every number below is from the committed arm JSON, and the fit it scores is
+**NOT converged** (`candidate.fits.michaels.converged = false`,
+`lbfgs_restart_gain_per_cell = 9.0618e-03`, `grad_norm = 5430.15`).
+
+| quantity | R3 | R2 | bar |
+|---|---:|---:|---:|
+| HPPNet equal-regime mean PIT MAE (rev/s) | **2.334258** | 2.456399 | ≤ 3.177994 → **within**, margin 0.843736 (R2: 0.721596) |
+| aggregate ratio vs legacy 3.026661 | 0.771232 | 0.811587 | ≤ 1.05 |
+| per-regime cruise (legacy 0.755783) | **0.693809** (ratio 0.918000) | 0.969167 (1.282334) | — |
+| per-regime ramp (legacy 8.007098) | **3.145259** (0.392809) | 3.393256 (0.423781) | — |
+| per-regime standby (legacy 0.317103) | **3.163707** (9.976916) | 3.006774 (9.482018) | — |
+| proxy `ltas_abs_db` michaels cruise | **1.886305** | 2.149092 | ≤ 1.219668 → **FAIL**, margin −0.666637 (R2: −0.929423) |
+| likelihood comb margin (nats/s) | **−862.83** (below oracle ✓) | −970.15 | below oracle |
+| likelihood floor margin (nats/s) | +201.56 | +71.79 | — |
+
+`pass = false` and `parity_pass = false` for the arm record as a whole because
+it carries ONE rig: the DREGON cohort is empty in a michaels-only arm (same as
+R2's michaels arm). The michaels frozen gate itself is `frozen_gate_pass =
+true` with `cohort_complete = true` and all three regimes present.
