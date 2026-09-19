@@ -120,3 +120,34 @@ also DILUTES the line: the legacy-law arm's k=1 prominence falls from +7.5 to
 **Second tracker.** The SCv2 probe (`ctrl_diverse_scv2_unified`,
 `best_real_r2.ckpt`) was NOT run: this agent's run budget ended with the HPPNet
 arms scored. Nothing about it is claimed here.
+## The SCv2 second tracker: loads, but the frozen PIT protocol cannot score it
+
+`ctrl_diverse_scv2_unified` / `best_real_r2.ckpt` **loads** through
+`zoo.load(name, ckpt=ckpt)`: reference
+`r2://ml-data/artifacts/ctrl_diverse_scv2_unified/checkpoints/best_real_r2.ckpt`,
+6,047,905 bytes, sha256
+`176e1f2606e0c36e60e60d152109b4395ecfe6a6f9e6a6953b2951ba3152fa90`
+(verified locally through `stochastic_fit_revised_eval.Tracker`, which records
+the digest at construction).
+
+It cannot be scored by the PIT protocol the HPPNet column uses. That protocol
+is `Tracker.pit` → `revised_eval.pit_mae(score, fm, LayerPeakRPSMetric(), …)`,
+and `LayerPeakRPSMetric` unpacks the model's `salience` output
+(`src/metrics/salience_layers.py:81,99`). SCv2 is a rate REGRESSOR, not a
+salience model, so the call dies at
+
+```
+scripts/_synthetic_probe.py:117  layers, rps_grid = metric._unpack(fm(inp), tgt)
+src/metrics/salience_layers.py:99  logits = torch.as_tensor(get_array(pred, self.pred_key))
+KeyError: 'salience'
+```
+
+Scoring it therefore needs a regressor PIT path (its own metric and the
+Hungarian assignment applied to the predicted rate tracks rather than to
+salience peaks), which is a protocol change, not a probe swap — beyond this
+agent's assignment and beyond its remaining budget. The colab job submitted for
+it (`nv2-r3-scv2-32e9bf`, arms `real, legacy, v2, v2_plus21db,
+v2_gx10_plus12db, v2_glegacy_plus12db`) was cancelled once the failure was
+reproduced locally, so no SCv2 number exists and none is claimed. The runner
+now carries `--probe-experiment/--probe-ckpt/--arms/--stem`, so the moment a
+regressor metric is wired into `Tracker`, the same command produces the column.
