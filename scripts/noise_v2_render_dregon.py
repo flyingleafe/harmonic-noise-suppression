@@ -1729,6 +1729,10 @@ WIDTH_AT_SHIFT_DB = 21.0
 MATCH_ORDERS: tuple[int, ...] = tuple(range(1, 9))
 MATCH_B = 16.0
 MATCH_SHIFT_BOUNDS = (-12.0, 42.0)
+#: Two matched arms are only compared when their solved shifts are this close:
+#: a match that needs 40 dB more comb than the needle arm compares comb ENERGY,
+#: not width.
+MATCH_COMPARABLE_DB = 3.0
 
 PROFILE_ORDERS = (2, 4, 8)
 PROFILE_STEP_HZ = 1.0
@@ -2661,12 +2665,19 @@ def hump_verdicts(payload: dict[str, Any]) -> dict[str, Any]:
     for key, row in payload["supports"].items():
         real = _harm(row, "real")
         v2 = _harm(row, "v2")
+        narrow = row["arms"].get("v2_matched")
+        narrow_shift = (narrow or {}).get("comb_shift_db")
         wide = [
             row["arms"][n]
             for n in row["arms"]
-            if n.endswith("_matched") and "_g" in n and not row["arms"][n].get("match_at_bound")
+            if n.endswith("_matched")
+            and "_g" in n
+            and not row["arms"][n].get("match_at_bound")
+            and narrow_shift is not None
+            and row["arms"][n].get("comb_shift_db") is not None
+            and abs(float(row["arms"][n]["comb_shift_db"]) - float(narrow_shift))
+            <= MATCH_COMPARABLE_DB
         ]
-        narrow = row["arms"].get("v2_matched")
         loud = row["arms"].get(f"v2_plus{int(WIDTH_AT_SHIFT_DB)}db")
         loud_wide = [
             row["arms"][n]
@@ -2698,8 +2709,12 @@ def hump_verdicts(payload: dict[str, Any]) -> dict[str, Any]:
                 ),
                 best_wide_matched_pit=best_wide,
                 narrow_matched_pit=(narrow or {}).get("pit_mae"),
+                comparable_arms=[e["tag"] for e in wide if e.get("pit_mae") is not None],
                 criterion=(
-                    "at the SAME hump fraction, a widened comb tracks better than the needle comb"
+                    "at the SAME carrier-locked power — and within "
+                    f"{MATCH_COMPARABLE_DB:g} dB of the needle arm's own shift, so the "
+                    "comb energy is comparable too — a widened comb tracks better than "
+                    "the needle comb"
                 ),
             ),
             width_is_the_lever_at_equal_power=dict(
@@ -2721,14 +2736,18 @@ def hump_verdicts(payload: dict[str, Any]) -> dict[str, Any]:
             level_is_the_lever=dict(
                 supported=bool(
                     have_pit
-                    and narrow is not None
-                    and narrow.get("pit_mae") is not None
+                    and loud is not None
+                    and loud.get("pit_mae") is not None
                     and v2.get("pit_mae") is not None
-                    and narrow["pit_mae"] < 0.5 * v2["pit_mae"]
+                    and loud["pit_mae"] < 0.5 * v2["pit_mae"]
                 ),
                 v2_pit=v2.get("pit_mae"),
-                narrow_matched_pit=(narrow or {}).get("pit_mae"),
-                criterion="re-levelling the NEEDLE comb alone halves the PIT MAE",
+                relevelled_pit=(loud or {}).get("pit_mae"),
+                shift_db=WIDTH_AT_SHIFT_DB,
+                criterion=(
+                    f"re-levelling the NEEDLE comb alone ({WIDTH_AT_SHIFT_DB:g} dB up, "
+                    "nothing else changed) at least halves the PIT MAE"
+                ),
             ),
             four_rotor_merge=dict(
                 real=[p["split"]["verdict"] for p in real["profiles"]],
