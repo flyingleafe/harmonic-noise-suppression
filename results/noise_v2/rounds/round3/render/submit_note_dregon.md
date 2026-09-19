@@ -107,3 +107,36 @@ python scripts/noise_v2_round_score.py --round 3 \
 
 If colab stalls > 40 min with no log lines, cancel and resubmit once on
 `--backend kaggle` with the same three `--env` vars, and note it here.
+
+## Harvested (2026-09-19) — no kaggle fallback needed
+
+`succeeded`, exit 0, colab GPU: submitted 02:51:12Z, started 02:55:16Z,
+finished 02:04:53Z→03:04:54Z (≈10 min wall, render 167 s). Polled at 3-min
+intervals; the 40-min cancel-and-resubmit clause never triggered.
+`arm_dregon_v2.json` synced from R2 into `/tmp/r3score_dregon_pull/`, copied out
+ALONE and committed (`0843f3ab`); the job's `--outputs` tree also carried
+`R3Michaels`' `arm_michaels_v2.json`/`submit_note_michaels.md` and the runner's
+own `round3/render/findings.md`, none of which were touched.
+`protocol.scorer.sha256` verified equal to `6e50e025…2877b1`.
+
+Every number below is from the committed arm JSON and the fit it scores is
+**NOT converged**.
+
+| quantity | R3 lowk | R2 combgain | bar |
+|---|---:|---:|---:|
+| DREGON cruise PIT MAE (5-recording mean, rev/s) | **71.866599** | 72.340606 | ≤ 2.187786 parity → **FAIL**, margin −69.678813 |
+| one-sided 95 % upper (rev/s) | **75.029755** | 74.830651 | ≤ 2.187786 → FAIL, margin −72.841969 |
+| stretch margin (rev/s) | −69.969536 | −70.443543 | ≤ 1.897063 → **FAIL** |
+| proxy `ltas_abs_db` dregon cruise (dB) | **3.748014** | 3.502432 | ≤ 1.978609 → **FAIL**, margin −1.769405 |
+| `mr_ltas` (report-only) | 2.659216 | 2.583300 | — |
+| real-arm reproduction (rev/s) | 1.218708 vs frozen 1.218708 (rel 1.08e-09) | — | protocol check |
+
+Eight per-order low-order gains plus a deeper `comb_gain_db` (−6.918 dB) buy
+0.474007 rev/s on the mean and LOSE 0.199104 rev/s on the 95 % upper bound and
+0.245582 dB on the proxy. Audio (uncommitted, 146 MB):
+`s3://omnirun-artifacts/nv2-r3-score-dregon-31ff78/outputs/results/noise_v2/rounds/round3/render/audio/dregon_v2`.
+
+The round record was composed with the command above and committed in
+`782d6126` (`results/noise_v2/rounds/round3.json`,
+`round3/score/findings.md`) — WITHOUT `R3Standby`'s pending per-regime
+Michael's arm.
