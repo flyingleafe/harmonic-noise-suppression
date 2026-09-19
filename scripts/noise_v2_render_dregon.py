@@ -2566,20 +2566,22 @@ def run_humps(
                         f"against the frozen {real.shape[-1]}"
                     )
                 diag = hump_diagnostics(audio, reference, sr=sr, fbar=fbar, deltas=deltas)
+            solved = (
+                shifts["fitted" if spec.gamma_hz is None else f"{spec.gamma_hz:g}"]
+                if spec.matched
+                else None
+            )
             entry: dict[str, Any] = dict(
                 kind=spec.kind,
                 tag=spec.tag,
                 label=spec.label,
                 gamma_hz=spec.gamma_hz,
                 comb_shift_db=(
-                    float(
-                        shifts["fitted" if spec.gamma_hz is None else f"{spec.gamma_hz:g}"][
-                            "shift_db"
-                        ]
-                    )
-                    if spec.matched
+                    float(solved["shift_db"])
+                    if solved is not None
                     else (float(spec.shift_db) if spec.kind == "v2" else None)
                 ),
+                match_at_bound=(None if solved is None else bool(solved["at_bound"])),
                 render_seconds=float(time.time() - t0),
                 **{k: v for k, v in diag.items() if not k.startswith("_")},
             )
@@ -2659,7 +2661,11 @@ def hump_verdicts(payload: dict[str, Any]) -> dict[str, Any]:
     for key, row in payload["supports"].items():
         real = _harm(row, "real")
         v2 = _harm(row, "v2")
-        wide = [row["arms"][n] for n in row["arms"] if n.endswith("_matched") and "_g" in n]
+        wide = [
+            row["arms"][n]
+            for n in row["arms"]
+            if n.endswith("_matched") and "_g" in n and not row["arms"][n].get("match_at_bound")
+        ]
         narrow = row["arms"].get("v2_matched")
         loud = row["arms"].get(f"v2_plus{int(WIDTH_AT_SHIFT_DB)}db")
         loud_wide = [
@@ -3408,29 +3414,57 @@ def hump_proposal(payload: dict[str, Any]) -> list[str]:
         "that decides it:"
     )
     o.append("")
+    unattainable = sorted(
+        {
+            f"{g:g} Hz"
+            for g in HUMP_GAMMAS
+            for r in rows
+            if (r["arms"].get(f"v2_g{int(g)}_matched") or {}).get("match_at_bound")
+        }
+    )
     o.append(
         "**(i) free `gamma_rk` in the DREGON flight fit under a wide flight-specific "
         f"prior — {'SUPPORTED' if width_lever else 'NOT SUPPORTED'}.** At the matched "
-        "hump fraction the needle comb scores "
+        "carrier-locked power the needle comb scores "
         + ", ".join(_f(p) for p in matched_pits)
         + " rev/s and the same comb widened scores "
         + "; ".join(f"{g:g} Hz: " + ", ".join(_f(p) for p in wide_pits[g]) for g in HUMP_GAMMAS)
         + " rev/s"
         + (
-            ". Widening at a fixed hump fraction therefore HELPS and a wide prior is the lever."
+            ". Widening at a fixed carrier-locked power therefore HELPS and a wide prior "
+            "is the lever."
             if width_lever
-            else ". Widening at a fixed hump fraction makes every window WORSE, so freeing "
-            "gamma_rk cannot buy the gate: the widths the data does support are the "
-            "measured effective HWHMs at k=1 ("
+            else ". Widening makes every window WORSE, so freeing gamma_rk cannot buy the "
+            "gate: the widths the data does support are the measured effective HWHMs at "
+            "k=1 ("
             + ", ".join(_f(x, ".1f") for x in w1)
             + " Hz) and k=2 ("
             + ", ".join(_f(x, ".1f") for x in w2)
             + " Hz) against the needle render's k=1 instrumental floor ("
             + ", ".join(_f(x, ".1f") for x in n1)
-            + " Hz), i.e. a log-normal prior on gamma_rk with median ~5 Hz at k=1 and a "
-            "factor-3 sd would cover them — but it is worth nothing to the gate."
+            + " Hz), i.e. a log-normal prior on gamma_rk with a median of a few Hz at k=1 "
+            "and a factor-3 sd would cover them — and it is worth nothing to the gate."
         )
     )
+    if unattainable:
+        o.append("")
+        o.append(
+            "At "
+            + " and ".join(unattainable)
+            + " the match is NOT ATTAINABLE at any level, which is the sharpest number in "
+            "this study: a DREGON cruise order spacing is fbar ~ 80 Hz, so a line of "
+            "half-width 67 or 130 Hz is WIDER THAN THE GAP BETWEEN ORDERS. Its power "
+            "lands as much halfway between two orders as on them — its carrier-locked "
+            "fraction over k=1..8 is "
+            + ", ".join(_pct(r["match_target"]["comb_only_frac"].get("67") or 0.0) for r in rows)
+            + " % (67 Hz) and "
+            + ", ".join(_pct(r["match_target"]["comb_only_frac"].get("130") or 0.0) for r in rows)
+            + " % (130 Hz) of ITS OWN band power, against "
+            + ", ".join(_pct(r["match_target"]["comb_only_frac"]["fitted"]) for r in rows)
+            + " % for the needle comb and a real-window target of "
+            + ", ".join(_pct(r["match_target"]["target_frac"]) for r in rows)
+            + " %. A comb that wide is not a quiet comb, it is not a comb."
+        )
     o.append("")
     o.append(
         "The same comparison at EQUAL comb power, which is the one without a confound "
