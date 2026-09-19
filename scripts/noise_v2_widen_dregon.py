@@ -203,12 +203,31 @@ def arms() -> tuple[Arm, ...]:
     return tuple(out)
 
 
-def run(*, fit_path: Path, out: Path, probe: bool, recordings: tuple[str, ...]) -> dict[str, Any]:
+def _probe(experiment: str | None, ckpt: str) -> Any:
+    """The frozen HPPNet probe, or any other checkpoint as a SECOND tracker."""
+    rs = _module("noise_v2_round_score")
+    if experiment is None:
+        return rs.Probe.load()
+    ev = _module("stochastic_fit_revised_eval")
+    tracker = ev.Tracker(dict(experiment=str(experiment), ckpt=str(ckpt)))
+    return type("P", (), dict(record=tracker.record, tracker=tracker))()
+
+
+def run(
+    *,
+    fit_path: Path,
+    out: Path,
+    probe: bool,
+    recordings: tuple[str, ...],
+    only: tuple[str, ...] = (),
+    probe_experiment: str | None = None,
+    probe_ckpt: str = "best",
+) -> dict[str, Any]:
     rs = _module("noise_v2_round_score")
     fit = json.loads(Path(fit_path).read_text())
-    probe_obj = rs.Probe.load() if probe else None
+    probe_obj = _probe(probe_experiment, probe_ckpt) if probe else None
     legacy = rs.legacy_arm("dregon")
-    specs = arms()
+    specs = tuple(a for a in arms() if not only or a.name in only)
     payload: dict[str, Any] = dict(
         schema=SCHEMA,
         git=git_rev(),
@@ -430,20 +449,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--figures", action="store_true")
     ap.add_argument("--job", default=None)
     ap.add_argument("--recordings", default=",".join(RECORDINGS))
+    ap.add_argument("--arms", default="", help="comma-separated arm subset")
+    ap.add_argument("--probe-experiment", default=None, help="a SECOND tracker's experiment")
+    ap.add_argument("--probe-ckpt", default="best")
+    ap.add_argument("--stem", default="widen", help="output file stem")
     args = ap.parse_args(argv)
     payload = run(
         fit_path=args.fit,
         out=args.out,
         probe=bool(args.probe),
         recordings=tuple(r for r in str(args.recordings).split(",") if r),
+        only=tuple(a for a in str(args.arms).split(",") if a),
+        probe_experiment=args.probe_experiment,
+        probe_ckpt=str(args.probe_ckpt),
     )
     figs = payload.pop("_figures")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     written = write_figures(figs, out) if args.figures else []
-    (out / "widen.json").write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
-    (out / "widen.md").write_text(findings(payload, written, job=args.job))
-    print(f"wrote {out / 'widen.json'}")
+    (out / f"{args.stem}.json").write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
+    (out / f"{args.stem}.md").write_text(findings(payload, written, job=args.job))
+    print(f"wrote {out / (args.stem + '.json')}")
     for p in written:
         print(f"wrote {p}")
     return 0
