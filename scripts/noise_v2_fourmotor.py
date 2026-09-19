@@ -251,24 +251,65 @@ def in_band_mask(carriers: np.ndarray, k_max: int) -> np.ndarray:
 # ── comparison ──────────────────────────────────────────────────────────────
 
 
-def band_stats(delta: np.ndarray, ok: np.ndarray) -> list[dict[str, Any]]:
-    """Median ``|delta|``, and the fraction inside 3 dB, per :data:`BANDS`."""
+def band_stats(
+    delta: np.ndarray, ok: np.ndarray, valid: np.ndarray | None = None
+) -> list[dict[str, Any]]:
+    """Median ``|delta|`` and the fraction inside 3 dB per :data:`BANDS`.
+
+    ``valid`` marks the cells an estimator actually produced a number for; a
+    COLLAPSED cell (the LS power went to zero once its own noise variance was
+    subtracted) is counted, never averaged in — a floored estimate against a
+    −60 dB target is a 140 dB "error" that would swamp every real one. The
+    synthetic study reports the same two numbers side by side.
+    """
     k = np.arange(1, delta.shape[1] + 1)
+    good = ok if valid is None else (ok & valid)
     out = []
     for name, lo, hi in BANDS:
-        sel = ok & (k[None, :] >= lo) & (k[None, :] <= hi)
+        band = (k >= lo) & (k <= hi)
         rows = []
         for r in range(delta.shape[0]):
-            d = np.abs(delta[r][sel[r]])
+            d = np.abs(delta[r][good[r] & band])
+            n_all = int((ok[r] & band).sum())
             rows.append(
                 dict(
                     rotor=r + 1,
                     n=int(d.size),
+                    n_in_band=n_all,
+                    frac_collapsed=float(1.0 - d.size / n_all) if n_all else None,
                     median_abs_db=float(np.median(d)) if d.size else None,
                     frac_within_3db=float(np.mean(d <= 3.0)) if d.size else None,
                 )
             )
         out.append(dict(band=name, per_rotor=rows))
+    return out
+
+
+def line_snr_db(
+    power_mean: np.ndarray, freqs_hz: np.ndarray, carriers: np.ndarray, k_max: int
+) -> np.ndarray:
+    """``(R, K)`` peak line power over the LOCAL floor, dB.
+
+    The gate the synthetic sweep reports its medians at, measured here the only
+    way a real recording allows: the mic-mean periodogram's peak within
+    ±0.15 Hz of the line, over :func:`multirotor._smooth_floor`'s block-median
+    floor at that bin.
+    """
+    floor = MR._smooth_floor(np.asarray(power_mean, dtype=np.float64))
+    df = float(freqs_hz[1] - freqs_hz[0])
+    half = max(1, int(round(0.15 / df)))
+    out = np.zeros((len(carriers), k_max))
+    for r, f_r in enumerate(np.asarray(carriers, dtype=np.float64)):
+        for k in range(1, k_max + 1):
+            j = int(round(k * f_r / df))
+            if j + half >= power_mean.size:
+                continue
+            out[r, k - 1] = 10.0 * float(
+                np.log10(
+                    max(float(np.max(power_mean[j - half : j + half + 1])), 1e-30)
+                    / max(float(floor[j]), 1e-30)
+                )
+            )
     return out
 
 
@@ -338,6 +379,45 @@ def offsets_block(scene: MR.MultiRotorScene, bound: float) -> dict[str, Any]:
     )
 
 
+_SCENE: MR.MultiRotorScene | None = None
+
+
+def _chunk_worker(job: tuple[np.ndarray, dict[str, Any]]) -> dict[str, Any]:
+    orders, kw = job
+    assert _SCENE is not None
+    return MR.estimate_e2(_SCENE, orders, **kw)
+
+
+def _parallel_e2(
+    scene: MR.MultiRotorScene, orders: np.ndarray, jobs: int, **kw: Any
+) -> dict[str, Any]:
+    """:func:`multirotor.estimate_e2` over ``orders``, split across processes.
+
+    Every target line is solved independently (one demodulation, one windowed
+    LS per line), so cutting the order list is an exact split as long as the
+    steering is handed in rather than re-estimated per chunk — which is why the
+    caller passes ``steering=``. The scene rides on a fork, not a pickle: the
+    audio is 35 MB and read-only in every worker.
+    """
+    global _SCENE
+    if jobs <= 1:
+        return MR.estimate_e2(scene, orders, **kw)
+    import multiprocessing as mp
+
+    _SCENE = scene
+    chunks = [c for c in np.array_split(np.asarray(orders), jobs) if c.size]
+    with mp.get_context("fork").Pool(len(chunks)) as pool:
+        parts = pool.map(_chunk_worker, [(c, kw) for c in chunks])
+    out = dict(parts[0])
+    for key, val in parts[0].items():
+        if isinstance(val, np.ndarray) and val.ndim >= 2 and val.shape[:1] == (scene.cfg.n_rotors,):
+            out[key] = np.concatenate([p[key] for p in parts], axis=1)
+        elif key == "orders":
+            out[key] = np.concatenate([p[key] for p in parts])
+    out.pop("mic_ratio", None)  # per-chunk only; nothing downstream reads it
+    return out
+
+
 def estimate(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -358,33 +438,103 @@ def estimate(args: argparse.Namespace) -> int:
     bin_hz = float(support.sr) / audio.shape[1]
     print(f"# offsets rev/s {np.round(chosen, 5).tolist()} ({np.round(chosen / bin_hz, 2)} bins)")
 
-    e1 = MR.estimate_e1(scene, orders, offsets_rev_s=chosen)
-    print("# E1 done", flush=True)
-    e2s = MR.estimate_e2(scene, orders, offsets_rev_s=chosen)
-    print("# E2-single done", flush=True)
-    e2m = MR.estimate_e2(scene, orders, offsets_rev_s=chosen, multi=True)
-    print("# E2-multi done", flush=True)
-    # the no-refinement control: how much the (uncertain) offsets are worth
-    e2m0 = MR.estimate_e2(scene, orders, multi=True)
-    print("# E2-multi (no offsets) done", flush=True)
+    # the estimator pass is the expensive half (about 5 min on 7 cores); its
+    # raw output is cached so re-scoring never re-measures
+    cache = out_dir / "raw_power.npz"
+    if args.reuse and cache.exists():
+        with np.load(cache, allow_pickle=False) as z:
+            raw = {k: z[k] for k in z.files}
+        print(f"# reusing {cache}", flush=True)
+    else:
+        e1 = MR.estimate_e1(scene, orders, offsets_rev_s=chosen)
+        print("# E1 done", flush=True)
+        # ONE steering estimate, then every order chunk solved in its own
+        # process. estimate_e2 re-derives the steering from a fixed block of
+        # orders on every call, so handing the same (gain, delay) to every
+        # chunk is what makes the split exact and not merely parallel.
+        probe = MR.estimate_e2(scene, orders[:1], offsets_rev_s=chosen, multi=True)
+        steering = (probe["steering_gain"], probe["steering_delay"])
+        probe0 = MR.estimate_e2(scene, orders[:1], multi=True)
+        print(f"# steering from orders {probe['steering_orders'].tolist()}", flush=True)
+        e2s = _parallel_e2(scene, orders, int(args.jobs), offsets_rev_s=chosen)
+        print("# E2-single done", flush=True)
+        e2m = _parallel_e2(
+            scene, orders, int(args.jobs), offsets_rev_s=chosen, multi=True, steering=steering
+        )
+        print("# E2-multi done", flush=True)
+        # the no-refinement control: how much the (uncertain) offsets are worth
+        e2m0 = _parallel_e2(
+            scene,
+            orders,
+            int(args.jobs),
+            multi=True,
+            steering=(probe0["steering_gain"], probe0["steering_delay"]),
+        )
+        print("# E2-multi (no offsets) done", flush=True)
+        raw = dict(
+            E1=e1["power"],
+            E2_single=e2s["power"],
+            E2_multi=e2m["power"],
+            E2_multi_no_offset=e2m0["power"],
+            steering_orders=np.atleast_1d(probe["steering_orders"]),
+            steering_gain=np.abs(steering[0]),
+            steering_delay=steering[1],
+            bandwidth_hz=e2s["bandwidth_hz"],
+            nearest_line_hz=np.where(
+                np.isfinite(e2s["nearest_line_hz"]), e2s["nearest_line_hz"], -1.0
+            ),
+            beat_cycles=np.where(np.isfinite(e2s["beat_cycles"]), e2s["beat_cycles"], -1.0),
+            n_columns=e2s["n_columns"],
+            window_s=e2s["window_s"],
+            coherence_time_s=e2s["coherence_time_s"],
+            cond=e2m["cond"],
+        )
+        np.savez(cache, **raw)
 
     cal = calibration_db(carriers, k_max, rig)
     ok = in_band_mask(carriers, k_max)
     target = rotor_profiles(k_max)
     est = {
-        "E1": to_profile_db(e1["power"], cal),
-        "E2-single": to_profile_db(e2s["power"], cal),
-        "E2-multi": to_profile_db(e2m["power"], cal),
-        "E2-multi-no-offset": to_profile_db(e2m0["power"], cal),
+        "E1": to_profile_db(raw["E1"], cal),
+        "E2-single": to_profile_db(raw["E2_single"], cal),
+        "E2-multi": to_profile_db(raw["E2_multi"], cal),
+        "E2-multi-no-offset": to_profile_db(raw["E2_multi_no_offset"], cal),
     }
     rig_prof = np.asarray(rig["params"]["profile"]["profile_db"], dtype=np.float64)[:, :k_max]
     est["R3-rig-fit"] = rig_prof
 
     scores = MR.per_rotor_scores(scene.cfg.rotors, orders, duration_s=duration_s)
-    comparison = {name: band_stats(v - target, ok & np.isfinite(target)) for name, v in est.items()}
+    w = hann_window(audio.shape[1])
+    p_mean = ((np.abs(np.fft.rfft(audio * w[None, :], axis=1)) ** 2) / float((w**2).sum())).mean(
+        axis=0
+    )
+    snr = line_snr_db(p_mean, np.fft.rfftfreq(audio.shape[1], d=1.0 / support.sr), carriers, k_max)
+    base = ok & np.isfinite(target)
+    # THE GATE. The synthetic sweep quotes its medians over cells whose line
+    # clears 20 dB in its own band; on the real four-motor support almost no
+    # line does (see the findings), so all three tiers are reported and the
+    # ungated one is the one to read with the collapse fraction beside it.
+    comparison = {
+        name: dict(
+            all=band_stats(v - target, base, v > -199.0),
+            snr6=band_stats(v - target, base & (snr >= 6.0), v > -199.0),
+            snr20=band_stats(v - target, base & (snr >= 20.0), v > -199.0),
+        )
+        for name, v in est.items()
+    }
     collapsed = {
         name: int(np.sum((v <= -199.0) & ok)) for name, v in est.items() if name != "R3-rig-fit"
     }
+    snr_summary = [
+        dict(
+            rotor=r + 1,
+            median_db=float(np.median(snr[r][ok[r]])),
+            frac_over_6db=float(np.mean(snr[r][ok[r]] >= 6.0)),
+            frac_over_20db=float(np.mean(snr[r][ok[r]] >= 20.0)),
+            max_db=float(np.max(snr[r][ok[r]])),
+        )
+        for r in range(len(carriers))
+    ]
 
     payload = dict(
         schema=SCHEMA,
@@ -417,23 +567,21 @@ def estimate(args: argparse.Namespace) -> int:
         target_profile_db=np.round(np.where(np.isfinite(target), target, -999.0), 3).tolist(),
         in_band=ok.tolist(),
         resolvability_score=np.round(scores, 4).tolist(),
+        line_snr_db=np.round(snr, 2).tolist(),
+        line_snr_summary=snr_summary,
         comparison=comparison,
         collapsed_cells=collapsed,
         e2_diagnostics=dict(
-            steering_orders=[int(v) for v in np.atleast_1d(e2m["steering_orders"])],
-            steering_gain=np.round(np.abs(e2m["steering_gain"]), 4).tolist(),
-            steering_delay_us=np.round(e2m["steering_delay"] * 1e6, 3).tolist(),
-            bandwidth_hz=np.round(e2s["bandwidth_hz"], 3).tolist(),
-            nearest_line_hz=np.round(
-                np.where(np.isfinite(e2s["nearest_line_hz"]), e2s["nearest_line_hz"], -1.0), 4
-            ).tolist(),
-            beat_cycles=np.round(
-                np.where(np.isfinite(e2s["beat_cycles"]), e2s["beat_cycles"], -1.0), 4
-            ).tolist(),
-            n_columns=e2s["n_columns"].tolist(),
-            window_s=np.round(e2s["window_s"], 5).tolist(),
-            coherence_time_s=np.round(e2s["coherence_time_s"], 5).tolist(),
-            cond_median=float(np.median(e2m["cond"])),
+            steering_orders=[int(v) for v in raw["steering_orders"]],
+            steering_gain=np.round(raw["steering_gain"], 4).tolist(),
+            steering_delay_us=np.round(raw["steering_delay"] * 1e6, 3).tolist(),
+            bandwidth_hz=np.round(raw["bandwidth_hz"], 3).tolist(),
+            nearest_line_hz=np.round(raw["nearest_line_hz"], 4).tolist(),
+            beat_cycles=np.round(raw["beat_cycles"], 4).tolist(),
+            n_columns=np.asarray(raw["n_columns"], dtype=np.int64).tolist(),
+            window_s=np.round(raw["window_s"], 5).tolist(),
+            coherence_time_s=np.round(raw["coherence_time_s"], 5).tolist(),
+            cond_median=float(np.median(raw["cond"])),
         ),
     )
     path = out_dir / "estimators.json"
@@ -442,12 +590,19 @@ def estimate(args: argparse.Namespace) -> int:
     init_path = write_profile_init(out_dir, est["E2-multi"], ok, carriers, chosen, k_max)
     fig = figure(out_dir, payload)
     print(f"# wrote {path}\n# wrote {init_path}\n# wrote {fig}")
-    for name, rows in comparison.items():
-        for band in rows:
+    for r in snr_summary:
+        print(
+            f"# rotor {r['rotor']} line SNR median {r['median_db']:.1f} dB, "
+            f"{100 * r['frac_over_6db']:.0f} % over 6 dB, {100 * r['frac_over_20db']:.0f} % over 20 dB"
+        )
+    for name, tiers in comparison.items():
+        for band in tiers["all"]:
             med = [b["median_abs_db"] for b in band["per_rotor"]]
+            coll = [b["frac_collapsed"] for b in band["per_rotor"]]
             print(
-                f"{name:20s} {band['band']:8s} median|d| per rotor "
-                f"{[None if v is None else round(v, 2) for v in med]}"
+                f"{name:20s} {band['band']:8s} median|d| "
+                f"{[None if v is None else round(v, 2) for v in med]} "
+                f"collapsed {[None if v is None else round(v, 2) for v in coll]}"
             )
     return 0
 
@@ -509,32 +664,53 @@ def figure(out_dir: Path, payload: dict[str, Any]) -> Path:
     orders = np.asarray(payload["orders"], dtype=float)
     ok = np.asarray(payload["in_band"], dtype=bool)
     target = np.asarray(payload["target_profile_db"], dtype=float)
+    snr = np.asarray(payload["line_snr_db"], dtype=float)
     series = [
-        ("R3 per-rotor fit", target, "k", 2.0),
-        ("E1", np.asarray(payload["profile_db"]["E1"], dtype=float), "tab:red", 1.0),
+        ("R3 per-rotor fit", target, "k", 2.0, 1.0),
+        ("E1", np.asarray(payload["profile_db"]["E1"], dtype=float), "tab:red", 1.0, 0.7),
         (
             "E2-single",
             np.asarray(payload["profile_db"]["E2-single"], dtype=float),
             "tab:orange",
             1.0,
+            0.7,
         ),
-        ("E2-multi", np.asarray(payload["profile_db"]["E2-multi"], dtype=float), "tab:blue", 1.4),
+        (
+            "E2-multi",
+            np.asarray(payload["profile_db"]["E2-multi"], dtype=float),
+            "tab:blue",
+            1.2,
+            0.8,
+        ),
         (
             "R3 rig fit",
             np.asarray(payload["profile_db"]["R3-rig-fit"], dtype=float),
             "tab:green",
-            1.0,
+            1.2,
+            0.85,
         ),
     ]
     fig, axes = plt.subplots(2, 2, figsize=(12.5, 7.6), sharex=True, sharey=True)
     for r, ax in enumerate(axes.ravel()):
-        for name, arr, colour, lw in series:
+        for name, arr, colour, lw, alpha in series:
             y = np.where(ok[r] & (arr[r] > -199.0), arr[r], np.nan)
-            ax.plot(orders, y, color=colour, lw=lw, label=name if r == 0 else None)
+            ax.plot(orders, y, color=colour, lw=lw, alpha=alpha, label=name if r == 0 else None)
+        # the only orders any of this is measurable at: the line clears 6 dB
+        # over its own local floor in the four-motor recording
+        vis = ok[r] & (snr[r] >= 6.0)
+        ax.plot(
+            orders[vis],
+            target[r][vis],
+            "o",
+            ms=3.5,
+            color="k",
+            label="line over 6 dB" if r == 0 else None,
+        )
         cap = int(ok[r].sum())
         ax.axvline(cap + 0.5, color="0.6", ls=":", lw=1)
         ax.set_title(
             f"rotor {r + 1} — carrier {payload['carriers_rev_s'][r]:.3f} rev/s, in band to k = {cap}"
+            f", {int(vis.sum())} lines over 6 dB"
         )
         ax.grid(alpha=0.3)
         ax.set_xlim(0, orders.max())
@@ -547,7 +723,7 @@ def figure(out_dir: Path, payload: dict[str, Any]) -> Path:
         f"estimators and the R3 rig fit",
         fontsize=11,
     )
-    fig.legend(loc="lower center", ncol=5, frameon=False)
+    fig.legend(loc="lower center", ncol=6, frameon=False)
     fig.tight_layout(rect=(0, 0.045, 1, 1))
     path = out_dir / "fig_profiles.png"
     fig.savefig(path, dpi=140)
@@ -662,6 +838,14 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("estimate", help="stage 2: the estimators on the real support")
     e.add_argument("--out", default=str(OUT_DIR))
     e.add_argument("--k-max", type=int, default=0, help="0 = the carrier geometry's own cap")
+    e.add_argument(
+        "--jobs", type=int, default=7, help="processes the E2 order list is split across"
+    )
+    e.add_argument(
+        "--reuse",
+        action="store_true",
+        help="score the cached raw_power.npz instead of re-measuring",
+    )
     e.add_argument(
         "--offset-bound",
         type=float,
