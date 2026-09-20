@@ -896,6 +896,15 @@ def param_diff(a: Any, b: Any, prefix: str = "") -> list[str]:
     return []
 
 
+def hump_periodogram(audio: np.ndarray, rps: np.ndarray, sr: int) -> Any:
+    """The campaign's flight front end (2048/512) on one arm's audio."""
+    from experiments.stochastic_fit.data import Clip, periodogram
+
+    rdd = _module("noise_v2_render_dregon")
+    clip = Clip("arm", "synthetic", np.asarray(audio, dtype=np.float32), rps, int(sr), rps, {})
+    return periodogram(clip, n_fft=rdd.HUMP_N, hop=rdd.HUMP_HOP)
+
+
 def run_score(
     *,
     out: Path,
@@ -904,6 +913,7 @@ def run_score(
     probe: bool,
     stem: str,
     ladder_arms: tuple[str, ...] = (),
+    cell_arms: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Render every arm on the score windows and score the frozen HPPNet."""
     rs = _module("noise_v2_round_score")
@@ -934,6 +944,21 @@ def run_score(
             max_rps=support.max_rps,
             sr=sr,
         )
+        cells = None
+        if cell_arms:
+            rdd = _module("noise_v2_render_dregon")
+            legacy_audio = np.asarray(legacy_render(recording, rps), dtype=np.float64)[:8]
+            pg_legacy = hump_periodogram(legacy_audio, rps, sr)
+            cells = dict(
+                masks=rdd.cell_classes(
+                    np.asarray(pg_legacy.freqs, dtype=np.float64),
+                    np.asarray(pg_legacy.rps, dtype=np.float64),
+                    n_fft=rdd.HUMP_N,
+                    sr=sr,
+                ),
+                power=np.asarray(pg_legacy.power, dtype=np.float64),
+                ratio=rdd._ratio_stats,
+            )
         row: dict[str, Any] = dict(support=support.as_dict(), arms={})
         for name, arm in arms.items():
             if arm == "real":
@@ -957,6 +982,12 @@ def run_score(
                 entry["pit_mae"] = float(pit["mae"])
             if name in ladder_arms:
                 entry |= ladder(audio, rps, sr=sr)
+            if cells is not None and name in cell_arms:
+                power = np.asarray(hump_periodogram(audio, rps, sr).power, dtype=np.float64)
+                entry["cells_vs_legacy_db"] = {
+                    cls: cells["ratio"](power, cells["power"], mask)
+                    for cls, mask in cells["masks"].items()
+                }
             row["arms"][name] = entry
             print(f"[{recording}] {name}: pit={entry.get('pit_mae')}", flush=True)
         payload["windows"][support.key] = row
@@ -1019,6 +1050,12 @@ def main(argv: list[str] | None = None) -> int:
         help="a v2 fit JSON to render and score; 'real' and 'legacy' are reserved arm names",
     )
     c.add_argument("--with-real", action="store_true", help="add the real and legacy arms")
+    c.add_argument(
+        "--cells",
+        default="",
+        help="comma-separated arms whose periodogram is compared to the LEGACY render's in "
+        "the three cell classes (comb k<=8, comb 8<k<=40, floor)",
+    )
     c.add_argument(
         "--ladder", default="", help="comma-separated arms to also measure the ladder on"
     )
@@ -1087,6 +1124,7 @@ def main(argv: list[str] | None = None) -> int:
         probe=bool(args.probe),
         stem=str(args.stem),
         ladder_arms=tuple(g for g in str(args.ladder).split(",") if g),
+        cell_arms=tuple(g for g in str(args.cells).split(",") if g),
     )
     if args.swap:
         payload["swap"] = dict(
