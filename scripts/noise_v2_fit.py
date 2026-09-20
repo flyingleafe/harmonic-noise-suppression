@@ -957,9 +957,23 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--max-frames", type=int, default=256)
             p.add_argument("--adam-batch", type=int, default=8)
             p.add_argument("--lbfgs-frames", type=int, default=64)
+            p.add_argument(
+                "--restart-tag",
+                default=None,
+                help="write this fit as a RESTART under <out>/restarts/<name>__<mode>__<tag>."
+                "json even though it is a single seed. A pooled flight fit can need the whole "
+                "node, so its restarts run as one CLUSTER JOB EACH; `reduce` then collapses "
+                "them the way --seeds would have",
+            )
 
     f = sub.add_parser("findings")
     f.add_argument("--out", default=OUT_DIR)
+
+    r = sub.add_parser(
+        "reduce", help="collapse <out>/restarts/*__<mode>__s*.json into one reported fit"
+    )
+    r.add_argument("--out", default=OUT_DIR)
+    r.add_argument("--mode", default="bench")
 
     v = sub.add_parser("validate", help="four-motor validation of the single-motor fits")
     v.add_argument("--out", default=OUT_DIR)
@@ -975,6 +989,14 @@ def main(argv: list[str] | None = None) -> int:
         text = findings(out_dir)
         (out_dir / "findings.md").write_text(text)
         print(text)
+        return 0
+
+    if args.cmd == "reduce":
+        rows = reduce_restarts(out_dir, mode=str(args.mode))
+        if not rows:
+            raise SystemExit(f"{out_dir / 'restarts'}: no *__{args.mode}__s*.json to reduce")
+        for row in rows:
+            print(json.dumps(row))
         return 0
 
     if args.cmd == "validate":
@@ -1034,7 +1056,7 @@ def main(argv: list[str] | None = None) -> int:
             optim = _optim_from_args(args)
             optim["seed"] = s
             optim["init_jitter"] = 0.0 if s == seeds[0] else float(args.init_jitter)
-            tag = f"s{s}" if len(seeds) > 1 else None
+            tag = f"s{s}" if len(seeds) > 1 else (args.restart_tag or None)
             units.append(
                 Unit(
                     uid=f"{args.name}__{mode}" + (f"__{tag}" if tag else ""),
