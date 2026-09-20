@@ -1,5 +1,46 @@
 # R5 probe (b): what the RPS trackers respond to on DREGON-like data
 
+## Synthesis
+
+**The verdict is BINARY, and on renders it is bought with CQT carrier contrast.**
+HPPNet does not mistrack the R3 v2-fit-to-real render: it emits 0.0 rev/s on
+**86.3 %** of scored values (6-7 mics of 8) — the zero class of its own
+training stream — so 69.6 rev/s is just the mean carrier; SCv2 does it on 1 mic
+of 8 and tracks the other seven to 0.8-3.0 rev/s. In the model's OWN front end
+(`CQT2010v2`, 48 bins/oct, Q = 68.75, 855 ms window at k=1) the render boundary
+is **+1.6 to +5.6 dB of carrier gain** `S₈(1) − med_{α≠1} S₈(α)`: `v2_real`
++1.63 OFF; `v2_legacy_free` +5.57, `legacy` +5.69, `v2_legacy_lowk` +5.98 ON.
+
+**H1 — a finer magnitude statistic separates what the 2048-frame cells could
+not: PARTLY, render side only.** The CQT splits the legacy family from
+`v2_real` by ≈ 4 dB of carrier gain (c₁ +3.41 against +7.38…+9.56) but NOT
+`real` from `v2_real`. **H2 — drift against the γ ladder and σ_ν = 0.74:
+mechanism confirmed, explanation refuted.** The 855 ms / 1.17 Hz window costs
+real 4.3 dB of its R4 prominence (+5.77 → +1.50) and `v2_real` 4.0 dB
+(+7.42 → +3.41); placement is flat too (|peak offset| 1.33 / 1.22 bins, both at
+the 1.2-bin no-signal expectation). **H3 — trained on legacy rig renders:
+REFUTED, 0 %** — 83.3 % real / 16.7 % silence, no rig bank; but all three
+scored recordings are IN both training pools.
+
+**The real clip is the anomaly and no magnitude statistic explains it.** On c₁,
+S₈, frac c₁>3 dB and carrier gain it is the WEAKEST arm (α curve peaks at 0.98)
+and the best tracked: **its score is not a target a generative fit can reach.**
+
+**SCv2 as an instrument: the MEAN carrier only.** Its comb is a prior — mean
+gap 2.25-2.49 rev/s and spread error 0.73-0.94 on all five arms, including the
+one it misses by 80 rev/s, against a label gap of 2.55 drifting 0.59 where
+SCv2's drifts 0.10; 83-98 % of its error is the centre. It ratifies R4 at
+1.96 / 1.80.
+
+**R5: a CALIBRATION PIN, not an objective term.** What moves the tracker is a
+THRESHOLD on one scalar that saturates above ~5.6 dB and lives on the tracker's
+front end, not in the Whittle likelihood; an objective term would trade
+likelihood continuously against a step. Fit the flight pool by Whittle in mode
+`flight` (free profile — 1.75 HPPNet / 1.80 SCv2, within 0.4 dB of the legacy
+render in every cell class, α = 0.5 alias 4.6 dB down against
+`flight_floor_lowk`'s 1.1 dB), then pin `comb_gain_db`, `low_order_gain_db` and
+the floor block to reach ≥ 5.6 dB, reporting the pin's cost in nats/cell.
+
 Runner: `scripts/noise_v2_tracker_probe.py` (`tracks`, `cqt`). Renders are R4's
 own route at seed 2001, 8 microphones, on the three frozen cruise score
 windows; scoring is the frozen path (`_synthetic_probe.score` through
