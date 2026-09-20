@@ -10,10 +10,12 @@ demodulated per-order increment variance). CPU-small by construction.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from typing import Any
 
 import numpy as np
+import pyro
 import pytest
 import torch
 
@@ -1057,3 +1059,89 @@ def test_flight_floor_lowk_recovers_a_per_order_low_order_gain():
     fitted = np.asarray(MD.params_to_dict(out.params)["profile"]["profile_db"], dtype=np.float64)
     planted = np.asarray(MD.params_to_dict(par)["profile"]["profile_db"], dtype=np.float64)
     assert np.abs(fitted - planted).max() < 2.5
+
+
+def test_flight_profile_frees_the_comb_and_keeps_no_dynamics_site():
+    """``flight_profile`` is the MIRROR of ``flight_floor_lowk``: the bench
+    rotor's dynamics arrive frozen and the RECORDING sets the whole comb.
+
+    In DREGON free flight neither the raw nor the refined rotor-speed labels
+    follow the harmonics closely, so a free ``sigma_nu``/``gamma_hz`` absorbs
+    the label's error as shaft wander and line width. The contract is
+    structural and is the same one the identified-ridge recipe states: a
+    frozen block has NO sample site at all — the guide allocates nothing for
+    it, the log-prior counts nothing for it, and the recorded parameters carry
+    the bench values verbatim — while the per-order profile and its speed law
+    are fitted, here against a frozen comb planted 15 dB off.
+    """
+    planted_off_db, k_cap, n_mics = 15.0, 8, 2
+    n_fft, hop, n_frames = 512, 256, 8
+    n = n_fft + (n_frames - 1) * hop
+    # a pool that SPANS speed, so the profile's own speed law is a site too
+    rps = np.linspace(120.0, 220.0, n)[None, :]
+    grid = SP.flight_grid(sr=SR, n_fft=n_fft, hop=hop)
+    par = _params(
+        n_rotors=1,
+        n_mics=n_mics,
+        k_cap=k_cap,
+        profile_db=np.linspace(-16.0, -24.0, k_cap)[None, :],
+        sigma_nu=0.55,
+        lam=4.0,
+        gamma_hz=0.6,
+        amp_exp=2.0,
+        floor_exp=2.0,
+        static_rel=0.01,
+    )
+    starts = np.arange(n_frames) * hop
+    with torch.no_grad():
+        truth = SP.flight_model(
+            grid, par, rate_work=SP.flight_rate_work(grid, rps, starts), k_max=k_cap
+        ).numpy()
+    obs = truth * np.random.default_rng(29).standard_exponential(truth.shape)
+    batch = MD.flight_batch(
+        name="profile", members=[("w0", obs, rps, starts)], sr=SR, n_fft=n_fft, hop=hop, k_cap=k_cap
+    )
+    assert batch.speed_span > MD.PRIORS.speed_span_pin, "the speed laws must be free here"
+    frozen = MD.frozen_from_params(MD.params_to_dict(par))
+    frozen["profile_db"] = (
+        np.asarray(frozen["profile_db"], dtype=np.float64) - planted_off_db
+    ).tolist()
+    assert MD.free_blocks("flight_profile") == ("profile", "floor", "mic")
+    # the profile and floor priors are centred on the data, so the model needs
+    # the measurement the fit attaches (fit_support does this itself)
+    measured = dataclasses.replace(
+        batch, measured=FT.measure_batch(batch, mode="flight_profile", frozen=frozen)
+    )
+    sites = {
+        name
+        for name, node in pyro.poutine.trace(
+            lambda: MD.support_model(measured, mode="flight_profile", frozen=frozen)
+        )
+        .get_trace()
+        .nodes.items()
+        if node.get("type") == "sample" and not node.get("is_observed", False)
+    }
+    assert sites.isdisjoint({"sigma_nu", "lam", "gamma_hz"}), sites
+    assert {"profile_db", "amp_exp"} <= sites, sites
+    assert set(FT.initial_values(batch, mode="flight_profile", frozen=frozen)) == sites
+
+    out = FT.fit_support(
+        batch,
+        mode="flight_profile",
+        frozen=frozen,
+        optim=FT.OptimSpec(
+            adam_steps=150, adam_lr=0.05, adam_batch=None, lbfgs_iters=60, lbfgs_frames=None
+        ),
+    )
+    got = MD.params_to_dict(out.params)
+    # the bench dynamics travel through the fit UNTOUCHED
+    assert got["sigma_nu"] == pytest.approx(0.55, rel=1e-12)
+    assert got["lam"] == pytest.approx(4.0, rel=1e-12)
+    assert np.asarray(got["gamma_hz"]) == pytest.approx(
+        np.asarray(frozen["gamma_hz"], dtype=np.float64), rel=1e-12
+    )
+    assert out.comb_gain_db is None and out.low_order_gain_db is None
+    # ...and the comb climbs off the 15 dB-off transplant back to the truth
+    fitted = np.asarray(got["profile"]["profile_db"], dtype=np.float64)
+    planted = np.asarray(MD.params_to_dict(par)["profile"]["profile_db"], dtype=np.float64)
+    assert np.abs(fitted - planted).max() < 3.0

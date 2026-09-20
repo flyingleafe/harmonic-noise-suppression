@@ -307,6 +307,20 @@ def free_blocks(mode: str) -> tuple[str, ...]:
         return ("dynamics", "profile", "floor", "mic")
     if mode == "flight":
         return ("dynamics", "profile", "floor", "mic")
+    if mode == "flight_profile":
+        # The MIRROR of ``flight_floor_lowk``: there the bench rig arrives
+        # whole and the recording sets only a level; here the recording sets
+        # the whole per-order comb and the BENCH sets the dynamics. In DREGON
+        # free flight neither the raw nor the refined rotor labels follow the
+        # harmonics closely, so a free ``sigma_nu``/``gamma_hz`` absorbs the
+        # LABEL's error as shaft wander and line width (R4's free-profile fit
+        # on the legacy render landed at a 13 Hz half width at k=1). The
+        # dynamics are a property of the ROTOR, measured on a bench where the
+        # carrier is known to ~0.003 rev/s, so they are transplanted from the
+        # bench fits exactly as the frozen comb of ``flight_floor_lowk`` is
+        # (``noise_v2_fit.mean_comb``) and only the profile, the floor and the
+        # mic gains move.
+        return ("profile", "floor", "mic")
     if mode in ("flight_floor_only", "flight_floor_lowk"):
         # the comb arrives FROZEN from a bench rig, so its absolute level is
         # that rig's, and nothing downstream can re-level it: render_noise

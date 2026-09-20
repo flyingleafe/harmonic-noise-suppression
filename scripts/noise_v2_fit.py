@@ -17,6 +17,10 @@
     # the same with a per-order gain for the orders the score windows resolve
     python scripts/noise_v2_fit.py flight --set dregon-floor --name dregon_room2_floor \
         --floor-low-k --low-orders 8 --frozen-mean results/noise_v2/rounds/round3/fits/bench_dregon_Motor*_70__bench.json
+    # the MIRROR of it: the DYNAMICS frozen (rotor-matched) and the comb free,
+    # for a pool whose rotor-speed label is too loose to fit shaft wander on
+    python scripts/noise_v2_fit.py flight --set dregon-floor --name dregon_room2_flightprofile \
+        --frozen-dynamics per-rotor --frozen-mean results/noise_v2/rounds/round3/fits/bench_dregon_Motor*_70__bench.json
     # the round-1 fit findings table over everything already written
     python scripts/noise_v2_fit.py findings
 
@@ -227,7 +231,9 @@ def worker(unit: Unit) -> dict[str, Any]:
 # ── frozen comb ─────────────────────────────────────────────────────────────
 
 
-def mean_comb(paths: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+def mean_comb(
+    paths: list[str], *, per_rotor_gamma: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """The MEAN comb of several bench fits, as a ``frozen`` mapping.
 
     The DREGON floor fit freezes the comb at the mean of the four
@@ -243,6 +249,15 @@ def mean_comb(paths: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
     fits are 116 to 118 orders wide and stacking them ragged. Order ``k`` is
     therefore the mean over exactly the fits that reach ``k``, and the frozen
     comb is as wide as the widest of them.
+
+    ``per_rotor_gamma`` keeps the per-line WIDTHS rotor-matched instead of
+    pooling them: rotor ``r`` takes the ``r``-th fit's own ladder, which is
+    the rule the four-motor validation transplants widths by
+    (:func:`four_motor_validation`) and what ``flight_profile`` freezes the
+    dynamics at. Above a rotor's own order cap its ladder falls back to the
+    pooled log-mean, because that is the only estimate that exists there.
+    ``sigma_nu`` and ``lam`` are the log-means either way — they are ONE
+    airframe's shaft dynamics, not a per-rotor property.
     """
     import numpy as np
 
@@ -265,18 +280,33 @@ def mean_comb(paths: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
         # so a frozen comb may mix rounds without mixing laws
         grow = MD.gamma_from_params(q)[0]
         gam[i, : grow.size] = np.maximum(grow, 1e-12)
+    pooled_gam = np.exp(np.nanmean(np.log(gam), axis=0))
+    gamma_hz = (
+        np.where(np.isfinite(gam), gam, pooled_gam[None, :])
+        if per_rotor_gamma
+        else pooled_gam[None, :]
+    )
     frozen = dict(
         sigma_nu=log_mean("sigma_nu"),
         lam=log_mean("lam"),
-        gamma_hz=np.exp(np.nanmean(np.log(gam), axis=0))[None, :].tolist(),
+        gamma_hz=gamma_hz.tolist(),
         profile_db=np.nanmean(prof, axis=0)[None, :].tolist(),
         amp_exp=float(np.mean([float(q["profile"]["amp_exp"]) for q in par])),
     )
     return frozen, dict(
         frozen_comb_from=[f["support"] for f in fits],
         frozen_comb_paths=[str(p) for p in paths],
-        rule="log-mean of the rates, scales and per-line widths, dB-mean of the per-order "
-        "profile, over the fits that reach each order",
+        rule=(
+            "log-mean of the rates and scales, dB-mean of the per-order profile, and "
+            + (
+                "rotor-matched per-line widths (rotor r <- the r-th fit, pooled log-mean "
+                "above that fit's own order cap)"
+                if per_rotor_gamma
+                else "log-mean of the per-line widths"
+            )
+            + ", over the fits that reach each order"
+        ),
+        gamma_rotor_matched=bool(per_rotor_gamma),
         profile_orders=widest,
         profile_orders_per_fit=[
             int(np.asarray(q["profile"]["profile_db"], dtype=np.float64).shape[1]) for q in par
@@ -948,6 +978,19 @@ def main(argv: list[str] | None = None) -> int:
                 help="width of the per-order low-order gain block of --floor-low-k",
             )
             p.add_argument(
+                "--frozen-dynamics",
+                choices=("per-rotor", "pooled"),
+                default=None,
+                help="mode flight_profile: freeze the DYNAMICS (sigma_nu, lam, gamma_hz) at "
+                "--frozen-mean's bench fits and fit the per-order profile, the floor and the "
+                "mic gains — the mirror of --floor-low-k. 'per-rotor' gives rotor r the r-th "
+                "fit's own gamma ladder (rotor-matched), 'pooled' the log-mean ladder "
+                "--floor-low-k transplants; sigma_nu and lam are the log-means either way. "
+                "Used where the rotor-speed LABEL is too loose for a free dynamics block to "
+                "mean anything: the fit would absorb the label's error into sigma_nu and the "
+                "line widths",
+            )
+            p.add_argument(
                 "--frozen-mean",
                 nargs="*",
                 default=None,
@@ -1040,17 +1083,33 @@ def main(argv: list[str] | None = None) -> int:
     else:
         frozen = None
         frozen_from = None
+        frozen_dyn = getattr(args, "frozen_dynamics", None)
+        low_k = bool(getattr(args, "floor_low_k", False))
+        floor_only = bool(args.floor_only) or low_k
+        if floor_only and frozen_dyn:
+            raise SystemExit("--frozen-dynamics is the MIRROR of --floor-only: pick one")
         if args.frozen_mean:
             from experiments.noise_model import supports as SU
 
-            frozen, frozen_from = mean_comb(list(args.frozen_mean))
+            frozen, frozen_from = mean_comb(
+                list(args.frozen_mean), per_rotor_gamma=(frozen_dyn == "per-rotor")
+            )
             n_rotors = int(SU.load_support(specs[0]).carrier_rev_s.shape[0])
+            if frozen_dyn == "per-rotor" and len(args.frozen_mean) != n_rotors:
+                raise SystemExit(
+                    f"--frozen-dynamics per-rotor needs one bench fit per rotor: "
+                    f"{len(args.frozen_mean)} fits for {n_rotors} rotors"
+                )
             frozen = expand_frozen(frozen, n_rotors=n_rotors)
-        low_k = bool(getattr(args, "floor_low_k", False))
-        floor_only = bool(args.floor_only) or low_k
-        mode = ("flight_floor_lowk" if low_k else "flight_floor_only") if floor_only else "flight"
-        if floor_only and frozen is None:
-            raise SystemExit("--floor-only / --floor-low-k needs --frozen-mean <bench fit JSONs>")
+        if floor_only:
+            mode = "flight_floor_lowk" if low_k else "flight_floor_only"
+        else:
+            mode = "flight_profile" if frozen_dyn else "flight"
+        if mode != "flight" and frozen is None:
+            raise SystemExit(
+                "--floor-only / --floor-low-k / --frozen-dynamics needs "
+                "--frozen-mean <bench fit JSONs>"
+            )
         units = []
         for s in seeds:
             optim = _optim_from_args(args)
