@@ -270,3 +270,20 @@ THE FLIGHT CLIP ITSELF with a coherent-needle line model, and its k=1 level is
 +22 dB above what the transplanted bench comb implies. R5 should therefore
 report the pin as a DELIBERATE trade — synthetic-data trackability bought with
 a quantified Whittle penalty — and never as a better description of DREGON.
+
+## Open at the time of writing
+
+Four of the eight restart jobs are still RUNNING on `uni-cpu` (4 h wall from
+2026-09-20T07:46Z): `nv2-r4-lt-lowk-s0-13b8b0`, `nv2-r4-lt-lowk-s1-7a669e`,
+`nv2-r4-lt-free-s0-c614f0`, `nv2-r4-lt-free-s1-fb9c38`. Every number above is
+from the restarts that landed (`s2`, `s3` for `flight_floor_lowk`; `s2`, `s3`
+for `flight`), reduced by `noise_v2_fit.py reduce`, which selected `s2` in both
+modes with a best-minus-worst spread of 5.1e-6 / 4.9e-6 nats per cell — at the
+1e-4 convergence tolerance, so the reported restart is not a lucky draw. When
+the remaining four land, re-run the two `reduce` calls; if either selection
+changes, `score_legacy_fit` and `swap` must be re-run against the new
+selection (each is a ~2 and ~7 minute laptop job).
+
+Neither fit CONVERGED (`optimiser.converged` False, `which_converged` `none`)
+— the same label the R3 fit-to-real carries, and the stop rule's one retry is
+what the four restarts are.
