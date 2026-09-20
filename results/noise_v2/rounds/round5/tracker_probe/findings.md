@@ -45,9 +45,13 @@ Runner: `scripts/noise_v2_tracker_probe.py` (`tracks`, `cqt`). Renders are R4's
 own route at seed 2001, 8 microphones, on the three frozen cruise score
 windows; scoring is the frozen path (`_synthetic_probe.score` through
 `revised_eval.pit_mae`). Every HPPNet number below reproduces
-`round4/legacy_truth/score_legacy_fit.json` to the digit and every SCv2 number
-for `real`/`legacy`/`v2_real` reproduces `round3/dregon_humps/widen_scv2.json`
-to the digit, which is the bit-identity check on the renders.
+`round4/legacy_truth/score_legacy_fit.json` at the reported precision and
+every SCv2 number for `real`/`legacy`/`v2_real` reproduces
+`round3/dregon_humps/widen_scv2.json` at the reported precision, which is the
+identity check on the renders. SCv2's pass repeats bit for bit; HPPNet's CPU
+forward repeats only to ~1e-8 relative (re-running `tracks` on `updown` gives
+1.694930334 against the committed 1.694930323), so nothing here is read
+beyond three decimals.
 
 Data: `tracks.json`, `cqt.json`. Figures: `tracks_hppnet.png`,
 `tracks_scv2.png`, `cqt_contrast.png`.
