@@ -95,6 +95,13 @@ ANNULUS_OUTER_ST = 2.0
 TIGHT_BAND_ST = 0.5
 #: Orders masked out of every floor estimate (k * f_r up to the grid top).
 EXCLUDE_ORDERS = 56
+#: Half-width, in CQT bins, of the window the "where is the line really"
+#: readout searches. One bin is 25 cents; at any k the four rotors span 1.7
+#: bins, so +-2 bins covers the whole four-rotor spread and nothing more.
+PEAK_SEARCH_BINS = 2
+#: Mis-tuned carrier hypotheses the harmonic sum is evaluated at. +-10 % in
+#: 2 % steps (2 % = 0.8 CQT bins at any k) plus the two octave confusions.
+ALPHA_GRID = (0.5, 0.90, 0.92, 0.94, 0.96, 0.98, 1.0, 1.02, 1.04, 1.06, 1.08, 1.10, 2.0)
 
 
 def die(m: str) -> NoReturn:
@@ -467,59 +474,164 @@ def comb_masks(fr: np.ndarray, *, freqs: np.ndarray, bpo: int, inner_st: float) 
     return out
 
 
-def contrast_ladder(
-    L: np.ndarray,
-    fr: np.ndarray,
-    *,
-    freqs: np.ndarray,
-    bpo: int,
-    masked: np.ndarray,
-) -> dict[str, np.ndarray]:
-    """Per-order contrast of the label's comb over the LOCAL floor.
+def comb_geometry(fr: np.ndarray, *, freqs: np.ndarray, bpo: int) -> dict[str, Any]:
+    """Every bin index the ladder reads, precomputed from the LABEL alone.
 
-    ``L`` is one microphone's ``(frames, bins)`` dB CQT, ``fr`` the ``(R,
-    frames)`` label. For each frame, rotor and order the read bin is the one
-    nearest ``k * f_r`` in log frequency; the floor is the median of the bins
-    whose log-distance lies in ``(ANNULUS_INNER_ST, ANNULUS_OUTER_ST]``
-    semitones and that are not within ``ANNULUS_INNER_ST`` of ANY comb line.
-    ``tight`` is the brief's literal +-1/2 semitone band with the comb bins
-    removed. ``peak1`` reads the strongest of the three bins nearest the line
-    instead of the nearest one: the difference isolates line PLACEMENT from
-    line LEVEL.
+    The label is the same for all five arms and all eight microphones, so the
+    geometry is built once per window and only the gathers are per-arm. Three
+    reference sets per ``(k, rotor, frame)``:
+
+    * ``bidx`` — the bin nearest ``k * f_r``, and ``off`` the +-2 bin window
+      around it, whose argmax says where the line ACTUALLY sits;
+    * ``mid`` — the INTER-TOOTH floor: the bins nearest ``(k -+ 1/2) * f_r``,
+      +-1 bin each, i.e. the six bins furthest from any tooth of this rotor's
+      comb. Defined at every ``k``, which the annulus is not;
+    * ``ann`` — the strict local annulus, ``(ANNULUS_INNER_ST,
+      ANNULUS_OUTER_ST]`` semitones from the read bin with every comb line of
+      every rotor masked out. At 48 bins/octave the four rotors span 1.7 bins
+      and order ``k``'s neighbours sit ``48 log2(1 + 1/k)`` bins away, so this
+      set EMPTIES above ``k ~ 11``: the comb stops being resolvable on the
+      model's own grid. ``n_annulus`` records where.
     """
-    nb = freqs.size
+    nb = int(freqs.size)
     logb = np.log2(np.asarray(freqs, dtype=np.float64) / float(freqs[0])) * bpo
     st = bpo / 12.0
-    nt, nr, nk = fr.shape[-1], fr.shape[0], len(CQT_ORDERS)
-    shape = (nk, nr, nt)
-    c = np.full(shape, np.nan)
-    c_tight = np.full(shape, np.nan)
-    c_peak = np.full(shape, np.nan)
-    floor = np.full(shape, np.nan)
-    n_ann = np.zeros(shape)
-    for t in range(nt):
-        row = L[t]
-        keep_t = ~masked[t]
-        for ri in range(nr):
-            for ki, k in enumerate(CQT_ORDERS):
-                f = float(k) * float(fr[ri, t])
-                if not (freqs[0] < f < freqs[-1]):
-                    continue
-                pos = float(np.log2(f / float(freqs[0])) * bpo)
-                b = int(np.clip(round(pos), 0, nb - 1))
-                d = np.abs(logb - pos) / st  # semitones
-                ann = keep_t & (d > ANNULUS_INNER_ST) & (d <= ANNULUS_OUTER_ST)
-                n_ann[ki, ri, t] = float(ann.sum())
-                if ann.any():
-                    fl = float(np.median(row[ann]))
-                    floor[ki, ri, t] = fl
-                    c[ki, ri, t] = float(row[b]) - fl
-                    lo, hi = max(b - 1, 0), min(b + 2, nb)
-                    c_peak[ki, ri, t] = float(row[lo:hi].max()) - fl
-                tight = keep_t & (d <= TIGHT_BAND_ST)
-                if tight.any():
-                    c_tight[ki, ri, t] = float(row[b]) - float(np.median(row[tight]))
-    return dict(c=c, c_tight=c_tight, c_peak=c_peak, floor=floor, n_annulus=n_ann)
+    ks = np.asarray(CQT_ORDERS, dtype=np.float64)[:, None, None]
+    f = ks * np.asarray(fr, dtype=np.float64)[None, :, :]  # (nk, nr, nt)
+    pos = np.log2(np.maximum(f, 1e-9) / float(freqs[0])) * bpo
+    valid = (f > freqs[0]) & (f < freqs[-1])
+    bidx = np.clip(np.round(pos).astype(int), 0, nb - 1)
+    off = np.clip(bidx[..., None] + np.arange(-PEAK_SEARCH_BINS, PEAK_SEARCH_BINS + 1), 0, nb - 1)
+    mid = np.concatenate(
+        [
+            np.clip(
+                np.round(
+                    np.log2(np.maximum((ks + s) * fr[None, :, :], 1e-9) / float(freqs[0])) * bpo
+                ).astype(int)[..., None]
+                + np.arange(-1, 2),
+                0,
+                nb - 1,
+            )
+            for s in (-0.5, 0.5)
+        ],
+        axis=-1,
+    )
+    masked = comb_masks(fr, freqs=freqs, bpo=bpo, inner_st=ANNULUS_INNER_ST)
+    d = np.abs(logb[None, None, None, :] - pos[..., None]) / st  # (nk, nr, nt, nb)
+    free = ~masked[None, None, :, :]  # (1, 1, nt, nb)
+    ann = (d > ANNULUS_INNER_ST) & (d <= ANNULUS_OUTER_ST) & free & valid[..., None]
+    tight = (d <= TIGHT_BAND_ST) & free & valid[..., None]
+    return dict(
+        bidx=bidx,
+        off=off,
+        mid=mid,
+        ann=ann,
+        tight=tight,
+        valid=valid,
+        n_annulus=ann.sum(axis=-1).astype(np.float64),
+        frac_mid_on_comb=float(masked[np.arange(mid.shape[2])[None, None, :, None], mid].mean()),
+    )
+
+
+def contrast_ladder(L: np.ndarray, geo: dict[str, Any]) -> dict[str, np.ndarray]:
+    """Per-order contrast of the label's comb over the floor, one microphone.
+
+    ``L`` is the ``(frames, bins)`` dB CQT. Headline ``c`` is the read bin over
+    the INTER-TOOTH floor (defined at every order); ``c_local`` is the same
+    read over the strict annulus (NaN where the comb is unresolved);
+    ``c_tight`` is the brief's literal +-1/2 semitone band. ``c_peak1`` /
+    ``c_peak2`` read the strongest bin within +-1 / +-2 bins instead of the
+    label's own bin, and ``peak_off`` is where that maximum sat: together they
+    separate a line that is WEAK from a line that is MISPLACED.
+    """
+    nb = L.shape[-1]
+    nt = L.shape[0]
+    tt = np.arange(nt)[None, None, :]
+    at = L[tt, geo["bidx"]]  # (nk, nr, nt)
+    offv = L[tt[..., None], geo["off"]]
+    midv = L[tt[..., None], geo["mid"]]
+    grid = L[None, None, :, :]  # (1, 1, nt, nb)
+    floor_mid = np.median(midv, axis=-1)
+    band = np.where(geo["ann"], grid, np.nan)
+    with np.errstate(invalid="ignore"):
+        floor_ann = np.nanmedian(band, axis=-1)
+    tband = np.where(geo["tight"], grid, np.nan)
+    with np.errstate(invalid="ignore"):
+        floor_tight = np.nanmedian(tband, axis=-1)
+    valid = geo["valid"]
+    m = PEAK_SEARCH_BINS
+    peak1 = offv[..., m - 1 : m + 2].max(axis=-1)
+    peak2 = offv.max(axis=-1)
+    peak_off = offv.argmax(axis=-1).astype(np.float64) - m
+    assert nb == geo["ann"].shape[-1]
+    return dict(
+        c=np.where(valid, at - floor_mid, np.nan),
+        c_local=np.where(valid, at - floor_ann, np.nan),
+        c_tight=np.where(valid, at - floor_tight, np.nan),
+        c_peak1=np.where(valid, peak1 - floor_mid, np.nan),
+        c_peak2=np.where(valid, peak2 - floor_mid, np.nan),
+        peak_off=np.where(valid, peak_off, np.nan),
+        floor=np.where(valid, floor_mid, np.nan),
+        n_annulus=geo["n_annulus"],
+    )
+
+
+def alpha_curve(L: np.ndarray, fr: np.ndarray, *, freqs: np.ndarray, bpo: int) -> dict[str, Any]:
+    """Harmonic sum as a function of a MIS-TUNED carrier — the decisive test.
+
+    A magnitude-domain comb tracker can only prefer the true carrier if the
+    harmonic sum at ``alpha = 1`` beats the sum at nearby wrong carriers. This
+    evaluates ``S_N`` exactly as :func:`ladder_stats` does — read bin over the
+    inter-tooth floor of the SAME hypothesis, so the spectral tilt cancels —
+    on the comb of ``alpha * f_r`` for every ``alpha`` in `ALPHA_GRID`, plus
+    the two octave confusions. ``carrier_gain`` is ``S_N(1)`` minus the median
+    over the mis-tuned alphas: the dB of evidence the label's carrier has over
+    a wrong one in this front end.
+    """
+    nb, nt = int(freqs.size), int(L.shape[0])
+    tt = np.arange(nt)[None, None, :]
+    ks = np.asarray(CQT_ORDERS, dtype=np.float64)[:, None, None]
+    curve: dict[float, dict[int, float]] = {}
+    for a in ALPHA_GRID:
+        fa = ks * (float(a) * np.asarray(fr, dtype=np.float64))[None, :, :]
+        valid = (fa > freqs[0]) & (fa < freqs[-1])
+        b = np.clip(
+            np.round(np.log2(np.maximum(fa, 1e-9) / float(freqs[0])) * bpo).astype(int), 0, nb - 1
+        )
+        mid = np.concatenate(
+            [
+                np.clip(
+                    np.round(
+                        np.log2(
+                            np.maximum((ks + s) * (float(a) * fr)[None, :, :], 1e-9)
+                            / float(freqs[0])
+                        )
+                        * bpo
+                    ).astype(int)[..., None]
+                    + np.arange(-1, 2),
+                    0,
+                    nb - 1,
+                )
+                for s in (-0.5, 0.5)
+            ],
+            axis=-1,
+        )
+        c = np.where(valid, L[tt, b] - np.median(L[tt[..., None], mid], axis=-1), np.nan)
+        pos = np.where(np.isfinite(c), np.maximum(c, 0.0), 0.0)
+        curve[float(a)] = {
+            n: float(np.median(pos[: CQT_ORDERS.index(n) + 1].sum(axis=0))) for n in SUM_ORDERS
+        }
+    wrong = [a for a in ALPHA_GRID if abs(a - 1.0) > 1e-9]
+    return dict(
+        curve={f"{a:.2f}": {str(n): curve[a][n] for n in SUM_ORDERS} for a in ALPHA_GRID},
+        carrier_gain_db={
+            str(n): curve[1.0][n] - float(np.median([curve[a][n] for a in wrong]))
+            for n in SUM_ORDERS
+        },
+        argmax_alpha={
+            str(n): float(max(ALPHA_GRID, key=lambda a: curve[a][n])) for n in SUM_ORDERS
+        },
+    )
 
 
 def _med(a: np.ndarray) -> float:
@@ -531,11 +643,21 @@ def _med(a: np.ndarray) -> float:
 def ladder_stats(lad: dict[str, np.ndarray]) -> dict[str, Any]:
     """Medians over frames/rotors per order, the harmonic sums, the fractions."""
     c = lad["c"]
+
+    def per_k(key: str) -> dict[str, float]:
+        return {str(k): _med(lad[key][i]) for i, k in enumerate(CQT_ORDERS)}
+
     out: dict[str, Any] = dict(
-        c_k_median_db={str(k): _med(c[i]) for i, k in enumerate(CQT_ORDERS)},
-        c_k_tight_median_db={str(k): _med(lad["c_tight"][i]) for i, k in enumerate(CQT_ORDERS)},
-        c_k_peak1_median_db={str(k): _med(lad["c_peak"][i]) for i, k in enumerate(CQT_ORDERS)},
-        floor_median_db={str(k): _med(lad["floor"][i]) for i, k in enumerate(CQT_ORDERS)},
+        c_k_median_db=per_k("c"),
+        c_k_local_median_db=per_k("c_local"),
+        c_k_tight_median_db=per_k("c_tight"),
+        c_k_peak1_median_db=per_k("c_peak1"),
+        c_k_peak2_median_db=per_k("c_peak2"),
+        floor_median_db=per_k("floor"),
+        peak_offset_bins_median=per_k("peak_off"),
+        peak_offset_bins_absmean={
+            str(k): float(np.nanmean(np.abs(lad["peak_off"][i]))) for i, k in enumerate(CQT_ORDERS)
+        },
         n_annulus_bins={
             str(k): float(np.nanmean(lad["n_annulus"][i])) for i, k in enumerate(CQT_ORDERS)
         },
@@ -573,6 +695,14 @@ def run_cqt(*, out: Path, recordings: tuple[str, ...]) -> dict[str, Any]:
             annulus_semitones=[ANNULUS_INNER_ST, ANNULUS_OUTER_ST],
             tight_band_semitones=TIGHT_BAND_ST,
             exclude_orders=EXCLUDE_ORDERS,
+            peak_search_bins=PEAK_SEARCH_BINS,
+            floor=(
+                "headline c_k reads the label's own bin over the INTER-TOOTH "
+                "floor: the median of the six bins nearest (k -+ 1/2) * f_r. "
+                "c_k_local is the strict annulus and is NaN above the order "
+                "where the four-rotor comb stops being resolvable at 48 "
+                "bins/octave; n_annulus_bins records it"
+            ),
         ),
         windows={},
     )
@@ -582,7 +712,7 @@ def run_cqt(*, out: Path, recordings: tuple[str, ...]) -> dict[str, Any]:
         n_frames = int(np.asarray(mat["real"].shape[-1]) // params["hop_length"]) + 1
         fr = label_on_frames(mat["rps"], n_frames, int(params["hop_length"]))
         fbar = float(fr.mean())
-        masked = comb_masks(fr, freqs=freqs, bpo=bpo, inner_st=ANNULUS_INNER_ST)
+        geo = comb_geometry(fr, freqs=freqs, bpo=bpo)
         row: dict[str, Any] = dict(
             support=support.as_dict(),
             fbar_rev_s=fbar,
@@ -594,6 +724,7 @@ def run_cqt(*, out: Path, recordings: tuple[str, ...]) -> dict[str, Any]:
             bin_spacing_hz_at_fbar={
                 str(k): (k * fbar) * (2.0 ** (1.0 / bpo) - 1.0) for k in CQT_ORDERS
             },
+            frac_mid_bins_on_comb=float(geo["frac_mid_on_comb"]),
             arms={},
         )
         for name in ARM_ORDER:
@@ -601,10 +732,7 @@ def run_cqt(*, out: Path, recordings: tuple[str, ...]) -> dict[str, Any]:
             L = cqt_db(fe, audio)
             if L.shape[1] != n_frames:
                 die(f"{recording}/{name}: CQT gave {L.shape[1]} frames, expected {n_frames}")
-            per_mic = [
-                ladder_stats(contrast_ladder(L[m], fr, freqs=freqs, bpo=bpo, masked=masked))
-                for m in range(N_MICS)
-            ]
+            per_mic = [ladder_stats(contrast_ladder(L[m], geo)) for m in range(N_MICS)]
             agg: dict[str, Any] = {}
             for key in per_mic[0]:
                 if isinstance(per_mic[0][key], dict):
@@ -615,12 +743,25 @@ def run_cqt(*, out: Path, recordings: tuple[str, ...]) -> dict[str, Any]:
                 else:
                     agg[key] = float(np.nanmean([p[key] for p in per_mic]))
             clamped = float(np.mean((L.max(axis=(1, 2), keepdims=True) - 80.0 + 1e-6) >= L))
-            row["arms"][name] = dict(mic_mean=agg, mic0=per_mic[0], frac_at_top_db_floor=clamped)
+            sweeps = [alpha_curve(L[m], fr, freqs=freqs, bpo=bpo) for m in range(N_MICS)]
+            agg["carrier_gain_db"] = {
+                str(n): float(np.mean([s["carrier_gain_db"][str(n)] for s in sweeps]))
+                for n in SUM_ORDERS
+            }
+            agg["alpha_curve_S8"] = {
+                a: float(np.mean([s["curve"][a]["8"] for s in sweeps])) for a in sweeps[0]["curve"]
+            }
+            row["arms"][name] = dict(
+                mic_mean=agg,
+                mic0=per_mic[0] | dict(alpha=sweeps[0]),
+                frac_at_top_db_floor=clamped,
+            )
             lad = agg["c_k_median_db"]
             print(
                 f"[{recording}] {name}: c1={lad['1']:+.2f} c2={lad['2']:+.2f} "
                 f"c4={lad['4']:+.2f} c8={lad['8']:+.2f} c16={lad['16']:+.2f} dB, "
-                f"S8={agg['S8_median_db']:.2f}",
+                f"S8={agg['S8_median_db']:.2f}, "
+                f"carrier gain S8={agg['carrier_gain_db']['8']:+.2f} dB",
                 flush=True,
             )
         payload["windows"][support.key] = row
@@ -662,33 +803,52 @@ def write_cqt_figure(payload: dict[str, Any], out: Path) -> list[str]:
         "v2_legacy_lowk": "#2ca02c",
         "v2_legacy_free": "#ff7f0e",
     }
-    fig, axes = plt.subplots(1, 3, figsize=(16.5, 5.2))
+    fig, axes = plt.subplots(1, 4, figsize=(21.0, 5.2))
     ax = axes[0]
     for arm in ARM_ORDER:
         y = [s[arm]["c_k_median_db"][str(k)] for k in ks]
         ax.plot(ks, y, marker="o", ms=4, color=cols[arm], label=arm, lw=1.8)
     ax.axhline(VISIBLE_DB, color="0.4", ls=":", lw=1)
     ax.set_xlabel("order k")
-    ax.set_ylabel("median contrast $c_k$ over local floor (dB)")
+    ax.set_ylabel("median contrast $c_k$ over inter-tooth floor (dB)")
     ax.set_title("(a) per-order CQT contrast at the label's own comb", fontsize=10)
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8)
     ax2 = ax.twiny()
     ax2.set_xlim(ax.get_xlim())
-    ax2.set_xticks([1, 2, 4, 8, 16])
+    ax2.set_xticks([1, 4, 8, 12, 16])
     ax2.set_xticklabels(
-        [f"{w0['window_ms_at_fbar'][str(k)]:.0f} ms" for k in (1, 2, 4, 8, 16)], fontsize=7
+        [f"{w0['window_ms_at_fbar'][str(k)]:.0f} ms" for k in (1, 4, 8, 12, 16)], fontsize=7
     )
     ax2.set_xlabel("constant-Q analysis window at the window's mean carrier", fontsize=8)
 
     ax = axes[1]
     for arm in ARM_ORDER:
-        y = [s[arm]["c_k_peak1_median_db"][str(k)] for k in ks]
+        y = [s[arm]["c_k_peak2_median_db"][str(k)] for k in ks]
         ax.plot(ks, y, marker="s", ms=4, color=cols[arm], lw=1.8, label=arm)
     ax.axhline(VISIBLE_DB, color="0.4", ls=":", lw=1)
     ax.set_xlabel("order k")
-    ax.set_ylabel("median contrast, best of the 3 nearest bins (dB)")
-    ax.set_title("(b) same, reading the strongest bin within $\\pm$1 bin", fontsize=10)
+    ax.set_ylabel("median contrast, best bin within $\\pm$2 bins (dB)")
+    ax.set_title(
+        "(b) same, free to find the line within $\\pm$2 bins ($\\pm$50 cents)", fontsize=10
+    )
+    ax.grid(alpha=0.25)
+
+    ax = axes[3]
+    alphas = sorted(float(a) for a in s["real"]["alpha_curve_S8"] if 0.85 <= float(a) <= 1.15)
+    for arm in ARM_ORDER:
+        y = [s[arm]["alpha_curve_S8"][f"{a:.2f}"] for a in alphas]
+        ax.plot(alphas, y, marker="^", ms=4, color=cols[arm], lw=1.8, label=arm)
+    ax.axvline(1.0, color="0.4", ls=":", lw=1)
+    ax.set_xlabel(r"carrier hypothesis $\alpha$ ($f = \alpha\,f_r^{label}$)")
+    ax.set_ylabel("$S_8$ at the mis-tuned comb (dB)")
+    ax.set_title(
+        "(d) does the TRUE carrier win in the magnitude CQT?\n"
+        "carrier gain $S_8(1)-\\mathrm{med}_{\\alpha\\neq1}S_8(\\alpha)$: "
+        + ", ".join(f"{a} {s[a]['carrier_gain_db']['8']:+.2f}" for a in ("real", "legacy"))
+        + " dB",
+        fontsize=9,
+    )
     ax.grid(alpha=0.25)
 
     ax = axes[2]
