@@ -869,8 +869,8 @@ def main(argv: list[str] | None = None) -> int:
             "--seeds",
             type=int,
             default=1,
-            help="RESTARTS per support: seeds <seed> .. <seed>+N-1, reduced to the best "
-            "fit plus a restart-spread block (bench only)",
+            help="RESTARTS per support (bench) or per pool (flight): seeds <seed> .. "
+            "<seed>+N-1, reduced to the best fit plus a restart-spread block",
         )
         p.add_argument(
             "--init-jitter",
@@ -1029,28 +1029,35 @@ def main(argv: list[str] | None = None) -> int:
         mode = ("flight_floor_lowk" if low_k else "flight_floor_only") if floor_only else "flight"
         if floor_only and frozen is None:
             raise SystemExit("--floor-only / --floor-low-k needs --frozen-mean <bench fit JSONs>")
-        units = [
-            Unit(
-                uid=f"{args.name}__{mode}",
-                params=dict(
-                    mode=mode,
-                    specs=specs,
-                    name=str(args.name),
-                    out_dir=str(out_dir),
-                    optim=_optim_from_args(args),
-                    frozen=frozen,
-                    frozen_from=frozen_from,
-                    frame_stride=int(args.frame_stride),
-                    max_frames=None if int(args.max_frames) <= 0 else int(args.max_frames),
-                    progress=int(args.progress),
-                    threads=int(args.threads),
-                    pin=_pin_from_args(args),
-                    profile_init=args.profile_init,
-                    profile_prior_sigma=args.profile_prior_sigma,
-                    low_orders=int(args.low_orders) if low_k else None,
-                ),
+        units = []
+        for s in seeds:
+            optim = _optim_from_args(args)
+            optim["seed"] = s
+            optim["init_jitter"] = 0.0 if s == seeds[0] else float(args.init_jitter)
+            tag = f"s{s}" if len(seeds) > 1 else None
+            units.append(
+                Unit(
+                    uid=f"{args.name}__{mode}" + (f"__{tag}" if tag else ""),
+                    params=dict(
+                        mode=mode,
+                        specs=specs,
+                        name=str(args.name),
+                        out_dir=str(out_dir),
+                        optim=optim,
+                        frozen=frozen,
+                        frozen_from=frozen_from,
+                        frame_stride=int(args.frame_stride),
+                        max_frames=None if int(args.max_frames) <= 0 else int(args.max_frames),
+                        progress=int(args.progress),
+                        threads=int(args.threads),
+                        pin=_pin_from_args(args),
+                        profile_init=args.profile_init,
+                        profile_prior_sigma=args.profile_prior_sigma,
+                        low_orders=int(args.low_orders) if low_k else None,
+                        restart_tag=tag,
+                    ),
+                )
             )
-        ]
 
     def summarize(payloads: list[dict[str, Any]]) -> dict[str, Any]:
         ok = [r for r in payloads if r.get("converged")]
@@ -1067,8 +1074,8 @@ def main(argv: list[str] | None = None) -> int:
     result = gridrun_from_args(
         args, units, worker, grid_dir, summarize=summarize, blas_threads=int(args.threads)
     )
-    if args.cmd == "bench" and len(seeds) > 1:
-        for row in reduce_restarts(out_dir):
+    if len(seeds) > 1:
+        for row in reduce_restarts(out_dir, mode=("bench" if args.cmd == "bench" else mode)):
             print(f"# reduced {row['support']}: {json.dumps(row)}", flush=True)
     text = findings(out_dir)
     (out_dir / "findings.md").write_text(text)

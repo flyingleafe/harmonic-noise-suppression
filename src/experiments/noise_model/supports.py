@@ -322,6 +322,21 @@ def flight_dregon(
     )
 
 
+def synthetic(name: str) -> SupportSpec:
+    """A support built from RENDERED audio, resolvable only from the cache.
+
+    The v2 model is fitted to a periodogram, so "fit v2 to another model's
+    render" needs the render to arrive as a support. It arrives in the SAME
+    ``.npz`` the real supports are cached in (:func:`synthetic_support` builds
+    it, :func:`save_support` writes it): there is no second format and no
+    second loader. What the spec cannot do is rebuild itself from a dataset —
+    the audio came from a renderer, not a recording — so :func:`load_support`
+    resolves this family from the cache or fails, and the support's own
+    ``meta["synthetic"]`` carries the provenance of the render.
+    """
+    return SupportSpec("synthetic", "flight", str(name), f"synthetic:{name}", dict(name=str(name)))
+
+
 def parse_spec(text: str) -> SupportSpec:
     """Inverse of :attr:`SupportSpec.text`."""
     head, _, rest = str(text).partition(":")
@@ -330,6 +345,8 @@ def parse_spec(text: str) -> SupportSpec:
         return bench_dregon_motor(parts[0], int(parts[1]))
     if head == "bench_point" and len(parts) == 1:
         return bench_point(parts[0])
+    if head == "synthetic" and len(parts) == 1:
+        return synthetic(parts[0])
     if head in ("flight_michaels", "flight_dregon") and len(parts) in (3, 4):
         rec, start, dur = parts[0], float(parts[1]), float(parts[2])
         key = parts[3] if len(parts) == 4 else None
@@ -895,6 +912,45 @@ def _flight_support(spec: SupportSpec) -> Support:
     )
 
 
+def synthetic_support(
+    name: str,
+    audio: np.ndarray,
+    carrier_rev_s: np.ndarray,
+    *,
+    sr: int = SR,
+    segment: tuple[float, float],
+    meta: dict[str, Any],
+) -> Support:
+    """A flight support built from an IN-MEMORY ``(audio, labels)`` pair.
+
+    ``audio`` is ``(M, T)`` at ``sr`` in the evaluator's absolute units (a
+    renderer's output, un-normalised) and ``carrier_rev_s`` is the ``(R, T)``
+    label track the audio was rendered on. The periodogram, the frame grid and
+    the frame-mean carriers are computed by exactly the route
+    :func:`_flight_support` uses, so a fit cannot tell a synthetic support from
+    a real one except by ``meta``.
+    """
+    audio = np.asarray(audio, dtype=np.float32)
+    rps = np.atleast_2d(np.asarray(carrier_rev_s, dtype=np.float64))
+    if audio.ndim != 2:
+        raise ValueError(f"{name}: audio must be (M, T), got {audio.shape}")
+    if rps.shape[-1] != audio.shape[-1]:
+        raise ValueError(
+            f"{name}: {audio.shape[-1]} audio samples against {rps.shape[-1]} label samples"
+        )
+    clip = Clip(str(name), str(meta.get("group") or "synthetic"), audio, rps, int(sr), rps, {})
+    spec = synthetic(name)
+    return _support_from_clip(
+        clip,
+        kind="flight",
+        name=spec.name,
+        n_fft=OBS_N_FFT,
+        hop=OBS_HOP,
+        segment=(float(segment[0]), float(segment[1])),
+        meta=dict(meta, spec=spec.text, family=spec.family, n_rotors=int(rps.shape[0])),
+    )
+
+
 def load_support(
     spec: SupportSpec | str, *, cache_dir: Path | None = None, use_cache: bool = True
 ) -> Support:
@@ -914,6 +970,12 @@ def load_support(
             iter(C.iter_recordings(BENCH_POINT_DATASET, (spec.args["point_id"],), None, "auto"))
         )
         return _bench_point_support(spec, rec, point)
+    if spec.family == "synthetic":
+        raise FileNotFoundError(
+            f"synthetic support {spec.name!r} is not in the cache "
+            f"{Path(cache_dir or CACHE_DIR)}: it is built from a render by "
+            "supports.synthetic_support and has no dataset to fall back to"
+        )
     return _flight_support(spec)
 
 
@@ -1254,4 +1316,6 @@ __all__ = [
     "select_order",
     "stationary_segment",
     "support_set",
+    "synthetic",
+    "synthetic_support",
 ]
