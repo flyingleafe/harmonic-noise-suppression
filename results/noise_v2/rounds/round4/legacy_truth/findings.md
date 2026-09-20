@@ -166,7 +166,7 @@ is exactly the deficit HPPNet reads.
 `flight_floor_lowk` fit to the legacy render (both the same parameterisation on
 the same frozen bench comb, so the six groups below are **exhaustive**: the
 `all` arm reproduces the target's parameters exactly, asserted in
-`swap_prelim.json` as `swap.exhaustive: true`, and reproduces its PIT to the
+`swap.json` as `swap.exhaustive: true`, and reproduces its PIT to the
 digit). `profile_db` already carries both gains, so a gain swap re-folds the
 difference into `profile_db` — the swap is a swap of the rendered comb, not of
 a record field.

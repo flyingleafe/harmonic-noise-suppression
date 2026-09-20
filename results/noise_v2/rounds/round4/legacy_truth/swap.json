@@ -1626,6 +1626,7 @@
    ]
   },
   "residual_after_all": [],
-  "exhaustive": true
+  "exhaustive": true,
+  "p_legacy_note": "this path is the SELECTED restart of results/noise_v2/rounds/round4/legacy_truth/fits/dregon_legacy_render__flight_floor_lowk.json (seed 2); their params blocks are numerically identical, checked with param_diff"
  }
 }
