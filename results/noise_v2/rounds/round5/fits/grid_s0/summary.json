@@ -1,0 +1,11 @@
+{
+ "n_units": 1,
+ "n_converged": 0,
+ "not_converged": [
+  "dregon_room2_floor"
+ ],
+ "slowest_s": 4927.991636514664,
+ "fits": [
+  "results/noise_v2/rounds/round5/fits/restarts/dregon_room2_floor__flight_profile__s0.json"
+ ]
+}
