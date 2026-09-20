@@ -97,3 +97,78 @@ bias: spread error 2.737 against 1.260, centre error 4.835 against 1.134. On
 the arms it accepts, HPPNet's centre is the better of the two trackers
 (-0.207 on `real`, -0.015 on `v2_legacy_free`, against SCv2's -1.061 /
 -1.533); SCv2 has a systematic 0.8-1.6 rev/s low bias on every arm.
+
+## 2. H3 (provenance): neither tracker has ever seen a legacy rig render
+
+Config reading only, no code run.
+
+**`hppnet_l2_r2_s0`.** `conf/experiment/hppnet_l2_r2_s0.yaml:6` takes
+`data: e12_real_fullflight` and `:22` overrides its training stream to
+`conf/online_mix/hb_silence_dload.yaml`. That policy's `sources.noise` block
+(`hb_silence_dload.yaml:29-46`) is exactly three entries:
+
+| source | spec | weight |
+|---|---|---:|
+| real DREGON | `kind: frames`, `dataset: DREGON-frames`, `splits: [in_flight_noise]`, `exclude_recording_ids: [free-flight_nosource_room1]`, `min_motor_rps: 0.0` | 1.0 (default) |
+| real Michael's | `kind: frames`, `dataset: michaels-frames`, `recording_ids: [FLY125]`, `min_motor_rps: 0.0` | 1.0 (default) |
+| synthetic silence | `kind: silence`, `n_channels: 8` | 0.4 |
+
+Speech is LibriSpeech `train-clean-100`. The default weight is 1.0
+(`src/data_processing/frame_datasets.py:1511`), so the merged real weight is
+2.0 and the split is **83.3 % real recordings / 16.7 % zero-labelled silence /
+0.0 % rig renders**. The silence arm is synthetic but is not a rotor render:
+`hb_silence_dload.yaml:9-13` describes it as quiet room tone, colored noise up
+to flight level, or a 30-60 Hz rumble, each with an exactly zero rotor-speed
+label. Validation is
+`dload:DREGON-LM-V4-michaels-valid-full@9604f3ff…` (`:25`), built from real
+recordings only (`src/data_processing/derivations.py:1550-1560`:
+`free-flight_nosource_room1`, `free-flight_speech-low_room1`,
+`free-flight_whitenoise-low_room1`, michaels `FLY124`).
+
+**`real_r4_scv2_unified`.** `conf/experiment/real_r4_scv2_unified.yaml:3`
+inherits `real_r4_scv2`, whose `:16` takes the same
+`data: e12_real_fullflight` and whose `:29` overrides the training stream to
+`conf/online_mix/hb_m3s2_dload.yaml`. That policy's `sources` block
+(`hb_m3s2_dload.yaml:32-49`) is `hb_silence_dload.yaml`'s **verbatim** — its
+own header says so at `:5-11` — so the same 83.3 / 16.7 / 0.0 split holds. No
+warm start: neither file sets `checkpoint:`, and the root default is
+`checkpoint: null` (`conf/config.yaml:42`); `real_r4_scv2.yaml:3-4` states
+"NO warm-up stage and NO warm start" explicitly.
+
+`real_r4_scv2_unified.yaml:4` does add `validation: rps_unified`, whose panel
+carries four SYNTHETIC views (`static_nomix`, `static_mix`,
+`stochastic_nomix`, `stochastic_mix`, from `conf/online_mix/salv2_comb.yaml`
+and `salv2_stoch.yaml`, i.e. `kind: static_comb` and `kind: stochastic`).
+These never enter the loss — they are monitored and they steer the LR
+schedule. And the checkpoint this round scores,
+**`best_real_r2.ckpt`, is by construction the one selected on the REAL view**:
+`conf/validation/rps_unified.yaml:91-94` defines `real_r2` as the real dataset,
+samples 0-176, all channels, and `src/training/loop.py:965-968` names each
+checkpoint `best_<score_name>.ckpt`.
+
+**Legacy rig renders exist as a training corpus — in other experiments.**
+`conf/online_mix/rig_easy_5050.yaml:75`, `rig_hard_5050.yaml:79` and
+`traj_fitted_5050.yaml:80` set `preset_bank: data/rig_banks/rig_{easy,hard}_n2048.json`,
+banks drawn offline by `experiments.stochastic_fit.rig_sampler` and anchored on
+`results/S2/cruise_8clip.json:fly125_cruise_00` (the header at
+`rig_easy_5050.yaml:35-40`). Neither of the two trackers' streams references
+any of them, and neither references the legacy DREGON export this round scores
+against (`results/S2/dregon_room2_cruise_refined.json`).
+
+**Verdict on H3: REFUTED.** Zero percent of either tracker's training clips
+are legacy rig renders, of any rig. The trackers do not prefer the legacy
+render because they were trained on its family.
+
+**But the provenance does carry a different, load-bearing fact.** The
+`in_flight_noise` split is
+`[free-flight_nosource_room1, free-flight_nosource_room2,
+hovering_nosource_room2, updown_nosource_room2, rectangle_nosource_room2,
+spinning_nosource_room2]` (`src/data_processing/sources/dregon.py:88-95`) and
+only `free-flight_nosource_room1` is excluded — so **all three recordings this
+round scores are in both trackers' TRAINING pool**, at whole-envelope
+`min_motor_rps: 0.0`, while the validation pool is room 1 + FLY124. The real
+arm's 1.07 / 1.61 is an in-domain number on seen recordings, and the 16.7 %
+zero-labelled silence arm is exactly the class HPPNet assigns to the R3 v2
+render (§1a). The provenance therefore explains the SHAPE of the failure (a
+trained OFF class exists, and the real clips are memorisable) without
+explaining the render's membership in it — that is §3.
