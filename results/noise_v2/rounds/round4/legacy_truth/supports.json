@@ -1,0 +1,74 @@
+{
+ "schema": "noise-v2-legacy-truth/1",
+ "study": "B-supports",
+ "git": "f94c03924649ba13544995819ad16edd3a809cf7",
+ "cache_dir": "results/noise_v2/rounds/round4/legacy_truth/supports",
+ "seed": 2001,
+ "supports": [
+  {
+   "name": "legacy_flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command",
+   "spec": "synthetic:legacy_flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command",
+   "from_spec": "flight_dregon:free-flight_nosource_room2:1512727403.205:8.0:motors_command",
+   "recording": "free-flight_nosource_room2",
+   "npz": "results/noise_v2/rounds/round4/legacy_truth/supports/legacy_flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command.npz",
+   "n_mics": 8,
+   "n_frames": 247,
+   "seconds": 8.0,
+   "carrier_rev_s_mean": 81.09414794945832,
+   "band_power_db": -18.936510895603615,
+   "real_band_power_db": -24.76900579435285
+  },
+  {
+   "name": "legacy_flight_dregon_hovering_nosource_room2@1511903911.394+8_motors_command",
+   "spec": "synthetic:legacy_flight_dregon_hovering_nosource_room2@1511903911.394+8_motors_command",
+   "from_spec": "flight_dregon:hovering_nosource_room2:1511903911.394:8.0:motors_command",
+   "recording": "hovering_nosource_room2",
+   "npz": "results/noise_v2/rounds/round4/legacy_truth/supports/legacy_flight_dregon_hovering_nosource_room2@1511903911.394+8_motors_command.npz",
+   "n_mics": 8,
+   "n_frames": 247,
+   "seconds": 8.0,
+   "carrier_rev_s_mean": 80.49900346046098,
+   "band_power_db": -22.014932617956976,
+   "real_band_power_db": -24.588031015478027
+  },
+  {
+   "name": "legacy_flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command",
+   "spec": "synthetic:legacy_flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command",
+   "from_spec": "flight_dregon:updown_nosource_room2:1511903584.348:8.0:motors_command",
+   "recording": "updown_nosource_room2",
+   "npz": "results/noise_v2/rounds/round4/legacy_truth/supports/legacy_flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command.npz",
+   "n_mics": 8,
+   "n_frames": 247,
+   "seconds": 8.0,
+   "carrier_rev_s_mean": 80.5507658755039,
+   "band_power_db": -21.830476502717953,
+   "real_band_power_db": -25.435159801231805
+  },
+  {
+   "name": "legacy_flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command",
+   "spec": "synthetic:legacy_flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command",
+   "from_spec": "flight_dregon:rectangle_nosource_room2:1511905731.953:8.0:motors_command",
+   "recording": "rectangle_nosource_room2",
+   "npz": "results/noise_v2/rounds/round4/legacy_truth/supports/legacy_flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command.npz",
+   "n_mics": 8,
+   "n_frames": 247,
+   "seconds": 8.0,
+   "carrier_rev_s_mean": 81.14800358241774,
+   "band_power_db": -20.652853044231062,
+   "real_band_power_db": -23.251225740770458
+  },
+  {
+   "name": "legacy_flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command",
+   "spec": "synthetic:legacy_flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command",
+   "from_spec": "flight_dregon:spinning_nosource_room2:1511905206.978:8.0:motors_command",
+   "recording": "spinning_nosource_room2",
+   "npz": "results/noise_v2/rounds/round4/legacy_truth/supports/legacy_flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command.npz",
+   "n_mics": 8,
+   "n_frames": 247,
+   "seconds": 8.0,
+   "carrier_rev_s_mean": 81.24692778572548,
+   "band_power_db": -19.49029448669131,
+   "real_band_power_db": -24.009816911431514
+  }
+ ]
+}
