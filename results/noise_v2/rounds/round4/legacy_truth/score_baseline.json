@@ -1,0 +1,87 @@
+{
+ "schema": "noise-v2-legacy-truth/1",
+ "study": "score_baseline",
+ "git": "1588c674e59af4dc8c67aa97c3146f7f0a18d722",
+ "protocol": {
+  "seed": 2001,
+  "n_mics": 8,
+  "scorer": {
+   "experiment": "hppnet_l2_r2_s0",
+   "ckpt": "best",
+   "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+   "local_path": "/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
+   "bytes": 2746881,
+   "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
+  },
+  "arms": {
+   "real": "real",
+   "legacy": "legacy",
+   "v2_real": "v2_real"
+  }
+ },
+ "windows": {
+  "free-flight_nosource_room2@1512727397.205045+4.000000": {
+   "support": {
+    "rig": "dregon",
+    "recording": "free-flight_nosource_room2",
+    "start_s": 1512727397.2050455,
+    "duration_s": 4.0,
+    "regime": "cruise",
+    "key": "free-flight_nosource_room2@1512727397.205045+4.000000"
+   },
+   "arms": {
+    "real": {
+     "pit_mae": 0.6381291290613775
+    },
+    "legacy": {
+     "pit_mae": 1.495533630913755
+    },
+    "v2_real": {
+     "pit_mae": 62.10548609132003
+    }
+   }
+  },
+  "hovering_nosource_room2@1511903905.394490+4.000000": {
+   "support": {
+    "rig": "dregon",
+    "recording": "hovering_nosource_room2",
+    "start_s": 1511903905.3944898,
+    "duration_s": 4.0,
+    "regime": "cruise",
+    "key": "hovering_nosource_room2@1511903905.394490+4.000000"
+   },
+   "arms": {
+    "real": {
+     "pit_mae": 0.8884082796921247
+    },
+    "legacy": {
+     "pit_mae": 1.8952373563869762
+    },
+    "v2_real": {
+     "pit_mae": 73.4479111574509
+    }
+   }
+  },
+  "updown_nosource_room2@1511903578.348311+4.000000": {
+   "support": {
+    "rig": "dregon",
+    "recording": "updown_nosource_room2",
+    "start_s": 1511903578.348311,
+    "duration_s": 4.0,
+    "regime": "cruise",
+    "key": "updown_nosource_room2@1511903578.348311+4.000000"
+   },
+   "arms": {
+    "real": {
+     "pit_mae": 1.694930322906428
+    },
+    "legacy": {
+     "pit_mae": 2.498841567931435
+    },
+    "v2_real": {
+     "pit_mae": 73.11178594032818
+    }
+   }
+  }
+ }
+}

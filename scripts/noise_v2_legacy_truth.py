@@ -788,13 +788,17 @@ def run_supports(*, out: Path, cache: Path, specs: list[str], prefix: str) -> di
 
 # ── (B3, C) rendering and scoring named fits and parameter swaps ────────────
 
-#: The parameter GROUPS study C swaps one at a time between two fits.
+#: The parameter GROUPS study C swaps one at a time between two fits. Between
+#: two ``flight_floor_lowk`` fits on the same frozen bench comb these groups
+#: are EXHAUSTIVE — the ``all`` arm must reproduce the target's parameters
+#: exactly, which :func:`swap_arms` asserts.
 SWAP_GROUPS: dict[str, tuple[str, ...]] = {
     "comb_gain": ("profile.comb_gain_db",),
     "low_order": ("profile.low_order_gain_db",),
     "gamma": ("gamma_hz",),
     "dynamics": ("sigma_nu", "lam"),
     "floor": ("floor",),
+    "mic": ("mic_gains_db", "profile.mic_line_gain_db"),
 }
 
 
@@ -861,7 +865,35 @@ def swap_arms(
         b = apply_profile_gains(b, p_real, g)
     out["real_to_legacy__all"] = a
     out["legacy_to_real__all"] = b
+    residual = param_diff(a["params"], p_legacy["params"])
+    if residual:
+        print(
+            "!! the swap groups are NOT exhaustive between these two fits: "
+            f"{residual} still differ after `all`. Every attribution below is an "
+            "attribution among the groups that WERE swapped.",
+            flush=True,
+        )
+    out["_residual_after_all"] = residual  # type: ignore[assignment]
     return out
+
+
+def param_diff(a: Any, b: Any, prefix: str = "") -> list[str]:
+    """Dotted names where two parameter blocks disagree numerically."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        keys = sorted(set(a) | set(b))
+        out: list[str] = []
+        for k in keys:
+            if k not in a or k not in b:
+                out.append(f"{prefix}{k}")
+            else:
+                out += param_diff(a[k], b[k], f"{prefix}{k}.")
+        return out
+    if a is None or b is None:
+        return [] if a is b else [prefix.rstrip(".")]
+    x, y = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
+    if x.shape != y.shape or not np.allclose(x, y, rtol=0.0, atol=1e-12):
+        return [prefix.rstrip(".")]
+    return []
 
 
 def run_score(
@@ -1038,11 +1070,14 @@ def main(argv: list[str] | None = None) -> int:
         if not path:
             die(f"--fit wants NAME=PATH, got {entry!r}")
         arms[name] = json.loads(Path(path).read_text())
+    residual: list[str] | None = None
     if args.swap:
         p_real = json.loads(Path(args.swap[0]).read_text())
         p_legacy = json.loads(Path(args.swap[1]).read_text())
         groups = tuple(g for g in str(args.swap_groups).split(",") if g)
-        arms |= swap_arms(p_real, p_legacy, groups)
+        swapped = swap_arms(p_real, p_legacy, groups)
+        residual = list(swapped.pop("_residual_after_all"))  # type: ignore[arg-type]
+        arms |= swapped
     if not arms:
         die("nothing to score: pass --fit, --swap or --with-real")
     payload = run_score(
@@ -1053,6 +1088,14 @@ def main(argv: list[str] | None = None) -> int:
         stem=str(args.stem),
         ladder_arms=tuple(g for g in str(args.ladder).split(",") if g),
     )
+    if args.swap:
+        payload["swap"] = dict(
+            p_real=str(args.swap[0]),
+            p_legacy=str(args.swap[1]),
+            groups={g: list(SWAP_GROUPS[g]) for g in groups},
+            residual_after_all=residual,
+            exhaustive=not residual,
+        )
     (out / f"{args.stem}.json").write_text(json.dumps(payload, indent=1) + "\n")
     print(score_table(payload))
     print(f"# wrote {out / f'{args.stem}.json'}")
