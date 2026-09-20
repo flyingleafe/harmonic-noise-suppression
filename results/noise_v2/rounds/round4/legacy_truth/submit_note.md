@@ -23,12 +23,12 @@ vs -24.77, -22.01 vs -24.59, -21.83 vs -25.44, -20.65 vs -23.25, -19.49 vs
 
 | field | value |
 | --- | --- |
-| job A (same mode as R3), 4 restarts | `nv2-r4-lt-lowk-s0-a24429`, `nv2-r4-lt-lowk-s1-fc3da1`, `nv2-r4-lt-lowk-s2-701b4b`, `nv2-r4-lt-lowk-s3-ef050e` |
-| job B (frees the most), 4 restarts | `nv2-r4-lt-free-s0-135e14`, `nv2-r4-lt-free-s1-bb7d53`, `nv2-r4-lt-free-s2-7f0d84`, `nv2-r4-lt-free-s3-e5fd0b` |
+| job A (same mode as R3), 4 restarts | `nv2-r4-lt-lowk-s0-13b8b0`, `nv2-r4-lt-lowk-s1-7a669e`, `nv2-r4-lt-lowk-s2-cf6a41`, `nv2-r4-lt-lowk-s3-eb4cc2` |
+| job B (frees the most), 4 restarts | `nv2-r4-lt-free-s0-c614f0`, `nv2-r4-lt-free-s1-fb9c38`, `nv2-r4-lt-free-s2-01b855`, `nv2-r4-lt-free-s3-11008a` |
 | backend | `uni-cpu`, `--gpus 0 --cpus 16 --mem 64 --time 4h`, `--jobs 1 --threads 16` (the R3 floor-fit profile) |
-| code SHA | `f94c0392` (`noise-v2 R4 legacy-truth: A anatomy`, pushed on `main`) |
+| code SHA | `be7a89de` (`noise-v2 R4 legacy-truth: B restarts re-submitted one job each`, pushed on `main`; the FIRST per-seed wave ran at `f94c0392`, which predates `--restart-tag`, and died on `unrecognized arguments: --restart-tag s0` in 41 s) |
 | submitted | 2026-09-20, via `omnirun --daemon localhost:18787` (ssh tunnel to the wg-bound daemon, `hub` process `omnirun-wg`) |
-| submitted from | detached worktree `.worktrees/submit-LegacyTruth` at `f94c0392` |
+| submitted from | detached worktree `.worktrees/submit-LegacyTruth` at `be7a89de` |
 | pool | the five `synthetic:legacy_flight_dregon_*@*+8_motors_command` supports |
 | seeds | 4 per mode, ONE CLUSTER JOB EACH (`--seed N --restart-tag sN`), collapsed afterwards by `noise_v2_fit.py reduce --mode <mode>` |
 | output | `results/noise_v2/rounds/round4/legacy_truth/fits/restarts/dregon_legacy_render__<mode>__s<N>.json`, reduced to `..fits/dregon_legacy_render__<mode>.json` |
