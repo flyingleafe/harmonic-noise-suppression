@@ -70,6 +70,11 @@ from data_processing.trajectory_model.source import (
     build_from_config,
     load_bundle,
 )
+from data_processing.trajectory_model.window import (
+    FlightCache,
+    make_flight_cache,
+    window_flight,
+)
 
 __all__ = [
     "F0_MAX_HZ",
@@ -92,6 +97,7 @@ __all__ = [
     "AirborneSampler",
     "FitBundle",
     "FittedTrajectorySource",
+    "FlightCache",
     "NewFit",
     "Params",
     "Posterior",
@@ -103,6 +109,7 @@ __all__ = [
     "corner_tau_s",
     "f0_from_v",
     "load_bundle",
+    "make_flight_cache",
     "ou_psd_grid",
     "ou_state_space",
     "params_from_rig_vector",
@@ -115,6 +122,7 @@ __all__ = [
     "v_from_f0",
     "v_from_tau_e",
     "v_from_zeta",
+    "window_flight",
     "wrap_airborne",
     "zeta_from_v",
 ]

@@ -369,6 +369,10 @@ def _build_engine(spec: Mapping[str, Any], *, window_s: float, sample_rate: int)
         from data_processing.stochastic_rotor_noise import StochasticNoisePool
 
         return StochasticNoisePool.from_config(spec, duration_s=window_s, sample_rate=sample_rate)
+    if kind == "noise_v2":
+        from data_processing.noise_v2_pool import NoiseV2Pool
+
+        return NoiseV2Pool.from_config(spec, duration_s=window_s, sample_rate=sample_rate)
     if kind == "silence":
         from data_processing.silence_noise import SilenceNoisePool
 
@@ -621,7 +625,15 @@ def build_noise_stream(
     """
     specs = _to_plain(specs)
     items = list(specs) if isinstance(specs, list) else [specs]
-    engine_kinds = {"generated", "static_comb", "stochastic", "gp", "silence", "audio_pool"}
+    engine_kinds = {
+        "generated",
+        "static_comb",
+        "stochastic",
+        "noise_v2",
+        "gp",
+        "silence",
+        "audio_pool",
+    }
     standalone = [c for c in items if _cfg_get(c, "kind") in engine_kinds]
     real_items = [c for c in items if _cfg_get(c, "kind") not in engine_kinds]
     weighted_real = [c for c in real_items if _cfg_get(c, "weight", None) is not None]

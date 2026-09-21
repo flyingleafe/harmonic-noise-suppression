@@ -1787,30 +1787,6 @@ def model_psd_db(diag: dict[str, Any], mic: int = 0) -> np.ndarray:
 # ── Pool ────────────────────────────────────────────────────────────────────
 
 
-@dataclass
-class _FlightCache:
-    rps: np.ndarray
-    t_low: np.ndarray
-    uses: int = 0
-    #: The flight's own hover speed (its 90th percentile). The amplitude law is
-    #: written against THIS, not against a fixed 80 rev/s, so the level says
-    #: "this aircraft is at such a fraction of its own hover" instead of "the
-    #: speed is such a number". Without it a wide speed range would make the
-    #: level a giveaway for the absolute speed — a shortcut, and a false one,
-    #: since a small fast drone is not quieter than a big slow one.
-    hover: float = 80.0
-    #: The reference level this whole flight is recorded at, drawn once when the
-    #: flight is made and held for every window of it — only when
-    #: ``level_per_flight`` is on. A real recording has ONE gain: within it,
-    #: loudness tracks rotor speed closely (Michael's two recordings couple
-    #: level to speed at Spearman +0.73 / +0.48 with only 1.2 / 3.2 dB of
-    #: scatter), and different recordings sit at very different absolute levels.
-    #: Redrawing the level per WINDOW destroys that: it keeps the across-flight
-    #: spread but throws the same spread INSIDE each flight, which is what left
-    #: the synthetic streams at 7.4 to 12.8 dB of scatter.
-    level: float | None = None
-
-
 class StochasticNoisePool:
     """Stochastic rotor-noise source (``kind: stochastic``).
 
@@ -1992,7 +1968,7 @@ class StochasticNoisePool:
             self._bank = load_preset_bank(self.preset_bank)
             self._check_bank()
         self._base_seed = int(seed)
-        self._flight: _FlightCache | None = None
+        self._flight: trajectory_model.FlightCache | None = None
         # Interface parity with the other pools: the analytic model has no
         # geometry, and the frame carries placeholders.
         self.mic_pos = np.zeros((self.n_mics, 3), dtype=np.float64)
@@ -2139,7 +2115,6 @@ class StochasticNoisePool:
         stopped rotor stays stopped, and every other speed moves with its own
         comb.
         """
-        n_samples = int(round(duration_s * self.sample_rate))
         # Log-uniform: the scale is a RATIO, and a decade of speed sampled
         # linearly would put four fifths of its draws in the top half.
         lo_s, hi_s = self.rps_scale_range
@@ -2188,19 +2163,14 @@ class StochasticNoisePool:
                     rotor_trim_rel=self.rotor_trim_rel,
                     rng=rng,
                 )
-            self._flight = _FlightCache(
-                rps=flight,
-                t_low=np.arange(flight.shape[1]) / self.flight_fs,
-                hover=float(np.percentile(flight, 90.0)),
+            self._flight = trajectory_model.make_flight_cache(
+                flight,
+                self.flight_fs,
                 level=self._draw_level(rng) if self.level_per_flight else None,
             )
         self._flight.uses += 1
-        flight, t_low = self._flight.rps, self._flight.t_low
-        max_start = max(0.0, float(t_low[-1]) - duration_s)
-        start_s = float(rng.uniform(0.0, max_start)) if max_start > 0 else 0.0
-        t_win = start_s + np.arange(n_samples) / self.sample_rate
         self._hover = max(scale * float(self._flight.hover), 1.0)
-        window = np.stack([np.interp(t_win, t_low, flight[r]) for r in range(flight.shape[0])])
+        window = trajectory_model.window_flight(self._flight, rng, duration_s, self.sample_rate)
         return scale * window
 
     def _draw_level(self, rng: np.random.Generator) -> float:
@@ -2280,7 +2250,7 @@ class StochasticNoisePool:
             changes["band_taper_frac"] = self.band_taper_frac
         params = params.with_(**changes)
         # One gain for a whole flight when asked for, else the old per-window
-        # draw. See _FlightCache.level.
+        # draw. See trajectory_model.FlightCache.level.
         cached = getattr(self._flight, "level", None) if self.level_per_flight else None
         level = cached if cached is not None else self._draw_level(rng)
         audio, diag = synthesize(
