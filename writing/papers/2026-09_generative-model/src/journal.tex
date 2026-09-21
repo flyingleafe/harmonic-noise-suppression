@@ -1,0 +1,387 @@
+% ---------------------------------------------------------------------------
+% Journal version for IEEE OJSP, IEEEtran journal class. Second paper of the
+% series: the fitted generative model of drone ego-noise is the contribution,
+% the estimators are the instrument. Preamble, macros and the reused
+% paragraphs come from ../../2026-08_wrapup/src/journal.tex (do not edit that
+% file). Tables: src/tables/*.tex, copied from the 2026-08 paper; figures are
+% read from ../../2026-08_wrapup/figures/ through \graphicspath.
+%
+% Sourcing rule for this draft: every number carries a "% source:" comment
+% naming the committed JSON or findings.md it was read from. Numbers that the
+% nv2_* arms have not produced yet are \todo{} blocks, not placeholders that
+% look like results.
+% ---------------------------------------------------------------------------
+\documentclass[journal]{IEEEtran}
+\usepackage{newtxtext}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,calc}
+\usepackage[hyphens]{url}
+\usepackage[hidelinks]{hyperref}
+\setlength{\emergencystretch}{1.5em}
+\graphicspath{{figures/}{../figures/}{../../2026-08_wrapup/figures/}}
+
+\newcommand{\revps}{\ensuremath{\,\mathrm{rev/s}}}
+\newcommand{\todo}[1]{\textcolor{red}{[\textbf{TODO:} #1]}}
+
+\begin{document}
+\bstctlcite{journal-reference-control}
+
+\title{A Fitted Generative Model of Drone Ego-Noise for Rotor-Speed
+  Estimation}
+
+\author{Dmitrii~Mukhutdinov and Lin~Wang%
+  \thanks{The authors are with the School of Electronic Engineering and
+    Computer Science, Queen Mary University of London, UK (e-mail:
+    d.mukhutdinov@qmul.ac.uk; lin.wang@qmul.ac.uk).}}
+
+\maketitle
+
+\begin{abstract}
+Estimating the four motor speeds of a quadrotor from its own noise is
+limited by data: the public annotated flight recordings amount to a few
+minutes from two airframes, and models trained on them recognize
+trajectories they have already heard instead of reading the harmonic
+comb. We replace the data with a model. We fit a probabilistic
+generative model of drone ego-noise in two halves, both estimated from
+real flights by exact likelihood. The first is a state-space model of
+the four rotor-speed trajectories, with a slow and a resonant mode per
+control axis, a per-rotor measurement process and a per-flight offset,
+fitted to seven rigs; a diagonal Gaussian over a dimensionless
+reparametrization of its 32 parameters samples unseen airframes. The
+second is a model of the rotor-noise audio given a speed trajectory:
+harmonic lines whose phase carries an integrated Ornstein--Uhlenbeck
+shaft error and a per-line Lorentzian width, a per-order power profile,
+a coloured floor with speed laws, and per-microphone gains, fitted by a
+composite Whittle likelihood on bench recordings and then in flight.
+We validate the fits with a tracker-parity gate: a frozen estimator
+trained on real audio reads the rendered audio at
+1.82\revps{} on the DREGON rig against a 2.19\revps{} bar and
+1.62\revps{} on the Matrice 100 against 3.03. We then train
+rotor-speed estimators on renders alone and on mixtures with real
+audio, and report what transfers.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Rotor speed estimation, drone ego-noise, generative models, Whittle
+likelihood, state-space models, synthetic training data, sim-to-real
+transfer.
+\end{IEEEkeywords}
+
+\section{Introduction}
+\label{sec:intro}
+
+\IEEEPARstart{A}{udio} recorded on board a drone could support voice
+interaction, acoustic monitoring and self-diagnostics. The main
+obstacle is the ego-noise of the rotors, which buries other sources at
+signal-to-noise ratios between 0 and $-30$ dB. This noise has a clear
+structure: each rotor produces a comb of harmonics spaced by its
+rotation rate, plus broadband aerodynamic noise. If the motor speeds
+are known, the harmonics can be located, and Gulli et al.
+\cite{gulli2025rotorcond} use motor-speed telemetry explicitly to
+condition speech-enhancement models. Estimating the speeds from the
+audio itself would remove the need for telemetry at inference time.
+Flight-controller logs are not always exposed, they have to be aligned
+with the audio, and they carry timing and value errors that matter at
+harmonic precision (Section~\ref{sec:data}).
+
+The obstacle to estimating the speeds is the annotation. The public
+recordings with usable telemetry amount to about seven minutes of
+powered flight from two airframes (Section~\ref{sec:data}), which is a
+few dozen distinct speed trajectories. A model trained on that much
+data can reach a low validation error and still be reading the wrong
+cue. We showed previously that it is: a frequency-scaling probe, which
+resamples a cruise clip and asks whether the prediction follows the
+harmonics, returns a slope near zero for every regressor trained on
+real audio alone, and the same models fail by an octave on an unseen
+drone. The cue they use is the trajectory prior of the recordings they
+saw. More annotated flight is the obvious remedy and it is expensive:
+every minute needs an airframe, a flight, a synchronized array and a
+telemetry log that survives the alignment.
+
+The contribution of this paper is a fitted probabilistic generative
+model of drone ego-noise that supplies the missing data. It has two
+halves, and both are estimated from real recordings rather than
+designed by hand. The first (Section~\ref{sec:traj}) is a continuous
+state-space model of the four rotor-speed trajectories: a slow
+Ornstein--Uhlenbeck mode and a damped oscillator per control axis, a
+coloured per-rotor measurement process, and a per-flight offset,
+fitted to seven rigs by an exact Kalman likelihood and judged against
+the best fit of the synthesizer it replaces. The second
+(Section~\ref{sec:noise}) is a model of the rotor-noise audio given a
+speed trajectory: each order of each rotor is a line whose phase
+carries the integrated shaft-speed error shared by all its orders and
+an independent Wiener term that gives the line a Lorentzian width;
+the line powers form a per-order profile; the broadband floor is a
+Gaussian-process-shaped spectrum with its own speed law; and every
+microphone has its own line and floor gains. It is fitted by a
+composite Whittle likelihood on static bench recordings and then in
+flight with the dynamics frozen (Section~\ref{sec:fit}). We validate
+the fits against a frozen estimator trained on real audio, a spectral
+proxy and the likelihood of a speed-matched oracle
+(Section~\ref{sec:fitval}), and we sample rigs from the fits in three
+ways of increasing difficulty (Section~\ref{sec:rigs}). The secondary
+contribution is the estimator side: compact regressors with a
+permutation-invariant loss, and multi-pitch salience architectures
+from music transcription equipped with a per-rotor output
+representation that makes them competitive (Section~\ref{sec:est}).
+
+Section~\ref{sec:exp} is the experiment that the model exists for. We
+train the estimators on renders alone, on renders mixed with the real
+pool, and on a curriculum, and we score everything on the same frozen
+real validation protocol against real-only references. Every training
+stream in this paper is synthetic or mixed; the validation protocol
+never changes.
+
+\section{Related work}
+\label{sec:related}
+
+\subsection{Drone ego-noise}
+Existing approaches to drone ego-noise
+reduction include multichannel blind source separation
+\cite{wang2020bss}, learned time--frequency masks for single- and
+multichannel processing \cite{wang2020dnntf}, and single-channel
+band-split attention \cite{liu2025edgebsrof}. These methods use the
+microphone signals only. Gulli et al. \cite{gulli2025rotorcond}
+condition the enhancement model on the rotor speeds taken from
+telemetry. In this work we estimate those speeds from the recorded
+sound, and we build the training data for that estimator.
+
+\subsection{Pitch estimation and transcription}
+Multi-pitch estimators
+predict several simultaneous fundamental frequencies. Neural methods
+often output a \emph{salience map}, a time--frequency array whose
+values indicate candidate-pitch activity
+\cite{bittner2017deepsalience,cuesta2020multif0,bittner2022basicpitch}.
+Harmonic convolutions on a log-frequency axis have been used for piano
+transcription \cite{wei2022hppnet} and monophonic pitch estimation
+\cite{wei2022harmof0}. Our task is different, and we adapt these
+architectures to four rotor-speed tracks. At cruise the rotor rates
+lie within one octave (55--110\revps) and can be less than 1\revps{}
+apart, so the main difficulty is to separate nearby combs.
+
+\subsection{Order tracking}
+An \emph{order} is a frequency component
+indexed by a multiple of the shaft speed. Tacholess order tracking
+estimates the speed from vibration or sound instead of a tachometer
+\cite{peeters2019tacholess}, either by time--frequency ridge extraction
+\cite{iatsenko2016ridges} or by iterative adaptive Vold--Kalman
+filtering, which updates the frequency estimate and the filter
+bandwidth together \cite{jiang2024iavkf}. The drone case adds four
+simultaneous shafts with near-equal speeds and changes of flight regime
+(idle, ramps, cruise, landing). The blind tracker of
+Appendix~\ref{sec:tracker} builds on these methods.
+
+\subsection{Synthetic training data and sim-to-real transfer}
+Training on simulated data and testing on real measurements is a
+standard answer to annotation scarcity, and its failure mode is
+well documented. In robotics, \emph{domain randomization} trains on
+simulated images whose nuisance parameters are sampled from wide
+distributions, so that the real world is one draw among many
+\cite{tobin2017domainrand}; randomizing the \emph{dynamics} rather
+than the appearance transfers a control policy to hardware
+\cite{peng2018dynrand}. The same two ideas appear in audio. Sound
+event detection is trained on soundscapes synthesized from isolated
+events and backgrounds, which gives strong labels that human
+annotation cannot \cite{turpault2019dcase}; end-to-end diarization is
+trained on simulated conversations whose statistics are fitted to
+real meetings, and the fidelity of those statistics is what decides
+the transfer \cite{landini2022simconv}; far-field recognition uses
+simulated room impulse responses, whose mismatch against measured ones
+is large enough that it is worth learning a correction
+\cite{ratnarajah2021tsrir}. In rotating machinery, a numerical model
+identified from measurements supplies the labelled fault data that
+the real machine cannot \cite{kumar2025numerical}.
+
+Our setting differs from all of these in one respect that shapes the
+paper. The quantity we predict, the rotor speed, is the
+\emph{input} to the generator, so a render is labelled exactly, with
+no annotation error and no alignment; and the generator is not a
+physical simulation but a probabilistic model fitted to the same
+recordings we validate on. That makes the fidelity of the fit
+measurable rather than assumed, and Section~\ref{sec:fitval} measures
+it.
+
+\section{Real data, splits and ground truth}
+\label{sec:data}
+
+\subsection{Task}
+Given a mono or multichannel recording from a
+drone-mounted array, we predict four motor speeds in revolutions per
+second (rev/s) on the short-time Fourier transform (STFT) frame grid:
+2048-sample windows and a 512-sample hop at 16 kHz, i.e. 31.25
+frames/s. We do not assign the estimates to physical rotor identities.
+For each frame, we match the four predictions to the four reference
+speeds in the order that minimizes the error, both in training
+(Section~\ref{sec:est}) and in evaluation, where we report the
+matched mean absolute error (MAE). A speed error of 1\revps{} shifts
+the fortieth harmonic by 40 Hz, so sub-rev/s accuracy matters for
+harmonic-informed suppression.
+
+\begin{table}[t]
+\centering
+\caption{The real data. Every recording is 8-channel unless marked
+  mono; durations are the whole recording, of which the powered
+  envelope (rotors spinning) is shorter. Roles: T = training pool of
+  the real-data references; V, $n$ = frozen validation
+  split, $n$ 8-s clips; H = held out for a future test. Telemetry: C =
+  cleaned commanded speed, M = measured speed (tachometer grade), S =
+  SDK log recalibrated as described in the text.}
+\label{tab:data}
+\scriptsize
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{3.1cm}rcl@{}}
+\toprule
+Rig & Recording & Dur. & Role & Tel. \\
+\midrule
+\multirow{9}{*}{\parbox{1.35cm}{DREGON \cite{strauss2018dregon}\\MikroKopter,\\indoor}}
+ & room 2, free flight & 82 s & T & C \\
+ & room 2, hovering & 45 s & T & C \\
+ & room 2, up/down & 54 s & T & C \\
+ & room 2, rectangle & 44 s & T & C \\
+ & room 2, spinning & 41 s & T & C \\
+ & room 1, free flight, no source & 71 s & V, 8 & C, M \\
+ & room 1, free flight, speech & 63 s & V, 7 & C, M \\
+ & room 1, free flight, white noise & 65 s & V, 7 & C, M \\
+ & room 1, two high-level source flights & 114 s & H & C, M \\
+\midrule
+\multirow{4}{*}{\parbox{1.35cm}{MD2 \cite{clayton2023embedded}\\Matrice 100,\\outdoor}}
+ & FLY125 & 178 s & T & S \\
+ & FLY124 & 122 s & V, 15 & S \\
+ & FLY103 (mono) & 107 s & H & S \\
+ & FLY108 (mono) & 99 s & H & S \\
+\midrule
+\multicolumn{2}{@{}l}{Training pool (T)} & 444 s & \multicolumn{2}{l}{$\times 8$ mics $\approx$ 1 h} \\
+\multicolumn{2}{@{}l}{Validation (V): 37 clips $\times$ 8 mics} & 296 s & \multicolumn{2}{l}{74\,296 frames} \\
+\multicolumn{2}{@{}l}{Speech for mixing: LibriSpeech train-clean-100} & 100 h & \multicolumn{2}{l}{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Recordings and splits}
+Table~\ref{tab:data} lists all the
+recordings we use. DREGON \cite{strauss2018dregon} provides an
+8-microphone array mounted under a MikroKopter quadrotor in indoor
+free flight, with logged commanded speeds and, for the room-1
+recordings, measured speeds from the motor controllers. The second
+collection, MD2, contains outdoor flights of a DJI Matrice 100 with an
+8-microphone ring and telemetry obtained through the manufacturer's
+SDK \cite{clayton2023embedded}. The real training pool consists of the
+five DREGON room-2 recordings and one MD2 flight (FLY125): 444 s of
+audio, or about one hour of single-channel material if the eight
+microphones are counted separately. It contains only a few dozen
+distinct speed trajectories, since additional microphones do not
+create new trajectories. That scarcity is the premise of this paper.
+The validation split consists of 37 fixed 8-second clips
+from three DREGON room-1 recordings (22 clips) and a different MD2
+flight, FLY124 (15 clips), each with eight channels. This gives
+74\,296 scored frames, of which 12.5\,\% are stopped-rotor frames,
+3.7\,\% have a rotor between 0.5 and 30\revps{} (take-off and landing
+transients), 13.5\,\% are ramps and 70.3\,\% are cruise. Fourteen of
+the DREGON clips come from flights with a loudspeaker playing speech
+or white noise in the room; the other 23 clips contain rotor noise
+only. We hold out two DREGON source flights and two mono MD2 flights
+and do not use them in this paper. Every number we report is a
+validation number, and we select checkpoints on the same split.
+
+Two of these recordings appear again as fitting data. The DREGON
+room-2 recordings and FLY125 are the flights on which the noise model
+of Section~\ref{sec:noise} is fitted, and the DREGON and MD2 telemetry
+logs are two of the seven rigs of Section~\ref{sec:traj}. The
+validation clips are not fitted on.
+
+\subsection{Speech mixing}
+During training we mix every 1-s chunk of rotor noise
+with a LibriSpeech \cite{panayotov2015librispeech} utterance drawn from
+train-clean-100 (100 h, 251 speakers) at a signal-to-noise ratio drawn
+uniformly from $[-30, 0]$ dB. The noise is the reference level, with a
+floor on the reference so that a silent chunk cannot be scaled into
+loud speech. One sixth of the chunks form a zero-labelled ``silence''
+arm, which contains speech and room noise but no rotor noise. Without
+this arm the models learn that quiet means stopped, and they fail on
+silence that carries sound. Each epoch therefore sees fresh mixtures.
+
+\subsection{Ground truth}
+The logs are imperfect in ways that matter at
+harmonic precision. We made three decisions about them.
+(i) The DREGON labels are the \emph{commanded} speed after a cleaning
+step: we zero the leading constant segment before the motors respond
+and median-filter single-sample spikes. The commanded track freezes at
+its last value when the controller stops logging, so we do not trust it
+through shutdown. Measured speeds exist only for the room-1
+recordings, from a period-counting tachometer with a 49.7 Hz update
+rate and a 0.27\revps{} quantization step at 80\revps{}. They agree
+with the cleaned command to 0.04\,\% on average (0.11\,\% in the worst
+case), so we use the command for the frozen split as well. (ii)
+Compared with the audio itself, the DREGON telemetry over-reports the
+speed by 0.35--0.85\,\% depending on the estimator (a
+harmonic-residual fit gives 0.54\,\%, with a confidence interval of
+0.45--0.62\,\%). No independent measurement decides between the
+candidate corrections, so we keep the DREGON labels as logged and
+carry the range as an uncertainty floor of 0.3--0.7\revps{} at cruise
+under every DREGON number in this paper. (iii) The MD2 SDK log lags
+the audio, and the lag grows linearly with time, which indicates a
+sample-clock dilation. A fixed lag leaves a 12--16 ms RMS timing
+residual, while a lag-plus-slope fit (+0.65 and +0.38 ms per second
+for FLY124 and FLY125) leaves 3--5 ms. The logged speeds are also about 0.7\,\% low, so we apply a
+multiplicative correction ($\times 1.0070$). The correction has to be
+multiplicative because it must vanish at zero speed. We estimate both corrections from the harmonic
+reconstruction residual, i.e. we fit a harmonic model to the audio at
+a candidate trajectory and measure the energy it leaves, and we apply
+them to the training and validation labels alike. An audio-refined
+annotation obtained by minimizing that residual starting from the
+telemetry has a precision floor of about 0.2\revps{}. We use it as a
+fitting target where stated, not as a training or validation label.
+
+\section{The generative model}
+\label{sec:model}
+
+% ---- filled in the "paper: section 4" commit ----
+
+\section{Rotor-speed estimators}
+\label{sec:est}
+
+% ---- filled in the "paper: sections 5-6" commit ----
+
+\section{Experiments}
+\label{sec:exp}
+
+% ---- filled in the "paper: sections 5-6" commit ----
+
+\section{Discussion}
+\label{sec:discussion}
+
+% ---- filled in the "paper: discussion, conclusion, appendices" commit ----
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+% ---- filled in the "paper: discussion, conclusion, appendices" commit ----
+
+\appendices
+
+\section{The two-stage blind tracker}
+\label{sec:tracker}
+
+% ---- filled in the "paper: discussion, conclusion, appendices" commit ----
+
+\section{Fit tables}
+\label{sec:fittables}
+
+% ---- filled in the "paper: discussion, conclusion, appendices" commit ----
+
+\clearpage
+% Reset column height after the final double-column float page.
+\onecolumn
+\twocolumn
+\IEEEtriggeratref{10}
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
