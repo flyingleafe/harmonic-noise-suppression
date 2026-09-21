@@ -1,0 +1,245 @@
+{
+ "git": "c4e623186b5b895f0f83b420c4c5c830f36f00e9",
+ "protocol": {
+  "fits": {
+   "asis": "results/noise_v2/rounds/round5/fits/dregon_room2_floor__flight_profile.json",
+   "pin": "results/noise_v2/rounds/round5/calibration/dregon_room2_floor__flight_profile_pin.json",
+   "pin_plus": "results/noise_v2/rounds/round5/calibration/dregon_room2_floor__flight_profile_pin_plus3db.json",
+   "stability_db": 3.0
+  },
+  "n_mics": 8,
+  "quoted_from": "results/noise_v2/rounds/round5/tracker_probe/tracks.json",
+  "recordings": [
+   "free-flight_nosource_room2",
+   "hovering_nosource_room2",
+   "updown_nosource_room2"
+  ],
+  "runner": "scripts/noise_v2_widen_dregon.py: run (unchanged, called as a library)",
+  "seed": 2001,
+  "trackers": {
+   "hppnet": null,
+   "scv2": {
+    "ckpt": "best_real_r2.ckpt",
+    "experiment": "real_r4_scv2_unified"
+   }
+  }
+ },
+ "quoted": {
+  "legacy": {
+   "hppnet": 1.9632041850773885,
+   "scv2": 1.5942225919829476
+  },
+  "real": {
+   "hppnet": 1.0738225772199768,
+   "scv2": 1.6143026109094973
+  },
+  "v2_legacy_free": {
+   "hppnet": 1.746434251998047,
+   "scv2": 1.798260140040564
+  },
+  "v2_legacy_lowk": {
+   "hppnet": 5.559694184762461,
+   "scv2": 1.95977364835285
+  },
+  "v2_real": {
+   "hppnet": 69.55506106303302,
+   "scv2": 11.296730722813182
+  }
+ },
+ "schema": "noise-v2-dregon-calibration/1",
+ "scored": {
+  "hppnet": {
+   "legacy": {
+    "mean": 1.9632041765080732,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 1.4955336539552109,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 1.895237329101874,
+     "updown_nosource_room2@1511903578.348311+4.000000": 2.4988415464671343
+    }
+   },
+   "real": {
+    "mean": 1.073822593656905,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 0.6381291059563977,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 0.8884082865062426,
+     "updown_nosource_room2@1511903578.348311+4.000000": 1.694930388508075
+    }
+   },
+   "scorer": {
+    "bytes": 2746881,
+    "ckpt": "best",
+    "experiment": "hppnet_l2_r2_s0",
+    "local_path": "/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
+    "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+    "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
+   },
+   "v2_r5_asis": {
+    "mean": 1.6185099428829446,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 1.3452579666862061,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 1.6322012564289134,
+     "updown_nosource_room2@1511903578.348311+4.000000": 1.878070605533714
+    }
+   },
+   "v2_r5_pin": {
+    "mean": 1.6562602813800131,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 1.452723800538847,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 1.6475686958855273,
+     "updown_nosource_room2@1511903578.348311+4.000000": 1.8684883477156655
+    }
+   },
+   "v2_r5_pin_plus": {
+    "mean": 1.678258428323039,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 1.488409893516577,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 1.6831052842521157,
+     "updown_nosource_room2@1511903578.348311+4.000000": 1.863260107200425
+    }
+   },
+   "widths": {
+    "v2_r5_asis": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 11.597854456649916,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 12.601015868839168,
+     "updown_nosource_room2@1511903578.348311+4.000000": 12.03845853817324
+    },
+    "v2_r5_pin": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 10.783494276565316,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 11.340986028622106,
+     "updown_nosource_room2@1511903578.348311+4.000000": 11.188399861374723
+    },
+    "v2_r5_pin_plus": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 10.472487241068988,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 10.832022659792013,
+     "updown_nosource_room2@1511903578.348311+4.000000": 10.89995968678824
+    }
+   }
+  },
+  "scv2": {
+   "legacy": {
+    "mean": 1.5942226285656922,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 1.2727861877471682,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 1.5471829762534488,
+     "updown_nosource_room2@1511903578.348311+4.000000": 1.96269872169646
+    }
+   },
+   "real": {
+    "mean": 1.6143026191090781,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 0.9833632121010432,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 1.313731036488972,
+     "updown_nosource_room2@1511903578.348311+4.000000": 2.545813608737219
+    }
+   },
+   "scorer": {
+    "bytes": 6047905,
+    "ckpt": "best_real_r2.ckpt",
+    "experiment": "real_r4_scv2_unified",
+    "local_path": "/home/flyingleafe/Research/PhD/projects/harmonic-noise-suppression/.cache/r2_checkpoints/ml-data__artifacts__real_r4_scv2_unified__checkpoints__best_real_r2.ckpt",
+    "reference": "r2://ml-data/artifacts/real_r4_scv2_unified/checkpoints/best_real_r2.ckpt",
+    "sha256": "93f62d19c9022f43dcf9e1e53d0a1b65c26aee3d6dcb70223f988675a9686749"
+   },
+   "v2_r5_asis": {
+    "mean": 1.1006579140506725,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 0.771639104873415,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 1.0516397158304849,
+     "updown_nosource_room2@1511903578.348311+4.000000": 1.4786949214481173
+    }
+   },
+   "v2_r5_pin": {
+    "mean": 1.0490564448492867,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 0.8157376694300817,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 1.057133404035417,
+     "updown_nosource_room2@1511903578.348311+4.000000": 1.2742982610823614
+    }
+   },
+   "v2_r5_pin_plus": {
+    "mean": 1.0419849368630263,
+    "per_window": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 0.841924648436289,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 1.0617726719568648,
+     "updown_nosource_room2@1511903578.348311+4.000000": 1.2222574901959253
+    }
+   },
+   "widths": {
+    "v2_r5_asis": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 11.597854456649916,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 12.601015868839168,
+     "updown_nosource_room2@1511903578.348311+4.000000": 12.03845853817324
+    },
+    "v2_r5_pin": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 10.783494276565316,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 11.340986028622106,
+     "updown_nosource_room2@1511903578.348311+4.000000": 11.188399861374723
+    },
+    "v2_r5_pin_plus": {
+     "free-flight_nosource_room2@1512727397.205045+4.000000": 10.472487241068988,
+     "hovering_nosource_room2@1511903905.394490+4.000000": 10.832022659792013,
+     "updown_nosource_room2@1511903578.348311+4.000000": 10.89995968678824
+    }
+   }
+  }
+ },
+ "study": "score",
+ "table": [
+  {
+   "arm": "real",
+   "hppnet": 1.0738225772199768,
+   "label": "the real DREGON room-2 clip",
+   "scv2": 1.6143026109094973,
+   "source": "round5/tracker_probe/tracks.json"
+  },
+  {
+   "arm": "legacy",
+   "hppnet": 1.9632041850773885,
+   "label": "legacy stage-2 render",
+   "scv2": 1.5942225919829476,
+   "source": "round5/tracker_probe/tracks.json"
+  },
+  {
+   "arm": "v2_real",
+   "hppnet": 69.55506106303302,
+   "label": "R3 v2 fitted to the real clip (flight_floor_lowk)",
+   "scv2": 11.296730722813182,
+   "source": "round5/tracker_probe/tracks.json"
+  },
+  {
+   "arm": "v2_legacy_lowk",
+   "hppnet": 5.559694184762461,
+   "label": "R4 v2 fitted to the LEGACY render (flight_floor_lowk)",
+   "scv2": 1.95977364835285,
+   "source": "round5/tracker_probe/tracks.json"
+  },
+  {
+   "arm": "v2_legacy_free",
+   "hppnet": 1.746434251998047,
+   "label": "R4 v2 fitted to the LEGACY render (flight, free profile)",
+   "scv2": 1.798260140040564,
+   "source": "round5/tracker_probe/tracks.json"
+  },
+  {
+   "arm": "v2_r5_asis",
+   "hppnet": 1.6185099428829446,
+   "label": "R5 v2 flight_profile, as fitted",
+   "scv2": 1.1006579140506725,
+   "source": "this pass"
+  },
+  {
+   "arm": "v2_r5_pin",
+   "hppnet": 1.6562602813800131,
+   "label": "R5 v2 flight_profile + the calibration pin",
+   "scv2": 1.0490564448492867,
+   "source": "this pass"
+  },
+  {
+   "arm": "v2_r5_pin_plus",
+   "hppnet": 1.678258428323039,
+   "label": "R5 v2 flight_profile + the pin + the stability margin",
+   "scv2": 1.0419849368630263,
+   "source": "this pass"
+  }
+ ]
+}

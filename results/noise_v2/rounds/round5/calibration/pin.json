@@ -1,0 +1,442 @@
+{
+ "audit": {
+  "carrier_gain_db": {
+   "free-flight_nosource_room2": [
+    5.048674613935873,
+    7.035633157007396,
+    7.174618185148574,
+    7.31397315999493,
+    7.460738220484927,
+    7.983594933524728,
+    8.905864405678585,
+    10.696244693826884,
+    12.493915349070448,
+    14.460701890755445,
+    16.104834276251495,
+    17.35020986822201,
+    18.488751246027277
+   ],
+   "hovering_nosource_room2": [
+    3.907598280115053,
+    5.290779631934129,
+    5.443794972728938,
+    5.556402717716992,
+    5.697026686742902,
+    6.144652383867651,
+    7.064014377538115,
+    8.753463692119112,
+    10.677593480795622,
+    12.09518593584653,
+    13.45041528204456,
+    14.844807593544829,
+    16.039311016909778
+   ],
+   "updown_nosource_room2": [
+    5.0873212069272995,
+    7.025972779025324,
+    7.1947546624578536,
+    7.383669383008964,
+    7.5427615873049945,
+    7.917645197478123,
+    8.952804708853364,
+    10.683490123803494,
+    12.594606989994645,
+    14.28525849757716,
+    15.921370721902349,
+    17.50548805523431,
+    18.85137885203585
+   ]
+  },
+  "monotone_in_offset": {
+   "free-flight_nosource_room2": true,
+   "hovering_nosource_room2": true,
+   "updown_nosource_room2": true
+  },
+  "offsets_db": [
+   0.0,
+   3.0,
+   3.25,
+   3.5,
+   3.75,
+   4.5,
+   6.0,
+   9.0,
+   12.0,
+   15.0,
+   18.0,
+   21.0,
+   24.0
+  ],
+  "rule": "every offset the bisection or the coarse sweep evaluated, in order: the bisection is only valid if the pass set is upward-closed"
+ },
+ "fit": {
+  "converged": false,
+  "mode": "flight_profile",
+  "path": "results/noise_v2/rounds/round5/fits/dregon_room2_floor__flight_profile.json",
+  "support": "dregon_room2_floor",
+  "which_converged": "none"
+ },
+ "git": "c4e623186b5b895f0f83b420c4c5c830f36f00e9",
+ "likelihood": {
+  "at_pin": {
+   "exposure_scale": 3.935483870967742,
+   "frame_chunk": 8,
+   "n_cells": 749952,
+   "n_cells_per_band": {
+    "comb": 723912,
+    "floor": 26040
+   },
+   "n_frames": 93,
+   "nats_per_cell": -5.980339340442044,
+   "offset_db": 3.75,
+   "per_band": {
+    "comb": -4518029.812054582,
+    "floor": 33062.36301139014
+   },
+   "whittle_nats": -4484967.449043192
+  },
+  "at_zero": {
+   "exposure_scale": 3.935483870967742,
+   "frame_chunk": 8,
+   "n_cells": 749952,
+   "n_cells_per_band": {
+    "comb": 723912,
+    "floor": 26040
+   },
+   "n_frames": 93,
+   "nats_per_cell": -5.49996530027527,
+   "offset_db": 0.0,
+   "per_band": {
+    "comb": -4167626.144003905,
+    "floor": 42916.167131866685
+   },
+   "whittle_nats": -4124709.976872039
+  },
+  "fit_pool_cost": {
+   "command": "omnirun --daemon localhost:18787 submit --backend uni-cpu --gpus 0 --cpus 16 --mem 64 --time 1h --name nv2-r5-pin-cost --outputs 'results/noise_v2/rounds/round5/calibration/**' -- bash -lc 'export PYTHONPATH=src; python scripts/noise_v2_supports.py build --set dregon-floor --out results/noise_v2/rounds/round5/supports; python scripts/noise_v2_calibrate_dregon.py pin --pool fit --allow-fit-pool --out results/noise_v2/rounds/round5/calibration_fitpool'",
+   "reason": "the flight forward model on the fit's own 255-frame pool is the step that OOM-killed this terminal three times; the laptop rule for R5 is that it is never built here",
+   "status": "not_computed"
+  },
+  "fit_pool_recorded_nats_per_cell": -8.712373012728486,
+  "nats_per_cell_cost": -0.4803740401667742,
+  "note": "priced on the THREE 4 s SCORE WINDOWS' own cells (the windows the pin is bisected on and the trackers are scored on), NOT on the fit's five 8 s segments: the fit pool's forward model is a cluster job, see fit_pool_cost.command",
+  "pool": "score",
+  "priced_on": [
+   "free-flight_nosource_room2",
+   "hovering_nosource_room2",
+   "updown_nosource_room2"
+  ]
+ },
+ "pin": {
+  "bracketed": true,
+  "cost_note": "priced on the THREE 4 s SCORE WINDOWS' own cells (the windows the pin is bisected on and the trackers are scored on), NOT on the fit's five 8 s segments: the fit pool's forward model is a cluster job, see fit_pool_cost.command",
+  "cost_pool": "score",
+  "last_failing_db": 3.5,
+  "n_evaluations": 9,
+  "nats_per_cell_cost": -0.4803740401667742,
+  "needed": true,
+  "offset_db": 3.75,
+  "s8_threshold": 5.6
+ },
+ "pinned_fit": "results/noise_v2/rounds/round5/calibration/dregon_room2_floor__flight_profile_pin.json",
+ "protocol": {
+  "frontend": {
+   "bins_per_octave": 48,
+   "cents_per_bin": 25.0,
+   "downsample_factor": 1.0,
+   "filter_scale": 1.0,
+   "fmin_hz": 27.5,
+   "frame_rate_hz": 31.25,
+   "hop_length": 512,
+   "implementation": "nnAudio.features.cqt.CQT2010v2 + torchaudio AmplitudeToDB(top_db=80)",
+   "module": "models.harmonic_ports.hppnet_orig.CQTLogSpecgram",
+   "n_bins": 352,
+   "n_octaves": 8,
+   "note": "constant-Q: the analysis window of the bin at f is Q/f seconds (Q = 1/(2^(1/B)-1)); the -3 dB bandwidth is f/Q Hz. Both are tabulated per order in protocol.window_ms_at_fbar",
+   "q": 68.75056533900923,
+   "sr": 16000,
+   "top_bin_hz": 4371.3394984986635
+  },
+  "n_mics": 8,
+  "offset_semantics": "one scalar dB added to profile_db of EVERY rotor and EVERY order, i.e. the model's comb_gain_db, which sample_params folds into the profile and the renderer therefore reads already applied",
+  "recordings": [
+   "free-flight_nosource_room2",
+   "hovering_nosource_room2",
+   "updown_nosource_room2"
+  ],
+  "render_code": "scripts/noise_v2_widen_dregon.py: mutate + render.render_noise",
+  "search": {
+   "hi_db": 24.0,
+   "lo_db": 0.0,
+   "step_db": 0.25
+  },
+  "seed": 2001,
+  "statistic": "S8 carrier gain on the frozen HPPNet's own CQT front end: the harmonic sum over k <= 8 of the read bin over the inter-tooth floor, at the label's carrier, minus its median over the mis-tuned carriers of noise_v2_tracker_probe.ALPHA_GRID. Mean over 8 microphones, per window",
+  "statistic_code": "scripts/noise_v2_tracker_probe.py: alpha_curve / ladder_stats",
+  "threshold_db": 5.6,
+  "threshold_provenance": "round5/tracker_probe/findings.md: the ON arms sit at +5.57 (v2_legacy_free), +5.69 (legacy) and +5.98 dB (v2_legacy_lowk); the OFF arm at +1.63 (v2_real)"
+ },
+ "schema": "noise-v2-dregon-calibration/1",
+ "study": "pin",
+ "summary": {
+  "carrier_gain_at_pin_db": {
+   "free-flight_nosource_room2": 7.460738220484927,
+   "hovering_nosource_room2": 5.697026686742902,
+   "updown_nosource_room2": 7.5427615873049945
+  },
+  "carrier_gain_at_zero_db": {
+   "free-flight_nosource_room2": 5.048674613935873,
+   "hovering_nosource_room2": 3.907598280115053,
+   "updown_nosource_room2": 5.0873212069272995
+  },
+  "cost_pool": "score",
+  "ladder_at_pin_db": {
+   "1": 5.381766644199767,
+   "2": 6.009118033573031,
+   "3": 0.12572391827901205,
+   "4": 1.7417471210161846,
+   "5": 0.6477555831273397,
+   "6": 0.8767276406288147,
+   "7": 0.1532677710056305,
+   "8": 0.5219041506449381
+  },
+  "ladder_at_zero_db": {
+   "1": 4.19109590134273,
+   "2": 4.477532344559829,
+   "3": 0.08203389247258504,
+   "4": 1.0842439532279968,
+   "5": 0.4283060183127721,
+   "6": 0.5485063393910726,
+   "7": 0.067484845717748,
+   "8": 0.38565071920553845
+  },
+  "nats_per_cell_at_pin": -5.980339340442044,
+  "nats_per_cell_at_zero": -5.49996530027527,
+  "nats_per_cell_cost": -0.4803740401667742,
+  "offset_db": 3.75
+ },
+ "windows": {
+  "free-flight_nosource_room2": {
+   "at_pin": {
+    "alpha_curve_s8": {
+     "0.50": 17.5517930528149,
+     "0.90": 8.316071895882487,
+     "0.92": 9.250634294003248,
+     "0.94": 11.740046819206327,
+     "0.96": 15.103990819305182,
+     "0.98": 16.207781944191083,
+     "1.00": 19.704865967854857,
+     "1.02": 16.07421499118209,
+     "1.04": 13.735980039462447,
+     "1.06": 11.223618894815445,
+     "1.08": 9.780548620969057,
+     "1.10": 8.70294070977252,
+     "2.00": 12.746502995491028
+    },
+    "argmax_alpha_s8": 1.0,
+    "carrier_gain_s16_db": 8.914870448257716,
+    "carrier_gain_s4_db": 6.317978441424202,
+    "carrier_gain_s8_db": 7.460738220484927,
+    "frac_c1_gt_3db": 0.6862599206349207,
+    "ladder_db": {
+     "1": 5.400021547451615,
+     "2": 6.109112150967121,
+     "3": 0.1154615730047226,
+     "4": 1.8244209289550781,
+     "5": 0.6196150332689285,
+     "6": 0.8638793528079987,
+     "7": 0.08780285716056824,
+     "8": 0.41021230816841125
+    },
+    "level_dbrms": -23.828292993956484,
+    "offset_db": 3.75,
+    "s8_median_db": 19.704865967854857
+   },
+   "at_zero": {
+    "alpha_curve_s8": {
+     "0.50": 14.82009754050523,
+     "0.90": 8.26228997670114,
+     "0.92": 9.118104914203286,
+     "0.94": 10.7256523151882,
+     "0.96": 12.799331866204739,
+     "0.98": 13.555883703753352,
+     "1.00": 16.100215745158494,
+     "1.02": 13.409957697615027,
+     "1.04": 11.86028721742332,
+     "1.06": 10.191837161779404,
+     "1.08": 9.202620988246053,
+     "1.10": 8.475706774741411,
+     "2.00": 11.246919639408588
+    },
+    "argmax_alpha_s8": 1.0,
+    "carrier_gain_s16_db": 6.641754544223659,
+    "carrier_gain_s4_db": 4.364452736452222,
+    "carrier_gain_s8_db": 5.048674613935873,
+    "frac_c1_gt_3db": 0.5932539682539683,
+    "ladder_db": {
+     "1": 4.180194305256009,
+     "2": 4.558999344706535,
+     "3": 0.04698385298252106,
+     "4": 1.1325435489416122,
+     "5": 0.40226811170578003,
+     "6": 0.5864062607288361,
+     "7": 0.00479540228843689,
+     "8": 0.34800709784030914
+    },
+    "level_dbrms": -25.200652411815735,
+    "offset_db": 0.0,
+    "s8_median_db": 16.100215745158494
+   },
+   "delta_carrier_gain_db": 2.4120636065490544,
+   "key": "free-flight_nosource_room2@1512727397.205045+4.000000"
+  },
+  "hovering_nosource_room2": {
+   "at_pin": {
+    "alpha_curve_s8": {
+     "0.50": 16.44703677110374,
+     "0.90": 8.79755443148315,
+     "0.92": 9.862943837419152,
+     "0.94": 12.491153300041333,
+     "0.96": 14.80922900699079,
+     "0.98": 15.50718999793753,
+     "1.00": 18.47836604434997,
+     "1.02": 15.487495791399851,
+     "1.04": 13.990987720899284,
+     "1.06": 11.666043817996979,
+     "1.08": 10.122969634830952,
+     "1.10": 9.002301644068211,
+     "2.00": 12.768799979239702
+    },
+    "argmax_alpha_s8": 1.0,
+    "carrier_gain_s16_db": 7.656881341536064,
+    "carrier_gain_s4_db": 5.081908141262829,
+    "carrier_gain_s8_db": 5.697026686742902,
+    "frac_c1_gt_3db": 0.6661706349206349,
+    "ladder_db": {
+     "1": 5.1704994682222605,
+     "2": 5.668059345334768,
+     "3": 0.10259221494197845,
+     "4": 1.5442000776529312,
+     "5": 0.4712136834859848,
+     "6": 0.7039863169193268,
+     "7": -0.006178021430969238,
+     "8": 0.3943163752555847
+    },
+    "level_dbrms": -23.507076962889748,
+    "offset_db": 3.75,
+    "s8_median_db": 18.47836604434997
+   },
+   "at_zero": {
+    "alpha_curve_s8": {
+     "0.50": 14.043347930535674,
+     "0.90": 8.771785993129015,
+     "0.92": 9.663888342678547,
+     "0.94": 11.169757019728422,
+     "0.96": 12.645768135786057,
+     "0.98": 13.093222253024578,
+     "1.00": 15.226567077683285,
+     "1.02": 12.93422269076109,
+     "1.04": 12.230866679688916,
+     "1.06": 10.472517187707126,
+     "1.08": 9.488629020750523,
+     "1.10": 8.638547822833061,
+     "2.00": 11.140593584626913
+    },
+    "argmax_alpha_s8": 1.0,
+    "carrier_gain_s16_db": 5.403794624959119,
+    "carrier_gain_s4_db": 3.6264718504971825,
+    "carrier_gain_s8_db": 3.907598280115053,
+    "frac_c1_gt_3db": 0.5629960317460319,
+    "ladder_db": {
+     "1": 3.9769584452733397,
+     "2": 4.194008439779282,
+     "3": 0.07989329099655151,
+     "4": 0.9147389531135559,
+     "5": 0.263379767537117,
+     "6": 0.41263100504875183,
+     "7": -0.06372272968292236,
+     "8": 0.2466125786304474
+    },
+    "level_dbrms": -24.77877336164105,
+    "offset_db": 0.0,
+    "s8_median_db": 15.226567077683285
+   },
+   "delta_carrier_gain_db": 1.7894284066278487,
+   "key": "hovering_nosource_room2@1511903905.394490+4.000000"
+  },
+  "updown_nosource_room2": {
+   "at_pin": {
+    "alpha_curve_s8": {
+     "0.50": 17.79077289090492,
+     "0.90": 9.214142516255379,
+     "0.92": 10.923451773822308,
+     "0.94": 13.304149931529537,
+     "0.96": 15.485039982944727,
+     "0.98": 16.890398621559143,
+     "1.00": 20.74898222181946,
+     "1.02": 16.59446257725358,
+     "1.04": 15.25187000259757,
+     "1.06": 12.098778781015426,
+     "1.08": 10.105198983103037,
+     "1.10": 8.853130716830492,
+     "2.00": 13.200900284573436
+    },
+    "argmax_alpha_s8": 1.0,
+    "carrier_gain_s16_db": 10.0345670649549,
+    "carrier_gain_s4_db": 5.919847957324237,
+    "carrier_gain_s8_db": 7.5427615873049945,
+    "frac_c1_gt_3db": 0.6989087301587301,
+    "ladder_db": {
+     "1": 5.574778916925425,
+     "2": 6.250182604417205,
+     "3": 0.15911796689033508,
+     "4": 1.8566203564405441,
+     "5": 0.8524380326271057,
+     "6": 1.0623172521591187,
+     "7": 0.3781784772872925,
+     "8": 0.7611837685108185
+    },
+    "level_dbrms": -24.072560967350398,
+    "offset_db": 3.75,
+    "s8_median_db": 20.74898222181946
+   },
+   "at_zero": {
+    "alpha_curve_s8": {
+     "0.50": 15.12084287405014,
+     "0.90": 8.88762928545475,
+     "0.92": 10.114904176443815,
+     "0.94": 11.881157018244267,
+     "0.96": 13.150512084364891,
+     "0.98": 14.120046401396394,
+     "1.00": 16.852362745441496,
+     "1.02": 13.788608111441135,
+     "1.04": 12.79166892170906,
+     "1.06": 10.742205299437046,
+     "1.08": 9.477787308394909,
+     "1.10": 8.641683734953403,
+     "2.00": 11.683247497305274
+    },
+    "argmax_alpha_s8": 1.0,
+    "carrier_gain_s16_db": 7.521829517558217,
+    "carrier_gain_s4_db": 4.30164248708752,
+    "carrier_gain_s8_db": 5.0873212069272995,
+    "frac_c1_gt_3db": 0.5962301587301587,
+    "ladder_db": {
+     "1": 4.41613495349884,
+     "2": 4.679589249193668,
+     "3": 0.11922453343868256,
+     "4": 1.2054493576288223,
+     "5": 0.6192701756954193,
+     "6": 0.6464817523956299,
+     "7": 0.2613818645477295,
+     "8": 0.5623324811458588
+    },
+    "level_dbrms": -25.56032016574108,
+    "offset_db": 0.0,
+    "s8_median_db": 16.852362745441496
+   },
+   "delta_carrier_gain_db": 2.455440380377695,
+   "key": "updown_nosource_room2@1511903578.348311+4.000000"
+  }
+ }
+}

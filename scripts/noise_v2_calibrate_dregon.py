@@ -19,14 +19,22 @@ of every rotor and every order — the semantics of `comb_gain_db`, which the
 model folds into the profile and the renderer therefore reads already applied —
 to the SMALLEST offset whose carrier gain clears the threshold on EVERY window.
 The pin is then PRICED: the same rig is scored by the Whittle objective on the
-fit's own five-window support, and the difference in nats per cell is what the
-pin costs in likelihood. Nothing here is a fit and nothing here is free: one
-scalar, one threshold, one price.
+THREE SCORE WINDOWS' own cells — the windows the pin is bisected on — and the
+difference in nats per cell is what the pin costs in likelihood. Nothing here
+is a fit and nothing here is free: one scalar, one threshold, one price.
+
+The price is NOT taken on the fit's own five 8 s segments. That batch's
+forward model is 255 frames of a 4-rotor, 88-order comb on an 8192-point work
+grid and needs over 20 GB of intermediates; it belongs on a 64 GB node and the
+command that runs it there is `FIT_POOL_COST_COMMAND` (`--pool fit
+--allow-fit-pool`). On the score windows the objective is evaluated in frame
+chunks — the Whittle risk is a weighted SUM over frames, so chunking is exact
+— and the whole step stays under a gigabyte.
 
     # bisect the offset, price it, write the pinned rig as a fit JSON
     python scripts/noise_v2_calibrate_dregon.py pin \
         --fit results/noise_v2/rounds/round5/fits/dregon_room2_floor__flight_profile.json
-    # score HPPNet + SCv2 on the three windows, as-is and pinned
+    # score HPPNet + SCv2 on the three windows, as-is, pinned and pinned +3 dB
     python scripts/noise_v2_calibrate_dregon.py score
     # the figures
     python scripts/noise_v2_calibrate_dregon.py figures
@@ -42,6 +50,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -73,18 +82,59 @@ AUDIT_STEP = 3.0
 #: Orders the prominence ladder is reported at (the probe's `c_k`, the read
 #: bin over the inter-tooth floor).
 LADDER_ORDERS = tuple(range(1, 9))
-#: `noise_v2_fit.py flight --max-frames`, the value every DREGON flight fit of
-#: this campaign ran with. The fit payload records the frames it USED, not the
-#: cap that produced them, so the rebuilt batch is checked against it.
+#: The support set both halves of the R5 pool live in: the five 4 s SCORED
+#: windows and the five disjoint 8 s FLOOR segments the fit itself ran on.
+SUPPORT_SET = "dregon-floor"
+#: Frame stride of the priced batch, the fit's own
+#: (`diagnostics.batch.frame_stride`); this is the fallback when a payload
+#: does not carry one. At hop 512 and NFFT 2048 a stride of 4 selects
+#: DISJOINT windows.
+SCORE_FRAME_STRIDE = 4
+#: Frames per forward pass when the objective is evaluated. The flight
+#: forward model holds `(R, n_c, K, n_fft_work)` intermediates — 4 rotors, a
+#: 32-order harmonic chunk and an 8192-point work grid, i.e. ~8 MB per frame
+#: per temporary — so the fit's own 255-frame pool needs over 20 GB and was
+#: OOM-killed three times on this laptop. The Whittle risk is a WEIGHTED SUM
+#: over frames (`revised_phase.composite_risk`), so evaluating it in frame
+#: chunks and adding the chunks is EXACT, not an approximation.
+WHITTLE_FRAME_CHUNK = 8
+#: `noise_v2_fit.py flight --max-frames`, the value every DREGON flight fit
+#: of this campaign ran with; the `--pool fit` batch is checked against the
+#: frame count the payload recorded.
 FIT_MAX_FRAMES = 256
-#: Where the five pooled DREGON flight support caches live on THIS machine.
-#: The fit rebuilt them inside its own job and `supports.CACHE_DIR` (round 1)
+#: The price on the FIT'S OWN five 8 s segments is a CLUSTER job, never a
+#: laptop one: the pool is three times the score windows' frames and the
+#: laptop rule for this step is that the fit pool's forward model is never
+#: built here (three OOM kills bought that rule). This is the command that
+#: computes it, verbatim; `--allow-fit-pool` is the switch that lets the
+#: script build that pool at all.
+FIT_POOL_COST_COMMAND = (
+    "omnirun --daemon localhost:18787 submit --backend uni-cpu --gpus 0 --cpus 16 "
+    "--mem 64 --time 1h --name nv2-r5-pin-cost "
+    "--outputs 'results/noise_v2/rounds/round5/calibration/**' -- bash -lc '"
+    "export PYTHONPATH=src; "
+    "python scripts/noise_v2_supports.py build --set dregon-floor "
+    "--out results/noise_v2/rounds/round5/supports; "
+    "python scripts/noise_v2_calibrate_dregon.py pin --pool fit --allow-fit-pool "
+    "--out results/noise_v2/rounds/round5/calibration_fitpool'"
+)
+#: What each priced pool IS, recorded beside every number priced on it.
+COST_POOL_NOTE = {
+    "score": (
+        "priced on the THREE 4 s SCORE WINDOWS' own cells (the windows the pin is bisected "
+        "on and the trackers are scored on), NOT on the fit's five 8 s segments: the fit "
+        "pool's forward model is a cluster job, see fit_pool_cost.command"
+    ),
+    "fit": "priced on the fit's OWN five 8 s pooled segments, the cells it was fitted on",
+}
+#: Where the DREGON flight support caches live on THIS machine. The fit
+#: rebuilt its own inside its cluster job and `supports.CACHE_DIR` (round 1)
 #: carries bench points only, so the objective below reads R3's caches — the
-#: same `.npz` files, built by the same builder from the same recordings, and
-#: the `n_frames_used` check in `fit_batch` fails loudly if they are not.
+#: same `.npz` files, built by the same builder from the same recordings.
 SUPPORT_CACHE_DIRS = (
     Path("results/noise_v2/rounds/round5/supports"),
     Path("results/noise_v2/rounds/round3/supports"),
+    Path("results/noise_v2/rounds/round2/supports"),
 )
 
 #: The comparanda of the score table are re-derivations of committed numbers,
@@ -260,22 +310,31 @@ def bisect_offset(reader: Reader) -> dict[str, Any]:
 # ── the price ───────────────────────────────────────────────────────────────
 
 
-def fit_specs(fit: dict[str, Any], *, support_set: str = "dregon-floor") -> list[str]:
-    """The support SPECS behind the names a fit payload records.
+def score_window_specs(recordings: tuple[str, ...]) -> list[Any]:
+    """The three 4 s SCORE windows, as support specs of the fit's own set.
 
-    A fit lists its pool by support NAME; `load_support` takes a spec. The
-    named set is the same one the fit was launched with, so resolving through
-    it — and failing loudly on a name the set does not carry — keeps the
-    objective below on exactly the fit's own five windows.
+    THE PIN IS PRICED HERE AND NOWHERE ELSE. `dregon-floor` carries both
+    halves of the R5 arrangement — the five 4 s SCORED windows and the five
+    disjoint 8 s FLOOR segments the fit was run on — and this returns the
+    scored half, restricted to the recordings the pin was bisected on. The
+    8 s fit pool is never built by this script: see `WHITTLE_FRAME_CHUNK` for
+    what its forward model costs.
     """
     from experiments.noise_model import supports as SU
 
-    names = [str(s) for s in fit["supports"]]
-    by_name = {s.name: s.text for s in SU.support_set(support_set)}
-    missing = [n for n in names if n not in by_name]
+    want = [str(r) for r in recordings]
+    found = {
+        str(s.args["recording"]): s
+        for s in SU.support_set(SUPPORT_SET)
+        if float(s.args.get("dur_s", 0.0)) == float(SU.DREGON_SCORED_DUR_S)
+    }
+    missing = [r for r in want if r not in found]
     if missing:
-        die(f"support set {support_set!r} carries no {missing}")
-    return [by_name[n] for n in names]
+        die(
+            f"support set {SUPPORT_SET!r} carries no "
+            f"{SU.DREGON_SCORED_DUR_S:g} s scored window for {missing}"
+        )
+    return [found[r] for r in want]
 
 
 def support_cache() -> Path:
@@ -292,21 +351,42 @@ def support_cache() -> Path:
     die(f"no DREGON flight support cache in {[str(d) for d in SUPPORT_CACHE_DIRS]}")
 
 
-def fit_batch(fit: dict[str, Any]) -> Any:
-    """The fit's OWN support batch, rebuilt from the fit JSON's own record.
+def fit_pool_specs(fit: dict[str, Any]) -> list[Any]:
+    """The fit's OWN five 8 s pooled supports, by the names it records.
 
-    The five pooled supports, the frame stride and the frame cap all come off
-    the fit payload, so the objective below is evaluated on exactly the cells
-    the fit was scored on and the fitted rig reproduces its own recorded
-    `objective.whittle_nats`.
+    Only `--pool fit --allow-fit-pool` reaches this, and only on a machine
+    that is allowed to build it (see `cost_batch`).
+    """
+    from experiments.noise_model import supports as SU
+
+    names = [str(s) for s in fit["supports"]]
+    by_name = {s.name: s for s in SU.support_set(SUPPORT_SET)}
+    missing = [n for n in names if n not in by_name]
+    if missing:
+        die(f"support set {SUPPORT_SET!r} carries no {missing}")
+    return [by_name[n] for n in names]
+
+
+def cost_batch(fit: dict[str, Any], *, pool: str, recordings: tuple[str, ...]) -> Any:
+    """The cells the pin is priced on, as one flight batch on the fit's grid.
+
+    `pool="score"` is the three 4 s SCORE windows — the windows the pin is
+    bisected on and the trackers are scored on, and the ONLY pool this step
+    is allowed to build on the laptop. `pool="fit"` is the fit's own five 8 s
+    segments, which is a cluster job (`FIT_POOL_COST_COMMAND`).
+
+    The front end, the frame stride and the order cap come off the fit
+    payload, so either way the cells are the model's own. The fit's `k_max`
+    is carried over rather than recomputed from this pool's carrier: the
+    profile the objective reads has exactly that many orders.
     """
     from experiments.noise_model import model as MD
     from experiments.noise_model import supports as SU
 
     nvf = _module("noise_v2_fit")
     cache = support_cache()
-    specs = fit_specs(fit)
-    loaded = [SU.load_support(str(spec), cache_dir=cache) for spec in specs]
+    specs = fit_pool_specs(fit) if pool == "fit" else score_window_specs(recordings)
+    loaded = [SU.load_support(str(s.text), cache_dir=cache) for s in specs]
     members = [
         (
             s.name,
@@ -317,43 +397,76 @@ def fit_batch(fit: dict[str, Any]) -> Any:
         for s in loaded
     ]
     first = loaded[0]
-    b = dict(fit["diagnostics"]["batch"])
+    b = dict((fit.get("diagnostics") or {}).get("batch") or {})
     batch = MD.flight_batch(
-        name=str(fit["support"]),
+        name=("dregon_fit_pool" if pool == "fit" else "dregon_score_windows"),
         members=members,
         sr=int(first.sr),
         n_fft=int(first.n_fft),
         hop=int(first.hop),
         k_cap=int(nvf.K_CAP),
-        frame_stride=int(b["frame_stride"]),
-        max_frames=FIT_MAX_FRAMES,
+        frame_stride=int(b.get("frame_stride", SCORE_FRAME_STRIDE)),
+        max_frames=FIT_MAX_FRAMES if pool == "fit" else None,
     )
-    got = int(np.asarray(batch.power.shape)[1])
-    if got != int(b["n_frames_used"]):
-        die(
-            f"rebuilt batch has {got} frames, the fit recorded {b['n_frames_used']}: "
-            "the objective below would not be on the fit's own cells"
-        )
+    if pool == "fit":
+        got, want = int(batch.power.shape[1]), int(b["n_frames_used"])
+        if got != want:
+            die(f"rebuilt fit pool has {got} frames, the fit recorded {want}")
+    k_fit = int(fit["k_max"])
+    if int(batch.k_max) != k_fit:
+        batch = replace(batch, k_max=k_fit)
     return batch
 
 
-def whittle_nats_per_cell(batch: Any, fit: dict[str, Any], offset_db: float) -> dict[str, Any]:
-    """The fit's own Whittle objective with the comb offset applied."""
+def whittle_nats_per_cell(
+    batch: Any, fit: dict[str, Any], offset_db: float, *, frame_chunk: int = WHITTLE_FRAME_CHUNK
+) -> dict[str, Any]:
+    """The model's own Whittle objective on this batch, in FRAME CHUNKS.
+
+    `composite_risk` is `sum_i a_i sum_{m, f in band} [I_i / M_i + log M_i]`
+    — a weighted sum over frames with per-frame weights the batch already
+    carries — so summing it over disjoint frame chunks with their own slice
+    of `weights` (NOT `batch_slice`, which rescales the weights to the full
+    set) returns the whole batch's value exactly, at a fraction of the peak
+    memory.
+    """
     import torch
 
     from experiments.noise_model import model as MD
 
     wd = _module("noise_v2_widen_dregon")
     par = MD.params_from_dict(wd.mutate(fit, shift_db=float(offset_db))["params"])
+    n = int(batch.power.shape[1])
+    step = max(1, int(frame_chunk))
+    acc = dict(all=0.0, floor=0.0, comb=0.0)
     with torch.no_grad():
-        obj = MD.objective_breakdown(batch, MD.forward(batch, par))
+        for c0 in range(0, n, step):
+            sl = slice(c0, min(c0 + step, n))
+            sub = replace(
+                batch,
+                power=batch.power[:, sl],
+                weights=batch.weights[sl],
+                rate_work=batch.rate_work[:, sl],
+            )
+            m_model = MD.forward(sub, par)
+            for key, band in (("all", sub.band), ("floor", sub.band_lo), ("comb", sub.band_hi)):
+                acc[key] += float(MD.composite_risk(sub.power, m_model, sub.weights, band=band))
+            del m_model, sub
+    n_mf = int(batch.power.shape[0]) * int(batch.power.shape[1])
+    cells = dict(
+        floor=n_mf * int(batch.band_lo.sum()),
+        comb=n_mf * int(batch.band_hi.sum()),
+    )
     return dict(
         offset_db=float(offset_db),
-        whittle_nats=float(obj["whittle_nats"]),
-        n_cells=int(obj["n_cells"]),
-        nats_per_cell=float(obj["whittle_nats"]) / float(obj["n_cells"]),
-        per_band={k: float(v) for k, v in obj["per_band"].items()},
-        n_cells_per_band={k: int(v) for k, v in obj["n_cells_per_band"].items()},
+        whittle_nats=float(acc["all"]),
+        n_cells=int(batch.n_cells),
+        nats_per_cell=float(acc["all"]) / float(batch.n_cells),
+        per_band=dict(floor=float(acc["floor"]), comb=float(acc["comb"])),
+        n_cells_per_band=cells,
+        n_frames=n,
+        frame_chunk=step,
+        exposure_scale=float(batch.exposure_scale),
     )
 
 
@@ -381,7 +494,14 @@ def write_pinned_fit(
 # ── (1) the pin ─────────────────────────────────────────────────────────────
 
 
-def run_pin(*, fit_path: Path, out: Path, recordings: tuple[str, ...]) -> dict[str, Any]:
+def run_pin(
+    *,
+    fit_path: Path,
+    out: Path,
+    recordings: tuple[str, ...],
+    pool: str = "score",
+    with_cost: bool = True,
+) -> dict[str, Any]:
     fit = json.loads(Path(fit_path).read_text())
     fit["_path"] = str(fit_path)
     reader = Reader(fit, recordings=recordings)
@@ -404,9 +524,18 @@ def run_pin(*, fit_path: Path, out: Path, recordings: tuple[str, ...]) -> dict[s
         if fit.get("objective")
         else None
     )
-    batch = fit_batch(fit)
-    cost0 = whittle_nats_per_cell(batch, fit, 0.0)
-    costpin = whittle_nats_per_cell(batch, fit, offset)
+    cost0: dict[str, Any] | None = None
+    costpin: dict[str, Any] | None = None
+    if with_cost:
+        batch = cost_batch(fit, pool=pool, recordings=recordings)
+        print(
+            f"# pricing on the {pool} pool: {int(batch.power.shape[1])} frames, "
+            f"{batch.n_cells} cells, {WHITTLE_FRAME_CHUNK} frames per forward",
+            flush=True,
+        )
+        cost0 = whittle_nats_per_cell(batch, fit, 0.0)
+        costpin = whittle_nats_per_cell(batch, fit, offset)
+        del batch
 
     audit: dict[str, list[float]] = {}
     for rec in recordings:
@@ -423,7 +552,22 @@ def run_pin(*, fit_path: Path, out: Path, recordings: tuple[str, ...]) -> dict[s
     calibration = dict(
         offset_db=float(offset),
         s8_threshold=float(S8_THRESHOLD),
-        nats_per_cell_cost=float(costpin["nats_per_cell"] - cost0["nats_per_cell"]),
+        nats_per_cell_cost=(
+            None
+            if costpin is None or cost0 is None
+            else float(costpin["nats_per_cell"] - cost0["nats_per_cell"])
+        ),
+        cost_pool=(pool if with_cost else None),
+        cost_note=(
+            COST_POOL_NOTE[pool]
+            if with_cost
+            else (
+                "NOT COMPUTED: this pass ran with --no-cost. The Whittle objective of the "
+                "flight forward model is the one step of this study that does not fit on the "
+                "laptop at the fit pool's size; the command that computes it on the cluster "
+                f"is: {FIT_POOL_COST_COMMAND}"
+            )
+        ),
     )
     pinned_path = write_pinned_fit(
         fit, offset_db=float(offset), calibration=calibration, path=out / f"{PIN_STEM}.json"
@@ -478,19 +622,31 @@ def run_pin(*, fit_path: Path, out: Path, recordings: tuple[str, ...]) -> dict[s
             for rec in recordings
         },
         likelihood=dict(
-            support=fit.get("support"),
-            n_supports=len(fit.get("supports") or []),
+            pool=(pool if with_cost else None),
+            priced_on=(
+                list(recordings)
+                if (with_cost and pool == "score")
+                else (list(fit.get("supports") or []) if with_cost else [])
+            ),
+            note=calibration["cost_note"],
             at_zero=cost0,
             at_pin=costpin,
             nats_per_cell_cost=calibration["nats_per_cell_cost"],
-            recorded_in_fit=recorded,
-            # the batch rebuild is only trustworthy if the UNSHIFTED rig
-            # reproduces the objective the fit itself recorded
-            reproduces_recorded_rel=(
-                None
-                if recorded is None
-                else abs(cost0["nats_per_cell"] - recorded) / max(abs(recorded), 1e-12)
-            ),
+            # the fit's own recorded objective, on ITS OWN five 8 s segments:
+            # a different pool and a different cell count, quoted as context
+            # and NOT as a comparandum of the two numbers above
+            fit_pool_recorded_nats_per_cell=recorded,
+            fit_pool_cost=dict(
+                status="not_computed",
+                reason=(
+                    "the flight forward model on the fit's own 255-frame pool is the step "
+                    "that OOM-killed this terminal three times; the laptop rule for R5 is "
+                    "that it is never built here"
+                ),
+                command=FIT_POOL_COST_COMMAND,
+            )
+            if pool != "fit"
+            else dict(status="computed", command=FIT_POOL_COST_COMMAND),
         ),
         audit=dict(
             offsets_db=offsets,
@@ -515,8 +671,9 @@ def run_pin(*, fit_path: Path, out: Path, recordings: tuple[str, ...]) -> dict[s
             str(k): float(np.mean([atpin[r]["ladder_db"][str(k)] for r in recordings]))
             for k in LADDER_ORDERS
         },
-        nats_per_cell_at_zero=cost0["nats_per_cell"],
-        nats_per_cell_at_pin=costpin["nats_per_cell"],
+        cost_pool=(pool if with_cost else None),
+        nats_per_cell_at_zero=(None if cost0 is None else cost0["nats_per_cell"]),
+        nats_per_cell_at_pin=(None if costpin is None else costpin["nats_per_cell"]),
         nats_per_cell_cost=calibration["nats_per_cell_cost"],
     )
     return payload
@@ -528,6 +685,66 @@ def self_params(reader: Reader) -> dict[str, Any]:
     return p
 
 
+def run_check(
+    *, fit_path: Path, out: Path, recordings: tuple[str, ...], offset_db: float
+) -> dict[str, Any]:
+    """Does an offset bisected on some windows also clear the gate on OTHERS?
+
+    The same statistic, the same render route and the same threshold as
+    `run_pin`, evaluated at ONE given offset instead of searched for: the
+    question is whether the pin the three score windows bought carries to the
+    rest of the frozen cruise cohort, not what those windows would have
+    bisected to on their own.
+    """
+    fit = json.loads(Path(fit_path).read_text())
+    fit["_path"] = str(fit_path)
+    reader = Reader(fit, recordings=recordings)
+    rows: dict[str, Any] = {}
+    for rec in recordings:
+        at0 = reader.read(rec, 0.0)
+        atpin = reader.read(rec, float(offset_db))
+        rows[rec] = dict(
+            key=reader.windows[rec]["key"],
+            at_zero=at0,
+            at_pin=atpin,
+            clears_at_zero=bool(at0["carrier_gain_s8_db"] >= S8_THRESHOLD),
+            clears_at_pin=bool(atpin["carrier_gain_s8_db"] >= S8_THRESHOLD),
+            margin_db=float(atpin["carrier_gain_s8_db"] - S8_THRESHOLD),
+        )
+        print(
+            f"[{rec}] S8 {at0['carrier_gain_s8_db']:.3f} -> {atpin['carrier_gain_s8_db']:.3f} dB "
+            f"at +{offset_db:g} dB, threshold {S8_THRESHOLD} "
+            f"({'CLEARS' if rows[rec]['clears_at_pin'] else 'FAILS'})",
+            flush=True,
+        )
+    return dict(
+        schema=SCHEMA,
+        study="check",
+        git=git_rev(),
+        fit=dict(path=str(fit_path), mode=fit.get("mode")),
+        protocol=dict(
+            offset_db=float(offset_db),
+            threshold_db=S8_THRESHOLD,
+            statistic_code="scripts/noise_v2_tracker_probe.py: alpha_curve / ladder_stats",
+            render_code="scripts/noise_v2_widen_dregon.py: mutate + render.render_noise",
+            seed=reader.tp.SEED,
+            n_mics=reader.tp.N_MICS,
+            recordings=list(recordings),
+            question=(
+                "the pin was bisected on the three probe windows; these are the REST of the "
+                "frozen DREGON cruise cohort at that same offset"
+            ),
+        ),
+        windows=rows,
+        summary=dict(
+            offset_db=float(offset_db),
+            carrier_gain_at_zero_db={r: rows[r]["at_zero"]["carrier_gain_s8_db"] for r in rows},
+            carrier_gain_at_pin_db={r: rows[r]["at_pin"]["carrier_gain_s8_db"] for r in rows},
+            all_clear_at_pin=bool(all(rows[r]["clears_at_pin"] for r in rows)),
+        ),
+    )
+
+
 # ── (2) the score ───────────────────────────────────────────────────────────
 
 
@@ -537,6 +754,37 @@ def _pit(payload: dict[str, Any], arm: str, key: str = "pit_mae") -> dict[str, A
     return dict(per_window=per, mean=float(np.mean(list(per.values()))))
 
 
+def stability_fit(pinned_path: Path, *, extra_db: float, out: Path) -> Path:
+    """The pinned rig `extra_db` HIGHER, as a fit JSON: the stability arm.
+
+    The pin is the SMALLEST offset that crosses a threshold, so the verdict it
+    buys is only useful if it does not fall apart just above the crossing.
+    This is the same rig with the same one scalar moved up, written the same
+    way, and the calibration block says what it is.
+    """
+    pinned = json.loads(Path(pinned_path).read_text())
+    wd = _module("noise_v2_widen_dregon")
+    out_fit = wd.mutate(pinned, shift_db=float(extra_db))
+    base = float((pinned.get("params") or {})["profile"].get("comb_gain_db") or 0.0)
+    cal = dict((pinned.get("diagnostics") or {}).get("calibration") or {})
+    out_fit["params"]["profile"]["comb_gain_db"] = base + float(extra_db)
+    out_fit["diagnostics"] = dict(out_fit.get("diagnostics") or {}) | dict(
+        calibration=cal
+        | dict(
+            offset_db=base + float(extra_db),
+            stability_margin_db=float(extra_db),
+            role=(
+                "STABILITY ARM, not the pin: the pinned rig with the same scalar "
+                f"{extra_db:g} dB higher, scored to show the verdict is not balanced on "
+                "the threshold crossing"
+            ),
+        )
+    )
+    path = Path(out) / f"{PIN_STEM}_plus{int(round(extra_db))}db.json"
+    path.write_text(json.dumps(out_fit, indent=1, sort_keys=True) + "\n")
+    return path
+
+
 def run_score(
     *,
     fit_path: Path,
@@ -544,8 +792,9 @@ def run_score(
     out: Path,
     recordings: tuple[str, ...],
     trackers: tuple[str, ...],
+    stability_db: float = 3.0,
 ) -> dict[str, Any]:
-    """HPPNet and SCv2 on the three windows, fit-as-is and fit+pin.
+    """HPPNet and SCv2 on the three windows: as-is, +pin, +pin+`stability_db`.
 
     The rendering and scoring are the widen runner's `run`, called as a
     library with no change: same three windows, same seed 2001, same eight
@@ -555,6 +804,7 @@ def run_score(
     """
     wd = _module("noise_v2_widen_dregon")
     tp = _module("noise_v2_tracker_probe")
+    plus_path = stability_fit(pinned_path, extra_db=stability_db, out=out)
     scored: dict[str, Any] = {}
     for tracker in trackers:
         spec = tp.TRACKERS[tracker]
@@ -575,29 +825,32 @@ def run_score(
         asis.pop("_figures", None)
         print(f"# {tracker}: fit + pin (v2)", flush=True)
         pinned = wd.run(
-            fit_path=pinned_path,
-            out=out,
-            probe=True,
-            recordings=recordings,
-            only=("v2",),
-            **kw,
+            fit_path=pinned_path, out=out, probe=True, recordings=recordings, only=("v2",), **kw
         )
         pinned.pop("_figures", None)
+        print(f"# {tracker}: fit + pin + {stability_db:g} dB (v2)", flush=True)
+        plus = wd.run(
+            fit_path=plus_path, out=out, probe=True, recordings=recordings, only=("v2",), **kw
+        )
+        plus.pop("_figures", None)
         scored[tracker] = dict(
             scorer=asis["protocol"]["scorer"],
             real=_pit(asis, "real"),
             legacy=_pit(asis, "legacy"),
             v2_r5_asis=_pit(asis, "v2"),
             v2_r5_pin=_pit(pinned, "v2"),
-            widths=dict(
-                v2_r5_asis={
-                    k: v["arms"]["v2"]["widths"][0]["width_hz"] for k, v in asis["supports"].items()
-                },
-                v2_r5_pin={
+            v2_r5_pin_plus=_pit(plus, "v2"),
+            widths={
+                name: {
                     k: v["arms"]["v2"]["widths"][0]["width_hz"]
-                    for k, v in pinned["supports"].items()
-                },
-            ),
+                    for k, v in payload["supports"].items()
+                }
+                for name, payload in (
+                    ("v2_r5_asis", asis),
+                    ("v2_r5_pin", pinned),
+                    ("v2_r5_pin_plus", plus),
+                )
+            },
         )
     quoted = quoted_arms()
     return dict(
@@ -610,7 +863,12 @@ def run_score(
             seed=wd.SEED,
             n_mics=8,
             trackers={k: tp.TRACKERS[k] for k in trackers},
-            fits=dict(asis=str(fit_path), pin=str(pinned_path)),
+            fits=dict(
+                asis=str(fit_path),
+                pin=str(pinned_path),
+                pin_plus=str(plus_path),
+                stability_db=float(stability_db),
+            ),
             quoted_from=str(PROBE_TRACKS),
         ),
         scored=scored,
@@ -637,11 +895,19 @@ def quoted_arms() -> dict[str, Any]:
 
 
 def score_table(scored: dict[str, Any], quoted: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every arm of the verdict in one table, the quoted ones first.
+
+    The quoted rows are NOT re-scored here: they are the probe's committed
+    numbers on the same three windows, the same seed and the same two
+    trackers, read off `tracks.json`.
+    """
     rows: list[dict[str, Any]] = []
     for arm, label in (
         ("real", "the real DREGON room-2 clip"),
         ("legacy", "legacy stage-2 render"),
         ("v2_real", "R3 v2 fitted to the real clip (flight_floor_lowk)"),
+        ("v2_legacy_lowk", "R4 v2 fitted to the LEGACY render (flight_floor_lowk)"),
+        ("v2_legacy_free", "R4 v2 fitted to the LEGACY render (flight, free profile)"),
     ):
         rows.append(
             dict(
@@ -654,6 +920,7 @@ def score_table(scored: dict[str, Any], quoted: dict[str, Any]) -> list[dict[str
     for arm, label in (
         ("v2_r5_asis", "R5 v2 flight_profile, as fitted"),
         ("v2_r5_pin", "R5 v2 flight_profile + the calibration pin"),
+        ("v2_r5_pin_plus", "R5 v2 flight_profile + the pin + the stability margin"),
     ):
         rows.append(
             dict(
@@ -667,6 +934,28 @@ def score_table(scored: dict[str, Any], quoted: dict[str, Any]) -> list[dict[str
 
 
 # ── (3) figures ─────────────────────────────────────────────────────────────
+
+
+def probe_carrier_gains() -> list[tuple[str, float, str]]:
+    """The committed S8 carrier gain of the probe's own arms, for the figure.
+
+    Read from `round5/tracker_probe/cqt.json`, never retyped: the REAL clip's
+    own gain (0.98 dB, tracked at 1.07 rev/s) is the strongest evidence that
+    the 5.6 dB threshold is a SUFFICIENT side of a boundary and not a
+    necessary condition, and it belongs on the same axes as the pin.
+    """
+    path = PROBE_TRACKS.parent / "cqt.json"
+    if not path.is_file():
+        return []
+    summary = json.loads(path.read_text())["summary"]
+    want = (("real", "tab:green"), ("legacy", "tab:brown"), ("v2_real", "tab:red"))
+    out: list[tuple[str, float, str]] = []
+    for arm, colour in want:
+        row = (summary.get(arm) or {}).get("carrier_gain_db")
+        # the probe records the gain per harmonic-sum depth; S8 is the statistic
+        if isinstance(row, dict) and "8" in row:
+            out.append((arm, float(row["8"]), colour))
+    return out
 
 
 def write_figures(pin: dict[str, Any], score: dict[str, Any] | None, out: Path) -> list[str]:
@@ -688,16 +977,22 @@ def write_figures(pin: dict[str, Any], score: dict[str, Any] | None, out: Path) 
     ax.axvline(
         pin["pin"]["offset_db"], color="crimson", lw=1, label=f"pin +{pin['pin']['offset_db']:g} dB"
     )
-    for name, val, c in (
-        ("real", 0.983, "tab:green"),
-        ("legacy", 5.687, "tab:brown"),
-    ):
+    for name, val, c in probe_carrier_gains():
         ax.axhline(val, color=c, lw=0.8, alpha=0.6)
-        ax.text(off[-1], val, f" {name}", va="center", fontsize=7, color=c)
+        ax.text(
+            off[0],
+            val + 0.25,
+            f"{name} {val:.2f} dB",
+            va="bottom",
+            ha="left",
+            fontsize=7,
+            color=c,
+        )
+    ax.set_xlim(off[0] - 0.8, off[-1] + 0.8)
     ax.set_xlabel("comb offset applied to profile_db (dB)")
     ax.set_ylabel("S8 carrier gain on HPPNet's CQT (dB)")
     ax.set_title("R5 DREGON: the calibration pin is a threshold crossing, not a fit")
-    ax.legend(fontsize=7)
+    ax.legend(fontsize=7, loc="lower right")
     fig.tight_layout()
     p = out / "carrier_gain_vs_offset.png"
     fig.savefig(p)
@@ -739,7 +1034,7 @@ def write_figures(pin: dict[str, Any], score: dict[str, Any] | None, out: Path) 
         ax.set_xticks(x)
         ax.set_xticklabels(names, rotation=20, ha="right", fontsize=8)
         ax.set_ylabel("3-window PIT MAE (rev/s, log)")
-        ax.set_title("R5 DREGON: both trackers, five arms")
+        ax.set_title(f"R5 DREGON: both trackers, {len(rows)} arms, three cruise score windows")
         ax.legend(fontsize=8)
         fig.tight_layout()
         p = out / "score_arms.png"
@@ -755,14 +1050,38 @@ def write_figures(pin: dict[str, Any], score: dict[str, Any] | None, out: Path) 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("pin", "score", "figures"):
+    for name in ("pin", "check", "score", "figures"):
         p = sub.add_parser(name)
         p.add_argument("--fit", type=Path, default=FIT_DEFAULT)
         p.add_argument("--out", type=Path, default=OUT_DEFAULT)
         p.add_argument("--recordings", default=None)
+        if name == "pin":
+            p.add_argument(
+                "--pool",
+                choices=sorted(COST_POOL_NOTE),
+                default="score",
+                help="cells the pin is priced on (default: the three 4 s score windows)",
+            )
+            p.add_argument(
+                "--allow-fit-pool",
+                action="store_true",
+                help="permit --pool fit; a CLUSTER switch, see FIT_POOL_COST_COMMAND",
+            )
+            p.add_argument(
+                "--no-cost",
+                action="store_true",
+                help="skip the price entirely; nats_per_cell_cost is then null with a reason",
+            )
         if name == "score":
             p.add_argument("--pinned-fit", type=Path, default=None)
             p.add_argument("--trackers", default="hppnet,scv2")
+        if name == "check":
+            p.add_argument(
+                "--offset-db",
+                type=float,
+                default=None,
+                help="the offset to test (default: the pin recorded in <out>/pin.json)",
+            )
     args = ap.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -772,10 +1091,37 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.cmd == "pin":
-        payload = run_pin(fit_path=args.fit, out=out, recordings=recordings)
+        if args.pool == "fit" and not args.allow_fit_pool:
+            die(
+                "--pool fit builds the flight forward model on the fit's own five 8 s "
+                "segments; that is a cluster job (it OOM-killed this laptop three times). "
+                f"Pass --allow-fit-pool to force it, or run: {FIT_POOL_COST_COMMAND}"
+            )
+        payload = run_pin(
+            fit_path=args.fit,
+            out=out,
+            recordings=recordings,
+            pool=str(args.pool),
+            with_cost=not args.no_cost,
+        )
         (out / "pin.json").write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
         print(json.dumps(payload["summary"], indent=1))
         print(f"wrote {out / 'pin.json'} and {payload['pinned_fit']}")
+        return 0
+
+    if args.cmd == "check":
+        offset = args.offset_db
+        if offset is None:
+            pin_json = out / "pin.json"
+            if not pin_json.is_file():
+                die(f"no --offset-db and no {pin_json} to read the pin from")
+            offset = float(json.loads(pin_json.read_text())["pin"]["offset_db"])
+        payload = run_check(
+            fit_path=args.fit, out=out, recordings=recordings, offset_db=float(offset)
+        )
+        (out / "check.json").write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
+        print(json.dumps(payload["summary"], indent=1))
+        print(f"wrote {out / 'check.json'}")
         return 0
 
     if args.cmd == "score":
