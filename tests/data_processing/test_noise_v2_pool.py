@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from data_processing.frames import get_meta
 from data_processing.noise_v2_pool import PRESET_BANK_FORMAT, NoiseV2Pool
 
 SR = 16000
@@ -210,3 +211,56 @@ def test_the_kind_is_reachable_through_the_online_mixing_engine_registry():
     assert isinstance(engine, NoiseV2Pool)
     frame = engine.sample_timeframe(np.random.default_rng(5), 0.25)
     assert np.asarray(frame["audio"].data).shape == (2, int(0.25 * SR))
+
+
+def test_each_bank_entry_is_flown_on_its_own_trajectory_rig(tmp_path):
+    """A mixed bank must not cross one rig's comb with another rig's flight:
+    the entry is drawn first and its `traj_rig` picks the fitted trajectory
+    source, which every window reports in `meta.noise_v2_traj_rig`."""
+    bank = tmp_path / "mixed.json"
+    bank.write_text(
+        json.dumps(
+            {
+                "format": PRESET_BANK_FORMAT,
+                "entries": [
+                    {
+                        "name": "dregon_room2_floor",
+                        "cruise": json.loads(Path(DREGON_FIT).read_text()),
+                        "standby": None,
+                        "traj_rig": "dregon",
+                    },
+                    {
+                        "name": "michaels_fly125",
+                        "cruise": json.loads(Path(MICHAELS_CRUISE).read_text()),
+                        "standby": None,
+                        "traj_rig": "michaels",
+                    },
+                ],
+            }
+        )
+    )
+    pool = _pool(
+        duration_s=0.05,
+        n_mics=1,
+        fits=None,
+        preset_bank=str(bank),
+        render_reuse=1,
+        rps={
+            "kind": "fitted_traj",
+            "fits": "dload:rps-traj-fits",
+            "rigs": {"michaels": 1, "dregon": 1},
+            "flight_fs": 200,
+            "flight_reuse": 4,
+        },
+    )
+    expected = {e.name: e.traj_rig for e in pool.entries}
+    assert set(pool._traj) == {None, "dregon", "michaels"}
+    rng = np.random.default_rng(11)
+    seen = Counter()
+    for _ in range(64):
+        frame = pool.sample_timeframe(rng, 0.05)
+        name = get_meta(frame, "noise_v2_entry")
+        rig = get_meta(frame, "noise_v2_traj_rig")
+        assert rig == expected[name], (name, rig)
+        seen[name] += 1
+    assert set(seen) == set(expected), "both entries must be exercised"

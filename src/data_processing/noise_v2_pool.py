@@ -71,10 +71,19 @@ policy names in one line::
 ``check_schema`` reads, i.e. ``{"schema": "noise-v2-fit/2", "params": {...}}``
 plus whatever else the writer kept — so a bank is self-contained and a fit
 that moves on disk does not silently change a bank's meaning. ``standby`` is
-``null`` for a single-regime rig. ``traj_rig`` is advisory: the name of the
-trajectory rig the entry was built around, for a later sampler that pairs a
-noise rig with its own flight statistics; this pool does not read it (the
-``rps`` block owns the trajectory). ``provenance`` is free-form on both the
+``null`` for a single-regime rig. ``traj_rig`` NAMES THE TRAJECTORY RIG the entry
+is flown on: under ``rps.kind: fitted_traj`` the pool builds one
+``FittedTrajectorySource`` per distinct ``traj_rig`` at construction — the
+policy's own ``rps`` block with ``rigs: {<traj_rig>: 1}`` — and each keeps its
+own flight cache, so an entry is always rendered on ITS rig's flight envelope
+and a mixed bank never crosses DREGON's comb with Michael's flight. That is
+why the entry is drawn BEFORE the trajectory. ``traj_rig: null`` falls back to
+the policy's ``rps`` block as written, which is how a bank gets the block's own
+rig mixture (the reserved ``posterior`` rig included); under
+``rps.kind: full_flight`` there are no per-rig sources and ``traj_rig`` is
+inert. Every window's Frame carries ``meta.noise_v2_entry`` and
+``meta.noise_v2_traj_rig``, so the pairing is auditable from the stream itself.
+``provenance`` is free-form on both the
 bank and each entry, and nothing here validates it beyond requiring the
 ``format`` tag.
 
@@ -195,6 +204,15 @@ def load_preset_bank(path: str | Path) -> tuple[NoiseV2Entry, ...]:
     return tuple(out)
 
 
+def _plain_cfg(cfg: Any) -> dict[str, Any]:
+    """The ``rps`` block as a plain dict, whether it came from YAML or OmegaConf."""
+    if isinstance(cfg, dict):
+        return dict(cfg)
+    from data_processing.generated_noise import _to_plain
+
+    return dict(_to_plain(cfg))
+
+
 def _offset_comb(fit: dict[str, Any], comb_offset_db: float) -> dict[str, Any]:
     """``fit`` with ``comb_offset_db`` on every rotor's ``profile_db``.
 
@@ -256,7 +274,7 @@ class NoiseV2Pool:
         # augmentation are still drawn per sample downstream.
         self.render_reuse = max(int(render_reuse), 1)
         self.render_pool = int(render_pool) if render_pool else 4 * self.render_reuse
-        self._pool: list[tuple[float, np.ndarray, np.ndarray]] = []
+        self._pool: list[tuple[float, np.ndarray, np.ndarray, NoiseV2Entry]] = []
         self._pool_draws = 0
         self.drone_profile_range = (float(drone_profile_range[0]), float(drone_profile_range[1]))
         self.aggressiveness: float | tuple[float, float] = (
@@ -290,15 +308,6 @@ class NoiseV2Pool:
                 f"noise_v2 renders on a whole flight; rps.kind must be one of "
                 f"{list(trajectory_model.FLIGHT_KINDS)}, got {self.rps_kind!r}"
             )
-        # ``rps.kind: fitted_traj``: resolve the fitted-model source here so a
-        # bad policy fails when the pool is built and not in a DataLoader
-        # worker on some later window.
-        self._traj = (
-            trajectory_model.build_from_config(fitted_traj or {})
-            if self.rps_kind == trajectory_model.FITTED_KIND
-            else None
-        )
-        self._flight: trajectory_model.FlightCache | None = None
         self.entries = tuple(entries)
         if not self.entries:
             raise ValueError("noise_v2 needs at least one entry: give it 'fits' or 'preset_bank'")
@@ -315,6 +324,22 @@ class NoiseV2Pool:
             for e in self.entries
         )
         self._check_entries()
+        # ``rps.kind: fitted_traj``: resolve the fitted-model source(s) here so
+        # a bad policy fails when the pool is built and not in a DataLoader
+        # worker on some later window. ``None`` is the policy's own ``rps``
+        # block; an entry naming a ``traj_rig`` gets its OWN source, the same
+        # block with `rigs: {<traj_rig>: 1}`, so a mixed bank cannot render
+        # DREGON's rig on Michael's flight envelope. Each source keeps its own
+        # flight cache, so `flight_reuse` means the same thing per rig.
+        self._rps_cfg = _plain_cfg(fitted_traj or {})
+        self._traj: dict[str | None, Any] = {}
+        self._flights: dict[str | None, trajectory_model.FlightCache] = {}
+        if self.rps_kind == trajectory_model.FITTED_KIND:
+            self._traj[None] = trajectory_model.build_from_config(self._rps_cfg)
+            for rig in sorted({e.traj_rig for e in self.entries if e.traj_rig is not None}):
+                self._traj[rig] = trajectory_model.build_from_config(
+                    dict(self._rps_cfg, rigs={rig: 1.0})
+                )
         # Interface parity with the other pools: the fitted model has no
         # geometry, and the frame carries placeholders.
         self.mic_pos = np.zeros((self.n_mics, 3), dtype=np.float64)
@@ -441,7 +466,23 @@ class NoiseV2Pool:
 
     # ── trajectory ──────────────────────────────────────────────────────────
 
-    def sample_rps(self, rng: np.random.Generator, duration_s: float) -> np.ndarray:
+    def traj_key(self, entry: NoiseV2Entry) -> str | None:
+        """Which trajectory source renders ``entry``: its own rig, or the policy's.
+
+        An entry's ``traj_rig`` binds it to the flight statistics of the rig it
+        was built around — that is what keeps a mixed bank from rendering one
+        rig's comb on another rig's envelope. ``None`` (and every
+        ``kind: full_flight`` policy, which has no per-rig sources at all)
+        falls back to the policy's own ``rps`` block, which is how a bank whose
+        entries name no rig gets the block's own mixture (the reserved
+        ``posterior`` rig included).
+        """
+        rig = entry.traj_rig
+        return rig if rig is not None and rig in self._traj else None
+
+    def sample_rps(
+        self, rng: np.random.Generator, duration_s: float, entry: NoiseV2Entry | None = None
+    ) -> np.ndarray:
         """``(R, T)`` rotor speeds at the audio rate for one window.
 
         A whole flight is generated at ``flight_fs`` and held for
@@ -452,22 +493,29 @@ class NoiseV2Pool:
         entry actually gets used. The window is multiplied by one log-uniform
         draw from ``rps_scale_range``, which is exact: a stopped rotor stays
         stopped and every other speed moves with its own comb.
+
+        ``entry`` selects the trajectory source (:meth:`traj_key`); its cache
+        is its own, so ``flight_reuse`` counts per rig.
         """
+        key = None if entry is None else self.traj_key(entry)
         lo_s, hi_s = self.rps_scale_range
         scale = (
             float(np.exp(rng.uniform(np.log(lo_s), np.log(hi_s))))
             if lo_s > 0.0 and hi_s > lo_s
             else float(lo_s)
         )
-        if self._flight is None or self._flight.uses >= self.flight_reuse:
-            self._flight = trajectory_model.make_flight_cache(self._new_flight(rng), self.flight_fs)
-        self._flight.uses += 1
-        window = trajectory_model.window_flight(self._flight, rng, duration_s, self.sample_rate)
+        cached = self._flights.get(key)
+        if cached is None or cached.uses >= self.flight_reuse:
+            cached = trajectory_model.make_flight_cache(self._new_flight(rng, key), self.flight_fs)
+            self._flights[key] = cached
+        cached.uses += 1
+        window = trajectory_model.window_flight(cached, rng, duration_s, self.sample_rate)
         return scale * window
 
-    def _new_flight(self, rng: np.random.Generator) -> np.ndarray:
-        if self._traj is not None:
-            flight = self._traj.flight(rng, self.flight_fs)
+    def _new_flight(self, rng: np.random.Generator, key: str | None = None) -> np.ndarray:
+        source = self._traj.get(key)
+        if source is not None:
+            flight = source.flight(rng, self.flight_fs)
         else:
             aggressiveness = (
                 float(rng.uniform(*self.aggressiveness))
@@ -541,9 +589,15 @@ class NoiseV2Pool:
     def render(
         self, rng: np.random.Generator, duration_s: float
     ) -> tuple[np.ndarray, np.ndarray, NoiseV2Entry]:
-        """``(audio (M, T) float32, rps (R, T) float32, entry)`` for one window."""
-        rps = self.sample_rps(rng, duration_s)
+        """``(audio (M, T) float32, rps (R, T) float32, entry)`` for one window.
+
+        The ENTRY is drawn first, because the trajectory follows from it: an
+        entry that names a ``traj_rig`` is rendered on that rig's own fitted
+        flight (:meth:`traj_key`), so a bank mixing two rigs never crosses one
+        rig's comb with the other's flight envelope.
+        """
         entry = self.entries[int(rng.integers(len(self.entries)))]
+        rps = self.sample_rps(rng, duration_s, entry)
         level = self._draw_level(rng)
         # The render's own seed: folded from the pool's configured seed and one
         # draw of the stream's generator, so two arms that differ only in
@@ -577,31 +631,33 @@ class NoiseV2Pool:
 
     def _pooled_render(
         self, rng: np.random.Generator, duration_s: float
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, NoiseV2Entry]:
         """One rendered clip, from the rolling pool when reuse is enabled.
 
         Reuse starts immediately and the pool GROWS: one slot is refreshed
         every ``render_reuse`` draws, appended until the pool is full and
-        replacing a random slot afterwards.
+        replacing a random slot afterwards. The entry travels with its clip, so
+        a reused window still reports the rig it was rendered from.
         """
         if self.render_reuse <= 1:
-            audio, rps, _ = self.render(rng, duration_s)
-            return audio, rps
-        matching = [entry for entry in self._pool if entry[0] == duration_s]
+            return self.render(rng, duration_s)
+        matching = [item for item in self._pool if item[0] == duration_s]
         if not matching or self._pool_draws % self.render_reuse == 0:
-            audio, rps, _ = self.render(rng, duration_s)
-            entry = (float(duration_s), audio, rps)
+            audio, rps, entry = self.render(rng, duration_s)
+            self._pool_draws += 1
+            slot = (float(duration_s), audio, rps, entry)
             if len(self._pool) < self.render_pool:
-                self._pool.append(entry)
+                self._pool.append(slot)
             else:
-                self._pool[int(rng.integers(len(self._pool)))] = entry
+                self._pool[int(rng.integers(len(self._pool)))] = slot
             matching = [item for item in self._pool if item[0] == duration_s]
-        self._pool_draws += 1
-        _, audio, rps = matching[int(rng.integers(len(matching)))]
-        return audio, rps
+        else:
+            self._pool_draws += 1
+        _, audio, rps, entry = matching[int(rng.integers(len(matching)))]
+        return audio, rps, entry
 
     def sample_timeframe(self, rng: np.random.Generator, duration_s: float) -> td.Frame:
-        audio, rps = self._pooled_render(rng, duration_s)
+        audio, rps, entry = self._pooled_render(rng, duration_s)
         audio_us = td.uniform(
             np.ascontiguousarray(audio), self.sample_rate, dims=("mic", "time"), t_start=0.0
         )
@@ -609,7 +665,13 @@ class NoiseV2Pool:
         rps_es = td.events(t, np.ascontiguousarray(rps), dims=("rotor", "time"), t_start=0.0)
         return make_recording_frame(
             {"audio": audio_us, "rps": rps_es},
-            meta={"recording_id": "noise_v2"},
+            meta={
+                "recording_id": "noise_v2",
+                # which rig the window is, and which fitted flight it flew: a
+                # mixed bank's pairing is auditable from the stream itself.
+                "noise_v2_entry": entry.name,
+                "noise_v2_traj_rig": self.traj_key(entry),
+            },
             mic_pos=self.mic_pos,
             rotor_pos=self.rotor_pos,
         )

@@ -1,0 +1,96 @@
+# SMOKE POLICY for the `noise_v2` source kind -- not a training arm.
+#
+# It is `conf/online_mix/rig_easy_5050.yaml` with the two `kind: stochastic`
+# sources replaced by `kind: noise_v2` and NOTHING else moved: the 0.4 / 0.4 /
+# 0.2 weights, the silence source, the LibriSpeech speech source, the
+# `snr_ref_floor_rms` and the whole `policy:` block are that arm's, so the
+# throughput this policy measures is the throughput the real arms will see
+# (`results/noise_v2/stream_bench/findings.md`). The leading underscore keeps
+# it out of the experiment sweep: it exists to be loaded, rendered and timed.
+#
+# What each source carries:
+# * source 0 -- the round-5 DREGON fit (`dregon_room2_floor__flight_profile`),
+#   a SINGLE-REGIME rig, on the fitted DREGON trajectory (`rigs: {dregon: 1}`);
+# * source 1 -- Michael's FLY125 round-3 pair, a REGIME PAIR (standby + cruise,
+#   composed by the 45/65 rev/s smoothstep), on the fitted Michael's
+#   trajectory (`rigs: {michaels: 1}`).
+# Pairing each rig with its own trajectory is the point of keeping two sources:
+# the DREGON bench fit never sees Michael's flight envelope and vice versa.
+#
+# The level is the FITTED ABSOLUTE one (no `normalize_rms`), which is what the
+# v2 renderer produces and what `snr_ref_floor_rms: 0.02` was written against.
+# `render_reuse: 48` is rig_easy_5050's, and it is load-bearing here: one v2
+# render costs ~0.2 s of CPU per second of 8-mic audio, two orders of magnitude
+# more than the stochastic family's filtered noise.
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+sources:
+  noise:
+  - kind: noise_v2
+    weight: 0.4
+    n_mics: 8
+    n_rotors: 4
+    render_reuse: 48
+    rps_scale_range:
+    - 0.45
+    - 1.2
+    rps:
+      kind: fitted_traj
+      fits: dload:rps-traj-fits
+      rigs:
+        dregon: 1
+      mean_shift:
+      - -5.0
+      - 5.0
+      flight_fs: 200
+      flight_reuse: 32
+    fits:
+    - name: dregon_room2_floor
+      cruise: results/noise_v2/rounds/round5/fits/dregon_room2_floor__flight_profile.json
+  - kind: noise_v2
+    weight: 0.4
+    n_mics: 8
+    n_rotors: 4
+    render_reuse: 48
+    rps_scale_range:
+    - 0.45
+    - 1.2
+    rps:
+      kind: fitted_traj
+      fits: dload:rps-traj-fits
+      rigs:
+        michaels: 1
+      mean_shift:
+      - -5.0
+      - 5.0
+      flight_fs: 200
+      flight_reuse: 32
+    fits:
+    - name: michaels_fly125
+      cruise: results/noise_v2/rounds/round3/fits/michaels_fly125_cruise__flight.json
+      standby: results/noise_v2/rounds/round3/fits/michaels_fly125_standby__flight.json
+  - kind: silence
+    weight: 0.2
+    n_channels: 8
+  speech:
+  - dataset: librispeech
+    subpath: LibriSpeech/train-clean-100
+policy:
+  stages:
+  - until: null
+    source_prob: 1.0
+    snr_db:
+      uniform:
+        low: -30.0
+        high: 0.0
+    speech_per_channel: independent
+    snr_per_channel: false
+    augmentations:
+      probability: 0.5
+      choices:
+      - random_gain:
+          min_db: -6.0
+          max_db: 6.0
+      - random_polarity: {}
