@@ -342,7 +342,705 @@ fitting target where stated, not as a training or validation label.
 \section{The generative model}
 \label{sec:model}
 
-% ---- filled in the "paper: section 4" commit ----
+The model has two halves. The first is a law for the four rotor-speed
+trajectories; the second is a law for the microphone signals given
+those trajectories. They are fitted on different data, by different
+likelihoods, and they compose: a draw from the first is the input of
+the second, and the draw is the label of the render.
+
+We fix the notation for the whole paper here. A quadrotor has rotors
+$i = 1,\ldots,4$; a rotor emits orders $k = 1,\ldots,K_i$, the
+multiples of its shaft rate below the analysis Nyquist; the array has
+microphones $m = 1,\ldots,M$. The speed of rotor $i$ at time $t$ is
+$r_i(t)$ in rev/s and $\mathbf r(t)$ is the vector of the four. A
+\emph{rig} is one parameter vector of each half: one trajectory law
+and one rotor-noise law, together describing one aircraft with one
+flight-controller tune.
+
+\todo{Fig.~1: schematic of the two halves --- trajectory state space
+  $\to$ $\mathbf r(t)$ $\to$ line/floor synthesis $\to$ 8-channel
+  audio, with the fitted blocks marked.}
+
+\subsection{Rotor-speed trajectories}
+\label{sec:traj}
+
+\subsubsection{Corpus and support}
+We collected telemetry from seven
+quadrotor rigs, of which the DREGON MikroKopter and the MD2 Matrice
+100 of Table~\ref{tab:data} are two; the other five are public flight
+datasets with logged motor speeds. Every log is resampled to a common
+100 Hz grid. Only \emph{airborne} samples are used, by a rule that is
+frozen and never tuned per rig: with $\bar r(t)$ the mean over rotors,
+the threshold is half the 90th percentile of $\bar r$, a sample is
+airborne when every rotor exceeds it, and each resulting run is eroded
+by 1.0 s at both ends and kept only if 5.0 s survive.
+% source: docs/experiments/rps-trajectory-model.md, "The frozen judge"
+
+\subsubsection{The model}
+Write $\mathbf M$ for the quadrotor mixer,
+whose columns are the common, roll, pitch and yaw axes, and
+$\mathbf R(\beta)$ for a rotation of the (common, yaw) plane that is
+the identity on roll and pitch. The trajectory is
+\begin{equation}
+  \mathbf r(t) = \boldsymbol\mu + \boldsymbol\delta
+    + \mathbf M\,\mathbf R(\beta)\,\mathbf v(t) + \mathbf e(t),
+  \label{eq:traj}
+\end{equation}
+with one \emph{mode} process $v_j$ per control axis,
+\begin{equation}
+  v_j(t) = \mathrm{OU}(\tau_{\mathrm s,j}, \sigma_{\mathrm s,j})
+    + \mathrm{CAR}_2(f_{0,j}, \zeta_j, \sigma_{\mathrm o,j}).
+  \label{eq:mode}
+\end{equation}
+$\mathrm{OU}$ is a stationary Ornstein--Uhlenbeck process with time
+constant $\tau_{\mathrm s}$ and standard deviation $\sigma_{\mathrm
+s}$, and $\mathrm{CAR}_2$ is the white-noise-driven damped oscillator
+$\ddot x + 2\zeta\omega_0\dot x + \omega_0^2 x = \xi$,
+$\omega_0 = 2\pi f_0$, with stationary standard deviation
+$\sigma_{\mathrm o}$. The oscillator is what makes the pair sufficient:
+its spectrum is flat below $f_0$ and falls as $f^{-4}$ above, whereas
+a sum of Ornstein--Uhlenbeck processes is capped at $f^{-2}$, which
+the measured spectra exclude. With $\zeta$ free it is also the
+per-rig resonance: $\zeta < 1/\sqrt2$ peaks at $f_0$ (the
+MikroKopter's 3 Hz control loop), $\zeta \approx 1$ is a shoulder,
+$\zeta > 1$ is the featureless power law of the Matrice 100.
+The rotation $\mathbf R(\beta)$ is needed because the two loud modes
+are a collective/yaw mixture rather than either axis alone.
+% source: docs/experiments/rps-trajectory-model.md, "The model"
+
+$\mathbf e(t)$ is the \emph{measurement} process: one
+Ornstein--Uhlenbeck process per rotor with shared
+$(\tau_{\mathrm e}, \sigma_{\mathrm e})$, independent across rotors.
+The artefacts it absorbs are coloured and incoherent --- the DREGON
+log is a 45 Hz sample-and-hold quantized to 0.30\revps{}, the MD2 log
+is a 17 Hz asynchronous update resampled at 29.41 Hz with no
+anti-alias filter --- so a white term cannot take them, and without
+this term the shaft modes take them instead: the DREGON inter-rotor
+correlation then comes out at 0.46 against a real 0.17. $\tau_{\mathrm
+e}$ is bounded to $(10^{-3}, 1)$ s, the range of the hold times it
+models (median hold 68 ms on MD2, 19 ms on DREGON). Labelling the
+term ``measurement'' is what lets a training sampler switch it off and
+keep the shaft: a stream that renders audio \emph{from} the labels
+must not render a logger's staircase as sound.
+% source: docs/experiments/rps-trajectory-model.md, "The model"
+
+$\boldsymbol\delta = \mathbf 1\,\delta_{\mathrm c} + \boldsymbol\delta_{\mathrm r}$
+is one draw per flight, with
+$\delta_{\mathrm c} \sim N(0, s_{\mathrm c}^2)$ common to the four
+rotors and $\boldsymbol\delta_{\mathrm r} \sim N(0, \mathrm{diag}(s_{\mathrm
+r}^2))$ per rotor. Between-flight level differences are real and
+large: two of the seven rigs differ by about 41\revps{} on all four
+rotors at once between a gentle and an aggressive flight, while on the
+MD2 rig one rotor's own trim moves 17\revps{}. Finally the sampler
+clamps its output to the rig's measured airborne extremes, because a
+real ESC has a floor and a ceiling and a Gaussian model does not know
+that.
+% source: docs/experiments/rps-trajectory-model.md, "The model"
+
+The parameter vector has 32 entries: $\boldsymbol\mu$ (4), $\beta$,
+five per mode ($\tau_{\mathrm s}, \sigma_{\mathrm s}, f_0, \zeta,
+\sigma_{\mathrm o}$) for 20, the two measurement parameters, and the
+five offset scales. $\boldsymbol\mu$, $s_{\mathrm c}$ and
+$\mathbf s_{\mathrm r}$ are moment-estimated from the airborne samples
+and never enter the likelihood, so the optimiser sees 23 dimensions;
+the state is 16-dimensional (four slow processes, four oscillator
+pairs, four measurement processes).
+% source: docs/experiments/rps-trajectory-model.md, "Parameters"
+
+\subsubsection{Fitting}
+Both shaft components and the measurement
+process are defined by their exact discrete state space on the fit
+grid, $\mathbf F = \exp(\mathbf A\,\Delta t)$ and
+$\mathbf Q = \mathbf P - \mathbf F \mathbf P \mathbf F^{\!\top}$ with
+$\mathbf P$ the continuous stationary covariance, so the sampler, the
+likelihood and the reported spectrum cannot drift apart. The
+continuous-time Lorentzian formula is not used: on a 100 Hz grid it
+misses the power folded down from above Nyquist (74\,\% low at 39.5 Hz
+for $\tau = 0.3$ s), which an earlier fit paid for by inflating the
+measurement term.
+% source: docs/experiments/rps-trajectory-model.md, "One object, not three"
+
+The likelihood is exact. Each airborne segment is cut into 30 s blocks
+overlapping 5 s on the left; the innovations of those burn-in samples
+are excluded, so every scored innovation comes from a filter that has
+forgotten its initial condition, and a block must contribute at least
+5 s of scored samples. All blocks of one padded length are driven
+through one batched steady-state recursion
+$\mathbf x_{t+1} = (\mathbf F - \mathbf K \mathbf H)\mathbf x_t +
+\mathbf K \mathbf y_t$, with the gain $\mathbf K$ and innovation
+covariance $\mathbf S$ from the discrete Riccati fixed point iterated
+in an autodiff framework, so the gain is differentiable in the
+parameters, and
+$\mathrm{NLL} = \tfrac12\sum_t [\log\det\mathbf S + \mathbf
+e_t^{\!\top}\mathbf S^{-1}\mathbf e_t]$. Each block is demeaned per
+rotor, which is why $\boldsymbol\mu$ and the offsets are estimated
+rather than fitted. Each rig is fitted at the rate at which its
+telemetry is believable rather than on a common grid: the MD2 log is
+fitted at 25 Hz, below the interpolation null of its 29.41 Hz update,
+and every other rig at 100 Hz. The fit is MAP under log-normal priors
+on $\tau_{\mathrm s}$ (median 2.0 s, log-sd 1.5), every $\sigma$
+(1.0\revps, 3.0), $\tau_{\mathrm e}$ (0.05 s, 2.0) and
+$\sigma_{\mathrm e}$ (0.1\revps, 3.0), maximized by L-BFGS-B on the
+analytic gradient with four restarts.
+% source: docs/experiments/rps-trajectory-model.md, "The likelihood is EXACT", "Optimiser"
+
+\subsubsection{The judge and the baseline}
+A generative model cannot
+be scored by its own likelihood against a different model class, so
+the campaign fixed a judge before it started. A trajectory, real or
+sampled, is summarised by five statistics, all computed on the same
+100 Hz airborne support: the mean speed over all samples
+(\textsf{overall\_mean}, discrepancy in rev/s), the same per rotor
+(\textsf{rotor\_mean}, RMS over rotors), the per-rotor variance pooled
+over flights about the pooled mean (\textsf{rotor\_var}, RMS of
+$|\log$ ratio$|$), the biased normalised autocorrelation at 24
+log-spaced lags from 0.05 to 10 s (\textsf{acf}, RMS over rotors and
+lags), and the zero-lag correlation between rotors (\textsf{xcorr},
+RMS over the six pairs). A candidate \emph{passes} a rig only if no
+family regresses and at least three improve strictly, which is what
+stops a model from trading autocorrelation for variance and calling it
+progress. Model statistics are estimated by drawing the real flight
+durations 40 times over with antithetic per-flight offsets, so the
+offset term contributes no Monte-Carlo error to the pooled mean.
+% source: docs/experiments/rps-trajectory-model.md, "The frozen judge"
+
+The comparison is against the synthesizer the model replaces ---
+Poisson-gated rectangular pulses through a first-order lag plus
+Ornstein--Uhlenbeck jitter --- fitted per rig at its best rather than
+at its defaults. It has no tractable likelihood, so its 22 free
+parameters are fitted by simulated moment matching on the same frozen
+statistics, by Powell with 300 evaluations under common random
+numbers. The fit is not a straw man: where it can, it converts rare
+pulses into continuous jitter, driving the maneuver rate and amplitude
+to their bounds while the cruise jitter grows tenfold, which is the
+incumbent admitting that the real series is continuous wander.
+% source: docs/experiments/rps-trajectory-model.md, "The baseline the judge compares against"
+
+\begin{table*}[t]
+\centering
+\caption{The trajectory model against the fitted incumbent
+  synthesizer, on the frozen five-family judge (Section~\ref{sec:traj}).
+  Each cell is baseline $\to$ model; $^{!}$ marks a regression. A rig
+  passes only with no regression and at least three strict
+  improvements. Estimator: 40 replications of the real flight
+  durations, seed 0, 100 Hz grid. The two rigs of
+  Table~\ref{tab:data} are \textsf{dregon} and \textsf{michaels}.}
+\label{tab:traj}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lccccccl@{}}
+\toprule
+ & \textsf{overall\_mean} & \textsf{rotor\_mean} & \textsf{rotor\_var}
+ & \textsf{acf} & \textsf{xcorr} & strict & \\
+Rig & (rev/s) & (rev/s) & (log) & & & & Verdict \\
+\midrule
+% source: results/rps_traj/rounds/round4.json, via docs/experiments/rps-trajectory-model.md "Round 4"
+michaels        & 0.073 $\to$ 0.050 & 0.122 $\to$ 0.107 & 0.484 $\to$ 0.143 & 0.061 $\to$ 0.051 & 0.135 $\to$ 0.047 & 5/5 & \textbf{PASS} \\
+dregon          & 0.108 $\to$ 0.045 & 0.120 $\to$ 0.048 & 0.331 $\to$ 0.140 & 0.062 $\to$ 0.086$^{!}$ & 0.175 $\to$ 0.077 & 4/5 & --- \\
+neurobem\_quad  & 0.662 $\to$ 3.654$^{!}$ & 0.691 $\to$ 3.694$^{!}$ & 1.205 $\to$ 0.139 & 0.335 $\to$ 0.155 & 0.074 $\to$ 0.142$^{!}$ & 2/5 & --- \\
+pitcn\_quad     & 0.236 $\to$ 0.002 & 0.255 $\to$ 0.050 & 0.262 $\to$ 0.153 & 0.116 $\to$ 0.122$^{!}$ & 0.232 $\to$ 0.042 & 4/5 & --- \\
+nanobench\_cf21b & 0.017 $\to$ 0.095$^{!}$ & 0.146 $\to$ 0.107 & 0.098 $\to$ 0.103$^{!}$ & 0.200 $\to$ 0.264$^{!}$ & 0.067 $\to$ 0.032 & 2/5 & --- \\
+vid\_m100       & 0.004 $\to$ 0.038$^{!}$ & 0.055 $\to$ 0.113$^{!}$ & 0.337 $\to$ 0.127 & 0.139 $\to$ 0.170$^{!}$ & 0.522 $\to$ 0.170 & 2/5 & --- \\
+blackbird\_quad & 0.844 $\to$ 0.324 & 0.967 $\to$ 0.339 & 0.181 $\to$ 0.219$^{!}$ & 0.159 $\to$ 0.100 & 0.701 $\to$ 0.095 & 4/5 & --- \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Table~\ref{tab:traj} is the result. One rig passes all five families
+and three more miss by one. The families the incumbent cannot reach
+are the ones the new model wins: pooled per-rotor variance improves on
+five of the seven rigs and inter-rotor correlation on six, and the
+three misses there are small (0.004, 0.038 and 0.024 in the respective
+units). What the model does not yet reach is the mean families on the
+three rigs with large between-flight level differences. The mechanism
+is named: on \textsf{neurobem\_quad} a per-rotor offset of about
+41\revps{} on all four rotors manufactures rotor spreads no real
+flight has, and the frozen airborne rule then drops those samples from
+the low side only, keeping 68.6\,\% of them. Splitting the offset into
+a common and a per-rotor part fixes exactly that rig (retention
+$0.686 \to 0.873$, \textsf{overall\_mean} $3.65 \to 1.11$,
+\textsf{rotor\_var} $0.139 \to 0.064$) and breaks the one whose offset
+is genuinely one rotor's trim: \textsf{michaels} then loses its pass,
+with the two mean families moving $0.050 \to 0.186$ and
+$0.107 \to 0.202$. The offset model therefore has to be chosen per
+rig, and the choice needs no refit of the dynamics.
+% source: docs/experiments/rps-trajectory-model.md, "Round 4", "Round 5", "Conclusion"
+
+\todo{Fig.~2: one real flight and one sampled flight per rig
+  (\textsf{dregon}, \textsf{michaels}), four rotors each, plus the
+  mode spectra from results/rps\_traj/diag/*\_spectra.png.}
+
+\subsubsection{A distribution over rigs}
+\label{sec:traj-post}
+Seven rigs is not enough to learn a 32-dimensional density, so the
+rig hyperprior is deliberately the simplest thing that can be sampled:
+a diagonal Gaussian. What makes it defensible is the
+reparametrization. Every coordinate is made dimensionless before the
+Gaussian is fitted: one scale coordinate $\log\overline{\mu}$; three
+relative trims (roll, pitch and yaw as a fraction of the hover level);
+the already dimensionless $\beta$, $\log f_0$, $\mathrm{logit}\,\zeta$
+and $\log\tau_{\mathrm e}$; and every $\sigma$ as
+$\log(\sigma/\overline\mu)$, a relative fluctuation. A draw is then
+``a drone this big, fluctuating this much relative to its size'',
+which matters because the seven rigs differ in absolute size by
+$3.6\times$: a Gaussian over raw parameters would mostly encode how
+big the drone is, and a draw combining one rig's hover level with
+another's absolute jitter would be nonsense. Sampling maps back
+through the same transform, so $\mu > 0$, the bounded parameters stay
+in their ranges and $\tau_{\mathrm s}$ stays above $1/(2\pi f_0)$ by
+construction. Each of the seven rigs sits within 1.51--2.38 standard
+deviations of the fitted Gaussian on its informative coordinates.
+% source: results/rps_traj/posterior.json, via docs/experiments/rps-trajectory-model.md "Rig posterior"
+
+One detail is load-bearing. A rig with no between-flight level
+difference has $s = 0$, which the log coordinate must write as a
+floor; averaging those floors in dragged that coordinate's mean to
+$-5.7$ with a standard deviation of 3.9, and a $+2\sigma$ draw then
+asked for a per-flight offset eight times the hover level. A floored
+zero is a different fact from a small value, so rigs without the
+information are left out of that coordinate's moments. This is a
+sampler and not a population estimate: it is fitted on seven rigs, six
+of them one airframe with one controller tune, and the diagonal
+Gaussian has no covariance structure between coordinates that the rigs
+demonstrably share.
+% source: docs/experiments/rps-trajectory-model.md, "Rig posterior"
+
+\subsection{Rotor noise}
+\label{sec:noise}
+
+Given the carrier $\mathbf r(t)$ --- a window-refined constant on a
+static bench, a trajectory in flight --- the microphone signal is a
+sum of lines plus a floor,
+\begin{equation}
+  x_m(t) = \sum_{i=1}^{4}\sum_{k=1}^{K_i} A_{mik}(t)\cos\phi_{mik}(t)
+    \;+\; n_m(t),
+  \label{eq:noisegen}
+\end{equation}
+with the phase of line $(i,k)$ at microphone $m$
+\begin{equation}
+  \phi_{mik}(t) = 2\pi k\!\int_0^t\! r_i(s)\,\mathrm ds
+    \;+\; k\,\theta_i(t) \;+\; \psi_{ik}(t) \;+\; \alpha_{mik}.
+  \label{eq:phase}
+\end{equation}
+The three stochastic terms are the model's content.
+% source: docs/explainers/noise-model-v2-plan.qmd, "Model R3: Generation"
+
+\subsubsection{Shaft}
+One process per rotor, shared by all its orders
+and all microphones: an Ornstein--Uhlenbeck speed error $\nu_i$ in
+rad/s integrated into an angle error,
+\begin{equation}
+  \mathrm d\nu_i = -\lambda\nu_i\,\mathrm dt
+    + \sqrt{2\lambda}\,\sigma_\nu\,\mathrm dW_i,
+  \qquad \mathrm d\theta_i = \nu_i\,\mathrm dt,
+  \label{eq:shaft}
+\end{equation}
+started stationary. Its increment variance is
+$V_\theta(\tau) = 2\sigma_\nu^2[\,|\tau|/\lambda - (1 -
+e^{-\lambda|\tau|})/\lambda^2\,]$. Because the term enters the phase
+multiplied by $k$, it broadens order $k$ as $k^2$, which is how it is
+separated from the next term.
+% source: docs/explainers/noise-model-v2-plan.qmd, "Model R3: Generation"
+
+\subsubsection{Per-line width}
+One Wiener phase per rotor and order,
+independent across $(i,k)$ and shared across microphones,
+$\mathrm d\psi_{ik} = \sqrt{4\pi\gamma_{ik}}\,\mathrm dW_{ik}$, so that
+$\mathbb E\,e^{\mathrm i\Delta\psi} = e^{-2\pi\gamma_{ik}|\tau|}$ and
+the line is a Lorentzian of half width $\gamma_{ik}$ in Hz. There is
+no law across $k$: each $\gamma_{ik}$ is a free non-negative number.
+This replaced a shared per-order Ornstein--Uhlenbeck pair in an
+earlier version of the model, which was over-parametrized in exactly
+one place --- a 128 ms flight window identifies only the product of
+its two parameters, and the profiled objective was flat to 0.03
+nats per cell over three decades of the rate.
+% source: results/noise_v2/rounds/round1/basin/findings.md, via docs/explainers/noise-model-v2-plan.qmd "Proposed after rounds 1--2"
+
+\subsubsection{Amplitude, profile and speed law}
+With
+$P_{ik} = 10^{p_{ik}/10}$ the line power of order $k$ of rotor $i$ and
+$p_{ik}$ in dB the \emph{profile},
+\begin{equation}
+  A_{mik}(t) = \sqrt{2P_{ik}}
+    \Bigl(\tfrac{r_i(t)}{r_{\mathrm{ref}}}\Bigr)^{a/2}
+    10^{(g_{mi} - \bar g_{\cdot i})/20}\;
+    10^{(G_m - \bar G)/20},
+  \label{eq:amp}
+\end{equation}
+where $a$ is the comb's speed exponent, $g_{mi}$ the per-microphone
+line gain of rotor $i$ and $G_m$ the per-microphone overall gain, both
+mean-pinned over microphones so that they carry no absolute level.
+These two gain sets are the model's microphone pattern: they are what
+makes an eight-channel render differ channel to channel, and they are
+fitted, not assumed. On a static bench $a = 0$, the speed being one
+constant absorbed by $p_{ik}$. When a comb fitted on the bench is
+transplanted into a flight fit, one extra scalar $c$ in dB is added to
+every $p_{ik}$ --- the level of a transplanted comb, and the only
+absolute scale it has. $\alpha_{mik}$ is a fixed uniform phase per
+$(m,i,k)$, so components add in power.
+% source: docs/explainers/noise-model-v2-plan.qmd, "Model R3: Generation"
+
+\subsubsection{Floor}
+The floor is white noise per microphone shaped by
+the square root of
+\begin{equation}
+\begin{aligned}
+  S_m(f,t) &= 10^{h_m/10}
+    \Bigl[\tfrac14\textstyle\sum_i
+      \bigl(r_i(t)/r_{\mathrm{ref}}\bigr)^{b} + s\Bigr]\,
+    10^{\Sigma_F(f)/10},\\
+  \Sigma_F(f) &= \mu_F + \textstyle\sum_{j=1}^{14}
+    B_j(f)\,\sigma_B\,(\mathbf L\mathbf z)_j + t_F\log_2(f/f_t),
+\end{aligned}
+  \label{eq:floor}
+\end{equation}
+with $\mu_F$ the floor level in dB, $\mathbf z$ the 14 standard-normal
+control-point coordinates of a Gaussian-process-interpolated spectral
+shape ($\mathbf L$ its Cholesky factor, $B_j$ the interpolation basis
+on a log-frequency grid, $\sigma_B$ a fixed shape scale), $t_F$ a tilt
+in dB/octave about $f_t$, $b$ the floor's speed exponent, $s$ its
+static fraction and $h_m$ the per-microphone floor gain. The two speed
+laws $a$ and $b$ and the static fraction $s$ exist only in flight;
+they are what lets one fitted rig cover standby, ramp and cruise.
+Everything is synthesized on a 64 kHz work grid, anti-aliased and
+decimated to 16 kHz, and the fit sees the same chain as a fixed power
+transfer $\mathcal T(f)$.
+% source: docs/explainers/noise-model-v2-plan.qmd, "Model R3: Generation"
+
+\subsubsection{Regimes}
+A rotor at standby and the same rotor at
+cruise are not one comb at two speeds: the blade-passing structure,
+the parity of the loud orders and the floor all change. One rig may
+therefore carry two fitted parameter sets, a \emph{standby} one and a
+\emph{cruise} one, and the renderer interpolates their line and floor
+powers by a smoothstep in the mean carrier, holding the standby set
+below 45\revps{} and the cruise set above 65\revps{}. Where a rig has
+no standby recording, its standby slot is empty and the cruise set is
+used throughout.
+% source: results/noise_v2/rounds/round3/fits/findings_regimes.md
+
+\subsection{Fitting the rotor-noise model}
+\label{sec:fit}
+
+\subsubsection{Objective}
+A \emph{support} is a set of frames $q$ of one
+recording: on the bench, one frame covering the whole stationary
+window (12--34 s, one periodogram); in flight, periodic-Hann frames of
+$N = 2048$ at hop 512 and 16 kHz, i.e. $T = 128$ ms, pooled over
+windows. The observation is the periodogram $I_{mqf}$ on the band
+$30 \le f \le \min(7900,\,0.45 f_{\mathrm s})$ Hz. Under the model its
+expectation is, with $w_{\mathrm{acf}}$ the window's autocorrelation
+and $\bar r_{iq}$ the mean carrier of rotor $i$ in frame $q$,
+\begin{align}
+  \Lambda_{mqf} &= \mathcal T(f)\,10^{(G_m - \bar G)/10}
+    \Bigl[\sum_i 10^{(g_{mi} - \bar g_{\cdot i})/10}\,
+      \Lambda^{\mathrm{line}}_{iqf} \nonumber\\
+  &\qquad\qquad\qquad\quad + 10^{h_m/10}\,
+      \Lambda^{\mathrm{floor}}_{qf}\Bigr],
+  \label{eq:expper}\\
+  \Lambda^{\mathrm{line}}_{iqf} &= \frac{1}{\sum_n w_n^2}
+    \sum_{|\tau| < T} w_{\mathrm{acf}}(\tau)\,e^{-2\pi \mathrm i f\tau}
+    \nonumber\\
+  &\quad\times \sum_k P_{ik}
+    \Bigl(\tfrac{\bar r_{iq}}{r_{\mathrm{ref}}}\Bigr)^{a}
+    \rho_{ik}(\tau)\cos\bigl(2\pi k \bar r_{iq}\tau\bigr),
+  \label{eq:linespec}
+\end{align}
+where the coherence of line $(i,k)$ collects the two phase noises,
+\begin{equation}
+  \rho_{ik}(\tau) = \exp\Bigl[-\tfrac{k^2}{2}V_\theta(\tau)
+    - 2\pi\gamma_{ik}|\tau|\Bigr].
+  \label{eq:coh}
+\end{equation}
+In flight the atom follows the label's trajectory inside the frame, so
+it is a chirped rather than a stationary atom. Lines and floor are
+independent, so their expected periodograms add. The fit objective is
+the composite Whittle risk with a MAP prior,
+\begin{equation}
+  \mathcal L(\Theta) = \sum_q w_q \sum_m \sum_{f}
+    \Bigl[\frac{I_{mqf}}{\Lambda_{mqf}}
+      + \log \Lambda_{mqf}\Bigr] - \log p(\Theta),
+  \label{eq:whittle}
+\end{equation}
+with $\Lambda$ evaluated at $\Theta$, the sum over $f$ running over
+the band, and $w_q$ exposure weights that normalise overlapping frames
+per unique second. Below 300 Hz the floor dominates the risk and above it
+the comb; we report the two bands separately throughout, and the comb
+band is the decisive one.
+% source: docs/explainers/noise-model-v2-plan.qmd, "Model R3: Likelihood"
+
+\subsubsection{Two stages}
+The dynamics are fitted on a static bench
+and not in flight, because the flight labels are not good enough to
+carry them: at order $k = 70$ the free-flight telemetry disagrees with
+the audio by about 1 Hz of standard deviation, which is the whole
+quantity a line width is supposed to measure. Stage one fits each
+DREGON rotor separately on single-motor bench recordings at 50--90
+rev/s with everything free --- $\sigma_\nu$, $\lambda$, the
+$\gamma_{ik}$ ladder, the profile, the floor and the microphone gains
+--- at $k_{\max}$ between 89 and 130. Stage two fits the flight, with
+the dynamics frozen at the log-means of the four bench fits
+($\sigma_\nu = 0.742318$ rad/s, $\lambda = 0.060800$ s$^{-1}$; rotor
+$i$ takes motor $i$'s width ladder) and the per-order profile, the
+floor and the microphone gains free, at $k_{\max} = 88$.
+% source: results/noise_v2/rounds/round5/fits/findings.md;
+% docs/explainers/noise-model-v2-plan.qmd, "Fit blocks per mode"
+
+The fit runs 1500 Adam steps at learning rate 0.02 and batch 8,
+then 300 L-BFGS steps on a deterministic 64-frame subset, from four
+starts: one data-driven and three log-normal perturbations of it, with
+the lowest polished objective reported. Convergence is declared when
+the restart gain falls below $10^{-4}$ nats per cell. \emph{No fit in
+this campaign converged by that test}: the R5 flight fit's restart
+gain is $1.7$--$2.5\times10^{-3}$ nats per cell. What the restarts do
+agree on is the answer. The four starts return Whittle risks of
+$-8.712373$, $-8.712293$, $-8.712558$ and $-8.712450$ nats per cell
+--- a best-to-worst spread of $1.9\times10^{-4}$ --- and the frozen
+dynamics are bit-identical across them. The flight fit improves on the
+previous round's on the same 2\,056\,320 cells, $-8.5931 \to -8.7124$
+nats per cell.
+% source: results/noise_v2/rounds/round5/fits/findings.md
+
+\subsubsection{Priors and the speed-span pin}
+The priors are measured
+rather than chosen, and Appendix~\ref{sec:fittables} lists them with
+their derivations. Two matter for reading the results. The line widths
+take $\gamma_{ik}\sim\mathrm{LN}(0.01k\ \mathrm{Hz}, 1.0)$, anchored on
+the bench decoherence law $V_\psi \approx 0.09\,k^{1.1}\tau^{0.43}$
+rad$^2$, i.e. an effective diffusion of about $0.1k$ rad$^2$/s; one
+log standard deviation is a factor 2.7, so a line may be seven times
+wider or narrower than that law at $2\sigma$ but cannot absorb the
+shaft core.
+% source: docs/explainers/noise-model-v2-plan.qmd, "Parameters, with their priors"
+
+The second is the \emph{speed-span pin}. The three flight-only
+parameters $a$, $b$ and $s$ are identified only by the range of speeds
+in the fitting pool, and a cruise-only pool has almost none. When the
+pool's carrier span $\max/\min$ falls below $1.5\times$, all three are
+pinned at their prior medians ($a = 2$, $b = 2$,
+$s = 2.5\times10^{-3}$) and the fit records which were pinned. The
+rule exists because of what happens without it: on a DREGON cruise
+pool of span $1.14\times$ the floor exponent ran to 38.8 and the
+static fraction to 17 --- four standard deviations out --- putting the
+standby floor about 37 dB above the real clip, and an earlier
+cruise-only fit took $a = 10.02$. A pooled fit spanning $4.68\times$
+pins nothing. The rule is a threshold and not a cure: the R5 flight
+pool spans $1.743918\times$, just above the threshold, so nothing was
+pinned and the fit returned $a = -0.868132$ (the comb getting
+\emph{quieter} with speed) and $b = 15.321160$. We do not report those
+two as measurements, and Section~\ref{sec:rigs} pins them at the prior
+medians in every sampled rig.
+% source: results/noise_v2/rounds/round5/fits/findings.md;
+% results/noise_v2/rounds/round3/fits/findings_regimes.md
+
+\subsubsection{What is identified}
+A basin scan around a converged
+cruise fit, holding every block but one and sweeping over two decades,
+separates the two. $\sigma_\nu$ has leverage 1.9968 nats per cell and
+is identified. The shaft rate $\lambda$ is not: the profiled objective
+is flat to 0.0307 nats per cell over 2.86 decades, because a 128 ms
+lag cannot see it. That is why $\lambda$ is fitted on the bench, where
+the window is 30 s, and frozen in flight. Within a rotor, low orders
+return the resolution floor for $\gamma_{ik}$ and their shape is the
+shaft's alone, which pins $\sigma_\nu$; at high orders whatever
+exceeds the $k^2$ shaft prediction is $\gamma_{ik}$. One degeneracy is
+possible and is tested after every bench fit rather than assumed away:
+in the Brownian limit the shaft term is also Lorentzian and a free
+$\gamma_{ik} \propto k^2$ could absorb it, so the fit passes only if
+the fitted widths at $k \le 4$ sit at the resolution floor.
+% source: results/noise_v2/rounds/round1/basin/findings.md;
+% docs/explainers/noise-model-v2-plan.qmd, "Identification, and the check that goes with it"
+
+\subsection{Validating the fits}
+\label{sec:fitval}
+
+A fitted generative model is validated by what it is for. We use three
+instruments, in decreasing order of authority.
+
+\subsubsection{Tracker parity}
+The decisive one asks whether a
+rotor-speed estimator trained on real audio, frozen, reads the render
+as well as it reads a recording. We use an HPPNet with the per-rotor
+output representation of Section~\ref{sec:est}, trained on the real
+pool and checkpoint-pinned by hash so that scoring dies on a mismatch,
+and we score the permutation-invariant MAE over all eight microphones
+and four frozen render seeds on five 4-s cruise windows per rig,
+aggregating per recording. The bar is parity with the previous
+generation of synthetic arms: 2.187786\revps{} on DREGON, where the
+same tracker reads the real audio at 1.218708, and $1.05\times$
+3.026661 on the Matrice 100.
+% source: results/noise_v2/rounds/round5/score/findings.md
+
+The fitted model reads 1.820065\revps{} on DREGON, a margin of
+$+0.368$ over the parity bar, and 1.621670\revps{} on the Matrice 100,
+a margin of $+1.556$. Per DREGON recording the renders score
+1.423033 (free flight), 1.648841 (hovering), 1.931465 (up/down),
+2.364579 (rectangle) and 1.732407 (spinning), against 0.638129,
+0.888408, 1.694930, 1.685142 and 1.186931 for the real recordings; so
+two of the five renders are already read as well as the real audio and
+three are not. A stretch bar at 70\,\% of the way from the bar to the
+real audio, 1.897063, is passed on the mean by $+0.077$ but not by the
+one-sided 95\,\% upper bound over recordings, 2.158331. The
+progression over the campaign is the reason to trust the number more
+than any single comparison: on the same protocol the DREGON renders
+scored 78.80, 72.34 and 71.87\revps{} in the three previous rounds.
+% source: results/noise_v2/rounds/round5/score/findings.md;
+% results/noise_v2/rounds/round3/score/findings.md
+
+\subsubsection{Spectral proxy and oracle likelihood}
+The second
+instrument is the absolute difference in long-term average spectrum
+between the render and the real recording at microphone 0, per
+support. It is a proxy and it fails, narrowly: 2.0298 dB on DREGON
+against a gate of 1.9786 dB and 1.2816 dB on the Matrice 100 against
+1.2197 dB, i.e. short by 0.05 and 0.06 dB. It has improved from 3.7518
+dB over the campaign. The third asks how much likelihood the fitted
+model leaves on the table against a speed-matched stationary oracle,
+i.e. an empirical spectrum measured at the same carriers. On the
+decisive comb band the fitted model scores $-373\,666.30$ nats/s
+against the oracle's $-371\,916.50$, a margin of $-1749.80$ nats/s,
+which passes the frozen convention; on the floor band the model is
+better than the oracle by 368.04 nats/s, which we report but do not
+read as an achievement.
+% source: results/noise_v2/rounds/round5/score/findings.md
+
+\todo{Fig.~3: fitted expected periodogram against the real
+  periodogram, one DREGON cruise support and one FLY125 cruise
+  support, comb band and floor band.}
+
+\subsubsection{What the tracker gate actually measures}
+The gate is
+sharper than a distance, and a probe of an earlier fit shows why. That
+fit scored 69.555\revps{} under the same HPPNet, which looks like
+total mistracking and is not: the tracker emits exactly 0\revps{} on
+86.3\,\% of the scored values, i.e. it puts the render in the zero
+class it was trained to recognize as ``rotors stopped''. Per
+microphone the errors are 80.37\revps{} on five channels and 10.23 and
+4.37 on two others, against a mean carrier of 80.39: the tracker
+either reads the comb or does not see it. A regressor trained on the
+same pool collapses on exactly one of the eight channels (per-channel
+79.82, 1.69, 0.77, 0.78, 2.15, 0.89, 3.05, 0.99), and its aggregate of
+11.297 is that one dead channel. The broadband level is not the
+explanation: that render is 3--7 dB down per channel, but the dying
+channel is not the quietest. What separates the arms is the carrier
+gain in the tracker's own front end --- the prominence of the true
+comb against mis-tuned combs at its 855 ms, $Q = 68.75$ analysis ---
+which reads $+1.63$ dB on the failing render against $+5.57$ to
+$+5.98$ dB on the arms the tracker reads. The gate therefore measures
+whether the fitted comb clears the estimator's detection boundary, not
+whether the render resembles the recording in any average sense, and
+that is exactly the property a training pool needs.
+% source: results/noise_v2/rounds/round5/tracker_probe/findings.md
+
+Two caveats go with it. First, the boundary is sufficient and not
+necessary: the \emph{real} clip's own carrier gain is $+0.98$ dB, well
+below the threshold, and it is tracked anyway at 1.074\revps{}. A
+render that clears the boundary is safe, but one that does not is not
+thereby refuted. Second, and more important for reading the reference
+numbers in Section~\ref{sec:exp}: the frozen trackers were trained on
+a pool that is 83.3\,\% real recordings and 16.7\,\% zero-labelled
+silence, with no synthetic rig renders in it at all, but the DREGON
+split they use excludes only one of the room-1 recordings, so all
+three of the recordings scored here are inside the trackers' own
+training pool. The real-audio anchors of 1.074 and 1.614\revps{} are
+therefore in-domain numbers on seen recordings, and the gate's margin
+should be read against the synthetic bar, which is not.
+% source: results/noise_v2/rounds/round5/tracker_probe/findings.md
+
+\subsection{Sampling rigs}
+\label{sec:rigs}
+
+A fit is one aircraft. Training on it is training on a point, and a
+point is what the previous generation of experiments showed to be the
+limit: a model trained on two fitted rigs as fixed parameter vectors
+overfits them and transfers unevenly. We therefore draw rigs from the
+fits in three ways, of increasing distance from the measured
+aircraft.
+
+\textbf{Neighbourhood} (the \emph{easy} bank, 1024 entries per rig).
+Each entry is a perturbation of one measured rig. The harmonic profile
+of each rotor is decomposed as
+$p_{ik} = \mathrm{gain}_i + \mathrm{slope}_i(\log_{10}k -
+\overline{\log_{10}k}) + \mathrm{resid}_i(k)$; the gain and the slope
+are perturbed and the residual is partially redrawn from a
+squared-exponential kernel in log order, mixed rather than added so
+that the fine-structure variance stays at the anchor's. The line
+widths and the shaft pair $(\sigma_\nu,\lambda)$ move in log space,
+the floor moves through its level, its tilt, an AR(1) perturbation of
+its Gaussian-process coordinates and its per-microphone gains, and the
+channel structure moves through $g_{mi}$ and $G_m$. The widths of all
+of these at strength 1 are \emph{measured}: they are the
+between-restart spread of the fits themselves, so the cloud is at
+least as wide as our own uncertainty about the aircraft, and strength
+is a single multiplier on all of them chosen so that the cloud
+brackets the real clip in at least 90\,\% of the 1/3-octave bands
+above 300 Hz, per rig. Each entry keeps the trajectory law of the rig
+it came from, so a DREGON comb is never flown on a Matrice 100
+envelope.
+
+\textbf{Path} (the \emph{hard} bank, 2048 entries). A mixing
+coordinate $t\sim U[0,1]$ interpolates the two measured rigs'
+\emph{cruise} fits in the same decomposed coordinates, on their common
+order range $k = 1,\ldots,81$; DREGON's orders 82--88 are dropped and
+the drop is recorded in the entry's provenance. The neighbourhood
+perturbation is then applied around that interpolated point. Standby
+is never interpolated --- a standby comb is a different regime, not a
+slower cruise --- so the standby slot is carried as a policy: at
+mixing coordinate $t$ the entry takes the Matrice 100's fitted standby
+fit with probability $t$ and no standby fit otherwise, which makes a
+Matrice-like draw usually two-regime and a DREGON-like draw usually
+single-regime. Rigs resembling either real aircraft therefore exist
+but neither is privileged, so no fingerprint can be memorized.
+
+\textbf{Hyperprior}. The trajectory half of a hard entry is left
+unbound and drawn from the diagonal Gaussian over rigs of
+Section~\ref{sec:traj-post}, rig-balanced. This is the only part of
+the pipeline that produces an airframe no dataset contains, and it is
+why the hard arm is hard on both halves at once.
+
+The hyperprior is used under one documented truncation. The salience
+architectures of Section~\ref{sec:est} have a fixed speed grid that
+ends at 150\revps, so a sampled flight whose fastest rotor exceeds
+that is rejected and redrawn whole, never clipped; the streams
+therefore train on the hyperprior conditioned on
+$\max_i \max_t r_i(t) \le 150$\revps. The acceptance rate is 0.296.
+The cost is hover level and not rig diversity: the log hover-scale
+coordinate shifts hard (mean $4.971 \to 4.406$, standard deviation
+$0.497 \to 0.275$, $z = -33.2$), while all 31 remaining shape and
+dynamics coordinates of the scale-free rig vector are statistically
+unmoved (largest $|z|$ is 1.71 and every accepted-to-all standard
+deviation ratio lies in 0.951--1.031). The surviving hover levels have
+median 86.1, 90th percentile 111.9 and maximum 182.0\revps, against
+144.2, 274.5 and 613.6 uncapped.
+% source: docs/experiments/noise-v2-transfer.md;
+% src/data_processing/trajectory_model/source.py (rps_max)
+
+Guards reject and redraw rather than clip, and all of them are
+structural rather than cosmetic: the expected periodogram must be
+finite and positive at cruise (80\revps) \emph{and} at idle
+(30\revps); each rotor's profile trend must still fall with order by
+at least 3 dB over the fitted range; the total line-width excursion is
+capped at $1.5\times$; the draw's expected periodogram must lie within
+twice the measured real clip-to-clip band RMS of that rig's own
+validation windows in the 1/3-octave bands from 300 to 7900 Hz; and
+negative speed exponents are refused.
+
+Every entry in both banks carries the short-span contract of
+Section~\ref{sec:fit}: $a = 2$, $b = 2$ and $s = 2.5\times10^{-3}$,
+the prior medians, recorded per entry, because a cruise-only pool
+cannot identify them. The cruise profile is left at its fitted
+80\revps{} reference and the trajectories keep their own speed labels;
+there is no hover rescaling. Both banks are built by one script from a
+single seed and are bit-reproducible.
+% source: scripts/noise_v2_build_bank.py; conf/online_mix/noise_v2_easy_5050.yaml,
+% conf/online_mix/noise_v2_hard_5050.yaml
+
+\todo{PENDING BankBuilder: the strength and spread chosen by the
+  coverage criterion and the ladder at which strength 1 reaches the
+  between-rotor and between-rig spreads; acceptance rates and
+  rejections per guard; the realised mixing-coordinate distribution
+  and its Kolmogorov--Smirnov statistic against $U[0,1]$.}
+
 
 \section{Rotor-speed estimators}
 \label{sec:est}
@@ -374,7 +1072,53 @@ fitting target where stated, not as a training or validation label.
 \section{Fit tables}
 \label{sec:fittables}
 
-% ---- filled in the "paper: discussion, conclusion, appendices" commit ----
+\begin{table}[h]
+\centering
+\caption{Priors of the rotor-noise model (Section~\ref{sec:fit}).
+  $\mathrm{LN}(m,s)$ is log-normal with median $m$ and log standard
+  deviation $s$; $N(\mu,\sigma)$ is normal. ``Fitted on'' names the
+  stage at which the block is free; a blank means the parameter is
+  frozen or absent there.}
+\label{tab:priors}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Symbol & Shape & Fitted on & Prior \\
+\midrule
+% source: docs/explainers/noise-model-v2-plan.qmd, "Parameters, with their priors"
+$\sigma_\nu$ (rad/s) & rotor & bench; flight & $\mathrm{LN}(0.3, 0.7)$; $\mathrm{LN}(0.3, 0.5)$ \\
+$\lambda$ (s$^{-1}$) & rotor & bench & $\mathrm{LN}(2, 1.0)$; pinned in flight \\
+$\gamma_{ik}$ (Hz) & rotor $\times$ ord. & bench; flight & $\mathrm{LN}(0.01k, 1.0)$, $\gamma \ge 0$ \\
+$p_{ik}$ (dB) & rotor $\times$ ord. & bench; flight & $N(\text{meas.}, 10)$ if SNR $\ge 2$ dB, \\
+                &                     &                & else $N(\mu_F - 15, 8)$ \\
+$c$ (dB) & scalar & transplanted comb & $N(0, 20)$ \\
+$a$ & scalar & flight & $N(2, 1)$; span pin at 2 \\
+$b$ & scalar & flight & $\mathrm{LN}(2, 0.5)$; span pin at 2 \\
+$s$ & scalar & flight & $\mathrm{LN}(2.5\!\times\!10^{-3}, 1.0)$; span pin \\
+$\mu_F$ (dB) & scalar & all & $N(\text{meas. band median}, 10)$ \\
+$\mathbf z$ & 14 & all & $N(0,1)$ each \\
+$t_F$ (dB/oct) & scalar & all & $N(0, 5)$ \\
+$g_{mi}$ (dB) & mic $\times$ rotor & all & $N(0, 6)$, mean-pinned \\
+$h_m$ (dB) & mic & all & $N(0, 6)$ \\
+$G_m$ (dB) & mic & all & $N(0, 6)$, mean-pinned \\
+$r_i$ & rotor & --- & frozen at the window-refined value \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The per-rotor dynamics block is therefore $2 + K_i$ parameters. The
+$\gamma_{ik}$ prior is anchored on the bench decoherence law and the
+$p_{ik}$ prior on each line's measured level, which lands the
+data-driven start within 0.4--1.5 dB of the fitted value; parking
+invisible orders at a wide zero-mean prior instead produced a 400 Hz
+pedestal above the floor in an earlier round.
+% source: results/noise_v2/rounds/round1/bench_diag/findings.md;
+% docs/explainers/noise-model-v2-plan.qmd
+
+\todo{Add the per-support bench fit table (21 supports, Whittle nats
+  per cell, $k_{\max}$, the $\gamma_{ik}$ low-order check) once the
+  numbers are pulled from results/noise\_v2/rounds/round3/fits/.}
 
 \clearpage
 % Reset column height after the final double-column float page.
