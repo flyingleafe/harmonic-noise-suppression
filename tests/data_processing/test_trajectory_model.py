@@ -178,6 +178,38 @@ def test_b_posterior_draws_are_new_drones(fits_tree: Path):
     assert all(np.all(mu > 0.0) for mu in drawn)
 
 
+# ── the speed cap ────────────────────────────────────────────────────────────
+
+
+def test_b_rps_max_caps_every_flight_of_a_posterior_mixture(fits_tree: Path):
+    """``rps_max`` bounds the WHOLE flight of a hyperprior draw, by rejection.
+
+    The posterior is a hyperprior over rigs and draws hover levels a
+    downstream speed grid need not cover, so the arms that fly it cap it. The
+    cap must hold on every sample of every flight — take-off overshoot
+    included, not just the hover level — and it must truncate rather than
+    clip: a clipped flight would be a flat-topped trajectory no rig flies.
+    """
+    cap = 100.0
+    source = _source(fits_tree, rigs={tm.POSTERIOR_RIG: 1.0}, rps_max=cap)
+    rng = np.random.default_rng(17)
+    peaks = [float(np.max(source.flight(rng, 50.0, duration_s=40.0))) for _ in range(64)]
+
+    assert max(peaks) <= cap
+    assert source.stats["flights"] == 64
+    # The cap BITES on this fixture, so the test measures rejection and not an
+    # inert branch; and the accepted flights are a truncation of the drawn
+    # population, which is what `stats` is there to report.
+    assert source.stats["rejected"] > 0
+    assert source.last_draw is not None and source.last_draw.redraws >= 0
+
+    # An impossible cap fails loudly instead of spinning or returning an
+    # out-of-range flight.
+    hopeless = _source(fits_tree, rigs={tm.POSTERIOR_RIG: 1.0}, rps_max=1e-3)
+    with pytest.raises(RuntimeError, match="rps_max"):
+        hopeless.flight(np.random.default_rng(1), 50.0, duration_s=10.0)
+
+
 # ── the mean shift ───────────────────────────────────────────────────────────
 
 

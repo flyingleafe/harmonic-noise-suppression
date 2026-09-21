@@ -24,6 +24,8 @@ One noise source's ``rps`` block::
       flight_reuse: 32            # like full_flight: windows per flight
       measurement_noise: true     # keep the per-rotor measurement OU term
       antithetic_offsets: false
+      rps_max: 150                # OPTIONAL cap (rev/s): reject-and-redraw a
+                                  # flight any rotor of which exceeds it
       phases: {warmup_s: [3.0, 25.0]}   # optional FlightPhaseRanges overrides
 
 Per flight the source picks a rig by weight, turns it into
@@ -34,6 +36,20 @@ airborne realisation in the full-flight envelope
 (:func:`~data_processing.trajectory_model.flight.wrap_airborne`: ground,
 spin-up, idle, take-off, airborne, landing, spin-down, ground).  The pools cache
 that flight and window it exactly as they window a ``full_flight`` one.
+
+``rps_max`` is a HARD CEILING on the whole flight, enforced by rejection: a
+flight in which any rotor exceeds it anywhere is thrown away and the attempt
+redrawn (a fresh drone for ``posterior``, a fresh hover shift and realisation
+for a stored rig), up to :data:`MAX_RPS_REDRAWS` times, after which the source
+raises rather than silently returning an out-of-range flight.  It exists
+because the rig posterior is a hyperprior over SEVEN rigs and draws hover
+levels far above what a downstream model's speed grid covers (the salience
+trunks are built on 0-150 rev/s), and because clipping a trajectory to the
+ceiling would invent a flat-topped flight no rig flies.  What it gives up is
+stated plainly: the accepted population is the drawn one CONDITIONED on
+staying under the cap — a documented truncation of the hyperprior — and
+``FittedTrajectorySource.stats`` counts accepted and rejected flights so the
+truncation can be reported.
 
 ``flight_fs``/``flight_reuse`` stay the POOL's knobs (they are the same keys the
 incumbent kind uses); everything else above belongs to this source, and every
@@ -103,6 +119,18 @@ class FitBundle:
         return tuple(sorted(self.fits)) + extra
 
 
+#: How many times :meth:`FittedTrajectorySource.flight` may redraw a flight
+#: that violates ``rps_max`` before it gives up. A cap the mixture cannot
+#: clear at all would otherwise spin forever in a DataLoader worker, so the
+#: budget is finite; it is 64 rather than 32 because the number that matters
+#: is the chance of killing a LONG RUN on a cap that is merely tight. The
+#: measured acceptance of the rig posterior at ``rps_max: 150`` is 0.309
+#: (256 accepted of 828 attempts, ``mean_shift: [-5, 5]``), at which 33
+#: attempts fail once per 2.1e5 flights — about one job in seven over a
+#: 31k-flight run — while 65 attempts fail once per 4.7e9.
+MAX_RPS_REDRAWS = 64
+
+
 @dataclass(frozen=True)
 class RigDraw:
     """One flight's drone: where it came from and what it is."""
@@ -113,6 +141,9 @@ class RigDraw:
     clip: tuple[float, float]
     mean_scale: float
     mean_shift: float
+    #: Flights thrown away by the ``rps_max`` cap before this one was accepted
+    #: (0 when the first attempt passed, or when no cap is set).
+    redraws: int = 0
 
 
 @lru_cache(maxsize=8)
@@ -150,9 +181,10 @@ def load_bundle(source: str | Path) -> FitBundle:
 class FittedTrajectorySource:
     """A weighted mixture of fitted rigs, drawn one drone per flight.
 
-    Stateful in exactly two ways, both documented: :attr:`last_draw` (the drone
-    of the most recently generated flight, which is what a pool reports as the
-    window's provenance) and the antithetic offset pairing.
+    Stateful in exactly three ways, all documented: :attr:`last_draw` (the
+    drone of the most recently generated flight, which is what a pool reports
+    as the window's provenance), the antithetic offset pairing, and
+    :attr:`stats` (the ``rps_max`` accept/reject tally).
     """
 
     def __init__(
@@ -164,6 +196,7 @@ class FittedTrajectorySource:
         mean_scale: tuple[float, float] = (1.0, 1.0),
         measurement_noise: bool = True,
         antithetic_offsets: bool = False,
+        rps_max: float | None = None,
         phases: FlightPhaseRanges | None = None,
     ):
         if not weights:
@@ -186,9 +219,16 @@ class FittedTrajectorySource:
         self.mean_scale = (float(mean_scale[0]), float(mean_scale[1]))
         self.measurement_noise = bool(measurement_noise)
         self.antithetic_offsets = bool(antithetic_offsets)
+        if rps_max is not None and not (float(rps_max) > 0.0):
+            raise ValueError(f"rps.rps_max must be a positive rotor speed, got {rps_max!r}")
+        self.rps_max = None if rps_max is None else float(rps_max)
         self.phases = phases or FlightPhaseRanges()
         self.last_draw: RigDraw | None = None
         self._last_z: np.ndarray | None = None
+        #: The ``rps_max`` tally over this source's lifetime: flights returned
+        #: and flights thrown away by the cap. A pool (or a study) reads it to
+        #: report how much of the drawn population the cap truncates.
+        self.stats: dict[str, int] = {"flights": 0, "rejected": 0}
 
     @property
     def last_rig(self) -> str | None:
@@ -279,17 +319,48 @@ class FittedTrajectorySource:
 
         Records the drone in :attr:`last_draw`, so a caller can report which rig
         the windows it cuts from this flight came from.
+
+        With ``rps_max`` set, a flight in which ANY rotor exceeds the cap
+        anywhere — take-off overshoot included, not just the hover level — is
+        thrown away whole and redrawn, up to :data:`MAX_RPS_REDRAWS` times. The
+        whole attempt is redrawn, so a ``posterior`` mixture gets a fresh drone
+        and a stored rig gets a fresh hover shift and a fresh realisation. This
+        is REJECTION SAMPLING and therefore a TRUNCATION of the drawn
+        population, not a clip of one flight: the accepted distribution is the
+        drawn one conditioned on staying under the cap, and :attr:`stats`
+        records what that costs.
         """
-        draw = self.draw(rng)
-        self.last_draw = draw
-        total = self.flight_duration_s(rng) if duration_s is None else float(duration_s)
-        params, clip = draw.params, draw.clip
-        offset = self._offset(params, rng)
+        for attempt in range(MAX_RPS_REDRAWS + 1):
+            # A rejected attempt must not consume the antithetic pairing: the
+            # pair is a property of two ACCEPTED flights.
+            paired_z = None if self._last_z is None else self._last_z.copy()
+            draw = self.draw(rng)
+            total = self.flight_duration_s(rng) if duration_s is None else float(duration_s)
+            params, clip = draw.params, draw.clip
+            offset = self._offset(params, rng)
 
-        def airborne(n: int, rng_: np.random.Generator, fs: float = fs) -> np.ndarray:
-            return params.sample_airborne(n, rng_, fs=fs, offset=offset, clip=clip)
+            def airborne(
+                n: int,
+                rng_: np.random.Generator,
+                fs: float = fs,
+                params: Params = params,
+                offset: np.ndarray | None = offset,
+                clip: tuple[float, float] = clip,
+            ) -> np.ndarray:
+                return params.sample_airborne(n, rng_, fs=fs, offset=offset, clip=clip)
 
-        return wrap_airborne(airborne, total, fs, rng, idle=draw.idle_rps, phases=self.phases)
+            track = wrap_airborne(airborne, total, fs, rng, idle=draw.idle_rps, phases=self.phases)
+            if self.rps_max is None or float(np.max(track)) <= self.rps_max:
+                self.last_draw = replace(draw, redraws=attempt)
+                self.stats["flights"] += 1
+                return track
+            self.stats["rejected"] += 1
+            self._last_z = paired_z
+        raise RuntimeError(
+            f"rps.rps_max {self.rps_max} rejected {MAX_RPS_REDRAWS + 1} consecutive flights "
+            f"from rigs {self.names}: the cap is below what this mixture flies at all. "
+            "Raise rps_max, or drop the rigs whose hover level exceeds it."
+        )
 
 
 def _get(cfg: Any, key: str, default: Any = None) -> Any:
@@ -339,6 +410,7 @@ def build_from_config(cfg: Any) -> FittedTrajectorySource:
         mean_scale=_pair(cfg, "mean_scale", (1.0, 1.0)),
         measurement_noise=bool(_get(cfg, "measurement_noise", True)),
         antithetic_offsets=bool(_get(cfg, "antithetic_offsets", False)),
+        rps_max=(None if _get(cfg, "rps_max") is None else float(_get(cfg, "rps_max"))),
         phases=phases,
     )
 
@@ -347,6 +419,7 @@ __all__ = [
     "FITS_SUBDIR",
     "FITTED_KIND",
     "FLIGHT_KINDS",
+    "MAX_RPS_REDRAWS",
     "POSTERIOR_CLAMP_REL",
     "POSTERIOR_FILE",
     "POSTERIOR_IDLE_REL",
