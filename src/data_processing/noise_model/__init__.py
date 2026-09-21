@@ -1,16 +1,29 @@
 """The rotor-noise model v2 — the parts a DATA STREAM needs.
 
-This package holds the primitives the v2 renderer stands on, so that an
-online-mixing noise source can synthesise fitted rotor noise without importing
-:mod:`experiments` (which the import-linter contract "nothing imports
-experiments" forbids, and which would drag Pyro into every training job).
+This package holds the renderer of the 2026-09 noise-model-v2 campaign and the
+handful of primitives it stands on, so that an online-mixing noise source can
+synthesise fitted rotor noise without importing :mod:`experiments` (which the
+import-linter contract "nothing imports experiments" forbids, and which would
+drag Pyro into every training job).
 
-:mod:`.constants`, :mod:`.ou`, :mod:`.floor` and :mod:`.resample` are the
-shared primitives of the C4/v2 model: the exact integrated-OU transition and
-its path simulator, the coloured floor's geometry and power spectrum, and the
-render anti-alias/decimation chain. They were MOVED here from
-:mod:`experiments.stochastic_fit`, which imports them back, so the fit and the
-renderer still read one definition of each law.
+WHAT LIVES HERE, and what does not:
+
+* :mod:`.constants`, :mod:`.ou`, :mod:`.floor`, :mod:`.resample` — the shared
+  primitives of the C4/v2 model: the exact integrated-OU transition and its
+  path simulator, the coloured floor's geometry and power spectrum, and the
+  render anti-alias/decimation chain. They were MOVED here from
+  :mod:`experiments.stochastic_fit`, which imports them back, so the fit and
+  the renderer still read one definition of each law.
+* :mod:`.lag`, :mod:`.spectrum`, :mod:`.params`, :mod:`.render` — the v2
+  residual-phase autocorrelation, the geometry the renderer reads, the fit-JSON
+  params reader and the exact discrete-time renderer.
+  :mod:`experiments.noise_model` re-exports every one of them.
+* NOT here: the Pyro model, the MAP fit, the supports, the expected-periodogram
+  forward model. Those stay in :mod:`experiments.noise_model`; nothing a
+  training stream does needs them.
+
+:mod:`data_processing.noise_v2_pool` is the consumer: the ``noise_v2`` online
+mixing source.
 """
 
 from __future__ import annotations

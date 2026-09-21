@@ -72,6 +72,10 @@ import pyro.distributions as dist
 import torch
 from torch import Tensor
 
+# MOVED to data_processing.noise_model.params: the v2 renderer reads a fit's
+# line widths and data_processing may not import experiments. Re-exported here
+# unchanged, so `MD.gamma_from_params` keeps working.
+from data_processing.noise_model.params import gamma_from_params
 from experiments.stochastic_fit.model import FLOOR_SHAPE_N_CTRL
 from experiments.stochastic_fit.revised_phase import composite_risk, composite_weights
 
@@ -1003,35 +1007,6 @@ def params_to_dict(params: V2Params) -> dict[str, Any]:
         ),
         mic_gains_db=a(params.gain_all_db),
     )
-
-
-def gamma_from_params(d: dict[str, Any]) -> np.ndarray:
-    """``(R, K)`` widths of a ``/2`` payload, or a ``/1`` payload MAPPED.
-
-    A ``noise-v2-fit/1`` fit carried a per-order OU instead: phase variance
-    ``sigma_eps^2 k^p`` relaxing at ``lam_eps``, both by the PARITY of ``k``.
-    At lags short against ``1 / lam_eps`` — the regime every fitted rate of R1
-    and R2 sat in on its own window — its exponent is
-    ``sigma_eps^2 k^p lam_eps |tau|``, which is R3's ``2 pi gamma_rk |tau|``
-    with
-
-        gamma_rk = sigma_eps(parity of k)^2 k^p lam_eps(parity of k) / (2 pi).
-
-    That is the equivalence used here, so an old fit renders as the same line
-    shape it was fitted with wherever its per-order term was diffusive; where
-    it had saturated, the mapped Lorentzian is WIDER than the old pedestal was
-    (the saturated case is the one R3 removed for having no evidence).
-    """
-    if "gamma_hz" in d:
-        return np.atleast_2d(np.asarray(d["gamma_hz"], dtype=np.float64))
-    prof = np.atleast_2d(np.asarray(d["profile"]["profile_db"], dtype=np.float64))
-    k = np.arange(1, prof.shape[1] + 1, dtype=np.float64)
-    even = np.remainder(k, 2.0) == 0.0
-    se = np.where(even, float(d["sigma_eps_even"]), float(d["sigma_eps_odd"]))
-    le = np.where(even, float(d["lam_eps_even"]), float(d["lam_eps_odd"]))
-    p = float(d.get("p", 1.0))
-    gamma = se**2 * k**p * le / (2.0 * math.pi)
-    return np.broadcast_to(gamma[None, :], prof.shape).copy()
 
 
 def params_from_dict(d: dict[str, Any], *, device: Any = "cpu") -> V2Params:

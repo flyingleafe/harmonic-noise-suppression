@@ -64,6 +64,19 @@ import numpy as np
 import torch
 from torch import Tensor
 
+# MOVED to data_processing.noise_model.spectrum, which the v2 renderer reads
+# (data_processing may not import experiments). Re-exported here unchanged;
+# the torch forward model below is the part that stays.
+from data_processing.noise_model.spectrum import (
+    FLIGHT_HOP,
+    FLIGHT_N_FFT,
+    FLIGHT_SR,
+    SAMPLE_RATE_WORK,
+    floor_ctrl_hz,
+    floor_shape_chol,
+    floor_shape_db,
+    k_max_for_carrier,
+)
 from experiments.stochastic_fit.model import (
     AMP_RPS_REF,
     FLOOR_SHAPE_F_MIN,
@@ -91,9 +104,13 @@ __all__ = [
     "BAND_F_MIN",
     "BAND_F_MAX",
     "BenchGrid",
+    "FLIGHT_HOP",
+    "FLIGHT_N_FFT",
+    "FLIGHT_SR",
     "FlightGrid",
     "FloorBasis",
     "FloorParams",
+    "SAMPLE_RATE_WORK",
     "V2Params",
     "bench_band",
     "bench_grid",
@@ -101,6 +118,9 @@ __all__ = [
     "flight_grid",
     "flight_model",
     "flight_rate_work",
+    "floor_ctrl_hz",
+    "floor_shape_chol",
+    "floor_shape_db",
     "gamma_block",
     "k_max_for_carrier",
     "order_groups",
@@ -112,14 +132,6 @@ __all__ = [
 #: decimator's own rolloff never enters the likelihood.
 BAND_F_MIN = 30.0
 BAND_F_MAX = 7900.0
-
-#: The flight front end of the v2 campaign (``docs/explainers/
-#: noise-model-v2-plan.qmd``, "Where and how the rig is fitted"). NOT C4's
-#: 16384/1024: a long window smears a moving line by ``k |df/dt| T``.
-FLIGHT_N_FFT = 2048
-FLIGHT_HOP = 512
-FLIGHT_SR = 16000
-SAMPLE_RATE_WORK = 64000
 
 #: Lags of the floor's autocovariance the bench model reads. The floor's
 #: sharpest structure is the 30 Hz low-end shape control (~33 ms), so 1.024 s
@@ -255,29 +267,6 @@ def _floor_basis(
             device=device,
         ),
     )
-
-
-def floor_ctrl_hz(sr: int) -> np.ndarray:
-    """The floor's shape control points: C4's geometric ladder to the Nyquist.
-
-    ONE definition, read by :func:`bench_grid`, :func:`flight_grid` AND
-    :func:`.render.render_noise`, so a fitted ``floor_shape_z`` means the same
-    curve in the fit and in the render.
-    """
-    return np.geomspace(FLOOR_SHAPE_F_MIN, 0.5 * float(sr), FLOOR_SHAPE_N_CTRL)
-
-
-def floor_shape_chol(ctrl_hz: np.ndarray) -> np.ndarray:
-    """The squared-exponential Cholesky of the shape GP on ``ctrl_hz``."""
-    oct_ = np.log2(np.asarray(ctrl_hz, dtype=np.float64) / float(ctrl_hz[0]))
-    return se_cholesky(FLOOR_SHAPE_N_CTRL, float(oct_[1] - oct_[0]), FLOOR_SHAPE_OCT)
-
-
-def floor_shape_db(shape_z: np.ndarray, *, sr: int) -> np.ndarray:
-    """``FLOOR_SHAPE_STD_DB * (chol @ z)``: the dB control values from the GP
-    coordinate, the numpy twin of :meth:`FloorBasis.shape_db`."""
-    chol = floor_shape_chol(floor_ctrl_hz(sr))
-    return FLOOR_SHAPE_STD_DB * (chol @ np.asarray(shape_z, dtype=np.float64))
 
 
 def bench_band(freqs_hz: np.ndarray, sr: int) -> np.ndarray:
@@ -443,21 +432,6 @@ def flight_grid(
 
 
 # ── orders ──────────────────────────────────────────────────────────────────
-
-
-def k_max_for_carrier(carrier_rev_s: Any, sr: int, *, k_cap: int | None = None) -> int:
-    """Highest order whose line sits strictly below the analysis Nyquist.
-
-    Orders above it were removed from the real recording by its own front end
-    (a decimator's anti-alias, never an alias), and they contribute to the
-    observed band only through line skirts far below the floor — so they are
-    not modelled. ``k_cap`` clamps the count to the profile's width.
-    """
-    f = float(np.max(np.asarray(carrier_rev_s, dtype=np.float64)))
-    if f <= 0.0:
-        raise ValueError(f"carrier must be positive, got {f}")
-    k = int(math.floor(0.5 * float(sr) / f - 1e-9))
-    return max(1, k if k_cap is None else min(k, int(k_cap)))
 
 
 def gamma_block(gamma_hz: Any, *, n_rotors: int, k_max: int, ref: Tensor) -> Tensor:
