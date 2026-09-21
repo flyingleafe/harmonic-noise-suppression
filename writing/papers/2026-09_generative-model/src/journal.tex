@@ -1045,12 +1045,394 @@ single seed and are bit-reproducible.
 \section{Rotor-speed estimators}
 \label{sec:est}
 
-% ---- filled in the "paper: sections 5-6" commit ----
+The model of Section~\ref{sec:model} is validated and used through
+estimators, so we state them here. Two families are relevant and they
+turn out to be on par: compact regressors that emit four numbers per
+frame, and multi-pitch salience architectures from music
+transcription given an output representation that can hold four
+near-unison rotors. The rest of this section is condensed from our
+earlier study, which established the comparison; the experiments of
+Section~\ref{sec:exp} change only the training stream.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=1pt, align=center, font=\scriptsize,
+              minimum height=5mm, inner sep=2pt},
+  stem/.style={box, fill=gray!12},
+  head/.style={box, fill=blue!8, text width=16.5mm},
+  arr/.style={-{Latex[length=1.5mm]}, thin}]
+  \node[stem] (stft) at (0,0) {log-magnitude STFT, 2048 / 512, centred};
+  \node[stem, text width=22mm] (sc) at (-27mm,-11.5mm)
+    {5 conv blocks\\BN, LeakyReLU\\45--90 ch, $1025\to33$ bins\\mean over frequency};
+  \node[stem, text width=44mm] (enc) at (11mm,-9.5mm)
+    {6 conv blocks, BN, LeakyReLU, SE\\stride 2 in freq., $1025\to17$ bins, 128 ch};
+  \node[stem, text width=44mm] (pool) at (11mm,-17.5mm)
+    {4-head self-attention over the 17 bands, mean $\to (128,T)$};
+  \node[head] (h1) at (-27mm,-29mm) {SimpleConv\\conv $\to$ 64\\conv $\to$ 4};
+  \node[head] (h2) at (-8mm,-29mm) {Conv+BiGRU\\conv $\to$ 64\\BiGRU $2\times64$};
+  \node[head] (h3) at (11mm,-29mm) {Transformer\\conv $\to$ 64\\2 layers, 4 heads};
+  \node[head] (h4) at (30mm,-29mm) {causal GRU\\causal conv $\to$ 128\\GRU $2\times128$};
+  \node[box, fill=green!10] (out) at (1.5mm,-39mm) {four speeds per frame, PIT-MSE};
+  \draw[arr] (stft.south) -- (sc.north); \draw[arr] (stft.south) -- (enc.north);
+  \draw[arr] (enc) -- (pool); \draw[arr] (sc) -- (h1);
+  \foreach \h in {h2,h3,h4} { \draw[arr] (pool.south) -- (\h.north); }
+  \foreach \h in {h1,h2,h3,h4} { \draw[arr] (\h.south) -- (out.north); }
+\end{tikzpicture}
+\caption{The regressors. SimpleConv (0.54M parameters) is a plain
+  strided CNN with mean pooling; the other three (1.48--1.62M) share a
+  trunk of squeeze-and-excitation blocks and an attention pool over
+  frequency, and differ in the temporal head. Only the causal-GRU
+  \emph{head} is time-causal (left-padded convolution, unidirectional
+  GRU); its trunk is the same centred STFT and symmetric convolutions as
+  the others.}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Regressors}
+Four compact networks take a log-magnitude STFT
+(2048-point, hop 512) as input and emit four speeds per frame
+(Fig.~\ref{fig:arch}). SimpleConv is the smallest: five convolutional
+blocks (convolution, batch norm, leaky ReLU; 45 to 90 channels) that
+halve the frequency axis at every block, a mean over the 33 surviving
+bands, and two 1-D convolutions. The other three share a wider trunk:
+six blocks of the same kind with squeeze-and-excitation \cite{hu2018se}
+after each (128 channels, 17 surviving bands), then a four-head
+self-attention over the bands followed by a mean, giving a 128-channel
+sequence at the frame rate. On top of this trunk we place a two-layer
+bidirectional GRU of width 64 (Conv+BiGRU), a two-layer pre-norm
+Transformer encoder of width 64 with sinusoidal positional encoding
+(Transformer), or a two-layer unidirectional GRU of width 128 behind a
+left-padded convolution (causal GRU). The last one is causal only in
+its head, since the STFT is centred and the convolutions of the trunk
+are symmetric in time.
+
+The rotor indices are arbitrary. The four motors are
+interchangeable for the downstream task, since harmonic-informed
+suppression needs the set of speeds and not the identity of the motor
+that produces each of them, and nothing in the audio pins an index to
+a physical rotor: the same flight seen from a different microphone can
+present the rotors in a different order of dominance. We therefore
+train with the permutation-invariant MSE (PIT-MSE), i.e. the mean
+squared error under the assignment of predictions to references that
+minimizes it, computed per frame. Our first multichannel experiment
+showed why this is necessary. A Conv+BiGRU trained on all eight DREGON
+microphones with a fixed-index MSE reached $R^2=-0.78$ on the held-out
+channels, while the same predictions re-scored under the optimal
+permutation gave $R^2 = 0.94$. This means that the model had learned
+the speeds and was penalized only for their order. Training with
+PIT-MSE removes this penalty, and the index instability with it.
+
+\subsection{Salience models and the per-rotor output}
+\label{sec:adapt}
+We also train four music-transcription architectures from scratch:
+HPPNet (harmonic dilated convolutions on a CQT axis)
+\cite{wei2022hppnet}, HarmoF0 (dilated convolutions on a
+log-frequency spectrogram) \cite{wei2022harmof0}, the late-fusion deep
+CNN of Cuesta et al. on a harmonic CQT (``LateDeep'')
+\cite{cuesta2020multif0}, and Basic Pitch
+\cite{bittner2022basicpitch}. Their front ends and harmonic devices
+are kept intact throughout; only the output changes. The minimal
+adaptation, \textbf{L0}, changes only what the task requires: the
+rotor speed in rev/s is placed on the model's own pitch axis as if it
+were a fundamental frequency in Hz, the shared salience map is trained
+with binary cross-entropy against a target that lights the bins of the
+four reference speeds, and four tracks are decoded from the map by
+peak picking with a threshold and Hungarian assignment across frames.
+
+At L0 these models are two to ten times worse than the regressors, and
+the reason is the readout rather than the architecture. A shared
+salience map with threshold-and-assign decoding has an error floor
+even for a perfect model. Encoding the real telemetry onto a
+0.5\revps{} grid as a single map and decoding it back with the L0 rule
+gives 8.2\revps{} with no model involved, because on the DREGON
+validation clips 55\,\% of the frames contain a pair of rotors less
+than 1 Hz apart: one map then has fewer peaks than the airframe has
+rotors, several rotors are decoded from one peak, and the assignment
+fills the remaining slots with noise. The published grids make it
+worse, one bin being 0.9\revps{} at 60\revps{} on a 48-bin-per-octave
+axis.
+
+\textbf{L2} changes the representation itself: four per-rotor layers
+on a 0--150\revps{} linear grid, each trained against a Gaussian bump
+at one rotor's speed under a permutation-invariant cross-entropy (the
+layers have no canonical order), and a conditional-random-field
+readout that decodes one smooth path per layer with no threshold and
+no assignment. The same encode--decode test returns
+$2\times10^{-16}$\revps. An intermediate level that changes only the
+output resolution (a fixed interpolation head onto a 720-bin linear
+grid) recovers almost nothing (LateDeep 12.6 $\to$ 11.8), so the
+representation and not the resolution is what matters. With L2,
+HPPNet moves from 7.77 to 2.27\revps{} over all frames and HarmoF0
+from 10.8 to 2.45, below every regressor; LateDeep drops to 3.83;
+Basic Pitch does not improve (27.3 $\to$ 27.6), which we attribute to
+its contour branch having no harmonic device to exploit. The two
+families are therefore on par, and both are carried into
+Section~\ref{sec:exp}.
+
+\subsection{Baselines and the reference points}
+For completeness we
+also ran four classical single-pitch estimators with a greedy
+multi-rotor extension (pYIN \cite{mauch2014pyin}, the cepstrum, the
+harmonic product spectrum and a matched comb-filter bank), two
+genuinely multi-pitch methods (semi-supervised NMF with a fixed
+harmonic-comb dictionary and the optimal-transport inverse harmonic
+clustering of \cite{bjorkman2026ihc}), and a training-free two-stage
+blind order tracker of our own construction
+(Appendix~\ref{sec:tracker}). None of the classical estimators is
+competitive: the best stay above 11\revps{} at cruise and above
+24\revps{} over all frames, and none can report a stopped rotor
+because their search grids start above zero. The blind tracker is the
+most precise method at DREGON cruise (0.92\revps{} against 2.1--2.9
+for the regressors) but only on the drone it was tuned on, reaching
+9.19\revps{} at FLY124 cruise, and it costs about forty times more
+than a regressor.
+
+Two trained models carry the experiments of Section~\ref{sec:exp}, one
+from each family: the Conv+BiGRU regressor and HPPNet at L2. Trained
+on the real pool they reach 2.99 and 2.27\revps{} on the frozen
+validation split, and those two numbers are the references that every
+synthetic arm is read against.
+% source: docs/experiments/rig-sampler-transfer-pair.md (real_r4_scv2_unified
+% val/real_r3 2.99); conf/experiment/hppnet_l2_r2_s0.md
 
 \section{Experiments}
 \label{sec:exp}
 
-% ---- filled in the "paper: sections 5-6" commit ----
+\subsection{Protocol and references}
+\label{sec:proto}
+Every arm below changes one field of one configuration: the training
+stream. The architecture, the optimizer, the batch size, the clip
+length and above all the validation block are identical across arms
+and identical to the real-data reference, so that a difference in the
+reported number is a difference in the training distribution and
+nothing else. Checkpoints are selected on the real validation error,
+not on a macro average over real and synthetic views: in an earlier
+preset-trained run the synthetic half improved monotonically while
+every real view degraded after epoch 22, so a macro monitor neither
+stopped the run nor reduced the learning rate.
+% source: docs/experiments/rig-sampler-transfer-pair.md
+
+Two real-data references anchor the section: the Conv+BiGRU regressor
+trained on the real pool, at 2.99\revps, and HPPNet L2, at
+2.27\revps. Two synthetic references sit above them: the previous
+generation of sampled-rig arms, drawn from the earlier stochastic
+noise family rather than from the model of Section~\ref{sec:model},
+reached 5.72\revps{} from a neighbourhood bank and 5.37\revps{} from a
+path bank --- a gap to real audio of about $1.8\times$. Closing that
+gap is what the fitted model is for.
+% source: docs/experiments/rig-sampler-transfer-pair.md, "Conclusion"
+
+One protocol detail is forced by the generator's cost. Rendering the
+fitted model takes 1973 ms per 2 s of 8-channel audio against 416 ms
+for the earlier stochastic generator, which makes the loader
+render-bound. Each render is therefore reused 192 times within the
+stream, four times the earlier arms' 48, which holds the rate of
+\emph{fresh} renders per unit of wall-clock time equal to theirs. The
+banks themselves are rebuilt inside each job from the committed fits,
+so an arm is reproducible from the repository alone.
+% source: results/noise_v2/stream_bench/
+
+\begin{table*}[t]
+\centering
+\caption{Training on the fitted generative model. Rows: training
+  stream. Columns: PIT MAE (rev/s) on the frozen real validation split
+  --- all frames, the three DREGON views and FLY124 --- at the
+  checkpoint selected on the real overall error, for each of the two
+  estimator families. \textbf{\todo{PENDING nv2\_* arms: every cell
+  below the reference block.}}}
+\label{tab:nv2}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+ & & \multicolumn{3}{c}{Conv+BiGRU} & \multicolumn{3}{c}{HPPNet L2} \\
+\cmidrule(lr){3-5}\cmidrule(lr){6-8}
+Arm & Training stream & all & DR cruise & FL cruise & all & DR cruise & FL cruise \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{References}}\\
+% source: docs/experiments/rig-sampler-transfer-pair.md; conf/experiment/hppnet_l2_r2_s0.md
+real            & real pool (R4 recipe)        & 2.99 & -- & -- & 2.27 & -- & -- \\
+legacy easy     & stochastic family, neighbourhood & 5.72 & -- & -- & -- & -- & -- \\
+legacy hard     & stochastic family, path      & 5.37 & -- & -- & -- & -- & -- \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{Fitted model, synthetic only}}\\
+\texttt{nv2\_easy}  & easy bank, own-rig trajectories & -- & -- & -- & -- & -- & -- \\
+\texttt{nv2\_hard}  & path bank, hyperprior trajectories & -- & -- & -- & -- & -- & -- \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{Fitted model with real audio}}\\
+\texttt{nv2\_mixed}   & real 2.0 : silence 0.4 : hard 2.0 & -- & -- & -- & -- & -- & -- \\
+\texttt{nv2\_easy\_ft} & easy bank, then the real pool   & -- & -- & -- & -- & -- & -- \\
+\texttt{nv2\_hard\_ft} & path bank, then the real pool   & -- & -- & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Synthetic only: easy and hard}
+\label{sec:easyhard}
+The two synthetic-only arms ask the two halves of one question. The
+\emph{easy} arm draws from neighbourhoods of the two fitted rigs, with
+each entry flown on its own rig's fitted trajectory law; the training
+distribution is measured to cover the real rigs, so this arm should
+transfer, and if it does not then the limit is the fidelity of the
+fit rather than the width of the cloud --- a neighbourhood of a wrong
+point is still wrong. The \emph{hard} arm draws from the path bank,
+where neither real aircraft is privileged, and flies every entry on a
+trajectory drawn from the rig hyperprior, so that no fingerprint of
+either measured rig is available on either half. The decision rule is
+the one the earlier pair was launched with: the easy arm is expected
+to transfer, and the informative outcome is the hard arm, because a
+model trained on a wide cloud in which neither target rig is special
+and that still reads real audio has learned the operation rather than
+a fingerprint.
+% source: docs/experiments/rig-sampler-transfer-pair.md, "Motivation"
+
+\todo{PENDING nv2\_easy\_scv2, nv2\_hard\_scv2,
+  nv2\_easy\_hppnet\_l2, nv2\_hard\_hppnet\_l2: the two rows of
+  Table~\ref{tab:nv2}, the epoch of the best real checkpoint, whether
+  the post-best real degradation of the point-preset run recurs, and
+  the DREGON/FLY ratio against the point-preset run's 1.93. Read
+  against 5.72 / 5.37 (previous family) and 2.99 / 2.27 (real).}
+
+\subsection{Mixed}
+\label{sec:mixed}
+The mixed arm puts real audio, the zero-labelled silence arm and the
+path bank into one pool in the ratio $2.0 : 0.4 : 2.0$, the ratio the
+earlier mixed regime used, with the fitted family standing where the
+stochastic and static-comb generators stood. Unlike the two
+synthetic-only arms it sees real audio in training, so its reference
+is the real-data row directly and the question is different: not
+whether the fitted model can replace real data, but whether it adds
+to it.
+% source: conf/experiment/nv2_mixed_scv2.yaml
+
+\todo{PENDING the two \texttt{nv2\_mixed} arms: the mixed row of
+  Table~\ref{tab:nv2}, and whether it improves on the 2.99 and 2.27
+  real references or merely matches them.}
+
+\subsection{Curriculum}
+\label{sec:curriculum}
+The curriculum arms take the synthetic-only checkpoint selected on
+real validation error and continue training on the real pool, with a
+fresh optimizer, scheduler and early-stopping state and a full-size
+learning rate, because the trunk is transferring across a noise family
+rather than refining within one. The real half is the real-data
+reference arm verbatim, so the comparison is exact: does pre-training
+on the fitted model beat training on real audio from scratch.
+% source: conf/experiment/nv2_easy_ft_scv2.yaml
+
+\todo{PENDING nv2\_easy\_ft\_scv2, nv2\_hard\_ft\_scv2 and their
+  hppnet\_l2 twins: the two curriculum rows of Table~\ref{tab:nv2},
+  against the 2.99 / 2.27 from-scratch references and against the
+  earlier comb curricula, which bought a frequency response at no cost
+  in precision.}
+
+\subsection{Per-regime analysis}
+\label{sec:regime}
+An aggregate error hides where a synthetic training distribution
+fails, and on this task it hides the same thing every time. The
+earlier sampled-rig pair was close to the real-trained model at cruise
+and far from it in the transitions, where both synthetic arms
+collapsed the four rotors onto nearly one speed: the predicted spread
+was 0.28\revps{} (easy) and 0.19 (hard) against 4.71 for the model
+trained on real audio. That is a failure of the training
+distribution's regime coverage and not of its cruise fidelity, which
+is why the fitted model carries an explicit standby regime
+(Section~\ref{sec:noise}) and why the hard bank carries the standby
+slot as a policy rather than as an interpolation.
+% source: docs/experiments/rig-sampler-transfer-pair.md, "Conclusion"
+
+\begin{table}[t]
+\centering
+\caption{Error by frame regime and predicted rotor spread.
+  Regimes as in Section~\ref{sec:data}: zero (all rotors
+  $\le 0.5$\revps), below 30, ramp, cruise.
+  \textbf{\todo{PENDING nv2\_* arms.}}}
+\label{tab:nv2regime}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Arm & zero & $<$30 & ramp & cruise & spread \\
+\midrule
+% source: docs/experiments/rig-sampler-transfer-pair.md (spread 4.71 / 0.28 / 0.19)
+real (Conv+BiGRU)  & -- & -- & -- & -- & 4.71 \\
+legacy easy        & -- & -- & -- & -- & 0.28 \\
+legacy hard        & -- & -- & -- & -- & 0.19 \\
+\midrule
+\texttt{nv2\_easy}     & -- & -- & -- & -- & -- \\
+\texttt{nv2\_hard}     & -- & -- & -- & -- & -- \\
+\texttt{nv2\_mixed}    & -- & -- & -- & -- & -- \\
+\texttt{nv2\_easy\_ft} & -- & -- & -- & -- & -- \\
+\texttt{nv2\_hard\_ft} & -- & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\todo{PENDING nv2\_* arms: Table~\ref{tab:nv2regime}, and the reading
+  that goes with it --- whether the explicit standby regime and the
+  regime policy of the hard bank move the transition rows and the
+  predicted spread, or whether the collapse survives the change of
+  noise family.}
+
+\subsection{Microphones, drones and the frequency cue}
+\label{sec:probe}
+Two supporting results from our earlier study set the terms for the
+whole paper, and we restate them because the arms above are meant to
+change them.
+
+First, generalization is asymmetric. Trained on one microphone, the
+recurrent and attention regressors reach the same DREGON cruise error
+on the other seven channels as on the training channel (2.73/2.73,
+2.37/2.27 and 2.40/2.29\revps); only the plain convolutional model
+degrades (3.56 against 6.06), which we attribute to its having no
+sequence context to fall back on. Trained on one drone, however, every
+model fails on the other: DREGON-trained regressors have a cruise
+error of 2.3--3.9\revps{} on DREGON and 8.5--66\revps{} on FLY124,
+errors on the scale of an octave although the two cruise bands
+overlap. Adding a single flight of the second drone brings FLY124
+cruise to 1.3--2.3\revps. With two drones we cannot measure transfer
+to a third, and nothing in these results gives a reason to expect it.
+
+Second, the models do not use the harmonic frequencies unless they are
+forced to. The \emph{frequency-scaling probe} resamples six DREGON
+cruise clips by $\alpha \in [0.7, 1.3]$, which multiplies every
+harmonic frequency and every reference speed by $\alpha$, and fits the
+slope of the predicted relative change against $\alpha - 1$; a slope
+of 1 is consistent with the imposed scaling and a slope of 0 is no
+response. Every regressor trained on real audio alone has a local
+slope between $-0.3$ and 0.2 (Fig.~\ref{fig:probe}), i.e. a genuine
+4\,\% shift of every harmonic produces almost no shift of the
+prediction. The harmonic architectures behave differently --- HPPNet
+has a slope near one already at L0, because harmonic dilated
+convolutions form a comb by construction --- and label-transforming
+augmentation, which resamples the training chunk and transforms the
+labels with it, raises the regressors' slopes to 0.5--1.0 when applied
+from the first step. A comb curriculum raises them to 1.0--1.4 at no
+cost in precision. This is the second reason for a generative model:
+a training distribution in which the speeds move freely is the only
+thing that makes the frequency cue learnable, and a fitted model
+supplies it with the right timbre attached.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{freq_probe_panels.pdf}
+\caption{Frequency-scaling probe, reproduced from our earlier study.
+  Six DREGON cruise clips are resampled by $\alpha\in[0.7,1.3]$; the
+  curves show the predicted relative speed change and the dashed line
+  the scaling-consistent response. One panel per training regime and
+  one line per model; values in brackets are local slopes within
+  $\pm4\,\%$. The probe does not distinguish between loudness,
+  spectral-envelope cues and a learned speed prior; it only shows
+  whether the prediction follows the harmonics.}
+\label{fig:probe}
+\end{figure*}
+
+\todo{PENDING nv2\_* arms: the probe panel for the fitted-model arms.
+  The prediction to state before the runs land is that the fitted arms
+  behave like the comb curricula (slope near 1) because their speeds
+  move freely, and the open question is whether they keep the real
+  split's precision while doing so.}
 
 \section{Discussion}
 \label{sec:discussion}
