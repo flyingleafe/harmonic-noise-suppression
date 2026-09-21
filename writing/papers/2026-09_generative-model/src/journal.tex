@@ -1437,19 +1437,188 @@ supplies it with the right timbre attached.
 \section{Discussion}
 \label{sec:discussion}
 
-% ---- filled in the "paper: discussion, conclusion, appendices" commit ----
+\subsection{What the model establishes}
+The two halves reached different states and the difference is
+informative. The trajectory half is a structural result: the families
+the incumbent synthesizer cannot reach --- pooled per-rotor variance
+and inter-rotor correlation --- are exactly the ones the fitted model
+wins, on five and six of the seven rigs respectively, and the mode
+spectra are reproduced in shape rather than in slope alone. Its
+remaining failures are a per-rig choice of offset model and
+Monte-Carlo-scale differences in the mean, not the dynamics. The
+rotor-noise half is a measurement result: it passes the tracker-parity
+gate on both rigs, which the three previous rounds of the same model
+family did not, and it is short of a spectral proxy by 0.05 dB while
+being read by a frozen real-trained tracker at 1.82\revps{} against a
+real-audio anchor of 1.22.
+
+\subsection{Three limits we can name}
+\emph{Nothing in this campaign converged.} Every rotor-noise fit stops
+with a restart gain one to two orders of magnitude above the
+convergence tolerance. The four restarts agree to
+$1.9\times10^{-4}$ nats per cell and return bit-identical frozen
+dynamics, so the reported fit is a stable basin rather than a
+converged optimum; but a stable basin is a weaker claim and we make
+only that one.
+
+\emph{The speed laws are not measured.} The exponents $a$ and $b$ and
+the static fraction $s$ need a pool that spans a wide range of rotor
+speeds, and the pools we have are cruise. The span pin is a guard
+against the pathology (38.8 and 17, four standard deviations out, on a
+$1.14\times$ pool) and not a substitute for the measurement: the R5
+pool spans $1.74\times$, clears the threshold, and still returns a
+negative comb exponent. Every sampled rig therefore carries the prior
+medians, which means the banks describe cruise honestly and standby by
+assumption. A bench sweep over rotor speed, or a flight pool that
+includes spin-up, would settle it.
+
+\emph{The judge for the trajectory half is second-order.} All five
+frozen families are second-order statistics, and every real series in
+the corpus has excess kurtosis between 2.7 and 46 at the lags we can
+measure. A Gaussian model can therefore pass the judge and still
+produce increments that are too well behaved. Either the judge gains a
+tail family or the innovation gains a mixing layer; the choice should
+be made deliberately rather than by default.
+
+\subsection{What the gate does and does not say}
+The tracker-parity gate is the right instrument for this purpose and a
+narrow one. It measures whether the rendered comb clears the
+estimator's own detection boundary, which is precisely the property a
+training pool needs and is not a distributional distance: an earlier
+fit that scored 69.6\revps{} was not mistracked but classified as
+silence on 86.3\,\% of its frames. The boundary is sufficient and not
+necessary --- the real clip sits below it and is tracked anyway --- so
+a render that clears it is safe while one that does not is not
+refuted. And the frozen trackers' own real-audio anchors are in-domain
+numbers, since the recordings they are scored on are in their training
+pool; the margin that means something is the one against the synthetic
+bar.
+
+\subsection{Future work}
+The obvious next steps are the ones the limits name: a per-rig offset
+model or a full offset covariance for the trajectory half, which needs
+no refit of the dynamics; a speed sweep that identifies the speed
+laws; and a heavier-tailed innovation with a judge that can see it.
+On the estimator side, the two error shapes we observed suggest two
+remedies --- a readout that can express multimodality for the
+regressors, which average near-unison rotors, and a joint decoder with
+a repulsion term between layers for the salience models, whose
+per-layer readout lets tracks lock onto an octave.
+\todo{PENDING nv2\_* arms: the paragraph that says which of the three
+  limits the transfer results actually implicate.}
+
+\subsection{Limitations}
+The study covers two drone models, uses a single training seed per
+experiment, and includes only indoor DREGON recordings and calm
+outdoor MD2 flights. Tachometer-grade labels exist only for a DREGON
+subset; the label corrections we estimated from the audio share the
+assumptions of the acoustic model, and every DREGON number carries an
+uncertainty floor of 0.3--0.7\revps{} at cruise. The rig hyperprior is
+fitted on seven rigs, six of them one airframe with one controller
+tune, and it is used under a truncation at 150\revps{} whose
+acceptance rate is 0.296. FLY124 is an unseen flight throughout, but
+never an unseen drone in the arms of Section~\ref{sec:exp}.
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-% ---- filled in the "paper: discussion, conclusion, appendices" commit ----
+We set out to replace scarce annotated flight with a model of the
+thing being annotated. The model has two halves, both fitted to real
+recordings by exact likelihood and both usable as samplers: a
+state-space model of the four rotor-speed trajectories, which beats
+the synthesizer it replaces on the variance and correlation families
+of a frozen five-family judge and passes all five on one rig, and a
+parametric model of the rotor-noise audio, whose renders a frozen
+real-trained estimator reads at 1.82 and 1.62\revps{} against bars of
+2.19 and 3.03. Neither half is finished --- no noise fit converged,
+the speed laws are not identified from cruise-only pools, and the
+trajectory judge cannot see the heavy tails that every real series
+has --- and we have stated each of those rather than absorbed it.
+\todo{PENDING nv2\_* arms: the sentence that says what training on
+  the fitted model buys, against 5.72 / 5.37 for the previous
+  synthetic family and 2.99 / 2.27 for real audio.}
+The instrument that made the fit decidable is worth stating
+separately: a frozen estimator trained on real audio, run on the
+render, is a sharper test of a generative model of ego-noise than any
+spectral distance we tried, because it measures the property the
+training pool has to have.
 
 \appendices
 
 \section{The two-stage blind tracker}
 \label{sec:tracker}
 
-% ---- filled in the "paper: discussion, conclusion, appendices" commit ----
+The blind tracker of Section~\ref{sec:est} is a training-free
+reference built on the tacholess order-tracking idea
+\cite{peeters2019tacholess,iatsenko2016ridges,jiang2024iavkf}.
+Let $C$ be the number of channels and $X_c(f,t)$ their STFTs. We form
+$\log(1+C^{-1}\sum_c |X_c(f,t)|)$ and subtract a running median over
+frequency; we call the whitened log magnitude $L(f,t)$. A rotor at
+$r$\revps{} produces harmonics at $kr$, so we score a candidate rate
+by sampling $L$ at those frequencies.
+
+\subsection{Stage 1: comb-matched search}
+We score a candidate by the
+half-tooth contrast
+\begin{equation}
+  S(r,t) = \frac{1}{|\mathcal{K}(r)|} \sum_{k \in \mathcal{K}(r)}
+  \Big( L(kr,t) - \big[L\big((k-\tfrac12)r,t\big)\big]_+ \Big),
+  \label{eq:comb-score}
+\end{equation}
+with $\mathcal{K}(r)$ the harmonics inside the analysis band and
+$[u]_+=\max(u,0)$; the half-tooth term penalizes sub-multiple aliases.
+On a grid $\mathcal{G}$ over the plausible range, a trajectory is the
+maximizer of the score minus a total-variation penalty,
+\begin{equation}
+  \hat r_{1:N} = \arg\max_{r_{1:N} \in \mathcal{G}^N}
+  \sum_{t=1}^{N} S(r_t,t) - \gamma \sum_{t=2}^{N} |r_t - r_{t-1}|,
+  \label{eq:viterbi}
+\end{equation}
+which we find by dynamic programming without an initial trajectory. We
+find the rotors in turn: we suppress the teeth of a found comb and
+repeat the search on the residual. We search near-unison pairs, which
+one comb cannot separate, jointly as $(r, r+\delta)$ with $\delta$
+fixed within a window. An octave guard halves a base whose line
+outweighs its second harmonic, and a slope-tolerant coarse pass with
+trust gates handles the ramps. The grid and the penalty limit the
+precision to about 1\revps.
+
+\subsection{Stage 2: phase-increment refinement}
+We fix $\hat r(t)$ and
+its phase $\hat\phi(t) = 2\pi\int_0^t \hat r(u)\,\mathrm du$,
+demodulate each harmonic and low-pass it to $\pm B_k$,
+$z_k(t) = ( x(\cdot)\, e^{-\mathrm ik\hat\phi(\cdot)} ) * h_{B_k}(t)$,
+which centres harmonic $k$ at zero frequency when $\hat r$ is correct;
+a residual rate error $\varepsilon = r-\hat r$ appears in the phase
+increment between envelope frames $\Delta t$ apart,
+$\psi_k(t) = \arg( z_k(t)\,\overline{z_k(t-\Delta t)} )
+\approx 2\pi k \Delta t\, \varepsilon(t) + v_k(t)$, a linear
+measurement of one scalar with variance
+$\sigma_k^2 = \sigma_v^2/|z_k|^2 + q_k \Delta t$ (off-comb floor plus
+the per-harmonic phase diffusion of Section~\ref{sec:noise}).
+Inverse-variance fusion over harmonics and channels,
+\begin{equation}
+\begin{gathered}
+  m(t) = \frac{1}{W(t)} \sum_k w_k(t)\,
+    \frac{\psi_k(t)}{2\pi k \Delta t},\\
+  w_k = \frac{(2\pi k\Delta t)^2}{\sigma_k^2},
+  \qquad W = \textstyle\sum_k w_k,
+\end{gathered}
+  \label{eq:fusion}
+\end{equation}
+feeds a Kalman smoother for the random walk
+$\varepsilon(t) = \varepsilon(t-\Delta t) + \eta(t)$; we update the
+trajectory and repeat the step. Iteration $j$ admits harmonics up to a
+cap $K_j$ (8, 20, 40). With half-bandwidth $B$, a rate error $\delta$
+keeps harmonic $k$ in band only while $k|\delta|\lesssim B$, so the
+capture radius shrinks as $1/k$ on exactly the harmonics whose weight
+$k^2$ favours them, and the ladder trusts the low harmonics first.
+Jiang et al. \cite{jiang2024iavkf} adapt the Vold--Kalman bandwidth
+iteratively; the order-cap schedule is a different construction. Two
+gates drop harmonics below the off-comb floor or inside another
+rotor's band. The refinement floor is about 0.2\revps{}. On DREGON
+recordings held out from all tuning, the tracker agrees with the
+measured motor speeds to 0.97--1.22\revps{}.
 
 \section{Fit tables}
 \label{sec:fittables}
