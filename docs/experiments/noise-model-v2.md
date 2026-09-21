@@ -950,15 +950,205 @@ labels register, the render is faithful to its own model to ~0.05 dB, and line
 width is not the missing ingredient. The open R4 question is a STATISTICS
 question — phase coherence and line continuity — not a level or width question.
 
+## Round 5
+
+R4 did not produce a round record; it produced the comparandum this round is
+judged against. Its legacy-truth study fitted v2 to the LEGACY RENDER instead
+of to the recording and found that in mode `flight` — free per-order profile
+AND free dynamics — the fit reproduces that render well enough to be tracked
+(HPPNet 1.746434, SCv2 1.798260 on the three cruise score windows)
+[`round5/tracker_probe/tracks.json`], while the bench-transplant mode
+`flight_floor_lowk` reaches only 5.559694. The R5 probe then found WHY the R3
+fit-to-real rig scores 69.6 rev/s: it is an OFF verdict, not a mistracked
+rotor — HPPNet assigns 86.3 % of its scored values to the zero class of its own
+training stream — and the render boundary between OFF and ON is one scalar on
+HPPNet's own CQT, the harmonic-sum carrier gain `S8(1) − med_{α≠1} S8(α)`,
+with the OFF arm at +1.63 dB and the three ON arms at +5.57 … +5.98 dB
+[`round5/tracker_probe/findings.md:5-33`].
+
+### Model change: mode `flight_profile`, the mirror of the transplant
+
+`flight_profile` (`src/experiments/noise_model/model.py:310`, git `1c6ac337`)
+frees `("profile", "floor", "mic")` and FREEZES the dynamics wholesale from the
+bench: `sigma_nu` and `lam` at the log-means over the four
+`bench_dregon_Motor{1..4}_70` R3 fits (0.742318 / 0.060800) and the per-line
+`gamma_hz` ladder rotor-matched, rotor `r` taking `Motor{r+1}`'s own widths.
+The reason is the label: in DREGON free flight neither the raw nor the refined
+rotor-speed labels follow the harmonics closely, and a free dynamics block
+absorbs that label error as shaft wander and line width — R4's free fit landed
+at a 13 Hz half width at k = 1, which is a property of the label, not of the
+rotor [`round5/fits/submit_note.md:8-29`].
+
+### Fits: four restarts, agreeing, none converged
+
+Four seeds, one `uni-cpu` job each, on the SAME five disjoint 8 s room-2 floor
+segments and the same 2 056 320 cells as R3's `flight_floor_lowk`
+[`round5/fits/findings.md`]:
+
+| | R5 `flight_profile` | R3 `flight_floor_lowk` |
+|---|---:|---:|
+| Whittle nats/cell | **−8.712373** | −8.593117 |
+| floor band (< 300 Hz) | −3.22246 | −2.45245 |
+| comb band | −8.90985 | −8.81400 |
+| `converged` / `which_converged` | **false** / none | **false** / none |
+
+Freeing the comb and freezing the dynamics buys 0.119256 nats/cell in both
+bands over freezing the comb and freeing the floor scalars — a MODE difference
+alone, since pool, cells and front end are identical. The four restarts span
+2.643e-4 nats/cell (Whittle) and 1.880e-4 (polished loss), and every one of
+them stops on the L-BFGS cap with a restart gain of 1.7–2.5e-3 nats/cell
+against the 1e-4 tolerance. The frozen half is bit-frozen: `sigma_nu`, `lam`
+and the `gamma_hz` log-mean are identical across all four restarts.
+
+The free half: `amp_exp` −0.868132 (the comb gets QUIETER with speed, where R3
+pinned it at 0 and R4's fit-to-legacy `flight` put it at +3.356), floor mean
+−37.359981 dB, tilt −5.552232 dB/oct, `floor_exp` 15.321160,
+`floor_static_rel` 2.58e−07 (three of four restarts return exactly 0). Nothing
+is span-pinned: the pool's carrier span is 1.743918 against the 1.5 threshold,
+so `amp_exp`, `floor_exp` and `floor_static_rel` are all free here. The fitted
+per-order comb sits +2.07 ± 8.44 dB against the rotor-matched bench ladder over
+88 orders (+1.46 ± 8.92 dB at k ≤ 16) and reorders it order by order with
+±10–20 dB excursions — most of which is the prior following the floor, since
+the recording resolves no per-order line above k ≈ 8.
+
+### The calibration pin: +3.75 dB, and it costs nothing
+
+The tracker gate saturates, so it is not a quantity a Whittle likelihood can
+trade against continuously; R5 therefore does not fit it, it BISECTS it. One
+scalar dB on `profile_db` of every rotor and every order (the model's
+`comb_gain_db`), smallest 0.25 dB grid point whose WEAKEST window clears
+S8 ≥ 5.6 dB [`round5/calibration/findings.md`]:
+
+| window | S8 as fitted | S8 at the pin | clears |
+|---|---:|---:|---|
+| free-flight | 5.049 | 7.461 | yes |
+| hovering (binds) | 3.908 | 5.697 | yes |
+| updown | 5.087 | 7.543 | yes |
+| rectangle (not bisected on) | 4.975 | 7.140 | yes |
+| spinning (not bisected on) | 3.978 | 5.774 | yes |
+
+The pin is **+3.75 dB** (+3.5 is the last failing grid point) and the carrier
+gain is monotone in the offset on every window over the whole 0–24 dB sweep.
+The two cohort windows the pin was not bisected on clear it at the same offset,
+so it was not re-bisected.
+
+Priced on the three score windows' own cells (93 frames, 749 952 cells, the
+objective evaluated in 8-frame chunks and summed, which is exact), the pin's
+`nats_per_cell_cost` is **−0.480374**: NEGATIVE, in both bands (comb −0.484042,
+floor −0.378410). The pin does not cost likelihood on the windows the trackers
+are scored on, it buys it — because the fit pool is the five 8 s FLOOR segments
+beside the scored cruise windows, which are quieter, so the level the pooled
+fit chose is too low for the cruise windows themselves. The same price on the
+fit's OWN pool is NOT computed: that forward model needs > 20 GB and is a
+cluster job, and the exact command is recorded in
+`round5/calibration/pin.json` (`likelihood.fit_pool_cost.command`).
+
+### Results
+
+Both trackers, three cruise score windows, seed 2001, 8 microphones. The `real`
+and `legacy` rows reproduce the probe's committed numbers exactly (the audio is
+bit-identical), which is this pass's protocol check
+[`round5/calibration/score.json`]:
+
+| arm | HPPNet | SCv2 |
+|---|---:|---:|
+| the real DREGON room-2 clip | 1.073823 | 1.614303 |
+| legacy stage-2 render | 1.963204 | 1.594223 |
+| R3 v2 fitted to the real clip (`flight_floor_lowk`) | 69.555061 | 11.296731 |
+| R4 v2 fitted to the legacy render (`flight_floor_lowk`) | 5.559694 | 1.959774 |
+| R4 v2 fitted to the legacy render (`flight`) | 1.746434 | 1.798260 |
+| **R5 `flight_profile`, as fitted** | **1.618510** | **1.100658** |
+| **R5 `flight_profile` + the +3.75 dB pin** | **1.656260** | **1.049056** |
+| **R5 + the pin + 3 dB (stability arm)** | **1.678258** | **1.041985** |
+
+The frozen round gate, on the full five-recording cruise cohort with the four
+frozen render seeds [`round5.json`, git `543dc616`]:
+
+| quantity | R5 | bar | verdict |
+|---|---:|---:|---|
+| DREGON cruise PIT MAE, 5-recording mean | **1.820065** | 2.187786 parity | **PASS**, margin +0.367721 |
+| same, one-sided 95 % upper | **2.158331** | 2.187786 parity | **PASS**, margin +0.029455 |
+| DREGON mean against the stretch bar | 1.820065 | 1.897063 | **PASS**, margin +0.076998 |
+| DREGON 95 % upper against the stretch bar | 2.158331 | 1.897063 | FAIL, margin −0.261268 |
+| DREGON proxy `ltas_abs_db` | 2.029799 | 1.978609 | FAIL, margin −0.051190 |
+| Michael's equal-regime mean (R3 incumbent, unchanged) | 1.621670 | 3.177994 | **PASS** |
+| Michael's proxy (unchanged) | 1.281622 | 1.219668 | FAIL, margin −0.061953 |
+
+**This is the campaign's first DREGON parity pass** — 71.866599 → 1.820065
+rev/s against R3, a 70.05 rev/s move, with the proxy following it from 3.748014
+to 2.029799 dB and now 0.05 dB short of its gate. The real-arm reproduction
+check holds to 1.9e−08 relative. The round's top-level verdict is PARITY PASS /
+STRETCH PASS; `frozen_gates_pass` is still false, because the frozen HPPNet
+gate applies the stretch target to the 95 % upper bound and both proxy groups
+remain short.
+
+### Caveats
+
+1. **The offset is not a measurement.** It was chosen by a tracker statistic,
+   not by the data: nothing in the recording asks for +3.75 dB. What the
+   recording does say is that the offset is not contradicted on the scored
+   windows — the price there is negative — but the fit's own pool, which is the
+   material that set the level, was NOT priced on this machine, so "the
+   likelihood agrees" is a statement about the cruise windows only.
+2. **The trackers are being asked for a mean carrier, not a comb.** SCv2's
+   predicted comb is a prior, not a measurement: its in-frame gap CV is
+   0.21–0.28 against the label's 0.359 and its comb drifts 0.10–0.23 rev/s
+   where the label's drifts 0.592, and 83–98 % of its error is the centre
+   [`round5/tracker_probe/findings.md:126-132`]. The label's own trajectory
+   shape is the thing neither tracker reproduces, and it is also the thing the
+   DREGON labels themselves follow poorly — which is why R5 froze the dynamics
+   rather than fitting them to that label.
+3. **The scored recordings are in both trackers' training pools.** Both
+   checkpoints train on an 83.3 % real / 16.7 % zero-labelled-silence /
+   0.0 % rig-render stream, and all the scored DREGON recordings are in it
+   [`round5/tracker_probe/findings.md:150-176,282-284`]. Every PIT number above
+   is therefore an in-domain number, and the ON/OFF threshold the pin crosses
+   is the sufficient side of a boundary, not a necessary condition: the REAL
+   clip's own carrier gain is 0.98 dB, well below the 5.6 dB threshold, and it
+   is tracked at 1.07 rev/s.
+
+### The sampling decision
+
+The criterion set before the round was: HPPNet ≤ 2.19, SCv2 ≤ ~2.0, and stable
+at +3 dB. The R5 pinned rig meets all three (1.656260 / 1.049056, and
+1.678258 / 1.041985 three decibels up), it beats R4's fit-to-legacy `flight`
+rig on both trackers (1.746434 / 1.798260), and it is a fit to the REAL
+recording rather than to another model's render. **The RPS-predictor training
+renders are therefore sampled from the R5 pinned rig**,
+`results/noise_v2/rounds/round5/calibration/dregon_room2_floor__flight_profile_pin.json`
+(`diagnostics.calibration` = offset 3.75 dB, threshold 5.6 dB, cost −0.480374
+nats/cell), with `round5/calibration/dregon_room2_floor__flight_profile_pin_plus3db.json`
+as the stability arm. The unpinned fit
+(`round5/fits/dregon_room2_floor__flight_profile.json`) tracks as well and is
+the rig to fall back to if the offset ever has to be defended as a measurement.
+
+### Follow-up
+
+The open lever is the one R5 deliberately did not pull: **free per-rotor
+carrier deviation tracks**. R5 freezes the dynamics because the label is the
+error source, but freezing them only stops the model from absorbing the label's
+error — it does not let the model describe the true trajectory. A per-rotor
+deviation track (a smooth, low-dimensional offset from the label carrier, fitted
+per window) would let the comb follow the harmonics where the label does not,
+and is the natural way to attack the one number that still fails the stretch
+bar: the between-recording spread that puts the 95 % upper bound at 2.158331.
+
 ## Status
 
-**R3 scored, FAIL; R4 opening.** The round records are the sections "Round 1",
-"Round 2" and "Round 3" above; the machine-readable records are
-`results/noise_v2/rounds/round{1,2,3}.json` (git `066651e8eb31`,
-`9579ca94592c`, `3fcae519cddb`). The nine approved decisions are listed above
-(section "Approved decisions (2026-09-17)") and in
+**R5 scored: PARITY PASS on both rigs, the campaign's first.** The round
+records are the sections "Round 1", "Round 2", "Round 3" and "Round 5" above;
+the machine-readable records are `results/noise_v2/rounds/round{1,2,3,5}.json`
+(git `066651e8eb31`, `9579ca94592c`, `3fcae519cddb`, `543dc616`). R4 has no
+round record of its own: it produced the legacy-truth comparandum quoted in
+"Round 5" (`round4/legacy_truth/`). The nine approved decisions are listed
+above (section "Approved decisions (2026-09-17)") and in
 `docs/explainers/noise-model-v2-plan.qmd`, section "Decisions (approved
 2026-09-17)"; Model R3 is in that file's section `#model-r3`.
+
+What is still open after R5: `frozen_gates_pass` is false on three counts —
+the DREGON 95 % upper bound against the STRETCH target (2.158331 against
+1.897063), the DREGON proxy (2.029799 against 1.978609 dB) and the Michael's
+proxy (1.281622 against 1.219668 dB) — and no fit of any round has converged.
 
 Of the three prerequisites R1 was blocked on:
 
@@ -978,14 +1168,20 @@ Of the three prerequisites R1 was blocked on:
    [`round1/score/findings.md:94-104`]. R2 read −970.154760 and R3
    −1 749.799951 nats/s against it [`round3/score/findings.md:24-34`].
 
-Carried into R4, in the order the records name them:
+Carried into R4, in the order the records name them, and what R5 did with each:
 
 1. **DREGON is a statistics problem, not a level or width problem.** R3's
    three studies exclude misregistration, a render/forward-model bug and line
    width; what is left is phase coherence and line continuity
-   [`round3/dregon_humps/render_vs_model.md:44-57`].
+   [`round3/dregon_humps/render_vs_model.md:44-57`]. **Answered in R5**: the
+   statistic is the tracker's own ON/OFF verdict on CQT carrier gain, and the
+   rig that clears it is the bench-frozen-dynamics / free-comb one
+   ("Round 5" above).
 2. **Nothing has converged, in any round.** R3 reaches 12/21 on the bench but
    every flight fit still stops on the L-BFGS iteration cap
    [`round3/fits/findings.md:207-224`, `round3/fits/findings_flight.md:12-20`].
+   **Still true in R5**: all four `flight_profile` restarts stop on the cap
+   with a restart gain 17–25x the tolerance [`round5/fits/findings.md`].
 3. **The Michael's proxy is 0.062 dB from passing** and the whole deficit sits
-   in one support [`round3/fits/findings_regimes.md:231-239`].
+   in one support [`round3/fits/findings_regimes.md:231-239`]. **Unchanged in
+   R5**, which did not re-fit Michael's: 1.281622 against 1.219668 dB.
