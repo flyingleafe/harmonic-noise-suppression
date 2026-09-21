@@ -790,16 +790,30 @@ The fit runs 1500 Adam steps at learning rate 0.02 and batch 8,
 then 300 L-BFGS steps on a deterministic 64-frame subset, from four
 starts: one data-driven and three log-normal perturbations of it, with
 the lowest polished objective reported. Convergence is declared when
-the restart gain falls below $10^{-4}$ nats per cell. \emph{No fit in
-this campaign converged by that test}: the R5 flight fit's restart
-gain is $1.7$--$2.5\times10^{-3}$ nats per cell. What the restarts do
-agree on is the answer. The four starts return Whittle risks of
-$-8.712373$, $-8.712293$, $-8.712558$ and $-8.712450$ nats per cell
+the restart gain falls below $10^{-4}$ nats per cell, and the fit
+records the verdict. The bench stage reaches it on 12 of its 21
+supports, up from 3 of 21 in the previous round (the reported fit
+carries \texttt{which\_converged} = \texttt{lbfgs}; the nine that do
+not are \texttt{Motor1\_70}, \texttt{Motor2\_90},
+\texttt{Motor3\_50}, \texttt{Motor3\_60}, \texttt{Motor3\_90},
+\texttt{Motor4\_60}, \texttt{Motor4\_70}, \texttt{Motor4\_90} and
+\texttt{allMotors\_70}). \emph{No flight fit reaches it.} The R5
+flight fit stops at a restart gain of $1.7$--$2.5\times10^{-3}$ nats
+per cell, the previous round's DREGON flight fit at
+$6.0\times10^{-3}$ and Michael's pooled flight fit at
+$9.1\times10^{-3}$, all three labelled
+\texttt{which\_converged} = \texttt{none}. What the restarts do
+agree on is the answer. The R5 fit's four starts return Whittle risks
+of $-8.712373$, $-8.712293$, $-8.712558$ and $-8.712450$ nats per cell
 --- a best-to-worst spread of $1.9\times10^{-4}$ --- and the frozen
-dynamics are bit-identical across them. The flight fit improves on the
-previous round's on the same 2\,056\,320 cells, $-8.5931 \to -8.7124$
-nats per cell.
-% source: results/noise_v2/rounds/round5/fits/findings.md
+dynamics are bit-identical across them. It improves on the
+previous round's fit on the same 2\,056\,320 cells,
+$-8.5931 \to -8.7124$ nats per cell.
+% source: results/noise_v2/rounds/round5/fits/findings.md (R5 restart gains,
+% risks, bit-identical dynamics); results/noise_v2/rounds/round3/fits/findings.md
+% ("L-BFGS converged, reported fit 3/21 -> 12/21"; the per-support
+% non-convergence list; flight_floor_lowk gain 5.98e-3);
+% results/noise_v2/rounds/round3/fits/findings_flight.md (michaels 9.0618e-03)
 
 \subsubsection{Priors and the speed-span pin}
 The priors are measured
@@ -834,8 +848,8 @@ medians in every sampled rig.
 % results/noise_v2/rounds/round3/fits/findings_regimes.md
 
 \subsubsection{What is identified}
-A basin scan around a converged
-cruise fit, holding every block but one and sweeping over two decades,
+A basin scan around a fitted
+cruise point, holding every block but one and sweeping over two decades,
 separates the two. $\sigma_\nu$ has leverage 1.9968 nats per cell and
 is identified. The shaft rate $\lambda$ is not: the profiled objective
 is flat to 0.0307 nats per cell over 2.86 decades, because a 128 ms
@@ -1455,13 +1469,19 @@ being read by a frozen real-trained tracker at 1.82\revps{} against a
 real-audio anchor of 1.22.
 
 \subsection{Three limits we can name}
-\emph{Nothing in this campaign converged.} Every rotor-noise fit stops
-with a restart gain one to two orders of magnitude above the
-convergence tolerance. The four restarts agree to
+\emph{The flight fits do not converge.} The bench stage does, on 12 of
+its 21 supports, with the reported fit labelled L-BFGS-converged in
+its payload. No flight fit does: all three stop one to two orders of
+magnitude above the $10^{-4}$ nats-per-cell tolerance and are labelled
+\texttt{none}. For the fit this paper uses, the four restarts agree to
 $1.9\times10^{-4}$ nats per cell and return bit-identical frozen
-dynamics, so the reported fit is a stable basin rather than a
-converged optimum; but a stable basin is a weaker claim and we make
-only that one.
+dynamics, so it is a stable basin rather than a converged optimum; a
+stable basin is a weaker claim and we make only that one. Since the
+flight stage is where the profile, the floor and the microphone
+pattern are estimated, this is a limit on the parameters the renders
+are most sensitive to.
+% source: results/noise_v2/rounds/round3/fits/findings.md;
+% results/noise_v2/rounds/round5/fits/findings.md
 
 \emph{The speed laws are not measured.} The exponents $a$ and $b$ and
 the static fraction $s$ need a pool that spans a wide range of rotor
@@ -1532,7 +1552,8 @@ the synthesizer it replaces on the variance and correlation families
 of a frozen five-family judge and passes all five on one rig, and a
 parametric model of the rotor-noise audio, whose renders a frozen
 real-trained estimator reads at 1.82 and 1.62\revps{} against bars of
-2.19 and 3.03. Neither half is finished --- no noise fit converged,
+2.19 and 3.03. Neither half is finished --- the flight fits stop at a
+stable basin rather than a converged optimum,
 the speed laws are not identified from cruise-only pools, and the
 trajectory judge cannot see the heavy tails that every real series
 has --- and we have stated each of those rather than absorbed it.
