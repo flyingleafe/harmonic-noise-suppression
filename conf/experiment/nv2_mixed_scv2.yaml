@@ -1,0 +1,27 @@
+# @package _global_
+# SCv2 on the JOINT mixed regime with the noise-model-v2 HARD family as the
+# synthetic half: real 2.0 : silence 0.4 : v2-hard 2.0, the ratio
+# hb_stochmixed_dload.yaml holds, with the fitted v2 family standing where the
+# stochastic + static-comb pair stood.
+#
+# `rig_easy_scv2_unified` with ONE field changed, the training stream: same
+# `real_r1_scv2` architecture, same `override /validation: rps_unified`,
+# bfloat16, batch 128, 12 workers, 2 s clips, `samples_per_validation: null`.
+# Unlike the two synthetic-only arms this one SEES REAL AUDIO in training, so
+# its reference is `real_r4_scv2_unified` (val/real_r3 2.99) directly: the
+# question is whether the fitted synthetic half ADDS to real data rather than
+# whether it can replace it.
+#
+# Stream: conf/online_mix/noise_v2_mixed_dload.yaml. The bank is a gitignored
+# build product; the job rebuilds it first
+# (`python scripts/noise_v2_build_bank.py --preset hard`).
+# Batch doc: docs/experiments/noise-v2-transfer.md.
+defaults:
+  - rig_easy_scv2_unified
+  - _self_
+
+experiment_name: nv2_mixed_scv2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v2_mixed_dload.yaml

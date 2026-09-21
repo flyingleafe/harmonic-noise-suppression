@@ -1,0 +1,122 @@
+# ARM: NOISE-MODEL-V2 HARD -- rigs drawn along the PATH between the two fitted
+# v2 rigs (DREGON's round-5 cruise and Michael's FLY125 cruise), mixing
+# coordinate uniform on [0, 1], flown on trajectories drawn from the rig
+# HYPERPRIOR rather than from either evaluation rig.
+#
+# DERIVED from conf/online_mix/noise_v2_easy_5050.yaml: the two files differ in
+# the bank, in `rps.rigs`, and in `rps_scale_range`, and in NOTHING else. The
+# read of the legacy pair (hard 5.37 vs easy 5.72, docs/experiments/
+# rig-sampler-transfer-pair.md) is that the wide cloud is not worse than the
+# close one; this arm asks the same question of the FITTED family, and asks it
+# harder, because neither the comb nor the flight envelope is privileged
+# towards a rig the model is scored on.
+#
+# THE BANK (scripts/noise_v2_build_bank.py --preset hard, 2048 entries). The
+# path interpolates CRUISE <-> CRUISE only, on the COMMON order range
+# K = 1..81; DREGON's orders 82-88 are dropped for the path bank and the drop
+# is recorded in the bank's provenance. Regime policy is CARRIED, not
+# interpolated: at mixing coordinate t the standby slot is Michael's standby
+# fit with probability t and null with probability 1 - t, so a path rig is
+# always a coherent {standby, cruise} pair or a coherent single-regime rig,
+# never a blend of two regime schemas. Every entry carries the same pinned
+# short-span contract as the easy bank (`amp_exp` 2.0, `floor_exp` 2.0,
+# `floor_static_rel` 2.5e-3, `span_pin_record` set).
+#
+# THE TRAJECTORY IS THE OTHER HALF OF "HARD". Every hard entry has
+# `traj_rig: null`, so the pool falls back to the block below for ALL of them,
+# and `rigs: {posterior: 1}` is the reserved name for the GLOBAL fit -- the
+# diagonal Gaussian over all seven fitted rigs in scale-free coordinates, one
+# 32-vector per rig and so rig-balanced rather than duration-weighted. Every
+# flight in this stream is therefore a drone that has never been built, on a
+# comb that is neither rig. `mean_shift: [-5, 5]` is the easy arm's, and is
+# what keeps the hover level from collapsing onto the hyperprior's mean.
+#
+# `rps_max: 150` IS LOAD-BEARING HERE, unlike on the easy arm where the same
+# key never fires. The hyperprior is a distribution over SEVEN rigs and its
+# flights run far past the salience trunks' 0-150 rev/s grid: uncapped, the
+# per-flight peak rotor speed is median 190, p90 396 and max 615 rev/s, and
+# 66 % of flights exceed 150. The cap REJECTS AND REDRAWS a whole flight that
+# breaks it (a fresh drone each attempt) rather than clipping one, because a
+# clipped trajectory is a flat-topped flight no rig flies. Both families in
+# this batch fly the same capped population, so the arms stay comparable
+# across trunks.
+# It is a TRUNCATION of the hyperprior and is reported as one: measured
+# acceptance 0.296 (512 accepted / 1217 rejected). What it truncates is the
+# HOVER LEVEL and not the rig diversity -- of the 32 scale-free coordinates
+# only coordinate 0 (log hover scale) moves (z = -33.2, std 0.497 -> 0.275),
+# while all 31 shape/dynamics coordinates are statistically unmoved (max
+# |z| = 1.71, accepted/all std ratio 0.951-1.031). Surviving hover: median
+# 86.1, p90 111.9, max 182.0 rev/s. Full numbers:
+# docs/experiments/noise-v2-transfer.md.
+#
+# `rps_scale_range: [1.0, 1.0]` -- THE ONE KNOB THAT IS NOT THE EASY ARM'S.
+# A posterior draw already carries its own fitted hover level and ESC clamp; a
+# multiplicative 0.45-1.2 on top of that would distort the hyperprior it is the
+# point of this arm to fly, turning a rig-balanced speed distribution into a
+# smeared one. The easy arm keeps [0.45, 1.2] because there the multiplier is
+# legacy AUGMENTATION around two known real rigs. Recorded in
+# docs/experiments/noise-v2-transfer.md.
+#
+# Everything else -- the single `kind: noise_v2` source at weight 0.8 (see the
+# easy policy's note on why one source and not two), `render_reuse: 192`, the
+# level draw, the silence arm, the speech source and the mixing policy -- is
+# conf/online_mix/noise_v2_easy_5050.yaml's, which is in turn
+# conf/online_mix/rig_hard_5050.yaml's.
+#
+# bank: data/rig_banks/noise_v2_hard_n2048.json, a gitignored BUILD PRODUCT
+# rebuilt in-job (seed 20260921, bit-reproducible, skipped when the provenance
+# digest matches):
+#   python scripts/noise_v2_build_bank.py --preset hard
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+sources:
+  noise:
+  - kind: noise_v2
+    weight: 0.8
+    n_mics: 8
+    n_rotors: 4
+    preset_bank: data/rig_banks/noise_v2_hard_n2048.json
+    render_reuse: 192
+    rps_scale_range:
+    - 1.0
+    - 1.0
+    normalize_rms_range:
+    - 0.02
+    - 0.25
+    level_mode: flight
+    rps:
+      kind: fitted_traj
+      fits: dload:rps-traj-fits
+      rigs:
+        posterior: 1
+      mean_shift:
+      - -5.0
+      - 5.0
+      flight_fs: 200
+      flight_reuse: 32
+      rps_max: 150
+  - kind: silence
+    weight: 0.2
+    n_channels: 8
+  speech:
+  - dataset: librispeech
+    subpath: LibriSpeech/train-clean-100
+policy:
+  stages:
+  - until: null
+    source_prob: 1.0
+    snr_db:
+      uniform:
+        low: -30.0
+        high: 0.0
+    speech_per_channel: independent
+    snr_per_channel: false
+    augmentations:
+      probability: 0.5
+      choices:
+      - random_gain:
+          min_db: -6.0
+          max_db: 6.0
+      - random_polarity: {}

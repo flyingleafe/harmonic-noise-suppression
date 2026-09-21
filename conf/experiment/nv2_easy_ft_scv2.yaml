@@ -1,0 +1,31 @@
+# @package _global_
+# CURRICULUM arm: `nv2_easy_scv2` (SCv2 on the v2 EASY bank, synthetic only)
+# fine-tuned on REAL audio. Stage 2 of the pair; stage 1 must have run and
+# uploaded its `best_real_overall` checkpoint.
+#
+# The real half is the family's REAL REFERENCE arm verbatim —
+# `real_r4_scv2_unified`: the R4 real pool (`conf/online_mix/hb_m3s2_dload.yaml`
+# — DREGON + FLY125, whole envelope, silence arm, speech at -30..0 dB,
+# freq-scale + time-warp + gain/polarity), `override /validation: rps_unified`,
+# batch 128, 2 s clips, `samples_per_validation: null`. That arm is the
+# campaign's real-data reference at val/real_r3 2.99, so this arm reads
+# directly against it: does pre-training on the fitted easy bank beat training
+# on real audio from scratch.
+#
+# What this file adds to `real_r4_scv2_unified`: the warm start
+# (`checkpoint: best:real_overall@nv2_easy_scv2`, resolved to
+# `r2://<bucket>/<prefix>/nv2_easy_scv2/checkpoints/best_real_overall.ckpt`;
+# `training.loop._warm_start` loads it `strict=False` with a FRESH
+# optimizer / scheduler / early-stopping state), renewed `patience: 20` and
+# `lr: 1e-3` — a full-size learning rate, because the trunk is transferring
+# across a noise family rather than refining within one.
+# Batch doc: docs/experiments/noise-v2-transfer.md.
+defaults:
+  - real_r4_scv2_unified
+  - _self_
+
+experiment_name: nv2_easy_ft_scv2
+checkpoint: best:real_overall@nv2_easy_scv2
+patience: 20
+optim:
+  lr: 0.001

@@ -1,0 +1,25 @@
+# @package _global_
+# HPPNet-L2 on the JOINT mixed regime with the noise-model-v2 HARD family as
+# the synthetic half (real 2.0 : silence 0.4 : v2-hard 2.0) — the salience
+# counterpart of `nv2_mixed_scv2`.
+#
+# `rig_easy_hppnet_l2_unified` with ONE field changed, the training stream:
+# same model/loss/metrics, same `override /validation: rps_unified` through
+# the model's own `decode_logits`, batch 128, 6 workers, 2 s clips,
+# `samples_per_validation: null`, validation batch 64, lr 1e-3, patience 20.
+# This arm sees REAL audio in training, so its reference is `hppnet_l2_r2_s0`
+# (2.27) directly: does the fitted synthetic half ADD to real data.
+#
+# Stream: conf/online_mix/noise_v2_mixed_dload.yaml. The bank is a gitignored
+# build product; the job rebuilds it first
+# (`python scripts/noise_v2_build_bank.py --preset hard`).
+# Batch doc: docs/experiments/noise-v2-transfer.md.
+defaults:
+  - rig_easy_hppnet_l2_unified
+  - _self_
+
+experiment_name: nv2_mixed_hppnet_l2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v2_mixed_dload.yaml

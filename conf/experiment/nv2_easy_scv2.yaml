@@ -1,0 +1,26 @@
+# @package _global_
+# SCv2 on the noise-model-v2 EASY bank: the two rigs as the v2 campaign
+# actually fitted them (DREGON round-5 flight-profile, Michael's FLY125
+# round-3 cruise/standby), sampled as neighbourhoods, each entry flown on its
+# own rig's fitted trajectory.
+#
+# `rig_easy_scv2_unified` with ONE field changed, the training stream: same
+# `real_r1_scv2` architecture, same `override /validation: rps_unified`,
+# bfloat16, batch 128, 12 workers, 2 s clips, `samples_per_validation: null`,
+# synthetic only. Reference rows: `real_r4_scv2_unified` (real noise in
+# training, val/real_r3 2.99) and the legacy stochastic-family pair
+# (`rig_easy_scv2_unified` 5.72, `rig_hard_scv2_unified` 5.37).
+#
+# Stream: conf/online_mix/noise_v2_easy_5050.yaml. The bank is a gitignored
+# build product; the job rebuilds it first
+# (`python scripts/noise_v2_build_bank.py --preset easy`).
+# Batch doc: docs/experiments/noise-v2-transfer.md.
+defaults:
+  - rig_easy_scv2_unified
+  - _self_
+
+experiment_name: nv2_easy_scv2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v2_easy_5050.yaml

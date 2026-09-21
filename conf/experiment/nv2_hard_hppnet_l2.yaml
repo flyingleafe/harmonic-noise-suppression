@@ -1,0 +1,24 @@
+# @package _global_
+# HPPNet-L2 on the noise-model-v2 HARD bank (path rigs on the common order
+# range K = 1..81, hyperprior `posterior` trajectories) — the salience
+# counterpart of `nv2_hard_scv2`.
+#
+# `rig_easy_hppnet_l2_unified` with ONE field changed, the training stream:
+# same model/loss/metrics, same `override /validation: rps_unified` through
+# the model's own `decode_logits`, batch 128, 6 workers, 2 s clips,
+# `samples_per_validation: null`, validation batch 64, lr 1e-3, patience 20.
+# Reference row for the family: `hppnet_l2_r2_s0` on real audio (2.27).
+#
+# Stream: conf/online_mix/noise_v2_hard_5050.yaml. The bank is a gitignored
+# build product; the job rebuilds it first
+# (`python scripts/noise_v2_build_bank.py --preset hard`).
+# Batch doc: docs/experiments/noise-v2-transfer.md.
+defaults:
+  - rig_easy_hppnet_l2_unified
+  - _self_
+
+experiment_name: nv2_hard_hppnet_l2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v2_hard_5050.yaml

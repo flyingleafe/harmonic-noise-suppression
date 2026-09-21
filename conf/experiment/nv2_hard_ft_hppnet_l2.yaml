@@ -1,0 +1,43 @@
+# @package _global_
+# CURRICULUM arm: `nv2_hard_hppnet_l2` (HPPNet-L2 on the v2 HARD bank — path
+# rigs, hyperprior trajectories, synthetic only) fine-tuned on REAL audio.
+# Stage 2 of the pair; stage 1 must have run and uploaded its
+# `best_real_overall` checkpoint.
+#
+# The real half is the salience family's REAL REFERENCE arm, `hppnet_l2_r2_s0`
+# (stream `conf/online_mix/hb_silence_dload.yaml`), the campaign's best real
+# salience row at 2.27.
+#
+# What this file changes against `hppnet_l2_r2_s0`, and nothing else:
+# * `override /validation: rps_unified` — the full deterministic panel the
+#   whole v2 batch is selected on (`real_overall`). VERBATIM, as every arm in
+#   this batch.
+# * the UNIFIED batch/clip settings of the family's arm
+#   (`rig_easy_hppnet_l2_unified`): batch 128 in place of 16,
+#   `samples_per_validation: null` in place of 40000, 2 s clips, validation
+#   batch 64.
+# * the warm start `checkpoint: best:real_overall@nv2_hard_hppnet_l2`
+#   (resolved to
+#   `r2://<bucket>/<prefix>/nv2_hard_hppnet_l2/checkpoints/best_real_overall.ckpt`,
+#   loaded `strict=False` with fresh optimizer / scheduler / early-stopping
+#   state), renewed `patience: 20` and `lr: 1e-3`.
+# Batch doc: docs/experiments/noise-v2-transfer.md.
+defaults:
+  - hppnet_l2_r2_s0
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: nv2_hard_ft_hppnet_l2
+checkpoint: best:real_overall@nv2_hard_hppnet_l2
+patience: 20
+batch_size: 128
+samples_per_validation: null
+data:
+  train:
+    params:
+      duration_s: 2.0
+validation:
+  batch_size: 64
+optim:
+  lr: 0.001
+  weight_decay: 0.0001

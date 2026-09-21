@@ -1,0 +1,141 @@
+# ARM: NOISE-MODEL-V2 EASY -- the two rigs as they were actually FITTED by the
+# noise-model-v2 campaign (DREGON's round-5 flight-profile fit and Michael's
+# FLY125 round-3 cruise/standby pair), each entry flown on ITS OWN rig's fitted
+# trajectory.
+#
+# DERIVED from conf/online_mix/rig_easy_5050.yaml -- the v2 counterpart of the
+# legacy easy arm (best real MAE 5.72). Everything outside the noise family is
+# that policy's: `sample_rate`, `duration_s`, `base_seed`, `snr_ref_floor_rms`,
+# the silence arm at weight 0.2, the speech source, and the single-stage mixing
+# policy (speech at -30..0 dB SNR, independent per-channel speech, 50 %
+# gain/polarity augmentation).
+#
+# WHAT MOVES -- three things, and nothing else.
+#
+# (1) ONE source instead of two. The legacy arms carried the same bank in TWO
+#     `kind: stochastic` sources (0.4 + 0.4) purely to keep two independent
+#     render pools. A v2 render is 1973 ms per 2 s x 8 mics against the legacy
+#     416 ms (results/noise_v2/stream_bench/), so a second pool would only
+#     double the render cost for the same distribution. One `kind: noise_v2`
+#     source at weight 0.8 carries the combined weight, and the noise : silence
+#     ratio is the base policy's 0.8 : 0.2 exactly.
+#
+# (2) `render_reuse: 192` instead of 48. At `render_reuse: 48` the v2 loader is
+#     RENDER-BOUND (12 workers deliver a batch of 128 about every 1.2 s), so
+#     the stream would be starved rather than varied. 192 = 4 x 48 is the value
+#     at which this arm produces FRESH RENDERS AT THE SAME WALL-CLOCK RATE as
+#     the legacy arms did at 48, since one v2 render costs ~4x a legacy one.
+#     The decision is recorded in docs/experiments/noise-v2-transfer.md.
+#
+# (3) The parameter family: `preset_bank` is a `noise-v2-bank/1` file of 2048
+#     fitted-rig entries (scripts/noise_v2_build_bank.py --preset easy), each
+#     entry a COMPLETE inline v2 fit payload, not a stochastic-family parameter
+#     vector. Each easy entry is a neighbourhood draw around ONE of the two
+#     canonical rigs and carries that rig's regime pair as fitted -- Michael's
+#     {standby, cruise}, DREGON {standby: null, cruise: round-5} -- and its own
+#     K (88 DREGON, 81 Michael).
+#
+# THE SPEED LAW IS PINNED, not fitted. Every bank entry carries the v2
+# short-span contract -- `amp_exp` 2.0, `floor_exp` 2.0, `floor_static_rel`
+# 2.5e-3, the model's prior medians, with `span_pin_record` set in the entry's
+# provenance. The R5 fitted exponents (-0.87 / 15.3) are UNIDENTIFIED on a
+# cruise-only fit pool and must not be flown. The cruise profile itself is
+# untouched, at its 80 rev/s reference.
+#
+# THE TRAJECTORY. `rps.kind: fitted_traj` draws from the campaign's fitted
+# trajectory model (docs/experiments/rps-trajectory-model.md, dataset
+# `rps-traj-fits`), exactly as conf/online_mix/traj_fitted_5050.yaml does, with
+# the same `mean_shift: [-5, 5]` (one additive hover draw per flight, rev/s;
+# the ESC clamp and the warm-up idle move with it) and the same `flight_fs` /
+# `flight_reuse`. The `rigs:` mixture below is only the FALLBACK for entries
+# with `traj_rig: null`, of which the easy bank has none: every easy entry
+# names its own `traj_rig` (dregon | michaels) and the pool builds one
+# `FittedTrajectorySource` per rig from this block with `rigs` overridden to
+# `{<traj_rig>: 1}`, each with its own flight cache. So a DREGON comb is never
+# flown on Michael's envelope. The pairing is auditable per window from
+# `meta.noise_v2_entry` / `meta.noise_v2_traj_rig`.
+# There is NO hover rescaling: the hyperprior trajectories keep their fitted
+# RPS labels and `rps_scale_range` stays at the legacy arms' [0.45, 1.2], so
+# the trajectory treatment is at parity with the legacy pair.
+#
+# `rps_max: 150` caps the whole flight (reject and redraw, never clip) at the
+# top of the salience trunks' speed grid, so BOTH families in this batch see
+# the same trajectory population. It is written here for UNIFORMITY and never
+# fires on this arm: measured over 128 flights per rig at `mean_shift`
+# [-5, 5], the peak rotor speed is median 92.3 / max 97.4 rev/s (dregon) and
+# median 93.9 / max 104.8 (michaels), 0 rejections. The hard and mixed arms,
+# which fly the hyperprior, are where it bites.
+#
+# THE LEVEL DRAW DIFFERS FROM THE LEGACY PAIR, deliberately. rig_easy_5050.yaml
+# names no level key and therefore ran the stochastic pool's defaults,
+# `normalize_rms: 0.1` with `level_mode: window` -- every window leaves at the
+# same root-mean-square, so level carries no speed cue at all. `render_noise`
+# is ABSOLUTE and its speed-level law is a fitted quantity, so `level_mode:
+# flight` is used here: the drawn level is the level AT THE REFERENCE SPEED and
+# the window's own speed envelope is kept on top of it. The range
+# [0.02, 0.25] is hb_stochmixed_dload.yaml's, the campaign's only measured
+# level-draw range, and it brackets both rigs' fitted absolute levels (DREGON
+# ~0.03-0.05, Michael's cruise ~0.1 at 8 mics).
+#
+# Keys left at the pool default and NOT written here: `drone_profile_range`
+# ([0.0, 1.0], the base policy's value), `comb_offset_db` (0.0 -- the comb is
+# flown as fitted) and `render_pool` (0).
+#
+# bank: data/rig_banks/noise_v2_easy_n2048.json, a gitignored BUILD PRODUCT
+# rebuilt in-job (seed 20260921, bit-reproducible, skipped when the provenance
+# digest matches):
+#   python scripts/noise_v2_build_bank.py --preset easy
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+sources:
+  noise:
+  - kind: noise_v2
+    weight: 0.8
+    n_mics: 8
+    n_rotors: 4
+    preset_bank: data/rig_banks/noise_v2_easy_n2048.json
+    render_reuse: 192
+    rps_scale_range:
+    - 0.45
+    - 1.2
+    normalize_rms_range:
+    - 0.02
+    - 0.25
+    level_mode: flight
+    rps:
+      kind: fitted_traj
+      fits: dload:rps-traj-fits
+      rigs:
+        dregon: 1
+        michaels: 1
+      mean_shift:
+      - -5.0
+      - 5.0
+      flight_fs: 200
+      flight_reuse: 32
+      rps_max: 150
+  - kind: silence
+    weight: 0.2
+    n_channels: 8
+  speech:
+  - dataset: librispeech
+    subpath: LibriSpeech/train-clean-100
+policy:
+  stages:
+  - until: null
+    source_prob: 1.0
+    snr_db:
+      uniform:
+        low: -30.0
+        high: 0.0
+    speech_per_channel: independent
+    snr_per_channel: false
+    augmentations:
+      probability: 0.5
+      choices:
+      - random_gain:
+          min_db: -6.0
+          max_db: 6.0
+      - random_polarity: {}
