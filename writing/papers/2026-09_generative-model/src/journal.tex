@@ -429,9 +429,9 @@ is one draw per flight, with
 $\delta_{\mathrm c} \sim N(0, s_{\mathrm c}^2)$ common to the four
 rotors and $\boldsymbol\delta_{\mathrm r} \sim N(0, \mathrm{diag}(s_{\mathrm
 r}^2))$ per rotor. Between-flight level differences are real and
-large: two of the seven rigs differ by about 41\revps{} on all four
+large: one of the seven rigs differs by about 41\revps{} on all four
 rotors at once between a gentle and an aggressive flight, while on the
-MD2 rig one rotor's own trim moves 17\revps{}. Finally the sampler
+MD2 rig one rotor's own trim moves 17\revps. Finally the sampler
 clamps its output to the rig's measured airborne extremes, because a
 real ESC has a floor and a ceiling and a Gaussian model does not know
 that.
@@ -893,8 +893,9 @@ instrument is the absolute difference in long-term average spectrum
 between the render and the real recording at microphone 0, per
 support. It is a proxy and it fails, narrowly: 2.0298 dB on DREGON
 against a gate of 1.9786 dB and 1.2816 dB on the Matrice 100 against
-1.2197 dB, i.e. short by 0.05 and 0.06 dB. It has improved from 3.7518
-dB over the campaign. The third asks how much likelihood the fitted
+1.2197 dB, i.e. short by 0.05 and 0.06 dB. The DREGON proxy has
+improved from 3.7518 dB at the first round of the campaign to 2.0298
+at the fifth. The third instrument asks how much likelihood the fitted
 model leaves on the table against a speed-matched stationary oracle,
 i.e. an empirical spectrum measured at the same carriers. On the
 decisive comb band the fitted model scores $-373\,666.30$ nats/s
@@ -902,7 +903,8 @@ against the oracle's $-371\,916.50$, a margin of $-1749.80$ nats/s,
 which passes the frozen convention; on the floor band the model is
 better than the oracle by 368.04 nats/s, which we report but do not
 read as an achievement.
-% source: results/noise_v2/rounds/round5/score/findings.md
+% source: results/noise_v2/rounds/round5/score/findings.md;
+% results/noise_v2/rounds/round3/score/findings.md (R1--R3 proxy progression)
 
 \todo{Fig.~3: fitted expected periodogram against the real
   periodogram, one DREGON cruise support and one FLY125 cruise
