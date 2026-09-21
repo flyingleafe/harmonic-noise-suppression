@@ -38,10 +38,19 @@ import torch
 import torch.utils.checkpoint
 from torch import Tensor, nn
 
-FLOOR_SHAPE_F_MIN = 30.0
-FLOOR_TILT_REF_HZ = 500.0
-FLOOR_SHAPE_N_CTRL = 14
-AMP_RPS_REF = 80.0
+# MOVED to data_processing.noise_model: the renderer of the v2 campaign reads
+# them and data_processing may not import experiments. Re-exported here so
+# every existing `from .model import AMP_RPS_REF, ...` keeps working.
+from data_processing.noise_model.constants import (
+    AMP_RPS_REF,
+    FLOOR_SHAPE_F_MIN,
+    FLOOR_SHAPE_N_CTRL,
+    FLOOR_SHAPE_OCT,
+    FLOOR_SHAPE_STD_DB,
+    FLOOR_TILT_REF_HZ,
+)
+from data_processing.noise_model.floor import interp_matrix, se_cholesky
+
 HANN_POWER_KERNEL = (1.0 / 6.0, 2.0 / 3.0, 1.0 / 6.0)
 GAMMA_FLOOR_HZ = 0.05
 #: The renderer floors every half width at 0.6 bins (``GAMMA_MIN_BINS``) so a
@@ -98,8 +107,8 @@ class Spec:
     floor_gp_tau_s: float = 3.0
     floor_tilt_gp_std: float = 0.5
     floor_tilt_gp_tau_s: float = 6.0
-    floor_shape_std_db: float = 5.0
-    floor_shape_oct: float = 1.5
+    floor_shape_std_db: float = FLOOR_SHAPE_STD_DB
+    floor_shape_oct: float = FLOOR_SHAPE_OCT
     line_shape: str = "lorentz"  # lorentz | gauss
     free_gamma: bool = False
     #: width law exponent: ``gamma = gamma0 + slope * k**width_power``. 1 is the
@@ -191,12 +200,6 @@ class Spec:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-def se_cholesky(n: int, dt: float, tau: float, jitter: float = 1e-6) -> np.ndarray:
-    t = np.arange(n) * dt
-    k = np.exp(-0.5 * ((t[:, None] - t[None, :]) / max(tau, 1e-9)) ** 2)
-    return np.linalg.cholesky(k + jitter * np.eye(n))
-
-
 def ou_cholesky(n: int, dt: float, tau: float, jitter: float = 1e-6) -> np.ndarray:
     """Matérn-1/2 (Ornstein-Uhlenbeck) kernel: ``exp(-|dt|/tau)``."""
     t = np.arange(n) * dt
@@ -206,19 +209,6 @@ def ou_cholesky(n: int, dt: float, tau: float, jitter: float = 1e-6) -> np.ndarr
 
 def drift_cholesky(kind: str, n: int, dt: float, tau: float) -> np.ndarray:
     return ou_cholesky(n, dt, tau) if kind == "ou" else se_cholesky(n, dt, tau)
-
-
-def interp_matrix(x: np.ndarray, knots: np.ndarray) -> np.ndarray:
-    """Linear interpolation ``x <- knots`` as a dense ``(len(x), len(knots))``
-    matrix; outside the knot range it clamps to the end knots."""
-    x = np.asarray(x, dtype=np.float64)
-    a = np.zeros((x.size, knots.size))
-    idx = np.clip(np.searchsorted(knots, x, side="right") - 1, 0, knots.size - 2)
-    w = (x - knots[idx]) / (knots[idx + 1] - knots[idx])
-    w = np.clip(w, 0.0, 1.0)
-    a[np.arange(x.size), idx] = 1.0 - w
-    a[np.arange(x.size), idx + 1] = w
-    return a
 
 
 def _knots(t_end: float, dt: float) -> np.ndarray:

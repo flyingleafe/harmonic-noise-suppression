@@ -35,8 +35,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import scipy.signal as sps
 
+from data_processing.noise_model.resample import decimate_audio
 from experiments.stochastic_fit.data import SR, Clip
 
 #: Both rigs record at 44.1 kHz; the published frames keep that rate.
@@ -499,8 +499,11 @@ def decimate(clip: Clip, target_sr: int = SR) -> Clip:
     ``scipy.signal.resample_poly`` uses a Kaiser-windowed FIR whose transition
     band sits just below the new Nyquist, so the result keeps content up to
     ~0.99 x Nyquist instead of the ~7.9 kHz the published 16 kHz training sets
-    stop at. The rps track is decimated by interpolation, which is exact for a
-    track already interpolated onto the audio grid.
+    stop at. The audio resampling itself is
+    :func:`data_processing.noise_model.resample.decimate_audio`, moved there so
+    the v2 renderer can decimate plain audio without building a :class:`Clip`;
+    the rps track is decimated by interpolation, which is exact for a track
+    already interpolated onto the audio grid.
 
     This is the path REAL clips take, and it is deliberately unchanged: a
     render that carries energy above the output Nyquist must remove it itself
@@ -509,11 +512,7 @@ def decimate(clip: Clip, target_sr: int = SR) -> Clip:
     """
     if int(clip.sr) == int(target_sr):
         return clip
-    from math import gcd
-
-    g = gcd(int(clip.sr), int(target_sr))
-    up, down = int(target_sr) // g, int(clip.sr) // g
-    audio = sps.resample_poly(clip.audio.astype(np.float64), up, down, axis=-1)
+    audio = decimate_audio(clip.audio, clip.sr, target_sr)
     n = audio.shape[-1]
     t_new = np.arange(n) / float(target_sr)
     t_old = np.arange(clip.audio.shape[-1]) / float(clip.sr)
@@ -522,7 +521,7 @@ def decimate(clip: Clip, target_sr: int = SR) -> Clip:
     meta.update(sample_rate=int(target_sr), decimated_from=int(clip.sr))
     return replace(
         clip,
-        audio=np.ascontiguousarray(audio.astype(np.float32)),
+        audio=audio,
         rps=np.ascontiguousarray(rps),
         sr=int(target_sr),
         rps_original=np.ascontiguousarray(rps),
