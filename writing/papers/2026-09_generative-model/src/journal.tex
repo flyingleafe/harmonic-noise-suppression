@@ -49,17 +49,22 @@ limited by data: the public annotated flight recordings amount to a few
 minutes from two airframes, and models trained on them recognize
 trajectories they have already heard instead of reading the harmonic
 comb. We replace the data with a model. We fit a probabilistic
-generative model of drone ego-noise in two halves, both estimated from
-real flights by exact likelihood. The first is a state-space model of
+generative model of drone ego-noise in two halves, each estimated from
+real flights by the likelihood its structure admits. The first is a
+state-space model of
 the four rotor-speed trajectories, with a slow and a resonant mode per
 control axis, a per-rotor measurement process and a per-flight offset,
-fitted to seven rigs; a diagonal Gaussian over a dimensionless
+fitted to seven rigs by an \emph{exact} steady-state Kalman
+likelihood; a diagonal Gaussian over a dimensionless
 reparametrization of its 32 parameters samples unseen airframes. The
 second is a model of the rotor-noise audio given a speed trajectory:
 harmonic lines whose phase carries an integrated Ornstein--Uhlenbeck
 shaft error and a per-line Lorentzian width, a per-order power profile,
-a coloured floor with speed laws, and per-microphone gains, fitted by a
-composite Whittle likelihood on bench recordings and then in flight.
+a coloured floor with speed laws, and per-microphone gains, fitted by
+the \emph{composite Whittle approximation} on static bench recordings
+and then in flight with the dynamics frozen. The bench stage
+converges on 12 of its 21 supports; the flight fit does not, and we
+report it as a stable basin rather than a converged optimum.
 We validate the fits with a tracker-parity gate: a frozen estimator
 trained on real audio reads the rendered audio at
 1.82\revps{} on the DREGON rig against a 2.19\revps{} bar and
@@ -297,15 +302,18 @@ logs are two of the seven rigs of Section~\ref{sec:traj}. The
 validation clips are not fitted on.
 
 \subsection{Speech mixing}
-During training we mix every 1-s chunk of rotor noise
+During training every chunk of rotor noise is mixed
 with a LibriSpeech \cite{panayotov2015librispeech} utterance drawn from
 train-clean-100 (100 h, 251 speakers) at a signal-to-noise ratio drawn
 uniformly from $[-30, 0]$ dB. The noise is the reference level, with a
 floor on the reference so that a silent chunk cannot be scaled into
-loud speech. One sixth of the chunks form a zero-labelled ``silence''
+loud speech. A fraction of the draws form a zero-labelled ``silence''
 arm, which contains speech and room noise but no rotor noise. Without
 this arm the models learn that quiet means stopped, and they fail on
 silence that carries sound. Each epoch therefore sees fresh mixtures.
+The chunk length and the size of the silence arm are properties of the
+individual training stream, not of the data, and are given per arm in
+Section~\ref{sec:proto}.
 
 \subsection{Ground truth}
 The logs are imperfect in ways that matter at
@@ -1229,6 +1237,24 @@ every real view degraded after epoch 22, so a macro monitor neither
 stopped the run nor reduced the learning rate.
 % source: docs/experiments/rig-sampler-transfer-pair.md
 
+The arms of this section train on 2-s clips, mixed with LibriSpeech as
+described in Section~\ref{sec:data}. The size of the silence arm
+follows from the stream's source weights. The two synthetic-only
+streams carry one noise source at weight 0.8 against the
+zero-labelled silence arm at 0.2, so silence is 20\,\% of the noise
+draws; the mixed stream is real $2.0$ : silence $0.4$ : synthetic
+$2.0$, so silence is 9.1\,\% of them. The Conv+BiGRU real reference
+and the two legacy synthetic references use the same 2-s clips; the
+HPPNet L2 reference at 2.27\revps{} was trained on 1-s chunks with a
+16.7\,\% silence arm, which is the one respect in which it is not
+configuration-identical to the arms below.
+% source: conf/online_mix/noise_v2_easy_5050.yaml,
+% conf/online_mix/noise_v2_hard_5050.yaml (noise 0.8 / silence 0.2),
+% conf/online_mix/noise_v2_mixed_dload.yaml (real 2.0 / silence 0.4 /
+% noise_v2 2.0); conf/experiment/{rig_easy,rig_hard,real_r4}_scv2_unified.yaml
+% (duration_s 2.0); conf/online_mix/hb_silence_dload.yaml (duration_s 1.0,
+% silence 0.4 against merged real 2.0 = 16.7 %); docs/experiments/noise-v2-transfer.md
+
 Two real-data references anchor the section: the Conv+BiGRU regressor
 trained on the real pool, at 2.99\revps, and HPPNet L2, at
 2.27\revps. Two synthetic references sit above them: the previous
@@ -1546,14 +1572,16 @@ never an unseen drone in the arms of Section~\ref{sec:exp}.
 
 We set out to replace scarce annotated flight with a model of the
 thing being annotated. The model has two halves, both fitted to real
-recordings by exact likelihood and both usable as samplers: a
-state-space model of the four rotor-speed trajectories, which beats
+recordings and both usable as samplers: a state-space model of the
+four rotor-speed trajectories, fitted by an exact steady-state Kalman
+likelihood, which beats
 the synthesizer it replaces on the variance and correlation families
 of a frozen five-family judge and passes all five on one rig, and a
-parametric model of the rotor-noise audio, whose renders a frozen
+parametric model of the rotor-noise audio, fitted by the composite
+Whittle approximation, whose renders a frozen
 real-trained estimator reads at 1.82 and 1.62\revps{} against bars of
-2.19 and 3.03. Neither half is finished --- the flight fits stop at a
-stable basin rather than a converged optimum,
+2.19 and 3.03. Neither half is finished --- the audio model's flight
+fits stop at a stable basin rather than a converged optimum,
 the speed laws are not identified from cruise-only pools, and the
 trajectory judge cannot see the heavy tails that every real series
 has --- and we have stated each of those rather than absorbed it.
