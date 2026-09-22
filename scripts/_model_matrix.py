@@ -339,7 +339,7 @@ def fitted_rig(rig: str) -> tuple[Any, dict[str, Any]]:
     spec = ANCHORS[rig]
     fit_path = REPO_ROOT / spec["fit"]
     anchor = rig_sampler.load_anchor(fit_path, spec["clip"])
-    export, clipped = bank_builder.clip_exponents(anchor)
+    export, clipped = rig_sampler.clip_exponents(anchor)
 
     policy_text, _, index = str(spec["dynamics"]).rpartition(":")
     ranges = rig_sampler.donor_ranges(REPO_ROOT / policy_text, int(index))
@@ -429,7 +429,7 @@ def hard_bank_coordinates() -> dict[str, Any]:
         reference = bank_builder.path_reference(anchors, levels, t)
         if not bank_builder.silent_when_stopped(export):
             continue
-        export, clipped = bank_builder.clip_exponents(export)
+        export, clipped = rig_sampler.clip_exponents(export)
         if clipped and not rig_sampler.check_sample(export, reference)["ok"]:
             continue
         coords.append(t)

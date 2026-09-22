@@ -1987,6 +1987,53 @@ BANK_N_MICS = 8
 #: HWHM of a unit-std Gaussian, i.e. the gamma-to-shaft-jitter conversion.
 GAUSS_HWHM = float(np.sqrt(2.0 * np.log(2.0)))
 
+#: STATED BOUND on the speed exponents, and the only place in this pipeline
+#: where a sampled value is bounded by anything other than a measured width.
+#:
+#: WHY. The sampler draws ``amp_exp`` and ``floor_exp`` with the measured
+#: between-refit sigma of 2.733, which is a legitimate WIDTH but has a tail no
+#: fit supports: an unbounded bank reached 24.7 and 31.9 dB per dB of rotor
+#: speed, and at that exponent an idle or ramp window carries a comb ~20 dB
+#: less prominent than the same rig at cruise — the low-speed part of every
+#: training clip would be a fiction. The bound is the range the six measured
+#: fits actually occupy (``results/rig_sampler/structure.json``,
+#: ``between_rig.per_fit``): ``amp_exp`` 4.398 (michael_standby) to 14.111
+#: (dregon_flight), ``floor_exp`` -3.711 (dregon_cruise_refined) to 6.792
+#: (michael_cruise).
+#:
+#: The ``floor_exp`` floor is raised from the measured -3.711 to 0 for a reason
+#: that is not statistical: a negative exponent is ``0 ** negative`` at the
+#: exact zero of a full flight's ground phase, i.e. infinite line power and NaN
+#: audio, which is why :func:`check_sample` refuses it outright. A clipped draw
+#: is re-checked against the sampler's guards and redrawn if the clip has made
+#: it implausible, so the bank stays an honest draw from the bounded family
+#: rather than a pile-up on the boundary.
+AMP_EXP_BOUND = (4.398, 14.111)
+FLOOR_EXP_BOUND = (0.0, 6.792)
+EXPONENT_BOUND_SOURCE = "results/rig_sampler/structure.json:between_rig.per_fit (six fits)"
+
+
+def clip_exponents(export: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Bound the speed exponents to the fitted range; name what was clipped.
+
+    Applied to every export the bank builder draws around, and to the anchor
+    itself wherever the anchor is rendered as a rig
+    (``scripts/_model_matrix.py``'s point presets,
+    ``notebooks/noise_lab.LegacyFit``), so the rendered rig is the one the arms
+    were defined against — and so a whole-flight trajectory's ground phase does
+    not meet a negative floor exponent.
+    """
+    out = dict(export)
+    clipped: list[str] = []
+    for key, (lo, hi) in (("amp_exp", AMP_EXP_BOUND), ("floor_exp", FLOOR_EXP_BOUND)):
+        value = float(out.get(key, out["amp_exp"]))
+        bounded = float(np.clip(value, lo, hi))
+        if bounded != value:
+            clipped.append(key)
+        out[key] = bounded
+    return out, clipped
+
+
 #: The fields an entry takes from the FIT rather than from the donor policy's
 #: per-clip draw. Everything not listed here (and not a ``fixed_*`` range in
 #: :func:`entry_params`) is the stream's own draw, so the arms keep the base

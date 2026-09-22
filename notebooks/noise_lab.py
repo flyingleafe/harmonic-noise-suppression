@@ -1032,12 +1032,18 @@ class LegacyFit(_LegacySource):
     fitted eight microphones either way; ``render(..., n_mics=1)`` listens
     through the first of them (:func:`_restrict_mics`).
 
-    NOT BOUNDED.  ``scripts/_build_rig_bank.py`` puts every export through
-    ``clip_exponents`` before it draws, which raises DREGON's fitted
-    ``floor_exp`` from -3.71 to 0; this source keeps the fit's own value, so a
-    trajectory that visits EXACTLY zero rotor speed (a whole flight's ground
-    phase) would give that rig an infinite floor gain.  Every airborne
-    trajectory is safe.
+    THE SPEED EXPONENTS ARE BOUNDED under ``"donor"``, by
+    :func:`~experiments.stochastic_fit.rig_sampler.clip_exponents` — the same
+    call the bank builder makes on every export before it draws around it, and
+    the point-preset run makes on the anchor itself: ``amp_exp`` into
+    ``[4.398, 14.111]`` and ``floor_exp`` into ``[0, 6.792]``, the range the
+    six measured fits occupy with the negative end raised to zero.  It bites
+    here: DREGON's fitted ``floor_exp`` is -3.711, and a negative exponent is
+    ``0 ** negative`` at the exact zero of a whole flight's ground phase, i.e.
+    infinite floor gain and NaN audio.  :meth:`describe` prints the fitted and
+    the rendered value of both exponents and marks what was clipped.  Under
+    ``"none"`` the export is rendered exactly as fitted, unbounded, because
+    that mode exists to hear the fit itself.
     """
 
     def __init__(
@@ -1067,15 +1073,22 @@ class LegacyFit(_LegacySource):
         self.fit_name = key
         self.fit_path = RS.FIT_PATHS[key]
         self.clip_id = _anchor_clip_id(path, selector)
-        self.export = RS.load_anchor(path, selector)
+        self.anchor = RS.load_anchor(path, selector)
         self.dynamics = mode
         self.seed = int(seed)
         rates = np.full(
-            np.atleast_2d(np.asarray(self.export["profile_db"])).shape[0],
+            np.atleast_2d(np.asarray(self.anchor["profile_db"])).shape[0],
             float(min_rps),
             dtype=np.float64,
         )
         if mode == "donor":
+            # The bank builder bounds every export's speed exponents before it
+            # draws around it, and the point-preset run bounds the anchor the
+            # same way; rendering the anchor unbounded would be a rig neither
+            # arm ever trained on — and DREGON's fitted floor_exp of -3.71 is
+            # ``0 ** negative`` at the exact zero of a whole flight's ground
+            # phase, i.e. infinite floor gain and NaN audio.
+            self.export, self.clipped = RS.clip_exponents(self.anchor)
             index = LEGACY_FIT_DONOR_INDEX["dregon" if key.startswith("dregon") else "michael"]
             self.donor = f"{LEGACY_FIT_DONOR_POLICY}:{index}"
             params = RS.entry_params(
@@ -1085,6 +1098,7 @@ class LegacyFit(_LegacySource):
                 rates=rates,
             )
         else:
+            self.export, self.clipped = self.anchor, []
             self.donor = None
             params = stage2.params_from_export(
                 self.export, rates, sample_rate=SR, n_mics=RS.BANK_N_MICS
@@ -1112,6 +1126,19 @@ class LegacyFit(_LegacySource):
             )
         )
         print(f"  line_mode  : {self.line_mode}")
+        if self.dynamics == "donor":
+            from experiments.stochastic_fit import rig_sampler as RS
+
+            bounds = ""
+            for key in ("amp_exp", "floor_exp"):
+                before = float(self.anchor.get(key, self.anchor["amp_exp"]))
+                after = float(self.export[key])
+                mark = "  CLIPPED" if key in self.clipped else ""
+                bounds += f"\n    {key:9s}: fitted {before:+.3f} -> rendered {after:+.3f}{mark}"
+            print(
+                f"  exponents  : rig_sampler.clip_exponents, amp_exp {RS.AMP_EXP_BOUND}, "
+                f"floor_exp {RS.FLOOR_EXP_BOUND}{bounds}"
+            )
         print(
             "  level      : power_scale folded "
             f"{float(self.export.get('power_scale_folded_db', float('nan'))):+.3f} dB, "
