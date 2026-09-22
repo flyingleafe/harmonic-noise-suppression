@@ -327,7 +327,7 @@ the same result):
 | `nv2_easy_scv2` | PASS | `nv2-easy-scv2-15cff2` |
 | `nv2_hard_scv2` | PASS | `nv2-hard-scv2-d926d0` |
 | `nv2_mixed_scv2` | PASS | `nv2-mixed-scv2-83d2cd` |
-| `nv2_easy_ft_scv2` | PASS | — (waits on `nv2_easy_scv2`) |
+| `nv2_easy_ft_scv2` | PASS | `nv2-easy-ft-scv2-9ff3c2` (chained `--after` `nv2-easy-scv2-15cff2`) |
 | `nv2_hard_ft_scv2` | PASS | — (waits on `nv2_hard_scv2`) |
 | `nv2_easy_hppnet_l2` | PASS | `nv2-easy-hppnet-l2-9a2ecf` |
 | `nv2_hard_hppnet_l2` | PASS | `nv2-hard-hppnet-l2-f71237` |
@@ -399,10 +399,47 @@ below are the job's own records and not a stdout scrape.
 | 09-22 03:52 | `nv2-hard-hppnet-l2-f71237` | running | 26 | 24 | 12.03 | 12.03 | 9.89 | 1e-03 |
 | 09-22 03:52 | `nv2-mixed-scv2-83d2cd` | queued | — | — | — | — | — | — |
 | 09-22 03:52 | `nv2-mixed-hppnet-l2-08c04f` | queued | — | — | — | — | — | — |
+| 09-22 03:55 | `nv2-easy-scv2-15cff2` | running | 62 | 53 | 8.05 | 7.69 | 7.18 | 5e-04 |
+| 09-22 03:55 | `nv2-hard-scv2-d926d0` | running | 66 | 15 | 9.17 | 7.06 | 7.06 | 3e-04 |
+| 09-22 03:55 | `nv2-easy-hppnet-l2-9a2ecf` | running | 27 | 20 | 7.23 | 6.46 | 5.52 | 1e-03 |
+| 09-22 03:55 | `nv2-hard-hppnet-l2-f71237` | running | 27 | 24 | 12.03 | 12.03 | 9.89 | 1e-03 |
+| 09-22 03:55 | `nv2-mixed-scv2-83d2cd` | queued | — | — | — | — | — | — |
+| 09-22 03:55 | `nv2-mixed-hppnet-l2-08c04f` | queued | — | — | — | — | — | — |
+| 09-22 04:20 | `nv2-easy-scv2-15cff2` | running | 76 | 53 | 8.05 | 7.69 | 7.18 | 3e-04 |
+| 09-22 04:20 | `nv2-hard-scv2-d926d0` | running | 81 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 04:20 | `nv2-easy-hppnet-l2-9a2ecf` | running | 33 | 20 | 7.23 | 6.46 | 5.52 | 5e-04 |
+| 09-22 04:20 | `nv2-hard-hppnet-l2-f71237` | running | 33 | 24 | 12.03 | 12.03 | 9.89 | 1e-03 |
+| 09-22 04:20 | `nv2-mixed-scv2-83d2cd` | queued | — | — | — | — | — | — |
+| 09-22 04:20 | `nv2-mixed-hppnet-l2-08c04f` | queued | — | — | — | — | — | — |
+| 09-22 04:45 | `nv2-easy-scv2-15cff2` | running | 90 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 04:45 | `nv2-hard-scv2-d926d0` | running | 96 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 04:45 | `nv2-easy-hppnet-l2-9a2ecf` | running | 39 | 20 | 7.23 | 6.46 | 5.52 | 5e-04 |
+| 09-22 04:45 | `nv2-hard-hppnet-l2-f71237` | running | 39 | 39 | 10.86 | 10.14 | 9.89 | 1e-03 |
+| 09-22 04:45 | `nv2-mixed-scv2-83d2cd` | queued | — | — | — | — | — | — |
+| 09-22 04:45 | `nv2-mixed-hppnet-l2-08c04f` | queued | — | — | — | — | — | — |
+| 09-22 05:10 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 05:10 | `nv2-hard-scv2-d926d0` | running | 111 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 05:10 | `nv2-easy-hppnet-l2-9a2ecf` | running | 46 | 20 | 7.23 | 6.46 | 5.52 | 3e-04 |
+| 09-22 05:10 | `nv2-hard-hppnet-l2-f71237` | running | 46 | 42 | 10.14 | 9.95 | 9.20 | 1e-03 |
+| 09-22 05:10 | `nv2-mixed-scv2-83d2cd` | running | 1 | — | — | — | 4.49 | 1e-03 |
+| 09-22 05:10 | `nv2-mixed-hppnet-l2-08c04f` | queued | — | — | — | — | — | — |
 
 ### Stage-1 and curriculum results
 
-**PENDING** — filled as each arm finishes.
+`real_overall` = `val/real_r3`, rev/s PIT MAE, lower is better. **sel** is the
+round `best_real_overall.ckpt` was written at (best smoothed); **raw @ sel** is
+that round's unsmoothed value and is the number every regime row below belongs
+to; **best raw** is the lowest raw value anywhere in the run, which no
+checkpoint corresponds to and which is quoted only so the gap between the two
+is visible. `r1`/`r2`/`r3` are the per-view values at **sel**.
+
+| arm | job | status | rounds | sel | smoothed | raw @ sel | best raw | r1 | r2 | r3 | r1/r2 |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| *`real_r4_scv2_unified`* (real ref) | — | done | 70 | — | — | — | **2.99** | — | — | 2.99 | — |
+| *`hppnet_l2_r2_s0`* (real ref) | — | done | — | — | — | — | **2.27** | — | — | 2.27 | — |
+| *`rig_easy_scv2_unified`* (legacy easy) | — | done | 94 | 57 | — | 6.09 | 5.72 | — | — | — | — |
+| *`rig_hard_scv2_unified`* (legacy hard) | — | done | 137 | — | — | — | 5.37 | — | — | — | — |
+| `nv2_easy_scv2` | `nv2-easy-scv2-15cff2` | done | 102 | 81 | 7.94 | **7.94** | 7.18 | 10.89 | 9.67 | 7.94 | 1.13 |
 
 ### Four-regime decomposition
 
