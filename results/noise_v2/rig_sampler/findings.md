@@ -149,8 +149,8 @@ sample and coverage is correspondingly higher:
 | | easy | hard |
 |---|---|---|
 | file | `noise_v2_easy_n2048.json` | `noise_v2_hard_n2048.json` |
-| sha256 | `e6329171f20fee3a…` | `fc1143c9ff1ff57c…` |
-| content digest | `a936e4d8cb78792f…` | `1926c4644dc8cdad…` |
+| sha256 | `cea6c5ad56b1337d…` | `b5ff345ecd2b8289…` |
+| content digest | `16ad7d6797aec704…` | `b43eacd34b993d70…` |
 | size | 29.8 MB | 29.3 MB |
 | entries | 1024 dregon + 1024 michaels | 2048 on the cruise-to-cruise path |
 | mode | neighbourhood, strength 3.0 | path, spread 3.0, K = 1..81 |
@@ -160,7 +160,7 @@ sample and coverage is correspondingly higher:
 | draws rejected | 2082 (50.4 %) | 1593 (43.8 %) |
 | guards fired | `ltas` 1041, `gamma_excursion` 859, `trend_falls` 697 | `ltas` 913, `gamma_excursion` 728, `trend_falls` 232 |
 | orders dropped | none | dregon 7 (orders 82–88), michaels 0 |
-| wall | 984 s | 973 s |
+| wall | 915 s | 980 s |
 
 `ltas` is the most active guard in both banks and `trend_falls` is three times
 more active in the easy bank than in the hard one, which follows from where the
@@ -175,13 +175,18 @@ accepted hard entries: mean 0.5009, KS distance to U(0,1) **0.0166** against the
 regime POLICY carried with probability t, and `path_cloud.png` shows the
 realised fraction per decile tracking the diagonal.
 
-**Wall time.** 984 s (easy) and 973 s (hard) on 11 workers of a 14-thread
+**Wall time.** 915 s (easy) and 980 s (hard) on 11 workers of a 14-thread
 laptop, i.e. **~16 min per bank, not under 15**: the guard's expected
-periodogram is 0.2 s per probe, an accepted entry costs about 1.8 probes' worth
-of attempts times two probes, and 2048 of them do not compress further without
-giving up the idle probe. The banks are therefore PUBLISHED as a pinned dload
-dataset (`noise-v2-banks`) rather than rebuilt in-job; `--preset easy|hard`
-stays the reproduction path.
+periodogram is 0.2 s per probe, an accepted entry costs about 1.8 attempts
+times two probes, and 2048 of them do not compress further without giving up
+the idle probe. The banks are therefore PUBLISHED as a pinned dload dataset
+rather than rebuilt in-job — `noise-v2-banks`, version
+`7f6a3242b353b1d0806f2add1ee0826dbc8032e904d9ae9825cf4c1d064d2925`, a flat tree
+holding the two banks, `build_easy.json`, `build_hard.json`, `structure.json`,
+`manifest.json` and `README.md`. The arms name
+`dload:noise-v2-banks/noise_v2_{easy,hard}_n2048.json` and take the version
+from the committed `dload.lock`; `--preset easy|hard` stays the reproduction
+path.
 
 ## 5. Reproducibility
 
@@ -197,12 +202,24 @@ The skip digest covers the CODE as well as the inputs: sha256 of
 `results/noise_v2/rig_sampler/structure.json`, plus both anchors' sha256s, the
 widths, the guard constants, the seed, the strength and the count. Verified:
 
-* two independent full builds of the same spec produce byte-identical banks
-  (sha256 `e6329171f20fee3a…` easy, `fc1143c9ff1ff57c…` hard, reproduced to
-  `/tmp/repro_{easy,hard}.json`);
-* appending a no-op comment to `rig_sampler.py` moves the easy digest
-  `a936e4d8cb78792f…` -> `0ed37a9dba39e1ce…`, and reverting the comment restores
-  it exactly, so a code change rebuilds and an unchanged rerun skips.
+* appending a no-op comment to `rig_sampler.py` moves the easy digest, and
+  reverting the comment restores it exactly (measured on the pre-publication
+  source: `a936e4d8cb78792f…` -> `0ed37a9dba39e1ce…` -> `a936e4d8cb78792f…`), so
+  a code change rebuilds and an unchanged rerun skips;
+* the PUBLISHED banks' digests equal what the committed source computes, checked
+  by rerunning the builder WITHOUT `--force`: both presets print "already the
+  bank this spec describes" and skip (easy `16ad7d6797aec704…`, hard
+  `b43eacd34b993d70…`). The banks were rebuilt from the final committed source
+  for exactly this reason — the pre-commit typing and formatting fixes that
+  landed after the first build are non-functional, which the rebuild
+  demonstrates: every draw statistic is unchanged (2.017 / 1.778 attempts per
+  entry, the same guard counts 1041/859/697 and 913/728/232, the same realised
+  t and KS 0.0166), and only the provenance's source hashes and hence the file
+  bytes differ;
+* determinism against the worker count and the completion order is pinned by
+  `tests/experiments/test_noise_model_rig_sampler.py::test_bank_bytes_are_reproducible_and_the_digest_covers_the_code`,
+  which builds the same spec at 1 and 2 workers and compares the serialised
+  payloads byte for byte.
 
 A skip is not blind: when the digest matches, the builder still loads the
 existing bank and renders from it before exiting 0.

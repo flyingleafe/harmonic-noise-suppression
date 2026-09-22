@@ -1,17 +1,17 @@
 {
   "bank": "data/rig_banks/noise_v2_hard_n2048.json",
-  "sha256": "fc1143c9ff1ff57cb4ffae3d98769458728849fdf40f4c0de1c9babde5524da4",
+  "sha256": "b5ff345ecd2b8289f162c7b7e34cbc877f08d250bfc2d16e1d461519650eb633",
   "size_bytes": 29305854,
-  "built_at": "2026-09-22T00:53:50+00:00",
-  "git": "82bcc2ae3a7fd6d3f3498aac5aa5658bc45b316a",
-  "wall_s": 972.8901371955872,
+  "built_at": "2026-09-22T01:51:58+00:00",
+  "git": "f819db58fb5c3029fb722b7e1ddc00d58567a629",
+  "wall_s": 980.1304039955139,
   "n_workers": 11,
   "strength": 3.0,
   "strength_reason": "the first ladder setting reaching 90% above 300 Hz",
-  "digest": "1926c4644dc8cdadf9c18a7684e796901d7b7a911d698afd6b929823e2f364c7",
+  "digest": "b43eacd34b993d707808a7cc2cfae92a6a96cc05dfcb88cedd952f71855094cf",
   "code": {
-    "scripts/noise_v2_build_bank.py": "e9c0224f1eefdddd3708b980eb8fde400831c67ef70a0cedd145eaf81de718ea",
-    "src/experiments/noise_model/rig_sampler.py": "93017afab78f9095ac494c0fdbd7634b9d2b1e4ee139f70ede7d9da3f1587c94",
+    "scripts/noise_v2_build_bank.py": "dedd7ac67e22470c36ba6321eb142b15f55fcebe49d48f1a6b35e44a7d014e0f",
+    "src/experiments/noise_model/rig_sampler.py": "355a8d627b9ed247a93260d6ad35d1812ffde7cbb76c4bb118fe9e724a94226c",
     "src/data_processing/noise_model/render.py": "332a9780833f726082c34c7401308205fb4b2ae84eb5ee27e5579bbe6ef9bfa6",
     "src/data_processing/noise_model/params.py": "d0f5119011a2b663f09ebbdc33cc6eb8c9cf5041371ce9470b6c70486963a909",
     "src/data_processing/noise_model/spectrum.py": "36bb2800bc3a1b1e1be52db3d27146beb33895500b4bb3635e058c0c9b670a6f",
@@ -22,15 +22,15 @@
     "builder": "scripts/noise_v2_build_bank.py",
     "sampler": "experiments.noise_model.rig_sampler",
     "code": {
-      "scripts/noise_v2_build_bank.py": "e9c0224f1eefdddd3708b980eb8fde400831c67ef70a0cedd145eaf81de718ea",
-      "src/experiments/noise_model/rig_sampler.py": "93017afab78f9095ac494c0fdbd7634b9d2b1e4ee139f70ede7d9da3f1587c94",
+      "scripts/noise_v2_build_bank.py": "dedd7ac67e22470c36ba6321eb142b15f55fcebe49d48f1a6b35e44a7d014e0f",
+      "src/experiments/noise_model/rig_sampler.py": "355a8d627b9ed247a93260d6ad35d1812ffde7cbb76c4bb118fe9e724a94226c",
       "src/data_processing/noise_model/render.py": "332a9780833f726082c34c7401308205fb4b2ae84eb5ee27e5579bbe6ef9bfa6",
       "src/data_processing/noise_model/params.py": "d0f5119011a2b663f09ebbdc33cc6eb8c9cf5041371ce9470b6c70486963a909",
       "src/data_processing/noise_model/spectrum.py": "36bb2800bc3a1b1e1be52db3d27146beb33895500b4bb3635e058c0c9b670a6f",
       "src/data_processing/noise_model/lag.py": "1aa85e869d087d13b9ccf8b38ca8b6da36fd1b4077e25f262fcd220081fc7303",
       "results/noise_v2/rig_sampler/structure.json": "7a4ebd9a7de8344b842d76df0b4b0dedb051b1d2895504802f5b0298425bd623"
     },
-    "digest": "1926c4644dc8cdadf9c18a7684e796901d7b7a911d698afd6b929823e2f364c7",
+    "digest": "b43eacd34b993d707808a7cc2cfae92a6a96cc05dfcb88cedd952f71855094cf",
     "preset": "hard",
     "mode": "path",
     "n": 2048,
@@ -2189,7 +2189,7 @@
     "n_requested": 2048,
     "n_exhausted": 0,
     "n_workers": 11,
-    "wall_s": 944.312087,
+    "wall_s": 951.636165,
     "attempts_mean": 1.77783203125,
     "attempts_max": 9,
     "first_try_frac": 0.56982421875,
@@ -6539,5 +6539,6 @@
         20.145926454280414
       ]
     }
-  }
+  },
+  "self_checked_at": "2026-09-22T01:53:07+00:00"
 }
