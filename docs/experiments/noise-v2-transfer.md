@@ -498,6 +498,24 @@ below are the job's own records and not a stdout scrape.
 | 09-22 07:51 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
 | 09-22 07:51 | `nv2-hard-ft-scv2-56dbff` | running | 11 | 6 | 2.83 | 2.65 | 2.62 | 1e-03 |
 | 09-22 07:51 | `nv2-easy-ft-hppnet-l2-1a711c` | queued | — | — | — | — | — | — |
+| 09-22 07:53 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 07:53 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 07:53 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 07:53 | `nv2-hard-hppnet-l2-f71237` | running | 86 | 79 | 7.15 | 6.80 | 6.72 | 1e-03 |
+| 09-22 07:53 | `nv2-mixed-scv2-83d2cd` | running | 102 | 91 | 2.53 | 2.53 | 2.47 | 1e-04 |
+| 09-22 07:53 | `nv2-mixed-hppnet-l2-08c04f` | running | 46 | 40 | 2.48 | 2.48 | 2.26 | 1e-03 |
+| 09-22 07:53 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 07:53 | `nv2-hard-ft-scv2-56dbff` | running | 12 | 6 | 2.83 | 2.65 | 2.62 | 1e-03 |
+| 09-22 07:53 | `nv2-easy-ft-hppnet-l2-1a711c` | queued | — | — | — | — | — | — |
+| 09-22 08:19 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 08:19 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 08:19 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 08:19 | `nv2-hard-hppnet-l2-f71237` | running | 93 | 79 | 7.15 | 6.80 | 6.72 | 1e-03 |
+| 09-22 08:19 | `nv2-mixed-scv2-83d2cd` | succeeded | 115 | 91 | 2.53 | 2.53 | 2.43 | 1e-04 |
+| 09-22 08:19 | `nv2-mixed-hppnet-l2-08c04f` | running | 54 | 40 | 2.48 | 2.48 | 2.26 | 1e-03 |
+| 09-22 08:19 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 08:19 | `nv2-hard-ft-scv2-56dbff` | running | 31 | 24 | 2.47 | 2.23 | 2.23 | 1e-03 |
+| 09-22 08:19 | `nv2-easy-ft-hppnet-l2-1a711c` | queued | — | — | — | — | — | — |
 
 ### Stage-1 and curriculum results
 
@@ -518,6 +536,7 @@ is visible. `r1`/`r2`/`r3` are the per-view values at **sel**.
 | `nv2_hard_scv2` | `nv2-hard-scv2-d926d0` | done | 116 | 15 | 9.17 | **7.06** | 7.06 | 25.11 | 9.38 | 7.06 | 2.68 |
 | `nv2_easy_hppnet_l2` | `nv2-easy-hppnet-l2-9a2ecf` | done | 61 | 20 | 7.23 | **6.46** | 5.52 | 10.59 | 8.55 | 6.46 | 1.24 |
 | `nv2_easy_ft_scv2` | `nv2-easy-ft-scv2-9ff3c2` | done | 54 | 10 | 2.79 | **2.73** | 2.56 | 3.34 | 3.18 | 2.73 | 1.05 |
+| `nv2_mixed_scv2` | `nv2-mixed-scv2-83d2cd` | done | 116 | 91 | 2.53 | **2.53** | 2.43 | 2.59 | 2.93 | 2.53 | 0.88 |
 
 ### Four-regime decomposition
 
@@ -553,6 +572,7 @@ finding survives the re-measurement, its magnitude does not.
 | `nv2_easy_scv2` | 7.99 | 10.64 | 11.05 | 11.12 | 6.87 | 6.42 | 16.76 |
 | `nv2_hard_scv2` | 7.05 | 1.25 | 6.16 | 15.81 | 7.76 | 8.14 | 18.56 |
 | `nv2_easy_hppnet_l2` | 6.45 | 3.58 | 5.04 | 26.50 | 6.14 | 9.95 | 15.46 |
+| `nv2_easy_ft_scv2` | 2.73 | 2.23 | 2.36 | 8.16 | 2.60 | 7.37 | 12.75 |
 
 *(target spread of the same frames: zero 0.01, standby 10.63, ramp 7.85,
 cruise 13.79 rev/s.)*
