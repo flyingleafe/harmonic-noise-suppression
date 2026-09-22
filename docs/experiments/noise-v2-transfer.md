@@ -233,12 +233,12 @@ coverage, self-check, wall time, digest) plus `structure.json` (the measured
 widths and the real-window band levels).
 
 **Transport.** A 2048-entry build takes about 45 minutes, so the banks are
-NOT rebuilt per job: they are published once as the pinned dload dataset
-`noise-v2-banks`, version
-`5515c472823bfe8c497bcdea15bb0a2e5b22e1a167eeea8a9822253a163a9002`
-(`dload.lock` line 55), and each policy names the file inside that pinned
-tree directly:
-`preset_bank: dload:noise-v2-banks@5515c472823b…/noise_v2_easy_n2048.json`.
+NOT rebuilt per job: they are published once as the dload dataset
+`noise-v2-banks` and each policy names the file inside it —
+`preset_bank: dload:noise-v2-banks/noise_v2_easy_n2048.json`. The VERSION is
+pinned by the committed `dload.lock`, the convention
+`rps.fits: dload:rps-traj-fits` already uses, so one git SHA resolves one
+exact bank and a republished dataset does not silently change an arm.
 `load_preset_bank` routes its path through
 `data_processing.streams.resolve_source`, the same convention `rps.fits` uses,
 so a pinned dataset resolves to a local file and a plain path still works
@@ -246,9 +246,8 @@ unchanged; the pin sits in the policy AND in the lock, so a job cannot
 silently train on a different bank. `scripts/noise_v2_submit_arms.sh` runs
 `dload pull noise-v2-banks` once before `train.py`, so the fetch happens up
 front and never inside a DataLoader worker. Verified on this machine:
-`load_preset_bank('dload:noise-v2-banks@5515c47…/noise_v2_hard_n2048.json')`
-returns 2048 entries (first `path_s3_00000`, `traj_rig` null, standby
-present).
+`load_preset_bank('dload:noise-v2-banks/noise_v2_hard_n2048.json')` returns
+2048 entries (first `path_s3_00000`, `traj_rig` null, standby present).
 
 * **Canonical regime pair.** Michael's = {standby, cruise} as fitted; DREGON =
   {standby: null, cruise: R5 `dregon_room2_floor__flight_profile.json`}.

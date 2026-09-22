@@ -31,7 +31,7 @@ clips, `samples_per_validation: null`, validation batch 64, lr 1e-3, patience
 20 all stand.
 
 Stream `conf/online_mix/noise_v2_hard_5050.yaml`, bank
-`dload:noise-v2-banks@5515c472823b…/noise_v2_hard_n2048.json` (2048 entries,
+`dload:noise-v2-banks/noise_v2_hard_n2048.json` (2048 entries,
 seed 20260921, sampler strength 3.0, published once as the pinned
 `noise-v2-banks` dataset and pulled by the job). The path interpolates CRUISE <-> CRUISE only on the
 common order range K = 1..81 (DREGON's orders 82-88 are dropped and the drop is

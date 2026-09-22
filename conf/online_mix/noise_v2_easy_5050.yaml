@@ -95,8 +95,10 @@
 #
 # THE BANK TRAVELS AS A PINNED DATASET, not as a build step: a 2048-entry
 # build takes ~45 min, so the banks are published once as `noise-v2-banks`
-# (version 5515c472823b..., seed 20260921, sampler strength 3.0) and the
-# `preset_bank` below names the file INSIDE that pinned tree.
+# (seed 20260921, sampler strength 3.0) and the `preset_bank` below names
+# the file INSIDE that tree. The VERSION is pinned by `dload.lock`, which
+# is committed, so a checkout at one git SHA resolves one exact bank --
+# the same convention `rps.fits: dload:rps-traj-fits` uses.
 # `load_preset_bank` resolves it through
 # `data_processing.streams.resolve_source`, the same convention `rps.fits`
 # uses. A job pulls it once (`dload pull noise-v2-banks`) before train.py, so
@@ -113,7 +115,7 @@ sources:
     weight: 0.8
     n_mics: 8
     n_rotors: 4
-    preset_bank: dload:noise-v2-banks@5515c472823bfe8c497bcdea15bb0a2e5b22e1a167eeea8a9822253a163a9002/noise_v2_easy_n2048.json
+    preset_bank: dload:noise-v2-banks/noise_v2_easy_n2048.json
     render_reuse: 192
     rps_scale_range:
     - 0.45

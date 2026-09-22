@@ -30,7 +30,7 @@ clips, `samples_per_validation: null`, validation batch 64, lr 1e-3, patience
 20 all stand.
 
 Stream `conf/online_mix/noise_v2_easy_5050.yaml`, bank
-`dload:noise-v2-banks@5515c472823b…/noise_v2_easy_n2048.json` (2048 entries,
+`dload:noise-v2-banks/noise_v2_easy_n2048.json` (2048 entries,
 seed 20260921, sampler strength 3.0, published once as the pinned
 `noise-v2-banks` dataset and pulled by the job — a 2048-entry build takes
 ~45 min, so it is not rebuilt per run). One `kind: noise_v2` source at weight 0.8 (one source,
