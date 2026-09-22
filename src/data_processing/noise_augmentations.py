@@ -35,7 +35,13 @@ pair; STFT-domain ones use the model's own 2048/512 grid):
   ``alpha`` (and time-compress them consistently), crop/zero-pad to the chunk
   length (the padded tail gets rps=0 — silence at zero rotor speed is the
   project's own amplitude convention). The key one: it manufactures genuinely
-  new (audio, RPS) pairs.
+  new (audio, RPS) pairs. ``rps_max`` (optional, default ``None`` = no
+  ceiling) bounds the AUGMENTED LABEL: the draw's upper bound becomes
+  ``min(alpha_high, rps_max / max(rps in this frame))``, and a frame that
+  cannot take even ``alpha_low`` is passed through at ``alpha = 1``. It exists
+  because a stream that caps its own trajectories (``rps.rps_max``) would
+  otherwise hand a model targets ``alpha`` times higher — 195 rev/s from a
+  150-capped flight at ``alpha_high`` 1.3, off a 0-150 salience grid.
 * ``spectral_recolor`` — multiply the STFT magnitude by a smooth random curve
   (gains ``U(-8, +8)`` dB at 10 log-spaced anchors 30 Hz..8 kHz, interpolated
   over bins in log-frequency, independent per channel). Labels untouched.
@@ -206,9 +212,25 @@ def _freq_scale(
 ) -> tuple[np.ndarray, np.ndarray]:
     import soxr
 
-    alpha = float(
-        rng.uniform(float(params.get("alpha_low", 0.75)), float(params.get("alpha_high", 1.3)))
-    )
+    alpha_low = float(params.get("alpha_low", 0.75))
+    alpha_high = float(params.get("alpha_high", 1.3))
+    # `rps_max` (optional; None = the historical behaviour) is a CEILING ON THE
+    # AUGMENTED LABEL, not on the source's trajectory. A stream can cap what it
+    # generates (`rps.rps_max`) and still hand a model targets alpha times
+    # higher, because this augmentation multiplies the labels by alpha: at
+    # alpha_high 1.3 a flight capped at 150 rev/s yields 195, off the salience
+    # trunks' 0-150 grid. When set, the upper bound of the alpha draw becomes
+    # the largest alpha this FRAME can take without crossing it; if that lands
+    # below `alpha_low` the frame is left alone (alpha = 1). The draw is taken
+    # either way, so the random stream does not depend on the frame's labels.
+    rps_max = params.get("rps_max")
+    label_peak = float(np.max(label)) if label.size else 0.0
+    alpha_cap = alpha_high
+    if rps_max is not None and label_peak > 0.0:
+        alpha_cap = min(alpha_high, float(rps_max) / label_peak)
+    alpha = float(rng.uniform(alpha_low, max(alpha_low, alpha_cap)))
+    if alpha_cap < alpha_low:
+        alpha = 1.0
     T = audio.shape[-1]
     # Playback at alpha x speed: all frequencies (and the comb) scale by alpha,
     # duration scales by 1/alpha. soxr takes (T, C) float32 and float rates.

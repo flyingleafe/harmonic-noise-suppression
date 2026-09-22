@@ -70,11 +70,17 @@ Five decisions are written into those files and are recorded here because they
 are the arms' content, not their plumbing.
 
 **One source, not two.** The legacy arms carried the same bank in TWO
-stochastic sources purely for two independent render pools. A v2 render costs
-1973 ms per 2 s x 8 mics against the legacy 416 ms
-(`results/noise_v2/stream_bench/`), so a second pool buys nothing but render
-cost. One source at weight 0.8 carries the combined weight and the
-noise : silence ratio is unchanged at 0.8 : 0.2.
+stochastic sources, which gives two independent render pools over ONE
+distribution. That is a cache-topology choice and not a throughput one: each
+source refreshes once per `render_reuse` of its own draws, so two sources at
+half the weight render no more often in steady state than one at the full
+weight. What two pools cost is two warm-ups before the stream saturates and
+two resident renders, which at 1973 ms per 2 s x 8 mics against the legacy
+416 ms (`results/noise_v2/stream_bench/`) is worth avoiding; what they buy is
+two windows to alternate between rather than one. One source at weight 0.8
+carries the combined weight and the noise : silence ratio is unchanged at
+0.8 : 0.2. The mixed policy's two replaced sources were two DIFFERENT
+families (a stochastic rig and a static comb), which one v2 bank subsumes.
 
 **`render_reuse: 192`, not 48.** At 48 the v2 loader is RENDER-BOUND: 12
 workers deliver a batch of 128 about every 1.2 s, so the stream would be
@@ -106,14 +112,16 @@ guessed. The range brackets both rigs' fitted absolute levels (DREGON
 ~0.03–0.05, Michael's cruise ~0.1 at 8 mics).
 
 **`rps_scale_range` is [0.45, 1.2] on easy and [1.0, 1.0] on hard and mixed.**
-On the easy arm the multiplier is legacy AUGMENTATION around two known real
-rigs and is kept for parity with the legacy pair's trajectory treatment. On
-the hard and mixed arms the trajectories come from the rig hyperprior, which
-already carries its own fitted hover level and ESC clamp; a multiplicative
-0.45–1.2 on top of that would smear a rig-balanced speed distribution and
-distort the very hyperprior the arm exists to fly. There is no hover
-rescaling anywhere: the hyperprior trajectories keep their fitted RPS labels,
-and `mean_shift: [-5, 5]` (as `traj_fitted_5050.yaml`) is the only level move.
+This knob IS a multiplicative rescaling of the drawn flight's speeds, applied
+per window. On the easy arm it is the LEGACY EASY AUGMENTATION, kept verbatim
+so the trajectory treatment is at parity with the arm this one is read
+against, and defensible there because the rigs it augments around are the two
+real ones. On the hard and mixed arms the trajectories come from the rig
+hyperprior, which already carries its own fitted hover level and ESC clamp; a
+multiplicative 0.45–1.2 on top would smear a rig-balanced speed distribution
+and distort the hyperprior the arm exists to fly, so those arms drop it to
+the identity. `mean_shift: [-5, 5]` (as `traj_fitted_5050.yaml`) is then the
+only level move the hard and mixed streams make.
 
 ### The trajectory cap `rps_max: 150`, and what it truncates
 
@@ -162,15 +170,70 @@ The redraw budget is 64 and not 32 for one measured reason: at 0.296
 acceptance, 33 attempts fail once per 2.1e5 flights — about one job in seven
 over a 31k-flight run — while 65 attempts fail once per 4.7e9.
 
+### The second cap: `freq_scale.rps_max`, on the LABEL
+
+Capping the trajectory is not enough. The mixed policy's
+`noise_augmentations` block fires `freq_scale` with probability 1.0, and that
+transform MULTIPLIES the rotor-speed labels by its own `alpha`
+(`src/data_processing/noise_augmentations.py`): a flight capped at 150 rev/s
+comes back out at 195 at `alpha_high` 1.3, straight off the grid the first cap
+exists to respect. The source-level cap cannot see this, because it runs
+before the augmentation.
+
+So `freq_scale` takes an additive `rps_max` key of its own (default `None` =
+the historical behaviour, every other policy unchanged). When set, the
+upper bound of the alpha draw becomes
+`min(alpha_high, rps_max / max(rps in this frame))`; the lower bound is
+untouched, and a frame that cannot take even `alpha_low` is passed through at
+`alpha = 1` rather than silently rescaled. The draw is taken in both branches,
+so the random stream does not depend on the frame's labels. The mixed policy
+sets `rps_max: 150`; the easy and hard policies inherit the legacy rig pair's
+policy block, which has NO `noise_augmentations` at all, so there is nothing
+to cap there.
+
+**Verified on YIELDED frames, not on the source** (256 chunk-level samples per
+stream, `render_reuse` and `flight_reuse` lowered to 2 for the measurement so
+the sample covers many distinct flights rather than one):
+
+| stream | max label | p99 | median | frames > 150 |
+|---|---:|---:|---:|---:|
+| `noise_v2_hard_5050` (no augmentation block) | 142.27 | 141.86 | 80.01 | 0 |
+| `noise_v2_mixed_dload` (freq_scale p = 1.0, capped) | 147.50 | 145.86 | 86.39 | 0 |
+| `noise_v2_mixed_dload`, CONTROL with the key removed | **175.29** | 165.42 | — | **17** |
+
+The control is the point: with the source cap alone, 17 of 256 mixed chunks
+carry labels above the salience grid and the worst is 175.29 rev/s. With the
+label cap, none do. Real-source frames in the mixed stream are untouched by
+the bound — their own peaks sit near 90 rev/s, so
+`min(1.3, 150 / peak)` = 1.3 and the draw is the unmodified one.
+
+
 ### The banks
 
-`data/rig_banks/noise_v2_easy_n2048.json` and `noise_v2_hard_n2048.json`,
-2048 entries each, format `noise-v2-bank/1`, built by
-`python scripts/noise_v2_build_bank.py --preset easy|hard` (seed 20260921,
-bit-reproducible, idempotent — a rebuild whose provenance digest matches is
-skipped). They are gitignored BUILD PRODUCTS and `omnirun` ships a clean
-pushed checkout, so every job rebuilds its bank before `train.py`;
-`scripts/noise_v2_submit_arms.sh` does exactly that.
+`noise_v2_easy_n2048.json` and `noise_v2_hard_n2048.json`, 2048 entries each,
+format `noise-v2-bank/1`, seed 20260921, built by
+`python scripts/noise_v2_build_bank.py --preset easy|hard` (bit-reproducible;
+idempotent — a rebuild whose content digest matches is skipped).
+
+**Sampler strength 3.0**, chosen by the coverage ladder and not by taste: at
+strength 2.0 — the legacy pair's setting — the hard cloud brackets only 89.2 %
+of DREGON's 1/3-octave bands above 300 Hz against a 90 % target, while at 3.0
+it reaches 93.1 % (easy 91.5 / 94.2 %). The widths ladder, the guard rejection
+statistics and the coverage table are in
+`results/noise_v2/rig_sampler/findings.md`, and each bank ships a sidecar
+build report (`build_easy.json`, `build_hard.json`: acceptance, guards fired,
+coverage, self-check, wall time, digest) plus `structure.json` (the measured
+widths and the real-window band levels).
+
+**Transport.** A 2048-entry build takes about 45 minutes, so the banks are
+NOT rebuilt per job: they are published once as the pinned dload dataset
+`noise-v2-banks` and the policies name the file inside it directly
+(`preset_bank: dload:noise-v2-banks@<pin>/noise_v2_easy_n2048.json`).
+`load_preset_bank` routes its path through
+`data_processing.streams.resolve_source`, the same convention `rps.fits` uses,
+so a pinned dataset resolves to a local file and a plain path still works
+unchanged. `scripts/noise_v2_submit_arms.sh` pulls the dataset once before
+`train.py` so the fetch happens outside the DataLoader workers.
 
 * **Canonical regime pair.** Michael's = {standby, cruise} as fitted; DREGON =
   {standby: null, cruise: R5 `dregon_room2_floor__flight_profile.json`}.
@@ -222,13 +285,37 @@ Reference rows, unchanged by this batch:
 | `hppnet_l2_r2_s0` | salience trunk on real noise, **2.27** |
 | `rig_easy_scv2_unified` / `rig_hard_scv2_unified` | the legacy stochastic pair, **5.72** / **5.37** |
 
-### Submission
+### Submission and preflight
 
 `scripts/noise_v2_submit_arms.sh <arm|all-synth|all-ft|mixed>` prints (with
-`--dry-run`) or runs one `omnirun` submission per arm on backend `uni`, each in
-a detached worktree at a pinned SHA, each rebuilding its bank in-job before
-`train.py`. The curriculum arms must not be submitted before their stage-1 arm
-has finished and uploaded its `best_real_overall` checkpoint.
+`--dry-run`) or runs one `omnirun` submission per arm on backend `uni`, each
+in a detached worktree at a pinned SHA, each pulling the pinned bank dataset
+before `train.py`. The curriculum arms must not be submitted before their
+stage-1 arm has finished and uploaded its `best_real_overall` checkpoint;
+`--after <job id>` lets the scheduler enforce that.
+
+**Preflight** (`conf/AGENTS.md`: `python train.py experiment=<name>
+validate_only=true` before any GPU job), run on the laptop under
+`systemd-run --user --scope -p MemoryMax=10G`, synthetic and mixed arms
+against a real 64-entry bank of each preset:
+
+| arm | `validate_only` |
+|---|---|
+| `nv2_easy_scv2` | PASS |
+| `nv2_hard_scv2` | PASS |
+| `nv2_mixed_scv2` | PASS |
+| `nv2_easy_ft_scv2` | PASS |
+| `nv2_hard_ft_scv2` | PASS |
+| `nv2_easy_hppnet_l2` | PASS |
+| `nv2_hard_hppnet_l2` | PASS |
+| `nv2_mixed_hppnet_l2` | PASS |
+| `nv2_easy_ft_hppnet_l2` | PASS |
+| `nv2_hard_ft_hppnet_l2` | PASS |
+
+One caveat worth stating: `validate_only` checks the spec and runs one CPU
+batch; it does NOT resolve the curriculum arms' `best:real_overall@<stage 1>`
+warm start, so a green row there does not prove the checkpoint exists. It
+will not until stage 1 has run.
 
 ## What will be measured
 
@@ -252,9 +339,11 @@ has finished and uploaded its `best_real_overall` checkpoint.
 
 ## Results
 
-**PENDING** — nothing submitted as of 2026-09-22. Configs, streams, the
-`rps_max` cap and the submit script have landed on `main`; the banks build
-in-job.
+**PENDING** — nothing submitted as of 2026-09-22. What has landed on `main`:
+the three streams, the ten arm configs, both caps (`rps.rps_max` on the
+trajectory source and `freq_scale.rps_max` on the augmented label) and the
+submit script. All ten arms pass the `validate_only` preflight. The banks
+are published separately as the pinned `noise-v2-banks` dataset.
 
 ## Conclusion
 

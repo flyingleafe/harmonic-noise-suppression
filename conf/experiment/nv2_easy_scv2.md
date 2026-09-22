@@ -32,8 +32,10 @@ Stream `conf/online_mix/noise_v2_easy_5050.yaml`, bank
 `data/rig_banks/noise_v2_easy_n2048.json` (2048 entries, `python
 scripts/noise_v2_build_bank.py --preset easy`, seed 20260921, gitignored build
 product rebuilt in-job). One `kind: noise_v2` source at weight 0.8 (one source,
-not the legacy two: a second render pool would only double the render cost for
-the same distribution) plus the base policy's silence arm at 0.2. Each entry is
+not the legacy two: two pools over one distribution render no more often in
+steady state, they only add a second warm-up and a second resident render,
+which at 1973 ms per 2 s x 8 mics is worth avoiding) plus the base policy's
+silence arm at 0.2. Each entry is
 a neighbourhood draw around one of the two canonical rigs — Michael's {standby,
 cruise} as fitted, DREGON {standby: null, cruise: round-5} — keeps its own K
 (88 / 81) and names its own `traj_rig`, so the pool flies each comb on ITS

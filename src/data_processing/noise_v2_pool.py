@@ -168,10 +168,18 @@ def _read_fit(path: str | Path, *, where: str) -> dict[str, Any]:
 def load_preset_bank(path: str | Path) -> tuple[NoiseV2Entry, ...]:
     """Every entry of a ``noise-v2-bank/1`` file, unvalidated against a pool.
 
+    ``path`` is a plain path or a dload URI — ``dload:NAME[@VERSION]/file`` —
+    resolved by :func:`data_processing.streams.resolve_source`, the same
+    convention ``rps.fits`` uses. A bank is a 20-40 MB build product that does
+    not travel with a checkout, so naming a PINNED dataset is how a job gets
+    the exact bank an arm was defined against.
+
     The payloads are returned as they were written; :class:`NoiseV2Pool`
     checks their schemas and shapes against its own ``n_mics`` / ``n_rotors``.
     """
-    p = Path(path)
+    from data_processing.streams import resolve_source  # noqa: PLC0415 (dload stays optional)
+
+    p = Path(resolve_source(str(path)))
     if not p.is_file():
         raise ValueError(f"preset_bank: no such bank file: {p}")
     bank = json.loads(p.read_text())

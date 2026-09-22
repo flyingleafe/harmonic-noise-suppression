@@ -13,12 +13,19 @@
 # WHAT MOVES -- three things, and nothing else.
 #
 # (1) ONE source instead of two. The legacy arms carried the same bank in TWO
-#     `kind: stochastic` sources (0.4 + 0.4) purely to keep two independent
-#     render pools. A v2 render is 1973 ms per 2 s x 8 mics against the legacy
-#     416 ms (results/noise_v2/stream_bench/), so a second pool would only
-#     double the render cost for the same distribution. One `kind: noise_v2`
-#     source at weight 0.8 carries the combined weight, and the noise : silence
-#     ratio is the base policy's 0.8 : 0.2 exactly.
+#     `kind: stochastic` sources (0.4 + 0.4), which bought two independent
+#     render pools over ONE distribution. That is a cache-topology choice, not
+#     a throughput one: each source refreshes once per `render_reuse` of ITS
+#     OWN draws, so two sources at half the weight each render no more often
+#     in steady state than one source at the full weight. What two pools do
+#     buy is two live renders in flight -- twice the warm-up cost before the
+#     stream is saturated, twice the resident render, and two windows the
+#     stream alternates between instead of one. At 1973 ms per 2 s x 8 mics
+#     against the legacy 416 ms (`results/noise_v2/stream_bench/`) that
+#     startup and residency is worth avoiding, and nothing about the sampled
+#     distribution changes. One `kind: noise_v2` source at weight 0.8 carries
+#     the combined weight, and the noise : silence ratio is the base policy's
+#     0.8 : 0.2 exactly.
 #
 # (2) `render_reuse: 192` instead of 48. At `render_reuse: 48` the v2 loader is
 #     RENDER-BOUND (12 workers deliver a batch of 128 about every 1.2 s), so
@@ -54,9 +61,14 @@
 # `{<traj_rig>: 1}`, each with its own flight cache. So a DREGON comb is never
 # flown on Michael's envelope. The pairing is auditable per window from
 # `meta.noise_v2_entry` / `meta.noise_v2_traj_rig`.
-# There is NO hover rescaling: the hyperprior trajectories keep their fitted
-# RPS labels and `rps_scale_range` stays at the legacy arms' [0.45, 1.2], so
-# the trajectory treatment is at parity with the legacy pair.
+# `rps_scale_range: [0.45, 1.2]` is kept as the LEGACY EASY AUGMENTATION: it
+# IS a multiplicative rescaling of the drawn flight's speeds, applied per
+# window, and the legacy pair had exactly it. It stays here so the trajectory
+# treatment is at parity with the arm this one is read against, and it is
+# defensible on this arm because the two rigs it augments around are the two
+# real rigs. The hard and mixed arms drop it to [1.0, 1.0] — see
+# conf/online_mix/noise_v2_hard_5050.yaml for why a multiplier and a
+# hyperprior do not mix.
 #
 # `rps_max: 150` caps the whole flight (reject and redraw, never clip) at the
 # top of the salience trunks' speed grid, so BOTH families in this batch see

@@ -93,6 +93,60 @@ def test_freq_scale_moves_comb_and_labels():
     assert np.allclose(new_label, 72.0, atol=1e-3)
 
 
+def test_freq_scale_rps_max_bounds_the_augmented_label():
+    """`rps_max` is a ceiling on the LABEL this augmentation emits.
+
+    A stream that caps its trajectories still hands the model `alpha` times
+    the capped speed without it: at `alpha_high` 1.3 a 150 rev/s flight comes
+    out at 195, off a 0-150 salience grid. With it, every draw lands under the
+    ceiling, and a frame already at the ceiling is passed through untouched
+    rather than shrunk.
+    """
+    audio = _comb_audio(60.0)
+    label = _const_label([120.0, 130.0, 140.0, 150.0])
+    params = {"alpha_low": 0.7, "alpha_high": 1.3, "rps_max": 150.0}
+    for seed in range(32):
+        _, new_label = _freq_scale(
+            audio,
+            label,
+            params,
+            np.random.default_rng(seed),
+            sample_rate=SR,
+            label_rate_hz=LABEL_RATE,
+        )
+        assert float(new_label.max()) <= 150.0 + 1e-3, seed
+
+    # Without the key the same draws DO cross it — the guard is not vacuous.
+    uncapped = max(
+        float(
+            _freq_scale(
+                audio,
+                label,
+                {"alpha_low": 0.7, "alpha_high": 1.3},
+                np.random.default_rng(seed),
+                sample_rate=SR,
+                label_rate_hz=LABEL_RATE,
+            )[1].max()
+        )
+        for seed in range(32)
+    )
+    assert uncapped > 150.0
+
+    # A frame whose peak already exceeds the ceiling cannot be scaled down to
+    # fit (alpha_low would still be a shrink, but the range is empty), so it
+    # passes through at alpha = 1 instead of being silently rescaled.
+    hot = _const_label([200.0, 200.0, 200.0, 200.0])
+    _, passed = _freq_scale(
+        audio,
+        hot,
+        {"alpha_low": 1.0, "alpha_high": 1.3, "rps_max": 150.0},
+        np.random.default_rng(3),
+        sample_rate=SR,
+        label_rate_hz=LABEL_RATE,
+    )
+    assert np.allclose(passed, 200.0, atol=1e-3)
+
+
 # ── spectral_recolor ────────────────────────────────────────────────────────
 
 

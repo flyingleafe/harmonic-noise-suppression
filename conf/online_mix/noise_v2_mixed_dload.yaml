@@ -27,11 +27,16 @@
 # THE RATIO IS PRESERVED. hb_stochmixed is real 2.0 : silence 0.4 :
 # stochastic 1.0 : comb 1.0. This is real 2.0 : silence 0.4 : noise_v2 2.0 --
 # the same 45.5 / 9.1 / 45.5 split, with the fitted v2 family standing exactly
-# where the stochastic + comb pair stood. ONE source rather than two because a
-# v2 render costs ~4x a legacy one (1973 ms per 2 s x 8 mics against 416 ms,
-# results/noise_v2/stream_bench/) and a second pool would buy nothing but
-# render cost; `render_reuse: 192` is what keeps the FRESH-RENDER RATE per
-# wall-clock at the legacy arms' level.
+# where the stochastic + comb pair stood. ONE source rather than two: the two
+# it replaces were two DIFFERENT families (a stochastic rig and a static
+# comb), while one v2 bank already carries the whole rig population, so a
+# second source would be a second live render of the SAME distribution. That
+# costs a second warm-up and a second resident render at 1973 ms per 2 s x 8
+# mics against the legacy 416 ms (results/noise_v2/stream_bench/) and changes
+# nothing that is sampled — the steady-state render rate is set by
+# `render_reuse` and the source's own weight, not by the number of sources.
+# `render_reuse: 192` is what keeps the FRESH-RENDER RATE per wall-clock at
+# the legacy arms' level.
 #
 # WHY THE HARD BANK AND NOT THE EASY ONE. The real half of this stream already
 # contains both evaluation rigs as recordings. A synthetic half drawn from
@@ -123,7 +128,15 @@ policy:
       noise_augmentations:
         probability: 1.0
         choices:
-          - freq_scale: {alpha_low: 0.7, alpha_high: 1.3}
+          # `rps_max` bounds the AUGMENTED LABEL, which the source-level
+          # `rps.rps_max: 150` cannot: freq_scale multiplies the labels by
+          # alpha, so a 150-capped flight would reach 195 rev/s at
+          # alpha_high 1.3 -- off the salience trunks' 0-150 rev/s grid. With
+          # it, this frame's upper bound is min(1.3, 150 / max rps in the
+          # frame); a frame that cannot take even alpha_low passes through at
+          # alpha = 1. Real-source frames are far below the ceiling and are
+          # untouched.
+          - freq_scale: {alpha_low: 0.7, alpha_high: 1.3, rps_max: 150}
       noise_time_warp:
         probability: 0.5
         dev_const: 0.08
