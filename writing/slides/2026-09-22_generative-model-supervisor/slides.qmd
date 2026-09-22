@@ -176,7 +176,7 @@ Flight supports: periodic Hann, $N = 2048$, hop 512 at 16 kHz. Fit band 30 Hz â€
 
 ![](../../papers/2026-08_wrapup/src/figures/gen_noise_real_vs_sampled.png){width=88%}
 
-## Noise sampled from the hyperprior used for hard training
+## Hard-bank noise (noise-fit path Ã— trajectory hyperprior) used for hard training
 
 ![](../../papers/2026-08_wrapup/src/figures/gen_noise_hyperprior.png){width=88%}
 
