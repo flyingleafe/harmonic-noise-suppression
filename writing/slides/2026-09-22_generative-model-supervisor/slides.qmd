@@ -180,26 +180,46 @@ Flight supports: periodic Hann, $N = 2048$, hop 512 at 16 kHz. Fit band 30 Hz �
 
 ![](../../papers/2026-08_wrapup/src/figures/gen_noise_hyperprior.png){width=88%}
 
-## Results — rev/s MAE on the real validation split (regime-only)
+## Results — regressor (SCv2)
+
+rev/s MAE on the real validation split
 
 ::: {.small}
 
-| trunk | arm | status | real_overall | zero | standby | ramp | cruise |
-|---|---|---|---:|---:|---:|---:|---:|
-| SCv2 | `real_r4_scv2_unified` (real ref) | final | **2.99** | 2.44 | 3.20 | 8.17 | 2.95 |
-| SCv2 | `nv2_easy_scv2` (synthetic only) | final | 7.94 | 10.64 | 11.05 | 11.12 | 6.87 |
-| SCv2 | `nv2_hard_scv2` (synthetic only) | final | 7.06 | 1.25 | 6.16 | 15.81 | 7.76 |
-| SCv2 | `nv2_mixed_scv2` (mixed) | final | 2.53 | — | — | — | — |
-| SCv2 | `nv2_easy_ft_scv2` (easy → real) | final | **2.73** | 2.23 | 2.36 | 8.16 | 2.60 |
-| SCv2 | `nv2_hard_ft_scv2` (hard → real) | running, r32 | 2.23 | — | — | — | — |
-| HPPNet L2 | `hppnet_l2_r2_s0` (real ref) | final | **2.27** | — | — | — | — |
-| HPPNet L2 | `nv2_easy_hppnet_l2` (synthetic only) | final | 6.46 | 3.58 | 5.04 | 26.50 | 6.14 |
-| HPPNet L2 | `nv2_hard_hppnet_l2` (synthetic only) | running, r93 | 6.80 | — | — | — | — |
-| HPPNet L2 | `nv2_mixed_hppnet_l2` (mixed) | running, r54 | 2.48 | — | — | — | — |
-| HPPNet L2 | `nv2_easy_ft_hppnet_l2` (easy → real) | queued | — | — | — | — | — |
+| arm | stream | real_overall | zero | standby | ramp | cruise |
+|:--------------------------|:-----------|--------------:|-------:|----------:|-------:|---------:|
+| `real_r4_scv2_unified` | real ref | **2.99** | 2.44 | 3.20 | 8.17 | 2.95 |
+| `nv2_easy_scv2` | synth | 7.94 | 10.64 | 11.05 | 11.12 | 6.87 |
+| `nv2_hard_scv2` | synth | 7.06 | 1.25 | 6.16 | 15.81 | 7.76 |
+| `nv2_mixed_scv2` | mixed | 2.53 | 1.78 | 2.25 | 7.00 | 2.49 |
+| `nv2_easy_ft_scv2` | easy→real | 2.73 | 2.23 | 2.36 | 8.16 | 2.60 |
+| `nv2_hard_ft_scv2` | hard→real | **2.23** | 0.93 | 1.44 | 6.71 | 2.35 |
 
 `real_overall` = `val/real_r3` at the selected checkpoint. Regime columns: per-frame PIT MAE, 8 mics,
 frame shares zero 13 % / standby 12 % / ramp 4 % / cruise 72 %; pooled over DREGON and Michael's.
+
+:::
+
+## Results — salience (HPPNet-L2)
+
+rev/s MAE on the real validation split
+
+::: {.small}
+
+| arm | stream | real_overall | zero | standby | ramp | cruise |
+|:--------------------------|:-----------|--------------:|-------:|----------:|-------:|---------:|
+| `hppnet_l2_r2_s0` | real ref | **2.27** | 1.05 | 3.11 | 12.51 | 1.74 |
+| `nv2_easy_hppnet_l2` | synth | 6.46 | 3.58 | 5.04 | 26.50 | 6.14 |
+| `nv2_hard_hppnet_l2` | synth | 6.47 | 1.63 | 4.25 | 30.07 | 6.44 |
+| `nv2_mixed_hppnet_l2` | mixed | 2.25 | 0.29 | 2.28 | 9.09 | 2.23 |
+| `nv2_easy_ft_hppnet_l2` | easy→real | **2.11** | 1.50 | 2.84 | 8.25 | 1.77 |
+| `nv2_hard_ft_hppnet_l2` \* | hard→real | 4.38 | 20.91 | 2.83 | 9.50 | 1.51 |
+
+Same columns and same selection rule as the regressor slide.
+
+\* `nv2_hard_ft_hppnet_l2`: the saved checkpoint is round 4, at 4.38. The run's raw score reached
+1.81 at round 1, but the 5-round median selected round 4, so that checkpoint was never saved —
+this arm's real result is unmeasured.
 
 :::
 
