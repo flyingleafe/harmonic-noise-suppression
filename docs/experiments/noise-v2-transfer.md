@@ -1,10 +1,14 @@
 # Sim-to-real transfer on the FITTED noise model (noise-model-v2)
 
-**Status:** RUNNING — the six stage-1 arms were submitted 2026-09-22 02:00Z on
-backend `uni`; the four curriculum arms are chained behind their stage-1
-checkpoints. Ten arms: `nv2_{easy,hard,mixed}_{scv2,hppnet_l2}` and
+**Status:** DONE — all ten arms ran to their own early stop on backend `uni`
+between 2026-09-22 02:00Z and 17:35Z; none failed and none was killed. Ten
+arms: `nv2_{easy,hard,mixed}_{scv2,hppnet_l2}` and
 `nv2_{easy,hard}_ft_{scv2,hppnet_l2}`. Per-experiment docs sit beside each
-config in `conf/experiment/`. Live numbers in § Results / Monitoring log.
+config in `conf/experiment/`. Headline: the fitted family does NOT transfer
+better than the hand-written one it replaces (7.94 / 7.06 against 5.72 / 5.37)
+but it DOES fix the rotor collapse it was built to fix, and used as a warm
+start or a mixing component it beats the real-data references (2.23 against
+2.99; 2.11 against 2.27).
 
 ## Motivation
 
@@ -368,8 +372,10 @@ will not until stage 1 has run.
 
 ## Results
 
-**IN PROGRESS** — six stage-1 jobs submitted 2026-09-22 02:00Z/02:01Z, four
-curriculum arms chained behind them as their stage-1 checkpoints land.
+All ten arms finished. The six stage-1 jobs were submitted 2026-09-22
+02:00Z/02:01Z; each curriculum arm was submitted with `--after` its stage-1 job
+once that job's `checkpoints/best_real_overall.ckpt` was confirmed present on
+R2.
 
 ### How these numbers are read
 
@@ -713,77 +719,206 @@ below are the job's own records and not a stdout scrape.
 | 09-22 16:46 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
 | 09-22 16:46 | `nv2-easy-ft-hppnet-l2-1a711c` | succeeded | 79 | 5 | 2.46 | 2.11 | 2.11 | 1e-04 |
 | 09-22 16:46 | `nv2-hard-ft-hppnet-l2-6fe90f` | running | 51 | 4 | 1.96 | 4.38 | 1.81 | 1e-04 |
+| 09-22 17:12 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 17:12 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 17:12 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 17:12 | `nv2-hard-hppnet-l2-f71237` | succeeded | 162 | 124 | 6.47 | 6.47 | 6.25 | 1e-04 |
+| 09-22 17:12 | `nv2-mixed-scv2-83d2cd` | succeeded | 115 | 91 | 2.53 | 2.53 | 2.43 | 1e-04 |
+| 09-22 17:12 | `nv2-mixed-hppnet-l2-08c04f` | succeeded | 112 | 72 | 2.38 | 2.25 | 2.25 | 1e-04 |
+| 09-22 17:12 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 17:12 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
+| 09-22 17:12 | `nv2-easy-ft-hppnet-l2-1a711c` | succeeded | 79 | 5 | 2.46 | 2.11 | 2.11 | 1e-04 |
+| 09-22 17:12 | `nv2-hard-ft-hppnet-l2-6fe90f` | running | 58 | 4 | 1.96 | 4.38 | 1.81 | 1e-04 |
+| 09-22 17:37 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 17:37 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 17:37 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 17:37 | `nv2-hard-hppnet-l2-f71237` | succeeded | 162 | 124 | 6.47 | 6.47 | 6.25 | 1e-04 |
+| 09-22 17:37 | `nv2-mixed-scv2-83d2cd` | succeeded | 115 | 91 | 2.53 | 2.53 | 2.43 | 1e-04 |
+| 09-22 17:37 | `nv2-mixed-hppnet-l2-08c04f` | succeeded | 112 | 72 | 2.38 | 2.25 | 2.25 | 1e-04 |
+| 09-22 17:37 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 17:37 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
+| 09-22 17:37 | `nv2-easy-ft-hppnet-l2-1a711c` | succeeded | 79 | 5 | 2.46 | 2.11 | 2.11 | 1e-04 |
+| 09-22 17:37 | `nv2-hard-ft-hppnet-l2-6fe90f` | succeeded | 60 | 4 | 1.96 | 4.38 | 1.81 | 1e-04 |
 
 ### Stage-1 and curriculum results
 
 `real_overall` = `val/real_r3`, rev/s PIT MAE, lower is better. **sel** is the
-round `best_real_overall.ckpt` was written at (best smoothed); **raw @ sel** is
-that round's unsmoothed value and is the number every regime row below belongs
-to; **best raw** is the lowest raw value anywhere in the run, which no
-checkpoint corresponds to and which is quoted only so the gap between the two
-is visible. `r1`/`r2`/`r3` are the per-view values at **sel**.
+round `best_real_overall.ckpt` was written at (best SMOOTHED); **raw @ sel** is
+that round's unsmoothed value, is the number the regime rows below belong to,
+and is the number to quote. **best raw** is the lowest raw value anywhere in
+the run, which no checkpoint corresponds to; it is here only so the gap between
+the two is visible. `r1`/`r2`/`r3` are the per-view values at **sel**. All ten
+arms ran to their own early stop; none was killed, none failed.
 
-| arm | job | status | rounds | sel | smoothed | raw @ sel | best raw | r1 | r2 | r3 | r1/r2 |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| *`real_r4_scv2_unified`* (real ref) | — | done | 70 | — | — | — | **2.99** | — | — | 2.99 | — |
-| *`hppnet_l2_r2_s0`* (real ref) | — | done | — | — | — | — | **2.27** | — | — | 2.27 | — |
-| *`rig_easy_scv2_unified`* (legacy easy) | — | done | 94 | 57 | — | 6.09 | 5.72 | — | — | — | — |
-| *`rig_hard_scv2_unified`* (legacy hard) | — | done | 137 | — | — | — | 5.37 | — | — | — | — |
-| `nv2_easy_scv2` | `nv2-easy-scv2-15cff2` | done | 102 | 81 | 7.94 | **7.94** | 7.18 | 10.89 | 9.67 | 7.94 | 1.13 |
-| `nv2_hard_scv2` | `nv2-hard-scv2-d926d0` | done | 116 | 15 | 9.17 | **7.06** | 7.06 | 25.11 | 9.38 | 7.06 | 2.68 |
-| `nv2_easy_hppnet_l2` | `nv2-easy-hppnet-l2-9a2ecf` | done | 61 | 20 | 7.23 | **6.46** | 5.52 | 10.59 | 8.55 | 6.46 | 1.24 |
-| `nv2_easy_ft_scv2` | `nv2-easy-ft-scv2-9ff3c2` | done | 54 | 10 | 2.79 | **2.73** | 2.56 | 3.34 | 3.18 | 2.73 | 1.05 |
-| `nv2_mixed_scv2` | `nv2-mixed-scv2-83d2cd` | done | 116 | 91 | 2.53 | **2.53** | 2.43 | 2.59 | 2.93 | 2.53 | 0.88 |
-| `nv2_hard_ft_scv2` | `nv2-hard-ft-scv2-56dbff` | done | 71 | 24 | 2.47 | **2.23** | 2.23 | 2.80 | 2.67 | 2.23 | 1.05 |
-| `nv2_mixed_hppnet_l2` | `nv2-mixed-hppnet-l2-08c04f` | done | 113 | 72 | 2.38 | **2.25** | 2.25 | 2.66 | 2.75 | 2.25 | 0.97 |
-| `nv2_easy_ft_hppnet_l2` | `nv2-easy-ft-hppnet-l2-1a711c` | done | 80 | 5 | 2.46 | **2.11** | 2.11 | 2.38 | 2.48 | 2.11 | 0.96 |
-| `nv2_hard_hppnet_l2` | `nv2-hard-hppnet-l2-f71237` | done | 163 | 124 | 6.47 | **6.47** | 6.25 | 11.50 | 8.35 | 6.47 | 1.38 |
+| arm | job | rounds | sel | smoothed | **raw @ sel** | best raw | r1 | r2 | r3 | r1/r2 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| *`real_r4_scv2_unified`* — real reference, regressor | — | 70 | 24 | — | 3.11 | **2.99** | — | — | 2.99 | — |
+| *`hppnet_l2_r2_s0`* — real reference, salience | — | — | — | — | 2.22 | **2.27** | — | — | 2.27 | — |
+| *`rig_easy_scv2_unified`* — legacy stochastic easy | — | 94 | 57 | — | 6.09 | **5.72** | — | — | — | — |
+| *`rig_hard_scv2_unified`* — legacy stochastic hard | — | 137 | 124 | — | 5.41 | **5.37** | — | — | — | — |
+| `nv2_easy_scv2` | `nv2-easy-scv2-15cff2` | 102 | 81 | 7.94 | **7.94** | 7.18 | 10.89 | 9.67 | 7.94 | 1.13 |
+| `nv2_hard_scv2` | `nv2-hard-scv2-d926d0` | 116 | 15 | 9.17 | **7.06** | 7.06 | 25.11 | 9.38 | 7.06 | 2.68 |
+| `nv2_mixed_scv2` | `nv2-mixed-scv2-83d2cd` | 116 | 91 | 2.53 | **2.53** | 2.43 | 2.59 | 2.93 | 2.53 | 0.88 |
+| `nv2_easy_ft_scv2` | `nv2-easy-ft-scv2-9ff3c2` | 54 | 10 | 2.79 | **2.73** | 2.56 | 3.34 | 3.18 | 2.73 | 1.05 |
+| `nv2_hard_ft_scv2` | `nv2-hard-ft-scv2-56dbff` | 71 | 24 | 2.47 | **2.23** | 2.23 | 2.80 | 2.67 | 2.23 | 1.05 |
+| `nv2_easy_hppnet_l2` | `nv2-easy-hppnet-l2-9a2ecf` | 61 | 20 | 7.23 | **6.46** | 5.52 | 10.59 | 8.55 | 6.46 | 1.24 |
+| `nv2_hard_hppnet_l2` | `nv2-hard-hppnet-l2-f71237` | 163 | 124 | 6.47 | **6.47** | 6.25 | 11.50 | 8.35 | 6.47 | 1.38 |
+| `nv2_mixed_hppnet_l2` | `nv2-mixed-hppnet-l2-08c04f` | 113 | 72 | 2.38 | **2.25** | 2.25 | 2.66 | 2.75 | 2.25 | 0.97 |
+| `nv2_easy_ft_hppnet_l2` | `nv2-easy-ft-hppnet-l2-1a711c` | 80 | 5 | 2.46 | **2.11** | 2.11 | 2.38 | 2.48 | 2.11 | 0.96 |
+| `nv2_hard_ft_hppnet_l2` | `nv2-hard-ft-hppnet-l2-6fe90f` | 61 | 4 | 1.96 | **4.38** | 1.81 | 6.26 | 6.19 | 4.38 | 1.01 |
+
+Three things in that table are artefacts of SELECTION, not of training, and are
+marked here so they are not read as results:
+
+* **`nv2_hard_ft_hppnet_l2` is the one arm the smoother cost.** Its raw score
+  hit **1.81** at round 1 — the best number in the whole batch, 20 % under the
+  2.27 real salience reference — and the 5-round median bottomed at round 4,
+  whose own raw score is 4.38. The file on R2 is round 4. The arm's real result
+  is therefore unmeasured: the checkpoint that scored 1.81 was never saved.
+* **`nv2_hard_scv2`'s `r1`/`r2` ratio of 2.68** (25.11 single-mic against 9.38
+  eight-mic) is the same effect: its selected round is 15 of 116, before the
+  single-mic view had converged at all.
+* **`nv2_easy_ft_hppnet_l2`** also selected early (round 5 of 80) but its raw
+  score there, 2.11, happens to be its best, so nothing is lost.
+
+The post-best real degradation of the point-preset run **recurs on every arm,
+but its size splits the batch cleanly in two.** Final round against best raw:
+synthetic-only 8.70/7.18 (+21 %), 12.18/7.06 (+73 %), 15.28/5.52 (+177 %),
+7.09/6.25 (+13 %); with real audio in the stream 2.55/2.43 (+5 %), 2.85/2.56
+(+11 %), 2.68/2.23 (+20 %), 2.73/2.25 (+21 %), 2.64/2.11 (+25 %). The one arm
+that degrades like a synthetic-only run despite training on real audio is
+`nv2_hard_ft_hppnet_l2` (3.80/1.81, +110 %), and its +110 % is measured against
+a round-1 score, i.e. against a number the run held for one validation round.
+Real data in the stream bounds
+the drift to a fifth of the score; the fitted family on its own does not bound
+it at all.
 
 ### Four-regime decomposition
 
 `python scripts/_regime_decomp.py --exp <arm> --ckpt best_real_overall`, 8 mics,
-the frozen real split, thresholds stated not fitted (ramp |d mean speed/dt| >=
-20 rev/s^2 first, then zero / standby / cruise on level). Per-regime cells are
-per-frame PIT MAE in rev/s; **overall** is training's own clip-level PIT metric
-recomputed on the SELECTED checkpoint, so it can be checked against the `raw @
-sel` column above.
+the frozen real split, thresholds stated not fitted (ramp
+|d mean speed/dt| >= 20 rev/s^2 taken FIRST, then zero / standby / cruise on
+level). Cells are per-frame PIT MAE in rev/s; **overall** is training's own
+clip-level PIT metric recomputed on the SELECTED checkpoint, so it can be
+checked against `raw @ sel` above and in every row it agrees to ~1 %. Frame
+shares: zero 12.7 %, standby 11.6 %, ramp 3.8 %, cruise 72.0 %.
 
 **Output spread** is the mean over frames of the rotor peak-to-peak
-(`max - min`) of the PREDICTED speeds — the quantity that reads as "how far
-apart does the model put the outer two rotors". It is measured here for every
-row including the references, because the legacy pair's 0.28 / 0.19 / 4.71
-figures were computed ad hoc and never committed; the column below is
-self-consistent and reproducible from `scripts/_regime_decomp.py` (which now
-records `spread.{regime}.{pred,true}` in its JSON).
+(`max - min`) of the PREDICTED speeds — the quantity that reads directly as
+"how far apart does the model put the outer two rotors", and the one the legacy
+pair's collapse claim was about. It is measured here for every row including
+the references, and `scripts/_regime_decomp.py` now records
+`spread.{regime}.{pred,true}` in its JSON so it is reproducible.
 
 **The legacy 0.28 / 0.19 / 4.71 are NOT reproduced by this definition and are
 not used below.** Re-measuring the same three checkpoints peak-to-peak gives
-ramp spreads 2.87 (legacy easy) / 4.14 (legacy hard) / 6.58 (real), so the
+ramp spreads 2.87 (legacy easy) / 4.14 (legacy hard) / 6.58 (real): the
 collapse the legacy conclusion described is a factor of 2.3 and 1.6, not of 17
-and 25. Whatever quantity produced 0.28 was not recorded, so it cannot be
-checked; every spread number in this batch is the peak-to-peak one, measured
-the same way for arms and references alike. The direction of the legacy
-finding survives the re-measurement, its magnitude does not.
+and 25. Whatever quantity produced 0.28 was never committed and cannot be
+checked. Every spread number in this batch is the peak-to-peak one, measured
+the same way for arms and references alike. The DIRECTION of the legacy finding
+survives the re-measurement; its magnitude does not.
 
-| arm | overall | zero | standby | ramp | cruise | spread @ ramp | spread @ cruise |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| *`real_r4_scv2_unified`* (real ref) | 3.11 | 2.44 | 3.20 | 8.17 | 2.95 | 6.58 | 10.94 |
-| *`hppnet_l2_r2_s0`* (real salience ref, `best.ckpt`) | 2.22 | 1.05 | 3.11 | 12.51 | 1.74 | 6.76 | 13.53 |
-| *`rig_easy_scv2_unified`* (legacy easy) | 6.08 | 2.37 | 13.70 | 18.82 | 4.85 | 2.87 | 10.36 |
-| *`rig_hard_scv2_unified`* (legacy hard) | 5.40 | 10.61 | 8.92 | 13.86 | 3.48 | 4.14 | 11.50 |
-| `nv2_easy_scv2` | 7.99 | 10.64 | 11.05 | 11.12 | 6.87 | 6.42 | 16.76 |
-| `nv2_hard_scv2` | 7.05 | 1.25 | 6.16 | 15.81 | 7.76 | 8.14 | 18.56 |
-| `nv2_easy_hppnet_l2` | 6.45 | 3.58 | 5.04 | 26.50 | 6.14 | 9.95 | 15.46 |
-| `nv2_easy_ft_scv2` | 2.73 | 2.23 | 2.36 | 8.16 | 2.60 | 7.37 | 12.75 |
-| `nv2_mixed_scv2` | 2.54 | 1.78 | 2.25 | 7.00 | 2.49 | 7.82 | 12.77 |
-| `nv2_hard_ft_scv2` | 2.23 | 0.93 | 1.44 | 6.71 | 2.35 | 6.63 | 11.23 |
-| `nv2_mixed_hppnet_l2` | 2.25 | 0.29 | 2.28 | 9.09 | 2.23 | 7.83 | 14.44 |
-| `nv2_easy_ft_hppnet_l2` | 2.11 | 1.50 | 2.84 | 8.25 | 1.77 | 7.29 | 13.06 |
-| `nv2_hard_hppnet_l2` | 6.47 | 1.63 | 4.25 | 30.07 | 6.44 | 6.11 | 17.25 |
+| arm | overall | zero | standby | ramp | cruise | spread standby | spread ramp | spread cruise |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| *`real_r4_scv2_unified`* — real reference, regressor | 3.11 | 2.44 | 3.20 | 8.17 | 2.95 | 9.74 | 6.58 | 10.94 |
+| *`hppnet_l2_r2_s0`* — real reference, salience (`best.ckpt`) | 2.22 | 1.05 | 3.11 | 12.51 | 1.74 | 8.81 | 6.76 | 13.53 |
+| *`rig_easy_scv2_unified`* — legacy stochastic easy | 6.08 | 2.37 | 13.70 | 18.82 | 4.85 | 1.65 | 2.87 | 10.36 |
+| *`rig_hard_scv2_unified`* — legacy stochastic hard | 5.40 | 10.61 | 8.92 | 13.86 | 3.48 | 1.55 | 4.14 | 11.50 |
+| `nv2_easy_scv2` | 7.99 | 10.64 | 11.05 | 11.12 | 6.87 | 5.71 | 6.42 | 16.76 |
+| `nv2_hard_scv2` | 7.05 | 1.25 | 6.16 | 15.81 | 7.76 | 6.27 | 8.14 | 18.56 |
+| `nv2_mixed_scv2` | 2.54 | 1.78 | 2.25 | 7.00 | 2.49 | 9.76 | 7.82 | 12.77 |
+| `nv2_easy_ft_scv2` | 2.73 | 2.23 | 2.36 | 8.16 | 2.60 | 10.16 | 7.37 | 12.75 |
+| `nv2_hard_ft_scv2` | 2.23 | 0.93 | 1.44 | 6.71 | 2.35 | 9.22 | 6.63 | 11.23 |
+| `nv2_easy_hppnet_l2` | 6.45 | 3.58 | 5.04 | 26.50 | 6.14 | 7.54 | 9.95 | 15.46 |
+| `nv2_hard_hppnet_l2` | 6.47 | 1.63 | 4.25 | 30.07 | 6.44 | 5.37 | 6.11 | 17.25 |
+| `nv2_mixed_hppnet_l2` | 2.25 | 0.29 | 2.28 | 9.09 | 2.23 | 8.31 | 7.83 | 14.44 |
+| `nv2_easy_ft_hppnet_l2` | 2.11 | 1.50 | 2.84 | 8.25 | 1.77 | 9.08 | 7.29 | 13.06 |
+| `nv2_hard_ft_hppnet_l2` | 4.42 | 20.91 | 2.83 | 9.50 | 1.51 | 10.57 | 7.42 | 13.84 |
+| **the TARGET labels of the same frames** | — | 0.01 | 10.63 | 7.85 | 13.79 | 10.63 | 7.85 | 13.79 |
 
-*(target spread of the same frames: zero 0.01, standby 10.63, ramp 7.85,
-cruise 13.79 rev/s.)*
+`nv2_hard_ft_hppnet_l2`'s row is the round-4 checkpoint discussed above and not
+a result: its 20.91 at zero — 8x every other row — is what a model looks like
+one round after a warm start, before it has learned that all rotors stopped
+means predict nothing. Its cruise cell (1.51, the batch's best) shows what the
+arm was on its way to.
 
 ## Conclusion
 
-**PENDING.**
+**Question 1 — does the fitted family transfer better than the hand-written
+one? No.** On the regressor the fitted arms score 7.94 (easy) and 7.06 (hard)
+against the legacy stochastic pair's 5.72 and 5.37; on the salience trunk they
+score 6.46 and 6.47, which has no legacy counterpart but sits 2.8x from that
+family's 2.27 real reference. Every synthetic-only v2 arm is WORSE than the
+hand-written family it replaces. This is a clean negative and it does not
+depend on the selection caveats: the best raw scores anywhere in those four
+runs are 7.18 / 7.06 / 5.52 / 6.25, all still above 5.37.
+
+**And the decomposition says the family did exactly what it was built to do.**
+The failure the whole noise-model-v2 campaign was aimed at is the rotor
+collapse, and the fitted family fixes it. At standby the legacy arms put the
+four rotors 1.65 and 1.55 rev/s apart where the labels are 10.63 apart; the v2
+arms put them 5.71 / 6.27 / 7.54 / 5.37 apart. At ramp the legacy arms give
+2.87 and 4.14 against a 7.85 target and a real-trained 6.58; the v2 arms give
+6.42 / 8.14 / 9.95 / 6.11 — i.e. the fitted trajectories under a stated cap,
+flown at an absolute fitted level, produce a model that separates the rotors
+about as much as the real data does. The ramp CELL follows on the easy
+regressor arm — 11.12 against the legacy easy arm's 18.82 — but not elsewhere:
+the hard regressor arm is 15.81 against 13.86, and both salience arms are far
+worse there (26.50 and 30.07). Rotor separation is restored; ramp ACCURACY is
+restored on one arm of four.
+
+**The deficit moved to cruise, and cruise is 72 % of the frames.** The v2
+synthetic-only arms score 6.87 / 7.76 / 6.14 / 6.44 at cruise against the
+legacy 4.85 / 3.48 and the real 2.95, and they OVER-separate there: cruise
+spread 16.76 / 18.56 / 15.46 / 17.25 against a 13.79 target and a real-trained
+10.94; the legacy arms, by contrast, were tight there (10.36 / 11.50) and
+accurate (4.85 / 3.48). The fitted absolute-level family buys transition
+behaviour and pays for
+it in steady-flight precision, and because cruise carries 62–79 % of each arm's
+total error, the trade is a net loss on the headline metric. That is the
+batch's substantive finding, and it is a sharper statement than "synthetic
+transfer is 1.8x away": the remaining gap is no longer the transitions.
+
+**Question 2 — does pre-training on it help a real-data run? Yes, and this is
+the batch's positive result.** `nv2_hard_ft_scv2` reaches **2.23** against the
+real reference's 2.99 — 25 % better than training the same arm on real audio
+from scratch — and `nv2_easy_ft_scv2` reaches 2.73, 9 % better.
+`nv2_easy_ft_hppnet_l2` reaches **2.11** against 2.27, 7 % better.
+`nv2_hard_ft_hppnet_l2` touched 1.81 but its saved checkpoint is the round-4
+one at 4.38, so it is reported as unmeasured rather than as its best number.
+All three MEASURED curriculum arms beat their real reference; none is worse,
+and the fourth is unmeasured rather than negative. The fitted family therefore does carry something the real pool does
+not, even though a model trained on it alone is poor.
+
+**Question 3 — does it add to real data when mixed in? Yes on the regressor,
+neutrally on the salience trunk.** `nv2_mixed_scv2` gets **2.53** against 2.99
+(15 % better); `nv2_mixed_hppnet_l2` gets **2.25** against 2.27, which is a
+tie. Mixing is cheaper than the curriculum — one stage, not two — and on the
+regressor it recovers about three fifths of the curriculum's gain (0.46 rev/s
+of 0.76).
+
+**Ranking the two ways of using the family:** curriculum 2.23 < mixed 2.53 on
+the regressor, curriculum 2.11 < mixed 2.25 on the salience trunk. Warm-starting
+beats mixing on both families, by 0.30 and 0.14 rev/s.
+
+**What the best arms fixed.** `nv2_hard_ft_scv2` at 2.23 is better than the
+real reference in every single cell — zero 0.93 vs 2.44, standby 1.44 vs 3.20,
+ramp 6.71 vs 8.17, cruise 2.35 vs 2.95 — while keeping the real-trained rotor
+separation (standby spread 9.22, ramp 6.63 against targets 10.63 and 7.85). The
+gain is not one regime; the warm start moves the whole surface.
+
+**Practical reading.** The fitted noise model is not a substitute for real
+audio and is a worse substitute than the hand-written sampler it replaced. It
+IS a better initialiser and a useful mixing component, and it is the first
+synthetic family in this project that does not collapse the rotors in the
+transitions. The next thing to fix is its cruise over-separation, which is
+where all of its remaining error lives.
+
+**One process finding worth carrying out of this batch:** selecting
+`best_<score>.ckpt` on the 5-round median cost one arm its result outright
+(1.81 raw, 4.38 saved, round 4 of 61) and put two others on the checkpoints of
+round 5 of 80 and round 15 of 116. On fast-improving warm-started runs the
+median is far enough behind the raw score to save the wrong file. Saving the
+best RAW checkpoint alongside the smoothed one would have cost one extra file
+per run and would have kept the best number in this batch.
