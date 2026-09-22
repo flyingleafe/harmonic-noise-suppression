@@ -195,11 +195,13 @@ to cap there.
 stream, `render_reuse` and `flight_reuse` lowered to 2 for the measurement so
 the sample covers many distinct flights rather than one):
 
-| stream | max label | p99 | median | frames > 150 |
-|---|---:|---:|---:|---:|
-| `noise_v2_hard_5050` (no augmentation block) | 142.27 | 141.86 | 80.01 | 0 |
-| `noise_v2_mixed_dload` (freq_scale p = 1.0, capped) | 147.50 | 145.86 | 86.39 | 0 |
-| `noise_v2_mixed_dload`, CONTROL with the key removed | **175.29** | 165.42 | — | **17** |
+| stream | bank | max label | p99 | median | frames > 150 |
+|---|---|---:|---:|---:|---:|
+| `noise_v2_hard_5050` (no augmentation block) | production 2048 | 144.17 | 143.96 | 87.07 | 0 |
+| `noise_v2_mixed_dload` (freq_scale p = 1.0, capped) | production 2048 | 149.20 | 142.45 | 78.64 | 0 |
+| `noise_v2_hard_5050` | 2-entry stub | 142.27 | 141.86 | 80.01 | 0 |
+| `noise_v2_mixed_dload` | 2-entry stub | 147.50 | 145.86 | 86.39 | 0 |
+| `noise_v2_mixed_dload`, CONTROL with the key removed | 2-entry stub | **175.29** | 165.42 | — | **17** |
 
 The control is the point: with the source cap alone, 17 of 256 mixed chunks
 carry labels above the salience grid and the worst is 175.29 rev/s. With the
@@ -207,18 +209,23 @@ label cap, none do. Real-source frames in the mixed stream are untouched by
 the bound — their own peaks sit near 90 rev/s, so
 `min(1.3, 150 / peak)` = 1.3 and the draw is the unmodified one.
 
-
 ### The banks
 
-`noise_v2_easy_n2048.json` and `noise_v2_hard_n2048.json`, 2048 entries each,
-format `noise-v2-bank/1`, seed 20260921, built by
+`noise_v2_easy_n2048.json` (29.8 MB, sha256 `e6329171f20fee3a…`) and
+`noise_v2_hard_n2048.json` (29.3 MB, sha256 `fc1143c9ff1ff57c…`), 2048 entries
+each, format `noise-v2-bank/1`, seed 20260921, built by
 `python scripts/noise_v2_build_bank.py --preset easy|hard` (bit-reproducible;
-idempotent — a rebuild whose content digest matches is skipped).
+idempotent — a rebuild whose content digest matches is skipped). The hard
+bank's realised mixing coordinate is uniform (mean *t* 0.501, KS 0.0166
+against a 0.0300 threshold, deciles 233/194/186/214/196/197/191/213/192/232)
+and 50.2 % of its entries carry the standby slot.
 
 **Sampler strength 3.0**, chosen by the coverage ladder and not by taste: at
 strength 2.0 — the legacy pair's setting — the hard cloud brackets only 89.2 %
 of DREGON's 1/3-octave bands above 300 Hz against a 90 % target, while at 3.0
-it reaches 93.1 % (easy 91.5 / 94.2 %). The widths ladder, the guard rejection
+it reaches 93.1 % (easy 91.5 / 94.2 %) on the 64-draw probe; at full size the
+realised coverage is easy DREGON 100.0 % / Michael's 99.0 % and hard DREGON
+98.5 % / Michael's 100.0 % of bands above 300 Hz. The widths ladder, the guard rejection
 statistics and the coverage table are in
 `results/noise_v2/rig_sampler/findings.md`, and each bank ships a sidecar
 build report (`build_easy.json`, `build_hard.json`: acceptance, guards fired,
@@ -227,13 +234,21 @@ widths and the real-window band levels).
 
 **Transport.** A 2048-entry build takes about 45 minutes, so the banks are
 NOT rebuilt per job: they are published once as the pinned dload dataset
-`noise-v2-banks` and the policies name the file inside it directly
-(`preset_bank: dload:noise-v2-banks@<pin>/noise_v2_easy_n2048.json`).
+`noise-v2-banks`, version
+`5515c472823bfe8c497bcdea15bb0a2e5b22e1a167eeea8a9822253a163a9002`
+(`dload.lock` line 55), and each policy names the file inside that pinned
+tree directly:
+`preset_bank: dload:noise-v2-banks@5515c472823b…/noise_v2_easy_n2048.json`.
 `load_preset_bank` routes its path through
 `data_processing.streams.resolve_source`, the same convention `rps.fits` uses,
 so a pinned dataset resolves to a local file and a plain path still works
-unchanged. `scripts/noise_v2_submit_arms.sh` pulls the dataset once before
-`train.py` so the fetch happens outside the DataLoader workers.
+unchanged; the pin sits in the policy AND in the lock, so a job cannot
+silently train on a different bank. `scripts/noise_v2_submit_arms.sh` runs
+`dload pull noise-v2-banks` once before `train.py`, so the fetch happens up
+front and never inside a DataLoader worker. Verified on this machine:
+`load_preset_bank('dload:noise-v2-banks@5515c47…/noise_v2_hard_n2048.json')`
+returns 2048 entries (first `path_s3_00000`, `traj_rig` null, standby
+present).
 
 * **Canonical regime pair.** Michael's = {standby, cruise} as fitted; DREGON =
   {standby: null, cruise: R5 `dregon_room2_floor__flight_profile.json`}.
@@ -296,8 +311,9 @@ stage-1 arm has finished and uploaded its `best_real_overall` checkpoint;
 
 **Preflight** (`conf/AGENTS.md`: `python train.py experiment=<name>
 validate_only=true` before any GPU job), run on the laptop under
-`systemd-run --user --scope -p MemoryMax=10G`, synthetic and mixed arms
-against a real 64-entry bank of each preset:
+`systemd-run --user --scope -p MemoryMax=10G` against the PINNED 2048-entry
+banks the arms actually name (an earlier pass against 64-entry stub banks gave
+the same result):
 
 | arm | `validate_only` |
 |---|---|

@@ -29,9 +29,10 @@ defaults chain, `override /validation: rps_unified`, bfloat16, batch 128, 12
 workers, 2 s clips, `samples_per_validation: null` all stand.
 
 Stream `conf/online_mix/noise_v2_easy_5050.yaml`, bank
-`data/rig_banks/noise_v2_easy_n2048.json` (2048 entries, `python
-scripts/noise_v2_build_bank.py --preset easy`, seed 20260921, gitignored build
-product rebuilt in-job). One `kind: noise_v2` source at weight 0.8 (one source,
+`dload:noise-v2-banks@5515c472823b…/noise_v2_easy_n2048.json` (2048 entries,
+seed 20260921, sampler strength 3.0, published once as the pinned
+`noise-v2-banks` dataset and pulled by the job — a 2048-entry build takes
+~45 min, so it is not rebuilt per run). One `kind: noise_v2` source at weight 0.8 (one source,
 not the legacy two: two pools over one distribution render no more often in
 steady state, they only add a second warm-up and a second resident render,
 which at 1973 ms per 2 s x 8 mics is worth avoiding) plus the base policy's
@@ -86,9 +87,9 @@ hard against 4.71 for the real-trained model).
 scripts/noise_v2_submit_arms.sh nv2_easy_scv2
 ```
 
-The bank is a gitignored build product and `omnirun` ships a clean pushed
-checkout, so the job rebuilds it before `train.py`; the build is
-bit-reproducible and skips itself when the provenance digest already matches.
+The bank does not travel with the checkout: `omnirun` ships a clean pushed
+tree and the job pulls the pinned `noise-v2-banks` dataset before
+`train.py`, so the fetch happens once and outside the DataLoader workers.
 
 ## Conclusion
 

@@ -43,9 +43,9 @@
 # neighbourhoods of those same two rigs would add little the real half does not
 # already carry; the hard bank adds rigs and flights that are in neither.
 #
-# bank: data/rig_banks/noise_v2_hard_n2048.json, a gitignored BUILD PRODUCT
-# rebuilt in-job:
-#   python scripts/noise_v2_build_bank.py --preset hard
+# THE BANK TRAVELS AS A PINNED DATASET: `noise-v2-banks` version
+# 5515c472823b... (seed 20260921, strength 3.0), pulled once per job and named
+# inline by `preset_bank` below. See conf/online_mix/noise_v2_hard_5050.yaml.
 #
 # USED BY: nv2_mixed_scv2, nv2_mixed_hppnet_l2.
 
@@ -83,7 +83,7 @@ sources:
       weight: 2.0
       n_mics: 8
       n_rotors: 4
-      preset_bank: data/rig_banks/noise_v2_hard_n2048.json
+      preset_bank: dload:noise-v2-banks@5515c472823bfe8c497bcdea15bb0a2e5b22e1a167eeea8a9822253a163a9002/noise_v2_hard_n2048.json
       render_reuse: 192
       rps_scale_range: [1.0, 1.0]
       normalize_rms_range: [0.02, 0.25]

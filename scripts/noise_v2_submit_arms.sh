@@ -20,12 +20,15 @@
 # the main checkout cannot change what a queued job runs, and several arms can
 # be prepared without fighting over one working tree.
 #
-# THE BANK IS BUILT IN THE JOB. data/rig_banks/noise_v2_{easy,hard}_n2048.json
-# are gitignored build products and `omnirun` ships a clean pushed checkout, so
-# every synthetic or mixed arm runs `scripts/noise_v2_build_bank.py` first. The
-# build is bit-reproducible (seed 20260921) and idempotent — it skips itself
-# when the provenance digest already matches — so a restarted job pays once.
-# The curriculum arms train on REAL audio and build no bank.
+# THE BANK IS PULLED, NOT BUILT. A 2048-entry bank takes ~45 min to build, so
+# the two banks are published once as the PINNED dload dataset
+# `noise-v2-banks` and the policies name the file inside it
+# (`preset_bank: dload:noise-v2-banks@<pin>/noise_v2_{easy,hard}_n2048.json`,
+# resolved by `data_processing.streams.resolve_source`). Every synthetic or
+# mixed arm runs `dload pull noise-v2-banks` before `train.py` so the fetch
+# happens once, up front, and not inside a DataLoader worker; the pin lives in
+# the policy and in `dload.lock`, so a job cannot silently train on a
+# different bank. The curriculum arms train on REAL audio and pull nothing.
 #
 # ORDERING. A curriculum arm resolves `best:real_overall@<stage 1>` to an R2
 # artifact, so its stage-1 arm must have FINISHED and uploaded
@@ -70,12 +73,15 @@ case "$TARGET" in
     ;;
 esac
 
-# The bank preset each arm needs, or empty for an arm that trains on real audio.
-preset_of() {
+#: The pinned bank dataset the policies name. The pin itself lives in the
+#: policies and in dload.lock; this is only the pull that warms the cache.
+BANKS_DATASET=noise-v2-banks
+
+# Does this arm read a bank at all? The curriculum arms train on real audio.
+needs_banks() {
   case "$1" in
-    nv2_easy_*ft*|nv2_hard_*ft*) printf '' ;;
-    *_easy_*) printf 'easy' ;;
-    *_hard_*|*_mixed_*) printf 'hard' ;;
+    *_ft_*) return 1 ;;
+    *) return 0 ;;
   esac
 }
 
@@ -88,10 +94,9 @@ SHA="$(git rev-parse --verify "${REF}^{commit}")"
 printf 'pinned %s = %s\n' "$REF" "$(git rev-parse --short "$SHA")" >&2
 
 for arm in "${ARMS[@]}"; do
-  preset="$(preset_of "$arm")"
   job="${arm//_/-}"
   payload="$ENV_WRAPPER"
-  [ -n "$preset" ] && payload="$payload; python scripts/noise_v2_build_bank.py --preset $preset"
+  needs_banks "$arm" && payload="$payload; dload pull $BANKS_DATASET"
   payload="$payload; python train.py experiment=$arm"
 
   cmd=(omnirun --daemon localhost:18787 submit --backend uni --gpus 1

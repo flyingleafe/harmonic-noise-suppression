@@ -13,9 +13,9 @@
 # pair read hard 5.37 against easy 5.72, and `real_r4_scv2_unified` is the
 # real-data reference at val/real_r3 2.99.
 #
-# Stream: conf/online_mix/noise_v2_hard_5050.yaml. The bank is a gitignored
-# build product; the job rebuilds it first
-# (`python scripts/noise_v2_build_bank.py --preset hard`).
+# Stream: conf/online_mix/noise_v2_hard_5050.yaml. The bank rides the
+# pinned `noise-v2-banks` dataset; the job pulls it first
+# (`dload pull noise-v2-banks`).
 # Batch doc: docs/experiments/noise-v2-transfer.md.
 defaults:
   - rig_easy_scv2_unified

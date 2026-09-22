@@ -31,9 +31,9 @@ clips, `samples_per_validation: null`, validation batch 64, lr 1e-3, patience
 20 all stand.
 
 Stream `conf/online_mix/noise_v2_hard_5050.yaml`, bank
-`data/rig_banks/noise_v2_hard_n2048.json` (2048 entries, `python
-scripts/noise_v2_build_bank.py --preset hard`, seed 20260921, gitignored build
-product rebuilt in-job). The path interpolates CRUISE <-> CRUISE only on the
+`dload:noise-v2-banks@5515c472823b…/noise_v2_hard_n2048.json` (2048 entries,
+seed 20260921, sampler strength 3.0, published once as the pinned
+`noise-v2-banks` dataset and pulled by the job). The path interpolates CRUISE <-> CRUISE only on the
 common order range K = 1..81 (DREGON's orders 82-88 are dropped and the drop is
 in the provenance); the regime policy is carried, not blended — at mixing
 coordinate *t* the standby slot is Michael's standby fit with probability *t*
@@ -95,9 +95,9 @@ easy / 0.19 hard against 4.71 for the real-trained model).
 scripts/noise_v2_submit_arms.sh nv2_hard_hppnet_l2
 ```
 
-The bank is a gitignored build product and `omnirun` ships a clean pushed
-checkout, so the job rebuilds it before `train.py`; the build is
-bit-reproducible and skips itself when the provenance digest already matches.
+The bank does not travel with the checkout: `omnirun` ships a clean pushed
+tree and the job pulls the pinned `noise-v2-banks` dataset before
+`train.py`, so the fetch happens once and outside the DataLoader workers.
 
 ## Conclusion
 

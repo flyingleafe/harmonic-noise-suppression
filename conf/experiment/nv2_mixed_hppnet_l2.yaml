@@ -10,9 +10,9 @@
 # This arm sees REAL audio in training, so its reference is `hppnet_l2_r2_s0`
 # (2.27) directly: does the fitted synthetic half ADD to real data.
 #
-# Stream: conf/online_mix/noise_v2_mixed_dload.yaml. The bank is a gitignored
-# build product; the job rebuilds it first
-# (`python scripts/noise_v2_build_bank.py --preset hard`).
+# Stream: conf/online_mix/noise_v2_mixed_dload.yaml. The bank rides the
+# pinned `noise-v2-banks` dataset; the job pulls it first
+# (`dload pull noise-v2-banks`).
 # Batch doc: docs/experiments/noise-v2-transfer.md.
 defaults:
   - rig_easy_hppnet_l2_unified
