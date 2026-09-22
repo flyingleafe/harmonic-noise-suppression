@@ -12,11 +12,14 @@ THE FIVE GENERATIONS, as noise sources::
                                   (data_processing.stochastic_rotor_noise),
                                   which is what `kind: stochastic` renders
                                   when a policy gives it `ranges:`
-    LegacyFit("dregon_cruise_refined")
-                                  one stage-2 ANCHOR fit on the physical level
+    LegacyFit("michael_cruise")   one stage-2 ANCHOR fit on the physical level
                                   scale (experiments.stochastic_fit.rig_sampler
-                                  .FIT_PATHS via load_anchor) — the MEASURED
-                                  rig each legacy bank was drawn around;
+                                  .FIT_PATHS via load_anchor), built with the
+                                  donor policy's per-clip dynamics on top
+                                  (rig_sampler.entry_params) — i.e. a bank entry
+                                  at ZERO perturbation, the MEASURED rig each
+                                  legacy bank was drawn around and what the
+                                  point-preset arm rendered;
                                   legacy_fit_names() lists all six
     LegacyBank("easy", 0)         entry 0 of data/rig_banks/rig_easy_n2048.json
                                   — the exact preset bank the `rig_easy` /
@@ -153,10 +156,19 @@ V2_BANKS = {
 LEGACY_RANDOM_LINE_MODE = "stochastic"
 LEGACY_BANK_LINE_MODE = "fm"
 
-#: ``line_mode`` of a stage-2 ANCHOR fit: an anchor export carries no shaft
-#: jitter, so its widths are the Lorentzians of ``gamma0``/``gamma_slope`` —
-#: which is the mode its own renderer (``stage2.render_from_export``) uses.
-LEGACY_FIT_LINE_MODE = "stochastic"
+#: ``line_mode`` of a stage-2 ANCHOR fit, per ``dynamics`` mode.  With the
+#: donor draw the rig carries a shaft jitter and its lines are FM-broadened,
+#: which is the bank arms' own mode; with the drift zeroed the export's jitter
+#: is zero and the widths are the ``gamma0``/``gamma_slope`` Lorentzians, which
+#: is what the anchor's own renderer (``stage2.render_from_export``) uses.
+LEGACY_FIT_LINE_MODE = {"donor": "fm", "none": "stochastic"}
+
+#: The policy whose ``ranges:`` donate a bank entry's per-clip DYNAMICS, and
+#: which of its stochastic sources belongs to which rig — the ``--dynamics``
+#: pairing recorded in ``scripts/_build_rig_bank.py``'s header and in the
+#: banks' ``provenance.anchors[].dynamics_from``.
+LEGACY_FIT_DONOR_POLICY = "conf/online_mix/rig_fitted_5050.yaml"
+LEGACY_FIT_DONOR_INDEX = {"michael": 1, "dregon": 0}
 
 #: The clip each published legacy bank ANCHORED on, from
 #: ``data/rig_banks/rig_easy_n2048.json``'s ``provenance.anchors`` (the hard
@@ -980,39 +992,63 @@ class LegacyFit(_LegacySource):
     :func:`~experiments.stochastic_fit.rig_sampler.load_anchor` with its own
     defaults — ``physical=True``, i.e. the clip's ``scores.power_scale`` folded
     into the absolute-power fields and ``to_renderer_units``' ``10 log10(work /
-    analysis)`` = +4.4032 dB at the 44.1 kHz work grid — and converted by
-    :func:`experiments.stochastic_fit.stage2.params_from_export`.  That is
-    exactly the path ``scripts/_build_rig_bank.py`` took (its line 684
-    ``load_anchor(path, selector)``, its line 402 ``params_from_export(export,
-    rates, sample_rate=16000, n_mics=8)``), so this source renders the anchor
-    ITSELF on the physical scale, against which the bank entries around it are
-    perturbations.
+    analysis)`` = +4.4032 dB at the 44.1 kHz work grid — which is what
+    ``scripts/_build_rig_bank.py`` reads its anchors with.
 
     ``clip`` is an integer index or a clip-id prefix.  Its default is the clip
     the PUBLISHED banks anchored on where they name one
     (:data:`LEGACY_FIT_CLIPS`, read out of ``rig_easy_n2048.json``'s
-    ``provenance.anchors``), and the fit's first clip otherwise.
+    ``provenance.anchors``: ``cruise_8clip.json:fly125_cruise_00`` and
+    ``dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00``),
+    and the fit's first clip otherwise.
+
+    ``dynamics`` decides what is built on top of that export:
+
+    ``"donor"`` (the default) — :func:`experiments.stochastic_fit.rig_sampler.
+    entry_params`, i.e. EXACTLY what one bank entry at zero perturbation is:
+    the donor policy's own per-clip draw (``conf/online_mix/rig_fitted_5050
+    .yaml``, source :data:`LEGACY_FIT_DONOR_INDEX` — 1 for the Michael's fits,
+    0 for the DREGON ones, the ``--dynamics`` pairing of the bank builder's
+    header) with the fit's identity written over it, the fitted ``gamma_slope``
+    crossing into the draw as ``fixed_shaft_jitter_rps``.  This is the rig the
+    point-preset run scored (``docs/experiments/rig-sampler-transfer-pair.md``)
+    and the thing every bank entry is a perturbation OF.
+
+    ``"none"`` — :func:`experiments.stochastic_fit.stage2.params_from_export`
+    alone: the anchor as its own renderer (``stage2.render_from_export``) plays
+    it, with every drift process zeroed, because a stage-2 fit carries those as
+    per-clip latents and not as rig parameters.
+
+    ``line_mode`` follows from that and can be overridden: ``"fm"`` for
+    ``"donor"``, where a line's width comes from the drawn shaft jitter (the
+    bank arms' own mode), ``"stochastic"`` for ``"none"``, where the export's
+    jitter is zero and the widths are the ``gamma0``/``gamma_slope``
+    Lorentzians.
 
     The order ladder is sized from :data:`LEGACY_FIT_MIN_RPS`, the slowest
     speed the arms' policy can render (``0.45 * 72`` rev/s, the bank's own
     ``order_ladder.min_rps_vector``), so the comb reaches Nyquist for the
-    slowest rotor exactly as the bank entries' does.
+    slowest rotor exactly as a bank entry's does.  The rig is built at its
+    fitted eight microphones either way; ``render(..., n_mics=1)`` listens
+    through the first of them (:func:`_restrict_mics`).
 
-    ``line_mode`` defaults to ``"stochastic"``, which is what the anchor's own
-    renderer (``stage2.render_from_export``) uses: an anchor export carries
-    ``shaft_jitter_rps = 0`` and its widths live in ``gamma0``/``gamma_slope``,
-    while the bank arms render ``fm`` because a bank entry is drawn WITH a
-    shaft jitter (``fixed_shaft_jitter_rps = gamma_slope / sqrt(2 ln 2)``).
+    NOT BOUNDED.  ``scripts/_build_rig_bank.py`` puts every export through
+    ``clip_exponents`` before it draws, which raises DREGON's fitted
+    ``floor_exp`` from -3.71 to 0; this source keeps the fit's own value, so a
+    trajectory that visits EXACTLY zero rotor speed (a whole flight's ground
+    phase) would give that rig an infinite floor gain.  Every airborne
+    trajectory is safe.
     """
 
     def __init__(
         self,
-        name: str = "dregon_cruise_refined",
+        name: str = "michael_cruise",
         clip: int | str | None = None,
         *,
-        line_mode: str = LEGACY_FIT_LINE_MODE,
+        dynamics: str = "donor",
+        seed: int = 0,
+        line_mode: str | None = None,
         n_fft: int = 2048,
-        n_mics: int = 8,
         min_rps: float = LEGACY_FIT_MIN_RPS,
     ):
         from experiments.stochastic_fit import rig_sampler as RS
@@ -1021,6 +1057,9 @@ class LegacyFit(_LegacySource):
         key = str(name)
         if key not in RS.FIT_PATHS:
             raise ValueError(f"unknown stage-2 fit {name!r}; known fits are {legacy_fit_names()}")
+        mode = str(dynamics)
+        if mode not in ("donor", "none"):
+            raise ValueError(f"dynamics must be 'donor' or 'none', got {dynamics!r}")
         path = ROOT / RS.FIT_PATHS[key]
         if not path.is_file():
             raise FileNotFoundError(f"{key}: stage-2 summary not found: {path}")
@@ -1029,17 +1068,34 @@ class LegacyFit(_LegacySource):
         self.fit_path = RS.FIT_PATHS[key]
         self.clip_id = _anchor_clip_id(path, selector)
         self.export = RS.load_anchor(path, selector)
-        params = stage2.params_from_export(
-            self.export,
-            np.full(4, float(min_rps), dtype=np.float64),
-            sample_rate=SR,
-            n_mics=int(n_mics),
+        self.dynamics = mode
+        self.seed = int(seed)
+        rates = np.full(
+            np.atleast_2d(np.asarray(self.export["profile_db"])).shape[0],
+            float(min_rps),
+            dtype=np.float64,
         )
+        if mode == "donor":
+            index = LEGACY_FIT_DONOR_INDEX["dregon" if key.startswith("dregon") else "michael"]
+            self.donor = f"{LEGACY_FIT_DONOR_POLICY}:{index}"
+            params = RS.entry_params(
+                self.export,
+                RS.donor_ranges(ROOT / LEGACY_FIT_DONOR_POLICY, index),
+                np.random.default_rng([int(seed), 0]),
+                rates=rates,
+            )
+        else:
+            self.donor = None
+            params = stage2.params_from_export(
+                self.export, rates, sample_rate=SR, n_mics=RS.BANK_N_MICS
+            )
         super().__init__(
             params,
-            name=f"legacy-fit {key}",
-            entry=f"{self.fit_path}: clip {self.clip_id} (physical)",
-            line_mode=line_mode,
+            # The mode is part of the identity: the two builds are different
+            # rigs to listen to, and ``render_all`` keys by name.
+            name=f"legacy-fit {key}" + ("" if mode == "donor" else f" ({mode} dynamics)"),
+            entry=f"{self.fit_path}: clip {self.clip_id} (physical, dynamics {mode})",
+            line_mode=(LEGACY_FIT_LINE_MODE[mode] if line_mode is None else line_mode),
             n_fft=n_fft,
         )
 
@@ -1047,6 +1103,14 @@ class LegacyFit(_LegacySource):
         print(f"{self.name}  [{self.generation}]  anchor fit")
         print(f"  fit        : {self.fit_path}")
         print(f"  clip       : {self.clip_id}")
+        print(
+            f"  dynamics   : {self.dynamics}"
+            + (
+                f"  (donor {self.donor}, seed [{self.seed}, 0] — rig_sampler.entry_params)"
+                if self.dynamics == "donor"
+                else "  (stage2.params_from_export: every drift process zeroed)"
+            )
+        )
         print(f"  line_mode  : {self.line_mode}")
         print(
             "  level      : power_scale folded "
@@ -1997,6 +2061,8 @@ __all__ = [
     "FIT_PATHS",
     "LEGACY_BANKS",
     "LEGACY_FIT_CLIPS",
+    "LEGACY_FIT_DONOR_INDEX",
+    "LEGACY_FIT_DONOR_POLICY",
     "LEGACY_FIT_LINE_MODE",
     "LEGACY_FIT_MIN_RPS",
     "LEGACY_LINE_MODES",

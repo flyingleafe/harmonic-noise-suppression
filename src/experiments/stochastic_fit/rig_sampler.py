@@ -1970,6 +1970,135 @@ def renderable_deviation(export: dict[str, Any], reference: dict[str, Any]) -> d
 
 
 # ---------------------------------------------------------------------------
+# phase B: what ONE bank entry is made of
+# ---------------------------------------------------------------------------
+
+#: The rate a bank entry is built at, i.e. the training stream's own
+#: ``sample_rate``. An entry's must match its pool's, and the pool refuses a
+#: bank loudly when it does not. Not to be confused with
+#: :data:`RENDER_SAMPLE_RATE_WORK`, which is the 44.1 kHz work grid the level
+#: conversion of :func:`to_physical` is declared against.
+BANK_WORK_RATE = 16000
+
+#: Microphones a bank entry carries. The fitted per-(mic, rotor) pattern is
+#: copied into the entry, so this must match the policy's ``n_mics``.
+BANK_N_MICS = 8
+
+#: HWHM of a unit-std Gaussian, i.e. the gamma-to-shaft-jitter conversion.
+GAUSS_HWHM = float(np.sqrt(2.0 * np.log(2.0)))
+
+#: The fields an entry takes from the FIT rather than from the donor policy's
+#: per-clip draw. Everything not listed here (and not a ``fixed_*`` range in
+#: :func:`entry_params`) is the stream's own draw, so the arms keep the base
+#: policy's dynamics.
+IDENTITY_FIELDS = (
+    "profile_db",
+    "harm_mean_db",
+    "floor_ctrl_hz",
+    "floor_ctrl_db",
+    "floor_tilt_db_oct",
+    "floor_mean_db",
+    "floor_static_rel",
+    "amp_rps_exponent",
+    "amp_rps_exponent_floor",
+    "amp_rps_ref",
+    "coherence_k_half",
+    "gamma_min_bins",
+)
+
+
+def donor_ranges(path: Path | str, index: int):
+    """The per-clip draw ranges of one stochastic source of one policy.
+
+    ``scripts/_build_rig_bank.py``'s ``--dynamics <policy.yaml>:<index>``:
+    the DONOR of everything a bank entry does not take from its fit — the
+    amplitude OU process, the floor level and tilt drift, the per-mic
+    modulation, the shaft-jitter time constant and its per-clip spread, the
+    phase diffusion and the label error.
+    """
+    import yaml
+
+    from data_processing import stochastic_rotor_noise as srn
+
+    policy = yaml.safe_load(Path(path).read_text())
+    source = policy["sources"]["noise"][int(index)]
+    if source.get("kind") != "stochastic":
+        raise ValueError(f"{path}: source {index} is {source.get('kind')!r}, not stochastic")
+    return srn.StochasticRanges.from_dict(source.get("ranges"))
+
+
+def _as_tuple(value: np.ndarray | None) -> tuple[float, ...] | None:
+    return None if value is None else tuple(np.asarray(value, dtype=np.float64).tolist())
+
+
+def _as_nested(value: np.ndarray | None) -> tuple[tuple[float, ...], ...] | None:
+    if value is None:
+        return None
+    return tuple(tuple(row) for row in np.asarray(value, dtype=np.float64).tolist())
+
+
+def entry_params(
+    export: dict[str, Any],
+    ranges: Any,
+    rng: np.random.Generator,
+    *,
+    rates: np.ndarray,
+):
+    """One bank entry: the stream's per-clip draw with the fitted rig on top.
+
+    A stage-2 export describes ONE FITTED CLIP — its rig identity (timbre,
+    floor shape, line widths, channel pattern, speed law) and nothing that
+    varies inside a window, because :func:`stage2.params_from_export`
+    deliberately zeroes every drift process. A training window needs both, so
+    an entry is the donor policy's own per-clip draw
+    (:func:`~data_processing.stochastic_rotor_noise.sample_params` on
+    ``ranges``) with the fit's :data:`IDENTITY_FIELDS` written over it.
+
+    The line WIDTH crosses over through the same seam the fitted policy uses:
+    in ``line_mode: fm`` a line's width comes from the shaft's speed jitter and
+    not from ``gamma``, and a Gaussian line with shaft-rate std ``sigma`` has
+    HWHM ``sqrt(2 log 2) * k * sigma``, so the fit's ``gamma_slope`` is handed
+    to the draw as ``fixed_shaft_jitter_rps = gamma_slope / GAUSS_HWHM``.
+    Without it a bank would render a comb of dead-steady tones, which is not
+    the fitted rig.
+
+    ``rates`` sizes the order ladder (``params_from_export`` reads its minimum),
+    so it is the SLOWEST speed the stream can ask for and not this clip's.
+    """
+    from dataclasses import replace
+
+    from data_processing import stochastic_rotor_noise as srn
+    from experiments.stochastic_fit import stage2
+
+    fitted = stage2.params_from_export(
+        export, rates, sample_rate=BANK_WORK_RATE, n_mics=BANK_N_MICS
+    )
+    # The widths and the channel pattern reach the draw through the very
+    # `fixed_*` seams the base policy uses, so the per-clip width SPREAD
+    # (`shaft_jitter_log_std`) still applies on top, exactly as it does there.
+    ranges = replace(
+        ranges,
+        fixed_gamma0_hz=tuple(np.asarray(fitted.gamma0, dtype=np.float64).tolist()),
+        fixed_gamma_slope_hz=tuple(np.asarray(fitted.gamma_slope, dtype=np.float64).tolist()),
+        fixed_shaft_jitter_rps=tuple(
+            (np.asarray(fitted.gamma_slope, dtype=np.float64) / GAUSS_HWHM).tolist()
+        ),
+        fixed_mic_gain_db=_as_nested(fitted.fixed_mic_gain_db),
+        fixed_mic_floor_db=_as_tuple(fitted.fixed_mic_floor_db),
+        fixed_mic_gain_all_db=_as_tuple(fitted.fixed_mic_gain_all_db),
+    )
+    draw = srn.sample_params(
+        rng,
+        ranges,
+        n_rotors=fitted.n_rotors,
+        n_harmonics=fitted.n_harmonics,
+        sample_rate=BANK_WORK_RATE,
+        line_bin_integrate=fitted.line_bin_integrate,
+    )
+    return draw.with_(**{name: getattr(fitted, name) for name in IDENTITY_FIELDS})
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 

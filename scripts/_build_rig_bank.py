@@ -77,31 +77,21 @@ import hashlib
 import json
 import subprocess
 import time
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-import yaml
 
 import experiments.stochastic_fit.rig_sampler as rig_sampler
 from data_processing import rps_synthesis
 from data_processing import stochastic_rotor_noise as srn
-from experiments.stochastic_fit import stage2
+from experiments.stochastic_fit.rig_sampler import IDENTITY_FIELDS, donor_ranges, entry_params
 
 #: Where banks live. Gitignored (`/data/*`), like the fitted summaries in
 #: `omnirun-outputs/`; a remote training job needs the file shipped with the
 #: checkout.
 BANK_DIR = Path("data/rig_banks")
-
-#: The rate the training stream renders at, i.e. the pool's `sample_rate`. An
-#: entry's `sample_rate` must match its pool's, and the pool refuses the bank
-#: loudly when it does not.
-WORK_RATE = 16000
-
-#: Microphones the stream renders. The fitted per-(mic, rotor) pattern is copied
-#: into the entry, so this must match the policy's `n_mics`.
-N_MICS = 8
 
 #: Lower end of the policy's `rps_scale_range`, the per-window multiplier on the
 #: whole trajectory (`conf/online_mix/rig_fitted_5050.yaml`).
@@ -140,27 +130,6 @@ AMP_EXP_BOUND = (4.398, 14.111)
 FLOOR_EXP_BOUND = (0.0, 6.792)
 EXPONENT_BOUND_SOURCE = "results/rig_sampler/structure.json:between_rig.per_fit (six fits)"
 
-#: HWHM of a unit-std Gaussian, i.e. the gamma-to-shaft-jitter conversion.
-GAUSS_HWHM = float(np.sqrt(2.0 * np.log(2.0)))
-
-#: The fields an entry takes from the FIT rather than from the donor policy's
-#: per-clip draw. Everything not listed here (and not a `fixed_*` range below)
-#: is the stream's own draw, so the arms keep the base policy's dynamics.
-IDENTITY_FIELDS = (
-    "profile_db",
-    "harm_mean_db",
-    "floor_ctrl_hz",
-    "floor_ctrl_db",
-    "floor_tilt_db_oct",
-    "floor_mean_db",
-    "floor_static_rel",
-    "amp_rps_exponent",
-    "amp_rps_exponent_floor",
-    "amp_rps_ref",
-    "coherence_k_half",
-    "gamma_min_bins",
-)
-
 
 def anchor_spec(text: str) -> tuple[Path, str]:
     """``<fit.json>:<clip-id>`` -> ``(path, selector)``."""
@@ -178,15 +147,6 @@ def dynamics_spec(text: str) -> tuple[Path, int]:
             f"--dynamics wants <policy.yaml>:<source-index>, got {text!r}"
         )
     return Path(path_text), int(index)
-
-
-def donor_ranges(path: Path, index: int) -> srn.StochasticRanges:
-    """The per-clip draw ranges of one stochastic source of one policy."""
-    policy = yaml.safe_load(path.read_text())
-    source = policy["sources"]["noise"][index]
-    if source.get("kind") != "stochastic":
-        raise SystemExit(f"{path}: source {index} is {source.get('kind')!r}, not stochastic")
-    return srn.StochasticRanges.from_dict(source.get("ranges"))
 
 
 def sha256(path: Path) -> str:
@@ -228,8 +188,8 @@ def inputs_digest(args: argparse.Namespace, ranges: list[srn.StochasticRanges]) 
             "max_attempts": int(args.max_attempts),
             "rps_scale_min": float(args.rps_scale_min),
             "rps_scale_max": float(args.rps_scale_max),
-            "work_rate": WORK_RATE,
-            "n_mics": N_MICS,
+            "work_rate": rig_sampler.BANK_WORK_RATE,
+            "n_mics": rig_sampler.BANK_N_MICS,
             "amp_exp_bound": list(AMP_EXP_BOUND),
             "floor_exp_bound": list(FLOOR_EXP_BOUND),
             "anchors": [
@@ -275,7 +235,7 @@ def _band_power_db(x: np.ndarray, n: int = 8192) -> np.ndarray:
         frames = np.stack([ch[s : s + n] * w for s in range(0, ch.size - n + 1, n // 2)])
         power += (np.abs(np.fft.rfft(frames, axis=-1)) ** 2).mean(axis=0)
     power /= xx.shape[0]
-    freqs = np.fft.rfftfreq(n, 1.0 / WORK_RATE)
+    freqs = np.fft.rfftfreq(n, 1.0 / rig_sampler.BANK_WORK_RATE)
     return np.asarray(
         [
             10.0 * np.log10(max(power[(freqs >= lo) & (freqs < hi)].mean(), 1e-300))
@@ -303,15 +263,15 @@ def fold_check(
     Any difference is content that folded down.
     """
     speed = float(rps_scale_max) * fastest_cruise_rps()
-    n = int(2.0 * WORK_RATE)
+    n = int(2.0 * rig_sampler.BANK_WORK_RATE)
     kwargs: dict[str, Any] = dict(
-        n_mics=N_MICS, n_fft=srn.DEFAULT_N_FFT, normalize_rms=None, line_mode="fm"
+        n_mics=rig_sampler.BANK_N_MICS, n_fft=srn.DEFAULT_N_FFT, normalize_rms=None, line_mode="fm"
     )
     deltas, removed_orders = [], []
     for params in entries[: int(count)]:
         rps = np.full((params.n_rotors, n), speed)
         k = np.arange(1, params.n_harmonics + 1, dtype=np.float64)
-        over = k * speed >= WORK_RATE / 2.0
+        over = k * speed >= rig_sampler.BANK_WORK_RATE / 2.0
         profile = np.array(params.profile_db, dtype=np.float64)
         profile[:, over] = -400.0
         removed_orders.append(int(over.sum()))
@@ -389,50 +349,6 @@ def path_reference(
     mid = rig_sampler.interpolate_exports(anchors[0], anchors[1], t, levels=levels)
     mid.pop("_path", None)
     return mid
-
-
-def entry_params(
-    export: dict[str, Any],
-    ranges: srn.StochasticRanges,
-    rng: np.random.Generator,
-    *,
-    rates: np.ndarray,
-) -> srn.StochasticParams:
-    """One bank entry: the stream's per-clip draw with the fitted rig on top."""
-    fitted = stage2.params_from_export(export, rates, sample_rate=WORK_RATE, n_mics=N_MICS)
-    # The widths and the channel pattern reach the draw through the very
-    # `fixed_*` seams the base policy uses, so the per-clip width SPREAD
-    # (`shaft_jitter_log_std`) still applies on top, exactly as it does there.
-    ranges = replace(
-        ranges,
-        fixed_gamma0_hz=tuple(np.asarray(fitted.gamma0, dtype=np.float64).tolist()),
-        fixed_gamma_slope_hz=tuple(np.asarray(fitted.gamma_slope, dtype=np.float64).tolist()),
-        fixed_shaft_jitter_rps=tuple(
-            (np.asarray(fitted.gamma_slope, dtype=np.float64) / GAUSS_HWHM).tolist()
-        ),
-        fixed_mic_gain_db=_as_nested(fitted.fixed_mic_gain_db),
-        fixed_mic_floor_db=_as_tuple(fitted.fixed_mic_floor_db),
-        fixed_mic_gain_all_db=_as_tuple(fitted.fixed_mic_gain_all_db),
-    )
-    draw = srn.sample_params(
-        rng,
-        ranges,
-        n_rotors=fitted.n_rotors,
-        n_harmonics=fitted.n_harmonics,
-        sample_rate=WORK_RATE,
-        line_bin_integrate=fitted.line_bin_integrate,
-    )
-    return draw.with_(**{name: getattr(fitted, name) for name in IDENTITY_FIELDS})
-
-
-def _as_tuple(value: np.ndarray | None) -> tuple[float, ...] | None:
-    return None if value is None else tuple(np.asarray(value, dtype=np.float64).tolist())
-
-
-def _as_nested(value: np.ndarray | None) -> tuple[tuple[float, ...], ...] | None:
-    if value is None:
-        return None
-    return tuple(tuple(row) for row in np.asarray(value, dtype=np.float64).tolist())
 
 
 def guard_stats(samplers: list[dict[str, Any]]) -> dict[str, Any]:
@@ -778,15 +694,17 @@ def main(argv: list[str] | None = None) -> int:
                 "slowest_cruise_rps": slowest_cruise_rps(),
                 "min_rps_vector": rates.tolist(),
                 "k_use": sorted({int(p.n_harmonics) for p in entries}),
-                "k_max_from_min_rps": int(np.floor((WORK_RATE / 2) / max(min_rps, 1.0))),
+                "k_max_from_min_rps": int(
+                    np.floor((rig_sampler.BANK_WORK_RATE / 2) / max(min_rps, 1.0))
+                ),
                 "note": (
                     "k_use = min(k_max_from_min_rps, the fit's own profile length); the fitted "
                     "ladder is the binding cap whenever it is the shorter of the two"
                 ),
             },
             "render_units": {
-                "sample_rate": WORK_RATE,
-                "n_mics": N_MICS,
+                "sample_rate": rig_sampler.BANK_WORK_RATE,
+                "n_mics": rig_sampler.BANK_N_MICS,
                 "converted_by": "experiments.stochastic_fit.stage2.params_from_export",
             },
             "guards": guard_stats([e["_sampler"] for e in exports]),

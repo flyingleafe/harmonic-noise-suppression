@@ -321,7 +321,7 @@ def choose_real_clips(dataset: Any, rows: list[dict], rigs: list[str]) -> list[d
 def fitted_rig(rig: str) -> tuple[Any, dict[str, Any]]:
     """The rig fit as the training stream carries it, plus its provenance.
 
-    This is `_build_rig_bank.entry_params` applied to the ANCHOR ITSELF instead
+    This is `rig_sampler.entry_params` applied to the ANCHOR ITSELF instead
     of to a neighbourhood draw around it: the fit supplies the rig's identity
     (timbre, floor shape, line widths, per-(mic, rotor) pattern, fitted speed
     law) and the policy's own `ranges:` supply the per-clip dynamics, exactly as
@@ -342,14 +342,14 @@ def fitted_rig(rig: str) -> tuple[Any, dict[str, Any]]:
     export, clipped = bank_builder.clip_exponents(anchor)
 
     policy_text, _, index = str(spec["dynamics"]).rpartition(":")
-    ranges = bank_builder.donor_ranges(REPO_ROOT / policy_text, int(index))
+    ranges = rig_sampler.donor_ranges(REPO_ROOT / policy_text, int(index))
     rates = np.full(
         int(np.atleast_2d(np.asarray(anchor["profile_db"])).shape[0]),
         bank_builder.DEFAULT_RPS_SCALE_MIN * bank_builder.slowest_cruise_rps(),
         dtype=np.float64,
     )
     seed = [MATRIX_SEED, _SUB_FIT, sorted(ANCHORS).index(rig)]
-    params = bank_builder.entry_params(export, ranges, np.random.default_rng(seed), rates=rates)
+    params = rig_sampler.entry_params(export, ranges, np.random.default_rng(seed), rates=rates)
     provenance = {
         "rig": rig,
         "fit": spec["fit"],
