@@ -44,8 +44,8 @@
 # already carry; the hard bank adds rigs and flights that are in neither.
 #
 # THE BANK TRAVELS AS A PINNED DATASET: `noise-v2-banks` (seed 20260921,
-# strength 3.0), version pinned by the committed `dload.lock`, pulled once
-# per job and named inline by `preset_bank` below. See
+# strength 3.0), version 7f6a3242b353... written into `preset_bank` below
+# and into the committed `dload.lock`, pulled once per job. See
 # conf/online_mix/noise_v2_hard_5050.yaml.
 #
 # USED BY: nv2_mixed_scv2, nv2_mixed_hppnet_l2.
@@ -84,7 +84,7 @@ sources:
       weight: 2.0
       n_mics: 8
       n_rotors: 4
-      preset_bank: dload:noise-v2-banks/noise_v2_hard_n2048.json
+      preset_bank: dload:noise-v2-banks@7f6a3242b353b1d0806f2add1ee0826dbc8032e904d9ae9825cf4c1d064d2925/noise_v2_hard_n2048.json
       render_reuse: 192
       rps_scale_range: [1.0, 1.0]
       normalize_rms_range: [0.02, 0.25]
