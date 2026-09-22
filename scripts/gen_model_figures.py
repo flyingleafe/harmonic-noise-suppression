@@ -98,18 +98,17 @@ def _plot_tracks(ax, rps, fs, title, ylim=None):
 def fig_traj_real_vs_sampled(
     rigs=("dregon", "michaels"), name: str = "gen_traj_real_vs_sampled", row_h: float = 3.1
 ) -> None:
-    import noise_v2_sampler as NS
+    import noise_lab as NL
 
     from experiments.rps_traj.data import RATE_HZ
 
-    # the noise rig only carries the fit-span warning; the TRAJECTORY rig is ``traj_rig``
-    noise_rig = NS.load_rig("dregon")
     fig, axes = plt.subplots(len(rigs), 2, figsize=(11, row_h * len(rigs)))
     axes = np.atleast_2d(axes)
     for row, rig in enumerate(rigs):
         real = _real_window(rig, 30.0)
-        traj = NS.sample_trajectory(noise_rig, seed=11 + row, duration_s=30.0, traj_rig=rig)
-        samp = np.asarray(traj["rps"].data)[:, :: int(SR / RATE_HZ)]
+        traj = NL.trajectory("fitted", rig=rig, seed=11 + row, duration_s=30.0)
+        # ``trajectory`` already carries the plot track at RPS_PLOT_SR = RATE_HZ
+        samp = np.asarray(traj["rps"].data)
         lo = min(np.nanmin(real), samp.min())
         hi = max(np.nanmax(real), samp.max())
         pad = 0.06 * (hi - lo)
@@ -122,15 +121,14 @@ def fig_traj_real_vs_sampled(
 
 
 def fig_traj_hyperprior(n: int = 4) -> None:
-    import noise_v2_sampler as NS
+    import noise_lab as NL
 
     from experiments.rps_traj.data import RATE_HZ
 
-    rig = NS.load_rig("dregon")
     fig, axes = plt.subplots(2, 2, figsize=(11, 6))
     for i, ax in enumerate(axes.ravel()[:n]):
-        traj = NS.sample_trajectory(rig, seed=101 + i, duration_s=30.0, traj_rig="posterior")
-        rps = np.asarray(traj["rps"].data)[:, :: int(SR / RATE_HZ)]
+        traj = NL.trajectory("fitted", rig="posterior", seed=101 + i, duration_s=30.0)
+        rps = np.asarray(traj["rps"].data)
         hover = float(traj["meta"]["hover_rev_s"])
         _plot_tracks(ax, rps, RATE_HZ, f"hyperprior drone {i + 1} — hover {hover:.0f} rev/s")
     axes[0, 1].legend(ncol=4, fontsize=7, loc="upper right")
@@ -179,22 +177,24 @@ def _support(name_contains: str, prefer: str = "+4_"):
 
 
 def _render_on_label(rig_name: str, carrier: np.ndarray, seed: int) -> np.ndarray:
-    import noise_v2_sampler as NS
+    import noise_lab as NL
     import tdseries as td
 
-    rig = NS.load_rig(rig_name)
+    carrier = np.ascontiguousarray(carrier, dtype=np.float64)
+    step = max(int(round(SR / NL.RPS_PLOT_SR)), 1)
     traj = td.Frame(
         {
             "rps": td.uniform(
-                np.ascontiguousarray(carrier, dtype=np.float64),
-                SR,
+                np.ascontiguousarray(carrier[:, ::step]),
+                NL.RPS_PLOT_SR,
                 dims=("rotor", "time"),
                 t_start=0.0,
             ),
-            "meta": td.Frame({"rig": rig_name, "traj_rig": "real-label", "seed": int(seed)}),
+            "rps_render": td.uniform(carrier, SR, dims=("rotor", "time"), t_start=0.0),
+            "meta": td.Frame({"traj_kind": "real-label", "seed": int(seed), "rig": rig_name}),
         }
     )
-    out = NS.render(rig, traj, seed=seed, n_mics=1)
+    out = NL.render(NL.V2Fit(rig_name), traj, seed=seed, n_mics=1)
     return np.asarray(out["audio"].data)[0].astype(np.float64)
 
 

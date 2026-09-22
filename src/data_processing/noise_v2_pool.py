@@ -100,7 +100,7 @@ as the level AT THE REFERENCE SPEED with the window's own speed envelope kept
 ``comb_offset_db`` adds a constant to every rotor's ``profile_db`` on a DEEP
 COPY of each loaded fit, raising or lowering the comb against the floor
 without touching the floor; the loaded payloads are never mutated. It is the
-same knob ``notebooks/noise_v2_sampler.py`` exposes, and it exists because the
+same knob ``notebooks/noise_lab.py`` exposes, and it exists because the
 comb-to-floor ratio is the one thing the round-5 DREGON fit is known to be
 uncertain about.
 
