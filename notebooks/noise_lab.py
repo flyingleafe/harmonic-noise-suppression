@@ -6,12 +6,18 @@ family, with sliders) — into one place where a clip of EVERY generation can be
 rendered on the SAME rotor-speed track, under the SAME level rule, with the
 SAME render seed, and then compared by ear, by spectrogram and by number.
 
-THE FOUR GENERATIONS, as noise sources::
+THE FIVE GENERATIONS, as noise sources::
 
     LegacyRandom(seed=0)          a fresh draw of the hand-written family
                                   (data_processing.stochastic_rotor_noise),
                                   which is what `kind: stochastic` renders
                                   when a policy gives it `ranges:`
+    LegacyFit("dregon_cruise_refined")
+                                  one stage-2 ANCHOR fit on the physical level
+                                  scale (experiments.stochastic_fit.rig_sampler
+                                  .FIT_PATHS via load_anchor) — the MEASURED
+                                  rig each legacy bank was drawn around;
+                                  legacy_fit_names() lists all six
     LegacyBank("easy", 0)         entry 0 of data/rig_banks/rig_easy_n2048.json
                                   — the exact preset bank the `rig_easy` /
                                   `rig_hard` arms trained on
@@ -146,6 +152,30 @@ V2_BANKS = {
 #: defaults, and :meth:`NoiseSource.describe` prints which one is in force.
 LEGACY_RANDOM_LINE_MODE = "stochastic"
 LEGACY_BANK_LINE_MODE = "fm"
+
+#: ``line_mode`` of a stage-2 ANCHOR fit: an anchor export carries no shaft
+#: jitter, so its widths are the Lorentzians of ``gamma0``/``gamma_slope`` —
+#: which is the mode its own renderer (``stage2.render_from_export``) uses.
+LEGACY_FIT_LINE_MODE = "stochastic"
+
+#: The clip each published legacy bank ANCHORED on, from
+#: ``data/rig_banks/rig_easy_n2048.json``'s ``provenance.anchors`` (the hard
+#: bank names the same two clips of the same two files):
+#: ``results/S2/cruise_8clip.json`` / ``fly125_cruise_00`` (sha256 65d1794a…,
+#: power_scale folded -24.077 dB) and
+#: ``results/S2/dregon_room2_cruise_refined.json`` /
+#: ``free-flight_nosource_room2_cruise_00`` (sha256 be37e136…, -22.305 dB).
+#: :class:`LegacyFit` defaults to these for the two fits the banks name and to
+#: the first clip for the other four of ``rig_sampler.FIT_PATHS``.
+LEGACY_FIT_CLIPS = {
+    "michael_cruise": "fly125_cruise_00",
+    "dregon_cruise_refined": "free-flight_nosource_room2_cruise_00",
+}
+
+#: Speed the anchor's order ladder is sized from: the slowest the arms' policy
+#: can render (``rps_scale_range`` low end 0.45 x the 72 rev/s slowest cruise),
+#: i.e. the bank's own ``provenance.order_ladder.min_rps_vector``.
+LEGACY_FIT_MIN_RPS = 0.45 * 72.0
 
 #: The deleted lab's slider table, lifted field for field: ``{parameter:
 #: (min, max, step, label)}``.  The first two are the amplitude means and the
@@ -910,6 +940,121 @@ class LegacyRandom(_LegacySource):
         self.name = self._name(self.seed)
         self.entry = self._entry(self.seed)
         return self.params
+
+
+def legacy_fit_names() -> tuple[str, ...]:
+    """Every stage-2 anchor fit :class:`LegacyFit` can load.
+
+    :data:`experiments.stochastic_fit.rig_sampler.FIT_PATHS` in its own order,
+    read rather than restated so the two cannot drift.
+    """
+    from experiments.stochastic_fit import rig_sampler as RS
+
+    return tuple(RS.FIT_PATHS)
+
+
+def _anchor_clip_id(path: Path, selector: Any) -> str:
+    """The clip id ``selector`` names inside a stage-2 summary.
+
+    :func:`~experiments.stochastic_fit.rig_sampler.load_anchor` resolves the
+    same selector — an integer index or a clip-id prefix — but returns only the
+    export, and the id is what a row of the table has to be able to name.
+    """
+    clips = list(json.loads(path.read_text(encoding="utf-8"))["clips"])
+    if isinstance(selector, int):
+        return str(clips[selector])
+    hit = next((cid for cid in clips if cid.startswith(str(selector))), None)
+    if hit is None:
+        raise KeyError(f"{path}: no clip starts with {selector!r}; the fit holds {clips}")
+    return str(hit)
+
+
+class LegacyFit(_LegacySource):
+    """One stage-2 ANCHOR fit — the measured rig the legacy banks were drawn around.
+
+    ``name`` is a key of :func:`legacy_fit_names`
+    (``experiments.stochastic_fit.rig_sampler.FIT_PATHS``: ``michael_cruise``,
+    ``michael_cruise_refined``, ``michael_cruise_dyn``, ``michael_standby``,
+    ``dregon_cruise_refined``, ``dregon_flight``; the summaries live in
+    ``results/S2/``).  The clip export is read by
+    :func:`~experiments.stochastic_fit.rig_sampler.load_anchor` with its own
+    defaults — ``physical=True``, i.e. the clip's ``scores.power_scale`` folded
+    into the absolute-power fields and ``to_renderer_units``' ``10 log10(work /
+    analysis)`` = +4.4032 dB at the 44.1 kHz work grid — and converted by
+    :func:`experiments.stochastic_fit.stage2.params_from_export`.  That is
+    exactly the path ``scripts/_build_rig_bank.py`` took (its line 684
+    ``load_anchor(path, selector)``, its line 402 ``params_from_export(export,
+    rates, sample_rate=16000, n_mics=8)``), so this source renders the anchor
+    ITSELF on the physical scale, against which the bank entries around it are
+    perturbations.
+
+    ``clip`` is an integer index or a clip-id prefix.  Its default is the clip
+    the PUBLISHED banks anchored on where they name one
+    (:data:`LEGACY_FIT_CLIPS`, read out of ``rig_easy_n2048.json``'s
+    ``provenance.anchors``), and the fit's first clip otherwise.
+
+    The order ladder is sized from :data:`LEGACY_FIT_MIN_RPS`, the slowest
+    speed the arms' policy can render (``0.45 * 72`` rev/s, the bank's own
+    ``order_ladder.min_rps_vector``), so the comb reaches Nyquist for the
+    slowest rotor exactly as the bank entries' does.
+
+    ``line_mode`` defaults to ``"stochastic"``, which is what the anchor's own
+    renderer (``stage2.render_from_export``) uses: an anchor export carries
+    ``shaft_jitter_rps = 0`` and its widths live in ``gamma0``/``gamma_slope``,
+    while the bank arms render ``fm`` because a bank entry is drawn WITH a
+    shaft jitter (``fixed_shaft_jitter_rps = gamma_slope / sqrt(2 ln 2)``).
+    """
+
+    def __init__(
+        self,
+        name: str = "dregon_cruise_refined",
+        clip: int | str | None = None,
+        *,
+        line_mode: str = LEGACY_FIT_LINE_MODE,
+        n_fft: int = 2048,
+        n_mics: int = 8,
+        min_rps: float = LEGACY_FIT_MIN_RPS,
+    ):
+        from experiments.stochastic_fit import rig_sampler as RS
+        from experiments.stochastic_fit import stage2
+
+        key = str(name)
+        if key not in RS.FIT_PATHS:
+            raise ValueError(f"unknown stage-2 fit {name!r}; known fits are {legacy_fit_names()}")
+        path = ROOT / RS.FIT_PATHS[key]
+        if not path.is_file():
+            raise FileNotFoundError(f"{key}: stage-2 summary not found: {path}")
+        selector = LEGACY_FIT_CLIPS.get(key, 0) if clip is None else clip
+        self.fit_name = key
+        self.fit_path = RS.FIT_PATHS[key]
+        self.clip_id = _anchor_clip_id(path, selector)
+        self.export = RS.load_anchor(path, selector)
+        params = stage2.params_from_export(
+            self.export,
+            np.full(4, float(min_rps), dtype=np.float64),
+            sample_rate=SR,
+            n_mics=int(n_mics),
+        )
+        super().__init__(
+            params,
+            name=f"legacy-fit {key}",
+            entry=f"{self.fit_path}: clip {self.clip_id} (physical)",
+            line_mode=line_mode,
+            n_fft=n_fft,
+        )
+
+    def describe(self) -> None:
+        print(f"{self.name}  [{self.generation}]  anchor fit")
+        print(f"  fit        : {self.fit_path}")
+        print(f"  clip       : {self.clip_id}")
+        print(f"  line_mode  : {self.line_mode}")
+        print(
+            "  level      : power_scale folded "
+            f"{float(self.export.get('power_scale_folded_db', float('nan'))):+.3f} dB, "
+            f"rate factor {float(self.export.get('rate_factor_db', float('nan'))):+.4f} dB "
+            "(rig_sampler.to_physical)"
+        )
+        super().describe()
 
 
 class LegacyBank(_LegacySource):
@@ -1851,6 +1996,9 @@ __all__ = [
     "DATASETS",
     "FIT_PATHS",
     "LEGACY_BANKS",
+    "LEGACY_FIT_CLIPS",
+    "LEGACY_FIT_LINE_MODE",
+    "LEGACY_FIT_MIN_RPS",
     "LEGACY_LINE_MODES",
     "LEGACY_SLIDERS",
     "RIGS",
@@ -1861,6 +2009,7 @@ __all__ = [
     "TRAJ_KINDS",
     "V2_BANKS",
     "LegacyBank",
+    "LegacyFit",
     "LegacyRandom",
     "NoiseSource",
     "Rig",
@@ -1869,6 +2018,7 @@ __all__ = [
     "describe",
     "describe_traj",
     "expected_vs_realised",
+    "legacy_fit_names",
     "line_stats",
     "load_rig",
     "model_vs_realised",
