@@ -321,18 +321,24 @@ validate_only=true` before any GPU job), run on the laptop under
 banks the arms actually name (an earlier pass against 64-entry stub banks gave
 the same result):
 
-| arm | `validate_only` |
-|---|---|
-| `nv2_easy_scv2` | PASS |
-| `nv2_hard_scv2` | PASS |
-| `nv2_mixed_scv2` | PASS |
-| `nv2_easy_ft_scv2` | PASS |
-| `nv2_hard_ft_scv2` | PASS |
-| `nv2_easy_hppnet_l2` | PASS |
-| `nv2_hard_hppnet_l2` | PASS |
-| `nv2_mixed_hppnet_l2` | PASS |
-| `nv2_easy_ft_hppnet_l2` | PASS |
-| `nv2_hard_ft_hppnet_l2` | PASS |
+| arm | `validate_only` | stage-1 job |
+|---|---|---|
+| `nv2_easy_scv2` | PASS | `nv2-easy-scv2-15cff2` |
+| `nv2_hard_scv2` | PASS | `nv2-hard-scv2-d926d0` |
+| `nv2_mixed_scv2` | PASS | `nv2-mixed-scv2-83d2cd` |
+| `nv2_easy_ft_scv2` | PASS | — (waits on `nv2_easy_scv2`) |
+| `nv2_hard_ft_scv2` | PASS | — (waits on `nv2_hard_scv2`) |
+| `nv2_easy_hppnet_l2` | PASS | `nv2-easy-hppnet-l2-9a2ecf` |
+| `nv2_hard_hppnet_l2` | PASS | `nv2-hard-hppnet-l2-f71237` |
+| `nv2_mixed_hppnet_l2` | PASS | `nv2-mixed-hppnet-l2-08c04f` |
+| `nv2_easy_ft_hppnet_l2` | PASS | — (waits on `nv2_easy_hppnet_l2`) |
+| `nv2_hard_ft_hppnet_l2` | PASS | — (waits on `nv2_hard_hppnet_l2`) |
+
+The six stage-1 jobs were submitted on **2026-09-22 02:00Z** (`all-synth`) and
+**02:01Z** (`mixed`), each from its own detached worktree pinned to
+**`d2586b67`** on backend `uni`, 1 GPU, 24 h. The four `_ft_` arms are NOT
+submitted: they resolve `best:real_overall@<stage 1>` and cannot run until
+their stage-1 arm has uploaded that checkpoint.
 
 One caveat worth stating: `validate_only` checks the spec and runs one CPU
 batch; it does NOT resolve the curriculum arms' `best:real_overall@<stage 1>`
