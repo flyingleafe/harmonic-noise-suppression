@@ -1506,22 +1506,94 @@ def _mean_periodogram(audio: np.ndarray, n_fft: int) -> np.ndarray:
     return power.mean(axis=1)
 
 
-def _stft_power(audio: np.ndarray, n_fft: int, hop: int) -> tuple[np.ndarray, np.ndarray]:
-    """``((M, N, F) power, (N,) frame-centre sample index)``.
+def _stft_power(x: np.ndarray, *, n: int, hop: int) -> tuple[np.ndarray, np.ndarray]:
+    """``((N, F) power, (N,) frame-centre sample index)`` for ONE channel.
 
-    ``noise_v2_widen_dregon.stft_power`` verbatim (symmetric Hann, power
-    normalised by ``sum(w**2)``, centres at ``start + n_fft // 2``), vectorised
-    over frames.
+    ``noise_v2_widen_dregon.stft_power`` verbatim — symmetric ``np.hanning(n)``,
+    power normalised by ``sum(w ** 2)``, frame centre at ``start + n // 2`` —
+    with the per-frame loop replaced by one batched ``rfft``, which changes
+    nothing about the values.
     """
-    audio = np.atleast_2d(np.asarray(audio, dtype=np.float64))
-    window = np.hanning(n_fft)
-    starts = np.arange(0, audio.shape[-1] - n_fft + 1, hop)
+    x = np.asarray(x, dtype=np.float64)
+    w = np.hanning(n)
+    starts = np.arange(0, x.size - n + 1, hop)
     if starts.size == 0:
-        raise ValueError(f"{audio.shape[-1]} samples is shorter than one {n_fft}-point frame")
-    idx = starts[:, None] + np.arange(n_fft)[None, :]
-    seg = audio[:, idx] * window
-    power = np.abs(np.fft.rfft(seg, axis=-1)) ** 2 / float((window**2).sum())
-    return power, starts + n_fft // 2
+        raise ValueError(f"{x.size} samples is shorter than one {n}-point frame")
+    seg = x[starts[:, None] + np.arange(n)[None, :]] * w
+    power = np.abs(np.fft.rfft(seg, axis=-1)) ** 2 / float((w**2).sum())
+    return power, starts + n // 2
+
+
+def _r4_line_profile(
+    audio: np.ndarray,
+    f0_tracks: np.ndarray,
+    k_max: int,
+    *,
+    n_fft: int = LINE_STATS_N_FFT,
+    hop: int = LINE_STATS_HOP,
+) -> tuple[np.ndarray, np.ndarray, float, int]:
+    """``((K, G) profiles, (G,) grid, fbar, n_frames)`` — R4's accumulation.
+
+    :func:`scripts/noise_v2_widen_dregon.line_width_db3`'s body, ported because
+    ``scripts/`` is not importable.  For every order ``k``, every microphone,
+    every rotor and every frame, the frame's linear power spectrum is read at
+    ``k f_r(t) + grid`` (``np.interp`` on the rfft grid), ``grid`` being a
+    0.5 Hz relative axis over ``-0.75 fbar .. 0.75 fbar`` and ``f_r(t)`` the
+    rotor's carrier AT THAT FRAME'S CENTRE SAMPLE; the readings are summed and
+    divided by their count, so the profile is the MEAN over frames x mics x
+    rotors of the carrier-ALIGNED spectrum.  Aligning before averaging is the
+    whole point: a fitted trajectory drifts tens of rev/s inside a clip, and an
+    unaligned average smears every line across the band it swept
+    (``results/noise_v2/rounds/round2/render_dregon/findings.md``, § "Order-
+    tracked comb prominence").
+
+    ``fbar`` is the mean of the WHOLE carrier track over rotors and time, as it
+    is there, so the grid and the floor annulus are the same for every order.
+    The only change is that the microphone's STFT is computed once instead of
+    once per order; the terms of each order's sum, and their order, are
+    identical.
+    """
+    freqs = np.fft.rfftfreq(n_fft, d=1.0 / float(SR))
+    f0 = np.atleast_2d(np.asarray(f0_tracks, dtype=np.float64))
+    audio = np.atleast_2d(np.asarray(audio, dtype=np.float64))
+    fbar = float(f0.mean())
+    grid = np.arange(-0.75 * fbar, 0.75 * fbar + 1e-9, 0.5)
+    acc = np.zeros((int(k_max), grid.size), dtype=np.float64)
+    n_used = 0
+    n_frames = 0
+    for m in range(int(audio.shape[0])):
+        power, centres = _stft_power(audio[m], n=n_fft, hop=hop)
+        n_frames = int(centres.size)
+        idx = np.clip(centres.astype(np.int64), 0, int(f0.shape[1]) - 1)
+        for r in range(int(f0.shape[0])):
+            track = f0[r][idx]
+            for k in range(1, int(k_max) + 1):
+                car = track * float(k)
+                for j, c in enumerate(car):
+                    acc[k - 1] += np.interp(c + grid, freqs, power[j])
+            n_used += int(track.size)
+    return acc / max(n_used, 1), grid, fbar, n_frames
+
+
+def _peak_over_base_db(prof: np.ndarray, grid: np.ndarray, fbar: float) -> float:
+    """R4's ``peak_over_base_db``: the aligned line over its own local floor.
+
+    ``base`` is the MEDIAN of the profile over the two-sided ``0.45-0.7 fbar``
+    annulus (no neighbouring-line exclusion — the profile is already an average
+    over rotors, so there is nothing to exclude), ``peak`` the largest excess
+    over that base within +-2 grid points of zero offset, and the number is
+    ``10 log10((peak + base) / base)``.  An order whose band peak does not clear
+    its own floor carries no identifiable prominence and is NaN, exactly as the
+    R4 table's ``—``.
+    """
+    side = (np.abs(grid) >= 0.45 * fbar) & (np.abs(grid) <= 0.7 * fbar)
+    base = float(np.median(prof[side])) if side.any() else float(np.median(prof))
+    ex = prof - base
+    i0 = int(np.argmin(np.abs(grid)))
+    peak = float(ex[max(i0 - 2, 0) : i0 + 3].max())
+    if peak <= 0:
+        return float("nan")
+    return float(10.0 * np.log10(max(peak + base, 1e-300) / max(base, 1e-300)))
 
 
 def line_stats(
@@ -1531,34 +1603,15 @@ def line_stats(
     n_fft: int = LINE_STATS_N_FFT,
     hop: int = LINE_STATS_HOP,
 ):
-    """Round 4's order-tracked prominence over the local floor, as a table.
+    """R4's ``line_width_db3`` ``peak_over_base_db``, order by order, as a table.
 
-    FRAMEWISE, ON EACH FRAME'S OWN CARRIER — which is the whole point of the
-    estimator and the one thing a clip-averaged spectrum cannot do.  A fitted
-    trajectory moves the rotors over tens of rev/s inside a clip, so a single
-    periodogram of the whole clip smears every line across the band it swept
-    and reads a width and a prominence that belong to no instant
-    (``results/noise_v2/rounds/round2/render_dregon/findings.md``, § "Order-
-    tracked comb prominence").  Here each 8192-point Hann frame (hop 1024 at
-    16 kHz, 1.95 Hz per bin — ``noise_v2_widen_dregon``'s own wide grid) is
-    read at the per-rotor carrier taken from ``rps_render`` AT THAT FRAME'S
-    CENTRE SAMPLE.
-
-    The per-frame estimator is R4's, through
-    :mod:`experiments.noise_model.tonality`: peak within +-1 bin of ``k f_r``
-    over the MEDIAN of the two-sided ``0.45-0.7 fbar`` annulus, with every
-    rotor's ``k-1 / k / k+1`` lines excluded from the floor
-    (``results/noise_v2/rounds/round4/legacy_truth/anatomy.md``).
-
-    AGGREGATION ORDER, in this order and no other: prominence is computed per
-    ``(frame, mic, rotor, k)``, then MEDIAN over frames, then MEDIAN over mics,
-    then MEAN over rotors.  The two medians are what keep a single loud frame
-    or a single dead microphone out of the number; the rotor mean is R4's
-    (``tonality.payload_stats``' ``curve``).
-
-    A frame whose carriers are too slow for the annulus to hold a bin (a
-    full-flight trajectory visits the ground) is dropped, and ``n_frames``
-    reports how many frames the row was actually read on.
+    The statistic the round-4 anatomy published
+    (``results/noise_v2/rounds/round4/legacy_truth/anatomy.md``, § "MEASURED on
+    the render: prominence over the local floor"), computed here by the same
+    code path it was computed by there: a FRAMEWISE CARRIER-ALIGNED PROFILE,
+    meaned over frames x mics x rotors on the 8192-point / hop-1024 wide grid
+    (1.95 Hz per bin), then peak over the median of the 0.45-0.7 fbar annulus
+    (:func:`_r4_line_profile`, :func:`_peak_over_base_db`).
 
     The difference from :mod:`~experiments.noise_model.tonality` is the input:
     this reads a RENDER, so the numbers carry the renderer's own line shapes
@@ -1566,46 +1619,30 @@ def line_stats(
     of a payload.
 
     Returns a ``pandas.DataFrame``: one row per clip, ``k=1 .. k=k_max`` in dB,
-    plus the generation, the clip's mean carrier, its RMS and ``n_frames``.
+    plus the generation, the clip's mean carrier, its RMS and the number of
+    8192-point frames each row was read on.
     """
     import pandas as pd
 
-    from experiments.noise_model import tonality as TN
-
     items = frames if isinstance(frames, dict) else {"": frames}
-    df_hz = SR / float(n_fft)
     rows: list[dict[str, Any]] = []
     for label, one in items.items():
         meta = dict(one["meta"].items())
         carrier = np.atleast_2d(np.asarray(one["rps_render"].data, dtype=np.float64))
         audio = np.asarray(one["audio"].data, dtype=np.float64)
-        power, centres = _stft_power(audio, int(n_fft), int(hop))
-        centres = np.clip(centres, 0, carrier.shape[1] - 1)
-        per_frame: list[np.ndarray] = []
-        for f, centre in enumerate(centres):
-            rev = carrier[:, int(centre)]
-            try:
-                geom = TN._geometry(rev, power.shape[-1], df_hz, k_geom=int(k_max))
-            except ValueError:
-                # The annulus holds no bin at this speed: the rotors are too
-                # slow for a floor to be read between their orders.
-                continue
-            per_frame.append(TN.prominence_db(power[:, f, :], geom, int(k_max)))
-        if not per_frame:
-            raise ValueError(
-                f"{label or meta.get('source')}: no frame of this clip turns fast enough for the "
-                "0.45-0.7 fbar annulus to hold a bin"
-            )
-        stack = np.stack(per_frame)  # (N, M, R, K)
-        curve = np.nanmean(np.nanmedian(np.nanmedian(stack, axis=0), axis=0), axis=0)  # (K,)
+        profs, grid, fbar, n_frames = _r4_line_profile(
+            audio, carrier, int(k_max), n_fft=int(n_fft), hop=int(hop)
+        )
         row: dict[str, Any] = {
             "source": str(meta.get("source", label)),
             "generation": str(meta.get("generation", "?")),
-            "fbar_rev_s": float(carrier.mean()),
+            "fbar_rev_s": fbar,
             "rms": float(meta.get("rms", float("nan"))),
-            "n_frames": int(stack.shape[0]),
+            "n_frames": n_frames,
         }
-        row.update({f"k={k + 1}": float(curve[k]) for k in range(int(k_max))})
+        row.update(
+            {f"k={k + 1}": _peak_over_base_db(profs[k], grid, fbar) for k in range(int(k_max))}
+        )
         rows.append(row)
     return pd.DataFrame(rows).set_index("source")
 
