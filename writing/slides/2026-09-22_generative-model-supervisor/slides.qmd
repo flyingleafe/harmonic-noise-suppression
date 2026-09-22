@@ -202,3 +202,10 @@ Flight supports: periodic Hann, $N = 2048$, hop 512 at 16 kHz. Fit band 30 Hz �
 frame shares zero 13 % / standby 12 % / ramp 4 % / cruise 72 %; pooled over DREGON and Michael's.
 
 :::
+
+## Conclusions
+
+- We have a probabilistic generative model of drone ego-noise — not deep, built on Gaussian processes — that is fitted to real data points, both for the drone **trajectories** and for the audio those trajectories produce.
+- The model is fitted on a small amount of real data from several drones, and the resulting posterior over model parameters lets us sample **unseen** drones.
+- Models trained only on synthetic data obtained this way still produce meaningful predictions on real data.
+- Models trained on **both** real and synthetic data reach **better overall performance** than models trained on real data only.

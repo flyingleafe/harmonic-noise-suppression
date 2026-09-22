@@ -665,9 +665,9 @@ def main() -> None:
         fig_traj_real_vs_sampled()
     if "traj_other" in which:
         fig_traj_real_vs_sampled(
-            ("neurobem_quad", "pitcn_quad", "nanobench_cf21b", "vid_m100"),
+            ("pitcn_quad", "nanobench_cf21b", "vid_m100"),
             name="gen_traj_real_vs_sampled_other",
-            row_h=2.4,
+            row_h=2.9,
         )
     if "hyper" in which:
         fig_traj_hyperprior()
