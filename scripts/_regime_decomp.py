@@ -287,6 +287,19 @@ def predict_clip(model, frame, salience: bool, threshold: float = 0.3) -> np.nda
     return np.asarray(model(frame)["rps_pred"].data, dtype=np.float64)
 
 
+def rotor_spread(speeds: np.ndarray) -> np.ndarray:
+    """``(F,)`` peak-to-peak spread across rotors, per frame, of an ``(R, F)`` track.
+
+    ``max - min`` and not a standard deviation: the failure this measures is a
+    model that puts every rotor on ONE speed, and peak-to-peak is the quantity
+    that reads directly as "how far apart are the outer two rotors". Computed
+    on the PREDICTION and on the TARGET, so a cell says both what the rotors
+    did and what the model thought they did; permutation-invariant, so the PIT
+    matching does not enter it.
+    """
+    return speeds.max(axis=0) - speeds.min(axis=0)
+
+
 def decompose(
     experiment: str,
     ckpt: str,
@@ -315,6 +328,8 @@ def decompose(
     by_regime: dict[str, list[np.ndarray]] = {r: [] for r in REGIMES}
     by_rig: dict[str, dict[str, list[np.ndarray]]] = {rig: {r: [] for r in REGIMES} for rig in RIGS}
     per_clip: dict[int, dict] = {}
+    spread_pred: dict[str, list[np.ndarray]] = {r: [] for r in REGIMES}
+    spread_true: dict[str, list[np.ndarray]] = {r: [] for r in REGIMES}
     # The metric training actually reports as ``val/real_overall``: ONE
     # permutation per clip (``metrics.rps.batched_pit_mae`` minimises the
     # time-averaged cost), not one per frame. It is always >= the per-frame
@@ -342,6 +357,8 @@ def decompose(
                 i, {"clip": i, "rig": rig, "errors": [], "regime_errors": {r: [] for r in REGIMES}}
             )
             clip["errors"].append(err.ravel())
+            p_spread = rotor_spread(pred)
+            t_spread = rotor_spread(target)
             for regime in REGIMES:
                 mask = labels == regime
                 if not mask.any():
@@ -350,6 +367,8 @@ def decompose(
                 by_regime[regime].append(vals)
                 by_rig[rig][regime].append(vals)
                 clip["regime_errors"][regime].append(vals)
+                spread_pred[regime].append(p_spread[mask])
+                spread_true[regime].append(t_spread[mask])
             clip_level.append(
                 float(
                     batched_pit_mae(
@@ -372,6 +391,13 @@ def decompose(
         },
         "clip_level_pit_mae": float(np.mean(clip_level)),
         "regimes": {r: _cell(by_regime[r], n_total) for r in REGIMES},
+        "spread": {
+            r: {
+                "pred": float(np.concatenate(spread_pred[r]).mean()) if spread_pred[r] else None,
+                "true": float(np.concatenate(spread_true[r]).mean()) if spread_true[r] else None,
+            }
+            for r in REGIMES
+        },
         "by_rig": {},
         "per_clip": [],
     }
@@ -431,6 +457,27 @@ def table(rows: list[dict]) -> str:
                 + "".join(f" {_fmt(block['regimes'][r]):>8s}" for r in REGIMES)
             )
         out.append("")
+    out.append("output spread (mean rotor peak-to-peak, rev/s; TARGET row last)")
+    for row in rows:
+        out.append(
+            f"{row['experiment']:26s} {'pred':9s} {'':>8s}"
+            + "".join(
+                f" {row['spread'][r]['pred']:8.2f}"
+                if row["spread"][r]["pred"] is not None
+                else f" {'--':>8s}"
+                for r in REGIMES
+            )
+        )
+    out.append(
+        f"{'(the labels themselves)':26s} {'true':9s} {'':>8s}"
+        + "".join(
+            f" {rows[0]['spread'][r]['true']:8.2f}"
+            if rows[0]["spread"][r]["true"] is not None
+            else f" {'--':>8s}"
+            for r in REGIMES
+        )
+    )
+    out.append("")
     ref = rows[0]
     per_frame = max(1, int(ref["channels"]) * 4)  # rotor-frames per distinct clip frame
     out.append(
