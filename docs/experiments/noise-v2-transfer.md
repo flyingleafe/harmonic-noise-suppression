@@ -1,9 +1,10 @@
 # Sim-to-real transfer on the FITTED noise model (noise-model-v2)
 
-**Status:** in progress — configs and streams landed 2026-09-22, nothing
-submitted. Ten arms: `nv2_{easy,hard,mixed}_{scv2,hppnet_l2}` and
+**Status:** RUNNING — the six stage-1 arms were submitted 2026-09-22 02:00Z on
+backend `uni`; the four curriculum arms are chained behind their stage-1
+checkpoints. Ten arms: `nv2_{easy,hard,mixed}_{scv2,hppnet_l2}` and
 `nv2_{easy,hard}_ft_{scv2,hppnet_l2}`. Per-experiment docs sit beside each
-config in `conf/experiment/`.
+config in `conf/experiment/`. Live numbers in § Results / Monitoring log.
 
 ## Motivation
 
@@ -367,11 +368,45 @@ will not until stage 1 has run.
 
 ## Results
 
-**PENDING** — nothing submitted as of 2026-09-22. What has landed on `main`:
-the three streams, the ten arm configs, both caps (`rps.rps_max` on the
-trajectory source and `freq_scale.rps_max` on the augmented label) and the
-submit script. All ten arms pass the `validate_only` preflight. The banks
-are published separately as the pinned `noise-v2-banks` dataset.
+**IN PROGRESS** — six stage-1 jobs submitted 2026-09-22 02:00Z/02:01Z, four
+curriculum arms chained behind them as their stage-1 checkpoints land.
+
+### How these numbers are read
+
+`real_overall` is the aggregate `{real_r3: 1.0}` (`conf/validation/rps_unified.yaml`),
+so it IS `val/real_r3` and is directly comparable to the reference rows' 2.99 /
+2.27 and to the legacy pair's 5.72 / 5.37.
+
+Selection is on the SMOOTHED (5-round median) `real_overall`:
+`best_real_overall.ckpt` — the object the curriculum arms warm-start from — is
+written at the round where that median last improved, which is NOT in general
+the round with the lowest raw value. Every row therefore quotes the selected
+round, its smoothed value, its raw value and the per-view `real_r1`/`r2`/`r3`
+AT THAT ROUND, plus the best raw value anywhere in the run.
+
+The live source is R2: `training.loop` uploads
+`artifacts/<exp>/checkpoints/validation_history.jsonl` and
+`best_checkpoints.json` after every validation round, so the monitoring rows
+below are the job's own records and not a stdout scrape.
+
+### Monitoring log
+
+| time (UTC) | job / arm | status | round | sel round | smoothed | raw @ sel | best raw | lr |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| 09-22 03:52 | `nv2-easy-scv2-15cff2` | running | 59 | 53 | 8.05 | 7.69 | 7.18 | 1e-03 |
+| 09-22 03:52 | `nv2-hard-scv2-d926d0` | running | 63 | 15 | 9.17 | 7.06 | 7.06 | 3e-04 |
+| 09-22 03:52 | `nv2-easy-hppnet-l2-9a2ecf` | running | 26 | 20 | 7.23 | 6.46 | 5.52 | 1e-03 |
+| 09-22 03:52 | `nv2-hard-hppnet-l2-f71237` | running | 26 | 24 | 12.03 | 12.03 | 9.89 | 1e-03 |
+| 09-22 03:52 | `nv2-mixed-scv2-83d2cd` | queued | — | — | — | — | — | — |
+| 09-22 03:52 | `nv2-mixed-hppnet-l2-08c04f` | queued | — | — | — | — | — | — |
+
+### Stage-1 and curriculum results
+
+**PENDING** — filled as each arm finishes.
+
+### Four-regime decomposition
+
+**PENDING.**
 
 ## Conclusion
 
