@@ -986,35 +986,42 @@ Each entry is a perturbation of one measured rig. The harmonic profile
 of each rotor is decomposed as
 $p_{ik} = \mathrm{gain}_i + \mathrm{slope}_i(\log_{10}k -
 \overline{\log_{10}k}) + \mathrm{resid}_i(k)$; the gain and the slope
-are perturbed and the residual is partially redrawn from a
-squared-exponential kernel in log order, mixed rather than added so
-that the fine-structure variance stays at the anchor's. The line
+are perturbed and the residual is partially redrawn, mixed rather than
+added ($\mathrm{resid}' = \rho\,\mathrm{resid} +
+\sqrt{1-\rho^2}\,\sigma z$) so that the fine-structure variance stays
+at the anchor's. The mixture matters: the measured correlation length
+of the residual in $\log_{10}$ order is 0.024 decades, so the residual
+is essentially white and a positive kernel cannot represent the
+even/odd blade-passing alternation at all. At the strength we use,
+$\rho = 0.963$, so an entry keeps its anchor's parity structure to
+within a few per cent while its fine structure still moves. The line
 widths and the shaft pair $(\sigma_\nu,\lambda)$ move in log space,
 the floor moves through its level, its tilt, an AR(1) perturbation of
 its Gaussian-process coordinates and its per-microphone gains, and the
-channel structure moves through $g_{mi}$ and $G_m$. The widths of all
-of these at strength 1 are \emph{measured}: they are the
-between-restart spread of the fits themselves, so the cloud is at
-least as wide as our own uncertainty about the aircraft, and strength
-is a single multiplier on all of them chosen so that the cloud
-brackets the real clip in at least 90\,\% of the 1/3-octave bands
-above 300 Hz, per rig. Each entry keeps the trajectory law of the rig
-it came from, so a DREGON comb is never flown on a Matrice 100
-envelope.
+channel structure moves through $g_{mi}$ and $G_m$. Each entry keeps
+the trajectory law of the rig it came from, so a DREGON comb is never
+flown on a Matrice 100 envelope.
+% source: results/noise_v2/rig_sampler/findings.md, "Residual structure"
 
 \textbf{Path} (the \emph{hard} bank, 2048 entries). A mixing
 coordinate $t\sim U[0,1]$ interpolates the two measured rigs'
 \emph{cruise} fits in the same decomposed coordinates, on their common
-order range $k = 1,\ldots,81$; DREGON's orders 82--88 are dropped and
-the drop is recorded in the entry's provenance. The neighbourhood
-perturbation is then applied around that interpolated point. Standby
-is never interpolated --- a standby comb is a different regime, not a
-slower cruise --- so the standby slot is carried as a policy: at
-mixing coordinate $t$ the entry takes the Matrice 100's fitted standby
-fit with probability $t$ and no standby fit otherwise, which makes a
-Matrice-like draw usually two-regime and a DREGON-like draw usually
-single-regime. Rigs resembling either real aircraft therefore exist
-but neither is privileged, so no fingerprint can be memorized.
+order range $k = 1,\ldots,81$; DREGON's seven highest orders (82--88)
+are dropped and the drop is recorded in the entry's provenance. The
+neighbourhood perturbation is then applied around that interpolated
+point. Standby is never interpolated --- a standby comb is a different
+regime, not a slower cruise --- so the standby slot is carried as a
+policy: at mixing coordinate $t$ the entry takes the Matrice 100's
+fitted standby fit with probability $t$ and no standby fit otherwise,
+which makes a Matrice-like draw usually two-regime and a DREGON-like
+draw usually single-regime. In the built bank 1028 of the 2048 entries
+(50.2\,\%) carry a standby slot. The realised mixing coordinate
+survives the guards: mean $t = 0.5009$ with a Kolmogorov--Smirnov
+distance to $U(0,1)$ of 0.0166 against a 95\,\% threshold of 0.0300.
+Rigs resembling either real aircraft therefore exist but neither is
+privileged, so no fingerprint can be memorized.
+% source: results/noise_v2/rig_sampler/findings.md, "The two banks",
+% "The mixing coordinate survives the truncation"; build_hard.json
 
 \textbf{Hyperprior}. The trajectory half of a hard entry is left
 unbound and drawn from the diagonal Gaussian over rigs of
@@ -1022,48 +1029,161 @@ Section~\ref{sec:traj-post}, rig-balanced. This is the only part of
 the pipeline that produces an airframe no dataset contains, and it is
 why the hard arm is hard on both halves at once.
 
-The hyperprior is used under one documented truncation. The salience
-architectures of Section~\ref{sec:est} have a fixed speed grid that
-ends at 150\revps, so a sampled flight whose fastest rotor exceeds
-that is rejected and redrawn whole, never clipped; the streams
-therefore train on the hyperprior conditioned on
-$\max_i \max_t r_i(t) \le 150$\revps. The acceptance rate is 0.296.
-The cost is hover level and not rig diversity: the log hover-scale
-coordinate shifts hard (mean $4.971 \to 4.406$, standard deviation
-$0.497 \to 0.275$, $z = -33.2$), while all 31 remaining shape and
-dynamics coordinates of the scale-free rig vector are statistically
-unmoved (largest $|z|$ is 1.71 and every accepted-to-all standard
-deviation ratio lies in 0.951--1.031). The surviving hover levels have
-median 86.1, 90th percentile 111.9 and maximum 182.0\revps, against
-144.2, 274.5 and 613.6 uncapped.
-% source: docs/experiments/noise-v2-transfer.md;
-% src/data_processing/trajectory_model/source.py (rps_max)
+\subsubsection{How wide, and why}
+The widths are measured rather than
+chosen, and they come in three tiers. At \emph{strength 1} every
+coordinate moves by its \emph{between-restart} spread --- the same
+fit, the same data, a different optimizer seed --- so the cloud is at
+least as wide as our own uncertainty about the aircraft. A single
+scalar multiplies all of them. The ladder in Table~\ref{tab:widths}
+shows why one scalar cannot walk every coordinate up together: a
+rotor's profile gain reaches the spread between the four real bench
+motors at strength 4.7 and the spread between the two rigs at 9.1, but
+the floor level needs 40.7 and 44.3 and the microphone pattern 26--93,
+because a flight fit reproduces its floor level to 0.038 dB across
+restarts while four real rotors differ by 1.54 dB. For those
+coordinates a between-restart spread is a convergence tolerance, not a
+width. One coordinate is deliberately on a different tier: the
+rig-wide level, whose strength-1 width is \emph{between-clip} --- the
+standard deviation of the 300--7900 Hz band level over each rig's own
+real windows, 2.006 dB on DREGON and 1.157 dB on the Matrice 100,
+1.361 dB pooled --- because at the between-restart tier (0.038 dB) it
+would clone all 2048 entries at one level, which is exactly the
+point-ness the experiment exists to break.
+% source: results/noise_v2/rig_sampler/findings.md, "The widths, and the
+% three tiers"; results/noise_v2/rig_sampler/structure.json
+
+\begin{table}[t]
+\centering
+\caption{Sampler widths. Strength-1 $\sigma$ is the between-restart
+  spread of the fits; the last two columns are the strength at which a
+  strength-1 draw reaches the spread between the four real bench
+  rotors and between the two rigs. $^{\ast}$The rig-wide level is on
+  the between-clip tier instead (see the text).}
+\label{tab:widths}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Coordinate & strength-1 $\sigma$ & $\to$ rotor & $\to$ rig \\
+\midrule
+% source: results/noise_v2/rig_sampler/findings.md, table in section 1
+rotor gain (dB)            & 0.3662 & 4.7 & 9.1 \\
+trend slope (dB/decade)    & 0.3700 & 4.1 & 4.8 \\
+residual redraw fraction   & 0.0903 & 7.1 & 10.7 \\
+$\gamma$ level (ln)        & 0.0618 & 4.0 & 0.2 \\
+$\gamma$ order (ln)        & 0.3060 & 5.0 & 7.9 \\
+$\sigma_\nu$ (ln)          & 0.0121 & 13.1 & 80.3 \\
+$\lambda$ (ln)             & 0.2495 & 8.2 & 6.0 \\
+floor level (dB)           & 0.0377 & 40.7 & 44.3 \\
+floor tilt (dB/oct)        & 0.1470 & 20.4 & 26.5 \\
+floor shape                & 0.1824 & 16.6 & 22.1 \\
+mic line gain (dB)         & 0.1459 & 43.7 & 25.9 \\
+mic floor (dB)             & 0.0767 & 93.0 & 37.3 \\
+mic overall gain (dB)      & 0.1266 & 56.0 & 32.7 \\
+rig level (dB)$^{\ast}$    & 1.3609 & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The strength is chosen by coverage, not by taste: per rig, the
+fraction of 1/3-octave bands above 300 Hz in which the cloud brackets
+each real window's measured band level, with a target of 90\,\% on
+both rigs and both presets. The default 2.0 misses on exactly one
+cell, the hard cloud bracketing 89.2\,\% of DREGON's bands.
+\textbf{Strength 3.0} is the first ladder setting that clears the
+target everywhere with no draw exhausting its 16-attempt budget, and
+both banks are built at it. Beyond 4.0 the guards stop being a filter
+and become a wall --- at 6.0 more than a third of the draws cannot be
+realised at all --- which is the honest upper bound on this family's
+width, set by the line-width cap and the spectral envelope rather than
+by preference. At full bank size the realised coverage above 300 Hz is
+100.0\,\% (DREGON) and 99.0\,\% (Matrice 100) for the easy bank, and
+98.5\,\% and 100.0\,\% for the hard bank.
+% source: results/noise_v2/rig_sampler/findings.md, "Coverage: how strength
+% 3.0 was chosen"
 
 Guards reject and redraw rather than clip, and all of them are
 structural rather than cosmetic: the expected periodogram must be
-finite and positive at cruise (80\revps) \emph{and} at idle
-(30\revps); each rotor's profile trend must still fall with order by
-at least 3 dB over the fitted range; the total line-width excursion is
-capped at $1.5\times$; the draw's expected periodogram must lie within
-twice the measured real clip-to-clip band RMS of that rig's own
-validation windows in the 1/3-octave bands from 300 to 7900 Hz; and
-negative speed exponents are refused.
+finite and positive at a 80\revps{} cruise probe \emph{and} at a
+30\revps{} idle probe, the idle probe reading the entry's standby
+payload where it has one; each rotor's profile trend must still fall
+by at least 3 dB from $k=1$ to $k=K$, a threshold calibrated so that
+the shallowest measured real profile (4.47 dB) is admitted; the
+per-rotor mean log line width must stay within $1.5\times$ of the
+reference; the draw's expected periodogram must lie within twice the
+measured real clip-to-clip band RMS of the anchor's own windows over
+300--7900 Hz (5.319 dB on DREGON, 4.653 dB on the Matrice 100,
+interpolated in $t$ on the path); and negative speed exponents are
+refused. They bind. The easy bank costs 2.017 attempts per accepted
+entry (50.4\,\% of draws rejected; the spectral envelope fires 1041
+times, the width cap 859, the trend guard 697) and the hard bank 1.778
+(43.8\,\%; 913, 728 and 232). The trend guard is three times more
+active on the easy bank, which follows from where the draws sit: a
+path point at intermediate $t$ already has a shallower trend than
+either anchor, so the same perturbation is less likely to tip it past
+the margin than on DREGON's steep third rotor.
+% source: results/noise_v2/rig_sampler/findings.md, "The guards",
+% "The two banks"; build_easy.json, build_hard.json
 
+\subsubsection{What is held fixed, and what the streams add}
 Every entry in both banks carries the short-span contract of
 Section~\ref{sec:fit}: $a = 2$, $b = 2$ and $s = 2.5\times10^{-3}$,
-the prior medians, recorded per entry, because a cruise-only pool
-cannot identify them. The cruise profile is left at its fitted
-80\revps{} reference and the trajectories keep their own speed labels;
-there is no hover rescaling. Both banks are built by one script from a
-single seed and are bit-reproducible.
-% source: scripts/noise_v2_build_bank.py; conf/online_mix/noise_v2_easy_5050.yaml,
-% conf/online_mix/noise_v2_hard_5050.yaml
+the prior medians, with the pre-pin values recorded per entry, because
+a cruise-only pool cannot identify them. The pin is applied at the
+80\revps{} reference where every speed factor is exactly 1, so it
+leaves a cruise spectrum untouched; it does move a standby payload at
+its own 20--40\revps, raising the Matrice 100's fitted 30\revps{}
+floor by about 12 dB and its comb by about 9 dB, which is a
+consequence of the campaign decision and is measured rather than
+assumed.
+% source: results/noise_v2/rig_sampler/findings.md, header and section 6
 
-\todo{PENDING BankBuilder: the strength and spread chosen by the
-  coverage criterion and the ladder at which strength 1 reaches the
-  between-rotor and between-rig spreads; acceptance rates and
-  rejections per guard; the realised mixing-coordinate distribution
-  and its Kolmogorov--Smirnov statistic against $U[0,1]$.}
+The speed \emph{labels} are then treated differently by the two
+streams, and this is the one knob that separates them beyond the bank.
+The easy stream keeps the legacy multiplicative augmentation
+$\texttt{rps\_scale\_range} = [0.45, 1.2]$, so a drawn flight is
+rescaled in speed before it is rendered; the hard and mixed streams
+set it to $[1, 1]$ and preserve the hyperprior's own speeds exactly,
+because there the trajectory distribution is itself the object under
+test. Both are capped: a sampled flight whose fastest rotor would
+exceed 150\revps{} --- the top of the salience models' speed grid ---
+is rejected and redrawn whole rather than clipped
+(\texttt{rps.rps\_max}), and the mixed stream's label-transforming
+frequency-scaling augmentation carries the same cap on the
+\emph{augmented} label (\texttt{freq\_scale.rps\_max}), which the
+source-level cap cannot see.
+% source: conf/online_mix/noise_v2_easy_5050.yaml (rps_scale_range 0.45--1.2,
+% rps_max 150); noise_v2_hard_5050.yaml (rps_scale_range 1.0--1.0);
+% noise_v2_mixed_dload.yaml (freq_scale rps_max 150)
+
+The cap is a documented truncation of the hyperprior. Its acceptance
+rate is 0.296, and the cost is hover level rather than rig diversity:
+the log hover-scale coordinate shifts hard (mean $4.971 \to 4.406$,
+standard deviation $0.497 \to 0.275$, $z = -33.2$), while all 31
+remaining shape and dynamics coordinates of the scale-free rig vector
+are statistically unmoved (largest $|z|$ is 1.71 and every
+accepted-to-all standard deviation ratio lies in 0.951--1.031). The
+surviving hover levels have median 86.1, 90th percentile 111.9 and
+maximum 182.0\revps, against 144.2, 274.5 and 613.6 uncapped.
+% source: docs/experiments/noise-v2-transfer.md;
+% src/data_processing/trajectory_model/source.py (rps_max)
+
+Both banks are a deterministic function of their inputs: each draw
+reads a seeded generator indexed by its own position, the payload
+carries no timestamp, git revision or worker count, and the rebuild
+digest covers the builder and renderer sources as well as the anchors
+and the widths. Because a bank costs about 16 minutes to build, they
+are published as a pinned dataset rather than rebuilt in each job ---
+\texttt{noise-v2-banks} at version \texttt{7f6a3242b353\ldots},
+holding \texttt{noise\_v2\_easy\_n2048.json}
+(sha256 \texttt{cea6c5ad56b1337d\ldots}) and
+\texttt{noise\_v2\_hard\_n2048.json}
+(sha256 \texttt{b5ff345ecd2b8289\ldots}) --- and the arms take the
+version from the committed lock file.
+% source: results/noise_v2/rig_sampler/findings.md, "Reproducibility",
+% "Wall time"; dload.lock (noise-v2-banks = 7f6a3242b353...);
+% build_easy.json / build_hard.json (sha256)
 
 
 \section{Rotor-speed estimators}
