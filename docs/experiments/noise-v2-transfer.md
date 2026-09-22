@@ -328,7 +328,7 @@ the same result):
 | `nv2_hard_scv2` | PASS | `nv2-hard-scv2-d926d0` |
 | `nv2_mixed_scv2` | PASS | `nv2-mixed-scv2-83d2cd` |
 | `nv2_easy_ft_scv2` | PASS | `nv2-easy-ft-scv2-9ff3c2` (chained `--after` `nv2-easy-scv2-15cff2`) |
-| `nv2_hard_ft_scv2` | PASS | — (waits on `nv2_hard_scv2`) |
+| `nv2_hard_ft_scv2` | PASS | `nv2-hard-ft-scv2-56dbff` (chained `--after` `nv2-hard-scv2-d926d0`) |
 | `nv2_easy_hppnet_l2` | PASS | `nv2-easy-hppnet-l2-9a2ecf` |
 | `nv2_hard_hppnet_l2` | PASS | `nv2-hard-hppnet-l2-f71237` |
 | `nv2_mixed_hppnet_l2` | PASS | `nv2-mixed-hppnet-l2-08c04f` |
@@ -423,6 +423,20 @@ below are the job's own records and not a stdout scrape.
 | 09-22 05:10 | `nv2-hard-hppnet-l2-f71237` | running | 46 | 42 | 10.14 | 9.95 | 9.20 | 1e-03 |
 | 09-22 05:10 | `nv2-mixed-scv2-83d2cd` | running | 1 | — | — | — | 4.49 | 1e-03 |
 | 09-22 05:10 | `nv2-mixed-hppnet-l2-08c04f` | queued | — | — | — | — | — | — |
+| 09-22 05:16 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 05:16 | `nv2-hard-scv2-d926d0` | running | 114 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 05:16 | `nv2-easy-hppnet-l2-9a2ecf` | running | 47 | 20 | 7.23 | 6.46 | 5.52 | 3e-04 |
+| 09-22 05:16 | `nv2-hard-hppnet-l2-f71237` | running | 47 | 42 | 10.14 | 9.95 | 9.20 | 1e-03 |
+| 09-22 05:16 | `nv2-mixed-scv2-83d2cd` | running | 4 | 4 | 5.68 | 5.67 | 4.49 | 1e-03 |
+| 09-22 05:16 | `nv2-mixed-hppnet-l2-08c04f` | queued | — | — | — | — | — | — |
+| 09-22 05:16 | `nv2-easy-ft-scv2-9ff3c2` | queued | — | — | — | — | — | — |
+| 09-22 05:42 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 05:42 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 05:42 | `nv2-easy-hppnet-l2-9a2ecf` | running | 54 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 05:42 | `nv2-hard-hppnet-l2-f71237` | running | 53 | 42 | 10.14 | 9.95 | 9.20 | 1e-03 |
+| 09-22 05:42 | `nv2-mixed-scv2-83d2cd` | running | 20 | 20 | 3.59 | 3.59 | 2.55 | 1e-03 |
+| 09-22 05:42 | `nv2-mixed-hppnet-l2-08c04f` | running | 6 | 5 | 4.02 | 3.91 | 3.61 | 1e-03 |
+| 09-22 05:42 | `nv2-easy-ft-scv2-9ff3c2` | queued | — | — | — | — | — | — |
 
 ### Stage-1 and curriculum results
 
@@ -440,10 +454,43 @@ is visible. `r1`/`r2`/`r3` are the per-view values at **sel**.
 | *`rig_easy_scv2_unified`* (legacy easy) | — | done | 94 | 57 | — | 6.09 | 5.72 | — | — | — | — |
 | *`rig_hard_scv2_unified`* (legacy hard) | — | done | 137 | — | — | — | 5.37 | — | — | — | — |
 | `nv2_easy_scv2` | `nv2-easy-scv2-15cff2` | done | 102 | 81 | 7.94 | **7.94** | 7.18 | 10.89 | 9.67 | 7.94 | 1.13 |
+| `nv2_hard_scv2` | `nv2-hard-scv2-d926d0` | done | 116 | 15 | 9.17 | **7.06** | 7.06 | 25.11 | 9.38 | 7.06 | 2.68 |
 
 ### Four-regime decomposition
 
-**PENDING.**
+`python scripts/_regime_decomp.py --exp <arm> --ckpt best_real_overall`, 8 mics,
+the frozen real split, thresholds stated not fitted (ramp |d mean speed/dt| >=
+20 rev/s^2 first, then zero / standby / cruise on level). Per-regime cells are
+per-frame PIT MAE in rev/s; **overall** is training's own clip-level PIT metric
+recomputed on the SELECTED checkpoint, so it can be checked against the `raw @
+sel` column above.
+
+**Output spread** is the mean over frames of the rotor peak-to-peak
+(`max - min`) of the PREDICTED speeds — the quantity that reads as "how far
+apart does the model put the outer two rotors". It is measured here for every
+row including the references, because the legacy pair's 0.28 / 0.19 / 4.71
+figures were computed ad hoc and never committed; the column below is
+self-consistent and reproducible from `scripts/_regime_decomp.py` (which now
+records `spread.{regime}.{pred,true}` in its JSON).
+
+**The legacy 0.28 / 0.19 / 4.71 are NOT reproduced by this definition and are
+not used below.** Re-measuring the same three checkpoints peak-to-peak gives
+ramp spreads 2.87 (legacy easy) / 4.14 (legacy hard) / 6.58 (real), so the
+collapse the legacy conclusion described is a factor of 2.3 and 1.6, not of 17
+and 25. Whatever quantity produced 0.28 was not recorded, so it cannot be
+checked; every spread number in this batch is the peak-to-peak one, measured
+the same way for arms and references alike. The direction of the legacy
+finding survives the re-measurement, its magnitude does not.
+
+| arm | overall | zero | standby | ramp | cruise | spread @ ramp | spread @ cruise |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| *`real_r4_scv2_unified`* (real ref) | 3.11 | 2.44 | 3.20 | 8.17 | 2.95 | 6.58 | 10.94 |
+| *`rig_easy_scv2_unified`* (legacy easy) | 6.08 | 2.37 | 13.70 | 18.82 | 4.85 | 2.87 | 10.36 |
+| *`rig_hard_scv2_unified`* (legacy hard) | 5.40 | 10.61 | 8.92 | 13.86 | 3.48 | 4.14 | 11.50 |
+| `nv2_easy_scv2` | 7.99 | 10.64 | 11.05 | 11.12 | 6.87 | 6.42 | 16.76 |
+
+*(target spread of the same frames: zero 0.01, standby 10.63, ramp 7.85,
+cruise 13.79 rev/s.)*
 
 ## Conclusion
 
