@@ -33,14 +33,24 @@ NOISE MODEL and nothing else.
     traj    = trajectory("fitted", rig="dregon", seed=0, duration_s=10.0)
     sources = [LegacyRandom(seed=0), LegacyBank("easy", 0), V2Fit("dregon"), ...]
     frames  = render_all(sources, traj, seed=0, level=("window", 0.1))
-    show(frames)                      # spectrogram grid + rps + players
+    show(frames)                      # the spectrogram grid + rps
+    players(frames)                   # one audio widget per generation
     line_stats(frames)                # the R4 order prominence, as a table
+    tune(sources[0], traj)            # the sliders, on one source
 
-NO SLIDERS.  The old ``stochastic_noise_lab.Lab`` drove ipywidgets from inside
-the module.  This one is a plain function API and the notebook is thin cells
-over it — the project's notebook convention (logic in the ``.py``, the
-``.ipynb`` a driver).  Moving an amplitude mean by hand is
-``LegacyRandom(seed=0, harm_mean_db=+6.0)``; there is no widget panel.
+THE SLIDERS.  ``stochastic_noise_lab.Lab`` drove an ipywidgets panel from
+inside the module, and :func:`tune` keeps it: the same amplitude means, wander
+amplitudes and times, harmonic coherence, floor-colour wander and clip length,
+the same "New random parameters" / "Regenerate" buttons and status line, the
+same semantics (a slider move changes THAT NUMBER and leaves the draw's static
+random parts alone).  What it drops is what the merge made shared — the
+rotor-speed source, the aggressiveness, the speed scale and the level mode,
+which now come from the trajectory and from ``level=`` — so a panel clip stays
+comparable with the clips of :func:`render_all`.  The fitted generations are
+not tunable and their panel says so: a bank entry's numbers are shown
+read-only, and a v2 payload exposes ``comb_offset_db`` alone.  Everything else
+is a plain function API over which the notebook is thin cells (the project's
+convention: logic in the ``.py``, the ``.ipynb`` a driver).
 
 THE RATE CONTRACT (inherited from ``noise_v2_sampler``).  The v2 renderer wants
 ``rps_rev_s`` as ``(R, T)`` on its OWN OUTPUT GRID — one carrier sample per
@@ -136,6 +146,31 @@ V2_BANKS = {
 #: defaults, and :meth:`NoiseSource.describe` prints which one is in force.
 LEGACY_RANDOM_LINE_MODE = "stochastic"
 LEGACY_BANK_LINE_MODE = "fm"
+
+#: The deleted lab's slider table, lifted field for field: ``{parameter:
+#: (min, max, step, label)}``.  The first two are the amplitude means and the
+#: rest are the covariance parameters of the Gaussian processes, plus the share
+#: of the broadband floor that does NOT follow the rotors.  :func:`tune` builds
+#: its panel from this; nothing else reads it.
+LEGACY_SLIDERS: dict[str, tuple[float, float, float, str]] = {
+    "harm_mean_db": (-20.0, 20.0, 0.5, "harmonic level (dB)"),
+    "floor_mean_db": (-40.0, 10.0, 0.5, "broadband level (dB)"),
+    "harm_gp_std_db": (0.0, 12.0, 0.25, "harmonic wander (dB)"),
+    "harm_gp_tau_s": (0.1, 12.0, 0.1, "harmonic wander time (s)"),
+    "harm_coherence": (0.0, 1.0, 0.05, "harmonic coherence"),
+    "floor_gp_std_db": (0.0, 10.0, 0.25, "floor wander (dB)"),
+    "floor_gp_tau_s": (0.2, 20.0, 0.2, "floor wander time (s)"),
+    "floor_tilt_gp_std": (0.0, 3.0, 0.05, "floor color wander (dB/oct)"),
+    "floor_tilt_gp_tau_s": (1.0, 30.0, 0.5, "floor color time (s)"),
+    "floor_static_rel": (0.0, 0.30, 0.005, "recording floor (rel)"),
+}
+
+#: ``line_mode`` values :func:`tune` offers a legacy source.  The old lab
+#: offered the first two; ``fm`` is what the bank arms declare.
+LEGACY_LINE_MODES = ("stochastic", "coherent", "fm")
+
+#: The comb-offset range :func:`tune` gives a v2 source, in dB.
+COMB_OFFSET_RANGE = (-12.0, 12.0, 0.25)
 
 #: Published frames datasets a ``"real"`` trajectory can be pulled from.
 DATASETS = ("DREGON-frames", "michaels-frames")
@@ -749,7 +784,7 @@ class _LegacySource(NoiseSource):
             # The legacy model's comb-against-floor knob is the harmonic mean
             # level; the v2 rigs' is profile_db. Same meaning, different field.
             params = params.with_(harm_mean_db=float(params.harm_mean_db) + float(comb_offset_db))
-        audio, _diag = srn.synthesize(
+        audio, diag = srn.synthesize(
             params,
             np.asarray(rps_16k, dtype=np.float64),
             rng=np.random.default_rng(int(seed)),
@@ -758,6 +793,9 @@ class _LegacySource(NoiseSource):
             normalize_rms=None,
             line_mode=self.line_mode,
         )
+        # The model spectrum of THIS render, which is what the old lab drew
+        # under its spectrogram; :func:`model_vs_realised` reads it back.
+        self.last_diag = diag
         return np.asarray(audio, dtype=np.float64)
 
     def flight_gain(self, rps_16k: np.ndarray) -> float:
@@ -825,27 +863,53 @@ class LegacyRandom(_LegacySource):
         n_fft: int = 2048,
         **overrides: float,
     ):
+        self.ranges = ranges
+        self.n_rotors = int(n_rotors)
+        self.n_harmonics = int(n_harmonics)
+        self.overrides = {k: float(v) for k, v in overrides.items()}
+        self.seed = int(seed)
+        super().__init__(
+            self._draw(int(seed)),
+            name=self._name(int(seed)),
+            entry=self._entry(int(seed)),
+            line_mode=line_mode,
+            n_fft=n_fft,
+        )
+
+    def _draw(self, seed: int):
         from data_processing import stochastic_rotor_noise as srn
 
         params = srn.sample_params(
             np.random.default_rng(int(seed)),
-            ranges,
-            n_rotors=int(n_rotors),
-            n_harmonics=int(n_harmonics),
+            self.ranges,
+            n_rotors=self.n_rotors,
+            n_harmonics=self.n_harmonics,
             sample_rate=SR,
         )
-        if overrides:
-            params = params.with_(**{k: float(v) for k, v in overrides.items()})
-        self.seed = int(seed)
-        self.overrides = {k: float(v) for k, v in overrides.items()}
-        super().__init__(
-            params,
-            name=f"legacy-random s{int(seed)}",
-            entry=f"sample_params(seed={int(seed)}, n_harmonics={int(n_harmonics)})"
-            + (f" + {self.overrides}" if overrides else ""),
-            line_mode=line_mode,
-            n_fft=n_fft,
+        return params.with_(**self.overrides) if self.overrides else params
+
+    def _name(self, seed: int) -> str:
+        return f"legacy-random s{int(seed)}"
+
+    def _entry(self, seed: int) -> str:
+        return f"sample_params(seed={int(seed)}, n_harmonics={self.n_harmonics})" + (
+            f" + {self.overrides}" if self.overrides else ""
         )
+
+    def resample(self, seed: int | None = None):
+        """Draw a NEW drone in place — a new timbre, floor colour and linewidth
+        set — and return its parameters.
+
+        The old lab's "New random parameters" button, with its semantics: no
+        argument advances the seed by one, so clicking it walks the family.  The
+        source keeps its identity (``render_all`` keys by ``name`` at call time,
+        and the name carries the new seed).
+        """
+        self.seed = self.seed + 1 if seed is None else int(seed)
+        self.params = self._draw(self.seed)
+        self.name = self._name(self.seed)
+        self.entry = self._entry(self.seed)
+        return self.params
 
 
 class LegacyBank(_LegacySource):
@@ -861,6 +925,10 @@ class LegacyBank(_LegacySource):
     is part of the policy's speed handling (``rps_scale_range`` and the flight
     cache), not of the rig, and the whole point here is one trajectory with no
     policy in the way.
+
+    :func:`tune` shows an entry's numbers READ-ONLY for the same reason: a bank
+    entry is a fitted rig, and a moved number is a different rig than the one
+    the arms trained on.  Clip length is the only knob left.
     """
 
     def __init__(
@@ -1356,6 +1424,66 @@ def expected_vs_realised(
     return fig
 
 
+def model_vs_realised(
+    source: NoiseSource,
+    frame: td.Frame,
+    *,
+    max_s: float = 2.0,
+    f_max: float = 8000.0,
+    dyn_range: float = 70.0,
+):
+    """The model spectrum against the clip's, whichever generation it is.
+
+    A v2 source goes to :func:`expected_vs_realised` — the forward model's
+    expected periodogram in absolute fitted units.  A legacy source has no such
+    object; what the deleted lab drew instead is the model PSD the render
+    ITSELF was built from (``stochastic_rotor_noise.model_psd_db`` on the
+    render's diagnostics), frame-averaged, against the realised spectrum, both
+    normalised to their own peak — which is why the panel's y axis is relative
+    dB for a legacy source and absolute for a v2 one.
+
+    The legacy branch reads the source's MOST RECENT render, so pass the frame
+    that render produced.
+    """
+    if source.generation == "v2":
+        return expected_vs_realised(source, frame, max_s=max_s, f_max=f_max)
+
+    import matplotlib.pyplot as plt
+
+    from data_processing import stochastic_rotor_noise as srn
+
+    diag = getattr(source, "last_diag", None)
+    if diag is None:
+        raise RuntimeError(
+            f"{source.name} has not rendered yet — model_vs_realised reads the diagnostics of "
+            "the source's last render"
+        )
+    n_fft = int(getattr(source, "n_fft", 2048))
+    audio = np.asarray(frame["audio"].data, dtype=np.float64)
+    realised = 10.0 * np.log10(np.maximum(_mean_periodogram(audio, n_fft)[0], 1e-300))
+    model = np.asarray(srn.model_psd_db(diag, 0), dtype=np.float64).mean(axis=0)
+    if model.size != realised.size:
+        raise ValueError(
+            f"the stored diagnostics hold {model.size} bins and this clip has {realised.size} — "
+            "the frame did not come from this source's last render"
+        )
+    realised = realised - realised.max()
+    model = model - model.max()
+    freqs = np.fft.rfftfreq(n_fft, 1.0 / SR)
+    keep = freqs <= float(f_max)
+    fig, ax = plt.subplots(figsize=(11, 4))
+    ax.plot(freqs[keep], realised[keep], lw=0.8, color="#888888", label="realised clip")
+    ax.plot(freqs[keep], model[keep], lw=1.2, color="#c0392b", label="model PSD of this render")
+    ax.set_xlabel("frequency (Hz)")
+    ax.set_ylabel("dB (each normalised to its own peak)")
+    ax.set_title(f"{source.name}: model against realisation, mic 0")
+    ax.set_ylim(-float(dyn_range), 3.0)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.2)
+    fig.tight_layout()
+    return fig
+
+
 # ── the number: order-tracked prominence ────────────────────────────────────
 
 
@@ -1422,10 +1550,212 @@ def line_stats(
     return pd.DataFrame(rows).set_index("source")
 
 
+# ── the panel ───────────────────────────────────────────────────────────────
+
+
+def _slice_traj(traj: td.Frame, duration_s: float) -> td.Frame:
+    """The first ``duration_s`` seconds of a trajectory, both tracks.
+
+    The panel's clip-length knob SLICES the shared trajectory instead of
+    drawing a new one — the whole point of this notebook is that every clip
+    rides the same carrier, so a length change must not move the aircraft.
+    """
+    rps = np.asarray(traj["rps_render"].data, dtype=np.float64)
+    total = rps.shape[1] / SR
+    seconds = float(min(max(float(duration_s), 1.0 / SR), total))
+    meta = {**{k: v for k, v in traj["meta"].items()}, "duration_s": seconds}
+    return _traj_frame(rps[:, : int(round(seconds * SR))], meta)
+
+
+def tune(
+    source: NoiseSource,
+    traj: td.Frame,
+    *,
+    n_mics: int = 1,
+    level: tuple[str, float] | None = ("window", 0.1),
+    seed: int = 0,
+    dyn_range: float = 70.0,
+    model_max_s: float = 2.0,
+):
+    """The deleted lab's slider panel, over ONE source and the SHARED trajectory.
+
+    What the old ``stochastic_noise_lab.Lab.panel`` was, minus everything the
+    merge made shared.  The trajectory controls (rotor-speed source,
+    aggressiveness, speed scale, dataset/recording/start) and the level-mode
+    dropdown are gone on purpose: the trajectory is the notebook's, drawn once
+    by :func:`trajectory`, and the level rule is this call's ``level=``, so
+    every clip the panel renders stays comparable with the clips of
+    :func:`render_all`.  Everything that describes the NOISE MODEL is still a
+    control:
+
+    * :class:`LegacyRandom` — the full :data:`LEGACY_SLIDERS` table (the
+      amplitude means, the harmonic and floor wander in dB and in seconds, the
+      harmonic coherence, the floor-colour wander and its time, the recording
+      floor), the ``line_mode`` dropdown, the clip length, and both buttons.
+      A slider move changes THAT NUMBER on the current draw and leaves the
+      static random parts — the timbre, the per-line jitter, the floor shape —
+      exactly where they were, which is the old semantics; "New random
+      parameters" is what redraws them (:meth:`LegacyRandom.resample`).
+    * :class:`LegacyBank` — the same table, DISABLED, plus the clip length.
+      A bank entry is a FITTED rig: it is the exact parameter set the
+      ``rig_easy`` / ``rig_hard`` arms drew from, and moving one of its numbers
+      would make it a different rig than the one those arms trained on, which
+      is the one question this notebook exists to answer.  The values are shown
+      because reading them is the point.
+    * :class:`V2Fit` / :class:`V2Bank` — ``comb_offset_db`` (the comb against
+      the floor, on a deep copy of the fit) and the clip length.  The v2
+      payloads are fitted too; ``comb_offset_db`` is the one knob the campaign
+      itself leaves open.
+
+    Every regenerate renders on the same carrier with the same render seed, so
+    two panel clips differ only by what was moved.  Returns the ``VBox``; the
+    buttons are ``panel.children[1].children[:2]``, and clicking them is how a
+    script drives it.
+    """
+    import ipywidgets as widgets
+    from IPython.display import clear_output, display
+
+    legacy = isinstance(source, _LegacySource)
+    tunable = isinstance(source, LegacyRandom)
+    total_s = float(np.asarray(traj["rps_render"].data).shape[1]) / SR
+
+    style = {"description_width": "170px"}
+    layout = widgets.Layout(width="430px")
+
+    def slider(value, lo, hi, step, label, disabled=False):
+        return widgets.FloatSlider(
+            value=float(np.clip(value, lo, hi)),
+            min=lo,
+            max=hi,
+            step=step,
+            description=label,
+            continuous_update=False,
+            readout_format=".3f",
+            disabled=disabled,
+            style=style,
+            layout=layout,
+        )
+
+    duration = slider(
+        min(8.0, total_s), min(1.0, total_s), total_s, 0.5, f"clip length (s, of {total_s:.1f})"
+    )
+    sliders: dict[str, Any] = {}
+    line_mode = None
+    comb = None
+    if legacy:
+        sliders = {
+            key: slider(getattr(source.params, key), lo, hi, step, label, disabled=not tunable)
+            for key, (lo, hi, step, label) in LEGACY_SLIDERS.items()
+        }
+        line_mode = widgets.Dropdown(
+            options=list(LEGACY_LINE_MODES),
+            value=source.line_mode,
+            description="line mode",
+            disabled=not tunable,
+            style=style,
+            layout=layout,
+        )
+    else:
+        lo, hi, step = COMB_OFFSET_RANGE
+        comb = slider(0.0, lo, hi, step, "comb offset (dB)")
+
+    new_params = widgets.Button(
+        description="New random parameters", button_style="info", disabled=not tunable
+    )
+    regenerate = widgets.Button(description="Regenerate", button_style="success")
+    status = widgets.HTML()
+    out = widgets.Output()
+    state: dict[str, Any] = {
+        "base": getattr(source, "params", None),
+        "frame": None,
+        # Until a control is MOVED the source is rendered exactly as it was
+        # handed over: a slider whose parameter sits outside its own range
+        # would otherwise be clipped into the model on the panel's first draw,
+        # and the source object is the caller's, shared with ``render_all``.
+        "touched": False,
+    }
+
+    def push_sliders() -> None:
+        for key, widget in sliders.items():
+            widget.value = float(
+                np.clip(float(getattr(state["base"], key)), widget.min, widget.max)
+            )
+
+    def on_move(_: Any) -> None:
+        state["touched"] = True
+
+    def draw(_: Any = None) -> None:
+        status.value = "rendering…"
+        try:
+            sub = _slice_traj(traj, duration.value)
+            if tunable and state["touched"]:
+                source.params = state["base"].with_(
+                    **{key: float(w.value) for key, w in sliders.items()}
+                )
+                source.line_mode = str(line_mode.value) if line_mode is not None else "stochastic"
+            frame = render(
+                source,
+                sub,
+                seed=int(seed),
+                n_mics=int(n_mics),
+                level=level,
+                comb_offset_db=0.0 if comb is None else float(comb.value),
+            )
+        except Exception as exc:  # noqa: BLE001 — surfaced in the panel, not raised at the user
+            status.value = f"<span style='color:#c0392b'>{exc}</span>"
+            return
+        state["frame"] = frame
+        with out:
+            clear_output(wait=True)
+            import matplotlib.pyplot as plt
+
+            show({source.name: frame}, dyn_range=45.0, figsize=(12, 5))
+            fig = model_vs_realised(source, frame, max_s=model_max_s, dyn_range=dyn_range)
+            display(fig)
+            plt.close(fig)
+            display(player(frame))
+        m = dict(frame["meta"].items())
+        rule = "native" if level is None else f"{level[0]} {level[1]:g}"
+        status.value = (
+            f"{source.name} — {float(m['duration_s']):.1f} s, level {rule}, "
+            f"rms {float(m['rms']):.4g}"
+        )
+
+    def on_new(_: Any) -> None:
+        state["base"] = source.resample()
+        # A fresh drone is a fresh set of numbers: the sliders follow it, and
+        # nothing counts as "moved" until the user moves it — hence the reset
+        # AFTER push_sliders, whose writes fire the move observer.
+        push_sliders()
+        state["touched"] = False
+        draw()
+
+    for widget in sliders.values():
+        widget.observe(on_move, names="value")
+    if line_mode is not None:
+        line_mode.observe(on_move, names="value")
+    new_params.on_click(on_new)
+    regenerate.on_click(draw)
+
+    keys = list(sliders)
+    half = (len(keys) + 1) // 2
+    columns = [
+        widgets.VBox([sliders[k] for k in keys[:half]]),
+        widgets.VBox([sliders[k] for k in keys[half:]]),
+        widgets.VBox([w for w in (line_mode, comb, duration) if w is not None]),
+    ]
+    controls = widgets.HBox([c for c in columns if c.children])
+    draw()
+    return widgets.VBox([controls, widgets.HBox([new_params, regenerate, status]), out])
+
+
 __all__ = [
+    "COMB_OFFSET_RANGE",
     "DATASETS",
     "FIT_PATHS",
     "LEGACY_BANKS",
+    "LEGACY_LINE_MODES",
+    "LEGACY_SLIDERS",
     "RIGS",
     "RPS_PLOT_SR",
     "SR",
@@ -1444,6 +1774,7 @@ __all__ = [
     "expected_vs_realised",
     "line_stats",
     "load_rig",
+    "model_vs_realised",
     "player",
     "players",
     "recordings",
@@ -1453,4 +1784,5 @@ __all__ = [
     "span_report",
     "traj_rig_names",
     "trajectory",
+    "tune",
 ]
