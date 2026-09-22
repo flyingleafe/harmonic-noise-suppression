@@ -16,6 +16,21 @@ format:
     auto-stretch: false
     html-math-method: katex
     theme: [default, styles.scss]
+  beamer:
+    output-file: slides.pdf
+    pdf-engine: tectonic
+    aspectratio: 169
+    fontsize: 8pt
+    navigation: empty
+    fig-align: center
+    header-includes: |
+      \setbeamertemplate{navigation symbols}{}
+      \setbeamertemplate{footline}[frame number]
+      \setbeamerfont{title}{size=\large}
+      \setbeamerfont{frametitle}{size=\normalsize}
+      \setbeamersize{text margin left=4mm,text margin right=4mm}
+      \usepackage{xcolor}
+      \setlength{\parskip}{2pt}
 execute:
   echo: false
 ---
