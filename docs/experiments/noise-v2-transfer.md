@@ -332,7 +332,7 @@ the same result):
 | `nv2_easy_hppnet_l2` | PASS | `nv2-easy-hppnet-l2-9a2ecf` |
 | `nv2_hard_hppnet_l2` | PASS | `nv2-hard-hppnet-l2-f71237` |
 | `nv2_mixed_hppnet_l2` | PASS | `nv2-mixed-hppnet-l2-08c04f` |
-| `nv2_easy_ft_hppnet_l2` | PASS | — (waits on `nv2_easy_hppnet_l2`) |
+| `nv2_easy_ft_hppnet_l2` | PASS | `nv2-easy-ft-hppnet-l2-1a711c` (chained `--after` `nv2-easy-hppnet-l2-9a2ecf`) |
 | `nv2_hard_ft_hppnet_l2` | PASS | — (waits on `nv2_hard_hppnet_l2`) |
 
 The six stage-1 jobs were submitted on **2026-09-22 02:00Z** (`all-synth`) and
@@ -437,6 +437,67 @@ below are the job's own records and not a stdout scrape.
 | 09-22 05:42 | `nv2-mixed-scv2-83d2cd` | running | 20 | 20 | 3.59 | 3.59 | 2.55 | 1e-03 |
 | 09-22 05:42 | `nv2-mixed-hppnet-l2-08c04f` | running | 6 | 5 | 4.02 | 3.91 | 3.61 | 1e-03 |
 | 09-22 05:42 | `nv2-easy-ft-scv2-9ff3c2` | queued | — | — | — | — | — | — |
+| 09-22 05:43 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 05:43 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 05:43 | `nv2-easy-hppnet-l2-9a2ecf` | running | 54 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 05:43 | `nv2-hard-hppnet-l2-f71237` | running | 54 | 42 | 10.14 | 9.95 | 9.20 | 1e-03 |
+| 09-22 05:43 | `nv2-mixed-scv2-83d2cd` | running | 21 | 20 | 3.59 | 3.59 | 2.55 | 1e-03 |
+| 09-22 05:43 | `nv2-mixed-hppnet-l2-08c04f` | running | 6 | 5 | 4.02 | 3.91 | 3.61 | 1e-03 |
+| 09-22 05:43 | `nv2-easy-ft-scv2-9ff3c2` | queued | — | — | — | — | — | — |
+| 09-22 05:43 | `nv2-hard-ft-scv2-56dbff` | queued | — | — | — | — | — | — |
+| 09-22 06:09 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 06:09 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 06:09 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 06:09 | `nv2-hard-hppnet-l2-f71237` | running | 60 | 55 | 9.77 | 9.77 | 8.17 | 1e-03 |
+| 09-22 06:09 | `nv2-mixed-scv2-83d2cd` | running | 37 | 36 | 2.99 | 2.98 | 2.51 | 1e-03 |
+| 09-22 06:09 | `nv2-mixed-hppnet-l2-08c04f` | running | 14 | 12 | 2.63 | 2.58 | 2.58 | 1e-03 |
+| 09-22 06:09 | `nv2-easy-ft-scv2-9ff3c2` | running | — | — | — | — | — | — |
+| 09-22 06:09 | `nv2-hard-ft-scv2-56dbff` | queued | — | — | — | — | — | — |
+| 09-22 06:10 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 06:10 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 06:10 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 06:10 | `nv2-hard-hppnet-l2-f71237` | running | 60 | 55 | 9.77 | 9.77 | 8.17 | 1e-03 |
+| 09-22 06:10 | `nv2-mixed-scv2-83d2cd` | running | 37 | 36 | 2.99 | 2.98 | 2.51 | 1e-03 |
+| 09-22 06:10 | `nv2-mixed-hppnet-l2-08c04f` | running | 14 | 12 | 2.63 | 2.58 | 2.58 | 1e-03 |
+| 09-22 06:10 | `nv2-easy-ft-scv2-9ff3c2` | running | 0 | — | — | — | 3.32 | — |
+| 09-22 06:10 | `nv2-hard-ft-scv2-56dbff` | queued | — | — | — | — | — | — |
+| 09-22 06:10 | `nv2-easy-ft-hppnet-l2-1a711c` | queued | — | — | — | — | — | — |
+| 09-22 06:35 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 06:35 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 06:35 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 06:35 | `nv2-hard-hppnet-l2-f71237` | running | 67 | 61 | 8.66 | 8.66 | 8.17 | 1e-03 |
+| 09-22 06:35 | `nv2-mixed-scv2-83d2cd` | running | 53 | 38 | 2.95 | 2.81 | 2.51 | 5e-04 |
+| 09-22 06:35 | `nv2-mixed-hppnet-l2-08c04f` | running | 22 | 18 | 2.52 | 2.41 | 2.41 | 1e-03 |
+| 09-22 06:35 | `nv2-easy-ft-scv2-9ff3c2` | running | 16 | 10 | 2.79 | 2.73 | 2.64 | 1e-03 |
+| 09-22 06:35 | `nv2-hard-ft-scv2-56dbff` | queued | — | — | — | — | — | — |
+| 09-22 06:35 | `nv2-easy-ft-hppnet-l2-1a711c` | queued | — | — | — | — | — | — |
+| 09-22 07:01 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 07:01 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 07:01 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 07:01 | `nv2-hard-hppnet-l2-f71237` | running | 73 | 72 | 8.21 | 8.21 | 7.34 | 1e-03 |
+| 09-22 07:01 | `nv2-mixed-scv2-83d2cd` | running | 69 | 57 | 2.80 | 2.71 | 2.51 | 3e-04 |
+| 09-22 07:01 | `nv2-mixed-hppnet-l2-08c04f` | running | 29 | 18 | 2.52 | 2.41 | 2.41 | 1e-03 |
+| 09-22 07:01 | `nv2-easy-ft-scv2-9ff3c2` | running | 33 | 10 | 2.79 | 2.73 | 2.56 | 3e-04 |
+| 09-22 07:01 | `nv2-hard-ft-scv2-56dbff` | queued | — | — | — | — | — | — |
+| 09-22 07:01 | `nv2-easy-ft-hppnet-l2-1a711c` | queued | — | — | — | — | — | — |
+| 09-22 07:26 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 07:26 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 07:26 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 07:26 | `nv2-hard-hppnet-l2-f71237` | running | 80 | 79 | 7.15 | 6.80 | 6.72 | 1e-03 |
+| 09-22 07:26 | `nv2-mixed-scv2-83d2cd` | running | 84 | 79 | 2.58 | 2.58 | 2.47 | 3e-04 |
+| 09-22 07:26 | `nv2-mixed-hppnet-l2-08c04f` | running | 37 | 18 | 2.52 | 2.41 | 2.26 | 1e-03 |
+| 09-22 07:26 | `nv2-easy-ft-scv2-9ff3c2` | running | 49 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 07:26 | `nv2-hard-ft-scv2-56dbff` | queued | — | — | — | — | — | — |
+| 09-22 07:26 | `nv2-easy-ft-hppnet-l2-1a711c` | queued | — | — | — | — | — | — |
+| 09-22 07:51 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 07:51 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 07:51 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 07:51 | `nv2-hard-hppnet-l2-f71237` | running | 86 | 79 | 7.15 | 6.80 | 6.72 | 1e-03 |
+| 09-22 07:51 | `nv2-mixed-scv2-83d2cd` | running | 101 | 91 | 2.53 | 2.53 | 2.47 | 1e-04 |
+| 09-22 07:51 | `nv2-mixed-hppnet-l2-08c04f` | running | 45 | 40 | 2.48 | 2.48 | 2.26 | 1e-03 |
+| 09-22 07:51 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 07:51 | `nv2-hard-ft-scv2-56dbff` | running | 11 | 6 | 2.83 | 2.65 | 2.62 | 1e-03 |
+| 09-22 07:51 | `nv2-easy-ft-hppnet-l2-1a711c` | queued | — | — | — | — | — | — |
 
 ### Stage-1 and curriculum results
 
@@ -455,6 +516,8 @@ is visible. `r1`/`r2`/`r3` are the per-view values at **sel**.
 | *`rig_hard_scv2_unified`* (legacy hard) | — | done | 137 | — | — | — | 5.37 | — | — | — | — |
 | `nv2_easy_scv2` | `nv2-easy-scv2-15cff2` | done | 102 | 81 | 7.94 | **7.94** | 7.18 | 10.89 | 9.67 | 7.94 | 1.13 |
 | `nv2_hard_scv2` | `nv2-hard-scv2-d926d0` | done | 116 | 15 | 9.17 | **7.06** | 7.06 | 25.11 | 9.38 | 7.06 | 2.68 |
+| `nv2_easy_hppnet_l2` | `nv2-easy-hppnet-l2-9a2ecf` | done | 61 | 20 | 7.23 | **6.46** | 5.52 | 10.59 | 8.55 | 6.46 | 1.24 |
+| `nv2_easy_ft_scv2` | `nv2-easy-ft-scv2-9ff3c2` | done | 54 | 10 | 2.79 | **2.73** | 2.56 | 3.34 | 3.18 | 2.73 | 1.05 |
 
 ### Four-regime decomposition
 
@@ -488,6 +551,8 @@ finding survives the re-measurement, its magnitude does not.
 | *`rig_easy_scv2_unified`* (legacy easy) | 6.08 | 2.37 | 13.70 | 18.82 | 4.85 | 2.87 | 10.36 |
 | *`rig_hard_scv2_unified`* (legacy hard) | 5.40 | 10.61 | 8.92 | 13.86 | 3.48 | 4.14 | 11.50 |
 | `nv2_easy_scv2` | 7.99 | 10.64 | 11.05 | 11.12 | 6.87 | 6.42 | 16.76 |
+| `nv2_hard_scv2` | 7.05 | 1.25 | 6.16 | 15.81 | 7.76 | 8.14 | 18.56 |
+| `nv2_easy_hppnet_l2` | 6.45 | 3.58 | 5.04 | 26.50 | 6.14 | 9.95 | 15.46 |
 
 *(target spread of the same frames: zero 0.01, standby 10.63, ramp 7.85,
 cruise 13.79 rev/s.)*
