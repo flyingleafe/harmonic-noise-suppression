@@ -1,0 +1,185 @@
+---
+title: "Generative models of rotor speed and rotor noise"
+subtitle: "The fitted trajectory model, the fitted noise model, and what they transfer"
+author: "Dmitrii Mukhutdinov"
+date: 2026-09-22
+format:
+  revealjs:
+    output-file: slides.html
+    embed-resources: true
+    width: 1280
+    height: 720
+    margin: 0.05
+    slide-number: c/t
+    transition: none
+    fig-align: center
+    auto-stretch: false
+    html-math-method: katex
+    theme: [default, styles.scss]
+execute:
+  echo: false
+---
+
+## Trajectory model
+
+$$
+\begin{aligned}
+w(t) &= \mu + \delta_{\text{flight}} + M\,R(\theta)\,v(t) + e(t) \\
+v_i(t) &= \mathrm{OU}(\tau_{\mathrm{slow},i}, \sigma_{\mathrm{slow},i}) + \mathrm{CAR2}(f_{0,i}, \zeta_i, \sigma_{\mathrm{osc},i}) \\
+e_j(t) &= \mathrm{OU}(\tau_e, \sigma_e), \quad \text{independent across rotors} \\
+\delta_{\text{flight}} &= \mathbf{1}c + r, \quad c \sim N(0, s_c^2),\; r \sim N(0, \operatorname{diag}(s_r^2)) \\
+\mathrm{CAR2}&: \; \ddot{x} + 2\zeta\omega_0\dot{x} + \omega_0^2 x = \xi, \quad \omega_0 = 2\pi f_0
+\end{aligned}
+$$
+
+::: {.small}
+$M$ = mixer, columns $[\text{common}, \text{roll}, \text{pitch}, \text{yaw}]$; $R(\theta)$ rotates the (common, yaw) plane.
+$S(\omega) = \tfrac{2}{f_s} H (e^{i\omega}I - \Phi)^{-1} Q (e^{-i\omega}I - \Phi^\top)^{-1} H^\top$, $\Phi = e^{A\Delta t}$, $Q = P - \Phi P \Phi^\top$.
+:::
+
+## Trajectory model — parameters
+
+::: {.small}
+
+| symbol | meaning | shape | range / prior |
+|---|---|---|---|
+| $\mu$ | per-rotor hover level (rev/s) | 4 | estimated from airborne samples |
+| $\theta$ | rotation of the (collective, yaw) plane (rad) | 1 | $(-\pi/4, \pi/4]$ canonical |
+| $\tau_{\mathrm{slow}}$ | slow OU time constant per mode (s) | 4 | $(\tau_c, 10]$, LN(2.0 s, 1.5) |
+| $\sigma_{\mathrm{slow}}$ | slow OU stationary sd per mode (rev/s) | 4 | LN(1.0, 3.0) |
+| $f_0$ | oscillator centre frequency per mode (Hz) | 4 | $(0.05, 20)$ |
+| $\zeta$ | oscillator damping ratio per mode | 4 | $(0.2, 3.0)$ |
+| $\sigma_{\mathrm{osc}}$ | oscillator stationary sd per mode (rev/s) | 4 | LN(1.0, 3.0) |
+| $\tau_e$ | measurement OU time constant (s) | 1 | $(10^{-3}, 1)$, LN(0.05 s, 2.0) |
+| $\sigma_e$ | measurement OU sd, per rotor (rev/s) | 1 | LN(0.1, 3.0) |
+| $s_c$ | sd of the per-flight level common to the rotors (rev/s) | 1 | moment estimate |
+| $s_r$ | sd of the per-flight per-rotor level (rev/s) | 4 | moment estimate |
+
+32 parameters; 23 enter the exact Kalman likelihood. $\tau_c = 1/(2\pi f_0)$.
+
+:::
+
+## Trajectory data
+
+::: {.small}
+
+| rig | vehicle | flights | airborne (s) | native rate | speed source |
+|---|---|---:|---:|---|---|
+| `michaels` | DJI Matrice 100 | 4 | 395 | 29.41 Hz | DatCon ESC feedback |
+| `dregon` | MikroKopter quad | 10 | 429 | ~1 kHz grid | `motor.measured` |
+| `neurobem_quad` | custom quad | 247 | 2479 | 400 Hz | Betaflight ESC feedback |
+| `pitcn_quad` | micro quad, 0.25 kg | 68 | 3345 | 100 Hz | ESC telemetry |
+| `nanobench_cf21b` | Crazyflie 2.1 Brushless | 15 | 668 | 100 Hz | bidirectional DSHOT eRPM |
+| `vid_m100` | DJI M100 derivative | 4 | 397 | ~1 kHz CAN | M3508/C620 CAN feedback |
+| `blackbird_quad` | custom quad | 1 | 199 | 187 Hz | optical motor encoders |
+| **total** | | **349** | **7912** | | |
+
+Hover level 78–278 rev/s; per-rotor variance spans a factor of 600. Common analysis grid 100 Hz.
+
+:::
+
+## Real vs sampled trajectories
+
+![](../../papers/2026-08_wrapup/src/figures/gen_traj_real_vs_sampled.png){width=92%}
+
+## Trajectories from the rig hyperprior
+
+![](../../papers/2026-08_wrapup/src/figures/gen_traj_hyperprior.png){width=92%}
+
+## Noise model
+
+$$
+x_m(t) = \sum_{r}\sum_{k} A_{mrk}(t)\cos\phi_{mrk}(t) + n_m(t), \qquad
+\phi_{mrk} = 2\pi k\!\int_0^t\! f_r + k\theta_r(t) + \psi_{rk}(t) + \alpha_{mrk}
+$$
+
+$$
+d\nu_r = -\lambda \nu_r dt + \sqrt{2\lambda}\sigma_\nu dW_r,\quad d\theta_r = \nu_r dt,\qquad
+V_\theta(\tau) = 2\sigma_\nu^2\!\left[\tfrac{|\tau|}{\lambda} - \tfrac{1-e^{-\lambda|\tau|}}{\lambda^2}\right]
+$$
+
+$$
+\operatorname{Var}[\Delta\psi_{rk}] = 4\pi\gamma_{rk}|\tau| \;\Rightarrow\; R_{rk}(\tau) = \exp\!\left[-\tfrac{k^2}{2}V_\theta(\tau) - 2\pi\gamma_{rk}|\tau|\right]
+$$
+
+$$
+A_{mrk}(t) = \sqrt{2P_{rk}}\left(\tfrac{f_r(t)}{f_{\mathrm{ref}}}\right)^{a/2} 10^{(g_{mr}-\bar g)/20} 10^{(G_m - \bar G)/20}, \qquad P_{rk} = 10^{p_{rk}/10}
+$$
+
+$$
+S_m(f,t) = 10^{h_m/10}\Big[\tfrac1R\sum_r\big(\tfrac{f_r(t)}{f_{\mathrm{ref}}}\big)^{b} + s\Big]\,
+10^{\left(\mu_F + \sum_{j=1}^{14} B_j(f)\sigma_B (Lz)_j + t_F\log_2(f/f_t)\right)/10}
+$$
+
+::: {.small}
+Regimes (Michael's): standby and cruise fits composed on the carrier; the blend weight follows $f_r(t)$.
+:::
+
+## Noise model — parameters
+
+::: {.small}
+
+| symbol | meaning | shape | prior |
+|---|---|---|---|
+| $\sigma_\nu$ | shaft OU speed-error sd (rad/s) | per rotor | bench LN(0.3, 0.7); flight LN(0.3, 0.5) |
+| $\lambda$ | shaft OU rate (s$^{-1}$) | per rotor | LN(2, 1.0) on the bench; pinned in flight |
+| $\gamma_{rk}$ | Lorentzian half-width of line $(r,k)$ (Hz) | rotor × order | LN($0.01k$ Hz, 1.0), $\gamma \ge 0$ |
+| $p_{rk}$ | line power of order $k$ (dB) — the comb profile | rotor × order | N(measured, 10) if SNR ≥ 2 dB, else N($\mu_F-15$, 8) |
+| $c$ | level of a transplanted comb (dB) | 1 | N(0, 20) |
+| $a$ | comb speed exponent | 1 | N(2, 1); pinned at 2 on a short span |
+| $b$ | floor speed exponent | 1 | LN(2, 0.5); same span pin |
+| $s$ | static fraction of the floor | 1 | LN($2.5\times10^{-3}$, 1.0) |
+| $\mu_F$ | floor level (dB) | 1 | N(measured band median, 10) |
+| $z$ | GP control points of the floor shape | 14 | N(0, 1) each |
+| $t_F$ | floor tilt (dB/octave) | 1 | N(0, 5) |
+| $g_{mr}$, $h_m$, $G_m$ | per-mic line / floor / overall gain (dB) | mic × rotor, mic, mic | N(0, 6) |
+| $f_r$ | carrier (rev/s) | per rotor | given: window-refined or telemetry label |
+
+:::
+
+## Noise data
+
+::: {.small}
+
+| recording set | class | rotors / mics | duration | role in the fit |
+|---|---|---|---|---|
+| DREGON single-motor bench, 50–90 % | bench | 1 / 8 | 12–34 s per window | identifies $\sigma_\nu$, $\lambda$, $\gamma_{rk}$ |
+| DREGON `motor_allMotors_70` bench | bench | 4 / 8 | ~30 s | four-rotor control |
+| DREGON room 2: free flight, hover, rectangle, spinning | flight | 4 / 8 | 4 s frames, pooled | floor and flight profile (R5 fit) |
+| Michael's FLY125 cruise | flight | 4 / 1 | 4 s frames, pooled | cruise comb and floor (R3 fit) |
+| Michael's FLY125 standby | flight | 4 / 1 | 4 s frames, pooled | standby regime of the same rig |
+
+Flight supports: periodic Hann, $N = 2048$, hop 512 at 16 kHz. Fit band 30 Hz – 7900 Hz.
+
+:::
+
+## Real vs sampled noise, on the same label
+
+![](../../papers/2026-08_wrapup/src/figures/gen_noise_real_vs_sampled.png){width=88%}
+
+## Noise sampled from the hyperprior used for hard training
+
+![](../../papers/2026-08_wrapup/src/figures/gen_noise_hyperprior.png){width=88%}
+
+## Results — rev/s MAE on the real validation split (regime-only)
+
+::: {.small}
+
+| trunk | arm | status | real_overall | zero | standby | ramp | cruise |
+|---|---|---|---:|---:|---:|---:|---:|
+| SCv2 | `real_r4_scv2_unified` (real ref) | final | **2.99** | 2.44 | 3.20 | 8.17 | 2.95 |
+| SCv2 | `nv2_easy_scv2` (synthetic only) | final | 7.94 | 10.64 | 11.05 | 11.12 | 6.87 |
+| SCv2 | `nv2_hard_scv2` (synthetic only) | final | 7.06 | 1.25 | 6.16 | 15.81 | 7.76 |
+| SCv2 | `nv2_mixed_scv2` (mixed) | final | 2.53 | — | — | — | — |
+| SCv2 | `nv2_easy_ft_scv2` (easy → real) | final | **2.73** | 2.23 | 2.36 | 8.16 | 2.60 |
+| SCv2 | `nv2_hard_ft_scv2` (hard → real) | running, r32 | 2.23 | — | — | — | — |
+| HPPNet L2 | `hppnet_l2_r2_s0` (real ref) | final | **2.27** | — | — | — | — |
+| HPPNet L2 | `nv2_easy_hppnet_l2` (synthetic only) | final | 6.46 | 3.58 | 5.04 | 26.50 | 6.14 |
+| HPPNet L2 | `nv2_hard_hppnet_l2` (synthetic only) | running, r93 | 6.80 | — | — | — | — |
+| HPPNet L2 | `nv2_mixed_hppnet_l2` (mixed) | running, r54 | 2.48 | — | — | — | — |
+| HPPNet L2 | `nv2_easy_ft_hppnet_l2` (easy → real) | queued | — | — | — | — | — |
+
+`real_overall` = `val/real_r3` at the selected checkpoint. Regime columns: per-frame PIT MAE, 8 mics,
+frame shares zero 13 % / standby 12 % / ramp 4 % / cruise 72 %; pooled over DREGON and Michael's.
+
+:::
