@@ -673,6 +673,46 @@ below are the job's own records and not a stdout scrape.
 | 09-22 14:58 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
 | 09-22 14:58 | `nv2-easy-ft-hppnet-l2-1a711c` | succeeded | 79 | 5 | 2.46 | 2.11 | 2.11 | 1e-04 |
 | 09-22 14:58 | `nv2-hard-ft-hppnet-l2-6fe90f` | running | 24 | 4 | 1.96 | 4.38 | 1.81 | 1e-03 |
+| 09-22 15:24 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 15:24 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 15:24 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 15:24 | `nv2-hard-hppnet-l2-f71237` | succeeded | 162 | 124 | 6.47 | 6.47 | 6.25 | 1e-04 |
+| 09-22 15:24 | `nv2-mixed-scv2-83d2cd` | succeeded | 115 | 91 | 2.53 | 2.53 | 2.43 | 1e-04 |
+| 09-22 15:24 | `nv2-mixed-hppnet-l2-08c04f` | succeeded | 112 | 72 | 2.38 | 2.25 | 2.25 | 1e-04 |
+| 09-22 15:24 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 15:24 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
+| 09-22 15:24 | `nv2-easy-ft-hppnet-l2-1a711c` | succeeded | 79 | 5 | 2.46 | 2.11 | 2.11 | 1e-04 |
+| 09-22 15:24 | `nv2-hard-ft-hppnet-l2-6fe90f` | running | 31 | 4 | 1.96 | 4.38 | 1.81 | 5e-04 |
+| 09-22 15:49 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 15:49 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 15:49 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 15:49 | `nv2-hard-hppnet-l2-f71237` | succeeded | 162 | 124 | 6.47 | 6.47 | 6.25 | 1e-04 |
+| 09-22 15:49 | `nv2-mixed-scv2-83d2cd` | succeeded | 115 | 91 | 2.53 | 2.53 | 2.43 | 1e-04 |
+| 09-22 15:49 | `nv2-mixed-hppnet-l2-08c04f` | succeeded | 112 | 72 | 2.38 | 2.25 | 2.25 | 1e-04 |
+| 09-22 15:49 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 15:49 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
+| 09-22 15:49 | `nv2-easy-ft-hppnet-l2-1a711c` | succeeded | 79 | 5 | 2.46 | 2.11 | 2.11 | 1e-04 |
+| 09-22 15:49 | `nv2-hard-ft-hppnet-l2-6fe90f` | running | 37 | 4 | 1.96 | 4.38 | 1.81 | 5e-04 |
+| 09-22 16:21 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 16:21 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 16:21 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 16:21 | `nv2-hard-hppnet-l2-f71237` | succeeded | 162 | 124 | 6.47 | 6.47 | 6.25 | 1e-04 |
+| 09-22 16:21 | `nv2-mixed-scv2-83d2cd` | succeeded | 115 | 91 | 2.53 | 2.53 | 2.43 | 1e-04 |
+| 09-22 16:21 | `nv2-mixed-hppnet-l2-08c04f` | succeeded | 112 | 72 | 2.38 | 2.25 | 2.25 | 1e-04 |
+| 09-22 16:21 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 16:21 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
+| 09-22 16:21 | `nv2-easy-ft-hppnet-l2-1a711c` | succeeded | 79 | 5 | 2.46 | 2.11 | 2.11 | 1e-04 |
+| 09-22 16:21 | `nv2-hard-ft-hppnet-l2-6fe90f` | running | 45 | 4 | 1.96 | 4.38 | 1.81 | 3e-04 |
+| 09-22 16:46 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 16:46 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 16:46 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 16:46 | `nv2-hard-hppnet-l2-f71237` | succeeded | 162 | 124 | 6.47 | 6.47 | 6.25 | 1e-04 |
+| 09-22 16:46 | `nv2-mixed-scv2-83d2cd` | succeeded | 115 | 91 | 2.53 | 2.53 | 2.43 | 1e-04 |
+| 09-22 16:46 | `nv2-mixed-hppnet-l2-08c04f` | succeeded | 112 | 72 | 2.38 | 2.25 | 2.25 | 1e-04 |
+| 09-22 16:46 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 16:46 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
+| 09-22 16:46 | `nv2-easy-ft-hppnet-l2-1a711c` | succeeded | 79 | 5 | 2.46 | 2.11 | 2.11 | 1e-04 |
+| 09-22 16:46 | `nv2-hard-ft-hppnet-l2-6fe90f` | running | 51 | 4 | 1.96 | 4.38 | 1.81 | 1e-04 |
 
 ### Stage-1 and curriculum results
 
