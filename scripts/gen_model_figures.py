@@ -95,16 +95,20 @@ def _plot_tracks(ax, rps, fs, title, ylim=None):
         ax.set_ylim(*ylim)
 
 
-def fig_traj_real_vs_sampled(rigs=("dregon", "michaels")) -> None:
+def fig_traj_real_vs_sampled(
+    rigs=("dregon", "michaels"), name: str = "gen_traj_real_vs_sampled", row_h: float = 3.1
+) -> None:
     import noise_v2_sampler as NS
 
     from experiments.rps_traj.data import RATE_HZ
 
-    fig, axes = plt.subplots(len(rigs), 2, figsize=(11, 3.1 * len(rigs)))
+    # the noise rig only carries the fit-span warning; the TRAJECTORY rig is ``traj_rig``
+    noise_rig = NS.load_rig("dregon")
+    fig, axes = plt.subplots(len(rigs), 2, figsize=(11, row_h * len(rigs)))
     axes = np.atleast_2d(axes)
     for row, rig in enumerate(rigs):
         real = _real_window(rig, 30.0)
-        traj = NS.sample_trajectory(NS.load_rig(rig), seed=11 + row, duration_s=30.0, traj_rig=rig)
+        traj = NS.sample_trajectory(noise_rig, seed=11 + row, duration_s=30.0, traj_rig=rig)
         samp = np.asarray(traj["rps"].data)[:, :: int(SR / RATE_HZ)]
         lo = min(np.nanmin(real), samp.min())
         hi = max(np.nanmax(real), samp.max())
@@ -114,7 +118,7 @@ def fig_traj_real_vs_sampled(rigs=("dregon", "michaels")) -> None:
         _plot_tracks(axes[row, 1], samp, RATE_HZ, f"{rig} — fitted model, 30 s sample", ylim)
     axes[0, 1].legend(ncol=4, fontsize=7, loc="upper right")
     fig.tight_layout()
-    save(fig, "gen_traj_real_vs_sampled")
+    save(fig, name)
 
 
 def fig_traj_hyperprior(n: int = 4) -> None:
@@ -654,11 +658,17 @@ def tables() -> None:
 
 
 def main() -> None:
-    which = sys.argv[1:] or ["tables", "traj", "hyper", "noise", "bank"]
+    which = sys.argv[1:] or ["tables", "traj", "traj_other", "hyper", "noise", "bank"]
     if "tables" in which:
         tables()
     if "traj" in which:
         fig_traj_real_vs_sampled()
+    if "traj_other" in which:
+        fig_traj_real_vs_sampled(
+            ("neurobem_quad", "pitcn_quad", "nanobench_cf21b", "vid_m100"),
+            name="gen_traj_real_vs_sampled_other",
+            row_h=2.4,
+        )
     if "hyper" in which:
         fig_traj_hyperprior()
     if "noise" in which:

@@ -97,6 +97,10 @@ Hover level 78–278 rev/s; per-rotor variance spans a factor of 600. Common ana
 
 ![](../../papers/2026-08_wrapup/src/figures/gen_traj_real_vs_sampled.png){width=92%}
 
+## Real vs sampled trajectories — other rigs
+
+![](../../papers/2026-08_wrapup/src/figures/gen_traj_real_vs_sampled_other.png){width=78%}
+
 ## Trajectories from the rig hyperprior
 
 ![](../../papers/2026-08_wrapup/src/figures/gen_traj_hyperprior.png){width=92%}
