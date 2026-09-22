@@ -259,32 +259,47 @@ def fig_noise_hyperprior(n: int = 4) -> None:
 # ── tables ──────────────────────────────────────────────────────────────────
 
 
-def _booktabs(colspec: str, header: list[str], rows: list[list[str]], caption: str, label: str):
-    esc = lambda s: s  # noqa: E731 - rows are authored already-escaped
-    out = [
-        "\\begin{table}[tb]",
-        "  \\centering",
-        "  \\small",
-        f"  \\begin{{tabular}}{{{colspec}}}",
-        "    \\toprule",
-        "    " + " & ".join(esc(h) for h in header) + " \\\\",
-        "    \\midrule",
-    ]
-    out += ["    " + " & ".join(esc(c) for c in r) + " \\\\" for r in rows]
+def _booktabs(
+    colspec: str,
+    header: list[str] | list[list[str] | str],
+    rows: list[list[str] | str],
+    caption: str,
+    label: str,
+    *,
+    star: bool = False,
+    size: str = "small",
+    tabcolsep: str | None = None,
+    source: str | None = None,
+):
+    # A row is either a list of already-escaped cells or a raw LaTeX line
+    # (\midrule, \cmidrule, a hand-written header row) emitted verbatim. A header
+    # holding any cell list is a sequence of such lines; a flat list of strings is
+    # one header row.
+    line = lambda r: "    " + (r if isinstance(r, str) else " & ".join(r) + " \\\\")  # noqa: E731
+    head = header if any(not isinstance(h, str) for h in header) else [header]
+    env = "table*" if star else "table"
+    out = ["% " + ln for ln in source.splitlines()] if source else []
+    out += [f"\\begin{{{env}}}[tb]", "  \\centering", f"  \\{size}"]
+    if tabcolsep is not None:
+        out.append(f"  \\setlength{{\\tabcolsep}}{{{tabcolsep}}}")
+    out += [f"  \\begin{{tabular}}{{{colspec}}}", "    \\toprule"]
+    out += [line(h) for h in head]
+    out.append("    \\midrule")
+    out += [line(r) for r in rows]
     out += [
         "    \\bottomrule",
         "  \\end{tabular}",
         f"  \\caption{{{caption}}}",
         f"  \\label{{{label}}}",
-        "\\end{table}",
+        f"\\end{{{env}}}",
         "",
     ]
     return "\n".join(out)
 
 
-def write_table(name: str, colspec, header, rows, caption, label) -> None:
+def write_table(name: str, colspec, header, rows, caption, label, **kw) -> None:
     TABLES.mkdir(parents=True, exist_ok=True)
-    (TABLES / f"{name}.tex").write_text(_booktabs(colspec, header, rows, caption, label))
+    (TABLES / f"{name}.tex").write_text(_booktabs(colspec, header, rows, caption, label, **kw))
     print(f"wrote {name}.tex", flush=True)
 
 
@@ -341,6 +356,7 @@ def tables() -> None:
         "$\\tau_c = 1/(2\\pi f_0)$ orders the two shaft components without a label-switching gauge. "
         "LN$(m,s)$: log-normal with median $m$ and log-sd $s$.",
         "tab:gen-traj-model-params",
+        star=True,
     )
 
     write_table(
@@ -409,6 +425,7 @@ def tables() -> None:
         "The seven ingested rigs, on the frozen airborne rule and the common 100\\,Hz "
         "analysis grid. Hover level spans 78--278\\,rev/s and per-rotor variance a factor of 600.",
         "tab:gen-traj-data",
+        star=True,
     )
 
     write_table(
@@ -460,6 +477,7 @@ def tables() -> None:
         "Parameters of the rotor-noise model and their priors. LN$(m,s)$: log-normal with "
         "median $m$ and log-sd $s$; N$(\\mu,\\sigma)$: normal.",
         "tab:gen-noise-model-params",
+        star=True,
     )
 
     write_table(
@@ -507,153 +525,156 @@ def tables() -> None:
         "$N=2048$, hop 512 at 16\\,kHz, pooled over windows; bench supports are one stationary "
         "periodogram each. The fit band is $30\\,\\mathrm{Hz} \\le f \\le 7900\\,\\mathrm{Hz}$.",
         "tab:gen-noise-data",
+        star=True,
+        size="footnotesize",
+        tabcolsep="4pt",
     )
 
     ref = "\\textit{real reference}"
+    # rows: real_overall, overall, zero, standby, ramp, cruise, spread standby/ramp/cruise
+    regime_rows: list[tuple[str, str, str, list[str]]] = [
+        (
+            "SCv2",
+            f"\\texttt{{real\\_r4\\_scv2\\_unified}} ({ref})",
+            "\\textbf{2.99}",
+            ["3.11", "2.44", "3.20", "8.17", "2.95", "9.74", "6.58", "10.94"],
+        ),
+        (
+            "HPPNet L2",
+            f"\\texttt{{hppnet\\_l2\\_r2\\_s0}} ({ref})",
+            "\\textbf{2.27}",
+            ["2.22", "1.05", "3.11", "12.51", "1.74", "8.81", "6.76", "13.53"],
+        ),
+        (
+            "SCv2",
+            "\\texttt{nv2\\_easy\\_scv2} (synthetic only)",
+            "7.94",
+            ["7.99", "10.64", "11.05", "11.12", "6.87", "5.71", "6.42", "16.76"],
+        ),
+        (
+            "SCv2",
+            "\\texttt{nv2\\_hard\\_scv2} (synthetic only)",
+            "7.06",
+            ["7.05", "1.25", "6.16", "15.81", "7.76", "6.27", "8.14", "18.56"],
+        ),
+        (
+            "SCv2",
+            "\\texttt{nv2\\_mixed\\_scv2} (mixed)",
+            "2.53",
+            ["2.54", "1.78", "2.25", "7.00", "2.49", "9.76", "7.82", "12.77"],
+        ),
+        (
+            "SCv2",
+            "\\texttt{nv2\\_easy\\_ft\\_scv2} (easy $\\to$ real)",
+            "2.73",
+            ["2.73", "2.23", "2.36", "8.16", "2.60", "10.16", "7.37", "12.75"],
+        ),
+        (
+            "SCv2",
+            "\\texttt{nv2\\_hard\\_ft\\_scv2} (hard $\\to$ real)",
+            "\\textbf{2.23}",
+            ["2.23", "0.93", "1.44", "6.71", "2.35", "9.22", "6.63", "11.23"],
+        ),
+        (
+            "HPPNet L2",
+            "\\texttt{nv2\\_easy\\_hppnet\\_l2} (synthetic only)",
+            "6.46",
+            ["6.45", "3.58", "5.04", "26.50", "6.14", "7.54", "9.95", "15.46"],
+        ),
+        (
+            "HPPNet L2",
+            "\\texttt{nv2\\_hard\\_hppnet\\_l2} (synthetic only)",
+            "6.47",
+            ["6.47", "1.63", "4.25", "30.07", "6.44", "5.37", "6.11", "17.25"],
+        ),
+        (
+            "HPPNet L2",
+            "\\texttt{nv2\\_mixed\\_hppnet\\_l2} (mixed)",
+            "2.25",
+            ["2.25", "0.29", "2.28", "9.09", "2.23", "8.31", "7.83", "14.44"],
+        ),
+        (
+            "HPPNet L2",
+            "\\texttt{nv2\\_easy\\_ft\\_hppnet\\_l2} (easy $\\to$ real)",
+            "\\textbf{2.11}",
+            ["2.11", "1.50", "2.84", "8.25", "1.77", "9.08", "7.29", "13.06"],
+        ),
+        (
+            # unmeasured: the saved checkpoint is round 4, the run's raw 1.81 at
+            # round 1 was never written, so this row is not a result.
+            "HPPNet L2",
+            "\\texttt{nv2\\_hard\\_ft\\_hppnet\\_l2} (hard $\\to$ real)$^{*}$",
+            "4.38",
+            ["4.42", "20.91", "2.83", "9.50", "1.51", "10.57", "7.42", "13.84"],
+        ),
+    ]
     write_table(
         "gen_results_by_dataset_regime",
-        "lllrrrrrr",
+        "llrrrrrrrrr",
         [
-            "trunk",
-            "arm",
-            "status",
-            "real\\_overall",
-            "overall",
-            "zero",
-            "standby",
-            "ramp",
-            "cruise",
+            "& & & & \\multicolumn{4}{c}{per-frame PIT MAE} "
+            "& \\multicolumn{3}{c}{output spread} \\\\",
+            "\\cmidrule(lr){5-8}\\cmidrule(lr){9-11}",
+            [
+                "trunk",
+                "arm",
+                "real\\_overall",
+                "overall",
+                "zero",
+                "standby",
+                "ramp",
+                "cruise",
+                "standby",
+                "ramp",
+                "cruise",
+            ],
         ],
         [
+            *[[trunk, arm, overall, *cells] for trunk, arm, overall, cells in regime_rows[:2]],
+            "\\midrule",
+            *[[trunk, arm, overall, *cells] for trunk, arm, overall, cells in regime_rows[2:7]],
+            "\\midrule",
+            *[[trunk, arm, overall, *cells] for trunk, arm, overall, cells in regime_rows[7:]],
+            "\\midrule",
             [
-                "SCv2",
-                f"\\texttt{{real\\_r4\\_scv2\\_unified}} ({ref})",
-                "done",
-                "\\textbf{2.99}",
-                "3.11",
-                "2.44",
-                "3.20",
-                "8.17",
-                "2.95",
-            ],
-            [
-                "SCv2",
-                "\\texttt{nv2\\_easy\\_scv2} (synthetic only)",
-                "done",
-                "7.94",
-                "7.99",
-                "10.64",
-                "11.05",
-                "11.12",
-                "6.87",
-            ],
-            [
-                "SCv2",
-                "\\texttt{nv2\\_hard\\_scv2} (synthetic only)",
-                "done",
-                "7.06",
-                "7.05",
-                "1.25",
-                "6.16",
-                "15.81",
-                "7.76",
-            ],
-            [
-                "SCv2",
-                "\\texttt{nv2\\_mixed\\_scv2} (mixed)",
-                "done",
-                "2.53",
-                "---",
-                "---",
-                "---",
-                "---",
-                "---",
-            ],
-            [
-                "SCv2",
-                "\\texttt{nv2\\_easy\\_ft\\_scv2} (easy $\\to$ real)",
-                "done",
-                "\\textbf{2.73}",
-                "2.73",
-                "2.23",
-                "2.36",
-                "8.16",
-                "2.60",
-            ],
-            [
-                "SCv2",
-                "\\texttt{nv2\\_hard\\_ft\\_scv2} (hard $\\to$ real)",
-                "running, r32",
-                "2.23",
-                "---",
-                "---",
-                "---",
-                "---",
-                "---",
-            ],
-            [
-                "HPPNet L2",
-                f"\\texttt{{hppnet\\_l2\\_r2\\_s0}} ({ref})",
-                "done",
-                "\\textbf{2.27}",
-                "---",
-                "---",
-                "---",
-                "---",
-                "---",
-            ],
-            [
-                "HPPNet L2",
-                "\\texttt{nv2\\_easy\\_hppnet\\_l2} (synthetic only)",
-                "done",
-                "6.46",
-                "6.45",
-                "3.58",
-                "5.04",
-                "26.50",
-                "6.14",
-            ],
-            [
-                "HPPNet L2",
-                "\\texttt{nv2\\_hard\\_hppnet\\_l2} (synthetic only)",
-                "running, r93",
-                "6.80",
-                "---",
-                "---",
-                "---",
-                "---",
-                "---",
-            ],
-            [
-                "HPPNet L2",
-                "\\texttt{nv2\\_mixed\\_hppnet\\_l2} (mixed)",
-                "running, r54",
-                "2.48",
-                "---",
-                "---",
-                "---",
-                "---",
-                "---",
-            ],
-            [
-                "HPPNet L2",
-                "\\texttt{nv2\\_easy\\_ft\\_hppnet\\_l2} (easy $\\to$ real)",
-                "queued",
+                "\\multicolumn{2}{l}{\\textit{the target labels of the same frames}}",
                 "---",
                 "---",
                 "---",
                 "---",
                 "---",
                 "---",
+                "10.63",
+                "7.85",
+                "13.79",
             ],
         ],
-        "Rotor-speed MAE (rev/s, lower is better) on the frozen real validation split. "
-        "\\texttt{real\\_overall} is \\texttt{val/real\\_r3} at the selected checkpoint; the four "
-        "regime columns are the per-frame PIT MAE of \\texttt{scripts/\\_regime\\_decomp.py} on the "
-        "same checkpoint. Running arms quote the value at the round stated. The regime "
-        "decomposition is pooled over DREGON and Michael's: the committed decomposition "
-        "carries no per-dataset split.",
+        "Rotor-speed error by frame regime on the frozen real validation split (rev/s, lower is "
+        "better), at the checkpoint each arm selected on the real overall error. "
+        "\\texttt{real\\_overall} is \\texttt{val/real\\_r3} at that checkpoint, i.e. the "
+        "\\emph{all} column of Table~\\ref{tab:nv2}; \\emph{overall} is the same clip-level "
+        "metric recomputed by \\texttt{scripts/\\_regime\\_decomp.py} on eight microphones, and "
+        "the four regime columns are its per-frame decomposition. Thresholds are stated, not "
+        "fitted (ramp first, at $|\\mathrm{d}\\bar r/\\mathrm{d}t|\\ge20$\\,rev/s$^2$, then zero "
+        "/ standby / cruise by level); frame shares are zero 12.7\\,\\%, standby 11.6\\,\\%, ramp "
+        "3.8\\,\\%, cruise 72.0\\,\\%. \\emph{Output spread} is the mean over frames of the "
+        "peak-to-peak spread of the four \\emph{predicted} speeds --- how far apart the model "
+        "puts the outer rotors --- and the last row gives the same quantity for the labels "
+        "themselves, which is the target the spread columns are read against (at zero the "
+        "labels' spread is 0.01). The decomposition is pooled over DREGON and MD2: the committed "
+        "decomposition carries no per-dataset split. $^{*}$\\texttt{nv2\\_hard\\_ft\\_hppnet\\_l2} "
+        "is its saved round-4 checkpoint and not a result; its raw score of 1.81 at round 1 was "
+        "never saved, so the arm is unmeasured, and its 20.91 at zero is a warm-started run one "
+        "round in.",
         "tab:gen-results-by-regime",
+        star=True,
+        size="footnotesize",
+        tabcolsep="4pt",
+        source=(
+            "source: docs/experiments/noise-v2-transfer.md,\n"
+            '"Stage-1 and curriculum results" (real_overall) and\n'
+            '"Four-regime decomposition" (overall, regime cells, output spread)'
+        ),
     )
 
 
