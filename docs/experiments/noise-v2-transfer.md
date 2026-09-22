@@ -552,6 +552,24 @@ below are the job's own records and not a stdout scrape.
 | 09-22 09:22 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
 | 09-22 09:22 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
 | 09-22 09:22 | `nv2-easy-ft-hppnet-l2-1a711c` | running | 18 | 5 | 2.46 | 2.11 | 2.11 | 1e-03 |
+| 09-22 09:48 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 09:48 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 09:48 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 09:48 | `nv2-hard-hppnet-l2-f71237` | running | 115 | 79 | 7.15 | 6.80 | 6.72 | 5e-04 |
+| 09-22 09:48 | `nv2-mixed-scv2-83d2cd` | succeeded | 115 | 91 | 2.53 | 2.53 | 2.43 | 1e-04 |
+| 09-22 09:48 | `nv2-mixed-hppnet-l2-08c04f` | running | 80 | 72 | 2.38 | 2.25 | 2.25 | 5e-04 |
+| 09-22 09:48 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 09:48 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
+| 09-22 09:48 | `nv2-easy-ft-hppnet-l2-1a711c` | running | 26 | 5 | 2.46 | 2.11 | 2.11 | 5e-04 |
+| 09-22 10:13 | `nv2-easy-scv2-15cff2` | succeeded | 101 | 81 | 7.94 | 7.94 | 7.18 | 1e-04 |
+| 09-22 10:13 | `nv2-hard-scv2-d926d0` | succeeded | 115 | 15 | 9.17 | 7.06 | 7.06 | 1e-04 |
+| 09-22 10:13 | `nv2-easy-hppnet-l2-9a2ecf` | succeeded | 60 | 20 | 7.23 | 6.46 | 5.52 | 1e-04 |
+| 09-22 10:13 | `nv2-hard-hppnet-l2-f71237` | running | 122 | 122 | 7.04 | 6.33 | 6.33 | 5e-04 |
+| 09-22 10:13 | `nv2-mixed-scv2-83d2cd` | succeeded | 115 | 91 | 2.53 | 2.53 | 2.43 | 1e-04 |
+| 09-22 10:13 | `nv2-mixed-hppnet-l2-08c04f` | running | 87 | 72 | 2.38 | 2.25 | 2.25 | 3e-04 |
+| 09-22 10:13 | `nv2-easy-ft-scv2-9ff3c2` | succeeded | 53 | 10 | 2.79 | 2.73 | 2.56 | 1e-04 |
+| 09-22 10:13 | `nv2-hard-ft-scv2-56dbff` | succeeded | 70 | 24 | 2.47 | 2.23 | 2.23 | 1e-04 |
+| 09-22 10:13 | `nv2-easy-ft-hppnet-l2-1a711c` | running | 35 | 5 | 2.46 | 2.11 | 2.11 | 5e-04 |
 
 ### Stage-1 and curriculum results
 
@@ -611,6 +629,7 @@ finding survives the re-measurement, its magnitude does not.
 | `nv2_easy_hppnet_l2` | 6.45 | 3.58 | 5.04 | 26.50 | 6.14 | 9.95 | 15.46 |
 | `nv2_easy_ft_scv2` | 2.73 | 2.23 | 2.36 | 8.16 | 2.60 | 7.37 | 12.75 |
 | `nv2_mixed_scv2` | 2.54 | 1.78 | 2.25 | 7.00 | 2.49 | 7.82 | 12.77 |
+| `nv2_hard_ft_scv2` | 2.23 | 0.93 | 1.44 | 6.71 | 2.35 | 6.63 | 11.23 |
 
 *(target spread of the same frames: zero 0.01, standby 10.63, ramp 7.85,
 cruise 13.79 rev/s.)*
