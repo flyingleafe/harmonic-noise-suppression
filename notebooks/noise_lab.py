@@ -1486,6 +1486,11 @@ def model_vs_realised(
 
 # ── the number: order-tracked prominence ────────────────────────────────────
 
+#: The R4 "wide" grid the prominence is read on: 8192-point Hann, hop 1024 at
+#: 16 kHz (1.95 Hz per bin), exactly ``noise_v2_widen_dregon.WIDE_N/WIDE_HOP``.
+LINE_STATS_N_FFT = 8192
+LINE_STATS_HOP = 1024
+
 
 def _mean_periodogram(audio: np.ndarray, n_fft: int) -> np.ndarray:
     """``(M, F)`` frame-averaged periodogram, Hann, 50 % overlap."""
@@ -1501,49 +1506,104 @@ def _mean_periodogram(audio: np.ndarray, n_fft: int) -> np.ndarray:
     return power.mean(axis=1)
 
 
+def _stft_power(audio: np.ndarray, n_fft: int, hop: int) -> tuple[np.ndarray, np.ndarray]:
+    """``((M, N, F) power, (N,) frame-centre sample index)``.
+
+    ``noise_v2_widen_dregon.stft_power`` verbatim (symmetric Hann, power
+    normalised by ``sum(w**2)``, centres at ``start + n_fft // 2``), vectorised
+    over frames.
+    """
+    audio = np.atleast_2d(np.asarray(audio, dtype=np.float64))
+    window = np.hanning(n_fft)
+    starts = np.arange(0, audio.shape[-1] - n_fft + 1, hop)
+    if starts.size == 0:
+        raise ValueError(f"{audio.shape[-1]} samples is shorter than one {n_fft}-point frame")
+    idx = starts[:, None] + np.arange(n_fft)[None, :]
+    seg = audio[:, idx] * window
+    power = np.abs(np.fft.rfft(seg, axis=-1)) ** 2 / float((window**2).sum())
+    return power, starts + n_fft // 2
+
+
 def line_stats(
     frames: td.Frame | dict[str, td.Frame],
     *,
     k_max: int = 8,
-    n_fft: int = 8192,
+    n_fft: int = LINE_STATS_N_FFT,
+    hop: int = LINE_STATS_HOP,
 ):
     """Round 4's order-tracked prominence over the local floor, as a table.
 
-    For each clip: an ``n_fft``-point frame-averaged periodogram (8192 points =
-    1.95 Hz per bin, the round-4 resolution), the clip's OWN per-rotor mean
-    carriers, and then the R4 estimator itself through
-    :mod:`experiments.noise_model.tonality` — peak within +-1 bin of ``k f_r``
-    over the MEDIAN of the two-sided ``0.45-0.7 fbar`` annulus, every rotor's
-    ``k-1 / k / k+1`` lines excluded from the floor
-    (``results/noise_v2/rounds/round4/legacy_truth/anatomy.md``).  Mic-median
-    then rotor-mean, exactly as ``tonality.payload_stats`` aggregates it.
+    FRAMEWISE, ON EACH FRAME'S OWN CARRIER — which is the whole point of the
+    estimator and the one thing a clip-averaged spectrum cannot do.  A fitted
+    trajectory moves the rotors over tens of rev/s inside a clip, so a single
+    periodogram of the whole clip smears every line across the band it swept
+    and reads a width and a prominence that belong to no instant
+    (``results/noise_v2/rounds/round2/render_dregon/findings.md``, § "Order-
+    tracked comb prominence").  Here each 8192-point Hann frame (hop 1024 at
+    16 kHz, 1.95 Hz per bin — ``noise_v2_widen_dregon``'s own wide grid) is
+    read at the per-rotor carrier taken from ``rps_render`` AT THAT FRAME'S
+    CENTRE SAMPLE.
 
-    The difference from that module is the input: this reads a RENDER, so the
-    numbers carry the renderer's own line shapes and its noise, where
-    ``tonality`` reads the noise-free expected periodogram of a payload.
+    The per-frame estimator is R4's, through
+    :mod:`experiments.noise_model.tonality`: peak within +-1 bin of ``k f_r``
+    over the MEDIAN of the two-sided ``0.45-0.7 fbar`` annulus, with every
+    rotor's ``k-1 / k / k+1`` lines excluded from the floor
+    (``results/noise_v2/rounds/round4/legacy_truth/anatomy.md``).
+
+    AGGREGATION ORDER, in this order and no other: prominence is computed per
+    ``(frame, mic, rotor, k)``, then MEDIAN over frames, then MEDIAN over mics,
+    then MEAN over rotors.  The two medians are what keep a single loud frame
+    or a single dead microphone out of the number; the rotor mean is R4's
+    (``tonality.payload_stats``' ``curve``).
+
+    A frame whose carriers are too slow for the annulus to hold a bin (a
+    full-flight trajectory visits the ground) is dropped, and ``n_frames``
+    reports how many frames the row was actually read on.
+
+    The difference from :mod:`~experiments.noise_model.tonality` is the input:
+    this reads a RENDER, so the numbers carry the renderer's own line shapes
+    and its noise, where that module reads the noise-free expected periodogram
+    of a payload.
 
     Returns a ``pandas.DataFrame``: one row per clip, ``k=1 .. k=k_max`` in dB,
-    plus the generation, the clip's mean carrier and its RMS.
+    plus the generation, the clip's mean carrier, its RMS and ``n_frames``.
     """
     import pandas as pd
 
     from experiments.noise_model import tonality as TN
 
     items = frames if isinstance(frames, dict) else {"": frames}
+    df_hz = SR / float(n_fft)
     rows: list[dict[str, Any]] = []
     for label, one in items.items():
         meta = dict(one["meta"].items())
-        rps = np.atleast_2d(np.asarray(one["rps"].data, dtype=np.float64))
-        rev = rps.mean(axis=1)
-        power = _mean_periodogram(np.asarray(one["audio"].data, dtype=np.float64), n_fft)
-        geom = TN._geometry(rev, power.shape[1], SR / float(n_fft), k_geom=int(k_max))
-        prom = TN.prominence_db(power, geom, int(k_max))  # (M, R, K)
-        curve = np.nanmean(np.nanmedian(prom, axis=0), axis=0)  # (K,)
+        carrier = np.atleast_2d(np.asarray(one["rps_render"].data, dtype=np.float64))
+        audio = np.asarray(one["audio"].data, dtype=np.float64)
+        power, centres = _stft_power(audio, int(n_fft), int(hop))
+        centres = np.clip(centres, 0, carrier.shape[1] - 1)
+        per_frame: list[np.ndarray] = []
+        for f, centre in enumerate(centres):
+            rev = carrier[:, int(centre)]
+            try:
+                geom = TN._geometry(rev, power.shape[-1], df_hz, k_geom=int(k_max))
+            except ValueError:
+                # The annulus holds no bin at this speed: the rotors are too
+                # slow for a floor to be read between their orders.
+                continue
+            per_frame.append(TN.prominence_db(power[:, f, :], geom, int(k_max)))
+        if not per_frame:
+            raise ValueError(
+                f"{label or meta.get('source')}: no frame of this clip turns fast enough for the "
+                "0.45-0.7 fbar annulus to hold a bin"
+            )
+        stack = np.stack(per_frame)  # (N, M, R, K)
+        curve = np.nanmean(np.nanmedian(np.nanmedian(stack, axis=0), axis=0), axis=0)  # (K,)
         row: dict[str, Any] = {
             "source": str(meta.get("source", label)),
             "generation": str(meta.get("generation", "?")),
-            "fbar_rev_s": float(rev.mean()),
+            "fbar_rev_s": float(carrier.mean()),
             "rms": float(meta.get("rms", float("nan"))),
+            "n_frames": int(stack.shape[0]),
         }
         row.update({f"k={k + 1}": float(curve[k]) for k in range(int(k_max))})
         rows.append(row)
