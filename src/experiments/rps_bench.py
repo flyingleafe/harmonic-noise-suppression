@@ -30,15 +30,17 @@ different file per monitored score::
     rb.show(rb.compare(MODELS, "real", 176, source="live"))
     rb.mae_table(MODELS, "real", [216, 16], source="live")   # rows = models, cols = frames
 
-Predictions come from the dump (``results/rps_dump/<part>/<exp>.npz``) when it
-holds the experiment, else from the checkpoint through ``zoo.load`` on the
-CPU (``source="live"`` forces that), memoised per (experiment, checkpoint,
-readout, part, frame) under ``.cache/rps_bench/preds/``. A live salience
-model is decoded by its OWN decoder (``decode_logits``, as
-``training.validation`` calls it) unless ``readout="peak"`` asks for the
-peak + parabola readout the dumps hold — see :data:`READOUTS`. A part is
-built once per process and pickled under ``.cache/rps_bench/``: a synthetic
-part is a minute of synthesis, the real part an R2 pull.
+A live salience model is decoded by its OWN decoder (``decode_logits``, as
+``training.validation`` calls it); ``readout="peak"`` asks instead for the
+peak + parabola readout the dumps hold — see :data:`READOUTS`. Because the
+dump (``results/rps_dump/<part>/<exp>.npz``) is peak-decoded, it serves
+``readout="peak"`` only: that readout comes from the dump when it holds the
+experiment, every other readout from the checkpoint through ``zoo.load`` on
+the CPU (``source="live"`` forces that either way), memoised per
+(experiment, checkpoint, readout, part, frame) under
+``.cache/rps_bench/preds/``. A part is built once per process and pickled
+under ``.cache/rps_bench/``: a synthetic part is a minute of synthesis, the
+real part an R2 pull.
 
 This module sits in ``experiments`` because it imports across the whole
 stack (zoo, plots, metrics, training, data_processing); nothing in ``src``
@@ -386,7 +388,7 @@ class Readout:
 # ─── Predictions: dump first, checkpoint second ───────────────────────────────
 
 _dumps: dict[tuple[str, str], Any] = {}
-_models: dict[tuple[str, str], Any] = {}
+_models: dict[tuple[str, str, str], Any] = {}
 _readout: Readout | None = None
 
 
@@ -450,7 +452,7 @@ def _live_pred(
 
     if readout not in READOUTS:
         raise ValueError(f"readout must be one of {READOUTS}, got {readout!r}")
-    key = (exp, ckpt)
+    key = (exp, ckpt, str(device))
     if key not in _models:
         _models[key] = zoo.load(exp, ckpt=ckpt, device=device)
     model = _models[key]
@@ -496,15 +498,28 @@ def overlay(
 
     ``rps_pred`` is PIT-aligned to the label and ``meta`` carries the
     experiment, the checkpoint, the readout, the part, the frame index, the
-    flight and mic, and the PIT MAE. ``source`` is ``"auto"`` (the dump when it
-    holds ``exp``, else the checkpoint), ``"dump"`` or ``"live"``; ``ckpt``
-    selects which checkpoint of ``exp`` runs live and ``readout`` how its
-    output becomes rev/s (:data:`READOUTS`). The dump holds one peak-decoded
-    array per experiment and ignores both.
+    flight and mic, and the PIT MAE. ``ckpt`` selects which checkpoint of
+    ``exp`` runs live and ``readout`` how its output becomes rev/s
+    (:data:`READOUTS`).
+
+    The dump holds one PEAK-decoded array per experiment, so it can only
+    serve ``readout="peak"``. ``source`` therefore reads:
+
+    ``"auto"``  the dump when it holds ``exp`` AND ``readout="peak"``, else
+                the checkpoint — a ``"deployed"`` row is never a peak row
+                wearing the deployed label;
+    ``"dump"``  the dump, and ``ValueError`` when ``readout != "peak"``;
+    ``"live"``  the checkpoint, always.
     """
+    if source == "dump" and readout != "peak":
+        raise ValueError(
+            f'source="dump" holds peak-decoded predictions only, but readout={readout!r}; '
+            'pass readout="peak" for the dumped array or source="live"/"auto" to run '
+            f"{exp} through its own decoder"
+        )
     frame = part(part_name)[i]
     pred = None
-    if source in ("auto", "dump"):
+    if source in ("auto", "dump") and readout == "peak":
         pred = _dump_pred(exp, part_name, i, dump_root)
         if pred is None and source == "dump":
             raise FileNotFoundError(f"{dump_root / part_name / exp}.npz")
