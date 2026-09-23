@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -264,3 +265,78 @@ def test_each_bank_entry_is_flown_on_its_own_trajectory_rig(tmp_path):
         assert rig == expected[name], (name, rig)
         seen[name] += 1
     assert set(seen) == set(expected), "both entries must be exercised"
+
+
+# ── the window the pool reports ─────────────────────────────────────────────
+
+
+#: ``sha256`` of ``sample_rps(default_rng(7), 0.5).tobytes()`` for the pool in
+#: :func:`test_flight_window_lift_left_the_draw_order_alone`, pinned at
+#: f91b01b0^ — the value the PRE-lift code produced, read by running that pool
+#: from ``git show f91b01b0^:src/data_processing/...``. The lift moved the
+#: ``rps_scale`` multiply inside ``window_flight``; the draws and their order
+#: had to stay put, because a stream windowing a different slice of a different
+#: flight is a silently different dataset. A deliberate change to the flight
+#: generator moves this too: pin it again, from the commit that changed it.
+PRE_LIFT_FLIGHT_RPS_SHA256 = "29348b083dea9b2d22558917ce70ab9b88956e98da44425d2d73896b9bc2777e"
+
+
+def test_flight_window_lift_left_the_draw_order_alone():
+    """One seed, one short window, one checksum — taken from the pre-lift code.
+
+    ``sample_rps`` draws the speed scale, then (when the cache is cold) a whole
+    flight, then the window's start. Reordering those keeps every range and
+    shape assertion green while handing the stream a different trajectory, so
+    the guard has to be the bytes.
+    """
+    pool = _pool(duration_s=0.5, rps_scale_range=[0.45, 1.2])
+    rps = pool.sample_rps(np.random.default_rng(7), 0.5)
+    assert rps.shape == (4, 8000) and rps.dtype == np.float64
+    assert hashlib.sha256(rps.tobytes()).hexdigest() == PRE_LIFT_FLIGHT_RPS_SHA256
+
+
+def test_last_window_is_the_draw_that_made_the_rps():
+    """``last_window`` reports one window's placement without redrawing it.
+
+    ``notebooks/noise_lab.trajectory("v2_stream")`` shows a window of the arm's
+    own stream beside the numbers that placed it, so those numbers must
+    describe THE returned track: the same slice of the entry's own cached
+    flight, the same multiply, and that flight's own hover, UNSCALED.
+    """
+    pool = _pool(duration_s=0.5, rps_scale_range=[0.45, 1.2])
+    rps = pool.sample_rps(np.random.default_rng(44), 0.5)
+    window = pool.last_window
+    assert window is not None
+    assert window.rps is rps
+
+    cache = pool._flights[None]  # the policy's own trajectory, no entry given
+    t_win = window.start_s + np.arange(rps.shape[1]) / SR
+    slice_at_start = np.stack(
+        [np.interp(t_win, cache.t_low, cache.rps[r]) for r in range(cache.rps.shape[0])]
+    )
+    assert np.array_equal(rps, window.rps_scale * slice_at_start)
+    assert window.hover == pytest.approx(float(cache.hover))
+
+
+def test_last_window_scale_and_start_stay_inside_what_the_policy_allows():
+    """Over many draws: the scale spans its log-uniform range two-sidedly, and
+    every start leaves a whole window inside the cached flight."""
+    pool = _pool(duration_s=0.5, rps_scale_range=[0.45, 1.2])
+    rng = np.random.default_rng(45)
+    scales, starts = [], []
+    for _ in range(64):
+        pool.sample_rps(rng, 0.5)
+        window = pool.last_window
+        cache = pool._flights[None]
+        assert window is not None
+        assert 0.0 <= window.start_s <= float(cache.t_low[-1]) - 0.5
+        scales.append(window.rps_scale)
+        starts.append(window.start_s)
+    scales = np.array(scales)
+    assert scales.min() >= 0.45 and scales.max() <= 1.2
+    # Log-uniform: the geometric midpoint splits the draws, not the arithmetic
+    # one. Only the two-sidedness is asserted — a constant or a one-sided scale
+    # is the failure this catches.
+    below = int(np.sum(scales < np.sqrt(0.45 * 1.2)))
+    assert 16 <= below <= 48, scales
+    assert len(set(starts)) > 32

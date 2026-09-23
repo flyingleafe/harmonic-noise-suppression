@@ -17,10 +17,10 @@ THE FIVE GENERATIONS, as noise sources::
                                   .FIT_PATHS via load_anchor), built with the
                                   donor policy's per-clip dynamics on top
                                   (rig_sampler.entry_params) — i.e. a bank entry
-                                  at ZERO perturbation, the MEASURED rig each
-                                  legacy bank was drawn around and what the
-                                  point-preset arm rendered;
-                                  legacy_fit_names() lists all six
+                                  at ZERO perturbation, an ACOUSTIC build of the
+                                  MEASURED rig each legacy bank was drawn
+                                  around, not a replay of the point-preset arm's
+                                  stream; legacy_fit_names() lists all six
     LegacyBank("easy", 0)         entry 0 of data/rig_banks/rig_easy_n2048.json
                                   — the exact preset bank the `rig_easy` /
                                   `rig_hard` arms trained on
@@ -1211,9 +1211,13 @@ class LegacyFit(_LegacySource):
     .yaml``, source :data:`LEGACY_FIT_DONOR_INDEX` — 1 for the Michael's fits,
     0 for the DREGON ones, the ``--dynamics`` pairing of the bank builder's
     header) with the fit's identity written over it, the fitted ``gamma_slope``
-    crossing into the draw as ``fixed_shaft_jitter_rps``.  This is the rig the
-    point-preset run scored (``docs/experiments/rig-sampler-transfer-pair.md``)
-    and the thing every bank entry is a perturbation OF.
+    crossing into the draw as ``fixed_shaft_jitter_rps``.  That is an ACOUSTIC
+    construction — the zero-perturbation bank entry every bank entry is a
+    perturbation OF — and NOT a replay of the point-preset run
+    (``docs/experiments/rig-sampler-transfer-pair.md``), whose stream carried
+    its own exponent override, per-window hover / gamma scaling and
+    trajectories on top; only :class:`LegacyBank` is exact for the runs that
+    scored.
 
     ``"none"`` — :func:`experiments.stochastic_fit.stage2.params_from_export`
     alone: the anchor as its own renderer (``stage2.render_from_export``) plays

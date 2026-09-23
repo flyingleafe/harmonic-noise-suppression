@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from typing import Any
@@ -997,3 +998,96 @@ def test_coherent_share_lands_at_the_level_the_spectrum_asks_for():
         return float(10.0 * np.log10(spectrum[line].sum() / spectrum[floor_band].sum()))
 
     assert ratio_db(realized) == pytest.approx(ratio_db(model), abs=2.0)
+
+
+# ── the window the pool reports ─────────────────────────────────────────────
+
+
+#: ``sha256`` of ``sample_rps(default_rng(7), 0.5).tobytes()`` for the pool in
+#: :func:`test_flight_window_lift_left_the_draw_order_alone`, pinned at
+#: f91b01b0^ — i.e. the value the PRE-lift code produced, read by running that
+#: pool from ``git show f91b01b0^:src/data_processing/...``. The lift moved the
+#: ``rps_scale`` multiply inside ``window_flight``; the draws it makes, and
+#: their order, had to stay exactly where they were, because a training stream
+#: reading a different slice of a different flight is a silently different
+#: dataset. Any deliberate change to the flight generator moves this too: pin
+#: it again, from the commit that changed it.
+PRE_LIFT_FLIGHT_RPS_SHA256 = "29348b083dea9b2d22558917ce70ab9b88956e98da44425d2d73896b9bc2777e"
+
+
+def _flight_pool(**overrides: Any) -> srn.StochasticNoisePool:
+    cfg: dict[str, Any] = dict(
+        sample_rate=SR,
+        duration_s=0.5,
+        n_harmonics=20,
+        n_mics=1,
+        rps_kind="full_flight",
+        rps_scale_range=(0.45, 1.2),
+    )
+    cfg.update(overrides)
+    return srn.StochasticNoisePool(**cfg)
+
+
+def test_flight_window_lift_left_the_draw_order_alone():
+    """One seed, one short window, one checksum — taken from the pre-lift code.
+
+    ``sample_rps`` draws the speed scale, then (when the cache is cold) a whole
+    flight, then the window's start. Reordering any of those keeps every
+    assertion about ranges and shapes green while handing the stream a
+    different trajectory, so the guard has to be the bytes.
+    """
+    rps = _flight_pool().sample_rps(np.random.default_rng(7), 0.5)
+    assert rps.shape == (4, 8000) and rps.dtype == np.float64
+    assert hashlib.sha256(rps.tobytes()).hexdigest() == PRE_LIFT_FLIGHT_RPS_SHA256
+
+
+def test_last_window_is_the_draw_that_made_the_rps():
+    """``last_window`` reports one window's placement without redrawing it.
+
+    ``notebooks/noise_lab.trajectory("legacy_stream")`` shows a window of the
+    arm's own stream beside the numbers that placed it, so those numbers have
+    to describe THE returned track: the same slice, the same multiply, and the
+    flight's own hover (its 90th percentile) UNSCALED, which is what sizes a
+    comb against the aircraft rather than against a fixed 80 rev/s.
+    """
+    pool = _flight_pool()
+    rng = np.random.default_rng(41)
+    rps = pool.sample_rps(rng, 0.5)
+    window = pool.last_window
+    assert window is not None
+    assert window.rps is rps
+
+    cache = pool._flight  # noqa: SLF001 - the pool's own cached flight
+    assert cache is not None
+    t_win = window.start_s + np.arange(rps.shape[1]) / SR
+    slice_at_start = np.stack(
+        [np.interp(t_win, cache.t_low, cache.rps[r]) for r in range(cache.rps.shape[0])]
+    )
+    assert np.array_equal(rps, window.rps_scale * slice_at_start)
+    assert window.hover == pytest.approx(float(cache.hover))
+    # The comb is sized against the SCALED hover, and that is the pool's own.
+    assert window.rps_scale * window.hover == pytest.approx(pool._hover)  # noqa: SLF001
+
+
+def test_last_window_scale_and_start_stay_inside_what_the_policy_allows():
+    """Over many draws: the scale spans its log-uniform range two-sidedly, and
+    every start leaves a whole window inside the cached flight."""
+    pool = _flight_pool()
+    rng = np.random.default_rng(42)
+    scales, starts = [], []
+    for _ in range(64):
+        pool.sample_rps(rng, 0.5)
+        window = pool.last_window
+        cache = pool._flight  # noqa: SLF001 - the flight the window came from
+        assert window is not None and cache is not None
+        assert 0.0 <= window.start_s <= float(cache.t_low[-1]) - 0.5
+        scales.append(window.rps_scale)
+        starts.append(window.start_s)
+    scales = np.array(scales)
+    assert scales.min() >= 0.45 and scales.max() <= 1.2
+    # Log-uniform: the geometric midpoint splits the draws, not the arithmetic
+    # one. Only the two-sidedness is asserted — a constant or a one-sided scale
+    # is the failure this catches.
+    below = int(np.sum(scales < np.sqrt(0.45 * 1.2)))
+    assert 16 <= below <= 48, scales
+    assert len(set(starts)) > 32

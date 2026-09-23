@@ -353,3 +353,58 @@ def test_e_pool_reuses_one_flight_for_flight_reuse_windows(fits_tree: Path):
     assert rigs[0] == rigs[1] == rigs[2]
     assert rigs[3] == rigs[4] == rigs[5]
     assert rigs[6] == rigs[7] == rigs[8]
+
+
+# ── the window a flight is drawn into ────────────────────────────────────────
+
+
+def _saw_flight(n: int = 2000, n_rotors: int = 4) -> np.ndarray:
+    """A flight whose value pins its own time: a ramp, offset per rotor."""
+    ramp = np.linspace(0.0, 100.0, n)
+    return np.stack([ramp + 3.0 * r for r in range(n_rotors)])
+
+
+def test_f_window_is_the_slice_it_reports_times_the_scale_it_reports():
+    """``FlightWindow`` carries the numbers that placed it, and they are TRUE.
+
+    Before the window became a value (f91b01b0) a pool computed
+    ``scale * window_flight(...)`` inline and kept nothing. The lift must not
+    change the arithmetic: ``rps`` is still the flight interpolated at
+    ``start_s`` onto the audio grid, multiplied by ``rps_scale`` — bit for bit,
+    since a stopped rotor staying stopped is an exact-multiply claim.
+    """
+    flight, fs, sr, dur, scale = _saw_flight(), 200.0, 16_000, 0.5, 0.7
+    cache = tm.make_flight_cache(flight, fs)
+    window = tm.window_flight(cache, np.random.default_rng(11), dur, sr, rps_scale=scale)
+
+    t_win = window.start_s + np.arange(int(round(dur * sr))) / sr
+    pre_lift = scale * np.stack(
+        [np.interp(t_win, cache.t_low, flight[r]) for r in range(flight.shape[0])]
+    )
+    assert np.array_equal(window.rps, pre_lift)
+    assert window.rps_scale == scale
+    assert window.hover == pytest.approx(float(np.percentile(flight, 90.0)))
+    # The start is inside the flight's usable span: a whole window fits after it.
+    assert 0.0 <= window.start_s <= float(cache.t_low[-1]) - dur
+
+
+def test_f_an_unscaled_window_is_the_flight_untouched():
+    """``rps_scale`` defaults to an identity that is not a multiply."""
+    cache = tm.make_flight_cache(_saw_flight(), 200.0)
+    window = tm.window_flight(cache, np.random.default_rng(12), 0.5, 16_000)
+    t_win = window.start_s + np.arange(8_000) / 16_000
+    assert window.rps_scale == 1.0
+    assert np.array_equal(
+        window.rps, np.stack([np.interp(t_win, cache.t_low, cache.rps[r]) for r in range(4)])
+    )
+
+
+def test_f_the_start_is_uniform_over_the_flight_and_not_a_window_counter():
+    """Successive windows are placed independently, not walked along the flight."""
+    cache = tm.make_flight_cache(_saw_flight(), 200.0)
+    rng = np.random.default_rng(13)
+    span = float(cache.t_low[-1]) - 1.0
+    starts = np.array([tm.window_flight(cache, rng, 1.0, 16_000).start_s for _ in range(64)])
+    assert starts.min() >= 0.0 and starts.max() <= span
+    assert np.any(starts < 0.25 * span) and np.any(starts > 0.75 * span)
+    assert not np.all(np.diff(starts) > 0.0)
