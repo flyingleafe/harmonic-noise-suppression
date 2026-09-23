@@ -1969,6 +1969,13 @@ class StochasticNoisePool:
             self._check_bank()
         self._base_seed = int(seed)
         self._flight: trajectory_model.FlightCache | None = None
+        # The window :meth:`sample_rps` last took from a cached flight — its
+        # start, its speed scale and the flight's own hover. A stream never
+        # reads it; it is how a caller that wants to REPORT one window's draw
+        # (notebooks/noise_lab.trajectory("legacy_stream")) gets the numbers
+        # without redrawing them. ``None`` until a flight window is drawn, and
+        # reset to ``None`` by a draw that windows no flight.
+        self.last_window: trajectory_model.FlightWindow | None = None
         # Interface parity with the other pools: the analytic model has no
         # geometry, and the frame carries placeholders.
         self.mic_pos = np.zeros((self.n_mics, 3), dtype=np.float64)
@@ -2130,6 +2137,7 @@ class StochasticNoisePool:
             else self.aggressiveness
         )
         if self.rps_kind not in trajectory_model.FLIGHT_KINDS:
+            self.last_window = None
             blend = float(rng.uniform(*self.drone_profile_range))
             return (
                 scale
@@ -2170,8 +2178,10 @@ class StochasticNoisePool:
             )
         self._flight.uses += 1
         self._hover = max(scale * float(self._flight.hover), 1.0)
-        window = trajectory_model.window_flight(self._flight, rng, duration_s, self.sample_rate)
-        return scale * window
+        self.last_window = trajectory_model.window_flight(
+            self._flight, rng, duration_s, self.sample_rate, rps_scale=scale
+        )
+        return self.last_window.rps
 
     def _draw_level(self, rng: np.random.Generator) -> float:
         """One reference level, log-uniform over the configured range."""

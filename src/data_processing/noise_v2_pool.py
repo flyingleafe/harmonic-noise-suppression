@@ -348,6 +348,12 @@ class NoiseV2Pool:
                 self._traj[rig] = trajectory_model.build_from_config(
                     dict(self._rps_cfg, rigs={rig: 1.0})
                 )
+        # The window :meth:`sample_rps` last took from a cached flight — its
+        # start, its speed scale and the flight's own hover. A stream never
+        # reads it; it is how a caller that wants to REPORT one window's draw
+        # (notebooks/noise_lab.trajectory("v2_stream")) gets the numbers
+        # without redrawing them.
+        self.last_window: trajectory_model.FlightWindow | None = None
         # Interface parity with the other pools: the fitted model has no
         # geometry, and the frame carries placeholders.
         self.mic_pos = np.zeros((self.n_mics, 3), dtype=np.float64)
@@ -517,8 +523,10 @@ class NoiseV2Pool:
             cached = trajectory_model.make_flight_cache(self._new_flight(rng, key), self.flight_fs)
             self._flights[key] = cached
         cached.uses += 1
-        window = trajectory_model.window_flight(cached, rng, duration_s, self.sample_rate)
-        return scale * window
+        self.last_window = trajectory_model.window_flight(
+            cached, rng, duration_s, self.sample_rate, rps_scale=scale
+        )
+        return self.last_window.rps
 
     def _new_flight(self, rng: np.random.Generator, key: str | None = None) -> np.ndarray:
         source = self._traj.get(key)

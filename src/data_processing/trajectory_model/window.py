@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["FlightCache", "make_flight_cache", "window_flight"]
+__all__ = ["FlightCache", "FlightWindow", "make_flight_cache", "window_flight"]
 
 
 @dataclass
@@ -64,18 +64,53 @@ def make_flight_cache(
     )
 
 
+@dataclass(frozen=True)
+class FlightWindow:
+    """One window drawn from a cached flight, with the numbers that placed it.
+
+    ``rps`` is what the renderer consumes; the other three say WHERE in the
+    flight it came from and how it was scaled, which is what a caller needs to
+    report a window (``notebooks/noise_lab.trajectory("legacy_stream")``) or to
+    size the comb against the aircraft's own hover.
+    """
+
+    #: ``(R, T)`` audio-rate rotor speeds, ``rps_scale`` already applied.
+    rps: np.ndarray
+    #: Start of the window inside the flight, in seconds.
+    start_s: float
+    #: The multiplier applied to the whole window.
+    rps_scale: float
+    #: The flight's own hover speed (``FlightCache.hover``), UNSCALED.
+    hover: float
+
+
 def window_flight(
-    cache: FlightCache, rng: np.random.Generator, duration_s: float, sample_rate: int
-) -> np.ndarray:
-    """``(R, T)`` audio-rate rotor speeds: a uniform slice of the cached flight.
+    cache: FlightCache,
+    rng: np.random.Generator,
+    duration_s: float,
+    sample_rate: int,
+    *,
+    rps_scale: float = 1.0,
+) -> FlightWindow:
+    """A uniform slice of the cached flight, at the audio rate.
 
     The start is uniform over the flight's usable span, so the window's phase
     is not a function of how many windows were drawn before it, and the low-rate
-    track is interpolated per rotor onto the audio grid.
+    track is interpolated per rotor onto the audio grid. ``rps_scale``
+    multiplies the result EXACTLY — a stopped rotor stays stopped and every
+    other speed moves with its own comb — and is the pool's per-window speed
+    augmentation, applied here so the window and the number that scaled it are
+    reported together.
     """
     n_samples = int(round(duration_s * sample_rate))
     flight, t_low = cache.rps, cache.t_low
     max_start = max(0.0, float(t_low[-1]) - duration_s)
     start_s = float(rng.uniform(0.0, max_start)) if max_start > 0 else 0.0
     t_win = start_s + np.arange(n_samples) / sample_rate
-    return np.stack([np.interp(t_win, t_low, flight[r]) for r in range(flight.shape[0])])
+    window = np.stack([np.interp(t_win, t_low, flight[r]) for r in range(flight.shape[0])])
+    return FlightWindow(
+        rps=window * float(rps_scale) if rps_scale != 1.0 else window,
+        start_s=start_s,
+        rps_scale=float(rps_scale),
+        hover=float(cache.hover),
+    )

@@ -47,6 +47,17 @@ NOISE MODEL and nothing else.
     line_stats(frames)                # the R4 order prominence, as a table
     tune(sources[0], traj)            # the sliders, on one source
 
+THE TRAJECTORY KINDS (:data:`TRAJ_KINDS`).  The fitted trajectory model of any
+``rps-traj-fits`` rig or of the hyperprior (``"fitted"``); a real recording's
+telemetry (``"real"`` — :func:`real_recordings` lists what each published
+frames dataset offers); the hand-written ``rps_synthesis`` scaffold
+(``"full_flight"`` / ``"intermittent"`` / ``"ou"``); and ONE WINDOW OF A
+TRAINING ARM'S OWN STREAM — ``"legacy_stream"`` for the ``rig_easy`` /
+``rig_hard`` pair and ``"v2_stream"`` for their v2 counterparts, each drawn by
+that arm's own pool through the very method the stream calls, so the speed
+population a transfer result was trained on can be rendered here as it was
+trained (:func:`_stream_rps` says exactly what is shared and what is not).
+
 THE SLIDERS.  ``stochastic_noise_lab.Lab`` drove an ipywidgets panel from
 inside the module, and :func:`tune` keeps it: the same amplitude means, wander
 amplitudes and times, harmonic coherence, floor-colour wander and clip length,
@@ -217,8 +228,24 @@ COMB_OFFSET_RANGE = (-12.0, 12.0, 0.25)
 #: Published frames datasets a ``"real"`` trajectory can be pulled from.
 DATASETS = ("DREGON-frames", "michaels-frames")
 
+#: The training arms whose TRAJECTORY STREAM :func:`trajectory` can replay, by
+#: kind: the legacy transfer pair (best real MAE 5.72 / 5.37 rev/s) and its v2
+#: counterparts (7.94 / 7.06).  The first of each is that kind's default.
+STREAM_POLICIES = {
+    "legacy_stream": ("rig_easy_5050", "rig_hard_5050"),
+    "v2_stream": ("noise_v2_easy_5050", "noise_v2_hard_5050"),
+}
+
 #: Trajectory kinds :func:`trajectory` understands.
-TRAJ_KINDS = ("fitted", "real", "full_flight", "intermittent", "ou")
+TRAJ_KINDS = (
+    "fitted",
+    "real",
+    "full_flight",
+    "intermittent",
+    "ou",
+    "legacy_stream",
+    "v2_stream",
+)
 
 
 def _repo_sha() -> str:
@@ -611,7 +638,7 @@ def _real_rps(
 
     if not recording:
         raise ValueError(
-            "the 'real' trajectory needs a recording id — recordings(dataset) lists them"
+            "the 'real' trajectory needs a recording id — real_recordings(dataset) lists them"
         )
     exc = real_slice(dataset, recording, float(offset_s), float(duration_s), labels=labels)
     rps = np.asarray(exc.rps, dtype=np.float64)
@@ -626,11 +653,156 @@ def _real_rps(
     return rps, float(SR), meta
 
 
-def recordings(dataset: str) -> list[str]:
-    """Recording ids of a published frames dataset that carry a rotor track."""
-    from generator_lab import recordings as _recordings
+def real_recordings(dataset: str) -> Any:
+    """The recordings a ``"real"`` trajectory can be drawn from, as a table.
 
-    return _recordings(dataset)
+    One row per recording that carries BOTH audio and a rotor track — the
+    filter :func:`generator_lab.recordings` applies, and for its reason: a
+    DREGON clean-source capture (``clean_chirps_45_-15_1.2``) has audio and no
+    telemetry, so it cannot drive a generation.  The published frames stream
+    (:func:`data_processing.streams.iter_published_frames`, the access
+    ``generator_lab.recordings`` is built on) is read ONCE and only SCALARS are
+    kept, so listing holds one recording at a time and no audio is retained.
+
+    Columns: ``duration_s``; ``rps_tracks``, which of
+    :data:`data_processing.frames.PUBLISHED_RPS_KEYS` the recording carries
+    (the FIRST is the one :func:`generator_lab.real_slice` drives with);
+    ``refined``, whether an ``rps_refined`` sidecar track rides along; and
+    ``regime``, the cheap hint the frame's own meta already holds — DREGON's
+    ``flight_type`` and ``room``, Michael's split (its two flights carry
+    neither).
+    """
+    import pandas as pd
+
+    from data_processing.frames import PUBLISHED_RPS_KEYS, get_meta
+    from data_processing.streams import iter_published_frames
+
+    rows: list[dict[str, Any]] = []
+    for frame in iter_published_frames(str(dataset), None):
+        tracks = [key for key in PUBLISHED_RPS_KEYS if key in frame]
+        if "audio" not in frame or not tracks:
+            continue
+        hint = " ".join(
+            str(get_meta(frame, key, "") or "") for key in ("flight_type", "room")
+        ).strip()
+        rows.append(
+            {
+                "recording": str(get_meta(frame, "recording_id", "?")),
+                "duration_s": round(float((frame.t_end or 0.0) - (frame.t_start or 0.0)), 1),
+                "rps_tracks": " ".join(tracks),
+                "refined": "rps_refined" in frame,
+                "regime": hint or str(get_meta(frame, "split", "") or ""),
+            }
+        )
+        del frame
+    return pd.DataFrame(rows).set_index("recording")
+
+
+@lru_cache(maxsize=8)
+def _policy_noise_source(policy: str) -> dict[str, Any]:
+    """The first rotor-noise source of one training arm's policy, as a plain dict.
+
+    The legacy arms carry the SAME source twice (weights 0.4 + 0.4, two render
+    pools over one distribution; they differ only in ``mic_gain_db``, which the
+    trajectory never sees), so the first one states the arm's draw.
+    """
+    import yaml
+
+    path = ROOT / "conf" / "online_mix" / f"{policy}.yaml"
+    cfg = yaml.safe_load(path.read_text())
+    for source in cfg["sources"]["noise"]:
+        if str(source.get("kind")) in ("stochastic", "noise_v2"):
+            return dict(source)
+    raise ValueError(f"{path}: no stochastic / noise_v2 source to draw a trajectory from")
+
+
+def _stream_rps(
+    kind: str,
+    *,
+    seed: int,
+    duration_s: float,
+    policy: str | None = None,
+) -> tuple[np.ndarray, float, dict[str, Any]]:
+    """ONE window of a TRAINING ARM's trajectory stream, drawn by the arm's own pool.
+
+    The arms in :data:`STREAM_POLICIES` are built here from their committed
+    policy file and asked for one window through the very method the training
+    stream calls — :meth:`data_processing.stochastic_rotor_noise.
+    StochasticNoisePool.sample_rps` for the legacy pair and
+    :meth:`data_processing.noise_v2_pool.NoiseV2Pool.sample_rps` for the v2
+    pair — so the draw is the stream's code, not a restatement of it: the
+    log-uniform ``rps_scale``, the whole-flight generation
+    (``rps_synthesis.generate_full_flight`` for the legacy arms, a
+    ``trajectory_model.FittedTrajectorySource`` flight with the policy's
+    ``mean_shift`` / ``rps_max`` for the v2 arms) and the uniform window
+    placement (``trajectory_model.window_flight``) all run as they do in
+    training, in the same order, off one ``default_rng(seed)``.
+
+    TWO THINGS ARE NOT THE STREAM'S, both of them stated rather than hidden.
+    (1) The RNG: a training window's generator is derived from the policy's
+    ``base_seed`` and the sample index, here it is ``default_rng(seed)`` — the
+    DISTRIBUTION is the stream's, one seed is not one particular training
+    window.  (2) A fresh pool per call means the window is always the FIRST of
+    a fresh flight.  ``rps_scale`` and the window start are drawn per window
+    and independently in the stream too, so a single window's distribution is
+    exact; what one call cannot show is two windows SHARING a flight
+    (``flight_reuse: 32``).
+
+    The legacy pool is built WITHOUT its ``preset_bank``: the bank entry is
+    drawn after the trajectory (:meth:`StochasticNoisePool.render`) and cannot
+    touch it, and skipping it saves parsing 24 MB of rig fits.  The v2 entry is
+    drawn FIRST and DOES touch the trajectory — it names the ``traj_rig`` whose
+    fitted flight the window is taken from — so the v2 bank is loaded, from the
+    local copy in :data:`V2_BANKS` (byte-for-byte the file the policy pins
+    inside ``dload:noise-v2-banks``) so the notebook needs no fetch.
+
+    ``amp_rps_ref`` follows the trajectory on the LEGACY arms only: their pool
+    sets the window's reference speed to ``rps_scale * flight_hover`` and
+    scales ``gamma0`` / ``shaft_jitter_rps`` with it.  A v2 fit is stated
+    against the fixed ``noise_model.constants.AMP_RPS_REF``, so there the
+    window's hover leaves the render alone.
+    """
+    arms = STREAM_POLICIES[kind]
+    name = str(policy or arms[0])
+    if name not in arms:
+        raise ValueError(f"{kind!r} replays {list(arms)}; asked for {name!r}")
+    cfg = _policy_noise_source(name)
+    rng = np.random.default_rng(int(seed))
+    entry_name: str | None = None
+    traj_rig: str | None = None
+    if kind == "legacy_stream":
+        from data_processing.stochastic_rotor_noise import StochasticNoisePool
+
+        cfg.pop("preset_bank", None)
+        pool: Any = StochasticNoisePool.from_config(cfg, duration_s=duration_s, sample_rate=SR)
+        rps = pool.sample_rps(rng, float(duration_s))
+    else:
+        from data_processing.noise_v2_pool import NoiseV2Pool
+
+        cfg["preset_bank"] = str(ROOT / V2_BANKS["hard" if "hard" in name else "easy"])
+        pool = NoiseV2Pool.from_config(cfg, duration_s=duration_s, sample_rate=SR)
+        entry = pool.entries[int(rng.integers(len(pool.entries)))]
+        rps = pool.sample_rps(rng, float(duration_s), entry)
+        entry_name, traj_rig = str(entry.name), pool.traj_key(entry)
+    window = pool.last_window
+    meta: dict[str, Any] = {
+        "traj_rig": traj_rig,
+        "policy": name,
+        "policy_path": f"conf/online_mix/{name}.yaml",
+        "rps_scale_drawn": float(window.rps_scale),
+        "rps_scale_range": [float(v) for v in pool.rps_scale_range],
+        "window_start_s": float(window.start_s),
+        "flight_hover_rev_s": float(window.hover),
+        "flight_fs": float(pool.flight_fs),
+        "flight_reuse": int(pool.flight_reuse),
+        "stream_entry": entry_name,
+        "amp_rps_ref": (
+            max(float(window.rps_scale) * float(window.hover), 1.0)
+            if kind == "legacy_stream"
+            else None
+        ),
+    }
+    return np.asarray(rps, dtype=np.float64), float(SR), meta
 
 
 def _traj_frame(rps: np.ndarray, meta: dict[str, Any]) -> td.Frame:
@@ -671,7 +843,11 @@ def trajectory(
         (any name of :func:`traj_rig_names`, or ``"posterior"``),
         ``mean_shift=``, ``mean_scale=``, ``full_flight=``.
         ``"real"`` — a real recording's telemetry; takes ``dataset=``,
-        ``recording=``, ``offset_s=``, ``labels=``.
+        ``recording=`` (:func:`real_recordings` lists them), ``offset_s=``,
+        ``labels=``.
+        ``"legacy_stream"`` / ``"v2_stream"`` — one window of a TRAINING ARM's
+        own trajectory stream, drawn by that arm's pool (:func:`_stream_rps`);
+        take ``policy=``, one of :data:`STREAM_POLICIES`.
         ``"full_flight"`` / ``"intermittent"`` / ``"ou"`` — the hand-written
         scaffold of :mod:`data_processing.rps_synthesis`; take
         ``aggressiveness=``.
@@ -699,6 +875,8 @@ def trajectory(
         low, fs, meta = _fitted_rps(seed=seed, duration_s=duration_s, **kw)
     elif key == "real":
         low, fs, meta = _real_rps(duration_s=duration_s, **kw)
+    elif key in STREAM_POLICIES:
+        low, fs, meta = _stream_rps(key, seed=seed, duration_s=duration_s, **kw)
     else:
         low, fs, meta, start = _scaffold_rps(key, seed=seed, duration_s=duration_s, **kw)
 
@@ -736,7 +914,30 @@ def describe_traj(traj: td.Frame) -> None:
         f"(mean {float(m['rps_mean']):.1f})"
     )
     if kind == "real":
-        print(f"  recording  : {m['dataset']} / {m['slice_label']}")
+        print(
+            f"  recording  : {m['dataset']} / {m['recording']}  "
+            f"(+{float(m['offset_s']):.1f} s, labels {m['labels']})"
+        )
+        print(f"  slice      : {m['slice_label']}")
+        return
+    if kind in STREAM_POLICIES:
+        lo, hi = (float(v) for v in m["rps_scale_range"])
+        print(f"  arm        : {m['policy']}  ({m['policy_path']})")
+        print(
+            f"  window     : rps_scale {float(m['rps_scale_drawn']):.3f} of [{lo:.2f}, {hi:.2f}]"
+            f"   start {float(m['window_start_s']):.1f} s of a flight at "
+            f"{float(m['flight_hover_rev_s']):.1f} rev/s hover"
+            f"   (flight_fs {float(m['flight_fs']):.0f}, flight_reuse "
+            f"{int(m['flight_reuse'])})"
+        )
+        if m.get("stream_entry"):
+            rig = m.get("traj_rig") or "the policy's own rig mixture"
+            print(f"  bank entry : {m['stream_entry']}  flown on {rig}")
+        if m.get("amp_rps_ref") is not None:
+            print(
+                f"  amp_rps_ref: {float(m['amp_rps_ref']):.1f} rev/s "
+                "(the window's own hover — what the legacy renderer references)"
+            )
         return
     if kind != "fitted":
         print(f"  generator  : rps_synthesis, aggressiveness {float(m['aggressiveness']):.2f}")
@@ -2097,6 +2298,7 @@ __all__ = [
     "RIGS",
     "RPS_PLOT_SR",
     "SR",
+    "STREAM_POLICIES",
     "TRAJ_FITS",
     "TRAJ_FS",
     "TRAJ_KINDS",
@@ -2117,7 +2319,7 @@ __all__ = [
     "model_vs_realised",
     "player",
     "players",
-    "recordings",
+    "real_recordings",
     "render",
     "render_all",
     "show",

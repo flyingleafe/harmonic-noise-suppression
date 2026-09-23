@@ -72,6 +72,7 @@ from data_processing.trajectory_model.source import (
 )
 from data_processing.trajectory_model.window import (
     FlightCache,
+    FlightWindow,
     make_flight_cache,
     window_flight,
 )
@@ -98,6 +99,7 @@ __all__ = [
     "FitBundle",
     "FittedTrajectorySource",
     "FlightCache",
+    "FlightWindow",
     "NewFit",
     "Params",
     "Posterior",
