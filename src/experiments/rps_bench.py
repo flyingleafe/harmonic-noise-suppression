@@ -28,14 +28,17 @@ different file per monitored score::
     MODELS = {"legacy easy": ("rig_easy_scv2_unified", "best_real_overall")}
     rb.frames_table("real")                            # pick a frame by rig/regime
     rb.show(rb.compare(MODELS, "real", 176, source="live"))
-    rb.mae_table(MODELS, "real", [176, 16])            # rows = models, cols = frames
+    rb.mae_table(MODELS, "real", [216, 16], source="live")   # rows = models, cols = frames
 
 Predictions come from the dump (``results/rps_dump/<part>/<exp>.npz``) when it
 holds the experiment, else from the checkpoint through ``zoo.load`` on the
 CPU (``source="live"`` forces that), memoised per (experiment, checkpoint,
-part, frame) under ``.cache/rps_bench/preds/``. A part is built once per
-process and pickled under ``.cache/rps_bench/``: a synthetic part is a minute
-of synthesis, the real part an R2 pull.
+readout, part, frame) under ``.cache/rps_bench/preds/``. A live salience
+model is decoded by its OWN decoder (``decode_logits``, as
+``training.validation`` calls it) unless ``readout="peak"`` asks for the
+peak + parabola readout the dumps hold — see :data:`READOUTS`. A part is
+built once per process and pickled under ``.cache/rps_bench/``: a synthetic
+part is a minute of synthesis, the real part an R2 pull.
 
 This module sits in ``experiments`` because it imports across the whole
 stack (zoo, plots, metrics, training, data_processing); nothing in ``src``
@@ -74,6 +77,7 @@ from zoo.cache import REPO_ROOT
 
 __all__ = [
     "PARTS",
+    "READOUTS",
     "REGIME_THRESHOLDS",
     "ModelSpec",
     "Readout",
@@ -407,31 +411,70 @@ def _dump_pred(exp: str, part_name: str, i: int, dump_root: Path) -> np.ndarray 
     return z["pred"][i, :, : z["n_t"][i]].astype(np.float64)
 
 
-def _live_pred(exp: str, frame: td.Frame, device: str, ckpt: str = "best") -> np.ndarray:
+#: How a live salience model's output becomes rev/s. ``"deployed"`` is the
+#: model's OWN decoder — ``decode_logits``, shared-map tracking or per-layer
+#: CRF — called exactly as ``training.validation._salience_readout`` calls it,
+#: so a row is the number the campaign's checkpoint selection and
+#: ``scripts/_regime_decomp.py`` were measured on. ``"peak"`` is
+#: :class:`Readout`'s peak + parabola, which is what the ``rps_mae`` monitor
+#: metric and the dumps under ``results/rps_dump/`` hold. A regressor emits
+#: ``rps_pred`` and reads the same either way.
+READOUTS = ("deployed", "peak")
+
+
+def _deployed_speeds(model: Any, pred: td.Frame, frame: td.Frame) -> np.ndarray:
+    """``(R, T)`` rev/s through the model's deployed decoder."""
+    if "rps_pred" in pred:
+        return np.asarray(get_array(pred, "rps_pred"), dtype=np.float64)
+    if "salience" not in pred:
+        raise KeyError(f"no rps_pred or salience in {list(pred.keys())}")
+    decode = getattr(model.model, "decode_logits", None)
+    if decode is None:
+        raise AttributeError(
+            f"{type(model.model).__name__} emits salience but has no decode_logits; "
+            'use readout="peak"'
+        )
+    logits = torch.as_tensor(get_array(pred, "salience")).unsqueeze(0)  # (1, R*G, T)
+    n_samples = int(np.asarray(get_array(frame, "mixture")).shape[-1])
+    with torch.no_grad():
+        speeds = decode(logits.to(model.device), n_samples)  # (1, R, T_stft)
+    return np.asarray(speeds[0].detach().cpu(), dtype=np.float64)
+
+
+def _live_pred(
+    exp: str, frame: td.Frame, device: str, ckpt: str = "best", readout: str = "deployed"
+) -> np.ndarray:
     """One model's raw ``(R, T)`` speeds for one frame, from its checkpoint."""
     global _readout
     import zoo  # heavy (Hydra + torch); only when a checkpoint is really needed
 
+    if readout not in READOUTS:
+        raise ValueError(f"readout must be one of {READOUTS}, got {readout!r}")
     key = (exp, ckpt)
     if key not in _models:
         _models[key] = zoo.load(exp, ckpt=ckpt, device=device)
+    model = _models[key]
+    pred = model(frame)
+    if readout == "deployed":
+        return _deployed_speeds(model, pred, frame)
     if _readout is None:
         _readout = Readout()
-    return _readout(_models[key](frame), frame)[0].astype(np.float64)
+    return _readout(pred, frame)[0].astype(np.float64)
 
 
 def _cached_live_pred(
-    exp: str, part_name: str, i: int, frame: td.Frame, device: str, ckpt: str
+    exp: str, part_name: str, i: int, frame: td.Frame, device: str, ckpt: str, readout: str
 ) -> np.ndarray:
-    """:func:`_live_pred`, memoised on disk per (experiment, checkpoint, part, frame).
+    """:func:`_live_pred`, memoised per (experiment, checkpoint, readout, part, frame).
 
-    A CPU forward pass over 8 s is seconds to a minute; a notebook that changes
-    one frame should not pay for the models it already ran.
+    A CPU forward pass over 8 s is seconds, the CRF decode behind
+    ``readout="deployed"`` is tens of seconds; a notebook that changes one
+    frame should not pay for the models it already ran.
     """
-    disk = PRED_CACHE / part_name / f"{exp}__{ckpt}__{i:05d}.npy"
+    disk = PRED_CACHE / part_name / f"{exp}__{ckpt}__{readout}__{i:05d}.npy"
     if disk.is_file():
         return np.load(disk).astype(np.float64)
-    pred = _live_pred(exp, frame, device, ckpt)
+    pred = _live_pred(exp, frame, device, ckpt, readout)
     disk.parent.mkdir(parents=True, exist_ok=True)
     np.save(disk, pred.astype(np.float32))
     return pred
@@ -445,17 +488,19 @@ def overlay(
     source: str = "auto",
     device: str = "cpu",
     ckpt: str = "best",
+    readout: str = "deployed",
     cache: bool = True,
     dump_root: Path = DUMP_ROOT,
 ) -> td.Frame:
     """One model on one frame: ``audio`` + ``rps`` (label) + ``rps_pred``, ready for ``dwym``.
 
     ``rps_pred`` is PIT-aligned to the label and ``meta`` carries the
-    experiment, the checkpoint, the part, the frame index, the flight and mic,
-    and the PIT MAE. ``source`` is ``"auto"`` (the dump when it holds ``exp``,
-    else the checkpoint), ``"dump"`` or ``"live"``; ``ckpt`` selects which
-    checkpoint of ``exp`` runs live (the dump has one per experiment and
-    ignores it).
+    experiment, the checkpoint, the readout, the part, the frame index, the
+    flight and mic, and the PIT MAE. ``source`` is ``"auto"`` (the dump when it
+    holds ``exp``, else the checkpoint), ``"dump"`` or ``"live"``; ``ckpt``
+    selects which checkpoint of ``exp`` runs live and ``readout`` how its
+    output becomes rev/s (:data:`READOUTS`). The dump holds one peak-decoded
+    array per experiment and ignores both.
     """
     frame = part(part_name)[i]
     pred = None
@@ -465,9 +510,9 @@ def overlay(
             raise FileNotFoundError(f"{dump_root / part_name / exp}.npz")
     if pred is None:
         pred = (
-            _cached_live_pred(exp, part_name, i, frame, device, ckpt)
+            _cached_live_pred(exp, part_name, i, frame, device, ckpt, readout)
             if cache
-            else _live_pred(exp, frame, device, ckpt)
+            else _live_pred(exp, frame, device, ckpt, readout)
         )
     gt = np.asarray(get_array(frame, "rps"), dtype=np.float64)
     pred = align_rps_to_gt(pred, gt)
@@ -475,6 +520,7 @@ def overlay(
     meta.update(
         experiment=exp,
         ckpt=ckpt,
+        readout=readout,
         part=part_name,
         index=i,
         flight=str(meta.get("recording_id", meta.get("sample_id", i // 8))),
@@ -515,8 +561,10 @@ def model_specs(models: ModelSpec, ckpt: str = "best") -> list[tuple[str, str, s
 def compare(models: ModelSpec, part_name: str, i: int, **kw: Any) -> td.Frame:
     """Several models on ONE frame: ``audio`` + ``rps`` + one aligned entry per model.
 
-    Draw it with :func:`show`; ``meta.mae`` maps each label to its PIT MAE and
-    ``meta.ckpt`` each label to the checkpoint it was read from.
+    Draw it with :func:`show`; ``meta.mae`` maps each label to its PIT MAE,
+    ``meta.ckpt`` each label to the checkpoint it was read from, and
+    ``meta.readout`` names the decoder (:data:`READOUTS`). ``kw`` goes to
+    :func:`overlay`, so ``source="live"`` and ``readout="peak"`` land there.
     """
     specs = model_specs(models, str(kw.pop("ckpt", "best")))
     entries: dict[str, Any] = {}
@@ -547,7 +595,8 @@ def mae_table(models: ModelSpec, part_name: str, frames: Sequence[int], **kw: An
 
     Columns are ``<dataset>/<clip> mic m`` (:func:`frame_label`) plus a
     ``mean`` over the frames given. ``kw`` goes to :func:`overlay`, so
-    ``source="live"`` forces the checkpoints.
+    ``source="live"`` forces the checkpoints and ``readout=`` picks the
+    decoder (:data:`READOUTS`; ``"deployed"`` by default).
     """
     specs = model_specs(models, str(kw.pop("ckpt", "best")))
     cols = {i: frame_label(part_name, i) for i in frames}
