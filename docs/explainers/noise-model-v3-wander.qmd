@@ -1,0 +1,572 @@
+---
+title: "Slow amplitude wander, and what the Whittle likelihood can and cannot see"
+subtitle: "Why the constant-amplitude v2 fit is blind to it, why per-block latents make it visible, and the modified model with its fitting procedure, line by line"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    html-math-method: katex
+execute:
+  echo: false
+  warning: false
+---
+
+```{=html}
+<style>
+table td code, table th code, li code { overflow-wrap: anywhere; }
+table { font-size: 0.9em; }
+table td, table th { hyphens: none; }
+.def { border-left: 3px solid #888; padding-left: 0.8em; margin: 0.8em 0; }
+</style>
+```
+
+::: {.callout-note}
+## Status
+
+Discussion document, 2026-09-22. Nothing here is fitted or authorised for a
+refit. It answers one question raised in the model review — *can the Whittle
+likelihood tell us about slowly wandering amplitudes?* — and then writes down
+the model that collects every change agreed in that review, with its fitting
+procedure. Every statement about the current model points at the code:
+`src/experiments/noise_model/model.py` (parameters and priors,
+`class Priors` and `sample_params`), `src/experiments/noise_model/fit.py`
+(objective and optimiser), `src/data_processing/noise_model/render.py`
+(the renderer). Numbers quoted from fits name their file under
+`results/noise_v2/`.
+:::
+
+# The short answer
+
+The current model (v2) has **no amplitude wander**: a rendered clip's line
+powers and floor shape are fixed by the rig parameters and the rotor-speed
+trajectory; only the phases are random
+(`render.py`, module docstring). The claim "the Whittle likelihood cannot see
+slow wander" is true **of that model** — a constant parameter cannot absorb a
+zero-mean fluctuation, so the fluctuation leaves no trace in the fit — and
+**false of the model proposed here**, where every block of a few hundred
+milliseconds gets its own amplitude latent with a prior centred on the clip's
+mean. Each block's periodogram is then fully informative about that block's
+amplitude, and the wander's size and memory are the spread and the
+autocorrelation of the block latents. It is the floor-spline construction —
+a smooth curve with a Gaussian prior — applied along time instead of along
+frequency.
+
+The rest of the page is the reasoning at the level of someone who has not met
+a periodogram before, then the modified model, then its fit.
+
+# Part 1 — what the likelihood sees
+
+## 1.1 A periodogram cell
+
+Take one microphone, cut the audio into frames of $N = 2048$ samples
+(128 ms at 16 kHz), hop 512, window each frame with a Hann taper and take
+the Fourier transform. The squared magnitude at frequency bin $f$ of frame
+$n$ is one **periodogram cell** $I_m(n, f)$: "how much power was there at
+frequency $f$ during frame $n$".
+
+For a Gaussian signal, each cell is a random number whose **mean** is the
+signal's power spectral density at that frequency, $S_m(n, f)$, and whose
+distribution is exponential:
+
+$$
+I_m(n,f) \;\sim\; S_m(n,f)\cdot \mathrm{Exp}(1), \qquad
+\mathbb E[I] = S,\quad \operatorname{sd}[I] = S .
+$$
+
+So a single cell tells you the local power to within a factor of $e^{\pm 1}$ —
+very noisy — and cells at different frequencies (and, for a taper with hop
+$\ge N/4$, different frames) are approximately independent.
+
+## 1.2 The Whittle likelihood
+
+Given a model that predicts the density $S_\theta(n, f)$ from parameters
+$\theta$, the log-likelihood of all the cells under the exponential law is
+
+$$
+\ell(\theta) \;=\; -\sum_{m,n,f}\Big[\log S_\theta(m,n,f) + \frac{I_m(n,f)}{S_\theta(m,n,f)}\Big] .
+$$
+
+That is the Whittle likelihood. It is an approximation (it ignores the
+correlation between neighbouring cells that the taper introduces) but it is
+the standard one for spectral fitting and it is what every v2 fit maximises
+(`fit.py`, the objective; the composite variant pools frames of a window that
+share a carrier, but the form is the same).
+
+Two properties matter below.
+
+::: {.def}
+**(W1) A scale is easy to estimate from many cells.** If $n$ independent
+cells share one unknown scale $\theta$ (their model is $S = \theta \cdot
+\text{shape}$ with the shape known), the maximum-likelihood estimate is the
+mean of the ratios $I/\text{shape}$ and its relative standard deviation is
+$1/\sqrt n$. In decibels: $\operatorname{sd} \approx 4.34/\sqrt n$ dB. Ten
+cells give $\pm 1.4$ dB, a hundred give $\pm 0.4$ dB.
+:::
+
+::: {.def}
+**(W2) The likelihood only sees the mean of each cell.** Everything the fit
+learns about $\theta$ comes through $S_\theta$. A random effect that changes
+the true density from frame to frame but leaves a constant model in place
+can only show up as a bias of the constant — not as a separate parameter.
+:::
+
+## 1.3 Why the constant-amplitude model is blind
+
+Suppose the true line power at order $k$ of rotor $i$ is not constant but
+wanders slowly:
+
+$$
+P_{ik}(t) \;=\; \bar P_{ik}\, e^{w_{ik}(t)}, \qquad
+w_{ik} \text{ slow, zero-mean, sd } \sigma_w .
+$$
+
+The v2 model has one number $\bar P_{ik}$ (well, $p_{ik} = 10\log_{10}\bar P_{ik}$,
+site `profile_db`) for the whole pool. Under (W2), the fit's best constant is
+the one whose density matches the cells on average, i.e. roughly the
+time-mean of $P_{ik}(t)$, which is $\bar P_{ik}\, e^{\sigma_w^2/2}$ — a
+slight upward bias. That is all. The **variance** of the wander is invisible:
+the cells' spread around their mean is already the exponential law's own
+spread, and a model with one constant has nowhere to put an extra spread.
+Nothing in `Priors` or `sample_params` corresponds to $\sigma_w$.
+
+Whatever the real amplitude variation is, the current fit therefore either
+ignores it or pushes it into a parameter that *can* change the per-frame
+density: the line width $\gamma_{ik}$ (a line that fades in and out over
+frames looks, in a pooled periodogram, like a broader hump than a steady
+line) or the per-mic gains. The degenerate widths found in every fit
+(`round5/fits/dregon_room2_floor__flight_profile.json`: 7223 Hz at $k=65$;
+`round3/fits/michaels_fly125_cruise__flight.json`: 125 578 Hz at $k=18$ on
+rotor 3) are consistent with that escape route, though they also have the
+prior explanation given in the model review (a log-normal prior is quadratic
+in $\log\gamma$ and charges only ~40 nats for a 7 kHz line).
+
+## 1.4 Why per-block latents make it visible
+
+Now give every **block** $b$ — a group of consecutive frames, say
+$T_b = 0.5$ s $\approx 15$ frames — its own amplitude:
+
+$$
+P_{ik}(b) \;=\; \bar P_{ik}\, e^{w_{ik}(b)} .
+$$
+
+Within the block the model is constant, so the block's cells around line
+$(i,k)$ have density $S \propto P_{ik}(b)$ and, by (W1), the Whittle
+likelihood of *those cells alone* pins $w_{ik}(b)$ to within
+$4.34/\sqrt{n_{ik}(b)}$ dB, where $n_{ik}(b)$ is the number of cells the line
+occupies in the block (its frames times the bins it spans). The likelihood
+is not "blind" to the block amplitude; it is exactly as informative as the
+count of cells allows.
+
+What ties the blocks together is a **prior on the latents**, and that is
+where $\sigma_w$ and the wander's memory $\tau_w$ live:
+
+$$
+w_{ik}(b+1) \;=\; \rho\, w_{ik}(b) + \sqrt{1-\rho^2}\,\sigma_w\,\varepsilon_b,
+\qquad \rho = e^{-T_b/\tau_w},\quad \varepsilon_b \sim \mathcal N(0,1),
+$$
+
+an Ornstein–Uhlenbeck process sampled at the block rate: stationary sd
+$\sigma_w$, correlation time $\tau_w$. This is the same object as the shaft
+OU of the phase model and the same object as the floor spline's Gaussian
+prior — a smooth random curve with a known covariance — only now the
+curve runs over blocks instead of over frequency control points.
+
+**The information flow, in words.** Each block's cells say "my amplitude is
+about this, $\pm$ a few dB". The prior says "consecutive blocks differ by
+about $\sigma_w\sqrt{2(1-\rho)}$, and all of them hover around the clip's
+$\bar P_{ik}$". Combining the two gives (a) a smoothed amplitude track per
+line, (b) an estimate of $\bar P_{ik}$ that is *less* biased than the
+constant model's, and (c), from the spread and the lag-1 correlation of the
+smoothed tracks, the wander parameters $\sigma_w, \tau_w$. Point (c) is what
+the legacy model's `harm_gp_std_db` / `harm_gp_tau_s` sliders set by hand
+and what v2 lost.
+
+Nothing in this argument is specific to the comb: the floor's 14 spline
+control values $c_j$ can carry a block latent $u_j(b)$ in exactly the same
+way, which gives the floor level and colour their slow drift back
+(the legacy `floor_gp_std_db`, `floor_color_*`).
+
+## 1.5 Where the Whittle likelihood genuinely stops
+
+The block construction removes the blindness, not every limitation. Four
+remain and each is a design constraint on the block length and on what is
+asked of the fit.
+
+1. **Wander faster than a block is width.** A line whose power changes
+   *within* a block is, to that block's periodogram, a broadened line. The
+   block must be short against $\tau_w$; the measured order-tracked
+   line-power autocorrelation (R4's estimator on real windows) decides
+   $T_b$. If the real wander has a fast component, it stays in $\gamma$ —
+   and then $\gamma$ is a physical width plus a modulation width, which the
+   paper must say.
+2. **Few cells, weak line: the latent is prior-dominated.** A line 3 dB over
+   the floor spanning 3 bins in a 15-frame block has $n \approx 45$ cells
+   but most of their power is floor; the effective count is far smaller.
+   The posterior of $w_{ik}(b)$ then follows the prior — the fit will
+   report "no evidence of wander" for such lines, not "no wander". Report
+   $\sigma_w$ only from orders whose block-level sd is under, say, 2 dB
+   (the slider in §1.6 shows the trade).
+3. **A moving carrier inside the block smears the line.** The block
+   periodogram is computed at fixed frequencies; if the rotor speed moves
+   by $\delta$ rev/s across the block, order $k$ moves $k\delta$ Hz and the
+   line's power spreads over bins. At 7.8 Hz per bin and a DREGON ramp of
+   10 rev/s per second, a 0.5 s block moves order 10 by 50 Hz — six bins.
+   Either the block periodogram is **carrier-aligned** (demodulate each
+   frame at its own carrier before averaging, the order-domain instrument
+   already in `tracking.order_domain`) or blocks are restricted to
+   near-constant-speed spans. This is the same label-precision limit that
+   set `k_max(T)` in the v2 plan.
+4. **Rotors unresolved at low orders are one amplitude, not four.** At
+   2048-point frames the four DREGON rotors' $k \le 8$ lines fall in the
+   same bins. A per-rotor $w_{ik}(b)$ at those orders is not identifiable;
+   only the rotor-sum's block amplitude is. Either share the low-order
+   latent across rotors (as `flight_floor_lowk` shared the gain) or fit
+   those orders on longer frames.
+
+Beyond these, Whittle keeps its known structural blind spot: it uses the
+**magnitude** of each cell and discards the cross-spectrum between
+microphones and the phase relation between orders. Amplitude wander is a
+magnitude effect, so this does not affect it; it affects the coherence
+questions the R3 hump study raised and needs the cross-spectral Whittle
+extension if they are ever pursued.
+
+## 1.6 How much wander can a block resolve?
+
+```{ojs}
+viewof Tb = Inputs.range([0.1, 4], {value: 0.5, step: 0.1, label: "block length T_b (s)"})
+viewof bins = Inputs.range([1, 9], {value: 3, step: 1, label: "bins a line occupies"})
+viewof snr = Inputs.range([0, 30], {value: 6, step: 1, label: "line-to-floor ratio at the peak (dB)"})
+viewof tauw = Inputs.range([0.5, 20], {value: 3, step: 0.5, label: "wander correlation time tau_w (s)"})
+```
+
+```{ojs}
+frames = Math.max(1, Math.round(Tb * 16000 / 512))
+cells = frames * bins
+snrLin = Math.pow(10, snr / 10)
+// fraction of a cell's power that belongs to the line, at the peak bin
+lineFrac = snrLin / (1 + snrLin)
+// effective cells: each cell informs the line scale with weight lineFrac^2 (delta-method)
+nEff = cells * lineFrac * lineFrac
+sdDb = 4.34 / Math.sqrt(nEff)
+rho = Math.exp(-Tb / tauw)
+html`<table>
+<tr><td>frames per block</td><td>${frames}</td></tr>
+<tr><td>cells per line per block</td><td>${cells}</td></tr>
+<tr><td>effective cells (floor-diluted)</td><td>${nEff.toFixed(1)}</td></tr>
+<tr><td><b>sd of one block's amplitude estimate</b></td><td><b>${sdDb.toFixed(2)} dB</b></td></tr>
+<tr><td>block-to-block prior correlation ρ = e^(−T_b/τ_w)</td><td>${rho.toFixed(3)}</td></tr>
+<tr><td>smallest wander sd the block can distinguish from noise (≈ sd/√2)</td><td>${(sdDb / Math.SQRT2).toFixed(2)} dB</td></tr>
+</table>`
+```
+
+Reading: a 6 dB line over three bins in half-second blocks is measured to
+about $\pm 1.1$ dB per block, so a wander of $\sigma_w \ge 1$ dB is
+resolvable on it; a 0 dB line is not (sd $\pm 3$ dB). Longer blocks buy
+precision at the cost of smearing (constraint 1 and 3). The legacy model
+drew `harm_gp_std_db` in the 2–6 dB range, which is comfortably above the
+threshold on any visible order.
+
+# Part 2 — the modified model
+
+Everything the review agreed, collected. Notation as on the supervisor deck:
+mic $m$, rotor $i$ (or $r$), order $k$, block $b$, time $t$. Changes to v2
+are marked **[new]**; the rest is v2 unchanged.
+
+## 2.1 The signal
+
+$$
+x_m(t) \;=\; \sum_i\sum_k A_{mik}(t)\cos\phi_{ik}(t) \;+\; n_m(t) .
+$$
+
+One cosine per (rotor, order), plus broadband noise.
+
+## 2.2 Phase
+
+$$
+\phi_{ik}(t) = 2\pi k\!\int_0^t f_i(s)\,ds \;+\; k\,\theta_i(t) \;+\; \psi_{ik}(t) \;+\; \alpha_{ik}
+$$
+
+- $f_i(t)$: the rotor's labelled speed (rev/s); given, from telemetry or the
+  refined track.
+- $\theta_i(t)$: the shaft's integrated speed error, one per rotor, shared by
+  all its orders (multiplied by $k$):
+  $d\nu_i = -\lambda\nu_i\,dt + \sqrt{2\lambda}\,\sigma_\nu\,dW_i,\;
+  d\theta_i = \nu_i\,dt$. The $\sqrt{2\lambda}$ makes $\sigma_\nu$ the
+  stationary sd of the speed error in rad/s, independent of $\lambda$ — the
+  size and the memory are separate knobs.
+- $\psi_{ik}(t)$: a per-line Wiener phase, increments $\mathcal N(0,
+  4\pi\gamma_{ik}|\tau|)$, which makes the line a Lorentzian of half-width
+  $\gamma_{ik}$ Hz (derivation: $\mathbb E[e^{i\Delta\psi}] = e^{-2\pi\gamma|\tau|}$,
+  an exponential autocorrelation, whose transform is a Lorentzian of HWHM
+  $\gamma$).
+- $\alpha_{ik}$: a fixed random start phase.
+
+**[new] priors.** $\sigma_\nu \sim$ HalfNormal$(s_\nu)$ in rad/s and
+$\gamma_{ik}/(\gamma_0 k) \sim$ HalfNormal$(c_\gamma)$, with $\gamma_0 =
+0.01$ Hz (the bench decoherence law) and $c_\gamma$ of order 3. Both are
+light-tailed in **linear** units: a width of $5\gamma_0 k$ costs 1.4 nats,
+$13$ Hz at $k=1$ costs $\sim 10^5$ nats. No truncation — the penalty is
+smooth everywhere, so L-BFGS in the unconstrained space never stalls at a
+wall — but nothing the data does not demand can be wide. The current
+LogNormal$(\log 0.01k,\;1.0)$ is removed.
+
+## 2.3 Line amplitude
+
+$$
+A_{mik}(t) \;=\; \sqrt{2\,\bar P_{ik}}\;
+\Big(\tfrac{f_i(t)}{f_{\mathrm{ref}}}\Big)^{a/2}\;
+e^{w_{ik}(b(t))/2}\;
+10^{g_{mi}/20}
+$$
+
+- $\bar P_{ik} = 10^{p_{ik}/10}$: the line's mean power at the reference
+  speed $f_{\mathrm{ref}} = 80$ rev/s (`profile_db`). The square root
+  converts power to amplitude; the $/2$ in the exponents are the same
+  conversion.
+- $(f_i/f_{\mathrm{ref}})^{a}$: the speed law on power, $a$ = `amp_exp`,
+  prior $\mathcal N(2, 1)$, pinned at 2 when the pool's speed span is under
+  1.5× (unchanged).
+- **[new]** $e^{w_{ik}(b)}$: the block wander of §1.4. Hierarchical:
+  $w_{ik}(b) = w_i(b) + v_{ik}(b)$, a per-rotor common part (all orders of a
+  rotor breathe together — the legacy `harm_coherence` at 1) and a per-line
+  residual; each an OU across blocks with its own $(\sigma, \tau)$:
+  $(\sigma_{w}, \tau_{w})$ for $w_i$, $(\sigma_v, \tau_v)$ for $v_{ik}$.
+  Priors on the four hyperparameters: HalfNormal on the sds (scale from the
+  R4 order-tracked line-power spread on real windows), LogNormal on the
+  times centred on the measured autocorrelation time.
+- **[new]** $10^{g_{mi}/20}$: the microphone gain of rotor $i$ at mic $m$
+  is **not free**. With channel sensitivities normalised in the data
+  (pending the rank test of `results/noise_v2/mic_gains/`), it is the
+  geometric spreading from the known rotor–mic distances,
+  $g_{mi} = -20\log_{10}(d_{mi}/d_{\mathrm{ref}}) + \delta_i$, with at most
+  one free directivity offset $\delta_i$ per rotor (prior
+  $\mathcal N(0, 3)$ dB). The three v2 blocks `mic_gains_db`,
+  `mic_line_gain_db`, `mic_floor_db` (48 numbers, 16 identifiable) are
+  removed.
+
+**[new] prior on $p_{ik}$: resolved or below the floor.** Whether order
+$(i,k)$ is a *resolved line* is decided on a measurement that can resolve
+it — the bench periodogram of the same rotor at its cruise speed, or a
+carrier-aligned order-domain estimate on the flight windows — **not** on the
+pooled 7.8 Hz/bin flight periodogram (whose "$\ge 2$ dB excess" is met by a
+neighbour rotor's line or a floor bump). A resolved order gets
+$p_{ik} \sim \mathcal N(\text{measured}, 10)$ as now. An unresolved order
+gets a **one-sided** penalty: zero cost anywhere at or below the local floor
+level, HalfNormal$(8\ \mathrm{dB})$ on the excess above it. It may sink as
+far as it likes; it may not stand up unless the data lifts it. This replaces
+the current $\mathcal N(\text{floor}-15, 8)$ parking, which pays to sink
+*and* pays to rise.
+
+## 2.4 The floor
+
+$$
+S_m(f, t) \;=\;
+\Big[\tfrac1R\textstyle\sum_i \big(\tfrac{f_i(t)}{f_{\mathrm{ref}}}\big)^{b} + s\Big]\;
+10^{\,C(f,\,b(t))/10}
+\;+\; W_m(f)
+$$
+
+- The bracket is unchanged: the rotor-mean speed law with exponent $b$
+  (`floor_exp`, LN$(\log 2, 0.5)$, pinned on short spans) plus the static
+  fraction $s$ (`floor_static_rel`).
+- **[new]** $C(f, b)$: the floor shape in dB is **the spline alone**,
+  $C(f,b) = \sum_{j=1}^{14} B_j(f)\,c_j(b)$, with $B_j$ the linear
+  interpolation weights on the geometric control grid 30 … 8000 Hz. The
+  separate mean $\mu_F$ and tilt $t_F$ are dropped: on this grid the spline
+  already spans a constant and a straight line in $\log f$, so the three
+  were collinear and the fits split them arbitrarily
+  (`michaels_fly125_cruise__flight.json`: tilt $-0.04$ dB/oct, spline
+  swing $+19 \to -58$ dB, $\|z\| = 13.9$ against a prior expectation of
+  3.7). The control values are $c_j(b) = \bar c_j + u_j(b)$:
+  - $\bar c_j = \mu + \sigma_B (L z)_j$, $z \sim \mathcal N(0, I)$, $L$ the
+    Cholesky factor of the squared-exponential kernel across control points
+    (as now), $\mu$ the measured band median, and $\sigma_B$ **measured**
+    from the real windows' floor-shape spread rather than a constant — so
+    the $z$ prior binds.
+  - **[new]** $u_j(b)$: the floor's slow drift, an OU across blocks shared
+    by all control points for the level (one latent $u(b)$) plus a
+    per-control-point residual for the colour — the same two-level
+    structure as the comb wander, with its own $(\sigma_u, \tau_u)$.
+- **[new]** $W_m(f)$: a per-microphone **static** term for wind /
+  self-noise, with a fixed low-frequency shape (below ~500 Hz) and one free
+  level per mic, not scaled by speed, not scaled by a channel gain. Present
+  only where the rank test shows the per-mic floor excess is not a channel
+  sensitivity (DREGON's floor–comb mic-gain correlation is $-0.39$ with an
+  18 dB spread; Michael's is $+0.82$). If the test says the excess is a
+  sensitivity, $W_m$ is dropped and the channels are normalised in the data.
+
+## 2.5 What is fitted where
+
+| quantity | per | prior / status |
+|---|---|---|
+| $p_{ik}$ | rig | resolved: $\mathcal N$(measured, 10 dB); unresolved: one-sided HalfNormal above the floor **[new]** |
+| $\gamma_{ik}$ | rig | HalfNormal in linear units, scale $c_\gamma \gamma_0 k$ **[new]** |
+| $\sigma_\nu$ | rig | HalfNormal **[new]**; $\lambda$ pinned in flight (unchanged) |
+| $a$, $b$, $s$ | rig | unchanged; pinned on short-span pools |
+| $\bar c_j$ via $z$, $\mu$ | rig | $\mathcal N(0, I)$ with measured $\sigma_B$; $\mu_F$, $t_F$ removed **[new]** |
+| $\delta_i$ | rig | $\mathcal N(0, 3)$ dB; geometry gives the rest **[new]** |
+| $W_m$ level | rig (per mic) | only if the rank test demands it **[new]** |
+| $w_i(b)$, $v_{ik}(b)$, $u(b)$, $u_j(b)$ | clip × block | OU latents **[new]** |
+| $\sigma_w, \tau_w, \sigma_v, \tau_v, \sigma_u, \tau_u$ | rig | HalfNormal / LogNormal, centred on measured statistics **[new]** |
+
+# Part 3 — fitting, line by line
+
+## 3.1 Data
+
+1. Windows of real audio with a rotor-speed label: the same supports as v2
+   (`experiments.noise_model.supports`), 8 microphones, 16 kHz.
+2. Each window → frames ($N = 2048$, hop 512, periodic Hann) → periodogram
+   cells $I_m(n, f)$, one per (mic, frame, bin), in the units the forward
+   model uses (`spectrum.py`'s work-grid convention). Bins in the fit band
+   30 – 7900 Hz.
+3. **[new]** Frames are grouped into blocks of $T_b$ seconds. $T_b$ is not a
+   free parameter: it is set from the measured autocorrelation time of
+   order-tracked line power on real windows (R4's estimator) at roughly
+   $\tau_w/4$, and checked against constraint 3 of §1.5 (carrier motion
+   inside a block under one bin at the highest fitted order; blocks that
+   violate it are dropped or carrier-aligned).
+4. Per frame, the carriers $f_i(n)$ from the label; per block, the
+   block-mean carriers and the speed factors.
+
+## 3.2 The forward model of a block
+
+For block $b$ of a window, the model predicts the density at every (mic,
+bin):
+
+$$
+S_m(b, f) \;=\; \sum_i \sum_k P_{ik}(b)\,10^{g_{mi}/10}\;\mathcal L_{ik}\big(f - k\bar f_i(b)\big)
+\;+\; S^{\text{floor}}_m(b, f)
+$$
+
+- $P_{ik}(b) = \bar P_{ik}\,(\bar f_i(b)/f_{\mathrm{ref}})^{a}\,e^{w_{ik}(b)}$.
+- $\mathcal L_{ik}$ is the line shape: the Lorentzian of half-width
+  $\gamma_{ik}$ convolved with the shaft's Gaussian core of sd
+  $k\sigma_\nu/2\pi$ Hz and with the frame window's transform — exactly the
+  R3 line-shape kernel `spectrum.py` evaluates now, unchanged.
+- $S^{\text{floor}}_m(b, f)$ is §2.4 with $C(f, b)$ at the block's control
+  values and the block-mean speed factor.
+
+This is the current `flight_model` with two extra inputs per block, the
+latent vectors $w(b)$ and $u(b)$. Nothing else in the forward model changes.
+
+## 3.3 The objective
+
+$$
+\mathcal J \;=\; \underbrace{\sum_{\text{windows}}\sum_{m,b,n\in b,f}\Big[\log S_m(b,f) + \tfrac{I_m(n,f)}{S_m(b,f)}\Big]}_{\text{Whittle, per block}}
+\;+\; \underbrace{\sum_{\text{latents}} \tfrac12\, \mathbf w^\top \Sigma_{\text{OU}}^{-1}\mathbf w}_{\text{block priors}}
+\;+\; \underbrace{\sum_{\text{rig params}} -\log \pi(\theta)}_{\text{rig priors}}
+$$
+
+Line by line:
+
+1. **Whittle per block.** Every frame $n$ inside block $b$ is compared to
+   the block's density $S_m(b, f)$. The frames of a block share the latent,
+   the blocks of a window share the rig parameters, the windows of a rig
+   share everything but the latents.
+2. **Block priors.** For each latent track (one per rotor for $w_i$, one per
+   line for $v_{ik}$, one for $u$, one per control point for $u_j$), the OU
+   quadratic form: with $\rho = e^{-T_b/\tau}$ and $B$ blocks,
+   $\tfrac12\big[w_1^2/\sigma^2 + \sum_{b\ge 2}(w_b - \rho w_{b-1})^2/(\sigma^2(1-\rho^2))\big]
+   + \tfrac{B}{2}\log\sigma^2 + \tfrac{B-1}{2}\log(1-\rho^2)$.
+   The two log terms are what let $\sigma$ and $\tau$ be fitted at all: a
+   small $\sigma$ makes the quadratic cheap but the $\log\sigma^2$ term
+   expensive, and the optimum sits where the latents' actual spread equals
+   $\sigma$.
+3. **Rig priors.** The list of §2.5, each as $-\log$ density in the
+   unconstrained parametrisation Pyro uses (HalfNormal via a softplus /
+   absolute-value bijector, LogNormal via $\log$).
+
+::: {.callout-warning}
+## The one place joint MAP is known to cheat
+
+Maximising $\mathcal J$ jointly over the latents **and** their variance
+hyperparameters $\sigma_w, \sigma_v, \sigma_u$ underestimates the variances:
+the latents shrink toward zero and the hyperparameter follows them (the
+classic random-effects MAP bias — the same reason a sample variance divides
+by $n-1$). Two remedies, either acceptable:
+
+- **Fix the correlation times** $\tau$ from the R4 autocorrelation
+  measurement and estimate the sds by **moment matching** after the fit:
+  $\hat\sigma^2 = $ the sample variance of the MAP latents *plus* the mean
+  posterior variance of a latent (from the block-level Fisher information
+  of §1.6, $\approx (4.34/\sqrt{n_{\text{eff}}})^2$ in dB²). Simple,
+  transparent, and the correction is exactly the quantity the slider shows.
+- **Marginalise** the latents with a Laplace approximation (integrate the
+  Gaussian prior against a quadratic expansion of the block Whittle term
+  around its optimum) and maximise the marginal in the hyperparameters.
+  Standard (it is what `lme4`-style software does), one extra Hessian per
+  block, no bias.
+
+The first is the recommended starting point; the second is the check.
+:::
+
+## 3.4 The optimisation
+
+1. **Parametrisation.** All rig parameters and all latents live in one
+   unconstrained vector: Pyro sites as now (`sample_params`), with the
+   latents as additional `to_event` sites inside a per-window plate. An
+   8 s window at $T_b = 0.5$ s has 16 blocks; with $R = 4$, $K = 88$ that
+   is $16\,(4 + 4\cdot 88 + 1 + 14) \approx 5\,900$ latents per window.
+   L-BFGS handles that; what it cannot handle is a pool of 250 windows
+   with all latents free at once, so:
+2. **Alternation.** (i) With latents at zero, fit the rig parameters on the
+   pool exactly as v2 does (warm start from the current fits — their
+   profile, floor and mic values are usable once re-expressed in the new
+   parametrisation). (ii) With rig parameters fixed, fit each window's
+   latents independently — the windows decouple, so this is 250 small
+   L-BFGS problems, embarrassingly parallel on `uni-cpu`. (iii) Re-fit the
+   rig parameters with the latents fixed. (iv) Update $\sigma$'s by moment
+   matching (§3.3 box). Repeat (ii)–(iv) until the Whittle term moves by
+   less than the v2 tolerance ($10^{-4}$ nats/cell). Three to five rounds
+   in practice for this kind of model; each round is one `uni-cpu` job.
+3. **Restarts and pins** as v2: four seeds, the speed-law span pin, $\lambda$
+   pinned in flight. The half-normal priors make the restarts far less
+   necessary — the width degeneracy that produced the restart spread is
+   gone — but they stay as the convergence check.
+4. **Convergence label** on every fit as now (`which_converged`).
+
+## 3.5 What to check before believing it
+
+1. **Prior predictive.** Render the prior alone (no data) and confirm no
+   line wider than a few $\gamma_0 k$ and no floor swing beyond the measured
+   $\sigma_B$ appears — the priors now forbid the v2 pathologies by
+   construction, and this is the test that they do.
+2. **Held-out statistic.** The R4 order-tracked line-power spread across
+   frames within a window, on real windows **not** in the pool, against the
+   same statistic on renders from the fit. v2 cannot match it (it renders
+   zero spread); the new fit's $\sigma_w, \sigma_v$ should.
+3. **The tonality audit** (`results/noise_v2/rig_sampler/tonality/`) on the
+   refitted rigs, now on rendered audio as well as on the expectation.
+4. **The parity gate** unchanged (HPPNet on renders vs real), with the
+   caveat already recorded that it measures familiarity, not transfer; the
+   transfer test is a retrained arm.
+
+# Part 4 — what this does not decide
+
+- Whether the rotor-speed label needs its own per-rotor deviation track in
+  DREGON free flight (the R5 follow-up). The block construction reduces the
+  damage of label error (a block whose carrier is off just gets a wrong
+  alignment for that block) but does not remove it; the carrier-aligned
+  block periodogram of §1.5 (3) is the cheap mitigation.
+- Cross-microphone coherence and inter-order phase relations: outside the
+  Whittle magnitude likelihood, unchanged from v2.
+- The trajectory model, the regime composition, the speed-law pins: all
+  unchanged.
+
+::: {.callout-note}
+## Decisions taken in the review (2026-09-22), for the record
+
+1. Half-normal, linear-space priors on $\gamma_{ik}$ and $\sigma_\nu$; no
+   truncation.
+2. Orders not resolved on a resolving measurement may sink below the floor
+   at no cost.
+3. Slow amplitude wander restored: per-block OU latents for line power
+   (rotor-common + per-line) and for the floor spline (level + colour), with
+   fitted or moment-matched hyperparameters.
+4. Floor shape = spline only; $\mu_F$ and $t_F$ removed; $\sigma_B$ measured.
+5. Channel gains: normalise in the data if the rank test holds; comb mic
+   gains from geometry; a per-mic static wind term only where the floor
+   excess is not a channel sensitivity.
+6. No refit is started until authorised.
+:::
