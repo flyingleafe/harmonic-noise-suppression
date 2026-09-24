@@ -64,9 +64,9 @@ is declared once and materialized only through `scripts/derive.py`. Design:
   `tracking.joint_decompose`); `noise_v2` → `noise_v2_pool.NoiseV2Pool`
   (FITTED v2 rigs, absolute level; `fits:`/`preset_bank:` =
   `noise-v2-bank/1`); `silence` → `silence_noise.SilenceNoisePool`.
-- `noise_model/` — the v2 renderer (`render`, `params`, `lag`, `spectrum`,
-  `ou`, `floor`, `resample`), moved down from `experiments.*`, which
-  re-exports every name (data_processing must not import experiments).
+- `noise_model/` — the v2/v3 renderer (`render`, `params`, `lag`, `spectrum`,
+  `ou`, `floor`, `resample`, `v3`), moved from `experiments.*`, which
+  re-exports each name (data_processing must not import experiments).
 - `trajectory_model/` — the FITTED rps trajectory model (`params`, `sampler`,
   `flight`, `posterior`, `source`, `window`): `rps.kind: fitted_traj` plus
   `FlightCache`/`window_flight` (shared flight cache), fed by `rps-traj-fits`;

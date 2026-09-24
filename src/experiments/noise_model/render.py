@@ -80,7 +80,7 @@ def expected_periodogram(
         raise ValueError(f"{n} samples is shorter than n_fft {n_fft}")
     starts = np.arange(1 + (n - int(n_fft)) // int(hop)) * int(hop)
     grid = SP.flight_grid(sr=sr, n_fft=n_fft, hop=hop, sr_work=sr_work)
-    params = MD.params_from_dict(p)
+    params = MD.params_from_dict(p, n_mics=int(n_mics))
     prof = np.asarray(p["profile"]["profile_db"], dtype=np.float64)
     k_max = min(
         int(prof.shape[1]),

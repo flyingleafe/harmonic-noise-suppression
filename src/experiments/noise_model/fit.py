@@ -73,16 +73,19 @@ from experiments.stochastic_fit.revised_phase import (
     _git_head,
 )
 
-from . import FIT_SCHEMA
+from . import FIT_SCHEMA, FIT_SCHEMA_V3
 from . import model as MD
 from . import spectrum as SP
 
 __all__ = [
     "FitOutcome",
     "OptimSpec",
+    "OptimSpecV3",
     "ProfileInit",
     "Seeds",
     "fit_support",
+    "fit_v3",
+    "fit_window_latents",
     "gamma_low_order_check",
     "initial_values",
     "load_channel_gains",
@@ -199,6 +202,41 @@ class OptimSpec:
             temperature=1.0,
             note="pyro 1.9.1 has no PyroLBFGS; the polish is torch.optim.LBFGS on the "
             "AutoDelta guide's unconstrained parameters against the same Trace_ELBO loss",
+        )
+
+
+@dataclass(frozen=True)
+class OptimSpecV3:
+    """The v3 alternation's schedule (explainer §3.4).
+
+    Round 0 is step (i): the rig on the pool with every latent at zero, under
+    ``rig`` — the v2 schedule, restarts and jitter included. Each of up to
+    ``rounds`` rounds is step (ii), every window's latents alone with the rig
+    fixed (``latent_lbfgs_iters`` of strong-Wolfe L-BFGS per window, from the
+    previous round's tracks), then step (iii), the rig again with the latents
+    fixed, warm-started (``refit_adam_steps`` Adam steps, then ``rig``'s
+    L-BFGS polish). The alternation stops when the Whittle term moves by less
+    than ``tol_nats_per_cell`` per observed cell between rounds.
+    """
+
+    rig: OptimSpec = field(default_factory=OptimSpec)
+    rounds: int = 3
+    refit_adam_steps: int = 0
+    latent_lbfgs_iters: int = 100
+    latent_lbfgs_history: int = 10
+    tol_nats_per_cell: float = 1e-4
+
+    def as_dict(self) -> dict[str, Any]:
+        return dict(
+            rig=self.rig.as_dict(),
+            rounds=self.rounds,
+            refit_adam_steps=self.refit_adam_steps,
+            latent_lbfgs_iters=self.latent_lbfgs_iters,
+            latent_lbfgs_history=self.latent_lbfgs_history,
+            latent_line_search="strong_wolfe",
+            tol_nats_per_cell=self.tol_nats_per_cell,
+            scheme="(i) rig, latents at zero; then per round (ii) each window's latents, rig "
+            "fixed, (iii) rig, latents fixed; stop when the Whittle term moves < tol per cell",
         )
 
 
@@ -1181,6 +1219,308 @@ def _measured_record(measured: MD.Measured, *, priors: MD.Priors) -> dict[str, A
     )
 
 
+# ── v3: the alternation ─────────────────────────────────────────────────────
+
+
+def fit_window_latents(
+    batch: MD.SupportBatch,
+    params: SP.V2Params,
+    *,
+    wander: MD.Wander,
+    window: int,
+    init: MD.WindowLatents,
+    iters: int = 100,
+    history: int = 10,
+) -> tuple[MD.WindowLatents, dict[str, Any]]:
+    """Step (ii): ONE window's block latents with the rig held FIXED.
+
+    ``batch`` is that window's frames (:func:`.model.window_batch`) and
+    ``params`` the rig as constants; an ``AutoDelta`` over the window's
+    ``wander_*`` sites (:func:`.model.latent_model`), started at ``init`` and
+    polished by strong-Wolfe L-BFGS. With ``sigma, tau`` fixed this is the
+    correctly-shrunk MAP of the explainer's §3.3a — a Kalman smoother of the
+    block amplitudes, no variance to cheat with.
+    """
+    t0 = time.time()
+    values = {f"wander_{name}": x.detach().clone() for name, x in init.tracks().items()}
+    rec: dict[str, Any] = dict(window=int(window), n_blocks=int(batch.window_blocks[int(window)]))
+    if not values:
+        return init, dict(rec, tracks=[], note="no active wander track")
+    pyro.clear_param_store()
+
+    def model() -> Any:
+        return MD.latent_model(batch, params, wander=wander, window=int(window))
+
+    guide = AutoDelta(model, init_loc_fn=init_to_value(values=values))
+    elbo = Trace_ELBO()
+    before = float(elbo.differentiable_loss(model, guide).detach())
+    opt_params = [p for p in guide.parameters() if p.requires_grad]
+    opt = torch.optim.LBFGS(
+        opt_params, max_iter=int(iters), history_size=int(history), line_search_fn="strong_wolfe"
+    )
+    count = 0
+
+    def closure() -> Tensor:
+        nonlocal count
+        opt.zero_grad(set_to_none=False)
+        loss = elbo.differentiable_loss(model, guide)
+        loss.backward()
+        count += 1
+        return loss
+
+    opt.step(closure)
+    with torch.no_grad():
+        after = float(elbo.differentiable_loss(model, guide))
+    med = guide.median()
+    lat = MD.WindowLatents(
+        **{
+            name: (med[f"wander_{name}"].detach().clone() if f"wander_{name}" in med else None)
+            for name in ("d", "v", "u", "uj")
+        }
+    )
+    return lat, dict(
+        rec,
+        tracks=sorted(init.tracks()),
+        loss_before=before,
+        loss_after=after,
+        evals=count,
+        wall_s=time.time() - t0,
+    )
+
+
+def fit_v3(
+    batch: MD.SupportBatch,
+    *,
+    priors: MD.PriorsV3,
+    pin: dict[str, Any] | None = None,
+    optim: OptimSpecV3 = OptimSpecV3(),
+    profile_init: ProfileInit | None = None,
+    progress: int = 0,
+) -> FitOutcome:
+    """MAP-fit noise model v3 on a flight pool (explainer §3.4).
+
+    The pool is MEASURED once, latent-free (:func:`seeds`: the prior centres,
+    ``mu``, ``sigma_B``, the wind centres), its frames are assigned to blocks
+    of the MEASURED ``priors.wander.block_s``, and the fit alternates:
+
+    (i)   the rig with every latent at zero — :func:`fit_support` exactly as a
+          v2 fit runs, restarts, jitter and pins included;
+    (ii)  each window's latents with the rig fixed (:func:`fit_window_latents`;
+          the windows are independent given the rig, so this is a loop that
+          parallelises trivially);
+    (iii) the rig with the latents fixed, warm-started from (i)/(iii);
+
+    repeating (ii)-(iii) until the Whittle term moves by less than
+    ``optim.tol_nats_per_cell`` per cell, or ``optim.rounds`` rounds. The
+    wander's ``(sigma, tau)`` never move, so this converges to the joint MAP
+    over rig and latents without the variance cheat of §3.3a.
+
+    The returned outcome's ``params`` are the RIG only; ``latents`` is the
+    record's per-window block tracks (the §3.5 check) and the objective carries
+    the total ``Whittle + rig prior + OU prior``, which is also what
+    ``optimiser.lbfgs_loss_after`` reports so restarts reduce on it.
+    """
+    if priors.wander is None:
+        raise ValueError("flight_v3 needs the measured wander (PriorsV3.wander, --wander)")
+    wander = priors.wander
+    mode = MD.V3_MODE
+    t0 = time.time()
+    blocked = MD.with_blocks(replace(batch, latents=None), wander.block_s)
+    start = seeds(blocked, mode=mode, priors=priors, pin=pin, profile_init=profile_init)
+    measured_batch = replace(blocked, measured=start.measured)
+    n_cells = max(1, blocked.n_cells)
+
+    rig = fit_support(
+        blocked,
+        mode=mode,
+        priors=priors,
+        pin=pin,
+        optim=optim.rig,
+        profile_init=profile_init,
+        progress=progress,
+        start=start,
+    )
+    first_rig = rig
+    history: list[dict[str, Any]] = [
+        dict(
+            round=0,
+            step="(i) rig, latents at zero",
+            whittle_nats=float(rig.objective["whittle_nats"]),
+            rig_converged=rig.converged,
+            wall_s=time.time() - t0,
+        )
+    ]
+    if progress:
+        print(f"  v3 round 0: whittle {history[-1]['whittle_nats']:.6g}", flush=True)
+    latents: dict[int, MD.WindowLatents] = {
+        w: MD.zero_latents(wander, n_rotors=blocked.n_rotors, k_max=blocked.k_max, n_blocks=nb)
+        for w, nb in enumerate(blocked.window_blocks)
+        if nb > 0
+    }
+    latent_fits: dict[int, dict[str, Any]] = {}
+    prev = float(rig.objective["whittle_nats"])
+    alternation_converged = int(optim.rounds) == 0
+    refit = replace(optim.rig, adam_steps=int(optim.refit_adam_steps), init_jitter=0.0)
+    for rnd in range(1, int(optim.rounds) + 1):
+        t_round = time.time()
+        fixed = MD.detach_params(rig.params)
+        for w in sorted(latents):
+            latents[w], latent_fits[w] = fit_window_latents(
+                MD.window_batch(measured_batch, w),
+                fixed,
+                wander=wander,
+                window=w,
+                init=latents[w],
+                iters=optim.latent_lbfgs_iters,
+                history=optim.latent_lbfgs_history,
+            )
+        t_latent = time.time() - t_round
+        rig = fit_support(
+            replace(blocked, latents=latents),
+            mode=mode,
+            priors=priors,
+            pin=pin,
+            optim=refit,
+            profile_init=profile_init,
+            progress=progress,
+            start=Seeds(measured=start.measured, init=dict(rig.sites)),
+        )
+        now = float(rig.objective["whittle_nats"])
+        move = abs(prev - now) / n_cells
+        history.append(
+            dict(
+                round=rnd,
+                step="(ii) latents, rig fixed; (iii) rig, latents fixed",
+                whittle_nats=now,
+                whittle_move_per_cell=move,
+                rig_converged=rig.converged,
+                latent_wall_s=t_latent,
+                wall_s=time.time() - t_round,
+            )
+        )
+        if progress:
+            print(f"  v3 round {rnd}: whittle {now:.6g}  move/cell {move:.3g}", flush=True)
+        prev = now
+        if move < float(optim.tol_nats_per_cell):
+            alternation_converged = True
+            break
+
+    final = replace(measured_batch, latents=latents)
+    whittle = float(rig.objective["whittle_nats"])
+    rig_nlp = -MD.log_prior(final, mode=mode, values=rig.sites, priors=priors, pin=pin)
+    ou_nlp = MD.ou_prior_nats(latents, wander)
+    total = whittle + rig_nlp + ou_nlp
+    converged = bool(alternation_converged and rig.converged)
+    optimiser = dict(
+        **optim.as_dict(),
+        seed=int(optim.rig.seed),
+        init_jitter=float(optim.rig.init_jitter),
+        pinned_dynamics=(dict(pin) if pin else None),
+        rounds_run=len(history) - 1,
+        history=history,
+        alternation_converged=bool(alternation_converged),
+        rig_converged=bool(rig.converged),
+        converged=converged,
+        which_converged=(
+            "alternation+lbfgs" if converged else ("lbfgs" if rig.converged else "none")
+        ),
+        lbfgs_loss_after=total,
+        loss_note="lbfgs_loss_after is the TOTAL objective Whittle + rig -log prior + OU "
+        "-log prior on the full pool at the final rig and latents (what restarts reduce on)",
+        first_rig=first_rig.optimiser,
+        last_rig=rig.optimiser,
+        wall_s=time.time() - t0,
+    )
+    objective = dict(
+        rig.objective,
+        rig_neg_log_prior_nats=rig_nlp,
+        ou_neg_log_prior_nats=ou_nlp,
+        total_nats=total,
+        whittle_latents_zero_nats=float(first_rig.objective["whittle_nats"]),
+    )
+    diagnostics = dict(
+        rig.diagnostics,
+        blocks=dict(
+            block_s=wander.block_s,
+            window_blocks=list(blocked.window_blocks),
+            n_windows=len(blocked.window_blocks),
+        ),
+    )
+    return FitOutcome(
+        params=rig.params,
+        objective=objective,
+        optimiser=optimiser,
+        diagnostics=diagnostics,
+        sites=rig.sites,
+        latents=_latents_record(blocked, latents, wander, latent_fits),
+        window_latents=latents,
+    )
+
+
+def _latents_record(
+    batch: MD.SupportBatch,
+    latents: dict[int, MD.WindowLatents],
+    wander: MD.Wander,
+    fits: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    """The ``latents`` block of a v3 record: every window's MAP block tracks
+    (dB, rounded to 1e-3) and, per track, the pooled spread and lag-1
+    correlation of the fitted tracks against the measured ``sigma``/``rho`` —
+    the explainer's §3.5 post-fit check reads these."""
+    assert batch.frame_window is not None and batch.frame_block is not None
+
+    def arr(x: Tensor | None) -> Any:
+        return None if x is None else np.round(x.detach().cpu().numpy(), 3).tolist()
+
+    windows = []
+    for w, lat in sorted(latents.items()):
+        n_b = int(batch.window_blocks[w])
+        counts = np.bincount(batch.frame_block[batch.frame_window == w], minlength=n_b)
+        windows.append(
+            dict(
+                window=int(w),
+                name=batch.members[w] if w < len(batch.members) else str(w),
+                n_blocks=n_b,
+                frames_per_block=counts.tolist(),
+                d=arr(lat.d),
+                v=arr(lat.v),
+                u=arr(lat.u),
+                uj=arr(lat.uj),
+                fit=fits.get(w),
+            )
+        )
+    summary: dict[str, Any] = {}
+    for name in ("d", "v", "u", "uj"):
+        if not wander.active(name):
+            continue
+        xs = [
+            x.detach().cpu().numpy()
+            for lat in latents.values()
+            if (x := lat.tracks().get(name)) is not None
+        ]
+        if not xs:
+            continue
+        flat = np.concatenate([x.reshape(-1) for x in xs])
+        num = sum(float((x[..., 1:] * x[..., :-1]).sum()) for x in xs)
+        den = sum(float((x[..., :-1] ** 2).sum()) for x in xs)
+        summary[name] = dict(
+            prior_sd_db=wander.sigma(name),
+            prior_rho=wander.rho(name),
+            fitted_sd_db=float(np.sqrt(np.mean(flat**2))),
+            fitted_lag1=(num / den) if den > 0.0 else None,
+            n_values=int(flat.size),
+        )
+    return dict(
+        block_s=wander.block_s,
+        units="dB",
+        tracks=[n for n in ("d", "v", "u", "uj") if wander.active(n)],
+        shapes="d (R, B), v (R, K, B), u (B,), uj (J, B) per window",
+        note="per-window MAP nuisance; NOT rendered (render_noise draws fresh OU tracks)",
+        summary=summary,
+        windows=windows,
+    )
+
+
 # ── the post-fit checks ─────────────────────────────────────────────────────
 
 #: A fitted low-order width may sit this many times over the window's
@@ -1278,7 +1618,18 @@ def write_fit(
     priors: MD.Priors = MD.PRIORS,
     extra: dict[str, Any] | None = None,
 ) -> Path:
-    """Write the ``noise-v2-fit/2`` JSON and return its path."""
+    """Write the ``noise-v2-fit/2`` JSON (``noise-v3-fit/1`` for mode
+    ``flight_v3``, :func:`_write_fit_v3`) and return its path."""
+    if mode == MD.V3_MODE:
+        return _write_fit_v3(
+            path,
+            support=support,
+            kind=kind,
+            outcome=outcome,
+            batch=batch,
+            priors=priors,
+            extra=extra,
+        )
     p = MD.params_to_dict(outcome.params)
     if outcome.comb_gain_db is not None:
         # the level the transplanted comb was re-levelled BY. ``profile_db``
@@ -1346,6 +1697,68 @@ def write_fit(
             "must not be shifted again. Above low_orders the frozen comb keeps its shape",
             low_order_gain_prior=list(priors.low_order_gain_db),
         )
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=1))
+    return out
+
+
+def _write_fit_v3(
+    path: str | Path,
+    *,
+    support: str,
+    kind: str,
+    outcome: FitOutcome,
+    batch: MD.SupportBatch,
+    priors: MD.Priors,
+    extra: dict[str, Any] | None,
+) -> Path:
+    """The ``noise-v3-fit/1`` record: rig ``params``, measured ``priors``
+    (wander, ``sigma_B``, channel gains, wind shape) and the per-window
+    ``latents`` block."""
+    if not isinstance(priors, MD.PriorsV3) or priors.wander is None:
+        raise TypeError("a noise-v3-fit/1 record needs PriorsV3 carrying the measured wander")
+    p = MD.params_to_dict_v3(outcome.params, wander=priors.wander)
+    meas = outcome.diagnostics.get("measured") or {}
+    pri = priors.as_dict()
+    pri["floor_shape_z"] = dict(
+        pri["floor_shape_z"],
+        sigma_B_db=meas.get("floor_shape_sd_db"),
+        mu_db=meas.get("floor_mean_db"),
+        measured_ctrl_db=meas.get("floor_ctrl_db"),
+    )
+    if priors.wind:
+        pri["wind"] = dict(pri["wind"] or {}, measured_centres_db=meas.get("wind_db"))
+    pri["channel_gains"] = batch.diagnostics.get("channel_gains")
+    k = np.arange(1, int(np.asarray(p["profile"]["profile_db"]).shape[1]) + 1)
+    gamma = np.asarray(p["gamma_hz"], dtype=np.float64)
+    ladder = [kk for kk in (1, 2, 4, 8, 16, 32) if kk <= int(k.size)]
+    payload: dict[str, Any] = dict(
+        schema=FIT_SCHEMA_V3,
+        support=support,
+        supports=list(batch.members) if batch.members else [support],
+        kind=kind,
+        mode=MD.V3_MODE,
+        n_rotors=batch.n_rotors,
+        n_mics=batch.n_mics,
+        k_max=batch.k_max,
+        sr=int(batch.grid.sr),
+        front_end=dict(batch.grid.diagnostics),
+        params=p,
+        objective=outcome.objective,
+        optimiser=outcome.optimiser,
+        priors=pri,
+        latents=outcome.latents,
+        diagnostics=dict(
+            outcome.diagnostics,
+            profile_orders=k.tolist(),
+            gamma_hz_at=dict(k=ladder, value=[gamma[:, kk - 1].tolist() for kk in ladder]),
+            floor_level_db=float(p["floor"]["floor_mean_db"]),
+        ),
+        git=_git_head(),
+    )
+    if extra:
+        payload.update(extra)
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=1))

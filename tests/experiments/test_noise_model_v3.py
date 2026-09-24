@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 import pyro
 import pyro.distributions as dist
+import pytest
 import torch
 
 from data_processing.noise_model.floor import floor_geometry
@@ -314,3 +315,187 @@ def test_measured_wind_centres_follow_a_planted_per_capsule_excess():
     assert meas.wind_db is not None
     assert abs(meas.wind_db[0] - planted_db[0]) < 3.0
     assert meas.wind_db[1] < planted_db[0] - 15.0
+
+
+# ── (e) the OU block prior ──────────────────────────────────────────────────
+
+
+def test_ou_block_prior_is_the_explicit_gaussian_of_the_chain():
+    """The Markov-factorised OU prior of a 4-block chain must equal the
+    explicit Gaussian ``N(0, sigma^2 rho^|i - j|)``, log-determinant included,
+    and the Pyro site distribution must be that density."""
+    sigma, block_s, tau, n_blocks = 2.5, 0.5, 3.0, 4
+    wander = MD.Wander(
+        sigma_d_db=sigma,
+        tau_d_s=tau,
+        sigma_v_db=1.0,
+        tau_v_s=1.0,
+        sigma_u_db=1.0,
+        tau_u_s=1.0,
+        block_s=block_s,
+    )
+    rho = wander.rho("d")
+    assert rho == math.exp(-block_s / tau)
+    lag = np.abs(np.arange(n_blocks)[:, None] - np.arange(n_blocks)[None, :])
+    cov = torch.as_tensor(sigma**2 * rho**lag, dtype=torch.float64)
+    x = torch.as_tensor(np.random.default_rng(2).normal(0.0, 3.0, (5, n_blocks)))
+    want = torch.distributions.MultivariateNormal(torch.zeros(n_blocks, dtype=torch.float64), cov)
+    np.testing.assert_allclose(
+        MD.ou_log_density(x, sigma, rho).numpy(), want.log_prob(x).numpy(), rtol=1e-12
+    )
+    site = MD.OUChain(sigma, rho, n_blocks).expand((5,)).to_event(1)
+    np.testing.assert_allclose(float(site.log_prob(x)), float(want.log_prob(x).sum()), rtol=1e-12)
+
+
+# ── (f) the block forward model ─────────────────────────────────────────────
+
+
+def _two_window_batch(par: SP.V2Params, *, k_cap: int, n_mics: int) -> MD.SupportBatch:
+    n_fft, hop, n_frames = 512, 256, 12
+    n = n_fft + (n_frames - 1) * hop
+    grid = SP.flight_grid(sr=SR, n_fft=n_fft, hop=hop)
+    starts = np.arange(n_frames) * hop
+    members = []
+    for w, f0 in enumerate((180.0, 195.0)):
+        rps = (f0 + 5.0 * np.linspace(0.0, 1.0, n))[None, :]
+        with torch.no_grad():
+            m = SP.flight_model(
+                grid, par, rate_work=SP.flight_rate_work(grid, rps, starts), k_max=k_cap
+            ).numpy()
+        members.append((f"w{w}", m, rps, starts))
+    return MD.flight_batch(name="blocks", members=members, sr=SR, n_fft=n_fft, hop=hop, k_cap=k_cap)
+
+
+def test_block_forward_model_at_zero_latents_is_flight_model_bit_for_bit():
+    """v3's per-block forward model is v2's ``flight_model`` with two per-block
+    multipliers: at zero latents it must BE ``flight_model``, bit for bit, and
+    a latent must move only its own block, by exactly its dB."""
+    k_cap, n_mics = 3, 2
+    par = _params(
+        k_cap=k_cap,
+        n_mics=n_mics,
+        profile_db=np.array([-18.0, -21.0, -25.0]),
+        shape_z=np.random.default_rng(4).standard_normal(NC),
+    )
+    par = dataclasses.replace(
+        par, floor=dataclasses.replace(par.floor, shape_sd_db=_t(4.0)), wind_db=_t([-50.0, -55.0])
+    )
+    wander = MD.Wander(
+        sigma_d_db=3.0,
+        tau_d_s=2.0,
+        sigma_v_db=2.0,
+        tau_v_s=2.0,
+        sigma_u_db=1.0,
+        tau_u_s=2.0,
+        block_s=0.05,
+        sigma_uj_db=1.0,
+        tau_uj_s=2.0,
+    )
+    batch = MD.with_blocks(_two_window_batch(par, k_cap=k_cap, n_mics=n_mics), wander.block_s)
+    assert all(nb >= 3 for nb in batch.window_blocks)
+    zero = {
+        w: MD.zero_latents(wander, n_rotors=1, k_max=k_cap, n_blocks=nb)
+        for w, nb in enumerate(batch.window_blocks)
+    }
+    grid = batch.grid
+    assert isinstance(grid, SP.FlightGrid) and batch.rate_work is not None
+    with torch.no_grad():
+        want = SP.flight_model(grid, par, rate_work=batch.rate_work, k_max=k_cap)
+        got = MD.forward_v3(batch, par, zero)
+    assert torch.equal(got, want)
+
+    # +3 dB on rotor 0 in block 1 of window 0: that block's line power x 10^0.3,
+    # every other frame untouched
+    moved = {w: dataclasses.replace(lat) for w, lat in zero.items()}
+    assert zero[0].d is not None
+    d = torch.zeros_like(zero[0].d)
+    d[0, 1] = 3.0
+    moved[0] = dataclasses.replace(zero[0], d=d)
+    quiet = dataclasses.replace(par, profile_db=torch.full((1, k_cap), -300.0, dtype=torch.float64))
+    with torch.no_grad():
+        got = MD.forward_v3(batch, par, moved)
+        floor = MD.forward_v3(batch, quiet, zero)
+    assert batch.frame_window is not None and batch.frame_block is not None
+    hit = (batch.frame_window == 0) & (batch.frame_block == 1)
+    assert hit.any()
+    assert torch.equal(got[:, ~hit], want[:, ~hit])
+    lines_before = (want - floor)[:, hit]
+    lines_after = (got - floor)[:, hit]
+    tol = 1e-12 * float(floor[:, hit].max())
+    np.testing.assert_allclose(
+        lines_after.numpy(), 10.0**0.3 * lines_before.numpy(), rtol=1e-9, atol=tol
+    )
+
+
+# ── (g) recovery of a planted v3 rig with wander ────────────────────────────
+
+
+@pytest.mark.slow
+def test_a_rendered_v3_rig_with_wander_is_recovered_with_its_block_tracks():
+    """Render two short windows from a known v3 rig WITH wander, fit
+    ``flight_v3`` with the true wander hyperparameters, and get back the
+    profile (within 3 dB of the rig level the two clips realised) and the
+    drawn block tracks of the lines (correlation > 0.7): the per-block latents
+    make slow amplitude wander visible to the Whittle likelihood, and the
+    renderer draws exactly the process the fit assumes. ~2.5 CPU-min: ``-m slow``."""
+    from data_processing.noise_model import FIT_SCHEMA_V3
+    from experiments.noise_model import render as RD
+    from experiments.noise_model import supports as SU
+
+    k_cap, n_mics, f0, dur = 6, 2, 150.0, 3.0
+    wander = MD.Wander(
+        sigma_d_db=3.0,
+        tau_d_s=2.0,
+        sigma_v_db=2.0,
+        tau_v_s=2.0,
+        sigma_u_db=1.5,
+        tau_u_s=2.0,
+        block_s=0.5,
+    )
+    prof = np.linspace(-20.0, -30.0, k_cap)[None, :]
+    par = _params(k_cap=k_cap, n_mics=n_mics, profile_db=prof, floor_mean_db=-45.0)
+    par = dataclasses.replace(par, floor=dataclasses.replace(par.floor, shape_sd_db=_t(3.0)))
+    fit = dict(schema=FIT_SCHEMA_V3, params=MD.params_to_dict_v3(par, wander=wander))
+    n = int(dur * SR)
+    rps = np.full((1, n), f0)
+    members, drawn = [], []
+    for w in range(2):
+        audio, diag = RD.render_noise(
+            fit, rps, sr=SR, n_mics=n_mics, seed=100 + w, return_diagnostics=True
+        )
+        s = SU.synthetic_support(f"syn{w}", audio, rps, segment=(0.0, dur), meta={})
+        members.append((s.name, s.power, s.carrier_rev_s_audio, s.frame_starts))
+        drawn.append(diag["wander_tracks"])
+    batch = MD.flight_batch(
+        name="syn", members=members, sr=SR, n_fft=2048, hop=512, k_cap=k_cap, frame_stride=4
+    )
+    out = FT.fit_v3(
+        batch,
+        priors=MD.PriorsV3(wander=wander),
+        optim=FT.OptimSpecV3(
+            rig=FT.OptimSpec(
+                adam_steps=60, adam_lr=0.05, adam_batch=None, lbfgs_iters=30, lbfgs_frames=None
+            ),
+            rounds=2,
+            latent_lbfgs_iters=30,
+        ),
+    )
+    assert out.window_latents is not None
+    fitted, truth = [], []
+    for w in range(2):
+        lat = out.window_latents[w]
+        assert lat.d is not None and lat.v is not None
+        n_b = int(lat.d.shape[-1])
+        fitted.append((lat.d[:, None, :] + lat.v).detach().numpy())
+        truth.append(drawn[w]["d"][:, None, :n_b] + drawn[w]["v"][..., :n_b])
+    # the profile is the rig's MEAN line level: two 3 s clips pin it only up to
+    # the mean their own drawn wander happened to have, which is the target
+    realised = np.concatenate(truth, axis=-1).mean(axis=-1)
+    got = out.params.profile_db.detach().numpy()
+    assert np.abs(got - (prof + realised)).max() < 3.0, (got - prof, realised)
+
+    flat_fit = np.concatenate([x.reshape(-1) for x in fitted])
+    flat_true = np.concatenate([x.reshape(-1) for x in truth])
+    corr = float(np.corrcoef(flat_fit, flat_true)[0, 1])
+    assert corr > 0.7, corr
+    assert out.latents is not None and out.latents["summary"]["d"]["prior_sd_db"] == 3.0

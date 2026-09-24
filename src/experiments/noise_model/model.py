@@ -81,6 +81,7 @@ import pyro
 import pyro.distributions as dist
 import torch
 from torch import Tensor
+from torch.distributions import constraints
 
 # MOVED to data_processing.noise_model.params: the v2 renderer reads a fit's
 # line widths and data_processing may not import experiments. Re-exported here
@@ -102,6 +103,7 @@ __all__ = [
     "V3_MODE",
     "ChannelGains",
     "Measured",
+    "OUChain",
     "Priors",
     "PriorsV3",
     "SupportBatch",
@@ -109,28 +111,35 @@ __all__ = [
     "WindowLatents",
     "batch_slice",
     "bench_batch",
+    "block_params",
     "detach_params",
     "dynamics_pin",
     "flight_batch",
     "flight_lam",
     "forward",
+    "forward_v3",
     "free_blocks",
     "frozen_from_params",
     "gamma_from_params",
     "is_pinned",
+    "latent_model",
     "log_prior",
     "objective_breakdown",
+    "ou_log_density",
+    "ou_prior_nats",
     "params_from_dict",
     "params_to_dict",
     "params_to_dict_v3",
     "pin_applied",
     "sample_params",
+    "sample_window_latents",
     "sample_params_from_values",
     "span_pinned_sites",
     "support_model",
     "whittle_risk",
     "window_batch",
     "with_blocks",
+    "zero_latents",
 ]
 
 #: The approved floor/comb band edge. Below it the wind-dominated floor sets the
@@ -1320,14 +1329,220 @@ def detach_params(params: V2Params) -> V2Params:
     )
 
 
+# ── v3: the block wander ────────────────────────────────────────────────────
+
+
+def ou_log_density(x: Tensor, sigma: float, rho: float) -> Tensor:
+    """``log N(x; 0, sigma^2 rho^|i - j|)`` along the LAST axis (explainer §3.3).
+
+    The stationary OU sampled at the block rate, as its Markov factorisation:
+
+        -1/2 [x_1^2 / s^2 + sum_{b>=2} (x_b - rho x_{b-1})^2 / (s^2 (1 - rho^2))]
+        - B/2 log(2 pi s^2) - (B - 1)/2 log(1 - rho^2)
+
+    — the quadratic form plus the log-determinant, which is constant here
+    because ``sigma`` and ``rho`` are MEASURED and fixed. One value per track
+    (every leading index).
+    """
+    s2 = float(sigma) ** 2
+    one = 1.0 - float(rho) ** 2
+    n = int(x.shape[-1])
+    quad = x[..., 0] ** 2 / s2
+    if n > 1:
+        quad = quad + ((x[..., 1:] - float(rho) * x[..., :-1]) ** 2).sum(dim=-1) / (s2 * one)
+    logdet = n * math.log(2.0 * math.pi * s2) + (n - 1) * math.log(one)
+    return -0.5 * (quad + logdet)
+
+
+class OUChain(dist.TorchDistribution):
+    """A stationary OU track over ``n_blocks`` blocks as ONE Pyro event.
+
+    ``log_prob`` is :func:`ou_log_density`; ``sample`` the exact recursion
+    (the renderer's :func:`data_processing.noise_model.v3.ou_blocks`). What a
+    per-window latent site of the v3 model is drawn from.
+    """
+
+    arg_constraints: dict[str, Any] = {}  # noqa: RUF012
+
+    @property
+    def support(self) -> Any:
+        return constraints.real_vector
+
+    def __init__(
+        self, sigma: float, rho: float, n_blocks: int, batch_shape: tuple[int, ...] = ()
+    ) -> None:
+        if not (float(sigma) > 0.0 and 0.0 <= float(rho) < 1.0 and int(n_blocks) >= 1):
+            raise ValueError(
+                f"OUChain needs sigma > 0, 0 <= rho < 1, n >= 1: {sigma}, {rho}, {n_blocks}"
+            )
+        self.sigma, self.rho, self.n_blocks = float(sigma), float(rho), int(n_blocks)
+        super().__init__(torch.Size(batch_shape), torch.Size([self.n_blocks]), validate_args=False)
+
+    def expand(self, batch_shape: Any, _instance: Any = None) -> OUChain:
+        return OUChain(self.sigma, self.rho, self.n_blocks, tuple(torch.Size(batch_shape)))
+
+    def sample(self, sample_shape: Any = torch.Size()) -> Tensor:
+        shape = torch.Size(sample_shape) + self.batch_shape + self.event_shape
+        e = torch.randn(shape, dtype=torch.float64)
+        out = torch.empty_like(e)
+        out[..., 0] = self.sigma * e[..., 0]
+        innov = math.sqrt(1.0 - self.rho**2) * self.sigma
+        for b in range(1, self.n_blocks):
+            out[..., b] = self.rho * out[..., b - 1] + innov * e[..., b]
+        return out
+
+    def log_prob(self, value: Tensor) -> Tensor:
+        return ou_log_density(value, self.sigma, self.rho)
+
+
+def _latent_shapes(n_rotors: int, k_max: int) -> dict[str, tuple[int, ...]]:
+    """The leading (per-track) shape of each latent, before the block axis."""
+    return dict(d=(n_rotors,), v=(n_rotors, k_max), u=(), uj=(FLOOR_SHAPE_N_CTRL,))
+
+
+def sample_window_latents(
+    site: SiteFn, wander: Wander, *, n_rotors: int, k_max: int, n_blocks: int
+) -> WindowLatents:
+    """ONE window's block latents as sites ``wander_{d,v,u,uj}`` under their
+    OU priors; a track whose measured ``sigma`` is zero has no site."""
+    out: dict[str, Tensor | None] = {}
+    for name, shape in _latent_shapes(n_rotors, k_max).items():
+        if not wander.active(name):
+            out[name] = None
+            continue
+        d: Any = OUChain(wander.sigma(name), wander.rho(name), n_blocks)
+        if shape:
+            d = d.expand(shape).to_event(len(shape))
+        out[name] = site(f"wander_{name}", d)
+    return WindowLatents(**out)
+
+
+def zero_latents(wander: Wander, *, n_rotors: int, k_max: int, n_blocks: int) -> WindowLatents:
+    """All-zero latents of one window, on the tracks ``wander`` carries."""
+    return WindowLatents(
+        **{
+            name: (
+                torch.zeros(shape + (n_blocks,), dtype=torch.float64)
+                if wander.active(name)
+                else None
+            )
+            for name, shape in _latent_shapes(n_rotors, k_max).items()
+        }
+    )
+
+
+def block_params(params: V2Params, latents: WindowLatents | None, block: int) -> V2Params:
+    """The rig with ONE block's latents applied — the explainer's §3.2.
+
+    Line ``(r, k)``'s power is multiplied by ``10^{(d_r + v_rk)/10}`` (added to
+    ``profile_db``) and the floor's by ``10^{(u + sum_j B_j(f) u_j)/10}`` (``u``
+    added to its level, ``u_j`` to its control values). Nothing else moves;
+    with every latent at zero this IS ``params`` to the last bit.
+    """
+    if latents is None:
+        return params
+    b = int(block)
+    line: Tensor | None = None
+    if latents.d is not None:
+        line = latents.d[:, b][:, None]
+    if latents.v is not None:
+        line = latents.v[:, :, b] if line is None else line + latents.v[:, :, b]
+    profile = params.profile_db
+    if line is not None:
+        profile = torch.as_tensor(profile, dtype=torch.float64) + line
+    floor = params.floor
+    if latents.u is not None or latents.uj is not None:
+        floor = replace(
+            floor,
+            mean_db=(
+                torch.as_tensor(floor.mean_db, dtype=torch.float64) + latents.u[b]
+                if latents.u is not None
+                else floor.mean_db
+            ),
+            ctrl_offset_db=latents.uj[:, b] if latents.uj is not None else floor.ctrl_offset_db,
+        )
+    return replace(params, profile_db=profile, floor=floor)
+
+
+def forward_v3(
+    batch: SupportBatch, params: V2Params, latents: dict[int, WindowLatents], **kw: Any
+) -> Tensor:
+    """``(M, N, F)`` expected periodogram with per-block latents (§3.2).
+
+    The frames are grouped by (window, block) and each group goes through
+    :func:`.spectrum.flight_model` UNCHANGED with :func:`block_params` —
+    the v2 forward model with two per-block multipliers, the line-shape
+    kernel untouched. A window with no entry in ``latents`` is at zero.
+    """
+    assert isinstance(batch.grid, FlightGrid) and batch.rate_work is not None
+    if batch.frame_window is None or batch.frame_block is None:
+        raise ValueError(f"batch {batch.name!r} has no block assignment (model.with_blocks)")
+    fw = np.asarray(batch.frame_window, dtype=np.int64)
+    fb = np.asarray(batch.frame_block, dtype=np.int64)
+    key = fw * (int(fb.max()) + 1) + fb
+    order = np.argsort(key, kind="stable")
+    cuts = np.flatnonzero(np.diff(key[order])) + 1
+    dev = batch.rate_work.device
+    pieces: list[Tensor] = []
+    for seg in np.split(order, cuts):
+        p_g = block_params(params, latents.get(int(fw[seg[0]])), int(fb[seg[0]]))
+        idx = torch.as_tensor(seg, dtype=torch.int64, device=dev)
+        pieces.append(
+            SP.flight_model(
+                batch.grid,
+                p_g,
+                rate_work=batch.rate_work.index_select(1, idx),
+                k_max=batch.k_max,
+                **kw,
+            )
+        )
+    out = torch.cat(pieces, dim=1)
+    if np.array_equal(order, np.arange(order.size)):
+        return out
+    inv = np.empty_like(order)
+    inv[order] = np.arange(order.size)
+    return out.index_select(1, torch.as_tensor(inv, dtype=torch.int64, device=dev))
+
+
+def latent_model(
+    batch: SupportBatch, params: V2Params, *, wander: Wander, window: int
+) -> WindowLatents:
+    """The Pyro model of ONE window's latents with the rig held FIXED.
+
+    Step (ii) of the explainer's §3.4 alternation: the windows are
+    conditionally independent given the rig — what a per-window plate
+    asserts — so each is its own small problem over ``wander_*`` sites, fitted
+    against exactly that window's frames and exposure (:func:`window_batch`).
+    """
+    n_blocks = int(batch.window_blocks[int(window)])
+    lat = sample_window_latents(
+        _pyro_site, wander, n_rotors=batch.n_rotors, k_max=batch.k_max, n_blocks=n_blocks
+    )
+    m_model = forward_v3(batch, params, {int(window): lat})
+    pyro.factor("whittle", -whittle_risk(batch, m_model))
+    return lat
+
+
+def ou_prior_nats(latents: dict[int, WindowLatents], wander: Wander) -> float:
+    """``-sum log p(latents)`` over every window and track (the OU priors)."""
+    total = 0.0
+    for lat in latents.values():
+        for name, x in lat.tracks().items():
+            total -= float(ou_log_density(x.detach(), wander.sigma(name), wander.rho(name)).sum())
+    return total
+
+
 def forward(batch: SupportBatch, params: V2Params, **kw: Any) -> Tensor:
-    """``(M, N, F)`` expected periodogram of the batch under ``params``."""
+    """``(M, N, F)`` expected periodogram of the batch under ``params`` (and,
+    for v3, the batch's own block latents held as constants)."""
     if batch.mode == "bench":
         assert isinstance(batch.grid, BenchGrid)
         return SP.bench_model(
             batch.grid, params, k_max=batch.k_max, groups=batch.bench_order_groups, **kw
         )
     assert isinstance(batch.grid, FlightGrid) and batch.rate_work is not None
+    if batch.latents is not None:
+        return forward_v3(batch, params, batch.latents, **kw)
     return SP.flight_model(batch.grid, params, rate_work=batch.rate_work, k_max=batch.k_max, **kw)
 
 

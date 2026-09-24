@@ -18,6 +18,10 @@ WHAT LIVES HERE, and what does not:
   residual-phase autocorrelation, the geometry the renderer reads, the fit-JSON
   params reader and the exact discrete-time renderer.
   :mod:`experiments.noise_model` re-exports every one of them.
+* :mod:`.v3` — what noise model v3 adds to a render: the measured block-wander
+  hyperparameters (:class:`.v3.Wander`), their stationary OU block draw and the
+  fixed per-mic wind shape. :func:`.render.render_noise` reads a
+  ``noise-v3-fit/1`` payload with them.
 * NOT here: the Pyro model, the MAP fit, the supports, the expected-periodogram
   forward model. Those stay in :mod:`experiments.noise_model`; nothing a
   training stream does needs them.
@@ -37,11 +41,21 @@ payloads by mapping their per-order OU onto an equivalent width, so old fits
 render and can be frozen into a new one.
 """
 
-READABLE_FIT_SCHEMAS: tuple[str, ...] = (FIT_SCHEMA, "noise-v2-fit/1")
+FIT_SCHEMA_V3 = "noise-v3-fit/1"
+"""The fit-JSON schema tag of noise model v3 (``flight_v3``).
+
+Its ``params`` carry no microphone block (the channels are normalised in the
+data), the floor as the spline alone (``floor_shape_sd_db`` = the measured
+``sigma_B``), an optional per-mic ``wind`` level and the measured ``wander``
+hyperparameters the renderer draws fresh block latents from (:mod:`.v3`).
+"""
+
+READABLE_FIT_SCHEMAS: tuple[str, ...] = (FIT_SCHEMA, "noise-v2-fit/1", FIT_SCHEMA_V3)
 """Every fit-JSON schema the readers of this campaign accept.
 
 This round's and R1/R2's: a ``/1`` payload's per-order OU is mapped onto an
 equivalent width by :func:`.params.gamma_from_params`, so the renderer, the
-regime study and the round score read both. One tuple so a new schema tag is
-accepted in one place instead of five.
+regime study and the round score read both; and v3's, which
+:func:`.render.render_noise` draws with fresh wander latents. One tuple so a
+new schema tag is accepted in one place instead of five.
 """

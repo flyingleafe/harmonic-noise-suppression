@@ -43,6 +43,22 @@ THE FLOOR is white noise shaped by the square root of the SHARED
 :func:`.floor.floor_power_spectrum`, with the floor's own speed envelope
 — the same spectrum the fit reads and the same envelope it evaluates, so the
 fitted floor and the synthesised floor cannot drift apart.
+
+A ``noise-v3-fit/1`` PAYLOAD (``docs/explainers/noise-model-v3-wander.qmd``)
+renders through the same path with three differences, all read off the
+payload: no microphone block (the channels were normalised in the data, so
+every mic has unit gain), the floor's control values scaled by the measured
+``sigma_B`` with no tilt, and — the point of v3 — the slow amplitude WANDER.
+The per-window latents a fit estimated are nuisance and are NOT rendered;
+the rig's measured ``(sigma, tau, block_s)`` are, as FRESH stationary OU
+tracks drawn per clip at the block centres (:func:`.v3.ou_blocks`) and
+interpolated linearly in dB between them: ``d_r + v_rk`` multiplies line
+``(r, k)``'s power by ``10^{(d + v)/10}``, and ``u + sum_j B_j(f) u_j``
+multiplies the floor's through a WOLA short-time gain (:func:`_slow_gain`).
+DREGON's static per-mic wind term ``W_m(f)`` (:func:`.v3.wind_shape`) is its
+own independent shaped noise, added unscaled by speed. The v3 draws come
+from streams spawned AFTER the four v2 ones, so a v2 payload renders exactly
+as before.
 """
 
 from __future__ import annotations
@@ -53,7 +69,7 @@ from typing import Any, Literal, overload
 
 import numpy as np
 
-from data_processing.noise_model import READABLE_FIT_SCHEMAS
+from data_processing.noise_model import FIT_SCHEMA_V3, READABLE_FIT_SCHEMAS
 from data_processing.noise_model import spectrum as SP
 from data_processing.noise_model.constants import AMP_RPS_REF, SPEED_FLOOR_RPS
 from data_processing.noise_model.floor import floor_geometry, floor_power_spectrum
@@ -61,6 +77,7 @@ from data_processing.noise_model.ou import simulate_state
 from data_processing.noise_model.params import check_schema as _check_schema
 from data_processing.noise_model.params import gamma_from_params
 from data_processing.noise_model.resample import antialias, decimate_audio
+from data_processing.noise_model.v3 import Wander, ou_blocks, wind_shape
 
 __all__ = [
     "REGIME_ORDER",
@@ -72,9 +89,44 @@ __all__ = [
 ]
 
 
-#: The fit schemas the renderer reads: its own, and R1/R2's, whose per-order
-#: OU :func:`.params.gamma_from_params` maps onto an equivalent width.
+#: The fit schemas the renderer reads: its own, R1/R2's, whose per-order OU
+#: :func:`.params.gamma_from_params` maps onto an equivalent width, and v3's.
 READABLE_SCHEMAS = READABLE_FIT_SCHEMAS
+
+#: WOLA frame (work samples) of the floor wander's short-time gain: 64 ms at
+#: 64 kHz, hop half of it. The gain it applies moves on the block scale
+#: (hundreds of ms) and is smooth in log-frequency, so 15.6 Hz bins and 32 ms
+#: steps resolve it; a sqrt-Hann pair at 50 % overlap reconstructs a constant
+#: gain exactly.
+WANDER_WOLA_FRAME = 4096
+
+
+def _slow_gain(x: np.ndarray, gain_db: Any, *, sr_work: int) -> np.ndarray:
+    """``x`` with a slowly varying, frequency-dependent gain applied.
+
+    ``gain_db(t_s) -> (len(t_s), WANDER_WOLA_FRAME // 2 + 1)`` gives the dB gain
+    at frame-centre times ``t_s`` (seconds from the first sample) on the rfft
+    bins of one frame. Weighted overlap-add with a sqrt-periodic-Hann pair at
+    50 % overlap, which sums to one, so a constant gain returns ``x`` scaled
+    exactly and a slow one multiplies the local power by ``10^{gain/10}``.
+    """
+    n = int(x.size)
+    nf = int(WANDER_WOLA_FRAME)
+    hop = nf // 2
+    extra = (-(n + nf)) % hop
+    xp = np.concatenate([np.zeros(nf), np.asarray(x, dtype=np.float64), np.zeros(nf + extra)])
+    n_frames = (xp.size - nf) // hop + 1
+    w = np.sqrt(0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(nf) / nf))
+    idx = np.arange(n_frames)[:, None] * hop + np.arange(nf)[None, :]
+    spec = np.fft.rfft(xp[idx] * w[None, :], axis=1)
+    t_centre = (np.arange(n_frames) * hop + nf // 2 - nf) / float(sr_work)
+    spec *= 10.0 ** (np.asarray(gain_db(t_centre), dtype=np.float64) / 20.0)
+    frames = np.fft.irfft(spec, n=nf, axis=1) * w[None, :]
+    halves = frames.reshape(n_frames, 2, hop)
+    out = np.zeros((n_frames + 1, hop))
+    out[:n_frames] += halves[:, 0]
+    out[1:] += halves[:, 1]
+    return out.reshape(-1)[nf : nf + n]
 
 
 @overload
@@ -118,7 +170,8 @@ def render_noise(
     Parameters
     ----------
     fit
-        A ``noise-v2-fit/1`` payload (:func:`.fit.write_fit`'s output).
+        A ``noise-v2-fit/{1,2}`` or ``noise-v3-fit/1`` payload
+        (:func:`experiments.noise_model.fit.write_fit`'s output).
     rps_rev_s
         ``(R, T)`` per-rotor carrier in rev/s on the OUTPUT grid at ``sr``. A
         bench fit's own constant carriers are NOT used here: the renderer is
@@ -133,6 +186,7 @@ def render_noise(
     and :func:`revised_eval.window_periodogram` are in. No RMS normalisation.
     """
     p = _check_schema(fit)
+    v3 = fit.get("schema") == FIT_SCHEMA_V3
     rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
     n_rotors, n_out = rps.shape
     profile_db = np.asarray(p["profile"]["profile_db"], dtype=np.float64)
@@ -181,21 +235,63 @@ def render_noise(
     theta, _nu = simulate_state(innov, lam=lam, sigma=sigma_nu, dt=dt)
     phase = 2.0 * np.pi * np.cumsum(f0, axis=1) * dt + theta  # (R, n_work)
 
-    mic_line_db = np.asarray(p["profile"]["mic_line_gain_db"], dtype=np.float64)
-    mic_floor_db = np.asarray(p["floor"]["mic_floor_db"], dtype=np.float64)
-    gain_all_db = np.asarray(p["mic_gains_db"], dtype=np.float64)
-    for name, arr in (
-        ("mic_line_gain_db", mic_line_db),
-        ("mic_floor_db", mic_floor_db),
-        ("mic_gains_db", gain_all_db),
-    ):
-        if arr.shape[0] < n_mics:
-            raise ValueError(
-                f"fit carries {arr.shape[0]} microphones in {name}, asked for {n_mics}"
+    if v3:
+        # no microphone block: the channels were normalised in the DATA
+        mic_floor_db = np.zeros(n_mics)
+        line_gain = np.ones((n_mics, n_rotors))
+        all_gain = np.ones(n_mics)
+    else:
+        mic_line_db = np.asarray(p["profile"]["mic_line_gain_db"], dtype=np.float64)
+        mic_floor_db = np.asarray(p["floor"]["mic_floor_db"], dtype=np.float64)
+        gain_all_db = np.asarray(p["mic_gains_db"], dtype=np.float64)
+        for name, arr in (
+            ("mic_line_gain_db", mic_line_db),
+            ("mic_floor_db", mic_floor_db),
+            ("mic_gains_db", gain_all_db),
+        ):
+            if arr.shape[0] < n_mics:
+                raise ValueError(
+                    f"fit carries {arr.shape[0]} microphones in {name}, asked for {n_mics}"
+                )
+        mic_line_db = (
+            mic_line_db[:n_mics, :n_rotors] if mic_line_db.ndim == 2 else mic_line_db[:n_mics]
+        )
+        line_gain = 10.0 ** ((mic_line_db - mic_line_db.mean(axis=0, keepdims=True)) / 10.0)
+        all_gain = 10.0 ** ((gain_all_db[:n_mics] - gain_all_db[:n_mics].mean()) / 10.0)
+
+    # v3: FRESH block-wander tracks per clip, at the block centres, from
+    # streams spawned after the four v2 ones (a v2 render draws nothing here)
+    tracks: dict[str, np.ndarray] = {}
+    wind_db: np.ndarray | None = None
+    rng_wind: np.random.Generator | None = None
+    t_knot = np.zeros(0)
+    if v3:
+        wander = Wander.from_mapping(p["wander"])
+        rng_wander, rng_wind = (np.random.default_rng(s) for s in ss.spawn(2))
+        n_blocks = max(1, int(math.ceil(n_out / float(sr) / wander.block_s)))
+        t_knot = (np.arange(n_blocks) + 0.5) * wander.block_s
+        n_ctrl = int(np.asarray(p["floor"]["floor_shape_z"]).size)
+        for name, shape in (
+            ("d", (n_rotors,)),
+            ("v", (n_rotors, k_max)),
+            ("u", ()),
+            ("uj", (n_ctrl,)),
+        ):
+            tracks[name] = ou_blocks(
+                rng_wander,
+                shape,
+                n_blocks,
+                sigma=wander.sigma(name),
+                rho=wander.rho(name) if wander.active(name) else 0.0,
             )
-    mic_line_db = mic_line_db[:n_mics, :n_rotors] if mic_line_db.ndim == 2 else mic_line_db[:n_mics]
-    line_gain = 10.0 ** ((mic_line_db - mic_line_db.mean(axis=0, keepdims=True)) / 10.0)
-    all_gain = 10.0 ** ((gain_all_db[:n_mics] - gain_all_db[:n_mics].mean()) / 10.0)
+        if p.get("wind") is not None:
+            wind_db = np.asarray(p["wind"]["wind_db"], dtype=np.float64)
+            if wind_db.size < n_mics:
+                raise ValueError(f"fit carries {wind_db.size} wind levels, asked for {n_mics} mics")
+
+    def wander_db(track: np.ndarray) -> np.ndarray:
+        """One block track, linearly interpolated in dB onto the work grid."""
+        return np.interp(t_work, t_knot, track)
 
     amp_exp = float(p["profile"]["amp_exp"])
     speed = f0 / AMP_RPS_REF
@@ -203,6 +299,7 @@ def render_noise(
     for r in range(n_rotors):
         line_amp = np.sqrt(2.0 * 10.0 ** (profile_db[r, :k_max] / 10.0))
         speed_amp = np.sqrt(speed[r] ** amp_exp)
+        d_r = wander_db(tracks["d"][r]) if v3 else None
         for k in range(1, k_max + 1):
             # the line's own Wiener phase: increments N(0, 4 pi gamma dt),
             # cumulatively summed. Its increment variance IS the exponent the
@@ -212,6 +309,9 @@ def render_noise(
             psi = np.cumsum(rng_psi.standard_normal(n_work) * step)
             arg = k * phase[r] + psi
             env = line_amp[k - 1] * speed_amp
+            if d_r is not None:
+                # the line's power wanders by 10^{(d_r + v_rk)/10}
+                env = env * 10.0 ** ((d_r + wander_db(tracks["v"][r, k - 1])) / 20.0)
             alpha = rng_alpha.uniform(0.0, 2.0 * np.pi, size=n_mics)
             # cos(arg + alpha_m) by angle addition: TWO full-length trig passes
             # per (rotor, order) instead of n_mics of them.
@@ -222,24 +322,57 @@ def render_noise(
                 audio[m] += (g * math.cos(alpha[m])) * ec
                 audio[m] -= (g * math.sin(alpha[m])) * es
 
-    shape_mat, tilt_oct = floor_geometry(np.fft.rfftfreq(n_work, d=dt), SP.floor_ctrl_hz(sr))
-    shape_db = SP.floor_shape_db(p["floor"]["floor_shape_z"], sr=sr)
+    ctrl_hz = SP.floor_ctrl_hz(sr)
+    shape_mat, tilt_oct = floor_geometry(np.fft.rfftfreq(n_work, d=dt), ctrl_hz)
+    if v3:
+        # the spline alone: c_j = mu + sigma_B (L z)_j, no tilt
+        shape_db = SP.floor_shape_db(
+            p["floor"]["floor_shape_z"], sr=sr, scale_db=float(p["floor"]["floor_shape_sd_db"])
+        )
+        tilt_db_oct = 0.0
+    else:
+        shape_db = SP.floor_shape_db(p["floor"]["floor_shape_z"], sr=sr)
+        tilt_db_oct = float(p["floor"]["floor_tilt_db_oct"])
     floor_psd = floor_power_spectrum(
         shape_mat,
         tilt_oct,
         mean_db=float(p["floor"]["floor_mean_db"]),
         ctrl_db=shape_db,
-        tilt_db_oct=float(p["floor"]["floor_tilt_db_oct"]),
+        tilt_db_oct=tilt_db_oct,
         rate_factor=float(sr_work) / float(sr),
     )
     floor_gain_t = (speed ** float(p["floor"]["floor_exp"])).mean(axis=0) + float(
         p["floor"]["floor_static_rel"]
     )
     floor_amp = np.sqrt(floor_psd)
+    floor_moves = v3 and bool(np.any(tracks["u"]) or np.any(tracks["uj"]))
+    wola_basis = (
+        floor_geometry(np.fft.rfftfreq(WANDER_WOLA_FRAME, d=dt), ctrl_hz)[0]
+        if floor_moves
+        else None
+    )
+
+    def floor_wander_db(t_s: np.ndarray) -> np.ndarray:
+        """``u(t) + sum_j B_j(f) u_j(t)`` on the WOLA frame's bins."""
+        assert wola_basis is not None
+        level = np.interp(t_s, t_knot, tracks["u"])
+        colour = np.stack([np.interp(t_s, t_knot, row) for row in tracks["uj"]])  # (J, n_t)
+        return level[:, None] + colour.T @ wola_basis.T
+
     for m in range(n_mics):
         white = rng_floor.standard_normal(n_work)
         shaped = np.fft.irfft(np.fft.rfft(white) * floor_amp, n=n_work)
+        if floor_moves:
+            shaped = _slow_gain(shaped, floor_wander_db, sr_work=int(sr_work))
         audio[m] += shaped * np.sqrt(floor_gain_t) * math.sqrt(10.0 ** (mic_floor_db[m] / 10.0))
+    if wind_db is not None:
+        assert rng_wind is not None
+        # static, per capsule: no speed law, no channel gain, no wander
+        wind_amp = np.sqrt((float(sr_work) / float(sr)) * wind_shape(np.fft.rfftfreq(n_work, d=dt)))
+        for m in range(n_mics):
+            white = rng_wind.standard_normal(n_work)
+            level = math.sqrt(10.0 ** (float(wind_db[m]) / 10.0))
+            audio[m] += level * np.fft.irfft(np.fft.rfft(white) * wind_amp, n=n_work)
     audio *= np.sqrt(all_gain)[:, None]
 
     rendered = np.asarray(
@@ -249,7 +382,7 @@ def render_noise(
         raise ValueError(f"render produced {rendered.shape[1]} samples, asked for {n_out}")
     if not return_diagnostics:
         return rendered
-    return rendered, dict(
+    diagnostics: dict[str, Any] = dict(
         seed=int(seed),
         sr=int(sr),
         sr_work=int(sr_work),
@@ -259,6 +392,11 @@ def render_noise(
         rms=np.sqrt((rendered**2).mean(axis=1)).tolist(),
         normalisation="none (absolute fitted level)",
     )
+    if v3:
+        # the FRESH tracks this clip was drawn with, at the block centres: what
+        # a prior-predictive or a recovery check compares the fit against
+        diagnostics["wander_tracks"] = dict(t_knot_s=t_knot, **tracks)
+    return rendered, diagnostics
 
 
 # ── the per-regime composition ──────────────────────────────────────────────

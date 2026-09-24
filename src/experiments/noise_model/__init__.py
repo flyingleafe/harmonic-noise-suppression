@@ -26,6 +26,18 @@ residual-phase autocorrelation), :mod:`.spectrum` (the expected periodogram),
 :mod:`.model` (the Pyro model), :mod:`.fit` (MAP) and :mod:`.render` (the
 exact discrete-time renderer).
 
+NOISE MODEL v3 (``docs/explainers/noise-model-v3-wander.qmd``) is the fit mode
+``flight_v3`` of the same stack: :class:`.model.PriorsV3` (half-normal linear
+width/shaft priors, one profile prior per order, the floor as the spline alone
+with a measured ``sigma_B``, no mic sites — the channels are normalised in the
+data by :func:`.fit.load_channel_gains` — and DREGON's per-mic static wind
+term), per-window per-block OU wander latents with MEASURED fixed
+hyperparameters (:class:`data_processing.noise_model.v3.Wander`, read from
+``results/noise_v3/wander/<rig>.json``), and the §3.4 alternation
+:func:`.fit.fit_v3`. It writes ``noise-v3-fit/1``, which
+:func:`.render.render_noise` renders with FRESH wander per clip. The v2 modes
+are unchanged.
+
 WHAT MOVED DOWN. The renderer and the primitives it stands on now live in
 :mod:`data_processing.noise_model`, so an online-mixing noise source can
 synthesise fitted rotor noise without importing :mod:`experiments`
@@ -37,6 +49,6 @@ here.
 
 from __future__ import annotations
 
-from data_processing.noise_model import FIT_SCHEMA, READABLE_FIT_SCHEMAS
+from data_processing.noise_model import FIT_SCHEMA, FIT_SCHEMA_V3, READABLE_FIT_SCHEMAS
 
-__all__ = ["FIT_SCHEMA", "READABLE_FIT_SCHEMAS"]
+__all__ = ["FIT_SCHEMA", "FIT_SCHEMA_V3", "READABLE_FIT_SCHEMAS"]

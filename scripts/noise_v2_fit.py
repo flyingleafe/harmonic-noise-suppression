@@ -23,9 +23,16 @@
         --frozen-dynamics per-rotor --frozen-mean results/noise_v2/rounds/round3/fits/bench_dregon_Motor*_70__bench.json
     # the round-1 fit findings table over everything already written
     python scripts/noise_v2_fit.py findings
+    # noise model v3 (docs/explainers/noise-model-v3-wander.qmd) on a flight pool:
+    # channels normalised by the rank test's >= 500 Hz gains, block wander at the
+    # rig's MEASURED (sigma, tau, block_s); --wind for DREGON's per-mic wind term
+    python scripts/noise_v2_fit.py flight --mode flight_v3 --set michaels-cruise \
+        --name michaels_fly125_cruise --wander results/noise_v3/wander/michaels.json \
+        --channel-gains results/noise_v2/mic_gains/mic_gains.json --out results/noise_v3/fits
 
 Every fit lands at ``<out>/<support>__<mode>.json`` in the ``noise-v2-fit/2``
-schema (:func:`experiments.noise_model.fit.write_fit`), and the bench modes run
+schema (``noise-v3-fit/1`` for ``--mode flight_v3``;
+:func:`experiments.noise_model.fit.write_fit`), and the bench modes run
 through :mod:`utils.gridrun` so 135 points are one restartable unit grid: a
 unit whose JSON already exists is skipped, a unit that raises leaves a ``.err``
 beside it and does not kill the grid.
@@ -57,8 +64,8 @@ K_CAP = 130
 #: shaft-absorption check lives, high ones are where a free width is supposed
 #: to earn its place.
 GAMMA_LADDER = (1, 2, 4, 8, 16, 32)
-#: The fit schemas the reductions read: this round's and R1/R2's.
-SCHEMAS = ("noise-v2-fit/2", "noise-v2-fit/1")
+#: The fit schemas the reductions read: this round's, R1/R2's and v3's.
+SCHEMAS = ("noise-v2-fit/2", "noise-v2-fit/1", "noise-v3-fit/1")
 
 
 def gamma_ladder(gamma_hz: Any) -> dict[str, Any]:
@@ -147,45 +154,77 @@ def worker(unit: Unit) -> dict[str, Any]:
             # the support's own sample count: recovering it as 2 (F - 1) is
             # n - 1 for an odd segment and stretches the model's bin grid
             n_samples=int(support.n_fft),
-            k_cap=K_CAP,
+            k_cap=int(p.get("k_cap") or K_CAP),
         )
         name, kind = support.name, support.kind
     else:
         members = []
         specs = list(p["specs"])
+        mics = p.get("mics")
         for spec in specs:
             s = SU.load_support(str(spec))
+            power = np.asarray(s.power, dtype=np.float64)
             members.append(
                 (
                     s.name,
-                    np.asarray(s.power, dtype=np.float64),
+                    power if mics is None else power[np.asarray(mics, dtype=np.int64)],
                     np.asarray(s.carrier_rev_s_audio, dtype=np.float64),
                     np.asarray(s.frame_starts, dtype=np.int64),
                 )
             )
         first = SU.load_support(str(specs[0]))
+        gains = (
+            FT.load_channel_gains(
+                str(p["channel_gains"]), rig=str(p["channel_gains_rig"]), mics=mics
+            )
+            if p.get("channel_gains")
+            else None
+        )
         batch = MD.flight_batch(
             name=str(p["name"]),
             members=members,
             sr=int(first.sr),
             n_fft=int(first.n_fft),
             hop=int(first.hop),
-            k_cap=K_CAP,
+            k_cap=int(p.get("k_cap") or K_CAP),
             frame_stride=int(p.get("frame_stride", 4)),
             max_frames=p.get("max_frames"),
+            channel_gains=gains,
         )
         name, kind = str(p["name"]), "flight"
 
-    outcome = FT.fit_support(
-        batch,
-        mode=mode,
-        frozen=frozen,
-        pin=MD.dynamics_pin(p.get("pin")),
-        low_orders=p.get("low_orders"),
-        optim=optim,
-        profile_init=prof_init,
-        progress=int(p.get("progress", 0)),
-    )
+    if mode == MD.V3_MODE:
+        record = json.loads(Path(str(p["wander"])).read_text())
+        priors = MD.PriorsV3(
+            wind=bool(p.get("wind")),
+            wander=MD.Wander.from_mapping(record),
+            wander_record=dict(record, path=str(p["wander"])),
+        )
+        outcome = FT.fit_v3(
+            batch,
+            priors=priors,
+            pin=MD.dynamics_pin(p.get("pin")),
+            optim=FT.OptimSpecV3(
+                rig=optim,
+                rounds=int(p.get("rounds", 3)),
+                refit_adam_steps=int(p.get("refit_adam_steps", 0)),
+                latent_lbfgs_iters=int(p.get("latent_iters", 100)),
+            ),
+            profile_init=prof_init,
+            progress=int(p.get("progress", 0)),
+        )
+    else:
+        priors = MD.PRIORS
+        outcome = FT.fit_support(
+            batch,
+            mode=mode,
+            frozen=frozen,
+            pin=MD.dynamics_pin(p.get("pin")),
+            low_orders=p.get("low_orders"),
+            optim=optim,
+            profile_init=prof_init,
+            progress=int(p.get("progress", 0)),
+        )
     # a RESTART lands beside its siblings and is reduced to one reported fit
     # afterwards; a single-seed fit is the reported fit itself
     tag = p.get("restart_tag")
@@ -201,9 +240,14 @@ def worker(unit: Unit) -> dict[str, Any]:
         mode=mode,
         outcome=outcome,
         batch=batch,
+        priors=priors,
         extra={"frozen_from": p.get("frozen_from")} if p.get("frozen_from") else None,
     )
-    d = MD.params_to_dict(outcome.params)
+    d = (
+        MD.params_to_dict_v3(outcome.params, wander=None)
+        if mode == MD.V3_MODE
+        else MD.params_to_dict(outcome.params)
+    )
     return dict(
         uid=unit.uid,
         support=name,
@@ -863,6 +907,20 @@ def _specs(args: argparse.Namespace) -> list[str]:
     return [s.text if hasattr(s, "text") else str(s) for s in specs]
 
 
+def _rig_of(specs: list[str]) -> str:
+    """The rank-test rig block (``dregon`` / ``michaels``) a flight pool reads."""
+    from experiments.noise_model import supports as SU
+
+    families = {SU.as_spec(s).family for s in specs}
+    rigs = {f.removeprefix("flight_") for f in families}
+    if len(rigs) != 1 or not rigs <= {"dregon", "michaels"}:
+        raise SystemExit(
+            f"cannot infer the channel-gain rig of families {sorted(families)}: "
+            "pass --channel-gains-rig"
+        )
+    return rigs.pop()
+
+
 def _pin_from_args(args: argparse.Namespace) -> dict[str, float] | None:
     """``["lam=0.5"]`` -> ``{"lam": 0.5}``."""
     items = getattr(args, "pin", None)
@@ -952,6 +1010,13 @@ def main(argv: list[str] | None = None) -> int:
             default=1,
             help="torch threads per unit (a one-unit flight fit wants the whole node)",
         )
+        p.add_argument(
+            "--k-cap",
+            type=int,
+            default=K_CAP,
+            help="profile width (orders per rotor); every support is further capped at its "
+            "own Nyquist. Lower it for a smoke fit",
+        )
         add_gridrun_args(p, jobs=4)
         if name == "flight":
             p.add_argument(
@@ -997,7 +1062,70 @@ def main(argv: list[str] | None = None) -> int:
                 help="bench fit JSONs to freeze the comb at",
             )
             p.add_argument("--frame-stride", type=int, default=4)
-            p.add_argument("--max-frames", type=int, default=256)
+            p.add_argument(
+                "--max-frames",
+                type=int,
+                default=None,
+                help="frames kept per pool, split evenly over its windows from each window's "
+                "start (<= 0: every stride-thinned frame). Default 256, and every frame for "
+                "--mode flight_v3, whose blocks need their frames across the whole window",
+            )
+            p.add_argument(
+                "--mode",
+                choices=("flight_v3",),
+                default=None,
+                help="noise model v3 (docs/explainers/noise-model-v3-wander.qmd): half-normal "
+                "width/shaft priors, one profile prior per order, floor = spline with the "
+                "measured sigma_B, NO mic sites (see --channel-gains), per-window block-wander "
+                "latents at the measured --wander, fitted by the alternation of fit.fit_v3. "
+                "Excludes --floor-only/--floor-low-k/--frozen-*",
+            )
+            p.add_argument(
+                "--wander",
+                default=None,
+                metavar="JSON",
+                help="flight_v3: the rig's MEASURED wander record "
+                "(results/noise_v3/wander/<rig>.json: sigma_d_db, tau_d_s, sigma_v_db, tau_v_s, "
+                "sigma_u_db, tau_u_s, block_s, ...); required",
+            )
+            p.add_argument(
+                "--channel-gains",
+                default=None,
+                metavar="JSON",
+                help="flight_v3: normalise each channel's periodogram by the rank test's "
+                ">= 500 Hz floor gain (results/noise_v2/mic_gains/mic_gains.json)",
+            )
+            p.add_argument(
+                "--channel-gains-rig",
+                choices=("dregon", "michaels"),
+                default=None,
+                help="the rig block of --channel-gains (default: from the pool's support family)",
+            )
+            p.add_argument(
+                "--wind",
+                action="store_true",
+                help="flight_v3: the per-mic static low-frequency wind term (DREGON)",
+            )
+            p.add_argument("--rounds", type=int, default=3, help="flight_v3 alternation rounds")
+            p.add_argument(
+                "--latent-iters",
+                type=int,
+                default=100,
+                help="flight_v3: L-BFGS iterations of each window's latent step",
+            )
+            p.add_argument(
+                "--refit-adam-steps",
+                type=int,
+                default=0,
+                help="flight_v3: Adam steps before the L-BFGS polish of each warm-started rig "
+                "refit (step iii)",
+            )
+            p.add_argument(
+                "--mics",
+                default=None,
+                metavar="I,J,...",
+                help="fit only these channels (0-based), e.g. a smoke fit on '0,1'",
+            )
             p.add_argument("--adam-batch", type=int, default=8)
             p.add_argument("--lbfgs-frames", type=int, default=64)
             p.add_argument(
@@ -1077,6 +1205,7 @@ def main(argv: list[str] | None = None) -> int:
                             profile_prior_sigma=args.profile_prior_sigma,
                             apply_carrier_offset=bool(args.apply_carrier_offset),
                             restart_tag=tag,
+                            k_cap=int(args.k_cap),
                         ),
                     )
                 )
@@ -1101,15 +1230,35 @@ def main(argv: list[str] | None = None) -> int:
                     f"{len(args.frozen_mean)} fits for {n_rotors} rotors"
                 )
             frozen = expand_frozen(frozen, n_rotors=n_rotors)
-        if floor_only:
+        v3 = getattr(args, "mode", None) == "flight_v3"
+        if v3:
+            if floor_only or frozen_dyn or args.frozen_mean:
+                raise SystemExit(
+                    "--mode flight_v3 fits the whole rig: drop --floor-only / --floor-low-k / "
+                    "--frozen-dynamics / --frozen-mean"
+                )
+            if not args.wander:
+                raise SystemExit(
+                    "--mode flight_v3 needs --wander <results/noise_v3/wander/<rig>.json>"
+                )
+            mode = "flight_v3"
+        elif floor_only:
             mode = "flight_floor_lowk" if low_k else "flight_floor_only"
         else:
             mode = "flight_profile" if frozen_dyn else "flight"
-        if mode != "flight" and frozen is None:
+        if mode not in ("flight", "flight_v3") and frozen is None:
             raise SystemExit(
                 "--floor-only / --floor-low-k / --frozen-dynamics needs "
                 "--frozen-mean <bench fit JSONs>"
             )
+        if args.max_frames is None:
+            max_frames = None if v3 else 256
+        else:
+            max_frames = None if int(args.max_frames) <= 0 else int(args.max_frames)
+        if not v3 and (args.wander or args.channel_gains or args.wind):
+            raise SystemExit("--wander / --channel-gains / --wind belong to --mode flight_v3")
+        gains_rig = args.channel_gains_rig or (_rig_of(specs) if args.channel_gains else None)
+        mics = [int(v) for v in str(args.mics).split(",")] if args.mics else None
         units = []
         for s in seeds:
             optim = _optim_from_args(args)
@@ -1128,7 +1277,7 @@ def main(argv: list[str] | None = None) -> int:
                         frozen=frozen,
                         frozen_from=frozen_from,
                         frame_stride=int(args.frame_stride),
-                        max_frames=None if int(args.max_frames) <= 0 else int(args.max_frames),
+                        max_frames=max_frames,
                         progress=int(args.progress),
                         threads=int(args.threads),
                         pin=_pin_from_args(args),
@@ -1136,6 +1285,21 @@ def main(argv: list[str] | None = None) -> int:
                         profile_prior_sigma=args.profile_prior_sigma,
                         low_orders=int(args.low_orders) if low_k else None,
                         restart_tag=tag,
+                        k_cap=int(args.k_cap),
+                        mics=mics,
+                        **(
+                            dict(
+                                wander=str(args.wander),
+                                channel_gains=args.channel_gains,
+                                channel_gains_rig=gains_rig,
+                                wind=bool(args.wind),
+                                rounds=int(args.rounds),
+                                latent_iters=int(args.latent_iters),
+                                refit_adam_steps=int(args.refit_adam_steps),
+                            )
+                            if v3
+                            else {}
+                        ),
                     ),
                 )
             )
