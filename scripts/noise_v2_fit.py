@@ -1133,7 +1133,8 @@ def main(argv: list[str] | None = None) -> int:
                 default=None,
                 help="write this fit as a RESTART under <out>/restarts/<name>__<mode>__<tag>."
                 "json even though it is a single seed. A pooled flight fit can need the whole "
-                "node, so its restarts run as one CLUSTER JOB EACH; `reduce` then collapses "
+                "node, so its restarts run as one CLUSTER JOB EACH (`--seed N --restart-tag "
+                "sN`, jittered unless N is 0, as --seeds would have); `reduce` then collapses "
                 "them the way --seeds would have",
             )
 
@@ -1259,11 +1260,15 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--wander / --channel-gains / --wind belong to --mode flight_v3")
         gains_rig = args.channel_gains_rig or (_rig_of(specs) if args.channel_gains else None)
         mics = [int(v) for v in str(args.mics).split(",")] if args.mics else None
+        # a single-seed --restart-tag run is ONE restart of a family started at
+        # seed 0 (one cluster job per seed), so it is jittered exactly as
+        # `--seed 0 --seeds N` would have jittered it: every restart but seed 0
+        first = 0 if (len(seeds) == 1 and args.restart_tag) else seeds[0]
         units = []
         for s in seeds:
             optim = _optim_from_args(args)
             optim["seed"] = s
-            optim["init_jitter"] = 0.0 if s == seeds[0] else float(args.init_jitter)
+            optim["init_jitter"] = 0.0 if s == first else float(args.init_jitter)
             tag = f"s{s}" if len(seeds) > 1 else (args.restart_tag or None)
             units.append(
                 Unit(
