@@ -77,6 +77,7 @@ from data_processing.noise_model.spectrum import (
     floor_shape_db,
     k_max_for_carrier,
 )
+from data_processing.noise_model.v3 import wind_shape
 from experiments.stochastic_fit.model import (
     AMP_RPS_REF,
     FLOOR_SHAPE_F_MIN,
@@ -157,6 +158,12 @@ class FloorParams:
     ``static_rel`` are the flight speed law of the floor's envelope and are
     ignored on the bench, where the carrier is constant and the envelope is a
     constant absorbed by ``mean_db``.
+
+    Two v3 fields, both ``None`` (= the v2 floor, bit for bit) unless set:
+    ``shape_sd_db`` replaces the fixed ``FLOOR_SHAPE_STD_DB`` scale of the
+    control values by the MEASURED ``sigma_B``, and ``ctrl_offset_db`` is a
+    ``(n_ctrl,)`` dB offset added to the control values (the block colour
+    latents ``u_j(b)`` of the floor wander).
     """
 
     mean_db: Any
@@ -165,6 +172,8 @@ class FloorParams:
     mic_floor_db: Any
     exp: Any = 0.0
     static_rel: Any = 0.0
+    shape_sd_db: Any = None
+    ctrl_offset_db: Any = None
 
 
 @dataclass
@@ -189,6 +198,10 @@ class V2Params:
     gain_all_db: Any
     carrier_rev_s: Any = None
     amp_exp: Any = 0.0
+    #: v3 only: ``(M,)`` dB level of the static per-mic wind term ``W_m(f)``
+    #: (``grid.wind_shape`` on the flat part), added to the floor in flight.
+    #: ``None`` — every v2 fit — adds nothing.
+    wind_db: Any = None
 
 
 # ── geometry ────────────────────────────────────────────────────────────────
@@ -217,17 +230,22 @@ class FloorBasis:
     rate_factor: float
     shape_chol: Tensor
 
-    def shape_db(self, shape_z: Any) -> Tensor:
+    def shape_db(self, shape_z: Any, sd_db: Any = None) -> Tensor:
         z = _as_t(shape_z, self.shape_chol)
-        return FLOOR_SHAPE_STD_DB * (self.shape_chol @ z)
+        if sd_db is None:
+            return FLOOR_SHAPE_STD_DB * (self.shape_chol @ z)
+        return _as_t(sd_db, self.shape_chol) * (self.shape_chol @ z)
 
     def psd(self, floor: FloorParams) -> Tensor:
         """The floor power spectrum on this basis' PSD grid, inside the graph."""
+        ctrl = self.shape_db(floor.shape_z, floor.shape_sd_db)
+        if floor.ctrl_offset_db is not None:
+            ctrl = ctrl + _as_t(floor.ctrl_offset_db, self.shape_psd)
         return floor_power_spectrum(
             self.shape_psd,
             self.tilt_oct_psd,
             mean_db=_as_t(floor.mean_db, self.shape_psd),
-            ctrl_db=self.shape_db(floor.shape_z),
+            ctrl_db=ctrl,
             tilt_db_oct=_as_t(floor.tilt_db_oct, self.shape_psd),
             rate_factor=self.rate_factor,
         )
@@ -379,6 +397,9 @@ class FlightGrid:
     grid_power_factor: float
     floor: FloorBasis
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    #: ``(F,)`` the FIXED v3 wind shape :func:`data_processing.noise_model.v3.wind_shape`
+    #: on the analysis bins; read only when ``V2Params.wind_db`` is set.
+    wind_shape: Tensor | None = None
 
 
 def flight_grid(
@@ -428,6 +449,7 @@ def flight_grid(
             device=device,
         ),
         diagnostics=dict(sr=sr, n_fft=n_fft, hop=int(hop), sr_work=sr_work, n_fft_work=n_fft_work),
+        wind_shape=torch.as_tensor(wind_shape(freqs), dtype=torch.float64, device=device),
     )
 
 
@@ -801,5 +823,15 @@ def flight_model(
     all_gain = _mean_pinned_db(_as_t(params.gain_all_db, ref).reshape(-1, 1)).reshape(-1)
     lines = torch.einsum("mr,rnf->mnf", line_gain, shapes)
     floor = _floor_frames(grid, rate, params.floor)
+    if params.wind_db is not None:
+        # v3's static per-mic wind term: a fixed smooth shape, zero above
+        # 500 Hz, one level per mic, no speed law. Added at the analysis bins —
+        # its shape varies slowly on the 7.8 Hz grid, so the window response of
+        # the process is the shape itself — and through the transfer with the
+        # rest, because the renderer's chain applies that to it too.
+        if grid.wind_shape is None:
+            raise ValueError("a wind term needs a FlightGrid carrying its wind_shape")
+        wind = 10.0 ** (_as_t(params.wind_db, ref).reshape(-1) / 10.0)
+        floor = floor + wind[:, None, None] * grid.wind_shape.to(ref)[None, None, :]
     observed = (floor + lines) * grid.transfer_power[None, None, :]
     return (observed * all_gain[:, None, None]).clamp_min(MODEL_FLOOR)

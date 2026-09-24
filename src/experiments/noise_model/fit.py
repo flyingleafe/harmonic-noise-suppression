@@ -64,6 +64,7 @@ from pyro.optim.optim import PyroOptim
 from torch import Tensor
 from torch.distributions import constraints
 
+from data_processing.noise_model.floor import floor_geometry
 from experiments.stochastic_fit.model import FLOOR_SHAPE_N_CTRL
 from experiments.stochastic_fit.revised_phase import (
     FLOOR_INIT_DB_CORRECTION,
@@ -217,6 +218,13 @@ class FitOutcome:
     #: by the model exactly as ``comb_gain_db`` is, so it too is carried here
     #: to be recorded rather than re-applied.
     low_order_gain_db: list[float] | None = None
+    #: the guide's fitted site values (``AutoDelta.median()``, detached): what
+    #: a warm-started refit of the same model starts from
+    sites: dict[str, Tensor] = field(default_factory=dict)
+    #: v3 only: the ``latents`` block of the record (per window, the MAP block
+    #: tracks) and the :class:`.model.WindowLatents` they were read from
+    latents: dict[str, Any] | None = None
+    window_latents: dict[int, MD.WindowLatents] | None = None
 
     @property
     def converged(self) -> bool:
@@ -300,6 +308,8 @@ def seeds(
     centre and width wherever it also carries a finite sd. See
     :class:`ProfileInit`.
     """
+    if mode == MD.V3_MODE:
+        return _seeds_v3(batch, priors=priors, pin=pin, profile_init=profile_init)
     free = MD.free_blocks(mode)
     fz = dict(frozen or {})
     span_pinned = MD.span_pinned_sites(batch, priors=priors)
@@ -459,6 +469,182 @@ def seeds(
     return Seeds(measured=measured, init=out)
 
 
+#: Median of a unit half-normal, ``Phi^-1(3/4)``: where v3 starts a
+#: half-normal site (its mode, zero, is a boundary no log-space start can reach).
+HALFNORMAL_MEDIAN = 0.6744897501960817
+
+#: The v3 floor-shape measurement reads only bins where the start comb
+#: predicts less than this share of the observed pooled power (see
+#: :func:`_seeds_v3`): the rest are the comb's, not the floor's.
+V3_FLOOR_COMB_SHARE = 0.5
+
+#: How far under its prior centre (the pooled line + floor level) a v3 line
+#: whose measured excess is at or below the floor STARTS: sunk, as the
+#: explainer's §2.3 argues it will end up, rather than parked by a rule.
+V3_SINK_INIT_DB = 20.0
+
+
+def _seeds_v3(
+    batch: MD.SupportBatch,
+    *,
+    priors: MD.Priors,
+    pin: dict[str, Any] | None,
+    profile_init: ProfileInit | None,
+) -> Seeds:
+    """The v3 measurement (explainer §2.3-§2.4) and the guide's start.
+
+    One pass, probe forward passes in the model's own units as in v2:
+
+    * ``mu`` (``floor_mean_db``): the band median of the observed floor curve
+      against the model's unit floor — v2's floor level, now a CONSTANT;
+    * the profile prior's centre ``p_hat``: the pooled observed level at each
+      line's peak — line PLUS floor, an upper bound — against the unit comb,
+      for EVERY line the model carries; its start is the v2 excess estimate,
+      held inside ``[p_hat - V3_SINK_INIT_DB, p_hat]``;
+    * the floor SHAPE: the pooled mean with that start comb subtracted through
+      the model, against the unit floor, read per control point as the median
+      over the bins nearest it, about ``mu`` — the control values ``c_j`` —
+      and ``sigma_B`` = their RMS (the real window's floor-shape spread, held
+      at least :attr:`PriorsV3.floor_shape_sd_min_db`); ``z`` starts at the
+      ridge solution of ``sigma_B L z = c`` (``L`` is too ill-conditioned for
+      a plain inverse);
+    * the dynamics start at their half-normal medians (no measurement: in
+      flight the measured widths are resolution-limited).
+    """
+    if not isinstance(priors, MD.PriorsV3):
+        raise TypeError(f"mode {MD.V3_MODE!r} needs PriorsV3, got {type(priors).__name__}")
+    if batch.mode != "flight":
+        raise ValueError(f"mode {MD.V3_MODE!r} is a flight mode; batch {batch.name!r} is not")
+    probe_batch = replace(batch, latents=None)
+    grid = batch.grid
+    assert isinstance(grid, SP.FlightGrid)
+    span_pinned = MD.span_pinned_sites(batch, priors=priors)
+    band = batch.band.detach().cpu().numpy()
+    obs_mean, floor_db = _observed_db(batch)
+    t = lambda v: torch.as_tensor(np.asarray(v, dtype=np.float64), dtype=torch.float64)  # noqa: E731
+    r, m, k = batch.n_rotors, batch.n_mics, batch.k_max
+    orders = np.broadcast_to(np.arange(1, k + 1, dtype=np.float64), (r, k))
+    gamma0 = priors.gamma_scale(orders).numpy() * HALFNORMAL_MEDIAN
+    sigma0 = float(priors.sigma_nu_scale) * HALFNORMAL_MEDIAN
+    med = priors.speed_law_medians()
+    zero = torch.zeros((), dtype=torch.float64)
+    probe = SP.V2Params(
+        sigma_nu=MD.pin_applied(pin, "sigma_nu", sigma0),
+        lam=MD.pin_applied(pin, "lam", MD.flight_lam(priors, None)),
+        gamma_hz=t(gamma0),
+        profile_db=t(np.zeros((r, k))),
+        floor=SP.FloorParams(
+            mean_db=zero,
+            shape_z=torch.zeros(FLOOR_SHAPE_N_CTRL, dtype=torch.float64),
+            tilt_db_oct=zero,
+            mic_floor_db=torch.zeros(m, dtype=torch.float64),
+            exp=t(med["floor_exp"]),
+            static_rel=t(med["floor_static_rel"]),
+            shape_sd_db=t(1.0),
+        ),
+        mic_line_gain_db=torch.zeros(m, r, dtype=torch.float64),
+        gain_all_db=torch.zeros(m, dtype=torch.float64),
+        carrier_rev_s=None,
+        amp_exp=t(med["amp_exp"]),
+    )
+    with torch.no_grad():
+        quiet = MD.forward(probe_batch, _with_profile(probe, -300.0))
+        unit = MD.forward(probe_batch, _with_profile(probe, 0.0))
+        lines_unit = (unit - quiet).clamp_min(1e-30).mean(dim=(0, 1)).cpu().numpy()
+        floor_unit = quiet.mean(dim=(0, 1)).cpu().numpy()
+
+    # ── the floor level mu: v2's measurement, now a constant ────────────────
+    resid = floor_db[band] - 10.0 * np.log10(np.maximum(floor_unit[band], 1e-30))
+    mu = float(np.median(resid))
+
+    # ── the comb: every line's pooled level and its start ──────────────────
+    floor_lin = np.maximum(floor_unit, 1e-30) * 10.0 ** (mu / 10.0)
+    excess = np.maximum(obs_mean - floor_lin, 1e-12)
+    p_hat = np.full((r, k), mu, dtype=np.float64)
+    prof = np.full((r, k), mu - V3_SINK_INIT_DB, dtype=np.float64)
+    snr = np.full((r, k), -99.0, dtype=np.float64)
+    for rr, kk, j0, j1 in _line_windows(batch, band=band, carrier=None, keep_all=True):
+        den = float(np.max(lines_unit[j0:j1]))
+        if den <= 0.0:
+            continue
+        total = float(np.max(obs_mean[j0:j1]))
+        p_hat[rr, kk - 1] = float(np.clip(10.0 * math.log10(max(total, 1e-30) / den), -120.0, 40.0))
+        num = float(np.max(excess[j0:j1]))
+        x_db = 10.0 * math.log10(num / den)
+        prof[rr, kk - 1] = float(
+            np.clip(x_db, p_hat[rr, kk - 1] - V3_SINK_INIT_DB, p_hat[rr, kk - 1])
+        )
+        jpk = int(j0 + np.argmax(excess[j0:j1]))
+        snr[rr, kk - 1] = 10.0 * math.log10(num / max(float(floor_lin[jpk]), 1e-30))
+
+    # ── the floor SHAPE: control values and sigma_B ────────────────────────
+    # read only where the FLOOR dominates: the pooled mean with the comb at
+    # its start levels subtracted through the model (window response and
+    # sidelobes included), on the bins where that comb predicts under
+    # V3_FLOOR_COMB_SHARE of what was observed. A strong line lifts every bin
+    # of a narrow control cell, even under a 20th-percentile curve, and a
+    # subtraction AT the line leaves its own sampling noise, tens of dB over
+    # the floor. Each control point reads the median over the kept bins it is
+    # nearest to (its largest hat weight); a point with none is interpolated.
+    with torch.no_grad():
+        lines_x = MD.forward(probe_batch, replace(probe, profile_db=t(prof))) - quiet
+        lines_x = lines_x.clamp_min(0.0).mean(dim=(0, 1)).cpu().numpy()
+    keep = lines_x[band] < V3_FLOOR_COMB_SHARE * obs_mean[band]
+    clean = np.maximum(obs_mean[band] - lines_x[band], 1e-30)
+    shape_resid = 10.0 * np.log10(clean / np.maximum(floor_unit[band], 1e-30))
+    nearest = np.argmax(floor_geometry(grid.freqs_hz[band], grid.floor.ctrl_hz)[0], axis=1)
+    ctrl = np.full(FLOOR_SHAPE_N_CTRL, np.nan)
+    for j in range(FLOOR_SHAPE_N_CTRL):
+        cell = keep & (nearest == j)
+        if np.any(cell):
+            ctrl[j] = float(np.median(shape_resid[cell])) - mu
+    have = np.isfinite(ctrl)
+    ctrl = (
+        np.interp(np.arange(ctrl.size), np.flatnonzero(have), ctrl[have])
+        if np.any(have)
+        else np.zeros(ctrl.size)
+    )
+    sigma_b = max(float(np.sqrt(np.mean(ctrl**2))), float(priors.floor_shape_sd_min_db))
+    chol = grid.floor.shape_chol.detach().cpu().numpy()
+    z0 = np.linalg.solve(
+        sigma_b**2 * (chol.T @ chol) + np.eye(chol.shape[1]), sigma_b * (chol.T @ ctrl)
+    )
+
+    ext_db: np.ndarray | None = None
+    ext_sd: np.ndarray | None = None
+    if profile_init is not None:
+        ext_db, ext_sd = profile_init.aligned((r, k))
+    measured = MD.Measured(
+        floor_mean_db=mu,
+        profile_db=p_hat,
+        line_snr_db=snr,
+        gamma_hz=gamma0,
+        resolution_hz=batch.resolution_hz,
+        profile_prior_db=(
+            None
+            if ext_db is None or ext_sd is None
+            else np.where(np.isfinite(ext_sd), ext_db, np.nan)
+        ),
+        profile_prior_sd_db=ext_sd,
+        floor_shape_sd_db=sigma_b,
+        floor_ctrl_db=ctrl,
+    )
+
+    out: dict[str, Tensor] = {}
+    if not MD.is_pinned(pin, "sigma_nu"):
+        out["sigma_nu"] = t(sigma0)
+    out["gamma_hz"] = t(gamma0)
+    out["profile_db"] = t(prof if ext_db is None else np.where(np.isfinite(ext_db), ext_db, prof))
+    if "amp_exp" not in span_pinned:
+        out["amp_exp"] = t(priors.amp_exp[0])
+    out["floor_shape_z"] = t(z0)
+    if "floor_exp" not in span_pinned:
+        out["floor_exp"] = t(med["floor_exp"])
+    if "floor_static_rel" not in span_pinned:
+        out["floor_static_rel"] = t(med["floor_static_rel"])
+    return Seeds(measured=measured, init=out)
+
+
 def _half_width_hz(excess: np.ndarray, jpk: int, j0: int, j1: int, df: float) -> float:
     """The measured HALF width at half maximum of the peak at ``jpk``, in Hz.
 
@@ -479,13 +665,14 @@ def _half_width_hz(excess: np.ndarray, jpk: int, j0: int, j1: int, df: float) ->
 
 
 def _line_windows(
-    batch: MD.SupportBatch, *, band: np.ndarray, carrier: Tensor | None
+    batch: MD.SupportBatch, *, band: np.ndarray, carrier: Tensor | None, keep_all: bool = False
 ) -> list[tuple[int, int, int, int]]:
     """``(rotor, order, j0, j1)`` per comb line: the bins that line covers.
 
     The window spans where the line went over the batch, plus the analysis
     window's own main lobe: a moving carrier smears the frame-mean peak across
-    ``k * (f_max - f_min)``. Lines wholly outside the fitted band are dropped.
+    ``k * (f_max - f_min)``. Lines wholly outside the fitted band are dropped
+    unless ``keep_all`` (v3 centres a prior on EVERY line it models).
     """
     if carrier is not None:
         lo_r = hi_r = np.atleast_1d(np.asarray(carrier.cpu(), dtype=np.float64))
@@ -501,10 +688,10 @@ def _line_windows(
     for r in range(int(lo_r.size)):
         for k in range(1, batch.k_max + 1):
             f_lo, f_hi = k * float(lo_r[r]), k * float(hi_r[r])
-            if f_hi < SP.BAND_F_MIN or f_lo > f_top:
+            if not keep_all and (f_hi < SP.BAND_F_MIN or f_lo > f_top):
                 continue
-            j0 = max(0, int(math.floor(f_lo / df)) - 3)
-            j1 = min(n_bins, int(math.ceil(f_hi / df)) + 4)
+            j0 = min(max(0, int(math.floor(f_lo / df)) - 3), n_bins - 1)
+            j1 = max(min(n_bins, int(math.ceil(f_hi / df)) + 4), j0 + 1)
             out.append((r, k, j0, j1))
     return out
 
@@ -660,6 +847,7 @@ def fit_support(
     forward_kw: dict[str, Any] | None = None,
     profile_init: ProfileInit | None = None,
     progress: int = 0,
+    start: Seeds | None = None,
 ) -> FitOutcome:
     """MAP-fit one support (or one pooled set of flight windows).
 
@@ -675,19 +863,29 @@ def fit_support(
 
     ``profile_init`` enters the profile's INITIALISATION and, where it carries
     a width, its prior centre and sd (:class:`ProfileInit`).
+
+    ``start`` replaces the measurement pass: its ``measured`` is the prior
+    centres (so a refit keeps the priors of the fit it continues) and its
+    ``init`` the guide's start (a warm start). The v3 alternation
+    (:func:`fit_v3`) refits the rig this way with the latents held on the
+    batch; ``None`` measures ``batch`` as always.
     """
     torch.manual_seed(int(optim.seed))
     pyro.set_rng_seed(int(optim.seed))
     pyro.clear_param_store()
 
-    measured = seeds(
-        batch,
-        mode=mode,
-        priors=priors,
-        frozen=frozen,
-        pin=pin,
-        low_orders=low_orders,
-        profile_init=profile_init,
+    measured = (
+        start
+        if start is not None
+        else seeds(
+            batch,
+            mode=mode,
+            priors=priors,
+            frozen=frozen,
+            pin=pin,
+            low_orders=low_orders,
+            profile_init=profile_init,
+        )
     )
     full = replace(batch, measured=measured.measured)
     init = dict(measured.init)
@@ -763,6 +961,10 @@ def fit_support(
         idx = np.linspace(0, n_frames - 1, int(optim.lbfgs_frames)).round().astype(np.int64)
         polish = MD.batch_slice(full, np.unique(idx))
     loss_fn = model_for(polish)
+    if not adam_losses:
+        # a warm-started refit may skip Adam: the guide must still have run
+        # once (on the polish set) before it has any parameter to polish
+        elbo.differentiable_loss(loss_fn, guide).detach()
     params = [p for p in guide.parameters() if p.requires_grad]
     boxed = _log_space_params(guide)
     elbo_of = lambda: elbo.differentiable_loss(loss_fn, guide)  # noqa: E731
@@ -828,6 +1030,7 @@ def fit_support(
         objective = MD.objective_breakdown(full, m_model)
     return FitOutcome(
         params=fitted,
+        sites={name: v.detach().clone() for name, v in med.items()},
         comb_gain_db=(float(med["comb_gain_db"]) if "comb_gain_db" in med else None),
         low_order_gain_db=(
             np.asarray(med["low_order_gain_db"].detach().cpu(), dtype=np.float64).tolist()
@@ -872,16 +1075,37 @@ def fit_support(
             gamma_low_order_check=gamma_low_order_check(fitted.gamma_hz, batch=full),
             span_pins=span_pin_record(full, priors=priors),
             profile_init=_profile_init_record(profile_init, measured.measured),
-            measured=dict(
-                floor_mean_db=measured.measured.floor_mean_db,
-                resolution_hz=measured.measured.resolution_hz,
-                n_lines_visible=int(
-                    (measured.measured.line_snr_db >= priors.line_visible_snr_db).sum()
-                ),
-                n_lines=int(measured.measured.line_snr_db.size),
-                line_visible_snr_db=priors.line_visible_snr_db,
-            ),
+            measured=_measured_record(measured.measured, priors=priors),
         ),
+    )
+
+
+def _measured_record(measured: MD.Measured, *, priors: MD.Priors) -> dict[str, Any]:
+    """The ``diagnostics.measured`` block: what the prior centres were read off."""
+    if isinstance(priors, MD.PriorsV3):
+        return dict(
+            floor_mean_db=measured.floor_mean_db,
+            floor_shape_sd_db=measured.floor_shape_sd_db,
+            floor_ctrl_db=(
+                None
+                if measured.floor_ctrl_db is None
+                else np.asarray(measured.floor_ctrl_db, dtype=np.float64).tolist()
+            ),
+            wind_db=(
+                None
+                if measured.wind_db is None
+                else np.asarray(measured.wind_db, dtype=np.float64).tolist()
+            ),
+            resolution_hz=measured.resolution_hz,
+            n_lines=int(measured.line_snr_db.size),
+            profile_centre="pooled observed level at k f_r (line + floor), every line",
+        )
+    return dict(
+        floor_mean_db=measured.floor_mean_db,
+        resolution_hz=measured.resolution_hz,
+        n_lines_visible=int((measured.line_snr_db >= priors.line_visible_snr_db).sum()),
+        n_lines=int(measured.line_snr_db.size),
+        line_visible_snr_db=priors.line_visible_snr_db,
     )
 
 

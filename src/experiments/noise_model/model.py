@@ -58,12 +58,22 @@ not a mode, so they do not belong in a MAP and are not silently applied.
 The two-band split at 300 Hz (the approved floor band edge) is reported in the
 objective, never fitted separately: the comb band is decisive for the
 likelihood gate and the floor band is what the DREGON floor-only fit moves.
+
+MODE ``flight_v3`` is noise model v3 (``docs/explainers/noise-model-v3-wander.qmd``,
+:class:`PriorsV3`): the same flight forward model with light-tailed LINEAR
+priors on the dynamics (``gamma_rk / (0.01 k) ~ HalfNormal(3)``,
+``sigma_nu ~ HalfNormal(0.6)``), ONE profile prior for every order
+(``N(pooled level at k f_r, 10)``, no visibility switch), the floor as the
+spline alone (``c_j = mu + sigma_B (L z)_j`` with ``mu`` and ``sigma_B``
+MEASURED, no mean/tilt sites), no microphone sites (the channels are
+normalised in the data), an optional per-mic static wind level and per-window
+block-wander latents with fixed OU priors.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from typing import Any
 
 import numpy as np
@@ -76,6 +86,7 @@ from torch import Tensor
 # line widths and data_processing may not import experiments. Re-exported here
 # unchanged, so `MD.gamma_from_params` keeps working.
 from data_processing.noise_model.params import gamma_from_params
+from data_processing.noise_model.v3 import Wander, wind_shape_spec
 from experiments.stochastic_fit.model import FLOOR_SHAPE_N_CTRL
 from experiments.stochastic_fit.revised_phase import composite_risk, composite_weights
 
@@ -86,12 +97,17 @@ __all__ = [
     "BAND_SPLIT_HZ",
     "DYN_SITES",
     "PRIORS",
+    "PRIORS_V3",
     "SPEED_LAW_SITES",
+    "V3_MODE",
     "Measured",
     "Priors",
+    "PriorsV3",
     "SupportBatch",
+    "Wander",
     "batch_slice",
     "bench_batch",
+    "detach_params",
     "dynamics_pin",
     "flight_batch",
     "flight_lam",
@@ -100,15 +116,19 @@ __all__ = [
     "frozen_from_params",
     "gamma_from_params",
     "is_pinned",
+    "log_prior",
     "objective_breakdown",
     "params_from_dict",
     "params_to_dict",
+    "params_to_dict_v3",
     "pin_applied",
     "sample_params",
     "sample_params_from_values",
     "span_pinned_sites",
     "support_model",
     "whittle_risk",
+    "window_batch",
+    "with_blocks",
 ]
 
 #: The approved floor/comb band edge. Below it the wind-dominated floor sets the
@@ -254,6 +274,99 @@ class Priors:
 
 PRIORS = Priors()
 
+#: The v3 fit mode (``docs/explainers/noise-model-v3-wander.qmd``).
+V3_MODE = "flight_v3"
+
+
+@dataclass(frozen=True)
+class PriorsV3(Priors):
+    """The v3 priors (explainer §2.2-§2.6), for mode :data:`V3_MODE`.
+
+    A SUBCLASS so every shared law — the speed laws ``amp_exp``,
+    ``log_floor_exp``, ``log_floor_static``, their span pin and the pinned
+    flight ``lam`` — is the very object v2 reads; the fields v3 replaces
+    (the LogNormal dynamics, the two-regime profile, the floor mean/tilt, the
+    mic sds) are simply not read in v3 mode and not recorded by
+    :meth:`as_dict`.
+
+    * ``gamma_rk / (gamma_per_order_hz k) ~ HalfNormal(gamma_c)`` and
+      ``sigma_nu ~ HalfNormal(sigma_nu_scale)``, LINEAR and untruncated: a
+      width of ``5 gamma_0 k`` costs 1.4 nats, 13 Hz at ``k = 1`` ~ 1e5;
+      ``sigma_nu_scale`` is twice the v2 flight LogNormal median (0.3 rad/s);
+    * ``profile_db ~ N(pooled level at k f_r, profile_db_sd)`` for EVERY line;
+    * the floor control values ``mu + sigma_B (L z)_j``, ``z ~ N(0, I)``, with
+      ``mu`` and ``sigma_B`` measured (:attr:`Measured.floor_shape_sd_db`,
+      held at least ``floor_shape_sd_min_db``);
+    * ``wind_db[m] ~ N(measured low-band excess, wind_db_sd)`` when ``wind``;
+    * the block wander's MEASURED hyperparameters ``wander`` (fixed; the
+      record they were read from, provenance included, in ``wander_record``).
+    """
+
+    gamma_c: float = 3.0
+    sigma_nu_scale: float = 0.6
+    floor_shape_sd_min_db: float = 1.0
+    wind: bool = False
+    wind_db_sd: float = 6.0
+    wander: Wander | None = None
+    wander_record: dict[str, Any] | None = field(default=None, compare=False, hash=False)
+
+    def gamma_scale(self, k: np.ndarray | Tensor) -> Tensor:
+        """``gamma_c * gamma_per_order_hz * k``: the half-normal scale per order."""
+        kk = torch.as_tensor(np.array(k, dtype=np.float64), dtype=torch.float64)
+        return float(self.gamma_c) * float(self.gamma_per_order_hz) * kk
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "version": "v3",
+            "sigma_nu": {
+                "family": "HalfNormal",
+                "scale_rad_s": self.sigma_nu_scale,
+                "source": "2 x the v2 flight LogNormal median (0.3 rad/s)",
+            },
+            "gamma_hz": {
+                "family": "HalfNormal",
+                "scale_hz": f"{self.gamma_c:g} * {self.gamma_per_order_hz:g} * k",
+                "gamma_c": self.gamma_c,
+                "gamma0_hz": self.gamma_per_order_hz,
+                "source": "bench decoherence law V_eps ~ 0.09 k^1.1 tau^0.43 rad^2",
+            },
+            "flight_lam_pin": self.flight_lam,
+            "profile_db": {
+                "family": "Normal",
+                "loc": "measured pooled level at k f_r (line + floor)",
+                "sd": self.profile_db_sd,
+                "rule": "every order; no visibility switch",
+            },
+            "floor_shape_z": {
+                "family": "Normal(0, I)",
+                "control_values_db": "mu + sigma_B (L z)_j",
+                "sigma_B_min_db": self.floor_shape_sd_min_db,
+            },
+            "amp_exp": list(self.amp_exp),
+            "log_floor_exp": list(self.log_floor_exp),
+            "log_floor_static": list(self.log_floor_static),
+            "speed_span_pin": self.speed_span_pin,
+            "mic": "none: channels normalised in the data",
+            "wind": (
+                {
+                    "family": "Normal",
+                    "loc": "measured per-mic low-band excess",
+                    "sd": self.wind_db_sd,
+                    "shape": wind_shape_spec(),
+                }
+                if self.wind
+                else None
+            ),
+            "wander": (
+                self.wander_record
+                if self.wander_record is not None
+                else (self.wander.as_params() if self.wander is not None else None)
+            ),
+        }
+
+
+PRIORS_V3 = PriorsV3()
+
 
 @dataclass(frozen=True)
 class Measured:
@@ -279,17 +392,28 @@ class Measured:
     #: width, never in the likelihood.
     profile_prior_db: np.ndarray | None = None
     profile_prior_sd_db: np.ndarray | None = None
+    #: v3 only: the MEASURED floor-shape spread ``sigma_B`` (dB) that scales
+    #: the spline's control values, the measured control values themselves
+    #: (dB about ``floor_mean_db``) and the per-mic wind prior centres.
+    floor_shape_sd_db: float | None = None
+    floor_ctrl_db: np.ndarray | None = None
+    wind_db: np.ndarray | None = None
 
     def profile_prior(self, priors: Priors) -> tuple[Tensor, Tensor]:
-        """``(loc, scale)`` of the two-regime profile prior, per line."""
-        snr = np.asarray(self.line_snr_db, dtype=np.float64)
-        visible = snr >= float(priors.line_visible_snr_db)
-        loc = np.where(
-            visible,
-            np.asarray(self.profile_db, dtype=np.float64),
-            float(self.floor_mean_db) + float(priors.profile_below_offset_db),
-        )
-        scale = np.where(visible, float(priors.profile_db_sd), float(priors.profile_below_sd))
+        """``(loc, scale)`` of the profile prior, per line: v2's two regimes,
+        or v3's ONE ``N(measured pooled level, profile_db_sd)`` for every line."""
+        if isinstance(priors, PriorsV3):
+            loc = np.asarray(self.profile_db, dtype=np.float64)
+            scale = np.full(loc.shape, float(priors.profile_db_sd))
+        else:
+            snr = np.asarray(self.line_snr_db, dtype=np.float64)
+            visible = snr >= float(priors.line_visible_snr_db)
+            loc = np.where(
+                visible,
+                np.asarray(self.profile_db, dtype=np.float64),
+                float(self.floor_mean_db) + float(priors.profile_below_offset_db),
+            )
+            scale = np.where(visible, float(priors.profile_db_sd), float(priors.profile_below_sd))
         if self.profile_prior_db is not None:
             ext = np.asarray(self.profile_prior_db, dtype=np.float64)
             loc = np.where(np.isfinite(ext), ext, loc)
@@ -351,6 +475,12 @@ def free_blocks(mode: str) -> tuple[str, ...]:
     # closes is a gap in that block alone
     if mode == "bench_dynamics_only":
         return ("dynamics",)
+    if mode == V3_MODE:
+        # v3: no "mic" block (channels normalised in the data) and nothing
+        # frozen. "wind" is sampled only when PriorsV3.wind; "latents" are the
+        # per-window block-wander tracks, fitted by the alternation of
+        # fit.fit_v3 rather than inside one guide with the rig
+        return ("dynamics", "profile", "floor", "wind", "latents")
     raise ValueError(f"unknown mode {mode!r}")
 
 
@@ -367,6 +497,27 @@ def span_pinned_sites(batch: SupportBatch, *, priors: Priors = PRIORS) -> tuple[
 
 
 # ── the observation ─────────────────────────────────────────────────────────
+
+
+@dataclass
+class WindowLatents:
+    """The block-wander latents of ONE window, in dB (explainer §2.3, §2.4).
+
+    ``d`` is ``(R, B)`` (per rotor, shared by its orders), ``v`` ``(R, K, B)``
+    (per line), ``u`` ``(B,)`` (floor level) and ``uj`` ``(J, B)`` (per floor
+    control point). A track whose measured ``sigma`` is zero is ``None`` — no
+    site, no prior term, nothing added.
+    """
+
+    d: Tensor | None = None
+    v: Tensor | None = None
+    u: Tensor | None = None
+    uj: Tensor | None = None
+
+    def tracks(self) -> dict[str, Tensor]:
+        """``{name: tensor}`` of the tracks this window carries."""
+        pairs = (("d", self.d), ("v", self.v), ("u", self.u), ("uj", self.uj))
+        return {name: t for name, t in pairs if t is not None}
 
 
 @dataclass
@@ -408,6 +559,20 @@ class SupportBatch:
     measured: Measured | None = None
     members: tuple[str, ...] = ()
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    #: FLIGHT only: ``(N,)`` member (window) index of every frame and its
+    #: centre time in seconds from the window's first sample. v2 never reads
+    #: them; v3 groups frames into blocks with them.
+    frame_window: np.ndarray | None = None
+    frame_time_s: np.ndarray | None = None
+    #: v3 only (:func:`with_blocks`): ``(N,)`` block of every frame inside its
+    #: window, each window's block count, and the block length.
+    frame_block: np.ndarray | None = None
+    window_blocks: tuple[int, ...] = ()
+    block_s: float | None = None
+    #: v3 only: the per-window block-wander latents :func:`forward` applies —
+    #: CONSTANTS of a rig step. ``None`` means all zero, i.e. plain
+    #: :func:`.spectrum.flight_model`.
+    latents: dict[int, WindowLatents] | None = None
 
     @property
     def n_cells(self) -> int:
@@ -554,7 +719,9 @@ def flight_batch(
     keys: list[tuple[str, int]] = []
     n_total = 0
     carriers: list[np.ndarray] = []
-    for mname, power, carrier, starts in members:
+    frame_window: list[np.ndarray] = []
+    frame_time: list[np.ndarray] = []
+    for w_idx, (mname, power, carrier, starts) in enumerate(members):
         p = np.asarray(power, dtype=np.float64)
         st = np.asarray(starts, dtype=np.int64)
         n_total += int(st.size)
@@ -566,6 +733,8 @@ def flight_batch(
         rates.append(SP.flight_rate_work(grid, carrier, st[sel]))
         keys.extend((mname, int(s)) for s in st[sel])
         carriers.append(np.asarray(carrier, dtype=np.float64))
+        frame_window.append(np.full(sel.size, w_idx, dtype=np.int64))
+        frame_time.append((st[sel] + 0.5 * float(n_fft)) / float(sr))
     power_t = torch.as_tensor(np.concatenate(powers, axis=1), dtype=torch.float64, device=device)
     rate_t = torch.cat(rates, dim=1)
     n_sel = int(power_t.shape[1])
@@ -603,6 +772,8 @@ def flight_batch(
             carrier_max_rev_s=float(c_all.max()),
             speed_span=span,
         ),
+        frame_window=np.concatenate(frame_window),
+        frame_time_s=np.concatenate(frame_time),
     )
 
 
@@ -623,7 +794,60 @@ def batch_slice(batch: SupportBatch, idx: np.ndarray) -> SupportBatch:
         power=batch.power.index_select(1, i),
         weights=batch.weights.index_select(0, i) * scale,
         rate_work=batch.rate_work.index_select(1, i),
+        **_frame_fields(batch, np.asarray(idx, dtype=np.int64)),
     )
+
+
+def _frame_fields(batch: SupportBatch, idx: np.ndarray) -> dict[str, Any]:
+    """The per-frame bookkeeping arrays of ``batch`` at frames ``idx``."""
+    return {
+        key: (None if getattr(batch, key) is None else getattr(batch, key)[idx])
+        for key in ("frame_window", "frame_time_s", "frame_block")
+    }
+
+
+def window_batch(batch: SupportBatch, window: int) -> SupportBatch:
+    """The frames of ONE member window, weights NOT rescaled.
+
+    What the per-window latent step of the v3 alternation fits against: a
+    window's latents must see exactly that window's exposure against their OU
+    prior, not the pool's (which :func:`batch_slice`'s rescaling would give).
+    """
+    if batch.rate_work is None or batch.frame_window is None:
+        raise ValueError("window_batch is for flight batches with frame bookkeeping")
+    idx = np.flatnonzero(batch.frame_window == int(window))
+    if idx.size == 0:
+        raise ValueError(f"window {window} has no frame in batch {batch.name!r}")
+    i = torch.as_tensor(idx, device=batch.power.device)
+    return replace(
+        batch,
+        power=batch.power.index_select(1, i),
+        weights=batch.weights.index_select(0, i),
+        rate_work=batch.rate_work.index_select(1, i),
+        latents=None,
+        **_frame_fields(batch, idx),
+    )
+
+
+def with_blocks(batch: SupportBatch, block_s: float) -> SupportBatch:
+    """``batch`` with every frame assigned to its window's block of ``block_s``.
+
+    Block ``b`` of a window holds the frames whose CENTRE lies in
+    ``[b block_s, (b + 1) block_s)`` from the window's first sample; a window
+    has ``1 + max b`` blocks over the frames the batch kept (a block the frame
+    thinning left empty is a pure-prior block of the OU chain).
+    """
+    if batch.frame_window is None or batch.frame_time_s is None:
+        raise ValueError("with_blocks needs a flight batch with frame bookkeeping")
+    if not (math.isfinite(block_s) and block_s > 0.0):
+        raise ValueError(f"block_s must be finite and positive, got {block_s!r}")
+    fb = np.floor(np.asarray(batch.frame_time_s) / float(block_s)).astype(np.int64)
+    n_win = len(batch.members) if batch.members else int(batch.frame_window.max()) + 1
+    counts = tuple(
+        int(fb[batch.frame_window == w].max()) + 1 if np.any(batch.frame_window == w) else 0
+        for w in range(n_win)
+    )
+    return replace(batch, frame_block=fb, window_blocks=counts, block_s=float(block_s))
 
 
 # ── parameters ──────────────────────────────────────────────────────────────
@@ -768,6 +992,8 @@ def sample_params(
     (:func:`span_pinned_sites`). ``pin`` does the same for a named dynamics
     scalar of an otherwise free block.
     """
+    if mode == V3_MODE:
+        return _sample_params_v3(batch, priors=priors, frozen=frozen, pin=pin, site=site)
     free = free_blocks(mode)
     fz = dict(frozen or {})
     r, m, k = batch.n_rotors, batch.n_mics, batch.k_max
@@ -913,6 +1139,144 @@ def sample_params(
     )
 
 
+def _sample_params_v3(
+    batch: SupportBatch,
+    *,
+    priors: Priors,
+    frozen: dict[str, Any] | None,
+    pin: dict[str, Any] | None,
+    site: SiteFn,
+) -> V2Params:
+    """Every RIG parameter of the v3 flight model (mode :data:`V3_MODE`).
+
+    Differences from v2, each one a line of the explainer's §2.6 table:
+    ``sigma_nu`` and ``gamma_hz`` are half-normal in linear units, the profile
+    prior is ``N(measured, profile_db_sd)`` for every line, the floor has NO
+    ``floor_mean_db``/``floor_tilt_db_oct`` site (``mu`` and ``sigma_B`` are
+    measured constants, ``floor_shape_z`` the only shape site), and there is no
+    microphone site at all — the three v2 mic blocks are zeros, which the
+    mean-pinned forward model reads as unit gains. ``wind_db`` is a site only
+    when :attr:`PriorsV3.wind`. The block latents are NOT sampled here: they
+    are per window (:func:`sample_window_latents`, :func:`latent_model`).
+    """
+    if not isinstance(priors, PriorsV3):
+        raise TypeError(f"mode {V3_MODE!r} needs PriorsV3, got {type(priors).__name__}")
+    if frozen:
+        raise ValueError(f"mode {V3_MODE!r} freezes nothing; got frozen keys {sorted(frozen)}")
+    if batch.mode != "flight":
+        raise ValueError(f"mode {V3_MODE!r} is a flight mode; batch {batch.name!r} is {batch.mode}")
+    meas = batch.measured
+    if meas is None or meas.floor_shape_sd_db is None:
+        raise ValueError(
+            f"batch {batch.name!r} carries no v3 measurement (fit.measure_batch with mode "
+            f"{V3_MODE!r}): the profile centre, mu and sigma_B are measured"
+        )
+    r, m, k = batch.n_rotors, batch.n_mics, batch.k_max
+    span_pinned = span_pinned_sites(batch, priors=priors)
+    medians = priors.speed_law_medians()
+    zero = torch.zeros((), dtype=torch.float64)
+
+    def speed_law(name: str, draw: Any) -> Tensor:
+        if name in span_pinned:
+            return torch.as_tensor(medians[name], dtype=torch.float64)
+        return draw()
+
+    if is_pinned(pin, "sigma_nu"):
+        assert pin is not None
+        sigma_nu = torch.as_tensor(float(pin["sigma_nu"]), dtype=torch.float64)
+    else:
+        sigma_nu = site(
+            "sigma_nu",
+            dist.HalfNormal(torch.tensor(float(priors.sigma_nu_scale), dtype=torch.float64)),
+        )
+    lam = pin_applied(pin, "lam", flight_lam(priors, None))
+    orders = np.broadcast_to(np.arange(1, k + 1, dtype=np.float64), (r, k))
+    gamma_hz = site("gamma_hz", dist.HalfNormal(priors.gamma_scale(orders)).to_event(2))
+
+    loc, scale = meas.profile_prior(priors)
+    profile_db = site("profile_db", dist.Normal(loc[:r, :k], scale[:r, :k]).to_event(2))
+    amp_exp = speed_law("amp_exp", lambda: _normal(site, "amp_exp", *priors.amp_exp))
+
+    floor = FloorParams(
+        mean_db=torch.as_tensor(float(meas.floor_mean_db), dtype=torch.float64),
+        shape_z=_normal(site, "floor_shape_z", 0.0, 1.0, (FLOOR_SHAPE_N_CTRL,)),
+        tilt_db_oct=zero,
+        mic_floor_db=torch.zeros(m, dtype=torch.float64),
+        exp=speed_law("floor_exp", lambda: _lognormal(site, "floor_exp", priors.log_floor_exp)),
+        static_rel=speed_law(
+            "floor_static_rel",
+            lambda: _lognormal(site, "floor_static_rel", priors.log_floor_static),
+        ),
+        shape_sd_db=torch.as_tensor(float(meas.floor_shape_sd_db), dtype=torch.float64),
+    )
+
+    wind_db = None
+    if priors.wind:
+        if meas.wind_db is None:
+            raise ValueError(f"batch {batch.name!r}: --wind needs the measured wind centres")
+        wind_db = _normal(
+            site, "wind_db", np.asarray(meas.wind_db, dtype=np.float64), priors.wind_db_sd, (m,)
+        )
+
+    return V2Params(
+        sigma_nu=sigma_nu,
+        lam=lam,
+        gamma_hz=gamma_hz,
+        profile_db=profile_db,
+        floor=floor,
+        mic_line_gain_db=torch.zeros(m, r, dtype=torch.float64),
+        gain_all_db=torch.zeros(m, dtype=torch.float64),
+        carrier_rev_s=None,
+        amp_exp=amp_exp,
+        wind_db=wind_db,
+    )
+
+
+def log_prior(
+    batch: SupportBatch,
+    *,
+    mode: str,
+    values: dict[str, Tensor],
+    priors: Priors = PRIORS,
+    pin: dict[str, Any] | None = None,
+) -> float:
+    """``sum log p(site)`` of the rig sites at ``values`` (a guide's medians).
+
+    The SAME construction the model samples through, with each draw replaced
+    by a lookup that also accumulates the site's log density — what the v3
+    record adds to the Whittle term to report a total objective."""
+    acc: list[Tensor] = []
+
+    def lookup(name: str, d: Any) -> Tensor:
+        v = torch.as_tensor(values[name], dtype=torch.float64)
+        acc.append(d.log_prob(v).sum())
+        return v
+
+    sample_params(batch, mode=mode, priors=priors, pin=pin, site=lookup)
+    return float(sum(float(a) for a in acc))
+
+
+def detach_params(params: V2Params) -> V2Params:
+    """``params`` with every tensor detached: the rig as CONSTANTS."""
+
+    def d(v: Any) -> Any:
+        return v.detach() if isinstance(v, Tensor) else v
+
+    fl = params.floor
+    return V2Params(
+        sigma_nu=d(params.sigma_nu),
+        lam=d(params.lam),
+        gamma_hz=d(params.gamma_hz),
+        profile_db=d(params.profile_db),
+        floor=FloorParams(**{f.name: d(getattr(fl, f.name)) for f in fields(FloorParams)}),
+        mic_line_gain_db=d(params.mic_line_gain_db),
+        gain_all_db=d(params.gain_all_db),
+        carrier_rev_s=d(params.carrier_rev_s),
+        amp_exp=d(params.amp_exp),
+        wind_db=d(params.wind_db),
+    )
+
+
 def forward(batch: SupportBatch, params: V2Params, **kw: Any) -> Tensor:
     """``(M, N, F)`` expected periodogram of the batch under ``params``."""
     if batch.mode == "bench":
@@ -1009,15 +1373,86 @@ def params_to_dict(params: V2Params) -> dict[str, Any]:
     )
 
 
-def params_from_dict(d: dict[str, Any], *, device: Any = "cpu") -> V2Params:
+def params_to_dict_v3(params: V2Params, *, wander: Wander | None) -> dict[str, Any]:
+    """The ``params`` block of a ``noise-v3-fit/1`` JSON: the RIG only.
+
+    No microphone block (the channels were normalised in the data); the floor
+    as ``mu`` (``floor_mean_db``, measured), the GP coordinate ``z`` and the
+    measured ``sigma_B`` (``floor_shape_sd_db``) with no tilt; the per-mic wind
+    level with its fixed shape when fitted; and the MEASURED wander
+    hyperparameters the renderer draws fresh block latents from. The fitted
+    per-window latents are nuisance and live in the record's ``latents``
+    block, not here.
+    """
+    f = lambda v: float(np.asarray(v.detach().cpu() if isinstance(v, Tensor) else v))  # noqa: E731
+    a = lambda v: np.asarray(  # noqa: E731
+        v.detach().cpu() if isinstance(v, Tensor) else v, dtype=np.float64
+    ).tolist()
+    if params.floor.shape_sd_db is None:
+        raise ValueError("a v3 parameter set carries the measured sigma_B (floor.shape_sd_db)")
+    prof = np.atleast_2d(np.asarray(a(params.profile_db), dtype=np.float64))
+    gamma = np.broadcast_to(
+        np.atleast_2d(np.asarray(a(params.gamma_hz), dtype=np.float64)), prof.shape
+    )
+    return dict(
+        sigma_nu=f(params.sigma_nu),
+        lam=f(params.lam),
+        gamma_hz=gamma.tolist(),
+        carrier_rev_s=None,
+        profile=dict(profile_db=prof.tolist(), amp_exp=f(params.amp_exp)),
+        floor=dict(
+            floor_mean_db=f(params.floor.mean_db),
+            floor_shape_z=a(params.floor.shape_z),
+            floor_shape_sd_db=f(params.floor.shape_sd_db),
+            floor_exp=f(params.floor.exp),
+            floor_static_rel=f(params.floor.static_rel),
+        ),
+        wind=(
+            None
+            if params.wind_db is None
+            else dict(wind_db=a(params.wind_db), shape=wind_shape_spec())
+        ),
+        wander=None if wander is None else wander.as_params(),
+    )
+
+
+def params_from_dict(
+    d: dict[str, Any], *, device: Any = "cpu", n_mics: int | None = None
+) -> V2Params:
     """Inverse of :func:`params_to_dict` (what the renderer and a frozen-comb
     flight fit read), for a ``/2`` payload or a mapped ``/1`` one
-    (:func:`gamma_from_params`)."""
+    (:func:`gamma_from_params`) — and of :func:`params_to_dict_v3`, whose
+    missing microphone block reads as zeros over ``n_mics`` microphones (the
+    wind block's count when it has one, else ``n_mics``, else one)."""
 
     def t(v: Any) -> Tensor:
         return torch.as_tensor(np.asarray(v, dtype=np.float64), dtype=torch.float64, device=device)
 
     prof, floor = d["profile"], d["floor"]
+    if "floor_shape_sd_db" in floor:
+        wind = d.get("wind")
+        n_m = len(wind["wind_db"]) if wind is not None else int(n_mics or 1)
+        n_r = int(np.atleast_2d(np.asarray(prof["profile_db"])).shape[0])
+        return V2Params(
+            sigma_nu=t(d["sigma_nu"]),
+            lam=t(d["lam"]),
+            gamma_hz=t(gamma_from_params(d)),
+            profile_db=t(prof["profile_db"]),
+            floor=FloorParams(
+                mean_db=t(floor["floor_mean_db"]),
+                shape_z=t(floor["floor_shape_z"]),
+                tilt_db_oct=t(0.0),
+                mic_floor_db=t(np.zeros(n_m)),
+                exp=t(floor["floor_exp"]),
+                static_rel=t(floor["floor_static_rel"]),
+                shape_sd_db=t(floor["floor_shape_sd_db"]),
+            ),
+            mic_line_gain_db=t(np.zeros((n_m, n_r))),
+            gain_all_db=t(np.zeros(n_m)),
+            carrier_rev_s=None,
+            amp_exp=t(prof["amp_exp"]),
+            wind_db=None if wind is None else t(wind["wind_db"]),
+        )
     return V2Params(
         sigma_nu=t(d["sigma_nu"]),
         lam=t(d["lam"]),

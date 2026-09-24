@@ -62,11 +62,14 @@ def floor_shape_chol(ctrl_hz: np.ndarray) -> np.ndarray:
     return se_cholesky(FLOOR_SHAPE_N_CTRL, float(oct_[1] - oct_[0]), FLOOR_SHAPE_OCT)
 
 
-def floor_shape_db(shape_z: np.ndarray, *, sr: int) -> np.ndarray:
-    """``FLOOR_SHAPE_STD_DB * (chol @ z)``: the dB control values from the GP
-    coordinate, the numpy twin of :meth:`FloorBasis.shape_db`."""
+def floor_shape_db(
+    shape_z: np.ndarray, *, sr: int, scale_db: float = FLOOR_SHAPE_STD_DB
+) -> np.ndarray:
+    """``scale_db * (chol @ z)``: the dB control values from the GP coordinate,
+    the numpy twin of :meth:`FloorBasis.shape_db`. v2 scales by the fixed
+    ``FLOOR_SHAPE_STD_DB``; v3 by its MEASURED ``sigma_B`` (``floor_shape_sd_db``)."""
     chol = floor_shape_chol(floor_ctrl_hz(sr))
-    return FLOOR_SHAPE_STD_DB * (chol @ np.asarray(shape_z, dtype=np.float64))
+    return float(scale_db) * (chol @ np.asarray(shape_z, dtype=np.float64))
 
 
 def k_max_for_carrier(carrier_rev_s: Any, sr: int, *, k_cap: int | None = None) -> int:
