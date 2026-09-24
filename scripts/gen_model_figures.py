@@ -435,49 +435,86 @@ def tables() -> None:
         [
             [
                 "$\\sigma_\\nu$",
-                "shaft OU speed-error sd (rad/s)",
+                "shaft OU stationary speed-error sd (rad/s)",
                 "per rotor",
-                "bench LN(0.3, 0.7); flight LN(0.3, 0.5)",
+                "HN(0.6)",
             ],
             [
                 "$\\lambda$",
                 "shaft OU rate (s$^{-1}$)",
                 "per rotor",
-                "LN(2, 1.0) on the bench; pinned in flight",
+                "pinned in flight (0.5); LN(2, 1.0) on the bench",
             ],
             [
-                "$\\gamma_{rk}$",
-                "Lorentzian half-width of line $(r,k)$ (Hz)",
+                "$\\gamma_{ik}$",
+                "Lorentzian half-width of line $(i,k)$ (Hz)",
                 "rotor $\\times$ order",
-                "LN($0.01k$\\,Hz, 1.0), $\\gamma\\ge0$",
+                "$\\gamma_{ik}/(\\gamma_0 k) \\sim$ HN(3), $\\gamma_0 = 0.01$\\,Hz",
             ],
             [
-                "$p_{rk}$",
-                "line power of order $k$ (dB), the comb profile",
+                "$p_{ik}$",
+                "mean line power of order $k$ at $r_{\\mathrm{ref}}$ (dB), the comb profile",
                 "rotor $\\times$ order",
-                "N(measured, 10) if SNR $\\ge$ 2\\,dB, else N($\\mu_F-15$, 8)",
+                "N($\\hat p_{ik}$, 10) for every order, $\\hat p_{ik}$ the pooled level at $k r_i$",
             ],
-            ["$c$", "level of a transplanted comb (dB)", "1", "N(0, 20)"],
             ["$a$", "comb speed exponent", "1", "N(2, 1); pinned at 2 on a short span"],
+            [
+                "$d_i(\\ell)$",
+                "rotor-common line wander in block $\\ell$ (dB)",
+                "rotor $\\times$ block",
+                "OU($\\sigma_d$, $\\tau_d$), measured and fixed",
+            ],
+            [
+                "$v_{ik}(\\ell)$",
+                "per-line wander in block $\\ell$ (dB)",
+                "line $\\times$ block",
+                "OU($\\sigma_v$, $\\tau_v$), measured and fixed",
+            ],
             ["$b$", "floor speed exponent", "1", "LN(2, 0.5); same span pin"],
             ["$s$", "static fraction of the floor", "1", "LN($2.5\\times10^{-3}$, 1.0)"],
-            ["$\\mu_F$", "floor level (dB)", "1", "N(measured band median, 10)"],
-            ["$z$", "GP control points of the floor shape", "14", "N(0, 1) each"],
-            ["$t_F$", "floor tilt (dB/octave)", "1", "N(0, 5)"],
+            ["$\\mu$", "floor level (dB)", "1", "measured band median, fixed"],
             [
-                "$g_{mr}$",
-                "per-microphone line gain (dB), mean-pinned",
-                "mic $\\times$ rotor",
-                "N(0, 6)",
+                "$z$",
+                "GP control points of the floor shape",
+                "14",
+                "N(0, 1) each, scale $\\sigma_B$ measured and fixed",
             ],
-            ["$h_m$", "per-microphone floor gain (dB)", "mic", "N(0, 6)"],
-            ["$G_m$", "per-microphone overall gain (dB), mean-pinned", "mic", "N(0, 6)"],
-            ["$f_r$", "carrier (rev/s)", "per rotor", "given: window-refined or telemetry label"],
+            [
+                "$u(\\ell)$",
+                "floor-level drift in block $\\ell$ (dB)",
+                "block",
+                "OU($\\sigma_u$, $\\tau_u$), measured and fixed",
+            ],
+            [
+                "$u_j(\\ell)$",
+                "floor-colour drift at control point $j$ (dB)",
+                "14 $\\times$ block",
+                "OU($\\sigma_{u_j}$, $\\tau_{u_j}$), measured and fixed",
+            ],
+            [
+                "$w_m$",
+                "static wind level below 500\\,Hz (dB), DREGON only",
+                "mic",
+                "N(measured low-band excess, 6)",
+            ],
+            [
+                "$r_i$",
+                "carrier (rev/s)",
+                "per rotor",
+                "given: window-refined or telemetry label",
+            ],
         ],
-        "Parameters of the rotor-noise model and their priors. LN$(m,s)$: log-normal with "
-        "median $m$ and log-sd $s$; N$(\\mu,\\sigma)$: normal.",
+        "Parameters of the rotor-noise model (v3) and their priors. HN$(\\sigma)$: half-normal "
+        "of scale $\\sigma$ in the parameter's own units; LN$(m,s)$: log-normal with median $m$ "
+        "and log-sd $s$; N$(\\mu,\\sigma)$: normal; OU$(\\sigma,\\tau)$: stationary "
+        "Ornstein--Uhlenbeck across blocks of 0.5\\,s with sd $\\sigma$ and correlation time "
+        "$\\tau$, the values of Table~\\ref{tab:wander}. There is no microphone parameter: "
+        "the channels are normalised in the data.",
         "tab:gen-noise-model-params",
         star=True,
+        source="source: docs/explainers/noise-model-v3-wander.qmd, section 2.6; "
+        "src/experiments/noise_model/model.py (PriorsV3);\n"
+        "results/noise_v3/wander/{dregon,michaels}.json (block_s 0.5)",
     )
 
     write_table(
