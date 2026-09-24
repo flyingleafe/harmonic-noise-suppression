@@ -1052,6 +1052,86 @@ def _verdict(audit: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _estimator() -> dict[str, Any]:
+    return {
+        "annulus_frac_of_fbar": list(TN.ANNULUS_FRAC),
+        "peak_half_bins": TN.PEAK_HALF_BINS,
+        "exclude_half_bins": TN.EXCLUDE_HALF_BINS,
+        "thresholds_db": list(TN.PROM_THRESHOLDS_DB),
+        "named_orders": list(TN.NAMED_ORDERS),
+        "comb_off_db": TN.COMB_OFF_DB,
+        "n_fft": 2048,
+        "sr": 16000,
+        "bin_hz": 16000.0 / 2048.0,
+    }
+
+
+def audit_fits(specs: list[str], out_dir: Path) -> Path:
+    """``--fit``: named FIT payloads (a ``noise-v3-fit/1`` rig, say) measured
+    exactly as the pinned anchors are, with the anchors' rows beside them."""
+    fits: dict[str, dict[str, Any]] = {}
+    paths: dict[str, str] = {}
+    for spec in specs:
+        key, sep, path = str(spec).partition("=")
+        if not sep:
+            raise SystemExit(f"--fit wants RIG[_standby]=PATH, got {spec!r}")
+        paths[key] = path
+        fits[key] = json.loads(Path(path).read_text())
+    patterns = TN.select_patterns()
+    probe = TN.PatternProbe(patterns)
+    rows: dict[str, Any] = {}
+    curves: dict[str, Any] = {}
+    for rig in sorted({k.removesuffix("_standby") for k in fits}):
+        if rig not in fits:
+            raise SystemExit(f"--fit {rig}_standby=... needs --fit {rig}=... (the cruise payload)")
+        payloads = {"cruise": fits[rig], "standby": fits.get(f"{rig}_standby")}
+        row, cur = TN.entry_row(
+            payloads, probe, [p.name for p in patterns if p.rig == rig], detail=True
+        )
+        rows[rig] = _round(row, 4)
+        curves[rig] = {k: [round(float(x), 3) for x in v] for k, v in cur.items()}
+    payload = {
+        "format": "noise-v2-tonality-fits/1",
+        "fits": paths,
+        "estimator": _estimator(),
+        "patterns": [p.as_dict() for p in patterns],
+        "rows": rows,
+        "curves": curves,
+        "references": _reference_rows(patterns),
+    }
+    path = out_dir / "fits.json"
+    path.write_text(json.dumps(payload, indent=1))
+    n_col = min(3, len(patterns))
+    n_row = -(-len(patterns) // n_col)
+    fig, axes = plt.subplots(n_row, n_col, figsize=(5.2 * n_col, 3.6 * n_row), squeeze=False)
+    for ax in axes.flat[len(patterns) :]:
+        ax.set_visible(False)
+    for ax, pat in zip(axes.flat, patterns):
+        anchor = pat.rig + ("_standby" if pat.regime == "standby" else "")
+        for label, cur, style in (
+            (f"{pat.rig} fit", curves.get(pat.rig, {}).get(pat.name), dict(color="C3")),
+            (
+                f"{anchor} anchor",
+                payload["references"]["curves"].get(anchor, {}).get(pat.name),
+                dict(color="0.4", ls="--"),
+            ),
+        ):
+            if cur:
+                ax.plot(np.arange(1, len(cur) + 1), cur, label=label, lw=1.2, **style)
+        ax.legend(fontsize=8)
+        for thr in TN.PROM_THRESHOLDS_DB:
+            ax.axhline(thr, color="0.8", lw=0.8)
+        ax.set_xscale("log")
+        ax.set_title(pat.name, fontsize=9)
+        ax.set_xlabel("order k")
+        ax.grid(alpha=0.3)
+    for row in axes:
+        row[0].set_ylabel("prominence over local floor, dB")
+    fig.tight_layout()
+    print("wrote", _save(fig, "fits_ladder.png", out_dir))
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--limit", type=int, default=None, help="entries per bank (smoke runs)")
@@ -1059,10 +1139,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=OUT)
     ap.add_argument("--bank", choices=sorted(BANKS), action="append")
     ap.add_argument("--reuse", action="store_true", help="rebuild tables/figures from audit.json")
+    ap.add_argument(
+        "--fit",
+        action="append",
+        default=[],
+        metavar="RIG[_standby]=PATH",
+        help="audit these fit payloads (e.g. a noise-v3-fit/1 rig) instead of the banks: the "
+        "anchors' per-pattern rows, for each fit and for the anchors, to <out>/fits.json",
+    )
     args = ap.parse_args(argv)
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    if args.fit:
+        print("wrote", audit_fits(list(args.fit), out_dir))
+        return 0
     audit_path = out_dir / "audit.json"
     if args.reuse:
         audit = json.loads(audit_path.read_text())
@@ -1081,17 +1172,7 @@ def main(argv: list[str] | None = None) -> int:
             "banks": banks,
             "n_entries": len(rows),
             "limit": args.limit,
-            "estimator": {
-                "annulus_frac_of_fbar": list(TN.ANNULUS_FRAC),
-                "peak_half_bins": TN.PEAK_HALF_BINS,
-                "exclude_half_bins": TN.EXCLUDE_HALF_BINS,
-                "thresholds_db": list(TN.PROM_THRESHOLDS_DB),
-                "named_orders": list(TN.NAMED_ORDERS),
-                "comb_off_db": TN.COMB_OFF_DB,
-                "n_fft": 2048,
-                "sr": 16000,
-                "bin_hz": 16000.0 / 2048.0,
-            },
+            "estimator": _estimator(),
             "patterns": [p.as_dict() for p in patterns],
             "references": refs,
             "curves": curve_quantiles(results, patterns),

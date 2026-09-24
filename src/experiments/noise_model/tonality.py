@@ -520,7 +520,8 @@ def payload_shape(fit: dict[str, Any]) -> dict[str, Any]:
         "slope_db_dec": [float(slope.mean()), *_quant(slope)],
         "trend_drop_db": [float(drop.mean()), *_quant(drop)],
         "floor_mean_db": float(floor["floor_mean_db"]),
-        "floor_tilt_db_oct": float(floor["floor_tilt_db_oct"]),
+        # a noise-v3-fit/1 floor is the spline alone: no tilt site, i.e. zero
+        "floor_tilt_db_oct": float(floor.get("floor_tilt_db_oct", 0.0)),
         "gain_minus_floor_db": float(gain.mean() - float(floor["floor_mean_db"])),
     }
 

@@ -170,7 +170,14 @@ def floor_edges() -> dict[str, np.ndarray]:
 def measure_window(
     spec: SUP.SupportSpec, tag: str, regime: str, blocks_s: Sequence[float]
 ) -> WindowData:
-    sup = SUP.load_support(spec)
+    return measure_support(SUP.load_support(spec), spec.text, tag, regime, blocks_s)
+
+
+def measure_support(
+    sup: SUP.Support, spec_text: str, tag: str, regime: str, blocks_s: Sequence[float]
+) -> WindowData:
+    """:func:`measure_window` on an already-loaded support: a real window, or a
+    RENDER through :func:`supports.synthetic_support` (the v3 held-out check)."""
     order = [CHOSEN_BLOCK_S] + [b for b in blocks_s if b != CHOSEN_BLOCK_S]
     lines: dict[float, W.LineBlocks] = {}
     floor: dict[str, dict[float, W.FloorBlocks]] = {g: {} for g in floor_edges()}
@@ -196,7 +203,7 @@ def measure_window(
     car = np.asarray(sup.carrier_rev_s, dtype=np.float64)
     return WindowData(
         name=sup.name,
-        spec=spec.text,
+        spec=spec_text,
         tag=tag,
         regime=regime,
         recording=str(sup.meta.get("recording_id", sup.name)),
