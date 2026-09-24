@@ -556,24 +556,198 @@ Line by line:
 
 Maximising $\mathcal J$ jointly over the latents **and** their variance
 hyperparameters $\sigma_d, \sigma_v, \sigma_u$ underestimates the variances:
-the latents shrink toward zero and the hyperparameter follows them (the
-classic random-effects MAP bias — the same reason a sample variance divides
-by $n-1$). Two remedies, either acceptable:
-
-- **Fix the correlation times** $\tau$ from the R4 autocorrelation
-  measurement and estimate the sds by **moment matching** after the fit:
-  $\hat\sigma^2 = $ the sample variance of the MAP latents *plus* the mean
-  posterior variance of a latent (from the block-level Fisher information
-  of §1.6, $\approx (4.34/\sqrt{n_{\text{eff}}})^2$ in dB²). Simple,
-  transparent, and the correction is exactly the quantity the slider shows.
-- **Marginalise** the latents with a Laplace approximation (integrate the
-  Gaussian prior against a quadratic expansion of the block Whittle term
-  around its optimum) and maximise the marginal in the hyperparameters.
-  Standard (it is what `lme4`-style software does), one extra Hessian per
-  block, no bias.
-
-The first is the recommended starting point; the second is the check.
+the latents shrink toward zero and the hyperparameter follows them. The
+section below derives it on the smallest example that has the problem, then
+derives the cure — integrating the latents out — first exactly for the
+Gaussian toy, then as the Laplace approximation the real objective needs.
 :::
+
+## 3.3a Why joint MAP cheats, and the marginal likelihood that does not
+
+### The toy
+
+Keep one line and forget the OU memory. There are $B$ blocks; block $b$ has
+a latent amplitude offset $d_b$ (dB) drawn from the wander distribution, and
+the block's Whittle term, expanded around its optimum, is a Gaussian
+measurement of that offset:
+
+$$
+d_b \sim \mathcal N(0, \sigma^2), \qquad
+y_b \,|\, d_b \sim \mathcal N(d_b,\, s^2),
+$$
+
+where $y_b$ is the block's own amplitude estimate (the MLE of the block
+scale from its cells) and $s$ its standard error — the $4.34/\sqrt{n_{\rm eff}}$
+dB of §1.6, **known**, set by the cell count. The unknowns are the $B$
+latents $d_1..d_B$ and the one hyperparameter $\sigma$. (The real objective
+has an OU prior instead of independent $\mathcal N(0,\sigma^2)$ and a
+non-Gaussian Whittle term instead of $\mathcal N(d_b, s^2)$; neither changes
+the mechanism, and §"Laplace" below puts them back.)
+
+### Joint MAP
+
+The negative log joint density of everything, dropping constants:
+
+$$
+\mathcal J(d, \sigma) \;=\; \underbrace{\sum_b \frac{(y_b - d_b)^2}{2 s^2}}_{\text{likelihood}}
+\;+\; \underbrace{\sum_b \frac{d_b^2}{2\sigma^2} + B\log\sigma}_{\text{prior of the latents}} .
+$$
+
+The $B\log\sigma$ is the normalising constant of the $B$ Gaussian priors,
+$\tfrac12\log(2\pi\sigma^2)$ each; it is what stops $\sigma$ from being
+driven to infinity (where the quadratic term vanishes). Now minimise.
+
+**Over the latents, at fixed $\sigma$.** $\partial\mathcal J/\partial d_b = 0$:
+
+$$
+-\frac{y_b - d_b}{s^2} + \frac{d_b}{\sigma^2} = 0
+\;\;\Rightarrow\;\;
+\hat d_b \;=\; \frac{\sigma^2}{\sigma^2 + s^2}\; y_b \;=:\; \kappa\, y_b .
+$$
+
+The estimate is the measurement **shrunk** toward the prior mean by the
+factor $\kappa \in (0,1)$: when the block is precise ($s \ll \sigma$) it is
+trusted, when it is noisy the prior wins. Correct and standard.
+
+**Over $\sigma$, at fixed latents.** $\partial\mathcal J/\partial\sigma = 0$:
+
+$$
+-\frac{\sum_b d_b^2}{\sigma^3} + \frac{B}{\sigma} = 0
+\;\;\Rightarrow\;\;
+\hat\sigma^2 \;=\; \frac1B\sum_b d_b^2 .
+$$
+
+The variance estimate is the sample variance of the latents. Also correct
+**if the latents were the truth**. But they are not: they are the shrunk
+estimates. Substitute:
+
+$$
+\hat\sigma^2 \;=\; \kappa^2\;\overline{y^2},
+\qquad \kappa = \frac{\hat\sigma^2}{\hat\sigma^2 + s^2} .
+$$
+
+This is a fixed-point equation in $\hat\sigma^2$. Write $v = \hat\sigma^2$
+and $m = \overline{y^2}$ (the observed spread of the block estimates, which
+in truth equals $\sigma^2 + s^2$):
+
+$$
+v \;=\; \Big(\frac{v}{v + s^2}\Big)^{2} m
+\;\;\Rightarrow\;\;
+v = 0 \quad\text{or}\quad (v + s^2)^2 = v\, m
+\;\;\Rightarrow\;\;
+v \;=\; \frac{m - 2s^2 \pm \sqrt{m(m - 4s^2)}}{2} .
+$$
+
+Read it: (i) $v = 0$ — "no wander at all" — is **always** a solution,
+whatever the data; (ii) a positive solution exists only if $m > 4s^2$, i.e.
+if the observed spread is more than **twice** the measurement noise
+(in sd); (iii) even then, the larger root is below the honest value
+$m - s^2$ (check with $s \to 0$: $v \to m$, fine; with $m = 5s^2$: honest
+$v = 4s^2$, joint MAP $v = (3 + \sqrt5)/2\, s^2 \approx 2.6\, s^2$ — a 35 %
+underestimate of the variance, and the small root is 0.4 $s^2$).
+Iterating the two steps from any start converges to one of these; with
+noisy blocks, to zero. That is the cheat: $B$ latents and one variance,
+each latent shrunk by a factor that depends on the variance, and the
+variance estimated from the shrunk latents. It is the same reason the MLE of
+a Gaussian's variance divides by $n$ rather than $n-1$, compounded $B$
+times.
+
+### The marginal likelihood
+
+The mistake was to treat the latents as parameters to be *optimised*. They
+are random effects: what we actually want is the probability of the data
+**averaged over everything the latents could have been**, as a function of
+$\sigma$ alone,
+
+$$
+p(y \,|\, \sigma) \;=\; \prod_b \int p(y_b \,|\, d_b)\, p(d_b \,|\, \sigma)\, \mathrm d d_b .
+$$
+
+For the toy the integral is a textbook Gaussian convolution: a Gaussian
+measurement of a Gaussian variable is a Gaussian with the variances added,
+
+$$
+\int \mathcal N(y_b;\, d_b, s^2)\;\mathcal N(d_b;\, 0, \sigma^2)\; \mathrm d d_b
+\;=\; \mathcal N(y_b;\; 0,\; \sigma^2 + s^2).
+$$
+
+(To see it without a table: the exponent is
+$-\tfrac{(y-d)^2}{2s^2} - \tfrac{d^2}{2\sigma^2}$, a quadratic in $d$;
+complete the square in $d$, integrate the Gaussian in $d$ — which gives a
+factor $\sqrt{2\pi\,\sigma^2 s^2/(\sigma^2+s^2)}$ — and what is left in $y$
+is $-\tfrac{y^2}{2(\sigma^2+s^2)}$.) So the negative log marginal is
+
+$$
+\mathcal M(\sigma) \;=\; \sum_b \Big[\frac{y_b^2}{2(\sigma^2 + s^2)} + \tfrac12\log(\sigma^2 + s^2)\Big],
+\qquad
+\frac{\partial\mathcal M}{\partial\sigma^2} = 0
+\;\Rightarrow\;
+\hat\sigma^2 \;=\; \overline{y^2} - s^2 .
+$$
+
+**Observed spread minus measurement noise** — the honest answer, no
+shrinkage loop, $v = 0$ is no longer a spurious solution. Compare the two
+objectives term by term: the marginal has $\log(\sigma^2 + s^2)$ where the
+joint had $\log\sigma^2$ *and* it has no latents to shrink; the
+$s^2$ inside the log is exactly the block-level uncertainty that the joint
+objective threw away when it replaced "average over $d_b$" by "plug in the
+best $d_b$".
+
+**Moment matching is the same formula from the other side.** After a joint
+fit at some $\sigma$, the posterior of $d_b$ given $y_b$ is Gaussian with
+mean $\kappa y_b$ and variance $\sigma^2 s^2/(\sigma^2 + s^2)$ (complete the
+square again). Then
+$\mathbb E[d_b^2 \,|\, y] = (\kappa y_b)^2 + \sigma^2 s^2/(\sigma^2+s^2)$, and
+the EM update of the variance, $\hat\sigma^2 = \tfrac1B\sum_b \mathbb E[d_b^2\,|\,y]$,
+is "sample variance of the shrunk latents **plus** their posterior
+variance" — the moment-matching recipe of the box. Iterating it converges
+to the marginal maximiser $\overline{y^2} - s^2$; that is why the two
+remedies agree, and why the first is just the second done by hand.
+
+### Laplace: the same thing for the real objective
+
+In the real fit two things are not Gaussian-exact: the block term is the
+Whittle sum, not $\mathcal N(d_b, s^2)$, and the prior is an OU chain across
+blocks, not independent. The OU prior is still Gaussian — with covariance
+$\Sigma_{\rm OU}$ (entries $\sigma^2 \rho^{|b - b'|}$) — so the only
+approximation needed is on the Whittle side. **Laplace's method** replaces
+the block Whittle term by its second-order Taylor expansion around its
+optimum $\hat d_b$:
+
+$$
+W_b(d_b) \;\approx\; W_b(\hat d_b) + \tfrac12\, h_b\, (d_b - \hat d_b)^2,
+\qquad h_b = \frac{\partial^2 W_b}{\partial d_b^2}\Big|_{\hat d_b},
+$$
+
+which is exactly the toy's $\mathcal N(y_b, s^2)$ with $y_b = \hat d_b$ and
+$s_b^2 = 1/h_b$ — the block's own Fisher information. Then the integral
+over the latents is Gaussian again and the negative log marginal is
+
+$$
+\mathcal M(\sigma, \tau) \;=\; \sum_b W_b(\hat d_b)
+\;+\; \tfrac12\,\hat{\mathbf d}^\top (\Sigma_{\rm OU} + H^{-1})^{-1}\hat{\mathbf d}
+\;+\; \tfrac12 \log\det\big(\Sigma_{\rm OU} + H^{-1}\big) \;+\; \text{const},
+$$
+
+with $H = \operatorname{diag}(h_b)$. The toy is the case $\Sigma_{\rm OU} =
+\sigma^2 I$, $H = I/s^2$. The recipe per window: (1) at the current
+$(\sigma, \tau)$, find the MAP latents $\hat{\mathbf d}$ (this is step (ii)
+of §3.4 — it has to be done anyway); (2) compute the block curvatures $h_b$
+(one second derivative of the Whittle sum per block, cheap — it is a sum
+over that block's cells of $I/S^2$-type terms); (3) evaluate $\mathcal M$
+and its gradient in $(\sigma, \tau)$ and take a step; repeat. The
+$\log\det$ is of a $B \times B$ matrix per latent track, $B \approx 16$ —
+negligible. This is the standard mixed-model / INLA construction, and it is
+what the "Laplace" remedy of the box means. Its error is the Whittle term's
+deviation from a parabola in $d_b$ over the width of the posterior, which
+for a log-scale parameter with $n_{\rm eff} \gtrsim 10$ cells is small.
+
+**What to use.** Fix $\tau$ from the measured line-power autocorrelation
+(it is poorly identified from 16 blocks anyway), run the joint fit, then
+re-estimate the sds by the EM / moment-matching update above with the
+curvatures $h_b$ as the measurement noise. That is the marginal maximiser to
+within the Laplace approximation, and it costs one Hessian diagonal per
+block.
 
 ## 3.4 The optimisation
 
