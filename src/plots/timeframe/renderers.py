@@ -278,8 +278,25 @@ def _rps_grid_from_audio(
     return frame_times, gt
 
 
+def _rps_on_plot_grid(series: td.Series, frame: Any) -> tuple[np.ndarray, np.ndarray]:
+    """``(times, (R, T))`` of an RPS series on the audio STFT grid when the
+    frame has one, else on the series' own stamps or grid."""
+    grid = _rps_grid_from_audio(series, frame) if isinstance(frame, td.Frame) else None
+    if grid is not None:
+        return grid
+    tindex = series.tindex
+    if isinstance(tindex, td.GridIndex):
+        return np.asarray(tindex.sample_times()), np.asarray(series.data)
+    return np.asarray(_stamp_index(series).abs_stamps), np.asarray(series.data)
+
+
 def render_rps(series: td.Series, context: TrackContext) -> RenderedTrack:
-    """Render ``StampIndex`` RPS with rotor colors, or a rug plot if it has no values."""
+    """Render ``StampIndex`` RPS with rotor colors, or a rug plot if it has no values.
+
+    Hint ``"reference"`` (a ``td.Series`` of the same rotor layout, e.g. the
+    label under a prediction) is drawn first, dashed, in the same rotor
+    colours, so a prediction row carries its own ground truth.
+    """
     ax = context.ax
     if series.data is None:
         for t in _stamp_index(series).abs_stamps:
@@ -288,14 +305,24 @@ def render_rps(series: td.Series, context: TrackContext) -> RenderedTrack:
         return RenderedTrack(ax=ax, legend_handles=[])
 
     frame = context.style.get("_frame")
-    grid = _rps_grid_from_audio(series, frame) if isinstance(frame, td.Frame) else None
-    if grid is not None:
-        frame_times, gt = grid
-    else:
-        frame_times = np.asarray(_stamp_index(series).abs_stamps)
-        gt = np.asarray(series.data)
+    frame_times, gt = _rps_on_plot_grid(series, frame)
 
     handles = []
+    reference = context.style.get("_hints", {}).get("reference")
+    if isinstance(reference, td.Series) and reference.data is not None:
+        ref_times, ref = _rps_on_plot_grid(reference, frame)
+        for r in range(min(ref.shape[0], len(ROTOR_COLORS))):
+            (line,) = ax.plot(
+                ref_times,
+                ref[r],
+                color=ROTOR_COLORS[r],
+                linewidth=1.2,
+                linestyle="--",
+                alpha=0.7,
+                label="label" if r == 0 else None,
+            )
+            if r == 0:
+                handles.append(line)
     n_rotors = min(gt.shape[0], len(ROTOR_COLORS))
     for r in range(n_rotors):
         (line,) = ax.plot(
@@ -308,7 +335,7 @@ def render_rps(series: td.Series, context: TrackContext) -> RenderedTrack:
         handles.append(line)
     ax.set_ylabel("RPS")
     ax.set_xlim(context.t_start, context.t_end)
-    ax.legend(handles=handles, loc="upper right", ncol=n_rotors, fontsize=8)
+    ax.legend(handles=handles, loc="upper right", ncol=len(handles), fontsize=8)
     ax.grid(True, alpha=0.3)
     return RenderedTrack(ax=ax, legend_handles=handles)
 

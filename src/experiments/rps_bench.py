@@ -629,7 +629,11 @@ def mae_table(models: ModelSpec, part_name: str, frames: Sequence[int], **kw: An
 def show(
     frame: td.Frame, *, fmax: float | None = 2000.0, row_height: float = 2.2
 ) -> matplotlib.figure.Figure:
-    """Spectrogram, label, then one PIT-aligned row per model, on one time axis."""
+    """Spectrogram, then one PIT-aligned row per model with the label dashed under it.
+
+    A frame without predictions (a bare :func:`part` frame) gets the label as
+    its own row instead.
+    """
     preds = [
         k
         for k, v in frame.items()
@@ -641,11 +645,18 @@ def show(
         PlotTrack(
             series=spec.series, renderer=spec.renderer, hints={**spec.hints, "title": "spectrogram"}
         ),
-        PlotTrack(series=frame["rps"], hints={"title": "rps (label)"}),
     ]
+    if not preds:
+        tracks.append(PlotTrack(series=frame["rps"], hints={"title": "rps (label)"}))
     for k in preds:
         title = f"{k}   PIT MAE {maes[k]:.2f} rev/s" if k in maes else k
-        tracks.append(PlotTrack(series=frame[k], hints={"title": title}))
+        tracks.append(
+            PlotTrack(
+                series=frame[k],
+                renderer="rps",
+                hints={"title": title, "reference": frame["rps"]},
+            )
+        )
     meta = meta_dict(frame)
     fig = plot_timeframe(frame, tracks=tracks, figsize=(16, row_height * len(tracks) + 1.5))
     fig.suptitle(f"{meta['part']}  flight {meta['flight']}  mic {meta.get('channel', '?')}", y=1.02)
