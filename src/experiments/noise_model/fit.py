@@ -1209,6 +1209,9 @@ def _measured_record(measured: MD.Measured, *, priors: MD.Priors) -> dict[str, A
             resolution_hz=measured.resolution_hz,
             n_lines=int(measured.line_snr_db.size),
             profile_centre="pooled observed level at k f_r (line + floor), every line",
+            # the (R, K) centres themselves: the prior predictive and the
+            # parameter view draw / plot the profile against them
+            profile_centre_db=np.asarray(measured.profile_db, dtype=np.float64).tolist(),
         )
     return dict(
         floor_mean_db=measured.floor_mean_db,
