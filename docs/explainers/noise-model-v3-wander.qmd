@@ -6,7 +6,7 @@ format:
     toc: true
     toc-depth: 3
     embed-resources: true
-    html-math-method: katex
+    html-math-method: mathjax
 execute:
   echo: false
   warning: false
