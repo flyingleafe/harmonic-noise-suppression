@@ -65,6 +65,7 @@ from torch import Tensor
 from torch.distributions import constraints
 
 from data_processing.noise_model.floor import floor_geometry
+from data_processing.noise_model.v3 import WIND_CORNER_HZ
 from experiments.stochastic_fit.model import FLOOR_SHAPE_N_CTRL
 from experiments.stochastic_fit.revised_phase import (
     FLOOR_INIT_DB_CORRECTION,
@@ -84,6 +85,7 @@ __all__ = [
     "fit_support",
     "gamma_low_order_check",
     "initial_values",
+    "load_channel_gains",
     "load_profile_init",
     "measure_batch",
     "seeds",
@@ -610,6 +612,8 @@ def _seeds_v3(
         sigma_b**2 * (chol.T @ chol) + np.eye(chol.shape[1]), sigma_b * (chol.T @ ctrl)
     )
 
+    wind_db = _wind_centres(batch) if priors.wind else None
+
     ext_db: np.ndarray | None = None
     ext_sd: np.ndarray | None = None
     if profile_init is not None:
@@ -628,6 +632,7 @@ def _seeds_v3(
         profile_prior_sd_db=ext_sd,
         floor_shape_sd_db=sigma_b,
         floor_ctrl_db=ctrl,
+        wind_db=wind_db,
     )
 
     out: dict[str, Tensor] = {}
@@ -642,7 +647,74 @@ def _seeds_v3(
         out["floor_exp"] = t(med["floor_exp"])
     if "floor_static_rel" not in span_pinned:
         out["floor_static_rel"] = t(med["floor_static_rel"])
+    if wind_db is not None:
+        out["wind_db"] = t(wind_db)
     return Seeds(measured=measured, init=out)
+
+
+#: How far under the quietest microphone's low-band level a v3 wind prior
+#: centre may sink: the quietest capsule's wind is not measurable against the
+#: shared floor, so it starts (and is centred) this far under it.
+V3_WIND_SINK_DB = 20.0
+
+
+def _wind_centres(batch: MD.SupportBatch) -> np.ndarray:
+    """``(M,)`` prior centres of the per-mic wind levels ``wind_db`` (dB).
+
+    Each mic's low band level ``l_m`` is the median, over the analysis bins
+    from 30 Hz to the wind shape's flat-part corner (100 Hz), of its OWN
+    20th-percentile floor curve (+ the C4 exponential-percentile correction)
+    — on the channel-NORMALISED data, so what is left between mics is the
+    per-capsule excess the rank test found below 500 Hz. The shared floor
+    cannot sit above the quietest mic, so a mic's measured wind is its POWER
+    excess over that one: ``10 log10(10^{l_m/10} - 10^{l_min/10})``, and no
+    lower than :data:`V3_WIND_SINK_DB` under ``l_min``.
+    """
+    p = batch.power.detach().cpu().numpy()
+    f = np.asarray(batch.grid.freqs_hz, dtype=np.float64)
+    low = (f >= SP.BAND_F_MIN) & (f <= WIND_CORNER_HZ)
+    if not np.any(low):
+        raise ValueError("the analysis grid has no bin between 30 Hz and the wind corner")
+    db = 10.0 * np.log10(np.maximum(p[:, :, low], 1e-30))
+    per_mic = np.quantile(db, FLOOR_INIT_QUANTILE, axis=1) + FLOOR_INIT_DB_CORRECTION  # (M, F_low)
+    level = np.median(per_mic, axis=1)
+    ref = float(level.min())
+    excess = 10.0 ** (level / 10.0) - 10.0 ** (ref / 10.0)
+    return np.maximum(10.0 * np.log10(np.maximum(excess, 1e-300)), ref - V3_WIND_SINK_DB)
+
+
+def load_channel_gains(
+    path: str | Path, *, rig: str, mics: Sequence[int] | None = None
+) -> MD.ChannelGains:
+    """The per-channel gains v3 normalises ``rig``'s data by (explainer §2.5).
+
+    Read from the rank-test record (``mic-gain-rank/1``,
+    ``results/noise_v2/mic_gains/mic_gains.json``): the rig's rank-one FLOOR
+    gains on the 1/3-octave bands at and above 500 Hz
+    (``rigs.<rig>.wind.excess_db_above_500hz``) — where comb and floor share
+    one gain per channel on both rigs (r = 0.990 DREGON, 0.996 Michael's) and
+    below which DREGON's per-capsule wind excess lives. ``mics`` selects
+    channels (a smoke fit on a subset); the selected gains are re-centred on
+    their own mean, so the normalisation moves no absolute level.
+    """
+    p = Path(path)
+    d = json.loads(p.read_text())
+    if d.get("schema") != "mic-gain-rank/1":
+        raise ValueError(f"{p}: expected schema 'mic-gain-rank/1', got {d.get('schema')!r}")
+    rigs = d.get("rigs") or {}
+    if rig not in rigs:
+        raise KeyError(f"{p}: no rig {rig!r} (have {sorted(rigs)})")
+    g = np.asarray(rigs[rig]["wind"]["excess_db_above_500hz"], dtype=np.float64)
+    if mics is not None:
+        g = g[np.asarray(list(mics), dtype=np.int64)]
+    return MD.ChannelGains(
+        gains_db=g - g.mean(),
+        source=str(p),
+        rig=str(rig),
+        rule="rank-one floor gain per channel on the 1/3-octave bands >= 500 Hz "
+        "(rigs.<rig>.wind.excess_db_above_500hz), re-centred on the channels used; "
+        "each channel's periodogram is divided by 10^(g/10)",
+    )
 
 
 def _half_width_hz(excess: np.ndarray, jpk: int, j0: int, j1: int, df: float) -> float:

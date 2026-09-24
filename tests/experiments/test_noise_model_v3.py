@@ -230,3 +230,87 @@ def test_floor_is_the_spline_alone_scaled_by_the_measured_sigma_b():
     db = meas.floor_mean_db + grid.floor.shape_psd @ want_ctrl
     want_psd = grid.floor.rate_factor * 10.0 ** (db / 10.0)
     assert float(((psd - want_psd).abs() / want_psd).max()) < 1e-12
+
+
+# ── (d) microphones: normalised in the data; DREGON's static wind term ──────
+
+
+def test_no_mic_site_the_data_is_channel_normalised_and_wind_is_opt_in(tmp_path):
+    """v3 has no microphone parameter; the channels are normalised in the DATA
+    by the rank test's >= 500 Hz gains, and the per-mic wind term exists only
+    when asked for and is identically zero from 500 Hz up."""
+    import json
+
+    k_cap, n_mics = 3, 2
+    par = _params(k_cap=k_cap, n_mics=n_mics, profile_db=-20.0)
+    # the rank-test record: the >= 500 Hz floor gains of a 3-mic rig; the fit
+    # uses mics 0 and 2, re-centred on their own mean (+2 and -1 -> +1.5, -1.5)
+    record = {
+        "schema": "mic-gain-rank/1",
+        "rigs": {"toy": {"wind": {"excess_db_above_500hz": [2.0, 9.0, -1.0]}}},
+    }
+    path = tmp_path / "mic_gains.json"
+    path.write_text(json.dumps(record))
+    gains = FT.load_channel_gains(path, rig="toy", mics=[0, 2])
+    np.testing.assert_allclose(gains.gains_db, [1.5, -1.5])
+
+    raw = _flight_batch(par, k_cap=k_cap, n_mics=n_mics)
+    starts = np.arange(16) * 256
+    rps = np.full((1, 512 + 15 * 256), 180.0)
+    normed = MD.flight_batch(
+        name="v3",
+        members=[("w0", raw.power.numpy(), rps, starts)],
+        sr=SR,
+        n_fft=512,
+        hop=256,
+        k_cap=k_cap,
+        channel_gains=gains,
+    )
+    ratio = (raw.power / normed.power).numpy()
+    np.testing.assert_allclose(ratio[0], 10.0**0.15, rtol=1e-12)
+    np.testing.assert_allclose(ratio[1], 10.0**-0.15, rtol=1e-12)
+    assert normed.diagnostics["channel_gains"]["gains_db"] == [1.5, -1.5]
+
+    plain = _measured(normed)
+    sites = _sites(_trace(plain))
+    assert sites.isdisjoint({"mic_line_gain_db", "gain_all_db", "mic_floor_db"})
+    assert "wind_db" not in sites
+
+    windy_priors = dataclasses.replace(MD.PRIORS_V3, wind=True)
+    windy = _measured(normed, windy_priors)
+    tr = _trace(windy, windy_priors)
+    assert "wind_db" in _sites(tr)
+    assert tr.nodes["wind_db"]["value"].shape == (n_mics,)
+
+    values = {n: tr.nodes[n]["value"] for n in _sites(tr)}
+    values["wind_db"] = torch.tensor([-30.0, -45.0], dtype=torch.float64)
+    with_wind = MD.sample_params_from_values(
+        windy, mode=MD.V3_MODE, priors=windy_priors, values=values
+    )
+    without = dataclasses.replace(with_wind, wind_db=None)
+    with torch.no_grad():
+        diff = (MD.forward(windy, with_wind) - MD.forward(windy, without)).numpy()
+    f = windy.grid.freqs_hz
+    assert np.all(diff[:, :, f >= 500.0] == 0.0)
+    low = (f >= 30.0) & (f <= 100.0)
+    # on the flat part the term IS its level, through the (unit) transfer there
+    transfer = windy.grid.transfer_power.numpy()[low]
+    want = np.broadcast_to(transfer[None, :], diff[0][:, low].shape)
+    np.testing.assert_allclose(diff[0][:, low], 10.0**-3.0 * want, rtol=1e-9)
+    np.testing.assert_allclose(diff[1][:, low], 10.0**-4.5 * want, rtol=1e-9)
+
+
+def test_measured_wind_centres_follow_a_planted_per_capsule_excess():
+    """The wind prior centres are the per-mic low-band POWER excess over the
+    quietest capsule: a mic with a planted wind 10 dB over the floor gets a
+    centre near its planted level, the quiet one sinks."""
+    k_cap, n_mics = 2, 2
+    par = _params(k_cap=k_cap, n_mics=n_mics, profile_db=-60.0, floor_mean_db=-40.0)
+    planted_db = np.array([-30.0, -300.0])
+    par = dataclasses.replace(par, wind_db=_t(planted_db))
+    batch = _flight_batch(par, k_cap=k_cap, n_mics=n_mics, n_frames=64, seed=13)
+    priors = dataclasses.replace(MD.PRIORS_V3, wind=True)
+    meas = FT.measure_batch(batch, mode=MD.V3_MODE, priors=priors)
+    assert meas.wind_db is not None
+    assert abs(meas.wind_db[0] - planted_db[0]) < 3.0
+    assert meas.wind_db[1] < planted_db[0] - 15.0

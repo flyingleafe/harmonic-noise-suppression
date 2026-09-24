@@ -100,11 +100,13 @@ __all__ = [
     "PRIORS_V3",
     "SPEED_LAW_SITES",
     "V3_MODE",
+    "ChannelGains",
     "Measured",
     "Priors",
     "PriorsV3",
     "SupportBatch",
     "Wander",
+    "WindowLatents",
     "batch_slice",
     "bench_batch",
     "detach_params",
@@ -520,6 +522,38 @@ class WindowLatents:
         return {name: t for name, t in pairs if t is not None}
 
 
+@dataclass(frozen=True)
+class ChannelGains:
+    """The per-microphone gains v3 NORMALISES the data by (explainer §2.5).
+
+    ``gains_db`` is ``(M,)``, one per channel of the batch, relative to the
+    channels' mean; :meth:`normalise` divides each channel's periodogram by
+    ``10^{g_m / 10}``. Read by :func:`.fit.load_channel_gains` from the
+    rank-test record (``results/noise_v2/mic_gains/mic_gains.json``).
+    """
+
+    gains_db: np.ndarray
+    source: str = ""
+    rig: str = ""
+    rule: str = ""
+
+    def normalise(self, power: np.ndarray) -> np.ndarray:
+        """``(M, ...)`` periodogram with channel ``m`` divided by ``10^{g_m/10}``."""
+        p = np.asarray(power, dtype=np.float64)
+        g = np.asarray(self.gains_db, dtype=np.float64).reshape(-1)
+        if g.size != int(p.shape[0]):
+            raise ValueError(f"{g.size} channel gains for a {int(p.shape[0])}-mic periodogram")
+        return p / (10.0 ** (g / 10.0)).reshape((-1,) + (1,) * (p.ndim - 1))
+
+    def as_dict(self) -> dict[str, Any]:
+        return dict(
+            gains_db=np.asarray(self.gains_db, dtype=np.float64).tolist(),
+            source=self.source,
+            rig=self.rig,
+            rule=self.rule,
+        )
+
+
 @dataclass
 class SupportBatch:
     """One support (or one pool of flight windows) as the objective sees it.
@@ -700,6 +734,7 @@ def flight_batch(
     max_frames: int | None = None,
     apply_transfer: bool = True,
     sr_work: int = SP.SAMPLE_RATE_WORK,
+    channel_gains: ChannelGains | None = None,
 ) -> SupportBatch:
     """Pool flight windows into one objective.
 
@@ -710,6 +745,11 @@ def flight_batch(
     composite weights otherwise carry — and the retained exposure weights are
     scaled back up by the thinning factor so the likelihood keeps the support's
     true exposure against the priors.
+
+    ``channel_gains`` (v3) NORMALISES THE DATA: mic ``m``'s periodogram is
+    divided by ``10^{g_m / 10}`` before anything reads it, so the model needs
+    no microphone parameter (explainer §2.5). The gains applied and their
+    source are recorded in ``diagnostics["channel_gains"]``.
     """
     grid = SP.flight_grid(
         sr=sr, n_fft=n_fft, hop=hop, sr_work=sr_work, device=device, apply_transfer=apply_transfer
@@ -723,6 +763,8 @@ def flight_batch(
     frame_time: list[np.ndarray] = []
     for w_idx, (mname, power, carrier, starts) in enumerate(members):
         p = np.asarray(power, dtype=np.float64)
+        if channel_gains is not None:
+            p = channel_gains.normalise(p)
         st = np.asarray(starts, dtype=np.int64)
         n_total += int(st.size)
         sel = np.arange(0, st.size, max(1, int(frame_stride)))
@@ -771,6 +813,7 @@ def flight_batch(
             carrier_min_rev_s=float(c_all.min()),
             carrier_max_rev_s=float(c_all.max()),
             speed_span=span,
+            **({} if channel_gains is None else {"channel_gains": channel_gains.as_dict()}),
         ),
         frame_window=np.concatenate(frame_window),
         frame_time_s=np.concatenate(frame_time),
