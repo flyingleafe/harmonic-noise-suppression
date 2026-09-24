@@ -413,7 +413,7 @@ $$
   - **[new]** $u_j(b)$, in dB: the floor's slow drift, an OU across blocks
     shared by all control points for the level (one latent $u(b)$) plus a
     per-control-point residual for the colour — the same two-level
-    structure as the comb wander, with its own $(\sigma_u, \tau_u)$.
+    structure as the comb wander, with its own measured $(\sigma_u, \tau_u)$.
 - **[new]** $W_m(f)$: a per-microphone **static** low-frequency term for
   wind / capsule self-noise: a fixed shape concentrated below ~500 Hz with
   one free level per mic, not scaled by rotor speed and not scaled by the
@@ -482,7 +482,7 @@ offset $\delta_i$ is the fallback if the residuals of the refit disagree.
 | $W_m$ level | rig (per mic) | DREGON only, static, < 500 Hz **[new]** |
 | $\delta_i$ | rig | not in the first fit; $\mathcal N(0, 3)$ dB fallback **[new]** |
 | $d_i(b)$, $v_{ik}(b)$, $u(b)$, $u_j(b)$ | clip × block | OU latents in dB **[new]** |
-| $\sigma_d, \tau_d, \sigma_v, \tau_v, \sigma_u, \tau_u$ | rig | HalfNormal / LogNormal, centred on measured statistics **[new]** |
+| $\sigma_d, \tau_d, \sigma_v, \tau_v, \sigma_u, \tau_u$ | rig | **measured** on the real windows, fixed in the fit (§3.3a) **[new]** |
 
 # Part 3 — fitting, line by line
 
@@ -557,9 +557,10 @@ Line by line:
 Maximising $\mathcal J$ jointly over the latents **and** their variance
 hyperparameters $\sigma_d, \sigma_v, \sigma_u$ underestimates the variances:
 the latents shrink toward zero and the hyperparameter follows them. The
-section below derives it on the smallest example that has the problem, then
-derives the cure — integrating the latents out — first exactly for the
-Gaussian toy, then as the Laplace approximation the real objective needs.
+section below derives it on the smallest example that has the problem,
+shows what the honest (marginal) answer is, and then gives the simplest way
+to be immune to it: measure $\sigma$ and $\tau$ on the real windows first
+and keep them fixed in the fit.
 :::
 
 ## 3.3a Why joint MAP cheats, and the marginal likelihood that does not
@@ -693,184 +694,76 @@ $s^2$ inside the log is exactly the block-level uncertainty that the joint
 objective threw away when it replaced "average over $d_b$" by "plug in the
 best $d_b$".
 
-**Moment matching is the same formula from the other side.** After a joint
-fit at some $\sigma$, the posterior of $d_b$ given $y_b$ is Gaussian with
-mean $\kappa y_b$ and variance $\sigma^2 s^2/(\sigma^2 + s^2)$ (complete the
-square again). Then
-$\mathbb E[d_b^2 \,|\, y] = (\kappa y_b)^2 + \sigma^2 s^2/(\sigma^2+s^2)$, and
-the EM update of the variance, $\hat\sigma^2 = \tfrac1B\sum_b \mathbb E[d_b^2\,|\,y]$,
-is "sample variance of the shrunk latents **plus** their posterior
-variance" — the moment-matching recipe of the box. Iterating it converges
-to the marginal maximiser $\overline{y^2} - s^2$; that is why the two
-remedies agree, and why the first is just the second done by hand.
+That is the whole story: the joint objective replaces "average over what
+the latent could be" by "plug in the best latent", and the variance of the
+latents is then read off values that were already shrunk by that very
+variance. Integrating the latents out is the cure; it is also more
+machinery than this fit needs, because there is a simpler way to be
+immune to the cheat.
 
-### Method of moments: no Laplace, no posterior
+### The simplest method that works: do not fit $\sigma$ and $\tau$ at all
 
-The marginal result $\hat\sigma^2 = \overline{y^2} - s^2$ can be reached
-without integrating anything, by asking only what the **first two moments**
-of the block estimates must be under the model. This route needs no
-Gaussian approximation of the Whittle term, because it never uses the
-likelihood's *shape* — only the sampling distribution of one number per
-block, which the Whittle model gives exactly.
+The cheat needs $\sigma$ to be **optimised** together with the latents.
+If $\sigma$ and $\tau$ are held **fixed**, the joint MAP over the rig
+parameters and the block latents has no bias of this kind: for fixed
+$\sigma$ the latents come out exactly as the toy's first step says,
+$\hat d_b = \kappa y_b$ — correctly shrunk toward the mean by the ratio of
+prior to measurement precision — and the rig parameters are fitted
+against those. (For an OU prior this "shrinkage" is a Kalman smoother:
+each block's estimate is pulled toward its neighbours and toward zero, by
+amounts set by $\sigma, \tau$ and the block's own precision.) It is the
+current Pyro machinery with one extra site per window, and nothing else.
 
-**Step 1 — what a block estimate is.** With the rig parameters held fixed
-(from the fit without latents, step (i) of §3.4), block $b$ of line $(i,k)$
-has one unknown, its amplitude offset $d_b$, and its Whittle term
-$W_b(d_b)$ is maximised by the block's scale estimate — call it $y_b$. In
-the pure-line case (cells dominated by the line) $y_b$ is $10\log_{10}$ of
-the mean of $n$ exponential cells divided by their model mean, i.e.
+So $\sigma_d, \tau_d$ (and $\sigma_v, \sigma_u, \ldots$) are treated like
+every other prior in this project: **measured on the real windows first,
+then fixed for the fit.** The measurement is three lines, and it is the
+same computation the marginal likelihood would do, done once by hand:
 
-$$
-10^{y_b/10} \;=\; 10^{d_b/10}\;\cdot\; \frac{1}{n}\sum_{c=1}^{n} E_c,
-\qquad E_c \sim \mathrm{Exp}(1) \text{ i.i.d.},
-$$
+1. On every real window, order-track the line power **per block** with the
+   existing R4 estimator (`noise_v2_widen_dregon.line_width_db3` per block
+   instead of per window); that gives a track $y_b$ in dB for every
+   resolvable line, and $n$ cells per block.
+2. $\hat\sigma_d^2 = \operatorname{Var}_b(y_b) - s^2$, with
+   $s^2 = (10/\ln 10)^2\,\psi_1(n) \approx 18.9/n$ dB² the **known** noise
+   of a block estimate made from $n$ exponential cells ($\psi_1$ = trigamma;
+   this is the variance of $10\log_{10}$ of a Gamma$(n,1/n)$ mean, exact).
+   Pool over the resolvable lines and windows of a rig. The rotor-common /
+   per-line split, if wanted: the covariance between two orders of one
+   rotor in the same block is $\sigma_d^2$ (the common part); the rest of
+   the variance is $\sigma_v^2$.
+3. $\hat\tau_d$ from the decay of the track's autocorrelation:
+   $\hat\rho_1 = \operatorname{Cov}(y_b, y_{b+1})/\hat\sigma_d^2$,
+   $\hat\tau_d = -T_b/\ln\hat\rho_1$. The block noise is independent across
+   blocks, so it does not enter the covariance and needs no correction.
 
-so $y_b = d_b + \epsilon_b$ with $\epsilon_b = 10\log_{10}\big(\tfrac1n\sum E_c\big)$
-— a **known** distribution: $\tfrac1n\sum E_c \sim \mathrm{Gamma}(n, 1/n)$,
-and for its log the mean and variance are exact,
+Steps 2–3 are the method of moments; stated this way they are just the
+measurement of a prior, like the shaft prior from the telemetry residual or
+the width prior from the bench decoherence law. The same three lines on the
+floor's per-block band levels give $\sigma_u, \tau_u$.
 
-$$
-\mathbb E[\epsilon_b] = \tfrac{10}{\ln 10}\big(\psi(n) - \ln n\big) \approx -\tfrac{2.17}{n}\ \mathrm{dB},
-\qquad
-\operatorname{Var}[\epsilon_b] = \big(\tfrac{10}{\ln 10}\big)^2 \psi_1(n) \approx \frac{18.9}{n}\ \mathrm{dB}^2
-= \Big(\frac{4.34}{\sqrt n}\Big)^2,
-$$
+**One check after the fit, and it is the only one needed.** The spread of
+the fitted latents across blocks, plus the known block noise $s^2$, must
+reproduce the measured $\hat\sigma_d^2$ — one number per rig. If it does
+not, the measurement (block length, which lines were called resolvable) is
+revised, not the fit. This is also how a wrong $\tau$ shows: the fitted
+tracks' lag-1 correlation disagrees with $\hat\rho_1$.
 
-with $\psi, \psi_1$ the digamma and trigamma functions. This is the
-$s^2$ of the toy, exact rather than asymptotic, and it depends on nothing
-but the cell count. (For a line over a floor, $n$ becomes the effective
-count of §1.6; if one does not trust the delta-method version of that, the
-variance of $\epsilon_b$ is obtained by **simulation under the model** —
-draw cells from the model's own density with $d_b = 0$, compute $y_b$,
-repeat — which is exact to Monte-Carlo error and still involves no
-approximation of the likelihood.) Independence across blocks holds because
-the cells of different blocks are disjoint, and $\epsilon_b$ is independent
-of $d_b$ because the cells' randomness is the exponential law, not the
-wander.
-
-**Step 2 — the moment equations.** Now $y_b = d_b + \epsilon_b$ with
-$d_b$ the OU latent (mean 0, variance $\sigma^2$, lag-$l$ covariance
-$\sigma^2\rho^{l}$) and $\epsilon_b$ the measurement error (mean $\mu_\epsilon$,
-variance $s^2$, independent across blocks and of $d$). Taking expectations:
-
-$$
-\mathbb E[y_b] = \mu_\epsilon, \qquad
-\operatorname{Var}[y_b] = \sigma^2 + s^2, \qquad
-\operatorname{Cov}[y_b, y_{b+l}] = \sigma^2 \rho^{l}\quad (l \ge 1).
-$$
-
-The measurement error appears **only** in the variance, never in the
-covariances — noise in different blocks is independent. Replace the
-population moments by their sample versions over the $B$ blocks (and over
-windows, and over the lines that share the hyperparameter) and solve:
-
-$$
-\hat\sigma^2 \;=\; \widehat{\operatorname{Var}}[y] - s^2,
-\qquad
-\hat\rho \;=\; \frac{\widehat{\operatorname{Cov}}_1[y]}{\hat\sigma^2}
-\;\;\Rightarrow\;\;
-\hat\tau = -\,T_b / \ln\hat\rho .
-$$
-
-The first is the marginal-likelihood answer of the previous section,
-obtained with no integral; the second is the Yule–Walker estimate of an
-AR(1) observed through noise, and it gives $\tau$ **as well** — the lag-1
-covariance is untouched by the measurement noise, so $\tau$ needs no
-correction at all. (A more robust variant uses several lags,
-$\widehat{\operatorname{Cov}}_l = \sigma^2\rho^l$, and fits $\log$-linearly
-in $l$; with $B = 16$ blocks per window and hundreds of windows, lags 1–4
-are well populated.)
-
-**Step 3 — the hierarchical split, also by moments.** The comb wander was
-written $d_{ik}(b) = d_i(b) + v_{ik}(b)$, a per-rotor common part and a
-per-line residual. Two lines $k \ne k'$ of the same rotor in the same block
-share $d_i(b)$ and have independent $v$ and independent $\epsilon$, so
-
-$$
-\operatorname{Cov}[y_{ik}(b),\, y_{ik'}(b)] = \sigma_d^2,
-\qquad
-\operatorname{Var}[y_{ik}(b)] = \sigma_d^2 + \sigma_v^2 + s_{ik}^2 .
-$$
-
-The **cross-order covariance** at one block is the common variance
-directly; the residual variance follows by subtraction. The legacy model's
-`harm_coherence` was exactly this ratio $\sigma_d^2/(\sigma_d^2+\sigma_v^2)$,
-set by hand; here it is a measured moment. The same construction on the
-floor control points gives $\sigma_u$ (level: covariance across control
-points) and the colour residual.
-
-**Why this is honest, and what it costs.** Every equation above is an
-identity of the model — no expansion, no Gaussian assumption on the
-Whittle term, no posterior. The price is statistical efficiency: a method of
-moments uses only second moments, so with few blocks its estimates are
-noisier than maximum likelihood's, and $\widehat{\operatorname{Var}}[y] -
-s^2$ can come out **negative** on a line whose wander is below its
-measurement noise (constraint 2 of §1.5). That is not a defect to hide: it
-means "no wander resolvable on this line", the estimate is clipped to zero
-and the line is excluded from the pooled $\hat\sigma$, exactly as the
-§1.6 threshold prescribes. Pool over orders with $s_{ik} < \sigma$-ish
-(the resolvable ones) and over windows, and the estimates are as good as
-the data allows.
-
-**Relation to the earlier "moment matching".** The recipe first stated in
-the box — variance of the shrunk MAP latents plus their posterior variance
-— is the EM update and needs the posterior variance, which for a
-non-Gaussian block term is itself a Laplace quantity ($1/h_b$). The version
-here bypasses the joint fit altogether for the hyperparameters: it takes
-the *unshrunk* block estimates $y_b$ and the *exact* noise variance $s_b^2$
-and solves the moment equations. The joint fit is still what produces the
-smoothed latent tracks for rendering and for the rig-parameter refit
-(step (iii) of §3.4), but $\sigma$ and $\tau$ are not read off it.
-
-### Laplace: the likelihood route, kept as the check
-
-In the real fit two things are not Gaussian-exact: the block term is the
-Whittle sum, not $\mathcal N(d_b, s^2)$, and the prior is an OU chain across
-blocks, not independent. The OU prior is still Gaussian — with covariance
-$\Sigma_{\rm OU}$ (entries $\sigma^2 \rho^{|b - b'|}$) — so the only
-approximation needed is on the Whittle side. **Laplace's method** replaces
-the block Whittle term by its second-order Taylor expansion around its
-optimum $\hat d_b$:
-
-$$
-W_b(d_b) \;\approx\; W_b(\hat d_b) + \tfrac12\, h_b\, (d_b - \hat d_b)^2,
-\qquad h_b = \frac{\partial^2 W_b}{\partial d_b^2}\Big|_{\hat d_b},
-$$
-
-which is exactly the toy's $\mathcal N(y_b, s^2)$ with $y_b = \hat d_b$ and
-$s_b^2 = 1/h_b$ — the block's own Fisher information. Then the integral
-over the latents is Gaussian again and the negative log marginal is
-
-$$
-\mathcal M(\sigma, \tau) \;=\; \sum_b W_b(\hat d_b)
-\;+\; \tfrac12\,\hat{\mathbf d}^\top (\Sigma_{\rm OU} + H^{-1})^{-1}\hat{\mathbf d}
-\;+\; \tfrac12 \log\det\big(\Sigma_{\rm OU} + H^{-1}\big) \;+\; \text{const},
-$$
-
-with $H = \operatorname{diag}(h_b)$. The toy is the case $\Sigma_{\rm OU} =
-\sigma^2 I$, $H = I/s^2$. The recipe per window: (1) at the current
-$(\sigma, \tau)$, find the MAP latents $\hat{\mathbf d}$ (this is step (ii)
-of §3.4 — it has to be done anyway); (2) compute the block curvatures $h_b$
-(one second derivative of the Whittle sum per block, cheap — it is a sum
-over that block's cells of $I/S^2$-type terms); (3) evaluate $\mathcal M$
-and its gradient in $(\sigma, \tau)$ and take a step; repeat. The
-$\log\det$ is of a $B \times B$ matrix per latent track, $B \approx 16$ —
-negligible. This is the standard mixed-model / INLA construction, and it is
-what the "Laplace" remedy of the box means. Its error is the Whittle term's
-deviation from a parabola in $d_b$ over the width of the posterior, which
-for a log-scale parameter with $n_{\rm eff} \gtrsim 10$ cells is small.
-
-**What to use.** The method of moments for the hyperparameters
-$(\sigma_d, \tau_d, \sigma_v, \sigma_u, \ldots)$: it is exact under the
-model, needs no posterior and no Laplace step, and yields $\tau$ for free
-from the lag covariances. The joint fit then runs with those
-hyperparameters fixed, producing the latent tracks and the refit of the rig
-parameters; alternate the two until the moments stop moving. The Laplace
-marginal stays as a *check* on the moment estimates where the blocks are
-precise ($n_{\rm eff} \gtrsim 10$), not as the estimator.
+**Why not the full marginal.** The Laplace-marginal route — expand each
+block's Whittle term to second order around its optimum, integrate the
+Gaussian prior against it, maximise the result in $(\sigma, \tau)$ — is the
+textbook mixed-model estimator and would estimate the hyperparameters
+inside the fit without bias. It adds one more approximation on top of
+Whittle's, one Hessian per block, and an outer optimisation loop, to
+estimate two numbers per rig that a direct measurement gives with no
+approximation at all. It is not used; it is what one would run if the
+check above ever failed and the measurement could not be trusted.
 
 ## 3.4 The optimisation
 
+0. **Before the fit.** Measure $\sigma_d, \tau_d$ (and $\sigma_v$,
+   $\sigma_u, \tau_u$) on the real windows as in §3.3a; they are constants
+   from here on, recorded in the fit's `priors` block like every other
+   measured prior.
 1. **Parametrisation.** All rig parameters and all latents live in one
    unconstrained vector: Pyro sites as now (`sample_params`), with the
    latents as additional `to_event` sites inside a per-window plate. An
@@ -885,11 +778,11 @@ precise ($n_{\rm eff} \gtrsim 10$), not as the estimator.
    normalisation). (ii) With rig parameters fixed, fit each window's
    latents independently — the windows decouple, so this is 250 small
    L-BFGS problems, embarrassingly parallel on `uni-cpu`. (iii) Re-fit the
-   rig parameters with the latents fixed. (iv) Re-estimate the
-   hyperparameters by the method of moments on the block estimates
-   (§3.3a). Repeat (ii)–(iv) until the Whittle term moves by
-   less than the v2 tolerance ($10^{-4}$ nats/cell). Three to five rounds
-   in practice for this kind of model; each round is one `uni-cpu` job.
+   rig parameters with the latents fixed. Repeat (ii)–(iii) until the
+   Whittle term moves by less than the v2 tolerance ($10^{-4}$ nats/cell);
+   two or three rounds, each one `uni-cpu` job. This alternation is only a
+   memory device — it converges to the same joint MAP as one big
+   optimisation would, because the hyperparameters are not moving.
 3. **Restarts and pins** as v2: four seeds, the speed-law span pin, $\lambda$
    pinned in flight. The half-normal priors make the restarts far less
    necessary — the width degeneracy that produced the restart spread is
@@ -934,8 +827,8 @@ precise ($n_{\rm eff} \gtrsim 10$), not as the estimator.
    the likelihood does on its own. No trend prior across orders.
 3. Slow amplitude wander restored: per-block OU latents **in dB** for line
    power (rotor-common + per-line) and for the floor spline (level + colour),
-   with hyperparameters from the method of moments on the block estimates
-   (§3.3a; Laplace marginal as the check).
+   with $\sigma, \tau$ measured on the real windows first and held fixed
+   in the fit (joint MAP over rig parameters and latents; §3.3a).
 4. Floor shape = spline only; $\mu_F$ and $t_F$ removed; $\sigma_B$ measured.
 5. Channel gains: the rank test (`276f29e0`) holds on both rigs above
    500 Hz (comb–floor gain correlation 0.996 Michael's, 0.990 DREGON) →
