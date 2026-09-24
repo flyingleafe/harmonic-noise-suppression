@@ -146,6 +146,20 @@ compared with. It uses 8 mics and the frozen render seeds 2001–2004.
 - **Parameter view**. `scripts/noise_v3_param_view.py` draws the v3 fit and the
   v2 fit it replaces the same way.
 
+### Monitoring log
+
+`omnirun --daemon localhost:18787 ps`, polled every 30 min (UTC). One row per
+poll; a job named in a row changed state at that poll.
+
+| time (UTC) | job | status |
+|---|---|---|
+| 2026-09-24 22:20 | `nv3-fit-dregon-s{0..3}`, `nv3-fit-mstandby-s{0..3}` | running (DREGON s0 at Adam step 1300 of 1500) |
+| 2026-09-24 22:20 | `nv3-fit-mcruise-s{0..3}` (160 GB) | queued (no free slot) |
+
+## Fits
+
+_Filled in per (rig, pool) family as its four restarts finish._
+
 ## Results
 
 _Fits running; results follow the harvest._
