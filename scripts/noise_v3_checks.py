@@ -12,6 +12,9 @@ fits they replace, and the measured wander records; writes
     PYTHONPATH=src python scripts/noise_v3_checks.py latents    # (e) fitted latents vs measured
     PYTHONPATH=src python scripts/noise_v3_checks.py summary    # the section 3.5 table
 
+``--keys dregon`` (or ``michaels_cruise,michaels_standby``) checks the fits
+named; a later run with other keys keeps the earlier entries of each record.
+
 (c)'s expectation half is ``scripts/noise_v2_tonality_audit.py --fit`` and (d)
 is ``scripts/noise_v2_round_score.py --fit``; ``summary`` reads their records
 (``results/noise_v3/checks/tonality/fits.json``, ``results/noise_v3/checks/
@@ -69,6 +72,8 @@ FITS: dict[str, dict[str, str]] = {
         "regime": "standby",
     },
 }
+#: The fits of each rig (the held-out windows of a rig render from all of them).
+RIG_KEYS = {rig: [k for k, v in FITS.items() if v["rig"] == rig] for rig in ("dregon", "michaels")}
 #: The v2 fit each v3 fit replaces: R5's DREGON flight_profile (as fitted,
 #: no calibration pin) and R3's per-regime Michael's pair.
 V2_FITS = {
@@ -150,6 +155,17 @@ def write_json(path: Path, payload: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(_clean(payload), indent=1) + "\n")
     return path
+
+
+def write_merged(path: Path, payload: dict[str, Any], *fields: str) -> Path:
+    """``write_json``, keeping the ``fields`` entries an earlier run of the same
+    check wrote for OTHER fits (``--keys``: each family is checked as it lands)."""
+    if path.is_file():
+        old = json.loads(path.read_text())
+        if old.get("check") == payload.get("check"):
+            for field in fields:
+                payload[field] = {**(old.get(field) or {}), **payload[field]}
+    return write_json(path, payload)
 
 
 def load_fit(path: str | Path) -> dict[str, Any]:
@@ -336,8 +352,8 @@ def widths(audio: np.ndarray, label: np.ndarray, sr: int) -> list[float]:
     return out
 
 
-def run_prior(fits_dir: Path, out_dir: Path) -> dict[str, Any]:
-    fits = fits_for(list(FITS), fits_dir)
+def run_prior(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str, Any]:
+    fits = fits_for(keys, fits_dir)
     res: dict[str, Any] = {}
     for key, f in fits.items():
         fit = f["v3"]
@@ -420,7 +436,7 @@ def run_prior(fits_dir: Path, out_dir: Path) -> dict[str, Any]:
         "widths bound a pathology (the v2 13 Hz half width at k=1), not a 0.03 k Hz line",
         fits=res,
     )
-    write_json(out_dir / "prior" / "prior.json", payload)
+    write_merged(out_dir / "prior" / "prior.json", payload, "fits")
     return payload
 
 
@@ -552,10 +568,13 @@ def prom_hist(lines: Sequence[dict[str, Any]]) -> list[int]:
     return np.histogram(allp, bins=HIST_EDGES_DB)[0].tolist()
 
 
-def run_heldout(fits_dir: Path, out_dir: Path, *, n_boot_wander: int) -> dict[str, Any]:
-    fits = fits_for(list(FITS), fits_dir)
+def run_heldout(
+    fits_dir: Path, out_dir: Path, keys: Sequence[str], *, n_boot_wander: int
+) -> dict[str, Any]:
+    fits = fits_for(keys, fits_dir)
     rigs: dict[str, Any] = {}
-    for rig in ("dregon", "michaels"):
+    # a rig is checked once every fit its held-out windows render from is in ``keys``
+    for rig in [r for r in ("dregon", "michaels") if all(k in fits for k in RIG_KEYS[r])]:
         which = LINE_SET[rig]
         specs = heldout_specs(rig)
         arms: dict[str, dict[str, Any]] = {
@@ -616,7 +635,7 @@ def run_heldout(fits_dir: Path, out_dir: Path, *, n_boot_wander: int) -> dict[st
         "with a window's render seeds kept together",
         rigs=rigs,
     )
-    write_json(out_dir / "heldout" / "heldout.json", payload)
+    write_merged(out_dir / "heldout" / "heldout.json", payload, "rigs", "fits")
     figure_heldout(payload, out_dir / "heldout")
     return payload
 
@@ -685,8 +704,8 @@ def ladder(full: W.LineBlocks) -> dict[str, Any]:
     )
 
 
-def run_rendered(fits_dir: Path, out_dir: Path) -> dict[str, Any]:
-    fits = fits_for(list(FITS), fits_dir)
+def run_rendered(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str, Any]:
+    fits = fits_for(keys, fits_dir)
     specs = pattern_specs()
     patterns = TN.select_patterns()
     res: dict[str, Any] = {}
@@ -752,7 +771,7 @@ def run_rendered(fits_dir: Path, out_dir: Path) -> dict[str, Any]:
         "over the local q25 floor), rotor median",
         fits=res,
     )
-    write_json(out_dir / "tonality" / "rendered.json", payload)
+    write_merged(out_dir / "tonality" / "rendered.json", payload, "fits")
     return payload
 
 
@@ -785,10 +804,11 @@ def _lag1(arrs: Sequence[np.ndarray]) -> float:
     return num / den if den > 0 else NAN
 
 
-def run_latents(fits_dir: Path, out_dir: Path) -> dict[str, Any]:
+def run_latents(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str, Any]:
     detail = json.loads((WANDER_DIR / "wander_detail.json").read_text())
     res: dict[str, Any] = {}
-    for key, cfg in FITS.items():
+    for key in keys:
+        cfg = FITS[key]
         path = v3_path(key, fits_dir)
         fit = load_fit(path)
         lat = fit["latents"]
@@ -865,7 +885,7 @@ def run_latents(fits_dir: Path, out_dir: Path) -> dict[str, Any]:
         "(window prominence >= 6 dB, wander.LineBlocks.window_prominence_db at block_s)",
         fits=res,
     )
-    write_json(out_dir / "latents" / "latents.json", payload)
+    write_merged(out_dir / "latents" / "latents.json", payload, "fits")
     return payload
 
 
@@ -1105,17 +1125,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument(
         "--wander-boot", type=int, default=WM.N_BOOT, help="(b): wander window-bootstrap draws"
     )
+    ap.add_argument(
+        "--keys",
+        default=",".join(FITS),
+        help=f"comma list of the fits to check (default all: {','.join(FITS)}); a rerun with "
+        "other keys keeps the earlier fits' entries",
+    )
     args = ap.parse_args(argv)
+    keys = [k.strip() for k in str(args.keys).split(",") if k.strip()]
+    unknown = sorted(set(keys) - set(FITS))
+    if unknown:
+        raise SystemExit(f"--keys: unknown fit(s) {unknown}; known {list(FITS)}")
     out_dir = Path(args.out)
     t0 = time.time()
     if args.cmd == "prior":
-        run_prior(args.fits, out_dir)
+        run_prior(args.fits, out_dir, keys)
     elif args.cmd == "heldout":
-        run_heldout(args.fits, out_dir, n_boot_wander=int(args.wander_boot))
+        run_heldout(args.fits, out_dir, keys, n_boot_wander=int(args.wander_boot))
     elif args.cmd == "rendered":
-        run_rendered(args.fits, out_dir)
+        run_rendered(args.fits, out_dir, keys)
     elif args.cmd == "latents":
-        run_latents(args.fits, out_dir)
+        run_latents(args.fits, out_dir, keys)
     text = summary_md(out_dir)
     (out_dir / "findings.md").parent.mkdir(parents=True, exist_ok=True)
     (out_dir / "findings.md").write_text(text)
