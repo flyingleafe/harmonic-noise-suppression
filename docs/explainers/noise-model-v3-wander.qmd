@@ -334,10 +334,9 @@ and $10^{(\cdot)/20}$ on amplitude (the square root). Term by term:
   common part (all orders of a rotor breathe together — the legacy
   `harm_coherence` at 1) plus a per-line residual, each an OU across blocks
   with its own $(\sigma, \tau)$: $(\sigma_d, \tau_d)$ and
-  $(\sigma_v, \tau_v)$. Priors on the four hyperparameters: HalfNormal on the
-  sds with scale from the R4 order-tracked line-power spread on real
-  windows; LogNormal on the times centred on the measured autocorrelation
-  time.
+  $(\sigma_v, \tau_v)$. The four hyperparameters are not fitted: they are
+  measured on the real windows (§3.3a) and fixed, like every other prior
+  of the model.
 - **[new]** $e_{mi}$: the microphone term, see §2.5. On the evidence of the
   rank test it is expected to be **zero** once channels are normalised; the
   model keeps at most one free directivity offset per rotor,
