@@ -1,0 +1,3896 @@
+{
+ "schema": "noise-v3-intermittency/1",
+ "generated_by": "scripts/_dregon_intermittency.py",
+ "git_head": "93a8c14111b8",
+ "config": {
+  "block_s": 0.5,
+  "prominence_db": 6.0,
+  "intermittent_frac": [
+   0.2,
+   0.8
+  ],
+  "min_valid_frac": 0.8,
+  "shift_bins": 3,
+  "neighbour_bins": 1.0,
+  "comb_step_rev_s": 0.05,
+  "comb_max_rev_s": 1.0,
+  "comb_min_order": 5,
+  "smooth_labels": [
+   "window_mean",
+   "moving_1s"
+  ],
+  "n_sim": 200,
+  "null_median_db": 1.0,
+  "tail_db": 6.0,
+  "gone_db": 3.0,
+  "near_threshold_db": [
+   4.0,
+   8.0
+  ],
+  "limit": null
+ },
+ "rigs": {
+  "dregon": {
+   "windows": [
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727397.205+4_motors_command",
+     "tag": "dregon_score",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_hovering_nosource_room2@1511903905.394+4_motors_command",
+     "tag": "dregon_score",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903578.348+4_motors_command",
+     "tag": "dregon_score",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905725.953+4_motors_command",
+     "tag": "dregon_score",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_spinning_nosource_room2@1511905200.978+4_motors_command",
+     "tag": "dregon_score",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command",
+     "tag": "dregon_fit",
+     "regime": "flight",
+     "blocks": 16
+    },
+    {
+     "name": "flight_dregon_hovering_nosource_room2@1511903911.394+8_motors_command",
+     "tag": "dregon_fit",
+     "regime": "flight",
+     "blocks": 16
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command",
+     "tag": "dregon_fit",
+     "regime": "flight",
+     "blocks": 16
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command",
+     "tag": "dregon_fit",
+     "regime": "flight",
+     "blocks": 16
+    },
+    {
+     "name": "flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command",
+     "tag": "dregon_fit",
+     "regime": "flight",
+     "blocks": 16
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672654.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672658.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672662.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672666.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672670.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672674.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672678.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672682.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672686.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672690.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672694.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672698.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672702.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room1@1519672706.061+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727413.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727417.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727421.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727425.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727429.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727433.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727437.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727441.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727445.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727449.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727453.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_free-flight_nosource_room2@1512727457.205+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_hovering_nosource_room2@1511903921.394+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_hovering_nosource_room2@1511903925.394+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_hovering_nosource_room2@1511903929.394+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905741.559+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905745.559+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905749.559+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_rectangle_nosource_room2@1511905753.559+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_spinning_nosource_room2@1511905215.335+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_spinning_nosource_room2@1511905219.335+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_spinning_nosource_room2@1511905223.335+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903596.177+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903600.177+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903604.177+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    },
+    {
+     "name": "flight_dregon_updown_nosource_room2@1511903608.177+4_motors_command",
+     "tag": "dregon_extra",
+     "regime": "flight",
+     "blocks": 8
+    }
+   ],
+   "counts": {
+    "n_windows": 50,
+    "n_blocks": 440,
+    "tracks": {
+     "resolvable": 44,
+     "intermittent": 767,
+     "under": 17983,
+     "off_grid": 2166
+    },
+    "intermittent_by_order_group": {
+     "1-2": 86,
+     "3-8": 32,
+     "9-24": 308,
+     "25-60": 185,
+     "61+": 156
+    },
+    "intermittent_by_rotor": {
+     "1": 175,
+     "2": 182,
+     "3": 204,
+     "4": 206
+    },
+    "intermittent_distinct_lines": 156,
+    "intermittent_most_windows": [
+     {
+      "line": "3:2",
+      "windows": 27
+     },
+     {
+      "line": "1:2",
+      "windows": 22
+     },
+     {
+      "line": "4:2",
+      "windows": 22
+     },
+     {
+      "line": "4:13",
+      "windows": 19
+     },
+     {
+      "line": "4:14",
+      "windows": 17
+     },
+     {
+      "line": "3:14",
+      "windows": 16
+     },
+     {
+      "line": "2:2",
+      "windows": 15
+     },
+     {
+      "line": "3:12",
+      "windows": 15
+     },
+     {
+      "line": "4:16",
+      "windows": 14
+     },
+     {
+      "line": "1:14",
+      "windows": 12
+     },
+     {
+      "line": "1:69",
+      "windows": 12
+     },
+     {
+      "line": "3:42",
+      "windows": 12
+     },
+     {
+      "line": "1:16",
+      "windows": 11
+     },
+     {
+      "line": "3:16",
+      "windows": 11
+     },
+     {
+      "line": "3:70",
+      "windows": 11
+     }
+    ],
+    "intermittent_dominant": 60,
+    "intermittent_own_share_quantiles": [
+     0.3544670582449565,
+     0.5386379903579844,
+     0.6465971843451924,
+     0.7298995040116154,
+     0.8175595346457342
+    ],
+    "intermittent_blocks": 6280,
+    "intermittent_absent_blocks": 3840,
+    "windows_with_intermittent": 47
+   },
+   "label": {
+    "search": {
+     "intermittent": {
+      "absent_blocks": 3840,
+      "recovered": 0.275,
+      "recovered_other_rotor": 0.159375,
+      "recovered_own": 0.115625,
+      "shift_bins_counts": {
+       "-3": 156,
+       "-2": 63,
+       "-1": 51,
+       "0": 0,
+       "1": 14,
+       "2": 33,
+       "3": 127
+      },
+      "own_shift_abs_rev_s_quantiles": [
+       0.2828960659712019,
+       0.3664712153518124,
+       0.5580357142857143,
+       1.1160714285714286,
+       1.953125
+      ],
+      "own_shift_at_edge": 0.6373873873873874
+     },
+     "always_under_null": {
+      "absent_blocks": 157390,
+      "recovered": 0.02089078086282483,
+      "recovered_other_rotor": 0.011411144291251032,
+      "recovered_own": 0.009479636571573798,
+      "shift_bins_counts": {
+       "-3": 514,
+       "-2": 241,
+       "-1": 102,
+       "0": 0,
+       "1": 71,
+       "2": 131,
+       "3": 433
+      },
+      "own_shift_abs_rev_s_quantiles": [
+       0.2170138888888889,
+       0.37202380952380953,
+       0.6510416666666666,
+       1.3020833333333333,
+       1.953125
+      ],
+      "own_shift_at_edge": 0.6347184986595175
+     },
+     "present_blocks_moved": 0.3168032786885246,
+     "regime_any_peak": {
+      "absent_recovered": 0.275,
+      "present_lost": 0.0,
+      "still_intermittent": 0.834419817470665,
+      "now_resolvable": 0.16558018252933507,
+      "now_under": 0.0,
+      "switches_over_observed": 0.8662291771832408
+     },
+     "regime_own_peak": {
+      "absent_recovered": 0.115625,
+      "present_lost": 0.0,
+      "still_intermittent": 0.9530638852672751,
+      "now_resolvable": 0.0469361147327249,
+      "now_under": 0.0,
+      "switches_over_observed": 1.0010095911155983
+     }
+    },
+    "comb_loo": {
+     "absent_recovered": 0.07447916666666667,
+     "present_lost": 0.13688524590163934,
+     "still_intermittent": 0.8565840938722294,
+     "now_resolvable": 0.024771838331160364,
+     "now_under": 0.11864406779661017,
+     "switches_over_observed": 0.9343765774861181,
+     "absent_with_estimate": 0.8838541666666667,
+     "dc_abs_rev_s_absent_quantiles": [
+      0.0,
+      0.05,
+      0.25,
+      0.45,
+      0.9
+     ],
+     "dc_abs_rev_s_present_quantiles": [
+      0.0,
+      0.05,
+      0.2,
+      0.4,
+      0.75
+     ],
+     "dc_at_zero_absent": 0.14466705951679434
+    },
+    "smoothed_label": {
+     "window_mean": {
+      "absent_recovered": 0.12916666666666668,
+      "present_lost": 0.4516393442622951,
+      "still_intermittent": 0.6101694915254238,
+      "now_resolvable": 0.01955671447196871,
+      "now_under": 0.37027379400260757,
+      "switches_over_observed": 0.7491166077738516,
+      "mean_gain_absent_db": 0.24400084276349057
+     },
+     "moving_1s": {
+      "absent_recovered": 0.07526041666666666,
+      "present_lost": 0.20614754098360655,
+      "still_intermittent": 0.8135593220338984,
+      "now_resolvable": 0.01564537157757497,
+      "now_under": 0.17079530638852672,
+      "switches_over_observed": 0.8833922261484098,
+      "mean_gain_absent_db": 0.08302348688856163
+     }
+    },
+    "label_jitter": {
+     "absent_off_by_gt_1bin": 0.6348958333333333,
+     "present_off_by_gt_1bin": 0.6295081967213115
+    },
+    "neighbour_at_label": {
+     "absent": 0.5302083333333333,
+     "present": 0.5762295081967214
+    }
+   },
+   "floor": {
+    "sigma_u_db": 2.8310395556186783,
+    "local": {
+     "tracks": 767,
+     "r_per_track_quantiles": [
+      -0.9275449266113157,
+      -0.7488170752204578,
+      -0.4665431816451361,
+      0.0365506887194906,
+      0.6047078122514458
+     ],
+     "r_per_track_negative": 0.7353324641460235,
+     "r_per_track_below_minus_half": 0.4784876140808344,
+     "r_pooled_within": -0.24626516301542523,
+     "r_pooled_within_ci90": [
+      -0.3081692034312791,
+      -0.20216399893340822
+     ],
+     "slope_db_per_db": -0.49364678754955377,
+     "floor_sd_within_track_db": 1.4712518149808762,
+     "absent_floor_above_sigma_u": 0.05,
+     "present_floor_above_sigma_u": 0.013934426229508197,
+     "all_floor_above_sigma_u": 0.035987261146496814,
+     "absent_floor_above_mean": 0.5822916666666667,
+     "present_floor_above_mean": 0.33852459016393444,
+     "floor_at_mean": {
+      "absent_recovered": 0.06640625,
+      "present_lost": 0.22540983606557377,
+      "still_intermittent": 0.7783572359843546,
+      "now_resolvable": 0.01564537157757497,
+      "now_under": 0.20599739243807041,
+      "switches_over_observed": 0.8939929328621908
+     }
+    },
+    "uj": {
+     "tracks": 767,
+     "r_per_track_quantiles": [
+      -0.8164915131406401,
+      -0.5083582937415533,
+      -0.18651337608117172,
+      0.22079752586136508,
+      0.6476933864720321
+     ],
+     "r_per_track_negative": 0.621903520208605,
+     "r_per_track_below_minus_half": 0.25945241199478486,
+     "r_pooled_within": -0.1185671444838327,
+     "r_pooled_within_ci90": [
+      -0.17290049857958306,
+      -0.07543047665915403
+     ],
+     "slope_db_per_db": -0.22799387188782683,
+     "floor_sd_within_track_db": 1.5335255888753836,
+     "absent_floor_above_sigma_u": 0.042198489189893204,
+     "present_floor_above_sigma_u": 0.026251025430680888,
+     "all_floor_above_sigma_u": 0.03600446072964792,
+     "absent_floor_above_mean": 0.5045584787705132,
+     "present_floor_above_mean": 0.4036095159967186,
+     "floor_at_mean": {
+      "absent_recovered": 0.08151041666666667,
+      "present_lost": 0.18524590163934426,
+      "still_intermittent": 0.8617992177314211,
+      "now_resolvable": 0.010430247718383311,
+      "now_under": 0.12777053455019557,
+      "switches_over_observed": 0.9767794043412418
+     }
+    },
+    "u": {
+     "tracks": 767,
+     "r_per_track_quantiles": [
+      -0.8238641357156457,
+      -0.5321529242465133,
+      -0.24054567184509434,
+      0.1273910248592427,
+      0.5842902461856632
+     ],
+     "r_per_track_negative": 0.6792698826597132,
+     "r_per_track_below_minus_half": 0.2842242503259452,
+     "r_pooled_within": -0.16442517906696752,
+     "r_pooled_within_ci90": [
+      -0.2197783371687847,
+      -0.11919872385630445
+     ],
+     "slope_db_per_db": -0.42855852393051025,
+     "floor_sd_within_track_db": 1.1315103540547495,
+     "absent_floor_above_sigma_u": 0.0265625,
+     "present_floor_above_sigma_u": 0.013524590163934426,
+     "all_floor_above_sigma_u": 0.021496815286624203,
+     "absent_floor_above_mean": 0.5330729166666667,
+     "present_floor_above_mean": 0.3819672131147541,
+     "floor_at_mean": {
+      "absent_recovered": 0.04140625,
+      "present_lost": 0.13237704918032786,
+      "still_intermittent": 0.8604954367666232,
+      "now_resolvable": 0.010430247718383311,
+      "now_under": 0.1290743155149935,
+      "switches_over_observed": 0.9414437152953054
+     }
+    },
+    "speed": {
+     "r_pooled_within": 0.0711650609910001
+    }
+   },
+   "by_order_group": {
+    "1-2": {
+     "tracks": 86,
+     "median_track_sd_db": 1.4803451702223769,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.014644351464435146,
+      "present_lost": 0.0,
+      "still_intermittent": 0.9883720930232558,
+      "now_resolvable": 0.011627906976744186,
+      "now_under": 0.0,
+      "switches_over_observed": 1.0036630036630036
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.0041841004184100415,
+      "present_lost": 0.02127659574468085,
+      "still_intermittent": 0.9767441860465116,
+      "now_resolvable": 0.0,
+      "now_under": 0.023255813953488372,
+      "switches_over_observed": 0.9926739926739927
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.012552301255230125,
+      "present_lost": 0.024822695035460994,
+      "still_intermittent": 0.9767441860465116,
+      "now_resolvable": 0.011627906976744186,
+      "now_under": 0.011627906976744186,
+      "switches_over_observed": 0.9743589743589743
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.13807531380753138,
+      "present_lost": 0.6312056737588653,
+      "still_intermittent": 0.4418604651162791,
+      "now_resolvable": 0.023255813953488372,
+      "now_under": 0.5348837209302325,
+      "switches_over_observed": 0.5970695970695971
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.16736401673640167,
+      "present_lost": 0.36524822695035464,
+      "still_intermittent": 0.8255813953488372,
+      "now_resolvable": 0.0,
+      "now_under": 0.1744186046511628,
+      "switches_over_observed": 1.0
+     }
+    },
+    "3-8": {
+     "tracks": 32,
+     "median_track_sd_db": 1.698964747662735,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.05142857142857143,
+      "present_lost": 0.0,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.1388888888888888
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.011428571428571429,
+      "present_lost": 0.012345679012345678,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.0
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.022857142857142857,
+      "present_lost": 0.07407407407407407,
+      "still_intermittent": 0.9375,
+      "now_resolvable": 0.0,
+      "now_under": 0.0625,
+      "switches_over_observed": 1.0
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.08571428571428572,
+      "present_lost": 0.43209876543209874,
+      "still_intermittent": 0.59375,
+      "now_resolvable": 0.0,
+      "now_under": 0.40625,
+      "switches_over_observed": 0.9722222222222222
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.09142857142857143,
+      "present_lost": 0.2222222222222222,
+      "still_intermittent": 0.8125,
+      "now_resolvable": 0.0,
+      "now_under": 0.1875,
+      "switches_over_observed": 1.2083333333333333
+     }
+    },
+    "9-24": {
+     "tracks": 308,
+     "median_track_sd_db": 2.068367327546394,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.11096256684491979,
+      "present_lost": 0.0,
+      "still_intermittent": 0.9545454545454546,
+      "now_resolvable": 0.045454545454545456,
+      "now_under": 0.0,
+      "switches_over_observed": 1.0251655629139074
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.0875668449197861,
+      "present_lost": 0.08669354838709678,
+      "still_intermittent": 0.9025974025974026,
+      "now_resolvable": 0.025974025974025976,
+      "now_under": 0.07142857142857142,
+      "switches_over_observed": 0.9483443708609272
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.08021390374331551,
+      "present_lost": 0.18649193548387097,
+      "still_intermittent": 0.8311688311688312,
+      "now_resolvable": 0.016233766233766232,
+      "now_under": 0.1525974025974026,
+      "switches_over_observed": 0.9271523178807947
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.0661764705882353,
+      "present_lost": 0.20766129032258066,
+      "still_intermittent": 0.8116883116883117,
+      "now_resolvable": 0.016233766233766232,
+      "now_under": 0.17207792207792208,
+      "switches_over_observed": 0.9324503311258279
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.09893048128342247,
+      "present_lost": 0.21774193548387097,
+      "still_intermittent": 0.8571428571428571,
+      "now_resolvable": 0.01948051948051948,
+      "now_under": 0.12337662337662338,
+      "switches_over_observed": 0.9549668874172186
+     }
+    },
+    "25-60": {
+     "tracks": 185,
+     "median_track_sd_db": 2.6174577028791934,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.18261826182618263,
+      "present_lost": 0.0,
+      "still_intermittent": 0.9351351351351351,
+      "now_resolvable": 0.06486486486486487,
+      "now_under": 0.0,
+      "switches_over_observed": 0.9451219512195121
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.1034103410341034,
+      "present_lost": 0.16695059625212946,
+      "still_intermittent": 0.7891891891891892,
+      "now_resolvable": 0.043243243243243246,
+      "now_under": 0.16756756756756758,
+      "switches_over_observed": 0.8800813008130082
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.0814081408140814,
+      "present_lost": 0.2708688245315162,
+      "still_intermittent": 0.7405405405405405,
+      "now_resolvable": 0.016216216216216217,
+      "now_under": 0.24324324324324326,
+      "switches_over_observed": 0.8130081300813008
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.0517051705170517,
+      "present_lost": 0.18228279386712096,
+      "still_intermittent": 0.7783783783783784,
+      "now_resolvable": 0.021621621621621623,
+      "now_under": 0.2,
+      "switches_over_observed": 0.9004065040650406
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.0539053905390539,
+      "present_lost": 0.14310051107325383,
+      "still_intermittent": 0.8486486486486486,
+      "now_resolvable": 0.010810810810810811,
+      "now_under": 0.14054054054054055,
+      "switches_over_observed": 0.926829268292683
+     }
+    },
+    "61+": {
+     "tracks": 156,
+     "median_track_sd_db": 4.353727127893963,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.12276214833759591,
+      "present_lost": 0.0,
+      "still_intermittent": 0.9423076923076923,
+      "now_resolvable": 0.057692307692307696,
+      "now_under": 0.0,
+      "switches_over_observed": 0.9974293059125964
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.07289002557544758,
+      "present_lost": 0.28714859437751006,
+      "still_intermittent": 0.75,
+      "now_resolvable": 0.019230769230769232,
+      "now_under": 0.23076923076923078,
+      "switches_over_observed": 0.922879177377892
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.10869565217391304,
+      "present_lost": 0.2931726907630522,
+      "still_intermittent": 0.75,
+      "now_resolvable": 0.019230769230769232,
+      "now_under": 0.23076923076923078,
+      "switches_over_observed": 0.8020565552699229
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.03580562659846547,
+      "present_lost": 0.04819277108433735,
+      "still_intermittent": 0.9358974358974359,
+      "now_resolvable": 0.00641025641025641,
+      "now_under": 0.057692307692307696,
+      "switches_over_observed": 1.0051413881748072
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.02557544757033248,
+      "present_lost": 0.06224899598393574,
+      "still_intermittent": 0.9166666666666666,
+      "now_resolvable": 0.0,
+      "now_under": 0.08333333333333333,
+      "switches_over_observed": 1.0231362467866323
+     }
+    }
+   },
+   "shape": {
+    "intermittent": {
+     "n_tracks": 767,
+     "n_blocks": 6280,
+     "model": {
+      "tau_s": 0.5673001249880142,
+      "block_noise_db2": 1.2971015613503527,
+      "null_pool_blocks": 112026,
+      "null_pool_prominence_db_quantiles": [
+       -1.5902391388760013,
+       -0.37153392634895366,
+       0.21742044372921046,
+       0.8388284842512563,
+       2.39260136753777
+      ],
+      "same_rotor_share": 0.2552908535054008
+     },
+     "observed": {
+      "sd_centred": 2.9491736600043117,
+      "excess_kurtosis": 1.0523957686435965,
+      "skew": 0.31674053942234615,
+      "acf1": 0.2264075473440302,
+      "switch_rate": 0.3593324868492654,
+      "track_sd_cv": 0.4882361505648236,
+      "present": 0.3885350318471338,
+      "gone": 0.2705414012738854,
+      "tail": 0.019267515923566878,
+      "dbic_centred": 167.12039956653098,
+      "dbic_raw": -51.75398173153371,
+      "inter_share": 1.0
+     },
+     "gaussian_literal": {
+      "sigma_db": 1.4754805456608948,
+      "with_floor": false,
+      "line_level_db_quantiles": [
+       -7.081941015658127,
+       0.9173369185195903,
+       2.946022882132772,
+       4.401341655045718,
+       6.979550564168014
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.1635452981300505,
+        1.1816996321932596,
+        1.2052590565620123
+       ],
+       "excess_kurtosis": [
+        0.35275565617479065,
+        0.6055573045556715,
+        1.2397337174716887
+       ],
+       "skew": [
+        0.17163864175294752,
+        0.24941744772381869,
+        0.3565299287939045
+       ],
+       "acf1": [
+        -0.013864882952811006,
+        0.008630883583543896,
+        0.030952194931985068
+       ],
+       "switch_rate": [
+        0.21039361509160168,
+        0.22002539452203881,
+        0.2290223109015055
+       ],
+       "track_sd_cv": [
+        0.30488915351806345,
+        0.32146882306584623,
+        0.33623278430686887
+       ],
+       "present": [
+        0.27738057324840765,
+        0.28495222929936304,
+        0.29411624203821657
+       ],
+       "gone": [
+        0.2063455414012739,
+        0.21321656050955415,
+        0.21879777070063694
+       ],
+       "tail": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "dbic_centred": [
+        -40.15245467264631,
+        -13.620152583042,
+        31.248120416191497
+       ],
+       "dbic_raw": [
+        -61.29233083031922,
+        -37.87508397090278,
+        -9.692855581000563
+       ],
+       "inter_share": [
+        0.3610821382007823,
+        0.379400260756193,
+        0.39771838331160364
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.10945273631840796,
+       "skew": 0.16417910447761194,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.004975124378109453,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.8308457711442786,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 0.8955223880597015,
+       "skew": 0.8407960199004975,
+       "acf1": 1.0,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 1.0,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 0.17412935323383086,
+       "inter_share": 1.0
+      }
+     },
+     "gaussian_literal_floor": {
+      "sigma_db": 1.4754805456608948,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       -7.184342338870777,
+       0.9210169336680907,
+       2.9402170577445506,
+       4.399745298948845,
+       6.977124733472904
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.461670470055904,
+        1.4837083112867713,
+        1.508357451274808
+       ],
+       "excess_kurtosis": [
+        0.42273122189353524,
+        0.5924207292500774,
+        0.8996687949049661
+       ],
+       "skew": [
+        0.1716587843849199,
+        0.23603400425451004,
+        0.31785598869126824
+       ],
+       "acf1": [
+        0.10899404042823253,
+        0.12704768459733834,
+        0.14843094656478825
+       ],
+       "switch_rate": [
+        0.23033738436422999,
+        0.24152004353346634,
+        0.25286595320152366
+       ],
+       "track_sd_cv": [
+        0.3469756963695369,
+        0.36301205176405404,
+        0.3773972340295953
+       ],
+       "present": [
+        0.3007802547770701,
+        0.3078821656050955,
+        0.31513535031847134
+       ],
+       "gone": [
+        0.22736464968152867,
+        0.23312101910828026,
+        0.23885350318471338
+       ],
+       "tail": [
+        0.0,
+        0.0,
+        0.0001592356687898089
+       ],
+       "dbic_centred": [
+        -36.25595465246952,
+        -5.400782924363739,
+        37.04357609578
+       ],
+       "dbic_raw": [
+        -28.07395590048327,
+        -5.530908423843357,
+        26.356719762745325
+       ],
+       "inter_share": [
+        0.45234680573663627,
+        0.4745762711864407,
+        0.4954367666232073
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.014925373134328358,
+       "skew": 0.05970149253731343,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.004975124378109453,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 0.9900497512437811,
+       "skew": 0.945273631840796,
+       "acf1": 1.0,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 1.0,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      }
+     },
+     "gaussian_fitted_floor": {
+      "sigma_db": 5.030077862805782,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       -8.305853908620369,
+       0.812788268703343,
+       2.9352301712613538,
+       4.411921688225978,
+       7.005920072449897
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        2.894371737710699,
+        2.955973296189156,
+        3.0216786254589056
+       ],
+       "excess_kurtosis": [
+        0.7088241234264604,
+        0.8960335746085644,
+        1.1347063324984195
+       ],
+       "skew": [
+        0.5133687549374857,
+        0.5754903935546727,
+        0.6381143941996581
+       ],
+       "acf1": [
+        0.123654994205419,
+        0.14531886680996192,
+        0.16896478425737313
+       ],
+       "switch_rate": [
+        0.28691275167785235,
+        0.2964810448031925,
+        0.30636676945401775
+       ],
+       "track_sd_cv": [
+        0.3999464602123824,
+        0.4126780303161939,
+        0.4259770475079381
+       ],
+       "present": [
+        0.3550875796178344,
+        0.36751592356687895,
+        0.37898885350318473
+       ],
+       "gone": [
+        0.3189410828025478,
+        0.3288216560509554,
+        0.33964968152866243
+       ],
+       "tail": [
+        0.009068471337579617,
+        0.01162420382165605,
+        0.014020700636942673
+       ],
+       "dbic_centred": [
+        247.00232594798362,
+        305.01111021767065,
+        374.31058186559966
+       ],
+       "dbic_raw": [
+        800.4354656616258,
+        910.3207601947979,
+        999.4405315028696
+       ],
+       "inter_share": [
+        0.5997392438070405,
+        0.6245110821382008,
+        0.6466753585397653
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.582089552238806,
+       "excess_kurtosis": 0.13432835820895522,
+       "skew": 1.0,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.004975124378109453,
+       "gone": 1.0,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 1.0,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 0.4228855721393035,
+       "excess_kurtosis": 0.8706467661691543,
+       "skew": 0.004975124378109453,
+       "acf1": 1.0,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 1.0,
+       "gone": 0.004975124378109453,
+       "tail": 1.0,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      }
+     },
+     "gmm2_centred": {
+      "means": [
+       -0.5586433209256353,
+       0.8226912474095285
+      ],
+      "sds": [
+       2.2358443144648064,
+       3.6066647847641304
+      ],
+      "weights": [
+       0.5955771080145097,
+       0.4044228919854903
+      ]
+     },
+     "gmm2_raw": {
+      "means": [
+       3.1588359948146385,
+       6.188288491079218
+      ],
+      "sds": [
+       2.751207678595793,
+       3.072723252586297
+      ],
+      "weights": [
+       0.41384143087634995,
+       0.5861585691236499
+      ]
+     },
+     "co_movement": {
+      "same_rotor_mean_r": 0.14849261349710074,
+      "same_rotor_pairs": 3302,
+      "other_rotor_mean_r": 0.11605299480361585,
+      "other_rotor_pairs": 10130
+     },
+     "track_sd_by_order_group": {
+      "1-2": {
+       "tracks": 86,
+       "median_track_sd_db": 1.4803451702223769
+      },
+      "3-8": {
+       "tracks": 32,
+       "median_track_sd_db": 1.698964747662735
+      },
+      "9-24": {
+       "tracks": 308,
+       "median_track_sd_db": 2.068367327546394
+      },
+      "25-60": {
+       "tracks": 185,
+       "median_track_sd_db": 2.6174577028791934
+      },
+      "61+": {
+       "tracks": 156,
+       "median_track_sd_db": 4.353727127893963
+      }
+     }
+    },
+    "near_threshold": {
+     "n_tracks": 744,
+     "n_blocks": 6208,
+     "model": {
+      "tau_s": 0.5673001249880142,
+      "block_noise_db2": 1.2971015613503527,
+      "null_pool_blocks": 112026,
+      "null_pool_prominence_db_quantiles": [
+       -1.5902391388760013,
+       -0.37153392634895366,
+       0.21742044372921046,
+       0.8388284842512563,
+       2.39260136753777
+      ],
+      "same_rotor_share": 0.2552908535054008
+     },
+     "observed": {
+      "sd_centred": 2.284277731987704,
+      "excess_kurtosis": 2.054426304522516,
+      "skew": -0.00928462628830514,
+      "acf1": 0.1905044959399738,
+      "switch_rate": 0.31076134699853586,
+      "track_sd_cv": 0.5245076679283626,
+      "present": 0.3327963917525773,
+      "gone": 0.16736469072164947,
+      "tail": 0.013047680412371135,
+      "dbic_centred": 384.21911012732016,
+      "dbic_raw": 392.92012115666876,
+      "inter_share": 0.6868279569892473
+     },
+     "gaussian_literal": {
+      "sigma_db": 1.4754805456608948,
+      "with_floor": false,
+      "line_level_db_quantiles": [
+       1.6181241600353709,
+       2.254236645700608,
+       3.106662802545844,
+       4.376698918036286,
+       6.400851437915247
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.1795346493519214,
+        1.199104546919235,
+        1.2194646726982525
+       ],
+       "excess_kurtosis": [
+        0.094112379951457,
+        0.2746028714837496,
+        0.6450148081211987
+       ],
+       "skew": [
+        0.1571994461815052,
+        0.2128649503270444,
+        0.3004142019302636
+       ],
+       "acf1": [
+        0.006520112782343702,
+        0.0255447370158491,
+        0.04656340336381534
+       ],
+       "switch_rate": [
+        0.2668191800878477,
+        0.27662884333821375,
+        0.28733528550512444
+       ],
+       "track_sd_cv": [
+        0.28024637218028237,
+        0.29379318916336183,
+        0.30746362029673524
+       ],
+       "present": [
+        0.2981475515463918,
+        0.30807023195876293,
+        0.31734858247422676
+       ],
+       "gone": [
+        0.0576514175257732,
+        0.06306378865979381,
+        0.06769490979381441
+       ],
+       "tail": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "dbic_centred": [
+        -44.12631876263767,
+        -23.77560488216841,
+        6.774309019899894
+       ],
+       "dbic_raw": [
+        155.43539884050298,
+        208.62141429654366,
+        270.5990918331974
+       ],
+       "inter_share": [
+        0.45161290322580644,
+        0.47513440860215056,
+        0.4987231182795699
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 1.0,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.004975124378109453,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 1.0,
+       "skew": 0.004975124378109453,
+       "acf1": 1.0,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 1.0,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 1.0,
+       "inter_share": 1.0
+      }
+     },
+     "gaussian_literal_floor": {
+      "sigma_db": 1.4754805456608948,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       1.6151573918100524,
+       2.2516269154820616,
+       3.1072516996340243,
+       4.378591244495221,
+       6.40959935231333
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.5116149238784988,
+        1.5382216849794665,
+        1.5603845266838967
+       ],
+       "excess_kurtosis": [
+        0.19309459652444932,
+        0.34994060155316253,
+        0.5296937560364312
+       ],
+       "skew": [
+        0.15558468942924372,
+        0.2178324903057132,
+        0.2754913345279548
+       ],
+       "acf1": [
+        0.11879509664574363,
+        0.13455224251707734,
+        0.15487554244035495
+       ],
+       "switch_rate": [
+        0.29280746705710103,
+        0.3052708638360176,
+        0.31663616398243044
+       ],
+       "track_sd_cv": [
+        0.31731784298020527,
+        0.33093508699673274,
+        0.34239895084843497
+       ],
+       "present": [
+        0.33294136597938145,
+        0.34213917525773196,
+        0.3506926546391752
+       ],
+       "gone": [
+        0.09084246134020618,
+        0.09600515463917526,
+        0.1026256443298969
+       ],
+       "tail": [
+        0.0,
+        0.0,
+        0.00032216494845360824
+       ],
+       "dbic_centred": [
+        -42.79593912326327,
+        -20.3908163279757,
+        4.652335858004873
+       ],
+       "dbic_raw": [
+        101.47179753903056,
+        142.13082481512356,
+        180.23856328135207
+       ],
+       "inter_share": [
+        0.5752016129032258,
+        0.6041666666666667,
+        0.6318548387096774
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 1.0,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 0.23880597014925373,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.9502487562189055,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 1.0,
+       "skew": 0.004975124378109453,
+       "acf1": 1.0,
+       "switch_rate": 0.7661691542288557,
+       "track_sd_cv": 1.0,
+       "present": 0.05472636815920398,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 1.0,
+       "inter_share": 1.0
+      }
+     },
+     "gaussian_fitted_floor": {
+      "sigma_db": 3.3629238916748454,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       1.5114885939683673,
+       2.1578724108953105,
+       3.0255083888106,
+       4.317247433551563,
+       6.3516706692343154
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        2.252777312327254,
+        2.2981567172164583,
+        2.3445994185153
+       ],
+       "excess_kurtosis": [
+        0.22084006251283628,
+        0.3835564692188296,
+        0.5779806263702705
+       ],
+       "skew": [
+        0.3700200773239741,
+        0.4236707602756885,
+        0.48730275103804577
+       ],
+       "acf1": [
+        0.13325587417871584,
+        0.1479243281045814,
+        0.1692768940933096
+       ],
+       "switch_rate": [
+        0.325942532942899,
+        0.33793923865300146,
+        0.34793191800878476
+       ],
+       "track_sd_cv": [
+        0.3141237758873764,
+        0.3267284861918023,
+        0.3409280574848792
+       ],
+       "present": [
+        0.3737032860824742,
+        0.38474548969072164,
+        0.39773679123711336
+       ],
+       "gone": [
+        0.17330057989690723,
+        0.18298969072164947,
+        0.19152706185567012
+       ],
+       "tail": [
+        0.0008054123711340206,
+        0.0016108247422680412,
+        0.002416237113402062
+       ],
+       "dbic_centred": [
+        84.96597865194981,
+        126.58619379522679,
+        174.58688911636364
+       ],
+       "dbic_raw": [
+        357.17461852071904,
+        418.3934950735893,
+        484.5885206815801
+       ],
+       "inter_share": [
+        0.6867607526881719,
+        0.7143817204301075,
+        0.7420698924731183
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.7164179104477612,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 1.0,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 1.0,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 1.0,
+       "gone": 1.0,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.7412935323383084,
+       "inter_share": 0.9502487562189055
+      },
+      "p_lower": {
+       "sd_centred": 0.2885572139303483,
+       "excess_kurtosis": 1.0,
+       "skew": 0.004975124378109453,
+       "acf1": 1.0,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 1.0,
+       "present": 0.004975124378109453,
+       "gone": 0.004975124378109453,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 0.263681592039801,
+       "inter_share": 0.05970149253731343
+      }
+     },
+     "gmm2_centred": {
+      "means": [
+       -0.43787433799845554,
+       0.23404335873252408
+      ],
+      "sds": [
+       3.1695387840529365,
+       1.5748270408462917
+      ],
+      "weights": [
+       0.34832146834529604,
+       0.6516785316547039
+      ]
+     },
+     "gmm2_raw": {
+      "means": [
+       5.096811750138325,
+       5.110742877887542
+      ],
+      "sds": [
+       3.389725182610393,
+       1.622379229135501
+      ],
+      "weights": [
+       0.4225132208434807,
+       0.5774867791565194
+      ]
+     },
+     "co_movement": {
+      "same_rotor_mean_r": 0.16942395214004746,
+      "same_rotor_pairs": 2769,
+      "other_rotor_mean_r": 0.12104777607659324,
+      "other_rotor_pairs": 8304
+     },
+     "track_sd_by_order_group": {
+      "1-2": {
+       "tracks": 135,
+       "median_track_sd_db": 1.2879301864692432
+      },
+      "3-8": {
+       "tracks": 42,
+       "median_track_sd_db": 1.3061381887922967
+      },
+      "9-24": {
+       "tracks": 335,
+       "median_track_sd_db": 1.7922835097964716
+      },
+      "25-60": {
+       "tracks": 164,
+       "median_track_sd_db": 2.248559974671875
+      },
+      "61+": {
+       "tracks": 68,
+       "median_track_sd_db": 3.827923896712231
+      }
+     }
+    },
+    "resolvable": {
+     "n_tracks": 44,
+     "n_blocks": 352,
+     "model": {
+      "tau_s": 0.5673001249880142,
+      "block_noise_db2": 1.2971015613503527,
+      "null_pool_blocks": 112026,
+      "null_pool_prominence_db_quantiles": [
+       -1.5902391388760013,
+       -0.37153392634895366,
+       0.21742044372921046,
+       0.8388284842512563,
+       2.39260136753777
+      ],
+      "same_rotor_share": 0.2552908535054008
+     },
+     "observed": {
+      "sd_centred": 2.204939277493144,
+      "excess_kurtosis": 3.3117871932356486,
+      "skew": -0.020361564489522935,
+      "acf1": 0.19252709278685162,
+      "switch_rate": 0.12987012987012986,
+      "track_sd_cv": 0.5658999926267804,
+      "present": 0.9261363636363636,
+      "gone": 0.011363636363636364,
+      "tail": 0.017045454545454544,
+      "dbic_centred": 54.337493401323854,
+      "dbic_raw": 92.35332829017148,
+      "inter_share": 0.0
+     },
+     "gaussian_literal": {
+      "sigma_db": 1.4754805456608948,
+      "with_floor": false,
+      "line_level_db_quantiles": [
+       6.013573513285547,
+       6.482465234141132,
+       7.312958623053557,
+       8.902785582176458,
+       11.764758910809919
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.3237508210490483,
+        1.4118370045574649,
+        1.4987313692586348
+       ],
+       "excess_kurtosis": [
+        -0.36941317778175403,
+        0.021426414926961623,
+        0.5663975143528258
+       ],
+       "skew": [
+        -0.1096401512008875,
+        0.10014631381312229,
+        0.3071053585377168
+       ],
+       "acf1": [
+        -0.04262396099987718,
+        0.03952398463089633,
+        0.12357545249249514
+       ],
+       "switch_rate": [
+        0.09074675324675326,
+        0.1331168831168831,
+        0.16899350649350645
+       ],
+       "track_sd_cv": [
+        0.22881365059505648,
+        0.2819806103633086,
+        0.33239000532890245
+       ],
+       "present": [
+        0.8863636363636364,
+        0.9119318181818182,
+        0.9404829545454545
+       ],
+       "gone": [
+        0.0,
+        0.0,
+        0.002840909090909091
+       ],
+       "tail": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "dbic_centred": [
+        -19.80700888785691,
+        -17.63466566735417,
+        -11.934670004725321
+       ],
+       "dbic_raw": [
+        -5.030612309398748,
+        12.030089679195385,
+        32.01364683308157
+       ],
+       "inter_share": [
+        0.09090909090909091,
+        0.18181818181818182,
+        0.2727272727272727
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 0.8009950248756219,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 0.5621890547263682,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.21393034825870647,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 1.0,
+       "skew": 0.20398009950248755,
+       "acf1": 1.0,
+       "switch_rate": 0.48756218905472637,
+       "track_sd_cv": 1.0,
+       "present": 0.8258706467661692,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      }
+     },
+     "gaussian_literal_floor": {
+      "sigma_db": 1.4754805456608948,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       6.005485168292313,
+       6.4751230689917705,
+       7.308401007732261,
+       8.901127535882383,
+       11.764591716360576
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.553144464119337,
+        1.646075998034153,
+        1.7724366776662297
+       ],
+       "excess_kurtosis": [
+        -0.35872727077364996,
+        0.0024356869778332513,
+        0.5375228234238857
+       ],
+       "skew": [
+        -0.15328747093479442,
+        0.05175977454394451,
+        0.2918296660986565
+       ],
+       "acf1": [
+        0.024268126224758574,
+        0.09231210675997395,
+        0.1676793781946516
+       ],
+       "switch_rate": [
+        0.11688311688311688,
+        0.15584415584415584,
+        0.19155844155844157
+       ],
+       "track_sd_cv": [
+        0.24116018520523413,
+        0.2871220543426823,
+        0.34286886072905587
+       ],
+       "present": [
+        0.8636363636363636,
+        0.8892045454545454,
+        0.9149147727272727
+       ],
+       "gone": [
+        0.0,
+        0.0,
+        0.005681818181818182
+       ],
+       "tail": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "dbic_centred": [
+        -19.86017609427944,
+        -17.87664245421547,
+        -12.415706258331902
+       ],
+       "dbic_raw": [
+        -10.319523699920795,
+        2.34548822356885,
+        19.269599441660766
+       ],
+       "inter_share": [
+        0.1590909090909091,
+        0.25,
+        0.3409090909090909
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 0.7412935323383084,
+       "acf1": 0.01990049751243781,
+       "switch_rate": 0.8905472636815921,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.024875621890547265,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 1.0,
+       "skew": 0.263681592039801,
+       "acf1": 0.9850746268656716,
+       "switch_rate": 0.12437810945273632,
+       "track_sd_cv": 1.0,
+       "present": 0.9900497512437811,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      }
+     },
+     "gaussian_fitted_floor": {
+      "sigma_db": 2.5209784532907977,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       6.028076182315459,
+       6.491631878166996,
+       7.324145898168655,
+       8.930163645873948,
+       11.799074770890558
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        2.0307843515708637,
+        2.2061790065268845,
+        2.352512672395006
+       ],
+       "excess_kurtosis": [
+        -0.3729553339318163,
+        -0.020697524276864998,
+        0.4262329572096778
+       ],
+       "skew": [
+        -0.03721309509602079,
+        0.17142200627941995,
+        0.3816215787378909
+       ],
+       "acf1": [
+        0.03180280007465977,
+        0.11836665998000276,
+        0.19062027454600236
+       ],
+       "switch_rate": [
+        0.17207792207792208,
+        0.20941558441558442,
+        0.2566558441558441
+       ],
+       "track_sd_cv": [
+        0.23920656883799274,
+        0.286460742613572,
+        0.3394172212867335
+       ],
+       "present": [
+        0.7953125,
+        0.8323863636363636,
+        0.8693181818181818
+       ],
+       "gone": [
+        0.0,
+        0.008522727272727272,
+        0.017045454545454544
+       ],
+       "tail": [
+        0.0,
+        0.0,
+        0.005681818181818182
+       ],
+       "dbic_centred": [
+        -19.717894632455046,
+        -16.49460217545368,
+        -8.60908025192637
+       ],
+       "dbic_raw": [
+        -11.70859101980028,
+        -2.269969860672859,
+        14.502582388293487
+       ],
+       "inter_share": [
+        0.2727272727272727,
+        0.38636363636363635,
+        0.5227272727272727
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.5223880597014925,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 0.9253731343283582,
+       "acf1": 0.05472636815920398,
+       "switch_rate": 1.0,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.004975124378109453,
+       "gone": 0.3880597014925373,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      },
+      "p_lower": {
+       "sd_centred": 0.48258706467661694,
+       "excess_kurtosis": 1.0,
+       "skew": 0.07960199004975124,
+       "acf1": 0.9502487562189055,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 1.0,
+       "present": 1.0,
+       "gone": 0.7562189054726368,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      }
+     },
+     "gmm2_centred": {
+      "means": [
+       -0.154994611408755,
+       0.06692623151204824
+      ],
+      "sds": [
+       3.568203783040654,
+       1.2035464824845736
+      ],
+      "weights": [
+       0.3015770426571974,
+       0.6984229573428026
+      ]
+     },
+     "gmm2_raw": {
+      "means": [
+       8.086852455582717,
+       11.268409977892155
+      ],
+      "sds": [
+       1.6011736746485556,
+       4.693172293446364
+      ],
+      "weights": [
+       0.823057478412999,
+       0.1769425215870009
+      ]
+     },
+     "co_movement": {
+      "same_rotor_mean_r": 0.07346128731965086,
+      "same_rotor_pairs": 29,
+      "other_rotor_mean_r": 0.10922562788800001,
+      "other_rotor_pairs": 71
+     },
+     "track_sd_by_order_group": {
+      "1-2": {
+       "tracks": 8,
+       "median_track_sd_db": 1.0985210972831183
+      },
+      "3-8": {
+       "tracks": 0,
+       "median_track_sd_db": null
+      },
+      "9-24": {
+       "tracks": 22,
+       "median_track_sd_db": 1.5300235864625842
+      },
+      "25-60": {
+       "tracks": 6,
+       "median_track_sd_db": 1.6511668862208906
+      },
+      "61+": {
+       "tracks": 8,
+       "median_track_sd_db": 3.7861811652195754
+      }
+     }
+    }
+   }
+  },
+  "michaels": {
+   "windows": [
+    {
+     "name": "flight_michaels_FLY125@16.000+8_rps_refined",
+     "tag": "michaels_cruise",
+     "regime": "cruise",
+     "blocks": 16
+    },
+    {
+     "name": "flight_michaels_FLY125@32.000+8_rps_refined",
+     "tag": "michaels_cruise",
+     "regime": "cruise",
+     "blocks": 16
+    },
+    {
+     "name": "flight_michaels_FLY125@48.000+8_rps_refined",
+     "tag": "michaels_cruise",
+     "regime": "cruise",
+     "blocks": 16
+    },
+    {
+     "name": "flight_michaels_FLY125@64.000+8_rps_refined",
+     "tag": "michaels_cruise",
+     "regime": "cruise",
+     "blocks": 16
+    },
+    {
+     "name": "flight_michaels_FLY125@96.000+8_rps_refined",
+     "tag": "michaels_cruise",
+     "regime": "cruise",
+     "blocks": 16
+    },
+    {
+     "name": "flight_michaels_FLY125@112.000+8_rps_refined",
+     "tag": "michaels_cruise",
+     "regime": "cruise",
+     "blocks": 16
+    },
+    {
+     "name": "flight_michaels_FLY125@128.000+8_rps_refined",
+     "tag": "michaels_cruise",
+     "regime": "cruise",
+     "blocks": 16
+    },
+    {
+     "name": "flight_michaels_FLY125@144.000+8_rps_refined",
+     "tag": "michaels_cruise",
+     "regime": "cruise",
+     "blocks": 16
+    },
+    {
+     "name": "flight_michaels_FLY125@2.000+4_rps_refined",
+     "tag": "michaels_standby",
+     "regime": "standby",
+     "blocks": 8
+    },
+    {
+     "name": "flight_michaels_FLY125@6.000+4_rps_refined",
+     "tag": "michaels_standby",
+     "regime": "standby",
+     "blocks": 8
+    },
+    {
+     "name": "flight_michaels_FLY125@10.000+4_rps_refined",
+     "tag": "michaels_standby",
+     "regime": "standby",
+     "blocks": 8
+    }
+   ],
+   "counts": {
+    "n_windows": 11,
+    "n_blocks": 152,
+    "tracks": {
+     "resolvable": 167,
+     "intermittent": 262,
+     "under": 5236,
+     "off_grid": 927
+    },
+    "intermittent_by_order_group": {
+     "1-2": 2,
+     "3-8": 55,
+     "9-24": 145,
+     "25-60": 22,
+     "61+": 38
+    },
+    "intermittent_by_rotor": {
+     "1": 58,
+     "2": 59,
+     "3": 68,
+     "4": 77
+    },
+    "intermittent_distinct_lines": 105,
+    "intermittent_most_windows": [
+     {
+      "line": "3:20",
+      "windows": 7
+     },
+     {
+      "line": "4:12",
+      "windows": 7
+     },
+     {
+      "line": "1:22",
+      "windows": 6
+     },
+     {
+      "line": "1:5",
+      "windows": 6
+     },
+     {
+      "line": "3:13",
+      "windows": 6
+     },
+     {
+      "line": "4:7",
+      "windows": 6
+     },
+     {
+      "line": "4:8",
+      "windows": 6
+     },
+     {
+      "line": "1:14",
+      "windows": 5
+     },
+     {
+      "line": "1:16",
+      "windows": 5
+     },
+     {
+      "line": "1:18",
+      "windows": 5
+     },
+     {
+      "line": "1:20",
+      "windows": 5
+     },
+     {
+      "line": "2:20",
+      "windows": 5
+     },
+     {
+      "line": "3:11",
+      "windows": 5
+     },
+     {
+      "line": "3:7",
+      "windows": 5
+     },
+     {
+      "line": "4:10",
+      "windows": 5
+     }
+    ],
+    "intermittent_dominant": 29,
+    "intermittent_own_share_quantiles": [
+     0.3527957025211015,
+     0.4998795910275809,
+     0.6030204649380385,
+     0.6893103197821733,
+     0.8338264813285825
+    ],
+    "intermittent_blocks": 3884,
+    "intermittent_absent_blocks": 2115,
+    "windows_with_intermittent": 11
+   },
+   "label": {
+    "search": {
+     "intermittent": {
+      "absent_blocks": 2115,
+      "recovered": 0.41465721040189124,
+      "recovered_other_rotor": 0.29692671394799053,
+      "recovered_own": 0.11773049645390071,
+      "shift_bins_counts": {
+       "-3": 98,
+       "-2": 23,
+       "-1": 10,
+       "0": 0,
+       "1": 10,
+       "2": 9,
+       "3": 99
+      },
+      "own_shift_abs_rev_s_quantiles": [
+       0.3595525568181818,
+       1.0653409090909092,
+       1.46484375,
+       2.34375,
+       4.6875
+      ],
+      "own_shift_at_edge": 0.7911646586345381
+     },
+     "always_under_null": {
+      "absent_blocks": 62458,
+      "recovered": 0.027602548912869448,
+      "recovered_other_rotor": 0.016298952896346346,
+      "recovered_own": 0.011303596016523103,
+      "shift_bins_counts": {
+       "-3": 406,
+       "-2": 19,
+       "-1": 8,
+       "0": 0,
+       "1": 10,
+       "2": 17,
+       "3": 246
+      },
+      "own_shift_abs_rev_s_quantiles": [
+       0.30145635614385613,
+       1.0190217391304348,
+       1.8028846153846154,
+       7.8125,
+       7.8125
+      ],
+      "own_shift_at_edge": 0.9235127478753541
+     },
+     "present_blocks_moved": 0.38100621820237424,
+     "regime_any_peak": {
+      "absent_recovered": 0.41465721040189124,
+      "present_lost": 0.0,
+      "still_intermittent": 0.6106870229007634,
+      "now_resolvable": 0.3893129770992366,
+      "now_under": 0.0,
+      "switches_over_observed": 0.7314890154597233
+     },
+     "regime_own_peak": {
+      "absent_recovered": 0.11773049645390071,
+      "present_lost": 0.0,
+      "still_intermittent": 0.9656488549618321,
+      "now_resolvable": 0.03435114503816794,
+      "now_under": 0.0,
+      "switches_over_observed": 1.045565500406835
+     }
+    },
+    "comb_loo": {
+     "absent_recovered": 0.06477541371158392,
+     "present_lost": 0.1288863764838892,
+     "still_intermittent": 0.7862595419847328,
+     "now_resolvable": 0.022900763358778626,
+     "now_under": 0.19083969465648856,
+     "switches_over_observed": 0.9397884458909682,
+     "absent_with_estimate": 1.0,
+     "dc_abs_rev_s_absent_quantiles": [
+      0.0,
+      0.1,
+      0.2,
+      0.5,
+      1.0
+     ],
+     "dc_abs_rev_s_present_quantiles": [
+      0.0,
+      0.1,
+      0.15000000000000002,
+      0.45,
+      0.9500000000000001
+     ],
+     "dc_at_zero_absent": 0.15650118203309693
+    },
+    "smoothed_label": {
+     "window_mean": {
+      "absent_recovered": 0.141371158392435,
+      "present_lost": 0.4013566986998304,
+      "still_intermittent": 0.6068702290076335,
+      "now_resolvable": 0.026717557251908396,
+      "now_under": 0.366412213740458,
+      "switches_over_observed": 0.8136696501220505,
+      "mean_gain_absent_db": 0.14369761310585827
+     },
+     "moving_1s": {
+      "absent_recovered": 0.08699763593380615,
+      "present_lost": 0.23911814584511024,
+      "still_intermittent": 0.767175572519084,
+      "now_resolvable": 0.015267175572519083,
+      "now_under": 0.21755725190839695,
+      "switches_over_observed": 0.8641171684296176,
+      "mean_gain_absent_db": -0.08184159885985488
+     }
+    },
+    "label_jitter": {
+     "absent_off_by_gt_1bin": 0.6747044917257683,
+     "present_off_by_gt_1bin": 0.6020350480497456
+    },
+    "neighbour_at_label": {
+     "absent": 0.4912529550827423,
+     "present": 0.607687959299039
+    }
+   },
+   "floor": {
+    "sigma_u_db": 1.7316626731947034,
+    "local": {
+     "tracks": 262,
+     "r_per_track_quantiles": [
+      -0.8408044019084566,
+      -0.6805220957099382,
+      -0.46785593001896036,
+      -0.13220177520519688,
+      0.3594700877474513
+     ],
+     "r_per_track_negative": 0.816793893129771,
+     "r_per_track_below_minus_half": 0.46564885496183206,
+     "r_pooled_within": -0.3622458543308891,
+     "r_pooled_within_ci90": [
+      -0.4373100628987926,
+      -0.26850773951375734
+     ],
+     "slope_db_per_db": -0.6711763900553359,
+     "floor_sd_within_track_db": 2.0276587323894395,
+     "absent_floor_above_sigma_u": 0.19574468085106383,
+     "present_floor_above_sigma_u": 0.09270774448841153,
+     "all_floor_above_sigma_u": 0.14881565396498456,
+     "absent_floor_above_mean": 0.6085106382978723,
+     "present_floor_above_mean": 0.3352176370830978,
+     "floor_at_mean": {
+      "absent_recovered": 0.09550827423167849,
+      "present_lost": 0.1554550593555681,
+      "still_intermittent": 0.8320610687022901,
+      "now_resolvable": 0.019083969465648856,
+      "now_under": 0.14885496183206107,
+      "switches_over_observed": 0.9536208299430431
+     }
+    },
+    "uj": {
+     "tracks": 216,
+     "r_per_track_quantiles": [
+      -0.7205958347094539,
+      -0.4271352439157258,
+      -0.1478371223052297,
+      0.17142482206099505,
+      0.5309545726050557
+     ],
+     "r_per_track_negative": 0.6296296296296297,
+     "r_per_track_below_minus_half": 0.18518518518518517,
+     "r_pooled_within": -0.13324367787512742,
+     "r_pooled_within_ci90": [
+      -0.21719153693905047,
+      -0.030309454562649805
+     ],
+     "slope_db_per_db": -0.24560234784103752,
+     "floor_sd_within_track_db": 1.890152758010382,
+     "absent_floor_above_sigma_u": 0.12840466926070038,
+     "present_floor_above_sigma_u": 0.09526982011992005,
+     "all_floor_above_sigma_u": 0.11333333333333333,
+     "absent_floor_above_mean": 0.5102834908282379,
+     "present_floor_above_mean": 0.4337108594270486,
+     "floor_at_mean": {
+      "absent_recovered": 0.06713947990543735,
+      "present_lost": 0.08592425098925947,
+      "still_intermittent": 0.9351145038167938,
+      "now_resolvable": 0.015267175572519083,
+      "now_under": 0.04961832061068702,
+      "switches_over_observed": 0.983726606997559
+     }
+    },
+    "u": {
+     "tracks": 262,
+     "r_per_track_quantiles": [
+      -0.692627546184289,
+      -0.44371210718111986,
+      -0.17589399277540171,
+      0.03605775074600984,
+      0.4296113408473085
+     ],
+     "r_per_track_negative": 0.7175572519083969,
+     "r_per_track_below_minus_half": 0.19083969465648856,
+     "r_pooled_within": -0.19166542943829679,
+     "r_pooled_within_ci90": [
+      -0.25356672286174403,
+      -0.1256080007073655
+     ],
+     "slope_db_per_db": -0.5907130807877157,
+     "floor_sd_within_track_db": 1.2103913271171525,
+     "absent_floor_above_sigma_u": 0.07526366251198466,
+     "present_floor_above_sigma_u": 0.03465909090909091,
+     "all_floor_above_sigma_u": 0.056682267290691625,
+     "absent_floor_above_mean": 0.5186960690316395,
+     "present_floor_above_mean": 0.4011363636363636,
+     "floor_at_mean": {
+      "absent_recovered": 0.0591016548463357,
+      "present_lost": 0.0847936687394008,
+      "still_intermittent": 0.9274809160305344,
+      "now_resolvable": 0.015267175572519083,
+      "now_under": 0.05725190839694656,
+      "switches_over_observed": 0.9983726606997559
+     }
+    },
+    "speed": {
+     "r_pooled_within": 0.027349275533322004
+    }
+   },
+   "by_order_group": {
+    "1-2": {
+     "tracks": 2,
+     "median_track_sd_db": 1.8138023251299442,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.09090909090909091,
+      "present_lost": 0.0,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.0
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.0,
+      "present_lost": 0.0,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.0
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.0,
+      "present_lost": 0.0,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.0
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.36363636363636365,
+      "present_lost": 0.23529411764705882,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.8571428571428572
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.36363636363636365,
+      "present_lost": 0.23529411764705882,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.5714285714285714
+     }
+    },
+    "3-8": {
+     "tracks": 55,
+     "median_track_sd_db": 4.2210557695301025,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.12177985948477751,
+      "present_lost": 0.0,
+      "still_intermittent": 0.9272727272727272,
+      "now_resolvable": 0.07272727272727272,
+      "now_under": 0.0,
+      "switches_over_observed": 1.076
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.0468384074941452,
+      "present_lost": 0.04856512141280353,
+      "still_intermittent": 0.8727272727272727,
+      "now_resolvable": 0.05454545454545454,
+      "now_under": 0.07272727272727272,
+      "switches_over_observed": 0.976
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.06791569086651054,
+      "present_lost": 0.08388520971302428,
+      "still_intermittent": 0.8727272727272727,
+      "now_resolvable": 0.03636363636363636,
+      "now_under": 0.09090909090909091,
+      "switches_over_observed": 0.976
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.09133489461358314,
+      "present_lost": 0.1280353200883002,
+      "still_intermittent": 0.9454545454545454,
+      "now_resolvable": 0.0,
+      "now_under": 0.05454545454545454,
+      "switches_over_observed": 0.932
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.06557377049180328,
+      "present_lost": 0.0728476821192053,
+      "still_intermittent": 0.9636363636363636,
+      "now_resolvable": 0.0,
+      "now_under": 0.03636363636363636,
+      "switches_over_observed": 0.984
+     }
+    },
+    "9-24": {
+     "tracks": 145,
+     "median_track_sd_db": 3.3627577603607737,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.13234142521534847,
+      "present_lost": 0.0,
+      "still_intermittent": 0.9655172413793104,
+      "now_resolvable": 0.034482758620689655,
+      "now_under": 0.0,
+      "switches_over_observed": 1.0115830115830116
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.07126076742364917,
+      "present_lost": 0.10546500479386385,
+      "still_intermittent": 0.8413793103448276,
+      "now_resolvable": 0.020689655172413793,
+      "now_under": 0.13793103448275862,
+      "switches_over_observed": 0.9472329472329473
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.09240407204385279,
+      "present_lost": 0.27900287631831255,
+      "still_intermittent": 0.7517241379310344,
+      "now_resolvable": 0.006896551724137931,
+      "now_under": 0.2413793103448276,
+      "switches_over_observed": 0.8597168597168597
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.11119812059514488,
+      "present_lost": 0.1610738255033557,
+      "still_intermittent": 0.7724137931034483,
+      "now_resolvable": 0.034482758620689655,
+      "now_under": 0.19310344827586207,
+      "switches_over_observed": 0.954954954954955
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.07674236491777604,
+      "present_lost": 0.09300095877277086,
+      "still_intermittent": 0.9103448275862069,
+      "now_resolvable": 0.027586206896551724,
+      "now_under": 0.06206896551724138,
+      "switches_over_observed": 0.9742599742599742
+     }
+    },
+    "25-60": {
+     "tracks": 22,
+     "median_track_sd_db": 2.235108111221477,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.07339449541284404,
+      "present_lost": 0.0,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.1565217391304348
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.04128440366972477,
+      "present_lost": 0.13432835820895522,
+      "still_intermittent": 0.8636363636363636,
+      "now_resolvable": 0.0,
+      "now_under": 0.13636363636363635,
+      "switches_over_observed": 1.0
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.0779816513761468,
+      "present_lost": 0.5597014925373134,
+      "still_intermittent": 0.45454545454545453,
+      "now_resolvable": 0.0,
+      "now_under": 0.5454545454545454,
+      "switches_over_observed": 0.6782608695652174
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.06422018348623854,
+      "present_lost": 0.29850746268656714,
+      "still_intermittent": 0.7727272727272727,
+      "now_resolvable": 0.0,
+      "now_under": 0.22727272727272727,
+      "switches_over_observed": 0.9130434782608695
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.05504587155963303,
+      "present_lost": 0.13432835820895522,
+      "still_intermittent": 0.9090909090909091,
+      "now_resolvable": 0.0,
+      "now_under": 0.09090909090909091,
+      "switches_over_observed": 1.0
+     }
+    },
+    "61+": {
+     "tracks": 38,
+     "median_track_sd_db": 4.818551392207501,
+     "peak +-3 bins, own": {
+      "absent_recovered": 0.06043956043956044,
+      "present_lost": 0.0,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.125
+     },
+     "carrier from other lines": {
+      "absent_recovered": 0.09340659340659341,
+      "present_lost": 0.639344262295082,
+      "still_intermittent": 0.39473684210526316,
+      "now_resolvable": 0.0,
+      "now_under": 0.6052631578947368,
+      "switches_over_observed": 0.6625
+     },
+     "label: 1 s moving mean": {
+      "absent_recovered": 0.10989010989010989,
+      "present_lost": 0.1557377049180328,
+      "still_intermittent": 0.8421052631578947,
+      "now_resolvable": 0.02631578947368421,
+      "now_under": 0.13157894736842105,
+      "switches_over_observed": 0.8125
+     },
+     "floor at mean: local": {
+      "absent_recovered": 0.016483516483516484,
+      "present_lost": 0.040983606557377046,
+      "still_intermittent": 0.9210526315789473,
+      "now_resolvable": 0.0,
+      "now_under": 0.07894736842105263,
+      "switches_over_observed": 0.9875
+     },
+     "floor at mean: band u+u_j": {
+      "absent_recovered": 0.0,
+      "present_lost": 0.0,
+      "still_intermittent": 1.0,
+      "now_resolvable": 0.0,
+      "now_under": 0.0,
+      "switches_over_observed": 1.0
+     }
+    }
+   },
+   "shape": {
+    "intermittent": {
+     "n_tracks": 262,
+     "n_blocks": 3884,
+     "model": {
+      "tau_s": 1.1763694638660718,
+      "block_noise_db2": 1.2888887952685457,
+      "null_pool_blocks": 57337,
+      "null_pool_prominence_db_quantiles": [
+       -2.65768312341458,
+       -0.692365057010132,
+       -0.06977870374452978,
+       0.5204857519677994,
+       1.7859568102800676
+      ],
+      "same_rotor_share": 0.052836864279090484
+     },
+     "observed": {
+      "sd_centred": 3.756886799389592,
+      "excess_kurtosis": 0.11736002769438203,
+      "skew": -0.10106180394090575,
+      "acf1": 0.3837070777649756,
+      "switch_rate": 0.33931529541689676,
+      "track_sd_cv": 0.3387150773866086,
+      "present": 0.4554582904222451,
+      "gone": 0.266735324407827,
+      "tail": 0.05458290422245108,
+      "dbic_centred": -41.75961226643631,
+      "dbic_raw": -39.92101723589076,
+      "inter_share": 1.0
+     },
+     "gaussian_literal": {
+      "sigma_db": 1.980613853595121,
+      "with_floor": false,
+      "line_level_db_quantiles": [
+       -4.901248785876208,
+       2.108833689956002,
+       3.9516389546620703,
+       5.963319517429106,
+       9.08238463585375
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.4876887422279597,
+        1.519414050492182,
+        1.5520480811629787
+       ],
+       "excess_kurtosis": [
+        0.35767098289324806,
+        0.6003492260663963,
+        0.9983184462565584
+       ],
+       "skew": [
+        0.06161971779918842,
+        0.18259377661344425,
+        0.2821993671267766
+       ],
+       "acf1": [
+        0.23913370383624485,
+        0.26129409406316195,
+        0.2892659571458336
+       ],
+       "switch_rate": [
+        0.19464384318056321,
+        0.20927664273881832,
+        0.22088625069022638
+       ],
+       "track_sd_cv": [
+        0.2621837563602974,
+        0.28229820403272915,
+        0.30353543085129614
+       ],
+       "present": [
+        0.4139546858908342,
+        0.42713697219361485,
+        0.4420700308959835
+       ],
+       "gone": [
+        0.16555097837281155,
+        0.17391864057672501,
+        0.18281410916580842
+       ],
+       "tail": [
+        0.0,
+        0.00025746652935118434,
+        0.0005149330587023687
+       ],
+       "dbic_centred": [
+        -47.561608050094584,
+        -28.90760539410894,
+        1.783075969128975
+       ],
+       "dbic_raw": [
+        -13.367271194866952,
+        24.11785226271786,
+        79.39290129480304
+       ],
+       "inter_share": [
+        0.35877862595419846,
+        0.3969465648854962,
+        0.4351145038167939
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 1.0,
+       "skew": 1.0,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.004975124378109453,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.8507462686567164,
+       "dbic_raw": 0.9950248756218906,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 0.004975124378109453,
+       "acf1": 1.0,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 1.0,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 0.15422885572139303,
+       "dbic_raw": 0.009950248756218905,
+       "inter_share": 1.0
+      }
+     },
+     "gaussian_literal_floor": {
+      "sigma_db": 1.980613853595121,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       -4.9078085854200015,
+       2.097420971293289,
+       3.9363199955898738,
+       5.961687799300557,
+       9.077489492198179
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        2.018846921216478,
+        2.066698215955591,
+        2.118362100441011
+       ],
+       "excess_kurtosis": [
+        0.6151209574545082,
+        0.8386458114650537,
+        1.1236412845005763
+       ],
+       "skew": [
+        0.038856893450148436,
+        0.1163640020720586,
+        0.20134593454426483
+       ],
+       "acf1": [
+        0.35491988730529456,
+        0.37440605777803015,
+        0.4016046251824507
+       ],
+       "switch_rate": [
+        0.21506073992269464,
+        0.22694643843180562,
+        0.23937051352843733
+       ],
+       "track_sd_cv": [
+        0.34261937493458516,
+        0.3621788785091027,
+        0.38657251874652365
+       ],
+       "present": [
+        0.4173403707518023,
+        0.4294541709577755,
+        0.44208290422245106
+       ],
+       "gone": [
+        0.1897399588053553,
+        0.19876416065911431,
+        0.2065010298661174
+       ],
+       "tail": [
+        0.003089598352214212,
+        0.004119464469618949,
+        0.005664263645726055
+       ],
+       "dbic_centred": [
+        -46.143907201938234,
+        -32.024841066477165,
+        -4.248419073541124
+       ],
+       "dbic_raw": [
+        65.35487111583225,
+        115.5164616979564,
+        167.434076684522
+       ],
+       "inter_share": [
+        0.457824427480916,
+        0.4961832061068702,
+        0.5307251908396946
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 1.0,
+       "skew": 1.0,
+       "acf1": 0.32338308457711445,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.9900497512437811,
+       "present": 0.004975124378109453,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.8557213930348259,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 0.004975124378109453,
+       "acf1": 0.681592039800995,
+       "switch_rate": 1.0,
+       "track_sd_cv": 0.014925373134328358,
+       "present": 1.0,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 0.14925373134328357,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      }
+     },
+     "gaussian_fitted_floor": {
+      "sigma_db": 5.8053849925075935,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       -5.568198088550427,
+       1.935412162844142,
+       3.79339723326329,
+       5.835158263144814,
+       8.980653693483237
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        3.6130188573653617,
+        3.7591606697712012,
+        3.878564724970185
+       ],
+       "excess_kurtosis": [
+        0.459648350107468,
+        0.7333776415758508,
+        0.9993289241888207
+       ],
+       "skew": [
+        0.42606603569276413,
+        0.5176568217157992,
+        0.5944037976157199
+       ],
+       "acf1": [
+        0.4050216642340375,
+        0.43544418224526493,
+        0.457057178114306
+       ],
+       "switch_rate": [
+        0.2338487023743788,
+        0.24806736609607952,
+        0.2634456101601325
+       ],
+       "track_sd_cv": [
+        0.35359505915240175,
+        0.3811716841149659,
+        0.4054463881537083
+       ],
+       "present": [
+        0.42248970133882596,
+        0.4423274974253347,
+        0.4634526261585994
+       ],
+       "gone": [
+        0.2867147270854789,
+        0.30342430484037075,
+        0.3210607621009269
+       ],
+       "tail": [
+        0.032183316168898045,
+        0.03759011328527292,
+        0.04479917610710608
+       ],
+       "dbic_centred": [
+        97.25167337591957,
+        150.00086373928025,
+        204.6166319417754
+       ],
+       "dbic_raw": [
+        463.8468336296522,
+        563.4609765748064,
+        667.8377904578044
+       ],
+       "inter_share": [
+        0.5763358778625954,
+        0.6221374045801527,
+        0.6603053435114504
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.5124378109452736,
+       "excess_kurtosis": 1.0,
+       "skew": 1.0,
+       "acf1": 0.9950248756218906,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 1.0,
+       "present": 0.18407960199004975,
+       "gone": 1.0,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 1.0,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 0.4925373134328358,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 0.004975124378109453,
+       "acf1": 0.009950248756218905,
+       "switch_rate": 1.0,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.8258706467661692,
+       "gone": 0.004975124378109453,
+       "tail": 1.0,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      }
+     },
+     "gmm2_centred": {
+      "means": [
+       -2.4819336698936114,
+       2.082235886051922
+      ],
+      "sds": [
+       3.0485247201661174,
+       2.941917627033624
+      ],
+      "weights": [
+       0.4562135259281701,
+       0.5437864740718299
+      ]
+     },
+     "gmm2_raw": {
+      "means": [
+       2.4696646624094347,
+       7.449366521197097
+      ],
+      "sds": [
+       3.5377907216440203,
+       3.422451330915759
+      ],
+      "weights": [
+       0.40459478618131894,
+       0.5954052138186812
+      ]
+     },
+     "co_movement": {
+      "same_rotor_mean_r": 0.1739946810325021,
+      "same_rotor_pairs": 827,
+      "other_rotor_mean_r": 0.17473586744594194,
+      "other_rotor_pairs": 2631
+     },
+     "track_sd_by_order_group": {
+      "1-2": {
+       "tracks": 2,
+       "median_track_sd_db": 1.8138023251299442
+      },
+      "3-8": {
+       "tracks": 55,
+       "median_track_sd_db": 4.2210557695301025
+      },
+      "9-24": {
+       "tracks": 145,
+       "median_track_sd_db": 3.3627577603607737
+      },
+      "25-60": {
+       "tracks": 22,
+       "median_track_sd_db": 2.235108111221477
+      },
+      "61+": {
+       "tracks": 38,
+       "median_track_sd_db": 4.818551392207501
+      }
+     }
+    },
+    "near_threshold": {
+     "n_tracks": 192,
+     "n_blocks": 2932,
+     "model": {
+      "tau_s": 1.1763694638660718,
+      "block_noise_db2": 1.2888887952685457,
+      "null_pool_blocks": 57337,
+      "null_pool_prominence_db_quantiles": [
+       -2.65768312341458,
+       -0.692365057010132,
+       -0.06977870374452978,
+       0.5204857519677994,
+       1.7859568102800676
+      ],
+      "same_rotor_share": 0.052836864279090484
+     },
+     "observed": {
+      "sd_centred": 3.282637820575927,
+      "excess_kurtosis": 0.5607143932446794,
+      "skew": -0.15828168958858843,
+      "acf1": 0.3559515753751852,
+      "switch_rate": 0.345985401459854,
+      "track_sd_cv": 0.3826057115792994,
+      "present": 0.4529331514324693,
+      "gone": 0.20429740791268758,
+      "tail": 0.03922237380627558,
+      "dbic_centred": -25.302955827017286,
+      "dbic_raw": -36.42167484699712,
+      "inter_share": 0.8958333333333334
+     },
+     "gaussian_literal": {
+      "sigma_db": 1.980613853595121,
+      "with_floor": false,
+      "line_level_db_quantiles": [
+       1.9997558192821832,
+       2.876264415133214,
+       4.256481144114951,
+       5.609972855490806,
+       6.948146071311349
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.4892423366765244,
+        1.5332823306192416,
+        1.5736127549959766
+       ],
+       "excess_kurtosis": [
+        0.05649896925090035,
+        0.28461277171380894,
+        0.5246706139309545
+       ],
+       "skew": [
+        0.12897727395738,
+        0.21979158291780415,
+        0.31289920125721954
+       ],
+       "acf1": [
+        0.24840246335266583,
+        0.27975207543653235,
+        0.3172190500896564
+       ],
+       "switch_rate": [
+        0.2518248175182482,
+        0.27153284671532846,
+        0.28833941605839414
+       ],
+       "track_sd_cv": [
+        0.22210155636943782,
+        0.24666440444545792,
+        0.26896131359165626
+       ],
+       "present": [
+        0.4276773533424284,
+        0.4461118690313779,
+        0.4645293315143247
+       ],
+       "gone": [
+        0.05900409276944066,
+        0.06957708049113233,
+        0.07946793997271487
+       ],
+       "tail": [
+        0.0,
+        0.0,
+        0.00034106412005457026
+       ],
+       "dbic_centred": [
+        -33.37338364617699,
+        -18.904983853938575,
+        2.2189715994610153
+       ],
+       "dbic_raw": [
+        10.949640694199116,
+        42.03337523805749,
+        81.46378785034267
+       ],
+       "inter_share": [
+        0.48932291666666666,
+        0.546875,
+        0.5940104166666665
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.01990049751243781,
+       "skew": 1.0,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.24875621890547264,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.6865671641791045,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 0.9850746268656716,
+       "skew": 0.004975124378109453,
+       "acf1": 1.0,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 0.7611940298507462,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 0.31840796019900497,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      }
+     },
+     "gaussian_literal_floor": {
+      "sigma_db": 1.980613853595121,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       1.9572983092566865,
+       2.84394070680361,
+       4.229800559193155,
+       5.59140000527931,
+       6.932241502859758
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.9970259474482661,
+        2.051372159365441,
+        2.113934283876469
+       ],
+       "excess_kurtosis": [
+        0.25464993310725303,
+        0.4709621573958651,
+        0.7915017488278325
+       ],
+       "skew": [
+        0.0775880253159859,
+        0.16972940499851055,
+        0.24661199093163225
+       ],
+       "acf1": [
+        0.35146110963950755,
+        0.37974299456093663,
+        0.41015844699456894
+       ],
+       "switch_rate": [
+        0.26932481751824816,
+        0.28558394160583944,
+        0.3011131386861314
+       ],
+       "track_sd_cv": [
+        0.2862640428941948,
+        0.3112023076414897,
+        0.3351616672087271
+       ],
+       "present": [
+        0.4358287858117326,
+        0.45259208731241474,
+        0.4694236016371077
+       ],
+       "gone": [
+        0.09618008185538882,
+        0.10607094133697136,
+        0.11631991814461118
+       ],
+       "tail": [
+        0.001364256480218281,
+        0.002728512960436562,
+        0.004092769440654843
+       ],
+       "dbic_centred": [
+        -40.60743897083821,
+        -27.355756628858217,
+        -9.811001686410968
+       ],
+       "dbic_raw": [
+        43.488042636479534,
+        81.6855275944863,
+        131.1824331084569
+       ],
+       "inter_share": [
+        0.625,
+        0.6770833333333334,
+        0.7291666666666666
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.26865671641791045,
+       "skew": 1.0,
+       "acf1": 0.8756218905472637,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.48258706467661694,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.43283582089552236,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 0.736318407960199,
+       "skew": 0.004975124378109453,
+       "acf1": 0.12935323383084577,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 0.5373134328358209,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 0.572139303482587,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      }
+     },
+     "gaussian_fitted_floor": {
+      "sigma_db": 4.702755005237657,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       2.0105888067508975,
+       2.9053595959272287,
+       4.296765086038749,
+       5.657620111250706,
+       7.009405000233268
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        3.1662575838460496,
+        3.288771745770977,
+        3.4029930376940474
+       ],
+       "excess_kurtosis": [
+        0.17288080509857998,
+        0.40484702198693645,
+        0.6909321038213527
+       ],
+       "skew": [
+        0.3647630577082799,
+        0.4454005976425838,
+        0.5287010368520751
+       ],
+       "acf1": [
+        0.3973300917303292,
+        0.42943043760437394,
+        0.4614459092884736
+       ],
+       "switch_rate": [
+        0.2613138686131387,
+        0.28065693430656935,
+        0.29744525547445255
+       ],
+       "track_sd_cv": [
+        0.2813221190803362,
+        0.30296521210234845,
+        0.3355429779979613
+       ],
+       "present": [
+        0.4529331514324693,
+        0.47595497953615284,
+        0.4953785811732605
+       ],
+       "gone": [
+        0.19065484311050476,
+        0.20804911323328787,
+        0.22646657571623466
+       ],
+       "tail": [
+        0.015688949522510234,
+        0.020463847203274217,
+        0.025272851296043647
+       ],
+       "dbic_centred": [
+        33.540063425076916,
+        68.40528724480555,
+        104.27921523507553
+       ],
+       "dbic_raw": [
+        200.9195448029668,
+        258.73905895038024,
+        325.2279289601873
+       ],
+       "inter_share": [
+        0.6875,
+        0.7447916666666666,
+        0.7916666666666666
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.5223880597014925,
+       "excess_kurtosis": 0.19402985074626866,
+       "skew": 1.0,
+       "acf1": 1.0,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.9601990049751243,
+       "gone": 0.6268656716417911,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 1.0,
+       "dbic_raw": 1.0,
+       "inter_share": 0.004975124378109453
+      },
+      "p_lower": {
+       "sd_centred": 0.48258706467661694,
+       "excess_kurtosis": 0.8109452736318408,
+       "skew": 0.004975124378109453,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 0.05970149253731343,
+       "gone": 0.38308457711442784,
+       "tail": 1.0,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 1.0
+      }
+     },
+     "gmm2_centred": {
+      "means": [
+       -2.199582322207008,
+       1.2990497847034521
+      ],
+      "sds": [
+       3.0016976940119333,
+       2.696945267872059
+      ],
+      "weights": [
+       0.3713021961176152,
+       0.6286978038823848
+      ]
+     },
+     "gmm2_raw": {
+      "means": [
+       3.609832583392206,
+       7.093703410692261
+      ],
+      "sds": [
+       3.167490179995835,
+       2.9605864714014176
+      ],
+      "weights": [
+       0.42947351173622045,
+       0.5705264882637795
+      ]
+     },
+     "co_movement": {
+      "same_rotor_mean_r": 0.26157805233881865,
+      "same_rotor_pairs": 453,
+      "other_rotor_mean_r": 0.21284569834368447,
+      "other_rotor_pairs": 1505
+     },
+     "track_sd_by_order_group": {
+      "1-2": {
+       "tracks": 2,
+       "median_track_sd_db": 1.8138023251299442
+      },
+      "3-8": {
+       "tracks": 38,
+       "median_track_sd_db": 3.3310056601685405
+      },
+      "9-24": {
+       "tracks": 111,
+       "median_track_sd_db": 3.0258391286337925
+      },
+      "25-60": {
+       "tracks": 24,
+       "median_track_sd_db": 1.7696531864623766
+      },
+      "61+": {
+       "tracks": 17,
+       "median_track_sd_db": 4.894954901652828
+      }
+     }
+    },
+    "resolvable": {
+     "n_tracks": 167,
+     "n_blocks": 2528,
+     "model": {
+      "tau_s": 1.1763694638660718,
+      "block_noise_db2": 1.2888887952685457,
+      "null_pool_blocks": 57337,
+      "null_pool_prominence_db_quantiles": [
+       -2.65768312341458,
+       -0.692365057010132,
+       -0.06977870374452978,
+       0.5204857519677994,
+       1.7859568102800676
+      ],
+      "same_rotor_share": 0.052836864279090484
+     },
+     "observed": {
+      "sd_centred": 2.839502470994137,
+      "excess_kurtosis": 1.0861617926988343,
+      "skew": -0.46494656151897173,
+      "acf1": 0.3724136153428916,
+      "switch_rate": 0.07327403642524354,
+      "track_sd_cv": 0.4032785838154743,
+      "present": 0.9438291139240507,
+      "gone": 0.012658227848101266,
+      "tail": 0.02966772151898734,
+      "dbic_centred": 76.63426496238571,
+      "dbic_raw": 726.5463473776381,
+      "inter_share": 0.0
+     },
+     "gaussian_literal": {
+      "sigma_db": 1.980613853595121,
+      "with_floor": false,
+      "line_level_db_quantiles": [
+       7.606859071603082,
+       9.620215828485753,
+       11.84553744231637,
+       14.79018053199135,
+       27.674605967264927
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        1.8337956945986509,
+        1.8824160127962455,
+        1.938908546586923
+       ],
+       "excess_kurtosis": [
+        -0.12451340099063825,
+        0.021105707613478852,
+        0.18136792904176727
+       ],
+       "skew": [
+        -0.02140942664350699,
+        0.06460557664104041,
+        0.15206186446094952
+       ],
+       "acf1": [
+        0.28341862986412575,
+        0.31588777300537224,
+        0.3475057179584962
+       ],
+       "switch_rate": [
+        0.019483269800931808,
+        0.026683608640406607,
+        0.03515459551037696
+       ],
+       "track_sd_cv": [
+        0.21462338695868793,
+        0.23616584743238644,
+        0.25764682258103383
+       ],
+       "present": [
+        0.975059335443038,
+        0.9812104430379747,
+        0.9861748417721519
+       ],
+       "gone": [
+        0.0,
+        0.0,
+        0.0007911392405063291
+       ],
+       "tail": [
+        0.0,
+        0.00039556962025316455,
+        0.0015822784810126582
+       ],
+       "dbic_centred": [
+        -40.14137618933155,
+        -33.045915726286694,
+        -24.00814633605779
+       ],
+       "dbic_raw": [
+        1146.3516462945377,
+        1256.883687900342,
+        1381.7357755377323
+       ],
+       "inter_share": [
+        0.005988023952095809,
+        0.023952095808383235,
+        0.041916167664670656
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 1.0,
+       "acf1": 0.014925373134328358,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 1.0,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 1.0,
+       "inter_share": 1.0
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 1.0,
+       "skew": 0.004975124378109453,
+       "acf1": 0.9900497512437811,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 0.004975124378109453,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 0.014925373134328358
+      }
+     },
+     "gaussian_literal_floor": {
+      "sigma_db": 1.980613853595121,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       7.566002505078932,
+       9.576808220324299,
+       11.809725968225358,
+       14.754635414617603,
+       27.63865113787056
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        2.5203696233100916,
+        2.5906980390218024,
+        2.663674280188295
+       ],
+       "excess_kurtosis": [
+        0.16540998586952835,
+        0.34462972360837707,
+        0.523523972212509
+       ],
+       "skew": [
+        -0.19345325911911482,
+        -0.11385268562734921,
+        -0.03556674701503136
+       ],
+       "acf1": [
+        0.376849075640637,
+        0.4058959229787712,
+        0.4337833907990985
+       ],
+       "switch_rate": [
+        0.039368911478187205,
+        0.047861075815332485,
+        0.055484963998305804
+       ],
+       "track_sd_cv": [
+        0.2730583159839062,
+        0.2973005865078366,
+        0.31787035569940625
+       ],
+       "present": [
+        0.9517009493670886,
+        0.959256329113924,
+        0.9659810126582279
+       ],
+       "gone": [
+        0.0015822784810126582,
+        0.0031645569620253164,
+        0.005142405063291139
+       ],
+       "tail": [
+        0.011471518987341773,
+        0.014636075949367089,
+        0.018591772151898733
+       ],
+       "dbic_centred": [
+        -41.421457762339195,
+        -37.437371472512496,
+        -28.32118313271331
+       ],
+       "dbic_raw": [
+        811.779751696836,
+        903.8270931746747,
+        999.8590356296659
+       ],
+       "inter_share": [
+        0.029940119760479042,
+        0.05389221556886228,
+        0.07784431137724551
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.004975124378109453,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 1.0,
+       "acf1": 0.9751243781094527,
+       "switch_rate": 0.004975124378109453,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 1.0,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 1.0,
+       "inter_share": 1.0
+      },
+      "p_lower": {
+       "sd_centred": 1.0,
+       "excess_kurtosis": 1.0,
+       "skew": 0.004975124378109453,
+       "acf1": 0.029850746268656716,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 0.004975124378109453,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 0.004975124378109453,
+       "inter_share": 0.004975124378109453
+      }
+     },
+     "gaussian_fitted_floor": {
+      "sigma_db": 2.4581634178795566,
+      "with_floor": true,
+      "line_level_db_quantiles": [
+       7.595254460756056,
+       9.600229629011551,
+       11.829715342511374,
+       14.783096677807084,
+       27.66633617068041
+      ],
+      "q05_50_95": {
+       "sd_centred": [
+        2.7577558294009425,
+        2.8392001063633705,
+        2.9168691946054652
+       ],
+       "excess_kurtosis": [
+        0.04416864370611893,
+        0.23263264947127626,
+        0.4794706305168476
+       ],
+       "skew": [
+        -0.13493662542182977,
+        -0.05842395020926955,
+        0.0328466655101613
+       ],
+       "acf1": [
+        0.3900073335424475,
+        0.41940834491004353,
+        0.4442604551508931
+       ],
+       "switch_rate": [
+        0.04743752647183397,
+        0.05739093604404913,
+        0.06736552308343921
+       ],
+       "track_sd_cv": [
+        0.2623758526605225,
+        0.2867700664057811,
+        0.311545696938985
+       ],
+       "present": [
+        0.9410205696202532,
+        0.9505537974683544,
+        0.9588607594936709
+       ],
+       "gone": [
+        0.0023734177215189874,
+        0.004746835443037975,
+        0.006724683544303798
+       ],
+       "tail": [
+        0.016198575949367088,
+        0.01977848101265823,
+        0.023734177215189875
+       ],
+       "dbic_centred": [
+        -41.82338963070133,
+        -39.40784035859997,
+        -33.49921417707465
+       ],
+       "dbic_raw": [
+        697.7094928177531,
+        794.9287073831729,
+        880.5939081882435
+       ],
+       "inter_share": [
+        0.041916167664670656,
+        0.0718562874251497,
+        0.09580838323353294
+       ]
+      },
+      "p_upper": {
+       "sd_centred": 0.4975124378109453,
+       "excess_kurtosis": 0.004975124378109453,
+       "skew": 1.0,
+       "acf1": 1.0,
+       "switch_rate": 0.009950248756218905,
+       "track_sd_cv": 0.004975124378109453,
+       "present": 0.8855721393034826,
+       "gone": 0.004975124378109453,
+       "tail": 0.004975124378109453,
+       "dbic_centred": 0.004975124378109453,
+       "dbic_raw": 0.8756218905472637,
+       "inter_share": 1.0
+      },
+      "p_lower": {
+       "sd_centred": 0.5074626865671642,
+       "excess_kurtosis": 1.0,
+       "skew": 0.004975124378109453,
+       "acf1": 0.004975124378109453,
+       "switch_rate": 1.0,
+       "track_sd_cv": 1.0,
+       "present": 0.12935323383084577,
+       "gone": 1.0,
+       "tail": 1.0,
+       "dbic_centred": 1.0,
+       "dbic_raw": 0.12935323383084577,
+       "inter_share": 0.004975124378109453
+      }
+     },
+     "gmm2_centred": {
+      "means": [
+       -1.4474025152376768,
+       0.7585203070255475
+      ],
+      "sds": [
+       3.3631858692115157,
+       2.1650116780721467
+      ],
+      "weights": [
+       0.34385623076664307,
+       0.6561437692333569
+      ]
+     },
+     "gmm2_raw": {
+      "means": [
+       11.26062686626748,
+       25.1590873276341
+      ],
+      "sds": [
+       3.7557351483844044,
+       5.442108838988147
+      ],
+      "weights": [
+       0.7855820000234999,
+       0.2144179999765001
+      ]
+     },
+     "co_movement": {
+      "same_rotor_mean_r": 0.2671925770311681,
+      "same_rotor_pairs": 387,
+      "other_rotor_mean_r": 0.1827146039442914,
+      "other_rotor_pairs": 1128
+     },
+     "track_sd_by_order_group": {
+      "1-2": {
+       "tracks": 32,
+       "median_track_sd_db": 1.8544766207230112
+      },
+      "3-8": {
+       "tracks": 63,
+       "median_track_sd_db": 3.1243325190706885
+      },
+      "9-24": {
+       "tracks": 54,
+       "median_track_sd_db": 2.477741818808215
+      },
+      "25-60": {
+       "tracks": 0,
+       "median_track_sd_db": null
+      },
+      "61+": {
+       "tracks": 18,
+       "median_track_sd_db": 1.5062332831267153
+      }
+     }
+    }
+   }
+  }
+ },
+ "figures": [
+  "example_tracks.png",
+  "prominence_hist.png",
+  "counterfactuals.png",
+  "peak_search_offsets.png",
+  "floor_scatter.png"
+ ],
+ "example_tracks": [
+  {
+   "rig": "dregon",
+   "window": "flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command",
+   "win": 7,
+   "track": 3236,
+   "rotor": 4,
+   "order": 13,
+   "own_share": 0.8691041880525897
+  },
+  {
+   "rig": "dregon",
+   "window": "flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command",
+   "win": 5,
+   "track": 2401,
+   "rotor": 4,
+   "order": 13,
+   "own_share": 0.8553652243834359
+  },
+  {
+   "rig": "dregon",
+   "window": "flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command",
+   "win": 8,
+   "track": 3368,
+   "rotor": 1,
+   "order": 41,
+   "own_share": 0.8504676359098694
+  },
+  {
+   "rig": "dregon",
+   "window": "flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command",
+   "win": 9,
+   "track": 4014,
+   "rotor": 3,
+   "order": 69,
+   "own_share": 0.782377900283203
+  },
+  {
+   "rig": "michaels",
+   "window": "flight_michaels_FLY125@128.000+8_rps_refined",
+   "win": 6,
+   "track": 2783,
+   "rotor": 3,
+   "order": 4,
+   "own_share": 0.9898254750233403
+  },
+  {
+   "rig": "michaels",
+   "window": "flight_michaels_FLY125@144.000+8_rps_refined",
+   "win": 7,
+   "track": 3215,
+   "rotor": 3,
+   "order": 6,
+   "own_share": 0.8974507013565969
+  }
+ ],
+ "verdict": "**(b) the line amplitude itself (wider Gaussian) dominates DREGON's intermittency.** DREGON has 767 intermittent tracks (3840 absent blocks) against 44 resolvable and 17983 always-under. (a) Label: no unbiased carrier re-estimate removes it; the best, 'label: window mean', returns 12.9 % of the absent blocks, takes 45.2 % of the present ones and leaves 61.0 % of the tracks intermittent. The +-3-bin search reaches 6 dB in 27.5 % of absent blocks, 15.9 % of them on another rotor's line and 11.6 % elsewhere (always-under null 0.9 %); on Michael's audio-refined label that rate is 11.8 %. (c) Floor: the prominence against the floor under the line (median per-track r -0.47, 47.8 % of tracks below -0.5; pooled within tracks -0.25, so the floor carries 6.1 % of the pooled scatter), but holding the floor at its mean ('floor at mean: local') leaves 77.8 % of the tracks intermittent (20.6 % become steadily under: lines seen only in floor dips); by order group it matters most at the bottom -- holding the local floor leaves 44.2 % of the k 1-2 tracks intermittent (53.5 % steadily under), against 77.8 %-93.6 % at k >= 9. (b) Amplitude: around its track mean the prominence scatters by 2.95 dB; a Gaussian at the resolvable lines' sigma 1.48 dB predicts 1.18 dB, 1.48 with the measured local floor added, and would call only 47.5 % of these tracks intermittent; the near-threshold tracks, chosen on their median alone (744 tracks), scatter by 2.28 dB against 1.54, so the excess is not the 20-80 % rule selecting noisy tracks; and their own sds spread by 0.52 (sd / mean) against 0.33 for one width-matched sigma (3.36 dB): the lines differ in how much they wander. The line's own sigma, fitted with the floor in, is 5.03 dB against 2.52 dB for the resolvable lines in the same observable. At that width the shape reads 'wider Gaussian': excess kurtosis 1.05 vs 0.90 (p 0.134); no second mode (raw BIC gain of two Gaussians -52 vs 910 for the Gaussian, the two components 1.04 sds apart); blocks > 6 dB under the track mean 1.9 % vs 1.2 %, blocks under 3 dB 27.1 % vs 32.9 %; lag-1 autocorrelation 0.23 vs 0.15. Michael's control (262 intermittent tracks, audio-refined label): the best label re-estimate leaves 60.7 % intermittent, the floor held 83.2 %; the prominence scatters by 3.76 dB against 2.07 for its resolvable lines' sigma 1.98 dB with the floor, the line sigma fitted is 5.81 dB against 2.46 for its resolvable lines, and the shape reads 'wider Gaussian'. Implication: a Gaussian OU is SUFFICIENT in form -- neither a switching component nor the carrier deviation track is called for -- but ONE rig sigma_v is not: the lines near the 6 dB threshold wander by 5.03 dB where the resolvable ones need 2.52 dB in the same observable, and the intermittent tracks' own block sd runs 1.48 dB at k 1-2, 1.70 dB at k 3-8, 2.07 dB at k 9-24, 2.62 dB at k 25-60, 4.35 dB at k 61+: sigma_v has to depend on the line (its order group, or its level over the floor), not be pinned at the resolvable lines' value."
+}
