@@ -175,6 +175,9 @@ poll; a job named in a row changed state at that poll.
 | 2026-09-25 05:41 | `nv3-fit-mcruise-s0-1fb6f3` | running (Adam 800) |
 | 2026-09-25 05:41 | `nv3-fit-mcruise-s1-91bf7f` | running (Adam 300) |
 | 2026-09-25 05:41 | `nv3-fit-mcruise-s2-de2c13` | running (Adam 400) |
+| 2026-09-25 06:11 | `nv3-fit-mstandby-s1-6c5be5` | succeeded |
+| 2026-09-25 06:11 | `nv3-fit-dregon-s3-64f951` | succeeded |
+| 2026-09-25 06:11 | `nv3-fit-mcruise-s3-2955b8` | running (Adam done / first L-BFGS) |
 
 ## Fits
 
