@@ -431,7 +431,15 @@ def flight_grid(
     device: Any = "cpu",
     apply_transfer: bool = True,
 ) -> FlightGrid:
-    """Geometry of the moving-carrier STFT model, C4's construction verbatim."""
+    """Geometry of the moving-carrier STFT model, C4's construction verbatim.
+
+    ``sr_work`` is the rate every line and floor atom is evaluated at, and the
+    render work rate whose chain transfer (:func:`render_transfer_power`) the
+    model applies: any integer multiple of ``sr`` the render chain supports.
+    The v2 fits use 64 kHz; ``flight_v3`` fits 32 kHz, whose transfer is
+    64 kHz's to 0.002 dB over the band and whose kernel is 64 kHz's to
+    < 0.05 dB (docs/experiments/noise-model-v3.md § "GPU round").
+    """
     sr, n_fft, sr_work = int(sr), int(n_fft), int(sr_work)
     if sr_work % sr:
         raise ValueError(f"sample_rate_work {sr_work} must be an integer multiple of sr {sr}")

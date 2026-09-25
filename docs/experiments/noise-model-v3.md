@@ -331,6 +331,116 @@ moved 0.0083 nats/cell in round 2). The laptop run is 8.8e-4 nats away
 latent cache takes 0.30 s, round 0's Adam 0.075 s per step, and the whole
 fit 20.3 s, 19× faster than the kaggle CPU.
 
+#### Work rate of the flight kernel (approved change 1)
+
+The flight kernel evaluated every line and floor atom on a 64 kHz work grid
+(`n_fft_work` 8192 for the 2048-point frame). The likelihood lives on the
+16 kHz analysis bins. The 64 kHz grid has no recorded physical reason:
+`revised_phase.py:276` gives only "4x the analysis rate, an integer
+multiple". It also keeps near-Nyquist line skirts from aliasing, and 32 kHz
+does that just as well. `flight_grid(sr_work=)` takes any integer multiple of
+the analysis rate, the analysis rate included, and `--work-rate` sets it.
+
+**Kernel check** (`/tmp/gpufit4/workrate_check.py`, laptop CPU under the
+cap). The smoke windows (FLY125 @16 s and @32 s, 4 s each) use their
+stride-4 frames and the full K the carrier allows (81), with no transfer and
+no latents. The expected periodogram at 32 kHz and 16 kHz is compared with the
+one at 64 kHz. The table gives the max |ΔdB| over every mic, frame and bin in
+each band. "Top orders" keeps the floor and only the lines with
+k·f_max > 6 kHz; "shaft orders" keeps the floor and k ≤ 4. The floor alone
+deviates by 0.0000 dB at both rates.
+
+| params | variant | rate | 30–500 | 500–2000 | 2000–6000 | 6000–7900 |
+|---|---|---|---:|---:|---:|---:|
+| DREGON v3 CPU fit (γ ≤ 13.9 Hz, σ_ν 5.25) | full | 32k | 0.0008 | 0.0012 | 0.0019 | 0.0034 |
+| | full | 16k | 0.0025 | 0.0037 | 0.0113 | **0.0684** |
+| | top orders | 16k | 0.0000 | 0.0072 | 0.0172 | **0.0572** |
+| | shaft orders | 16k | 0.0025 | 0.0312 | **0.0649** | 0.0017 |
+| R3 v2 cruise fit (v2 widths) | full | 32k | 0.0145 | 0.0094 | 0.0175 | 0.0207 |
+| | full | 16k | **0.0706** | 0.0464 | **0.1023** | **0.1782** |
+| | top orders | 32k | 0.626 | 0.621 | 0.098 | 0.001 |
+| | top orders | 16k | 3.24 | 3.23 | 0.713 | 0.044 |
+| v3 CPU smoke fit (K 24) | full | 32k | 0.0024 | 0.0023 | 0.0007 | 0.0001 |
+| | full | 16k | 0.0073 | 0.0069 | 0.0020 | 0.0012 |
+
+**16 kHz fails the < 0.05 dB test and 32 kHz passes it.** On realistic v3
+parameters (DREGON), 16 kHz misses by 0.068 dB at 6–7.9 kHz. Two
+things fold back past the 8 kHz Nyquist there: the skirts of the top orders,
+and the tails of the shaft-phase kernel of the low orders (0.065 dB at
+2–6 kHz from k ≤ 4 alone). With the v2 cruise widths the error grows to
+0.18 dB. Those lines are broadband pedestals, and their Lorentzian tails
+alias at every frequency; the top-order-only variant moves by 3.2 dB below
+2 kHz at 16k and by 0.6 dB at 32k. That variant is an isolation test:
+in the full model those pedestals sit under the rest, and the full model at
+32 kHz stays within 0.021 dB in every band. The v3 default work rate is
+**32 kHz**.
+
+**Speed-up** (one rig evaluation, forward + gradient, chunked, unit-atom
+kernel, 62 frames × 2 mics, laptop CPU with 4 threads, best of 2):
+
+| K | 64 kHz | 32 kHz | 16 kHz |
+|---:|---:|---:|---:|
+| 24 | 2.43 s | 1.20 s (2.0×) | 0.54 s (4.5×) |
+| 81 | 8.32 s | 3.98 s (2.1×) | 2.09 s (4.0×) |
+
+**Render check** (same windows, R3 cruise v2 fit, all 8 mics, 8 seeds per
+rate, `render_noise(sr_work=)`). Each render is read as a Hann 2048/512
+periodogram. The table compares band-mean dB against the 64 kHz render and
+against the model: the 64 kHz kernel, with the 64 kHz chain transfer T64
+(the decimator's roll-off: −0.85 dB at 7–7.5 kHz, −3.12 dB at
+7.5–7.9 kHz) and without it. "Seed split" is the difference between two
+disjoint halves of the seeds at the same rate, i.e. the noise of the
+comparison.
+
+| render rate | 1/3 octaves 30–7900 Hz vs 64 kHz render, max \|Δ\| | 6–6.5 / 6.5–7 / 7–7.5 / 7.5–7.9 kHz vs 64 kHz render | same bands vs model × T64 | same bands vs model, no transfer | seed split, same bands |
+|---|---:|---|---|---|---|
+| 64 kHz | — | — | +0.009 / −0.002 / +0.007 / −0.043 | +0.015 / −0.056 / −0.854 / −3.178 | −0.017 / −0.047 / −0.015 / −0.075 |
+| 32 kHz | 0.054 (seed split there 0.074) | −0.034 / +0.002 / +0.025 / +0.059 | −0.025 / 0.000 / +0.032 / +0.015 | −0.019 / −0.054 / −0.830 / −3.119 | +0.025 / +0.038 / −0.021 / +0.004 |
+| 16 kHz | **2.09** (7.5 kHz band) | −0.010 / +0.074 / **+0.869** / **+3.220** | −0.001 / +0.072 / +0.876 / +3.177 | +0.005 / +0.018 / +0.014 / +0.042 | +0.012 / +0.054 / +0.012 / −0.055 |
+
+Below 6 kHz every rate matches the model within the seed noise (up to 0.4 dB
+in the 125 Hz band, which holds only a few bins). A 32 kHz render cannot be
+told from a 64 kHz one: every difference is inside its seed split, and both
+carry T64 (T32 and T64 agree to 0.002 dB over 30–7900 Hz, because the
+decimator's roll-off is set by the output band). A 16 kHz render has no
+decimator. Its chain is flat to 7.9 kHz, so it reproduces the model WITHOUT
+the transfer and sits up to 3.2 dB above the 64 kHz render at the top of the
+band.
+
+**Decisions.**
+
+- **Fit.** 16 kHz fails the < 0.05 dB kernel test, so the no-transfer 16 kHz
+  grid of the addendum does not apply. The `flight_v3` fit evaluates its
+  kernel at **32 kHz** (`fit.V3_WORK_RATE`; CLI `--work-rate`, v2 modes
+  unchanged at 64 kHz) and keeps the render-chain transfer at that rate,
+  which is T64 to 0.002 dB. That buys 2.0–2.1× per rig evaluation.
+- **Render.** The lowest rate that passes the render comparison is **32 kHz**.
+  `render_noise` and `expected_periodogram` now default to the fit's own
+  `front_end.sr_work`: 32 kHz for the GPU v3 fits, 64 kHz for every v2 or
+  CPU-round fit, and for payloads that record none. So a fit renders through
+  the chain its likelihood carried. `noise_v2_pool` passes its rate
+  explicitly and is unchanged.
+
+#### Rig L-BFGS on a frame subset (approved change 2)
+
+Each rig step of the alternation (round 0 and every refit) runs its L-BFGS
+on a 64-frame subset, as v2 does. The subset is stratified over the windows
+(`model.stratified_frames`): each window gets frames in proportion to its
+length, spread evenly across it. Adam still draws minibatches from the whole
+pool. After the last round, ONE all-frames L-BFGS polish of the rig runs at
+the final latents, warm-started from the subset optimum. The latent step
+always uses every frame. `optimiser.polish` records the full-pool
+objective (Whittle − rig log prior) at the subset optimum and after the
+polish. The CLI defaults are `--lbfgs-frames 64` for `flight_v3`, with
+`lbfgs_stratified`; the v2 modes keep their even stride.
+
+Laptop check on the smoke pool (32 kHz, `--lbfgs-frames 24` out of 62
+frames, so that the subset is a real one; otherwise the smoke schedule): the
+rig evaluation on the subset costs 0.55–0.84 s against 2.0 s on all frames.
+The polish ran 1 + 1 iterations and gained 6.56 nats (5.2e-5 nats/cell,
+under the 1e-4 tolerance). The total objective is −826 300.30. That is
+21.5 nats (1.7e-4 nats/cell) worse than the all-frames 64 kHz smoke.
+
 ## Results
 
 _Fits running; results follow the harvest._

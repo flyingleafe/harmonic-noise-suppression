@@ -30,6 +30,7 @@ from data_processing.noise_model.render import (
     READABLE_SCHEMAS,
     REGIME_ORDER,
     _regime_fits,
+    fit_work_rate,
     regime_blend_weight,
     regime_seeds,
     render_noise,
@@ -44,6 +45,7 @@ __all__ = [
     "READABLE_SCHEMAS",
     "expected_periodogram",
     "expected_periodogram_regimes",
+    "fit_work_rate",
     "regime_blend_weight",
     "regime_seeds",
     "render_noise",
@@ -60,7 +62,7 @@ def expected_periodogram(
     sr: int = SP.FLIGHT_SR,
     n_mics: int = 8,
     frame_chunk: int = 16,
-    sr_work: int = SP.SAMPLE_RATE_WORK,
+    sr_work: int | None = None,
 ) -> np.ndarray:
     """``(n_mics, n_frames, n_fft // 2 + 1)`` predicted ``M`` on a moving carrier.
 
@@ -69,7 +71,9 @@ def expected_periodogram(
     in ``data.periodogram`` units, with the frame grid
     ``arange(1 + (T - n_fft) // hop) * hop`` — ``data.periodogram``'s own
     framing, so bin ``j`` is ``j sr / n_fft`` and frame centre ``i`` is
-    ``(start_i + n_fft / 2) / sr``, exactly the support's.
+    ``(start_i + n_fft / 2) / sr``, exactly the support's. ``sr_work`` is the
+    kernel's work rate and its render-chain transfer; ``None``: the fit's own
+    (:func:`fit_work_rate`), so the ``M`` is the one its likelihood read.
     """
     import torch
 
@@ -79,7 +83,9 @@ def expected_periodogram(
     if n < n_fft:
         raise ValueError(f"{n} samples is shorter than n_fft {n_fft}")
     starts = np.arange(1 + (n - int(n_fft)) // int(hop)) * int(hop)
-    grid = SP.flight_grid(sr=sr, n_fft=n_fft, hop=hop, sr_work=sr_work)
+    grid = SP.flight_grid(
+        sr=sr, n_fft=n_fft, hop=hop, sr_work=fit_work_rate(fit) if sr_work is None else sr_work
+    )
     params = MD.params_from_dict(p, n_mics=int(n_mics))
     prof = np.asarray(p["profile"]["profile_db"], dtype=np.float64)
     k_max = min(
@@ -108,7 +114,7 @@ def expected_periodogram_regimes(
     sr: int = SP.FLIGHT_SR,
     n_mics: int = 8,
     frame_chunk: int = 16,
-    sr_work: int = SP.SAMPLE_RATE_WORK,
+    sr_work: int | None = None,
 ) -> np.ndarray:
     """The composition's expected ``M``: the same power blend, per FRAME.
 

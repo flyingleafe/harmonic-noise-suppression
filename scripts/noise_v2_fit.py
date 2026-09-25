@@ -130,6 +130,7 @@ def worker(unit: Unit) -> dict[str, Any]:
 
     from experiments.noise_model import fit as FT
     from experiments.noise_model import model as MD
+    from experiments.noise_model import spectrum as SP
     from experiments.noise_model import supports as SU
 
     p = dict(unit.params)
@@ -196,6 +197,7 @@ def worker(unit: Unit) -> dict[str, Any]:
             channel_gains=gains,
             device=p.get("device") or ("cuda" if torch.cuda.is_available() else "cpu"),
             chunk_frames=p.get("chunk_frames"),
+            sr_work=int(p.get("work_rate") or SP.SAMPLE_RATE_WORK),
         )
         name, kind = str(p["name"]), "flight"
 
@@ -1155,8 +1157,18 @@ def main(argv: list[str] | None = None) -> int:
                 "--lbfgs-frames",
                 type=int,
                 default=None,
-                help="frames of the L-BFGS polish (<= 0: every frame). Default 64, and every "
-                "frame for --mode flight_v3 (its evaluation is chunked, --chunk-frames)",
+                help="frames of the L-BFGS polish (<= 0: every frame). Default 64; for --mode "
+                "flight_v3, 64 stratified over the windows for every rig step, then one "
+                "all-frames polish of the rig at the final latents",
+            )
+            p.add_argument(
+                "--work-rate",
+                type=int,
+                default=None,
+                help="sample rate (Hz, an integer multiple of the analysis rate) the flight "
+                "kernel evaluates each line atom at. Default 64000 with the render chain's "
+                "transfer; for --mode flight_v3, fit.V3_WORK_RATE (32000) with that rate's "
+                "render-chain transfer",
             )
             p.add_argument(
                 "--device",
@@ -1325,6 +1337,10 @@ def main(argv: list[str] | None = None) -> int:
             chunk_frames = V3_CHUNK_FRAMES if v3 else None
         else:
             chunk_frames = None if int(args.chunk_frames) <= 0 else int(args.chunk_frames)
+        from experiments.noise_model.fit import V3_WORK_RATE
+        from experiments.noise_model.spectrum import SAMPLE_RATE_WORK
+
+        work_rate = int(args.work_rate or (V3_WORK_RATE if v3 else SAMPLE_RATE_WORK))
         # a single-seed --restart-tag run is ONE restart of a family started at
         # seed 0 (one cluster job per seed), so it is jittered exactly as
         # `--seed 0 --seeds N` would have jittered it: every restart but seed 0
@@ -1338,9 +1354,14 @@ def main(argv: list[str] | None = None) -> int:
                 from experiments.noise_model.fit import WARM_START_ADAM_STEPS
 
                 optim["adam_steps"] = WARM_START_ADAM_STEPS
-            if v3 and args.lbfgs_frames is None:
-                # v3's polish sees every frame: its evaluation is chunked
-                optim["lbfgs_frames"] = None
+            if v3:
+                # v3's rig L-BFGS runs on a frame subset stratified over the
+                # windows, then one all-frames polish (FT.OptimSpecV3)
+                from experiments.noise_model.fit import V3_LBFGS_FRAMES
+
+                optim["lbfgs_stratified"] = True
+                if args.lbfgs_frames is None:
+                    optim["lbfgs_frames"] = V3_LBFGS_FRAMES
             if v3 and args.lbfgs_rtol is None:
                 from experiments.noise_model.fit import V3_LBFGS_RTOL
 
@@ -1370,6 +1391,7 @@ def main(argv: list[str] | None = None) -> int:
                         mics=mics,
                         device=args.device,
                         chunk_frames=chunk_frames,
+                        work_rate=work_rate,
                         **(
                             dict(
                                 wander=str(args.wander),

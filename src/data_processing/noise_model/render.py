@@ -82,6 +82,7 @@ from data_processing.noise_model.v3 import Wander, ou_blocks, wind_shape
 __all__ = [
     "REGIME_ORDER",
     "READABLE_SCHEMAS",
+    "fit_work_rate",
     "regime_blend_weight",
     "regime_seeds",
     "render_noise",
@@ -129,6 +130,16 @@ def _slow_gain(x: np.ndarray, gain_db: Any, *, sr_work: int) -> np.ndarray:
     return out.reshape(-1)[nf : nf + n]
 
 
+def fit_work_rate(fit: Mapping[str, Any]) -> int:
+    """The work rate a fit renders at unless told otherwise: the one its
+    likelihood's kernel ran on and whose render-chain transfer it carries
+    (``front_end.sr_work``: 64 kHz for the v2 fits, 32 kHz for the GPU
+    ``flight_v3`` fits), :data:`.spectrum.SAMPLE_RATE_WORK` for a payload
+    that records none (bench fits, hand-built payloads)."""
+    front_end = fit.get("front_end") or {}
+    return int(front_end.get("sr_work") or SP.SAMPLE_RATE_WORK)
+
+
 @overload
 def render_noise(
     fit: dict[str, Any],
@@ -137,7 +148,7 @@ def render_noise(
     sr: int = SP.FLIGHT_SR,
     n_mics: int = 8,
     seed: int = 0,
-    sr_work: int = SP.SAMPLE_RATE_WORK,
+    sr_work: int | None = None,
     return_diagnostics: Literal[False] = False,
 ) -> np.ndarray: ...
 
@@ -150,7 +161,7 @@ def render_noise(
     sr: int = SP.FLIGHT_SR,
     n_mics: int = 8,
     seed: int = 0,
-    sr_work: int = SP.SAMPLE_RATE_WORK,
+    sr_work: int | None = None,
     return_diagnostics: Literal[True],
 ) -> tuple[np.ndarray, dict[str, Any]]: ...
 
@@ -162,7 +173,7 @@ def render_noise(
     sr: int = SP.FLIGHT_SR,
     n_mics: int = 8,
     seed: int = 0,
-    sr_work: int = SP.SAMPLE_RATE_WORK,
+    sr_work: int | None = None,
     return_diagnostics: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, dict[str, Any]]:
     """Synthesise the fitted noise on the carriers ``rps_rev_s``.
@@ -179,6 +190,10 @@ def render_noise(
         rig be rendered on a flight trajectory.
     sr, n_mics, seed
         Output rate, channel count and the single seed of every draw.
+    sr_work
+        The work rate the lines and the floor are synthesised at before the
+        anti-alias and the decimation to ``sr``; ``None``: :func:`fit_work_rate`,
+        the rate whose chain the fit's likelihood carried.
 
     Returns
     -------
@@ -186,6 +201,7 @@ def render_noise(
     and :func:`revised_eval.window_periodogram` are in. No RMS normalisation.
     """
     p = _check_schema(fit)
+    sr_work = fit_work_rate(fit) if sr_work is None else int(sr_work)
     v3 = fit.get("schema") == FIT_SCHEMA_V3
     rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
     n_rotors, n_out = rps.shape
@@ -469,7 +485,7 @@ def render_noise_regimes(
     sr: int = SP.FLIGHT_SR,
     n_mics: int = 8,
     seed: int = 0,
-    sr_work: int = SP.SAMPLE_RATE_WORK,
+    sr_work: int | None = None,
     return_diagnostics: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, dict[str, Any]]:
     """Synthesise ONE carrier track from a PER-REGIME pair of fits.
@@ -543,7 +559,7 @@ def render_noise_regimes(
     return out, dict(
         seed=int(seed),
         sr=int(sr),
-        sr_work=int(sr_work),
+        sr_work={r: fit_work_rate(fits[r]) if sr_work is None else int(sr_work) for r in fits},
         n_mics=int(n_mics),
         n_rotors=int(rps.shape[0]),
         regimes=list(REGIME_ORDER),

@@ -140,6 +140,7 @@ __all__ = [
     "sample_params_from_values",
     "span_pinned_sites",
     "stack_latents",
+    "stratified_frames",
     "support_model",
     "unstack_latents",
     "whittle_risk",
@@ -869,6 +870,31 @@ def _frame_fields(batch: SupportBatch, idx: np.ndarray) -> dict[str, Any]:
         key: (None if getattr(batch, key) is None else getattr(batch, key)[idx])
         for key in ("frame_window", "frame_time_s", "frame_block")
     }
+
+
+def stratified_frames(frame_window: np.ndarray, n: int) -> np.ndarray:
+    """``n`` sorted frame indices STRATIFIED over the windows of a pool.
+
+    Each window gets its share of ``n`` in proportion to its frame count
+    (largest remainder; never more than it has), spread evenly over the
+    window with centred spacing, so a subset objective sees every window's
+    whole span instead of whichever windows an even stride over the pooled
+    frame sequence happens to land in.
+    """
+    fw = np.asarray(frame_window, dtype=np.int64)
+    windows, counts = np.unique(fw, return_counts=True)
+    n = min(int(n), int(fw.size))
+    share = n * counts / float(counts.sum())
+    take = np.floor(share).astype(np.int64)
+    order = np.argsort(-(share - take), kind="stable")
+    take[order[: n - int(take.sum())]] += 1
+    out = []
+    for w, t in zip(windows, np.minimum(take, counts), strict=True):
+        idx = np.flatnonzero(fw == w)
+        if t > 0:
+            pos = np.round((np.arange(t) + 0.5) * idx.size / float(t) - 0.5).astype(np.int64)
+            out.append(idx[pos])
+    return np.sort(np.concatenate(out))
 
 
 def frame_chunks(batch: SupportBatch) -> list[SupportBatch]:

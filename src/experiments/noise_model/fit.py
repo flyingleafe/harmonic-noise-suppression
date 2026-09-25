@@ -172,6 +172,21 @@ def load_profile_init(path: Any) -> ProfileInit:
 #: standby -9.3 on the CPU round 1): 1e-5 x 6..9 = 0.6..0.9e-4 nats per cell.
 V3_LBFGS_RTOL = 1e-5
 
+#: ``flight_v3``'s rig L-BFGS frame subset (the CLI's ``--lbfgs-frames``
+#: default there), stratified over the windows; the fit ends with one
+#: all-frames polish (:class:`OptimSpecV3`).
+V3_LBFGS_FRAMES = 64
+
+#: ``flight_v3``'s kernel work rate (the CLI's ``--work-rate`` default there),
+#: with the render chain's transfer at that rate (which a render of the fit
+#: goes through: ``render_noise`` defaults to the fit's ``front_end.sr_work``).
+#: The lowest rate whose expected periodogram matches the 64 kHz kernel to
+#: < 0.05 dB over 30-7900 Hz on the smoke windows (16 kHz misses by 0.07 dB,
+#: aliased top-order skirts and shaft tails), at half the cost per evaluation;
+#: its transfer is 64 kHz's to 0.002 dB (docs/experiments/noise-model-v3.md
+#: § "GPU round").
+V3_WORK_RATE = 32000
+
 
 @dataclass(frozen=True)
 class OptimSpec:
@@ -187,6 +202,9 @@ class OptimSpec:
     adam_batch: int | None = 8
     lbfgs_iters: int = 200
     lbfgs_frames: int | None = 64
+    #: draw the ``lbfgs_frames`` subset per window (:func:`.model.stratified_frames`)
+    #: instead of evenly over the pooled frame sequence (the v2 modes' rule)
+    lbfgs_stratified: bool = False
     lbfgs_history: int = 10
     #: stop an L-BFGS pass once one iteration moves the objective by less than
     #: this fraction of it (scipy's ``ftol``, :class:`.lbfgs.LBFGS`);
@@ -214,6 +232,7 @@ class OptimSpec:
             adam_batch=self.adam_batch,
             lbfgs_iters=self.lbfgs_iters,
             lbfgs_frames=self.lbfgs_frames,
+            lbfgs_stratified=self.lbfgs_stratified,
             lbfgs_history=self.lbfgs_history,
             lbfgs_rtol=self.lbfgs_rtol,
             lbfgs_line_search="strong_wolfe",
@@ -240,6 +259,12 @@ class OptimSpecV3:
     fixed, warm-started (``refit_adam_steps`` Adam steps, then ``rig``'s
     L-BFGS polish). The alternation stops when the Whittle term moves by less
     than ``tol_nats_per_cell`` per observed cell between rounds.
+
+    When ``rig.lbfgs_frames`` is a SUBSET of the pool's frames (``flight_v3``'s
+    CLI default: 64, stratified over the windows), every rig step above runs its
+    L-BFGS on that subset, and the fit ends with ONE all-frames L-BFGS polish of
+    the rig at the final latents (``optimiser.polish``). The latent step always
+    sees every frame.
     """
 
     rig: OptimSpec = field(default_factory=OptimSpec)
@@ -261,7 +286,8 @@ class OptimSpecV3:
             latent_dtype=self.latent_dtype,
             tol_nats_per_cell=self.tol_nats_per_cell,
             scheme="(i) rig, latents at zero; then per round (ii) each window's latents, rig "
-            "fixed, (iii) rig, latents fixed; stop when the Whittle term moves < tol per cell",
+            "fixed, (iii) rig, latents fixed; stop when the Whittle term moves < tol per cell; "
+            "a rig L-BFGS on a frame subset ends in one all-frames rig L-BFGS polish",
         )
 
 
@@ -1366,7 +1392,10 @@ def fit_support(
     # resampled objective is not a line search)
     polish = full
     if full.mode == "flight" and optim.lbfgs_frames is not None and optim.lbfgs_frames < n_frames:
-        idx = np.linspace(0, n_frames - 1, int(optim.lbfgs_frames)).round().astype(np.int64)
+        if optim.lbfgs_stratified and full.frame_window is not None:
+            idx = MD.stratified_frames(full.frame_window, int(optim.lbfgs_frames))
+        else:
+            idx = np.linspace(0, n_frames - 1, int(optim.lbfgs_frames)).round().astype(np.int64)
         polish = MD.batch_slice(full, np.unique(idx))
     loss_fn = model_for(polish)
 
@@ -1660,6 +1689,9 @@ def fit_v3(
     ``optim.tol_nats_per_cell`` per cell, or ``optim.rounds`` rounds. The
     wander's ``(sigma, tau)`` never move, so this converges to the joint MAP
     over rig and latents without the variance cheat of §3.3a.
+    A rig L-BFGS on a frame subset (``optim.rig.lbfgs_frames``) is followed,
+    after the last round, by ONE all-frames polish of the rig at the final
+    latents; what it gains over the subset optimum is ``optimiser.polish``.
 
     ``init_from`` starts step (i) at a v2 fit of the same pool
     (:func:`warm_start_v3`; recorded in ``diagnostics.init_from``) instead
@@ -1782,6 +1814,50 @@ def fit_v3(
             alternation_converged = True
             break
 
+    # every rig step above ran its L-BFGS on a stratified frame SUBSET
+    # (``optim.rig.lbfgs_frames``): ONE all-frames L-BFGS polish of the rig at
+    # the final latents, warm-started from the subset optimum, and what it
+    # still gains on the full pool recorded
+    polish: dict[str, Any] | None = None
+    n_frames = int(blocked.power.shape[1])
+    if optim.rig.lbfgs_frames is not None and int(optim.rig.lbfgs_frames) < n_frames:
+        t_polish = time.time()
+        subset_rig = rig
+        rig = fit_support(
+            replace(blocked, latents=latents),
+            mode=mode,
+            priors=priors,
+            pin=pin,
+            optim=replace(refit, adam_steps=0, lbfgs_frames=None),
+            forward_kw=rig_kw,
+            profile_init=profile_init,
+            progress=progress,
+            start=Seeds(measured=start.measured, init=dict(rig.sites)),
+        )
+        at_subset = float(rig.optimiser["lbfgs_loss_before"])
+        polished = float(rig.optimiser["lbfgs_loss_after"])
+        polish = dict(
+            frames=n_frames,
+            subset_frames=int(subset_rig.optimiser["lbfgs_frames_used"]),
+            loss_note="Whittle - rig log prior on the FULL pool at the final latents",
+            loss_at_subset_optimum=at_subset,
+            loss_polished=polished,
+            gain_nats=at_subset - polished,
+            gain_per_cell=(at_subset - polished) / n_cells,
+            whittle_at_subset_optimum=float(subset_rig.objective["whittle_nats"]),
+            whittle_polished=float(rig.objective["whittle_nats"]),
+            rig_converged=rig.converged,
+            **_rig_timing(rig.optimiser),
+            peak_mem_mb=_peak_mb(dev, reset=True),
+            wall_s=time.time() - t_polish,
+        )
+        if progress:
+            print(
+                f"  v3 all-frames polish: whittle {polish['whittle_polished']:.6g}  "
+                f"gain/cell {polish['gain_per_cell']:.3g}",
+                flush=True,
+            )
+
     final = replace(measured_batch, latents=latents)
     whittle = float(rig.objective["whittle_nats"])
     rig_nlp = -MD.log_prior(final, mode=mode, values=rig.sites, priors=priors, pin=pin)
@@ -1806,13 +1882,14 @@ def fit_v3(
         "-log prior on the full pool at the final rig and latents (what restarts reduce on)",
         first_rig=first_rig.optimiser,
         last_rig=rig.optimiser,
+        polish=polish,
         device=str(dev),
         chunk_frames=batch.chunk_frames,
         line_kernel="unit_autocorr",
         peak_mem_mb=max(
             (
                 float(v)
-                for row in history
+                for row in (*history, polish or {})
                 for k in ("peak_mem_mb", "latent_peak_mem_mb")
                 if (v := row.get(k)) is not None
             ),
