@@ -1,0 +1,12 @@
+building set dregon-floor into /tmp/supports_dregon_room2_floor
+  flight_dregon_free-flight_nosource_room2@1512727397.205+4_motors_command: 8x122x1025 4.000 s carriers [84.41831, 76.614871, 81.635053, 78.87329] pass=True
+  flight_dregon_free-flight_nosource_room2@1512727403.205+8_motors_command: 8x247x1025 8.000 s carriers [84.183189, 77.305957, 82.542859, 80.344602] pass=True
+  flight_dregon_hovering_nosource_room2@1511903905.394+4_motors_command: 8x122x1025 4.000 s carriers [85.0849, 76.98386, 82.088004, 79.27052] pass=True
+  flight_dregon_hovering_nosource_room2@1511903911.394+8_motors_command: 8x247x1025 8.000 s carriers [84.854508, 76.140097, 81.905107, 79.096297] pass=True
+  flight_dregon_rectangle_nosource_room2@1511905725.953+4_motors_command: 8x122x1025 4.000 s carriers [84.276551, 76.712489, 82.023814, 79.77137] pass=True
+  flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command: 8x247x1025 8.000 s carriers [85.765929, 76.359685, 82.727471, 79.738908] pass=True
+  flight_dregon_spinning_nosource_room2@1511905200.978+4_motors_command: 8x122x1025 4.000 s carriers [84.780916, 76.393494, 82.437784, 79.619583] pass=True
+  flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command: 8x247x1025 8.000 s carriers [83.338191, 78.45801, 81.598133, 81.59336] pass=True
+  flight_dregon_updown_nosource_room2@1511903578.348+4_motors_command: 8x122x1025 4.000 s carriers [82.941068, 75.728556, 81.027888, 78.059711] pass=True
+  flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command: 8x247x1025 8.000 s carriers [84.314811, 76.688208, 81.514045, 79.685927] pass=True
+built 10/10 supports; wrote /tmp/supports_dregon_room2_floor/index.json and /tmp/supports_dregon_room2_floor/findings.md

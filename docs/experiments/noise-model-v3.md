@@ -796,9 +796,101 @@ dir `results/noise_v3/fits_r2`. Submitted 2026-09-25 16:32 UTC from
 
 | job | pool | submitted (UTC) | state |
 |---|---|---|---|
-| `nv3r2-dregon-2d63a3` | DREGON | 16:32 | submitted |
-| `nv3r2-cruise-ac4e0f` | Michael's cruise | 16:32 | queued (one kaggle slot) |
-| `nv3r2-standby-5b9eed` | Michael's standby | 16:32 | queued |
+| `nv3r2-dregon-2d63a3` | DREGON | 16:32 | succeeded ≈ 17:03, Tesla T4, 1 717 s to the last fit (build 53 s) |
+| `nv3r2-cruise-ac4e0f` | Michael's cruise | 16:32 | started ≈ 17:04 (one kaggle slot), succeeded ≈ 17:24, Tesla T4, 1 155 s to the last fit (build 25 s) |
+| `nv3r2-standby-5b9eed` | Michael's standby | 16:32 | started ≈ 17:25, succeeded ≈ 17:40, Tesla T4, 829 s to the last fit (build 21 s) |
+
+**Wall time.** All three ran on a Tesla T4 (torch 2.7.0+cu126), back to back:
+the round took 68 min of wall clock (16:32–17:40 UTC) against the campaign's
+45. The alternation stops as soon as its move falls under the tolerance, so
+no restart ran all 20 rounds but DREGON s0. Fit s is `optimiser.wall_s`.
+
+| pool | build s | fit s, s0 / s1 / s2 / s3 | rounds run, s0 / s1 / s2 / s3 | job s to the last fit | peak GPU MiB |
+|---|---:|---|---|---:|---:|
+| DREGON | 53 | 462 / 399 / 365 / 399 | 20 / 17 / 15 / 17 | 1 717 | 2 215 |
+| Michael's cruise | 25 | 268 / 286 / 267 / 266 | 10 / 11 / 10 / 10 | 1 155 | 2 756 |
+| Michael's standby | 21 | 210 / 192 / 191 / 180 | 8 / 7 / 7 / 6 | 829 | 1 677 |
+
+**Convergence.** Whittle move per observed cell between alternation rounds
+(`optimiser.history`, tolerance 1e-4; "—" = the restart had stopped):
+
+| pool | seed | r1 | r2 | r3 | r5 | r8 | r10 | r12 | r15 | r18 | r20 | first round < 1e-4 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| DREGON | 0 | 0.12 | 0.006 | 0.0029 | 0.0011 | 4.1e-4 | 3.1e-4 | 2.4e-4 | 1.3e-4 | 1.2e-4 | 8.8e-5 | 20 |
+| DREGON | 1 | 0.12 | 0.0059 | 0.0029 | 0.0011 | 3.9e-4 | 2.2e-4 | 1.7e-4 | 1.3e-4 | — | — | 17 |
+| DREGON | 2 | 0.12 | 0.0061 | 0.003 | 0.0011 | 3.7e-4 | 2.3e-4 | 2.1e-4 | 9.2e-5 | — | — | 15 |
+| DREGON | 3 | 0.12 | 0.0057 | 0.0027 | 0.0012 | 4.3e-4 | 2.9e-4 | 2.0e-4 | 1.4e-4 | — | — | 17 |
+| cruise | 0 | 0.12 | 0.0036 | 0.002 | 7.5e-4 | 2.3e-4 | 9.5e-5 | — | — | — | — | 10 |
+| cruise | 1 | 0.12 | 0.0035 | 0.0019 | 7.5e-4 | 2.2e-4 | 1.1e-4 | — | — | — | — | 11 |
+| cruise | 2 | 0.11 | 0.0038 | 0.002 | 7.7e-4 | 2.0e-4 | 9.7e-5 | — | — | — | — | 10 |
+| cruise | 3 | 0.11 | 0.0037 | 0.0023 | 7.5e-4 | 1.8e-4 | 8.2e-5 | — | — | — | — | 10 |
+| standby | 0 | 0.061 | 0.0041 | 0.0016 | 4.0e-4 | 5.5e-5 | — | — | — | — | — | 8 |
+| standby | 1 | 0.06 | 0.0048 | 0.0015 | 2.4e-4 | — | — | — | — | — | — | 7 |
+| standby | 2 | 0.061 | 0.0043 | 0.0015 | 3.4e-4 | — | — | — | — | — | — | 7 |
+| standby | 3 | 0.061 | 0.0039 | 0.0016 | 4.0e-4 | — | — | — | — | — | — | 6 |
+
+- **The alternation converges in every restart**: `optimiser.converged` and
+  `alternation_converged` are true in all twelve (round 1: false in all
+  twelve). The move drops under 1e-4 at round **15–20 on DREGON**, **10–11
+  on cruise** and **6–8 on standby**. DREGON s0 gets there at the last
+  allowed round (8.8e-5 at round 20). The move is not monotone after
+  round 10 on DREGON (s0 1.1e-4 → 1.2e-4 → 1.1e-4 at rounds 17–19; s3
+  1.9e-4 → 2.0e-4 at 13–14), so the tail is a slow creep, not a
+  geometric decay: from round 5 to round 15 DREGON's move falls by
+  ≈ 0.8 per round, against 0.55 over rounds 2–5 of round 1.
+- **Polish.** `which_converged` is "alternation+lbfgs" everywhere. The
+  all-frames polish now gains 189–223 nats (7.6e-5–8.9e-5 /cell) on DREGON,
+  122–146 (3.0e-5–3.7e-5) on cruise and 1.4–1.7 (≈ 2e-6) on standby, a
+  half to a twelfth of round 1's; every rig step, polish included, stops on
+  its 1e-5 relative tolerance in 1–2 iterations (+1 restart) after round 0.
+
+**Restart spread** (`reduce`; lowest total objective selected):
+
+| pool | selected | best − median /cell (round 1) | best − worst /cell (round 1) | σ_ν min–max rad/s | log-mean γ min–max Hz | restart gain, selected polish /cell |
+|---|---:|---:|---:|---|---|---:|
+| DREGON | s3 | 1.7e-4 (1.0e-4) | 7.3e-4 (1.2e-3) | 4.052–4.214 | 0.901–1.237 | 1.9e-5 |
+| Michael's cruise | s1 | 5.3e-5 (3.1e-5) | 2.6e-4 (2.7e-4) | 3.806–4.019 | 0.467–0.657 | 1.3e-5 |
+| Michael's standby | s2 | 7.3e-5 (7.7e-5) | 2.0e-4 (2.6e-4) | 0.290–0.348 | 1.420–1.704 | 8.5e-7 |
+
+The restarts still disagree by 2–7 × the tolerance: 20 rounds converge each
+restart's alternation, not the restarts onto one optimum. The widths barely
+move from round 1: every seed's γ median and rotor maxima are within 1–10 %
+of its round-1 value (DREGON s0 γ median 1.668 → 1.669 Hz, s3 1.273 →
+1.273), so the width spread across restarts is still the sd-0.8 jitter of
+the start, carried through by rig steps of 1–2 L-BFGS iterations.
+
+**Selected fits.** Widths are `params.gamma_hz`, rotors from 1, γ0 k = 0.01k Hz.
+
+| pool | seed | σ_ν rad/s (round 1 selected) | γ median Hz | γ max per rotor Hz (k) | γ > 50 Hz | max γ/(0.01k) (rotor, k, Hz) | lines > 5 γ0 k |
+|---|---:|---|---:|---|---:|---|---|
+| DREGON | s3 | 4.214 (4.573) | 1.273 | 18.15 (74), 42.59 (26), 7.20 (71), 14.23 (70) | 0 | 163.8 (2, 26, 42.59) | 118/352 (33.5 %) |
+| Michael's cruise | s1 | 3.821 (3.837) | 0.779 | 29.32 (49), 12.70 (17), 4.21 (7), 4.74 (30) | 0 | 74.7 (2, 17, 12.70) | 97/324 (29.9 %) |
+| Michael's standby | s2 | 0.348 (0.348) | 2.262 | 17.27 (108), 10.57 (51), 86.39 (128), 12.44 (85) | 3 | 67.5 (3, 128, 86.39) | 218/520 (41.9 %) |
+
+σ_ν falls 8–11 % on DREGON (4.05–4.21 against 4.56–4.75 rad/s over the
+restarts) and stays within 1 % on Michael's. Standby keeps the three rotor-3
+lines over 50 Hz at k = 126–128. Objectives (selected): DREGON −18 051 537.9
+= Whittle −18 130 023.7 + rig −log prior 5 137.1 + OU −log prior 73 348.6
+(rounds 1–17 gain 333 944 nats, 0.134 /cell, over the latents-at-zero
+round 0); cruise −24 814 982.0 = −24 925 545.9 + 4 737.0 + 105 826.9 (gain
+0.124 /cell); standby −6 945 142.4 = −6 979 126.5 + 4 589.0 + 29 395.0
+(0.068 /cell). The Whittle term is 7 729 (DREGON) and 6 533 nats (cruise) below round 1's
+selected fit and 448 nats above it on standby; the totals do not rank
+across rounds (different wander prior).
+
+**Latent tracks against the mm1 σ** (selected fit; rms of the fitted block
+latents / the σ the fit was fitted under, dB):
+
+| pool | d | u | u_j | v k 1–2 | v k 3–8 | v k 9–24 | v k 25–60 | v k ≥ 61 |
+|---|---|---|---|---|---|---|---|---|
+| DREGON | 2.32 / 1.94 | 2.09 / 2.48 | 7.03 / 3.99 | 0 / 0 | 0 / 0 | 5.16 / 4.21 | 6.21 / 4.98 | 4.84 / 4.72 |
+| Michael's cruise | 2.37 / 1.12 | 4.00 / 3.42 | 6.18 / 3.63 | 1.03 / 0.52 | 7.01 / 5.89 | 6.48 / 5.29 | 4.65 / 4.16 | 4.42 / 3.72 |
+| Michael's standby | 1.19 / 1.12 | 2.12 / 3.42 | 2.73 / 3.63 | 1.09 / 0.52 | 5.12 / 5.89 | 4.35 / 5.29 | 3.07 / 4.16 | 3.49 / 3.72 |
+
+The looser prior let the tracks spread further: against round 1 the rms of
+DREGON's `u_j` goes 3.97 → 7.03 dB and `d` 1.80 → 2.32; cruise `d` 1.02 →
+2.37 and `u_j` 3.61 → 6.18. Standby, which reads the cruise update, sits
+under it in `u`, `u_j` and every `v` group at k ≥ 3.
 
 ## Results
 
