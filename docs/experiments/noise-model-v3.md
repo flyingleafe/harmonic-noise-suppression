@@ -1,8 +1,9 @@
-**Status:** running — 2026-09-24 → 2026-09-25. CPU round 1 (σ_v rig-wide) is
+**Status:** done — 2026-09-24 → 2026-09-25. CPU round 1 (σ_v rig-wide) is
 superseded and only exercised the check tooling. The GPU campaign (4 restarts
-× 3 pools, σ_v(k) from wander schema 2) is fitted and reduced; the §3.5
-checks run on its fits. Round 2 (wander re-estimated by one moment update
-from the campaign's latents, 20 alternation rounds) is fitting.
+× 3 pools, σ_v(k) from wander schema 2) and round 2 (wander re-estimated by
+one moment update `mm1` from the campaign's latents, 20 alternation rounds)
+are fitted, reduced and checked; a second update `mm2` was computed from the
+round-2 latents and not refitted.
 
 # Noise model v3: fits on the free-flight pools and the §3.5 checks
 
@@ -982,11 +983,147 @@ rotor measures, that overstates its block noise, and for lines under the
 floor it understates it. The v k 1–2 rows (σ 0 on DREGON, 0.32 dB on
 Michael's) are in `findings.md`.
 
+### Round 2 against round 1 (`results/noise_v3/checks_r2/`)
+
+Same tooling and commands (`noise_v3_checks.py latents|heldout|rendered|summary`,
+`noise_v2_tonality_audit.py --fit`, `noise_v2_round_score.py --round 6 … --fit`)
+on the round-2 selected fits `results/noise_v3/fits_r2/<pool>__flight_v3.json`
+(DREGON s3, cruise s1, standby s2); the prior predictive (a) and the parameter
+views were not rerun. `findings.md` there has every table in full.
+
+**(e) Latent consistency, round 1 → round 2.** Ratio of the lag-0 sum (fitted
+mean square + posterior variance) to σ², and of the lag-1 sum to ρσ², under
+the law each fit was fitted under: round 1 against the measured wander,
+round 2 against mm1 (standby: the cruise mm1). A ratio of 1 is the §3.3a
+fixed point.
+
+| family | DREGON lag 0 | DREGON lag 1 | cruise lag 0 | cruise lag 1 | standby lag 0 | standby lag 1 |
+|---|---|---|---|---|---|---|
+| d | 4.23 → 1.67 | 10.03 → 1.94 | 4.58 → 4.81 | 7.69 → 6.06 | 3.77 → 1.51 | 4.37 → 1.11 |
+| u | 0.76 → 0.73 | 0.61 → 0.63 | 3.91 → 1.37 | 4.42 → 1.42 | 1.04 → 0.39 | 1.12 → 0.38 |
+| u_j | 6.87 → 3.12 | 9.09 → 3.30 | 4.92 → 2.91 | 6.37 → 3.17 | 1.48 → 0.58 | 1.76 → 0.55 |
+| v, all orders | 0.84 → 1.42 | 0.98 → 1.74 | 1.06 → 1.43 | 1.22 → 1.62 | 0.61 → 0.80 | 0.64 → 0.83 |
+| v k 1–2 | σ 0 | σ 0 | 2.59 → 4.53 | 3.35 → 5.21 | 2.55 → 5.03 | 3.25 → 5.82 |
+| v k 3–8 | σ 0 | σ 0 | 1.99 → 1.45 | 2.40 → 1.55 | 1.23 → 0.79 | 1.41 → 0.79 |
+| v k 9–24 | 2.00 → 1.57 | 2.40 → 1.70 | 1.94 → 1.54 | 2.44 → 1.72 | 1.05 → 0.72 | 1.09 → 0.66 |
+| v k 25–60 | 1.63 → 1.60 | 2.37 → 1.91 | 1.33 → 1.31 | 1.56 → 1.45 | 0.69 → 0.61 | 0.64 → 0.54 |
+| v k ≥ 61 | 0.43 → 1.11 | 0.43 → 1.49 | 0.43 → 1.49 | 0.45 → 1.94 | 0.52 → 0.96 | 0.56 → 1.11 |
+
+The update closed part of the gap but no family on DREGON or cruise is at
+the fixed point: every one but DREGON `u` (0.73) is above 1, by 1.1–4.8 ×
+in σ² at lag 0 (closest: DREGON v k ≥ 61, 1.11). The round-2 latents again
+spread wider than the σ they were fitted under. Against the **measured** σ² the round-2 lag-0 sums
+are further away than round 1's: DREGON `d` 7.0 ×, `u_j` 21 ×, v k 9–24
+3.1 ×; cruise `d` 22 ×, `u_j` 14 ×, `u` 5.4 ×, v k 1–2 12 ×. Standby, fitted
+under the cruise update, now sits below it in `u`, `u_j` and v k 3–60.
+
+**(b) Disappearance rate per order group** (as above; renders: 4 seeds per
+window, so a render column's visible-line count is over 4 × the windows):
+
+| rig | orders | real | v3 round 2 | v3 round 1 | v2 | a+d real / v3 r2 / v3 r1 / v2 % |
+|---|---|---|---|---|---|---|
+| DREGON | 1–2 | 71.9 % [68.8, 75.0] (8) | 75.0 % (7) | 75.0 % (3) | 75.0 % (3) | 50.0 / 2.5 / 1.2 / 8.8 |
+| DREGON | 3–8 | no visible line | none | none | none | 0 / 0.2 / 0 / 0 |
+| DREGON | 9–24 | 68.8 % [66.2, 71.9] (10) | 57.2 % [56.1, 58.2] (218) | 66.4 % [63.3, 68.5] (37) | none | 11.6 / 26.2 / 7.7 / 2.0 |
+| DREGON | 25–60 | 72.7 % [68.8, 75.0] (10) | 56.6 % [53.4, 59.5] (225) | 44.4 % [41.1, 47.1] (94) | none | 6.8 / 16.2 / 6.0 / 0.0 |
+| DREGON | 61+ | 75.0 % (2) | 72.5 % [68.8, 75.0] (5) | 75.0 % (4) | none | 1.6 / 1.6 / 2.1 / 0.0 |
+| Michael's | 1–2 | 5.6 % [0.0, 10.3] (9) | 4.7 % [3.0, 6.3] (36) | 1.0 % [0.0, 1.9] (33) | 0.0 % (32) | 10.0 / 12.5 / 5.0 / 0.0 |
+| Michael's | 3–8 | 23.7 % [18.8, 29.5] (24) | 34.4 % [30.3, 40.7] (160) | 27.5 % [23.6, 35.2] (145) | 17.6 % [13.3, 21.3] (120) | 25.0 / 57.6 / 36.2 / 16.4 |
+| Michael's | 9–24 | 40.4 % [34.6, 54.4] (34) | 47.4 % [44.8, 64.6] (164) | 44.9 % [41.2, 68.8] (153) | 37.2 % [33.8, 41.5] (146) | 21.5 / 33.9 / 26.9 / 17.1 |
+| Michael's | 25–60 | 65.6 % (2) | 66.7 % [66.2, 67.6] (51) | 68.6 % [68.2, 69.2] (36) | none | 3.5 / 14.7 / 10.5 / 0.7 |
+| Michael's | 61+ | 25.8 % [25.6, 26.0] (23) | 46.3 % (177) | 48.6 % (223) | 30.4 % [29.6, 31.2] (149) | 1.6 / 4.4 / 6.9 / 2.2 |
+
+On DREGON the larger σ_v lifts far more lines over 6 dB: 10.9 visible lines
+per window at k 9–24 (round 1 1.85, real 2.0) and 11.3 at k 25–60 (4.7,
+real 2.0). They disappear less often at k 9–24 (57 % against real 69 %;
+round 1 matched at 66 %) and more often at k 25–60 (57 % against 73 %;
+round 1 44 %), and a+d overshoots at both (26 % and 16 % against 12 % and
+7 %). The shaft orders are unchanged (a+d 2.5 % against 50 %: σ_v is still
+0 at k 1–2). On Michael's the rates move 2–7 points up at k 1–24 and stay
+inside the real intervals only at k 1–2 and 9–24 (k 25–60: 66.7 % against
+65.6 % on 2 real lines); k 3–8 now fails (34 %
+against 24 % [19, 30]); k ≥ 61 is still ≈ 1.8 × the real rate. The dominant
+tracks' line-power spread grows from 3.16 to 3.93 dB (real 1.46); the
+rendered floor σ_u is 1.53 dB on Michael's (round 1 0.83, real 2.97) and
+0.81 on DREGON (0.88, real 3.66).
+
+**(c) Tonality** (audit counts, orders ≥ 3 / 6 / 10 dB per rotor; clips =
+median of 4 render seeds):
+
+| pattern | real clips | v3 r2 clips | v3 r1 clips | v3 r2 expectation | v3 r1 expectation |
+|---|---|---|---|---|---|
+| DREGON narrow | 7.5 / 1.0 / 0.0 | 6.4 / 2.1 / 0.0 | 3.8 / 2.0 / 0.0 | 10.5 / 5.8 / 0.0 | 7.0 / 3.2 / 0.0 |
+| DREGON wide | 5.5 / 1.0 / 0.0 | 4.4 / 2.2 / 0.2 | 3.2 / 2.0 / 0.2 | 8.2 / 3.0 / 0.0 | 5.2 / 2.5 / 0.0 |
+| cruise narrow | 8.8 / 3.0 / 1.2 | 8.1 / 4.1 / 2.1 | 8.5 / 3.1 / 1.4 | 17.8 / 9.5 / 4.5 | 18.0 / 9.8 / 4.2 |
+| cruise wide | 11.8 / 6.8 / 3.2 | 11.9 / 5.6 / 3.0 | 11.4 / 5.9 / 3.4 | 19.5 / 10.5 / 3.8 | 18.8 / 11.0 / 3.8 |
+| standby narrow | 7.0 / 3.5 / 2.8 | 18.0 / 6.5 / 3.2 | 18.6 / 5.2 / 2.2 | 8.8 / 4.0 / 2.0 | 8.8 / 4.0 / 2.0 |
+| standby wide | 4.5 / 1.2 / 0.0 | 9.1 / 3.0 / 1.4 | 8.0 / 2.6 / 1.4 | 13.0 / 3.8 / 1.2 | 13.0 / 3.8 / 1.2 |
+
+DREGON's clips come within 1.1 orders of the real count at 3 dB (round 1
+was 2.3–3.7 under) and stay ≈ 1 order over at 6 dB; the R4 widths at
+k = 1, 2, 7, 8 are 9.8, 17.4, 12.3, 15.9 Hz (round 1 9.5, 17.6, 17.6, 17.6;
+real 10.4, 23.4, 30.7, 30.2). Cruise stays within 1.2 orders at every bar
+(PASS). Standby still has 2–2.6 × the real 3-dB count (FAIL), unchanged.
+The DREGON expectation counts differ from round 1 because the selected
+restart changed (s2 → s3); the Michael's expectation counts are within
+0.7 orders of round 1's.
+
+**(d) Parity** (HPPNet PIT MAE, rev/s; proxy `ltas_abs_db`, dB):
+
+| rig | round 2 | round 1 | bar | proxy r2 (r1) |
+|---|---|---|---|---|
+| DREGON | **1.686967**, upper 2.033397, PASS (margin +0.501); stretch 1.897063 on the mean, not on the upper bound | 1.716079, upper 2.062063 | 2.187786 | 2.4707 (2.4302), gate 1.9786 |
+| Michael's | **2.329048**, ratio **0.770**, PASS (margin +0.849) | 1.686297, ratio 0.557 | 3.177994 | 2.1683 (2.3656), gate 1.2197 |
+| Michael's per regime, standby / ramp / cruise | 2.320 / 3.753 / 0.914 | 0.885 / 3.283 / 0.891 | real 0.344 / 3.171 / 0.588 | |
+
+Michael's got worse through standby: its PIT MAE on the two standby
+windows went 0.885 → 2.320 rev/s, with a per-window render-seed spread of
+5.5–6.8 rev/s (`parity/findings.md`); cruise is unchanged.
+
+**LTAS proxy per restart seed** (`noise_v2_round_score.py --round 6
+--no-probe --fit <restart>`, the same frozen render seeds for every restart;
+`checks_r2/proxy_seeds/arm_<rig>_<round>_s<N>.json`):
+
+| rig | round | s0 | s1 | s2 | s3 | seed mean | max − min | sd |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| DREGON | 1 | 2.5012 | 2.4668 | 2.4302 | 2.4473 | 2.4614 | 0.0709 | 0.0304 |
+| DREGON | 2 | 2.6589 | 2.5016 | 2.4537 | 2.4707 | 2.5212 | 0.2052 | 0.0939 |
+| Michael's | 1 | 2.3361 | 2.3531 | 2.3656 | 2.3518 | 2.3516 | 0.0295 | 0.0121 |
+| Michael's | 2 | 2.1720 | 2.1683 | 2.1651 | 2.1599 | 2.1663 | 0.0121 | 0.0051 |
+
+With the render seeds frozen, the restart-to-restart proxy spread is small
+in both rounds (≤ 0.21 dB, against a per-support render-seed spread of
+0.5–2.9 dB on the timing fits). Twenty rounds did not shrink it on DREGON: it grew 2.9 ×,
+all of it from s0 (2.659 dB, the unjittered warm start, the only restart
+that ran all 20 rounds); without s0 the round-2 spread is 0.048 dB. On
+Michael's it shrank 2.4 × and the seed mean improved by 0.19 dB; on DREGON
+the seed mean got worse by 0.06 dB. Both stay above their gates.
+
+**Moment update mm2** (`results/noise_v3/wander/{dregon,michaels}_mm2.json`,
+table in `moment_update.md`; σ dB, measured → mm1 → mm2, mm2/mm1 in
+brackets; converged = |mm2/mm1 − 1| < 10 %):
+
+| family | DREGON | τ mm1 → mm2 s | cruise | τ mm1 → mm2 s | standby (own updates) | τ mm1 → mm2 s |
+|---|---|---|---|---|---|---|
+| d | 0.94 → 1.94 → 2.50 (1.29, grows) | 0.64 → 0.79 | 0.53 → 1.12 → 2.46 (2.19, grows) | 1.43 → 4.15 | 0.53 → 1.02 → 1.38 (1.35) | 0.69 → 0.76 |
+| u | 2.83 → 2.48 → 2.12 (0.85, shrinks) | 1.53 → 1.06 | 1.73 → 3.42 → 4.01 (1.17, grows) | 3.88 → 5.26 | 1.73 → 1.77 → 2.15 (1.22) | 2.82 → 2.99 |
+| u_j | 1.52 → 3.98 → 7.04 (1.77, grows) | 6.05 → 19.99 | 1.63 → 3.63 → 6.19 (1.71, grows) | 3.38 → 8.04 | 1.63 → 1.99 → 2.75 (1.38) | 2.15 → 2.62 |
+| v k 1–2 | 0 (pinned) | 0.75 | 0.32 → 0.52 → 1.10 (2.13, grows) | 2.83 → 14.15 | 0.32 → 0.51 → 1.16 (2.26) | 2.62 → 17.19 |
+| v k 3–8 | 0 (pinned) | 0.75 | 4.17 → 5.89 → 7.09 (1.20, grows) | 2.00 → 2.77 | 4.17 → 4.63 → 5.23 (1.13) | 1.66 → 2.04 |
+| v k 9–24 | 2.98 → 4.21 → 5.26 (1.25, grows) | 1.10 → 1.34 | 3.79 → 5.29 → 6.57 (1.24, grows) | 1.43 → 2.05 | 3.79 → 3.88 → 4.48 (1.15) | 0.93 → 1.14 |
+| v k 25–60 | 3.90 → 4.98 → 6.30 (1.26, grows) | 1.15 → 1.97 | 3.61 → 4.16 → 4.76 (1.14, grows) | 1.61 → 2.37 | 3.61 → 3.01 → 3.24 (1.08) | 0.91 → 1.17 |
+| v k ≥ 61 | 7.18 → 4.72 → 4.96 (1.05, **converged**) | 0.87 → 1.78 | 5.68 → 3.72 → 4.54 (1.22, grows) | 1.30 → 4.16 | 5.68 → 4.11 → 3.64 (0.89) | 1.36 → 2.15 |
+
+Standby's row is not a fixed-point iteration: it was fitted under the
+cruise mm1, not its own, and against that law its σ̂ shrinks in most
+families (`u` 0.63, `u_j` 0.76, v k 9–60 0.78–0.85 ×).
+
 ### Figures
 
 - `results/noise_v3/checks/heldout/prominence_hist.png` (block prominence, k 8–24, real / v3 / v2 per rig)
 - `results/noise_v3/checks/tonality/fits_ladder.png` (expectation prominence ladder, v3 against the v2 anchors)
 - `results/noise_v3/checks/param_view/{dregon,michaels_cruise,michaels_standby}_{params,comb}.png` (v3 beside the v2 fit it replaces)
+- `results/noise_v3/checks_r2/heldout/prominence_hist.png`, `results/noise_v3/checks_r2/tonality/fits_ladder.png` (the same two for the round-2 fits)
 
 ## Conclusion
 
@@ -1039,3 +1176,32 @@ converged in 5 rounds (DREGON still moves 10 × the tolerance), and every
 latent family but a few fails the (e) sums, `d` by 3.7–4.5 × in every pool,
 which by §3.3a sends the wander measurement (block length, line set) back
 for revision, not the fit.
+
+**Round 2 and the mm1 → mm2 verdict.** Refitting under the moment-matched
+wander `mm1` with up to 20 alternation rounds fixed the convergence: every
+restart's alternation now stops under 1e-4 nats/cell, at round 15–20 on
+DREGON, 10–11 on cruise and 6–8 on standby. The rig parameters barely moved
+(widths within 1–10 % per seed, σ_ν −8–11 % on DREGON), and the restarts
+still disagree by 2–7 × the tolerance. On the checks round 2 is not a
+uniform improvement. Parity still passes on both rigs: DREGON gets better
+(1.687, upper 2.033) and Michael's worse (ratio 0.557 → 0.770, all through
+standby, 0.885 → 2.320 rev/s). The seed-mean LTAS proxy improves on
+Michael's (2.352 → 2.166 dB) and worsens on DREGON (2.461 → 2.521). DREGON's
+clip tonality at 3 dB now nearly matches (6.4 / 4.4 against 7.5 / 5.5).
+DREGON's disappearance at k 9–24 moves away from the real audio: 5.9 × as
+many visible lines as round 1, 57 % dropout against 69 %. The (e) sums are
+still off the fixed point, and the second moment update does not settle. From
+mm1 to mm2 only DREGON's v k ≥ 61 moves less than 10 % (1.05 ×). DREGON `u`
+shrinks (0.85 ×). Every other family on DREGON and cruise keeps growing:
+`d` 1.29 / 2.19 ×, `u_j` 1.77 / 1.71 ×, v k 9–24 1.25 / 1.24 ×, v k 25–60
+1.26 / 1.14 ×. The mm1 steps were 2.06 / 2.14 × for `d` and 2.62 / 2.22 ×
+for `u_j`, so the growth slows on DREGON `d` and not on cruise `d`, and the
+τ of DREGON `u_j` runs 1.4 → 6.1 → 20 s (ρ 0.975, near the 0.99 clip).
+After two updates, cruise σ_d is 4.7 × and σ_uj 3.8 × their measured values.
+This is the structural-absorption outcome, not convergence. Given a looser
+prior, the rotor-common and floor-colour latents take up more of the
+Whittle residual, so their variance tracks what the static rig model leaves
+unexplained rather than the measured wander [inference]. Iterating the
+M-step further would keep inflating σ_d and σ_uj, and a third refit was not
+run. Per §3.3a this points back at the wander measurement (block length,
+line set) and at the static model, not at more EM rounds.
