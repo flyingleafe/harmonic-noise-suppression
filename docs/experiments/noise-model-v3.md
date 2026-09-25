@@ -635,7 +635,7 @@ warm starts are the timing runs': R5 `flight_profile` for DREGON, R3
 | job | pool | submitted (UTC) | state |
 |---|---|---|---|
 | `nv3c-dregon-26c719` | DREGON (`dregon-floor`, `--wind`) | 14:11 | succeeded 14:28, Tesla T4, 871 s to the last fit (build 53 s) |
-| `nv3c-cruise-0a9885` | Michael's cruise (`michaels-cruise`) | 14:11 | queued, started 14:28 (kaggle runs one job at a time) |
+| `nv3c-cruise-0a9885` | Michael's cruise (`michaels-cruise`) | 14:11 | started 14:28 (kaggle runs one job at a time), succeeded 14:44, Tesla T4, 805 s to the last fit (build 26 s) |
 | `nv3c-standby-cf4505` | Michael's standby (`michaels-standby`) | 14:11 | queued |
 
 ## Results
