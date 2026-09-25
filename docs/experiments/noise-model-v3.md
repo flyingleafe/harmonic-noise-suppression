@@ -1,4 +1,4 @@
-**Status:** running — 2026-09-24 → 2026-09-25. CPU round 1 (σ_v rig-wide) is
+**Status:** done — 2026-09-24 → 2026-09-25. CPU round 1 (σ_v rig-wide) is
 superseded and only exercised the check tooling. The GPU campaign (4 restarts
 × 3 pools, σ_v(k) from wander schema 2) is fitted and reduced; the §3.5
 checks run on its fits.
@@ -753,8 +753,148 @@ total objective):
 
 ## Results
 
-_Fits running; results follow the harvest._
+The campaign fits are `results/noise_v3/fits/<pool>__flight_v3.json` (s2 in
+every pool). The checks ran on the laptop under the cap, with the tooling of
+`448312f8`: `noise_v3_checks.py prior|heldout|rendered|latents|summary`,
+`noise_v2_tonality_audit.py --fit`, `noise_v2_round_score.py --round 6 …
+--fit` (the R5 parity command), `noise_v3_param_view.py`. Every output is
+under `results/noise_v3/checks/`; `findings.md` there has every table in
+full, with window-bootstrap intervals (median [5 %, 95 %]). Renders use the
+real label of each window, 8 mics and the frozen seeds 2001–2004.
+
+### §3.5 table, DREGON (held-out = the five frozen room-2 score windows, 4 s)
+
+| check | statistic | real | v3 render | v2 render (R5) |
+|---|---|---|---|---|
+| (a) | prior draws: max γ/(γ0 k); max \|c_j − μ\|/σ_B; max shape sd/σ_B | — | 11.80; 3.01; 1.48 (σ_B 17.60 dB) | — |
+| (b) | wander σ_total of the resolvable line tracks, dB | no resolvable track (0) | 3.40 [2.83, 3.64] (16 tracks) | no track |
+| (b) | disappearance rate, visible lines k 8–24 | 68.8 % [66.4, 72.5] (10 lines) | 66.2 % [63.3, 68.4] (37) | no visible line |
+| (b) | lines that appear and disappear, k 8–24 | 10.9 % [6.2, 15.3] | 7.2 % [6.2, 8.2] | 1.8 % [0.0, 3.7] |
+| (b) | block cells under the floor, k 8–24 | 81.8 % | 87.9 % | 92.2 % |
+| (b) | floor level σ_u, dB | 3.66 | 0.88 | 0.54 |
+| (c) | R4 width k = 1, 2, 7, 8, Hz (rendered clips) | 10.4, 23.4, 30.7, 30.2 | 9.5, 17.6, 17.6, 17.6 | 10.3, 10.2, 6.8, 10.3 |
+| (c) | audit orders ≥ 3 / 6 / 10 dB per rotor, clips (narrow; wide) | 7.5/1.0/0.0; 5.5/1.0/0.0 | 3.8/2.0/0.0; 3.2/2.0/0.2 | 3.0/2.0/0.0; 2.6/1.0/0.0 |
+| (c) | audit on the expectation (narrow; wide) | — | 7.0/3.2/0.0; 5.2/2.5/0.0 | anchor 23.2/9.5/2.0; 17.2/6.8/0.2 |
+| (d) | HPPNet PIT MAE, rev/s (bar 2.187786) | 1.218708 | **1.716079** (upper 2.062063) | 1.820065 (upper 2.158331) |
+| (d) | proxy `ltas_abs_db` (gate 1.9786) | — | 2.4302 | 2.0298 |
+
+### §3.5 table, Michael's (held-out = FLY124 standby @8/16 s, cruise @40/56 s, 8 s)
+
+| check | statistic | real | v3 render | v2 render (R3) |
+|---|---|---|---|---|
+| (a) | prior draws, cruise fit: max γ/(γ0 k); max \|c_j − μ\|/σ_B; max shape sd/σ_B | — | 11.26; 3.24; 1.63 (σ_B 3.95 dB) | — |
+| (a) | prior draws, standby fit: same | — | 11.66; 3.07; 1.53 (σ_B 13.01 dB) | — |
+| (b) | wander σ_total of the dominant line tracks, dB | 1.46 [0.53, 1.50] (5 tracks) | 3.16 [2.59, 3.47] (22) | 0.38 [0.28, 0.44] (30) |
+| (b) | block sd of a present line, k 8–24, dB | 2.76 [2.57, 3.91] | 2.62 [2.52, 2.76] | 1.18 [1.14, 1.21] |
+| (b) | disappearance rate, visible lines k 8–24 | 38.2 % [32.9, 51.1] (38) | 42.9 % [38.9, 58.5] (181) | 33.9 % [29.9, 38.6] (170) |
+| (b) | lines that appear and disappear, k 8–24 | 22.1 % [3.3, 39.8] | 27.6 % [4.4, 44.1] | 17.0 % [0.0, 32.8] |
+| (b) | floor level σ_u, dB | 2.97 | 0.83 | 0.21 |
+| (c) | audit orders ≥ 3 / 6 / 10 dB, cruise clips (narrow; wide) | 8.8/3.0/1.2; 11.8/6.8/3.2 | 8.5/3.1/1.4; 11.4/5.9/3.4 | 7.8/1.9/1.2; 10.5/5.5/2.8 |
+| (c) | same, standby clips (narrow; wide) | 7.0/3.5/2.8; 4.5/1.2/0.0 | 18.6/5.2/2.2; 8.0/2.6/1.4 | 8.9/3.9/2.0; 4.4/2.0/1.2 |
+| (c) | audit on the expectation, cruise; standby (narrow / wide) | — | 18.0/9.8/4.2, 18.8/11.0/3.8; 8.8/4.0/2.0, 13.0/3.8/1.2 | anchors 15.0/8.0/4.2, 17.0/8.2/3.8; 8.5/4.2/2.8, 11.5/3.8/1.5 |
+| (d) | HPPNet equal-regime PIT MAE, rev/s (bar 3.177994 = 1.05 × 3.026661) | 1.3676 | **1.686297** (ratio 0.557) | 1.621670 (ratio 0.536) |
+| (d) | per regime standby / ramp / cruise | 0.344 / 3.171 / 0.588 | 0.885 / 3.283 / 0.891 | 0.785 / 3.267 / 0.813 |
+| (d) | proxy `ltas_abs_db` (gate 1.2197) | — | 2.3656 | 1.2816 |
+
+### Disappearance rate per order group (check (b), the headline)
+
+Share of blocks under 6 dB among the lines visible in their window (≥ 6 dB
+in ≥ 20 % of its blocks); number of visible lines in brackets (renders:
+4 seeds per window); "a+d" = share of all lines that both reach 6 dB and fall
+under 3.01 dB inside one window.
+
+| rig | orders (σ_v dB) | real | v3 render | v2 render | a+d real / v3 / v2 |
+|---|---|---|---|---|---|
+| DREGON | 1–2 (0) | 71.9 % [68.8, 75.0] (8) | 75.0 % (3) | 75.0 % (3) | 50.0 / 1.2 / 8.8 % |
+| DREGON | 3–8 (0) | no visible line | none | none | 0 / 0 / 0 % |
+| DREGON | 9–24 (2.98) | 68.8 % [66.2, 71.9] (10) | 66.4 % [63.3, 68.5] (37) | none | 11.6 / 7.7 / 2.0 % |
+| DREGON | 25–60 (3.91) | 72.7 % [68.8, 75.0] (10) | 44.4 % [41.1, 47.1] (94) | none | 6.8 / 6.0 / 0.0 % |
+| DREGON | 61+ (7.18) | 75.0 % (2) | 75.0 % (4) | none | 1.6 / 2.1 / 0.0 % |
+| DREGON | all orders (point) | 71.2 % (30) | 51.7 % (138) | 75.0 % (3) | |
+| Michael's | 1–2 (0.32) | 5.6 % [0.0, 10.3] (9) | 1.0 % [0.0, 1.9] (33) | 0.0 % (32) | 10.0 / 5.0 / 0.0 % |
+| Michael's | 3–8 (4.17) | 23.7 % [18.8, 29.5] (24) | 27.5 % [23.6, 35.2] (145) | 17.6 % [13.3, 21.3] (120) | 25.0 / 36.2 / 16.4 % |
+| Michael's | 9–24 (3.79) | 40.4 % [34.6, 54.4] (34) | 44.9 % [41.2, 68.8] (153) | 37.2 % [33.8, 41.5] (146) | 21.5 / 26.9 / 17.1 % |
+| Michael's | 25–60 (3.61) | 65.6 % (2) | 68.6 % [68.2, 69.2] (36) | none | 3.5 / 10.5 / 0.7 % |
+| Michael's | 61+ (5.69) | 25.8 % [25.6, 26.0] (23) | 48.6 % (223) | 30.4 % [29.6, 31.2] (149) | 1.6 / 6.9 / 2.2 % |
+| Michael's | all orders (point) | 29.6 % (92) | 41.0 % (590) | 27.0 % (447) | |
+
+### Latent consistency (check (e), selected fits)
+
+Fitted mean square + OU-smoother posterior variance (the lag-0 sum) against
+the measured σ², and fitted lag-1 product + posterior lag-1 covariance
+against ρσ², in dB², as ratio sum / measured:
+
+| family | DREGON lag 0 | DREGON lag 1 | cruise lag 0 | cruise lag 1 | standby lag 0 | standby lag 1 |
+|---|---:|---:|---:|---:|---:|---:|
+| d | 3.75/0.89 (4.2) | 1.71/0.17 (10) | 1.26/0.28 (4.5) | 0.89/0.12 (7.4) | 1.04/0.28 (3.7) | 0.50/0.12 (4.2) |
+| v, all orders | 20.5/24.2 (0.84) | 12.6/12.9 (0.98) | 19.4/18.3 (1.06) | 14.0/11.5 (1.22) | 14.5/23.6 (0.61) | 9.6/15.0 (0.64) |
+| v k 3–8 | σ = 0 | σ = 0 | 34.7/17.4 (2.0) | 27.0/11.3 (2.4) | 21.5/17.4 (1.23) | 15.9/11.3 (1.41) |
+| v k 9–24 | 17.7/8.9 (2.0) | 11.3/4.7 (2.4) | 28.0/14.4 (1.9) | 19.7/8.1 (2.4) | 15.1/14.4 (1.05) | 8.8/8.1 (1.09) |
+| v k 25–60 | 24.8/15.3 (1.6) | 16.1/6.8 (2.4) | 17.3/13.0 (1.3) | 12.7/8.1 (1.6) | 9.0/13.0 (0.69) | 5.2/8.1 (0.64) |
+| v k ≥ 61 | 22.3/51.5 (0.43) | 12.5/29.1 (0.43) | 13.8/32.3 (0.43) | 9.4/20.9 (0.45) | 16.9/32.3 (0.52) | 11.7/20.9 (0.56) |
+| u | 6.1/8.0 (0.76) | 4.4/7.2 (0.61) | 11.7/3.0 (3.9) | 10.3/2.3 (4.4) | 3.1/3.0 (1.04) | 2.6/2.3 (1.12) |
+| u_j | 15.9/2.3 (6.9) | 14.6/1.6 (9.1) | 13.2/2.7 (4.9) | 11.3/1.8 (6.4) | 4.0/2.7 (1.48) | 3.1/1.8 (1.76) |
+
+The posterior variance uses the measured median block noise of a line
+(1.30 / 1.29 dB²) or of the floor (0.12 dB²); for `d`, which every line of a
+rotor measures, that overstates its block noise, and for lines under the
+floor it understates it. The v k 1–2 rows (σ 0 on DREGON, 0.32 dB on
+Michael's) are in `findings.md`.
+
+### Figures
+
+- `results/noise_v3/checks/heldout/prominence_hist.png` (block prominence, k 8–24, real / v3 / v2 per rig)
+- `results/noise_v3/checks/tonality/fits_ladder.png` (expectation prominence ladder, v3 against the v2 anchors)
+- `results/noise_v3/checks/param_view/{dregon,michaels_cruise,michaels_standby}_{params,comb}.png` (v3 beside the v2 fit it replaces)
 
 ## Conclusion
 
-_Pending._
+| check | DREGON | Michael's cruise | Michael's standby |
+|---|---|---|---|
+| (a) prior predictive: widths | PASS (max 11.8 γ0 k, 9.3 % of drawn lines > 5 γ0 k; v2 fits reached 10⁴) | PASS (11.3, 9.1 %) | PASS (11.7, 9.4 %) |
+| (a) prior predictive: floor | at the σ_B scale, not within it (draw shape sd ≤ 1.48 σ_B, extreme control point 3.0 σ_B); PASS against the v2 pathology, FAIL on a literal "no swing beyond σ_B" | same (1.63, 3.2) | same (1.53, 3.1); renders' median floor shape sd 9.3 dB against 3.6 dB real |
+| (b) line-power spread | not testable: no resolvable line on the held-out windows | FAIL: v3 3.16 dB against real 1.46 on the dominant tracks (v2 0.38 fails the other way); PASS on the block sd of present lines (2.62 against 2.76; v2 1.18) | pooled with cruise (the rig's held-out set) |
+| (b) disappearance | PASS at k 9–24 (66.4 % against 68.8 %; v2 shows no visible line), FAIL at k 25–60 (44 % against 73 %, 2.4 × as many visible lines per window) and at k 1–2 (a+d 1.2 % against 50 %: σ_v is 0 there) | PASS at k 3–24 (intervals overlap), FAIL at k ≥ 61 (48.6 % against 25.8 %) | pooled with cruise |
+| (c) tonality | FAIL at 3 dB (v3 clips 3.2–3.8 orders per rotor against real 5.5–7.5), 1 order over at 6 dB; closer than v2 on the expectation (v2 anchor 17–23 at 3 dB) | PASS (clip counts within 1 order at every bar, closer than v2) | FAIL (clips 8.0–18.6 at 3 dB against 4.5–7.0; the expectation's k = 1 line is 14–22 dB) |
+| (d) parity | PASS: 1.716079, upper 2.062063 ≤ 2.187786 (margin +0.472); stretch 1.897063 passed on the mean, not on the upper bound | PASS: ratio 0.557 ≤ 1.05 (margin +1.492 rev/s), equal-regime with standby | (inside Michael's) |
+| (e) latents | FAIL: `d` 4.2 × and `u_j` 6.9 × σ²; v 2.0 / 1.6 / 0.43 × by group | FAIL: `d` 4.5 ×, `u` 3.9 ×, `u_j` 4.9 ×, v 2.0 / 1.9 / 1.3 / 0.43 × | mixed: `u` 1.04, v k 9–24 1.05, v k 3–8 1.23; `d` 3.7 ×, v k ≥ 25 0.52–0.69 × |
+
+**The headline question, (b).** The Gaussian OU with σ_v(k) does reproduce
+DREGON's intermittent mid-order lines: at k 9–24 the renders show about as
+many visible lines per window (1.85 against 2.0) and they drop under 6 dB in
+66 % of their blocks against 69 % in the real audio, where v2 renders no
+visible line at all. It overshoots at k 25–60, where σ_v = 3.9 dB lifts
+2.4 × as many lines over 6 dB as the real audio shows and they stay up
+(44 % against 73 %), and it cannot produce the shaft-order dropouts: at
+k 1–2 half the real lines appear and disappear within a window, the renders
+1 %, because the measured σ_v there is 0 and σ_d is 0.94 dB. On Michael's
+the disappearance rate matches at k 3–24 and is too high at k ≥ 61, and the
+line-power spread of the dominant tracks is 2.2 × too large. The parity
+gate still passes on both rigs, with DREGON better than v2 (1.716 against
+1.820) and Michael's slightly worse (1.686 against 1.622); the spectral
+proxy is worse than v2 on both (2.43 against 2.03 dB, 2.37 against 1.28).
+Parity measures familiarity, not transfer: the transfer test is a retrained
+arm.
+
+**The DREGON width verdict.** The DREGON widths are physical: no fitted line
+is wider than 50 Hz (widest 44.7 Hz at rotor 2, k = 26), against the R5 v2
+fit's 16 kHz lines. On rendered audio the R4 −3 dB widths at k = 1, 2, 7, 8
+are 9.5, 17.6, 17.6, 17.6 Hz against 10.4, 23.4, 30.7, 30.2 Hz real
+(0.91 / 0.75 / 0.57 / 0.58 ×) and 10.3, 10.2, 6.8, 10.3 Hz for v2: v3 closes
+most of the gap at k = 2, 7, 8 and stays narrower than the real lines.
+
+**Open question for the next round: the prior scales.** The priors stayed at
+the committed defaults (`gamma_c` 3, `sigma_nu_scale` 0.6), and the fits sit
+far outside them. The timing fits already had σ_ν 5.4 (DREGON) and 4.3 rad/s
+(cruise), 9.1 × and 7.1 × the 0.6 rad/s HalfNormal scale, and max
+γ/(0.01k) of 157 / 72 / 75 (DREGON / cruise / standby) against a prior
+scale of 3 (52 / 24 / 25 ×). The campaign fits keep that: σ_ν 4.57 / 3.84 /
+0.35 rad/s (7.6 / 6.4 / 0.58 ×) and max γ/(0.01k) 172 / 76 / 68, with 31–42 %
+of the lines over 5 γ0 k, while the prior draws of check (a) never pass
+12 γ0 k. Either the bench-law scales are wrong for flight (label scatter,
+real flight decoherence), or the likelihood buys width that the wander
+should carry. Which one is not decided here. The alternation also never
+converged in 5 rounds (DREGON still moves 10 × the tolerance), and every
+latent family but a few fails the (e) sums, `d` by 3.7–4.5 × in every pool,
+which by §3.3a sends the wander measurement (block length, line set) back
+for revision, not the fit.
