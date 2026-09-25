@@ -98,6 +98,8 @@ One name per thing. Each name has one meaning on this page.
 - **Static part.** The mean of a latent over all windows and all blocks.
   It is one offset, the same in every window.
 - **Floor part.** The model with every line switched off.
+- **Expected periodogram.** The periodogram the model predicts on average.
+  One frame, mic mean, latents at zero.
 
 No latent is per mic. $u_j$ is per control point, not per mic. All eight
 mics share every latent. One fixed gain per mic divides the data before
@@ -455,7 +457,106 @@ r = 0.47 with the static part removed.
     `docs/explainers/noise-model-v3-wander.qmd` §2.5: one gain per mic,
     DREGON bands ≥ 500 Hz, residual 1.76 dB.
 
-# 6. What this means
+# 6. What a rig looks like
+
+Three figures show the rig itself. No data enters them.[^view]
+
+How to read one row:
+
+- All rotors run at one speed. Their lines share one frequency.
+- Grey: the floor part. On DREGON it holds the wind below 500 Hz.
+- Black dots: the floor control values.
+- Blue stems: the expected periodogram at $k f_r$, from the floor part up.
+- Thin blue line: the whole expected periodogram.
+- Red caps: $\pm\gamma$ of each line. The four rotors are overlaid.
+- The y axis is the same in all three figures.
+
+This view reads the model at one speed. Section 4 reads the pool. Their
+numbers differ.
+
+[^view]: The parameter view of `notebooks/noise_lab.ipynb`
+    ("Parameter view — comb over floor, per rotor"), lifted into
+    `notebooks/noise_lab.py` as `param_view` (the numbers) and
+    `draw_param_view` (one pane). One 2048-point frame at 16 kHz, so the
+    x axis ends at Nyquist, 8 kHz. Line over floor = stem height. The
+    orders counted are the ones at or below 8 kHz. Source: `figdata.json`
+    `rigs`.
+
+## The prior
+
+![**What you see:** four rigs drawn from the v3 prior, seeds 0–3, DREGON geometry, all rotors at 80 rev/s.](noise-model-v3-latent-runaway/fig_g_prior_rigs.png){#fig-g}
+
+The prior thinks a rig is a loud comb over a wild floor.[^prior]
+
+- Lines at $k = 1, 2$ stand 9.6–23.9 dB over the floor part.
+- 82 to 88 of 88 orders clear 3 dB.
+- The floor part at 1 kHz spans −50.7 to −15.4 dB.
+- No width reaches 7 Hz. The widest is 6.8 Hz.
+  <!-- source: figdata.json rigs.prior.s0..s3: over_k1_db 16.09, 11.75, 22.46, 23.90; over_k2_db 16.35, 17.95, 9.59, 22.08; n_orders_over 86, 85, 82, 88 of 88; floor_at_db["1000"] -50.71, -21.07, -15.41, -47.16; gamma_max_hz 5.91, 5.13, 4.97, 6.79 -->
+
+[^prior]: The laws of `scripts/noise_v3_checks.py prior`
+    (`prior_draw`), on the round-2 DREGON fit, `np.random.default_rng(seed)`:
+    $\gamma_{rk} \sim$ HalfNormal($3 \cdot 0.01\,k$ Hz),
+    $\sigma_\nu \sim$ HalfNormal(0.6 rad/s), line level
+    $\sim \mathcal N(\hat p_{rk}, 10\text{ dB})$ about the measured level,
+    floor $z \sim \mathcal N(0, I)$ at the measured $\sigma_B$ = 17.6 dB,
+    wind $\sim \mathcal N$(measured, its sd). Latents at zero.
+
+## The round-2 fits
+
+![**What you see:** the round-2 v3 fits, latents at zero. DREGON and Michael's cruise at 80 rev/s. Standby at 30.6 rev/s, the middle of its 20.9–40.3 rev/s span.](noise-model-v3-latent-runaway/fig_h_v3_rigs.png){#fig-h}
+
+The fits are weaker combs than the prior.
+
+- DREGON: $k = 1$ stands 5.4 dB over the floor part. $k = 2$: 6.2 dB.
+- DREGON: 73 of 88 orders clear 3 dB.
+- Michael's lines stand higher: $k = 1$ 15.2 dB (cruise), 38.7 dB
+  (standby).
+- The widest lines: 42.6 Hz (DREGON), 29.3 Hz (cruise), 86.4 Hz (standby).
+  <!-- source: figdata.json rigs.v3_r2.{dregon,cruise,standby}: over_k1_db 5.43, 15.16, 38.74; over_k2_db 6.22; n_orders_over 73/88; gamma_max_hz 42.59, 29.32, 86.39; rps 80, 80, 30.64; span_rev_s standby [20.93, 40.35] -->
+
+## The v2 fits
+
+![**What you see:** the v2 fits, same axes as @fig-h. Red bars that cross the whole axis are lines wider than the axis.](noise-model-v3-latent-runaway/fig_i_v2_rigs.png){#fig-i}
+
+v2 builds its floor out of lines.
+
+- Its widest lines: 16 059 Hz (DREGON), 125 578 Hz (cruise).
+- Look halfway between two lines near 1 kHz. v2 cruise sits
+  43.0 dB over its floor part there. v3 cruise sits 1.5 dB over.
+- The v2 cruise floor part is −74.5 dB at 1 kHz. The wide lines
+  fill the gap above it.
+- On DREGON the floor parts of v2 and v3 differ by 1.0–3.0 dB.
+  <!-- source: figdata.json rigs.v2.{dregon,cruise}.gamma_max_hz 16059.0, 125578.0; rigs.v2.cruise.between_over_floor_db 43.03, rigs.v3_r2.cruise 1.49 (both at 1000 Hz); rigs.v2.cruise.floor_at_db["1000"] -74.55; floor_at_db 100/1000/4000 Hz: v2 dregon -11.48, -33.73, -45.23; v3 dregon -10.45, -35.14, -42.20 -->
+
+```{python}
+#| label: tbl-rigs
+#| tbl-cap: "Every row of @fig-g, @fig-h and @fig-i. Line over floor = stem height. Orders > 3 dB counts the orders at or below 8 kHz. Floor = the floor part. Between lines = the expected periodogram over the floor part, halfway between the two lines around 1 kHz. Source: `figdata.json` `rigs`."
+rg = FD["rigs"]
+rig_label = {"dregon": "DREGON", "cruise": "cruise", "standby": "standby"}
+
+
+def hz(v):
+    return f"{v:,.0f}".replace(",", " ") if v >= 100 else f(v, 1)
+
+
+rows = [
+    "| figure | rig | rev/s | $k = 1$ dB | $k = 2$ dB | orders > 3 dB | max γ Hz | floor 100 Hz dB | floor 1 kHz dB | floor 4 kHz dB | between lines dB |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+]
+for fig, gen, name in (("G", "prior", "prior, seed {}"), ("H", "v3_r2", "v3 {}"), ("I", "v2", "v2 {}")):
+    for key, x in rg[gen].items():
+        lab = name.format(key[1:] if gen == "prior" else rig_label[key])
+        fl = x["floor_at_db"]
+        rows.append(
+            f"| {fig} | {lab} | {f(x['rps'], 1)} | {f(x['over_k1_db'], 1)} | {f(x['over_k2_db'], 1)} | "
+            f"{x['n_orders_over']}/{x['n_orders_shown']} | {hz(x['gamma_max_hz'])} | {f(fl['100'], 1)} | "
+            f"{f(fl['1000'], 1)} | {f(fl['4000'], 1)} | {f(x['between_over_floor_db'], 1)} |"
+        )
+Markdown("\n".join(rows))
+```
+
+# 7. What this means
 
 1. The latents do not measure wander.
 2. They absorb rig error: 88 % of the round-2 $u_j$ is one static shape.

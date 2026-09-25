@@ -20,9 +20,14 @@ Inputs:
   (the v2 fit both rounds were warm-started from);
 * the DREGON pool's five windows (``supports.support_set("dregon-floor")``),
   loaded, thinned and channel-normalised exactly as ``noise_v2_fit.py flight
-  --mode flight_v3`` built them.
+  --mode flight_v3`` built them;
+* Figs G-I: the parameter view of ``notebooks/noise_lab.py`` (``param_view`` /
+  ``draw_param_view``, the notebook's comb-over-floor cell) on four draws of
+  the round-2 DREGON fit's v3 prior (``noise_v3_checks.prior_draw``, seeds
+  0-3), the three round-2 fits and the v2 fits of ``noise_lab.FIT_PATHS``.
 
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py            # evaluate + plot
+    PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --rigs-only # Figs G-I only
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --plot-only
 
 Writes ``docs/explainers/noise-model-v3-latent-runaway/`` (``fig_*.png`` and
@@ -32,8 +37,10 @@ Writes ``docs/explainers/noise-model-v3-latent-runaway/`` (``fig_*.png`` and
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
+import sys
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -92,6 +99,20 @@ FLOOR_OFFS = (5, 10)
 #: Fig F bands: floor control points from this frequency up, inside the fit band
 F_MIN_HZ = 500.0
 F_MAX_HZ = 7900.0
+#: Figs G-I, the parameter view (``notebooks/noise_lab.py`` ``param_view``):
+#: every rotor at one speed, the carrier span midpoint when it is outside the
+#: fit's span; the prior draws' seeds; the floor readouts; the visibility bar
+RIG_RPS = 80.0
+PRIOR_SEEDS = (0, 1, 2, 3)
+RIG_FLOOR_AT_HZ = (100.0, 1000.0, 4000.0)
+RIG_OVER_DB = 3.0
+RIG_FMIN_HZ = 20.0
+V3_R2_FITS = {
+    "dregon": FITS["r2"],
+    "cruise": Path("results/noise_v3/fits_r2/michaels_fly125_cruise__flight_v3.json"),
+    "standby": Path("results/noise_v3/fits_r2/michaels_fly125_standby__flight_v3.json"),
+}
+RIG_NAMES = {"dregon": "DREGON", "cruise": "Michael's cruise", "standby": "Michael's standby"}
 
 C_R1, C_R2, C_V2, C_DATA = "#1f77b4", "#d62728", "#7f7f7f", "#000000"
 WIN_LABELS = ("free-flight", "hovering", "updown", "rectangle", "spinning")
@@ -609,6 +630,101 @@ def mic_residuals(
     )
 
 
+def _noise_lab() -> Any:
+    """``notebooks/noise_lab.py``, whose ``param_view`` / ``draw_param_view``
+    are the notebook's parameter-view cell."""
+    root = Path(__file__).resolve().parent.parent
+    if str(root / "notebooks") not in sys.path:
+        sys.path.insert(0, str(root / "notebooks"))
+    import noise_lab
+
+    return noise_lab
+
+
+def _sibling(name: str) -> Any:
+    """A sibling script as a module."""
+    path = Path(__file__).resolve().parent / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, str(path))
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def rig_span(fit: dict[str, Any]) -> tuple[float, float]:
+    """The fit's carrier span (``diagnostics.batch.carrier_{min,max}_rev_s``)."""
+    b = fit["diagnostics"]["batch"]
+    return float(b["carrier_min_rev_s"]), float(b["carrier_max_rev_s"])
+
+
+def rig_rps(fit: dict[str, Any]) -> float:
+    """:data:`RIG_RPS`, or the midpoint of the fit's carrier span when the span
+    does not hold it."""
+    lo, hi = rig_span(fit)
+    return RIG_RPS if lo <= RIG_RPS <= hi else 0.5 * (lo + hi)
+
+
+def rig_panel(nl: Any, fit: dict[str, Any], rps: float) -> dict[str, Any]:
+    """One row of Figs G-I: ``noise_lab.param_view`` at ``rps`` and its numbers
+    (line over floor at k = 1, 2; orders over :data:`RIG_OVER_DB`; max gamma
+    over the orders shown; the floor at :data:`RIG_FLOOR_AT_HZ`; the expected
+    periodogram over the floor halfway between the two lines around 1 kHz, i.e.
+    what the comb puts BETWEEN its lines)."""
+    v = nl.param_view(fit, rps)
+    f, floor, keep = v["f"], v["floor_db"], v["keep"]
+    over = v["line_db"] - np.interp(v["freq_hz"], f, floor)
+    mid_hz = (math.floor(1000.0 / rps) + 0.5) * rps
+    return dict(
+        span_rev_s=rig_span(fit),
+        view=v,
+        over_db=over,
+        over_k1_db=float(over[0]),
+        over_k2_db=float(over[1]),
+        n_orders_shown=int(keep.sum()),
+        n_orders_over=int((over[keep] > RIG_OVER_DB).sum()),
+        gamma_max_hz=float(v["gamma_hz"][:, keep].max()),
+        floor_at_db={f"{h:.0f}": float(np.interp(h, f, floor)) for h in RIG_FLOOR_AT_HZ},
+        between_hz=mid_hz,
+        between_over_floor_db=float(np.interp(mid_hz, f, v["full_db"] - floor)),
+    )
+
+
+def rig_views() -> dict[str, Any]:
+    """Figs G-I: the parameter view of four v3 prior draws, the round-2 v3 fits
+    and the v2 fits, every rotor at one speed, latents at zero."""
+    nl = _noise_lab()
+    checks = _sibling("noise_v3_checks")
+    fit_d = load(V3_R2_FITS["dregon"])
+    out: dict[str, Any] = dict(
+        prior_fit=str(V3_R2_FITS["dregon"]),
+        over_bar_db=RIG_OVER_DB,
+        floor_at_hz=RIG_FLOOR_AT_HZ,
+        fmin_hz=RIG_FMIN_HZ,
+        prior={},
+        v3_r2={},
+        v2={},
+    )
+    for seed in PRIOR_SEEDS:
+        draw, stats = checks.prior_draw(fit_d, np.random.default_rng(seed))
+        rps = rig_rps(fit_d)
+        out["prior"][f"s{seed}"] = dict(rps=rps, stats=stats, **rig_panel(nl, draw, rps))
+        print(f"prior draw seed {seed}: done", flush=True)
+    v2_paths = {
+        "dregon": nl.FIT_PATHS["dregon"]["single"],
+        "cruise": nl.FIT_PATHS["michaels"]["cruise"],
+        "standby": nl.FIT_PATHS["michaels"]["standby"],
+    }
+    for gen, paths in (("v3_r2", {k: str(p) for k, p in V3_R2_FITS.items()}), ("v2", v2_paths)):
+        for key, path in paths.items():
+            fit = load(path)
+            rps = rig_rps(fit)
+            out[gen][key] = dict(path=path, rps=rps, **rig_panel(nl, fit, rps))
+            print(f"{gen} {key}: {rps:.1f} rev/s", flush=True)
+    return out
+
+
 def compute() -> dict[str, Any]:
     import torch
 
@@ -711,6 +827,7 @@ def compute() -> dict[str, Any]:
         lf = line_floor_db(order_aligned(arr, car, df, E_ORDERS))
         prof[key] = {k: v.mean(axis=0) for k, v in lf.items()}  # rotor mean of dB
     out["profile"] = prof
+    out["rigs"] = rig_views()
     return out
 
 
@@ -1099,6 +1216,70 @@ def fig_f(d: dict[str, Any]) -> None:
     _save(fig, "fig_f_mics.png")
 
 
+def _rig_rows(d: dict[str, Any]) -> list[dict[str, Any]]:
+    rg = d["rigs"]
+    return [*rg["prior"].values(), *rg["v3_r2"].values(), *rg["v2"].values()]
+
+
+def rig_ylim(d: dict[str, Any]) -> tuple[float, float]:
+    """One y range for Figs G-I: every panel's floor and expected periodogram
+    between :data:`RIG_FMIN_HZ` and :data:`F_MAX_HZ` (the anti-alias roll-off
+    at Nyquist left out), to the 10 dB."""
+    lo, hi = np.inf, -np.inf
+    for row in _rig_rows(d):
+        v = row["view"]
+        f = np.asarray(v["f"], dtype=np.float64)
+        band = (f >= RIG_FMIN_HZ) & (f <= F_MAX_HZ)
+        lo = min(lo, float(np.nanmin(np.asarray(v["floor_db"], dtype=np.float64)[band])))
+        hi = max(hi, float(np.nanmax(np.asarray(v["full_db"], dtype=np.float64)[band])))
+    return 10.0 * math.floor(lo / 10.0 - 0.5), 10.0 * math.ceil(hi / 10.0 + 0.5)
+
+
+def fig_rigs(d: dict[str, Any], rows: list[tuple[dict[str, Any], str]], name: str) -> None:
+    """One row per rig: ``noise_lab.draw_param_view`` with every rotor's gamma
+    caps overlaid (every rotor runs at one speed, so the stems are the rig's)."""
+    nl = _noise_lab()
+    ylim = rig_ylim(d)
+    fig, axes = plt.subplots(len(rows), 1, figsize=(11, 2.55 * len(rows) + 0.9), sharex=True)
+    for ax, (row, label) in zip(np.atleast_1d(axes), rows, strict=True):
+        nl.draw_param_view(ax, row["view"], spectrum=True)
+        ax.set_xscale("log")
+        ax.set_xlim(RIG_FMIN_HZ, float(row["view"]["fmax"]))
+        ax.set_ylim(*ylim)
+        ax.set_ylabel("dB (fit units)")
+        ax.set_title(f"{label}, {row['rps']:.1f} rev/s", loc="left")
+        ax.set_title(
+            f"k=1 {row['over_k1_db']:+.1f} dB, k=2 {row['over_k2_db']:+.1f} dB, "
+            f"{row['n_orders_over']}/{row['n_orders_shown']} orders > {RIG_OVER_DB:g} dB",
+            loc="right",
+        )
+        ax.grid(alpha=0.3, which="both")
+    last = np.atleast_1d(axes)[-1]
+    ticks = [20, 50, 100, 200, 500, 1000, 2000, 4000, 8000]
+    last.set_xticks(ticks)
+    last.set_xticklabels([f"{t / 1000:g}k" if t >= 1000 else str(t) for t in ticks])
+    last.set_xlabel("frequency (Hz)")
+    handles, labels = np.atleast_1d(axes)[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.0))
+    fig.tight_layout(rect=(0, 0, 1, 1.0 - 0.75 / fig.get_figheight()))
+    _save(fig, name)
+
+
+def fig_g(d: dict[str, Any]) -> None:
+    rows = [(row, f"prior draw, seed {k[1:]}") for k, row in d["rigs"]["prior"].items()]
+    fig_rigs(d, rows, "fig_g_prior_rigs.png")
+
+
+def fig_h(d: dict[str, Any]) -> None:
+    rows = [(row, f"v3 round 2, {RIG_NAMES[k]}") for k, row in d["rigs"]["v3_r2"].items()]
+    fig_rigs(d, rows, "fig_h_v3_rigs.png")
+
+
+def fig_i(d: dict[str, Any]) -> None:
+    rows = [(row, f"v2, {RIG_NAMES[k]}") for k, row in d["rigs"]["v2"].items()]
+    fig_rigs(d, rows, "fig_i_v2_rigs.png")
+
+
 def plot(d: dict[str, Any]) -> None:
     fig_a(d)
     fig_b(d)
@@ -1106,18 +1287,31 @@ def plot(d: dict[str, Any]) -> None:
     fig_d(d)
     fig_e(d)
     fig_f(d)
+    fig_g(d)
+    fig_h(d)
+    fig_i(d)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--plot-only", action="store_true", help=f"redraw from {DATA}")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--plot-only", action="store_true", help=f"redraw from {DATA}")
+    mode.add_argument(
+        "--rigs-only",
+        action="store_true",
+        help=f"recompute Figs G-I (no pool build) into {DATA}, then redraw",
+    )
     args = ap.parse_args(argv)
     if args.plot_only:
         d = load(DATA)
     else:
-        d = _r(compute(), 4)
+        if args.rigs_only:
+            d = load(DATA)
+            d["rigs"] = _r(rig_views(), 4)
+        else:
+            d = _r(compute(), 4)
         OUT.mkdir(parents=True, exist_ok=True)
         DATA.write_text(json.dumps(d, ensure_ascii=False) + "\n")
         print(f"wrote {DATA}")

@@ -706,6 +706,121 @@ def floor_ctrl_db(
     return np.asarray(ctrl_hz, dtype=np.float64), np.asarray(db, dtype=np.float64)
 
 
+# ── the parameter view (comb over floor) ────────────────────────────────────
+
+#: The frame the parameter view's expected periodogram is one of: 2048-point
+#: Hann at :data:`SR` (7.8 Hz bins, to Nyquist 8 kHz), hop 512.
+PARAM_VIEW_N_FFT = 2048
+PARAM_VIEW_HOP = 512
+
+
+def _expected_const(fit: dict[str, Any], rps: float) -> np.ndarray:
+    """``(F,)`` mic-mean expected periodogram of ONE frame, every rotor at a
+    constant ``rps``, at the fit's own work rate, wander at its mean."""
+    from experiments.noise_model import render as RD
+
+    n_rotors = np.atleast_2d(np.asarray(fit["params"]["profile"]["profile_db"])).shape[0]
+    m = RD.expected_periodogram(
+        fit,
+        np.full((n_rotors, PARAM_VIEW_N_FFT), float(rps)),
+        n_fft=PARAM_VIEW_N_FFT,
+        hop=PARAM_VIEW_HOP,
+        sr=SR,
+        n_mics=int(fit.get("n_mics") or 8),
+    )
+    return m[:, 0, :].mean(axis=0)
+
+
+def param_view(fit: dict[str, Any], rps: float = 80.0, *, fmax: float = SR / 2) -> dict[str, Any]:
+    """What the parameter view draws of one v2/v3 fit, every rotor at ``rps``.
+
+    ``full_db``: the model's EXPECTED periodogram (mic mean, one frame, the
+    fit's own work rate; a v3 fit's wander at its mean, latents zero);
+    ``floor_db``: the same with the comb switched off (``profile_db`` -> -300
+    dB), so a v3 fit keeps DREGON's per-mic wind term; ``line_db``: ``full_db``
+    at each ``k rps`` (every rotor's line ``k`` lands on the same bin, so the
+    stem is the RIG's, not one rotor's); ``gamma_hz`` ``(R, K)``: the half
+    widths; ``ctrl_hz``/``ctrl_db``: the floor's control values
+    (:func:`floor_ctrl_db` at ``rps``, mic mean); ``keep``: the orders at or
+    below ``fmax``.
+    """
+    from data_processing.noise_model import params as MDP
+
+    p = fit["params"]
+    gamma = np.atleast_2d(np.asarray(MDP.gamma_from_params(p), dtype=np.float64))
+    full = 10.0 * np.log10(_expected_const(fit, rps))
+    off = copy.deepcopy(fit)
+    off["params"]["profile"]["profile_db"] = (
+        np.asarray(p["profile"]["profile_db"], dtype=np.float64) * 0.0 - 300.0
+    ).tolist()
+    floor = 10.0 * np.log10(_expected_const(off, rps))
+    f = np.fft.rfftfreq(PARAM_VIEW_N_FFT, 1.0 / SR)
+    ctrl_hz, ctrl_db = floor_ctrl_db(fit, rps=rps)
+    k = np.arange(1, gamma.shape[1] + 1)
+    freq = k * float(rps)
+    return dict(
+        rps=float(rps),
+        fmax=float(fmax),
+        v3="floor_shape_sd_db" in p["floor"],
+        wind=bool(p.get("wind")),
+        f=f,
+        full_db=full,
+        floor_db=floor,
+        ctrl_hz=ctrl_hz,
+        ctrl_db=ctrl_db,
+        gamma_hz=gamma,
+        k=k,
+        freq_hz=freq,
+        line_db=np.interp(freq, f, full),
+        keep=freq <= float(fmax),
+    )
+
+
+def draw_param_view(
+    ax: Any, view: dict[str, Any], rotors: Any = None, *, spectrum: bool = False
+) -> None:
+    """One pane of the parameter view: grey = the floor (comb off), black dots
+    = its control values, blue stems = the expected periodogram at ``k f``
+    (from the floor up), red caps = ``±gamma_rk`` of each rotor in ``rotors``
+    (``None``: all, overlaid); ``spectrum`` adds the whole expected periodogram
+    as a thin line.  ``view`` is :func:`param_view`'s (or the same keys read
+    back from JSON)."""
+    f = np.asarray(view["f"], dtype=np.float64)
+    floor = np.asarray(view["floor_db"], dtype=np.float64)
+    ctrl_hz = np.asarray(view["ctrl_hz"], dtype=np.float64)
+    ctrl_db = np.asarray(view["ctrl_db"], dtype=np.float64)
+    gamma = np.atleast_2d(np.asarray(view["gamma_hz"], dtype=np.float64))
+    freq = np.asarray(view["freq_hz"], dtype=np.float64)
+    lvl = np.asarray(view["line_db"], dtype=np.float64)
+    keep = np.asarray(view["keep"], dtype=bool)
+    fmax = float(view["fmax"])
+    rows = range(gamma.shape[0]) if rotors is None else np.atleast_1d(rotors)
+    ck = ctrl_hz <= min(fmax, 7900.0)
+    if spectrum:
+        ax.plot(f, view["full_db"], color="C0", lw=0.6, alpha=0.6, label="expected periodogram")
+    floor_label = "floor (comb off)" + (" + wind" if view["v3"] and view["wind"] else "")
+    ax.plot(f, floor, color="0.4", lw=1.5, label=floor_label)
+    ctrl_label = "floor ctrl mu + sigma_B (L z)" if view["v3"] else "floor ctrl mean + shape + tilt"
+    ax.plot(ctrl_hz[ck], ctrl_db[ck], "o", color="k", ms=3.5, label=ctrl_label)
+    ax.vlines(
+        freq[keep],
+        np.interp(freq[keep], f, floor),
+        lvl[keep],
+        color="C0",
+        lw=1.2,
+        label="expected periodogram at k*f",
+    )
+    for i, r in enumerate(rows):
+        ax.hlines(
+            lvl[keep],
+            freq[keep] - gamma[r][keep],
+            freq[keep] + gamma[r][keep],
+            color="C3",
+            lw=2.5,
+            label="±gamma_rk" if i == 0 else None,
+        )
+
+
 # ── the trajectory ──────────────────────────────────────────────────────────
 
 
@@ -2572,6 +2687,7 @@ __all__ = [
     "V3Fit",
     "describe",
     "describe_traj",
+    "draw_param_view",
     "expected_vs_realised",
     "floor_ctrl_db",
     "legacy_fit_names",
@@ -2579,6 +2695,7 @@ __all__ = [
     "load_rig",
     "load_rig_v3",
     "model_vs_realised",
+    "param_view",
     "player",
     "players",
     "real_recordings",
