@@ -1082,12 +1082,19 @@ def audit_fits(specs: list[str], out_dir: Path) -> Path:
     rows: dict[str, Any] = {}
     curves: dict[str, Any] = {}
     for rig in sorted({k.removesuffix("_standby") for k in fits}):
+        standby = fits.get(f"{rig}_standby")
+        names = [p.name for p in patterns if p.rig == rig]
+        payloads: dict[str, Any]
+        if rig in fits:
+            payloads = {"cruise": fits[rig], "standby": standby}
+        else:
+            # a standby fit alone: its own regime's patterns only (the cruise
+            # slot is never read for them; its shape row is dropped)
+            payloads = {"cruise": standby, "standby": standby}
+            names = [p.name for p in patterns if p.rig == rig and p.regime == "standby"]
+        row, cur = TN.entry_row(payloads, probe, names, detail=True)
         if rig not in fits:
-            raise SystemExit(f"--fit {rig}_standby=... needs --fit {rig}=... (the cruise payload)")
-        payloads = {"cruise": fits[rig], "standby": fits.get(f"{rig}_standby")}
-        row, cur = TN.entry_row(
-            payloads, probe, [p.name for p in patterns if p.rig == rig], detail=True
-        )
+            row.pop("shape", None)
         rows[rig] = _round(row, 4)
         curves[rig] = {k: [round(float(x), 3) for x in v] for k, v in cur.items()}
     payload = {
