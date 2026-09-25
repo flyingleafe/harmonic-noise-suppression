@@ -18,6 +18,8 @@ import pyro
 import pyro.distributions as dist
 import pytest
 import torch
+from pyro.infer import Trace_ELBO
+from pyro.infer.autoguide import AutoDelta, init_to_value
 
 from data_processing.noise_model.floor import floor_geometry
 from experiments.noise_model import fit as FT
@@ -374,10 +376,12 @@ def _two_window_batch(par: SP.V2Params, *, k_cap: int, n_mics: int) -> MD.Suppor
     return MD.flight_batch(name="blocks", members=members, sr=SR, n_fft=n_fft, hop=hop, k_cap=k_cap)
 
 
-def test_block_forward_model_at_zero_latents_is_flight_model_bit_for_bit():
+def test_block_forward_model_at_zero_latents_is_flight_model():
     """v3's per-block forward model is v2's ``flight_model`` with two per-block
-    multipliers: at zero latents it must BE ``flight_model``, bit for bit, and
-    a latent must move only its own block, by exactly its dB."""
+    multipliers: at zero latents it must BE ``flight_model`` (to rounding: the
+    per-block floor curves go through one batched FFT), a latent must move
+    only its own block, by exactly its dB, and evaluating the frames in chunks
+    must change nothing."""
     k_cap, n_mics = 3, 2
     par = _params(
         k_cap=k_cap,
@@ -410,7 +414,7 @@ def test_block_forward_model_at_zero_latents_is_flight_model_bit_for_bit():
     with torch.no_grad():
         want = SP.flight_model(grid, par, rate_work=batch.rate_work, k_max=k_cap)
         got = MD.forward_v3(batch, par, zero)
-    assert torch.equal(got, want)
+    np.testing.assert_allclose(got.numpy(), want.numpy(), rtol=1e-13, atol=0.0)
 
     # +3 dB on rotor 0 in block 1 of window 0: that block's line power x 10^0.3,
     # every other frame untouched
@@ -426,13 +430,82 @@ def test_block_forward_model_at_zero_latents_is_flight_model_bit_for_bit():
     assert batch.frame_window is not None and batch.frame_block is not None
     hit = (batch.frame_window == 0) & (batch.frame_block == 1)
     assert hit.any()
-    assert torch.equal(got[:, ~hit], want[:, ~hit])
+    np.testing.assert_allclose(got[:, ~hit].numpy(), want[:, ~hit].numpy(), rtol=1e-13, atol=0.0)
     lines_before = (want - floor)[:, hit]
     lines_after = (got - floor)[:, hit]
     tol = 1e-12 * float(floor[:, hit].max())
     np.testing.assert_allclose(
         lines_after.numpy(), 10.0**0.3 * lines_before.numpy(), rtol=1e-9, atol=tol
     )
+
+    # the same batch evaluated 5 frames at a time (chunks straddle the windows)
+    chunked = dataclasses.replace(batch, latents=moved, chunk_frames=5)
+    assert len(MD.frame_chunks(chunked)) > 2
+    with torch.no_grad():
+        np.testing.assert_allclose(
+            MD.forward(chunked, par).numpy(), got.numpy(), rtol=1e-13, atol=0.0
+        )
+
+
+def test_the_chunked_rig_objective_is_the_elbo_value_and_gradient():
+    """The rig step's frame-chunked objective (the Whittle term accumulated
+    chunk by chunk, each chunk's graph released) must be the ``Trace_ELBO``
+    loss of the whole batch — value AND gradient in every guide parameter —
+    with the latents on the batch and chunks straddling the windows."""
+    k_cap, n_mics = 3, 2
+    par = _params(
+        k_cap=k_cap,
+        n_mics=n_mics,
+        profile_db=np.array([-18.0, -21.0, -25.0]),
+        shape_z=np.random.default_rng(4).standard_normal(NC),
+    )
+    wander = MD.Wander(
+        sigma_d_db=3.0,
+        tau_d_s=2.0,
+        sigma_v_db=2.0,
+        tau_v_s=2.0,
+        sigma_u_db=1.0,
+        tau_u_s=2.0,
+        block_s=0.05,
+        sigma_uj_db=1.0,
+        tau_uj_s=2.0,
+    )
+    priors = MD.PriorsV3(wander=wander, wind=True)
+    batch = MD.with_blocks(_two_window_batch(par, k_cap=k_cap, n_mics=n_mics), wander.block_s)
+    start = FT.seeds(batch, mode=MD.V3_MODE, priors=priors)
+    rng = np.random.default_rng(11)
+    latents = {}
+    for w, nb in enumerate(batch.window_blocks):
+        zero = MD.zero_latents(wander, n_rotors=1, k_max=k_cap, n_blocks=nb)
+        latents[w] = MD.WindowLatents(
+            **{n: _t(rng.normal(0.0, 2.0, x.shape)) for n, x in zero.tracks().items()}
+        )
+    whole = dataclasses.replace(batch, measured=start.measured, latents=latents)
+    init = {k: v * 1.1 if k in ("sigma_nu", "gamma_hz") else v for k, v in start.init.items()}
+
+    def model() -> Any:
+        return MD.support_model(whole, mode=MD.V3_MODE, priors=priors)
+
+    pyro.clear_param_store()
+    guide = AutoDelta(model, init_loc_fn=init_to_value(values=init))
+    loss = Trace_ELBO().differentiable_loss(model, guide)
+    loss.backward()
+    params = dict(guide.named_parameters())
+    want: dict[str, torch.Tensor] = {}
+    for k, p in params.items():
+        assert p.grad is not None, k
+        want[k] = p.grad.clone()
+        p.grad = None
+
+    chunked = dataclasses.replace(whole, chunk_frames=5)
+    assert len(MD.frame_chunks(chunked)) > 2
+    got = FT.chunked_objective(chunked, guide, mode=MD.V3_MODE, priors=priors, grad=True)
+    np.testing.assert_allclose(float(got), float(loss), rtol=1e-12)
+    for k, p in params.items():
+        assert p.grad is not None, k
+        np.testing.assert_allclose(
+            p.grad.numpy(), want[k].numpy(), rtol=1e-8, atol=1e-10 * float(want[k].abs().max())
+        )
 
 
 def test_the_latent_steps_cached_forward_is_forward_v3_at_any_latents():

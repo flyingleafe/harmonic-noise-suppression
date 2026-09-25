@@ -72,6 +72,7 @@ block-wander latents with fixed OU priors.
 
 from __future__ import annotations
 
+import contextlib
 import math
 from dataclasses import dataclass, field, fields, replace
 from typing import Any
@@ -112,13 +113,13 @@ __all__ = [
     "WindowLatents",
     "batch_slice",
     "bench_batch",
-    "block_params",
     "detach_params",
     "dynamics_pin",
     "flight_batch",
     "flight_lam",
     "forward",
     "forward_v3",
+    "frame_chunks",
     "free_blocks",
     "frozen_from_params",
     "gamma_from_params",
@@ -126,6 +127,7 @@ __all__ = [
     "latent_cache",
     "latent_model",
     "log_prior",
+    "log_prior_tensor",
     "objective_breakdown",
     "ou_log_density",
     "ou_prior_nats",
@@ -618,6 +620,11 @@ class SupportBatch:
     #: CONSTANTS of a rig step. ``None`` means all zero, i.e. plain
     #: :func:`.spectrum.flight_model`.
     latents: dict[int, WindowLatents] | None = None
+    #: FLIGHT only: frames per forward pass (``None``: every frame at once).
+    #: :func:`forward` concatenates the chunks' expectations and the fit's
+    #: gradient ACCUMULATES over them (:func:`frame_chunks`), so every frame
+    #: counts in every evaluation while the kernel's memory is one chunk's.
+    chunk_frames: int | None = None
 
     @property
     def n_cells(self) -> int:
@@ -746,6 +753,7 @@ def flight_batch(
     apply_transfer: bool = True,
     sr_work: int = SP.SAMPLE_RATE_WORK,
     channel_gains: ChannelGains | None = None,
+    chunk_frames: int | None = None,
 ) -> SupportBatch:
     """Pool flight windows into one objective.
 
@@ -760,7 +768,8 @@ def flight_batch(
     ``channel_gains`` (v3) NORMALISES THE DATA: mic ``m``'s periodogram is
     divided by ``10^{g_m / 10}`` before anything reads it, so the model needs
     no microphone parameter (explainer §2.5). The gains applied and their
-    source are recorded in ``diagnostics["channel_gains"]``.
+    source are recorded in ``diagnostics["channel_gains"]``. ``chunk_frames``
+    is :attr:`SupportBatch.chunk_frames`.
     """
     grid = SP.flight_grid(
         sr=sr, n_fft=n_fft, hop=hop, sr_work=sr_work, device=device, apply_transfer=apply_transfer
@@ -828,6 +837,7 @@ def flight_batch(
         ),
         frame_window=np.concatenate(frame_window),
         frame_time_s=np.concatenate(frame_time),
+        chunk_frames=chunk_frames,
     )
 
 
@@ -858,6 +868,35 @@ def _frame_fields(batch: SupportBatch, idx: np.ndarray) -> dict[str, Any]:
         key: (None if getattr(batch, key) is None else getattr(batch, key)[idx])
         for key in ("frame_window", "frame_time_s", "frame_block")
     }
+
+
+def frame_chunks(batch: SupportBatch) -> list[SupportBatch]:
+    """``batch`` cut into consecutive runs of ``batch.chunk_frames`` frames.
+
+    The pieces of a SUM, not minibatches: the exposure weights are NOT
+    rescaled, so the chunks' Whittle terms add up to the batch's exactly and a
+    gradient accumulated over them is the batch's gradient. ``[batch]`` when
+    the batch is not chunked (or is a bench batch).
+    """
+    n = int(batch.power.shape[1])
+    step = batch.chunk_frames
+    if batch.rate_work is None or step is None or int(step) >= n:
+        return [batch]
+    step = max(1, int(step))
+    out: list[SupportBatch] = []
+    for i0 in range(0, n, step):
+        i1 = min(i0 + step, n)
+        out.append(
+            replace(
+                batch,
+                power=batch.power[:, i0:i1],
+                weights=batch.weights[i0:i1],
+                rate_work=batch.rate_work[:, i0:i1],
+                **_frame_fields(batch, np.arange(i0, i1)),
+                chunk_frames=None,
+            )
+        )
+    return out
 
 
 def with_blocks(batch: SupportBatch, block_s: float) -> SupportBatch:
@@ -1022,7 +1061,35 @@ def sample_params(
     the three speed laws on a pool that barely changes speed
     (:func:`span_pinned_sites`). ``pin`` does the same for a named dynamics
     scalar of an otherwise free block.
+
+    Every tensor it creates lives on the batch's device (the prior's
+    parameters, the constants, the zeros), so a CUDA objective never mixes
+    devices.
     """
+    dev = batch.power.device
+    with contextlib.nullcontext() if dev.type == "cpu" else torch.device(dev):
+        return _sample_params(
+            batch,
+            mode=mode,
+            priors=priors,
+            frozen=frozen,
+            pin=pin,
+            low_orders=low_orders,
+            site=site,
+        )
+
+
+def _sample_params(
+    batch: SupportBatch,
+    *,
+    mode: str,
+    priors: Priors,
+    frozen: dict[str, Any] | None,
+    pin: dict[str, Any] | None,
+    low_orders: int | None,
+    site: SiteFn,
+) -> V2Params:
+    """:func:`sample_params` on the current default device."""
     if mode == V3_MODE:
         return _sample_params_v3(batch, priors=priors, frozen=frozen, pin=pin, site=site)
     free = free_blocks(mode)
@@ -1263,6 +1330,37 @@ def _sample_params_v3(
     )
 
 
+def log_prior_tensor(
+    batch: SupportBatch,
+    *,
+    mode: str,
+    values: dict[str, Tensor],
+    priors: Priors = PRIORS,
+    pin: dict[str, Any] | None = None,
+    frozen: dict[str, Any] | None = None,
+    low_orders: int | None = None,
+) -> Tensor:
+    """``sum log p(site)`` of the rig sites at ``values``, inside the graph.
+
+    The SAME construction the model samples through, with each draw replaced
+    by a lookup that also accumulates the site's log density: the prior half
+    of the MAP objective, and — as :func:`log_prior` — what the v3 record adds
+    to the Whittle term to report a total objective."""
+    acc: list[Tensor] = []
+
+    def lookup(name: str, d: Any) -> Tensor:
+        v = torch.as_tensor(values[name], dtype=torch.float64)
+        acc.append(d.log_prob(v).sum())
+        return v
+
+    sample_params(
+        batch, mode=mode, priors=priors, frozen=frozen, pin=pin, low_orders=low_orders, site=lookup
+    )
+    if not acc:
+        return torch.zeros((), dtype=torch.float64, device=batch.power.device)
+    return torch.stack(acc).sum()
+
+
 def log_prior(
     batch: SupportBatch,
     *,
@@ -1271,20 +1369,9 @@ def log_prior(
     priors: Priors = PRIORS,
     pin: dict[str, Any] | None = None,
 ) -> float:
-    """``sum log p(site)`` of the rig sites at ``values`` (a guide's medians).
-
-    The SAME construction the model samples through, with each draw replaced
-    by a lookup that also accumulates the site's log density — what the v3
-    record adds to the Whittle term to report a total objective."""
-    acc: list[Tensor] = []
-
-    def lookup(name: str, d: Any) -> Tensor:
-        v = torch.as_tensor(values[name], dtype=torch.float64)
-        acc.append(d.log_prob(v).sum())
-        return v
-
-    sample_params(batch, mode=mode, priors=priors, pin=pin, site=lookup)
-    return float(sum(float(a) for a in acc))
+    """:func:`log_prior_tensor` as a number (a guide's medians in, nats out)."""
+    with torch.no_grad():
+        return float(log_prior_tensor(batch, mode=mode, values=values, priors=priors, pin=pin))
 
 
 def detach_params(params: V2Params) -> V2Params:
@@ -1393,15 +1480,16 @@ class OUTracks(dist.TorchDistribution):
 
     def sample(self, sample_shape: Any = torch.Size()) -> Tensor:
         shape = torch.Size(sample_shape) + self.batch_shape + self.event_shape
-        e = torch.randn(shape, dtype=torch.float64)
-        s = torch.as_tensor(self.sigma, dtype=torch.float64)
-        r = torch.as_tensor(self.rho, dtype=torch.float64)
+        dev = self.n_blocks.device
+        e = torch.randn(shape, dtype=torch.float64, device=dev)
+        s = torch.as_tensor(self.sigma, dtype=torch.float64, device=dev)
+        r = torch.as_tensor(self.rho, dtype=torch.float64, device=dev)
         out = torch.empty_like(e)
         out[..., 0] = s * e[..., 0]
         innov = torch.sqrt(1.0 - r**2) * s
         for b in range(1, self.b_max):
             out[..., b] = r * out[..., b - 1] + innov * e[..., b]
-        live = torch.arange(self.b_max) < self._n(out)[..., None]
+        live = torch.arange(self.b_max, device=dev) < self._n(out)[..., None]
         return out * live
 
     def log_prob(self, value: Tensor) -> Tensor:
@@ -1450,12 +1538,14 @@ def unstack_latents(
     }
 
 
-def zero_latents(wander: Wander, *, n_rotors: int, k_max: int, n_blocks: int) -> WindowLatents:
+def zero_latents(
+    wander: Wander, *, n_rotors: int, k_max: int, n_blocks: int, device: Any = "cpu"
+) -> WindowLatents:
     """All-zero latents of one window, on the tracks ``wander`` carries."""
     return WindowLatents(
         **{
             name: (
-                torch.zeros(shape + (n_blocks,), dtype=torch.float64)
+                torch.zeros(shape + (n_blocks,), dtype=torch.float64, device=device)
                 if wander.active(name)
                 else None
             )
@@ -1464,37 +1554,29 @@ def zero_latents(wander: Wander, *, n_rotors: int, k_max: int, n_blocks: int) ->
     )
 
 
-def block_params(params: V2Params, latents: WindowLatents | None, block: int) -> V2Params:
-    """The rig with ONE block's latents applied — the explainer's §3.2.
-
-    Line ``(r, k)``'s power is multiplied by ``10^{(d_r + v_rk)/10}`` (added to
-    ``profile_db``) and the floor's by ``10^{(u + sum_j B_j(f) u_j)/10}`` (``u``
-    added to its level, ``u_j`` to its control values). Nothing else moves;
-    with every latent at zero this IS ``params`` to the last bit.
-    """
-    if latents is None:
-        return params
-    b = int(block)
-    line: Tensor | None = None
-    if latents.d is not None:
-        line = latents.d[:, b][:, None]
-    if latents.v is not None:
-        line = latents.v[:, :, b] if line is None else line + latents.v[:, :, b]
-    profile = params.profile_db
-    if line is not None:
-        profile = torch.as_tensor(profile, dtype=torch.float64) + line
-    floor = params.floor
-    if latents.u is not None or latents.uj is not None:
-        floor = replace(
-            floor,
-            mean_db=(
-                torch.as_tensor(floor.mean_db, dtype=torch.float64) + latents.u[b]
-                if latents.u is not None
-                else floor.mean_db
-            ),
-            ctrl_offset_db=latents.uj[:, b] if latents.uj is not None else floor.ctrl_offset_db,
-        )
-    return replace(params, profile_db=profile, floor=floor)
+def _frame_tracks(
+    batch: SupportBatch, latents: dict[int, WindowLatents], name: str
+) -> Tensor | None:
+    """``(..., N)``: latent ``name``'s value at every frame of ``batch`` — its
+    window's track at its block, zero for a window with no track."""
+    assert batch.frame_window is not None and batch.frame_block is not None
+    xs = {w: x for w, lat in latents.items() if (x := lat.tracks().get(name)) is not None}
+    if not xs:
+        return None
+    like = next(iter(xs.values()))
+    b_max = max(int(nb) for nb in batch.window_blocks)
+    n_win = len(batch.window_blocks)
+    padded = [
+        torch.nn.functional.pad(xs[w], (0, b_max - int(xs[w].shape[-1])))
+        if w in xs
+        else like.new_zeros(tuple(like.shape[:-1]) + (b_max,))
+        for w in range(n_win)
+    ]
+    flat = torch.stack(padded, dim=-2).reshape(tuple(like.shape[:-1]) + (n_win * b_max,))
+    fw = np.asarray(batch.frame_window, dtype=np.int64)
+    fb = np.asarray(batch.frame_block, dtype=np.int64)
+    idx = torch.as_tensor(fw * b_max + fb, dtype=torch.int64, device=like.device)
+    return flat.index_select(-1, idx)
 
 
 def forward_v3(
@@ -1502,39 +1584,47 @@ def forward_v3(
 ) -> Tensor:
     """``(M, N, F)`` expected periodogram with per-block latents (§3.2).
 
-    The frames are grouped by (window, block) and each group goes through
-    :func:`.spectrum.flight_model` UNCHANGED with :func:`block_params` —
-    the v2 forward model with two per-block multipliers, the line-shape
-    kernel untouched. A window with no entry in ``latents`` is at zero.
+    ONE :func:`.spectrum.flight_model` over the batch's frames, each frame
+    moved by its window's latents at its block: line ``(r, k)``'s power by
+    ``10^{(d_r + v_rk)/10}`` (``line_db``, added to ``profile_db``) and the
+    floor's dB curve by ``u + S u_j`` (``frame_floor_db``, one curve per
+    (window, block) present). The line-shape kernel is untouched and nothing
+    else moves; at zero latents this IS ``flight_model`` to rounding (the
+    per-block floor curves share one batched FFT). A window with no entry in
+    ``latents`` is at zero.
     """
     assert isinstance(batch.grid, FlightGrid) and batch.rate_work is not None
     if batch.frame_window is None or batch.frame_block is None:
         raise ValueError(f"batch {batch.name!r} has no block assignment (model.with_blocks)")
-    fw = np.asarray(batch.frame_window, dtype=np.int64)
-    fb = np.asarray(batch.frame_block, dtype=np.int64)
-    key = fw * (int(fb.max()) + 1) + fb
-    order = np.argsort(key, kind="stable")
-    cuts = np.flatnonzero(np.diff(key[order])) + 1
-    dev = batch.rate_work.device
-    pieces: list[Tensor] = []
-    for seg in np.split(order, cuts):
-        p_g = block_params(params, latents.get(int(fw[seg[0]])), int(fb[seg[0]]))
-        idx = torch.as_tensor(seg, dtype=torch.int64, device=dev)
-        pieces.append(
-            SP.flight_model(
-                batch.grid,
-                p_g,
-                rate_work=batch.rate_work.index_select(1, idx),
-                k_max=batch.k_max,
-                **kw,
-            )
-        )
-    out = torch.cat(pieces, dim=1)
-    if np.array_equal(order, np.arange(order.size)):
-        return out
-    inv = np.empty_like(order)
-    inv[order] = np.arange(order.size)
-    return out.index_select(1, torch.as_tensor(inv, dtype=torch.int64, device=dev))
+    d, v, u, uj = (_frame_tracks(batch, latents, n) for n in ("d", "v", "u", "uj"))
+    line_db: Tensor | None = None
+    if d is not None:
+        line_db = d[:, None, :]
+    if v is not None:
+        line_db = v if line_db is None else line_db + v
+    frame_floor_db: tuple[Tensor, Tensor] | None = None
+    if u is not None or uj is not None:
+        key = np.asarray(batch.frame_window, dtype=np.int64) * (
+            max(int(nb) for nb in batch.window_blocks) + 1
+        ) + np.asarray(batch.frame_block, dtype=np.int64)
+        first, group = np.unique(key, return_index=True, return_inverse=True)[1:]
+        dev = batch.rate_work.device
+        pick = torch.as_tensor(first, dtype=torch.int64, device=dev)
+        db = batch.grid.floor.log_psd_db(params.floor)[None, :]
+        if u is not None:
+            db = db + u.index_select(0, pick)[:, None]
+        if uj is not None:
+            db = db + uj.index_select(1, pick).T @ batch.grid.floor.shape_psd.T
+        frame_floor_db = (db, torch.as_tensor(group, dtype=torch.int64, device=dev))
+    return SP.flight_model(
+        batch.grid,
+        params,
+        rate_work=batch.rate_work,
+        k_max=batch.k_max,
+        line_db=line_db,
+        frame_floor_db=frame_floor_db,
+        **kw,
+    )
 
 
 @dataclass
@@ -1542,7 +1632,7 @@ class LatentCache:
     """Step (ii)'s forward model with the rig FIXED, precomputed once per rig.
 
     With the rig a constant a block latent moves two multipliers and nothing
-    else (:func:`block_params`): line ``(r, k)`` of a frame in block ``b`` is
+    else (:func:`forward_v3`): line ``(r, k)`` of a frame in block ``b`` is
     ``10^{(d_r(b) + v_rk(b))/10}`` times its rig spectrum and the floor's dB
     curve moves by ``u(b) + S u_j(b)``. ``flight`` holds the rig's per-line
     spectra and floor atoms (:func:`.spectrum.flight_cache`), so an evaluation
@@ -1600,13 +1690,11 @@ class LatentCache:
 
 
 def latent_cache(
-    batch: SupportBatch,
-    params: V2Params,
-    *,
-    chunk_frames: int | None = None,
-    line_dtype: torch.dtype = torch.float64,
+    batch: SupportBatch, params: V2Params, *, line_dtype: torch.dtype = torch.float64
 ) -> LatentCache:
-    """The :class:`LatentCache` of the rig ``params`` on ``batch``'s frames."""
+    """The :class:`LatentCache` of the rig ``params`` on ``batch``'s frames,
+    built ``batch.chunk_frames`` frames at a time; its line store in
+    ``line_dtype``."""
     assert isinstance(batch.grid, FlightGrid) and batch.rate_work is not None
     if batch.frame_window is None or batch.frame_block is None:
         raise ValueError(f"batch {batch.name!r} has no block assignment (model.with_blocks)")
@@ -1623,7 +1711,7 @@ def latent_cache(
         params,
         rate_work=batch.rate_work,
         k_max=batch.k_max,
-        chunk_frames=chunk_frames,
+        chunk_frames=batch.chunk_frames,
         line_dtype=line_dtype,
     )
     return LatentCache(
@@ -1645,7 +1733,7 @@ def latent_model(batch: SupportBatch, cache: LatentCache, *, wander: Wander) -> 
     n_win = len(cache.windows)
     n_blocks = torch.as_tensor(cache.n_blocks, dtype=torch.int64, device=batch.power.device)
     out: dict[str, Tensor] = {}
-    with pyro.plate("windows", n_win):
+    with pyro.plate("windows", n_win, device=str(batch.power.device)):
         for name, shape in _latent_shapes(batch.n_rotors, batch.k_max).items():
             if wander.active(name):
                 out[f"wander_{name}"] = pyro.sample(
@@ -1670,12 +1758,21 @@ def ou_prior_nats(latents: dict[int, WindowLatents], wander: Wander) -> float:
 
 def forward(batch: SupportBatch, params: V2Params, **kw: Any) -> Tensor:
     """``(M, N, F)`` expected periodogram of the batch under ``params`` (and,
-    for v3, the batch's own block latents held as constants)."""
+    for v3, the batch's own block latents held as constants).
+
+    A batch with ``chunk_frames`` is evaluated chunk by chunk and the pieces
+    concatenated: the kernel's memory is one chunk's, which is what a
+    no-gradient pass (a probe, the final record) needs. A GRADIENT through
+    every chunk at once would keep every chunk's graph alive; the fit
+    accumulates it chunk by chunk instead (:func:`frame_chunks`)."""
     if batch.mode == "bench":
         assert isinstance(batch.grid, BenchGrid)
         return SP.bench_model(
             batch.grid, params, k_max=batch.k_max, groups=batch.bench_order_groups, **kw
         )
+    chunks = frame_chunks(batch)
+    if len(chunks) > 1:
+        return torch.cat([forward(c, params, **kw) for c in chunks], dim=1)
     assert isinstance(batch.grid, FlightGrid) and batch.rate_work is not None
     if batch.latents is not None:
         return forward_v3(batch, params, batch.latents, **kw)

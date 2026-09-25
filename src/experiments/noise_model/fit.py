@@ -83,6 +83,7 @@ __all__ = [
     "OptimSpecV3",
     "ProfileInit",
     "Seeds",
+    "chunked_objective",
     "fit_support",
     "fit_v3",
     "fit_latents",
@@ -212,8 +213,9 @@ class OptimSpecV3:
     Round 0 is step (i): the rig on the pool with every latent at zero, under
     ``rig`` — the v2 schedule, restarts and jitter included. Each of up to
     ``rounds`` rounds is step (ii), every window's latents alone with the rig
-    fixed (``latent_lbfgs_iters`` of strong-Wolfe L-BFGS per window, from the
-    previous round's tracks), then step (iii), the rig again with the latents
+    fixed (``latent_lbfgs_iters`` of strong-Wolfe L-BFGS on the pooled
+    latents, from the previous round's tracks, the rig's line spectra stored
+    in ``latent_dtype``), then step (iii), the rig again with the latents
     fixed, warm-started (``refit_adam_steps`` Adam steps, then ``rig``'s
     L-BFGS polish). The alternation stops when the Whittle term moves by less
     than ``tol_nats_per_cell`` per observed cell between rounds.
@@ -224,6 +226,7 @@ class OptimSpecV3:
     refit_adam_steps: int = 0
     latent_lbfgs_iters: int = 100
     latent_lbfgs_history: int = 10
+    latent_dtype: str = "float64"
     tol_nats_per_cell: float = 1e-4
 
     def as_dict(self) -> dict[str, Any]:
@@ -234,6 +237,7 @@ class OptimSpecV3:
             latent_lbfgs_iters=self.latent_lbfgs_iters,
             latent_lbfgs_history=self.latent_lbfgs_history,
             latent_line_search="strong_wolfe",
+            latent_dtype=self.latent_dtype,
             tol_nats_per_cell=self.tol_nats_per_cell,
             scheme="(i) rig, latents at zero; then per round (ii) each window's latents, rig "
             "fixed, (iii) rig, latents fixed; stop when the Whittle term moves < tol per cell",
@@ -896,6 +900,22 @@ def _grad_norm(params: Sequence[Tensor]) -> float:
     return float(math.sqrt(sum(float((p.grad**2).sum()) for p in params if p.grad is not None)))
 
 
+def _sync(device: torch.device) -> None:
+    """Wait for the device's queued work, so a wall clock reads it."""
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
+def _peak_mb(device: torch.device, *, reset: bool = False) -> float | None:
+    """The CUDA allocator's peak since the last reset, in MiB (``None`` off CUDA)."""
+    if device.type != "cuda":
+        return None
+    peak = torch.cuda.max_memory_allocated(device) / 2.0**20
+    if reset:
+        torch.cuda.reset_peak_memory_stats(device)
+    return float(peak)
+
+
 #: Half-width of the box a POSITIVE site's unconstrained coordinate is held in
 #: during the L-BFGS polish. A strong-Wolfe probe extrapolates before it
 #: brackets, and one such probe on ``bench_dregon_Motor3_70`` pushed
@@ -943,6 +963,50 @@ def _profile_init_record(
         n_widths=0 if sd is None else int(np.isfinite(sd).sum()),
         carrier_offset_rev_s=None if off is None else [float(v) for v in off],
     )
+
+
+def chunked_objective(
+    batch: MD.SupportBatch,
+    guide: AutoDelta,
+    *,
+    mode: str,
+    priors: MD.Priors = MD.PRIORS,
+    frozen: dict[str, Any] | None = None,
+    pin: dict[str, Any] | None = None,
+    low_orders: int | None = None,
+    forward_kw: dict[str, Any] | None = None,
+    grad: bool,
+) -> Tensor:
+    """``Whittle - log p(sites)`` of ``batch`` at ``guide``'s point — the
+    ``Trace_ELBO`` loss an ``AutoDelta`` guide minimises — with the Whittle
+    term summed over :func:`.model.frame_chunks`.
+
+    With ``grad`` each chunk's gradient is accumulated (into the site values,
+    then once through the guide's transforms into its parameters' ``.grad``)
+    and the chunk's graph released before the next one is built: every frame
+    counts in every evaluation while the kernel's autograd memory is one
+    chunk's. Returns the objective, detached.
+    """
+    site_kw: dict[str, Any] = dict(
+        mode=mode, priors=priors, frozen=frozen, pin=pin, low_orders=low_orders
+    )
+    with torch.set_grad_enabled(grad):
+        values = guide()
+        leaves = {k: v.detach().requires_grad_(grad) for k, v in values.items()}
+        nlp = -MD.log_prior_tensor(batch, values=leaves, **site_kw)
+        if grad:
+            nlp.backward()
+        total = nlp.detach()
+        for sub in MD.frame_chunks(batch):
+            params = MD.sample_params_from_values(sub, values=leaves, **site_kw)
+            whittle = MD.whittle_risk(sub, MD.forward(sub, params, **(forward_kw or {})))
+            if grad:
+                whittle.backward()
+            total = total + whittle.detach()
+        if grad:
+            names = [k for k, v in leaves.items() if v.grad is not None]
+            torch.autograd.backward([values[k] for k in names], [leaves[k].grad for k in names])
+    return total
 
 
 def fit_support(
@@ -998,7 +1062,8 @@ def fit_support(
         )
     )
     full = replace(batch, measured=measured.measured)
-    init = dict(measured.init)
+    dev = full.power.device
+    init = {k: v.to(dev) for k, v in measured.init.items()}
     if optim.init_jitter > 0.0:
         # a log-normal multi-start on the dynamics block only: the profile,
         # floor and carrier initialisations are read off the data and a random
@@ -1008,7 +1073,7 @@ def fit_support(
             if key in init:
                 v = init[key]
                 shift = jrng.normal(0.0, float(optim.init_jitter), size=tuple(v.shape))
-                init[key] = v * torch.as_tensor(np.exp(shift), dtype=torch.float64)
+                init[key] = v * torch.as_tensor(np.exp(shift), dtype=torch.float64, device=dev)
 
     def model_for(b: MD.SupportBatch) -> Any:
         def fn() -> Any:
@@ -1025,16 +1090,35 @@ def fit_support(
 
         return fn
 
+    # the frame-CHUNKED objective (``batch.chunk_frames``, flight): the ELBO's
+    # MAP objective with its Whittle term accumulated chunk by chunk
+    # (:func:`chunked_objective`)
+    chunked = full.rate_work is not None and full.chunk_frames is not None
+
     # CLONE into the guide. ``AutoDelta`` keeps the very tensors ``init_to_value``
     # hands it as its own (unconstrained) parameters and then updates them IN
     # PLACE, so passing ``init`` itself would make the recorded
     # ``diagnostics.init_*`` read the FITTED value and report every fit as one
-    # that never left its initialisation.
+    # that never left its initialisation. A chunked fit builds the guide's
+    # prototype on one chunk: the sites do not depend on the frame count.
     guide = AutoDelta(
-        model_for(full),
+        model_for(MD.frame_chunks(full)[0] if chunked else full),
         init_loc_fn=init_to_value(values={k: v.detach().clone() for k, v in init.items()}),
     )
     elbo = Trace_ELBO()
+
+    def chunked_loss(b: MD.SupportBatch, *, grad: bool) -> Tensor:
+        return chunked_objective(
+            b,
+            guide,
+            mode=mode,
+            priors=priors,
+            frozen=frozen,
+            pin=pin,
+            low_orders=low_orders,
+            forward_kw=forward_kw,
+            grad=grad,
+        )
 
     rng = np.random.default_rng(int(optim.seed))
     n_frames = int(full.power.shape[1])
@@ -1047,15 +1131,31 @@ def fit_support(
     adam = SVI(model_for(full), guide, adam_optim, loss=elbo)
     adam_losses: list[float] = []
     loss: Any
+    adam_chunked: torch.optim.Adam | None = None
+    if chunked and int(optim.adam_steps) > 0:
+        with torch.no_grad():
+            guide()
+        adam_chunked = torch.optim.Adam(
+            [p for p in guide.parameters() if p.requires_grad], lr=float(optim.adam_lr)
+        )
     for step in range(int(optim.adam_steps)):
         if use_batches:
             assert optim.adam_batch is not None
             idx = rng.choice(n_frames, size=int(optim.adam_batch), replace=False)
             sub = MD.batch_slice(full, idx)
-            # Preserve Adam's moments across frame minibatches.  Recreating a
-            # Pyro optimiser here silently converts 1,500 Adam steps into 1,500
-            # independent first steps.
-            loss = SVI(model_for(sub), guide, adam_optim, loss=elbo).step()
+            if adam_chunked is not None:
+                adam_chunked.zero_grad(set_to_none=False)
+                loss = float(chunked_loss(sub, grad=True))
+                adam_chunked.step()
+            else:
+                # Preserve Adam's moments across frame minibatches.  Recreating a
+                # Pyro optimiser here silently converts 1,500 Adam steps into 1,500
+                # independent first steps.
+                loss = SVI(model_for(sub), guide, adam_optim, loss=elbo).step()
+        elif adam_chunked is not None:
+            adam_chunked.zero_grad(set_to_none=False)
+            loss = float(chunked_loss(full, grad=True))
+            adam_chunked.step()
         else:
             loss = adam.step()
         adam_losses.append(float(loss))
@@ -1071,19 +1171,32 @@ def fit_support(
         idx = np.linspace(0, n_frames - 1, int(optim.lbfgs_frames)).round().astype(np.int64)
         polish = MD.batch_slice(full, np.unique(idx))
     loss_fn = model_for(polish)
+
+    def elbo_of() -> Tensor:
+        if chunked:
+            return chunked_loss(polish, grad=False)
+        return elbo.differentiable_loss(loss_fn, guide)
+
     if not adam_losses:
         # a warm-started refit may skip Adam: the guide must still have run
         # once (on the polish set) before it has any parameter to polish
-        elbo.differentiable_loss(loss_fn, guide).detach()
+        elbo_of().detach()
     params = [p for p in guide.parameters() if p.requires_grad]
     boxed = _log_space_params(guide)
-    elbo_of = lambda: elbo.differentiable_loss(loss_fn, guide)  # noqa: E731
 
     def box() -> None:
         """Hold every log-space coordinate inside ``LOG_BOX``."""
         with torch.no_grad():
             for p in boxed:
                 p.clamp_(-LOG_BOX, LOG_BOX)
+
+    def loss_and_grad() -> Tensor:
+        """The polish objective, its gradient accumulated into ``params``."""
+        if chunked:
+            return chunked_loss(polish, grad=True)
+        loss = elbo_of()
+        loss.backward()
+        return loss
 
     def run_lbfgs(max_iter: int) -> tuple[float, int]:
         """One L-BFGS pass; returns its final loss and its evaluation count."""
@@ -1101,8 +1214,7 @@ def fit_support(
             # extrapolates first and it is the EXTRAPOLATION that underflows
             box()
             opt.zero_grad(set_to_none=False)
-            loss = elbo_of()
-            loss.backward()
+            loss = loss_and_grad()
             count += 1
             return loss
 
@@ -1125,7 +1237,7 @@ def fit_support(
     lbfgs_s = time.time() - t1
     for p in params:
         p.grad = None
-    elbo_of().backward()
+    loss_and_grad()
     gnorm = _grad_norm(params)
     gain_per_cell = max(0.0, first_pass - restart) / max(1, polish.n_cells)
     converged = bool(np.isfinite(restart) and gain_per_cell < float(optim.tol_nats_per_cell))
@@ -1233,6 +1345,7 @@ def fit_latents(
     init: dict[int, MD.WindowLatents],
     iters: int = 100,
     history: int = 10,
+    line_dtype: torch.dtype = torch.float64,
 ) -> tuple[dict[int, MD.WindowLatents], dict[str, Any]]:
     """Step (ii): EVERY window's block latents with the rig held FIXED.
 
@@ -1245,20 +1358,23 @@ def fit_latents(
     ``sigma, tau`` fixed it is the correctly-shrunk MAP of the explainer's
     §3.3a — a Kalman smoother of the block amplitudes, no variance to cheat
     with. The rig's line and floor spectra are computed ONCE
-    (:func:`.model.latent_cache`): an evaluation only moves their block
-    multipliers.
+    (:func:`.model.latent_cache`, lines stored in ``line_dtype``): an
+    evaluation only moves their block multipliers.
     """
     t0 = time.time()
     windows = tuple(sorted(init))
     n_blocks = tuple(int(batch.window_blocks[w]) for w in windows)
     values = MD.stack_latents(init, windows, max(n_blocks))
-    rec: dict[str, Any] = dict(windows=len(windows), n_blocks=list(n_blocks))
+    rec: dict[str, Any] = dict(
+        windows=len(windows), n_blocks=list(n_blocks), line_dtype=str(line_dtype)
+    )
     if not values:
         return init, dict(rec, tracks=[], note="no active wander track")
     pyro.clear_param_store()
-    cache = MD.latent_cache(batch, params)
+    cache = MD.latent_cache(batch, params, line_dtype=line_dtype)
     if cache.windows != windows:
         raise ValueError(f"latents for windows {windows}, batch has {cache.windows}")
+    _sync(batch.power.device)
     cache_s = time.time() - t0
 
     def model() -> Any:
@@ -1299,6 +1415,18 @@ def fit_latents(
     )
 
 
+def _rig_timing(opt: dict[str, Any]) -> dict[str, float | None]:
+    """Per-step costs of one rig fit, from its optimiser record: seconds per
+    Adam step and per L-BFGS evaluation (forward + gradient, every chunk)."""
+    steps = int(opt.get("adam_steps") or 0)
+    evals = int(opt.get("lbfgs_evals") or 0) + int(opt.get("lbfgs_restart_evals") or 0)
+    return dict(
+        adam_s_per_step=(float(opt["adam_wall_s"]) / steps) if steps else None,
+        rig_lbfgs_evals=evals,
+        rig_s_per_eval=(float(opt["lbfgs_wall_s"]) / evals) if evals else None,
+    )
+
+
 def fit_v3(
     batch: MD.SupportBatch,
     *,
@@ -1336,6 +1464,8 @@ def fit_v3(
     wander = priors.wander
     mode = MD.V3_MODE
     t0 = time.time()
+    dev = batch.power.device
+    _peak_mb(dev, reset=True)
     blocked = MD.with_blocks(replace(batch, latents=None), wander.block_s)
     start = seeds(blocked, mode=mode, priors=priors, pin=pin, profile_init=profile_init)
     measured_batch = replace(blocked, measured=start.measured)
@@ -1358,13 +1488,17 @@ def fit_v3(
             step="(i) rig, latents at zero",
             whittle_nats=float(rig.objective["whittle_nats"]),
             rig_converged=rig.converged,
+            **_rig_timing(rig.optimiser),
+            peak_mem_mb=_peak_mb(dev, reset=True),
             wall_s=time.time() - t0,
         )
     ]
     if progress:
         print(f"  v3 round 0: whittle {history[-1]['whittle_nats']:.6g}", flush=True)
     latents: dict[int, MD.WindowLatents] = {
-        w: MD.zero_latents(wander, n_rotors=blocked.n_rotors, k_max=blocked.k_max, n_blocks=nb)
+        w: MD.zero_latents(
+            wander, n_rotors=blocked.n_rotors, k_max=blocked.k_max, n_blocks=nb, device=dev
+        )
         for w, nb in enumerate(blocked.window_blocks)
         if nb > 0
     }
@@ -1382,8 +1516,10 @@ def fit_v3(
             init=latents,
             iters=optim.latent_lbfgs_iters,
             history=optim.latent_lbfgs_history,
+            line_dtype=getattr(torch, optim.latent_dtype),
         )
         t_latent = time.time() - t_round
+        latent_peak = _peak_mb(dev, reset=True)
         rig = fit_support(
             replace(blocked, latents=latents),
             mode=mode,
@@ -1407,6 +1543,9 @@ def fit_v3(
                 latent_evals=latent_fit.get("evals"),
                 latent_s_per_eval=latent_fit.get("s_per_eval"),
                 latent_cache_s=latent_fit.get("cache_s"),
+                latent_peak_mem_mb=latent_peak,
+                **_rig_timing(rig.optimiser),
+                peak_mem_mb=_peak_mb(dev, reset=True),
                 wall_s=time.time() - t_round,
             )
         )
@@ -1441,6 +1580,17 @@ def fit_v3(
         "-log prior on the full pool at the final rig and latents (what restarts reduce on)",
         first_rig=first_rig.optimiser,
         last_rig=rig.optimiser,
+        device=str(dev),
+        chunk_frames=batch.chunk_frames,
+        peak_mem_mb=max(
+            (
+                float(v)
+                for row in history
+                for k in ("peak_mem_mb", "latent_peak_mem_mb")
+                if (v := row.get(k)) is not None
+            ),
+            default=None,
+        ),
         wall_s=time.time() - t0,
     )
     objective = dict(

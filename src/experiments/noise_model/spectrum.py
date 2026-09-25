@@ -167,11 +167,11 @@ class FloorParams:
     ignored on the bench, where the carrier is constant and the envelope is a
     constant absorbed by ``mean_db``.
 
-    Two v3 fields, both ``None`` (= the v2 floor, bit for bit) unless set:
+    One v3 field, ``None`` (= the v2 floor, bit for bit) unless set:
     ``shape_sd_db`` replaces the fixed ``FLOOR_SHAPE_STD_DB`` scale of the
-    control values by the MEASURED ``sigma_B``, and ``ctrl_offset_db`` is a
-    ``(n_ctrl,)`` dB offset added to the control values (the block colour
-    latents ``u_j(b)`` of the floor wander).
+    control values by the MEASURED ``sigma_B``. The block colour latents
+    ``u_j(b)`` move the floor's dB curve (:meth:`FloorBasis.log_psd_db`), not
+    these parameters.
     """
 
     mean_db: Any
@@ -181,7 +181,6 @@ class FloorParams:
     exp: Any = 0.0
     static_rel: Any = 0.0
     shape_sd_db: Any = None
-    ctrl_offset_db: Any = None
 
 
 @dataclass
@@ -247,8 +246,6 @@ class FloorBasis:
     def psd(self, floor: FloorParams) -> Tensor:
         """The floor power spectrum on this basis' PSD grid, inside the graph."""
         ctrl = self.shape_db(floor.shape_z, floor.shape_sd_db)
-        if floor.ctrl_offset_db is not None:
-            ctrl = ctrl + _as_t(floor.ctrl_offset_db, self.shape_psd)
         return floor_power_spectrum(
             self.shape_psd,
             self.tilt_oct_psd,
@@ -276,8 +273,6 @@ class FloorBasis:
         """``(P,)`` the dB curve :meth:`psd` exponentiates (``mean + S ctrl +
         tilt``, before ``rate_factor``): what a block's ``u + S u_j`` add to."""
         ctrl = self.shape_db(floor.shape_z, floor.shape_sd_db)
-        if floor.ctrl_offset_db is not None:
-            ctrl = ctrl + _as_t(floor.ctrl_offset_db, self.shape_psd)
         mean = _as_t(floor.mean_db, self.shape_psd)
         tilt = _as_t(floor.tilt_db_oct, self.shape_psd)
         return mean + self.shape_psd @ ctrl + tilt * self.tilt_oct_psd
@@ -772,18 +767,33 @@ def _floor_gain(grid: FlightGrid, rate: Tensor, floor: FloorParams) -> Tensor:
     ) + _as_t(floor.static_rel, ref)
 
 
-def _floor_frames(grid: FlightGrid, rate: Tensor, floor: FloorParams) -> Tensor:
+def _floor_frames(
+    grid: FlightGrid,
+    rate: Tensor,
+    floor: FloorParams,
+    frame_floor_db: tuple[Tensor, Tensor] | None = None,
+) -> Tensor:
     """``(M, n_c, F)`` broadband floor of a chunk, C4's ``_floor_frames``.
 
     The floor goes through the SAME finite-window kernel as the lines, with the
     real atom ``w(t) A_floor(t)`` and ``r_tau = 2 R_floor(tau)``, so it carries
     the window response on a coloured spectrum and the within-window variation
     of its envelope exactly.
+
+    ``frame_floor_db`` (v3) is ``(db, group)``: the floor's whole dB curve
+    (:meth:`FloorBasis.log_psd_db`, its level and colour moved) per GROUP of
+    frames, ``(G, P)``, and the ``(n_c,)`` group of every frame; the speed law
+    and the per-mic gains stay ``floor``'s.
     """
     ref = grid.window_work
     gain_t = _floor_gain(grid, rate, floor)
-    c = grid.floor.autocovariance(floor)
-    c0 = c[0].clamp_min(MODEL_FLOOR)
+    if frame_floor_db is None:
+        c = grid.floor.autocovariance(floor)
+        c0 = c[0].clamp_min(MODEL_FLOOR)
+    else:
+        db, group = frame_floor_db
+        c = grid.floor.autocovariance_db(db).index_select(0, group)
+        c0 = c[:, :1].clamp_min(MODEL_FLOOR)
     atom = ref[None, :] * torch.sqrt(c0 * gain_t)
     shape_work = expected_periodogram_from_atoms(
         atom,
@@ -838,10 +848,13 @@ def _line_blocks(
     rate: Tensor,
     kk: int,
     harmonic_chunk: int | None,
+    line_db: Tensor | None = None,
 ) -> Iterator[tuple[int, int, Tensor]]:
     """``(k0, k1, block)`` per harmonic chunk of :func:`flight_model`'s line
     kernel: ``block`` is the ``(R, k1 - k0, n_c, F)`` expected periodogram of
     each line of the chunk on the analysis bins, before ``grid_power_factor``.
+    ``line_db`` (v3) is an ``(R, K, n_c)`` per-FRAME dB offset of every
+    line's ``profile_db``; ``None`` is the constant profile, bit for bit.
     """
     ref = grid.window_work
     n_rotors, _n_c, n_work = rate.shape
@@ -850,7 +863,11 @@ def _line_blocks(
 
     phase = (2.0 * math.pi / float(grid.sr_work)) * torch.cumsum(rate, dim=-1)
     phase = phase - phase[..., n_work // 2 : n_work // 2 + 1]
-    prof_amp = torch.sqrt(2.0 * 10.0 ** (profile[:, :kk] / 10.0))  # (R, K)
+    if line_db is None:
+        prof_amp = torch.sqrt(2.0 * 10.0 ** (profile[:, :kk] / 10.0))[:, :, None]  # (R, K, 1)
+    else:
+        offset = _as_t(line_db, ref)
+        prof_amp = torch.sqrt(2.0 * 10.0 ** ((profile[:, :kk, None] + offset) / 10.0))
     speed_amp = torch.sqrt(
         (rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF) ** _as_t(params.amp_exp, ref)
     )
@@ -861,7 +878,7 @@ def _line_blocks(
         k1 = min(k0 + step, kk)
         k = torch.arange(k0 + 1, k1 + 1, dtype=ref.dtype, device=ref.device)
         kph = torch.remainder(k[None, :, None, None] * phase[:, None], 2.0 * math.pi)
-        atoms = torch.polar(prof_amp[:, k0:k1, None, None] * env[:, None], kph)
+        atoms = torch.polar(prof_amp[:, k0:k1, :, None] * env[:, None], kph)
         rho = r_tau(
             grid.tau_s_work[None, None, :],
             k[None, :, None],
@@ -882,6 +899,8 @@ def flight_model(
     rate_work: Tensor,
     k_max: int | None = None,
     harmonic_chunk: int | None = 32,
+    line_db: Tensor | None = None,
+    frame_floor_db: tuple[Tensor, Tensor] | None = None,
 ) -> Tensor:
     """``(M, n_c, F)`` expected periodogram of a moving-carrier chunk.
 
@@ -892,6 +911,11 @@ def flight_model(
     amplitude, the speed law, the shared kernel, the floor through the same
     kernel, the transfer applied once — is C4's, and the differential test
     pins the two to 1e-6 where the laws coincide (``gamma_hz = 0``).
+
+    v3's block latents enter per frame: ``line_db`` ``(R, K, n_c)`` (or
+    ``(R, 1, n_c)``) adds to every line's ``profile_db`` and
+    ``frame_floor_db`` sets each frame's floor level and colour
+    (:func:`_floor_frames`); ``None`` for both is the v2 model, bit for bit.
     """
     ref = grid.window_work
     rate = rate_work.to(dtype=ref.dtype, device=ref.device)
@@ -899,14 +923,14 @@ def flight_model(
     kk = _k_cap(params, k_max)
 
     shapes = torch.zeros(n_rotors, n_c, grid.n_fft // 2 + 1, dtype=ref.dtype, device=ref.device)
-    for _k0, _k1, block in _line_blocks(grid, params, rate, kk, harmonic_chunk):
+    for _k0, _k1, block in _line_blocks(grid, params, rate, kk, harmonic_chunk, line_db):
         shapes = shapes + block.sum(dim=1)
     shapes = shapes * grid.grid_power_factor
 
     line_gain = _mean_pinned_db(_as_t(params.mic_line_gain_db, ref))
     all_gain = _mean_pinned_db(_as_t(params.gain_all_db, ref).reshape(-1, 1)).reshape(-1)
     lines = torch.einsum("mr,rnf->mnf", line_gain, shapes)
-    floor = _floor_frames(grid, rate, params.floor)
+    floor = _floor_frames(grid, rate, params.floor, frame_floor_db)
     if params.wind_db is not None:
         # v3's static per-mic wind term: a fixed smooth shape, zero above
         # 500 Hz, one level per mic, no speed law. Added at the analysis bins —

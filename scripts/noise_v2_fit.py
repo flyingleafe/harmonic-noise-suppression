@@ -66,6 +66,10 @@ K_CAP = 130
 GAMMA_LADDER = (1, 2, 4, 8, 16, 32)
 #: The fit schemas the reductions read: this round's, R1/R2's and v3's.
 SCHEMAS = ("noise-v2-fit/2", "noise-v2-fit/1", "noise-v3-fit/1")
+#: Frames per forward pass of a v3 fit: the line kernel's autograd memory is
+#: ~R K x this many atoms, sized so the largest pool (R 4, K 130) fits a 16 GB
+#: GPU; the gradient accumulates over the chunks, every frame counts.
+V3_CHUNK_FRAMES = 16
 
 
 def gamma_ladder(gamma_hz: Any) -> dict[str, Any]:
@@ -190,6 +194,8 @@ def worker(unit: Unit) -> dict[str, Any]:
             frame_stride=int(p.get("frame_stride", 4)),
             max_frames=p.get("max_frames"),
             channel_gains=gains,
+            device=p.get("device") or ("cuda" if torch.cuda.is_available() else "cpu"),
+            chunk_frames=p.get("chunk_frames"),
         )
         name, kind = str(p["name"]), "flight"
 
@@ -209,6 +215,7 @@ def worker(unit: Unit) -> dict[str, Any]:
                 rounds=int(p.get("rounds", 3)),
                 refit_adam_steps=int(p.get("refit_adam_steps", 0)),
                 latent_lbfgs_iters=int(p.get("latent_iters", 100)),
+                latent_dtype=str(p.get("latent_dtype", "float64")),
             ),
             profile_init=prof_init,
             progress=int(p.get("progress", 0)),
@@ -1127,7 +1134,34 @@ def main(argv: list[str] | None = None) -> int:
                 help="fit only these channels (0-based), e.g. a smoke fit on '0,1'",
             )
             p.add_argument("--adam-batch", type=int, default=8)
-            p.add_argument("--lbfgs-frames", type=int, default=64)
+            p.add_argument(
+                "--lbfgs-frames",
+                type=int,
+                default=None,
+                help="frames of the L-BFGS polish (<= 0: every frame). Default 64, and every "
+                "frame for --mode flight_v3 (its evaluation is chunked, --chunk-frames)",
+            )
+            p.add_argument(
+                "--device",
+                choices=("cuda", "cpu"),
+                default=None,
+                help="where the objective runs (default: cuda if available, else cpu)",
+            )
+            p.add_argument(
+                "--chunk-frames",
+                type=int,
+                default=None,
+                help="frames per forward pass; the gradient accumulates over the chunks so "
+                "every frame counts in every evaluation (<= 0: one pass). Default "
+                f"{V3_CHUNK_FRAMES} for --mode flight_v3, one pass otherwise",
+            )
+            p.add_argument(
+                "--latent-dtype",
+                choices=("float64", "float32"),
+                default="float64",
+                help="flight_v3: precision of the latent step's cached line spectra (the "
+                "Whittle sum and the latents stay float64)",
+            )
             p.add_argument(
                 "--restart-tag",
                 default=None,
@@ -1260,6 +1294,10 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--wander / --channel-gains / --wind belong to --mode flight_v3")
         gains_rig = args.channel_gains_rig or (_rig_of(specs) if args.channel_gains else None)
         mics = [int(v) for v in str(args.mics).split(",")] if args.mics else None
+        if args.chunk_frames is None:
+            chunk_frames = V3_CHUNK_FRAMES if v3 else None
+        else:
+            chunk_frames = None if int(args.chunk_frames) <= 0 else int(args.chunk_frames)
         # a single-seed --restart-tag run is ONE restart of a family started at
         # seed 0 (one cluster job per seed), so it is jittered exactly as
         # `--seed 0 --seeds N` would have jittered it: every restart but seed 0
@@ -1269,6 +1307,9 @@ def main(argv: list[str] | None = None) -> int:
             optim = _optim_from_args(args)
             optim["seed"] = s
             optim["init_jitter"] = 0.0 if s == first else float(args.init_jitter)
+            if v3 and args.lbfgs_frames is None:
+                # v3's polish sees every frame: its evaluation is chunked
+                optim["lbfgs_frames"] = None
             tag = f"s{s}" if len(seeds) > 1 else (args.restart_tag or None)
             units.append(
                 Unit(
@@ -1292,6 +1333,8 @@ def main(argv: list[str] | None = None) -> int:
                         restart_tag=tag,
                         k_cap=int(args.k_cap),
                         mics=mics,
+                        device=args.device,
+                        chunk_frames=chunk_frames,
                         **(
                             dict(
                                 wander=str(args.wander),
@@ -1301,6 +1344,7 @@ def main(argv: list[str] | None = None) -> int:
                                 rounds=int(args.rounds),
                                 latent_iters=int(args.latent_iters),
                                 refit_adam_steps=int(args.refit_adam_steps),
+                                latent_dtype=str(args.latent_dtype),
                             )
                             if v3
                             else {}
