@@ -1,7 +1,8 @@
-**Status:** done — 2026-09-24 → 2026-09-25. CPU round 1 (σ_v rig-wide) is
+**Status:** running — 2026-09-24 → 2026-09-25. CPU round 1 (σ_v rig-wide) is
 superseded and only exercised the check tooling. The GPU campaign (4 restarts
 × 3 pools, σ_v(k) from wander schema 2) is fitted and reduced; the §3.5
-checks run on its fits.
+checks run on its fits. Round 2 (wander re-estimated by one moment update
+from the campaign's latents, 20 alternation rounds) is fitting.
 
 # Noise model v3: fits on the free-flight pools and the §3.5 checks
 
@@ -750,6 +751,54 @@ total objective):
   its σ at k 3–60 on DREGON and cruise, 0.8–1.1 × on standby, and 0.6–0.7 ×
   at k ≥ 61 in every pool, where 94–99 % of the held-out line blocks are
   under the floor (check (b)) and the latents are shrunk toward zero.
+
+### Round 2 (moment-matched wander, 20 rounds)
+
+Check (e) put the fitted `d` and `u_j` at 4–7 × their measured σ² and the
+alternation 6–11 × off its tolerance after 5 rounds. Round 2 takes the
+explainer's §3.3a M-step once and refits with more rounds.
+
+**Moment update `mm1`** (`scripts/noise_v3_moment_update.py`, commit
+`0b87c5eb`). Per pool and latent family (`d`, `u`, `u_j`, `v` pooled and
+per order group) from the check (e) sums of the campaign fits
+(`results/noise_v3/checks/latents/latents.json`): σ̂² = fitted mean square +
+OU-smoother posterior variance (`ms_plus_post_var_db2`), ρ̂ = (lag-1
+product + posterior lag-1 covariance) / σ̂², clipped to (0.05, 0.99),
+τ̂ = −0.5 s / ln ρ̂. A group held at σ 0 (DREGON `v` k 1–8) has pinned
+latents and keeps σ 0 and its τ. The rig files the fits read are
+`results/noise_v3/wander/dregon_mm1.json` (from the DREGON pool) and
+`michaels_mm1.json` (from the cruise pool; standby fits read it too, as
+they read `michaels.json` in the campaign). Standby's own update is in
+`results/noise_v3/wander/moment_update.md` with the other two.
+
+| family | DREGON σ dB, measured → mm1 | τ s | cruise σ dB, measured → mm1 | τ s | standby σ (not used) | τ s |
+|---|---|---|---|---|---|---|
+| d | 0.94 → 1.94 | 0.30 → 0.64 | 0.52 → 1.12 | 0.58 → 1.42 | 1.02 | 0.69 |
+| u | 2.83 → 2.48 | 4.72 → 1.53 | 1.73 → 3.42 | 1.98 → 3.88 | 1.77 | 2.82 |
+| u_j | 1.52 → 3.99 | 1.38 → 6.05 | 1.63 → 3.63 | 1.23 → 3.38 | 1.99 | 2.15 |
+| v k 1–2 | 0 → 0 (pinned) | 0.75 | 0.32 → 0.52 | 1.15 → 2.83 | 0.51 | 2.62 |
+| v k 3–8 | 0 → 0 (pinned) | 0.75 | 4.17 → 5.89 | 1.15 → 2.00 | 4.64 | 1.66 |
+| v k 9–24 | 2.98 → 4.21 | 0.79 → 1.10 | 3.79 → 5.29 | 0.86 → 1.43 | 3.88 | 0.93 |
+| v k 25–60 | 3.91 → 4.98 | 0.62 → 1.15 | 3.61 → 4.16 | 1.06 → 1.61 | 3.01 | 0.91 |
+| v k ≥ 61 | 7.18 → 4.72 | 0.87 → 0.87 | 5.69 → 3.72 | 1.15 → 1.31 | 4.11 | 1.36 |
+
+The update doubles σ_d on both rigs, more than doubles σ_uj, raises σ_v by
+1.15–1.4 × at k 3–60 and cuts it by a third at k ≥ 61 (where the lines sit
+under the floor and the latents shrink to zero). Every τ but DREGON's `u`
+grows: the fitted tracks are smoother than the measured ones.
+
+**Jobs.** As the campaign (same wrapper, support build, seeds 0–3 with the
+same jitter, `--init-from` the same v2 fits, `--channel-gains`, `--wind` on
+DREGON, `--lbfgs-frames 64 --lbfgs-iters 500`, `--device cuda`), except
+`--wander results/noise_v3/wander/<rig>_mm1.json`, `--rounds 20` and the out
+dir `results/noise_v3/fits_r2`. Submitted 2026-09-25 16:32 UTC from
+`.worktrees/submit-v3gpu` detached at `0b87c5eb`.
+
+| job | pool | submitted (UTC) | state |
+|---|---|---|---|
+| `nv3r2-dregon-2d63a3` | DREGON | 16:32 | submitted |
+| `nv3r2-cruise-ac4e0f` | Michael's cruise | 16:32 | queued (one kaggle slot) |
+| `nv3r2-standby-5b9eed` | Michael's standby | 16:32 | queued |
 
 ## Results
 
