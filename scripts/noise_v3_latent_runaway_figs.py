@@ -24,14 +24,22 @@ Inputs:
 * Figs G-I: the parameter view of ``notebooks/noise_lab.py`` (``param_view`` /
   ``draw_param_view``, the notebook's comb-over-floor cell) on four draws of
   the round-2 DREGON fit's v3 prior (``noise_v3_checks.prior_draw``, seeds
-  0-3), the three round-2 fits and the v2 fits of ``noise_lab.FIT_PATHS``.
+  0-3), the three round-2 fits and the v2 fits of ``noise_lab.FIT_PATHS``;
+* Figs J-K (§ Listen): one real window per rig (:data:`LISTEN_WINDOWS`, held
+  out of every fit's pool) through the notebook's own primitives —
+  ``trajectory("real")``, ``real_clip``, ``render_all`` of ``V2Fit(rig)`` and
+  ``V3Fit(rig, round="r2")`` under the notebook's level rule, ``line_stats``,
+  ``spectrogram_figure`` — written as 16-bit WAVs to ``audio/``; the LTAS is
+  ``revised_eval.absolute_ltas_bands`` on the bands inside
+  :data:`LISTEN_LTAS_HZ`.
 
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py            # evaluate + plot
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --rigs-only # Figs G-I only
+    PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --listen-only # Figs J-K + WAVs
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --plot-only
 
-Writes ``docs/explainers/noise-model-v3-latent-runaway/`` (``fig_*.png`` and
-``figdata.json``, every plotted number).
+Writes ``docs/explainers/noise-model-v3-latent-runaway/`` (``fig_*.png``,
+``figdata.json``, every plotted number, and ``audio/*.wav``).
 """
 
 from __future__ import annotations
@@ -113,6 +121,23 @@ V3_R2_FITS = {
     "standby": Path("results/noise_v3/fits_r2/michaels_fly125_standby__flight_v3.json"),
 }
 RIG_NAMES = {"dregon": "DREGON", "cruise": "Michael's cruise", "standby": "Michael's standby"}
+#: § Listen: one 10 s real window per rig, held out of every fit's pool (the
+#: DREGON pool reads free-flight 18-26 s; Michael's fits read FLY125 only),
+#: every rotor inside the fits' carrier spans; the notebook's render cell
+#: (``render_all(..., seed=0, n_mics=1, level=("window", 0.1))``): mic 0, a
+#: per-clip RMS of 0.1; the clip order of the figure rows
+LISTEN_WINDOWS = {
+    "dregon": dict(dataset="DREGON-frames", recording="free-flight_nosource_room2", offset_s=50.0),
+    "michaels": dict(dataset="michaels-frames", recording="FLY124", offset_s=40.0),
+}
+LISTEN_S = 10.0
+LISTEN_SEED = 0
+LISTEN_LEVEL = ("window", 0.1)
+LISTEN_LTAS_HZ = (100.0, 7000.0)
+LISTEN_CLIPS = ("real", "v2", "v3")
+LISTEN_LABELS = {"real": "real recording", "v2": "v2 fit", "v3": "v3 round-2 fit"}
+LISTEN_DYN_DB = 45.0
+AUDIO = OUT / "audio"
 
 C_R1, C_R2, C_V2, C_DATA = "#1f77b4", "#d62728", "#7f7f7f", "#000000"
 WIN_LABELS = ("free-flight", "hovering", "updown", "rectangle", "spinning")
@@ -725,6 +750,90 @@ def rig_views() -> dict[str, Any]:
     return out
 
 
+def listen() -> dict[str, Any]:
+    """Figs J-K: per rig, the real window of :data:`LISTEN_WINDOWS` and the v2
+    and round-2 v3 fits rendered on its rotor track, all three under the
+    notebook's level rule, as 16-bit WAVs, with ``noise_lab.line_stats`` (k = 1
+    to 8) and the band LTAS inside :data:`LISTEN_LTAS_HZ`."""
+    import soundfile as sf
+
+    from experiments.stochastic_fit import accept_stats
+    from experiments.stochastic_fit import revised_eval as RE
+
+    nl = _noise_lab()
+    lo, hi = LISTEN_LTAS_HZ
+    bands = [i for i, (b0, b1) in enumerate(accept_stats.BANDS) if b0 >= lo and b1 <= hi]
+    AUDIO.mkdir(parents=True, exist_ok=True)
+    out: dict[str, Any] = dict(
+        seconds=LISTEN_S,
+        seed=LISTEN_SEED,
+        level=list(LISTEN_LEVEL),
+        mic=0,
+        sr=nl.SR,
+        dyn_range_db=LISTEN_DYN_DB,
+        ltas_bands_hz=[list(accept_stats.BANDS[i]) for i in bands],
+        rigs={},
+    )
+    for rig, window in LISTEN_WINDOWS.items():
+        traj = nl.trajectory("real", duration_s=LISTEN_S, **window)
+        sources = {"v2": nl.V2Fit(rig), "v3": nl.V3Fit(rig, round="r2")}
+        renders = nl.render_all(
+            list(sources.values()), traj, seed=LISTEN_SEED, n_mics=1, level=LISTEN_LEVEL
+        )
+        clips = {
+            "real": nl.real_clip(traj, n_mics=1, level=LISTEN_LEVEL),
+            **{key: renders[src.name] for key, src in sources.items()},
+        }
+        stats = nl.line_stats(clips)
+        m = dict(traj["meta"].items())
+        row: dict[str, Any] = dict(
+            **window,
+            seconds=LISTEN_S,
+            labels=m["labels"],
+            slice_label=m["slice_label"],
+            rps_min=m["rps_min"],
+            rps_max=m["rps_max"],
+            rps_mean=m["rps_mean"],
+            spans_rev_s={key: src.span for key, src in sources.items()},
+            rps=np.round(np.asarray(traj["rps"].data, dtype=np.float64), 2),
+            clips={},
+        )
+        ltas: dict[str, np.ndarray] = {}
+        for (key, clip), (_, st) in zip(clips.items(), stats.iterrows(), strict=True):
+            x = np.asarray(clip["audio"].data, dtype=np.float64)[0]
+            if np.max(np.abs(x)) >= 1.0:
+                raise SystemExit(f"{rig} {key}: peak {np.max(np.abs(x)):.3f} would clip a WAV")
+            wav = AUDIO / f"{rig}_{key}.wav"
+            sf.write(wav, x, nl.SR, subtype="PCM_16")
+            ltas[key] = RE.absolute_ltas_bands(x)[bands]
+            cm = dict(clip["meta"].items())
+            row["clips"][key] = dict(
+                source=cm["source"],
+                entry=cm["entry"],
+                wav=str(wav.relative_to(OUT)),
+                rms=cm["rms"],
+                peak=cm["peak"],
+                level_gain=cm["level_gain"],
+                line_over_floor_db=[float(st[f"k={k}"]) for k in range(1, 9)],
+                ltas_db=ltas[key],
+            )
+        for key in sources:
+            dev = ltas[key] - ltas["real"]
+            row["clips"][key]["ltas_dev_db"] = dev
+            row["clips"][key]["ltas_mean_abs_db"] = float(np.mean(np.abs(dev)))
+        out["rigs"][rig] = row
+        print(
+            f"listen {rig}: {m['slice_label']}, {m['rps_min']:.1f}-{m['rps_max']:.1f} rev/s; "
+            + ", ".join(
+                f"{key} k1 {c['line_over_floor_db'][0]:+.2f} k2 {c['line_over_floor_db'][1]:+.2f}"
+                + (f" LTAS {c['ltas_mean_abs_db']:.2f}" if "ltas_mean_abs_db" in c else "")
+                for key, c in row["clips"].items()
+            ),
+            flush=True,
+        )
+    return out
+
+
 def compute() -> dict[str, Any]:
     import torch
 
@@ -828,6 +937,7 @@ def compute() -> dict[str, Any]:
         prof[key] = {k: v.mean(axis=0) for k, v in lf.items()}  # rotor mean of dB
     out["profile"] = prof
     out["rigs"] = rig_views()
+    out["listen"] = listen()
     return out
 
 
@@ -1280,6 +1390,51 @@ def fig_i(d: dict[str, Any]) -> None:
     fig_rigs(d, rows, "fig_i_v2_rigs.png")
 
 
+def fig_listen(d: dict[str, Any], rig: str, name: str) -> None:
+    """One rig of § Listen: ``noise_lab.spectrogram_figure`` of the three WAVs
+    as written (real, v2, v3 round 2), one colour scale, the rotor track once."""
+    import soundfile as sf
+    import tdseries as td
+
+    nl = _noise_lab()
+    ls = d["listen"]
+    row = ls["rigs"][rig]
+    rps = td.uniform(
+        np.asarray(row["rps"], dtype=np.float64),
+        nl.RPS_PLOT_SR,
+        dims=("rotor", "time"),
+        t_start=0.0,
+    )
+    frames: dict[str, Any] = {}
+    for key in LISTEN_CLIPS:
+        x, sr = sf.read(OUT / row["clips"][key]["wav"], dtype="float32")
+        frames[LISTEN_LABELS[key]] = td.Frame(
+            {"audio": td.uniform(x[None], sr, dims=("mic", "time"), t_start=0.0), "rps": rps}
+        )
+    fig = nl.spectrogram_figure(
+        frames,
+        dyn_range=float(ls["dyn_range_db"]),
+        figsize=(11, 10),
+        shared_scale=True,
+        rps="once",
+    )
+    rps_ax = fig.axes[-1]
+    lines = rps_ax.get_lines()
+    rps_ax.set_title("")
+    rps_ax.set_title("rotor speed, telemetry", loc="left")
+    rps_ax.set_ylabel("rev/s")
+    rps_ax.legend(
+        lines,
+        [f"rotor {r + 1}" for r in range(len(lines))],
+        ncol=len(lines),
+        loc="lower right",
+        bbox_to_anchor=(1.0, 1.0),
+        frameon=False,
+        fontsize=11,
+    )
+    _save(fig, name)
+
+
 def plot(d: dict[str, Any]) -> None:
     fig_a(d)
     fig_b(d)
@@ -1290,6 +1445,8 @@ def plot(d: dict[str, Any]) -> None:
     fig_g(d)
     fig_h(d)
     fig_i(d)
+    fig_listen(d, "dregon", "fig_j_listen_dregon.png")
+    fig_listen(d, "michaels", "fig_k_listen_michaels.png")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1303,6 +1460,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=f"recompute Figs G-I (no pool build) into {DATA}, then redraw",
     )
+    mode.add_argument(
+        "--listen-only",
+        action="store_true",
+        help=f"recompute Figs J-K and the WAVs (no pool build) into {DATA}, then redraw",
+    )
     args = ap.parse_args(argv)
     if args.plot_only:
         d = load(DATA)
@@ -1310,6 +1472,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.rigs_only:
             d = load(DATA)
             d["rigs"] = _r(rig_views(), 4)
+        elif args.listen_only:
+            d = load(DATA)
+            d["listen"] = _r(listen(), 4)
         else:
             d = _r(compute(), 4)
         OUT.mkdir(parents=True, exist_ok=True)

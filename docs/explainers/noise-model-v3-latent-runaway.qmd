@@ -556,6 +556,97 @@ for fig, gen, name in (("G", "prior", "prior, seed {}"), ("H", "v3_r2", "v3 {}")
 Markdown("\n".join(rows))
 ```
 
+## Listen
+
+Now data enters. One real window per rig. Its own rotor track drives the
+v2 fit and the round-2 v3 fit. All three clips have the same RMS.[^listen]
+
+- DREGON: `free-flight_nosource_room2`, 50–60 s, 69.9–87.8 rev/s.
+- Michael's: `FLY124`, 40–50 s, 67.2–98.4 rev/s.
+- No fit saw either window.
+<!-- source: figdata.json listen.rigs.dregon: recording free-flight_nosource_room2, offset_s 50.0, seconds 10.0, labels telemetry, rps_min 69.945, rps_max 87.7978; listen.rigs.michaels: recording FLY124, offset_s 40.0, rps_min 67.1837, rps_max 98.4491; listen.level ["window", 0.1], mic 0, seed 0; pools: fits_r2/*.json supports (DREGON free-flight @ audio start + 18 s, 8 s; Michael's FLY125 only) -->
+
+[^listen]: `scripts/noise_v3_latent_runaway_figs.py --listen-only`, with
+    the notebook's own calls from `notebooks/noise_lab.py`:
+    `trajectory("real", ...)` and `real_clip` (the recording, same window),
+    `render_all([V2Fit(rig), V3Fit(rig, round="r2")], seed=0, n_mics=1,
+    level=("window", 0.1))`, `line_stats`, `spectrogram_figure`. Mic 0.
+    Telemetry labels. RMS 0.1 for every clip. 16 kHz, 16-bit WAV in
+    `noise-model-v3-latent-runaway/audio/`. The spectrograms of one figure
+    share one colour scale: 45 dB down from the loudest row's 99.5th
+    percentile. Line over floor: `line_stats`, the round-4 carrier-aligned
+    prominence; "—" means the line does not clear its floor. LTAS distance:
+    mean $|\Delta|$ of `revised_eval.absolute_ltas_bands` over its six
+    bands from 100 Hz to 7 kHz, clip minus real. On Michael's every rotor
+    stays above 65 rev/s, so both pairs render their cruise fit alone. The
+    DREGON pool reads 18–26 s of the same flight. Michael's fits read
+    `FLY125` only.
+
+```{python}
+from IPython.display import HTML
+
+LISTEN_LABELS = {"real": "real recording", "v2": "v2 fit", "v3": "v3 round-2 fit"}
+
+
+def db_cell(v):
+    return "—" if v is None else f(v, 1)
+
+
+def listen_players(rig):
+    """One row per clip, in the figure's row order: the player and its numbers."""
+    row = FD["listen"]["rigs"][rig]
+    cell = "<td style='padding:4px 10px'>"
+    out = [
+        "<table style='border-collapse:collapse'>",
+        "<tr><th style='text-align:left'>clip</th><th>listen</th>"
+        "<th><i>k</i> = 1, dB</th><th><i>k</i> = 2, dB</th><th>LTAS distance, dB</th></tr>",
+    ]
+    for key, label in LISTEN_LABELS.items():
+        c = row["clips"][key]
+        k1, k2 = c["line_over_floor_db"][:2]
+        dist = db_cell(c.get("ltas_mean_abs_db")) if key != "real" else ""
+        out.append(
+            f"<tr>{cell}<b>{label}</b></td>{cell}<audio controls preload='metadata' "
+            f"src='noise-model-v3-latent-runaway/{c['wav']}'></audio></td>"
+            f"{cell}{db_cell(k1)}</td>{cell}{db_cell(k2)}</td>{cell}{dist}</td></tr>"
+        )
+    out.append("</table>")
+    return HTML("\n".join(out))
+```
+
+### DREGON
+
+![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the v2 fit, the round-2 v3 fit, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon.png){#fig-j}
+
+```{python}
+listen_players("dregon")
+```
+
+- Real: $k = 1$ stands 4.4 dB over its floor. $k = 2$: 2.9 dB.
+- v2: 5.7 and 7.6 dB. v3: 5.8 and 5.3 dB. Both models' lines stand too high.
+- LTAS distance to real: v2 0.5 dB, v3 2.2 dB. v3 is 4.8 dB low at
+  0.7–1.5 kHz.
+- The real clip pulses below 1.5 kHz. v2 and v3 stay steady. v3 adds a
+  lone line near 2.2 kHz.
+  <!-- source: figdata.json listen.rigs.dregon.clips.{real,v2,v3}.line_over_floor_db[0:2] = 4.44, 2.89 / 5.65, 7.64 / 5.78, 5.33; .ltas_mean_abs_db v2 0.518, v3 2.160; v3.ltas_dev_db[700-1500 Hz] -4.814; pulses and the 2.2 kHz line: fig_j -->
+
+### Michael's
+
+![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j.](noise-model-v3-latent-runaway/fig_k_listen_michaels.png){#fig-k}
+
+```{python}
+listen_players("michaels")
+```
+
+- Real: $k = 1$ does not clear its floor. $k = 2$ stands 18.7 dB over it.
+- v2: 1.4 and 19.0 dB. v3: 1.6 and 18.1 dB. $k = 2$ matches within
+  0.6 dB.
+- LTAS distance to real: v2 1.3 dB, v3 2.9 dB. v3 is 7.0 dB too loud at
+  5–7 kHz. v2 is 3.4 dB too loud there.
+- v3 draws two bright lines near 1.6 and 3 kHz. They dip with rotor 1 at
+  2 s. The real clip has no line that strong there.
+  <!-- source: figdata.json listen.rigs.michaels.clips.{real,v2,v3}.line_over_floor_db[0:2] = null, 18.68 / 1.45, 19.00 / 1.63, 18.14; .ltas_mean_abs_db v2 1.266, v3 2.934; ltas_dev_db[5000-7000 Hz] v3 +6.981, v2 +3.435; lines: fig_k -->
+
 # 7. What this means
 
 1. The latents do not measure wander.

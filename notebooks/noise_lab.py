@@ -49,9 +49,14 @@ NOISE MODEL and nothing else.
     sources = [LegacyRandom(seed=0), LegacyBank("easy", 0), V2Fit("dregon"), ...]
     frames  = render_all(sources, traj, seed=0, level=("window", 0.1))
     show(frames)                      # the spectrogram grid + rps
+                                      # (spectrogram_figure returns it)
     players(frames)                   # one audio widget per generation
     line_stats(frames)                # the R4 order prominence, as a table
     tune(sources[0], traj)            # the sliders, on one source
+
+A ``"real"`` trajectory also has the recording itself: ``real_clip(traj,
+level=("window", 0.1))`` is that window's audio as a Frame the three calls
+above take next to the renders.
 
 THE TRAJECTORY KINDS (:data:`TRAJ_KINDS`).  The fitted trajectory model of any
 ``rps-traj-fits`` rig or of the hyperprior (``"fitted"``); a real recording's
@@ -1965,11 +1970,13 @@ def _v2_flight_gain(fit: dict[str, Any], rps: np.ndarray) -> float:
 
 def _apply_level(
     audio: np.ndarray,
-    source: NoiseSource,
+    source: NoiseSource | None,
     rps: np.ndarray,
     level: tuple[str, float] | None,
 ) -> tuple[np.ndarray, float]:
-    """``(audio, gain)`` under one of the two level rules, or unchanged."""
+    """``(audio, gain)`` under one of the two level rules, or unchanged.
+
+    ``source`` is read by the ``"flight"`` rule only (its floor envelope)."""
     if level is None:
         return audio, 1.0
     mode, value = str(level[0]), float(level[1])
@@ -1978,6 +1985,8 @@ def _apply_level(
     rms = float(np.sqrt(np.mean(np.square(audio)))) or 1.0
     gain = value / rms
     if mode == "flight":
+        if source is None:
+            raise ValueError("the 'flight' level rule needs a source's floor envelope")
         gain *= source.flight_gain(rps)
     return audio * gain, gain
 
@@ -2065,6 +2074,69 @@ def render_all(
     return out
 
 
+def real_clip(
+    traj: td.Frame,
+    *,
+    n_mics: int = 1,
+    level: tuple[str, float] | None = None,
+) -> td.Frame:
+    """The RECORDING under a ``"real"`` trajectory, shaped like a :func:`render`.
+
+    The same window of the same recording the trajectory read its rotor track
+    from (:func:`generator_lab.real_slice` with the trajectory's own
+    ``dataset`` / ``recording`` / ``offset_s`` / ``duration_s`` / ``labels``):
+    its first ``n_mics`` mics on the 16 kHz grid, the trajectory's two rotor
+    tracks, and a ``meta`` naming it (``source`` ``"real"``, ``entry`` the
+    slice label) — so :func:`show`, :func:`line_stats` and :func:`players`
+    take it next to the renders.  ``level`` is ``None`` (the recording's own
+    scale) or ``("window", rms)``; the ``"flight"`` rule needs a fit's floor
+    envelope, which a recording does not have.
+    """
+    from generator_lab import real_slice
+
+    m = dict(traj["meta"].items())
+    if m.get("traj_kind") != "real":
+        raise ValueError(f"real_clip needs a 'real' trajectory, got {m.get('traj_kind')!r}")
+    if float(m["rps_scale"]) != 1.0:
+        raise ValueError("a scaled trajectory is no longer the recording's own rotor track")
+    exc = real_slice(
+        str(m["dataset"]),
+        str(m["recording"]),
+        float(m["offset_s"]),
+        float(m["duration_s"]),
+        labels=str(m["labels"]),
+    )
+    rps = np.asarray(traj["rps_render"].data, dtype=np.float64)
+    n = rps.shape[-1]
+    audio = np.asarray(exc.audio, dtype=np.float64)[: int(n_mics)]
+    if audio.shape[-1] < n:
+        raise ValueError(
+            f"{exc.label}: {audio.shape[-1]} audio samples, the trajectory has {n} "
+            "(the window runs past the end of the recording)"
+        )
+    audio, gain = _apply_level(audio[:, :n], None, rps, level)
+    meta = {
+        **m,
+        "source": "real",
+        "generation": "real",
+        "entry": str(exc.label),
+        "n_mics": int(n_mics),
+        "level_mode": "native" if level is None else str(level[0]),
+        "level_value": float("nan") if level is None else float(level[1]),
+        "level_gain": float(gain),
+        "rms": float(np.sqrt(np.mean(np.square(audio)))),
+        "peak": float(np.max(np.abs(audio))),
+    }
+    return td.Frame(
+        {
+            "audio": td.uniform(audio.astype(np.float32), SR, dims=("mic", "time"), t_start=0.0),
+            "rps": traj["rps"],
+            "rps_render": traj["rps_render"],
+            "meta": td.Frame(meta),
+        }
+    )
+
+
 # ── looking and listening ───────────────────────────────────────────────────
 
 
@@ -2075,14 +2147,16 @@ def player(frame: td.Frame, channel: int = 0):
     return Audio(np.asarray(frame["audio"].data)[int(channel)], rate=SR, normalize=True)
 
 
-def show(
+def spectrogram_figure(
     frames: td.Frame | dict[str, td.Frame],
     *,
     dyn_range: float = 45.0,
     fmax: float = 8000.0,
     figsize: tuple[float, float] = (14, 7),
+    shared_scale: bool = False,
+    rps: str = "each",
 ):
-    """``dwym``'s rps route with a READABLE colour range, stacked over clips.
+    """The figure :func:`show` displays, returned (a script saves it).
 
     :func:`plots.dwym.dwym` routes ``audio`` + ``rps`` to a spectrogram over a
     rotor-speed track, which is exactly the figure wanted here, but its
@@ -2094,20 +2168,42 @@ def show(
     dB data clipped to ``[top - dyn_range, top]``, ``top`` being the 99.5th
     percentile.  Nothing else differs.
 
-    Pass a ``{label: Frame}`` dict — what :func:`render_all` returns — to stack
-    several clips in one figure.  The audio widgets are :func:`players`, which
-    is a separate call so a figure can be re-drawn without re-listing them.
+    ``shared_scale=True`` takes ONE ``top`` for every clip (the largest of
+    their 99.5th percentiles) and pins every spectrogram's colour limits to it,
+    so equal colours are equal levels across rows — the reading for
+    level-matched clips.  ``rps="once"`` draws the rotor track under the last
+    clip only, for clips that share one trajectory (checked: their ``rps``
+    tracks must be identical).
     """
+    from matplotlib.collections import QuadMesh
+
     from plots.timeframe import PlotTrack, plot_timeframe
     from plots.timeframe.renderers import make_spectrogram_series
     from utils.audio import first_channel
 
+    if rps not in ("each", "once"):
+        raise ValueError(f"rps must be 'each' or 'once', got {rps!r}")
     items = frames if isinstance(frames, dict) else {"": frames}
+    host = next(iter(items.values()))
+    if rps == "once":
+        ref = np.asarray(host["rps"].data)
+        for label, one in items.items():
+            if not np.array_equal(np.asarray(one["rps"].data), ref):
+                raise ValueError(f"rps='once': clip {label!r} is on a different trajectory")
+    specs = {
+        label: make_spectrogram_series(first_channel(one["audio"]), fmax=fmax)
+        for label, one in items.items()
+    }
+    tops = {
+        label: float(np.percentile(np.asarray(spec.series.data, dtype=np.float32), 99.5))
+        for label, spec in specs.items()
+    }
+    shared_top = max(tops.values())
     tracks: list[Any] = []
     for label, one in items.items():
-        spec = make_spectrogram_series(first_channel(one["audio"]), fmax=fmax)
+        spec = specs[label]
         data = np.asarray(spec.series.data, dtype=np.float32)
-        top = float(np.percentile(data, 99.5))
+        top = shared_top if shared_scale else tops[label]
         clipped = td.Series(
             np.clip(data, top - float(dyn_range), top),
             spec.series.dims,
@@ -2121,14 +2217,32 @@ def show(
                 hints={**spec.hints, "title": f"{prefix}spectrogram"},
             )
         )
-        tracks.append(PlotTrack(series=one["rps"], hints={"title": f"{prefix}rps"}))
-    host = next(iter(items.values()))
+        if rps == "each":
+            tracks.append(PlotTrack(series=one["rps"], hints={"title": f"{prefix}rps"}))
+    if rps == "once":
+        tracks.append(PlotTrack(series=host["rps"], hints={"title": "rps"}))
     fig = plot_timeframe(host, tracks=tracks, figsize=figsize)
+    if shared_scale:
+        for ax in fig.axes:
+            for mesh in ax.collections:
+                if isinstance(mesh, QuadMesh):
+                    mesh.set_clim(shared_top - float(dyn_range), shared_top)
+    return fig
+
+
+def show(frames: td.Frame | dict[str, td.Frame], **kw: Any) -> None:
+    """:func:`spectrogram_figure` (same keywords), displayed and closed.
+
+    ``dwym``'s rps route with a READABLE colour range, stacked over clips.
+    Pass a ``{label: Frame}`` dict — what :func:`render_all` returns — to stack
+    several clips in one figure.  The audio widgets are :func:`players`, which
+    is a separate call so a figure can be re-drawn without re-listing them.
+    """
+    import matplotlib.pyplot as plt
     from IPython.display import display
 
+    fig = spectrogram_figure(frames, **kw)
     display(fig)
-    import matplotlib.pyplot as plt
-
     plt.close(fig)
 
 
