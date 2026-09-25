@@ -2,9 +2,11 @@
 
 ONE objective and ONE optimiser pair, per the round plan: an ``AutoDelta``
 guide over the free blocks of :mod:`.model`, driven by ``pyro.optim.Adam``
-(lr 0.02, 1500 steps by default) and then polished with ``torch.optim.LBFGS``
-under a strong-Wolfe line search. Pyro 1.9.1 ships no ``PyroLBFGS``, so the
-polish is torch's L-BFGS on the guide's own unconstrained parameters against
+(lr 0.02, 1500 steps by default) and then polished with torch's L-BFGS
+under a strong-Wolfe line search (:class:`.lbfgs.LBFGS`: torch's step plus an
+optional relative objective-change stop, ``OptimSpec.lbfgs_rtol``, off in
+the v2 modes). Pyro 1.9.1 ships no ``PyroLBFGS``, so the polish runs on the
+guide's own unconstrained parameters against
 ``Trace_ELBO().differentiable_loss`` — the same objective the Adam phase
 minimised, to the last term. WHICH phase converged, how long each took and
 both objectives are recorded in the JSON's ``optimiser`` block; nothing is
@@ -77,6 +79,7 @@ from experiments.stochastic_fit.revised_phase import (
 from . import FIT_SCHEMA, FIT_SCHEMA_V3
 from . import model as MD
 from . import spectrum as SP
+from .lbfgs import LBFGS
 
 __all__ = [
     "FitOutcome",
@@ -162,6 +165,14 @@ def load_profile_init(path: Any) -> ProfileInit:
     )
 
 
+#: ``flight_v3``'s :attr:`OptimSpec.lbfgs_rtol` (the CLI's ``--lbfgs-rtol``
+#: default there): the relative change that IS ``tol_nats_per_cell`` = 1e-4
+#: nats per cell per iteration on the v3 pools, whose objective sits at
+#: 6..9 nats per cell in magnitude (smoke pool -6.2, DREGON -7.2, Michael's
+#: standby -9.3 on the CPU round 1): 1e-5 x 6..9 = 0.6..0.9e-4 nats per cell.
+V3_LBFGS_RTOL = 1e-5
+
+
 @dataclass(frozen=True)
 class OptimSpec:
     """The recorded optimiser schedule. Defaults are the round-plan ones."""
@@ -177,6 +188,12 @@ class OptimSpec:
     lbfgs_iters: int = 200
     lbfgs_frames: int | None = 64
     lbfgs_history: int = 10
+    #: stop an L-BFGS pass once one iteration moves the objective by less than
+    #: this fraction of it (scipy's ``ftol``, :class:`.lbfgs.LBFGS`);
+    #: ``lbfgs_iters`` stays the cap. ``None`` (the v2 modes' default) leaves
+    #: torch's own tests alone, whose absolute 1e-9 lets a pass run to
+    #: ``lbfgs_iters``. ``flight_v3``'s default is :data:`V3_LBFGS_RTOL`.
+    lbfgs_rtol: float | None = None
     seed: int = 0
     #: objective gain per observed cell an L-BFGS RESTART may still find and
     #: the fit still count as converged (nats/cell)
@@ -198,6 +215,7 @@ class OptimSpec:
             lbfgs_iters=self.lbfgs_iters,
             lbfgs_frames=self.lbfgs_frames,
             lbfgs_history=self.lbfgs_history,
+            lbfgs_rtol=self.lbfgs_rtol,
             lbfgs_line_search="strong_wolfe",
             seed=self.seed,
             tol_nats_per_cell=self.tol_nats_per_cell,
@@ -1378,10 +1396,12 @@ def fit_support(
         loss.backward()
         return loss
 
-    def run_lbfgs(max_iter: int) -> tuple[float, int]:
-        """One L-BFGS pass; returns its final loss and its evaluation count."""
-        opt = torch.optim.LBFGS(
+    def run_lbfgs(max_iter: int) -> tuple[float, int, int]:
+        """One L-BFGS pass; returns its final loss, its evaluation count and
+        the iterations it ran (``max_iter`` unless a tolerance stopped it)."""
+        opt = LBFGS(
             params,
+            rtol=optim.lbfgs_rtol,
             max_iter=int(max_iter),
             history_size=int(optim.lbfgs_history),
             line_search_fn="strong_wolfe",
@@ -1403,17 +1423,17 @@ def fit_support(
         # closure never saw
         box()
         with torch.no_grad():
-            return float(elbo_of()), count
+            return float(elbo_of()), count, opt.n_iter
 
     t1 = time.time()
     with torch.no_grad():
         before = float(elbo_of())
-    first_pass, evals = run_lbfgs(int(optim.lbfgs_iters))
+    first_pass, evals, iters = run_lbfgs(int(optim.lbfgs_iters))
     # THE convergence test, not a threshold on a trace: L-BFGS is RESTARTED
     # with a fresh Hessian approximation and half the budget. If a restart
     # cannot find more than ``tol_nats_per_cell`` per observed cell, the first
     # pass had converged; if it can, it had not, and the fit says so.
-    restart, restart_evals = run_lbfgs(max(1, int(optim.lbfgs_iters) // 2))
+    restart, restart_evals, restart_iters = run_lbfgs(max(1, int(optim.lbfgs_iters) // 2))
     lbfgs_s = time.time() - t1
     for p in params:
         p.grad = None
@@ -1453,6 +1473,8 @@ def fit_support(
             lbfgs_restart_gain_per_cell=float(gain_per_cell),
             lbfgs_evals=int(evals),
             lbfgs_restart_evals=int(restart_evals),
+            lbfgs_iters_used=int(iters),
+            lbfgs_restart_iters_used=int(restart_iters),
             log_box_hits=int(sum(int((p.detach().abs() >= LOG_BOX - 1e-9).sum()) for p in boxed)),
             lbfgs_wall_s=lbfgs_s,
             lbfgs_frames_used=int(polish.power.shape[1]),
@@ -1597,12 +1619,15 @@ def fit_latents(
 
 def _rig_timing(opt: dict[str, Any]) -> dict[str, float | None]:
     """Per-step costs of one rig fit, from its optimiser record: seconds per
-    Adam step and per L-BFGS evaluation (forward + gradient, every chunk)."""
+    Adam step and per L-BFGS evaluation (forward + gradient, every chunk), and
+    the L-BFGS iterations the first pass and the restart ran."""
     steps = int(opt.get("adam_steps") or 0)
     evals = int(opt.get("lbfgs_evals") or 0) + int(opt.get("lbfgs_restart_evals") or 0)
     return dict(
         adam_s_per_step=(float(opt["adam_wall_s"]) / steps) if steps else None,
         rig_lbfgs_evals=evals,
+        rig_lbfgs_iters=opt.get("lbfgs_iters_used"),
+        rig_lbfgs_restart_iters=opt.get("lbfgs_restart_iters_used"),
         rig_s_per_eval=(float(opt["lbfgs_wall_s"]) / evals) if evals else None,
     )
 

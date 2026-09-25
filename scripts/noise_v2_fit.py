@@ -893,6 +893,8 @@ def _optim_from_args(args: argparse.Namespace) -> dict[str, Any]:
         spec["adam_batch"] = None if int(args.adam_batch) <= 0 else int(args.adam_batch)
     if getattr(args, "lbfgs_frames", None) is not None:
         spec["lbfgs_frames"] = None if int(args.lbfgs_frames) <= 0 else int(args.lbfgs_frames)
+    if getattr(args, "lbfgs_rtol", None) is not None and float(args.lbfgs_rtol) > 0.0:
+        spec["lbfgs_rtol"] = float(args.lbfgs_rtol)
     return spec
 
 
@@ -966,6 +968,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         p.add_argument("--adam-lr", type=float, default=0.02)
         p.add_argument("--lbfgs-iters", type=int, default=200)
+        p.add_argument(
+            "--lbfgs-rtol",
+            type=float,
+            default=None,
+            help="stop each L-BFGS pass when one iteration moves the objective by less than "
+            "this fraction of it (--lbfgs-iters stays the cap; <= 0: off). Default off, and "
+            "fit.V3_LBFGS_RTOL for --mode flight_v3",
+        )
         p.add_argument("--seed", type=int, default=0)
         p.add_argument(
             "--seeds",
@@ -1331,6 +1341,10 @@ def main(argv: list[str] | None = None) -> int:
             if v3 and args.lbfgs_frames is None:
                 # v3's polish sees every frame: its evaluation is chunked
                 optim["lbfgs_frames"] = None
+            if v3 and args.lbfgs_rtol is None:
+                from experiments.noise_model.fit import V3_LBFGS_RTOL
+
+                optim["lbfgs_rtol"] = V3_LBFGS_RTOL
             tag = f"s{s}" if len(seeds) > 1 else (args.restart_tag or None)
             units.append(
                 Unit(
