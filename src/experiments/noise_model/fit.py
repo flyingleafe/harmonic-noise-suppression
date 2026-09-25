@@ -1689,12 +1689,19 @@ def fit_v3(
         )
         start = Seeds(measured=start.measured, init=warm_init)
 
+    # the rig's line kernel: where the pool's span pins amp_exp the atoms are
+    # data and the lines go through their unit-atom autocorrelation
+    # (spectrum._line_sum_unit_autocorr); a fitted amp_exp keeps the atoms
+    unit = "amp_exp" in MD.span_pinned_sites(blocked, priors=priors)
+    rig_kw: dict[str, Any] = dict(unit_autocorr=True) if unit else {}
+
     rig = fit_support(
         blocked,
         mode=mode,
         priors=priors,
         pin=pin,
         optim=optim.rig,
+        forward_kw=rig_kw,
         profile_init=profile_init,
         progress=progress,
         start=start,
@@ -1744,6 +1751,7 @@ def fit_v3(
             priors=priors,
             pin=pin,
             optim=refit,
+            forward_kw=rig_kw,
             profile_init=profile_init,
             progress=progress,
             start=Seeds(measured=start.measured, init=dict(rig.sites)),
@@ -1800,6 +1808,7 @@ def fit_v3(
         last_rig=rig.optimiser,
         device=str(dev),
         chunk_frames=batch.chunk_frames,
+        line_kernel="unit_autocorr" if unit else "atoms",
         peak_mem_mb=max(
             (
                 float(v)

@@ -892,6 +892,86 @@ def _line_blocks(
         yield k0, k1, block[..., : grid.n_fft // 2 + 1]
 
 
+def _line_sum_unit_autocorr(
+    grid: FlightGrid,
+    params: V2Params,
+    rate: Tensor,
+    kk: int,
+    harmonic_chunk: int | None,
+    line_db: Tensor | None = None,
+) -> Tensor:
+    """``(R, n_c, F)``: the SUM over orders of :func:`_line_blocks`' blocks,
+    through each line's UNIT-atom autocorrelation (``unit_autocorr``).
+
+    A line's atom is ``A w(t) s(t) e^{i k phi(t)}`` with ``A^2 = 2 10^{p/10}``
+    (``profile_db`` plus the frame's ``line_db``) and the speed envelope
+    ``s(t) = (rate/AMP_RPS_REF)^{amp_exp/2}``. With ``amp_exp`` carrying no
+    gradient (span-pinned or fixed) the unit atom is DATA, so the kernel's
+    atom autocorrelation is ``A^2 G`` with ``G`` its unit-atom one, computed
+    under ``no_grad`` per harmonic chunk (one complex and one real FFT of
+    length ``2 n``; never stored across calls: for a cruise pool it would be
+    tens of GB), and the fitted lag law ``R`` enters as ``DFT[A^2 G R]``.
+    That transform is linear, so the orders are summed in the LAG domain
+    first: the only transform with a gradient is ONE per (rotor, frame).
+
+    The lag-domain sum is also halved twice: ``G`` is Hermitian and ``R``
+    even, so the ``2 n`` sequence ``G R`` is Hermitian and its transform real,
+    and only its even bins are read, which are the length-``n`` transform of
+    the sequence folded onto ``n`` lags (``x_tau + x_{tau+n}``, again
+    Hermitian). Only the ``n`` positive lags of ``G`` are kept, and the
+    transform is one ``hfft`` of length ``n``.
+    """
+    ref = grid.window_work
+    n_rotors, n_c, n_work = rate.shape
+    n = int(grid.n_fft_work)
+    profile = _as_t(params.profile_db, ref)
+    gamma = gamma_block(params.gamma_hz, n_rotors=n_rotors, k_max=kk, ref=ref)
+    offset = profile[:, :kk, None] if line_db is None else profile[:, :kk, None] + line_db
+    power = 2.0 * 10.0 ** (_as_t(offset, ref) / 10.0)  # (R, K, n_c | 1)
+
+    with torch.no_grad():
+        phase = (2.0 * math.pi / float(grid.sr_work)) * torch.cumsum(rate, dim=-1)
+        phase = phase - phase[..., n_work // 2 : n_work // 2 + 1]
+        speed_amp = torch.sqrt(
+            (rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF) ** _as_t(params.amp_exp, ref)
+        )
+        env = speed_amp * ref  # (R, n_c, n_work)
+
+    lag_sum = torch.zeros(n_rotors, n_c, n, dtype=torch.complex128, device=ref.device)
+    step = kk if harmonic_chunk is None else max(1, int(harmonic_chunk))
+    for k0 in range(0, kk, step):
+        k1 = min(k0 + step, kk)
+        k = torch.arange(k0 + 1, k1 + 1, dtype=ref.dtype, device=ref.device)
+        with torch.no_grad():
+            kph = torch.remainder(k[None, :, None, None] * phase[:, None], 2.0 * math.pi)
+            spec = torch.fft.fft(torch.polar(env[:, None].expand_as(kph), kph), n=2 * n, dim=-1)
+            # ifft of the real |spec|^2, positive lags 0 .. n - 1
+            g = torch.fft.ihfft(spec.real**2 + spec.imag**2, dim=-1)[..., :n]
+            del spec, kph
+        rho = r_tau(
+            grid.tau_s_work[None, None, :],
+            k[None, :, None],
+            sigma_nu=params.sigma_nu,
+            lam=params.lam,
+            gamma_hz=gamma[:, k0:k1, None],
+        )  # (R, k, n_work)
+        lag_sum = lag_sum + (g * (power[:, k0:k1, :, None] * rho[:, :, None, :])).sum(dim=1)
+
+    half = n // 2
+    folded = torch.cat(
+        (lag_sum[..., :1], lag_sum[..., 1 : half + 1] + lag_sum.flip(-1)[..., :half].conj()),
+        dim=-1,
+    )
+    p_z = torch.fft.hfft(folded, n=n, dim=-1)
+    pos = torch.arange(0, grid.n_fft // 2 + 1, device=p_z.device)
+    neg = torch.remainder(n - pos, n)
+    return (
+        0.25
+        * (p_z.index_select(-1, pos) + p_z.index_select(-1, neg))
+        / float(grid.window_work_sumsq)
+    )
+
+
 def flight_model(
     grid: FlightGrid,
     params: V2Params,
@@ -901,6 +981,7 @@ def flight_model(
     harmonic_chunk: int | None = 32,
     line_db: Tensor | None = None,
     frame_floor_db: tuple[Tensor, Tensor] | None = None,
+    unit_autocorr: bool = False,
 ) -> Tensor:
     """``(M, n_c, F)`` expected periodogram of a moving-carrier chunk.
 
@@ -916,15 +997,24 @@ def flight_model(
     ``(R, 1, n_c)``) adds to every line's ``profile_db`` and
     ``frame_floor_db`` sets each frame's floor level and colour
     (:func:`_floor_frames`); ``None`` for both is the v2 model, bit for bit.
+
+    ``unit_autocorr`` sums the lines through their unit-atom autocorrelation
+    (:func:`_line_sum_unit_autocorr`: the same expected periodogram to
+    rounding, no autograd through the atoms) when ``amp_exp`` carries no
+    gradient; a fitted ``amp_exp`` moves the atoms and keeps the atom kernel.
     """
     ref = grid.window_work
     rate = rate_work.to(dtype=ref.dtype, device=ref.device)
     n_rotors, n_c, _n_work = rate.shape
     kk = _k_cap(params, k_max)
 
-    shapes = torch.zeros(n_rotors, n_c, grid.n_fft // 2 + 1, dtype=ref.dtype, device=ref.device)
-    for _k0, _k1, block in _line_blocks(grid, params, rate, kk, harmonic_chunk, line_db):
-        shapes = shapes + block.sum(dim=1)
+    amp_fitted = isinstance(params.amp_exp, Tensor) and params.amp_exp.requires_grad
+    if unit_autocorr and not amp_fitted:
+        shapes = _line_sum_unit_autocorr(grid, params, rate, kk, harmonic_chunk, line_db)
+    else:
+        shapes = torch.zeros(n_rotors, n_c, grid.n_fft // 2 + 1, dtype=ref.dtype, device=ref.device)
+        for _k0, _k1, block in _line_blocks(grid, params, rate, kk, harmonic_chunk, line_db):
+            shapes = shapes + block.sum(dim=1)
     shapes = shapes * grid.grid_power_factor
 
     line_gain = _mean_pinned_db(_as_t(params.mic_line_gain_db, ref))

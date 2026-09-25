@@ -447,6 +447,62 @@ def test_block_forward_model_at_zero_latents_is_flight_model():
         )
 
 
+def test_the_unit_autocorrelation_line_kernel_is_the_atom_kernel():
+    """With ``amp_exp`` not fitted the atoms are data, and the lines summed
+    through their UNIT-atom autocorrelation (the orders summed in the lag
+    domain, one transform per rotor and frame) must be the atom kernel's
+    expected periodogram — value and gradient in every line parameter — at
+    per-frame line offsets, over a speed ramp and across harmonic chunks. A
+    fitted ``amp_exp`` must keep its gradient."""
+    k_cap, n_mics, n_frames, n_fft, hop = 5, 2, 6, 512, 256
+    par = _params(
+        k_cap=k_cap, n_mics=n_mics, profile_db=np.array([-18.0, -21.0, -25.0, -30.0, -28.0])
+    )
+    grid = SP.flight_grid(sr=SR, n_fft=n_fft, hop=hop)
+    n = n_fft + (n_frames - 1) * hop
+    starts = np.arange(n_frames) * hop
+    rate = SP.flight_rate_work(grid, (180.0 + 25.0 * np.linspace(0.0, 1.0, n))[None, :], starts)
+    rng = np.random.default_rng(7)
+    line_db = _t(3.0 * rng.standard_normal((1, k_cap, n_frames)))
+    weights = _t(rng.uniform(0.5, 1.5, (n_mics, n_frames, n_fft // 2 + 1)))
+
+    def run(unit: bool) -> tuple[np.ndarray, list[np.ndarray]]:
+        leaves = [
+            par.sigma_nu.clone().requires_grad_(),
+            _t(np.linspace(0.01, 0.4, k_cap)[None, :]).requires_grad_(),
+            par.profile_db.clone().requires_grad_(),
+        ]
+        p = dataclasses.replace(par, sigma_nu=leaves[0], gamma_hz=leaves[1], profile_db=leaves[2])
+        m = SP.flight_model(
+            grid,
+            p,
+            rate_work=rate,
+            k_max=k_cap,
+            harmonic_chunk=2,
+            line_db=line_db,
+            unit_autocorr=unit,
+        )
+        (m * weights).sum().backward()
+        return m.detach().numpy(), [x.grad.numpy() for x in leaves if x.grad is not None]
+
+    want, want_grad = run(False)
+    got, got_grad = run(True)
+    np.testing.assert_allclose(got, want, rtol=1e-10, atol=0.0)
+    assert len(got_grad) == len(want_grad) == 3
+    for g, w in zip(got_grad, want_grad, strict=True):
+        np.testing.assert_allclose(g, w, rtol=1e-9, atol=1e-12 * float(np.abs(w).max()))
+
+    amp = _t(2.0).requires_grad_()
+    SP.flight_model(
+        grid,
+        dataclasses.replace(par, amp_exp=amp),
+        rate_work=rate,
+        k_max=k_cap,
+        unit_autocorr=True,
+    ).sum().backward()
+    assert amp.grad is not None and float(amp.grad) != 0.0
+
+
 def test_the_chunked_rig_objective_is_the_elbo_value_and_gradient():
     """The rig step's frame-chunked objective (the Whittle term accumulated
     chunk by chunk, each chunk's graph released) must be the ``Trace_ELBO``
