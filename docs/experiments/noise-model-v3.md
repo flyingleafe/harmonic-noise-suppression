@@ -441,6 +441,152 @@ The polish ran 1 + 1 iterations and gained 6.56 nats (5.2e-5 nats/cell,
 under the 1e-4 tolerance). The total objective is −826 300.30. That is
 21.5 nats (1.7e-4 nats/cell) worse than the all-frames 64 kHz smoke.
 
+#### Timing fits (one seed, 3 rounds, `f65179a7`)
+
+One kaggle job per pool, submitted 2026-09-25 12:48 UTC from
+`.worktrees/submit-v3gpu`. The command is the v3 pool fit with both approved
+changes in effect: 32 kHz kernel, 64-frame stratified rig L-BFGS, one
+all-frames polish. It runs `--rounds 3 --max-frames 0 --seed 0 --device
+cuda`, with `--channel-gains results/noise_v2/mic_gains/mic_gains.json
+--channel-gains-rig <rig> --wander results/noise_v3/wander/<rig>.json`.
+DREGON adds `--wind`. Each job warm-starts from its pool's v2 fit
+(`--init-from`). All frames means the pool's stride-4 frames, the same
+pool and cell count as the CPU round. Harvested with `aws s3 sync` into
+`results/noise_v3/fits_gpu/`: `<pool>__flight_v3.json` and
+`<pool>_job.log`. Kaggle ran one job at a time ("provider at capacity"), so
+the jobs ran back to back. All three ran on a **Tesla T4** (15 GB; driver
+580.159.04, torch 2.7.0+cu126), although each job requested a P100. So did
+the fp32 bench below: all 6 of the round's kaggle GPU jobs landed on a T4.
+
+"Fit" is `optimiser.wall_s`. "Job" is the wrapper's `total_wall_s`: the
+support build, the fit and the CLI start-up. The kaggle session adds about
+95 s of environment setup before the job starts (`preparing` → `running`).
+Rig s/eval is one forward + gradient evaluation. It is measured on the
+64-frame subset in rounds 0–3 and on all frames in the polish. L-BFGS
+iterations are first pass + restart. Every rig L-BFGS ended far below the
+200-iteration cap. The record keeps no stop reason; the 1e-5 relative
+tolerance is the stop the schedule sets for these early exits. Peak memory is
+`torch.cuda.max_memory_allocated` in MiB. The latent step sets it on DREGON
+and cruise, the rig step on standby.
+
+| pool | windows / frames / mics / K / cells | fit s | job s (build) | rig s/eval, rounds 0 / 1 / 2 / 3 · polish | L-BFGS iterations, rounds 0 / 1 / 2 / 3 · polish | Adam s/step (300 steps) | latent step: evals × s/eval, cache s | peak GPU MB (rig step) | `which_converged` | total objective (nats) | σ_ν rad/s |
+|---|---|---:|---:|---|---|---:|---|---:|---|---:|---:|
+| DREGON (`nv3gpu4-dregon-298747`) | 5 / 310 / 8 / 88 / 2 499 840 | 159.8 | 223 (55) | 0.808 / 0.992 / 0.976 / 0.983 · 4.89 | 14+1 / 1+1 / 2+1 / 2+1 · 1+1 | 0.117 | 105 × 0.043, 2.5–2.6 | 2 215 (1 394–1 455) | lbfgs | −18 027 353.4 | 5.432 |
+| Michael's cruise (`nv3gpu4-cruise-61d712`) | 8 / 496 / 8 / 81 / 3 999 744 | 154.2 | 189 (27) | 0.503 / 0.530 / 0.538 / 0.542 · 4.11 | 2+2 / 4+1 / 4+1 / 4+1 · 4+1 | 0.065 | 103–109 × 0.061, 3.8–3.9 | 2 756 (1 131–1 468) | lbfgs | −24 806 693.7 | 4.280 |
+| Michael's standby (`nv3gpu4-standby-6eb132`) | 3 / 93 / 8 / 130 / 749 952 | 131.0 | 161 (24) | 1.258 / 1.432 / 1.441 / 1.446 · 2.10 | 2+4 / 1+1 / 1+1 / 1+1 · 1+1 | 0.161 | 104–105 × 0.023, 1.1 | 1 677 (1 617–1 677) | lbfgs | −6 947 035.5 | 0.290 |
+
+Whittle term per round (round 0 is the rig with the latents at zero) and the
+alternation's move per cell. The tolerance is 1e-4 nats/cell:
+
+| pool | round 0 | round 1 (move) | round 2 (move) | round 3 (move) | polish (gain/cell) |
+|---|---:|---:|---:|---:|---:|
+| DREGON | −17 800 116.2 | −18 074 433.0 (0.1097) | −18 078 465.6 (0.0016) | −18 079 299.2 (3.3e-4) | −18 079 516.3 (8.8e-5) |
+| cruise | −24 427 766.7 | −24 878 314.1 (0.1126) | −24 885 767.2 (0.0019) | −24 888 418.9 (6.6e-4) | −24 891 425.7 (7.6e-4) |
+| standby | −6 928 454.0 | −6 971 762.9 (0.0577) | −6 973 350.5 (0.0021) | −6 973 865.5 (6.9e-4) | −6 973 866.3 (1.5e-6) |
+
+Widths (`params.gamma_hz`; rotors numbered from 1; γ0 k = 0.01k Hz):
+
+| pool | γ median Hz | γ max per rotor Hz (k) | γ > 50 Hz | max γ/(0.01k) | lines > 5 γ0 k | max γ at k ≤ 8 Hz |
+|---|---:|---|---:|---|---:|---:|
+| DREGON | 1.668 | 19.34 (69), 40.94 (26), 10.40 (43), 24.37 (70) | 0 | 157.4 (rotor 2, k = 26, 40.9 Hz) | 141/352 | 4.57 |
+| cruise | 0.893 | 28.11 (49), 12.25 (17), 2.81 (15), 3.20 (15) | 0 | 72.0 (rotor 2, k = 17, 12.2 Hz) | 100/324 | 2.71 |
+| standby | 2.660 | 17.06 (130), 11.71 (81), 95.58 (128), 13.08 (85) | 3 (rotor 3, k = 126 / 127 / 128: 59.6 / 71.5 / 95.6 Hz) | 74.7 (rotor 3, k = 128, 95.6 Hz) | 244/520 | 2.92 |
+
+- **Convergence.** `which_converged` is "lbfgs" in all three pools:
+  the all-frames polish met the 1e-4 restart-gain test (restart gain
+  2.1e-5 / 1.4e-5 / 4.3e-7 nats/cell). The alternation did not converge in
+  any pool: round 3 still moved 3.3 / 6.6 / 6.9 × the tolerance. The subset
+  rig steps failed the restart-gain test in DREGON round 1, in cruise
+  rounds 0–3 (restart gain 9.0e-4 nats/cell in round 0), and in standby
+  round 0 (6.6e-4).
+- **Subset vs polish.** The polish gains 221.2 nats on DREGON
+  (8.8e-5/cell), 3 043.7 on cruise (7.6e-4/cell, 7.6 × the tolerance) and
+  1.1 on standby. On cruise, a 64-frame subset of 496 frames leaves its rig
+  optimum measurably off the full-pool one.
+- **Objective.** DREGON: Whittle −18 079 516.3 + rig −log prior 5 741.5 + OU
+  −log prior 46 421.4. Cruise: −24 891 425.7 + 4 572.0 + 80 160.1. Standby:
+  −6 973 866.3 + 4 840.8 + 21 990.0. These totals cannot be ranked against
+  the CPU round: that round used σ_v rig-wide, a 64 kHz kernel and an
+  all-frames rig L-BFGS. The CPU round's best DREGON restart is lower by
+  11 240 nats (4.5e-3/cell). Its best standby restart is lower by 1 754
+  nats (2.3e-3/cell).
+- **Span pins.** Cruise pins `amp_exp`, `floor_exp` and `floor_static_rel`
+  (speed span 1.436 < 1.5). DREGON (1.744) and standby (1.928) pin nothing.
+- **`init_from` clip record.** Each v2 site was clipped to the 0.001–0.999
+  prior box.
+  - **DREGON**, from R5 `flight_profile` (`1c6ac337`). Sites `amp_exp`,
+    `floor_exp`, `floor_static_rel`, `gamma_hz`, `profile_db`, `sigma_nu`.
+    Clipped: γ 246 of 352, `profile_db` 2, `floor_exp` 1,
+    `floor_static_rel` 1; σ_ν, `amp_exp` and `floor_shape_z` 0. The floor
+    starts from the measurement: objective −17 592 338.7, against
+    −15 542 065.2 at the v2 floor. v2 λ 0.0608 is not carried (λ is pinned).
+  - **Cruise**, from R3 `flight` (`a996e5e5`). Sites `gamma_hz`,
+    `profile_db`, `sigma_nu`. Clipped: γ 164 of 324, `profile_db` 3, σ_ν 1,
+    `floor_shape_z` 6. The floor starts from the measurement (−24 192 501.9,
+    against −23 651 922.6 at the v2 floor).
+  - **Standby**, from R3 `flight` (`58e895fb`). Sites `amp_exp`,
+    `floor_exp`, `floor_shape_z`, `floor_static_rel`, `gamma_hz`,
+    `profile_db`, `sigma_nu`. Clipped: γ 180 of 520, `floor_static_rel` 1,
+    all others 0. The floor starts from the v2 floor re-expressed
+    (−6 325 922.7, against −5 037 953.2 measured).
+- **Time split** (DREGON; the other pools are alike). Round 0 takes 72.5 s:
+  35 s of Adam and 17 s of subset L-BFGS. Rounds 1–3 take 16–17 s each, of
+  which 7 s is the latent step. The all-frames polish takes 37 s.
+
+#### fp32 unit-atom kernel (`nv3gpu4-fp32bench-a7aed3`, T4)
+
+`/tmp/gpufit4/fp32_bench.py` measures without implementing anything. It
+uses the smoke windows at all 8 mics, the full K 81, 62 frames, 32 kHz and
+the seed start point. It times one full rig evaluation in fp64 (as shipped),
+then replays the kernel's no-grad atom block per chunk in complex128 and in
+complex64: unit atoms, the 2n FFT, |·|², the inverse, and the order sum
+with the lag law.
+
+| rig s/eval, fp64 | atom block c128 | atom block c64 | block share of eval | projected eval, fp32 block | projected speed-up | block rel. error (max-abs) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0.352 | 0.297 s | 0.086 s (3.45×) | 84.5 % | 0.141 s | **2.50×** | 7.8e-6 |
+
+**Objective difference** (`/tmp/gpumon/fp32_obj.py`, laptop CPU under the
+cap, one no-grad evaluation each). The same pool and point were used, with
+the atom block in complex64 and every accumulation from the lag sum on in
+fp64. The fp64 objective is −2 714 463.8343 nats and the fp32-block
+objective −2 714 463.8236: a difference of **+0.0107 nats**, 3.9e-9
+relative, 2.1e-8 nats/cell over 499 968 cells. That is 5 000 × under the
+1e-4 nats/cell tolerance. It was measured at one point, the seed start, not
+at an optimum.
+
+#### Does 4 restarts × 3 rounds fit in 1 h per pool?
+
+**Yes, on the T4 kaggle allocates, with a margin of 4.6–5.6×.** Restarts
+run one after another in one job, and the support build and the kaggle
+setup (≈ 95 s) are paid once:
+
+| pool | 4 × fit s | + build s | + kaggle setup s | total s (min) | share of 1 h |
+|---|---:|---:|---:|---:|---:|
+| DREGON | 639 | 55 | 95 | 789 (13.2) | 22 % |
+| cruise | 617 | 27 | 95 | 739 (12.3) | 21 % |
+| standby | 524 | 24 | 95 | 643 (10.7) | 18 % |
+
+All three pools × 4 restarts would fit in one 1 h job as well: 1 981 s,
+33 min. No job got a P100, so no P100 number was measured. The P100's fp64
+rate is about 19× the T4's (4.7 against 0.25 TFLOPS). The fp32 bench shows
+the rig evaluation is dominated by the fp64 atom block (84.5 %), so the T4
+times are an upper bound for a P100 [inference]. The margin covers the
+current stopping rules only. The rtol stop ends each rig L-BFGS after
+1–14 iterations, and the alternation is still 3–7 × off its tolerance after
+round 3. One extra round costs 15–19 s per restart. Within 1 h a restart may
+take ≈ 860 s ((3 600 − 150) / 4), 5.4–6.6 × the measured single-seed wall.
+
+**DREGON widths are physical.** No line is wider than 50 Hz. The widest,
+40.9 Hz at rotor 2, k = 26, is γ/(0.01k) = 157. The v2 R5 fit it
+warm-starts from has 7 223 Hz at k = 65 on rotor 1: γ/(0.01k) = 11 113. Its
+own maximum is 16 059 Hz at rotor 4, k = 83 (γ/(0.01k) = 19 348), and it has
+19 lines over 50 Hz. The v3 widths are 70–120 × narrower in that ratio.
+The warm start clipped 246 of the 352 v2 widths into the prior box, and the
+v3 fit did not escape to broadband pedestals again. The widths are still
+wider than the CPU v3 round's (max γ/(0.01k) 81.6, γ median 0.72 Hz),
+and 141 of 352 lines exceed 5 γ0 k.
+
 ## Results
 
 _Fits running; results follow the harvest._

@@ -1,0 +1,46 @@
+V3GPU job=nv3gpu4-standby-6eb132 dest=s3://omnirun-artifacts/nv3gpu4-standby-6eb132/outputs/results/noise_v3/fits_gpu aws='uvx --quiet --from awscli aws' sha=f65179a76896 host=b29dfdd1de57 nproc=4
+name, memory.total [MiB], driver_version
+Tesla T4, 15360 MiB, 580.159.04
+Tesla T4, 15360 MiB, 580.159.04
+V3GPU torch 2.7.0+cu126 cuda True Tesla T4
+V3GPU spec: set=michaels-standby name=michaels_fly125_standby rig=michaels extra='' init=results/noise_v2/rounds/round3/fits/michaels_fly125_standby__flight.json
+  flight_michaels_FLY125@6.000+4_rps_refined: 8x122x1025 4.000 s carriers [30.922183, 34.75634, 40.203837, 36.265439] pass=True
+  flight_michaels_FLY125@10.000+4_rps_refined: 8x122x1025 4.000 s carriers [30.986261, 34.543646, 40.148095, 36.542121] pass=True
+built 3/3 supports; wrote /tmp/supports_michaels_fly125_standby/index.json and /tmp/supports_michaels_fly125_standby/findings.md
+findings.md
+flight_michaels_FLY125@10.000+4_rps_refined.npz
+flight_michaels_FLY125@2.000+4_rps_refined.npz
+flight_michaels_FLY125@6.000+4_rps_refined.npz
+index.json
+V3GPU build exit=0 wall_s=24
+13:03:31   we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+13:03:31   adam     0  loss -6.50777e+06
+13:03:31   adam    50  loss -6.90519e+06
+13:03:31   adam   100  loss -6.81656e+06
+13:03:31   adam   150  loss -6.83929e+06
+13:03:31   adam   200  loss -7.0118e+06
+13:03:31   adam   250  loss -7.01117e+06
+13:03:31   v3 round 0: whittle -6.92845e+06
+13:03:31   v3 round 1: whittle -6.97176e+06  move/cell 0.0577
+13:03:31   v3 round 2: whittle -6.97335e+06  move/cell 0.00212
+13:03:31   v3 round 3: whittle -6.97387e+06  move/cell 0.000687
+13:03:31   v3 all-frames polish: whittle -6.97387e+06  gain/cell 1.46e-06
+13:03:31 ('michaels_fly125_standby__flight_v3', 'ok')
+13:03:31 {
+13:03:31  "n_units": 1,
+13:03:31  "n_converged": 0,
+13:03:31  "not_converged": [
+13:03:31   "michaels_fly125_standby"
+13:03:31  ],
+13:03:31  "slowest_s": 131.0310697555542,
+13:03:31  "fits": [
+13:03:31   "results/noise_v3/fits_gpu/michaels_fly125_standby__flight_v3.json"
+13:03:31  ]
+13:03:31 }
+13:03:31 # wrote results/noise_v3/fits_gpu/findings.md
+V3GPU fit exit=0 fit_wall_s=137 total_wall_s=161
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'wrapt'
+FIT_SUMMARY {"file": "results/noise_v3/fits_gpu/michaels_fly125_standby__flight_v3.json", "git": "f65179a7689611a2df20c6c92dd075f4ea37be2b", "device": "cuda:0", "line_kernel": "unit_autocorr", "chunk_frames": 16, "lbfgs_rtol": 1e-05, "wall_s": 131.0310697555542, "peak_mem_mb": 1676.7763671875, "converged": false, "which_converged": "lbfgs", "alternation_converged": false, "rig_converged": true, "rounds_run": 3, "total_nats": -6947035.461661658, "whittle_nats": -6973866.28852163, "whittle_latents_zero_nats": -6928453.954910472, "rig_neg_log_prior_nats": 4840.778823152205, "ou_neg_log_prior_nats": 21990.04803681939, "n_cells": 749952, "total_per_cell": -9.263306800517444, "first_rig": {"adam_steps": 300, "lbfgs_frames": 64, "lbfgs_frames_used": 64, "lbfgs_stratified": true, "adam_wall_s": 48.186784744262695, "lbfgs_wall_s": 12.580434083938599, "lbfgs_evals": 4, "lbfgs_restart_evals": 6, "lbfgs_iters_used": 2, "lbfgs_restart_iters_used": 4, "lbfgs_loss_before": -6924464.91300208, "lbfgs_loss_first_pass": -6924624.892526895, "lbfgs_loss_after_restart": -6924966.883105299, "lbfgs_restart_gain_per_cell": 0.0006626491552048994, "converged": false, "peak_mem_mb": null}, "last_rig": {"adam_steps": 0, "lbfgs_frames": null, "lbfgs_frames_used": 93, "lbfgs_stratified": true, "adam_wall_s": 1.7404556274414062e-05, "lbfgs_wall_s": 12.586910486221313, "lbfgs_evals": 3, "lbfgs_restart_evals": 3, "lbfgs_iters_used": 1, "lbfgs_restart_iters_used": 1, "lbfgs_loss_before": -6969024.416719387, "lbfgs_loss_first_pass": -6969025.189660856, "lbfgs_loss_after_restart": -6969025.509698478, "lbfgs_restart_gain_per_cell": 4.2674414096468493e-07, "converged": true, "peak_mem_mb": null}, "history": [{"round": 0, "whittle_nats": -6928453.954910472, "rig_converged": false, "adam_s_per_step": 0.16062261581420897, "rig_lbfgs_evals": 10, "rig_lbfgs_iters": 2, "rig_lbfgs_restart_iters": 4, "rig_s_per_eval": 1.2580434083938599, "peak_mem_mb": 1617.392578125, "wall_s": 70.5957555770874}, {"round": 1, "whittle_nats": -6971762.915834408, "whittle_move_per_cell": 0.05774897716645361, "rig_converged": true, "adam_s_per_step": null, "rig_lbfgs_evals": 6, "rig_lbfgs_iters": 1, "rig_lbfgs_restart_iters": 1, "rig_s_per_eval": 1.432315707206726, "latent_evals": 105, "latent_s_per_eval": 0.022618890943981354, "latent_cache_s": 1.1213107109069824, "latent_wall_s": 3.5292036533355713, "peak_mem_mb": 1676.75048828125, "latent_peak_mem_mb": 1634.90380859375, "wall_s": 14.758859395980835}, {"round": 2, "whittle_nats": -6973350.492308281, "whittle_move_per_cell": 0.0021169041136940877, "rig_converged": true, "adam_s_per_step": null, "rig_lbfgs_evals": 6, "rig_lbfgs_iters": 1, "rig_lbfgs_restart_iters": 1, "rig_s_per_eval": 1.4412904977798462, "latent_evals": 104, "latent_s_per_eval": 0.02219282893034128, "latent_cache_s": 1.131030797958374, "latent_wall_s": 3.4690628051757812, "peak_mem_mb": 1676.7763671875, "latent_peak_mem_mb": 1634.9296875, "wall_s": 14.762493371963501}, {"round": 3, "whittle_nats": -6973865.45245031, "whittle_move_per_cell": 0.0006866574687826928, "rig_converged": true, "adam_s_per_step": null, "rig_lbfgs_evals": 6, "rig_lbfgs_iters": 1, "rig_lbfgs_restart_iters": 1, "rig_s_per_eval": 1.4459298054377239, "latent_evals": 105, "latent_s_per_eval": 0.022661570140293668, "latent_cache_s": 1.1396756172180176, "latent_wall_s": 3.5554046630859375, "peak_mem_mb": 1676.7763671875, "latent_peak_mem_mb": 1634.9296875, "wall_s": 14.885334253311157}], "polish": {"frames": 93, "subset_frames": 64, "loss_note": "Whittle - rig log prior on the FULL pool at the final latents", "loss_at_subset_optimum": -6969024.416719387, "loss_polished": -6969025.509698478, "gain_nats": 1.0929790902882814, "gain_per_cell": 1.4573987272362516e-06, "whittle_at_subset_optimum": -6973865.45245031, "whittle_polished": -6973866.28852163, "rig_converged": true, "adam_s_per_step": null, "rig_lbfgs_evals": 6, "rig_lbfgs_iters": 1, "rig_lbfgs_restart_iters": 1, "rig_s_per_eval": 2.0978184143702188, "peak_mem_mb": 1664.66162109375, "wall_s": 16.013184547424316}, "front_end": {"sr": 16000, "n_fft": 2048, "hop": 512, "sr_work": 32000, "n_fft_work": 4096}, "latent_fit": {"windows": 3, "n_blocks": [8, 8, 8], "line_dtype": "torch.float64", "tracks": ["d", "u", "uj", "v"], "loss_before": -6951697.367918452, "loss_after": -6951875.821917104, "evals": 105, "cache_s": 1.1396756172180176, "s_per_eval": 0.022661570140293668, "wall_s": 3.5550999641418457}, "sigma_nu": 0.2902472291938901, "gamma_median": 2.660234944267731, "gamma_median_per_rotor": [1.6985, 2.6666, 4.6038, 2.3969], "gamma_max_per_rotor": [17.057, 11.709, 95.581, 13.081], "gamma_argmax_k_per_rotor": [130, 81, 128, 85], "gamma_over_50hz": 3, "gamma_shape": [4, 130], "amp_exp": 3.932216766248531, "span_pins": [], "speed_span": 1.9278266197081828, "init_from": {"source": "results/noise_v2/rounds/round3/fits/michaels_fly125_standby__flight.json", "schema": "noise-v2-fit/2", "mode": "flight", "git": "58e895fb943207db1ba5124f24329822fadf39b9", "sites": ["amp_exp", "floor_exp", "floor_shape_z", "floor_static_rel", "gamma_hz", "profile_db", "sigma_nu"], "clipped": {"sigma_nu": 0, "gamma_hz": 180, "profile_db": 0, "amp_exp": 0, "floor_exp": 0, "floor_static_rel": 1, "floor_shape_z": 0}, "prior_box_quantiles": [0.001, 0.999], "floor_start": "v2 re-expressed", "objective_at_v2_floor": -6325922.701675446, "objective_at_measured_floor": -5037953.246885765, "objective_at_measured_start": -6621819.48484148, "not_v3_sites": {"lam": 0.5, "note": "lam is pinned in v3 flight; v2 mic gains are data-normalised"}}, "batch": {"grid": {"sr": 16000, "n_fft": 2048, "hop": 512, "sr_work": 32000, "n_fft_work": 4096}, "n_frames_total": 366, "n_frames_used": 93, "frame_stride": 4, "exposure_scale": 3.935483870967742, "carrier_min_rev_s": 20.930063247680664, "carrier_max_rev_s": 40.34953308105469, "speed_span": 1.9278266197081828, "channel_gains": {"gains_db": [0.02806923749999987, -6.5042584625, 1.0624115375, 2.3590115375, 5.0315015375000005, 2.4618615375, -0.5576684625000001, -3.8809284625000005], "source": "results/noise_v2/mic_gains/mic_gains.json", "rig": "michaels", "rule": "rank-one floor gain per channel on the 1/3-octave bands >= 500 Hz (rigs.<rig>.wind.excess_db_above_500hz), re-centred on the channels used; each channel's periodogram is divided by 10^(g/10)"}}}
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'wrapt'

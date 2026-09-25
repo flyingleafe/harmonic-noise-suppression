@@ -1,0 +1,12 @@
+V3GPU job=nv3gpu4-fp32bench-a7aed3 dest=s3://omnirun-artifacts/nv3gpu4-fp32bench-a7aed3/outputs/results/noise_v3/fits_gpu aws='uvx --quiet --from awscli aws' sha=f65179a76896 host=fb7e67560973 nproc=4
+name, memory.total [MiB], driver_version
+Tesla T4, 15360 MiB, 580.159.04
+Tesla T4, 15360 MiB, 580.159.04
+V3GPU torch 2.7.0+cu126 cuda True Tesla T4
+built /tmp/supports_smoke/flight_michaels_FLY125@16.000+4_rps_refined.npz
+built /tmp/supports_smoke/flight_michaels_FLY125@32.000+4_rps_refined.npz
+V3GPU smoke build wall_s=21
+  we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+FP32_BENCH {"device": "Tesla T4", "work_rate": 32000, "k_max": 81, "n_frames": 62, "n_mics": 8, "chunks": 4, "rig_s_per_eval_fp64": 0.3515965938568115, "atom_block_s_c128": 0.29711079597473145, "atom_block_s_c64": 0.08615946769714355, "atom_block_rel_err_c64": 7.780843707210924e-06, "atom_block_share_of_eval": 0.8450332032958501, "projected_rig_s_per_eval_fp32_kernel": 0.14064526557922363, "projected_speedup": 2.499882185218398}
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'wrapt'
