@@ -64,6 +64,7 @@ from pyro.optim.optim import PyroOptim
 from torch import Tensor
 from torch.distributions import constraints
 
+from data_processing.noise_model.constants import FLOOR_TILT_REF_HZ
 from data_processing.noise_model.floor import floor_geometry
 from data_processing.noise_model.v3 import WIND_CORNER_HZ
 from experiments.stochastic_fit.model import FLOOR_SHAPE_N_CTRL
@@ -83,6 +84,7 @@ __all__ = [
     "OptimSpecV3",
     "ProfileInit",
     "Seeds",
+    "V2Fit",
     "chunked_objective",
     "fit_support",
     "fit_v3",
@@ -94,6 +96,7 @@ __all__ = [
     "measure_batch",
     "seeds",
     "span_pin_record",
+    "warm_start_v3",
     "write_fit",
 ]
 
@@ -649,10 +652,7 @@ def _seeds_v3(
         else np.zeros(ctrl.size)
     )
     sigma_b = max(float(np.sqrt(np.mean(ctrl**2))), float(priors.floor_shape_sd_min_db))
-    chol = grid.floor.shape_chol.detach().cpu().numpy()
-    z0 = np.linalg.solve(
-        sigma_b**2 * (chol.T @ chol) + np.eye(chol.shape[1]), sigma_b * (chol.T @ ctrl)
-    )
+    z0 = _floor_z(grid, sigma_b, ctrl)
 
     wind_db = _wind_centres(batch) if priors.wind else None
 
@@ -692,6 +692,186 @@ def _seeds_v3(
     if wind_db is not None:
         out["wind_db"] = t(wind_db)
     return Seeds(measured=measured, init=out)
+
+
+def _floor_z(grid: SP.FlightGrid, sigma_b: float, ctrl_db: np.ndarray) -> np.ndarray:
+    """The ``floor_shape_z`` whose spline ``sigma_B (L z)`` reads ``ctrl_db`` at
+    the control points: the ridge solution of ``sigma_B L z = c`` (``L`` is
+    too ill-conditioned for a plain inverse; the ridge is the ``N(0, I)``
+    prior's own)."""
+    chol = grid.floor.shape_chol.detach().cpu().numpy()
+    return np.linalg.solve(
+        sigma_b**2 * (chol.T @ chol) + np.eye(chol.shape[1]),
+        sigma_b * (chol.T @ np.asarray(ctrl_db, dtype=np.float64)),
+    )
+
+
+#: A warm-started site is clipped into its v3 prior's central ``1 - 2 q``
+#: (``q .. 1 - q`` quantiles): a v2 value the v3 prior calls impossible — a
+#: v2 width parked at 10^5 x its bench law — is a start the v3 fit would first
+#: have to climb out of.
+WARM_START_PRIOR_Q = 1e-3
+
+#: Adam steps a warm-started v3 fit runs before its L-BFGS polish (the CLI's
+#: ``--adam-steps`` default with ``--init-from``): the start is a MAP of the
+#: same data, not a measurement.
+WARM_START_ADAM_STEPS = 300
+
+
+@dataclass(frozen=True)
+class V2Fit:
+    """A v2 fit of the same pool, the warm start of a v3 fit (``--init-from``)."""
+
+    path: str
+    payload: dict[str, Any]
+
+    @classmethod
+    def load(cls, path: str | Path) -> V2Fit:
+        d = json.loads(Path(path).read_text())
+        if d.get("schema") not in (FIT_SCHEMA, "noise-v2-fit/1"):
+            raise ValueError(f"{path}: not a v2 fit (schema {d.get('schema')!r})")
+        if d.get("kind") != "flight":
+            raise ValueError(f"{path}: a v3 warm start needs a FLIGHT fit, got {d.get('kind')!r}")
+        return cls(path=str(path), payload=d)
+
+
+def _prior_box(
+    batch: MD.SupportBatch, *, priors: MD.PriorsV3, pin: dict[str, Any] | None, q: float
+) -> dict[str, tuple[Tensor, Tensor]]:
+    """``{site: (lo, hi)}``: every v3 rig site's prior ``q`` and ``1 - q``
+    quantiles, read off the very distributions the model samples."""
+    boxes: dict[str, tuple[Tensor, Tensor]] = {}
+
+    def collect(name: str, d: Any) -> Tensor:
+        base = d
+        while isinstance(base, torch.distributions.Independent):
+            base = base.base_dist
+        at = lambda p: torch.full(  # noqa: E731
+            tuple(base.batch_shape), p, dtype=torch.float64, device=batch.power.device
+        )
+        boxes[name] = (base.icdf(at(q)), base.icdf(at(1.0 - q)))
+        return boxes[name][0]
+
+    MD.sample_params(batch, mode=MD.V3_MODE, priors=priors, pin=pin, site=collect)
+    return boxes
+
+
+def warm_start_v3(
+    v2: V2Fit,
+    *,
+    batch: MD.SupportBatch,
+    start: Seeds,
+    priors: MD.PriorsV3,
+    pin: dict[str, Any] | None = None,
+) -> tuple[dict[str, Tensor], dict[str, Any]]:
+    """The v3 guide's start from a v2 fit of the same pool, and its record.
+
+    ``start`` is the v3 measurement of ``batch`` (the prior centres stay
+    v3's own); its ``init`` is replaced site by site:
+
+    * ``sigma_nu``, ``gamma_hz`` (the first ``K`` orders; orders the v2 fit
+      does not carry keep the measured start), ``profile_db`` likewise, and
+      the speed laws v3 does not pin — straight from the v2 ``params``;
+    * ``floor_shape_z`` RE-EXPRESSED: v3's floor is the spline alone about
+      the measured ``mu`` with the measured ``sigma_B``, so the v2 floor's
+      microphone-mean dB curve at the control points (``floor_mean_db +
+      mean(mic_floor_db) + 6 (L z) + tilt log2(f_j / f_ref)``) minus ``mu``
+      is solved for ``z`` exactly as the measurement's own start is — and
+      KEPT only if the objective there beats the measured floor's under the
+      same warm comb: a v2 floor can sit tens of dB under the data where its
+      over-wide lines (v2's widths reach 10^5 x the bench law) made a
+      broadband pedestal the v3 width prior clips away;
+    * ``lam`` is not a v3 site (pinned in flight) and is only recorded;
+    * every site clipped into its v3 prior's :data:`WARM_START_PRIOR_Q`
+      central box (:func:`_prior_box`).
+    """
+    p = v2.payload["params"]
+    r, k = batch.n_rotors, batch.k_max
+    grid = batch.grid
+    assert isinstance(grid, SP.FlightGrid) and start.measured.floor_shape_sd_db is not None
+    t = lambda v: torch.as_tensor(np.asarray(v, dtype=np.float64), dtype=torch.float64)  # noqa: E731
+
+    def per_line(v2_rk: np.ndarray, site: str) -> Tensor:
+        got = np.atleast_2d(np.asarray(v2_rk, dtype=np.float64))
+        if got.shape[0] != r:
+            raise ValueError(f"{v2.path}: {site} has {got.shape[0]} rotors, the pool {r}")
+        out = start.init[site].detach().cpu().numpy().copy()
+        kk = min(k, int(got.shape[1]))
+        out[:, :kk] = got[:, :kk]
+        return t(out)
+
+    v2_sites: dict[str, Tensor] = dict(
+        sigma_nu=t(p["sigma_nu"]),
+        gamma_hz=per_line(MD.gamma_from_params(p), "gamma_hz"),
+        profile_db=per_line(p["profile"]["profile_db"], "profile_db"),
+        amp_exp=t(p["profile"]["amp_exp"]),
+        floor_exp=t(p["floor"]["floor_exp"]),
+        floor_static_rel=t(p["floor"]["floor_static_rel"]),
+    )
+    fl = p["floor"]
+    ctrl_hz = np.asarray(grid.floor.ctrl_hz, dtype=np.float64)
+    v2_ctrl = (
+        float(fl["floor_mean_db"])
+        + float(np.mean(np.asarray(fl["mic_floor_db"], dtype=np.float64)))
+        + grid.floor.shape_db(t(fl["floor_shape_z"])).detach().cpu().numpy()
+        + float(fl["floor_tilt_db_oct"]) * np.log2(ctrl_hz / FLOOR_TILT_REF_HZ)
+    )
+    sigma_b = float(start.measured.floor_shape_sd_db)
+    v2_sites["floor_shape_z"] = t(
+        _floor_z(grid, sigma_b, v2_ctrl - float(start.measured.floor_mean_db))
+    )
+
+    boxes = _prior_box(batch, priors=priors, pin=pin, q=WARM_START_PRIOR_Q)
+    init = dict(start.init)
+    clipped: dict[str, int] = {}
+    for name, value in v2_sites.items():
+        if name not in init:  # pinned (a span pin or --pin): no site to start
+            continue
+        lo, hi = (b.detach().cpu() for b in boxes[name])
+        init[name] = torch.maximum(torch.minimum(value, hi), lo)
+        clipped[name] = int((init[name] != value).sum())
+    at_v2_floor = _objective_at(batch, init, priors=priors, pin=pin)
+    at_measured_floor = _objective_at(
+        batch, dict(init, floor_shape_z=start.init["floor_shape_z"]), priors=priors, pin=pin
+    )
+    floor_from = "v2 re-expressed" if at_v2_floor <= at_measured_floor else "measured"
+    if floor_from == "measured":
+        init["floor_shape_z"] = start.init["floor_shape_z"]
+    record = dict(
+        source=v2.path,
+        schema=v2.payload.get("schema"),
+        mode=v2.payload.get("mode"),
+        git=v2.payload.get("git"),
+        sites=sorted(n for n in clipped if n != "floor_shape_z" or floor_from != "measured"),
+        clipped=clipped,
+        prior_box_quantiles=[WARM_START_PRIOR_Q, 1.0 - WARM_START_PRIOR_Q],
+        floor_start=floor_from,
+        objective_at_v2_floor=at_v2_floor,
+        objective_at_measured_floor=at_measured_floor,
+        objective_at_measured_start=_objective_at(batch, start.init, priors=priors, pin=pin),
+        v2_floor_ctrl_db=np.round(v2_ctrl - float(start.measured.floor_mean_db), 3).tolist(),
+        not_v3_sites=dict(
+            lam=p.get("lam"), note="lam is pinned in v3 flight; v2 mic gains are data-normalised"
+        ),
+    )
+    return init, record
+
+
+def _objective_at(
+    batch: MD.SupportBatch,
+    values: dict[str, Tensor],
+    *,
+    priors: MD.PriorsV3,
+    pin: dict[str, Any] | None,
+) -> float:
+    """``Whittle - log p(sites)`` of ``batch`` at site ``values`` (no gradient)."""
+    dev = batch.power.device
+    vals = {k: v.to(dev) for k, v in values.items()}
+    kw: dict[str, Any] = dict(mode=MD.V3_MODE, priors=priors, pin=pin, values=vals)
+    with torch.no_grad():
+        nlp = -MD.log_prior_tensor(batch, **kw)
+        m_model = MD.forward(batch, MD.sample_params_from_values(batch, **kw))
+        return float(nlp + MD.whittle_risk(batch, m_model))
 
 
 #: How far under the quietest microphone's low-band level a v3 wind prior
@@ -1435,6 +1615,7 @@ def fit_v3(
     optim: OptimSpecV3 = OptimSpecV3(),
     profile_init: ProfileInit | None = None,
     progress: int = 0,
+    init_from: V2Fit | None = None,
 ) -> FitOutcome:
     """MAP-fit noise model v3 on a flight pool (explainer §3.4).
 
@@ -1454,6 +1635,10 @@ def fit_v3(
     wander's ``(sigma, tau)`` never move, so this converges to the joint MAP
     over rig and latents without the variance cheat of §3.3a.
 
+    ``init_from`` starts step (i) at a v2 fit of the same pool
+    (:func:`warm_start_v3`; recorded in ``diagnostics.init_from``) instead
+    of the measured start; the priors are the measured ones either way.
+
     The returned outcome's ``params`` are the RIG only; ``latents`` is the
     record's per-window block tracks (the §3.5 check) and the objective carries
     the total ``Whittle + rig prior + OU prior``, which is also what
@@ -1470,6 +1655,14 @@ def fit_v3(
     start = seeds(blocked, mode=mode, priors=priors, pin=pin, profile_init=profile_init)
     measured_batch = replace(blocked, measured=start.measured)
     n_cells = max(1, blocked.n_cells)
+    warm: dict[str, Any] | None = None
+    if init_from is not None:
+        # the guide starts at the v2 MAP of the same pool (clipped into the v3
+        # priors); the priors stay the ones v3 measured
+        warm_init, warm = warm_start_v3(
+            init_from, batch=measured_batch, start=start, priors=priors, pin=pin
+        )
+        start = Seeds(measured=start.measured, init=warm_init)
 
     rig = fit_support(
         blocked,
@@ -1607,6 +1800,7 @@ def fit_v3(
             window_blocks=list(blocked.window_blocks),
             n_windows=len(blocked.window_blocks),
         ),
+        init_from=warm,
     )
     return FitOutcome(
         params=rig.params,

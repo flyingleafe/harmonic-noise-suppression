@@ -219,6 +219,7 @@ def worker(unit: Unit) -> dict[str, Any]:
             ),
             profile_init=prof_init,
             progress=int(p.get("progress", 0)),
+            init_from=FT.V2Fit.load(str(p["init_from"])) if p.get("init_from") else None,
         )
     else:
         priors = MD.PRIORS
@@ -883,7 +884,7 @@ def findings(out_dir: Path) -> str:
 
 def _optim_from_args(args: argparse.Namespace) -> dict[str, Any]:
     spec: dict[str, Any] = dict(
-        adam_steps=int(args.adam_steps),
+        adam_steps=int(args.adam_steps) if args.adam_steps is not None else 1500,
         adam_lr=float(args.adam_lr),
         lbfgs_iters=int(args.lbfgs_iters),
         seed=int(args.seed),
@@ -956,7 +957,13 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument(
             "--grid-dir", default=None, help="gridrun unit directory (default <out>/grid)"
         )
-        p.add_argument("--adam-steps", type=int, default=1500)
+        p.add_argument(
+            "--adam-steps",
+            type=int,
+            default=None,
+            help="Adam steps before the L-BFGS polish (default 1500; "
+            "fit.WARM_START_ADAM_STEPS for a flight_v3 fit warm-started with --init-from)",
+        )
         p.add_argument("--adam-lr", type=float, default=0.02)
         p.add_argument("--lbfgs-iters", type=int, default=200)
         p.add_argument("--seed", type=int, default=0)
@@ -1163,6 +1170,14 @@ def main(argv: list[str] | None = None) -> int:
                 "Whittle sum and the latents stay float64)",
             )
             p.add_argument(
+                "--init-from",
+                default=None,
+                metavar="JSON",
+                help="flight_v3: start the rig at this v2 fit of the same pool "
+                "(fit.warm_start_v3: profile, widths, shaft, speed laws, the floor "
+                "re-expressed for the spline-only floor, all clipped into the v3 priors)",
+            )
+            p.add_argument(
                 "--restart-tag",
                 default=None,
                 help="write this fit as a RESTART under <out>/restarts/<name>__<mode>__<tag>."
@@ -1290,8 +1305,10 @@ def main(argv: list[str] | None = None) -> int:
             max_frames = None if v3 else 256
         else:
             max_frames = None if int(args.max_frames) <= 0 else int(args.max_frames)
-        if not v3 and (args.wander or args.channel_gains or args.wind):
-            raise SystemExit("--wander / --channel-gains / --wind belong to --mode flight_v3")
+        if not v3 and (args.wander or args.channel_gains or args.wind or args.init_from):
+            raise SystemExit(
+                "--wander / --channel-gains / --wind / --init-from belong to --mode flight_v3"
+            )
         gains_rig = args.channel_gains_rig or (_rig_of(specs) if args.channel_gains else None)
         mics = [int(v) for v in str(args.mics).split(",")] if args.mics else None
         if args.chunk_frames is None:
@@ -1307,6 +1324,10 @@ def main(argv: list[str] | None = None) -> int:
             optim = _optim_from_args(args)
             optim["seed"] = s
             optim["init_jitter"] = 0.0 if s == first else float(args.init_jitter)
+            if v3 and args.adam_steps is None and args.init_from:
+                from experiments.noise_model.fit import WARM_START_ADAM_STEPS
+
+                optim["adam_steps"] = WARM_START_ADAM_STEPS
             if v3 and args.lbfgs_frames is None:
                 # v3's polish sees every frame: its evaluation is chunked
                 optim["lbfgs_frames"] = None
@@ -1345,6 +1366,7 @@ def main(argv: list[str] | None = None) -> int:
                                 latent_iters=int(args.latent_iters),
                                 refit_adam_steps=int(args.refit_adam_steps),
                                 latent_dtype=str(args.latent_dtype),
+                                init_from=args.init_from,
                             )
                             if v3
                             else {}
