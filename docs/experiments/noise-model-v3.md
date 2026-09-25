@@ -169,6 +169,12 @@ poll; a job named in a row changed state at that poll.
 | 2026-09-25 04:11 | 8 running, 4 queued | no change; stage by seed — dregon: round 1 done, round 1 done, round 2 done, round 2 done; mstandby: round 1 done, round 2 done, round 2 done, round 2 done |
 | 2026-09-25 04:41 | 8 running, 4 queued | no change; stage by seed — dregon: round 1 done, round 1 done, round 2 done, round 2 done; mstandby: round 1 done, round 2 done, round 2 done, round 2 done |
 | 2026-09-25 05:11 | 8 running, 4 queued | no change; stage by seed — dregon: round 2 done, round 1 done, round 2 done, round 2 done; mstandby: round 1 done, round 2 done, round 2 done, round 2 done |
+| 2026-09-25 05:41 | `nv3-fit-dregon-s2-0c2b38` | succeeded |
+| 2026-09-25 05:41 | `nv3-fit-mstandby-s2-98610f` | succeeded |
+| 2026-09-25 05:41 | `nv3-fit-mstandby-s3-32f230` | succeeded |
+| 2026-09-25 05:41 | `nv3-fit-mcruise-s0-1fb6f3` | running (Adam 800) |
+| 2026-09-25 05:41 | `nv3-fit-mcruise-s1-91bf7f` | running (Adam 300) |
+| 2026-09-25 05:41 | `nv3-fit-mcruise-s2-de2c13` | running (Adam 400) |
 
 ## Fits
 
