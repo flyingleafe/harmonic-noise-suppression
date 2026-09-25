@@ -644,26 +644,34 @@ def figure_heldout(payload: dict[str, Any], out_dir: Path) -> Path:
     edges = np.asarray(payload["hist_edges_db"], dtype=np.float64)
     centres = 0.5 * (edges[1:] + edges[:-1])
     rigs = list(payload["rigs"])
-    fig, axes = plt.subplots(1, len(rigs), figsize=(7.0 * len(rigs), 4.2), squeeze=False)
+    fig, axes = plt.subplots(1, len(rigs), figsize=(7.0 * len(rigs), 5.6), squeeze=False)
     style = {"real": ("k", "-", 2.0), "v3": ("C3", "-", 1.6), "v2": ("C0", "--", 1.4)}
     for ax, rig in zip(axes[0], rigs):
+        hi = edges[1]
         for arm, (c, ls, lw) in style.items():
             h = np.asarray(payload["rigs"][rig][arm]["prominence_hist"], dtype=np.float64)
             st = payload["rigs"][rig][arm]["intermittency"]
+            drop = st.get("frac_under_present")
             lab = (
                 f"{arm}: under floor {100 * (st.get('frac_under') or NAN):.1f} %, "
-                f"present-line dropouts {100 * (st.get('frac_under_present') or NAN):.1f} %"
+                "present-line dropouts "
+                + ("n/a (no present line)" if drop is None else f"{100 * drop:.1f} %")
             )
             ax.step(centres, h / max(h.sum(), 1.0), where="mid", color=c, ls=ls, lw=lw, label=lab)
-        ax.axvline(payload["under_floor_db"], color="0.5", lw=1.0, ls=":")
-        ax.axvline(payload["present_db"], color="0.5", lw=1.0, ls="-.")
+            if h.any():
+                hi = max(hi, float(edges[int(np.nonzero(h)[0][-1]) + 1]))
+        uf, pr = float(payload["under_floor_db"]), float(payload["present_db"])
+        ax.axvline(uf, color="0.5", lw=1.0, ls=":", label=f"line power = floor ({uf:.2f} dB)")
+        ax.axvline(pr, color="0.5", lw=1.0, ls="-.", label=f"present bar ({pr:g} dB)")
+        ax.set_xlim(edges[0], hi + 1.0)
         ax.set_title(
             f"{rig}: block prominence, orders {payload['mid_orders'][0]}-{payload['mid_orders'][1]}"
         )
         ax.set_xlabel("block prominence (cells over local floor), dB")
         ax.set_ylabel("share of (line, block) cells")
         ax.grid(alpha=0.3)
-        ax.legend(fontsize=8, loc="upper right")
+        # below the axes: inside, the five entries cover the histogram's peak
+        ax.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=1)
     fig.tight_layout()
     path = out_dir / "prominence_hist.png"
     fig.savefig(path, dpi=130)
@@ -966,11 +974,21 @@ def summary_md(out_dir: Path) -> str:
             for arm in ("real", "v3", "v2"):
                 w = b[arm]["wander"]
                 bt = w["bootstrap"]
+                # no line track passed the estimator's rule: the line spreads are
+                # unidentified (the estimator reports 0), not zero
+                line = (
+                    {
+                        k: f"{_f(w['numbers'][k])} ({_ci(bt[k])})"
+                        for k in ("sigma_total_db", "sigma_d_db", "sigma_v_db")
+                    }
+                    if w["n_line_tracks"]
+                    else dict.fromkeys(
+                        ("sigma_total_db", "sigma_d_db", "sigma_v_db"), "— (no track)"
+                    )
+                )
                 lines.append(
                     f"| {rig} | {arm} | {b[arm]['n_windows']} | {w['n_line_tracks']} "
-                    f"| {_f(w['numbers']['sigma_total_db'])} ({_ci(bt['sigma_total_db'])}) "
-                    f"| {_f(w['numbers']['sigma_d_db'])} ({_ci(bt['sigma_d_db'])}) "
-                    f"| {_f(w['numbers']['sigma_v_db'])} ({_ci(bt['sigma_v_db'])}) "
+                    f"| {line['sigma_total_db']} | {line['sigma_d_db']} | {line['sigma_v_db']} "
                     f"| {_f(w['numbers']['sigma_u_db'])} ({_ci(bt['sigma_u_db'])}) |"
                 )
         lines += [
