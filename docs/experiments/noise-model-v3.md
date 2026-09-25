@@ -1,6 +1,7 @@
-**Status:** stopped — 2026-09-24 → 2026-09-25. CPU round 1 (σ_v rig-wide) is
-superseded: the real round runs on a GPU port with σ_v(k). The CPU fits below
-only exercise the check tooling.
+**Status:** running — 2026-09-24 → 2026-09-25. CPU round 1 (σ_v rig-wide) is
+superseded and only exercised the check tooling. The GPU campaign (4 restarts
+× 3 pools, σ_v(k) from wander schema 2) is fitted and reduced; the §3.5
+checks run on its fits.
 
 # Noise model v3: fits on the free-flight pools and the §3.5 checks
 
@@ -637,6 +638,118 @@ warm starts are the timing runs': R5 `flight_profile` for DREGON, R3
 | `nv3c-dregon-26c719` | DREGON (`dregon-floor`, `--wind`) | 14:11 | succeeded 14:28, Tesla T4, 871 s to the last fit (build 53 s) |
 | `nv3c-cruise-0a9885` | Michael's cruise (`michaels-cruise`) | 14:11 | started 14:28 (kaggle runs one job at a time), succeeded 14:44, Tesla T4, 805 s to the last fit (build 26 s) |
 | `nv3c-standby-cf4505` | Michael's standby (`michaels-standby`) | 14:11 | started 14:44, succeeded 14:56, Tesla T4, 711 s to the last fit (build 22 s) |
+
+**Wall time and GPU.** All three jobs ran on a **Tesla T4** (15 GB, driver
+580.159.04, torch 2.7.0+cu126), although each requested a P100. Kaggle ran
+them back to back; the whole campaign took 45 min of wall clock
+(14:11–14:56 UTC). "Fit s" is `optimiser.wall_s` per seed; "to the last
+fit" is the wrapper's `total_wall_s` after seed 3 (support build included,
+the ≈ 95 s kaggle session setup not).
+
+| pool | job | GPU | build s | fit s, s0 / s1 / s2 / s3 | job s to the last fit | peak GPU MiB |
+|---|---|---|---:|---|---:|---:|
+| DREGON | `nv3c-dregon-26c719` | Tesla T4 | 53 | 207 / 187 / 189 / 200 | 871 | 2 215 |
+| Michael's cruise | `nv3c-cruise-0a9885` | Tesla T4 | 26 | 192 / 183 / 181 / 180 | 805 | 2 756 |
+| Michael's standby | `nv3c-standby-cf4505` | Tesla T4 | 22 | 164 / 159 / 158 / 163 | 711 | 1 677 |
+
+**Per restart** (`results/noise_v3/fits/restarts/<pool>__flight_v3__s<N>.json`).
+The move is the Whittle move per observed cell between alternation rounds
+(tolerance 1e-4). L-BFGS iterations are first pass + restart pass, per rig
+step (round 0 is the first rig fit, rounds 1–5 the subset refits) and for
+the all-frames polish. The polish gain is the full-pool objective it gains
+over the subset optimum. Widths are `params.gamma_hz`, rotors numbered
+from 1, γ0 k = 0.01k Hz.
+
+| pool | seed | fit s | `which_converged` | move/cell, rounds 1–5 | rig L-BFGS iterations, rounds 0–5 · polish | polish gain nats (/cell) | total objective (nats) | σ_ν rad/s | γ median Hz | γ max per rotor Hz (k) | γ > 50 Hz | max γ/(0.01k) (rotor, k, Hz) | lines > 5 γ0 k |
+|---|---:|---:|---|---|---|---|---:|---:|---:|---|---:|---|---|
+| DREGON | 0 | 207 | lbfgs | 0.12, 0.0059, 0.0028, 0.0017, 0.001 | 14+1 / 1+1 / 2+1 / 2+1 / 2+1 / 2+1 · 5+1 | 1301.5 (0.00052) | −18 038 244.8 | 4.726 | 1.668 | 19.28 (69), 38.48 (26), 10.36 (43), 24.09 (70) | 0 | 148.0 (2, 26, 38.48) | 141/352 (40.1 %) |
+| DREGON | 1 | 187 | lbfgs | 0.12, 0.0057, 0.0029, 0.0016, 0.001 | 3+1 / 2+1 / 2+1 / 2+1 / 2+1 / 2+1 · 2+1 | 593.8 (0.00024) | −18 041 276.8 | 4.561 | 1.567 | 21.56 (69), 43.54 (26), 13.08 (55), 23.95 (70) | 0 | 167.5 (2, 26, 43.54) | 147/352 (41.8 %) |
+| DREGON | 2 | 189 | lbfgs | 0.12, 0.0057, 0.003, 0.0017, 0.00092 | 4+1 / 2+1 / 2+1 / 2+1 / 2+1 / 2+1 · 2+1 | 580.4 (0.00023) | −18 041 310.6 | 4.573 | 1.615 | 22.82 (69), 44.67 (26), 17.6 (55), 24.27 (70) | 0 | 171.8 (2, 26, 44.67) | 145/352 (41.2 %) |
+| DREGON | 3 | 200 | lbfgs | 0.12, 0.0055, 0.0027, 0.0017, 0.0011 | 2+2 / 2+1 / 2+1 / 2+1 / 2+1 / 2+1 · 5+1 | 1192.1 (0.00048) | −18 040 823.7 | 4.751 | 1.273 | 18.15 (74), 43.63 (26), 7.2 (71), 14.15 (70) | 0 | 167.8 (2, 26, 43.63) | 118/352 (33.5 %) |
+| cruise | 0 | 192 | lbfgs | 0.12, 0.0037, 0.0017, 0.00088, 0.00059 | 2+2 / 3+1 / 3+1 / 3+1 / 3+1 / 3+1 · 4+1 | 1755.5 (0.00044) | −24 805 561.3 | 3.922 | 0.893 | 27.58 (49), 11.93 (17), 2.82 (15), 3.18 (15) | 0 | 70.2 (2, 17, 11.93) | 100/324 (30.9 %) |
+| cruise | 1 | 183 | lbfgs | 0.12, 0.0037, 0.0015, 0.001, 0.00097 | 8+1 / 3+1 / 3+1 / 3+1 / 3+1 / 2+1 · 1+1 | 253.9 (6.3e-05) | −24 805 328.5 | 3.865 | 0.779 | 29.42 (49), 12.78 (17), 4.16 (7), 4.74 (30) | 0 | 75.2 (2, 17, 12.78) | 97/324 (29.9 %) |
+| cruise | 2 | 181 | lbfgs | 0.11, 0.0036, 0.0018, 0.00092, 0.00093 | 4+1 / 4+1 / 4+1 / 3+1 / 3+1 / 2+1 · 1+1 | 236.3 (5.9e-05) | −24 805 567.3 | 3.837 | 0.808 | 29.98 (49), 12.98 (17), 3.32 (7), 3.39 (14) | 0 | 76.4 (2, 17, 12.98) | 101/324 (31.2 %) |
+| cruise | 3 | 180 | lbfgs | 0.12, 0.0038, 0.0016, 0.0009, 0.001 | 4+1 / 4+1 / 4+1 / 3+1 / 3+1 / 1+1 · 1+1 | 223.0 (5.6e-05) | −24 804 482.5 | 4.021 | 0.633 | 30.38 (49), 14.78 (17), 3.49 (80), 3.65 (49) | 0 | 87.0 (2, 17, 14.78) | 97/324 (29.9 %) |
+| standby | 0 | 164 | lbfgs | 0.062, 0.0043, 0.0014, 0.00046, 0.00024 | 2+4 / 1+1 / 1+1 / 1+1 / 1+1 / 1+1 · 1+1 | 1.7 (2.2e-06) | −6 943 253.8 | 0.290 | 2.660 | 17.06 (130), 11.71 (81), 95.51 (128), 13.08 (85) | 3 | 74.6 (3, 128, 95.51) | 244/520 (46.9 %) |
+| standby | 1 | 159 | lbfgs | 0.061, 0.0048, 0.0011, 0.00068, 0.00014 | 2+1 / 1+1 / 1+1 / 1+1 / 1+1 / 1+1 · 1+1 | 1.5 (1.9e-06) | −6 943 419.4 | 0.300 | 2.670 | 18.19 (108), 11.22 (81), 89.34 (128), 12.56 (85) | 3 | 69.8 (3, 128, 89.34) | 241/520 (46.3 %) |
+| standby | 2 | 158 | lbfgs | 0.062, 0.0044, 0.0016, 0.00042, 0.00028 | 1+1 / 1+1 / 1+1 / 1+1 / 1+1 / 1+1 · 1+1 | 1.5 (2e-06) | −6 943 448.2 | 0.348 | 2.262 | 17.27 (108), 10.57 (51), 86.44 (128), 12.44 (85) | 3 | 67.5 (3, 128, 86.44) | 218/520 (41.9 %) |
+| standby | 3 | 163 | lbfgs | 0.062, 0.0045, 0.0012, 0.00058, 0.0002 | 3+1 / 1+1 / 1+1 / 1+1 / 1+1 / 1+1 · 1+1 | 1.2 (1.6e-06) | −6 943 361.7 | 0.320 | 2.474 | 17.24 (126), 11.23 (51), 87.37 (128), 11.93 (85) | 3 | 68.3 (3, 128, 87.37) | 235/520 (45.2 %) |
+
+**Restart spread** (`reduce`; the reported fit is the restart with the lowest
+total objective):
+
+| pool | restarts | selected | best − median /cell | best − worst /cell | σ_ν min–max rad/s | log-mean γ min–max Hz | restart gain of the selected fit's polish /cell |
+|---|---:|---:|---:|---:|---|---|---:|
+| DREGON | 4 | s2 | 1.0e-4 | 1.2e-3 | 4.561–4.751 | 0.901–1.237 | 6.1e-5 |
+| Michael's cruise | 4 | s2 | 3.1e-5 | 2.7e-4 | 3.837–4.021 | 0.467–0.656 | 1.8e-5 |
+| Michael's standby | 4 | s2 | 7.7e-5 | 2.6e-4 | 0.290–0.348 | 1.420–1.704 | 7.5e-7 |
+
+- **Convergence.** `which_converged` is "lbfgs" in all twelve restarts: the
+  all-frames polish passed the restart-gain test (restart gain
+  4.4e-5–7.0e-5 /cell on DREGON, 1.1e-5–1.9e-5 on cruise, 5.7e-7–7.5e-7 on
+  standby). `optimiser.converged` is false in all twelve, because the
+  alternation never converged in 5 rounds. Round 5 still moved
+  9.2e-4–1.1e-3 /cell on DREGON (9–11 × the tolerance), 5.9e-4–1.0e-3 on
+  cruise (6–10 ×) and 1.4e-4–2.8e-4 on standby (1.4–2.8 ×). On DREGON the
+  move falls by a factor 0.53–0.57 per round from round 2 on; at that rate
+  it reaches 1e-4 after about four more rounds [inference].
+- **Iterations used.** Every rig L-BFGS stopped on its 1e-5 relative
+  tolerance; none came near the 500-iteration cap. Round 0 used 1–14
+  iterations, the subset refits of rounds 1–5 used 1–4, and the all-frames
+  polish used 1–5 (+1 restart). Raising the cap from 200 to 500 therefore
+  changed nothing: the polish runs to its rtol in at most 5 iterations. Its
+  gain is 580–1 302 nats (2.3e-4–5.2e-4 /cell, 2–5 × the tolerance) on
+  DREGON, 223–1 756 nats (5.6e-5–4.4e-4 /cell) on cruise and 1.2–1.7 nats
+  (≈ 2e-6 /cell) on standby.
+- **Restart spread.** DREGON's restarts disagree by up to 1.2e-3 /cell,
+  12 × the tolerance; its seed 0 (the unjittered warm start) is the worst,
+  3 066 nats above s2. Cruise and standby disagree by 2.7e-4 and 2.6e-4
+  /cell (2.6–2.7 ×). σ_ν agrees within 5 % (DREGON, cruise) and 20 %
+  (standby); the log-mean width within 1.2–1.4 ×.
+- **Objective (selected, s2 in every pool).** DREGON: total
+  −18 041 310.6 = Whittle −18 122 294.7 + rig −log prior 5 847.7 + OU −log
+  prior 75 136.4, over 2 499 840 cells. Round 0 (latents at zero) had
+  Whittle −17 795 035.0, so rounds 1–5 gain 327 259.7 nats
+  (0.131 /cell). Cruise: −24 805 567.3 = −24 919 012.8 + 4 938.1 +
+  108 507.4 (3 999 744 cells; rounds 1–5 gain 489 112.6, 0.122 /cell).
+  Standby: −6 943 448.2 = −6 979 574.4 + 4 589.6 + 31 536.5 (749 952 cells;
+  gain 51 527.5, 0.069 /cell). Against the timing fits the Whittle term is
+  lower by 42 778 (DREGON), 27 587 (cruise) and 5 708 nats (standby), and
+  the OU prior term is larger (DREGON 46 421 → 75 136). The totals do not
+  rank: the timing fits used the schema-1 wander (σ_v 1.15 dB rig-wide).
+- **Span pins.** Cruise pins `amp_exp`, `floor_exp` and `floor_static_rel`
+  (speed span 1.436); DREGON (1.744) and standby (1.928) pin nothing.
+- **Widths (selected).** DREGON: γ median 1.615 Hz; rotor maxima 22.82 /
+  44.67 / 17.60 / 24.27 Hz at k = 69 / 26 / 55 / 70; no line over 50 Hz; the
+  largest γ/(0.01k) is **171.8** (rotor 2, k = 26, 44.7 Hz; 148–172 over the
+  restarts); 145 of 352 lines (41.2 %) exceed 5 γ0 k; the widest line at
+  k ≤ 8 is 4.65 Hz. Cruise: median 0.808 Hz; maxima 29.98 / 12.98 / 3.32 /
+  3.39 Hz at k = 49 / 17 / 7 / 14; none over 50 Hz; largest γ/(0.01k)
+  **76.4** (rotor 2, k = 17, 13.0 Hz; 70–87); 101 of 324 (31.2 %) over
+  5 γ0 k; widest at k ≤ 8 3.32 Hz. Standby: median 2.262 Hz; maxima 17.27 /
+  10.57 / 86.44 / 12.44 Hz at k = 108 / 51 / 128 / 85; **3 lines over
+  50 Hz** (rotor 3, k = 126 / 127 / 128: 61.7 / 67.5 / 86.4 Hz, the same
+  three as in the timing fit); largest γ/(0.01k) **67.5** (rotor 3,
+  k = 128; 67.5–74.6); 218 of 520 (41.9 %) over 5 γ0 k; widest at k ≤ 8
+  3.15 Hz.
+- **σ_ν (selected).** DREGON **4.573** rad/s, cruise **3.837**, standby
+  0.348: 7.6 ×, 6.4 × and 0.58 × the scale of the HalfNormal prior
+  (0.6 rad/s).
+- **Latent tracks against the schema-2 σ** (selected fit; rms of the fitted
+  block latents / the measured σ, dB; `v` per order group). Check (e) below
+  adds the posterior variance.
+
+| pool | d | u | u_j | v k 1–2 | v k 3–8 | v k 9–24 | v k 25–60 | v k ≥ 61 |
+|---|---|---|---|---|---|---|---|---|
+| DREGON | 1.80 / 0.94 | 2.45 / 2.83 | 3.97 / 1.52 | 0 / 0 | 0 / 0 | 4.08 / 2.98 | 4.87 / 3.91 | 4.58 / 7.18 |
+| Michael's cruise | 1.02 / 0.52 | 3.41 / 1.73 | 3.61 / 1.63 | 0.42 / 0.32 | 5.80 / 4.17 | 5.18 / 3.79 | 4.03 / 3.61 | 3.56 / 5.69 |
+| Michael's standby | 0.91 / 0.52 | 1.74 / 1.73 | 1.96 / 1.63 | 0.42 / 0.32 | 4.51 / 4.17 | 3.74 / 3.79 | 2.82 / 3.61 | 3.97 / 5.69 |
+
+  The rotor-common `d` spreads 1.75–1.96 × its measured σ in every pool,
+  and DREGON's floor colour `u_j` 2.6 ×. The per-line `v` spreads 1.1–1.4 ×
+  its σ at k 3–60 on DREGON and cruise, 0.8–1.1 × on standby, and 0.6–0.7 ×
+  at k ≥ 61 in every pool, where 94–99 % of the held-out line blocks are
+  under the floor (check (b)) and the latents are shrunk toward zero.
 
 ## Results
 
