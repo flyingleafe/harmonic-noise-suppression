@@ -588,6 +588,41 @@ v3 fit did not escape to broadband pedestals again. The widths are still
 wider than the CPU v3 round's (max γ/(0.01k) 81.6, γ median 0.72 Hz),
 and 141 of 352 lines exceed 5 γ0 k.
 
+### Campaign (4 restarts × 3 pools, schema-2 wander)
+
+One kaggle job per pool, submitted 2026-09-25 14:11 UTC from
+`.worktrees/submit-v3gpu` detached at `a7a6156c` (the model code of
+`f65179a7`; the wander files of `336fcf21`, `noise-v3-wander/2` with
+`sigma_v_db_by_order`). The wrapper is the timing runs' (support build once,
+R2 sync every 10 min and before any summary, every `grid/raw/*.err`/`*.log`
+echoed on a failure), with the out dir `results/noise_v3/fits` and a loop
+over the four seeds. Each seed runs
+
+```
+python scripts/noise_v2_fit.py flight --mode flight_v3 --set <set> --name <name> \
+  --wander results/noise_v3/wander/<rig>.json \
+  --channel-gains results/noise_v2/mic_gains/mic_gains.json --channel-gains-rig <rig> [--wind] \
+  --init-from <v2 fit of the pool> --rounds 5 --lbfgs-frames 64 --lbfgs-iters 500 \
+  --max-frames 0 --seed N --restart-tag sN --jobs 1 --threads 4 --device cuda \
+  --progress 50 --out results/noise_v3/fits --grid-dir results/noise_v3/fits/grid/<name>_sN
+```
+
+Against the timing fits this changes three things: 5 alternation rounds
+instead of 3; four seeds (`s0` from the warm start, `s1`–`s3` with the
+log-normal jitter, sd 0.8, of `σ_ν` and `γ` that `4890fc4e` gives a
+`--restart-tag` seed); and the rig L-BFGS cap raised from 200 to 500
+iterations (restart pass 250), so that no rig step, the all-frames polish
+included, can stop on the cap before its 1e-5 relative tolerance. The v2
+warm starts are the timing runs': R5 `flight_profile` for DREGON, R3
+`flight` for cruise and standby. Priors are the committed defaults
+(`gamma_c` 3, `sigma_nu_scale` 0.6).
+
+| job | pool | submitted (UTC) | state |
+|---|---|---|---|
+| `nv3c-dregon-26c719` | DREGON (`dregon-floor`, `--wind`) | 14:11 | submitted |
+| `nv3c-cruise-0a9885` | Michael's cruise (`michaels-cruise`) | 14:11 | queued (kaggle runs one job at a time) |
+| `nv3c-standby-cf4505` | Michael's standby (`michaels-standby`) | 14:11 | queued |
+
 ## Results
 
 _Fits running; results follow the harvest._
