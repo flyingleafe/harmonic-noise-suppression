@@ -182,6 +182,12 @@ poll; a job named in a row changed state at that poll.
 | 2026-09-25 07:11 | 7 running, 5 succeeded | no change; stage by seed — dregon: round 2 done, round 2 done; mstandby: round 1 done; mcruise: round 0 done, round 0 done, round 0 done, round 0 done |
 | 2026-09-25 07:41 | 7 running, 5 succeeded | no change; stage by seed — dregon: round 2 done, round 2 done; mstandby: round 2 done; mcruise: round 0 done, round 0 done, round 0 done, round 0 done |
 | 2026-09-25 08:11 | `nv3-fit-dregon-s1-0d3805` | succeeded |
+| 2026-09-25 08:40 | `nv3-fit-dregon-s0-28cc14` | succeeded |
+| 2026-09-25 08:40 | `nv3-fit-mstandby-s0-3fcf29` | cancelled |
+| 2026-09-25 08:40 | `nv3-fit-mcruise-s0-1fb6f3` | cancelled |
+| 2026-09-25 08:40 | `nv3-fit-mcruise-s1-91bf7f` | cancelled |
+| 2026-09-25 08:40 | `nv3-fit-mcruise-s2-de2c13` | cancelled |
+| 2026-09-25 08:40 | `nv3-fit-mcruise-s3-2955b8` | cancelled |
 
 ## Fits
 
