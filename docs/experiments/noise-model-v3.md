@@ -164,6 +164,7 @@ poll; a job named in a row changed state at that poll.
 | 2026-09-25 01:40 | 8 running, 4 queued | no change; stage by seed — dregon: round 0 done, round 0 done, round 1 done, round 1 done; mstandby: round 0 done, round 0 done, round 1 done, round 0 done |
 | 2026-09-25 02:10 | 8 running, 4 queued | no change; stage by seed — dregon: round 1 done, round 0 done, round 1 done, round 1 done; mstandby: round 0 done, round 1 done, round 1 done, round 1 done |
 | 2026-09-25 02:40 | 8 running, 4 queued | no change; stage by seed — dregon: round 1 done, round 1 done, round 1 done, round 1 done; mstandby: round 0 done, round 1 done, round 1 done, round 1 done |
+| 2026-09-25 03:11 | 8 running, 4 queued | no change; stage by seed — dregon: round 1 done, round 1 done, round 1 done, round 1 done; mstandby: round 0 done, round 1 done, round 1 done, round 1 done |
 
 ## Fits
 
