@@ -589,7 +589,7 @@ def _seeds_v3(
     t = lambda v: torch.as_tensor(np.asarray(v, dtype=np.float64), dtype=torch.float64)  # noqa: E731
     r, m, k = batch.n_rotors, batch.n_mics, batch.k_max
     orders = np.broadcast_to(np.arange(1, k + 1, dtype=np.float64), (r, k))
-    gamma0 = priors.gamma_scale(orders).numpy() * HALFNORMAL_MEDIAN
+    gamma0 = priors.gamma_scale(orders).detach().cpu().numpy() * HALFNORMAL_MEDIAN
     sigma0 = float(priors.sigma_nu_scale) * HALFNORMAL_MEDIAN
     med = priors.speed_law_medians()
     zero = torch.zeros((), dtype=torch.float64)
@@ -1492,7 +1492,8 @@ def fit_support(
             init_floor_mean_db=float(init["floor_mean_db"]) if "floor_mean_db" in init else None,
             init_comb_gain_db=float(init["comb_gain_db"]) if "comb_gain_db" in init else None,
             init_gamma_hz=(
-                np.asarray(init["gamma_hz"], dtype=np.float64).tolist()
+                # ``init`` lives on the fit's device: bring it home before numpy
+                np.asarray(init["gamma_hz"].detach().cpu(), dtype=np.float64).tolist()
                 if "gamma_hz" in init
                 else None
             ),

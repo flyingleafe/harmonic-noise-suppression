@@ -681,6 +681,77 @@ def test_a_rendered_v3_rig_with_wander_is_recovered_with_its_block_tracks():
     assert out.latents is not None and out.latents["summary"]["d"]["prior_sd_db"] == 3.0
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+def test_a_v3_fit_on_a_cuda_device_runs_end_to_end_and_writes_its_record(tmp_path):
+    """The whole ``flight_v3`` fit on a CUDA device — minibatch Adam and L-BFGS on
+    the frame-chunked rig objective, the latent step, the rig refit, the wind
+    term — and its record: every number the fit reads back off a device tensor
+    must come home first (the first kaggle smoke died in ``fit_support``'s
+    diagnostics on ``np.asarray`` of the guide's cuda ``gamma_hz`` start)."""
+    import json
+
+    k_cap, n_mics = 4, 2
+    par = _params(k_cap=k_cap, n_mics=n_mics, profile_db=np.linspace(-20.0, -30.0, k_cap))
+    par = dataclasses.replace(par, floor=dataclasses.replace(par.floor, shape_sd_db=_t(3.0)))
+    members = []
+    n_frames = 12
+    grid = SP.flight_grid(sr=SR, n_fft=512, hop=256)
+    starts = np.arange(n_frames) * 256
+    n = 512 + (n_frames - 1) * 256
+    for w, f0 in enumerate((180.0, 195.0)):
+        rps = (f0 + 5.0 * np.linspace(0.0, 1.0, n))[None, :]
+        with torch.no_grad():
+            m = SP.flight_model(
+                grid, par, rate_work=SP.flight_rate_work(grid, rps, starts), k_max=k_cap
+            ).numpy()
+        obs = m * np.random.default_rng(w).standard_exponential(m.shape)
+        members.append((f"w{w}", obs, rps, starts))
+    batch = MD.flight_batch(
+        name="cuda",
+        members=members,
+        sr=SR,
+        n_fft=512,
+        hop=256,
+        k_cap=k_cap,
+        device="cuda",
+        chunk_frames=5,
+    )
+    wander = MD.Wander(
+        sigma_d_db=2.0,
+        tau_d_s=1.0,
+        sigma_v_db=2.0,
+        tau_v_s=1.0,
+        sigma_u_db=1.0,
+        tau_u_s=1.0,
+        block_s=0.05,
+    )
+    priors = MD.PriorsV3(wind=True, wander=wander)
+    out = FT.fit_v3(
+        batch,
+        priors=priors,
+        optim=FT.OptimSpecV3(
+            rig=FT.OptimSpec(adam_steps=3, adam_batch=4, lbfgs_iters=2, lbfgs_frames=None),
+            rounds=1,
+            latent_lbfgs_iters=2,
+        ),
+    )
+    path = FT.write_fit(
+        tmp_path / "cuda__flight_v3.json",
+        support="cuda",
+        kind="flight",
+        mode=MD.V3_MODE,
+        outcome=out,
+        batch=batch,
+        priors=priors,
+    )
+    record = json.loads(path.read_text())
+    assert record["optimiser"]["device"].startswith("cuda")
+    assert record["optimiser"]["rounds_run"] == 1
+    assert np.isfinite(record["objective"]["total_nats"])
+    assert np.all(np.isfinite(np.asarray(record["params"]["gamma_hz"], dtype=np.float64)))
+    assert record["latents"]["fit"]["windows"] == 2
+
+
 def test_sigma_v_by_order_sets_each_lines_ou_prior_and_the_render_draw():
     """``sigma_v_db_by_order`` (wander schema 2) gives every order its group's
     sd: ``sigma_db[i]`` for ``k_edges[i] <= k < k_edges[i + 1]``, the last group
