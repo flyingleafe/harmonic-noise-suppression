@@ -1,4 +1,6 @@
-**Status:** in progress — 2026-09-24 → (fits running on `uni-cpu`)
+**Status:** stopped — 2026-09-24 → 2026-09-25. CPU round 1 (σ_v rig-wide) is
+superseded: the real round runs on a GPU port with σ_v(k). The CPU fits below
+only exercise the check tooling.
 
 # Noise model v3: fits on the free-flight pools and the §3.5 checks
 
@@ -77,19 +79,19 @@ from the detached worktree `.worktrees/submit-v3`. The backend is `uni-cpu`
 |---|---|---|---|---|---|
 | `nv3-smoke-dregon-697f8d` | DREGON (smoke: 3 Adam steps, 2 L-BFGS iterations, 1 round, 2 latent iterations) | 0 | `4890fc4e` | 64 GB | done, 567 s, exit 0 |
 | `nv3-smoke-michaels-eadc6e` | Michael's standby (the same smoke) | 0 | `4890fc4e` | 64 GB | done, 507 s, exit 0 |
-| `nv3-fit-dregon-s0-28cc14` | DREGON | 0 | `e1d0e7f0` | 64 GB | running |
-| `nv3-fit-dregon-s1-0d3805` | DREGON | 1 | `e1d0e7f0` | 64 GB | running |
-| `nv3-fit-dregon-s2-0c2b38` | DREGON | 2 | `e1d0e7f0` | 64 GB | running |
-| `nv3-fit-dregon-s3-64f951` | DREGON | 3 | `e1d0e7f0` | 64 GB | running |
-| `nv3-fit-mstandby-s0-3fcf29` | Michael's standby | 0 | `e1d0e7f0` | 64 GB | running |
-| `nv3-fit-mstandby-s1-6c5be5` | Michael's standby | 1 | `e1d0e7f0` | 64 GB | running |
-| `nv3-fit-mstandby-s2-98610f` | Michael's standby | 2 | `e1d0e7f0` | 64 GB | running |
-| `nv3-fit-mstandby-s3-32f230` | Michael's standby | 3 | `e1d0e7f0` | 64 GB | running |
+| `nv3-fit-dregon-s0-28cc14` | DREGON | 0 | `e1d0e7f0` | 64 GB | succeeded, 37 507 s |
+| `nv3-fit-dregon-s1-0d3805` | DREGON | 1 | `e1d0e7f0` | 64 GB | succeeded, 36 719 s |
+| `nv3-fit-dregon-s2-0c2b38` | DREGON | 2 | `e1d0e7f0` | 64 GB | succeeded, 27 014 s |
+| `nv3-fit-dregon-s3-64f951` | DREGON | 3 | `e1d0e7f0` | 64 GB | succeeded, 29 705 s |
+| `nv3-fit-mstandby-s0-3fcf29` | Michael's standby | 0 | `e1d0e7f0` | 64 GB | **cancelled** 2026-09-25 08:40 by the main agent after round 2 (CPU fits too slow; not resubmitted) |
+| `nv3-fit-mstandby-s1-6c5be5` | Michael's standby | 1 | `e1d0e7f0` | 64 GB | succeeded, 28 160 s |
+| `nv3-fit-mstandby-s2-98610f` | Michael's standby | 2 | `e1d0e7f0` | 64 GB | succeeded, 27 456 s |
+| `nv3-fit-mstandby-s3-32f230` | Michael's standby | 3 | `e1d0e7f0` | 64 GB | succeeded, 27 382 s |
 | `nv3-fit-mcruise-s{0..3}-{8cf99e,3a0859,7cba5a,f7ba2c}` | Michael's cruise | 0–3 | `e1d0e7f0` | 64 GB | **OOM-killed** 11 s into the fit (8 windows × 62 frames at full frames; DREGON's 5 × 62 fits in 64 GB) |
-| `nv3-fit-mcruise-s0-1fb6f3` | Michael's cruise | 0 | `e1d0e7f0` | 160 GB | queued (daemon slot limit) |
-| `nv3-fit-mcruise-s1-91bf7f` | Michael's cruise | 1 | `e1d0e7f0` | 160 GB | queued |
-| `nv3-fit-mcruise-s2-de2c13` | Michael's cruise | 2 | `e1d0e7f0` | 160 GB | queued |
-| `nv3-fit-mcruise-s3-2955b8` | Michael's cruise | 3 | `e1d0e7f0` | 160 GB | queued |
+| `nv3-fit-mcruise-s0-1fb6f3` | Michael's cruise | 0 | `e1d0e7f0` | 160 GB | **cancelled** 2026-09-25 08:40 by the main agent after round 0 (CPU fits too slow; not resubmitted) |
+| `nv3-fit-mcruise-s1-91bf7f` | Michael's cruise | 1 | `e1d0e7f0` | 160 GB | **cancelled**, the same |
+| `nv3-fit-mcruise-s2-de2c13` | Michael's cruise | 2 | `e1d0e7f0` | 160 GB | **cancelled**, the same |
+| `nv3-fit-mcruise-s3-2955b8` | Michael's cruise | 3 | `e1d0e7f0` | 160 GB | **cancelled**, the same |
 
 The smoke jobs ran the full-frame pools with the iterations cut. They cost
 about 10 s per L-BFGS evaluation on DREGON (88 orders, 8 mics, 64 frames), the
@@ -189,9 +191,91 @@ poll; a job named in a row changed state at that poll.
 | 2026-09-25 08:40 | `nv3-fit-mcruise-s2-de2c13` | cancelled |
 | 2026-09-25 08:40 | `nv3-fit-mcruise-s3-2955b8` | cancelled |
 
+At 08:40 the main agent cancelled `nv3-fit-mstandby-s0` and all four 160 GB
+cruise jobs, because the CPU fits are too slow. The real round runs on a GPU
+port with a per-order σ_v(k). No job was resubmitted.
+
 ## Fits
 
-_Filled in per (rig, pool) family as its four restarts finish._
+### CPU round 1, σ_v rig-wide (superseded)
+
+**These fits are superseded.** They are kept for two uses only: to run the
+check tooling end to end on a real fit, and to record what a full CPU fit
+costs and how far it gets. No Michael's cruise fit exists. For standby,
+three of the four restarts finished (s1–s3). Harvested with
+`omnirun pull`, reduced with `noise_v2_fit.py reduce --mode flight_v3`, and
+committed under `results/noise_v3/fits/`: the reduced fits
+`{dregon_room2_floor,michaels_fly125_standby}__flight_v3.json` and the
+restarts in `restarts/`.
+
+Per restart. "Wall" is the job's `V3FIT_DONE wall_s`, which includes a
+20–34 s support build. "Move/cell" is the Whittle move per observed cell in
+alternation rounds 1–3; the tolerance is 1e-4. The widths are
+`params.gamma_hz`. The latents are the rms of the fitted block tracks
+(`latents.summary.*.fitted_sd_db`).
+
+| job | seed | wall s (h) | `which_converged` | move/cell, rounds 1–3 | total objective (nats) | σ_ν rad/s | γ median Hz | γ max per rotor Hz | γ > 50 Hz | max γ/(0.01k) | lines > 5 γ0 k | latent sd d / v / u / u_j dB |
+|---|---:|---|---|---|---:|---:|---:|---|---:|---:|---:|---|
+| `nv3-fit-dregon-s0-28cc14` | 0 | 37 507 (10.42) | none | 0.1069, 0.0022, 0.0008 | −18 038 593.6 | 5.252 | 0.722 | 7.36, 13.88, 4.97, 9.25 | 0 | 81.6 | 56/352 | 2.77 / 1.89 / 2.10 / 4.00 |
+| `nv3-fit-dregon-s1-0d3805` | 1 | 36 719 (10.20) | none | 0.1061, 0.0031, 0.0003 | −18 037 678.5 | 5.307 | 0.609 | 7.17, 11.80, 4.96, 6.54 | 0 | 69.4 | 52/352 | 2.77 / 1.90 / 2.17 / 4.40 |
+| `nv3-fit-dregon-s2-0c2b38` | 2 | 27 014 (7.50) | none | 0.1064, 0.0023, 0.0006 | −18 037 105.8 | 5.321 | 0.658 | 7.81, 13.52, 5.25, 7.54 | 0 | 79.5 | 55/352 | 2.76 / 1.90 / 2.15 / 4.23 |
+| `nv3-fit-dregon-s3-64f951` | 3 | 29 705 (8.25) | none | 0.1058, 0.0032, 0.0001 | −18 037 490.1 | 5.452 | 0.474 | 7.92, 11.64, 4.40, 6.48 | 0 | 68.4 | 50/352 | 2.74 / 1.89 / 2.18 / 4.19 |
+| `nv3-fit-mstandby-s1-6c5be5` | 1 | 28 160 (7.82) | none | 0.0391, 0.0030, 0.0010 | −6 948 693.2 | 0.290 | 0.885 | 6.74, 8.08, 10.14, 7.09 | 0 | 20.0 | 70/520 | 1.24 / 1.87 / 1.39 / 1.85 |
+| `nv3-fit-mstandby-s2-98610f` | 2 | 27 456 (7.63) | none | 0.0388, 0.0033, 0.0011 | −6 948 789.1 | 0.289 | 0.890 | 6.87, 7.92, 9.39, 11.94 | 0 | 22.6 | 72/520 | 1.22 / 1.85 / 1.40 / 1.82 |
+| `nv3-fit-mstandby-s3-32f230` | 3 | 27 382 (7.61) | none | 0.0392, 0.0030, 0.0011 | −6 948 661.8 | 0.284 | 0.895 | 7.28, 8.43, 10.54, 12.02 | 0 | 19.0 | 75/520 | 1.25 / 1.88 / 1.38 / 1.83 |
+
+**DREGON** (`dregon_room2_floor__flight_v3.json`; 4 restarts, s0 selected):
+
+- **Convergence:** none of the four restarts converged
+  (`optimiser.converged` false, `which_converged` "none"; neither the
+  alternation nor the rig refit met 1e-4 nats/cell). In round 3 the
+  alternation still moved 1–8 × the tolerance. The last rig refit left a
+  gradient norm of 2043 and a restart gain of 0.0014 nats/cell.
+- **Restart spread:** best − median = 4.0e-4 nats/cell and best − worst =
+  6.0e-4 nats/cell, 4–6 × the tolerance. σ_ν runs 5.25–5.45 rad/s (max/min
+  1.04). The log-mean γ runs 0.387–0.599 Hz (max/min 1.55). Across restarts
+  the rotor-max γ is 0.024–0.026 Hz at k = 1, 0.66–0.79 Hz at k = 8 and
+  2.08–2.39 Hz at k = 16.
+- **Objective** (selected): total −18 038 593.6 nats over 2 499 840 cells.
+  That is Whittle −18 092 279.2, plus the rig −log prior 2 814.9, plus the OU
+  −log prior 50 870.8. With the latents set to zero the Whittle term is
+  −17 817 683.5, so the latents gain 274 596 nats (0.110 nats/cell).
+- **Span pins:** none. The speed span is 1.744, above the 1.5 threshold. The
+  low-order γ check passes: at k ≤ 4 the largest γ is 0.24 × the resolution.
+- **γ:** median 0.722 Hz. The rotor maxima are 7.36 / 13.88 / 4.97 / 9.25 Hz
+  at k = 21 / 17 / 14 / 21. No line is wider than 50 Hz. The largest
+  γ/(0.01k) is **81.6** (rotor 2, k = 17, γ = 13.9 Hz), and 56 of the 352
+  lines exceed 5 γ0 k. At k ≤ 8 the largest γ is 1.06 Hz, which is
+  23.7 × γ0 k.
+- **σ_ν:** 5.25 rad/s, which is 8.8 × the scale of its HalfNormal prior
+  (0.6 rad/s).
+- **Latents** (selected; range over restarts in brackets). Fitted sd: d 2.77
+  [2.74–2.77], v 1.89 [1.89–1.90], u 2.10 [2.10–2.18] and u_j 4.00
+  [4.00–4.40] dB. The measured σ are 0.94 / 1.15 / 2.83 / 1.52 dB. Fitted
+  lag-1: 0.63 / 0.83 / 0.61 / 0.91 against the measured ρ of
+  0.19 / 0.58 / 0.90 / 0.70.
+
+**Michael's standby** (`michaels_fly125_standby__flight_v3.json`; 3 restarts,
+s2 selected):
+
+- **Convergence:** none of the three restarts converged ("none"). In round 3
+  the alternation still moved 10–11 × the tolerance. The last rig refit left a
+  gradient norm of 212 and a restart gain of 2.2e-4 nats/cell.
+- **Restart spread:** best − median = 1.3e-4 nats/cell and best − worst =
+  1.7e-4 nats/cell. σ_ν runs 0.284–0.290 rad/s (max/min 1.02). The log-mean γ
+  runs 0.538–0.603 Hz (max/min 1.12).
+- **Objective:** total −6 948 789.1 nats over 749 952 cells. That is Whittle
+  −6 972 250.8, plus the rig −log prior 2 514.7, plus the OU −log prior
+  20 947.1. The latents gain 32 394 nats (0.043 nats/cell).
+- **Span pins:** none (speed span 1.928). The low-order γ check passes.
+- **γ:** median 0.890 Hz. The rotor maxima are 6.87 / 7.92 / 9.39 / 11.94 Hz
+  at k = 83 / 108 / 121 / 65. None is wider than 50 Hz. The largest γ/(0.01k)
+  is 22.6 (rotor 3, k = 27), and 72 of the 520 lines exceed 5 γ0 k.
+- **σ_ν:** 0.289 rad/s.
+- **Latents:** fitted sd d 1.22 [1.22–1.25], v 1.85 [1.85–1.88], u 1.40
+  [1.38–1.40] and u_j 1.82 [1.82–1.85] dB, against the measured
+  0.52 / 1.91 / 1.73 / 1.63 dB. Fitted lag-1: 0.45 / 0.81 / 0.75 / 0.60
+  against the measured ρ of 0.42 / 0.67 / 0.78 / 0.67.
 
 ## Results
 
