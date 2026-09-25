@@ -447,13 +447,15 @@ def test_block_forward_model_at_zero_latents_is_flight_model():
         )
 
 
-def test_the_unit_autocorrelation_line_kernel_is_the_atom_kernel():
-    """With ``amp_exp`` not fitted the atoms are data, and the lines summed
-    through their UNIT-atom autocorrelation (the orders summed in the lag
-    domain, one transform per rotor and frame) must be the atom kernel's
-    expected periodogram — value and gradient in every line parameter — at
-    per-frame line offsets, over a speed ramp and across harmonic chunks. A
-    fitted ``amp_exp`` must keep its gradient."""
+@pytest.mark.parametrize("amp_fitted", [False, True])
+def test_the_unit_autocorrelation_line_kernel_is_the_atom_kernel(amp_fitted):
+    """The lines summed through their UNIT-atom autocorrelation (the orders
+    summed in the lag domain, one transform per rotor and frame, no autograd
+    through the atoms) must be the atom kernel's expected periodogram — value
+    and gradient in every line parameter — at per-frame line offsets, over a
+    speed ramp and across harmonic chunks. A fitted ``amp_exp`` moves the
+    atoms themselves: its gradient (the autocorrelation's tangent) must be the
+    atom kernel's too."""
     k_cap, n_mics, n_frames, n_fft, hop = 5, 2, 6, 512, 256
     par = _params(
         k_cap=k_cap, n_mics=n_mics, profile_db=np.array([-18.0, -21.0, -25.0, -30.0, -28.0])
@@ -471,8 +473,11 @@ def test_the_unit_autocorrelation_line_kernel_is_the_atom_kernel():
             par.sigma_nu.clone().requires_grad_(),
             _t(np.linspace(0.01, 0.4, k_cap)[None, :]).requires_grad_(),
             par.profile_db.clone().requires_grad_(),
+            _t(3.1).requires_grad_(amp_fitted),
         ]
-        p = dataclasses.replace(par, sigma_nu=leaves[0], gamma_hz=leaves[1], profile_db=leaves[2])
+        p = dataclasses.replace(
+            par, sigma_nu=leaves[0], gamma_hz=leaves[1], profile_db=leaves[2], amp_exp=leaves[3]
+        )
         m = SP.flight_model(
             grid,
             p,
@@ -488,19 +493,9 @@ def test_the_unit_autocorrelation_line_kernel_is_the_atom_kernel():
     want, want_grad = run(False)
     got, got_grad = run(True)
     np.testing.assert_allclose(got, want, rtol=1e-10, atol=0.0)
-    assert len(got_grad) == len(want_grad) == 3
+    assert len(got_grad) == len(want_grad) == (4 if amp_fitted else 3)
     for g, w in zip(got_grad, want_grad, strict=True):
         np.testing.assert_allclose(g, w, rtol=1e-9, atol=1e-12 * float(np.abs(w).max()))
-
-    amp = _t(2.0).requires_grad_()
-    SP.flight_model(
-        grid,
-        dataclasses.replace(par, amp_exp=amp),
-        rate_work=rate,
-        k_max=k_cap,
-        unit_autocorr=True,
-    ).sum().backward()
-    assert amp.grad is not None and float(amp.grad) != 0.0
 
 
 def test_the_chunked_rig_objective_is_the_elbo_value_and_gradient():

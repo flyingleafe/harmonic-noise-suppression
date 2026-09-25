@@ -905,14 +905,23 @@ def _line_sum_unit_autocorr(
 
     A line's atom is ``A w(t) s(t) e^{i k phi(t)}`` with ``A^2 = 2 10^{p/10}``
     (``profile_db`` plus the frame's ``line_db``) and the speed envelope
-    ``s(t) = (rate/AMP_RPS_REF)^{amp_exp/2}``. With ``amp_exp`` carrying no
-    gradient (span-pinned or fixed) the unit atom is DATA, so the kernel's
-    atom autocorrelation is ``A^2 G`` with ``G`` its unit-atom one, computed
-    under ``no_grad`` per harmonic chunk (one complex and one real FFT of
-    length ``2 n``; never stored across calls: for a cruise pool it would be
-    tens of GB), and the fitted lag law ``R`` enters as ``DFT[A^2 G R]``.
-    That transform is linear, so the orders are summed in the LAG domain
-    first: the only transform with a gradient is ONE per (rotor, frame).
+    ``s(t) = (rate/AMP_RPS_REF)^{a/2}``, ``a = amp_exp``. At the current ``a``
+    the unit atom ``u = w s e^{i k phi}`` is DATA, so the kernel's atom
+    autocorrelation is ``A^2 G`` with ``G`` the unit atom's, computed under
+    ``no_grad`` per harmonic chunk (one complex and one real FFT of length
+    ``2 n``; never stored across calls: for a cruise pool it would be tens of
+    GB), and the fitted lag law ``R`` enters as ``DFT[A^2 G R]``. That
+    transform is linear, so the orders are summed in the LAG domain first:
+    the only transform with a gradient is ONE per (rotor, frame).
+
+    A FITTED ``a`` moves the atoms, with ``du/da = l u``, ``l = log(rate /
+    AMP_RPS_REF) / 2``: ``dG/da`` is the autocorrelation cross term
+    ``IDFT[2 Re(B conj U)]`` (``U``, ``B`` the transforms of ``u`` and
+    ``l u``: one more FFT per atom, still no autograd through it), summed
+    over orders like ``G`` into the tangent ``T = sum_k A^2 R dG/da``, and
+    the lag sum carries ``(a - a.detach()) T``: zero in value, exactly
+    ``dG/da`` in the first derivative (the term it drops is multiplied by
+    that zero).
 
     The lag-domain sum is also halved twice: ``G`` is Hermitian and ``R``
     even, so the ``2 n`` sequence ``G R`` is Hermitian and its transform real,
@@ -928,26 +937,37 @@ def _line_sum_unit_autocorr(
     gamma = gamma_block(params.gamma_hz, n_rotors=n_rotors, k_max=kk, ref=ref)
     offset = profile[:, :kk, None] if line_db is None else profile[:, :kk, None] + line_db
     power = 2.0 * 10.0 ** (_as_t(offset, ref) / 10.0)  # (R, K, n_c | 1)
+    amp_exp = _as_t(params.amp_exp, ref)
+    fitted = amp_exp.requires_grad
 
     with torch.no_grad():
         phase = (2.0 * math.pi / float(grid.sr_work)) * torch.cumsum(rate, dim=-1)
         phase = phase - phase[..., n_work // 2 : n_work // 2 + 1]
-        speed_amp = torch.sqrt(
-            (rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF) ** _as_t(params.amp_exp, ref)
-        )
-        env = speed_amp * ref  # (R, n_c, n_work)
+        speed = rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF
+        env = torch.sqrt(speed ** amp_exp.detach()) * ref  # (R, n_c, n_work)
+        log_half = 0.5 * torch.log(speed) if fitted else None
 
     lag_sum = torch.zeros(n_rotors, n_c, n, dtype=torch.complex128, device=ref.device)
+    tangent = torch.zeros_like(lag_sum) if fitted else None
     step = kk if harmonic_chunk is None else max(1, int(harmonic_chunk))
     for k0 in range(0, kk, step):
         k1 = min(k0 + step, kk)
         k = torch.arange(k0 + 1, k1 + 1, dtype=ref.dtype, device=ref.device)
+        dg: Tensor | None = None
         with torch.no_grad():
             kph = torch.remainder(k[None, :, None, None] * phase[:, None], 2.0 * math.pi)
-            spec = torch.fft.fft(torch.polar(env[:, None].expand_as(kph), kph), n=2 * n, dim=-1)
+            unit = torch.polar(env[:, None].expand_as(kph), kph)
+            del kph
+            spec = torch.fft.fft(unit, n=2 * n, dim=-1)
             # ifft of the real |spec|^2, positive lags 0 .. n - 1
             g = torch.fft.ihfft(spec.real**2 + spec.imag**2, dim=-1)[..., :n]
-            del spec, kph
+            if log_half is not None:
+                d_spec = torch.fft.fft(unit * log_half[:, None], n=2 * n, dim=-1)
+                cross = 2.0 * (d_spec.real * spec.real + d_spec.imag * spec.imag)
+                del d_spec
+                dg = torch.fft.ihfft(cross, dim=-1)[..., :n]
+                del cross
+            del unit, spec
         rho = r_tau(
             grid.tau_s_work[None, None, :],
             k[None, :, None],
@@ -955,7 +975,14 @@ def _line_sum_unit_autocorr(
             lam=params.lam,
             gamma_hz=gamma[:, k0:k1, None],
         )  # (R, k, n_work)
-        lag_sum = lag_sum + (g * (power[:, k0:k1, :, None] * rho[:, :, None, :])).sum(dim=1)
+        weight = power[:, k0:k1, :, None] * rho[:, :, None, :]  # (R, k, n_c | 1, n_work)
+        lag_sum = lag_sum + (g * weight).sum(dim=1)
+        if tangent is not None and dg is not None:
+            with torch.no_grad():
+                tangent += (dg * weight).sum(dim=1)
+
+    if tangent is not None:
+        lag_sum = lag_sum + (amp_exp - amp_exp.detach()) * tangent
 
     half = n // 2
     folded = torch.cat(
@@ -999,17 +1026,16 @@ def flight_model(
     (:func:`_floor_frames`); ``None`` for both is the v2 model, bit for bit.
 
     ``unit_autocorr`` sums the lines through their unit-atom autocorrelation
-    (:func:`_line_sum_unit_autocorr`: the same expected periodogram to
-    rounding, no autograd through the atoms) when ``amp_exp`` carries no
-    gradient; a fitted ``amp_exp`` moves the atoms and keeps the atom kernel.
+    (:func:`_line_sum_unit_autocorr`: the same expected periodogram and
+    gradient to rounding, no autograd through the atoms, ``amp_exp``'s
+    gradient through the autocorrelation's tangent).
     """
     ref = grid.window_work
     rate = rate_work.to(dtype=ref.dtype, device=ref.device)
     n_rotors, n_c, _n_work = rate.shape
     kk = _k_cap(params, k_max)
 
-    amp_fitted = isinstance(params.amp_exp, Tensor) and params.amp_exp.requires_grad
-    if unit_autocorr and not amp_fitted:
+    if unit_autocorr:
         shapes = _line_sum_unit_autocorr(grid, params, rate, kk, harmonic_chunk, line_db)
     else:
         shapes = torch.zeros(n_rotors, n_c, grid.n_fft // 2 + 1, dtype=ref.dtype, device=ref.device)
