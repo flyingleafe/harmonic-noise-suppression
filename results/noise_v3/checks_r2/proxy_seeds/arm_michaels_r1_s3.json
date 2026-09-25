@@ -1,0 +1,741 @@
+{
+ "round": 6,
+ "git": "67f97dbbfcf8b2d67293f5f6e829f9a6747551cd",
+ "arm": {
+  "kind": "v2",
+  "label": {
+   "michaels": "v2 FLY125 PER-REGIME pair: the standby-only fit below 45 rev/s, the cruise-only fit above 65, their powers interpolated across the ramp band (render_noise_regimes)"
+  },
+  "source": {
+   "michaels": {
+    "composition": "render.render_noise_regimes",
+    "per_regime": {
+     "standby": {
+      "support": "michaels_fly125_standby",
+      "path": "results/noise_v3/fits/restarts/michaels_fly125_standby__flight_v3__s3.json"
+     },
+     "cruise": {
+      "support": "michaels_fly125_cruise",
+      "path": "results/noise_v3/fits/restarts/michaels_fly125_cruise__flight_v3__s3.json"
+     }
+    },
+    "rule": "per-sample sqrt-weight sum of the two regimes' renders, weight = rps_gating.regime_weight (smoothstep in the slowest rotor, 0 at 45 rev/s, 1 at 65, settle_s disabled), so the composed power interpolates the two fitted regimes' levels across the ramp band"
+   }
+  }
+ },
+ "candidate": {
+  "name": "michaels_r1_s3",
+  "rigs": [
+   "michaels"
+  ],
+  "fits": {
+   "michaels": {
+    "support": "michaels_fly125_standby+michaels_fly125_cruise",
+    "path": "results/noise_v3/fits/restarts/michaels_fly125_standby__flight_v3__s3.json + results/noise_v3/fits/restarts/michaels_fly125_cruise__flight_v3__s3.json",
+    "mode": "flight_v3",
+    "n_fit_windows": 11,
+    "converged": false,
+    "which_converged": {
+     "standby": "lbfgs",
+     "cruise": "lbfgs"
+    },
+    "grad_norm": null,
+    "tol_nats_per_cell": 0.0001,
+    "lbfgs_restart_gain_per_cell": null,
+    "wall_s": 342.95914101600647,
+    "whittle_nats": null,
+    "per_regime": {
+     "standby": {
+      "support": "michaels_fly125_standby",
+      "path": "results/noise_v3/fits/restarts/michaels_fly125_standby__flight_v3__s3.json",
+      "mode": "flight_v3",
+      "n_fit_windows": 3,
+      "converged": false,
+      "which_converged": "lbfgs",
+      "grad_norm": null,
+      "tol_nats_per_cell": 0.0001,
+      "lbfgs_restart_gain_per_cell": null,
+      "wall_s": 162.67162823677063,
+      "whittle_nats": -6979650.865984626
+     },
+     "cruise": {
+      "support": "michaels_fly125_cruise",
+      "path": "results/noise_v3/fits/restarts/michaels_fly125_cruise__flight_v3__s3.json",
+      "mode": "flight_v3",
+      "n_fit_windows": 8,
+      "converged": false,
+      "which_converged": "lbfgs",
+      "grad_norm": null,
+      "tol_nats_per_cell": 0.0001,
+      "lbfgs_restart_gain_per_cell": null,
+      "wall_s": 180.28751277923584,
+      "whittle_nats": -24917521.19741635
+     }
+    },
+    "composition": "render.render_noise_regimes",
+    "composition_rule": "per-sample sqrt-weight sum of the two regimes' renders, weight = rps_gating.regime_weight (smoothstep in the slowest rotor, 0 at 45 rev/s, 1 at 65, settle_s disabled), so the composed power interpolates the two fitted regimes' levels across the ramp band"
+   }
+  }
+ },
+ "fits": [
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_50__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_60__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_80__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_90__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_50__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_60__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_80__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_90__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_50__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_60__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_80__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_90__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_50__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_60__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_80__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_90__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_allMotors_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/dregon_room2_floor__flight_floor_lowk.json",
+  "results/noise_v2/rounds/round3/fits/michaels_fly125_all__flight.json",
+  "results/noise_v2/rounds/round3/fits/michaels_fly125_cruise__flight.json",
+  "results/noise_v2/rounds/round3/fits/michaels_fly125_standby__flight.json",
+  "results/noise_v2/rounds/round3/fits/regimes_comb_floor.json"
+ ],
+ "protocol": {
+  "render_seeds": [
+   2001,
+   2002,
+   2003,
+   2004
+  ],
+  "n_mics": 8,
+  "scorer": null,
+  "proxy_seed": 2001,
+  "likelihood_front_end": {
+   "n_fft": 2048,
+   "hop": 512
+  },
+  "note": "PIT MAE per support is the mean over the frozen render seeds (the evaluator's per_window quantity); the proxy reads the first seed's render with the per-seed spread recorded beside it"
+ },
+ "measurements": {
+  "FLY124@8.000000+8.000000": {
+   "support": {
+    "rig": "michaels",
+    "recording": "FLY124",
+    "start_s": 8.0,
+    "duration_s": 8.0,
+    "regime": "standby",
+    "key": "FLY124@8.000000+8.000000"
+   },
+   "n_samples": 128000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 8.0,
+   "scored_fraction": 1.0,
+   "mean_reference_rps": 36.389816864977895,
+   "per_rotor_mean_rps": [
+    31.643570260690428,
+    36.185823450515414,
+    41.34941727130098,
+    36.38045647740476
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 7.718257904052734,
+     "ltas_abs_db": 2.726399040439927
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 7.556488513946533,
+     "ltas_abs_db": 2.506453285414904
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 7.951175689697266,
+     "ltas_abs_db": 2.0158530652725655
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 7.703196048736572,
+     "ltas_abs_db": 2.25755182183658
+    }
+   ],
+   "ltas_abs_db_first_seed": 2.726399040439927,
+   "ltas_abs_db_seed_mean": 2.376564303240994,
+   "ltas_abs_db_seed_spread": 0.7105459751673617
+  },
+  "FLY124@16.000000+8.000000": {
+   "support": {
+    "rig": "michaels",
+    "recording": "FLY124",
+    "start_s": 16.0,
+    "duration_s": 8.0,
+    "regime": "standby",
+    "key": "FLY124@16.000000+8.000000"
+   },
+   "n_samples": 128000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 8.0,
+   "scored_fraction": 1.0,
+   "mean_reference_rps": 36.39407167414634,
+   "per_rotor_mean_rps": [
+    31.659299425629808,
+    36.18256020999607,
+    41.318388537697686,
+    36.41603852326181
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 7.771391868591309,
+     "ltas_abs_db": 2.488024868608721
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 8.076096296310425,
+     "ltas_abs_db": 2.127015130634782
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 7.940685987472534,
+     "ltas_abs_db": 1.5844715084729724
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 7.5537543296813965,
+     "ltas_abs_db": 2.013789719691898
+    }
+   ],
+   "ltas_abs_db_first_seed": 2.488024868608721,
+   "ltas_abs_db_seed_mean": 2.0533253068520936,
+   "ltas_abs_db_seed_spread": 0.9035533601357488
+  },
+  "FLY124@27.680000+8.000000": {
+   "support": {
+    "rig": "michaels",
+    "recording": "FLY124",
+    "start_s": 27.68,
+    "duration_s": 8.0,
+    "regime": "ramp",
+    "key": "FLY124@27.680000+8.000000"
+   },
+   "n_samples": 128000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 0.997375,
+   "scored_fraction": 0.124671875,
+   "mean_reference_rps": 56.820198499177515,
+   "per_rotor_mean_rps": [
+    57.642151396344694,
+    54.89134394174926,
+    59.91306804879848,
+    54.83423060981762
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 9.852450847625732,
+     "ltas_abs_db": 2.6076284066781343
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 9.585819482803345,
+     "ltas_abs_db": 2.9678473393779154
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 9.636021852493286,
+     "ltas_abs_db": 2.6283389079754462
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 9.989981412887573,
+     "ltas_abs_db": 2.4939925423731553
+    }
+   ],
+   "ltas_abs_db_first_seed": 2.6076284066781343,
+   "ltas_abs_db_seed_mean": 2.674451799101163,
+   "ltas_abs_db_seed_spread": 0.4738547970047602
+  },
+  "FLY124@40.000000+8.000000": {
+   "support": {
+    "rig": "michaels",
+    "recording": "FLY124",
+    "start_s": 40.0,
+    "duration_s": 8.0,
+    "regime": "cruise",
+    "key": "FLY124@40.000000+8.000000"
+   },
+   "n_samples": 128000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 8.0,
+   "scored_fraction": 1.0,
+   "mean_reference_rps": 80.93400967714052,
+   "per_rotor_mean_rps": [
+    92.08840573644228,
+    74.76522593304067,
+    79.59674671707079,
+    77.2856603220083
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 5.07165002822876,
+     "ltas_abs_db": 1.8097489319516522
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 4.966670513153076,
+     "ltas_abs_db": 2.3853066690083713
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 4.916106224060059,
+     "ltas_abs_db": 2.867473298560431
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 4.776597499847412,
+     "ltas_abs_db": 1.9521345003541488
+    }
+   ],
+   "ltas_abs_db_first_seed": 1.8097489319516522,
+   "ltas_abs_db_seed_mean": 2.253665849968651,
+   "ltas_abs_db_seed_spread": 1.0577243666087788
+  },
+  "FLY124@56.000000+8.000000": {
+   "support": {
+    "rig": "michaels",
+    "recording": "FLY124",
+    "start_s": 56.0,
+    "duration_s": 8.0,
+    "regime": "cruise",
+    "key": "FLY124@56.000000+8.000000"
+   },
+   "n_samples": 128000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 8.0,
+   "scored_fraction": 1.0,
+   "mean_reference_rps": 80.69226921409135,
+   "per_rotor_mean_rps": [
+    91.56759653402602,
+    73.95202129601836,
+    81.92882978948431,
+    75.32062923683672
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 4.952675104141235,
+     "ltas_abs_db": 2.8938971783606036
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 4.803423881530762,
+     "ltas_abs_db": 4.141768217051159
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 4.7281272411346436,
+     "ltas_abs_db": 4.452529895329115
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 5.010516166687012,
+     "ltas_abs_db": 3.1425156262938914
+    }
+   ],
+   "ltas_abs_db_first_seed": 2.8938971783606036,
+   "ltas_abs_db_seed_mean": 3.657677729258692,
+   "ltas_abs_db_seed_spread": 1.5586327169685115
+  }
+ },
+ "likelihood_cells": [
+  {
+   "support": "FLY124@40.000000+8.000000",
+   "n_frames": 247,
+   "n_mics": 8,
+   "oracle_reference": {
+    "rig": "michaels",
+    "recording": "FLY124",
+    "start_s": 90.93,
+    "duration_s": 8.0,
+    "regime": "cruise",
+    "role": "oracle_reference",
+    "rule": "legal disjoint span (guard 1.024 s), 8.000 s, start chosen on a 0.25 s grid to minimise the per-rotor mean-speed mismatch (0.877 rev/s)",
+    "key": "FLY124@90.930000+8.000000",
+    "oracle_match": {
+     "mean_rps_mismatch_rps": 0.8773319949239102,
+     "scored_mean_rps": [
+      92.0896904270611,
+      74.76549491754423,
+      79.59395325971433,
+      77.28612611065005
+     ],
+     "reference_mean_rps": [
+      91.54611902058852,
+      74.79005489382878,
+      80.31962441194919,
+      75.0706006659464
+     ],
+     "n_candidate_starts": 187,
+     "duration_s": 8.0
+    }
+   },
+   "model_available": true
+  },
+  {
+   "support": "FLY124@56.000000+8.000000",
+   "n_frames": 247,
+   "n_mics": 8,
+   "oracle_reference": {
+    "rig": "michaels",
+    "recording": "FLY124",
+    "start_s": 65.774,
+    "duration_s": 8.0,
+    "regime": "cruise",
+    "role": "oracle_reference",
+    "rule": "legal disjoint span (guard 1.024 s), 8.000 s, start chosen on a 0.25 s grid to minimise the per-rotor mean-speed mismatch (0.389 rev/s)",
+    "key": "FLY124@65.774000+8.000000",
+    "oracle_match": {
+     "mean_rps_mismatch_rps": 0.38876711440993006,
+     "scored_mean_rps": [
+      91.56757932300549,
+      73.95320335235549,
+      81.92837450691194,
+      75.32060473715624
+     ],
+     "reference_mean_rps": [
+      91.56798817176903,
+      74.59623438393072,
+      81.46456884936939,
+      75.76842765691464
+     ],
+     "n_candidate_starts": 146,
+     "duration_s": 8.0
+    }
+   },
+   "model_available": true
+  }
+ ],
+ "gates": {
+  "hppnet": {
+   "name": "hppnet_pit_mae",
+   "unavailable": "no probe run",
+   "pass": false
+  },
+  "proxy": {
+   "name": "proxy_ltas_abs_db",
+   "primary": "ltas_abs_db (revised_eval.ltas_deviation_db mean_abs_db, mic 0, absolute level)",
+   "secondary": "mr_ltas (reported only)",
+   "closure": 0.7,
+   "mic": 0,
+   "groups": {
+    "dregon_cruise": {
+     "checks": {
+      "cohort_complete": false,
+      "within_gate": false
+     },
+     "gate_db": 1.9786091435875266,
+     "reference": {
+      "oracle_db": 1.784816176956543,
+      "c3_db": 2.4307927323931553,
+      "current_best_db": 2.126453600529959,
+      "oracle_spread_db": 1.141525996979129,
+      "n_supports": 5.0
+     },
+     "mean_ltas_abs_db": NaN,
+     "spread_ltas_abs_db": NaN,
+     "margin_db": null,
+     "mean_mr_ltas": null,
+     "n_supports": 0,
+     "missing_supports": [
+      "free-flight_nosource_room2@1512727397.205045+4.000000",
+      "hovering_nosource_room2@1511903905.394490+4.000000",
+      "updown_nosource_room2@1511903578.348311+4.000000",
+      "rectangle_nosource_room2@1511905725.952559+4.000000",
+      "spinning_nosource_room2@1511905200.978012+4.000000"
+     ],
+     "supports": [],
+     "pass": false
+    },
+    "michaels_cruise": {
+     "checks": {
+      "cohort_complete": true,
+      "within_gate": false
+     },
+     "gate_db": 1.2196683027095454,
+     "reference": {
+      "oracle_db": 1.0852372760667532,
+      "c3_db": 1.5333406982093933,
+      "current_best_db": 1.3320148816302133,
+      "oracle_spread_db": 0.05340504126022878,
+      "n_supports": 2.0
+     },
+     "mean_ltas_abs_db": 2.351823055156128,
+     "spread_ltas_abs_db": 1.0841482464089514,
+     "margin_db": -1.1321547524465827,
+     "mean_mr_ltas": 2.6759774410298394,
+     "n_supports": 2,
+     "missing_supports": [],
+     "supports": [
+      {
+       "support": "FLY124@40.000000+8.000000",
+       "regime": "cruise",
+       "ltas_abs_db": 1.8097489319516522,
+       "ltas_max_abs_db": 3.8002605838566366,
+       "level_offset_db": 0.9737592462052864,
+       "shape_only_mean_abs_db": 1.6811314278145024,
+       "mr_ltas": 2.2244858283041977
+      },
+      {
+       "support": "FLY124@56.000000+8.000000",
+       "regime": "cruise",
+       "ltas_abs_db": 2.8938971783606036,
+       "ltas_max_abs_db": 5.228784898995403,
+       "level_offset_db": 2.8938971783606036,
+       "shape_only_mean_abs_db": 1.5933488800642455,
+       "mr_ltas": 3.127469053755481
+      }
+     ],
+     "pass": false
+    }
+   },
+   "pass": false
+  },
+  "likelihood": {
+   "name": "likelihood_composite_risk",
+   "front_end": {
+    "n_fft": 2048,
+    "hop": 512,
+    "sr": 16000,
+    "window": "periodic Hann"
+   },
+   "band_hz": [
+    30.0,
+    7900.0
+   ],
+   "band_edge_hz": 300.0,
+   "decisive_band": "comb",
+   "pooled_over": [
+    "FLY124@40.000000+8.000000",
+    "FLY124@56.000000+8.000000"
+   ],
+   "missing_supports": [],
+   "unexpected_supports": [],
+   "checks": {
+    "cohort_complete": true,
+    "comb_below_oracle": false
+   },
+   "per_band": {
+    "comb": {
+     "band_hz": [
+      300.0,
+      7900.0
+     ],
+     "model_nats_per_s": -348981.319444265,
+     "oracle_nats_per_s": -371916.50407051947,
+     "margin_nats_per_s": 22935.184626254486,
+     "below_oracle": false,
+     "arms": {
+      "model": {
+       "score": -348981.319444265,
+       "score_per_band_cell": -44.833160257485225,
+       "weighted_nats": -5516696.697774945,
+       "unique_seconds": 15.808000000000012,
+       "n_frames": 494,
+       "cells_per_frame": [
+        7784
+       ]
+      },
+      "oracle": {
+       "score": -371916.50407051947,
+       "score_per_band_cell": -47.77961254760014,
+       "weighted_nats": -5879256.096346776,
+       "unique_seconds": 15.808000000000012,
+       "n_frames": 494,
+       "cells_per_frame": [
+        7784
+       ]
+      }
+     }
+    },
+    "floor": {
+     "band_hz": [
+      30.0,
+      300.0
+     ],
+     "model_nats_per_s": -6863.891238346425,
+     "oracle_nats_per_s": -8713.266324862545,
+     "margin_nats_per_s": 1849.37508651612,
+     "below_oracle": false,
+     "arms": {
+      "model": {
+       "score": -6863.891238346425,
+       "score_per_band_cell": -24.51389727980866,
+       "weighted_nats": -108504.39269578036,
+       "unique_seconds": 15.808000000000012,
+       "n_frames": 494,
+       "cells_per_frame": [
+        280
+       ]
+      },
+      "oracle": {
+       "score": -8713.266324862545,
+       "score_per_band_cell": -31.118808303080517,
+       "weighted_nats": -137739.3140634272,
+       "unique_seconds": 15.808000000000012,
+       "n_frames": 494,
+       "cells_per_frame": [
+        280
+       ]
+      }
+     }
+    },
+    "full": {
+     "band_hz": [
+      30.0,
+      7900.0
+     ],
+     "model_nats_per_s": -355845.21068261145,
+     "oracle_nats_per_s": -380629.77039538196,
+     "margin_nats_per_s": 24784.55971277051,
+     "below_oracle": false,
+     "arms": {
+      "model": {
+       "score": -355845.21068261145,
+       "score_per_band_cell": -44.12763029298257,
+       "weighted_nats": -5625201.090470726,
+       "unique_seconds": 15.808000000000012,
+       "n_frames": 494,
+       "cells_per_frame": [
+        8064
+       ]
+      },
+      "oracle": {
+       "score": -380629.77039538196,
+       "score_per_band_cell": -47.20111240022098,
+       "weighted_nats": -6016995.410410203,
+       "unique_seconds": 15.808000000000012,
+       "n_frames": 494,
+       "cells_per_frame": [
+        8064
+       ]
+      }
+     }
+    }
+   },
+   "frozen_margin_nats_per_s": 22935.184626254486,
+   "frozen_margin_note": "R1 freezes the comb-band model-minus-oracle margin; later rounds are held to it",
+   "oracle": {
+    "arm": "oracle_np",
+    "definition": "Welch mean periodogram of a speed-matched legal disjoint real segment of the same recording, broadcast over the scored support's frames",
+    "source": "results/noise_v2/short_whittle/short_whittle.json",
+    "reproduction": {
+     "available": true,
+     "recorded_pooled_nats_per_s": -380629.77039538196,
+     "recorded_unique_seconds": 15.808000000000012,
+     "n_rows": 2,
+     "schema": "noise-v2-short_whittle/1",
+     "git_head": "ae47fd4d0c63e06bcebe2a0724d6829f67f1a868",
+     "band_hz": [
+      30.0,
+      7900.0
+     ],
+     "note": "recorded numbers are FULL-band only; compare against per_band.full.oracle_nats_per_s"
+    }
+   },
+   "units": "nats/s of unique observed material (lower is better)",
+   "pass": false
+  }
+ },
+ "bars": {
+  "unavailable": "no probe run",
+  "dregon": null,
+  "michaels": null,
+  "parity_pass": false,
+  "stretch_pass": false
+ },
+ "pass": false,
+ "frozen_gates_pass": false,
+ "parity_pass": false,
+ "stretch_pass": false
+}
