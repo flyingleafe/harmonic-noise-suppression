@@ -53,6 +53,7 @@ import numpy as np  # noqa: E402
 
 from data_processing.noise_model import spectrum as DSP  # noqa: E402
 from data_processing.noise_model.render import render_noise  # noqa: E402
+from data_processing.noise_model.v3 import Wander  # noqa: E402
 from experiments.noise_model import supports as SUP  # noqa: E402
 from experiments.noise_model import tonality as TN  # noqa: E402
 from experiments.noise_model import wander as W  # noqa: E402
@@ -89,12 +90,19 @@ RENDER_SEEDS = (2001, 2002, 2003, 2004)
 N_MICS = 8
 #: (b): the orders whose per-block prominence is histogrammed ("mid" comb).
 MID_ORDERS = (8, 24)
+#: (b): every measured order, broken down by the wander's order groups
+#: (``WM.ORDER_GROUPS``, the groups ``sigma_v_db_by_order`` is measured on).
+ALL_ORDERS = (1, 10_000)
 #: Block prominence (cells over local floor) at which the LINE power equals
 #: the local floor power: 10 log10(2). Below it the line is "under its floor".
 UNDER_FLOOR_DB = float(10.0 * np.log10(2.0))
 #: A line is PRESENT in a window when its window prominence reaches this
 #: (``wander.PROMINENCE_DB``, the resolvable rule's block bar).
 PRESENT_DB = W.PROMINENCE_DB
+#: A line is VISIBLE in a window when at least this share of its blocks reach
+#: ``PRESENT_DB`` (the paper's disappearance-rate population, §"Held-out
+#: wander and line disappearance").
+VISIBLE_BLOCK_FRAC = 0.2
 HIST_EDGES_DB = np.arange(-4.0, 40.5, 1.0)
 N_BOOT = 1000
 BOOT_SEED = 20260925
@@ -474,11 +482,11 @@ def measure(sup: SUP.Support, spec_text: str, tag: str, regime: str) -> tuple[An
     return wd, full
 
 
-def line_cells(full: W.LineBlocks) -> list[dict[str, Any]]:
-    """Every mid-order (rotor, order) line of one window: its valid block
-    prominences and its window prominence."""
+def line_cells(full: W.LineBlocks, orders: tuple[int, int] = MID_ORDERS) -> list[dict[str, Any]]:
+    """Every (rotor, order) line of one window with ``orders[0] <= k <= orders[1]``
+    (default: the mid orders): its valid block prominences and its window prominence."""
     out = []
-    sel = np.nonzero((full.orders >= MID_ORDERS[0]) & (full.orders <= MID_ORDERS[1]))[0]
+    sel = np.nonzero((full.orders >= orders[0]) & (full.orders <= orders[1]))[0]
     for r in range(full.prominence_db.shape[0]):
         for i in sel:
             ok = full.valid[r, i] & np.isfinite(full.prominence_db[r, i])
@@ -506,7 +514,10 @@ def intermittency(lines: Sequence[dict[str, Any]]) -> dict[str, float]:
       >= 6 dB AND one block under the floor: a line that appears and
       disappears inside one window;
     * ``block_sd_present_db`` -- the median over present lines of the sd of
-      their block prominence.
+      their block prominence;
+    * ``frac_dropout_visible`` -- the paper's line disappearance rate: over
+      the lines VISIBLE in their window (>= 6 dB in at least 20 % of its
+      blocks), the share of blocks under 6 dB.
     """
     if not lines:
         return dict(n_lines=0)
@@ -516,16 +527,20 @@ def intermittency(lines: Sequence[dict[str, Any]]) -> dict[str, float]:
     inter = [
         (ln["prom"].max() >= PRESENT_DB) and (ln["prom"].min() < UNDER_FLOOR_DB) for ln in lines
     ]
+    vis = [ln["prom"] for ln in lines if np.mean(ln["prom"] >= PRESENT_DB) >= VISIBLE_BLOCK_FRAC]
+    visp = np.concatenate(vis) if vis else np.array([])
     return dict(
         n_lines=len(lines),
         n_cells=int(allp.size),
         n_present=len(pres),
+        n_visible=len(vis),
         frac_under=float(np.mean(allp < UNDER_FLOOR_DB)),
         frac_under_present=float(np.mean(presp < UNDER_FLOOR_DB)) if presp.size else NAN,
         frac_intermittent=float(np.mean(inter)),
         block_sd_present_db=(
             float(np.median([np.std(ln["prom"], ddof=1) for ln in pres])) if pres else NAN
         ),
+        frac_dropout_visible=float(np.mean(visp < PRESENT_DB)) if visp.size else NAN,
         prom_median_db=float(np.median(allp)),
     )
 
@@ -535,7 +550,13 @@ def boot_intermittency(
 ) -> dict[str, list[float]]:
     """Window bootstrap (``groups`` = one list of lines per window, or per
     window with all its render seeds): [q05, q50, q95] of every statistic."""
-    keys = ("frac_under", "frac_under_present", "frac_intermittent", "block_sd_present_db")
+    keys = (
+        "frac_under",
+        "frac_under_present",
+        "frac_intermittent",
+        "block_sd_present_db",
+        "frac_dropout_visible",
+    )
     draws: dict[str, list[float]] = {k: [] for k in keys}
     for _ in range(n_boot):
         idx = rng.integers(0, len(groups), size=len(groups))
@@ -543,6 +564,24 @@ def boot_intermittency(
         for k in keys:
             draws[k].append(st.get(k, NAN))
     return {k: _q(v) for k, v in draws.items()}
+
+
+def by_order_group(
+    groups: Sequence[Sequence[dict[str, Any]]], rng: np.random.Generator, n_boot: int
+) -> dict[str, Any]:
+    """:func:`intermittency` and its window bootstrap per wander order group
+    (``WM.ORDER_GROUPS``) of every measured order; ``groups`` = one list of
+    lines per window, as :func:`boot_intermittency` takes it."""
+    out: dict[str, Any] = {}
+    for name, lo, hi in WM.ORDER_GROUPS:
+        sub = [[ln for ln in g if lo <= ln["order"] <= hi] for g in groups]
+        lines = [ln for g in sub for ln in g]
+        out[name] = dict(
+            orders=[lo, hi],
+            intermittency=intermittency(lines),
+            intermittency_boot=boot_intermittency(sub, rng, n_boot) if lines else {},
+        )
+    return out
 
 
 def wander_numbers(wins: Sequence[Any], which: str, n_boot: int) -> dict[str, Any]:
@@ -578,7 +617,7 @@ def run_heldout(
         which = LINE_SET[rig]
         specs = heldout_specs(rig)
         arms: dict[str, dict[str, Any]] = {
-            a: dict(wins=[], groups=[], windows=[]) for a in ("real", "v3", "v2")
+            a: dict(wins=[], groups=[], all_orders=[], windows=[]) for a in ("real", "v3", "v2")
         }
         for wi, (spec, key) in enumerate(specs):
             t0 = time.time()
@@ -587,19 +626,25 @@ def run_heldout(
             wd, full = measure(sup, spec.text, "real", regime)
             arms["real"]["wins"].append(wd)
             arms["real"]["groups"].append(line_cells(full))
+            arms["real"]["all_orders"].append(line_cells(full, ALL_ORDERS))
             arms["real"]["windows"].append(dict(spec=spec.text, fit=key, regime=regime))
             for arm in ("v3", "v2"):
                 group: list[dict[str, Any]] = []
+                group_all: list[dict[str, Any]] = []
                 for seed in RENDER_SEEDS:
                     name = f"{arm}_{sup.name}_s{seed}"
                     rs = render_on(fits[key][arm], sup, seed, name)
                     rwd, rfull = measure(rs, f"render:{name}", arm, regime)
                     arms[arm]["wins"].append(rwd)
                     group += line_cells(rfull)
+                    group_all += line_cells(rfull, ALL_ORDERS)
                 arms[arm]["groups"].append(group)
+                arms[arm]["all_orders"].append(group_all)
                 arms[arm]["windows"].append(dict(spec=spec.text, fit=key, seeds=list(RENDER_SEEDS)))
             print(f"  heldout {rig} window {wi}: {sup.name} ({time.time() - t0:.0f} s)", flush=True)
         rng = np.random.default_rng(BOOT_SEED)
+        # its own stream: the mid-order bootstrap above keeps its draws
+        rng_groups = np.random.default_rng([BOOT_SEED, 1])
         block: dict[str, Any] = dict(line_set=which)
         for arm, a in arms.items():
             lines = [ln for g in a["groups"] for ln in g]
@@ -610,6 +655,7 @@ def run_heldout(
                 intermittency=intermittency(lines),
                 intermittency_boot=boot_intermittency(a["groups"], rng, N_BOOT),
                 prominence_hist=prom_hist(lines),
+                intermittency_by_order_group=by_order_group(a["all_orders"], rng_groups, N_BOOT),
             )
         rigs[rig] = block
     payload = dict(
@@ -632,7 +678,8 @@ def run_heldout(
         "own label at the four frozen render seeds, measured by the same estimator. Wander "
         "numbers: scripts/noise_v3_measure_wander.py's rig-centred moments (tau at lag 1), "
         "window bootstrap; intermittency: every (rotor, order 8-24, block), window bootstrap "
-        "with a window's render seeds kept together",
+        "with a window's render seeds kept together; intermittency_by_order_group: the same "
+        "statistics on every measured order, per wander order group (its own bootstrap stream)",
         rigs=rigs,
     )
     write_merged(out_dir / "heldout" / "heldout.json", payload, "rigs", "fits")
@@ -693,8 +740,9 @@ def pattern_specs() -> dict[str, SUP.SupportSpec]:
 
 def ladder(full: W.LineBlocks) -> dict[str, Any]:
     """Rotor-median window prominence at ``LADDER_ORDERS`` and the per-rotor
-    count / highest order at >= 6 dB (the rendered twin of the audit's
-    ``count_ge6`` / ``highest_ge6``)."""
+    count / highest order at >= 3, 6 and 10 dB (the rendered twin of the
+    audit's ``count_ge*`` / ``highest_ge*``, on the wander estimator's window
+    prominence)."""
     wp = np.where(np.isfinite(full.window_prominence_db), full.window_prominence_db, -np.inf)
     ks = full.orders
     at = {
@@ -702,14 +750,31 @@ def ladder(full: W.LineBlocks) -> dict[str, Any]:
         for k in LADDER_ORDERS
         if k in ks
     }
-    hits = wp >= PRESENT_DB
-    return dict(
-        prom_at_k_db=at,
-        count_ge6=float(hits.sum(axis=1).mean()),
-        highest_ge6=float(np.mean([ks[h].max() if h.any() else 0 for h in hits])),
-        curve_db=np.median(wp, axis=0).tolist(),
-        orders=ks.tolist(),
-    )
+    out: dict[str, Any] = dict(prom_at_k_db=at)
+    for thr in TN.PROM_THRESHOLDS_DB:
+        hits = wp >= thr
+        bar = f"{thr:g}".replace(".", "p")
+        out[f"count_ge{bar}"] = float(hits.sum(axis=1).mean())
+        out[f"highest_ge{bar}"] = float(np.mean([ks[h].max() if h.any() else 0 for h in hits]))
+    return out | dict(curve_db=np.median(wp, axis=0).tolist(), orders=ks.tolist())
+
+
+def audit_counts(power: np.ndarray, geom: Any, k_max: int) -> dict[str, float]:
+    """The tonality audit's estimator (``TN.prominence_db``: the peak within one
+    bin of ``k r_i`` over the 0.45-0.70 mean-carrier annulus median, the
+    neighbouring lines excluded) on a clip's TIME-MEAN periodogram instead of
+    the expectation: per-rotor count and highest order at >= 3, 6 and 10 dB,
+    mic-median prominence, rotor mean — the audit's ``count_ge*`` row."""
+    prom = TN.prominence_db(np.asarray(power, dtype=np.float64).mean(axis=1), geom, k_max)
+    per_rotor = np.nanmedian(prom, axis=0)  # (R, K)
+    ks = np.arange(1, k_max + 1)
+    out: dict[str, float] = dict(k_max=float(k_max))
+    for thr in TN.PROM_THRESHOLDS_DB:
+        hits = per_rotor >= thr
+        bar = f"{thr:g}".replace(".", "p")
+        out[f"count_ge{bar}"] = float(hits.sum(axis=1).mean())
+        out[f"highest_ge{bar}"] = float(np.mean([ks[h].max() if h.any() else 0 for h in hits]))
+    return out
 
 
 def run_rendered(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str, Any]:
@@ -720,6 +785,8 @@ def run_rendered(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str
     for key, f in fits.items():
         rig, regime = FITS[key]["rig"], FITS[key]["regime"]
         pats = [p for p in patterns if p.rig == rig and p.regime == regime]
+        # the audit's own bin geometry per pattern (window-mean carrier per rotor)
+        probe = TN.PatternProbe(pats)
         rows = []
         for pat in pats:
             spec = specs[pat.support]
@@ -730,11 +797,17 @@ def run_rendered(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str
             real_full = W.measure_lines(
                 sup.power, sup.freqs_hz, sup.carrier_rev_s, blocks, block_s=BLOCK_S
             )
+            geom = probe.geom[pat.name]
+            k_audit = probe.k_max(f["v3"], pat.name)
             row: dict[str, Any] = dict(
                 pattern=pat.name,
                 support=spec.text,
                 duration_s=float(sup.duration_s),
-                real=dict(widths_hz=widths(audio_real, label, sup.sr), ladder=ladder(real_full)),
+                real=dict(
+                    widths_hz=widths(audio_real, label, sup.sr),
+                    ladder=ladder(real_full),
+                    audit=audit_counts(sup.power, geom, k_audit),
+                ),
             )
             for arm in ("v3", "v2"):
                 clips = []
@@ -754,7 +827,10 @@ def run_rendered(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str
                     )
                     clips.append(
                         dict(
-                            seed=seed, widths_hz=widths(audio, label, sup.sr), ladder=ladder(rfull)
+                            seed=seed,
+                            widths_hz=widths(audio, label, sup.sr),
+                            ladder=ladder(rfull),
+                            audit=audit_counts(rs.power, geom, k_audit),
                         )
                     )
                     print(
@@ -776,7 +852,9 @@ def run_rendered(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str
         "of its regime (TN.select_patterns: narrowest / widest rotor spread) at four seeds = 8 "
         "clips per fit; widths = R4 line_width_db3 (8192/1024, order-tracked, mic and rotor "
         "mean); ladder = wander.measure_lines window prominence (mic-summed 3-bin line cells "
-        "over the local q25 floor), rotor median",
+        "over the local q25 floor), rotor median; audit = the tonality audit's estimator "
+        "(TN.prominence_db, the pattern's own bin geometry) on the clip's time-mean "
+        "periodogram, orders 1..k_max of the v3 fit for every arm",
         fits=res,
     )
     write_merged(out_dir / "tonality" / "rendered.json", payload, "fits")
@@ -812,6 +890,75 @@ def _lag1(arrs: Sequence[np.ndarray]) -> float:
     return num / den if den > 0 else NAN
 
 
+def ou_map_moments(sigma: float, rho: float, s2: float, n_blocks: int) -> np.ndarray:
+    """One OU track of ``n_blocks`` blocks (stationary sd ``sigma``, lag-1 ``rho``)
+    seen through white block noise ``s2``: the explainer's §3.3a toy. Its
+    correctly-shrunk MAP is the Kalman smoother ``m = Q (Q + s2 I)^-1 y``, so
+    ``Cov(m) = Q (Q + s2 I)^-1 Q`` and the posterior covariance is ``Q - Cov(m)``.
+    Returns the block SUMS ``[posterior variance, E m_b^2, E m_b m_{b+1}, the
+    _lag1 denominator, posterior lag-1 covariance]``, so tracks of any length
+    pool as :func:`_lag1` pools."""
+    if sigma <= 0.0 or n_blocks < 1:
+        return np.zeros(5)
+    i = np.arange(int(n_blocks))
+    q = float(sigma) ** 2 * float(rho) ** np.abs(i[:, None] - i[None, :])
+    cm = q @ np.linalg.solve(q + float(s2) * np.eye(i.size), q)
+    d = np.diag(cm)
+    return np.array(
+        [
+            float(np.trace(q - cm)),
+            float(d.sum()),
+            float(np.diag(cm, 1).sum()),
+            float(d[:-1].sum() + d[1:].sum()) / 2.0,
+            float(np.diag(q - cm, 1).sum()),
+        ]
+    )
+
+
+class _Families:
+    """The fitted latent tracks of each family and the §3.3a toy moments of
+    the law each was fitted under (:func:`ou_map_moments`), pooled over windows."""
+
+    def __init__(self) -> None:
+        self.tracks: dict[str, list[np.ndarray]] = {}
+        self.acc: dict[str, dict[str, Any]] = {}
+        self._cache: dict[tuple[float, float, float, int], np.ndarray] = {}
+
+    def add(self, name: str, a: np.ndarray, sigma: float, rho: float, s2: float) -> None:
+        """``a`` = (tracks, B) fitted latents under one law ``(sigma, rho)``."""
+        if a.size == 0:
+            return
+        n = int(a.shape[0])
+        ck = (float(sigma), float(rho), float(s2), int(a.shape[-1]))
+        if ck not in self._cache:
+            self._cache[ck] = ou_map_moments(*ck)
+        self.tracks.setdefault(name, []).append(a)
+        f = self.acc.setdefault(
+            name,
+            dict(
+                moments=np.zeros(5),
+                sig2=0.0,
+                sig4_shrunk=0.0,
+                rho=0.0,
+                n=0,
+                s2=s2,
+                pairs=0,
+                lag_prod=0.0,
+                rho_sig2=0.0,
+            ),
+        )
+        f["moments"] = f["moments"] + n * self._cache[ck]
+        f["sig2"] += a.size * float(sigma) ** 2
+        s4 = float(sigma) ** 4 / (float(sigma) ** 2 + s2) if sigma > 0 else 0.0
+        f["sig4_shrunk"] += a.size * s4
+        f["rho"] += a.size * float(rho)
+        f["n"] += int(a.size)
+        pairs = n * (int(a.shape[-1]) - 1)
+        f["pairs"] += pairs
+        f["lag_prod"] += float((a[:, 1:] * a[:, :-1]).sum())
+        f["rho_sig2"] += pairs * float(rho) * float(sigma) ** 2
+
+
 def run_latents(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str, Any]:
     detail = json.loads((WANDER_DIR / "wander_detail.json").read_text())
     res: dict[str, Any] = {}
@@ -821,63 +968,98 @@ def run_latents(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str,
         fit = load_fit(path)
         lat = fit["latents"]
         wander = fit["params"]["wander"]
+        law = Wander.from_mapping(wander)
         bs = float(wander["block_s"])
         noise = detail["rigs"][cfg["rig"]]["noise"][f"{bs:g}"]
         s2_line = float(noise["line_s2_measured_median_db2"])
         s2_floor = float(noise["floor_s2_measured_median_db2"])
         specs = pool_specs(fit)
-        tracks: dict[str, list[np.ndarray]] = {"d": [], "v": [], "v_present": [], "u": [], "uj": []}
+        # the per-line law's order groups: sigma_v_db_by_order's (schema 2), else one group
+        k_fit = int(fit["k_max"])
+        edges = list(law.v_sigma_edges) or [1, k_fit + 1]
+        v_groups = [
+            (f"v k{lo}-{hi - 1}" if gi < len(edges) - 2 else f"v k{lo}+", lo)
+            for gi, (lo, hi) in enumerate(zip(edges[:-1], edges[1:], strict=True))
+        ]
+        sig_k = np.broadcast_to(law.track_sigma("v", k_fit), (k_fit,))
+        rho_k = np.broadcast_to(law.track_rho("v", k_fit), (k_fit,))
+        grp_k = np.clip(
+            np.searchsorted(np.asarray(edges), np.arange(1, k_fit + 1), side="right") - 1,
+            0,
+            len(v_groups) - 1,
+        )
+        fams = _Families()
+        tracks, acc, add = fams.tracks, fams.acc, fams.add
+
         for w in lat["windows"]:
             for name in ("d", "u", "uj"):
                 if w.get(name) is not None:
-                    tracks[name].append(np.atleast_2d(np.asarray(w[name], dtype=np.float64)))
+                    a = np.atleast_2d(np.asarray(w[name], dtype=np.float64))
+                    s2 = s2_floor if name in ("u", "uj") else s2_line
+                    add(name, a, law.sigma(name), law.rho(name), s2)
             if w.get("v") is None:
                 continue
             v = np.asarray(w["v"], dtype=np.float64)  # (R, K, B)
-            tracks["v"].append(v.reshape(-1, v.shape[-1]))
+            present = None
             spec = specs.get(w["name"])
-            if spec is None:
-                continue
-            sup = SUP.load_support(spec)
-            blocks = W.frame_blocks(sup.frame_centres_s, bs)
-            lb = W.measure_lines(sup.power, sup.freqs_hz, sup.carrier_rev_s, blocks, block_s=bs)
-            present = lb.window_prominence_db >= PRESENT_DB  # (R, K_measured)
-            kk = min(present.shape[1], v.shape[1])
-            sel = present[:, :kk]
-            if sel.any():
-                tracks["v_present"].append(v[:, :kk][sel])
-        rho = {
-            n: float(np.exp(-bs / float(wander[f"tau_{n}_s"]))) if wander.get(f"tau_{n}_s") else NAN
-            for n in ("d", "v", "u", "uj")
-        }
+            if spec is not None:
+                sup = SUP.load_support(spec)
+                blocks = W.frame_blocks(sup.frame_centres_s, bs)
+                lb = W.measure_lines(sup.power, sup.freqs_hz, sup.carrier_rev_s, blocks, block_s=bs)
+                present = lb.window_prominence_db >= PRESENT_DB  # (R, K_measured)
+            for ki in range(v.shape[1]):
+                s, r = float(sig_k[ki]), float(rho_k[ki])
+                g = v_groups[int(grp_k[ki])][0]
+                a = v[:, ki, :]
+                add("v", a, s, r, s2_line)
+                add(g, a, s, r, s2_line)
+                if present is not None and ki < present.shape[1]:
+                    ap = a[present[:, ki]]
+                    add("v_present", ap, s, r, s2_line)
+                    add(g.replace("v ", "v_present ", 1), ap, s, r, s2_line)
         fam: dict[str, Any] = {}
-        for name, arrs in tracks.items():
-            base = "v" if name == "v_present" else name
-            sigma = wander.get(f"sigma_{base}_db")
-            if not arrs or sigma is None:
-                fam[name] = dict(n_values=0, measured_sigma_db=sigma)
+        order = ["d", "v", "v_present", "u", "uj"]
+        order += [g for g, _ in v_groups] + [g.replace("v ", "v_present ", 1) for g, _ in v_groups]
+        for name in order:
+            arrs, f = tracks.get(name), acc.get(name)
+            if not arrs or f is None:
+                fam[name] = dict(n_values=0)
                 continue
             # each window's tracks keep their own block axis; pooled moments
-            n_val = sum(a.size for a in arrs)
+            n_val = int(f["n"])
             sd2 = float(sum(float((a**2).sum()) for a in arrs) / max(n_val, 1))
-            s2 = s2_floor if base in ("u", "uj") else s2_line
-            sig2 = float(sigma) ** 2
+            post, map_sq, lag_num, lag_den, post_lag = (float(x) for x in f["moments"])
+            post_var = post / n_val
+            pairs = max(int(f["pairs"]), 1)
             fam[name] = dict(
-                n_values=int(sum(a.size for a in arrs)),
+                n_values=n_val,
                 fitted_sd_db=float(np.sqrt(sd2)),
-                fitted_sd_plus_noise_db=float(np.sqrt(sd2 + s2)),
-                block_noise_s2_db2=s2,
-                measured_sigma_db=float(sigma),
-                shrunk_expectation_db=float(np.sqrt(sig2 * sig2 / (sig2 + s2)))
-                if sig2 > 0
-                else 0.0,
+                fitted_sd_plus_noise_db=float(np.sqrt(sd2 + f["s2"])),
+                block_noise_s2_db2=float(f["s2"]),
+                # the rms of the prior sd over the family's values (one law
+                # per family but for v / v_present, which mix order groups)
+                measured_sigma_db=float(np.sqrt(f["sig2"] / n_val)),
+                shrunk_expectation_db=float(np.sqrt(f["sig4_shrunk"] / n_val)),
+                posterior_var_db2=post_var,
+                fitted_ms_plus_post_var_db=float(np.sqrt(sd2 + post_var)),
+                map_expected_sd_db=float(np.sqrt(map_sq / n_val)),
+                map_expected_lag1=(lag_num / lag_den) if lag_den > 0 else NAN,
                 fitted_lag1=_lag1(arrs),
-                measured_rho=rho[base],
+                measured_rho=float(f["rho"] / n_val),
+                # the same two sums in dB^2: lag 0 against sigma^2, lag 1 against rho sigma^2
+                fitted_ms_db2=sd2,
+                ms_plus_post_var_db2=sd2 + post_var,
+                measured_sigma2_db2=float(f["sig2"] / n_val),
+                fitted_lag1_product_db2=float(f["lag_prod"]) / pairs,
+                posterior_lag1_cov_db2=post_lag / pairs,
+                lag1_product_plus_post_cov_db2=(float(f["lag_prod"]) + post_lag) / pairs,
+                measured_rho_sigma2_db2=float(f["rho_sig2"]) / pairs,
             )
         res[key] = dict(
             fit=str(path),
             block_s=bs,
             wander=wander,
+            v_order_groups={g: lo for g, lo in v_groups},
             summary_recorded=lat.get("summary"),
             families=fam,
         )
@@ -886,11 +1068,16 @@ def run_latents(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str,
         check="latents",
         git=git_head(),
         note="fitted_sd = rms of the fitted block latents (pooled over windows); +noise = sqrt("
-        "fitted var + the measured median block noise at block_s, "
-        "wander_detail.json rigs.<rig>.noise); shrunk_expectation = sqrt(sigma^4 / (sigma^2 + "
-        "s^2)), the spread a correctly-shrunk MAP latent has in the explainer's toy (section "
-        "3.3a); v_present = the per-line residual on the lines PRESENT in the pool window "
-        "(window prominence >= 6 dB, wander.LineBlocks.window_prominence_db at block_s)",
+        "fitted var + the measured median block noise s^2 at block_s, "
+        "wander_detail.json rigs.<rig>.noise); measured_sigma = rms of the fit's prior sd over "
+        "the family's values (v: sigma_v_db_by_order per order); shrunk_expectation = rms of "
+        "sqrt(sigma^4 / (sigma^2 + s^2)), the spread a correctly-shrunk MAP latent has in the "
+        "explainer's independent-block toy (section 3.3a); posterior_var / map_expected_sd / "
+        "map_expected_lag1 = the same toy with the OU prior (Kalman smoother, ou_map_moments) "
+        "at the family's block counts: fitted mean-square + posterior variance = sigma^2 and "
+        "fitted lag-1 = map_expected_lag1 when the latents are correctly shrunk; v_present = "
+        "the per-line residual on the lines PRESENT in the pool window (window prominence >= "
+        "6 dB, wander.LineBlocks.window_prominence_db at block_s); 'v kA-B' = orders A..B",
         fits=res,
     )
     write_merged(out_dir / "latents" / "latents.json", payload, "fits")
@@ -995,12 +1182,15 @@ def summary_md(out_dir: Path) -> str:
             "",
             f"Mid-order lines (k {d['mid_orders'][0]}-{d['mid_orders'][1]}, every rotor), per "
             f"block: UNDER the floor = line power below the local floor (prominence < "
-            f"{d['under_floor_db']:.2f} dB); PRESENT = window prominence >= {d['present_db']:g} dB. "
-            "Window bootstrap median [5 %, 95 %]:",
+            f"{d['under_floor_db']:.2f} dB); PRESENT = window prominence >= {d['present_db']:g} dB; "
+            f"VISIBLE = >= {d['present_db']:g} dB in >= {100 * VISIBLE_BLOCK_FRAC:g} % of the "
+            "window's blocks, and the disappearance rate is the share of a visible line's blocks "
+            f"under {d['present_db']:g} dB. Window bootstrap median [5 %, 95 %]:",
             "",
             "| rig | arm | lines | cells under floor | present-line blocks under floor | "
-            "lines that appear and disappear | block sd of a present line dB |",
-            "|---|---|---:|---|---|---|---|",
+            "lines that appear and disappear | block sd of a present line dB | visible lines "
+            "| disappearance rate |",
+            "|---|---|---:|---|---|---|---|---:|---|",
         ]
         for rig, b in d["rigs"].items():
             for arm in ("real", "v3", "v2"):
@@ -1008,8 +1198,35 @@ def summary_md(out_dir: Path) -> str:
                 lines.append(
                     f"| {rig} | {arm} | {st.get('n_lines', 0)} ({st.get('n_present', 0)} present) "
                     f"| {_pct(bt['frac_under'])} | {_pct(bt['frac_under_present'])} "
-                    f"| {_pct(bt['frac_intermittent'])} | {_ci(bt['block_sd_present_db'])} |"
+                    f"| {_pct(bt['frac_intermittent'])} | {_ci(bt['block_sd_present_db'])} "
+                    f"| {st.get('n_visible', '—')} | {_pct(bt.get('frac_dropout_visible'))} |"
                 )
+        if any("intermittency_by_order_group" in b["real"] for b in d["rigs"].values()):
+            lines += [
+                "",
+                "Every measured order by wander order group (the groups `sigma_v_db_by_order` "
+                "is measured on), the same statistics, window bootstrap median [5 %, 95 %]:",
+                "",
+                "| rig | orders | arm | lines | cells under floor | present-line blocks under "
+                "floor | lines that appear and disappear | block sd of a present line dB | "
+                "visible lines | disappearance rate |",
+                "|---|---|---|---:|---|---|---|---|---:|---|",
+            ]
+            for rig, b in d["rigs"].items():
+                for group in b["real"].get("intermittency_by_order_group", {}):
+                    for arm in ("real", "v3", "v2"):
+                        g = b[arm]["intermittency_by_order_group"][group]
+                        st, bt = g["intermittency"], g["intermittency_boot"]
+                        if not st.get("n_lines"):
+                            lines.append(f"| {rig} | {group} | {arm} | 0 | — | — | — | — | 0 | — |")
+                            continue
+                        lines.append(
+                            f"| {rig} | {group} | {arm} | {st['n_lines']} ({st['n_present']} "
+                            f"present) | {_pct(bt['frac_under'])} "
+                            f"| {_pct(bt['frac_under_present'])} | {_pct(bt['frac_intermittent'])} "
+                            f"| {_ci(bt['block_sd_present_db'])} | {st.get('n_visible', '—')} "
+                            f"| {_pct(bt.get('frac_dropout_visible'))} |"
+                        )
         lines += ["", "Figure: `heldout/prominence_hist.png`.", ""]
     p = out_dir / "tonality" / "rendered.json"
     if p.is_file():
@@ -1046,6 +1263,39 @@ def summary_md(out_dir: Path) -> str:
                     f"| {_f(np.median(cs), '{:.1f}')} | {_f(np.median(hs), '{:.0f}')} "
                     f"| {', '.join(_f(v, '{:.1f}') for v in pmed)} |"
                 )
+        lines += [
+            "",
+            "Visible-order counts per rotor at 3 / 6 / 10 dB (rotor mean), per pattern window: "
+            "`audit` = the tonality audit's estimator on the clip's time-mean periodogram "
+            "(orders 1..k_max of the v3 fit); `ladder` = the wander estimator's window "
+            "prominence. Renders: median over the 4 seeds.",
+            "",
+            "| fit | pattern | arm | audit >= 3 / 6 / 10 dB | audit highest >= 6 dB "
+            "| ladder >= 3 / 6 / 10 dB |",
+            "|---|---|---|---|---:|---|",
+        ]
+        for key, r in d["fits"].items():
+            for row in r["patterns"]:
+                for arm in ("real", "v3", "v2"):
+                    items = [row["real"]] if arm == "real" else row[arm]
+                    if not all("audit" in it for it in items):
+                        continue
+                    au = [
+                        _f(np.median([it["audit"][f"count_ge{b}"] for it in items]), "{:.1f}")
+                        for b in ("3", "6", "10")
+                    ]
+                    la = [
+                        _f(
+                            np.median([it["ladder"].get(f"count_ge{b}", NAN) for it in items]),
+                            "{:.1f}",
+                        )
+                        for b in ("3", "6", "10")
+                    ]
+                    hi = np.median([it["audit"]["highest_ge6"] for it in items])
+                    lines.append(
+                        f"| {key} | {row['pattern']} | {arm} | {' / '.join(au)} "
+                        f"| {_f(hi, '{:.0f}')} | {' / '.join(la)} |"
+                    )
         lines.append("")
     p = out_dir / "tonality" / "fits.json"
     if p.is_file():
@@ -1053,8 +1303,9 @@ def summary_md(out_dir: Path) -> str:
         lines += [
             "## (c) Tonality on the expectation (`tonality/fits.json`, `noise_v2_tonality_audit.py --fit`)",
             "",
-            "| pattern | payload | prom k=1,2,4,8,16 dB (mic median) | orders >= 6 dB / rotor | highest >= 6 dB | trend crosses floor at k | pedestal median dB |",
-            "|---|---|---|---:|---:|---:|---:|",
+            "| pattern | payload | prom k=1,2,4,8,16 dB (mic median) | orders >= 3 / 6 / 10 dB / "
+            "rotor | highest >= 6 dB | trend crosses floor at k | pedestal median dB |",
+            "|---|---|---|---|---:|---:|---:|",
         ]
         # per pattern: the v3 fit of its rig, then the v2 anchor of its regime
         for pat in d["patterns"]:
@@ -1072,9 +1323,12 @@ def summary_md(out_dir: Path) -> str:
                     if isinstance(st["pedestal"], dict)
                     else st["pedestal"]
                 )
+                counts = " / ".join(
+                    _f(st.get(f"count_ge{b}", [NAN])[0], "{:.1f}") for b in ("3", "6", "10")
+                )
                 lines.append(
                     f"| {name} | {label} | {', '.join(_f(v, '{:.1f}') for v in pk)} "
-                    f"| {_f(st['count_ge6'][0], '{:.1f}')} | {_f(st['highest_ge6'][0], '{:.0f}')} "
+                    f"| {counts} | {_f(st['highest_ge6'][0], '{:.0f}')} "
                     f"| {_f(st['trend_cross_order'][0], '{:.0f}')} | {_f(ped, '{:.1f}')} |"
                 )
         lines.append("")
@@ -1115,9 +1369,16 @@ def summary_md(out_dir: Path) -> str:
         lines += [
             "## (e) Fitted latents against the measured wander (`latents/latents.json`)",
             "",
-            "| fit | family | values | fitted sd dB | sqrt(fitted var + s²) dB | measured σ dB | "
-            "shrunk expectation dB | fitted lag-1 | measured ρ |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+            "Measured σ = rms of the fit's prior sd over the family (v: per order group); "
+            "posterior variance and the MAP's expected sd / lag-1 = the OU prior seen through "
+            "the measured block noise s² (Kalman smoother); correctly shrunk latents give "
+            "fitted sd = MAP expected sd, sqrt(fitted ms + posterior var) = measured σ, "
+            "fitted lag-1 = MAP expected lag-1.",
+            "",
+            "| fit | family | values | fitted sd dB | MAP expected sd dB | sqrt(fitted ms + "
+            "posterior var) dB | measured σ dB | sqrt(fitted var + s²) dB | fitted lag-1 | MAP "
+            "expected lag-1 | measured ρ |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
         for key, r in d["fits"].items():
             for name, f in r["families"].items():
@@ -1125,9 +1386,32 @@ def summary_md(out_dir: Path) -> str:
                     continue
                 lines.append(
                     f"| {key} | {name} | {f['n_values']} | {_f(f['fitted_sd_db'])} "
-                    f"| {_f(f['fitted_sd_plus_noise_db'])} | {_f(f['measured_sigma_db'])} "
-                    f"| {_f(f['shrunk_expectation_db'])} | {_f(f['fitted_lag1'])} "
+                    f"| {_f(f.get('map_expected_sd_db'))} "
+                    f"| {_f(f.get('fitted_ms_plus_post_var_db'))} "
+                    f"| {_f(f['measured_sigma_db'])} | {_f(f['fitted_sd_plus_noise_db'])} "
+                    f"| {_f(f['fitted_lag1'])} | {_f(f.get('map_expected_lag1'))} "
                     f"| {_f(f['measured_rho'])} |"
+                )
+        lines += [
+            "",
+            "The same check as second moments (dB²): fitted mean square + posterior variance "
+            "against the measured σ², and at lag one the fitted lag-1 product + the posterior "
+            "lag-1 covariance against ρσ² (per block pair).",
+            "",
+            "| fit | family | fitted ms | + posterior var | = lag-0 sum | measured σ² | fitted "
+            "lag-1 product | + posterior lag-1 cov | = lag-1 sum | measured ρσ² |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+        for key, r in d["fits"].items():
+            for name, f in r["families"].items():
+                if not f.get("n_values") or "ms_plus_post_var_db2" not in f:
+                    continue
+                lines.append(
+                    f"| {key} | {name} | {_f(f['fitted_ms_db2'])} | {_f(f['posterior_var_db2'])} "
+                    f"| {_f(f['ms_plus_post_var_db2'])} | {_f(f['measured_sigma2_db2'])} "
+                    f"| {_f(f['fitted_lag1_product_db2'])} | {_f(f['posterior_lag1_cov_db2'])} "
+                    f"| {_f(f['lag1_product_plus_post_cov_db2'])} "
+                    f"| {_f(f['measured_rho_sigma2_db2'])} |"
                 )
         lines.append("")
     return "\n".join(lines) + "\n"
