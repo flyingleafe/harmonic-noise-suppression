@@ -1,0 +1,201 @@
+{
+ "schema": "noise-v3-wander/2",
+ "rig": "michaels",
+ "sigma_d_db": 1.1235321522479729,
+ "tau_d_s": 1.4248766746328638,
+ "sigma_v_db": 4.402112964992397,
+ "tau_v_s": 1.5334642159570022,
+ "sigma_v_db_by_order": {
+  "k_edges": [
+   1,
+   3,
+   9,
+   25,
+   61,
+   277
+  ],
+  "sigma_db": [
+   0.5161543045593735,
+   5.890730357247826,
+   5.287035389804068,
+   4.161392935808445,
+   3.7178248524675177
+  ]
+ },
+ "tau_v_s_by_order": {
+  "k_edges": [
+   1,
+   3,
+   9,
+   25,
+   61,
+   277
+  ],
+  "tau_s": [
+   2.8299630060570506,
+   1.9989635836353663,
+   1.4276790342984416,
+   1.6143349723522886,
+   1.3050495976537155
+  ],
+  "tau_source": [
+   "moment",
+   "moment",
+   "moment",
+   "moment",
+   "moment"
+  ]
+ },
+ "sigma_u_db": 3.4233793380357214,
+ "tau_u_s": 3.876077662491937,
+ "sigma_uj_db": 3.625991176269312,
+ "tau_uj_s": 3.375822884541094,
+ "block_s": 0.5,
+ "n_lines_used": 30,
+ "n_v_tracks_used": 3026,
+ "n_windows": 11,
+ "provenance": {
+  "generated_by": "scripts/noise_v3_moment_update.py",
+  "git_head": "8f07160ce150",
+  "explainer": "docs/explainers/noise-model-v3-wander.qmd section 3.3a",
+  "windows": "scripts/_mic_gain_rank.py::rig_specs(extra=True)",
+  "window_specs": [
+   "flight_michaels:FLY125:16.0:8.0:rps_refined",
+   "flight_michaels:FLY125:32.0:8.0:rps_refined",
+   "flight_michaels:FLY125:48.0:8.0:rps_refined",
+   "flight_michaels:FLY125:64.0:8.0:rps_refined",
+   "flight_michaels:FLY125:96.0:8.0:rps_refined",
+   "flight_michaels:FLY125:112.0:8.0:rps_refined",
+   "flight_michaels:FLY125:128.0:8.0:rps_refined",
+   "flight_michaels:FLY125:144.0:8.0:rps_refined",
+   "flight_michaels:FLY125:2.0:4.0:rps_refined",
+   "flight_michaels:FLY125:6.0:4.0:rps_refined",
+   "flight_michaels:FLY125:10.0:4.0:rps_refined"
+  ],
+  "front_end": "2048/512 periodic Hann, 16 kHz, frame-mean label carriers",
+  "units": "sigma_*: stationary sd in dB; tau_*: OU correlation time in s; block_s in s",
+  "line_set": "dominant",
+  "line_estimator": "mic-mean order-tracked line level (3 bins at the label carrier minus the local q25 floor), speed law (f/f_ref)^2 removed, centred per line on its regime mean; d = lag-0 cross moment of two lines of one rotor with tau over lags 1-4 (the line set above)",
+  "v_estimator": "sigma_v_db / tau_v_s: the POOLED all-track value -- every classified track (valid in >= 80 % of its window's blocks); block prominence = 10 log10(10^((mu + d + v + e + o) / 10) + eta): v the per-line OU fitted, d the rotor-common OU held at (sigma_d, tau_d), e white block noise s2, o the speed law minus the track's measured local floor deviation, eta line-free cell ratios; mu matched to each track's median; per-track centring, model draws centred alike (sigma = stationary sd); weight = line fraction at the track median, squared; sigma from the weighted lag-0 sum, tau from lags 1-4; sigma_v_db_by_order[i] holds for orders k_edges[i] <= k < k_edges[i+1]; tau_v_s_by_order (present only when some group's tau is pinned by the window bootstrap, 95/5 % ratio < 4) carries the pooled tau_v where tau_source says so",
+  "floor_estimator": "mic-mean comb-masked level on bands around the 14 floor control points, speed law mean_i (f_i/f_ref)^2 removed, centred per band on its regime mean; u = lag-0 cross-band moment with tau over lags 1-4, uj = auto minus u",
+  "block_noise": "measured: within-block frame scatter (lines); exact correlated-cell Gamma count x mic coherence (floor)",
+  "resolvable_lines": {
+   "note": "schema 1: the per-line residual on the resolvable lines only",
+   "sigma_v_db": 1.9122819238992694,
+   "tau_v_s": 1.2596133679021935,
+   "sigma_total_db": 1.980613853474656,
+   "tau_total_s": 1.1763694638660718
+  },
+  "flags": {},
+  "detail": "results/noise_v3/wander/wander_detail.json",
+  "method": "moment_update_1 from results/noise_v3/fits/michaels_fly125_cruise__flight_v3.json",
+  "fitted_under": "results/noise_v3/wander/michaels.json",
+  "latents": "results/noise_v3/checks/latents/latents.json",
+  "latents_git": "d3c4d0126bc7",
+  "rho_clip": [
+   0.05,
+   0.99
+  ],
+  "rows": [
+   {
+    "family": "d",
+    "n_values": 512,
+    "sigma_old_db": 0.5247579861461655,
+    "sigma_new_db": 1.1235321522479729,
+    "tau_old_s": 0.575985351958768,
+    "tau_new_s": 1.4248766746328638,
+    "rho_old": 0.41975770320110756,
+    "rho_new": 0.7040488317364184,
+    "rho_raw": 0.7040488317364184
+   },
+   {
+    "family": "u",
+    "n_values": 128,
+    "sigma_old_db": 1.7316626732067102,
+    "sigma_new_db": 3.4233793380357214,
+    "tau_old_s": 1.9819572863955734,
+    "tau_new_s": 3.876077662491937,
+    "rho_old": 0.7770303486375727,
+    "rho_new": 0.8789771445027701,
+    "rho_raw": 0.8789771445027701
+   },
+   {
+    "family": "uj",
+    "n_values": 1792,
+    "sigma_old_db": 1.6340634232961726,
+    "sigma_new_db": 3.625991176269312,
+    "tau_old_s": 1.2343524446037826,
+    "tau_new_s": 3.375822884541094,
+    "rho_old": 0.6669296620100221,
+    "rho_new": 0.8623344971765816,
+    "rho_raw": 0.8623344971765816
+   },
+   {
+    "family": "v",
+    "n_values": 41472,
+    "sigma_old_db": 3.7752985545745554,
+    "sigma_new_db": 4.402112964992397,
+    "tau_old_s": 1.1514377270595022,
+    "tau_new_s": 1.5334642159570022,
+    "rho_old": 0.6477569544342069,
+    "rho_new": 0.7217625121845975,
+    "rho_raw": 0.7217625121845975
+   },
+   {
+    "family": "v k1-2",
+    "n_values": 1024,
+    "sigma_old_db": 0.3205396567008768,
+    "sigma_new_db": 0.5161543045593735,
+    "tau_old_s": 1.1514377270595022,
+    "tau_new_s": 2.8299630060570506,
+    "rho_old": 0.6477569544342069,
+    "rho_new": 0.8380472843846145,
+    "rho_raw": 0.8380472843846145
+   },
+   {
+    "family": "v k3-8",
+    "n_values": 3072,
+    "sigma_old_db": 4.17116100602756,
+    "sigma_new_db": 5.890730357247826,
+    "tau_old_s": 1.1514377270595022,
+    "tau_new_s": 1.9989635836353663,
+    "rho_old": 0.6477569544342069,
+    "rho_new": 0.778699842067103,
+    "rho_raw": 0.778699842067103
+   },
+   {
+    "family": "v k9-24",
+    "n_values": 8192,
+    "sigma_old_db": 3.793863772396994,
+    "sigma_new_db": 5.287035389804068,
+    "tau_old_s": 0.8630416875102158,
+    "tau_new_s": 1.4276790342984416,
+    "rho_old": 0.5602644972387953,
+    "rho_new": 0.7045339396711158,
+    "rho_raw": 0.7045339396711158
+   },
+   {
+    "family": "v k25-60",
+    "n_values": 18432,
+    "sigma_old_db": 3.60659967802293,
+    "sigma_new_db": 4.161392935808445,
+    "tau_old_s": 1.062140635312904,
+    "tau_new_s": 1.6143349723522886,
+    "rho_old": 0.624535282303978,
+    "rho_new": 0.7336486361146283,
+    "rho_raw": 0.7336486361146283
+   },
+   {
+    "family": "v k61+",
+    "n_values": 10752,
+    "sigma_old_db": 5.685058339484003,
+    "sigma_new_db": 3.7178248524675177,
+    "tau_old_s": 1.1514377270595022,
+    "tau_new_s": 1.3050495976537155,
+    "rho_old": 0.6477569544342069,
+    "rho_new": 0.6817261772658285,
+    "rho_raw": 0.6817261772658285
+   }
+  ]
+ }
+}
