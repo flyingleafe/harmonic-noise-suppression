@@ -206,7 +206,8 @@ three of the four restarts finished (s1–s3). Harvested with
 `omnirun pull`, reduced with `noise_v2_fit.py reduce --mode flight_v3`, and
 committed under `results/noise_v3/fits/`: the reduced fits
 `{dregon_room2_floor,michaels_fly125_standby}__flight_v3.json` and the
-restarts in `restarts/`.
+restarts in `restarts/`. The GPU campaign took over `results/noise_v3/fits/`,
+so these files now live in `results/noise_v3/fits_cpu_r1/` (same layout).
 
 Per restart. "Wall" is the job's `V3FIT_DONE wall_s`, which includes a
 20–34 s support build. "Move/cell" is the Whittle move per observed cell in
