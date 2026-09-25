@@ -57,6 +57,7 @@ between the fit and the render.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -108,6 +109,7 @@ __all__ = [
     "FLIGHT_HOP",
     "FLIGHT_N_FFT",
     "FLIGHT_SR",
+    "FlightCache",
     "FlightGrid",
     "FloorBasis",
     "FloorParams",
@@ -116,9 +118,14 @@ __all__ = [
     "bench_band",
     "bench_grid",
     "bench_model",
+    "flight_cache",
     "flight_grid",
+    "flight_line_spectra",
     "flight_model",
+    "flight_model_cached",
     "flight_rate_work",
+    "floor_frames_from_autocov",
+    "floor_unit_autocorr",
     "floor_ctrl_hz",
     "floor_shape_chol",
     "floor_shape_db",
@@ -126,6 +133,7 @@ __all__ = [
     "k_max_for_carrier",
     "order_groups",
     "refine_bench_carrier",
+    "wind_frames",
 ]
 
 #: The observation band. ``BAND_F_MAX`` is the frozen evaluator edge; a bench
@@ -263,6 +271,23 @@ class FloorBasis:
         psd = self.psd(floor)
         c = torch.fft.irfft(psd.to(torch.complex128), n=self.psd_len).real
         return c[: self.lag_len]
+
+    def log_psd_db(self, floor: FloorParams) -> Tensor:
+        """``(P,)`` the dB curve :meth:`psd` exponentiates (``mean + S ctrl +
+        tilt``, before ``rate_factor``): what a block's ``u + S u_j`` add to."""
+        ctrl = self.shape_db(floor.shape_z, floor.shape_sd_db)
+        if floor.ctrl_offset_db is not None:
+            ctrl = ctrl + _as_t(floor.ctrl_offset_db, self.shape_psd)
+        mean = _as_t(floor.mean_db, self.shape_psd)
+        tilt = _as_t(floor.tilt_db_oct, self.shape_psd)
+        return mean + self.shape_psd @ ctrl + tilt * self.tilt_oct_psd
+
+    def autocovariance_db(self, db: Tensor) -> Tensor:
+        """``(..., lag_len)`` :meth:`autocovariance` of the floor whose dB
+        curve (:meth:`log_psd_db`) is ``db`` ``(..., P)``, batched."""
+        psd = float(self.rate_factor) * 10.0 ** (db / 10.0)
+        c = torch.fft.irfft(psd.to(torch.complex128), n=self.psd_len, dim=-1).real
+        return c[..., : self.lag_len]
 
 
 def _floor_basis(
@@ -739,6 +764,14 @@ def flight_rate_work(
     return w[:, idx]
 
 
+def _floor_gain(grid: FlightGrid, rate: Tensor, floor: FloorParams) -> Tensor:
+    """``(n_c, n_work)`` the floor envelope's within-window speed law."""
+    ref = grid.window_work
+    return ((rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF) ** _as_t(floor.exp, ref)).mean(
+        dim=0
+    ) + _as_t(floor.static_rel, ref)
+
+
 def _floor_frames(grid: FlightGrid, rate: Tensor, floor: FloorParams) -> Tensor:
     """``(M, n_c, F)`` broadband floor of a chunk, C4's ``_floor_frames``.
 
@@ -748,9 +781,7 @@ def _floor_frames(grid: FlightGrid, rate: Tensor, floor: FloorParams) -> Tensor:
     of its envelope exactly.
     """
     ref = grid.window_work
-    gain_t = ((rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF) ** _as_t(floor.exp, ref)).mean(
-        dim=0
-    ) + _as_t(floor.static_rel, ref)
+    gain_t = _floor_gain(grid, rate, floor)
     c = grid.floor.autocovariance(floor)
     c0 = c[0].clamp_min(MODEL_FLOOR)
     atom = ref[None, :] * torch.sqrt(c0 * gain_t)
@@ -762,6 +793,86 @@ def _floor_frames(grid: FlightGrid, rate: Tensor, floor: FloorParams) -> Tensor:
     )
     f_head = shape_work[..., : grid.n_fft // 2 + 1] * grid.grid_power_factor
     return f_head[None] * 10.0 ** (_as_t(floor.mic_floor_db, ref)[:, None, None] / 10.0)
+
+
+def floor_unit_autocorr(grid: FlightGrid, rate_work: Tensor, floor: FloorParams) -> Tensor:
+    """``(n_c, 2 n_work)`` complex: the autocorrelation ``g_n`` of each frame's
+    UNIT-level floor atom ``w(t) sqrt(g_n(t))`` (the speed law ``exp``,
+    ``static_rel`` of ``floor``, its level and colour NOT applied).
+
+    :func:`_floor_frames` is quadratic in the atom and linear in ``r_tau``, and
+    its atom's level ``sqrt(c_0)`` cancels against ``r_tau = 2 c / c_0``: the
+    floor of a frame is ``K[g_n, 2 c]`` for the floor's autocovariance ``c``
+    (:func:`floor_frames_from_autocov`). With the speed law fixed, ``g_n`` is
+    a constant of every level and colour the floor can take — what the v3
+    latent step caches.
+    """
+    ref = grid.window_work
+    rate = rate_work.to(dtype=ref.dtype, device=ref.device)
+    atom = ref[None, :] * torch.sqrt(_floor_gain(grid, rate, floor))
+    spec = torch.fft.fft(atom.to(torch.complex128), n=2 * grid.n_fft_work, dim=-1)
+    return torch.fft.ifft(spec.real**2 + spec.imag**2, dim=-1)
+
+
+def floor_frames_from_autocov(grid: FlightGrid, g1: Tensor, c: Tensor) -> Tensor:
+    """``(n_c, F)`` floor frames from :func:`floor_unit_autocorr`'s ``g1`` and
+    ``c``, the ``(n_c, n_work)`` (or broadcastable) floor autocovariance of
+    each frame: :func:`_floor_frames` before its per-mic gain, to rounding.
+    ``expected_periodogram_from_atoms``' second half, on the analysis bins only.
+    """
+    n = int(grid.n_fft_work)
+    big = 2 * n
+    r = 2.0 * c
+    mid = torch.zeros(r.shape[:-1] + (1,), dtype=r.dtype, device=r.device)
+    rw = torch.cat((r, mid, r.flip(-1)[..., : n - 1]), dim=-1)
+    p_z = torch.fft.fft(g1 * rw, dim=-1).real
+    pos = torch.arange(0, 2 * (grid.n_fft // 2 + 1), 2, device=p_z.device)
+    neg = torch.remainder(big - pos, big)
+    head = 0.25 * (p_z.index_select(-1, pos) + p_z.index_select(-1, neg))
+    return head / float(grid.window_work_sumsq) * grid.grid_power_factor
+
+
+def _line_blocks(
+    grid: FlightGrid,
+    params: V2Params,
+    rate: Tensor,
+    kk: int,
+    harmonic_chunk: int | None,
+) -> Iterator[tuple[int, int, Tensor]]:
+    """``(k0, k1, block)`` per harmonic chunk of :func:`flight_model`'s line
+    kernel: ``block`` is the ``(R, k1 - k0, n_c, F)`` expected periodogram of
+    each line of the chunk on the analysis bins, before ``grid_power_factor``.
+    """
+    ref = grid.window_work
+    n_rotors, _n_c, n_work = rate.shape
+    profile = _as_t(params.profile_db, ref)
+    gamma = gamma_block(params.gamma_hz, n_rotors=n_rotors, k_max=kk, ref=ref)
+
+    phase = (2.0 * math.pi / float(grid.sr_work)) * torch.cumsum(rate, dim=-1)
+    phase = phase - phase[..., n_work // 2 : n_work // 2 + 1]
+    prof_amp = torch.sqrt(2.0 * 10.0 ** (profile[:, :kk] / 10.0))  # (R, K)
+    speed_amp = torch.sqrt(
+        (rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF) ** _as_t(params.amp_exp, ref)
+    )
+    env = speed_amp * ref  # (R, n_c, n_work)
+
+    step = kk if harmonic_chunk is None else max(1, int(harmonic_chunk))
+    for k0 in range(0, kk, step):
+        k1 = min(k0 + step, kk)
+        k = torch.arange(k0 + 1, k1 + 1, dtype=ref.dtype, device=ref.device)
+        kph = torch.remainder(k[None, :, None, None] * phase[:, None], 2.0 * math.pi)
+        atoms = torch.polar(prof_amp[:, k0:k1, None, None] * env[:, None], kph)
+        rho = r_tau(
+            grid.tau_s_work[None, None, :],
+            k[None, :, None],
+            sigma_nu=params.sigma_nu,
+            lam=params.lam,
+            gamma_hz=gamma[:, k0:k1, None],
+        )[:, :, None, :]  # (R, K, 1, n_work)
+        block = expected_periodogram_from_atoms(
+            atoms, rho, n_fft=grid.n_fft_work, window_sumsq=grid.window_work_sumsq
+        )
+        yield k0, k1, block[..., : grid.n_fft // 2 + 1]
 
 
 def flight_model(
@@ -784,39 +895,12 @@ def flight_model(
     """
     ref = grid.window_work
     rate = rate_work.to(dtype=ref.dtype, device=ref.device)
-    n_rotors, n_c, n_work = rate.shape
-    profile = _as_t(params.profile_db, ref)
-    kk = int(profile.shape[1]) if k_max is None else int(k_max)
-    if kk > int(profile.shape[1]):
-        raise ValueError(f"k_max {kk} exceeds the profile's {int(profile.shape[1])} orders")
-    gamma = gamma_block(params.gamma_hz, n_rotors=n_rotors, k_max=kk, ref=ref)
-
-    phase = (2.0 * math.pi / float(grid.sr_work)) * torch.cumsum(rate, dim=-1)
-    phase = phase - phase[..., n_work // 2 : n_work // 2 + 1]
-    prof_amp = torch.sqrt(2.0 * 10.0 ** (profile[:, :kk] / 10.0))  # (R, K)
-    speed_amp = torch.sqrt(
-        (rate.clamp_min(SPEED_FLOOR_RPS) / AMP_RPS_REF) ** _as_t(params.amp_exp, ref)
-    )
-    env = speed_amp * ref  # (R, n_c, n_work)
+    n_rotors, n_c, _n_work = rate.shape
+    kk = _k_cap(params, k_max)
 
     shapes = torch.zeros(n_rotors, n_c, grid.n_fft // 2 + 1, dtype=ref.dtype, device=ref.device)
-    step = kk if harmonic_chunk is None else max(1, int(harmonic_chunk))
-    for k0 in range(0, kk, step):
-        k1 = min(k0 + step, kk)
-        k = torch.arange(k0 + 1, k1 + 1, dtype=ref.dtype, device=ref.device)
-        kph = torch.remainder(k[None, :, None, None] * phase[:, None], 2.0 * math.pi)
-        atoms = torch.polar(prof_amp[:, k0:k1, None, None] * env[:, None], kph)
-        rho = r_tau(
-            grid.tau_s_work[None, None, :],
-            k[None, :, None],
-            sigma_nu=params.sigma_nu,
-            lam=params.lam,
-            gamma_hz=gamma[:, k0:k1, None],
-        )[:, :, None, :]  # (R, K, 1, n_work)
-        block = expected_periodogram_from_atoms(
-            atoms, rho, n_fft=grid.n_fft_work, window_sumsq=grid.window_work_sumsq
-        )
-        shapes = shapes + block[..., : grid.n_fft // 2 + 1].sum(dim=1)
+    for _k0, _k1, block in _line_blocks(grid, params, rate, kk, harmonic_chunk):
+        shapes = shapes + block.sum(dim=1)
     shapes = shapes * grid.grid_power_factor
 
     line_gain = _mean_pinned_db(_as_t(params.mic_line_gain_db, ref))
@@ -829,9 +913,154 @@ def flight_model(
         # its shape varies slowly on the 7.8 Hz grid, so the window response of
         # the process is the shape itself — and through the transfer with the
         # rest, because the renderer's chain applies that to it too.
-        if grid.wind_shape is None:
-            raise ValueError("a wind term needs a FlightGrid carrying its wind_shape")
-        wind = 10.0 ** (_as_t(params.wind_db, ref).reshape(-1) / 10.0)
-        floor = floor + wind[:, None, None] * grid.wind_shape.to(ref)[None, None, :]
+        floor = floor + wind_frames(grid, params)[:, None, :]
     observed = (floor + lines) * grid.transfer_power[None, None, :]
     return (observed * all_gain[:, None, None]).clamp_min(MODEL_FLOOR)
+
+
+def _k_cap(params: V2Params, k_max: int | None) -> int:
+    n_prof = int(torch.as_tensor(params.profile_db).shape[1])
+    kk = n_prof if k_max is None else int(k_max)
+    if kk > n_prof:
+        raise ValueError(f"k_max {kk} exceeds the profile's {n_prof} orders")
+    return kk
+
+
+def wind_frames(grid: FlightGrid, params: V2Params) -> Tensor:
+    """``(M, F)`` v3's static per-mic wind term ``10^{w_m/10} s(f)``."""
+    if grid.wind_shape is None:
+        raise ValueError("a wind term needs a FlightGrid carrying its wind_shape")
+    ref = grid.window_work
+    wind = 10.0 ** (_as_t(params.wind_db, ref).reshape(-1) / 10.0)
+    return wind[:, None] * grid.wind_shape.to(ref)[None, :]
+
+
+def flight_line_spectra(
+    grid: FlightGrid,
+    params: V2Params,
+    *,
+    rate_work: Tensor,
+    k_max: int | None = None,
+    harmonic_chunk: int | None = 32,
+    dtype: torch.dtype = torch.float64,
+) -> Tensor:
+    """``(R, n_c, K, F)``: every LINE's expected periodogram, apart.
+
+    :func:`flight_model`'s line kernel at ``params`` (profile, width, shaft,
+    speed law), per rotor, frame and order, with ``grid_power_factor`` applied
+    and before the mic gains and the transfer — the lines :func:`flight_model`
+    sums over ``k``. A line's power is linear in ``10^{p_rk / 10}``, so a
+    per-block dB offset of it is a multiplier on its row: what the v3 latent
+    step caches when the rig is fixed. Stored in ``dtype``.
+    """
+    ref = grid.window_work
+    rate = rate_work.to(dtype=ref.dtype, device=ref.device)
+    n_rotors, n_c, _n_work = rate.shape
+    kk = _k_cap(params, k_max)
+    out = torch.empty(n_rotors, n_c, kk, grid.n_fft // 2 + 1, dtype=dtype, device=ref.device)
+    for k0, k1, block in _line_blocks(grid, params, rate, kk, harmonic_chunk):
+        out[:, :, k0:k1] = (block * grid.grid_power_factor).transpose(1, 2).to(dtype)
+    return out
+
+
+@dataclass
+class FlightCache:
+    """:func:`flight_model` at a FIXED ``params``, kept apart for multipliers.
+
+    ``lines`` is :func:`flight_line_spectra` ``(R, N, K, F)``, dense: a line's
+    Lorentzian and window tails reach every bin, so a banded store would trade
+    the 1e-10 agreement with :func:`flight_model` for memory no pool needs.
+    ``floor_g1`` is :func:`floor_unit_autocorr` ``(N, 2 n_work)``, ``floor_db``
+    the floor's :meth:`FloorBasis.log_psd_db` and ``floor0`` its frames at that
+    curve. The rest are ``params``' fixed per-mic factors. Read by
+    :func:`flight_model_cached`.
+    """
+
+    lines: Tensor
+    floor_g1: Tensor
+    floor_db: Tensor
+    floor0: Tensor
+    line_gain: Tensor
+    all_gain: Tensor
+    mic_floor: Tensor
+    wind: Tensor | None
+
+
+def flight_cache(
+    grid: FlightGrid,
+    params: V2Params,
+    *,
+    rate_work: Tensor,
+    k_max: int | None = None,
+    chunk_frames: int | None = None,
+    line_dtype: torch.dtype = torch.float64,
+) -> FlightCache:
+    """Build the :class:`FlightCache` of ``params`` on ``rate_work``'s frames,
+    ``chunk_frames`` at a time (``None``: all at once). No gradient."""
+    ref = grid.window_work
+    rate = rate_work.to(dtype=ref.dtype, device=ref.device)
+    n_c = int(rate.shape[1])
+    step = n_c if not chunk_frames else max(1, int(chunk_frames))
+    lines: list[Tensor] = []
+    g1: list[Tensor] = []
+    with torch.no_grad():
+        for i0 in range(0, n_c, step):
+            sub = rate[:, i0 : i0 + step]
+            lines.append(
+                flight_line_spectra(grid, params, rate_work=sub, k_max=k_max, dtype=line_dtype)
+            )
+            g1.append(floor_unit_autocorr(grid, sub, params.floor))
+        floor_g1 = torch.cat(g1, dim=0)
+        floor_db = grid.floor.log_psd_db(params.floor)
+        floor0 = floor_frames_from_autocov(
+            grid, floor_g1, grid.floor.autocovariance_db(floor_db)[None, :]
+        )
+        return FlightCache(
+            lines=torch.cat(lines, dim=1),
+            floor_g1=floor_g1,
+            floor_db=floor_db,
+            floor0=floor0,
+            line_gain=_mean_pinned_db(_as_t(params.mic_line_gain_db, ref)),
+            all_gain=_mean_pinned_db(_as_t(params.gain_all_db, ref).reshape(-1, 1)).reshape(-1),
+            mic_floor=10.0 ** (_as_t(params.floor.mic_floor_db, ref) / 10.0),
+            wind=None if params.wind_db is None else wind_frames(grid, params),
+        )
+
+
+def flight_model_cached(
+    grid: FlightGrid,
+    cache: FlightCache,
+    *,
+    line_db: Tensor | None = None,
+    floor_db: Tensor | None = None,
+    floor_group: Tensor | None = None,
+) -> Tensor:
+    """``(M, N, F)`` :func:`flight_model` of the cached rig with its lines and
+    floor moved by per-frame multipliers, to rounding.
+
+    ``line_db`` ``(R, N, K)`` (or ``(R, N, 1)``, one offset per rotor) adds to
+    every line's ``profile_db`` frame by frame; ``floor_db`` ``(G, P)`` adds
+    to the floor's dB curve per GROUP and ``floor_group`` ``(N,)`` names each
+    frame's group. Elementwise work, one batched ``(1 x K) @ (K x F)`` product
+    per rotor and frame, ``G`` ``irfft`` and ``N`` ``fft`` of the floor.
+    """
+    lines = cache.lines
+    if line_db is None:
+        shapes = lines.sum(dim=2).to(torch.float64)
+    else:
+        mult = (10.0 ** (line_db / 10.0)).to(lines.dtype)
+        mult = mult.expand(lines.shape[0], lines.shape[1], lines.shape[2])
+        shapes = torch.matmul(mult.unsqueeze(-2), lines).squeeze(-2).to(torch.float64)
+    if floor_db is None:
+        floor = cache.floor0
+    else:
+        c = grid.floor.autocovariance_db(cache.floor_db + floor_db)
+        if floor_group is not None:
+            c = c.index_select(0, floor_group)
+        floor = floor_frames_from_autocov(grid, cache.floor_g1, c)
+    lines_m = torch.einsum("mr,rnf->mnf", cache.line_gain, shapes)
+    floor_m = floor[None] * cache.mic_floor[:, None, None]
+    if cache.wind is not None:
+        floor_m = floor_m + cache.wind[:, None, :]
+    observed = (floor_m + lines_m) * grid.transfer_power[None, None, :]
+    return (observed * cache.all_gain[:, None, None]).clamp_min(MODEL_FLOOR)

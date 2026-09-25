@@ -427,6 +427,59 @@ def test_block_forward_model_at_zero_latents_is_flight_model_bit_for_bit():
     )
 
 
+def test_the_latent_steps_cached_forward_is_forward_v3_at_any_latents():
+    """With the rig fixed, step (ii) caches every line's spectrum and the
+    floor's atoms once and moves only their block multipliers: at arbitrary
+    ``d, v, u, u_j`` on windows of DIFFERENT block counts it must reproduce
+    :func:`forward_v3` (the per-block ``flight_model``) to rounding."""
+    k_cap, n_mics = 3, 2
+    par = _params(
+        k_cap=k_cap,
+        n_mics=n_mics,
+        profile_db=np.array([-18.0, -21.0, -25.0]),
+        shape_z=np.random.default_rng(4).standard_normal(NC),
+    )
+    par = dataclasses.replace(
+        par, floor=dataclasses.replace(par.floor, shape_sd_db=_t(4.0)), wind_db=_t([-50.0, -55.0])
+    )
+    wander = MD.Wander(
+        sigma_d_db=3.0,
+        tau_d_s=2.0,
+        sigma_v_db=2.0,
+        tau_v_s=2.0,
+        sigma_u_db=1.0,
+        tau_u_s=2.0,
+        block_s=0.05,
+        sigma_uj_db=1.0,
+        tau_uj_s=2.0,
+    )
+    full = _two_window_batch(par, k_cap=k_cap, n_mics=n_mics)
+    assert full.frame_window is not None
+    keep = np.flatnonzero(
+        ~((full.frame_window == 1) & (np.arange(full.frame_window.size) % 12 >= 8))
+    )
+    batch = MD.with_blocks(MD.batch_slice(full, keep), wander.block_s)
+    assert batch.window_blocks[0] > batch.window_blocks[1] >= 3
+    rng = np.random.default_rng(7)
+    latents = {}
+    for w, nb in enumerate(batch.window_blocks):
+        zero = MD.zero_latents(wander, n_rotors=1, k_max=k_cap, n_blocks=nb)
+        latents[w] = MD.WindowLatents(
+            **{n: _t(rng.normal(0.0, 3.0, x.shape)) for n, x in zero.tracks().items()}
+        )
+    cache = MD.latent_cache(batch, par)
+    b_max = cache.n_block_max
+
+    def stacked(name: str) -> torch.Tensor:
+        xs = [getattr(latents[w], name) for w in cache.windows]
+        return torch.stack([torch.nn.functional.pad(x, (0, b_max - x.shape[-1])) for x in xs])
+
+    with torch.no_grad():
+        want = MD.forward_v3(batch, par, latents)
+        got = cache.expected(stacked("d"), stacked("v"), stacked("u"), stacked("uj"))
+    np.testing.assert_allclose(got.numpy(), want.numpy(), rtol=1e-10, atol=0.0)
+
+
 # ── (g) recovery of a planted v3 rig with wander ────────────────────────────
 
 

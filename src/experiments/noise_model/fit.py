@@ -1239,10 +1239,12 @@ def fit_window_latents(
 
     ``batch`` is that window's frames (:func:`.model.window_batch`) and
     ``params`` the rig as constants; an ``AutoDelta`` over the window's
-    ``wander_*`` sites (:func:`.model.latent_model`), started at ``init`` and
-    polished by strong-Wolfe L-BFGS. With ``sigma, tau`` fixed this is the
-    correctly-shrunk MAP of the explainer's §3.3a — a Kalman smoother of the
-    block amplitudes, no variance to cheat with.
+    ``wander_*`` sites (:func:`.model.latent_model_cached`), started at
+    ``init`` and polished by strong-Wolfe L-BFGS. With ``sigma, tau`` fixed
+    this is the correctly-shrunk MAP of the explainer's §3.3a — a Kalman
+    smoother of the block amplitudes, no variance to cheat with. The rig's
+    line and floor spectra are computed ONCE (:func:`.model.latent_cache`):
+    an evaluation only moves their block multipliers.
     """
     t0 = time.time()
     values = {f"wander_{name}": x.detach().clone() for name, x in init.tracks().items()}
@@ -1250,9 +1252,11 @@ def fit_window_latents(
     if not values:
         return init, dict(rec, tracks=[], note="no active wander track")
     pyro.clear_param_store()
+    cache = MD.latent_cache(batch, params)
+    cache_s = time.time() - t0
 
     def model() -> Any:
-        return MD.latent_model(batch, params, wander=wander, window=int(window))
+        return MD.latent_model_cached(batch, cache, wander=wander)
 
     guide = AutoDelta(model, init_loc_fn=init_to_value(values=values))
     elbo = Trace_ELBO()
@@ -1287,6 +1291,7 @@ def fit_window_latents(
         loss_before=before,
         loss_after=after,
         evals=count,
+        cache_s=cache_s,
         wall_s=time.time() - t0,
     )
 

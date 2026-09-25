@@ -102,6 +102,7 @@ __all__ = [
     "SPEED_LAW_SITES",
     "V3_MODE",
     "ChannelGains",
+    "LatentCache",
     "Measured",
     "OUChain",
     "Priors",
@@ -122,7 +123,8 @@ __all__ = [
     "frozen_from_params",
     "gamma_from_params",
     "is_pinned",
-    "latent_model",
+    "latent_cache",
+    "latent_model_cached",
     "log_prior",
     "objective_breakdown",
     "ou_log_density",
@@ -1209,7 +1211,7 @@ def _sample_params_v3(
     microphone site at all — the three v2 mic blocks are zeros, which the
     mean-pinned forward model reads as unit gains. ``wind_db`` is a site only
     when :attr:`PriorsV3.wind`. The block latents are NOT sampled here: they
-    are per window (:func:`sample_window_latents`, :func:`latent_model`).
+    are per window (:func:`sample_window_latents`, :func:`latent_model_cached`).
     """
     if not isinstance(priors, PriorsV3):
         raise TypeError(f"mode {V3_MODE!r} needs PriorsV3, got {type(priors).__name__}")
@@ -1504,21 +1506,125 @@ def forward_v3(
     return out.index_select(1, torch.as_tensor(inv, dtype=torch.int64, device=dev))
 
 
-def latent_model(
-    batch: SupportBatch, params: V2Params, *, wander: Wander, window: int
+@dataclass
+class LatentCache:
+    """Step (ii)'s forward model with the rig FIXED, precomputed once per rig.
+
+    With the rig a constant a block latent moves two multipliers and nothing
+    else (:func:`block_params`): line ``(r, k)`` of a frame in block ``b`` is
+    ``10^{(d_r(b) + v_rk(b))/10}`` times its rig spectrum and the floor's dB
+    curve moves by ``u(b) + S u_j(b)``. ``flight`` holds the rig's per-line
+    spectra and floor atoms (:func:`.spectrum.flight_cache`), so an evaluation
+    is elementwise work, one batched matrix product and the floor's FFTs
+    (:func:`.spectrum.flight_model_cached`) instead of :func:`forward_v3`'s
+    ``R K N`` line kernels.
+
+    ``windows`` are the batch windows the cache covers, each with its
+    ``n_blocks``; a latent track is laid out ``(W, ..., B)`` with ``B`` the
+    largest count (a shorter window's tail blocks touch no frame) and
+    ``frame_track`` ``(N,)`` holds ``w B + b`` of every frame.
+    """
+
+    grid: FlightGrid
+    flight: SP.FlightCache
+    windows: tuple[int, ...]
+    n_blocks: tuple[int, ...]
+    frame_track: Tensor
+
+    @property
+    def n_block_max(self) -> int:
+        return max(self.n_blocks)
+
+    def expected(
+        self,
+        d: Tensor | None = None,
+        v: Tensor | None = None,
+        u: Tensor | None = None,
+        uj: Tensor | None = None,
+    ) -> Tensor:
+        """``(M, N, F)`` at latents ``d (W, R, B)``, ``v (W, R, K, B)``,
+        ``u (W, B)``, ``uj (W, J, B)`` (``None``: zero)."""
+        n_tracks = len(self.windows) * self.n_block_max
+        ft = self.frame_track
+        line: Tensor | None = None
+        if d is not None:
+            line = d.permute(1, 0, 2).reshape(d.shape[1], n_tracks).index_select(1, ft)[..., None]
+        if v is not None:
+            per = v.permute(1, 2, 0, 3).reshape(v.shape[1], v.shape[2], n_tracks)
+            vv = per.index_select(2, ft).permute(0, 2, 1)
+            line = vv if line is None else line + vv
+        floor_db: Tensor | None = None
+        if u is not None:
+            floor_db = u.reshape(n_tracks)[:, None]
+        if uj is not None:
+            add = uj.permute(0, 2, 1).reshape(n_tracks, -1) @ self.grid.floor.shape_psd.T
+            floor_db = add if floor_db is None else floor_db + add
+        return SP.flight_model_cached(
+            self.grid,
+            self.flight,
+            line_db=line,
+            floor_db=floor_db,
+            floor_group=None if floor_db is None else ft,
+        )
+
+
+def latent_cache(
+    batch: SupportBatch,
+    params: V2Params,
+    *,
+    chunk_frames: int | None = None,
+    line_dtype: torch.dtype = torch.float64,
+) -> LatentCache:
+    """The :class:`LatentCache` of the rig ``params`` on ``batch``'s frames."""
+    assert isinstance(batch.grid, FlightGrid) and batch.rate_work is not None
+    if batch.frame_window is None or batch.frame_block is None:
+        raise ValueError(f"batch {batch.name!r} has no block assignment (model.with_blocks)")
+    fw = np.asarray(batch.frame_window, dtype=np.int64)
+    fb = np.asarray(batch.frame_block, dtype=np.int64)
+    windows = tuple(int(w) for w in np.unique(fw))
+    n_blocks = tuple(int(batch.window_blocks[w]) for w in windows)
+    local = np.searchsorted(np.asarray(windows, dtype=np.int64), fw)
+    track = torch.as_tensor(
+        local * max(n_blocks) + fb, dtype=torch.int64, device=batch.power.device
+    )
+    flight = SP.flight_cache(
+        batch.grid,
+        params,
+        rate_work=batch.rate_work,
+        k_max=batch.k_max,
+        chunk_frames=chunk_frames,
+        line_dtype=line_dtype,
+    )
+    return LatentCache(
+        grid=batch.grid, flight=flight, windows=windows, n_blocks=n_blocks, frame_track=track
+    )
+
+
+def latent_model_cached(
+    batch: SupportBatch, cache: LatentCache, *, wander: Wander
 ) -> WindowLatents:
     """The Pyro model of ONE window's latents with the rig held FIXED.
 
     Step (ii) of the explainer's §3.4 alternation: the windows are
     conditionally independent given the rig — what a per-window plate
     asserts — so each is its own small problem over ``wander_*`` sites, fitted
-    against exactly that window's frames and exposure (:func:`window_batch`).
+    against exactly that window's frames and exposure (:func:`window_batch`),
+    through the window's :class:`LatentCache`.
     """
-    n_blocks = int(batch.window_blocks[int(window)])
+    if len(cache.windows) != 1:
+        raise ValueError(f"one window per cache here, got {len(cache.windows)}")
     lat = sample_window_latents(
-        _pyro_site, wander, n_rotors=batch.n_rotors, k_max=batch.k_max, n_blocks=n_blocks
+        _pyro_site,
+        wander,
+        n_rotors=batch.n_rotors,
+        k_max=batch.k_max,
+        n_blocks=cache.n_blocks[0],
     )
-    m_model = forward_v3(batch, params, {int(window): lat})
+
+    def one(x: Tensor | None) -> Tensor | None:
+        return None if x is None else x[None]
+
+    m_model = cache.expected(one(lat.d), one(lat.v), one(lat.u), one(lat.uj))
     pyro.factor("whittle", -whittle_risk(batch, m_model))
     return lat
 
