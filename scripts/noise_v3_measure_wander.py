@@ -1483,6 +1483,29 @@ def _why_md(inter: dict[str, Any] | None) -> str:
     )
 
 
+def _steps_md(rigs: dict[str, Any]) -> str:
+    """Old to new in two steps, per rig: the estimator on the same (resolvable)
+    tracks, then the track set."""
+    steps = "; ".join(
+        f"{rig} {_f(blk['chosen'][PRIMARY]['numbers']['sigma_v_db'])} (schema 1, "
+        f"{blk['chosen'][PRIMARY]['n_line_tracks']} {blk['line_set']} line tracks) -> "
+        f"{_f(blk['all_tracks']['resolvable_only']['sigma_db'])} (all-track estimator, "
+        f"resolvable tracks) -> {_f(blk['all_tracks']['pooled']['sigma_db'])} dB (every "
+        "valid track)"
+        for rig, blk in rigs.items()
+    )
+    return (
+        f"**Old to new in two steps:** {steps}. The first step is everything the two "
+        "estimators do differently on the same tracks: schema 1 keeps only the line set's "
+        f"tracks with a median measured block sd <= {MAX_TRACK_NOISE_DB:g} dB, treats blocks "
+        f"under {W.MIN_BLOCK_PROMINENCE_DB:g} dB prominence or noisier than "
+        f"{MAX_BLOCK_NOISE_DB:g} dB as missing, reads the line level (cells minus floor, mic "
+        "mean of dB) and centres on the regime mean; schema 2 keeps every valid block, reads "
+        "the prominence with the floor modelled and centres per track. The second step is "
+        "the resolvable rule alone."
+    )
+
+
 def all_track_md(rigs: dict[str, Any], inter: dict[str, Any] | None) -> list[str]:
     """The schema-2 section: the per-line sd on every valid track, old beside new."""
     out = ["## The per-line sd on every valid track (the contract's sigma_v, schema 2)", ""]
@@ -1531,8 +1554,8 @@ def all_track_md(rigs: dict[str, Any], inter: dict[str, Any] | None) -> list[str
             f"{_qci(r['sigma_db_q05_50_95'])} | {_f(h['sigma_d_db'])} / {_f(h['tau_d_s'])} | "
             f"{_f(at['sigma_total_db'])} | {_f(p['acf1_observed'])} / {_f(p['acf1_model'])} |"
         )
+    out += ["", _steps_md(rigs), ""]
     out += [
-        "",
         "By order group -- the contract's `sigma_v_db_by_order` / `tau_v_s_by_order`. The "
         "schema-1 column is the resolvable lines' own auto sd per group (section 'Breakdown', "
         "all of a line's wander, `d` included; n/a where no resolvable line was used).",
@@ -1643,7 +1666,31 @@ def _all_track_blocks_md(rigs: dict[str, Any]) -> list[str]:
                 f"{_qci(p['tau_s_q05_50_95'])} | {grp} | {_f(p['acf1_observed'])} / "
                 f"{_f(p['acf1_model'])} |"
             )
-    return out + [""]
+    out += [""]
+    for rig, blk in rigs.items():
+        rows = {str(CHOSEN_BLOCK_S): blk["all_tracks"]} | blk["all_tracks_block_length"]
+        keys = sorted(rows, key=float)
+        sig = [_num(rows[b]["pooled"]["sigma_db"]) for b in keys]
+        tau = [_num(rows[b]["pooled"]["tau_s"]) for b in keys]
+        grows = all(b > a for a, b in zip(tau, tau[1:], strict=False))
+        n_min = min(w["duration_s"] for w in blk["windows"]) / float(keys[-1])
+        out.append(
+            f"**{rig}:** pooled `sigma_v` {_f(min(sig))}-{_f(max(sig))} dB over "
+            f"{float(keys[0]):g}-{float(keys[-1]):g} s blocks; `tau_v` "
+            + " / ".join(f"{_f(t)}" for t in tau)
+            + " s"
+            + (
+                " -- it GROWS with the block: more than one OU time scale (a fast part the "
+                "longer blocks average away), or too few blocks per window at the longest "
+                f"block ({n_min:g} in the shortest window) to pin it. The "
+                f"contract's `tau_v` is the {CHOSEN_BLOCK_S:g} s value, the block the v3 fit's "
+                "latents live on."
+                if grows
+                else "."
+            )
+        )
+        out.append("")
+    return out
 
 
 def findings_md(payload: dict[str, Any]) -> str:
