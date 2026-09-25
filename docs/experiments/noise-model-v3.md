@@ -133,18 +133,33 @@ compared with. It uses 8 mics and the frozen render seeds 2001–2004.
   floor (prominence < 10 log10 2 = 3.01 dB). This rate is computed over all
   lines and over the lines present in their window (window prominence ≥ 6 dB).
   It also reports the share of lines that both appear (≥ 6 dB) and disappear
-  (< 3.01 dB) inside one window.
+  (< 3.01 dB) inside one window. Since `448312f8` the same statistics are also
+  computed on every measured order, broken down by the wander's order groups
+  (k 1–2, 3–8, 9–24, 25–60, 61+, the groups `sigma_v_db_by_order` is measured
+  on; own bootstrap stream). A further column is the paper's disappearance
+  rate: over the lines **visible** in their window (≥ 6 dB in at least 20 %
+  of its blocks), the share of their blocks under 6 dB.
 - **(c) tonality**. On the expectation this is
   `scripts/noise_v2_tonality_audit.py --fit` (new `--fit RIG[_standby]=PATH`
   mode), with the same per-pattern rows as the pinned v2 anchors beside them.
   On rendered audio (`rendered`) there are 8 clips per fit: 2 pattern windows ×
   4 seeds, on the real labels. The measures are R4's `line_width_db3` at
   k = 1..8 and the window-prominence ladder, with the real windows next to
-  them.
+  them. Since `448312f8` each clip, real or rendered, also gets the audit's
+  own estimator (`tonality.prominence_db` with the pattern's bin geometry) on
+  its time-mean periodogram, so the visible-order counts at 3, 6 and 10 dB
+  are one estimator on expectation, renders and real audio; the ladder
+  counts are given at all three bars as well.
 - **(d) parity**. `scripts/noise_v2_round_score.py --fit` as R5 used it.
 - **(e) latents** (`latents`). The fitted `d`/`v`/`u`/`u_j` spread and the
   fitted spread plus the measured block noise, against the measured `σ`. The
-  fitted lag-1 is compared with the measured `ρ = e^{-T_b/τ}`.
+  fitted lag-1 is compared with the measured `ρ = e^{-T_b/τ}`. Since
+  `448312f8`: `v` also per order group against its own `σ_v(k)`, `τ_v(k)`;
+  and the explainer §3.3a toy with the OU prior (a Kalman smoother through
+  white block noise `s²`, the measured median line or floor block noise)
+  gives each family's posterior variance, so that the check reads as the
+  paper states it: fitted mean square + posterior variance against `σ²`,
+  and fitted lag-1 product + posterior lag-1 covariance against `ρσ²`.
 - **Parameter view**. `scripts/noise_v3_param_view.py` draws the v3 fit and the
   v2 fit it replaces the same way.
 
@@ -619,8 +634,8 @@ warm starts are the timing runs': R5 `flight_profile` for DREGON, R3
 
 | job | pool | submitted (UTC) | state |
 |---|---|---|---|
-| `nv3c-dregon-26c719` | DREGON (`dregon-floor`, `--wind`) | 14:11 | submitted |
-| `nv3c-cruise-0a9885` | Michael's cruise (`michaels-cruise`) | 14:11 | queued (kaggle runs one job at a time) |
+| `nv3c-dregon-26c719` | DREGON (`dregon-floor`, `--wind`) | 14:11 | succeeded 14:28, Tesla T4, 871 s to the last fit (build 53 s) |
+| `nv3c-cruise-0a9885` | Michael's cruise (`michaels-cruise`) | 14:11 | queued, started 14:28 (kaggle runs one job at a time) |
 | `nv3c-standby-cf4505` | Michael's standby (`michaels-standby`) | 14:11 | queued |
 
 ## Results
