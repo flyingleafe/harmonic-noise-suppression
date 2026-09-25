@@ -179,6 +179,7 @@ poll; a job named in a row changed state at that poll.
 | 2026-09-25 06:11 | `nv3-fit-dregon-s3-64f951` | succeeded |
 | 2026-09-25 06:11 | `nv3-fit-mcruise-s3-2955b8` | running (Adam done / first L-BFGS) |
 | 2026-09-25 06:41 | 7 running, 5 succeeded | no change; stage by seed — dregon: round 2 done, round 2 done; mstandby: round 1 done; mcruise: round 0 done, round 0 done, round 0 done, Adam done / first L-BFGS |
+| 2026-09-25 07:11 | 7 running, 5 succeeded | no change; stage by seed — dregon: round 2 done, round 2 done; mstandby: round 1 done; mcruise: round 0 done, round 0 done, round 0 done, round 0 done |
 
 ## Fits
 
