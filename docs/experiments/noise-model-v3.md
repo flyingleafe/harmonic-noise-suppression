@@ -277,6 +277,60 @@ s2 selected):
   0.52 / 1.91 / 1.73 / 1.63 dB. Fitted lag-1: 0.45 / 0.81 / 0.75 / 0.60
   against the measured ρ of 0.42 / 0.67 / 0.78 / 0.67.
 
+### GPU round
+
+The v3 fit ported to the GPU: the rig objective on the device, chunked over
+frames (`f4c5218a`); the warm start from the v2 fit of the pool
+(`804884e1`); σ_v(k) (`e6f14cf3`); the L-BFGS relative tolerance
+(`9329ccf0`); the unit-atom line kernel (`ac390340`, `cb87eeba`). Jobs go to
+kaggle through `omnirun` from the detached worktree `.worktrees/submit-v3gpu`.
+Each job builds its supports into a fresh directory, copies the `.npz` into
+the cache, and `aws s3 sync`s `results/noise_v3/fits_gpu` to
+`s3://omnirun-artifacts/<job>/outputs/results/noise_v3/fits_gpu` every
+10 min and at the end. On a failure the job prints every `grid/raw/*.err`
+and `*.log` before any summary step.
+
+**GPU.** Every job asks for `--gpu-type P100`, but kaggle placed each one on
+a **Tesla T4** (15 GB). The T4's fp64 rate is 1/32 of its fp32 rate, and the
+rig step runs in fp64, so the T4 timings below are an upper bound for a
+P100.
+
+#### Smoke (2 FLY125 windows, K 24, mics 0 1, 2 rounds)
+
+The command is the CPU smoke's (`--support
+flight_michaels:FLY125:{16,32}.0:4.0:rps_refined --mics 0,1 --k-cap 24
+--init-from round3 cruise --rounds 2 --adam-steps 30 --lbfgs-iters 20
+--latent-iters 20 --max-frames 0`), with `--device cuda`.
+
+- **First try (`nv3gpu4-smoke-451582`, `cb87eeba`):** the CUDA unit crashed
+  after 20 Adam steps. `fit_support` built its diagnostics with
+  `np.asarray(init["gamma_hz"])`, and `init` holds cuda tensors:
+  `TypeError: can't convert cuda:0 device type tensor to numpy`. The wrapper
+  did not echo the gridrun `.err`, so the log showed no traceback. Fix in
+  `d04ae2a4`: `.detach().cpu()` first. A CPU audit patched
+  `Tensor.numpy`/`__array__` to flag every conversion that skips `.cpu()`,
+  then ran the real `flight_v3` CLI with and without `--wind`/`--init-from`.
+  It flags exactly that line and no other. A new test runs a `flight_v3` fit
+  on a CUDA device end to end and writes the record; it is skipped without
+  CUDA and passed on the kaggle T4. The same job's `--device cpu` smoke on
+  the kaggle CPU (4 cores) finished and is the reference below.
+- **Rerun (`nv3gpu4-smoke2-bbc101`, `d04ae2a4`, T4): the CUDA fit matches
+  the CPU fit.**
+
+| run | code | total objective (nats) | Whittle (nats) | wall s | rig s/eval, rounds 0 / 1 / 2 | latent s/eval | peak GPU MB |
+|---|---|---:|---:|---:|---|---:|---:|
+| CUDA, kaggle T4 | `d04ae2a4` | −826 321.8109116681 | −830 312.5208480533 | 20.3 | 0.267 / 0.356 / 0.371 | 0.0175 | 2 317 |
+| CPU, kaggle (4 cores) | `cb87eeba` | −826 321.8109116696 | −830 312.5208480536 | 379.8 | 5.46 / 7.69 / 8.02 | 0.053–0.069 | — |
+| CPU, laptop (12 threads) | `ac390340` | −826 321.8100351072 | −830 312.519943153 | 190.6 | 2.85 / 3.57 / 3.92 | 0.033–0.148 | — |
+
+CUDA and the kaggle CPU differ by 1.5e-9 nats (2e-15 relative). Both follow
+the same path: round-0 L-BFGS 20 + 1 iterations (28 evaluations), then 2 + 1
+and 1 + 1 in the refits, and `which_converged` "lbfgs" (the alternation
+moved 0.0083 nats/cell in round 2). The laptop run is 8.8e-4 nats away
+(1e-9 relative): it used the older commit and 12 threads. On the T4, the
+latent cache takes 0.30 s, round 0's Adam 0.075 s per step, and the whole
+fit 20.3 s, 19× faster than the kaggle CPU.
+
 ## Results
 
 _Fits running; results follow the harvest._
