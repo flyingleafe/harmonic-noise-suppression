@@ -91,6 +91,15 @@ class Wander:
     were measured on and the model is evaluated on. ``sigma_uj_db`` is the
     per-control-point colour residual of the floor on top of the band-common
     level ``u``; a record that does not carry it has no colour track.
+
+    The per-line track ``v`` may be measured PER ORDER GROUP (record schema
+    ``noise-v3-wander/2``): ``sigma_v_db_by_order = {k_edges, sigma_db}`` —
+    ``sigma_db[i]`` holds for orders ``k_edges[i] <= k < k_edges[i + 1]`` —
+    and optionally ``tau_v_s_by_order = {k_edges, tau_s}`` likewise. Kept as
+    ``v_sigma_edges``/``v_sigma_db`` and ``v_tau_edges``/``v_tau_s``;
+    :meth:`track_sigma`/:meth:`track_rho` expand them per order (an order past
+    the last edge takes the last group). Without them the scalar
+    ``sigma_v_db``/``tau_v_s`` holds for every line.
     """
 
     sigma_d_db: float
@@ -102,6 +111,10 @@ class Wander:
     block_s: float
     sigma_uj_db: float = 0.0
     tau_uj_s: float = 1.0
+    v_sigma_edges: tuple[int, ...] = ()
+    v_sigma_db: tuple[float, ...] = ()
+    v_tau_edges: tuple[int, ...] = ()
+    v_tau_s: tuple[float, ...] = ()
 
     #: ``(name, sigma field, tau field)`` of the four latent tracks.
     TRACKS = (
@@ -120,6 +133,31 @@ class Wander:
                 raise ValueError(f"{s_key} must be finite and >= 0, got {s!r}")
             if s > 0.0 and not (math.isfinite(t) and t > 0.0):
                 raise ValueError(f"track {name!r} has sigma {s} but tau {t!r}")
+        if self.v_sigma_db and max(self.v_sigma_db) > 0.0 and not self.v_tau_s:
+            t = float(self.tau_v_s)
+            if not (math.isfinite(t) and t > 0.0):
+                raise ValueError(f"sigma_v_db_by_order is positive but tau_v_s is {t!r}")
+        for what, edges, vals, positive in (
+            ("sigma_v_db_by_order", self.v_sigma_edges, self.v_sigma_db, False),
+            ("tau_v_s_by_order", self.v_tau_edges, self.v_tau_s, True),
+        ):
+            if not edges and not vals:
+                continue
+            e = np.asarray(edges, dtype=np.int64)
+            v = np.asarray(vals, dtype=np.float64)
+            if not (
+                e.size >= 2
+                and v.size == e.size - 1
+                and int(e[0]) >= 1
+                and bool(np.all(np.diff(e) > 0))
+                and bool(np.all(np.isfinite(v)))
+                and bool(np.all(v > 0.0) if positive else np.all(v >= 0.0))
+            ):
+                raise ValueError(
+                    f"{what}: need increasing k_edges >= 1 and one "
+                    f"{'positive' if positive else 'non-negative'} value per group; "
+                    f"got k_edges {list(edges)}, values {list(vals)}"
+                )
 
     @classmethod
     def from_mapping(cls, d: Mapping[str, Any]) -> Wander:
@@ -131,6 +169,17 @@ class Wander:
                 raise KeyError(f"wander record has no {key!r}")
             return float(v)
 
+        def by_order(key: str, field: str) -> tuple[tuple[int, ...], tuple[float, ...]]:
+            blk = d.get(key)
+            if not blk:
+                return (), ()
+            return (
+                tuple(int(k) for k in blk["k_edges"]),
+                tuple(float(v) for v in blk[field]),
+            )
+
+        v_sigma_edges, v_sigma_db = by_order("sigma_v_db_by_order", "sigma_db")
+        v_tau_edges, v_tau_s = by_order("tau_v_s_by_order", "tau_s")
         return cls(
             sigma_d_db=num("sigma_d_db"),
             tau_d_s=num("tau_d_s"),
@@ -141,9 +190,14 @@ class Wander:
             block_s=num("block_s"),
             sigma_uj_db=num("sigma_uj_db", 0.0),
             tau_uj_s=num("tau_uj_s", 1.0),
+            v_sigma_edges=v_sigma_edges,
+            v_sigma_db=v_sigma_db,
+            v_tau_edges=v_tau_edges,
+            v_tau_s=v_tau_s,
         )
 
     def sigma(self, track: str) -> float:
+        """The track's scalar (for ``v``: pooled over the orders) sd in dB."""
         return float(getattr(self, dict((n, s) for n, s, _ in self.TRACKS)[track]))
 
     def rho(self, track: str) -> float:
@@ -151,12 +205,30 @@ class Wander:
         tau = float(getattr(self, dict((n, t) for n, _, t in self.TRACKS)[track]))
         return math.exp(-float(self.block_s) / tau)
 
+    def track_sigma(self, track: str, k_max: int) -> float | np.ndarray:
+        """The OU sd of ``track`` per TRACK: ``(k_max,)`` for ``v`` measured
+        per order (orders ``1 .. k_max``, broadcast over the rotors), else the
+        scalar :meth:`sigma`."""
+        if track == "v" and self.v_sigma_db:
+            return _per_order(self.v_sigma_edges, self.v_sigma_db, k_max)
+        return self.sigma(track)
+
+    def track_rho(self, track: str, k_max: int) -> float | np.ndarray:
+        """:meth:`rho` per track, as :meth:`track_sigma`."""
+        if track == "v" and self.v_tau_s:
+            tau = _per_order(self.v_tau_edges, self.v_tau_s, k_max)
+            return np.exp(-float(self.block_s) / tau)
+        return self.rho(track)
+
     def active(self, track: str) -> bool:
+        """Whether ``track`` exists at all: some line of it has a positive sd."""
+        if track == "v" and self.v_sigma_db:
+            return max(self.v_sigma_db) > 0.0
         return self.sigma(track) > 0.0
 
-    def as_params(self) -> dict[str, float]:
+    def as_params(self) -> dict[str, Any]:
         """The ``params.wander`` block of a ``noise-v3-fit/1`` payload."""
-        return dict(
+        out: dict[str, Any] = dict(
             sigma_d_db=self.sigma_d_db,
             tau_d_s=self.tau_d_s,
             sigma_v_db=self.sigma_v_db,
@@ -167,24 +239,48 @@ class Wander:
             tau_uj_s=self.tau_uj_s,
             block_s=self.block_s,
         )
+        if self.v_sigma_db:
+            out["sigma_v_db_by_order"] = dict(
+                k_edges=list(self.v_sigma_edges), sigma_db=list(self.v_sigma_db)
+            )
+        if self.v_tau_s:
+            out["tau_v_s_by_order"] = dict(k_edges=list(self.v_tau_edges), tau_s=list(self.v_tau_s))
+        return out
+
+
+def _per_order(edges: tuple[int, ...], values: tuple[float, ...], k_max: int) -> np.ndarray:
+    """``(k_max,)``: ``values[i]`` at orders ``edges[i] <= k < edges[i + 1]``,
+    the first group below ``edges[0]`` and the last one from its edge up."""
+    k = np.arange(1, int(k_max) + 1)
+    group = np.clip(np.searchsorted(np.asarray(edges), k, side="right") - 1, 0, len(values) - 1)
+    return np.asarray(values, dtype=np.float64)[group]
 
 
 def ou_blocks(
-    rng: np.random.Generator, shape: tuple[int, ...], n_blocks: int, *, sigma: float, rho: float
+    rng: np.random.Generator,
+    shape: tuple[int, ...],
+    n_blocks: int,
+    *,
+    sigma: float | np.ndarray,
+    rho: float | np.ndarray,
 ) -> np.ndarray:
     """``shape + (n_blocks,)`` STATIONARY OU tracks sampled at the block rate.
 
     ``x_1 ~ N(0, sigma^2)``, ``x_b = rho x_{b-1} + sqrt(1 - rho^2) sigma e_b`` —
     the exact discretisation of the OU whose prior the fit evaluates
-    (``experiments.noise_model.model.ou_log_density``). ``sigma = 0`` gives
-    zeros and draws nothing.
+    (``experiments.noise_model.model.ou_log_density``). ``sigma`` and ``rho``
+    are scalars or per track (broadcast against ``shape``, e.g. ``(K,)`` per
+    order of ``(R, K)``); a track of ``sigma = 0`` is zero, and an all-zero
+    ``sigma`` draws nothing.
     """
     out = np.zeros(tuple(shape) + (int(n_blocks),), dtype=np.float64)
-    if float(sigma) <= 0.0 or int(n_blocks) < 1:
+    s = np.broadcast_to(np.asarray(sigma, dtype=np.float64), tuple(shape))
+    r = np.broadcast_to(np.asarray(rho, dtype=np.float64), tuple(shape))
+    if not np.any(s > 0.0) or int(n_blocks) < 1:
         return out
     e = rng.standard_normal(out.shape)
-    out[..., 0] = float(sigma) * e[..., 0]
-    innov = math.sqrt(max(1.0 - float(rho) ** 2, 0.0)) * float(sigma)
+    out[..., 0] = s * e[..., 0]
+    innov = np.sqrt(np.maximum(1.0 - r**2, 0.0)) * s
     for b in range(1, int(n_blocks)):
-        out[..., b] = float(rho) * out[..., b - 1] + innov * e[..., b]
+        out[..., b] = r * out[..., b - 1] + innov * e[..., b]
     return out

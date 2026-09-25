@@ -628,3 +628,54 @@ def test_a_rendered_v3_rig_with_wander_is_recovered_with_its_block_tracks():
     corr = float(np.corrcoef(flat_fit, flat_true)[0, 1])
     assert corr > 0.7, corr
     assert out.latents is not None and out.latents["summary"]["d"]["prior_sd_db"] == 3.0
+
+
+def test_sigma_v_by_order_sets_each_lines_ou_prior_and_the_render_draw():
+    """``sigma_v_db_by_order`` (wander schema 2) gives every order its group's
+    sd: ``sigma_db[i]`` for ``k_edges[i] <= k < k_edges[i + 1]``, the last group
+    past the last edge; a group at 0 dB is a dead line (no prior term, drawn as
+    zero). Without the block the scalar ``sigma_v_db`` holds for every line."""
+    from data_processing.noise_model.v3 import ou_blocks
+
+    rec = dict(
+        sigma_d_db=1.0,
+        tau_d_s=2.0,
+        sigma_v_db=1.5,
+        tau_v_s=2.0,
+        sigma_u_db=1.0,
+        tau_u_s=2.0,
+        block_s=0.5,
+        sigma_v_db_by_order=dict(k_edges=[1, 3, 9, 25, 61, 82], sigma_db=[3.0, 2.0, 0.0, 1.0, 0.5]),
+    )
+    wander = MD.Wander.from_mapping(rec)
+    k_max, n_rot, n_b = 90, 2, 5
+    per = np.asarray(wander.track_sigma("v", k_max))
+    k = np.arange(1, k_max + 1)
+    want = np.select([k < 3, k < 9, k < 25, k < 61], [3.0, 2.0, 0.0, 1.0], default=0.5)
+    np.testing.assert_array_equal(per, want)
+    assert MD.Wander.from_mapping(MD.Wander.from_mapping(rec).as_params()) == wander
+    scalar = MD.Wander.from_mapping({k: v for k, v in rec.items() if k != "sigma_v_db_by_order"})
+    assert scalar.track_sigma("v", k_max) == 1.5
+
+    prior = MD.ou_tracks(
+        wander, "v", n_rotors=n_rot, k_max=k_max, n_blocks=torch.tensor([n_b]), b_max=n_b
+    )
+    assert prior.live is not None and not bool(prior.live[:, 8:24].any())
+    x = _t(np.random.default_rng(5).normal(0.0, 2.0, (1, n_rot, k_max, n_b)))
+    rho = wander.rho("v")
+    lag = np.abs(np.arange(n_b)[:, None] - np.arange(n_b)[None, :])
+    expl = 0.0
+    for r in range(n_rot):
+        for kk in range(k_max):
+            if per[kk] > 0.0:
+                cov = torch.as_tensor(per[kk] ** 2 * rho**lag, dtype=torch.float64)
+                mvn = torch.distributions.MultivariateNormal(
+                    torch.zeros(n_b, dtype=torch.float64), cov
+                )
+                expl += float(mvn.log_prob(x[0, r, kk]))
+    np.testing.assert_allclose(float(prior.log_prob(x)), expl, rtol=1e-12)
+
+    # the renderer's draw: the same innovations scaled per line, zero on dead lines
+    base = ou_blocks(np.random.default_rng(9), (n_rot, k_max), n_b, sigma=1.0, rho=rho)
+    got = ou_blocks(np.random.default_rng(9), (n_rot, k_max), n_b, sigma=per, rho=rho)
+    np.testing.assert_allclose(got, base * per[None, :, None], rtol=1e-12, atol=0.0)

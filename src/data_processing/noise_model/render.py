@@ -281,8 +281,8 @@ def render_noise(
                 rng_wander,
                 shape,
                 n_blocks,
-                sigma=wander.sigma(name),
-                rho=wander.rho(name) if wander.active(name) else 0.0,
+                sigma=wander.track_sigma(name, k_max),
+                rho=wander.track_rho(name, k_max) if wander.active(name) else 0.0,
             )
         if p.get("wind") is not None:
             wind_db = np.asarray(p["wind"]["wind_db"], dtype=np.float64)

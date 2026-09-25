@@ -131,6 +131,7 @@ __all__ = [
     "objective_breakdown",
     "ou_log_density",
     "ou_prior_nats",
+    "ou_tracks",
     "params_from_dict",
     "params_to_dict",
     "params_to_dict_v3",
@@ -1438,15 +1439,18 @@ class OUTracks(dist.TorchDistribution):
     :func:`ou_log_density` summed over the window's tracks; ``sample`` the
     exact recursion (the renderer's
     :func:`data_processing.noise_model.v3.ou_blocks`), zero past a window's end.
-    ``sigma`` and ``rho`` are scalars or per track (``track_shape``-broadcast).
+    ``sigma`` and ``rho`` are scalars or per track (``track_shape``-broadcast,
+    e.g. ``(K,)`` per order of a ``(R, K)`` track). A track of ``sigma = 0``
+    is DEAD: no prior term, sampled as zero, and :attr:`live` says which, so
+    the model can hold it at zero in the forward.
     """
 
     arg_constraints: dict[str, Any] = {}  # noqa: RUF012
 
     def __init__(
         self,
-        sigma: float | Tensor,
-        rho: float | Tensor,
+        sigma: float | np.ndarray | Tensor,
+        rho: float | np.ndarray | Tensor,
         n_blocks: Tensor,
         track_shape: tuple[int, ...],
         b_max: int,
@@ -1455,17 +1459,21 @@ class OUTracks(dist.TorchDistribution):
         r = torch.as_tensor(rho, dtype=torch.float64)
         nb = torch.as_tensor(n_blocks, dtype=torch.int64)
         if not (
-            bool((s > 0.0).all())
+            bool((s >= 0.0).all())
+            and bool((s > 0.0).any())
             and bool(((r >= 0.0) & (r < 1.0)).all())
             and bool((nb >= 1).all())
             and int(nb.max()) <= int(b_max)
         ):
             raise ValueError(
-                f"OUTracks needs sigma > 0, 0 <= rho < 1, 1 <= n <= {b_max}: {sigma}, {rho}, "
-                f"{nb.tolist()}"
+                f"OUTracks needs sigma >= 0 (one > 0), 0 <= rho < 1, 1 <= n <= {b_max}: "
+                f"{sigma}, {rho}, {nb.tolist()}"
             )
-        self.sigma, self.rho, self.n_blocks = sigma, rho, nb
         self.track_shape, self.b_max = tuple(track_shape), int(b_max)
+        alive = torch.broadcast_to(s > 0.0, self.track_shape)
+        self.live: Tensor | None = None if bool(alive.all()) else alive
+        self.sigma = torch.where(s > 0.0, s, torch.ones_like(s))
+        self.rho, self.n_blocks = r, nb
         super().__init__(
             nb.shape, torch.Size(self.track_shape + (self.b_max,)), validate_args=False
         )
@@ -1482,21 +1490,39 @@ class OUTracks(dist.TorchDistribution):
         shape = torch.Size(sample_shape) + self.batch_shape + self.event_shape
         dev = self.n_blocks.device
         e = torch.randn(shape, dtype=torch.float64, device=dev)
-        s = torch.as_tensor(self.sigma, dtype=torch.float64, device=dev)
-        r = torch.as_tensor(self.rho, dtype=torch.float64, device=dev)
+        s = self.sigma.to(dev)
+        r = self.rho.to(dev)
         out = torch.empty_like(e)
         out[..., 0] = s * e[..., 0]
         innov = torch.sqrt(1.0 - r**2) * s
         for b in range(1, self.b_max):
             out[..., b] = r * out[..., b - 1] + innov * e[..., b]
         live = torch.arange(self.b_max, device=dev) < self._n(out)[..., None]
+        if self.live is not None:
+            live = live & self.live.to(dev)[..., None]
         return out * live
 
     def log_prob(self, value: Tensor) -> Tensor:
         per_track = ou_log_density(value, self.sigma, self.rho, self._n(value))
+        if self.live is not None:
+            per_track = per_track * self.live.to(per_track)
         return per_track.reshape(
             per_track.shape[: per_track.ndim - len(self.track_shape)] + (-1,)
         ).sum(-1)
+
+
+def ou_tracks(
+    wander: Wander, name: str, *, n_rotors: int, k_max: int, n_blocks: Tensor, b_max: int
+) -> OUTracks:
+    """The :class:`OUTracks` prior of latent ``name`` at ``wander``'s MEASURED
+    per-track sd and correlation (``v``: per order when measured so)."""
+    return OUTracks(
+        wander.track_sigma(name, k_max),
+        wander.track_rho(name, k_max),
+        n_blocks,
+        _latent_shapes(n_rotors, k_max)[name],
+        b_max,
+    )
 
 
 def _latent_shapes(n_rotors: int, k_max: int) -> dict[str, tuple[int, ...]]:
@@ -1728,31 +1754,48 @@ def latent_model(batch: SupportBatch, cache: LatentCache, *, wander: Wander) -> 
     (:class:`OUTracks`, a window's tail past its own block count padding),
     the Whittle term is the pool's (``batch`` is the pool, its exposure
     weights unrescaled) through the rig's :class:`LatentCache`. Returns
-    ``{"wander_<name>": (W, ..., B)}`` of the active tracks.
+    ``{"wander_<name>": (W, ..., B)}`` of the active tracks. The priors are
+    :func:`ou_tracks`' (``v``: per order when measured so); a DEAD track
+    (measured sd 0) is held at zero in the forward.
     """
     n_win = len(cache.windows)
-    n_blocks = torch.as_tensor(cache.n_blocks, dtype=torch.int64, device=batch.power.device)
+    n_blocks = torch.as_tensor(cache.n_blocks, dtype=torch.int64)
     out: dict[str, Tensor] = {}
+    used: dict[str, Tensor] = {}
     with pyro.plate("windows", n_win, device=str(batch.power.device)):
-        for name, shape in _latent_shapes(batch.n_rotors, batch.k_max).items():
+        for name in ("d", "v", "u", "uj"):
             if wander.active(name):
-                out[f"wander_{name}"] = pyro.sample(
-                    f"wander_{name}",
-                    OUTracks(
-                        wander.sigma(name), wander.rho(name), n_blocks, shape, cache.n_block_max
-                    ),
+                prior = ou_tracks(
+                    wander,
+                    name,
+                    n_rotors=batch.n_rotors,
+                    k_max=batch.k_max,
+                    n_blocks=n_blocks,
+                    b_max=cache.n_block_max,
                 )
-    m_model = cache.expected(*(out.get(f"wander_{n}") for n in ("d", "v", "u", "uj")))
+                x = pyro.sample(f"wander_{name}", prior)
+                out[f"wander_{name}"] = x
+                used[name] = x if prior.live is None else x * prior.live.to(x)[..., None]
+    m_model = cache.expected(*(used.get(n) for n in ("d", "v", "u", "uj")))
     pyro.factor("whittle", -whittle_risk(batch, m_model))
     return out
 
 
 def ou_prior_nats(latents: dict[int, WindowLatents], wander: Wander) -> float:
-    """``-sum log p(latents)`` over every window and track (the OU priors)."""
+    """``-sum log p(latents)`` over every window and track (the OU priors,
+    :func:`ou_tracks`)."""
     total = 0.0
     for lat in latents.values():
         for name, x in lat.tracks().items():
-            total -= float(ou_log_density(x.detach(), wander.sigma(name), wander.rho(name)).sum())
+            prior = ou_tracks(
+                wander,
+                name,
+                n_rotors=int(x.shape[0]) if name in ("d", "v") else 1,
+                k_max=int(x.shape[1]) if name == "v" else 1,
+                n_blocks=torch.tensor([int(x.shape[-1])]),
+                b_max=int(x.shape[-1]),
+            )
+            total -= float(prior.log_prob(x.detach()[None]).sum())
     return total
 
 
