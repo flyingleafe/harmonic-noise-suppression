@@ -31,15 +31,27 @@ expectation of the centred moments under an OU plus block noise
 * ``sigma_d`` / ``tau_d`` -- cross moments of pairs of distinct lines of the
   SAME rotor in the same window (no noise term: different cells);
 * ``sigma_v`` / ``tau_v`` -- auto moments with the fitted rotor-common part
-  taken out;
+  taken out (on the resolvable lines: the schema-1 numbers, kept in the detail);
 * ``sigma_u`` / ``tau_u`` -- cross moments of distinct floor bands;
   ``sigma_uj`` / ``tau_uj`` the auto moments minus that level part.
+
+The contract's ``sigma_v`` / ``tau_v`` (schema 2) are measured on ALL valid
+tracks instead -- every (window, rotor, order) valid in >= 80 % of the
+window's blocks, however weak -- through their block PROMINENCE: a Gaussian
+line level in dB (the per-line OU on top of the rotor-common one, ``d`` held
+at its measured value) plus the measured block noise, the speed law and the
+track's measured local floor deviation, plus the line-free cell-over-floor
+ratio, read as prominence -- the forward model of the intermittency
+diagnostic's test (b) (``scripts/_dregon_intermittency.py``,
+``wander.ProminenceModel``). ``sigma_v`` solves the weighted lag-0 sum and
+``tau_v`` the lags 1-4 (:func:`wander.fit_prominence_ou`), per order group
+(``wander.ORDER_GROUP_EDGES``) and pooled; window bootstrap.
 
 Usage
 -----
 
     PYTHONPATH=src python scripts/noise_v3_measure_wander.py            # both rigs
-    PYTHONPATH=src python scripts/noise_v3_measure_wander.py --limit 2  # smoke
+    PYTHONPATH=src python scripts/noise_v3_measure_wander.py --rigs michaels --limit 3  # smoke
 """
 
 from __future__ import annotations
@@ -61,7 +73,7 @@ from experiments.noise_model import supports as SUP
 from experiments.noise_model import wander as W
 
 OUT_DIR = Path("results/noise_v3/wander")
-SCHEMA = "noise-v3-wander/1"
+SCHEMA = "noise-v3-wander/2"
 RIGS = ("dregon", "michaels")
 BLOCK_LENGTHS_S = (0.25, 0.5, 1.0)
 #: The block length the JSON carries (explainer section 3.1: ~tau_d / 4, and
@@ -74,12 +86,9 @@ FLOOR_EXP = 2.0
 F_REF_REV_S = 80.0
 #: Order groups of the breakdown: the blade-pass family, the aerodynamic
 #: comb, and the motor's electromagnetic orders (42 = 6 x 7 pole pairs, ...).
-ORDER_GROUPS: tuple[tuple[str, int, int], ...] = (
-    ("1-2", 1, 2),
-    ("3-8", 3, 8),
-    ("9-24", 9, 24),
-    ("25-60", 25, 60),
-    ("61+", 61, 10_000),
+ORDER_GROUPS: tuple[tuple[str, int, int], ...] = tuple(
+    (f"{lo}-{hi - 1}" if hi else f"{lo}+", lo, hi - 1 if hi else 10_000)
+    for lo, hi in zip(W.ORDER_GROUP_EDGES, (*W.ORDER_GROUP_EDGES[1:], 0), strict=True)
 )
 #: Floor band groups (by band centre).
 BAND_GROUPS: tuple[tuple[str, float, float], ...] = (
@@ -114,6 +123,14 @@ BOOT_SEED = 20260924
 AERO_MAX_ORDER = 24
 LEGACY_YAML = "conf/online_mix/rig_fitted_5050.yaml"
 NAN = float("nan")
+#: The all-track sigma_v: draws of common random numbers behind every grid
+#: point of the moment table, the seed, and the lags tau_v is read from.
+ALL_TRACK_DRAWS = 8
+ALL_TRACK_SEED = 20260925
+ALL_TRACK_LAGS = LAGS_4
+#: A group's tau_v is its own when its window-bootstrap 95 % / 5 % ratio is
+#: under this (the schema-1 "pinned" rule), else the pooled tau_v.
+TAU_PINNED_RATIO = 4.0
 
 
 def _module(name: str) -> Any:
@@ -161,6 +178,7 @@ class WindowData:
     floor: dict[str, dict[float, W.FloorBlocks]]  # grid -> block_s -> levels
     n_orders: int  # before pruning
     eligible: np.ndarray  # (R, K') median measured block sd <= MAX_TRACK_NOISE_DB
+    tracks: W.ProminenceTracks  # every classified track at CHOSEN_BLOCK_S, unpruned
 
 
 def floor_edges() -> dict[str, np.ndarray]:
@@ -181,7 +199,7 @@ def measure_support(
     order = [CHOSEN_BLOCK_S] + [b for b in blocks_s if b != CHOSEN_BLOCK_S]
     lines: dict[float, W.LineBlocks] = {}
     floor: dict[str, dict[float, W.FloorBlocks]] = {g: {} for g in floor_edges()}
-    keep = res = dom = strong = None
+    keep = res = dom = strong = tracks = None
     n_orders = 0
     for bs in order:
         blocks = W.frame_blocks(sup.frame_centres_s, bs)
@@ -193,12 +211,13 @@ def measure_support(
             res = res_all[:, keep]
             dom = lb.dominant()[:, keep]
             strong = lb.window_prominence_db >= W.STRONG_LINE_DB
+            tracks = W.ProminenceTracks.from_blocks(lb, line_speed_db(lb, AMP_EXP))
         lines[bs] = lb.take_orders(keep)
         for grid, edges in floor_edges().items():
             floor[grid][bs] = W.measure_floor(
                 sup.power, sup.freqs_hz, sup.carrier_rev_s, blocks, edges, strong=strong
             )
-    assert res is not None and dom is not None
+    assert res is not None and dom is not None and tracks is not None
     lb0 = lines[CHOSEN_BLOCK_S]
     car = np.asarray(sup.carrier_rev_s, dtype=np.float64)
     return WindowData(
@@ -217,6 +236,7 @@ def measure_support(
         floor=floor,
         n_orders=n_orders,
         eligible=median_block_sd(lb0) <= MAX_TRACK_NOISE_DB,
+        tracks=tracks,
     )
 
 
@@ -750,13 +770,11 @@ def bootstrap(
     ``[q05, q50, q95]`` of every number for both lag variants, and the share
     of draws in which a sigma clips to zero."""
     rng = np.random.default_rng(seed)
-    regimes: dict[str, list[int]] = {}
-    for i, w in enumerate(wins):
-        regimes.setdefault(w.regime, []).append(i)
+    regimes = regime_windows(wins)
     centres = wins[0].floor["control"][bs].centres_hz
     draws: dict[str, list[dict[str, float]]] = {"lag1": [], "lags1_4": []}
     for _ in range(n_boot):
-        idx = [int(j) for ids in regimes.values() for j in rng.choice(ids, size=len(ids))]
+        idx = resample_windows(regimes, rng)
         sub = [wins[i] for i in idx]
         lm = moments(line_tracks(sub, bs, which=which), sub, bs, mode="rig")
         fm = moments(floor_tracks(sub, bs), sub, bs, mode="rig", centres_hz=centres)
@@ -772,6 +790,199 @@ def bootstrap(
             k: float(np.mean([r[k] == 0.0 for r in rows])) for k in keys if k.startswith("sigma")
         }
     return out
+
+
+def regime_windows(wins: Sequence[WindowData]) -> dict[str, list[int]]:
+    """Window indices per regime (the bootstrap resamples inside each)."""
+    regimes: dict[str, list[int]] = {}
+    for i, w in enumerate(wins):
+        regimes.setdefault(w.regime, []).append(i)
+    return regimes
+
+
+def resample_windows(regimes: dict[str, list[int]], rng: np.random.Generator) -> list[int]:
+    return [int(j) for ids in regimes.values() for j in rng.choice(ids, size=len(ids))]
+
+
+# ---------------------------------------------------------------------------
+# the per-line sd on ALL valid tracks
+# ---------------------------------------------------------------------------
+
+N_GROUPS = len(W.ORDER_GROUP_EDGES)
+#: Track kinds of the moment-table cells: weak (median prominence under
+#: ``W.MIN_BLOCK_PROMINENCE_DB``, where the line is under half its cells),
+#: clear (at or over it) and resolvable -- the subsets the robustness rows fit.
+KINDS = {"all": (1.0, 1.0, 1.0), "clear": (0.0, 1.0, 1.0), "resolvable": (0.0, 0.0, 1.0)}
+
+
+def _cells(tr: W.ProminenceTracks, n_windows: int) -> tuple[np.ndarray, int]:
+    """The moment-table cell of every track: (window, order group, kind)."""
+    clear = tr.medians() >= W.MIN_BLOCK_PROMINENCE_DB
+    kind = np.where(tr.cls == W.RESOLVABLE, 2, clear.astype(np.int64))
+    return (tr.window * N_GROUPS + W.order_group(tr.order)) * 3 + kind, n_windows * N_GROUPS * 3
+
+
+def _cell_weight(
+    mult: np.ndarray, groups: Sequence[int] | None = None, kind: str = "all"
+) -> np.ndarray:
+    """``(C,)`` cell multiplicities: windows repeated ``mult`` times, the order
+    groups ``groups`` (all by default), the track kinds :data:`KINDS` ``kind``."""
+    gm = np.zeros(N_GROUPS)
+    gm[list(range(N_GROUPS)) if groups is None else list(groups)] = 1.0
+    km = np.asarray(KINDS[kind])
+    return (np.asarray(mult)[:, None, None] * gm[None, :, None] * km[None, None, :]).ravel()
+
+
+def all_track_fits(mom: W.ProminenceMoments, mult: np.ndarray) -> dict[str, W.OUFit]:
+    """Every all-track fit at one window multiplicity: pooled, each order group
+    with its own tau and at the pooled tau, and the pooled fit on the clear
+    tracks and on the resolvable ones alone."""
+    lags = ALL_TRACK_LAGS
+    pooled = W.fit_prominence_ou(mom, _cell_weight(mult), lags=lags)
+    out = {"pooled": pooled}
+    tau0 = float(pooled.tau_s) if np.isfinite(pooled.tau_s) else CHOSEN_BLOCK_S
+    for gi, (name, _, _) in enumerate(ORDER_GROUPS):
+        cw = _cell_weight(mult, [gi])
+        out[f"free:{name}"] = W.fit_prominence_ou(mom, cw, lags=lags)
+        out[f"at_pooled_tau:{name}"] = W.fit_prominence_ou(mom, cw, lags=lags, tau_s=tau0)
+        out[f"clear_at_pooled_tau:{name}"] = W.fit_prominence_ou(
+            mom, _cell_weight(mult, [gi], "clear"), lags=lags, tau_s=tau0
+        )
+    for kind in ("clear", "resolvable"):
+        out[kind] = W.fit_prominence_ou(mom, _cell_weight(mult, kind=kind), lags=lags)
+    return out
+
+
+def _fit_row(fit: W.OUFit, bt: dict[str, Any] | None = None) -> dict[str, Any]:
+    row: dict[str, Any] = dict(
+        sigma_db=fit.sigma_db, tau_s=fit.tau_s, clipped=fit.clipped, edge=fit.edge
+    )
+    if bt is not None:
+        row |= dict(
+            sigma_db_q05_50_95=bt["sigma"], tau_s_q05_50_95=bt["tau"], zero_share=bt["zero"]
+        )
+    return row
+
+
+def all_tracks(wins: Sequence[WindowData], detail: dict[str, Any]) -> dict[str, Any]:
+    """``sigma_v`` / ``tau_v`` per order group and pooled on every classified
+    track (:class:`wander.ProminenceTracks`) through the prominence forward
+    model, the rotor-common part held at the resolvable lines' ``(sigma_d,
+    tau_d)``; window bootstrap (d held)."""
+    bs = CHOSEN_BLOCK_S
+    tr = W.ProminenceTracks.stack([w.tracks for w in wins])
+    under = tr.p_db[tr.cls == W.UNDER]
+    eta = W.line_free_eta([row[np.isfinite(row)] for row in under])
+    s2 = float(detail["noise"][str(bs)]["line_s2_measured_median_db2"])
+    if not math.isfinite(s2):
+        # DREGON's first windows (score, fit sets) resolve no line at all
+        raise ValueError("no resolvable line in these windows: no measured line block noise")
+    com = detail["chosen"][PRIMARY]["lines"]["common"]
+    held = not com["clipped"] and np.isfinite(com["tau_s"])
+    sd, td = (float(com["sigma_db"]), float(com["tau_s"])) if held else (0.0, bs)
+    model = W.ProminenceModel(0.0, 1.0, s2, eta, bs, sd, td)
+    cells, n_cells = _cells(tr, len(wins))
+    mom = W.prominence_moments(
+        tr, model, cells, n_cells, np.random.default_rng(ALL_TRACK_SEED), n_draw=ALL_TRACK_DRAWS
+    )
+    ones = np.ones(len(wins))
+    point = all_track_fits(mom, ones)
+    rng = np.random.default_rng(BOOT_SEED)
+    regimes = regime_windows(wins)
+    draws = [
+        all_track_fits(mom, np.bincount(resample_windows(regimes, rng), minlength=len(wins)))
+        for _ in range(N_BOOT)
+    ]
+    qs = (0.05, 0.5, 0.95)
+    bt: dict[str, dict[str, Any]] = {
+        k: dict(
+            sigma=[_q(np.array([d[k].sigma_db for d in draws]), q) for q in qs],
+            tau=[_q(np.array([d[k].tau_s for d in draws]), q) for q in qs],
+            zero=float(np.mean([d[k].clipped for d in draws])),
+        )
+        for k in point
+    }
+
+    def acf1(fit: W.OUFit, cw: np.ndarray) -> tuple[float, float]:
+        obs, mod = W.prominence_products(mom, fit, cw)
+        o, m = (float(v[1] / v[0]) if v[0] > 0 else NAN for v in (obs, mod))
+        return o, m
+
+    pooled = point["pooled"]
+    grp = W.order_group(tr.order)
+    groups: dict[str, Any] = {}
+    for gi, (name, lo, hi) in enumerate(ORDER_GROUPS):
+        cw = _cell_weight(ones, [gi])
+        weight = float(cw @ mom.weight)
+        free, fixed = point[f"free:{name}"], point[f"at_pooled_tau:{name}"]
+        tq = bt[f"free:{name}"]["tau"]
+        pinned = bool(
+            weight > 0
+            and not free.clipped
+            and not free.edge
+            and tq[0] > 0
+            and tq[2] / tq[0] < TAU_PINNED_RATIO
+        )
+        if weight <= 0:
+            chosen, key, source = pooled, "pooled", "pooled (no weighted track)"
+        elif pinned:
+            chosen, key, source = free, f"free:{name}", "group"
+        else:
+            chosen, key, source = fixed, f"at_pooled_tau:{name}", "pooled"
+        a_obs, a_mod = acf1(chosen, cw) if weight > 0 else (NAN, NAN)
+        in_g = grp == gi
+        groups[name] = dict(
+            orders=[lo, hi],
+            tracks={
+                c: int(np.sum(in_g & (tr.cls == i))) for i, c in enumerate(W.TRACK_CLASSES[:3])
+            },
+            tracks_weighted=int(cw @ mom.n_tracks),
+            weight=weight,
+            free=_fit_row(free, bt[f"free:{name}"]),
+            at_pooled_tau=_fit_row(fixed, bt[f"at_pooled_tau:{name}"]),
+            clear_at_pooled_tau=_fit_row(
+                point[f"clear_at_pooled_tau:{name}"], bt[f"clear_at_pooled_tau:{name}"]
+            )
+            | dict(tracks_weighted=int(_cell_weight(ones, [gi], "clear") @ mom.n_tracks)),
+            tau_pinned=pinned,
+            tau_source=source,
+            sigma_db=chosen.sigma_db,
+            tau_s=chosen.tau_s,
+            sigma_db_q05_50_95=bt[key]["sigma"],
+            tau_s_q05_50_95=bt[key]["tau"],
+            acf1_observed=a_obs,
+            acf1_model=a_mod,
+        )
+    p_obs, p_mod = acf1(pooled, _cell_weight(ones))
+    return dict(
+        estimator=(
+            "every classified track (valid in >= 80 % of its window's blocks); block prominence "
+            "= 10 log10(10^((mu + d + v + e + o) / 10) + eta): v the per-line OU fitted, d the "
+            "rotor-common OU held at (sigma_d, tau_d), e white block noise s2, o the speed law "
+            "minus the track's measured local floor deviation, eta line-free cell ratios; mu "
+            "matched to each track's median; per-track centring, model draws centred alike "
+            "(sigma = stationary sd); weight = line fraction at the track median, squared; "
+            "sigma from the weighted lag-0 sum, tau from lags 1-4"
+        ),
+        held=dict(sigma_d_db=sd, tau_d_s=td, block_noise_db2=s2),
+        null_pool_blocks=int(eta.size),
+        n_draw=ALL_TRACK_DRAWS,
+        seed=ALL_TRACK_SEED,
+        lags=list(ALL_TRACK_LAGS),
+        sigma_grid_db=[float(mom.sigma_grid[1]), float(mom.sigma_grid[-1])],
+        tau_grid_s=[float(mom.tau_grid[0]), float(mom.tau_grid[-1])],
+        tau_pinned_ratio=TAU_PINNED_RATIO,
+        k_top=int(max(w.n_orders for w in wins)),
+        tracks={c: int(np.sum(tr.cls == i)) for i, c in enumerate(W.TRACK_CLASSES[:3])},
+        tracks_weighted=int(mom.n_tracks.sum()),
+        pooled=_fit_row(pooled, bt["pooled"]) | dict(acf1_observed=p_obs, acf1_model=p_mod),
+        sigma_total_db=math.sqrt(pooled.sigma_db**2 + sd**2),
+        resolvable_only=_fit_row(point["resolvable"], bt["resolvable"]),
+        clear_only=_fit_row(point["clear"], bt["clear"])
+        | dict(tracks_weighted=int(_cell_weight(ones, kind="clear") @ mom.n_tracks)),
+        groups=groups,
+        n_boot=N_BOOT,
+    )
 
 
 def analyse_rig(rig: str, wins: Sequence[WindowData]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -868,9 +1079,25 @@ def analyse_rig(rig: str, wins: Sequence[WindowData]) -> tuple[dict[str, Any], d
     detail["floor_by_band_group"] = fits_by(fm.by_group, bs0)
     detail["line_clips"] = line_clip_table(lm.by_line, bs0)
     detail["floor_band_clips"] = line_clip_table(fm.by_line, bs0)
+    detail["all_tracks"] = all_tracks(wins, detail)
 
     figs = dict(lm=lm, fm=fm, main=main, which=which)
     return detail, figs
+
+
+def _v_by_order(at: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The contract's ``sigma_v_db_by_order`` and, when any group's tau_v is its
+    own (pinned), ``tau_v_s_by_order`` (the others at the pooled tau_v)."""
+    edges = [*W.ORDER_GROUP_EDGES, int(at["k_top"]) + 1]
+    grp = [at["groups"][name] for name, _, _ in ORDER_GROUPS]
+    sig = dict(k_edges=edges, sigma_db=[float(g["sigma_db"]) for g in grp])
+    if not any(g["tau_pinned"] for g in grp):
+        return sig, None
+    return sig, dict(
+        k_edges=edges,
+        tau_s=[float(g["tau_s"]) for g in grp],
+        tau_source=[g["tau_source"] for g in grp],
+    )
 
 
 def contract(rig: str, detail: dict[str, Any], wins: Sequence[WindowData]) -> dict[str, Any]:
@@ -878,11 +1105,12 @@ def contract(rig: str, detail: dict[str, Any], wins: Sequence[WindowData]) -> di
     num = detail["chosen"][PRIMARY]["numbers"]
     lines = detail["chosen"][PRIMARY]["lines"]
     floor = detail["chosen"][PRIMARY]["floor"]
+    at = detail["all_tracks"]
     out: dict[str, Any] = {}
     flags: dict[str, Any] = {}
     for part, blk in (
         ("d", lines["common"]),
-        ("v", lines["residual"]),
+        ("v", at["pooled"]),
         ("u", floor["common"]),
         ("uj", floor["residual"]),
     ):
@@ -896,6 +1124,10 @@ def contract(rig: str, detail: dict[str, Any], wins: Sequence[WindowData]) -> di
             flags[part] = f"tau on the grid edge ({blk['edge']})"
         out[f"sigma_{part}_db"] = sig
         out[f"tau_{part}_s"] = tau
+    sig_k, tau_k = _v_by_order(at)
+    by_order: dict[str, Any] = dict(sigma_v_db_by_order=sig_k)
+    if tau_k is not None:
+        by_order["tau_v_s_by_order"] = tau_k
     return dict(
         schema=SCHEMA,
         rig=rig,
@@ -903,12 +1135,14 @@ def contract(rig: str, detail: dict[str, Any], wins: Sequence[WindowData]) -> di
         tau_d_s=out["tau_d_s"],
         sigma_v_db=out["sigma_v_db"],
         tau_v_s=out["tau_v_s"],
+        **by_order,
         sigma_u_db=out["sigma_u_db"],
         tau_u_s=out["tau_u_s"],
         sigma_uj_db=out["sigma_uj_db"],
         tau_uj_s=out["tau_uj_s"],
         block_s=CHOSEN_BLOCK_S,
         n_lines_used=int(detail["chosen"][PRIMARY]["n_line_tracks"]),
+        n_v_tracks_used=int(at["tracks_weighted"]),
         n_windows=len(wins),
         provenance=dict(
             generated_by="scripts/noise_v3_measure_wander.py",
@@ -922,10 +1156,16 @@ def contract(rig: str, detail: dict[str, Any], wins: Sequence[WindowData]) -> di
             line_estimator=(
                 "mic-mean order-tracked line level (3 bins at the label carrier minus the local "
                 "q25 floor), speed law (f/f_ref)^2 removed, centred per line on its regime mean; "
-                "d = lag-0 cross moment of two lines of one rotor with tau over lags 1-4, v = "
-                "auto moments minus the fitted d part (lag 0 minus the measured noise); exact "
-                "centred-moment OU fits; tau_v from "
-                + ("lag 1" if PRIMARY == "lag1" else "lags 1-4")
+                "d = lag-0 cross moment of two lines of one rotor with tau over lags 1-4 (the "
+                "line set above)"
+            ),
+            v_estimator=(
+                "sigma_v_db / tau_v_s: the POOLED all-track value -- "
+                + at["estimator"]
+                + "; sigma_v_db_by_order[i] holds for orders k_edges[i] <= k < k_edges[i+1]; "
+                "tau_v_s_by_order (present only when some group's tau is pinned by the window "
+                f"bootstrap, 95/5 % ratio < {TAU_PINNED_RATIO:g}) carries the pooled tau_v "
+                "where tau_source says so"
             ),
             floor_estimator=(
                 "mic-mean comb-masked level on bands around the 14 floor control points, speed "
@@ -933,8 +1173,13 @@ def contract(rig: str, detail: dict[str, Any], wins: Sequence[WindowData]) -> di
                 "lag-0 cross-band moment with tau over lags 1-4, uj = auto minus u"
             ),
             block_noise="measured: within-block frame scatter (lines); exact correlated-cell Gamma count x mic coherence (floor)",
-            sigma_total_db=float(num["sigma_total_db"]),
-            tau_total_s=float(num["tau_total_s"]),
+            resolvable_lines=dict(
+                note="schema 1: the per-line residual on the resolvable lines only",
+                sigma_v_db=float(num["sigma_v_db"]),
+                tau_v_s=float(num["tau_v_s"]),
+                sigma_total_db=float(num["sigma_total_db"]),
+                tau_total_s=float(num["tau_total_s"]),
+            ),
             flags=flags,
             detail="results/noise_v3/wander/wander_detail.json",
         ),
@@ -1147,6 +1392,98 @@ def _num_head(first: str) -> list[str]:
     ]
 
 
+def _qci(q: Sequence[Any] | None) -> str:
+    q = q or [NAN, NAN, NAN]
+    return f"[{_f(q[0])}, {_f(q[2])}]"
+
+
+def all_track_md(rigs: dict[str, Any]) -> list[str]:
+    """The schema-2 section: the per-line sd on every valid track, old beside new."""
+    out = ["## The per-line sd on every valid track (the contract's sigma_v, schema 2)", ""]
+    out += [
+        "**Why it changed.** Schema 1 read `sigma_v` off the RESOLVABLE lines alone (block "
+        f"prominence >= {W.PROMINENCE_DB:g} dB in >= {100 * W.PROMINENT_BLOCK_FRAC:g} % of the "
+        "blocks, section 'Resolvable lines'). The intermittency diagnostic "
+        "(`results/noise_v3/intermittency/findings.md`) looked at the tracks that rule leaves out "
+        "-- on DREGON 767 intermittent and 17983 always-under against 44 resolvable -- and "
+        "found them a Gaussian in dB of LARGER sd that grows with the order (median own block "
+        "sd of the intermittent tracks 1.48 dB at k 1-2, 2.07 at k 9-24, 2.62 at k 25-60, "
+        "4.35 at k 61+; the forward model fitted to them 5.0 dB with the floor held), with a "
+        "lag-1 autocorrelation of 0.23 against the 0.15 the schema-1 tau implies. 'Prominent "
+        "in >= 80 % of the blocks' is a selection on low scatter: it keeps the steady lines, "
+        "and a sd read off them is biased low for every line the v3 fit carries.",
+        "",
+        "**Estimator.** Every classified track -- valid (in band, on the grid) in >= "
+        f"{100 * W.MIN_VALID_FRAC:g} % of its window's {CHOSEN_BLOCK_S:g} s blocks, resolvable, "
+        "intermittent or always-under -- is read through its block prominence with the "
+        "diagnostic's test (b) forward model (`wander.ProminenceModel`): the line over its "
+        "local floor is `mu + d + v + e + o` dB, `v` the per-line OU being measured, `d` the "
+        "rotor-common OU held at the resolvable lines' `(sigma_d, tau_d)` (section 'The "
+        "estimates'), `e` white block noise at the measured median line `s^2`, `o` the speed "
+        "law minus the track's MEASURED local floor deviation (the line held in absolute "
+        "level, the floor as it was); the floor cells add a line-free cell-over-floor ratio "
+        f"(every block of the always-under tracks with median < {W.NULL_MEDIAN_DB:g} dB), and "
+        "`10 log10(10^(line/10) + ratio)` is the prominence. Each track's `mu` is matched to "
+        "its median; each track is centred on its own mean and the model's draws alike, so "
+        "`sigma` is the OU's STATIONARY sd. A track weighs the square of its line fraction "
+        "at its median prominence, `(1 - 10^(-P/10))^2` -- the slope of the prominence in "
+        "the line level: a track at 0 dB carries no line and weighs 0, one at 3 dB a quarter. "
+        "`sigma_v` solves the weighted lag-0 sum and `tau_v` the lags 1-4 "
+        "(`wander.fit_prominence_ou`, common random numbers over a (sigma, tau) table), per "
+        "order group and pooled. A group keeps its own `tau_v` when the window bootstrap "
+        f"pins it (95 % / 5 % under {TAU_PINNED_RATIO:g}x, not on the grid edge); otherwise "
+        "its `sigma_v` is refitted at the pooled `tau_v`. Intervals: window bootstrap "
+        "(within regime), 5-95 %, with `d` held at its point estimate.",
+        "",
+        "Pooled, old beside new (sd dB, tau s):",
+        "",
+        "| rig | schema 1: sigma_v (resolvable lines, rig-centred) | tau_v | tracks res / inter / under (weighted) | schema 2: sigma_v pooled | tau_v | same estimator, clear tracks only (median >= 3 dB) | same estimator, resolvable tracks only | sigma_d held / tau_d | sigma_total = sqrt(v^2 + d^2) | lag-1 autocorrelation observed / model |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for rig, blk in rigs.items():
+        at = blk["all_tracks"]
+        num = blk["chosen"][PRIMARY]["numbers"]
+        bt = blk["bootstrap"][PRIMARY]
+        p, r, c, h = at["pooled"], at["resolvable_only"], at["clear_only"], at["held"]
+        tr = at["tracks"]
+        out.append(
+            f"| {rig} | {_f(num['sigma_v_db'])} {_ci(bt, 'sigma_v_db')} | {_f(num['tau_v_s'])} "
+            f"{_ci(bt, 'tau_v_s')} | {tr['resolvable']} / {tr['intermittent']} / {tr['under']} "
+            f"({at['tracks_weighted']}) | **{_f(p['sigma_db'])}** {_qci(p['sigma_db_q05_50_95'])} "
+            f"| {_f(p['tau_s'])} {_qci(p['tau_s_q05_50_95'])} | {_f(c['sigma_db'])} "
+            f"{_qci(c['sigma_db_q05_50_95'])} ({c['tracks_weighted']} tracks) | {_f(r['sigma_db'])} "
+            f"{_qci(r['sigma_db_q05_50_95'])} | {_f(h['sigma_d_db'])} / {_f(h['tau_d_s'])} | "
+            f"{_f(at['sigma_total_db'])} | {_f(p['acf1_observed'])} / {_f(p['acf1_model'])} |"
+        )
+    out += [
+        "",
+        "By order group -- the contract's `sigma_v_db_by_order` / `tau_v_s_by_order`. The "
+        "schema-1 column is the resolvable lines' own auto sd per group (section 'Breakdown', "
+        "all of a line's wander, `d` included; n/a where no resolvable line was used).",
+        "",
+        "| rig | orders | tracks res / inter / under (weighted) | schema 1: auto sd | schema 2: sigma_v | tau_v (source) | own tau: sigma_v / tau_v [tau 5-95 %] | clear tracks only, pooled tau: sigma_v (tracks) | lag-1 autocorrelation observed / model |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for rig, blk in rigs.items():
+        at = blk["all_tracks"]
+        old = blk["by_order_group"]
+        for name, g in at["groups"].items():
+            tr = g["tracks"]
+            fr, cl = g["free"], g["clear_at_pooled_tau"]
+            out.append(
+                f"| {rig} | {name} | {tr['resolvable']} / {tr['intermittent']} / {tr['under']} "
+                f"({g['tracks_weighted']}) | {_f(old.get(name, {}).get('sigma_db'))} | "
+                f"**{_f(g['sigma_db'])}** {_qci(g['sigma_db_q05_50_95'])} | {_f(g['tau_s'])} "
+                f"{_qci(g['tau_s_q05_50_95'])} ({g['tau_source']}) | {_f(fr['sigma_db'])} / "
+                f"{_f(fr['tau_s'])} {_qci(fr['tau_s_q05_50_95'])}"
+                f"{' ' + fr['edge'] if fr['edge'] else ''} | {_f(cl['sigma_db'])} "
+                f"{_qci(cl['sigma_db_q05_50_95'])} ({cl['tracks_weighted']}) | "
+                f"{_f(g['acf1_observed'])} / {_f(g['acf1_model'])} |"
+            )
+    out += [""]
+    return out
+
+
 def findings_md(payload: dict[str, Any]) -> str:
     rigs = payload["rigs"]
     leg = payload["legacy"]
@@ -1221,6 +1558,7 @@ def findings_md(payload: dict[str, Any]) -> str:
                 f"{min(cm):.1f}-{max(cm):.1f} | {len({w['recording'] for w in ws})} |"
             )
     out += [""]
+    out += all_track_md(rigs)
 
     out += ["## Resolvable lines", ""]
     out += [
@@ -1509,6 +1847,11 @@ def _sd(v: Any) -> float:
     return math.sqrt(v) if isinstance(v, int | float) and math.isfinite(v) and v >= 0 else NAN
 
 
+def _num(v: Any) -> float:
+    """A cleaned JSON number (None = non-finite) as a float."""
+    return float(v) if isinstance(v, int | float) else NAN
+
+
 def _slash(v: Sequence[Any]) -> str:
     return " / ".join(str(x) for x in v)
 
@@ -1546,8 +1889,9 @@ def _verdict_body(
         f"{_ci(bt, 'sigma_uj_db')}, tau_uj {_f(num['tau_uj_s'])} s {_ci(bt, 'tau_uj_s')}.",
         f"Split of the line wander: rotor-common sd_d {_f(num['sigma_d_db'])} dB "
         f"{_ci(bt, 'sigma_d_db')} ({_f(100 * share, '{:.0f}')} % of the variance), tau_d "
-        f"{_f(num['tau_d_s'])} s {_ci(bt, 'tau_d_s')}; per line sd_v {_f(num['sigma_v_db'])} dB "
-        f"{_ci(bt, 'sigma_v_db')}, tau_v {_f(num['tau_v_s'])} s {_ci(bt, 'tau_v_s')}.",
+        f"{_f(num['tau_d_s'])} s {_ci(bt, 'tau_d_s')}; per line on these lines (schema 1) sd_v "
+        f"{_f(num['sigma_v_db'])} dB {_ci(bt, 'sigma_v_db')}, tau_v {_f(num['tau_v_s'])} s "
+        f"{_ci(bt, 'tau_v_s')}.",
     ]
     if loose:
         out.append(
@@ -1562,10 +1906,10 @@ def _verdict_body(
     fs, ft = lg.get("floor_gp_std_db"), lg.get("floor_gp_tau_s")
     out.append(
         f"Against the legacy sliders: line sd {_vs_range(tot, hs)} harm_gp_std_db {hs}, line tau "
-        f"{_vs_range(float(num['tau_total_s']), ht)} harm_gp_tau_s {ht}, common share "
+        f"{_vs_range(_num(num['tau_total_s']), ht)} harm_gp_tau_s {ht}, common share "
         f"{_vs_range(share, lg.get('harm_coherence'))} harm_coherence {lg.get('harm_coherence')}; "
         f"floor sd {_vs_range(u, fs)} floor_gp_std_db {fs}, floor tau "
-        f"{_vs_range(float(num['tau_u_s']), ft)} floor_gp_tau_s {ft}."
+        f"{_vs_range(_num(num['tau_u_s']), ft)} floor_gp_tau_s {ft}."
     )
     return out
 
@@ -1584,12 +1928,31 @@ def _verdict_text(
     sens = blk["block_length"]
     sig_bs = ", ".join(_f(sens[b]["numbers"]["sigma_total_db"]) for b in sens)
     u_bs = ", ".join(_f(sens[b]["numbers"]["sigma_u_db"]) for b in sens)
-    tot, u = float(num["sigma_total_db"]), float(num["sigma_u_db"])
+    tot, u = _num(num["sigma_total_db"]), _num(num["sigma_u_db"])
     parts = [
         f"**{rig}.** {blk['chosen'][PRIMARY]['n_line_tracks']} line tracks used "
         f"({rc['tracks'][0]} resolvable, {rc['tracks'][1]} rotor-dominant; set: {blk['line_set']}).",
     ]
-    return " ".join(parts + _verdict_body(num, bt, lg, s_blk, share, loose, tot, u, sig_bs, u_bs))
+    body = _verdict_body(num, bt, lg, s_blk, share, loose, tot, u, sig_bs, u_bs)
+    return " ".join(parts + body + [_all_track_sentence(blk["all_tracks"])])
+
+
+def _all_track_sentence(at: dict[str, Any]) -> str:
+    """The contract's sigma_v / tau_v (schema 2), read off ``at``."""
+    p = at["pooled"]
+    grp = "; ".join(
+        f"k {name} {_f(g['sigma_db'])} dB {_qci(g['sigma_db_q05_50_95'])} at tau "
+        f"{_f(g['tau_s'])} s ({g['tau_source']})"
+        for name, g in at["groups"].items()
+    )
+    return (
+        f"**The contract's per-line sd (schema 2), on all {at['tracks_weighted']} weighted valid "
+        f"tracks:** sd_v {_f(p['sigma_db'])} dB {_qci(p['sigma_db_q05_50_95'])} pooled, tau_v "
+        f"{_f(p['tau_s'])} s {_qci(p['tau_s_q05_50_95'])}; by order group {grp}. The same "
+        f"estimator on the resolvable tracks alone reads {_f(at['resolvable_only']['sigma_db'])} "
+        f"dB; lag-1 autocorrelation of the prominence {_f(p['acf1_observed'])} observed, "
+        f"{_f(p['acf1_model'])} under the fit."
+    )
 
 
 def verdict(rigs: dict[str, Any], leg: dict[str, Any]) -> list[str]:
@@ -1600,7 +1963,7 @@ def verdict(rigs: dict[str, Any], leg: dict[str, Any]) -> list[str]:
         bt = blk["bootstrap"][PRIMARY]
         noise = blk["chosen"][PRIMARY]["lines"]["total_lags_only"].get("measured_noise_mean_db2")
         s_blk = math.sqrt(noise) if isinstance(noise, int | float) and noise > 0 else NAN
-        tot = float(num["sigma_total_db"])
+        tot = _num(num["sigma_total_db"])
         share = num["sigma_d_db"] ** 2 / tot**2 if tot > 0 else NAN
         loose = [
             k.split("_")[1]

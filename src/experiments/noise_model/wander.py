@@ -80,13 +80,30 @@ lifts every line of a block); ``fit_ou(..., skip_lag0=True)`` fits from lags
 1-4 alone and returns that excess as the nugget. The explainer's literal
 estimate -- ``Var_b(y) - s^2`` and ``Cov(y_b, y_b+1) / sigma^2`` -- is kept
 beside it (:meth:`LagMoments.naive`).
+
+Every valid track
+-----------------
+
+The moments above need a line level per block, so they run on lines that
+stand clear of their floor -- a selection on low scatter. The per-line sd of
+the v3 contract is read instead off EVERY classified track
+(:func:`classify_tracks`: valid in >= ``MIN_VALID_FRAC`` of its window's
+blocks) through its block PROMINENCE, with the forward model of the
+intermittency diagnostic (``scripts/_dregon_intermittency.py`` test (b)):
+:class:`ProminenceModel` -- a Gaussian line level in dB plus block noise, the
+speed law and the track's measured local floor deviation, plus the
+line-free cell-over-floor ratio. :func:`prominence_moments` tabulates the
+weighted, per-track-centred lag sums of the data and of the model on a
+``(sigma, tau)`` grid, summed per cell (window x order group x class), and
+:func:`fit_prominence_ou` solves any set of cells -- one order group, a
+window-bootstrap draw -- like :func:`fit_ou` does its linear moments.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any
 
@@ -353,6 +370,7 @@ class LineBlocks:
     line_db: np.ndarray  # (M, R, K, B) 10 log10(line power) per mic, NaN if <= floor
     line_frac: np.ndarray  # (M, R, K, B) line power / cell power
     prominence_db: np.ndarray  # (R, K, B) mic-summed cells over mic-summed floor
+    floor_db: np.ndarray  # (R, K, B) the mic-summed local floor (the prominence's denominator), dB
     window_prominence_db: np.ndarray  # (R, K) the same over the whole window
     n_cells: np.ndarray  # (R, K, B) frames x bins (the explainer's literal count)
     s2_explainer: np.ndarray  # (M, R, K, B) (10/ln10)^2 psi1(n_cells lineFrac^2)
@@ -415,6 +433,7 @@ class LineBlocks:
             line_db=self.line_db[:, :, i],
             line_frac=self.line_frac[:, :, i],
             prominence_db=self.prominence_db[:, i],
+            floor_db=self.floor_db[:, i],
             window_prominence_db=self.window_prominence_db[:, i],
             n_cells=self.n_cells[:, i],
             s2_explainer=self.s2_explainer[:, :, i],
@@ -511,6 +530,7 @@ def measure_lines(
     s2_emp = np.full(shape4, np.nan)
     s2_emp_mm = np.full((r_, k_, b_), np.nan)
     prom = np.full((r_, k_, b_), np.nan)
+    floor_db = np.full((r_, k_, b_), np.nan)
     n_cells = np.zeros((r_, k_, b_), dtype=np.int64)
     valid = np.zeros((r_, k_, b_), dtype=bool)
     cell_sum = np.zeros((r_, k_))
@@ -549,6 +569,7 @@ def measure_lines(
             s2_expl[:, r, :, b] = np.where(pos, noise_var_db(n * frac**2), np.nan)
             ps, fs = pbar.sum(axis=0), fhat.sum(axis=0)
             prom[r, :, b] = 10.0 * np.log10(np.maximum(ps, 1e-300) / np.maximum(fs, 1e-300))
+            floor_db[r, :, b] = 10.0 * np.log10(np.maximum(fs, 1e-300))
             cell_sum[r] += np.where(okb, ps, 0.0)
             floor_sum[r] += np.where(okb, fs, 0.0)
             lin_pos += np.where(okb[None], np.maximum(lin, 0.0), 0.0)
@@ -580,6 +601,7 @@ def measure_lines(
         line_db=line_db,
         line_frac=line_frac,
         prominence_db=prom,
+        floor_db=floor_db,
         window_prominence_db=np.where(floor_sum > 0, win_prom, np.nan),
         n_cells=n_cells,
         s2_explainer=s2_expl,
@@ -1074,6 +1096,17 @@ def ou_expected_products(
     return np.where(mom.n > 0, tot / np.maximum(mom.n, 1), np.nan)
 
 
+def ou_filter(z: np.ndarray, rho: float) -> np.ndarray:
+    """A UNIT stationary OU along the last axis from standard normals ``z``:
+    ``x_0 = z_0``, ``x_b = rho x_{b-1} + sqrt(1 - rho^2) z_b``."""
+    x = np.empty(z.shape, dtype=np.float64)
+    x[..., 0] = z[..., 0]
+    c = math.sqrt(max(1.0 - rho * rho, 0.0))
+    for b in range(1, z.shape[-1]):
+        x[..., b] = rho * x[..., b - 1] + c * z[..., b]
+    return x
+
+
 def simulate_ou_blocks(
     rng: np.random.Generator,
     n_tracks: int,
@@ -1084,13 +1117,421 @@ def simulate_ou_blocks(
 ) -> np.ndarray:
     """``(n_tracks, n_blocks)`` stationary OU draws at the block rate, in dB --
     the explainer's recursion ``d_{b+1} = rho d_b + sqrt(1 - rho^2) sigma eps``."""
-    rho = math.exp(-float(block_s) / float(tau_s))
-    x = np.empty((n_tracks, n_blocks))
-    x[:, 0] = rng.normal(0.0, sigma_db, n_tracks)
-    innov = sigma_db * math.sqrt(1.0 - rho * rho)
-    for b in range(1, n_blocks):
-        x[:, b] = rho * x[:, b - 1] + rng.normal(0.0, innov, n_tracks)
-    return x
+    z = np.empty((n_tracks, n_blocks))
+    for b in range(n_blocks):
+        z[:, b] = rng.standard_normal(n_tracks)
+    return sigma_db * ou_filter(z, math.exp(-float(block_s) / float(tau_s)))
+
+
+# ---------------------------------------------------------------------------
+# every valid track: the line level read through its block prominence
+# ---------------------------------------------------------------------------
+
+#: A (window, rotor, order) track is CLASSIFIED -- and enters the all-track
+#: estimate -- when it is valid (in band, on the grid) in at least this share
+#: of the window's blocks: a line leaving the band is not wander.
+MIN_VALID_FRAC = 0.8
+#: A classified track is ALWAYS-UNDER when prominent (>= ``PROMINENCE_DB``) in
+#: under this share of its valid blocks, INTERMITTENT from here up to
+#: ``PROMINENT_BLOCK_FRAC``, RESOLVABLE above.
+ALWAYS_UNDER_FRAC = 0.2
+TRACK_CLASSES = ("resolvable", "intermittent", "under", "off_grid")
+RESOLVABLE, INTERMITTENT, UNDER, OFF_GRID = range(4)
+#: The line-free cell-over-floor ratio: every block of the always-under tracks
+#: whose median prominence is under this (dB) -- floor cells with no line.
+NULL_MEDIAN_DB = 1.0
+#: Lower edges of the order groups the per-line sd is measured on:
+#: ``[1, 3), [3, 9), [9, 25), [25, 61), [61, K]``.
+ORDER_GROUP_EDGES = (1, 3, 9, 25, 61)
+#: The prominence model's median map: draws, and the line-level grid (dB).
+PROM_MAP_DRAWS = 20_000
+PROM_MAP_MU_DB = np.arange(-30.0, 40.0001, 0.1)
+#: The all-track moment table: sigma (dB, 0 first; interpolated in sigma^2)
+#: and tau (s; interpolated in log tau onto ``PROM_TAU_FINE_S``).
+PROM_SIGMA_GRID_DB = np.concatenate([[0.0], np.geomspace(0.25, 16.0, 32)])
+PROM_TAU_GRID_S = np.geomspace(0.05, 50.0, 31)
+PROM_TAU_FINE_S = np.geomspace(0.05, 50.0, 600)
+
+
+def classify_tracks(prominence_db: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """``(R, K)`` index into :data:`TRACK_CLASSES` of every track of a window
+    (``prominence_db``, ``valid`` ``(R, K, B)``): OFF_GRID when valid in under
+    ``MIN_VALID_FRAC`` of the blocks, else by the share of its VALID blocks
+    at >= ``PROMINENCE_DB``."""
+    nval = valid.sum(axis=-1)
+    prom = np.where(valid, prominence_db, -np.inf)
+    pres = (np.nan_to_num(prom, nan=-np.inf) >= PROMINENCE_DB).sum(axis=-1)
+    frac = pres / np.maximum(nval, 1)
+    out = np.full(nval.shape, OFF_GRID)
+    ok = nval >= MIN_VALID_FRAC * valid.shape[-1]
+    out[ok & (frac >= PROMINENT_BLOCK_FRAC)] = RESOLVABLE
+    out[ok & (frac >= ALWAYS_UNDER_FRAC) & (frac < PROMINENT_BLOCK_FRAC)] = INTERMITTENT
+    out[ok & (frac < ALWAYS_UNDER_FRAC)] = UNDER
+    return out
+
+
+def order_group(orders: Any) -> np.ndarray:
+    """Index into :data:`ORDER_GROUP_EDGES` of every order (``>= 1``)."""
+    edges = np.asarray(ORDER_GROUP_EDGES)
+    return np.searchsorted(edges, np.asarray(orders), side="right") - 1
+
+
+def line_fraction(prominence_db: Any) -> np.ndarray:
+    """``max(1 - 10^(-P/10), 0)``: the line's share of its cells at block
+    prominence ``P`` -- the slope ``dP/dx`` of the prominence in the line level."""
+    p = np.asarray(prominence_db, dtype=np.float64)
+    return np.clip(1.0 - 10.0 ** (-p / 10.0), 0.0, 1.0)
+
+
+@dataclass(frozen=True)
+class ProminenceModel:
+    """A Gaussian line level in dB, read as block prominence.
+
+    A track's line over its local floor is ``mu + x_b + e_b + o_b`` dB: ``x``
+    an OU of ``(sigma_db, tau_s)`` -- plus, when ``sigma_d_db > 0``, an
+    independent OU of ``(sigma_d_db, tau_d_s)``, the rotor-common part -- ``e``
+    white block noise of variance ``s2_db2``, ``o`` a known offset (the speed
+    law minus the track's measured local floor deviation: the line held in
+    absolute level, the floor as it was). The floor cells add a line-free
+    cell-over-floor ratio drawn from ``eta`` (linear), and the block
+    prominence is ``10 log10(10^((mu + x + e + o) / 10) + eta)``.
+    """
+
+    sigma_db: float
+    tau_s: float
+    s2_db2: float
+    eta: np.ndarray
+    block_s: float
+    sigma_d_db: float = 0.0
+    tau_d_s: float = 1.0
+
+
+def line_free_eta(tracks: Sequence[np.ndarray]) -> np.ndarray:
+    """The linear cell-over-floor ratios of every block of the ``tracks`` (block
+    prominences, dB, of ALWAYS-UNDER tracks) whose median is under
+    ``NULL_MEDIAN_DB``: :attr:`ProminenceModel.eta`."""
+    quiet = [np.asarray(t, dtype=np.float64) for t in tracks if np.median(t) < NULL_MEDIAN_DB]
+    if not quiet:
+        raise ValueError(f"no always-under track with median prominence < {NULL_MEDIAN_DB} dB")
+    return 10.0 ** (np.concatenate(quiet) / 10.0)
+
+
+def prominence_median_map(
+    model: ProminenceModel, rng: np.random.Generator, extra_var_db2: float = 0.0
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(mu, median P)``: the model's median block prominence at line level
+    ``mu`` (dB over the local floor) on :data:`PROM_MAP_MU_DB`, the Gaussian's
+    variance ``sigma^2 + sigma_d^2 + s^2 + extra_var_db2``; monotone by
+    construction."""
+    var = model.sigma_db**2 + model.sigma_d_db**2 + model.s2_db2 + extra_var_db2
+    z = rng.standard_normal(PROM_MAP_DRAWS) * math.sqrt(var)
+    e = rng.choice(model.eta, PROM_MAP_DRAWS)
+    mu = PROM_MAP_MU_DB
+    med = np.empty(mu.size)
+    for i in range(0, mu.size, 64):
+        m = mu[i : i + 64, None]
+        med[i : i + 64] = np.median(10.0 * np.log10(10.0 ** ((m + z) / 10.0) + e), axis=1)
+    return mu, np.maximum.accumulate(med)
+
+
+def prominence_line_levels(
+    model: ProminenceModel,
+    medians: np.ndarray,
+    rng: np.random.Generator,
+    extra_var_db2: float = 0.0,
+) -> np.ndarray:
+    """Each track's line level ``mu`` whose model median prominence is the
+    track's observed median ``medians``."""
+    mu_grid, med_grid = prominence_median_map(model, rng, extra_var_db2)
+    return np.interp(np.asarray(medians, dtype=np.float64), med_grid, mu_grid)
+
+
+def simulate_prominence(
+    model: ProminenceModel,
+    mus: np.ndarray,
+    n_blocks: int,
+    rng: np.random.Generator,
+    offset: np.ndarray | None = None,
+) -> np.ndarray:
+    """``(len(mus), n_blocks)``: one forward-model draw of every track's block
+    prominence (dB); ``offset`` ``(len(mus), n_blocks)`` is the known ``o``."""
+    x = simulate_ou_blocks(rng, mus.size, n_blocks, model.sigma_db, model.tau_s, model.block_s)
+    if model.sigma_d_db > 0.0:
+        x = x + simulate_ou_blocks(
+            rng, mus.size, n_blocks, model.sigma_d_db, model.tau_d_s, model.block_s
+        )
+    x = x + math.sqrt(model.s2_db2) * rng.standard_normal(x.shape)
+    if offset is not None:
+        x = x + offset
+    return 10.0 * np.log10(10.0 ** ((mus[:, None] + x) / 10.0) + rng.choice(model.eta, x.shape))
+
+
+def centred_lag_sums(x: np.ndarray, max_lag: int = MAX_LAG) -> tuple[np.ndarray, np.ndarray]:
+    """``(c, n)`` ``(..., max_lag + 1)``: sums and counts of the lag-``j``
+    products of every row of ``x`` (blocks on the last axis, NaN = missing),
+    each row centred on the mean of its observed blocks."""
+    ok = np.isfinite(x)
+    cnt = ok.sum(axis=-1)
+    mean = np.where(ok, x, 0.0).sum(axis=-1) / np.maximum(cnt, 1)
+    z = np.where(ok, x - mean[..., None], 0.0)
+    okf = ok.astype(np.float64)
+    b_ = x.shape[-1]
+    c = np.zeros(x.shape[:-1] + (max_lag + 1,))
+    n = np.zeros_like(c)
+    for j in range(min(max_lag, b_ - 1) + 1):
+        c[..., j] = (z[..., : b_ - j] * z[..., j:]).sum(axis=-1)
+        n[..., j] = (okf[..., : b_ - j] * okf[..., j:]).sum(axis=-1)
+    return c, n
+
+
+@dataclass
+class ProminenceTracks:
+    """Classified tracks (valid in >= ``MIN_VALID_FRAC`` of their window's
+    blocks) on one ``(N, B)`` layout, rows padded with NaN to the longest
+    window. Axes: ``n`` track, ``b`` block."""
+
+    p_db: np.ndarray  # (N, B) block prominence, NaN where not valid
+    offset_db: np.ndarray  # (N, B) the model's known o, centred per track; 0 where p is NaN
+    window: np.ndarray  # (N,) window index
+    rotor: np.ndarray  # (N,)
+    order: np.ndarray  # (N,)
+    cls: np.ndarray  # (N,) index into TRACK_CLASSES
+
+    @classmethod
+    def from_blocks(cls, lb: LineBlocks, speed_db: np.ndarray) -> ProminenceTracks:
+        """Every classified track of one window; ``speed_db`` ``(R, B)`` is the
+        line speed law per block (dB) -- ``o`` is it minus the local floor,
+        centred on the track's valid blocks."""
+        c = classify_tracks(lb.prominence_db, lb.valid)
+        rr, kk = np.nonzero(c != OFF_GRID)
+        valid = lb.valid[rr, kk]
+        p = np.where(valid, lb.prominence_db[rr, kk], np.nan)
+        o = np.where(valid, np.asarray(speed_db)[rr] - lb.floor_db[rr, kk], 0.0)
+        o = o - o.sum(axis=1, keepdims=True) / np.maximum(valid.sum(axis=1, keepdims=True), 1)
+        return cls(
+            p_db=p,
+            offset_db=np.where(valid, o, 0.0),
+            window=np.zeros(rr.size, dtype=np.int64),
+            rotor=rr.astype(np.int64),
+            order=lb.orders[kk].astype(np.int64),
+            cls=c[rr, kk].astype(np.int64),
+        )
+
+    @classmethod
+    def stack(cls, parts: Sequence[ProminenceTracks]) -> ProminenceTracks:
+        """One layout of several windows' tracks; ``window`` = position in ``parts``."""
+        b_ = max(p.p_db.shape[1] for p in parts)
+
+        def pad(a: np.ndarray, fill: float) -> np.ndarray:
+            out = np.full((a.shape[0], b_), fill)
+            out[:, : a.shape[1]] = a
+            return out
+
+        return cls(
+            p_db=np.concatenate([pad(p.p_db, np.nan) for p in parts]),
+            offset_db=np.concatenate([pad(p.offset_db, 0.0) for p in parts]),
+            window=np.concatenate(
+                [np.full(p.rotor.size, i, dtype=np.int64) for i, p in enumerate(parts)]
+            ),
+            rotor=np.concatenate([p.rotor for p in parts]),
+            order=np.concatenate([p.order for p in parts]),
+            cls=np.concatenate([p.cls for p in parts]),
+        )
+
+    def take(self, m: np.ndarray) -> ProminenceTracks:
+        return ProminenceTracks(
+            self.p_db[m],
+            self.offset_db[m],
+            self.window[m],
+            self.rotor[m],
+            self.order[m],
+            self.cls[m],
+        )
+
+    def medians(self) -> np.ndarray:
+        """``(N,)`` median block prominence over the valid blocks."""
+        return np.nanmedian(self.p_db, axis=1)
+
+    def weights(self) -> np.ndarray:
+        """``(N,)`` the square of the line fraction at the track's median
+        prominence: how much of a line-level change reaches the prominence (a
+        track at 0 dB carries no line and weighs 0)."""
+        return line_fraction(self.medians()) ** 2
+
+
+@dataclass
+class ProminenceMoments:
+    """Weighted, per-track-centred lag sums of the observed block prominence
+    and of the :class:`ProminenceModel` on a ``(sigma, tau)`` grid, summed per
+    CELL (any grouping of the tracks, e.g. window x order group). The model's
+    draws are centred per track exactly as the data, so ``sigma`` is the OU's
+    STATIONARY sd; a set of cells is fitted by :func:`fit_prominence_ou`."""
+
+    sigma_grid: np.ndarray  # (S,)
+    tau_grid: np.ndarray  # (T,)
+    block_s: float
+    obs: np.ndarray  # (C, L+1) weighted lag-product sums
+    n: np.ndarray  # (C, L+1) weighted product counts
+    sim: np.ndarray  # (C, S, T, L+1) the model's expectation of obs
+    weight: np.ndarray  # (C,) sum of the track weights
+    n_tracks: np.ndarray  # (C,) tracks with weight > 0
+
+
+def prominence_moments(
+    tracks: ProminenceTracks,
+    model: ProminenceModel,
+    cells: np.ndarray,
+    n_cells: int,
+    rng: np.random.Generator,
+    *,
+    n_draw: int = 8,
+    sigma_grid: np.ndarray = PROM_SIGMA_GRID_DB,
+    tau_grid: np.ndarray = PROM_TAU_GRID_S,
+    max_lag: int = MAX_LAG,
+) -> ProminenceMoments:
+    """The table behind :func:`fit_prominence_ou`. Each track is weighted by
+    :meth:`ProminenceTracks.weights`; its line level ``mu`` is matched to its
+    median at every ``sigma`` (:func:`prominence_line_levels`, the offsets'
+    pooled variance added to the Gaussian); ``model.sigma_db``/``tau_s`` are
+    the grid's, the rest of ``model`` is held. ``n_draw`` draws of common
+    random numbers serve every grid point, so the table is smooth in both."""
+    w_all = tracks.weights()
+    use = w_all > 0
+    p = tracks.p_db[use]
+    off = tracks.offset_db[use]
+    w = w_all[use]
+    cid = np.asarray(cells)[use]
+    med = tracks.medians()[use]
+    ok = np.isfinite(p)
+    n_, b_ = p.shape
+    l1 = max_lag + 1
+
+    def per_cell(v: np.ndarray) -> np.ndarray:
+        return np.stack(
+            [np.bincount(cid, weights=v[:, j], minlength=n_cells) for j in range(v.shape[1])],
+            axis=1,
+        )
+
+    c_obs, n_obs = centred_lag_sums(p, max_lag)
+    obs, cnt = per_cell(w[:, None] * c_obs), per_cell(w[:, None] * n_obs)
+    extra = float(np.mean(off[ok] ** 2)) if ok.any() else 0.0
+    mus = [
+        prominence_line_levels(replace(model, sigma_db=float(s)), med, rng, extra)
+        for s in sigma_grid
+    ]
+    shape = (n_draw, n_, b_)
+    zv = rng.standard_normal(shape)
+    base = math.sqrt(model.s2_db2) * rng.standard_normal(shape) + off[None]
+    if model.sigma_d_db > 0.0:
+        rho_d = math.exp(-model.block_s / model.tau_d_s)
+        base = base + model.sigma_d_db * ou_filter(rng.standard_normal(shape), rho_d)
+    eta = rng.choice(model.eta, shape)
+    sim = np.zeros((n_cells, sigma_grid.size, tau_grid.size, l1))
+    for ti, tau in enumerate(tau_grid):
+        uv = ou_filter(zv, math.exp(-model.block_s / float(tau)))
+        for si, s in enumerate(sigma_grid):
+            x = mus[si][None, :, None] + float(s) * uv + base
+            pr = np.where(ok[None], 10.0 * np.log10(10.0 ** (x / 10.0) + eta), np.nan)
+            c_sim, _ = centred_lag_sums(pr, max_lag)
+            sim[:, si, ti] = per_cell(w[:, None] * c_sim.mean(axis=0))
+    return ProminenceMoments(
+        sigma_grid=np.asarray(sigma_grid, dtype=np.float64),
+        tau_grid=np.asarray(tau_grid, dtype=np.float64),
+        block_s=float(model.block_s),
+        obs=obs,
+        n=cnt,
+        sim=sim,
+        weight=np.bincount(cid, weights=w, minlength=n_cells),
+        n_tracks=np.bincount(cid, minlength=n_cells),
+    )
+
+
+def _table_at_tau(sim: np.ndarray, tau_grid: np.ndarray, taus: np.ndarray) -> np.ndarray:
+    """``(S, len(taus), L+1)``: ``sim`` ``(S, T, L+1)`` linear in log tau."""
+    lt, lf = np.log(tau_grid), np.log(np.clip(taus, tau_grid[0], tau_grid[-1]))
+    i = np.clip(np.searchsorted(lt, lf) - 1, 0, lt.size - 2)
+    fr = ((lf - lt[i]) / (lt[i + 1] - lt[i]))[None, :, None]
+    return sim[:, i] * (1.0 - fr) + sim[:, i + 1] * fr
+
+
+def _solve_sigma(
+    table: np.ndarray, sigma_grid: np.ndarray, target0: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per column of ``table`` ``(S, F, L+1)``: the ``sigma^2`` whose lag-0
+    expectation is ``target0`` (linear in ``sigma^2`` between grid points),
+    the expected products there ``(F, L+1)``, and the clip / top-edge flags."""
+    c0 = np.maximum.accumulate(table[..., 0], axis=0)  # (S, F)
+    s_ = sigma_grid.size
+    k = (c0 < target0).sum(axis=0)
+    lo = np.clip(k - 1, 0, s_ - 2)
+    cols = np.arange(c0.shape[1])
+    a, b = c0[lo, cols], c0[lo + 1, cols]
+    fr = np.clip((target0 - a) / np.where(b > a, b - a, 1.0), 0.0, 1.0)
+    g2 = sigma_grid**2
+    sig2 = g2[lo] + fr * (g2[lo + 1] - g2[lo])
+    prod = table[lo, cols] * (1.0 - fr[:, None]) + table[lo + 1, cols] * fr[:, None]
+    return sig2, prod, k == 0, k == s_
+
+
+def _cell_sums(mom: ProminenceMoments, cell_weight: np.ndarray | None) -> tuple[np.ndarray, ...]:
+    m = np.ones(mom.obs.shape[0]) if cell_weight is None else np.asarray(cell_weight, float)
+    return m @ mom.obs, m @ mom.n, np.tensordot(m, mom.sim, axes=1)
+
+
+def fit_prominence_ou(
+    mom: ProminenceMoments,
+    cell_weight: np.ndarray | None = None,
+    *,
+    lags: Sequence[int] = (1, 2, 3, 4),
+    tau_s: float | None = None,
+) -> OUFit:
+    """Simulated method of moments on the cells ``cell_weight`` ``(C,)`` of
+    ``mom`` (multiplicities: a window bootstrap repeats a window's cells):
+    for every ``tau`` (``PROM_TAU_FINE_S``, or the given ``tau_s``) ``sigma``
+    solves the weighted lag-0 sum, and ``tau`` minimises the count-weighted
+    squared residual of the lag sums at ``lags`` -- :func:`fit_ou` with the
+    model's expectation in place of the linear one."""
+    obs, cnt, sim = _cell_sums(mom, cell_weight)
+    lag_t = tuple(int(j) for j in lags if cnt[int(j)] > 0)
+    nan = float("nan")
+    if cnt[0] <= 0 or obs[0] <= 0:
+        return OUFit(0.0, nan, nan, cnt[0] > 0, "", lag_t, nan)
+    taus = PROM_TAU_FINE_S if tau_s is None else np.array([float(tau_s)])
+    sig2, prod, clip, top = _solve_sigma(
+        _table_at_tau(sim, mom.tau_grid, taus), mom.sigma_grid, float(obs[0])
+    )
+    loss = np.zeros(taus.size)
+    for j in lag_t:
+        loss += (obs[j] - prod[:, j]) ** 2 / cnt[j]
+    i = int(np.argmin(loss))
+    edge = ""
+    if tau_s is None and lag_t and i in (0, taus.size - 1):
+        edge = "tau_min" if i == 0 else "tau_max"
+    if top[i]:
+        edge = "sigma_max"
+    tau = float(taus[i])
+    return OUFit(
+        0.0 if clip[i] else float(sig2[i]),
+        tau,
+        math.exp(-mom.block_s / tau),
+        bool(clip[i]),
+        edge,
+        lag_t,
+        float(loss[i]),
+    )
+
+
+def prominence_products(
+    mom: ProminenceMoments, fit: OUFit, cell_weight: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(observed, model)`` ``(L+1,)`` weighted mean lag products of the
+    cells at ``fit`` (the model interpolated at its ``sigma``, ``tau``)."""
+    obs, cnt, sim = _cell_sums(mom, cell_weight)
+    tab = _table_at_tau(sim, mom.tau_grid, np.array([fit.tau_s]))[:, 0]  # (S, L+1)
+    g2 = mom.sigma_grid**2
+    model = np.array([np.interp(fit.sigma2, g2, tab[:, j]) for j in range(tab.shape[1])])
+    den = np.where(cnt > 0, cnt, np.nan)
+    return obs / den, model / den
 
 
 __all__ = [
@@ -1099,21 +1540,36 @@ __all__ = [
     "LagMoments",
     "LineBlocks",
     "OUFit",
+    "ProminenceModel",
+    "ProminenceMoments",
+    "ProminenceTracks",
     "block_line_power_db",
     "cell_power_correlation",
+    "centred_lag_sums",
+    "classify_tracks",
     "comb_mask",
     "control_band_edges",
     "correlated_cell_count",
     "fit_ou",
+    "fit_prominence_ou",
     "frame_blocks",
     "hann_capture",
+    "line_fraction",
+    "line_free_eta",
     "measure_floor",
     "measure_lines",
     "noise_var_db",
+    "order_group",
     "ou_expected_products",
+    "ou_filter",
     "overlap_inflation",
+    "prominence_line_levels",
+    "prominence_median_map",
+    "prominence_moments",
+    "prominence_products",
     "rel_var_to_db2",
     "simulate_ou_blocks",
+    "simulate_prominence",
     "third_octave_edges",
     "within_block_mean_var",
 ]

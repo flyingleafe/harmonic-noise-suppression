@@ -178,3 +178,89 @@ class TestBlockLinePower:
         centre = (np.arange(y.size) + 0.5) * 0.5
         lo, hi = y[centre < 1.75], y[centre > 2.25]
         assert float(hi.mean() - lo.mean()) == pytest.approx(20 * math.log10(2.0), abs=0.3)
+
+
+class TestAllTrackProminence:
+    """The all-track estimate: every valid track's block PROMINENCE read as a
+    Gaussian line level in dB plus block noise, the track's own floor
+    deviation and the line-free floor cells. Two order groups with their own
+    sigma, a rotor-common part on top, weak and intermittent tracks included."""
+
+    BS, TAU, S2, SD, TD = 0.5, 1.0, 1.0, 0.8, 0.4
+    GROUPS = ((2, 1.5), (30, 4.0))  # (order, sigma_v dB)
+    SIGMA_GRID = np.concatenate([[0.0], np.geomspace(0.25, 8.0, 19)])
+
+    def _data(self, rng: np.random.Generator) -> tuple[W.ProminenceTracks, W.ProminenceModel]:
+        n_per, n_b, n_w = 500, 16, 25
+        eta = rng.gamma(15.0, 1.0 / 15.0, 50_000)  # a 15-cell floor over its own mean
+        held = W.ProminenceModel(0.0, 1.0, self.S2, eta, self.BS, self.SD, self.TD)
+        p, off, order = [], [], []
+        for k, sigma in self.GROUPS:
+            truth = W.ProminenceModel(sigma, self.TAU, self.S2, eta, self.BS, self.SD, self.TD)
+            o = rng.normal(0.0, 1.0, (n_per, n_b))  # the measured floor deviation, known
+            o -= o.mean(axis=1, keepdims=True)
+            mus = rng.uniform(-4.0, 14.0, n_per)
+            y = W.simulate_prominence(truth, mus, n_b, rng, o)
+            gone = rng.random(y.shape) < 0.1  # blocks the line leaves the grid in
+            p.append(np.where(gone, np.nan, y))
+            off.append(np.where(gone, 0.0, o))
+            order.append(np.full(n_per, k))
+        n = 2 * n_per
+        tracks = W.ProminenceTracks(
+            p_db=np.concatenate(p),
+            offset_db=np.concatenate(off),
+            window=np.arange(n) % n_w,
+            rotor=np.zeros(n, dtype=np.int64),
+            order=np.concatenate(order),
+            cls=np.zeros(n, dtype=np.int64),
+        )
+        return tracks, held
+
+    @pytest.mark.parametrize("subset", ["all", "median_under_6db"])
+    def test_recovers_the_sigma_of_each_order_group(self, subset):
+        # "median_under_6db": only the tracks the resolvable rule would drop
+        # -- the estimate must not need a line that stands clear of its floor.
+        rng = np.random.default_rng(8)
+        tracks, held = self._data(rng)
+        if subset != "all":
+            tracks = tracks.take(tracks.medians() < W.PROMINENCE_DB)
+        grp = W.order_group(tracks.order)
+        assert set(grp.tolist()) == {0, 3}
+        cells = (grp == 3).astype(np.int64)
+        mom = W.prominence_moments(
+            tracks, held, cells, 2, rng, n_draw=4, sigma_grid=self.SIGMA_GRID
+        )
+        for c, (_, sigma) in enumerate(self.GROUPS):
+            fit = W.fit_prominence_ou(mom, np.eye(2)[c])
+            assert fit.sigma_db == pytest.approx(sigma, rel=0.12)
+            assert fit.tau_s == pytest.approx(self.TAU, rel=0.4)
+        pooled = W.fit_prominence_ou(mom)
+        assert self.GROUPS[0][1] < pooled.sigma_db < self.GROUPS[1][1]
+
+    def test_a_fixed_tau_refits_sigma_only(self):
+        rng = np.random.default_rng(9)
+        tracks, held = self._data(rng)
+        cells = (W.order_group(tracks.order) == 3).astype(np.int64)
+        mom = W.prominence_moments(
+            tracks, held, cells, 2, rng, n_draw=4, sigma_grid=self.SIGMA_GRID
+        )
+        fit = W.fit_prominence_ou(mom, np.array([0.0, 1.0]), tau_s=self.TAU)
+        assert fit.tau_s == self.TAU
+        assert fit.sigma_db == pytest.approx(self.GROUPS[1][1], rel=0.1)
+
+    def test_no_line_wander_clips_to_zero(self):
+        # Lines with only the rotor-common part and block noise: nothing is left
+        # for the per-line sd once those are held.
+        rng = np.random.default_rng(10)
+        eta = rng.gamma(15.0, 1.0 / 15.0, 50_000)
+        held = W.ProminenceModel(0.0, 1.0, self.S2, eta, self.BS, self.SD, self.TD)
+        n, n_b = 600, 16
+        y = W.simulate_prominence(held, rng.uniform(2.0, 14.0, n), n_b, rng)
+        tracks = W.ProminenceTracks(
+            y, np.zeros_like(y), np.zeros(n, int), np.zeros(n, int), np.full(n, 5), np.zeros(n, int)
+        )
+        cells = np.zeros(n, dtype=np.int64)
+        mom = W.prominence_moments(
+            tracks, held, cells, 1, rng, n_draw=4, sigma_grid=self.SIGMA_GRID
+        )
+        assert W.fit_prominence_ou(mom).sigma_db < 0.5
