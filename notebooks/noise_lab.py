@@ -6,7 +6,7 @@ family, with sliders) — into one place where a clip of EVERY generation can be
 rendered on the SAME rotor-speed track, under the SAME level rule, with the
 SAME render seed, and then compared by ear, by spectrogram and by number.
 
-THE FIVE GENERATIONS, as noise sources::
+THE SIX GENERATIONS, as noise sources::
 
     LegacyRandom(seed=0)          a fresh draw of the hand-written family
                                   (data_processing.stochastic_rotor_noise),
@@ -30,6 +30,12 @@ THE FIVE GENERATIONS, as noise sources::
     V2Bank("easy", 0)             entry 0 of data/rig_banks/noise_v2_easy_
                                   n2048.json (= `dload:noise-v2-banks`), the
                                   sampled v2 rig bank
+    V3Fit("dregon")               the noise-model-v3 single-regime fit
+                                  (results/noise_v3/fits{,_r2}/, round "r1",
+                                  "r2" or "latest" = r2 when it is on disk);
+                                  V3Fit("michaels") is the v3 standby +
+                                  cruise pair, composed as V2Fit("michaels");
+                                  v3_fit_names() lists what is on disk
 
 WHY ONE TRAJECTORY.  The training policies these generations come from differ
 in four things at once — the level rule, render/flight reuse, the speed scaling
@@ -93,8 +99,8 @@ quieter than a fast one.  Each source reports its own envelope, so the rule
 means the same thing across generations.
 
 MEMORY.  Rendering only: no forward model is ever evaluated on a fit POOL.
-:func:`expected_vs_realised` evaluates the v2 forward model on a few seconds of
-ONE clip, which is the largest thing here.
+:func:`expected_vs_realised` evaluates the v2/v3 forward model on a few seconds
+of ONE clip, which is the largest thing here.
 """
 
 from __future__ import annotations
@@ -140,7 +146,22 @@ FIT_PATHS: dict[str, dict[str, str]] = {
     },
 }
 
-#: Trajectory-model rig name per v2 noise rig.
+#: The noise-model-v3 fit directories, by round: round 1 is the reduced
+#: campaign (4 restarts x 5 alternation rounds), round 2 the mm1-wander refit
+#: (20 rounds) that lands file by file.  A rig's round is ON DISK only when
+#: every one of its regime files is (:func:`v3_fit_names`).
+V3_FIT_DIRS = {"r1": "results/noise_v3/fits", "r2": "results/noise_v3/fits_r2"}
+
+#: The v3 fit file of each rig, by regime, inside a :data:`V3_FIT_DIRS` round.
+V3_FIT_FILES: dict[str, dict[str, str]] = {
+    "dregon": {"single": "dregon_room2_floor__flight_v3.json"},
+    "michaels": {
+        "standby": "michaels_fly125_standby__flight_v3.json",
+        "cruise": "michaels_fly125_cruise__flight_v3.json",
+    },
+}
+
+#: Trajectory-model rig name per v2/v3 noise rig.
 TRAJ_RIG = {"dregon": "dregon", "michaels": "michaels"}
 
 RIGS = tuple(FIT_PATHS)
@@ -323,11 +344,16 @@ def _restrict_mics(params: Any, n_mics: int) -> Any:
     )
 
 
-# ── the v2 rig ──────────────────────────────────────────────────────────────
+# ── the fitted rig (v2 / v3) ────────────────────────────────────────────────
 
 
 class Rig:
-    """One v2 rig: its fit(s), how to render them, and where they came from."""
+    """One fitted rig: its fit(s), how to render them, and where they came from.
+
+    The payloads are ``noise-v2-fit`` (:func:`load_rig`) or ``noise-v3-fit/1``
+    (:func:`load_rig_v3`); the renderer and the forward model read either, so
+    nothing below branches on the generation except :func:`describe`.
+    """
 
     def __init__(
         self,
@@ -339,6 +365,8 @@ class Rig:
         pool_rps: dict[str, tuple[float, float] | None],
         provenance: dict[str, dict[str, str]],
         repo_sha: str,
+        generation: str = "v2",
+        fit_round: str | None = None,
     ) -> None:
         self.name = name
         #: ``{"single": fit}`` or ``{"standby": fit, "cruise": fit}``.
@@ -353,6 +381,10 @@ class Rig:
         self.provenance = provenance
         #: Short SHA of this checkout, when the rig was loaded.
         self.repo_sha = repo_sha
+        #: ``"v2"`` or ``"v3"``.
+        self.generation = generation
+        #: The v3 round the payloads came from (``"r1"``/``"r2"``); ``None`` for v2.
+        self.fit_round = fit_round
 
     @property
     def per_regime(self) -> bool:
@@ -397,7 +429,16 @@ class Rig:
         return np.asarray(audio, dtype=np.float64), dict(diag)
 
     def expected_m(self, rps: np.ndarray, *, n_fft: int, hop: int, comb_offset_db: float = 0.0):
-        """``(1, frames, bins)`` predicted periodogram of ONE mic on ``rps``."""
+        """``(1, frames, bins)`` predicted periodogram of ONE mic on ``rps``.
+
+        For a v3 payload this is the forward model with the block WANDER AT ITS
+        MEAN — every latent ``d, v, u, u_j`` zero, which is what
+        :func:`experiments.noise_model.model.params_from_dict` builds (the
+        payload's ``wander`` block is not read).  A render draws fresh OU
+        latents per clip, and a zero-mean dB latent of sd ``s`` raises the
+        mean POWER by ``exp((s ln10 / 10)^2 / 2)`` (+1.6 dB at s = 3.7 dB), so
+        a v3 clip's realised spectrum sits above this curve on average by that.
+        """
         from experiments.noise_model import render as RD
 
         fits = self.offset_fits(comb_offset_db)
@@ -410,19 +451,11 @@ class Rig:
         )
 
 
-def load_rig(name: str) -> Rig:
-    """Load one v2 rig's noise fit(s) with their provenance.
-
-    ``name`` is ``"dregon"`` (the round-5 uncalibrated single-regime fit) or
-    ``"michaels"`` (the round-3 standby + cruise pair).
-    """
-    key = str(name).lower()
-    if key not in FIT_PATHS:
-        raise ValueError(f"unknown rig {name!r}; known rigs are {list(FIT_PATHS)}")
+def _load_rig(key: str, paths: dict[str, str], *, generation: str, fit_round: str | None) -> Rig:
     fits: dict[str, dict[str, Any]] = {}
     provenance: dict[str, dict[str, str]] = {}
     pool: dict[str, tuple[float, float] | None] = {}
-    for regime, rel in FIT_PATHS[key].items():
+    for regime, rel in paths.items():
         path = ROOT / rel
         if not path.is_file():
             raise FileNotFoundError(f"{key} {regime} fit not found: {path}")
@@ -439,18 +472,132 @@ def load_rig(name: str) -> Rig:
         name=key,
         fits=fits,
         traj_rig=TRAJ_RIG[key],
-        paths=dict(FIT_PATHS[key]),
+        paths=dict(paths),
         pool_rps=pool,
         provenance=provenance,
         repo_sha=_repo_sha(),
+        generation=generation,
+        fit_round=fit_round,
     )
 
 
+def load_rig(name: str) -> Rig:
+    """Load one v2 rig's noise fit(s) with their provenance.
+
+    ``name`` is ``"dregon"`` (the round-5 uncalibrated single-regime fit) or
+    ``"michaels"`` (the round-3 standby + cruise pair).
+    """
+    key = str(name).lower()
+    if key not in FIT_PATHS:
+        raise ValueError(f"unknown rig {name!r}; known rigs are {list(FIT_PATHS)}")
+    return _load_rig(key, FIT_PATHS[key], generation="v2", fit_round=None)
+
+
+def _v3_paths(rig: str, fit_round: str) -> dict[str, str] | None:
+    """``{regime: repo-relative path}`` of one v3 rig in one round, or ``None``
+    unless EVERY regime file of it is on disk (a half-landed round is not a rig)."""
+    paths = {
+        regime: f"{V3_FIT_DIRS[fit_round]}/{file}" for regime, file in V3_FIT_FILES[rig].items()
+    }
+    return paths if all((ROOT / rel).is_file() for rel in paths.values()) else None
+
+
+def v3_fit_names() -> tuple[tuple[str, str], ...]:
+    """Every ``(rig, round)`` whose v3 fit(s) are all on disk, e.g.
+    ``(("dregon", "r1"), ("michaels", "r1"))`` until round 2 lands."""
+    return tuple(
+        (rig, fit_round)
+        for rig in V3_FIT_FILES
+        for fit_round in V3_FIT_DIRS
+        if _v3_paths(rig, fit_round) is not None
+    )
+
+
+def load_rig_v3(name: str, round: str = "latest") -> Rig:
+    """Load one noise-model-v3 rig's fit(s) with their provenance.
+
+    ``name`` is ``"dregon"`` (the single-regime room-2 fit) or ``"michaels"``
+    (the FLY125 standby + cruise pair).  ``round`` is ``"r1"``, ``"r2"`` or
+    ``"latest"`` — r2 when every one of the rig's round-2 files is on disk,
+    else r1; :attr:`Rig.fit_round` says which was taken.
+    """
+    key = str(name).lower()
+    if key not in V3_FIT_FILES:
+        raise ValueError(f"unknown v3 rig {name!r}; known rigs are {list(V3_FIT_FILES)}")
+    if round == "latest":
+        fit_round = "r2" if _v3_paths(key, "r2") is not None else "r1"
+    elif round in V3_FIT_DIRS:
+        fit_round = str(round)
+    else:
+        raise ValueError(f"round must be 'latest' or one of {list(V3_FIT_DIRS)}, got {round!r}")
+    paths = _v3_paths(key, fit_round)
+    if paths is None:
+        missing = [
+            f"{V3_FIT_DIRS[fit_round]}/{f}"
+            for f in V3_FIT_FILES[key].values()
+            if not (ROOT / V3_FIT_DIRS[fit_round] / f).is_file()
+        ]
+        raise FileNotFoundError(f"v3 {key} {fit_round}: not on disk: {missing}")
+    return _load_rig(key, paths, generation="v3", fit_round=fit_round)
+
+
+def _describe_v3(fit: dict[str, Any]) -> None:
+    """The lines :func:`describe` adds for a ``noise-v3-fit/1`` payload."""
+    from data_processing.noise_model.v3 import Wander
+
+    p = fit["params"]
+    wind = p.get("wind")
+    if wind is not None:
+        print("    wind_db / mic  : " + "  ".join(f"{float(v):.2f}" for v in wind["wind_db"]))
+    w = Wander.from_mapping(p["wander"])
+    k_max = int(np.asarray(p["profile"]["profile_db"]).shape[1])
+    print(
+        f"    wander         : block_s {w.block_s:.3f} s (fresh OU per clip; latents not rendered)"
+    )
+    for track, s_key, t_key in Wander.TRACKS:
+        pooled = "   (pooled)" if track == "v" and w.v_sigma_db else ""
+        print(
+            f"      {track:2s}  sigma {float(getattr(w, s_key)):5.2f} dB   "
+            f"tau {float(getattr(w, t_key)):5.2f} s{pooled}"
+        )
+    if w.v_sigma_db:
+        sig = np.asarray(w.track_sigma("v", k_max), dtype=np.float64)
+        rho = np.asarray(w.track_rho("v", k_max), dtype=np.float64)
+        tau = -float(w.block_s) / np.log(np.clip(rho, 1e-300, 1.0 - 1e-15))
+        edges = list(w.v_sigma_edges)
+        for i in range(len(w.v_sigma_db)):
+            lo = edges[i]
+            label = f"k {lo}+" if i == len(w.v_sigma_db) - 1 else f"k {lo}-{edges[i + 1] - 1}"
+            j = min(lo, k_max) - 1
+            print(f"      v {label:8s} sigma {sig[j]:5.2f} dB   tau {tau[j]:5.2f} s")
+    opt = fit.get("optimiser") or {}
+    print(
+        f"    which_converged: {opt.get('which_converged')!r}   converged {opt.get('converged')}"
+        f"   rig {opt.get('rig_converged')}   alternation {opt.get('alternation_converged')}"
+        f"   rounds {opt.get('rounds_run')}/{opt.get('rounds')}"
+    )
+    rs = fit.get("restarts")
+    if rs:
+        print(
+            f"    restarts       : {rs.get('n_restarts')}, selected seed {rs.get('selected_seed')}"
+            f"   best-worst {float(rs.get('best_minus_worst_per_cell', float('nan'))):.2e} nats/cell"
+        )
+
+
 def describe(rig: Rig, *, k_show: int = 8) -> None:
-    """Print a v2 fit's key numbers, per regime, plus its provenance."""
+    """Print a fitted rig's key numbers, per regime, plus its provenance.
+
+    Every payload: sigma_nu, lam, ``profile_db``, the widths (k=1, k=8 and the
+    per-rotor median / max / count above 50 Hz), the floor and ``amp_exp``.  A
+    v3 payload's floor is the spline alone — ``mu`` (``floor_mean_db``) plus
+    the measured ``sigma_B`` times ``L z``, no tilt — and it adds the per-mic
+    wind levels, the wander block (sigma per family, sigma_v per order group,
+    tau, ``block_s``) and which half of the optimiser converged.
+    """
     from experiments.noise_model import model as MD
 
-    print(f"rig {rig.name}  ({'per-regime' if rig.per_regime else 'single-regime'})")
+    tag = rig.generation + (f" {rig.fit_round}" if rig.fit_round else "")
+    print(f"rig {rig.name} [{tag}]  ({'per-regime' if rig.per_regime else 'single-regime'})")
     print(f"  trajectory rig : {rig.traj_rig}   (bundle {TRAJ_FITS})")
     print(f"  checkout       : {rig.repo_sha}")
     for regime, fit in rig.fits.items():
@@ -461,7 +608,10 @@ def describe(rig: Rig, *, k_show: int = 8) -> None:
         gamma = np.asarray(MD.gamma_from_params(p), dtype=np.float64)
         print()
         print(f"  [{regime}] {rig.paths[regime]}")
-        print(f"    schema {prov['schema']}  git {prov['git'][:12]}  support {prov['support']}")
+        print(
+            f"    schema {prov['schema']}  mode {prov['mode']}  git {prov['git'][:12]}  "
+            f"support {prov['support']}"
+        )
         print(
             "    pool carrier   : "
             + (f"{span[0]:.1f}-{span[1]:.1f} rev/s" if span else "not recorded")
@@ -481,13 +631,79 @@ def describe(rig: Rig, *, k_show: int = 8) -> None:
             + "\n    gamma_hz k=8   : "
             + "  ".join(f"{v:.4f}" for v in g8)
         )
+        print(f"    gamma_hz over k=1..{gamma.shape[1]}, per rotor:")
+        for r in range(gamma.shape[0]):
+            print(
+                f"      rotor {r}: median {float(np.median(gamma[r])):7.3f}   "
+                f"max {float(gamma[r].max()):7.3f} (k={int(gamma[r].argmax()) + 1})   "
+                f"> 50 Hz: {int((gamma[r] > 50.0).sum())}"
+            )
         fl = p["floor"]
-        print(
-            f"    floor          : mean {float(fl['floor_mean_db']):.2f} dB   "
-            f"tilt {float(fl['floor_tilt_db_oct']):+.3f} dB/oct   "
-            f"exp {float(fl['floor_exp']):.3f}   static_rel {float(fl['floor_static_rel']):.4g}"
-        )
+        if "floor_shape_sd_db" in fl:
+            print(
+                f"    floor          : mu {float(fl['floor_mean_db']):.2f} dB   "
+                f"sigma_B {float(fl['floor_shape_sd_db']):.2f} dB (spline only, no tilt)   "
+                f"exp {float(fl['floor_exp']):.3f}   static_rel {float(fl['floor_static_rel']):.4g}"
+            )
+        else:
+            print(
+                f"    floor          : mean {float(fl['floor_mean_db']):.2f} dB   "
+                f"tilt {float(fl['floor_tilt_db_oct']):+.3f} dB/oct   "
+                f"exp {float(fl['floor_exp']):.3f}   static_rel {float(fl['floor_static_rel']):.4g}"
+            )
         print(f"    amp_exp        : {float(p['profile']['amp_exp']):.4f}")
+        if "wander" in p:
+            _describe_v3(fit)
+
+
+def floor_ctrl_db(
+    fit: dict[str, Any], *, rps: float | None = None, mic: int | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(ctrl_hz, dB)``: the floor's control values, read from either payload.
+
+    v2: ``floor_mean_db + FLOOR_SHAPE_STD_DB (L z)_j + tilt * log2(f_j / f_ref)``
+    plus the microphone's floor gain (``floor.mic_floor_db`` and the
+    mean-pinned ``mic_gains_db``, as the forward model applies them; ``mic=None``
+    takes their mean power over the mics); v3: the spline alone,
+    ``mu + sigma_B (L z)_j`` (``floor_mean_db`` is ``mu``, ``floor_shape_sd_db``
+    is ``sigma_B``, no tilt field, no mic block) — the curve
+    :func:`~data_processing.noise_model.render.render_noise` shapes its floor
+    with, in the fit's periodogram units.  With ``rps`` the floor's speed
+    envelope at that constant speed (``(rps / AMP_RPS_REF)**floor_exp +
+    floor_static_rel`` on every rotor) is folded in; without it the values are
+    envelope-free.  DREGON v3's per-mic wind term is NOT in it.
+    """
+    from data_processing.noise_model import spectrum as NSP
+    from data_processing.noise_model.constants import AMP_RPS_REF
+    from data_processing.noise_model.floor import floor_geometry
+    from data_processing.noise_model.params import check_schema
+
+    p = check_schema(fit)
+    fl = p["floor"]
+    ctrl_hz = NSP.floor_ctrl_hz(SR)
+    if "floor_shape_sd_db" in fl:
+        db = float(fl["floor_mean_db"]) + NSP.floor_shape_db(
+            fl["floor_shape_z"], sr=SR, scale_db=float(fl["floor_shape_sd_db"])
+        )
+    else:
+        _, tilt_oct = floor_geometry(ctrl_hz, ctrl_hz)
+        gain_all = np.asarray(p["mic_gains_db"], dtype=np.float64)
+        mic_db = np.asarray(fl["mic_floor_db"], dtype=np.float64) + gain_all - gain_all.mean()
+        mic_gain = (
+            float(np.mean(10.0 ** (mic_db / 10.0))) if mic is None else 10.0 ** (mic_db[mic] / 10.0)
+        )
+        db = (
+            float(fl["floor_mean_db"])
+            + NSP.floor_shape_db(fl["floor_shape_z"], sr=SR)
+            + float(fl["floor_tilt_db_oct"]) * np.asarray(tilt_oct, dtype=np.float64)
+            + 10.0 * np.log10(mic_gain)
+        )
+    if rps is not None:
+        env = (max(float(rps), 0.0) / float(AMP_RPS_REF)) ** float(fl["floor_exp"]) + float(
+            fl["floor_static_rel"]
+        )
+        db = db + 10.0 * np.log10(max(env, 1e-300))
+    return np.asarray(ctrl_hz, dtype=np.float64), np.asarray(db, dtype=np.float64)
 
 
 # ── the trajectory ──────────────────────────────────────────────────────────
@@ -971,7 +1187,7 @@ class NoiseSource:
     """One generation of the noise model, renderable on a given carrier.
 
     Subclasses carry a ``name`` (unique inside a comparison), a ``generation``
-    (``"legacy"`` or ``"v2"``), an ``entry`` naming exactly which parameter set
+    (``"legacy"``, ``"v2"`` or ``"v3"``), an ``entry`` naming exactly which parameter set
     is being heard, and a ``span`` — the carrier range the underlying fit was
     identified on, or ``None`` for a model that has no such evidence.
     """
@@ -1477,6 +1693,38 @@ class V2Fit(NoiseSource):
         describe(self.rig)
 
 
+class V3Fit(V2Fit):
+    """One of the noise-model-v3 fits (``noise-v3-fit/1``, mode ``flight_v3``).
+
+    ``dregon`` is the single-regime room-2 fit, rendered by
+    :func:`~data_processing.noise_model.render.render_noise`; ``michaels`` is
+    the FLY125 standby + cruise pair through
+    :func:`~data_processing.noise_model.render.render_noise_regimes` with the
+    same 45-65 rev/s power smoothstep as :class:`V2Fit` ``("michaels")`` and the
+    cruise fit's floor envelope for the ``"flight"`` level rule.  The renderer
+    reads the v3 differences off the payload: no mic block (every mic unit
+    gain), the floor's control values scaled by the measured ``sigma_B``, the
+    DREGON wind term, FRESH OU wander latents per clip drawn from the
+    payload's ``wander`` block, work rate ``front_end.sr_work`` (32 kHz).
+
+    ``round`` is ``"r1"`` (the reduced campaign, ``results/noise_v3/fits``),
+    ``"r2"`` (the mm1-wander refit, ``results/noise_v3/fits_r2``) or
+    ``"latest"`` — r2 when all of the rig's r2 files are on disk, else r1; the
+    name and ``entry`` say which was taken.  :meth:`expected_m` is the forward
+    model with the wander at its mean (latents zero, :meth:`Rig.expected_m`).
+    """
+
+    generation = "v3"
+
+    def __init__(self, rig: str = "dregon", round: str = "latest"):
+        self.rig = load_rig_v3(rig, round)
+        taken = str(self.rig.fit_round)
+        self.name = f"v3-fit {self.rig.name} {taken}"
+        how = f"{taken} (latest on disk)" if round == "latest" else taken
+        self.entry = f"round {how}: " + " + ".join(self.rig.paths.values())
+        self.span = self.rig.span
+
+
 class V2Bank(NoiseSource):
     """ONE entry of a v2 rig bank (``noise-v2-bank/1``, ``dload:noise-v2-banks``).
 
@@ -1788,7 +2036,7 @@ def expected_vs_realised(
     max_s: float = 4.0,
     f_max: float = 8000.0,
 ):
-    """The v2 fit's expected periodogram against the clip's realised one, 1 mic.
+    """The v2/v3 fit's expected periodogram against the clip's realised one, 1 mic.
 
     Both are the campaign's own flight front end (2048 / 512 at 16 kHz) averaged
     over frames, in the absolute units the fit is stated in — so the clip's
@@ -1796,6 +2044,11 @@ def expected_vs_realised(
     and not the model's.  Only the first ``max_s`` seconds are used: the forward
     model is the expensive half of the model and a spectrum does not get better
     with more of it.
+
+    For a :class:`V3Fit` the expectation is the one with the block wander at
+    its MEAN (every latent zero, :meth:`Rig.expected_m`), while the clip drew
+    fresh OU latents — so the realised curve sits above the model by the
+    lognormal excess of the wander on average and wanders around it in time.
 
     Returns a matplotlib Figure.  Legacy sources have no forward model here
     (their expectation is ``stochastic_rotor_noise.model_psd_db`` on the render's
@@ -1806,8 +2059,8 @@ def expected_vs_realised(
     expected = getattr(source, "expected_m", None)
     if expected is None:
         raise TypeError(
-            f"{source.name} is a {source.generation} source: expected_vs_realised needs a v2 "
-            "forward model (V2Fit or V2Bank)"
+            f"{source.name} is a {source.generation} source: expected_vs_realised needs a "
+            "v2/v3 forward model (V2Fit, V2Bank or V3Fit)"
         )
     rps = np.asarray(frame["rps_render"].data, dtype=np.float64)
     audio = np.asarray(frame["audio"].data, dtype=np.float64)[0]
@@ -1875,18 +2128,18 @@ def model_vs_realised(
 ):
     """The model spectrum against the clip's, whichever generation it is.
 
-    A v2 source goes to :func:`expected_vs_realised` — the forward model's
+    A v2 or v3 source goes to :func:`expected_vs_realised` — the forward model's
     expected periodogram in absolute fitted units.  A legacy source has no such
     object; what the deleted lab drew instead is the model PSD the render
     ITSELF was built from (``stochastic_rotor_noise.model_psd_db`` on the
     render's diagnostics), frame-averaged, against the realised spectrum, both
     normalised to their own peak — which is why the panel's y axis is relative
-    dB for a legacy source and absolute for a v2 one.
+    dB for a legacy source and absolute for a fitted one.
 
     The legacy branch reads the source's MOST RECENT render, so pass the frame
     that render produced.
     """
-    if source.generation == "v2":
+    if source.generation in ("v2", "v3"):
         return expected_vs_realised(source, frame, max_s=max_s, f_max=f_max)
 
     import matplotlib.pyplot as plt
@@ -2140,10 +2393,10 @@ def tune(
       would make it a different rig than the one those arms trained on, which
       is the one question this notebook exists to answer.  The values are shown
       because reading them is the point.
-    * :class:`V2Fit` / :class:`V2Bank` — ``comb_offset_db`` (the comb against
-      the floor, on a deep copy of the fit) and the clip length.  The v2
-      payloads are fitted too; ``comb_offset_db`` is the one knob the campaign
-      itself leaves open.
+    * :class:`V2Fit` / :class:`V2Bank` / :class:`V3Fit` — ``comb_offset_db``
+      (the comb against the floor, on a deep copy of the fit) and the clip
+      length.  The v2/v3 payloads are fitted too; ``comb_offset_db`` is the
+      one knob the campaign itself leaves open.
 
     Every regenerate renders on the same carrier with the same render seed, so
     two panel clips differ only by what was moved.  Returns the ``VBox``; the
@@ -2307,6 +2560,8 @@ __all__ = [
     "TRAJ_FS",
     "TRAJ_KINDS",
     "V2_BANKS",
+    "V3_FIT_DIRS",
+    "V3_FIT_FILES",
     "LegacyBank",
     "LegacyFit",
     "LegacyRandom",
@@ -2314,12 +2569,15 @@ __all__ = [
     "Rig",
     "V2Bank",
     "V2Fit",
+    "V3Fit",
     "describe",
     "describe_traj",
     "expected_vs_realised",
+    "floor_ctrl_db",
     "legacy_fit_names",
     "line_stats",
     "load_rig",
+    "load_rig_v3",
     "model_vs_realised",
     "player",
     "players",
@@ -2331,4 +2589,5 @@ __all__ = [
     "traj_rig_names",
     "trajectory",
     "tune",
+    "v3_fit_names",
 ]
