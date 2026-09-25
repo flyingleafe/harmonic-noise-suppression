@@ -104,7 +104,7 @@ __all__ = [
     "ChannelGains",
     "LatentCache",
     "Measured",
-    "OUChain",
+    "OUTracks",
     "Priors",
     "PriorsV3",
     "SupportBatch",
@@ -124,7 +124,7 @@ __all__ = [
     "gamma_from_params",
     "is_pinned",
     "latent_cache",
-    "latent_model_cached",
+    "latent_model",
     "log_prior",
     "objective_breakdown",
     "ou_log_density",
@@ -134,12 +134,12 @@ __all__ = [
     "params_to_dict_v3",
     "pin_applied",
     "sample_params",
-    "sample_window_latents",
     "sample_params_from_values",
     "span_pinned_sites",
+    "stack_latents",
     "support_model",
+    "unstack_latents",
     "whittle_risk",
-    "window_batch",
     "with_blocks",
     "zero_latents",
 ]
@@ -860,29 +860,6 @@ def _frame_fields(batch: SupportBatch, idx: np.ndarray) -> dict[str, Any]:
     }
 
 
-def window_batch(batch: SupportBatch, window: int) -> SupportBatch:
-    """The frames of ONE member window, weights NOT rescaled.
-
-    What the per-window latent step of the v3 alternation fits against: a
-    window's latents must see exactly that window's exposure against their OU
-    prior, not the pool's (which :func:`batch_slice`'s rescaling would give).
-    """
-    if batch.rate_work is None or batch.frame_window is None:
-        raise ValueError("window_batch is for flight batches with frame bookkeeping")
-    idx = np.flatnonzero(batch.frame_window == int(window))
-    if idx.size == 0:
-        raise ValueError(f"window {window} has no frame in batch {batch.name!r}")
-    i = torch.as_tensor(idx, device=batch.power.device)
-    return replace(
-        batch,
-        power=batch.power.index_select(1, i),
-        weights=batch.weights.index_select(0, i),
-        rate_work=batch.rate_work.index_select(1, i),
-        latents=None,
-        **_frame_fields(batch, idx),
-    )
-
-
 def with_blocks(batch: SupportBatch, block_s: float) -> SupportBatch:
     """``batch`` with every frame assigned to its window's block of ``block_s``.
 
@@ -1211,7 +1188,7 @@ def _sample_params_v3(
     microphone site at all — the three v2 mic blocks are zeros, which the
     mean-pinned forward model reads as unit gains. ``wind_db`` is a site only
     when :attr:`PriorsV3.wind`. The block latents are NOT sampled here: they
-    are per window (:func:`sample_window_latents`, :func:`latent_model_cached`).
+    are per window (:class:`OUTracks`, :func:`latent_model`).
     """
     if not isinstance(priors, PriorsV3):
         raise TypeError(f"mode {V3_MODE!r} needs PriorsV3, got {type(priors).__name__}")
@@ -1334,7 +1311,9 @@ def detach_params(params: V2Params) -> V2Params:
 # ── v3: the block wander ────────────────────────────────────────────────────
 
 
-def ou_log_density(x: Tensor, sigma: float, rho: float) -> Tensor:
+def ou_log_density(
+    x: Tensor, sigma: float | Tensor, rho: float | Tensor, n_blocks: Tensor | None = None
+) -> Tensor:
     """``log N(x; 0, sigma^2 rho^|i - j|)`` along the LAST axis (explainer §3.3).
 
     The stationary OU sampled at the block rate, as its Markov factorisation:
@@ -1344,57 +1323,92 @@ def ou_log_density(x: Tensor, sigma: float, rho: float) -> Tensor:
 
     — the quadratic form plus the log-determinant, which is constant here
     because ``sigma`` and ``rho`` are MEASURED and fixed. One value per track
-    (every leading index).
+    (every leading index); ``sigma`` and ``rho`` may be per track (broadcast
+    against ``x.shape[:-1]``). ``n_blocks`` (broadcast likewise) keeps only
+    each track's first ``B`` blocks: the rest of the axis is padding.
     """
-    s2 = float(sigma) ** 2
-    one = 1.0 - float(rho) ** 2
-    n = int(x.shape[-1])
-    quad = x[..., 0] ** 2 / s2
-    if n > 1:
-        quad = quad + ((x[..., 1:] - float(rho) * x[..., :-1]) ** 2).sum(dim=-1) / (s2 * one)
-    logdet = n * math.log(2.0 * math.pi * s2) + (n - 1) * math.log(one)
+    s2 = torch.as_tensor(sigma, dtype=x.dtype, device=x.device) ** 2
+    r = torch.as_tensor(rho, dtype=x.dtype, device=x.device)
+    one = 1.0 - r**2
+    inc = (x[..., 1:] - r[..., None] * x[..., :-1]) ** 2
+    if n_blocks is None:
+        n = torch.as_tensor(float(x.shape[-1]), dtype=x.dtype, device=x.device)
+    else:
+        n = torch.as_tensor(n_blocks, device=x.device).to(x.dtype)
+        steps = torch.arange(1, int(x.shape[-1]), dtype=x.dtype, device=x.device)
+        inc = inc * (steps < n[..., None])
+    quad = x[..., 0] ** 2 / s2 + inc.sum(dim=-1) / (s2 * one)
+    logdet = n * torch.log(2.0 * math.pi * s2) + (n - 1.0) * torch.log(one)
     return -0.5 * (quad + logdet)
 
 
-class OUChain(dist.TorchDistribution):
-    """A stationary OU track over ``n_blocks`` blocks as ONE Pyro event.
+class OUTracks(dist.TorchDistribution):
+    """Every window's stationary OU tracks of one latent as ONE Pyro event.
 
-    ``log_prob`` is :func:`ou_log_density`; ``sample`` the exact recursion
-    (the renderer's :func:`data_processing.noise_model.v3.ou_blocks`). What a
-    per-window latent site of the v3 model is drawn from.
+    Batch ``(W,)`` (the windows' plate), event ``track_shape + (B,)``: window
+    ``w`` holds its tracks over its own ``n_blocks[w] <= B`` blocks, the rest
+    of the block axis is padding with no prior term. ``log_prob`` is
+    :func:`ou_log_density` summed over the window's tracks; ``sample`` the
+    exact recursion (the renderer's
+    :func:`data_processing.noise_model.v3.ou_blocks`), zero past a window's end.
+    ``sigma`` and ``rho`` are scalars or per track (``track_shape``-broadcast).
     """
 
     arg_constraints: dict[str, Any] = {}  # noqa: RUF012
 
+    def __init__(
+        self,
+        sigma: float | Tensor,
+        rho: float | Tensor,
+        n_blocks: Tensor,
+        track_shape: tuple[int, ...],
+        b_max: int,
+    ) -> None:
+        s = torch.as_tensor(sigma, dtype=torch.float64)
+        r = torch.as_tensor(rho, dtype=torch.float64)
+        nb = torch.as_tensor(n_blocks, dtype=torch.int64)
+        if not (
+            bool((s > 0.0).all())
+            and bool(((r >= 0.0) & (r < 1.0)).all())
+            and bool((nb >= 1).all())
+            and int(nb.max()) <= int(b_max)
+        ):
+            raise ValueError(
+                f"OUTracks needs sigma > 0, 0 <= rho < 1, 1 <= n <= {b_max}: {sigma}, {rho}, "
+                f"{nb.tolist()}"
+            )
+        self.sigma, self.rho, self.n_blocks = sigma, rho, nb
+        self.track_shape, self.b_max = tuple(track_shape), int(b_max)
+        super().__init__(
+            nb.shape, torch.Size(self.track_shape + (self.b_max,)), validate_args=False
+        )
+
     @property
     def support(self) -> Any:
-        return constraints.real_vector
+        return constraints.independent(constraints.real, len(self.event_shape))
 
-    def __init__(
-        self, sigma: float, rho: float, n_blocks: int, batch_shape: tuple[int, ...] = ()
-    ) -> None:
-        if not (float(sigma) > 0.0 and 0.0 <= float(rho) < 1.0 and int(n_blocks) >= 1):
-            raise ValueError(
-                f"OUChain needs sigma > 0, 0 <= rho < 1, n >= 1: {sigma}, {rho}, {n_blocks}"
-            )
-        self.sigma, self.rho, self.n_blocks = float(sigma), float(rho), int(n_blocks)
-        super().__init__(torch.Size(batch_shape), torch.Size([self.n_blocks]), validate_args=False)
-
-    def expand(self, batch_shape: Any, _instance: Any = None) -> OUChain:
-        return OUChain(self.sigma, self.rho, self.n_blocks, tuple(torch.Size(batch_shape)))
+    def _n(self, ref: Tensor) -> Tensor:
+        nb = self.n_blocks.to(ref.device)
+        return nb.reshape(tuple(nb.shape) + (1,) * len(self.track_shape))
 
     def sample(self, sample_shape: Any = torch.Size()) -> Tensor:
         shape = torch.Size(sample_shape) + self.batch_shape + self.event_shape
         e = torch.randn(shape, dtype=torch.float64)
+        s = torch.as_tensor(self.sigma, dtype=torch.float64)
+        r = torch.as_tensor(self.rho, dtype=torch.float64)
         out = torch.empty_like(e)
-        out[..., 0] = self.sigma * e[..., 0]
-        innov = math.sqrt(1.0 - self.rho**2) * self.sigma
-        for b in range(1, self.n_blocks):
-            out[..., b] = self.rho * out[..., b - 1] + innov * e[..., b]
-        return out
+        out[..., 0] = s * e[..., 0]
+        innov = torch.sqrt(1.0 - r**2) * s
+        for b in range(1, self.b_max):
+            out[..., b] = r * out[..., b - 1] + innov * e[..., b]
+        live = torch.arange(self.b_max) < self._n(out)[..., None]
+        return out * live
 
     def log_prob(self, value: Tensor) -> Tensor:
-        return ou_log_density(value, self.sigma, self.rho)
+        per_track = ou_log_density(value, self.sigma, self.rho, self._n(value))
+        return per_track.reshape(
+            per_track.shape[: per_track.ndim - len(self.track_shape)] + (-1,)
+        ).sum(-1)
 
 
 def _latent_shapes(n_rotors: int, k_max: int) -> dict[str, tuple[int, ...]]:
@@ -1402,21 +1416,38 @@ def _latent_shapes(n_rotors: int, k_max: int) -> dict[str, tuple[int, ...]]:
     return dict(d=(n_rotors,), v=(n_rotors, k_max), u=(), uj=(FLOOR_SHAPE_N_CTRL,))
 
 
-def sample_window_latents(
-    site: SiteFn, wander: Wander, *, n_rotors: int, k_max: int, n_blocks: int
-) -> WindowLatents:
-    """ONE window's block latents as sites ``wander_{d,v,u,uj}`` under their
-    OU priors; a track whose measured ``sigma`` is zero has no site."""
-    out: dict[str, Tensor | None] = {}
-    for name, shape in _latent_shapes(n_rotors, k_max).items():
-        if not wander.active(name):
-            out[name] = None
+def stack_latents(
+    latents: dict[int, WindowLatents], windows: tuple[int, ...], b_max: int
+) -> dict[str, Tensor]:
+    """``{"wander_<name>": (W, ..., B)}``: the windows' tracks, zero-padded."""
+    out: dict[str, Tensor] = {}
+    for name in ("d", "v", "u", "uj"):
+        xs = [latents[w].tracks().get(name) for w in windows]
+        if any(x is None for x in xs):
             continue
-        d: Any = OUChain(wander.sigma(name), wander.rho(name), n_blocks)
-        if shape:
-            d = d.expand(shape).to_event(len(shape))
-        out[name] = site(f"wander_{name}", d)
-    return WindowLatents(**out)
+        out[f"wander_{name}"] = torch.stack(
+            [torch.nn.functional.pad(x, (0, b_max - int(x.shape[-1]))) for x in xs if x is not None]
+        )
+    return out
+
+
+def unstack_latents(
+    tracks: dict[str, Tensor], windows: tuple[int, ...], n_blocks: tuple[int, ...]
+) -> dict[int, WindowLatents]:
+    """Inverse of :func:`stack_latents`: each window's tracks, padding cut."""
+    return {
+        w: WindowLatents(
+            **{
+                name: (
+                    tracks[f"wander_{name}"][i, ..., :nb].detach().clone()
+                    if f"wander_{name}" in tracks
+                    else None
+                )
+                for name in ("d", "v", "u", "uj")
+            }
+        )
+        for i, (w, nb) in enumerate(zip(windows, n_blocks, strict=True))
+    }
 
 
 def zero_latents(wander: Wander, *, n_rotors: int, k_max: int, n_blocks: int) -> WindowLatents:
@@ -1600,33 +1631,32 @@ def latent_cache(
     )
 
 
-def latent_model_cached(
-    batch: SupportBatch, cache: LatentCache, *, wander: Wander
-) -> WindowLatents:
-    """The Pyro model of ONE window's latents with the rig held FIXED.
+def latent_model(batch: SupportBatch, cache: LatentCache, *, wander: Wander) -> dict[str, Tensor]:
+    """The Pyro model of EVERY window's latents with the rig held FIXED.
 
     Step (ii) of the explainer's §3.4 alternation: the windows are
-    conditionally independent given the rig — what a per-window plate
-    asserts — so each is its own small problem over ``wander_*`` sites, fitted
-    against exactly that window's frames and exposure (:func:`window_batch`),
-    through the window's :class:`LatentCache`.
+    conditionally independent given the rig, which is what the ``windows``
+    plate asserts. Each latent is ONE ``(W, ..., B)`` site
+    (:class:`OUTracks`, a window's tail past its own block count padding),
+    the Whittle term is the pool's (``batch`` is the pool, its exposure
+    weights unrescaled) through the rig's :class:`LatentCache`. Returns
+    ``{"wander_<name>": (W, ..., B)}`` of the active tracks.
     """
-    if len(cache.windows) != 1:
-        raise ValueError(f"one window per cache here, got {len(cache.windows)}")
-    lat = sample_window_latents(
-        _pyro_site,
-        wander,
-        n_rotors=batch.n_rotors,
-        k_max=batch.k_max,
-        n_blocks=cache.n_blocks[0],
-    )
-
-    def one(x: Tensor | None) -> Tensor | None:
-        return None if x is None else x[None]
-
-    m_model = cache.expected(one(lat.d), one(lat.v), one(lat.u), one(lat.uj))
+    n_win = len(cache.windows)
+    n_blocks = torch.as_tensor(cache.n_blocks, dtype=torch.int64, device=batch.power.device)
+    out: dict[str, Tensor] = {}
+    with pyro.plate("windows", n_win):
+        for name, shape in _latent_shapes(batch.n_rotors, batch.k_max).items():
+            if wander.active(name):
+                out[f"wander_{name}"] = pyro.sample(
+                    f"wander_{name}",
+                    OUTracks(
+                        wander.sigma(name), wander.rho(name), n_blocks, shape, cache.n_block_max
+                    ),
+                )
+    m_model = cache.expected(*(out.get(f"wander_{n}") for n in ("d", "v", "u", "uj")))
     pyro.factor("whittle", -whittle_risk(batch, m_model))
-    return lat
+    return out
 
 
 def ou_prior_nats(latents: dict[int, WindowLatents], wander: Wander) -> float:

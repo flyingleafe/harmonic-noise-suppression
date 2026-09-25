@@ -323,7 +323,8 @@ def test_measured_wind_centres_follow_a_planted_per_capsule_excess():
 def test_ou_block_prior_is_the_explicit_gaussian_of_the_chain():
     """The Markov-factorised OU prior of a 4-block chain must equal the
     explicit Gaussian ``N(0, sigma^2 rho^|i - j|)``, log-determinant included,
-    and the Pyro site distribution must be that density."""
+    and the Pyro site distribution must be that density — per window over
+    ITS OWN blocks when windows of different lengths share one padded site."""
     sigma, block_s, tau, n_blocks = 2.5, 0.5, 3.0, 4
     wander = MD.Wander(
         sigma_d_db=sigma,
@@ -336,15 +337,22 @@ def test_ou_block_prior_is_the_explicit_gaussian_of_the_chain():
     )
     rho = wander.rho("d")
     assert rho == math.exp(-block_s / tau)
-    lag = np.abs(np.arange(n_blocks)[:, None] - np.arange(n_blocks)[None, :])
-    cov = torch.as_tensor(sigma**2 * rho**lag, dtype=torch.float64)
+
+    def chain(n: int) -> torch.distributions.MultivariateNormal:
+        lag = np.abs(np.arange(n)[:, None] - np.arange(n)[None, :])
+        cov = torch.as_tensor(sigma**2 * rho**lag, dtype=torch.float64)
+        return torch.distributions.MultivariateNormal(torch.zeros(n, dtype=torch.float64), cov)
+
     x = torch.as_tensor(np.random.default_rng(2).normal(0.0, 3.0, (5, n_blocks)))
-    want = torch.distributions.MultivariateNormal(torch.zeros(n_blocks, dtype=torch.float64), cov)
     np.testing.assert_allclose(
-        MD.ou_log_density(x, sigma, rho).numpy(), want.log_prob(x).numpy(), rtol=1e-12
+        MD.ou_log_density(x, sigma, rho).numpy(), chain(n_blocks).log_prob(x).numpy(), rtol=1e-12
     )
-    site = MD.OUChain(sigma, rho, n_blocks).expand((5,)).to_event(1)
-    np.testing.assert_allclose(float(site.log_prob(x)), float(want.log_prob(x).sum()), rtol=1e-12)
+    # two windows of 4 and 2 blocks, 5 tracks each, on one (W, 5, 4) site;
+    # the padding of the short window must not count
+    site = MD.OUTracks(sigma, rho, torch.tensor([4, 2]), (5,), 4)
+    xs = torch.as_tensor(np.random.default_rng(3).normal(0.0, 3.0, (2, 5, n_blocks)))
+    want = [float(chain(4).log_prob(xs[0]).sum()), float(chain(2).log_prob(xs[1, :, :2]).sum())]
+    np.testing.assert_allclose(site.log_prob(xs).numpy(), want, rtol=1e-12)
 
 
 # ── (f) the block forward model ─────────────────────────────────────────────
@@ -468,15 +476,10 @@ def test_the_latent_steps_cached_forward_is_forward_v3_at_any_latents():
             **{n: _t(rng.normal(0.0, 3.0, x.shape)) for n, x in zero.tracks().items()}
         )
     cache = MD.latent_cache(batch, par)
-    b_max = cache.n_block_max
-
-    def stacked(name: str) -> torch.Tensor:
-        xs = [getattr(latents[w], name) for w in cache.windows]
-        return torch.stack([torch.nn.functional.pad(x, (0, b_max - x.shape[-1])) for x in xs])
-
+    tracks = MD.stack_latents(latents, cache.windows, cache.n_block_max)
     with torch.no_grad():
         want = MD.forward_v3(batch, par, latents)
-        got = cache.expected(stacked("d"), stacked("v"), stacked("u"), stacked("uj"))
+        got = cache.expected(*(tracks[f"wander_{n}"] for n in ("d", "v", "u", "uj")))
     np.testing.assert_allclose(got.numpy(), want.numpy(), rtol=1e-10, atol=0.0)
 
 

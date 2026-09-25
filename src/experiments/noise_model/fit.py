@@ -85,7 +85,7 @@ __all__ = [
     "Seeds",
     "fit_support",
     "fit_v3",
-    "fit_window_latents",
+    "fit_latents",
     "gamma_low_order_check",
     "initial_values",
     "load_channel_gains",
@@ -1225,38 +1225,44 @@ def _measured_record(measured: MD.Measured, *, priors: MD.Priors) -> dict[str, A
 # ── v3: the alternation ─────────────────────────────────────────────────────
 
 
-def fit_window_latents(
+def fit_latents(
     batch: MD.SupportBatch,
     params: SP.V2Params,
     *,
     wander: MD.Wander,
-    window: int,
-    init: MD.WindowLatents,
+    init: dict[int, MD.WindowLatents],
     iters: int = 100,
     history: int = 10,
-) -> tuple[MD.WindowLatents, dict[str, Any]]:
-    """Step (ii): ONE window's block latents with the rig held FIXED.
+) -> tuple[dict[int, MD.WindowLatents], dict[str, Any]]:
+    """Step (ii): EVERY window's block latents with the rig held FIXED.
 
-    ``batch`` is that window's frames (:func:`.model.window_batch`) and
-    ``params`` the rig as constants; an ``AutoDelta`` over the window's
-    ``wander_*`` sites (:func:`.model.latent_model_cached`), started at
-    ``init`` and polished by strong-Wolfe L-BFGS. With ``sigma, tau`` fixed
-    this is the correctly-shrunk MAP of the explainer's §3.3a — a Kalman
-    smoother of the block amplitudes, no variance to cheat with. The rig's
-    line and floor spectra are computed ONCE (:func:`.model.latent_cache`):
-    an evaluation only moves their block multipliers.
+    ``batch`` is the pool and ``params`` the rig as constants; ONE
+    ``AutoDelta`` over the pooled ``wander_*`` sites of
+    :func:`.model.latent_model` (a ``windows`` plate, one ``(W, ..., B)`` site
+    per latent), started at ``init`` and polished by ONE strong-Wolfe L-BFGS on
+    the summed objective — the windows are independent given the rig, so this
+    is every window's own MAP at once, with no Python loop over windows. With
+    ``sigma, tau`` fixed it is the correctly-shrunk MAP of the explainer's
+    §3.3a — a Kalman smoother of the block amplitudes, no variance to cheat
+    with. The rig's line and floor spectra are computed ONCE
+    (:func:`.model.latent_cache`): an evaluation only moves their block
+    multipliers.
     """
     t0 = time.time()
-    values = {f"wander_{name}": x.detach().clone() for name, x in init.tracks().items()}
-    rec: dict[str, Any] = dict(window=int(window), n_blocks=int(batch.window_blocks[int(window)]))
+    windows = tuple(sorted(init))
+    n_blocks = tuple(int(batch.window_blocks[w]) for w in windows)
+    values = MD.stack_latents(init, windows, max(n_blocks))
+    rec: dict[str, Any] = dict(windows=len(windows), n_blocks=list(n_blocks))
     if not values:
         return init, dict(rec, tracks=[], note="no active wander track")
     pyro.clear_param_store()
     cache = MD.latent_cache(batch, params)
+    if cache.windows != windows:
+        raise ValueError(f"latents for windows {windows}, batch has {cache.windows}")
     cache_s = time.time() - t0
 
     def model() -> Any:
-        return MD.latent_model_cached(batch, cache, wander=wander)
+        return MD.latent_model(batch, cache, wander=wander)
 
     guide = AutoDelta(model, init_loc_fn=init_to_value(values=values))
     elbo = Trace_ELBO()
@@ -1275,23 +1281,20 @@ def fit_window_latents(
         count += 1
         return loss
 
+    t1 = time.time()
     opt.step(closure)
+    lbfgs_s = time.time() - t1
     with torch.no_grad():
         after = float(elbo.differentiable_loss(model, guide))
-    med = guide.median()
-    lat = MD.WindowLatents(
-        **{
-            name: (med[f"wander_{name}"].detach().clone() if f"wander_{name}" in med else None)
-            for name in ("d", "v", "u", "uj")
-        }
-    )
-    return lat, dict(
+    out = MD.unstack_latents(guide.median(), windows, n_blocks)
+    return out, dict(
         rec,
-        tracks=sorted(init.tracks()),
+        tracks=sorted(k.removeprefix("wander_") for k in values),
         loss_before=before,
         loss_after=after,
         evals=count,
         cache_s=cache_s,
+        s_per_eval=lbfgs_s / max(1, count),
         wall_s=time.time() - t0,
     )
 
@@ -1313,9 +1316,9 @@ def fit_v3(
 
     (i)   the rig with every latent at zero — :func:`fit_support` exactly as a
           v2 fit runs, restarts, jitter and pins included;
-    (ii)  each window's latents with the rig fixed (:func:`fit_window_latents`;
-          the windows are independent given the rig, so this is a loop that
-          parallelises trivially);
+    (ii)  every window's latents with the rig fixed (:func:`fit_latents`: the
+          windows are independent given the rig, so this is ONE batched
+          problem over a ``windows`` plate);
     (iii) the rig with the latents fixed, warm-started from (i)/(iii);
 
     repeating (ii)-(iii) until the Whittle term moves by less than
@@ -1365,23 +1368,21 @@ def fit_v3(
         for w, nb in enumerate(blocked.window_blocks)
         if nb > 0
     }
-    latent_fits: dict[int, dict[str, Any]] = {}
+    latent_fit: dict[str, Any] | None = None
     prev = float(rig.objective["whittle_nats"])
     alternation_converged = int(optim.rounds) == 0
     refit = replace(optim.rig, adam_steps=int(optim.refit_adam_steps), init_jitter=0.0)
     for rnd in range(1, int(optim.rounds) + 1):
         t_round = time.time()
         fixed = MD.detach_params(rig.params)
-        for w in sorted(latents):
-            latents[w], latent_fits[w] = fit_window_latents(
-                MD.window_batch(measured_batch, w),
-                fixed,
-                wander=wander,
-                window=w,
-                init=latents[w],
-                iters=optim.latent_lbfgs_iters,
-                history=optim.latent_lbfgs_history,
-            )
+        latents, latent_fit = fit_latents(
+            measured_batch,
+            fixed,
+            wander=wander,
+            init=latents,
+            iters=optim.latent_lbfgs_iters,
+            history=optim.latent_lbfgs_history,
+        )
         t_latent = time.time() - t_round
         rig = fit_support(
             replace(blocked, latents=latents),
@@ -1403,6 +1404,9 @@ def fit_v3(
                 whittle_move_per_cell=move,
                 rig_converged=rig.converged,
                 latent_wall_s=t_latent,
+                latent_evals=latent_fit.get("evals"),
+                latent_s_per_eval=latent_fit.get("s_per_eval"),
+                latent_cache_s=latent_fit.get("cache_s"),
                 wall_s=time.time() - t_round,
             )
         )
@@ -1460,7 +1464,7 @@ def fit_v3(
         optimiser=optimiser,
         diagnostics=diagnostics,
         sites=rig.sites,
-        latents=_latents_record(blocked, latents, wander, latent_fits),
+        latents=_latents_record(blocked, latents, wander, latent_fit),
         window_latents=latents,
     )
 
@@ -1469,7 +1473,7 @@ def _latents_record(
     batch: MD.SupportBatch,
     latents: dict[int, MD.WindowLatents],
     wander: MD.Wander,
-    fits: dict[int, dict[str, Any]],
+    fit: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """The ``latents`` block of a v3 record: every window's MAP block tracks
     (dB, rounded to 1e-3) and, per track, the pooled spread and lag-1
@@ -1494,7 +1498,6 @@ def _latents_record(
                 v=arr(lat.v),
                 u=arr(lat.u),
                 uj=arr(lat.uj),
-                fit=fits.get(w),
             )
         )
     summary: dict[str, Any] = {}
@@ -1524,6 +1527,7 @@ def _latents_record(
         tracks=[n for n in ("d", "v", "u", "uj") if wander.active(n)],
         shapes="d (R, B), v (R, K, B), u (B,), uj (J, B) per window",
         note="per-window MAP nuisance; NOT rendered (render_noise draws fresh OU tracks)",
+        fit=fit,
         summary=summary,
         windows=windows,
     )
