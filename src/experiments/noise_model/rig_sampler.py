@@ -188,9 +188,9 @@ this:
   DREGON's otherwise (:data:`PATH_INTERP_V3`).
 * **trend guard** — the folded Michael's cruise fit falls by only 0.6 and
   0.2 dB on rotors 2 and 3, so v2's absolute 3 dB rule would refuse the
-  anchor itself. v2's rule is kept on every rotor whose reference clears it.
-  A rotor whose reference does not clear it may not flatten by more than
-  3 dB below its own fit (:func:`trend_floor_db`).
+  anchor itself. The v3 bound is ``min(3 dB, reference drop - 3 dB)``
+  (:func:`trend_floor_db`): v2's rule on every rotor whose reference falls by
+  at least 6 dB, and elsewhere no flattening by more than 3 dB below the fit.
 * **probe** — each payload's expected periodogram is evaluated at its own work
   rate (32 kHz for v3), with the wander at its mean.
 
@@ -376,9 +376,9 @@ TREND_MARGIN_DB = 3.0
 
 #: The trend guard around a v3 reference, as recorded in a v3 bank's guards.
 TREND_RULE_V3 = (
-    "per rotor: drop >= TREND_MARGIN_DB where the reference itself falls by at least that "
-    "much (v2's rule), else drop >= reference drop - TREND_MARGIN_DB; a standby payload "
-    "keeps v2's absolute margin"
+    "per rotor: drop >= min(TREND_MARGIN_DB, reference drop - TREND_MARGIN_DB), i.e. v2's rule "
+    "wherever the reference falls by at least twice the margin; a standby payload keeps v2's "
+    "absolute margin"
 )
 
 #: Total per-rotor line-width excursion cap. STATED, not measured.
@@ -1361,17 +1361,23 @@ class Reference:
 def trend_floor_db(drops: Any) -> np.ndarray:
     """``(R,)`` lower bound on each rotor's trend drop around a v3 reference.
 
-    v2's rule — every rotor must fall by :data:`TREND_MARGIN_DB` — is kept on
-    every rotor whose REFERENCE falls by at least that much. A rotor whose own
-    fit already falls by less (the folded round-2 Michael's cruise: 0.6 and
-    0.2 dB on rotors 2 and 3, where v2's measured minimum was 9.7) cannot be
-    held to it — the anchor itself would fail and every draw around it would
-    be refused — so there the bound is the reference's own drop minus the
-    same margin: a draw may not flatten that rotor by more than
-    :data:`TREND_MARGIN_DB` below what the fit measured.
+    ``min(TREND_MARGIN_DB, reference drop - TREND_MARGIN_DB)``. On every rotor
+    whose REFERENCE falls by at least twice the margin, this is v2's rule:
+    every rotor must fall by :data:`TREND_MARGIN_DB`. Every v2 rotor but one
+    falls that far, and so do all four DREGON v3 rotors. A rotor that falls by
+    less may not be flattened by more than the margin below its reference.
+    The folded round-2 Michael's cruise falls by only 0.6 and 0.2 dB on rotors
+    2 and 3, against v2's measured minimum of 9.7. v2's absolute rule would
+    refuse that anchor itself, and every draw around it.
+
+    The bound is continuous in the reference's drop. A step rule — v2's 3 dB
+    wherever the reference clears 3 dB — refuses about half of all draws
+    around a path point that falls by just over 3 dB. It exhausted 3 of 2048
+    hard draws near t = 0.84, where the interpolated rotors 2 and 3 fall by
+    about 3.3 dB.
     """
     d = np.asarray(drops, dtype=np.float64)
-    return np.where(d >= TREND_MARGIN_DB, TREND_MARGIN_DB, d - TREND_MARGIN_DB)
+    return np.minimum(TREND_MARGIN_DB, d - TREND_MARGIN_DB)
 
 
 def reference_of(
