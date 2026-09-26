@@ -754,7 +754,7 @@ The legacy combs tower over their floor.
 - The two bank rigs light 98 and 99 of 99 orders over 3 dB.
 - The lines are wide: up to 34–57 Hz at the top orders. Their skirts fill
   the space between lines. Halfway between two lines near 1 kHz the comb
-  sits 13.8–28.6 dB over the floor part. v3: 0.3–6.8 dB.
+  sits 13.7–28.6 dB over the floor part. v3: 0.3–6.8 dB.
 - The legacy floor has no wind. At 100 Hz it sits at −31 to −24 dB. v3
   DREGON: −9.6 dB.
 - One rotor alone differs a lot. In entry 0, rotor 2 holds $k = 1$ at
@@ -1245,7 +1245,25 @@ Read @fig-i2 and @fig-i3 against @fig-h, rotor switch on "all rotors".
 The rig view reads each model at one speed, without the real track. The
 next subsection reads every noise on real tracks with one estimator.
 
+{{< include noise-model-v3-latent-runaway/_harmonicity.qmd >}}
+
 {{< include noise-model-v3-latent-runaway/_traj.qmd >}}
+
+## What § 9 says
+
+1. **Candidate 1, sharp form: no.** In the rig view the legacy stems
+   tower (@fig-i3). On a real track they read as wide bumps. Legacy is
+   the least tonal noise past $k = 2$ (@fig-harm-prominence).
+2. **Candidate 1, loud wide bumps: still open.** The legacy comb lifts
+   the band between its lines by 14–29 dB. v3 lifts it by 0.3–6.8 dB. v2
+   lifts it on Michael's only (26–43 dB). Nothing here tests whether that
+   helps.
+3. **Candidate 2: true, but not the gap.** The v2 hard trajectory is 4×
+   too fast. Yet v2 easy moves most like real, and it still loses to
+   legacy.
+4. **Candidate 3: no.** The v2 and v3 hard banks are more tonal than the
+   legacy hard bank, not less.
+   <!-- source: this section's figures and tables: figdata.json rigs.legacy_bank between_over_floor_db 28.56, 24.95, legacy_fit 13.75, 21.44; rigs.v3_r3b 0.32, 2.90, 6.81; rigs.v2 dregon 1.08, cruise 43.03, standby 25.72; harm_summary.json (the harmonicity include); traj_stats.json (the trajectory include) -->
 
 # Appendix: the reconstruction
 
