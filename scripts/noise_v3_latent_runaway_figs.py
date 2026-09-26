@@ -38,13 +38,17 @@ Inputs:
   ``V3Fit(rig, round=V3_ROUND)`` under the notebook's level rule, ``line_stats``,
   ``spectrogram_figure`` — written as 16-bit WAVs to ``audio/``; the LTAS is
   ``revised_eval.absolute_ltas_bands`` on the bands inside
-  :data:`LISTEN_LTAS_HZ`.
+  :data:`LISTEN_LTAS_HZ`. ``--round TAG`` renders the same windows with the
+  legacy anchor fits (:data:`LISTEN_LEGACY`, ``LegacyFit(...,
+  dynamics="donor")``), v2, round 2 and round TAG; ``--listen-add KEY`` adds
+  one source to an existing ``figdata_TAG.json`` without re-rendering the rest.
 
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py            # evaluate + plot
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --rigs-only # Figs G-I3 only
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --listen-only # Figs J-K + WAVs
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --plot-only
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3a  # r3a beside r2
+    PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --listen-add legacy
 
 Writes ``docs/explainers/noise-model-v3-latent-runaway/`` (``fig_*.png``,
 ``figdata.json``, every plotted number, and ``audio/*.wav``).
@@ -165,7 +169,17 @@ LISTEN_S = 10.0
 LISTEN_SEED = 0
 LISTEN_LEVEL = ("window", 0.1)
 LISTEN_LTAS_HZ = (100.0, 7000.0)
-LISTEN_LABELS = {"real": "real recording", "v2": "v2 fit", "v3": "v3 round-2 fit"}
+LISTEN_LABELS = {
+    "real": "real recording",
+    "legacy": "legacy anchor fit (donor dynamics)",
+    "v2": "v2 fit",
+    "v3": "v3 round-2 fit",
+}
+#: § 8 Listen again: the anchor fit of :data:`LEGACY_FITS` each listen rig was
+#: drawn around, rendered as the legacy training streams render a bank entry
+#: (``noise_lab.LegacyFit``'s default ``dynamics="donor"``, line mode ``fm``)
+LISTEN_LEGACY = {"dregon": LEGACY_FITS["dregon"], "michaels": LEGACY_FITS["michael"]}
+LISTEN_LEGACY_DYNAMICS = "donor"
 LISTEN_DYN_DB = 45.0
 AUDIO = OUT / "audio"
 
@@ -995,11 +1009,22 @@ def listen_label(key: str) -> str:
     return f"v3 round-{key.removeprefix('v3_r')} fit"
 
 
-def listen(rounds: tuple[str, ...] = (V3_ROUND,)) -> dict[str, Any]:
-    """Figs J-K: per rig, the real window of :data:`LISTEN_WINDOWS` and the v2
-    fit and the v3 fits of ``rounds`` rendered on its rotor track, all under the
-    notebook's level rule, as 16-bit WAVs, with ``noise_lab.line_stats`` (k = 1
-    to 8) and the band LTAS inside :data:`LISTEN_LTAS_HZ`."""
+def listen_source(nl: Any, rig: str, key: str) -> Any:
+    """The noise source of clip ``key`` for listen rig ``rig``: ``"legacy"``
+    (:data:`LISTEN_LEGACY`), ``"v2"``, or a v3 round's :func:`listen_key`."""
+    if key == "legacy":
+        return nl.LegacyFit(LISTEN_LEGACY[rig], dynamics=LISTEN_LEGACY_DYNAMICS)
+    if key == "v2":
+        return nl.V2Fit(rig)
+    return nl.V3Fit(rig, round="r2" if key == "v3" else key.removeprefix("v3_"))
+
+
+def listen(keys: tuple[str, ...] = ("v2", listen_key(V3_ROUND))) -> dict[str, Any]:
+    """Figs J-K: per rig, the real window of :data:`LISTEN_WINDOWS` and the
+    sources ``keys`` (:func:`listen_source`) rendered on its rotor track, all
+    under the notebook's level rule, as 16-bit WAVs, with
+    ``noise_lab.line_stats`` (k = 1 to 8) and the band LTAS inside
+    :data:`LISTEN_LTAS_HZ`."""
     import soundfile as sf
 
     from experiments.stochastic_fit import accept_stats
@@ -1017,15 +1042,12 @@ def listen(rounds: tuple[str, ...] = (V3_ROUND,)) -> dict[str, Any]:
         sr=nl.SR,
         dyn_range_db=LISTEN_DYN_DB,
         ltas_bands_hz=[list(accept_stats.BANDS[i]) for i in bands],
-        labels={k: listen_label(k) for k in ("real", "v2", *(listen_key(t) for t in rounds))},
+        labels={k: listen_label(k) for k in ("real", *keys)},
         rigs={},
     )
     for rig, window in LISTEN_WINDOWS.items():
         traj = nl.trajectory("real", duration_s=LISTEN_S, **window)
-        sources = {
-            "v2": nl.V2Fit(rig),
-            **{listen_key(t): nl.V3Fit(rig, round=t) for t in rounds},
-        }
+        sources = {key: listen_source(nl, rig, key) for key in keys}
         renders = nl.render_all(
             list(sources.values()), traj, seed=LISTEN_SEED, n_mics=1, level=LISTEN_LEVEL
         )
@@ -1682,7 +1704,7 @@ def fig_i3(d: dict[str, Any]) -> None:
 
 def fig_listen(d: dict[str, Any], rig: str, name: str) -> None:
     """One rig of § Listen: ``noise_lab.spectrogram_figure`` of the WAVs as
-    written (real, v2, then the v3 rounds), one colour scale, the rotor track once."""
+    written (real, then the sources in row order), one colour scale, the rotor track once."""
     import soundfile as sf
     import tdseries as td
 
@@ -1746,8 +1768,9 @@ def plot(d: dict[str, Any]) -> None:
 def round_views(tag: str) -> dict[str, Any]:
     """``--round``: round ``tag`` beside round 2 — the static shares of every
     family, the parameter-view numbers of the three pooled fits (§ 8's table;
-    the rig figures are Figs H / H2 of :func:`rig_views`), § Listen with both
-    rounds rendered on the same real windows and seed."""
+    the rig figures are Figs H / H2 of :func:`rig_views`), § Listen with the
+    legacy anchor fit, v2 and both rounds rendered on the same real windows
+    and seed."""
     nl = _noise_lab()
     return dict(
         tag=tag,
@@ -1759,8 +1782,30 @@ def round_views(tag: str) -> dict[str, Any]:
             v3_r2=v3_rig_panels(nl, "r2"),
             **{f"v3_{tag}": v3_rig_panels(nl, tag)},
         ),
-        listen=listen(("r2", tag)),
+        listen=listen(("legacy", "v2", listen_key("r2"), listen_key(tag))),
     )
+
+
+def listen_merge(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """``--listen-add``: the clips of ``new`` (a :func:`listen` of more keys on
+    the same windows) into ``old``, right after the real clip, in the row order
+    a full :func:`round_views` writes. The real clip must come out the same."""
+    for k in ("seconds", "seed", "level", "mic", "sr", "dyn_range_db", "ltas_bands_hz"):
+        if old[k] != new[k]:
+            raise SystemExit(f"--listen-add: {k} {new[k]!r} differs from {old[k]!r}")
+
+    def first(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+        """``a`` then the keys of ``b`` not in ``a``."""
+        return {**a, **{k: v for k, v in b.items() if k not in a}}
+
+    old["labels"] = first(new["labels"], old["labels"])
+    for rig, row in old["rigs"].items():
+        add = new["rigs"][rig]
+        if add["clips"]["real"] != row["clips"]["real"]:
+            raise SystemExit(f"--listen-add: the {rig} real clip moved")
+        row["clips"] = first(add["clips"], row["clips"])
+        row["spans_rev_s"] = first(add["spans_rev_s"], row["spans_rev_s"])
+    return old
 
 
 def fig_static_shares(d: dict[str, Any], name: str) -> None:
@@ -1816,6 +1861,12 @@ def main(argv: list[str] | None = None) -> int:
         "shares, parameter views and § Listen into figdata_TAG.json and fig_*_TAG.png (with "
         "--plot-only: redraw them)",
     )
+    ap.add_argument(
+        "--listen-add",
+        metavar="KEY",
+        help="with --round: render one more § Listen source (legacy, v2 or a v3 key) into "
+        "figdata_TAG.json beside the clips already there, then redraw",
+    )
     args = ap.parse_args(argv)
     if args.round:
         if args.rigs_only or args.listen_only:
@@ -1824,12 +1875,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.plot_only:
             d = load(data)
         else:
-            d = _r(round_views(str(args.round)), 4)
+            if args.listen_add:
+                d = load(data)
+                new = json.loads(json.dumps(_r(listen((str(args.listen_add),)), 4)))
+                d["listen"] = listen_merge(d["listen"], new)
+            else:
+                d = _r(round_views(str(args.round)), 4)
             OUT.mkdir(parents=True, exist_ok=True)
             data.write_text(json.dumps(d, ensure_ascii=False) + "\n")
             print(f"wrote {data}")
         plot_round(d)
         return 0
+    if args.listen_add:
+        ap.error("--listen-add takes --round")
     if args.plot_only:
         d = load(DATA)
     else:

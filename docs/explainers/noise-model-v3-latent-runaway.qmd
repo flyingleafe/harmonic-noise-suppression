@@ -1092,11 +1092,24 @@ Markdown("\n".join(rows))
 ## Listen again
 
 Same windows, same seed and same level rule as § Listen. § Listen plays
-round 3b. Here the round-2 fit is added.
+round 3b. Here the round-2 fit and the legacy anchor fit of each rig are
+added.[^listen-legacy]
+
+[^listen-legacy]: The legacy row is `noise_lab.LegacyFit` of the anchor
+    the legacy banks were drawn around, the one of @fig-i2: DREGON
+    `dregon_cruise_refined` (clip `free-flight_nosource_room2_cruise_00`),
+    Michael's `michael_cruise` (clip `fly125_cruise_00`). Dynamics `donor`,
+    the class default: the donor policy's per-clip draw, as one bank entry
+    at zero perturbation, line mode `fm`, speed exponents bounded. It is the
+    acoustic build a training stream renders, not the point-preset run.
+    Mic 0 of its 8. `scripts/noise_v3_latent_runaway_figs.py --round r3b
+    --listen-add legacy` renders it into `figdata_r3b.json` beside the
+    other clips.
 
 ```{python}
 R3_LABELS = {
     "real": "real recording",
+    "legacy": "legacy anchor fit (donor dynamics)",
     "v2": "v2 fit",
     "v3": "v3 round-2 fit",
     "v3_r3b": "v3 round-3b fit",
@@ -1105,11 +1118,16 @@ R3_LABELS = {
 
 ### DREGON
 
-![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the v2 fit, the round-2 and the round-3b v3 fits, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon_r3b.png){#fig-j3}
+![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the legacy DREGON anchor fit (`dregon_cruise_refined`, donor dynamics), the v2 fit, the round-2 and the round-3b v3 fits, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon_r3b.png){#fig-j3}
 
 ```{python}
 listen_players(F3["r3b"], "dregon", R3_LABELS)
 ```
+
+Legacy DREGON lines stand tallest: $k = 1$ 14.9 dB, $k = 2$ 7.9 dB, real
+4.4 and 2.9 dB. Legacy is also too quiet everywhere, 2.3–6.5 dB low in
+every band, so its LTAS distance, 4.3 dB, is the worst of the four fits.
+<!-- source: figdata_r3b.json listen.rigs.dregon.clips.legacy.line_over_floor_db[0:2] 14.9249, 7.9041; clips.real 4.4401, 2.8916; clips.legacy.ltas_mean_abs_db 4.2702, ltas_dev_db [-2.64, -2.32, -3.22, -5.05, -6.51, -5.87]; v2 0.518, v3 2.160, v3_r3b 3.610 -->
 
 - The lone line near 2.2 kHz is gone.
 - The LTAS distance grows: 2.2 dB (round 2) to 3.6 dB (round 3b). Round
@@ -1123,11 +1141,16 @@ listen_players(F3["r3b"], "dregon", R3_LABELS)
 
 ### Michael's
 
-![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
+![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3; the legacy row is the Michael's anchor fit (`michael_cruise`, donor dynamics).](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
 
 ```{python}
 listen_players(F3["r3b"], "michaels", R3_LABELS)
 ```
+
+Legacy Michael's has $k = 1$ at 7.4 dB where real has none; its $k = 2$
+is 11.5 dB, real 18.7 dB. Legacy is 1–3 dB too loud in every band; its
+LTAS distance, 2.1 dB, ties round 3b (2.0 dB).
+<!-- source: figdata_r3b.json listen.rigs.michaels.clips.legacy.line_over_floor_db[0:2] 7.3634, 11.5179; clips.real null, 18.6767; clips.legacy.ltas_mean_abs_db 2.0604, ltas_dev_db [2.30, 3.00, 1.93, 0.95, 1.14, 3.04]; v3_r3b 2.0472, v2 1.266, v3 2.934 -->
 
 - The LTAS distance shrinks: 2.9 dB (round 2) to 2.0 dB (round 3b).
 - Up to 3 kHz round 3b is within 1 dB of the real clip.
