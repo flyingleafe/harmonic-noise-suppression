@@ -1,0 +1,48 @@
+V3CHK job=nv3chk-r3a-41b1e7 tag=r3a fits=results/noise_v3/fits_r3a out=results/noise_v3/checks_r3a sha=1e45a206154c host=ehc8 nproc=4
+STEP latents exit=0 wall_s=23
+# latents done in 13 s; wrote results/noise_v3/checks_r3a/findings.md
+STEP tonality exit=0 wall_s=25
+wrote results/noise_v3/checks_r3a/tonality/fits_ladder.png
+wrote results/noise_v3/checks_r3a/tonality/fits.json
+STEP proxy_dregon_s0 exit=0 wall_s=63
+wrote results/noise_v3/checks_r3a/proxy_seeds/arm_dregon_r3a_s0.json and results/noise_v3/checks_r3a/proxy_seeds/findings.md
+round 6: FAIL
+STEP parity_dregon exit=0 wall_s=102
+wrote results/noise_v3/checks_r3a/parity/arm_dregon_v3.json and results/noise_v3/checks_r3a/parity/findings.md
+round 6: FAIL
+STEP proxy_dregon_s1 exit=0 wall_s=56
+wrote results/noise_v3/checks_r3a/proxy_seeds/arm_dregon_r3a_s1.json and results/noise_v3/checks_r3a/proxy_seeds/findings.md
+round 6: FAIL
+STEP proxy_michaels_s0 exit=0 wall_s=161
+wrote results/noise_v3/checks_r3a/proxy_seeds/arm_michaels_r3a_s0.json and results/noise_v3/checks_r3a/proxy_seeds/findings.md
+round 6: FAIL
+STEP proxy_dregon_s2 exit=0 wall_s=62
+wrote results/noise_v3/checks_r3a/proxy_seeds/arm_dregon_r3a_s2.json and results/noise_v3/checks_r3a/proxy_seeds/findings.md
+round 6: FAIL
+STEP parity_michaels exit=0 wall_s=243
+wrote results/noise_v3/checks_r3a/parity/arm_michaels_v3.json and results/noise_v3/checks_r3a/parity/findings.md
+round 6: FAIL
+STEP proxy_dregon_s3 exit=0 wall_s=62
+wrote results/noise_v3/checks_r3a/proxy_seeds/arm_dregon_r3a_s3.json and results/noise_v3/checks_r3a/proxy_seeds/findings.md
+round 6: FAIL
+STEP heldout_dregon exit=0 wall_s=295
+  heldout dregon window 4: flight_dregon_spinning_nosource_room2@1511905200.978+4_motors_command (33 s)
+# heldout done in 285 s; wrote results/noise_v3/checks_r3a/findings.md
+STEP proxy_michaels_s1 exit=0 wall_s=172
+wrote results/noise_v3/checks_r3a/proxy_seeds/arm_michaels_r3a_s1.json and results/noise_v3/checks_r3a/proxy_seeds/findings.md
+round 6: FAIL
+STEP rendered exit=0 wall_s=368
+  pmed = np.nanmedian(np.asarray(pk, dtype=np.float64), axis=0)
+# rendered done in 358 s; wrote results/noise_v3/checks_r3a/findings.md
+STEP proxy_michaels_s2 exit=0 wall_s=176
+wrote results/noise_v3/checks_r3a/proxy_seeds/arm_michaels_r3a_s2.json and results/noise_v3/checks_r3a/proxy_seeds/findings.md
+round 6: FAIL
+STEP proxy_michaels_s3 exit=0 wall_s=162
+wrote results/noise_v3/checks_r3a/proxy_seeds/arm_michaels_r3a_s3.json and results/noise_v3/checks_r3a/proxy_seeds/findings.md
+round 6: FAIL
+STEP heldout_michaels exit=0 wall_s=486
+  pmed = np.nanmedian(np.asarray(pk, dtype=np.float64), axis=0)
+# heldout done in 478 s; wrote results/noise_v3/checks_r3a/findings.md
+STEP summary exit=0 wall_s=7
+  pmed = np.nanmedian(np.asarray(pk, dtype=np.float64), axis=0)
+# summary done in 0 s; wrote results/noise_v3/checks_r3a/findings.md

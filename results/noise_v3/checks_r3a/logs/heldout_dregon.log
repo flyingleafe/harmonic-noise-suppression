@@ -1,0 +1,6 @@
+  heldout dregon window 0: flight_dregon_free-flight_nosource_room2@1512727397.205+4_motors_command (36 s)
+  heldout dregon window 1: flight_dregon_hovering_nosource_room2@1511903905.394+4_motors_command (35 s)
+  heldout dregon window 2: flight_dregon_updown_nosource_room2@1511903578.348+4_motors_command (33 s)
+  heldout dregon window 3: flight_dregon_rectangle_nosource_room2@1511905725.953+4_motors_command (33 s)
+  heldout dregon window 4: flight_dregon_spinning_nosource_room2@1511905200.978+4_motors_command (33 s)
+# heldout done in 285 s; wrote results/noise_v3/checks_r3a/findings.md

@@ -1,0 +1,7 @@
+[dregon free-flight_nosource_room2@1512727397.205045+4.000000] pit=None real=None ltas=3.3489 dB
+[dregon hovering_nosource_room2@1511903905.394490+4.000000] pit=None real=None ltas=2.6809 dB
+[dregon updown_nosource_room2@1511903578.348311+4.000000] pit=None real=None ltas=4.2965 dB
+[dregon rectangle_nosource_room2@1511905725.952559+4.000000] pit=None real=None ltas=1.6998 dB
+[dregon spinning_nosource_room2@1511905200.978012+4.000000] pit=None real=None ltas=1.8813 dB
+wrote results/noise_v3/checks_r3a/proxy_seeds/arm_dregon_r3a_s1.json and results/noise_v3/checks_r3a/proxy_seeds/findings.md
+round 6: FAIL

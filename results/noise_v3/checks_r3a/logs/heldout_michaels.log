@@ -1,0 +1,9 @@
+  heldout michaels window 0: flight_michaels_FLY124@8.000+8_rps_refined (100 s)
+  heldout michaels window 1: flight_michaels_FLY124@16.000+8_rps_refined (98 s)
+  heldout michaels window 2: flight_michaels_FLY124@40.000+8_rps_refined (60 s)
+  heldout michaels window 3: flight_michaels_FLY124@56.000+8_rps_refined (59 s)
+/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/1e45a206154c/scripts/noise_v3_checks.py:1259: RuntimeWarning: All-NaN slice encountered
+  wmed = np.nanmedian(np.asarray(ws, dtype=np.float64), axis=0)
+/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/1e45a206154c/scripts/noise_v3_checks.py:1260: RuntimeWarning: All-NaN slice encountered
+  pmed = np.nanmedian(np.asarray(pk, dtype=np.float64), axis=0)
+# heldout done in 478 s; wrote results/noise_v3/checks_r3a/findings.md

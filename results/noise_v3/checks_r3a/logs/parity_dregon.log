@@ -1,0 +1,7 @@
+[dregon free-flight_nosource_room2@1512727397.205045+4.000000] pit=1.283723938581903 real=0.6381290900540575 ltas=3.3861 dB
+[dregon hovering_nosource_room2@1511903905.394490+4.000000] pit=1.4607209640568988 real=0.8884082861629494 ltas=2.7195 dB
+[dregon updown_nosource_room2@1511903578.348311+4.000000] pit=1.9895363585692463 real=1.6949303171268002 ltas=4.3468 dB
+[dregon rectangle_nosource_room2@1511905725.952559+4.000000] pit=2.211862883370554 real=1.6851416622305468 ltas=1.7134 dB
+[dregon spinning_nosource_room2@1511905200.978012+4.000000] pit=1.6037252261918546 real=1.1869310807959752 ltas=1.9674 dB
+wrote results/noise_v3/checks_r3a/parity/arm_dregon_v3.json and results/noise_v3/checks_r3a/parity/findings.md
+round 6: FAIL
