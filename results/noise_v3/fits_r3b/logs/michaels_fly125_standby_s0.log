@@ -1,0 +1,31 @@
+02:17:13   we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+02:17:13   adam     0  loss -6.50777e+06
+02:17:13   adam    50  loss -6.90519e+06
+02:17:13   adam   100  loss -6.81656e+06
+02:17:13   adam   150  loss -6.83929e+06
+02:17:13   adam   200  loss -7.0118e+06
+02:17:13   adam   250  loss -7.01117e+06
+02:17:13   v3 round 0: whittle -6.93869e+06
+02:17:13   v3 round 1: whittle -6.97212e+06  move/cell 0.0446
+02:17:13   v3 round 2: whittle -6.97654e+06  move/cell 0.00589
+02:17:13   v3 round 3: whittle -6.97807e+06  move/cell 0.00204
+02:17:13   v3 round 4: whittle -6.97884e+06  move/cell 0.00104
+02:17:13   v3 round 5: whittle -6.97945e+06  move/cell 0.000805
+02:17:13   v3 round 6: whittle -6.9797e+06  move/cell 0.000329
+02:17:13   v3 round 7: whittle -6.97988e+06  move/cell 0.000247
+02:17:13   v3 round 8: whittle -6.98012e+06  move/cell 0.000315
+02:17:13   v3 round 9: whittle -6.98019e+06  move/cell 0.000102
+02:17:13   v3 round 10: whittle -6.98042e+06  move/cell 0.000295
+02:17:13   v3 round 11: whittle -6.98043e+06  move/cell 5.91e-05
+02:17:13   v3 all-frames polish: whittle -6.98071e+06  gain/cell 0.000522
+02:17:13 ('michaels_fly125_standby__flight_v3__s0', 'ok')
+02:17:13 {
+02:17:13  "n_units": 1,
+02:17:13  "n_converged": 1,
+02:17:13  "not_converged": [],
+02:17:13  "slowest_s": 3421.979409456253,
+02:17:13  "fits": [
+02:17:13   "results/noise_v3/fits_r3b/restarts/michaels_fly125_standby__flight_v3__s0.json"
+02:17:13  ]
+02:17:13 }
+02:17:13 # wrote results/noise_v3/fits_r3b/findings.md

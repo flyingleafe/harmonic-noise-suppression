@@ -1,0 +1,31 @@
+02:08:11   adam     0  loss -1.79491e+07
+02:08:11   adam    50  loss -1.80344e+07
+02:08:11   adam   100  loss -1.78019e+07
+02:08:11   adam   150  loss -1.78969e+07
+02:08:11   adam   200  loss -1.796e+07
+02:08:11   adam   250  loss -1.68324e+07
+02:08:11   v3 round 0: whittle -1.78147e+07
+02:08:11   v3 round 1: whittle -1.80786e+07  move/cell 0.106
+02:08:11   v3 round 2: whittle -1.80953e+07  move/cell 0.00669
+02:08:11   v3 round 3: whittle -1.81033e+07  move/cell 0.00319
+02:08:11   v3 round 4: whittle -1.81102e+07  move/cell 0.00275
+02:08:11   v3 round 5: whittle -1.81124e+07  move/cell 0.000905
+02:08:11   v3 round 6: whittle -1.81152e+07  move/cell 0.00111
+02:08:11   v3 round 7: whittle -1.81167e+07  move/cell 0.000594
+02:08:11   v3 round 8: whittle -1.81173e+07  move/cell 0.000249
+02:08:11   v3 round 9: whittle -1.81183e+07  move/cell 0.000406
+02:08:11   v3 round 10: whittle -1.81185e+07  move/cell 8.29e-05
+02:08:11   v3 all-frames polish: whittle -1.81311e+07  gain/cell 0.00544
+02:08:11 ('dregon_room2_floor__flight_v3__s2', 'ok')
+02:08:11 {
+02:08:11  "n_units": 1,
+02:08:11  "n_converged": 0,
+02:08:11  "not_converged": [
+02:08:11   "dregon_room2_floor"
+02:08:11  ],
+02:08:11  "slowest_s": 2706.8106179237366,
+02:08:11  "fits": [
+02:08:11   "results/noise_v3/fits_r3b/restarts/dregon_room2_floor__flight_v3__s2.json"
+02:08:11  ]
+02:08:11 }
+02:08:11 # wrote results/noise_v3/fits_r3b/findings.md

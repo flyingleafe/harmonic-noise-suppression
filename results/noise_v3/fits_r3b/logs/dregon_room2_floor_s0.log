@@ -1,0 +1,39 @@
+02:22:15   we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+02:22:15   adam     0  loss -1.77936e+07
+02:22:15   adam    50  loss -1.78582e+07
+02:22:15   adam   100  loss -1.7464e+07
+02:22:15   adam   150  loss -1.79901e+07
+02:22:15   adam   200  loss -1.81088e+07
+02:22:15   adam   250  loss -1.77364e+07
+02:22:15   v3 round 0: whittle -1.78142e+07
+02:22:15   v3 round 1: whittle -1.80792e+07  move/cell 0.106
+02:22:15   v3 round 2: whittle -1.80965e+07  move/cell 0.00693
+02:22:15   v3 round 3: whittle -1.8105e+07  move/cell 0.00339
+02:22:15   v3 round 4: whittle -1.81105e+07  move/cell 0.00222
+02:22:15   v3 round 5: whittle -1.81123e+07  move/cell 0.000689
+02:22:15   v3 round 6: whittle -1.81141e+07  move/cell 0.00072
+02:22:15   v3 round 7: whittle -1.81168e+07  move/cell 0.0011
+02:22:15   v3 round 8: whittle -1.81175e+07  move/cell 0.000277
+02:22:15   v3 round 9: whittle -1.81184e+07  move/cell 0.000359
+02:22:15   v3 round 10: whittle -1.8119e+07  move/cell 0.000223
+02:22:15   v3 round 11: whittle -1.81194e+07  move/cell 0.000185
+02:22:15   v3 round 12: whittle -1.81201e+07  move/cell 0.000276
+02:22:15   v3 round 13: whittle -1.81205e+07  move/cell 0.000141
+02:22:15   v3 round 14: whittle -1.812e+07  move/cell 0.000288
+02:22:15   v3 round 15: whittle -1.81204e+07  move/cell 0.000155
+02:22:15   v3 round 16: whittle -1.81198e+07  move/cell 0.000355
+02:22:15   v3 round 17: whittle -1.812e+07  move/cell 5.33e-05
+02:22:15   v3 all-frames polish: whittle -1.81327e+07  gain/cell 0.00555
+02:22:15 ('dregon_room2_floor__flight_v3__s0', 'ok')
+02:22:15 {
+02:22:15  "n_units": 1,
+02:22:15  "n_converged": 0,
+02:22:15  "not_converged": [
+02:22:15   "dregon_room2_floor"
+02:22:15  ],
+02:22:15  "slowest_s": 3590.5075402259827,
+02:22:15  "fits": [
+02:22:15   "results/noise_v3/fits_r3b/restarts/dregon_room2_floor__flight_v3__s0.json"
+02:22:15  ]
+02:22:15 }
+02:22:15 # wrote results/noise_v3/fits_r3b/findings.md

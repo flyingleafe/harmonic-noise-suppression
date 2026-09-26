@@ -1,0 +1,5 @@
+building set michaels-standby into /tmp/supports_michaels_fly125_standby
+  flight_michaels_FLY125@2.000+4_rps_refined: 8x122x1025 4.000 s carriers [28.90832, 33.047176, 38.314677, 34.112877] pass=True
+  flight_michaels_FLY125@6.000+4_rps_refined: 8x122x1025 4.000 s carriers [30.922183, 34.75634, 40.203837, 36.265439] pass=True
+  flight_michaels_FLY125@10.000+4_rps_refined: 8x122x1025 4.000 s carriers [30.986261, 34.543646, 40.148095, 36.542121] pass=True
+built 3/3 supports; wrote /tmp/supports_michaels_fly125_standby/index.json and /tmp/supports_michaels_fly125_standby/findings.md
