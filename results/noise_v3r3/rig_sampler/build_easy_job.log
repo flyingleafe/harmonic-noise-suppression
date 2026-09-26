@@ -1,0 +1,38 @@
+NV3R3BANK preset=easy sha=1ca0dac2a34c host=ddy167 nproc=1
+building the v3r3 easy bank: 2048 draws at strength 3 (the first ladder setting reaching 90% above 300 Hz), seed 20260921
+  128/2048 draws
+  256/2048 draws
+  384/2048 draws
+  512/2048 draws
+  640/2048 draws
+  768/2048 draws
+  896/2048 draws
+  1024/2048 draws
+  1152/2048 draws
+  1280/2048 draws
+  1408/2048 draws
+  1536/2048 draws
+  1664/2048 draws
+  1792/2048 draws
+  1920/2048 draws
+  2048/2048 draws
+
+results/noise_v3r3/rig_sampler/banks/noise_v3r3_easy_n2048.json  (30.7 MB, sha256 bd012d7f7f6b8a7d)
+  preset easy / mode neighbourhood, strength 3, 2048 entries, seed 20260921
+  digest f8d48d6ba3cd5da4
+  acceptance: 1.951 attempts per entry, 53.8% first try, 1947 draws rejected (48.7%)
+  guards fired: {'gamma_excursion': 805, 'ltas': 949, 'trend_falls': 661}
+  per rig: {'dregon': 1024, 'michaels': 1024}
+  coverage of the real windows: dregon 93.8% above 300 Hz (95.7% all bands), michaels 99.0% above 300 Hz (97.6% all bands)
+  self-check: 8 entries rendered one at a time for 2 s, 4 of them also on a standby-speed window; cruise RMS 0.0299-0.0873; 1024 per-regime entries in the bank, traj rigs ['dregon', 'michaels']
+    [    0] v3r3_dregon_s3_00000 cruise-only: cruise 67.3-86.9 rev/s, RMS 0.0641
+    [  341] v3r3_dregon_s3_00341 cruise-only: cruise 67.3-86.9 rev/s, RMS 0.0390
+    [  682] v3r3_dregon_s3_00682 cruise-only: cruise 67.3-86.9 rev/s, RMS 0.0546
+    [ 1023] v3r3_dregon_s3_01023 cruise-only: cruise 67.3-86.9 rev/s, RMS 0.0516
+    [ 1024] v3r3_michaels_s3_01024 per-regime: cruise 67.3-86.9 rev/s, RMS 0.0594 | standby 23.6-30.4 rev/s, blend 0.00, RMS 0.0408
+    [ 1365] v3r3_michaels_s3_01365 per-regime: cruise 67.3-86.9 rev/s, RMS 0.0299 | standby 23.6-30.4 rev/s, blend 0.00, RMS 0.0270
+    [ 1706] v3r3_michaels_s3_01706 per-regime: cruise 67.3-86.9 rev/s, RMS 0.0873 | standby 23.6-30.4 rev/s, blend 0.00, RMS 0.0652
+    [ 2047] v3r3_michaels_s3_02047 per-regime: cruise 67.3-86.9 rev/s, RMS 0.0514 | standby 23.6-30.4 rev/s, blend 0.00, RMS 0.0415
+  wall 180.6 s (14 workers)
+  report results/noise_v3r3/rig_sampler/build_easy.json
+NV3R3BANK_DONE exit=0 wall_s=200

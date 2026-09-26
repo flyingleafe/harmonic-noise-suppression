@@ -1568,6 +1568,121 @@ against 2.7–3.3. It has the best parity of the three rounds on both rigs (1.70
 against 1.710 / 1.674). Its DREGON proxy (2.561 against 2.827) and DREGON Listen
 (3.61 against 3.89) are better.
 
+## Training arms (round-3 fits)
+
+Dmitrii authorised one more SCv2 easy/hard pair on the round-3 fits, because
+round 3b is verifiably better than round 2 (§ Round 3 Results,
+`results/noise_v3/diag/verdict_r3.md`). The DREGON Listen deficit was shown
+to come from the comparison, not the fit: mic 0's static wind inflates a
+full-band RMS match (`results/noise_v3/diag/ltas_gap_dregon.md`). The pair
+`nv3r3_{easy,hard}_scv2` is the round-2 pair `nv3_{easy,hard}_scv2`
+(§ "Training arms (round-2 fits)") with ONLY the anchor fits swapped. The
+trunk, streams, sampler construction, seed, strength, entry count, trend
+guard, renderer code and Vast settings are unchanged. Per-experiment docs:
+`conf/experiment/nv3r3_{easy,hard}_scv2.md`.
+
+### What the arms fly
+
+**The fits.** The anchors are the round-3b fits
+(`results/noise_v3/fits_r3b/{dregon_room2_floor,michaels_fly125_cruise,michaels_fly125_standby}__flight_v3.json`,
+commit `ffb61244`; the u_j kernel prior was wired in `d512827b`). They are
+folded like round 2 (`results/noise_v3/diag/folded_r3/`, commit `b2c3f31b`):
+
+| anchor | folded file | sha256 |
+|---|---|---|
+| DREGON room 2 | `folded_r3/dregon_room2_floor__flight_v3.json` | `6b538d575bea481c…` |
+| Michael's cruise | `folded_r3/michaels_fly125_cruise__flight_v3.json` | `54a895b50067886e…` |
+| Michael's standby | `folded_r3/michaels_fly125_standby__flight_v3.json` | `d81e2ef23cd5179b…` |
+
+Round 3b leaves almost no static part in its latents, so the fold is close to
+the identity: it moves the profile by 0.2–0.4 dB rms. After the fold, render
+minus fit is within −0.8..+0.5 dB below 5 kHz and +1.5 dB at 5–7 kHz
+(`results/noise_v3/diag/ltas_bias_folded_r3.json`).
+
+**The renderer and the u_j kernel prior.** The round-3b wander blocks carry
+`uj_corr_oct: 1.5`. `render.py` has handled that key since `d512827b`, and it
+is unchanged for this pair. When the key is present, `Wander.uj_mix` gives
+the Cholesky factor `A` of the floor spline's SE kernel over the control
+points, and each block's colour vector is drawn as `A y` from independent OU
+tracks `y`. The renderer therefore draws u_j with the SAME correlated prior
+the fit used; there is no fit/render mismatch to report. The round-2
+payloads have no such key, so the running `nv3_*` jobs draw independent
+tracks under the same code. `NoiseV2Pool` reads the key through
+`Wander.from_mapping`, and the build self-check rendered 8 entries per bank
+through the pool.
+
+**The banks.** `scripts/noise_v2_build_bank.py --preset easy|hard
+--generation v3r3`. `v3r3` is a new key in `rig_sampler.GENERATIONS`: sampler
+generation v3's construction and trend rule, with the anchors
+`ANCHORS_V3R3` = `folded_r3/*`. The v2 → v3 mapping, seed 20260921,
+strength 3.0, widths, guards, 16 attempts and 2048 entries are all
+unchanged. At the same code, the `v3` generation still redraws the published
+`noise-v3-banks` entries (easy 0 / 1024, hard 5) payload for payload; the
+only differences are ≤ 1.4e-11 dB in the diagnostic probe fields of the
+provenance.
+
+**The trend guard around the round-3b cruise.** The rule is the same,
+`min(3 dB, reference drop − 3 dB)` per rotor. Round 3b's Michael's cruise
+is flatter than round 2's. From k = 1 to 81 rotors 0–3 fall by 1.6, 5.3, 2.4
+and −2.2 dB; rotor 3 rises. Round 2's fell by 4.7, ≥ 6, 0.6 and 0.2 dB. No
+Michael's rotor now clears 6 dB, so the anchor-relative bound applies on all
+four; every DREGON rotor still gets v2's absolute 3 dB. On easy the guard
+fires 661 times against 447 for round 2, and attempts per entry rise from
+1.83 to 1.95. No draw exhausted its 16 attempts.
+
+### The banks as built
+
+The banks are published as dload
+`noise-v3r3-banks@500de70d211260b17af310a0a64c14616981552203b1fff4a497600552a282a8`,
+pinned in `dload.lock` and named with the pin in both policies
+(`conf/online_mix/noise_v3r3_{easy,hard}_5050.yaml`). Each policy is its
+`noise_v3_*` twin with only the bank line changed. They were built on
+`uni-cpu` at `1ca0dac2` (jobs `nv3r3-bank-easy-868e42` and
+`nv3r3-bank-hard-ab3c5f`, 14 workers, 200 s and 257 s). The build reports
+are `results/noise_v3r3/rig_sampler/build_{easy,hard}.json`.
+
+| bank | sha256 | attempts / entry | first try | guards fired (gamma / ltas / trend) | coverage > 300 Hz (DREGON / Michael's) |
+|---|---|---:|---:|---|---|
+| easy | `bd012d7f7f6b8a7d…` | 1.951 | 53.8 % | 805 / 949 / 661 | 93.8 % / 99.0 % |
+| hard | `265d5caaf030a256…` | 1.863 | 54.7 % | 774 / 913 / 446 | 97.7 % / 99.0 % |
+| *v3 r2 easy / hard* | — | 1.827 / 1.851 | 56.6 / 54.9 % | — | 93.1 / 93.3 %, 96.2 / 95.2 % |
+| *v2 easy / hard* | — | 2.017 / 1.778 | — | — | 100.0 / 99.0 %, 98.5 / 100.0 % |
+
+The hard bank's mixing coordinate is draw-for-draw the round-2 one: mean
+0.501, KS 0.0166 (passes), and the standby slot on 50.2 % of entries. The
+round-3b banks cover the real windows better than the round-2 ones, most of
+all on Michael's (99.0 % against 93.3 / 95.2 %).
+
+Spot check (`notebooks/noise_lab.py` `V3Bank` machinery, 2 s at 2 mics, on
+the fitted trajectory of the entry's rig). Entries: easy 0, 1023, 1024 and
+2047, and hard at t ≈ 0.05, 0.35, 0.65 and 0.95. All eight renders are
+finite, with RMS 0.046–0.099. As in the round-2 banks, Michael's entries
+show the resolved comb and DREGON's the wind-dominated low band
+(`results/noise_v3r3/rig_sampler/spotcheck_v3r3_banks.{png,json}`).
+`nv3r3_{easy,hard}_scv2` pass `scripts/check_experiment_configs.py`,
+`scripts/validate_experiment_docs.py` and `train.py … validate_only=true`.
+
+### Jobs
+
+The jobs were submitted from detached worktrees with
+`scripts/noise_v2_submit_arms.sh --backend vast --gpu-type A100 --cpus 16
+--mem 64 --time 8h nv3r3` (new target `nv3r3`; each job pulls
+`noise-v3r3-banks` before `train.py`). These settings are identical to the
+round-2 pair's.
+
+| arm | job | backend | state |
+|---|---|---|---|
+
+### Results
+
+**PENDING.** The protocol is the round-2 pair's. Selection is on the
+smoothed `real_overall` (`best_checkpoints.json`). The metrics are raw @ sel,
+best raw and `r1`/`r2`/`r3` from the R2 `validation_history.jsonl`, followed
+by `scripts/_regime_decomp.py --exp <arm> --ckpt best_real_overall --out
+results/regime_decomp/<arm>.json`: overall + zero / standby / ramp / cruise
+and `by_rig`. One table carries nv2 / nv3 (round-2 fits) / nv3r3 (round-3
+fits), easy and hard.
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |
