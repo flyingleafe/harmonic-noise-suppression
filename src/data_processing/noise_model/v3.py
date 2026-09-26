@@ -26,6 +26,8 @@ from typing import Any
 
 import numpy as np
 
+from data_processing.noise_model.floor import se_cholesky
+
 __all__ = [
     "WIND_CORNER_HZ",
     "WIND_CUT_HZ",
@@ -100,6 +102,15 @@ class Wander:
     :meth:`track_sigma`/:meth:`track_rho` expand them per order (an order past
     the last edge takes the last group). Without them the scalar
     ``sigma_v_db``/``tau_v_s`` holds for every line.
+
+    ``uj_corr_oct`` > 0 correlates the colour tracks ACROSS the control
+    points: every block's ``u_j`` vector is ``A y`` with ``y`` independent OU
+    tracks of ``(sigma_uj_db, tau_uj_s)`` and ``A`` the Cholesky factor of the
+    squared-exponential correlation over the control points' octave ladder of
+    length ``uj_corr_oct`` octaves (:meth:`uj_mix`, the rig floor spline's
+    own kernel at its own length): the colour may wander only as smoothly as
+    the floor it colours. 0 (the default, and every record without the key)
+    keeps the tracks independent.
     """
 
     sigma_d_db: float
@@ -115,6 +126,7 @@ class Wander:
     v_sigma_db: tuple[float, ...] = ()
     v_tau_edges: tuple[int, ...] = ()
     v_tau_s: tuple[float, ...] = ()
+    uj_corr_oct: float = 0.0
 
     #: ``(name, sigma field, tau field)`` of the four latent tracks.
     TRACKS = (
@@ -194,6 +206,7 @@ class Wander:
             v_sigma_db=v_sigma_db,
             v_tau_edges=v_tau_edges,
             v_tau_s=v_tau_s,
+            uj_corr_oct=num("uj_corr_oct", 0.0),
         )
 
     def sigma(self, track: str) -> float:
@@ -245,7 +258,20 @@ class Wander:
             )
         if self.v_tau_s:
             out["tau_v_s_by_order"] = dict(k_edges=list(self.v_tau_edges), tau_s=list(self.v_tau_s))
+        if self.uj_corr_oct > 0.0:
+            out["uj_corr_oct"] = self.uj_corr_oct
         return out
+
+    def uj_mix(self, ctrl_hz: Any) -> np.ndarray | None:
+        """``(J, J)`` lower-triangular ``A``: a block's colour vector is
+        ``A y`` with ``y`` the independent OU draws (``None``: independent
+        tracks, ``uj_corr_oct`` 0). The squared-exponential correlation of
+        :func:`.floor.se_cholesky` on ``log2(ctrl_hz)``, the rig floor
+        spline's construction."""
+        if self.uj_corr_oct <= 0.0:
+            return None
+        oct_ = np.log2(np.asarray(ctrl_hz, dtype=np.float64) / float(np.asarray(ctrl_hz)[0]))
+        return se_cholesky(int(oct_.size), float(oct_[1] - oct_[0]), float(self.uj_corr_oct))
 
 
 def _per_order(edges: tuple[int, ...], values: tuple[float, ...], k_max: int) -> np.ndarray:

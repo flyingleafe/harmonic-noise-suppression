@@ -1,0 +1,30 @@
+V3DIAG job=nv3dv-dregon-b-45bd47 dest=s3://omnirun-artifacts/nv3dv-dregon-b-45bd47/outputs/results/noise_v3/diag/rig/B sha=c589cecad816 host=13b01664d689 nproc=24
+name, memory.total [MiB], driver_version
+NVIDIA A100-SXM4-40GB, 40960 MiB, 595.71.05
+V3DIAG torch 2.7.0+cu126 cuda True NVIDIA A100-SXM4-40GB
+  flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command: 8x247x1025 8.000 s carriers [84.314811, 76.688208, 81.514045, 79.685927] pass=True
+built 10/10 supports; wrote /tmp/supports_dregon_room2_floor/index.json and /tmp/supports_dregon_room2_floor/findings.md
+V3DIAG build exit=0 wall_s=61
+  we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+[00:53:45] building dregon_room2_floor on cuda
+[00:53:47] fit rebuilt: whittle -18130023.67 (recorded -18130023.66), rig 5137.07, ou 73348.64
+[00:53:47] step 2 reverse: zero-mean projection, rig fixed
+[00:53:56]     latent pass: -17863584.29 -> -18056481.97 (311 evals)
+[00:54:03]     latent pass: -18056481.97 -> -18056874.71 (307 evals)
+[00:54:09]     latent pass: -18056874.71 -> -18057084.19 (308 evals)
+[00:54:09] step 3: the static u_j removed
+[00:54:10] step 3: rig refit with the notch removed
+[00:55:20]     rig chunk 1: 90 iters, gain 21516.8 nats (8.61e-03/cell), loss -18125794.14, 70 s
+[00:56:30]     rig chunk 2: 90 iters, gain 1528.6 nats (6.11e-04/cell), loss -18127322.76, 70 s
+[00:57:40]     rig chunk 3: 90 iters, gain 726.1 nats (2.90e-04/cell), loss -18128048.87, 71 s
+[00:58:51]     rig chunk 4: 90 iters, gain 335.8 nats (1.34e-04/cell), loss -18128384.71, 71 s
+[00:59:54]     rig chunk 5: 90 iters, gain 256.5 nats (1.03e-04/cell), loss -18128641.17, 63 s
+[01:01:01]     rig chunk 6: 90 iters, gain 334.7 nats (1.34e-04/cell), loss -18128975.91, 67 s
+[01:02:12]     rig chunk 7: 90 iters, gain 187.6 nats (7.50e-05/cell), loss -18129163.47, 71 s
+[01:03:21]     rig chunk 8: 90 iters, gain 268.7 nats (1.07e-04/cell), loss -18129432.14, 69 s
+[01:03:21] step 3: latent step from the removed state
+[01:03:28]     latent pass: -18036160.76 -> -18056966.89 (310 evals)
+[01:03:34]     latent pass: -18056966.89 -> -18057148.66 (312 evals)
+[01:03:41]     latent pass: -18057148.66 -> -18057286.96 (311 evals)
+[01:03:41] done in 596 s -> results/noise_v3/diag/rig/B/dregon_room2_floor.json
+V3DIAG exit=0 total_wall_s=662

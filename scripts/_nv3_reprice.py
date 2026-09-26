@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from data_processing.noise_model import spectrum as DSP
 from data_processing.noise_model.v3 import Wander
 from experiments.noise_model import model as MD
 
@@ -61,8 +62,12 @@ def main() -> None:
                 for w in fit["latents"]["windows"]
             }
             own = Wander.from_mapping(fit["params"]["wander"])
+            # the fit's own law: its u_j kernel (uj_corr_oct) when it has one
+            mix = own.uj_mix(DSP.floor_ctrl_hz(int(fit["front_end"]["sr"])))
+            own_mix = None if mix is None else t(mix)
             o = fit["objective"]
-            ou_m, ou_own = MD.ou_prior_nats(lat, meas), MD.ou_prior_nats(lat, own)
+            ou_m = MD.ou_prior_nats(lat, meas)
+            ou_own = MD.ou_prior_nats(lat, own, uj_mix=own_mix)
             out[f"{rnd}/{pool}"] = dict(
                 whittle=o["whittle_nats"],
                 rig=o["rig_neg_log_prior_nats"],

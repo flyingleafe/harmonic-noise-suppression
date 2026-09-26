@@ -300,6 +300,11 @@ def render_noise(
                 sigma=wander.track_sigma(name, k_max),
                 rho=wander.track_rho(name, k_max) if wander.active(name) else 0.0,
             )
+        mix = wander.uj_mix(SP.floor_ctrl_hz(sr))
+        if mix is not None:
+            # the colour moves smoothly across the control points (the
+            # payload's ``uj_corr_oct``): each block's draw is ``A y``
+            tracks["uj"] = mix @ tracks["uj"]
         if p.get("wind") is not None:
             wind_db = np.asarray(p["wind"]["wind_db"], dtype=np.float64)
             if wind_db.size < n_mics:

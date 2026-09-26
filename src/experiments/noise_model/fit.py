@@ -1608,9 +1608,13 @@ def fit_latents(
     t0 = time.time()
     windows = tuple(sorted(init))
     n_blocks = tuple(int(batch.window_blocks[w]) for w in windows)
-    values = MD.stack_latents(init, windows, max(n_blocks))
+    mix = MD.uj_mix(wander, batch.grid, device=batch.power.device)
+    values = MD.stack_latents(init, windows, max(n_blocks), uj_mix=mix)
     rec: dict[str, Any] = dict(
-        windows=len(windows), n_blocks=list(n_blocks), line_dtype=str(line_dtype)
+        windows=len(windows),
+        n_blocks=list(n_blocks),
+        line_dtype=str(line_dtype),
+        uj_corr_oct=float(wander.uj_corr_oct),
     )
     if not values:
         return init, dict(rec, tracks=[], note="no active wander track")
@@ -1622,7 +1626,7 @@ def fit_latents(
     cache_s = time.time() - t0
 
     def model() -> Any:
-        return MD.latent_model(batch, cache, wander=wander)
+        return MD.latent_model(batch, cache, wander=wander, uj_mix=mix)
 
     guide = AutoDelta(model, init_loc_fn=init_to_value(values=values))
     elbo = Trace_ELBO()
@@ -1646,7 +1650,7 @@ def fit_latents(
     lbfgs_s = time.time() - t1
     with torch.no_grad():
         after = float(elbo.differentiable_loss(model, guide))
-    out = MD.unstack_latents(guide.median(), windows, n_blocks)
+    out = MD.unstack_latents(guide.median(), windows, n_blocks, uj_mix=mix)
     return out, dict(
         rec,
         tracks=sorted(k.removeprefix("wander_") for k in values),
@@ -1672,7 +1676,8 @@ def _priors_nats(
     rig = -MD.log_prior(
         replace(batch, latents=latents), mode=MD.V3_MODE, values=sites, priors=priors, pin=pin
     )
-    return rig + MD.ou_prior_nats(latents, priors.wander)
+    mix = MD.uj_mix(priors.wander, batch.grid, device=batch.power.device)
+    return rig + MD.ou_prior_nats(latents, priors.wander, uj_mix=mix)
 
 
 def _ou_shift_coeffs(
@@ -1705,6 +1710,7 @@ def static_ridge_step(
     priors: MD.PriorsV3,
     shape_chol: Tensor,
     families: Sequence[str] = ("d", "v", "u", "uj"),
+    uj_mix: Tensor | None = None,
 ) -> tuple[dict[str, Tensor], dict[int, MD.WindowLatents], dict[str, Any]]:
     """The EXACT minimum of the priors along the Whittle-invariant ridge.
 
@@ -1722,7 +1728,10 @@ def static_ridge_step(
     so the minimum is one small linear solve per rotor for the lines
     (``d_r`` shifts rotor ``r``'s whole profile, ``v_rk`` one line) and one
     ``(J + 1)`` solve for the floor (``u`` shifts every control value,
-    ``u_j`` one). Tracks the wander pins (``sigma`` 0) never move. No
+    ``u_j`` one). With ``uj_mix`` ``A`` (:func:`.model.uj_mix`) the colour's
+    OU prior sits on the whitened tracks ``A^-1 u_j``, so a shift ``eps`` of
+    ``u_j`` is a shift ``A^-1 eps`` of them and its quadratic couples the
+    control points. Tracks the wander pins (``sigma`` 0) never move. No
     parameter is added; ``families`` restricts the move.
 
     Returns the moved sites, the moved latents and a record of the shifts and
@@ -1742,6 +1751,13 @@ def static_ridge_step(
     p_hat = loc.detach().cpu().numpy()[:n_r, :n_k]
     s2 = scale.detach().cpu().numpy()[:n_r, :n_k] ** 2
     lat = {w: {n: arr(t) for n, t in latents[w].tracks().items()} for w in windows}
+    a_mix = arr(uj_mix)
+    if a_mix is not None:
+        # the colour's OU prior is on the whitened tracks y = A^-1 u_j
+        for w in windows:
+            uj = lat[w].get("uj")
+            if uj is not None:
+                lat[w]["uj"] = np.linalg.solve(a_mix, uj)
 
     def coeffs(name: str, shape: tuple[int, ...]) -> tuple[np.ndarray, np.ndarray]:
         """``(g, h)`` summed over the windows, per track of ``name``."""
@@ -1787,14 +1803,22 @@ def static_ridge_step(
     n_j = chol.shape[0]
     g_u, h_u = coeffs("u", ())
     g_j, h_j = coeffs("uj", (n_j,))
+    # the colour's shift quadratic in eps: diagonal, or through the whitening
+    # A^-1 eps when the tracks are correlated across the control points
+    h_jj = np.diag(h_j)
+    if a_mix is not None:
+        a_inv = np.linalg.inv(a_mix)
+        g_j, h_jj = a_inv.T @ g_j, a_inv.T @ np.diag(h_j) @ a_inv
     use = np.concatenate([[float(h_u) > 0.0], h_j > 0.0])
     w_shift = np.zeros(n_j + 1)
     if np.any(use):
         amat = np.linalg.solve(sb * chol, np.eye(n_j))  # (sigma_B L)^-1
         m_full = np.concatenate([amat @ np.ones(n_j)[:, None], amat], axis=1)[:, use]
         g_full = np.concatenate([[float(g_u)], g_j])[use]
-        h_full = np.concatenate([[float(h_u)], h_j])[use]
-        lhs = m_full.T @ m_full + np.diag(h_full)
+        h_full = np.zeros((n_j + 1, n_j + 1))
+        h_full[0, 0] = float(h_u)
+        h_full[1:, 1:] = h_jj
+        lhs = m_full.T @ m_full + h_full[np.ix_(use, use)]
         w_shift[use] = np.linalg.solve(lhs, g_full - m_full.T @ z)
         z_new = z + m_full @ w_shift[use]
     else:
@@ -1823,8 +1847,8 @@ def static_ridge_step(
         )
     prof_nats = float((((prof + shift_line - p_hat) ** 2 - e**2) / (2.0 * s2)).sum())
     z_nats = 0.5 * float(z_new @ z_new - z @ z)
-    ou_before = MD.ou_prior_nats(latents, wander)
-    ou_after = MD.ou_prior_nats(new_lat, wander)
+    ou_before = MD.ou_prior_nats(latents, wander, uj_mix=uj_mix)
+    ou_after = MD.ou_prior_nats(new_lat, wander, uj_mix=uj_mix)
     record = dict(
         families=sorted(fam),
         shift_d_db=delta.tolist(),
@@ -1962,6 +1986,7 @@ def fit_v3(
     alternation_converged = int(optim.rounds) == 0
     refit = replace(optim.rig, adam_steps=int(optim.refit_adam_steps), init_jitter=0.0)
     shape_chol = blocked.grid.floor.shape_chol
+    mix = MD.uj_mix(wander, blocked.grid, device=dev)
     for rnd in range(1, int(optim.rounds) + 1):
         t_round = time.time()
         fixed = MD.detach_params(rig.params)
@@ -1986,6 +2011,7 @@ def fit_v3(
                 measured=start.measured,
                 priors=priors,
                 shape_chol=shape_chol,
+                uj_mix=mix,
             )
         rig = fit_support(
             replace(blocked, latents=latents),
@@ -2086,6 +2112,7 @@ def fit_v3(
             measured=start.measured,
             priors=priors,
             shape_chol=shape_chol,
+            uj_mix=mix,
         )
         params_f = MD.sample_params_from_values(
             measured_batch, mode=mode, priors=priors, pin=pin, values=sites_f
@@ -2100,7 +2127,7 @@ def fit_v3(
     final = replace(measured_batch, latents=latents)
     whittle = float(rig.objective["whittle_nats"])
     rig_nlp = -MD.log_prior(final, mode=mode, values=rig.sites, priors=priors, pin=pin)
-    ou_nlp = MD.ou_prior_nats(latents, wander)
+    ou_nlp = MD.ou_prior_nats(latents, wander, uj_mix=mix)
     total = whittle + rig_nlp + ou_nlp
     converged = bool(alternation_converged and rig.converged)
     optimiser = dict(

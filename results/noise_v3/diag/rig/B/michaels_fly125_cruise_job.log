@@ -1,0 +1,31 @@
+V3DIAG job=nv3dv-cruise-b-beddbc dest=s3://omnirun-artifacts/nv3dv-cruise-b-beddbc/outputs/results/noise_v3/diag/rig/B sha=c589cecad816 host=0b837e099889 nproc=128
+name, memory.total [MiB], driver_version
+NVIDIA A100-PCIE-40GB, 40960 MiB, 595.71.05
+V3DIAG torch 2.7.0+cu126 cuda True NVIDIA A100-PCIE-40GB
+  flight_michaels_FLY125@144.000+8_rps_refined: 8x247x1025 8.000 s carriers [91.565036, 74.237875, 82.855846, 75.272913] pass=True
+built 13/13 supports; wrote /tmp/supports_michaels_fly125_cruise/index.json and /tmp/supports_michaels_fly125_cruise/findings.md
+V3DIAG build exit=0 wall_s=21
+  we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+[00:52:33] building michaels_fly125_cruise on cuda
+[00:52:37] fit rebuilt: whittle -24925545.86 (recorded -24925545.89), rig 4736.99, ou 105826.88
+[00:52:37] step 2 reverse: zero-mean projection, rig fixed
+[00:52:46]     latent pass: -24345373.56 -> -24818383.59 (311 evals)
+[00:52:52]     latent pass: -24818383.59 -> -24819785.27 (307 evals)
+[00:52:57]     latent pass: -24819785.27 -> -24820036.71 (306 evals)
+[00:52:58] step 3: the static u_j removed
+[00:52:59] step 3: rig refit with the notch removed
+[00:54:00]     rig chunk 1: 90 iters, gain 42618.3 nats (1.07e-02/cell), loss -24914609.34, 62 s
+[00:55:00]     rig chunk 2: 90 iters, gain 1588.3 nats (3.97e-04/cell), loss -24916197.64, 60 s
+[00:56:02]     rig chunk 3: 90 iters, gain 746.2 nats (1.87e-04/cell), loss -24916943.89, 62 s
+[00:57:05]     rig chunk 4: 90 iters, gain 423.5 nats (1.06e-04/cell), loss -24917367.37, 63 s
+[00:58:09]     rig chunk 5: 90 iters, gain 248.8 nats (6.22e-05/cell), loss -24917616.13, 64 s
+[00:59:13]     rig chunk 6: 90 iters, gain 142.2 nats (3.55e-05/cell), loss -24917758.30, 64 s
+[01:00:17]     rig chunk 7: 90 iters, gain 110.8 nats (2.77e-05/cell), loss -24917869.14, 64 s
+[01:01:19]     rig chunk 8: 90 iters, gain 84.5 nats (2.11e-05/cell), loss -24917953.60, 62 s
+[01:02:18]     rig chunk 9: 90 iters, gain 81.4 nats (2.03e-05/cell), loss -24918034.98, 60 s
+[01:02:19] step 3: latent step from the removed state
+[01:02:25]     latent pass: -24771021.42 -> -24819970.81 (310 evals)
+[01:02:31]     latent pass: -24819970.81 -> -24820086.16 (309 evals)
+[01:02:37]     latent pass: -24820086.16 -> -24820111.39 (307 evals)
+[01:02:37] done in 604 s -> results/noise_v3/diag/rig/B/michaels_fly125_cruise.json
+V3DIAG exit=0 total_wall_s=630

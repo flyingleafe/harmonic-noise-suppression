@@ -1556,15 +1556,32 @@ def _latent_shapes(n_rotors: int, k_max: int) -> dict[str, tuple[int, ...]]:
     return dict(d=(n_rotors,), v=(n_rotors, k_max), u=(), uj=(FLOOR_SHAPE_N_CTRL,))
 
 
+def uj_mix(wander: Wander, grid: BenchGrid | FlightGrid, *, device: Any = "cpu") -> Tensor | None:
+    """``(J, J)`` :meth:`Wander.uj_mix` on the grid's floor control points as a
+    tensor, or ``None`` for independent colour tracks."""
+    a = wander.uj_mix(np.asarray(grid.floor.ctrl_hz, dtype=np.float64))
+    return None if a is None else torch.as_tensor(a, dtype=torch.float64, device=device)
+
+
 def stack_latents(
-    latents: dict[int, WindowLatents], windows: tuple[int, ...], b_max: int
+    latents: dict[int, WindowLatents],
+    windows: tuple[int, ...],
+    b_max: int,
+    *,
+    uj_mix: Tensor | None = None,
 ) -> dict[str, Tensor]:
-    """``{"wander_<name>": (W, ..., B)}``: the windows' tracks, zero-padded."""
+    """``{"wander_<name>": (W, ..., B)}``: the windows' tracks, zero-padded.
+    ``uj_mix`` (:func:`uj_mix`): the colour site holds the WHITENED tracks
+    ``A^-1 u_j``, the coordinates :func:`latent_model` samples."""
     out: dict[str, Tensor] = {}
     for name in ("d", "v", "u", "uj"):
         xs = [latents[w].tracks().get(name) for w in windows]
         if any(x is None for x in xs):
             continue
+        if name == "uj" and uj_mix is not None:
+            xs = [
+                torch.linalg.solve_triangular(uj_mix, x, upper=False) for x in xs if x is not None
+            ]
         out[f"wander_{name}"] = torch.stack(
             [torch.nn.functional.pad(x, (0, b_max - int(x.shape[-1]))) for x in xs if x is not None]
         )
@@ -1572,20 +1589,24 @@ def stack_latents(
 
 
 def unstack_latents(
-    tracks: dict[str, Tensor], windows: tuple[int, ...], n_blocks: tuple[int, ...]
+    tracks: dict[str, Tensor],
+    windows: tuple[int, ...],
+    n_blocks: tuple[int, ...],
+    *,
+    uj_mix: Tensor | None = None,
 ) -> dict[int, WindowLatents]:
-    """Inverse of :func:`stack_latents`: each window's tracks, padding cut."""
+    """Inverse of :func:`stack_latents`: each window's tracks, padding cut,
+    the colour mixed back to the control points."""
+
+    def track(name: str, i: int, nb: int) -> Tensor | None:
+        key = f"wander_{name}"
+        if key not in tracks:
+            return None
+        x = tracks[key][i, ..., :nb].detach().clone()
+        return uj_mix @ x if name == "uj" and uj_mix is not None else x
+
     return {
-        w: WindowLatents(
-            **{
-                name: (
-                    tracks[f"wander_{name}"][i, ..., :nb].detach().clone()
-                    if f"wander_{name}" in tracks
-                    else None
-                )
-                for name in ("d", "v", "u", "uj")
-            }
-        )
+        w: WindowLatents(**{name: track(name, i, nb) for name in ("d", "v", "u", "uj")})
         for i, (w, nb) in enumerate(zip(windows, n_blocks, strict=True))
     }
 
@@ -1771,7 +1792,9 @@ def latent_cache(
     )
 
 
-def latent_model(batch: SupportBatch, cache: LatentCache, *, wander: Wander) -> dict[str, Tensor]:
+def latent_model(
+    batch: SupportBatch, cache: LatentCache, *, wander: Wander, uj_mix: Tensor | None = None
+) -> dict[str, Tensor]:
     """The Pyro model of EVERY window's latents with the rig held FIXED.
 
     Step (ii) of the explainer's §3.4 alternation: the windows are
@@ -1782,7 +1805,8 @@ def latent_model(batch: SupportBatch, cache: LatentCache, *, wander: Wander) -> 
     weights unrescaled) through the rig's :class:`LatentCache`. Returns
     ``{"wander_<name>": (W, ..., B)}`` of the active tracks. The priors are
     :func:`ou_tracks`' (``v``: per order when measured so); a DEAD track
-    (measured sd 0) is held at zero in the forward.
+    (measured sd 0) is held at zero in the forward. With ``uj_mix`` the colour
+    site is the whitened ``y`` and the forward reads ``u_j = A y``.
     """
     n_win = len(cache.windows)
     n_blocks = torch.as_tensor(cache.n_blocks, dtype=torch.int64)
@@ -1802,17 +1826,26 @@ def latent_model(batch: SupportBatch, cache: LatentCache, *, wander: Wander) -> 
                 x = pyro.sample(f"wander_{name}", prior)
                 out[f"wander_{name}"] = x
                 used[name] = x if prior.live is None else x * prior.live.to(x)[..., None]
+                if name == "uj" and uj_mix is not None:
+                    used[name] = torch.einsum("ij,wjb->wib", uj_mix.to(x), used[name])
     m_model = cache.expected(*(used.get(n) for n in ("d", "v", "u", "uj")))
     pyro.factor("whittle", -whittle_risk(batch, m_model))
     return out
 
 
-def ou_prior_nats(latents: dict[int, WindowLatents], wander: Wander) -> float:
+def ou_prior_nats(
+    latents: dict[int, WindowLatents], wander: Wander, *, uj_mix: Tensor | None = None
+) -> float:
     """``-sum log p(latents)`` over every window and track (the OU priors,
-    :func:`ou_tracks`)."""
+    :func:`ou_tracks`). With ``uj_mix`` ``A`` the colour's density is that of
+    ``y = A^-1 u_j`` less ``B log |det A|`` per window."""
     total = 0.0
     for lat in latents.values():
         for name, x in lat.tracks().items():
+            if name == "uj" and uj_mix is not None:
+                a = uj_mix.to(x)
+                x = torch.linalg.solve_triangular(a, x.detach(), upper=False)
+                total += float(x.shape[-1]) * float(torch.log(torch.diagonal(a)).sum())
             prior = ou_tracks(
                 wander,
                 name,
