@@ -1944,3 +1944,21 @@ collapsed under line skirts. r3b is the round to use (`noise_lab` `"latest"`, fo
 2 kHz has no measurement, and the lines took that band over again. v at k ≥ 61 renders at a
 σ its fitted tracks never reach. The rig step on a 64-frame subset leaves thousands of nats
 to the all-frames polish.
+
+**The transfer test (SCv2, real `val/real_r3`, raw PIT MAE at the selected
+round; § Training arms).** With the folded round-2 fits v3 beats v2 on the
+easy bank (6.50 against 7.94) and ties on hard (7.01 against 7.06), the hard
+error moving from DREGON to Michael's. With the folded round-3b fits the easy
+arm reaches **4.68**: the first synthetic-only SCv2 regressor arm below the
+legacy pair (6.09 easy, 5.41 hard), 1.5 × the real-trained reference (3.11).
+The round-3b hard arm is worse (7.79). So the fit quality of round 3 carries
+into transfer on the easy bank, and the hard-bank recipe (path
+interpolation, no tonality guard, the v2 hard trajectory that moves 4 × faster
+than real — see the runaway explainer § 9) is the open question, not the
+model. Why the legacy hard arm wins over its easy arm is investigated in
+`docs/explainers/noise-model-v3-latent-runaway.qmd` § 9: the legacy comb is
+30–45 dB over its floor with every order filled, sits on a static per-rotor
+shaft offset, and by the demodulated prominence metric on real tracks is the
+LEAST line-like source; the v2 hard bank is the most tonal; the legacy
+trajectory sampler is calmer than real. None of the three candidates alone
+explains it.
