@@ -40,7 +40,8 @@ def fams(fit):
 
 
 def rig_move(a, b):
-    pa, pb = np.asarray(a["params"]["profile_db"]), np.asarray(b["params"]["profile_db"])
+    pa = np.asarray(a["params"]["profile"]["profile_db"])
+    pb = np.asarray(b["params"]["profile"]["profile_db"])
     k = min(pa.shape[1], pb.shape[1])
     dp = pa[:, :k] - pb[:, :k]
     ga, gb = np.asarray(a["params"]["gamma_hz"]), np.asarray(b["params"]["gamma_hz"])

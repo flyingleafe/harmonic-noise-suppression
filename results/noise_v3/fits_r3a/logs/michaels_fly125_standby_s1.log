@@ -1,0 +1,29 @@
+01:38:25   adam     0  loss -6.45805e+06
+01:38:25   adam    50  loss -7.03141e+06
+01:38:25   adam   100  loss -6.85987e+06
+01:38:25   adam   150  loss -6.88453e+06
+01:38:25   adam   200  loss -6.85822e+06
+01:38:25   adam   250  loss -7.00788e+06
+01:38:25   v3 round 0: whittle -6.93971e+06
+01:38:25   v3 round 1: whittle -6.97445e+06  move/cell 0.0463
+01:38:25   v3 round 2: whittle -6.97829e+06  move/cell 0.00512
+01:38:25   v3 round 3: whittle -6.97938e+06  move/cell 0.00146
+01:38:25   v3 round 4: whittle -6.97993e+06  move/cell 0.000725
+01:38:25   v3 round 5: whittle -6.98031e+06  move/cell 0.000516
+01:38:25   v3 round 6: whittle -6.98055e+06  move/cell 0.000311
+01:38:25   v3 round 7: whittle -6.98068e+06  move/cell 0.00018
+01:38:25   v3 round 8: whittle -6.98086e+06  move/cell 0.000243
+01:38:25   v3 round 9: whittle -6.98096e+06  move/cell 0.000131
+01:38:25   v3 round 10: whittle -6.98097e+06  move/cell 4.93e-05
+01:38:25   v3 all-frames polish: whittle -6.98122e+06  gain/cell 0.000544
+01:38:25 ('michaels_fly125_standby__flight_v3__s1', 'ok')
+01:38:25 {
+01:38:25  "n_units": 1,
+01:38:25  "n_converged": 1,
+01:38:25  "not_converged": [],
+01:38:25  "slowest_s": 2467.967517852783,
+01:38:25  "fits": [
+01:38:25   "results/noise_v3/fits_r3a/restarts/michaels_fly125_standby__flight_v3__s1.json"
+01:38:25  ]
+01:38:25 }
+01:38:25 # wrote results/noise_v3/fits_r3a/findings.md

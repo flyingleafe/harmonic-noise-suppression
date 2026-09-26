@@ -1,0 +1,15 @@
+building set michaels-cruise into /tmp/supports_michaels_fly125_cruise
+  flight_michaels_FLY124@8.000+8_rps: 8x247x1025 8.000 s carriers [31.643052, 36.184702, 41.350173, 36.381601] pass=True
+  flight_michaels_FLY124@16.000+8_rps: 8x247x1025 8.000 s carriers [31.659772, 36.18231, 41.317903, 36.415944] pass=True
+  flight_michaels_FLY124@27.680+8_rps: 8x247x1025 8.000 s carriers [57.577898, 54.904946, 59.895462, 54.847605] pass=True
+  flight_michaels_FLY124@40.000+8_rps: 8x247x1025 8.000 s carriers [92.081042, 74.760465, 79.575459, 77.269099] pass=True
+  flight_michaels_FLY124@56.000+8_rps: 8x247x1025 8.000 s carriers [91.566203, 73.962941, 81.928158, 75.326922] pass=True
+  flight_michaels_FLY125@16.000+8_rps_refined: 8x247x1025 8.000 s carriers [89.955786, 74.301676, 81.423472, 75.394874] pass=True
+  flight_michaels_FLY125@32.000+8_rps_refined: 8x247x1025 8.000 s carriers [91.802946, 74.912862, 80.989574, 75.232754] pass=True
+  flight_michaels_FLY125@48.000+8_rps_refined: 8x247x1025 8.000 s carriers [89.410574, 75.011939, 81.321085, 77.437523] pass=True
+  flight_michaels_FLY125@64.000+8_rps_refined: 8x247x1025 8.000 s carriers [91.056871, 74.482382, 82.843706, 74.484265] pass=True
+  flight_michaels_FLY125@96.000+8_rps_refined: 8x247x1025 8.000 s carriers [90.088911, 74.618312, 81.285155, 76.744847] pass=True
+  flight_michaels_FLY125@112.000+8_rps_refined: 8x247x1025 8.000 s carriers [91.61747, 74.049503, 80.97218, 75.979463] pass=True
+  flight_michaels_FLY125@128.000+8_rps_refined: 8x247x1025 8.000 s carriers [91.61422, 74.211651, 81.803559, 73.918025] pass=True
+  flight_michaels_FLY125@144.000+8_rps_refined: 8x247x1025 8.000 s carriers [91.565036, 74.237875, 82.855846, 75.272913] pass=True
+built 13/13 supports; wrote /tmp/supports_michaels_fly125_cruise/index.json and /tmp/supports_michaels_fly125_cruise/findings.md

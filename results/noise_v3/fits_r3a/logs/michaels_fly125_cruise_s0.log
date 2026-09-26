@@ -1,0 +1,28 @@
+01:23:00   we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+01:23:00   adam     0  loss -2.40636e+07
+01:23:00   adam    50  loss -2.44412e+07
+01:23:00   adam   100  loss -2.47858e+07
+01:23:00   adam   150  loss -2.45024e+07
+01:23:00   adam   200  loss -2.27856e+07
+01:23:00   adam   250  loss -2.41464e+07
+01:23:00   v3 round 0: whittle -2.44309e+07
+01:23:00   v3 round 1: whittle -2.48849e+07  move/cell 0.114
+01:23:00   v3 round 2: whittle -2.48973e+07  move/cell 0.00311
+01:23:00   v3 round 3: whittle -2.49041e+07  move/cell 0.00168
+01:23:00   v3 round 4: whittle -2.4908e+07  move/cell 0.000985
+01:23:00   v3 round 5: whittle -2.49097e+07  move/cell 0.000431
+01:23:00   v3 round 6: whittle -2.49105e+07  move/cell 0.000187
+01:23:00   v3 round 7: whittle -2.49118e+07  move/cell 0.000315
+01:23:00   v3 round 8: whittle -2.49121e+07  move/cell 8.49e-05
+01:23:00   v3 all-frames polish: whittle -2.49225e+07  gain/cell 0.00284
+01:23:00 ('michaels_fly125_cruise__flight_v3__s0', 'ok')
+01:23:00 {
+01:23:00  "n_units": 1,
+01:23:00  "n_converged": 1,
+01:23:00  "not_converged": [],
+01:23:00  "slowest_s": 1572.5150628089905,
+01:23:00  "fits": [
+01:23:00   "results/noise_v3/fits_r3a/restarts/michaels_fly125_cruise__flight_v3__s0.json"
+01:23:00  ]
+01:23:00 }
+01:23:00 # wrote results/noise_v3/fits_r3a/findings.md
