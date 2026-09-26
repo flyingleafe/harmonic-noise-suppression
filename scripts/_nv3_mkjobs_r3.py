@@ -99,7 +99,9 @@ def job(pool: str, args: argparse.Namespace) -> str:
 }}
 """
     loop = (
-        f"for N in {args.seeds}; do run_seed $N & sleep 20; done; wait\n"
+        # wait on the seed PIDs only: a bare `wait` also waits for the sync loop,
+        # which never exits (every round-3 job hung after its last seed)
+        f'P=""; for N in {args.seeds}; do run_seed $N & P="$P $!"; sleep 20; done; wait $P\n'
         if args.parallel
         else f"for N in {args.seeds}; do run_seed $N; done\n"
     )
