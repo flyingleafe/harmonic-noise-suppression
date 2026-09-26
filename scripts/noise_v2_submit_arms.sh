@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Submit the noise-model-v2 transfer arms (docs/experiments/noise-v2-transfer.md)
 # and their noise-model-v3 twins (docs/experiments/noise-model-v3.md § "Training
-# arms (round-2 fits)").
+# arms (round-2 fits)" and § "Training arms (round-3 fits)").
 #
-# Usage: scripts/noise_v2_submit_arms.sh [OPTIONS] <arm|all-synth|all-ft|mixed|nv3>
+# Usage: scripts/noise_v2_submit_arms.sh [OPTIONS] <arm|all-synth|all-ft|mixed|nv3|nv3r3>
 #
 #   all-synth   nv2_{easy,hard}_{scv2,hppnet_l2}   — the four synthetic-only arms
 #   mixed       nv2_mixed_{scv2,hppnet_l2}         — the two joint real+v2 arms
 #   all-ft      nv2_{easy,hard}_ft_{scv2,hppnet_l2} — the four curriculum arms
 #   nv3         nv3_{easy,hard}_scv2               — the v3 twins of the SCv2 pair
+#   nv3r3       nv3r3_{easy,hard}_scv2             — the same pair on the round-3b fits
 #   <arm>       any one of those experiment names
 #
 # Options:
@@ -59,6 +60,7 @@ SYNTH=(nv2_easy_scv2 nv2_hard_scv2 nv2_easy_hppnet_l2 nv2_hard_hppnet_l2)
 MIXED=(nv2_mixed_scv2 nv2_mixed_hppnet_l2)
 FT=(nv2_easy_ft_scv2 nv2_hard_ft_scv2 nv2_easy_ft_hppnet_l2 nv2_hard_ft_hppnet_l2)
 NV3=(nv3_easy_scv2 nv3_hard_scv2)
+NV3R3=(nv3r3_easy_scv2 nv3r3_hard_scv2)
 
 TARGET=""
 while [ $# -gt 0 ]; do
@@ -84,11 +86,12 @@ case "$TARGET" in
   mixed)     ARMS=("${MIXED[@]}") ;;
   all-ft)    ARMS=("${FT[@]}") ;;
   nv3)       ARMS=("${NV3[@]}") ;;
+  nv3r3)     ARMS=("${NV3R3[@]}") ;;
   *)
     ARMS=("$TARGET")
     found=0
-    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
-    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} or all-synth|all-ft|mixed|nv3"
+    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}" "${NV3R3[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
+    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} ${NV3R3[*]} or all-synth|all-ft|mixed|nv3|nv3r3"
     ;;
 esac
 
@@ -97,6 +100,7 @@ esac
 banks_dataset() {
   case "$1" in
     nv3_*) echo noise-v3-banks ;;
+    nv3r3_*) echo noise-v3r3-banks ;;
     *) echo noise-v2-banks ;;
   esac
 }

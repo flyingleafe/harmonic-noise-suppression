@@ -194,6 +194,10 @@ this:
 * **probe** — each payload's expected periodogram is evaluated at its own work
   rate (32 kHz for v3), with the wander at its mean.
 
+``generation="v3r3"`` is the same construction, byte for byte, around the
+folded round-3b fits (:data:`ANCHORS_V3R3`; their wander blocks carry the u_j
+kernel prior ``uj_corr_oct``, which the renderer reads off the payload).
+
 CLI
 ---
 ``PYTHONPATH=src python -m experiments.noise_model.rig_sampler measure`` runs
@@ -304,12 +308,39 @@ ANCHORS_V3: dict[str, dict[str, Any]] = {
     },
 }
 
+#: Round 3b of the noise-model-v3 campaign (``docs/experiments/noise-model-v3.md``
+#: § "Round 3": the u_j kernel prior, ``uj_corr_oct`` 1.5 in the wander block),
+#: folded exactly as round 2 (``results/noise_v3/diag/folded_r3``, commit
+#: ``b2c3f31b``; render minus fit within -0.8..+0.5 dB below 5 kHz).
+ROUND_V3_R3 = "results/noise_v3/diag/folded_r3"
+
+#: The v3 anchors of the round-3 arms: the same rigs and regime pairs as
+#: :data:`ANCHORS_V3`, their folded round-3b fits.
+ANCHORS_V3R3: dict[str, dict[str, Any]] = {
+    rig: {
+        **row,
+        "cruise": row["cruise"].replace(ROUND_V3_R2, ROUND_V3_R3),
+        "standby": None
+        if row["standby"] is None
+        else row["standby"].replace(ROUND_V3_R2, ROUND_V3_R3),
+    }
+    for rig, row in ANCHORS_V3.items()
+}
+
 #: The model generations a bank can be drawn in, and the anchors of each.
-GENERATIONS: dict[str, dict[str, dict[str, Any]]] = {"v2": ANCHORS, "v3": ANCHORS_V3}
+#: ``"v3r3"`` is the v3 construction around the round-3b anchors.
+GENERATIONS: dict[str, dict[str, dict[str, Any]]] = {
+    "v2": ANCHORS,
+    "v3": ANCHORS_V3,
+    "v3r3": ANCHORS_V3R3,
+}
+
+#: The generations drawn with the v3 construction (and its trend rule).
+V3_GENERATIONS = ("v3", "v3r3")
 
 
 def anchors_of(generation: str) -> dict[str, dict[str, Any]]:
-    """The anchor table of one model generation (``"v2"`` or ``"v3"``)."""
+    """The anchor table of one model generation (a key of :data:`GENERATIONS`)."""
     if generation not in GENERATIONS:
         raise ValueError(f"generation must be one of {tuple(GENERATIONS)}, got {generation!r}")
     return GENERATIONS[generation]
@@ -1880,8 +1911,9 @@ class BankSpec:
     widths: dict[str, float]
     k_max: int = PATH_K_MAX
     max_attempts: int = 16
-    #: ``"v2"``: the v2 anchors (:data:`ANCHORS`); ``"v3"``: the round-2 v3
-    #: anchors (:data:`ANCHORS_V3`), drawn by the SAME construction and widths.
+    #: ``"v2"``: the v2 anchors (:data:`ANCHORS`); ``"v3"`` / ``"v3r3"``: the
+    #: round-2 / round-3b v3 anchors (:data:`ANCHORS_V3`, :data:`ANCHORS_V3R3`),
+    #: drawn by the SAME construction and widths.
     generation: str = "v2"
 
     def __post_init__(self) -> None:
@@ -1924,7 +1956,7 @@ class BankSpec:
                 "ltas_envelope_x": LTAS_ENVELOPE_X,
                 "probe_rps": [PROBE_CRUISE_RPS, PROBE_IDLE_RPS],
                 "level_band_hz": list(LEVEL_BAND_HZ),
-                **({"trend_rule": TREND_RULE_V3} if self.generation == "v3" else {}),
+                **({"trend_rule": TREND_RULE_V3} if self.generation in V3_GENERATIONS else {}),
             },
             "code": code_digest(),
         }
@@ -2174,7 +2206,7 @@ def bank_payload(
 ) -> dict[str, Any]:
     """The whole ``noise-v2-bank/1`` file, provenance included."""
     anchors = anchors_of(spec.generation)
-    v3 = spec.generation == "v3"
+    v3 = spec.generation in V3_GENERATIONS
     return {
         "format": PRESET_BANK_FORMAT,
         "entries": entries,

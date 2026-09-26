@@ -35,6 +35,10 @@ file is ``noise_v3_<preset>_n<n>.json`` and the report
 ``results/noise_v3/rig_sampler/build_<preset>.json``. How every v2 coordinate
 maps onto v3 (floor spline, wind, wander carried unperturbed, the trend guard
 around a flat-trend anchor) is in the sampler's module docstring.
+``--generation v3r3`` is the same v3 construction around the folded round-3b
+fits (:data:`experiments.noise_model.rig_sampler.ANCHORS_V3R3`): file
+``noise_v3r3_<preset>_n<n>.json``, report
+``results/noise_v3r3/rig_sampler/build_<preset>.json``.
 
 REPRODUCIBILITY. One seed (:data:`SEED`), one substream per entry index
 (``default_rng([seed, i])``), so a bank is bit-identical at any worker count
@@ -359,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
         "--generation",
         default="v2",
         choices=tuple(RS.GENERATIONS),
-        help="model generation of the anchors (default v2; v3 = the folded round-2 v3 fits)",
+        help="model generation of the anchors (default v2; v3 / v3r3 = the folded round-2 / round-3b v3 fits)",
     )
     ap.add_argument("--n", type=int, default=DEFAULT_N, help=f"draws (default {DEFAULT_N})")
     ap.add_argument("--out", default=None, help="output path (default data/rig_banks/...)")
