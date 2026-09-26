@@ -1761,18 +1761,87 @@ round-2 pair's.
 
 | arm | job | backend | state |
 |---|---|---|---|
-| `nv3r3_easy_scv2` | `nv3r3-easy-scv2-fd6e96` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | resubmitted 2026-09-26 ~04:52Z at `b8cd12b1` (a docs-only commit on top of `5f137903`). The first submission, `nv3r3-easy-scv2-9c84f2` (~03:58Z at `5f137903`), failed at 04:12Z before its first training step: the wandb service did not start (`ServicePollForTokenError`) |
-| `nv3r3_hard_scv2` | `nv3r3-hard-scv2-5ea979` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 ~04:00Z at `5f137903` (placing) |
+| `nv3r3_easy_scv2` | `nv3r3-easy-scv2-fd6e96` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | resubmitted 2026-09-26 04:47Z at `b8cd12b1` (a docs-only commit on top of `5f137903`); ran 04:48–09:43Z (4 h 55 min), succeeded, early stop at round 147. The first submission, `nv3r3-easy-scv2-9c84f2` (~03:58Z at `5f137903`), failed at 04:12Z before its first training step: the wandb service did not start (`ServicePollForTokenError`) |
+| `nv3r3_hard_scv2` | `nv3r3-hard-scv2-5ea979` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 04:00Z at `5f137903`; ran 04:01–06:16Z (2 h 15 min), succeeded, early stop at round 63 |
 
 ### Results
 
-**PENDING.** The protocol is the round-2 pair's. Selection is on the
-smoothed `real_overall` (`best_checkpoints.json`). The metrics are raw @ sel,
-best raw and `r1`/`r2`/`r3` from the R2 `validation_history.jsonl`, followed
-by `scripts/_regime_decomp.py --exp <arm> --ckpt best_real_overall --out
-results/regime_decomp/<arm>.json`: overall + zero / standby / ramp / cruise
-and `by_rig`. One table carries nv2 / nv3 (round-2 fits) / nv3r3 (round-3
-fits), easy and hard.
+The protocol, script and column definitions are those of the round-2 pair
+(§ "Training arms (round-2 fits)" → Results). The scores come from
+`scripts/_nv3_arm_history.py` on the R2 history, and **wall** is training
+time from the `perf/*` rows. The decompositions ran on `kaggle` from the same
+job wrapper: `nv3r3-hard-decomp-kg2-d1227f` and
+`nv3r3-easy-decomp-kg-a8a269`, both at `b766faf5`. They were uploaded to
+`r2://ml-data/artifacts/<arm>/regime_decomp/` and copied to
+`results/regime_decomp/nv3r3_{easy,hard}_scv2.json`. The decomposition's
+overall re-evaluation agrees with raw @ sel to 2.3 % (easy, 4.79 vs 4.68) and
+0.3 % (hard, 7.76 vs 7.79).
+
+| arm | rounds | sel | smoothed | **raw @ sel** | best raw (round) | r1 | r2 | r3 | r1/r2 | final raw | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| *`real_r4_scv2_unified`*: real reference | 70 | 24 | — | 3.11 | 2.99 | — | — | 2.99 | — | — | — |
+| *`rig_easy_scv2_unified`*: legacy stochastic easy | 94 | 57 | — | 6.09 | 5.72 | — | — | — | — | — | — |
+| *`rig_hard_scv2_unified`*: legacy stochastic hard | 137 | 124 | — | 5.41 | 5.37 | — | — | — | — | — | — |
+| `nv2_easy_scv2` | 102 | 81 | 7.94 | **7.94** | 7.18 (49) | 10.89 | 9.67 | 7.94 | 1.13 | 8.70 | 3.03 h |
+| `nv3_easy_scv2` (r2 fits) | 174 | 126 | 6.88 | **6.50** | 6.04 (80) | 8.61 | 6.61 | 6.50 | 1.30 | 8.18 | 5.67 h |
+| `nv3r3_easy_scv2` (r3b fits) | 147 | 125 | 4.93 | **4.68** | 4.68 (125) | 5.22 | 4.74 | 4.68 | 1.10 | 5.00 | 4.56 h |
+| `nv2_hard_scv2` | 116 | 15 | 9.17 | **7.06** | 7.06 (15) | 25.11 | 9.38 | 7.06 | 2.68 | 12.18 | 3.24 h |
+| `nv3_hard_scv2` (r2 fits) | 64 | 21 | 8.60 | **7.01** | 7.01 (21) | 7.86 | 5.93 | 7.01 | 1.33 | 14.85 | 2.05 h |
+| `nv3r3_hard_scv2` (r3b fits) | 63 | 14 | 8.67 | **7.79** | 7.46 (4) | 12.09 | 9.10 | 7.79 | 1.33 | 11.31 | 1.91 h |
+
+| arm | overall | zero | standby | ramp | cruise | spread standby | spread ramp | spread cruise |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| *`real_r4_scv2_unified`*: real reference | 3.11 | 2.44 | 3.20 | 8.17 | 2.95 | 9.74 | 6.58 | 10.94 |
+| *`rig_easy_scv2_unified`*: legacy easy | 6.08 | 2.37 | 13.70 | 18.82 | 4.85 | 1.65 | 2.87 | 10.36 |
+| *`rig_hard_scv2_unified`*: legacy hard | 5.40 | 10.61 | 8.92 | 13.86 | 3.48 | 1.55 | 4.14 | 11.50 |
+| `nv2_easy_scv2` | 7.99 | 10.64 | 11.05 | 11.12 | 6.87 | 5.71 | 6.42 | 16.76 |
+| `nv3_easy_scv2` (r2) | 6.83 | 1.84 | 13.02 | 12.97 | 6.39 | 4.39 | 8.11 | 15.12 |
+| `nv3r3_easy_scv2` (r3b) | 4.79 | 1.75 | 5.65 | 13.79 | 4.71 | 3.76 | 6.49 | 13.13 |
+| `nv2_hard_scv2` | 7.05 | 1.25 | 6.16 | 15.81 | 7.76 | 6.27 | 8.14 | 18.56 |
+| `nv3_hard_scv2` (r2) | 7.02 | 2.18 | 17.31 | 13.52 | 5.88 | 5.48 | 16.54 | 22.23 |
+| `nv3r3_hard_scv2` (r3b) | 7.76 | 4.07 | 6.79 | 14.85 | 8.20 | 6.34 | 10.41 | 16.84 |
+| **the TARGET labels of the same frames** | — | 0.01 | 10.63 | 7.85 | 13.79 | 10.63 | 7.85 | 13.79 |
+
+| arm | DREGON overall | zero | standby | ramp | cruise | Michael's overall | zero | standby | ramp | cruise |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `nv2_easy_scv2` | 9.68 | 14.14 | 7.43 | 9.77 | 8.85 | 5.52 | 1.77 | 11.26 | 13.90 | 3.12 |
+| `nv3_easy_scv2` (r2) | 7.10 | 2.14 | 10.69 | 11.74 | 7.75 | 6.43 | 1.08 | 13.16 | 15.51 | 3.80 |
+| `nv3r3_easy_scv2` (r3b) | 4.91 | 1.55 | 6.98 | 12.34 | 5.14 | 4.60 | 2.25 | 5.57 | 16.79 | 3.90 |
+| `nv2_hard_scv2` | 9.36 | 1.61 | 2.93 | 17.34 | 10.52 | 3.66 | 0.34 | 6.35 | 12.68 | 2.51 |
+| `nv3_hard_scv2` (r2) | 5.92 | 1.81 | 8.46 | 13.15 | 6.29 | 8.63 | 3.09 | 17.84 | 14.29 | 5.11 |
+| `nv3r3_hard_scv2` (r3b) | 9.09 | 5.02 | 19.82 | 15.62 | 9.38 | 5.82 | 1.69 | 6.02 | 13.25 | 5.96 |
+
+DREGON standby (60 clip frames) and Michael's ramp (114) are too thin to read,
+as in round 2.
+
+**Reading.**
+
+* **Easy on the round-3b fits is the first synthetic-only SCv2 regressor arm
+  to beat the hand-written legacy pair.** raw @ sel is 4.68, best raw is the
+  same round, and the decomposition re-evaluates it at 4.79. That compares
+  with v2's 7.94, round 2's 6.50, and the legacy pair's 6.09 (easy) and 5.41
+  (hard), whose best raw is 5.37. It also beats the synthetic-only salience
+  arms of the v2 batch (best raw 5.52 / 6.25). Every view improves (r1 / r2
+  5.22 / 4.74), with an r1/r2 ratio of 1.10, close to v2's 1.13. The gain is
+  broad. Against round 2: standby 13.02 → 5.65, cruise 6.39 → 4.71, DREGON
+  7.10 → 4.91, Michael's 6.43 → 4.60. Only ramp does not improve (13.79,
+  against 18.82 for the legacy easy arm and 8.17 for real). The arm is still
+  1.5× the real reference (3.11). Post-sel drift is small: final raw 5.00
+  against best 4.68 (+7 %). The v2 batch's synthetic-only arms drifted by
+  +13 to +177 %; nv3 drifted by +35 % (easy) and +112 % (hard), and nv3r3
+  hard by +52 %.
+* **Hard on the round-3b fits is worse than both earlier hard arms.** raw @
+  sel is 7.79 against 7.01 (round 2) and 7.06 (v2). Best raw is 7.46 at round
+  4, and selection took round 14. The r2 → r3b change swaps which rig fails:
+  DREGON goes back to 9.09 (round 2 5.92, v2 9.36) with standby 19.82 and
+  zero 5.02, while Michael's recovers to 5.82 (round 2 8.63, v2 3.66). None
+  of the three hard arms (v2, v3 r2, v3 r3b) transfers better than the
+  legacy hard arm's 5.41. Neither better fits nor the move to v3 has improved
+  the hard path bank's transfer.
+* **Spread.** The round-3b arms put the rotors closer to the label spread than
+  round 2 did at ramp and cruise: hard ramp 10.41 against 16.54 (label 7.85),
+  hard cruise 16.84 against 22.23 (label 13.79), easy cruise 13.13 against
+  13.79. Standby stays collapsed on both arms (3.76 and 6.34 against 10.63).
 
 ## Conclusion
 

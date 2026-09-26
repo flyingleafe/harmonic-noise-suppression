@@ -52,5 +52,19 @@ scripts/noise_v2_submit_arms.sh --backend vast --gpu-type A100 --cpus 16 --mem 6
 
 ## Conclusion
 
-**PENDING**. See `docs/experiments/noise-model-v3.md` § "Training arms
-(round-3 fits)".
+**No: this arm transfers worse than both earlier hard arms.** Job
+`nv3r3-hard-scv2-5ea979` ran on Vast A100 for 2 h 15 min and early-stopped at
+round 63. It selected round 14: smoothed 8.67, **raw @ sel 7.79**. Its best
+raw was 7.46, at round 4. r1 / r2 / r3 at sel were 12.09 / 9.10 / 7.79. On
+raw @ sel, `nv3_hard_scv2` (round-2 fits) scored 7.01, `nv2_hard_scv2` 7.06,
+and the legacy hard arm 5.41.
+
+The decomposition of the selected file re-evaluates it at 7.76: zero 4.07,
+standby 6.79, ramp 14.85, cruise 8.20. The failing rig flips relative to
+round 2. DREGON goes from 5.92 to 9.09 (standby 19.82, zero 5.02, cruise
+9.38). Michael's goes from 8.63 to 5.82. The rotor spread moves closer to the
+labels than in round 2 at ramp (10.41 against 16.54; label 7.85) and at
+cruise (16.84 against 22.23; label 13.79). Post-sel drift is +52 % (final raw
+11.31 against 7.46). The hard path bank has not turned the better fits into
+better transfer. Full tables: `docs/experiments/noise-model-v3.md` §
+"Training arms (round-3 fits)" → Results.

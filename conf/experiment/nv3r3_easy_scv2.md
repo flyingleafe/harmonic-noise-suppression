@@ -67,5 +67,20 @@ scripts/noise_v2_submit_arms.sh --backend vast --gpu-type A100 --cpus 16 --mem 6
 
 ## Conclusion
 
-**PENDING**. See `docs/experiments/noise-model-v3.md` § "Training arms
-(round-3 fits)".
+**Yes: the round-3b fits transfer, and this is the first synthetic-only SCv2
+regressor arm to beat the hand-written legacy pair.** Job
+`nv3r3-easy-scv2-fd6e96` was a resubmission: the first attempt,
+`-9c84f2`, died at wandb service start before training. It ran on Vast A100
+for 4 h 55 min and early-stopped at round 147. It selected round 125:
+smoothed 4.93, **raw @ sel 4.68**, which is also the best raw. r1 / r2 / r3
+were 5.22 / 4.74 / 4.68. For comparison, raw @ sel was 7.94 on
+`nv2_easy_scv2`, 6.50 on `nv3_easy_scv2` (round-2 fits), 6.09 on the legacy
+easy arm and 5.41 on the legacy hard arm. The real reference is 3.11.
+
+The decomposition of the selected file, re-evaluated at 4.79: zero 1.75,
+standby 5.65, ramp 13.79, cruise 4.71. By rig, DREGON scores 4.91 and
+Michael's 4.60. Relative to round 2, every regime improves except ramp.
+Standby improves most (13.02 → 5.65), but the predicted rotor spread there
+stays collapsed at 3.76, against 10.63 in the labels. Post-sel drift is +7 %
+(final raw 5.00). Full tables: `docs/experiments/noise-model-v3.md` §
+"Training arms (round-3 fits)" → Results.
