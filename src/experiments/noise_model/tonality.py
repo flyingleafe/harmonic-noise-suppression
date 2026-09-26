@@ -30,9 +30,19 @@ visibility; one rotor alone understates the floor. This module therefore probes
 with REAL four-rotor patterns — the per-rotor mean carriers of the campaign's
 own frozen windows (:func:`select_patterns`).
 
-Everything here works on ``(M, F)`` expected periodograms from
+Everything above works on ``(M, F)`` expected periodograms from
 :class:`PatternProbe`, which is :class:`rig_sampler.ModelProbe` with a per-rotor
 carrier row instead of one shared speed.
+
+A second estimator reads a RENDER (or a recording) instead of a payload:
+:func:`demod_prominence`. Each rotor's order ``k`` is demodulated around
+``k f_r(t)`` on the TRUE carrier track, so a line that follows the track
+collapses to DC whatever the speed does; the per-frame spectrum of that
+baseband is MEDIANED over frames and microphones inside ``+-k`` Hz, and the
+prominence is the median at 0 Hz over the median at the band ends. It
+measures what the renderer (its jitter, wander and floor included) or the
+recording (its label error included) delivers on a real flight, which the
+expected periodogram at a constant carrier cannot.
 """
 
 from __future__ import annotations
@@ -47,15 +57,23 @@ from experiments.noise_model import rig_sampler as RS
 __all__ = [
     "ANNULUS_FRAC",
     "COMB_OFF_DB",
+    "DEMOD_FRAME_S",
+    "DEMOD_HOP_S",
+    "DEMOD_K_MAX",
+    "DEMOD_LOWPASS_HZ",
     "NAMED_ORDERS",
+    "ORDER_GROUPS",
     "PROM_THRESHOLDS_DB",
+    "DemodProminence",
     "Pattern",
     "PatternGeometry",
     "PatternProbe",
     "comb_pedestal_db",
     "comb_switch_check",
+    "demod_prominence",
     "entry_row",
     "local_floor",
+    "order_group_summary",
     "patterns_from_dicts",
     "payload_shape",
     "payload_stats",
@@ -551,6 +569,154 @@ def entry_row(
         row[name] = stats
         curves[name] = curve
     return row, curves
+
+
+# ---------------------------------------------------------------------------
+# the demodulated prominence: a render or a recording, on its true carrier
+# ---------------------------------------------------------------------------
+
+#: Orders :func:`demod_prominence` reads by default: ``k = 1 .. DEMOD_K_MAX``.
+DEMOD_K_MAX = 24
+#: Low-pass of the complex baseband (Hz), zero-phase 6th-order Butterworth
+#: (:func:`utils.demod.demodulate`). Above the widest band read (``+-DEMOD_K_MAX``
+#: Hz), so every band end sits in the flat passband (-0.01 dB at 24 Hz); the
+#: baseband is then kept at ``2.5 x`` this rate (100 Hz), where a neighbouring
+#: order 80 Hz away folds to -20 Hz 72 dB down.
+DEMOD_LOWPASS_HZ = 40.0
+#: Frame and hop of the per-frame baseband spectrum (s). 2 s gives 0.5 Hz bins:
+#: the k = 1 band (+-1 Hz) holds five bins, and its ends are two Hann bins from
+#: DC, where a tone on the track leaks nothing.
+DEMOD_FRAME_S = 2.0
+DEMOD_HOP_S = 0.5
+#: The band ENDS: ``|offset|`` in ``[0.75 k, k]`` Hz.
+DEMOD_ENDS_FRAC = (0.75, 1.0)
+#: The order groups the summaries report, inclusive.
+ORDER_GROUPS: tuple[tuple[int, int], ...] = ((1, 4), (5, 8), (9, 16), (17, 24))
+
+
+@dataclass(frozen=True)
+class DemodProminence:
+    """One clip's demodulated prominence, per rotor and order (dB).
+
+    ``centre_db`` is the frame-median baseband power at 0 Hz, ``floor_db`` the
+    median of the frame-median spectrum over the band ends, ``prom_db`` their
+    difference. Rows of a rotor the estimator skipped are NaN.
+    """
+
+    prom_db: np.ndarray  # (R, K)
+    centre_db: np.ndarray  # (R, K)
+    floor_db: np.ndarray  # (R, K)
+    n_frames: int
+
+    def summary(self) -> dict[str, dict[str, float]]:
+        """:func:`order_group_summary` of :attr:`prom_db`."""
+        return order_group_summary(self.prom_db)
+
+
+def order_group_summary(
+    prom_db: np.ndarray,
+    *,
+    groups: tuple[tuple[int, int], ...] = ORDER_GROUPS,
+    thresholds: tuple[float, ...] = PROM_THRESHOLDS_DB,
+) -> dict[str, dict[str, float]]:
+    """Per order group: the median prominence and the fraction over each bar.
+
+    ``prom_db`` is ``(..., K)`` with ``K`` on the last axis (column ``k - 1`` is
+    order ``k``); everything before it is pooled. NaN cells are dropped. Keys
+    are ``"k1-4"`` etc. plus ``"all"`` over every order present; each holds
+    ``median_db``, ``frac_gt<bar>`` (``frac_gt3`` ...) and ``n``.
+    """
+    p = np.asarray(prom_db, dtype=np.float64)
+    k_have = int(p.shape[-1])
+    spans = [(f"k{lo}-{hi}", lo, min(hi, k_have)) for lo, hi in groups if lo <= k_have]
+    spans.append(("all", 1, k_have))
+    out: dict[str, dict[str, float]] = {}
+    for name, lo, hi in spans:
+        v = p[..., lo - 1 : hi].ravel()
+        v = v[np.isfinite(v)]
+        row: dict[str, float] = {
+            "median_db": float(np.median(v)) if v.size else float("nan"),
+            "n": int(v.size),
+        }
+        for thr in thresholds:
+            row[f"frac_gt{thr:g}"] = float(np.mean(v > thr)) if v.size else float("nan")
+        out[name] = row
+    return out
+
+
+def demod_prominence(
+    audio: np.ndarray,
+    rps: np.ndarray,
+    sr: float,
+    *,
+    k_max: int = DEMOD_K_MAX,
+    frame_s: float = DEMOD_FRAME_S,
+    hop_s: float = DEMOD_HOP_S,
+    min_rps: float = 1.0,
+) -> DemodProminence:
+    """Order-tracked prominence of every rotor's orders ``1 .. k_max`` in a clip.
+
+    ``audio`` is ``(M, T)`` (or ``(T,)``), ``rps`` the ``(R, T)`` carrier in
+    rev/s on the same audio-rate grid: for a render the track it was rendered
+    on, for a recording its labels. For each rotor ``r`` and order ``k``:
+
+    1. demodulate: ``audio * exp(-i 2 pi k integral f_r dt)``, low-passed at
+       :data:`DEMOD_LOWPASS_HZ` (:func:`utils.demod.demodulate`), so a line
+       that follows ``k f_r(t)`` sits at 0 Hz however the speed moves;
+    2. per frame (``frame_s`` Hann, ``hop_s`` hop), the two-sided power
+       spectrum of that baseband (:func:`utils.demod.zoom_spectrogram`);
+    3. the MEDIAN of each bin over frames x microphones, inside ``+-k`` Hz;
+    4. prominence = median at 0 Hz over the median of that profile at the band
+       ends, ``|offset|`` in ``[0.75 k, k]`` Hz, in dB.
+
+    The band widens with ``k`` because a speed error of ``df`` puts order ``k``
+    ``k df`` off DC. A carrier error (label noise, the renderer's own jitter)
+    spreads the line over the band and lowers the number; a line the track
+    follows exactly stands over the floor by its full line-to-floor ratio in a
+    ``1 / frame_s`` Hz bin. White noise reads ~0 dB. The ends read whatever
+    sits there: the broadband floor, and any other rotor's line that crosses.
+
+    A rotor whose slowest speed in the clip is under ``min_rps`` is skipped
+    (NaN): with no rotation there is no order to demodulate.
+    """
+    from utils.demod import demodulate, zoom_spectrogram
+
+    x = np.atleast_2d(np.asarray(audio, dtype=np.float64))
+    f = np.atleast_2d(np.asarray(rps, dtype=np.float64))
+    if f.shape[-1] != x.shape[-1]:
+        raise ValueError(f"carrier length {f.shape[-1]} != audio length {x.shape[-1]}")
+    if int(k_max) > DEMOD_LOWPASS_HZ:
+        raise ValueError(f"k_max={k_max} reads past the {DEMOD_LOWPASS_HZ:g} Hz baseband")
+    n_rot, n_k = int(f.shape[0]), int(k_max)
+    centre = np.full((n_rot, n_k), np.nan)
+    floor = np.full((n_rot, n_k), np.nan)
+    n_frames = 0
+    band = float(DEMOD_LOWPASS_HZ)
+    n_freq = int(round(2.0 * band * float(frame_s)))  # native 1/frame_s Hz bins
+    for r in range(n_rot):
+        if float(f[r].min()) < float(min_rps):
+            continue
+        for k in range(1, n_k + 1):
+            z = demodulate(x, f[r], band, float(sr), order=float(k))
+            _t, freqs, spec = zoom_spectrogram(
+                z, float(sr), band, win_s=float(frame_s), hop_s=float(hop_s), n_freq=n_freq
+            )
+            power = np.abs(spec) ** 2  # (M, F, N)
+            n_frames = int(power.shape[-1])
+            med = np.median(np.moveaxis(power, -2, 0).reshape(freqs.size, -1), axis=1)
+            af = np.abs(freqs)
+            tol = 1e-6
+            ends = (af >= DEMOD_ENDS_FRAC[0] * k - tol) & (af <= DEMOD_ENDS_FRAC[1] * k + tol)
+            centre[r, k - 1] = med[int(np.argmin(af))]
+            floor[r, k - 1] = np.median(med[ends])
+    centre_db = 10.0 * np.log10(np.maximum(centre, 1e-300))
+    floor_db = 10.0 * np.log10(np.maximum(floor, 1e-300))
+    return DemodProminence(
+        prom_db=centre_db - floor_db,
+        centre_db=centre_db,
+        floor_db=floor_db,
+        n_frames=n_frames,
+    )
 
 
 # ---------------------------------------------------------------------------
