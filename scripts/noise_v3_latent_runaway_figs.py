@@ -37,6 +37,7 @@ Inputs:
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --rigs-only # Figs G-I only
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --listen-only # Figs J-K + WAVs
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --plot-only
+    PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3a  # r3a beside r2
 
 Writes ``docs/explainers/noise-model-v3-latent-runaway/`` (``fig_*.png``,
 ``figdata.json``, every plotted number, and ``audio/*.wav``).
@@ -115,12 +116,13 @@ PRIOR_SEEDS = (0, 1, 2, 3)
 RIG_FLOOR_AT_HZ = (100.0, 1000.0, 4000.0)
 RIG_OVER_DB = 3.0
 RIG_FMIN_HZ = 20.0
-V3_R2_FITS = {
-    "dregon": FITS["r2"],
-    "cruise": Path("results/noise_v3/fits_r2/michaels_fly125_cruise__flight_v3.json"),
-    "standby": Path("results/noise_v3/fits_r2/michaels_fly125_standby__flight_v3.json"),
-}
 RIG_NAMES = {"dregon": "DREGON", "cruise": "Michael's cruise", "standby": "Michael's standby"}
+#: the pooled v3 fit of each rig key, by file stem, inside a round's fit directory
+V3_POOLS = {
+    "dregon": POOL,
+    "cruise": "michaels_fly125_cruise",
+    "standby": "michaels_fly125_standby",
+}
 #: § Listen: one 10 s real window per rig, held out of every fit's pool (the
 #: DREGON pool reads free-flight 18-26 s; Michael's fits read FLY125 only),
 #: every rotor inside the fits' carrier spans; the notebook's render cell
@@ -134,7 +136,6 @@ LISTEN_S = 10.0
 LISTEN_SEED = 0
 LISTEN_LEVEL = ("window", 0.1)
 LISTEN_LTAS_HZ = (100.0, 7000.0)
-LISTEN_CLIPS = ("real", "v2", "v3")
 LISTEN_LABELS = {"real": "real recording", "v2": "v2 fit", "v3": "v3 round-2 fit"}
 LISTEN_DYN_DB = 45.0
 AUDIO = OUT / "audio"
@@ -342,14 +343,19 @@ def pool_batch(fit: dict[str, Any], *, v3: bool) -> Any:
     return MD.with_blocks(batch, float(fit["latents"]["block_s"])) if v3 else batch
 
 
-def static_shares() -> dict[str, Any]:
-    """:func:`decompose` of every family of every pool's selected fit, rounds 1 and 2."""
+def v3_fits(tag: str) -> dict[str, Path]:
+    """``{rig key: fit path}`` of v3 round ``tag`` (a ``noise_lab.V3_FIT_DIRS`` key)."""
+    d = Path(_noise_lab().V3_FIT_DIRS[tag])
+    return {key: d / f"{stem}__flight_v3.json" for key, stem in V3_POOLS.items()}
+
+
+def static_shares(rounds: tuple[str, ...] = ("r1", "r2")) -> dict[str, Any]:
+    """:func:`decompose` of every family of every pool's selected fit, per round."""
     out: dict[str, Any] = {}
-    for rnd, d in (("r1", FITS["r1"].parent), ("r2", FITS["r2"].parent)):
-        for pool in (POOL, "michaels_fly125_cruise", "michaels_fly125_standby"):
-            path = d / f"{pool}__flight_v3.json"
+    for rnd in rounds:
+        for key, path in v3_fits(rnd).items():
             fams = family_tracks(latent_arrays(load(path)))
-            out[f"{rnd}/{pool}"] = dict(
+            out[f"{rnd}/{V3_POOLS[key]}"] = dict(
                 path=str(path), families={k: decompose(v) for k, v in fams.items()}
             )
     return out
@@ -716,19 +722,31 @@ def rig_panel(nl: Any, fit: dict[str, Any], rps: float) -> dict[str, Any]:
     )
 
 
+def v3_rig_panels(nl: Any, tag: str) -> dict[str, Any]:
+    """One Figs G-I row per pooled v3 fit of round ``tag``."""
+    out: dict[str, Any] = {}
+    for key, path in v3_fits(tag).items():
+        fit = load(path)
+        rps = rig_rps(fit)
+        out[key] = dict(path=str(path), rps=rps, **rig_panel(nl, fit, rps))
+        print(f"v3 {tag} {key}: {rps:.1f} rev/s", flush=True)
+    return out
+
+
 def rig_views() -> dict[str, Any]:
     """Figs G-I: the parameter view of four v3 prior draws, the round-2 v3 fits
     and the v2 fits, every rotor at one speed, latents at zero."""
     nl = _noise_lab()
     checks = _sibling("noise_v3_checks")
-    fit_d = load(V3_R2_FITS["dregon"])
+    prior_fit = v3_fits("r2")["dregon"]
+    fit_d = load(prior_fit)
     out: dict[str, Any] = dict(
-        prior_fit=str(V3_R2_FITS["dregon"]),
+        prior_fit=str(prior_fit),
         over_bar_db=RIG_OVER_DB,
         floor_at_hz=RIG_FLOOR_AT_HZ,
         fmin_hz=RIG_FMIN_HZ,
         prior={},
-        v3_r2={},
+        v3_r2=v3_rig_panels(nl, "r2"),
         v2={},
     )
     for seed in PRIOR_SEEDS:
@@ -741,18 +759,28 @@ def rig_views() -> dict[str, Any]:
         "cruise": nl.FIT_PATHS["michaels"]["cruise"],
         "standby": nl.FIT_PATHS["michaels"]["standby"],
     }
-    for gen, paths in (("v3_r2", {k: str(p) for k, p in V3_R2_FITS.items()}), ("v2", v2_paths)):
-        for key, path in paths.items():
-            fit = load(path)
-            rps = rig_rps(fit)
-            out[gen][key] = dict(path=path, rps=rps, **rig_panel(nl, fit, rps))
-            print(f"{gen} {key}: {rps:.1f} rev/s", flush=True)
+    for key, path in v2_paths.items():
+        fit = load(path)
+        rps = rig_rps(fit)
+        out["v2"][key] = dict(path=path, rps=rps, **rig_panel(nl, fit, rps))
+        print(f"v2 {key}: {rps:.1f} rev/s", flush=True)
     return out
 
 
-def listen() -> dict[str, Any]:
+def listen_key(tag: str) -> str:
+    """The § Listen clip key of v3 round ``tag`` (round 2 is the original ``"v3"``)."""
+    return "v3" if tag == "r2" else f"v3_{tag}"
+
+
+def listen_label(key: str) -> str:
+    if key in LISTEN_LABELS:
+        return LISTEN_LABELS[key]
+    return f"v3 round-{key.removeprefix('v3_r')} fit"
+
+
+def listen(rounds: tuple[str, ...] = ("r2",)) -> dict[str, Any]:
     """Figs J-K: per rig, the real window of :data:`LISTEN_WINDOWS` and the v2
-    and round-2 v3 fits rendered on its rotor track, all three under the
+    fit and the v3 fits of ``rounds`` rendered on its rotor track, all under the
     notebook's level rule, as 16-bit WAVs, with ``noise_lab.line_stats`` (k = 1
     to 8) and the band LTAS inside :data:`LISTEN_LTAS_HZ`."""
     import soundfile as sf
@@ -772,11 +800,15 @@ def listen() -> dict[str, Any]:
         sr=nl.SR,
         dyn_range_db=LISTEN_DYN_DB,
         ltas_bands_hz=[list(accept_stats.BANDS[i]) for i in bands],
+        labels={k: listen_label(k) for k in ("real", "v2", *(listen_key(t) for t in rounds))},
         rigs={},
     )
     for rig, window in LISTEN_WINDOWS.items():
         traj = nl.trajectory("real", duration_s=LISTEN_S, **window)
-        sources = {"v2": nl.V2Fit(rig), "v3": nl.V3Fit(rig, round="r2")}
+        sources = {
+            "v2": nl.V2Fit(rig),
+            **{listen_key(t): nl.V3Fit(rig, round=t) for t in rounds},
+        }
         renders = nl.render_all(
             list(sources.values()), traj, seed=LISTEN_SEED, n_mics=1, level=LISTEN_LEVEL
         )
@@ -1327,8 +1359,14 @@ def fig_f(d: dict[str, Any]) -> None:
 
 
 def _rig_rows(d: dict[str, Any]) -> list[dict[str, Any]]:
-    rg = d["rigs"]
-    return [*rg["prior"].values(), *rg["v3_r2"].values(), *rg["v2"].values()]
+    """Every parameter-view row of ``d["rigs"]`` (prior draws, v3 rounds, v2)."""
+    return [
+        row
+        for group in d["rigs"].values()
+        if isinstance(group, dict)
+        for row in group.values()
+        if isinstance(row, dict) and "view" in row
+    ]
 
 
 def rig_ylim(d: dict[str, Any]) -> tuple[float, float]:
@@ -1391,8 +1429,8 @@ def fig_i(d: dict[str, Any]) -> None:
 
 
 def fig_listen(d: dict[str, Any], rig: str, name: str) -> None:
-    """One rig of § Listen: ``noise_lab.spectrogram_figure`` of the three WAVs
-    as written (real, v2, v3 round 2), one colour scale, the rotor track once."""
+    """One rig of § Listen: ``noise_lab.spectrogram_figure`` of the WAVs as
+    written (real, v2, then the v3 rounds), one colour scale, the rotor track once."""
     import soundfile as sf
     import tdseries as td
 
@@ -1405,16 +1443,17 @@ def fig_listen(d: dict[str, Any], rig: str, name: str) -> None:
         dims=("rotor", "time"),
         t_start=0.0,
     )
+    labels = ls.get("labels") or {}
     frames: dict[str, Any] = {}
-    for key in LISTEN_CLIPS:
-        x, sr = sf.read(OUT / row["clips"][key]["wav"], dtype="float32")
-        frames[LISTEN_LABELS[key]] = td.Frame(
+    for key, clip in row["clips"].items():
+        x, sr = sf.read(OUT / clip["wav"], dtype="float32")
+        frames[labels.get(key) or listen_label(key)] = td.Frame(
             {"audio": td.uniform(x[None], sr, dims=("mic", "time"), t_start=0.0), "rps": rps}
         )
     fig = nl.spectrogram_figure(
         frames,
         dyn_range=float(ls["dyn_range_db"]),
-        figsize=(11, 10),
+        figsize=(11, 2.5 * len(frames) + 2.5),
         shared_scale=True,
         rps="once",
     )
@@ -1449,6 +1488,59 @@ def plot(d: dict[str, Any]) -> None:
     fig_listen(d, "michaels", "fig_k_listen_michaels.png")
 
 
+def round_views(tag: str) -> dict[str, Any]:
+    """``--round``: round ``tag`` beside round 2 — the static shares of every
+    family, the parameter views of the three pooled fits, § Listen with both
+    rounds rendered on the same real windows and seed."""
+    nl = _noise_lab()
+    return dict(
+        tag=tag,
+        static_shares=static_shares(("r2", tag)),
+        rigs=dict(
+            over_bar_db=RIG_OVER_DB,
+            floor_at_hz=RIG_FLOOR_AT_HZ,
+            fmin_hz=RIG_FMIN_HZ,
+            v3_r2=v3_rig_panels(nl, "r2"),
+            **{f"v3_{tag}": v3_rig_panels(nl, tag)},
+        ),
+        listen=listen(("r2", tag)),
+    )
+
+
+def fig_static_shares(d: dict[str, Any], name: str) -> None:
+    """Share of each family's mean square that is static (the pool mean per
+    track), round 2 against round ``d["tag"]``, one panel per pool."""
+    tag = str(d["tag"])
+    ss = d["static_shares"]
+    fams = list(next(iter(ss.values()))["families"])
+    fig, axes = plt.subplots(1, len(V3_POOLS), figsize=(13, 4.6), sharey=True)
+    x = np.arange(len(fams))
+    for ax, (key, stem) in zip(np.atleast_1d(axes), V3_POOLS.items(), strict=True):
+        for i, (rnd, colour) in enumerate((("r2", C_R2), (tag, C_R1))):
+            fam = ss[f"{rnd}/{stem}"]["families"]
+            share = [100.0 * float(fam[f]["static_share"]) for f in fams]
+            ax.bar(x + (i - 0.5) * 0.38, share, 0.38, color=colour, label=f"round {rnd[1:]}")
+        ax.set_xticks(x)
+        ax.set_xticklabels(fams, rotation=35, ha="right")
+        ax.set_title(RIG_NAMES[key], loc="left")
+        ax.grid(alpha=0.3, axis="y")
+    np.atleast_1d(axes)[0].set_ylabel("static share of the mean square (%)")
+    np.atleast_1d(axes)[0].legend(loc="upper right")
+    fig.tight_layout()
+    _save(fig, name)
+
+
+def plot_round(d: dict[str, Any]) -> None:
+    tag = str(d["tag"])
+    rows = [
+        (row, f"v3 round {tag[1:]}, {RIG_NAMES[k]}") for k, row in d["rigs"][f"v3_{tag}"].items()
+    ]
+    fig_rigs(d, rows, f"fig_h_v3_rigs_{tag}.png")
+    fig_static_shares(d, f"fig_l_static_shares_{tag}.png")
+    fig_listen(d, "dregon", f"fig_j_listen_dregon_{tag}.png")
+    fig_listen(d, "michaels", f"fig_k_listen_michaels_{tag}.png")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1465,7 +1557,27 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=f"recompute Figs J-K and the WAVs (no pool build) into {DATA}, then redraw",
     )
+    ap.add_argument(
+        "--round",
+        metavar="TAG",
+        help="a later v3 round (a noise_lab.V3_FIT_DIRS key, e.g. r3a) beside round 2: static "
+        "shares, parameter views and § Listen into figdata_TAG.json and fig_*_TAG.png (with "
+        "--plot-only: redraw them)",
+    )
     args = ap.parse_args(argv)
+    if args.round:
+        if args.rigs_only or args.listen_only:
+            ap.error("--round takes --plot-only only")
+        data = OUT / f"figdata_{args.round}.json"
+        if args.plot_only:
+            d = load(data)
+        else:
+            d = _r(round_views(str(args.round)), 4)
+            OUT.mkdir(parents=True, exist_ok=True)
+            data.write_text(json.dumps(d, ensure_ascii=False) + "\n")
+            print(f"wrote {data}")
+        plot_round(d)
+        return 0
     if args.plot_only:
         d = load(DATA)
     else:

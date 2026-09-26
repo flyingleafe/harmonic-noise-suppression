@@ -32,8 +32,9 @@ THE SIX GENERATIONS, as noise sources::
                                   sampled v2 rig bank; V3Bank("easy"|"hard",
                                   i) is the v3 one (`dload:noise-v3-banks`)
     V3Fit("dregon")               the noise-model-v3 single-regime fit
-                                  (results/noise_v3/fits{,_r2}/, round "r1",
-                                  "r2" or "latest" = r2 when it is on disk);
+                                  (results/noise_v3/fits{,_r2,_r3a,_r3b}/,
+                                  round "r1", "r2", "r3a", "r3b" or "latest"
+                                  = r2 when it is on disk, else r1);
                                   V3Fit("michaels") is the v3 standby +
                                   cruise pair, composed as V2Fit("michaels");
                                   v3_fit_names() lists what is on disk
@@ -154,9 +155,15 @@ FIT_PATHS: dict[str, dict[str, str]] = {
 
 #: The noise-model-v3 fit directories, by round: round 1 is the reduced
 #: campaign (4 restarts x 5 alternation rounds), round 2 the mm1-wander refit
-#: (20 rounds) that lands file by file.  A rig's round is ON DISK only when
-#: every one of its regime files is (:func:`v3_fit_names`).
-V3_FIT_DIRS = {"r1": "results/noise_v3/fits", "r2": "results/noise_v3/fits_r2"}
+#: (20 rounds), rounds 3a/3b the measured-wander refits with the ridge step and
+#: rig L-BFGS without the relative stop (3b adds the u_j kernel prior).  A rig's
+#: round is ON DISK only when every one of its regime files is (:func:`v3_fit_names`).
+V3_FIT_DIRS = {
+    "r1": "results/noise_v3/fits",
+    "r2": "results/noise_v3/fits_r2",
+    "r3a": "results/noise_v3/fits_r3a",
+    "r3b": "results/noise_v3/fits_r3b",
+}
 
 #: The v3 fit file of each rig, by regime, inside a :data:`V3_FIT_DIRS` round.
 V3_FIT_FILES: dict[str, dict[str, str]] = {
@@ -396,7 +403,7 @@ class Rig:
         self.repo_sha = repo_sha
         #: ``"v2"`` or ``"v3"``.
         self.generation = generation
-        #: The v3 round the payloads came from (``"r1"``/``"r2"``); ``None`` for v2.
+        #: The v3 round the payloads came from (a :data:`V3_FIT_DIRS` key); ``None`` for v2.
         self.fit_round = fit_round
 
     @property
@@ -530,9 +537,10 @@ def load_rig_v3(name: str, round: str = "latest") -> Rig:
     """Load one noise-model-v3 rig's fit(s) with their provenance.
 
     ``name`` is ``"dregon"`` (the single-regime room-2 fit) or ``"michaels"``
-    (the FLY125 standby + cruise pair).  ``round`` is ``"r1"``, ``"r2"`` or
-    ``"latest"`` — r2 when every one of the rig's round-2 files is on disk,
-    else r1; :attr:`Rig.fit_round` says which was taken.
+    (the FLY125 standby + cruise pair).  ``round`` is a :data:`V3_FIT_DIRS` key
+    (``"r1"``, ``"r2"``, ``"r3a"``, ``"r3b"``) or ``"latest"`` — r2 when every
+    one of the rig's round-2 files is on disk, else r1; :attr:`Rig.fit_round`
+    says which was taken.
     """
     key = str(name).lower()
     if key not in V3_FIT_FILES:
@@ -1836,7 +1844,8 @@ class V3Fit(V2Fit):
     payload's ``wander`` block, work rate ``front_end.sr_work`` (32 kHz).
 
     ``round`` is ``"r1"`` (the reduced campaign, ``results/noise_v3/fits``),
-    ``"r2"`` (the mm1-wander refit, ``results/noise_v3/fits_r2``) or
+    ``"r2"`` (the mm1-wander refit, ``results/noise_v3/fits_r2``), ``"r3a"`` /
+    ``"r3b"`` (the round-3 refits, ``results/noise_v3/fits_r3{a,b}``) or
     ``"latest"`` — r2 when all of the rig's r2 files are on disk, else r1; the
     name and ``entry`` say which was taken.  :meth:`expected_m` is the forward
     model with the wander at its mean (latents zero, :meth:`Rig.expected_m`).
