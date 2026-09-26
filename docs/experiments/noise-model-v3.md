@@ -1232,6 +1232,8 @@ The v2 SCv2 pair ran 3.1 h (easy) and 3.7 h (hard) on `uni`.
 
 | arm | job | backend | state |
 |---|---|---|---|
+| `nv3_easy_scv2` | `nv3-easy-scv2-9bc4c1` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 ~00:28Z at `23576375` (placing) |
+| `nv3_hard_scv2` | `nv3-hard-scv2-149094` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 ~00:29Z at `23576375` (queued) |
 
 ### Results
 
