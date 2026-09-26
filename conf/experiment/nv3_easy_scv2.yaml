@@ -1,0 +1,26 @@
+# @package _global_
+# SCv2 on the noise-model-v3 EASY bank: `nv2_easy_scv2` with the v2 fits
+# replaced by the round-2 v3 fits (static latent part folded into the rig,
+# results/noise_v3/diag/folded_r2, commit 1b698d78), sampled by the SAME
+# neighbourhood construction (seed 20260921, strength 3.0, 2048 entries), each
+# entry flown on its own rig's fitted trajectory.
+#
+# `rig_easy_scv2_unified` with ONE field changed, the training stream, exactly
+# as `nv2_easy_scv2`: same `real_r1_scv2` architecture, same
+# `override /validation: rps_unified`, bfloat16, batch 128, 12 workers, 2 s
+# clips, `samples_per_validation: null`, synthetic only. Read against
+# `nv2_easy_scv2` (7.94) and `real_r4_scv2_unified` (2.99).
+#
+# Stream: conf/online_mix/noise_v3_easy_5050.yaml. The bank rides the pinned
+# `noise-v3-banks` dataset; the job pulls it first (`dload pull
+# noise-v3-banks`).
+# Batch doc: docs/experiments/noise-model-v3.md.
+defaults:
+  - rig_easy_scv2_unified
+  - _self_
+
+experiment_name: nv3_easy_scv2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v3_easy_5050.yaml

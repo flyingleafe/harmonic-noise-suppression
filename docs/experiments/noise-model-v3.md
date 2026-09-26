@@ -1125,6 +1125,124 @@ families (`u` 0.63, `u_j` 0.76, v k 9–60 0.78–0.85 ×).
 - `results/noise_v3/checks/param_view/{dregon,michaels_cruise,michaels_standby}_{params,comb}.png` (v3 beside the v2 fit it replaces)
 - `results/noise_v3/checks_r2/heldout/prominence_hist.png`, `results/noise_v3/checks_r2/tonality/fits_ladder.png` (the same two for the round-2 fits)
 
+## Training arms (round-2 fits)
+
+The v3 twins of the v2 transfer pair `nv2_easy_scv2` / `nv2_hard_scv2`
+(`docs/experiments/noise-v2-transfer.md`). Same trunk, same stream, same bank
+construction; only the fitted noise model differs. Per-experiment docs:
+`conf/experiment/nv3_{easy,hard}_scv2.md`.
+
+### What the arms fly
+
+**The fits.** The anchors are the round-2 v3 fits
+(`results/noise_v3/fits_r2/{dregon_room2_floor,michaels_fly125_cruise,michaels_fly125_standby}__flight_v3.json`,
+commit `0b87c5eb`). The static part of their fitted block latents is folded
+into the rig (`results/noise_v3/diag/folded_r2/`, commit `1b698d78`,
+`scripts/noise_v3_diag.py fold_static`). The fold moves the profile by the
+window-mean `d + v`, the floor mean by the mean `u`, and `z` by
+`L⁻¹ mean(u_j) / σ_B`. It is an exact reparametrisation: the fit's block
+spectra move by ≤ 8e-4 dB, and it adds no parameter. `DiagV3` asked for the
+fold before the banks were built. The renderer draws zero-mean wander, so on
+the unfolded r2 payloads it drops the static part and adds the prior's Jensen
+term on top. A render then sits above what the fit explains, in dB:
+
+| rig | 100–300 Hz | 300–700 | 0.7–1.5 k | 1.5–3 k | 3–5 k | 5–7 k |
+|---|---:|---:|---:|---:|---:|---:|
+| DREGON | −0.05 | +0.39 | +0.89 | +1.80 | +1.30 | +1.83 |
+| Michael's cruise | +0.05 | +3.51 | +3.31 | +3.41 | +2.40 | +2.58 |
+
+The fold brings DREGON within 0.35 dB of the fit, and Michael's cruise to
++0.1..+1.6 dB (`results/noise_v3/diag/ltas_bias_r2.json`).
+`render.py` is unchanged.
+
+**The pool.** `NoiseV2Pool` reads `noise-v3-fit/1` payloads through the same
+policy keys and bank container. It checks the wander block, σ_B and the wind
+mic count. Each fit renders at its own work rate: 32 kHz for v3, 64 kHz for
+every v2 fit, as before. v2 renders are byte-identical before and after the
+change. Six pinned 2 s × 8-mic pool renders (easy[3], easy[1500], hard[2000],
+each at speed scale 1.0 and 0.4) gave identical sha256s. A v3 render costs
+1.1 s per 2 s × 8 mics on one core, against 1.9 s for v2.
+
+**The banks** (`scripts/noise_v2_build_bank.py --preset easy|hard
+--generation v3`, `experiments.noise_model.rig_sampler`). The construction and
+hyperparameters are v2's: seed 20260921, strength 3.0, the v2 widths,
+`structure.json`, the LTAS envelope, the γ excursion cap, the pinned speed
+laws, 2048 entries, 16 attempts, 1024 draws per rig on easy, and the
+CRUISE ↔ CRUISE path on K = 1..81 on hard. Every perturbed v2 coordinate maps
+to its v3 counterpart as follows:
+
+| v2 coordinate | v3 counterpart |
+|---|---|
+| rig level (comb + floor mean), rotor gain, trend slope, residual mix, γ level and per-order scatter, σ_ν, λ | the same draws, verbatim |
+| floor shape z (v2 GP, 5 dB scale) + floor tilt (dB/oct) | the same two draws, written as their exact dB move at every control point into the v3 spline `z` (`σ_B L z`) |
+| floor mean | `floor_mean_db` (μ), same draw |
+| mic line / floor / overall gains | none: v3 normalises channels in the data. DREGON's per-mic `wind_db` takes the rig level plus v2's per-mic floor width |
+| — (v3 only) wander `(σ, τ)` | NOT perturbed: every neighbourhood entry keeps its anchor's fitted block. On the path the block is carried like the standby slot (Michael's with probability t) |
+| path: floor | control values linear in dB, σ_B(t) linear. The wind fades linearly in power towards Michael's (none) |
+
+**Deviation: the trend guard.** The fold flattens Michael's cruise: rotors 2
+and 3 fall by only 0.6 and 0.2 dB from k = 1 to 81. Before the fold they fell
+by 14.5 and 9.9 dB; in the v2 R3 fit, by 13.8 and 6.5. v2's absolute rule
+("every rotor falls by ≥ 3 dB") therefore refuses the anchor itself, and every
+draw near it. The v3 bound is `min(3 dB, reference drop − 3 dB)` per rotor:
+
+- It equals v2's rule on every rotor whose reference falls by ≥ 6 dB, which
+  covers all DREGON rotors and Michael's rotor 1.
+- Elsewhere a draw may not flatten a rotor by more than 3 dB below its fit.
+
+A first build with a step rule failed. That rule was v2's 3 dB wherever the
+reference clears 3 dB, and relative below. It exhausted 1/2048 easy draws
+(Michael's, index 1843) and 3/2048 hard draws near t = 0.84, where the
+interpolated rotors 2 and 3 fall by about 3.3 dB and the step refused about
+half the draws. The continuous rule accepts both indices at the first
+attempt. Standby payloads keep v2's absolute 3 dB.
+
+### The banks as built
+
+The banks are published as dload `noise-v3-banks@8c62fa744282…`, pinned in
+`dload.lock` and named with the pin in both policies. They were built on
+`uni-cpu` at `aac0ba85` (jobs `nv3-bank2-easy-339185` and
+`nv3-bank2-hard-843ffb`, 14 workers, about 200 s each). The build reports
+are `results/noise_v3/rig_sampler/build_{easy,hard}.json`.
+
+| bank | sha256 | attempts / entry | first try | guards fired (gamma / ltas / trend) | coverage > 300 Hz (DREGON / Michael's) |
+|---|---|---:|---:|---|---|
+| easy | `b59d810276a9a140…` | 1.827 | 56.6 % | 757 / 845 / 447 | 93.1 % / 93.3 % |
+| hard | `8dde71483c7ae01d…` | 1.851 | 54.9 % | 776 / 890 / 416 | 96.2 % / 95.2 % |
+| *v2 easy / hard* | — | 2.017 / 1.778 | — | — | 100.0 / 99.0 %, 98.5 / 100.0 % |
+
+The hard bank reproduces v2's mixing coordinate exactly: the same seed draws
+`t` first, giving mean 0.501, KS 0.0166 and the same deciles, and 50.2 % of
+entries carry the standby slot. Both banks cover the real windows above the
+ladder's 90 % target, but less of them than the v2 banks did.
+
+Spot check (`notebooks/noise_lab.py`, `V3Bank`, 2 s at 2 mics, rendered on the
+fitted trajectory of the entry's rig): easy 0, 1023, 1024 and 2047, and hard
+entries at t ≈ 0.05, 0.35, 0.65 and 0.95. All eight renders are finite. RMS is
+0.045–0.091. The Michael's entries show the resolved comb and the DREGON ones
+the wind-dominated low band, the same picture as the anchors
+(`results/noise_v3/rig_sampler/spotcheck_v3_banks.{png,json}`).
+
+### Jobs
+
+The jobs were submitted from detached worktrees with
+`scripts/noise_v2_submit_arms.sh --backend vast --gpu-type A100 --cpus 16
+--mem 64 --time 8h nv3`. Each job pulls `noise-v3-banks` before `train.py`.
+The v2 SCv2 pair ran 3.1 h (easy) and 3.7 h (hard) on `uni`.
+
+| arm | job | backend | state |
+|---|---|---|---|
+
+### Results
+
+**PENDING.** The v2 protocol applies. Selection is on the smoothed
+`real_overall` (`best_checkpoints.json`). The metrics are raw @ sel, best raw
+and `r1`/`r2`/`r3` from the R2 `validation_history.jsonl`. After that,
+`scripts/_regime_decomp.py --exp <arm> --ckpt best_real_overall --out
+results/regime_decomp/<arm>.json`, overall + zero / standby / ramp / cruise
+and `by_rig`, against `results/regime_decomp/nv2_{easy,hard}_scv2.json`.
+
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |

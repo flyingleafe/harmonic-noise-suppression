@@ -1,0 +1,40 @@
+NV3BANK preset=hard sha=aac0ba85bd15 host=ddy18 nproc=1
+building the v3 hard bank: 2048 draws at strength 3 (the first ladder setting reaching 90% above 300 Hz), seed 20260921
+  128/2048 draws
+  256/2048 draws
+  384/2048 draws
+  512/2048 draws
+  640/2048 draws
+  768/2048 draws
+  896/2048 draws
+  1024/2048 draws
+  1152/2048 draws
+  1280/2048 draws
+  1408/2048 draws
+  1536/2048 draws
+  1664/2048 draws
+  1792/2048 draws
+  1920/2048 draws
+  2048/2048 draws
+
+results/noise_v3/rig_sampler/banks/noise_v3_hard_n2048.json  (30.5 MB, sha256 8dde71483c7ae01d)
+  preset hard / mode path, strength 3, 2048 entries, seed 20260921
+  digest 43d4ed70815b681e
+  acceptance: 1.851 attempts per entry, 54.9% first try, 1742 draws rejected (46.0%)
+  guards fired: {'gamma_excursion': 776, 'ltas': 890, 'trend_falls': 416}
+  mixing coordinate: mean 0.501, KS 0.0166 against the 95% threshold 0.0300 (passes); deciles [233, 194, 186, 214, 196, 197, 191, 213, 192, 232]
+  standby slot carried by 50.2% of entries
+  orders dropped: dregon 7, michaels 0
+  coverage of the real windows: dregon 96.2% above 300 Hz (96.7% all bands), michaels 95.2% above 300 Hz (96.4% all bands)
+  self-check: 8 entries rendered one at a time for 2 s, 4 of them also on a standby-speed window; cruise RMS 0.0255-0.0680; 1028 per-regime entries in the bank, traj rigs ['None']
+    [  455] v3_path_s3_00455 t=0.000 cruise-only: cruise 67.3-86.9 rev/s, RMS 0.0544
+    [ 1271] v3_path_s3_01271 t=0.130 cruise-only: cruise 67.3-86.9 rev/s, RMS 0.0680
+    [ 1974] v3_path_s3_01974 t=0.284 cruise-only: cruise 67.3-86.9 rev/s, RMS 0.0617
+    [ 1541] v3_path_s3_01541 t=0.420 cruise-only: cruise 67.3-86.9 rev/s, RMS 0.0331
+    [ 1072] v3_path_s3_01072 t=0.577 per-regime: cruise 67.3-86.9 rev/s, RMS 0.0255 | standby 23.6-30.4 rev/s, blend 0.00, RMS 0.0169
+    [ 1727] v3_path_s3_01727 t=0.730 per-regime: cruise 67.3-86.9 rev/s, RMS 0.0458 | standby 23.6-30.4 rev/s, blend 0.00, RMS 0.0162
+    [  463] v3_path_s3_00463 t=0.867 per-regime: cruise 67.3-86.9 rev/s, RMS 0.0477 | standby 23.6-30.4 rev/s, blend 0.00, RMS 0.0179
+    [ 1825] v3_path_s3_01825 t=0.023 per-regime: cruise 67.3-86.9 rev/s, RMS 0.0550 | standby 23.6-30.4 rev/s, blend 0.00, RMS 0.0158
+  wall 198.8 s (14 workers)
+  report results/noise_v3/rig_sampler/build_hard.json
+NV3BANK_DONE exit=0 wall_s=214

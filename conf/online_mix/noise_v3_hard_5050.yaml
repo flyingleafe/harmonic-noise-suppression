@@ -1,0 +1,84 @@
+# ARM: NOISE-MODEL-V3 HARD -- conf/online_mix/noise_v2_hard_5050.yaml with the
+# v2 fits replaced by the round-2 v3 fits, and NOTHING else changed.
+#
+# DERIVED from conf/online_mix/noise_v2_hard_5050.yaml (the v2 hard arm, best
+# real MAE 7.06). The two files differ in ONE line, `preset_bank`, and in this
+# header. Every other key is the v2 hard policy's, and that header explains
+# each one. In particular the trajectory is the rig HYPERPRIOR (`rigs:
+# {posterior: 1}`, every entry `traj_rig: null`), truncated by `rps_max: 150`,
+# with `rps_scale_range: [1.0, 1.0]`. The `rps.rigs` key names a TRAJECTORY
+# rig, not a noise fit, so it stays.
+#
+# THE BANK. It has 2048 entries, a `noise-v2-bank/1` container of
+# `noise-v3-fit/1` payloads. It was built by `scripts/noise_v2_build_bank.py
+# --preset hard --generation v3` with the v2 bank's construction and
+# hyperparameters: seed 20260921, spread 3.0, the v2 widths, guards and LTAS
+# envelope. It is the CRUISE <-> CRUISE path between the two round-2 v3 fits,
+# with their static latent part folded into the rig
+# (results/noise_v3/diag/folded_r2, commit 1b698d78). The mixing coordinate is
+# t ~ U[0, 1], on the common order range K = 1..81, with DREGON's orders 82-88
+# dropped. The standby slot is CARRIED as in v2: Michael's standby with
+# probability t. The wander block is carried the same way (Michael's with
+# probability t, DREGON's otherwise), so every entry keeps a FITTED wander
+# block. The floor control values are interpolated linearly in dB. DREGON's
+# wind fades out linearly in power towards Michael's, which has none. The full
+# conventions are recorded as the bank's `provenance.path_interp`.
+#
+# THE BANK TRAVELS AS A PINNED DATASET, `noise-v3-banks`, exactly as the v2
+# banks do. The `preset_bank` below names the file inside it WITH ITS
+# VERSION, and the same pin sits in `dload.lock`. A job pulls it once
+# (`dload pull noise-v3-banks`) before train.py. The build report rides in
+# the same tree as build_hard.json.
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+sources:
+  noise:
+  - kind: noise_v2
+    weight: 0.8
+    n_mics: 8
+    n_rotors: 4
+    preset_bank: dload:noise-v3-banks@8c62fa74428241ace1beb782ec1de2fb442cfcd45bfca2bc72711452284f65ff/noise_v3_hard_n2048.json
+    render_reuse: 192
+    rps_scale_range:
+    - 1.0
+    - 1.0
+    normalize_rms_range:
+    - 0.02
+    - 0.25
+    level_mode: flight
+    rps:
+      kind: fitted_traj
+      fits: dload:rps-traj-fits
+      rigs:
+        posterior: 1
+      mean_shift:
+      - -5.0
+      - 5.0
+      flight_fs: 200
+      flight_reuse: 32
+      rps_max: 150
+  - kind: silence
+    weight: 0.2
+    n_channels: 8
+  speech:
+  - dataset: librispeech
+    subpath: LibriSpeech/train-clean-100
+policy:
+  stages:
+  - until: null
+    source_prob: 1.0
+    snr_db:
+      uniform:
+        low: -30.0
+        high: 0.0
+    speech_per_channel: independent
+    snr_per_channel: false
+    augmentations:
+      probability: 0.5
+      choices:
+      - random_gain:
+          min_db: -6.0
+          max_db: 6.0
+      - random_polarity: {}
