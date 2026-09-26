@@ -1,6 +1,6 @@
 ---
 title: "The latents that keep growing"
-subtitle: "Noise model v3, rounds 1 and 2: why each fit stops, why the leash does not, and what the latents eat"
+subtitle: "Noise model v3, rounds 1 to 3: why each fit stops, why the leash does not, what the latents eat, and the round that stops them"
 format:
   html:
     toc: true
@@ -43,7 +43,8 @@ def pct(v):
 ::: {.callout-note}
 ## Status
 
-Discussion page, 2026-09-25. It answers one question from Dmitrii. Nothing
+Discussion page, 2026-09-25. It answers one question from Dmitrii. §8
+adds round 3 (2026-09-26). Nothing
 here is fitted. Every number comes from the committed fits. One script
 makes every figure: `scripts/noise_v3_latent_runaway_figs.py`. It writes
 every plotted number to
@@ -664,6 +665,270 @@ So the leash sets the split.
 - @tbl-ridge: the rig floor cannot draw the notch. It costs 13 919 nats.
 - @fig-c: the notch follows the leash. −8.6 dB at σ 1.52 dB. −21.3 dB at
   σ 3.99 dB.
+
+# 8. Round 3
+
+Round 3 tests the diagnosis. It changes the fit, not the model. No
+parameter is added.[^r3]
+
+- **The rig step runs to its cap.** In round 2 each rig step stopped
+  after 1–2 iterations. Now each step runs 150 + 75 iterations.
+- **The ridge step.** After each latent step, the static part moves into
+  the rig. The Whittle term does not change. Only the priors change.
+- **The leash is the measured σ.** It does not grow between fits.
+- **Round 3b only: the floor colour wanders smoothly.** $u_j$ is
+  correlated across the control points. The kernel is the rig floor's
+  own kernel, 1.5 octaves. A one-point notch now costs as much in $u_j$ as
+  in the rig.
+
+Round 3a has the first three changes. Round 3b has all four. Each round
+fits 4 restarts per pool.
+
+[^r3]: Jobs, commands and every table: `docs/experiments/noise-model-v3.md`
+    § Round 3. Fits: `results/noise_v3/fits_r3{a,b}/`. Checks:
+    `results/noise_v3/checks_r3{a,b}/`. The tables below read
+    `results/noise_v3/diag/verdict_r3.json`
+    (`results/noise_v3/diag/r3_tools/verdict.py`). The figures come from
+    `scripts/noise_v3_latent_runaway_figs.py --round r3a` and `--round r3b`,
+    which write `figdata_r3a.json` and `figdata_r3b.json`.
+
+```{python}
+VD = json.loads(Path("../../results/noise_v3/diag/verdict_r3.json").read_text())
+F3 = {
+    tag: json.loads(Path(f"noise-model-v3-latent-runaway/figdata_{tag}.json").read_text())
+    for tag in ("r3a", "r3b")
+}
+POOL_NAMES = {
+    "dregon_room2_floor": "DREGON",
+    "michaels_fly125_cruise": "cruise",
+    "michaels_fly125_standby": "standby",
+}
+
+
+def nats(v):
+    return f"{v:,.0f}".replace(",", " ").replace("-", "−")
+```
+
+## The static part is gone
+
+![**What you see:** the static share of each latent family, round 2 (red) against round 3b (blue), one panel per pool.](noise-model-v3-latent-runaway/fig_l_static_shares_r3b.png){#fig-l}
+
+```{python}
+#| label: tbl-r3-static
+#| tbl-cap: "Static share of each family's mean square: the pool mean per track. Rounds 2 → 3a → 3b. Source: `verdict_r3.json` `<round>.objective.<pool>.shares`."
+fams = ["d", "u", "u_j", "v k9-24", "v k25-60", "v k61+"]
+rows = [
+    "| pool | " + " | ".join(f"${x.split()[0]}$ " + " ".join(x.split()[1:]).replace("k61+", "k ≥ 61").replace("-", "–") for x in fams) + " |",
+    "|---|" + "---:|" * len(fams),
+]
+for pool, name in POOL_NAMES.items():
+    cells = [" → ".join(pct(VD[t]["objective"][pool]["shares"][x]) for t in ("r2", "r3a", "r3b")) for x in fams]
+    rows.append(f"| {name} | " + " | ".join(cells) + " |")
+Markdown("\n".join(rows))
+```
+
+- Round 2 kept 13–88 % of each family as one static shape.
+- Round 3a empties every family but $u_j$. $u_j$ keeps 43 % on DREGON.
+  The rig spline cannot draw the notch cheaply. So the notch stays in $u_j$.
+- Round 3b empties $u_j$ too. Every family is at 0–2 %.
+  <!-- source: verdict_r3.json r2/r3a/r3b.objective.*.shares: r2 0.13..0.88; r3a u_j 0.43, 0.15, 0.23; r3b all <= 0.02 -->
+
+The latents now hold wander. They do not hold rig error.
+
+## The score
+
+Each fit is scored under the same law, the measured wander. The target is
+the best earlier fit under that law.
+
+```{python}
+#| label: tbl-r3-score
+#| tbl-cap: "Total objective (nats) under the measured wander. Lower is better. Δ = total − target. Round 3b is re-priced from its own prior to the measured one (`scripts/_nv3_reprice.py`). Whittle = the data term alone. Source: `verdict_r3.json` `<round>.objective`."
+rows = [
+    "| pool | round | total | Δ to target | Δ per cell | Whittle |",
+    "|---|---|---:|---:|---:|---:|",
+]
+for pool, name in POOL_NAMES.items():
+    for t in ("r2", "r3a", "r3b"):
+        o = VD[t]["objective"][pool]
+        rows.append(
+            f"| {name} | {t} | {nats(o['total_measured'])} | {nats(o['vs_target'])} | "
+            f"{f(o['vs_target'] / o['n_cells'] * 1e3, 2)}e−3 | {nats(o['whittle'])} |"
+        )
+Markdown("\n".join(rows))
+```
+
+- Both round-3 fits beat the target in every pool.
+- 3a beats 3b by 7 619, 3 364 and 602 nats. Most of that is the Whittle
+  term: 5 757, 3 132 and 566 nats.
+- That Whittle gap is the price of the smooth $u_j$. The notch bought
+  those nats. The diagnosis priced the notch at 3.5k nats (DREGON) and
+  4.2k nats (cruise).
+  <!-- source: verdict_r3.json r3a/r3b.objective.*.total_measured, whittle; results/noise_v3/diag/findings.md §2-3 notch net worth 3 507 / 4 872 nats (Whittle 3 291 / 4 181) -->
+
+The rig steps now run to their cap: 225 iterations per round, 2 025–4 050
+per restart. Round 2 used 16–75 in total. Each alternation stops within
+8–17 rounds. One problem is left. On DREGON the final all-frames polish
+still gains 4–6 nats per thousand cells. The rig that the 64-frame subset
+finds is not the all-frames optimum.
+<!-- source: verdict_r3.json r3*.objective.*.restarts[].rig_iters, rounds; fits_r3{a,b}/restarts/dregon_*.json optimiser.polish.gain_per_cell 4.4e-3..5.7e-3 -->
+
+## The rig now
+
+![**What you see:** the round-3b fits, latents at zero. DREGON and Michael's cruise at 80 rev/s. Standby at 30.6 rev/s. Same axes as @fig-h.](noise-model-v3-latent-runaway/fig_h_v3_rigs_r3b.png){#fig-h3}
+
+```{python}
+#| label: tbl-r3-rigs
+#| tbl-cap: "The rows of @fig-h (round 2) beside rounds 3a and 3b. Line over floor = stem height. Floor = the floor part. Source: `figdata_r3a.json` and `figdata_r3b.json` `rigs`."
+rows = [
+    "| rig | round | $k = 1$ dB | $k = 2$ dB | orders > 3 dB | max γ Hz | floor 100 Hz dB | floor 1 kHz dB | floor 4 kHz dB |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+]
+for key in ("dregon", "cruise", "standby"):
+    for t, x in (
+        ("r2", F3["r3a"]["rigs"]["v3_r2"][key]),
+        ("r3a", F3["r3a"]["rigs"]["v3_r3a"][key]),
+        ("r3b", F3["r3b"]["rigs"]["v3_r3b"][key]),
+    ):
+        fl = x["floor_at_db"]
+        rows.append(
+            f"| {rig_label[key]} | {t} | {f(x['over_k1_db'], 1)} | {f(x['over_k2_db'], 1)} | "
+            f"{x['n_orders_over']}/{x['n_orders_shown']} | {f(x['gamma_max_hz'], 1)} | "
+            f"{f(fl['100'], 1)} | {f(fl['1000'], 1)} | {f(fl['4000'], 1)} |"
+        )
+Markdown("\n".join(rows))
+```
+
+- The γ tail is gone. The widest line is 15.8 Hz on DREGON (was 42.6) and
+  11.1 Hz on standby (was 86.4).
+- The combs are denser. On cruise 79 of 81 orders stand over 3 dB (was 45).
+- Above 2 kHz the floor sinks again, by 9–11 dB at 4 kHz. The lines carry
+  that band. Nothing measures the floor between the lines there. So the
+  split is still free. Sentence 5 of §7 still holds.
+- Standby's floor sinks to −71 dB at 100 Hz. Line skirts fill the space
+  between its low lines.
+  <!-- source: figdata_r3b.json rigs.v3_r3b.{dregon,cruise,standby}: gamma_max_hz 15.77, 26.89, 11.10; n_orders_over 83/88, 79/81, 130/130; floor_at_db["4000"] -53.06, -42.53; ["100"] standby -70.62; figdata_r3a.json rigs.v3_r2: gamma_max 42.59, 29.32, 86.39; n_orders_over cruise 45; floor 4000 -42.20, -33.30; standby 100 -59.88 -->
+
+## Listen again
+
+Same windows, same seed and same level rule as § Listen. The round-3b fit
+is added.
+
+```{python}
+def listen_players_round(fd, rig, keys):
+    """One row per clip of ``fd`` (a figdata file): the player and its numbers."""
+    row = fd["listen"]["rigs"][rig]
+    cell = "<td style='padding:4px 10px'>"
+    out = [
+        "<table style='border-collapse:collapse'>",
+        "<tr><th style='text-align:left'>clip</th><th>listen</th>"
+        "<th><i>k</i> = 1, dB</th><th><i>k</i> = 2, dB</th><th>LTAS distance, dB</th></tr>",
+    ]
+    for key, label in keys.items():
+        c = row["clips"][key]
+        k1, k2 = c["line_over_floor_db"][:2]
+        dist = db_cell(c.get("ltas_mean_abs_db")) if key != "real" else ""
+        out.append(
+            f"<tr>{cell}<b>{label}</b></td>{cell}<audio controls preload='metadata' "
+            f"src='noise-model-v3-latent-runaway/{c['wav']}'></audio></td>"
+            f"{cell}{db_cell(k1)}</td>{cell}{db_cell(k2)}</td>{cell}{dist}</td></tr>"
+        )
+    out.append("</table>")
+    return HTML("\n".join(out))
+
+
+R3_LABELS = {**LISTEN_LABELS, "v3_r3b": "v3 round-3b fit"}
+```
+
+### DREGON
+
+![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the v2 fit, the round-2 and the round-3b v3 fits, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon_r3b.png){#fig-j3}
+
+```{python}
+listen_players_round(F3["r3b"], "dregon", R3_LABELS)
+```
+
+- The lone line near 2.2 kHz is gone.
+- The LTAS distance grows: 2.2 dB (round 2) to 3.6 dB (round 3b). Round
+  3a: 3.9 dB.
+- Round 3b is 4–6 dB low at 0.3–5 kHz against the real clip. Round 2 was
+  1–5 dB low there.
+- Round 2 rendered 1.3–1.8 dB louder than its own fit above 1.5 kHz. That
+  bias pointed the right way here. Round 3 removed it. [inference]
+  <!-- source: figdata_r3b.json listen.rigs.dregon.clips.v3_r3b.ltas_mean_abs_db 3.610, ltas_dev_db [-0.50, -3.83, -5.88, -4.43, -4.92, -2.10]; clips.v3 2.160, [-0.86, -3.27, -4.81, -1.52, -1.07, -1.44]; figdata_r3a.json clips.v3_r3a 3.888; results/noise_v3/diag/findings.md §1(e) render - fit +1.30..+1.83 dB above 1.5 kHz -->
+
+### Michael's
+
+![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
+
+```{python}
+listen_players_round(F3["r3b"], "michaels", R3_LABELS)
+```
+
+- The LTAS distance shrinks: 2.9 dB (round 2) to 2.0 dB (round 3b).
+- Up to 3 kHz round 3b is within 1 dB of the real clip.
+- At 5–7 kHz it is still 7.6 dB too loud. v2 is 3.4 dB too loud there.
+- $k = 2$ matches: 18.1 dB against 18.7 dB real.
+  <!-- source: figdata_r3b.json listen.rigs.michaels.clips.v3_r3b.ltas_mean_abs_db 2.047, ltas_dev_db [-0.97, -0.98, -0.38, 0.21, 2.18, 7.55], line_over_floor_db[1] 18.14; clips.real line_over_floor_db[1] 18.68; clips.v2 ltas_dev_db[5] 3.44 -->
+
+## The checks
+
+```{python}
+#| label: tbl-r3-checks
+#| tbl-cap: "The §3.5 checks, rounds 2 → 3a → 3b. (e) = fitted mean square + posterior variance over the measured σ² (1 is right). Disappearance = share of a visible line's blocks under 6 dB. Parity = HPPNet PIT MAE on the frozen supports (lower is better; bar 2.188 DREGON, ratio 1.05 Michael's). Proxy = LTAS distance on the frozen supports (lower is better). Source: `verdict_r3.json`."
+R = ("r2", "r3a", "r3b")
+
+
+def arrow(vals, fmt):
+    return " → ".join(fmt(v) for v in vals)
+
+
+rows = ["| check | real | rounds 2 → 3a → 3b |", "|---|---:|---|"]
+for key, fam, lab in (
+    ("dregon", "d", "(e) DREGON $d$"),
+    ("dregon", "uj", "(e) DREGON $u_j$"),
+    ("michaels_cruise", "d", "(e) cruise $d$"),
+    ("michaels_cruise", "uj", "(e) cruise $u_j$"),
+):
+    rows.append(f"| {lab} | 1 | {arrow([VD[t]['e'][key][fam]['lag0'] for t in R], lambda v: f(v))} |")
+for rig, g, lab in (
+    ("dregon", "9-24", "(b) DREGON, orders 9–24"),
+    ("dregon", "25-60", "(b) DREGON, orders 25–60"),
+    ("michaels", "3-8", "(b) Michael's, orders 3–8"),
+    ("michaels", "61+", "(b) Michael's, orders ≥ 61"),
+):
+    real = VD["r3a"]["disappearance"][rig]["real"][g]["rate"]
+    rows.append(f"| {lab} | {pct(real)} | {arrow([VD[t]['disappearance'][rig]['v3'][g]['rate'] for t in R], pct)} |")
+rows.append(f"| (d) parity DREGON, rev/s | — | {arrow([VD[t]['parity']['dregon']['mean'] for t in R], lambda v: f(v, 3))} |")
+rows.append(f"| (d) parity Michael's, ratio | — | {arrow([VD[t]['parity']['michaels']['ratio'] for t in R], lambda v: f(v, 3))} |")
+rows.append(f"| (d) proxy DREGON, dB | — | {arrow([VD[t]['parity']['dregon']['proxy'] for t in R], lambda v: f(v, 2))} |")
+rows.append(f"| (d) proxy Michael's, dB | — | {arrow([VD[t]['parity']['michaels']['proxy'] for t in R], lambda v: f(v, 2))} |")
+Markdown("\n".join(rows))
+```
+
+- The latents come close to the leash. The worst ratios drop from
+  14–22 to 1.5–2.8. $d$ is still 3–4 times too wide.
+- DREGON's middle lines now come and go at the real rate. Round 2 had 5
+  times too many visible lines. Round 3 has the real count.
+- Michael's orders 3–8 are back inside the real interval. Orders ≥ 61
+  still drop out twice as often as the real lines.
+- Parity improves on Michael's: 1.59 rev/s in round 3b. v2 has 1.62.
+  DREGON stays at 1.70.
+- The spectral proxy gets worse on both rigs.
+  <!-- source: verdict_r3.json r2/r3a/r3b: e.dregon.uj.lag0 21.43/3.27/1.53, e.michaels_cruise.d.lag0 22.05/2.55/2.83; disappearance.dregon.v3["9-24"].n_visible 218/26/42 over 20 renders vs real 10 over 5 windows; parity.michaels.mean 2.329/1.674/1.592, v2 1.622 (noise-model-v3.md Conclusion); parity.*.proxy 2.471/2.827/2.561 and 2.168/2.370/2.484 -->
+
+## What round 3 means
+
+1. The diagnosis was right. With the rig step run to its cap and the
+   ridge step, the latents stop eating the rig.
+2. Round 3 fits the data better than round 2 under the same law.
+3. Round 3b is the round to use. It has no static part left, so a render
+   needs no fold. It has the best parity on both rigs. `noise_lab` now
+   loads it as `"latest"`. Its fold is in
+   `results/noise_v3/diag/folded_r3/`.
+4. Two things are still missing. Nothing measures the floor between the
+   lines above 2 kHz. The render draws orders ≥ 61 at a σ the fitted
+   tracks never reach, so it is 1.5 dB too loud at 5–7 kHz.
+   <!-- source: results/noise_v3/diag/ltas_bias_folded_r3.json render_minus_fit.abs_db[5] +1.53 (DREGON), +1.47 (cruise); verdict_r3.json r3b.e.*["v k61+"].lag0 0.46, 0.38, 0.39 -->
 
 # Appendix: the reconstruction
 
