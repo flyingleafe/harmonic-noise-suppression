@@ -1,0 +1,2980 @@
+{
+ "schema": "noise-v3-checks/1",
+ "check": "heldout",
+ "git": "ffb61244a092",
+ "block_s": 0.5,
+ "render_seeds": [
+  2001,
+  2002,
+  2003,
+  2004
+ ],
+ "mid_orders": [
+  8,
+  24
+ ],
+ "under_floor_db": 3.010299956639812,
+ "present_db": 6.0,
+ "hist_edges_db": [
+  -4.0,
+  -3.0,
+  -2.0,
+  -1.0,
+  0.0,
+  1.0,
+  2.0,
+  3.0,
+  4.0,
+  5.0,
+  6.0,
+  7.0,
+  8.0,
+  9.0,
+  10.0,
+  11.0,
+  12.0,
+  13.0,
+  14.0,
+  15.0,
+  16.0,
+  17.0,
+  18.0,
+  19.0,
+  20.0,
+  21.0,
+  22.0,
+  23.0,
+  24.0,
+  25.0,
+  26.0,
+  27.0,
+  28.0,
+  29.0,
+  30.0,
+  31.0,
+  32.0,
+  33.0,
+  34.0,
+  35.0,
+  36.0,
+  37.0,
+  38.0,
+  39.0,
+  40.0
+ ],
+ "fits": {
+  "dregon": {
+   "v3": "results/noise_v3/fits_r3b/dregon_room2_floor__flight_v3.json",
+   "v2": "results/noise_v2/rounds/round5/fits/dregon_room2_floor__flight_profile.json"
+  },
+  "michaels_cruise": {
+   "v3": "results/noise_v3/fits_r3b/michaels_fly125_cruise__flight_v3.json",
+   "v2": "results/noise_v2/rounds/round3/fits/michaels_fly125_cruise__flight.json"
+  },
+  "michaels_standby": {
+   "v3": "results/noise_v3/fits_r3b/michaels_fly125_standby__flight_v3.json",
+   "v2": "results/noise_v2/rounds/round3/fits/michaels_fly125_standby__flight.json"
+  }
+ },
+ "wander_contract": {
+  "dregon": {
+   "schema": "noise-v3-wander/2",
+   "rig": "dregon",
+   "sigma_d_db": 0.9417628624950293,
+   "tau_d_s": 0.30350941912635415,
+   "sigma_v_db": 3.6599860818637993,
+   "tau_v_s": 0.7515045372490663,
+   "sigma_v_db_by_order": {
+    "k_edges": [
+     1,
+     3,
+     9,
+     25,
+     61,
+     110
+    ],
+    "sigma_db": [
+     0.0,
+     0.0,
+     2.977115319133369,
+     3.905039713732859,
+     7.177319720913927
+    ]
+   },
+   "tau_v_s_by_order": {
+    "k_edges": [
+     1,
+     3,
+     9,
+     25,
+     61,
+     110
+    ],
+    "tau_s": [
+     0.7515045372490663,
+     0.7515045372490663,
+     0.786982356585573,
+     0.6177172137044682,
+     0.8730520193656962
+    ],
+    "tau_source": [
+     "pooled",
+     "pooled",
+     "group",
+     "group",
+     "group"
+    ]
+   },
+   "sigma_u_db": 2.8311175333986296,
+   "tau_u_s": 4.724022428078703,
+   "sigma_uj_db": 1.5199574134177198,
+   "tau_uj_s": 1.383338228723798,
+   "block_s": 0.5,
+   "n_lines_used": 32,
+   "n_v_tracks_used": 15185,
+   "n_windows": 50,
+   "provenance": {
+    "generated_by": "scripts/noise_v3_measure_wander.py",
+    "git_head": "8f07160ce150",
+    "explainer": "docs/explainers/noise-model-v3-wander.qmd section 3.3a",
+    "windows": "scripts/_mic_gain_rank.py::rig_specs(extra=True)",
+    "window_specs": [
+     "flight_dregon:free-flight_nosource_room2:1512727397.2050455:4.0:motors_command",
+     "flight_dregon:hovering_nosource_room2:1511903905.3944898:4.0:motors_command",
+     "flight_dregon:updown_nosource_room2:1511903578.348311:4.0:motors_command",
+     "flight_dregon:rectangle_nosource_room2:1511905725.952559:4.0:motors_command",
+     "flight_dregon:spinning_nosource_room2:1511905200.978012:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727403.2050455:8.0:motors_command",
+     "flight_dregon:hovering_nosource_room2:1511903911.3944898:8.0:motors_command",
+     "flight_dregon:updown_nosource_room2:1511903584.348311:8.0:motors_command",
+     "flight_dregon:rectangle_nosource_room2:1511905731.952559:8.0:motors_command",
+     "flight_dregon:spinning_nosource_room2:1511905206.978012:8.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672654.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672658.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672662.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672666.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672670.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672674.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672678.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672682.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672686.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672690.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672694.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672698.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672702.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room1:1519672706.0605333:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727413.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727417.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727421.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727425.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727429.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727433.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727437.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727441.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727445.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727449.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727453.2050455:4.0:motors_command",
+     "flight_dregon:free-flight_nosource_room2:1512727457.2050455:4.0:motors_command",
+     "flight_dregon:hovering_nosource_room2:1511903921.3944898:4.0:motors_command",
+     "flight_dregon:hovering_nosource_room2:1511903925.3944898:4.0:motors_command",
+     "flight_dregon:hovering_nosource_room2:1511903929.3944898:4.0:motors_command",
+     "flight_dregon:rectangle_nosource_room2:1511905741.5589993:4.0:motors_command",
+     "flight_dregon:rectangle_nosource_room2:1511905745.5589993:4.0:motors_command",
+     "flight_dregon:rectangle_nosource_room2:1511905749.5589993:4.0:motors_command",
+     "flight_dregon:rectangle_nosource_room2:1511905753.5589993:4.0:motors_command",
+     "flight_dregon:spinning_nosource_room2:1511905215.3349512:4.0:motors_command",
+     "flight_dregon:spinning_nosource_room2:1511905219.3349512:4.0:motors_command",
+     "flight_dregon:spinning_nosource_room2:1511905223.3349512:4.0:motors_command",
+     "flight_dregon:updown_nosource_room2:1511903596.177404:4.0:motors_command",
+     "flight_dregon:updown_nosource_room2:1511903600.177404:4.0:motors_command",
+     "flight_dregon:updown_nosource_room2:1511903604.177404:4.0:motors_command",
+     "flight_dregon:updown_nosource_room2:1511903608.177404:4.0:motors_command"
+    ],
+    "front_end": "2048/512 periodic Hann, 16 kHz, frame-mean label carriers",
+    "units": "sigma_*: stationary sd in dB; tau_*: OU correlation time in s; block_s in s",
+    "line_set": "resolvable",
+    "line_estimator": "mic-mean order-tracked line level (3 bins at the label carrier minus the local q25 floor), speed law (f/f_ref)^2 removed, centred per line on its regime mean; d = lag-0 cross moment of two lines of one rotor with tau over lags 1-4 (the line set above)",
+    "v_estimator": "sigma_v_db / tau_v_s: the POOLED all-track value -- every classified track (valid in >= 80 % of its window's blocks); block prominence = 10 log10(10^((mu + d + v + e + o) / 10) + eta): v the per-line OU fitted, d the rotor-common OU held at (sigma_d, tau_d), e white block noise s2, o the speed law minus the track's measured local floor deviation, eta line-free cell ratios; mu matched to each track's median; per-track centring, model draws centred alike (sigma = stationary sd); weight = line fraction at the track median, squared; sigma from the weighted lag-0 sum, tau from lags 1-4; sigma_v_db_by_order[i] holds for orders k_edges[i] <= k < k_edges[i+1]; tau_v_s_by_order (present only when some group's tau is pinned by the window bootstrap, 95/5 % ratio < 4) carries the pooled tau_v where tau_source says so",
+    "floor_estimator": "mic-mean comb-masked level on bands around the 14 floor control points, speed law mean_i (f_i/f_ref)^2 removed, centred per band on its regime mean; u = lag-0 cross-band moment with tau over lags 1-4, uj = auto minus u",
+    "block_noise": "measured: within-block frame scatter (lines); exact correlated-cell Gamma count x mic coherence (floor)",
+    "resolvable_lines": {
+     "note": "schema 1: the per-line residual on the resolvable lines only",
+     "sigma_v_db": 1.1505208770050686,
+     "tau_v_s": 0.9132038806959841,
+     "sigma_total_db": 1.4754805456774425,
+     "tau_total_s": 0.5673001249880142
+    },
+    "flags": {},
+    "detail": "results/noise_v3/wander/wander_detail.json"
+   }
+  },
+  "michaels": {
+   "schema": "noise-v3-wander/2",
+   "rig": "michaels",
+   "sigma_d_db": 0.5247579861461655,
+   "tau_d_s": 0.575985351958768,
+   "sigma_v_db": 3.7752985545745554,
+   "tau_v_s": 1.1514377270595022,
+   "sigma_v_db_by_order": {
+    "k_edges": [
+     1,
+     3,
+     9,
+     25,
+     61,
+     277
+    ],
+    "sigma_db": [
+     0.3205396567008768,
+     4.17116100602756,
+     3.793863772396994,
+     3.60659967802293,
+     5.685058339484003
+    ]
+   },
+   "tau_v_s_by_order": {
+    "k_edges": [
+     1,
+     3,
+     9,
+     25,
+     61,
+     277
+    ],
+    "tau_s": [
+     1.1514377270595022,
+     1.1514377270595022,
+     0.8630416875102158,
+     1.062140635312904,
+     1.1514377270595022
+    ],
+    "tau_source": [
+     "pooled",
+     "pooled",
+     "group",
+     "group",
+     "pooled"
+    ]
+   },
+   "sigma_u_db": 1.7316626732067102,
+   "tau_u_s": 1.9819572863955734,
+   "sigma_uj_db": 1.6340634232961726,
+   "tau_uj_s": 1.2343524446037826,
+   "block_s": 0.5,
+   "n_lines_used": 30,
+   "n_v_tracks_used": 3026,
+   "n_windows": 11,
+   "provenance": {
+    "generated_by": "scripts/noise_v3_measure_wander.py",
+    "git_head": "8f07160ce150",
+    "explainer": "docs/explainers/noise-model-v3-wander.qmd section 3.3a",
+    "windows": "scripts/_mic_gain_rank.py::rig_specs(extra=True)",
+    "window_specs": [
+     "flight_michaels:FLY125:16.0:8.0:rps_refined",
+     "flight_michaels:FLY125:32.0:8.0:rps_refined",
+     "flight_michaels:FLY125:48.0:8.0:rps_refined",
+     "flight_michaels:FLY125:64.0:8.0:rps_refined",
+     "flight_michaels:FLY125:96.0:8.0:rps_refined",
+     "flight_michaels:FLY125:112.0:8.0:rps_refined",
+     "flight_michaels:FLY125:128.0:8.0:rps_refined",
+     "flight_michaels:FLY125:144.0:8.0:rps_refined",
+     "flight_michaels:FLY125:2.0:4.0:rps_refined",
+     "flight_michaels:FLY125:6.0:4.0:rps_refined",
+     "flight_michaels:FLY125:10.0:4.0:rps_refined"
+    ],
+    "front_end": "2048/512 periodic Hann, 16 kHz, frame-mean label carriers",
+    "units": "sigma_*: stationary sd in dB; tau_*: OU correlation time in s; block_s in s",
+    "line_set": "dominant",
+    "line_estimator": "mic-mean order-tracked line level (3 bins at the label carrier minus the local q25 floor), speed law (f/f_ref)^2 removed, centred per line on its regime mean; d = lag-0 cross moment of two lines of one rotor with tau over lags 1-4 (the line set above)",
+    "v_estimator": "sigma_v_db / tau_v_s: the POOLED all-track value -- every classified track (valid in >= 80 % of its window's blocks); block prominence = 10 log10(10^((mu + d + v + e + o) / 10) + eta): v the per-line OU fitted, d the rotor-common OU held at (sigma_d, tau_d), e white block noise s2, o the speed law minus the track's measured local floor deviation, eta line-free cell ratios; mu matched to each track's median; per-track centring, model draws centred alike (sigma = stationary sd); weight = line fraction at the track median, squared; sigma from the weighted lag-0 sum, tau from lags 1-4; sigma_v_db_by_order[i] holds for orders k_edges[i] <= k < k_edges[i+1]; tau_v_s_by_order (present only when some group's tau is pinned by the window bootstrap, 95/5 % ratio < 4) carries the pooled tau_v where tau_source says so",
+    "floor_estimator": "mic-mean comb-masked level on bands around the 14 floor control points, speed law mean_i (f_i/f_ref)^2 removed, centred per band on its regime mean; u = lag-0 cross-band moment with tau over lags 1-4, uj = auto minus u",
+    "block_noise": "measured: within-block frame scatter (lines); exact correlated-cell Gamma count x mic coherence (floor)",
+    "resolvable_lines": {
+     "note": "schema 1: the per-line residual on the resolvable lines only",
+     "sigma_v_db": 1.9122819238992694,
+     "tau_v_s": 1.2596133679021935,
+     "sigma_total_db": 1.980613853474656,
+     "tau_total_s": 1.1763694638660718
+    },
+    "flags": {},
+    "detail": "results/noise_v3/wander/wander_detail.json"
+   }
+  }
+ },
+ "note": "real = held-out windows (DREGON frozen room-2 score windows, motors_command label; FLY124 standby + cruise, rps_refined label); v3/v2 = the fit rendered on each window's own label at the four frozen render seeds, measured by the same estimator. Wander numbers: scripts/noise_v3_measure_wander.py's rig-centred moments (tau at lag 1), window bootstrap; intermittency: every (rotor, order 8-24, block), window bootstrap with a window's render seeds kept together; intermittency_by_order_group: the same statistics on every measured order, per wander order group (its own bootstrap stream)",
+ "rigs": {
+  "dregon": {
+   "line_set": "resolvable",
+   "real": {
+    "windows": [
+     {
+      "spec": "flight_dregon:free-flight_nosource_room2:1512727397.2050455:4.0:motors_command",
+      "fit": "dregon",
+      "regime": "cruise"
+     },
+     {
+      "spec": "flight_dregon:hovering_nosource_room2:1511903905.3944898:4.0:motors_command",
+      "fit": "dregon",
+      "regime": "cruise"
+     },
+     {
+      "spec": "flight_dregon:updown_nosource_room2:1511903578.348311:4.0:motors_command",
+      "fit": "dregon",
+      "regime": "cruise"
+     },
+     {
+      "spec": "flight_dregon:rectangle_nosource_room2:1511905725.952559:4.0:motors_command",
+      "fit": "dregon",
+      "regime": "cruise"
+     },
+     {
+      "spec": "flight_dregon:spinning_nosource_room2:1511905200.978012:4.0:motors_command",
+      "fit": "dregon",
+      "regime": "cruise"
+     }
+    ],
+    "n_windows": 5,
+    "wander": {
+     "numbers": {
+      "sigma_d_db": 0.0,
+      "tau_d_s": null,
+      "sigma_v_db": 0.0,
+      "tau_v_s": null,
+      "sigma_u_db": 3.6620348441484287,
+      "tau_u_s": 1.5269296088564837,
+      "sigma_uj_db": 1.7446864074232293,
+      "tau_uj_s": 500.0,
+      "sigma_total_db": 0.0,
+      "tau_total_s": null,
+      "sigma_floor_total_db": 4.101335001908652
+     },
+     "n_line_tracks": 0,
+     "n_floor_tracks": 60,
+     "bootstrap": {
+      "sigma_d_db": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tau_d_s": [
+       null,
+       null,
+       null
+      ],
+      "sigma_v_db": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tau_v_s": [
+       null,
+       null,
+       null
+      ],
+      "sigma_u_db": [
+       2.5182831572262168,
+       3.6195215228303224,
+       4.036412418427253
+      ],
+      "tau_u_s": [
+       1.0107335221700748,
+       1.3137385898893232,
+       2.7616131568072633
+      ],
+      "sigma_uj_db": [
+       1.3277503626434923,
+       1.6821317145133685,
+       1.8828517834688239
+      ],
+      "tau_uj_s": [
+       500.0,
+       500.0,
+       500.0
+      ],
+      "sigma_total_db": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tau_total_s": [
+       null,
+       null,
+       null
+      ],
+      "sigma_floor_total_db": [
+       2.918082529758652,
+       4.052953874265194,
+       4.503904030391296
+      ],
+      "zero_share": {
+       "sigma_d_db": 1.0,
+       "sigma_v_db": 1.0,
+       "sigma_u_db": 0.0,
+       "sigma_uj_db": 0.0,
+       "sigma_total_db": 1.0,
+       "sigma_floor_total_db": 0.0
+      }
+     },
+     "zero_share": {
+      "sigma_d_db": 1.0,
+      "sigma_v_db": 1.0,
+      "sigma_u_db": 0.0,
+      "sigma_uj_db": 0.0,
+      "sigma_total_db": 1.0,
+      "sigma_floor_total_db": 0.0
+     }
+    },
+    "intermittency": {
+     "n_lines": 340,
+     "n_cells": 2720,
+     "n_present": 0,
+     "n_visible": 10,
+     "frac_under": 0.81875,
+     "frac_under_present": null,
+     "frac_intermittent": 0.10882352941176471,
+     "block_sd_present_db": null,
+     "frac_dropout_visible": 0.6875,
+     "prom_median_db": 1.2377014623967657
+    },
+    "intermittency_boot": {
+     "frac_under": [
+      0.7805147058823529,
+      0.8180147058823529,
+      0.8577205882352941
+     ],
+     "frac_under_present": [
+      null,
+      null,
+      null
+     ],
+     "frac_intermittent": [
+      0.061764705882352944,
+      0.10882352941176471,
+      0.15294117647058825
+     ],
+     "block_sd_present_db": [
+      null,
+      null,
+      null
+     ],
+     "frac_dropout_visible": [
+      0.6640625,
+      0.6875,
+      0.725
+     ]
+    },
+    "prominence_hist": [
+     67,
+     87,
+     195,
+     330,
+     536,
+     589,
+     420,
+     234,
+     146,
+     64,
+     35,
+     13,
+     3,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "intermittency_by_order_group": {
+     "1-2": {
+      "orders": [
+       1,
+       2
+      ],
+      "intermittency": {
+       "n_lines": 20,
+       "n_cells": 160,
+       "n_present": 0,
+       "n_visible": 8,
+       "frac_under": 0.5875,
+       "frac_under_present": null,
+       "frac_intermittent": 0.5,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": 0.71875,
+       "prom_median_db": 2.657623538312766
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.3125,
+        0.5875,
+        0.875
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.15,
+        0.5,
+        0.8
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        0.6875,
+        0.71875,
+        0.75
+       ]
+      }
+     },
+     "3-8": {
+      "orders": [
+       3,
+       8
+      ],
+      "intermittency": {
+       "n_lines": 120,
+       "n_cells": 960,
+       "n_present": 0,
+       "n_visible": 0,
+       "frac_under": 0.871875,
+       "frac_under_present": null,
+       "frac_intermittent": 0.0,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": null,
+       "prom_median_db": 1.6216958023049237
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.8322916666666667,
+        0.8697916666666666,
+        0.9157812499999999
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        null,
+        null,
+        null
+       ]
+      }
+     },
+     "9-24": {
+      "orders": [
+       9,
+       24
+      ],
+      "intermittency": {
+       "n_lines": 320,
+       "n_cells": 2560,
+       "n_present": 0,
+       "n_visible": 10,
+       "frac_under": 0.8125,
+       "frac_under_present": null,
+       "frac_intermittent": 0.115625,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": 0.6875,
+       "prom_median_db": 1.2215928637061395
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.77578125,
+        0.8125,
+        0.85939453125
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.065625,
+        0.115625,
+        0.159375
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        0.6625,
+        0.6875,
+        0.71875
+       ]
+      }
+     },
+     "25-60": {
+      "orders": [
+       25,
+       60
+      ],
+      "intermittency": {
+       "n_lines": 720,
+       "n_cells": 5760,
+       "n_present": 0,
+       "n_visible": 10,
+       "frac_under": 0.8907986111111111,
+       "frac_under_present": null,
+       "frac_intermittent": 0.07083333333333333,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": 0.725,
+       "prom_median_db": 0.7422052655517852
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.8478472222222222,
+        0.8921875,
+        0.9350694444444444
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.027777777777777776,
+        0.06805555555555555,
+        0.12361111111111112
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        0.6875,
+        0.7272727272727273,
+        0.75
+       ]
+      }
+     },
+     "61+": {
+      "orders": [
+       61,
+       10000
+      ],
+      "intermittency": {
+       "n_lines": 753,
+       "n_cells": 5802,
+       "n_present": 0,
+       "n_visible": 2,
+       "frac_under": 0.9824198552223371,
+       "frac_under_present": null,
+       "frac_intermittent": 0.01593625498007968,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": 0.75,
+       "prom_median_db": 0.3675688585192014
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.9730344948345299,
+        0.9824198552223371,
+        0.9912073047007102
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.015915119363395226,
+        0.03195739014647137
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        0.75,
+        0.75,
+        0.75
+       ]
+      }
+     }
+    }
+   },
+   "v3": {
+    "windows": [
+     {
+      "spec": "flight_dregon:free-flight_nosource_room2:1512727397.2050455:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_dregon:hovering_nosource_room2:1511903905.3944898:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_dregon:updown_nosource_room2:1511903578.348311:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_dregon:rectangle_nosource_room2:1511905725.952559:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_dregon:spinning_nosource_room2:1511905200.978012:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     }
+    ],
+    "n_windows": 20,
+    "wander": {
+     "numbers": {
+      "sigma_d_db": 0.0,
+      "tau_d_s": null,
+      "sigma_v_db": 0.0,
+      "tau_v_s": null,
+      "sigma_u_db": 0.9590524001540764,
+      "tau_u_s": 2.204368560043995,
+      "sigma_uj_db": 1.0181955551710495,
+      "tau_uj_s": 0.753331266269876,
+      "sigma_total_db": 0.0,
+      "tau_total_s": null,
+      "sigma_floor_total_db": 1.3977912748665104
+     },
+     "n_line_tracks": 0,
+     "n_floor_tracks": 240,
+     "bootstrap": {
+      "sigma_d_db": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tau_d_s": [
+       null,
+       null,
+       null
+      ],
+      "sigma_v_db": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tau_v_s": [
+       null,
+       null,
+       null
+      ],
+      "sigma_u_db": [
+       0.8023048741766853,
+       0.9377829772552799,
+       1.0621623268736862
+      ],
+      "tau_u_s": [
+       1.3550831009155824,
+       2.196027131049899,
+       3.27308286239093
+      ],
+      "sigma_uj_db": [
+       0.9543314517980137,
+       1.0043755989739047,
+       1.056323973522304
+      ],
+      "tau_uj_s": [
+       0.605907931748211,
+       0.7438531270465587,
+       0.8618641779898311
+      ],
+      "sigma_total_db": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tau_total_s": [
+       null,
+       null,
+       null
+      ],
+      "sigma_floor_total_db": [
+       1.2794104163153475,
+       1.3720493226824066,
+       1.4622343062261531
+      ],
+      "zero_share": {
+       "sigma_d_db": 1.0,
+       "sigma_v_db": 1.0,
+       "sigma_u_db": 0.0,
+       "sigma_uj_db": 0.0,
+       "sigma_total_db": 1.0,
+       "sigma_floor_total_db": 0.0
+      }
+     },
+     "zero_share": {
+      "sigma_d_db": 1.0,
+      "sigma_v_db": 1.0,
+      "sigma_u_db": 0.0,
+      "sigma_uj_db": 0.0,
+      "sigma_total_db": 1.0,
+      "sigma_floor_total_db": 0.0
+     }
+    },
+    "intermittency": {
+     "n_lines": 1360,
+     "n_cells": 10880,
+     "n_present": 0,
+     "n_visible": 42,
+     "frac_under": 0.8731617647058824,
+     "frac_under_present": null,
+     "frac_intermittent": 0.06838235294117648,
+     "block_sd_present_db": null,
+     "frac_dropout_visible": 0.6607142857142857,
+     "prom_median_db": 0.6105170800274138
+    },
+    "intermittency_boot": {
+     "frac_under": [
+      0.8624080882352941,
+      0.8731617647058824,
+      0.8843060661764706
+     ],
+     "frac_under_present": [
+      null,
+      null,
+      null
+     ],
+     "frac_intermittent": [
+      0.057352941176470586,
+      0.06838235294117648,
+      0.07797794117647056
+     ],
+     "block_sd_present_db": [
+      null,
+      null,
+      null
+     ],
+     "frac_dropout_visible": [
+      0.6388888888888888,
+      0.6607142857142857,
+      0.6805555555555556
+     ]
+    },
+    "prominence_hist": [
+     270,
+     538,
+     1234,
+     1893,
+     2429,
+     1979,
+     1145,
+     696,
+     361,
+     170,
+     106,
+     38,
+     6,
+     8,
+     0,
+     4,
+     2,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "intermittency_by_order_group": {
+     "1-2": {
+      "orders": [
+       1,
+       2
+      ],
+      "intermittency": {
+       "n_lines": 80,
+       "n_cells": 640,
+       "n_present": 0,
+       "n_visible": 0,
+       "frac_under": 0.2140625,
+       "frac_under_present": null,
+       "frac_intermittent": 0.0,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": null,
+       "prom_median_db": 3.6980768122754792
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.1875,
+        0.2140625,
+        0.2421875
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        null,
+        null,
+        null
+       ]
+      }
+     },
+     "3-8": {
+      "orders": [
+       3,
+       8
+      ],
+      "intermittency": {
+       "n_lines": 480,
+       "n_cells": 3840,
+       "n_present": 0,
+       "n_visible": 0,
+       "frac_under": 0.9864583333333333,
+       "frac_under_present": null,
+       "frac_intermittent": 0.0,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": null,
+       "prom_median_db": 0.3887616860359616
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.98125,
+        0.98671875,
+        0.9911458333333333
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        null,
+        null,
+        null
+       ]
+      }
+     },
+     "9-24": {
+      "orders": [
+       9,
+       24
+      ],
+      "intermittency": {
+       "n_lines": 1280,
+       "n_cells": 10240,
+       "n_present": 0,
+       "n_visible": 42,
+       "frac_under": 0.865625,
+       "frac_under_present": null,
+       "frac_intermittent": 0.07265625,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": 0.6607142857142857,
+       "prom_median_db": 0.6318262299340116
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.854287109375,
+        0.865625,
+        0.87861328125
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0609375,
+        0.07265625,
+        0.08359375
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        0.6388888888888888,
+        0.6607142857142857,
+        0.6805555555555556
+       ]
+      }
+     },
+     "25-60": {
+      "orders": [
+       25,
+       60
+      ],
+      "intermittency": {
+       "n_lines": 2880,
+       "n_cells": 23040,
+       "n_present": 1,
+       "n_visible": 38,
+       "frac_under": 0.8716579861111111,
+       "frac_under_present": 0.5,
+       "frac_intermittent": 0.07708333333333334,
+       "block_sd_present_db": 4.600827772772824,
+       "frac_dropout_visible": 0.7335526315789473,
+       "prom_median_db": 0.6547962485640921
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.8589084201388889,
+        0.8716579861111111,
+        0.8863715277777777
+       ],
+       "frac_under_present": [
+        0.5,
+        0.5,
+        0.5
+       ],
+       "frac_intermittent": [
+        0.059375,
+        0.07708333333333334,
+        0.09479166666666666
+       ],
+       "block_sd_present_db": [
+        4.600827772772824,
+        4.600827772772824,
+        4.600827772772824
+       ],
+       "frac_dropout_visible": [
+        0.7111934267241379,
+        0.7335526315789473,
+        0.7472826086956522
+       ]
+      }
+     },
+     "61+": {
+      "orders": [
+       61,
+       10000
+      ],
+      "intermittency": {
+       "n_lines": 3012,
+       "n_cells": 23208,
+       "n_present": 0,
+       "n_visible": 49,
+       "frac_under": 0.865218890037918,
+       "frac_under_present": null,
+       "frac_intermittent": 0.11985391766268261,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": 0.7295918367346939,
+       "prom_median_db": 0.6587968171464496
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.8536298746518106,
+        0.865218890037918,
+        0.8786864406779661
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.09084880636604775,
+        0.11856065894178416,
+        0.14893617021276595
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        0.7172619047619048,
+        0.7295918367346939,
+        0.7380952380952381
+       ]
+      }
+     }
+    }
+   },
+   "v2": {
+    "windows": [
+     {
+      "spec": "flight_dregon:free-flight_nosource_room2:1512727397.2050455:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_dregon:hovering_nosource_room2:1511903905.3944898:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_dregon:updown_nosource_room2:1511903578.348311:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_dregon:rectangle_nosource_room2:1511905725.952559:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_dregon:spinning_nosource_room2:1511905200.978012:4.0:motors_command",
+      "fit": "dregon",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     }
+    ],
+    "n_windows": 20,
+    "wander": {
+     "numbers": {
+      "sigma_d_db": 0.0,
+      "tau_d_s": null,
+      "sigma_v_db": 0.0,
+      "tau_v_s": null,
+      "sigma_u_db": 0.5396501930581823,
+      "tau_u_s": 0.45859893739790775,
+      "sigma_uj_db": 0.4996616176521154,
+      "tau_uj_s": 0.3282953502648883,
+      "sigma_total_db": 0.0,
+      "tau_total_s": null,
+      "sigma_floor_total_db": 0.7354245435515504
+     },
+     "n_line_tracks": 0,
+     "n_floor_tracks": 240,
+     "bootstrap": {
+      "sigma_d_db": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tau_d_s": [
+       null,
+       null,
+       null
+      ],
+      "sigma_v_db": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tau_v_s": [
+       null,
+       null,
+       null
+      ],
+      "sigma_u_db": [
+       0.4425263686451331,
+       0.5377811218637651,
+       0.633104482574789
+      ],
+      "tau_u_s": [
+       0.36601550850617054,
+       0.44769853450893426,
+       0.596999048180565
+      ],
+      "sigma_uj_db": [
+       0.3944722827016795,
+       0.4968782915695149,
+       0.5812820106881278
+      ],
+      "tau_uj_s": [
+       0.27075299184109614,
+       0.32457581787684664,
+       0.3596301462778261
+      ],
+      "sigma_total_db": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "tau_total_s": [
+       null,
+       null,
+       null
+      ],
+      "sigma_floor_total_db": [
+       0.6165762583661702,
+       0.7308985601164624,
+       0.8519935901043644
+      ],
+      "zero_share": {
+       "sigma_d_db": 1.0,
+       "sigma_v_db": 1.0,
+       "sigma_u_db": 0.0,
+       "sigma_uj_db": 0.0,
+       "sigma_total_db": 1.0,
+       "sigma_floor_total_db": 0.0
+      }
+     },
+     "zero_share": {
+      "sigma_d_db": 1.0,
+      "sigma_v_db": 1.0,
+      "sigma_u_db": 0.0,
+      "sigma_uj_db": 0.0,
+      "sigma_total_db": 1.0,
+      "sigma_floor_total_db": 0.0
+     }
+    },
+    "intermittency": {
+     "n_lines": 1360,
+     "n_cells": 10880,
+     "n_present": 0,
+     "n_visible": 0,
+     "frac_under": 0.9220588235294118,
+     "frac_under_present": null,
+     "frac_intermittent": 0.01838235294117647,
+     "block_sd_present_db": null,
+     "frac_dropout_visible": null,
+     "prom_median_db": 0.78665026236706
+    },
+    "intermittency_boot": {
+     "frac_under": [
+      0.9025735294117647,
+      0.9224264705882353,
+      0.9414522058823529
+     ],
+     "frac_under_present": [
+      null,
+      null,
+      null
+     ],
+     "frac_intermittent": [
+      0.0,
+      0.01838235294117647,
+      0.03676470588235294
+     ],
+     "block_sd_present_db": [
+      null,
+      null,
+      null
+     ],
+     "frac_dropout_visible": [
+      null,
+      null,
+      null
+     ]
+    },
+    "prominence_hist": [
+     29,
+     293,
+     1159,
+     2045,
+     2482,
+     2505,
+     1511,
+     578,
+     211,
+     41,
+     14,
+     10,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "intermittency_by_order_group": {
+     "1-2": {
+      "orders": [
+       1,
+       2
+      ],
+      "intermittency": {
+       "n_lines": 80,
+       "n_cells": 640,
+       "n_present": 0,
+       "n_visible": 3,
+       "frac_under": 0.115625,
+       "frac_under_present": null,
+       "frac_intermittent": 0.0875,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": 0.75,
+       "prom_median_db": 4.203838044699923
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.071875,
+        0.115625,
+        0.159375
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.0875,
+        0.1625
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        0.75,
+        0.75,
+        0.75
+       ]
+      }
+     },
+     "3-8": {
+      "orders": [
+       3,
+       8
+      ],
+      "intermittency": {
+       "n_lines": 480,
+       "n_cells": 3840,
+       "n_present": 0,
+       "n_visible": 0,
+       "frac_under": 0.9778645833333334,
+       "frac_under_present": null,
+       "frac_intermittent": 0.0,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": null,
+       "prom_median_db": 0.041407512982465595
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.9557291666666666,
+        0.9778645833333334,
+        1.0
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        null,
+        null,
+        null
+       ]
+      }
+     },
+     "9-24": {
+      "orders": [
+       9,
+       24
+      ],
+      "intermittency": {
+       "n_lines": 1280,
+       "n_cells": 10240,
+       "n_present": 0,
+       "n_visible": 0,
+       "frac_under": 0.919140625,
+       "frac_under_present": null,
+       "frac_intermittent": 0.01953125,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": null,
+       "prom_median_db": 0.8242741065143058
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.9,
+        0.919140625,
+        0.93779296875
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.01953125,
+        0.05859375
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        null,
+        null,
+        null
+       ]
+      }
+     },
+     "25-60": {
+      "orders": [
+       25,
+       60
+      ],
+      "intermittency": {
+       "n_lines": 2880,
+       "n_cells": 23040,
+       "n_present": 0,
+       "n_visible": 0,
+       "frac_under": 0.9859375,
+       "frac_under_present": null,
+       "frac_intermittent": 0.0,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": null,
+       "prom_median_db": 0.08713771446312835
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.9819878472222222,
+        0.9859375,
+        0.9899305555555555
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        null,
+        null,
+        null
+       ]
+      }
+     },
+     "61+": {
+      "orders": [
+       61,
+       10000
+      ],
+      "intermittency": {
+       "n_lines": 3012,
+       "n_cells": 23208,
+       "n_present": 0,
+       "n_visible": 0,
+       "frac_under": 0.9952602550844536,
+       "frac_under_present": null,
+       "frac_intermittent": 0.0,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": null,
+       "prom_median_db": -0.010177771941634573
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.9943450815360336,
+        0.9952602550844536,
+        0.9960633254317643
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        null,
+        null,
+        null
+       ]
+      }
+     }
+    }
+   }
+  },
+  "michaels": {
+   "line_set": "dominant",
+   "real": {
+    "windows": [
+     {
+      "spec": "flight_michaels:FLY124:8.0:8.0:rps_refined",
+      "fit": "michaels_standby",
+      "regime": "standby"
+     },
+     {
+      "spec": "flight_michaels:FLY124:16.0:8.0:rps_refined",
+      "fit": "michaels_standby",
+      "regime": "standby"
+     },
+     {
+      "spec": "flight_michaels:FLY124:40.0:8.0:rps_refined",
+      "fit": "michaels_cruise",
+      "regime": "cruise"
+     },
+     {
+      "spec": "flight_michaels:FLY124:56.0:8.0:rps_refined",
+      "fit": "michaels_cruise",
+      "regime": "cruise"
+     }
+    ],
+    "n_windows": 4,
+    "wander": {
+     "numbers": {
+      "sigma_d_db": 0.12012370581079802,
+      "tau_d_s": 0.7706972906544123,
+      "sigma_v_db": 1.458615987228972,
+      "tau_v_s": 0.7824964787741404,
+      "sigma_u_db": 2.9654401692681307,
+      "tau_u_s": 7.470823915300167,
+      "sigma_uj_db": 2.0121048854424255,
+      "tau_uj_s": 14.14190794020837,
+      "sigma_total_db": 1.4635645281809522,
+      "tau_total_s": 0.7824964787741404,
+      "sigma_floor_total_db": 3.579958967056538
+     },
+     "n_line_tracks": 5,
+     "n_floor_tracks": 31,
+     "bootstrap": {
+      "sigma_d_db": [
+       0.0,
+       0.12012370581079802,
+       0.12012370581079802
+      ],
+      "tau_d_s": [
+       0.745739166505316,
+       0.7706972906544123,
+       0.7706972906544123
+      ],
+      "sigma_v_db": [
+       0.5291190734051513,
+       1.458615987228972,
+       1.497308014158808
+      ],
+      "tau_v_s": [
+       0.6373849968699823,
+       0.7824964787741404,
+       0.9509636299264438
+      ],
+      "sigma_u_db": [
+       0.8313921581238911,
+       2.9589932199452393,
+       2.9683459009475865
+      ],
+      "tau_u_s": [
+       0.745739166505316,
+       7.451929549379019,
+       7.48976618788243
+      ],
+      "sigma_uj_db": [
+       0.6729505349852216,
+       1.937087643047321,
+       2.0121048854424255
+      ],
+      "tau_uj_s": [
+       0.5545172231621529,
+       11.784883399733348,
+       14.14190794020837
+      ],
+      "sigma_total_db": [
+       0.5291190734051513,
+       1.4635645281809522,
+       1.501578304180912
+      ],
+      "tau_total_s": [
+       0.6373849968699823,
+       0.7824964787741404,
+       0.9509636299264438
+      ],
+      "sigma_floor_total_db": [
+       1.0690217024950126,
+       3.534289935803796,
+       3.579958967056538
+      ],
+      "zero_share": {
+       "sigma_d_db": 0.225,
+       "sigma_v_db": 0.0,
+       "sigma_u_db": 0.0,
+       "sigma_uj_db": 0.0,
+       "sigma_total_db": 0.0,
+       "sigma_floor_total_db": 0.0
+      }
+     },
+     "zero_share": {
+      "sigma_d_db": 0.225,
+      "sigma_v_db": 0.0,
+      "sigma_u_db": 0.0,
+      "sigma_uj_db": 0.0,
+      "sigma_total_db": 0.0,
+      "sigma_floor_total_db": 0.0
+     }
+    },
+    "intermittency": {
+     "n_lines": 272,
+     "n_cells": 4352,
+     "n_present": 26,
+     "n_visible": 38,
+     "frac_under": 0.8028492647058824,
+     "frac_under_present": 0.07211538461538461,
+     "frac_intermittent": 0.22058823529411764,
+     "block_sd_present_db": 2.7612235447511777,
+     "frac_dropout_visible": 0.3815789473684211,
+     "prom_median_db": 0.2976810885136149
+    },
+    "intermittency_boot": {
+     "frac_under": [
+      0.6663602941176471,
+      0.8028492647058824,
+      0.9446231617647058
+     ],
+     "frac_under_present": [
+      0.040625,
+      0.07211538461538461,
+      0.17708333333333334
+     ],
+     "frac_intermittent": [
+      0.03308823529411765,
+      0.22058823529411764,
+      0.3981617647058813
+     ],
+     "block_sd_present_db": [
+      2.5703465643213024,
+      2.7612235447511777,
+      3.9096319327833178
+     ],
+     "frac_dropout_visible": [
+      0.3287037037037037,
+      0.3815789473684211,
+      0.5113636363636364
+     ]
+    },
+    "prominence_hist": [
+     371,
+     326,
+     532,
+     711,
+     688,
+     563,
+     303,
+     158,
+     153,
+     113,
+     109,
+     73,
+     64,
+     51,
+     38,
+     21,
+     22,
+     18,
+     16,
+     10,
+     8,
+     4,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "intermittency_by_order_group": {
+     "1-2": {
+      "orders": [
+       1,
+       2
+      ],
+      "intermittency": {
+       "n_lines": 10,
+       "n_cells": 149,
+       "n_present": 8,
+       "n_visible": 9,
+       "frac_under": 0.04697986577181208,
+       "frac_under_present": 0.0,
+       "frac_intermittent": 0.1,
+       "block_sd_present_db": 2.2725978194234475,
+       "frac_dropout_visible": 0.056338028169014086,
+       "prom_median_db": 21.936031888460622
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.01282051282051282,
+        0.04697986577181208,
+        0.08450704225352113
+       ],
+       "frac_under_present": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.1,
+        0.2
+       ],
+       "block_sd_present_db": [
+        1.1636278825234805,
+        2.2725978194234475,
+        3.3648397483891115
+       ],
+       "frac_dropout_visible": [
+        0.0,
+        0.056338028169014086,
+        0.10256410256410256
+       ]
+      }
+     },
+     "3-8": {
+      "orders": [
+       3,
+       8
+      ],
+      "intermittency": {
+       "n_lines": 96,
+       "n_cells": 1536,
+       "n_present": 22,
+       "n_visible": 24,
+       "frac_under": 0.6223958333333334,
+       "frac_under_present": 0.06534090909090909,
+       "frac_intermittent": 0.25,
+       "block_sd_present_db": 2.798266246124692,
+       "frac_dropout_visible": 0.23697916666666666,
+       "prom_median_db": 1.5953712610660291
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.4459635416666667,
+        0.6223958333333334,
+        0.78125
+       ],
+       "frac_under_present": [
+        0.010416666666666666,
+        0.06534090909090909,
+        0.13125
+       ],
+       "frac_intermittent": [
+        0.08333333333333333,
+        0.25,
+        0.46875
+       ],
+       "block_sd_present_db": [
+        2.12845559080809,
+        2.798266246124692,
+        3.5369862207012015
+       ],
+       "frac_dropout_visible": [
+        0.1875,
+        0.23697916666666666,
+        0.29545454545454547
+       ]
+      }
+     },
+     "9-24": {
+      "orders": [
+       9,
+       24
+      ],
+      "intermittency": {
+       "n_lines": 256,
+       "n_cells": 4096,
+       "n_present": 22,
+       "n_visible": 34,
+       "frac_under": 0.814697265625,
+       "frac_under_present": 0.08238636363636363,
+       "frac_intermittent": 0.21484375,
+       "block_sd_present_db": 2.955354758249192,
+       "frac_dropout_visible": 0.40441176470588236,
+       "prom_median_db": 0.2171053302268215
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.68505859375,
+        0.814697265625,
+        0.9541015625
+       ],
+       "frac_under_present": [
+        0.04779411764705882,
+        0.08238636363636363,
+        0.2
+       ],
+       "frac_intermittent": [
+        0.01171875,
+        0.21484375,
+        0.37890625
+       ],
+       "block_sd_present_db": [
+        2.5920546284413164,
+        2.955354758249192,
+        3.875470314066411
+       ],
+       "frac_dropout_visible": [
+        0.3463541666666667,
+        0.40441176470588236,
+        0.54375
+       ]
+      }
+     },
+     "25-60": {
+      "orders": [
+       25,
+       60
+      ],
+      "intermittency": {
+       "n_lines": 576,
+       "n_cells": 9216,
+       "n_present": 1,
+       "n_visible": 2,
+       "frac_under": 0.9611545138888888,
+       "frac_under_present": 0.0,
+       "frac_intermittent": 0.034722222222222224,
+       "block_sd_present_db": 1.3936991712532314,
+       "frac_dropout_visible": 0.65625,
+       "prom_median_db": 0.018775834237005518
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.9259982638888888,
+        0.9612630208333334,
+        0.9962022569444444
+       ],
+       "frac_under_present": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.034722222222222224,
+        0.06944444444444445
+       ],
+       "block_sd_present_db": [
+        1.3936991712532314,
+        1.3936991712532314,
+        1.3936991712532314
+       ],
+       "frac_dropout_visible": [
+        0.65625,
+        0.65625,
+        0.65625
+       ]
+      }
+     },
+     "61+": {
+      "orders": [
+       61,
+       10000
+      ],
+      "intermittency": {
+       "n_lines": 1588,
+       "n_cells": 24951,
+       "n_present": 16,
+       "n_visible": 23,
+       "frac_under": 0.9824455933629914,
+       "frac_under_present": 0.05078125,
+       "frac_intermittent": 0.015743073047858942,
+       "block_sd_present_db": 1.4151104457185415,
+       "frac_dropout_visible": 0.25815217391304346,
+       "prom_median_db": -0.07797072153882666
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.9791790013814881,
+        0.9824455933629914,
+        0.9987344442100823
+       ],
+       "frac_under_present": [
+        0.0234375,
+        0.05078125,
+        0.078125
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.015743073047858942,
+        0.019261006289308175
+       ],
+       "block_sd_present_db": [
+        1.4043343183509056,
+        1.4151104457185415,
+        1.4151104457185415
+       ],
+       "frac_dropout_visible": [
+        0.2556818181818182,
+        0.25815217391304346,
+        0.2604166666666667
+       ]
+      }
+     }
+    }
+   },
+   "v3": {
+    "windows": [
+     {
+      "spec": "flight_michaels:FLY124:8.0:8.0:rps_refined",
+      "fit": "michaels_standby",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_michaels:FLY124:16.0:8.0:rps_refined",
+      "fit": "michaels_standby",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_michaels:FLY124:40.0:8.0:rps_refined",
+      "fit": "michaels_cruise",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_michaels:FLY124:56.0:8.0:rps_refined",
+      "fit": "michaels_cruise",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     }
+    ],
+    "n_windows": 16,
+    "wander": {
+     "numbers": {
+      "sigma_d_db": 0.0,
+      "tau_d_s": null,
+      "sigma_v_db": 3.0348208657872005,
+      "tau_v_s": 2.372341720788206,
+      "sigma_u_db": 0.664770510131537,
+      "tau_u_s": 1.0958483655201752,
+      "sigma_uj_db": 1.3687746179144136,
+      "tau_uj_s": 1.3150224890612643,
+      "sigma_total_db": 3.0348208657872005,
+      "tau_total_s": 2.372341720788206,
+      "sigma_floor_total_db": 1.5216192660911734
+     },
+     "n_line_tracks": 23,
+     "n_floor_tracks": 124,
+     "bootstrap": {
+      "sigma_d_db": [
+       0.0,
+       0.0,
+       0.5583049181584846
+      ],
+      "tau_d_s": [
+       0.02,
+       0.5178709159002954,
+       500.0
+      ],
+      "sigma_v_db": [
+       2.5295977690109006,
+       2.932050588800482,
+       3.378155323156123
+      ],
+      "tau_v_s": [
+       1.6166794738495187,
+       2.1876857020558034,
+       2.935027237325689
+      ],
+      "sigma_u_db": [
+       0.6114480031679493,
+       0.6552319026498924,
+       0.693813188860252
+      ],
+      "tau_u_s": [
+       0.7033344578613415,
+       1.0779593223139017,
+       1.5629240338565349
+      ],
+      "sigma_uj_db": [
+       1.254628107440152,
+       1.3543550868673035,
+       1.428269989740201
+      ],
+      "tau_uj_s": [
+       0.9630807607860544,
+       1.2532540986229308,
+       1.6854258647601743
+      ],
+      "sigma_total_db": [
+       2.5295977690109006,
+       2.9367505969570447,
+       3.3794475575779495
+      ],
+      "tau_total_s": [
+       1.5820334280748902,
+       2.176633998839529,
+       2.8396198438905547
+      ],
+      "sigma_floor_total_db": [
+       1.4031922782999886,
+       1.5071656570017886,
+       1.5807003314146855
+      ],
+      "zero_share": {
+       "sigma_d_db": 0.745,
+       "sigma_v_db": 0.0,
+       "sigma_u_db": 0.0,
+       "sigma_uj_db": 0.0,
+       "sigma_total_db": 0.0,
+       "sigma_floor_total_db": 0.0
+      }
+     },
+     "zero_share": {
+      "sigma_d_db": 0.745,
+      "sigma_v_db": 0.0,
+      "sigma_u_db": 0.0,
+      "sigma_uj_db": 0.0,
+      "sigma_total_db": 0.0,
+      "sigma_floor_total_db": 0.0
+     }
+    },
+    "intermittency": {
+     "n_lines": 1088,
+     "n_cells": 17408,
+     "n_present": 138,
+     "n_visible": 202,
+     "frac_under": 0.7430491727941176,
+     "frac_under_present": 0.09284420289855072,
+     "frac_intermittent": 0.28125,
+     "block_sd_present_db": 2.6133001088800576,
+     "frac_dropout_visible": 0.40810643564356436,
+     "prom_median_db": 0.7844693363299062
+    },
+    "intermittency_boot": {
+     "frac_under": [
+      0.6027113970588235,
+      0.7430491727941176,
+      0.8961397058823529
+     ],
+     "frac_under_present": [
+      0.0787037037037037,
+      0.09284420289855072,
+      0.11293859649122807
+     ],
+     "frac_intermittent": [
+      0.05974264705882353,
+      0.28125,
+      0.4522058823529412
+     ],
+     "block_sd_present_db": [
+      2.5254209570981523,
+      2.6133001088800576,
+      2.782305581611992
+     ],
+     "frac_dropout_visible": [
+      0.3547619047619048,
+      0.40810643564356436,
+      0.46585051546391754
+     ]
+    },
+    "prominence_hist": [
+     916,
+     1048,
+     1841,
+     2770,
+     2661,
+     2145,
+     1542,
+     983,
+     695,
+     586,
+     500,
+     395,
+     331,
+     276,
+     208,
+     180,
+     155,
+     102,
+     45,
+     23,
+     4,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "intermittency_by_order_group": {
+     "1-2": {
+      "orders": [
+       1,
+       2
+      ],
+      "intermittency": {
+       "n_lines": 40,
+       "n_cells": 596,
+       "n_present": 32,
+       "n_visible": 33,
+       "frac_under": 0.09228187919463088,
+       "frac_under_present": 0.0,
+       "frac_intermittent": 0.05,
+       "block_sd_present_db": 1.2627436190741674,
+       "frac_dropout_visible": 0.009633911368015413,
+       "prom_median_db": 21.807501905486248
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.04929577464788732,
+        0.09228187919463088,
+        0.13141025641025642
+       ],
+       "frac_under_present": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "frac_intermittent": [
+        0.05,
+        0.05,
+        0.05
+       ],
+       "block_sd_present_db": [
+        1.200885026738459,
+        1.2627436190741674,
+        1.4125536544656678
+       ],
+       "frac_dropout_visible": [
+        0.0,
+        0.009633911368015413,
+        0.019011406844106463
+       ]
+      }
+     },
+     "3-8": {
+      "orders": [
+       3,
+       8
+      ],
+      "intermittency": {
+       "n_lines": 384,
+       "n_cells": 6144,
+       "n_present": 106,
+       "n_visible": 125,
+       "frac_under": 0.6158854166666666,
+       "frac_under_present": 0.05660377358490566,
+       "frac_intermittent": 0.3098958333333333,
+       "block_sd_present_db": 3.118150905310805,
+       "frac_dropout_visible": 0.257,
+       "prom_median_db": 1.4626215093972925
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.392578125,
+        0.6158854166666666,
+        0.73974609375
+       ],
+       "frac_under_present": [
+        0.026442307692307692,
+        0.05660377358490566,
+        0.08564814814814815
+       ],
+       "frac_intermittent": [
+        0.21614583333333334,
+        0.3098958333333333,
+        0.4583333333333333
+       ],
+       "block_sd_present_db": [
+        2.9041989298035666,
+        3.118150905310805,
+        3.3625266401293157
+       ],
+       "frac_dropout_visible": [
+        0.17948190789473684,
+        0.257,
+        0.36
+       ]
+      }
+     },
+     "9-24": {
+      "orders": [
+       9,
+       24
+      ],
+      "intermittency": {
+       "n_lines": 1024,
+       "n_cells": 16384,
+       "n_present": 118,
+       "n_visible": 180,
+       "frac_under": 0.75311279296875,
+       "frac_under_present": 0.09904661016949153,
+       "frac_intermittent": 0.2822265625,
+       "block_sd_present_db": 2.6789463560633235,
+       "frac_dropout_visible": 0.42777777777777776,
+       "prom_median_db": 0.6969369599520394
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.618408203125,
+        0.75311279296875,
+        0.900146484375
+       ],
+       "frac_under_present": [
+        0.08839285714285715,
+        0.09904661016949153,
+        0.11458333333333333
+       ],
+       "frac_intermittent": [
+        0.048828125,
+        0.2822265625,
+        0.4521484375
+       ],
+       "block_sd_present_db": [
+        2.5319185372629818,
+        2.6789463560633235,
+        2.8125715831617972
+       ],
+       "frac_dropout_visible": [
+        0.3736559139784946,
+        0.42777777777777776,
+        0.48563218390804597
+       ]
+      }
+     },
+     "25-60": {
+      "orders": [
+       25,
+       60
+      ],
+      "intermittency": {
+       "n_lines": 2304,
+       "n_cells": 36864,
+       "n_present": 11,
+       "n_visible": 47,
+       "frac_under": 0.8704969618055556,
+       "frac_under_present": 0.22727272727272727,
+       "frac_intermittent": 0.1814236111111111,
+       "block_sd_present_db": 2.959358938563226,
+       "frac_dropout_visible": 0.6582446808510638,
+       "prom_median_db": 0.4654240239137225
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.7889811197916666,
+        0.8704969618055556,
+        0.9609103732638888
+       ],
+       "frac_under_present": [
+        0.1875,
+        0.22727272727272727,
+        0.296875
+       ],
+       "frac_intermittent": [
+        0.030381944444444444,
+        0.1814236111111111,
+        0.3033854166666667
+       ],
+       "block_sd_present_db": [
+        2.959358938563226,
+        2.959358938563226,
+        3.040638826869915
+       ],
+       "frac_dropout_visible": [
+        0.6527777777777778,
+        0.6582446808510638,
+        0.6761363636363636
+       ]
+      }
+     },
+     "61+": {
+      "orders": [
+       61,
+       10000
+      ],
+      "intermittency": {
+       "n_lines": 6352,
+       "n_cells": 99804,
+       "n_present": 61,
+       "n_visible": 125,
+       "frac_under": 0.942467235782133,
+       "frac_under_present": 0.136568848758465,
+       "frac_intermittent": 0.09272670025188917,
+       "block_sd_present_db": 3.8057543426589855,
+       "frac_dropout_visible": 0.4797921478060046,
+       "prom_median_db": 0.01303021744713887
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.906715612178795,
+        0.942467235782133,
+        0.9536427108775566
+       ],
+       "frac_under_present": [
+        0.12735849056603774,
+        0.136568848758465,
+        0.14502164502164502
+       ],
+       "frac_intermittent": [
+        0.06682389937106918,
+        0.09272670025188917,
+        0.1694182389937107
+       ],
+       "block_sd_present_db": [
+        3.5921884717592745,
+        3.8057543426589855,
+        4.028135864452548
+       ],
+       "frac_dropout_visible": [
+        0.4514501891551072,
+        0.4797921478060046,
+        0.75
+       ]
+      }
+     }
+    }
+   },
+   "v2": {
+    "windows": [
+     {
+      "spec": "flight_michaels:FLY124:8.0:8.0:rps_refined",
+      "fit": "michaels_standby",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_michaels:FLY124:16.0:8.0:rps_refined",
+      "fit": "michaels_standby",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_michaels:FLY124:40.0:8.0:rps_refined",
+      "fit": "michaels_cruise",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     },
+     {
+      "spec": "flight_michaels:FLY124:56.0:8.0:rps_refined",
+      "fit": "michaels_cruise",
+      "seeds": [
+       2001,
+       2002,
+       2003,
+       2004
+      ]
+     }
+    ],
+    "n_windows": 16,
+    "wander": {
+     "numbers": {
+      "sigma_d_db": 0.25563941607208585,
+      "tau_d_s": 0.7089110635169877,
+      "sigma_v_db": 0.2873019285672918,
+      "tau_v_s": 0.4775613851486803,
+      "sigma_u_db": 0.21132751607915745,
+      "tau_u_s": 0.5231431717174386,
+      "sigma_uj_db": 0.5631669644450359,
+      "tau_uj_s": 0.8005348286205377,
+      "sigma_total_db": 0.384458630580009,
+      "tau_total_s": 0.5673001249880142,
+      "sigma_floor_total_db": 0.601447799823632
+     },
+     "n_line_tracks": 30,
+     "n_floor_tracks": 125,
+     "bootstrap": {
+      "sigma_d_db": [
+       0.17862754987560503,
+       0.25558153772226316,
+       0.30494717688598655
+      ],
+      "tau_d_s": [
+       0.02,
+       0.7017666321633403,
+       1.9155503851553926
+      ],
+      "sigma_v_db": [
+       0.1381254457042328,
+       0.2801027374186436,
+       0.37007841224911986
+      ],
+      "tau_v_s": [
+       0.02,
+       0.4679856281659987,
+       500.0
+      ],
+      "sigma_u_db": [
+       0.1501882406663459,
+       0.20905425179276188,
+       0.26147061977358643
+      ],
+      "tau_u_s": [
+       0.23309011001195376,
+       0.4799877078296746,
+       1.1044854142827198
+      ],
+      "sigma_uj_db": [
+       0.4702103320167774,
+       0.5525738527768911,
+       0.6333623672364428
+      ],
+      "tau_uj_s": [
+       0.5032648565420305,
+       0.7466845772610349,
+       1.0353064600286892
+      ],
+      "sigma_total_db": [
+       0.2838935360589483,
+       0.37896584486746343,
+       0.4448752469899631
+      ],
+      "tau_total_s": [
+       0.2667039787133571,
+       0.5622948004059845,
+       1.2967939776901158
+      ],
+      "sigma_floor_total_db": [
+       0.5296842167748738,
+       0.5887832360059873,
+       0.6519473647221119
+      ],
+      "zero_share": {
+       "sigma_d_db": 0.005,
+       "sigma_v_db": 0.02,
+       "sigma_u_db": 0.0,
+       "sigma_uj_db": 0.0,
+       "sigma_total_db": 0.0,
+       "sigma_floor_total_db": 0.0
+      }
+     },
+     "zero_share": {
+      "sigma_d_db": 0.005,
+      "sigma_v_db": 0.02,
+      "sigma_u_db": 0.0,
+      "sigma_uj_db": 0.0,
+      "sigma_total_db": 0.0,
+      "sigma_floor_total_db": 0.0
+     }
+    },
+    "intermittency": {
+     "n_lines": 1088,
+     "n_cells": 17408,
+     "n_present": 108,
+     "n_visible": 170,
+     "frac_under": 0.7913028492647058,
+     "frac_under_present": 0.031828703703703706,
+     "frac_intermittent": 0.17003676470588236,
+     "block_sd_present_db": 1.1841649993168115,
+     "frac_dropout_visible": 0.3386029411764706,
+     "prom_median_db": 0.3528803269701204
+    },
+    "intermittency_boot": {
+     "frac_under": [
+      0.6002987132352942,
+      0.7913028492647058,
+      0.9810431985294118
+     ],
+     "frac_under_present": [
+      0.016346153846153847,
+      0.031828703703703706,
+      0.055232558139534885
+     ],
+     "frac_intermittent": [
+      0.0,
+      0.17003676470588236,
+      0.328125
+     ],
+     "block_sd_present_db": [
+      1.1449015769275994,
+      1.1841649993168115,
+      1.209985868376042
+     ],
+     "frac_dropout_visible": [
+      0.29905913978494625,
+      0.3386029411764706,
+      0.38636363636363635
+     ]
+    },
+    "prominence_hist": [
+     1263,
+     958,
+     1978,
+     3375,
+     3093,
+     2140,
+     958,
+     582,
+     510,
+     554,
+     544,
+     479,
+     361,
+     215,
+     168,
+     129,
+     88,
+     13,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "intermittency_by_order_group": {
+     "1-2": {
+      "orders": [
+       1,
+       2
+      ],
+      "intermittency": {
+       "n_lines": 40,
+       "n_cells": 596,
+       "n_present": 32,
+       "n_visible": 32,
+       "frac_under": 0.1325503355704698,
+       "frac_under_present": 0.0,
+       "frac_intermittent": 0.0,
+       "block_sd_present_db": 0.8732998039525615,
+       "frac_dropout_visible": 0.0,
+       "prom_median_db": 20.169759102487134
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.08098591549295775,
+        0.1325503355704698,
+        0.1794871794871795
+       ],
+       "frac_under_present": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "block_sd_present_db": [
+        0.7501695141385258,
+        0.8732998039525615,
+        1.1446284073038298
+       ],
+       "frac_dropout_visible": [
+        0.0,
+        0.0,
+        0.0
+       ]
+      }
+     },
+     "3-8": {
+      "orders": [
+       3,
+       8
+      ],
+      "intermittency": {
+       "n_lines": 384,
+       "n_cells": 6144,
+       "n_present": 102,
+       "n_visible": 120,
+       "frac_under": 0.68115234375,
+       "frac_under_present": 0.022058823529411766,
+       "frac_intermittent": 0.1640625,
+       "block_sd_present_db": 1.1877835825548284,
+       "frac_dropout_visible": 0.17552083333333332,
+       "prom_median_db": 0.8782024090891403
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.3748372395833333,
+        0.68115234375,
+        0.998046875
+       ],
+       "frac_under_present": [
+        0.008928571428571428,
+        0.022058823529411766,
+        0.03419811320754717
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.1640625,
+        0.328125
+       ],
+       "block_sd_present_db": [
+        0.8649371795300289,
+        1.1877835825548284,
+        1.5222600840359009
+       ],
+       "frac_dropout_visible": [
+        0.1328125,
+        0.17552083333333332,
+        0.212890625
+       ]
+      }
+     },
+     "9-24": {
+      "orders": [
+       9,
+       24
+      ],
+      "intermittency": {
+       "n_lines": 1024,
+       "n_cells": 16384,
+       "n_present": 88,
+       "n_visible": 146,
+       "frac_under": 0.8018798828125,
+       "frac_under_present": 0.037642045454545456,
+       "frac_intermittent": 0.1708984375,
+       "block_sd_present_db": 1.3705748989222268,
+       "frac_dropout_visible": 0.3724315068493151,
+       "prom_median_db": 0.2482851257939926
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.6243896484375,
+        0.8018798828125,
+        0.981689453125
+       ],
+       "frac_under_present": [
+        0.01768867924528302,
+        0.037642045454545456,
+        0.06785714285714285
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.1708984375,
+        0.3251953125
+       ],
+       "block_sd_present_db": [
+        1.1398025735199477,
+        1.3705748989222268,
+        1.434020352512477
+       ],
+       "frac_dropout_visible": [
+        0.33796296296296297,
+        0.3724315068493151,
+        0.4153846153846154
+       ]
+      }
+     },
+     "25-60": {
+      "orders": [
+       25,
+       60
+      ],
+      "intermittency": {
+       "n_lines": 2304,
+       "n_cells": 36864,
+       "n_present": 0,
+       "n_visible": 0,
+       "frac_under": 0.9724392361111112,
+       "frac_under_present": null,
+       "frac_intermittent": 0.006510416666666667,
+       "block_sd_present_db": null,
+       "frac_dropout_visible": null,
+       "prom_median_db": -0.006702053507625596
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.9503851996527778,
+        0.9724392361111112,
+        0.9988878038194444
+       ],
+       "frac_under_present": [
+        null,
+        null,
+        null
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.006510416666666667,
+        0.013020833333333334
+       ],
+       "block_sd_present_db": [
+        null,
+        null,
+        null
+       ],
+       "frac_dropout_visible": [
+        null,
+        null,
+        null
+       ]
+      }
+     },
+     "61+": {
+      "orders": [
+       61,
+       10000
+      ],
+      "intermittency": {
+       "n_lines": 6352,
+       "n_cells": 99804,
+       "n_present": 109,
+       "n_visible": 149,
+       "frac_under": 0.9689591599535089,
+       "frac_under_present": 0.0739842328684051,
+       "frac_intermittent": 0.02204030226700252,
+       "block_sd_present_db": 2.0444703147106367,
+       "frac_dropout_visible": 0.3042671614100185,
+       "prom_median_db": -0.07296088594694883
+      },
+      "intermittency_boot": {
+       "frac_under": [
+        0.9618335677102607,
+        0.9689591599535089,
+        1.0
+       ],
+       "frac_under_present": [
+        0.0703883495145631,
+        0.0739842328684051,
+        0.07757575757575758
+       ],
+       "frac_intermittent": [
+        0.0,
+        0.02204030226700252,
+        0.02692610062893082
+       ],
+       "block_sd_present_db": [
+        2.0301268563512354,
+        2.0444703147106367,
+        2.1909587691452703
+       ],
+       "frac_dropout_visible": [
+        0.2957345971563981,
+        0.3042671614100185,
+        0.31244323342415986
+       ]
+      }
+     }
+    }
+   }
+  }
+ }
+}

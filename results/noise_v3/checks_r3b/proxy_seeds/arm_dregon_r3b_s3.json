@@ -1,0 +1,598 @@
+{
+ "round": 6,
+ "git": "ffb61244a0921458a6800135f527eb2fe6c1d7b7",
+ "arm": {
+  "kind": "v2",
+  "label": {
+   "dregon": "v2 DREGON room-2 floor fit with the bench comb (mean of Motor1-4 @70)"
+  },
+  "source": {
+   "dregon": {
+    "support": "dregon_room2_floor",
+    "path": "results/noise_v3/fits_r3b/restarts/dregon_room2_floor__flight_v3__s3.json",
+    "kind": "flight",
+    "comb_mean_check": {
+     "available": true,
+     "bench_fits": [
+      "bench_dregon_Motor1_70",
+      "bench_dregon_Motor2_70",
+      "bench_dregon_Motor3_70",
+      "bench_dregon_Motor4_70"
+     ],
+     "declared_rule": null,
+     "reference_mean": "arithmetic",
+     "per_parameter": {
+      "sigma_nu": {
+       "bench_values": [
+        0.8477534487604035,
+        0.7786182704015061,
+        0.589565326209629,
+        0.780250537709747
+       ],
+       "bench_mean": 0.7490468957703215,
+       "bench_log_mean": 0.7423180851884967,
+       "reference": 0.7490468957703215,
+       "rendered": 4.031130489583097,
+       "relative": 4.381679721718189
+      },
+      "lam": {
+       "bench_values": [
+        0.35825025610103456,
+        0.01353401006160542,
+        0.3553001449048951,
+        0.007932601893033603
+       ],
+       "bench_mean": 0.18375425324014216,
+       "bench_log_mean": 0.06080034059031183,
+       "reference": 0.18375425324014216,
+       "rendered": 0.5,
+       "relative": 1.7210254521105808
+      }
+     },
+     "max_relative": 4.381679721718189,
+     "rule": "the floor-only flight fit must carry the bench comb mean unchanged, under the rule it declares in frozen_from.rule"
+    }
+   }
+  }
+ },
+ "candidate": {
+  "name": "dregon_r3b_s3",
+  "rigs": [
+   "dregon"
+  ],
+  "fits": {
+   "dregon": {
+    "support": "dregon_room2_floor",
+    "path": "results/noise_v3/fits_r3b/restarts/dregon_room2_floor__flight_v3__s3.json",
+    "mode": "flight_v3",
+    "n_fit_windows": 5,
+    "converged": false,
+    "which_converged": "none",
+    "grad_norm": null,
+    "tol_nats_per_cell": 0.0001,
+    "lbfgs_restart_gain_per_cell": null,
+    "wall_s": 3238.1017274856567,
+    "whittle_nats": -18130815.80110025,
+    "comb_mean_check": {
+     "available": true,
+     "bench_fits": [
+      "bench_dregon_Motor1_70",
+      "bench_dregon_Motor2_70",
+      "bench_dregon_Motor3_70",
+      "bench_dregon_Motor4_70"
+     ],
+     "declared_rule": null,
+     "reference_mean": "arithmetic",
+     "per_parameter": {
+      "sigma_nu": {
+       "bench_values": [
+        0.8477534487604035,
+        0.7786182704015061,
+        0.589565326209629,
+        0.780250537709747
+       ],
+       "bench_mean": 0.7490468957703215,
+       "bench_log_mean": 0.7423180851884967,
+       "reference": 0.7490468957703215,
+       "rendered": 4.031130489583097,
+       "relative": 4.381679721718189
+      },
+      "lam": {
+       "bench_values": [
+        0.35825025610103456,
+        0.01353401006160542,
+        0.3553001449048951,
+        0.007932601893033603
+       ],
+       "bench_mean": 0.18375425324014216,
+       "bench_log_mean": 0.06080034059031183,
+       "reference": 0.18375425324014216,
+       "rendered": 0.5,
+       "relative": 1.7210254521105808
+      }
+     },
+     "max_relative": 4.381679721718189,
+     "rule": "the floor-only flight fit must carry the bench comb mean unchanged, under the rule it declares in frozen_from.rule"
+    }
+   }
+  }
+ },
+ "fits": [
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_50__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_60__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_80__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor1_90__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_50__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_60__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_80__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor2_90__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_50__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_60__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_80__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor3_90__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_50__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_60__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_80__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_Motor4_90__bench.json",
+  "results/noise_v2/rounds/round3/fits/bench_dregon_allMotors_70__bench.json",
+  "results/noise_v2/rounds/round3/fits/dregon_room2_floor__flight_floor_lowk.json",
+  "results/noise_v2/rounds/round3/fits/michaels_fly125_all__flight.json",
+  "results/noise_v2/rounds/round3/fits/michaels_fly125_cruise__flight.json",
+  "results/noise_v2/rounds/round3/fits/michaels_fly125_standby__flight.json",
+  "results/noise_v2/rounds/round3/fits/regimes_comb_floor.json"
+ ],
+ "protocol": {
+  "render_seeds": [
+   2001,
+   2002,
+   2003,
+   2004
+  ],
+  "n_mics": 8,
+  "scorer": null,
+  "proxy_seed": 2001,
+  "likelihood_front_end": {
+   "n_fft": 2048,
+   "hop": 512
+  },
+  "note": "PIT MAE per support is the mean over the frozen render seeds (the evaluator's per_window quantity); the proxy reads the first seed's render with the per-seed spread recorded beside it"
+ },
+ "measurements": {
+  "free-flight_nosource_room2@1512727397.205045+4.000000": {
+   "support": {
+    "rig": "dregon",
+    "recording": "free-flight_nosource_room2",
+    "start_s": 1512727397.2050455,
+    "duration_s": 4.0,
+    "regime": "cruise",
+    "key": "free-flight_nosource_room2@1512727397.205045+4.000000"
+   },
+   "n_samples": 64000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 4.0,
+   "scored_fraction": 1.0,
+   "mean_reference_rps": 80.39134577568659,
+   "per_rotor_mean_rps": [
+    84.3945929902479,
+    76.64434074136318,
+    81.6334512057349,
+    78.89299816540031
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 4.194354057312012,
+     "ltas_abs_db": 3.1792404718007075
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 4.131018161773682,
+     "ltas_abs_db": 4.555881358854843
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 4.141902685165405,
+     "ltas_abs_db": 2.671048738619526
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 4.118957757949829,
+     "ltas_abs_db": 3.4670571452939996
+    }
+   ],
+   "ltas_abs_db_first_seed": 3.1792404718007075,
+   "ltas_abs_db_seed_mean": 3.468306928642269,
+   "ltas_abs_db_seed_spread": 1.8848326202353172
+  },
+  "hovering_nosource_room2@1511903905.394490+4.000000": {
+   "support": {
+    "rig": "dregon",
+    "recording": "hovering_nosource_room2",
+    "start_s": 1511903905.3944898,
+    "duration_s": 4.0,
+    "regime": "cruise",
+    "key": "hovering_nosource_room2@1511903905.394490+4.000000"
+   },
+   "n_samples": 64000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 4.0,
+   "scored_fraction": 1.0,
+   "mean_reference_rps": 80.90005137944557,
+   "per_rotor_mean_rps": [
+    85.09231082097068,
+    77.06210191746577,
+    82.10787151162923,
+    79.3379212677166
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 4.138192415237427,
+     "ltas_abs_db": 2.479983660915638
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 4.150684833526611,
+     "ltas_abs_db": 3.8046355213294674
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 4.186847686767578,
+     "ltas_abs_db": 2.434898463267953
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 4.220937728881836,
+     "ltas_abs_db": 2.940650331638807
+    }
+   ],
+   "ltas_abs_db_first_seed": 2.479983660915638,
+   "ltas_abs_db_seed_mean": 2.915041994287966,
+   "ltas_abs_db_seed_spread": 1.3697370580615145
+  },
+  "updown_nosource_room2@1511903578.348311+4.000000": {
+   "support": {
+    "rig": "dregon",
+    "recording": "updown_nosource_room2",
+    "start_s": 1511903578.348311,
+    "duration_s": 4.0,
+    "regime": "cruise",
+    "key": "updown_nosource_room2@1511903578.348311+4.000000"
+   },
+   "n_samples": 64000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 4.0,
+   "scored_fraction": 1.0,
+   "mean_reference_rps": 79.305178324876,
+   "per_rotor_mean_rps": [
+    82.77177082127629,
+    75.62703633350729,
+    80.8846232148677,
+    77.9372829298526
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 4.242893695831299,
+     "ltas_abs_db": 4.188011308837467
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 4.21630597114563,
+     "ltas_abs_db": 5.603062345275026
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 4.135567903518677,
+     "ltas_abs_db": 3.730908773962472
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 4.132741212844849,
+     "ltas_abs_db": 4.592574126462887
+    }
+   ],
+   "ltas_abs_db_first_seed": 4.188011308837467,
+   "ltas_abs_db_seed_mean": 4.528639138634463,
+   "ltas_abs_db_seed_spread": 1.872153571312554
+  },
+  "rectangle_nosource_room2@1511905725.952559+4.000000": {
+   "support": {
+    "rig": "dregon",
+    "recording": "rectangle_nosource_room2",
+    "start_s": 1511905725.952559,
+    "duration_s": 4.0,
+    "regime": "cruise",
+    "key": "rectangle_nosource_room2@1511905725.952559+4.000000"
+   },
+   "n_samples": 64000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 4.0,
+   "scored_fraction": 1.0,
+   "mean_reference_rps": 80.5750713272443,
+   "per_rotor_mean_rps": [
+    84.11835466645734,
+    76.6339955282487,
+    81.89082641056552,
+    79.65710870370566
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 4.126055955886841,
+     "ltas_abs_db": 1.3065612929058903
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 4.143697738647461,
+     "ltas_abs_db": 2.077410175415081
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 4.087427616119385,
+     "ltas_abs_db": 1.5855514291619939
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 4.1323606967926025,
+     "ltas_abs_db": 1.83692553843844
+    }
+   ],
+   "ltas_abs_db_first_seed": 1.3065612929058903,
+   "ltas_abs_db_seed_mean": 1.7016121089803513,
+   "ltas_abs_db_seed_spread": 0.7708488825091908
+  },
+  "spinning_nosource_room2@1511905200.978012+4.000000": {
+   "support": {
+    "rig": "dregon",
+    "recording": "spinning_nosource_room2",
+    "start_s": 1511905200.978012,
+    "duration_s": 4.0,
+    "regime": "cruise",
+    "key": "spinning_nosource_room2@1511905200.978012+4.000000"
+   },
+   "n_samples": 64000,
+   "mics": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+   ],
+   "scored_seconds": 4.0,
+   "scored_fraction": 1.0,
+   "mean_reference_rps": 80.7072530188022,
+   "per_rotor_mean_rps": [
+    84.63820128811895,
+    76.3437150690958,
+    82.31368191334232,
+    79.53341380465179
+   ],
+   "seeds": [
+    2001,
+    2002,
+    2003,
+    2004
+   ],
+   "per_seed": [
+    {
+     "seed": 2001,
+     "render_seconds": 4.132307291030884,
+     "ltas_abs_db": 1.673137932184529
+    },
+    {
+     "seed": 2002,
+     "render_seconds": 4.113838195800781,
+     "ltas_abs_db": 2.6825115184857675
+    },
+    {
+     "seed": 2003,
+     "render_seconds": 4.1345374584198,
+     "ltas_abs_db": 1.8123285692913274
+    },
+    {
+     "seed": 2004,
+     "render_seconds": 3.975080966949463,
+     "ltas_abs_db": 2.0334335794551937
+    }
+   ],
+   "ltas_abs_db_first_seed": 1.673137932184529,
+   "ltas_abs_db_seed_mean": 2.050352899854204,
+   "ltas_abs_db_seed_spread": 1.0093735863012385
+  }
+ },
+ "likelihood_cells": [],
+ "gates": {
+  "hppnet": {
+   "name": "hppnet_pit_mae",
+   "unavailable": "no probe run",
+   "pass": false
+  },
+  "proxy": {
+   "name": "proxy_ltas_abs_db",
+   "primary": "ltas_abs_db (revised_eval.ltas_deviation_db mean_abs_db, mic 0, absolute level)",
+   "secondary": "mr_ltas (reported only)",
+   "closure": 0.7,
+   "mic": 0,
+   "groups": {
+    "dregon_cruise": {
+     "checks": {
+      "cohort_complete": true,
+      "within_gate": false
+     },
+     "gate_db": 1.9786091435875266,
+     "reference": {
+      "oracle_db": 1.784816176956543,
+      "c3_db": 2.4307927323931553,
+      "current_best_db": 2.126453600529959,
+      "oracle_spread_db": 1.141525996979129,
+      "n_supports": 5.0
+     },
+     "mean_ltas_abs_db": 2.5653869333288464,
+     "spread_ltas_abs_db": 2.881450015931577,
+     "margin_db": -0.5867777897413198,
+     "mean_mr_ltas": 2.5699208693839255,
+     "n_supports": 5,
+     "missing_supports": [],
+     "supports": [
+      {
+       "support": "free-flight_nosource_room2@1512727397.205045+4.000000",
+       "regime": "cruise",
+       "ltas_abs_db": 3.1792404718007075,
+       "ltas_max_abs_db": 4.66314624377239,
+       "level_offset_db": -3.082650767197333,
+       "shape_only_mean_abs_db": 2.2345274371797528,
+       "mr_ltas": 3.692332752894801
+      },
+      {
+       "support": "hovering_nosource_room2@1511903905.394490+4.000000",
+       "regime": "cruise",
+       "ltas_abs_db": 2.479983660915638,
+       "ltas_max_abs_db": 4.26627053913152,
+       "level_offset_db": -2.479983660915638,
+       "shape_only_mean_abs_db": 1.0221515481127612,
+       "mr_ltas": 2.0187756550807303
+      },
+      {
+       "support": "updown_nosource_room2@1511903578.348311+4.000000",
+       "regime": "cruise",
+       "ltas_abs_db": 4.188011308837467,
+       "ltas_max_abs_db": 6.347271491003864,
+       "level_offset_db": -4.188011308837467,
+       "shape_only_mean_abs_db": 1.2611081441017375,
+       "mr_ltas": 3.6922192961782536
+      },
+      {
+       "support": "rectangle_nosource_room2@1511905725.952559+4.000000",
+       "regime": "cruise",
+       "ltas_abs_db": 1.3065612929058903,
+       "ltas_max_abs_db": 3.261190239743371,
+       "level_offset_db": -0.6529007960992412,
+       "shape_only_mean_abs_db": 1.4097490531532373,
+       "mr_ltas": 1.788371838179997
+      },
+      {
+       "support": "spinning_nosource_room2@1511905200.978012+4.000000",
+       "regime": "cruise",
+       "ltas_abs_db": 1.673137932184529,
+       "ltas_max_abs_db": 3.364315121240434,
+       "level_offset_db": -1.3239332770901737,
+       "shape_only_mean_abs_db": 1.1496494566802318,
+       "mr_ltas": 1.6579048045858469
+      }
+     ],
+     "pass": false
+    },
+    "michaels_cruise": {
+     "checks": {
+      "cohort_complete": false,
+      "within_gate": false
+     },
+     "gate_db": 1.2196683027095454,
+     "reference": {
+      "oracle_db": 1.0852372760667532,
+      "c3_db": 1.5333406982093933,
+      "current_best_db": 1.3320148816302133,
+      "oracle_spread_db": 0.05340504126022878,
+      "n_supports": 2.0
+     },
+     "mean_ltas_abs_db": NaN,
+     "spread_ltas_abs_db": NaN,
+     "margin_db": null,
+     "mean_mr_ltas": null,
+     "n_supports": 0,
+     "missing_supports": [
+      "FLY124@40.000000+8.000000",
+      "FLY124@56.000000+8.000000"
+     ],
+     "supports": [],
+     "pass": false
+    }
+   },
+   "pass": false
+  },
+  "likelihood": {
+   "name": "likelihood_composite_risk",
+   "unavailable": "no Michael's cruise likelihood cell was built",
+   "pass": false
+  }
+ },
+ "bars": {
+  "unavailable": "no probe run",
+  "dregon": null,
+  "michaels": null,
+  "parity_pass": false,
+  "stretch_pass": false
+ },
+ "pass": false,
+ "frozen_gates_pass": false,
+ "parity_pass": false,
+ "stretch_pass": false
+}

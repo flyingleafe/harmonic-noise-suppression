@@ -1,0 +1,7 @@
+[michaels FLY124@8.000000+8.000000] pit=None real=None ltas=3.3470 dB
+[michaels FLY124@16.000000+8.000000] pit=None real=None ltas=2.9030 dB
+[michaels FLY124@27.680000+8.000000] pit=None real=None ltas=3.4472 dB
+[michaels FLY124@40.000000+8.000000] pit=None real=None ltas=2.5432 dB
+[michaels FLY124@56.000000+8.000000] pit=None real=None ltas=2.4242 dB
+wrote results/noise_v3/checks_r3b/proxy_seeds/arm_michaels_r3b_s3.json and results/noise_v3/checks_r3b/proxy_seeds/findings.md
+round 6: FAIL

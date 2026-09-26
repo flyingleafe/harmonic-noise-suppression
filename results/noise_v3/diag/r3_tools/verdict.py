@@ -37,6 +37,7 @@ TARGET = {
     "michaels_fly125_standby": -6943448.2,
 }
 FIGDIR = Path("docs/explainers/noise-model-v3-latent-runaway")
+PROXY_GROUP = {"dregon": "dregon_cruise", "michaels": "michaels_cruise"}
 GROUPS = ("1-2", "3-8", "9-24", "25-60", "61+")
 FAMS_E = ("d", "u", "uj", "v", "v k1-2", "v k3-8", "v k9-24", "v k25-60", "v k61+")
 
@@ -150,10 +151,10 @@ def disappearance(tag):
             gs = h[rig][arm]["intermittency_by_order_group"]
             out[rig][arm] = {
                 g: dict(
-                    rate=gs[g]["intermittency"]["frac_dropout_visible"],
+                    rate=gs[g]["intermittency_boot"]["frac_dropout_visible"][1],
                     boot=gs[g]["intermittency_boot"]["frac_dropout_visible"],
                     n_visible=gs[g]["intermittency"]["n_visible"],
-                    appear_disappear=gs[g]["intermittency"]["frac_intermittent"],
+                    appear_disappear=gs[g]["intermittency_boot"]["frac_intermittent"][1],
                 )
                 for g in GROUPS
             }
@@ -190,7 +191,7 @@ def parity(tag):
     for rig in ("dregon", "michaels"):
         a = load(f"{CHECKS[tag]}/parity/arm_{rig}_v3.json")
         b = a["bars"][rig]
-        grp = next(iter(a["gates"]["proxy"]["groups"].values()))
+        grp = a["gates"]["proxy"]["groups"][PROXY_GROUP[rig]]
         out[rig] = dict(
             mean=b.get("mean_rev_s"),
             upper=b.get("interval_upper_rev_s"),
@@ -219,9 +220,8 @@ def proxy_seeds(tag):
         vals = {}
         for p in sorted(d.glob(f"arm_{rig}_{tag}_s*.json")):
             a = load(p)
-            vals[int(p.stem.rsplit("_s", 1)[1])] = next(
-                iter(a["gates"]["proxy"]["groups"].values())
-            )["mean_ltas_abs_db"]
+            groups = a["gates"]["proxy"]["groups"]
+            vals[int(p.stem.rsplit("_s", 1)[1])] = groups[PROXY_GROUP[rig]]["mean_ltas_abs_db"]
         if vals:
             v = np.array(list(vals.values()))
             out[rig] = dict(seeds=vals, mean=float(v.mean()), spread=float(v.max() - v.min()))
@@ -277,14 +277,276 @@ def main():
         json.dumps(res, indent=1, default=float)
     )
     pr(res)
+    Path("results/noise_v3/diag/verdict_r3.md").write_text(md(res))
+
+
+def sp(x, nd=1):
+    """Signed, thin-space thousands, '—' for None/NaN."""
+    if x is None or (isinstance(x, float) and math.isnan(x)):
+        return "—"
+    return f"{x:+,.{nd}f}".replace(",", " ").replace("-", "−")
+
+
+def md(res):
+    """The doc's § Round 3 Results tables, r2 / r3a / r3b."""
+    have = [t for t in ROUNDS if "e" in res[t]]
+    out = []
+    pn = {
+        "dregon_room2_floor": "DREGON",
+        "michaels_fly125_cruise": "cruise",
+        "michaels_fly125_standby": "standby",
+    }
+    out += [
+        "**Objective under the measured wander** (nats; r3b re-priced by "
+        "`_nv3_reprice.py`, its own-law total in brackets; Δ = total − target):",
+        "",
+        "| pool | target | r2 (Δ) | r3a (Δ) | r3b (Δ) [own law] | Whittle r2 / r3a / r3b |",
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    for pool, name in pn.items():
+        o = {t: res[t]["objective"][pool] for t in ROUNDS}
+        out.append(
+            f"| {name} | {f1(TARGET[pool])} | {f1(o['r2']['total_measured'])} ({sp(o['r2']['vs_target'])}) | "
+            f"{f1(o['r3a']['total_measured'])} ({sp(o['r3a']['vs_target'])}) | "
+            f"{f1(o['r3b']['total_measured'])} ({sp(o['r3b']['vs_target'])}) [{f1(o['r3b']['total_own'])}] | "
+            f"{f1(o['r2']['whittle'])} / {f1(o['r3a']['whittle'])} / {f1(o['r3b']['whittle'])} |"
+        )
+    out += [
+        "",
+        "**Rounds and rig iterations** (per restart s0 / s1 / s2 / s3; rig L-BFGS iterations summed "
+        "over the alternation, first pass + restart, then the all-frames polish):",
+        "",
+        "| pool | round | selected | rounds run | rig iterations | polish | σ_ν rad/s | max γ Hz |",
+        "|---|---|---:|---|---|---|---:|---:|",
+    ]
+    for pool, name in pn.items():
+        for t in ROUNDS:
+            o = res[t]["objective"][pool]
+            rs = o["restarts"]
+            out.append(
+                f"| {name} | {t} | s{o['selected_seed']} | {' / '.join(str(r['rounds']) for r in rs)} | "
+                f"{' / '.join(f'{r["rig_iters"]:,}'.replace(',', ' ') for r in rs)} | "
+                f"{' / '.join(str(r['polish_iters']) for r in rs)} | {o['sigma_nu']:.2f} | {o['gamma_max']:.1f} |"
+            )
+    fams = ("d", "u", "u_j", "v k9-24", "v k25-60", "v k61+")
+    out += [
+        "",
+        "**Static share** of each family's mean square (pool mean per track), r2 → r3a → r3b:",
+        "",
+        "| pool | "
+        + " | ".join(f.replace("k61+", "k ≥ 61").replace("-", "–") for f in fams)
+        + " |",
+        "|---|" + "---|" * len(fams),
+    ]
+    for pool, name in pn.items():
+        cells = [
+            " → ".join(f"{res[t]['objective'][pool]['shares'][f]:.2f}" for t in ROUNDS)
+            for f in fams
+        ]
+        out.append(f"| {name} | " + " | ".join(cells) + " |")
+    efams = ("d", "u", "uj", "v k1-2", "v k3-8", "v k9-24", "v k25-60", "v k61+")
+    out += [
+        "",
+        "**(e) Lag-0 sum / measured σ²** (fitted mean square + posterior variance over the "
+        "measured σ² of `results/noise_v3/wander/<rig>.json`; r2 against the measured σ too; "
+        "lag-1 ratio in brackets), " + " → ".join(have) + ":",
+        "",
+        "| pool | "
+        + " | ".join(
+            f.replace("uj", "u_j").replace("k61+", "k ≥ 61").replace("-", "–") for f in efams
+        )
+        + " |",
+        "|---|" + "---|" * len(efams),
+    ]
+    for key, name in (
+        ("dregon", "DREGON"),
+        ("michaels_cruise", "cruise"),
+        ("michaels_standby", "standby"),
+    ):
+        cells = []
+        for f in efams:
+            xs = [res[t]["e"][key].get(f) for t in have]
+            if not all(xs) or any(x["lag0"] is None for x in xs):
+                cells.append("σ 0")
+                continue
+            cells.append(
+                " → ".join(f"{x['lag0']:.2f}" for x in xs)
+                + " ("
+                + " → ".join(f"{x['lag1']:.2f}" for x in xs)
+                + ")"
+            )
+        out.append(f"| {name} | " + " | ".join(cells) + " |")
+    out += [
+        "",
+        "**(b) Disappearance rate per order group** (share of a visible line's blocks under "
+        "6 dB, window-bootstrap median [5 %, 95 %], visible lines in brackets; a+d = lines that "
+        "appear and disappear, %):",
+        "",
+        "| rig | orders | real | " + " | ".join(have) + " | a+d real / " + " / ".join(have) + " |",
+        "|---|---|---|" + "---|" * len(have) + "---|",
+    ]
+    for rig, rname in (("dregon", "DREGON"), ("michaels", "Michael's")):
+        for g in GROUPS:
+            real = res["r3a"]["disappearance"][rig]["real"][g]
+            cells = [
+                f"{pc(real['rate'])} % ({real['n_visible']})"
+                if real["n_visible"]
+                else "no visible line"
+            ]
+            ads = [pc(real["appear_disappear"])]
+            for t in have:
+                x = res[t]["disappearance"][rig]["v3"][g]
+                b = x["boot"]
+                cells.append(
+                    f"{pc(x['rate'])} % [{pc(b[0])}, {pc(b[-1])}] ({x['n_visible']})"
+                    if x["n_visible"]
+                    else "none"
+                )
+                ads.append(pc(x["appear_disappear"]))
+            out.append(
+                f"| {rname} | {g.replace('61+', '≥ 61').replace('-', '–')} | "
+                + " | ".join(cells)
+                + f" | {' / '.join(ads)} |"
+            )
+    out += [
+        "",
+        "**(c) Tonality** (audit counts, orders ≥ 3 / 6 / 10 dB per rotor; clips = median of 4 "
+        "render seeds; expectation = `noise_v2_tonality_audit.py --fit`):",
+        "",
+        "| pattern | real clips | "
+        + " | ".join(f"{t} clips" for t in have)
+        + " | "
+        + " | ".join(f"{t} expectation" for t in have)
+        + " |",
+        "|---|---|" + "---|" * (2 * len(have)),
+    ]
+    for pat in res["r3a"]["tonality"]["clips"]:
+        real = res["r3a"]["tonality"]["clips"][pat].get("real")
+        cl = [res[t]["tonality"]["clips"].get(pat, {}).get("v3") for t in have]
+        ex = [res[t]["tonality"]["expectation"].get(pat) for t in have]
+        nm = pat.replace("michaels_", "").replace("dregon_cruise_", "DREGON ").replace("_", " ")
+        out.append(f"| {nm} | {real} | " + " | ".join(cl) + " | " + " | ".join(ex) + " |")
+    out += [
+        "",
+        "**(d) Parity** (HPPNet PIT MAE, rev/s, frozen supports and seeds) and the LTAS proxy "
+        "(`ltas_abs_db`, dB; selected fit, then the mean over the four restarts):",
+        "",
+        "| rig | "
+        + " | ".join(have)
+        + " | bar | proxy "
+        + " / ".join(have)
+        + " | proxy seed mean "
+        + " / ".join(have)
+        + " | gate |",
+        "|---|" + "---|" * len(have) + "---|---|---|---|",
+    ]
+    for rig, rname in (("dregon", "DREGON"), ("michaels", "Michael's")):
+        cells = []
+        for t in have:
+            p = res[t]["parity"][rig]
+            s = f"{p['mean']:.6f}"
+            s += (
+                f", upper {p['upper']:.6f}"
+                if p["upper"] is not None
+                else f", ratio {p['ratio']:.3f}"
+            )
+            s += ", PASS" if p["within"] else ", FAIL"
+            s += f" ({sp(p['margin'], 3)})"
+            cells.append(s)
+        p0 = res["r3a"]["parity"][rig]
+        prox = " / ".join(f"{res[t]['parity'][rig]['proxy']:.4f}" for t in have)
+        seedm = " / ".join(
+            f"{res[t]['proxy_seeds'][rig]['mean']:.4f}" if rig in res[t]["proxy_seeds"] else "—"
+            for t in have
+        )
+        out.append(
+            f"| {rname} | "
+            + " | ".join(cells)
+            + f" | {p0['bar']:.6f} | {prox} | {seedm} | {p0['proxy_gate']:.4f} |"
+        )
+    reg = " | ".join(
+        " / ".join(
+            f"{res[t]['parity']['michaels']['per_regime'][k]:.3f}"
+            for k in ("standby", "ramp", "cruise")
+        )
+        for t in have
+    )
+    out.append(f"| Michael's standby / ramp / cruise | {reg} | real 0.344 / 3.171 / 0.588 | | | |")
+    out += [
+        "",
+        "**Listen** (LTAS distance to the real clip, dB: mean |Δ| over the six bands 100 Hz–7 kHz, "
+        "same windows and seed as the explainer's § Listen):",
+        "",
+        "| rig | v2 | r2 | r3a | r3b |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    va, vb = res["views"]["r3a"], res["views"]["r3b"]
+    for rig, rname in (("dregon", "DREGON"), ("michaels", "Michael's")):
+        la, lb = va["listen"][rig], vb["listen"][rig]
+        out.append(
+            f"| {rname} | {la['v2']:.2f} | {la['v3']:.2f} | {la['v3_r3a']:.2f} | {lb['v3_r3b']:.2f} |"
+        )
+    out += [
+        "",
+        "**Rig views** (latents at zero; DREGON and cruise at 80 rev/s, standby at 30.6; line over "
+        "floor dB at k = 1 / 2; orders > 3 dB of the orders ≤ 8 kHz; floor part dB):",
+        "",
+        "| pool | round | k = 1 | k = 2 | orders > 3 dB | max γ Hz | floor 100 Hz | 1 kHz | 4 kHz |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for k, name in (("dregon", "DREGON"), ("cruise", "cruise"), ("standby", "standby")):
+        for t, v in (
+            ("r2", va["rigs"]["r2"][k]),
+            ("r3a", va["rigs"]["r3a"][k]),
+            ("r3b", vb["rigs"]["r3b"][k]),
+        ):
+            fl = v["floor_at_db"]
+            out.append(
+                f"| {name} | {t} | {v['over_k1_db']:.1f} | {v['over_k2_db']:.1f} | "
+                f"{v['n_orders_over']}/{v['n_orders']} | {v['gamma_max_hz']:.1f} | "
+                f"{fl['100']:.1f} | {fl['1000']:.1f} | {fl['4000']:.1f} |".replace("-", "−")
+            )
+    bias = {}
+    for t, p in (
+        ("r2", "ltas_bias_r2.json"),
+        ("r3a", "ltas_bias_r3a.json"),
+        ("r3b", "ltas_bias_r3b.json"),
+        ("folded r3", "ltas_bias_folded_r3.json"),
+    ):
+        q = Path("results/noise_v3/diag") / p
+        if q.exists():
+            bias[t] = load(q)
+    out += [
+        "",
+        "**Render − fit LTAS** (dB per band 100–300 / 300–700 / 700–1.5k / 1.5–3k / 3–5k / 5–7k Hz; "
+        "`noise_v3_diag.py ltas-bias`, render expectation against the fit's own block-mean spectrum):",
+        "",
+        "| pool | " + " | ".join(bias) + " |",
+        "|---|" + "---|" * len(bias),
+    ]
+    for pool, name in pn.items():
+        cells = []
+        for b in bias.values():
+            r = b.get(pool)
+            cells.append(
+                " / ".join(f"{x:+.2f}".replace("-", "−") for x in r["render_minus_fit"]["abs_db"])
+                if r
+                else "—"
+            )
+        out.append(f"| {name} | " + " | ".join(cells) + " |")
+    return "\n".join(out) + "\n"
 
 
 def f1(x, nd=1):
     return (
         "—"
         if x is None or (isinstance(x, float) and math.isnan(x))
-        else f"{x:,.{nd}f}".replace(",", " ")
+        else f"{x:,.{nd}f}".replace(",", " ").replace("-", "−")
     )
+
+
+def pc(x):
+    return "—" if x is None else f"{100 * x:.1f}"
 
 
 def pr(res):
@@ -323,16 +585,17 @@ def pr(res):
         for g in GROUPS:
             real = res["r3a"]["disappearance"][rig]["real"][g]
             cs = [
-                f"real {100 * real['rate']:.1f} ({real['n_visible']}) ad {100 * real['appear_disappear']:.1f}"
+                f"real {pc(real['rate'])} ({real['n_visible']}) ad {pc(real['appear_disappear'])}"
             ]
             for tag in ROUNDS:
                 x = res[tag].get("disappearance", {}).get(rig, {}).get("v3", {}).get(g)
                 if x:
                     b = x["boot"]
                     cs.append(
-                        f"{tag} {100 * x['rate']:.1f} [{100 * b[0]:.1f}, {100 * b[-1]:.1f}] ({x['n_visible']}) ad {100 * x['appear_disappear']:.1f}"
+                        f"{tag} {pc(x['rate'])} [{pc(b[0])}, {pc(b[-1])}] ({x['n_visible']}) "
+                        f"ad {pc(x['appear_disappear'])}"
                         if x["n_visible"]
-                        else f"{tag} none ad {100 * x['appear_disappear']:.1f}"
+                        else f"{tag} none ad {pc(x['appear_disappear'])}"
                     )
             print(rig, g, " | ".join(cs))
     print("\n## tonality (clips median; expectation)")
