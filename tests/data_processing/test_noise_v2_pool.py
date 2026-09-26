@@ -19,6 +19,7 @@ SR = 16000
 DREGON_FIT = "results/noise_v2/rounds/round5/fits/dregon_room2_floor__flight_profile.json"
 MICHAELS_CRUISE = "results/noise_v2/rounds/round3/fits/michaels_fly125_cruise__flight.json"
 MICHAELS_STANDBY = "results/noise_v2/rounds/round3/fits/michaels_fly125_standby__flight.json"
+V3_DREGON = "results/noise_v3/diag/folded_r2/dregon_room2_floor__flight_v3.json"
 
 pytestmark = pytest.mark.skipif(
     not Path(DREGON_FIT).is_file() or not Path(MICHAELS_CRUISE).is_file(),
@@ -74,6 +75,29 @@ def test_a_fit_with_fewer_microphones_than_the_policy_renders_is_refused(tmp_pat
     path.write_text(json.dumps(fit))
     with pytest.raises(ValueError, match="microphones in mic_gains_db"):
         _pool(n_mics=8, fits=[{"name": "two_mic", "cruise": str(path)}])
+
+
+@pytest.mark.skipif(not Path(V3_DREGON).is_file(), reason="no v3 fit in this checkout")
+def test_a_v3_fit_renders_through_the_same_policy():
+    """A ``noise-v3-fit/1`` payload has no microphone block and carries a
+    wander block; the pool renders it at unit mic gains with fresh wander."""
+    frame = _pool(n_mics=8, fits=[{"name": "v3", "cruise": V3_DREGON}]).sample_timeframe(
+        np.random.default_rng(4), 2.0
+    )
+    audio = np.asarray(frame["audio"].data)
+    assert audio.shape == (8, 2 * SR)
+    assert np.isfinite(audio).all()
+    assert 1e-4 < float(np.sqrt(np.mean(np.square(audio.astype(np.float64))))) < 1.0
+
+
+@pytest.mark.skipif(not Path(V3_DREGON).is_file(), reason="no v3 fit in this checkout")
+def test_a_v3_fit_without_its_wander_block_is_refused(tmp_path):
+    fit = json.loads(Path(V3_DREGON).read_text())
+    del fit["params"]["wander"]
+    path = tmp_path / "no_wander.json"
+    path.write_text(json.dumps(fit))
+    with pytest.raises(ValueError, match="'wander'"):
+        _pool(fits=[{"name": "no_wander", "cruise": str(path)}])
 
 
 def test_a_bank_without_the_format_tag_is_refused(tmp_path):

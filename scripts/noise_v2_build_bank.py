@@ -26,6 +26,16 @@ TWO PRESETS, both from :mod:`experiments.noise_model.rig_sampler`:
     ``rps`` block — the fitted-trajectory rig hyperprior for this arm — flies
     them. The standby SLOT is a regime policy carried with probability ``t``.
 
+NOISE MODEL V3 (``--generation v3``). The same two presets, the same seed,
+strength, widths, guards and entry count, drawn around the round-2 v3 fits
+with their static latent part folded into the rig
+(:data:`experiments.noise_model.rig_sampler.ANCHORS_V3`). Each entry carries
+``noise-v3-fit/1`` payloads in the same ``noise-v2-bank/1`` container; the
+file is ``noise_v3_<preset>_n<n>.json`` and the report
+``results/noise_v3/rig_sampler/build_<preset>.json``. How every v2 coordinate
+maps onto v3 (floor spline, wind, wander carried unperturbed, the trend guard
+around a flat-trend anchor) is in the sampler's module docstring.
+
 REPRODUCIBILITY. One seed (:data:`SEED`), one substream per entry index
 (``default_rng([seed, i])``), so a bank is bit-identical at any worker count
 and any build order, and a single entry can be re-derived on its own. The
@@ -49,6 +59,7 @@ USAGE::
     PYTHONPATH=src python scripts/noise_v2_build_bank.py --preset hard --force
     PYTHONPATH=src python scripts/noise_v2_build_bank.py --preset easy --n 64 \\
         --out /tmp/nv2_easy_64.json
+    PYTHONPATH=src python scripts/noise_v2_build_bank.py --preset hard --generation v3
 """
 
 from __future__ import annotations
@@ -85,8 +96,13 @@ SELF_CHECK_S = 2.0
 STANDBY_MAX_RPS = 40.0
 
 
-def default_out(preset: str, n: int) -> Path:
-    return BANK_DIR / f"noise_v2_{preset}_n{n}.json"
+def default_out(preset: str, n: int, generation: str = "v2") -> Path:
+    return BANK_DIR / f"noise_{generation}_{preset}_n{n}.json"
+
+
+def report_dir(generation: str) -> Path:
+    """Where a generation's sidecar build reports live."""
+    return Path(f"results/noise_{generation}/rig_sampler")
 
 
 def chosen_strength(structure: dict[str, Any]) -> tuple[float, str]:
@@ -339,6 +355,12 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--preset", required=True, choices=RS.PRESETS)
+    ap.add_argument(
+        "--generation",
+        default="v2",
+        choices=tuple(RS.GENERATIONS),
+        help="model generation of the anchors (default v2; v3 = the folded round-2 v3 fits)",
+    )
     ap.add_argument("--n", type=int, default=DEFAULT_N, help=f"draws (default {DEFAULT_N})")
     ap.add_argument("--out", default=None, help="output path (default data/rig_banks/...)")
     ap.add_argument("--seed", type=int, default=SEED)
@@ -365,8 +387,9 @@ def main(argv: list[str] | None = None) -> int:
         ltas_tol_db=RS.default_tolerances(structure),
         widths=RS.WIDTHS.as_dict(),
         max_attempts=int(args.max_attempts),
+        generation=args.generation,
     )
-    out = Path(args.out) if args.out else default_out(args.preset, int(args.n))
+    out = Path(args.out) if args.out else default_out(args.preset, int(args.n), args.generation)
     out.parent.mkdir(parents=True, exist_ok=True)
 
     have = existing_digest(out)
@@ -382,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
             f"a time, {check['n_standby_windows']} also on a standby-speed window, cruise RMS "
             f"{check['rms_min']:.4f}-{check['rms_max']:.4f}"
         )
-        report_path = Path("results/noise_v2/rig_sampler") / f"build_{args.preset}.json"
+        report_path = report_dir(args.generation) / f"build_{args.preset}.json"
         if report_path.is_file():
             row = json.loads(report_path.read_text())
             row["self_check"] = check
@@ -394,8 +417,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"rebuilding {out}: digest {have[:16]} -> {spec.digest[:16]}")
 
     print(
-        f"building the {args.preset} bank: {spec.n} draws at strength {strength:g} ({why}), "
-        f"seed {spec.seed}"
+        f"building the {args.generation} {args.preset} bank: {spec.n} draws at strength "
+        f"{strength:g} ({why}), seed {spec.seed}"
     )
     started = time.time()
     entries, stats = RS.build_entries(spec, workers=args.workers, log=print)
@@ -409,7 +432,7 @@ def main(argv: list[str] | None = None) -> int:
     wall = time.time() - started
     report(payload, out, check, cov, wall, stats["n_workers"])
 
-    report_path = Path("results/noise_v2/rig_sampler") / f"build_{args.preset}.json"
+    report_path = report_dir(args.generation) / f"build_{args.preset}.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(

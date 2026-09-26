@@ -29,7 +29,8 @@ THE SIX GENERATIONS, as noise sources::
                                   cruise pair with the 45-65 rev/s smoothstep
     V2Bank("easy", 0)             entry 0 of data/rig_banks/noise_v2_easy_
                                   n2048.json (= `dload:noise-v2-banks`), the
-                                  sampled v2 rig bank
+                                  sampled v2 rig bank; V3Bank("easy"|"hard",
+                                  i) is the v3 one (`dload:noise-v3-banks`)
     V3Fit("dregon")               the noise-model-v3 single-regime fit
                                   (results/noise_v3/fits{,_r2}/, round "r1",
                                   "r2" or "latest" = r2 when it is on disk);
@@ -184,6 +185,13 @@ LEGACY_BANKS = {
 V2_BANKS = {
     "easy": "data/rig_banks/noise_v2_easy_n2048.json",
     "hard": "data/rig_banks/noise_v2_hard_n2048.json",
+}
+
+#: The v3 rig banks (the same files as ``dload:noise-v3-banks``): drawn by the
+#: v2 sampler's construction around the folded round-2 v3 fits.
+V3_BANKS = {
+    "easy": "data/rig_banks/noise_v3_easy_n2048.json",
+    "hard": "data/rig_banks/noise_v3_hard_n2048.json",
 }
 
 #: ``line_mode`` each legacy generation is rendered with: the bank arms declare
@@ -1743,17 +1751,17 @@ def _legacy_entry(preset: str, index: int) -> Any:
 
 
 @lru_cache(maxsize=8)
-def _v2_entry(preset: str, index: int):
-    """ONE entry of a v2 rig bank, through the pool's own bank loader.
+def _v2_entry(path: str, index: int):
+    """ONE entry of a v2/v3 rig bank, through the pool's own bank loader.
 
     Cached per entry rather than per bank on purpose: a bank is a 30 MB JSON of
     2048 inline fit payloads, and the notebook wants two of them.
     """
     from data_processing.noise_v2_pool import load_preset_bank
 
-    entries = load_preset_bank(str(ROOT / V2_BANKS[preset]))
+    entries = load_preset_bank(str(ROOT / path))
     if not 0 <= index < len(entries):
-        raise IndexError(f"{V2_BANKS[preset]} holds {len(entries)} entries; asked for {index}")
+        raise IndexError(f"{path} holds {len(entries)} entries; asked for {index}")
     return entries[index]
 
 
@@ -1857,16 +1865,20 @@ class V2Bank(NoiseSource):
     """
 
     generation = "v2"
+    #: ``{preset: repo-relative bank file}`` this class reads.
+    BANKS = V2_BANKS
 
     def __init__(self, preset: str = "easy", index: int = 0):
         key = str(preset).lower()
-        if key not in V2_BANKS:
-            raise ValueError(f"unknown v2 bank {preset!r}; known banks are {list(V2_BANKS)}")
+        if key not in self.BANKS:
+            raise ValueError(
+                f"unknown {self.generation} bank {preset!r}; known banks are {list(self.BANKS)}"
+            )
         self.preset = key
         self.index = int(index)
-        self.entry_obj = _v2_entry(key, int(index))
-        self.name = f"v2-bank {key}[{int(index)}]"
-        self.entry = f"{V2_BANKS[key]}: entry {int(index)} ({self.entry_obj.name})"
+        self.entry_obj = _v2_entry(self.BANKS[key], int(index))
+        self.name = f"{self.generation}-bank {key}[{int(index)}]"
+        self.entry = f"{self.BANKS[key]}: entry {int(index)} ({self.entry_obj.name})"
         self.span = _pool_span(self.entry_obj.cruise)
 
     @property
@@ -1942,14 +1954,28 @@ class V2Bank(NoiseSource):
             )
             print(
                 f"    floor    : mean {float(fl['floor_mean_db']):.2f} dB   "
-                f"tilt {float(fl['floor_tilt_db_oct']):+.3f} dB/oct   "
-                f"exp {float(fl['floor_exp']):.3f}   static_rel {float(fl['floor_static_rel']):.4g}"
+                + (
+                    f"sigma_B {float(fl['floor_shape_sd_db']):.2f} dB   "
+                    if "floor_shape_sd_db" in fl
+                    else f"tilt {float(fl['floor_tilt_db_oct']):+.3f} dB/oct   "
+                )
+                + f"exp {float(fl['floor_exp']):.3f}   "
+                f"static_rel {float(fl['floor_static_rel']):.4g}"
             )
             k = min(8, prof.shape[1])
             print(f"    profile_db, k=1..{k} (dB, per rotor):")
             for r in range(prof.shape[0]):
                 print(f"      rotor {r}: " + "  ".join(f"{v:7.2f}" for v in prof[r, :k]))
             print("    gamma_hz k=1   : " + "  ".join(f"{v:.4f}" for v in gamma[:, 0]))
+
+
+class V3Bank(V2Bank):
+    """ONE entry of a v3 rig bank (``noise-v2-bank/1`` of ``noise-v3-fit/1``
+    payloads, ``dload:noise-v3-banks``), rendered exactly as :class:`V2Bank`
+    renders a v2 one — the renderer reads the v3 differences off the payload."""
+
+    generation = "v3"
+    BANKS = V3_BANKS
 
 
 def _v2_flight_gain(fit: dict[str, Any], rps: np.ndarray) -> float:
@@ -2789,6 +2815,7 @@ __all__ = [
     "TRAJ_FS",
     "TRAJ_KINDS",
     "V2_BANKS",
+    "V3_BANKS",
     "V3_FIT_DIRS",
     "V3_FIT_FILES",
     "LegacyBank",
@@ -2798,6 +2825,7 @@ __all__ = [
     "Rig",
     "V2Bank",
     "V2Fit",
+    "V3Bank",
     "V3Fit",
     "describe",
     "describe_traj",

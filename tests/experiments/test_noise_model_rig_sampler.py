@@ -331,3 +331,75 @@ def test_coverage_counts_a_bracketed_band_and_refuses_an_unbracketed_one() -> No
     # is outside the 400 Hz one
     assert cov["above_300hz"] == pytest.approx(0.75)
     assert cov["above_300hz_worst_clip"] == pytest.approx(0.5)
+
+
+# ── noise model v3 ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def anchors_v3() -> dict:
+    return RS.pinned_anchors("v3")
+
+
+def _ctrl_db(fit: dict) -> np.ndarray:
+    """A v3 floor's control values in dB: ``mu + sigma_B (L z)_j``."""
+    from data_processing.noise_model.spectrum import floor_shape_db
+
+    f = fit["params"]["floor"]
+    return f["floor_mean_db"] + floor_shape_db(
+        f["floor_shape_z"], sr=16000, scale_db=f["floor_shape_sd_db"]
+    )
+
+
+def test_v3_anchors_pass_their_own_guards(
+    probe: RS.ModelProbe, anchors_v3: dict, structure: dict
+) -> None:
+    """Both v3 anchors, the flat-trend Michael's cruise included, are inside
+    the envelope they are guarded against — else no draw near them could be."""
+    tol = RS.default_tolerances(structure)
+    for rig in ("dregon", "michaels"):
+        ref = RS.reference_of(anchors_v3[rig], probe, ltas_tol_db=tol[rig], name=rig)
+        guards = RS.check_sample(anchors_v3[rig], ref, probe, standby=anchors_v3[f"{rig}_standby"])
+        assert guards["ok"], (rig, guards["failed"])
+
+
+def test_v3_floor_step_is_the_v2_floor_step_in_db(anchors_v3: dict) -> None:
+    """The v3 floor has no tilt and its own sigma_B; the mapped draw must move
+    every control value by exactly what the v2 shape and tilt draws would."""
+    from data_processing.noise_model.constants import FLOOR_SHAPE_STD_DB
+    from data_processing.noise_model.spectrum import floor_ctrl_hz, floor_shape_chol
+
+    anchor = anchors_v3["dregon"]
+    ctrl = floor_ctrl_hz(16000)
+    dz = np.random.default_rng(0).normal(size=ctrl.size)
+    moved = RS.strip_payload(anchor)
+    moved["params"]["floor"]["floor_shape_z"] = list(
+        np.asarray(anchor["params"]["floor"]["floor_shape_z"])
+        + RS._v3_floor_step(dz, 0.5, anchor["params"]["floor"])
+    )
+    want = FLOOR_SHAPE_STD_DB * (floor_shape_chol(ctrl) @ dz) + 0.5 * np.log2(ctrl / 500.0)
+    assert np.allclose(_ctrl_db(moved) - _ctrl_db(anchor), want, atol=1e-6)
+
+
+def test_v3_draw_keeps_the_fitted_wander_and_moves_the_wind_with_the_rig(
+    anchors_v3: dict,
+) -> None:
+    anchor = anchors_v3["dregon"]
+    drawn, info = RS.draw_fit(anchor, np.random.default_rng([5, 5]), 3.0)
+    assert drawn["params"]["wander"] == anchor["params"]["wander"]
+    assert "mic_gains_db" not in drawn["params"]
+    wind_move = np.subtract(drawn["params"]["wind"]["wind_db"], anchor["params"]["wind"]["wind_db"])
+    # the whole-rig level plus a per-mic scatter at v2's mic_floor_db width
+    assert abs(float(wind_move.mean()) - info["level_db"]) < 4.0 * 3.0 * RS.WIDTHS.mic_floor_db
+
+
+def test_v3_path_endpoints_reproduce_the_anchor_floors(anchors_v3: dict) -> None:
+    a, b = anchors_v3["dregon"], anchors_v3["michaels"]
+    at0, at1 = RS.interpolate_fits(a, b, 0.0), RS.interpolate_fits(a, b, 1.0)
+    assert np.allclose(_ctrl_db(at0), _ctrl_db(a), atol=1e-3)
+    assert np.allclose(_ctrl_db(at1), _ctrl_db(b), atol=1e-3)
+    assert np.allclose(at0["params"]["wind"]["wind_db"], a["params"]["wind"]["wind_db"])
+    # Michael's has no wind term: the path's wind fades out in power
+    assert at1["params"]["wind"] is None
+    half = RS.interpolate_fits(a, b, 0.5)["params"]["wind"]["wind_db"]
+    assert np.allclose(np.subtract(half, a["params"]["wind"]["wind_db"]), 10 * np.log10(0.5))

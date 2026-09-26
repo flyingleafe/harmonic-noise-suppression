@@ -1,4 +1,4 @@
-"""Parameter-neighbourhood sampler for noise-model-v2 fits.
+"""Parameter-neighbourhood sampler for noise-model-v2 (and v3) fits.
 
 What this is
 ------------
@@ -163,6 +163,37 @@ unless coverage above 300 Hz falls under 90 %, in which case the ladder
 The measured answer for this pair is in ``results/noise_v2/rig_sampler/
 findings.md``.
 
+Noise model v3 (``generation="v3"``)
+------------------------------------
+The same two modes, seed, strength, widths, guards and LTAS envelope, drawn
+around the round-2 v3 fits with their static latent part folded into the rig
+(:data:`ANCHORS_V3`). A ``noise-v3-fit/1`` payload shares ``profile_db``,
+``gamma_hz``, ``sigma_nu``, ``lam``, ``floor_mean_db`` and the speed laws with
+v2, and those are drawn and interpolated exactly as above. The rest maps like
+this:
+
+* **floor shape and tilt** — v3's floor is the spline alone,
+  ``mu + sigma_B (L z)_j`` with the MEASURED ``sigma_B``. v2 draws a shape
+  step in its GP coordinate (scale ``FLOOR_SHAPE_STD_DB`` = 5 dB) and a tilt
+  step in dB/octave. v3 takes the same two draws and writes their exact dB
+  move at every control point into ``z`` (:func:`_v3_floor_step`). On the path
+  the control values are interpolated linearly in dB, which is v2's rule.
+* **microphone blocks** — v3 has none, because it normalises the channels in
+  the data, so nothing is drawn there. DREGON's per-mic ``wind`` level takes
+  the whole-rig level move plus v2's per-mic floor width (``mic_floor_db``).
+  On the path it mixes linearly in power towards Michael's absent term.
+* **wander** — the ``(sigma, tau)`` hyperparameters are NOT perturbed; every
+  neighbourhood entry keeps its anchor's fitted block. On the path the block is
+  CARRIED like the standby slot: Michael's cruise block with probability ``t``,
+  DREGON's otherwise (:data:`PATH_INTERP_V3`).
+* **trend guard** — the folded Michael's cruise fit falls by only 0.6 and
+  0.2 dB on rotors 2 and 3, so v2's absolute 3 dB rule would refuse the
+  anchor itself. v2's rule is kept on every rotor whose reference clears it.
+  A rotor whose reference does not clear it may not flatten by more than
+  3 dB below its own fit (:func:`trend_floor_db`).
+* **probe** — each payload's expected periodogram is evaluated at its own work
+  rate (32 kHz for v3), with the wander at its mean.
+
 CLI
 ---
 ``PYTHONPATH=src python -m experiments.noise_model.rig_sampler measure`` runs
@@ -181,12 +212,20 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from data_processing.noise_model.constants import AMP_RPS_REF
+from data_processing.noise_model import FIT_SCHEMA_V3
+from data_processing.noise_model.constants import (
+    AMP_RPS_REF,
+    FLOOR_SHAPE_F_MIN,
+    FLOOR_SHAPE_STD_DB,
+    FLOOR_TILT_REF_HZ,
+)
+from data_processing.noise_model.spectrum import FLIGHT_SR, floor_ctrl_hz, floor_shape_chol
 from data_processing.noise_v2_pool import PRESET_BANK_FORMAT
 from experiments.stochastic_fit.rig_sampler import third_octave
 
@@ -237,6 +276,49 @@ ANCHORS: dict[str, dict[str, Any]] = {
         "traj_rig": "michaels",
     },
 }
+
+#: Round 2 of the noise-model-v3 campaign (``docs/experiments/noise-model-v3.md``
+#: § "Round 2") with the STATIC part of its fitted block latents folded into the
+#: rig (``scripts/noise_v3_diag.py fold_static``, commit ``1b698d78``): profile +=
+#: the window-mean ``d`` and ``v``, floor mean += mean ``u``, ``z`` += ``L^-1``
+#: mean ``u_j`` / sigma_B. An exact reparametrisation (the fit's block spectra
+#: move by <= 8e-4 dB, no parameter added); without it the renderer, which
+#: draws zero-mean wander, drops the static part and adds the prior's Jensen
+#: term on top of it (DREGON +0.4..+1.8 dB above 300 Hz, Michael's cruise
+#: +2.4..+3.5 dB, render minus fit; ``results/noise_v3/diag/ltas_bias_r2.json``).
+ROUND_V3_R2 = "results/noise_v3/diag/folded_r2"
+
+#: The v3 anchors: the same two rigs, the same regime pairs, their folded
+#: round-2 v3 fits. Michael's standby is a v3 fit too, so a v3 entry is v3 in
+#: both slots.
+ANCHORS_V3: dict[str, dict[str, Any]] = {
+    "dregon": {
+        "cruise": f"{ROUND_V3_R2}/dregon_room2_floor__flight_v3.json",
+        "standby": None,
+        "traj_rig": "dregon",
+    },
+    "michaels": {
+        "cruise": f"{ROUND_V3_R2}/michaels_fly125_cruise__flight_v3.json",
+        "standby": f"{ROUND_V3_R2}/michaels_fly125_standby__flight_v3.json",
+        "traj_rig": "michaels",
+    },
+}
+
+#: The model generations a bank can be drawn in, and the anchors of each.
+GENERATIONS: dict[str, dict[str, dict[str, Any]]] = {"v2": ANCHORS, "v3": ANCHORS_V3}
+
+
+def anchors_of(generation: str) -> dict[str, dict[str, Any]]:
+    """The anchor table of one model generation (``"v2"`` or ``"v3"``)."""
+    if generation not in GENERATIONS:
+        raise ValueError(f"generation must be one of {tuple(GENERATIONS)}, got {generation!r}")
+    return GENERATIONS[generation]
+
+
+def is_v3(fit: dict[str, Any]) -> bool:
+    """Whether ``fit`` is a ``noise-v3-fit/1`` payload."""
+    return fit.get("schema") == FIT_SCHEMA_V3
+
 
 #: R5's four optimiser restarts: the between-restart tier for everything the
 #: flight profile fit leaves free (profile, floor, microphones).
@@ -291,6 +373,13 @@ LEVEL_BAND_HZ = (300.0, 7900.0)
 #: ``k = K``. Measured: the smallest total drop over the 16 v2 rotor profiles
 #: (2 cruise rigs x 4 rotors, Michael's standby x 4, 4 bench motors) is 9.7 dB.
 TREND_MARGIN_DB = 3.0
+
+#: The trend guard around a v3 reference, as recorded in a v3 bank's guards.
+TREND_RULE_V3 = (
+    "per rotor: drop >= TREND_MARGIN_DB where the reference itself falls by at least that "
+    "much (v2's rule), else drop >= reference drop - TREND_MARGIN_DB; a standby payload "
+    "keeps v2's absolute margin"
+)
 
 #: Total per-rotor line-width excursion cap. STATED, not measured.
 GAMMA_EXCURSION_CAP = 1.5
@@ -503,6 +592,13 @@ class ModelProbe:
     One frame of the declared 2 s window is evaluated, not 59: every frame of a
     CONSTANT-carrier window has the same expectation, verified to 0.0 dB against
     ``experiments.noise_model.render.expected_periodogram`` on the full window.
+
+    Each fit is evaluated at ITS OWN work rate (``front_end.sr_work``, as
+    :func:`~data_processing.noise_model.render.fit_work_rate` reads it): 64 kHz
+    for every v2 fit — the grid this probe always built — and 32 kHz for a
+    ``noise-v3-fit/1`` payload, whose likelihood read that rate. A v3 payload is
+    evaluated with its block wander at its mean (latents zero), which is the
+    forward model its fit wrote.
     """
 
     def __init__(
@@ -521,41 +617,51 @@ class ModelProbe:
         self.n_rotors = int(n_rotors)
         self.n_mics = int(n_mics)
         self.window_s = float(window_s)
-        self.grid = SP.flight_grid()
         self.freqs_hz = np.fft.rfftfreq(SP.FLIGHT_N_FFT, d=1.0 / float(SP.FLIGHT_SR))
-        self._rate = {
-            float(s): SP.flight_rate_work(
-                self.grid,
-                np.full((self.n_rotors, SP.FLIGHT_N_FFT), float(s)),
+        self._grids: dict[int, Any] = {}
+        self._rate: dict[tuple[int, float], Any] = {}
+        for s in speeds:
+            self._rate_for(SP.SAMPLE_RATE_WORK, float(s))
+        self._centres: np.ndarray | None = None
+
+    def _rate_for(self, sr_work: int, speed_rps: float) -> tuple[Any, Any]:
+        """``(grid, carrier)``: one work-rate grid and one constant speed on it."""
+        from experiments.noise_model import spectrum as SP
+
+        grid = self._grids.get(int(sr_work))
+        if grid is None:
+            grid = SP.flight_grid(sr_work=int(sr_work))
+            self._grids[int(sr_work)] = grid
+        key = (int(sr_work), float(speed_rps))
+        rate = self._rate.get(key)
+        if rate is None:
+            rate = SP.flight_rate_work(
+                grid,
+                np.full((self.n_rotors, SP.FLIGHT_N_FFT), float(speed_rps)),
                 np.array([0], dtype=np.int64),
             )
-            for s in speeds
-        }
-        self._centres: np.ndarray | None = None
+            self._rate[key] = rate
+        return grid, rate
 
     def periodogram(self, fit: dict[str, Any], speed_rps: float) -> np.ndarray:
         """``(M, F)`` expected periodogram of ``fit`` at ``speed_rps``."""
         import torch
 
+        from data_processing.noise_model.render import fit_work_rate
         from experiments.noise_model import model as MD
         from experiments.noise_model import spectrum as SP
 
         p = fit["params"]
-        rate = self._rate.get(float(speed_rps))
-        if rate is None:
-            rate = SP.flight_rate_work(
-                self.grid,
-                np.full((self.n_rotors, SP.FLIGHT_N_FFT), float(speed_rps)),
-                np.array([0], dtype=np.int64),
-            )
-            self._rate[float(speed_rps)] = rate
+        grid, rate = self._rate_for(fit_work_rate(fit), float(speed_rps))
         prof = np.asarray(p["profile"]["profile_db"], dtype=np.float64)
         k_max = min(
             int(prof.shape[1]),
             SP.k_max_for_carrier(float(speed_rps), SP.FLIGHT_SR, k_cap=int(prof.shape[1])),
         )
         with torch.no_grad():
-            m = SP.flight_model(self.grid, MD.params_from_dict(p), rate_work=rate, k_max=k_max)
+            m = SP.flight_model(
+                grid, MD.params_from_dict(p, n_mics=self.n_mics), rate_work=rate, k_max=k_max
+            )
         return m.cpu().numpy()[: self.n_mics, 0, :]
 
     def bands(self, fit: dict[str, Any], speed_rps: float) -> tuple[np.ndarray, np.ndarray, bool]:
@@ -1148,22 +1254,42 @@ def draw_fit(
     # --- the broadband floor ----------------------------------------------
     shape = np.asarray(p["floor"]["floor_shape_z"], dtype=np.float64)
     d_shape = _ar1_draw(rng, shape.size, widths.floor_shape_ar1) * s * widths.floor_shape_z
-    p["floor"]["floor_shape_z"] = _round(shape + (d_shape - d_shape.mean()))
-    p["floor"]["floor_mean_db"] = float(
-        p["floor"]["floor_mean_db"] + d_level + rng.normal(0.0, s * widths.floor_mean_db)
-    )
-    p["floor"]["floor_tilt_db_oct"] = float(
-        p["floor"]["floor_tilt_db_oct"] + rng.normal(0.0, s * widths.floor_tilt_db_oct)
-    )
+    if is_v3(fit):
+        # the SAME three floor draws as v2, in the same order and at the same
+        # widths, mapped onto the v3 floor c_j = mu + sigma_B (L z)_j, which has
+        # no tilt and scales its GP by the MEASURED sigma_B instead of v2's
+        # fixed FLOOR_SHAPE_STD_DB (:func:`_v3_floor_step`). No channel block
+        # follows: v3 has none. The wind, a per-mic low-band floor level, takes
+        # the whole-rig level and v2's per-mic floor width.
+        d_mean = float(rng.normal(0.0, s * widths.floor_mean_db))
+        d_tilt = float(rng.normal(0.0, s * widths.floor_tilt_db_oct))
+        p["floor"]["floor_shape_z"] = _round(
+            shape + _v3_floor_step(d_shape - d_shape.mean(), d_tilt, p["floor"])
+        )
+        p["floor"]["floor_mean_db"] = float(p["floor"]["floor_mean_db"] + d_level + d_mean)
+        wind = p.get("wind")
+        if wind is not None:
+            base = np.asarray(wind["wind_db"], dtype=np.float64)
+            wind["wind_db"] = _round(
+                base + d_level + rng.normal(0.0, s * widths.mic_floor_db, size=base.shape)
+            )
+    else:
+        p["floor"]["floor_shape_z"] = _round(shape + (d_shape - d_shape.mean()))
+        p["floor"]["floor_mean_db"] = float(
+            p["floor"]["floor_mean_db"] + d_level + rng.normal(0.0, s * widths.floor_mean_db)
+        )
+        p["floor"]["floor_tilt_db_oct"] = float(
+            p["floor"]["floor_tilt_db_oct"] + rng.normal(0.0, s * widths.floor_tilt_db_oct)
+        )
 
-    # --- channel structure -------------------------------------------------
-    for holder, key, sigma in (
-        (p["profile"], "mic_line_gain_db", widths.mic_line_gain_db),
-        (p["floor"], "mic_floor_db", widths.mic_floor_db),
-        (p, "mic_gains_db", widths.mic_gains_db),
-    ):
-        base = np.asarray(holder[key], dtype=np.float64)
-        holder[key] = _round(base + rng.normal(0.0, s * sigma, size=base.shape))
+        # --- channel structure ---------------------------------------------
+        for holder, key, sigma in (
+            (p["profile"], "mic_line_gain_db", widths.mic_line_gain_db),
+            (p["floor"], "mic_floor_db", widths.mic_floor_db),
+            (p, "mic_gains_db", widths.mic_gains_db),
+        ):
+            base = np.asarray(holder[key], dtype=np.float64)
+            holder[key] = _round(base + rng.normal(0.0, s * sigma, size=base.shape))
 
     drawn = {
         "level_db": d_level,
@@ -1176,6 +1302,36 @@ def draw_fit(
         "floor_mean_db": float(p["floor"]["floor_mean_db"]),
     }
     return out, drawn
+
+
+@lru_cache(maxsize=1)
+def _tilt_as_ctrl() -> tuple[np.ndarray, np.ndarray]:
+    """``(L, tilt)``: the floor GP's Cholesky and ``log2(f_j / 500 Hz)`` at its
+    control points, the octave axis v2's ``floor_tilt_db_oct`` multiplies."""
+    ctrl = floor_ctrl_hz(FLIGHT_SR)
+    tilt = np.log2(np.maximum(ctrl, FLOOR_SHAPE_F_MIN) / FLOOR_TILT_REF_HZ)
+    return floor_shape_chol(ctrl), tilt
+
+
+def _v3_floor_step(
+    d_shape_z: np.ndarray, d_tilt_db_oct: float, floor: dict[str, Any]
+) -> np.ndarray:
+    """The v3 ``floor_shape_z`` step equal, in dB at every control point, to a
+    v2 floor step of ``d_shape_z`` (v2 GP coordinate) plus ``d_tilt_db_oct``.
+
+    v2 puts ``FLOOR_SHAPE_STD_DB (L dz)_j + tilt log2(f_j / 500)`` on the
+    control values; v3's control values are ``sigma_B (L z)_j``, so the same dB
+    move is ``dz' = (FLOOR_SHAPE_STD_DB dz + tilt L^-1 log2(f_j / 500)) /
+    sigma_B``. The tilt is exact between control points as well — the floor
+    interpolates its control values linearly in octaves, and a tilt IS linear
+    in octaves — and below the 30 Hz clamp both floors are flat.
+    """
+    chol, tilt = _tilt_as_ctrl()
+    if d_shape_z.size != tilt.size:
+        raise ValueError(f"floor carries {d_shape_z.size} control points, the ladder {tilt.size}")
+    sigma_b = float(floor["floor_shape_sd_db"])
+    step_db = FLOOR_SHAPE_STD_DB * (chol @ d_shape_z) + float(d_tilt_db_oct) * tilt
+    return np.linalg.solve(chol, step_db) / sigma_b
 
 
 # ---------------------------------------------------------------------------
@@ -1196,6 +1352,26 @@ class Reference:
     bands: np.ndarray  # (B,) cruise band levels of the reference payload
     gamma_level_ln: np.ndarray  # (R,) per-rotor mean log gamma
     ltas_tol_db: float
+    #: ``(R,)`` per-rotor lower bound on the CRUISE payload's trend drop, or
+    #: ``None``: :data:`TREND_MARGIN_DB` on every rotor (every v2 reference).
+    #: See :func:`trend_floor_db`.
+    trend_floor_db: np.ndarray | None = None
+
+
+def trend_floor_db(drops: Any) -> np.ndarray:
+    """``(R,)`` lower bound on each rotor's trend drop around a v3 reference.
+
+    v2's rule — every rotor must fall by :data:`TREND_MARGIN_DB` — is kept on
+    every rotor whose REFERENCE falls by at least that much. A rotor whose own
+    fit already falls by less (the folded round-2 Michael's cruise: 0.6 and
+    0.2 dB on rotors 2 and 3, where v2's measured minimum was 9.7) cannot be
+    held to it — the anchor itself would fail and every draw around it would
+    be refused — so there the bound is the reference's own drop minus the
+    same margin: a draw may not flatten that rotor by more than
+    :data:`TREND_MARGIN_DB` below what the fit measured.
+    """
+    d = np.asarray(drops, dtype=np.float64)
+    return np.where(d >= TREND_MARGIN_DB, TREND_MARGIN_DB, d - TREND_MARGIN_DB)
 
 
 def reference_of(
@@ -1211,6 +1387,13 @@ def reference_of(
         bands=bands,
         gamma_level_ln=gamma.mean(axis=1),
         ltas_tol_db=float(ltas_tol_db),
+        trend_floor_db=(
+            trend_floor_db(
+                [q.drop for q in decompose_block(fit["params"]["profile"]["profile_db"])]
+            )
+            if is_v3(fit)
+            else None
+        ),
     )
 
 
@@ -1251,7 +1434,16 @@ def check_sample(
         for parts in decompose_block(q["params"]["profile"]["profile_db"])
     ]
     out["trend_drop_db"] = [float(v) for v in drops]
-    out["trend_falls"] = bool(min(drops) >= TREND_MARGIN_DB)
+    if reference.trend_floor_db is None:
+        out["trend_falls"] = bool(min(drops) >= TREND_MARGIN_DB)
+    else:
+        # the cruise rotors against the reference's own per-rotor bound, the
+        # standby payload (if any) against v2's absolute margin
+        n_cruise = int(np.asarray(reference.trend_floor_db).size)
+        out["trend_falls"] = bool(
+            np.all(np.asarray(drops[:n_cruise]) >= reference.trend_floor_db)
+            and all(v >= TREND_MARGIN_DB for v in drops[n_cruise:])
+        )
 
     level = np.log(np.maximum(np.asarray(fit["params"]["gamma_hz"], dtype=np.float64), 1e-12)).mean(
         axis=1
@@ -1403,6 +1595,31 @@ PATH_INTERP: dict[str, str] = {
     ),
 }
 
+#: The v3 path's conventions: every coordinate v3 shares with v2 as in
+#: :data:`PATH_INTERP`, and these for what v3 changed. Recorded in a v3 bank.
+PATH_INTERP_V3: dict[str, str] = {
+    **{
+        k: v
+        for k, v in PATH_INTERP.items()
+        if not k.startswith(("floor_tilt", "floor_shape", "mic_"))
+    },
+    "floor_shape": (
+        "linear in dB at every control point: sigma_B(t) = (1 - t) sigma_B,a + t sigma_B,b and "
+        "z(t) = ((1 - t) sigma_B,a z_a + t sigma_B,b z_b) / sigma_B(t), so sigma_B(t) (L z(t)) "
+        "is the convex combination of the two control-value curves (v2's linear-in-z with one "
+        "fixed scale is the same rule)"
+    ),
+    "wind_db": (
+        "linear in POWER with an absent endpoint as zero (only DREGON has a wind term): "
+        "wind_db(t) = wind_db,a + 10 log10(1 - t); linear in dB when both endpoints carry one"
+    ),
+    "wander": (
+        "NOT interpolated and NOT perturbed: a FITTED block carried as a policy, like the "
+        "standby slot — Michael's cruise block with probability t, DREGON's with 1 - t"
+    ),
+    "mic blocks": "none: v3 normalises the channels in the data and renders unit gains",
+}
+
 
 def interpolate_fits(
     fit_a: dict[str, Any], fit_b: dict[str, Any], t: float, *, k_max: int = PATH_K_MAX
@@ -1449,21 +1666,26 @@ def interpolate_fits(
     )
     for key in ("sigma_nu", "lam"):
         p[key] = float(math.exp((1.0 - t) * math.log(pa[key]) + t * math.log(pb[key])))
-    for holder_a, holder_b, holder, key in (
-        (pa["floor"], pb["floor"], p["floor"], "floor_mean_db"),
-        (pa["floor"], pb["floor"], p["floor"], "floor_tilt_db_oct"),
-    ):
-        holder[key] = float((1.0 - t) * holder_a[key] + t * holder_b[key])
-    for holder_a, holder_b, holder, key in (
-        (pa["floor"], pb["floor"], p["floor"], "floor_shape_z"),
-        (pa["floor"], pb["floor"], p["floor"], "mic_floor_db"),
-        (pa["profile"], pb["profile"], p["profile"], "mic_line_gain_db"),
-        (pa, pb, p, "mic_gains_db"),
-    ):
-        holder[key] = _round(
-            (1.0 - t) * np.asarray(holder_a[key], dtype=np.float64)
-            + t * np.asarray(holder_b[key], dtype=np.float64)
-        )
+    if is_v3(a) != is_v3(b):
+        raise ValueError("the path mixes fits of one generation; got a v2 and a v3 payload")
+    if is_v3(a):
+        _interpolate_v3_floor(pa, pb, p, t)
+    else:
+        for holder_a, holder_b, holder, key in (
+            (pa["floor"], pb["floor"], p["floor"], "floor_mean_db"),
+            (pa["floor"], pb["floor"], p["floor"], "floor_tilt_db_oct"),
+        ):
+            holder[key] = float((1.0 - t) * holder_a[key] + t * holder_b[key])
+        for holder_a, holder_b, holder, key in (
+            (pa["floor"], pb["floor"], p["floor"], "floor_shape_z"),
+            (pa["floor"], pb["floor"], p["floor"], "mic_floor_db"),
+            (pa["profile"], pb["profile"], p["profile"], "mic_line_gain_db"),
+            (pa, pb, p, "mic_gains_db"),
+        ):
+            holder[key] = _round(
+                (1.0 - t) * np.asarray(holder_a[key], dtype=np.float64)
+                + t * np.asarray(holder_b[key], dtype=np.float64)
+            )
     for key, value in SPAN_PIN.items():
         holder = p["profile"] if key == "amp_exp" else p["floor"]
         if float(holder[key]) != float(value):
@@ -1487,6 +1709,43 @@ def interpolate_fits(
         },
     }
     return out
+
+
+def _interpolate_v3_floor(
+    pa: dict[str, Any], pb: dict[str, Any], p: dict[str, Any], t: float
+) -> None:
+    """The v3 floor and wind at ``t``, written into ``p`` (:data:`PATH_INTERP_V3`)."""
+    fa, fb, f = pa["floor"], pb["floor"], p["floor"]
+    f["floor_mean_db"] = float((1.0 - t) * fa["floor_mean_db"] + t * fb["floor_mean_db"])
+    sa, sb = float(fa["floor_shape_sd_db"]), float(fb["floor_shape_sd_db"])
+    sigma = (1.0 - t) * sa + t * sb
+    f["floor_shape_sd_db"] = float(sigma)
+    f["floor_shape_z"] = _round(
+        (
+            (1.0 - t) * sa * np.asarray(fa["floor_shape_z"], dtype=np.float64)
+            + t * sb * np.asarray(fb["floor_shape_z"], dtype=np.float64)
+        )
+        / sigma
+    )
+    wa, wb = pa.get("wind"), pb.get("wind")
+    if wa is not None and wb is not None:
+        wind = json.loads(json.dumps(wa))
+        wind["wind_db"] = _round(
+            (1.0 - t) * np.asarray(wa["wind_db"], dtype=np.float64)
+            + t * np.asarray(wb["wind_db"], dtype=np.float64)
+        )
+    elif wa is None and wb is None:
+        wind = None
+    else:
+        present, weight = (wa, 1.0 - t) if wa is not None else (wb, t)
+        assert present is not None
+        wind = None
+        if weight > 0.0:
+            wind = json.loads(json.dumps(present))
+            wind["wind_db"] = _round(
+                np.asarray(present["wind_db"], dtype=np.float64) + 10.0 * math.log10(weight)
+            )
+    p["wind"] = wind
 
 
 def sample_path(
@@ -1525,6 +1784,13 @@ def sample_path(
     reference = reference_of(mid, probe, ltas_tol_db=tol, name=f"path@t={tt:.3f}")
     standby = standby_b if (standby_b is not None and bool(rng.uniform() < tt)) else None
     path["standby_carried"] = standby is not None
+    if is_v3(mid):
+        # a v3 wander block is a FITTED block and is never perturbed: it is
+        # carried as a policy, like the standby slot, rather than interpolated
+        carried = bool(rng.uniform() < tt)
+        if carried:
+            mid["params"]["wander"] = json.loads(json.dumps(fit_b["params"]["wander"]))
+        path["wander_from"] = "b" if carried else "a"
     attempts: list[dict[str, Any]] = []
     for _ in range(int(max_attempts)):
         cand, drawn = draw_fit(mid, rng, spread, widths)
@@ -1581,6 +1847,7 @@ CODE_FILES: tuple[str, ...] = (
     "src/data_processing/noise_model/params.py",
     "src/data_processing/noise_model/spectrum.py",
     "src/data_processing/noise_model/lag.py",
+    "src/data_processing/noise_model/v3.py",
 )
 
 
@@ -1607,16 +1874,22 @@ class BankSpec:
     widths: dict[str, float]
     k_max: int = PATH_K_MAX
     max_attempts: int = 16
+    #: ``"v2"``: the v2 anchors (:data:`ANCHORS`); ``"v3"``: the round-2 v3
+    #: anchors (:data:`ANCHORS_V3`), drawn by the SAME construction and widths.
+    generation: str = "v2"
 
     def __post_init__(self) -> None:
         if self.preset not in PRESETS:
             raise ValueError(f"preset must be one of {PRESETS}, got {self.preset!r}")
         if self.preset == "easy" and int(self.n) % 2:
             raise ValueError(f"an easy bank splits evenly between two rigs; {self.n} is odd")
+        anchors_of(self.generation)
 
     @property
     def digest(self) -> str:
+        anchors = anchors_of(self.generation)
         payload = {
+            "generation": self.generation,
             "preset": self.preset,
             "n": int(self.n),
             "seed": int(self.seed),
@@ -1627,16 +1900,16 @@ class BankSpec:
             "widths": {k: round(float(v), 9) for k, v in sorted(self.widths.items())},
             "anchors": {
                 name: {
-                    "cruise": ANCHORS[name]["cruise"],
-                    "cruise_sha256": sha256(ANCHORS[name]["cruise"]),
-                    "standby": ANCHORS[name]["standby"],
+                    "cruise": anchors[name]["cruise"],
+                    "cruise_sha256": sha256(anchors[name]["cruise"]),
+                    "standby": anchors[name]["standby"],
                     "standby_sha256": (
                         None
-                        if ANCHORS[name]["standby"] is None
-                        else sha256(ANCHORS[name]["standby"])
+                        if anchors[name]["standby"] is None
+                        else sha256(anchors[name]["standby"])
                     ),
                 }
-                for name in sorted(ANCHORS)
+                for name in sorted(anchors)
             },
             "span_pin": dict(SPAN_PIN),
             "guards": {
@@ -1645,6 +1918,7 @@ class BankSpec:
                 "ltas_envelope_x": LTAS_ENVELOPE_X,
                 "probe_rps": [PROBE_CRUISE_RPS, PROBE_IDLE_RPS],
                 "level_band_hz": list(LEVEL_BAND_HZ),
+                **({"trend_rule": TREND_RULE_V3} if self.generation == "v3" else {}),
             },
             "code": code_digest(),
         }
@@ -1657,14 +1931,14 @@ def default_tolerances(structure: dict[str, Any] | None = None) -> dict[str, flo
     return {rig: float(row["ltas_tol_db"]) for rig, row in st["real_windows"]["rigs"].items()}
 
 
-def pinned_anchors() -> dict[str, dict[str, Any] | None]:
-    """Every anchor payload, stripped and speed-law pinned.
+def pinned_anchors(generation: str = "v2") -> dict[str, dict[str, Any] | None]:
+    """Every anchor payload of one generation, stripped and speed-law pinned.
 
     Keyed ``<rig>`` and ``<rig>_standby``; the standby slot is ``None`` for a
     single-regime rig (DREGON's room-2 recordings hold no standby segment).
     """
     out: dict[str, dict[str, Any] | None] = {}
-    for name, spec in ANCHORS.items():
+    for name, spec in anchors_of(generation).items():
         out[name] = pin_speed_laws(load_fit(spec["cruise"]))
         out[f"{name}_standby"] = (
             None if spec["standby"] is None else pin_speed_laws(load_fit(spec["standby"]))
@@ -1700,6 +1974,11 @@ def _entry(
             "trend_drop_db_min": float(min(guards["trend_drop_db"])),
             "span_pin": dict(SPAN_PIN),
             **({"t": sampler["path"]["t"]} if "path" in sampler else {}),
+            **(
+                {"wander_from": sampler["path"]["wander_from"]}
+                if "wander_from" in sampler.get("path", {})
+                else {}
+            ),
         },
     }
 
@@ -1716,7 +1995,7 @@ def _require(payload: dict[str, Any] | None, name: str) -> dict[str, Any]:
 
 def _init_worker(spec: BankSpec) -> None:
     """One probe and one set of anchors per process, built once."""
-    anchors = pinned_anchors()
+    anchors = pinned_anchors(spec.generation)
     probe = ModelProbe()
     widths = Widths(**spec.widths)
     refs = {
@@ -1756,6 +2035,8 @@ def _draw_index(
     widths: Widths,
     rng: np.random.Generator,
 ) -> dict[str, Any]:
+    # a v2 entry keeps its historical name; a v3 one says so in the stream meta
+    prefix = "" if spec.generation == "v2" else f"{spec.generation}_"
     if spec.preset == "easy":
         rig = "dregon" if index < spec.n // 2 else "michaels"
         sample = sample_rig(
@@ -1769,8 +2050,8 @@ def _draw_index(
             max_attempts=spec.max_attempts,
         )
         name, traj_rig, anchor = (
-            f"{rig}_s{spec.strength:g}_{index:05d}",
-            ANCHORS[rig]["traj_rig"],
+            f"{prefix}{rig}_s{spec.strength:g}_{index:05d}",
+            anchors_of(spec.generation)[rig]["traj_rig"],
             rig,
         )
     else:
@@ -1787,7 +2068,7 @@ def _draw_index(
             max_attempts=spec.max_attempts,
         )
         name, traj_rig, anchor = (
-            f"path_s{spec.strength:g}_{index:05d}",
+            f"{prefix}path_s{spec.strength:g}_{index:05d}",
             None,
             "dregon->michaels",
         )
@@ -1886,12 +2167,15 @@ def bank_payload(
     entries: list[dict[str, Any]], spec: BankSpec, stats: dict[str, Any]
 ) -> dict[str, Any]:
     """The whole ``noise-v2-bank/1`` file, provenance included."""
+    anchors = anchors_of(spec.generation)
+    v3 = spec.generation == "v3"
     return {
         "format": PRESET_BANK_FORMAT,
         "entries": entries,
         "provenance": {
             "builder": "scripts/noise_v2_build_bank.py",
             "sampler": "experiments.noise_model.rig_sampler",
+            "generation": spec.generation,
             # NOTHING here is a RUN fact. No build timestamp, no git HEAD, no
             # worker count, no wall time: two builds of the same spec must be
             # byte-identical, and an unrelated commit must not change a bank's
@@ -1912,13 +2196,13 @@ def bank_payload(
                 else {
                     "dregon": int(
                         np.asarray(
-                            load_fit(ANCHORS["dregon"]["cruise"])["params"]["profile"]["profile_db"]
+                            load_fit(anchors["dregon"]["cruise"])["params"]["profile"]["profile_db"]
                         ).shape[1]
                         - spec.k_max
                     ),
                     "michaels": int(
                         np.asarray(
-                            load_fit(ANCHORS["michaels"]["cruise"])["params"]["profile"][
+                            load_fit(anchors["michaels"]["cruise"])["params"]["profile"][
                                 "profile_db"
                             ]
                         ).shape[1]
@@ -1931,6 +2215,7 @@ def bank_payload(
                 }
             ),
             "span_pin": dict(SPAN_PIN),
+            **({"path_interp": PATH_INTERP_V3} if v3 and spec.preset == "hard" else {}),
             "widths_strength1": dict(spec.widths),
             "ltas_tol_db": dict(spec.ltas_tol_db),
             "structure": str(STRUCTURE_PATH),
@@ -1942,7 +2227,7 @@ def bank_payload(
                     "standby_sha256": (None if row["standby"] is None else sha256(row["standby"])),
                     "traj_rig": row["traj_rig"],
                 }
-                for name, row in ANCHORS.items()
+                for name, row in anchors.items()
             },
             "guards": {
                 "trend_margin_db": TREND_MARGIN_DB,
@@ -1951,6 +2236,7 @@ def bank_payload(
                 "probe_cruise_rps": PROBE_CRUISE_RPS,
                 "probe_idle_rps": PROBE_IDLE_RPS,
                 "level_band_hz": list(LEVEL_BAND_HZ),
+                **({"trend_rule": TREND_RULE_V3} if v3 else {}),
             },
             "statistics": {
                 k: v for k, v in stats.items() if k not in ("bands_db", "t", "wall_s", "n_workers")

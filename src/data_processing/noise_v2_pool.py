@@ -104,6 +104,18 @@ same knob ``notebooks/noise_lab.py`` exposes, and it exists because the
 comb-to-floor ratio is the one thing the round-5 DREGON fit is known to be
 uncertain about.
 
+NOISE MODEL V3. A ``noise-v3-fit/1`` payload (``flight_v3``,
+``docs/experiments/noise-model-v3.md``) is read and rendered through the SAME
+path — ``fits:`` files or ``preset_bank`` entries, the same container format
+(``noise-v2-bank/1`` names the file layout, each entry's own ``schema`` names
+its payload). What differs is checked here and drawn by
+:func:`~data_processing.noise_model.render.render_noise`: no microphone block
+(the channels were normalised in the data, every mic renders at unit gain), a
+required ``wander`` block whose block latents are drawn FRESH per window, and
+an optional per-mic ``wind`` level (DREGON's), which must cover ``n_mics``.
+Each fit renders at its OWN work rate (``front_end.sr_work``: 64 kHz for every
+v2 fit, 32 kHz for v3) unless the pool is built with an explicit ``sr_work``.
+
 EVERYTHING IS VALIDATED WHEN THE POOL IS BUILT — the fit files are read, the
 schemas checked, the rotor and microphone counts compared against the policy's
 — so a bad policy fails where it is loaded and not in a DataLoader worker on
@@ -123,10 +135,12 @@ import tdseries as td
 
 from data_processing import rps_synthesis, trajectory_model
 from data_processing.frames import make_recording_frame
+from data_processing.noise_model import FIT_SCHEMA_V3
 from data_processing.noise_model.constants import AMP_RPS_REF
 from data_processing.noise_model.params import check_schema
 from data_processing.noise_model.render import render_noise, render_noise_regimes
-from data_processing.noise_model.spectrum import FLIGHT_SR, SAMPLE_RATE_WORK
+from data_processing.noise_model.spectrum import FLIGHT_SR
+from data_processing.noise_model.v3 import Wander
 
 #: The bank-file tag :func:`load_preset_bank` accepts, documented above.
 PRESET_BANK_FORMAT = "noise-v2-bank/1"
@@ -261,7 +275,7 @@ class NoiseV2Pool:
         normalize_rms: float | tuple[float, float] | None = None,
         level_mode: str = "window",
         comb_offset_db: float = 0.0,
-        sr_work: int = SAMPLE_RATE_WORK,
+        sr_work: int | None = None,
         seed: int = 0,
     ):
         self.sample_rate = int(sample_rate)
@@ -309,7 +323,9 @@ class NoiseV2Pool:
         if self.level_mode not in ("window", "flight"):
             raise ValueError(f"level_mode must be 'window' or 'flight', got {self.level_mode!r}")
         self.comb_offset_db = float(comb_offset_db)
-        self.sr_work = int(sr_work)
+        # ``None``: each fit's OWN work rate (render.fit_work_rate), the rate
+        # its likelihood carried — 64 kHz for every v2 fit, 32 kHz for v3.
+        self.sr_work = None if sr_work is None else int(sr_work)
         self._base_seed = int(seed)
         if self.rps_kind not in trajectory_model.FLIGHT_KINDS:
             raise ValueError(
@@ -380,10 +396,13 @@ class NoiseV2Pool:
                     raise ValueError(f"{where}: {exc}") from exc
                 if not isinstance(params, dict):
                     raise ValueError(f"{where}: 'params' is not an object")
-                self._check_params(params, where=where)
+                self._check_params(params, where=where, v3=fit.get("schema") == FIT_SCHEMA_V3)
 
-    def _check_params(self, params: dict[str, Any], *, where: str) -> None:
-        for key in ("sigma_nu", "lam", "profile", "floor", "mic_gains_db"):
+    def _check_params(self, params: dict[str, Any], *, where: str, v3: bool = False) -> None:
+        required = ("sigma_nu", "lam", "profile", "floor") + (
+            ("gamma_hz", "wander") if v3 else ("mic_gains_db",)
+        )
+        for key in required:
             if key not in params:
                 raise ValueError(f"{where}: the fit carries no {key!r}")
         prof = np.atleast_2d(np.asarray(params["profile"]["profile_db"], dtype=np.float64))
@@ -392,6 +411,9 @@ class NoiseV2Pool:
                 f"{where}: the fit carries {prof.shape[0]} rotor profiles, which is neither 1 "
                 f"(broadcast) nor this pool's n_rotors={self.n_rotors}"
             )
+        if v3:
+            self._check_v3(params, where=where)
+            return
         for name, arr in (
             ("profile.mic_line_gain_db", params["profile"]["mic_line_gain_db"]),
             ("floor.mic_floor_db", params["floor"]["mic_floor_db"]),
@@ -401,6 +423,27 @@ class NoiseV2Pool:
             if got < self.n_mics:
                 raise ValueError(
                     f"{where}: the fit carries {got} microphones in {name}, "
+                    f"this pool renders n_mics={self.n_mics}"
+                )
+
+    def _check_v3(self, params: dict[str, Any], *, where: str) -> None:
+        """A ``noise-v3-fit/1`` payload: the spline floor, the wander, the wind.
+
+        No microphone block to count — the channels were normalised in the
+        data — so the only per-mic quantity is the optional wind level.
+        """
+        if "floor_shape_sd_db" not in params["floor"]:
+            raise ValueError(f"{where}: a v3 floor carries no 'floor_shape_sd_db' (sigma_B)")
+        try:
+            Wander.from_mapping(params["wander"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{where}: unreadable wander block: {exc}") from exc
+        wind = params.get("wind")
+        if wind is not None:
+            got = int(np.asarray(wind["wind_db"], dtype=np.float64).size)
+            if got < self.n_mics:
+                raise ValueError(
+                    f"{where}: the fit carries {got} microphones in wind.wind_db, "
                     f"this pool renders n_mics={self.n_mics}"
                 )
 
