@@ -202,3 +202,67 @@ the same fold is an exact re-parametrisation, `scripts/noise_v3_diag.py fold` �
 
 The fit's block spectra move by ≤ 8e-4 dB. ArmsV3 was told this at 01:10 (40 min budget from
 00:47) and builds its v3 banks from `folded_r2`.
+
+## 2. The rig step to its true optimum
+
+### Why the production rig step stops after 1–2 iterations
+
+This section is from reading the code (`fit.fit_support`, `lbfgs.LBFGS`) and from the per-iteration
+L-BFGS trace, which `fit_support` now records (`lbfgs_trace_first_pass`, `lbfgs_trace_restart`).
+
+The production run uses the torch L-BFGS with strong Wolfe, history 10, float64, and one
+addition: the relative stop `|f_k − f_{k−1}| ≤ rtol · max(|f_k|, |f_{k−1}|)`, with rtol 1e-5
+(`V3_LBFGS_RTOL`). The objective is the Whittle term plus the rig −log prior. Its magnitude is set
+by the log-periodogram constant: 1.8e7 nats on the full DREGON pool and 2.5e7 on cruise. So the
+rule stops the first time **one iteration** gains less than 180 / 250 nats, or 37 / 32 nats on
+the 64-frame subset the rounds use. That is 7e-5–1e-4 nats per cell per iteration.
+
+The first L-BFGS iteration is a steepest-descent step of length `min(1, 1/‖g‖₁)`, and
+‖g‖₁ ~ 1e4–1e5 here. It gains little, the rule fires, and the pass ends after 1–2 iterations.
+The "restart test" meant to prove convergence is a fresh L-BFGS: its history is empty, so its
+first step is again a tiny steepest-descent step. It ends after one iteration with a gain under
+the tolerance, and the fit calls itself converged. The test is circular.
+
+The smoke pool shows the pattern on its free trajectory (all frames): iterations 1–5 gain
+2.4 / 3.8 / 28.1 / 18.6 / 22.7 nats. The rule fires at iteration 1 (threshold 8.3 nats), before
+the 10× larger steps that follow.
+
+A second reason sits under the first. Along the static directions (a constant shift of a latent
+track against the rig parameter it multiplies) the Whittle term is exactly flat. The rig step
+holds the latents fixed, so it has no gradient along these directions. The latent step feels
+only the OU prior's weak pull on a static offset. Coordinate descent cannot cross this ridge. A
+fully converged rig step would still leave the static part in the latents.
+
+### Pool-level numbers (steps 2–3): pending
+
+The ridge gain is already measured without the pool, because it is prior-only and the Whittle
+term is invariant by construction (`/tmp/diagv3/ridge_check.py`, closed form equal to brute
+force):
+
+| pool | lines (d, v) | floor (u, u_j) | all |
+|---|---:|---:|---:|
+| DREGON r2 | −1 627.0 | −104.0 | **−1 731.0** |
+| cruise r2 | −3 107.4 | −204.4 | **−3 311.8** |
+
+These are changes in nats. The floor part hardly moves: the static u_j notch stays in u_j,
+where the priors put it (z prior +1.7 / +10.5 nats).
+
+`scripts/noise_v3_diag_rig.py` measures the rest. It rebuilds the pool; on the smoke pool the
+reconstruction is exact to 0.03 nats. It then measures:
+
+- the rig L-BFGS to convergence with the latents frozen (trace, gain, and the iteration where
+  the production rule fires);
+- ridge → alternation with converged steps;
+- zero-mean projection → re-run of the latent step;
+- the u_j notch removed → rig refit → latent re-run, with Whittle per band, rig prior per site
+  and OU per family.
+
+On the smoke pool (2 × 4 s, 2 mics, K 24):
+
+- the ridge gains 296 nats;
+- one converged alternation round gains 511 nats in total;
+- the zero-mean projection without compensation costs +5 644 Whittle nats, and the latent step
+  wins back all but +714.
+
+The jobs on the DREGON and cruise pools had not started when this was written (see the doc §
+"Round 3 → Status").

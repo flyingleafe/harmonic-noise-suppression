@@ -1245,6 +1245,82 @@ results/regime_decomp/<arm>.json`, overall + zero / standby / ramp / cruise
 and `by_rig`, against `results/regime_decomp/nv2_{easy,hard}_scv2.json`.
 
 
+## Round 3 (diagnosis-driven; in progress)
+
+The diagnosis is in [`results/noise_v3/diag/findings.md`](../../results/noise_v3/diag/findings.md),
+made with `scripts/noise_v3_diag.py` (light) and `scripts/noise_v3_diag_rig.py` (GPU). Headlines:
+
+- **The rig is the round-0 rig.** The round-1 → round-2 same-seed moves are 0.001–0.02 dB in
+  the profile and ≤ 0.003 in log γ, although the prior changed 2–4 × in σ² and 20 rounds ran.
+  Every rig L-BFGS stops on `|Δf| ≤ 1e-5 |f|` (180 nats per iteration on the full DREGON pool,
+  37 on the 64-frame subset) at its first steepest-descent iteration. The restart "convergence
+  test" is another first iteration, so it is circular. On the smoke pool the free trajectory
+  gains 2.4 / 3.8 / 28 / 19 / 23 nats per iteration, and the rule fires at iteration 1.
+- **The Whittle-flat ridge.** A constant shift of a latent track against the rig parameter it
+  multiplies leaves every block spectrum unchanged, so alternation cannot cross it. The exact
+  prior minimum along it (`fit.static_ridge_step`, closed form, checked against brute force)
+  lowers the r2 objective by **1 731 nats on DREGON and 3 312 on cruise** at an unchanged
+  Whittle term. That is 7–8 × the 1e-4 /cell tolerance.
+- **The render bias is fit-side.** Against the fit's own block-mean spectrum, a render is
+  +0.4–1.8 dB (DREGON) and +2.4–3.5 dB (cruise) too loud above 300 Hz. The render drops the
+  latents' static part, which is negative on average, and adds the Jensen term of the prior σ.
+  `render` stays as it is. The exact fold of the static part into the rig
+  (`results/noise_v3/diag/folded_r2/`, which ArmsV3's v3 banks use) leaves DREGON within
+  ±0.35 dB.
+- **Priors.** p̂ encodes the fall-off (−3.1 / −2.8 dB/oct, r² 0.87 / 0.67). Static v carries no
+  tilt on DREGON or standby (r² ≤ 0.06). Cruise shows a floor/line swap above 2 kHz: static v is
+  +2 to +9 dB and static u_j −5 to −15 dB. The profile prior (sd 10 dB about a line + floor
+  upper bound) and the floor z (σ_B 13–18 dB on DREGON and standby) are too flat to bind. σ_ν
+  (6–7 × scale) and the γ tail (67–164 × γ0 k) never bind. u_j is independent per control
+  point, so a one-point −21 dB notch costs ≈ 180 nats in u_j against 14 000 in the rig spline.
+
+### Design (written before any round-3 fit)
+
+No parameter is added.
+
+1. **Rig L-BFGS without the relative stop** (`--lbfgs-rtol 0`): each rig step runs its
+   iteration cap. The restart test becomes a real one.
+2. **Ridge step** (`--ridge-step`, `c589ceca`) after every latent step and once after the
+   polish. The alternation then stops on the move of the Whittle term and of the total
+   objective.
+3. **The measured wander** `results/noise_v3/wander/<rig>.json` (the schema-2 measurement that
+   round 1 used), not mm1/mm2. The moment updates counted the static part (73–88 % of `d`/`u_j`)
+   as wander. With the ridge step that part leaves the latents.
+4. **Candidate prior change, pending the step-3 decomposition:** u_j correlated across the
+   control points with the rig floor's own SE kernel (1.5 oct, `Wander.uj_corr_oct`), sampled
+   in whitened coordinates. It is implemented in model/render/Wander but not yet wired into
+   `fit_latents` or the ridge step's floor solve; the diff is kept as
+   `results/noise_v3/diag/uj_kernel_prior_unwired.patch`, not in the tree.
+
+**Predictions.**
+
+- (e): static shares of every family near 0. `d` and `u_j` ratios move toward 1 against the
+  measured σ.
+- Render − fit LTAS within ±0.5 dB on DREGON and within ±1 dB on cruise.
+- The rig moves off round 0 by several dB in the profile.
+- Total objective under the measured wander below the best earlier fit: DREGON r2 re-priced at
+  −18 043 573.7, cruise r1 at −24 805 567.3, standby r1 at −6 943 448.2
+  (`results/noise_v3/diag/reprice_measured.json`).
+- The LTAS proxy closer to v2's.
+- Tonality and parity no worse than r2.
+
+### Status (2026-09-26 ≈ 01:45 BST)
+
+- **Step 1 is done and committed.**
+- **Steps 2–3 are submitted, with no result yet.** The pool-level jobs
+  (`noise_v3_diag_rig.py`, at `c589ceca` from `.worktrees/submit-v3diag`) are:
+  - `nv3dv-{dregon,cruise}-a` on vast A100: `fit,rig,ridge,alt`;
+  - `nv3dk-{dregon,cruise}-b` on kaggle: `fit,zeromean,notch`;
+  - `nv3diag-{dregon,cruise}-a` on uni-gpushort, as a duplicate.
+
+  All were still queued or placing: the daemon timed out on submits and cancels, vast
+  instances were unreachable, and gpushort was at capacity. Each job syncs
+  `results/noise_v3/diag/rig/{A,B}/<pool>.json` and its `_job.log` to
+  `s3://omnirun-artifacts/<job>/outputs/`.
+- **Round-3 fits are not submitted.** The job generator is `/tmp/diagv3/mkjobs_r3.py`, with
+  schedule `--ridge-step --lbfgs-rtol 0 --rounds 20 --lbfgs-frames 64 --lbfgs-iters 150`, the
+  measured wander, 4 seeds, and output `results/noise_v3/fits_r3`.
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |
