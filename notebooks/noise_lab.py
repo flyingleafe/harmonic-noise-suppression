@@ -1875,17 +1875,37 @@ class V3Fit(V2Fit):
     ``wander_mean="power"`` renders the same fit with every wander track drawn
     at mean ``-sigma^2 ln10 / 20`` dB instead of 0, so each power multiplier
     has mean one (``render_noise``'s option); the name says so.
+
+    ``params_override`` (e.g. ``{"lam": 5.0}``) sets top-level scalar
+    ``params`` entries of DEEP COPIES of every regime's payload before
+    rendering; the files on disk and every other parameter are untouched, and
+    the name and ``entry`` say which values were set.
     """
 
     generation = "v3"
 
-    def __init__(self, rig: str = "dregon", round: str = "latest", wander_mean: str = "zero"):
+    def __init__(
+        self,
+        rig: str = "dregon",
+        round: str = "latest",
+        wander_mean: str = "zero",
+        params_override: dict[str, float] | None = None,
+    ):
         if wander_mean not in ("zero", "power"):
             raise ValueError(f"wander_mean {wander_mean!r} is not 'zero' or 'power'")
         self.rig = load_rig_v3(rig, round)
         self.wander_mean = wander_mean
         taken = str(self.rig.fit_round)
         mp = ", mean-preserving wander" if wander_mean == "power" else ""
+        if params_override:
+            fits = {regime: copy.deepcopy(fit) for regime, fit in self.rig.fits.items()}
+            for regime, fit in fits.items():
+                for key, value in params_override.items():
+                    if not isinstance(fit["params"].get(key), (int, float)):
+                        raise ValueError(f"{regime} params.{key} is not a scalar to override")
+                    fit["params"][key] = float(value)
+            self.rig.fits = fits
+            mp += "".join(f", {key} = {float(v):g}" for key, v in params_override.items())
         self.name = f"v3-fit {self.rig.name} {taken}{mp}"
         how = f"{taken} (latest on disk)" if round == "latest" else taken
         self.entry = f"round {how}{mp}: " + " + ".join(self.rig.paths.values())

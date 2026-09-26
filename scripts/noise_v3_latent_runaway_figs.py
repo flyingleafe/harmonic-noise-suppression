@@ -42,7 +42,9 @@ Inputs:
   legacy anchor fits (:data:`LISTEN_LEGACY`, ``LegacyFit(...,
   dynamics="donor")``), v2, round 2, round TAG and round TAG with
   mean-preserving wander (:data:`LISTEN_MP`); ``--listen-add KEY`` adds one
-  source to an existing ``figdata_TAG.json`` without re-rendering the rest.
+  source to an existing ``figdata_TAG.json`` without re-rendering the rest,
+  among them round TAG with the shaft OU rate ``lam`` set (:data:`LISTEN_LAM`,
+  Michael's only).
 
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py            # evaluate + plot
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --rigs-only # Figs G-I3 only
@@ -51,6 +53,7 @@ Inputs:
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3a  # r3a beside r2
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --listen-add legacy
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --listen-add v3_r3b_mp
+    PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --listen-add v3_r3b_lam5
 
 Writes ``docs/explainers/noise-model-v3-latent-runaway/`` (``fig_*.png``,
 ``figdata.json``, every plotted number, and ``audio/*.wav``).
@@ -186,6 +189,12 @@ LISTEN_LEGACY_DYNAMICS = "donor"
 #: drawn at mean ``-sigma^2 ln10 / 20`` dB, so every power multiplier has mean
 #: one (``V3Fit(..., wander_mean="power")``): ``v3_r3b`` + ``_mp``
 LISTEN_MP = "_mp"
+#: § 8 Listen again: suffixes of a v3 round's key rendered with the shaft OU
+#: rate ``params.lam`` (s^-1) set to the value instead of the pinned one
+#: (``V3Fit(..., params_override={"lam": value})``), on :data:`LISTEN_LAM_RIGS`
+#: only: ``v3_r3b`` + ``_lam5``
+LISTEN_LAM = {"_lam5": 5.0, "_lam8": 8.0}
+LISTEN_LAM_RIGS = ("michaels",)
 LISTEN_DYN_DB = 45.0
 AUDIO = OUT / "audio"
 
@@ -1014,27 +1023,44 @@ def listen_keys(tag: str) -> tuple[str, ...]:
     return ("legacy", "v2", listen_key("r2"), listen_key(tag), listen_key(tag) + LISTEN_MP)
 
 
+def listen_lam(key: str) -> str | None:
+    """The :data:`LISTEN_LAM` suffix ``key`` ends with, if any."""
+    return next((s for s in LISTEN_LAM if key.endswith(s)), None)
+
+
+def listen_rigs(key: str) -> tuple[str, ...]:
+    """The listen rigs clip ``key`` is rendered on (a :data:`LISTEN_LAM` key:
+    :data:`LISTEN_LAM_RIGS`; every other key: all of :data:`LISTEN_WINDOWS`)."""
+    return LISTEN_LAM_RIGS if listen_lam(key) else tuple(LISTEN_WINDOWS)
+
+
 def listen_label(key: str) -> str:
     if key in LISTEN_LABELS:
         return LISTEN_LABELS[key]
     if key.endswith(LISTEN_MP):
         return f"{listen_label(key.removesuffix(LISTEN_MP))}, mean-preserving wander"
+    lam = listen_lam(key)
+    if lam:
+        return f"{listen_label(key.removesuffix(lam))}, λ = {LISTEN_LAM[lam]:g} s⁻¹"
     return f"v3 round-{key.removeprefix('v3_r')} fit"
 
 
 def listen_source(nl: Any, rig: str, key: str) -> Any:
     """The noise source of clip ``key`` for listen rig ``rig``: ``"legacy"``
-    (:data:`LISTEN_LEGACY`), ``"v2"``, a v3 round's :func:`listen_key`, or that
-    key + :data:`LISTEN_MP` (the same fit, mean-preserving wander)."""
+    (:data:`LISTEN_LEGACY`), ``"v2"``, a v3 round's :func:`listen_key`, that
+    key + :data:`LISTEN_MP` (the same fit, mean-preserving wander) or that key
+    + a :data:`LISTEN_LAM` suffix (the same fit, shaft OU rate ``lam`` set)."""
     if key == "legacy":
         return nl.LegacyFit(LISTEN_LEGACY[rig], dynamics=LISTEN_LEGACY_DYNAMICS)
     if key == "v2":
         return nl.V2Fit(rig)
-    base = key.removesuffix(LISTEN_MP)
+    lam = listen_lam(key)
+    base = key.removesuffix(LISTEN_MP).removesuffix(lam or "")
     return nl.V3Fit(
         rig,
         round="r2" if base == "v3" else base.removeprefix("v3_"),
         wander_mean="power" if key.endswith(LISTEN_MP) else "zero",
+        params_override={"lam": LISTEN_LAM[lam]} if lam else None,
     )
 
 
@@ -1043,7 +1069,8 @@ def listen(keys: tuple[str, ...] = ("v2", listen_key(V3_ROUND))) -> dict[str, An
     sources ``keys`` (:func:`listen_source`) rendered on its rotor track, all
     under the notebook's level rule, as 16-bit WAVs, with
     ``noise_lab.line_stats`` (k = 1 to 8) and the band LTAS inside
-    :data:`LISTEN_LTAS_HZ`."""
+    :data:`LISTEN_LTAS_HZ`. Each key goes to its :func:`listen_rigs`; a rig
+    none of ``keys`` goes to is left out."""
     import soundfile as sf
 
     from experiments.stochastic_fit import accept_stats
@@ -1065,8 +1092,11 @@ def listen(keys: tuple[str, ...] = ("v2", listen_key(V3_ROUND))) -> dict[str, An
         rigs={},
     )
     for rig, window in LISTEN_WINDOWS.items():
+        rig_keys = [key for key in keys if rig in listen_rigs(key)]
+        if not rig_keys:
+            continue
         traj = nl.trajectory("real", duration_s=LISTEN_S, **window)
-        sources = {key: listen_source(nl, rig, key) for key in keys}
+        sources = {key: listen_source(nl, rig, key) for key in rig_keys}
         renders = nl.render_all(
             list(sources.values()), traj, seed=LISTEN_SEED, n_mics=1, level=LISTEN_LEVEL
         )
@@ -1807,21 +1837,28 @@ def round_views(tag: str) -> dict[str, Any]:
 def listen_merge(old: dict[str, Any], new: dict[str, Any], tag: str) -> dict[str, Any]:
     """``--listen-add``: the clips of ``new`` (a :func:`listen` of more keys on
     the same windows) into ``old``, in the row order a full :func:`round_views`
-    of round ``tag`` writes (:func:`listen_keys`; keys outside it last). The
-    real clip must come out the same."""
+    of round ``tag`` writes (:func:`listen_keys`; a :data:`LISTEN_LAM` key
+    right after its base key; other keys last), on the rigs ``new`` renders.
+    The real clip must come out the same."""
     for k in ("seconds", "seed", "level", "mic", "sr", "dyn_range_db", "ltas_bands_hz"):
         if old[k] != new[k]:
             raise SystemExit(f"--listen-add: {k} {new[k]!r} differs from {old[k]!r}")
     rank = {k: i for i, k in enumerate(("real", *listen_keys(tag)))}
 
+    def order(key: str) -> tuple[int, int]:
+        lam = listen_lam(key)
+        if lam:
+            return rank.get(key.removesuffix(lam), len(rank)), 1 + list(LISTEN_LAM).index(lam)
+        return rank.get(key, len(rank)), 0
+
     def merged(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
         """``a`` updated by ``b``, in row order (a stable sort)."""
         both = {**a, **b}
-        return dict(sorted(both.items(), key=lambda kv: rank.get(kv[0], len(rank))))
+        return dict(sorted(both.items(), key=lambda kv: order(kv[0])))
 
     old["labels"] = merged(old["labels"], new["labels"])
-    for rig, row in old["rigs"].items():
-        add = new["rigs"][rig]
+    for rig, add in new["rigs"].items():
+        row = old["rigs"][rig]
         if add["clips"]["real"] != row["clips"]["real"]:
             raise SystemExit(f"--listen-add: the {rig} real clip moved")
         row["clips"] = merged(row["clips"], add["clips"])
@@ -1885,8 +1922,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--listen-add",
         metavar="KEY",
-        help="with --round: render one more § Listen source (legacy, v2, a v3 key or a v3 key "
-        "+ _mp for its mean-preserving wander) into "
+        help="with --round: render one more § Listen source (legacy, v2, a v3 key, a v3 key "
+        "+ _mp for its mean-preserving wander, or a v3 key + _lam5 / _lam8 for its shaft OU "
+        "rate lam set, Michael's only) into "
         "figdata_TAG.json beside the clips already there, then redraw",
     )
     args = ap.parse_args(argv)

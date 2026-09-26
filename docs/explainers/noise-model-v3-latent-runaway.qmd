@@ -1137,6 +1137,12 @@ R3_LABELS = {
     "v3_r3b": "v3 round-3b fit",
     "v3_r3b_mp": "v3 round-3b fit, mean-preserving wander",
 }
+R3_LABELS_MICHAELS = {
+    **{k: v for k, v in R3_LABELS.items() if k != "v3_r3b_mp"},
+    "v3_r3b_lam5": "v3 round-3b fit, λ = 5 s⁻¹",
+    "v3_r3b_lam8": "v3 round-3b fit, λ = 8 s⁻¹",
+    "v3_r3b_mp": R3_LABELS["v3_r3b_mp"],
+}
 ```
 
 ### DREGON
@@ -1172,10 +1178,30 @@ Only the mean-preserving row below is further off (5.4 dB).
 
 ### Michael's
 
-![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3; the legacy row is the Michael's anchor fit (`michael_cruise`, donor dynamics), the last row the round-3b fit with mean-preserving wander.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
+![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3; the legacy row is the Michael's anchor fit (`michael_cruise`, donor dynamics). After the round-3b row come the same fit with $\lambda$ = 5 s⁻¹ and with $\lambda$ = 8 s⁻¹ instead of the pinned 0.5 s⁻¹, all else equal. $\lambda$ is the rate at which each rotor's shaft speed error $\nu$ (rad/s) returns to zero: $d\nu = -\lambda \nu\, dt + \sigma_\nu \sqrt{2 \lambda}\, dW$, with $\sigma_\nu$ = 3.84 rad/s kept. So $\nu$ keeps its size; only its memory $1/\lambda$ shrinks, 2 s → 0.2 s → 0.125 s. In this regime the mean spectrum does not change: total power exactly, the figure's 7.8 Hz bins within 0.24 dB, 1.95 Hz bins within 0.54 dB. The last row is the round-3b fit with mean-preserving wander.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
+
+[^listen-lam]: `V3Fit("michaels", round="r3b", params_override={"lam": 5.0})`
+    (and 8.0): deep copies of both round-3b payloads with `params.lam` set.
+    Every rotor stays above 65 rev/s, so the cruise fit renders alone. The
+    renderer reads `params.lam` and `params.sigma_nu` into
+    `ou.simulate_state`, the exact integrated-OU path $\theta_r = \int \nu_r$;
+    order $k$ carries $k \theta_r$. The fit's lag law reads the same
+    process through `ou.integrated_ou_increment_var`. Seed 0, so the same
+    innovations. The expected periodogram (`Rig.expected_m`) on this rotor
+    track, against $\lambda$ = 0.5: total power 100 Hz–7 kHz moves 0.00 dB;
+    time mean per bin 100 Hz–7 kHz at most 0.15 / 0.24 dB ($\lambda$ = 5 /
+    8) at 2048 points (the figure's), 0.34 / 0.54 dB at 8192 points
+    (`line_stats`'). What moves is the shape of the lowest lines. When
+    $k \sigma_\nu \gg \lambda$ (the high orders: $k \ge 10$ is
+    ≥ 38 rad/s) a line is a Gaussian of sd $k \sigma_\nu / 2\pi$ =
+    0.61 $k$ Hz whatever $\lambda$ is; at the first few orders the faster
+    rate narrows it a little. `scripts/noise_v3_latent_runaway_figs.py
+    --round r3b --listen-add v3_r3b_lam5` (then `v3_r3b_lam8`) renders the
+    rows.
+    <!-- source: fits_r3b/michaels_fly125_cruise__flight_v3.json params.sigma_nu 3.8423, lam 0.5 (model.py Priors.flight_lam); src/data_processing/noise_model/render.py "lam = float(p["lam"])" -> simulate_state(innov, lam=lam, sigma=sigma_nu, dt); ou.py ou_transition Var[nu] -> sigma^2 (stationary sd sigma); lag.py r_tau exp(-0.5 k^2 V_theta - 2 pi gamma tau); throwaway expected_m check on the listen michaels rps (16 kHz), max over 100-7000 Hz of |time-mean dB difference| vs lam 0.5: 2048/512 lam 5 0.147, lam 8 0.237; 8192/1024 0.339 / 0.539; 1024/256 0.024 / 0.039; total power ratio 0.0000 dB -->
 
 ```{python}
-listen_players(F3["r3b"], "michaels", R3_LABELS)
+listen_players(F3["r3b"], "michaels", R3_LABELS_MICHAELS)
 ```
 
 Legacy Michael's has $k = 1$ at 7.4 dB where real has none; its $k = 2$
@@ -1194,6 +1220,14 @@ LTAS distance, 2.1 dB, ties round 3b (2.0 dB).
   −0.6, +1.2, +5.6 dB. At 5–7 kHz it is 5.6 dB too loud instead of
   7.6 dB. The low bands lose about 1 dB. $k = 2$ stays at 18.1 dB.
   <!-- source: figdata_r3b.json listen.rigs.michaels.clips.v3_r3b.ltas_dev_db [-0.9724, -0.9844, -0.3826, 0.2144, 2.1764, 7.5529], ltas_mean_abs_db 2.0472, line_over_floor_db[0:2] 0.8973, 18.1401; clips.v3_r3b_mp.ltas_dev_db [-1.1354, -2.1911, -1.2713, -0.635, 1.1591, 5.6311], ltas_mean_abs_db 2.0038, line_over_floor_db[0:2] 1.4942, 18.1488 -->
+- A faster shaft rate leaves the LTAS where it was.[^listen-lam] Per
+  band, 100 Hz to 7 kHz, $\lambda$ = 5 s⁻¹ is −0.8, −1.0, −0.4, +0.2,
+  +2.2, +7.5 dB and $\lambda$ = 8 s⁻¹ is −0.9, −1.0, −0.4, +0.2, +2.2,
+  +7.5 dB, LTAS distance 2.01 and 2.05 dB.
+  <!-- source: figdata_r3b.json listen.rigs.michaels.clips.v3_r3b_lam5.ltas_dev_db [-0.7963, -0.9715, -0.3651, 0.2107, 2.1917, 7.5346], ltas_mean_abs_db 2.0116, line_over_floor_db[0:2] 1.137, 18.7284; clips.v3_r3b_lam8.ltas_dev_db [-0.942, -0.9662, -0.4468, 0.2384, 2.1816, 7.5311], ltas_mean_abs_db 2.051, line_over_floor_db[0:2] 1.2152, 18.9648 -->
+- By eye the lines sit where they sat; at $\lambda$ = 5 and 8 s⁻¹ the
+  high lines (4–7 kHz) wiggle faster and break into shorter pieces, where
+  $\lambda$ = 0.5 s⁻¹ draws them as smooth slow arcs.
 
 ## The checks
 
