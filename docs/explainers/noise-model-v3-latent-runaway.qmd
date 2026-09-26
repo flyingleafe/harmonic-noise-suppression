@@ -44,12 +44,13 @@ def pct(v):
 ## Status
 
 Discussion page, 2026-09-25. It answers one question from Dmitrii. §8
-adds round 3 (2026-09-26). Nothing
-here is fitted. Every number comes from the committed fits. One script
-makes every figure: `scripts/noise_v3_latent_runaway_figs.py`. It writes
-every plotted number to
-`docs/explainers/noise-model-v3-latent-runaway/figdata.json`. The model is
-`docs/explainers/noise-model-v3-wander.qmd`. The campaign is
+adds round 3 (2026-09-26). Since 2026-09-26 round 3b is the page's v3:
+§ 6 shows it, and § 6 adds the legacy rigs. § 9 asks why the legacy hard
+arm wins. Nothing here is fitted. Every number comes from the committed
+fits. One script makes every figure of §§ 1–8:
+`scripts/noise_v3_latent_runaway_figs.py`. It writes every plotted number
+to `docs/explainers/noise-model-v3-latent-runaway/figdata.json`. The model
+is `docs/explainers/noise-model-v3-wander.qmd`. The campaign is
 `docs/experiments/noise-model-v3.md`.
 :::
 
@@ -102,6 +103,15 @@ One name per thing. Each name has one meaning on this page.
 - **Expected periodogram.** The periodogram the model predicts on average.
   One frame, mic mean, latents at zero.
 
+- **Legacy model.** The hand-written noise model of the `rig_easy` /
+  `rig_hard` arms: `src/data_processing/stochastic_rotor_noise.py`.
+- **Anchor fit.** One stage-2 fit of the legacy model to one real clip.
+  Two anchors, one DREGON and one Michael's, hold both legacy banks.
+- **Bank.** 2 048 rigs, drawn offline. A training window draws one entry.
+  The legacy hard bank spreads its rigs along the path between the two
+  anchors.
+- **Arm.** One training run: one noise stream, one model.
+
 No latent is per mic. $u_j$ is per control point, not per mic. All eight
 mics share every latent. One fixed gain per mic divides the data before
 the fit.[^defs]
@@ -111,6 +121,47 @@ the fit.[^defs]
     line), `u` `(B,)` (floor level) and `uj` `(J, B)` (per floor control
     point)". The channel gains: `results/noise_v2/mic_gains/mic_gains.json`,
     applied by `model.flight_batch(channel_gains=…)`.
+
+## The v3 model now
+
+Round 3b is the page's v3. Its fits are
+`results/noise_v3/fits_r3b/*__flight_v3.json`. §§ 1–7 tell how rounds 1
+and 2 ran away. This is where the fit stands after round 3b.
+
+**Priors.** Each law carries the commit that set it.
+
+| site | prior | since |
+|---|---|---|
+| line width $\gamma_{rk}$ | $\gamma_{rk} / (0.01\,k\text{ Hz}) \sim$ HalfNormal(3) | `4e8cbc0d`, 2026-09-24 |
+| phase noise $\sigma_\nu$ | HalfNormal(0.6 rad/s) | `4e8cbc0d`, 2026-09-24 |
+| line level $p_{rk}$ | $\mathcal N(\hat p_{rk}, 10\text{ dB})$; $\hat p_{rk}$ = the measured level at $k f_r$ | `4e8cbc0d`, 2026-09-24 |
+| floor weights $z$ | $\mathcal N(0, I)$; control values $\mu + \sigma_B (L z)_j$; $\mu$ and $\sigma_B$ measured | `4e8cbc0d`, 2026-09-24 |
+| wind, DREGON, per mic | $\mathcal N$(measured level, 6 dB) | `4e8cbc0d`, 2026-09-24 |
+| leash of every latent family | the measured σ and τ, fixed | measured at `8506a2c8`, 2026-09-24; back in the fit at `84509baa`, 2026-09-26 |
+| $u_j$ across control points | correlated; kernel = the rig floor's own SE kernel, 1.5 octaves (`Wander.uj_corr_oct`) | `d512827b`, 2026-09-26 |
+
+Round 2 used the leash update `mm1` instead of the measured leash. § 2
+shows why that ran away.
+
+**Fit.** Four restarts per pool. One restart:
+
+1. **First rig step.** Latents at zero. 300 Adam steps, then L-BFGS.
+2. **Latent step.** Each window's latents, rig held. L-BFGS, at most 100
+   iterations.
+3. **Ridge step.** The static part of each latent family moves into the
+   rig. Closed form. The Whittle term does not change. Since `c589ceca`,
+   2026-09-26.
+4. **Rig step.** Latents held. L-BFGS on a stratified 64-frame subset
+   (`f65179a7`, 2026-09-25). No early stop: each step runs its full
+   150 + 75 iterations (`--lbfgs-rtol 0`, `84509baa`, 2026-09-26).
+5. **Stop test.** The Whittle term and the total objective both move by
+   less than $10^{-4}$ nats per cell. Else go to step 2. The total joined
+   the test at `c589ceca`. At most 20 rounds.
+6. **Polish.** One rig L-BFGS on all frames, then one more ridge step.
+
+In the DREGON pick the rig L-BFGS never converges. It stops at its cap.
+The alternation does converge. It stops after 10 rounds.
+<!-- source: fits_r3b/dregon_room2_floor__flight_v3.json optimiser: rounds 20, rounds_run 10, alternation_converged true, rig_converged false, ridge_step true, first_rig.adam_steps 300, lbfgs_iters 150 + restart 75, lbfgs_frames 64 (polish: all 310), lbfgs_rtol null, latent_lbfgs_iters 100, tol 1e-4; priors.* as tabled; priors.wander.uj_corr_oct 1.5; git d512827b. Commits: git log -S -->
 
 # 1. Two loops
 
@@ -460,17 +511,27 @@ r = 0.47 with the static part removed.
 
 # 6. What a rig looks like
 
-Three figures show the rig itself. No data enters them.[^view]
+Six figures show a rig itself. No data enters them.[^view]
+
+- @fig-g: the v3 prior.
+- @fig-h: the v3 fits, round 3b.
+- @fig-i: the v2 fits.
+- @fig-i2: the legacy anchor fits.
+- @fig-i3: two rigs of the legacy hard bank.
+- @fig-h2, in § 8: the round-2 v3 fits.
 
 How to read one row:
 
 - All rotors run at one speed. Their lines share one frequency.
-- Grey: the floor part. On DREGON it holds the wind below 500 Hz.
+- Grey: the floor part. On v3 DREGON it holds the wind below 500 Hz.
 - Black dots: the floor control values.
 - Blue stems: the expected periodogram at $k f_r$, from the floor part up.
 - Thin blue line: the whole expected periodogram.
-- Red caps: $\pm\gamma$ of each line. The four rotors are overlaid.
-- The y axis is the same in all three figures.
+- Red caps: $\pm\gamma$ of each line.
+- The radio above each figure picks the rotors. **all rotors**: every
+  comb on, the four rotors' caps overlaid. **rotor N**: only rotor N's
+  comb on, only its caps.
+- The y axis is the same in every figure.
 
 This view reads the model at one speed. Section 4 reads the pool. Their
 numbers differ.
@@ -480,12 +541,62 @@ numbers differ.
     `notebooks/noise_lab.py` as `param_view` (the numbers) and
     `draw_param_view` (one pane). One 2048-point frame at 16 kHz, so the
     x axis ends at Nyquist, 8 kHz. Line over floor = stem height. The
-    orders counted are the ones at or below 8 kHz. Source: `figdata.json`
-    `rigs`.
+    orders counted are the ones below 8 kHz. One rotor alone: the other
+    rotors' `profile_db` set to −300 dB, the view's own switch
+    (`scripts/noise_v3_latent_runaway_figs.py`, `solo_fit`). Source:
+    `figdata.json` `rigs`; per rotor `rigs.<group>.<rig>.rotors`.
+
+```{python}
+import base64
+
+RIG_FIGS = (
+    "fig_g_prior_rigs",
+    "fig_h_v3_rigs",
+    "fig_i_v2_rigs",
+    "fig_i2_legacy_fits",
+    "fig_i3_legacy_bank",
+    "fig_h2_v3_r2_rigs",
+)
+ROTOR_CHOICES = {
+    "all rotors": "all",
+    "rotor 1": "rotor1",
+    "rotor 2": "rotor2",
+    "rotor 3": "rotor3",
+    "rotor 4": "rotor4",
+}
+
+
+def png_uri(path):
+    return "data:image/png;base64," + base64.b64encode(Path(path).read_bytes()).decode()
+
+
+ojs_define(
+    rig_png={
+        fig: {
+            label: png_uri(f"noise-model-v3-latent-runaway/{fig}_{key}.png")
+            for label, key in ROTOR_CHOICES.items()
+        }
+        for fig in RIG_FIGS
+    }
+)
+```
 
 ## The prior
 
-![**What you see:** four rigs drawn from the v3 prior, seeds 0–3, DREGON geometry, all rotors at 80 rev/s.](noise-model-v3-latent-runaway/fig_g_prior_rigs.png){#fig-g}
+::: {#fig-g}
+
+```{ojs}
+viewof rotor_g = Inputs.radio(Object.keys(rig_png.fig_g_prior_rigs), {value: "all rotors", label: "show"})
+```
+
+```{ojs}
+html`<img src="${rig_png.fig_g_prior_rigs[rotor_g]}" style="width: 100%" alt="Fig G, ${rotor_g}">`
+```
+
+**What you see:** four rigs drawn from the v3 prior, seeds 0–3, DREGON
+geometry, all rotors at 80 rev/s.
+
+:::
 
 The prior thinks a rig is a loud comb over a wild floor.[^prior]
 
@@ -493,66 +604,203 @@ The prior thinks a rig is a loud comb over a wild floor.[^prior]
 - 82 to 88 of 88 orders clear 3 dB.
 - The floor part at 1 kHz spans −50.7 to −15.4 dB.
 - No width reaches 7 Hz. The widest is 6.8 Hz.
-  <!-- source: figdata.json rigs.prior.s0..s3: over_k1_db 16.09, 11.75, 22.46, 23.90; over_k2_db 16.35, 17.95, 9.59, 22.08; n_orders_over 86, 85, 82, 88 of 88; floor_at_db["1000"] -50.71, -21.07, -15.41, -47.16; gamma_max_hz 5.91, 5.13, 4.97, 6.79 -->
+- One rotor alone is a weaker comb. Its $k = 1$ spans 0.1–23.7 dB.
+  <!-- source: figdata.json rigs.prior.s0..s3: over_k1_db 16.09, 11.75, 22.46, 23.90; over_k2_db 16.35, 17.95, 9.59, 22.08; n_orders_over 86, 85, 82, 88 of 88; floor_at_db["1000"] -50.71, -21.07, -15.41, -47.16; gamma_max_hz 5.91, 5.13, 4.97, 6.79; rotors[*].over_k1_db min 0.1 (s2 r1), max 23.7 (s3 r4) -->
 
 [^prior]: The laws of `scripts/noise_v3_checks.py prior`
-    (`prior_draw`), on the round-2 DREGON fit, `np.random.default_rng(seed)`:
+    (`prior_draw`), on the round-3b DREGON fit, `np.random.default_rng(seed)`:
     $\gamma_{rk} \sim$ HalfNormal($3 \cdot 0.01\,k$ Hz),
     $\sigma_\nu \sim$ HalfNormal(0.6 rad/s), line level
     $\sim \mathcal N(\hat p_{rk}, 10\text{ dB})$ about the measured level,
     floor $z \sim \mathcal N(0, I)$ at the measured $\sigma_B$ = 17.6 dB,
-    wind $\sim \mathcal N$(measured, its sd). Latents at zero.
+    wind $\sim \mathcal N$(measured, its sd). Latents at zero. Round 2 and
+    round 3b measured the same pool, so the draws are the round-2 draws.
 
-## The round-2 fits
+## The v3 fits
 
-![**What you see:** the round-2 v3 fits, latents at zero. DREGON and Michael's cruise at 80 rev/s. Standby at 30.6 rev/s, the middle of its 20.9–40.3 rev/s span.](noise-model-v3-latent-runaway/fig_h_v3_rigs.png){#fig-h}
+::: {#fig-h}
 
-The fits are weaker combs than the prior.
+```{ojs}
+viewof rotor_h = Inputs.radio(Object.keys(rig_png.fig_h_v3_rigs), {value: "all rotors", label: "show"})
+```
 
-- DREGON: $k = 1$ stands 5.4 dB over the floor part. $k = 2$: 6.2 dB.
-- DREGON: 73 of 88 orders clear 3 dB.
-- Michael's lines stand higher: $k = 1$ 15.2 dB (cruise), 38.7 dB
-  (standby).
-- The widest lines: 42.6 Hz (DREGON), 29.3 Hz (cruise), 86.4 Hz (standby).
-  <!-- source: figdata.json rigs.v3_r2.{dregon,cruise,standby}: over_k1_db 5.43, 15.16, 38.74; over_k2_db 6.22; n_orders_over 73/88; gamma_max_hz 42.59, 29.32, 86.39; rps 80, 80, 30.64; span_rev_s standby [20.93, 40.35] -->
+```{ojs}
+html`<img src="${rig_png.fig_h_v3_rigs[rotor_h]}" style="width: 100%" alt="Fig H, ${rotor_h}">`
+```
+
+**What you see:** the round-3b v3 fits, latents at zero. DREGON and
+Michael's cruise at 80 rev/s. Standby at 30.6 rev/s, the middle of its
+20.9–40.3 rev/s span.
+
+:::
+
+The fits are weaker combs than the prior on DREGON. They are denser combs
+on Michael's.
+
+- DREGON: $k = 1$ stands 3.7 dB over the floor part. $k = 2$: 5.7 dB.
+- DREGON: 83 of 88 orders clear 3 dB. No DREGON rotor alone clears 2.1 dB
+  at $k = 1$.
+- Cruise: $k = 1$ 13.5 dB, $k = 2$ 40.2 dB. 79 of 81 orders clear 3 dB.
+- Standby: its floor part sinks to −70.6 dB at 100 Hz. So its low lines
+  stand 70 dB over it.
+- The widest lines: 15.8 Hz (DREGON), 26.9 Hz (cruise), 11.1 Hz (standby).
+- Halfway between two lines near 1 kHz the comb adds 0.3–6.8 dB over the
+  floor part.
+  <!-- source: figdata.json rigs.v3_r3b.{dregon,cruise,standby}: over_k1_db 3.67, 13.52, 70.08; over_k2_db 5.67, 40.16, 70.88; n_orders_over 83/88, 79/81, 130/130; gamma_max_hz 15.77, 26.89, 11.10; floor_at_db["100"] standby -70.62; between_over_floor_db 0.32, 2.90, 6.81; dregon rotors[*].over_k1_db 0.2, 2.1, 0.8, 1.7; span_rev_s standby [20.93, 40.35] -->
 
 ## The v2 fits
 
-![**What you see:** the v2 fits, same axes as @fig-h. Red bars that cross the whole axis are lines wider than the axis.](noise-model-v3-latent-runaway/fig_i_v2_rigs.png){#fig-i}
+::: {#fig-i}
+
+```{ojs}
+viewof rotor_i = Inputs.radio(Object.keys(rig_png.fig_i_v2_rigs), {value: "all rotors", label: "show"})
+```
+
+```{ojs}
+html`<img src="${rig_png.fig_i_v2_rigs[rotor_i]}" style="width: 100%" alt="Fig I, ${rotor_i}">`
+```
+
+**What you see:** the v2 fits, same axes as @fig-h. Red bars that cross
+the whole axis are lines wider than the axis.
+
+:::
 
 v2 builds its floor out of lines.
 
 - Its widest lines: 16 059 Hz (DREGON), 125 578 Hz (cruise).
 - Look halfway between two lines near 1 kHz. v2 cruise sits
-  43.0 dB over its floor part there. v3 cruise sits 1.5 dB over.
+  43.0 dB over its floor part there. v3 cruise sits 2.9 dB over.
 - The v2 cruise floor part is −74.5 dB at 1 kHz. The wide lines
   fill the gap above it.
-- On DREGON the floor parts of v2 and v3 differ by 1.0–3.0 dB.
-  <!-- source: figdata.json rigs.v2.{dregon,cruise}.gamma_max_hz 16059.0, 125578.0; rigs.v2.cruise.between_over_floor_db 43.03, rigs.v3_r2.cruise 1.49 (both at 1000 Hz); rigs.v2.cruise.floor_at_db["1000"] -74.55; floor_at_db 100/1000/4000 Hz: v2 dregon -11.48, -33.73, -45.23; v3 dregon -10.45, -35.14, -42.20 -->
+- On DREGON the floor parts of v2 and v3 agree within 2 dB up to 1 kHz.
+  At 4 kHz v3 sits 7.8 dB lower.
+  <!-- source: figdata.json rigs.v2.{dregon,cruise}.gamma_max_hz 16059.0, 125578.0; rigs.v2.cruise.between_over_floor_db 43.03, rigs.v3_r3b.cruise 2.90 (both at 1000 Hz); rigs.v2.cruise.floor_at_db["1000"] -74.55; floor_at_db 100/1000/4000 Hz: v2 dregon -11.48, -33.73, -45.23; v3_r3b dregon -9.58, -33.72, -53.06 -->
+
+## The legacy anchor fits
+
+The legacy arms train on banks. Both banks are drawn around two anchor
+fits: DREGON `free-flight_nosource_room2_cruise_00` and Michael's
+`fly125_cruise_00`.[^anchors] @fig-i2 shows the two anchors. Each is built
+as a bank entry with no perturbation.
+
+::: {#fig-i2}
+
+```{ojs}
+viewof rotor_i2 = Inputs.radio(Object.keys(rig_png.fig_i2_legacy_fits), {value: "all rotors", label: "show"})
+```
+
+```{ojs}
+html`<img src="${rig_png.fig_i2_legacy_fits[rotor_i2]}" style="width: 100%" alt="Fig I2, ${rotor_i2}">`
+```
+
+**What you see:** the two legacy anchor fits, all rotors at 80 rev/s,
+wander at 0 dB, same axes as @fig-h.
+
+:::
+
+How the legacy parameters map onto this view:
+
+- The legacy model has no expected periodogram. So the blue line is the
+  mean periodogram of a 12 s render, 8 mics.
+- The wander and the label error are zero. So every shaft turns at
+  80 rev/s.
+- A red cap is the Lorentzian half width $\gamma_0 + \gamma_1 k$.
+- At $k = 1, 2$ most power is a steady tone instead. There the cap
+  overstates the width.
+- The level is the render's own, not the v3 fit's. Every training window
+  is rescaled anyway. Read shapes, not absolute dB.
+
+[^anchors]: `data/rig_banks/rig_{easy,hard}_n2048.json`
+    `provenance.anchors`: `results/S2/cruise_8clip.json:fly125_cruise_00`
+    and `results/S2/dregon_room2_cruise_refined.json:free-flight_nosource_room2_cruise_00`,
+    physical level. Built by `noise_lab.LegacyFit(name)`
+    (`dynamics="donor"`, `rig_sampler.entry_params`): the donor policy's
+    dynamics with the fit's identity on top, speed exponents bounded, line
+    mode `fm`. The view: `legacy_view` of
+    `scripts/noise_v3_latent_runaway_figs.py`. The stream's per-window
+    rules at a hover of 80 rev/s (`StochasticNoisePool.render`); every
+    wander process at 0 dB; shaft offset 0; one seed, so the comb-off render
+    shares the floor's noise. Its floor matches the closed-form floor
+    within 0.15 dB rms. Tone share of order $k$:
+    $w_k = \exp(-(k / k_{1/2})^2)$, $k_{1/2}$ = `coherence_k_half`; $w_1$ =
+    0.70–0.84, $w_2$ = 0.24–0.49, $w_3 \le 0.20$ over the four legacy rigs.
+    The tone's width comes from the shaft jitter, not from $\gamma$.
+
+## Two legacy hard-bank rigs
+
+::: {#fig-i3}
+
+```{ojs}
+viewof rotor_i3 = Inputs.radio(Object.keys(rig_png.fig_i3_legacy_bank), {value: "all rotors", label: "show"})
+```
+
+```{ojs}
+html`<img src="${rig_png.fig_i3_legacy_bank[rotor_i3]}" style="width: 100%" alt="Fig I3, ${rotor_i3}">`
+```
+
+**What you see:** entries 0 and 1 of the legacy hard bank
+(`data/rig_banks/rig_hard_n2048.json`), the bank `rig_hard_scv2_unified`
+trained on. Same view and axes as @fig-i2.
+
+:::
+
+The first two entries are shown. They are not picked. The mapping of
+@fig-i2 holds.
+
+The legacy combs tower over their floor.
+
+- $k = 1$ stands 14.1–33.9 dB over the floor part. $k = 2$: 31.4–47.4 dB.
+  v3 DREGON: 3.7 and 5.7 dB.
+- The two bank rigs light 98 and 99 of 99 orders over 3 dB.
+- The lines are wide: up to 34–57 Hz at the top orders. Their skirts fill
+  the space between lines. Halfway between two lines near 1 kHz the comb
+  sits 13.8–28.6 dB over the floor part. v3: 0.3–6.8 dB.
+- The legacy floor has no wind. At 100 Hz it sits at −31 to −24 dB. v3
+  DREGON: −9.6 dB.
+- One rotor alone differs a lot. In entry 0, rotor 2 holds $k = 1$ at
+  32.2 dB. Rotor 1 holds it at 0.2 dB.
+  <!-- source: figdata.json rigs.legacy_fit.{dregon,michael}, rigs.legacy_bank.{e0,e1}: over_k1_db 33.93, 14.05, 32.58, 25.98; over_k2_db 47.40, 31.42, 44.12, 43.54; n_orders_over 49/99, 72/99, 98/99, 99/99; gamma_max_hz 34.00, 56.69, 50.09, 49.84; between_over_floor_db 13.75, 21.44, 28.56, 24.95; floor_at_db["100"] -30.86, -28.18, -26.31, -24.32; e0 rotors[1].over_k1_db 32.2, rotors[0] 0.2; v3_r3b as above -->
 
 ```{python}
 #| label: tbl-rigs
-#| tbl-cap: "Every row of @fig-g, @fig-h and @fig-i. Line over floor = stem height. Orders > 3 dB counts the orders at or below 8 kHz. Floor = the floor part. Between lines = the expected periodogram over the floor part, halfway between the two lines around 1 kHz. Source: `figdata.json` `rigs`."
+#| tbl-cap: "Every row of @fig-g, @fig-h, @fig-i, @fig-i2 and @fig-i3, all rotors. Line over floor = stem height. Orders > 3 dB counts the orders below 8 kHz. Floor = the floor part. Between lines = the expected periodogram over the floor part, halfway between the two lines around 1 kHz. Legacy rows: the render's own level. Source: `figdata.json` `rigs`."
 rg = FD["rigs"]
-rig_label = {"dregon": "DREGON", "cruise": "cruise", "standby": "standby"}
+rig_label = {
+    "dregon": "DREGON",
+    "cruise": "cruise",
+    "standby": "standby",
+    "michael": "Michael's cruise",
+}
 
 
 def hz(v):
     return f"{v:,.0f}".replace(",", " ") if v >= 100 else f(v, 1)
 
 
+def rig_name(gen, key, name):
+    if gen in ("prior", "legacy_bank"):
+        return name.format(key[1:])
+    return name.format(rig_label[key])
+
+
 rows = [
     "| figure | rig | rev/s | $k = 1$ dB | $k = 2$ dB | orders > 3 dB | max γ Hz | floor 100 Hz dB | floor 1 kHz dB | floor 4 kHz dB | between lines dB |",
     "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
 ]
-for fig, gen, name in (("G", "prior", "prior, seed {}"), ("H", "v3_r2", "v3 {}"), ("I", "v2", "v2 {}")):
+for fig, gen, name in (
+    ("G", "prior", "prior, seed {}"),
+    ("H", "v3_r3b", "v3 {}"),
+    ("I", "v2", "v2 {}"),
+    ("I2", "legacy_fit", "legacy anchor, {}"),
+    ("I3", "legacy_bank", "legacy hard bank, entry {}"),
+):
     for key, x in rg[gen].items():
-        lab = name.format(key[1:] if gen == "prior" else rig_label[key])
         fl = x["floor_at_db"]
         rows.append(
-            f"| {fig} | {lab} | {f(x['rps'], 1)} | {f(x['over_k1_db'], 1)} | {f(x['over_k2_db'], 1)} | "
-            f"{x['n_orders_over']}/{x['n_orders_shown']} | {hz(x['gamma_max_hz'])} | {f(fl['100'], 1)} | "
-            f"{f(fl['1000'], 1)} | {f(fl['4000'], 1)} | {f(x['between_over_floor_db'], 1)} |"
+            f"| {fig} | {rig_name(gen, key, name)} | {f(x['rps'], 1)} | {f(x['over_k1_db'], 1)} | "
+            f"{f(x['over_k2_db'], 1)} | {x['n_orders_over']}/{x['n_orders_shown']} | "
+            f"{hz(x['gamma_max_hz'])} | {f(fl['100'], 1)} | {f(fl['1000'], 1)} | {f(fl['4000'], 1)} | "
+            f"{f(x['between_over_floor_db'], 1)} |"
         )
 Markdown("\n".join(rows))
 ```
@@ -560,17 +808,17 @@ Markdown("\n".join(rows))
 ## Listen
 
 Now data enters. One real window per rig. Its own rotor track drives the
-v2 fit and the round-2 v3 fit. All three clips have the same RMS.[^listen]
+v2 fit and the round-3b v3 fit. All three clips have the same RMS.[^listen]
 
 - DREGON: `free-flight_nosource_room2`, 50–60 s, 69.9–87.8 rev/s.
 - Michael's: `FLY124`, 40–50 s, 67.2–98.4 rev/s.
 - No fit saw either window.
-<!-- source: figdata.json listen.rigs.dregon: recording free-flight_nosource_room2, offset_s 50.0, seconds 10.0, labels telemetry, rps_min 69.945, rps_max 87.7978; listen.rigs.michaels: recording FLY124, offset_s 40.0, rps_min 67.1837, rps_max 98.4491; listen.level ["window", 0.1], mic 0, seed 0; pools: fits_r2/*.json supports (DREGON free-flight @ audio start + 18 s, 8 s; Michael's FLY125 only) -->
+<!-- source: figdata.json listen.rigs.dregon: recording free-flight_nosource_room2, offset_s 50.0, seconds 10.0, labels telemetry, rps_min 69.945, rps_max 87.7978; listen.rigs.michaels: recording FLY124, offset_s 40.0, rps_min 67.1837, rps_max 98.4491; listen.level ["window", 0.1], mic 0, seed 0; pools: fits_r3b/*.json supports (DREGON free-flight @ audio start + 18 s, 8 s; Michael's FLY125 only) -->
 
 [^listen]: `scripts/noise_v3_latent_runaway_figs.py --listen-only`, with
     the notebook's own calls from `notebooks/noise_lab.py`:
     `trajectory("real", ...)` and `real_clip` (the recording, same window),
-    `render_all([V2Fit(rig), V3Fit(rig, round="r2")], seed=0, n_mics=1,
+    `render_all([V2Fit(rig), V3Fit(rig, round="r3b")], seed=0, n_mics=1,
     level=("window", 0.1))`, `line_stats`, `spectrogram_figure`. Mic 0.
     Telemetry labels. RMS 0.1 for every clip. 16 kHz, 16-bit WAV in
     `noise-model-v3-latent-runaway/audio/`. The spectrograms of one figure
@@ -586,23 +834,24 @@ v2 fit and the round-2 v3 fit. All three clips have the same RMS.[^listen]
 ```{python}
 from IPython.display import HTML
 
-LISTEN_LABELS = {"real": "real recording", "v2": "v2 fit", "v3": "v3 round-2 fit"}
+LISTEN_LABELS = {"real": "real recording", "v2": "v2 fit", "v3_r3b": "v3 fit (round 3b)"}
 
 
 def db_cell(v):
     return "—" if v is None else f(v, 1)
 
 
-def listen_players(rig):
-    """One row per clip, in the figure's row order: the player and its numbers."""
-    row = FD["listen"]["rigs"][rig]
+def listen_players(fd, rig, keys):
+    """One row per clip of ``fd`` (a figdata file), in the figure's row order:
+    the player and its numbers."""
+    row = fd["listen"]["rigs"][rig]
     cell = "<td style='padding:4px 10px'>"
     out = [
         "<table style='border-collapse:collapse'>",
         "<tr><th style='text-align:left'>clip</th><th>listen</th>"
         "<th><i>k</i> = 1, dB</th><th><i>k</i> = 2, dB</th><th>LTAS distance, dB</th></tr>",
     ]
-    for key, label in LISTEN_LABELS.items():
+    for key, label in keys.items():
         c = row["clips"][key]
         k1, k2 = c["line_over_floor_db"][:2]
         dist = db_cell(c.get("ltas_mean_abs_db")) if key != "real" else ""
@@ -617,36 +866,48 @@ def listen_players(rig):
 
 ### DREGON
 
-![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the v2 fit, the round-2 v3 fit, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon.png){#fig-j}
+![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the v2 fit, the round-3b v3 fit, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon.png){#fig-j}
 
 ```{python}
-listen_players("dregon")
+listen_players(FD, "dregon", LISTEN_LABELS)
 ```
 
 - Real: $k = 1$ stands 4.4 dB over its floor. $k = 2$: 2.9 dB.
-- v2: 5.7 and 7.6 dB. v3: 5.8 and 5.3 dB. Both models' lines stand too high.
-- LTAS distance to real: v2 0.5 dB, v3 2.2 dB. v3 is 4.8 dB low at
-  0.7–1.5 kHz.
-- The real clip pulses below 1.5 kHz. v2 and v3 stay steady. v3 adds a
-  lone line near 2.2 kHz.
-  <!-- source: figdata.json listen.rigs.dregon.clips.{real,v2,v3}.line_over_floor_db[0:2] = 4.44, 2.89 / 5.65, 7.64 / 5.78, 5.33; .ltas_mean_abs_db v2 0.518, v3 2.160; v3.ltas_dev_db[700-1500 Hz] -4.814; pulses and the 2.2 kHz line: fig_j -->
+- v2: 5.7 and 7.6 dB. v3: 4.6 and 5.0 dB. v3 $k = 1$ is within 0.2 dB
+  of real.
+- LTAS distance to real: v2 0.5 dB, v3 3.6 dB. v3 is 3.8–5.9 dB low at
+  0.3–5 kHz.
+- That deficit is mostly a level artefact. Mic 0's static wind is fitted
+  too loud for this window. The RMS match then pulls every band down.
+  Matched above 500 Hz, v3 is within 0.8 dB at 0.7–5 kHz.[^gap]
+- The real clip pulses below 1.5 kHz. v2 and v3 stay steady.
+  <!-- source: figdata.json listen.rigs.dregon.clips.{real,v2,v3_r3b}.line_over_floor_db[0:2] = 4.44, 2.89 / 5.65, 7.64 / 4.62, 4.95; .ltas_mean_abs_db v2 0.518, v3_r3b 3.610; v3_r3b.ltas_dev_db [-0.50, -3.83, -5.88, -4.43, -4.92, -2.10]; results/noise_v3/diag/ltas_gap_dregon.md Verdict + T0 (>= 500 Hz match -0.5 / +0.1 / -0.8 dB at 0.7-5 kHz); pulses: fig_j -->
+
+[^gap]: `results/noise_v3/diag/ltas_gap_dregon.md`
+    (`scripts/noise_v3_ltas_gap.py`, commit `8c9d0ac7`). On its own five
+    windows the round-3b render expectation matches the data within 0.7 dB
+    below 5 kHz. On this window mic 0's fitted wind (−5.3 dB) sits 4 dB
+    over what the window asks for (−9.3 dB). 78 % of the real clip's power
+    lies below 300 Hz. So the full-band RMS match takes 3.5 dB off every
+    band.
 
 ### Michael's
 
 ![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j.](noise-model-v3-latent-runaway/fig_k_listen_michaels.png){#fig-k}
 
 ```{python}
-listen_players("michaels")
+listen_players(FD, "michaels", LISTEN_LABELS)
 ```
 
 - Real: $k = 1$ does not clear its floor. $k = 2$ stands 18.7 dB over it.
-- v2: 1.4 and 19.0 dB. v3: 1.6 and 18.1 dB. $k = 2$ matches within
+- v2: 1.4 and 19.0 dB. v3: 0.9 and 18.1 dB. $k = 2$ matches within
   0.6 dB.
-- LTAS distance to real: v2 1.3 dB, v3 2.9 dB. v3 is 7.0 dB too loud at
-  5–7 kHz. v2 is 3.4 dB too loud there.
-- v3 draws two bright lines near 1.6 and 3 kHz. They dip with rotor 1 at
-  2 s. The real clip has no line that strong there.
-  <!-- source: figdata.json listen.rigs.michaels.clips.{real,v2,v3}.line_over_floor_db[0:2] = null, 18.68 / 1.45, 19.00 / 1.63, 18.14; .ltas_mean_abs_db v2 1.266, v3 2.934; ltas_dev_db[5000-7000 Hz] v3 +6.981, v2 +3.435; lines: fig_k -->
+- LTAS distance to real: v2 1.3 dB, v3 2.0 dB. Up to 3 kHz v3 is within
+  1 dB of real.
+- At 5–7 kHz v3 is 7.6 dB too loud. v2 is 3.4 dB too loud there.
+- v3 draws a bright line near 1.5 kHz and thin lines at 5–6.5 kHz. The
+  real clip has broadband bursts at 1–3 kHz instead.
+  <!-- source: figdata.json listen.rigs.michaels.clips.{real,v2,v3_r3b}.line_over_floor_db[0:2] = null, 18.68 / 1.45, 19.00 / 0.90, 18.14; .ltas_mean_abs_db v2 1.266, v3_r3b 2.047; v3_r3b.ltas_dev_db [-0.97, -0.98, -0.38, 0.21, 2.18, 7.55], v2 ltas_dev_db[5] 3.44; lines and bursts: fig_k -->
 
 # 7. What this means
 
@@ -688,9 +949,11 @@ fits 4 restarts per pool.
     § Round 3. Fits: `results/noise_v3/fits_r3{a,b}/`. Checks:
     `results/noise_v3/checks_r3{a,b}/`. The tables below read
     `results/noise_v3/diag/verdict_r3.json`
-    (`results/noise_v3/diag/r3_tools/verdict.py`). The figures come from
+    (`results/noise_v3/diag/r3_tools/verdict.py`). The static shares, the
+    rig table and § Listen again come from
     `scripts/noise_v3_latent_runaway_figs.py --round r3a` and `--round r3b`,
-    which write `figdata_r3a.json` and `figdata_r3b.json`.
+    which write `figdata_r3a.json` and `figdata_r3b.json`. @fig-h and
+    @fig-h2 come from `--rigs-only` (`figdata.json`).
 
 ```{python}
 VD = json.loads(Path("../../results/noise_v3/diag/verdict_r3.json").read_text())
@@ -774,11 +1037,28 @@ finds is not the all-frames optimum.
 
 ## The rig now
 
-![**What you see:** the round-3b fits, latents at zero. DREGON and Michael's cruise at 80 rev/s. Standby at 30.6 rev/s. Same axes as @fig-h.](noise-model-v3-latent-runaway/fig_h_v3_rigs_r3b.png){#fig-h3}
+@fig-h in § 6 shows the round-3b fits. @fig-h2 shows the round-2 fits
+they replace.
+
+::: {#fig-h2}
+
+```{ojs}
+viewof rotor_h2 = Inputs.radio(Object.keys(rig_png.fig_h2_v3_r2_rigs), {value: "all rotors", label: "show"})
+```
+
+```{ojs}
+html`<img src="${rig_png.fig_h2_v3_r2_rigs[rotor_h2]}" style="width: 100%" alt="Fig H2, ${rotor_h2}">`
+```
+
+**What you see:** the round-2 v3 fits, latents at zero. DREGON and
+Michael's cruise at 80 rev/s. Standby at 30.6 rev/s. Same axes as
+@fig-h.
+
+:::
 
 ```{python}
 #| label: tbl-r3-rigs
-#| tbl-cap: "The rows of @fig-h (round 2) beside rounds 3a and 3b. Line over floor = stem height. Floor = the floor part. Source: `figdata_r3a.json` and `figdata_r3b.json` `rigs`."
+#| tbl-cap: "The rows of @fig-h2 (round 2) beside rounds 3a and 3b (@fig-h). Line over floor = stem height. Floor = the floor part. Source: `figdata_r3a.json` and `figdata_r3b.json` `rigs`."
 rows = [
     "| rig | round | $k = 1$ dB | $k = 2$ dB | orders > 3 dB | max γ Hz | floor 100 Hz dB | floor 1 kHz dB | floor 4 kHz dB |",
     "|---|---|---:|---:|---:|---:|---:|---:|---:|",
@@ -799,44 +1079,28 @@ Markdown("\n".join(rows))
 ```
 
 - The γ tail is gone. The widest line is 15.8 Hz on DREGON (was 42.6) and
-  11.1 Hz on standby (was 86.4).
+  11.1 Hz on standby (was 86.4). In @fig-h2, pick rotor 2 on DREGON and
+  rotor 3 on standby: the wide caps belong to one rotor each.
 - The combs are denser. On cruise 79 of 81 orders stand over 3 dB (was 45).
 - Above 2 kHz the floor sinks again, by 9–11 dB at 4 kHz. The lines carry
   that band. Nothing measures the floor between the lines there. So the
   split is still free. Sentence 5 of §7 still holds.
 - Standby's floor sinks to −71 dB at 100 Hz. Line skirts fill the space
   between its low lines.
-  <!-- source: figdata_r3b.json rigs.v3_r3b.{dregon,cruise,standby}: gamma_max_hz 15.77, 26.89, 11.10; n_orders_over 83/88, 79/81, 130/130; floor_at_db["4000"] -53.06, -42.53; ["100"] standby -70.62; figdata_r3a.json rigs.v3_r2: gamma_max 42.59, 29.32, 86.39; n_orders_over cruise 45; floor 4000 -42.20, -33.30; standby 100 -59.88 -->
+  <!-- source: figdata_r3b.json rigs.v3_r3b.{dregon,cruise,standby}: gamma_max_hz 15.77, 26.89, 11.10; n_orders_over 83/88, 79/81, 130/130; floor_at_db["4000"] -53.06, -42.53; ["100"] standby -70.62; figdata_r3a.json rigs.v3_r2: gamma_max 42.59, 29.32, 86.39; n_orders_over cruise 45; floor 4000 -42.20, -33.30; standby 100 -59.88; figdata.json rigs.v3_r2.dregon.rotors[1].gamma_max_hz 42.6, standby.rotors[2] 86.4 -->
 
 ## Listen again
 
-Same windows, same seed and same level rule as § Listen. The round-3b fit
-is added.
+Same windows, same seed and same level rule as § Listen. § Listen plays
+round 3b. Here the round-2 fit is added.
 
 ```{python}
-def listen_players_round(fd, rig, keys):
-    """One row per clip of ``fd`` (a figdata file): the player and its numbers."""
-    row = fd["listen"]["rigs"][rig]
-    cell = "<td style='padding:4px 10px'>"
-    out = [
-        "<table style='border-collapse:collapse'>",
-        "<tr><th style='text-align:left'>clip</th><th>listen</th>"
-        "<th><i>k</i> = 1, dB</th><th><i>k</i> = 2, dB</th><th>LTAS distance, dB</th></tr>",
-    ]
-    for key, label in keys.items():
-        c = row["clips"][key]
-        k1, k2 = c["line_over_floor_db"][:2]
-        dist = db_cell(c.get("ltas_mean_abs_db")) if key != "real" else ""
-        out.append(
-            f"<tr>{cell}<b>{label}</b></td>{cell}<audio controls preload='metadata' "
-            f"src='noise-model-v3-latent-runaway/{c['wav']}'></audio></td>"
-            f"{cell}{db_cell(k1)}</td>{cell}{db_cell(k2)}</td>{cell}{dist}</td></tr>"
-        )
-    out.append("</table>")
-    return HTML("\n".join(out))
-
-
-R3_LABELS = {**LISTEN_LABELS, "v3_r3b": "v3 round-3b fit"}
+R3_LABELS = {
+    "real": "real recording",
+    "v2": "v2 fit",
+    "v3": "v3 round-2 fit",
+    "v3_r3b": "v3 round-3b fit",
+}
 ```
 
 ### DREGON
@@ -844,24 +1108,25 @@ R3_LABELS = {**LISTEN_LABELS, "v3_r3b": "v3 round-3b fit"}
 ![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the v2 fit, the round-2 and the round-3b v3 fits, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon_r3b.png){#fig-j3}
 
 ```{python}
-listen_players_round(F3["r3b"], "dregon", R3_LABELS)
+listen_players(F3["r3b"], "dregon", R3_LABELS)
 ```
 
 - The lone line near 2.2 kHz is gone.
 - The LTAS distance grows: 2.2 dB (round 2) to 3.6 dB (round 3b). Round
   3a: 3.9 dB.
 - Round 3b is 4–6 dB low at 0.3–5 kHz against the real clip. Round 2 was
-  1–5 dB low there.
-- Round 2 rendered 1.3–1.8 dB louder than its own fit above 1.5 kHz. That
-  bias pointed the right way here. Round 3 removed it. [inference]
-  <!-- source: figdata_r3b.json listen.rigs.dregon.clips.v3_r3b.ltas_mean_abs_db 3.610, ltas_dev_db [-0.50, -3.83, -5.88, -4.43, -4.92, -2.10]; clips.v3 2.160, [-0.86, -3.27, -4.81, -1.52, -1.07, -1.44]; figdata_r3a.json clips.v3_r3a 3.888; results/noise_v3/diag/findings.md §1(e) render - fit +1.30..+1.83 dB above 1.5 kHz -->
+  1–5 dB low there. Most of the round-3b deficit is the wind artefact of
+  § Listen.[^gap]
+- Round 2 rendered 1.9–2.3 dB louder than its own windows above 1.5 kHz.
+  That bias pointed the right way here. Round 3 removed it.
+  <!-- source: figdata_r3b.json listen.rigs.dregon.clips.v3_r3b.ltas_mean_abs_db 3.610, ltas_dev_db [-0.50, -3.83, -5.88, -4.43, -4.92, -2.10]; clips.v3 2.160, [-0.86, -3.27, -4.81, -1.52, -1.07, -1.44]; figdata_r3a.json clips.v3_r3a 3.888; results/noise_v3/diag/ltas_gap_dregon.md §1 "r2, for the record": render-exp. mic mean +2.1 / +1.9 / +2.3 dB above 1.5 kHz on its own windows -->
 
 ### Michael's
 
 ![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
 
 ```{python}
-listen_players_round(F3["r3b"], "michaels", R3_LABELS)
+listen_players(F3["r3b"], "michaels", R3_LABELS)
 ```
 
 - The LTAS distance shrinks: 2.9 dB (round 2) to 2.0 dB (round 3b).
@@ -929,6 +1194,58 @@ Markdown("\n".join(rows))
    lines above 2 kHz. The render draws orders ≥ 61 at a σ the fitted
    tracks never reach, so it is 1.5 dB too loud at 5–7 kHz.
    <!-- source: results/noise_v3/diag/ltas_bias_folded_r3.json render_minus_fit.abs_db[5] +1.53 (DREGON), +1.47 (cruise); verdict_r3.json r3b.e.*["v k61+"].lag0 0.46, 0.38, 0.39 -->
+
+# 9. Why the legacy hard arm wins
+
+The legacy hard arm is `rig_hard_scv2_unified`. It trains on the legacy
+hard bank (@fig-i3). No v2 or v3 arm comes close to it on the real
+validation.
+
+| noise model | easy arm | hard arm |
+|---|---:|---:|
+| legacy | 6.09 | **5.41** |
+| v2 | 7.94 | 7.06 |
+| v3, round-2 banks | 6.50 | 7.01 |
+
+Real MAE in rev/s, raw at the selected round. Lower is better.[^arms]
+
+- Legacy is the only model where hard beats easy.
+- Dmitrii reports: legacy hard also wins on the static and stochastic
+  validation parts.
+
+Three candidates:
+
+1. **The comb.** The legacy lines stand too high. The exaggerated comb
+   teaches useful features.
+2. **The trajectory.** The hard trajectory of the new streams is too wild.
+3. **The tonality.** The v2 and v3 hard banks are not tonal enough. Their
+   sampler has no tonality guard.
+
+[^arms]: `docs/experiments/noise-model-v3.md` § Training arms (round-2
+    fits) § Results: `val/real_r3`, PIT MAE. The round-3b arms
+    (`nv3r3_{easy,hard}_scv2`) are still training.
+
+## Candidate 1 in the rig view
+
+Read @fig-i2 and @fig-i3 against @fig-h, rotor switch on "all rotors".
+
+- Legacy $k = 1$ stands 14–34 dB over its floor part. v3: 3.7 dB
+  (DREGON), 13.5 dB (cruise).
+- Legacy $k = 2$ stands 31–47 dB over it. v3: 5.7 dB (DREGON), 40.2 dB
+  (cruise).
+- The two hard-bank rigs light 98 and 99 of 99 orders. v3 DREGON lights
+  83 of 88.
+- Between the lines the legacy comb sits 14–29 dB over its floor part.
+  v3 sits 0.3–6.8 dB over. The wide legacy skirts raise a hedge of
+  lines, not a row of peaks.
+- Michael's cruise is the exception at $k = 2$. There v3 (40.2 dB) stands
+  over the legacy anchor (31.4 dB).
+  <!-- source: figdata.json rigs.legacy_fit.{dregon,michael}, legacy_bank.{e0,e1}: over_k1_db 33.93, 14.05, 32.58, 25.98; over_k2_db 47.40, 31.42, 44.12, 43.54; n_orders_over 49/99, 72/99, 98/99, 99/99; between_over_floor_db 13.75, 21.44, 28.56, 24.95; rigs.v3_r3b.{dregon,cruise}: over_k1_db 3.67, 13.52; over_k2_db 5.67, 40.16; n_orders_over 83/88; between 0.32, 2.90, 6.81 (standby) -->
+
+The rig view reads each model at one speed, without the real track. The
+next subsection reads every noise on real tracks with one estimator.
+
+{{< include noise-model-v3-latent-runaway/_traj.qmd >}}
 
 # Appendix: the reconstruction
 
