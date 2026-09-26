@@ -262,9 +262,10 @@ def true_carrier(src: Any, labels: np.ndarray) -> np.ndarray:
     wander and line phase noise are ZERO-MEAN processes around it). A legacy
     render does not: ``stochastic_rotor_noise.synthesize`` treats the track as
     the LABEL and rides the comb on ``label + shaft_offset_rps``, a static
-    per-rotor error drawn per entry (0.1-2.5 rev/s here), stopped rotors kept
-    stopped. That offset is the legacy model's label error, not its line
-    shape, so the true carrier puts it back, exactly as ``synthesize`` does.
+    per-rotor error drawn per entry (median 0.6, up to 3.9 rev/s here),
+    stopped rotors kept stopped. That offset is the legacy model's label
+    error, not its line shape, so the true carrier puts it back, exactly as
+    ``synthesize`` does.
     Its OU shaft jitter stays in the render, as the v2 / v3 shaft wander does.
     """
     if getattr(src, "generation", "") != "legacy":
@@ -376,12 +377,12 @@ def run(workers: int, smoke: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _stack(res: dict[str, Any], keys: list[str], clip_ids: list[str]) -> np.ndarray:
-    """``(n, R, K)`` prominence of every (source, clip) present."""
-    return np.array(
-        [res[k][c]["prom_db"] for k in keys for c in clip_ids if c in res.get(k, {})],
-        dtype=np.float64,
-    )
+def _stack(
+    res: dict[str, Any], keys: list[str], clip_ids: list[str], *, field: str = "prom_db"
+) -> np.ndarray:
+    """``(n, R, K)`` ``field`` of every (source, clip) present that carries it."""
+    rows = [res[k][c] for k in keys for c in clip_ids if c in res.get(k, {})]
+    return np.array([r[field] for r in rows if field in r], dtype=np.float64)
 
 
 def summarise(data: dict[str, Any]) -> dict[str, Any]:
@@ -412,8 +413,9 @@ def summarise(data: dict[str, Any]) -> dict[str, Any]:
             if not p.size:
                 continue
             per_k = p.transpose(2, 0, 1).reshape(p.shape[2], -1)  # (K, n * R)
+            present = {c for k in keys for c in res.get(k, {}) if c in ids}
             row[set_name] = {
-                "n_clips": len(ids),
+                "n_clips": len(present),
                 "n_cells": int(p.shape[0] * p.shape[1]),
                 "median_by_k": np.round(np.nanmedian(per_k, axis=1), 2).tolist(),
                 "q25_by_k": np.round(np.nanpercentile(per_k, 25, axis=1), 2).tolist(),
@@ -425,6 +427,10 @@ def summarise(data: dict[str, Any]) -> dict[str, Any]:
                 q = _stack(res, keys, rid)
                 if q.size:
                     row[set_name][f"groups_{rig}"] = TN.order_group_summary(q)
+            lab = _stack(res, keys, ids, field="prom_label_db")
+            if lab.size:
+                # a legacy render read on its LABELS (the static shaft offset left in)
+                row[set_name]["groups_label"] = TN.order_group_summary(lab)
         out["families"][fam] = row
     return out
 

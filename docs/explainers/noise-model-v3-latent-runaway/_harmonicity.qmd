@@ -1,0 +1,114 @@
+## How tonal is each training noise?
+
+Candidates (1) and (3) both say: tonality differs between the banks.
+Measure it. Same tracks, same estimator, every noise.[^harm]
+
+### The old check
+
+The old check (`tonality.py`, the v2 bank audit) reads no audio.
+It takes a payload's expected spectrum at one constant speed.
+Its prominence: peak bin over the median of a nearby ring.
+`line_stats` (R4 `line_width_db3`) reads a render but means speed-aligned frames.
+
+So it never sees jitter, wander, label error or a real track.
+
+### The new check
+
+It reads audio on a real track. Take one rotor $r$, one order $k$.
+
+1. Shift the clip down by $k f_r(t)$. $f_r(t)$ is the true speed.
+2. A line that follows the speed now sits at 0 Hz.
+3. Cut 2 s frames, hop 0.5 s. Bins are 0.5 Hz wide.
+4. Keep the band $\pm k$ Hz. Take the median over frames and mics.
+5. Prominence = median at 0 Hz minus median at the band ends.
+
+The band ends are $0.75k$ to $k$ Hz on both sides. White noise
+reads 0 dB. A clean comb on its own track reads over 40 dB.
+
+- **Tracks.** 18 real validation clips, 8 s each, every rotor ≥ 20 rev/s.
+  Six are DREGON `free-flight_nosource_room1`. Twelve are Michael's
+  `FLY124`: standby, climb and cruise.
+- **Sources.** Legacy, v2 and v3: the two fits, plus 16 entries of each bank.
+- **Real.** The recordings of the same clips, read on their telemetry labels.
+
+Labels carry errors. An error of $\delta$ rev/s moves order $k$ by $k\delta$ Hz.
+So the real number is a lower bound. It is the grey band.
+
+One catch. A legacy render does not ride its label. It rides label +
+a static offset per rotor: median 0.6 rev/s, up to 3.9. That offset is
+the legacy label error. So a legacy render is read on label + offset.
+That is its true shaft.
+<!-- source: results/noise_v3/harmonicity/prominence.json results.legacy_*[*].shaft_offset_rps, |offset| 0.004–3.861, median 0.584 (34 legacy sources x 4 rotors) -->
+
+### The result
+
+![**What you see:** median prominence per order, one panel per generation. Dashed = the two fits. Blue = easy bank, red = hard bank (16 entries each). Grey = the real recordings on their labels (band = 25–75 %). Dotted lines at 3, 6 and 10 dB. Every curve uses the same 18 clips.](noise-model-v3-latent-runaway/harm_prominence.png){#fig-harm-prominence}
+
+```{python}
+#| label: tbl-harm-prominence
+#| tbl-cap: "Prominence per family. Median (dB) over clips × entries × rotors × the orders of the group. Share over 3 / 6 / 10 dB counts every (clip, entry, rotor, order), k = 1–24. Real = the recordings on their labels, a lower bound. Source: `harm_summary.json`."
+HS = json.loads(Path("noise-model-v3-latent-runaway/harm_summary.json").read_text())
+harm_names = {
+    "real": "real (labels)",
+    "legacy_fit": "legacy fits",
+    "legacy_easy": "legacy easy bank",
+    "legacy_hard": "legacy hard bank",
+    "v2_fit": "v2 fits",
+    "v2_easy": "v2 easy bank",
+    "v2_hard": "v2 hard bank",
+    "v3_fit": "v3 r3b fits",
+    "v3_easy": "v3r3 easy bank",
+    "v3_hard": "v3r3 hard bank",
+}
+rows = [
+    "| family | $k$ 1–4 | $k$ 5–8 | $k$ 9–16 | $k$ 17–24 | > 3 dB | > 6 dB | > 10 dB |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|",
+]
+for key, name in harm_names.items():
+    g = HS["families"][key]["nosource"]["groups"]
+    rows.append(
+        f"| {name} | "
+        + " | ".join(f(g[s]["median_db"], 1) for s in ("k1-4", "k5-8", "k9-16", "k17-24"))
+        + " | "
+        + " | ".join(pct(g["all"][f"frac_gt{t}"]) for t in (3, 6, 10))
+        + " |"
+    )
+Markdown("\n".join(rows))
+```
+
+### What it says
+
+- **Candidate 1 fails in its sharp form.** On a real track the legacy comb
+  is the least tonal. Past $k = 2$ its orders stand at most 1.1 dB over
+  the band ends.
+- The tall legacy stems of @fig-i3 are wide bumps, not lines. In the
+  median legacy entry, 96 % of order 3 is incoherent noise. That noise
+  is a Lorentzian of half-width 4–17 Hz at $k = 8$. So if the legacy comb
+  helps, loud wide bumps help. Sharp lines do not.
+- **Candidate 3 fails.** The hard banks are not less tonal. The v2 hard
+  bank is the most tonal noise here: 44 % of its orders pass 3 dB.
+  Legacy hard: 10 %.
+- The v3r3 hard bank matches its easy bank: 18 % and 18 %. Both beat
+  legacy hard.
+- Tonality ranks legacy < v3 < v2. The hard arms rank the other way:
+  5.41, 7.01, 7.06 rev/s. The v3 arm there used the round-2 banks.
+
+Two limits. The real audio reads 0.2 dB on its labels. The labels smear
+it, so it cannot rank the models. And a network sees the legacy bank on
+its labels too. Read that way, legacy hard drops to 0.15 dB.
+<!-- source: harm_summary.json families.<fam>.nosource.groups.all: frac_gt3 legacy_hard 0.095, v2_hard 0.441, v3_easy 0.179, v3_hard 0.182; median_by_k legacy_* k>=3 0.08–1.04; real groups.all.median_db 0.23; legacy_hard groups_label.all.median_db 0.15, frac_gt3 0.040. Legacy line parameters over the 34 legacy sources (LegacyFit x2, 16+16 bank entries): coherence_k_half 1.17 / 1.69 / 4.50 (min/median/max), coherent share exp(-(3/1.69)^2) = 0.043 at k = 3; gamma0 + 8 gamma_slope = 4.13 / 10.09 / 16.99 Hz. Arm MAE: § 9 table above. -->
+
+[^harm]: `scripts/noise_v3_harmonicity.py`: `--subsets` cuts entries 0, 128,
+    …, 1920 of each bank; `--run` renders and measures on `uni-cpu`
+    (job `harm-prominence-99ce52`, commit `315d7a2f`); `--plot` writes
+    `harm_summary.json` and
+    `harm_prominence.png`. Estimator: `tonality.demod_prominence`,
+    tests in `tests/experiments/test_noise_model_tonality.py`. Tracks:
+    `dload:DREGON-LM-V4-michaels-valid-full`, labels stretched onto
+    the clip as the validation does. Clips are 8 s, not 10 s: that is
+    the validation clip length. Mics 0–3. Banks: `rig_{easy,hard}`
+    (legacy), `noise_v2_{easy,hard}`, `noise_v3r3_{easy,hard}`; fits:
+    `LegacyFit` DREGON + Michael's cruise anchors (donor dynamics),
+    `V2Fit`, `V3Fit(round="r3b")`. The 10 flying clips with a
+    loudspeaker in the room are left out of the table and the figure;
+    their numbers are in `harm_summary.json` (`loudspeaker`).
