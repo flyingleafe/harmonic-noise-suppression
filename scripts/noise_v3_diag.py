@@ -105,17 +105,28 @@ def band_power(freqs: np.ndarray, spec: np.ndarray) -> np.ndarray:
     ).T
 
 
-def jensen_factors(wander: Any, k_max: int, basis: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def jensen_factors(
+    wander: Any, k_max: int, basis: np.ndarray, ctrl_hz: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     """``((K,) line, (F,) floor)`` render-mean power factors ``E[10^{x/10}]``
-    of fresh zero-mean OU tracks (sd after linear interpolation in time)."""
+    of fresh zero-mean OU tracks (sd after linear interpolation in time). With
+    ``ctrl_hz`` and a wander whose ``uj_corr_oct`` > 0, the colour draw is ``A y``
+    and its variance at a bin is ``sigma_uj^2 B^T (A A^T) B``, not ``sum_j B_j^2``."""
     sd_d = float(wander.track_sigma("d", k_max))
     sd_v = np.broadcast_to(np.asarray(wander.track_sigma("v", k_max), dtype=np.float64), (k_max,))
     rho_d = float(wander.track_rho("d", k_max))
     rho_v = np.broadcast_to(np.asarray(wander.track_rho("v", k_max), dtype=np.float64), (k_max,))
     var_line = sd_d**2 * _interp_var_factor(rho_d) + sd_v**2 * _interp_var_factor(rho_v)
-    var_floor = wander.sigma("u") ** 2 * _interp_var_factor(wander.rho("u")) + wander.sigma(
-        "uj"
-    ) ** 2 * _interp_var_factor(wander.rho("uj")) * (basis**2).sum(axis=0)
+    mix = None if ctrl_hz is None else wander.uj_mix(ctrl_hz)
+    colour = (
+        (basis**2).sum(axis=0)
+        if mix is None
+        else np.einsum("jf,jk,kf->f", basis, mix @ mix.T, basis)
+    )
+    var_floor = (
+        wander.sigma("u") ** 2 * _interp_var_factor(wander.rho("u"))
+        + wander.sigma("uj") ** 2 * _interp_var_factor(wander.rho("uj")) * colour
+    )
     return np.exp(0.5 * C_DB**2 * var_line), np.exp(0.5 * C_DB**2 * var_floor)
 
 
@@ -127,6 +138,7 @@ def ltas_bias(
     the render expectation (``render``), latents at zero (``zero``), the
     render expectation plus the static part (``render_static``) and that
     under the ``measured`` wander record (``render_static_measured``)."""
+    from data_processing.noise_model import spectrum as DSP
     from data_processing.noise_model.v3 import Wander
 
     comp = comp or fit_components(fit)
@@ -154,7 +166,8 @@ def ltas_bias(
         np.einsum("rkf,rkb->f", lines, line_gain0) / n_b + floor * floor_gain0.mean(axis=1) + wind
     )
     wander = Wander.from_mapping(fit["params"]["wander"])
-    jl, jf = jensen_factors(wander, k_max, basis)
+    ctrl_hz = DSP.floor_ctrl_hz(int(fit["front_end"]["sr"]))
+    jl, jf = jensen_factors(wander, k_max, basis, ctrl_hz)
     render = np.einsum("rkf,k->f", lines, jl) + floor * jf + wind
     zero = lines.sum(axis=(0, 1)) + floor + wind
     static_line = 10.0 ** ((ds[:, None] + vs) / 10.0)

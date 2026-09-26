@@ -1,0 +1,41 @@
+V3DIAG job=nv3dv-cruise-a-759896 dest=s3://omnirun-artifacts/nv3dv-cruise-a-759896/outputs/results/noise_v3/diag/rig/A sha=c589cecad816 host=54c4da4c3478 nproc=128
+name, memory.total [MiB], driver_version
+NVIDIA A100-PCIE-40GB, 40960 MiB, 595.71.05
+V3DIAG torch 2.7.0+cu126 cuda True NVIDIA A100-PCIE-40GB
+  flight_michaels_FLY125@144.000+8_rps_refined: 8x247x1025 8.000 s carriers [91.565036, 74.237875, 82.855846, 75.272913] pass=True
+built 13/13 supports; wrote /tmp/supports_michaels_fly125_cruise/index.json and /tmp/supports_michaels_fly125_cruise/findings.md
+V3DIAG build exit=0 wall_s=22
+  we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+[00:52:33] building michaels_fly125_cruise on cuda
+[00:52:37] fit rebuilt: whittle -24925545.86 (recorded -24925545.89), rig 4736.99, ou 105826.88
+[00:52:37] step 2: production stop rule trace
+[00:53:48]     production: 1+1 iterations; free pass: 60 iterations, rtol would fire at 1
+[00:53:48] step 2: rig to convergence, latents frozen
+[00:54:49]     rig chunk 1: 90 iters, gain 1809.4 nats (4.52e-04/cell), loss -24922618.32, 61 s
+[00:55:52]     rig chunk 2: 89 iters, gain 240.1 nats (6.00e-05/cell), loss -24922858.38, 63 s
+[00:56:57]     rig chunk 3: 90 iters, gain 67.8 nats (1.69e-05/cell), loss -24922926.14, 65 s
+[00:58:00]     rig chunk 4: 90 iters, gain 81.4 nats (2.03e-05/cell), loss -24923007.53, 63 s
+[00:59:07]     rig chunk 5: 90 iters, gain 19.0 nats (4.76e-06/cell), loss -24923026.55, 67 s
+[00:59:07] ridge step from the fit
+[00:59:08] alt round 1: latent step
+[00:59:13]     latent pass: -24823003.98 -> -24824610.96 (313 evals)
+[00:59:19]     latent pass: -24824610.96 -> -24824730.81 (310 evals)
+[00:59:25]     latent pass: -24824730.81 -> -24824745.05 (311 evals)
+[00:59:26] alt round 1: ridge -553.9 nats; rig step
+[01:00:28]     rig chunk 1: 90 iters, gain 1794.0 nats (4.49e-04/cell), loss -24925109.78, 62 s
+[01:01:30]     rig chunk 2: 90 iters, gain 211.4 nats (5.29e-05/cell), loss -24925321.23, 63 s
+[01:02:28]     rig chunk 3: 90 iters, gain 71.1 nats (1.78e-05/cell), loss -24925392.32, 58 s
+[01:03:31]     rig chunk 4: 90 iters, gain 83.6 nats (2.09e-05/cell), loss -24925475.90, 63 s
+[01:04:37]     rig chunk 5: 90 iters, gain 18.8 nats (4.71e-06/cell), loss -24925494.74, 66 s
+[01:04:37] alt round 1: total -24822767.70 (fit -24814981.99)
+[01:04:37] alt round 2: latent step
+[01:04:43]     latent pass: -24826093.57 -> -24826927.21 (312 evals)
+[01:04:49]     latent pass: -24826927.21 -> -24826961.56 (312 evals)
+[01:04:55]     latent pass: -24826961.56 -> -24826985.14 (311 evals)
+[01:04:55] alt round 2: ridge -106.5 nats; rig step
+[01:06:00]     rig chunk 1: 90 iters, gain 268.5 nats (6.71e-05/cell), loss -24926854.15, 65 s
+[01:07:01]     rig chunk 2: 90 iters, gain 52.1 nats (1.30e-05/cell), loss -24926906.30, 60 s
+[01:08:03]     rig chunk 3: 90 iters, gain 19.4 nats (4.85e-06/cell), loss -24926925.68, 62 s
+[01:08:03] alt round 2: total -24824105.85 (fit -24814981.99)
+[01:08:03] done in 930 s -> results/noise_v3/diag/rig/A/michaels_fly125_cruise.json
+V3DIAG exit=0 total_wall_s=958

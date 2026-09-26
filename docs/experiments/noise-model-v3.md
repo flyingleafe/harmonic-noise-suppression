@@ -1304,22 +1304,40 @@ No parameter is added.
 - The LTAS proxy closer to v2's.
 - Tonality and parity no worse than r2.
 
-### Status (2026-09-26 ≈ 01:45 BST)
+### Jobs
 
-- **Step 1 is done and committed.**
-- **Steps 2–3 are submitted, with no result yet.** The pool-level jobs
-  (`noise_v3_diag_rig.py`, at `c589ceca` from `.worktrees/submit-v3diag`) are:
-  - `nv3dv-{dregon,cruise}-a` on vast A100: `fit,rig,ridge,alt`;
-  - `nv3dk-{dregon,cruise}-b` on kaggle: `fit,zeromean,notch`;
-  - `nv3diag-{dregon,cruise}-a` on uni-gpushort, as a duplicate.
+**Diagnosis, steps 2–3** (`scripts/noise_v3_diag_rig.py` at `c589ceca`, from
+`.worktrees/submit-v3diag`; wrappers `results/noise_v3/diag/jobs/job_{dregon,cruise}_{A,B}.sh`,
+generator `scripts/_nv3_mkjobs_diag.py`). The daemon timed out on the first submits, so
+copies landed on three backends. One copy of each was kept (2026-09-26 00:40–00:50 UTC):
 
-  All were still queued or placing: the daemon timed out on submits and cancels, vast
-  instances were unreachable, and gpushort was at capacity. Each job syncs
-  `results/noise_v3/diag/rig/{A,B}/<pool>.json` and its `_job.log` to
-  `s3://omnirun-artifacts/<job>/outputs/`.
-- **Round-3 fits are not submitted.** The job generator is `/tmp/diagv3/mkjobs_r3.py`, with
-  schedule `--ridge-step --lbfgs-rtol 0 --rounds 20 --lbfgs-frames 64 --lbfgs-iters 150`, the
-  measured wander, 4 seeds, and output `results/noise_v3/fits_r3`.
+| job | steps | backend | state |
+|---|---|---|---|
+| `nv3dv-dregon-a-6a9bc6` | `fit,rig,ridge,alt --rounds 2 --rig-wall-s 540` | vast A100-PCIE | ran 00:53 UTC |
+| `nv3dv-cruise-a-759896` | same | vast A100-PCIE | succeeded, 958 s |
+| `nv3dv-dregon-b-45bd47` | `fit,zeromean,notch --rig-wall-s 540` | vast A100-SXM4 | succeeded, 662 s |
+| `nv3dv-cruise-b-beddbc` | same | vast A100-PCIE | succeeded, 630 s |
+
+Cancelled: the uni-gpushort duplicates `nv3diag-{dregon,cruise}-a` (still queued, vast
+placed first) and the kaggle copies `nv3dk-{dregon,cruise}-b`. Kaggle rejected every push
+with `401 Unauthorized` (`kernels_push`), so the B steps were resubmitted to vast.
+
+**Round-3 fits.** Each job builds the pool's supports, then runs the four seeds as
+concurrent processes on one GPU (`scripts/_nv3_mkjobs_r3.py --parallel`). The fit CLI is
+the campaign's (§ Campaign: `--init-from` the same v2 fits, `--channel-gains`, `--wind` on
+DREGON, `--max-frames 0`, `--seed N --restart-tag sN`). The schedule is
+`--ridge-step --lbfgs-rtol 0 --rounds 20 --lbfgs-frames 64 --lbfgs-iters 150`.
+
+The fits run on vast A100, not the kaggle T4. The rig kernel is fp64, and 84.5 % of an
+evaluation is its fp64 atom block (§ fp32 unit-atom kernel). Without the relative stop,
+each rig step runs its 150 + 75 iterations. On the T4 (1.0 s per 64-frame evaluation) that
+is ≈ 5 min per rig step, over an hour per restart. On the A100 the diagnosis measured
+0.60 s per ALL-frames evaluation on cruise.
+
+| round | wander | jobs (vast A100, from `.worktrees/submit-v3r3`) | commit | out |
+|---|---|---|---|---|
+| 3a | measured, `results/noise_v3/wander/<rig>.json` | `nv3r3a-dregon-de150e`, `nv3r3a-cruise-bf7186`, `nv3r3a-standby-e3cc0a` | `84509baa` | `results/noise_v3/fits_r3a/` |
+| 3b | measured + `uj_corr_oct` 1.5, `results/noise_v3/wander/<rig>_ujk.json` | `nv3r3b-dregon-5e326d`, `nv3r3b-cruise-88b8db`, `nv3r3b-standby-914944` | `d512827b` | `results/noise_v3/fits_r3b/` |
 
 ## Conclusion
 

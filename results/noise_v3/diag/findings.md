@@ -233,36 +233,95 @@ holds the latents fixed, so it has no gradient along these directions. The laten
 only the OU prior's weak pull on a static offset. Coordinate descent cannot cross this ridge. A
 fully converged rig step would still leave the static part in the latents.
 
-### Pool-level numbers (steps 2–3): pending
+### Pool-level numbers (steps 2–3)
 
-The ridge gain is already measured without the pool, because it is prior-only and the Whittle
-term is invariant by construction (`/tmp/diagv3/ridge_check.py`, closed form equal to brute
-force):
+`scripts/noise_v3_diag_rig.py` rebuilds each pool as the fit CLI built it (Whittle term within
+0.03 nats of the recorded one on both pools) and prices every state under the fit's own
+(mm1) wander. Jobs: `nv3dv-{dregon,cruise}-a` (steps `fit,rig,ridge,alt`, 2 alternation
+rounds) and `nv3dv-{dregon,cruise}-b` (`fit,zeromean,notch`), vast A100, rig wall cap 540 s
+per converged rig step. Outputs `rig/A/<pool>.json`, `rig/B/<pool>.json`.
 
-| pool | lines (d, v) | floor (u, u_j) | all |
-|---|---:|---:|---:|
-| DREGON r2 | −1 627.0 | −104.0 | **−1 731.0** |
-| cruise r2 | −3 107.4 | −204.4 | **−3 311.8** |
+**The production stop, on the real pools.** The production call (rtol 1e-5, cap 500,
+restart) runs 1 + 1 iterations on cruise, and the free pass from the same point would fire the
+rule at iteration 1 again. The restart gain it reports, 5.2e-6 nats/cell, passes the
+convergence test. The free pass then gains 2 218 nats.
 
-These are changes in nats. The floor part hardly moves: the static u_j notch stays in u_j,
-where the priors put it (z prior +1.7 / +10.5 nats).
+**Rig to convergence with the latents frozen** (from the r2 fit):
 
-`scripts/noise_v3_diag_rig.py` measures the rest. It rebuilds the pool; on the smoke pool the
-reconstruction is exact to 0.03 nats. It then measures:
+| pool | iterations (stop) | wall s | s / all-frames eval | gain nats | Whittle | γ prior | profile | z |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| cruise | 449 (tolerance 1e-5 /cell per 90 iterations) | 319 | 0.60 | **−2 217.7** | −775.4 | −1 442.3 | −1.3 | +0.4 |
+| DREGON | pending: `nv3dv-dregon-a-6a9bc6` still running at 01:20 UTC | | | | | | | |
 
-- the rig L-BFGS to convergence with the latents frozen (trace, gain, and the iteration where
-  the production rule fires);
-- ridge → alternation with converged steps;
-- zero-mean projection → re-run of the latent step;
-- the u_j notch removed → rig refit → latent re-run, with Whittle per band, rig prior per site
-  and OU per family.
+Two thirds of the gain is the γ prior: the converged rig narrows the widest lines.
+Cruise's γ max falls from 29.3 to 12.0 Hz in the notch refit below (DREGON 42.6 → 26.0 Hz). The
+round-2 "γ tail that the prior pays for" (§1(d)) is an unconverged rig, not a width the
+likelihood buys.
 
-On the smoke pool (2 × 4 s, 2 mics, K 24):
+**Ridge, then alternation with converged steps** (total objective change from the r2 fit,
+nats; static share of each family after the last round):
 
-- the ridge gains 296 nats;
-- one converged alternation round gains 511 nats in total;
-- the zero-mean projection without compensation costs +5 644 Whittle nats, and the latent step
-  wins back all but +714.
+| pool | ridge | after round 1 | after round 2 | round 2: Whittle / rig / OU | static share d / v / u / u_j |
+|---|---:|---:|---:|---|---|
+| cruise | −3 311.8 | −7 785.7 | **−9 123.9** | −4 659.6 / −1 457.2 / −3 007.1 | 0.03 / 0.01 / 0.01 / **0.44** |
+| DREGON | −1 731.0 (ridge, prior-only) | pending | pending | | |
 
-The jobs on the DREGON and cruise pools had not started when this was written (see the doc §
-"Round 3 → Status").
+The ridge and the converged rig steps together more than double what either gains alone,
+and the Whittle term now moves: −4 660 nats on cruise, mostly above 3 kHz. Every static share
+goes to ≈ 0 except u_j, which keeps 44 %. The ridge cannot fold a non-smooth static u_j shape
+into the rig spline (its z prior prices it at thousands of nats), so it stays in u_j.
+
+**Zero-mean projection** (every track minus its pool mean, rig fixed, then the latent step
+re-run):
+
+| pool | projected: total (Whittle / OU) | latent step re-run: total (Whittle / OU) |
+|---|---|---|
+| DREGON | +193 090.7 (+194 768.2 / −1 677.4) | −409.2 (−662.9 / +253.8) |
+| cruise | +474 345.4 (+477 642.9 / −3 297.5) | −317.7 (−958.6 / +640.8) |
+
+Removing the static part with the rig fixed costs 0.08–0.12 nats/cell. The latent step wins
+all of it back and 300–400 nats more: it digs the static part back in, because a static
+offset costs the OU prior almost nothing.
+
+## 3. The u_j notch: which term pays for it
+
+Control point 11 (3.39 kHz) carries the static u_j notch: −21.3 dB on DREGON and −14.9 dB on
+cruise (§1(c)). Step 3 removes the static part of u_j at that point only. From there it runs
+two branches: the rig re-fitted to convergence (wall cap 540 s: 720 / 810 iterations, latents
+as removed), and the latent step re-run under the ORIGINAL r2 rig. Every change is in nats
+against the r2 fit:
+
+| pool | state | total | Whittle (1.5–3 / 3–5 kHz) | rig prior: γ / z | OU u_j / v |
+|---|---|---:|---|---|---|
+| DREGON | notch removed, rig fixed | +20 514.3 | +20 609.3 (+8 910.8 / +11 679.0) | 0 / 0 | −95.0 / 0 |
+| DREGON | notch removed, rig re-fitted | −4 640.5 | −2 464.2 (+1 259.6 / −51.2) | −2 138.2 / **+72.2** | −95.0 / 0 |
+| DREGON | notch removed, latent step re-run (r2 rig) | −611.9 | −1 048.6 (−425.8 / −262.9) | 0 / 0 | +6.8 / +435.4 |
+| cruise | notch removed, rig fixed | +48 697.6 | +48 817.8 (+7 937.0 / +40 832.7) | 0 / 0 | −120.2 / 0 |
+| cruise | notch removed, rig re-fitted | +2 653.7 | +3 406.0 (+1 310.7 / +1 739.4) | −1 357.8 / **+731.8** | −120.2 / 0 |
+| cruise | notch removed, latent step re-run (r2 rig) | −392.4 | −1 302.5 (−20.9 / −425.2) | 0 / 0 | +17.3 / +858.2 |
+
+With the rig fixed, the notch is worth 20.6k / 48.8k Whittle nats and costs 95 / 120 OU nats.
+Once the rig is re-fitted, that value mostly moves into the rig:
+
+- **DREGON.** The refit rig recovers the 3–5 kHz Whittle term exactly (−51 against the
+  notched fit). It uses a smooth dip of the floor spline: −1.7 / −6.0 / −3.3 dB at control
+  points 10 / 11 / 12. That costs +72 z nats, not the 14 000 of the exact fold (§1(e)). The net worth of the notch needs DREGON's converged-rig gain
+  (step 2), which is still pending; the refit already ends 4 640 nats below the r2 fit.
+- **Cruise.** The refit rig dips −5.2 / −8.4 / −2.4 dB at points 10–12 for +732 z nats and
+  leaves +3 406 Whittle nats. Net of the converged-rig gain (−2 218: Whittle −775, γ −1 442),
+  the notch is worth **4 872 nats**: 4 181 in the Whittle term, 731 in z, and +84 in γ.
+  That is 1.2e-3 nats/cell, a real but small feature. The refit rig recovers 45.4k of the
+  48.8k Whittle nats the removal cost (93 %).
+- **Both.** The latent step re-run under the r2 rig digs the static u_j back: its static share
+  returns to 0.87 (DREGON) and 0.77 (cruise). From the removed state it buys 21.7k / 50.1k
+  Whittle nats for +102 / +138 OU u_j nats. It even ends 612 / 392 nats below the r2 fit.
+
+**Answer.** Under the independent u_j prior the notch is paid by u_j's OU term, and u_j pays
+only 90–120 nats for a one-point −15 to −21 dB offset that the rig spline would price at
+thousands. The data asks for a smooth dip of 6–8 dB at 3–4 kHz, which the rig carries for
+72 / 732 z nats. The rest of the notch buys at most ≈ 4.2k Whittle nats on cruise, and it is
+re-dug by any latent step because it is almost free there. **The u_j kernel prior is justified**
+(round 3b). Correlating u_j across the control points with the rig floor's own 1.5-oct kernel
+makes a non-smooth static colour as expensive in the latents as in the rig. The smooth part
+then goes to the rig through the ridge step, where the floor's prior prices it. The cost to
+watch is the ≤ 4.2k Whittle nats per pool that the notch buys on cruise.
