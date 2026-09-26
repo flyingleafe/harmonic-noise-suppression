@@ -1,0 +1,55 @@
+V3DIAG job=nv3dv-dregon-a-6a9bc6 dest=s3://omnirun-artifacts/nv3dv-dregon-a-6a9bc6/outputs/results/noise_v3/diag/rig/A sha=c589cecad816 host=a02b47bf33d4 nproc=128
+name, memory.total [MiB], driver_version
+NVIDIA A100-PCIE-40GB, 40960 MiB, 595.71.05
+V3DIAG torch 2.7.0+cu126 cuda True NVIDIA A100-PCIE-40GB
+  flight_dregon_updown_nosource_room2@1511903584.348+8_motors_command: 8x247x1025 8.000 s carriers [84.314811, 76.688208, 81.514045, 79.685927] pass=True
+built 10/10 supports; wrote /tmp/supports_dregon_room2_floor/index.json and /tmp/supports_dregon_room2_floor/findings.md
+V3DIAG build exit=0 wall_s=53
+  we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+[00:54:21] building dregon_room2_floor on cuda
+[00:54:24] fit rebuilt: whittle -18130023.67 (recorded -18130023.66), rig 5137.07, ou 73348.64
+[00:54:24] step 2: production stop rule trace
+[00:55:37]     production: 1+1 iterations; free pass: 60 iterations, rtol would fire at 1
+[00:55:37] step 2: rig to convergence, latents frozen
+[00:56:43]     rig chunk 1: 90 iters, gain 5293.2 nats (2.12e-03/cell), loss -18130179.77, 66 s
+[00:57:47]     rig chunk 2: 90 iters, gain 659.1 nats (2.64e-04/cell), loss -18130838.88, 64 s
+[00:58:52]     rig chunk 3: 90 iters, gain 303.5 nats (1.21e-04/cell), loss -18131142.38, 66 s
+[00:59:58]     rig chunk 4: 90 iters, gain 200.3 nats (8.01e-05/cell), loss -18131342.64, 66 s
+[01:01:00]     rig chunk 5: 90 iters, gain 387.4 nats (1.55e-04/cell), loss -18131730.01, 62 s
+[01:02:05]     rig chunk 6: 90 iters, gain 98.9 nats (3.95e-05/cell), loss -18131828.86, 65 s
+[01:03:08]     rig chunk 7: 90 iters, gain 358.4 nats (1.43e-04/cell), loss -18132187.21, 63 s
+[01:04:12]     rig chunk 8: 90 iters, gain 96.3 nats (3.85e-05/cell), loss -18132283.51, 64 s
+[01:05:18]     rig chunk 9: 90 iters, gain 750.8 nats (3.00e-04/cell), loss -18133034.31, 66 s
+[01:05:18] ridge step from the fit
+[01:05:19] alt round 1: latent step
+[01:05:24]     latent pass: -18058315.33 -> -18059393.51 (310 evals)
+[01:05:29]     latent pass: -18059393.51 -> -18059758.14 (312 evals)
+[01:05:34]     latent pass: -18059758.14 -> -18059878.52 (310 evals)
+[01:05:34] alt round 1: ridge -364.8 nats; rig step
+[01:06:39]     rig chunk 1: 90 iters, gain 5066.9 nats (2.03e-03/cell), loss -18131993.34, 65 s
+[01:07:41]     rig chunk 2: 90 iters, gain 1237.6 nats (4.95e-04/cell), loss -18133230.98, 62 s
+[01:08:43]     rig chunk 3: 90 iters, gain 281.4 nats (1.13e-04/cell), loss -18133512.35, 62 s
+[01:09:49]     rig chunk 4: 90 iters, gain 465.2 nats (1.86e-04/cell), loss -18133977.60, 66 s
+[01:10:57]     rig chunk 5: 90 iters, gain 91.5 nats (3.66e-05/cell), loss -18134069.14, 68 s
+[01:12:01]     rig chunk 6: 90 iters, gain 268.1 nats (1.07e-04/cell), loss -18134337.23, 64 s
+[01:13:08]     rig chunk 7: 90 iters, gain 221.7 nats (8.87e-05/cell), loss -18134558.95, 66 s
+[01:14:14]     rig chunk 8: 90 iters, gain 102.4 nats (4.10e-05/cell), loss -18134661.32, 66 s
+[01:15:19]     rig chunk 9: 90 iters, gain 557.2 nats (2.23e-04/cell), loss -18135218.47, 65 s
+[01:15:19] alt round 1: total -18063488.98 (fit -18051537.95)
+[01:15:19] alt round 2: latent step
+[01:15:24]     latent pass: -18066170.28 -> -18068723.63 (311 evals)
+[01:15:29]     latent pass: -18068723.63 -> -18068844.99 (311 evals)
+[01:15:34]     latent pass: -18068844.99 -> -18068887.35 (311 evals)
+[01:15:34] alt round 2: ridge -137.2 nats; rig step
+[01:16:40]     rig chunk 1: 90 iters, gain 992.1 nats (3.97e-04/cell), loss -18139171.44, 65 s
+[01:17:46]     rig chunk 2: 90 iters, gain 212.2 nats (8.49e-05/cell), loss -18139383.59, 66 s
+[01:18:50]     rig chunk 3: 90 iters, gain 113.3 nats (4.53e-05/cell), loss -18139496.87, 64 s
+[01:19:56]     rig chunk 4: 90 iters, gain 45.3 nats (1.81e-05/cell), loss -18139542.13, 66 s
+[01:21:03]     rig chunk 5: 90 iters, gain 198.3 nats (7.93e-05/cell), loss -18139740.47, 67 s
+[01:22:11]     rig chunk 6: 90 iters, gain 58.5 nats (2.34e-05/cell), loss -18139798.96, 68 s
+[01:23:17]     rig chunk 7: 90 iters, gain 75.9 nats (3.04e-05/cell), loss -18139874.88, 66 s
+[01:24:24]     rig chunk 8: 90 iters, gain 35.7 nats (1.43e-05/cell), loss -18139910.58, 67 s
+[01:25:29]     rig chunk 9: 90 iters, gain 84.7 nats (3.39e-05/cell), loss -18139995.25, 65 s
+[01:25:29] alt round 2: total -18068159.26 (fit -18051537.95)
+[01:25:29] done in 1868 s -> results/noise_v3/diag/rig/A/dregon_room2_floor.json
+V3DIAG exit=0 total_wall_s=1926

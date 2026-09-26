@@ -1313,7 +1313,7 @@ copies landed on three backends. One copy of each was kept (2026-09-26 00:40–0
 
 | job | steps | backend | state |
 |---|---|---|---|
-| `nv3dv-dregon-a-6a9bc6` | `fit,rig,ridge,alt --rounds 2 --rig-wall-s 540` | vast A100-PCIE | ran 00:53 UTC |
+| `nv3dv-dregon-a-6a9bc6` | `fit,rig,ridge,alt --rounds 2 --rig-wall-s 540` | vast A100-PCIE | succeeded, 1 868 s (every rig step at the 540 s wall) |
 | `nv3dv-cruise-a-759896` | same | vast A100-PCIE | succeeded, 958 s |
 | `nv3dv-dregon-b-45bd47` | `fit,zeromean,notch --rig-wall-s 540` | vast A100-SXM4 | succeeded, 662 s |
 | `nv3dv-cruise-b-beddbc` | same | vast A100-PCIE | succeeded, 630 s |

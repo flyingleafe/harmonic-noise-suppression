@@ -251,12 +251,15 @@ convergence test. The free pass then gains 2 218 nats.
 | pool | iterations (stop) | wall s | s / all-frames eval | gain nats | Whittle | γ prior | profile | z |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | cruise | 449 (tolerance 1e-5 /cell per 90 iterations) | 319 | 0.60 | **−2 217.7** | −775.4 | −1 442.3 | −1.3 | +0.4 |
-| DREGON | pending: `nv3dv-dregon-a-6a9bc6` still running at 01:20 UTC | | | | | | | |
+| DREGON | 810 (wall cap 540 s; still gaining 751 nats in its last 90 iterations) | 581 | 0.64 | **−8 147.7** | −5 755.6 | −2 384.8 | −13.0 | +8.0 |
 
-Two thirds of the gain is the γ prior: the converged rig narrows the widest lines.
-Cruise's γ max falls from 29.3 to 12.0 Hz in the notch refit below (DREGON 42.6 → 26.0 Hz). The
-round-2 "γ tail that the prior pays for" (§1(d)) is an unconverged rig, not a width the
-likelihood buys.
+Most of the cruise gain is the γ prior: the converged rig narrows the widest lines. On DREGON the
+Whittle term leads (−5 756 nats, −3 499 of them below 700 Hz) and γ adds −2 385; that rig is not
+converged at the cap (the per-90-iteration gains are 5 293, 659, 304, 200, 387, 99, 358, 96, 751
+nats, against a tolerance of 25). γ max falls from 29.3 to 10.3 Hz (cruise) and from 42.6 to
+14.7 Hz (DREGON). The round-2 "γ tail that the prior pays for" (§1(d)) is an unconverged rig, not
+a width the likelihood buys. On DREGON the production call also stops after 1 + 1 iterations (the
+rtol rule fires at iteration 1; restart gain 1.3e-5 nats/cell).
 
 **Ridge, then alternation with converged steps** (total objective change from the r2 fit,
 nats; static share of each family after the last round):
@@ -264,12 +267,15 @@ nats; static share of each family after the last round):
 | pool | ridge | after round 1 | after round 2 | round 2: Whittle / rig / OU | static share d / v / u / u_j |
 |---|---:|---:|---:|---|---|
 | cruise | −3 311.8 | −7 785.7 | **−9 123.9** | −4 659.6 / −1 457.2 / −3 007.1 | 0.03 / 0.01 / 0.01 / **0.44** |
-| DREGON | −1 731.0 (ridge, prior-only) | pending | pending | | |
+| DREGON | −1 731.0 (ridge, prior-only) | −11 951.0 | **−16 621.3** | −12 830.5 / −2 278.2 / −1 512.7 | 0.14 / 0.00 / 0.00 / **0.73** |
 
 The ridge and the converged rig steps together more than double what either gains alone,
-and the Whittle term now moves: −4 660 nats on cruise, mostly above 3 kHz. Every static share
-goes to ≈ 0 except u_j, which keeps 44 %. The ridge cannot fold a non-smooth static u_j shape
-into the rig spline (its z prior prices it at thousands of nats), so it stays in u_j.
+and the Whittle term now moves: −4 660 nats on cruise, mostly above 3 kHz; −12 831 on DREGON,
+−7 662 of them above 3 kHz and −4 576 below 700 Hz. Every DREGON rig step of the alternation
+hit the 540 s wall (810 iterations), so these are lower bounds on the gain. Every static share
+goes to ≈ 0 except u_j (0.44 cruise, 0.73 DREGON) and DREGON's d (0.14). The ridge cannot fold a
+non-smooth static u_j shape into the rig spline (its z prior prices it at thousands of nats), so it
+stays in u_j.
 
 **Zero-mean projection** (every track minus its pool mean, rig fixed, then the latent step
 re-run):
@@ -305,8 +311,11 @@ Once the rig is re-fitted, that value mostly moves into the rig:
 
 - **DREGON.** The refit rig recovers the 3–5 kHz Whittle term exactly (−51 against the
   notched fit). It uses a smooth dip of the floor spline: −1.7 / −6.0 / −3.3 dB at control
-  points 10 / 11 / 12. That costs +72 z nats, not the 14 000 of the exact fold (§1(e)). The net worth of the notch needs DREGON's converged-rig gain
-  (step 2), which is still pending; the refit already ends 4 640 nats below the r2 fit.
+  points 10 / 11 / 12. That costs +72 z nats, not the 14 000 of the exact fold (§1(e)). Net of the
+  converged-rig gain (−8 148: Whittle −5 756, γ −2 385), the notch is worth **3 507 nats**: 3 291
+  in the Whittle term, 64 in z, 247 in γ, less the 95 OU nats it cost u_j (1.4e-3 nats/cell).
+  Both rig runs stopped at the 540 s wall (720 and 810 iterations), so part of that is the 90
+  extra iterations of the converged run [inference].
 - **Cruise.** The refit rig dips −5.2 / −8.4 / −2.4 dB at points 10–12 for +732 z nats and
   leaves +3 406 Whittle nats. Net of the converged-rig gain (−2 218: Whittle −775, γ −1 442),
   the notch is worth **4 872 nats**: 4 181 in the Whittle term, 731 in z, and +84 in γ.
