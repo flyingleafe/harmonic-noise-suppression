@@ -34,7 +34,7 @@ THE SIX GENERATIONS, as noise sources::
     V3Fit("dregon")               the noise-model-v3 single-regime fit
                                   (results/noise_v3/fits{,_r2,_r3a,_r3b}/,
                                   round "r1", "r2", "r3a", "r3b" or "latest"
-                                  = r2 when it is on disk, else r1);
+                                  = the best round on disk, r3b > r2 > r1);
                                   V3Fit("michaels") is the v3 standby +
                                   cruise pair, composed as V2Fit("michaels");
                                   v3_fit_names() lists what is on disk
@@ -164,6 +164,11 @@ V3_FIT_DIRS = {
     "r3a": "results/noise_v3/fits_r3a",
     "r3b": "results/noise_v3/fits_r3b",
 }
+
+#: The order ``"latest"`` takes the rounds in: the best round whose files are all
+#: on disk.  r3b is the round-3 verdict's pick (docs/experiments/noise-model-v3.md
+#: § Round 3 Results); r3a stays loadable by name.
+V3_LATEST = ("r3b", "r2", "r1")
 
 #: The v3 fit file of each rig, by regime, inside a :data:`V3_FIT_DIRS` round.
 V3_FIT_FILES: dict[str, dict[str, str]] = {
@@ -538,15 +543,15 @@ def load_rig_v3(name: str, round: str = "latest") -> Rig:
 
     ``name`` is ``"dregon"`` (the single-regime room-2 fit) or ``"michaels"``
     (the FLY125 standby + cruise pair).  ``round`` is a :data:`V3_FIT_DIRS` key
-    (``"r1"``, ``"r2"``, ``"r3a"``, ``"r3b"``) or ``"latest"`` — r2 when every
-    one of the rig's round-2 files is on disk, else r1; :attr:`Rig.fit_round`
-    says which was taken.
+    (``"r1"``, ``"r2"``, ``"r3a"``, ``"r3b"``) or ``"latest"`` — the first round
+    of :data:`V3_LATEST` (r3b, r2, r1) whose files for the rig are all on disk;
+    :attr:`Rig.fit_round` says which was taken.
     """
     key = str(name).lower()
     if key not in V3_FIT_FILES:
         raise ValueError(f"unknown v3 rig {name!r}; known rigs are {list(V3_FIT_FILES)}")
     if round == "latest":
-        fit_round = "r2" if _v3_paths(key, "r2") is not None else "r1"
+        fit_round = next((r for r in V3_LATEST if _v3_paths(key, r) is not None), V3_LATEST[-1])
     elif round in V3_FIT_DIRS:
         fit_round = str(round)
     else:
@@ -1846,7 +1851,7 @@ class V3Fit(V2Fit):
     ``round`` is ``"r1"`` (the reduced campaign, ``results/noise_v3/fits``),
     ``"r2"`` (the mm1-wander refit, ``results/noise_v3/fits_r2``), ``"r3a"`` /
     ``"r3b"`` (the round-3 refits, ``results/noise_v3/fits_r3{a,b}``) or
-    ``"latest"`` — r2 when all of the rig's r2 files are on disk, else r1; the
+    ``"latest"`` — the first of :data:`V3_LATEST` (r3b, r2, r1) on disk; the
     name and ``entry`` say which was taken.  :meth:`expected_m` is the forward
     model with the wander at its mean (latents zero, :meth:`Rig.expected_m`).
     """
@@ -2827,6 +2832,7 @@ __all__ = [
     "V3_BANKS",
     "V3_FIT_DIRS",
     "V3_FIT_FILES",
+    "V3_LATEST",
     "LegacyBank",
     "LegacyFit",
     "LegacyRandom",
