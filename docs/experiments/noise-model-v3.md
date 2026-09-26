@@ -1672,7 +1672,7 @@ round-2 pair's.
 
 | arm | job | backend | state |
 |---|---|---|---|
-| `nv3r3_easy_scv2` | `nv3r3-easy-scv2-9c84f2` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 ~03:58Z at `5f137903` (starting) |
+| `nv3r3_easy_scv2` | `nv3r3-easy-scv2-fd6e96` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | resubmitted 2026-09-26 ~04:52Z at `b8cd12b1` (a docs-only commit on top of `5f137903`). The first submission, `nv3r3-easy-scv2-9c84f2` (~03:58Z at `5f137903`), failed at 04:12Z before its first training step: the wandb service did not start (`ServicePollForTokenError`) |
 | `nv3r3_hard_scv2` | `nv3r3-hard-scv2-5ea979` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 ~04:00Z at `5f137903` (placing) |
 
 ### Results
