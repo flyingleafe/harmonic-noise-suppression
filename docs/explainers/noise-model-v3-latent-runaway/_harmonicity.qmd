@@ -112,3 +112,92 @@ its labels too. Read that way, legacy hard drops to 0.15 dB.
     `V2Fit`, `V3Fit(round="r3b")`. The 10 flying clips with a
     loudspeaker in the room are left out of the table and the figure;
     their numbers are in `harm_summary.json` (`loudspeaker`).
+
+### Method B per rotor to order 74
+
+Method B is Fig E's estimator. Here it runs per rotor, orders 1–74,
+no rotor mean. Real pool against the r3b model (latents 0), same
+estimator.[^lof74]
+
+- **Pools.** The r3b fits' own STFT pools. DREGON: five room-2
+  windows, 310 frames, labels `motors_command`. Michael's cruise: eight
+  FLY125 windows, 496 frames, labels `rps_refined`.
+- **Line.** Per frame, the bins at round($k f_r / \Delta f$) ± 10 on that
+  frame's label. Mean over mics and frames. Line = centre ± 1 bin.
+- **Two floors.** Ring (Fig E's): median of bins 5–10 away. But orders
+  sit $f_r / \Delta f \approx$ 10 bins apart, so the ring touches
+  orders $k \pm 1$. Mid: bins ±($h$−1, $h$, $h$+1), $h$ = round($f_r / 2\Delta f$)
+  ≈ 5, mid-way between orders. The figures draw both: solid = mid,
+  dashed = ring. **The table uses mid.**
+- **Peak offset.** Argmax of the frame-mean cells within ±10 bins.
+  ±10 bins is the neighbour order. An offset at ±10 is that neighbour
+  (or the floor slope), not this line.
+
+![**What you see:** DREGON, line over floor per order, one panel per rotor. Black = real, red = r3b model. Solid = mid floor, dashed = ring floor. Dotted = 3 dB. Green = $k$ = 70.](noise-model-v3-latent-runaway/lof74_dregon.png){#fig-lof74-dregon}
+
+![**What you see:** Michael's cruise, same view.](noise-model-v3-latent-runaway/lof74_michaels_cruise.png){#fig-lof74-cruise}
+
+```{python}
+#| label: tbl-lof74
+#| tbl-cap: "Real line over floor per rotor, dB, mid floor (ring floor in brackets); then the peak offset, bins. Source: `lof74_table.json`."
+LT = json.loads(Path("noise-model-v3-latent-runaway/lof74_table.json").read_text())
+lk = LT["orders"]
+rows = [
+    "| rig | rotor | " + " | ".join(f"$k$ = {k}" for k in lk) + " |",
+    "|---|---|" + "---:|" * len(lk),
+]
+for key, name in (("dregon", "DREGON"), ("michaels_cruise", "Michael's cruise")):
+    t = LT[key]
+    for r in range(len(t["over_mid_db"])):
+        rows.append(
+            f"| {name} | {r + 1} | "
+            + " | ".join(
+                f"{f(m, 1)} ({f(g, 1)})" for m, g in zip(t["over_mid_db"][r], t["over_ring_db"][r])
+            )
+            + " |"
+        )
+for key, name in (("dregon", "DREGON"), ("michaels_cruise", "Michael's cruise")):
+    t = LT[key]
+    for r in range(len(t["peak_offset_bins"])):
+        rows.append(
+            f"| {name} offset | {r + 1} | "
+            + " | ".join(f(o, 0) for o in t["peak_offset_bins"][r])
+            + " |"
+        )
+Markdown("\n".join(rows))
+```
+
+**$k$ = 70: no.** DREGON shows no line at order 70 on any rotor.
+Real, mid floor: 0.5, 0.3, 0.1, 0.7 dB (rotors 1–4). Ring: 0.7, 0.3,
+−0.1, 2.1 dB. None reaches 3 dB. Peak offsets: −10, +10, −10, −3 bins.
+Three sit on the window edge. Only rotor 4 peaks near its label.
+
+So the estimator is **invalid at DREGON's telemetry precision** for
+high orders. The line is in the spectrogram. On the label it is gone.
+At $k$ = 70, a label error of 0.11 rev/s moves the line one bin
+(7.8 Hz / 70). Centre ± 1 bin cannot hold it.
+
+- **DREGON, low orders.** $k$ = 1 passes 3 dB: 5.3–5.9. $k$ = 2
+  reads 2.4–3.0 (rotor 3 just over). Past $k$ = 3 real stays inside −2.2 to 2.1 dB, but
+  rotor 4 $k$ = 13 at 3.2. r3b tracks it.
+- **Michael's cruise.** Rotor 1 (91 rev/s) alternates: even orders
+  stand 4–27 dB through $k$ = 26. Rotors 2–4 pass 3 dB only at
+  $k \le$ 12. At $k$ = 70 all four read −0.1 to 0.2 dB: flat.
+- **Dips.** $k$ = 3 reads −21 to −22 dB on rotors 2 and 4. Likely cause, not
+  checked: rotor 1's $k$ = 2 line (182 Hz, 27 dB) sits 31–47 Hz below
+  their $k$ = 3, in their low floor cells. r3b shows the same dip.
+- **Label bias.** 36 real cells pass 3 dB. 28 peak within ±1 bin of
+  the label: DREGON $k$ = 1 at −1, 0, 0, 0; Michael's rotor 1 at 0 on
+  every even order. Three peak on the ±10 edge (the neighbour order).
+  Five peak +2 to +9 bins high: Michael's rotors 3–4 at $k$ = 1, 2, 4.
+  That is the one sign of a label bias. No bias is readable at $k$ = 70.
+<!-- source: results/noise_v3/line_over_floor/{dregon,michaels_cruise}.json real.over_mid_db / over_ring_db / peak_offset_bins at orders.index(70): dregon mid 0.479 0.266 0.079 0.676, ring 0.653 0.310 -0.145 2.068, r3b mid -0.005 -0.023 0.027 0.388, offsets -10 10 -10 -3; michaels mid -0.020 0.056 0.202 -0.065; dregon k>=3 mid min/max per rotor -0.83/2.06 -2.19/1.06 -1.44/1.51 -1.02/3.20 (rotor 4 k=13); michaels rotor 1 even orders over 3 dB k=2..26, 4.0-27.0 dB; rotors 2-4 over 3 dB at k<=12; k=3 michaels mid -4.42 -22.22 -9.37 -21.19; rotor 1 k=2 27.02; cells over 3 dB: 36, |offset|<=1 in 28; dregon pool.spacing_mean_bins 10.81 9.85 10.50 10.25, mid_h_mean_bins 5.16 5.00 5.00 5.00 -->
+
+[^lof74]: `scripts/noise_v3_line_over_floor.py`: `--run` on `uni-cpu`
+    (job `lof74-d7faf6`, commit `688d8c0d`) writes
+    `results/noise_v3/line_over_floor/{dregon,michaels_cruise}.json`;
+    `--plot` writes `lof74_{dregon,michaels_cruise}.png` and
+    `lof74_table.json`. Estimator: `order_aligned` / `line_floor_db`
+    of `scripts/noise_v3_latent_runaway_figs.py` (the ring), plus
+    `mid_floor` (the mid). Pools: `pool_batch` on the r3b fits'
+    `supports` (sets `dregon-floor`, `michaels-cruise`), channel-normalised.
