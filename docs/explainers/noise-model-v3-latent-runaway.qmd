@@ -1221,20 +1221,25 @@ Markdown("\n".join(rows))
 # 9. Why the legacy hard arm wins
 
 The legacy hard arm is `rig_hard_scv2_unified`. It trains on the legacy
-hard bank (@fig-i3). No v2 or v3 arm comes close to it on the real
-validation.
+hard bank (@fig-i3). When this section was asked for, no v2 or v3 arm
+came close to it on the real validation. Then the round-3b easy arm
+finished. It is the first synthetic-only arm below the legacy pair.
 
 | noise model | easy arm | hard arm |
 |---|---:|---:|
 | legacy | 6.09 | **5.41** |
 | v2 | 7.94 | 7.06 |
 | v3, round-2 banks | 6.50 | 7.01 |
+| v3, round-3b banks | **4.68** | 7.79 |
 
 Real MAE in rev/s, raw at the selected round. Lower is better.[^arms]
 
 - Legacy is the only model where hard beats easy.
 - Dmitrii reports: legacy hard also wins on the static and stochastic
   validation parts.
+- Round 3b beats legacy on the easy bank: 4.68 against 6.09 and 5.41.
+  The real reference is 3.11.
+- Round 3b loses on the hard bank: 7.79. Hard is the open question.
 
 Three candidates:
 
@@ -1245,8 +1250,10 @@ Three candidates:
    sampler has no tonality guard.
 
 [^arms]: `docs/experiments/noise-model-v3.md` § Training arms (round-2
-    fits) § Results: `val/real_r3`, PIT MAE. The round-3b arms
-    (`nv3r3_{easy,hard}_scv2`) are still training.
+    fits) and (round-3 fits) § Results: `val/real_r3`, PIT MAE, raw at
+    the selected round. Jobs `nv3-easy-scv2-9bc4c1`,
+    `nv3-hard-scv2-149094`, `nv3r3-easy-scv2-fd6e96`,
+    `nv3r3-hard-scv2-5ea979`.
 
 ## Candidate 1 in the rig view
 
