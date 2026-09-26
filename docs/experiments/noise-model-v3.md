@@ -1232,18 +1232,107 @@ The v2 SCv2 pair ran 3.1 h (easy) and 3.7 h (hard) on `uni`.
 
 | arm | job | backend | state |
 |---|---|---|---|
-| `nv3_easy_scv2` | `nv3-easy-scv2-9bc4c1` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 ~00:28Z at `23576375` (placing) |
-| `nv3_hard_scv2` | `nv3-hard-scv2-149094` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 ~00:29Z at `23576375` (queued) |
+| `nv3_easy_scv2` | `nv3-easy-scv2-9bc4c1` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 ~00:28Z at `23576375`; ran 00:48–06:39Z (5 h 51 min), succeeded, early stop at round 174 |
+| `nv3_hard_scv2` | `nv3-hard-scv2-149094` | vast, 1× A100, 16 CPUs, 64 GB, 8 h | submitted 2026-09-26 ~00:29Z at `23576375`; ran 00:48–03:05Z (2 h 17 min), succeeded, early stop at round 64 |
+
+Neither job was resubmitted. `omnirun pull` on both jobs timed out against the
+daemon (`ReadTimeout`). That loses nothing the results need: the checkpoints,
+`validation_history.jsonl` and `best_checkpoints.json` are on R2 under
+`artifacts/nv3_{easy,hard}_scv2/checkpoints/`.
 
 ### Results
 
-**PENDING.** The v2 protocol applies. Selection is on the smoothed
-`real_overall` (`best_checkpoints.json`). The metrics are raw @ sel, best raw
-and `r1`/`r2`/`r3` from the R2 `validation_history.jsonl`. After that,
-`scripts/_regime_decomp.py --exp <arm> --ckpt best_real_overall --out
-results/regime_decomp/<arm>.json`, overall + zero / standby / ramp / cruise
-and `by_rig`, against `results/regime_decomp/nv2_{easy,hard}_scv2.json`.
+The v2 protocol (`docs/experiments/noise-v2-transfer.md` § "Stage-1 and
+curriculum results"). `real_overall` = `val/real_r3`, rev/s PIT MAE, lower is
+better. **sel** is the round whose smoothed score wrote
+`best_real_overall.ckpt`. **raw @ sel** is that round's unsmoothed value, and
+it is the number to quote. **best raw** is the lowest raw value in the run; no
+checkpoint corresponds to it. `r1`/`r2`/`r3` are taken at sel. The table comes
+from `scripts/_nv3_arm_history.py nv2_easy_scv2 nv2_hard_scv2 nv3_easy_scv2
+nv3_hard_scv2`, which reads the R2 history. **wall** is training time from the
+`perf/*` rows, first train start to last validation end. It excludes job
+setup, so the v2 pair shows 3.03 / 3.24 h here, against 3.1 / 3.7 h of job
+wall on `uni`.
 
+| arm | rounds | sel | smoothed | **raw @ sel** | best raw (round) | r1 | r2 | r3 | r1/r2 | final raw | wall |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| *`rig_easy_scv2_unified`*: legacy stochastic easy | 94 | 57 | — | 6.09 | 5.72 | — | — | — | — | — | — |
+| *`rig_hard_scv2_unified`*: legacy stochastic hard | 137 | 124 | — | 5.41 | 5.37 | — | — | — | — | — | — |
+| `nv2_easy_scv2` | 102 | 81 | 7.94 | **7.94** | 7.18 (49) | 10.89 | 9.67 | 7.94 | 1.13 | 8.70 | 3.03 h |
+| `nv3_easy_scv2` | 174 | 126 | 6.88 | **6.50** | 6.04 (80) | 8.61 | 6.61 | 6.50 | 1.30 | 8.18 | 5.67 h |
+| `nv2_hard_scv2` | 116 | 15 | 9.17 | **7.06** | 7.06 (15) | 25.11 | 9.38 | 7.06 | 2.68 | 12.18 | 3.24 h |
+| `nv3_hard_scv2` | 64 | 21 | 8.60 | **7.01** | 7.01 (21) | 7.86 | 5.93 | 7.01 | 1.33 | 14.85 | 2.05 h |
+
+**Four-regime decomposition.** `scripts/_regime_decomp.py --exp <arm> --ckpt
+best_real_overall --device cuda` ran on `kaggle`, not `uni-gpushort`. The
+`gpushort` slots were held by another project's 1 h queue (`omnirun explain`:
+"provider at capacity"). Kaggle's `omnirun pull` brings back 0 paths, so the
+job uploads its JSON to
+`r2://ml-data/artifacts/<arm>/regime_decomp/<arm>.json`. From there it was
+copied to `results/regime_decomp/nv3_{easy,hard}_scv2.json`. The jobs were
+`nv3-hard-decomp-kg3-9fe395` and `nv3-easy-decomp-kg-0e6d01`, both at
+`332359fd`. Thresholds, split and cell definitions are the v2 doc's. Frame
+shares: zero 12.7 %, standby 11.6 %, ramp 3.8 %, cruise 72.0 %; DREGON
+176 704 frames, Michael's 120 480.
+
+| arm | overall | zero | standby | ramp | cruise | spread standby | spread ramp | spread cruise |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `nv2_easy_scv2` | 7.99 | 10.64 | 11.05 | 11.12 | 6.87 | 5.71 | 6.42 | 16.76 |
+| `nv3_easy_scv2` | 6.83 | 1.84 | 13.02 | 12.97 | 6.39 | 4.39 | 8.11 | 15.12 |
+| `nv2_hard_scv2` | 7.05 | 1.25 | 6.16 | 15.81 | 7.76 | 6.27 | 8.14 | 18.56 |
+| `nv3_hard_scv2` | 7.02 | 2.18 | 17.31 | 13.52 | 5.88 | 5.48 | 16.54 | 22.23 |
+| **the TARGET labels of the same frames** | — | 0.01 | 10.63 | 7.85 | 13.79 | 10.63 | 7.85 | 13.79 |
+
+| arm | rig | overall | zero | standby | ramp | cruise |
+|---|---|---:|---:|---:|---:|---:|
+| `nv2_easy_scv2` | DREGON | 9.68 | 14.14 | 7.43 | 9.77 | 8.85 |
+| `nv3_easy_scv2` | DREGON | 7.10 | 2.14 | 10.69 | 11.74 | 7.75 |
+| `nv2_hard_scv2` | DREGON | 9.36 | 1.61 | 2.93 | 17.34 | 10.52 |
+| `nv3_hard_scv2` | DREGON | 5.92 | 1.81 | 8.46 | 13.15 | 6.29 |
+| `nv2_easy_scv2` | Michael's | 5.52 | 1.77 | 11.26 | 13.90 | 3.12 |
+| `nv3_easy_scv2` | Michael's | 6.43 | 1.08 | 13.16 | 15.51 | 3.80 |
+| `nv2_hard_scv2` | Michael's | 3.66 | 0.34 | 6.35 | 12.68 | 2.51 |
+| `nv3_hard_scv2` | Michael's | 8.63 | 3.09 | 17.84 | 14.29 | 5.11 |
+
+Two per-rig cells are too thin to read as results, as the script flags:
+DREGON standby (60 clip frames, 1.9 s) and Michael's ramp (114, 3.6 s).
+
+**One cross-check does not close as it did in v2.** On `nv3_hard_scv2` the
+decomposition's overall is 7.02 against raw @ sel 7.01, within the ~1 % that
+holds for every v2 row. On `nv3_easy_scv2` it is **6.83 against 6.50
+(+5 %)**. The file is the round-126 checkpoint: R2 wrote it at 05:11:56Z, ten
+seconds after round 126's validation ended, and `best_checkpoints.json` names
+round 126 at step 63 500. So the gap is a re-evaluation difference on the same
+weights, not a different file. [INFERENCE] The likely cause is AMP validation
+on the A100 against fp32 on the Kaggle GPU. This run is unusually sensitive
+around sel: the neighbouring rounds 124–128 score 7.35 / 6.40 / 6.50 / 6.99 /
+7.14. The regime cells belong to the 6.83 evaluation. Quoting 6.83 instead of
+6.50 does not change any conclusion below.
+
+**Reading.**
+
+* **Easy: v3 transfers better than v2.** raw @ sel is 6.50 against 7.94
+  (−18 %), and best raw 6.04 against 7.18. The eight-mic `r2` view falls from
+  9.67 to 6.61. Most of the gain is the ZERO cell, 10.64 → 1.84: the v2 easy
+  arm predicted rotor speed on stopped DREGON rotors (14.14), and the v3 arm
+  does not (2.14). DREGON cruise also improves, 8.85 → 7.75. Michael's gets
+  worse in every regime except zero (overall 5.52 → 6.43).
+* **Hard: no change overall, with the error moved between the rigs.** raw @
+  sel is 7.01 against 7.06. DREGON improves a lot (9.36 → 5.92; cruise
+  10.52 → 6.29, ramp 17.34 → 13.15). Michael's gets much worse (3.66 → 8.63),
+  standby most of all (6.35 → 17.84). The pooled standby cell is 17.31
+  against 6.16. The single-mic view does converge this time (`r1`/`r2` 1.33
+  against v2's 2.68), because sel is not a pre-convergence round.
+* **Standby is v3's weak regime on both arms** (13.02 and 17.31 against
+  v2's 11.05 and 6.16). The rotor spread there stays well under the label's
+  10.63 (4.39 and 5.48). At ramp and cruise the hard arm now spreads the
+  rotors too far (16.54 against 7.85, and 22.23 against 13.79). v2 did the
+  same at cruise (18.56).
+* **Neither arm reaches the hand-written legacy pair** (6.09 / 5.41 raw @ sel,
+  5.72 / 5.37 best raw), and both remain more than twice the real reference
+  (3.11). v3's best raw of 6.04 is still above the legacy hard arm's 5.37.
+* **Drift after sel is as large as v2's.** Final raw against best raw is 8.18
+  vs 6.04 (+35 %) and 14.85 vs 7.01 (+112 %), against v2's +21 % and +73 %.
 
 ## Round 3 (diagnosis-driven)
 

@@ -59,5 +59,22 @@ scripts/noise_v2_submit_arms.sh --backend vast --gpu-type A100 --cpus 16 --mem 6
 
 ## Conclusion
 
-**PENDING**. See `docs/experiments/noise-model-v3.md` § "Training arms
-(round-2 fits)".
+**v3 (folded round-2 fits) transfers better than v2 on the easy bank, but it
+does not beat the hand-written legacy arm.** Job `nv3-easy-scv2-9bc4c1` (vast
+A100, 5 h 51 min, early stop at round 174) selected round 126: smoothed 6.88,
+**raw @ sel 6.50**, best raw 6.04 at round 80, r1 / r2 / r3 8.61 / 6.61 /
+6.50. Against `nv2_easy_scv2`'s 7.94 raw @ sel and 7.18 best raw that is
+−18 %. It stays above `rig_easy_scv2_unified`'s 6.09 (best raw 5.72) and
+about twice the real reference's 3.11.
+
+The four-regime decomposition re-evaluates the selected file at 6.83, not
+6.50. The file is the right one (round 126); the likely cause is bf16
+validation on the A100 against fp32 on Kaggle [INFERENCE]. Its cells:
+zero 1.84 (v2 10.64), standby 13.02 (11.05), ramp 12.97 (11.12), cruise 6.39
+(6.87). By rig: DREGON 7.10 (9.68), Michael's 6.43 (5.52). The gain is
+DREGON's stopped rotors, zero 14.14 → 2.14, plus DREGON cruise, 8.85 → 7.75.
+Michael's gets worse in every regime except zero. Standby stays the weak cell,
+with a rotor spread of 4.39 against the label's 10.63. Post-sel drift: final
+raw 8.18 against best 6.04 (+35 %). Full tables:
+`docs/experiments/noise-model-v3.md` § "Training arms (round-2 fits)" →
+Results.

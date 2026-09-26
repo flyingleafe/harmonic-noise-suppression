@@ -46,5 +46,21 @@ scripts/noise_v2_submit_arms.sh --backend vast --gpu-type A100 --cpus 16 --mem 6
 
 ## Conclusion
 
-**PENDING**. See `docs/experiments/noise-model-v3.md` § "Training arms
-(round-2 fits)".
+**v3 (folded round-2 fits) does not transfer better than v2 on the hard bank.
+It ties v2 overall and moves the error from DREGON to Michael's.** Job
+`nv3-hard-scv2-149094` (vast A100, 2 h 17 min, early stop at round 64)
+selected round 21: smoothed 8.60, **raw @ sel 7.01**, which is also the best
+raw. r1 / r2 / r3 are 7.86 / 5.93 / 7.01. `nv2_hard_scv2` had 7.06 at round
+15, with r1 25.11. Unlike v2, the single-mic view has converged at sel (r1/r2
+1.33 against 2.68). The arm stays above `rig_hard_scv2_unified`'s 5.41 (best
+raw 5.37) and more than twice the real reference's 3.11.
+
+Decomposition of the selected file, which re-evaluates at 7.02: zero 2.18
+(v2 1.25), standby 17.31 (6.16), ramp 13.52 (15.81), cruise 5.88 (7.76). By
+rig, DREGON improves from 9.36 to 5.92 (cruise 10.52 → 6.29) and Michael's
+worsens from 3.66 to 8.63 (standby 6.35 → 17.84, cruise 2.51 → 5.11). The
+predicted rotor spread is now too wide at ramp (16.54 against the label's
+7.85) and at cruise (22.23 against 13.79), and too narrow at standby (5.48
+against 10.63). Post-sel drift: final raw 14.85 against best 7.01 (+112 %).
+Full tables: `docs/experiments/noise-model-v3.md` § "Training arms (round-2
+fits)" → Results.

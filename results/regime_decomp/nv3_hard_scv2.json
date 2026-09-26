@@ -1,0 +1,1299 @@
+{
+ "regimes": [
+  "zero",
+  "standby",
+  "ramp",
+  "cruise"
+ ],
+ "rows": [
+  {
+   "experiment": "nv3_hard_scv2",
+   "ckpt": "best_real_overall",
+   "channels": 8,
+   "salience": false,
+   "overall": {
+    "mae": 7.023194965725258,
+    "frames": 297184,
+    "share": 1.0
+   },
+   "clip_level_pit_mae": 7.0231948470747145,
+   "regimes": {
+    "zero": {
+     "mae": 2.175206584354468,
+     "frames": 37664,
+     "share": 0.1267362980510391
+    },
+    "standby": {
+     "mae": 17.31328956844559,
+     "frames": 34368,
+     "share": 0.11564552600409174
+    },
+    "ramp": {
+     "mae": 13.521172393785848,
+     "frames": 11168,
+     "share": 0.03757941208140411
+    },
+    "cruise": {
+     "mae": 5.8846764371113265,
+     "frames": 213984,
+     "share": 0.7200387638634651
+    }
+   },
+   "spread": {
+    "zero": {
+     "pred": 1.4688604686633955,
+     "true": 0.006113764551209449
+    },
+    "standby": {
+     "pred": 5.475069249426908,
+     "true": 10.634782819621945
+    },
+    "ramp": {
+     "pred": 16.542136688265725,
+     "true": 7.845916331326722
+    },
+    "cruise": {
+     "pred": 22.232505795286965,
+     "true": 13.789878524043234
+    }
+   },
+   "by_rig": {
+    "dregon": {
+     "overall": {
+      "mae": 5.924285428503278,
+      "frames": 176704,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": 1.8143742530691382,
+       "frames": 27008,
+       "share": 0.1528431727634915
+      },
+      "standby": {
+       "mae": 8.46332988111923,
+       "frames": 1920,
+       "share": 0.010865628395508874
+      },
+      "ramp": {
+       "mae": 13.150603651683381,
+       "frames": 7520,
+       "share": 0.04255704454907642
+      },
+      "cruise": {
+       "mae": 6.293493181745837,
+       "frames": 140256,
+       "share": 0.7937341542919232
+      }
+     }
+    },
+    "michaels": {
+     "overall": {
+      "mae": 8.63492895365083,
+      "frames": 120480,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": 3.0897485891737424,
+       "frames": 10656,
+       "share": 0.08844621513944223
+      },
+      "standby": {
+       "mae": 17.836955822133543,
+       "frames": 32448,
+       "share": 0.2693227091633466
+      },
+      "ramp": {
+       "mae": 14.285064098997074,
+       "frames": 3648,
+       "share": 0.030278884462151396
+      },
+      "cruise": {
+       "mae": 5.10696645806052,
+       "frames": 73728,
+       "share": 0.6119521912350597
+      }
+     }
+    }
+   },
+   "per_clip": [
+    {
+     "clip": 0,
+     "rig": "dregon",
+     "overall": {
+      "mae": 0.20442194176978798,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": 0.20442194176978798,
+       "frames": 8032,
+       "share": 1.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      }
+     }
+    },
+    {
+     "clip": 1,
+     "rig": "dregon",
+     "overall": {
+      "mae": 14.080162904637149,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": 12.68643840133316,
+       "frames": 576,
+       "share": 0.07171314741035857
+      },
+      "standby": {
+       "mae": 10.370710462331772,
+       "frames": 128,
+       "share": 0.01593625498007968
+      },
+      "ramp": {
+       "mae": 14.844615804594616,
+       "frames": 2752,
+       "share": 0.3426294820717131
+      },
+      "cruise": {
+       "mae": 13.899616760807438,
+       "frames": 4576,
+       "share": 0.5697211155378487
+      }
+     }
+    },
+    {
+     "clip": 2,
+     "rig": "dregon",
+     "overall": {
+      "mae": 6.885997675329565,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 6.885997675329565,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 3,
+     "rig": "dregon",
+     "overall": {
+      "mae": 6.104899211233831,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 6.104899211233831,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 4,
+     "rig": "dregon",
+     "overall": {
+      "mae": 5.91934537935067,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 5.91934537935067,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 5,
+     "rig": "dregon",
+     "overall": {
+      "mae": 6.860897092230291,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 6.860897092230291,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 6,
+     "rig": "dregon",
+     "overall": {
+      "mae": 5.052847832797533,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 5.052847832797533,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 7,
+     "rig": "dregon",
+     "overall": {
+      "mae": 0.20123491308603628,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": 0.20123491308603628,
+       "frames": 8032,
+       "share": 1.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      }
+     }
+    },
+    {
+     "clip": 8,
+     "rig": "dregon",
+     "overall": {
+      "mae": 12.805672414509248,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": 11.854308712749138,
+       "frames": 2784,
+       "share": 0.3466135458167331
+      },
+      "standby": {
+       "mae": 12.965871078812558,
+       "frames": 736,
+       "share": 0.09163346613545817
+      },
+      "ramp": {
+       "mae": 12.929137277039322,
+       "frames": 2368,
+       "share": 0.2948207171314741
+      },
+      "cruise": {
+       "mae": 13.849667533120112,
+       "frames": 2144,
+       "share": 0.26693227091633465
+      }
+     }
+    },
+    {
+     "clip": 9,
+     "rig": "dregon",
+     "overall": {
+      "mae": 5.114712924121386,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 5.114712924121386,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 10,
+     "rig": "dregon",
+     "overall": {
+      "mae": 4.172663355253607,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 4.172663355253607,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 11,
+     "rig": "dregon",
+     "overall": {
+      "mae": 4.684348928500931,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 4.684348928500931,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 12,
+     "rig": "dregon",
+     "overall": {
+      "mae": 5.100616975609525,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 5.100616975609525,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 13,
+     "rig": "dregon",
+     "overall": {
+      "mae": 4.634507752984644,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 4.634507752984644,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 14,
+     "rig": "dregon",
+     "overall": {
+      "mae": 0.8058879793252889,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": 0.716587551849658,
+       "frames": 7584,
+       "share": 0.9442231075697212
+      },
+      "standby": {
+       "mae": 2.3176166444484676,
+       "frames": 448,
+       "share": 0.055776892430278883
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      }
+     }
+    },
+    {
+     "clip": 15,
+     "rig": "dregon",
+     "overall": {
+      "mae": 9.313813460241276,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": 7.139751746466286,
+       "frames": 608,
+       "share": 0.07569721115537849
+      },
+      "ramp": {
+       "mae": 11.426649872660636,
+       "frames": 2400,
+       "share": 0.29880478087649404
+      },
+      "cruise": {
+       "mae": 8.567599712663396,
+       "frames": 5024,
+       "share": 0.6254980079681275
+      }
+     }
+    },
+    {
+     "clip": 16,
+     "rig": "dregon",
+     "overall": {
+      "mae": 6.14587839808597,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 6.14587839808597,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 17,
+     "rig": "dregon",
+     "overall": {
+      "mae": 8.708724455529476,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 8.708724455529476,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 18,
+     "rig": "dregon",
+     "overall": {
+      "mae": 5.924286036377409,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 5.924286036377409,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 19,
+     "rig": "dregon",
+     "overall": {
+      "mae": 5.954540828784624,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 5.954540828784624,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 20,
+     "rig": "dregon",
+     "overall": {
+      "mae": 6.898714540014229,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 6.898714540014229,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 21,
+     "rig": "dregon",
+     "overall": {
+      "mae": 4.760104427299652,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 4.760104427299652,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 22,
+     "rig": "michaels",
+     "overall": {
+      "mae": 18.271106528563507,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": 16.99719484920592,
+       "frames": 6880,
+       "share": 0.8565737051792829
+      },
+      "ramp": {
+       "mae": 23.447283691816754,
+       "frames": 992,
+       "share": 0.12350597609561753
+      },
+      "cruise": {
+       "mae": 40.957010328769684,
+       "frames": 160,
+       "share": 0.0199203187250996
+      }
+     }
+    },
+    {
+     "clip": 23,
+     "rig": "michaels",
+     "overall": {
+      "mae": 17.892153152453886,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": 17.892153152453886,
+       "frames": 8032,
+       "share": 1.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      }
+     }
+    },
+    {
+     "clip": 24,
+     "rig": "michaels",
+     "overall": {
+      "mae": 16.887634078478552,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": 16.887634078478552,
+       "frames": 8032,
+       "share": 1.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      }
+     }
+    },
+    {
+     "clip": 25,
+     "rig": "michaels",
+     "overall": {
+      "mae": 22.534338904923178,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": 22.392981445123613,
+       "frames": 6912,
+       "share": 0.8605577689243028
+      },
+      "ramp": {
+       "mae": 21.062857892597094,
+       "frames": 512,
+       "share": 0.06374501992031872
+      },
+      "cruise": {
+       "mae": 25.38049193197175,
+       "frames": 608,
+       "share": 0.07569721115537849
+      }
+     }
+    },
+    {
+     "clip": 26,
+     "rig": "michaels",
+     "overall": {
+      "mae": 5.779153511343724,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": 7.924472649892171,
+       "frames": 576,
+       "share": 0.07171314741035857
+      },
+      "cruise": {
+       "mae": 5.613420702357149,
+       "frames": 7456,
+       "share": 0.9282868525896414
+      }
+     }
+    },
+    {
+     "clip": 27,
+     "rig": "michaels",
+     "overall": {
+      "mae": 5.199663742604959,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 5.199663742604959,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 28,
+     "rig": "michaels",
+     "overall": {
+      "mae": 4.258340381531126,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": 6.988286972045898,
+       "frames": 32,
+       "share": 0.00398406374501992
+      },
+      "cruise": {
+       "mae": 4.247420595169068,
+       "frames": 8000,
+       "share": 0.9960159362549801
+      }
+     }
+    },
+    {
+     "clip": 29,
+     "rig": "michaels",
+     "overall": {
+      "mae": 4.1684328265399095,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 4.1684328265399095,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 30,
+     "rig": "michaels",
+     "overall": {
+      "mae": 4.537181816253054,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 4.537181816253054,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 31,
+     "rig": "michaels",
+     "overall": {
+      "mae": 4.591323311110417,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 4.591323311110417,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 32,
+     "rig": "michaels",
+     "overall": {
+      "mae": 3.4443155579357985,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 3.4443155579357985,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 33,
+     "rig": "michaels",
+     "overall": {
+      "mae": 5.172913375603725,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 5.172913375603725,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 34,
+     "rig": "michaels",
+     "overall": {
+      "mae": 5.21784358860487,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": 5.21784358860487,
+       "frames": 8032,
+       "share": 1.0
+      }
+     }
+    },
+    {
+     "clip": 35,
+     "rig": "michaels",
+     "overall": {
+      "mae": 11.257431659558083,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": 11.59205745135593,
+       "frames": 2624,
+       "share": 0.32669322709163345
+      },
+      "standby": {
+       "mae": 10.68723115991847,
+       "frames": 2592,
+       "share": 0.32270916334661354
+      },
+      "ramp": {
+       "mae": 8.645770664326847,
+       "frames": 1536,
+       "share": 0.19123505976095617
+      },
+      "cruise": {
+       "mae": 14.860097992420197,
+       "frames": 1280,
+       "share": 0.1593625498007968
+      }
+     }
+    },
+    {
+     "clip": 36,
+     "rig": "michaels",
+     "overall": {
+      "mae": 0.3121018692576493,
+      "frames": 8032,
+      "share": 1.0
+     },
+     "regimes": {
+      "zero": {
+       "mae": 0.3121018692576493,
+       "frames": 8032,
+       "share": 1.0
+      },
+      "standby": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "ramp": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      },
+      "cruise": {
+       "mae": null,
+       "frames": 0,
+       "share": 0.0
+      }
+     }
+    }
+   ],
+   "provenance": {
+    "experiment": "nv3_hard_scv2",
+    "checkpoint": "best_real_overall",
+    "checkpoint_uri": "r2://ml-data/artifacts/nv3_hard_scv2/checkpoints/best_real_overall.ckpt",
+    "checkpoint_digest": "sha256:29bc66a2e762714350068df80b53c438d2144b0a4d8f58b1ecc007539d8ca6d5",
+    "split": "dload:DREGON-LM-V4-michaels-valid-full",
+    "split_version": "9604f3ffc2c9",
+    "thresholds": {
+     "ramp_slew_rev_s2": 20.0,
+     "zero_max_rev_s": 1.0,
+     "standby_mean_rev_s": 45.0,
+     "derivative_halfwidth_s": 0.25,
+     "smoothing_width_s": 0.288,
+     "frame_rate_hz": 31.25
+    },
+    "git_head": "332359fdc7e44d25a4be77cddfc9fb92e2603fc3",
+    "scored_object": "Every per-regime and per-clip number in this row belongs to the SELECTED CHECKPOINT \u2014 the file at checkpoint_uri, aliased by training.loop when the MEDIAN-SMOOTHED val/real_overall improved. It is NOT the best-round checkpoint of the run's history: selected = round 21 at raw val/real_overall 7.012321087707941, while the best round the history ever logged was None at None. Inference ran on the selected file only.",
+    "selected_checkpoint": {
+     "source": "r2://ml-data/artifacts/nv3_hard_scv2/checkpoints/best_checkpoints.json",
+     "score": "real_overall",
+     "checkpoint": "best_real_overall.ckpt",
+     "validation_round": 21,
+     "optimizer_step": 11000,
+     "raw": 7.012321087707941,
+     "smoothed": 8.60261908082946
+    },
+    "best_round_history": null
+   }
+  }
+ ]
+}
