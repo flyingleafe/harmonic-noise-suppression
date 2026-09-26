@@ -40,8 +40,9 @@ Inputs:
   ``revised_eval.absolute_ltas_bands`` on the bands inside
   :data:`LISTEN_LTAS_HZ`. ``--round TAG`` renders the same windows with the
   legacy anchor fits (:data:`LISTEN_LEGACY`, ``LegacyFit(...,
-  dynamics="donor")``), v2, round 2 and round TAG; ``--listen-add KEY`` adds
-  one source to an existing ``figdata_TAG.json`` without re-rendering the rest.
+  dynamics="donor")``), v2, round 2, round TAG and round TAG with
+  mean-preserving wander (:data:`LISTEN_MP`); ``--listen-add KEY`` adds one
+  source to an existing ``figdata_TAG.json`` without re-rendering the rest.
 
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py            # evaluate + plot
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --rigs-only # Figs G-I3 only
@@ -49,6 +50,7 @@ Inputs:
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --plot-only
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3a  # r3a beside r2
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --listen-add legacy
+    PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --listen-add v3_r3b_mp
 
 Writes ``docs/explainers/noise-model-v3-latent-runaway/`` (``fig_*.png``,
 ``figdata.json``, every plotted number, and ``audio/*.wav``).
@@ -180,6 +182,10 @@ LISTEN_LABELS = {
 #: (``noise_lab.LegacyFit``'s default ``dynamics="donor"``, line mode ``fm``)
 LISTEN_LEGACY = {"dregon": LEGACY_FITS["dregon"], "michaels": LEGACY_FITS["michael"]}
 LISTEN_LEGACY_DYNAMICS = "donor"
+#: § 8 Listen again: the suffix of a v3 round's key rendered with the wander
+#: drawn at mean ``-sigma^2 ln10 / 20`` dB, so every power multiplier has mean
+#: one (``V3Fit(..., wander_mean="power")``): ``v3_r3b`` + ``_mp``
+LISTEN_MP = "_mp"
 LISTEN_DYN_DB = 45.0
 AUDIO = OUT / "audio"
 
@@ -1003,20 +1009,33 @@ def listen_key(tag: str) -> str:
     return "v3" if tag == "r2" else f"v3_{tag}"
 
 
+def listen_keys(tag: str) -> tuple[str, ...]:
+    """The § Listen again sources of ``--round tag``, in row order after the real clip."""
+    return ("legacy", "v2", listen_key("r2"), listen_key(tag), listen_key(tag) + LISTEN_MP)
+
+
 def listen_label(key: str) -> str:
     if key in LISTEN_LABELS:
         return LISTEN_LABELS[key]
+    if key.endswith(LISTEN_MP):
+        return f"{listen_label(key.removesuffix(LISTEN_MP))}, mean-preserving wander"
     return f"v3 round-{key.removeprefix('v3_r')} fit"
 
 
 def listen_source(nl: Any, rig: str, key: str) -> Any:
     """The noise source of clip ``key`` for listen rig ``rig``: ``"legacy"``
-    (:data:`LISTEN_LEGACY`), ``"v2"``, or a v3 round's :func:`listen_key`."""
+    (:data:`LISTEN_LEGACY`), ``"v2"``, a v3 round's :func:`listen_key`, or that
+    key + :data:`LISTEN_MP` (the same fit, mean-preserving wander)."""
     if key == "legacy":
         return nl.LegacyFit(LISTEN_LEGACY[rig], dynamics=LISTEN_LEGACY_DYNAMICS)
     if key == "v2":
         return nl.V2Fit(rig)
-    return nl.V3Fit(rig, round="r2" if key == "v3" else key.removeprefix("v3_"))
+    base = key.removesuffix(LISTEN_MP)
+    return nl.V3Fit(
+        rig,
+        round="r2" if base == "v3" else base.removeprefix("v3_"),
+        wander_mean="power" if key.endswith(LISTEN_MP) else "zero",
+    )
 
 
 def listen(keys: tuple[str, ...] = ("v2", listen_key(V3_ROUND))) -> dict[str, Any]:
@@ -1769,8 +1788,7 @@ def round_views(tag: str) -> dict[str, Any]:
     """``--round``: round ``tag`` beside round 2 — the static shares of every
     family, the parameter-view numbers of the three pooled fits (§ 8's table;
     the rig figures are Figs H / H2 of :func:`rig_views`), § Listen with the
-    legacy anchor fit, v2 and both rounds rendered on the same real windows
-    and seed."""
+    sources of :func:`listen_keys` rendered on the same real windows and seed."""
     nl = _noise_lab()
     return dict(
         tag=tag,
@@ -1782,29 +1800,32 @@ def round_views(tag: str) -> dict[str, Any]:
             v3_r2=v3_rig_panels(nl, "r2"),
             **{f"v3_{tag}": v3_rig_panels(nl, tag)},
         ),
-        listen=listen(("legacy", "v2", listen_key("r2"), listen_key(tag))),
+        listen=listen(listen_keys(tag)),
     )
 
 
-def listen_merge(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+def listen_merge(old: dict[str, Any], new: dict[str, Any], tag: str) -> dict[str, Any]:
     """``--listen-add``: the clips of ``new`` (a :func:`listen` of more keys on
-    the same windows) into ``old``, right after the real clip, in the row order
-    a full :func:`round_views` writes. The real clip must come out the same."""
+    the same windows) into ``old``, in the row order a full :func:`round_views`
+    of round ``tag`` writes (:func:`listen_keys`; keys outside it last). The
+    real clip must come out the same."""
     for k in ("seconds", "seed", "level", "mic", "sr", "dyn_range_db", "ltas_bands_hz"):
         if old[k] != new[k]:
             raise SystemExit(f"--listen-add: {k} {new[k]!r} differs from {old[k]!r}")
+    rank = {k: i for i, k in enumerate(("real", *listen_keys(tag)))}
 
-    def first(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
-        """``a`` then the keys of ``b`` not in ``a``."""
-        return {**a, **{k: v for k, v in b.items() if k not in a}}
+    def merged(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+        """``a`` updated by ``b``, in row order (a stable sort)."""
+        both = {**a, **b}
+        return dict(sorted(both.items(), key=lambda kv: rank.get(kv[0], len(rank))))
 
-    old["labels"] = first(new["labels"], old["labels"])
+    old["labels"] = merged(old["labels"], new["labels"])
     for rig, row in old["rigs"].items():
         add = new["rigs"][rig]
         if add["clips"]["real"] != row["clips"]["real"]:
             raise SystemExit(f"--listen-add: the {rig} real clip moved")
-        row["clips"] = first(add["clips"], row["clips"])
-        row["spans_rev_s"] = first(add["spans_rev_s"], row["spans_rev_s"])
+        row["clips"] = merged(row["clips"], add["clips"])
+        row["spans_rev_s"] = merged(row["spans_rev_s"], add["spans_rev_s"])
     return old
 
 
@@ -1864,7 +1885,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--listen-add",
         metavar="KEY",
-        help="with --round: render one more § Listen source (legacy, v2 or a v3 key) into "
+        help="with --round: render one more § Listen source (legacy, v2, a v3 key or a v3 key "
+        "+ _mp for its mean-preserving wander) into "
         "figdata_TAG.json beside the clips already there, then redraw",
     )
     args = ap.parse_args(argv)
@@ -1878,7 +1900,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.listen_add:
                 d = load(data)
                 new = json.loads(json.dumps(_r(listen((str(args.listen_add),)), 4)))
-                d["listen"] = listen_merge(d["listen"], new)
+                d["listen"] = listen_merge(d["listen"], new, str(args.round))
             else:
                 d = _r(round_views(str(args.round)), 4)
             OUT.mkdir(parents=True, exist_ok=True)

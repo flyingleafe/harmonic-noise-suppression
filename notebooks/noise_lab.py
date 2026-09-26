@@ -432,15 +432,28 @@ class Rig:
         return {regime: _offset_fit(fit, comb_offset_db) for regime, fit in self.fits.items()}
 
     def render_audio(
-        self, rps: np.ndarray, *, seed: int, n_mics: int, comb_offset_db: float = 0.0
+        self,
+        rps: np.ndarray,
+        *,
+        seed: int,
+        n_mics: int,
+        comb_offset_db: float = 0.0,
+        wander_mean: str = "zero",
     ) -> tuple[np.ndarray, dict[str, Any]]:
-        """``((n_mics, T) float64, diagnostics)`` --- the rig's own renderer."""
+        """``((n_mics, T) float64, diagnostics)`` --- the rig's own renderer.
+        ``wander_mean`` is ``render_noise``'s (a v3 payload's wander mean)."""
         from experiments.noise_model import render as RD
 
         fits = self.offset_fits(comb_offset_db)
         if self.per_regime:
             audio, diag = RD.render_noise_regimes(
-                fits, rps, sr=SR, n_mics=int(n_mics), seed=int(seed), return_diagnostics=True
+                fits,
+                rps,
+                sr=SR,
+                n_mics=int(n_mics),
+                seed=int(seed),
+                wander_mean=wander_mean,
+                return_diagnostics=True,
             )
         else:
             audio, diag = RD.render_noise(
@@ -449,6 +462,7 @@ class Rig:
                 sr=SR,
                 n_mics=int(n_mics),
                 seed=int(seed),
+                wander_mean=wander_mean,
                 return_diagnostics=True,
             )
         return np.asarray(audio, dtype=np.float64), dict(diag)
@@ -1792,6 +1806,8 @@ class V2Fit(NoiseSource):
     """
 
     generation = "v2"
+    #: ``render_noise``'s ``wander_mean``; a v2 payload has no wander to shift.
+    wander_mean = "zero"
 
     def __init__(self, rig: str = "dregon"):
         self.rig = load_rig(rig)
@@ -1812,6 +1828,7 @@ class V2Fit(NoiseSource):
             seed=int(seed),
             n_mics=int(n_mics),
             comb_offset_db=float(comb_offset_db),
+            wander_mean=self.wander_mean,
         )
         self.last_diag = diag
         return audio
@@ -1854,16 +1871,24 @@ class V3Fit(V2Fit):
     ``"latest"`` — the first of :data:`V3_LATEST` (r3b, r2, r1) on disk; the
     name and ``entry`` say which was taken.  :meth:`expected_m` is the forward
     model with the wander at its mean (latents zero, :meth:`Rig.expected_m`).
+
+    ``wander_mean="power"`` renders the same fit with every wander track drawn
+    at mean ``-sigma^2 ln10 / 20`` dB instead of 0, so each power multiplier
+    has mean one (``render_noise``'s option); the name says so.
     """
 
     generation = "v3"
 
-    def __init__(self, rig: str = "dregon", round: str = "latest"):
+    def __init__(self, rig: str = "dregon", round: str = "latest", wander_mean: str = "zero"):
+        if wander_mean not in ("zero", "power"):
+            raise ValueError(f"wander_mean {wander_mean!r} is not 'zero' or 'power'")
         self.rig = load_rig_v3(rig, round)
+        self.wander_mean = wander_mean
         taken = str(self.rig.fit_round)
-        self.name = f"v3-fit {self.rig.name} {taken}"
+        mp = ", mean-preserving wander" if wander_mean == "power" else ""
+        self.name = f"v3-fit {self.rig.name} {taken}{mp}"
         how = f"{taken} (latest on disk)" if round == "latest" else taken
-        self.entry = f"round {how}: " + " + ".join(self.rig.paths.values())
+        self.entry = f"round {how}{mp}: " + " + ".join(self.rig.paths.values())
         self.span = self.rig.span
 
 

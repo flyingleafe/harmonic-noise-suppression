@@ -59,6 +59,19 @@ DREGON's static per-mic wind term ``W_m(f)`` (:func:`.v3.wind_shape`) is its
 own independent shaped noise, added unscaled by speed. The v3 draws come
 from streams spawned AFTER the four v2 ones, so a v2 payload renders exactly
 as before.
+
+WANDER MEAN. Every wander track is drawn ZERO-MEAN in dB by default
+(``wander_mean="zero"``), so a family of sd ``s`` raises the mean power it
+multiplies by ``exp((s ln10 / 10)^2 / 2)``. ``wander_mean="power"`` draws each
+of the four with mean ``-s^2 ln10 / 20`` dB instead — ``d`` and ``u`` at
+their scalar sd, every line's ``v`` at its own order group's sd, every
+colour point ``u_j`` at ``sigma_uj sqrt((A A^T)_jj)`` when the colour is the
+kernel mix ``A y`` — so ``E[10^{x/10}] = 1`` at every block centre (and
+colour control point) and the rendered mean power is the fitted one there.
+The same draws are used, only shifted. Between block centres the linear
+interpolation in dB has less variance than ``s^2`` — short by
+``(1 - rho) s^2 / 3`` averaged over a block, ``rho`` the block-to-block
+correlation — so there the mean power sits slightly BELOW the fitted one.
 """
 
 from __future__ import annotations
@@ -100,6 +113,19 @@ READABLE_SCHEMAS = READABLE_FIT_SCHEMAS
 #: steps resolve it; a sqrt-Hann pair at 50 % overlap reconstructs a constant
 #: gain exactly.
 WANDER_WOLA_FRAME = 4096
+
+
+#: ``render_noise``'s ``wander_mean``: the wander tracks' mean in dB, ``"zero"``
+#: (the fitted model's latents at their prior mean) or ``"power"`` (each shifted
+#: by ``-sigma^2 ln10 / 20`` so its power multiplier has mean one).
+WanderMean = Literal["zero", "power"]
+WANDER_MEANS: tuple[str, ...] = ("zero", "power")
+
+
+def _power_mean_shift_db(var_db2: Any) -> np.ndarray:
+    """The dB mean of a Gaussian of variance ``var_db2`` whose ``10^{x/10}``
+    has mean one: ``-var ln10 / 20``."""
+    return -np.asarray(var_db2, dtype=np.float64) * math.log(10.0) / 20.0
 
 
 def _slow_gain(x: np.ndarray, gain_db: Any, *, sr_work: int) -> np.ndarray:
@@ -149,6 +175,7 @@ def render_noise(
     n_mics: int = 8,
     seed: int = 0,
     sr_work: int | None = None,
+    wander_mean: WanderMean = "zero",
     return_diagnostics: Literal[False] = False,
 ) -> np.ndarray: ...
 
@@ -162,6 +189,7 @@ def render_noise(
     n_mics: int = 8,
     seed: int = 0,
     sr_work: int | None = None,
+    wander_mean: WanderMean = "zero",
     return_diagnostics: Literal[True],
 ) -> tuple[np.ndarray, dict[str, Any]]: ...
 
@@ -174,6 +202,7 @@ def render_noise(
     n_mics: int = 8,
     seed: int = 0,
     sr_work: int | None = None,
+    wander_mean: WanderMean = "zero",
     return_diagnostics: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, dict[str, Any]]:
     """Synthesise the fitted noise on the carriers ``rps_rev_s``.
@@ -194,6 +223,10 @@ def render_noise(
         The work rate the lines and the floor are synthesised at before the
         anti-alias and the decimation to ``sr``; ``None``: :func:`fit_work_rate`,
         the rate whose chain the fit's likelihood carried.
+    wander_mean
+        ``"zero"``: the v3 wander tracks drawn zero-mean in dB (the default);
+        ``"power"``: the same draws shifted so every power multiplier has mean
+        one (module docstring, WANDER MEAN). A v2 payload ignores it.
 
     Returns
     -------
@@ -201,6 +234,8 @@ def render_noise(
     and :func:`revised_eval.window_periodogram` are in. No RMS normalisation.
     """
     p = _check_schema(fit)
+    if wander_mean not in WANDER_MEANS:
+        raise ValueError(f"wander_mean {wander_mean!r} is not one of {WANDER_MEANS}")
     sr_work = fit_work_rate(fit) if sr_work is None else int(sr_work)
     v3 = fit.get("schema") == FIT_SCHEMA_V3
     rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
@@ -305,6 +340,17 @@ def render_noise(
             # the colour moves smoothly across the control points (the
             # payload's ``uj_corr_oct``): each block's draw is ``A y``
             tracks["uj"] = mix @ tracks["uj"]
+        if wander_mean == "power":
+            # every family multiplies a power by 10^{x/10}: shift each track by
+            # its own stationary variance (u_j through A y: diag(A A^T) sigma^2)
+            uj_var = wander.sigma("uj") ** 2 * (
+                np.ones(n_ctrl) if mix is None else np.einsum("ij,ij->i", mix, mix)
+            )
+            tracks["d"] += _power_mean_shift_db(wander.sigma("d") ** 2)
+            v_sd = np.asarray(wander.track_sigma("v", k_max), dtype=np.float64)
+            tracks["v"] += _power_mean_shift_db(v_sd**2)[..., None]
+            tracks["u"] += _power_mean_shift_db(wander.sigma("u") ** 2)
+            tracks["uj"] += _power_mean_shift_db(uj_var)[:, None]
         if p.get("wind") is not None:
             wind_db = np.asarray(p["wind"]["wind_db"], dtype=np.float64)
             if wind_db.size < n_mics:
@@ -491,6 +537,7 @@ def render_noise_regimes(
     n_mics: int = 8,
     seed: int = 0,
     sr_work: int | None = None,
+    wander_mean: WanderMean = "zero",
     return_diagnostics: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, dict[str, Any]]:
     """Synthesise ONE carrier track from a PER-REGIME pair of fits.
@@ -527,7 +574,7 @@ def render_noise_regimes(
 
     A regime whose weight is zero everywhere is NOT rendered: a cruise-only
     window costs exactly one render, and only a window that actually crosses
-    the band costs two.
+    the band costs two. ``wander_mean`` goes to each :func:`render_noise`.
     """
     fits = _regime_fits(fits_by_regime)
     rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
@@ -549,6 +596,7 @@ def render_noise_regimes(
                 n_mics=n_mics,
                 seed=seeds[regime],
                 sr_work=sr_work,
+                wander_mean=wander_mean,
             ),
             dtype=np.float64,
         )

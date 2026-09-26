@@ -801,3 +801,125 @@ def test_sigma_v_by_order_sets_each_lines_ou_prior_and_the_render_draw():
     base = ou_blocks(np.random.default_rng(9), (n_rot, k_max), n_b, sigma=1.0, rho=rho)
     got = ou_blocks(np.random.default_rng(9), (n_rot, k_max), n_b, sigma=per, rho=rho)
     np.testing.assert_allclose(got, base * per[None, :, None], rtol=1e-12, atol=0.0)
+
+
+def _wander_mean_fit(
+    *, k_cap: int, n_rotors: int, n_mics: int, floor_mean_db: float
+) -> dict[str, Any]:
+    """A v3 payload with every wander family live: ``d``, ``v`` in two order
+    groups of different sd, ``u`` and the kernel-mixed colour ``u_j``."""
+    from data_processing.noise_model import FIT_SCHEMA_V3
+
+    wander = MD.Wander.from_mapping(
+        dict(
+            sigma_d_db=1.0,
+            tau_d_s=2.0,
+            sigma_v_db=3.0,
+            tau_v_s=2.0,
+            sigma_u_db=1.5,
+            tau_u_s=2.0,
+            sigma_uj_db=1.0,
+            tau_uj_s=1.0,
+            block_s=0.5,
+            uj_corr_oct=1.5,
+            sigma_v_db_by_order=dict(k_edges=[1, 11, k_cap + 1], sigma_db=[2.0, 4.0]),
+        )
+    )
+    prof = np.linspace(-20.0, -30.0, k_cap)[None, :]
+    par = _params(k_cap=k_cap, n_mics=n_mics, profile_db=prof, floor_mean_db=floor_mean_db)
+    par = dataclasses.replace(par, floor=dataclasses.replace(par.floor, shape_sd_db=_t(3.0)))
+    p = MD.params_to_dict_v3(par, wander=wander)
+    fit: dict[str, Any] = dict(schema=FIT_SCHEMA_V3, params=p)
+    p["profile"]["profile_db"] = np.repeat(prof, n_rotors, axis=0).tolist()
+    p["gamma_hz"] = np.repeat(np.asarray(p["gamma_hz"]), n_rotors, axis=0).tolist()
+    return fit
+
+
+def test_zero_wander_mean_renders_byte_identically_to_the_renderer_before_the_option():
+    """``wander_mean="zero"`` (the default) is the renderer as it was before
+    the option existed: the sha256 of this render was taken with the
+    pre-option ``render.py``; ``"power"`` moves it."""
+    import hashlib
+
+    from experiments.noise_model import render as RD
+
+    fit = _wander_mean_fit(k_cap=12, n_rotors=2, n_mics=2, floor_mean_db=-45.0)
+    fit["params"]["profile"]["profile_db"] = fit["params"]["profile"]["profile_db"][:1]
+    fit["params"]["gamma_hz"] = fit["params"]["gamma_hz"][:1]
+    rps = np.stack([np.full(SR, 150.0), np.full(SR, 131.0)])
+    kw: dict[str, Any] = dict(sr=SR, n_mics=2, seed=4, sr_work=32000)
+    default = RD.render_noise(fit, rps, **kw)
+    zero = RD.render_noise(fit, rps, wander_mean="zero", **kw)
+    assert hashlib.sha256(default.tobytes()).hexdigest() == (
+        "925ec7687714371c0f15da4d54d2d70b7908071290dc5d5ab079f07ab7d375b0"
+    )
+    assert zero.tobytes() == default.tobytes()
+    assert not np.array_equal(RD.render_noise(fit, rps, wander_mean="power", **kw), zero)
+    with pytest.raises(ValueError, match="wander_mean"):
+        RD.render_noise(fit, rps, wander_mean="mean", **kw)  # type: ignore[call-overload]
+
+
+def test_power_wander_mean_renders_the_fitted_mean_line_power():
+    """``wander_mean="power"`` shifts every dB-Gaussian wander track by
+    ``-sigma^2 ln10 / 20`` (per order group for ``v``, ``diag(A A^T)`` for the
+    kernel-mixed ``u_j``) on the SAME draws, so a long render's mean line power
+    is the expected periodogram's (the model at zero latents), where the
+    zero-mean draw sits above it by ``exp((s ln10 / 10)^2 / 2)``.
+
+    Four rotors at 145-155 rev/s put orders 1-10 (``v`` sd 2 dB) below 1572 Hz
+    and orders 11-50 (4 dB) above; the floor is off. 20 s is ~10 wander
+    correlation times per line over 40 and 160 lines: the band means scatter
+    by ~0.15 dB over seeds, and the linear interpolation between block centres
+    leaves the 4 dB group ~0.14 dB low; 0.5 dB covers both."""
+    from data_processing.noise_model import spectrum as NSP
+    from experiments.noise_model import render as RD
+    from experiments.noise_model import supports as SU
+
+    k_cap, n_mics, dur, sr_work = 50, 1, 20.0, 32000
+    f0 = np.array([145.0, 148.3, 151.7, 155.0])
+    fit = _wander_mean_fit(k_cap=k_cap, n_rotors=f0.size, n_mics=n_mics, floor_mean_db=-300.0)
+    rps = np.repeat(f0[:, None], int(dur * SR), axis=1)
+    kw: dict[str, Any] = dict(sr=SR, n_mics=n_mics, seed=1, sr_work=sr_work)
+    zero, dz = RD.render_noise(fit, rps, return_diagnostics=True, **kw)
+    power, dp = RD.render_noise(fit, rps, wander_mean="power", return_diagnostics=True, **kw)
+
+    # the same draws, each track shifted by its own stationary variance
+    wander = MD.Wander.from_mapping(fit["params"]["wander"])
+    tz, tp = dz["wander_tracks"], dp["wander_tracks"]
+    c = math.log(10.0) / 20.0
+    sd_v = np.where(np.arange(1, k_cap + 1) < 11, 2.0, 4.0)
+    mix = wander.uj_mix(NSP.floor_ctrl_hz(SR))
+    assert mix is not None
+    np.testing.assert_allclose(tp["d"] - tz["d"], -c * 1.0**2, rtol=1e-12)
+    np.testing.assert_allclose(
+        tp["v"] - tz["v"], np.broadcast_to(-c * sd_v[None, :, None] ** 2, tz["v"].shape), rtol=1e-9
+    )
+    np.testing.assert_allclose(tp["u"] - tz["u"], -c * 1.5**2, rtol=1e-9)
+    uj_var = 1.0**2 * (mix @ mix.T).diagonal()
+    np.testing.assert_allclose(
+        tp["uj"] - tz["uj"], np.broadcast_to(-c * uj_var[:, None], tz["uj"].shape), rtol=1e-9
+    )
+
+    # constant carriers: one frame of the expected periodogram is every frame's
+    m = RD.expected_periodogram(
+        fit,
+        rps[:, : SU.OBS_N_FFT],
+        n_fft=SU.OBS_N_FFT,
+        hop=SU.OBS_HOP,
+        sr=SR,
+        n_mics=n_mics,
+        sr_work=sr_work,
+    )
+    split = int(1572.0 / SR * SU.OBS_N_FFT)
+    kk = math.log(10.0) / 10.0
+    for lo, hi, s_v in ((1, split, 2.0), (split, m.shape[-1], 4.0)):
+        want = float(m[..., lo:hi].sum(-1).mean())
+        got = {}
+        for mode, audio in (("zero", zero), ("power", power)):
+            s = SU.synthetic_support(mode, audio, rps, segment=(0.0, dur), meta={})
+            got[mode] = float(np.asarray(s.power)[..., lo:hi].sum(-1).mean())
+        assert abs(10.0 * np.log10(got["power"] / want)) < 0.5, (lo, hi, got, want)
+        # every line of the band carries the same d + v sd: the zero-mean draw
+        # is the same audio scaled by the lognormal excess
+        excess = math.exp(kk**2 * (1.0**2 + s_v**2) / 2.0)
+        np.testing.assert_allclose(got["zero"] / got["power"], excess, rtol=1e-3)

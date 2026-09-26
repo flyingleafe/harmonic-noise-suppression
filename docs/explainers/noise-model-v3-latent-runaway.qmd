@@ -1093,7 +1093,8 @@ Markdown("\n".join(rows))
 
 Same windows, same seed and same level rule as § Listen. § Listen plays
 round 3b. Here the round-2 fit and the legacy anchor fit of each rig are
-added.[^listen-legacy]
+added.[^listen-legacy] The last row is round 3b again, with its wander
+drawn so that it keeps the mean power.[^listen-mp]
 
 [^listen-legacy]: The legacy row is `noise_lab.LegacyFit` of the anchor
     the legacy banks were drawn around, the one of @fig-i2: DREGON
@@ -1106,6 +1107,27 @@ added.[^listen-legacy]
     --listen-add legacy` renders it into `figdata_r3b.json` beside the
     other clips.
 
+[^listen-mp]: The same round-3b payloads and the same seed, so the same random
+    draws. Only the draws' mean moves: `render_noise(...,
+    wander_mean="power")`. Each wander family multiplies a power by
+    $10^{x/10}$ with $x$ Gaussian in dB. By default $x$ has mean 0, so a
+    family of sd $\sigma$ raises the mean power by
+    $e^{(\sigma \ln 10 / 10)^2 / 2}$. The row draws $x$ with mean
+    $-\sigma^2 \ln 10 / 20$ dB instead, so $E[10^{x/10}] = 1$. All four
+    families were drawn zero-mean, so all four are shifted: the rotor line
+    level $d$, every line's $v$ at its own order group's $\sigma_v$
+    (`wander.sigma_v_db_by_order`), the floor level $u$, and every floor
+    colour point $u_j$ at $\sigma_{u_j}^2 (A A^\top)_{jj}$ ($u_j$ is drawn
+    as $A y$; the diagonal is 1). DREGON: $d$ −0.10 dB, $v$ 0 / 0 /
+    −1.02 / −1.76 / −5.93 dB for $k$ 1–2 / 3–8 / 9–24 / 25–60 / ≥ 61,
+    $u$ −0.92 dB, $u_j$ −0.27 dB. Michael's: $d$ −0.03 dB, $v$ −0.01 /
+    −2.00 / −1.66 / −1.50 / −3.72 dB, $u$ −0.35 dB, $u_j$ −0.31 dB. The
+    renderer interpolates in dB between block centres, and there the
+    variance is smaller, so the mean power sits a little below the fit
+    between centres. `scripts/noise_v3_latent_runaway_figs.py --round r3b
+    --listen-add v3_r3b_mp` renders the row.
+    <!-- source: fits_r3b/{dregon_room2_floor,michaels_fly125_cruise}__flight_v3.json params.wander: sigma_d_db 0.942 / 0.525, sigma_u_db 2.831 / 1.732, sigma_uj_db 1.520 / 1.634, uj_corr_oct 1.5, sigma_v_db_by_order.sigma_db [0, 0, 2.977, 3.905, 7.177] / [0.321, 4.171, 3.794, 3.607, 5.685]; shift = -sigma^2 ln10/20; diag(A A^T) = 1 + 1e-6; src/data_processing/noise_model/render.py WANDER MEAN -->
+
 ```{python}
 R3_LABELS = {
     "real": "real recording",
@@ -1113,12 +1135,13 @@ R3_LABELS = {
     "v2": "v2 fit",
     "v3": "v3 round-2 fit",
     "v3_r3b": "v3 round-3b fit",
+    "v3_r3b_mp": "v3 round-3b fit, mean-preserving wander",
 }
 ```
 
 ### DREGON
 
-![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the legacy DREGON anchor fit (`dregon_cruise_refined`, donor dynamics), the v2 fit, the round-2 and the round-3b v3 fits, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon_r3b.png){#fig-j3}
+![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the legacy DREGON anchor fit (`dregon_cruise_refined`, donor dynamics), the v2 fit, the round-2 and the round-3b v3 fits, and the round-3b fit again with mean-preserving wander ($d$, $v$, $u$, $u_j$ all drawn at mean $-\sigma^2 \ln 10 / 20$ dB), all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon_r3b.png){#fig-j3}
 
 ```{python}
 listen_players(F3["r3b"], "dregon", R3_LABELS)
@@ -1127,6 +1150,7 @@ listen_players(F3["r3b"], "dregon", R3_LABELS)
 Legacy DREGON lines stand tallest: $k = 1$ 14.9 dB, $k = 2$ 7.9 dB, real
 4.4 and 2.9 dB. Legacy is also too quiet everywhere, 2.3–6.5 dB low in
 every band, so its LTAS distance, 4.3 dB, is the worst of the four fits.
+Only the mean-preserving row below is further off (5.4 dB).
 <!-- source: figdata_r3b.json listen.rigs.dregon.clips.legacy.line_over_floor_db[0:2] 14.9249, 7.9041; clips.real 4.4401, 2.8916; clips.legacy.ltas_mean_abs_db 4.2702, ltas_dev_db [-2.64, -2.32, -3.22, -5.05, -6.51, -5.87]; v2 0.518, v3 2.160, v3_r3b 3.610 -->
 
 - The lone line near 2.2 kHz is gone.
@@ -1138,10 +1162,17 @@ every band, so its LTAS distance, 4.3 dB, is the worst of the four fits.
 - Round 2 rendered 1.9–2.3 dB louder than its own windows above 1.5 kHz.
   That bias pointed the right way here. Round 3 removed it.
   <!-- source: figdata_r3b.json listen.rigs.dregon.clips.v3_r3b.ltas_mean_abs_db 3.610, ltas_dev_db [-0.50, -3.83, -5.88, -4.43, -4.92, -2.10]; clips.v3 2.160, [-0.86, -3.27, -4.81, -1.52, -1.07, -1.44]; figdata_r3a.json clips.v3_r3a 3.888; results/noise_v3/diag/ltas_gap_dregon.md §1 "r2, for the record": render-exp. mic mean +2.1 / +1.9 / +2.3 dB above 1.5 kHz on its own windows -->
+- Mean-preserving wander makes DREGON worse. The LTAS distance goes from
+  3.6 dB to 5.4 dB. Per band, 100 Hz to 7 kHz, round 3b is −0.5, −3.8,
+  −5.9, −4.4, −4.9, −2.1 dB; mean-preserving is −0.4, −4.2, −6.9, −5.9,
+  −6.9, −7.7 dB. The 5–7 kHz band drops from −2.1 to −7.7 dB. Orders
+  ≥ 61 lose 5.9 dB there. $k = 1$ and $k = 2$ do not move (4.6 and
+  4.9 dB): their $\sigma_v$ is 0.
+  <!-- source: figdata_r3b.json listen.rigs.dregon.clips.v3_r3b.ltas_dev_db [-0.5019, -3.8337, -5.8766, -4.4298, -4.9238, -2.0961], ltas_mean_abs_db 3.6103, line_over_floor_db[0:2] 4.6247, 4.9479; clips.v3_r3b_mp.ltas_dev_db [-0.4235, -4.2236, -6.9293, -5.9468, -6.9189, -7.746], ltas_mean_abs_db 5.3647, line_over_floor_db[0:2] 4.5893, 4.9093; ltas_bands_hz [[100,300],[300,700],[700,1500],[1500,3000],[3000,5000],[5000,7000]]; v k>=61 shift -5.93 dB ([^listen-mp]) -->
 
 ### Michael's
 
-![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3; the legacy row is the Michael's anchor fit (`michael_cruise`, donor dynamics).](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
+![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3; the legacy row is the Michael's anchor fit (`michael_cruise`, donor dynamics), the last row the round-3b fit with mean-preserving wander.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
 
 ```{python}
 listen_players(F3["r3b"], "michaels", R3_LABELS)
@@ -1157,6 +1188,12 @@ LTAS distance, 2.1 dB, ties round 3b (2.0 dB).
 - At 5–7 kHz it is still 7.6 dB too loud. v2 is 3.4 dB too loud there.
 - $k = 2$ matches: 18.1 dB against 18.7 dB real.
   <!-- source: figdata_r3b.json listen.rigs.michaels.clips.v3_r3b.ltas_mean_abs_db 2.047, ltas_dev_db [-0.97, -0.98, -0.38, 0.21, 2.18, 7.55], line_over_floor_db[1] 18.14; clips.real line_over_floor_db[1] 18.68; clips.v2 ltas_dev_db[5] 3.44 -->
+- Mean-preserving wander helps Michael's a little. The LTAS distance goes
+  from 2.05 dB to 2.00 dB. Per band, 100 Hz to 7 kHz, round 3b is −1.0,
+  −1.0, −0.4, +0.2, +2.2, +7.6 dB; mean-preserving is −1.1, −2.2, −1.3,
+  −0.6, +1.2, +5.6 dB. At 5–7 kHz it is 5.6 dB too loud instead of
+  7.6 dB. The low bands lose about 1 dB. $k = 2$ stays at 18.1 dB.
+  <!-- source: figdata_r3b.json listen.rigs.michaels.clips.v3_r3b.ltas_dev_db [-0.9724, -0.9844, -0.3826, 0.2144, 2.1764, 7.5529], ltas_mean_abs_db 2.0472, line_over_floor_db[0:2] 0.8973, 18.1401; clips.v3_r3b_mp.ltas_dev_db [-1.1354, -2.1911, -1.2713, -0.635, 1.1591, 5.6311], ltas_mean_abs_db 2.0038, line_over_floor_db[0:2] 1.4942, 18.1488 -->
 
 ## The checks
 
