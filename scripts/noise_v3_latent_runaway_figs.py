@@ -337,14 +337,17 @@ def tracks(fits: dict[str, dict[str, Any]], ctrl_hz: np.ndarray) -> dict[str, An
 # ── forward-model evaluations ──────────────────────────────────────────────
 
 
-def pool_batch(fit: dict[str, Any], *, v3: bool) -> Any:
-    """The fit's pool exactly as the CLI built it (``v3``: channel-normalised,
-    the v3 work rate; else the v2 fit's unnormalised build)."""
+def pool_batch(fit: dict[str, Any], *, v3: bool, set_name: str = "dregon-floor") -> Any:
+    """The fit's pool exactly as the CLI built it from support set ``set_name``
+    (``v3``: channel-normalised on the fit's rig, the v3 work rate; else the v2
+    fit's unnormalised build)."""
     from experiments.noise_model import fit as FT
     from experiments.noise_model import model as MD
     from experiments.noise_model import supports as SUP
 
-    specs = {s.name: s for s in SUP.support_set("dregon-floor")}
+    name = str(fit["support"])
+    rig = "dregon" if name.startswith("dregon") else "michaels"
+    specs = {s.name: s for s in SUP.support_set(set_name)}
     members = []
     sups = [SUP.load_support(specs[n]) for n in fit["supports"]]
     for s in sups:
@@ -357,14 +360,14 @@ def pool_batch(fit: dict[str, Any], *, v3: bool) -> Any:
             )
         )
     batch = MD.flight_batch(
-        name=POOL,
+        name=name,
         members=members,
         sr=int(sups[0].sr),
         n_fft=int(sups[0].n_fft),
         hop=int(sups[0].hop),
         k_cap=K_CAP,
         frame_stride=FRAME_STRIDE,
-        channel_gains=FT.load_channel_gains(CHANNEL_GAINS, rig="dregon") if v3 else None,
+        channel_gains=FT.load_channel_gains(CHANNEL_GAINS, rig=rig) if v3 else None,
         device="cpu",
         chunk_frames=CHUNK_FRAMES,
         sr_work=V3_SR_WORK if v3 else V2_SR_WORK,
