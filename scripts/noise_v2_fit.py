@@ -218,6 +218,7 @@ def worker(unit: Unit) -> dict[str, Any]:
                 refit_adam_steps=int(p.get("refit_adam_steps", 0)),
                 latent_lbfgs_iters=int(p.get("latent_iters", 100)),
                 latent_dtype=str(p.get("latent_dtype", "float64")),
+                ridge_step=bool(p.get("ridge_step", False)),
             ),
             profile_init=prof_init,
             progress=int(p.get("progress", 0)),
@@ -1140,6 +1141,13 @@ def main(argv: list[str] | None = None) -> int:
                 help="flight_v3: L-BFGS iterations of each window's latent step",
             )
             p.add_argument(
+                "--ridge-step",
+                action="store_true",
+                help="flight_v3: after each latent step (and after the last rig step) move the "
+                "latents' static part into the rig at the exact prior minimum along the "
+                "Whittle-invariant directions (fit.static_ridge_step)",
+            )
+            p.add_argument(
                 "--refit-adam-steps",
                 type=int,
                 default=0,
@@ -1402,6 +1410,7 @@ def main(argv: list[str] | None = None) -> int:
                                 latent_iters=int(args.latent_iters),
                                 refit_adam_steps=int(args.refit_adam_steps),
                                 latent_dtype=str(args.latent_dtype),
+                                ridge_step=bool(args.ridge_step),
                                 init_from=args.init_from,
                             )
                             if v3

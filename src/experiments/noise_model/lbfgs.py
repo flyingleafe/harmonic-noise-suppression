@@ -38,6 +38,9 @@ class LBFGS(torch.optim.LBFGS):
         self.rtol = rtol
         #: iterations the last :meth:`step` ran
         self.n_iter = 0
+        #: the objective after each accepted iteration of the last :meth:`step`
+        #: (its first entry the starting value): where a stop fired, and why
+        self.trace: list[float] = []
 
     @torch.no_grad()
     def step(self, closure: Any) -> Any:  # noqa: C901 (torch's own control flow)
@@ -67,6 +70,7 @@ class LBFGS(torch.optim.LBFGS):
         current_evals = 1
         state["func_evals"] += 1
         self.n_iter = 0
+        self.trace = [loss]
 
         flat_grad = self._gather_flat_grad()
         opt_cond = flat_grad.abs().max() <= tolerance_grad
@@ -200,6 +204,7 @@ class LBFGS(torch.optim.LBFGS):
             # update func eval
             current_evals += ls_func_evals
             state["func_evals"] += ls_func_evals
+            self.trace.append(float(loss))
 
             ############################################################
             # check conditions

@@ -274,6 +274,10 @@ class OptimSpecV3:
     latent_lbfgs_history: int = 10
     latent_dtype: str = "float64"
     tol_nats_per_cell: float = 1e-4
+    #: after each latent step (and once after the last rig step) move the
+    #: static part of the latents into the rig by :func:`static_ridge_step`,
+    #: the exact prior minimum along the Whittle-invariant directions
+    ridge_step: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return dict(
@@ -285,8 +289,10 @@ class OptimSpecV3:
             latent_line_search="strong_wolfe",
             latent_dtype=self.latent_dtype,
             tol_nats_per_cell=self.tol_nats_per_cell,
+            ridge_step=self.ridge_step,
             scheme="(i) rig, latents at zero; then per round (ii) each window's latents, rig "
-            "fixed, (iii) rig, latents fixed; stop when the Whittle term moves < tol per cell; "
+            "fixed, [ridge step,] (iii) rig, latents fixed; stop when the Whittle term and the "
+            "total objective move < tol per cell; "
             "a rig L-BFGS on a frame subset ends in one all-frames rig L-BFGS polish",
         )
 
@@ -1425,9 +1431,12 @@ def fit_support(
         loss.backward()
         return loss
 
+    traces: list[list[float]] = []
+
     def run_lbfgs(max_iter: int) -> tuple[float, int, int]:
         """One L-BFGS pass; returns its final loss, its evaluation count and
-        the iterations it ran (``max_iter`` unless a tolerance stopped it)."""
+        the iterations it ran (``max_iter`` unless a tolerance stopped it).
+        Its per-iteration objective goes to ``traces``."""
         opt = LBFGS(
             params,
             rtol=optim.lbfgs_rtol,
@@ -1448,6 +1457,7 @@ def fit_support(
             return loss
 
         opt.step(closure)
+        traces.append(list(opt.trace))
         # L-BFGS leaves the parameters at its own accepted point, which the
         # closure never saw
         box()
@@ -1504,6 +1514,8 @@ def fit_support(
             lbfgs_restart_evals=int(restart_evals),
             lbfgs_iters_used=int(iters),
             lbfgs_restart_iters_used=int(restart_iters),
+            lbfgs_trace_first_pass=traces[0],
+            lbfgs_trace_restart=traces[1],
             log_box_hits=int(sum(int((p.detach().abs() >= LOG_BOX - 1e-9).sum()) for p in boxed)),
             lbfgs_wall_s=lbfgs_s,
             lbfgs_frames_used=int(polish.power.shape[1]),
@@ -1647,6 +1659,187 @@ def fit_latents(
     )
 
 
+def _priors_nats(
+    batch: MD.SupportBatch,
+    sites: dict[str, Tensor],
+    latents: dict[int, MD.WindowLatents],
+    *,
+    priors: MD.PriorsV3,
+    pin: dict[str, Any] | None,
+) -> float:
+    """Rig ``-log prior`` at ``sites`` plus the OU ``-log prior`` of ``latents``."""
+    assert priors.wander is not None
+    rig = -MD.log_prior(
+        replace(batch, latents=latents), mode=MD.V3_MODE, values=sites, priors=priors, pin=pin
+    )
+    return rig + MD.ou_prior_nats(latents, priors.wander)
+
+
+def _ou_shift_coeffs(
+    x: np.ndarray, sigma: np.ndarray, rho: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(g, h)`` per track of the stationary OU quadratic under a constant
+    shift: ``Q(x - c) = Q(x) - c g + c^2 h / 2`` (last axis = blocks).
+
+    ``Q`` is quadratic, so three evaluations give ``g`` and ``h`` exactly;
+    a track with ``sigma`` 0 (pinned) gives zeros."""
+
+    def q(y: np.ndarray) -> np.ndarray:
+        s = np.broadcast_to(sigma, y.shape[:-1])
+        r = np.broadcast_to(rho, y.shape[:-1])
+        innov = y[..., 1:] - r[..., None] * y[..., :-1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            out = 0.5 * (y[..., 0] ** 2 / s**2 + (innov**2).sum(axis=-1) / (s**2 * (1.0 - r**2)))
+        return np.where(s > 0.0, out, 0.0)
+
+    q0, qp, qm = q(x), q(x - 1.0), q(x + 1.0)
+    return 0.5 * (qm - qp), qp + qm - 2.0 * q0
+
+
+def static_ridge_step(
+    sites: dict[str, Tensor],
+    latents: dict[int, MD.WindowLatents],
+    *,
+    wander: MD.Wander,
+    measured: MD.Measured,
+    priors: MD.PriorsV3,
+    shape_chol: Tensor,
+    families: Sequence[str] = ("d", "v", "u", "uj"),
+) -> tuple[dict[str, Tensor], dict[int, MD.WindowLatents], dict[str, Any]]:
+    """The EXACT minimum of the priors along the Whittle-invariant ridge.
+
+    A constant shift ``c`` of one latent track over every window and block,
+    with ``-c`` put into the rig parameter the track multiplies, leaves every
+    block's expected periodogram unchanged: ``profile_db[r, k] + d_r + v_rk``
+    for the lines, ``sigma_B L z + u + u_j`` at the floor's control points
+    (the latents' floor basis is the spline's own interpolation, whose rows
+    sum to one). The Whittle term cannot see these moves, so neither step of
+    the alternation makes them: the latent step only feels the OU prior's
+    weak pull on a static offset, and the rig step with the latents fixed has
+    no gradient along them at all. This step makes them in closed form. Every
+    prior involved is Gaussian — the profile ``N(p_hat, sd)``, the floor
+    ``z ~ N(0, I)`` and each stationary OU (quadratic in a constant shift) —
+    so the minimum is one small linear solve per rotor for the lines
+    (``d_r`` shifts rotor ``r``'s whole profile, ``v_rk`` one line) and one
+    ``(J + 1)`` solve for the floor (``u`` shifts every control value,
+    ``u_j`` one). Tracks the wander pins (``sigma`` 0) never move. No
+    parameter is added; ``families`` restricts the move.
+
+    Returns the moved sites, the moved latents and a record of the shifts and
+    of each prior's change (nats).
+    """
+    windows = sorted(latents)
+    fam = set(families)
+
+    def arr(t: Tensor | None) -> np.ndarray | None:
+        return None if t is None else t.detach().cpu().numpy().astype(np.float64)
+
+    prof = arr(sites["profile_db"])
+    z = arr(sites["floor_shape_z"])
+    assert prof is not None and z is not None
+    n_r, n_k = prof.shape
+    loc, scale = measured.profile_prior(priors)
+    p_hat = loc.detach().cpu().numpy()[:n_r, :n_k]
+    s2 = scale.detach().cpu().numpy()[:n_r, :n_k] ** 2
+    lat = {w: {n: arr(t) for n, t in latents[w].tracks().items()} for w in windows}
+
+    def coeffs(name: str, shape: tuple[int, ...]) -> tuple[np.ndarray, np.ndarray]:
+        """``(g, h)`` summed over the windows, per track of ``name``."""
+        g, h = np.zeros(shape), np.zeros(shape)
+        if name not in fam or not wander.active(name):
+            return g, h
+        sig: Any = wander.track_sigma(name, n_k)
+        rho: Any = wander.track_rho(name, n_k)
+        if name == "v":
+            sig = np.broadcast_to(np.asarray(sig, dtype=np.float64), (n_k,))[None, :]
+            rho = np.broadcast_to(np.asarray(rho, dtype=np.float64), (n_k,))[None, :]
+        for w in windows:
+            x = lat[w].get(name)
+            if x is None:
+                continue
+            if name == "v":
+                x = x[:, :n_k]
+            gw, hw = _ou_shift_coeffs(
+                x, np.asarray(sig, dtype=np.float64), np.asarray(rho, dtype=np.float64)
+            )
+            g, h = g + gw, h + hw
+        return g, h
+
+    # ── lines: per rotor, delta_r (d) and eps_rk (v) ───────────────────────
+    g_d, h_d = coeffs("d", (n_r,))
+    g_v, h_v = coeffs("v", (n_r, n_k))
+    live_v = h_v > 0.0
+    e = prof - p_hat
+    den = 1.0 / s2 + h_v
+    a = np.where(live_v, (g_v - e / s2) / den, 0.0)
+    b = np.where(live_v, (1.0 / s2) / den, 0.0)
+    delta = np.zeros(n_r)
+    if np.any(h_d > 0.0):
+        num = g_d - ((e + a) / s2).sum(axis=1)
+        cur = ((1.0 - b) / s2).sum(axis=1) + h_d
+        delta = np.where(h_d > 0.0, num / cur, 0.0)
+    eps = np.where(live_v, a - b * delta[:, None], 0.0)
+    shift_line = delta[:, None] + eps
+
+    # ── floor: w = (delta_u, eps_j); ctrl shift delta_u 1 + eps ───────────
+    sb = float(measured.floor_shape_sd_db or 1.0)
+    chol = shape_chol.detach().cpu().numpy().astype(np.float64)
+    n_j = chol.shape[0]
+    g_u, h_u = coeffs("u", ())
+    g_j, h_j = coeffs("uj", (n_j,))
+    use = np.concatenate([[float(h_u) > 0.0], h_j > 0.0])
+    w_shift = np.zeros(n_j + 1)
+    if np.any(use):
+        amat = np.linalg.solve(sb * chol, np.eye(n_j))  # (sigma_B L)^-1
+        m_full = np.concatenate([amat @ np.ones(n_j)[:, None], amat], axis=1)[:, use]
+        g_full = np.concatenate([[float(g_u)], g_j])[use]
+        h_full = np.concatenate([[float(h_u)], h_j])[use]
+        lhs = m_full.T @ m_full + np.diag(h_full)
+        w_shift[use] = np.linalg.solve(lhs, g_full - m_full.T @ z)
+        z_new = z + m_full @ w_shift[use]
+    else:
+        z_new = z.copy()
+    d_u, eps_j = float(w_shift[0]), w_shift[1:]
+
+    # ── apply ──────────────────────────────────────────────────────────────
+    dev = sites["profile_db"].device
+
+    def t(x: np.ndarray) -> Tensor:
+        return torch.as_tensor(np.ascontiguousarray(x), dtype=torch.float64, device=dev)
+
+    new_sites = dict(sites)
+    new_sites["profile_db"] = t(prof + shift_line)
+    new_sites["floor_shape_z"] = t(z_new)
+    new_lat: dict[int, MD.WindowLatents] = {}
+    for w in windows:
+        old = latents[w]
+        new_lat[w] = MD.WindowLatents(
+            d=None if old.d is None else old.d - t(delta)[:, None],
+            v=None
+            if old.v is None
+            else torch.cat([old.v[:, :n_k] - t(eps)[..., None], old.v[:, n_k:]], dim=1),
+            u=None if old.u is None else old.u - d_u,
+            uj=None if old.uj is None else old.uj - t(eps_j)[:, None],
+        )
+    prof_nats = float((((prof + shift_line - p_hat) ** 2 - e**2) / (2.0 * s2)).sum())
+    z_nats = 0.5 * float(z_new @ z_new - z @ z)
+    ou_before = MD.ou_prior_nats(latents, wander)
+    ou_after = MD.ou_prior_nats(new_lat, wander)
+    record = dict(
+        families=sorted(fam),
+        shift_d_db=delta.tolist(),
+        shift_v_rms_db=float(np.sqrt((eps[live_v] ** 2).mean())) if live_v.any() else 0.0,
+        shift_u_db=d_u,
+        shift_uj_db=eps_j.tolist(),
+        profile_prior_change_nats=prof_nats,
+        z_prior_change_nats=z_nats,
+        ou_prior_change_nats=ou_after - ou_before,
+        total_prior_change_nats=prof_nats + z_nats + ou_after - ou_before,
+        z_norm=[float(np.linalg.norm(z)), float(np.linalg.norm(z_new))],
+    )
+    return new_sites, new_lat, record
+
+
 def _rig_timing(opt: dict[str, Any]) -> dict[str, float | None]:
     """Per-step costs of one rig fit, from its optimiser record: seconds per
     Adam step and per L-BFGS evaluation (forward + gradient, every chunk), and
@@ -1685,10 +1878,14 @@ def fit_v3(
           problem over a ``windows`` plate);
     (iii) the rig with the latents fixed, warm-started from (i)/(iii);
 
-    repeating (ii)-(iii) until the Whittle term moves by less than
-    ``optim.tol_nats_per_cell`` per cell, or ``optim.rounds`` rounds. The
-    wander's ``(sigma, tau)`` never move, so this converges to the joint MAP
-    over rig and latents without the variance cheat of §3.3a.
+    repeating (ii)-(iii) until the Whittle term and the total objective move by
+    less than ``optim.tol_nats_per_cell`` per cell, or ``optim.rounds``
+    rounds. The wander's ``(sigma, tau)`` never move, so this converges to the
+    joint MAP over rig and latents without the variance cheat of §3.3a.
+    ``optim.ridge_step`` inserts :func:`static_ridge_step` between (ii) and
+    (iii), and once after the last rig step: neither step can move a static
+    offset between the latents and the rig (the Whittle term is flat along
+    it), so without it the static part stays wherever round 1 put it.
     A rig L-BFGS on a frame subset (``optim.rig.lbfgs_frames``) is followed,
     after the last round, by ONE all-frames polish of the rig at the final
     latents; what it gains over the subset optimum is ``optimiser.polish``.
@@ -1761,8 +1958,10 @@ def fit_v3(
     }
     latent_fit: dict[str, Any] | None = None
     prev = float(rig.objective["whittle_nats"])
+    prev_total = prev + _priors_nats(measured_batch, rig.sites, latents, priors=priors, pin=pin)
     alternation_converged = int(optim.rounds) == 0
     refit = replace(optim.rig, adam_steps=int(optim.refit_adam_steps), init_jitter=0.0)
+    shape_chol = blocked.grid.floor.shape_chol
     for rnd in range(1, int(optim.rounds) + 1):
         t_round = time.time()
         fixed = MD.detach_params(rig.params)
@@ -1777,6 +1976,17 @@ def fit_v3(
         )
         t_latent = time.time() - t_round
         latent_peak = _peak_mb(dev, reset=True)
+        rig_start = dict(rig.sites)
+        ridge: dict[str, Any] | None = None
+        if optim.ridge_step:
+            rig_start, latents, ridge = static_ridge_step(
+                rig_start,
+                latents,
+                wander=wander,
+                measured=start.measured,
+                priors=priors,
+                shape_chol=shape_chol,
+            )
         rig = fit_support(
             replace(blocked, latents=latents),
             mode=mode,
@@ -1786,16 +1996,22 @@ def fit_v3(
             forward_kw=rig_kw,
             profile_init=profile_init,
             progress=progress,
-            start=Seeds(measured=start.measured, init=dict(rig.sites)),
+            start=Seeds(measured=start.measured, init=rig_start),
         )
         now = float(rig.objective["whittle_nats"])
-        move = abs(prev - now) / n_cells
+        now_total = now + _priors_nats(measured_batch, rig.sites, latents, priors=priors, pin=pin)
+        # the move of the Whittle term AND of the total objective: a ridge
+        # step moves the priors at a fixed Whittle term
+        move = max(abs(prev - now), abs(prev_total - now_total)) / n_cells
         history.append(
             dict(
                 round=rnd,
                 step="(ii) latents, rig fixed; (iii) rig, latents fixed",
                 whittle_nats=now,
-                whittle_move_per_cell=move,
+                total_nats=now_total,
+                whittle_move_per_cell=abs(prev - now) / n_cells,
+                move_per_cell=move,
+                ridge=ridge,
                 rig_converged=rig.converged,
                 latent_wall_s=t_latent,
                 latent_evals=latent_fit.get("evals"),
@@ -1809,7 +2025,7 @@ def fit_v3(
         )
         if progress:
             print(f"  v3 round {rnd}: whittle {now:.6g}  move/cell {move:.3g}", flush=True)
-        prev = now
+        prev, prev_total = now, now_total
         if move < float(optim.tol_nats_per_cell):
             alternation_converged = True
             break
@@ -1858,6 +2074,29 @@ def fit_v3(
                 flush=True,
             )
 
+    final_ridge: dict[str, Any] | None = None
+    if optim.ridge_step:
+        # the last rig step leaves a static part in the latents it could not
+        # see: fold it out exactly, so the recorded rig carries it (a render
+        # draws zero-mean latents)
+        sites_f, latents, final_ridge = static_ridge_step(
+            dict(rig.sites),
+            latents,
+            wander=wander,
+            measured=start.measured,
+            priors=priors,
+            shape_chol=shape_chol,
+        )
+        params_f = MD.sample_params_from_values(
+            measured_batch, mode=mode, priors=priors, pin=pin, values=sites_f
+        )
+        with torch.no_grad():
+            objective_f = MD.objective_breakdown(
+                replace(blocked, latents=latents),
+                MD.forward(replace(blocked, latents=latents), params_f, **rig_kw),
+            )
+        rig = replace(rig, params=params_f, sites=sites_f, objective=objective_f)
+
     final = replace(measured_batch, latents=latents)
     whittle = float(rig.objective["whittle_nats"])
     rig_nlp = -MD.log_prior(final, mode=mode, values=rig.sites, priors=priors, pin=pin)
@@ -1883,6 +2122,7 @@ def fit_v3(
         first_rig=first_rig.optimiser,
         last_rig=rig.optimiser,
         polish=polish,
+        final_ridge=final_ridge,
         device=str(dev),
         chunk_frames=batch.chunk_frames,
         line_kernel="unit_autocorr",
