@@ -1,0 +1,139 @@
+## Candidate 2: the hard trajectory
+
+Each stream draws one rotor track per window.
+The track is the trajectory.
+The legacy arms and the v2 arms use different trajectory samplers.
+
+- **Legacy easy and legacy hard share one sampler.**
+  Both fly `full_flight`, aggressiveness 1.0.
+  Both scale each window by a log-uniform draw in [0.45, 1.2].
+  The two policies differ in the bank line only.
+- **v2, v3 and v3r3 share one sampler per preset.**
+  Their policies differ in the bank line only.
+  Every bank of a preset has the same `traj_rig` split.
+  Easy: 1024 DREGON and 1024 Michael's entries.
+  Hard: 2048 entries with no `traj_rig`.
+  So "v2 hard" below is also v3 hard and v3r3 hard.
+- **v2 easy** flies each entry on its own rig's fitted trajectory.
+  It keeps the legacy scale draw in [0.45, 1.2].
+- **v2 hard** flies the rig hyperprior.
+  It rejects flights above 150 rev/s.
+  It has no scale draw.
+
+We draw 512 windows per arm.
+A window is 2 s, the training clip length.
+The arm's own pool draws it, as in training.
+One change: every window gets a fresh flight.
+That keeps the law of one window.
+It only drops the flight that 32 windows share.
+
+Two references:
+
+- **Real valid.** The 37 real clips of the validation, 8 s each.
+  Each clip is cut into four 2 s windows: 148 windows.
+  88 are DREGON, 60 are Michael's.
+- **Synthetic valid.** The trajectory recipe of the static and stochastic validation parts.
+  Both parts use the same recipe.
+  Half `full_flight`, half `synthetic_intermittent`, scale in [0.45, 1.2].
+
+The statistics, per window, on a 100 Hz grid:
+
+- **Range.** Max minus min, over all rotors and all time.
+- **Std over time.** The std of the rotor-mean track.
+- **Per-rotor std.** Each rotor's std over time, averaged over rotors.
+- **Rotor separation.** $|f_i - f_j|$, averaged over the 6 pairs and time.
+- **$|df/dt|$.** Taken on 0.1 s block means, all rotors pooled.
+  We report its median and 95th percentile per window.
+- **Low / high share.** The share of rotor-time below 40 or above 90 rev/s.
+
+![**What you see:** the ECDF over windows of six statistics. Blue: legacy. Red: v2 (= v3 = v3r3). Dashed: easy. Solid: hard. Grey dotted: synthetic valid. Black: real valid.](noise-model-v3-latent-runaway/traj_ecdf.png){#fig-traj-ecdf}
+
+```{python}
+#| label: tbl-traj-stats
+#| tbl-cap: "Per-window statistics: median [25th, 75th percentile]. The two share rows are means over windows. rev/s unless marked. Source: `traj_stats.json` `summary`."
+TS = json.loads(Path("noise-model-v3-latent-runaway/traj_stats.json").read_text())
+_cols = ["legacy_easy", "legacy_hard", "v2_easy", "v2_hard", "synth_valid", "real"]
+_rows = [
+    ("mean", "mean speed", 1),
+    ("range", "range", 1),
+    ("std_time", "std over time", 2),
+    ("std_rotor", "per-rotor std", 2),
+    ("sep_mean", "rotor separation, mean", 1),
+    ("sep_max", "rotor separation, max", 1),
+    ("rate_med", "$|df/dt|$ median, rev/s²", 1),
+    ("rate_p95", "$|df/dt|$ 95th pct, rev/s²", 1),
+]
+_head = "| statistic | " + " | ".join(TS["labels"][c] for c in _cols) + " |"
+_lines = [_head, "|---|" + "---:|" * len(_cols)]
+for key, name, nd in _rows:
+    cells = []
+    for c in _cols:
+        s = TS["summary"][c][key]
+        cells.append(f"{f(s['median'], nd)} [{f(s['q1'], nd)}, {f(s['q3'], nd)}]")
+    _lines.append(f"| {name} | " + " | ".join(cells) + " |")
+for key, name in (("frac_low", "share below 40 rev/s"), ("frac_high", "share above 90 rev/s")):
+    cells = [pct(TS["summary"][c][key]["mean"]) for c in _cols]
+    _lines.append(f"| {name} | " + " | ".join(cells) + " |")
+Markdown("\n".join(_lines))
+```
+
+```{python}
+#| label: tbl-traj-ks
+#| tbl-cap: "Distance of each arm's window distribution to real valid: the Kolmogorov–Smirnov statistic, 0 = same, 1 = disjoint. Source: `traj_stats.json` `ks_to_real`."
+_ks_rows = [
+    ("mean", "mean speed"),
+    ("range", "range"),
+    ("std_time", "std over time"),
+    ("sep_mean", "rotor separation, mean"),
+    ("rate_med", "$|df/dt|$ median"),
+    ("rate_p95", "$|df/dt|$ 95th pct"),
+    ("frac_high", "share above 90 rev/s"),
+]
+_kc = ["legacy_easy", "legacy_hard", "v2_easy", "v2_hard", "synth_valid"]
+_lines = ["| statistic | " + " | ".join(TS["labels"][c] for c in _kc) + " |", "|---|" + "---:|" * len(_kc)]
+for key, name in _ks_rows:
+    _lines.append(f"| {name} | " + " | ".join(f(TS["ks_to_real"][c][key]) for c in _kc) + " |")
+Markdown("\n".join(_lines))
+```
+
+What the table shows:
+
+- v2 hard moves fast.
+  Its $|df/dt|$ median is 15 rev/s².
+  Real valid: 3.5 rev/s².
+- v2 hard spreads wide.
+  Its range is 33 rev/s, twice real valid.
+  Its std over time is 1.9 rev/s, real valid 0.42.
+- v2 hard flies high.
+  30 % of its rotor-time is above 90 rev/s.
+  Real valid: 5 %.
+- v2 hard matches real valid on rotor separation: 8.9 against 7.4 rev/s.
+- Legacy moves slowly.
+  Its $|df/dt|$ median is 1.3–1.5 rev/s², under half of real valid.
+  Its rotors sit close: separation 3.5 rev/s, half of real valid.
+  Its mean speed is 47 rev/s. Real valid cruises at 80.
+- Legacy flies half of the synthetic valid recipe.
+  Synthetic valid is `full_flight` plus `synthetic_intermittent`.
+  Legacy trains on that `full_flight` half.
+- v2 easy sits between legacy and v2 hard.
+  It is the nearest to real valid on range and on $|df/dt|$.
+- One oddity per sampler.
+  About 18 % of v2 windows are flat: the fitted warm-up idle.
+  About 24 % of legacy windows have four equal rotors near 23 rev/s.
+  About 12 % of real valid windows are on the ground, all zero.
+
+A caveat on real valid.
+Its $|df/dt|$ holds telemetry jitter.
+So real motion is at most that fast.
+The excess of v2 hard is then a lower bound.
+
+### Verdict on candidate 2
+
+The v2 hard trajectory is too wild: 4× faster than real.
+Legacy hard is calmer than real valid, not closer to it.
+Legacy hard beats legacy easy on one sampler: the bank decides.
+Of the four arms, v2 easy moves most like real valid.
+Yet v2 easy scores 7.94 rev/s, legacy easy 6.09.[^traj-mae]
+So candidate 2 is true, but it does not explain the gap.
+
+[^traj-mae]: Real MAE, raw at the selected round (`real_r3`). Source: `docs/experiments/noise-model-v3.md` § Results.
