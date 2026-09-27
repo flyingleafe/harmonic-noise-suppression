@@ -667,8 +667,21 @@ def strip_payload(fit: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def pin_speed_laws(fit: dict[str, Any]) -> dict[str, Any]:
-    """``fit`` with the three speed-law quantities pinned to :data:`SPAN_PIN`.
+#: The v2 pin's rule, recorded on every pinned entry.
+SPAN_PIN_RULE = (
+    "the v2 short-span contract: a cruise-only pool cannot identify the speed laws, "
+    "so they are the model's prior medians on every bank entry. Applied at the "
+    "80 rev/s reference, where every speed factor is 1, so the cruise spectrum is "
+    "unchanged; a standby payload IS moved at its own 20-40 rev/s."
+)
+
+
+def pin_speed_laws(
+    fit: dict[str, Any], pin: dict[str, float] = SPAN_PIN, rule: str = SPAN_PIN_RULE
+) -> dict[str, Any]:
+    """``fit`` with the speed-law quantities in ``pin`` set to its values
+    (:data:`SPAN_PIN` and its rule by default; a key absent from ``pin`` keeps
+    the fit's own value).
 
     The pre-pin values are recorded in ``params.span_pin_record`` so an entry
     says what was changed and from what. A deep copy: the anchor is never
@@ -680,18 +693,13 @@ def pin_speed_laws(fit: dict[str, Any]) -> dict[str, Any]:
         "amp_exp": float(p["profile"]["amp_exp"]),
         "floor_exp": float(p["floor"]["floor_exp"]),
         "floor_static_rel": float(p["floor"]["floor_static_rel"]),
-        "pinned_to": dict(SPAN_PIN),
+        "pinned_to": {k: float(v) for k, v in pin.items()},
         "reference_rps": float(AMP_RPS_REF),
-        "rule": (
-            "the v2 short-span contract: a cruise-only pool cannot identify the speed laws, "
-            "so they are the model's prior medians on every bank entry. Applied at the "
-            "80 rev/s reference, where every speed factor is 1, so the cruise spectrum is "
-            "unchanged; a standby payload IS moved at its own 20-40 rev/s."
-        ),
+        "rule": rule,
     }
-    p["profile"]["amp_exp"] = SPAN_PIN["amp_exp"]
-    p["floor"]["floor_exp"] = SPAN_PIN["floor_exp"]
-    p["floor"]["floor_static_rel"] = SPAN_PIN["floor_static_rel"]
+    for key, value in pin.items():
+        holder = p["profile"] if key == "amp_exp" else p["floor"]
+        holder[key] = float(value)
     p["span_pin_record"] = record
     return out
 
@@ -702,7 +710,8 @@ def pin_speed_laws(fit: dict[str, Any]) -> dict[str, Any]:
 #: moved — free, not shown identified: DREGON's ``amp_exp`` went 9 -> 13
 #: between 150 and 600 L-BFGS iterations — rather than the v2 short-span
 #: constants). Every other generation is pinned to :data:`SPAN_PIN`
-#: (:func:`pin_speed_laws`).
+#: (:func:`pin_speed_laws`). A bank may override either policy with an
+#: explicit pin (:attr:`BankSpec.speed_law_pin`), recorded on every entry.
 FITTED_SPEED_LAW_GENERATIONS = ("v3r4",)
 
 
@@ -722,10 +731,16 @@ def keep_speed_laws(fit: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def speed_laws_pinned(fit: dict[str, Any]) -> bool:
-    """Whether a stripped payload's speed laws are the :data:`SPAN_PIN` constants."""
+def speed_law_pin(fit: dict[str, Any]) -> dict[str, float] | None:
+    """The pin a stripped payload's speed laws carry (``None``: fitted laws
+    kept, or an unpinned raw fit)."""
     rec = fit["params"].get("span_pin_record")
-    return rec is None or rec.get("pinned_to") is not None
+    return None if rec is None else rec.get("pinned_to")
+
+
+def speed_laws_pinned(fit: dict[str, Any]) -> bool:
+    """Whether a stripped payload's speed laws are pinned (to any pin)."""
+    return speed_law_pin(fit) is not None
 
 
 def truncate_orders(fit: dict[str, Any], k_max: int) -> dict[str, Any]:
@@ -1874,10 +1889,21 @@ def interpolate_fits(
     if pinned_a != pinned_b:
         raise ValueError("the path endpoints must both pin or both carry their speed laws")
     if pinned_a:
-        for key, value in SPAN_PIN.items():
+        pin_a, pin_b = speed_law_pin(a) or {}, speed_law_pin(b) or {}
+        if pin_a != pin_b:
+            raise ValueError(f"the path endpoints carry different pins: {pin_a} against {pin_b}")
+        for key, value in pin_a.items():
             holder = p["profile"] if key == "amp_exp" else p["floor"]
             if float(holder[key]) != float(value):
                 raise ValueError(f"path endpoints must be pinned; {key} is {holder[key]}")
+        if "floor_static_rel" not in pin_a:
+            sa = float(pa["floor"]["floor_static_rel"])
+            sb = float(pb["floor"]["floor_static_rel"])
+            if not (sa > 0.0 and sb > 0.0):
+                raise ValueError(f"floor_static_rel must be positive to mix; got {sa}, {sb}")
+            p["floor"]["floor_static_rel"] = float(
+                math.exp((1.0 - t) * math.log(sa) + t * math.log(sb))
+            )
     else:
         # round 4: free fitted laws, mixed like the rest — exponents linear in
         # t, the static floor fraction log-linear (a positive scale)
@@ -2095,6 +2121,10 @@ class BankSpec:
     #: Hard preset only: refuse a path draw that fails the per-rotor tonality
     #: guard (:class:`RotorLinesProbe`, round 4).
     rotor_lines: bool = False
+    #: An explicit speed-law pin (``{"amp_exp": .., "floor_exp": ..}``, a key
+    #: absent keeps each anchor's own value) overriding the generation's
+    #: policy (:data:`SPAN_PIN` / :data:`FITTED_SPEED_LAW_GENERATIONS`).
+    speed_law_pin: dict[str, float] | None = None
 
     def __post_init__(self) -> None:
         if self.preset not in PRESETS:
@@ -2130,7 +2160,11 @@ class BankSpec:
                 for name in sorted(anchors)
             },
             "span_pin": (
-                "fitted" if self.generation in FITTED_SPEED_LAW_GENERATIONS else dict(SPAN_PIN)
+                {k: float(v) for k, v in sorted(self.speed_law_pin.items())}
+                if self.speed_law_pin
+                else "fitted"
+                if self.generation in FITTED_SPEED_LAW_GENERATIONS
+                else dict(SPAN_PIN)
             ),
             "guards": {
                 "trend_margin_db": TREND_MARGIN_DB,
@@ -2152,14 +2186,26 @@ def default_tolerances(structure: dict[str, Any] | None = None) -> dict[str, flo
     return {rig: float(row["ltas_tol_db"]) for rig, row in st["real_windows"]["rigs"].items()}
 
 
-def pinned_anchors(generation: str = "v2") -> dict[str, dict[str, Any] | None]:
+def pinned_anchors(
+    generation: str = "v2", *, pin: dict[str, float] | None = None
+) -> dict[str, dict[str, Any] | None]:
     """Every anchor payload of one generation, stripped and speed-law pinned —
-    or, for :data:`FITTED_SPEED_LAW_GENERATIONS`, with its own laws kept.
+    or, for :data:`FITTED_SPEED_LAW_GENERATIONS`, with its own laws kept;
+    ``pin`` (a bank's ``speed_law_pin``) overrides either policy.
 
     Keyed ``<rig>`` and ``<rig>_standby``; the standby slot is ``None`` for a
     single-regime rig (DREGON's room-2 recordings hold no standby segment).
     """
-    prepare = keep_speed_laws if generation in FITTED_SPEED_LAW_GENERATIONS else pin_speed_laws
+    if pin is not None:
+        rule = f"pinned by the bank spec (speed_law_pin {pin}); the static fraction is the anchor's own"
+
+        def prepare(fit: dict[str, Any]) -> dict[str, Any]:
+            return pin_speed_laws(fit, pin=pin, rule=rule)
+
+    elif generation in FITTED_SPEED_LAW_GENERATIONS:
+        prepare = keep_speed_laws
+    else:
+        prepare = pin_speed_laws
     out: dict[str, dict[str, Any] | None] = {}
     for name, spec in anchors_of(generation).items():
         out[name] = prepare(load_fit(spec["cruise"]))
@@ -2232,7 +2278,7 @@ def _require(payload: dict[str, Any] | None, name: str) -> dict[str, Any]:
 
 def _init_worker(spec: BankSpec) -> None:
     """One probe and one set of anchors per process, built once."""
-    anchors = pinned_anchors(spec.generation)
+    anchors = pinned_anchors(spec.generation, pin=spec.speed_law_pin)
     probe = ModelProbe()
     widths = Widths(**spec.widths)
     refs = {
@@ -2460,7 +2506,9 @@ def bank_payload(
                 }
             ),
             "span_pin": (
-                "fitted per anchor (params.span_pin_record)"
+                dict(spec.speed_law_pin)
+                if spec.speed_law_pin
+                else "fitted per anchor (params.span_pin_record)"
                 if spec.generation in FITTED_SPEED_LAW_GENERATIONS
                 else dict(SPAN_PIN)
             ),
