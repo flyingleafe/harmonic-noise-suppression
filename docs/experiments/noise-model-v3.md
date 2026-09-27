@@ -2108,6 +2108,20 @@ model produces per-line ridges, not broadband bursts, so it is not the thing
 that separates round 4 from the real clip, and the latents stay out.
 <!-- source: docs/explainers/noise-model-v3-latent-runaway/figdata_r4.json listen.rigs.michaels.clips.{v3_r4,v3_r4_mw}.ltas_mean_abs_db 0.9513, 1.75 -->
 
+### Bank status: blocked on the tonality guarantee (brief item 3)
+
+The guard as required (every real cruise pattern at its own speed and at 35 /
+50 / 65 rev/s, the entry composed by the regime weight, every rotor ≥ 3
+comparable orders at ≥ 3 dB) passes 0 % of 28 round-4 path draws under the
+free fitted laws and 4 % (t = 1, standby carried) under a (6, 6) pin
+(`scripts/_nv3_r4_guard_calib.py`, `results/noise_v3/rig_sampler/guard_calib_r4_{free,pin66}.json`).
+The round-4 DREGON anchor has 1–2 comparable orders per rotor at its own
+speed (k = 1, 2 at +6…+8 dB, the rest ≤ 3 dB), and a cruise-only payload has
+no line at all below 65 rev/s under either law. The bank policy (standby on
+every entry, a lower bar calibrated on real DREGON, a cruise-only hover
+range, or the round-3b DREGON endpoint) is Dmitrii's call; no round-4 bank
+is built before it.
+
 
 ## Conclusion
 
