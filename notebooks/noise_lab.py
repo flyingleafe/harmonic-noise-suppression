@@ -114,6 +114,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import subprocess
 import warnings
 from functools import lru_cache
@@ -771,6 +772,21 @@ def _expected_const(fit: dict[str, Any], rps: float) -> np.ndarray:
     return m[:, 0, :].mean(axis=0)
 
 
+#: The legend label of the parameter view's red caps.
+HALF_WIDTH_LABEL = "±half-width (shaft ⊕ γ)"
+
+
+def line_half_width_hz(shaft_sd_hz: Any, gamma_hz: Any) -> np.ndarray:
+    """Half width at half maximum (Hz) of a line broadened twice: by the shaft,
+    a Gaussian of standard deviation ``shaft_sd_hz`` (HWHM ``sqrt(2 ln 2)
+    shaft_sd_hz``), and by its own Lorentzian of HWHM ``gamma_hz``; the Voigt
+    approximation ``0.5346 gamma + sqrt(0.2166 gamma^2 + HWHM_G^2)`` (Olivero &
+    Longbothum 1977, 0.02 % accurate), broadcast over both."""
+    g = np.asarray(gamma_hz, dtype=np.float64)
+    hwhm_g = math.sqrt(2.0 * math.log(2.0)) * np.asarray(shaft_sd_hz, dtype=np.float64)
+    return 0.5346 * g + np.sqrt(0.2166 * g**2 + hwhm_g**2)
+
+
 def param_view(fit: dict[str, Any], rps: float = 80.0, *, fmax: float = SR / 2) -> dict[str, Any]:
     """What the parameter view draws of one v2/v3 fit, every rotor at ``rps``.
 
@@ -779,8 +795,12 @@ def param_view(fit: dict[str, Any], rps: float = 80.0, *, fmax: float = SR / 2) 
     ``floor_db``: the same with the comb switched off (``profile_db`` -> -300
     dB), so a v3 fit keeps DREGON's per-mic wind term; ``line_db``: ``full_db``
     at each ``k rps`` (every rotor's line ``k`` lands on the same bin, so the
-    stem is the RIG's, not one rotor's); ``gamma_hz`` ``(R, K)``: the half
-    widths; ``ctrl_hz``/``ctrl_db``: the floor's control values
+    stem is the RIG's, not one rotor's); ``gamma_hz`` ``(R, K)``: the
+    Lorentzian half widths; ``shaft_sd_hz`` ``(R, K)``: the shaft's Gaussian
+    standard deviation at order ``k``, ``k sigma_nu / 2 pi`` Hz (``sigma_nu`` the
+    shaft's phase-noise scale in rad/s); ``half_width_hz`` ``(R, K)``: the
+    whole line's half width, the two combined (:func:`line_half_width_hz`);
+    ``ctrl_hz``/``ctrl_db``: the floor's control values
     (:func:`floor_ctrl_db` at ``rps``, mic mean); ``keep``: the orders at or
     below ``fmax``.
     """
@@ -798,6 +818,8 @@ def param_view(fit: dict[str, Any], rps: float = 80.0, *, fmax: float = SR / 2) 
     ctrl_hz, ctrl_db = floor_ctrl_db(fit, rps=rps)
     k = np.arange(1, gamma.shape[1] + 1)
     freq = k * float(rps)
+    sigma_nu = np.asarray(p["sigma_nu"], dtype=np.float64).reshape(-1, 1)
+    shaft = np.broadcast_to(sigma_nu * k[None, :] / (2.0 * math.pi), gamma.shape).copy()
     return dict(
         rps=float(rps),
         fmax=float(fmax),
@@ -809,6 +831,8 @@ def param_view(fit: dict[str, Any], rps: float = 80.0, *, fmax: float = SR / 2) 
         ctrl_hz=ctrl_hz,
         ctrl_db=ctrl_db,
         gamma_hz=gamma,
+        shaft_sd_hz=shaft,
+        half_width_hz=line_half_width_hz(shaft, gamma),
         k=k,
         freq_hz=freq,
         line_db=np.interp(freq, f, full),
@@ -821,20 +845,24 @@ def draw_param_view(
 ) -> None:
     """One pane of the parameter view: grey = the floor (comb off), black dots
     = its control values, blue stems = the expected periodogram at ``k f``
-    (from the floor up), red caps = ``±gamma_rk`` of each rotor in ``rotors``
-    (``None``: all, overlaid); ``spectrum`` adds the whole expected periodogram
-    as a thin line.  ``view`` is :func:`param_view`'s (or the same keys read
-    back from JSON)."""
+    (from the floor up), red caps = ``±half_width_hz`` (shaft ⊕ gamma) of each
+    rotor in ``rotors`` (``None``: all, overlaid); ``spectrum`` adds the whole
+    expected periodogram as a thin line.  ``view`` is :func:`param_view`'s (or
+    the same keys read back from JSON); an optional ``shaft_source`` names
+    where the shaft part came from in the caps' legend label."""
     f = np.asarray(view["f"], dtype=np.float64)
     floor = np.asarray(view["floor_db"], dtype=np.float64)
     ctrl_hz = np.asarray(view["ctrl_hz"], dtype=np.float64)
     ctrl_db = np.asarray(view["ctrl_db"], dtype=np.float64)
-    gamma = np.atleast_2d(np.asarray(view["gamma_hz"], dtype=np.float64))
+    half = np.atleast_2d(np.asarray(view["half_width_hz"], dtype=np.float64))
     freq = np.asarray(view["freq_hz"], dtype=np.float64)
     lvl = np.asarray(view["line_db"], dtype=np.float64)
     keep = np.asarray(view["keep"], dtype=bool)
     fmax = float(view["fmax"])
-    rows = range(gamma.shape[0]) if rotors is None else np.atleast_1d(rotors)
+    rows = range(half.shape[0]) if rotors is None else np.atleast_1d(rotors)
+    cap_label = HALF_WIDTH_LABEL + (
+        f"\nshaft: {view['shaft_source']}" if view.get("shaft_source") else ""
+    )
     ck = ctrl_hz <= min(fmax, 7900.0)
     if spectrum:
         ax.plot(f, view["full_db"], color="C0", lw=0.6, alpha=0.6, label="expected periodogram")
@@ -853,11 +881,11 @@ def draw_param_view(
     for i, r in enumerate(rows):
         ax.hlines(
             lvl[keep],
-            freq[keep] - gamma[r][keep],
-            freq[keep] + gamma[r][keep],
+            freq[keep] - half[r][keep],
+            freq[keep] + half[r][keep],
             color="C3",
             lw=2.5,
-            label="±gamma_rk" if i == 0 else None,
+            label=cap_label if i == 0 else None,
         )
 
 

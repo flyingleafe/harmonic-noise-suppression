@@ -102,6 +102,12 @@ One name per thing. Each name has one meaning on this page.
 - **Floor part.** The model with every line switched off.
 - **Expected periodogram.** The periodogram the model predicts on average.
   One frame, mic mean, latents at zero.
+- **Half-width.** How far one line reaches on each side of $k f_r$, in
+  Hz. Two things widen line $k$. The shaft wanders: a Gaussian of
+  standard deviation $k \sigma_\nu / 2\pi$ Hz. The line has its own
+  width: a Lorentzian of half width $\gamma_{rk}$. The half-width is the
+  two together, written shaft ⊕ γ. The red caps of §§ 6 and 8 show
+  it.[^halfwidth]
 
 - **Legacy model.** The hand-written noise model of the `rig_easy` /
   `rig_hard` arms: `src/data_processing/stochastic_rotor_noise.py`.
@@ -121,6 +127,17 @@ the fit.[^defs]
     line), `u` `(B,)` (floor level) and `uj` `(J, B)` (per floor control
     point)". The channel gains: `results/noise_v2/mic_gains/mic_gains.json`,
     applied by `model.flight_batch(channel_gains=…)`.
+
+[^halfwidth]: `notebooks/noise_lab.py`, `line_half_width_hz`, the field
+    `half_width_hz` of `param_view`: the Voigt half width
+    $0.5346\,\gamma + \sqrt{0.2166\,\gamma^2 + h_G^2}$ with
+    $h_G = \sqrt{2 \ln 2}\,\sigma_f$ the Gaussian's half width and
+    $\sigma_f = k \sigma_\nu / 2\pi$ Hz ($\sigma_\nu$ in rad/s; Olivero &
+    Longbothum 1977, 0.02 % accurate). v2 and v3 both carry $\sigma_\nu$ and
+    $\gamma_{rk}$. Legacy: $\sigma_f = k \times$ `shaft_jitter_rps` Hz, the
+    drawn shaft jitter at the hover (`legacy_view`; zero outside line mode
+    `fm`), and $\gamma = \gamma_0 + \gamma_1 k$. The tables keep $\gamma$ alone
+    as a second column.
 
 ## The v3 model now
 
@@ -527,7 +544,7 @@ How to read one row:
 - Black dots: the floor control values.
 - Blue stems: the expected periodogram at $k f_r$, from the floor part up.
 - Thin blue line: the whole expected periodogram.
-- Red caps: $\pm\gamma$ of each line.
+- Red caps: $\pm$ the half-width of each line, shaft ⊕ γ (§ Words).
 - The radio above each figure picks the rotors. **all rotors**: every
   comb on, the four rotors' caps overlaid. **rotor N**: only rotor N's
   comb on, only its caps.
@@ -603,9 +620,10 @@ The prior thinks a rig is a loud comb over a wild floor.[^prior]
 - Lines at $k = 1, 2$ stand 9.6–23.9 dB over the floor part.
 - 82 to 88 of 88 orders clear 3 dB.
 - The floor part at 1 kHz spans −50.7 to −15.4 dB.
-- No width reaches 7 Hz. The widest is 6.8 Hz.
+- The lines are narrow. The widest half-width is 7.8–12.8 Hz, at the
+  top orders. $\gamma$ alone stays under 7 Hz. The shaft adds the rest.
 - One rotor alone is a weaker comb. Its $k = 1$ spans 0.1–23.7 dB.
-  <!-- source: figdata.json rigs.prior.s0..s3: over_k1_db 16.09, 11.75, 22.46, 23.90; over_k2_db 16.35, 17.95, 9.59, 22.08; n_orders_over 86, 85, 82, 88 of 88; floor_at_db["1000"] -50.71, -21.07, -15.41, -47.16; gamma_max_hz 5.91, 5.13, 4.97, 6.79; rotors[*].over_k1_db min 0.1 (s2 r1), max 23.7 (s3 r4) -->
+  <!-- source: figdata.json rigs.prior.s0..s3: over_k1_db 16.09, 11.75, 22.46, 23.90; over_k2_db 16.35, 17.95, 9.59, 22.08; n_orders_over 86, 85, 82, 88 of 88; floor_at_db["1000"] -50.71, -21.07, -15.41, -47.16; half_width_max_hz 7.80, 10.98, 12.77, 9.61 (at k 84, 87, 85, 74); gamma_max_hz 5.91, 5.13, 4.97, 6.79; sigma_nu 0.237, 0.506, 0.651, 0.366 rad/s (view.shaft_sd_hz[0][0] x 2 pi); rotors[*].over_k1_db min 0.1 (s2 r1), max 23.7 (s3 r4) -->
 
 [^prior]: The laws of `scripts/noise_v3_checks.py prior`
     (`prior_draw`), on the round-3b DREGON fit, `np.random.default_rng(seed)`:
@@ -643,10 +661,19 @@ on Michael's.
 - Cruise: $k = 1$ 13.5 dB, $k = 2$ 40.2 dB. 79 of 81 orders clear 3 dB.
 - Standby: its floor part sinks to −70.6 dB at 100 Hz. So its low lines
   stand 70 dB over it.
-- The widest lines: 15.8 Hz (DREGON), 26.9 Hz (cruise), 11.1 Hz (standby).
+- The widest half-widths: 75.4 Hz (DREGON), 70.8 Hz (cruise), 14.4 Hz
+  (standby).
+- On DREGON and cruise the shaft sets the width. $\sigma_\nu$ is 4.0 and
+  3.8 rad/s. So line $k$ is a Gaussian with a standard deviation of
+  about $0.6\,k$ Hz. The half-width is 0.7–0.8 Hz at $k = 1$, 7–9 Hz at
+  $k = 10$ and 43–46 Hz at $k = 60$. $\gamma$ alone peaks at 15.8 Hz
+  (DREGON) and 26.9 Hz (cruise).
+- From $k = 53$ (4.2 kHz) up, the caps of neighbouring lines touch.
+- Standby's shaft is quiet: $\sigma_\nu$ = 0.29 rad/s. Its widest line is
+  mostly $\gamma$ (11.1 Hz).
 - Halfway between two lines near 1 kHz the comb adds 0.3–6.8 dB over the
   floor part.
-  <!-- source: figdata.json rigs.v3_r3b.{dregon,cruise,standby}: over_k1_db 3.67, 13.52, 70.08; over_k2_db 5.67, 40.16, 70.88; n_orders_over 83/88, 79/81, 130/130; gamma_max_hz 15.77, 26.89, 11.10; floor_at_db["100"] standby -70.62; between_over_floor_db 0.32, 2.90, 6.81; dregon rotors[*].over_k1_db 0.2, 2.1, 0.8, 1.7; span_rev_s standby [20.93, 40.35] -->
+  <!-- source: figdata.json rigs.v3_r3b.{dregon,cruise,standby}: over_k1_db 3.67, 13.52, 70.08; over_k2_db 5.67, 40.16, 70.88; n_orders_over 83/88, 79/81, 130/130; half_width_max_hz 75.42, 70.75, 14.38; gamma_max_hz 15.77, 26.89, 11.10; sigma_nu = view.shaft_sd_hz[0][0] x 2 pi 4.038, 3.842, 0.294 rad/s; view.half_width_hz k=1 dregon 0.769-0.783, cruise 0.720-0.749; k=10 dregon 7.88-8.93, cruise 7.20-8.85; k=60 dregon 45.63-45.98, cruise 43.25-43.39; half_width_hz >= rps/2 = 40 Hz from k 53 on both; floor_at_db["100"] standby -70.62; between_over_floor_db 0.32, 2.90, 6.81; dregon rotors[*].over_k1_db 0.2, 2.1, 0.8, 1.7; span_rev_s standby [20.93, 40.35] -->
 
 ## The v2 fits
 
@@ -667,14 +694,15 @@ the whole axis are lines wider than the axis.
 
 v2 builds its floor out of lines.
 
-- Its widest lines: 16 059 Hz (DREGON), 125 578 Hz (cruise).
+- Its widest half-widths: 16 059 Hz (DREGON), 125 578 Hz (cruise). That
+  is $\gamma$. The shaft adds under 0.4 Hz to them.
 - Look halfway between two lines near 1 kHz. v2 cruise sits
   43.0 dB over its floor part there. v3 cruise sits 2.9 dB over.
 - The v2 cruise floor part is −74.5 dB at 1 kHz. The wide lines
   fill the gap above it.
 - On DREGON the floor parts of v2 and v3 agree within 2 dB up to 1 kHz.
   At 4 kHz v3 sits 7.8 dB lower.
-  <!-- source: figdata.json rigs.v2.{dregon,cruise}.gamma_max_hz 16059.0, 125578.0; rigs.v2.cruise.between_over_floor_db 43.03, rigs.v3_r3b.cruise 2.90 (both at 1000 Hz); rigs.v2.cruise.floor_at_db["1000"] -74.55; floor_at_db 100/1000/4000 Hz: v2 dregon -11.48, -33.73, -45.23; v3_r3b dregon -9.58, -33.72, -53.06 -->
+  <!-- source: figdata.json rigs.v2.{dregon,cruise}.half_width_max_hz 16059.07, 125578.36; gamma_max_hz 16059.01, 125577.97 (half width - gamma 0.06, 0.38 Hz); rigs.v2.cruise.between_over_floor_db 43.03, rigs.v3_r3b.cruise 2.90 (both at 1000 Hz); rigs.v2.cruise.floor_at_db["1000"] -74.55; floor_at_db 100/1000/4000 Hz: v2 dregon -11.48, -33.73, -45.23; v3_r3b dregon -9.58, -33.72, -53.06 -->
 
 ## The legacy anchor fits
 
@@ -704,9 +732,13 @@ How the legacy parameters map onto this view:
   mean periodogram of a 12 s render, 8 mics.
 - The wander and the label error are zero. So every shaft turns at
   80 rev/s.
-- A red cap is the Lorentzian half width $\gamma_0 + \gamma_1 k$.
-- At $k = 1, 2$ most power is a steady tone instead. There the cap
-  overstates the width.
+- A red cap is the half-width, shaft ⊕ γ. Shaft: a Gaussian with a
+  standard deviation of $k \times$ `shaft_jitter_rps` Hz, the jitter the
+  rig drew (the legend says where from). γ: the Lorentzian
+  $\gamma_0 + \gamma_1 k$.
+- At $k = 1, 2$ most power is a steady tone on the shaft instead. The
+  tone is only as wide as the shaft. There the cap overstates the width.
+  DREGON anchor at $k = 1$: cap 13.3 Hz, shaft 0.1 Hz.
 - The level is the render's own, not the v3 fit's. Every training window
   is rescaled anyway. Read shapes, not absolute dB.
 
@@ -724,7 +756,10 @@ How the legacy parameters map onto this view:
     within 0.15 dB rms. Tone share of order $k$:
     $w_k = \exp(-(k / k_{1/2})^2)$, $k_{1/2}$ = `coherence_k_half`; $w_1$ =
     0.70–0.84, $w_2$ = 0.24–0.49, $w_3 \le 0.20$ over the four legacy rigs.
-    The tone's width comes from the shaft jitter, not from $\gamma$.
+    The tone's width comes from the shaft jitter, not from $\gamma$. The
+    rest of the line is noise of width $\gamma$, not on the jittering
+    shaft (`stochastic_rotor_noise.synthesize`). So the cap puts together
+    two widths that the render keeps apart.
 
 ## Two legacy hard-bank rigs
 
@@ -752,18 +787,22 @@ The legacy combs tower over their floor.
 - $k = 1$ stands 14.1–33.9 dB over the floor part. $k = 2$: 31.4–47.4 dB.
   v3 DREGON: 3.7 and 5.7 dB.
 - The two bank rigs light 98 and 99 of 99 orders over 3 dB.
-- The lines are wide: up to 34–57 Hz at the top orders. Their skirts fill
-  the space between lines. Halfway between two lines near 1 kHz the comb
-  sits 13.7–28.6 dB over the floor part. v3: 0.3–6.8 dB.
+- The lines are wide. The widest half-width is 38 Hz on the DREGON
+  anchor, 75 Hz on both bank rigs and 181 Hz on Michael's anchor, at the
+  top orders. γ alone reaches 34–57 Hz. Michael's anchor has the widest
+  shaft, 1.27 rev/s of jitter. Its caps touch from $k = 22$ (1.8 kHz) up.
+- The skirts fill the space between lines. Halfway between two lines
+  near 1 kHz the comb sits 13.7–28.6 dB over the floor part. v3:
+  0.3–6.8 dB.
 - The legacy floor has no wind. At 100 Hz it sits at −31 to −24 dB. v3
   DREGON: −9.6 dB.
 - One rotor alone differs a lot. In entry 0, rotor 2 holds $k = 1$ at
   32.2 dB. Rotor 1 holds it at 0.2 dB.
-  <!-- source: figdata.json rigs.legacy_fit.{dregon,michael}, rigs.legacy_bank.{e0,e1}: over_k1_db 33.93, 14.05, 32.58, 25.98; over_k2_db 47.40, 31.42, 44.12, 43.54; n_orders_over 49/99, 72/99, 98/99, 99/99; gamma_max_hz 34.00, 56.69, 50.09, 49.84; between_over_floor_db 13.75, 21.44, 28.56, 24.95; floor_at_db["100"] -30.86, -28.18, -26.31, -24.32; e0 rotors[1].over_k1_db 32.2, rotors[0] 0.2; v3_r3b as above -->
+  <!-- source: figdata.json rigs.legacy_fit.{dregon,michael}, rigs.legacy_bank.{e0,e1}: over_k1_db 33.93, 14.05, 32.58, 25.98; over_k2_db 47.40, 31.42, 44.12, 43.54; n_orders_over 49/99, 72/99, 98/99, 99/99; half_width_max_hz 37.58, 180.68, 74.92, 75.30 (k = 99); gamma_max_hz 34.00, 56.69, 50.09, 49.84; shaft_sd_hz / k (= shaft_jitter_rps) 0.0963, 1.2700, 0.3614, 0.3669; half_width_hz >= 40 Hz from k 22 (michael), 52 (e0), 50 (e1), never (dregon); dregon k=1 half_width 13.28, gamma 13.28, shaft sd 0.096 Hz (HWHM 0.11); between_over_floor_db 13.75, 21.44, 28.56, 24.95; floor_at_db["100"] -30.86, -28.18, -26.31, -24.32; e0 rotors[1].over_k1_db 32.2, rotors[0] 0.2; v3_r3b as above -->
 
 ```{python}
 #| label: tbl-rigs
-#| tbl-cap: "Every row of @fig-g, @fig-h, @fig-i, @fig-i2 and @fig-i3, all rotors. Line over floor = stem height. Orders > 3 dB counts the orders below 8 kHz. Floor = the floor part. Between lines = the expected periodogram over the floor part, halfway between the two lines around 1 kHz. Legacy rows: the render's own level. Source: `figdata.json` `rigs`."
+#| tbl-cap: "Every row of @fig-g, @fig-h, @fig-i, @fig-i2 and @fig-i3, all rotors. Line over floor = stem height. Orders > 3 dB counts the orders below 8 kHz. Max half-width = the widest red cap (shaft ⊕ γ, § Words); max γ = the widest Lorentzian part alone. Floor = the floor part. Between lines = the expected periodogram over the floor part, halfway between the two lines around 1 kHz. Legacy rows: the render's own level. Source: `figdata.json` `rigs`."
 rg = FD["rigs"]
 rig_label = {
     "dregon": "DREGON",
@@ -784,8 +823,8 @@ def rig_name(gen, key, name):
 
 
 rows = [
-    "| figure | rig | rev/s | $k = 1$ dB | $k = 2$ dB | orders > 3 dB | max γ Hz | floor 100 Hz dB | floor 1 kHz dB | floor 4 kHz dB | between lines dB |",
-    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| figure | rig | rev/s | $k = 1$ dB | $k = 2$ dB | orders > 3 dB | max half-width (shaft ⊕ γ) Hz | max γ Hz | floor 100 Hz dB | floor 1 kHz dB | floor 4 kHz dB | between lines dB |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
 ]
 for fig, gen, name in (
     ("G", "prior", "prior, seed {}"),
@@ -799,7 +838,8 @@ for fig, gen, name in (
         rows.append(
             f"| {fig} | {rig_name(gen, key, name)} | {f(x['rps'], 1)} | {f(x['over_k1_db'], 1)} | "
             f"{f(x['over_k2_db'], 1)} | {x['n_orders_over']}/{x['n_orders_shown']} | "
-            f"{hz(x['gamma_max_hz'])} | {f(fl['100'], 1)} | {f(fl['1000'], 1)} | {f(fl['4000'], 1)} | "
+            f"{hz(x['half_width_max_hz'])} | {hz(x['gamma_max_hz'])} | "
+            f"{f(fl['100'], 1)} | {f(fl['1000'], 1)} | {f(fl['4000'], 1)} | "
             f"{f(x['between_over_floor_db'], 1)} |"
         )
 Markdown("\n".join(rows))
@@ -952,8 +992,9 @@ fits 4 restarts per pool.
     (`results/noise_v3/diag/r3_tools/verdict.py`). The static shares, the
     rig table and § Listen again come from
     `scripts/noise_v3_latent_runaway_figs.py --round r3a` and `--round r3b`,
-    which write `figdata_r3a.json` and `figdata_r3b.json`. @fig-h and
-    @fig-h2 come from `--rigs-only` (`figdata.json`).
+    which write `figdata_r3a.json` and `figdata_r3b.json`; `--round r3a
+    --rigs-only` and `--round r3b --rigs-only` refresh their rig table
+    alone. @fig-h and @fig-h2 come from `--rigs-only` (`figdata.json`).
 
 ```{python}
 VD = json.loads(Path("../../results/noise_v3/diag/verdict_r3.json").read_text())
@@ -1058,10 +1099,10 @@ Michael's cruise at 80 rev/s. Standby at 30.6 rev/s. Same axes as
 
 ```{python}
 #| label: tbl-r3-rigs
-#| tbl-cap: "The rows of @fig-h2 (round 2) beside rounds 3a and 3b (@fig-h). Line over floor = stem height. Floor = the floor part. Source: `figdata_r3a.json` and `figdata_r3b.json` `rigs`."
+#| tbl-cap: "The rows of @fig-h2 (round 2) beside rounds 3a and 3b (@fig-h). Line over floor = stem height. Max half-width = the widest red cap (shaft ⊕ γ); max γ = the Lorentzian part alone. Floor = the floor part. Source: `figdata_r3a.json` and `figdata_r3b.json` `rigs`."
 rows = [
-    "| rig | round | $k = 1$ dB | $k = 2$ dB | orders > 3 dB | max γ Hz | floor 100 Hz dB | floor 1 kHz dB | floor 4 kHz dB |",
-    "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+    "| rig | round | $k = 1$ dB | $k = 2$ dB | orders > 3 dB | max half-width (shaft ⊕ γ) Hz | max γ Hz | floor 100 Hz dB | floor 1 kHz dB | floor 4 kHz dB |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
 ]
 for key in ("dregon", "cruise", "standby"):
     for t, x in (
@@ -1072,22 +1113,28 @@ for key in ("dregon", "cruise", "standby"):
         fl = x["floor_at_db"]
         rows.append(
             f"| {rig_label[key]} | {t} | {f(x['over_k1_db'], 1)} | {f(x['over_k2_db'], 1)} | "
-            f"{x['n_orders_over']}/{x['n_orders_shown']} | {f(x['gamma_max_hz'], 1)} | "
+            f"{x['n_orders_over']}/{x['n_orders_shown']} | {f(x['half_width_max_hz'], 1)} | "
+            f"{f(x['gamma_max_hz'], 1)} | "
             f"{f(fl['100'], 1)} | {f(fl['1000'], 1)} | {f(fl['4000'], 1)} |"
         )
 Markdown("\n".join(rows))
 ```
 
-- The γ tail is gone. The widest line is 15.8 Hz on DREGON (was 42.6) and
-  11.1 Hz on standby (was 86.4). In @fig-h2, pick rotor 2 on DREGON and
-  rotor 3 on standby: the wide caps belong to one rotor each.
+- The γ tail is gone. The widest γ is 15.8 Hz on DREGON (was 42.6) and
+  11.1 Hz on standby (was 86.4).
+- On standby the caps show it. In @fig-h2 pick rotor 3: its widest cap
+  is 87 Hz, the other rotors' 12–20 Hz.
+- On DREGON the shaft hides it. Every rotor's widest cap is 70–72 Hz in
+  round 2 and 67–75 Hz in round 3b, at $k = 88$; the shaft alone makes
+  67–69 Hz of it. Round 2's tail sits at $k = 26$ on rotor 2: a 51 Hz cap
+  among caps of about 21 Hz.
 - The combs are denser. On cruise 79 of 81 orders stand over 3 dB (was 45).
 - Above 2 kHz the floor sinks again, by 9–11 dB at 4 kHz. The lines carry
   that band. Nothing measures the floor between the lines there. So the
   split is still free. Sentence 5 of §7 still holds.
 - Standby's floor sinks to −71 dB at 100 Hz. Line skirts fill the space
   between its low lines.
-  <!-- source: figdata_r3b.json rigs.v3_r3b.{dregon,cruise,standby}: gamma_max_hz 15.77, 26.89, 11.10; n_orders_over 83/88, 79/81, 130/130; floor_at_db["4000"] -53.06, -42.53; ["100"] standby -70.62; figdata_r3a.json rigs.v3_r2: gamma_max 42.59, 29.32, 86.39; n_orders_over cruise 45; floor 4000 -42.20, -33.30; standby 100 -59.88; figdata.json rigs.v3_r2.dregon.rotors[1].gamma_max_hz 42.6, standby.rotors[2] 86.4 -->
+  <!-- source: figdata_r3b.json rigs.v3_r3b.{dregon,cruise,standby}: half_width_max_hz 75.42, 70.75, 14.38; gamma_max_hz 15.77, 26.89, 11.10; n_orders_over 83/88, 79/81, 130/130; floor_at_db["4000"] -53.06, -42.53; ["100"] standby -70.62; figdata_r3a.json rigs.v3_r2: half_width_max_hz 71.66, 60.35, 87.25; gamma_max 42.59, 29.32, 86.39; n_orders_over cruise 45; floor 4000 -42.20, -33.30; standby 100 -59.88; figdata.json rigs.v3_r2.dregon.rotors[*].half_width_max_hz 71.66, 70.55, 70.99, 70.10, rigs.v3_r3b.dregon.rotors[*] 75.42, 67.99, 67.61, 67.42 (k = 88; shaft HWHM sqrt(2 ln 2) shaft_sd_hz there 69.49 r2, 66.59 r3b); v3_r2.dregon view.half_width_hz[:, 25] 21.57, 51.31, 20.77, 20.60 (gamma 1.90, 42.59, 0.45, 0.13); rotors[1].gamma_max_hz 42.6; v3_r2.standby.rotors[*].half_width_max_hz 19.92, 12.43, 87.25, 14.66, rotors[2].gamma_max_hz 86.4 -->
 
 ## Listen again
 

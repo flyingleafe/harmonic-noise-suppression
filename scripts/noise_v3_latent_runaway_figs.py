@@ -30,8 +30,10 @@ Inputs:
   (``noise_lab.LegacyFit``) and two entries of the hard bank
   (``noise_lab.LegacyBank``). The legacy model has no expected-periodogram
   function, so its view is the mean periodogram of a render
-  (:func:`legacy_view`). Every figure is written once per rotor (only that
-  rotor's comb on) and once with all four (``_{all,rotor1..4}.png``);
+  (:func:`legacy_view`). The red caps are each line's whole half width,
+  shaft ⊕ gamma (``noise_lab.line_half_width_hz``). Every figure is written
+  once per rotor (only that rotor's comb on) and once with all four
+  (``_{all,rotor1..4}.png``);
 * Figs J-K (§ Listen): one real window per rig (:data:`LISTEN_WINDOWS`, held
   out of every fit's pool) through the notebook's own primitives —
   ``trajectory("real")``, ``real_clip``, ``render_all`` of ``V2Fit(rig)`` and
@@ -51,6 +53,7 @@ Inputs:
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --listen-only # Figs J-K + WAVs
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --plot-only
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3a  # r3a beside r2
+    PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --rigs-only  # § 8 table
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --listen-add legacy
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --listen-add v3_r3b_mp
     PYTHONPATH=src python scripts/noise_v3_latent_runaway_figs.py --round r3b --listen-add v3_r3b_lam5
@@ -760,19 +763,23 @@ def rig_rps(fit: dict[str, Any]) -> float:
 
 def view_numbers(view: dict[str, Any], rotor: int | None = None) -> dict[str, Any]:
     """The numbers of one parameter view: line over floor per order (k = 1, 2
-    singled out), the orders over :data:`RIG_OVER_DB`, and the widest gamma of
-    the orders shown, over rotor ``rotor`` (``None``: every rotor)."""
+    singled out), the orders over :data:`RIG_OVER_DB`, and the widest line
+    half width (shaft ⊕ gamma, the red caps) and the widest gamma of the orders
+    shown, over rotor ``rotor`` (``None``: every rotor)."""
     f, floor, keep = view["f"], view["floor_db"], view["keep"]
     over = np.asarray(view["line_db"], dtype=np.float64) - np.interp(view["freq_hz"], f, floor)
     gamma = np.atleast_2d(np.asarray(view["gamma_hz"], dtype=np.float64))
+    half = np.atleast_2d(np.asarray(view["half_width_hz"], dtype=np.float64))
     if rotor is not None:
         gamma = gamma[rotor : rotor + 1]
+        half = half[rotor : rotor + 1]
     return dict(
         over_db=over,
         over_k1_db=float(over[0]),
         over_k2_db=float(over[1]),
         n_orders_shown=int(keep.sum()),
         n_orders_over=int((over[keep] > RIG_OVER_DB).sum()),
+        half_width_max_hz=float(half[:, keep].max()),
         gamma_max_hz=float(gamma[:, keep].max()),
     )
 
@@ -875,7 +882,7 @@ def legacy_mean_periodogram(params: Any, rps: float, *, line_mode: str, n_fft: i
     return pg.power.astype(np.float64).mean(axis=(0, 1))
 
 
-def legacy_view(src: Any, rps: float) -> tuple[dict[str, Any], list[np.ndarray]]:
+def legacy_view(nl: Any, src: Any, rps: float) -> tuple[dict[str, Any], list[np.ndarray]]:
     """The parameter view of one legacy source (``noise_lab.LegacyFit`` /
     ``LegacyBank``) at ``rps``, in ``param_view``'s keys, and one expected
     periodogram per rotor with only that rotor's comb on.
@@ -887,10 +894,16 @@ def legacy_view(src: Any, rps: float) -> tuple[dict[str, Any], list[np.ndarray]]
     ``max(gamma0 + gamma_slope k, gamma_min_bins df)``: the width of the
     incoherent share ``1 - w_k``; the coherent share ``w_k = exp(-(k /
     coherence_k_half)^2)`` is a tone on the jittering shaft
-    (``stochastic_rotor_noise.synthesize``, ``line_mode="fm"``). ``ctrl_db``:
-    ``floor_mean_db + floor_shape_db`` (shape + tilt) at the control points,
-    plus the floor's speed factor at the hover (1 + ``floor_static_rel``) and
-    the mic-mean floor gain (``fixed_mic_floor_db`` + ``fixed_mic_gain_all_db``).
+    (``stochastic_rotor_noise.synthesize``, ``line_mode="fm"``).
+    ``shaft_sd_hz``: that shaft's Gaussian at order ``k``, ``k
+    shaft_jitter_rps`` Hz of the drawn (and hover-scaled) jitter, zero outside
+    ``line_mode="fm"`` (a ``dynamics="none"`` anchor, whose jitter is zero
+    anyway); ``half_width_hz``: the two combined
+    (``noise_lab.line_half_width_hz``), ``shaft_source`` where the jitter came
+    from. ``ctrl_db``: ``floor_mean_db + floor_shape_db`` (shape + tilt) at the
+    control points, plus the floor's speed factor at the hover (1 +
+    ``floor_static_rel``) and the mic-mean floor gain (``fixed_mic_floor_db`` +
+    ``fixed_mic_gain_all_db``).
     """
     from data_processing import stochastic_rotor_noise as srn
 
@@ -919,6 +932,16 @@ def legacy_view(src: Any, rps: float) -> tuple[dict[str, Any], list[np.ndarray]]
         + np.asarray(p.gamma_slope, dtype=np.float64)[:, None] * k[None, :],
         float(p.gamma_min_bins) * sr / float(src.n_fft),
     )
+    fm = src.line_mode == "fm"
+    jitter = np.broadcast_to(np.asarray(p.shaft_jitter_rps, dtype=np.float64), (n_rotors,))
+    shaft = (jitter[:, None] * k[None, :]) if fm else np.zeros_like(gamma)
+    dynamics = getattr(src, "dynamics", None)
+    if not fm:
+        shaft_source = f"none (line mode {src.line_mode})"
+    elif dynamics is None:
+        shaft_source = "bank entry's shaft_jitter_rps"
+    else:
+        shaft_source = f"{dynamics} draw's shaft_jitter_rps"
     mic_db = np.zeros(LEGACY_VIEW_MICS)
     for fixed in (p.fixed_mic_floor_db, p.fixed_mic_gain_all_db):
         if fixed is not None:
@@ -938,6 +961,9 @@ def legacy_view(src: Any, rps: float) -> tuple[dict[str, Any], list[np.ndarray]]
         ctrl_hz=ctrl_hz,
         ctrl_db=float(p.floor_mean_db) + srn.floor_shape_db(p, ctrl_hz) + 10.0 * np.log10(gain),
         gamma_hz=gamma,
+        shaft_sd_hz=shaft,
+        half_width_hz=nl.line_half_width_hz(shaft, gamma),
+        shaft_source=shaft_source,
         k=k,
         freq_hz=freq,
         line_db=np.interp(freq, f, full),
@@ -958,7 +984,7 @@ def legacy_rig_panels(nl: Any) -> dict[str, dict[str, Any]]:
     for group, srcs in sources.items():
         out[group] = {}
         for key, src in srcs.items():
-            view, solo = legacy_view(src, RIG_RPS)
+            view, solo = legacy_view(nl, src, RIG_RPS)
             out[group][key] = dict(
                 name=src.name,
                 entry=src.entry,
@@ -1706,7 +1732,7 @@ def fig_rigs(d: dict[str, Any], rows: list[tuple[dict[str, Any], str]], stem: st
         last.set_xticklabels([f"{t / 1000:g}k" if t >= 1000 else str(t) for t in ticks])
         last.set_xlabel("frequency (Hz)")
         handles, labels = np.atleast_1d(axes)[0].get_legend_handles_labels()
-        fig.legend(handles, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.0))
+        fig.legend(handles, labels, loc="upper right", ncol=3, bbox_to_anchor=(1.0, 1.0))
         fig.text(0.01, 0.995, who, ha="left", va="top", fontsize=15, fontweight="bold")
         fig.tight_layout(rect=(0, 0, 1, 1.0 - 0.75 / fig.get_figheight()))
         _save(fig, f"{stem}_{key}.png")
@@ -1814,22 +1840,27 @@ def plot(d: dict[str, Any]) -> None:
     fig_listen(d, "michaels", "fig_k_listen_michaels.png")
 
 
+def round_rigs(tag: str) -> dict[str, Any]:
+    """The parameter-view numbers of round ``tag``'s and round 2's pooled fits
+    (§ 8's table; the rig figures are Figs H / H2 of :func:`rig_views`)."""
+    nl = _noise_lab()
+    return dict(
+        over_bar_db=RIG_OVER_DB,
+        floor_at_hz=RIG_FLOOR_AT_HZ,
+        fmin_hz=RIG_FMIN_HZ,
+        v3_r2=v3_rig_panels(nl, "r2"),
+        **{f"v3_{tag}": v3_rig_panels(nl, tag)},
+    )
+
+
 def round_views(tag: str) -> dict[str, Any]:
     """``--round``: round ``tag`` beside round 2 — the static shares of every
-    family, the parameter-view numbers of the three pooled fits (§ 8's table;
-    the rig figures are Figs H / H2 of :func:`rig_views`), § Listen with the
-    sources of :func:`listen_keys` rendered on the same real windows and seed."""
-    nl = _noise_lab()
+    family, :func:`round_rigs`, § Listen with the sources of
+    :func:`listen_keys` rendered on the same real windows and seed."""
     return dict(
         tag=tag,
         static_shares=static_shares(("r2", tag)),
-        rigs=dict(
-            over_bar_db=RIG_OVER_DB,
-            floor_at_hz=RIG_FLOOR_AT_HZ,
-            fmin_hz=RIG_FMIN_HZ,
-            v3_r2=v3_rig_panels(nl, "r2"),
-            **{f"v3_{tag}": v3_rig_panels(nl, tag)},
-        ),
+        rigs=round_rigs(tag),
         listen=listen(listen_keys(tag)),
     )
 
@@ -1917,7 +1948,7 @@ def main(argv: list[str] | None = None) -> int:
         metavar="TAG",
         help="a later v3 round (a noise_lab.V3_FIT_DIRS key, e.g. r3a) beside round 2: static "
         "shares, parameter views and § Listen into figdata_TAG.json and fig_*_TAG.png (with "
-        "--plot-only: redraw them)",
+        "--plot-only: redraw them; with --rigs-only: recompute the parameter views alone)",
     )
     ap.add_argument(
         "--listen-add",
@@ -1929,13 +1960,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
     if args.round:
-        if args.rigs_only or args.listen_only:
-            ap.error("--round takes --plot-only only")
+        if args.listen_only or (args.rigs_only and args.listen_add):
+            ap.error("--round takes --plot-only, --rigs-only or --listen-add")
         data = OUT / f"figdata_{args.round}.json"
         if args.plot_only:
             d = load(data)
         else:
-            if args.listen_add:
+            if args.rigs_only:
+                d = load(data)
+                d["rigs"] = _r(round_rigs(str(args.round)), 4)
+            elif args.listen_add:
                 d = load(data)
                 new = json.loads(json.dumps(_r(listen((str(args.listen_add),)), 4)))
                 d["listen"] = listen_merge(d["listen"], new, str(args.round))
