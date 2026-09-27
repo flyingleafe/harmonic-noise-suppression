@@ -1,0 +1,23 @@
+{
+ "schema": "noise-v3-checks/1",
+ "check": "latents",
+ "git": "7a49269eaaa3",
+ "note": "fitted_sd = rms of the fitted block latents (pooled over windows); +noise = sqrt(fitted var + the measured median block noise s^2 at block_s, wander_detail.json rigs.<rig>.noise); measured_sigma = rms of the fit's prior sd over the family's values (v: sigma_v_db_by_order per order); shrunk_expectation = rms of sqrt(sigma^4 / (sigma^2 + s^2)), the spread a correctly-shrunk MAP latent has in the explainer's independent-block toy (section 3.3a); posterior_var / map_expected_sd / map_expected_lag1 = the same toy with the OU prior (Kalman smoother, ou_map_moments) at the family's block counts: fitted mean-square + posterior variance = sigma^2 and fitted lag-1 = map_expected_lag1 when the latents are correctly shrunk; v_present = the per-line residual on the lines PRESENT in the pool window (window prominence >= 6 dB, wander.LineBlocks.window_prominence_db at block_s); 'v kA-B' = orders A..B",
+ "fits": {
+  "dregon": {
+   "fit": "results/noise_v3/fits_r4/dregon_room2_floor__flight_v3.json",
+   "status": "disabled",
+   "note": "every wander sigma is 0 by construction (rig-only fit); no latent track was fitted and none is rendered, so check (e) does not apply"
+  },
+  "michaels_cruise": {
+   "fit": "results/noise_v3/fits_r4/michaels_fly125_cruise__flight_v3.json",
+   "status": "disabled",
+   "note": "every wander sigma is 0 by construction (rig-only fit); no latent track was fitted and none is rendered, so check (e) does not apply"
+  },
+  "michaels_standby": {
+   "fit": "results/noise_v3/fits_r4/michaels_fly125_standby__flight_v3.json",
+   "status": "disabled",
+   "note": "every wander sigma is 0 by construction (rig-only fit); no latent track was fitted and none is rendered, so check (e) does not apply"
+  }
+ }
+}
