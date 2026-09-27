@@ -136,9 +136,21 @@ class Posterior:
         self.std = np.asarray(self.std, dtype=np.float64).reshape(RIG_DIM)
         self.rigs = tuple(self.rigs)
 
-    def sample(self, rng: np.random.Generator) -> Params:
-        """One drone drawn from the posterior."""
-        return params_from_rig_vector(self.mean + self.std * rng.standard_normal(RIG_DIM))
+    def sample(self, rng: np.random.Generator, *, hover: float | None = None) -> Params:
+        """One drone drawn from the posterior.
+
+        ``hover`` replaces the drawn log-scale coordinate (the hover level in
+        rev/s) and leaves every scale-free coordinate as drawn: the Gaussian
+        is diagonal, so this is exactly the posterior's shape at a chosen
+        size — the drone's trims, time constants, stds and offsets all scale
+        with it (:func:`params_from_rig_vector`).
+        """
+        v = self.mean + self.std * rng.standard_normal(RIG_DIM)
+        if hover is not None:
+            if not (float(hover) > 0.0):
+                raise ValueError(f"hover must be a positive rotor speed, got {hover!r}")
+            v[IDX_LOG_SCALE] = np.log(float(hover))
+        return params_from_rig_vector(v)
 
     def to_dict(self) -> dict[str, Any]:
         return {

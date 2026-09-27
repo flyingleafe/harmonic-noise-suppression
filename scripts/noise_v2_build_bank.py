@@ -377,6 +377,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--max-attempts", type=int, default=16)
     ap.add_argument("--force", action="store_true", help="rebuild even if the digest matches")
+    ap.add_argument(
+        "--rotor-lines",
+        action="store_true",
+        help="hard preset: refuse a path draw whose rotors are not all line-bearing on the "
+        "real cruise patterns (rig_sampler.RotorLinesProbe, round 4)",
+    )
     args = ap.parse_args(argv)
 
     structure = RS.load_fit(RS.STRUCTURE_PATH)
@@ -392,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         widths=RS.WIDTHS.as_dict(),
         max_attempts=int(args.max_attempts),
         generation=args.generation,
+        rotor_lines=bool(args.rotor_lines),
     )
     out = Path(args.out) if args.out else default_out(args.preset, int(args.n), args.generation)
     out.parent.mkdir(parents=True, exist_ok=True)

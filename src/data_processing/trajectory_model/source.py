@@ -26,6 +26,11 @@ One noise source's ``rps`` block::
       antithetic_offsets: false
       rps_max: 150                # OPTIONAL cap (rev/s): reject-and-redraw a
                                   # flight any rotor of which exceeds it
+      hover_range: [35, 95]       # OPTIONAL: a posterior drone's hover level
+                                  # is drawn U[lo, hi] rev/s instead of from
+                                  # the hyperprior's own scale coordinate
+      rotor_sep: [2.0, 15.0]      # OPTIONAL [closest pair >=, pair mean <=]
+                                  # rev/s over the airborne part, by rejection
       phases: {warmup_s: [3.0, 25.0]}   # optional FlightPhaseRanges overrides
 
 Per flight the source picks a rig by weight, turns it into
@@ -51,6 +56,23 @@ staying under the cap — a documented truncation of the hyperprior — and
 ``FittedTrajectorySource.stats`` counts accepted and rejected flights so the
 truncation can be reported.
 
+``hover_range`` is the answer to the hyperprior's hover marginal (seven rigs,
+three of them racing quads at 200-280 rev/s: median 142, 95th percentile 315
+rev/s, of which ``rps_max: 150`` kept 31 %): the rig posterior is diagonal in
+SCALE-FREE coordinates, so its log-scale coordinate can be replaced by a chosen
+law without touching the drone's shape (:meth:`Posterior.sample` with
+``hover``). ``U[35, 95]`` is the legacy hard sampler's own operating range
+(window means 36-65 rev/s interquartile, 85 at the 95th percentile,
+``docs/explainers/noise-model-v3-latent-runaway/traj_stats.json``). Stored
+rigs keep their own hover.
+
+``rotor_sep`` is a second rejection, on the AIRBORNE part of the accepted
+flight: the closest pair of rotors must keep a time-mean separation of at
+least ``rotor_sep[0]`` rev/s (a hyperprior draw at 35-95 rev/s puts a pair
+within 2 rev/s of each other 22 % of the time, where real cruise keeps every
+pair 2-4 rev/s apart and the pair mean at 6-9), and the pair-mean separation
+must stay under ``rotor_sep[1]`` (the trim coordinates' Gaussian tail reaches
+40 rev/s where real rigs never pass 11). Both are counted in :attr:`stats`.
 ``flight_fs``/``flight_reuse`` stay the POOL's knobs (they are the same keys the
 incumbent kind uses); everything else above belongs to this source, and every
 draw comes from the pool's own rng, so a stream stays reproducible per
@@ -197,6 +219,8 @@ class FittedTrajectorySource:
         measurement_noise: bool = True,
         antithetic_offsets: bool = False,
         rps_max: float | None = None,
+        hover_range: tuple[float, float] | None = None,
+        rotor_sep: tuple[float, float] | None = None,
         phases: FlightPhaseRanges | None = None,
     ):
         if not weights:
@@ -222,13 +246,25 @@ class FittedTrajectorySource:
         if rps_max is not None and not (float(rps_max) > 0.0):
             raise ValueError(f"rps.rps_max must be a positive rotor speed, got {rps_max!r}")
         self.rps_max = None if rps_max is None else float(rps_max)
+        if hover_range is not None and not (0.0 < float(hover_range[0]) <= float(hover_range[1])):
+            raise ValueError(f"rps.hover_range must be 0 < lo <= hi rev/s, got {hover_range!r}")
+        self.hover_range = (
+            None if hover_range is None else (float(hover_range[0]), float(hover_range[1]))
+        )
+        if rotor_sep is not None and not (0.0 <= float(rotor_sep[0]) <= float(rotor_sep[1])):
+            raise ValueError(
+                f"rps.rotor_sep must be [closest >=, pair mean <=] with 0 <= lo <= hi, "
+                f"got {rotor_sep!r}"
+            )
+        self.rotor_sep = None if rotor_sep is None else (float(rotor_sep[0]), float(rotor_sep[1]))
         self.phases = phases or FlightPhaseRanges()
         self.last_draw: RigDraw | None = None
         self._last_z: np.ndarray | None = None
-        #: The ``rps_max`` tally over this source's lifetime: flights returned
-        #: and flights thrown away by the cap. A pool (or a study) reads it to
-        #: report how much of the drawn population the cap truncates.
-        self.stats: dict[str, int] = {"flights": 0, "rejected": 0}
+        #: The rejection tally over this source's lifetime: flights returned,
+        #: flights thrown away by the ``rps_max`` cap and by ``rotor_sep``. A
+        #: pool (or a study) reads it to report how much of the drawn
+        #: population the rejections truncate.
+        self.stats: dict[str, int] = {"flights": 0, "rejected": 0, "rejected_sep": 0}
 
     @property
     def last_rig(self) -> str | None:
@@ -241,7 +277,10 @@ class FittedTrajectorySource:
         rig = str(self.names[int(rng.choice(len(self.names), p=self.probs))])
         if rig == POSTERIOR_RIG:
             assert self.bundle.posterior is not None  # guaranteed by bundle.names
-            params = self.bundle.posterior.sample(rng)
+            params = self.bundle.posterior.sample(
+                rng,
+                hover=None if self.hover_range is None else float(rng.uniform(*self.hover_range)),
+            )
             hover = float(np.mean(params.mu))
             idle = POSTERIOR_IDLE_REL * params.mu
             clip = (POSTERIOR_CLAMP_REL[0] * hover, POSTERIOR_CLAMP_REL[1] * hover)
@@ -328,7 +367,8 @@ class FittedTrajectorySource:
         is REJECTION SAMPLING and therefore a TRUNCATION of the drawn
         population, not a clip of one flight: the accepted distribution is the
         drawn one conditioned on staying under the cap, and :attr:`stats`
-        records what that costs.
+        records what that costs. ``rotor_sep`` rejects the same way, on the
+        airborne part alone (:func:`rotor_separation`).
         """
         for attempt in range(MAX_RPS_REDRAWS + 1):
             # A rejected attempt must not consume the antithetic pairing: the
@@ -338,6 +378,7 @@ class FittedTrajectorySource:
             total = self.flight_duration_s(rng) if duration_s is None else float(duration_s)
             params, clip = draw.params, draw.clip
             offset = self._offset(params, rng)
+            cruise: list[np.ndarray] = []
 
             def airborne(
                 n: int,
@@ -346,21 +387,44 @@ class FittedTrajectorySource:
                 params: Params = params,
                 offset: np.ndarray | None = offset,
                 clip: tuple[float, float] = clip,
+                cruise: list[np.ndarray] = cruise,
             ) -> np.ndarray:
-                return params.sample_airborne(n, rng_, fs=fs, offset=offset, clip=clip)
+                x = params.sample_airborne(n, rng_, fs=fs, offset=offset, clip=clip)
+                cruise.append(x)
+                return x
 
             track = wrap_airborne(airborne, total, fs, rng, idle=draw.idle_rps, phases=self.phases)
-            if self.rps_max is None or float(np.max(track)) <= self.rps_max:
-                self.last_draw = replace(draw, redraws=attempt)
-                self.stats["flights"] += 1
-                return track
-            self.stats["rejected"] += 1
-            self._last_z = paired_z
+            if self.rps_max is not None and float(np.max(track)) > self.rps_max:
+                self.stats["rejected"] += 1
+                self._last_z = paired_z
+                continue
+            if self.rotor_sep is not None and cruise:
+                closest, pair_mean = rotor_separation(cruise[0])
+                if closest < self.rotor_sep[0] or pair_mean > self.rotor_sep[1]:
+                    self.stats["rejected_sep"] += 1
+                    self._last_z = paired_z
+                    continue
+            self.last_draw = replace(draw, redraws=attempt)
+            self.stats["flights"] += 1
+            return track
         raise RuntimeError(
-            f"rps.rps_max {self.rps_max} rejected {MAX_RPS_REDRAWS + 1} consecutive flights "
-            f"from rigs {self.names}: the cap is below what this mixture flies at all. "
-            "Raise rps_max, or drop the rigs whose hover level exceeds it."
+            f"rps.rps_max {self.rps_max} / rps.rotor_sep {self.rotor_sep} rejected "
+            f"{MAX_RPS_REDRAWS + 1} consecutive flights from rigs {self.names}: the bounds "
+            "exclude what this mixture flies at all. Raise rps_max, loosen rotor_sep, or drop "
+            "the rigs whose hover level exceeds it."
         )
+
+
+def rotor_separation(track: np.ndarray) -> tuple[float, float]:
+    """``(closest pair, pair mean)`` time-mean rotor separations of an
+    ``(R, n)`` track, rev/s: the smallest pairwise mean ``|w_i - w_j|`` and
+    the mean over all pairs."""
+    x = np.asarray(track, dtype=np.float64)
+    r = x.shape[0]
+    seps = [float(np.mean(np.abs(x[i] - x[j]))) for i in range(r) for j in range(i + 1, r)]
+    if not seps:
+        return float("inf"), 0.0
+    return float(min(seps)), float(np.mean(seps))
 
 
 def _get(cfg: Any, key: str, default: Any = None) -> Any:
@@ -411,6 +475,10 @@ def build_from_config(cfg: Any) -> FittedTrajectorySource:
         measurement_noise=bool(_get(cfg, "measurement_noise", True)),
         antithetic_offsets=bool(_get(cfg, "antithetic_offsets", False)),
         rps_max=(None if _get(cfg, "rps_max") is None else float(_get(cfg, "rps_max"))),
+        hover_range=(
+            None if _get(cfg, "hover_range") is None else _pair(cfg, "hover_range", (0.0, 0.0))
+        ),
+        rotor_sep=(None if _get(cfg, "rotor_sep") is None else _pair(cfg, "rotor_sep", (0.0, 0.0))),
         phases=phases,
     )
 
@@ -429,4 +497,5 @@ __all__ = [
     "RigDraw",
     "build_from_config",
     "load_bundle",
+    "rotor_separation",
 ]

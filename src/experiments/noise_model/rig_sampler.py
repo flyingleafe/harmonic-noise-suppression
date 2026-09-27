@@ -430,6 +430,88 @@ COVERAGE_TARGET = 0.90
 #: past its own fit's order support would invent data.
 PATH_K_MAX = 81
 
+#: The per-rotor TONALITY guard of a hard (path) draw, round 4 (item 3 of the
+#: brief: "each rotor has some identifiable harmonics above the floor,
+#: comparable to the close harmonics of its neighbours"). Measured on the
+#: expected periodogram at the four REAL cruise carrier patterns below with the
+#: R4 local-floor prominence estimator (:func:`tonality.prominence_db`, the
+#: mic median): every rotor must show at least ``ROTOR_LINES_MIN_ORDERS`` of
+#: its first ``ROTOR_LINES_K_MAX`` orders at ``ROTOR_LINES_DB`` or more over
+#: its local floor on EVERY pattern, and the rotors' median prominence over
+#: k <= 8 may not spread more than ``ROTOR_LINES_SPREAD_DB``. The bars are set
+#: under the real clips (real DREGON wide / Michael's cruise narrow show 5.5 /
+#: 8.8 orders per rotor at 3 dB, `docs/experiments/noise-model-v3.md`
+#: § Checks (c)), so a draw is refused only when a rotor is nearly line-free.
+ROTOR_LINES_DB = 3.0
+ROTOR_LINES_MIN_ORDERS = 3
+ROTOR_LINES_K_MAX = 24
+ROTOR_LINES_SPREAD_DB = 10.0
+#: The four real cruise carrier patterns (``tonality.select_patterns``: per
+#: rig the narrowest- and widest-spread frozen window), frozen here so a bank
+#: build needs no support cache. Source: the supports named in each key.
+ROTOR_LINES_PATTERNS: dict[str, tuple[float, float, float, float]] = {
+    # flight_dregon_spinning_nosource_room2@1511905206.978+8_motors_command
+    "dregon_cruise_narrow": (83.3382, 78.458, 81.5981, 81.5934),
+    # flight_dregon_rectangle_nosource_room2@1511905731.953+8_motors_command
+    "dregon_cruise_wide": (85.7659, 76.3597, 82.7275, 79.7389),
+    # flight_michaels_FLY125@48.000+8_rps_refined
+    "michaels_cruise_narrow": (89.4106, 75.0119, 81.3211, 77.4375),
+    # flight_michaels_FLY125@128.000+8_rps_refined
+    "michaels_cruise_wide": (91.6142, 74.2117, 81.8036, 73.918),
+}
+
+
+class RotorLinesProbe:
+    """Per-rotor line prominence of a payload on the real cruise patterns.
+
+    A thin holder of one :class:`tonality.PatternProbe` over
+    :data:`ROTOR_LINES_PATTERNS` (imported lazily: ``tonality`` imports this
+    module). :meth:`measure` costs two expected periodograms per pattern.
+    """
+
+    def __init__(self, n_mics: int = 8) -> None:
+        from experiments.noise_model import tonality as TN
+
+        self._tn = TN
+        patterns = [
+            TN.Pattern(name=name, rig=name.split("_")[0], regime="cruise", support="", rev_s=rev)
+            for name, rev in ROTOR_LINES_PATTERNS.items()
+        ]
+        self.probe = TN.PatternProbe(patterns, n_mics=n_mics)
+        self.patterns = [p.name for p in patterns]
+
+    def measure(self, fit: dict[str, Any]) -> dict[str, Any]:
+        """The guard verdict and its numbers for one cruise payload."""
+        tn = self._tn
+        counts: dict[str, list[int]] = {}
+        spread: dict[str, float] = {}
+        for name in self.patterns:
+            geom = self.probe.geom[name]
+            k_max = min(self.probe.k_max(fit, name), ROTOR_LINES_K_MAX)
+            prom = tn.prominence_db(self.probe.periodogram(fit, name, comb=True), geom, k_max)
+            per_rotor = np.nanmedian(prom, axis=0)  # (R, K) mic median
+            counts[name] = [int(v) for v in (per_rotor >= ROTOR_LINES_DB).sum(axis=1)]
+            med8 = np.nanmedian(per_rotor[:, : min(8, k_max)], axis=1)
+            spread[name] = float(np.nanmax(med8) - np.nanmin(med8))
+        ok = all(min(c) >= ROTOR_LINES_MIN_ORDERS for c in counts.values()) and all(
+            s <= ROTOR_LINES_SPREAD_DB for s in spread.values()
+        )
+        return dict(rotor_lines=bool(ok), rotor_lines_counts=counts, rotor_lines_spread_db=spread)
+
+
+def rotor_lines_rule() -> dict[str, Any]:
+    """The per-rotor tonality guard as recorded in a bank's guards."""
+    return {
+        "prominence_db": ROTOR_LINES_DB,
+        "min_orders_per_rotor": ROTOR_LINES_MIN_ORDERS,
+        "k_max": ROTOR_LINES_K_MAX,
+        "rotor_spread_db_max": ROTOR_LINES_SPREAD_DB,
+        "patterns_rev_s": {k: list(v) for k, v in ROTOR_LINES_PATTERNS.items()},
+        "rule": "on every pattern every rotor shows >= min_orders_per_rotor of its first k_max "
+        "orders at >= prominence_db over the R4 local floor (mic median), and the rotors' "
+        "median prominence over k <= 8 spreads <= rotor_spread_db_max",
+    }
+
 
 class SampleRejected(RuntimeError):
     """No draw satisfied the guards within the attempt budget."""
@@ -1440,6 +1522,7 @@ def check_sample(
     probe: ModelProbe,
     *,
     standby: dict[str, Any] | None = None,
+    rotor_lines: RotorLinesProbe | None = None,
 ) -> dict[str, Any]:
     """Every guard result for one draw, plus the numbers behind them.
 
@@ -1502,7 +1585,14 @@ def check_sample(
 
     out["bands_db"] = band
     out["idle_bands_db"] = idle_band
-    guards = ("finite", "speed_law", "trend_falls", "gamma_excursion", "ltas")
+    guards: tuple[str, ...] = ("finite", "speed_law", "trend_falls", "gamma_excursion", "ltas")
+    if rotor_lines is not None:
+        # only a finite payload is worth two more periodograms per pattern
+        if out["finite"]:
+            out.update(rotor_lines.measure(fit))
+        else:
+            out["rotor_lines"] = False
+        guards = (*guards, "rotor_lines")
     out["failed"] = [g for g in guards if not out[g]]
     out["ok"] = not out["failed"]
     return out
@@ -1798,6 +1888,7 @@ def sample_path(
     k_max: int = PATH_K_MAX,
     widths: Widths = WIDTHS,
     max_attempts: int = 16,
+    rotor_lines: RotorLinesProbe | None = None,
 ) -> dict[str, Any]:
     """A draw from the CLOUD along the path between the two cruise anchors.
 
@@ -1836,7 +1927,7 @@ def sample_path(
             if standby is not None
             else None
         )
-        guards = check_sample(cand, reference, probe, standby=cand_standby)
+        guards = check_sample(cand, reference, probe, standby=cand_standby, rotor_lines=rotor_lines)
         attempts.append(guards)
         if guards["ok"]:
             cand["_sampler"] = {
@@ -1915,6 +2006,9 @@ class BankSpec:
     #: round-2 / round-3b v3 anchors (:data:`ANCHORS_V3`, :data:`ANCHORS_V3R3`),
     #: drawn by the SAME construction and widths.
     generation: str = "v2"
+    #: Hard preset only: refuse a path draw that fails the per-rotor tonality
+    #: guard (:class:`RotorLinesProbe`, round 4).
+    rotor_lines: bool = False
 
     def __post_init__(self) -> None:
         if self.preset not in PRESETS:
@@ -1957,6 +2051,7 @@ class BankSpec:
                 "probe_rps": [PROBE_CRUISE_RPS, PROBE_IDLE_RPS],
                 "level_band_hz": list(LEVEL_BAND_HZ),
                 **({"trend_rule": TREND_RULE_V3} if self.generation in V3_GENERATIONS else {}),
+                **({"rotor_lines": rotor_lines_rule()} if self.rotor_lines else {}),
             },
             "code": code_digest(),
         }
@@ -2043,7 +2138,14 @@ def _init_worker(spec: BankSpec) -> None:
         for name in ("dregon", "michaels")
     }
     _WORKER.clear()
-    _WORKER.update(spec=spec, anchors=anchors, probe=probe, widths=widths, refs=refs)
+    _WORKER.update(
+        spec=spec,
+        anchors=anchors,
+        probe=probe,
+        widths=widths,
+        refs=refs,
+        rotor_lines=(RotorLinesProbe() if spec.rotor_lines and spec.preset == "hard" else None),
+    )
 
 
 def draw_index(index: int) -> dict[str, Any]:
@@ -2101,6 +2203,7 @@ def _draw_index(
             spread=spec.strength,
             ltas_tol_db=(spec.ltas_tol_db["dregon"], spec.ltas_tol_db["michaels"]),
             standby_b=anchors["michaels_standby"],
+            rotor_lines=_WORKER.get("rotor_lines"),
             k_max=spec.k_max,
             widths=widths,
             max_attempts=spec.max_attempts,
@@ -2275,6 +2378,7 @@ def bank_payload(
                 "probe_idle_rps": PROBE_IDLE_RPS,
                 "level_band_hz": list(LEVEL_BAND_HZ),
                 **({"trend_rule": TREND_RULE_V3} if v3 else {}),
+                **({"rotor_lines": rotor_lines_rule()} if spec.rotor_lines else {}),
             },
             "statistics": {
                 k: v for k, v in stats.items() if k not in ("bands_db", "t", "wall_s", "n_workers")

@@ -157,18 +157,23 @@ FIT_PATHS: dict[str, dict[str, str]] = {
 #: The noise-model-v3 fit directories, by round: round 1 is the reduced
 #: campaign (4 restarts x 5 alternation rounds), round 2 the mm1-wander refit
 #: (20 rounds), rounds 3a/3b the measured-wander refits with the ridge step and
-#: rig L-BFGS without the relative stop (3b adds the u_j kernel prior).  A rig's
-#: round is ON DISK only when every one of its regime files is (:func:`v3_fit_names`).
+#: rig L-BFGS without the relative stop (3b adds the u_j kernel prior), rounds
+#: 4a/4b the RIG-ONLY fits under the round-4 priors (no wander; 4b runs the
+#: L-BFGS to 600 iterations).  A rig's round is ON DISK only when every one of
+#: its regime files is (:func:`v3_fit_names`).
 V3_FIT_DIRS = {
     "r1": "results/noise_v3/fits",
     "r2": "results/noise_v3/fits_r2",
     "r3a": "results/noise_v3/fits_r3a",
     "r3b": "results/noise_v3/fits_r3b",
+    "r4a": "results/noise_v3/fits_r4a",
+    "r4b": "results/noise_v3/fits_r4b",
 }
 
 #: The order ``"latest"`` takes the rounds in: the best round whose files are all
 #: on disk.  r3b is the round-3 verdict's pick (docs/experiments/noise-model-v3.md
-#: § Round 3 Results); r3a stays loadable by name.
+#: § Round 3 Results); r3a stays loadable by name; the round-4 rounds are named
+#: explicitly until their verdict is in.
 V3_LATEST = ("r3b", "r2", "r1")
 
 #: The v3 fit file of each rig, by regime, inside a :data:`V3_FIT_DIRS` round.

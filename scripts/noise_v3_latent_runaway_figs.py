@@ -1050,7 +1050,11 @@ def listen_key(tag: str) -> str:
 
 
 def listen_keys(tag: str) -> tuple[str, ...]:
-    """The § Listen again sources of ``--round tag``, in row order after the real clip."""
+    """The § Listen again sources of ``--round tag``, in row order after the
+    real clip. A rig-only round (no latent tracks) has no mean-preserving
+    variant and is set beside round 3b, the round it is judged against."""
+    if not round_has_latents(tag):
+        return ("legacy", "v2", listen_key("r3b"), listen_key(tag))
     return ("legacy", "v2", listen_key("r2"), listen_key(tag), listen_key(tag) + LISTEN_MP)
 
 
@@ -1867,13 +1871,19 @@ def round_rigs(tag: str) -> dict[str, Any]:
     )
 
 
+def round_has_latents(tag: str) -> bool:
+    """Whether round ``tag``'s fits carry latent tracks (a rig-only round,
+    r4a/r4b, records none: its wander is all-zero)."""
+    return all(bool(load(path)["latents"]["tracks"]) for path in v3_fits(tag).values())
+
+
 def round_views(tag: str) -> dict[str, Any]:
     """``--round``: round ``tag`` beside round 2 — the static shares of every
-    family, :func:`round_rigs`, § Listen with the sources of
-    :func:`listen_keys` rendered on the same real windows and seed."""
+    family (rounds with latents only), :func:`round_rigs`, § Listen with the
+    sources of :func:`listen_keys` rendered on the same real windows and seed."""
     return dict(
         tag=tag,
-        static_shares=static_shares(("r2", tag)),
+        **({"static_shares": static_shares(("r2", tag))} if round_has_latents(tag) else {}),
         rigs=round_rigs(tag),
         listen=listen(listen_keys(tag)),
     )
@@ -1938,7 +1948,8 @@ def fig_static_shares(d: dict[str, Any], name: str) -> None:
 
 def plot_round(d: dict[str, Any]) -> None:
     tag = str(d["tag"])
-    fig_static_shares(d, f"fig_l_static_shares_{tag}.png")
+    if "static_shares" in d:
+        fig_static_shares(d, f"fig_l_static_shares_{tag}.png")
     fig_listen(d, "dregon", f"fig_j_listen_dregon_{tag}.png")
     fig_listen(d, "michaels", f"fig_k_listen_michaels_{tag}.png")
 

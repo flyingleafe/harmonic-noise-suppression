@@ -210,6 +210,58 @@ def test_b_rps_max_caps_every_flight_of_a_posterior_mixture(fits_tree: Path):
         hopeless.flight(np.random.default_rng(1), 50.0, duration_s=10.0)
 
 
+def test_b_hover_range_sets_a_posterior_drone_size_and_keeps_its_shape(fits_tree: Path):
+    """``hover_range`` replaces the hyperprior's scale coordinate by U[lo, hi]
+    and leaves every scale-free coordinate as drawn: the rotor trims, time
+    constants and relative stds of a draw at 40 rev/s are those of the same
+    draw at 400. Stored rigs keep their own hover."""
+    lo, hi = 40.0, 60.0
+    source = _source(fits_tree, rigs={tm.POSTERIOR_RIG: 1.0}, hover_range=[lo, hi])
+    hovers = [float(np.mean(source.draw(np.random.default_rng(s)).params.mu)) for s in range(64)]
+    assert lo <= min(hovers) and max(hovers) <= hi
+    assert max(hovers) - min(hovers) > 0.5 * (hi - lo)  # a draw, not a constant
+
+    post = source.bundle.posterior
+    assert post is not None
+    a = post.sample(np.random.default_rng(5), hover=40.0)
+    b = post.sample(np.random.default_rng(5), hover=400.0)
+    np.testing.assert_allclose(np.mean(a.mu), 40.0)
+    np.testing.assert_allclose(np.mean(b.mu), 400.0)
+    np.testing.assert_allclose(a.mu / np.mean(a.mu), b.mu / np.mean(b.mu), rtol=1e-9)
+    np.testing.assert_allclose(a.tau_slow, b.tau_slow, rtol=1e-9)
+    np.testing.assert_allclose(a.sigma_slow / 40.0, b.sigma_slow / 400.0, rtol=1e-9)
+
+    stored = _source(fits_tree, rigs={"michaels": 1.0}, hover_range=[lo, hi])
+    assert float(np.mean(stored.draw(np.random.default_rng(0)).params.mu)) == pytest.approx(
+        float(np.mean(tm.Params(**RIGS["michaels"]).mu))
+    )
+
+
+def test_b_rotor_sep_bounds_the_airborne_separation_by_rejection(fits_tree: Path):
+    """``rotor_sep`` refuses a flight whose closest rotor pair rides under
+    ``lo`` rev/s or whose pair-mean separation exceeds ``hi`` — measured on the
+    airborne part alone, where the ground and idle phases would otherwise put
+    every rotor at the same speed."""
+    lo, hi = 3.0, 12.0
+    source = _source(
+        fits_tree, rigs={tm.POSTERIOR_RIG: 1.0}, hover_range=[60.0, 80.0], rotor_sep=[lo, hi]
+    )
+    rng = np.random.default_rng(23)
+    for _ in range(32):
+        track = source.flight(rng, 50.0, duration_s=60.0)
+        level = track.mean(axis=0)
+        air = track[:, level > 0.8 * level.max()]
+        closest, pair_mean = tm.rotor_separation(air)
+        assert closest >= 0.9 * lo  # the whole airborne stretch, edges included
+        assert pair_mean <= 1.1 * hi
+    assert source.stats["flights"] == 32
+    assert source.stats["rejected_sep"] > 0  # the bound bites on this fixture
+
+    hopeless = _source(fits_tree, rigs={tm.POSTERIOR_RIG: 1.0}, rotor_sep=[500.0, 600.0])
+    with pytest.raises(RuntimeError, match="rotor_sep"):
+        hopeless.flight(np.random.default_rng(1), 50.0, duration_s=10.0)
+
+
 # ── the mean shift ───────────────────────────────────────────────────────────
 
 

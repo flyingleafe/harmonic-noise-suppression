@@ -69,6 +69,7 @@ from data_processing.trajectory_model.source import (
     RigDraw,
     build_from_config,
     load_bundle,
+    rotor_separation,
 )
 from data_processing.trajectory_model.window import (
     FlightCache,
@@ -111,6 +112,7 @@ __all__ = [
     "corner_tau_s",
     "f0_from_v",
     "load_bundle",
+    "rotor_separation",
     "make_flight_cache",
     "ou_psd_grid",
     "ou_state_space",
