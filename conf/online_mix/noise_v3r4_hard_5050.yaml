@@ -10,8 +10,8 @@
 #   anchor's static fraction, Michael's standby payload on EVERY entry, the
 #   per-rotor tonality guard (>= 1 comparable order per rotor on every real
 #   cruise pattern at its own speed and at 35 / 50 / 65 rev/s), the array
-#   response carried by its own coin (p 0.5). The path is LOCAL until the bank
-#   is published as a pinned dload dataset; the training job needs the file.
+#   response carried by its own coin (p 0.5). Published as the pinned dload
+#   dataset `noise-v3r4-banks` (the pin is in the URI and in dload.lock).
 # * `rps.hover_range: [35, 95]`: a posterior drone's hover drawn uniform on
 #   the legacy hard operating range on the scale-free coordinates (the
 #   hyperprior's own hover median was 142 rev/s, 95th percentile 315);
@@ -29,7 +29,7 @@ sources:
     weight: 0.8
     n_mics: 8
     n_rotors: 4
-    preset_bank: results/noise_v3r4/rig_sampler/banks/noise_v3r4_hard_n2048.json
+    preset_bank: dload:noise-v3r4-banks@77ff7d7f6b67d65fb4fc113840c9fd532973cc38af79824b1ec219756b4d5bd0/noise_v3r4_hard_n2048.json
     render_reuse: 192
     rps_scale_range:
     - 1.0

@@ -2126,6 +2126,38 @@ pattern (28 draws over t = 0…1: 24 of 28 = 86 % pass on the tonality guard alo
 patterns; `guard_calib_r4_pin66_standby.json`). The array response rides
 its own coin (p = 0.5).
 
+### The round-4 banks as built
+
+`dload:noise-v3r4-banks@77ff7d7f6b67` (pinned; `results/noise_v3r4/rig_sampler/`,
+jobs `nv3r4-bank-easy2-597e5f`, `nv3r4-bank-hard-526d45` on `uni-cpu` at
+`7300f320`, 47 s / 2712 s). Easy: 1024 + 1024 neighbourhood draws, rejection
+41 %, guards fired gamma 703 / ltas 812 / trend 134. Hard: 2048 path draws,
+rejection 53 %, none exhausted, guards fired gamma 857 / ltas 1025 /
+rotor_lines 824 / trend 180; standby carried on 100 %, array response on
+1050 entries, t uniform (5 / 50 / 95 %: 0.04 / 0.50 / 0.95). Both streams
+pass `scripts/check_stream.py` (fires, determinism).
+<!-- source: results/noise_v3r4/rig_sampler/build_{easy,hard}.json provenance.statistics; the banks' provenance.round4_policy -->
+
+Actual 2 s training windows of the hard stream (200 windows,
+`scripts/_nv3_r4_hard_window_stats.py` → `results/noise_v3r4/rig_sampler/hard_window_stats.json`;
+median [q1, q3], rev/s) against the legacy hard stream and the real valid
+windows of the trajectory study (`traj_stats.json`):
+
+| stat | r4 hard | legacy hard | real |
+|---|---|---|---|
+| mean speed | 54.6 [36.7, 72.6] | 46.8 [35.9, 65.3] | 80.0 [36.2, 80.5] |
+| mean rotor separation | 7.9 [4.1, 10.4] | 3.5 [0.0, 5.0] | 7.4 [5.0, 8.9] |
+| range (max − min) | 28.3 [19.5, 35.7] | 9.8 [6.4, 14.5] | 15.7 [12.8, 21.3] |
+| \|df/dt\| median, rev/s² | 12.4 [7.1, 19.6] | 1.3 [0.9, 2.4] | 3.5 [2.1, 5.1] |
+
+Items 1 and 2 of the brief hold on the windows: the speed range is the
+legacy hard one (the v3r3 hard stream had median 73.9, q3 91.3), and the
+rotors sit apart as in the real windows (legacy's q1 was 0.04). Not
+addressed by this round: the hyperprior's trajectories still move ~3.5 ×
+faster than real (12.4 against 3.5 rev/s²; the v3r3 hard stream was 15.4),
+which the runaway explainer § 9 already named.
+<!-- source: results/noise_v3r4/rig_sampler/hard_window_stats.json; docs/explainers/noise-model-v3-latent-runaway/traj_stats.json summary.{legacy_hard,real,v2_hard} -->
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |

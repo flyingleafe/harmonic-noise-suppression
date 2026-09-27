@@ -4,8 +4,8 @@
 # --preset easy --generation v3r4` around the round-4 fits
 # (results/noise_v3/fits_r4, rig-only, no fold) under the mandatory round-4
 # policy (speed exponents pinned to (6, 6) with each anchor's static fraction;
-# Michael's entries carry the measured array response). The path is LOCAL
-# until the bank is published as a pinned dload dataset.
+# Michael's entries carry the measured array response). Published as the
+# pinned dload dataset `noise-v3r4-banks` (the pin is in the URI and dload.lock).
 sample_rate: 16000
 duration_s: 4.0
 base_seed: 20260909
@@ -16,7 +16,7 @@ sources:
     weight: 0.8
     n_mics: 8
     n_rotors: 4
-    preset_bank: results/noise_v3r4/rig_sampler/banks/noise_v3r4_easy_n2048.json
+    preset_bank: dload:noise-v3r4-banks@77ff7d7f6b67d65fb4fc113840c9fd532973cc38af79824b1ec219756b4d5bd0/noise_v3r4_easy_n2048.json
     render_reuse: 192
     rps_scale_range:
     - 0.45
