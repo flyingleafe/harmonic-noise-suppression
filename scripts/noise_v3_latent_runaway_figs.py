@@ -1868,14 +1868,18 @@ def plot(d: dict[str, Any]) -> None:
 
 
 def round_rigs(tag: str) -> dict[str, Any]:
-    """The parameter-view numbers of round ``tag``'s and round 2's pooled fits
-    (§ 8's table; the rig figures are Figs H / H2 of :func:`rig_views`)."""
+    """The parameter-view numbers of round ``tag``'s pooled fits beside its
+    reference round's (§ 8's table; the rig figures are Figs H / H2 of
+    :func:`rig_views`): round 2 for a latent round, round 3b for a rig-only
+    round (the round it is judged against, as § Listen does)."""
     nl = _noise_lab()
+    ref = "r2" if round_has_latents(tag) else "r3b"
     return dict(
         over_bar_db=RIG_OVER_DB,
         floor_at_hz=RIG_FLOOR_AT_HZ,
         fmin_hz=RIG_FMIN_HZ,
-        v3_r2=v3_rig_panels(nl, "r2"),
+        reference=ref,
+        **{f"v3_{ref}": v3_rig_panels(nl, ref)},
         **{f"v3_{tag}": v3_rig_panels(nl, tag)},
     )
 

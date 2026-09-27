@@ -975,6 +975,16 @@ def run_latents(fits_dir: Path, out_dir: Path, keys: Sequence[str]) -> dict[str,
         lat = fit["latents"]
         wander = fit["params"]["wander"]
         law = Wander.from_mapping(wander)
+        if not any(law.active(t) for t in ("d", "v", "u", "uj")):
+            # a rig-only fit (round 4): no wander, no latent track, nothing to
+            # check — say so instead of reporting zero-valued families
+            res[key] = dict(
+                fit=str(path),
+                status="disabled",
+                note="every wander sigma is 0 by construction (rig-only fit); no latent "
+                "track was fitted and none is rendered, so check (e) does not apply",
+            )
+            continue
         bs = float(wander["block_s"])
         noise = detail["rigs"][cfg["rig"]]["noise"][f"{bs:g}"]
         s2_line = float(noise["line_s2_measured_median_db2"])
@@ -1387,6 +1397,9 @@ def summary_md(out_dir: Path) -> str:
             "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
         for key, r in d["fits"].items():
+            if r.get("status") == "disabled":
+                lines.append(f"- {key}: (e) disabled — {r['note']}")
+                continue
             for name, f in r["families"].items():
                 if not f.get("n_values"):
                     continue
@@ -1409,6 +1422,8 @@ def summary_md(out_dir: Path) -> str:
             "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
         for key, r in d["fits"].items():
+            if r.get("status") == "disabled":
+                continue
             for name, f in r["families"].items():
                 if not f.get("n_values") or "ms_plus_post_var_db2" not in f:
                     continue
