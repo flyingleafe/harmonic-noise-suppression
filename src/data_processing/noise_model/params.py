@@ -72,10 +72,16 @@ def array_response_db(block: dict[str, Any], freqs_hz: np.ndarray) -> np.ndarray
     """
     band = np.asarray(block["band_hz"], dtype=np.float64)
     gain = np.atleast_2d(np.asarray(block["gain_db"], dtype=np.float64))
-    if band.ndim != 1 or gain.shape[1] != band.size or np.any(np.diff(band) <= 0):
+    if (
+        band.ndim != 1
+        or gain.shape[1] != band.size
+        or np.any(np.diff(band) <= 0)
+        or not np.all(band > 0)
+        or not np.all(np.isfinite(gain))
+    ):
         raise ValueError(
-            f"array_response needs increasing band_hz (B,) and gain_db (M, B); got "
-            f"{band.shape} and {gain.shape}"
+            f"array_response needs increasing positive band_hz (B,) and finite gain_db (M, B); "
+            f"got {band.shape} and {gain.shape}"
         )
     lf = np.log(np.maximum(np.asarray(freqs_hz, dtype=np.float64), band[0]))
     return np.stack([np.interp(lf, np.log(band), row) for row in gain])

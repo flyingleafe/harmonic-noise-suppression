@@ -680,6 +680,13 @@ class ChannelGains:
     band_hz: np.ndarray | None = None
     transfer_db: np.ndarray | None = None
 
+    def __post_init__(self) -> None:
+        if (self.band_hz is None) != (self.transfer_db is None):
+            raise ValueError("a channel transfer needs both band_hz and transfer_db, or neither")
+        if self.transfer_db is not None:
+            # validated once here, through the curve helper's own checks
+            MDP.array_response_db(self.array_response() or {}, np.asarray([1.0]))
+
     def normalise(self, power: np.ndarray, freqs_hz: np.ndarray | None = None) -> np.ndarray:
         """``(M, ...)`` periodogram with channel ``m`` divided by ``10^{g_m/10}``
         (per bin ``10^{g_m(f)/10}`` when a transfer is carried; ``freqs_hz`` are
