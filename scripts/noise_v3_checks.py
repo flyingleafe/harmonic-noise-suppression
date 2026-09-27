@@ -275,8 +275,14 @@ def prior_draw(fit: dict[str, Any], rng: np.random.Generator) -> tuple[dict[str,
     r_, k_ = prof.shape
     ks = np.arange(1, k_ + 1, dtype=np.float64)
     g0, gc = float(pr["gamma_hz"]["gamma0_hz"]), float(pr["gamma_hz"]["gamma_c"])
-    gamma = np.abs(rng.normal(0.0, gc * g0 * np.broadcast_to(ks, (r_, k_))))
-    sigma_nu = abs(float(rng.normal(0.0, float(pr["sigma_nu"]["scale_rad_s"]))))
+    bpf, other = (float(v) for v in pr["gamma_hz"].get("gamma_floor_hz") or (0.0, 0.0))
+    blades = int(pr["gamma_hz"].get("blades") or 2)
+    gamma_floor = np.where(ks % blades == 0, bpf, other)
+    gamma = np.abs(rng.normal(0.0, np.broadcast_to(gamma_floor + gc * g0 * ks, (r_, k_))))
+    if pr["sigma_nu"]["family"] == "LogNormal":
+        sigma_nu = float(np.exp(rng.normal(pr["sigma_nu"]["log_mu"], pr["sigma_nu"]["log_sd"])))
+    else:
+        sigma_nu = abs(float(rng.normal(0.0, float(pr["sigma_nu"]["scale_rad_s"]))))
     centre = np.asarray(meas["profile_centre_db"], dtype=np.float64)[:r_, :k_]
     profile = rng.normal(centre, float(pr["profile_db"]["sd"]))
     pinned = set(pins.get("pinned") or [])

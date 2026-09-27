@@ -1843,6 +1843,116 @@ as in round 2.
   hard cruise 16.84 against 22.23 (label 13.79), easy cruise 13.13 against
   13.79. Standby stays collapsed on both arms (3.76 and 6.34 against 10.63).
 
+## Round 4 (rig-only, priors re-centred on measurements and physics)
+
+Dmitrii's brief (2026-09-26): fit the v3 model WITHOUT the wandering latents
+first, with the prior changes A–F below and no new parameter; the result must
+match or beat the legacy fit on HPPNet L2 parity, on the LTAS proxy and by eye
+against the real Michael's recordings; for DREGON parity is the only key
+criterion. Latents come back only if three rounds of fitting and debugging
+miss those criteria AND the evidence says the latents are what still separates
+the fit from the legacy one. Rig fits run on kaggle / `uni-gpushort`, never
+vast (vast is for the RPS-tracker arms) and never the laptop.
+
+### Where round 3b stands against the bars
+
+| criterion | legacy | r3b | bar |
+|---|---|---|---|
+| DREGON parity (cruise PIT MAE, rev/s) | 2.188 | 1.700 (upper 2.048) | ≤ 2.188 |
+| Michael's parity (equal-regime mean, rev/s) | 3.027 | 1.592 (ratio 0.526) | ≤ 3.178 |
+| Michael's LTAS proxy (`ltas_abs_db`, cruise supports @40/@56, dB) | 0.98 / 1.68 = **1.33** | 2.54 / 2.42 = **2.48** | ≤ 1.22 (gate), ≤ 1.33 (legacy) |
+| Michael's Listen LTAS per band 100–300 / 300–700 / 700–1.5k / 1.5–3k / 3–5k / 5–7k Hz | +2.3 / +3.0 / +1.9 / +1.0 / +1.1 / +3.0 | −1.0 / −1.0 / −0.4 / +0.2 / **+2.2 / +7.6** | — |
+
+<!-- source: results/noise_v3/diag/verdict_r3.md (d); results/noise_v2/rounds/round1_legacy_plumbing/score/findings.md proxy rows; results/noise_v3/checks_r3b/parity/arm_michaels_v3.json gates.proxy; docs/explainers/noise-model-v3-latent-runaway/figdata_r3b.json listen.rigs.michaels.clips.{legacy,v3_r3b}.ltas_dev_db -->
+
+Parity is already met on both rigs. The Michael's gap is the LTAS proxy, and
+it is spectral shape, not level (level offset +0.1 / +2.1 dB): the render is
+2–8 dB too loud above 3 kHz. The no-wander render of r3b still has +5.6 dB
+at 5–7 kHz, so 5.6 of the 7.6 dB is the RIG (the explainer's "Listen again"),
+which is where the v3 profile prior puts it: `N(pooled level, 10)` centres every
+unresolved order AT the floor, and 4 rotors × ~70 orders at the floor level
+double the floor between 4 and 7 kHz. The latents add the last 2 dB through
+the log-normal mean (Jensen).
+
+### Design (written before any round-4 fit)
+
+No parameter is added. Every change is a prior centre or scale, a pin or a
+normalisation; the code is `model.PRIORS_V4` (`--priors v4`,
+`--priors-set KEY=VALUE` for a per-rig override).
+
+- **A1. Shaft rate pinned at the label's band edge.** `lam = 2π·16 ≈ 100.5
+  s⁻¹` (was 0.5). A 31.25 Hz label carries nothing above 15.6 Hz; the shaft OU
+  must generate only what the label leaves, so its corner sits at the label's
+  Nyquist. Round 3's 0.5 s⁻¹ made `sigma_nu` slow content the label already
+  tracks (`results/noise_v2/shaft/findings.md` § "Trend removal").
+- **A2. `sigma_nu ~ LogNormal`** fitted to the measured label residuals of the
+  six telemetered drones (NeuroBEM 9.67, Blackbird 2.75, VID 2.74, NanoBench
+  8.38, PI-TCN 11.3, DREGON room 1 `motors_measured` 3.48 rad/s; Michael's 29 Hz
+  log is a floor value, 1.12, and is left out): **LN(1.68, 0.66)**, median 5.4,
+  68 % 2.8–10.4 rad/s. Michael's takes the population prior. DREGON takes its
+  own residual as the centre, LN(ln 3.48, 0.5): the pool's carrier is
+  `motors_command`, whose gap to the shaft the fit must also carry, so wider
+  than a measurement (0.3) and narrower than the population. Round 3's
+  HalfNormal(0.6) was never a measurement and the fits sat 6–8 × outside it.
+  <!-- source: results/noise_v2/shaft/findings.md table "label residual" rows; log-normal fit over the six: mu 1.68 sd 0.66 (this session) -->
+- **B3. Width prior with a constant term and blade parity.** `gamma_rk ~
+  HalfNormal(gamma_floor[parity] + 0.03 k)` Hz with `gamma_floor` = 1 Hz for
+  blade-pass orders (`k % 2 == 0`) and 3 Hz for the others (was `0.03 k`
+  alone, which priced a 1 Hz width at k = 1 at 10³ nats). The bench measured
+  the odd orders decohering ~3.7 × faster (blade-asymmetry lines; explainer
+  § 6).
+- **C4. Profile prior relative to the measured floor.** `profile_rk ~
+  N(floor_rk − 12 dB − 15 dB·[k % 2 ≠ 0], 10 dB)`, `floor_rk` the measured
+  floor at the line's peak bin in the line's own units
+  (`Measured.floor_line_db`, recorded as `diagnostics.measured.floor_line_db`;
+  the prior centre itself in `profile_centre_db`, the pooled level in
+  `profile_pooled_db`). 12 dB is the pooled Whittle resolution limit: a line at
+  fraction x of the floor in one bin gains ≈ N M x²/2 nats over N frames × M
+  mics, and 2 nats needs x > 2/√(NM) = −14 / −15 / −11.5 dB on DREGON (310
+  frames) / cruise (496) / standby (93) at 8 mics; an order the data cannot
+  resolve therefore sinks under the floor instead of doubling it. The 15 dB
+  blade-asymmetry penalty is winged, not fitted: a fitted odd–even gap would
+  be the rig's own data twice. A resolved line pays ≤ (52/10)²/2 = 14 nats to
+  sit 40 dB over the centre, which the likelihood dwarfs. The warm start from
+  the v2 fit no longer clips the profile into this prior's box (it would clip
+  every resolved line).
+  <!-- source: results/noise_v3/fits_r3b/*__flight_v3.json optimiser.polish.frames 310 / 496 / 93 -->
+- **E10. Aeroacoustic speed exponents.** `amp_exp ~ N(6, 2)` (was N(2, 1)),
+  `floor_exp ~ LN(log 6, 0.35)` (was LN(log 2, 0.5)): rotor noise scales as
+  U⁴–U⁸; the legacy anchors fitted 7.5 / 6.8, v3 DREGON 8.1.
+- **E11. Speed-span pin lowered** to 1.2 (was 1.5): Michael's cruise pool spans
+  1.43 ×, so its exponents were held at 2.0 and the render did not follow the
+  rotor dips. With E10 an unidentified exponent rests on a physical prior.
+- **F12. Michael's channels normalised by the full-band gain**
+  (`--channel-gains-band full`: the mean of the rank test's four band groups
+  30 Hz–8 kHz; DREGON keeps the ≥ 500 Hz gain and its per-mic wind term). Per
+  mic the two differ by ≤ 1.2 dB on Michael's.
+- **No latents.** `--wander results/noise_v3/wander/<rig>_off.json` (the
+  measured record with every σ = 0, taus kept) and `--rounds 0`: the rig MAP at
+  zero latents, then the all-frames L-BFGS polish; no ridge step. A render of
+  the record draws no track. This is "r4a".
+- **Kept from round 3 (G13):** `--lbfgs-rtol 0`, 150 L-BFGS iterations on a
+  64-frame stratified subset, the all-frames polish, the v2 warm start, 4
+  restarts (seeds 0–3), pools and windows unchanged.
+
+**Predictions.**
+
+- Michael's LTAS proxy at or under the legacy 1.33 dB: the 5–7 kHz excess
+  goes with the floor-level orders (C4) and the Jensen term (no latents).
+- Parity stays under the bars on both rigs (DREGON ≤ 2.19, Michael's ratio
+  ≤ 1.05); the DREGON number may move either way by ~0.1 rev/s.
+- Fitted `sigma_nu` inside the prior's 68 % band; widths: the k ≥ 30 lines
+  dissolve through the shaft skirt (HWHM ≈ k² σ_ν² / 2π λ), no fitted γ
+  above 20 Hz.
+- Cruise `amp_exp` and `floor_exp` fitted, 4–8.
+- Rig views: k = 2 stays 35–40 dB over the floor on cruise; the number of
+  orders > 3 dB over the floor at 80 rev/s drops from 79/81 toward the
+  real-clip counts (explainer § Listen: real 8.8 / 3.0 / 1.2 at 3 / 6 / 10 dB
+  on the narrow pattern).
+- Rig-only fits are cheap (round-0 rig 2–5 min + polish 3–13 min per seed on
+  an A100 with four seeds sharing it), so a pool with two seeds fits inside a
+  `uni-gpushort` hour.
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |

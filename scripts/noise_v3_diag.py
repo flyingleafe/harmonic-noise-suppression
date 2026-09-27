@@ -486,7 +486,10 @@ def sanity(fit: dict[str, Any], fit_r1: dict[str, Any] | None) -> dict[str, Any]
     prof_sd = float(pri["profile_db"]["sd"])
     dev = prof[:, :k_max] - p_hat[:, :k_max]
     z = np.asarray(p["floor"]["floor_shape_z"], dtype=np.float64)
-    sig_nu, nu_scale = float(p["sigma_nu"]), float(pri["sigma_nu"]["scale_rad_s"])
+    # v4 records a LogNormal: report its median as the scale (the v3 rows below
+    # read a half-normal scale)
+    sig_nu = float(p["sigma_nu"])
+    nu_scale = float(pri["sigma_nu"].get("scale_rad_s") or pri["sigma_nu"].get("median_rad_s"))
     rows: dict[str, Any] = {}
     rows["gamma/(0.01k)"] = dict(
         prior=f"HalfNormal({gc:g})",

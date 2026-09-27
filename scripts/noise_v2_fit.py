@@ -49,6 +49,7 @@ import argparse
 import json
 import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -113,11 +114,29 @@ def load_profile_init(p: dict[str, Any]) -> Any:
         hi = int(hi_s)
         sigma[(k >= lo) & (k <= hi)] = float(sd_s)
         lo = hi + 1
-    import dataclasses
-
-    return dataclasses.replace(
+    return replace(
         init, sigma_db=np.where(np.isfinite(db), np.broadcast_to(sigma[None, :], db.shape), np.nan)
     )
+
+
+def _priors_overrides(items: Any) -> dict[str, Any]:
+    """``--priors-set KEY=VALUE`` pairs as :class:`PriorsV3` field values.
+
+    ``VALUE`` is JSON where it parses (``[1.25,0.3]`` a tuple field, ``12`` a
+    number, ``"floor"`` a string) and a bare string otherwise; lists become
+    tuples, so a pair overrides ``sigma_nu_lognormal`` or ``gamma_floor_hz``.
+    """
+    out: dict[str, Any] = {}
+    for item in items or []:
+        key, sep, raw = str(item).partition("=")
+        if not sep or not key:
+            raise SystemExit(f"--priors-set expects KEY=VALUE, got {item!r}")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        out[key] = tuple(value) if isinstance(value, list) else value
+    return out
 
 
 # ── one unit ────────────────────────────────────────────────────────────────
@@ -180,7 +199,10 @@ def worker(unit: Unit) -> dict[str, Any]:
         first = SU.load_support(str(specs[0]))
         gains = (
             FT.load_channel_gains(
-                str(p["channel_gains"]), rig=str(p["channel_gains_rig"]), mics=mics
+                str(p["channel_gains"]),
+                rig=str(p["channel_gains_rig"]),
+                mics=mics,
+                band=str(p.get("channel_gains_band") or "above_500"),
             )
             if p.get("channel_gains")
             else None
@@ -203,10 +225,12 @@ def worker(unit: Unit) -> dict[str, Any]:
 
     if mode == MD.V3_MODE:
         record = json.loads(Path(str(p["wander"])).read_text())
-        priors = MD.PriorsV3(
+        priors = replace(
+            MD.PRIOR_SETS[str(p.get("priors") or "v3")],
             wind=bool(p.get("wind")),
             wander=MD.Wander.from_mapping(record),
             wander_record=dict(record, path=str(p["wander"])),
+            **_priors_overrides(p.get("priors_set")),
         )
         outcome = FT.fit_v3(
             batch,
@@ -1129,6 +1153,30 @@ def main(argv: list[str] | None = None) -> int:
                 help="the rig block of --channel-gains (default: from the pool's support family)",
             )
             p.add_argument(
+                "--channel-gains-band",
+                choices=("above_500", "full"),
+                default="above_500",
+                help="flight_v3: which rank-test band the per-channel gain is read from: "
+                "the >= 500 Hz floor bands (DREGON, whose per-capsule wind lives below) or "
+                "the mean over all four band groups 30 Hz-8 kHz (Michael's, round 4)",
+            )
+            p.add_argument(
+                "--priors",
+                choices=("v3", "v4"),
+                default="v3",
+                help="flight_v3: the named prior set (model.PRIOR_SETS): v3 = round 3, "
+                "v4 = round 4 (label-band shaft rate, log-normal sigma_nu, parity width "
+                "floor, floor-relative profile centre, aeroacoustic speed exponents)",
+            )
+            p.add_argument(
+                "--priors-set",
+                nargs="*",
+                default=None,
+                metavar="KEY=VALUE",
+                help="flight_v3: override PriorsV3 fields of --priors, JSON values, e.g. "
+                "sigma_nu_lognormal=[1.247,0.3] for a rig with its own measured residual",
+            )
+            p.add_argument(
                 "--wind",
                 action="store_true",
                 help="flight_v3: the per-mic static low-frequency wind term (DREGON)",
@@ -1405,7 +1453,10 @@ def main(argv: list[str] | None = None) -> int:
                                 wander=str(args.wander),
                                 channel_gains=args.channel_gains,
                                 channel_gains_rig=gains_rig,
+                                channel_gains_band=str(args.channel_gains_band),
                                 wind=bool(args.wind),
+                                priors=str(args.priors),
+                                priors_set=list(args.priors_set or []),
                                 rounds=int(args.rounds),
                                 latent_iters=int(args.latent_iters),
                                 refit_adam_steps=int(args.refit_adam_steps),

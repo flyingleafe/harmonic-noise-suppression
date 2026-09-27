@@ -100,6 +100,8 @@ __all__ = [
     "DYN_SITES",
     "PRIORS",
     "PRIORS_V3",
+    "PRIORS_V4",
+    "PRIOR_SETS",
     "SPEED_LAW_SITES",
     "V3_MODE",
     "ChannelGains",
@@ -326,34 +328,99 @@ class PriorsV3(Priors):
     wind_db_sd: float = 6.0
     wander: Wander | None = None
     wander_record: dict[str, Any] | None = field(default=None, compare=False, hash=False)
+    #: ROUND 4 (``docs/experiments/noise-model-v3.md`` § Round 4). Every
+    #: default below reproduces round 3; :data:`PRIORS_V4` sets them.
+    #: ``sigma_nu ~ LogNormal(mu, sd)`` in place of the half-normal: the
+    #: population of measured label residuals of six telemetered drones
+    #: (``results/noise_v2/shaft/findings.md``), or one rig's own residual
+    #: with a tighter sd. The shaft is what the LABEL leaves, so with
+    #: ``flight_lam`` at the label's band edge the prior is a measurement.
+    sigma_nu_lognormal: tuple[float, float] | None = None
+    #: ``gamma_rk ~ HalfNormal(gamma_floor_hz[parity] + gamma_c gamma_per_order_hz k)``:
+    #: a constant term per order parity (blade-pass orders ``k % blades == 0``
+    #: first, the rest second), so a width at ``k = 1`` is not priced at
+    #: 1e5 nats. The bench measured the odd orders decohering ~3.7x faster.
+    gamma_floor_hz: tuple[float, float] = (0.0, 0.0)
+    blades: int = 2
+    #: ``"measured"``: v3's ``N(pooled level at k f_r, profile_db_sd)``;
+    #: ``"floor"``: ``N(measured floor at k f_r - profile_below_floor_db -
+    #: profile_odd_penalty_db [k % blades != 0], profile_db_sd)`` — an order
+    #: without evidence sinks below the floor instead of doubling it, and a
+    #: non-blade-pass order (blade asymmetry only) starts lower still.
+    profile_prior: str = "measured"
+    profile_below_floor_db: float = 0.0
+    profile_odd_penalty_db: float = 0.0
 
     def gamma_scale(self, k: np.ndarray | Tensor) -> Tensor:
-        """``gamma_c * gamma_per_order_hz * k``: the half-normal scale per order."""
+        """``gamma_floor_hz[parity] + gamma_c * gamma_per_order_hz * k``: the
+        half-normal scale per order."""
         kk = torch.as_tensor(np.array(k, dtype=np.float64), dtype=torch.float64)
-        return float(self.gamma_c) * float(self.gamma_per_order_hz) * kk
+        bpf, other = (float(v) for v in self.gamma_floor_hz)
+        floor = torch.where(
+            torch.remainder(kk, float(self.blades)) == 0.0,
+            torch.tensor(bpf, dtype=torch.float64),
+            torch.tensor(other, dtype=torch.float64),
+        )
+        return floor + float(self.gamma_c) * float(self.gamma_per_order_hz) * kk
+
+    def sigma_nu_median(self) -> float:
+        """The prior's median in rad/s: the fit's start and a probe's value."""
+        if self.sigma_nu_lognormal is not None:
+            return math.exp(float(self.sigma_nu_lognormal[0]))
+        # the half-normal median, Phi^-1(3/4) x scale
+        return float(self.sigma_nu_scale) * 0.6744897501960817
 
     def as_dict(self) -> dict[str, Any]:
+        v4 = self.profile_prior == "floor" or self.sigma_nu_lognormal is not None
         return {
-            "version": "v3",
-            "sigma_nu": {
-                "family": "HalfNormal",
-                "scale_rad_s": self.sigma_nu_scale,
-                "source": "2 x the v2 flight LogNormal median (0.3 rad/s)",
-            },
+            "version": "v4" if v4 else "v3",
+            "sigma_nu": (
+                {
+                    "family": "LogNormal",
+                    "log_mu": self.sigma_nu_lognormal[0],
+                    "log_sd": self.sigma_nu_lognormal[1],
+                    "median_rad_s": self.sigma_nu_median(),
+                    "source": "measured label residual RMS (results/noise_v2/shaft/findings.md)",
+                }
+                if self.sigma_nu_lognormal is not None
+                else {
+                    "family": "HalfNormal",
+                    "scale_rad_s": self.sigma_nu_scale,
+                    "source": "2 x the v2 flight LogNormal median (0.3 rad/s)",
+                }
+            ),
             "gamma_hz": {
                 "family": "HalfNormal",
-                "scale_hz": f"{self.gamma_c:g} * {self.gamma_per_order_hz:g} * k",
+                "scale_hz": (
+                    f"{self.gamma_floor_hz[0]:g} (k % {self.blades} == 0) | "
+                    f"{self.gamma_floor_hz[1]:g} (other) + "
+                    f"{self.gamma_c:g} * {self.gamma_per_order_hz:g} * k"
+                ),
                 "gamma_c": self.gamma_c,
                 "gamma0_hz": self.gamma_per_order_hz,
+                "gamma_floor_hz": list(self.gamma_floor_hz),
+                "blades": self.blades,
                 "source": "bench decoherence law V_eps ~ 0.09 k^1.1 tau^0.43 rad^2",
             },
             "flight_lam_pin": self.flight_lam,
-            "profile_db": {
-                "family": "Normal",
-                "loc": "measured pooled level at k f_r (line + floor)",
-                "sd": self.profile_db_sd,
-                "rule": "every order; no visibility switch",
-            },
+            "profile_db": (
+                {
+                    "family": "Normal",
+                    "loc": (
+                        f"measured floor at k f_r - {self.profile_below_floor_db:g} dB"
+                        f" - {self.profile_odd_penalty_db:g} dB [k % {self.blades} != 0]"
+                    ),
+                    "sd": self.profile_db_sd,
+                    "rule": "every order; centre below the floor; blade-pass parity",
+                }
+                if self.profile_prior == "floor"
+                else {
+                    "family": "Normal",
+                    "loc": "measured pooled level at k f_r (line + floor)",
+                    "sd": self.profile_db_sd,
+                    "rule": "every order; no visibility switch",
+                }
+            ),
             "floor_shape_z": {
                 "family": "Normal(0, I)",
                 "control_values_db": "mu + sigma_B (L z)_j",
@@ -383,6 +450,37 @@ class PriorsV3(Priors):
 
 
 PRIORS_V3 = PriorsV3()
+
+#: The round-4 priors (``docs/experiments/noise-model-v3.md`` § Round 4): the
+#: same sites, every law re-centred on a measurement or on physics.
+#:
+#: * ``lam`` = 2 pi 16 s^-1: the shaft OU carries only what a 31.25 Hz label
+#:   cannot, so its corner sits at the label's band edge;
+#: * ``sigma_nu ~ LogNormal(1.68, 0.66)``: the six measured label residuals
+#:   (2.7-11.3 rad/s, median 5.4); a rig with its own telemetry narrows it
+#:   (``--priors-set sigma_nu_lognormal=[mu,sd]``);
+#: * ``gamma`` half-normal scale ``1 Hz`` (blade-pass orders) / ``3 Hz``
+#:   (others) ``+ 0.03 k``;
+#: * profile centred 12 dB UNDER the measured floor (the pooled Whittle
+#:   resolution limit of ~1000 frames: ``x > 2 / sqrt N`` ~ -12 dB), a
+#:   further 15 dB down for non-blade-pass orders (blade asymmetry only);
+#: * ``amp_exp ~ N(6, 2)``, ``floor_exp ~ LogNormal(log 6, 0.35)``:
+#:   aeroacoustic U^4-U^8, the speed span pin lowered so a 1.44x cruise pool
+#:   fits them.
+PRIORS_V4 = PriorsV3(
+    flight_lam=2.0 * math.pi * 16.0,
+    sigma_nu_lognormal=(1.68, 0.66),
+    gamma_floor_hz=(1.0, 3.0),
+    profile_prior="floor",
+    profile_below_floor_db=12.0,
+    profile_odd_penalty_db=15.0,
+    amp_exp=(6.0, 2.0),
+    log_floor_exp=(math.log(6.0), 0.35),
+    speed_span_pin=1.2,
+)
+
+#: The named prior sets a fit selects by ``--priors``.
+PRIOR_SETS: dict[str, PriorsV3] = {"v3": PRIORS_V3, "v4": PRIORS_V4}
 
 
 @dataclass(frozen=True)
@@ -415,11 +513,28 @@ class Measured:
     floor_shape_sd_db: float | None = None
     floor_ctrl_db: np.ndarray | None = None
     wind_db: np.ndarray | None = None
+    #: v3 only: ``(R, K)`` the MEASURED floor at each line's peak bin, in the
+    #: line's own profile units (the level a line would need to equal the
+    #: floor there): the centre of the round-4 floor-relative profile prior.
+    floor_line_db: np.ndarray | None = None
 
     def profile_prior(self, priors: Priors) -> tuple[Tensor, Tensor]:
         """``(loc, scale)`` of the profile prior, per line: v2's two regimes,
-        or v3's ONE ``N(measured pooled level, profile_db_sd)`` for every line."""
-        if isinstance(priors, PriorsV3):
+        v3's ONE ``N(measured pooled level, profile_db_sd)`` for every line, or
+        round 4's ``N(measured floor - below - odd penalty, profile_db_sd)``."""
+        if isinstance(priors, PriorsV3) and priors.profile_prior == "floor":
+            if self.floor_line_db is None:
+                raise ValueError("profile_prior 'floor' needs the measured floor at each line")
+            floor = np.asarray(self.floor_line_db, dtype=np.float64)
+            k = np.arange(1, floor.shape[1] + 1)
+            odd = (k % int(priors.blades) != 0)[None, :]
+            loc = (
+                floor
+                - float(priors.profile_below_floor_db)
+                - float(priors.profile_odd_penalty_db) * odd
+            )
+            scale = np.full(loc.shape, float(priors.profile_db_sd))
+        elif isinstance(priors, PriorsV3):
             loc = np.asarray(self.profile_db, dtype=np.float64)
             scale = np.full(loc.shape, float(priors.profile_db_sd))
         else:
@@ -1309,6 +1424,8 @@ def _sample_params_v3(
     if is_pinned(pin, "sigma_nu"):
         assert pin is not None
         sigma_nu = torch.as_tensor(float(pin["sigma_nu"]), dtype=torch.float64)
+    elif priors.sigma_nu_lognormal is not None:
+        sigma_nu = _lognormal(site, "sigma_nu", priors.sigma_nu_lognormal)
     else:
         sigma_nu = site(
             "sigma_nu",

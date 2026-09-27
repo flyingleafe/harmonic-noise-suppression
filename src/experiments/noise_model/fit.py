@@ -622,7 +622,7 @@ def _seeds_v3(
     r, m, k = batch.n_rotors, batch.n_mics, batch.k_max
     orders = np.broadcast_to(np.arange(1, k + 1, dtype=np.float64), (r, k))
     gamma0 = priors.gamma_scale(orders).detach().cpu().numpy() * HALFNORMAL_MEDIAN
-    sigma0 = float(priors.sigma_nu_scale) * HALFNORMAL_MEDIAN
+    sigma0 = priors.sigma_nu_median()
     med = priors.speed_law_medians()
     zero = torch.zeros((), dtype=torch.float64)
     probe = SP.V2Params(
@@ -658,6 +658,7 @@ def _seeds_v3(
     floor_lin = np.maximum(floor_unit, 1e-30) * 10.0 ** (mu / 10.0)
     excess = np.maximum(obs_mean - floor_lin, 1e-12)
     p_hat = np.full((r, k), mu, dtype=np.float64)
+    floor_line = np.full((r, k), mu, dtype=np.float64)
     prof = np.full((r, k), mu - V3_SINK_INIT_DB, dtype=np.float64)
     snr = np.full((r, k), -99.0, dtype=np.float64)
     for rr, kk, j0, j1 in _line_windows(batch, band=band, carrier=None, keep_all=True):
@@ -673,6 +674,8 @@ def _seeds_v3(
         )
         jpk = int(j0 + np.argmax(excess[j0:j1]))
         snr[rr, kk - 1] = 10.0 * math.log10(num / max(float(floor_lin[jpk]), 1e-30))
+        # the floor at the line's own peak bin, in the line's profile units
+        floor_line[rr, kk - 1] = 10.0 * math.log10(max(float(floor_lin[jpk]), 1e-30) / den)
 
     # ── the floor SHAPE: control values and sigma_B ────────────────────────
     # read only where the FLOOR dominates: the pooled mean with the comb at
@@ -725,6 +728,7 @@ def _seeds_v3(
         floor_shape_sd_db=sigma_b,
         floor_ctrl_db=ctrl,
         wind_db=wind_db,
+        floor_line_db=floor_line,
     )
 
     out: dict[str, Tensor] = {}
@@ -877,6 +881,13 @@ def warm_start_v3(
     for name, value in v2_sites.items():
         if name not in init:  # pinned (a span pin or --pin): no site to start
             continue
+        if name == "profile_db" and priors.profile_prior == "floor":
+            # the round-4 centre sits 12-27 dB UNDER the floor on purpose: its
+            # q-box would clip every resolved line, which the likelihood, not
+            # the prior, places. The v2 comb starts where v2 left it.
+            init[name] = value
+            clipped[name] = 0
+            continue
         lo, hi = (b.detach().cpu() for b in boxes[name])
         init[name] = torch.maximum(torch.minimum(value, hi), lo)
         clipped[name] = int((init[name] != value).sum())
@@ -956,7 +967,11 @@ def _wind_centres(batch: MD.SupportBatch) -> np.ndarray:
 
 
 def load_channel_gains(
-    path: str | Path, *, rig: str, mics: Sequence[int] | None = None
+    path: str | Path,
+    *,
+    rig: str,
+    mics: Sequence[int] | None = None,
+    band: str = "above_500",
 ) -> MD.ChannelGains:
     """The per-channel gains v3 normalises ``rig``'s data by (explainer §2.5).
 
@@ -965,9 +980,12 @@ def load_channel_gains(
     gains on the 1/3-octave bands at and above 500 Hz
     (``rigs.<rig>.wind.excess_db_above_500hz``) — where comb and floor share
     one gain per channel on both rigs (r = 0.990 DREGON, 0.996 Michael's) and
-    below which DREGON's per-capsule wind excess lives. ``mics`` selects
-    channels (a smoke fit on a subset); the selected gains are re-centred on
-    their own mean, so the normalisation moves no absolute level.
+    below which DREGON's per-capsule wind excess lives — or, ``band="full"``,
+    the mean over the record's four band groups (30 Hz-8 kHz,
+    ``rigs.<rig>.wind.excess_db_by_band_group``): the whole-band gain a rig
+    without a wind term (Michael's, round 4) is normalised by. ``mics``
+    selects channels (a smoke fit on a subset); the selected gains are
+    re-centred on their own mean, so the normalisation moves no absolute level.
     """
     p = Path(path)
     d = json.loads(p.read_text())
@@ -976,16 +994,30 @@ def load_channel_gains(
     rigs = d.get("rigs") or {}
     if rig not in rigs:
         raise KeyError(f"{p}: no rig {rig!r} (have {sorted(rigs)})")
-    g = np.asarray(rigs[rig]["wind"]["excess_db_above_500hz"], dtype=np.float64)
+    wind = rigs[rig]["wind"]
+    if band == "above_500":
+        g = np.asarray(wind["excess_db_above_500hz"], dtype=np.float64)
+        rule = (
+            "rank-one floor gain per channel on the 1/3-octave bands >= 500 Hz "
+            "(rigs.<rig>.wind.excess_db_above_500hz)"
+        )
+    elif band == "full":
+        groups = wind["excess_db_by_band_group"]
+        g = np.mean([np.asarray(groups[name], dtype=np.float64) for name in groups], axis=0)
+        rule = (
+            "rank-one floor gain per channel, mean over the band groups "
+            f"{list(groups)} (rigs.<rig>.wind.excess_db_by_band_group)"
+        )
+    else:
+        raise ValueError(f"band must be 'above_500' or 'full', got {band!r}")
     if mics is not None:
         g = g[np.asarray(list(mics), dtype=np.int64)]
     return MD.ChannelGains(
         gains_db=g - g.mean(),
         source=str(p),
         rig=str(rig),
-        rule="rank-one floor gain per channel on the 1/3-octave bands >= 500 Hz "
-        "(rigs.<rig>.wind.excess_db_above_500hz), re-centred on the channels used; "
-        "each channel's periodogram is divided by 10^(g/10)",
+        rule=f"{rule}, re-centred on the channels used; each channel's periodogram is "
+        "divided by 10^(g/10)",
     )
 
 
@@ -1564,10 +1596,20 @@ def _measured_record(measured: MD.Measured, *, priors: MD.Priors) -> dict[str, A
             ),
             resolution_hz=measured.resolution_hz,
             n_lines=int(measured.line_snr_db.size),
-            profile_centre="pooled observed level at k f_r (line + floor), every line",
-            # the (R, K) centres themselves: the prior predictive and the
+            profile_centre=(
+                "measured floor at k f_r - below - odd penalty (round 4)"
+                if priors.profile_prior == "floor"
+                else "pooled observed level at k f_r (line + floor), every line"
+            ),
+            # the (R, K) prior centres themselves: the prior predictive and the
             # parameter view draw / plot the profile against them
-            profile_centre_db=np.asarray(measured.profile_db, dtype=np.float64).tolist(),
+            profile_centre_db=measured.profile_prior(priors)[0].numpy().tolist(),
+            profile_pooled_db=np.asarray(measured.profile_db, dtype=np.float64).tolist(),
+            floor_line_db=(
+                None
+                if measured.floor_line_db is None
+                else np.asarray(measured.floor_line_db, dtype=np.float64).tolist()
+            ),
         )
     return dict(
         floor_mean_db=measured.floor_mean_db,
