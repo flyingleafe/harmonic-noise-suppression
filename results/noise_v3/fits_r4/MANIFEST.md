@@ -21,8 +21,9 @@ fit of the pool, `--max-frames 0`. Job scripts: `results/noise_v3/fits_r4{b,c}/j
 Convergence (`optimiser.polish` of the selected restarts): the move from
 the 64-frame subset optimum to the all-frames polish is 0.00721 (DREGON) /
 0.01992 (cruise) / 0.00218 (standby) nats per cell; `rig_converged` is false
-on all three at the 600-iteration cap (the terminal L-BFGS restart still
-gains; see `optimiser.polish` in each file).
+on all three at the 600-iteration cap; the terminal L-BFGS restart still
+gains (`optimiser.last_rig.lbfgs_restart_gain_per_cell`: 0.000351 / 0.000165 /
+0.000408 nats per cell).
 
 Checks: `results/noise_v3/checks_r4/` (job `nv3r4-checks-1d0d6c`). The
 `latents` step is N/A on this set (no latent track by construction): it

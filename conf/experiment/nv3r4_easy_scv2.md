@@ -37,4 +37,11 @@ scripts/noise_v2_submit_arms.sh --backend vast --gpu-type A100 --cpus 16 --mem 6
 
 ## Conclusion
 
-Pending: the arm is not yet run.
+**No transfer gain over round 3b; level with the legacy easy arm.** Job
+`nv3r4-easy-scv2-c85aa7` (Vast A100, 3 h 32 min, early-stopped at round 77) selected
+round 36: smoothed 6.10, **raw @ sel 6.10**, best raw 4.63 (at a round no
+checkpoint corresponds to). r1 / r2 / r3 at sel 3.54 / 4.78 / 6.10. Against
+`nv3r3_easy_scv2` 4.68 (r1 5.22 / r2 4.74 / r3 4.68) and the legacy easy arm
+6.09. The r1 view is the best of any synthetic arm; the r3 view is what
+selects. Scores from `scripts/_nv3_arm_history.py` (the live R2 validation
+history), read at the campaign doc's § Round 4 "Training arms".
