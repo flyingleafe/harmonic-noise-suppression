@@ -87,6 +87,7 @@ from torch.distributions import constraints
 # MOVED to data_processing.noise_model.params: the v2 renderer reads a fit's
 # line widths and data_processing may not import experiments. Re-exported here
 # unchanged, so `MD.gamma_from_params` keeps working.
+from data_processing.noise_model import params as MDP
 from data_processing.noise_model.params import gamma_from_params
 from data_processing.noise_model.v3 import Wander, wind_shape_spec
 from experiments.stochastic_fit.model import FLOOR_SHAPE_N_CTRL
@@ -660,20 +661,59 @@ class ChannelGains:
     channels' mean; :meth:`normalise` divides each channel's periodogram by
     ``10^{g_m / 10}``. Read by :func:`.fit.load_channel_gains` from the
     rank-test record (``results/noise_v2/mic_gains/mic_gains.json``).
+
+    Round 4 (``band="transfer"``): a PER-BAND response ``transfer_db`` (M, B)
+    on the third-octave centres ``band_hz`` — each mic's measured deviation
+    from the array mean as a function of frequency (Michael's mic 0 sits 4-5
+    dB under the array mean at 5-8 kHz and 1-2 dB over it at 100-300 Hz on
+    every real window). With it :meth:`normalise` divides by the curve on the
+    batch's own bins (:func:`data_processing.noise_model.params.array_response_db`)
+    and :meth:`array_response` is the block a fit records for the renderer and
+    the expectation to apply back. ``gains_db`` then holds each mic's band
+    mean, for the record.
     """
 
     gains_db: np.ndarray
     source: str = ""
     rig: str = ""
     rule: str = ""
+    band_hz: np.ndarray | None = None
+    transfer_db: np.ndarray | None = None
 
-    def normalise(self, power: np.ndarray) -> np.ndarray:
-        """``(M, ...)`` periodogram with channel ``m`` divided by ``10^{g_m/10}``."""
+    def normalise(self, power: np.ndarray, freqs_hz: np.ndarray | None = None) -> np.ndarray:
+        """``(M, ...)`` periodogram with channel ``m`` divided by ``10^{g_m/10}``
+        (per bin ``10^{g_m(f)/10}`` when a transfer is carried; ``freqs_hz`` are
+        then the last axis's bin frequencies)."""
         p = np.asarray(power, dtype=np.float64)
+        block = self.array_response()
+        if block is not None:
+            if freqs_hz is None:
+                raise ValueError(
+                    "a per-band channel transfer needs the periodogram's bin frequencies"
+                )
+            curve = MDP.array_response_db(block, np.asarray(freqs_hz, dtype=np.float64))  # (M, F)
+            if curve.shape[0] != int(p.shape[0]) or curve.shape[1] != int(p.shape[-1]):
+                raise ValueError(
+                    f"{curve.shape} channel transfer for a {p.shape[0]}-mic, {p.shape[-1]}-bin "
+                    "periodogram"
+                )
+            return p / (10.0 ** (curve / 10.0)).reshape((p.shape[0],) + (1,) * (p.ndim - 2) + (-1,))
         g = np.asarray(self.gains_db, dtype=np.float64).reshape(-1)
         if g.size != int(p.shape[0]):
             raise ValueError(f"{g.size} channel gains for a {int(p.shape[0])}-mic periodogram")
         return p / (10.0 ** (g / 10.0)).reshape((-1,) + (1,) * (p.ndim - 1))
+
+    def array_response(self) -> dict[str, Any] | None:
+        """The ``params.array_response`` block, or ``None`` for a flat gain."""
+        if self.band_hz is None or self.transfer_db is None:
+            return None
+        return dict(
+            band_hz=np.asarray(self.band_hz, dtype=np.float64).tolist(),
+            gain_db=np.asarray(self.transfer_db, dtype=np.float64).tolist(),
+            source=self.source,
+            rig=self.rig,
+            rule=self.rule,
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return dict(
@@ -681,6 +721,30 @@ class ChannelGains:
             source=self.source,
             rig=self.rig,
             rule=self.rule,
+            **({} if self.band_hz is None else {"band_hz": np.asarray(self.band_hz).tolist()}),
+            **(
+                {}
+                if self.transfer_db is None
+                else {"transfer_db": np.asarray(self.transfer_db, dtype=np.float64).tolist()}
+            ),
+        )
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ChannelGains:
+        """Inverse of :meth:`as_dict` (a fit's ``diagnostics.batch.channel_gains``)."""
+        return cls(
+            gains_db=np.asarray(d["gains_db"], dtype=np.float64),
+            source=str(d.get("source", "")),
+            rig=str(d.get("rig", "")),
+            rule=str(d.get("rule", "")),
+            band_hz=None
+            if d.get("band_hz") is None
+            else np.asarray(d["band_hz"], dtype=np.float64),
+            transfer_db=(
+                None
+                if d.get("transfer_db") is None
+                else np.asarray(d["transfer_db"], dtype=np.float64)
+            ),
         )
 
 
@@ -901,7 +965,7 @@ def flight_batch(
     for w_idx, (mname, power, carrier, starts) in enumerate(members):
         p = np.asarray(power, dtype=np.float64)
         if channel_gains is not None:
-            p = channel_gains.normalise(p)
+            p = channel_gains.normalise(p, grid.freqs_hz)
         st = np.asarray(starts, dtype=np.int64)
         n_total += int(st.size)
         sel = np.arange(0, st.size, max(1, int(frame_stride)))

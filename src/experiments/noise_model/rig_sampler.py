@@ -327,16 +327,36 @@ ANCHORS_V3R3: dict[str, dict[str, Any]] = {
     for rig, row in ANCHORS_V3.items()
 }
 
+#: Round 4b of the noise-model-v3 campaign (``docs/experiments/noise-model-v3.md``
+#: § "Round 4": rig-only fits under ``model.PRIORS_V4``, no block wander). No
+#: fold: the record carries no latent track and its wander block is all zero,
+#: so a render draws no track and the rig IS the expectation.
+ROUND_V3_R4 = "results/noise_v3/fits_r4b"
+
+#: The v3 anchors of the round-4 arms: the round-4b fits as written.
+ANCHORS_V3R4: dict[str, dict[str, Any]] = {
+    rig: {
+        **row,
+        "cruise": row["cruise"].replace(ROUND_V3_R2, ROUND_V3_R4),
+        "standby": None
+        if row["standby"] is None
+        else row["standby"].replace(ROUND_V3_R2, ROUND_V3_R4),
+    }
+    for rig, row in ANCHORS_V3.items()
+}
+
 #: The model generations a bank can be drawn in, and the anchors of each.
-#: ``"v3r3"`` is the v3 construction around the round-3b anchors.
+#: ``"v3r3"`` is the v3 construction around the round-3b anchors, ``"v3r4"``
+#: around the round-4b ones.
 GENERATIONS: dict[str, dict[str, dict[str, Any]]] = {
     "v2": ANCHORS,
     "v3": ANCHORS_V3,
     "v3r3": ANCHORS_V3R3,
+    "v3r4": ANCHORS_V3R4,
 }
 
 #: The generations drawn with the v3 construction (and its trend rule).
-V3_GENERATIONS = ("v3", "v3r3")
+V3_GENERATIONS = ("v3", "v3r3", "v3r4")
 
 
 def anchors_of(generation: str) -> dict[str, dict[str, Any]]:

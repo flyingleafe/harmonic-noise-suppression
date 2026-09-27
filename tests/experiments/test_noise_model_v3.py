@@ -923,3 +923,162 @@ def test_power_wander_mean_renders_the_fitted_mean_line_power():
         # is the same audio scaled by the lognormal excess
         excess = math.exp(kk**2 * (1.0**2 + s_v**2) / 2.0)
         np.testing.assert_allclose(got["zero"] / got["power"], excess, rtol=1e-3)
+
+
+# ── round 4: the array's per-channel response ────────────────────────────────
+
+
+def test_array_response_curve_interpolates_in_log_f_and_holds_the_edges():
+    """``array_response_db`` is linear in ``log f`` between the band centres,
+    flat beyond them, and refuses a malformed block."""
+    from data_processing.noise_model import params as MDP
+
+    block = {"band_hz": [100.0, 1000.0, 10000.0], "gain_db": [[1.0, 3.0, -5.0], [0.0, 0.0, 0.0]]}
+    f = np.array([10.0, 100.0, 316.2277660168379, 1000.0, 3162.277660168379, 10000.0, 20000.0])
+    got = MDP.array_response_db(block, f)
+    np.testing.assert_allclose(got[0], [1.0, 1.0, 2.0, 3.0, -1.0, -5.0, -5.0], rtol=1e-9)
+    np.testing.assert_allclose(got[1], 0.0)
+    with pytest.raises(ValueError, match="array_response"):
+        MDP.array_response_db({"band_hz": [1000.0, 100.0], "gain_db": [[0.0, 0.0]]}, f)
+    with pytest.raises(ValueError, match="array_response"):
+        MDP.array_response_db({"band_hz": [100.0, 1000.0], "gain_db": [[0.0, 0.0, 0.0]]}, f)
+
+
+def test_a_per_band_transfer_normalises_the_data_and_is_written_for_the_renderer(tmp_path):
+    """``load_channel_gains(band="transfer")`` reads each mic's per-band
+    deviation from the array mean off the rank record's level table; a batch
+    normalised by it is divided by the curve on its own bins (the power-domain
+    inverse of what the renderer and the expectation apply back), and the fit
+    record carries the block as ``params.array_response`` with the SAME
+    numbers, so a render of the record is mic ``m`` of the rig."""
+    import json
+
+    from data_processing.noise_model import params as MDP
+    from experiments.noise_model import render as RD
+
+    k_cap, n_mics = 3, 2
+    par = _params(k_cap=k_cap, n_mics=n_mics, profile_db=-20.0)
+    par = dataclasses.replace(par, floor=dataclasses.replace(par.floor, shape_sd_db=_t(3.0)))
+    band_hz = [100.0, 1000.0, 5000.0]
+    # three windows, three mics, three bands: mic 0 is +2 / 0 / -6 dB against
+    # the array mean, mic 2 the mirror image, mic 1 (unused) fills the mean
+    full = []
+    for w in range(3):
+        base = np.array([[-40.0, -50.0, -60.0]]) + w
+        full.append(
+            (base + np.array([[2.0], [0.0], [-2.0]]) * np.array([[1.0, 0.0, -3.0]])).tolist()
+        )
+    record = {
+        "schema": "mic-gain-rank/1",
+        "rigs": {
+            "toy": {
+                "band_centres_hz": band_hz,
+                "levels_db": {"full": full},
+                "wind": {"excess_db_above_500hz": [0.0, 0.0, 0.0]},
+            }
+        },
+    }
+    path = tmp_path / "mic_gains.json"
+    path.write_text(json.dumps(record))
+    gains = FT.load_channel_gains(path, rig="toy", mics=[0, 2], band="transfer")
+    assert gains.transfer_db is not None and gains.band_hz is not None
+    np.testing.assert_allclose(gains.transfer_db, [[2.0, 0.0, -6.0], [-2.0, 0.0, 6.0]], atol=1e-12)
+    np.testing.assert_allclose(gains.gains_db, [-4.0 / 3.0, 4.0 / 3.0], atol=1e-12)
+
+    raw = _flight_batch(par, k_cap=k_cap, n_mics=n_mics)
+    starts = np.arange(16) * 256
+    rps = np.full((1, 512 + 15 * 256), 180.0)
+    normed = MD.flight_batch(
+        name="v3",
+        members=[("w0", raw.power.numpy(), rps, starts)],
+        sr=SR,
+        n_fft=512,
+        hop=256,
+        k_cap=k_cap,
+        channel_gains=gains,
+    )
+    block = gains.array_response()
+    assert block is not None
+    curve = MDP.array_response_db(block, normed.grid.freqs_hz)  # (M, F)
+    ratio = (raw.power / normed.power).numpy()  # (M, N, F)
+    np.testing.assert_allclose(
+        ratio, np.broadcast_to(10.0 ** (curve[:, None, :] / 10.0), ratio.shape), rtol=1e-12
+    )
+
+    wander = MD.Wander(
+        sigma_d_db=0.0,
+        tau_d_s=1.0,
+        sigma_v_db=0.0,
+        tau_v_s=1.0,
+        sigma_u_db=0.0,
+        tau_u_s=1.0,
+        block_s=0.05,
+    )
+    priors = MD.PriorsV3(wander=wander)
+    out = FT.fit_v3(
+        normed,
+        priors=priors,
+        optim=FT.OptimSpecV3(
+            rig=FT.OptimSpec(adam_steps=2, adam_batch=4, lbfgs_iters=1, lbfgs_frames=None),
+            rounds=0,
+        ),
+    )
+    rec_path = FT.write_fit(
+        tmp_path / "toy__flight_v3.json",
+        support="toy",
+        kind="flight",
+        mode=MD.V3_MODE,
+        outcome=out,
+        batch=normed,
+        priors=priors,
+    )
+    fit = json.loads(rec_path.read_text())
+    assert fit["params"]["array_response"]["gain_db"] == block["gain_db"]
+    assert fit["params"]["array_response"]["band_hz"] == block["band_hz"]
+    assert fit["diagnostics"]["batch"]["channel_gains"]["transfer_db"] == block["gain_db"]
+
+    # the expectation of mic m is the array-mean model times the response
+    plain = json.loads(json.dumps(fit))
+    del plain["params"]["array_response"]
+    r = np.full((1, 4096), 180.0)
+    with_resp = RD.expected_periodogram(fit, r, n_fft=512, hop=256, sr=SR, n_mics=n_mics)
+    without = RD.expected_periodogram(plain, r, n_fft=512, hop=256, sr=SR, n_mics=n_mics)
+    want = MDP.array_response_db(block, np.fft.rfftfreq(512, 1.0 / SR))
+    np.testing.assert_allclose(
+        10.0 * np.log10(with_resp / without), np.broadcast_to(want[:, None, :], with_resp.shape)
+    )
+
+
+def test_a_render_carries_each_channels_response_in_its_long_run_spectrum():
+    """Rendered mic 0 over mic 1 follows ``params.array_response`` band for band:
+    a 20 s floor-only render, its per-mic band levels against the response's
+    difference on the same bands, within the periodogram's own scatter."""
+    from experiments.noise_model import render as RD
+    from experiments.noise_model import supports as SU
+
+    k_cap, n_mics, dur = 12, 2, 20.0
+    fit = _wander_mean_fit(k_cap=k_cap, n_rotors=1, n_mics=n_mics, floor_mean_db=-45.0)
+    p = fit["params"]
+    p["profile"]["profile_db"] = (np.asarray(p["profile"]["profile_db"]) - 300.0).tolist()
+    for key in ("sigma_d_db", "sigma_v_db", "sigma_u_db", "sigma_uj_db"):
+        p["wander"][key] = 0.0
+    p["wander"]["sigma_v_db_by_order"]["sigma_db"] = [0.0, 0.0]
+    band_hz = [125.0, 500.0, 2000.0, 6000.0]
+    p["array_response"] = {
+        "band_hz": band_hz,
+        "gain_db": [[3.0, 1.0, -2.0, -5.0], [-3.0, -1.0, 2.0, 5.0]],
+    }
+    rps = np.full((1, int(dur * SR)), 150.0)
+    audio = RD.render_noise(fit, rps, sr=SR, n_mics=n_mics, seed=3, sr_work=32000)
+    s = SU.synthetic_support("resp", audio, rps, segment=(0.0, dur), meta={})
+    power = np.asarray(s.power).mean(axis=1)  # (M, F)
+    f = np.fft.rfftfreq(SU.OBS_N_FFT, 1.0 / SR)
+    for lo, hi, want in (
+        (110.0, 140.0, 6.0),
+        (450.0, 550.0, 2.0),
+        (1800.0, 2200.0, -4.0),
+        (5500.0, 6500.0, -10.0),
+    ):
+        sel = (f >= lo) & (f < hi)
+        got = 10.0 * np.log10(power[0, sel].mean() / power[1, sel].mean())
+        assert abs(got - want) < 0.4, (lo, hi, got, want)

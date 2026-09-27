@@ -17,7 +17,7 @@ import numpy as np
 
 from data_processing.noise_model import READABLE_FIT_SCHEMAS
 
-__all__ = ["check_schema", "gamma_from_params"]
+__all__ = ["array_response_db", "check_schema", "gamma_from_params"]
 
 
 def check_schema(fit: dict[str, Any]) -> dict[str, Any]:
@@ -55,3 +55,27 @@ def gamma_from_params(d: dict[str, Any]) -> np.ndarray:
     p = float(d.get("p", 1.0))
     gamma = se**2 * k**p * le / (2.0 * math.pi)
     return np.broadcast_to(gamma[None, :], prof.shape).copy()
+
+
+def array_response_db(block: dict[str, Any], freqs_hz: np.ndarray) -> np.ndarray:
+    """``(M, F)`` per-microphone response, dB, of a ``params.array_response``
+    block on the bins ``freqs_hz``.
+
+    The block is a MEASURED property of the recording array, not of the rotor
+    model: ``band_hz`` (B) third-octave centres and ``gain_db`` (M, B), each
+    mic's mean deviation from the array mean over the rig's real windows
+    (``experiments.noise_model.fit.load_channel_gains(band="transfer")``). It
+    is interpolated linearly in ``log f`` and held flat beyond the outermost
+    bands. A v3 fit whose data were normalised by it (every channel's
+    periodogram divided by ``10^{g_m(f)/10}``) is rendered and expected back
+    THROUGH it, so mic ``m`` of the render is mic ``m`` of the rig.
+    """
+    band = np.asarray(block["band_hz"], dtype=np.float64)
+    gain = np.atleast_2d(np.asarray(block["gain_db"], dtype=np.float64))
+    if band.ndim != 1 or gain.shape[1] != band.size or np.any(np.diff(band) <= 0):
+        raise ValueError(
+            f"array_response needs increasing band_hz (B,) and gain_db (M, B); got "
+            f"{band.shape} and {gain.shape}"
+        )
+    lf = np.log(np.maximum(np.asarray(freqs_hz, dtype=np.float64), band[0]))
+    return np.stack([np.interp(lf, np.log(band), row) for row in gain])

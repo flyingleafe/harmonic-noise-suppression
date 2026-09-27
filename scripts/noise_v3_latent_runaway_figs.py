@@ -376,14 +376,14 @@ def tracks(fits: dict[str, dict[str, Any]], ctrl_hz: np.ndarray) -> dict[str, An
 
 def pool_batch(fit: dict[str, Any], *, v3: bool, set_name: str = "dregon-floor") -> Any:
     """The fit's pool exactly as the CLI built it from support set ``set_name``
-    (``v3``: channel-normalised on the fit's rig, the v3 work rate; else the v2
-    fit's unnormalised build)."""
-    from experiments.noise_model import fit as FT
+    (``v3``: channel-normalised by the gains the fit RECORDED
+    (``diagnostics.batch.channel_gains``: the >= 500 Hz band on rounds 1-3,
+    the full band on Michael's round 4), the v3 work rate; else the v2 fit's
+    unnormalised build)."""
     from experiments.noise_model import model as MD
     from experiments.noise_model import supports as SUP
 
     name = str(fit["support"])
-    rig = "dregon" if name.startswith("dregon") else "michaels"
     specs = {s.name: s for s in SUP.support_set(set_name)}
     members = []
     sups = [SUP.load_support(specs[n]) for n in fit["supports"]]
@@ -396,6 +396,15 @@ def pool_batch(fit: dict[str, Any], *, v3: bool, set_name: str = "dregon-floor")
                 np.asarray(s.frame_starts, dtype=np.int64),
             )
         )
+    gains = None
+    if v3:
+        rec = fit["diagnostics"]["batch"]["channel_gains"]
+        gains = MD.ChannelGains(
+            gains_db=np.asarray(rec["gains_db"], dtype=np.float64),
+            source=str(rec["source"]),
+            rig=str(rec["rig"]),
+            rule=str(rec["rule"]),
+        )
     batch = MD.flight_batch(
         name=name,
         members=members,
@@ -404,7 +413,7 @@ def pool_batch(fit: dict[str, Any], *, v3: bool, set_name: str = "dregon-floor")
         hop=int(sups[0].hop),
         k_cap=K_CAP,
         frame_stride=FRAME_STRIDE,
-        channel_gains=FT.load_channel_gains(CHANNEL_GAINS, rig=rig) if v3 else None,
+        channel_gains=gains,
         device="cpu",
         chunk_frames=CHUNK_FRAMES,
         sr_work=V3_SR_WORK if v3 else V2_SR_WORK,

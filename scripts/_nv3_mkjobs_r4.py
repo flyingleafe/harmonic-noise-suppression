@@ -12,7 +12,9 @@ sync, seed summaries) with round 4's differences:
   `--rounds 0` and no `--ridge-step`: the rig MAP at zero latents, then the
   all-frames polish — no block wander is fitted or rendered ("r4a");
 * Michael's channels normalised by the FULL-band gain (`--channel-gains-band
-  full`); DREGON keeps the >= 500 Hz gain and its per-mic wind term.
+  full`, r4a/r4b) or by each channel's per-band TRANSFER (`transfer`, r4c: the
+  fit records it as `params.array_response` and the renderer applies it
+  back); DREGON keeps the >= 500 Hz gain and its per-mic wind term.
 
 Writes `<out>/jobs/r4_job_<pool>[_<seeds>].sh`; submit with
 `omnirun submit --backend uni-gpushort --gpus 1 --time 60m --yes -- bash -lc
@@ -40,8 +42,8 @@ R4_EXTRA = {
         f"--priors v4 --priors-set sigma_nu_lognormal=[{math.log(3.48):.4f},0.5] "
         "--channel-gains-band above_500"
     ),
-    "cruise": "--priors v4 --channel-gains-band full",
-    "standby": "--priors v4 --channel-gains-band full",
+    "cruise": "--priors v4 --channel-gains-band {band}",
+    "standby": "--priors v4 --channel-gains-band {band}",
 }
 
 SCHED_DEFAULT = "--lbfgs-rtol 0 --rounds 0 --lbfgs-frames 64 --lbfgs-iters 150"
@@ -50,10 +52,11 @@ SCHED_DEFAULT = "--lbfgs-rtol 0 --rounds 0 --lbfgs-frames 64 --lbfgs-iters 150"
 def job(pool: str, args: argparse.Namespace) -> str:
     set_, name, rig, extra, init = POOLS[pool]
     wander = f"results/noise_v3/wander/{rig}{args.wander_suffix}.json"
+    r4_extra = R4_EXTRA[pool].format(band=args.michaels_band)
     fit = f"""  $PY -u scripts/noise_v2_fit.py flight --mode flight_v3 --set {set_} --name {name} \\
     --wander {wander} \\
     --channel-gains results/noise_v2/mic_gains/mic_gains.json --channel-gains-rig {rig} {extra} \\
-    {R4_EXTRA[pool]} \\
+    {r4_extra} \\
     --init-from {init} {args.sched} --max-frames 0 --seed $N --restart-tag s$N --jobs 1 --threads 4 --device cuda \\
     --progress 50 --out "$F" --grid-dir "$F/grid/{name}_s$N" 2>&1 | grep -v Warn | stamp"""
     seed = f"""run_seed() {{
@@ -75,7 +78,7 @@ def job(pool: str, args: argparse.Namespace) -> str:
     return (
         head(args.out, name)
         + f"""S=/tmp/supports_{name}; mkdir -p "$S"
-echo "V3R4 spec: set={set_} name={name} wander={wander} extra='{extra} {R4_EXTRA[pool]}' init={init} sched='{args.sched}' seeds='{args.seeds}' parallel={int(args.parallel)}"
+echo "V3R4 spec: set={set_} name={name} wander={wander} extra='{extra} {r4_extra}' init={init} sched='{args.sched}' seeds='{args.seeds}' parallel={int(args.parallel)}"
 $PY scripts/noise_v2_supports.py build --set {set_} --out "$S" > "$F/{name}_build.log" 2>&1; EB=$?
 tail -2 "$F/{name}_build.log"
 for f in "$S"/*.npz; do b=$(basename "$f"); [ -f "$C/$b" ] || {{ cp "$f" "$C/.tmp.$$.$b" && mv -f "$C/.tmp.$$.$b" "$C/$b"; }}; done
@@ -97,6 +100,13 @@ def main() -> None:
     ap.add_argument("--seeds", default="0 1")
     ap.add_argument("--pools", default="dregon,cruise,standby")
     ap.add_argument("--parallel", action="store_true", help="run the seeds concurrently")
+    ap.add_argument(
+        "--michaels-band",
+        default="transfer",
+        choices=("full", "transfer"),
+        help="Michael's channel normalisation: the full-band flat gain (r4a/r4b) or the "
+        "per-band transfer recorded as params.array_response (r4c)",
+    )
     args = ap.parse_args()
     d = Path(args.out) / "jobs"
     d.mkdir(parents=True, exist_ok=True)

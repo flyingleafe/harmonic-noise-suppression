@@ -995,6 +995,8 @@ def load_channel_gains(
     if rig not in rigs:
         raise KeyError(f"{p}: no rig {rig!r} (have {sorted(rigs)})")
     wind = rigs[rig]["wind"]
+    transfer: np.ndarray | None = None
+    band_hz: np.ndarray | None = None
     if band == "above_500":
         g = np.asarray(wind["excess_db_above_500hz"], dtype=np.float64)
         rule = (
@@ -1008,16 +1010,36 @@ def load_channel_gains(
             "rank-one floor gain per channel, mean over the band groups "
             f"{list(groups)} (rigs.<rig>.wind.excess_db_by_band_group)"
         )
+    elif band == "transfer":
+        # each mic's deviation from the array mean per third-octave band, the
+        # mean over the rig's real windows (rigs.<rig>.levels_db.full: (W, M, B))
+        full = np.asarray(rigs[rig]["levels_db"]["full"], dtype=np.float64)
+        band_hz = np.asarray(rigs[rig]["band_centres_hz"], dtype=np.float64)
+        transfer = (full - full.mean(axis=1, keepdims=True)).mean(axis=0)  # (M, B)
+        g = np.asarray(transfer).mean(axis=1)
+        rule = (
+            f"per-channel transfer: each mic's deviation from the array mean on the "
+            f"{band_hz.size} third-octave bands {band_hz[0]:.0f}-{band_hz[-1]:.0f} Hz, mean "
+            f"over the rig's {full.shape[0]} real windows (rigs.<rig>.levels_db.full), "
+            "interpolated in log f and held flat beyond the outer bands"
+        )
     else:
-        raise ValueError(f"band must be 'above_500' or 'full', got {band!r}")
+        raise ValueError(f"band must be 'above_500', 'full' or 'transfer', got {band!r}")
     if mics is not None:
-        g = g[np.asarray(list(mics), dtype=np.int64)]
+        sel = np.asarray(list(mics), dtype=np.int64)
+        g = g[sel]
+        if transfer is not None:
+            transfer = transfer[sel]
+    if transfer is not None:
+        transfer = transfer - transfer.mean(axis=0, keepdims=True)
     return MD.ChannelGains(
         gains_db=g - g.mean(),
         source=str(p),
         rig=str(rig),
         rule=f"{rule}, re-centred on the channels used; each channel's periodogram is "
         "divided by 10^(g/10)",
+        band_hz=band_hz,
+        transfer_db=transfer,
     )
 
 
@@ -2495,6 +2517,11 @@ def _write_fit_v3(
     if not isinstance(priors, MD.PriorsV3) or priors.wander is None:
         raise TypeError("a noise-v3-fit/1 record needs PriorsV3 carrying the measured wander")
     p = MD.params_to_dict_v3(outcome.params, wander=priors.wander)
+    gains_rec = batch.diagnostics.get("channel_gains")
+    if gains_rec is not None and gains_rec.get("transfer_db") is not None:
+        # the ARRAY's measured response the data were normalised by: the
+        # renderer and the expectation apply it back, per channel
+        p["array_response"] = MD.ChannelGains.from_dict(gains_rec).array_response()
     meas = outcome.diagnostics.get("measured") or {}
     pri = priors.as_dict()
     pri["floor_shape_z"] = dict(

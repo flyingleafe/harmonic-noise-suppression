@@ -24,6 +24,7 @@ from typing import Any
 
 import numpy as np
 
+from data_processing.noise_model import params as MDP
 from data_processing.noise_model.params import check_schema as _check_schema
 from data_processing.noise_model.render import *  # noqa: F403
 from data_processing.noise_model.render import (
@@ -102,6 +103,12 @@ def expected_periodogram(
             if got.shape[0] < n_mics:
                 raise ValueError(f"fit carries {got.shape[0]} microphones, asked for {n_mics}")
             out[:, sl, :] = got[:n_mics]
+    response = p.get("array_response")
+    if response is not None:
+        # the array's measured per-channel response the data were normalised
+        # by (round 4): the expectation of mic m carries it back, as the render does
+        curve = MDP.array_response_db(response, np.fft.rfftfreq(int(n_fft), 1.0 / sr))
+        out *= (10.0 ** (curve[:n_mics] / 10.0))[:, None, :]
     return out
 
 

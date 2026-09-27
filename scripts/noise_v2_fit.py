@@ -1154,11 +1154,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             p.add_argument(
                 "--channel-gains-band",
-                choices=("above_500", "full"),
+                choices=("above_500", "full", "transfer"),
                 default="above_500",
                 help="flight_v3: which rank-test band the per-channel gain is read from: "
-                "the >= 500 Hz floor bands (DREGON, whose per-capsule wind lives below) or "
-                "the mean over all four band groups 30 Hz-8 kHz (Michael's, round 4)",
+                "the >= 500 Hz floor bands (DREGON, whose per-capsule wind lives below), "
+                "the mean over all four band groups 30 Hz-8 kHz, or the whole PER-BAND "
+                "transfer of each channel (24 third-octave bands; Michael's, round 4c), "
+                "which the fit records as params.array_response for the renderer",
             )
             p.add_argument(
                 "--priors",

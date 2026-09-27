@@ -87,8 +87,8 @@ from data_processing.noise_model import spectrum as SP
 from data_processing.noise_model.constants import AMP_RPS_REF, SPEED_FLOOR_RPS
 from data_processing.noise_model.floor import floor_geometry, floor_power_spectrum
 from data_processing.noise_model.ou import simulate_state
+from data_processing.noise_model.params import array_response_db, gamma_from_params
 from data_processing.noise_model.params import check_schema as _check_schema
-from data_processing.noise_model.params import gamma_from_params
 from data_processing.noise_model.resample import antialias, decimate_audio
 from data_processing.noise_model.v3 import Wander, ou_blocks, wind_shape
 
@@ -441,6 +441,17 @@ def render_noise(
             level = math.sqrt(10.0 ** (float(wind_db[m]) / 10.0))
             audio[m] += level * np.fft.irfft(np.fft.rfft(white) * wind_amp, n=n_work)
     audio *= np.sqrt(all_gain)[:, None]
+    response = p.get("array_response") if v3 else None
+    if response is not None:
+        # the ARRAY's measured per-channel response (round 4): the data were
+        # normalised by it, so mic m is rendered back through 10^{g_m(f)/20}
+        curve = array_response_db(response, np.fft.rfftfreq(n_work, d=dt))
+        if curve.shape[0] < n_mics:
+            raise ValueError(
+                f"array_response carries {curve.shape[0]} channels, the render asks for {n_mics}"
+            )
+        for m in range(n_mics):
+            audio[m] = np.fft.irfft(np.fft.rfft(audio[m]) * 10.0 ** (curve[m] / 20.0), n=n_work)
 
     rendered = np.asarray(
         decimate_audio(antialias(audio, sr_work), int(sr_work), int(sr)), dtype=np.float64
