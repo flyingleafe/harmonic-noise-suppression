@@ -2150,12 +2150,14 @@ windows of the trajectory study (`traj_stats.json`):
 | range (max − min) | 28.3 [19.5, 35.7] | 9.8 [6.4, 14.5] | 15.7 [12.8, 21.3] |
 | \|df/dt\| median, rev/s² | 12.4 [7.1, 19.6] | 1.3 [0.9, 2.4] | 3.5 [2.1, 5.1] |
 
-Items 1 and 2 of the brief hold on the windows: the speed range is the
-legacy hard one (the v3r3 hard stream had median 73.9, q3 91.3), and the
-rotors sit apart as in the real windows (legacy's q1 was 0.04). Not
-addressed by this round: the hyperprior's trajectories still move ~3.5 ×
-faster than real (12.4 against 3.5 rev/s²; the v3r3 hard stream was 15.4),
-which the runaway explainer § 9 already named.
+Item 1 of the brief: the mean-speed distribution is close to the legacy
+hard one but still above it (median 54.6 against 46.8, q3 72.6 against
+65.3; the v3r3 hard stream had 73.9 / 91.3) — the flight envelope around a
+35–95 hover adds its take-off and landing. Item 2 holds: the rotors sit apart
+as in the real windows (legacy's q1 was 0.04). Not addressed by this round:
+the within-window range (28.3 against legacy 9.8 and real 15.7) and the
+hyperprior's speed of movement, still ~3.5 × real (12.4 against 3.5 rev/s²;
+the v3r3 hard stream was 15.4), which the runaway explainer § 9 already named.
 <!-- source: results/noise_v3r4/rig_sampler/hard_window_stats.json; docs/explainers/noise-model-v3-latent-runaway/traj_stats.json summary.{legacy_hard,real,v2_hard} -->
 
 ## Conclusion
