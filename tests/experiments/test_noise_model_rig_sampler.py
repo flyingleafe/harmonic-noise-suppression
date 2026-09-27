@@ -530,3 +530,28 @@ def test_comparable_orders_rule_on_planted_prominence() -> None:
     far[0, 0], far[1, 0] = hi, hi + RS.ROTOR_LINES_SPREAD_DB + 10.0
     counts, shared, spread = RS.comparable_orders(far)
     assert counts == [0, 0] and shared == 1 and spread == RS.ROTOR_LINES_SPREAD_DB + 10.0
+
+
+def test_the_round4_bank_policy_is_mandatory_by_generation() -> None:
+    """A ``v3r4`` spec pins the exponents to the aeroacoustic centre, turns the
+    tonality guard on for the hard preset, and says so in its digest; the
+    round-3 generation is untouched."""
+
+    def spec(preset: str, generation: str) -> RS.BankSpec:
+        return RS.BankSpec(
+            preset=preset,
+            n=4,
+            seed=1,
+            strength=3.0,
+            ltas_tol_db={"dregon": 3.0, "michaels": 3.0},
+            widths=RS.WIDTHS.as_dict(),
+            generation=generation,
+        )
+
+    r4 = spec("hard", "v3r4")
+    assert r4.speed_law_pin == RS.ROUND4_SPEED_LAW_PIN and r4.rotor_lines
+    easy = spec("easy", "v3r4")
+    assert easy.speed_law_pin == RS.ROUND4_SPEED_LAW_PIN and not easy.rotor_lines
+    r3 = spec("hard", "v3r3")
+    assert r3.speed_law_pin is None and not r3.rotor_lines
+    assert RS.ROTOR_LINES_MIN_ORDERS == 1

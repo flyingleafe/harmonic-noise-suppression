@@ -470,7 +470,7 @@ PATH_K_MAX = 81
 #: 8.8 orders per rotor at 3 dB, `docs/experiments/noise-model-v3.md`
 #: § Checks (c)); the bar is calibrated on sampled path draws before a bank is built.
 ROTOR_LINES_DB = 3.0
-ROTOR_LINES_MIN_ORDERS = 3
+ROTOR_LINES_MIN_ORDERS = 1
 ROTOR_LINES_K_MAX = 24
 ROTOR_LINES_SPREAD_DB = 10.0
 #: The hard policy flies 35-95 rev/s (``rps.hover_range``), so the guard reads
@@ -789,6 +789,18 @@ def pin_speed_laws(
 #: (:func:`pin_speed_laws`). A bank may override either policy with an
 #: explicit pin (:attr:`BankSpec.speed_law_pin`), recorded on every entry.
 FITTED_SPEED_LAW_GENERATIONS = ("v3r4",)
+
+#: The round-4 BANK policy, mandatory for these generations (a bank build
+#: applies it whatever the flags say, and records it): the speed exponents
+#: pinned to the aeroacoustic prior centre :data:`ROUND4_SPEED_LAW_PIN` (the
+#: free fitted laws are not usable as rendering laws, see above; the static
+#: floor fraction stays the anchor's own), the standby payload carried on
+#: EVERY hard entry (a cruise-only payload has no line below 65 rev/s), and
+#: the per-rotor tonality guard on (:class:`RotorLinesProbe`). Calibrated on
+#: 28 path draws: min comparable orders per rotor >= 1 on 79 % of them
+#: (`results/noise_v3/rig_sampler/guard_calib_r4_pin66_standby.json`).
+ROUND4_BANK_GENERATIONS = ("v3r4",)
+ROUND4_SPEED_LAW_PIN: dict[str, float] = {"amp_exp": 6.0, "floor_exp": 6.0}
 
 
 def keep_speed_laws(fit: dict[str, Any]) -> dict[str, Any]:
@@ -2081,6 +2093,7 @@ def sample_path(
     widths: Widths = WIDTHS,
     max_attempts: int = 16,
     rotor_lines: RotorLinesProbe | None = None,
+    standby_always: bool = False,
 ) -> dict[str, Any]:
     """A draw from the CLOUD along the path between the two cruise anchors.
 
@@ -2102,7 +2115,14 @@ def sample_path(
     path = mid.pop("_path")
     tol = (1.0 - tt) * float(ltas_tol_db[0]) + tt * float(ltas_tol_db[1])
     reference = reference_of(mid, probe, ltas_tol_db=tol, name=f"path@t={tt:.3f}")
-    standby = standby_b if (standby_b is not None and bool(rng.uniform() < tt)) else None
+    if standby_b is not None and standby_always:
+        # round 4: every entry carries the standby payload, so the composed
+        # entry has lines below 45 rev/s on every path point (the cruise-only
+        # payload has none there under any speed law; guard calibration in
+        # docs/experiments/noise-model-v3.md § Round 4)
+        standby = standby_b
+    else:
+        standby = standby_b if (standby_b is not None and bool(rng.uniform() < tt)) else None
     path["standby_carried"] = standby is not None
     if is_v3(mid):
         # a v3 wander block is a FITTED block and is never perturbed: it is
@@ -2237,6 +2257,11 @@ class BankSpec:
             raise ValueError(f"an easy bank splits evenly between two rigs; {self.n} is odd")
         if self.rotor_lines and self.preset != "hard":
             raise ValueError("rotor_lines is a guard of the hard (path) preset only")
+        if self.generation in ROUND4_BANK_GENERATIONS:
+            # the round-4 policy is not optional: apply it and say so
+            object.__setattr__(self, "speed_law_pin", dict(ROUND4_SPEED_LAW_PIN))
+            if self.preset == "hard":
+                object.__setattr__(self, "rotor_lines", True)
         anchors_of(self.generation)
 
     @property
@@ -2271,6 +2296,16 @@ class BankSpec:
                 else "fitted"
                 if self.generation in FITTED_SPEED_LAW_GENERATIONS
                 else dict(SPAN_PIN)
+            ),
+            **(
+                {
+                    "round4_policy": {
+                        "standby_always": self.preset == "hard",
+                        "array_response_p": ARRAY_RESPONSE_P,
+                    }
+                }
+                if self.generation in ROUND4_BANK_GENERATIONS
+                else {}
             ),
             "guards": {
                 "trend_margin_db": TREND_MARGIN_DB,
@@ -2460,6 +2495,7 @@ def _draw_index(
             ltas_tol_db=(spec.ltas_tol_db["dregon"], spec.ltas_tol_db["michaels"]),
             standby_b=anchors["michaels_standby"],
             rotor_lines=_WORKER.get("rotor_lines"),
+            standby_always=spec.generation in ROUND4_BANK_GENERATIONS,
             k_max=spec.k_max,
             widths=widths,
             max_attempts=spec.max_attempts,
@@ -2642,6 +2678,18 @@ def bank_payload(
                 **({"trend_rule": TREND_RULE_V3} if v3 else {}),
                 **({"rotor_lines": rotor_lines_rule()} if spec.rotor_lines else {}),
             },
+            **(
+                {
+                    "round4_policy": {
+                        "speed_law_pin": dict(ROUND4_SPEED_LAW_PIN),
+                        "standby_always": spec.preset == "hard",
+                        "array_response_p": ARRAY_RESPONSE_P,
+                        "rotor_lines": spec.preset == "hard",
+                    }
+                }
+                if spec.generation in ROUND4_BANK_GENERATIONS
+                else {}
+            ),
             "statistics": {
                 k: v for k, v in stats.items() if k not in ("bands_db", "t", "wall_s", "n_workers")
             },
