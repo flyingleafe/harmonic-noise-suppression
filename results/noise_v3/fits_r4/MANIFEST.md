@@ -18,9 +18,12 @@ fitted, the record's wander block is all zero, so a render draws no track),
 `--lbfgs-rtol 0 --lbfgs-frames 64 --lbfgs-iters 600`, `--init-from` the v2
 fit of the pool, `--max-frames 0`. Job scripts: `results/noise_v3/fits_r4{b,c}/jobs/`.
 
-Not converged: the all-frames polish still gains 0.007 (DREGON) / 0.020
-(cruise) / 0.002 (standby) nats per cell at the 600-iteration cap.
+Convergence (`optimiser.polish` of the selected restarts): the move from
+the 64-frame subset optimum to the all-frames polish is 0.00721 (DREGON) /
+0.01992 (cruise) / 0.00218 (standby) nats per cell; `rig_converged` is false
+on all three at the 600-iteration cap (the terminal L-BFGS restart still
+gains; see `optimiser.polish` in each file).
 
-Checks: `results/noise_v3/checks_r4/` (job `nv3r4-checks`). The `latents`
-step has nothing to check on this set (no latent tracks by construction) and
-is expected to report so rather than pass.
+Checks: `results/noise_v3/checks_r4/` (job `nv3r4-checks-1d0d6c`). The
+`latents` step is N/A on this set (no latent track by construction): it
+reports `status: disabled` and exits successfully.
