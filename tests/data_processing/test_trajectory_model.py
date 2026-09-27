@@ -237,7 +237,7 @@ def test_b_hover_range_sets_a_posterior_drone_size_and_keeps_its_shape(fits_tree
     )
 
 
-def test_b_rotor_sep_bounds_the_airborne_separation_by_rejection(fits_tree: Path):
+def test_b_rotor_sep_bounds_the_airborne_separation_by_rejection(fits_tree: Path, monkeypatch):
     """``rotor_sep`` refuses a flight whose closest rotor pair rides under
     ``lo`` rev/s or whose pair-mean separation exceeds ``hi`` — measured on the
     airborne part alone, where the ground and idle phases would otherwise put
@@ -246,14 +246,24 @@ def test_b_rotor_sep_bounds_the_airborne_separation_by_rejection(fits_tree: Path
     source = _source(
         fits_tree, rigs={tm.POSTERIOR_RIG: 1.0}, hover_range=[60.0, 80.0], rotor_sep=[lo, hi]
     )
+    from data_processing.trajectory_model import source as src_mod
+
+    # capture the exact metric the source evaluates on every attempt; the
+    # last call before a return is the accepted flight's
+    seen: list[tuple[float, float]] = []
+    real = src_mod.rotor_separation
+
+    def spy(track):
+        out = real(track)
+        seen.append(out)
+        return out
+
+    monkeypatch.setattr(src_mod, "rotor_separation", spy)
     rng = np.random.default_rng(23)
     for _ in range(32):
-        track = source.flight(rng, 50.0, duration_s=60.0)
-        level = track.mean(axis=0)
-        air = track[:, level > 0.8 * level.max()]
-        closest, pair_mean = tm.rotor_separation(air)
-        assert closest >= 0.9 * lo  # the whole airborne stretch, edges included
-        assert pair_mean <= 1.1 * hi
+        source.flight(rng, 50.0, duration_s=60.0)
+        closest, pair_mean = seen[-1]
+        assert closest >= lo and pair_mean <= hi  # exact bounds, no slack
     assert source.stats["flights"] == 32
     assert source.stats["rejected_sep"] > 0  # the bound bites on this fixture
 
