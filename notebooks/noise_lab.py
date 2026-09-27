@@ -159,7 +159,8 @@ FIT_PATHS: dict[str, dict[str, str]] = {
 #: (20 rounds), rounds 3a/3b the measured-wander refits with the ridge step and
 #: rig L-BFGS without the relative stop (3b adds the u_j kernel prior), rounds
 #: 4a/4b the RIG-ONLY fits under the round-4 priors (no wander; 4b runs the
-#: L-BFGS to 600 iterations).  A rig's round is ON DISK only when every one of
+#: L-BFGS to 600 iterations), r4 the round-4 set (DREGON from 4b, Michael's
+#: from 4c: 600 iterations, channels normalised by the per-band transfer).  A rig's round is ON DISK only when every one of
 #: its regime files is (:func:`v3_fit_names`).
 V3_FIT_DIRS = {
     "r1": "results/noise_v3/fits",
@@ -168,6 +169,7 @@ V3_FIT_DIRS = {
     "r3b": "results/noise_v3/fits_r3b",
     "r4a": "results/noise_v3/fits_r4a",
     "r4b": "results/noise_v3/fits_r4b",
+    "r4": "results/noise_v3/fits_r4",
 }
 
 #: The order ``"latest"`` takes the rounds in: the best round whose files are all

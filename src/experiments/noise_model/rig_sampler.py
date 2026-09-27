@@ -331,7 +331,7 @@ ANCHORS_V3R3: dict[str, dict[str, Any]] = {
 #: § "Round 4": rig-only fits under ``model.PRIORS_V4``, no block wander). No
 #: fold: the record carries no latent track and its wander block is all zero,
 #: so a render draws no track and the rig IS the expectation.
-ROUND_V3_R4 = "results/noise_v3/fits_r4b"
+ROUND_V3_R4 = "results/noise_v3/fits_r4"
 
 #: The v3 anchors of the round-4 arms: the round-4b fits as written.
 ANCHORS_V3R4: dict[str, dict[str, Any]] = {
