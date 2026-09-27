@@ -1000,7 +1000,7 @@ fits 4 restarts per pool.
 VD = json.loads(Path("../../results/noise_v3/diag/verdict_r3.json").read_text())
 F3 = {
     tag: json.loads(Path(f"noise-model-v3-latent-runaway/figdata_{tag}.json").read_text())
-    for tag in ("r3a", "r3b")
+    for tag in ("r3a", "r3b", "r4")
 }
 POOL_NAMES = {
     "dregon_room2_floor": "DREGON",
@@ -1184,6 +1184,14 @@ R3_LABELS = {
     "v3_r3b": "v3 round-3b fit",
     "v3_r3b_mp": "v3 round-3b fit, mean-preserving wander",
 }
+R4_LABELS = {
+    "real": "real recording",
+    "legacy": "legacy anchor fit (donor dynamics)",
+    "v2": "v2 fit",
+    "v3_r3b": "v3 round-3b fit",
+    "v3_r4": "v3 round-4 fit (rig alone)",
+    "v3_r4_mw": "v3 round-4 fit + round-3b measured wander",
+}
 R3_LABELS_MICHAELS = {
     **{k: v for k, v in R3_LABELS.items() if k != "v3_r3b_mp"},
     "v3_r3b_lam5": "v3 round-3b fit, λ = 5 s⁻¹",
@@ -1225,6 +1233,22 @@ Only the mean-preserving row below is further off (5.4 dB).
   ≥ 61 lose 5.9 dB there. $k = 1$ and $k = 2$ do not move (4.6 and
   4.9 dB): their $\sigma_v$ is 0.
   <!-- source: figdata_r3b.json listen.rigs.dregon.clips.v3_r3b.ltas_dev_db [-0.5019, -3.8337, -5.8766, -4.4298, -4.9238, -2.0961], ltas_mean_abs_db 3.6103, line_over_floor_db[0:2] 4.6247, 4.9479; clips.v3_r3b_mp.ltas_dev_db [-0.4235, -4.2236, -6.9293, -5.9468, -6.9189, -7.746], ltas_mean_abs_db 5.3647, line_over_floor_db[0:2] 4.5893, 4.9093; ltas_bands_hz [[100,300],[300,700],[700,1500],[1500,3000],[3000,5000],[5000,7000]]; v k>=61 shift -5.93 dB ([^listen-mp]) -->
+
+**Round 4.** The same window, the rig alone (no wander), beside round 3b.
+
+![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the legacy anchor fit, the v2 fit, the round-3b v3 fit, the round-4 v3 fit (rig alone, no wander), all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon_r4.png){#fig-j4}
+
+```{python}
+listen_players(F3["r4"], "dregon", {k: v for k, v in R4_LABELS.items() if k != "v3_r4_mw"})
+```
+
+- LTAS distance to real: round 3b 3.6, **round 4 3.1 dB** (v2 0.5,
+  legacy 4.3). Per band −0.5 / −2.8 / −3.9 / −3.6 / −4.0 / −3.7. The
+  mic-0 wind deficit of § Listen stays; round 4 has no wander to add.
+- $k = 1$ / $k = 2$ over the floor: 4.1 / 5.2 dB; real 4.4 / 2.9.
+- DREGON's criterion is parity alone: 1.67 rev/s, the best of the
+  campaign (bar 2.19).
+  <!-- source: figdata_r4.json listen.rigs.dregon.clips.{v3_r3b,v3_r4,v2,legacy}.ltas_mean_abs_db 3.6103, 3.0838, 0.5183, 4.2702; v3_r4.ltas_dev_db [-0.5467,-2.8478,-3.9046,-3.5581,-3.9922,-3.6535]; v3_r4.line_over_floor_db[0:2] 4.05, 5.16; results/noise_v3/checks_r4/parity/arm_dregon_v3.json bars.dregon.mean_rev_s 1.6656 -->
 
 ### Michael's
 
@@ -1305,6 +1329,25 @@ LTAS distance, 2.1 dB, ties round 3b (2.0 dB).
   subtraction fell short there, the "wander" of those orders is cell
   scatter, drawn onto lines the prior kept at floor level.
   <!-- source: wander/michaels.json sigma_v_db_by_order [0.32, 4.17, 3.79, 3.61, 5.69] at k_edges [1,3,9,25,61,277]; wander/dregon.json k>=61 7.18; Var[10 log10 Exp(1)] = (10/ln10)^2 psi_1(1) = 18.86^2 * 1.645 -> sd 5.57 dB -->
+
+**Round 4.** The same window, the rig alone, beside round 3b; then the
+round-4 rig with the round-3b measured wander put back (the latent gate
+of § Round 4).
+
+![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows: the real recording, the legacy anchor fit, the v2 fit, the round-3b v3 fit, the round-4 v3 fit (rig alone, no wander; mic 0 rendered through its measured response), and the round-4 rig with the round-3b measured wander, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r4.png){#fig-k4}
+
+```{python}
+listen_players(F3["r4"], "michaels", R4_LABELS)
+```
+
+- LTAS distance to real: legacy 2.06, v2 1.27, round 3b 2.05, **round 4
+  0.95 dB**. Per band −0.2 / +1.2 / +0.7 / +0.9 / +0.9 / +1.7. Round 3b's
+  +7.6 dB at 5–7 kHz is gone: mic 0 sits 4 dB under the array mean there,
+  and round 4 renders that.
+- $k = 2$ over the floor: 17.4 dB; real 18.7, round 3b 18.1.
+- With the measured wander back: LTAS 1.75 dB, the 1.5 / 3 / 6 kHz ridges
+  return. The real clip's bursts are broadband. The latents stay out.
+  <!-- source: figdata_r4.json listen.rigs.michaels.clips.{legacy,v2,v3_r3b,v3_r4,v3_r4_mw}.ltas_mean_abs_db 2.0604, 1.266, 2.0472, 0.9513, 1.75; v3_r4.ltas_dev_db [-0.2406, 1.2068, 0.7256, 0.9171, 0.9413, 1.6765]; v3_r4.line_over_floor_db[1] 17.40; real 18.68; v3_r3b 18.14 -->
 
 ## The checks
 
@@ -1413,16 +1456,15 @@ centred 12 dB under the measured floor, odd orders 15 dB lower. Speed
 exponents free under an aeroacoustic prior. Michael's channels normalised
 by each mic's measured per-band transfer, rendered back per channel.
 
-![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows: the real recording, the legacy anchor fit, the v2 fit, the round-3b and the round-4 v3 fits, and the round-4 rig rendered with the round-3b measured wander.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r4.png){#fig-k4}
+The renders are in § Listen again: DREGON @fig-j4, Michael's @fig-k4,
+with the players and the per-band numbers.
 
 [^r4doc]: `docs/experiments/noise-model-v3.md` § Round 4: design,
     predictions, jobs, results and the bank policies.
 
-- LTAS distance to real: legacy 2.06, v2 1.27, round 3b 2.05, **round 4
-  0.95 dB**. Per band −0.2 / +1.2 / +0.7 / +0.9 / +0.9 / +1.7. The 5–7 kHz
-  excess is gone: mic 0 sits 4 dB under the array mean there, and round 4
-  renders that.
-  <!-- source: figdata_r4.json listen.rigs.michaels.clips.{legacy,v2,v3_r3b,v3_r4}.ltas_mean_abs_db 2.0604, 1.266, 2.0472, 0.9513; v3_r4.ltas_dev_db -->
+- Michael's Listen LTAS distance to real: legacy 2.06, v2 1.27, round 3b
+  2.05, **round 4 0.95 dB**. DREGON: round 3b 3.6, round 4 3.1.
+  <!-- source: figdata_r4.json listen.rigs.{michaels,dregon}.clips.*.ltas_mean_abs_db -->
 - The frozen Michael's LTAS proxy: 1.28 dB on every restart. Legacy 1.33.
   Round 3b 2.48. Parity: DREGON 1.67 rev/s (bar 2.19), Michael's ratio
   0.52 (bar 1.05).
