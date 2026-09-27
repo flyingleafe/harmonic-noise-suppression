@@ -1931,17 +1931,30 @@ class V3Fit(V2Fit):
         params_override: dict[str, float] | None = None,
         wander: str = "on",
     ):
-        if wander not in ("on", "off"):
-            raise ValueError(f"wander {wander!r} is not 'on' or 'off'")
+        if wander not in ("on", "off", "measured"):
+            raise ValueError(f"wander {wander!r} is not 'on', 'off' or 'measured'")
         if wander_mean not in ("zero", "power"):
             raise ValueError(f"wander_mean {wander_mean!r} is not 'zero' or 'power'")
         self.rig = load_rig_v3(rig, round)
         self.wander_mean = wander_mean
         taken = str(self.rig.fit_round)
         mp = ", mean-preserving wander" if wander_mean == "power" else ""
-        if params_override or wander == "off":
+        if params_override or wander in ("off", "measured"):
             fits = {regime: copy.deepcopy(fit) for regime, fit in self.rig.fits.items()}
             for regime, fit in fits.items():
+                if wander == "measured":
+                    # a rig-only fit (round 4) rendered WITH the rig's measured
+                    # block wander: the controlled test of what the latents add
+                    rec = json.loads(
+                        Path(
+                            f"results/noise_v3/wander/{TRAJ_RIG[str(rig).lower()]}_ujk.json"
+                        ).read_text()
+                    )
+                    fit["params"]["wander"] = {
+                        k: v
+                        for k, v in rec.items()
+                        if k in fit["params"]["wander"] or k == "uj_corr_oct"
+                    }
                 for key, value in (params_override or {}).items():
                     if not isinstance(fit["params"].get(key), (int, float)):
                         raise ValueError(f"{regime} params.{key} is not a scalar to override")
@@ -1952,7 +1965,13 @@ class V3Fit(V2Fit):
                         w[key] = [0.0] * len(w[key]) if isinstance(w[key], list) else 0.0
             self.rig.fits = fits
             mp += "".join(f", {key} = {float(v):g}" for key, v in (params_override or {}).items())
-            mp += ", no wander" if wander == "off" else ""
+            mp += (
+                ", no wander"
+                if wander == "off"
+                else ", measured wander"
+                if wander == "measured"
+                else ""
+            )
         self.name = f"v3-fit {self.rig.name} {taken}{mp}"
         how = f"{taken} (latest on disk)" if round == "latest" else taken
         self.entry = f"round {how}{mp}: " + " + ".join(self.rig.paths.values())

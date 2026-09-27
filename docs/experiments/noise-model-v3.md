@@ -2073,6 +2073,42 @@ carries whatever its anchor carries only if that policy is written down first.
   2.2, pair mean ≤ 13.8, 0.9 redraws per flight; `rps_max` 120.
   <!-- source: src/data_processing/trajectory_model/source.py docstring; this session, 150 flights at seed 3 -->
 
+### Results (round 4 = DREGON r4b + Michael's r4c, `results/noise_v3/fits_r4/`)
+
+Checks job `nv3r4-checks-1d0d6c` (`results/noise_v3/checks_r4/`), the round-3
+tooling unchanged; (e) reports "disabled" (no latent by construction).
+
+| criterion | legacy | r3b | **r4** | bar |
+|---|---|---|---|---|
+| DREGON parity (rev/s, 95 % upper) | 2.188 | 1.700 (2.048) | **1.666 (2.028)** | ≤ 2.188 ✓ |
+| Michael's parity (equal-regime mean, ratio) | 3.027 | 1.592 (0.526) | **1.577 (0.521)** | ratio ≤ 1.05 ✓ |
+| Michael's LTAS proxy, selected fit (cruise @ 40 / @ 56) | 0.98 / 1.68 = **1.332** | 2.54 / 2.42 = 2.48 | 0.48 / 2.09 = **1.281** | ≤ legacy ✓ (gate 1.22 ✗) |
+| Michael's LTAS proxy, every restart | — | 2.48 | 1.278 / 1.284 / 1.283 / 1.281 | |
+| Michael's Listen LTAS (FLY124 @ 40 s, mic 0) | 2.06 | 2.05 | **0.95** | v2 1.27 |
+| DREGON LTAS proxy / Listen | 2.13 / 4.27 | 2.56 / 3.61 | 2.42 / 3.08 | not a criterion |
+
+<!-- source: results/noise_v3/checks_r4/parity/arm_{dregon,michaels}_v3.json; checks_r4/proxy_seeds/arm_michaels_r4_s{0..3}.json; docs/explainers/noise-model-v3-latent-runaway/figdata_r4.json listen.rigs; legacy: results/noise_v2/rounds/round1_legacy_plumbing/score/findings.md and gates.PROXY_REFERENCE; r3b: results/noise_v3/diag/verdict_r3.md -->
+
+**Verdict.** Both parity bars pass with the best numbers of the campaign, and
+the Michael's LTAS proxy is under the legacy fit's on the selected fit and on
+every restart (1.278–1.284 against 1.332; the round-3b fits were at 2.48).
+On rendered cruise clips the R4 −3 dB widths at k = 1, 2, 4, 5, 6 are 2.7 /
+4.4 / 6.4 / 19.2 / 8.2 Hz against 3.1 / 4.2 / 5.7 / 18.9 / 8.2 real, and
+6.6 orders per rotor stand ≥ 6 dB against 9.0 real (v2 7.0).
+<!-- source: results/noise_v3/checks_r4/findings.md § (c) -->
+
+By eye (`fig_k_listen_michaels_r4.png`): the round-4 render has the real
+recording's spectral colour (the dark 7–8 kHz band is the array response) and
+none of round 3b's wandering ridges at 1.5 / 3 / 6 kHz; what it lacks is the
+real clip's broadband level bursts (0.5–1 s, 1–4 kHz), which the legacy render
+shows a trace of. **The latent gate:** the same round-4 rig rendered WITH the
+round-3b measured wander (`v3_r4_mw`, `V3Fit(wander="measured")`) brings the
+ridges back and moves the Listen LTAS from 0.95 to 1.75 dB — the block wander
+model produces per-line ridges, not broadband bursts, so it is not the thing
+that separates round 4 from the real clip, and the latents stay out.
+<!-- source: docs/explainers/noise-model-v3-latent-runaway/figdata_r4.json listen.rigs.michaels.clips.{v3_r4,v3_r4_mw}.ltas_mean_abs_db 0.9513, 1.75 -->
+
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |

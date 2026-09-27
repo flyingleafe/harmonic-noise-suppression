@@ -200,8 +200,11 @@ LISTEN_LAM = {"_lam5": 5.0, "_lam8": 8.0, "_lam30": 30.0, "_lam60": 60.0}
 #: § 8 Listen again: suffix of a v3 round's key rendered with every wander
 #: sigma zeroed (``V3Fit(..., wander="off")``): the rig alone
 LISTEN_NOWANDER = "_nowander"
+#: § Round 4: suffix of a rig-only round's key rendered WITH the rig's measured
+#: block wander (``V3Fit(..., wander="measured")``): what the latents would add
+LISTEN_MEASURED_WANDER = "_mw"
 #: the variant suffixes in row order after the base key
-LISTEN_VARIANTS = (*LISTEN_LAM, LISTEN_NOWANDER)
+LISTEN_VARIANTS = (*LISTEN_LAM, LISTEN_NOWANDER, LISTEN_MEASURED_WANDER)
 LISTEN_LAM_RIGS = ("michaels",)
 LISTEN_DYN_DB = 45.0
 AUDIO = OUT / "audio"
@@ -1090,6 +1093,8 @@ def listen_label(key: str) -> str:
         return f"{listen_label(key.removesuffix(LISTEN_MP))}, mean-preserving wander"
     if key.endswith(LISTEN_NOWANDER):
         return f"{listen_label(key.removesuffix(LISTEN_NOWANDER))}, no wander (every σ = 0)"
+    if key.endswith(LISTEN_MEASURED_WANDER):
+        return f"{listen_label(key.removesuffix(LISTEN_MEASURED_WANDER))}, + measured wander"
     lam = listen_lam(key)
     if lam:
         return f"{listen_label(key.removesuffix(lam))}, λ = {LISTEN_LAM[lam]:g} s⁻¹"
@@ -1113,7 +1118,13 @@ def listen_source(nl: Any, rig: str, key: str) -> Any:
         round="r2" if base == "v3" else base.removeprefix("v3_"),
         wander_mean="power" if key.endswith(LISTEN_MP) else "zero",
         params_override={"lam": LISTEN_LAM[lam]} if lam else None,
-        wander="off" if variant == LISTEN_NOWANDER else "on",
+        wander=(
+            "off"
+            if variant == LISTEN_NOWANDER
+            else "measured"
+            if variant == LISTEN_MEASURED_WANDER
+            else "on"
+        ),
     )
 
 
