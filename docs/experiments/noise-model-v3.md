@@ -1953,6 +1953,80 @@ normalisation; the code is `model.PRIORS_V4` (`--priors v4`,
   an A100 with four seeds sharing it), so a pool with two seeds fits inside a
   `uni-gpushort` hour.
 
+### Jobs
+
+`scripts/_nv3_mkjobs_r4.py` (the round-3 job with the round-4 flags, two seeds
+per `uni-gpushort` job, `--parallel`), submitted from `.worktrees/submit-v3r3`
+detached at the pushed HEAD:
+
+| round | HEAD | pools | schedule | jobs |
+|---|---|---|---|---|
+| 4a | `9fc5ca62` | dregon, cruise, standby | `--rounds 0 --lbfgs-iters 150 --lbfgs-frames 64` | `nv3r4a-{dregon,cruise,standby}-s01`, `nv3r4a-dregon-s23` (cruise/standby s23 cancelled: under-converged, see below) |
+| 4b | `9fc5ca62` | dregon | `--lbfgs-iters 600` | `nv3r4b-dregon-s{01,23}` (cruise/standby cancelled, superseded by 4c) |
+| 4c | `ab30eafa` | cruise, standby | `--lbfgs-iters 600 --channel-gains-band transfer` | `nv3r4c-{cruise,standby}-s{01,23}` |
+
+### Round 4a: what the first fits said
+
+Wall per seed (two seeds sharing one gpushort GPU): cruise 556 s, DREGON
+~600 s, standby ~300 s. Round 0 rig 75 s; the all-frames polish 464 / 328 /
+118 s and NOT converged: it still gains 0.0155 (cruise) / 0.0059 (DREGON) /
+0.0011 (standby) nats per cell at the 150-iteration cap. Round 3 had given
+the rig ~20 × 150 iterations through the alternation. Round 4b/4c raise the
+cap to 600.
+<!-- source: results/noise_v3/fits_r4a/restarts/*__flight_v3__s0.json optimiser.polish.{gain_per_cell,wall_s,rig_converged}; fits_r4a/*_job.log fit_wall_s -->
+
+Fitted values (s0 / s1): cruise σ_ν 5.5 / 5.7 rad/s (the prior median 5.4:
+unidentified, as expected), amp_exp 9.1 / 9.3, **floor_exp 0.02** — the floor
+does not follow the rotor speed inside the 1.43 × pool at all, against the
+LN(log 6, 0.35) prior's 130 nats; DREGON σ_ν 4.9 / 5.2 (prior centre 3.5),
+amp_exp 8.9, floor_exp 0.02; standby σ_ν 0.34, amp_exp 4.3, floor_exp 4.6.
+Widths: medians 1.5–1.7 (cruise) / 4 (DREGON) / 3 Hz (standby); 20–48 Hz at
+odd orders 5–39 (cruise) and at k ≥ 57 (DREGON), all on lines UNDER the
+floor, where the width has no evidence and no effect. Orders over the floor
+by ≥ 3 dB per rotor: cruise 22 / 22 / 9 / 8 of 81 (r3b 79 / 81), even 20 / 12
+/ 6 / 8, odd 2 / 10 / 3 / 0; DREGON 13–32 of 88 with k = 1, 2 at +20 / +22 dB
+(r3b +3.7 / +5.7); standby 17 / 9 / 5 / 5 of 130 with k = 1–3 at +22 / +29 /
++23 (r3b 70 / 71 at k = 1 / 2).
+<!-- source: results/noise_v3/fits_r4a/restarts/*__flight_v3__s{0,1}.json params, diagnostics.measured.floor_line_db -->
+
+**The Michael's LTAS proxy did not move (2.34 / 2.89 dB, r3b 2.54 / 2.42).**
+The Listen row (FLY124 @ 40 s, mic 0) is −0.6 / +0.9 / +0.4 / +1.0 / +2.3 /
+**+6.4** dB per band (r3b +7.6 at 5–7 kHz), LTAS 1.95 (r3b 2.05, legacy 2.06,
+v2 1.27). On its OWN pool the fit is unbiased in every band (mic mean within
+±0.1 dB, 100 Hz–7.9 kHz), but not per mic: mic 0 sits −4.6 dB under the model
+at 5–7 kHz and −6.4 at 7–7.9 kHz, mic 3 +2.5 / +4.5. The same deviation is on
+the score windows: on FLY124 @ 40 / @ 56 mic 0 is −4.1 / −4.5 dB against the
+array mean at 5–7 kHz and +1.3 / +1.5 at 100–300 Hz (FLY125 @ 48 / @ 128:
+−3.6 / −3.9, +1.8 / +2.0). The rank test had already said so (a per-channel
+TRANSFER, not a gain: 80 % of the deviation with one constant per channel
+against 91 % per band). A v3 render gives every mic the array mean, and the
+proxy is scored on mic 0 alone.
+<!-- source: results/noise_v3/checks_r4a/proxy_seeds/arm_michaels_r4a_s0.json; docs/explainers/noise-model-v3-latent-runaway/figdata_r4a.json listen.rigs.michaels; scripts/_nv3_r4_band_resid.py (michaels-cruise, transfer band full); results/noise_v2/mic_gains/mic_gains.json rigs.michaels.rank.full.models -->
+
+**Counterfactual (post hoc, all four frozen seeds).** The r4a arm rendered on
+the two cruise supports as `noise_v2_round_score` renders it, mic 0 EQ'd by its
+FLY125 curve (24 third-octave bands, log-f interpolation): @ 40 2.33–2.40 →
+0.58–0.65 dB, @ 56 2.85–2.93 → 2.16–2.24. Per band after the EQ, @ 40 is within
+±1.1 dB everywhere; @ 56 is +0.8…+3.9 with a uniform +2.2 dB level offset the
+carriers do not explain (80.9 against 80.7 rev/s) and the legacy fit shares
+(+1.58; r3b +2.0). Seed mean 1.41 dB against the legacy 1.33: **not a match**,
+0.08 dB short, the whole of it the @ 56 level.
+<!-- source: scripts/_nv3_r4_eq_counterfactual.py output; results/noise_v2/rounds/round1_legacy_plumbing/score/findings.md; results/noise_v3/checks_r3b/proxy_seeds -->
+
+**Amendment F13 (round 4c).** Michael's channels are normalised by each
+channel's measured per-band transfer instead of a flat gain
+(`--channel-gains-band transfer`: `rigs.michaels.levels_db.full` of the rank
+record, each mic's deviation from the array mean, mean over the 11 FLY125
+windows, 24 third-octave bands 34 Hz–6.8 kHz, interpolated in log f, held
+flat outside). The fit records it as `params.array_response`; `render_noise`
+and `expected_periodogram` apply it back per channel, so mic m of a render is
+mic m of the rig. It is a measured property of the ARRAY (acquisition), not of
+the rotor model — the same standing as the channel gains and DREGON's wind
+term — and it is not fitted. DREGON keeps the ≥ 500 Hz flat gain and its wind
+term (its criterion is parity). The bank policy for array responses is not
+decided here: the round-4 banks are built after the fit verdict, and an entry
+carries whatever its anchor carries only if that policy is written down first.
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |
