@@ -403,3 +403,40 @@ def test_v3_path_endpoints_reproduce_the_anchor_floors(anchors_v3: dict) -> None
     assert at1["params"]["wind"] is None
     half = RS.interpolate_fits(a, b, 0.5)["params"]["wind"]["wind_db"]
     assert np.allclose(np.subtract(half, a["params"]["wind"]["wind_db"]), 10 * np.log10(0.5))
+
+
+# ── round 4: fitted speed laws ──────────────────────────────────────────────
+
+
+def test_a_fitted_law_generation_keeps_its_anchors_laws_and_mixes_them_on_the_path(
+    anchors_v3: dict,
+) -> None:
+    """A generation in ``FITTED_SPEED_LAW_GENERATIONS`` carries each anchor's
+    own ``amp_exp`` / ``floor_exp`` / ``floor_static_rel`` (no SPAN_PIN
+    overwrite, ``span_pin_record.pinned_to`` None) and the path mixes them —
+    exponents linear in t, the static fraction log-linear; a pinned and a
+    fitted endpoint cannot be mixed."""
+    a = RS.keep_speed_laws(RS.load_fit(RS.ANCHORS_V3["dregon"]["cruise"]))
+    b = RS.keep_speed_laws(RS.load_fit(RS.ANCHORS_V3["michaels"]["cruise"]))
+    for fit, spec in ((a, RS.ANCHORS_V3["dregon"]), (b, RS.ANCHORS_V3["michaels"])):
+        raw = RS.load_fit(spec["cruise"])["params"]
+        assert fit["params"]["profile"]["amp_exp"] == raw["profile"]["amp_exp"]
+        assert fit["params"]["floor"]["floor_exp"] == raw["floor"]["floor_exp"]
+        assert fit["params"]["span_pin_record"]["pinned_to"] is None
+        assert not RS.speed_laws_pinned(fit)
+    # plant distinct laws so the mixing is measurable
+    a["params"]["profile"]["amp_exp"], b["params"]["profile"]["amp_exp"] = 8.0, 12.0
+    a["params"]["floor"]["floor_exp"], b["params"]["floor"]["floor_exp"] = 4.0, 0.0
+    a["params"]["floor"]["floor_static_rel"] = 1e-4
+    b["params"]["floor"]["floor_static_rel"] = 1e-2
+    mid = RS.interpolate_fits(a, b, 0.25)["params"]
+    assert mid["profile"]["amp_exp"] == pytest.approx(9.0)
+    assert mid["floor"]["floor_exp"] == pytest.approx(3.0)
+    assert mid["floor"]["floor_static_rel"] == pytest.approx(10 ** (-4 + 0.25 * 2))
+    assert mid["span_pin_record"]["amp_exp"] == pytest.approx(9.0)
+    assert "interpolated" in mid["span_pin_record"]["rule"]
+    with pytest.raises(ValueError, match="both pin or both carry"):
+        RS.interpolate_fits(a, anchors_v3["michaels"], 0.5)
+    assert (
+        "v3r4" in RS.FITTED_SPEED_LAW_GENERATIONS and "v3r3" not in RS.FITTED_SPEED_LAW_GENERATIONS
+    )

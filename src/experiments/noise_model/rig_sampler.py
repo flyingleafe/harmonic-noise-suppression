@@ -696,6 +696,38 @@ def pin_speed_laws(fit: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+#: Generations whose anchors keep their OWN fitted speed laws (round 4: the
+#: pools were fitted with ``speed_span_pin`` 1.2 under aeroacoustic priors, so
+#: ``amp_exp`` / ``floor_exp`` / ``floor_static_rel`` are FREE sites the fit
+#: moved — free, not shown identified: DREGON's ``amp_exp`` went 9 -> 13
+#: between 150 and 600 L-BFGS iterations — rather than the v2 short-span
+#: constants). Every other generation is pinned to :data:`SPAN_PIN`
+#: (:func:`pin_speed_laws`).
+FITTED_SPEED_LAW_GENERATIONS = ("v3r4",)
+
+
+def keep_speed_laws(fit: dict[str, Any]) -> dict[str, Any]:
+    """``fit`` stripped, its fitted speed laws kept and said so in
+    ``params.span_pin_record`` (the field every entry carries)."""
+    out = strip_payload(fit)
+    p = out["params"]
+    p["span_pin_record"] = {
+        "amp_exp": float(p["profile"]["amp_exp"]),
+        "floor_exp": float(p["floor"]["floor_exp"]),
+        "floor_static_rel": float(p["floor"]["floor_static_rel"]),
+        "pinned_to": None,
+        "reference_rps": float(AMP_RPS_REF),
+        "rule": "fitted: the anchor's own free speed laws are carried as fitted (round 4)",
+    }
+    return out
+
+
+def speed_laws_pinned(fit: dict[str, Any]) -> bool:
+    """Whether a stripped payload's speed laws are the :data:`SPAN_PIN` constants."""
+    rec = fit["params"].get("span_pin_record")
+    return rec is None or rec.get("pinned_to") is not None
+
+
 def truncate_orders(fit: dict[str, Any], k_max: int) -> dict[str, Any]:
     """``fit`` restricted to orders ``1..k_max``; the rest are DROPPED."""
     out = strip_payload(fit)
@@ -1765,6 +1797,11 @@ PATH_INTERP_V3: dict[str, str] = {
         "standby slot — Michael's cruise block with probability t, DREGON's with 1 - t"
     ),
     "mic blocks": "none: v3 normalises the channels in the data and renders unit gains",
+    "amp_exp/floor_exp/floor_static_rel (v3r4)": (
+        "the round-4 anchors carry their own free fitted laws (FITTED_SPEED_LAW_GENERATIONS): "
+        "exponents linear in t, the static floor fraction log-linear; every other generation "
+        "is pinned on both endpoints"
+    ),
 }
 
 
@@ -1833,10 +1870,39 @@ def interpolate_fits(
                 (1.0 - t) * np.asarray(holder_a[key], dtype=np.float64)
                 + t * np.asarray(holder_b[key], dtype=np.float64)
             )
-    for key, value in SPAN_PIN.items():
-        holder = p["profile"] if key == "amp_exp" else p["floor"]
-        if float(holder[key]) != float(value):
-            raise ValueError(f"path endpoints must be pinned; {key} is {holder[key]}")
+    pinned_a, pinned_b = speed_laws_pinned(a), speed_laws_pinned(b)
+    if pinned_a != pinned_b:
+        raise ValueError("the path endpoints must both pin or both carry their speed laws")
+    if pinned_a:
+        for key, value in SPAN_PIN.items():
+            holder = p["profile"] if key == "amp_exp" else p["floor"]
+            if float(holder[key]) != float(value):
+                raise ValueError(f"path endpoints must be pinned; {key} is {holder[key]}")
+    else:
+        # round 4: free fitted laws, mixed like the rest — exponents linear in
+        # t, the static floor fraction log-linear (a positive scale)
+        sa, sb = float(pa["floor"]["floor_static_rel"]), float(pb["floor"]["floor_static_rel"])
+        if not (sa > 0.0 and sb > 0.0):
+            raise ValueError(
+                f"floor_static_rel must be positive to mix log-linearly; got {sa}, {sb}"
+            )
+        p["profile"]["amp_exp"] = float(
+            (1.0 - t) * pa["profile"]["amp_exp"] + t * pb["profile"]["amp_exp"]
+        )
+        p["floor"]["floor_exp"] = float(
+            (1.0 - t) * pa["floor"]["floor_exp"] + t * pb["floor"]["floor_exp"]
+        )
+        p["floor"]["floor_static_rel"] = float(
+            math.exp((1.0 - t) * math.log(sa) + t * math.log(sb))
+        )
+        p["span_pin_record"] = dict(
+            p["span_pin_record"],
+            amp_exp=p["profile"]["amp_exp"],
+            floor_exp=p["floor"]["floor_exp"],
+            floor_static_rel=p["floor"]["floor_static_rel"],
+            rule="fitted: the endpoints' free speed laws interpolated in t "
+            "(exponents linear, the static fraction log-linear)",
+        )
     out["_path"] = {
         "t": t,
         "k_max": int(k_max),
@@ -2063,7 +2129,9 @@ class BankSpec:
                 }
                 for name in sorted(anchors)
             },
-            "span_pin": dict(SPAN_PIN),
+            "span_pin": (
+                "fitted" if self.generation in FITTED_SPEED_LAW_GENERATIONS else dict(SPAN_PIN)
+            ),
             "guards": {
                 "trend_margin_db": TREND_MARGIN_DB,
                 "gamma_excursion_cap": GAMMA_EXCURSION_CAP,
@@ -2085,18 +2153,34 @@ def default_tolerances(structure: dict[str, Any] | None = None) -> dict[str, flo
 
 
 def pinned_anchors(generation: str = "v2") -> dict[str, dict[str, Any] | None]:
-    """Every anchor payload of one generation, stripped and speed-law pinned.
+    """Every anchor payload of one generation, stripped and speed-law pinned —
+    or, for :data:`FITTED_SPEED_LAW_GENERATIONS`, with its own laws kept.
 
     Keyed ``<rig>`` and ``<rig>_standby``; the standby slot is ``None`` for a
     single-regime rig (DREGON's room-2 recordings hold no standby segment).
     """
+    prepare = keep_speed_laws if generation in FITTED_SPEED_LAW_GENERATIONS else pin_speed_laws
     out: dict[str, dict[str, Any] | None] = {}
     for name, spec in anchors_of(generation).items():
-        out[name] = pin_speed_laws(load_fit(spec["cruise"]))
+        out[name] = prepare(load_fit(spec["cruise"]))
         out[f"{name}_standby"] = (
-            None if spec["standby"] is None else pin_speed_laws(load_fit(spec["standby"]))
+            None if spec["standby"] is None else prepare(load_fit(spec["standby"]))
         )
     return out
+
+
+def _span_pin_provenance(sample: dict[str, Any]) -> dict[str, Any]:
+    """What an entry's speed laws are: the :data:`SPAN_PIN` constants, or its
+    own fitted (hard: interpolated) values with the rule that produced them."""
+    rec = sample["params"].get("span_pin_record") or {}
+    if rec.get("pinned_to") is not None or not rec:
+        return dict(SPAN_PIN)
+    return {
+        "amp_exp": float(rec["amp_exp"]),
+        "floor_exp": float(rec["floor_exp"]),
+        "floor_static_rel": float(rec["floor_static_rel"]),
+        "rule": str(rec["rule"]),
+    }
 
 
 def _entry(
@@ -2125,7 +2209,7 @@ def _entry(
             "ltas_level_db": guards["ltas_level_db"],
             "gamma_ratio": guards["gamma_ratio"],
             "trend_drop_db_min": float(min(guards["trend_drop_db"])),
-            "span_pin": dict(SPAN_PIN),
+            "span_pin": _span_pin_provenance(sample),
             **({"t": sampler["path"]["t"]} if "path" in sampler else {}),
             **(
                 {"wander_from": sampler["path"]["wander_from"]}
@@ -2375,7 +2459,11 @@ def bank_payload(
                     ),
                 }
             ),
-            "span_pin": dict(SPAN_PIN),
+            "span_pin": (
+                "fitted per anchor (params.span_pin_record)"
+                if spec.generation in FITTED_SPEED_LAW_GENERATIONS
+                else dict(SPAN_PIN)
+            ),
             **({"path_interp": PATH_INTERP_V3} if v3 and spec.preset == "hard" else {}),
             "widths_strength1": dict(spec.widths),
             "ltas_tol_db": dict(spec.ltas_tol_db),
