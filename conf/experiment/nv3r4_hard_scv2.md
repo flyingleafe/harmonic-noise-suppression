@@ -44,4 +44,10 @@ scripts/noise_v2_submit_arms.sh --backend vast --gpu-type A100 --cpus 16 --mem 6
 
 ## Conclusion
 
-Pending: the arm is not yet run.
+**Worse than every earlier hard arm.** Job `nv3r4-hard-scv2-0e4025` (Vast
+A100, 4 h 51 min, early-stopped at round 118; the first placement
+`-399ab9` failed on vast provisioning and never ran) selected round 37:
+smoothed 8.02, **raw @ sel 8.02**, best raw 7.17 (no checkpoint). r1 / r2
+/ r3 at sel 14.18 / 10.50 / 8.02. Against `nv3r3_hard_scv2` 7.79,
+`nv2_hard_scv2` 7.06 and the legacy hard arm 5.41. The campaign doc's
+§ Round 4 "Training arms" reads the pair together.
