@@ -2027,6 +2027,52 @@ term (its criterion is parity). The bank policy for array responses is not
 decided here: the round-4 banks are built after the fit verdict, and an entry
 carries whatever its anchor carries only if that policy is written down first.
 
+### Bank policy for round 4 (decided before any round-4 bank)
+
+- **Speed laws.** The v2/v3 banks pin every entry to the short-span
+  constants (2.0 / 2.0 / 2.5e-3, `rig_sampler.SPAN_PIN`), which is what put
+  Michael's cruise renders on a flat level through the rotor dips (E11). The
+  round-4 generation `v3r4` (`FITTED_SPEED_LAW_GENERATIONS`) carries each
+  anchor's own fitted laws; the hard path mixes them, exponents linear in
+  `t`, the static floor fraction log-linear. They are FREE fitted values, not
+  shown identified: DREGON's `amp_exp` moved 9 → 13 between 150 and 600
+  L-BFGS iterations under the N(6, 2) prior (a level-versus-speed confound the
+  round-3 `d` latent used to absorb), and `floor_exp` sits at 0.0–0.07 on both
+  cruise pools. A cruise-only entry rendered at 35 rev/s therefore keeps its
+  cruise floor and drops its lines by (35/80)^13 ≈ −47 dB; the regime
+  composition uses the standby payload below 45 rev/s only where an entry
+  carries one. Which extrapolation to allow for entries without a standby
+  payload is checked by rendering an entry at 35 / 50 / 65 / 80 rev/s before
+  the banks are built, against Michael's standby (the only sub-cruise data).
+- **Array response.** `params.array_response` is an acquisition property of
+  Michael's array. The easy Michael's entries are neighbourhoods of that rig
+  and carry it as their anchor does (an unperturbed block, like the wander).
+  For the hard path it is NOT tied to `t` (`t` is the rotor-noise coordinate);
+  whether hard entries carry it at all, and with what independent weight, is
+  decided at bank time and recorded in the bank's provenance — the sampler
+  currently carries none on a path draw (the DREGON endpoint has none and the
+  path point starts from the DREGON payload).
+- **Rotor lines guard** (`--rotor-lines`, brief item 3): on the four real
+  cruise carrier patterns every rotor must show ≥ 3 of its first 24 orders at
+  ≥ 3 dB over the R4 local floor (mic median) and the rotors' median
+  prominence over k ≤ 8 may spread ≤ 10 dB. Measured before the guard existed:
+  the v3r3 hard bank passes it on 97.5 % of a 40-entry sample (min per-rotor
+  count median 6.5), the v2 hard bank on 100 %; the r3b anchors show 4–12
+  (DREGON) and 9–17 (Michael's) such orders per rotor. At 6 dB the same
+  sample's min-over-rotors count has median 2 and 57 % of entry-patterns fall
+  under 3, so 3 dB is the bar that refuses only a nearly line-free rotor.
+  <!-- source: this session, RotorLinesProbe.measure over 40 entries of data/rig_banks/noise_v3r3_hard_n2048.json and noise_v2_hard_n2048.json, seed 0 -->
+- **Hard trajectories** (brief items 1–2): `rps.hover_range: [35, 95]` (a
+  posterior drone's hover drawn uniform on the legacy hard operating range on
+  the scale-free coordinates; the hyperprior's own hover marginal had median
+  142 and 95th percentile 315 rev/s, of which `rps_max 150` kept 31 %) and
+  `rps.rotor_sep: [2.0, 15.0]` (closest pair ≥ 2 rev/s, pair mean ≤ 15 over
+  the airborne part, by rejection; the draw at 35–95 put a pair within 2
+  rev/s 22 % of the time and the pair mean over 15 rev/s 22 %). Measured on
+  150 accepted flights: airborne mean 37–90 rev/s (5–95 %), closest pair ≥
+  2.2, pair mean ≤ 13.8, 0.9 redraws per flight; `rps_max` 120.
+  <!-- source: src/data_processing/trajectory_model/source.py docstring; this session, 150 flights at seed 3 -->
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |
