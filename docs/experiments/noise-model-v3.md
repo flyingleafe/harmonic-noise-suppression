@@ -1868,7 +1868,7 @@ vast (vast is for the RPS-tracker arms) and never the laptop.
 Parity is already met on both rigs. The Michael's gap is the LTAS proxy, and
 it is spectral shape, not level (level offset +0.1 / +2.1 dB): the render is
 2–8 dB too loud above 3 kHz. The no-wander render of r3b still has +5.6 dB
-at 5–7 kHz, so 5.6 of the 7.6 dB is the RIG (the explainer's "Listen again"),
+at 5–7 kHz, so 5.6 of the 7.6 dB is the RIG (the explainer's § Listen, round-3b rows),
 which is where the v3 profile prior puts it: `N(pooled level, 10)` centres every
 unresolved order AT the floor, and 4 rotors × ~70 orders at the floor level
 double the floor between 4 and 7 kHz. The latents add the last 2 dB through

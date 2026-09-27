@@ -183,21 +183,21 @@ LISTEN_LABELS = {
     "v2": "v2 fit",
     "v3": "v3 round-2 fit",
 }
-#: § 8 Listen again: the anchor fit of :data:`LEGACY_FITS` each listen rig was
+#: § 6 Listen (later rows): the anchor fit of :data:`LEGACY_FITS` each listen rig was
 #: drawn around, rendered as the legacy training streams render a bank entry
 #: (``noise_lab.LegacyFit``'s default ``dynamics="donor"``, line mode ``fm``)
 LISTEN_LEGACY = {"dregon": LEGACY_FITS["dregon"], "michaels": LEGACY_FITS["michael"]}
 LISTEN_LEGACY_DYNAMICS = "donor"
-#: § 8 Listen again: the suffix of a v3 round's key rendered with the wander
+#: § 6 Listen (later rows): the suffix of a v3 round's key rendered with the wander
 #: drawn at mean ``-sigma^2 ln10 / 20`` dB, so every power multiplier has mean
 #: one (``V3Fit(..., wander_mean="power")``): ``v3_r3b`` + ``_mp``
 LISTEN_MP = "_mp"
-#: § 8 Listen again: suffixes of a v3 round's key rendered with the shaft OU
+#: § 6 Listen (later rows): suffixes of a v3 round's key rendered with the shaft OU
 #: rate ``params.lam`` (s^-1) set to the value instead of the pinned one
 #: (``V3Fit(..., params_override={"lam": value})``), on :data:`LISTEN_LAM_RIGS`
 #: only: ``v3_r3b`` + ``_lam5``
 LISTEN_LAM = {"_lam5": 5.0, "_lam8": 8.0, "_lam30": 30.0, "_lam60": 60.0}
-#: § 8 Listen again: suffix of a v3 round's key rendered with every wander
+#: § 6 Listen (later rows): suffix of a v3 round's key rendered with every wander
 #: sigma zeroed (``V3Fit(..., wander="off")``): the rig alone
 LISTEN_NOWANDER = "_nowander"
 #: § Round 4: suffix of a rig-only round's key rendered WITH the rig's measured
@@ -1062,7 +1062,7 @@ def listen_key(tag: str) -> str:
 
 
 def listen_keys(tag: str) -> tuple[str, ...]:
-    """The § Listen again sources of ``--round tag``, in row order after the
+    """The § Listen (later rows) sources of ``--round tag``, in row order after the
     real clip. A rig-only round (no latent tracks) has no mean-preserving
     variant and is set beside round 3b, the round it is judged against."""
     if not round_has_latents(tag):
@@ -1790,7 +1790,7 @@ def fig_h(d: dict[str, Any]) -> None:
 
 
 def fig_h2(d: dict[str, Any]) -> None:
-    """§ 8's contrast: the round-2 fits the runaway came from."""
+    """§ 6: the round-2 fits the runaway came from."""
     rows = [(row, f"v3 round 2, {RIG_NAMES[k]}") for k, row in d["rigs"]["v3_r2"].items()]
     fig_rigs(d, rows, "fig_h2_v3_r2_rigs")
 
@@ -1880,7 +1880,7 @@ def plot(d: dict[str, Any]) -> None:
 
 def round_rigs(tag: str) -> dict[str, Any]:
     """The parameter-view numbers of round ``tag``'s pooled fits beside its
-    reference round's (§ 8's table; the rig figures are Figs H / H2 of
+    reference round's (§ 6's side-by-side table; the rig figures are Figs H / H2 / H4 of
     :func:`rig_views`): round 2 for a latent round, round 3b for a rig-only
     round (the round it is judged against, as § Listen does)."""
     nl = _noise_lab()
@@ -1970,10 +1970,22 @@ def fig_static_shares(d: dict[str, Any], name: str) -> None:
     _save(fig, name)
 
 
+def fig_h_round(d: dict[str, Any]) -> None:
+    """The round's pooled fits in the parameter view, ``fig_h_v3_TAG_rigs``,
+    on the y axis of Figs G-I3 (:func:`rig_ylim` of ``figdata.json``, so the
+    rows read against @fig-h and @fig-h2 directly)."""
+    tag = str(d["tag"])
+    rows = [
+        (row, f"v3 round {tag[1:]}, {RIG_NAMES[k]}") for k, row in d["rigs"][f"v3_{tag}"].items()
+    ]
+    fig_rigs(load(DATA), rows, f"fig_h_v3_{tag}_rigs")
+
+
 def plot_round(d: dict[str, Any]) -> None:
     tag = str(d["tag"])
     if "static_shares" in d:
         fig_static_shares(d, f"fig_l_static_shares_{tag}.png")
+    fig_h_round(d)
     fig_listen(d, "dregon", f"fig_j_listen_dregon_{tag}.png")
     fig_listen(d, "michaels", f"fig_k_listen_michaels_{tag}.png")
 
