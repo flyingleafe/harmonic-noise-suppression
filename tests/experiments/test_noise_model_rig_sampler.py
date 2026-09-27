@@ -505,3 +505,28 @@ def test_the_array_response_is_one_coin_per_entry_cruise_and_standby_alike(
             with_standby += 1
             assert (st["params"].get("array_response") == block) == (src == "b")
     assert seen["b"] > 0 and seen[None] > 0 and with_standby > 0
+
+
+def test_comparable_orders_rule_on_planted_prominence() -> None:
+    """Disjoint strong orders fail: each rotor's strong harmonics must have a
+    comparable (same order, within the spread) strong neighbour on another
+    rotor; shared comparable sets pass; a neighbour outside the spread does
+    not count; the all-rotor shared count and spread are reported."""
+    lo = RS.ROTOR_LINES_DB - 1.0
+    hi = RS.ROTOR_LINES_DB + 5.0
+    # four rotors, each strong on three DIFFERENT orders: no comparable order
+    disjoint = np.full((4, 12), lo)
+    for r in range(4):
+        disjoint[r, 3 * r : 3 * r + 3] = hi
+    counts, shared, spread = RS.comparable_orders(disjoint)
+    assert counts == [0, 0, 0, 0] and shared == 0 and spread == float("inf")
+    # every rotor strong on orders 1-3 within a few dB: three comparable each
+    together = np.full((4, 12), lo)
+    together[:, :3] = hi + np.arange(4)[:, None]
+    counts, shared, spread = RS.comparable_orders(together)
+    assert counts == [3, 3, 3, 3] and shared == 3 and spread == 3.0
+    # rotor 0 strong at order 1 with a neighbour 20 dB louder: not comparable
+    far = np.full((2, 6), lo)
+    far[0, 0], far[1, 0] = hi, hi + RS.ROTOR_LINES_SPREAD_DB + 10.0
+    counts, shared, spread = RS.comparable_orders(far)
+    assert counts == [0, 0] and shared == 1 and spread == RS.ROTOR_LINES_SPREAD_DB + 10.0

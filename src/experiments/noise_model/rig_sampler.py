@@ -468,11 +468,18 @@ PATH_K_MAX = 81
 #: k <= 8 may not spread more than ``ROTOR_LINES_SPREAD_DB``. The bars are set
 #: under the real clips (real DREGON wide / Michael's cruise narrow show 5.5 /
 #: 8.8 orders per rotor at 3 dB, `docs/experiments/noise-model-v3.md`
-#: § Checks (c)), so a draw is refused only when a rotor is nearly line-free.
+#: § Checks (c)); the bar is calibrated on sampled path draws before a bank is built.
 ROTOR_LINES_DB = 3.0
 ROTOR_LINES_MIN_ORDERS = 3
 ROTOR_LINES_K_MAX = 24
 ROTOR_LINES_SPREAD_DB = 10.0
+#: The hard policy flies 35-95 rev/s (``rps.hover_range``), so the guard reads
+#: every pattern at its own speed (~80) and rescaled to these rotor means —
+#: standby, the ramp band's middle, the cruise threshold — the ENTRY composed
+#: as the renderer composes it: the standby payload below 45 rev/s, the cruise
+#: payload above 65, their powers blended between (``regime_blend_weight``
+#: on the slowest rotor), the cruise payload alone where there is no standby.
+ROTOR_LINES_SPEEDS_REV_S = (35.0, 50.0, 65.0)
 #: The four real cruise carrier patterns (``tonality.select_patterns``: per
 #: rig the narrowest- and widest-spread frozen window), frozen here so a bank
 #: build needs no support cache. Source: the supports named in each key.
@@ -489,41 +496,99 @@ ROTOR_LINES_PATTERNS: dict[str, tuple[float, float, float, float]] = {
 
 
 class RotorLinesProbe:
-    """Per-rotor line prominence of a payload on the real cruise patterns.
+    """Per-rotor line prominence of an ENTRY on the real cruise patterns, at
+    their own speed and rescaled to :data:`ROTOR_LINES_SPEEDS_REV_S`.
 
     A thin holder of one :class:`tonality.PatternProbe` over
-    :data:`ROTOR_LINES_PATTERNS` (imported lazily: ``tonality`` imports this
-    module). :meth:`measure` costs two expected periodograms per pattern.
+    :data:`ROTOR_LINES_PATTERNS` x speeds (imported lazily: ``tonality``
+    imports this module). :meth:`measure` costs one expected periodogram per
+    payload per pattern.
     """
 
     def __init__(self, n_mics: int = 8) -> None:
         from experiments.noise_model import tonality as TN
 
         self._tn = TN
-        patterns = [
-            TN.Pattern(name=name, rig=name.split("_")[0], regime="cruise", support="", rev_s=rev)
-            for name, rev in ROTOR_LINES_PATTERNS.items()
-        ]
+        patterns = []
+        for name, rev in ROTOR_LINES_PATTERNS.items():
+            base = np.asarray(rev, dtype=np.float64)
+            for speed in (None, *ROTOR_LINES_SPEEDS_REV_S):
+                scaled = base if speed is None else base * (float(speed) / float(base.mean()))
+                patterns.append(
+                    TN.Pattern(
+                        name=name if speed is None else f"{name}@{speed:g}",
+                        rig=name.split("_")[0],
+                        regime="cruise",
+                        support="",
+                        rev_s=tuple(float(v) for v in scaled),
+                    )
+                )
         self.probe = TN.PatternProbe(patterns, n_mics=n_mics)
         self.patterns = [p.name for p in patterns]
+        self.rev_s = {p.name: np.asarray(p.rev_s, dtype=np.float64) for p in patterns}
 
-    def measure(self, fit: dict[str, Any]) -> dict[str, Any]:
-        """The guard verdict and its numbers for one cruise payload."""
+    def measure(self, fit: dict[str, Any], standby: dict[str, Any] | None = None) -> dict[str, Any]:
+        """The guard verdict and its numbers for one ENTRY: the cruise payload
+        and, where carried, the standby payload, composed per pattern by the
+        renderer's own regime weight on the slowest rotor."""
+        from data_processing.noise_model.render import regime_blend_weight
+
         tn = self._tn
         counts: dict[str, list[int]] = {}
         spread: dict[str, float] = {}
+        shared: dict[str, int] = {}
+        weight: dict[str, float] = {}
         for name in self.patterns:
             geom = self.probe.geom[name]
+            rev = self.rev_s[name]
+            w = float(regime_blend_weight(np.repeat(rev[:, None], 2, axis=1))[0])
+            weight[name] = w
             k_max = min(self.probe.k_max(fit, name), ROTOR_LINES_K_MAX)
-            prom = tn.prominence_db(self.probe.periodogram(fit, name, comb=True), geom, k_max)
+            if standby is None:
+                power = self.probe.periodogram(fit, name, comb=True)
+            else:
+                k_max = min(k_max, self.probe.k_max(standby, name))
+                power = (1.0 - w) * self.probe.periodogram(standby, name, comb=True)
+                if w > 0.0:
+                    power = power + w * self.probe.periodogram(fit, name, comb=True)
+            prom = tn.prominence_db(power, geom, k_max)
             per_rotor = np.nanmedian(prom, axis=0)  # (R, K) mic median
-            counts[name] = [int(v) for v in (per_rotor >= ROTOR_LINES_DB).sum(axis=1)]
-            med8 = np.nanmedian(per_rotor[:, : min(8, k_max)], axis=1)
-            spread[name] = float(np.nanmax(med8) - np.nanmin(med8))
-        ok = all(min(c) >= ROTOR_LINES_MIN_ORDERS for c in counts.values()) and all(
-            s <= ROTOR_LINES_SPREAD_DB for s in spread.values()
+            counts[name], shared[name], spread[name] = comparable_orders(per_rotor)
+        ok = all(min(c) >= ROTOR_LINES_MIN_ORDERS for c in counts.values())
+        return dict(
+            rotor_lines=bool(ok),
+            rotor_lines_shared=shared,
+            rotor_lines_counts=counts,
+            rotor_lines_spread_db=spread,
+            rotor_lines_cruise_weight=weight,
         )
-        return dict(rotor_lines=bool(ok), rotor_lines_counts=counts, rotor_lines_spread_db=spread)
+
+
+def comparable_orders(per_rotor: np.ndarray) -> tuple[list[int], int, float]:
+    """The tonality rule on one pattern's ``(R, K)`` per-rotor prominence (dB).
+
+    Returns ``(counts, shared, spread_db)``: per rotor the number of
+    COMPARABLE orders — orders where the rotor stands >= :data:`ROTOR_LINES_DB`
+    and some other rotor stands >= :data:`ROTOR_LINES_DB` at the same order
+    within :data:`ROTOR_LINES_SPREAD_DB` of it (a harmonic with a comparable
+    close neighbour) — the number of orders EVERY rotor clears, and the median
+    across-rotor spread over those (``inf`` when there is none).
+    """
+    p = np.atleast_2d(np.asarray(per_rotor, dtype=np.float64))
+    strong = p >= ROTOR_LINES_DB
+    n_r = int(p.shape[0])
+    comparable = np.zeros_like(strong)
+    for r in range(n_r):
+        others = np.delete(np.arange(n_r), r)
+        close = strong[others] & (np.abs(p[others] - p[r][None, :]) <= ROTOR_LINES_SPREAD_DB)
+        comparable[r] = strong[r] & close.any(axis=0)
+    common = strong.all(axis=0)
+    spread = (
+        float(np.median(p[:, common].max(axis=0) - p[:, common].min(axis=0)))
+        if common.any()
+        else float("inf")
+    )
+    return [int(v) for v in comparable.sum(axis=1)], int(common.sum()), spread
 
 
 def rotor_lines_rule() -> dict[str, Any]:
@@ -534,9 +599,13 @@ def rotor_lines_rule() -> dict[str, Any]:
         "k_max": ROTOR_LINES_K_MAX,
         "rotor_spread_db_max": ROTOR_LINES_SPREAD_DB,
         "patterns_rev_s": {k: list(v) for k, v in ROTOR_LINES_PATTERNS.items()},
-        "rule": "on every pattern every rotor shows >= min_orders_per_rotor of its first k_max "
-        "orders at >= prominence_db over the R4 local floor (mic median), and the rotors' "
-        "median prominence over k <= 8 spreads <= rotor_spread_db_max",
+        "speeds_rev_s": list(ROTOR_LINES_SPEEDS_REV_S),
+        "rule": "on every pattern, at its own speed and rescaled to each of speeds_rev_s, the "
+        "ENTRY (cruise and standby payloads composed by the renderer's regime weight on the "
+        "slowest rotor) shows on EVERY rotor >= min_orders_per_rotor COMPARABLE orders among "
+        "its first k_max: orders where the rotor stands >= prominence_db over the R4 local "
+        "floor (mic median) and some other rotor stands >= prominence_db at the same order "
+        "within rotor_spread_db_max of it; the all-rotor shared count and spread are recorded",
     }
 
 
@@ -1663,7 +1732,7 @@ def check_sample(
     if rotor_lines is not None:
         # only a finite payload is worth two more periodograms per pattern
         if out["finite"]:
-            out.update(rotor_lines.measure(fit))
+            out.update(rotor_lines.measure(fit, standby))
         else:
             out["rotor_lines"] = False
         guards = (*guards, "rotor_lines")
