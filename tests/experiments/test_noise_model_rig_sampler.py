@@ -440,3 +440,25 @@ def test_a_fitted_law_generation_keeps_its_anchors_laws_and_mixes_them_on_the_pa
     assert (
         "v3r4" in RS.FITTED_SPEED_LAW_GENERATIONS and "v3r3" not in RS.FITTED_SPEED_LAW_GENERATIONS
     )
+
+
+def test_a_partial_pin_holds_the_exponents_and_mixes_the_static_fraction() -> None:
+    """``pin_speed_laws(fit, pin={amp_exp, floor_exp})`` pins the two
+    exponents and keeps the anchor's static fraction; on the path both
+    endpoints must carry the same pin and the static fraction mixes
+    log-linearly like an unpinned one."""
+    pin = {"amp_exp": 6.0, "floor_exp": 6.0}
+    a = RS.pin_speed_laws(RS.load_fit(RS.ANCHORS_V3["dregon"]["cruise"]), pin=pin, rule="test")
+    b = RS.pin_speed_laws(RS.load_fit(RS.ANCHORS_V3["michaels"]["cruise"]), pin=pin, rule="test")
+    a["params"]["floor"]["floor_static_rel"] = 1e-4
+    b["params"]["floor"]["floor_static_rel"] = 1e-2
+    assert RS.speed_law_pin(a) == pin and RS.speed_laws_pinned(a)
+    assert a["params"]["span_pin_record"]["floor_static_rel"] != 1e-4  # the pre-pin value
+    mid = RS.interpolate_fits(a, b, 0.5)["params"]
+    assert mid["profile"]["amp_exp"] == 6.0 and mid["floor"]["floor_exp"] == 6.0
+    assert mid["floor"]["floor_static_rel"] == pytest.approx(1e-3)
+    other = RS.pin_speed_laws(
+        RS.load_fit(RS.ANCHORS_V3["michaels"]["cruise"]), pin={"amp_exp": 5.0}
+    )
+    with pytest.raises(ValueError, match="different pins"):
+        RS.interpolate_fits(a, other, 0.5)
