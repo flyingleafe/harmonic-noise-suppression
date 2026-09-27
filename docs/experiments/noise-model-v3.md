@@ -2122,7 +2122,7 @@ generation `v3r4` (`rig_sampler.ROUND4_BANK_GENERATIONS`, recorded in the
 digest and the bank provenance): exponents pinned to the aeroacoustic prior
 centre (6, 6) with each anchor's static fraction; the standby payload on
 EVERY hard entry; the guard at ≥ 1 comparable order per rotor on every
-pattern (28 draws over t = 0…1: 79 % pass, worst at t ≤ 0.1 on the wide
+pattern (28 draws over t = 0…1: 24 of 28 = 86 % pass on the tonality guard alone, worst at t ≤ 0.1 on the wide
 patterns; `guard_calib_r4_pin66_standby.json`). The array response rides
 its own coin (p = 0.5).
 

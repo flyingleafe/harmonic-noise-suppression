@@ -797,7 +797,7 @@ FITTED_SPEED_LAW_GENERATIONS = ("v3r4",)
 #: floor fraction stays the anchor's own), the standby payload carried on
 #: EVERY hard entry (a cruise-only payload has no line below 65 rev/s), and
 #: the per-rotor tonality guard on (:class:`RotorLinesProbe`). Calibrated on
-#: 28 path draws: min comparable orders per rotor >= 1 on 79 % of them
+#: 28 path draws: min comparable orders per rotor >= 1 on 24 of 28 (86 %)
 #: (`results/noise_v3/rig_sampler/guard_calib_r4_pin66_standby.json`).
 ROUND4_BANK_GENERATIONS = ("v3r4",)
 ROUND4_SPEED_LAW_PIN: dict[str, float] = {"amp_exp": 6.0, "floor_exp": 6.0}
