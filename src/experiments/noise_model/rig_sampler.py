@@ -445,6 +445,13 @@ LTAS_ENVELOPE_X = 2.0
 LADDER_STRENGTHS = (1.0, 2.0, 3.0, 4.0, 6.0)
 COVERAGE_TARGET = 0.90
 
+#: Hard path (round 4): the probability that an entry carries an endpoint's
+#: measured ARRAY response (``params.array_response``, Michael's only so far);
+#: its own coin, independent of the rotor-noise coordinate t. One half: as
+#: many entries with a structured 8-channel array as without, the easy bank's
+#: own rig split.
+ARRAY_RESPONSE_P = 0.5
+
 #: The path bank's common order range: DREGON's 88 orders against Michael's 81.
 #: The extra orders are DROPPED rather than padded, because padding a profile
 #: past its own fit's order support would invent data.
@@ -1812,6 +1819,10 @@ PATH_INTERP_V3: dict[str, str] = {
         "standby slot — Michael's cruise block with probability t, DREGON's with 1 - t"
     ),
     "mic blocks": "none: v3 normalises the channels in the data and renders unit gains",
+    "array_response (v3r4)": (
+        "NOT interpolated and NOT perturbed: an acquisition block carried by its own coin "
+        "(ARRAY_RESPONSE_P) independent of t, from an endpoint that has one, else absent"
+    ),
     "amp_exp/floor_exp/floor_static_rel (v3r4)": (
         "the round-4 anchors carry their own free fitted laws (FITTED_SPEED_LAW_GENERATIONS): "
         "exponents linear in t, the static floor fraction log-linear; every other generation "
@@ -2031,6 +2042,30 @@ def sample_path(
         if carried:
             mid["params"]["wander"] = json.loads(json.dumps(fit_b["params"]["wander"]))
         path["wander_from"] = "b" if carried else "a"
+        # an ARRAY response (round 4, an acquisition property of one rig's
+        # microphones, not of the rotor noise) is carried by its own coin,
+        # independent of t: the endpoint that has one with probability
+        # ARRAY_RESPONSE_P, else none (every mic the array mean)
+        responses = {
+            name: f["params"]["array_response"]
+            for name, f in (("a", fit_a), ("b", fit_b))
+            if f["params"].get("array_response") is not None
+        }
+        mid["params"].pop("array_response", None)
+        path["array_response_from"] = None
+        chosen = None
+        if responses and bool(rng.uniform() < ARRAY_RESPONSE_P):
+            name = sorted(responses)[int(rng.integers(len(responses)))]
+            chosen = json.loads(json.dumps(responses[name]))
+            mid["params"]["array_response"] = chosen
+            path["array_response_from"] = name
+        if standby is not None:
+            # the whole entry is one array: the carried standby payload takes
+            # the same response as its cruise payload, or none
+            standby = json.loads(json.dumps(standby))
+            standby["params"].pop("array_response", None)
+            if chosen is not None:
+                standby["params"]["array_response"] = json.loads(json.dumps(chosen))
     attempts: list[dict[str, Any]] = []
     for _ in range(int(max_attempts)):
         cand, drawn = draw_fit(mid, rng, spread, widths)

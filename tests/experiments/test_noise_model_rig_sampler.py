@@ -462,3 +462,46 @@ def test_a_partial_pin_holds_the_exponents_and_mixes_the_static_fraction() -> No
     )
     with pytest.raises(ValueError, match="different pins"):
         RS.interpolate_fits(a, other, 0.5)
+
+
+def _path_with_response(anchors_v3: dict, probe: RS.ModelProbe, structure: dict, i: int):
+    """One hard draw at t = 0.95 between DREGON and a Michael's pair (cruise
+    and standby) that both carry a planted array response."""
+    block = {"band_hz": [100.0, 1000.0, 6000.0], "gain_db": [[1.0, 0.0, -4.0]] * 8}
+    b = json.loads(json.dumps(anchors_v3["michaels"]))
+    sb = json.loads(json.dumps(anchors_v3["michaels_standby"]))
+    b["params"]["array_response"] = block
+    sb["params"]["array_response"] = block
+    tol = RS.default_tolerances(structure)
+    cand = RS.sample_path(
+        anchors_v3["dregon"],
+        b,
+        np.random.default_rng([7, i]),
+        probe,
+        t=0.95,
+        ltas_tol_db=(tol["dregon"], tol["michaels"]),
+        standby_b=sb,
+        max_attempts=8,
+    )
+    return cand, block
+
+
+def test_the_array_response_is_one_coin_per_entry_cruise_and_standby_alike(
+    anchors_v3: dict, probe: RS.ModelProbe, structure: dict
+) -> None:
+    """A path point takes an endpoint's ``array_response`` with probability
+    ``ARRAY_RESPONSE_P`` independent of t (``array_response_from`` says which),
+    otherwise none; the carried standby payload, which arrives with its own
+    copy, ends up with exactly the cruise payload's choice."""
+    seen = {None: 0, "b": 0}
+    with_standby = 0
+    for i in range(32):
+        cand, block = _path_with_response(anchors_v3, probe, structure, i)
+        src = cand["_sampler"]["path"]["array_response_from"]
+        seen[src] += 1
+        assert (cand["params"].get("array_response") == block) == (src == "b")
+        st = cand.get("_standby")
+        if st is not None:
+            with_standby += 1
+            assert (st["params"].get("array_response") == block) == (src == "b")
+    assert seen["b"] > 0 and seen[None] > 0 and with_standby > 0
