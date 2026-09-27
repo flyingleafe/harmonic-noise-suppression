@@ -193,7 +193,7 @@ LISTEN_MP = "_mp"
 #: rate ``params.lam`` (s^-1) set to the value instead of the pinned one
 #: (``V3Fit(..., params_override={"lam": value})``), on :data:`LISTEN_LAM_RIGS`
 #: only: ``v3_r3b`` + ``_lam5``
-LISTEN_LAM = {"_lam5": 5.0, "_lam8": 8.0}
+LISTEN_LAM = {"_lam5": 5.0, "_lam8": 8.0, "_lam30": 30.0, "_lam60": 60.0}
 LISTEN_LAM_RIGS = ("michaels",)
 LISTEN_DYN_DB = 45.0
 AUDIO = OUT / "audio"
@@ -1923,8 +1923,8 @@ def main(argv: list[str] | None = None) -> int:
         "--listen-add",
         metavar="KEY",
         help="with --round: render one more § Listen source (legacy, v2, a v3 key, a v3 key "
-        "+ _mp for its mean-preserving wander, or a v3 key + _lam5 / _lam8 for its shaft OU "
-        "rate lam set, Michael's only) into "
+        "+ _mp for its mean-preserving wander, or a v3 key + _lam5 / _lam8 / _lam30 / _lam60 "
+        "for its shaft OU rate lam set, Michael's only) into "
         "figdata_TAG.json beside the clips already there, then redraw",
     )
     args = ap.parse_args(argv)
