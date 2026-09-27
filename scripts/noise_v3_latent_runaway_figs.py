@@ -197,6 +197,11 @@ LISTEN_MP = "_mp"
 #: (``V3Fit(..., params_override={"lam": value})``), on :data:`LISTEN_LAM_RIGS`
 #: only: ``v3_r3b`` + ``_lam5``
 LISTEN_LAM = {"_lam5": 5.0, "_lam8": 8.0, "_lam30": 30.0, "_lam60": 60.0}
+#: § 8 Listen again: suffix of a v3 round's key rendered with every wander
+#: sigma zeroed (``V3Fit(..., wander="off")``): the rig alone
+LISTEN_NOWANDER = "_nowander"
+#: the variant suffixes in row order after the base key
+LISTEN_VARIANTS = (*LISTEN_LAM, LISTEN_NOWANDER)
 LISTEN_LAM_RIGS = ("michaels",)
 LISTEN_DYN_DB = 45.0
 AUDIO = OUT / "audio"
@@ -1054,10 +1059,15 @@ def listen_lam(key: str) -> str | None:
     return next((s for s in LISTEN_LAM if key.endswith(s)), None)
 
 
+def listen_variant(key: str) -> str | None:
+    """The :data:`LISTEN_VARIANTS` suffix ``key`` ends with, if any."""
+    return next((s for s in LISTEN_VARIANTS if key.endswith(s)), None)
+
+
 def listen_rigs(key: str) -> tuple[str, ...]:
-    """The listen rigs clip ``key`` is rendered on (a :data:`LISTEN_LAM` key:
+    """The listen rigs clip ``key`` is rendered on (a :data:`LISTEN_VARIANTS` key:
     :data:`LISTEN_LAM_RIGS`; every other key: all of :data:`LISTEN_WINDOWS`)."""
-    return LISTEN_LAM_RIGS if listen_lam(key) else tuple(LISTEN_WINDOWS)
+    return LISTEN_LAM_RIGS if listen_variant(key) else tuple(LISTEN_WINDOWS)
 
 
 def listen_label(key: str) -> str:
@@ -1065,6 +1075,8 @@ def listen_label(key: str) -> str:
         return LISTEN_LABELS[key]
     if key.endswith(LISTEN_MP):
         return f"{listen_label(key.removesuffix(LISTEN_MP))}, mean-preserving wander"
+    if key.endswith(LISTEN_NOWANDER):
+        return f"{listen_label(key.removesuffix(LISTEN_NOWANDER))}, no wander (every σ = 0)"
     lam = listen_lam(key)
     if lam:
         return f"{listen_label(key.removesuffix(lam))}, λ = {LISTEN_LAM[lam]:g} s⁻¹"
@@ -1081,12 +1093,14 @@ def listen_source(nl: Any, rig: str, key: str) -> Any:
     if key == "v2":
         return nl.V2Fit(rig)
     lam = listen_lam(key)
-    base = key.removesuffix(LISTEN_MP).removesuffix(lam or "")
+    variant = listen_variant(key)
+    base = key.removesuffix(LISTEN_MP).removesuffix(variant or "")
     return nl.V3Fit(
         rig,
         round="r2" if base == "v3" else base.removeprefix("v3_"),
         wander_mean="power" if key.endswith(LISTEN_MP) else "zero",
         params_override={"lam": LISTEN_LAM[lam]} if lam else None,
+        wander="off" if variant == LISTEN_NOWANDER else "on",
     )
 
 
@@ -1877,9 +1891,11 @@ def listen_merge(old: dict[str, Any], new: dict[str, Any], tag: str) -> dict[str
     rank = {k: i for i, k in enumerate(("real", *listen_keys(tag)))}
 
     def order(key: str) -> tuple[int, int]:
-        lam = listen_lam(key)
-        if lam:
-            return rank.get(key.removesuffix(lam), len(rank)), 1 + list(LISTEN_LAM).index(lam)
+        variant = listen_variant(key)
+        if variant:
+            return rank.get(key.removesuffix(variant), len(rank)), 1 + LISTEN_VARIANTS.index(
+                variant
+            )
         return rank.get(key, len(rank)), 0
 
     def merged(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:

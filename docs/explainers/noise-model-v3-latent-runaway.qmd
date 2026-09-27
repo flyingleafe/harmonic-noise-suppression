@@ -1190,6 +1190,7 @@ R3_LABELS_MICHAELS = {
     "v3_r3b_lam8": "v3 round-3b fit, λ = 8 s⁻¹",
     "v3_r3b_lam30": "v3 round-3b fit, λ = 30 s⁻¹",
     "v3_r3b_lam60": "v3 round-3b fit, λ = 60 s⁻¹",
+    "v3_r3b_nowander": "v3 round-3b fit, no wander (every σ = 0)",
     "v3_r3b_mp": R3_LABELS["v3_r3b_mp"],
 }
 ```
@@ -1227,7 +1228,7 @@ Only the mean-preserving row below is further off (5.4 dB).
 
 ### Michael's
 
-![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3; the legacy row is the Michael's anchor fit (`michael_cruise`, donor dynamics). After the round-3b row come the same fit with $\lambda$ = 5, 8, 30 and 60 s⁻¹ instead of the pinned 0.5 s⁻¹, all else equal. $\lambda$ is the rate at which each rotor's shaft speed error $\nu$ (rad/s) returns to zero: $d\nu = -\lambda \nu\, dt + \sigma_\nu \sqrt{2 \lambda}\, dW$, with $\sigma_\nu$ = 3.84 rad/s kept. So $\nu$ keeps its size; only its memory $1/\lambda$ shrinks, 2 s → 0.2 s → 0.125 s → 33 ms → 17 ms. The mean spectrum barely changes: total power exactly; the figure's 7.8 Hz bins within 0.24 dB up to $\lambda$ = 8 s⁻¹ and within 0.74 and 1.09 dB at 30 and 60 s⁻¹, the most near 210 Hz, where the low lines sharpen, and under 0.02 dB at 4–7 kHz; 1.95 Hz bins within 0.54, 1.53 and 2.10 dB. The last row is the round-3b fit with mean-preserving wander.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
+![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3; the legacy row is the Michael's anchor fit (`michael_cruise`, donor dynamics). After the round-3b row come the same fit with $\lambda$ = 5, 8, 30 and 60 s⁻¹ instead of the pinned 0.5 s⁻¹, all else equal, then the same fit with every wander σ set to 0 (the rig alone). $\lambda$ is the rate at which each rotor's shaft speed error $\nu$ (rad/s) returns to zero: $d\nu = -\lambda \nu\, dt + \sigma_\nu \sqrt{2 \lambda}\, dW$, with $\sigma_\nu$ = 3.84 rad/s kept. So $\nu$ keeps its size; only its memory $1/\lambda$ shrinks, 2 s → 0.2 s → 0.125 s → 33 ms → 17 ms. The mean spectrum barely changes: total power exactly; the figure's 7.8 Hz bins within 0.24 dB up to $\lambda$ = 8 s⁻¹ and within 0.74 and 1.09 dB at 30 and 60 s⁻¹, the most near 210 Hz, where the low lines sharpen, and under 0.02 dB at 4–7 kHz; 1.95 Hz bins within 0.54, 1.53 and 2.10 dB. The last row is the round-3b fit with mean-preserving wander.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
 
 [^listen-lam]: `V3Fit("michaels", round="r3b", params_override={"lam": 5.0})`
     (and 8, 30, 60): deep copies of both round-3b payloads with `params.lam` set.
@@ -1289,6 +1290,21 @@ LTAS distance, 2.1 dB, ties round 3b (2.0 dB).
   sink toward the real row, which shows no lines there, yet still read
   as lines.
   <!-- source: throwaway, the listen WAVs at 2048/512 Hann, 4-7 kHz, dB minus a 51-bin running median: share of frame bins > 6 dB over it real 0.105, v3_r3b 0.141, lam5 0.135, lam8 0.129, lam30 0.121, lam60 0.119; lag-1 bin autocorrelation 0.304 / 0.410 / 0.395 / 0.385 / 0.362 / 0.348. Hann-weighted within-frame sd of nu over sigma_nu, OU corr exp(-lam |dt|), 128 ms: lam 0.5 0.114, 5 0.346, 8 0.426, 30 0.692, 60 0.817 -->
+- **No wander at all** (every latent σ set to 0, the rig alone, same seed):
+  the 6 kHz ridges go. The LTAS distance drops from 2.05 to 1.82 dB. Per
+  band, 100 Hz to 7 kHz: −1.0, −1.5, −1.4, −0.4, +1.2, +5.6 dB. So the
+  wander adds 2 dB at 5–7 kHz and 1 dB at 3–5 kHz; the other 5.6 dB at
+  5–7 kHz is the rig itself. The ridges are lines at $k \ge 61$ drawn
+  $+2\sigma_v$ = +11 dB now and then.
+  <!-- source: figdata_r3b.json listen.rigs.michaels.clips.v3_r3b_nowander.ltas_dev_db [-0.97, -1.50, -1.37, -0.36, 1.17, 5.56], ltas_mean_abs_db 1.82, line_over_floor_db[0:2] 1.24, 18.04; clips.v3_r3b.ltas_dev_db [-0.97, -0.98, -0.38, 0.21, 2.18, 7.55]; wander/michaels.json sigma_v_db_by_order.sigma_db[4] 5.685 (k >= 61) -->
+- A number to check. The measured $\sigma_v$ at $k \ge 61$ is 5.7 dB on
+  Michael's, 7.2 dB on DREGON. The sd of 10 log10 of one exponential
+  periodogram cell is 5.57 dB. Michael's real audio shows no line at
+  5–7 kHz. The measurement says it subtracted the block noise
+  (`results/noise_v3/wander/findings.md` § Block noise); if that
+  subtraction fell short there, the "wander" of those orders is cell
+  scatter, drawn onto lines the prior kept at floor level.
+  <!-- source: wander/michaels.json sigma_v_db_by_order [0.32, 4.17, 3.79, 3.61, 5.69] at k_edges [1,3,9,25,61,277]; wander/dregon.json k>=61 7.18; Var[10 log10 Exp(1)] = (10/ln10)^2 psi_1(1) = 18.86^2 * 1.645 -> sd 5.57 dB -->
 
 ## The checks
 
