@@ -2168,8 +2168,9 @@ fits)". Easy on `bc746925` (`nv3r4-easy-scv2-c85aa7`); hard on `d575edd1`
 (`nv3r4-hard-scv2-0e4025`; the first placement, `-399ab9`, failed on
 vast provisioning and never ran) — the two HEADs differ in docs only, the
 configs and the `dload.lock` pin are identical. Scores from
-`scripts/_nv3_arm_history.py` (raw `val/real_r3` PIT MAE at the selected
-round; `r1 / r2 / r3` are the per-view scores at that round).
+`scripts/_nv3_arm_history.py`: raw `val/real_overall` PIT MAE at the round
+the smoothed `real_overall` selected; `r1 / r2 / r3` are the per-view scores
+at that round (`r3` is the limiting view and equals the overall here).
 
 | arm | rounds / sel | raw @ sel | best raw | r1 / r2 / r3 | wall |
 |---|---|---|---|---|---|
@@ -2186,8 +2187,7 @@ campaign on every fit criterion, and the round-4 hard bank does what the
 brief asked of it, yet both arms score worse than round 3b: easy 6.10
 (round 3b 4.68; level with the legacy 6.09), hard 8.02 (round 3b 7.79,
 v2 7.06, legacy 5.41). What did change: the round-4 easy arm's `r1` view
-is 3.54, the best any synthetic arm has produced (round 3b 5.22); the
-`r3` view, which selects, is where it loses. Round 3b had the block wander
+is 3.54, the best any synthetic arm has produced (round 3b 5.22); `r3`, the limiting view, is where it loses. Round 3b had the block wander
 on and a worse LTAS; round 4 has neither. With the § 9 finding that the
 legacy hard arm wins with the LEAST line-like source, the arms say the
 SCv2 regressor's transfer is not governed by the spectral fidelity these
@@ -2324,24 +2324,24 @@ The rig alone under priors re-centred on measurements (λ at the label's
 band edge, σ_ν from the label residuals, a parity width floor, a
 floor-relative profile centre, aeroacoustic exponents) and — the decisive
 lever — Michael's channels normalised by each mic's measured per-band
-response, rendered back per channel, gives the campaign's best fit: DREGON
+response, rendered back per channel, gives the campaign's best fit on the declared criteria: DREGON
 parity 1.666 (upper 2.028, bar 2.188), Michael's parity 1.577 (ratio 0.521),
-Michael's LTAS proxy 1.281 on every restart against the legacy 1.332
-(round 3b 2.48), Michael's Listen LTAS 0.95 (legacy 2.06). The latent gate
+Michael's LTAS proxy 1.281 on the selected fit (1.278–1.284 over the four
+restarts) against the legacy 1.332 (round 3b 2.48), Michael's Listen LTAS 0.95 (legacy 2.06). The latent gate
 was run: the round-4 rig with the round-3b measured wander put back brings
 the ridges back and moves Listen to 1.75, so the latents stayed out. Two
 predictions failed: the free speed exponents are not identified (`floor_exp`
 ≈ 0, `amp_exp` 9 → 13 with iterations) and the widths exceed 20 Hz on lines
 under the floor; every selected restart is `rig_converged=false` at the
 600-iteration cap. The hard sampler now draws the hover on 35–95 rev/s,
-keeps rotors ≥ 2 rev/s apart by rejection and refuses an entry whose rotors
+keeps the airborne time-mean closest rotor pair ≥ 2 rev/s apart by rejection and refuses an entry whose rotors
 lack a comparable identifiable harmonic at 35–80 rev/s (calibrated to the
 round-4 DREGON anchor; exponents pinned to (6, 6) and the standby payload
 on every hard entry, both mandatory for generation `v3r4`). The arms on
 those banks: easy **6.10** (round 3b 4.68, legacy 6.09), hard **8.02**
 (round 3b 7.79, legacy 5.41). The fit criteria the brief set are satisfied
-and the SCv2 transfer got worse, so what the regressor learns from is not
-what these criteria measure; the § Round 4 "Training arms" paragraph holds
+and the SCv2 transfer got worse, so transfer is not determined by these
+criteria alone; the § Round 4 "Training arms" paragraph holds
 the hypothesis (round 3b's wandering lines as augmentation) and the
 confound (fit, bank and trajectory policy changed together).
 <!-- source: § Round 4 Results, Training arms; results/noise_v3r4/arm_history.json -->
