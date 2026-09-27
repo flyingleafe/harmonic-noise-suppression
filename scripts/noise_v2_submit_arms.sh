@@ -10,6 +10,7 @@
 #   all-ft      nv2_{easy,hard}_ft_{scv2,hppnet_l2} — the four curriculum arms
 #   nv3         nv3_{easy,hard}_scv2               — the v3 twins of the SCv2 pair
 #   nv3r3       nv3r3_{easy,hard}_scv2             — the same pair on the round-3b fits
+#   nv3r4       nv3r4_{easy,hard}_scv2             — the pair on the round-4 fits and hard policy
 #   <arm>       any one of those experiment names
 #
 # Options:
@@ -61,6 +62,7 @@ MIXED=(nv2_mixed_scv2 nv2_mixed_hppnet_l2)
 FT=(nv2_easy_ft_scv2 nv2_hard_ft_scv2 nv2_easy_ft_hppnet_l2 nv2_hard_ft_hppnet_l2)
 NV3=(nv3_easy_scv2 nv3_hard_scv2)
 NV3R3=(nv3r3_easy_scv2 nv3r3_hard_scv2)
+NV3R4=(nv3r4_easy_scv2 nv3r4_hard_scv2)
 
 TARGET=""
 while [ $# -gt 0 ]; do
@@ -87,11 +89,12 @@ case "$TARGET" in
   all-ft)    ARMS=("${FT[@]}") ;;
   nv3)       ARMS=("${NV3[@]}") ;;
   nv3r3)     ARMS=("${NV3R3[@]}") ;;
+  nv3r4)     ARMS=("${NV3R4[@]}") ;;
   *)
     ARMS=("$TARGET")
     found=0
-    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}" "${NV3R3[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
-    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} ${NV3R3[*]} or all-synth|all-ft|mixed|nv3|nv3r3"
+    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}" "${NV3R3[@]}" "${NV3R4[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
+    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} ${NV3R3[*]} ${NV3R4[*]} or all-synth|all-ft|mixed|nv3|nv3r3|nv3r4"
     ;;
 esac
 
@@ -101,6 +104,7 @@ banks_dataset() {
   case "$1" in
     nv3_*) echo noise-v3-banks ;;
     nv3r3_*) echo noise-v3r3-banks ;;
+    nv3r4_*) echo noise-v3r4-banks ;;
     *) echo noise-v2-banks ;;
   esac
 }

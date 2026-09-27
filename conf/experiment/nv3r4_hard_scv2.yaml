@@ -1,0 +1,29 @@
+# @package _global_
+# SCv2 on the noise-model-v3 ROUND-4 HARD bank: `nv3r3_hard_scv2` with the
+# round-3b fits replaced by the round-4 fits (results/noise_v3/fits_r4:
+# rig-only, no wander, round-4 priors, Michael's channels normalised by the
+# measured array response) and the round-4 hard policy: bank entries drawn on
+# the CRUISE <-> CRUISE path with the speed exponents pinned to (6, 6),
+# Michael's standby payload on every entry, the per-rotor tonality guard and
+# the array response by its own coin; trajectories from the rig HYPERPRIOR
+# with the hover drawn uniform on 35-95 rev/s and rotor separation by
+# rejection (conf/online_mix/noise_v3r4_hard_5050.yaml).
+#
+# `rig_easy_scv2_unified` with ONE field changed, the training stream, exactly
+# as `nv2_hard_scv2`: same `real_r1_scv2` architecture, same
+# `override /validation: rps_unified`, bfloat16, batch 128, 12 workers, 2 s
+# clips, `samples_per_validation: null`, synthetic only. Read against
+# `nv3r3_hard_scv2` (7.79), `nv2_hard_scv2` (7.06), the legacy hard arm (5.41)
+# and `real_r4_scv2_unified` (2.99).
+#
+# Stream: conf/online_mix/noise_v3r4_hard_5050.yaml; the bank file is local
+# until published (`noise-v3r4-banks`). Batch doc: docs/experiments/noise-model-v3.md.
+defaults:
+  - rig_easy_scv2_unified
+  - _self_
+
+experiment_name: nv3r4_hard_scv2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v3r4_hard_5050.yaml
