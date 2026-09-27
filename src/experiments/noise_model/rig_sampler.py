@@ -2131,6 +2131,8 @@ class BankSpec:
             raise ValueError(f"preset must be one of {PRESETS}, got {self.preset!r}")
         if self.preset == "easy" and int(self.n) % 2:
             raise ValueError(f"an easy bank splits evenly between two rigs; {self.n} is odd")
+        if self.rotor_lines and self.preset != "hard":
+            raise ValueError("rotor_lines is a guard of the hard (path) preset only")
         anchors_of(self.generation)
 
     @property

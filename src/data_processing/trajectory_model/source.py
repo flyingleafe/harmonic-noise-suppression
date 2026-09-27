@@ -261,10 +261,16 @@ class FittedTrajectorySource:
         self.last_draw: RigDraw | None = None
         self._last_z: np.ndarray | None = None
         #: The rejection tally over this source's lifetime: flights returned,
-        #: flights thrown away by the ``rps_max`` cap and by ``rotor_sep``. A
-        #: pool (or a study) reads it to report how much of the drawn
-        #: population the rejections truncate.
-        self.stats: dict[str, int] = {"flights": 0, "rejected": 0, "rejected_sep": 0}
+        #: flights thrown away (``rejected``, every cause), and the breakdown
+        #: by the ``rps_max`` cap (``rejected_cap``) and by ``rotor_sep``
+        #: (``rejected_sep``). A pool (or a study) reads it to report how much
+        #: of the drawn population the rejections truncate.
+        self.stats: dict[str, int] = {
+            "flights": 0,
+            "rejected": 0,
+            "rejected_cap": 0,
+            "rejected_sep": 0,
+        }
 
     @property
     def last_rig(self) -> str | None:
@@ -396,11 +402,13 @@ class FittedTrajectorySource:
             track = wrap_airborne(airborne, total, fs, rng, idle=draw.idle_rps, phases=self.phases)
             if self.rps_max is not None and float(np.max(track)) > self.rps_max:
                 self.stats["rejected"] += 1
+                self.stats["rejected_cap"] += 1
                 self._last_z = paired_z
                 continue
             if self.rotor_sep is not None and cruise:
                 closest, pair_mean = rotor_separation(cruise[0])
                 if closest < self.rotor_sep[0] or pair_mean > self.rotor_sep[1]:
+                    self.stats["rejected"] += 1
                     self.stats["rejected_sep"] += 1
                     self._last_z = paired_z
                     continue
