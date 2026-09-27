@@ -1403,6 +1403,35 @@ Three candidates:
     `nv3-hard-scv2-149094`, `nv3r3-easy-scv2-fd6e96`,
     `nv3r3-hard-scv2-5ea979`.
 
+## Round 4: the rig alone, priors from measurements
+
+Round 4 fits the rig with no latent at all. Every prior moved to a
+measurement or to physics.[^r4doc] Shaft rate pinned at the label's band
+edge, 2π·16 s⁻¹. Shaft sd log-normal, from six drones' label residuals.
+Line widths half-normal with a 1 / 3 Hz floor by blade parity. Profile
+centred 12 dB under the measured floor, odd orders 15 dB lower. Speed
+exponents free under an aeroacoustic prior. Michael's channels normalised
+by each mic's measured per-band transfer, rendered back per channel.
+
+![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows: the real recording, the legacy anchor fit, the v2 fit, the round-3b and the round-4 v3 fits, and the round-4 rig rendered with the round-3b measured wander.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r4.png){#fig-k4}
+
+[^r4doc]: `docs/experiments/noise-model-v3.md` § Round 4: design,
+    predictions, jobs, results and the bank policies.
+
+- LTAS distance to real: legacy 2.06, v2 1.27, round 3b 2.05, **round 4
+  0.95 dB**. Per band −0.2 / +1.2 / +0.7 / +0.9 / +0.9 / +1.7. The 5–7 kHz
+  excess is gone: mic 0 sits 4 dB under the array mean there, and round 4
+  renders that.
+  <!-- source: figdata_r4.json listen.rigs.michaels.clips.{legacy,v2,v3_r3b,v3_r4}.ltas_mean_abs_db 2.0604, 1.266, 2.0472, 0.9513; v3_r4.ltas_dev_db -->
+- The frozen Michael's LTAS proxy: 1.28 dB on every restart. Legacy 1.33.
+  Round 3b 2.48. Parity: DREGON 1.67 rev/s (bar 2.19), Michael's ratio
+  0.52 (bar 1.05).
+  <!-- source: results/noise_v3/checks_r4/parity/arm_{dregon,michaels}_v3.json bars; checks_r4/proxy_seeds/arm_michaels_r4_s{0..3}.json -->
+- Add the measured wander to the round-4 rig: round 3b's ridges return,
+  LTAS 1.75. The real clip's bursts are broadband. The wander model makes
+  per-line ridges. It is not what is missing. The latents stay out.
+  <!-- source: figdata_r4.json listen.rigs.michaels.clips.v3_r4_mw.ltas_mean_abs_db 1.75 -->
+
 ## Candidate 1 in the rig view
 
 Read @fig-i2 and @fig-i3 against @fig-h, rotor switch on "all rotors".
