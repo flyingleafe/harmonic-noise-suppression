@@ -2417,14 +2417,16 @@ legacy pair (6.09 easy, 5.41 hard), 1.5 × the real-trained reference (3.11).
 The round-3b hard arm is worse (7.79). So the fit quality of round 3 carries
 into transfer on the easy bank, and the hard-bank recipe (path
 interpolation, no tonality guard, the v2 hard trajectory that moves 4 × faster
-than real — see the runaway explainer § 9) is the open question, not the
-model. Why the legacy hard arm wins over its easy arm is investigated in
+than real — see the runaway explainer § 9) was then read as the open
+question rather than the model; the round-4 transfer controls below show
+both matter. Why the legacy hard arm wins over its easy arm is investigated in
 `docs/explainers/noise-model-v3-latent-runaway.qmd` § 9: the legacy comb is
 30–45 dB over its floor with every order filled, sits on a static per-rotor
 shaft offset, and by the demodulated prominence metric on real tracks is the
 LEAST line-like source; the v2 hard bank is the most tonal; the legacy
 trajectory sampler is calmer than real. None of the three candidates alone
-explains it.
+explained it on that evidence. The round-4 transfer controls (below) later
+showed the trajectory candidate is sufficient on the v2 bank.
 
 
 **Round 4: the fit criteria met without latents; transfer did not follow.**
@@ -2454,12 +2456,16 @@ the hypothesis (round 3b's wandering lines as augmentation) and the
 confound (fit, bank and trajectory policy changed together).
 <!-- source: § Round 4 Results, Training arms; results/noise_v3r4/arm_history.json -->
 
-**Transfer controls: the trajectories, not the fit.** The v2 hard bank on
-the legacy hard trajectories scores 4.96, against 7.06 on the hyperprior
-and 5.41 for the legacy arm: the legacy trajectories alone close the whole
-v2-to-legacy hard gap. The round-4 fits under the round-3 policy score
-11.17, against 8.02 under the round-4 policy, whose trajectory keys moved
-toward the legacy hover range. The round-4 easy curriculum (2.67) is on par
-with v2's (2.73). The next lever for synthetic-only transfer is the
-trajectory distribution, not the noise-model fit criteria of this campaign.
+**Transfer controls: legacy trajectories close the v2 gap; the fit still matters.**
+The v2 hard bank on the legacy hard trajectories scores 4.96, against 7.06
+on the hyperprior and 5.41 for the legacy arm: the legacy trajectories are
+sufficient to close the whole v2-to-legacy hard gap. The round-4 fits
+under the round-4 policy score 8.02, under the round-3 policy 11.17; under
+that same round-3 policy the round-3b fits score 7.79, so on one policy
+the fit moves transfer by 3.38. The round-4 easy curriculum (2.67) is on
+par with v2's (2.73). Both the trajectory distribution and the fit move
+synthetic-only hard transfer by 2 to 3.4 rev/s; the
+fidelity criteria of this campaign (parity, LTAS) did not predict which
+fit transfers better (round 4 passes them, round 3b does not, round 3b
+transfers better).
 <!-- source: § Round 4 "Transfer controls"; results/noise_v3r4/transfer_controls.json -->

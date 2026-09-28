@@ -1609,9 +1609,12 @@ next subsection reads every noise on real tracks with one estimator.
    the band between its lines by 14–29 dB. v3 lifts it by 0.3–6.8 dB. v2
    lifts it on Michael's only (26–43 dB). Nothing here tests whether that
    helps.
-3. **Candidate 2: true, but not the gap.** The v2 hard trajectory is 4×
-   too fast. Yet v2 easy moves most like real, and it still loses to
-   legacy.
+3. **Candidate 2: true, and enough on the v2 bank.** The v2 hard
+   trajectory is 4× too fast. On this section's evidence it did not look
+   like the gap: v2 easy moves most like real, and it still loses to
+   legacy. A later control run settles it. The v2 hard bank on the legacy
+   hard trajectories scores 4.96. v2 hard: 7.06. Legacy hard: 5.41.
+   <!-- source: docs/experiments/noise-model-v3.md § Round 4 "Transfer controls"; results/noise_v3r4/transfer_controls.json: nv2_hard_legacytraj_scv2 raw_at_sel 4.96, nv2_hard_scv2 7.06, rig_hard_scv2_unified 5.41 -->
 4. **Candidate 3: no.** The v2 and v3 hard banks are more tonal than the
    legacy hard bank, not less.
    <!-- source: this section's figures and tables: figdata.json rigs.legacy_bank between_over_floor_db 28.56, 24.95, legacy_fit 13.75, 21.44; rigs.v3_r3b 0.32, 2.90, 6.81; rigs.v2 dregon 1.08, cruise 43.03, standby 25.72; harm_summary.json (the harmonicity include); traj_stats.json (the trajectory include) -->

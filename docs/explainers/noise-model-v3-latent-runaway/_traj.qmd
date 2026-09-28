@@ -134,6 +134,9 @@ Legacy hard is calmer than real valid, not closer to it.
 Legacy hard beats legacy easy on one sampler: the bank decides.
 Of the four arms, v2 easy moves most like real valid.
 Yet v2 easy scores 7.94 rev/s, legacy easy 6.09.[^traj-mae]
-So candidate 2 is true, but it does not explain the gap.
+So candidate 2 is true, but on this evidence it did not look like the gap.
+A later control run says it is: the v2 hard bank on the legacy hard
+trajectories scores 4.96, below legacy hard (5.41) and v2 hard (7.06).
+<!-- source: docs/experiments/noise-model-v3.md § Round 4 "Transfer controls"; results/noise_v3r4/transfer_controls.json: nv2_hard_legacytraj_scv2 raw_at_sel 4.96, nv2_hard_scv2 7.06, rig_hard_scv2_unified 5.41 -->
 
 [^traj-mae]: Real MAE, raw at the selected round (`real_r3`). Source: `docs/experiments/noise-model-v3.md` § Results.
