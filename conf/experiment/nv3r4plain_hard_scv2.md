@@ -34,8 +34,19 @@ hard --generation v3r4plain` on `uni-cpu`
 
 ## Results
 
-Pending.
+Job `nv3r4plain-hard-scv2-7f3270` (Vast A100, HEAD `60273abd`; the first
+placement's instance never accepted SSH, the retry ran), 83 rounds, selected
+round 33: **raw @ sel 11.17** (smoothed 11.17), best raw 9.29, r1 / r2 / r3
+29.27 / 15.48 / 11.17, last raw 13.78, train loss (last 10 rounds) 16.9.
+Against `nv3r4_hard_scv2` 8.02 and `nv3r3_hard_scv2` 7.79.
+<!-- source: results/noise_v3r4/transfer_controls.json -->
 
 ## Conclusion
 
-Pending.
+**The round-4 policy helped; the round-4 fit alone did not.** Under the
+round-3 policy the round-4 fits score 11.17, 3.15 worse than with the
+round-4 policy (threshold: 0.5) and 3.38 worse than the round-3b fits under
+the same policy. The reversal is bundled (speed-law pin, standby, guard,
+array response, trajectory keys), so which change carried the 3.15 is not
+separated; the trajectory keys point toward the legacy hover range, the
+direction `nv2_hard_legacytraj_scv2` rewards.

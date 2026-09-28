@@ -33,8 +33,19 @@ selection).
 
 ## Results
 
-Pending.
+Job `nv2-hard-legacytraj-scv2-baf979` (Vast A100, HEAD `60273abd`),
+134 rounds, selected round 92: **raw @ sel 4.96** (smoothed 4.96), best raw
+4.46, r1 / r2 / r3 3.82 / 5.18 / 4.96, last raw 5.51, train loss (last 10
+rounds) 0.6. Against `nv2_hard_scv2` 7.06 (r1 25.11) and the legacy hard arm
+5.41.
+<!-- source: results/noise_v3r4/transfer_controls.json -->
 
 ## Conclusion
 
-Pending.
+**The trajectory sampler is the lever.** Swapping only the trajectories
+takes the v2 hard bank from 7.06 to 4.96, far past the 6.56 threshold set
+before the run, and below the legacy hard arm (5.41): the best hard arm of
+the campaign and the most stable (r1 3.82). The legacy trajectories are
+enough to close the whole v2-to-legacy gap. It does not show that the legacy
+noise model played no part: the legacy arm also differs in bank format,
+level rule and stream.

@@ -2241,7 +2241,62 @@ within ±0.5 of 7.06 says it does not. Arm 2: ≤ 7.52 (≥ 0.5 below
 `nv2-hard-legacytraj-scv2-baf979`, `nv3r4plain-hard-scv2-7f3270` (HEAD
 `60273abd`).
 
-Results: pending.
+**Results** (all three jobs succeeded):
+
+| arm | rounds / sel | raw @ sel | smoothed | best raw | r1 / r2 / r3 | train loss (last 10) |
+|---|---|---|---|---|---|---|
+| `nv2_hard_legacytraj_scv2` | 134 / 92 | **4.96** | 4.96 | 4.46 | 3.82 / 5.18 / 4.96 | 0.6 |
+| `nv2_hard_scv2` | 116 / 15 | 7.06 | 9.17 | 7.06 | 25.11 / 9.38 / 7.06 | 11.4 |
+| `rig_hard_scv2_unified` (legacy) | 137 / 124 | 5.41 | 5.52 | 5.37 | 6.15 / 4.85 / 5.41 | 12.0 |
+| `nv3r4plain_hard_scv2` | 83 / 33 | **11.17** | 11.17 | 9.29 | 29.27 / 15.48 / 11.17 | 16.9 |
+| `nv3r4_hard_scv2` | 118 / 37 | 8.02 | 8.02 | 7.17 | 14.18 / 10.50 / 8.02 | 5.5 |
+| `nv3r3_hard_scv2` | 63 / 14 | 7.79 | 8.67 | 7.46 | 12.09 / 9.10 / 7.79 | 22.1 |
+| `nv3r4_easy_ft_scv2` | 91 / 16 | **2.67** | 2.91 | 2.43 | 3.25 / 3.12 / 2.67 | 2.1 |
+| `nv2_easy_ft_scv2` | 54 / 10 | 2.73 | 2.79 | 2.56 | 3.34 / 3.18 / 2.73 | 2.5 |
+
+<!-- source: results/noise_v3r4/transfer_controls.json (scripts/_nv3_arm_history.py at the terminal state of all three jobs; reference rows re-fetched in the same call; train loss = mean train/loss of the last 10 validation_history rows) -->
+
+- **Arm 1: the trajectory sampler is the lever.** The legacy trajectories
+  take the v2 hard bank from 7.06 to 4.96. That is 2.10 below `nv2_hard_scv2`,
+  past the 6.56 threshold and past the legacy arm itself (5.41). It is the
+  best synthetic-only hard arm of the campaign, and the most stable: its `r1`
+  view is 3.82 (v2 25.11), and it selected late (round 92). The legacy
+  trajectories are enough to close the whole v2-to-legacy gap: on them the
+  v2 bank scores 0.45 below the legacy arm. That does not show the legacy
+  noise model played no part; the legacy arm also differs in bank format,
+  level rule and stream (two `stochastic` sources, `render_reuse` 48).
+- **Arm 2: the round-4 hard policy helped; the round-4 fit alone did not.**
+  The reversal is bundled: speed-law pin (6, 6) → `SPAN_PIN`, standby on
+  every entry → by t-coin, tonality guard off, array-response coin
+  0.5 → 0, and the trajectory keys (hover range, rotor separation,
+  `rps_max` 120 → 150, `mean_shift` restored) all at once.
+  With the round-3 policy the round-4 fits score 11.17, 3.15 above
+  `nv3r4_hard_scv2` (8.02) and 3.38 above `nv3r3_hard_scv2` (7.79), with the
+  worst `r1` view of the batch (29.27). The round-4 bank and trajectory policy
+  (hover 35–95 rev/s, rotor separation, `rps_max` 120, guard, standby) took
+  this fit from 11.17 to 8.02. Which of the bundled changes did it is not
+  separated; the trajectory keys moved the hyperprior toward the legacy
+  hover range, the direction arm 1 rewards.
+- **Train loss, within one fit.** v2 bank: hyperprior 11.4 → legacy
+  trajectories 0.6. Round-4 fits: round-3 policy 16.9 → round-4 policy
+  5.5. In both ablations the lower-loss stream transferred better (7.06 →
+  4.96; 11.17 → 8.02). Across fits train loss does not rank transfer: the
+  legacy arm flies the same `full_flight` trajectories as arm 1 and
+  trains at 12.0.
+- **Curriculum: on par with v2.** `nv3r4_easy_ft_scv2` 2.67 raw at selection
+  against `nv2_easy_ft_scv2` 2.73 (smoothed 2.91 against 2.79). The 0.06 gap
+  is under the 0.5 one-seed threshold, and so is the 0.12 smoothed gap the
+  other way: no difference. `nv2_hard_ft_scv2` (2.23) stays the best
+  curriculum arm; all three beat real-from-scratch (3.11).
+- **Synthetic-only round 4 against v2: mixed at selection, less stable.**
+  Easy: round 4 6.10 against v2 7.94 (better); hard: 8.02 against 7.06
+  (worse), and 11.17 with the round-3 policy. After selection round 4 easy
+  drifts from 6.10 to 11.16 by its last round (v2 easy 7.94 to 8.70); round
+  4 hard ends at 10.97 (v2 hard 12.18). By the W&B curves (read by the
+  user) the round-4 synthetic-only runs are slightly worse and less stable
+  than v2 overall.
+  <!-- source: results/noise_v3r4/transfer_controls.json: nv2_easy_scv2 raw_at_sel 7.94 last_raw 8.70; nv3r4_easy_scv2 6.10 / 11.16; nv2_hard_scv2 7.06 / 12.18; nv3r4_hard_scv2 8.02 / 10.97 -->
+
 
 **Curriculum (stage 2).** `nv3r4_easy_ft_scv2`: `nv2_easy_ft_scv2` with the
 warm start moved to `best:real_overall@nv3r4_easy_scv2` (round 36), the
@@ -2249,7 +2304,7 @@ parent `real_r4_scv2_unified` real pool, `lr` 1e-3, `patience` 20.
 References: `nv2_easy_ft_scv2` 2.73, `nv2_hard_ft_scv2` 2.23,
 `real_r4_scv2_unified` 3.11 (raw `val/real_overall` at selection,
 `scripts/_nv3_arm_history.py`). Job `nv3r4-easy-ft-scv2-669405` (HEAD
-`5b27ddce`). Results: pending.
+`5b27ddce`). Results: the table below.
 
 ## Conclusion
 
@@ -2398,3 +2453,13 @@ criteria alone; the § Round 4 "Training arms" paragraph holds
 the hypothesis (round 3b's wandering lines as augmentation) and the
 confound (fit, bank and trajectory policy changed together).
 <!-- source: § Round 4 Results, Training arms; results/noise_v3r4/arm_history.json -->
+
+**Transfer controls: the trajectories, not the fit.** The v2 hard bank on
+the legacy hard trajectories scores 4.96, against 7.06 on the hyperprior
+and 5.41 for the legacy arm: the legacy trajectories alone close the whole
+v2-to-legacy hard gap. The round-4 fits under the round-3 policy score
+11.17, against 8.02 under the round-4 policy, whose trajectory keys moved
+toward the legacy hover range. The round-4 easy curriculum (2.67) is on par
+with v2's (2.73). The next lever for synthetic-only transfer is the
+trajectory distribution, not the noise-model fit criteria of this campaign.
+<!-- source: § Round 4 "Transfer controls"; results/noise_v3r4/transfer_controls.json -->

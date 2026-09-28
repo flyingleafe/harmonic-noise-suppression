@@ -28,8 +28,16 @@ selection). References: `nv2_easy_ft_scv2` 2.73, `nv2_hard_ft_scv2` 2.23,
 
 ## Results
 
-Pending.
+Job `nv3r4-easy-ft-scv2-669405` (Vast A100, HEAD `5b27ddce`), 91 rounds,
+selected round 16: **raw @ sel 2.67** (smoothed 2.91), best raw 2.43, r1 /
+r2 / r3 3.25 / 3.12 / 2.67. Against `nv2_easy_ft_scv2` 2.73 (smoothed 2.79),
+`nv2_hard_ft_scv2` 2.23 and `real_r4_scv2_unified` 3.11.
+<!-- source: results/noise_v3r4/transfer_controls.json -->
 
 ## Conclusion
 
-Pending.
+**On par with the v2 easy curriculum.** 2.67 against 2.73 raw, 2.91
+against 2.79 smoothed: both gaps are under the 0.5 one-seed threshold, and by
+the W&B curves (the user's reading) it is if anything slightly worse. The
+round-4 easy warm start buys nothing over v2's; `nv2_hard_ft_scv2` stays the
+best curriculum arm. All beat real audio from scratch (3.11).
