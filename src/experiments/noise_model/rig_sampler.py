@@ -347,16 +347,22 @@ ANCHORS_V3R4: dict[str, dict[str, Any]] = {
 
 #: The model generations a bank can be drawn in, and the anchors of each.
 #: ``"v3r3"`` is the v3 construction around the round-3b anchors, ``"v3r4"``
-#: around the round-4b ones.
+#: around the round-4b ones under the mandatory round-4 bank policy
+#: (:data:`ROUND4_BANK_GENERATIONS`), and ``"v3r4plain"`` the SAME round-4
+#: anchors under the round-3 policy (:data:`SPAN_PIN`, standby carried with
+#: probability t, no tonality guard, no array-response coin): the control
+#: that separates the round-4 fit from the round-4 bank policy
+#: (``docs/experiments/noise-model-v3.md`` § "Round 4" transfer controls).
 GENERATIONS: dict[str, dict[str, dict[str, Any]]] = {
     "v2": ANCHORS,
     "v3": ANCHORS_V3,
     "v3r3": ANCHORS_V3R3,
     "v3r4": ANCHORS_V3R4,
+    "v3r4plain": ANCHORS_V3R4,
 }
 
 #: The generations drawn with the v3 construction (and its trend rule).
-V3_GENERATIONS = ("v3", "v3r3", "v3r4")
+V3_GENERATIONS = ("v3", "v3r3", "v3r4", "v3r4plain")
 
 
 def anchors_of(generation: str) -> dict[str, dict[str, Any]]:
@@ -801,6 +807,13 @@ FITTED_SPEED_LAW_GENERATIONS = ("v3r4",)
 #: (`results/noise_v3/rig_sampler/guard_calib_r4_pin66_standby.json`).
 ROUND4_BANK_GENERATIONS = ("v3r4",)
 ROUND4_SPEED_LAW_PIN: dict[str, float] = {"amp_exp": 6.0, "floor_exp": 6.0}
+
+
+def array_response_p(generation: str) -> float:
+    """The array-response coin of a hard bank of ``generation``:
+    :data:`ARRAY_RESPONSE_P` under the round-4 bank policy, else 0 (the block
+    is dropped, as the round-3 policy had no such block)."""
+    return ARRAY_RESPONSE_P if generation in ROUND4_BANK_GENERATIONS else 0.0
 
 
 def keep_speed_laws(fit: dict[str, Any]) -> dict[str, Any]:
@@ -1900,9 +1913,11 @@ PATH_INTERP_V3: dict[str, str] = {
         "standby slot — Michael's cruise block with probability t, DREGON's with 1 - t"
     ),
     "mic blocks": "none: v3 normalises the channels in the data and renders unit gains",
-    "array_response (v3r4)": (
+    "array_response": (
         "NOT interpolated and NOT perturbed: an acquisition block carried by its own coin "
-        "(ARRAY_RESPONSE_P) independent of t, from an endpoint that has one, else absent"
+        "independent of t, from an endpoint that has one, else absent; the coin's probability "
+        "is the bank's `array_response_p` (ARRAY_RESPONSE_P under the round-4 bank policy, 0 "
+        "for every other generation: the block is dropped)"
     ),
     "amp_exp/floor_exp/floor_static_rel (v3r4)": (
         "the round-4 anchors carry their own free fitted laws (FITTED_SPEED_LAW_GENERATIONS): "
@@ -2094,6 +2109,7 @@ def sample_path(
     max_attempts: int = 16,
     rotor_lines: RotorLinesProbe | None = None,
     standby_always: bool = False,
+    array_response_p: float = ARRAY_RESPONSE_P,
 ) -> dict[str, Any]:
     """A draw from the CLOUD along the path between the two cruise anchors.
 
@@ -2134,7 +2150,8 @@ def sample_path(
         # an ARRAY response (round 4, an acquisition property of one rig's
         # microphones, not of the rotor noise) is carried by its own coin,
         # independent of t: the endpoint that has one with probability
-        # ARRAY_RESPONSE_P, else none (every mic the array mean)
+        # ``array_response_p`` (ARRAY_RESPONSE_P under the round-4 policy, 0
+        # under the round-3 one), else none (every mic the array mean)
         responses = {
             name: f["params"]["array_response"]
             for name, f in (("a", fit_a), ("b", fit_b))
@@ -2143,7 +2160,7 @@ def sample_path(
         mid["params"].pop("array_response", None)
         path["array_response_from"] = None
         chosen = None
-        if responses and bool(rng.uniform() < ARRAY_RESPONSE_P):
+        if responses and bool(rng.uniform() < float(array_response_p)):
             name = sorted(responses)[int(rng.integers(len(responses)))]
             chosen = json.loads(json.dumps(responses[name]))
             mid["params"]["array_response"] = chosen
@@ -2496,6 +2513,7 @@ def _draw_index(
             standby_b=anchors["michaels_standby"],
             rotor_lines=_WORKER.get("rotor_lines"),
             standby_always=spec.generation in ROUND4_BANK_GENERATIONS,
+            array_response_p=array_response_p(spec.generation),
             k_max=spec.k_max,
             widths=widths,
             max_attempts=spec.max_attempts,
@@ -2654,7 +2672,14 @@ def bank_payload(
                 if spec.generation in FITTED_SPEED_LAW_GENERATIONS
                 else dict(SPAN_PIN)
             ),
-            **({"path_interp": PATH_INTERP_V3} if v3 and spec.preset == "hard" else {}),
+            **(
+                {
+                    "path_interp": PATH_INTERP_V3,
+                    "array_response_p": array_response_p(spec.generation),
+                }
+                if v3 and spec.preset == "hard"
+                else {}
+            ),
             "widths_strength1": dict(spec.widths),
             "ltas_tol_db": dict(spec.ltas_tol_db),
             "structure": str(STRUCTURE_PATH),

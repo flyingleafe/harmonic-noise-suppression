@@ -1,0 +1,19 @@
+# @package _global_
+# CONTROL: SCv2 on the noise-model-v2 HARD bank flown on the LEGACY hard
+# trajectory sampler (`full_flight` scaffold, profile blend [0, 1],
+# per-window speed scale [0.45, 1.2]) instead of the rig hyperprior.
+# `nv2_hard_scv2` with ONE field changed, the training stream; the stream
+# differs from noise_v2_hard_5050.yaml only in the trajectory keys.
+#
+# Stream: conf/online_mix/noise_v2_hard_legacytraj_5050.yaml. The job pulls
+# `noise-v2-banks` first. Batch doc: docs/experiments/noise-model-v3.md
+# § Round 4 "Transfer controls".
+defaults:
+  - rig_easy_scv2_unified
+  - _self_
+
+experiment_name: nv2_hard_legacytraj_scv2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v2_hard_legacytraj_5050.yaml

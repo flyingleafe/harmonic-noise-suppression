@@ -63,6 +63,9 @@ FT=(nv2_easy_ft_scv2 nv2_hard_ft_scv2 nv2_easy_ft_hppnet_l2 nv2_hard_ft_hppnet_l
 NV3=(nv3_easy_scv2 nv3_hard_scv2)
 NV3R3=(nv3r3_easy_scv2 nv3r3_hard_scv2)
 NV3R4=(nv3r4_easy_scv2 nv3r4_hard_scv2)
+#: Round-4 transfer controls: the v2 hard bank on the legacy trajectory
+#: sampler; the round-4 fits under the round-3 bank and trajectory policy.
+R4CTL=(nv2_hard_legacytraj_scv2 nv3r4plain_hard_scv2)
 
 TARGET=""
 while [ $# -gt 0 ]; do
@@ -90,11 +93,12 @@ case "$TARGET" in
   nv3)       ARMS=("${NV3[@]}") ;;
   nv3r3)     ARMS=("${NV3R3[@]}") ;;
   nv3r4)     ARMS=("${NV3R4[@]}") ;;
+  r4ctl)     ARMS=("${R4CTL[@]}") ;;
   *)
     ARMS=("$TARGET")
     found=0
-    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}" "${NV3R3[@]}" "${NV3R4[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
-    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} ${NV3R3[*]} ${NV3R4[*]} or all-synth|all-ft|mixed|nv3|nv3r3|nv3r4"
+    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}" "${NV3R3[@]}" "${NV3R4[@]}" "${R4CTL[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
+    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} ${NV3R3[*]} ${NV3R4[*]} ${R4CTL[*]} or all-synth|all-ft|mixed|nv3|nv3r3|nv3r4|r4ctl"
     ;;
 esac
 
@@ -105,6 +109,7 @@ banks_dataset() {
     nv3_*) echo noise-v3-banks ;;
     nv3r3_*) echo noise-v3r3-banks ;;
     nv3r4_*) echo noise-v3r4-banks ;;
+    nv3r4plain_*) echo noise-v3r4plain-banks ;;
     *) echo noise-v2-banks ;;
   esac
 }

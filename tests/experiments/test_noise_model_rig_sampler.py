@@ -10,6 +10,7 @@ every draw count is the smallest that can still fail.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import numpy as np
 import pytest
@@ -464,7 +465,7 @@ def test_a_partial_pin_holds_the_exponents_and_mixes_the_static_fraction() -> No
         RS.interpolate_fits(a, other, 0.5)
 
 
-def _path_with_response(anchors_v3: dict, probe: RS.ModelProbe, structure: dict, i: int):
+def _path_with_response(anchors_v3: dict, probe: RS.ModelProbe, structure: dict, i: int, **kw: Any):
     """One hard draw at t = 0.95 between DREGON and a Michael's pair (cruise
     and standby) that both carry a planted array response."""
     block = {"band_hz": [100.0, 1000.0, 6000.0], "gain_db": [[1.0, 0.0, -4.0]] * 8}
@@ -482,6 +483,7 @@ def _path_with_response(anchors_v3: dict, probe: RS.ModelProbe, structure: dict,
         ltas_tol_db=(tol["dregon"], tol["michaels"]),
         standby_b=sb,
         max_attempts=8,
+        **kw,
     )
     return cand, block
 
@@ -505,6 +507,13 @@ def test_the_array_response_is_one_coin_per_entry_cruise_and_standby_alike(
             with_standby += 1
             assert (st["params"].get("array_response") == block) == (src == "b")
     assert seen["b"] > 0 and seen[None] > 0 and with_standby > 0
+    # the round-3 policy: no coin, the response is dropped from every payload
+    for i in range(4):
+        cand, _ = _path_with_response(anchors_v3, probe, structure, i, array_response_p=0.0)
+        assert cand["_sampler"]["path"]["array_response_from"] is None
+        assert cand["params"].get("array_response") is None
+        st = cand.get("_standby")
+        assert st is None or st["params"].get("array_response") is None
 
 
 def test_comparable_orders_rule_on_planted_prominence() -> None:
@@ -555,3 +564,12 @@ def test_the_round4_bank_policy_is_mandatory_by_generation() -> None:
     r3 = spec("hard", "v3r3")
     assert r3.speed_law_pin is None and not r3.rotor_lines
     assert RS.ROTOR_LINES_MIN_ORDERS == 1
+    plain = spec("hard", "v3r4plain")
+    assert plain.speed_law_pin is None and not plain.rotor_lines
+    assert RS.anchors_of("v3r4plain") is RS.anchors_of("v3r4")
+    assert "v3r4plain" in RS.V3_GENERATIONS
+    assert "v3r4plain" not in RS.ROUND4_BANK_GENERATIONS
+    assert "v3r4plain" not in RS.FITTED_SPEED_LAW_GENERATIONS
+    assert RS.array_response_p("v3r4") == RS.ARRAY_RESPONSE_P
+    assert RS.array_response_p("v3r4plain") == RS.array_response_p("v3r3") == 0.0
+    assert plain.digest != r3.digest != spec("hard", "v3r4").digest
