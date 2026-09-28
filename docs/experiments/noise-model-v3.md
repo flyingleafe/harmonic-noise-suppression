@@ -2408,8 +2408,9 @@ collapsed under line skirts. r3b is the round to use (`noise_lab` `"latest"`, fo
 σ its fitted tracks never reach. The rig step on a 64-frame subset leaves thousands of nats
 to the all-frames polish.
 
-**The transfer test (SCv2, real `val/real_r3`, raw PIT MAE at the selected
-round; § Training arms).** With the folded round-2 fits v3 beats v2 on the
+**The transfer test (SCv2, raw `val/real_overall` PIT MAE at the round the
+smoothed `real_overall` selected, `real_r3` equal to it on these rows;
+§ Training arms).** With the folded round-2 fits v3 beats v2 on the
 easy bank (6.50 against 7.94) and ties on hard (7.01 against 7.06), the hard
 error moving from DREGON to Michael's. With the folded round-3b fits the easy
 arm reaches **4.68**: the first synthetic-only SCv2 regressor arm below the
