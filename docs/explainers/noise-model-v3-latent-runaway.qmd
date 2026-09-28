@@ -1542,8 +1542,9 @@ Three candidates:
    sampler has no tonality guard.
 
 [^arms]: `docs/experiments/noise-model-v3.md` § Training arms (round-2
-    fits) and (round-3 fits) § Results: `val/real_r3`, PIT MAE, raw at
-    the selected round. Jobs `nv3-easy-scv2-9bc4c1`,
+    fits) and (round-3 fits) § Results: raw `val/real_overall`, PIT MAE, at
+    the round the smoothed `real_overall` selected (`real_r3`, the limiting
+    view, equals it on these rows). Jobs `nv3-easy-scv2-9bc4c1`,
     `nv3-hard-scv2-149094`, `nv3r3-easy-scv2-fd6e96`,
     `nv3r3-hard-scv2-5ea979`.
 
