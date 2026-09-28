@@ -1,0 +1,66 @@
+# CONTROL ARM: the ROUND-4 FITS under the ROUND-3 HARD BANK AND TRAJECTORY
+# POLICY. conf/online_mix/noise_v3r3_hard_5050.yaml with only the bank
+# changed: generation `v3r4plain` (rig_sampler.GENERATIONS) = the round-4
+# anchors (results/noise_v3/fits_r4) drawn with the round-3 policy -- the v2
+# short-span pin (SPAN_PIN), Michael's standby carried with probability t, no
+# per-rotor tonality guard, no array-response block (coin 0, recorded as the
+# bank's `array_response_p`). Trajectories: the rig hyperprior exactly as
+# round 3 (mean_shift [-5, 5], rps_max 150; no hover_range, no rotor_sep).
+# Against nv3r3_hard_scv2 it changes the fit alone; against nv3r4_hard_scv2
+# it changes the bank and trajectory policy alone.
+# Bank: scripts/noise_v2_build_bank.py --preset hard --generation v3r4plain
+# (job results/noise_v3r4plain/rig_sampler/jobs/build_hard_job.sh, uni-cpu).
+# Reading: docs/experiments/noise-model-v3.md § Round 4 "Transfer controls".
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+sources:
+  noise:
+  - kind: noise_v2
+    weight: 0.8
+    n_mics: 8
+    n_rotors: 4
+    preset_bank: dload:noise-v3r4plain-banks@1512be476ac5a45a5605cad9ad092338d1843be420504e54c511995206db664e/noise_v3r4plain_hard_n2048.json
+    render_reuse: 192
+    rps_scale_range:
+    - 1.0
+    - 1.0
+    normalize_rms_range:
+    - 0.02
+    - 0.25
+    level_mode: flight
+    rps:
+      kind: fitted_traj
+      fits: dload:rps-traj-fits
+      rigs:
+        posterior: 1
+      mean_shift:
+      - -5.0
+      - 5.0
+      flight_fs: 200
+      flight_reuse: 32
+      rps_max: 150
+  - kind: silence
+    weight: 0.2
+    n_channels: 8
+  speech:
+  - dataset: librispeech
+    subpath: LibriSpeech/train-clean-100
+policy:
+  stages:
+  - until: null
+    source_prob: 1.0
+    snr_db:
+      uniform:
+        low: -30.0
+        high: 0.0
+    speech_per_channel: independent
+    snr_per_channel: false
+    augmentations:
+      probability: 0.5
+      choices:
+      - random_gain:
+          min_db: -6.0
+          max_db: 6.0
+      - random_polarity: {}

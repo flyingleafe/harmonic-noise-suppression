@@ -2174,7 +2174,7 @@ at that round (`r3` is the limiting view and equals the overall here).
 
 | arm | rounds / sel | raw @ sel | best raw | r1 / r2 / r3 | wall |
 |---|---|---|---|---|---|
-| `nv3r4_easy_scv2` | 77 / 36 | **6.10** | 4.63 | 3.54 / 4.78 / 6.10 | 3.5 h |
+| `nv3r4_easy_scv2` | 77 / 36 | **6.10** | 4.63 | 3.54 / 4.78 / 6.10 | 3.3 h |
 | `nv3r4_hard_scv2` | 118 / 37 | **8.02** | 7.17 | 14.18 / 10.50 / 8.02 | 3.8 h |
 | `nv3r3_easy_scv2` | 147 / 125 | 4.68 | 4.68 | 5.22 / 4.74 / 4.68 | 4.6 h |
 | `nv3r3_hard_scv2` | 63 / 14 | 7.79 | 7.46 | 12.09 / 9.10 / 7.79 | 1.9 h |
@@ -2196,7 +2196,40 @@ have worked as an augmentation a faithful rig-only render lacks. That is a
 hypothesis for the next round, not a result of this one: the arms differ
 in the fit, the bank policy and the hard trajectory policy at once.
 
+### Transfer controls (after the round-4 arms)
 
+**The observation.** Round 4 is the first pair whose hard arm trains to a
+lower loss than its easy arm. Mean `train/loss` over the last ten rounds:
+
+| pair | easy | hard |
+|---|---|---|
+| legacy `rig_*_scv2_unified` | 10.7 | 12.0 |
+| v2 `nv2_*_scv2` | 1.3 | 11.4 |
+| round 3b `nv3r3_*_scv2` | 1.9 | 22.1 |
+| round 4 `nv3r4_*_scv2` | 7.3 | **5.5** |
+
+<!-- source: r2://ml-data/artifacts/<exp>/checkpoints/validation_history.jsonl, field train/loss, mean of the last 10 rows (fetched 2026-09-28; rounds 94 / 137, 102 / 116, 147 / 63, 77 / 118) -->
+
+Hypothesis: the round-4 hard stream became easier than intended. The hover
+range 35–95 rev/s, the rotor separation, `rps_max` 120, the tonality guard
+and the standby payload on every entry each remove hard cases; together they
+may have left a stream with clean, well-separated combs. Two controls, one
+seed each, Vast A100, submitted together (`scripts/noise_v2_submit_arms.sh
+... r4ctl`):
+
+1. **`nv2_hard_legacytraj_scv2`**: the v2 hard bank on the legacy hard
+   trajectory sampler (`full_flight`, aggressiveness 1.0, profile blend
+   [0, 1], per-window scale [0.45, 1.2]). Against `nv2_hard_scv2` (7.06) it
+   changes only the trajectories. If it lands materially below 7.06, the
+   hard-arm gap to legacy (5.41) is mostly the trajectory sampler.
+2. **`nv3r4plain_hard_scv2`**: the round-4 fits under the round-3 hard bank
+   and trajectory policy (generation `v3r4plain`: `SPAN_PIN`, standby by
+   t-coin, no guard, no array response; hyperprior trajectories with
+   `mean_shift` [−5, 5], `rps_max` 150). Against `nv3r3_hard_scv2` (7.79) it
+   changes only the fit; against `nv3r4_hard_scv2` (8.02) only the bank and
+   trajectory policy.
+
+Results: pending.
 
 ## Conclusion
 
