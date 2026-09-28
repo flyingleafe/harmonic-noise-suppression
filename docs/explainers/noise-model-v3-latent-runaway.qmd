@@ -528,10 +528,13 @@ r = 0.47 with the static part removed.
 
 # 6. What a rig looks like
 
-Every rig of the campaign in one view. No data enters these figures.[^view]
+Every scored generation in one view: the prior, the four v3 rounds
+(2, 3a, 3b, 4), v2 and the legacy anchors and bank. Round 4a, the first
+round-4 attempt, was superseded by the round-4 fits and is left out. No
+data enters these figures.[^view]
 
 - @fig-g: the v3 prior.
-- @fig-h2, @fig-h, @fig-h4: the v3 fits, rounds 2, 3b and 4.
+- @fig-h2, @fig-h3a, @fig-h, @fig-h4: the v3 fits, rounds 2, 3a, 3b and 4.
 - @fig-i: the v2 fits.
 - @fig-i2: the legacy anchor fits.
 - @fig-i3: two rigs of the legacy hard bank.
@@ -572,6 +575,7 @@ RIG_FIGS = (
     "fig_i2_legacy_fits",
     "fig_i3_legacy_bank",
     "fig_h2_v3_r2_rigs",
+    "fig_h_v3_r3a_rigs",
     "fig_h_v3_r4_rigs",
 )
 ROTOR_CHOICES = {
@@ -636,10 +640,10 @@ The prior thinks a rig is a loud comb over a wild floor.[^prior]
 
 ## The v3 fits, round 2
 
-@fig-h2 shows the round-2 fits, the ones the runaway came from. @fig-h
-shows the round-3b fits that replace them; @fig-h4 the round-4 fits, the
-rig alone. The table and the bullets after @fig-h4 read the three side
-by side.
+@fig-h2 shows the round-2 fits, the ones the runaway came from.
+@fig-h3a and @fig-h show rounds 3a and 3b, which replace them; @fig-h4
+the round-4 fits, the rig alone. The table and the bullets after
+@fig-h4 read the four side by side.
 
 ::: {#fig-h2}
 
@@ -656,6 +660,31 @@ Michael's cruise at 80 rev/s. Standby at 30.6 rev/s. Same axes as
 @fig-h.
 
 :::
+
+## The v3 fits, round 3a
+
+::: {#fig-h3a}
+
+```{ojs}
+viewof rotor_h3a = Inputs.radio(Object.keys(rig_png.fig_h_v3_r3a_rigs), {value: "all rotors", label: "show"})
+```
+
+```{ojs}
+html`<img src="${rig_png.fig_h_v3_r3a_rigs[rotor_h3a]}" style="width: 100%" alt="Fig H3a, ${rotor_h3a}">`
+```
+
+**What you see:** the round-3a v3 fits, latents at zero. Same rigs,
+speeds and axes as @fig-h2.
+
+:::
+
+Round 3a has the first three round-3 changes (§ 8), not the smooth $u_j$.
+Against round 2 the γ tail is gone (widest γ 10.5 Hz on DREGON, was
+42.6; 11.9 Hz on standby, was 86.4) and the cruise comb is denser (79 of
+81 orders over 3 dB, was 45). The 3a → 3b differences are small in this
+view: DREGON $k = 1$ 3.3 → 3.7 dB, 79 → 83 orders; cruise $k = 2$ 36.7 →
+40.2 dB. The table after @fig-h4 has every number.
+<!-- source: figdata_r3a.json rigs.v3_r3a.{dregon,cruise,standby}: over_k1_db 3.29, 12.53, 59.11; over_k2_db 5.64, 36.71, 61.94; n_orders_over 79/88, 79/81, 130/130; gamma_max_hz 10.54, 22.17, 11.85; rigs.v3_r2 gamma_max 42.59, 29.32, 86.39, cruise n_orders_over 45; figdata_r3b.json rigs.v3_r3b dregon 3.67 / 83, cruise over_k2 40.16 -->
 
 ## The v3 fits, round 3b
 
@@ -717,8 +746,8 @@ normalisation (§ Round 4).
 
 :::
 
-Round 4 is round 3b with wider lines and a flatter floor. Round 3b in
-brackets.
+Compared with round 3b, round 4 has wider lines and a flatter floor.
+Round 3b in brackets.
 
 - DREGON: $k = 1$ stands 3.7 dB over the floor part (3.7), $k = 2$
   5.5 dB (5.7). 69 of 88 orders clear 3 dB (83).
@@ -996,11 +1025,11 @@ v2 fit and the round-3b v3 fit. All three clips have the same RMS.[^listen]
     DREGON pool reads 18–26 s of the same flight. Michael's fits read
     `FLY125` only.
 
-Each rig is shown three times, same windows, same seed, same level rule.
-The first figure plays v2 and round 3b. The second adds the round-2 fit
-and the legacy anchor fit of each rig,[^listen-legacy] and ends with
-round 3b again, its wander drawn so that it keeps the mean
-power.[^listen-mp] The third adds round 4.
+Each rig is shown four times, same windows, same seed, same level rule.
+The first figure plays v2 and round 3b. The second plays v2, round 2 and
+round 3a. The third adds the legacy anchor fit of each
+rig[^listen-legacy] and ends with round 3b again, its wander drawn so
+that it keeps the mean power.[^listen-mp] The fourth adds round 4.
 
 [^listen-legacy]: The legacy row is `noise_lab.LegacyFit` of the anchor
     the legacy banks were drawn around, the one of @fig-i2: DREGON
@@ -1068,6 +1097,7 @@ def listen_players(fd, rig, keys):
 ```
 
 ```{python}
+R3A_LABELS = {"real": "real recording", "v2": "v2 fit", "v3": "v3 round-2 fit", "v3_r3a": "v3 round-3a fit"}
 R3_LABELS = {
     "real": "real recording",
     "legacy": "legacy anchor fit (donor dynamics)",
@@ -1121,6 +1151,19 @@ listen_players(FD, "dregon", LISTEN_LABELS)
     over what the window asks for (−9.3 dB). 78 % of the real clip's power
     lies below 300 Hz. So the full-band RMS match takes 3.5 dB off every
     band.
+
+**Round 3a.** The same window: v2, the round-2 fit and the round-3a fit.
+
+![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the v2 fit, the round-2 and the round-3a v3 fits, all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon_r3a.png){#fig-j3a}
+
+```{python}
+listen_players(F3["r3a"], "dregon", R3A_LABELS)
+```
+
+- Round 3a: LTAS distance 3.9 dB (round 2 2.2, round 3b 3.6). Per band
+  −0.5 / −4.8 / −5.8 / −4.9 / −5.0 / −2.4. $k = 1$ / $k = 2$ over the
+  floor 4.6 / 4.5 dB (real 4.4 / 2.9).
+  <!-- source: figdata_r3a.json listen.rigs.dregon.clips.v3_r3a.ltas_mean_abs_db 3.888, ltas_dev_db [-0.48, -4.80, -5.78, -4.93, -4.98, -2.36], line_over_floor_db[0:2] 4.57, 4.45; clips.v3 2.16 -->
 
 ![**What you see:** DREGON, `free-flight_nosource_room2`, 50–60 s, mic 0. Rows: the real recording, the legacy DREGON anchor fit (`dregon_cruise_refined`, donor dynamics), the v2 fit, the round-2 and the round-3b v3 fits, and the round-3b fit again with mean-preserving wander ($d$, $v$, $u$, $u_j$ all drawn at mean $-\sigma^2 \ln 10 / 20$ dB), all on the real rotor track (bottom), same RMS, one colour scale.](noise-model-v3-latent-runaway/fig_j_listen_dregon_r3b.png){#fig-j3}
 
@@ -1185,6 +1228,19 @@ listen_players(FD, "michaels", LISTEN_LABELS)
 - v3 draws a bright line near 1.5 kHz and thin lines at 5–6.5 kHz. The
   real clip has broadband bursts at 1–3 kHz instead.
   <!-- source: figdata.json listen.rigs.michaels.clips.{real,v2,v3_r3b}.line_over_floor_db[0:2] = null, 18.68 / 1.45, 19.00 / 0.90, 18.14; .ltas_mean_abs_db v2 1.266, v3_r3b 2.047; v3_r3b.ltas_dev_db [-0.97, -0.98, -0.38, 0.21, 2.18, 7.55], v2 ltas_dev_db[5] 3.44; lines and bursts: fig_k -->
+
+**Round 3a.** The same window: v2, the round-2 fit and the round-3a fit.
+
+![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3a.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3a.png){#fig-k3a}
+
+```{python}
+listen_players(F3["r3a"], "michaels", R3A_LABELS)
+```
+
+- Round 3a: LTAS distance 2.0 dB (round 2 2.9, round 3b 2.0). Per band
+  −0.7 / −1.0 / −0.6 / +0.1 / +2.1 / +7.4: the 5–7 kHz excess is already
+  there. $k = 2$ 18.2 dB (real 18.7).
+  <!-- source: figdata_r3a.json listen.rigs.michaels.clips.v3_r3a.ltas_mean_abs_db 1.987, ltas_dev_db [-0.66, -0.96, -0.62, 0.12, 2.14, 7.43], line_over_floor_db[1] 18.21; clips.v3 2.93 -->
 
 ![**What you see:** Michael's, `FLY124`, 40–50 s, mic 0. Rows as in @fig-j3; the legacy row is the Michael's anchor fit (`michael_cruise`, donor dynamics). After the round-3b row come the same fit with $\lambda$ = 5, 8, 30 and 60 s⁻¹ instead of the pinned 0.5 s⁻¹, all else equal, then the same fit with every wander σ set to 0 (the rig alone). $\lambda$ is the rate at which each rotor's shaft speed error $\nu$ (rad/s) returns to zero: $d\nu = -\lambda \nu\, dt + \sigma_\nu \sqrt{2 \lambda}\, dW$, with $\sigma_\nu$ = 3.84 rad/s kept. So $\nu$ keeps its size; only its memory $1/\lambda$ shrinks, 2 s → 0.2 s → 0.125 s → 33 ms → 17 ms. The mean spectrum barely changes: total power exactly; the figure's 7.8 Hz bins within 0.24 dB up to $\lambda$ = 8 s⁻¹ and within 0.74 and 1.09 dB at 30 and 60 s⁻¹, the most near 210 Hz, where the low lines sharpen, and under 0.02 dB at 4–7 kHz; 1.95 Hz bins within 0.54, 1.53 and 2.10 dB. The last row is the round-3b fit with mean-preserving wander.](noise-model-v3-latent-runaway/fig_k_listen_michaels_r3b.png){#fig-k3}
 
@@ -1510,7 +1566,8 @@ The rig view is @fig-h4 in § 6. The renders are in § Listen: DREGON
 - Michael's Listen LTAS distance to real: legacy 2.06, v2 1.27, round 3b
   2.05, **round 4 0.95 dB**. DREGON: round 3b 3.6, round 4 3.1.
   <!-- source: figdata_r4.json listen.rigs.{michaels,dregon}.clips.*.ltas_mean_abs_db -->
-- The frozen Michael's LTAS proxy: 1.28 dB on every restart. Legacy 1.33.
+- The frozen Michael's LTAS proxy: 1.281 dB on the selected fit,
+  1.278–1.284 over the four restarts. Legacy 1.33.
   Round 3b 2.48. Parity: DREGON 1.67 rev/s (bar 2.19), Michael's ratio
   0.52 (bar 1.05).
   <!-- source: results/noise_v3/checks_r4/parity/arm_{dregon,michaels}_v3.json bars; checks_r4/proxy_seeds/arm_michaels_r4_s{0..3}.json -->
