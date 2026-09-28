@@ -2229,6 +2229,18 @@ seed each, Vast A100, submitted together (`scripts/noise_v2_submit_arms.sh
    changes only the fit; against `nv3r4_hard_scv2` (8.02) only the bank and
    trajectory policy.
 
+**Read (fixed before any result).** Endpoint: raw `val/real_overall` at
+the smoothed-selected round (`scripts/_nv3_arm_history.py`); `train/loss`
+curves are diagnostic only. One seed, so a difference under 0.5 rev/s is
+read as no effect. Arm 1: ≤ 6.56 (≥ 0.5 below `nv2_hard_scv2` 7.06, i.e.
+≥ 30 % of the 1.65 gap to legacy 5.41) says the trajectory sampler matters;
+within ±0.5 of 7.06 says it does not. Arm 2: ≤ 7.52 (≥ 0.5 below
+`nv3r4_hard_scv2` 8.02) says the round-4 bank/trajectory policy hurt; within
+±0.5 of 8.02 says the policy is not what cost transfer, and its distance to
+`nv3r3_hard_scv2` 7.79 then reads the fit alone. Jobs:
+`nv2-hard-legacytraj-scv2-baf979`, `nv3r4plain-hard-scv2-7f3270` (HEAD
+`60273abd`).
+
 Results: pending.
 
 **Curriculum (stage 2).** `nv3r4_easy_ft_scv2`: `nv2_easy_ft_scv2` with the
@@ -2236,7 +2248,8 @@ warm start moved to `best:real_overall@nv3r4_easy_scv2` (round 36), the
 parent `real_r4_scv2_unified` real pool, `lr` 1e-3, `patience` 20.
 References: `nv2_easy_ft_scv2` 2.73, `nv2_hard_ft_scv2` 2.23,
 `real_r4_scv2_unified` 3.11 (raw `val/real_overall` at selection,
-`scripts/_nv3_arm_history.py`). Results: pending.
+`scripts/_nv3_arm_history.py`). Job `nv3r4-easy-ft-scv2-669405` (HEAD
+`5b27ddce`). Results: pending.
 
 ## Conclusion
 
