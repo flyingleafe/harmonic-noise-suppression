@@ -2231,6 +2231,13 @@ seed each, Vast A100, submitted together (`scripts/noise_v2_submit_arms.sh
 
 Results: pending.
 
+**Curriculum (stage 2).** `nv3r4_easy_ft_scv2`: `nv2_easy_ft_scv2` with the
+warm start moved to `best:real_overall@nv3r4_easy_scv2` (round 36), the
+parent `real_r4_scv2_unified` real pool, `lr` 1e-3, `patience` 20.
+References: `nv2_easy_ft_scv2` 2.73, `nv2_hard_ft_scv2` 2.23,
+`real_r4_scv2_unified` 3.11 (raw `val/real_overall` at selection,
+`scripts/_nv3_arm_history.py`). Results: pending.
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |

@@ -66,6 +66,8 @@ NV3R4=(nv3r4_easy_scv2 nv3r4_hard_scv2)
 #: Round-4 transfer controls: the v2 hard bank on the legacy trajectory
 #: sampler; the round-4 fits under the round-3 bank and trajectory policy.
 R4CTL=(nv2_hard_legacytraj_scv2 nv3r4plain_hard_scv2)
+#: Round-4 curriculum: stage 2 of nv3r4_easy_scv2 on real audio.
+NV3R4FT=(nv3r4_easy_ft_scv2)
 
 TARGET=""
 while [ $# -gt 0 ]; do
@@ -97,8 +99,8 @@ case "$TARGET" in
   *)
     ARMS=("$TARGET")
     found=0
-    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}" "${NV3R3[@]}" "${NV3R4[@]}" "${R4CTL[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
-    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} ${NV3R3[*]} ${NV3R4[*]} ${R4CTL[*]} or all-synth|all-ft|mixed|nv3|nv3r3|nv3r4|r4ctl"
+    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}" "${NV3R3[@]}" "${NV3R4[@]}" "${R4CTL[@]}" "${NV3R4FT[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
+    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} ${NV3R3[*]} ${NV3R4[*]} ${R4CTL[*]} ${NV3R4FT[*]} or all-synth|all-ft|mixed|nv3|nv3r3|nv3r4|r4ctl"
     ;;
 esac
 
