@@ -37,7 +37,8 @@ r2 / r3 3.25 / 3.12 / 2.67. Against `nv2_easy_ft_scv2` 2.73 (smoothed 2.79),
 ## Conclusion
 
 **On par with the v2 easy curriculum.** 2.67 against 2.73 raw, 2.91
-against 2.79 smoothed: both gaps are under the 0.5 one-seed threshold, and by
-the W&B curves (the user's reading) it is if anything slightly worse. The
+against 2.79 smoothed, last round 3.16 against 2.85 (91 rounds against 54):
+every gap is under the 0.5 one-seed threshold, and the smoothed, last-round
+and W&B readings (the user's) all lean slightly worse. The
 round-4 easy warm start buys nothing over v2's; `nv2_hard_ft_scv2` stays the
 best curriculum arm. All beat real audio from scratch (3.11).
