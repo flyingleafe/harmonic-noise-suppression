@@ -65,8 +65,10 @@ Details: `docs/data-and-artifacts.md` § "Job running"; workflow: the
    evaluation protocol of the runs it will be compared against; the protocols
    are named in `docs/experiments/AGENTS.md`. Change the architecture, not the
    regime, unless the regime is the question.
-4. **Worktrees.** Implementation work happens in `.worktrees/<name>` on a
-   branch of the same name. `mk-worktree <name>` (devShell; logic in
+4. **Worktrees (soft).** Direct work on `main` in the main checkout is fine
+   and is the default; do not flag it. Use a worktree for long-lived or
+   parallel branches: `.worktrees/<name>` on a branch of the same name.
+   `mk-worktree <name>` (devShell; logic in
    `scripts/mk-worktree.sh`) creates it, links the shared gitignored resources
    (`.env`, `.cache`, `.venv`, `data/`, `datasets/`, `models/`,
    `.checkpoints-cache.json`, untracked `results/` dirs), runs `direnv allow`
