@@ -35,7 +35,6 @@ difference or a mic mean of dB, which a per-channel gain does not move.
 from __future__ import annotations
 
 import argparse
-import copy
 import importlib.util
 import json
 import subprocess
@@ -54,6 +53,7 @@ import numpy as np  # noqa: E402
 from data_processing.noise_model import spectrum as DSP  # noqa: E402
 from data_processing.noise_model.render import render_noise  # noqa: E402
 from data_processing.noise_model.v3 import Wander  # noqa: E402
+from experiments.noise_model import rig_prior as RP  # noqa: E402
 from experiments.noise_model import supports as SUP  # noqa: E402
 from experiments.noise_model import tonality as TN  # noqa: E402
 from experiments.noise_model import wander as W  # noqa: E402
@@ -259,54 +259,21 @@ def prior_traj_spec(key: str) -> SUP.SupportSpec:
 
 
 def prior_draw(fit: dict[str, Any], rng: np.random.Generator) -> tuple[dict[str, Any], dict]:
-    """One draw of every RIG site from the v3 prior the fit recorded.
-
-    The laws are the model's (``model._sample_params_v3``): ``sigma_nu ~
-    HalfNormal``, ``gamma_rk ~ HalfNormal(c gamma_0 k)``, ``profile_db ~
-    N(measured centre, sd)``, ``z ~ N(0, I)`` on the floor spline at the
-    measured ``mu``/``sigma_B``, the speed laws at their pins or priors, the
-    wind at ``N(measured, sd)``. The wander hyperparameters are the fit's
-    (measured, fixed); the render draws fresh OU tracks from them.
-    """
-    pr, p = fit["priors"], fit["params"]
-    meas = fit["diagnostics"]["measured"]
-    pins = fit["diagnostics"]["span_pins"]
-    prof = np.asarray(p["profile"]["profile_db"], dtype=np.float64)
-    r_, k_ = prof.shape
-    ks = np.arange(1, k_ + 1, dtype=np.float64)
-    g0, gc = float(pr["gamma_hz"]["gamma0_hz"]), float(pr["gamma_hz"]["gamma_c"])
-    bpf, other = (float(v) for v in pr["gamma_hz"].get("gamma_floor_hz") or (0.0, 0.0))
-    blades = int(pr["gamma_hz"].get("blades") or 2)
-    gamma_floor = np.where(ks % blades == 0, bpf, other)
-    gamma = np.abs(rng.normal(0.0, np.broadcast_to(gamma_floor + gc * g0 * ks, (r_, k_))))
-    if pr["sigma_nu"]["family"] == "LogNormal":
-        sigma_nu = float(np.exp(rng.normal(pr["sigma_nu"]["log_mu"], pr["sigma_nu"]["log_sd"])))
-    else:
-        sigma_nu = abs(float(rng.normal(0.0, float(pr["sigma_nu"]["scale_rad_s"]))))
-    centre = np.asarray(meas["profile_centre_db"], dtype=np.float64)[:r_, :k_]
-    profile = rng.normal(centre, float(pr["profile_db"]["sd"]))
-    pinned = set(pins.get("pinned") or [])
-
-    def law(name: str, draw: Any) -> float:
-        return float(pins["values"][name]) if name in pinned else float(draw())
-
-    amp_exp = law("amp_exp", lambda: rng.normal(*pr["amp_exp"]))
-    floor_exp = law("floor_exp", lambda: np.exp(rng.normal(*pr["log_floor_exp"])))
-    static = law("floor_static_rel", lambda: np.exp(rng.normal(*pr["log_floor_static"])))
-    z = rng.normal(size=len(p["floor"]["floor_shape_z"]))
-    out = copy.deepcopy(fit)
+    """One draw of every RIG site from the v3 prior the fit recorded
+    (:func:`experiments.noise_model.rig_prior.draw_rig`), plus the width, floor
+    shape and speed-law statistics of the draw this check reports."""
+    out = RP.draw_rig(fit, rng)
     q = out["params"]
-    q["sigma_nu"] = sigma_nu
-    q["gamma_hz"] = gamma.tolist()
-    q["profile"]["profile_db"] = profile.tolist()
-    q["profile"]["amp_exp"] = amp_exp
-    q["floor"]["floor_shape_z"] = z.tolist()
-    q["floor"]["floor_exp"] = floor_exp
-    q["floor"]["floor_static_rel"] = static
-    if q.get("wind") is not None:
-        q["wind"]["wind_db"] = rng.normal(
-            np.asarray(meas["wind_db"], dtype=np.float64), float(pr["wind"]["sd"])
-        ).tolist()
+    pr = fit["priors"]
+    gamma = np.asarray(q["gamma_hz"], dtype=np.float64)
+    ks = np.arange(1, gamma.shape[1] + 1, dtype=np.float64)
+    g0 = float(pr["gamma_hz"]["gamma0_hz"])
+    sigma_nu = float(q["sigma_nu"])
+    amp_exp = float(q["profile"]["amp_exp"])
+    floor_exp = float(q["floor"]["floor_exp"])
+    static = float(q["floor"]["floor_static_rel"])
+    z = np.asarray(q["floor"]["floor_shape_z"], dtype=np.float64)
+    p = fit["params"]
     ratio = gamma / (g0 * ks[None, :])
     shape = DSP.floor_shape_db(
         z, sr=int(fit["sr"]), scale_db=float(p["floor"]["floor_shape_sd_db"])

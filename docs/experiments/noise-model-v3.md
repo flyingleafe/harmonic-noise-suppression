@@ -2397,6 +2397,77 @@ bank (full round-4 bank policy) on the legacy hard trajectories, SCv2
 
 Results: pending.
 
+### Identifiability gate (per-rotor tonality, 2026-09-29)
+
+**Why.** The round-4 tonality guard (`RotorLinesProbe`) asked for a harmonic
+of each rotor with ANOTHER rotor strong at the same order. That is inverted: a
+line standing alone (DREGON's order 70) should count, and a line swamped by
+another rotor's line should not. Rule agreed with Dmitrii (discussion,
+2026-09-29):
+
+* a harmonic `k` of rotor `r` is **identifiable** in a frame when removing its
+  line lowers the frame's expected spectrum at the line centre by at least
+  `T` = 2 dB: `10 log10(S / (S - L_rk)) >= T`, mic mean;
+* a rotor **passes** a frame with at least 3 identifiable harmonics, any orders
+  in 30 Hz-7.9 kHz;
+* a rotor is **excused** in a frame where it is stopped or within `D` =
+  1.5 rev/s of another rotor anywhere in the frame (geometry only);
+* a rig **passes** when every rotor passes at least 90 % of its eligible
+  frames and has at least 10 of them; fewer makes the pool untestable, which
+  fails: the gate never passes vacuously.
+
+Frames are the models' STFT (2048 / 512 at 16 kHz), drawn from windows of the
+arm's own trajectory stream; the rotor speed moves inside a frame as it does in
+the renderer's kernel.
+
+**Built.** `experiments.noise_model.identifiability` (`gate`, `decompose`,
+`frame_pool`, `pool_coverage`, `GateConfig`). The spectra are the forward
+model's own: `spectrum.flight_cache` holds every line apart,
+`spectrum.flight_model_cached` their sum, per regime, power-blended per frame
+as `render.expected_periodogram_regimes` blends them. No second spectral law.
+The mic-mean spectrum equals `expected_periodogram_regimes` to 9.6e-15 dB on a
+ramp through the standby/cruise blend (59 frames). Two exact economies: orders
+are counted up to k = 24 first and over every in-band order only for the frames
+still short, and a rig is dropped as soon as one rotor exceeds its failure
+budget. `experiments.noise_model.rig_prior.draw_rig` is the prior draw moved
+out of `scripts/noise_v3_checks.py` (which now calls it); `sample_guarded`
+draws until `n` rigs pass. Tests: `tests/experiments/test_identifiability.py`.
+
+**Calibration: the anchors FAIL.** The requirement was that the gate not reject
+the round-4 anchors themselves. On a 64-frame pool of the round-4 hard stream,
+it does. The 3rd-best line contrast per rotor (the largest `T` at which a frame
+passes), p10 / p50 over eligible frames:
+
+| anchor | rotor 1 | rotor 2 | rotor 3 | rotor 4 | gate at T = 2 dB |
+|---|---|---|---|---|---|
+| DREGON r4, as fitted | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 | fail |
+| Michael's r4, as fitted | 6.99 / 8.42 | 4.52 / 5.00 | 0.57 / 0.98 | 1.25 / 2.02 | fail |
+| DREGON r4, speed laws (6, 6) | 0.66 / 0.95 | 1.38 / 1.77 | 0.34 / 0.53 | 1.48 / 1.84 | fail |
+| Michael's r4, speed laws (6, 6) | 6.87 / 8.87 | 3.34 / 3.84 | 0.28 / 0.46 | 0.79 / 1.30 | fail |
+
+As fitted, DREGON's free speed exponents (`amp_exp` ≈ 13, `floor_exp` ≈ 0;
+§ Round 4 Results) sink its lines by 13 · 10 log10(80/60) ≈ 16 dB between 80 and
+60 rev/s. The banks pin (6, 6), so the
+pinned rows are the fair ones. Both anchors would pass only near T ≈ 0.3 dB (the lowest
+pinned p10). The rule is left at 2 dB. Dmitrii decides
+among lowering `T`, fewer orders, or dropping the "anchors pass" condition.
+
+**Prior draws pass more often than the anchors.** 24 draws each on the same
+pool, 4 threads:
+
+| base prior | accepted at T = 2 dB | accepted at T = 1 dB | s per draw (2 / 1 dB) |
+|---|---|---|---|
+| DREGON r4 | 5 / 24 | 11 / 24 | 2.68 / 4.38 |
+| Michael's cruise r4 | 3 / 24 | 7 / 24 | 1.14 / 1.79 |
+
+The pool gives each diagonal pair few eligible frames (rotors 2 and 4: 19 of 64);
+the hyperprior keeps diagonal rotors close, as real quads do.
+<!-- source: results/noise_v3r4/identifiability/calibration.json (scripts/_nv3_r4_gate_calib.py) -->
+
+**Where to use it.** `notebooks/noise_lab.ipynb` § 10: `NL.sample_prior_rigs`,
+`NL.rig_view_plotly` (speed slider; all rotors, mean or one rotor), a trajectory
+and renders with spectrograms and players. The gate is NOT in any bank build.
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |

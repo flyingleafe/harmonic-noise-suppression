@@ -283,11 +283,21 @@ COMB_OFFSET_RANGE = (-12.0, 12.0, 0.25)
 DATASETS = ("DREGON-frames", "michaels-frames")
 
 #: The training arms whose TRAJECTORY STREAM :func:`trajectory` can replay, by
-#: kind: the legacy transfer pair (best real MAE 5.72 / 5.37 rev/s) and its v2
-#: counterparts (7.94 / 7.06).  The first of each is that kind's default.
+#: kind: the legacy transfer pair (best real MAE 5.72 / 5.37 rev/s) and every
+#: ``NoiseV2Pool`` arm - the v2 pair (7.94 / 7.06), the round-4 pair (hover
+#: 35-95 rev/s and rotor separation on hard) and the v2 hard bank on the legacy
+#: ``full_flight`` trajectories (4.96). A ``NoiseV2Pool`` arm's trajectory is
+#: its policy's ``rps`` block plus the entry's ``traj_rig``, which the v2 bank
+#: states exactly as the v3 banks do. The first of each is that kind's default.
 STREAM_POLICIES = {
     "legacy_stream": ("rig_easy_5050", "rig_hard_5050"),
-    "v2_stream": ("noise_v2_easy_5050", "noise_v2_hard_5050"),
+    "v2_stream": (
+        "noise_v2_easy_5050",
+        "noise_v2_hard_5050",
+        "noise_v3r4_easy_5050",
+        "noise_v3r4_hard_5050",
+        "noise_v2_hard_legacytraj_5050",
+    ),
 }
 
 #: Trajectory kinds :func:`trajectory` understands.
@@ -2920,7 +2930,293 @@ def tune(
     return widgets.VBox([controls, widgets.HBox([new_params, regenerate, status]), out])
 
 
+# -- the unfitted prior, guarded ----------------------------------------------
+
+#: Payloads whose RECORDED v3 prior :func:`sample_prior_rigs` draws from: one
+#: regime each (``(rig, regime)`` of :data:`V3_FIT_FILES`). The recorded priors
+#: are marginal per fit, so a standby + cruise pair is not drawn.
+PRIOR_BASES = {
+    "dregon": ("dregon", "single"),
+    "michaels_cruise": ("michaels", "cruise"),
+    "michaels_standby": ("michaels", "standby"),
+}
+
+
+def prior_base(name: str = "michaels_cruise", round: str = "r4") -> dict[str, Any]:
+    """The ``noise-v3-fit/1`` payload of :data:`PRIOR_BASES` ``name`` in fit
+    round ``round``: its ``priors`` and measured quantities are what a draw follows."""
+    rig, regime = PRIOR_BASES[name]
+    path = ROOT / V3_FIT_DIRS[round] / V3_FIT_FILES[rig][regime]
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def gate_pool(
+    kind: str = "v2_stream",
+    *,
+    policy: str | None = "noise_v3r4_hard_5050",
+    n_windows: int = 32,
+    n_frames: int = 64,
+    duration_s: float = 2.0,
+    seed: int = 0,
+) -> Any:
+    """The identifiability gate's frame pool: ``n_windows`` windows of a
+    training arm's OWN trajectory stream (:func:`_stream_rps`, window ``i`` at
+    seed ``seed + i``), ``n_frames`` STFT frames drawn from them
+    (:func:`experiments.noise_model.identifiability.frame_pool`)."""
+    from experiments.noise_model import identifiability as ID
+
+    windows = [
+        _stream_rps(kind, seed=int(seed) + i, duration_s=float(duration_s), policy=policy)[0]
+        for i in range(int(n_windows))
+    ]
+    return ID.frame_pool(windows, n_frames=int(n_frames), seed=int(seed))
+
+
+class PriorRig(V2Fit):
+    """ONE rig drawn from a fit's recorded v3 prior
+    (:func:`experiments.noise_model.rig_prior.draw_rig`), rendered like
+    :class:`V3Fit` (``render_noise``, fresh wander from the base fit's own
+    block, which is zero on a round-4 fit). ``result`` is its gate verdict."""
+
+    generation = "v3"
+
+    def __init__(self, fit: dict[str, Any], *, base: str, seed: int, attempt: int, result: Any):
+        rig, regime = PRIOR_BASES[base]
+        rel = f"{V3_FIT_DIRS['r4']}/{V3_FIT_FILES[rig][regime]}"
+        self.rig = Rig(
+            name=f"{base} prior",
+            fits={"single": fit},
+            traj_rig=TRAJ_RIG[rig],
+            paths={"single": f"prior draw of {rel}"},
+            pool_rps={"single": _pool_span(fit)},
+            provenance={
+                "single": {"schema": str(fit.get("schema")), "draw": f"[{seed}, {attempt}]"}
+            },
+            repo_sha=_repo_sha(),
+            generation="v3",
+            fit_round="prior",
+        )
+        self.result = result
+        self.name = f"prior {base} [{seed},{attempt}]"
+        self.entry = f"draw_rig(default_rng([{seed}, {attempt}])) of {rel}"
+        self.span = self.rig.span
+        self.wander_mean = "zero"
+
+
+def sample_prior_rigs(
+    base: str = "michaels_cruise",
+    *,
+    n: int = 4,
+    seed: int = 0,
+    pool: Any = None,
+    config: Any = None,
+    max_attempts: int = 50,
+    round: str = "r4",
+    guard: bool = True,
+) -> list[PriorRig]:
+    """``n`` rigs from :func:`prior_base` ``base``'s recorded prior; with
+    ``guard``, only draws that pass the identifiability gate on ``pool``
+    (default :func:`gate_pool`) under ``config`` (default ``GateConfig()``:
+    T 2 dB, D 1.5 rev/s, >= 3 orders on >= 90 % of eligible frames). Prints
+    the acceptance count and every rejection's reason."""
+    from experiments.noise_model import identifiability as ID
+    from experiments.noise_model import rig_prior as RP
+
+    fit = prior_base(base, round)
+    if not guard:
+        return [
+            PriorRig(
+                RP.draw_rig(fit, np.random.default_rng([int(seed), i])),
+                base=base,
+                seed=seed,
+                attempt=i,
+                result=None,
+            )
+            for i in range(int(n))
+        ]
+    pool = gate_pool() if pool is None else pool
+    cfg = ID.GateConfig() if config is None else config
+    accepted, rejected = RP.sample_guarded(
+        fit, pool, n=int(n), seed=int(seed), config=cfg, max_attempts=int(max_attempts)
+    )
+    tried = len(accepted) + len(rejected)
+    print(f"{base}: {len(accepted)} accepted of {tried} draws (pool {pool.n_frames} frames)")
+    for d in rejected:
+        print(f"  rejected [{seed},{d.attempt}]: {d.result.reason}")
+    return [
+        PriorRig(d.fit, base=base, seed=seed, attempt=d.attempt, result=d.result) for d in accepted
+    ]
+
+
+def rig_view_plotly(
+    rig: NoiseSource | dict[str, Any],
+    *,
+    speeds: Any = None,
+    fmax: float = 7900.0,
+    title: str | None = None,
+) -> Any:
+    """The parameter view of one rig as an interactive Plotly figure.
+
+    Every rotor runs at the slider's speed. Per speed there is ONE exact
+    decomposition (:func:`experiments.noise_model.identifiability.decompose`,
+    one 2048-sample frame at constant speed, mic mean): the floor (grey, with
+    its control values for a single payload), and the dropdown picks what
+    stands on it - ``all rotors`` (the whole expected periodogram), ``rotor
+    mean`` (floor plus the mean of the four combs) or ``rotor N`` (floor plus
+    that comb alone), each with its stems at ``k f_r`` and red caps of +/- the
+    line's half width (:func:`line_half_width_hz`). ``rig`` is a
+    :class:`NoiseSource` with a ``rig`` (V2Fit / V3Fit / PriorRig) or a payload.
+    """
+    try:
+        import plotly.graph_objects as go
+    except ImportError as exc:  # pragma: no cover - plotly is a project dependency
+        raise ImportError("rig_view_plotly needs plotly (a project dependency)") from exc
+    from data_processing.noise_model import params as MDP
+    from data_processing.noise_model.render import regime_blend_weight
+    from experiments.noise_model import identifiability as ID
+
+    fits = rig.rig.fits if isinstance(rig, NoiseSource) else ID.regimes_of(rig)
+    name = title or (rig.name if isinstance(rig, NoiseSource) else "rig")
+    speeds = np.arange(20.0, 121.0, 5.0) if speeds is None else np.asarray(speeds, dtype=float)
+    n_rot = int(np.asarray(next(iter(fits.values()))["params"]["profile"]["profile_db"]).shape[0])
+    views = ["all rotors", "rotor mean"] + [f"rotor {r + 1}" for r in range(n_rot)]
+    n_fft = ID.SP.FLIGHT_N_FFT
+
+    def db(x: np.ndarray) -> np.ndarray:
+        return 10.0 * np.log10(np.maximum(x, 1e-300))
+
+    def half_widths(fit: dict[str, Any]) -> np.ndarray:
+        p = fit["params"]
+        gamma = np.atleast_2d(np.asarray(MDP.gamma_from_params(p), dtype=np.float64))
+        k = np.arange(1, gamma.shape[1] + 1)
+        sig = np.asarray(p["sigma_nu"], dtype=np.float64).reshape(-1, 1)
+        return line_half_width_hz(sig * k[None, :] / (2.0 * math.pi), gamma)
+
+    widths = {regime: half_widths(fit) for regime, fit in fits.items()}
+    per_speed = []  # per speed: list of (x, y) per trace
+    for v in speeds:
+        rps = np.full((n_rot, n_fft), float(v))
+        dec = ID.decompose(fits, rps, np.array([0]))
+        f = dec.freqs_hz
+        band = f <= fmax
+        floor = dec.floor[0]
+        combs = dec.lines[:, 0].sum(axis=1)  # (R, F)
+        curves = [dec.power[0], floor + combs.mean(axis=0)] + [floor + c for c in combs]
+        if "single" in fits:
+            hw = widths["single"]
+            ctrl = floor_ctrl_db(fits["single"], rps=float(v))
+        else:
+            w = float(regime_blend_weight(rps, sr=SR)[n_fft // 2])
+            hw = widths["cruise" if w >= 0.5 else "standby"]
+            ctrl = (np.array([]), np.array([]))
+        k = np.arange(1, dec.k_max + 1)
+        fk = k * float(v)
+        keep = fk <= fmax
+        bins = np.rint(fk[keep] * n_fft / SR).astype(int)
+        traces = [(f[band], db(floor[band])), (np.asarray(ctrl[0]), np.asarray(ctrl[1]))]
+        for i, curve in enumerate(curves):
+            lvl = db(curve[bins])
+            base = db(floor[bins])
+            stem_x = np.repeat(fk[keep], 3)
+            stem_y = np.column_stack([base, lvl, np.full(lvl.size, np.nan)]).ravel()
+            stem_x[2::3] = np.nan
+            rot = range(n_rot) if i < 2 else [i - 2]
+            cap_x, cap_y = [], []
+            for r in rot:
+                h = hw[r, : dec.k_max][keep]
+                cap_x += (
+                    np.column_stack([fk[keep] - h, fk[keep] + h, np.full(h.size, np.nan)])
+                    .ravel()
+                    .tolist()
+                )
+                cap_y += np.column_stack([lvl, lvl, np.full(h.size, np.nan)]).ravel().tolist()
+            traces += [
+                (f[band], db(curve[band])),
+                (stem_x, stem_y),
+                (np.asarray(cap_x), np.asarray(cap_y)),
+            ]
+        per_speed.append(traces)
+
+    start = int(np.argmin(np.abs(speeds - 80.0)))
+    fig = go.Figure()
+    styles = [
+        dict(name="floor", mode="lines", line=dict(color="grey", width=2)),
+        dict(name="floor control values", mode="markers", marker=dict(color="black", size=6)),
+    ]
+    for view in views:
+        styles += [
+            dict(
+                name=f"{view}: expected periodogram",
+                mode="lines",
+                line=dict(color="#1f77b4", width=1),
+            ),
+            dict(
+                name=f"{view}: line level at k f_r",
+                mode="lines",
+                line=dict(color="#1f77b4", width=1.5),
+            ),
+            dict(
+                name=f"{view}: +/- half width", mode="lines", line=dict(color="#d62728", width=2.5)
+            ),
+        ]
+    for (x, y), style in zip(per_speed[start], styles, strict=True):
+        fig.add_trace(go.Scatter(x=x, y=y, visible=True, **style))
+
+    def visible(view_i: int) -> list[bool]:
+        return [True, True] + [j // 3 == view_i for j in range(3 * len(views))]
+
+    for trace, vis in zip(fig.data, visible(0), strict=True):
+        trace.visible = vis
+    idx = list(range(len(fig.data)))
+    steps = [
+        dict(
+            method="restyle",
+            label=f"{v:g}",
+            args=[{"x": [t[0] for t in tr], "y": [t[1] for t in tr]}, idx],
+        )
+        for v, tr in zip(speeds, per_speed, strict=True)
+    ]
+    ys = np.concatenate([np.asarray(t[1], dtype=float) for tr in per_speed for t in tr[:3]])
+    ys = ys[np.isfinite(ys)]
+    fig.update_layout(
+        title=dict(text=f"{name}: every rotor at the slider's speed", x=0.98, xanchor="right"),
+        xaxis=dict(title="frequency (Hz)", type="log", range=[math.log10(20.0), math.log10(fmax)]),
+        yaxis=dict(title="expected periodogram, mic mean (dB)", range=[ys.min() - 5, ys.max() + 5]),
+        sliders=[
+            dict(
+                active=start,
+                steps=steps,
+                currentvalue=dict(prefix="rotor speed (rev/s): "),
+                pad=dict(t=60),
+            )
+        ],
+        updatemenus=[
+            dict(
+                buttons=[
+                    dict(method="restyle", label=view, args=[{"visible": visible(i)}])
+                    for i, view in enumerate(views)
+                ],
+                x=0.0,
+                xanchor="left",
+                y=1.12,
+                yanchor="bottom",
+            )
+        ],
+        legend=dict(orientation="h", x=0.0, y=-0.5, yanchor="top"),
+        margin=dict(t=90, b=40),
+        height=720,
+        showlegend=True,
+    )
+    return fig
+
+
 __all__ = [
+    "sample_prior_rigs",
+    "rig_view_plotly",
+    "prior_base",
+    "gate_pool",
+    "PriorRig",
+    "PRIOR_BASES",
     "COMB_OFFSET_RANGE",
     "DATASETS",
     "FIT_PATHS",
