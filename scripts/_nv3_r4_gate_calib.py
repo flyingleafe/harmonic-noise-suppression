@@ -72,8 +72,12 @@ def equivalence(mich: dict) -> dict:
     )
 
 
-def third_best(fit, pool: ID.FramePool, cfg: ID.GateConfig) -> list[list[float] | None]:
-    third: list[list[float]] = [[] for _ in range(pool.n_rotors)]
+def best_contrasts(fit, pool: ID.FramePool, cfg: ID.GateConfig) -> dict[str, list]:
+    """Per rank 1-3 and rotor, over the rotor's eligible frames: the p10 / p50
+    of the rank-th best line contrast (``10 log10(S / (S - L))`` at the line
+    centre, in-band orders), and the order ``k`` that holds that rank most often."""
+    vals: list[list[list[float]]] = [[[] for _ in range(pool.n_rotors)] for _ in range(3)]
+    ords: list[list[list[int]]] = [[[] for _ in range(pool.n_rotors)] for _ in range(3)]
     for w, st in zip(pool.windows, pool.starts, strict=True):
         if st.size == 0:
             continue
@@ -87,16 +91,32 @@ def third_best(fit, pool: ID.FramePool, cfg: ID.GateConfig) -> list[list[float] 
         s = dec.power[ni[..., None], b]
         c = 10.0 * np.log10(s / np.maximum(s - line, 1e-300))
         c[(hz < cfg.f_min_hz) | (hz > cfg.f_max_hz)] = -np.inf
-        top3 = np.sort(c, axis=2)[:, :, -3]
-        for r in range(n_r):
-            third[r] += top3[r][e[r]].tolist()
-    return [np.round(np.percentile(t, [10, 50]), 2).tolist() if t else None for t in third]
+        order = np.argsort(c, axis=2)[:, :, ::-1][:, :, :3]  # (R, n, 3) best first
+        top = np.take_along_axis(c, order, axis=2)
+        for rank in range(3):
+            for r in range(n_r):
+                vals[rank][r] += top[r, :, rank][e[r]].tolist()
+                ords[rank][r] += (order[r, :, rank][e[r]] + 1).tolist()
+    out: dict[str, list] = {}
+    for rank, label in enumerate(("1st", "2nd", "3rd")):
+        out[f"{label}_contrast_db_p10_p50"] = [
+            np.round(np.percentile(v, [10, 50]), 2).tolist() if v else None for v in vals[rank]
+        ]
+        out[f"{label}_modal_order"] = [
+            int(np.bincount(o).argmax()) if o else None for o in ords[rank]
+        ]
+    return out
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     ap.add_argument("--draws", type=int, default=24)
     ap.add_argument("--frames", type=int, default=64)
+    ap.add_argument(
+        "--anchors-only",
+        action="store_true",
+        help="recompute only the anchors block and merge it into the existing record",
+    )
     args = ap.parse_args()
     torch.set_num_threads(4)
     pin = RS.ROUND4_SPEED_LAW_PIN
@@ -113,7 +133,7 @@ def main() -> None:
             coverage=ID.pool_coverage(pool, cfg).eligible.tolist(),
         ),
         config=cfg.__dict__,
-        equivalence=equivalence(mich),
+        equivalence=None if args.anchors_only else equivalence(mich),
         anchors={},
         prior={},
     )
@@ -124,11 +144,17 @@ def main() -> None:
     for name, fit in {"dregon": dregon, "michaels": mich, **pinned}.items():
         res = ID.gate(fit, pool, cfg)
         out["anchors"][name] = dict(
-            third_best_contrast_db_p10_p50=third_best(fit, pool, cfg),
+            **best_contrasts(fit, pool, cfg),
             passed=res.passed,
             reason=res.reason,
         )
-        print(name, out["anchors"][name])
+        print(name, json.dumps(out["anchors"][name]))
+    if args.anchors_only:
+        rec = json.loads(OUT.read_text())
+        rec["anchors"] = out["anchors"]
+        OUT.write_text(json.dumps(rec, indent=1))
+        print(f"merged anchors into {OUT}")
+        return
     for base in ("dregon_room2_floor", "michaels_fly125_cruise"):
         for t in (2.0, 1.0):
             t0 = time.perf_counter()
