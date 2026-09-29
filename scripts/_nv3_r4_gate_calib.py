@@ -11,8 +11,8 @@ Writes ``results/noise_v3r4/identifiability/calibration.json``:
   the 1st/2nd/3rd best EXACT line contrast, and the (fast) gate's verdict;
 * ``accuracy``: the fast contrasts (:func:`identifiability.line_contrasts`)
   against the exact ones, on the pool's frames and on the same frames held at
-  their centre speed, for the default background (+-10 neighbours) and the two
-  nearest per other rotor;
+  their centre speed (the gate sums every line and leaves out only the speed
+  change within a frame);
 * ``prior``: acceptance of prior draws (``rig_prior.draw_rig``) of the DREGON and
   Michael's cruise fits at T = 2 and 1 dB, and the seconds per draw.
 
