@@ -15,7 +15,7 @@ sources:
     weight: 0.8
     n_mics: 8
     n_rotors: 4
-    preset_bank: dload:noise-v3r4plain6-banks@PIN/noise_v3r4plain6_hard_n2048.json
+    preset_bank: dload:noise-v3r4plain6-banks@fb2551a1d9b116a2553cf79006090bf873f8a8ca32d199e4fff1e18df80d451b/noise_v3r4plain6_hard_n2048.json
     render_reuse: 192
     rps_scale_range:
     - 0.45
