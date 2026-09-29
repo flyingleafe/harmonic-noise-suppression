@@ -1,0 +1,14 @@
+# @package _global_
+# SCv2 on the round-4 fits (round-3 bank rules, (6, 6) speed laws) flown on the
+# legacy hard trajectories. `nv2_hard_legacytraj_scv2` with only the bank changed.
+# Stream: conf/online_mix/noise_v3r4plain6_hard_legacytraj_5050.yaml. Batch doc:
+# docs/experiments/noise-model-v3.md § Round 4 "Transfer controls".
+defaults:
+  - rig_easy_scv2_unified
+  - _self_
+
+experiment_name: nv3r4plain6_hard_legacytraj_scv2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v3r4plain6_hard_legacytraj_5050.yaml

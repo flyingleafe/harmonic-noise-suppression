@@ -353,16 +353,21 @@ ANCHORS_V3R4: dict[str, dict[str, Any]] = {
 #: probability t, no tonality guard, no array-response coin): the control
 #: that separates the round-4 fit from the round-4 bank policy
 #: (``docs/experiments/noise-model-v3.md`` § "Round 4" transfer controls).
+#: ``"v3r4plain6"`` is ``"v3r4plain"`` with the speed laws pinned to the
+#: round-4 aeroacoustic centre (6, 6) instead of :data:`SPAN_PIN`
+#: (:data:`GENERATION_SPEED_LAW_PIN`): the (2, 2) pin was the v2 short-span
+#: contract, not a v3 law.
 GENERATIONS: dict[str, dict[str, dict[str, Any]]] = {
     "v2": ANCHORS,
     "v3": ANCHORS_V3,
     "v3r3": ANCHORS_V3R3,
     "v3r4": ANCHORS_V3R4,
     "v3r4plain": ANCHORS_V3R4,
+    "v3r4plain6": ANCHORS_V3R4,
 }
 
 #: The generations drawn with the v3 construction (and its trend rule).
-V3_GENERATIONS = ("v3", "v3r3", "v3r4", "v3r4plain")
+V3_GENERATIONS = ("v3", "v3r3", "v3r4", "v3r4plain", "v3r4plain6")
 
 
 def anchors_of(generation: str) -> dict[str, dict[str, Any]]:
@@ -807,6 +812,13 @@ FITTED_SPEED_LAW_GENERATIONS = ("v3r4",)
 #: (`results/noise_v3/rig_sampler/guard_calib_r4_pin66_standby.json`).
 ROUND4_BANK_GENERATIONS = ("v3r4",)
 ROUND4_SPEED_LAW_PIN: dict[str, float] = {"amp_exp": 6.0, "floor_exp": 6.0}
+
+#: Generations whose bank pins the speed laws by default without the rest of
+#: the round-4 bank policy (an explicit :attr:`BankSpec.speed_law_pin` still
+#: overrides). Each anchor keeps its own static floor fraction.
+GENERATION_SPEED_LAW_PIN: dict[str, dict[str, float]] = {
+    "v3r4plain6": ROUND4_SPEED_LAW_PIN,
+}
 
 
 def array_response_p(generation: str) -> float:
@@ -2255,9 +2267,12 @@ class BankSpec:
     widths: dict[str, float]
     k_max: int = PATH_K_MAX
     max_attempts: int = 16
-    #: ``"v2"``: the v2 anchors (:data:`ANCHORS`); ``"v3"`` / ``"v3r3"``: the
-    #: round-2 / round-3b v3 anchors (:data:`ANCHORS_V3`, :data:`ANCHORS_V3R3`),
-    #: drawn by the SAME construction and widths.
+    #: A key of :data:`GENERATIONS`: ``"v2"`` the v2 anchors; ``"v3"`` /
+    #: ``"v3r3"`` the round-2 / round-3b v3 anchors; ``"v3r4"`` the round-4
+    #: anchors under the round-4 bank policy; ``"v3r4plain"`` /
+    #: ``"v3r4plain6"`` the round-4 anchors under the round-3 policy with the
+    #: (2, 2) / (6, 6) speed-law pin. All drawn by the SAME construction and
+    #: widths.
     generation: str = "v2"
     #: Hard preset only: refuse a path draw that fails the per-rotor tonality
     #: guard (:class:`RotorLinesProbe`, round 4).
@@ -2274,6 +2289,10 @@ class BankSpec:
             raise ValueError(f"an easy bank splits evenly between two rigs; {self.n} is odd")
         if self.rotor_lines and self.preset != "hard":
             raise ValueError("rotor_lines is a guard of the hard (path) preset only")
+        if self.generation in GENERATION_SPEED_LAW_PIN and self.speed_law_pin is None:
+            object.__setattr__(
+                self, "speed_law_pin", dict(GENERATION_SPEED_LAW_PIN[self.generation])
+            )
         if self.generation in ROUND4_BANK_GENERATIONS:
             # the round-4 policy is not optional: apply it and say so
             object.__setattr__(self, "speed_law_pin", dict(ROUND4_SPEED_LAW_PIN))

@@ -39,6 +39,10 @@ around a flat-trend anchor) is in the sampler's module docstring.
 fits (:data:`experiments.noise_model.rig_sampler.ANCHORS_V3R3`): file
 ``noise_v3r3_<preset>_n<n>.json``, report
 ``results/noise_v3r3/rig_sampler/build_<preset>.json``.
+``--generation v3r4`` / ``v3r4plain`` / ``v3r4plain6`` draw around the round-4
+fits: under the mandatory round-4 bank policy, under the round-3 policy with
+the (2, 2) speed-law pin, and under the round-3 policy with the (6, 6) pin
+(``rig_sampler.GENERATIONS``); same file and report naming.
 
 REPRODUCIBILITY. One seed (:data:`SEED`), one substream per entry index
 (``default_rng([seed, i])``), so a bank is bit-identical at any worker count

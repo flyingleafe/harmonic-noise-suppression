@@ -572,4 +572,8 @@ def test_the_round4_bank_policy_is_mandatory_by_generation() -> None:
     assert "v3r4plain" not in RS.FITTED_SPEED_LAW_GENERATIONS
     assert RS.array_response_p("v3r4") == RS.ARRAY_RESPONSE_P
     assert RS.array_response_p("v3r4plain") == RS.array_response_p("v3r3") == 0.0
+    plain6 = spec("hard", "v3r4plain6")
+    assert plain6.speed_law_pin == RS.ROUND4_SPEED_LAW_PIN and not plain6.rotor_lines
+    assert RS.array_response_p("v3r4plain6") == 0.0
+    assert plain6.digest != plain.digest
     assert plain.digest != r3.digest != spec("hard", "v3r4").digest

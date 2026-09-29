@@ -1,0 +1,15 @@
+# @package _global_
+# HPPNet-L2 on the stream of `nv3r4_hard_fullhyper_scv2` (round-4 hard bank,
+# tonality guard on, unrestricted rig hyperprior); the salience counterpart,
+# built like `nv2_hard_hppnet_l2`.
+# Stream: conf/online_mix/noise_v3r4_hard_fullhyper_5050.yaml. Batch doc:
+# docs/experiments/noise-model-v3.md § Round 4 "Transfer controls".
+defaults:
+  - rig_easy_hppnet_l2_unified
+  - _self_
+
+experiment_name: nv3r4_hard_fullhyper_hppnet_l2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v3r4_hard_fullhyper_5050.yaml

@@ -2306,6 +2306,29 @@ References: `nv2_easy_ft_scv2` 2.73, `nv2_hard_ft_scv2` 2.23,
 `scripts/_nv3_arm_history.py`). Job `nv3r4-easy-ft-scv2-669405` (HEAD
 `5b27ddce`). Results: the table below.
 
+### Trajectory and guard arms (after the transfer controls)
+
+Three arms, one seed each, Vast A100, submitted together. Reading fixed
+before any result (raw `val/real_overall` at the smoothed selection; under
+0.5 rev/s is no effect):
+
+1. **`nv3r4plain6_hard_legacytraj_scv2`**: the round-4 fits under the
+   round-3 bank rules with the speed laws pinned to (6, 6) (generation
+   `v3r4plain6`; the (2, 2) pin of `v3r4plain` was the v2 short-span
+   contract, a mistake for a v3 fit, so `nv3r4plain_hard_scv2`'s 11.17 is
+   confounded by it), on the legacy hard trajectories. Against
+   `nv2_hard_legacytraj_scv2` (4.96) it changes the fit generation (and the
+   v3 construction) on fixed trajectories: within ±0.5 says the round-4 fit
+   transfers as well as v2 there.
+2. **`nv3r4_hard_fullhyper_scv2`**: the round-4 hard bank (tonality guard,
+   (6, 6), standby on every entry, array response) on the unrestricted
+   hyperprior. Against `nv3r4_hard_scv2` (8.02) it removes only the
+   trajectory restrictions: ≥ 0.5 worse says they helped.
+3. **`nv3r4_hard_fullhyper_hppnet_l2`**: the same stream on HPPNet-L2,
+   against `nv2_hard_hppnet_l2` (6.47) and arm 2.
+
+Results: pending.
+
 ## Conclusion
 
 | check | DREGON | Michael's cruise | Michael's standby |

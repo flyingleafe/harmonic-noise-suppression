@@ -1,0 +1,14 @@
+# @package _global_
+# SCv2 on the round-4 hard bank (tonality guard on) flown on the unrestricted
+# rig hyperprior. `nv3r4_hard_scv2` with only the trajectory block changed.
+# Stream: conf/online_mix/noise_v3r4_hard_fullhyper_5050.yaml. Batch doc:
+# docs/experiments/noise-model-v3.md § Round 4 "Transfer controls".
+defaults:
+  - rig_easy_scv2_unified
+  - _self_
+
+experiment_name: nv3r4_hard_fullhyper_scv2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v3r4_hard_fullhyper_5050.yaml

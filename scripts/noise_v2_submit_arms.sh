@@ -11,6 +11,8 @@
 #   nv3         nv3_{easy,hard}_scv2               — the v3 twins of the SCv2 pair
 #   nv3r3       nv3r3_{easy,hard}_scv2             — the same pair on the round-3b fits
 #   nv3r4       nv3r4_{easy,hard}_scv2             — the pair on the round-4 fits and hard policy
+#   r4ctl       nv2_hard_legacytraj_scv2 nv3r4plain_hard_scv2 — round-4 transfer controls
+#   r4traj      nv3r4plain6_hard_legacytraj_scv2 nv3r4_hard_fullhyper_{scv2,hppnet_l2}
 #   <arm>       any one of those experiment names
 #
 # Options:
@@ -68,6 +70,9 @@ NV3R4=(nv3r4_easy_scv2 nv3r4_hard_scv2)
 R4CTL=(nv2_hard_legacytraj_scv2 nv3r4plain_hard_scv2)
 #: Round-4 curriculum: stage 2 of nv3r4_easy_scv2 on real audio.
 NV3R4FT=(nv3r4_easy_ft_scv2)
+#: Round-4 trajectory/guard arms: round-4 fits on legacy trajectories; the
+#: round-4 bank on the unrestricted hyperprior (SCv2 and HPPNet-L2).
+R4TRAJ=(nv3r4plain6_hard_legacytraj_scv2 nv3r4_hard_fullhyper_scv2 nv3r4_hard_fullhyper_hppnet_l2)
 
 TARGET=""
 while [ $# -gt 0 ]; do
@@ -96,11 +101,12 @@ case "$TARGET" in
   nv3r3)     ARMS=("${NV3R3[@]}") ;;
   nv3r4)     ARMS=("${NV3R4[@]}") ;;
   r4ctl)     ARMS=("${R4CTL[@]}") ;;
+  r4traj)    ARMS=("${R4TRAJ[@]}") ;;
   *)
     ARMS=("$TARGET")
     found=0
-    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}" "${NV3R3[@]}" "${NV3R4[@]}" "${R4CTL[@]}" "${NV3R4FT[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
-    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} ${NV3R3[*]} ${NV3R4[*]} ${R4CTL[*]} ${NV3R4FT[*]} or all-synth|all-ft|mixed|nv3|nv3r3|nv3r4|r4ctl"
+    for a in "${SYNTH[@]}" "${MIXED[@]}" "${FT[@]}" "${NV3[@]}" "${NV3R3[@]}" "${NV3R4[@]}" "${R4CTL[@]}" "${NV3R4FT[@]}" "${R4TRAJ[@]}"; do [ "$a" = "$TARGET" ] && found=1; done
+    [ "$found" = 1 ] || die "unknown arm '$TARGET'; expected one of ${SYNTH[*]} ${MIXED[*]} ${FT[*]} ${NV3[*]} ${NV3R3[*]} ${NV3R4[*]} ${R4CTL[*]} ${NV3R4FT[*]} ${R4TRAJ[*]} or all-synth|all-ft|mixed|nv3|nv3r3|nv3r4|r4ctl|r4traj"
     ;;
 esac
 
@@ -112,6 +118,7 @@ banks_dataset() {
     nv3r3_*) echo noise-v3r3-banks ;;
     nv3r4_*) echo noise-v3r4-banks ;;
     nv3r4plain_*) echo noise-v3r4plain-banks ;;
+    nv3r4plain6_*) echo noise-v3r4plain6-banks ;;
     *) echo noise-v2-banks ;;
   esac
 }

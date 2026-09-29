@@ -1,0 +1,60 @@
+# ARM STREAM: the ROUND-4 HARD BANK (noise-v3r4-banks, with its tonality
+# guard, (6, 6) speed laws, standby on every entry, array-response coin) on
+# the UNRESTRICTED rig hyperprior: conf/online_mix/noise_v3r4_hard_5050.yaml
+# with the round-3 trajectory block (mean_shift [-5, 5], rps_max 150; no
+# hover_range, no rotor_sep). Against nv3r4_hard_scv2 it changes only the
+# trajectory restrictions; against nv3r4plain_hard_scv2 only the bank policy.
+# Reading: docs/experiments/noise-model-v3.md § Round 4 "Transfer controls".
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+sources:
+  noise:
+  - kind: noise_v2
+    weight: 0.8
+    n_mics: 8
+    n_rotors: 4
+    preset_bank: dload:noise-v3r4-banks@77ff7d7f6b67d65fb4fc113840c9fd532973cc38af79824b1ec219756b4d5bd0/noise_v3r4_hard_n2048.json
+    render_reuse: 192
+    rps_scale_range:
+    - 1.0
+    - 1.0
+    normalize_rms_range:
+    - 0.02
+    - 0.25
+    level_mode: flight
+    rps:
+      kind: fitted_traj
+      fits: dload:rps-traj-fits
+      rigs:
+        posterior: 1
+      mean_shift:
+      - -5.0
+      - 5.0
+      flight_fs: 200
+      flight_reuse: 32
+      rps_max: 150
+  - kind: silence
+    weight: 0.2
+    n_channels: 8
+  speech:
+  - dataset: librispeech
+    subpath: LibriSpeech/train-clean-100
+policy:
+  stages:
+  - until: null
+    source_prob: 1.0
+    snr_db:
+      uniform:
+        low: -30.0
+        high: 0.0
+    speech_per_channel: independent
+    snr_per_channel: false
+    augmentations:
+      probability: 0.5
+      choices:
+      - random_gain:
+          min_db: -6.0
+          max_db: 6.0
+      - random_polarity: {}
