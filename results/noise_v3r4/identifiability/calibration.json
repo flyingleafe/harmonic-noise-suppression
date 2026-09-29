@@ -20,15 +20,10 @@
   "spin_min_rps": 0.0,
   "f_min_hz": 30.0,
   "f_max_hz": 7900.0,
-  "first_k": 24,
-  "margin_hz": 200.0,
-  "n_fft": 2048,
-  "hop": 512,
-  "sr": 16000,
-  "frame_chunk": 16
+  "shape_step_hz": 0.5
  },
  "equivalence": {
-  "carrier": "rotors 30/42/55/70 rev/s + 8 rev/s^2, 2 s",
+  "carrier": "rotors 30/42/55/70 rev/s + 8 rev/s^2, 2 s; array response on",
   "n_frames": 59,
   "max_abs_db": 9.643274665532861e-15
  },
@@ -107,7 +102,7 @@
     13
    ],
    "passed": false,
-   "reason": "rotor 2 failed 3 frames, budget 1 of 19 eligible"
+   "reason": "rotor 1 passed 0 of 54 eligible frames (needs 49)"
   },
   "michaels": {
    "1st_contrast_db_p10_p50": [
@@ -183,7 +178,7 @@
     71
    ],
    "passed": false,
-   "reason": "rotor 3 failed 7 frames, budget 5 of 50 eligible"
+   "reason": "rotor 3 passed 16 of 50 eligible frames (needs 45)"
   },
   "dregon (6,6)": {
    "1st_contrast_db_p10_p50": [
@@ -259,7 +254,7 @@
     21
    ],
    "passed": false,
-   "reason": "rotor 2 failed 3 frames, budget 1 of 19 eligible"
+   "reason": "rotor 1 passed 0 of 54 eligible frames (needs 49)"
   },
   "michaels (6,6)": {
    "1st_contrast_db_p10_p50": [
@@ -335,29 +330,87 @@
     71
    ],
    "passed": false,
-   "reason": "rotor 4 failed 3 frames, budget 1 of 19 eligible"
+   "reason": "rotor 3 passed 0 of 50 eligible frames (needs 45)"
   }
  },
  "prior": {
   "dregon_room2_floor T=2": {
-   "accepted": 5,
+   "accepted": 7,
    "drawn": 24,
-   "s_per_draw": 2.68
+   "s_per_draw": 0.81
   },
   "dregon_room2_floor T=1": {
-   "accepted": 11,
+   "accepted": 15,
    "drawn": 24,
-   "s_per_draw": 4.38
+   "s_per_draw": 0.78
   },
   "michaels_fly125_cruise T=2": {
    "accepted": 3,
    "drawn": 24,
-   "s_per_draw": 1.14
+   "s_per_draw": 0.7
   },
   "michaels_fly125_cruise T=1": {
    "accepted": 7,
    "drawn": 24,
-   "s_per_draw": 1.79
+   "s_per_draw": 0.67
+  }
+ },
+ "accuracy": {
+  "dregon (6,6), constant speed": {
+   "median_db": -0.0,
+   "p95_db": -0.0,
+   "max_db": 0.0,
+   "decision_flips": 0,
+   "lines": 22485
+  },
+  "dregon (6,6), stream": {
+   "median_db": 0.074,
+   "p95_db": 0.34,
+   "max_db": 1.64,
+   "decision_flips": 55,
+   "lines": 22502
+  },
+  "michaels (6,6), constant speed": {
+   "median_db": -0.0,
+   "p95_db": -0.0,
+   "max_db": 0.0,
+   "decision_flips": 0,
+   "lines": 33237
+  },
+  "michaels (6,6), stream": {
+   "median_db": 0.406,
+   "p95_db": 1.8,
+   "max_db": 12.48,
+   "decision_flips": 967,
+   "lines": 33254
+  },
+  "prior dregon [7,1], constant speed": {
+   "median_db": -0.0,
+   "p95_db": -0.0,
+   "max_db": 0.0,
+   "decision_flips": 0,
+   "lines": 22485
+  },
+  "prior dregon [7,1], stream": {
+   "median_db": 0.277,
+   "p95_db": 1.85,
+   "max_db": 7.21,
+   "decision_flips": 248,
+   "lines": 22502
+  },
+  "prior michaels-cruise [7,0], constant speed": {
+   "median_db": -0.0,
+   "p95_db": -0.0,
+   "max_db": 0.0,
+   "decision_flips": 0,
+   "lines": 20693
+  },
+  "prior michaels-cruise [7,0], stream": {
+   "median_db": 0.176,
+   "p95_db": 1.18,
+   "max_db": 5.13,
+   "decision_flips": 276,
+   "lines": 20710
   }
  }
 }

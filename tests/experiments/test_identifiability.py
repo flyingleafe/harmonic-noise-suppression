@@ -45,7 +45,7 @@ def test_a_loud_comb_passes_and_a_sunk_comb_fails(cruise):
     assert loud.frames_ok.tolist() == [12, 12, 12, 12]
     sunk = ID.gate(_moved(cruise, -100.0), pool)
     assert not sunk.passed
-    assert sunk.reason.startswith("rotor 1 failed")
+    assert sunk.reason.startswith("rotor 1 passed 0 of 12")
 
 
 def test_the_gate_never_passes_vacuously(cruise):
@@ -69,13 +69,48 @@ def test_rotors_closer_than_the_separation_are_excused_not_failed(cruise):
     assert lax.frames_ok.tolist() == [0, 0, 12, 12]
 
 
-def test_progressive_orders_count_what_one_full_pass_counts(cruise):
-    """Pass 1's partial background is only trusted below the margin, so the
-    two-pass count equals the all-orders count, on a ramp (chirped frames) and
-    at the fit's own levels, where some rotors pass and some do not."""
-    pool = _pool([55.0, 64.0, 81.0, 97.0], ramp=6.0)
-    counts = {}
-    for first_k in (8, 24, 10_000):
-        cfg = ID.GateConfig(first_k=first_k, pass_frac=0.0, min_eligible_frames=0)
-        counts[first_k] = ID.gate(cruise, pool, cfg).frames_ok.tolist()
-    assert counts[8] == counts[24] == counts[10_000]
+def _exact_contrasts(fit, pool: ID.FramePool) -> list[np.ndarray]:
+    out = []
+    for w, st in zip(pool.windows, pool.starts, strict=True):
+        dec = ID.decompose(fit, w, st)
+        n_r, n, kk, _ = dec.lines.shape
+        hz = dec.centre_rps[:, :, None] * np.arange(1, kk + 1)
+        b = np.clip(np.rint(hz * pool.n_fft / pool.sr).astype(int), 0, pool.n_fft // 2)
+        ri, ni = np.meshgrid(np.arange(n_r), np.arange(n), indexing="ij")
+        line = dec.lines[ri[..., None], ni[..., None], np.arange(kk), b]
+        s = dec.power[ni[..., None], b]
+        out.append(10.0 * np.log10(s / np.maximum(s - line, 1e-300)))
+    return out
+
+
+def test_fast_contrasts_are_the_exact_model_at_constant_speed(cruise):
+    """At constant speed the fast scheme is the forward model's own line kernel
+    summed over every line, so it must reproduce the exact per-line contrast
+    (:func:`decompose`) up to the shape table's interpolation."""
+    pool = _pool([55.0, 64.0, 81.0, 118.0])  # 118 rev/s: the order cap bites below 81
+    cfg = ID.GateConfig()
+    (fast, hz), exact = ID.line_contrasts(cruise, pool, cfg)[0], _exact_contrasts(cruise, pool)[0]
+    kk = min(fast.shape[2], exact.shape[2])
+    band = (hz[:, :, :kk] >= cfg.f_min_hz) & (hz[:, :, :kk] <= cfg.f_max_hz)
+    f, e = fast[:, :, :kk][band], exact[:, :, :kk][band]
+    relevant = (f > 0.5) | (e > 0.5)
+    assert relevant.sum() > 100
+    assert np.max(np.abs(f - e)[relevant]) < 0.2
+
+
+def test_the_exact_reference_is_the_render_expectation_with_the_array_response():
+    """:func:`decompose`'s spectrum is the mic mean of
+    :func:`render.expected_periodogram_regimes`, array response included."""
+    from experiments.noise_model import render as RD
+
+    def load(name: str) -> dict:
+        return json.loads((ROOT / f"results/noise_v3/fits_r4/{name}__flight_v3.json").read_text())
+
+    pair = {"standby": load("michaels_fly125_standby"), "cruise": load("michaels_fly125_cruise")}
+    assert pair["cruise"]["params"].get("array_response") is not None
+    t = np.arange(N_SAMPLES) / ID.SP.FLIGHT_SR
+    rps = np.array([40.0, 50.0, 58.0, 70.0])[:, None] + 8.0 * t[None, :]  # through the blend
+    starts = np.arange(1 + (N_SAMPLES - ID.SP.FLIGHT_N_FFT) // ID.SP.FLIGHT_HOP) * ID.SP.FLIGHT_HOP
+    ref = RD.expected_periodogram_regimes(pair, rps, n_mics=8).mean(axis=0)
+    got = ID.decompose(pair, rps, starts).power
+    assert np.max(np.abs(10.0 * np.log10(got / ref))) < 1e-9

@@ -2417,21 +2417,36 @@ another rotor's line should not. Rule agreed with Dmitrii (discussion,
   fails: the gate never passes vacuously.
 
 Frames are the models' STFT (2048 / 512 at 16 kHz), drawn from windows of the
-arm's own trajectory stream; the rotor speed moves inside a frame as it does in
-the renderer's kernel.
+arm's own trajectory stream; each frame is read at its centre speed.
 
-**Built.** `experiments.noise_model.identifiability` (`gate`, `decompose`,
-`frame_pool`, `pool_coverage`, `GateConfig`). The spectra are the forward
-model's own: `spectrum.flight_cache` holds every line apart,
-`spectrum.flight_model_cached` their sum, per regime, power-blended per frame
-as `render.expected_periodogram_regimes` blends them. No second spectral law.
-The mic-mean spectrum equals `expected_periodogram_regimes` to 9.6e-15 dB on a
-ramp through the standby/cruise blend (59 frames). Two exact economies: orders
-are counted up to k = 24 first and over every in-band order only for the frames
-still short, and a rig is dropped as soon as one rotor exceeds its failure
-budget. `experiments.noise_model.rig_prior.draw_rig` is the prior draw moved
-out of `scripts/noise_v3_checks.py` (which now calls it); `sample_guarded`
-draws until `n` rigs pass. Tests: `tests/experiments/test_identifiability.py`.
+**Built** (Dmitrii's scheme). `experiments.noise_model.identifiability`:
+`gate`, `line_contrasts`, `line_shapes`, and `decompose` (the exact reference).
+At constant speed a model line is one shape shifted to `k f` and scaled by the
+speed law: window autocorrelation times the fitted lag law (`lag.r_tau`),
+transformed once per line per rig over the whole band. Per frame the gate
+reads the shapes at the target bin: the line, and as background every other
+line of every rotor plus the model's floor. The one simplification is constant
+speed within a frame (Dmitrii's call). The exact reference applies the array
+response per mic and equals `render.expected_periodogram_regimes` to
+9.6e-15 dB. `experiments.noise_model.rig_prior`: `draw_rig` (a negative
+`amp_exp` draw is redrawn), `sample_rigs` with an acceptance callable; it raises
+`SamplingExhausted` rather than return fewer than `n`.
+
+**Accuracy against the exact model** (fast minus exact contrast over lines above
+0.5 dB; the number of 2 dB decisions that differ):
+
+| rig | constant-speed frames | real stream frames |
+|---|---|---|
+| DREGON r4 (6, 6) | 0.00 dB; 0 of 22,485 | median +0.07, p95 +0.34, max +1.64 dB; 55 of 22,502 |
+| Michael's r4 (6, 6) | 0.00 dB; 0 of 33,237 | median +0.41, p95 +1.80, max +12.48 dB; 967 of 33,254 |
+| prior draw, DREGON | 0.00 dB; 0 of 22,485 | median +0.28, p95 +1.85, max +7.21 dB; 248 of 22,502 |
+| prior draw, Michael's cruise | 0.00 dB; 0 of 20,693 | median +0.18, p95 +1.18, max +5.13 dB; 276 of 20,710 |
+
+At constant speed the gate IS the model. On real frames the speed change within
+a frame, which the gate leaves out, reads contrasts too high: the gate is lenient.
+Keeping only the two nearest lines of each other rotor (the first proposal)
+read wide-line prior draws several dB high even at constant speed, so every
+line is summed.
 
 **Calibration: the anchors FAIL.** The requirement was that the gate not reject
 the round-4 anchors themselves. On a 64-frame pool of the round-4 hard stream,
@@ -2448,17 +2463,18 @@ passes), p10 / p50 over eligible frames:
 As fitted, DREGON's free speed exponents (`amp_exp` ≈ 13, `floor_exp` ≈ 0;
 § Round 4 Results) sink its lines by 13 · 10 log10(80/60) ≈ 16 dB between 80 and
 60 rev/s. The banks pin (6, 6), so the
-pinned rows are the fair ones. Both anchors would pass only near T ≈ 0.3 dB (the lowest
-pinned p10). The rule is left at 2 dB. Dmitrii decides
-among lowering `T`, fewer orders, or dropping the "anchors pass" condition.
+pinned rows are the fair ones. Their lowest p10 is 0.28 dB (Michael's rotor 3);
+no threshold sweep was run, so no `T` at which both anchors pass is claimed. The
+rule is left at 2 dB; Dmitrii decides among lowering `T`, fewer orders, or
+dropping the "anchors pass" condition.
 
 **Prior draws pass more often than the anchors.** 24 draws each on the same
-pool, 4 threads:
+pool, 4 threads, every draw evaluated on all 64 frames:
 
 | base prior | accepted at T = 2 dB | accepted at T = 1 dB | s per draw (2 / 1 dB) |
 |---|---|---|---|
-| DREGON r4 | 5 / 24 | 11 / 24 | 2.68 / 4.38 |
-| Michael's cruise r4 | 3 / 24 | 7 / 24 | 1.14 / 1.79 |
+| DREGON r4 | 7 / 24 | 15 / 24 | 0.81 / 0.78 |
+| Michael's cruise r4 | 3 / 24 | 7 / 24 | 0.70 / 0.67 |
 
 The pool gives each diagonal pair few eligible frames (rotors 2 and 4: 19 of 64);
 the hyperprior keeps diagonal rotors close, as real quads do.

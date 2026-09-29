@@ -1132,6 +1132,18 @@ def _policy_noise_source(policy: str) -> dict[str, Any]:
     raise ValueError(f"{path}: no stochastic / noise_v2 source to draw a trajectory from")
 
 
+def _local_bank(uri: str) -> str:
+    """A policy's ``preset_bank``, as read here: the local copy in :data:`V2_BANKS`
+    when the policy pins that very ``noise-v2-banks`` file (so the notebook needs
+    no fetch), else the policy's own URI (``dload:`` resolves it)."""
+    name = uri.rsplit("/", 1)[-1]
+    if "noise-v2-banks" in uri:
+        for rel in V2_BANKS.values():
+            if Path(rel).name == name:
+                return str(ROOT / rel)
+    return uri
+
+
 def _stream_rps(
     kind: str,
     *,
@@ -1195,7 +1207,7 @@ def _stream_rps(
     else:
         from data_processing.noise_v2_pool import NoiseV2Pool
 
-        cfg["preset_bank"] = str(ROOT / V2_BANKS["hard" if "hard" in name else "easy"])
+        cfg["preset_bank"] = _local_bank(str(cfg["preset_bank"]))
         pool = NoiseV2Pool.from_config(cfg, duration_s=duration_s, sample_rate=SR)
         entry = pool.entries[int(rng.integers(len(pool.entries)))]
         rps = pool.sample_rps(rng, float(duration_s), entry)
@@ -2951,25 +2963,34 @@ def prior_base(name: str = "michaels_cruise", round: str = "r4") -> dict[str, An
 
 
 def gate_pool(
-    kind: str = "v2_stream",
+    policy: str = "noise_v3r4_hard_5050",
     *,
-    policy: str | None = "noise_v3r4_hard_5050",
     n_windows: int = 32,
     n_frames: int = 64,
     duration_s: float = 2.0,
     seed: int = 0,
 ) -> Any:
     """The identifiability gate's frame pool: ``n_windows`` windows of a
-    training arm's OWN trajectory stream (:func:`_stream_rps`, window ``i`` at
-    seed ``seed + i``), ``n_frames`` STFT frames drawn from them
+    ``NoiseV2Pool`` training arm's OWN trajectory stream (``policy``, any of
+    :data:`STREAM_POLICIES` ``["v2_stream"]``), drawn by ONE pool built from
+    the policy and its own bank; window ``i`` draws its entry and flight from
+    ``default_rng(seed + i)`` as :func:`_stream_rps` does. ``n_frames`` STFT
+    frames are then drawn from them
     (:func:`experiments.noise_model.identifiability.frame_pool`)."""
+    from data_processing.noise_v2_pool import NoiseV2Pool
     from experiments.noise_model import identifiability as ID
 
-    windows = [
-        _stream_rps(kind, seed=int(seed) + i, duration_s=float(duration_s), policy=policy)[0]
-        for i in range(int(n_windows))
-    ]
-    return ID.frame_pool(windows, n_frames=int(n_frames), seed=int(seed))
+    if policy not in STREAM_POLICIES["v2_stream"]:
+        raise ValueError(f"gate_pool draws NoiseV2Pool arms {STREAM_POLICIES['v2_stream']}")
+    cfg = _policy_noise_source(policy)
+    cfg["preset_bank"] = _local_bank(str(cfg["preset_bank"]))
+    pool = NoiseV2Pool.from_config(cfg, duration_s=float(duration_s), sample_rate=SR)
+    windows = []
+    for i in range(int(n_windows)):
+        rng = np.random.default_rng(int(seed) + i)
+        entry = pool.entries[int(rng.integers(len(pool.entries)))]
+        windows.append(pool.sample_rps(rng, float(duration_s), entry))
+    return ID.frame_pool(windows, n_frames=int(n_frames), seed=int(seed), sr=SR)
 
 
 class PriorRig(V2Fit):
@@ -3010,7 +3031,7 @@ def sample_prior_rigs(
     seed: int = 0,
     pool: Any = None,
     config: Any = None,
-    max_attempts: int = 50,
+    max_attempts: int = 200,
     round: str = "r4",
     guard: bool = True,
 ) -> list[PriorRig]:
@@ -3018,31 +3039,30 @@ def sample_prior_rigs(
     ``guard``, only draws that pass the identifiability gate on ``pool``
     (default :func:`gate_pool`) under ``config`` (default ``GateConfig()``:
     T 2 dB, D 1.5 rev/s, >= 3 orders on >= 90 % of eligible frames). Prints
-    the acceptance count and every rejection's reason."""
+    the acceptance count and the rejection reasons, counted. Fewer than ``n``
+    within ``max_attempts`` raises ``rig_prior.SamplingExhausted`` (its
+    ``accepted`` / ``rejected`` hold every draw)."""
+    from collections import Counter
+
     from experiments.noise_model import identifiability as ID
     from experiments.noise_model import rig_prior as RP
 
     fit = prior_base(base, round)
-    if not guard:
-        return [
-            PriorRig(
-                RP.draw_rig(fit, np.random.default_rng([int(seed), i])),
-                base=base,
-                seed=seed,
-                attempt=i,
-                result=None,
-            )
-            for i in range(int(n))
-        ]
-    pool = gate_pool() if pool is None else pool
-    cfg = ID.GateConfig() if config is None else config
-    accepted, rejected = RP.sample_guarded(
-        fit, pool, n=int(n), seed=int(seed), config=cfg, max_attempts=int(max_attempts)
+    accept = None
+    if guard:
+        pool = gate_pool() if pool is None else pool
+        accept = RP.gate_acceptance(pool, ID.GateConfig() if config is None else config)
+    accepted, rejected = RP.sample_rigs(
+        fit, n=int(n), seed=int(seed), accept=accept, max_attempts=int(max_attempts)
     )
-    tried = len(accepted) + len(rejected)
-    print(f"{base}: {len(accepted)} accepted of {tried} draws (pool {pool.n_frames} frames)")
-    for d in rejected:
-        print(f"  rejected [{seed},{d.attempt}]: {d.result.reason}")
+    if guard:
+        tried = len(accepted) + len(rejected)
+        print(f"{base}: {len(accepted)} accepted of {tried} draws (pool {pool.n_frames} frames)")
+        reasons = Counter(
+            d.result.reason.split(" passed")[0].split(" (")[0] for d in rejected if d.result
+        )
+        for reason, count in reasons.most_common():
+            print(f"  rejected x{count}: {reason}")
     return [
         PriorRig(d.fit, base=base, seed=seed, attempt=d.attempt, result=d.result) for d in accepted
     ]
@@ -3103,11 +3123,12 @@ def rig_view_plotly(
         combs = dec.lines[:, 0].sum(axis=1)  # (R, F)
         curves = [dec.power[0], floor + combs.mean(axis=0)] + [floor + c for c in combs]
         if "single" in fits:
-            hw = widths["single"]
+            carried = [widths["single"]]
             ctrl = floor_ctrl_db(fits["single"], rps=float(v))
         else:
+            # both regimes' lines are in the spectrum wherever both carry weight
             w = float(regime_blend_weight(rps, sr=SR)[n_fft // 2])
-            hw = widths["cruise" if w >= 0.5 else "standby"]
+            carried = [widths[g] for g, wt in (("standby", 1.0 - w), ("cruise", w)) if wt > 0.0]
             ctrl = (np.array([]), np.array([]))
         k = np.arange(1, dec.k_max + 1)
         fk = k * float(v)
@@ -3123,13 +3144,13 @@ def rig_view_plotly(
             rot = range(n_rot) if i < 2 else [i - 2]
             cap_x, cap_y = [], []
             for r in rot:
-                h = hw[r, : dec.k_max][keep]
-                cap_x += (
-                    np.column_stack([fk[keep] - h, fk[keep] + h, np.full(h.size, np.nan)])
-                    .ravel()
-                    .tolist()
-                )
-                cap_y += np.column_stack([lvl, lvl, np.full(h.size, np.nan)]).ravel().tolist()
+                for hw in carried:
+                    own = k[keep] <= hw.shape[1]  # the orders this regime's profile has
+                    h = hw[r, k[keep][own] - 1]
+                    c = fk[keep][own]
+                    nan = np.full(h.size, np.nan)
+                    cap_x += np.column_stack([c - h, c + h, nan]).ravel().tolist()
+                    cap_y += np.column_stack([lvl[own], lvl[own], nan]).ravel().tolist()
             traces += [
                 (f[band], db(curve[band])),
                 (stem_x, stem_y),
@@ -3156,7 +3177,9 @@ def rig_view_plotly(
                 line=dict(color="#1f77b4", width=1.5),
             ),
             dict(
-                name=f"{view}: +/- half width", mode="lines", line=dict(color="#d62728", width=2.5)
+                name=f"{view}: +/- half width (regimes carrying weight)",
+                mode="lines",
+                line=dict(color="#d62728", width=2.5),
             ),
         ]
     for (x, y), style in zip(per_speed[start], styles, strict=True):
