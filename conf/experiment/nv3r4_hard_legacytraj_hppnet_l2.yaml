@@ -1,0 +1,15 @@
+# @package _global_
+# HPPNet-L2 on the stream of `nv3r4_hard_legacytraj_scv2` (round-4 hard bank,
+# legacy hard trajectories); `nv3r4_hard_fullhyper_hppnet_l2` with only the
+# trajectories changed.
+# Stream: conf/online_mix/noise_v3r4_hard_legacytraj_5050.yaml. Batch doc:
+# docs/experiments/noise-model-v3.md § Round 4 "Legacy-trajectory arms".
+defaults:
+  - rig_easy_hppnet_l2_unified
+  - _self_
+
+experiment_name: nv3r4_hard_legacytraj_hppnet_l2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_v3r4_hard_legacytraj_5050.yaml

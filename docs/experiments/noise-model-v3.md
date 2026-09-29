@@ -2276,7 +2276,10 @@ within ±0.5 of 7.06 says it does not. Arm 2: ≤ 7.52 (≥ 0.5 below
   (hover 35–95 rev/s, rotor separation, `rps_max` 120, guard, standby) took
   this fit from 11.17 to 8.02. Which of the bundled changes did it is not
   separated; the trajectory keys moved the hyperprior toward the legacy
-  hover range, the direction arm 1 rewards.
+  hover range, the direction arm 1 rewards. **Superseded:** this arm used
+  the v2 (2, 2) speed-law pin by mistake, and the later
+  `nv3r4_hard_fullhyper_scv2` (8.18) shows the trajectory keys did nothing;
+  see § "Trajectory and guard arms".
 - **Train loss, within one fit.** v2 bank: hyperprior 11.4 → legacy
   trajectories 0.6. Round-4 fits: round-3 policy 16.9 → round-4 policy
   5.5. In both ablations the lower-loss stream transferred better (7.06 →
@@ -2326,6 +2329,71 @@ before any result (raw `val/real_overall` at the smoothed selection; under
    trajectory restrictions: ≥ 0.5 worse says they helped.
 3. **`nv3r4_hard_fullhyper_hppnet_l2`**: the same stream on HPPNet-L2,
    against `nv2_hard_hppnet_l2` (6.47) and arm 2.
+
+**Results** (all three succeeded; jobs `nv3r4plain6-hard-legacyt-bbb2d7`,
+`nv3r4-hard-fullhyper-scv-265e24`, `nv3r4-hard-fullhyper-hpp-544be8`, HEAD
+`d5286fcb`):
+
+| arm | rounds / sel | raw @ sel | smoothed | best raw | r1 / r2 / r3 | last raw |
+|---|---|---|---|---|---|---|
+| `nv3r4_hard_fullhyper_hppnet_l2` | 95 / 45 | **4.24** | 4.58 | 4.24 | 4.42 / 4.94 / 4.24 | 6.18 |
+| `nv2_hard_hppnet_l2` | 163 / 124 | 6.47 | 6.47 | 6.25 | 11.50 / 8.35 / 6.47 | 7.09 |
+| `nv3r4_hard_fullhyper_scv2` | 105 / 65 | **8.18** | 8.18 | 6.93 | 20.22 / 10.68 / 8.18 | 9.55 |
+| `nv3r4_hard_scv2` (restricted hyperprior) | 118 / 37 | 8.02 | 8.02 | 7.17 | 14.18 / 10.50 / 8.02 | 10.97 |
+| `nv2_hard_scv2` | 116 / 15 | 7.06 | 9.17 | 7.06 | 25.11 / 9.38 / 7.06 | 12.18 |
+| `nv3r4plain6_hard_legacytraj_scv2` | 91 / 69 | **6.30** | 6.37 | 5.64 | 6.98 / 6.92 / 6.30 | 8.35 |
+| `nv2_hard_legacytraj_scv2` | 134 / 92 | 4.96 | 4.96 | 4.46 | 3.82 / 5.18 / 4.96 | 5.51 |
+
+<!-- source: results/noise_v3r4/r4traj_scores.json (scripts/_nv3_arm_history.py at the terminal state of the three jobs; reference rows re-fetched in the same call) -->
+
+- **HPPNet-L2 on the round-4 hard bank is the best synthetic-only arm of the
+  campaign:** 4.24 raw at selection (v2 bank 6.47; best SCv2 arm 4.96;
+  `rig_easy_hppnet_l2_unified` 5.52; real-data HPPNet-L2 2.27). Its training
+  loss bottoms at round 20 (0.554) and then creeps up (0.578 at round 94);
+  `real_r1` is best at round 22 (3.84), `real_r2` (DREGON) at round 27
+  (3.87), `real_overall` at round 45.
+  <!-- source: r2://ml-data/artifacts/nv3r4_hard_fullhyper_hppnet_l2/checkpoints/validation_history.jsonl -->
+- **SCv2 on the same stream is on par with v2:** 8.18 against 7.06 raw at
+  selection, but smoothed 8.18 against 9.17, best raw 6.93 against 7.06 and
+  last round 9.55 against 12.18 (the W&B curves, read by Dmitrii, agree).
+- **The round-4 trajectory restrictions did nothing:** 8.18 unrestricted
+  against 8.02 restricted, within the 0.5 threshold. The gain of
+  `nv3r4_hard_scv2` over the mistaken (2, 2) `nv3r4plain` arm (11.17) came
+  from the bank policy (speed laws (6, 6), tonality guard, standby on every
+  entry, array response), not from the trajectories.
+- **Without the round-4 bank policy (except the (6, 6) laws), the round-4
+  fits trail v2 on legacy trajectories:** 6.30 against 4.96, 1.34 over the
+  threshold.
+
+**Conclusions (Dmitrii, 2026-09-29; for the paper, at least the appendix):**
+
+1. The round-4 hard bank as built (speed laws (6, 6), tonality guard) is
+   better than the v2 hard bank for transfer overall: not worse for SCv2,
+   better for HPPNet-L2 (4.24 against 6.47).
+2. HPPNet-L2 learns more useful features from synthetic data than SCv2.
+3. Restricting the hard hyperprior (hover 35–95 rev/s, rotor separation,
+   `rps_max` 120) was useless; the speed law and the tonality guard are what
+   mattered.
+
+`nv3r4plain_hard_scv2` (11.17) used the v2 short-span (2, 2) speed-law pin by
+mistake and is not a valid round-4 fit comparison; the "fit moves transfer
+by 3.38" reading built on it is withdrawn.
+
+### Legacy-trajectory arms (round-4 hard bank)
+
+Two arms, one seed each, Vast A100, submitted together: the round-4 hard
+bank (full round-4 bank policy) on the legacy hard trajectories, SCv2
+(`nv3r4_hard_legacytraj_scv2`) and HPPNet-L2
+(`nv3r4_hard_legacytraj_hppnet_l2`). Reading fixed before any result (raw
+`val/real_overall` at the smoothed selection; under 0.5 rev/s is no effect):
+
+- SCv2: within 0.5 of `nv2_hard_legacytraj_scv2` (4.96) says the round-4 and
+  v2 setups are at parity for SCv2 pretraining; ≥ 0.5 better than
+  `nv3r4plain6_hard_legacytraj_scv2` (6.30) says the guard and the rest of
+  the round-4 bank policy matter on these trajectories.
+- HPPNet-L2: ≥ 0.5 better than `nv3r4_hard_fullhyper_hppnet_l2` (4.24) says
+  HPPNet gains from the legacy trajectories too; within 0.5 says the gain is
+  specific to the regressor.
 
 Results: pending.
 
@@ -2484,11 +2552,13 @@ confound (fit, bank and trajectory policy changed together).
 The v2 hard bank on the legacy hard trajectories scores 4.96, against 7.06
 on the hyperprior and 5.41 for the legacy arm: the legacy trajectories are
 sufficient to close the whole v2-to-legacy hard gap. The round-4 fits
-under the round-4 policy score 8.02, under the round-3 policy 11.17; under
-that same round-3 policy the round-3b fits score 7.79, so on one policy
-the fit moves transfer by 3.38. The round-4 easy curriculum (2.67) is on
-par with v2's (2.73). Both the trajectory distribution and the fit move
-synthetic-only hard transfer by 2 to 3.4 rev/s; the
+under the round-4 policy score 8.02. (The 11.17 of the round-3-policy arm
+used the v2 (2, 2) speed-law pin by mistake; the "fit moves transfer by
+3.38" reading built on it is withdrawn.) The round-4 easy curriculum (2.67)
+is on par with v2's (2.73). The later arms (§ "Trajectory and guard arms")
+settle the rest: the round-4 hard bank with its speed law and tonality
+guard is on par with v2 on SCv2 and better on HPPNet-L2 (4.24, the best
+synthetic-only arm), and the trajectory restrictions did nothing. The
 fidelity criteria of this campaign (parity, LTAS) did not predict which
 fit transfers better (round 4 passes them, round 3b does not, round 3b
 transfers better).

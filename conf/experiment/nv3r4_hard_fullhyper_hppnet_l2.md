@@ -22,8 +22,15 @@ raw `val/real_overall` at the smoothed-selected round; a difference under
 
 ## Results
 
-Pending.
+Job `nv3r4-hard-fullhyper-hpp-544be8` (HEAD `d5286fcb`), 95 rounds, selected
+round 45: **raw @ sel 4.24** (smoothed 4.58), best raw 4.24, r1 / r2 / r3
+4.42 / 4.94 / 4.24, last raw 6.18. Training loss bottoms at round 20 (0.554)
+and creeps up after (0.578 at round 94); `real_r1` is best at round 22
+(3.84), `real_r2` at round 27 (3.87). Against `nv2_hard_hppnet_l2` 6.47.
+<!-- source: results/noise_v3r4/r4traj_scores.json -->
 
 ## Conclusion
 
-Pending.
+**The best synthetic-only arm of the campaign** (4.24; best SCv2 arm 4.96,
+real-data HPPNet-L2 2.27). The round-4 hard bank beats the v2 hard bank on
+HPPNet-L2 by 2.23 rev/s, far over the 0.5 one-seed threshold.

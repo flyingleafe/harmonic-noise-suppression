@@ -28,8 +28,13 @@ raw `val/real_overall` at the smoothed-selected round; a difference under
 
 ## Results
 
-Pending.
+Job `nv3r4plain6-hard-legacyt-bbb2d7` (HEAD `d5286fcb`), 91 rounds, selected
+round 69: **raw @ sel 6.30** (smoothed 6.37), best raw 5.64, r1 / r2 / r3
+6.98 / 6.92 / 6.30, last raw 8.35. Against `nv2_hard_legacytraj_scv2` 4.96.
+<!-- source: results/noise_v3r4/r4traj_scores.json -->
 
 ## Conclusion
 
-Pending.
+**Without the tonality guard, the round-4 fits trail v2 on legacy
+trajectories** by 1.34 rev/s (6.30 vs 4.96), over the 0.5 threshold.
+`nv3r4_hard_legacytraj_scv2` adds the rest of the round-4 bank policy back.
