@@ -69,6 +69,11 @@ dataset **name**, a map-style dataset, or any iterable of `td.Frame`s:
 - `explore.pick(x, index_or_query)` — one sample by index, meta-id
   substring, or predicate; returned **coerced** (`coerce_frame`), ready for
   `dwym` / `zoo.FrameModel`.
+- `explore.noise_datasets()` / `noise_recordings(name, max_shards=)` /
+  `load_recording(name, id)` — drone-noise catalog (`NOISE_DATASETS` +
+  `RAW_NOISE_DATASETS`), a per-recording meta table built once per shard
+  (cache `.cache/noise_explorer/<name>/<version>/`), and a by-id load that
+  streams one shard (`data_processing.streams.iter_published_shard`).
 
 `explore` imports `data_processing` (streams, frames) — allowed: `plots`
 sits above `data_processing` in the layer contract. Only the thumbnail grid
@@ -100,8 +105,8 @@ layout is new rendering code; everything else delegates.
   full-sequence, summary/per-SNR/curves; `slide_comparison` was deleted as
   dead code). RPS plots PIT-align predictions to GT via
   `tasks.rps_prediction.align_rps_to_gt` before drawing.
-- `comb_page.py` + `comb_widget.py` — the **comb explorer**, the one
-  non-matplotlib product here: a self-contained interactive HTML page
+- `comb_page.py` + `comb_widget.py` — the **comb explorer**, a
+  non-matplotlib product (as is `spectrum_viewer`): a self-contained interactive HTML page
   (spectrogram + STFT/synchrosqueezed toggle + per-rotor harmonic combs +
   demodulated per-harmonic strips). `comb_page` holds the payload builder and
   the single HTML/JS template; `comb_widget.comb_explorer(frame, t0=, dur=)`
@@ -125,6 +130,11 @@ layout is new rendering code; everything else delegates.
   `max_height`, never from the document element's scroll height (which is at
   least the frame's own height, so writing it back grew the cell on every
   redraw).
+- `spectrum_viewer.py` — `spectrum_viewer(frame|series|array)`: Plotly
+  `FigureWidget` spectrogram + spectrum with ipywidgets controls (overall FFT
+  / mean / clicked frame; log-lin frequency; dB-lin amplitude; band). STFT via
+  `make_spectrogram_series`; amplitudes read a bin-centred sinusoid's `A` in
+  every mode; time axis = seconds from the source start.
 
 ## Gotchas
 

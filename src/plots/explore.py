@@ -16,6 +16,16 @@ Every function accepts the same dataset forms:
 - any **map-style dataset** (``__len__`` + ``__getitem__`` of ``td.Frame``);
 - any **iterable of frames** (list, generator, ``DloadFrameDataset``).
 
+Drone-noise recordings (``notebooks/noise_explorer.ipynb``) have three
+more calls, over published ``tdframe-v1`` sets only:
+
+- :func:`noise_datasets` — the drone-noise sets we hold (:data:`NOISE_DATASETS`
+  frames + :data:`RAW_NOISE_DATASETS` raw trees), pins and sizes.
+- :func:`noise_recordings` — one row per recording (id, shard, channels, sr,
+  duration, dotted meta), built once per shard and cached under
+  ``.cache/noise_explorer``.
+- :func:`load_recording` — a recording by id; streams only its shard.
+
 Heavy lifting stays where it already lives: streaming/decoding in
 ``data_processing.streams``, figure assembly in the ``plots.timeframe``
 renderers, and entry-name coercion in ``data_processing.canonical``. Only the thumbnail
@@ -38,7 +48,17 @@ from data_processing.canonical import CANONICAL_ENTRIES, _audio_candidates, coer
 from plots.dwym import DwymResult, _in_ipython
 from utils.audio import first_channel
 
-__all__ = ["datasets", "meta_table", "grid", "pick"]
+__all__ = [
+    "NOISE_DATASETS",
+    "RAW_NOISE_DATASETS",
+    "datasets",
+    "grid",
+    "load_recording",
+    "meta_table",
+    "noise_datasets",
+    "noise_recordings",
+    "pick",
+]
 
 #: Entry names probed (in order) for the thumbnail waveform of :func:`grid`.
 _GRID_AUDIO_ENTRIES = ("audio", "mixture", "target", "enhanced", "generated")
@@ -62,10 +82,7 @@ def datasets(*, sizes: bool = False) -> pd.DataFrame:
     ``size`` columns are added; a dataset whose manifest cannot be fetched
     gets null values instead of failing the whole table.
     """
-    from data_processing.streams import REPO_ROOT
-
-    lock = tomllib.loads((REPO_ROOT / "dload.lock").read_text())
-    pins: dict[str, str] = {str(k): str(v) for k, v in dict(lock.get("datasets", {})).items()}
+    pins = _lock_pins()
     rows: list[dict[str, Any]] = [{"name": n, "version": v[:12]} for n, v in sorted(pins.items())]
     if sizes:
         import dload
@@ -365,3 +382,242 @@ def pick(
         if predicate(frame):
             return _coerce(frame, remaps)
     raise ValueError(f"pick(): no sample matched {index_or_query!r} ({scanned} samples scanned)")
+
+
+# ---------------------------------------------------------------------------
+# drone-noise catalog, per-recording index, load by id
+
+#: Drone / rotor ego-noise datasets published as recording Frames
+#: (``tdframe-v1``): dload name -> what it holds. Display order.
+NOISE_DATASETS: dict[str, str] = {
+    "DREGON-frames": "DREGON (INRIA) quadrotor: 8-mic array, 44.1 kHz, motor telemetry "
+    "(motors_command + motors_measured), rps_refined",
+    "michaels-frames": "Michael's DJI M100 flights FLY124/FLY125: 8 mics, calibrated rps",
+    "michaels-test-frames": "HELD-OUT TEST flights FLY103/FLY108 (mono, 48 kHz): look, do not train",
+    "SPCUP19-frames": "IEEE SP Cup 2019 ego-noise: 10 student-team rigs (1-16 ch) + the ChuMS "
+    "propeller bench",
+    "AVQ-egonoise": "AVQ quadrotor: the 5 pure rotor ego-noise sequences, 8-ch 44.1 kHz",
+    "AVQ": "AVQ quadrotor: 12 sequences, ego-noise + a moving speech source, 8-ch",
+    "noise-v2-bench-points": "stationary bench/static windows (DREGON, SPCUP19, AVQ, "
+    "DroneAudioSet, ChuMS) with measured shaft rates",
+    "DroneAudioSet": "2 quads x 2 throttles x 3 rooms, 8-ch; drone-only / source-only / mixed "
+    "(88 GiB: index a few shards)",
+    "drone-detection-samples": "180k mono 16 kHz clips, drone / no-drone (13 GiB: index a few "
+    "shards)",
+}
+
+#: Drone-noise dload pins that are raw file trees, not Frames: listed so the
+#: catalog is complete; :func:`load_recording` cannot read them.
+RAW_NOISE_DATASETS: dict[str, str] = {
+    "drone_audio": "raw drone clip corpus (23k files, no frames builder)",
+    "zenodo_drone_noises": "raw Zenodo drone-noise recordings (no frames builder)",
+    "new-drone-noises": "raw tree of Michael's TEST flights (frames: michaels-test-frames)",
+}
+
+_ID_COLUMNS = ("recording_id", "shard", "channels", "sr", "duration_s", "entries")
+_META_ARRAY_MAX = 16  # longer array-valued meta is shown as its shape
+
+
+def _lock_pins() -> dict[str, str]:
+    from data_processing.streams import REPO_ROOT
+
+    lock = tomllib.loads((REPO_ROOT / "dload.lock").read_text())
+    return {str(k): str(v) for k, v in dict(lock.get("datasets", {})).items()}
+
+
+def noise_datasets(*, sizes: bool = True) -> pd.DataFrame:
+    """The drone-noise datasets we hold, one row each.
+
+    Columns: ``name``, ``kind`` (``frames`` = loadable with
+    :func:`load_recording`; ``raw`` = a file tree), ``pinned`` (12-char
+    ``dload.lock`` version, ``None`` when not pinned yet), ``what``; with
+    ``sizes=True`` (network) also ``recordings``, ``shards``, ``size``.
+    """
+    pins = _lock_pins()
+    rows: list[dict[str, Any]] = [
+        {"name": n, "kind": kind, "pinned": pins[n][:12] if n in pins else None, "what": what}
+        for kind, table in (("frames", NOISE_DATASETS), ("raw", RAW_NOISE_DATASETS))
+        for n, what in table.items()
+    ]
+    if sizes:
+        import dload
+
+        from data_processing.streams import open_repository
+
+        repo = open_repository()
+        for row in rows:
+            row.update(recordings=None, shards=None, size=None)
+            if row["name"] not in pins:
+                continue
+            try:
+                m = repo.manifest(row["name"], pins[row["name"]])
+            except Exception:
+                continue
+            row.update(
+                recordings=int(m.num_samples),
+                shards=len(m.shards),
+                size=dload.format_size(int(m.total_bytes)),
+            )
+    columns = ["name", "kind", "pinned", "recordings", "shards", "size", "what"]
+    keep = [c for c in columns if sizes or c not in ("recordings", "shards", "size")]
+    df = pd.DataFrame(rows).reindex(columns=keep)
+    for c in ("recordings", "shards"):
+        if c in df.columns:
+            df[c] = df[c].astype("Int64")
+    return df
+
+
+def _flat_meta(value: Any, prefix: str, out: dict[str, Any]) -> None:
+    """Nested meta (Frames / dicts) -> dotted scalar columns, JSON-safe."""
+    if isinstance(value, (td.Frame, Mapping)):
+        items = value.items() if isinstance(value, Mapping) else ((k, value[k]) for k in value)
+        for k, v in items:
+            _flat_meta(v, f"{prefix}.{k}" if prefix else str(k), out)
+        return
+    if isinstance(value, td.Series):
+        value = np.asarray(value.data)
+    if isinstance(value, (np.generic,)):
+        value = value.item()
+    if isinstance(value, np.ndarray):
+        value = value.tolist() if value.size <= _META_ARRAY_MAX else f"<array {value.shape}>"
+    if isinstance(value, (list, tuple)):
+        value = str(list(value)) if len(value) <= _META_ARRAY_MAX else f"<list of {len(value)}>"
+    if value is not None and not isinstance(value, (str, int, float, bool)):
+        value = str(value)
+    out[prefix] = value
+
+
+def _recording_row(key: str, frame: td.Frame, shard: int) -> dict[str, Any]:
+    from data_processing.frames import meta_dict
+    from plots.spectrum_viewer import _audio_entry
+
+    meta = meta_dict(frame)
+    row: dict[str, Any] = {"recording_id": str(meta.get("recording_id", key)), "shard": shard}
+    try:
+        _, audio = _audio_entry(frame, None)
+    except ValueError:
+        audio = None
+    if audio is not None and isinstance(audio.tindex, td.GridIndex):
+        n_t = int(audio.dim_size("time"))
+        row.update(
+            channels=int(np.prod(np.asarray(audio.data).shape) // max(n_t, 1)),
+            sr=float(audio.tindex.sr),
+            duration_s=round(n_t / float(audio.tindex.sr), 3),
+        )
+    row["entries"] = ", ".join(k for k, _ in frame.items() if k != "meta")
+    flat: dict[str, Any] = {}
+    _flat_meta({k: v for k, v in meta.items() if k != "recording_id"}, "", flat)
+    row.update(flat)
+    return row
+
+
+def _index_path(name: str, version: str, shard: int, digest: str):
+    from data_processing.streams import REPO_ROOT
+
+    return (
+        REPO_ROOT
+        / ".cache"
+        / "noise_explorer"
+        / name
+        / version[:12]
+        / f"{shard:05d}_{digest[:16]}.json"
+    )
+
+
+def _index_shard(
+    name: str,
+    version: str,
+    shard: int,
+    digest: str,
+    *,
+    want: str | None = None,
+    refresh: bool = False,
+) -> tuple[list[dict[str, Any]], td.Frame | None]:
+    """The shard's recording rows (cached on disk) and, when ``want`` is one of
+    its recordings and the shard had to be streamed anyway, that Frame."""
+    import json
+
+    from data_processing.streams import iter_published_shard
+
+    path = _index_path(name, version, shard, digest)
+    if path.exists() and not refresh:
+        return json.loads(path.read_text()), None
+    rows: list[dict[str, Any]] = []
+    found: td.Frame | None = None
+    for key, frame in iter_published_shard(name, shard, version):
+        row = _recording_row(key, frame, shard)
+        rows.append(row)
+        if want is not None and want in (key, row["recording_id"]):
+            found = frame
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rows))
+    tmp.replace(path)
+    return rows, found
+
+
+def _pinned_manifest(name: str, version: str | None):
+    from data_processing.streams import open_repository
+
+    if version is None:
+        pins = _lock_pins()
+        if name not in pins:
+            raise KeyError(
+                f"{name!r} is not pinned in dload.lock (pass version= to read it anyway)"
+            )
+        version = pins[name]
+    return open_repository().manifest(name, version)
+
+
+def noise_recordings(
+    name: str,
+    *,
+    max_shards: int | None = None,
+    version: str | None = None,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    """One row per recording of a frames dataset: id, shard, channels, sample
+    rate, duration, entry names and every ``meta`` field (nested keys dotted).
+
+    dload has no per-key index, so each shard is streamed ONCE and its rows
+    cached under ``.cache/noise_explorer/<name>/<version>/`` (keyed by shard
+    digest; ``refresh=True`` rebuilds). ``max_shards`` bounds the scan for the
+    very large sets (DroneAudioSet, drone-detection-samples); the table's
+    ``attrs["shards"]`` says how many of how many were indexed.
+    """
+    manifest = _pinned_manifest(name, version)
+    shards = manifest.shards if max_shards is None else manifest.shards[: int(max_shards)]
+    rows: list[dict[str, Any]] = []
+    for i, info in enumerate(shards):
+        if not _index_path(name, manifest.version, i, info.digest).exists() or refresh:
+            print(f"indexing {name}: shard {i + 1}/{len(shards)}", end="\r", flush=True)
+        rows.extend(_index_shard(name, manifest.version, i, info.digest, refresh=refresh)[0])
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        first = [c for c in _ID_COLUMNS if c in df.columns]
+        df = df.reindex(columns=first + [c for c in df.columns if c not in first])
+    df.attrs["shards"] = f"{len(shards)}/{len(manifest.shards)}"
+    df.attrs["version"] = manifest.version[:12]
+    return df
+
+
+def load_recording(name: str, recording_id: str, *, version: str | None = None) -> td.Frame:
+    """One recording of a frames dataset as the published ``td.Frame`` (not coerced).
+
+    Looks the id up in the :func:`noise_recordings` index (``recording_id`` or
+    the dload key) and streams only its shard; shards not indexed yet are
+    indexed on the way, so a cold lookup costs at most one pass.
+    """
+    manifest = _pinned_manifest(name, version)
+    target = str(recording_id)
+    for i, info in enumerate(manifest.shards):
+        rows, found = _index_shard(name, manifest.version, i, info.digest, want=target)
+        if found is not None:
+            return found
+        if any(target == r["recording_id"] for r in rows):
+            from data_processing.streams import iter_published_shard
+
+            for key, frame in iter_published_shard(name, i, manifest.version):
+                if target == key or target == str(_recording_row(key, frame, i)["recording_id"]):
+                    return frame
+    raise KeyError(f"no recording {target!r} in {name}@{manifest.version[:12]}")

@@ -610,6 +610,32 @@ def iter_published_frames(
         yield frame
 
 
+def iter_published_shard(
+    dataset: str,
+    shard: int,
+    version: str | None = None,
+    *,
+    repo: dload.Repository | None = None,
+) -> Iterator[tuple[str, td.Frame]]:
+    """``(key, Frame)`` of ONE shard of a published ``tdframe-v1`` dataset.
+
+    dload has no key index, so a per-recording lookup that knows its shard
+    (e.g. ``plots.explore.noise_recordings``' cache) streams only that shard
+    instead of the whole dataset: the manifest is narrowed to it.
+    """
+    import dataclasses
+
+    repo = repo or open_repository()
+    manifest = repo.manifest(str(dataset), version)
+    meta = manifest.meta if isinstance(manifest.meta, dict) else {}
+    if meta.get(LAYOUT_META_KEY) != TDFRAME_LAYOUT:
+        raise ValueError(f"dataset {dataset!r} is not published with the {TDFRAME_LAYOUT} layout")
+    one = dataclasses.replace(manifest, shards=(manifest.shards[int(shard)],))
+    for sample in dload.Dataset(repo, one).samples():
+        if is_data_sample(sample):
+            yield sample[0], decode_tdframe(sample)
+
+
 # ─── Frame combinators over dload Pipelines ────────────────────────────────────
 
 
