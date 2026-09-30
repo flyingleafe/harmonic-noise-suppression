@@ -92,6 +92,11 @@ PARENTS = {
     "SPCUP19-egonoise": "dload:SPCUP19-egonoise@043e0a4e8264ebed3588c7706f6b23d25164e442d0e8129a7602f05b2852298b",
 }
 
+#: The unannotated AVQ build (recipe 1) that ``AVQ-egonoise`` and
+#: ``noise-v2-bench-points`` were derived from; it stays on R2 for them. Their
+#: audio is unchanged in recipe 2 (only the meta was corrected).
+_AVQ_V1 = "dload:AVQ@50dd53d1a6c0ab81fe02e4a40a57557a0a2b1c1b85152470edd12aa6d0725f39"
+
 
 # ─── Sample encoding ──────────────────────────────────────────────────────────
 
@@ -1453,6 +1458,13 @@ def _spcup19_annotations_sha256() -> str:
     return annotations_digest()
 
 
+def _avq_annotations_sha256() -> str:
+    """Identity of the AVQ per-sequence annotation (``sources/avq_meta.yaml``)."""
+    from data_processing.sources.avq import annotations_digest
+
+    return annotations_digest()
+
+
 def _refined_label_identity(source: str) -> dict[str, Any]:
     """Exact identity of the refined-label inputs, for the fingerprint.
 
@@ -1893,9 +1905,24 @@ SPECS: dict[str, dict[str, Any]] = {
     },
     "AVQ": {
         "generator": "source_frames",
-        "adopt_only": True,
-        "note": "Adopt-in-place; raw via the registry's pinned http spec.",
-        "gen": {"recipe_version": 1, "source": "AVQ", "raw": {"kind": "download"}},
+        "adopt_only": False,
+        "note": "Derivable from the registry's pinned http archive; every sequence "
+        "ANNOTATED from the publisher's spec table + setup photos "
+        "(sources/avq_meta.yaml; the builder refuses unannotated sequences): "
+        "meta.operating condition (bench / bench_varying_speed / rotors_off — the "
+        "drone is on a tripod throughout), contains_rotor_noise, n_active_rotors, "
+        "throttle_or_speed; meta.label content (ego_noise_only / source_only / "
+        "mixture), external_source and its motion/area. recipe_version 2 "
+        "(2026-10-01); recipe 1 (AVQ@50dd53d1a6c0, same audio) tagged all 12 "
+        "sequences 'speech + rotor ego-noise' with a moving source and stays for "
+        "AVQ-egonoise / noise-v2-bench-points. gen.annotations_sha256 keys the "
+        "identity on the annotation file.",
+        "gen": {
+            "recipe_version": 2,
+            "source": "AVQ",
+            "raw": {"kind": "download"},
+            "annotations_sha256": _avq_annotations_sha256(),
+        },
     },
     # ── Per-rotor telemetry frames (rps only, no audio) ─────────────────────
     #
@@ -1977,7 +2004,7 @@ SPECS: dict[str, dict[str, Any]] = {
         "sequences of AVQ (no angle_vad entry), channel 0, 16 kHz mono.",
         "gen": {
             "recipe_version": 1,
-            "parent": PARENTS["AVQ"],
+            "parent": _AVQ_V1,
             "include_keys": ["S1_seq1", "S1_seq2", "S1_seq3", "S2_seq1", "S2_seq2"],
             "forbid_entries": ["angle_vad"],
             "channel": 0,
@@ -2193,7 +2220,7 @@ SPECS: dict[str, dict[str, Any]] = {
             "parents": {
                 "DREGON-frames": PARENTS["DREGON-frames"],
                 "SPCUP19-egonoise": PARENTS["SPCUP19-egonoise"],
-                "AVQ": PARENTS["AVQ"],
+                "AVQ": _AVQ_V1,
             },
             "daset": {
                 "repo_id": "ahlab-drone-project/DroneAudioSet",

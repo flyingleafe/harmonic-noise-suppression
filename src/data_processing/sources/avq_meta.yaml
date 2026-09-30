@@ -1,0 +1,227 @@
+# AVQ per-recording annotation (read by sources/avq.py; hashed into the AVQ derivation identity).
+#
+# Evidence (all from the publisher):
+#   spec table  = AVQ.docx in the zip (AVQ-raw key "AVQ", word/media/image1.jpeg) = the table on
+#                 https://webspace.eecs.qmul.ac.uk/lin.wang/demo/avq.html (avq_files/table.jpg);
+#                 columns Sub / Seq / Mod / Dur / VG / VAD / Type (EO ego-noise only, SO speech only,
+#                 MIX mixture) / Drone (constant (x%) / dynamic / muted) / Source (cons. / uncons. area).
+#   setup       = demo page figures setupA.jpg (scenario 1: two people, 3x3 grid of locations 2 m apart,
+#                 2 m in front of the quadcopter) and setupB.jpg (scenario 2: a loudspeaker carried by a
+#                 walking person, +-45 deg sector); in BOTH photos the quadcopter stands on a camera
+#                 tripod on the grass, i.e. it never flies.
+#   platform    = demo page platform.jpg (side/top view, dimensions in cm).
+#   geometry    = <session>/misc/mic_pos.mat (3 x 8, metres), <session>/misc/array_configuration.docx
+#                 (figure "Array configuration (angle_a)": mics 1..8 in the x-y plane, 0 deg = +x,
+#                 90 deg = +y), <session>/misc/readme.txt + av_calibration.mat.
+# Paper: L. Wang, R. Sanchez-Matilla, A. Cavallaro, "Audio-visual sensing from a quadcopter: dataset and
+# baselines for source localization and sound enhancement", IROS 2019, doi 10.1109/IROS40897.2019.8968183.
+dataset: AVQ
+spec_table: "AVQ.docx (zip root) = demo page avq_files/table.jpg"
+drone:
+  make_model: "quadrotor (model not stated by the publisher)"
+  n_rotors: 4
+  source: "demo page platform.jpg (four propellers); spec table 'Drone' column"
+platform:
+  mounting: "tripod-mounted on the ground in every sequence (never airborne)"
+  source: "demo page setupA.jpg and setupB.jpg (quadcopter on a camera tripod, the red circle marks it)"
+frame:
+  description: >-
+    Microphone-array frame of mic_pos.mat: origin = array centre, x = the 0 deg axis and y = the 90 deg
+    axis of array_configuration.docx (angle_a counter-clockwise from +x), z up; metres. The camera
+    optical axis lies at angle_a = a2 of av_calibration.mat (S1 -28.23 deg, S2 -29.08 deg).
+  source: "misc/mic_pos.mat; misc/array_configuration.docx; misc/readme.txt; misc/av_calibration.mat"
+geometry:
+  array8:
+    mic_pos: "misc/mic_pos.mat (identical in S1 and S2)"
+    mic_pos_quality: reported
+    channel_map_source: >-
+      ASSUMED: audio channel i = MONO-00i.wav = column i+1 of mic_pos.mat (= mic i+1 of
+      array_configuration.docx). The publisher states neither mapping explicitly.
+    rotor_pos: null
+    rotor_pos_quality: unknown
+    source: "misc/mic_pos.mat; misc/array_configuration.docx"
+    notes: >-
+      8 mics on a ~20 cm ring (z 0 to -0.032 m), ~15 cm above the rotor arms (platform.jpg side view).
+      platform.jpg top view gives rotor spacings only (front pair 45 cm, rear pair 41 cm, left side
+      26 cm, array centre to front-right rotor 24 cm and to rear-left rotor 28 cm; the five figures are
+      mutually inconsistent by ~1.5 cm) in a drone frame whose rotation relative to the mic_pos frame is
+      not documented, so rotor_pos is not published.
+recordings:
+  - key: S1_seq1
+    spec_row: "S1 seq1"
+    condition: bench
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    content: ego_noise_only
+    external_source: none
+    external_source_motion: none
+    external_source_area: null
+    throttle_or_speed: "constant 50 % (spec table; unit as printed)"
+    description: "Ego-noise only, motors at constant 50 % throttle, drone on its tripod, audio only (120 s)."
+    source: "spec table row S1 seq1 (A, 120 s, EO, constant (50%), source '/'); setupA.jpg (tripod)"
+    confidence: high
+  - key: S1_seq2
+    spec_row: "S1 seq2"
+    condition: bench
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    content: ego_noise_only
+    external_source: none
+    external_source_motion: none
+    external_source_area: null
+    throttle_or_speed: "constant 100 % (spec table; unit as printed)"
+    description: "Ego-noise only, motors at constant 100 % throttle, drone on its tripod, audio only (120 s)."
+    source: "spec table row S1 seq2 (A, 120 s, EO, constant (100%), source '/'); setupA.jpg (tripod)"
+    confidence: high
+  - key: S1_seq3
+    spec_row: "S1 seq3"
+    condition: bench
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    content: ego_noise_only
+    external_source: none
+    external_source_motion: none
+    external_source_area: null
+    throttle_or_speed: "constant 150 % (spec table; unit as printed, meaning of >100 % not stated)"
+    description: "Ego-noise only, motors at constant '150 %' throttle, drone on its tripod, audio only (40 s)."
+    source: "spec table row S1 seq3 (A, 40 s, EO, constant (150%), source '/'); setupA.jpg (tripod)"
+    confidence: high
+  - key: S1_seq4
+    spec_row: "S1 seq5"
+    condition: rotors_off
+    contains_rotor_noise: false
+    n_active_rotors: 0
+    content: source_only
+    external_source: speech
+    external_source_motion: piecewise_static
+    external_source_area: "3x3 grid of locations 2 m apart, 2 m in front of the drone"
+    throttle_or_speed: null
+    description: >-
+      Speech only, motors muted: two people talk from nine fixed locations (they change location during
+      the sequence), with video, per-talker DOA (angle_a, angle_b) and VAD ground truth (799 s).
+    source: >-
+      spec table row S1 seq5 (AV, 797 s, VG, VAD, SO, muted, '2 sources 9 locations'): the zip names this
+      sequence seq4 (S1 has no seq5 folder; 798.9 s published vs 797 s in the table); demo page scenario 1
+      text + setupA.jpg; angle_vad.mat columns 'time (s)|angle_a|angle_b|vad_a|vad_b'
+    confidence: high
+  - key: S2_seq1
+    spec_row: "S2 seq1"
+    condition: bench
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    content: ego_noise_only
+    external_source: none
+    external_source_motion: none
+    external_source_area: null
+    throttle_or_speed: "constant 100 % (spec table; unit as printed)"
+    description: "Ego-noise only, motors at constant 100 % throttle, drone on its tripod, audio only (211 s)."
+    source: "spec table row S2 seq1 (A, 210 s, EO, constant (100%), source '/'); setupB.jpg (tripod)"
+    confidence: high
+  - key: S2_seq2
+    spec_row: "S2 seq2"
+    condition: bench_varying_speed
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    content: ego_noise_only
+    external_source: none
+    external_source_motion: none
+    external_source_area: null
+    throttle_or_speed: "dynamic (spec table: time-varying motor speed, values not given)"
+    description: "Ego-noise only, motor speed varied over time, drone on its tripod, audio only (214 s)."
+    source: "spec table row S2 seq2 (A, 214 s, EO, dynamic, source '/'); setupB.jpg (tripod)"
+    confidence: high
+  - key: S2_seq3
+    spec_row: "S2 seq3"
+    condition: rotors_off
+    contains_rotor_noise: false
+    n_active_rotors: 0
+    content: source_only
+    external_source: speech
+    external_source_motion: moving
+    external_source_area: constrained
+    throttle_or_speed: null
+    description: >-
+      Speech only, motors muted: a loudspeaker carried by a person walking in front of the drone inside
+      the constrained area, with video, DOA and VAD ground truth (216 s).
+    source: "spec table row S2 seq3 (AV, 215 s, VG, VAD, SO, muted, cons.); demo page scenario 2 + setupB.jpg"
+    confidence: high
+  - key: S2_seq4
+    spec_row: "S2 seq4"
+    condition: rotors_off
+    contains_rotor_noise: false
+    n_active_rotors: 0
+    content: source_only
+    external_source: speech
+    external_source_motion: moving
+    external_source_area: unconstrained
+    throttle_or_speed: null
+    description: >-
+      Speech only, motors muted: a loudspeaker carried by a person walking in front of the drone in the
+      unconstrained area, with video, DOA and VAD ground truth (218 s).
+    source: "spec table row S2 seq4 (AV, 217 s, VG, VAD, SO, muted, uncons.); demo page scenario 2 + setupB.jpg"
+    confidence: high
+  - key: S2_seq5
+    spec_row: "S2 seq5"
+    condition: bench
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    content: mixture
+    external_source: speech
+    external_source_motion: moving
+    external_source_area: constrained
+    throttle_or_speed: "constant 100 % (spec table; unit as printed)"
+    description: >-
+      Mixture: motors at constant 100 % throttle (drone on its tripod) + a walking loudspeaker inside the
+      constrained area, with video, DOA and VAD ground truth (304 s).
+    source: "spec table row S2 seq5 (AV, 303 s, VG, VAD, MIX, constant (100%), cons.); setupB.jpg"
+    confidence: high
+  - key: S2_seq6
+    spec_row: "S2 seq6"
+    condition: bench
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    content: mixture
+    external_source: speech
+    external_source_motion: moving
+    external_source_area: unconstrained
+    throttle_or_speed: "constant 100 % (spec table; unit as printed)"
+    description: >-
+      Mixture: motors at constant 100 % throttle (drone on its tripod) + a walking loudspeaker in the
+      unconstrained area, with video, DOA and VAD ground truth (271 s).
+    source: "spec table row S2 seq6 (AV, 271 s, VG, VAD, MIX, constant (100%), uncons.); setupB.jpg"
+    confidence: high
+  - key: S2_seq7
+    spec_row: "S2 seq7"
+    condition: bench_varying_speed
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    content: mixture
+    external_source: speech
+    external_source_motion: moving
+    external_source_area: constrained
+    throttle_or_speed: "dynamic (spec table: time-varying motor speed, values not given)"
+    description: >-
+      Mixture: motor speed varied over time (drone on its tripod) + a walking loudspeaker inside the
+      constrained area, with video, DOA and VAD ground truth (258 s).
+    source: "spec table row S2 seq7 (AV, 258 s, VG, VAD, MIX, dynamic, cons.); setupB.jpg"
+    confidence: high
+  - key: S2_seq8
+    spec_row: "S2 seq8"
+    condition: bench_varying_speed
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    content: mixture
+    external_source: speech
+    external_source_motion: moving
+    external_source_area: unconstrained
+    throttle_or_speed: "dynamic (spec table: time-varying motor speed, values not given)"
+    description: >-
+      Mixture: motor speed varied over time (drone on its tripod) + a walking loudspeaker in the
+      unconstrained area, with video, DOA and VAD ground truth (249 s).
+    source: "spec table row S2 seq8 (AV, 249 s, VG, VAD, MIX, dynamic, uncons.); setupB.jpg"
+    confidence: high
+open_questions:
+  - "Channel map: audio channel i = MONO-00i.wav = mic i+1 of mic_pos.mat is assumed (file order); the publisher does not state it."
+  - "Rotor positions relative to the mic array are not documented (only cm spacings in platform.jpg, frame rotation unknown): rotor_pos is null."
+  - "Throttle unit: the table prints 50 / 100 / 150 %; what 150 % means is not stated. 'dynamic' speed values are not given."
+  - "Drone make/model is not named by the publisher."

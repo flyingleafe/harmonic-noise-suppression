@@ -27,6 +27,37 @@ from data_processing.frames import audio_series
 #: Manifest ``meta["layout"]`` value every frames dataset in this package uses.
 LAYOUT = "tdframe-v1"
 
+#: Annotated-source ``meta.operating.condition`` vocabulary (SPCUP19, AVQ).
+#: ``bench`` = drone/rig fixed, rotors at ~constant speed; ``bench_varying_speed``
+#: = fixed, speed deliberately varied; ``handheld`` = not airborne, rotors
+#: running, drone carried/moved by a person; ``flight`` = airborne
+#: (``flight_mode`` says how); ``rotors_off`` = no rotor noise at all
+#: (calibration, clean-source captures, motors off).
+CONDITIONS = ("flight", "bench", "bench_varying_speed", "handheld", "rotors_off")
+FLIGHT_MODES = ("hover", "manoeuvre", "mixed", "unknown")
+EXTERNAL_SOURCES = ("none", "speech", "chirp", "white_noise", "music", "mixed", "other", "unknown")
+CONFIDENCE = ("high", "medium", "low")
+
+
+def validate_operating(rec: dict[str, Any], n_rotors: int, where: str) -> None:
+    """Raise unless one annotated recording's operating tags are consistent:
+    vocabulary, ``flight_mode`` iff flight, and rotors_off <=> 0 active rotors
+    <=> no rotor noise."""
+    cond, mode = rec["condition"], rec.get("flight_mode")
+    if cond not in CONDITIONS:
+        raise ValueError(f"{where}: condition {cond!r} not in {CONDITIONS}")
+    if (cond == "flight") != (mode is not None) or (mode is not None and mode not in FLIGHT_MODES):
+        raise ValueError(f"{where}: flight_mode {mode!r} is set iff condition is flight")
+    n_active, noisy = rec["n_active_rotors"], rec["contains_rotor_noise"]
+    if n_active is not None and not (isinstance(n_active, int) and 0 <= n_active <= n_rotors):
+        raise ValueError(f"{where}: n_active_rotors {n_active!r} not an int in 0..{n_rotors}")
+    if (cond == "rotors_off") != (n_active == 0) or (cond == "rotors_off") == bool(noisy):
+        raise ValueError(f"{where}: rotors_off <=> n_active_rotors 0 <=> no rotor noise")
+    if rec["external_source"] not in EXTERNAL_SOURCES:
+        raise ValueError(f"{where}: external_source {rec['external_source']!r}")
+    if rec.get("confidence") not in CONFIDENCE:
+        raise ValueError(f"{where}: confidence {rec.get('confidence')!r}")
+
 
 def clean_dict(d: dict[str, Any]) -> dict[str, Any]:
     """Drop ``None`` values, coerce numpy scalars to native Python (JSON-safe)."""

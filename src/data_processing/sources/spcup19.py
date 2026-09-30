@@ -22,7 +22,7 @@ Each recording Frame holds:
 - KumamoTech only: ``position`` (East/North/up m from take-off) and
   ``attitude`` (quaternion x, y, z, w) tracks on the audio clock;
 - ``meta`` — ``system`` (drone, team, n_rotors), ``operating`` (``condition``
-  ∈ :data:`CONDITIONS`, ``flight_mode``, ``contains_rotor_noise``,
+  ∈ :data:`~data_processing.sources._common.CONDITIONS`, ``flight_mode``, ``contains_rotor_noise``,
   ``n_active_rotors``, ``throttle_or_speed``), ``label`` (``external_source``),
   ``geometry`` (config, frame, qualities, channel-map evidence, sources),
   ``annotation`` (description, source, confidence) and format extras.
@@ -40,7 +40,13 @@ from typing import Any
 import numpy as np
 import tdseries as td
 
-from data_processing.sources._common import audio_frame, meta_frame, read_audio_file, safe_key
+from data_processing.sources._common import (
+    audio_frame,
+    meta_frame,
+    read_audio_file,
+    safe_key,
+    validate_operating,
+)
 
 #: Team package → dregon.inria.fr download id (dataset page, "Show data...").
 _DOWNLOAD_IDS: dict[str, int] = {
@@ -62,25 +68,6 @@ URLS = {
 
 #: Per-team annotations (one YAML per team; schema in the module docstring).
 ANNOTATION_DIR = Path(__file__).with_name("spcup19_meta")
-
-#: ``operating.condition`` vocabulary. ``bench`` = drone/rig fixed, rotors at
-#: ~constant speed; ``bench_varying_speed`` = fixed, speed deliberately varied;
-#: ``handheld`` = not airborne, rotors running, drone carried/moved by a person;
-#: ``flight`` = airborne (``flight_mode`` says how); ``rotors_off`` = no rotor
-#: noise at all (calibration, clean-source captures, motors off).
-CONDITIONS = ("flight", "bench", "bench_varying_speed", "handheld", "rotors_off")
-FLIGHT_MODES = ("hover", "manoeuvre", "mixed", "unknown")
-EXTERNAL_SOURCES = (
-    "none",
-    "speech",
-    "chirp",
-    "white_noise",
-    "music",
-    "mixed",
-    "other",
-    "unknown",
-)
-CONFIDENCE = ("high", "medium", "low")
 
 _CHUMS_DETAILS = re.compile(r"\s*(\d+)\s*propellers?\b.*?Repeat\s*:\s*(\d+)", re.IGNORECASE)
 
@@ -116,22 +103,7 @@ def validate_team(doc: dict[str, Any]) -> None:
         if key in seen or not key.startswith(f"{team}__"):
             raise ValueError(f"{where}: duplicate key or key outside the team prefix")
         seen.add(key)
-        cond, mode = rec["condition"], rec.get("flight_mode")
-        if cond not in CONDITIONS:
-            raise ValueError(f"{where}: condition {cond!r} not in {CONDITIONS}")
-        if (cond == "flight") != (mode is not None) or (
-            mode is not None and mode not in FLIGHT_MODES
-        ):
-            raise ValueError(f"{where}: flight_mode {mode!r} is set iff condition is flight")
-        n_active, noisy = rec["n_active_rotors"], rec["contains_rotor_noise"]
-        if n_active is not None and not (isinstance(n_active, int) and 0 <= n_active <= n_rotors):
-            raise ValueError(f"{where}: n_active_rotors {n_active!r} not an int in 0..{n_rotors}")
-        if (cond == "rotors_off") != (n_active == 0) or (cond == "rotors_off") == bool(noisy):
-            raise ValueError(f"{where}: rotors_off <=> n_active_rotors 0 <=> no rotor noise")
-        if rec["external_source"] not in EXTERNAL_SOURCES:
-            raise ValueError(f"{where}: external_source {rec['external_source']!r}")
-        if rec.get("confidence") not in CONFIDENCE:
-            raise ValueError(f"{where}: confidence {rec.get('confidence')!r}")
+        validate_operating(rec, n_rotors, where)
         if rec.get("geometry") is not None and rec["geometry"] not in configs:
             raise ValueError(f"{where}: unknown geometry {rec['geometry']!r}")
 

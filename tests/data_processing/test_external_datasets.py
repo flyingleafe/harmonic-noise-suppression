@@ -15,6 +15,7 @@ import soundfile as sf
 from data_processing import sources, streams
 from data_processing.sources import (
     _common,
+    avq,
     droneaudio,
     hustmotor,
     kaist,
@@ -302,12 +303,81 @@ def test_spcup19_annotations_are_complete_and_pass_the_sanity_checks():
     set is the same stand with the rotors running, per report + xlsx)."""
     docs = spcup19.load_annotations()
     recs = {r["key"]: r for d in docs.values() for r in d["recordings"]}
-    assert all(r["condition"] in spcup19.CONDITIONS for r in recs.values())
+    assert all(r["condition"] in _common.CONDITIONS for r in recs.values())
     agh_clean = [r for k, r in recs.items() if k.startswith("AGH__static_clean__")]
     assert len(agh_clean) == 10
     assert all(r["condition"] == "rotors_off" and r["n_active_rotors"] == 0 for r in agh_clean)
     chums = [r for k, r in recs.items() if k.startswith("ChuMS__")]
     assert len(chums) == 9 and all("recorder_align" in r for r in chums)
+
+
+_AVQ_SEQS = {"S1": ["seq1", "seq2", "seq3", "seq4"], "S2": [f"seq{i}" for i in range(1, 9)]}
+
+
+def _fake_avq(root, drop=None):
+    """Tiny AVQ tree: every sequence as 8 MONO-00i.wav files + misc/mic_pos.mat."""
+    from scipy.io import savemat
+
+    for session, seqs in _AVQ_SEQS.items():
+        misc = root / session / "misc"
+        misc.mkdir(parents=True)
+        savemat(misc / "mic_pos.mat", {"mic_pos": np.arange(24, dtype=float).reshape(3, 8)})
+        for seq in seqs:
+            if f"{session}_{seq}" == drop:
+                continue
+            (root / session / seq).mkdir()
+            for ch in range(8):
+                sf.write(root / session / seq / f"MONO-00{ch}.wav", np.zeros(64), 44100)
+
+
+def test_avq_annotations_follow_the_spec_table():
+    """The drone never flies; 5 ego-noise-only, 3 motors-muted speech-only
+    sequences and 4 mixtures (spec table); S1's talkers stand still, S2's move."""
+    by_key = avq.load_annotations()["by_key"]
+    assert sorted(by_key) == sorted(f"{s}_{q}" for s, qs in _AVQ_SEQS.items() for q in qs)
+    content = {k: r["content"] for k, r in by_key.items()}
+    assert sorted(k for k, c in content.items() if c == "ego_noise_only") == [
+        "S1_seq1",
+        "S1_seq2",
+        "S1_seq3",
+        "S2_seq1",
+        "S2_seq2",
+    ]
+    assert sorted(k for k, r in by_key.items() if r["condition"] == "rotors_off") == [
+        "S1_seq4",
+        "S2_seq3",
+        "S2_seq4",
+    ]
+    assert {r["condition"] for r in by_key.values()} == {
+        "bench",
+        "bench_varying_speed",
+        "rotors_off",
+    }
+    varying = sorted(k for k, r in by_key.items() if r["condition"] == "bench_varying_speed")
+    assert varying == ["S2_seq2", "S2_seq7", "S2_seq8"]
+    assert by_key["S1_seq4"]["external_source_motion"] == "piecewise_static"
+    assert all(by_key[f"S2_seq{i}"]["external_source_motion"] == "moving" for i in range(3, 9))
+
+
+def test_build_avq_joins_the_annotation_and_refuses_gaps(tmp_path):
+    _fake_avq(tmp_path)
+    frames = dict(avq.build(tmp_path))
+    assert len(frames) == 12
+    meta = frames["S2_seq7"]["meta"]
+    assert meta["operating"]["condition"] == "bench_varying_speed"
+    assert meta["operating"]["n_active_rotors"] == 4
+    assert meta["label"]["content"] == "mixture"
+    assert meta["label"]["external_source_motion"] == "moving"
+    muted = frames["S1_seq4"]["meta"]
+    assert muted["operating"]["contains_rotor_noise"] is False
+    assert muted["label"]["external_source"] == "speech"
+    assert frames["S1_seq1"]["mic_pos"].shape == (8, 3)
+
+    other = tmp_path / "missing"
+    other.mkdir()
+    _fake_avq(other, drop="S2_seq5")
+    with pytest.raises(ValueError, match="without a recording"):
+        dict(avq.build(other))
 
 
 def _one_team_doc(keys):
