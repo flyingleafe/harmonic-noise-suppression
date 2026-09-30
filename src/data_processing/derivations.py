@@ -1858,6 +1858,26 @@ SPECS: dict[str, dict[str, Any]] = {
         "note": "Adopt-in-place; raw via the registry's pinned http spec.",
         "gen": {"recipe_version": 1, "source": "SPCUP19-egonoise", "raw": {"kind": "download"}},
     },
+    "SPCUP19-frames": {
+        "generator": "source_frames",
+        "adopt_only": False,
+        "note": "Derivable rebuild of SPCUP19-egonoise from the registry's pinned "
+        "http archives. Changed vs the historical pin: the ChuMS propeller-rig "
+        ".mat is parsed per run — one 8-mic Frame per TestResults.Test "
+        "(1/2/3 propellers x 3 repeats; calibrated Pa at the struct's Fs; mics "
+        "stacked start-aligned to the shortest; meta.operating n_propellers/"
+        "repeat/details, meta.mic_positions in mm). The pre-fix builder emits "
+        "278 frames (the pin's count), 216 of them ChuMS arrays read by a "
+        "generic struct walk: 72 Freq axes and 72 SPL spectra (0.5 s each at "
+        "44.1 kHz) plus 72 unlabelled single-mic tracks. Other teams' keys and "
+        "meta are unchanged; KumamoTech ships only ROS bags and is absent from "
+        "both. The historical pin stays: SE audio_pool policies, "
+        "noise-v2-bench-points and the noise-v2 scripts read it by name. "
+        "recipe_version 2 because version 1 IS the historical pin's recipe on "
+        "the same source: an identical gen would give both specs one "
+        "fingerprint (one derivation identity for two different byte sets).",
+        "gen": {"recipe_version": 2, "source": "SPCUP19-egonoise", "raw": {"kind": "download"}},
+    },
     "AVQ": {
         "generator": "source_frames",
         "adopt_only": True,

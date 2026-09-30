@@ -191,11 +191,15 @@ REGISTRY: dict[str, SourceDataset] = {
             download=DownloadSpec("gdrive", {"folder_id": "1XmahwIQ4o66FC3dpOaeTV-gqz2dd0XBw"}),
             builder=hustmotor.build,
         ),
+        # frames_dataset: the historical adopt-only `SPCUP19-egonoise` pin
+        # stays pinned for its consumers (read by name); the registry streams
+        # the derivable rebuild with the ChuMS rig parsed per run.
         SourceDataset(
             name="SPCUP19-egonoise",
             provenance=spcup19.PROVENANCE,
             download=DownloadSpec("http", {"urls": spcup19.URLS}, extract=True),
             builder=spcup19.build,
+            frames_dataset="SPCUP19-frames",
         ),
         SourceDataset(
             name="AVQ",

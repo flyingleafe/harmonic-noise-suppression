@@ -2,16 +2,16 @@
 
 The "the-spcup19-egonoise-dataset" bonus task: 10 teams each recorded their own
 drone's ego-noise with their own mic array (1/4/8/16 ch). Packages are wildly
-heterogeneous — some ship loose .wav, some ship one big .mat with a nested,
-team-specific struct. The builder is per-team + resilient (skips a recording it
-can't parse) and bakes the per-team drone model / channel count / condition into
-meta; where a .mat exposes mic positions they go into meta too (not a shared-dim
-geometry Series — mic count need not match the stored audio channel count).
+heterogeneous: most ship loose .wav, ChuMS ships one .mat of a static
+PROPELLER RIG (parsed per run, see :func:`_chums_recordings`), KumamoTech ships
+only ROS bags (not read). The builder bakes the per-team drone model / channel
+count / condition into meta; ChuMS's mic positions go into meta too (not a
+shared-dim geometry Series, matching the other teams' meta-only convention).
 """
 
 from __future__ import annotations
 
-import contextlib
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -42,20 +42,7 @@ URLS = {
     f"{team}.zip": f"http://dregon.inria.fr/?smd_process_download=1&download_id={info['id']}"
     for team, info in _TEAMS.items()
 }
-_MIN_AUDIO_LEN = 8000  # below this, a numeric array is metadata (spectrum/SPL), not audio
-_SR_FIELDS = ("fs", "samplerate", "sample_rate", "samplingrate", "samplingfrequency")
-_MIC_FIELDS = ("micpositions", "micpos", "mic_positions", "micposition")
-_AUDIO_TOKENS = ("raw", "audio", "signal", "calibrated", "recording", "data", "wav")
-
-
-def _orient_audio(arr: np.ndarray) -> np.ndarray:
-    """Numeric array → ``(C, T) float32`` with channels (the smaller axis) first."""
-    a = np.asarray(arr, dtype=np.float32)
-    if a.ndim == 1:
-        return a[None, :]
-    if a.ndim == 2:
-        return np.ascontiguousarray(a if a.shape[0] <= a.shape[1] else a.T)
-    return a.reshape(1, -1)
+_CHUMS_DETAILS = re.compile(r"\s*(\d+)\s*propellers?\b.*?Repeat\s*:\s*(\d+)", re.IGNORECASE)
 
 
 def _condition(name: str) -> str | None:
@@ -89,14 +76,18 @@ def _frame(
     condition: str | None,
     relpath: str,
     mic_positions: list | None = None,
+    observation: dict[str, Any] | None = None,
+    operating: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> tuple[str, td.Frame]:
     rid = f"{team}__{safe_key(rid_suffix)}"
-    extra: dict[str, Any] = {
+    extras: dict[str, Any] = {
         "raw_relpath": relpath,
         "competition": "IEEE SP Cup 2019 ego-noise (bonus task)",
     }
     if mic_positions is not None:
-        extra["mic_positions"] = mic_positions
+        extras["mic_positions"] = mic_positions
+    extras.update(extra or {})
     meta = meta_frame(
         rid,
         "SPCUP19-egonoise",
@@ -111,99 +102,74 @@ def _frame(
             "source_motion": "onboard",
             "relative_trajectory": "none",
             "mic_array": f"{info['channels']}ch",
+            **(observation or {}),
         },
-        operating={"condition": condition},
+        operating={"condition": condition, **(operating or {})},
         label={"team": team, "drone": info["drone"]},
-        extra=extra,
+        extra=extras,
     )
     return safe_key(rid), audio_frame(audio_ct, int(sr), meta)
 
 
-def _walk_mat(obj: Any, path: str, sr_ctx: int | None, out: list) -> None:
-    """Collect ``(struct-path, numeric audio array, sr)`` from a loaded .mat,
-    propagating the nearest ``Fs`` down the struct tree."""
-    from scipy.io.matlab import mat_struct
-
-    if isinstance(obj, mat_struct):
-        sr_local = sr_ctx
-        fields: list[str] = list(obj._fieldnames)  # pyright: ignore[reportAttributeAccessIssue]
-        for f in fields:
-            if f.lower() in _SR_FIELDS:
-                val = getattr(obj, f)
-                if np.isscalar(val):
-                    with contextlib.suppress(TypeError, ValueError):
-                        sr_local = int(np.asarray(val).astype(float).item())
-        for f in fields:
-            _walk_mat(getattr(obj, f), f"{path}/{f}", sr_local, out)
-        return
-    if isinstance(obj, np.ndarray) and obj.dtype == object:
-        for i, item in enumerate(obj.ravel()):
-            _walk_mat(item, f"{path}[{i}]", sr_ctx, out)
-        return
-    if (
-        isinstance(obj, np.ndarray)
-        and np.issubdtype(obj.dtype, np.number)
-        and obj.ndim in (1, 2)
-        and max(obj.shape) >= _MIN_AUDIO_LEN
-    ):
-        out.append((path, obj, sr_ctx))
-
-
-def _find_mic_positions(d: dict) -> list | None:
-    """First MicPositions-like 2D array anywhere in the loaded .mat, as a list."""
-    from scipy.io.matlab import mat_struct
-
-    stack: list = [v for k, v in d.items() if not k.startswith("__")]
-    while stack:
-        obj = stack.pop()
-        if isinstance(obj, mat_struct):
-            for f in list(obj._fieldnames):  # pyright: ignore[reportAttributeAccessIssue]
-                if f.lower() in _MIC_FIELDS:
-                    val = getattr(obj, f)
-                    if isinstance(val, np.ndarray) and val.ndim == 2:
-                        return np.asarray(val, dtype=np.float64).tolist()
-                stack.append(getattr(obj, f))
-        elif isinstance(obj, np.ndarray) and obj.dtype == object:
-            stack.extend(obj.ravel().tolist())
-    return None
-
-
-def _mat_recordings(
-    mat_path: Path, team: str, info: dict, rel_stem: str | None = None
+def _chums_recordings(
+    mat_path: Path, team: str, info: dict, rel_stem: str
 ) -> Iterator[tuple[str, td.Frame]]:
+    """ChuMS ``UAV_rotor_recordings.mat``: a static PROPELLER RIG, not a flight.
+
+    One ``TestResults`` struct: ``MicPositions`` (8×2, x/y in mm) and
+    ``Test(1..9)``, each a run described by ``Details`` ("N propellers.
+    Repeat:R") whose ``Data(1..8)`` are the eight microphones —
+    ``RawTruncatedCalibrated`` (Pa at ``Fs``) plus a per-mic ``OASPL`` and a
+    precomputed ``Freq``/``SPL`` spectrum, which are not audio. The mics are
+    truncated to slightly different lengths, so they are stacked start-aligned
+    to the common minimum (original lengths kept in ``meta.mic_n_samples``).
+    One Frame per run; a layout mismatch raises rather than publishing arrays
+    of unknown meaning.
+    """
     from scipy.io import loadmat
 
-    stem = rel_stem or mat_path.stem
-
-    try:
-        d = loadmat(str(mat_path), squeeze_me=True, struct_as_record=False)
-    except Exception as exc:  # noqa: BLE001 - a broken team .mat shouldn't sink the publish
-        print(f"  SPCUP19 {team}: cannot load {mat_path.name} ({exc})", flush=True)
-        return
-    found: list = []
-    for k, v in d.items():
-        if not k.startswith("__"):
-            _walk_mat(v, k, None, found)
-    if not found:
-        return
-    mic = _find_mic_positions(d)
-    # Prefer arrays whose struct-path names them audio-like (drops spectrum/SPL).
-    named = [t for t in found if any(tok in t[0].lower() for tok in _AUDIO_TOKENS)]
-    picks = named or found
-    for path, arr, sr in picks:
-        try:
-            audio = _orient_audio(arr)
-        except Exception:  # noqa: BLE001
-            continue
+    d = loadmat(str(mat_path), squeeze_me=True, struct_as_record=False)
+    if "TestResults" not in d:
+        raise ValueError(f"SPCUP19 {team}: {mat_path.name} has no TestResults struct")
+    root = np.atleast_1d(d["TestResults"])[0]
+    mic_mm = np.asarray(root.MicPositions, dtype=np.float64)
+    for run, test in enumerate(np.atleast_1d(root.Test), start=1):
+        details = str(test.Details).strip()
+        match = _CHUMS_DETAILS.match(details)
+        if match is None:
+            raise ValueError(
+                f"SPCUP19 {team}: Test({run}) Details {details!r} is not 'N propellers. Repeat:R'"
+            )
+        n_props, repeat = int(match.group(1)), int(match.group(2))
+        mics = np.atleast_1d(test.Data)
+        rates = {int(round(float(mic.Fs))) for mic in mics}
+        if len(rates) != 1 or len(mics) != mic_mm.shape[0]:
+            raise ValueError(
+                f"SPCUP19 {team}: Test({run}) has {len(mics)} mics at Fs {sorted(rates)} "
+                f"for {mic_mm.shape[0]} MicPositions"
+            )
+        sigs = [
+            np.asarray(mic.RawTruncatedCalibrated, dtype=np.float32).reshape(-1) for mic in mics
+        ]
+        n = min(s.size for s in sigs)
         yield _frame(
             team,
             info,
-            f"{stem}_{path}",
-            audio,
-            sr or 48000,
-            condition=_condition(path) or _condition(stem),
-            relpath=f"{mat_path.name}:{path}",
-            mic_positions=mic,
+            f"{rel_stem}/{n_props}prop_repeat{repeat}",
+            np.stack([s[:n] for s in sigs]),
+            rates.pop(),
+            condition="propeller_rig",
+            relpath=f"{team}/{rel_stem}.mat:TestResults/Test({run})",
+            mic_positions=mic_mm.tolist(),
+            observation={"type": "fixed_array_bench", "source_motion": "static"},
+            operating={"n_propellers": n_props, "repeat": repeat, "details": details},
+            extra={
+                "mic_positions_unit": "mm",
+                "mic_positions_axes": "xy",
+                "audio_unit": "Pa",
+                "oaspl_db": [float(mic.OASPL) for mic in mics],
+                "mic_n_samples": [int(s.size) for s in sigs],
+            },
         )
 
 
@@ -216,13 +182,15 @@ def _dedup_key(seen: dict[str, int], key: str) -> str:
 
 def build(raw_dir: Path) -> Iterator[tuple[str, td.Frame]]:
     """10 team packages under ``raw_dir/<team>/``. Loose .wav → one recording
-    each; .mat → generic resilient extraction (see helpers).
+    each; the ChuMS .mat → one recording per propeller-rig run.
 
     Teams lay files out in *scenario subdirs* (``static clean/1.wav``,
     ``ego-noise/single rotors/1.wav``, …) that reuse bare-integer stems, so keys
     are derived from the **team-relative path** (not the stem) — and the subdir
     tokens feed condition detection. A final per-team dedup guard suffixes any
-    residual collision so the publish never aborts on a duplicate key."""
+    residual collision so the publish never aborts on a duplicate key. A .mat
+    outside ChuMS raises: guessing audio from an unknown struct is what once
+    published ChuMS's per-mic spectra as 216 unlabelled "recordings"."""
     for team, info in _TEAMS.items():
         team_dir = Path(raw_dir) / team
         if not team_dir.exists():
@@ -245,8 +213,10 @@ def build(raw_dir: Path) -> Iterator[tuple[str, td.Frame]]:
             )
             yield _dedup_key(seen, key), frame
         for mat in sorted(team_dir.rglob("*.mat")):
+            if team != "ChuMS":
+                raise ValueError(f"SPCUP19 {team}: no parser for {mat.relative_to(raw_dir)}")
             rel_stem = str(mat.relative_to(team_dir).with_suffix(""))
-            for key, frame in _mat_recordings(mat, team, info, rel_stem):
+            for key, frame in _chums_recordings(mat, team, info, rel_stem):
                 yield _dedup_key(seen, key), frame
 
 
@@ -257,8 +227,8 @@ PROVENANCE = {
     "citation": "Deleforge et al., Audio-Based Search and Rescue With a Drone: IEEE SP Cup 2019 (IEEE SPM 36(5), 2019).",
     "collection_method": "10 student teams recorded their own drone's ego-noise with their own on-board mic array (bonus task)",
     "equipment": "heterogeneous: 10 different drones + mic arrays (1/4/8/16 ch); see per-sample system.make_model + team",
-    "observation_type": "onboard_array",
-    "sample_rate": "varies per team (wav teams 44.1 kHz; .mat teams carry Fs)",
-    "channels": "1/4/8/16 varies per team",
-    "description": "Drone-variety ego-noise: 10 heterogeneous team rigs (Phantom 3/4, Skylark, Intel Aero, MikroKopter, ...). Loose .wav + team-specific .mat; rich per-team drone/condition meta, mic positions where the .mat exposes them.",
+    "observation_type": "onboard_array (ChuMS: fixed_array_bench, a static propeller rig)",
+    "sample_rate": "per recording: 16 / 44.1 / 48 kHz (ChuMS: the .mat's Fs, 44.1 kHz)",
+    "channels": "per recording: 1 / 3 / 8 (KumamoTech's 16-ch ROS bags are not read)",
+    "description": "Drone-variety ego-noise: heterogeneous team rigs (Phantom 3/4, Skylark, Intel Aero, MikroKopter, ...). Loose .wav from 8 teams + the ChuMS propeller-rig .mat (one 8-mic Frame per run, calibrated Pa, n_propellers/repeat in meta.operating, mic positions in mm); KumamoTech ships only ROS bags and is absent. Rich per-team drone/condition meta.",
 }

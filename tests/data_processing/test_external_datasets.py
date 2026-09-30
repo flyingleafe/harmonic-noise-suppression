@@ -9,6 +9,7 @@ actual ``tdframe-v1`` codec (``streams.frame_to_sample`` → ``sample_to_frame``
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from data_processing import sources, streams
@@ -42,7 +43,9 @@ def test_registry_integrity():
 def test_every_source_frames_spec_names_its_registry_entry():
     """A renamed ``frames_dataset`` must not silently orphan its derivation:
     `derive <spec>` publishes under the SPEC name but its meta/builder come
-    from ``gen['source']``, so the two names have to agree."""
+    from ``gen['source']``, so the two names have to agree — except for a
+    historical adopt-only pin whose source now publishes a DERIVABLE rebuild
+    under a new name (``SPCUP19-egonoise`` → ``SPCUP19-frames``)."""
     from data_processing import derivations
 
     for spec_name, entry in derivations.SPECS.items():
@@ -50,8 +53,16 @@ def test_every_source_frames_spec_names_its_registry_entry():
             continue
         source = entry["gen"]["source"]
         assert source in sources.REGISTRY, f"{spec_name}: unknown source {source!r}"
-        assert sources.get(source).frames_name == spec_name, (
-            f"{spec_name}: source {source!r} publishes as {sources.get(source).frames_name!r}"
+        frames_name = sources.get(source).frames_name
+        if entry["adopt_only"] and frames_name != spec_name:
+            successor = derivations.SPECS.get(frames_name)
+            assert successor is not None and not successor["adopt_only"], (
+                f"{spec_name}: historical pin, but {source!r} publishes as {frames_name!r}, "
+                "which is not a derivable spec"
+            )
+            continue
+        assert frames_name == spec_name, (
+            f"{spec_name}: source {source!r} publishes as {frames_name!r}"
         )
 
 
@@ -301,31 +312,78 @@ def test_build_spcup19_wav_team(tmp_path):
     assert frame["meta"]["operating"]["condition"] == "free_flight"
 
 
-def test_build_spcup19_mat_team(tmp_path):
-    """SPCUP19 .mat-shipping team (nested struct) → audio extracted via the
-    generic walk; Fs propagated; mic positions captured into meta."""
+def _write_chums_mat(path, runs, *, fs=16000, n_spec=9000):
+    """A ChuMS-shaped ``UAV_rotor_recordings.mat``: ``TestResults.Test(k)`` runs
+    of 8 per-mic ``Data`` structs (raw audio of UNEQUAL lengths + a spectrum
+    long enough to pass for audio), ``MicPositions`` 8×2 mm."""
     from scipy.io import savemat
 
+    rng = np.random.default_rng(1)
+    mic_fields = [(f, object) for f in ("Fs", "Freq", "SPL", "OASPL", "RawTruncatedCalibrated")]
+    tests = np.zeros((1, len(runs)), dtype=[("Details", object), ("Data", object)])
+    sigs = []
+    for i, (details, lengths) in enumerate(runs):
+        data = np.zeros((1, 8), dtype=mic_fields)
+        run_sigs = [rng.standard_normal(n) * 0.5 for n in lengths]
+        for j, sig in enumerate(run_sigs):
+            freq = np.arange(n_spec, dtype=np.uint16)
+            data[0, j] = (float(fs), freq, rng.standard_normal(n_spec), 90.0 + j, sig)
+        tests[0, i] = (details, data)
+        sigs.append(run_sigs)
+    mic_mm = np.array(
+        [[1020, -290], [1030, -180], [1040, -50], [1030, 20],
+         [1020, 140], [800, -50], [550, -50], [0, -50]],
+        dtype=np.int16,
+    )  # fmt: skip
+    savemat(str(path), {"TestResults": {"Test": tests, "MicPositions": mic_mm}})
+    return sigs, mic_mm
+
+
+def test_build_spcup19_chums_one_frame_per_run(tmp_path):
+    """ChuMS propeller rig → one 8-mic Frame per ``Test`` run (never the
+    per-mic ``Freq``/``SPL`` spectra), mics truncated start-aligned to the
+    shortest, run labels parsed from ``Details``, geometry in mm."""
     team = tmp_path / "ChuMS"
     team.mkdir()
-    sig = (np.random.default_rng(1).standard_normal((16000, 8)) * 0.1).astype(np.float64)
-    savemat(
-        str(team / "UAV_rotor_recordings.mat"),
-        {
-            "TestResults": {
-                "Test": {"Data": {"RawTruncatedCalibrated": sig, "Fs": 48000}},
-                "MicPositions": np.zeros((8, 3)),
-            }
-        },
-    )
+    runs = [
+        ("2 propellers. Repeat:1", [12000, 11000, 12000, 11500, 12000, 12000, 12000, 12000]),
+        ("3 propellers. Repeat:2", [10000] * 8),
+    ]
+    sigs, mic_mm = _write_chums_mat(team / "UAV_rotor_recordings.mat", runs)
     frames = dict(spcup19.build(tmp_path))
-    assert len(frames) >= 1
-    frame = next(iter(frames.values()))
-    assert frame["audio"].dims == ("mic", "time")
-    assert frame["audio"].shape == (8, 16000)  # oriented channels-first
-    assert int(frame["audio"].tindex.sr) == 48000
-    assert frame["meta"]["system"]["team"] == "ChuMS"
-    assert "mic_positions" in frame["meta"]  # captured from the .mat
+    assert sorted(frames) == [
+        "ChuMS__UAV_rotor_recordings__2prop_repeat1",
+        "ChuMS__UAV_rotor_recordings__3prop_repeat2",
+    ]
+    frame = frames["ChuMS__UAV_rotor_recordings__2prop_repeat1"]
+    audio = frame["audio"]
+    assert audio.dims == ("mic", "time")
+    assert audio.shape == (8, 11000)  # the shortest mic
+    assert int(audio.tindex.sr) == 16000  # Fs from the struct
+    np.testing.assert_allclose(np.asarray(audio.data)[1], sigs[0][1].astype(np.float32))
+    np.testing.assert_allclose(np.asarray(audio.data)[0], sigs[0][0][:11000].astype(np.float32))
+    meta = frame["meta"]
+    assert meta["recording_id"] == "ChuMS__UAV_rotor_recordings__2prop_repeat1"
+    assert meta["system"]["team"] == "ChuMS"
+    assert meta["operating"]["condition"] == "propeller_rig"
+    assert meta["operating"]["n_propellers"] == 2
+    assert meta["operating"]["repeat"] == 1
+    assert meta["operating"]["details"] == "2 propellers. Repeat:1"
+    assert meta["observation"]["type"] == "fixed_array_bench"
+    assert np.asarray(meta["mic_positions"]).tolist() == mic_mm.tolist()
+    assert meta["mic_positions_unit"] == "mm"
+    assert list(meta["mic_n_samples"]) == runs[0][1]
+    assert list(meta["oaspl_db"]) == [90.0 + j for j in range(8)]
+
+
+def test_build_spcup19_chums_rejects_unlabelled_runs(tmp_path):
+    """A ``Details`` string that does not name the propeller count/repeat is a
+    layout change: fail the build instead of publishing unlabelled arrays."""
+    team = tmp_path / "ChuMS"
+    team.mkdir()
+    _write_chums_mat(team / "UAV_rotor_recordings.mat", [("calibration tone", [10000] * 8)])
+    with pytest.raises(ValueError, match="Details"):
+        list(spcup19.build(tmp_path))
 
 
 def test_build_spcup19_wav_nested_subdirs_unique_keys(tmp_path):
