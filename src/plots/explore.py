@@ -394,8 +394,8 @@ NOISE_DATASETS: dict[str, str] = {
     "(motors_command + motors_measured), rps_refined",
     "michaels-frames": "Michael's DJI M100 flights FLY124/FLY125: 8 mics, calibrated rps",
     "michaels-test-frames": "HELD-OUT TEST flights FLY103/FLY108 (mono, 48 kHz): look, do not train",
-    "SPCUP19-frames": "IEEE SP Cup 2019 ego-noise: 10 student-team rigs (1-16 ch) + the ChuMS "
-    "propeller bench",
+    "SPCUP19-frames": "IEEE SP Cup 2019 ego-noise: 9 team packages (1/3/8 ch; KumamoTech absent) "
+    "incl. the ChuMS propeller bench as 9 runs x 8 mics",
     "AVQ-egonoise": "AVQ quadrotor: the 5 pure rotor ego-noise sequences, 8-ch 44.1 kHz",
     "AVQ": "AVQ quadrotor: 12 sequences, ego-noise + a moving speech source, 8-ch",
     "noise-v2-bench-points": "stationary bench/static windows (DREGON, SPCUP19, AVQ, "
@@ -414,8 +414,10 @@ RAW_NOISE_DATASETS: dict[str, str] = {
     "new-drone-noises": "raw tree of Michael's TEST flights (frames: michaels-test-frames)",
 }
 
-_ID_COLUMNS = ("recording_id", "shard", "channels", "sr", "duration_s", "entries")
+_ID_COLUMNS = ("recording_id", "key", "shard", "channels", "sr", "duration_s", "entries")
 _META_ARRAY_MAX = 16  # longer array-valued meta is shown as its shape
+#: Bump when :func:`_recording_row` changes: cached rows of an older schema are ignored.
+_INDEX_SCHEMA = 2
 
 
 def _lock_pins() -> dict[str, str]:
@@ -492,7 +494,11 @@ def _recording_row(key: str, frame: td.Frame, shard: int) -> dict[str, Any]:
     from plots.spectrum_viewer import _audio_entry
 
     meta = meta_dict(frame)
-    row: dict[str, Any] = {"recording_id": str(meta.get("recording_id", key)), "shard": shard}
+    row: dict[str, Any] = {
+        "recording_id": str(meta.get("recording_id", key)),
+        "key": key,
+        "shard": shard,
+    }
     try:
         _, audio = _audio_entry(frame, None)
     except ValueError:
@@ -520,6 +526,7 @@ def _index_path(name: str, version: str, shard: int, digest: str):
         / "noise_explorer"
         / name
         / version[:12]
+        / f"schema{_INDEX_SCHEMA}"
         / f"{shard:05d}_{digest[:16]}.json"
     )
 
@@ -614,10 +621,10 @@ def load_recording(name: str, recording_id: str, *, version: str | None = None) 
         rows, found = _index_shard(name, manifest.version, i, info.digest, want=target)
         if found is not None:
             return found
-        if any(target == r["recording_id"] for r in rows):
+        if any(target in (r["recording_id"], r["key"]) for r in rows):
             from data_processing.streams import iter_published_shard
 
             for key, frame in iter_published_shard(name, i, manifest.version):
-                if target == key or target == str(_recording_row(key, frame, i)["recording_id"]):
+                if target in (key, str(_recording_row(key, frame, i)["recording_id"])):
                     return frame
     raise KeyError(f"no recording {target!r} in {name}@{manifest.version[:12]}")
