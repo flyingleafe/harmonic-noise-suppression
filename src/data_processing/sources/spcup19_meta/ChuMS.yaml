@@ -1,0 +1,236 @@
+team: ChuMS
+report: "SPCUP19_ChuMS_documentation.pdf"
+supplementary:
+  - "ChuMS/UAV_rotor_recordings.mat (TestResults.MicPositions 8x2 mm; TestResults.Test(1..9).Details / .Data(1..8).{Fs,Freq,SPL,OASPL,RawTruncatedCalibrated})"
+  - "report pages 1-3 rendered to PNG (Fig. 1 UAV overview, Fig. 2 mic array + rotor labels zoomed at 400 dpi, Tables 1-3)"
+  - "dataset page /tmp/spcup_page.txt (Team ChuMS: custom UAV by Dotterel Technologies, 8 channels)"
+  - "spectral checks: Welch PSD / spectrograms of Data(8) per test; GCC-PHAT between mics for inter-recorder alignment"
+summary: >-
+  University of Auckland (with Dotterel Technologies) flew a custom quadcopter (Skylark
+  M4-680 frame, T-Motor U7 KV490 motors, T-Motor P15x5 props) carrying 8 Rode lavalier mics
+  recorded by two Zoom H6 recorders. The array is a carbon boom running out from the chassis
+  centre plus a vertical mast at its tip. Nine ~1-minute outdoor hover tests were flown at
+  ~2.5 m altitude in a park, with 1, 2 or 3 two-blade propellers STACKED on every motor
+  (2/4/6 blades per rotor), three repeats each in random order. Data are calibrated in Pa and
+  truncated to the hover part. It is a flying drone, not a propeller test rig. The two
+  recorders' channel groups are NOT time-aligned in the .mat (offsets measured below).
+drone:
+  make_model: "custom quadcopter by Dotterel Technologies: Skylark M4-680 frame (+custom parts), T-Motor U7-V2.0 KV490 motors, T-Motor P15x5 propellers, Pixhawk 2 Cube"
+  n_rotors: 4
+  source: "report p.1 Sec. 2.1, p.2 Table 1 (hardware) and Fig. 2 / Table 2 (four rotors A-D); dataset page"
+frame:
+  description: >-
+    Table 2 frame: origin = mic 8 (centre of the UAV chassis) horizontally and the propeller
+    plane vertically, so propellers have z = 0 and mic 8 has z = -0.05. x = along the array
+    boom, pointing from the chassis centre toward the mast (mics 1-5). z = up (mic 5 at the
+    top of the mast has z = +0.14, mic 1 at the bottom z = -0.29). y = z cross x
+    (right-handed, horizontal, perpendicular to the boom). Metres. This is the frame of
+    TestResults.MicPositions, whose two columns are Table 2's x and z (not x/y); every mic
+    has y = 0.
+  source: >-
+    report p.2 Sec. 2.2 ('The horizontal distance has its origin with respect to the
+    position of microphone 8, where it is located at the centre of the UAV chassis. The
+    vertical distance was measured with respect to the plane of the UAV propellers') and
+    Table 2. MicPositions rows equal Table 2 (x, z) exactly: [[1020,-290],[1030,-180],
+    [1040,-50],[1030,20],[1020,140],[800,-50],[550,-50],[0,-50]].
+geometry:
+  chums_boom8:
+    mic_pos:
+      - [1.020, 0.0, -0.290]
+      - [1.030, 0.0, -0.180]
+      - [1.040, 0.0, -0.050]
+      - [1.030, 0.0, 0.020]
+      - [1.020, 0.0, 0.140]
+      - [0.800, 0.0, -0.050]
+      - [0.550, 0.0, -0.050]
+      - [0.000, 0.0, -0.050]
+    mic_pos_quality: measured
+    channel_map_source: >-
+      Row i = TestResults.Test(k).Data(i+1) = microphone i+1 of Table 2 / Fig. 2. The builder
+      stacks Data(1..8) in order. MicPositions rows are in Table 2 order, and the report says
+      "the microphone number corresponding to that outlined in Fig. 2". Physical check: in
+      every one of the 9 tests, mic 8 (chassis centre, 0.47 m from every hub) has the highest
+      OASPL (91-98 dB) and mic 7 (0.45 m from rotors A/B) the second highest. In the 1-prop
+      tests mic 6 (0.63 m) is next, ahead of the mast mics 1-5 (~0.83-0.86 m); in the 2- and
+      3-prop tests mic 6 and the mast mics are within ~1-2 dB. Within each recorder group,
+      GCC-PHAT lags match the boom spacing (mic 3 vs mic 6: 27-28 samples, expected ~31 for
+      0.24 m; mic 3 vs mic 7: 57 samples).
+    rotor_pos:
+      - [0.293, 0.3675, 0.0]
+      - [0.293, -0.3675, 0.0]
+      - [-0.293, 0.3675, 0.0]
+      - [-0.293, -0.3675, 0.0]
+    rotor_pos_quality: derived
+    source: >-
+      Report Table 2 rotor rows, corrected. As printed, the table lists A (293, 367.5, 0), B
+      (-293, -367.5, 0), C (293, 367.5, 0), D (-293, -367.5, 0): C duplicates A and D
+      duplicates B, which is physically impossible. Fig. 2 (zoomed photo) shows the boom
+      leaving the chassis between rotors A and B, with A and D diagonally opposite and B and C
+      opposite. Viewed from above, the CCW order starting from the boom is A, C, D, B. In the
+      right-handed z-up frame that puts A and B at +x (boom side) with A at +y. The y column
+      of the table (+,-,+,-) is kept as printed; only the x column is re-ordered, to
+      (+,+,-,-). Rows are A, B, C, D.
+    notes: >-
+      Fig. 2's drawn axes label the boom arrow 'y', which contradicts Table 2 and
+      MicPositions (both put the boom mics at x ~ 1 m, y = 0). Table 2 and the .mat are
+      followed. The mics are not a compact array: a 1.04 m boom plus a 0.43 m vertical mast
+      at its tip, all in the x-z plane (y = 0). Two recorder groups: Zoom H6 'A' = mics
+      1, 2, 4, 5 (channels 0, 1, 3, 4) and 'B' = mics 3, 6, 7, 8 (channels 2, 5, 6, 7). This
+      grouping is measured, not reported: channels within a group align to <= a few samples,
+      while channels across groups are offset by a per-test constant. Positions are
+      reported as measured (mm precision) by the team.
+recordings:
+  - key: ChuMS__UAV_rotor_recordings__1prop_repeat1
+    raw: "ChuMS/UAV_rotor_recordings.mat:TestResults/Test(1)"
+    geometry: chums_boom8
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "altitude hold at ~2.5 m (report); speed not reported, measured shaft ~100 Hz, BPF ~199 Hz (2 blades)"
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    recorder_align: {group_a: [0, 1, 3, 4], group_b: [2, 5, 6, 7], k_samples: 28145}  # B[n+K] ~ A[n], GCC-PHAT mic 3 vs mic 2
+    description: >-
+      Test 1: hover with 1 propeller (2 blades) per rotor, repeat 1. Calibrated Pa, 44.1
+      kHz, per-mic lengths 3219301-3307501 samples. Inter-recorder offset K = +28145 samples
+      (B[n+K] ~ A[n]; K>0 -> drop the first K samples of channels 2,5,6,7; K<0 -> drop the
+      first |K| samples of channels 0,1,3,4).
+    source: "report p.2 Sec. 3.2 + Table 3 (Test 1 = 1 propeller), Sec. 4.1 (truncated to hover); Details '1 propellers. Repeat:1'; Welch PSD of Data(8); GCC-PHAT mic3 vs mic2 (0-40 s and 20-50 s windows agree)"
+    confidence: high
+  - key: ChuMS__UAV_rotor_recordings__2prop_repeat1
+    raw: "ChuMS/UAV_rotor_recordings.mat:TestResults/Test(2)"
+    geometry: chums_boom8
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "altitude hold at ~2.5 m (report); speed not reported, measured shaft ~85 Hz, BPF ~338 Hz (4 blades)"
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    recorder_align: {group_a: [0, 1, 3, 4], group_b: [2, 5, 6, 7], k_samples: 52510}  # B[n+K] ~ A[n], GCC-PHAT mic 3 vs mic 2
+    description: >-
+      Test 2: hover with 2 stacked propellers (4 blades) per rotor, repeat 1. Inter-recorder
+      offset K = +52510 samples (convention as Test 1).
+    source: "report Sec. 3.2 + Table 3 (Test 2 = 2 propellers); Details '2 propellers. Repeat:1'; Welch PSD of Data(8); GCC-PHAT mic3 vs mic2"
+    confidence: high
+  - key: ChuMS__UAV_rotor_recordings__3prop_repeat1
+    raw: "ChuMS/UAV_rotor_recordings.mat:TestResults/Test(3)"
+    geometry: chums_boom8
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "altitude hold at ~2.5 m (report); speed not reported, measured shaft ~73-78 Hz, BPF ~470 Hz (6 blades)"
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    recorder_align: {group_a: [0, 1, 3, 4], group_b: [2, 5, 6, 7], k_samples: 18511}  # B[n+K] ~ A[n], GCC-PHAT mic 3 vs mic 2
+    description: >-
+      Test 3: hover with 3 stacked propellers (6 blades) per rotor, repeat 1. Inter-recorder
+      offset K = +18511 samples (convention as Test 1).
+    source: "report Sec. 3.2 + Table 3 (Test 3 = 3 propellers); Details '3 propellers. Repeat:1'; Welch PSD of Data(8); GCC-PHAT mic3 vs mic2"
+    confidence: high
+  - key: ChuMS__UAV_rotor_recordings__2prop_repeat2
+    raw: "ChuMS/UAV_rotor_recordings.mat:TestResults/Test(4)"
+    geometry: chums_boom8
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "altitude hold at ~2.5 m (report); speed not reported, measured shaft ~81 Hz, BPF ~328 Hz (4 blades)"
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    recorder_align: {group_a: [0, 1, 3, 4], group_b: [2, 5, 6, 7], k_samples: -41700}  # B[n+K] ~ A[n], GCC-PHAT mic 3 vs mic 2
+    description: >-
+      Test 4: hover with 2 stacked propellers (4 blades) per rotor, repeat 2. Inter-recorder
+      offset K = -41700 samples (convention as Test 1).
+    source: "report Sec. 3.2 + Table 3 (Test 4 = 2 propellers); Details '2 propellers. Repeat:2'; Welch PSD of Data(8); GCC-PHAT mic3 vs mic2"
+    confidence: high
+  - key: ChuMS__UAV_rotor_recordings__3prop_repeat2
+    raw: "ChuMS/UAV_rotor_recordings.mat:TestResults/Test(5)"
+    geometry: chums_boom8
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "altitude hold at ~2.5 m (report); speed not reported, measured shaft ~77 Hz, BPF ~468 Hz (6 blades)"
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    recorder_align: {group_a: [0, 1, 3, 4], group_b: [2, 5, 6, 7], k_samples: -84390}  # B[n+K] ~ A[n], GCC-PHAT mic 3 vs mic 2
+    description: >-
+      Test 5: hover with 3 stacked propellers (6 blades) per rotor, repeat 2. Inter-recorder
+      offset K = -84390 samples (convention as Test 1).
+    source: "report Sec. 3.2 + Table 3 (Test 5 = 3 propellers); Details '3 propellers. Repeat:2'; Welch PSD of Data(8); GCC-PHAT mic3 vs mic2"
+    confidence: high
+  - key: ChuMS__UAV_rotor_recordings__1prop_repeat2
+    raw: "ChuMS/UAV_rotor_recordings.mat:TestResults/Test(6)"
+    geometry: chums_boom8
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "altitude hold at ~2.5 m (report); speed not reported, measured shaft ~96 Hz, BPF ~193 Hz (2 blades)"
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    recorder_align: {group_a: [0, 1, 3, 4], group_b: [2, 5, 6, 7], k_samples: -315058}  # B[n+K] ~ A[n], GCC-PHAT mic 3 vs mic 2
+    description: >-
+      Test 6: hover with 1 propeller (2 blades) per rotor, repeat 2. Inter-recorder offset
+      K = -315058 samples (7.14 s, the largest; convention as Test 1).
+    source: "report Sec. 3.2 + Table 3 (Test 6 = 1 propeller); Details '1 propellers. Repeat:2'; Welch PSD of Data(8); GCC-PHAT mic3 vs mic2 (+-15 s search)"
+    confidence: high
+  - key: ChuMS__UAV_rotor_recordings__1prop_repeat3
+    raw: "ChuMS/UAV_rotor_recordings.mat:TestResults/Test(7)"
+    geometry: chums_boom8
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "altitude hold at ~2.5 m (report); speed not reported, measured shaft ~96 Hz, BPF ~195 Hz (2 blades)"
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    recorder_align: {group_a: [0, 1, 3, 4], group_b: [2, 5, 6, 7], k_samples: 71326}  # B[n+K] ~ A[n], GCC-PHAT mic 3 vs mic 2
+    description: >-
+      Test 7: hover with 1 propeller (2 blades) per rotor, repeat 3. Inter-recorder offset
+      K = +71326 samples (convention as Test 1).
+    source: "report Sec. 3.2 + Table 3 (Test 7 = 1 propeller); Details '1 propellers. Repeat:3'; Welch PSD of Data(8); GCC-PHAT mic3 vs mic2"
+    confidence: high
+  - key: ChuMS__UAV_rotor_recordings__2prop_repeat3
+    raw: "ChuMS/UAV_rotor_recordings.mat:TestResults/Test(8)"
+    geometry: chums_boom8
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "altitude hold at ~2.5 m (report); speed not reported, measured shaft ~83 Hz, BPF ~332 Hz (4 blades)"
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    recorder_align: {group_a: [0, 1, 3, 4], group_b: [2, 5, 6, 7], k_samples: -37792}  # B[n+K] ~ A[n], GCC-PHAT mic 3 vs mic 2
+    description: >-
+      Test 8: hover with 2 stacked propellers (4 blades) per rotor, repeat 3. Inter-recorder
+      offset K = -37792 samples (convention as Test 1).
+    source: "report Sec. 3.2 + Table 3 (Test 8 = 2 propellers); Details '2 propellers. Repeat:3'; Welch PSD of Data(8); GCC-PHAT mic3 vs mic2"
+    confidence: high
+  - key: ChuMS__UAV_rotor_recordings__3prop_repeat3
+    raw: "ChuMS/UAV_rotor_recordings.mat:TestResults/Test(9)"
+    geometry: chums_boom8
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "altitude hold at ~2.5 m (report); speed not reported, measured shaft ~79 Hz, BPF ~468 Hz (6 blades)"
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    recorder_align: {group_a: [0, 1, 3, 4], group_b: [2, 5, 6, 7], k_samples: -101863}  # B[n+K] ~ A[n], GCC-PHAT mic 3 vs mic 2
+    description: >-
+      Test 9: hover with 3 stacked propellers (6 blades) per rotor, repeat 3. Inter-recorder
+      offset K = -101863 samples (convention as Test 1).
+    source: "report Sec. 3.2 + Table 3 (Test 9 = 3 propellers); Details '3 propellers. Repeat:3'; Welch PSD of Data(8); GCC-PHAT mic3 vs mic2"
+    confidence: high
+open_questions:
+  - "The current builder tags ChuMS as a static 'propeller_rig' / 'fixed_array_bench'. The report contradicts this: a flying UAV under altitude hold at ~2.5 m with only pilot drift correction, and the audio truncated to hover (Sec. 3.2, 4.1). 'N propellers' means N two-blade P15x5 propellers stacked per motor (2/4/6 blades), with all 4 rotors running. Spectra agree: the blade-passing frequency equals 2N x the shaft rate, and the shaft rate falls as blades are added (~97 -> ~83 -> ~76 Hz), which is what constant-thrust hover predicts. A quad could not hover on 1-3 rotors."
+  - "The builder labels MicPositions as 'xy'; the second column is z (height relative to the propeller plane), and y = 0 for every mic."
+  - "INTER-RECORDER MISALIGNMENT (affects any multichannel use): mics 1,2,4,5 (channels 0,1,3,4) and mics 3,6,7,8 (channels 2,5,6,7) come from two unsynchronised Zoom H6 recorders and were truncated independently. The builder start-aligns all 8 mics, so the two groups are offset by K samples per test (B[n+K] ~ A[n]): T1 +28145, T2 +52510, T3 +18511, T4 -41700, T5 -84390, T6 -315058, T7 +71326, T8 -37792, T9 -101863 (+-1 sample; K is from GCC-PHAT mic 3 vs mic 2, which sit 0.13 m apart on the mast with <1 sample expected acoustic lag; mics 1, 4 and 5 give the same K within ~2 samples, except mic 5 in T3 at 18487). K was identical in the 0-40 s and 20-50 s windows, and Test 1 re-checked at 10 s and 53 s drifted by only 3 samples. The report does not mention this."
+  - "Report Table 2 rotor rows are self-contradictory (C = A, D = B). rotor_pos keeps the table's y column and re-orders the x column to match Fig. 2 (boom between A and B; A-D and B-C diagonal). The sign of y for A vs B additionally relies on reading Fig. 2's perspective as viewed from above."
+  - "Fig. 2's drawn axis labels (boom arrow labelled 'y') disagree with Table 2 / MicPositions (boom = x); Table 2 is followed."
+  - "Rotor speed/throttle is not reported; shaft/BPF values are measured from Data(8) PSD peaks and are approximate. The four rotors run at slightly different speeds under flight control."
+  - "Outdoor park recording: low-level traffic/ambient noise and ~5 km/h wind are acknowledged (Sec. 3.1) but are incidental, not deliberate sources."

@@ -1,0 +1,190 @@
+team: Diagonal_Unloading
+report: "SPCUP19_Diagonal_Unloading_documentation.pdf"
+supplementary:
+  - "dataset page /tmp/spcup_page.txt (Team Diagonal_Unloading entry: 'Quadrotor UAV (Phantom 4 PRO by DJI)', 16 audio channels)"
+  - "DJI Phantom 4 Pro specs, https://www.dji.com/support/product/phantom-4-pro ('Diagonal Size (Propellers Excluded) 350 mm') and Phantom 4 Pro Quick Start Guide, https://dl.djicdn.com/downloads/phantom_4_pro/20170125/quick+start+guide/Phantom+4+Pro+Quick+Start+Guide+En.pdf (289.5 x 289.5 x 196 mm)"
+  - "Diagonal_Unloading/recordings/*/*.wav (headers via soxi; inter-channel coherence, per-second harmonic-comb f0 track and high-band PSD measured by the annotator)"
+  - "no other supplementary files ship in the team package (only the five wavs)"
+summary: >-
+  Jade Hochschule Oldenburg recorded a DJI Phantom 4 PRO outdoors on a quiet field (no wind,
+  faint highway 600 m away) with a 16-MEMS-microphone planar array (Fraunhofer IDMT
+  'Octopus' board, 43 x 43 mm) fixed under the drone on a composite plate together with an
+  SD-card recording board. Adjacent microphone pairs are summed in hardware, so each file
+  has 8 channels. Five recordings: hovering at 2 m and at 10 m ('static'), a yaw rotation
+  and a 20 x 20 m rectangle flight at ~10 m, and one unlabeled free flight. No external
+  sound source was used.
+drone:
+  make_model: "DJI Phantom 4 PRO (Professional)"
+  n_rotors: 4
+  source: "report §2 p.1 ('DJI Phantom 4 PRO Professional Drone with four rotors'), Fig. 1 p.1; dataset page"
+frame:
+  description: >-
+    origin = centre of the microphone array (centre of the 8 channel positions of Listing 1),
+    x = forward (the 'Flight Direction' arrow of report Fig. 2), y = left, z = up;
+    metres, right-handed (DREGON-style body frame).
+  source: >-
+    chosen by annotator. Listing 1 (report p.2) is given in a board frame with origin at the
+    CH6 corner, x = flight direction, y = to the right in the Fig. 2 'TOP VIEW' (CH1..CH8 of
+    Fig. 2 match Listing rows 1..8 only with that reading: CH1 front-centre (0.0426,0.0213),
+    CH2 front-right (0.0424,0.0424), CH7 left-centre (0.0213,0)). Conversion applied:
+    x = x_L - 0.0213, y = -(y_L - 0.0213), z = 0.
+geometry:
+  octopus8_under_phantom4pro:
+    mic_pos:
+      - [0.0213, 0.0, 0.0]      # file ch 0 = CH1, front centre
+      - [0.0211, -0.0211, 0.0]  # file ch 1 = CH2, front right
+      - [0.0, -0.0213, 0.0]     # file ch 2 = CH3, right centre
+      - [-0.0211, -0.0211, 0.0] # file ch 3 = CH4, rear right
+      - [-0.0213, 0.0, 0.0]     # file ch 4 = CH5, rear centre
+      - [-0.0211, 0.0211, 0.0]  # file ch 5 = CH6, rear left
+      - [0.0, 0.0213, 0.0]      # file ch 6 = CH7, left centre
+      - [0.0211, 0.0211, 0.0]   # file ch 7 = CH8, front left
+    mic_pos_quality: reported
+    channel_map_source: >-
+      Report Fig. 2 labels channels CH1..CH8 clockwise (seen from the top) starting at the
+      front centre, and Listing 1 row i matches CH i. That wav channel i is CH(i+1) is an
+      assumption (no explicit statement), supported by a measurement: the 300-3000 Hz
+      inter-channel coherence of every file has ring structure - each channel is most
+      coherent with its two ring neighbours (e.g. static_10m: ch0-ch1 0.56, ch0-ch7 0.49,
+      ch0-ch4 0.31, ch0-ch5 0.26; same pattern for ch1..ch7 and in all 5 files), and the
+      broadband cross-correlation peaks between channels lie within 0-3 samples. This
+      confirms the file order walks around the square perimeter, but cannot exclude a
+      rotation or mirror of the numbering.
+    rotor_pos:
+      - [0.1237, -0.1237, 0.18]   # front right
+      - [0.1237, 0.1237, 0.18]    # front left
+      - [-0.1237, 0.1237, 0.18]   # rear left
+      - [-0.1237, -0.1237, 0.18]  # rear right
+    rotor_pos_quality: estimated
+    source: >-
+      mic_pos: report Listing 1 p.2 (relative positions, metres) + Fig. 2 p.2 (channel labels,
+      flight direction); each position is the effective (pair-centre) position of one summed
+      MEMS pair (report §2 p.2 'The adjoined microphone pair outputs are summed, resulting in
+      8 recording channels'). rotor_pos horizontal: DJI Phantom 4 Pro spec 'Diagonal Size
+      (Propellers Excluded) 350 mm' -> hubs at 0.175 m radius, 45 deg off the x axis (X
+      layout, camera forward). rotor z and array horizontal placement: estimated from report
+      Fig. 1 p.1 (photo: the plate carrying board, battery and array is fixed under the
+      drone between the landing legs, roughly at skid level) and the Quick Start Guide height
+      196 mm -> propeller plane ~0.18 m above the array; array centre assumed on the body's
+      vertical axis.
+    notes: >-
+      16 MEMS mics physically, 8 channels recorded: each channel is the hardware sum of two
+      adjacent MEMS capsules (the pairs are the dot pairs next to each CH label in Fig. 2,
+      only a few mm apart, so the pair sum is effectively one omnidirectional sensor up to
+      well above 10 kHz). Individual positions of the 16 capsules are not given (Fig. 2 was
+      copied from the Fraunhofer IDMT 'Octopus Array Dimensions' datasheet, ref. [1], not
+      available). rotor_pos uncertainty: ~+-0.03 m in z, ~+-0.05 m horizontally (array
+      offset from the body axis unknown); rotor order front-right, front-left, rear-left,
+      rear-right is the annotator's (no motor numbering in the report). Assumes the Fig. 2
+      'Flight Direction' is the drone's nose direction and that the plate is aligned with the
+      body axes.
+recordings:
+  - key: Diagonal_Unloading__recordings__flight__rotate_right_left_10m
+    raw: "Diagonal_Unloading/recordings/flight/rotate_right_left_10m.wav"
+    geometry: octopus8_under_phantom4pro
+    condition: flight
+    flight_mode: manoeuvre
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "not reported; measured harmonic-comb f0 ~190-200 Hz throughout (1-s harmonic-sum estimate on the channel mean)"
+    channels_used: null
+    description: >-
+      Yaw rotation of the drone right and left about its vertical centre axis while airborne
+      at about 10 m height, outdoors. 34.9 s, 8 ch, 48 kHz.
+    source: "report Table 1 p.3 ('rotate_right_left_10m: rotation along center axis of drone') and §3 p.4 ('Both flight maneuvers took place in about 10 m height'); f0 track measured on the wav"
+    confidence: high
+  - key: Diagonal_Unloading__recordings__flight__square_10m
+    raw: "Diagonal_Unloading/recordings/flight/square_10m.wav"
+    geometry: octopus8_under_phantom4pro
+    condition: flight
+    flight_mode: manoeuvre
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "not reported; measured harmonic-comb f0 ~180-213 Hz, mostly 195-205 Hz"
+    channels_used: null
+    description: >-
+      Flight along a rectangular (~20 x 20 m) path at about 10 m height (called
+      'rectangle_10_m' in the report). 87.5 s, 8 ch, 48 kHz.
+    source: "report Table 1 p.3 ('rectangle_10_m: flying along a rectangle path (20 x 20 m)') and §3 p.4; file-name mismatch square_10m vs rectangle_10_m resolved by being the only remaining flight file"
+    confidence: high
+  - key: Diagonal_Unloading__recordings__static__static_10m
+    raw: "Diagonal_Unloading/recordings/static/static_10m.wav"
+    geometry: octopus8_under_phantom4pro
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "hover; measured harmonic-comb f0 ~195-204 Hz"
+    channels_used: null
+    description: >-
+      'Static' = the drone hovers in place ('drone stands in 10 m heights'), airborne, at
+      10 m. Not on the ground: the report counts it as one of two 'static situations ... in
+      10 m height', and its rotor comb (~199 Hz) equals that of the flight manoeuvres.
+      14.4 s, 8 ch, 48 kHz.
+    source: "report Table 1 p.3 ('static_10_m: drone stands in 10 m heights') and §3 p.4 ('Two static situations, one in 2 m height and the other in 10 m height'); f0 track measured on the wav"
+    confidence: high
+  - key: Diagonal_Unloading__recordings__static__static_2m
+    raw: "Diagonal_Unloading/recordings/static/static_2m.wav"
+    geometry: octopus8_under_phantom4pro
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "hover; measured harmonic-comb f0 ~194-202 Hz"
+    channels_used: null
+    description: >-
+      Hover at 2 m height ('drone stands in 2 m heights'), airborne (possible ground
+      reflections/ground effect at 2 m). 35.5 s, 8 ch, 44.1 kHz - the only file not at the
+      reported 48 kHz; the 44.1 kHz header is correct (see source).
+    source: >-
+      report Table 1 p.3 ('static_2_m: drone stands in 2 m heights') and §3 p.4. Sample-rate
+      check: read at its 44.1 kHz header the rotor comb is ~199 Hz, identical to static_10m
+      and the flights at 48 kHz (a mislabelled 48 kHz stream would read ~183 Hz), and the PSD
+      falls off steeply at 20.5-22 kHz (-105 -> -116 -> -129 dB) as for a genuine 44.1 kHz
+      anti-alias filter (48 kHz files: -105 -> -110 -> -114 dB).
+    confidence: high
+  - key: Diagonal_Unloading__recordings__unlabeled__01
+    raw: "Diagonal_Unloading/recordings/unlabeled/01.wav"
+    geometry: octopus8_under_phantom4pro
+    condition: flight
+    flight_mode: unknown
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "not reported; measured harmonic-comb f0 ~188-209 Hz (drifts, e.g. ~191 Hz around 25-31 s, ~203 Hz around 9-15 s)"
+    channels_used: null
+    description: >-
+      Unlabeled free flight ('an unlabeled free flight recording'); the manoeuvres are not
+      described. Airborne from the first second (rotor comb ~198 Hz at t = 0, no spin-up).
+      60.07 s, 8 ch, 48 kHz.
+    source: "report Table 1 p.3 ('01: unlabeled situation') and §3 p.4 ('supplementary, an unlabeled free flight recording with a total duration of about 3 minutes'); f0 track measured on the wav"
+    confidence: medium
+open_questions:
+  - >-
+    16 vs 8 channels: the dataset page lists 16 audio channels, the files have 8. Resolved by
+    the report (§2 p.1-2): the array has 16 MEMS microphones but adjoining pairs are summed,
+    giving 8 recorded channels; nothing is missing.
+  - >-
+    Channel order: wav channel i = Fig. 2 CH(i+1) is assumed (report never states it). The
+    coherence ring structure confirms the order goes around the perimeter, but a rotation or
+    mirror of the numbering (e.g. if Fig. 2 'TOP VIEW' is the datasheet view of the
+    component side while the mic side faces the ground) cannot be excluded from the data.
+  - >-
+    Format mismatch: the report says 32-bit PCM at 48 kHz; all shipped files are 16-bit PCM,
+    and static_2m.wav is 44.1 kHz (header verified as correct by the rotor-comb and
+    anti-alias checks). Probably re-exported by the team or the organisers.
+  - >-
+    01.wav: the report says the unlabeled free flight is 'about 3 minutes'; the file is
+    60.07 s (2 883 584 = 11 * 2^18 frames), so it looks truncated. Its flight mode
+    (hover/manoeuvre mix) is unknown.
+  - >-
+    Rotor positions are estimated: horizontal from the DJI 350 mm diagonal, vertical offset
+    (~0.18 m) and array centring from the setup photo; the report gives neither. Height,
+    motion and yaw of each flight are not logged (no telemetry in the package).
+  - >-
+    The report's Table 1 names differ from the files (static_2_m / static_10_m /
+    rectangle_10_m vs static_2m / static_10m / square_10m); mapping is unambiguous.

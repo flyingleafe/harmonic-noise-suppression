@@ -1,0 +1,185 @@
+team: Maverick
+report: "SPCUP19_Maverick_documentation.pdf"
+supplementary:
+  - "dataset page /tmp/spcup_page.txt (Team Maverick entry: 'Quadcopter UAV (YH-19HW ...)', '4' audio channels)"
+  - "report embedded images: Fig. 1 p.3 (product photo), Fig. 2 p.4 (bottom/top photos, extracted at 1535x2046 with pdfimages), Fig. 3 p.5 (array drawing), Fig. 5 p.7 (spectrum)"
+  - "Maverick/*.wav (headers via soxi; RMS, inter-channel coherence/cross-correlation and per-second harmonic-comb f0 track measured by the annotator)"
+  - "no other supplementary files ship in the team package (only the six wavs)"
+summary: >-
+  BUET (Bangladesh) recorded a small foldable toy quadcopter (YH-19HW, brushed motors, 160 g)
+  inside an anechoic chamber with three omnidirectional lavalier microphones taped in a
+  triangle under the body, wired to a laptop through three USB sound cards (44.1 kHz,
+  16 bit). Six recordings: three tele-operated free flights (take-off, stabilisation,
+  hovering or spinning, landing), one with the motors on at constant speed while the drone
+  stays on the ground, and two in which a person carries the running drone around by hand.
+  No external sound source was used.
+drone:
+  make_model: "YH-19HW foldable toy quadcopter (brushed motors)"
+  n_rotors: 4
+  source: "report §3.1 p.1-2 + Table 1 p.2 ('quadcopter UAV YH-19HW ... four brushed motors', 0.16 kg, 21.0 x 16.5 x 8.0 cm); dataset page"
+frame:
+  description: >-
+    report Fig. 3 frame: origin = centre of the drone body (crosshair in Fig. 3), x =
+    across the body (to the right in the Fig. 3 top view), y = along the body's long axis
+    towards microphones 1-2 (away from the protrusion drawn at the other end), z = up;
+    metres (converted from the report's cm), right-handed.
+  source: "report §4 p.4-5 and Fig. 3 p.5 (axes x, y, z-out-of-page drawn; mics below the body have negative z, so the drawing is a top view with z up)"
+geometry:
+  yh19hw_tri3:
+    mic_pos:
+      - [-0.0256, 0.0422, -0.0052]  # file ch 0 = mic (1)
+      - [0.0256, 0.0422, -0.0052]   # file ch 1 = mic (2)
+      - [0.0, -0.0422, -0.0112]     # file ch 2 = mic (3)
+    mic_pos_quality: reported
+    channel_map_source: >-
+      assumption: wav channel i = microphone (i+1) of Fig. 3 (the report numbers the mics 1-3
+      but never states the channel order; each mic went to its own USB sound card and the
+      3-channel file was assembled afterwards). Not verifiable from the data: the rotor noise
+      is only weakly coherent between channels (median 20-1000 Hz coherence 0.03-0.06).
+    rotor_pos:
+      - [0.070, 0.075, 0.025]
+      - [-0.072, 0.076, 0.025]
+      - [-0.073, -0.071, 0.025]
+      - [0.069, -0.067, 0.025]
+    rotor_pos_quality: estimated
+    source: >-
+      mic_pos: report Fig. 3 p.5 'Microphone co-ordinates' (1) (-2.56, 4.22, -0.52),
+      (2) (2.56, 4.22, -0.52), (3) (0, -4.22, -1.12) cm. rotor_pos x/y: measured by the
+      annotator on the report's Fig. 2 bottom photo (pdfimages, 1535 px wide): motor-hub
+      centres relative to the mic-triangle origin, scaled by the reported mic spacings
+      (mic1-mic2 5.12 cm = 217 px, mic-pair-to-mic3 8.44 cm = 368 px -> ~43 px/cm), then
+      mapped into the Fig. 3 frame (photo right = +y towards the mic pair; bottom view
+      mirrored so photo up = +x). Result: roughly square ~0.14 x 0.14 m motor layout, which
+      matches the product photo Fig. 1 (motor spacing across ~= along, within 2 %). rotor z:
+      guessed propeller plane ~2.5 cm above the origin (drone height 8 cm, Table 1; props sit
+      on the motor tops at the arm ends); not measured.
+    notes: >-
+      Report Fig. 3's drawing is schematic (its rotor placement is not to scale with the mic
+      coordinates), so it was not used for rotor positions. rotor_pos uncertainty ~+-0.01 m
+      in x/y (photo perspective, hub centring) and ~+-0.02 m in z. Rotor order: (+x,+y),
+      (-x,+y), (-x,-y), (+x,-y) - annotator's choice, the report has no motor numbering.
+      Swapping mic 1 and mic 2 (unknown left/right in the bottom photo) only mirrors x, which
+      leaves this near-symmetric rotor set unchanged within its uncertainty. Which end is
+      the drone's nose is not stated.
+recordings:
+  - key: Maverick__1
+    raw: "Maverick/1.wav"
+    geometry: yh19hw_tri3
+    condition: handheld
+    flight_mode: null
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "not reported; measured comb ~33-36 Hz for the first ~4 s, then ~92-100 Hz (brief dip to ~35-72 Hz at 14-16 s)"
+    channels_used: null
+    description: >-
+      Motors on, not flying: a human operator carried the running drone around by hand 'to
+      simulate motion' in the anechoic chamber. Speed ramps up after ~4 s and dips once
+      mid-file. 27.0 s.
+    source: "report §6 p.6 'Audio 1 The UAV motors were turned on and a human operator carried the it to simulate motion'; f0 track measured on the wav"
+    confidence: medium
+  - key: Maverick__2
+    raw: "Maverick/2.wav"
+    geometry: yh19hw_tri3
+    condition: flight
+    flight_mode: mixed
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "not reported; measured comb ~84-100 Hz"
+    channels_used: null
+    description: >-
+      Tele-operated free flight in the anechoic chamber: take-off, stabilisation, hovering,
+      landing. 23.0 s.
+    source: "report §6 p.6 'Audio 2 ... free-flights combining sequences of take-off, stabilization, hovering, and landing'"
+    confidence: high
+  - key: Maverick__3
+    raw: "Maverick/3.wav"
+    geometry: yh19hw_tri3
+    condition: flight
+    flight_mode: mixed
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "not reported; measured comb ~82-97 Hz"
+    channels_used: null
+    description: >-
+      Tele-operated free flight: take-off, stabilisation, spinning (yaw rotation), landing.
+      29.0 s.
+    source: "report §6 p.6 'Audio 3 ... free-flights combining sequences of take-off, stabilization, spinning, and landing'"
+    confidence: high
+  - key: Maverick__4
+    raw: "Maverick/4.wav"
+    geometry: yh19hw_tri3
+    condition: bench
+    flight_mode: null
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "constant speed; report Fig. 5: harmonics of ~35 Hz (peaks 35, 71, 108, 173 Hz); measured Welch peaks ~37.3, ~69.6, ~75.0 Hz (two slightly different rotor speeds)"
+    channels_used: null
+    description: >-
+      All four motors running at a constant speed with the drone stationary (it did not take
+      off). Lower speed than in flight (comb ~37/75 Hz vs ~85-100 Hz, level ~10 dB below the
+      flight files: -19 to -25 dBFS vs -6 to -14 dBFS). 16.0 s.
+    source: "report §6 p.6 'Audio 4 The UAV motors were turned on and rotated at a constant speed but the drone did not take any flight rather it was stationary', §7 p.6-7 ('the UAV was stationary, but all the four motors were turned on') and Fig. 5; RMS and PSD measured on the wav"
+    confidence: high
+  - key: Maverick__5
+    raw: "Maverick/5.wav"
+    geometry: yh19hw_tri3
+    condition: handheld
+    flight_mode: null
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "not reported; measured comb wanders ~84-104 Hz"
+    channels_used: null
+    description: >-
+      Motors on, not flying: a human operator carried the running drone along a circular
+      path, varying its yaw and pitch by hand. 64.5 s.
+    source: "report §6 p.6 'Audio 5 ... a human operator manually moved the UAV in a circular path and its yaw and pitch were varied'; f0 track measured on the wav"
+    confidence: medium
+  - key: Maverick__6
+    raw: "Maverick/6.wav"
+    geometry: yh19hw_tri3
+    condition: flight
+    flight_mode: mixed
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "not reported; measured comb ~75-90 Hz"
+    channels_used: null
+    description: >-
+      Tele-operated free flight: take-off, stabilisation, hovering, landing (same programme
+      as recording 2). 25.0 s.
+    source: "report §6 p.6 'Audio 6 The UAV was tele-operated by a human and was performing free-flights combining sequences of take-off, stabilization, hovering, and landing'"
+    confidence: high
+open_questions:
+  - >-
+    4 vs 3 channels: the dataset page lists 4 audio channels, but the report says three
+    microphones (§2, §3.2, §4, Fig. 2-3) and every file has 3 channels. The page's '4' is
+    wrong; no channel is missing.
+  - >-
+    Recordings 1 and 5 (running drone carried by hand): not airborne, not fixed, the rig
+    moves (Doppler/orientation changes) and the rotor speed is not held constant (measured
+    spin-up and wander). Tagged condition=handheld (added to the vocabulary for exactly
+    this case) rather than bench.
+  - >-
+    The report contradicts itself: the §6 summary paragraph says recording 4 is the
+    hand-carried one, while the per-recording list says 4 is stationary at constant speed
+    and 1 and 5 are hand-carried. The per-recording list was followed; §7 and Fig. 5 (4 =
+    stationary, constant speed, 35 Hz comb) and the measured lower speed/level of 4 agree
+    with it.
+  - >-
+    §6 states 'total weight of the equipped system is 0.88 kg' and 'propellers' speed ranges
+    from 10 turns/s ... up to around 75 turns/s', which looks copied from the SP Cup/DREGON
+    description: Table 1 gives 0.16 kg for this drone and no speed measurement exists.
+  - >-
+    Channel order (wav channel i = mic i+1) is assumed. The three mics went through three
+    separate USB sound cards, so sample-accurate synchronisation is not guaranteed: the
+    100-2000 Hz envelope cross-correlation peaks within ~1 ms in recording 4 but at 20-56 ms
+    (weak peaks) in recording 2; inter-channel coherence is low throughout.
+  - >-
+    Rotor positions are estimated from a photo (x/y) and a guess (z); the drone's forward
+    direction is not stated. 'Stationary' in recording 4 presumably means resting on the
+    floor (not stated).

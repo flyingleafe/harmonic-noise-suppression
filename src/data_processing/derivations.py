@@ -1445,6 +1445,14 @@ def generate_se_valid(gen: dict[str, Any]) -> Iterator[Sample]:
 
 # ─── Spec registry ────────────────────────────────────────────────────────────
 #
+def _spcup19_annotations_sha256() -> str:
+    """Identity of the SPCUP19 per-team annotations (``sources/spcup19_meta``):
+    editing a tag or a geometry mints a new ``SPCUP19-frames`` derivation."""
+    from data_processing.sources.spcup19 import annotations_digest
+
+    return annotations_digest()
+
+
 def _refined_label_identity(source: str) -> dict[str, Any]:
     """Exact identity of the refined-label inputs, for the fingerprint.
 
@@ -1862,21 +1870,26 @@ SPECS: dict[str, dict[str, Any]] = {
         "generator": "source_frames",
         "adopt_only": False,
         "note": "Derivable rebuild of SPCUP19-egonoise from the registry's pinned "
-        "http archives. Changed vs the historical pin: the ChuMS propeller-rig "
-        ".mat is parsed per run — one 8-mic Frame per TestResults.Test "
-        "(1/2/3 propellers x 3 repeats; calibrated Pa at the struct's Fs; mics "
-        "stacked start-aligned to the shortest; meta.operating n_propellers/"
-        "repeat/details, meta.mic_positions in mm). The pre-fix builder emits "
-        "278 frames (the pin's count), 216 of them ChuMS arrays read by a "
-        "generic struct walk: 72 Freq axes and 72 SPL spectra (0.5 s each at "
-        "44.1 kHz) plus 72 unlabelled single-mic tracks. Other teams' keys and "
-        "meta are unchanged; KumamoTech ships only ROS bags and is absent from "
-        "both. The historical pin stays: SE audio_pool policies, "
-        "noise-v2-bench-points and the noise-v2 scripts read it by name. "
-        "recipe_version 2 because version 1 IS the historical pin's recipe on "
-        "the same source: an identical gen would give both specs one "
-        "fingerprint (one derivation identity for two different byte sets).",
-        "gen": {"recipe_version": 2, "source": "SPCUP19-egonoise", "raw": {"kind": "download"}},
+        "http archives, every recording ANNOTATED from its team's technical report + "
+        "supplementary material (sources/spcup19_meta/<Team>.yaml; builder refuses "
+        "unannotated recordings): meta.operating condition (flight / bench / "
+        "bench_varying_speed / handheld / rotors_off), flight_mode, contains_rotor_noise, "
+        "n_active_rotors; meta.label.external_source; DREGON-style mic_pos (mic, 3) "
+        "and rotor_pos (rotor, 3) where derivable, with meta.geometry qualities and "
+        "channel-map evidence. recipe_version 3 (2026-10-01): KumamoTech decoded from "
+        "its ROS bags (16-ch HARK audio + position/attitude; data2 split at its "
+        "rotors-off tail); ChuMS re-read as 9 HOVER tests with 1/2/3 stacked "
+        "propellers per rotor and its two recorders re-aligned (per-test offsets "
+        "measured by GCC-PHAT). recipe_version 2 (SPCUP19-frames@7c1e7d2bde7d) was "
+        "the ChuMS per-run parse without annotations. The historical pin stays: SE "
+        "audio_pool policies, noise-v2-bench-points and the noise-v2 scripts read it "
+        "by name. gen.annotations_sha256 keys the identity on the annotation files.",
+        "gen": {
+            "recipe_version": 3,
+            "source": "SPCUP19-egonoise",
+            "raw": {"kind": "download"},
+            "annotations_sha256": _spcup19_annotations_sha256(),
+        },
     },
     "AVQ": {
         "generator": "source_frames",

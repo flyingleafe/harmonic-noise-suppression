@@ -1,0 +1,155 @@
+team: Idea_ssu
+report: "SPCUP19_Idea!_ssu_documentation.pdf"
+supplementary:
+  - "dataset page /tmp/spcup_page.txt (Team Idea!_ssu entry) + its drone photo SPCUP19_idea_ssu_drone.jpg (= report Fig. 1b)"
+  - "DJI Phantom 4 spec sheet, https://www.dji.com/support/product/phantom-4 (diagonal size 350 mm)"
+  - "Idea_ssu/*.wav (spectral/level checks, see recording sources)"
+summary: >-
+  Soongsil University recorded the ego-noise of a DJI Phantom 4 quadrotor with a single
+  AUDIOTRAK ATM-520p condenser microphone taped to the bottom of the drone's landing
+  stand, through a Nexi NX-USOUND2 USB sound card into a MacBook (16 bit, 44.1 kHz),
+  indoors in a large low-reflection hall. Seven 65 s recordings cover five flight
+  states: hovering ('stationary'), yaw spinning clockwise/counter-clockwise at constant
+  height, vertical up/down movement and free flight. No external sound source was used.
+drone:
+  make_model: "DJI Phantom 4 (report writes 'PANTHOM 4 GL300C'; GL300C is the Phantom 4 remote-controller model)"
+  n_rotors: 4
+  source: "report p.1 Table 1 + §3 ('DJI Phantom4 GL300C'), p.2 Fig. 1 (four propellers visible); dataset page 'Quadrotor UAV (Phantom 4 GL300C from DJI)'"
+frame:
+  description: >-
+    origin = centre of the four motor hubs in the rotor plane, x = forward (camera
+    direction), y = left, z = up; metres (right-handed)
+  source: "chosen by annotator; Phantom 4 is an X-configuration quad with the camera between the two front arms (report Fig. 1b / dataset-page photo)"
+geometry:
+  phantom4_mono:
+    mic_pos: [[0.0, 0.0, -0.15]]
+    mic_pos_quality: estimated
+    channel_map_source: "single-channel recordings (1 ch in every file); the only microphone is channel 0"
+    rotor_pos:
+      - [0.1237, 0.1237, 0.0]
+      - [-0.1237, 0.1237, 0.0]
+      - [-0.1237, -0.1237, 0.0]
+      - [0.1237, -0.1237, 0.0]
+    rotor_pos_quality: derived
+    source: >-
+      mic: report §2 p.1 ('The microphone is attached to the bottom of the UAV stand using
+      adhesive tape') and Fig. 1a p.2 (windscreened mic hanging on its cable centred between
+      the landing legs, just below the gimbal, at roughly skid level); z from the Phantom 4
+      overall height of ~0.19-0.196 m without props (DJI/third-party specs) minus a few cm
+      mic clearance above the skids. rotors: DJI Phantom 4 spec 'Diagonal Size (Propellers
+      Excluded) 350 mm' -> hubs at 0.175 m radius, 45 deg off the x axis (X layout).
+    notes: >-
+      mic_pos is an estimate (+-0.05 m in every axis): the report gives no numbers, the mic
+      hangs on a cable so it may swing in flight. Rotor ordering is front-left, rear-left,
+      rear-right, front-right (no motor numbering given by the team).
+recordings:
+  - key: Idea_ssu__free_flight_1
+    raw: "Idea_ssu/free_flight_1.wav"
+    geometry: phantom4_mono
+    condition: flight
+    flight_mode: manoeuvre
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0]
+    description: >-
+      Free flight ('the motor and propeller noise are recorded when flying freely'), indoor,
+      65 s. The first ~4 s are 15-25 dB quieter (motor spin-up / take-off), afterwards a
+      steady ~-17 dBFS rotor noise level.
+    source: "report p.3 Table 2 ('Free Flight: free_flight_1 free_flight_2') and §5 text; per-second RMS measured on the wav (-43 dB at 0 s rising to -17 dB by ~5 s)"
+    confidence: high
+  - key: Idea_ssu__free_flight_2
+    raw: "Idea_ssu/free_flight_2.wav"
+    geometry: phantom4_mono
+    condition: flight
+    flight_mode: manoeuvre
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0]
+    description: "Second free-flight take, indoor, 65 s; first ~2 s quieter (spin-up / take-off)."
+    source: "report p.3 Table 2 and §5; per-second RMS measured on the wav (-33 dB at 0 s, steady -17 dB from ~2 s)"
+    confidence: high
+  - key: Idea_ssu__spinng_left_1
+    raw: "Idea_ssu/spinng_left_1.wav"
+    geometry: phantom4_mono
+    condition: flight
+    flight_mode: manoeuvre
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0]
+    description: >-
+      Spinning counter-clockwise (yaw rotation) while the height is kept constant; indoor,
+      65 s; first ~2 s quieter (spin-up / take-off).
+    source: "report p.3 Table 2 ('Counterclockwise: spinning_left_1') and §5 ('In the spinning state, height is kept constantly and rotation is only possible'); per-second RMS measured"
+    confidence: high
+  - key: Idea_ssu__spinng_right_1
+    raw: "Idea_ssu/spinng_right_1.wav"
+    geometry: phantom4_mono
+    condition: flight
+    flight_mode: manoeuvre
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0]
+    description: >-
+      Spinning clockwise (yaw rotation) at constant height; indoor, 65 s; first ~2 s
+      quieter (spin-up / take-off).
+    source: "report p.3 Table 2 ('Clockwise: spinning_right_1') and §5; per-second RMS measured"
+    confidence: high
+  - key: Idea_ssu__stationary_1
+    raw: "Idea_ssu/stationary_1.wav"
+    geometry: phantom4_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "harmonic spacing 184 Hz (report reads it as 184 turns/s motor speed)"
+    channels_used: [0]
+    description: >-
+      'stationary' = airborne hovering (not on the ground): Table 2 lists stationary_1/2
+      under 'Hovering', and §5 says 'In the hovering state, only the sound of motors and
+      propellers is recorded'. Indoor, 65 s; the first ~5 s contain the motor start-up
+      (quiet, sweeping harmonics) before the steady hover comb.
+    source: >-
+      report p.3 Table 2 + §5 + Fig. 4 (power spectrum of stationary_1.wav, harmonics every
+      184 Hz); verified: 1 Hz-resolution Welch harmonic-comb search on the wav gives
+      f0 = 184.0 Hz (strongest comb of all Idea files); spectrogram shows spin-up in 0-5 s
+    confidence: high
+  - key: Idea_ssu__stationary_2
+    raw: "Idea_ssu/stationary_2.wav"
+    geometry: phantom4_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0]
+    description: "Second hovering take ('stationary' = hovering per Table 2); indoor, 65 s; first ~3 s quieter (spin-up / take-off)."
+    source: "report p.3 Table 2 ('Hovering: stationary_1 stationary_2') and §5; per-second RMS measured (-41 dB at 0-1 s, steady -16 dB from ~3 s)"
+    confidence: high
+  - key: Idea_ssu__up_down_1
+    raw: "Idea_ssu/up_down_1.wav"
+    geometry: phantom4_mono
+    condition: flight
+    flight_mode: manoeuvre
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0]
+    description: "Up & down movement: only the height changes, other conditions fixed; indoor, 65 s."
+    source: "report p.3 Table 2 ('Up-down Movement: up_down_1') and §5; per-second RMS measured (steady -16/-17 dB after ~1 s)"
+    confidence: high
+open_questions:
+  - "Microphone position is not given numerically; mic_pos [0, 0, -0.15] m is an estimate from report Fig. 1a and the Phantom 4 overall height (~0.19 m). The mic hangs on its cable below the stand, so its position may swing during flight."
+  - "Every recording starts with a few seconds (2-5 s) of motor spin-up / take-off at lower level; the whole file is still tagged condition=flight. Consumers wanting pure steady-state segments should drop the first ~5 s."
+  - "Report calls the drone 'PANTHOM 4 GL300C'; GL300C is the DJI Phantom 4 remote-controller model [INFERENCE from DJI product naming], so the airframe is taken as a standard Phantom 4 (350 mm diagonal)."
+  - "The report interprets the 184 Hz harmonic spacing as 184 turns/s; with two-blade propellers the blade-passing frequency would be twice the shaft rate, so the shaft speed may be ~92 rev/s. Stored verbatim as harmonic spacing only."

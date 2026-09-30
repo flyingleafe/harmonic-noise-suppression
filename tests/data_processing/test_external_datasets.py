@@ -296,116 +296,141 @@ def test_build_kaist_reads_signal_struct(tmp_path):
     assert frame["meta"]["label"]["severity"] == "03"
 
 
-def test_build_spcup19_wav_team(tmp_path):
-    """SPCUP19 wav-shipping team → one frame per wav with drone/condition meta."""
+def test_spcup19_annotations_are_complete_and_pass_the_sanity_checks():
+    """The committed per-team annotations load and validate; every recording has
+    a condition; AGH's clean static set is rotors-off (its 'static corrupted'
+    set is the same stand with the rotors running, per report + xlsx)."""
+    docs = spcup19.load_annotations()
+    recs = {r["key"]: r for d in docs.values() for r in d["recordings"]}
+    assert all(r["condition"] in spcup19.CONDITIONS for r in recs.values())
+    agh_clean = [r for k, r in recs.items() if k.startswith("AGH__static_clean__")]
+    assert len(agh_clean) == 10
+    assert all(r["condition"] == "rotors_off" and r["n_active_rotors"] == 0 for r in agh_clean)
+    chums = [r for k, r in recs.items() if k.startswith("ChuMS__")]
+    assert len(chums) == 9 and all("recorder_align" in r for r in chums)
+
+
+def _one_team_doc(keys):
+    return {
+        "team": "Idea_ssu",
+        "report": "report.pdf",
+        "drone": {"make_model": "test quad", "n_rotors": 4},
+        "frame": {"description": "body frame, metres"},
+        "geometry": {
+            "pair": {
+                "mic_pos": [[0.1, 0.0, 0.0], [-0.1, 0.0, 0.0]],
+                "rotor_pos": [
+                    [0.2, 0.2, 0.1],
+                    [0.2, -0.2, 0.1],
+                    [-0.2, 0.2, 0.1],
+                    [-0.2, -0.2, 0.1],
+                ],
+                "mic_pos_quality": "reported",
+                "rotor_pos_quality": "estimated",
+            }
+        },
+        "recordings": [
+            {
+                "key": k,
+                "raw": "x.wav",
+                "geometry": "pair",
+                "condition": "bench",
+                "flight_mode": None,
+                "contains_rotor_noise": True,
+                "n_active_rotors": 4,
+                "external_source": "none",
+                "description": "test",
+                "source": "test",
+                "confidence": "high",
+            }
+            for k in keys
+        ],
+    }
+
+
+def test_build_spcup19_joins_every_recording_to_its_annotation(tmp_path, monkeypatch):
+    """A decoded recording gets its annotation's tags and DREGON-style
+    geometry (``mic_pos`` (mic, 3), row i = channel i; ``rotor_pos`` (rotor, 3))
+    through the publish codec; an unannotated file or an annotation without its
+    file fails the build instead of publishing untagged data."""
     team = tmp_path / "Idea_ssu"
     team.mkdir()
-    audio = (np.random.default_rng(0).standard_normal((44100, 1)) * 0.1).astype(np.float32)
-    sf.write(str(team / "free_flight_1.wav"), audio, 44100)
-    frames = dict(spcup19.build(tmp_path))
-    assert len(frames) == 1
-    frame = next(iter(frames.values()))
-    assert frame["audio"].dims == ("time",)
-    assert int(frame["audio"].tindex.sr) == 44100
-    assert frame["meta"]["system"]["make_model"].startswith("DJI Phantom 4")
-    assert frame["meta"]["system"]["team"] == "Idea_ssu"
-    assert frame["meta"]["operating"]["condition"] == "free_flight"
-
-
-def _write_chums_mat(path, runs, *, fs=16000, n_spec=9000):
-    """A ChuMS-shaped ``UAV_rotor_recordings.mat``: ``TestResults.Test(k)`` runs
-    of 8 per-mic ``Data`` structs (raw audio of UNEQUAL lengths + a spectrum
-    long enough to pass for audio), ``MicPositions`` 8×2 mm."""
-    from scipy.io import savemat
-
-    rng = np.random.default_rng(1)
-    mic_fields = [(f, object) for f in ("Fs", "Freq", "SPL", "OASPL", "RawTruncatedCalibrated")]
-    tests = np.zeros((1, len(runs)), dtype=[("Details", object), ("Data", object)])
-    sigs = []
-    for i, (details, lengths) in enumerate(runs):
-        data = np.zeros((1, 8), dtype=mic_fields)
-        run_sigs = [rng.standard_normal(n) * 0.5 for n in lengths]
-        for j, sig in enumerate(run_sigs):
-            freq = np.arange(n_spec, dtype=np.uint16)
-            data[0, j] = (float(fs), freq, rng.standard_normal(n_spec), 90.0 + j, sig)
-        tests[0, i] = (details, data)
-        sigs.append(run_sigs)
-    mic_mm = np.array(
-        [[1020, -290], [1030, -180], [1040, -50], [1030, 20],
-         [1020, 140], [800, -50], [550, -50], [0, -50]],
-        dtype=np.int16,
-    )  # fmt: skip
-    savemat(str(path), {"TestResults": {"Test": tests, "MicPositions": mic_mm}})
-    return sigs, mic_mm
-
-
-def test_build_spcup19_chums_one_frame_per_run(tmp_path):
-    """ChuMS propeller rig → one 8-mic Frame per ``Test`` run (never the
-    per-mic ``Freq``/``SPL`` spectra), mics truncated start-aligned to the
-    shortest, run labels parsed from ``Details``, geometry in mm."""
-    team = tmp_path / "ChuMS"
-    team.mkdir()
-    runs = [
-        ("2 propellers. Repeat:1", [12000, 11000, 12000, 11500, 12000, 12000, 12000, 12000]),
-        ("3 propellers. Repeat:2", [10000] * 8),
-    ]
-    sigs, mic_mm = _write_chums_mat(team / "UAV_rotor_recordings.mat", runs)
-    frames = dict(spcup19.build(tmp_path))
-    assert sorted(frames) == [
-        "ChuMS__UAV_rotor_recordings__2prop_repeat1",
-        "ChuMS__UAV_rotor_recordings__3prop_repeat2",
-    ]
-    frame = frames["ChuMS__UAV_rotor_recordings__2prop_repeat1"]
-    audio = frame["audio"]
-    assert audio.dims == ("mic", "time")
-    assert audio.shape == (8, 11000)  # the shortest mic
-    assert int(audio.tindex.sr) == 16000  # Fs from the struct
-    np.testing.assert_allclose(np.asarray(audio.data)[1], sigs[0][1].astype(np.float32))
-    np.testing.assert_allclose(np.asarray(audio.data)[0], sigs[0][0][:11000].astype(np.float32))
+    sf.write(str(team / "hover_1.wav"), np.zeros((4410, 2), dtype=np.float32), 44100)
+    monkeypatch.setattr(spcup19, "_DOWNLOAD_IDS", {"Idea_ssu": 393})
+    monkeypatch.setattr(
+        spcup19, "load_annotations", lambda: {"Idea_ssu": _one_team_doc(["Idea_ssu__hover_1"])}
+    )
+    ((key, frame),) = list(spcup19.build(tmp_path))
+    frame = streams.sample_to_frame(streams.frame_to_sample(frame))
+    assert key == "Idea_ssu__hover_1"
+    assert frame["mic_pos"].dims == ("mic", None) and np.asarray(frame["mic_pos"].data).shape == (
+        2,
+        3,
+    )
+    assert np.asarray(frame["rotor_pos"].data).shape == (4, 3)
     meta = frame["meta"]
-    assert meta["recording_id"] == "ChuMS__UAV_rotor_recordings__2prop_repeat1"
-    assert meta["system"]["team"] == "ChuMS"
-    assert meta["operating"]["condition"] == "propeller_rig"
-    assert meta["operating"]["n_propellers"] == 2
-    assert meta["operating"]["repeat"] == 1
-    assert meta["operating"]["details"] == "2 propellers. Repeat:1"
-    assert meta["observation"]["type"] == "fixed_array_bench"
-    assert np.asarray(meta["mic_positions"]).tolist() == mic_mm.tolist()
-    assert meta["mic_positions_unit"] == "mm"
-    assert list(meta["mic_n_samples"]) == runs[0][1]
-    assert list(meta["oaspl_db"]) == [90.0 + j for j in range(8)]
+    assert meta["operating"]["condition"] == "bench"
+    assert meta["operating"]["n_active_rotors"] == 4
+    assert meta["geometry"]["config"] == "pair"
 
-
-def test_build_spcup19_chums_rejects_unlabelled_runs(tmp_path):
-    """A ``Details`` string that does not name the propeller count/repeat is a
-    layout change: fail the build instead of publishing unlabelled arrays."""
-    team = tmp_path / "ChuMS"
-    team.mkdir()
-    _write_chums_mat(team / "UAV_rotor_recordings.mat", [("calibration tone", [10000] * 8)])
-    with pytest.raises(ValueError, match="Details"):
+    sf.write(str(team / "extra.wav"), np.zeros((4410, 2), dtype=np.float32), 44100)
+    with pytest.raises(ValueError, match="no annotation"):
+        list(spcup19.build(tmp_path))
+    (team / "extra.wav").unlink()
+    monkeypatch.setattr(
+        spcup19,
+        "load_annotations",
+        lambda: {"Idea_ssu": _one_team_doc(["Idea_ssu__hover_1", "Idea_ssu__gone"])},
+    )
+    with pytest.raises(ValueError, match="annotated but not found"):
         list(spcup19.build(tmp_path))
 
 
-def test_build_spcup19_wav_nested_subdirs_unique_keys(tmp_path):
-    """AGH-shaped layout: scenario subdirs reuse bare-integer stems
-    (``static clean/1.wav``, ``ego-noise/single rotors/1.wav``). Keys must be
-    unique (derived from the team-relative path) and the subdir must feed the
-    condition — regression for the ``AGH__1`` duplicate-key publish abort."""
-    team = tmp_path / "AGH"
-    subdirs = ["static clean", "static corrupted", "calibration", "ego-noise/single rotors"]
-    audio = np.zeros((16000, 8), dtype=np.float32)
-    for sd in subdirs:
-        d = team / sd
-        d.mkdir(parents=True)
-        for i in (0, 1):
-            sf.write(str(d / f"{i}.wav"), audio, 16000)
-    frames = list(spcup19.build(tmp_path))
-    keys = [k for k, _ in frames]
-    assert len(keys) == len(subdirs) * 2 == 8
-    assert len(set(keys)) == len(keys)  # no collisions
-    assert "AGH__static_clean__0" in keys
-    conds = {f["meta"]["operating"]["condition"] for _, f in frames if "operating" in f["meta"]}
-    assert {"stationary", "calibration", "single_rotor"} <= conds
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("condition", "hovering"),
+        ("n_active_rotors", 0),
+        ("flight_mode", "hover"),
+        ("geometry", "nope"),
+    ],
+)
+def test_spcup19_annotation_validation_rejects_inconsistent_tags(field, value):
+    """Vocabulary and cross-field rules: a bench recording cannot have 0 active
+    rotors or a flight mode, and geometry must name a defined config."""
+    doc = _one_team_doc(["Idea_ssu__a"])
+    doc["recordings"][0][field] = value
+    with pytest.raises(ValueError):
+        spcup19.validate_team(doc)
+
+
+@pytest.mark.parametrize("k", [5, -7])
+def test_spcup19_align_recorders_undoes_the_two_recorder_offset(k: int) -> None:
+    """``B[n+K] ≈ A[n]``: after alignment every channel carries the same samples."""
+    base = np.random.default_rng(0).standard_normal(size=200).astype(np.float32)
+    lead = np.random.default_rng(1).standard_normal(size=abs(k)).astype(np.float32)
+    a = base if k > 0 else np.concatenate([lead, base])
+    b = np.concatenate([lead, base]) if k > 0 else base
+    out = spcup19._align_recorders(
+        [a, b, a, b], {"group_a": [0, 2], "group_b": [1, 3], "k_samples": k}
+    )
+    np.testing.assert_array_equal(out, np.stack([base] * 4))
+
+
+def test_spcup19_chums_rejects_unlabelled_runs(tmp_path):
+    """A ``Details`` string that does not name the propeller count/repeat is a
+    layout change: fail instead of publishing unlabelled arrays."""
+    from scipy.io import savemat
+
+    mic = np.zeros((1, 8), dtype=[(f, object) for f in ("Fs", "OASPL", "RawTruncatedCalibrated")])
+    for j in range(8):
+        mic[0, j] = (16000.0, 90.0, np.zeros(100))
+    tests = np.zeros((1, 1), dtype=[("Details", object), ("Data", object)])
+    tests[0, 0] = ("calibration tone", mic)
+    path = tmp_path / "UAV_rotor_recordings.mat"
+    savemat(str(path), {"TestResults": {"Test": tests, "MicPositions": np.zeros((8, 2))}})
+    with pytest.raises(ValueError, match="Details"):
+        list(spcup19._chums_runs(path))
 
 
 def test_spcup19_registered_with_http_download():

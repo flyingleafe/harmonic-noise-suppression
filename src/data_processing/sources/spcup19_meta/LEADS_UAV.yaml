@@ -1,0 +1,283 @@
+team: LEADS_UAV
+report: "SPCUP19_LEADS_UAV_documentation.pdf"
+supplementary:
+  - "LEADS_UAV/datasets.docx (Table I: elevation/azimuth per file; read from word/document.xml)"
+  - "LEADS_UAV/plot_structure.m (drone + microphone geometry)"
+  - "LEADS_UAV/LEADS_UAV_pictures/LEADS_UAV_pic1.jpg .. pic4.jpg (pic1 = drone with mic boom hovering, pic2 = lawn site, pic3 = pic4 byte-identical = speaker standing under hovering drone)"
+  - "dataset page /tmp/spcup_page.txt (Team LEADS_UAV entry)"
+  - "LEADS_UAV/data/*.wav (spectral checks)"
+summary: >-
+  Southeast University recorded a hovering DJI Phantom 3 Advanced quadrotor outdoors on an
+  open lawn with one microphone mounted on a rod 0.12 m below the bottom of the landing
+  bracket (44.1 kHz, single channel). Ten ~10 s recordings (1.wav-10.wav) contain a team
+  member speaking from a fixed position on the ground at the elevation/azimuth listed in
+  datasets.docx; motor_recording.wav is a 10 s ego-noise-only recording in hover without
+  the source.
+drone:
+  make_model: "DJI Phantom 3 Advanced"
+  n_rotors: 4
+  source: "report §2 p.1 ('A quadrotor UAV Phantom 3 Advanced ... equipped with four 2312A motors'); dataset page"
+frame:
+  description: >-
+    plot_structure.m frame: origin = centroid of the box formed by the landing bracket
+    (vertices +-0.0775, +-0.075, +-0.0525 m), x = drone forward, z = up; metres. The report
+    calls it a left-hand system (y to the right, azimuth positive clockwise seen from above);
+    the positions below are symmetric under y -> -y, so they are equally valid in the
+    right-handed (y = left) convention used by DREGON.
+  source: "report §2 p.1 (coordinate-system paragraph) + Fig. 2 p.2; plot_structure.m (vertex_array, micPos, drone_core, rotorsPos)"
+geometry:
+  phantom3_mono:
+    mic_pos: [[0.0, 0.0, -0.1725]]
+    mic_pos_quality: reported
+    channel_map_source: "single-channel recordings; the only microphone is channel 0 (plot_structure.m labels it '0')"
+    rotor_pos:
+      - [-0.1237, 0.1237, 0.1405]
+      - [-0.1237, -0.1237, 0.1405]
+      - [0.1237, -0.1237, 0.1405]
+      - [0.1237, 0.1237, 0.1405]
+    rotor_pos_quality: reported
+    source: >-
+      plot_structure.m: micPos = [0 0 -0.1725]; rotorsPos(i) = [r cosd(a+90), r sind(a+90),
+      drone_core(end,3)] + offset with r = 0.350/2, a = 45:90:359, offset = (0, 0, 0),
+      drone_core(end,3) = 0.1405 -> rows above (rotor numbering 1-4 as in the .m and Fig. 2).
+      Consistent with report §2: mic 0.12 m below the bottom of the drone (bracket bottom
+      z = -0.0525), symmetric rotor wheelbase 0.35 m.
+    notes: >-
+      Rotors are placed at the top face of the modelled 'drone core' box, which is the
+      team's approximation of the propeller plane. The mic sits on a rigid rod (pic1), on
+      the vertical axis through the body centre.
+recordings:
+  - key: LEADS_UAV__data__1
+    raw: "LEADS_UAV/data/1.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation -17 deg, azimuth 82 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '1.wav' (Elevation -17 deg,
+      Azimuth(Overlooking clockwise) 82 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__10
+    raw: "LEADS_UAV/data/10.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation -12 deg, azimuth 47 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '10.wav' (Elevation -12 deg,
+      Azimuth(Overlooking clockwise) 47 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__2
+    raw: "LEADS_UAV/data/2.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation -9 deg, azimuth 5 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '2.wav' (Elevation -9 deg,
+      Azimuth(Overlooking clockwise) 5 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__3
+    raw: "LEADS_UAV/data/3.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation -5 deg, azimuth 35 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '3.wav' (Elevation -5 deg,
+      Azimuth(Overlooking clockwise) 35 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__4
+    raw: "LEADS_UAV/data/4.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation -17 deg, azimuth 140 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '4.wav' (Elevation -17 deg,
+      Azimuth(Overlooking clockwise) 140 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__5
+    raw: "LEADS_UAV/data/5.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation -27 deg, azimuth 3 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '5.wav' (Elevation -27 deg,
+      Azimuth(Overlooking clockwise) 3 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__6
+    raw: "LEADS_UAV/data/6.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation -32 deg, azimuth 62 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '6.wav' (Elevation -32 deg,
+      Azimuth(Overlooking clockwise) 62 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__7
+    raw: "LEADS_UAV/data/7.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation -6 deg, azimuth -140 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '7.wav' (Elevation -6 deg,
+      Azimuth(Overlooking clockwise) -140 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__8
+    raw: "LEADS_UAV/data/8.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation 8 deg, azimuth -92 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '8.wav' (Elevation 8 deg,
+      Azimuth(Overlooking clockwise) -92 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__9
+    raw: "LEADS_UAV/data/9.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: speech
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Outdoor (open lawn), drone hovering under program control; a team member standing
+      still on the ground speaks ('variant speech') as a single static source. Source
+      direction relative to the drone: elevation 7 deg, azimuth -28 deg (azimuth measured
+      clockwise from the drone x/forward axis seen from above; elevation positive when the
+      source is above the drone). ~10 s, 44.1 kHz.
+    source: >-
+      report §4 p.2 and Fig. 4; datasets.docx Table I row '9.wav' (Elevation 7 deg,
+      Azimuth(Overlooking clockwise) -28 deg); azimuth/elevation definition report §2 p.1;
+      verified: median-whitened spectrogram (200-3500 Hz) shows transient formant/pitch events over the stationary rotor harmonics, absent in motor_recording.wav
+    confidence: high
+  - key: LEADS_UAV__data__motor_recording
+    raw: "LEADS_UAV/data/motor_recording.wav"
+    geometry: phantom3_mono
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "hover; report: propeller rate at hover up to 130 turns/s"
+    channels_used: [0]
+    description: >-
+      Ego-noise only: 10 s recording of the drone hovering outdoors without the speech
+      source ('To analyze the ego-noise of drone, an individual recording was performed
+      without the sound source').
+    source: >-
+      report §1 p.1 ('a 10-second audio file to record the ego-noise of UAV in hover, which
+      was named motor_recording.wav') and §4 p.2; verified: whitened spectrogram shows only
+      stationary rotor harmonics, no speech events
+    confidence: high
+open_questions:
+  - "Report says a left-hand coordinate system (x forward, z up); plot_structure.m draws it with MATLAB's right-handed axes. Because the mic is on the z axis and the rotors are placed symmetrically, the position sets are unchanged; only the individual rotor labels 1-4 swap between left and right."
+  - "Rotor z (0.1405 m) is the top of the team's schematic 'drone core' box, not a measured hub height."
+  - "Source distance/height is not given (only elevation/azimuth in datasets.docx); the hover height was read from the DJI app but not reported."
+  - "Speech content/talker identity and SNR are not documented; 'variant speech' only."

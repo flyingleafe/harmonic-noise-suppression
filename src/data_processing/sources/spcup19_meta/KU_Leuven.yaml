@@ -1,0 +1,130 @@
+team: KU_Leuven
+report: "SPCUP19_KU_Leuven_documentation.pdf"
+supplementary:
+  - "KU_Leuven/SPCUP19_KU_Leuven_Team_1_array_drone.xml (MicArray 'array_SPAI', 8 <pos> points, metres)"
+  - "KU_Leuven/SPCUP19_KU_Leuven_Team_2_array_drone.xml (byte-for-byte the same 8 points as Team 1)"
+  - "report figures 1-4 rendered to PNG (pdftoppm) + Fig. 1 extracted at native 1379x1034 (pdfimages) for photogrammetry"
+  - "dataset page /tmp/spcup_page.txt ('KU Leuven Team 1 & Team 2', MK EASY Quadro V3, 8 channels)"
+  - "MK EASY Quadro V3 user manual (MikroKopter, riggers 289 mm; no motor-to-motor distance given)"
+  - "KU_Leuven/SPCUP19_KU_Leuven_Team_{1,2}_recording.wav (per-channel RMS, spectrograms, GCC-PHAT)"
+summary: >-
+  Two KU Leuven student teams shared one setup: a MikroKopter MK EASY Quadro V3 (four
+  MK3640/34 motors) carrying a 16SoundsUSB sound card and an 8-mic MEMS array on a 3D-printed
+  cube hung 19 cm below the motor plane. Each team submitted one short (16.7 s / 19.0 s)
+  8-channel 44.1 kHz recording made indoors in a medium-sized room with the drone static,
+  "held approximately half a metre above the floor". In both files the four motors spin up
+  from standstill, run at a steady speed, and spin down. Channel 7 (1-based; index 6) is
+  digital silence because that microphone was faulty.
+drone:
+  make_model: "MikroKopter MK EASY Quadro V3, 4x MK3640/34 motors"
+  n_rotors: 4
+  source: "report p.1 'The UAV' ('MK EASY Quadro V3 with four MK3640/34 motors'); dataset page"
+frame:
+  description: >-
+    The frame of the team's XML: origin = centre of the cubic mic array, x/y = the XML axes
+    (normal to the cube's side faces), z = along the drone's vertical axis, assumed up (the
+    report only says the array centre is "19cm vertically under the X-Y plane on which the
+    motors lie"; it never says which way z points). Metres. Which horizontal axis points to
+    the front (red) rigger is not documented.
+  source: "report p.2 'Microphone array'; SPCUP19_KU_Leuven_Team_1_array_drone.xml"
+geometry:
+  kul_cube8:
+    mic_pos:
+      - [-0.0345, -0.0595, -0.0345]
+      - [0.0345, -0.0595, 0.0345]
+      - [0.0595, -0.0345, -0.0345]
+      - [0.0595, 0.0345, 0.0345]
+      - [0.0345, 0.0595, -0.0345]
+      - [-0.0345, 0.0595, 0.0345]
+      - [-0.0595, 0.0345, -0.0345]
+      - [-0.0595, -0.0345, 0.0345]
+    mic_pos_quality: reported
+    channel_map_source: >-
+      Assumption: XML 'Point k' is wav channel k-1. Neither the report nor the XML states a
+      mapping explicitly. The only check is that the report's "channel 7 is an empty signal"
+      (1-based) matches wav index 6, which is all zeros in both files (RMS 0, max 0), so the
+      report and the XML both use 1-based numbering in wav order.
+    rotor_pos:
+      - [0.233, 0.233, 0.19]
+      - [-0.233, 0.233, 0.19]
+      - [-0.233, -0.233, 0.19]
+      - [0.233, -0.233, 0.19]
+    rotor_pos_quality: estimated
+    source: >-
+      mics: XML Point 1..8 (same values in the Team 1 and Team 2 files). Rotor z = +0.19 m:
+      report p.2 ('The centre of the array lies 19cm vertically under de X-Y plane on which
+      the motors lie'). Rotor azimuths: in report Figs. 1 and 2 a cube face points straight
+      at the camera while the camera looks between two adjacent riggers, so the arms run
+      along the cube diagonals (+-45 deg from the x/y axes). Rotor radius ~0.33 m from
+      photogrammetry on Fig. 1 (native 1379 px image). Front motor hubs are 1025 px apart and
+      rear hubs 556 px apart, giving camera distance ~3.4x the half-spacing. The cube's
+      front-face mics are 0.069 m apart horizontally (XML) and 107 px apart in the photo,
+      which sets the scale. Correcting for the ~0.19 m lower cube and the camera tilt gives
+      R = 0.32-0.35 m, so hub = (+-R/sqrt2, +-R/sqrt2) = (+-0.233, +-0.233).
+    notes: >-
+      A 2x4 layout: each side face of a 0.119 m cube holds two mics on a diagonal (z =
+      +-0.0345), and the layout is C4-symmetric about z. Rotor rows are listed by quadrant
+      (+,+), (-,+), (-,-), (+,-). Which physical motor (front/red, left, rear, right) sits in
+      which quadrant is unknown. Because the rotor set is symmetric under 90-degree turns
+      about z, only the +-45-degree arm placement and R affect the geometry. The rigger length
+      (289 mm, manual) is consistent with R ~0.33 m once the centre-plate mount offset is
+      added. Rotor positions carry roughly +-3 cm uncertainty. Channel 6 (0-based) is a dead
+      microphone: its row is geometrically valid but the audio is zeros.
+recordings:
+  - key: KU_Leuven__SPCUP19_KU_Leuven_Team_1_recording
+    raw: "KU_Leuven/SPCUP19_KU_Leuven_Team_1_recording.wav"
+    geometry: kul_cube8
+    condition: bench
+    flight_mode: null
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0, 1, 2, 3, 4, 5, 7]
+    description: >-
+      Team 1's indoor ego-noise take: 16.65 s, 8 ch, 44.1 kHz, with the drone static and held
+      ~0.5 m above the floor. Motors spin up from standstill at ~0.3-1.3 s (one motor ramps
+      ~0.6 s later than the others), then hold a steady plateau. The dominant tonal lines sit
+      at ~205-240 Hz (separate per-motor lines, median peak 215 Hz) with harmonics up to
+      several kHz. The motors spin down to standstill at ~15.8-16.4 s. The speed was not
+      reported; the Hz figures are measured. Channel index 6 is all zeros (dead mic), so the
+      file carries 7 usable channels.
+    source: >-
+      report p.3 'Recordings' ('The drone remained static and was held approximately half a
+      metre above the floor'), p.1 note on channel 7. Spectrogram of ch0 (nperseg 4096/8192)
+      shows the spin-up, plateau and spin-down; the motors reach standstill inside the file,
+      which is incompatible with a hover 0.5 m off the floor. Per-channel RMS shows ch6 = 0.
+    confidence: medium
+  - key: KU_Leuven__SPCUP19_KU_Leuven_Team_2_recording
+    raw: "KU_Leuven/SPCUP19_KU_Leuven_Team_2_recording.wav"
+    geometry: kul_cube8
+    condition: bench
+    flight_mode: null
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0, 1, 2, 3, 4, 5, 7]
+    description: >-
+      Team 2's take with the same drone, array and room: 19.03 s, 8 ch, 44.1 kHz. Motors spin
+      up at ~0.2-0.7 s, hold a steady plateau (dominant lines ~205-225 Hz, median peak 205
+      Hz), and spin down at ~18.6-19.0 s. Short broadband low-frequency impulses (<~1.5 kHz)
+      occur at ~1.4, 6.5, 8.4, 13.6 and 15.2 s. They are probably handling or mechanical
+      knocks: they are not described in the report, show no speech or tonal structure, and
+      the loudest (8.4 s) is ~6 dB above the rotor-noise RMS. Channel index 6 is all zeros
+      (dead mic).
+    source: >-
+      report p.3 'Recordings' and p.1 note on channel 7 (report shared with Team 2, p.1
+      'identical to the data collection report submitted by KU Leuven Team 2 ... recordings
+      are however different'). Spectrogram / 50 ms RMS envelope of ch0; per-channel RMS
+      shows ch6 = 0.
+    confidence: medium
+open_questions:
+  - "Bench vs flight: the report says only that the drone 'remained static and was held approximately half a metre above the floor' (by hand or by a support; not stated). Tagged 'bench' because the motors ramp from and back to standstill inside each 17-19 s file, and a quad cannot do that while airborne 0.5 m up. Fig. 4, however, shows the drone standing on its landing legs on the floor, so the exact support is unclear."
+  - "n_active_rotors = 4 comes from the report (four motors, none said to be off) plus several distinct per-motor tonal lines ramping up together. The spectrogram cannot resolve the count to exactly four."
+  - "Channel -> XML point mapping is assumed (Point k = channel k-1). It is supported only by the '1-based channel 7 = index 6 = empty' agreement."
+  - "Array chirality: viewed from outside, each cube face in the photos (Figs. 1 and 2) has its two mics upper-left / lower-right. The XML points read in a right-handed frame, with either z up or z down, predict lower-left / upper-right. So the XML may be a mirror image of the physical array (e.g. z_up = -z_xml), or its point numbering does not match the photographed build. An attempt to settle this with GCC-PHAT on the rotor noise failed: every inter-channel lag peaks at 0 samples, which suggests zero-lag coherent (electrical or structural) interference dominates the whitened cross-spectrum. mic_pos is published as the XML states."
+  - "Horizontal orientation of the XML axes relative to the drone's front (red rigger) is undocumented; rotor rows are therefore quadrant-ordered, not motor-identified."
+  - "Rotor radius (~0.33 m) is a photogrammetric estimate; MikroKopter documents only the 289 mm rigger length, not the motor-to-motor distance."
+  - "Rotor speed/throttle is not reported; the recordings include ~0.5-1 s spin-up and spin-down transients at the file edges. The integrator may want to trim them if 'bench' must mean constant speed throughout."
+  - "Team 2 contains unexplained impulsive events (~1.4, 6.5, 8.4, 13.6, 15.2 s)."

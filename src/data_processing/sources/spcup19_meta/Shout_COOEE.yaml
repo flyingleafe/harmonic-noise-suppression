@@ -1,0 +1,107 @@
+# SPCUP19 ego-noise — team Shout COOEE! (UNSW Sydney).
+team: Shout_COOEE
+report: "SPCUP19_Shout_COOEE!_documentation.pdf"
+supplementary:
+  - "Shout_COOEE/readme.txt"
+  - "Shout_COOEE/extract_pos.m"
+  - "Shout_COOEE/2019-02-04-15-53-42.bag (topic inventory + /mavros/state, /mavros/extended_state, /mavros/statustext/recv, /mavros/mocap/pose, /mavros/rc/out, /audio_sync)"
+  - "Shout_COOEE/SPCUP19_Shout COOEE_StaticSubmission1.wav"
+  - "Shout_COOEE/SPCUP19_Shout COOEE_StaticSubmission2.wav"
+  - "Shout_COOEE/Dynamic_Flight_Video.mp4 (container metadata only)"
+  - "https://dregon.inria.fr/SPCup2019/micPos.txt (report ref. [10]; byte-identical matrix to data/DREGON/micPos.txt)"
+  - "/tmp/spcup_page.txt (dataset page: Intel Aero Ready-To-Fly Drone, 8 channels)"
+summary: >-
+  An Intel Aero Ready-To-Fly quadcopter with an 8-microphone array (Freetronics modules on a
+  3D-printed holder copying the SPCup2019 micPos.txt geometry) under its belly, recorded by a
+  NI 9171/9220 DAQ in MATLAB and written to 44.1 kHz wav after per-channel normalisation. The
+  submitted "static" recordings are indoor (curtained lab), manually piloted take-off, ~70 s
+  hover and landing with no deliberate external source. The ROS bag, extract_pos.m and the
+  video belong to a separate, unpublished dynamic flight with a speech loudspeaker.
+drone:
+  make_model: "Intel Aero Ready-To-Fly Drone (quadcopter, PX4)"
+  n_rotors: 4
+  source: "report §I.A component list + Fig. 5; dataset page"
+frame:
+  description: >-
+    ARRAY frame of the SPCup2019 micPos.txt: origin = array centre, x/y/z axes exactly as in
+    micPos.txt (z up as in DREGON, where rotorsPos z > 0); metres. Orientation and offset of the
+    holder relative to the Intel Aero airframe are not given. DREGON-frames publishes the same
+    matrix with x and y negated (dregon._correct_mic_frame, a DREGON-rig-specific fix against
+    DREGON's rotorsPos); that flip is NOT applied here.
+  source: "report p.1 §II ('design was based off of the array geometry provided to the team in micPos.txt [10]') + ref. [10]"
+geometry:
+  spcup_micpos_cube:
+    mic_pos:
+      - [0.0420, 0.0615, -0.0410]
+      - [-0.0420, 0.0615, 0.0410]
+      - [-0.0615, 0.0420, -0.0410]
+      - [-0.0615, -0.0420, 0.0410]
+      - [-0.0420, -0.0615, -0.0410]
+      - [0.0420, -0.0615, 0.0410]
+      - [0.0615, -0.0420, -0.0410]
+      - [0.0615, 0.0420, 0.0410]
+    mic_pos_quality: reported
+    channel_map_source: >-
+      ASSUMPTION: wav channel i = micPos.txt 'mic i+1'. The report never states the wiring order
+      from the holder to the NI 9220 inputs. Checked, not confirmed: a plane-wave fit of the 28
+      GCC-PHAT pair lags (200-8000 Hz, hover 10-40 s and 40-70 s of both files) leaves 9.6-10.0
+      samples RMS for the micPos order, at the 30th-37th percentile of 2000 random channel
+      permutations (near-field rotor noise + heavy clipping make the test uninformative). The
+      aperture is consistent: the largest measured lag is 21.75 samples at 44.1 kHz vs 21.6 for
+      the largest micPos pair distance (0.168 m).
+    rotor_pos: null
+    rotor_pos_quality: unknown
+    source: "report p.1-2 §II, Figs. 2-3 (2x2x2 holder printed from micPos.txt); micPos.txt [10]"
+    notes: >-
+      The array is 'secured to the underside of the drone' (report p.1, Fig. 5 photo); its yaw and
+      vertical offset relative to the four rotors are not reported, so rotor_pos is null. The
+      printed holder follows the micPos coordinates by design; as-built deviations are unknown.
+recordings:
+  - key: Shout_COOEE__SPCUP19_Shout_COOEE_StaticSubmission1
+    raw: "Shout_COOEE/SPCUP19_Shout COOEE_StaticSubmission1.wav"
+    geometry: spcup_micpos_cube
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    description: >-
+      'Static' submission 1, 78.26 s, 8 ch, 44.1 kHz float wav: drone armed on a cushion, manual
+      take-off, hover in a fixed position, landing (report table: take-off 0-7 s, landing
+      1m13s-1m19s). Measured: motors idling on the ground 0-4.9 s (harmonic comb f0 = 33.9 Hz,
+      no broadband rotor noise), spin-up/take-off from 4.9 s, airborne hover until ~73.9 s,
+      touchdown with rotors idling/spinning down ~73.9-77.0 s, no idle comb detected in the last
+      ~1.2 s. No sound source other than the drone.
+    source: >-
+      report p.2-3 §III (static experiment, take-off/landing table); readme.txt; spectral check:
+      Welch 1.0-4.8 s peaks at 339/373/406/475/509 Hz = 10-15 x 33.9 Hz, broadband 100-2000 Hz
+      level -59 dB vs -39 dB in hover; 0.25 s level steps at 4.9-6 s and 73.9-77.3 s.
+    confidence: high
+  - key: Shout_COOEE__SPCUP19_Shout_COOEE_StaticSubmission2
+    raw: "Shout_COOEE/SPCUP19_Shout COOEE_StaticSubmission2.wav"
+    geometry: spcup_micpos_cube
+    condition: flight
+    flight_mode: hover
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: null
+    channels_used: [0, 1, 2, 3, 4, 5, 6, 7]
+    description: >-
+      'Static' submission 2, 85.94 s, 8 ch, 44.1 kHz float wav: same protocol (report table:
+      take-off 0-7 s, landing 1m19s-1m25s). Measured: motors idling on the ground 0-5.6 s (comb
+      f0 = 33.9 Hz: 67/136/203 Hz and 305-544 Hz = 9-16 x f0), spin-up/take-off from 5.6 s,
+      airborne hover until ~81.2 s, landing, rotors idling on the ground ~81.2-85.94 s (weak
+      409/476 Hz = 12/14 x 34 Hz comb at 84.2-85.9 s). No sound source other than the drone.
+    source: >-
+      report p.2-3 §III; readme.txt; spectral check: Welch 1.0-5.4 s and 84.2-85.9 s tonal peaks
+      listed above, broadband 100-2000 Hz level -64.5 dB (idle) vs -40.6 dB (hover 20-60 s).
+    confidence: high
+open_questions:
+  - "Channel map is an assumption (wav channel i = micPos mic i+1); the report does not state the wiring order and the data cannot confirm it (see geometry.spcup_micpos_cube.channel_map_source)."
+  - "Both wavs are heavily CLIPPED and per-channel peak-normalised: every channel peaks at exactly 1.0 and |x| > 0.99 for 8.4-24.3% (file 1) / 4.3-17.6% (file 2) of the samples per channel; hover RMS is -3 to -6 dBFS. Inter-channel gain and absolute level are lost; the report only says the recordings were 'normalised'."
+  - "The first ~5 s (and the post-landing tail) are rotors idling on the ground, not airborne; flight_mode=hover covers take-off, hover and landing as the report's table describes. The last ~1.2 s of file 1 shows no idle comb (motors possibly disarmed) — too short to split."
+  - "2019-02-04-15-53-42.bag does NOT belong to either published wav: armed 20.8 s, take-off 24.8 s, landing 232.3 s, disarmed 234.3 s (≈ 207 s airborne, = 'file 3, duration 205' in extract_pos.m) with mocap x/y moving ±1.3 m and z 0.2-1.35 m — the unpublished dynamic flight with a speech loudspeaker at (1.9937, 0.0808, 0.147) m. Its /mavros/rc/out motor PWM (4 ch, ~10 Hz) and 100 Hz mocap pose would be a rotor-command/pose track, but there is no audio for it in the package, so no reader was added. Dynamic_Flight_Video.mp4 is dated 2019-02-25 (another session) and is also dynamic."
+  - "Rotor positions relative to the array are unknown (array yaw/offset under the Intel Aero not reported)."

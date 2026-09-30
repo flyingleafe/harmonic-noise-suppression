@@ -1,0 +1,103 @@
+team: NSS_Chellamma
+report: "SPCUP19_NSS_Chellamma_documentation.pdf"
+supplementary:
+  - "NSS_Chellamma/IMG_20190309_172502.jpg, IMG_20190309_172556.jpg (photos of the recorder only: electret capsule on a perfboard, Arduino UNO, SD-card module, 9 V battery)"
+  - "NSS_Chellamma/video.mp4 (ffprobe: 12.33 s, 1920x1080 30 fps H.264 + 48 kHz stereo AAC; frames at 0.5-12 s inspected)"
+  - "dataset page /tmp/spcup_page.txt (Team NSS_Chellamma entry) + its photo SPCUP19_NSS_Chellamma_drone.jpg (drone in flight + Emax RS2205 motor drawing)"
+  - "NSS_Chellamma/task_audio.wav, task_audio_edited.wav (level, spectral and cross-correlation checks)"
+summary: >-
+  NSS College of Engineering recorded their self-assembled racing-class multirotor (Emax
+  RS2205-2300KV motors, 218 mm carbon frame, Dalprop T3056C 3-inch props) with a single
+  microphone embedded on the UAV, sampled by an Arduino UNO's 10-bit ADC and stored at
+  16 kHz. One ~167 s outdoor recording was made over barren land while the pilot tried to
+  keep the drone stable at fixed angular speed; task_audio_edited.wav is the same recording
+  after Audacity processing ('noise reduced') and trimming.
+drone:
+  make_model: "self-assembled multirotor: Emax RS2205-2300KV BLDC motors, 218 mm wheelbase carbon-fibre frame (99 g), Dalprop Cyclone T3056C propellers"
+  n_rotors: 4
+  source: >-
+    report p.1 'UAV Specifications' (motor, frame, propeller); dataset page 'Self-assembled
+    UAV'. The rotor count is NOT stated anywhere: 4 is inferred from the 218 mm 'wheelbase'
+    carbon frame spec (a quadcopter racing-frame specification) and the flat X-shaped
+    airframe in the video / dataset-page photo.
+frame:
+  description: >-
+    origin = frame centre in the motor plane, x = forward, y = left, z = up; metres
+    (right-handed). Assumes a symmetric X quad frame.
+  source: "chosen by annotator; frame spec from report p.1 ('Wheelbase: 218mm')"
+geometry:
+  nss_quad_mono:
+    mic_pos: null
+    mic_pos_quality: unknown
+    channel_map_source: "single-channel recordings; the only microphone is channel 0"
+    rotor_pos:
+      - [0.0771, 0.0771, 0.0]
+      - [-0.0771, 0.0771, 0.0]
+      - [-0.0771, -0.0771, 0.0]
+      - [0.0771, -0.0771, 0.0]
+    rotor_pos_quality: estimated
+    source: >-
+      rotors: report p.1 'Frame: Wheelbase: 218mm' -> hubs at 0.109 m radius, assuming a
+      symmetric X layout (45 deg arms). mic: report p.1 only says 'a single microphone
+      embedded on the UAV'; the two photos show the recorder on the bench, not mounted; in
+      video.mp4 the drone is ~2-4% of the frame width and only a white box on top of the
+      frame (presumably the recorder) is discernible.
+    notes: >-
+      Rotor positions are an estimate: a stretched-X or H frame of the same wheelbase would
+      move the hubs by a few cm. Ordering front-left, rear-left, rear-right, front-right.
+recordings:
+  - key: NSS_Chellamma__task_audio
+    raw: "NSS_Chellamma/task_audio.wav"
+    geometry: nss_quad_mono
+    condition: flight
+    flight_mode: mixed
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "report: 'angular speed fixed' (no value); measured dominant rotor harmonic ~540 Hz, slowly wandering"
+    channels_used: [0]
+    description: >-
+      Original ('task_audio') outdoor recording of the drone flying over barren land,
+      167.04 s at 16 kHz from a 10-bit Arduino ADC (large DC offset, mean -0.36 FS). The
+      first ~3.9 s and last ~2 s are motors-off silence (~-52 dB vs ~-13 dB in flight);
+      between them a strong rotor harmonic comb (dominant line ~540 Hz with harmonics to
+      >3 kHz) with slow speed drift.
+    source: >-
+      report p.1 ('The drone noise was recorded using a single microphone embedded on the
+      UAV ... recording was done at large barren land ... All effort were done to keep the
+      drone stable and angular speed fixed ... the original (task_audio.wav)'); video.mp4
+      frames show the drone airborne, drifting sideways and climbing; measured per-second
+      AC RMS and spectrogram of the wav
+    confidence: medium
+  - key: NSS_Chellamma__task_audio_edited
+    raw: "NSS_Chellamma/task_audio_edited.wav"
+    geometry: nss_quad_mono
+    condition: flight
+    flight_mode: mixed
+    contains_rotor_noise: true
+    n_active_rotors: 4
+    external_source: none
+    throttle_or_speed: "same as task_audio"
+    channels_used: [0]
+    description: >-
+      The SAME audio as task_audio.wav after Audacity processing, not a separate take: it is
+      task_audio trimmed to 3.88-164.16 s (removing the motors-off lead-in/out; 160.28 s),
+      with only the <100 Hz band altered (DC offset reduced from -0.36 to -0.20 FS,
+      0-100 Hz residual -3.9 dB) and everything above 100 Hz identical within -29 dB
+      (100-500 Hz) / -46 dB (>500 Hz). The team calls this the 'noise reduced' version
+      ('processed using Audacity to supress the internal noise of recording setup').
+      Duplicate content of task_audio: do not use both for training/evaluation splits.
+    source: >-
+      report p.1 ('So both the original (task_audio.wav) and noise reduced
+      (task_audio_edited.wav) versions are enclosed'); verified by FFT cross-correlation:
+      peak normalised correlation 0.997 at lag 62082 samples (3.880 s), least-squares gain
+      0.996, residual -23.1 dB overall, per-band residual/original: 0-100 Hz -3.9 dB,
+      100-500 Hz -29.4 dB, 500-8000 Hz <= -46 dB
+    confidence: high
+open_questions:
+  - "Number of rotors is not stated by the team; 4 is inferred from the 218 mm 'wheelbase' frame spec and the airframe silhouette (video too low-resolution to count arms reliably)."
+  - "Microphone position on the airframe is unknown ('embedded on the UAV'); mic_pos is null. The video suggests the recorder sits in a white box on top of the frame."
+  - "rotor_pos assumes a symmetric X frame; frame geometry beyond the wheelbase is not documented."
+  - "Flight mode: the report aims at a stable hover with fixed angular speed, but the 12 s video shows the drone drifting and climbing and the rotor fundamental wanders over the recording; tagged 'mixed'. The video (12.3 s) is much shorter than the 167 s audio, so it only documents part of the flight."
+  - "The report says the recorder is sampled by the Arduino ADC (max ~76 kHz); the files are 16 kHz 16-bit with ~2750 distinct values in task_audio (10-bit quantisation). Effective audio bandwidth/anti-aliasing is undocumented."
+  - "task_audio_edited is a processed duplicate of task_audio (see its entry); the integrator may want to flag or drop one of them."
