@@ -371,7 +371,7 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
   `NeuroBEM-frames` (247), `PITCN-frames` (68), `NanoBench-frames` (15),
   `VID-frames` (8), `Blackbird-frames` (1). All derivable
   (`recipe_version 1`, generator `source_frames`, `raw: {kind: download}`).
-- **External harmonic-noise datasets** (10, `tdframe-v1`; registry
+- **External harmonic-noise datasets** (11, `tdframe-v1`; registry
   `src/data_processing/sources/`, driver `scripts/derive.py`, plan
   `docs/external-datasets-plan.md`):
   `MIMII` (54057; industrial fan/pump/slider/valve, 8-ch 16 kHz 10 s, 3 SNR
@@ -379,8 +379,12 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
   sections), `drone-detection-samples` (180320; mono 16 kHz binary
   drone/no-drone), `DroneAudioSet` (2313; 2 quads × 2 throttles × 3 rooms, 8-ch,
   drone-only/source-only/mixed subsets), `AeroSonicDB` (1895; aircraft flyover +
-  rich aircraft/engine/prop meta), `SPCUP19-egonoise` (278; 10 heterogeneous
-  drone-team ego-noise rigs, 1–16 ch, mic geometry in meta where exposed),
+  rich aircraft/engine/prop meta), `SPCUP19-frames` (71, derivable; 9 of the
+  10 SPCUP19 drone-team ego-noise packages — KumamoTech ships only ROS bags —
+  1/3/8 ch at 16/44.1/48 kHz, 46.7 min; ChuMS's propeller rig as 9 runs × 8
+  mics with `n_propellers`/`repeat` and mic positions in mm; the adopt-only
+  `SPCUP19-egonoise` pin (278) carries ChuMS as 216 Freq/SPL/single-mic arrays
+  and stays for its by-name consumers),
   `HornBase` (1080; horn/not-horn — tonal, not rotating-source), `HUSTmotor`
   (24; 6 health states × 4 speeds, acoustic + X/Y/Z vibration),
   `KAIST-rotating-acoustic` (5; sound-pressure at 3010 RPM), `AVQ` (12;

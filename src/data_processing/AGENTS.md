@@ -2,11 +2,9 @@
 
 ## Purpose
 
-Everything between raw recordings and a training loop's `td.Frame`s:
-raw-source registry, frozen derived-dataset specs, the single copy of the
-mixing math, the online-mix compiler, torch `Dataset` adapters. Every dataset
-is declared once and materialized only through `scripts/derive.py`. Design:
-`docs/refactor-data-pipelines.md`. VK/refinement: `src/tracking`.
+Everything between raw recordings and a training loop's `td.Frame`s. Every
+dataset is declared once and materialized only through `scripts/derive.py`.
+Design: `docs/refactor-data-pipelines.md`. VK/refinement: `src/tracking`.
 
 ## Map
 
@@ -158,6 +156,8 @@ is declared once and materialized only through `scripts/derive.py`. Design:
   `FLY124`.
 - Michael's telemetry published before 2026-07-31 is uncalibrated
   (`rps_scale` 1.0 in frame meta).
+- `SPCUP19-egonoise`: historical pin, ChuMS = 216 spectra/1-mic arrays;
+  the registry builds `SPCUP19-frames` (ChuMS: 8-mic Frame/run).
 - Keep the 50k unaugmented warmup stage (G5: removing it regresses).
 - `rps.kind: fitted_traj` draws ONE drone per flight (`rigs:` weights;
   reserved name `posterior` = the global fit) and shifts its mean; the ESC
