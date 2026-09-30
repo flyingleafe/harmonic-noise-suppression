@@ -379,12 +379,16 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
   sections), `drone-detection-samples` (180320; mono 16 kHz binary
   drone/no-drone), `DroneAudioSet` (2313; 2 quads × 2 throttles × 3 rooms, 8-ch,
   drone-only/source-only/mixed subsets), `AeroSonicDB` (1895; aircraft flyover +
-  rich aircraft/engine/prop meta), `SPCUP19-frames` (71, derivable; 9 of the
-  10 SPCUP19 drone-team ego-noise packages — KumamoTech ships only ROS bags —
-  1/3/8 ch at 16/44.1/48 kHz, 46.7 min; ChuMS's propeller rig as 9 runs × 8
-  mics with `n_propellers`/`repeat` and mic positions in mm; the adopt-only
-  `SPCUP19-egonoise` pin (278) carries ChuMS as 216 Freq/SPL/single-mic arrays
-  and stays for its by-name consumers),
+  rich aircraft/engine/prop meta), `SPCUP19-frames` (74, derivable, recipe 3
+  `@a81ee75821c6`; all 10 SPCUP19 team packages, 1/3/8/16 ch at 16/44.1/48 kHz,
+  0.85 h; every recording tagged from its team's report + supplementary files
+  in `src/data_processing/sources/spcup19_meta/<Team>.yaml` — condition 41
+  flight / 18 bench / 2 handheld / 13 rotors_off, active rotors, external
+  source — with `mic_pos` on 63 and `rotor_pos` on 42 recordings; KumamoTech's
+  16-ch HARK audio + pose decoded from its ROS bags; ChuMS = 9 hover tests with
+  1/2/3 stacked propellers per rotor, its two recorders re-aligned; the
+  adopt-only `SPCUP19-egonoise` pin (278, ChuMS as 216 Freq/SPL/single-mic
+  arrays) stays for its by-name consumers),
   `HornBase` (1080; horn/not-horn — tonal, not rotating-source), `HUSTmotor`
   (24; 6 health states × 4 speeds, acoustic + X/Y/Z vibration),
   `KAIST-rotating-acoustic` (5; sound-pressure at 3010 RPM), `AVQ` (12;
