@@ -439,3 +439,39 @@ def line_powers(sp: Spectrum, speeds: list[float], p: Params) -> list[dict[str, 
             merged.append(any(abs(k * o - c) < 2 * w_hz for jj, o in enumerate(speeds) if jj != i))
         out.append({"speed": float(s), "power_db": power, "snr_db": snr, "merged": merged})
     return out
+
+
+def comb_band_powers(
+    sp: Spectrum, s_lo: float, s_hi: float, p: Params, flank_hz: float = 10.0
+) -> dict[str, Any]:
+    """Total (all-rotor) comb power per order and channel, for rotors that
+    cannot be told apart: every rotor runs somewhere in ``[s_lo, s_hi]``.
+
+    Order ``k`` integrates ``[k·s_lo − w, k·s_hi + w]`` (``w = line_bins·df``)
+    minus its floor, the per-channel median density of the two ``flank_hz``
+    flanks just outside the band (the running-median floor is biased once the
+    band fills its window). Orders stop where the band plus flanks would reach
+    the next order's band, so no line is counted twice or used as floor."""
+    w = p.line_bins * sp.df
+    orders, power, snr = [], [], []
+    k = 1
+    while True:
+        lo_hz, hi_hz = k * s_lo - w, k * s_hi + w
+        if hi_hz + flank_hz > sp.f[-1] or s_lo - k * (s_hi - s_lo) < 2 * (w + flank_hz):
+            break
+        band = (sp.f >= lo_hz) & (sp.f <= hi_hz)
+        flanks = ((sp.f >= lo_hz - flank_hz) & (sp.f < lo_hz)) | (
+            (sp.f > hi_hz) & (sp.f <= hi_hz + flank_hz)
+        )
+        tot = sp.psd[:, band].sum(axis=1) * sp.df
+        flo = np.median(sp.psd[:, flanks], axis=1) * int(band.sum()) * sp.df
+        line = tot - flo
+        orders.append(k)
+        power.append(np.where(line > 0, 10.0 * np.log10(np.maximum(line, 1e-30)), np.nan))
+        snr.append(10.0 * np.log10(tot / flo))
+        k += 1
+    return {
+        "orders": orders,
+        "power_db": np.asarray(power).reshape(len(orders), sp.psd.shape[0]),
+        "snr_db": np.asarray(snr).reshape(len(orders), sp.psd.shape[0]),
+    }

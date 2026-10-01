@@ -13,6 +13,8 @@ from __future__ import annotations
 import itertools
 import json
 import math
+import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -42,19 +44,35 @@ def _load(d: Path) -> list[dict[str, Any]]:
     return [json.loads(p.read_text()) for p in sorted(d.glob("*.json"))]
 
 
+#: Tracking outputs, later directories replacing earlier units of the same
+#: name (the AGH-array rerun in the 3-blade shaft band).
+TRACK_DIRS = ("tracks/raw", "tracks_agh/raw", "tracks_das/raw", "tracks_das2/raw")
+
+
+def _uid(dataset: str, key: str) -> str:
+    """``scripts/static_rig.py`` unit id of one recording file."""
+    return re.sub(r"[^0-9A-Za-z._-]+", "_", f"{dataset}__{key}")
+
+
 def observations() -> list[dict[str, Any]]:
     """One record per (recording or DroneAudioSet member) with its rotors."""
+    units: dict[str, dict[str, Any]] = {}
+    for d in TRACK_DIRS:
+        for p in sorted((RES / d).glob("*.json")):
+            units[p.name] = json.loads(p.read_text())
     out = []
-    for r in _load(RES / "tracks/raw"):
+    for r in units.values():
         if "members" in r:
             for m, v in r["members"].items():
                 out.append(
                     {
                         **{k: r[k] for k in ("dataset", "rig", "throttle", "mic_dist", "take")},
-                        "key": v["key"],
+                        "n_rotors": r["n_rotors"],
+                        "rate_range": r["rate_range"],
+                        **v,
+                        "uid": _uid(r["dataset"], v["key"]),
                         "member": m,
                         "group": r["key"],
-                        **v,
                     }
                 )
         else:
@@ -88,18 +106,25 @@ def _lines(rot: dict[str, Any], n_ch: int):
         yield k, p, np.asarray(s, dtype=float), np.asarray(ph["phase"]), np.asarray(ph["coherence"])
 
 
-def valid(rot: dict[str, Any], o: dict[str, Any]) -> bool:
-    """Per-track evidence: the recording's VK fit explains > 20 % of the signal
-    (final residual ratio < 0.8), and a distinct track with >= 5 orders at median-mic SNR
-    >= SNR_MIN_DB, speed std < 3 rev/s, and < 20 % of its frames within
-    0.5 rev/s of the search band's edges (a track parked on an edge is junk)."""
-    if not rot["distinct"] or rot["std"] >= 3.0 or o["residual_ratios"][-1] >= 0.8:
+def _candidate(rot: dict[str, Any], o: dict[str, Any]) -> bool:
+    """A distinct track with speed std < 3 rev/s and < 20 % of its frames
+    within 0.5 rev/s of the search band's edges (a track parked on an edge is
+    junk)."""
+    if not rot["distinct"] or rot["std"] >= 3.0:
         return False
-    good = sum(1 for s in rot["snr_db"] if np.nanmedian(np.asarray(s, dtype=float)) >= SNR_MIN_DB)
     lo, hi = o.get("rate_range", (-np.inf, np.inf))
     t = np.asarray(rot["track"])
-    edge = float(np.mean((t - lo < 0.5) | (hi - t < 0.5)))
-    return good >= 5 and edge < 0.2
+    return float(np.mean((t - lo < 0.5) | (hi - t < 0.5))) < 0.2
+
+
+def valid(rot: dict[str, Any], o: dict[str, Any]) -> bool:
+    """Per-track evidence: a :func:`_candidate` with >= 5 orders at median-mic
+    SNR >= SNR_MIN_DB, in a recording whose VK fit explains > 20 % of the
+    signal (final residual ratio < 0.8)."""
+    if not _candidate(rot, o) or o["residual_ratios"][-1] >= 0.8:
+        return False
+    good = sum(1 for s in rot["snr_db"] if np.nanmedian(np.asarray(s, dtype=float)) >= SNR_MIN_DB)
+    return good >= 5
 
 
 def speed_table(obs_all: list[dict[str, Any]]) -> dict[str, Any]:
@@ -244,10 +269,9 @@ def _rig_lines(o: dict[str, Any], D: np.ndarray) -> list:
     return out
 
 
-def _perm_for(o: dict[str, Any], lines: list, D: np.ndarray) -> tuple:
+def _perm_for(o: dict[str, Any], lines: list, D: np.ndarray, n_tr: int) -> tuple:
     if o.get("n_rotors") == 1 and o["rig"] == "dregon":
         return (int(o["motor"]) - 1,)
-    n_tr = 1 + max(ln[0] for ln in lines)
     perms = list(itertools.permutations(range(D.shape[0]), n_tr))
     return _assign([(ln[0], ln[1], ln[2]) for ln in lines], D, perms)
 
@@ -268,19 +292,25 @@ def _collect(lines, D, perm, rows, perr, pnull, rng) -> None:
         pnull.extend(np.abs(np.angle(np.exp(1j * (ph - predn))))[good].tolist())
 
 
-def _score(rows: list, perr: list[float], pnull: list[float]) -> dict[str, Any]:
-    """Held-out across-mic RMS (fit on even orders, score odd, and back)."""
-    n_mic = rows[0][1].size
-    folds = [[(p, r) for k, p, r in rows if k % 2 == m] for m in (0, 1)]
-    out: dict[str, Any] = {"n_lines": len(rows), "n_mics": n_mic}
-    out["one_over_r_spread_db"] = float(np.median([np.ptp(20 * np.log10(r)) for _, _, r in rows]))
+def _score(
+    fold: dict[int, dict[str, list]], perr: list[float], pnull: list[float]
+) -> dict[str, Any]:
+    """Held-out across-mic RMS: for each parity ``a``, gains/alpha (and the
+    recordings' track -> rotor permutations) come from order parity ``a``, the
+    RMS from the other parity's lines."""
+    test_all = [r for d in fold.values() for r in d["test"]]
+    n_mic = test_all[0][1].size
+    out: dict[str, Any] = {"n_lines": len(test_all), "n_mics": n_mic}
+    out["one_over_r_spread_db"] = float(
+        np.median([np.ptp(20 * np.log10(r)) for _, _, r in test_all])
+    )
     for name, gain, dist in (("none", 0, 0), ("gain", 1, 0), ("dist", 0, 1), ("both", 1, 1)):
         held, alphas = [], []
-        for a, b in ((0, 1), (1, 0)):
-            if not folds[a] or not folds[b]:
+        for d in fold.values():
+            if not d["train"] or not d["test"]:
                 continue
-            g, al = _fit(folds[a], n_mic, bool(gain), bool(dist))
-            held.append(_rms(folds[b], g, al))
+            g, al = _fit([(p, r) for _, p, r in d["train"]], n_mic, bool(gain), bool(dist))
+            held.append(_rms([(p, r) for _, p, r in d["test"]], g, al))
             alphas.append(al)
         out[f"rms_{name}"] = float(np.mean(held)) if held else None
         if dist:
@@ -293,11 +323,15 @@ def _score(rows: list, perr: list[float], pnull: list[float]) -> dict[str, Any]:
 
 def point_source(obs_all: list[dict[str, Any]]) -> dict[str, Any]:
     """Level = line const + mic gain - alpha*20*log10 r on cells at SNR >=
-    SNR_MIN_DB (>= 60 % of mics, min 3). Tracks go to rotor positions by the
-    best pure-1/r permutation per recording. Gains/alpha fitted on even
-    orders, scored on odd ones and vice versa. Phase error vs
-    -2 pi f (r_c - r_ref)/c at coherence >= COH_MIN vs a mic-permuted null."""
-    rows: dict[str, list] = defaultdict(list)
+    SNR_MIN_DB (>= 60 % of mics, min 3). Cross-fitted by order parity: on
+    parity ``a`` each recording's tracks go to rotor positions by the best
+    pure-1/r permutation and the gains/alpha are fitted; the other parity's
+    lines are scored under both (a track with no training line is dropped).
+    Phase error of the scored lines vs -2 pi f (r_c - r_ref)/c at coherence
+    >= COH_MIN, against a mic-permuted null."""
+    fold: dict[str, dict[int, dict[str, list]]] = defaultdict(
+        lambda: {a: {"train": [], "test": []} for a in (0, 1)}
+    )
     perr: dict[str, list[float]] = defaultdict(list)
     pnull: dict[str, list[float]] = defaultdict(list)
     rng = np.random.default_rng(0)
@@ -309,9 +343,21 @@ def point_source(obs_all: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         assert D is not None
         rig = GEOM_RIG[o["rig"]] + (f"/{o['member']}" if o.get("member") else "")
-        perm = _perm_for(o, lines, D)
-        _collect(lines, D, perm, rows[rig], perr[rig], pnull[rig], rng)
-    return {rig: _score(rr, perr[rig], pnull[rig]) for rig, rr in rows.items()}
+        n_tr = 1 + max(ln[0] for ln in lines)
+        for a in (0, 1):
+            train = [ln for ln in lines if ln[1] % 2 == a]
+            if not train:
+                continue
+            seen = {ln[0] for ln in train}
+            test = [ln for ln in lines if ln[1] % 2 != a and ln[0] in seen]
+            perm = _perm_for(o, train, D, n_tr)
+            _collect(train, D, perm, fold[rig][a]["train"], [], [], rng)
+            _collect(test, D, perm, fold[rig][a]["test"], perr[rig], pnull[rig], rng)
+    return {
+        rig: _score(f, perr[rig], pnull[rig])
+        for rig, f in fold.items()
+        if any(d["test"] for d in f.values())
+    }
 
 
 def profile_tables(obs_all: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -337,15 +383,97 @@ def profile_tables(obs_all: list[dict[str, Any]]) -> dict[str, list[dict[str, An
     return dict(out)
 
 
-def main() -> int:
+def recordings(obs_all: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per recording file: resolved R/R, partial or unresolved, and for the
+    last two the shaft band ``[s_lo, s_hi]`` holding every rotor, for the
+    combined comb read. The band comes from the candidate tracks (5th-95th
+    percentile of their frames) when at least one track is valid, else from
+    the round-1 full-record speed modes (±0.5 %), else from the full-record
+    comb rate ± ``spread_frac`` (the speed-mode search window)."""
+    full = {(r["dataset"], r["key"]): r for r in _load(RES / "speeds/raw")}
+    out = {}
+    for o in obs_all:
+        uid = o.get("uid") or _uid(o["dataset"], o["key"])
+        n_r, n_v = int(o["n_rotors"]), sum(valid(r, o) for r in o["rotors"])
+        rec: dict[str, Any] = {"rig": o["rig"], "n_rotors": n_r, "n_valid": n_v}
+        rec["verdict"] = "resolved" if n_v == n_r else "partial" if n_v else "unresolved"
+        if n_v < n_r:
+            cand = [np.asarray(r["track"]) for r in o["rotors"] if _candidate(r, o)]
+            f = full.get((o["dataset"], o["key"]))
+            if n_v and cand:
+                band = (
+                    min(np.percentile(t, 5) for t in cand),
+                    max(np.percentile(t, 95) for t in cand),
+                )
+                src = "tracks"
+            elif f is not None and f["modes"]["rotors"]:
+                s = [m["speed"] for m in f["modes"]["rotors"]]
+                band, src = (0.995 * min(s), 1.005 * max(s)), "full_record_modes"
+            elif f is not None:
+                c, w = f["comb"]["f0_comb"], f["params"]["spread_frac"]
+                band, src = (c * (1 - w), c * (1 + w)), "full_record_comb"
+            else:
+                band, src = None, None
+            if band is not None:
+                rec["band"] = {"s_lo": float(band[0]), "s_hi": float(band[1]), "source": src}
+        out[uid] = rec
+    return out
+
+
+def combined_profiles(recs: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Per partial/unresolved recording read by ``static_rig.py combined``:
+    total comb power per (order, mic) at SNR >= SNR_MIN_DB (else null), and
+    the symmetric per-rotor profile, total - 10 log10 R dB."""
+    out = {}
+    for r in _load(RES / "combined/raw"):
+        rec = recs.get(r["uid"])
+        if rec is None:
+            continue
+        p = np.array(r["power_db"], dtype=float)
+        s = np.array(r["snr_db"], dtype=float)
+        p = np.where(s >= SNR_MIN_DB, p, np.nan)
+        out[r["uid"]] = {
+            **rec,
+            "orders": r["orders"],
+            "total_db": [
+                [None if not np.isfinite(v) else round(float(v), 2) for v in row] for row in p
+            ],
+            "per_rotor_db": [
+                [
+                    None
+                    if not np.isfinite(v)
+                    else round(float(v - 10 * math.log10(rec["n_rotors"])), 2)
+                    for v in row
+                ]
+                for row in p
+            ],
+            "snr_db": [[round(float(v), 2) for v in row] for row in s],
+            "n_orders_measured": int(
+                np.sum(np.sum(np.isfinite(p), axis=1) >= min(p.shape[1], _min_mics(p.shape[1])))
+            ),
+        }
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
     obs_all = observations()
+    recs = recordings(obs_all)
+    if (argv if argv is not None else sys.argv[1:]) == ["bands"]:
+        path = RES / "combined/bands.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        bands = {u: r["band"] for u, r in recs.items() if "band" in r}
+        path.write_text(json.dumps(bands, indent=1))
+        print(f"{len(bands)} bands -> {path}")
+        return 0
     out_dir = RES / "report"
     out_dir.mkdir(parents=True, exist_ok=True)
     report = {
+        "recordings": recs,
         "speeds": speed_table(obs_all),
         "tracker_vs_fullrecord": tracker_vs_fullrecord(obs_all),
         "profiles": profiles(obs_all),
         "point_source": point_source(obs_all),
+        "combined": combined_profiles(recs),
     }
     (out_dir / "report.json").write_text(json.dumps(report, indent=1))
     (out_dir / "profiles_full.json").write_text(json.dumps(profile_tables(obs_all)))

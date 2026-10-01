@@ -1,0 +1,57 @@
+{
+ "AVQ__S1_seq1": {
+  "s_lo": 77.29850844748103,
+  "s_hi": 81.6175949583203,
+  "source": "tracks"
+ },
+ "AVQ__S1_seq2": {
+  "s_lo": 79.35651919461588,
+  "s_hi": 98.48417219544558,
+  "source": "tracks"
+ },
+ "DREGON-frames__motor_allMotors_70": {
+  "s_lo": 67.33907264243636,
+  "s_hi": 69.91161695727531,
+  "source": "full_record_modes"
+ },
+ "SPCUP19-frames__AGH__ego-noise__mic_array__0": {
+  "s_lo": 223.56548204046092,
+  "s_hi": 228.52665053380002,
+  "source": "full_record_modes"
+ },
+ "SPCUP19-frames__AGH__ego-noise__mic_array__1": {
+  "s_lo": 182.3292739534676,
+  "s_hi": 186.3820738432775,
+  "source": "full_record_modes"
+ },
+ "SPCUP19-frames__AGH__ego-noise__mic_array__2": {
+  "s_lo": 160.28154648254986,
+  "s_hi": 163.66093307493728,
+  "source": "full_record_modes"
+ },
+ "SPCUP19-frames__AGH__ego-noise__mic_array__3": {
+  "s_lo": 196.87321377134356,
+  "s_hi": 200.60540702591155,
+  "source": "full_record_modes"
+ },
+ "SPCUP19-frames__AGH__ego-noise__mic_array__4": {
+  "s_lo": 178.67911064470417,
+  "s_hi": 187.3454940195117,
+  "source": "full_record_modes"
+ },
+ "SPCUP19-frames__KU_Leuven__SPCUP19_KU_Leuven_Team_1_recording": {
+  "s_lo": 104.27028904046107,
+  "s_hi": 117.38441230738316,
+  "source": "tracks"
+ },
+ "SPCUP19-frames__KU_Leuven__SPCUP19_KU_Leuven_Team_2_recording": {
+  "s_lo": 99.96374493821648,
+  "s_hi": 114.99903085020242,
+  "source": "tracks"
+ },
+ "SPCUP19-frames__Maverick__4": {
+  "s_lo": 33.55239999999958,
+  "s_hi": 39.38759999999951,
+  "source": "full_record_comb"
+ }
+}

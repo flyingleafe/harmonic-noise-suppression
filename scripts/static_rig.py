@@ -18,6 +18,10 @@ Two stages, both meant for ``uni-cpu`` (the audio is large)::
 
 ``run`` writes one ``raw/<uid>.json`` per recording (gridrun) and a compact
 ``spec/<uid>.npz`` (channel-mean prominence up to 4 kHz, float16) for figures.
+``track`` follows each rotor over time (multichannel VK). ``combined`` reads the
+total comb of recordings whose rotors are not all resolved, in the band
+``results/static_rig/combined/bands.json`` written by
+``scripts/static_rig_report.py bands``.
 """
 
 from __future__ import annotations
@@ -450,6 +454,32 @@ def worker(unit: Unit) -> dict[str, Any]:
     }
 
 
+def worker_combined(unit: Unit) -> dict[str, Any]:
+    """Total comb power of one recording whose rotors are not all resolved:
+    full motor-on span, every rotor in the band ``[s_lo, s_hi]`` (from
+    ``static_rig_report.py bands``)."""
+    import numpy as np
+
+    from experiments.static_rig import spectra as S
+
+    prm = dict(unit.params)
+    p = S.Params()
+    x = np.load(prm["audio"], mmap_mode="r")
+    fs = int(prm["fs"])
+    a, b = S.motor_on_span(np.asarray(x), fs, p)
+    sp = S.spectrum(np.asarray(x[:, a:b], dtype=np.float64), fs, p)
+    band = prm["band"]
+    res = S.comb_band_powers(sp, float(band["s_lo"]), float(band["s_hi"]), p)
+    return {
+        **{k: v for k, v in prm.items() if k not in ("audio", "out")},
+        "span_s": [a / fs, b / fs],
+        "df": sp.df,
+        "orders": res["orders"],
+        "power_db": _jsonable(res["power_db"]),
+        "snr_db": _jsonable(res["snr_db"]),
+    }
+
+
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """One line per recording: rig, rotor count, distinct speeds found."""
     return {
@@ -484,6 +514,12 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--jobs", type=int, default=6)
     t.add_argument("--only", default=None, help="regex over uid")
     t.add_argument("--max-s", type=float, default=160.0)
+    c = sub.add_parser("combined")
+    c.add_argument("--work", type=Path, required=True)
+    c.add_argument("--out", type=Path, default=_ROOT / "results/static_rig/combined")
+    c.add_argument("--bands", type=Path, default=_ROOT / "results/static_rig/combined/bands.json")
+    c.add_argument("--jobs", type=int, default=6)
+    c.add_argument("--only", default=None, help="regex over uid")
     args = ap.parse_args(argv)
     if args.cmd == "fetch":
         units: list[dict[str, Any]] = []
@@ -503,6 +539,14 @@ def main(argv: list[str] | None = None) -> int:
         for u in specs
         if pat is None or pat.search(u["uid"])
     ]
+    if args.cmd == "combined":
+        bands = json.loads(args.bands.read_text())
+        cu = [
+            Unit(uid=u.uid, params={**u.params, "band": bands[u.uid]})
+            for u in units_
+            if u.uid in bands
+        ]
+        return run_grid(cu, worker_combined, args.out, jobs=args.jobs).exit_code
     if args.cmd == "track":
         singles = [
             Unit(uid=u.uid, params={**u.params, "max_s": args.max_s})
