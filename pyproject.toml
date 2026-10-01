@@ -204,6 +204,8 @@ known-first-party = ["utils", "framespec", "tasks", "models", "data_processing",
 # Standalone report/slide scripts bootstrap sys.path / os.chdir / matplotlib
 # backend before imports; E402 is structural there.
 "writing/**" = ["E402"]
+# Exploration scripts kept verbatim for provenance (see their README).
+"scripts/static_rig_scratch/**" = ["E402", "E701", "E702", "E741", "F841", "B007", "SIM115", "I001"]
 
 [tool.pyright]
 typeCheckingMode = "basic"
@@ -221,6 +223,6 @@ extraPaths = ["src"]
 # writing/** holds frozen report/slide scripts pinned to their publication
 # date; they reference since-refactored APIs by design (same rationale as
 # the ruff E402 exemption above).
-exclude = [".venv", "node_modules", ".direnv", "**/notebooks/**", "**/.ipynb_checkpoints/**", "writing"]
+exclude = [".venv", "node_modules", ".direnv", "**/notebooks/**", "**/.ipynb_checkpoints/**", "writing", "scripts/static_rig_scratch"]
 reportMissingImports = false
 reportMissingTypeStubs = false

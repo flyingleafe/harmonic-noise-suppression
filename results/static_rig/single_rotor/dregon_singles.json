@@ -1,0 +1,415 @@
+{
+ "doc": "DREGON single-rotor recordings (docs/experiments/static-rig-profiles.md \u00a7 Round 3). s_bar: core peaks of orders 2-7 on the strict span, median over orders and non-windy mics (\u00b10.003 rev/s). wander_rev: rms drift of the shaft phase from s_bar*t after 0.1/0.3/1/3 s (BPF line demodulated \u00b140 Hz, unwrapped, detrended; \u00b115-25 %). D_phase = r(1 s)^2 (rev^2/s; upper bound, noise-limited). D_core: Lorentzian HWHM/(pi k^2) of resolved strong cores. D_shape: one-Lorentzian fit of the line tops (measures the AM pedestal, not D). wind_mics: Dmitrii's reading. span_s: strict rotor-on span.",
+ "recordings": {
+  "motor_Motor1_50": {
+   "s_bar_rev_s": 49.011,
+   "wander_rev": {
+    "0.1": 0.0113,
+    "0.3": 0.0169,
+    "1": 0.0273,
+    "3": 0.0541
+   },
+   "D_phase": 0.00074529,
+   "D_core": null,
+   "D_core_n_orders": 0,
+   "D_shape": 0.0021,
+   "wind_mics": [
+    5,
+    6
+   ],
+   "span_s": [
+    6.8,
+    36.2
+   ]
+  },
+  "motor_Motor1_60": {
+   "s_bar_rev_s": 58.771,
+   "wander_rev": {
+    "0.1": 0.0097,
+    "0.3": 0.0196,
+    "1": 0.0379,
+    "3": 0.075
+   },
+   "D_phase": 0.00143641,
+   "D_core": 0.000168,
+   "D_core_n_orders": 2,
+   "D_shape": 0.00229,
+   "wind_mics": [
+    5,
+    6
+   ],
+   "span_s": [
+    5.2,
+    41.2
+   ]
+  },
+  "motor_Motor1_70": {
+   "s_bar_rev_s": 68.463,
+   "wander_rev": {
+    "0.1": 0.0094,
+    "0.3": 0.0172,
+    "1": 0.0332,
+    "3": 0.0588
+   },
+   "D_phase": 0.00110224,
+   "D_core": 2.08e-05,
+   "D_core_n_orders": 3,
+   "D_shape": 0.00297,
+   "wind_mics": [
+    5,
+    6
+   ],
+   "span_s": [
+    5.2,
+    34.8
+   ]
+  },
+  "motor_Motor1_80": {
+   "s_bar_rev_s": 78.234,
+   "wander_rev": {
+    "0.1": 0.0108,
+    "0.3": 0.0233,
+    "1": 0.0339,
+    "3": 0.0294
+   },
+   "D_phase": 0.00114921,
+   "D_core": 6.08e-05,
+   "D_core_n_orders": 13,
+   "D_shape": 0.00193,
+   "wind_mics": [
+    5,
+    6
+   ],
+   "span_s": [
+    5.0,
+    14.8
+   ]
+  },
+  "motor_Motor1_90": {
+   "s_bar_rev_s": 87.979,
+   "wander_rev": {
+    "0.1": 0.0089,
+    "0.3": 0.0161,
+    "1": 0.0266,
+    "3": 0.0399
+   },
+   "D_phase": 0.00070756,
+   "D_core": null,
+   "D_core_n_orders": 0,
+   "D_shape": 0.00385,
+   "wind_mics": [
+    5,
+    6
+   ],
+   "span_s": [
+    5.2,
+    16.0
+   ]
+  },
+  "motor_Motor2_50": {
+   "s_bar_rev_s": 48.44,
+   "wander_rev": {
+    "0.1": 0.0113,
+    "0.3": 0.0161,
+    "1": 0.0175,
+    "3": 0.0194
+   },
+   "D_phase": 0.00030625,
+   "D_core": 4.64e-05,
+   "D_core_n_orders": 1,
+   "D_shape": 0.0021,
+   "wind_mics": [
+    0
+   ],
+   "span_s": [
+    5.0,
+    14.8
+   ]
+  },
+  "motor_Motor2_60": {
+   "s_bar_rev_s": 58.192,
+   "wander_rev": {
+    "0.1": 0.0076,
+    "0.3": 0.0113,
+    "1": 0.0155,
+    "3": 0.0297
+   },
+   "D_phase": 0.00024025,
+   "D_core": 4.6e-05,
+   "D_core_n_orders": 3,
+   "D_shape": 0.0025,
+   "wind_mics": [
+    0
+   ],
+   "span_s": [
+    4.2,
+    14.8
+   ]
+  },
+  "motor_Motor2_70": {
+   "s_bar_rev_s": 67.679,
+   "wander_rev": {
+    "0.1": 0.0116,
+    "0.3": 0.0154,
+    "1": 0.032,
+    "3": 0.0568
+   },
+   "D_phase": 0.001024,
+   "D_core": 0.000109,
+   "D_core_n_orders": 4,
+   "D_shape": 0.00193,
+   "wind_mics": [
+    0
+   ],
+   "span_s": [
+    4.8,
+    15.0
+   ]
+  },
+  "motor_Motor2_80": {
+   "s_bar_rev_s": 77.307,
+   "wander_rev": {
+    "0.1": 0.0109,
+    "0.3": 0.0197,
+    "1": 0.0361,
+    "3": 0.0468
+   },
+   "D_phase": 0.00130321,
+   "D_core": 0.000159,
+   "D_core_n_orders": 1,
+   "D_shape": 0.00324,
+   "wind_mics": [
+    0
+   ],
+   "span_s": [
+    5.2,
+    15.8
+   ]
+  },
+  "motor_Motor2_90": {
+   "s_bar_rev_s": 86.93,
+   "wander_rev": {
+    "0.1": 0.0083,
+    "0.3": 0.0099,
+    "1": 0.0167,
+    "3": 0.0268
+   },
+   "D_phase": 0.00027889,
+   "D_core": 0.000105,
+   "D_core_n_orders": 8,
+   "D_shape": 0.00272,
+   "wind_mics": [
+    0
+   ],
+   "span_s": [
+    6.2,
+    16.0
+   ]
+  },
+  "motor_Motor3_50": {
+   "s_bar_rev_s": 49.15,
+   "wander_rev": {
+    "0.1": 0.0108,
+    "0.3": 0.0172,
+    "1": 0.0218,
+    "3": 0.0225
+   },
+   "D_phase": 0.00047524,
+   "D_core": 0.000246,
+   "D_core_n_orders": 2,
+   "D_shape": 0.0021,
+   "wind_mics": [
+    1,
+    2
+   ],
+   "span_s": [
+    4.2,
+    13.8
+   ]
+  },
+  "motor_Motor3_60": {
+   "s_bar_rev_s": 59.048,
+   "wander_rev": {
+    "0.1": 0.0082,
+    "0.3": 0.0123,
+    "1": 0.0162,
+    "3": 0.0208
+   },
+   "D_phase": 0.00026244,
+   "D_core": 0.000194,
+   "D_core_n_orders": 2,
+   "D_shape": 0.0025,
+   "wind_mics": [
+    1,
+    2
+   ],
+   "span_s": [
+    4.8,
+    15.2
+   ]
+  },
+  "motor_Motor3_70": {
+   "s_bar_rev_s": 68.723,
+   "wander_rev": {
+    "0.1": 0.0088,
+    "0.3": 0.0176,
+    "1": 0.0379,
+    "3": 0.0491
+   },
+   "D_phase": 0.00143641,
+   "D_core": 6.37e-05,
+   "D_core_n_orders": 1,
+   "D_shape": 0.00297,
+   "wind_mics": [
+    1,
+    2
+   ],
+   "span_s": [
+    5.8,
+    15.8
+   ]
+  },
+  "motor_Motor3_80": {
+   "s_bar_rev_s": 78.652,
+   "wander_rev": {
+    "0.1": 0.0078,
+    "0.3": 0.0148,
+    "1": 0.03,
+    "3": 0.0503
+   },
+   "D_phase": 0.0009,
+   "D_core": null,
+   "D_core_n_orders": 0,
+   "D_shape": 0.00193,
+   "wind_mics": [
+    1,
+    2
+   ],
+   "span_s": [
+    5.0,
+    15.5
+   ]
+  },
+  "motor_Motor3_90": {
+   "s_bar_rev_s": 88.457,
+   "wander_rev": {
+    "0.1": 0.0087,
+    "0.3": 0.0119,
+    "1": 0.0198,
+    "3": 0.0264
+   },
+   "D_phase": 0.00039204,
+   "D_core": 0.000124,
+   "D_core_n_orders": 2,
+   "D_shape": 0.00385,
+   "wind_mics": [
+    1,
+    2
+   ],
+   "span_s": [
+    5.8,
+    15.8
+   ]
+  },
+  "motor_Motor4_50": {
+   "s_bar_rev_s": 49.777,
+   "wander_rev": {
+    "0.1": 0.011,
+    "0.3": 0.0137,
+    "1": 0.0252,
+    "3": 0.0251
+   },
+   "D_phase": 0.00063504,
+   "D_core": 7.52e-05,
+   "D_core_n_orders": 1,
+   "D_shape": 0.00193,
+   "wind_mics": [
+    4
+   ],
+   "span_s": [
+    5.0,
+    14.5
+   ]
+  },
+  "motor_Motor4_60": {
+   "s_bar_rev_s": 59.81,
+   "wander_rev": {
+    "0.1": 0.0081,
+    "0.3": 0.0116,
+    "1": 0.0214,
+    "3": 0.028
+   },
+   "D_phase": 0.00045796,
+   "D_core": 0.000187,
+   "D_core_n_orders": 2,
+   "D_shape": 0.0025,
+   "wind_mics": [
+    4
+   ],
+   "span_s": [
+    4.0,
+    14.0
+   ]
+  },
+  "motor_Motor4_70": {
+   "s_bar_rev_s": 69.515,
+   "wander_rev": {
+    "0.1": 0.0081,
+    "0.3": 0.011,
+    "1": 0.0176,
+    "3": 0.0205
+   },
+   "D_phase": 0.00030976,
+   "D_core": 8.82e-05,
+   "D_core_n_orders": 5,
+   "D_shape": 0.00297,
+   "wind_mics": [
+    4
+   ],
+   "span_s": [
+    4.8,
+    14.8
+   ]
+  },
+  "motor_Motor4_80": {
+   "s_bar_rev_s": 79.611,
+   "wander_rev": {
+    "0.1": 0.0069,
+    "0.3": 0.0107,
+    "1": 0.0151,
+    "3": 0.0226
+   },
+   "D_phase": 0.00022801,
+   "D_core": 3.34e-05,
+   "D_core_n_orders": 5,
+   "D_shape": 0.00229,
+   "wind_mics": [
+    4
+   ],
+   "span_s": [
+    6.2,
+    16.0
+   ]
+  },
+  "motor_Motor4_90": {
+   "s_bar_rev_s": 89.405,
+   "wander_rev": {
+    "0.1": 0.0086,
+    "0.3": 0.0091,
+    "1": 0.0155,
+    "3": 0.027
+   },
+   "D_phase": 0.00024025,
+   "D_core": 0.000102,
+   "D_core_n_orders": 6,
+   "D_shape": 0.000809,
+   "wind_mics": [
+    4
+   ],
+   "span_s": [
+    6.2,
+    16.0
+   ]
+  }
+ }
+}

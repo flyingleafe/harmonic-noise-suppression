@@ -249,3 +249,83 @@ drifting bands leave few orders (AVQ `S1_seq2`: 3). On AGH array 4 the
 shaft-order profile peaks at multiples of 3 only partly (orders 15 and 18
 loudest, 8 and 16 next), so its shaft assignment stays `[INFERENCE]`.
 
+
+## Round 3 — joint multichannel search, line physics, single-rotor reading (2026-10-01)
+
+Motivation: the round-2 tracker (hand-picked bands, single-mic seeding, VK)
+missed rotors a human reads off the spectrogram (AVQ `S1_seq1`: 54 and 59
+rev/s). Replaced by a Bretthorst-style joint search, then — on the user's
+direction — stripped back to the simplest reading on the single-rotor case.
+
+**Joint search** (`experiments/static_rig/joint_speeds.py`,
+`scripts/static_rig_joint.py` → `results/static_rig/joint/`): per channel
+Student-t/g-prior evidence of a comb, product over channels, spike-and-slab
+line presence; dyadic windows split while the gain beats an Occam cost
+(~12 nats/rotor); joint R-rotor modes = combinations of 1-D peaks (BPF must
+carry ≥ 0.3 of the strongest harmonic, speeds within 1.7×, 2nd-order
+intermodulation tones in the model), linked by Viterbi with a Hungarian
+permutation cost. AVQ S1 (8 ch, ~100 s per 120 s recording):
+
+| seq | A | B | C | D | all four found |
+|---|---|---|---|---|---|
+| seq1 (50 %) | 51.7–54.3 (11/14 windows) | 55.0–55.9 (10/14) | 57.2→61.2 (14/14) | 77.6–79.1 (14/14) | 7/14 |
+| seq2 (100 %) | 79.3–82.3 (16/16) | 81.8–84.9 (13/16) | 85.0–88.2 (12/16) | 97.1–98.4 (16/16) | 9/16 |
+| seq3 (150 %) | 88.5–89.3 (5/7) | 93.0–93.4 (5/7) | 95.4–96.9 (5/7) | 109.9–112.0 (7/7) | 5/7 |
+
+Validated on 20 DREGON singles against round 1 (median 0.016, max 0.043
+rev/s) and on halves (median 0.016, max 0.034; old method 0.022/0.116);
+Laplace sd ~1e-5 is 1000× overconfident. The published OT multi-pitch
+baseline (arXiv 2508.02471) resolves all four AVQ rotors in 6 of 450 frames.
+
+**AVQ profiles, full band.** The first reading (3 kHz cap, 10 Hz running-median
+floor, window-constant speeds) missed what the spectrogram shows: D's order 42
+is 11–16 dB above noise in all three sequences (3284/4108/4651 Hz — a motor
+order, 6 × 7 pole pairs `[INFERENCE]`), and the 7 s window-mean speed is off by
+up to 0.3 % inside the window (±7–10 Hz at k = 42). With 0.5 s block-refined
+tracks, a 20th-percentile floor over ±60 Hz and a collision mask
+(`scripts/static_rig_scratch/avq_refine.py`): D orders 2–24 (even) at 5–42 dB
+and k = 42; A/B/C only to k ≈ 8 (50 %), 16 (100 %), 10 (150 %). The 3.28 and
+~5 kHz "clusters" are D k42 and D k63–66 with companions 4–8 Hz apart (modulation
+sidebands `[INFERENCE, untested]`), not other rotors' harmonics — with a line
+every ~15 Hz above 2 kHz, nearest-harmonic assignment is meaningless.
+
+**DREGON singles — what a stationary rotor is**
+(`results/static_rig/single_rotor/dregon_singles.json`,
+`scripts/static_rig_scratch/dregon_*.py`). Strict span: BPF line within 1 % of
+its plateau. Windy mics (downwash): Motor1 ch 5, 6; Motor2 ch 0; Motor3 ch 1, 2;
+Motor4 ch 4.
+
+- *Mean speed*: core peaks of orders 2–7 agree to ±0.001–0.005 rev/s, mics to
+  ≤ 0.003: two decimals solid, the third ±3. The k = 2 core is unresolved
+  (HWHM 0.7–0.9 of 1/T): no slow wander above ~0.004 rev/s over 7–35 s.
+- *Shaft jitter* as phase drift from s̄·t: 0.010 rev after 0.1 s on every
+  recording (the measurement floor), **0.015–0.038 rev (5–14°) after 1 s**,
+  0.02–0.075 after 3 s; growth ∝ √τ ⇒ a phase random walk, i.e. OU frequency
+  noise with memory ≪ 0.1 s — only D = 2σ_ν²/λ is identifiable. Lines are
+  Lorentzian, HWHM γ_k = π k² D, tails 1/Δf²; the skirts of neighbours make a
+  floor from k ≈ 15–20 (M1_70). No throttle trend; Motor1 wanders most.
+- *Amplitude jitter*: 2–4 dB window-to-window on every line, not explainable by
+  speed (≤ 0.1 dB). It is inflow-turbulence loading modulation: a pedestal of
+  fixed width in Hz at every order (flat in k, ~ −20 dB, HWHM ≈ 0.3–0.5 Hz on
+  M1_70), while the FM pedestal grows ∝ k². One Lorentzian cannot carry both:
+  a shape fit returns the AM width at every order (2–3e-3 "D"); the phase-drift
+  D (2–14e-4) is noise-inflated; resolved cores give D ≈ 0.3–2.5e-4 from 1–13
+  orders. Derivation and physics:
+  `writing/reports/2026-10-01_harmonic-line-am-fm/` (two Lorentzians, widths
+  add; read the air below k_× = √(γ_m/πD), the shaft above).
+- *Profile reading* (`experiments/static_rig/single_rotor.py`): with s̄ and D
+  given, a_k = mean of the periodogram over ±max(γ_k, 1/T) ÷ the same mean of
+  the known line shape (the peak when unresolved, peak·πγ_kT/1.5 when
+  resolved); no floor, no fit; orders 1–150. Reconstruction = one diffusing
+  shaft + harmonics at √a_k, random phases. Peaks match within ~1 dB
+  (M1_70 ch 0: k1/2/4/8/16/24/32/42 real −85.2/−51.0/−59.8/−68.2/−76.0/−77.8/
+  −84.5/−70.5 vs synth −85.1/−50.5/−58.7/−68.4/−76.0/−79.1/−83.3/−73.5 dB).
+  Over/under-estimation across recordings tracks the reading window, i.e.
+  floor leaking into wide windows when D is too large — not a D ∝ s law
+  (that hypothesis gives a worse spectral fit on 17/20). Explorer:
+  `notebooks/single_rotor_explainer.ipynb` (`plots.spectrum_viewer` with the
+  new `overlay=`: both spectra on one pane, spectrogram toggle, audio).
+
+Open: read D from the cores above k_× and the AM parameters (σ_m², λ_m) from
+the pedestals below it; coherence of the AM across orders; then back to the
+multi-rotor rigs with the same reading.

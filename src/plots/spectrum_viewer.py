@@ -31,6 +31,11 @@ same in all three modes; a broadband floor does not (its level scales with the
 window's noise bandwidth, i.e. with the analysis length), which is the
 physics, not a bug.
 
+Overlay: ``spectrum_viewer(a, sr, overlay=b, labels=("recording", "model"))``
+draws the spectrum of ``b`` (same channel, mode, band, decimation) on the same
+pane in a second colour; a **spectrogram** toggle picks which of the two the
+top panel shows. :meth:`SpectrumViewer.spectrum` takes ``which=0|1``.
+
 Display decimation (exact data, reduced drawing): spectrogram columns are
 power-averaged down to ``max_cols``; spectrum curves keep the MAXIMUM of each
 of ``max_points`` frequency buckets (log-spaced buckets on a log axis), so no
@@ -237,16 +242,21 @@ class SpectrumViewer:
         max_points: int = 6000,
         height: int = 720,
         width: int = 1100,
+        overlay: np.ndarray | None = None,
+        labels: tuple[str, str] = ("A", "B"),
     ) -> None:
         import ipywidgets as W
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
 
         self.audio, self.sr, self.t_start = audio, float(sr), float(t_start)
+        self.overlay, self.labels = overlay, labels
+        if overlay is not None and overlay.shape[0] != audio.shape[0]:
+            raise ValueError("overlay must have the same channels as audio")
         self.n_fft, self.hop = int(n_fft), int(hop or n_fft // 4)
         self.max_cols, self.max_points = int(max_cols), int(max_points)
         self.nyquist = self.sr / 2.0
-        self._cache: dict[int, tuple[Stft, tuple[np.ndarray, np.ndarray]]] = {}
+        self._cache: dict[tuple[int, int], tuple[Stft, tuple[np.ndarray, np.ndarray]]] = {}
 
         n_ch = audio.shape[0]
         self.w_channel = W.Dropdown(
@@ -304,6 +314,13 @@ class SpectrumViewer:
             readout_format=".3f",
             layout=W.Layout(width="520px"),
         )
+        self.w_specsrc = W.ToggleButtons(
+            options=[(labels[0], 0), (labels[1], 1)],
+            value=0,
+            description="spectrogram:",
+            style={"button_width": "112px"},
+            layout=W.Layout(display="" if overlay is not None else "none"),
+        )
 
         fig = make_subplots(
             rows=2,
@@ -330,9 +347,25 @@ class SpectrumViewer:
                 x=[0.0],
                 y=[0.0],
                 mode="lines",
-                line={"width": 1.1},
+                name=labels[0] if overlay is not None else "",
+                line={"width": 1.1, "color": "#1f77b4"},
                 hovertemplate="f %{x:.2f} Hz<br>%{y:.3g}<extra></extra>",
-                showlegend=False,
+                showlegend=overlay is not None,
+            ),
+            row=2,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scattergl(
+                x=[0.0],
+                y=[0.0],
+                mode="lines",
+                name=labels[1],
+                line={"width": 1.1, "color": "#d62728"},
+                opacity=0.8,
+                hovertemplate="f %{x:.2f} Hz<br>%{y:.3g}<extra></extra>",
+                showlegend=overlay is not None,
+                visible=overlay is not None,
             ),
             row=2,
             col=1,
@@ -342,6 +375,13 @@ class SpectrumViewer:
             width=width,
             margin={"l": 60, "r": 20, "t": 60, "b": 40},
             title={"text": title, "x": 0.01, "font": {"size": 13}},
+            legend={
+                "x": 0.99,
+                "y": 0.38,
+                "xanchor": "right",
+                "yanchor": "top",
+                "font": {"size": 11},
+            },
             shapes=[
                 {
                     "type": "line",
@@ -362,7 +402,7 @@ class SpectrumViewer:
         self.figure = go.FigureWidget(fig)
         self.figure.data[0].on_click(self._on_click)
 
-        for w in (self.w_channel, self.w_dyn):
+        for w in (self.w_channel, self.w_dyn, self.w_specsrc):
             w.observe(lambda _c: self._redraw_all(), "value")
         self.w_mode.observe(lambda _c: self._redraw_spectrum(), "value")
         self.w_amp.observe(lambda _c: self._redraw_all(), "value")
@@ -372,7 +412,7 @@ class SpectrumViewer:
 
         self.widget = W.VBox(
             [
-                W.HBox([self.w_mode, self.w_channel]),
+                W.HBox([self.w_mode, self.w_channel, self.w_specsrc]),
                 W.HBox([self.w_faxis, self.w_amp, self.w_dyn]),
                 W.HBox([self.w_frange, self.w_time]),
                 self.figure,
@@ -382,13 +422,14 @@ class SpectrumViewer:
 
     # ── state ────────────────────────────────────────────────────────────────
 
-    def _channel_data(self) -> tuple[Stft, tuple[np.ndarray, np.ndarray]]:
+    def _channel_data(self, which: int = 0) -> tuple[Stft, tuple[np.ndarray, np.ndarray]]:
         c = int(self.w_channel.value)
-        if c not in self._cache:
-            x = self.audio[c]
+        if (which, c) not in self._cache:
+            src = self.audio if which == 0 or self.overlay is None else self.overlay
+            x = src[c]
             s = stft_of(x, self.sr, t_start=self.t_start, n_fft=self.n_fft, hop=self.hop)
-            self._cache[c] = (s, overall_spectrum(x, self.sr))
-        return self._cache[c]
+            self._cache[(which, c)] = (s, overall_spectrum(x, self.sr))
+        return self._cache[(which, c)]
 
     def _band(self) -> tuple[float, float]:
         lo, hi = (float(v) for v in self.w_frange.value)
@@ -396,10 +437,11 @@ class SpectrumViewer:
             lo = max(lo, self.sr / self.n_fft)  # first non-DC STFT bin
         return lo, max(hi, lo * 1.001)
 
-    def spectrum(self) -> tuple[np.ndarray, np.ndarray]:
+    def spectrum(self, which: int = 0) -> tuple[np.ndarray, np.ndarray]:
         """The CURRENT spectrum curve as drawn: ``(freqs, values)`` in the
-        chosen amplitude unit, after band selection and peak decimation."""
-        s, (f_all, a_all) = self._channel_data()
+        chosen amplitude unit, after band selection and peak decimation;
+        ``which=1`` is the overlay signal."""
+        s, (f_all, a_all) = self._channel_data(which)
         mode = self.w_mode.value
         if mode == "overall":
             f, a = f_all, a_all
@@ -414,7 +456,7 @@ class SpectrumViewer:
     # ── drawing ──────────────────────────────────────────────────────────────
 
     def _redraw_all(self) -> None:
-        s, _ = self._channel_data()
+        s, _ = self._channel_data(int(self.w_specsrc.value))
         lo, hi = self._band()
         rows = (s.freqs >= lo) & (s.freqs <= hi)
         power, times = _pool_columns(s.power[rows], s.times, self.max_cols)
@@ -447,15 +489,23 @@ class SpectrumViewer:
             with self.figure.batch_update():
                 self._redraw_spectrum(inside_batch=True)
             return
-        f, v = self.spectrum()
+        f, v = self.spectrum(0)
         mode, db = self.w_mode.value, self.w_amp.value == "dB"
         line = self.figure.data[1]
         line.x, line.y = f, v
+        if self.overlay is not None:
+            f2, v2 = self.spectrum(1)
+            self.figure.data[2].x, self.figure.data[2].y = f2, v2
         tag = {"overall": "overall FFT", "mean": "mean over STFT frames"}.get(
             mode, f"frame @ {float(self.w_time.value):.3f} s"
         )
         ch = f"ch {int(self.w_channel.value)}"
-        self.figure.layout.annotations[1].text = f"spectrum — {tag} — {ch}"
+        src = (
+            f" — spectrogram: {self.labels[int(self.w_specsrc.value)]}"
+            if self.overlay is not None
+            else ""
+        )
+        self.figure.layout.annotations[1].text = f"spectrum — {tag} — {ch}{src}"
         self.figure.layout.yaxis2.update(title_text="dB re 1" if db else "amplitude")
         cursor = self.figure.layout.shapes[0]
         cursor.update(
@@ -484,6 +534,7 @@ class SpectrumViewer:
         t: float | None = None,
         channel: int | None = None,
         dyn_range_db: float | None = None,
+        spectrogram: int | None = None,
     ) -> SpectrumViewer:
         """Drive the controls from code (each change redraws like a click)."""
         if mode is not None:
@@ -500,6 +551,8 @@ class SpectrumViewer:
             self.w_channel.value = int(channel)
         if dyn_range_db is not None:
             self.w_dyn.value = int(dyn_range_db)
+        if spectrogram is not None:
+            self.w_specsrc.value = int(spectrogram)
         if t is not None:  # like a click: pin the frame AND show it
             self.w_time.value = float(t)
             self.w_mode.value = "frame"
@@ -529,7 +582,8 @@ def spectrum_viewer(
     into the title); ``start_s``/``duration_s`` crop on that same clock.
     ``kw`` go to :class:`SpectrumViewer` (``channel``, ``n_fft``, ``hop``,
     ``fmin``, ``fmax``, ``dyn_range_db``, ``max_cols``, ``max_points``,
-    ``height``, ``width``, ``title``).
+    ``height``, ``width``, ``title``, ``overlay``, ``labels``); an ``overlay``
+    array is cropped like ``source`` when it has the same length.
     """
     title = kw.pop("title", None)
     frame_title = ""
@@ -543,6 +597,9 @@ def spectrum_viewer(
     if start_s is not None or duration_s is not None:
         a = 0 if start_s is None else int(np.clip(round(float(start_s) * rate), 0, audio.shape[1]))
         b = audio.shape[1] if duration_s is None else a + int(round(float(duration_s) * rate))
+        ov = kw.get("overlay")
+        if ov is not None and ov.shape[1] == audio.shape[1]:
+            kw["overlay"] = ov[:, a : min(b, audio.shape[1])]
         audio, t0 = audio[:, a : min(b, audio.shape[1])], a / rate
     if audio.shape[1] == 0:
         raise ValueError("the selected span holds no samples")

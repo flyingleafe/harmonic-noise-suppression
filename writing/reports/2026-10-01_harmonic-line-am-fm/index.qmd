@@ -1,0 +1,167 @@
+---
+title: "One harmonic line of a rotor: where its width comes from"
+subtitle: "Frequency jitter (the shaft) and amplitude jitter (the air), in plain words and with the derivation"
+date: 2026-10-01
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    number-sections: true
+    html-math-method: katex
+execute:
+  echo: false
+---
+
+## The signal we are talking about
+
+A rotor at a steady setting makes a periodic sound. Take the $k$-th harmonic of the shaft rate $\bar s$ (revolutions per second). If the rotor were a perfect machine in still air, that harmonic would be one pure tone:
+
+$$
+x_k(t) = \bar A_k \cos\big(2\pi k\,\bar s\,t + \phi_k\big).
+$$
+
+In a real recording two things are not constant:
+
+1. **the shaft phase**: the shaft does not turn at exactly $\bar s$; its angle $\theta(t)$ (in revolutions) wanders around $\bar s\,t$. Write $\theta(t) = \bar s\,t + \xi(t)$ with $\xi$ the *phase error* in revolutions;
+2. **the amplitude**: the sound of each blade passage is not the same every time. Write $A_k(t) = \bar A_k\,[1 + m_k(t)]$ with $m_k$ the *relative amplitude error* (dimensionless, mean zero).
+
+So the harmonic is really
+
+$$
+x_k(t) = \bar A_k\,[1 + m_k(t)]\,\cos\big(2\pi k\,[\bar s t + \xi(t)] + \phi_k\big).
+$$
+
+The question of this note: what does the *spectrum* of this signal look like, and which part of its shape is the shaft ($\xi$) and which part is the air ($m_k$)?
+
+## Where the amplitude jitter comes from, physically
+
+The tonal sound of a rotor is **loading noise**: every time a blade sweeps past a point in the air it pushes on that air with its lift. The pressure pulse the microphone receives from one blade passage is set by the lift the blade carries *during that passage*. Repeat the pulse $B\,\bar s$ times per second ($B$ blades) and you get the harmonics: harmonic $k$ is the $k$-th Fourier coefficient of the pulse train.
+
+The lift of a blade is not a fixed number. It depends on the angle at which the air meets the blade, and that angle depends on the air the blade flies into:
+
+- **Inflow turbulence.** The air sucked into the rotor is never still. On a static rig it is the room's air set in motion by the rotor itself: recirculation off the floor and walls, the rotor's own wake curling back into the inlet, draughts (the DREGON recordings have two microphones that are visibly in moving air). Turbulence is a collection of eddies of all sizes. An eddy of size $\Lambda$ carried into the rotor at the inflow speed $U$ (a few m/s for a small rotor: the induced velocity $U \approx \sqrt{T/2\rho A}$) changes the inflow angle for a time $\Lambda / U$. Big eddies, 0.3–1 m from room recirculation, last 0.1–0.5 s; small ones, centimetres, last milliseconds.
+- **Each passage sees a different inflow**, so the lift pulse — and with it every harmonic amplitude — changes from passage to passage. That is the amplitude jitter. Its *time scale* is the eddy passage time, its *size* is the ratio of the lift fluctuation to the mean lift, typically a few per cent.
+- **High harmonics are more sensitive.** Harmonic $k$ comes from the fine structure of the pulse (features of the pulse that last about $1/(k\bar s)$). Small eddies change the fine structure without changing the total lift much, so the relative jitter $m_k$ grows with $k$ and its bandwidth widens with $k$. Low harmonics follow the slow, large eddies: the whole lift breathing.
+- **What it is not.** It is not the shaft speed: the amplitude of harmonic $k$ scales like $\bar s^{\,n}$ with $n \approx 2$–5, so a 0.3 % speed wander moves the amplitude by at most 1.5 % (0.1 dB). The 2–4 dB window-to-window scatter we measure is far larger. It is also not the microphone's wind noise, which is additive, not multiplicative.
+
+In the aeroacoustics literature this is *inflow-turbulence ingestion noise*: the periodic loading noise is modulated by the turbulence, and in the spectrum every harmonic sits on a hump of sidebands — the "haystack".
+
+## The spectrum of a modulated tone — the tool
+
+Everything below uses one fact. For a stationary random signal the power spectrum is the Fourier transform of the autocorrelation,
+
+$$
+S(f) = \int R(\tau)\,e^{-i2\pi f\tau}\,d\tau,
+\qquad
+R(\tau) = \mathbb{E}\big[x(t)\,x(t+\tau)\big].
+$$
+
+A pure tone has $R(\tau) \propto \cos(2\pi f_0 \tau)$ forever: a spike at $f_0$. Anything that makes the signal *forget* its phase or its amplitude makes $R(\tau)$ decay, and a decaying $R$ is a line with a width. The shape of the decay is the shape of the line.
+
+For our harmonic, with $\xi$ and $m_k$ independent of each other, the autocorrelation factorises (keeping the positive-frequency part):
+
+$$
+R_k(\tau) = \frac{\bar A_k^2}{2}\;
+\underbrace{\big[1 + R_{m}(\tau)\big]}_{\text{amplitude}}\;
+\underbrace{\mathbb{E}\big[e^{\,i2\pi k\,(\xi(t+\tau)-\xi(t))}\big]}_{\text{phase}}\;
+\cos(2\pi k\bar s\tau).
+$$
+
+The amplitude factor is $\mathbb{E}[(1+m(t))(1+m(t+\tau))] = 1 + R_m(\tau)$ because $m$ has mean zero. The phase factor is the *characteristic function* of the phase increment over a lag $\tau$. Two factors in time means a **convolution** in frequency: the line is the phase-broadened line convolved with the amplitude spectrum. We now take the two factors one at a time.
+
+## Frequency jitter alone: the shaft (known)
+
+The shaft speed error $\nu(t) = \dot\xi(t)$ is an Ornstein–Uhlenbeck process: stationary standard deviation $\sigma_\nu$ (rev/s) and memory $1/\lambda$ (s). The phase increment over a lag $\tau$ is the integral of $\nu$, Gaussian with
+
+$$
+\operatorname{Var}\big[\xi(t+\tau)-\xi(t)\big]
+= \frac{2\sigma_\nu^2}{\lambda^2}\big(\lambda\tau - 1 + e^{-\lambda\tau}\big).
+$$
+
+For a Gaussian increment the characteristic function is $\exp(-\tfrac12 (2\pi k)^2 \operatorname{Var})$. Two limits:
+
+- **slow jitter** ($\tau \ll 1/\lambda$): $\operatorname{Var} \approx \sigma_\nu^2\tau^2$, the phase factor is a Gaussian in $\tau$, the line is a **Gaussian** of standard deviation $k\sigma_\nu$ Hz. The line is simply the histogram of the instantaneous frequency.
+- **fast jitter** ($\tau \gg 1/\lambda$): $\operatorname{Var} \approx 2\sigma_\nu^2\tau/\lambda \equiv D\,\tau$. The phase does a random walk with diffusion constant $D$ (rev²/s). The phase factor is $e^{-2\pi^2 k^2 D|\tau|}$, an exponential, and the line is a **Lorentzian**
+
+$$
+L_k(f) = \frac{1}{\pi}\frac{\gamma_k}{(f - k\bar s)^2 + \gamma_k^2},
+\qquad
+\gamma_k = \pi k^2 D \quad\text{(half-width at half-maximum, Hz)}.
+$$
+
+The DREGON rotors are in the fast regime: the measured phase drift grows like $\sqrt\tau$ from 0.1 s to 3 s, the pedestal around the lines falls as $1/\Delta f^2$ (the Lorentzian tail), and the width grows as $k^2$ (1.1, 3.3, 4.2 Hz at $k$ = 24, 30, 40 on Motor1 at 70 %). Only $D = 2\sigma_\nu^2/\lambda$ is identifiable from a spectrum; $\sigma_\nu$ and $\lambda$ separately are not.
+
+Two things to remember about the Lorentzian: its width grows as $k^2$ (the same phase error is $k$ times more radians at the $k$-th harmonic, and the power of a random walk goes as the square); and its tails are heavy, $(\gamma_k/\Delta f)^2$, so the skirts of neighbouring harmonics eventually meet and make a floor of their own.
+
+## Amplitude jitter alone: the air (new)
+
+Now hold the shaft perfect ($\xi = 0$) and let the amplitude move: $x = \bar A[1+m(t)]\cos(2\pi f_0 t)$. The autocorrelation is $\tfrac{\bar A^2}{2}[1 + R_m(\tau)]\cos(2\pi f_0\tau)$, so the spectrum is
+
+$$
+S(f) = \frac{\bar A^2}{2}\Big[\delta(f - f_0) + S_m(f - f_0)\Big].
+$$
+
+In words: **the carrier stays a spike, and the modulation spectrum $S_m$ is copied around it as sidebands**. The pedestal has the shape of $S_m$, its width is the bandwidth of $m(t)$ (the inverse eddy passage time), and its total power relative to the carrier is $\int S_m = \overline{m^2}$, the mean-square relative amplitude error. Nothing here depends on $k$ except through $m_k$ itself: if the modulation were the same for all harmonics, every line would carry an identical pedestal, in Hz and in dB.
+
+If $m$ is itself an OU process — standard deviation $\sigma_m$, memory $1/\lambda_m$ — then $R_m(\tau) = \sigma_m^2 e^{-\lambda_m|\tau|}$ and the pedestal is a Lorentzian too:
+
+$$
+S_m(f) = \sigma_m^2\,\frac{1}{\pi}\frac{\gamma_m}{f^2 + \gamma_m^2},
+\qquad \gamma_m = \frac{\lambda_m}{2\pi}.
+$$
+
+A single pedestal then gives both numbers: its half-width is $\gamma_m$ (the eddy time scale), its level relative to the carrier is $\sigma_m^2$.
+
+::: {.callout-note}
+## Multiplicative in amplitude, additive in dB
+If the amplitude error is log-normal, $A = \bar A e^{g(t)}$ with $g$ an OU process of variance $\sigma_g^2$, then $1 + m = e^{g}$ and $R_{1+m}(\tau) = e^{\sigma_g^2(1 + \rho(\tau))}$ with $\rho = e^{-\lambda_m|\tau|}$. For $\sigma_g \lesssim 0.3$ (3 dB) this is $e^{\sigma_g^2}[1 + \sigma_g^2\rho(\tau) + \dots]$: the same carrier-plus-Lorentzian-pedestal picture with $\sigma_m^2 \approx \sigma_g^2$, plus a small series of harmonics of $\lambda_m$ in the pedestal that only matter for large $\sigma_g$.
+:::
+
+## Both together: the full line
+
+Multiply the two factors and transform: the line is the **convolution** of the Lorentzian carrier with the amplitude spectrum,
+
+$$
+S_k(f) = \frac{\bar A_k^2}{2}\Big[\,L_k(f) + \big(S_{m_k} * L_k\big)(f)\Big].
+$$
+
+With an OU amplitude error both pieces are Lorentzians, and the convolution of two Lorentzians is a Lorentzian whose half-widths add. So the whole line is just two Lorentzians on top of each other:
+
+$$
+S_k(f) = \frac{\bar A_k^2}{2}\left[
+\underbrace{\frac{1}{\pi}\frac{\gamma_k}{\Delta f^2 + \gamma_k^2}}_{\text{carrier, power }1}
+\;+\;
+\underbrace{\sigma_m^2\,\frac{1}{\pi}\frac{\gamma_k + \gamma_m}{\Delta f^2 + (\gamma_k+\gamma_m)^2}}_{\text{pedestal, power }\sigma_m^2}
+\right],
+\qquad \Delta f = f - k\bar s .
+$$
+
+This formula says everything:
+
+- **Low orders** ($\gamma_k = \pi k^2 D \ll \gamma_m$): the carrier is a needle (narrower than the record's resolution $1/T$) and the pedestal is the amplitude spectrum itself. The pedestal's width is the same at $k = 1, 2, 3, 4$, and its level relative to the peak is $\approx \sigma_m^2 \cdot \gamma_{\text{res}}/\gamma_m$ (the needle is capped by the window). *This is the regime in which we can read the air*: the measured Motor1_70 pedestal at $k \le 4$ falls from −24 dB at 0.25 Hz to −40 dB at 2 Hz, roughly a Lorentzian with $\gamma_m \approx 0.3$–0.5 Hz (a memory of ~0.3–0.5 s, i.e. big slow eddies) and a few per cent of modulation power.
+- **High orders** ($\gamma_k \gg \gamma_m$): the carrier is wide and swallows the pedestal; the line is one Lorentzian of half-width $\gamma_k$ and power $(1+\sigma_m^2)\bar A_k^2/2$. Amplitude jitter is invisible in the shape — it only adds its few per cent to the power. *This is the regime in which we read the shaft.*
+- **Crossover** at $\pi k_\times^2 D = \gamma_m$. With $D \approx 10^{-4}$ rev²/s and $\gamma_m \approx 0.4$ Hz, $k_\times \approx 35$; with $D \approx 10^{-3}$, $k_\times \approx 11$. Below $k_\times$ a width-based reading of $D$ is contaminated by the air; above it, a width-based reading of $\gamma_m$ is impossible.
+- **How to tell the two apart in data**: measure the pedestal level at a *fixed* offset, say 2 Hz, against $k$. The amplitude part is flat in $k$; the shaft part rises as $k^2$ (as $k^4$ in power at a fixed offset, because $\gamma_k^2$). Motor1_70 at 2 Hz: −40, −33 dB for $k$ = 2, 4 (flat, air), then −25, −21, −16, −15, −9.5 for $k$ = 6, 8, 12, 16, 24 (rising, shaft).
+
+![Left: the measured pedestal of DREGON Motor1_70 at six orders — flat-in-$k$ and steep below $k \approx 4$, rising with $k$ and shallower above. Right: the two-Lorentzian model at three orders for round numbers.](assets/pedestal.png){#fig-pedestal}
+
+## What this means for measuring the profile
+
+- The **line power** $\bar A_k^2/2\,(1+\sigma_m^2)$ is the carrier plus its pedestal. A reading window of $\pm\max(\gamma_k, 1/T)$ captures the carrier and, at low $k$, misses the pedestal: an error of $\sigma_m^2$, a few per cent, ≤ 0.2 dB. Harmless — *unless* the window is made wide to chase a $D$ that is too large, in which case it fills with floor and with the neighbours' skirts and the reading goes up by whatever sits there. That, not $D$, is the over-estimation seen when the phase-wander $D$ was used: $D$ from phase wander is biased upward by measurement noise (the drift floor of 0.01 rev at 0.1 s on every recording is noise), while the resolved core widths give $D \approx 0.3$–$2.5\times10^{-4}$.
+- A **shape fit of one Lorentzian** to the top of a line cannot work below $k_\times$: the top is the pedestal. It returns $\gamma_m$-sized widths at every order (that is the $2$–$3\times10^{-3}$ "D" the fit gave). Fit the *two*-Lorentzian form, or read $D$ only from orders above $k_\times$ and $\gamma_m$ only from orders below.
+- For the **generative model** the amplitude jitter is one more OU process per line (or one shared per rotor plus a per-line residual — whether the harmonics breathe together is a cross-spectrum question not yet measured), with two parameters readable from the low-order pedestals: $\sigma_m^2$ from the pedestal-to-carrier ratio and $\lambda_m = 2\pi\gamma_m$ from its half-width. The existing "slow per-line log-amplitude OU" item of the v2 redesign list is exactly this.
+
+## Summary in four lines
+
+$$
+x_k(t) = \bar A_k\,[1+m_k(t)]\cos\!\big(2\pi k[\bar s t + \xi(t)]\big),
+\qquad \dot\xi \sim \text{OU}(\sigma_\nu, \lambda),\quad m_k \sim \text{OU}(\sigma_m, \lambda_m)
+$$
+
+$$
+S_k(f) = \tfrac{\bar A_k^2}{2}\big[L_{\gamma_k} + \sigma_m^2\,L_{\gamma_k+\gamma_m}\big](f - k\bar s),
+\qquad \gamma_k = \pi k^2 D,\quad D = \tfrac{2\sigma_\nu^2}{\lambda},\quad \gamma_m = \tfrac{\lambda_m}{2\pi}
+$$
+
+Shaft: width $\propto k^2$, tails $1/\Delta f^2$, read above $k_\times$. Air: width fixed in Hz, level $\sigma_m^2$, read below $k_\times$. Both: the convolution, which for two Lorentzians is the sum of widths.
