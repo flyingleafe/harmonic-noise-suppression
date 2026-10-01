@@ -265,7 +265,9 @@ def rate_range(u: dict[str, Any]) -> tuple[float, float]:
         if "single_rotors" in key:
             s = _AGH_SINGLE[int(key.rsplit("__", 1)[1])]
             return 0.85 * s, 1.15 * s
-        return 70.0, 260.0
+        # 3-blade props (AGH.yaml, report Fig. 2): the shaft band, so blade-pass
+        # combs (3x) are not tracked as rotors
+        return 40.0, 100.0
     if rig == "spcup_ku_leuven":
         return 80.0, 150.0
     if rig == "spcup_maverick":
