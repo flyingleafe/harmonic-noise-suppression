@@ -205,7 +205,7 @@ known-first-party = ["utils", "framespec", "tasks", "models", "data_processing",
 # backend before imports; E402 is structural there.
 "writing/**" = ["E402"]
 # Exploration scripts kept verbatim for provenance (see their README).
-"scripts/static_rig_scratch/**" = ["E402", "E701", "E702", "E741", "F841", "B007", "SIM115", "I001"]
+"scripts/static_rig_scratch/**" = ["E402", "E701", "E702", "E741", "F841", "B007", "B023", "SIM115", "I001"]
 
 [tool.pyright]
 typeCheckingMode = "basic"

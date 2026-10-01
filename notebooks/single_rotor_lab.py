@@ -8,6 +8,7 @@ listenable, with the profile drawn as stems with caps. Driver notebook: ``single
 from __future__ import annotations
 
 import io
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +65,11 @@ def load(key: str) -> tuple[np.ndarray, int]:
     return np.load(path), int((CACHE / f"{key}.fs").read_text())
 
 
+MODELS = ("table: D = r(1 s)², no AM", "Whittle D + measured per-order AM")
+WHITTLE_DIR = Path("../results/static_rig/single_rotor/whittle")
+AM_FILE = "amplitude_jitter.json"
+
+
 @dataclass
 class Case:
     key: str
@@ -72,13 +78,64 @@ class Case:
     synth: np.ndarray  #: (C, n) the reconstruction
     model: SR.RotorModel
     wind: list[int]  #: windy mics (excluded from speed/jitter)
+    fit: SR.LineFit | SR.WhittleFit  #: the profile behind ``synth``
+    which: str  #: entry of MODELS
 
 
-_cases: dict[str, Case] = {}
+_cases: dict[tuple[str, str], Case] = {}
 
 
-def case(key: str, seed: int = 0) -> Case:
-    if key not in _cases:
+def load_whittle(key: str) -> SR.WhittleFit | None:
+    """The stored Whittle fit (``results/static_rig/single_rotor/whittle/``)."""
+    for base in (WHITTLE_DIR, Path("results/static_rig/single_rotor/whittle")):
+        path = base / f"{key}.json"
+        if path.exists():
+            r = json.loads(path.read_text())
+            return SR.WhittleFit(
+                s=r["s"],
+                D=r["D"],
+                gamma_m=r["gamma_m"],
+                sigma_m2=r["sigma_m2"],
+                orders=np.array(r["orders"]),
+                amp2=np.array(r["amp2"]),
+                loglik=r["loglik"],
+                grid=r["grid"],
+                T=r["T"],
+                mics=r["mics"],
+            )
+    return None
+
+
+def load_am(key: str) -> dict | None:
+    """Direct per-order amplitude-jitter measurement
+    (``results/static_rig/single_rotor/amplitude_jitter.json``)."""
+    for base in (WHITTLE_DIR.parent, Path("results/static_rig/single_rotor")):
+        path = base / AM_FILE
+        if path.exists():
+            return json.loads(path.read_text()).get(key)
+    return None
+
+
+def am_per_order(key: str, K: int) -> tuple[np.ndarray, np.ndarray] | None:
+    """``(σ_m² (K,), γ_m (K,))``: median over the non-windy mics per order,
+    gaps filled with the record's median."""
+    r = load_am(key)
+    if r is None:
+        return None
+    good = r["mics_good"]
+    sm = np.array([[np.nan if v is None else v for v in row] for row in r["sigma_m2"]], float)[good]
+    gm = np.array([[np.nan if v is None else v for v in row] for row in r["gamma_m"]], float)[good]
+    sm_k, gm_k = np.nanmedian(sm, axis=0), np.nanmedian(gm, axis=0)
+    sm_k = np.where(np.isfinite(sm_k), sm_k, np.nanmedian(sm_k))
+    gm_k = np.where(np.isfinite(gm_k), gm_k, np.nanmedian(gm_k))
+    out_s, out_g = np.full(K, float(np.nanmedian(sm_k))), np.full(K, float(np.nanmedian(gm_k)))
+    n = min(K, sm_k.size)
+    out_s[:n], out_g[:n] = sm_k[:n], gm_k[:n]
+    return out_s, out_g
+
+
+def case(key: str, which: str = MODELS[0], seed: int = 0) -> Case:
+    if (key, which) not in _cases:
         x, fs = load(key)
         wind = WIND[key.split("_")[1]]
         s_bar, r1 = TABLE[key]
@@ -87,9 +144,26 @@ def case(key: str, seed: int = 0) -> Case:
         )
         a, b = model.span
         real = np.asarray(x[:, a:b], dtype=np.float32)
-        synth = SR.synthesise(model.fit, fs, b - a, seed=seed).astype(np.float32)
-        _cases[key] = Case(key=key, fs=fs, real=real, synth=synth, model=model, wind=wind)
-    return _cases[key]
+        wf = load_whittle(key) if which == MODELS[1] else None
+        fit: SR.LineFit | SR.WhittleFit
+        if wf is not None:
+            fit = wf
+            am = am_per_order(key, wf.orders.size)
+            synth = SR.synthesise(wf, fs, b - a, seed=seed, am=am)
+        else:
+            fit = model.fit
+            synth = SR.synthesise(model.fit, fs, b - a, seed=seed)
+        _cases[(key, which)] = Case(
+            key=key,
+            fs=fs,
+            real=real,
+            synth=synth.astype(np.float32),
+            model=model,
+            wind=wind,
+            fit=fit,
+            which=which,
+        )
+    return _cases[(key, which)]
 
 
 def _wav_bytes(x: np.ndarray, fs: int, gain: float) -> bytes:
@@ -102,17 +176,42 @@ def _wav_bytes(x: np.ndarray, fs: int, gain: float) -> bytes:
 
 
 def summary_html(c: Case) -> str:
-    fit = c.model.fit
+    fit = c.fit
     a, b = c.model.span
     g = fit.gamma
     rows = [
         f"<b>{c.key}</b> — strict rotor-on span {a / c.fs:.1f}–{b / c.fs:.1f} s (T = {fit.T:.1f} s), "
-        f"fs {c.fs} Hz, windy mics (not used for the span): {c.wind}",
-        f"given: s̄ = <b>{fit.s:.3f} rev/s</b>, r(1 s) = {TABLE[c.key][1]:.4f} rev → D = {fit.D:.2e} rev²/s",
-        f"line HWHM γ_k = π k² D: k=2 {g[1]:.3f} Hz, k=10 {g[9]:.2f}, k=20 {g[19]:.2f}, "
-        f"k=40 {g[min(39, g.size - 1)]:.1f} Hz (resolution 1/T = {1 / fit.T:.3f} Hz); "
-        f"orders read: 1–{fit.orders[-1]}",
+        f"fs {c.fs} Hz, windy mics (not used for the span / shape fit): {c.wind}",
+        f"given: s̄ = <b>{fit.s:.3f} rev/s</b>, r(1 s) = {TABLE[c.key][1]:.4f} rev → D_phase = {TABLE[c.key][1] ** 2:.2e} rev²/s",
     ]
+    if isinstance(fit, SR.WhittleFit):
+        gD = fit.grid
+        ok = [
+            f"{d:.0e}" for d, v in zip(gD["D"], gD["loglik_D"], strict=True) if v > fit.loglik - 300
+        ]
+        rows.append(
+            f"<b>Whittle fit</b> (mics {fit.mics}): D = <b>{fit.D:.2e}</b> rev²/s "
+            f"(spectral pedestal γ_m = {fit.gamma_m:.3f} Hz, σ_m² = {fit.sigma_m2:.3f} — poorly constrained, not used); "
+            f"D grid points within 300 nats of the optimum: {ok}"
+        )
+        am = am_per_order(c.key, fit.orders.size)
+        r = load_am(c.key)
+        if am is not None and r is not None:
+            sm, gm = am
+            k = np.arange(1, fit.orders.size + 1)
+            coh = [v for v in r["coherence"] if v is not None]
+            rows.append(
+                "<b>amplitude jitter, measured per order</b> (0.25 s frames, ln A variance minus noise, non-windy mics): "
+                f"σ_m² median k≤8 {np.median(sm[k <= 8]):.3f}, k 9–30 {np.median(sm[(k > 8) & (k <= 30)]):.3f}, k>30 {np.median(sm[k > 30]):.3f}; "
+                f"γ_m median k≤8 {np.median(gm[k <= 8]):.2f} Hz, k 9–30 {np.median(gm[(k > 8) & (k <= 30)]):.2f}, k>30 {np.median(gm[k > 30]):.2f} "
+                f"(1.27 Hz = frame-rate limit); cross-order correlation of ln A: {np.median(coh):.2f} → lines breathe independently"
+            )
+    else:
+        rows.append("<b>table model</b>: D = D_phase, no amplitude jitter")
+    rows.append(
+        f"line HWHM γ_k = π k² D: k=2 {g[1]:.3f} Hz, k=10 {g[9]:.2f}, k=20 {g[19]:.2f}, "
+        f"k=40 {g[min(39, g.size - 1)]:.1f} Hz (resolution 1/T = {1 / fit.T:.3f} Hz); orders: 1–{fit.orders[-1]}"
+    )
     return "<div style='font-size:13px;line-height:1.5'>" + "<br>".join(rows) + "</div>"
 
 
@@ -128,8 +227,11 @@ class Lab:
         from plots.spectrum_viewer import SpectrumViewer
 
         self.w_rec = W.Dropdown(options=RECORDINGS, value=RECORDINGS[2], description="recording:")
+        self.w_model = W.Dropdown(
+            options=MODELS, value=MODELS[0], description="model:", layout=W.Layout(width="420px")
+        )
         self.w_info = W.HTML()
-        c = case(self.w_rec.value)
+        c = self._case()
         self.viewer = SpectrumViewer(
             c.real,
             c.fs,
@@ -178,9 +280,10 @@ class Lab:
         self.viewer.w_frange.observe(lambda _c: self._sync_profile_axis(), "value")
         self.viewer.w_faxis.observe(lambda _c: self._sync_profile_axis(), "value")
         self.w_rec.observe(lambda _c: self._on_rec(), "value")
+        self.w_model.observe(lambda _c: self._on_rec(), "value")
         self.widget = W.VBox(
             [
-                self.w_rec,
+                W.HBox([self.w_rec, self.w_model]),
                 self.w_info,
                 W.HBox(
                     [
@@ -194,20 +297,23 @@ class Lab:
         )
         self._refresh()
 
+    def _case(self) -> Case:
+        return case(self.w_rec.value, self.w_model.value)
+
     def _on_rec(self) -> None:
-        c = case(self.w_rec.value)
+        c = self._case()
         v = self.viewer
         v.audio, v.overlay, v.sr = c.real, c.synth, float(c.fs)
         v._cache.clear()
         dur = c.real.shape[1] / v.sr
         v.w_time.max = dur
         v.w_time.value = dur / 2
-        v.figure.layout.title.text = c.key
+        v.figure.layout.title.text = f"{c.key} — {c.which}"
         v._redraw_all()
         self._refresh()
 
     def _refresh(self) -> None:
-        c = case(self.w_rec.value)
+        c = self._case()
         self.w_info.value = summary_html(c)
         self._redraw_profile_audio()
 
@@ -222,14 +328,14 @@ class Lab:
     def _redraw_profile_audio(self) -> None:
         from IPython.display import Audio, display
 
-        c = case(self.w_rec.value)
+        c = self._case()
         ch = int(self.viewer.w_channel.value)
         gain = 0.9 / float(np.max(np.abs(c.real[ch])) + 1e-9)
         for out, x in ((self.a_real, c.real[ch]), (self.a_synth, c.synth[ch])):
             out.clear_output(wait=True)
             with out:
                 display(Audio(data=_wav_bytes(x, c.fs, gain), rate=c.fs, autoplay=False))
-        fit = c.model.fit
+        fit = c.fit
         f = fit.orders * fit.s
         db = 10 * np.log10(np.maximum(fit.amp2[ch], 1e-20))
         base = float(db.min()) - 6.0
@@ -243,7 +349,7 @@ class Lab:
             self.profile.data[1].x, self.profile.data[1].y = f, db
             self.profile.data[1].customdata = fit.orders
             self.profile.layout.title.update(
-                text=f"harmonic profile — {c.key} ch {ch} — amplitude dB re 1, stems with caps, no floor",
+                text=f"harmonic profile — {c.key} ch {ch} — {c.which} — amplitude dB re 1, stems with caps, no floor",
                 font={"size": 13},
             )
             self.profile.layout.yaxis.range = [base, float(db.max()) + 3]
@@ -260,13 +366,31 @@ def lab(**kw) -> Lab:
 
 
 def precompute(keys: list[str] | None = None) -> None:
-    """Warm the audio cache and the analyses for every recording."""
+    """Warm the audio cache and the analyses; one line per recording with the
+    table D and, when stored, the Whittle fit (D, γ_m, σ_m²)."""
     for k in keys or RECORDINGS:
         c = case(k)
         m = c.model
+        wf = load_whittle(k)
+        extra = (
+            f" | Whittle: D {wf.D:.2e} γ_m {wf.gamma_m:.3f} Hz σ_m² {wf.sigma_m2:.3f}"
+            if wf is not None
+            else " | Whittle: not fitted"
+        )
         print(
-            f"{k}: s {m.fit.s:.3f} D {m.fit.D:.2e} span {m.span[0] / c.fs:.1f}-{m.span[1] / c.fs:.1f}"
+            f"{k}: s {m.fit.s:.3f} D_phase {m.fit.D:.2e} span {m.span[0] / c.fs:.1f}-{m.span[1] / c.fs:.1f}{extra}"
         )
 
 
-__all__ = ["RECORDINGS", "Case", "Lab", "case", "lab", "load", "precompute", "summary_html"]
+__all__ = [
+    "MODELS",
+    "RECORDINGS",
+    "Case",
+    "Lab",
+    "case",
+    "lab",
+    "load",
+    "load_whittle",
+    "precompute",
+    "summary_html",
+]

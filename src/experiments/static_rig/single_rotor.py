@@ -21,11 +21,17 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
+from scipy.signal import lfilter
 
 __all__ = [
     "LineFit",
+    "WhittleFit",
+    "whittle_fit",
+    "AmplitudeJitter",
+    "amplitude_jitter",
     "RotorModel",
     "core_speed",
     "line_powers",
@@ -201,22 +207,299 @@ def line_powers(
     return LineFit(s=s, D=D, orders=orders, amp2=amp2, T=T)
 
 
+# ─── Whittle fit: D, AM pedestal, amplitudes ──────────────────────────────────
+
+
+@dataclass
+class WhittleFit:
+    """Profile-likelihood fit of the two-Lorentzian line model to one
+    periodogram per mic: ``S_k(f) = a_k [L_{γ_k} + σ_m² L_{γ_k+γ_m}] ⊛ K + F_k``
+    with ``γ_k = π k² D`` (shaft) and ``γ_m = λ_m / 2π`` (amplitude jitter)."""
+
+    s: float
+    D: float  #: rev²/s
+    gamma_m: float  #: Hz, HWHM of the amplitude-jitter pedestal
+    sigma_m2: float  #: pedestal power relative to the carrier
+    orders: np.ndarray  #: (K,)
+    amp2: np.ndarray  #: (C, K) carrier squared amplitude per mic (0 dB = 1)
+    loglik: float  #: Whittle log-likelihood at the optimum (fit mics)
+    grid: dict  #: profile log-likelihood slices through the optimum
+    T: float
+    mics: list[int]  #: mics the shape parameters were fitted on
+
+    @property
+    def gamma(self) -> np.ndarray:
+        return math.pi * self.orders.astype(float) ** 2 * self.D
+
+
+def _line_windows(f, P, s, K, T, half_hz=8.0, floor_hz=60.0):
+    """Per order: the periodogram within ``±half_hz`` of ``k s`` (same width
+    for all orders) ``(C, K, B)`` and the local floor level ``(C, K)`` (20th
+    percentile within ±floor_hz, scaled to the mean of exponential noise)."""
+    df = float(f[1])
+    half = int(round(min(half_hz, s / 4) / df))
+    B = 2 * half + 1
+    C = P.shape[0]
+    win = np.zeros((C, K, B))
+    floor = np.zeros((C, K))
+    hf = int(round(floor_hz / df))
+    for j in range(K):
+        c0 = int(round((j + 1) * s / df))
+        win[:, j] = P[:, c0 - half : c0 + half + 1]
+        floor[:, j] = np.percentile(P[:, max(0, c0 - hf) : c0 + hf], 20, axis=1) / 0.2231
+    off = (np.arange(B) - half) * df
+    return win, floor, off
+
+
+def _shapes(off, gam_k, gamma_m, sigma_m2, kern, df, T):
+    """Unit-carrier line shapes ``(K, B)``: ``L_{γ_k} + σ_m² L_{γ_k+γ_m}``
+    through the window kernel; an unresolved carrier is the kernel itself."""
+    from scipy.signal import fftconvolve
+
+    g1 = gam_k[:, None]
+    lor = (g1 / math.pi) / (off[None, :] ** 2 + g1**2) * df
+    unres = gam_k < df
+    if unres.any():
+        delta = np.zeros_like(off)
+        delta[off.size // 2] = 1.0
+        lor[unres] = delta
+    g2 = (gam_k + gamma_m)[:, None]
+    ped = sigma_m2 * (g2 / math.pi) / (off[None, :] ** 2 + g2**2) * df
+    sh = fftconvolve(lor + ped, kern[None, :], mode="same", axes=1)
+    return np.maximum(sh, 1e-300)
+
+
+def _profile_amplitudes(win, floor, shape, n_iter=15):
+    """Whittle ML of ``a`` per (mic, order) for ``S = a·shape + F``: damped
+    Newton in ``ln a`` from a peak-based start; returns ``(a (C,K), loglik)``."""
+    g = shape[None]
+    F = floor[:, :, None]
+    B = win.shape[2]
+    c = B // 2
+    a = np.maximum(
+        np.max(np.maximum(win[:, :, c - 2 : c + 3] - F, 0) / g[:, :, c - 2 : c + 3], axis=2), 1e-30
+    )
+    for _ in range(n_iter):
+        S = a[:, :, None] * g + F
+        r = win / S
+        grad = np.sum(g / S * (r - 1), axis=2)  # dl/da
+        hess = np.sum((g / S) ** 2 * (1 - 2 * r), axis=2)  # d2l/da2
+        d1 = a * grad
+        d2 = a * a * hess + d1
+        step = np.where(d2 < 0, -d1 / np.where(d2 < 0, d2, -1.0), np.sign(d1) * 0.5)
+        a = a * np.exp(np.clip(step, -1.0, 1.0))
+    S = a[:, :, None] * g + F
+    ll = -np.sum(np.log(S) + win / S)
+    return a, float(ll)
+
+
+def whittle_fit(
+    x_ct: np.ndarray,
+    fs: int,
+    s: float,
+    *,
+    mics: list[int] | None = None,
+    k_max: int = 150,
+    f_max: float | None = None,
+    D_grid=np.geomspace(1e-5, 1e-2, 10),
+    gm_grid=np.geomspace(0.05, 3.0, 8),
+    sm_grid=np.geomspace(0.003, 0.5, 6),
+    refine: int = 2,
+) -> WhittleFit:
+    """Profile Whittle likelihood over ``(D, γ_m, σ_m²)`` with the per-line
+    amplitudes solved in closed form at every point; the floor level of each
+    line is a known constant (local 20th percentile), never a parameter.
+    Shape parameters from ``mics`` (the non-windy ones), amplitudes for all."""
+    sel = list(range(x_ct.shape[0])) if mics is None else list(mics)
+    f, P, w = _periodogram(x_ct, fs, pad=1)
+    df = float(f[1])
+    T = x_ct.shape[1] / fs
+    nfft = 2 * (f.size - 1)
+    Wk = np.abs(np.fft.rfft(w, nfft)) ** 2 / w.sum() ** 2
+    kh = 4
+    kern = np.concatenate([Wk[kh:0:-1], Wk[: kh + 1]])
+    f_top = 0.95 * fs / 2 if f_max is None else f_max
+    K = min(k_max, int(f_top // s))
+    orders = np.arange(1, K + 1)
+    win, floor, off = _line_windows(f, P, s, K, T)
+    kk = orders.astype(float)
+
+    def ll_at(D, gm, sm):
+        sh = _shapes(off, math.pi * kk**2 * D, gm, sm, kern, df, T)
+        _, ll = _profile_amplitudes(win[sel], floor[sel], sh)
+        return ll
+
+    best = (-np.inf, None)
+    grid = {
+        "D": list(map(float, D_grid)),
+        "gamma_m": list(map(float, gm_grid)),
+        "sigma_m2": list(map(float, sm_grid)),
+    }
+    LL = np.full((len(D_grid), len(gm_grid), len(sm_grid)), -np.inf)
+    for i, D in enumerate(D_grid):
+        for j, gm in enumerate(gm_grid):
+            for l_, sm in enumerate(sm_grid):
+                LL[i, j, l_] = ll_at(D, gm, sm)
+    i, j, l_ = np.unravel_index(int(np.argmax(LL)), LL.shape)
+    D, gm, sm = float(D_grid[i]), float(gm_grid[j]), float(sm_grid[l_])
+    best = (float(LL[i, j, l_]), (D, gm, sm))
+    # local refinement: shrink the log-step around the optimum
+    steps = [
+        math.log(D_grid[1] / D_grid[0]),
+        math.log(gm_grid[1] / gm_grid[0]),
+        math.log(sm_grid[1] / sm_grid[0]),
+    ]
+    for _ in range(refine):
+        steps = [st / 3 for st in steps]
+        cand = [
+            (D * math.exp(a * steps[0]), gm * math.exp(b * steps[1]), sm * math.exp(c * steps[2]))
+            for a in (-1, 0, 1)
+            for b in (-1, 0, 1)
+            for c in (-1, 0, 1)
+        ]
+        vals = [ll_at(*cnd) for cnd in cand]
+        m = int(np.argmax(vals))
+        if vals[m] > best[0]:
+            best = (float(vals[m]), cand[m])
+            D, gm, sm = cand[m]
+    grid["loglik_D"] = [float(v) for v in LL[:, j, l_]]
+    grid["loglik_gamma_m"] = [float(v) for v in LL[i, :, l_]]
+    grid["loglik_sigma_m2"] = [float(v) for v in LL[i, j, :]]
+    sh = _shapes(off, math.pi * kk**2 * D, gm, sm, kern, df, T)
+    amp2, _ = _profile_amplitudes(win, floor, sh)
+    return WhittleFit(
+        s=s,
+        D=D,
+        gamma_m=gm,
+        sigma_m2=sm,
+        orders=orders,
+        amp2=amp2,
+        loglik=best[0],
+        grid=grid,
+        T=T,
+        mics=sel,
+    )
+
+
+# ─── amplitude jitter, measured directly per order ────────────────────────────
+
+
+@dataclass
+class AmplitudeJitter:
+    """Per-order amplitude jitter from short-frame amplitude tracks."""
+
+    orders: np.ndarray  #: (K,)
+    sigma_m2: np.ndarray  #: (C, K) variance of ln A_k(t), noise-corrected (nan: line too weak)
+    gamma_m: np.ndarray  #: (C, K) Hz, 1/(2π · integral correlation time of ln A_k)
+    snr_db: np.ndarray  #: (C, K) mean line/noise of the frame amplitudes
+    coherence: np.ndarray  #: (C,) median pairwise correlation of ln A_k(t) across usable orders
+    frame_s: float
+
+
+def amplitude_jitter(
+    x_ct: np.ndarray,
+    fs: int,
+    s: float,
+    *,
+    k_max: int = 150,
+    frame_s: float = 0.25,
+    snr_min_db: float = 10.0,
+) -> AmplitudeJitter:
+    """Track every harmonic's amplitude with a ``frame_s`` Hann STFT (hop
+    half a frame, peak of ±1 bin around ``k s`` so the shaft jitter stays
+    inside the bin), then per order and mic: variance of ``ln A_k(t)`` minus
+    the additive-noise part (``N/(2 A²)``, noise read midway between
+    harmonics), the integral correlation time of ``ln A_k`` → ``γ_m``, and
+    the median correlation of ``ln A_k`` across usable orders."""
+    nb = int(frame_s * fs)
+    hop = nb // 2
+    n_fr = (x_ct.shape[1] - nb) // hop + 1
+    w = np.hanning(nb)
+    nfft = 1 << int(math.ceil(math.log2(2 * nb)))
+    df = fs / nfft
+    K = min(k_max, int(0.95 * fs / 2 // s))
+    orders = np.arange(1, K + 1)
+    C = x_ct.shape[0]
+    A2 = np.zeros((C, K, n_fr))
+    N2 = np.zeros((C, K, n_fr))
+    idx = np.rint(orders * s / df).astype(int)
+    idn = np.rint((orders + 0.5) * s / df).astype(int)
+    h = max(1, int(round(0.5 * s / 4 / df)))  # ±1 native bin (4/frame_s Hz)
+    for i in range(n_fr):
+        X = np.fft.rfft(x_ct[:, i * hop : i * hop + nb] * w, nfft, axis=1)
+        P = (np.abs(X) * (2.0 / w.sum())) ** 2
+        for j in range(K):
+            A2[:, j, i] = P[:, idx[j] - h : idx[j] + h + 1].max(axis=1)
+            N2[:, j, i] = P[:, idn[j] - h : idn[j] + h + 1].max(axis=1)
+    snr = 10 * np.log10(np.maximum(A2.mean(axis=2) / np.maximum(N2.mean(axis=2), 1e-300), 1e-3))
+    lnA = 0.5 * np.log(np.maximum(A2, 1e-300))
+    t = np.arange(n_fr) * hop / fs
+    sig = np.full((C, K), np.nan)
+    gam = np.full((C, K), np.nan)
+    coh = np.full(C, np.nan)
+    for c in range(C):
+        tracks = []
+        for j in range(K):
+            if snr[c, j] < snr_min_db:
+                continue
+            y = lnA[c, j] - np.polyval(np.polyfit(t, lnA[c, j], 1), t)
+            v = float(np.var(y)) - 0.5 * float(N2[c, j].mean() / A2[c, j].mean())
+            sig[c, j] = max(v, 0.0)
+            ac = np.correlate(y, y, "full")[y.size - 1 :] / (
+                np.arange(y.size, 0, -1) * max(np.var(y), 1e-300)
+            )
+            pos = ac[: max(2, n_fr // 4)]
+            first_neg = int(np.argmax(pos <= 0)) if (pos <= 0).any() else pos.size
+            tau_c = float(np.sum(pos[:first_neg]) * hop / fs) - 0.5 * hop / fs
+            gam[c, j] = 1.0 / (2 * math.pi * max(tau_c, hop / fs))
+            tracks.append(y)
+        if len(tracks) >= 3:
+            R = np.corrcoef(np.stack(tracks))
+            coh[c] = float(np.median(R[np.triu_indices(len(tracks), 1)]))
+    return AmplitudeJitter(
+        orders=orders, sigma_m2=sig, gamma_m=gam, snr_db=snr, coherence=coh, frame_s=frame_s
+    )
+
+
 # ─── synthesis ────────────────────────────────────────────────────────────────
 
 
-def synthesise(fit: LineFit, fs: int, n: int, seed: int = 0) -> np.ndarray:
+def synthesise(
+    fit: LineFit | WhittleFit,
+    fs: int,
+    n: int,
+    seed: int = 0,
+    am: tuple[Any, Any] | None = None,
+    env_rate: int = 200,
+) -> np.ndarray:
     """``(C, n)`` audio from the profile: one shaft (rate ``s``, phase
     diffusion ``D``) shared by all mics, every harmonic at its measured
-    amplitude with a random phase. Nothing else."""
+    amplitude with a random phase; with ``am = (σ_m², γ_m)`` — scalars or
+    per-order arrays — each line also carries its own log-amplitude OU
+    jitter ``exp(g(t))`` (variance ``σ_m²``, memory ``1/(2π γ_m)``,
+    independent per line and mic). Nothing else."""
     rng = np.random.default_rng(seed)
-    C = fit.amp2.shape[0]
+    C, K = fit.amp2.shape
     dtheta = fit.s / fs + math.sqrt(fit.D / fs) * rng.standard_normal(n)
     theta = np.cumsum(dtheta)
     out = np.zeros((C, n))
+    sm = np.broadcast_to(np.asarray(am[0] if am is not None else 0.0, float), (K,))
+    gm = np.broadcast_to(np.asarray(am[1] if am is not None else 1.0, float), (K,))
+    dt = 1.0 / env_rate
+    n_env = n // (fs // env_rate) + 2
+    t_env = np.arange(n_env) * dt
+    t = np.arange(n) / fs
     for j, k in enumerate(fit.orders):
         base = 2 * np.pi * k * theta
+        rho = math.exp(-2 * math.pi * float(gm[j]) * dt)
         for c in range(C):
-            out[c] += math.sqrt(fit.amp2[c, j]) * np.cos(base + rng.uniform(0, 2 * np.pi))
+            amp = math.sqrt(fit.amp2[c, j])
+            if am is not None and sm[j] > 0:
+                noise = rng.standard_normal(n_env) * math.sqrt(sm[j] * (1 - rho**2))
+                noise[0] = rng.standard_normal() * math.sqrt(sm[j])
+                g = lfilter([1.0], [1.0, -rho], noise)
+                amp = amp * np.exp(np.interp(t, t_env, g) - 0.5 * sm[j])
+            out[c] += amp * np.cos(base + rng.uniform(0, 2 * np.pi))
     return out
 
 

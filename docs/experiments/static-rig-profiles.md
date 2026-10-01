@@ -329,3 +329,28 @@ Motor4 ch 4.
 Open: read D from the cores above k_× and the AM parameters (σ_m², λ_m) from
 the pedestals below it; coherence of the AM across orders; then back to the
 multi-rotor rigs with the same reading.
+
+**Whittle fit and direct amplitude jitter (2026-10-01, laptop, ~5 min for
+all 20).** `single_rotor.whittle_fit`: two-Lorentzian line
+`a_k[L_γk + σ_m² L_(γk+γm)] ⊛ K + F_k` on the full-span Hann periodogram
+(F_k = local 20th percentile, a constant), amplitudes per line in closed
+form, grid + local search over (D, γ_m, σ_m²) on the non-windy mics;
+`results/static_rig/single_rotor/whittle/`. `single_rotor.amplitude_jitter`:
+0.25 s frames, peak of ±1 bin at k·s̄ → ln A_k(t) per order and mic; variance
+minus the noise part = σ²_m,k, integral correlation time → γ_m,k, cross-order
+correlation; `.../amplitude_jitter.json`.
+
+- D_Whittle (×10⁻⁴, 50→90 %): M1 9.2/8.4/10.9/9.2/11.9; M2 2.2/3.0/6.0/
+  12.9/7.7; M3 7.1/3.9/10.9/10.0/10.0; M4 4.6/3.9/3.6/4.6/3.9. Sharply
+  peaked, within 1.5× of D_phase on 15/20: D ≈ 1e-3 (Motor1, M2/M3 ≥ 70 %)
+  and 3–5e-4 (Motor4, M2/M3 ≤ 60 %) stand; the "D_core ≈ 1e-4" reading from
+  1–13 orders was the unreliable one.
+- The spectral AM pair is not constrained: γ_m at the grid floor on 19/20,
+  σ_m² scattered 0.02–0.56.
+- Direct per-order: σ_m² = 0.005–0.08 at k ≤ 8 (σ_m ≈ 0.1–0.3), 0.1–0.17 at
+  k = 9–30 (partly frame scalloping of the FM), 0.02–0.11 above; γ_m ≈
+  0.2–0.6 Hz at k ≤ 8 (memory 0.3–0.8 s), ~1 Hz at mid orders, frame-rate-
+  limited above k ≈ 30. Cross-order correlation of ln A_k(t): −0.01…0.08 on
+  all 20 — **the harmonics breathe independently**, one AM process per line.
+- Notebook model 2 = Whittle D + the measured per-order (σ²_m,k, γ_m,k) as
+  independent log-amplitude OU per line.
