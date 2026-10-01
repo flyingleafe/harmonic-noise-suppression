@@ -1,0 +1,146 @@
+{
+ "rig": "agh",
+ "drone": "unspecified small X-frame quadrotor with 3-blade props (SPCUP19 team AGH), fixed on a stand in an anechoic chamber; 8-ch electret cube array below it + AKG C451 B reference mic on a separate stand",
+ "n_rotors": 4,
+ "frame": "AGH.yaml frame: origin = centroid of the 8 array mics (derived); x, y parallel to the loudspeaker axes of 'static clean/info.xlsx' (azimuth counter-clockwise from +x); z up, towards the drone; metres. The drone's own heading relative to x, y is not documented.",
+ "configs": {
+  "array8": {
+   "mic_pos": [
+    [
+     0.1033,
+     -0.0522,
+     -0.0505
+    ],
+    [
+     0.1043,
+     0.0502,
+     0.0505
+    ],
+    [
+     0.0522,
+     0.1033,
+     -0.0505
+    ],
+    [
+     -0.0502,
+     0.1043,
+     0.0505
+    ],
+    [
+     -0.1033,
+     0.0522,
+     -0.0505
+    ],
+    [
+     -0.1043,
+     -0.0502,
+     0.0505
+    ],
+    [
+     -0.0522,
+     -0.1033,
+     -0.0505
+    ],
+    [
+     0.0502,
+     -0.1043,
+     0.0505
+    ]
+   ],
+   "channel_map": {
+    "text": "row i = wav channel i of 'ego-noise/mic array/*.wav' (each channel's position was fitted from that channel's own TDOAs)",
+    "quality": "derived",
+    "source": "src/data_processing/sources/spcup19_meta/AGH.yaml geometry.array8.channel_map_source"
+   },
+   "rotor_pos": null,
+   "rotor_labels": [],
+   "rotor_pos_null_reason": "No rotor coordinates are documented. AGH.yaml: SRP-PHAT / MUSIC on the ego-noise files puts the rotor noise at elevation ~58-62 deg above the array centre, but azimuth peaks (~68, 126, -132, -48 deg) have only 1-1.5 dB contrast and range is unresolved. This campaign's attempt (ego-noise/mic array/4.wav, setting 20, the four BPF lines 209.6/214.3/216.0/217.4 Hz -> shaft rates 69.85/71.47/72.02/72.49 Hz refined by comb search; per-rotor harmonic families k <= 70, f <= 5 kHz, rank-1 cross-spectral vectors, phase-only near-field beam on a 3-D grid +-0.3 m x +-0.3 m x -0.1..0.4 m) failed: beam peaks 0.18-0.21 against a grid median 0.12-0.13, two of four peaks on the grid edge, the other two at implausible places (z ~ 0). The rotor field at this array is not explained by four point sources with the derived mic_pos.",
+   "rotor_partial_constraints": {
+    "rotor_plane_height_above_array_centre_m": {
+     "value": 0.16,
+     "uncertainty": 0.04,
+     "quality": "estimated",
+     "source": "report Fig. 2 photo (pdfimages img-001): prop plane ~255 px above the mid-point between the two mic layers, layer gap 0.101 m ~150-160 px at that depth; perspective not corrected"
+    },
+    "rotor_radius_from_axis_m": {
+     "value": 0.1,
+     "uncertainty": 0.03,
+     "quality": "estimated",
+     "source": "height 0.16 m and SRP elevation 58-62 deg (AGH.yaml) -> 0.085-0.10 m; Fig. 2 shows a small racing X-frame (motor spacing consistent with ~0.2 m diagonal)"
+    },
+    "rotor_azimuths": {
+     "value": null,
+     "quality": "unknown",
+     "source": "SRP azimuth peaks ~68/126/-132/-48 deg have 1-1.5 dB contrast (AGH.yaml); not usable"
+    }
+   },
+   "quality": {
+    "mic_pos": "derived",
+    "rotor_pos": "unknown"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.01,
+     "vertical": 0.03,
+     "quality": "derived",
+     "basis": "AGH.yaml: regular-model vs unconstrained fit differ 0.3/0.9/2.3 cm (x/y/z); layer gap 0.101 m is uncertain by ~+-0.03 m; scale +-1 % with c"
+    },
+    "rotor_pos": null
+   },
+   "sources": [
+    "src/data_processing/sources/spcup19_meta/AGH.yaml (geometry.array8, frame, open_questions)",
+    ".cache/spcup19_docs/SPCUP19_AGH_documentation.pdf p.1, Fig. 2/3",
+    ".cache/source_raw/SPCUP19-egonoise/AGH/ego-noise/mic array/4.wav (localisation attempt)"
+   ],
+   "notes": "Two horizontal 4-mic squares (radius 0.116 m, 0.101 m apart): lower layer = channels 0, 2, 4, 6; upper = 1, 3, 5, 7. The drone sits on posts above the upper plate. All four rotors run in every array take; at setting 20 they are separable by speed (4 distinct BPF lines), at higher settings they overlap more."
+  },
+  "ref_mic": {
+   "mic_pos": null,
+   "channel_map": {
+    "text": "single channel (AKG C451 B reference condenser mic)",
+    "quality": "reported",
+    "source": "AGH.yaml geometry.ref_mic"
+   },
+   "rotor_pos": null,
+   "rotor_labels": [
+    "team rotor 1",
+    "team rotor 2",
+    "team rotor 3",
+    "team rotor 4"
+   ],
+   "quality": {
+    "mic_pos": "unknown",
+    "rotor_pos": "unknown"
+   },
+   "uncertainty_m": {
+    "mic_pos": null,
+    "rotor_pos": null
+   },
+   "sources": [
+    "src/data_processing/sources/spcup19_meta/AGH.yaml geometry.ref_mic",
+    "report Fig. 2 (mic on its own stand beside the drone)"
+   ],
+   "notes": "No coordinates anywhere; only visible in Fig. 2 (beside the drone, roughly at arm / upper-array height, a few dm from the nearest rotor). At the common setting 160 the single-rotor RMS is rotor 4 -20.8, rotor 1 -22.7, rotor 3 -24.8, rotor 2 -29.3 dBFS (AGH.yaml) - a level ordering, not a geometry. One mic only, so the single-rotor takes cannot test spreading across microphones."
+  }
+ },
+ "recordings": {
+  "AGH__ego-noise__mic_array__0": "array8",
+  "AGH__ego-noise__mic_array__1": "array8",
+  "AGH__ego-noise__mic_array__2": "array8",
+  "AGH__ego-noise__mic_array__3": "array8",
+  "AGH__ego-noise__mic_array__4": "array8",
+  "AGH__ego-noise__single_rotors__0": "ref_mic",
+  "AGH__ego-noise__single_rotors__1": "ref_mic",
+  "AGH__ego-noise__single_rotors__2": "ref_mic",
+  "AGH__ego-noise__single_rotors__3": "ref_mic",
+  "AGH__ego-noise__single_rotors__4": "ref_mic",
+  "AGH__ego-noise__single_rotors__5": "ref_mic",
+  "AGH__ego-noise__single_rotors__6": "ref_mic",
+  "AGH__ego-noise__single_rotors__7": "ref_mic"
+ },
+ "open_questions": [
+  "Rotor positions (and which physical rotor is the team's 'rotor 1..4') are undocumented; only elevation (~58-62 deg) is constrained acoustically, height/radius only roughly from the photo. Asking the AGH team or fitting rotor positions as free parameters in the spreading test are the remaining routes.",
+  "Reference-mic position unknown (single-rotor takes therefore carry no geometry).",
+  "Array layer gap (0.101 m) is the least certain mic coordinate (+-0.03 m)."
+ ]
+}

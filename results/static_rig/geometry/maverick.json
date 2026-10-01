@@ -1,0 +1,91 @@
+{
+ "rig": "maverick",
+ "drone": "YH-19HW foldable toy quadcopter (brushed motors), 3 lavalier mics taped under the body (SPCUP19 team Maverick, BUET)",
+ "n_rotors": 4,
+ "frame": "Report Fig. 3 frame: origin = centre of the drone body; x across the body (right in the Fig. 3 top view); y along the long axis towards mics 1-2; z up; metres (report cm converted), right-handed.",
+ "configs": {
+  "yh19hw_tri3": {
+   "mic_pos": [
+    [
+     -0.0256,
+     0.0422,
+     -0.0052
+    ],
+    [
+     0.0256,
+     0.0422,
+     -0.0052
+    ],
+    [
+     0.0,
+     -0.0422,
+     -0.0112
+    ]
+   ],
+   "channel_map": {
+    "text": "wav channel i = microphone (i+1) of report Fig. 3",
+    "quality": "estimated",
+    "source": "Maverick.yaml channel_map_source: assumption, not verifiable from the data (inter-channel coherence 0.03-0.06)"
+   },
+   "rotor_pos": [
+    [
+     0.07,
+     0.075,
+     0.025
+    ],
+    [
+     -0.072,
+     0.076,
+     0.025
+    ],
+    [
+     -0.073,
+     -0.071,
+     0.025
+    ],
+    [
+     0.069,
+     -0.067,
+     0.025
+    ]
+   ],
+   "rotor_labels": [
+    "(+x,+y)",
+    "(-x,+y)",
+    "(-x,-y)",
+    "(+x,-y)"
+   ],
+   "quality": {
+    "mic_pos": "reported",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.003,
+     "vertical": 0.003,
+     "quality": "estimated",
+     "basis": "report Fig. 3 coordinates to 0.01 cm; lavalier mics taped by hand"
+    },
+    "rotor_pos": {
+     "horizontal": 0.01,
+     "vertical": 0.02,
+     "quality": "estimated",
+     "basis": "Maverick.yaml: x/y from the Fig. 2 bottom photo scaled by the reported mic spacings; z = guessed prop plane 2.5 cm above the origin"
+    }
+   },
+   "sources": [
+    "src/data_processing/sources/spcup19_meta/Maverick.yaml (geometry.yh19hw_tri3)",
+    "SPCUP19_Maverick_documentation.pdf Fig. 3 p.5 (mic coordinates), Fig. 2 p.4 (bottom photo)"
+   ],
+   "notes": "Rotor order is the annotator's choice (no motor numbering in the report); nose direction not stated. The three mics went through three separate USB sound cards, so channels are not guaranteed sample-synchronous (Maverick.yaml: 100-2000 Hz envelope xcorr peak within ~1 ms in recording 4). Maverick__4: motors at constant speed, drone stationary (presumably on the floor, not stated); comb ~37/75 Hz."
+  }
+ },
+ "recordings": {
+  "Maverick__4": "yh19hw_tri3"
+ },
+ "open_questions": [
+  "Channel order (wav channel i = mic i+1) assumed; the mic-1/mic-2 swap only mirrors x, which leaves the near-symmetric rotor set unchanged within its uncertainty.",
+  "Rotor z is a guess (+-0.02 m); the drone's nose and motor numbering are undocumented.",
+  "Recording 4's support (floor vs stand) is not stated; a floor would add a strong image source ~2 x mount height away."
+ ]
+}

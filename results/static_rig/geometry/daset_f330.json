@@ -1,0 +1,775 @@
+{
+ "rig": "daset_f330",
+ "drone": "DJI F330 (DroneAudioSet drone2; wheelbase 0.33 m), rigidly affixed to an aluminium frame 1.5 m above the floor, fixed throttle (low/high)",
+ "n_rotors": 4,
+ "frame": "Publisher array frame (DroneAudioSet-code mic_geometry_util.py): origin = drone centre (on the array axis, propeller plane taken as z = 0); x, y = the publisher's array axes (azimuth counter-clockwise from +x; the loudspeaker of the with-source takes lies at -135 deg = paper's 225 deg); z up; metres. Mup at z = +mic_dist, Mdown at z = -mic_dist, Mcenter at the Mup plane centre.",
+ "configs": {
+  "up_25cm": {
+   "mic_pos": [
+    [
+     0.0,
+     -0.15,
+     0.25
+    ],
+    [
+     -0.10607,
+     -0.10607,
+     0.25
+    ],
+    [
+     0.15,
+     0.0,
+     0.25
+    ],
+    [
+     -0.10607,
+     0.10607,
+     0.25
+    ],
+    [
+     0.10607,
+     -0.10607,
+     0.25
+    ],
+    [
+     -0.15,
+     0.0,
+     0.25
+    ],
+    [
+     0.10607,
+     0.10607,
+     0.25
+    ],
+    [
+     0.0,
+     0.15,
+     0.25
+    ]
+   ],
+   "channel_map": {
+    "text": "audio channel i (0-based) of mic3_8array-up-*.wav at azimuth [270, 225, 0, 135, 315, 180, 45, 90][i] deg on a ring of radius 0.15 m",
+    "quality": "reported",
+    "source": "DroneAudioSet-code scripts/config.py mic_reorder_list [6,5,0,3,7,4,1,2] -> circular_array_positions (scripts/utils/mic_geometry_util.py); overall_pipeline.ipynb cell 7 MIC_ANGLE_VECTOR; the publisher runs it on mic3_8array-up only, Mdown use is [INFERENCE]"
+   },
+   "rotor_pos": [
+    [
+     0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     -0.11667,
+     0.0
+    ],
+    [
+     0.11667,
+     -0.11667,
+     0.0
+    ]
+   ],
+   "rotor_pos_alt_0based": [
+    [
+     0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.165,
+     0.0
+    ],
+    [
+     -0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     -0.165,
+     0.0
+    ]
+   ],
+   "rotor_labels": [
+    "az45",
+    "az135",
+    "az225",
+    "az315"
+   ],
+   "quality": {
+    "mic_pos": "reported",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.01,
+     "vertical": 0.03,
+     "quality": "estimated",
+     "basis": "ring diameter reported (paper §3.3); mount tolerance; the reference point of 'mic-dist' on the drone is undefined"
+    },
+    "rotor_pos": {
+     "horizontal": 0.02,
+     "vertical": 0.05,
+     "quality": "estimated",
+     "basis": "radius = wheelbase/2 = 0.165 m (reported wheelbase); azimuth conditional on the 1-based reading (else rotate by 45 deg: 0.126 m chord); prop plane vs 'drone' reference unknown"
+    }
+   },
+   "sources": [
+    "paper arXiv:2510.15383 §3.2 (wheelbase), §3.3 (17 mics; arrays above/below at 25/50 cm; diameters 50/30 cm), App. A Fig. 8 caption, Fig. 1",
+    "github.com/augmented-human-lab/DroneAudioSet-code scripts/config.py, scripts/utils/mic_geometry_util.py, overall_pipeline.ipynb (.cache/daset_docs/code)",
+    ".cache/daset_docs/daset-annotations.yaml (geometry, microphones)"
+   ],
+   "notes": "Mup: file token mic3_8array-up. Rotor azimuths. Paper App. A Fig. 8 caption: 'channel 1 represents a microphone location that is in-between two propellers, while channel 2 represents a location directly above or below the propeller'. Publisher code numbers channels from 1 (overall_pipeline.ipynb cell 14 file names '_ch{ch+1}', cell 16 'np.argmin(rms_values) + 1  # Channels are 1-indexed'), so channel 1 = index 0 at 270 deg (between props) and channel 2 = index 1 at 225 deg (over a prop) -> props at 45/135/225/315 deg (used). The 0-based reading (index 1 at 225 deg between, index 2 at 0 deg over a prop) is also geometrically consistent and gives 0/90/180/270 deg (rotor_pos_alt_0based). Acoustic localisation of per-rotor harmonic families did not separate four rotors (File2 families all at az 13-48 deg on both arrays, File1/File4 at 100-320 deg), so audio does not choose between the two readings. Radius = wheelbase/2 (diagonal motor-to-motor distance, paper §3.2). z = 0: the drone reference plane of 'mic-dist' is taken as the propeller plane. Audio support for the publisher's ring order (drone2, 50 cm, low, File2): rank-1 cross-spectral vectors of the rotor lines at 0.7-4 kHz (1 s STFT, 20 s, rank-1 ratio > 0.5), phase-only near-field beam over a free source position in the rotor plane; mean best beam power Mup 0.939 (11 lines) vs 0.742-0.900 (median 0.778) for 40 random channel permutations and 0.759 for sequential rings; Mdown 0.883 (6 lines) vs 0.631-0.778 (median 0.691) and 0.664. This validates the ring ORDER only: a rigid rotation or reflection of the array with a free source fits equally well, so absolute orientation and the Mdown handedness rest on the code."
+  },
+  "down_25cm": {
+   "mic_pos": [
+    [
+     0.0,
+     -0.15,
+     -0.25
+    ],
+    [
+     -0.10607,
+     -0.10607,
+     -0.25
+    ],
+    [
+     0.15,
+     0.0,
+     -0.25
+    ],
+    [
+     -0.10607,
+     0.10607,
+     -0.25
+    ],
+    [
+     0.10607,
+     -0.10607,
+     -0.25
+    ],
+    [
+     -0.15,
+     0.0,
+     -0.25
+    ],
+    [
+     0.10607,
+     0.10607,
+     -0.25
+    ],
+    [
+     0.0,
+     0.15,
+     -0.25
+    ]
+   ],
+   "channel_map": {
+    "text": "audio channel i (0-based) of mic2_8array-down-*.wav at azimuth [270, 225, 0, 135, 315, 180, 45, 90][i] deg on a ring of radius 0.15 m",
+    "quality": "reported (code) / estimated (Mdown use)",
+    "source": "DroneAudioSet-code scripts/config.py mic_reorder_list [6,5,0,3,7,4,1,2] -> circular_array_positions (scripts/utils/mic_geometry_util.py); overall_pipeline.ipynb cell 7 MIC_ANGLE_VECTOR; the publisher runs it on mic3_8array-up only, Mdown use is [INFERENCE]"
+   },
+   "rotor_pos": [
+    [
+     0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     -0.11667,
+     0.0
+    ],
+    [
+     0.11667,
+     -0.11667,
+     0.0
+    ]
+   ],
+   "rotor_pos_alt_0based": [
+    [
+     0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.165,
+     0.0
+    ],
+    [
+     -0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     -0.165,
+     0.0
+    ]
+   ],
+   "rotor_labels": [
+    "az45",
+    "az135",
+    "az225",
+    "az315"
+   ],
+   "quality": {
+    "mic_pos": "reported",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.01,
+     "vertical": 0.03,
+     "quality": "estimated",
+     "basis": "ring diameter reported (paper §3.3); mount tolerance; the reference point of 'mic-dist' on the drone is undefined"
+    },
+    "rotor_pos": {
+     "horizontal": 0.02,
+     "vertical": 0.05,
+     "quality": "estimated",
+     "basis": "radius = wheelbase/2 = 0.165 m (reported wheelbase); azimuth conditional on the 1-based reading (else rotate by 45 deg: 0.126 m chord); prop plane vs 'drone' reference unknown"
+    }
+   },
+   "sources": [
+    "paper arXiv:2510.15383 §3.2 (wheelbase), §3.3 (17 mics; arrays above/below at 25/50 cm; diameters 50/30 cm), App. A Fig. 8 caption, Fig. 1",
+    "github.com/augmented-human-lab/DroneAudioSet-code scripts/config.py, scripts/utils/mic_geometry_util.py, overall_pipeline.ipynb (.cache/daset_docs/code)",
+    ".cache/daset_docs/daset-annotations.yaml (geometry, microphones)"
+   ],
+   "notes": "Mdown: file token mic2_8array-down. Identification: in the simultaneous File2 take (drone2 50 cm low) Mdown's 20-100 Hz band is 20-47 dB above Mup's per channel (downwash wind; paper: 'Mdown ... wind noise exposure'), 1-4 kHz within ~3 dB. Rotor azimuths. Paper App. A Fig. 8 caption: 'channel 1 represents a microphone location that is in-between two propellers, while channel 2 represents a location directly above or below the propeller'. Publisher code numbers channels from 1 (overall_pipeline.ipynb cell 14 file names '_ch{ch+1}', cell 16 'np.argmin(rms_values) + 1  # Channels are 1-indexed'), so channel 1 = index 0 at 270 deg (between props) and channel 2 = index 1 at 225 deg (over a prop) -> props at 45/135/225/315 deg (used). The 0-based reading (index 1 at 225 deg between, index 2 at 0 deg over a prop) is also geometrically consistent and gives 0/90/180/270 deg (rotor_pos_alt_0based). Acoustic localisation of per-rotor harmonic families did not separate four rotors (File2 families all at az 13-48 deg on both arrays, File1/File4 at 100-320 deg), so audio does not choose between the two readings. Radius = wheelbase/2 (diagonal motor-to-motor distance, paper §3.2). z = 0: the drone reference plane of 'mic-dist' is taken as the propeller plane. Audio support for the publisher's ring order (drone2, 50 cm, low, File2): rank-1 cross-spectral vectors of the rotor lines at 0.7-4 kHz (1 s STFT, 20 s, rank-1 ratio > 0.5), phase-only near-field beam over a free source position in the rotor plane; mean best beam power Mup 0.939 (11 lines) vs 0.742-0.900 (median 0.778) for 40 random channel permutations and 0.759 for sequential rings; Mdown 0.883 (6 lines) vs 0.631-0.778 (median 0.691) and 0.664. This validates the ring ORDER only: a rigid rotation or reflection of the array with a free source fits equally well, so absolute orientation and the Mdown handedness rest on the code."
+  },
+  "centre_25cm": {
+   "mic_pos": [
+    [
+     0.0,
+     0.0,
+     0.25
+    ]
+   ],
+   "channel_map": {
+    "text": "single channel (one of the 6 raw Soundskrit channels, which one is not stated)",
+    "quality": "reported",
+    "source": "publisher scripts/0_preprocess_data.py ('soundskrit' n_mics = 6, first channel kept); daset-annotations.yaml microphones.mic1_soundskrit"
+   },
+   "rotor_pos": [
+    [
+     0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     -0.11667,
+     0.0
+    ],
+    [
+     0.11667,
+     -0.11667,
+     0.0
+    ]
+   ],
+   "rotor_pos_alt_0based": [
+    [
+     0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.165,
+     0.0
+    ],
+    [
+     -0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     -0.165,
+     0.0
+    ]
+   ],
+   "rotor_labels": [
+    "az45",
+    "az135",
+    "az225",
+    "az315"
+   ],
+   "quality": {
+    "mic_pos": "estimated",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.03,
+     "vertical": 0.03,
+     "quality": "estimated",
+     "basis": "paper Fig. 1a schematic (green dot at the centre of the Mup plane); photo Fig. 1b shows a central element on the Mup plate"
+    },
+    "rotor_pos": {
+     "horizontal": 0.02,
+     "vertical": 0.05,
+     "quality": "estimated",
+     "basis": "as for the arrays"
+    }
+   },
+   "sources": [
+    "paper arXiv:2510.15383 §3.3 ('a central standalone mic above the drone (Mcenter)'), Fig. 1a/b",
+    ".cache/daset_docs/daset-annotations.yaml"
+   ],
+   "notes": "Mcenter: file token mic1_soundskrit. Independent clock (see simultaneity). Rotor azimuths. Paper App. A Fig. 8 caption: 'channel 1 represents a microphone location that is in-between two propellers, while channel 2 represents a location directly above or below the propeller'. Publisher code numbers channels from 1 (overall_pipeline.ipynb cell 14 file names '_ch{ch+1}', cell 16 'np.argmin(rms_values) + 1  # Channels are 1-indexed'), so channel 1 = index 0 at 270 deg (between props) and channel 2 = index 1 at 225 deg (over a prop) -> props at 45/135/225/315 deg (used). The 0-based reading (index 1 at 225 deg between, index 2 at 0 deg over a prop) is also geometrically consistent and gives 0/90/180/270 deg (rotor_pos_alt_0based). Acoustic localisation of per-rotor harmonic families did not separate four rotors (File2 families all at az 13-48 deg on both arrays, File1/File4 at 100-320 deg), so audio does not choose between the two readings. Radius = wheelbase/2 (diagonal motor-to-motor distance, paper §3.2). z = 0: the drone reference plane of 'mic-dist' is taken as the propeller plane."
+  },
+  "up_50cm": {
+   "mic_pos": [
+    [
+     0.0,
+     -0.15,
+     0.5
+    ],
+    [
+     -0.10607,
+     -0.10607,
+     0.5
+    ],
+    [
+     0.15,
+     0.0,
+     0.5
+    ],
+    [
+     -0.10607,
+     0.10607,
+     0.5
+    ],
+    [
+     0.10607,
+     -0.10607,
+     0.5
+    ],
+    [
+     -0.15,
+     0.0,
+     0.5
+    ],
+    [
+     0.10607,
+     0.10607,
+     0.5
+    ],
+    [
+     0.0,
+     0.15,
+     0.5
+    ]
+   ],
+   "channel_map": {
+    "text": "audio channel i (0-based) of mic3_8array-up-*.wav at azimuth [270, 225, 0, 135, 315, 180, 45, 90][i] deg on a ring of radius 0.15 m",
+    "quality": "reported",
+    "source": "DroneAudioSet-code scripts/config.py mic_reorder_list [6,5,0,3,7,4,1,2] -> circular_array_positions (scripts/utils/mic_geometry_util.py); overall_pipeline.ipynb cell 7 MIC_ANGLE_VECTOR; the publisher runs it on mic3_8array-up only, Mdown use is [INFERENCE]"
+   },
+   "rotor_pos": [
+    [
+     0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     -0.11667,
+     0.0
+    ],
+    [
+     0.11667,
+     -0.11667,
+     0.0
+    ]
+   ],
+   "rotor_pos_alt_0based": [
+    [
+     0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.165,
+     0.0
+    ],
+    [
+     -0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     -0.165,
+     0.0
+    ]
+   ],
+   "rotor_labels": [
+    "az45",
+    "az135",
+    "az225",
+    "az315"
+   ],
+   "quality": {
+    "mic_pos": "reported",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.01,
+     "vertical": 0.03,
+     "quality": "estimated",
+     "basis": "ring diameter reported (paper §3.3); mount tolerance; the reference point of 'mic-dist' on the drone is undefined"
+    },
+    "rotor_pos": {
+     "horizontal": 0.02,
+     "vertical": 0.05,
+     "quality": "estimated",
+     "basis": "radius = wheelbase/2 = 0.165 m (reported wheelbase); azimuth conditional on the 1-based reading (else rotate by 45 deg: 0.126 m chord); prop plane vs 'drone' reference unknown"
+    }
+   },
+   "sources": [
+    "paper arXiv:2510.15383 §3.2 (wheelbase), §3.3 (17 mics; arrays above/below at 25/50 cm; diameters 50/30 cm), App. A Fig. 8 caption, Fig. 1",
+    "github.com/augmented-human-lab/DroneAudioSet-code scripts/config.py, scripts/utils/mic_geometry_util.py, overall_pipeline.ipynb (.cache/daset_docs/code)",
+    ".cache/daset_docs/daset-annotations.yaml (geometry, microphones)"
+   ],
+   "notes": "Mup: file token mic3_8array-up. Rotor azimuths. Paper App. A Fig. 8 caption: 'channel 1 represents a microphone location that is in-between two propellers, while channel 2 represents a location directly above or below the propeller'. Publisher code numbers channels from 1 (overall_pipeline.ipynb cell 14 file names '_ch{ch+1}', cell 16 'np.argmin(rms_values) + 1  # Channels are 1-indexed'), so channel 1 = index 0 at 270 deg (between props) and channel 2 = index 1 at 225 deg (over a prop) -> props at 45/135/225/315 deg (used). The 0-based reading (index 1 at 225 deg between, index 2 at 0 deg over a prop) is also geometrically consistent and gives 0/90/180/270 deg (rotor_pos_alt_0based). Acoustic localisation of per-rotor harmonic families did not separate four rotors (File2 families all at az 13-48 deg on both arrays, File1/File4 at 100-320 deg), so audio does not choose between the two readings. Radius = wheelbase/2 (diagonal motor-to-motor distance, paper §3.2). z = 0: the drone reference plane of 'mic-dist' is taken as the propeller plane. Audio support for the publisher's ring order (drone2, 50 cm, low, File2): rank-1 cross-spectral vectors of the rotor lines at 0.7-4 kHz (1 s STFT, 20 s, rank-1 ratio > 0.5), phase-only near-field beam over a free source position in the rotor plane; mean best beam power Mup 0.939 (11 lines) vs 0.742-0.900 (median 0.778) for 40 random channel permutations and 0.759 for sequential rings; Mdown 0.883 (6 lines) vs 0.631-0.778 (median 0.691) and 0.664. This validates the ring ORDER only: a rigid rotation or reflection of the array with a free source fits equally well, so absolute orientation and the Mdown handedness rest on the code."
+  },
+  "down_50cm": {
+   "mic_pos": [
+    [
+     0.0,
+     -0.15,
+     -0.5
+    ],
+    [
+     -0.10607,
+     -0.10607,
+     -0.5
+    ],
+    [
+     0.15,
+     0.0,
+     -0.5
+    ],
+    [
+     -0.10607,
+     0.10607,
+     -0.5
+    ],
+    [
+     0.10607,
+     -0.10607,
+     -0.5
+    ],
+    [
+     -0.15,
+     0.0,
+     -0.5
+    ],
+    [
+     0.10607,
+     0.10607,
+     -0.5
+    ],
+    [
+     0.0,
+     0.15,
+     -0.5
+    ]
+   ],
+   "channel_map": {
+    "text": "audio channel i (0-based) of mic2_8array-down-*.wav at azimuth [270, 225, 0, 135, 315, 180, 45, 90][i] deg on a ring of radius 0.15 m",
+    "quality": "reported (code) / estimated (Mdown use)",
+    "source": "DroneAudioSet-code scripts/config.py mic_reorder_list [6,5,0,3,7,4,1,2] -> circular_array_positions (scripts/utils/mic_geometry_util.py); overall_pipeline.ipynb cell 7 MIC_ANGLE_VECTOR; the publisher runs it on mic3_8array-up only, Mdown use is [INFERENCE]"
+   },
+   "rotor_pos": [
+    [
+     0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     -0.11667,
+     0.0
+    ],
+    [
+     0.11667,
+     -0.11667,
+     0.0
+    ]
+   ],
+   "rotor_pos_alt_0based": [
+    [
+     0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.165,
+     0.0
+    ],
+    [
+     -0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     -0.165,
+     0.0
+    ]
+   ],
+   "rotor_labels": [
+    "az45",
+    "az135",
+    "az225",
+    "az315"
+   ],
+   "quality": {
+    "mic_pos": "reported",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.01,
+     "vertical": 0.03,
+     "quality": "estimated",
+     "basis": "ring diameter reported (paper §3.3); mount tolerance; the reference point of 'mic-dist' on the drone is undefined"
+    },
+    "rotor_pos": {
+     "horizontal": 0.02,
+     "vertical": 0.05,
+     "quality": "estimated",
+     "basis": "radius = wheelbase/2 = 0.165 m (reported wheelbase); azimuth conditional on the 1-based reading (else rotate by 45 deg: 0.126 m chord); prop plane vs 'drone' reference unknown"
+    }
+   },
+   "sources": [
+    "paper arXiv:2510.15383 §3.2 (wheelbase), §3.3 (17 mics; arrays above/below at 25/50 cm; diameters 50/30 cm), App. A Fig. 8 caption, Fig. 1",
+    "github.com/augmented-human-lab/DroneAudioSet-code scripts/config.py, scripts/utils/mic_geometry_util.py, overall_pipeline.ipynb (.cache/daset_docs/code)",
+    ".cache/daset_docs/daset-annotations.yaml (geometry, microphones)"
+   ],
+   "notes": "Mdown: file token mic2_8array-down. Identification: in the simultaneous File2 take (drone2 50 cm low) Mdown's 20-100 Hz band is 20-47 dB above Mup's per channel (downwash wind; paper: 'Mdown ... wind noise exposure'), 1-4 kHz within ~3 dB. Rotor azimuths. Paper App. A Fig. 8 caption: 'channel 1 represents a microphone location that is in-between two propellers, while channel 2 represents a location directly above or below the propeller'. Publisher code numbers channels from 1 (overall_pipeline.ipynb cell 14 file names '_ch{ch+1}', cell 16 'np.argmin(rms_values) + 1  # Channels are 1-indexed'), so channel 1 = index 0 at 270 deg (between props) and channel 2 = index 1 at 225 deg (over a prop) -> props at 45/135/225/315 deg (used). The 0-based reading (index 1 at 225 deg between, index 2 at 0 deg over a prop) is also geometrically consistent and gives 0/90/180/270 deg (rotor_pos_alt_0based). Acoustic localisation of per-rotor harmonic families did not separate four rotors (File2 families all at az 13-48 deg on both arrays, File1/File4 at 100-320 deg), so audio does not choose between the two readings. Radius = wheelbase/2 (diagonal motor-to-motor distance, paper §3.2). z = 0: the drone reference plane of 'mic-dist' is taken as the propeller plane. Audio support for the publisher's ring order (drone2, 50 cm, low, File2): rank-1 cross-spectral vectors of the rotor lines at 0.7-4 kHz (1 s STFT, 20 s, rank-1 ratio > 0.5), phase-only near-field beam over a free source position in the rotor plane; mean best beam power Mup 0.939 (11 lines) vs 0.742-0.900 (median 0.778) for 40 random channel permutations and 0.759 for sequential rings; Mdown 0.883 (6 lines) vs 0.631-0.778 (median 0.691) and 0.664. This validates the ring ORDER only: a rigid rotation or reflection of the array with a free source fits equally well, so absolute orientation and the Mdown handedness rest on the code."
+  },
+  "centre_50cm": {
+   "mic_pos": [
+    [
+     0.0,
+     0.0,
+     0.5
+    ]
+   ],
+   "channel_map": {
+    "text": "single channel (one of the 6 raw Soundskrit channels, which one is not stated)",
+    "quality": "reported",
+    "source": "publisher scripts/0_preprocess_data.py ('soundskrit' n_mics = 6, first channel kept); daset-annotations.yaml microphones.mic1_soundskrit"
+   },
+   "rotor_pos": [
+    [
+     0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     0.11667,
+     0.0
+    ],
+    [
+     -0.11667,
+     -0.11667,
+     0.0
+    ],
+    [
+     0.11667,
+     -0.11667,
+     0.0
+    ]
+   ],
+   "rotor_pos_alt_0based": [
+    [
+     0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.165,
+     0.0
+    ],
+    [
+     -0.165,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     -0.165,
+     0.0
+    ]
+   ],
+   "rotor_labels": [
+    "az45",
+    "az135",
+    "az225",
+    "az315"
+   ],
+   "quality": {
+    "mic_pos": "estimated",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.03,
+     "vertical": 0.03,
+     "quality": "estimated",
+     "basis": "paper Fig. 1a schematic (green dot at the centre of the Mup plane); photo Fig. 1b shows a central element on the Mup plate"
+    },
+    "rotor_pos": {
+     "horizontal": 0.02,
+     "vertical": 0.05,
+     "quality": "estimated",
+     "basis": "as for the arrays"
+    }
+   },
+   "sources": [
+    "paper arXiv:2510.15383 §3.3 ('a central standalone mic above the drone (Mcenter)'), Fig. 1a/b",
+    ".cache/daset_docs/daset-annotations.yaml"
+   ],
+   "notes": "Mcenter: file token mic1_soundskrit. Independent clock (see simultaneity). Rotor azimuths. Paper App. A Fig. 8 caption: 'channel 1 represents a microphone location that is in-between two propellers, while channel 2 represents a location directly above or below the propeller'. Publisher code numbers channels from 1 (overall_pipeline.ipynb cell 14 file names '_ch{ch+1}', cell 16 'np.argmin(rms_values) + 1  # Channels are 1-indexed'), so channel 1 = index 0 at 270 deg (between props) and channel 2 = index 1 at 225 deg (over a prop) -> props at 45/135/225/315 deg (used). The 0-based reading (index 1 at 225 deg between, index 2 at 0 deg over a prop) is also geometrically consistent and gives 0/90/180/270 deg (rotor_pos_alt_0based). Acoustic localisation of per-rotor harmonic families did not separate four rotors (File2 families all at az 13-48 deg on both arrays, File1/File4 at 100-320 deg), so audio does not choose between the two readings. Radius = wheelbase/2 (diagonal motor-to-motor distance, paper §3.2). z = 0: the drone reference plane of 'mic-dist' is taken as the propeller plane."
+  }
+ },
+ "recordings": {
+  "*_drone-only-recordings__drone2-only__mic-dist-25cm__throttle-{low,high}__mic3_8array-up-{File1..File6,silence}.wav": "up_25cm",
+  "*_drone-only-recordings__drone2-only__mic-dist-25cm__throttle-{low,high}__mic2_8array-down-{File1..File6,silence}.wav": "down_25cm",
+  "*_drone-only-recordings__drone2-only__mic-dist-25cm__throttle-{low,high}__mic1_soundskrit-{File1..File6,silence}.wav": "centre_25cm",
+  "*_drone-only-recordings__drone2-only__mic-dist-50cm__throttle-{low,high}__mic3_8array-up-{File1..File6,silence}.wav": "up_50cm",
+  "*_drone-only-recordings__drone2-only__mic-dist-50cm__throttle-{low,high}__mic2_8array-down-{File1..File6,silence}.wav": "down_50cm",
+  "*_drone-only-recordings__drone2-only__mic-dist-50cm__throttle-{low,high}__mic1_soundskrit-{File1..File6,silence}.wav": "centre_50cm"
+ },
+ "simultaneity": {
+  "verdict": "SIMULTANEOUS. The mic1_soundskrit (Mcenter), mic2_8array-down (Mdown) and mic3_8array-up (Mup) files of one take (same drone / mic-dist / throttle / FileN or silence) are three captures of ONE run of the drone. Mup and Mdown share an (almost) common clock; Mcenter runs on an independent clock and is not sample-aligned without a time warp.",
+  "data": "Only cached pin shards 0/1 (~/.cache/dload/shards/3f/3f46abdc..., fb/fbfa7c1e...; = .cache/source_raw/noise_v2/daset/train_001.parquet rows): drone2 (F330), mic-dist-50cm, throttle-low, drone-only: down+centre File3, down+centre silence, up+centre File1, up+down File2, up File4. No DroneAudioSet audio was downloaded.",
+  "measurements": {
+   "1_envelope_xcorr": {
+    "method": "channel-mean signal, 1-4 kHz band log-envelope at 200 Hz, detrended over 2 s, full-file normalised cross-correlation, lags +-10 s",
+    "same_take_peak_r(max_sidelobe>0.5s)": {
+     "File3 down vs centre": [
+      0.443,
+      0.076
+     ],
+     "silence down vs centre": [
+      0.513,
+      0.127
+     ],
+     "File1 up vs centre": [
+      0.374,
+      0.04
+     ],
+     "File2 up vs down": [
+      0.677,
+      0.06
+     ]
+    },
+    "control_different_takes_peak_r(max_sidelobe)": {
+     "File3-down vs File1-centre": [
+      0.074,
+      0.061
+     ],
+     "File1-up vs File2-down": [
+      0.054,
+      0.044
+     ],
+     "File2-up vs File1-centre": [
+      0.057,
+      0.052
+     ],
+     "File4-up vs File3-centre": [
+      0.117,
+      0.113
+     ]
+    }
+   },
+   "2_clock_rate": "Tonal rotor lines read +1530..+1600 ppm higher in frequency on Mcenter than on the arrays in the same take (e.g. File3 1437.28 -> 1439.58 Hz, 2055.91 -> 2059.10 Hz, 2262.59 -> 2266.15 Hz); Mup vs Mdown lines agree within +-25 ppm (File2: 620.02/620.02, 623.59/623.58, 1036.90/1036.90, 1039.29/1039.29 Hz). 20 s spectra, parabolic peak interpolation.",
+   "3_warped_gcc": {
+    "method": "Mcenter time-warped y[n] = x(n/(1+eps)) (cubic spline), eps scanned 1500-1650 ppm in 10 ppm steps by full-60 s GCC-PHAT peak-to-median ratio (PSR, 100-3000 Hz); then GCC-PHAT in 4 s windows (16x upsampled lag) around the coarse lag. Lag L: array(t + L) ~ other(t), file time.",
+    "File3 down vs centre": {
+     "best_eps_ppm": 1550,
+     "coarse_psr": 90.1,
+     "windows_psr_gt10": "22/22",
+     "median_psr": 34.1,
+     "lag_s": -0.2723
+    },
+    "silence down vs centre": {
+     "best_eps_ppm": 1550,
+     "coarse_psr": 134.2,
+     "windows_psr_gt10": "7/7",
+     "median_psr": 34.1,
+     "lag_s": -0.2742
+    },
+    "File1 up vs centre": {
+     "best_eps_ppm": 1550,
+     "coarse_psr": 89.1,
+     "windows_psr_gt10": "37/37",
+     "median_psr": 58.2,
+     "lag_s": -0.2788
+    },
+    "File2 up vs down (no warp)": {
+     "coarse_psr": 127.1,
+     "windows_psr_gt10": "37/37",
+     "median_psr": 22.4,
+     "lag_s": -0.0084,
+     "drift": "lag -7.88 -> -8.25 ms over 2-134 s = -2.8 ppm; alternating +-0.5 ms jumps are GCC peak ambiguity (they return), not slips"
+    },
+    "CONTROL File3-down vs File1-centre": {
+     "best_coarse_psr_over_eps_grid": 7.2,
+     "windows_psr_gt10": "0/14",
+     "median_psr": 4.6
+    },
+    "residual_structure": "After the 1550 ppm warp the Mcenter-vs-array lag is constant to +-10 us within 16 s and steps by +1.00 ms every 16.0 s (net +46..+64 ppm), i.e. Mcenter's clock differs from the arrays' by ~1.6e-3 overall with periodic 1 ms (48 samples @ 48 kHz) slips."
+   }
+  },
+  "practical": "Per-take level / harmonic-amplitude comparisons across the three files need only the start offset (array file time = centre file time - ~0.27-0.28 s; up vs down -8 ms). Sample-level (phase / TDOA) work across Mcenter and an array needs the warp (eps ~ +1.55e-3) plus the 16 s slips; Mup vs Mdown are usable as one 16-channel array after removing the -8 ms offset (drift 0.4 ms over 150 s).",
+  "caveat": "Measured on drone2 / 50 cm / low throttle only (the cached takes); other drone/dist/throttle cells are assumed to use the same recording chain [INFERENCE]."
+ },
+ "open_questions": [
+  "Rotor azimuths rest on reading the paper's 'channel 1/2' as 1-based (publisher code convention); the 0-based reading rotates the rotor set by 45 deg (rotor_pos_alt_0based). Audio did not decide it.",
+  "Mdown uses the Mup channel->angle map (publisher code applies one geometry and only runs it on Mup); a face-down mount could mirror the angles. Audio validates only the ring order.",
+  "Both the Mdown 20-100 Hz downwash pattern (loudest channels at 45/0/315 deg, quietest 135-225 deg; drone2 50 cm low) and the harmonic-line localisation lean to a sector around az ~20 deg: an off-centre drone or one dominant rotor is possible; neither is documented.",
+  "The reference point of 'mic-dist' on the drone (prop plane, arm plane or centre plate) is not stated (+-0.05 m in z).",
+  "Mcenter position is inferred from the Fig. 1a schematic; which of the 6 Soundskrit channels is published is unknown.",
+  "Drone-only takes have no room token (room unknown)."
+ ]
+}

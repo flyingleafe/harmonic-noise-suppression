@@ -1,0 +1,225 @@
+{
+ "rig": "avq",
+ "drone": "quadrotor of unstated make (AVQ, Wang/Sanchez-Matilla/Cavallaro IROS 2019), on a camera tripod; 8-mic ring (~0.18 m) on posts 15 cm above the arms, GoPro at the array centre",
+ "n_rotors": 4,
+ "frame": "mic_pos.mat frame: origin = array centre, x = 0 deg and y = 90 deg axes of array_configuration.docx (angle_a counter-clockwise from +x seen from above), z up; metres. The drone's forward axis (top-view 0 deg = camera optical axis) lies at angle_a = a2 (S1 -28.23 deg, S2 -29.08 deg).",
+ "configs": {
+  "avq_S1": {
+   "mic_pos": [
+    [
+     0.07406,
+     0.05296,
+     -0.00579
+    ],
+    [
+     0.06635,
+     -0.05586,
+     -0.03214
+    ],
+    [
+     -0.08837,
+     -0.00861,
+     0.00361
+    ],
+    [
+     -0.07628,
+     0.05268,
+     -0.0255
+    ],
+    [
+     -0.04714,
+     -0.0538,
+     0.0
+    ],
+    [
+     0.08395,
+     -0.00118,
+     -0.00852
+    ],
+    [
+     0.00014,
+     -0.08889,
+     0.0
+    ],
+    [
+     -5e-05,
+     0.08875,
+     0.0
+    ]
+   ],
+   "channel_map": {
+    "text": "audio channel i (MONO-00i.wav order) = column i+1 of mic_pos.mat = mic i+1 of array_configuration.docx",
+    "quality": "estimated",
+    "source": "avq_meta.yaml geometry.array8.channel_map_source (ASSUMED: file order; not stated by the publisher)"
+   },
+   "rotor_pos": [
+    [
+     0.16995,
+     0.16413,
+     -0.15
+    ],
+    [
+     -0.0429,
+     -0.23234,
+     -0.15
+    ],
+    [
+     -0.06885,
+     0.26964,
+     -0.15
+    ],
+    [
+     -0.26278,
+     -0.0916,
+     -0.15
+    ]
+   ],
+   "rotor_labels": [
+    "front-left",
+    "front-right",
+    "rear-left",
+    "rear-right"
+   ],
+   "quality": {
+    "mic_pos": "reported",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.003,
+     "vertical": 0.003,
+     "quality": "estimated",
+     "basis": "publisher mic_pos.mat values (0.1 mm); ring mount tolerance"
+    },
+    "rotor_pos": {
+     "horizontal": 0.03,
+     "vertical": 0.04,
+     "quality": "estimated",
+     "basis": "drone-frame hub layout: least-squares residual of the five publisher distances <= 0.4 cm, photo-measured layout differs by <= 1.2 cm; forward axis +-1 deg (photo registration vs a2) = +-0.5 cm at 0.3 m; array-centre projection onto the arm plane (photo parallax) +-2 cm; prop plane 14-19 cm below the mic-frame origin depending on which platform.jpg scale is trusted"
+    }
+   },
+   "sources": [
+    ".cache/avq_docs/raw/S1__misc__mic_pos (mic_pos.mat, 3 x 8, metres; identical in S1 and S2)",
+    ".cache/avq_docs/raw/S1__misc__readme + S1__misc__av_calibration (angle_a = -1.14 angle_v -28.23 deg)",
+    ".cache/avq_docs/raw/S1__misc__array_configuration (docx; figure word/media/image1.png: mics 1-8, 0 deg = +x, 90 deg = +y)",
+    ".cache/avq_docs/platform.jpg (side view: ring 20 cm wide, ~15 cm above the arms; top view: 0 deg forward, 90 deg right; hub distances front pair 45 cm, rear pair 41 cm, left side 26 cm, centre->front-right 24 cm, centre->rear-left 28 cm; 2D-coordinates panel: O_M = O_C, theta from the forward z-axis towards +x/right)"
+   ],
+   "notes": "Derivation. (1) Drone-frame hub layout (X right, Y forward, origin = array centre projected on the arm plane): left/right symmetry about the 0-deg axis (photo: hubs at -185/+185 px and -175/+175 px from the axis) and the pair distances give X = +-0.225 (front) / +-0.205 (rear); Y from least squares of |centre-FR| = 0.24, |centre-RL| = 0.28, |FL-RL| = 0.26: Y_front = +0.072, Y_rear = -0.188 (residuals <= 0.4 cm; photo at 8.45 +- 0.26 px/cm gives +0.068 / -0.200). The array centre sits ~6.6 cm ahead of the rotor centroid. (2) Orientation: forward (top-view 0 deg) is at angle_a = a2 of av_calibration.mat (-28.23 deg for S1), right = a2 - 90 deg (angle_a counter-clockwise from +x seen from above, z up). Independent check: a 2-D similarity fit of mic_pos (x, y) to the 7 visible mic blobs of the platform.jpg top view (exhaustive cyclic correspondences, both handednesses) gives rms 3.05 px at 1026.2 px/m (~3 mm), not mirrored (best mirrored fit 9.19 px), blob->mic {'G': 3, 'E': 5, 'D': 7, 'B': 2, 'A': 6, 'C': 1, 'F': 8}, and puts image-up (forward) at angle_a = -28.52 deg - within 0.3/0.6 deg of a2 (S1/S2). This also confirms that the mic_pos frame is right-handed with z up as seen in the photo. (3) Height: rotor_pos z = -0.15 m (publisher's 15 cm ring-to-arm label; mic-frame origin is at the upper mic level, mics span z -0.032..+0.004). Rotor positions are hub centres; labels front/rear = towards/away from the camera axis."
+  },
+  "avq_S2": {
+   "mic_pos": [
+    [
+     0.07406,
+     0.05296,
+     -0.00579
+    ],
+    [
+     0.06635,
+     -0.05586,
+     -0.03214
+    ],
+    [
+     -0.08837,
+     -0.00861,
+     0.00361
+    ],
+    [
+     -0.07628,
+     0.05268,
+     -0.0255
+    ],
+    [
+     -0.04714,
+     -0.0538,
+     0.0
+    ],
+    [
+     0.08395,
+     -0.00118,
+     -0.00852
+    ],
+    [
+     0.00014,
+     -0.08889,
+     0.0
+    ],
+    [
+     -5e-05,
+     0.08875,
+     0.0
+    ]
+   ],
+   "channel_map": {
+    "text": "audio channel i (MONO-00i.wav order) = column i+1 of mic_pos.mat = mic i+1 of array_configuration.docx",
+    "quality": "estimated",
+    "source": "avq_meta.yaml geometry.array8.channel_map_source (ASSUMED: file order; not stated by the publisher)"
+   },
+   "rotor_pos": [
+    [
+     0.17237,
+     0.16159,
+     -0.15
+    ],
+    [
+     -0.04635,
+     -0.23168,
+     -0.15
+    ],
+    [
+     -0.06484,
+     0.27063,
+     -0.15
+    ],
+    [
+     -0.26411,
+     -0.08769,
+     -0.15
+    ]
+   ],
+   "rotor_labels": [
+    "front-left",
+    "front-right",
+    "rear-left",
+    "rear-right"
+   ],
+   "quality": {
+    "mic_pos": "reported",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.003,
+     "vertical": 0.003,
+     "quality": "estimated",
+     "basis": "publisher mic_pos.mat values (0.1 mm); ring mount tolerance"
+    },
+    "rotor_pos": {
+     "horizontal": 0.03,
+     "vertical": 0.04,
+     "quality": "estimated",
+     "basis": "drone-frame hub layout: least-squares residual of the five publisher distances <= 0.4 cm, photo-measured layout differs by <= 1.2 cm; forward axis +-1 deg (photo registration vs a2) = +-0.5 cm at 0.3 m; array-centre projection onto the arm plane (photo parallax) +-2 cm; prop plane 14-19 cm below the mic-frame origin depending on which platform.jpg scale is trusted"
+    }
+   },
+   "sources": [
+    ".cache/avq_docs/raw/S2__misc__mic_pos (mic_pos.mat, 3 x 8, metres; identical in S1 and S2)",
+    ".cache/avq_docs/raw/S2__misc__readme + S2__misc__av_calibration (angle_a = -1.182 angle_v -29.08 deg)",
+    ".cache/avq_docs/raw/S1__misc__array_configuration (docx; figure word/media/image1.png: mics 1-8, 0 deg = +x, 90 deg = +y)",
+    ".cache/avq_docs/platform.jpg (side view: ring 20 cm wide, ~15 cm above the arms; top view: 0 deg forward, 90 deg right; hub distances front pair 45 cm, rear pair 41 cm, left side 26 cm, centre->front-right 24 cm, centre->rear-left 28 cm; 2D-coordinates panel: O_M = O_C, theta from the forward z-axis towards +x/right)"
+   ],
+   "notes": "Derivation. (1) Drone-frame hub layout (X right, Y forward, origin = array centre projected on the arm plane): left/right symmetry about the 0-deg axis (photo: hubs at -185/+185 px and -175/+175 px from the axis) and the pair distances give X = +-0.225 (front) / +-0.205 (rear); Y from least squares of |centre-FR| = 0.24, |centre-RL| = 0.28, |FL-RL| = 0.26: Y_front = +0.072, Y_rear = -0.188 (residuals <= 0.4 cm; photo at 8.45 +- 0.26 px/cm gives +0.068 / -0.200). The array centre sits ~6.6 cm ahead of the rotor centroid. (2) Orientation: forward (top-view 0 deg) is at angle_a = a2 of av_calibration.mat (-29.08 deg for S2), right = a2 - 90 deg (angle_a counter-clockwise from +x seen from above, z up). Independent check: a 2-D similarity fit of mic_pos (x, y) to the 7 visible mic blobs of the platform.jpg top view (exhaustive cyclic correspondences, both handednesses) gives rms 3.05 px at 1026.2 px/m (~3 mm), not mirrored (best mirrored fit 9.19 px), blob->mic {'G': 3, 'E': 5, 'D': 7, 'B': 2, 'A': 6, 'C': 1, 'F': 8}, and puts image-up (forward) at angle_a = -28.52 deg - within 0.3/0.6 deg of a2 (S1/S2). This also confirms that the mic_pos frame is right-handed with z up as seen in the photo. (3) Height: rotor_pos z = -0.15 m (publisher's 15 cm ring-to-arm label; mic-frame origin is at the upper mic level, mics span z -0.032..+0.004). Rotor positions are hub centres; labels front/rear = towards/away from the camera axis."
+  }
+ },
+ "recordings": {
+  "S1_seq1": "avq_S1",
+  "S1_seq2": "avq_S1",
+  "S1_seq3": "avq_S1",
+  "S2_seq1": "avq_S2"
+ },
+ "open_questions": [
+  "Channel map (channel i = mic i+1) is assumed by file order.",
+  "Assumed: the publisher's top-view 0 deg axis is both the camera optical axis and the drone's forward symmetry axis (supported: the photo registration lands within 0.6 deg of a2).",
+  "The 15 cm ring-to-arm height and the photo scales disagree (side-view vertical vs horizontal scale differ by ~35 %); the prop plane is 0.14-0.19 m below the mic-frame origin.",
+  "The array-centre projection onto the arm plane is taken at the crossing of the publisher's dashed axes (where its 24/28 cm arrows start); the fitted ring centre in the photo is 25.5 px forward of it (~3 cm at the arm-plane scale), attributed to parallax of the 15 cm higher ring.",
+  "Whether the array or drone was remounted between S1 and S2 is not stated (a2 differs by 0.85 deg)."
+ ]
+}

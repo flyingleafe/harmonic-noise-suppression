@@ -99,6 +99,42 @@ Code: `src/experiments/static_rig/spectra.py`, driver `scripts/static_rig.py`
   (`noise_v2_bench_points.json`). Whether two rotors share one of the three
   speeds is a question for the line powers (+3 dB for two coincident rotors).
 
-## Results
+## Results (round 1, `uni-cpu` job `static-rig-speeds-a5a5e5`, commit `8c23b9e5`)
 
-Pending: the `uni-cpu` run over the census.
+209 recordings read (outputs in `results/static_rig/speeds/`, not committed:
+147 MB of unit JSON + 23 MB of spectra).
+
+**Constant-speed recordings: the full-record read works.**
+
+- DREGON single motors (20): the two halves of each record agree to
+  0.116 rev/s at most (median 0.022). Against the common throttle law the
+  error is mean 0.562, max 1.277 rev/s — but that law averages four motors that
+  differ: per motor, a straight line in throttle fits every reading to
+  ≤ 0.123 rev/s (Motor1 0.9727·t + 0.398, max residual 0.023; Motor2 0.9609·t
+  + 0.439, 0.098; Motor3 0.9812·t + 0.136, 0.088; Motor4 0.9898·t + 0.337,
+  0.123). Motor2 runs 0.7–1.2 rev/s below the law, Motor4 0.7–1.3 above.
+- DREGON `allMotors_70`: 67.677 / 68.747 / 69.564 rev/s (halves agree to
+  0.07); the fourth rotor is not resolved (see the smoke note above).
+- AGH single rotors (8): 159.688, 132.626, 113.789, 97.406, 77.722 (rotor 4 at
+  settings 275…125), 97.793 / 96.620 / 96.809 (rotors 3/2/1 at 160); halves
+  agree to ≤ 0.06. Matches `AGH.yaml`'s 159.5 / 132.6 / 113.7 / 97.6 / 77.7.
+
+**Multi-rotor rigs other than DREGON: the premise of constant speed fails.**
+
+- AVQ `S1_seq2` ("constant 100 %"): four rotor tracks are clearly separate in a
+  4 s STFT, but they DRIFT over the 120 s — one near 97–98 Hz, three between 79
+  and 89 Hz that converge and cross (e.g. 89 → 83 Hz)
+  (`results/static_rig/avq_S1_seq2_tracks.png`). In the full-record spectrum
+  each rotor is a plateau several Hz wide whose width grows with the order
+  (79–88 Hz at order 1, 583–591 Hz at order 6;
+  `avq_S1_seq2_fullrecord_zoom.png`). 3 of the 4 AVQ takes gave no rotor.
+- KU Leuven Team 1: the rotors fall from ~120 to ~106 Hz over the 16 s
+  (`results/static_rig/spcup_tracks.png`).
+- Maverick 4: weak, gappy lines (toy quad).
+- DroneAudioSet: comb rates scatter between 15 and 250 rev/s within a design
+  cell and most files give no rotor; not inspected further (its audio stays
+  off the laptop).
+
+So "stationary" (drone fixed, throttle constant) does not mean constant shaft
+speed on these rigs; a full-record spectrum cannot be read there, and the
+per-rotor speeds must be tracked in time.

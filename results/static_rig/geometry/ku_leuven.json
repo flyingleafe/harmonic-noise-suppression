@@ -1,0 +1,118 @@
+{
+ "rig": "ku_leuven",
+ "drone": "MikroKopter MK EASY Quadro V3, 4x MK3640/34 motors with a 16SoundsUSB card and an 8-mic MEMS cube hung 0.19 m below the motor plane",
+ "n_rotors": 4,
+ "frame": "Team XML frame: origin = centre of the cubic mic array; x, y = XML axes (normal to the cube side faces); z along the drone's vertical axis, assumed up; metres. Which horizontal axis points to the front (red) rigger is undocumented.",
+ "configs": {
+  "kul_cube8": {
+   "mic_pos": [
+    [
+     -0.0345,
+     -0.0595,
+     -0.0345
+    ],
+    [
+     0.0345,
+     -0.0595,
+     0.0345
+    ],
+    [
+     0.0595,
+     -0.0345,
+     -0.0345
+    ],
+    [
+     0.0595,
+     0.0345,
+     0.0345
+    ],
+    [
+     0.0345,
+     0.0595,
+     -0.0345
+    ],
+    [
+     -0.0345,
+     0.0595,
+     0.0345
+    ],
+    [
+     -0.0595,
+     0.0345,
+     -0.0345
+    ],
+    [
+     -0.0595,
+     -0.0345,
+     0.0345
+    ]
+   ],
+   "channel_map": {
+    "text": "XML 'Point k' = wav channel k-1",
+    "quality": "estimated",
+    "source": "KU_Leuven.yaml channel_map_source: assumption; only check = report's 1-based 'channel 7 is empty' matches the all-zero wav index 6"
+   },
+   "rotor_pos": [
+    [
+     0.233,
+     0.233,
+     0.19
+    ],
+    [
+     -0.233,
+     0.233,
+     0.19
+    ],
+    [
+     -0.233,
+     -0.233,
+     0.19
+    ],
+    [
+     0.233,
+     -0.233,
+     0.19
+    ]
+   ],
+   "rotor_labels": [
+    "quadrant (+x,+y)",
+    "quadrant (-x,+y)",
+    "quadrant (-x,-y)",
+    "quadrant (+x,-y)"
+   ],
+   "quality": {
+    "mic_pos": "reported",
+    "rotor_pos": "estimated"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.002,
+     "vertical": 0.002,
+     "quality": "estimated",
+     "basis": "XML values to 0.5 mm; NOTE possible mirror image of the physical array (open question)"
+    },
+    "rotor_pos": {
+     "horizontal": 0.03,
+     "vertical": 0.01,
+     "quality": "estimated",
+     "basis": "KU_Leuven.yaml: radius 0.32-0.35 m by photogrammetry (+-3 cm); z = +0.19 m stated in the report"
+    }
+   },
+   "sources": [
+    "src/data_processing/sources/spcup19_meta/KU_Leuven.yaml (geometry.kul_cube8)",
+    "SPCUP19_KU_Leuven_Team_1_array_drone.xml (= Team 2 XML)",
+    "report p.2 ('centre of the array lies 19cm vertically under the X-Y plane on which the motors lie'), Figs. 1-2"
+   ],
+   "notes": "Channel index 6 is a dead mic (all zeros): use channels [0, 1, 2, 3, 4, 5, 7]. Arms along the cube diagonals (+-45 deg from x/y); rotor set is C4-symmetric, so only R and the 45 deg placement matter until rotors are identified. Rotor rows are quadrant-ordered, NOT motor-identified. Takes include ~0.5-1 s spin-up / spin-down at the file edges."
+  }
+ },
+ "recordings": {
+  "KU_Leuven__SPCUP19_KU_Leuven_Team_1_recording": "kul_cube8",
+  "KU_Leuven__SPCUP19_KU_Leuven_Team_2_recording": "kul_cube8"
+ },
+ "open_questions": [
+  "Array chirality: photos show each cube face's mic pair upper-left/lower-right, the XML predicts lower-left/upper-right -> the XML may be a mirror image of the build (KU_Leuven.yaml). GCC-PHAT on rotor noise peaks at lag 0 for every pair (coherent electrical/structural interference), so audio did not settle it.",
+  "Channel -> XML point map is assumed (Point k = channel k-1).",
+  "Rotor radius (~0.33 m) is photogrammetric; which motor sits in which quadrant is unknown."
+ ]
+}

@@ -1,0 +1,171 @@
+{
+ "rig": "dregon",
+ "drone": "MikroKopter quadrotor (DREGON, Strauss et al. IROS 2018), 8-mic 8SoundsUSB cube array under the core",
+ "n_rotors": 4,
+ "frame": "The DREGON-frames frame (= repo dregon.get_geometry): origin = barycentre of the 8 mics; x, y, z = the axes of the publisher's coordinates.mat / plot_structure.m (z up, rotors at z = +0.1915 m above the array centre); metres. mic_pos is the publisher's micPos with x and y negated (180 deg rotation about z, dregon._correct_mic_frame), which is what makes the measured TDOAs agree with rotorsPos (see notes). Which horizontal axis is the drone's nose is not established here.",
+ "configs": {
+  "dregon_cube8": {
+   "mic_pos": [
+    [
+     -0.042,
+     -0.0615,
+     -0.041
+    ],
+    [
+     0.042,
+     -0.0615,
+     0.041
+    ],
+    [
+     0.0615,
+     -0.042,
+     -0.041
+    ],
+    [
+     0.0615,
+     0.042,
+     0.041
+    ],
+    [
+     0.042,
+     0.0615,
+     -0.041
+    ],
+    [
+     -0.042,
+     0.0615,
+     0.041
+    ],
+    [
+     -0.0615,
+     0.042,
+     -0.041
+    ],
+    [
+     -0.0615,
+     -0.042,
+     0.041
+    ]
+   ],
+   "channel_map": {
+    "text": "audio channel i (0-based) of DREGON_individual_motors_recordings/*.wav and of the DREGON-frames 'audio' entry = row i = publisher 'mic i+1' of micPos.txt = mic label i in plot_structure.m / array_rotor.png (labels 0-7).",
+    "quality": "reported",
+    "source": "data/DREGON/micPos.txt comments '% mic 1'..'% mic 8'; plot_structure.m text(..., num2str(i-1)); consistent with the TDOA fit below (correct-row correlation 0.91-0.98 with this order)"
+   },
+   "rotor_pos": [
+    [
+     -0.15997,
+     0.17147,
+     0.1915
+    ],
+    [
+     -0.15997,
+     -0.17147,
+     0.1915
+    ],
+    [
+     0.18297,
+     -0.17147,
+     0.1915
+    ],
+    [
+     0.18297,
+     0.17147,
+     0.1915
+    ]
+   ],
+   "rotor_labels": [
+    "Motor1",
+    "Motor2",
+    "Motor3",
+    "Motor4"
+   ],
+   "motor_to_rotor_row": {
+    "mapping": {
+     "Motor1": 0,
+     "Motor2": 1,
+     "Motor3": 2,
+     "Motor4": 3
+    },
+    "statement": "MotorN (file DREGON_individual_motors_recordings/MotorN_YY.wav, frame id motor_MotorN_YY) = rotor_pos row N-1 (0-based) = coordinates.mat rotorsPos row N = rotor label N in the publisher figure array_rotor.png / plot_structure.m (text num2str(i)). Valid in THIS (corrected) mic frame; with the shipped (uncorrected) micPos the audio instead puts MotorN at row (N+1) mod 4, i.e. the diagonally opposite rotor.",
+    "quality": "derived",
+    "source": "Publisher: website ('MotorX_YY.wav where X is the motor number from 1 to 4') + plot_structure.m rotor labels 1..4 (the publisher never states MotorX = figure label X). Audio (this measurement, raw data/DREGON wavs, all 20 single-motor takes, loudest 6 s, GCC-PHAT 300-4000 Hz, 28 mic pairs vs free-field TDOA from each rotor_pos row): correct-row TDOA correlation Motor1 0.954-0.971, Motor2 0.909-0.973, Motor3 0.924-0.977, Motor4 0.949-0.969; best wrong row <= 0.519; rms TDOA error 1.92-4.26 samples @44.1 kHz for the correct row vs 9.91-16.05 for the others; shipped-frame best rows (motor, row) [(1, 2), (2, 3), (3, 0), (4, 1)]. Agrees with the repo's independent level-pattern check (src/experiments/residual_attribution/data.py:169-172, docs/experiments/residual-attribution.md:116-118) and the Stage-0 TDOA frame check (notebooks/stage0_rotor_rtf.ipynb: identity -0.55 -> +0.93 after the 180 deg fix)."
+   },
+   "quality": {
+    "mic_pos": "reported (values) + derived (180 deg frame alignment to rotor_pos)",
+    "rotor_pos": "reported (publisher nominal hub positions)"
+   },
+   "uncertainty_m": {
+    "mic_pos": {
+     "horizontal": 0.002,
+     "vertical": 0.002,
+     "quality": "estimated",
+     "basis": "3-D printed holder, publisher values given to 0.5 mm"
+    },
+    "rotor_pos": {
+     "horizontal": 0.02,
+     "vertical": 0.02,
+     "quality": "estimated",
+     "basis": "nominal hub positions (r = 0.485/2 m about (0.0115, 0), z = top of the drawn core box); correct-row TDOA rms residual 1.92-4.26 samples = 1.5-3.3 cm path difference; a propeller disc is not a point source"
+    }
+   },
+   "sources": [
+    "data/DREGON/micPos.txt (publisher micPos, metres, origin = array barycentre)",
+    "data/DREGON/coordinates.mat ['rotorsPos'] = plot_structure.m (r = 0.485/2, angles 135/225/315/45 deg about (0.0115, 0, 0), z = 0.1915)",
+    "data/DREGON/plot_structure.m + array_rotor-768x670.png (publisher figure, rotors labelled 1-4)",
+    "https://dregon.inria.fr/datasets/dregon/ (Individual Motor Recordings: MotorX_YY.wav, X = motor number 1-4, YY = turn/s; drone hung on a nylon string, held still)",
+    "~/.cache/dload/materialized/DREGON-frames/261b09971c8a/motor_Motor1_70.{mic_pos,rotor_pos} (published frames: identical to the values here)",
+    "src/data_processing/sources/dregon.py:359-398 (_correct_mic_frame, get_geometry)"
+   ],
+   "notes": "Rows of rotor_pos: 0 (-0.160, +0.171), 1 (-0.160, -0.171), 2 (+0.183, -0.171), 3 (+0.183, +0.171), all z = +0.1915. Nearest mic (3-D) to rows 0-3: [5, 7, 1, 3] (upper layer). Observation for the spreading test (same TDOA script, 6 s Welch, median band PSD per mic): the loudest mic at 0.1-1 kHz for Motor1..4_70 is [6, 0, 1, 4]; only for Motor3 is it the nearest mic, for Motor1/2/4 it is the lower-layer mic below the nearest one on the rotor's side; correlation of per-mic band level with -20 log10(d) for the correct row, bands 0.1-1 / 1-4 / 4-10 kHz: Motor1 [0.81, 0.8, 0.85], Motor2 [0.61, 0.87, 0.82], Motor3 [0.89, 0.89, 0.79], Motor4 [0.47, 0.96, 0.83]. The 180 deg mic-frame fix and a relabelling MotorN -> row (N+1) mod 4 are equivalent up to the 1.15 cm x-offset of the rotor square; the repo convention (fix the mics, keep rotorsPos rows = motor numbers) is used."
+  }
+ },
+ "recordings": {
+  "motor_Motor1_50": "dregon_cube8",
+  "motor_Motor1_60": "dregon_cube8",
+  "motor_Motor1_70": "dregon_cube8",
+  "motor_Motor1_80": "dregon_cube8",
+  "motor_Motor1_90": "dregon_cube8",
+  "motor_Motor2_50": "dregon_cube8",
+  "motor_Motor2_60": "dregon_cube8",
+  "motor_Motor2_70": "dregon_cube8",
+  "motor_Motor2_80": "dregon_cube8",
+  "motor_Motor2_90": "dregon_cube8",
+  "motor_Motor3_50": "dregon_cube8",
+  "motor_Motor3_60": "dregon_cube8",
+  "motor_Motor3_70": "dregon_cube8",
+  "motor_Motor3_80": "dregon_cube8",
+  "motor_Motor3_90": "dregon_cube8",
+  "motor_Motor4_50": "dregon_cube8",
+  "motor_Motor4_60": "dregon_cube8",
+  "motor_Motor4_70": "dregon_cube8",
+  "motor_Motor4_80": "dregon_cube8",
+  "motor_Motor4_90": "dregon_cube8",
+  "motor_allMotors_70": "dregon_cube8"
+ },
+ "active_rotor_rows": {
+  "motor_Motor1_*": [
+   0
+  ],
+  "motor_Motor2_*": [
+   1
+  ],
+  "motor_Motor3_*": [
+   2
+  ],
+  "motor_Motor4_*": [
+   3
+  ],
+  "motor_allMotors_70": [
+   0,
+   1,
+   2,
+   3
+  ]
+ },
+ "open_questions": [
+  "The 180 deg disagreement between the shipped micPos and rotorsPos is resolved here by the repo convention (rotate mics, keep rotor rows = motor numbers). Audio cannot tell this apart from 'publisher motor numbers are diagonally swapped' except through the 1.15 cm x-offset of the rotor square; the publisher has not been asked.",
+  "Which axis is the drone's nose, and which rotor spins which way, are not documented in the files used here.",
+  "rotor z = 0.1915 m is the top of the drawn core box in plot_structure.m, not a measured propeller-plane height."
+ ]
+}
