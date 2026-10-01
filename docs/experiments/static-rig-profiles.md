@@ -358,8 +358,9 @@ correlation; `.../amplitude_jitter.json`.
   zeroth order; an AR(1)-in-k (ρ ≈ 0.25 per same-parity step) the refinement.
 - Cross-mic correlation of the same order's ln A_k(t): 0.3–0.8 (M1_70 0.79,
   M3_70 0.75, M2_80 0.56, M4_80 0.34 at k ≤ 8) — the AM is mostly a source
-  property. Notebook model 2 = Whittle D + the measured per-order
-  (σ²_m,k, γ_m,k) as one log-amplitude OU envelope per order shared by the
+  property (the rest is the per-mic pattern of each line breathing, see the
+  mic section below). The measured per-order (σ²_m,k, γ_m,k) enter the
+  reconstruction as one log-amplitude OU envelope per order shared by the
   mics; the per-mic residual is dropped. Table-D profiles are stored in
   `results/static_rig/single_rotor/profile/` (the notebook reads, never
   recomputes); synthesis is a blocked float32 cosine-bank matmul (~1–2 s per
@@ -381,3 +382,78 @@ bias), and at k ≈ 20 a resolution-sharp spike survives on top of the hump —
 the shaft's own coherence time there is > 1 s, so the hump is not accumulated
 FM; model question left open. Notebook model 2 = OU shaft + peak amplitudes
 with the OU shape + measured per-order AM; no zeroed orders, RMS matches.
+
+### Microphone structure of the line levels (2026-10-01)
+
+Question: can the per-(rotor, mic) harmonic profiles be factorised into a
+rotor profile and a per-mic response, X_rm[k] = X_r[k]·H_m[k]? Data: OU
+profiles of the 20 singles, non-windy mics, dB; scripts in
+`scripts/static_rig_scratch/` (`mic_factor.py`, `mic_symmetry.py`,
+`mic_eq.py`, `mic_eq_fine.py`, `line_coincidence.py`, `mic_variance.py`,
+`pattern_stability.py`); figures `results/static_rig/single_rotor/figs/`.
+Geometry (`sources.dregon.get_geometry`): rotors at z = +0.19 m over the cube
+centre, mics on two layers z = ±0.041 m, rotor–mic distances 0.22–0.40 m,
+rotor radius ≈ 0.12 m — every mic is in the near field above ~1.5 kHz.
+
+1. **Rank-1-per-harmonic factorisation fails.** Mic-to-mic spread of a
+   rotor's line levels is 3.6–4.0 dB rms. Rotor profile alone leaves 3.7 dB,
+   × scalar mic gain 3.4 dB, × per-harmonic H_m[k] 3.1 dB (70 %; 60/80 %
+   alike). H_m is small (1–1.7 dB sd over k) and explains ~0.6 dB; the
+   residual is pair-specific (rotor, mic, k).
+2. **The pair residual is not smooth in k**: autocorrelation along k flat at
+   +0.2…0.3 from Δk = 1 to 8 (a smooth directivity would be ≈ 1 at Δk = 1);
+   ~25 % broad component, ~75 % per-order scatter ≈ 2 dB; odd orders 2.6 dB,
+   even 2.1 dB.
+3. **The rig's symmetry does not reproduce it.** The only mic-to-mic symmetry
+   is the 180° rotation about z (ch c ↔ c+4; pairs Motor1↔Motor3,
+   Motor2↔Motor4; matches the windy sets {5,6}↔{1,2}, {0}↔{4}; x-offset 2.3
+   cm). Matched-mic difference spread 2.8 dB (M1/M3) and 3.2 dB (M2/M4) vs
+   3.1/3.9 same-index and 3.4/4.2 random pairings — matched is best but only
+   at the ~10th percentile of random, and equal to one rotor's own mic-to-mic
+   spread (2.7/3.2 dB): matching the symmetric mic removes nothing.
+4. **A fixed per-pair transfer function exists and lives on the frequency
+   axis.** R_rm(f) = P_rm(f) / mean_m' P_rm'(f) (Welch, 20 Hz smoothing,
+   300–6000 Hz; the rotor's emission cancels whatever its speed law) is the
+   same curve at 50–90 % duty on the frequency axis (mean cross-duty corr
+   +0.54…+0.60 per rotor, all 26 pairs) and not on the order axis (+0.18…
+   +0.24). Its size is modest: sd 1.4–2.7 dB over frequency per mic; broad
+   shapes (tilts, a step at ~4 kHz, notches).
+5. **The fine (per-line) part is not a fine-grained RTF.** A room transfer
+   function has features ≈ 4/T₆₀ Hz wide, finer than a harmonic spacing, so
+   a per-line scatter is what an RTF would produce — but (a) the gaps between
+   harmonics are only 0–6 dB above the rotor-off floor (pre-spin-up segment),
+   so they cannot probe it (`mic_eq_fine.py`: fine part 0.7 dB sd, cross-duty
+   correlation flat vs smoothing 2.7→50 Hz), and (b) on the lines themselves
+   (`line_coincidence.py`) orders of two duties whose frequencies coincide
+   within 2 Hz agree no better (corr +0.45, rms diff 3.8 dB) than orders
+   10–40 Hz apart (+0.46) or the same order at the other speed (+0.48). The
+   per-line term is tied neither to frequency nor to order.
+6. **Variance accounting** (`mic_variance.py`, held-out duty, orders ≤ 60):
+   raw 3.64 dB; per-mic sensitivity only → 3.07 (29 %); per-pair RTF → 2.70
+   (45 %); pair + mic → 2.70 (mic is inside the pair term: the two EQs
+   correlate +0.81, pair 2.4 dB sd of which 2.0 mic-common, 1.4 rotor-
+   specific). Explained share flat for EQ widths 50–400 Hz: the reproducible
+   part is broad. Remaining ≈ 2.7 dB per line.
+7. **Within-run vs between-run** (`pattern_stability.py`): first vs second
+   half of a span differ by 1.73 dB rms (corr +0.89; run mean good to ~0.9
+   dB), other duty by 3.71 dB (+0.48). Odd/even wander alike (1.69/1.77),
+   high orders less (1.4 dB at k 31–60). ≈ 2.4 dB therefore changes
+   genuinely from run to run; ≈ 1 dB breathes within a run (the mic-specific
+   part of the AM: cross-mic correlation of ln A_k 0.3–0.8).
+
+Reading. The array is in the rotor's near field: each harmonic's field
+across the mics is an interference pattern of an extended source (blade
+sections, two blades, body scattering). Its broad, speed-independent part is
+the pair RTF; its fine part depends on the loading distribution at the
+operating point, so at a new speed neither the same frequency (different
+order of a different loading) nor the same order (different wavelength and
+loading) reproduces it. [INFERENCE: mechanism; the magnitudes and the
+"neither axis" fact are measured.] Whether the per-run term varies smoothly
+on a finer speed grid or jumps is unknown (10 % duty steps).
+
+Model statement per (rotor, mic, line), for the generative prior:
+mean rotor profile (shared by mics) + fixed pair EQ (≈ 2.4 dB sd, smooth in
+f, ~2/3 mic-common) + per-run draw (≈ 2.4 dB, independent per line, ρ ≈ 0.25
+between same-parity neighbours) + within-run wander (≈ 1 dB over 15 s, the
+mic-specific AM). Together with the OU shaft (σ_ν, λ) and the per-order AM
+envelopes this is the current form of the single-rotor noise model.
