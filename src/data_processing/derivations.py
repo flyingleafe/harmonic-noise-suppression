@@ -86,7 +86,7 @@ PARENTS = {
     "drone_audio": "dload:drone_audio@b6c77a68c55dedec11750a3784c10833e7db981fab6ef00380300a9e4d382b95",
     "DREGON-frames": "dload:DREGON-frames@261b09971c8ace16e3434f4a89406c6043403f8ac89a3f1202566cb8c712ba89",
     "michaels-frames": "dload:michaels-frames@8e9d149560dd5d5fa8aaa87e7ea537d7e4d96e829e874dab7d9c92621cca6e46",
-    "AVQ": "dload:AVQ@50dd53d1a6c0ab81fe02e4a40a57557a0a2b1c1b85152470edd12aa6d0725f39",
+    "AVQ": "dload:AVQ@a37840cace1ef87cabcb6c1a3432c67ca942db12611bcca8bd9a782c88622caf",
     "AVQ-egonoise": "dload:AVQ-egonoise@b43b374b007a0d5c9575dd2feacd31a05097d0c436629819b936273f17cf7703",
     "DREGON-LM-V4-michaels-valid-full": "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9",
     "SPCUP19-egonoise": "dload:SPCUP19-egonoise@043e0a4e8264ebed3588c7706f6b23d25164e442d0e8129a7602f05b2852298b",

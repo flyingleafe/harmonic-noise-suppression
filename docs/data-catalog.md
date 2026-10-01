@@ -391,10 +391,18 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
   arrays) stays for its by-name consumers),
   `HornBase` (1080; horn/not-horn — tonal, not rotating-source), `HUSTmotor`
   (24; 6 health states × 4 speeds, acoustic + X/Y/Z vibration),
-  `KAIST-rotating-acoustic` (5; sound-pressure at 3010 RPM), `AVQ` (12;
-  audio-visual quadrotor — onboard 8-ch array, 44.1 kHz, rotor ego-noise + a
-  moving speech source; labeled seqs carry `angle_vad` DOA/VAD + `mic_pos`;
-  builder `build_avq`, http+extract). Every recording Frame carries
+  `KAIST-rotating-acoustic` (5; sound-pressure at 3010 RPM), `AVQ` (12, recipe 2
+  `@a37840cace1e`; audio-visual quadrotor on a tripod — never airborne —
+  onboard 8-ch array, 44.1 kHz; tagged per sequence from the publisher's spec
+  table in `sources/avq_meta.yaml`: 5 ego-noise only (4 constant throttle =
+  `bench`, S2_seq2 time-varying = `bench_varying_speed`), 3 speech only with the
+  motors muted (`rotors_off`; S1_seq4 = the table's "seq5", two talkers at fixed
+  grid spots; S2_seq3/4 a walking loudspeaker), 4 mixtures S2_seq5–8 (constant
+  100 % / time-varying, walking loudspeaker); `rotor_pos` not published (rotor
+  spacings only, frame rotation undocumented), channel map assumed from file
+  order; labeled seqs carry `angle_vad` DOA/VAD + `mic_pos`; recipe 1
+  `@50dd53d1a6c0` tagged every sequence "speech + rotor ego-noise" and stays for
+  `AVQ-egonoise` / `noise-v2-bench-points`). Every recording Frame carries
   `system`/`observation`/`operating`/`label` meta (make/model, how observed —
   onboard vs flyover — SNR, condition). Harmonicity is measured separately
   (`harmonicity.py`, analysis stage).

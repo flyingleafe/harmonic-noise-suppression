@@ -397,7 +397,8 @@ NOISE_DATASETS: dict[str, str] = {
     "SPCUP19-frames": "IEEE SP Cup 2019 ego-noise: 10 team packages (1/3/8/16 ch), every recording "
     "tagged from the team reports (condition, active rotors, sources) with mic_pos/rotor_pos",
     "AVQ-egonoise": "AVQ quadrotor: the 5 pure rotor ego-noise sequences, 8-ch 44.1 kHz",
-    "AVQ": "AVQ quadrotor: 12 sequences, ego-noise + a moving speech source, 8-ch",
+    "AVQ": "AVQ quadrotor on a tripod: 12 sequences, 8-ch; 5 ego-noise only, 3 speech only "
+    "(motors muted), 4 mixtures; tagged from the publisher's spec table",
     "noise-v2-bench-points": "stationary bench/static windows (DREGON, SPCUP19, AVQ, "
     "DroneAudioSet, ChuMS) with measured shaft rates",
     "DroneAudioSet": "2 quads x 2 throttles x 3 rooms, 8-ch; drone-only / source-only / mixed "

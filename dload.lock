@@ -1,6 +1,6 @@
 # Pinned dataset versions, managed by `dload pin`.
 [datasets]
-AVQ = "50dd53d1a6c0ab81fe02e4a40a57557a0a2b1c1b85152470edd12aa6d0725f39"
+AVQ = "a37840cace1ef87cabcb6c1a3432c67ca942db12611bcca8bd9a782c88622caf"
 AVQ-egonoise = "b43b374b007a0d5c9575dd2feacd31a05097d0c436629819b936273f17cf7703"
 AVQ-egonoise-vkrps = "266f5241bfb0cfa37d34ca5091ba6475eb4c7348de522ac4eb672c0107ef703f"
 AVQ-raw = "0e17e52b16c32f50dbe0d98024bf44797b731fab1df0b7d79c67c64c1444fb36"
