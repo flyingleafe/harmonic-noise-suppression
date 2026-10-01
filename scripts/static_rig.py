@@ -228,6 +228,174 @@ def _jsonable(v: Any) -> Any:
     return v
 
 
+def _match(full: list[float], half: list[float]) -> list[float | None]:
+    """One-to-one (Hungarian) match of a half-record's speeds to the full read."""
+    import numpy as np
+    from scipy.optimize import linear_sum_assignment
+
+    out: list[float | None] = [None] * len(full)
+    if full and half:
+        cost = np.abs(np.subtract.outer(np.asarray(full), np.asarray(half)))
+        for i, j in zip(*linear_sum_assignment(cost), strict=True):
+            out[int(i)] = float(half[j])
+    return out
+
+
+#: AGH single-rotor shaft rates measured in AGH.yaml (by take index).
+_AGH_SINGLE = [159.5, 132.6, 113.7, 97.6, 77.7, 97.6, 97.6, 97.6]
+#: DroneAudioSet cell medians of noise-v2-bench-points (rev/s).
+_DAS_CELL = {
+    ("daset_drone1", "low"): 84.96,
+    ("daset_drone1", "high"): 118.68,
+    ("daset_drone2", "low"): 105.83,
+    ("daset_drone2", "high"): 126.03,
+}
+
+
+def rate_range(u: dict[str, Any]) -> tuple[float, float]:
+    """Seeder rate range per recording: narrow (no octave inside) where the
+    rate is known from a law or an earlier reading, wide where it is not."""
+    rig, key = u["rig"], u["key"]
+    if rig == "dregon":
+        if u["n_rotors"] == 4:
+            return 58.0, 80.0
+        law = 0.975 * float(str(u["throttle"]).split()[0]) + 0.37
+        return 0.85 * law, 1.15 * law
+    if rig == "spcup_agh":
+        if "single_rotors" in key:
+            s = _AGH_SINGLE[int(key.rsplit("__", 1)[1])]
+            return 0.85 * s, 1.15 * s
+        return 70.0, 260.0
+    if rig == "spcup_ku_leuven":
+        return 80.0, 150.0
+    if rig == "spcup_maverick":
+        return 28.0, 50.0
+    if rig == "avq":
+        return 65.0, 120.0
+    s = _DAS_CELL[(rig, u["throttle"])]
+    return 0.75 * s, 1.3 * s
+
+
+def worker_track(unit: Unit) -> dict[str, Any]:
+    import numpy as np
+
+    from experiments.static_rig import spectra as S
+    from experiments.static_rig import tracks as T
+
+    prm = dict(unit.params)
+    x = np.load(prm["audio"], mmap_mode="r")
+    fs = int(prm["fs"])
+    a, b = S.motor_on_span(np.asarray(x), fs, S.Params())
+    cap = int(float(prm["max_s"]) * fs)
+    if b - a > cap:
+        mid = (a + b) // 2
+        a, b = mid - cap // 2, mid + cap // 2
+    lo, hi = rate_range(prm)
+    out = T.track(np.asarray(x[:, a:b]), fs, int(prm["n_rotors"]), lo, hi, T.TrackParams())
+    return {
+        **{k: v for k, v in prm.items() if k not in ("audio", "out")},
+        "span_s": [a / fs, b / fs],
+        "rate_range": [lo, hi],
+        **out,
+    }
+
+
+def _load_span(path: str, fs: int, max_s: float):
+    import numpy as np
+
+    from experiments.static_rig import spectra as S
+
+    x = np.load(path, mmap_mode="r")
+    a, b = S.motor_on_span(np.asarray(x), fs, S.Params())
+    cap = int(max_s * fs)
+    if b - a > cap:
+        mid = (a + b) // 2
+        a, b = mid - cap // 2, mid + cap // 2
+    return np.asarray(x[:, a:b], dtype=np.float64), [a / fs, b / fs]
+
+
+def worker_track_group(unit: Unit) -> dict[str, Any]:
+    """One DroneAudioSet physical take: the up / down rings and the centre mic
+    were recorded simultaneously. Seed + refine on the primary ring (up, else
+    down), then refine that trajectory on each other member (its own clock:
+    the centre mic runs on an independent device) and profile every member."""
+    import numpy as np
+
+    from experiments.static_rig import tracks as T
+
+    prm = dict(unit.params)
+    tp = T.TrackParams()
+    members = prm["members"]
+    order = [m for m in ("M_up", "M_down", "M_center") if m in members]
+    lo, hi = rate_range(prm)
+    out: dict[str, Any] = {k: v for k, v in prm.items() if k not in ("members", "out")}
+    out.update(rate_range=[lo, hi], primary=order[0], members={})
+    ref_t = ref_r = None
+    for m in order:
+        info = members[m]
+        x, span = _load_span(info["audio"], int(info["fs"]), float(prm["max_s"]))
+        x = T.resample(x, int(info["fs"]), tp.fs)[:8]
+        if ref_r is None:
+            seeds, ft, ch = T.seed(x, int(prm["n_rotors"]), lo, hi, tp)
+            res = T.refine_and_profile(x, seeds, ft, tp)
+            res.update(seed_channel=ch, seeds=seeds.tolist())
+            ref_t = np.asarray(res["frame_times"])
+            ref_r = np.array([r["track"] for r in res["rotors"]])
+        else:
+            assert ref_t is not None
+            ft = T.frame_grid(x.shape[1], tp)
+            r0 = np.stack([np.interp(ft, ref_t, row) for row in ref_r])
+            res = T.refine_and_profile(x, r0, ft, tp)
+        res.update(key=info["key"], span_s=span, n_ch=int(x.shape[0]))
+        out["members"][m] = res
+    return out
+
+
+def _das_groups(specs: list[dict[str, Any]], out: str, max_s: float) -> list[Unit]:
+    groups: dict[str, dict[str, Any]] = {}
+    for u in specs:
+        if u["dataset"] != "DroneAudioSet":
+            continue
+        gid = _uid("DAS", f"{u['rig']}_{u['throttle']}_{u['mic_dist']}_{u['take']}")
+        g = groups.setdefault(
+            gid,
+            {
+                "dataset": "DroneAudioSet",
+                "key": gid,
+                "rig": u["rig"],
+                "throttle": u["throttle"],
+                "mic_dist": u["mic_dist"],
+                "take": u["take"],
+                "n_rotors": u["n_rotors"],
+                "members": {},
+                "out": out,
+                "max_s": max_s,
+            },
+        )
+        g["members"][u["mic"]] = {"audio": u["audio"], "fs": u["fs"], "key": u["key"]}
+    return [Unit(uid=gid, params=g) for gid, g in sorted(groups.items())]
+
+
+def _summary_track(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def one(r: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "n_distinct": r["n_distinct"],
+            "means": [round(x["mean"], 3) for x in r["rotors"]],
+            "stds": [round(x["std"], 3) for x in r["rotors"]],
+            "residual": round(r["residual_ratios"][-1], 3),
+        }
+
+    return {
+        "n": len(rows),
+        "recordings": {
+            f"{r['dataset']}:{r['key']}": (
+                {m: one(v) for m, v in r["members"].items()} if "members" in r else one(r)
+            )
+            for r in rows
+        },
+    }
+
+
 def worker(unit: Unit) -> dict[str, Any]:
     import numpy as np
 
@@ -249,7 +417,7 @@ def worker(unit: Unit) -> dict[str, Any]:
     for part in (xs[:, :mid], xs[:, mid:]):
         mh = S.speed_modes(S.spectrum(part, fs, p), comb["f_bar"], n_rot, p)
         hs = [r["speed"] for r in mh["rotors"]]
-        halves.append([min(hs, key=lambda h, s=s: abs(h - s)) if hs else None for s in speeds])
+        halves.append(_match(speeds, hs))
     lines = S.line_powers(sp, speeds, p)
     spec_dir = Path(prm["out"]) / "spec"
     spec_dir.mkdir(parents=True, exist_ok=True)
@@ -308,6 +476,12 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--out", type=Path, default=_ROOT / "results/static_rig/speeds")
     r.add_argument("--jobs", type=int, default=6)
     r.add_argument("--only", default=None, help="regex over uid")
+    t = sub.add_parser("track")
+    t.add_argument("--work", type=Path, required=True)
+    t.add_argument("--out", type=Path, default=_ROOT / "results/static_rig/tracks")
+    t.add_argument("--jobs", type=int, default=6)
+    t.add_argument("--only", default=None, help="regex over uid")
+    t.add_argument("--max-s", type=float, default=160.0)
     args = ap.parse_args(argv)
     if args.cmd == "fetch":
         units: list[dict[str, Any]] = []
@@ -327,6 +501,27 @@ def main(argv: list[str] | None = None) -> int:
         for u in specs
         if pat is None or pat.search(u["uid"])
     ]
+    if args.cmd == "track":
+        singles = [
+            Unit(uid=u.uid, params={**u.params, "max_s": args.max_s})
+            for u in units_
+            if u.params["dataset"] != "DroneAudioSet"
+        ]
+        das = [
+            g
+            for g in _das_groups(specs, str(args.out), args.max_s)
+            if pat is None or pat.search(g.uid)
+        ]
+        ok = run_grid(singles, worker_track, args.out, jobs=args.jobs, summarize=_summary_track)
+        res = run_grid(
+            das,
+            worker_track_group,
+            args.out,
+            jobs=args.jobs,
+            summarize=_summary_track,
+            summary_name="summary_das.json",
+        )
+        return ok.exit_code or res.exit_code
     res = run_grid(units_, worker, args.out, jobs=args.jobs, summarize=_summary)
     return res.exit_code
 
