@@ -98,7 +98,7 @@ class PriorSpec:
     # wind
     wind_sc: dict[str, Any] = field(
         default_factory=lambda: dict(
-            p_wind=0.7, max_over_floor_db=33.0, shield_mean_db=8.0, speed_range=[2.0, 10.0]
+            p_wind=0.7, max_over_floor_db=33.0, shield_mean_db=8.0, gustiness=3
         )
     )
 

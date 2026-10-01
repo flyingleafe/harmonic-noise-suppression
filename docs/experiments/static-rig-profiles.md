@@ -477,7 +477,7 @@ in `results/prior_rigs/<name>/` (payloads with `_prior` provenance) and
 | Shaft | OU: σ_ν ~ LogN(log 0.4 rad/s, 0.4), λ ~ LogN(log 12, 0.4); `gamma_hz` ≡ 0 | quick OU fits, 16/20 recordings |
 | Pedestal (AM + fast wobble) | per order, shared by mics: σ² ~ LogN(log 0.05, 1) (k ≤ 8), LogN(log 0.12, 0.7) (9–30), min(0.07 + k²σ_ψ², 0.6) above (σ_ψ ~ LogN(log 0.012, 0.7) rad); rate 0.4 → 1 Hz, 25 Hz where the wobble dominates; same-parity AR(1) ρ 0.25 | direct AM measurement; six-rig telemetry S_max |
 | Floor | mean N(−36, 4) dB, hump/tilt template 50/50, σ_B U(4, 5); speed law LogN(log 5, 0.3), static share LogN(log 2.5e−3, 1) | DREGON/Michael v3 floors |
-| Wind | SC generator on some capsules: p 0.7, up to 33 dB over the 20–100 Hz floor minus Exp(8 dB) shielding | DREGON windy mics +4–12 dB low band; free-flight wind_db −5…−44 dB per mic |
+| Wind | SC generator (its own Weibull gust profile, `gustiness` 3, LPC following the speed) on some capsules: p 0.7, mean level up to 33 dB over the 20–100 Hz floor minus Exp(8 dB) shielding | DREGON free flight (`free-flight_nosource_room2`, mics 0/1/4): fitted wind 16/15/10/16 dB over the rotor floor on the windy capsules (a lower bound: the quietest mic defines zero); 20–100 Hz envelope 10–90 % 11.5–12.3 dB, 1.0–1.4 bursts/s; burst−gap excess 14–19 dB at 50–400 Hz, 2–12 dB at 800 Hz, 0–6 dB at 1.6 kHz, gone by 2.4 kHz. SC reproduces this (prior windy capsule: 10–14.5 dB, 13–19 / −1…8 / −6…8 dB); the renderer must NOT feed it a constant speed profile, which is what made the first draws' wind steady and band-limited to a shelf |
 
 The comb is written as LINE OVER FLOOR because that is what the fits
 measure and what a recording shows; `profile_db` is obtained by reading

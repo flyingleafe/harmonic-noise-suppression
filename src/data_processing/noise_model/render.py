@@ -31,13 +31,16 @@ WHAT IS DRAWN, per rotor ``r`` and order ``k`` (the total phase of the model,
   not identifiable from an expected periodogram, and the model's independent
   uniform initial phase is what makes the components add in power).
 
-ORDERS. Only orders whose line sits below the OUTPUT Nyquist are rendered, the
-same cap the forward model uses (:func:`.spectrum.k_max_for_carrier`), so there
-is nothing to alias; the render still goes through
-:func:`.resample.antialias` and the unchanged
-:func:`.resample.decimate_audio`, because that pair IS the chain
-:func:`experiments.stochastic_fit.stage2.render_transfer_power` describes to the fit and
-the fitted ``M`` carries it.
+ORDERS. Every order of the profile whose line sits below the WORK Nyquist is
+rendered (:func:`.spectrum.k_max_for_carrier` at ``sr_work``); the ones above
+the OUTPUT Nyquist, or crossing it as the carrier moves, are removed by
+:func:`.resample.antialias` and the unchanged :func:`.resample.decimate_audio`,
+because that pair IS the chain
+:func:`experiments.stochastic_fit.stage2.render_transfer_power` describes to the
+fit and the fitted ``M`` carries it. A real comb rolls off through the
+recorder's transition band with its last orders still well over the floor; a
+cap at the output Nyquist for the clip's fastest carrier would cut it with a
+cliff, so the work rate must stay above the output rate.
 
 THE FLOOR is white noise shaped by the square root of the SHARED
 :func:`.floor.floor_power_spectrum`, with the floor's own speed envelope
@@ -81,6 +84,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal, overload
 
 import numpy as np
+from numba import njit
 
 from data_processing.noise_model import FIT_SCHEMA_V3, READABLE_FIT_SCHEMAS
 from data_processing.noise_model import spectrum as SP
@@ -122,32 +126,116 @@ WanderMean = Literal["zero", "power"]
 WANDER_MEANS: tuple[str, ...] = ("zero", "power")
 
 
+#: The LINE ENVELOPE grid: every slow per-line factor (speed law, wander, the
+#: AM pedestal, the Wiener phase) is drawn or sampled at this rate and
+#: interpolated linearly onto the work grid by :func:`_line_kernel`. 1 kHz
+#: resolves a 25 Hz pedestal and a Lorentzian of tens of Hz; the carriers
+#: themselves (``k phi_r``) stay at the work rate.
+ENV_RATE_HZ = 1000
+#: Work samples per :func:`_line_kernel` block (``2 K x block`` float32 live).
+LINE_BLOCK = 4096
+
+
 def _am_envelopes(
     rng: np.random.Generator | None,
     sigma2: np.ndarray,
     gamma_hz: np.ndarray,
-    n_work: int,
-    dt: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """``((R, K, n_env), t_env)`` log-OU amplitude envelopes ``exp(g - sigma2/2)``
-    (unit MEAN AMPLITUDE: the profile stays the coherent core, the pedestal
-    adds ``e^{sigma2} - 1`` of it) at ~500 Hz (``t_env`` in work samples), one per (rotor,
-    order), shared by the mics: ``g`` has variance ``sigma2`` and rate
-    ``2 pi gamma_hz``; the caller interpolates linearly onto the work grid."""
+    n_env: int,
+    dt_env: float,
+) -> np.ndarray:
+    """``(R, K, n_env)`` log-OU amplitude envelopes ``exp(g - sigma2/2)`` (unit
+    MEAN AMPLITUDE: the profile stays the coherent core, the pedestal adds
+    ``e^{sigma2} - 1`` of it) on the envelope grid, one per (rotor, order),
+    shared by the mics: ``g`` has variance ``sigma2`` and rate ``2 pi gamma_hz``."""
     assert rng is not None
     R, K = sigma2.shape
-    hop = max(1, int(round(0.002 / dt)))  # 500 Hz envelope rate: resolves a 25 Hz pedestal
-    n_env = n_work // hop + 2
-    rho = np.exp(-2.0 * np.pi * gamma_hz * hop * dt)  # (R, K)
+    rho = np.exp(-2.0 * np.pi * gamma_hz * dt_env)  # (R, K)
     sd = np.sqrt(np.maximum(sigma2, 0.0))
     g = np.empty((R, K, n_env))
     g[:, :, 0] = sd * rng.standard_normal((R, K))
     drive = (
         sd[:, :, None] * np.sqrt(1.0 - rho[:, :, None] ** 2) * rng.standard_normal((R, K, n_env))
     )
-    for i in range(1, n_env):
-        g[:, :, i] = rho * g[:, :, i - 1] + drive[:, :, i]
-    return np.exp(g - 0.5 * sigma2[:, :, None]), np.arange(n_env, dtype=np.float64) * hop
+    _ar1(g, rho, drive)
+    return np.exp(g - 0.5 * sigma2[:, :, None])
+
+
+@njit(cache=True, fastmath=True)
+def _line_kernel(
+    c1: np.ndarray,
+    s1: np.ndarray,
+    e_re: np.ndarray,
+    e_im: np.ndarray,
+    hop_env: int,
+    t0: int,
+    n: int,
+    zbuf: np.ndarray,
+    ck: np.ndarray,
+    sk: np.ndarray,
+) -> None:
+    """Fill ``zbuf[:, :n]`` (``(2 K, block)`` float32) with ``Re`` and ``Im`` of
+    ``Z_k(t) = E_k(t) e^{i k phi(t)}`` for work samples ``t0 .. t0 + n``:
+    ``cos / sin(k phi)`` by the angle-addition recurrence in ``k`` from
+    ``(c1, s1) = (cos phi, sin phi)`` (``ck``, ``sk``: block-length scratch),
+    ``E_k`` linearly interpolated from the envelope grid (``hop_env`` work
+    samples per knot). Loops are ``k`` outer, ``t`` inner: every ``t`` is an
+    independent lane."""
+    K = e_re.shape[0]
+    inv = np.float32(1.0 / hop_env)
+    for i in range(n):
+        ck[i] = c1[t0 + i]
+        sk[i] = s1[t0 + i]
+    for k in range(K):
+        if k > 0:
+            for i in range(n):
+                c = c1[t0 + i]
+                s = s1[t0 + i]
+                cn = ck[i] * c - sk[i] * s
+                sk[i] = sk[i] * c + ck[i] * s
+                ck[i] = cn
+        for i in range(n):
+            t = t0 + i
+            j = t // hop_env
+            fr = np.float32(t - j * hop_env) * inv
+            er = e_re[k, j] + (e_re[k, j + 1] - e_re[k, j]) * fr
+            ei = e_im[k, j] + (e_im[k, j + 1] - e_im[k, j]) * fr
+            zbuf[k, i] = er * ck[i] - ei * sk[i]
+            zbuf[K + k, i] = er * sk[i] + ei * ck[i]
+
+
+@njit(cache=True, fastmath=True)
+def _ar1(g: np.ndarray, rho: np.ndarray, drive: np.ndarray) -> None:
+    """``g[..., i] = rho g[..., i - 1] + drive[..., i]`` in place, from ``g[..., 0]``."""
+    R, K, n = g.shape
+    for r in range(R):
+        for k in range(K):
+            for i in range(1, n):
+                g[r, k, i] = rho[r, k] * g[r, k, i - 1] + drive[r, k, i]
+
+
+def _render_lines(
+    audio: np.ndarray,
+    c1: np.ndarray,
+    s1: np.ndarray,
+    env: np.ndarray,
+    hop_env: int,
+    mix: np.ndarray,
+) -> None:
+    """``audio (M, T) += Re(sum_k G_mk Z_k(t))`` for one rotor: ``env`` the
+    ``(K, n_env)`` complex line envelopes, ``mix`` ``(M, K)`` complex mic
+    gains ``g_mk e^{i alpha_mk}``; the kernel's block is mixed by one BLAS
+    product ``[Re G, -Im G] @ [Re Z; Im Z]``."""
+    K, T = env.shape[0], c1.shape[0]
+    a = np.concatenate([mix.real, -mix.imag], axis=1).astype(np.float32)
+    e_re = np.ascontiguousarray(env.real, dtype=np.float32)
+    e_im = np.ascontiguousarray(env.imag, dtype=np.float32)
+    zbuf = np.empty((2 * K, LINE_BLOCK), dtype=np.float32)
+    ck = np.empty(LINE_BLOCK, dtype=np.float32)
+    sk = np.empty(LINE_BLOCK, dtype=np.float32)
+    for t0 in range(0, T, LINE_BLOCK):
+        n = min(LINE_BLOCK, T - t0)
+        _line_kernel(c1, s1, e_re, e_im, hop_env, t0, n, zbuf, ck, sk)
+        audio[:, t0 : t0 + n] += a @ zbuf[:, :n]
 
 
 def _sc_wind(
@@ -159,27 +247,25 @@ def _sc_wind(
     floor_band: np.ndarray,
     band: np.ndarray,
 ) -> np.ndarray:
-    """``(n_mics, n_work)`` SC wind noise. One clip-level intensity ``s``
-    (none with probability ``1 - p_wind``, else uniform), per capsule a level
+    """``(n_mics, n_work)`` SC wind noise, the generator's own gusty wind-speed
+    profile per capsule (``gustiness`` Weibull draws over the clip, SC's
+    default 3). One clip-level intensity ``s`` (none with probability
+    ``1 - p_wind``, else uniform), per capsule a mean level
     ``max_over_floor_db * s - Exp(shield_mean_db)`` dB over that capsule's
-    20-100 Hz floor power, an independent realisation per capsule at wind
-    speed ``speed_range[0] + s * (speed_range[1] - speed_range[0])`` m/s."""
+    20-100 Hz floor power."""
     from data_processing.noise_model.wind_sc import wind_noise
 
     out = np.zeros((n_mics, n_work))
     if rng.uniform() >= float(spec.get("p_wind", 0.7)):
         return out
     s = float(rng.uniform())
-    lo, hi = (float(v) for v in spec.get("speed_range", (2.0, 10.0)))
-    speed = lo + s * (hi - lo)
     for m in range(n_mics):
         excess_db = float(spec.get("max_over_floor_db", 33.0)) * s - rng.exponential(
             float(spec.get("shield_mean_db", 8.0))
         )
         if excess_db <= -10.0:
             continue
-        prof = np.full(int(round(n_work / sr_work * 48000)), speed)
-        w, _ = wind_noise(rng, sr_work, n_work / sr_work, speed_profile=prof, gustiness=1)
+        w, _ = wind_noise(rng, sr_work, n_work / sr_work, gustiness=int(spec.get("gustiness", 3)))
         w = w[:n_work] if w.size >= n_work else np.pad(w, (0, n_work - w.size))
         w_band = float(np.mean(np.abs(np.fft.rfft(w)[band]) ** 2))
         out[m] = w * math.sqrt(floor_band[m] * 10.0 ** (excess_db / 10.0) / max(w_band, 1e-30))
@@ -334,12 +420,19 @@ def render_noise(
         np.stack([np.interp(t_work, t_src, r) for r in rps]), SPEED_FLOOR_RPS
     )  # (R, n_work)
 
+    # every order the profile has that fits below the WORK Nyquist is rendered; the
+    # ones above the OUTPUT Nyquist (or crossing it as the carrier moves) are then
+    # removed by the same anti-alias chain a real recording's decimator applied -
+    # a comb's top rolls off through that transition band, it never stops at the
+    # last order under 8 kHz for the clip's fastest carrier (a cliff no recording has)
     k_max = min(
         int(profile_db.shape[1]),
-        SP.k_max_for_carrier(f0.max(axis=1), sr, k_cap=int(profile_db.shape[1])),
+        SP.k_max_for_carrier(f0.max(axis=1), sr_work, k_cap=int(profile_db.shape[1])),
     )
     if k_max < 1:
-        raise ValueError(f"no order of a {float(f0.max()):.1f} rev/s rotor fits below {sr / 2} Hz")
+        raise ValueError(
+            f"no order of a {float(f0.max()):.1f} rev/s rotor fits below {sr_work / 2} Hz"
+        )
 
     ss = np.random.SeedSequence(int(seed))
     rng_state, rng_psi, rng_alpha, rng_floor = (np.random.default_rng(s) for s in ss.spawn(4))
@@ -425,59 +518,69 @@ def render_noise(
     #   ``am``: per-(rotor, order) log-OU amplitude envelope shared by the mics
     #   ``profile.mic_dev_sd_db``: per-(mic, rotor, order) static dB deviation, redrawn per clip
     #   ``wind_sc``: SC wind noise (data_processing.noise_model.wind_sc) on some capsules
-    am_env: tuple[np.ndarray, np.ndarray] | None = None
     mic_dev: np.ndarray | None = None
     rng_am = rng_dev = rng_wsc = None
     if v3 and (p.get("am") is not None or p["profile"].get("mic_dev_sd_db") or p.get("wind_sc")):
         rng_am, rng_dev, rng_wsc = (np.random.default_rng(s) for s in ss.spawn(3))
-    if v3 and p.get("am") is not None:
-        am_s2 = np.asarray(p["am"]["sigma2"], dtype=np.float64)
-        am_g = np.asarray(p["am"]["gamma_hz"], dtype=np.float64)
-        if am_s2.shape[0] == 1:
-            am_s2, am_g = np.repeat(am_s2, n_rotors, 0), np.repeat(am_g, n_rotors, 0)
-        am_env = _am_envelopes(rng_am, am_s2[:, :k_max], am_g[:, :k_max], n_work, dt)
     dev_sd = float(p["profile"].get("mic_dev_sd_db") or 0.0)
     if v3 and dev_sd > 0.0:
         assert rng_dev is not None
         mic_dev = 10.0 ** (dev_sd * rng_dev.standard_normal((n_mics, n_rotors, k_max)) / 20.0)
 
-    def wander_db(track: np.ndarray) -> np.ndarray:
-        """One block track, linearly interpolated in dB onto the work grid."""
-        return np.interp(t_work, t_knot, track)
-
+    # LINES: every slow factor on the envelope grid, the carriers at the work
+    # rate, mixed per block (``_line_kernel`` / ``_render_lines``)
+    hop_env = int(sr_work) // ENV_RATE_HZ
+    if hop_env * ENV_RATE_HZ != int(sr_work):
+        raise ValueError(f"sr_work {sr_work} is not a multiple of the envelope rate {ENV_RATE_HZ}")
+    dt_env = hop_env * dt
+    n_env = n_work // hop_env + 2
+    t_env_s = np.arange(n_env) * dt_env
+    knots = np.minimum(np.arange(n_env) * hop_env, n_work - 1)
+    am_env = None
+    if v3 and p.get("am") is not None:
+        am_s2 = np.asarray(p["am"]["sigma2"], dtype=np.float64)
+        am_g = np.asarray(p["am"]["gamma_hz"], dtype=np.float64)
+        if am_s2.shape[0] == 1:
+            am_s2, am_g = np.repeat(am_s2, n_rotors, 0), np.repeat(am_g, n_rotors, 0)
+        am_env = _am_envelopes(rng_am, am_s2[:, :k_max], am_g[:, :k_max], n_env, dt_env)
     amp_exp = float(p["profile"]["amp_exp"])
     speed = f0 / AMP_RPS_REF
-    audio = np.zeros((n_mics, n_work), dtype=np.float64)
-    t_idx = np.arange(n_work, dtype=np.float64)
+    audio = np.zeros((n_mics, n_work), dtype=np.float32)
     for r in range(n_rotors):
-        line_amp = np.sqrt(2.0 * 10.0 ** (profile_db[r, :k_max] / 10.0))
-        speed_amp = np.sqrt(speed[r] ** amp_exp)
-        d_r = wander_db(tracks["d"][r]) if v3 else None
-        for k in range(1, k_max + 1):
-            # the line's own Wiener phase: increments N(0, 4 pi gamma dt),
-            # cumulatively summed. Its increment variance IS the exponent the
-            # lag law carries, so the rendered line is the Lorentzian of
-            # half-width gamma_rk the fit was written in terms of.
-            step = math.sqrt(4.0 * math.pi * max(float(gamma_hz[r, k - 1]), 0.0) * dt)
-            psi = np.cumsum(rng_psi.standard_normal(n_work) * step)
-            arg = k * phase[r] + psi
-            env = line_amp[k - 1] * speed_amp
-            if d_r is not None:
-                # the line's power wanders by 10^{(d_r + v_rk)/10}
-                env = env * 10.0 ** ((d_r + wander_db(tracks["v"][r, k - 1])) / 20.0)
-            if am_env is not None:
-                env = env * np.interp(t_idx, am_env[1], am_env[0][r, k - 1])
-            alpha = rng_alpha.uniform(0.0, 2.0 * np.pi, size=n_mics)
-            # cos(arg + alpha_m) by angle addition: TWO full-length trig passes
-            # per (rotor, order) instead of n_mics of them.
-            ec = env * np.cos(arg)
-            es = env * np.sin(arg)
-            for m in range(n_mics):
-                g = math.sqrt(line_gain[m, r]) if line_gain.ndim == 2 else math.sqrt(line_gain[m])
-                if mic_dev is not None:
-                    g *= float(mic_dev[m, r, k - 1])
-                audio[m] += (g * math.cos(alpha[m])) * ec
-                audio[m] -= (g * math.sin(alpha[m])) * es
+        env = (
+            np.sqrt(2.0 * 10.0 ** (profile_db[r, :k_max] / 10.0))[:, None]
+            * np.sqrt(speed[r, knots] ** amp_exp)[None, :]
+        )  # (K, n_env)
+        if v3:
+            # the line's power wanders by 10^{(d_r + v_rk)/10}
+            d_r = np.interp(t_env_s, t_knot, tracks["d"][r])
+            v_r = np.stack([np.interp(t_env_s, t_knot, row) for row in tracks["v"][r]])
+            env = env * 10.0 ** ((d_r[None, :] + v_r) / 20.0)
+        if am_env is not None:
+            env = env * am_env[r]
+        # the line's own Wiener phase: increments N(0, 4 pi gamma dt_env),
+        # cumulatively summed. Its increment variance IS the exponent the lag
+        # law carries, so the rendered line is the Lorentzian of half-width
+        # gamma_rk the fit was written in terms of.
+        step = np.sqrt(4.0 * np.pi * np.maximum(gamma_hz[r, :k_max], 0.0) * dt_env)
+        psi = np.cumsum(rng_psi.standard_normal((k_max, n_env)) * step[:, None], axis=1)
+        env = env * np.exp(1j * psi)
+        alpha = rng_alpha.uniform(0.0, 2.0 * np.pi, size=(n_mics, k_max))
+        g = np.sqrt(line_gain[:, r] if line_gain.ndim == 2 else line_gain)[:, None] * np.ones(
+            (1, k_max)
+        )
+        if mic_dev is not None:
+            g = g * mic_dev[:, r, :]
+        ph = phase[r]
+        _render_lines(
+            audio,
+            np.cos(ph).astype(np.float32),
+            np.sin(ph).astype(np.float32),
+            env,
+            hop_env,
+            g * np.exp(1j * alpha),
+        )
+    audio = audio.astype(np.float64)
 
     ctrl_hz = SP.floor_ctrl_hz(sr)
     shape_mat, tilt_oct = floor_geometry(np.fft.rfftfreq(n_work, d=dt), ctrl_hz)
