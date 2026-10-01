@@ -350,7 +350,11 @@ correlation; `.../amplitude_jitter.json`.
 - Direct per-order: σ_m² = 0.005–0.08 at k ≤ 8 (σ_m ≈ 0.1–0.3), 0.1–0.17 at
   k = 9–30 (partly frame scalloping of the FM), 0.02–0.11 above; γ_m ≈
   0.2–0.6 Hz at k ≤ 8 (memory 0.3–0.8 s), ~1 Hz at mid orders, frame-rate-
-  limited above k ≈ 30. Cross-order correlation of ln A_k(t): −0.01…0.08 on
-  all 20 — **the harmonics breathe independently**, one AM process per line.
+  limited above k ≈ 30. Cross-order correlation of ln A_k(t) by separation
+  (`am_corr_lag.py`, `am_corr_lag.json`): Δk = 1 ≈ 0, **Δk = 2 ≈ +0.1–0.3**,
+  Δ4/Δ6 +0.05–0.2, ~0 beyond Δ10; odd separations ≈ 0 — the even (blade-pass)
+  and odd (shaft-rate) families breathe separately, with a short correlation
+  length of a few orders inside each family. Independent per-line AM is the
+  zeroth order; an AR(1)-in-k (ρ ≈ 0.25 per same-parity step) the refinement.
 - Notebook model 2 = Whittle D + the measured per-order (σ²_m,k, γ_m,k) as
   independent log-amplitude OU per line.
