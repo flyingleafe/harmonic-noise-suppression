@@ -102,14 +102,17 @@ def geometry(obs: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _lines(rot: dict[str, Any], n_ch: int):
-    """(order, power_db (C,), snr_db (C,), phase (C,), coherence (C,)) per order."""
+    """(order, power_db (C,), snr_db (C,), phase (C,), coherence (C,), ref) per
+    order; phase and coherence are relative to mic ``ref`` (the tracker's
+    loudest raw cell)."""
     for k, p, s, ph in zip(
         rot["orders"], rot["power_db"], rot["snr_db"], rot["phase_rel"], strict=True
     ):
         if k > MAX_ORDER:
             continue
         p = np.array([np.nan if v is None else v for v in p], dtype=float)
-        yield k, p, np.asarray(s, dtype=float), np.asarray(ph["phase"]), np.asarray(ph["coherence"])
+        s = np.asarray(s, dtype=float)
+        yield k, p, s, np.asarray(ph["phase"]), np.asarray(ph["coherence"]), int(ph["ref"])
 
 
 def _candidate(rot: dict[str, Any], o: dict[str, Any]) -> bool:
@@ -182,7 +185,7 @@ def profiles(obs_all: list[dict[str, Any]]) -> dict[str, Any]:
             if not valid(rot, o):
                 continue
             per_k = {}
-            for k, p, s, _, _ in _lines(rot, 0):
+            for k, p, s, *_ in _lines(rot, 0):
                 if np.nanmedian(s) >= SNR_MIN_DB and np.isfinite(np.nanmedian(p)):
                     per_k[k] = float(np.nanmedian(p))
             if len(per_k) < 3:
@@ -261,17 +264,17 @@ def _rms(rows: list, g: np.ndarray, alpha: float) -> float:
 
 
 def _rig_lines(o: dict[str, Any], D: np.ndarray) -> list:
-    """(track, order, masked level (C,), freq, phase, coherence) per usable line."""
+    """(track, order, masked level (C,), freq, phase, coherence, ref) per usable line."""
     n_mic = D.shape[1]
     rots = [r for r in o["rotors"] if valid(r, o)]
     out = []
     for ti, rot in enumerate(rots):
-        for k, p, s, ph, coh in _lines(rot, n_mic):
+        for k, p, s, ph, coh, ref in _lines(rot, n_mic):
             if p.size != n_mic:
                 continue
             p = np.where(s >= SNR_MIN_DB, p, np.nan)
             if np.isfinite(p).sum() >= _min_mics(n_mic):
-                out.append((ti, k, p, k * rot["mean"], ph, coh))
+                out.append((ti, k, p, k * rot["mean"], ph, coh, ref))
     return out
 
 
@@ -283,13 +286,14 @@ def _perm_for(o: dict[str, Any], lines: list, D: np.ndarray, n_tr: int) -> tuple
 
 
 def _collect(lines, D, perm, rows, perr, pnull, rng) -> None:
+    """Level rows of ``lines``; phase errors where the reference mic's cell is
+    usable (SNR >= SNR_MIN_DB) and the other mic's coherence >= COH_MIN."""
     n_mic = D.shape[1]
-    for ti, k, p, f, ph, coh in lines:
+    for ti, k, p, f, ph, coh, ref in lines:
         r = D[perm[ti]]
         rows.append((k, p, r))
-        ref = int(np.nanargmax(p))
         good = (coh >= COH_MIN) & (np.arange(n_mic) != ref)
-        if not good.any():
+        if not np.isfinite(p[ref]) or not good.any():
             continue
         pred = -2 * math.pi * f * (r - r[ref]) / C_SOUND
         perr.extend(np.abs(np.angle(np.exp(1j * (ph - pred))))[good].tolist())

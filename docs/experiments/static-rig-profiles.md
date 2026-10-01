@@ -195,21 +195,22 @@ line needs ≥ 60 % of the mics. Cross-fitted by order parity: on the even
 orders each recording's track → rotor-position permutation (best pure 1/r)
 and the gains and α are fitted, the odd orders are scored under them, and
 back; a track with no training line is dropped. Phase of the scored lines:
-measured inter-mic phase vs −2πf(r_c − r_ref)/c at coherence ≥ 0.8, against a
+measured phase relative to the tracker's reference mic (loudest raw cell,
+itself at SNR ≥ 6 dB) vs −2πf(r_c − r_ref)/c at coherence ≥ 0.8, against a
 mic-permuted null.
 
 | Rig | Scored lines | 1/r spread (dB) | Held-out RMS: none / gains / 1/r / both (dB) | α (two folds) | Phase error, median rad (null) |
 |---|---|---|---|---|---|
-| DREGON | 683 | 4.68 | 3.80 / 3.27 / 3.41 / 3.22 | 1.03, 0.33 | 0.59 (1.15) |
+| DREGON | 683 | 4.68 | 3.80 / 3.27 / 3.41 / 3.22 | 1.03, 0.33 | 0.59 (1.13) |
 | AVQ | 165 | 4.53 | 3.79 / 3.46 / 3.46 / 3.19 | 1.75, 0.72 | 0.51 (1.11) |
-| KU Leuven | 36 | 3.45 | 1.90 / 2.01 / 2.17 / 2.24 | 1.00, 1.02 | 0.72 (0.55) |
+| KU Leuven | 36 | 3.45 | 1.90 / 2.01 / 2.17 / 2.24 | 1.00, 1.02 | 0.70 (0.58) |
 
 Spherical spreading accounts for only ~0.4 dB of the 3.8 dB across-mic
 scatter on DREGON and AVQ, and α is unstable between folds there; the phase
 follows the point-source delay pattern far better than chance (about half the
 null error) with ~0.5–0.6 rad median error. KU Leuven fails out of sample:
-with the permutation chosen on the other parity its phase error (0.72 rad) is
-worse than the null (0.55); a first pass that chose the permutation on all
+with the permutation chosen on the other parity its phase error (0.70 rad) is
+worse than the null (0.58); a first pass that chose the permutation on all
 orders showed 0.47 rad, an in-sample artefact. The point source is a usable
 first-order delay model on DREGON and AVQ and a poor level model everywhere:
 per-mic level is dominated by something else (directivity / near field /

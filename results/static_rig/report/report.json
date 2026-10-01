@@ -2356,9 +2356,9 @@
     1.754,
     0.716
    ],
-   "phase_median_abs_err_rad": 0.5108547379335406,
-   "phase_null_median_abs_err_rad": 1.1055822227887773,
-   "phase_n": 859
+   "phase_median_abs_err_rad": 0.5078175226165831,
+   "phase_null_median_abs_err_rad": 1.1070737992044606,
+   "phase_n": 857
   },
   "dregon": {
    "n_lines": 683,
@@ -2376,9 +2376,9 @@
     1.025,
     0.332
    ],
-   "phase_median_abs_err_rad": 0.5932087155359943,
-   "phase_null_median_abs_err_rad": 1.1452910325631676,
-   "phase_n": 3616
+   "phase_median_abs_err_rad": 0.5850766262957157,
+   "phase_null_median_abs_err_rad": 1.1347783865519698,
+   "phase_n": 3573
   },
   "ku_leuven": {
    "n_lines": 36,
@@ -2396,9 +2396,9 @@
     0.999,
     1.019
    ],
-   "phase_median_abs_err_rad": 0.7178547902198142,
-   "phase_null_median_abs_err_rad": 0.5455239837500274,
-   "phase_n": 100
+   "phase_median_abs_err_rad": 0.6986165877360536,
+   "phase_null_median_abs_err_rad": 0.5815419818479766,
+   "phase_n": 99
   }
  },
  "combined": {}
