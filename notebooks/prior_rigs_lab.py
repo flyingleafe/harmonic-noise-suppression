@@ -130,30 +130,34 @@ def summary(lab: Lab, i: int) -> str:
     )
 
 
-def plot_rig(lab: Lab, i: int, rps: float = 80.0, fmax: float = 8000.0) -> None:
-    """The parameter view of ``noise_lab`` (stems = expected line peaks at
-    ``rps``, grey = floor, red caps = shaft width), one pane per rotor. The
-    per-order AM pedestals are not in the expectation drawn here."""
+def plot_rig(lab: Lab, i: int, speeds: Any = None, fmax: float = 7900.0) -> Any:
+    """The parameter view of rig ``i`` as ``noise_lab.rig_view_plotly``: a
+    dropdown picks ``all rotors`` / ``rotor mean`` / one rotor (its stems at
+    ``k f_r`` and red caps of +/- the line's half width over the grey floor),
+    a slider sets the common rotor speed (``speeds``, default 20-120 rev/s by
+    5). The per-order AM pedestals are not in the expectation drawn here."""
     import noise_lab as NL
 
-    fit = lab.rigs[i]
-    view = NL.param_view(fit, rps, fmax=fmax)
-    f, floor, keep = view["f"], view["floor_db"], view["keep"]
-    R = view["gamma_hz"].shape[0]
-    fig, axes_ = plt.subplots(R, 1, figsize=(18, 2.4 * R), sharex=True, sharey=True, squeeze=False)
-    axes = list(axes_[:, 0])
-    for r, ax in enumerate(axes):
-        NL.draw_param_view(ax, view, r)
-        ax.set_ylabel(f"rotor {r}\ndB")
-        ax.grid(alpha=0.3)
-        ax.set_ylim(
-            floor[(f > 100) & (f < fmax)].min() - 15,
-            max(floor[f < fmax].max(), np.nanmax(view["line_db"][keep])) + 5,
-        )
-    axes[0].set_title(summary(lab, i), fontsize=9)
-    axes[0].legend(loc="upper right", fontsize=8)
-    fig.tight_layout()
-    plt.show()
+    return NL.rig_view_plotly(lab.rigs[i], speeds=speeds, fmax=fmax, title=f"rig {i}")
+
+
+def rig_browser(lab: Lab, **kw: Any):
+    """Dropdown (rig) → :func:`plot_rig` (rotor dropdown + speed slider inside)."""
+    import ipywidgets as W
+    from IPython.display import display
+
+    w_rig = W.Dropdown(options=list(range(len(lab.rigs))), description="rig")
+    out = W.Output()
+
+    def refresh(*_):
+        with out:
+            out.clear_output(wait=True)
+            print(summary(lab, w_rig.value))
+            display(plot_rig(lab, w_rig.value, **kw))
+
+    w_rig.observe(refresh, "value")
+    refresh()
+    return W.VBox([w_rig, out])
 
 
 def plot_trajectory(lab: Lab, i: int, j: int) -> None:
@@ -201,4 +205,13 @@ def browser(lab: Lab):
     return W.VBox([W.HBox([w_rig, w_rec]), out])
 
 
-__all__ = ["Lab", "browser", "build", "plot_rig", "plot_trajectory", "summary", "view"]
+__all__ = [
+    "Lab",
+    "browser",
+    "build",
+    "plot_rig",
+    "plot_trajectory",
+    "rig_browser",
+    "summary",
+    "view",
+]
