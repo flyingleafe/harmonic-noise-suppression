@@ -188,3 +188,23 @@ at median-mic SNR ≥ 6 dB, speed std < 3 rev/s, < 20 % of frames within
   band 40–100; residual ratios 0.88–0.92, tracks parked at band edges). Their
   lines only start at 150–820 Hz depending on the take, so the low orders that
   fix the shaft rate are missing. Unresolved.
+
+**Point-source test (tracked envelopes, valid tracks).** Model per line:
+level = line constant + mic gain − α·20·log10 r; mic cells at SNR ≥ 6 dB, a
+line needs ≥ 60 % of the mics; track → rotor position by the best pure-1/r
+permutation per recording; gains and α fitted on even orders, RMS scored on
+odd orders and back (held out). Phase: measured inter-mic phase vs
+−2πf(r_c − r_ref)/c at coherence ≥ 0.8, against a mic-permuted null.
+
+| Rig | Lines | 1/r spread (dB) | Held-out RMS: none / gains / 1/r / both (dB) | α (two folds) | Phase error, median rad (null) |
+|---|---|---|---|---|---|
+| DREGON | 692 | 4.68 | 3.79 / 3.26 / 3.41 / 3.22 | 1.01, 0.33 | 0.59 (1.13) |
+| AVQ | 165 | 4.53 | 3.79 / 3.46 / 3.46 / 3.19 | 1.75, 0.72 | 0.51 (1.01) |
+| KU Leuven | 42 | 3.45 | 1.91 / 1.99 / 2.17 / 2.09 | 1.00, −0.07 | 0.47 (0.56) |
+
+Spherical spreading accounts for only ~0.4 dB of the 3.8 dB across-mic
+scatter on DREGON and AVQ, and α is unstable between folds; the phase follows
+the point-source delay pattern far better than chance (about half the null
+error) but with ~0.5–0.6 rad median error. The point source is the right
+first-order delay model and a poor level model: per-mic level is dominated by
+something else (directivity / near field / scattering).
