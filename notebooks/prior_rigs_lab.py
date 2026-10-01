@@ -176,15 +176,32 @@ def plot_trajectory(lab: Lab, i: int, j: int) -> None:
 
 
 def view(lab: Lab, i: int, j: int, **kw: Any):
-    """A :func:`plots.spectrum_viewer` over recording ``j`` of rig ``i``."""
+    """A :func:`plots.spectrum_viewer` over recording ``j`` of rig ``i``, with an
+    audio player of the viewed channel (follows the channel dropdown; the clip
+    is peak-normalised, so no absolute level is implied)."""
+    import ipywidgets as W
+    from IPython.display import Audio, display
+
     from plots.spectrum_viewer import spectrum_viewer
 
     audio, _ = lab.recording(i, j)
-    return spectrum_viewer(audio, sr=SR, title=f"rig {i} rec {j}", **kw)
+    viewer = spectrum_viewer(audio, sr=SR, title=f"rig {i} rec {j}", **kw)
+    player = W.Output()
+
+    def play(*_):
+        with player:
+            player.clear_output(wait=True)
+            ch = int(viewer.w_channel.value)
+            display(Audio(audio[ch], rate=SR, normalize=False))
+
+    viewer.w_channel.observe(play, "value")
+    play()
+    viewer.widget = W.VBox([viewer.widget, player])
+    return viewer
 
 
 def browser(lab: Lab):
-    """Dropdowns (rig, recording) → trajectory plot + spectrum viewer."""
+    """Dropdowns (rig, recording) → trajectory plot + spectrum viewer + player."""
     import ipywidgets as W
     from IPython.display import display
 
