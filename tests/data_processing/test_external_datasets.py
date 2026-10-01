@@ -378,6 +378,8 @@ def test_build_avq_joins_the_annotation_and_refuses_gaps(tmp_path):
     _fake_avq(other, drop="S2_seq5")
     with pytest.raises(ValueError, match="without a recording"):
         dict(avq.build(other))
+    assert meta["observation"]["source_motion"] == "moving"
+    assert meta["observation"]["platform_motion"].startswith("static")
 
 
 def _one_team_doc(keys):

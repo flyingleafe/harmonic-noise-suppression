@@ -396,7 +396,8 @@ NOISE_DATASETS: dict[str, str] = {
     "michaels-test-frames": "HELD-OUT TEST flights FLY103/FLY108 (mono, 48 kHz): look, do not train",
     "SPCUP19-frames": "IEEE SP Cup 2019 ego-noise: 10 team packages (1/3/8/16 ch), every recording "
     "tagged from the team reports (condition, active rotors, sources) with mic_pos/rotor_pos",
-    "AVQ-egonoise": "AVQ quadrotor: the 5 pure rotor ego-noise sequences, 8-ch 44.1 kHz",
+    "AVQ-egonoise": "AVQ quadrotor: the 5 pure rotor ego-noise sequences, channel 0, 16 kHz mono "
+    "(meta from AVQ recipe 1, untagged)",
     "AVQ": "AVQ quadrotor on a tripod: 12 sequences, 8-ch; 5 ego-noise only, 3 speech only "
     "(motors muted), 4 mixtures; tagged from the publisher's spec table",
     "noise-v2-bench-points": "stationary bench/static windows (DREGON, SPCUP19, AVQ, "
