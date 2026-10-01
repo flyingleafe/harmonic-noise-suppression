@@ -1,6 +1,6 @@
-"""Real vs Whittle-model spectra for every DREGON single (full band + zooms at
+"""Real vs OU-model (model 2) spectra for every DREGON single (full band + zooms at
 chosen orders) and the directly measured line HWHM per order against the
-Lorentzian law π k² D of the Whittle fit and a linear law.
+OU HWHM law of the quick fit and a linear law.
 
 Writes results/static_rig/single_rotor/figs/<key>.png and
 results/static_rig/single_rotor/line_widths.json."""
@@ -51,7 +51,7 @@ for key in keys:
     x, fs, model = L._analysed(key)
     a, b = model.span
     x = x[:, a:b].astype(np.float64)
-    wf = L.load_whittle(key)
+    wf = L.load_ou(key)
     am = L.am_per_order(key, wf.orders.size)
     y = SR.synthesise(wf, fs, b - a, am=am).astype(np.float64)
     c = 0 if "Motor4" in key else 3
@@ -85,7 +85,7 @@ for key in keys:
     ax = axs[0, 1]
     ax.plot(k, w_real, ".", label="real HWHM")
     ax.plot(k, w_synth, "x", alpha=0.6, label="model 2 HWHM")
-    ax.plot(k, np.pi * k**2 * wf.D, "-", label=f"π k² D, D={wf.D:.1e}")
+    ax.plot(k, wf.gamma, "-", label=f"OU HWHM σ_ν={wf.sigma_nu:.3f} λ={wf.lam:.1f}")
     ax.plot(k, np.polyval(lin, k), "--", label=f"linear {lin[0]:.3f} Hz/order")
     ax.set_ylim(0, 12)
     ax.set_xlabel("order k")
@@ -98,17 +98,12 @@ for key in keys:
         ax.plot(f[m] - f0, 10 * np.log10(Pr[m] + 1e-30), lw=0.7, label="real")
         ax.plot(f[m] - f0, 10 * np.log10(Ps[m] + 1e-30), lw=0.7, alpha=0.7, label="model 2")
         ax.set_title(
-            f"k={kz} ({f0:.0f} Hz): HWHM real {w_real[kz - 1]:.2f} / synth {w_synth[kz - 1]:.2f} Hz; π k² D = {np.pi * kz**2 * wf.D:.2f}"
+            f"k={kz} ({f0:.0f} Hz): OU HWHM = {SR.ou_hwhm(kz, wf.sigma_nu, wf.lam):.2f} Hz"
         )
         ax.set_xlabel("Hz from k·s̄")
         ax.legend()
     fig.tight_layout()
     fig.savefig(OUT / f"{key}.png", dpi=80)
     plt.close(fig)
-    print(
-        f"{key}: HWHM real k=10/42/70/84: {w_real[9]:.2f}/{w_real[41]:.2f}/{w_real[69]:.2f}/{w_real[83]:.2f} Hz; "
-        f"πk²D: {np.pi * 100 * wf.D:.2f}/{np.pi * 42**2 * wf.D:.2f}/{np.pi * 70**2 * wf.D:.2f}/{np.pi * 84**2 * wf.D:.2f}; "
-        f"linear fit {lin[0]:.3f} Hz/order",
-        flush=True,
-    )
+    print(key, "done", flush=True)
 Path("results/static_rig/single_rotor/line_widths.json").write_text(json.dumps(res))

@@ -65,8 +65,9 @@ def load(key: str) -> tuple[np.ndarray, int]:
     return np.load(path), int((CACHE / f"{key}.fs").read_text())
 
 
-MODELS = ("table: D = r(1 s)², no AM", "Whittle D + measured per-order AM")
-WHITTLE_DIR = Path("../results/static_rig/single_rotor/whittle")
+MODELS = ("table: D = r(1 s)², no AM", "OU shaft (width law) + peak amplitudes + measured AM")
+RESULTS = Path("../results/static_rig/single_rotor")
+OU_DIR = RESULTS / "ou"
 AM_FILE = "amplitude_jitter.json"
 
 
@@ -78,7 +79,7 @@ class Case:
     synth: np.ndarray  #: (C, n) the reconstruction
     model: SR.RotorModel
     wind: list[int]  #: windy mics (excluded from speed/jitter)
-    fit: SR.LineFit | SR.WhittleFit  #: the profile behind ``synth``
+    fit: SR.LineFit | SR.OUFit  #: the profile behind ``synth``
     which: str  #: entry of MODELS
 
 
@@ -86,23 +87,20 @@ _cases: dict[tuple[str, str], Case] = {}
 _models: dict[str, tuple[np.ndarray, int, SR.RotorModel]] = {}
 
 
-def load_whittle(key: str) -> SR.WhittleFit | None:
-    """The stored Whittle fit (``results/static_rig/single_rotor/whittle/``)."""
-    for base in (WHITTLE_DIR, Path("results/static_rig/single_rotor/whittle")):
+def load_ou(key: str) -> SR.OUFit | None:
+    """The stored quick OU profile (``results/static_rig/single_rotor/ou/``,
+    written by ``scripts/static_rig_scratch/ou_quick.py``)."""
+    for base in (OU_DIR, Path("results/static_rig/single_rotor/ou")):
         path = base / f"{key}.json"
         if path.exists():
             r = json.loads(path.read_text())
-            return SR.WhittleFit(
+            return SR.OUFit(
                 s=r["s"],
-                D=r["D"],
-                gamma_m=r["gamma_m"],
-                sigma_m2=r["sigma_m2"],
+                sigma_nu=r["sigma_nu"],
+                lam=r["lam"],
                 orders=np.array(r["orders"]),
                 amp2=np.array(r["amp2"]),
-                loglik=r["loglik"],
-                grid=r["grid"],
                 T=r["T"],
-                mics=r["mics"],
             )
     return None
 
@@ -110,7 +108,7 @@ def load_whittle(key: str) -> SR.WhittleFit | None:
 def load_am(key: str) -> dict | None:
     """Direct per-order amplitude-jitter measurement
     (``results/static_rig/single_rotor/amplitude_jitter.json``)."""
-    for base in (WHITTLE_DIR.parent, Path("results/static_rig/single_rotor")):
+    for base in (RESULTS, Path("results/static_rig/single_rotor")):
         path = base / AM_FILE
         if path.exists():
             return json.loads(path.read_text()).get(key)
@@ -135,7 +133,7 @@ def am_per_order(key: str, K: int) -> tuple[np.ndarray, np.ndarray] | None:
     return out_s, out_g
 
 
-PROFILE_DIR = WHITTLE_DIR.parent / "profile"
+PROFILE_DIR = RESULTS / "profile"
 
 
 def _profile_path(key: str) -> Path:
@@ -193,12 +191,12 @@ def case(key: str, which: str = MODELS[0], seed: int = 0) -> Case:
         wind = WIND[key.split("_")[1]]
         a, b = model.span
         real = np.asarray(x[:, a:b], dtype=np.float32)
-        wf = load_whittle(key) if which == MODELS[1] else None
-        fit: SR.LineFit | SR.WhittleFit
-        if wf is not None:
-            fit = wf
-            am = am_per_order(key, wf.orders.size)
-            synth = SR.synthesise(wf, fs, b - a, seed=seed, am=am)
+        of = load_ou(key) if which == MODELS[1] else None
+        fit: SR.LineFit | SR.OUFit
+        if of is not None:
+            fit = of
+            am = am_per_order(key, of.orders.size)
+            synth = SR.synthesise(of, fs, b - a, seed=seed, am=am)
         else:
             fit = model.fit
             synth = SR.synthesise(model.fit, fs, b - a, seed=seed)
@@ -233,15 +231,14 @@ def summary_html(c: Case) -> str:
         f"fs {c.fs} Hz, windy mics (not used for the span / shape fit): {c.wind}",
         f"given: s̄ = <b>{fit.s:.3f} rev/s</b>, r(1 s) = {TABLE[c.key][1]:.4f} rev → D_phase = {TABLE[c.key][1] ** 2:.2e} rev²/s",
     ]
-    if isinstance(fit, SR.WhittleFit):
-        gD = fit.grid
-        ok = [
-            f"{d:.0e}" for d, v in zip(gD["D"], gD["loglik_D"], strict=True) if v > fit.loglik - 300
-        ]
+    if isinstance(fit, SR.OUFit):
+        k_star = 1.1774 * fit.sigma_nu / (np.pi * fit.D)
         rows.append(
-            f"<b>Whittle fit</b> (mics {fit.mics}): D = <b>{fit.D:.2e}</b> rev²/s "
-            f"(spectral pedestal γ_m = {fit.gamma_m:.3f} Hz, σ_m² = {fit.sigma_m2:.3f} — poorly constrained, not used); "
-            f"D grid points within 300 nats of the optimum: {ok}"
+            f"<b>OU shaft</b> (σ_ν, λ from the free per-order line widths, `width_law.json`): "
+            f"σ_ν = <b>{fit.sigma_nu:.4f} rev/s</b> ({100 * fit.sigma_nu / fit.s:.2f} % of s̄), λ = <b>{fit.lam:.1f} s⁻¹</b> "
+            f"(memory {1 / fit.lam:.2f} s), random-walk-equivalent D = 2σ_ν²/λ = {fit.D:.1e} rev²/s; "
+            f"Lorentzian (π k² D) below k ≈ {k_star:.0f}, Gaussian (1.18 k σ_ν) above; "
+            f"amplitudes = periodogram mean over ±HWHM_k ÷ the OU line shape, no floor"
         )
         am = am_per_order(c.key, fit.orders.size)
         r = load_am(c.key)
@@ -253,12 +250,13 @@ def summary_html(c: Case) -> str:
                 "<b>amplitude jitter, measured per order</b> (0.25 s frames, ln A variance minus noise, non-windy mics): "
                 f"σ_m² median k≤8 {np.median(sm[k <= 8]):.3f}, k 9–30 {np.median(sm[(k > 8) & (k <= 30)]):.3f}, k>30 {np.median(sm[k > 30]):.3f}; "
                 f"γ_m median k≤8 {np.median(gm[k <= 8]):.2f} Hz, k 9–30 {np.median(gm[(k > 8) & (k <= 30)]):.2f}, k>30 {np.median(gm[k > 30]):.2f} "
-                f"(1.27 Hz = frame-rate limit); cross-order correlation of ln A: {np.median(coh):.2f} → lines breathe independently"
+                f"(1.27 Hz = frame-rate limit); cross-order correlation of ln A: {np.median(coh):.2f} (same-parity neighbours ~0.25); "
+                "one envelope per order, shared by the mics (cross-mic correlation 0.3–0.8)"
             )
     else:
         rows.append("<b>table model</b>: D = D_phase, no amplitude jitter")
     rows.append(
-        f"line HWHM γ_k = π k² D: k=2 {g[1]:.3f} Hz, k=10 {g[9]:.2f}, k=20 {g[19]:.2f}, "
+        f"line HWHM γ_k ({'OU' if isinstance(fit, SR.OUFit) else 'π k² D'}): k=2 {g[1]:.3f} Hz, k=10 {g[9]:.2f}, k=20 {g[19]:.2f}, "
         f"k=40 {g[min(39, g.size - 1)]:.1f} Hz (resolution 1/T = {1 / fit.T:.3f} Hz); orders: 1–{fit.orders[-1]}"
     )
     return "<div style='font-size:13px;line-height:1.5'>" + "<br>".join(rows) + "</div>"
@@ -416,15 +414,15 @@ def lab(**kw) -> Lab:
 
 def precompute(keys: list[str] | None = None) -> None:
     """Warm the audio cache and the analyses; one line per recording with the
-    table D and, when stored, the Whittle fit (D, γ_m, σ_m²)."""
+    table D and, when stored, the quick OU profile (σ_ν, λ)."""
     for k in keys or RECORDINGS:
         c = case(k)
         m = c.model
-        wf = load_whittle(k)
+        of = load_ou(k)
         extra = (
-            f" | Whittle: D {wf.D:.2e} γ_m {wf.gamma_m:.3f} Hz σ_m² {wf.sigma_m2:.3f}"
-            if wf is not None
-            else " | Whittle: not fitted"
+            f" | OU: σ_ν {of.sigma_nu:.4f} rev/s λ {of.lam:.1f} 1/s (D {of.D:.1e})"
+            if of is not None
+            else " | OU: not fitted"
         )
         print(
             f"{k}: s {m.fit.s:.3f} D_phase {m.fit.D:.2e} span {m.span[0] / c.fs:.1f}-{m.span[1] / c.fs:.1f}{extra}"
@@ -439,7 +437,7 @@ __all__ = [
     "case",
     "lab",
     "load",
-    "load_whittle",
+    "load_ou",
     "precompute",
     "summary_html",
 ]

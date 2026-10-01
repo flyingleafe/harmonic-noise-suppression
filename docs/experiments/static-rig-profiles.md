@@ -364,3 +364,20 @@ correlation; `.../amplitude_jitter.json`.
   `results/static_rig/single_rotor/profile/` (the notebook reads, never
   recomputes); synthesis is a blocked float32 cosine-bank matmul (~1–2 s per
   recording).
+
+**Width law → OU shaft (2026-10-01).** Real-vs-model spectra for all 20
+(`line_widths.py`, `results/static_rig/single_rotor/figs/`) showed the
+random-walk Whittle lines 2–4× too wide above k ≈ 30 and 30–63 harmonics per
+recording zeroed by the amplitude solver. A free per-order Lorentzian HWHM
+(`width_law.py`) grows as k^1.4–1.9: quadratic to k ≈ 20 (π k² D with the
+Whittle D), then bending towards linear (γ/k ≈ 0.03–0.08 Hz/order) — the OU
+shaft-speed signature (Lorentzian while the coherence time exceeds 1/λ,
+Gaussian 1.18 k σ_ν beyond). Quick fit (`ou_quick.py`, `.../ou/`): σ_ν =
+0.04–0.09 rev/s (0.05–0.15 % of s̄), λ ≈ 9–15 s⁻¹ (memory 0.06–0.13 s) on
+16/20; M1_90, M2_80, M3_90, M4_90 fall to λ ≈ 0.5–2 (random-walk corner,
+still too wide at k = 80). Width residual sd 0.5–1.0 in ln: even orders are
+3–10× wider than odd in the free fit (odd lines are weak, partly a low-SNR
+bias), and at k ≈ 20 a resolution-sharp spike survives on top of the hump —
+the shaft's own coherence time there is > 1 s, so the hump is not accumulated
+FM; model question left open. Notebook model 2 = OU shaft + peak amplitudes
+with the OU shape + measured per-order AM; no zeroed orders, RMS matches.

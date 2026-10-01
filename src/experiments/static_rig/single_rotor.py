@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from scipy.signal import lfilter
 
 __all__ = [
     "LineFit",
@@ -204,6 +205,136 @@ def line_powers(
         shape_mean = shape[sup - half : sup + half + 1].mean()
         amp2[:, j] = P[:, c0 - half : c0 + half + 1].mean(axis=1) / shape_mean
     return LineFit(s=s, D=D, orders=orders, amp2=amp2, T=T)
+
+
+# ─── OU shaft speed: line shape, width law, quick fit ─────────────────────────
+
+
+def ou_phase_var(tau, sigma_nu: float, lam: float):
+    """Variance (rev²) of the shaft phase increment over lag ``tau`` when the
+    speed error is OU with stationary sd ``sigma_nu`` (rev/s) and rate
+    ``lam`` (1/s): ``2σ²/λ² (λτ − 1 + e^{−λτ})`` — ``σ²τ²`` for ``τ ≪ 1/λ``,
+    ``2σ²τ/λ`` (random walk, ``D = 2σ²/λ``) for ``τ ≫ 1/λ``."""
+    lt = lam * np.asarray(tau, float)
+    return 2 * sigma_nu**2 / lam**2 * (lt - 1 + np.exp(-lt))
+
+
+def ou_line(k: float, sigma_nu: float, lam: float, ff: np.ndarray) -> np.ndarray:
+    """Unit-power line of order ``k`` on frequency offsets ``ff`` (Hz,
+    uniform spacing): the Fourier transform of ``exp(−2π²k² Var φ(τ))``,
+    scaled to sum to one over ``ff``."""
+    D = 2 * sigma_nu**2 / lam
+    hw = max(math.pi * k * k * D, 1.1774 * k * sigma_nu)  # the wider regime
+    tau_max = 8.0 / (2 * math.pi * hw)  # r(τ) < 1e-3 well before this
+    f_span = float(np.max(np.abs(ff))) + 1e-9
+    dtau = min(0.25 / f_span, tau_max / 64)
+    tau = np.arange(0.0, tau_max, dtau)
+    r = np.exp(-2 * math.pi**2 * k * k * ou_phase_var(tau, sigma_nu, lam))
+    S = 2 * dtau * (r[None, :] * np.cos(2 * math.pi * ff[:, None] * tau[None, :])).sum(axis=1)
+    S = np.maximum(S, 0.0)
+    return S / S.sum()
+
+
+def ou_hwhm(k: float, sigma_nu: float, lam: float) -> float:
+    """Half-width at half-maximum (Hz) of the OU line of order ``k``."""
+    D = 2 * sigma_nu**2 / lam
+    guess = max(math.pi * k * k * D, 1.1774 * k * sigma_nu)
+    ff = np.linspace(0.0, 4 * guess, 400)
+    S = ou_line(k, sigma_nu, lam, ff)
+    half = np.flatnonzero(0.5 * S[0] > S)
+    if half.size == 0:
+        return float(ff[-1])
+    i = int(half[0])
+    return float(np.interp(0.5 * S[0], [S[i], S[i - 1]], [ff[i], ff[i - 1]]))
+
+
+def fit_width_law(
+    orders: np.ndarray, gamma_k: np.ndarray, sigma0: float = 0.05, lam0: float = 3.0
+) -> tuple[float, float]:
+    """``(σ_ν, λ)`` minimising ``Σ (ln HWHM_k(σ_ν, λ) − ln γ_k)²`` over the
+    given orders (Nelder–Mead in log parameters)."""
+    from scipy.optimize import minimize
+
+    lg = np.log(gamma_k)
+
+    def loss(p):
+        sn, lm = math.exp(p[0]), math.exp(p[1])
+        h = np.array([ou_hwhm(float(k), sn, lm) for k in orders])
+        return float(((np.log(np.maximum(h, 1e-6)) - lg) ** 2).sum())
+
+    res = minimize(
+        loss,
+        [math.log(sigma0), math.log(lam0)],
+        method="Nelder-Mead",
+        options={"xatol": 1e-3, "fatol": 1e-4},
+    )
+    return math.exp(res.x[0]), math.exp(res.x[1])
+
+
+@dataclass
+class OUFit:
+    """Quick profile: OU shaft speed from the width law, amplitudes read at
+    the peaks with the OU line shape, no floor."""
+
+    s: float  #: shaft rate (rev/s)
+    sigma_nu: float  #: stationary sd of the shaft speed error (rev/s)
+    lam: float  #: speed-error rate (1/s); memory 1/λ
+    orders: np.ndarray  #: (K,)
+    amp2: np.ndarray  #: (C, K)
+    T: float
+
+    @property
+    def D(self) -> float:
+        """Random-walk-equivalent phase diffusion ``2σ_ν²/λ`` (rev²/s)."""
+        return 2 * self.sigma_nu**2 / self.lam
+
+    @property
+    def gamma(self) -> np.ndarray:
+        """(K,) HWHM of every order (Hz)."""
+        return np.array([ou_hwhm(float(k), self.sigma_nu, self.lam) for k in self.orders])
+
+
+def line_powers_ou(
+    x_ct: np.ndarray,
+    fs: int,
+    s: float,
+    sigma_nu: float,
+    lam: float,
+    *,
+    k_max: int = 150,
+    f_max: float | None = None,
+) -> OUFit:
+    """`line_powers` with the OU line shape: periodogram mean over
+    ``±max(HWHM_k, 1/T)`` divided by the same mean of the known shape through
+    the window kernel. Everything under the line is the line: no floor."""
+    f, P, w = _periodogram(x_ct, fs, pad=2)
+    df = float(f[1])
+    T = x_ct.shape[1] / fs
+    C = P.shape[0]
+    nfft = 2 * (f.size - 1)
+    Wk = np.abs(np.fft.rfft(w, nfft)) ** 2 / w.sum() ** 2
+    kern_h = int(round(4.0 / T / df)) + 1
+    kern = np.concatenate([Wk[kern_h:0:-1], Wk[: kern_h + 1]])
+    f_top = 0.95 * fs / 2 if f_max is None else f_max
+    K = min(k_max, int(f_top // s))
+    orders = np.arange(1, K + 1)
+    amp2 = np.zeros((C, K))
+    for j, k in enumerate(orders):
+        hw = ou_hwhm(float(k), sigma_nu, lam)
+        c0 = int(round(k * s / df))
+        half = int(round(max(hw, 1.0 / T) / df)) + 1
+        half = min(half, int(round(s / 3 / df)))
+        sup = half + kern_h + int(round(6 * hw / df))
+        ff = np.arange(-sup, sup + 1) * df
+        if hw < df:
+            line = np.zeros_like(ff)
+            line[sup] = 1.0
+        else:
+            line = ou_line(float(k), sigma_nu, lam, ff)
+        shape = np.convolve(line, kern, mode="same")
+        shape_mean = shape[sup - half : sup + half + 1].mean()
+        amp2[:, j] = P[:, c0 - half : c0 + half + 1].mean(axis=1) / shape_mean
+    return OUFit(s=s, sigma_nu=sigma_nu, lam=lam, orders=orders, amp2=amp2, T=T)
 
 
 # ─── Whittle fit: D, AM pedestal, amplitudes ──────────────────────────────────
@@ -464,26 +595,35 @@ def amplitude_jitter(
 
 
 def synthesise(
-    fit: LineFit | WhittleFit,
+    fit: LineFit | WhittleFit | OUFit,
     fs: int,
     n: int,
     seed: int = 0,
     am: tuple[Any, Any] | None = None,
     env_rate: int = 200,
 ) -> np.ndarray:
-    """``(C, n)`` audio from the profile: one shaft (rate ``s``, phase
-    diffusion ``D``) shared by all mics, every harmonic at its measured
-    amplitude with a random phase; with ``am = (σ_m², γ_m)`` — scalars or
-    per-order arrays — each order also carries a log-amplitude OU jitter
-    ``exp(g_k(t))`` (variance ``σ_m²``, memory ``1/(2π γ_m)``), independent
-    across orders and shared by the mics. Nothing else."""
+    """``(C, n)`` audio from the profile: one shaft shared by all mics — an
+    OU speed error (``σ_ν``, ``λ``) for an `OUFit`, a phase random walk
+    (``D``) otherwise — every harmonic at its measured amplitude with a
+    random phase; with ``am = (σ_m², γ_m)`` — scalars or per-order arrays —
+    each order also carries a log-amplitude OU jitter ``exp(g_k(t))``
+    (variance ``σ_m²``, memory ``1/(2π γ_m)``), independent across orders
+    and shared by the mics. Nothing else."""
     rng = np.random.default_rng(seed)
     C, K = fit.amp2.shape
     hop = fs // env_rate  # envelope sample spacing; blocks of one hop
     dt = hop / fs
     n_blk = -(-n // hop)
     n_pad = n_blk * hop
-    theta = np.cumsum(fit.s / fs + math.sqrt(fit.D / fs) * rng.standard_normal(n_pad))
+    if isinstance(fit, OUFit):  # speed error as AR(1) at the hop rate, linear between hops
+        rho = math.exp(-fit.lam * dt)
+        e = rng.standard_normal(n_blk + 1) * fit.sigma_nu * math.sqrt(1 - rho**2)
+        e[0] = rng.standard_normal() * fit.sigma_nu
+        nu = lfilter([1.0], [1.0, -rho], e)
+        rate = fit.s + np.interp(np.arange(n_pad) / hop, np.arange(n_blk + 1), nu)
+        theta = np.cumsum(rate / fs)
+    else:
+        theta = np.cumsum(fit.s / fs + math.sqrt(fit.D / fs) * rng.standard_normal(n_pad))
     frac = np.mod(theta, 1.0).reshape(n_blk, 1, hop)  # shaft angle in turns
     orders = np.asarray(fit.orders, dtype=np.float64)[None, :, None]
     phase = rng.uniform(0, 2 * np.pi, (C, K))
