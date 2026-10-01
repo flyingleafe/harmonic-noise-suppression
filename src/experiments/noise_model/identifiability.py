@@ -190,6 +190,9 @@ class _Payload:
     array: torch.Tensor  # (M, F): the array response, linear (ones without one)
     mic_obs: torch.Tensor  # (M, F): all_gain_m * array_m(f) * transfer(f)
     line_obs: torch.Tensor  # (R, F)
+    #: ``(sigma2, gamma_hz)``, each ``(R, K)``: the prior rigs' per-order log-OU
+    #: amplitude envelope (``render._am_envelopes``); ``None`` on a fit.
+    am: tuple[np.ndarray, np.ndarray] | None = None
 
 
 def _payload(fit: dict[str, Any], *, n_fft: int, hop: int, sr: int) -> _Payload:
@@ -212,6 +215,7 @@ def _payload(fit: dict[str, Any], *, n_fft: int, hop: int, sr: int) -> _Payload:
         array = torch.as_tensor(10.0 ** (curve / 10.0), dtype=ref.dtype)
     mic_obs = all_gain[:, None] * array * grid.transfer_power[None, :]
     line_obs = torch.einsum("mf,mr->rf", mic_obs, line_gain) / n_mics
+    am = p.get("am")
     return _Payload(
         grid=grid,
         params=params,
@@ -219,6 +223,12 @@ def _payload(fit: dict[str, Any], *, n_fft: int, hop: int, sr: int) -> _Payload:
         array=array,
         mic_obs=mic_obs,
         line_obs=line_obs,
+        am=None
+        if am is None
+        else (
+            np.asarray(am["sigma2"], dtype=np.float64),
+            np.asarray(am["gamma_hz"], dtype=np.float64),
+        ),
     )
 
 
@@ -262,7 +272,10 @@ def line_shapes(pl: _Payload, *, step_hz: float) -> LineShapes:
     """Every line's ``H_rk`` of payload ``pl`` on offsets ``0 .. sr_work / 2`` at
     a spacing of at most ``step_hz``: the lag sequence ``A_w(tau) rho_rk(tau)``,
     ``tau = 0 .. n - 1``, zero-padded and transformed once per line
-    (``H = 2 Re rfft - x_0``, the even lag sum)."""
+    (``H = 2 Re rfft - x_0``, the even lag sum). A prior rig's amplitude
+    envelope multiplies the lag law by its own autocorrelation
+    ``exp(sigma2 e^{-2 pi gamma |tau|})`` (unit mean amplitude: ``1`` at long
+    lags, the pedestal's ``e^{sigma2} - 1`` at zero lag)."""
     grid, params = pl.grid, pl.params
     n = int(grid.n_fft_work)
     sr_work = int(grid.sr_work)
@@ -285,6 +298,12 @@ def line_shapes(pl: _Payload, *, step_hz: float) -> LineShapes:
                 gamma_hz=gamma[:, k0:k1, None],
             )  # (R, k, n)
             x = aw * rho
+            if pl.am is not None:
+                s2 = torch.as_tensor(pl.am[0][:, k0:k1, None], dtype=x.dtype)
+                g = torch.as_tensor(pl.am[1][:, k0:k1, None], dtype=x.dtype)
+                x = x * torch.exp(
+                    s2 * torch.exp(-2.0 * math.pi * g * grid.tau_s_work[None, None, :])
+                )
             out[:, k0:k1] = (2.0 * torch.fft.rfft(x, n=big).real - x[..., :1]).numpy()
     prof = torch.as_tensor(params.profile_db, dtype=torch.float64)
     level = 0.5 * 10.0 ** (prof / 10.0) * grid.grid_power_factor / float(grid.window_work_sumsq)

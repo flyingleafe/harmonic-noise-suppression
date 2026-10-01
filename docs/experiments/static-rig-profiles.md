@@ -457,3 +457,41 @@ f, ~2/3 mic-common) + per-run draw (≈ 2.4 dB, independent per line, ρ ≈ 0.2
 between same-parity neighbours) + within-run wander (≈ 1 dB over 15 s, the
 mic-specific AM). Together with the OU shaft (σ_ν, λ) and the per-order AM
 envelopes this is the current form of the single-rotor noise model.
+
+## Generic drone prior (2026-10-02)
+
+`src/experiments/noise_model/drone_prior.py` turns the measurements above
+into a prior over rigs (`sample_prior` → a `noise-v3-fit/1` payload the
+renderer accepts; `trajectory_windows`, `gated_draws`). Driven by
+`notebooks/prior_rigs_explainer.ipynb` / `prior_rigs_lab.py`; draws cached
+in `results/prior_rigs/<name>/` (payloads with `_prior` provenance) and
+`.cache/prior_rigs/<name>/` (audio). Laws (`PriorSpec`), each sourced:
+
+| Block | Law | Source |
+|---|---|---|
+| Comb, even orders | line over floor: `k2 − slope·log10(k/2)`, floored at a tail; `k2 ~ N(26, 5)` dB per rotor, `slope ~ N(25, 5)` dB/dec, `tail ~ N(0, 2)` dB; `k = 2` + N(8, 4) | Michael's cruise/standby v3 fits at 80 rev/s (stacked `k = 2` 36/29 dB, tail 3–8 dB stacked from k ≈ 15 to 75–100); bench slope of the table profiles |
+| Odd orders | even law − (N(5, 2) + N(10, 4)·log10 k); `k = 1` = `k2` − N(5, 2) | gallery: odd lines sink with k |
+| Motor family | multiples of 3p, p ∈ {6, 7, 7, 8, 11}: + N(9, 3) dB × 0.8 per multiple | k = 42, 63, 84, 126 lines (21 = 3 × 7) |
+| Rotor scatter | N(0, 2.5) per line + N(0, 1.5) level | between-run 3.7 dB minus the per-mic part |
+| Mic scatter | 3.4 dB per (mic, line), redrawn per clip | `mic_variance.py` (raw 3.64 dB) |
+| Shaft | OU: σ_ν ~ LogN(log 0.4 rad/s, 0.4), λ ~ LogN(log 12, 0.4); `gamma_hz` ≡ 0 | quick OU fits, 16/20 recordings |
+| Pedestal (AM + fast wobble) | per order, shared by mics: σ² ~ LogN(log 0.05, 1) (k ≤ 8), LogN(log 0.12, 0.7) (9–30), min(0.07 + k²σ_ψ², 0.6) above (σ_ψ ~ LogN(log 0.012, 0.7) rad); rate 0.4 → 1 Hz, 25 Hz where the wobble dominates; same-parity AR(1) ρ 0.25 | direct AM measurement; six-rig telemetry S_max |
+| Floor | mean N(−36, 4) dB, hump/tilt template 50/50, σ_B U(4, 5); speed law LogN(log 5, 0.3), static share LogN(log 2.5e−3, 1) | DREGON/Michael v3 floors |
+| Wind | SC generator on some capsules: p 0.7, up to 33 dB over the 20–100 Hz floor minus Exp(8 dB) shielding | DREGON windy mics +4–12 dB low band; free-flight wind_db −5…−44 dB per mic |
+
+The comb is written as LINE OVER FLOOR because that is what the fits
+measure and what a recording shows; `profile_db` is obtained by reading
+the per-order conversion (window gain, OU width at order k, floor shape)
+off the model's own expected periodogram of a flat profile
+(`line_contrast_db`, one rotor, 2048-point Hann at 60 rev/s). Two
+earlier forms were wrong: a profile-space level `k2_over_floor` N(−8, 8)
+put k = 2 anywhere from +40 to −10 dB over the floor (half the draws had
+no visible lines, yet passed the 1 dB gate: the gate is statistical, not a
+visibility test), and a two-slope comb cut at K = 115 left the last
+orders 20–30 dB over a tilted floor (a cliff no recording has). The gate
+now reads the pedestal through the lag law (`identifiability.line_shapes`
+× exp(σ² e^{−2πγ|τ|})) and the lab gates at 3 dB / ≥ 2 orders / 80 % of
+frames (12 draws for 10 rigs at seed 0). At the same colour scale a prior
+draw and the DREGON free-flight / hovering recordings look alike
+(`results/prior_rigs/prior_v1_seed0/real_vs_prior.png`); Michael's FLY125
+hover shows a steadier comb because its speeds barely move.

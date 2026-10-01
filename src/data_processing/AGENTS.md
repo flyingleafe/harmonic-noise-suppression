@@ -58,13 +58,13 @@ Design: `docs/refactor-data-pipelines.md`. VK/refinement: `src/tracking`.
   `generated_noise.GeneratedNoisePool` (CUDA producer + shm seqlock ring);
   `gp` → `gp_noise.GPRotorNoisePool` (core `egonoise_gp.py`);
   `static_comb` → `rotor_spectral_model.StaticCombNoisePool`; `stochastic` →
-  `stochastic_rotor_noise.StochasticNoisePool` (generative direction of
-  `tracking.joint_decompose`); `noise_v2` → `noise_v2_pool.NoiseV2Pool`
+  `stochastic_rotor_noise.StochasticNoisePool`; `noise_v2` → `noise_v2_pool.NoiseV2Pool`
   (FITTED v2 rigs, absolute level; `fits:`/`preset_bank:` =
   `noise-v2-bank/1`); `silence` → `silence_noise.SilenceNoisePool`.
-- `noise_model/` — the v2/v3 renderer (`render`, `params`, `lag`, `spectrum`,
-  `ou`, `floor`, `resample`, `v3`), moved from `experiments.*`, which
-  re-exports each name (data_processing must not import experiments).
+- `noise_model/` — v2/v3 renderer (`render`, + prior-rig blocks `am`/
+  `mic_dev_sd_db`/`wind_sc`; `wind_sc` = SC wind port; `params`, `lag`,
+  `spectrum`, `ou`, `floor`, `resample`, `v3`), re-exported by
+  `experiments.noise_model` (never imports experiments).
 - `trajectory_model/` — the FITTED rps trajectory model (`params`, `sampler`,
   `flight`, `posterior`, `source`, `window`): `rps.kind: fitted_traj` plus
   `FlightCache`/`window_flight` (shared flight cache), fed by `rps-traj-fits`;

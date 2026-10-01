@@ -122,6 +122,70 @@ WanderMean = Literal["zero", "power"]
 WANDER_MEANS: tuple[str, ...] = ("zero", "power")
 
 
+def _am_envelopes(
+    rng: np.random.Generator | None,
+    sigma2: np.ndarray,
+    gamma_hz: np.ndarray,
+    n_work: int,
+    dt: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``((R, K, n_env), t_env)`` log-OU amplitude envelopes ``exp(g - sigma2/2)``
+    (unit MEAN AMPLITUDE: the profile stays the coherent core, the pedestal
+    adds ``e^{sigma2} - 1`` of it) at ~500 Hz (``t_env`` in work samples), one per (rotor,
+    order), shared by the mics: ``g`` has variance ``sigma2`` and rate
+    ``2 pi gamma_hz``; the caller interpolates linearly onto the work grid."""
+    assert rng is not None
+    R, K = sigma2.shape
+    hop = max(1, int(round(0.002 / dt)))  # 500 Hz envelope rate: resolves a 25 Hz pedestal
+    n_env = n_work // hop + 2
+    rho = np.exp(-2.0 * np.pi * gamma_hz * hop * dt)  # (R, K)
+    sd = np.sqrt(np.maximum(sigma2, 0.0))
+    g = np.empty((R, K, n_env))
+    g[:, :, 0] = sd * rng.standard_normal((R, K))
+    drive = (
+        sd[:, :, None] * np.sqrt(1.0 - rho[:, :, None] ** 2) * rng.standard_normal((R, K, n_env))
+    )
+    for i in range(1, n_env):
+        g[:, :, i] = rho * g[:, :, i - 1] + drive[:, :, i]
+    return np.exp(g - 0.5 * sigma2[:, :, None]), np.arange(n_env, dtype=np.float64) * hop
+
+
+def _sc_wind(
+    rng: np.random.Generator,
+    spec: Mapping[str, Any],
+    n_mics: int,
+    n_work: int,
+    sr_work: int,
+    floor_band: np.ndarray,
+    band: np.ndarray,
+) -> np.ndarray:
+    """``(n_mics, n_work)`` SC wind noise. One clip-level intensity ``s``
+    (none with probability ``1 - p_wind``, else uniform), per capsule a level
+    ``max_over_floor_db * s - Exp(shield_mean_db)`` dB over that capsule's
+    20-100 Hz floor power, an independent realisation per capsule at wind
+    speed ``speed_range[0] + s * (speed_range[1] - speed_range[0])`` m/s."""
+    from data_processing.noise_model.wind_sc import wind_noise
+
+    out = np.zeros((n_mics, n_work))
+    if rng.uniform() >= float(spec.get("p_wind", 0.7)):
+        return out
+    s = float(rng.uniform())
+    lo, hi = (float(v) for v in spec.get("speed_range", (2.0, 10.0)))
+    speed = lo + s * (hi - lo)
+    for m in range(n_mics):
+        excess_db = float(spec.get("max_over_floor_db", 33.0)) * s - rng.exponential(
+            float(spec.get("shield_mean_db", 8.0))
+        )
+        if excess_db <= -10.0:
+            continue
+        prof = np.full(int(round(n_work / sr_work * 48000)), speed)
+        w, _ = wind_noise(rng, sr_work, n_work / sr_work, speed_profile=prof, gustiness=1)
+        w = w[:n_work] if w.size >= n_work else np.pad(w, (0, n_work - w.size))
+        w_band = float(np.mean(np.abs(np.fft.rfft(w)[band]) ** 2))
+        out[m] = w * math.sqrt(floor_band[m] * 10.0 ** (excess_db / 10.0) / max(w_band, 1e-30))
+    return out
+
+
 def _power_mean_shift_db(var_db2: Any) -> np.ndarray:
     """The dB mean of a Gaussian of variance ``var_db2`` whose ``10^{x/10}``
     has mean one: ``-var ln10 / 20``."""
@@ -355,6 +419,27 @@ def render_noise(
             wind_db = np.asarray(p["wind"]["wind_db"], dtype=np.float64)
             if wind_db.size < n_mics:
                 raise ValueError(f"fit carries {wind_db.size} wind levels, asked for {n_mics} mics")
+    # PRIOR-RIG blocks (``experiments.noise_model.drone_prior``), all optional on
+    # a v3 payload and drawn from streams spawned AFTER every existing one, so
+    # a payload without them renders exactly as before:
+    #   ``am``: per-(rotor, order) log-OU amplitude envelope shared by the mics
+    #   ``profile.mic_dev_sd_db``: per-(mic, rotor, order) static dB deviation, redrawn per clip
+    #   ``wind_sc``: SC wind noise (data_processing.noise_model.wind_sc) on some capsules
+    am_env: tuple[np.ndarray, np.ndarray] | None = None
+    mic_dev: np.ndarray | None = None
+    rng_am = rng_dev = rng_wsc = None
+    if v3 and (p.get("am") is not None or p["profile"].get("mic_dev_sd_db") or p.get("wind_sc")):
+        rng_am, rng_dev, rng_wsc = (np.random.default_rng(s) for s in ss.spawn(3))
+    if v3 and p.get("am") is not None:
+        am_s2 = np.asarray(p["am"]["sigma2"], dtype=np.float64)
+        am_g = np.asarray(p["am"]["gamma_hz"], dtype=np.float64)
+        if am_s2.shape[0] == 1:
+            am_s2, am_g = np.repeat(am_s2, n_rotors, 0), np.repeat(am_g, n_rotors, 0)
+        am_env = _am_envelopes(rng_am, am_s2[:, :k_max], am_g[:, :k_max], n_work, dt)
+    dev_sd = float(p["profile"].get("mic_dev_sd_db") or 0.0)
+    if v3 and dev_sd > 0.0:
+        assert rng_dev is not None
+        mic_dev = 10.0 ** (dev_sd * rng_dev.standard_normal((n_mics, n_rotors, k_max)) / 20.0)
 
     def wander_db(track: np.ndarray) -> np.ndarray:
         """One block track, linearly interpolated in dB onto the work grid."""
@@ -363,6 +448,7 @@ def render_noise(
     amp_exp = float(p["profile"]["amp_exp"])
     speed = f0 / AMP_RPS_REF
     audio = np.zeros((n_mics, n_work), dtype=np.float64)
+    t_idx = np.arange(n_work, dtype=np.float64)
     for r in range(n_rotors):
         line_amp = np.sqrt(2.0 * 10.0 ** (profile_db[r, :k_max] / 10.0))
         speed_amp = np.sqrt(speed[r] ** amp_exp)
@@ -379,6 +465,8 @@ def render_noise(
             if d_r is not None:
                 # the line's power wanders by 10^{(d_r + v_rk)/10}
                 env = env * 10.0 ** ((d_r + wander_db(tracks["v"][r, k - 1])) / 20.0)
+            if am_env is not None:
+                env = env * np.interp(t_idx, am_env[1], am_env[0][r, k - 1])
             alpha = rng_alpha.uniform(0.0, 2.0 * np.pi, size=n_mics)
             # cos(arg + alpha_m) by angle addition: TWO full-length trig passes
             # per (rotor, order) instead of n_mics of them.
@@ -386,6 +474,8 @@ def render_noise(
             es = env * np.sin(arg)
             for m in range(n_mics):
                 g = math.sqrt(line_gain[m, r]) if line_gain.ndim == 2 else math.sqrt(line_gain[m])
+                if mic_dev is not None:
+                    g *= float(mic_dev[m, r, k - 1])
                 audio[m] += (g * math.cos(alpha[m])) * ec
                 audio[m] -= (g * math.sin(alpha[m])) * es
 
@@ -426,12 +516,22 @@ def render_noise(
         colour = np.stack([np.interp(t_s, t_knot, row) for row in tracks["uj"]])  # (J, n_t)
         return level[:, None] + colour.T @ wola_basis.T
 
+    floor_band = np.zeros(
+        n_mics
+    )  # each capsule's floor power in 20-100 Hz, the SC wind's reference
+    band = (np.fft.rfftfreq(n_work, d=dt) >= 20.0) & (np.fft.rfftfreq(n_work, d=dt) <= 100.0)
     for m in range(n_mics):
         white = rng_floor.standard_normal(n_work)
         shaped = np.fft.irfft(np.fft.rfft(white) * floor_amp, n=n_work)
         if floor_moves:
             shaped = _slow_gain(shaped, floor_wander_db, sr_work=int(sr_work))
-        audio[m] += shaped * np.sqrt(floor_gain_t) * math.sqrt(10.0 ** (mic_floor_db[m] / 10.0))
+        sig = shaped * np.sqrt(floor_gain_t) * math.sqrt(10.0 ** (mic_floor_db[m] / 10.0))
+        audio[m] += sig
+        if v3 and p.get("wind_sc") is not None:
+            floor_band[m] = float(np.mean(np.abs(np.fft.rfft(sig)[band]) ** 2))
+    if v3 and p.get("wind_sc") is not None:
+        assert rng_wsc is not None
+        audio += _sc_wind(rng_wsc, p["wind_sc"], n_mics, n_work, int(sr_work), floor_band, band)
     if wind_db is not None:
         assert rng_wind is not None
         # static, per capsule: no speed law, no channel gain, no wander
