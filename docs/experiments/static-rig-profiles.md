@@ -104,7 +104,13 @@ Code: `src/experiments/static_rig/spectra.py`, driver `scripts/static_rig.py`
 209 recordings read (outputs in `results/static_rig/speeds/`, not committed:
 147 MB of unit JSON + 23 MB of spectra).
 
-**Constant-speed recordings: the full-record read works.**
+**Kill gate as stated: FAILED** — 16 of 20 DREGON single-motor readings are
+within 1 rev/s of the common law, not 20/20 (Motor2_80 −1.07, Motor2_90 −1.19,
+Motor4_80 +1.24, Motor4_90 +1.28). The follow-up below shows the misses are
+systematic per-motor offsets, not read errors; the gate is recorded as failed
+regardless.
+
+**Constant-speed recordings: the full-record read is precise.**
 
 - DREGON single motors (20): the two halves of each record agree to
   0.116 rev/s at most (median 0.022). Against the common throttle law the
@@ -138,3 +144,16 @@ Code: `src/experiments/static_rig/spectra.py`, driver `scripts/static_rig.py`
 So "stationary" (drone fixed, throttle constant) does not mean constant shaft
 speed on these rigs; a full-record spectrum cannot be read there, and the
 per-rotor speeds must be tracked in time.
+
+**Point-source level test, DREGON single motors (from the round-1 line powers).**
+385 harmonic lines (orders ≤ 40, ≥ 6 dB over the floor on all 8 mics; 3080
+observations). Model per line: level = line constant + mic gain − α·20·log10 r
+(r = rotor-hub-to-mic distance; the 1/r effect spans 4.65–4.85 dB across the
+8 mics for each rotor). Across-mic RMS residual: 4.09 dB with neither term,
+3.61 dB with mic gains only, 3.67 dB with distance only (α = 1.30), 3.46 dB
+with both (α = 0.87; mic gains −2.09 … +2.62 dB). By order: 5.58 dB (1–4),
+2.74 (5–10), 2.92 (11–20), 3.11 (21–40). Spreading is the right size (α near
+1) but explains little: the per-mic level is dominated by something the
+point-source model lacks (directivity, near-field interference, scattering by
+the frame), worst at the lowest orders. Magnitude only; the phase test needs
+complex amplitudes per mic.
