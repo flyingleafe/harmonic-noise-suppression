@@ -157,3 +157,34 @@ with both (α = 0.87; mic gains −2.09 … +2.62 dB). By order: 5.58 dB (1–4)
 point-source model lacks (directivity, near-field interference, scattering by
 the frame), worst at the lowest orders. Magnitude only; the phase test needs
 complex amplitudes per mic.
+
+## Round 2 — windowed tracking (2026-10-01)
+
+Drifting rigs are tracked, not read from one spectrum
+(`experiments/static_rig/tracks.py`): rotors seeded by the in-tree
+`tracking.comb_seed.seed_from_gram` (1 s windows, hop 0.5 s, slew 3 rev/s/s,
+40 orders, 4 restarts) on the most line-like channel, refined on all channels
+by `tracking.vk_tracking.vk_track` (40 orders, 1 Hz envelopes); harmonics read
+off the final VK envelopes — line power = mean `|x|²/2` minus floor density ×
+envelope bandwidth, per order and mic, plus SNR and inter-mic phase.
+DroneAudioSet takes are grouped (up ring, down ring, centre mic of one run).
+Report: `scripts/static_rig_report.py` → `results/static_rig/report/`.
+
+Track gate: recording VK residual ratio < 0.8; the track distinct, ≥ 5 orders
+at median-mic SNR ≥ 6 dB, speed std < 3 rev/s, < 20 % of frames within
+0.5 rev/s of the search-band edges.
+
+- **Control (constant rigs):** 28 single-rotor recordings (DREGON 20, AGH 8):
+  tracked vs full-record speed median 0.018, max 0.251 rev/s.
+- **DREGON `allMotors_70`:** the tracker fails (residual ratio 2.57; four
+  rotors within 2 rev/s); its speeds stay the full-record ones (3 of 4).
+- **AVQ:** tracks follow the drifting rotors (overlay checked on `S1_seq2`;
+  one identity swap at ~103 s after a crossing). Valid tracks: `S1_seq1` 1/4,
+  `S1_seq2` 3/4, `S1_seq3` 4/4, `S2_seq1` 4/4.
+- **KU Leuven:** Team 1 3/4, Team 2 1/4 valid; three tracks crowd one ridge
+  (rotors falling ~117 → 105 Hz).
+- **Maverick 4:** 0/4 (residual ratio 0.976).
+- **AGH arrays:** 0 usable rotors in either band (70–260 or the 3-blade shaft
+  band 40–100; residual ratios 0.88–0.92, tracks parked at band edges). Their
+  lines only start at 150–820 Hz depending on the take, so the low orders that
+  fix the shaft rate are missing. Unresolved.
