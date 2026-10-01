@@ -14,30 +14,10 @@
   "s_hi": 69.91161695727531,
   "source": "full_record_modes"
  },
- "SPCUP19-frames__AGH__ego-noise__mic_array__0": {
-  "s_lo": 223.56548204046092,
-  "s_hi": 228.52665053380002,
-  "source": "full_record_modes"
- },
- "SPCUP19-frames__AGH__ego-noise__mic_array__1": {
-  "s_lo": 182.3292739534676,
-  "s_hi": 186.3820738432775,
-  "source": "full_record_modes"
- },
- "SPCUP19-frames__AGH__ego-noise__mic_array__2": {
-  "s_lo": 160.28154648254986,
-  "s_hi": 163.66093307493728,
-  "source": "full_record_modes"
- },
- "SPCUP19-frames__AGH__ego-noise__mic_array__3": {
-  "s_lo": 196.87321377134356,
-  "s_hi": 200.60540702591155,
-  "source": "full_record_modes"
- },
  "SPCUP19-frames__AGH__ego-noise__mic_array__4": {
-  "s_lo": 178.67911064470417,
-  "s_hi": 187.3454940195117,
-  "source": "full_record_modes"
+  "s_lo": 69.86666666666666,
+  "s_hi": 72.46666666666667,
+  "source": "AGH.yaml blade-pass lines / 3"
  },
  "SPCUP19-frames__KU_Leuven__SPCUP19_KU_Leuven_Team_1_recording": {
   "s_lo": 104.27028904046107,

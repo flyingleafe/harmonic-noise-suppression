@@ -393,13 +393,22 @@ def profile_tables(obs_all: list[dict[str, Any]]) -> dict[str, list[dict[str, An
     return dict(out)
 
 
+#: AGH 4-rotor array takes: the round-1 full-record search (2-blade
+#: assumption, 15-260 rev/s) does not see their 3-blade combs, and neither the
+#: tracker (40-100 rev/s) nor a shaft-rate harmonic sieve finds a dominant comb.
+#: The only sourced band: take 4's blade-pass lines in AGH.yaml
+#: (209.6/214.3/216.0/217.4 Hz), /3 for the shaft.
+AGH_ARRAY_BAND = {"SPCUP19-frames__AGH__ego-noise__mic_array__4": (209.6 / 3, 217.4 / 3)}
+
+
 def recordings(obs_all: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Per recording file: resolved R/R, partial or unresolved, and for the
     last two the shaft band ``[s_lo, s_hi]`` holding every rotor, for the
     combined comb read. The band comes from the candidate tracks (5th-95th
     percentile of their frames) when at least one track is valid, else from
     the round-1 full-record speed modes (±0.5 %), else from the full-record
-    comb rate ± ``spread_frac`` (the speed-mode search window)."""
+    comb rate ± ``spread_frac`` (the speed-mode search window); AGH arrays
+    only from :data:`AGH_ARRAY_BAND`, DroneAudioSet only from tracks."""
     full = {(r["dataset"], r["key"]): r for r in _load(RES / "speeds/raw")}
     out = {}
     for o in obs_all:
@@ -410,20 +419,25 @@ def recordings(obs_all: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         if n_v < n_r:
             cand = [np.asarray(r["track"]) for r in o["rotors"] if _candidate(r, o)]
             f = full.get((o["dataset"], o["key"]))
-            if n_v and cand:
+            band: tuple[float, float] | None = None
+            src = None
+            if "mic_array" in o["key"] and o["rig"] == "spcup_agh":
+                if uid in AGH_ARRAY_BAND:
+                    band, src = AGH_ARRAY_BAND[uid], "AGH.yaml blade-pass lines / 3"
+            elif n_v and cand:
                 band = (
-                    min(np.percentile(t, 5) for t in cand),
-                    max(np.percentile(t, 95) for t in cand),
+                    float(min(np.percentile(t, 5) for t in cand)),
+                    float(max(np.percentile(t, 95) for t in cand)),
                 )
                 src = "tracks"
+            elif o["dataset"] == "DroneAudioSet":
+                pass  # round-1 DAS reads scatter 15-250 rev/s: no fallback
             elif f is not None and f["modes"]["rotors"]:
                 s = [m["speed"] for m in f["modes"]["rotors"]]
                 band, src = (0.995 * min(s), 1.005 * max(s)), "full_record_modes"
             elif f is not None:
                 c, w = f["comb"]["f0_comb"], f["params"]["spread_frac"]
                 band, src = (c * (1 - w), c * (1 + w)), "full_record_comb"
-            else:
-                band, src = None, None
             if band is not None:
                 rec["band"] = {"s_lo": float(band[0]), "s_hi": float(band[1]), "source": src}
         out[uid] = rec
@@ -437,8 +451,8 @@ def combined_profiles(recs: dict[str, dict[str, Any]]) -> dict[str, Any]:
     out = {}
     for r in _load(RES / "combined/raw"):
         rec = recs.get(r["uid"])
-        if rec is None:
-            continue
+        if rec is None or rec.get("band") != r["band"]:
+            continue  # resolved since, or read in a band no longer used
         p = np.array(r["power_db"], dtype=float)
         s = np.array(r["snr_db"], dtype=float)
         p = np.where(s >= SNR_MIN_DB, p, np.nan)
