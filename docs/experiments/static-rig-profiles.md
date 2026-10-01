@@ -180,14 +180,18 @@ at median-mic SNR ≥ 6 dB, speed std < 3 rev/s, < 20 % of frames within
   rotors within 2 rev/s); its speeds stay the full-record ones (3 of 4).
 - **AVQ:** tracks follow the drifting rotors (overlay checked on `S1_seq2`;
   one identity swap at ~103 s after a crossing). Valid tracks: `S1_seq1` 1/4,
-  `S1_seq2` 3/4, `S1_seq3` 4/4, `S2_seq1` 4/4.
+  `S1_seq2` 3/4, `S1_seq3` 4/4, `S2_seq1` 4/4 (rerun at full length, job
+  `static-rig-combined-3a33f0`: means 87.1 / 93.0 / 90.0 / 68.1 rev/s,
+  residual ratio 0.16).
 - **KU Leuven:** Team 1 3/4, Team 2 1/4 valid; three tracks crowd one ridge
   (rotors falling ~117 → 105 Hz).
 - **Maverick 4:** 0/4 (residual ratio 0.976).
 - **AGH arrays:** 0 usable rotors in either band (70–260 or the 3-blade shaft
   band 40–100; residual ratios 0.88–0.92, tracks parked at band edges). Their
   lines only start at 150–820 Hz depending on the take, so the low orders that
-  fix the shaft rate are missing. Unresolved.
+  fix the shaft rate are missing; a shaft-rate harmonic sieve (40–170 rev/s,
+  24 orders) on the round-1 spectra finds no dominant comb either (best
+  scores within ~1 dB of the runners-up). Unresolved.
 
 **Point-source test (tracked envelopes, valid tracks).** Model per line:
 level = line constant + mic gain − α·20·log10 r; mic cells at SNR ≥ 6 dB, a
@@ -201,17 +205,47 @@ mic-permuted null.
 
 | Rig | Scored lines | 1/r spread (dB) | Held-out RMS: none / gains / 1/r / both (dB) | α (two folds) | Phase error, median rad (null) |
 |---|---|---|---|---|---|
-| DREGON | 683 | 4.68 | 3.80 / 3.27 / 3.41 / 3.22 | 1.03, 0.33 | 0.59 (1.13) |
-| AVQ | 165 | 4.53 | 3.79 / 3.46 / 3.46 / 3.19 | 1.75, 0.72 | 0.51 (1.11) |
-| KU Leuven | 36 | 3.45 | 1.90 / 2.01 / 2.17 / 2.24 | 1.00, 1.02 | 0.70 (0.58) |
+| DREGON | 683 | 4.68 | 3.80 / 3.27 / 3.41 / 3.22 | 1.03, 0.33 | 0.59 (1.14) |
+| AVQ | 173 | 4.53 | 3.62 / 3.27 / 3.34 / 3.03 | 1.67, 0.66 | 0.52 (1.07) |
+| KU Leuven | 36 | 3.45 | 1.90 / 2.01 / 2.17 / 2.24 | 1.00, 1.02 | 0.70 (0.57) |
 
-Spherical spreading accounts for only ~0.4 dB of the 3.8 dB across-mic
-scatter on DREGON and AVQ, and α is unstable between folds there; the phase
+Spherical spreading accounts for only 0.3–0.4 dB of the 3.6–3.8 dB
+across-mic scatter on DREGON and AVQ, and α is unstable between folds there; the phase
 follows the point-source delay pattern far better than chance (about half the
 null error) with ~0.5–0.6 rad median error. KU Leuven fails out of sample:
 with the permutation chosen on the other parity its phase error (0.70 rad) is
-worse than the null (0.58); a first pass that chose the permutation on all
+worse than the null (0.57); a first pass that chose the permutation on all
 orders showed 0.47 rad, an in-sample artefact. The point source is a usable
 first-order delay model on DREGON and AVQ and a poor level model everywhere:
 per-mic level is dominated by something else (directivity / near field /
 scattering) `[INFERENCE]`.
+
+**Combined profiles (rotors not all resolved).** Per recording, the total
+comb of all rotors is read from the full-record spectrum
+(`spectra.comb_band_powers`, `static_rig.py combined`): order k integrates
+[k·s_lo − w, k·s_hi + w] minus the median density of 10 Hz flanks; orders stop
+where the band would reach the next order's. Band: the candidate tracks'
+5th–95th percentiles when ≥ 1 track is valid, else the round-1 speed modes
+(±0.5 %), else the round-1 comb rate ± 8 %; AGH arrays only from `AGH.yaml`'s
+take-4 blade-pass lines / 3; DroneAudioSet only from tracks. Per-rotor =
+total − 10·log10 4 (symmetric). Median-mic level by order, dB re the loudest
+measured order (cells at SNR ≥ 6 dB; `–` = no such cell):
+
+| Recording | Verdict | Band (rev/s), source | Orders read / measured | Level by order 1, 2, 3, … |
+|---|---|---|---|---|
+| DREGON `allMotors_70` | unresolved 0/4 | 67.3–69.9, round-1 modes | 18 / 9 | 0 −1 −15 −12 −17 −15 −21 −17 −15 −16 −15 −15 −8 −15 −21 −17 – −19 |
+| AVQ `S1_seq1` | partial 1/4 | 77.3–81.6, tracks | 13 / 8 | −19 0 −21 −13 – −16 – −15 – −15 – −17 – |
+| AVQ `S1_seq2` | partial 3/4 | 79.4–98.5, tracks | 3 / 3 | −19 0 −21 |
+| KU Leuven Team 1 | partial 3/4 | 104.3–117.4, tracks | 6 / 5 | −9 0 −13 −2 −13 −11 |
+| KU Leuven Team 2 | partial 1/4 | 100.0–115.0, tracks | 5 / 2 | −9 −2 −13 0 – |
+| Maverick 4 | unresolved 0/4 | 33.6–39.4, round-1 comb | 2 / 1 | −11 0 |
+| AGH array 4 (setting 20) | unresolved 0/4 | 69.9–72.5, AGH.yaml BPF/3 | 18 / 8 | – – −11 −11 −17 – −18 −6 −14 −19 – – −12 – 0 −7 – −3 |
+| AGH arrays 0–3 | unresolved 0/4 | none identifiable | – | – |
+
+`allMotors_70`'s band holds the three resolved rotors only (the fourth,
+64.65 rev/s, shows a line at 2 of 40 orders in round 1), so its symmetric
+per-rotor level assumes four equal rotors over a three-rotor total. Wide
+drifting bands leave few orders (AVQ `S1_seq2`: 3). On AGH array 4 the
+shaft-order profile peaks at multiples of 3 only partly (orders 15 and 18
+loudest, 8 and 16 next), so its shaft assignment stays `[INFERENCE]`.
+

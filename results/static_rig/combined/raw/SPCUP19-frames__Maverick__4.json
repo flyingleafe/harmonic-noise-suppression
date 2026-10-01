@@ -1,0 +1,49 @@
+{
+ "uid": "SPCUP19-frames__Maverick__4",
+ "fs": 44100,
+ "n_ch": 3,
+ "dataset": "SPCUP19-frames",
+ "key": "Maverick__4",
+ "rig": "spcup_maverick",
+ "n_rotors": 4,
+ "throttle": "constant speed; report Fig. 5: harmonics of ~35 Hz (peaks 35, 71, 108, 173 Hz); measured Welch peaks ~37.3, ~69.6, ~75.0 Hz (two slightly different rotor speeds)",
+ "geometry": "yh19hw_tri3",
+ "band": {
+  "s_lo": 33.55239999999958,
+  "s_hi": 39.38759999999951,
+  "source": "full_record_comb"
+ },
+ "span_s": [
+  0.0,
+  16.00002267573696
+ ],
+ "df": 0.125,
+ "orders": [
+  1,
+  2
+ ],
+ "power_db": [
+  [
+   -45.48346757956571,
+   -39.48743190947201,
+   -43.84884411274068
+  ],
+  [
+   -46.67507046752143,
+   -34.584169781214776,
+   -33.77432753168845
+  ]
+ ],
+ "snr_db": [
+  [
+   7.898866100746726,
+   4.706570566615985,
+   3.3107169522075974
+  ],
+  [
+   9.65996942945312,
+   7.259205350339895,
+   8.432428908548914
+  ]
+ ]
+}
