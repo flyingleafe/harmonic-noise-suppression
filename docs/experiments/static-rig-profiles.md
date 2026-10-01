@@ -356,5 +356,11 @@ correlation; `.../amplitude_jitter.json`.
   and odd (shaft-rate) families breathe separately, with a short correlation
   length of a few orders inside each family. Independent per-line AM is the
   zeroth order; an AR(1)-in-k (ρ ≈ 0.25 per same-parity step) the refinement.
-- Notebook model 2 = Whittle D + the measured per-order (σ²_m,k, γ_m,k) as
-  independent log-amplitude OU per line.
+- Cross-mic correlation of the same order's ln A_k(t): 0.3–0.8 (M1_70 0.79,
+  M3_70 0.75, M2_80 0.56, M4_80 0.34 at k ≤ 8) — the AM is mostly a source
+  property. Notebook model 2 = Whittle D + the measured per-order
+  (σ²_m,k, γ_m,k) as one log-amplitude OU envelope per order shared by the
+  mics; the per-mic residual is dropped. Table-D profiles are stored in
+  `results/static_rig/single_rotor/profile/` (the notebook reads, never
+  recomputes); synthesis is a blocked float32 cosine-bank matmul (~1–2 s per
+  recording).

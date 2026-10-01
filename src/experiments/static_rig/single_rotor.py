@@ -24,7 +24,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from scipy.signal import lfilter
 
 __all__ = [
     "LineFit",
@@ -475,32 +474,49 @@ def synthesise(
     """``(C, n)`` audio from the profile: one shaft (rate ``s``, phase
     diffusion ``D``) shared by all mics, every harmonic at its measured
     amplitude with a random phase; with ``am = (σ_m², γ_m)`` — scalars or
-    per-order arrays — each line also carries its own log-amplitude OU
-    jitter ``exp(g(t))`` (variance ``σ_m²``, memory ``1/(2π γ_m)``,
-    independent per line and mic). Nothing else."""
+    per-order arrays — each order also carries a log-amplitude OU jitter
+    ``exp(g_k(t))`` (variance ``σ_m²``, memory ``1/(2π γ_m)``), independent
+    across orders and shared by the mics. Nothing else."""
     rng = np.random.default_rng(seed)
     C, K = fit.amp2.shape
-    dtheta = fit.s / fs + math.sqrt(fit.D / fs) * rng.standard_normal(n)
-    theta = np.cumsum(dtheta)
-    out = np.zeros((C, n))
-    sm = np.broadcast_to(np.asarray(am[0] if am is not None else 0.0, float), (K,))
-    gm = np.broadcast_to(np.asarray(am[1] if am is not None else 1.0, float), (K,))
-    dt = 1.0 / env_rate
-    n_env = n // (fs // env_rate) + 2
-    t_env = np.arange(n_env) * dt
-    t = np.arange(n) / fs
-    for j, k in enumerate(fit.orders):
-        base = 2 * np.pi * k * theta
-        rho = math.exp(-2 * math.pi * float(gm[j]) * dt)
-        for c in range(C):
-            amp = math.sqrt(fit.amp2[c, j])
-            if am is not None and sm[j] > 0:
-                noise = rng.standard_normal(n_env) * math.sqrt(sm[j] * (1 - rho**2))
-                noise[0] = rng.standard_normal() * math.sqrt(sm[j])
-                g = lfilter([1.0], [1.0, -rho], noise)
-                amp = amp * np.exp(np.interp(t, t_env, g) - 0.5 * sm[j])
-            out[c] += amp * np.cos(base + rng.uniform(0, 2 * np.pi))
-    return out
+    hop = fs // env_rate  # envelope sample spacing; blocks of one hop
+    dt = hop / fs
+    n_blk = -(-n // hop)
+    n_pad = n_blk * hop
+    theta = np.cumsum(fit.s / fs + math.sqrt(fit.D / fs) * rng.standard_normal(n_pad))
+    frac = np.mod(theta, 1.0).reshape(n_blk, 1, hop)  # shaft angle in turns
+    orders = np.asarray(fit.orders, dtype=np.float64)[None, :, None]
+    phase = rng.uniform(0, 2 * np.pi, (C, K))
+    cr = (np.sqrt(fit.amp2) * np.cos(phase)).astype(np.float32)
+    ci = (np.sqrt(fit.amp2) * np.sin(phase)).astype(np.float32)
+    env = None
+    if am is not None:  # one log-amplitude OU envelope per order, shared by the mics
+        sm = np.broadcast_to(np.asarray(am[0], float), (K,))
+        gm = np.broadcast_to(np.asarray(am[1], float), (K,))
+        rho = np.exp(-2 * np.pi * gm * dt)[:, None]
+        sd = np.sqrt(sm)[:, None]
+        noise = rng.standard_normal((K, n_blk + 1)) * sd * np.sqrt(1 - rho**2)
+        noise[:, :1] = rng.standard_normal((K, 1)) * sd
+        g = np.empty_like(noise)
+        g[:, 0] = noise[:, 0]
+        for i in range(1, n_blk + 1):
+            g[:, i] = rho[:, 0] * g[:, i - 1] + noise[:, i]
+        env = np.exp(g - 0.5 * sm[:, None]).astype(np.float32)  # (K, n_blk + 1)
+    w = (np.arange(hop, dtype=np.float32) / hop)[None, None, :]
+    out = np.empty((C, n_pad), dtype=np.float32)
+    B = max(1, (1 << 22) // (K * hop))  # blocks per chunk (~16 MB per bank)
+    for b0 in range(0, n_blk, B):
+        b1 = min(n_blk, b0 + B)
+        ang = (2 * np.pi * (orders * frac[b0:b1])).astype(np.float32)  # (b, K, hop)
+        zr, zi = np.cos(ang), np.sin(ang)
+        if env is not None:  # linear blend between the hop endpoints
+            e = env.T[b0:b1, :, None] * (1 - w) + env.T[b0 + 1 : b1 + 1, :, None] * w
+            zr *= e
+            zi *= e
+        zr = zr.transpose(1, 0, 2).reshape(K, -1)
+        zi = zi.transpose(1, 0, 2).reshape(K, -1)
+        out[:, b0 * hop : b1 * hop] = cr @ zr - ci @ zi  # Re(coef · e^{i2πkθ})
+    return out[:, :n]
 
 
 @dataclass

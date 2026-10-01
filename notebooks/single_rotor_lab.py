@@ -83,6 +83,7 @@ class Case:
 
 
 _cases: dict[tuple[str, str], Case] = {}
+_models: dict[str, tuple[np.ndarray, int, SR.RotorModel]] = {}
 
 
 def load_whittle(key: str) -> SR.WhittleFit | None:
@@ -134,14 +135,62 @@ def am_per_order(key: str, K: int) -> tuple[np.ndarray, np.ndarray] | None:
     return out_s, out_g
 
 
+PROFILE_DIR = WHITTLE_DIR.parent / "profile"
+
+
+def _profile_path(key: str) -> Path:
+    for base in (PROFILE_DIR, Path("results/static_rig/single_rotor/profile")):
+        if base.parent.exists():
+            return base / f"{key}.json"
+    return PROFILE_DIR / f"{key}.json"
+
+
+def _analysed(key: str) -> tuple[np.ndarray, int, SR.RotorModel]:
+    """Audio plus the table-D profile; the profile is read from
+    ``results/static_rig/single_rotor/profile/<key>.json`` and only computed
+    (and stored) when that file is missing."""
+    if key not in _models:
+        x, fs = load(key)
+        path = _profile_path(key)
+        if path.exists():
+            r = json.loads(path.read_text())
+            model = SR.RotorModel(
+                span=(r["span"][0], r["span"][1]),
+                fit=SR.LineFit(
+                    s=r["s"],
+                    D=r["D"],
+                    orders=np.array(r["orders"]),
+                    amp2=np.array(r["amp2"]),
+                    T=r["T"],
+                ),
+            )
+        else:
+            wind = WIND[key.split("_")[1]]
+            s_bar, r1 = TABLE[key]
+            model = SR.analyse(
+                x, fs, s_bar, r1**2, mics=[c for c in range(x.shape[0]) if c not in wind]
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "span": list(model.span),
+                        "s": model.fit.s,
+                        "D": model.fit.D,
+                        "orders": model.fit.orders.tolist(),
+                        "amp2": model.fit.amp2.tolist(),
+                        "T": model.fit.T,
+                    }
+                )
+            )
+        _models[key] = (x, fs, model)
+    return _models[key]
+
+
 def case(key: str, which: str = MODELS[0], seed: int = 0) -> Case:
     if (key, which) not in _cases:
-        x, fs = load(key)
+        x, fs, model = _analysed(key)
         wind = WIND[key.split("_")[1]]
-        s_bar, r1 = TABLE[key]
-        model = SR.analyse(
-            x, fs, s_bar, r1**2, mics=[c for c in range(x.shape[0]) if c not in wind]
-        )
         a, b = model.span
         real = np.asarray(x[:, a:b], dtype=np.float32)
         wf = load_whittle(key) if which == MODELS[1] else None
