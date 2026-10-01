@@ -45,8 +45,14 @@ def _load(d: Path) -> list[dict[str, Any]]:
 
 
 #: Tracking outputs, later directories replacing earlier units of the same
-#: name (the AGH-array rerun in the 3-blade shaft band).
-TRACK_DIRS = ("tracks/raw", "tracks_agh/raw", "tracks_das/raw", "tracks_das2/raw")
+#: name (the AGH-array rerun in the 3-blade shaft band, AVQ S2_seq1 at full length).
+TRACK_DIRS = (
+    "tracks/raw",
+    "tracks_agh/raw",
+    "tracks_s2/raw",
+    "tracks_das/raw",
+    "tracks_das2/raw",
+)
 
 
 def _uid(dataset: str, key: str) -> str:
