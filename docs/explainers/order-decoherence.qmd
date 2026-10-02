@@ -175,7 +175,9 @@ recording yesterday (`results/static_rig/single_rotor`: OU shaft speed from the 
 σ_ν = 0.089 rev/s, λ = 12.4 /s; every order's power per microphone; the measured per-order
 log-amplitude jitter, median σ² = 0.11, γ = 0.47 Hz, shared by the mics) is rendered for 30 s at
 44.1 kHz, its lines level-matched to the recording (within 1 dB per mic), and a broadband floor
-with the recording's own spectral shape per microphone is added. It has the shaft wander, the
+with the recording's own spectral shape per microphone is added (read in the valleys between
+the lines: bins within ±0.45 spacing of a harmonic dropped, running 25th percentile of the
+rest). It has the shaft wander, the
 amplitude jitter and the coloured floor of the real signal — and **no** independent phase motion
 of any order.
 
@@ -189,11 +191,11 @@ Same microphone, same analysis, same floor simulation:
 
 | k | SNR real / synth | net @ 500 ms real | synth | net @ 2 s real | synth |
 |---|---|---|---|---|---|
-| 4 | 19 / 20 dB | 0.07 | −0.00 | 0.21 | 0.00 |
-| 10 | 8 / 9 | 1.17 | 0.03 | 2.03 | 0.05 |
-| 20 | 4 / 6 | 1.45 | 0.04 | 3.41 | 0.08 |
-| 40 | 1 / 1 | 2.18 | 0.07 | 2.15 | 0.26 |
-| 42 | 9 / 10 | 0.66 | −0.01 | 0.53 | 0.14 |
+| 4 | 19 / 21 dB | 0.07 | −0.00 | 0.21 | −0.00 |
+| 10 | 8 / 10 | 1.17 | 0.01 | 2.03 | 0.03 |
+| 20 | 4 / 7 | 1.45 | 0.01 | 3.41 | 0.03 |
+| 40 | 1 / 4 | 2.18 | −0.00 | 2.15 | 0.07 |
+| 42 | 9 / 11 | 0.66 | −0.02 | 0.53 | 0.04 |
 
 : Independent per-order term, real recording against the synthetic control at matched SNR. {#tbl-ctrl}
 
@@ -201,11 +203,11 @@ Same microphone, same analysis, same floor simulation:
 
 ![Line shapes of the synthetic rotor after shaft removal: a needle at every order with no pedestal beyond the floor — compare @fig-shapes.](../../results/noise_v2/decoherence/one_rotor/synthetic/line_shapes.png){#fig-synth-shapes}
 
-The synthetic's amplitudes fluctuate as much as the real ones (CV of $|z_k|$ 0.71 / 0.55 / 0.47 at
+The synthetic's amplitudes fluctuate as much as the real ones (CV of $|z_k|$ 0.71 / 0.55 / 0.46 at
 k = 4 / 10 / 20 against 0.51 / 0.50 / 0.50 real) and its phase read is zero — the amplitude
-jitter the model carries does not leak into the phase read. The synthetic reads at most 0.07 rad²
-at 500 ms where the real recording reads 1.2–2.2, and
-0.26 at 2 s at order 40 (the shaft-estimate leakage, $k^2 B$, is at its largest there). The
+jitter the model carries does not leak into the phase read. The synthetic reads at most 0.01 rad²
+at 500 ms where the real recording reads 1.2–2.2, and 0.07 at 2 s at order 40 (the
+shaft-estimate leakage, $k^2 B$, is at its largest there). The
 difference is stark, and in the expected direction: the procedure does not manufacture
 per-order phase noise from shaft wander, amplitude jitter or a coloured floor. What it finds on
 the real recording is in the real recording.
@@ -226,11 +228,11 @@ to the control except for an independent phase $\psi_k(t)$ on every order:
 
 | k | τ | real | walk read | walk planted | bounded read | bounded planted |
 |---|---|---|---|---|---|---|
-| 4 | 0.5 s | 0.07 | 0.27 | 0.48 | 0.25 | 0.51 |
-| 4 | 2 s | 0.21 | 2.22 | 1.92 | 0.82 | 0.79 |
-| 10 | 0.2 s | 0.48 | 0.34 | 0.48 | 0.45 | 0.66 |
-| 10 | 0.5 s | 1.17 | 0.92 | 1.20 | 0.90 | 1.26 |
-| 10 | 1 s | 1.62 | ceiling | 2.40 | 1.69 | 1.73 |
+| 4 | 0.5 s | 0.07 | 0.28 | 0.48 | 0.27 | 0.51 |
+| 4 | 2 s | 0.21 | 2.17 | 1.92 | 0.77 | 0.79 |
+| 10 | 0.2 s | 0.48 | 0.30 | 0.48 | 0.42 | 0.66 |
+| 10 | 0.5 s | 1.17 | 0.85 | 1.20 | 0.86 | 1.26 |
+| 10 | 1 s | 1.62 | ceiling | 2.40 | 1.58 | 1.73 |
 | 10 | 2 s | 2.03 | ceiling | 4.80 | ceiling | 1.96 |
 | 20 | 0.5 s | 1.44 | ceiling | 2.40 | ceiling | 2.53 |
 
@@ -239,8 +241,8 @@ to the control except for an independent phase $\psi_k(t)$ on every order:
 Three things to take from it. The procedure *recovers* what is planted — at 0.6–0.8× of the
 planted value at mid lags and ≈ 1× at long lags, which is the recovery ratio the 12-recording
 controls reported — and it recovers the *shape*: the walk keeps doubling per doubling of τ
-(order 4: 0.27 → 0.84 → 2.22 from 0.5 to 2 s), the bounded phase bends over (0.25 → 0.60 →
-0.82). The real order 10 bends: 0.48 → 1.17 → 1.62 → 2.03 from 0.2 to 2 s (×2.4, ×1.4, ×1.25),
+(order 4: 0.28 → 0.85 → 2.17 from 0.5 to 2 s), the bounded phase bends over (0.27 → 0.58 →
+0.77). The real order 10 bends: 0.48 → 1.17 → 1.62 → 2.03 from 0.2 to 2 s (×2.4, ×1.4, ×1.25),
 and sits on the bounded curve, not the walk. And in the frequency domain the planted walk leaves
 **no needle** at any order ≥ 20 (`synthetic_wiener/line_shapes.png`), while the real recording
 keeps one up to order 42.

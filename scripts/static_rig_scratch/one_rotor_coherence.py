@@ -599,11 +599,23 @@ def analyse(
 
 def real_floor_psd(seg: np.ndarray, rate: float) -> tuple[np.ndarray, np.ndarray]:
     """``(f, (M, F))`` broadband floor of each microphone: the Welch spectrum
-    with the lines removed by a running median 1.5 harmonic spacings wide."""
+    read in the VALLEYS between the lines - bins within +-0.45 spacing of any
+    harmonic are dropped (that is where the lines and their pedestals live)
+    and a running 25th percentile over one spacing of what remains is
+    interpolated back onto the full grid."""
     f, p = signal.welch(seg, fs=FS, nperseg=8192, axis=-1)
-    width = int(round(1.5 * rate / (f[1] - f[0]))) | 1
-    floor = np.stack([signal.medfilt(np.log(row), width) for row in p])
-    return f, np.exp(floor)
+    off = np.abs((f / rate) - np.round(f / rate))  # distance to the nearest harmonic, in spacings
+    keep = (off > 0.45) | (f < 0.5 * rate)
+    fk = f[keep]
+    half = int(round(0.5 * rate / (f[1] - f[0])))
+    floor = np.empty_like(p)
+    for m in range(p.shape[0]):
+        lp = np.log(p[m, keep])
+        q = np.array(
+            [np.percentile(lp[max(i - half, 0) : i + half + 1], 25) for i in range(lp.size)]
+        )
+        floor[m] = np.exp(np.interp(f, fk, q))
+    return f, floor
 
 
 def shaped_noise(f: np.ndarray, psd: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
