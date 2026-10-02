@@ -137,6 +137,36 @@ pedestal's share, i.e. how much of the line is *not* locked to the shaft.
 
 ![Fraction of each order's power still phase-locked to the shaft after 1 s and 2 s, $|\gamma|^2$ from the lag law with floor and shaft leakage removed. It falls from ~1 at k = 2 to ~0.1 by k = 12 for the aerodynamic orders; the motor order 42 sits at 0.5–0.6.](../../results/noise_v2/decoherence/one_rotor/coherent_share.png){#fig-share}
 
+### Caveat — the demodulation band
+
+Every order is demodulated with the same ±0.4 f₀ = ±27 Hz window: the widest band that cannot
+see a neighbouring order, the same admitted noise and the same ~18 ms time resolution for every
+$k$. It is fair for comparing orders at the same lag; it is not neutral for the high orders,
+whose pedestal is wider than the window. Varying the band (floor re-simulated for each):
+
+| band | k | in-band SNR | net @ 50 ms | @ 200 ms | @ 500 ms |
+|---|---|---|---|---|---|
+| ±14 Hz | 10 | 8.3 dB | 0.02 | 0.41 | 1.08 |
+| ±27 Hz | 10 | 8.1 | 0.12 | 0.48 | 1.17 |
+| ±48 Hz | 10 | 6.5 | 0.17 | 0.53 | 1.22 |
+| ±14 Hz | 20 | 1.6 | — | 0.54 | 0.96 |
+| ±27 Hz | 20 | 3.7 | 0.52 | 1.04 | 1.44 |
+| ±48 Hz | 20 | 6.7 | 0.83 | 1.37 | 1.80 |
+| ±27 Hz | 40 | 0.9 | 0.55 | 1.40 | 2.17 |
+| ±48 Hz | 40 | 1.2 | 0.91 | 1.81 | 2.53 |
+| ±27 Hz | 42 | 9.1 | 0.00 | 0.22 | 0.66 |
+| ±48 Hz | 42 | 10.2 | 0.06 | 0.28 | 0.72 |
+
+: The per-order term against the demodulation band. {#tbl-band}
+
+Orders 10 and 42 do not care. Orders 20 and 40 keep collecting line power as the band widens
+(the in-band SNR rises), and the per-order term rises with it: their pedestal extends beyond half
+the harmonic spacing, i.e. it is merging into the continuum between the lines. The high-order
+numbers in this document are therefore lower bounds, the coherent shares at high order upper
+bounds; the direction of every conclusion is unchanged. The other $k$-dependent width, the shaft
+smear, stays inside the band on this bench (±10 Hz at order 40); in flight it would not, and the
+demodulation would have to follow the tracked carrier before filtering.
+
 ## Is it amplitude modulation in disguise?
 
 Unsteady blade loading certainly modulates the lines' amplitudes. Could that be what the phase
