@@ -49,6 +49,8 @@ BB_DECIM = 220  # 44100 / 220 = 200.45 Hz phase grid
 FS_PHASE = FS / BB_DECIM
 LAGS_MS = (5, 10, 20, 50, 100, 200, 500, 1000, 2000)
 SHOW_ORDERS = (2, 4, 10, 20, 40, 42, 63, 84)
+FOCUS_ORDERS = (2, 4, 10, 20, 40, 42)  # lag-law and amplitude panels
+SHAPE_ORDERS = (4, 10, 20, 30, 40, 42)  # line-shape panels
 MOTOR_ORDERS = (42, 63, 84)
 GATE_DB = 10.0  # peak / median of the in-band spectrum
 
@@ -114,9 +116,12 @@ def analyse(
     rate0: float,
     mic: int | None = None,
     start_s: float = 0.0,
+    shaft_orders: np.ndarray = SHAFT_ORDERS,
 ) -> dict[str, Any]:
     """The whole measurement on one ``(M, T)`` segment at 44.1 kHz; figures and
-    JSON go to ``OUT / tag``. ``mic`` None picks the least windy microphone."""
+    JSON go to ``OUT / tag``. ``mic`` None picks the least windy microphone.
+    ``shaft_orders``: the orders the shared shaft phase is estimated from
+    (three groups by position in the list)."""
     global OUT
     base = OUT
     OUT = base / tag
@@ -151,18 +156,18 @@ def analyse(
     # unwrapped phase / k, in three disjoint order groups so the error of the
     # estimate can be measured from their disagreement (as the 12-recording
     # study does) and the combined estimate is inverse-variance weighted.
-    z_lo = demod_orders(seg, rate, SHAFT_ORDERS)[:, :, edge:-edge]  # (10, M, T)
+    z_lo = demod_orders(seg, rate, shaft_orders)[:, :, edge:-edge]  # (Ks, M, T)
     pm_lo, _ = decoh.line_snr(z_lo, band)
     use_lo = pm_lo >= GATE_DB
     phi_lo, _slip = decoh.unwrap_censored(z_lo)
     wgt = np.where(use_lo, pm_lo, 0.0)  # (10, M)
-    group = (SHAFT_ORDERS - 1) % 3
+    group = np.arange(shaft_orders.size) % 3
     shaft_g = []
     for g in range(3):
         wg = wgt * (group == g)[:, None]
         shaft_g.append(
-            np.einsum("km,k,kmt->t", wg, SHAFT_ORDERS, phi_lo)
-            / np.einsum("km,k->", wg, SHAFT_ORDERS**2)
+            np.einsum("km,k,kmt->t", wg, shaft_orders, phi_lo)
+            / np.einsum("km,k->", wg, shaft_orders**2)
         )
     shaft_g = np.stack(shaft_g)  # (3, T)
 
@@ -314,7 +319,7 @@ def analyse(
 
     # 5. the motor order against aerodynamic orders: coherence |gamma| vs lag
     fig, ax = plt.subplots(figsize=(8, 4.8))
-    for k in (2, 4, 10, 20, 40, 42):
+    for k in FOCUS_ORDERS:
         g = np.exp(-0.5 * np.maximum(v_net[:, k - 1], 0))
         ax.semilogx(
             taus,
@@ -325,10 +330,17 @@ def analyse(
             color=colors[k],
             label=f"k={k} ({10 * np.log10(snr_eff[k - 1]):.0f} dB){'  motor' if k in MOTOR_ORDERS else ''}",
         )
-    law42 = np.exp(-0.5 * 0.09148 * 42**1.082 * taus**0.434)
-    ax.semilogx(
-        taus, law42, "--", color=colors[42], lw=1, label="k=42 if it followed the aerodynamic law"
-    )
+    if MOTOR_ORDERS and MOTOR_ORDERS[0] in colors:
+        k0 = MOTOR_ORDERS[0]
+        law = np.exp(-0.5 * 0.09148 * k0**1.082 * taus**0.434)
+        ax.semilogx(
+            taus,
+            law,
+            "--",
+            color=colors[k0],
+            lw=1,
+            label=f"k={k0} if it followed the aerodynamic law",
+        )
     ax.set(
         xlabel="lag τ [s]",
         ylabel="|γ| = exp(−V_ε/2): coherence left after floor and shaft removal",
@@ -385,7 +397,7 @@ def analyse(
     # 7. phase vs log-amplitude increments: is the per-order term a shape
     # change (both equal), a gain (amplitude only) or a timing (phase only)?
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
-    for k in (4, 10, 20, 40, 42):
+    for k in FOCUS_ORDERS[1:]:
         axes[0].loglog(
             taus,
             np.maximum(v_net[:, k - 1], 1e-4),
@@ -435,7 +447,7 @@ def analyse(
     # per-order pedestal.
     nper = 2048
     fig, axes = plt.subplots(2, 3, figsize=(13, 6.5))
-    for ax, k in zip(axes.ravel(), (4, 10, 20, 30, 40, 42)):
+    for ax, k in zip(axes.ravel(), SHAPE_ORDERS):
         zz = z[k - 1]
         zd = zz * np.exp(-1j * k * theta)
         fr, pr = signal.welch(zz, fs=FS_PHASE, nperseg=nper, return_onesided=False)
@@ -511,7 +523,7 @@ def analyse(
     # same noise at the same SNR: is the line's amplitude steadier or wilder?
     sos_b = signal.butter(6, band, btype="low", fs=FS_PHASE, output="sos")
     rng_a = np.random.default_rng(3)
-    ks_a = (4, 10, 20, 40, 42)
+    ks_a = FOCUS_ORDERS[1:]
     fig, axes = plt.subplots(1, len(ks_a), figsize=(3.2 * len(ks_a), 3.4))
     cv = {}
     for ax, k in zip(axes, ks_a):
@@ -553,6 +565,7 @@ def analyse(
         "rate_survey": rate0,
         "rate": rate,
         "segment": [start_s, span_s],
+        "shaft_orders": shaft_orders.tolist(),
         "lags_ms": list(LAGS_MS),
         "orders": orders.tolist(),
         "snr_eff_db": (10 * np.log10(snr_eff)).round(1).tolist(),
@@ -793,7 +806,54 @@ def compare_real_synth(real: np.ndarray, synth: np.ndarray, mic: int, rate: floa
     sf.write(out / "synth_mic.wav", (synth[mic, :n] / peak * 0.9).astype(np.float32), int(FS))
 
 
+AGH_RATES = {
+    0: 159.688,
+    1: 132.626,
+    2: 113.789,
+    3: 97.406,
+    4: 77.722,
+    5: 97.793,
+    6: 96.620,
+    7: 96.809,
+}
+
+
+def agh_single_rotor(idx: int) -> tuple[np.ndarray, float]:
+    """``((1, T) audio at 44.1 kHz, survey rate)`` of AGH single-rotor recording
+    ``idx`` (SPCUP19, anechoic chamber, one rotor of a 3-blade quad, AKG
+    reference mic); rates from the static-rig survey."""
+    from data_processing.frames import meta_dict
+    from data_processing.streams import iter_published_frames
+
+    rid = f"AGH__ego-noise__single_rotors__{idx}"
+    for frame in iter_published_frames("SPCUP19-frames"):
+        if str(meta_dict(frame).get("recording_id")) != rid:
+            continue
+        sr = float(frame["audio"].tindex.sr)
+        if sr != FS:
+            raise RuntimeError(f"{rid} is at {sr} Hz")
+        return np.atleast_2d(np.asarray(frame["audio"].data, np.float64)), AGH_RATES[idx]
+    raise SystemExit(f"{rid} not in the local SPCUP19-frames")
+
+
 def main() -> None:
+    global MOTOR_ORDERS, RECORDING, SHOW_ORDERS, FOCUS_ORDERS, SHAPE_ORDERS
+    if len(sys.argv) > 2 and sys.argv[1] == "--agh":
+        idx = int(sys.argv[2])
+        audio, rate0 = agh_single_rotor(idx)
+        seg, start_s, _span = decoh.analysis_segment(audio, 30.0)
+        MOTOR_ORDERS = ()
+        SHOW_ORDERS = (1, 3, 6, 9, 12, 18, 21, 42)
+        FOCUS_ORDERS = (1, 3, 6, 9, 18, 21)
+        SHAPE_ORDERS = (3, 6, 9, 18, 21, 42)
+        RECORDING = f"AGH__ego-noise__single_rotors__{idx}"
+        shaft = (
+            np.array([int(k) for k in sys.argv[3].split(",")])
+            if len(sys.argv) > 3
+            else SHAFT_ORDERS
+        )
+        analyse(seg, f"agh_{idx}", rate0, mic=0, start_s=start_s, shaft_orders=shaft)
+        return
     jobs = [j for j in decoh.load_bench() if j.name == RECORDING]
     if not jobs:
         raise SystemExit(f"{RECORDING} not in the local DREGON-frames")

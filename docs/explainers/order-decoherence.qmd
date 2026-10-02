@@ -285,6 +285,39 @@ put it at 0.15. Its amplitude is steady (@fig-amp) and its line is a clean needl
 is removed (@fig-shapes). The electromagnetic tone is locked to the shaft angle and does not
 carry the aerodynamic unsteadiness. **Yes — phase coherence is much better at the motor orders.**
 
+## The same rotor physics in an anechoic chamber (AGH, SP Cup 2019)
+
+Could the per-order term be the room? The DREGON bench stood in a room; the AGH team recorded a
+single rotor of a 3-blade quad in an **anechoic chamber** with one reference microphone
+(`SPCUP19-frames`, `AGH__ego-noise__single_rotors__4`, 77.7 rev/s, 12 s of steady run). One
+microphone and a quieter blade family (−3 to +3 dB in-band) make it a coarser read: the shaft
+is estimated from the strong orders 21 and 42 (7 and 6 dB) together with 1, 3, 9, and the floors
+at 50 ms are as large as the signal, so the 50 ms column below is marginal and the 500 ms column
+is the one to trust.
+
+| k | SNR | raw − floor @ 50 ms | shaft $k^2 V$ @ 50 ms | net @ 50 ms | net @ 500 ms |
+|---|---|---|---|---|---|
+| 1 | 10 dB | 0.05 | 0.001 | 0.05 | 0.05 |
+| 3 | 3 | 0.42 | 0.005 | 0.43 | 0.38 |
+| 6 | −3 | 0.59 | 0.019 | 0.54 | 1.69 (ceiling) |
+| 9 | 0 | 0.34 | 0.043 | 0.20 | 1.67 |
+| 12 | 2 | 0.36 | 0.076 | 0.26 | 2.62 (ceiling) |
+| 18 | 0 | 0.41 | 0.172 | 0.26 | 1.07 |
+| 21 | 7 | 0.29 | 0.234 | (shaft reference) | |
+| 42 | 6 | 1.18 | 0.935 | (shaft reference) | |
+
+: AGH anechoic single rotor, rad². The two strongest orders define the shaft and are not read against it. {#tbl-agh}
+
+The blade-pass family (3, 6, 9, 12, 18) carries 0.3–0.6 rad² at 50 ms beyond its floor where the
+shaft would give ≤ 0.17, and 1–2.6 rad² at 500 ms — the same size as on the DREGON bench. The two
+strong orders 21 and 42 are consistent with shaft wander alone: their raw reads beyond the floor
+scale as $k^2$ (0.29 → 1.18, ratio 4.1 for a 4× in $k^2$), and the shaft phase they define
+collapses their lines into needles exactly as the DREGON motor order did. Whether they are this
+drone's motor family (21 = 7 × 3 blades) is not documented; what matters here is that lines of
+the same rotor, in the same anechoic chamber, through the same microphone, split the same way:
+some phase-locked to the shaft, the aerodynamic family not. No room is needed to produce the
+term, and no room can explain why it skips orders.
+
 ## What this means for the noise model
 
 - The harmonics of the propeller do **not** move in lockstep. Beyond the shared shaft term, each
@@ -302,6 +335,11 @@ carry the aerodynamic unsteadiness. **Yes — phase coherence is much better at 
   phase-dominated above order 10.
 - The motor family is a different source: shaft-locked, steady, with a pedestal ~20 dB down.
   A rig model that gives the motor lines the aerodynamic pedestal law over-decoheres them.
+- It is not the room: the de-rotated phase does not track the instantaneous speed
+  (R² ≤ 0.03 at every order, so a static room response crossed by the wandering line is out),
+  the cross-order correlations are not the random-sign ±1 a shared speed excursion through
+  order-specific group delays would give, and the same split between shaft-locked and
+  aerodynamic orders appears in an anechoic chamber (AGH, above).
 - Open: why the high orders' phases wander *more* than their amplitudes (a timing-like
   fluctuation that is nevertheless independent across orders), and the slight asymmetry of the
   high-order pedestals (their centroid sits 1–2 Hz above the harmonic at orders 20 and 40).
