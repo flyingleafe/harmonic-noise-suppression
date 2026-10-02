@@ -495,3 +495,39 @@ frames (12 draws for 10 rigs at seed 0). At the same colour scale a prior
 draw and the DREGON free-flight / hovering recordings look alike
 (`results/prior_rigs/prior_v1_seed0/real_vs_prior.png`); Michael's FLY125
 hover shows a steadier comb because its speeds barely move.
+
+### Renderer throughput (2026-10-02)
+
+Budget for `render_reuse: 1` at A100 throughput in the unified regime (one
+500-step round = 8 000 eight-channel 2 s mixes, 6 400 of them noise, in
+< 60 s on 16 cores): ≤ 150 ms per 2 s × 8-ch render. Before: 1.0 s on the
+v3r4 bank (88 orders), 2.1 s on a prior rig (115 orders + AM + SC wind);
+`nv3r4_easy_scv2` therefore ran at `render_reuse: 192` — ≈ 33 fresh noise
+clips per round, ≈ 6 700 per 100 000-step run.
+
+`noise_model.render` now synthesises the comb in a numba kernel: every slow
+factor (speed law, wander, AM pedestal, the per-line Wiener phase) lives on a
+1 kHz envelope grid as one complex envelope per line; the carriers
+`cos/sin(k φ)` come from the angle-addition recurrence in `k` on
+`(cos φ, sin φ)`; the 8 mic gains × phases are one BLAS product per 4096-
+sample block. Orders whose line stays under the anti-alias passband edge
+(7.9 kHz) for the clip's fastest carrier are rendered straight at 16 kHz;
+the orders reaching the transition band are rendered at 32 kHz and go
+through the chain (`antialias` + `decimate_audio`), so a comb's top rolls
+off through the recorder's transition band instead of stopping at the last
+order under 8 kHz (the cap is now the WORK Nyquist). The SC wind keeps its
+model (Weibull gust profile, long-term gain, GARCH, speed-following LPC)
+with O(n) code (3e-3 relative rms change from the 0.02 m/s LPC grid).
+
+Measured, one thread, 4 s × 8 ch: v3r4 bank 0.29 s (was 2.0), prior rig
+0.30 s without wind / 0.50 s with (was 4.2). `NoiseV2Pool` gained
+`render_duration_s`: a slot holds a longer render and every draw cuts its own
+2 s window. The full online-mix pipeline on the v3r4 bank at
+`render_duration_s: 4`, `render_reuse: 40`: 38 ms per 8-ch mix per worker
+(26 ms at reuse 192 before), i.e. ≈ 25 s per round on 12 workers with a
+fresh 4 s render every 40 mixes. Tests: the lag-law test now integrates 30 s
+(an 8 s random walk scatters ± 16 %); the sha256 pin of the old renderer is
+gone (an implementation pin). `test_regime_composition_crosses_the_bands_
+without_a_level_step` fails at 3.41 dB vs 3.0 with the committed renderer
+too (seed 4; seeds 5/6 pass) — pre-existing, not touched.
+

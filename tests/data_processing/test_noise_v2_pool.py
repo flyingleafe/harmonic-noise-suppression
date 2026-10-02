@@ -226,6 +226,28 @@ def test_render_reuse_renders_once_every_reuse_windows_and_repeats_in_between():
     assert len(distinct) == 2, "16 draws at reuse 8 must come from 2 rendered clips"
 
 
+def test_a_longer_render_is_cut_into_distinct_windows_on_every_reuse():
+    """``render_duration_s`` 0.2 s at ``duration_s`` 0.05 s: 16 draws at reuse
+    8 come from 2 renders, every draw is a 0.05 s slice of one of them (audio
+    and rotor track cut at the same samples), and the slices differ."""
+    pool = _pool(duration_s=0.05, render_reuse=8, render_pool=2, render_duration_s=0.2)
+    rng = np.random.default_rng(3)
+    drawn = [pool._pooled_render(rng, 0.05) for _ in range(16)]
+    n = int(0.05 * SR)
+    assert all(a.shape[-1] == n and r.shape[-1] == n for a, r, _ in drawn)
+    assert len({a.tobytes() for a, _, _ in drawn}) > 2
+    slots = [(a, r) for _, a, r, _ in pool._pool]
+    assert len(slots) == 2 and all(a.shape[-1] == int(0.2 * SR) for a, _ in slots)
+    for a, r, _ in drawn:
+        hits = [
+            i
+            for sa, sr_ in slots
+            for i in range(sa.shape[-1] - n + 1)
+            if np.array_equal(sa[:, i : i + n], a) and np.array_equal(sr_[:, i : i + n], r)
+        ]
+        assert hits, "every draw is a slice of a pooled render"
+
+
 # ── registration ────────────────────────────────────────────────────────────
 
 

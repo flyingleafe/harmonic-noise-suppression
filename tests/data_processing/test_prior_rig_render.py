@@ -40,8 +40,8 @@ def test_am_envelope_keeps_the_coherent_core_and_the_drawn_variance():
     rng = np.random.default_rng(0)
     s2 = np.full((1, 3), 0.3)
     g = np.full((1, 3), 0.5)
-    env, t_env = _am_envelopes(rng, s2, g, n_work=32000 * 60, dt=1 / 32000)
-    assert env.shape[:2] == (1, 3) and t_env.size == env.shape[2]
+    env = _am_envelopes(rng, s2, g, n_env=1000 * 60, dt_env=1e-3)
+    assert env.shape == (1, 3, 1000 * 60)
     # exp(g - s2/2): unit mean amplitude (the profile IS the coherent core), total power e^{s2}
     assert np.allclose(env.mean(axis=2), 1.0, rtol=0.2)
     assert np.allclose((env**2).mean(axis=2), np.exp(0.3), rtol=0.3)

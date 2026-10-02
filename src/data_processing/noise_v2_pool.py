@@ -272,6 +272,7 @@ class NoiseV2Pool:
         rps_scale_range: tuple[float, float] = (1.0, 1.0),
         render_reuse: int = 1,
         render_pool: int = 0,
+        render_duration_s: float | None = None,
         normalize_rms: float | tuple[float, float] | None = None,
         level_mode: str = "window",
         comb_offset_db: float = 0.0,
@@ -285,17 +286,20 @@ class NoiseV2Pool:
         self.rps_kind = str(rps_kind)
         self.flight_fs = float(flight_fs)
         self.flight_reuse = int(flight_reuse)
-        # Rendering the v2 model costs ~0.4 s of CPU per second of 8-mic audio,
-        # far more than the stochastic family's filtered noise, so the rolling
-        # render pool is not an optimisation here but the thing that makes the
-        # source usable at all. Same mechanism and same keys as
-        # StochasticNoisePool: refresh one slot every ``render_reuse`` draws,
-        # take a random slot otherwise, so the render rate is 1 / render_reuse
-        # from the first sample while the number of distinct clips in
-        # circulation climbs to ``render_pool``. Speech, SNR and every
-        # augmentation are still drawn per sample downstream.
+        # Rendering costs ~0.07-0.12 s of CPU per second of 8-mic audio (the
+        # blocked line kernel of ``noise_model.render``; it was 0.5 s before it),
+        # so a rolling render pool keeps the source ahead of the GPU. Same
+        # mechanism and same keys as StochasticNoisePool: refresh one slot
+        # every ``render_reuse`` draws, take a random slot otherwise, so the
+        # render rate is 1 / render_reuse from the first sample while the
+        # number of distinct clips in circulation climbs to ``render_pool``.
+        # A slot holds ``render_duration_s`` of audio (default the chunk
+        # length) and every draw cuts its own uniformly placed ``duration_s``
+        # window out of it, so a reused render is not a repeated clip. Speech,
+        # SNR and every augmentation are still drawn per sample downstream.
         self.render_reuse = max(int(render_reuse), 1)
         self.render_pool = int(render_pool) if render_pool else 4 * self.render_reuse
+        self.render_duration_s = None if render_duration_s is None else float(render_duration_s)
         self._pool: list[tuple[float, np.ndarray, np.ndarray, NoiseV2Entry]] = []
         self._pool_draws = 0
         self.drone_profile_range = (float(drone_profile_range[0]), float(drone_profile_range[1]))
@@ -508,6 +512,9 @@ class NoiseV2Pool:
             rps_scale_range=pair("rps_scale_range", (1.0, 1.0)),
             render_reuse=int(g("render_reuse", 1)),
             render_pool=int(g("render_pool", 0)),
+            render_duration_s=(
+                None if g("render_duration_s") is None else float(g("render_duration_s"))
+            ),
             normalize_rms=(
                 pair("normalize_rms_range", (0.0, 0.0))
                 if g("normalize_rms_range") is not None
@@ -691,28 +698,36 @@ class NoiseV2Pool:
     def _pooled_render(
         self, rng: np.random.Generator, duration_s: float
     ) -> tuple[np.ndarray, np.ndarray, NoiseV2Entry]:
-        """One rendered clip, from the rolling pool when reuse is enabled.
+        """One ``duration_s`` clip, from the rolling pool when reuse is enabled.
 
         Reuse starts immediately and the pool GROWS: one slot is refreshed
         every ``render_reuse`` draws, appended until the pool is full and
-        replacing a random slot afterwards. The entry travels with its clip, so
-        a reused window still reports the rig it was rendered from.
+        replacing a random slot afterwards. A slot is a ``render_duration_s``
+        render (``duration_s`` when unset); the draw cuts a uniformly placed
+        ``duration_s`` window out of it, audio and rotor track alike. The entry
+        travels with its clip, so a reused window still reports the rig it
+        was rendered from.
         """
-        if self.render_reuse <= 1:
+        span = max(float(duration_s), self.render_duration_s or 0.0)
+        if self.render_reuse <= 1 and span == float(duration_s):
             return self.render(rng, duration_s)
-        matching = [item for item in self._pool if item[0] == duration_s]
+        matching = [item for item in self._pool if item[0] == span]
         if not matching or self._pool_draws % self.render_reuse == 0:
-            audio, rps, entry = self.render(rng, duration_s)
+            audio, rps, entry = self.render(rng, span)
             self._pool_draws += 1
-            slot = (float(duration_s), audio, rps, entry)
+            slot = (span, audio, rps, entry)
             if len(self._pool) < self.render_pool:
                 self._pool.append(slot)
             else:
                 self._pool[int(rng.integers(len(self._pool)))] = slot
-            matching = [item for item in self._pool if item[0] == duration_s]
+            matching = [item for item in self._pool if item[0] == span]
         else:
             self._pool_draws += 1
         _, audio, rps, entry = matching[int(rng.integers(len(matching)))]
+        n = int(round(float(duration_s) * self.sample_rate))
+        if audio.shape[-1] > n:
+            start = int(rng.integers(audio.shape[-1] - n + 1))
+            audio, rps = audio[:, start : start + n], rps[:, start : start + n]
         return audio, rps, entry
 
     def sample_timeframe(self, rng: np.random.Generator, duration_s: float) -> td.Frame:

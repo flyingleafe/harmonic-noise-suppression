@@ -509,7 +509,9 @@ def test_render_reproduces_the_per_order_lag_law():
     """
     from utils.demod import demodulate
 
-    k, f0, dur, gamma = 20, 149.0, 8.0, 1.5
+    # 30 s: the increment variance of one random walk over 8 s scatters by
+    # +-16 % (sd over seeds) once the demodulator's residual trend is removed
+    k, f0, dur, gamma = 20, 149.0, 30.0, 1.5
     fit = _planted_fit(k_cap=k, f0=f0, n_mics=1)
     p = fit["params"]
     p["sigma_nu"] = 1e-9

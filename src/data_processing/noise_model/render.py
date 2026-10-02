@@ -93,7 +93,7 @@ from data_processing.noise_model.floor import floor_geometry, floor_power_spectr
 from data_processing.noise_model.ou import simulate_state
 from data_processing.noise_model.params import array_response_db, gamma_from_params
 from data_processing.noise_model.params import check_schema as _check_schema
-from data_processing.noise_model.resample import antialias, decimate_audio
+from data_processing.noise_model.resample import AA_PASS_HZ, antialias, decimate_audio
 from data_processing.noise_model.v3 import Wander, ou_blocks, wind_shape
 
 __all__ = [
@@ -172,19 +172,30 @@ def _line_kernel(
     zbuf: np.ndarray,
     ck: np.ndarray,
     sk: np.ndarray,
+    k0: int,
 ) -> None:
     """Fill ``zbuf[:, :n]`` (``(2 K, block)`` float32) with ``Re`` and ``Im`` of
-    ``Z_k(t) = E_k(t) e^{i k phi(t)}`` for work samples ``t0 .. t0 + n``:
-    ``cos / sin(k phi)`` by the angle-addition recurrence in ``k`` from
-    ``(c1, s1) = (cos phi, sin phi)`` (``ck``, ``sk``: block-length scratch),
-    ``E_k`` linearly interpolated from the envelope grid (``hop_env`` work
-    samples per knot). Loops are ``k`` outer, ``t`` inner: every ``t`` is an
+    ``Z_k(t) = E_k(t) e^{i k phi(t)}`` for work samples ``t0 .. t0 + n`` and
+    orders ``k0 .. k0 + K - 1``: ``cos / sin(k phi)`` by the angle-addition
+    recurrence in ``k`` from ``(c1, s1) = (cos phi, sin phi)`` (``ck``,
+    ``sk``: block-length scratch), ``E_k`` linearly interpolated from the
+    envelope grid (``hop_env`` work samples per knot; ``t0`` is a knot). Loops
+    are ``k`` outer, ``t`` inner within a knot segment: every ``t`` is an
     independent lane."""
     K = e_re.shape[0]
     inv = np.float32(1.0 / hop_env)
     for i in range(n):
         ck[i] = c1[t0 + i]
         sk[i] = s1[t0 + i]
+    for _ in range(k0 - 1):  # up to cos / sin(k0 phi)
+        for i in range(n):
+            c = c1[t0 + i]
+            s = s1[t0 + i]
+            cn = ck[i] * c - sk[i] * s
+            sk[i] = sk[i] * c + ck[i] * s
+            ck[i] = cn
+    j0 = t0 // hop_env
+    n_seg = (n + hop_env - 1) // hop_env
     for k in range(K):
         if k > 0:
             for i in range(n):
@@ -193,14 +204,20 @@ def _line_kernel(
                 cn = ck[i] * c - sk[i] * s
                 sk[i] = sk[i] * c + ck[i] * s
                 ck[i] = cn
-        for i in range(n):
-            t = t0 + i
-            j = t // hop_env
-            fr = np.float32(t - j * hop_env) * inv
-            er = e_re[k, j] + (e_re[k, j + 1] - e_re[k, j]) * fr
-            ei = e_im[k, j] + (e_im[k, j + 1] - e_im[k, j]) * fr
-            zbuf[k, i] = er * ck[i] - ei * sk[i]
-            zbuf[K + k, i] = er * sk[i] + ei * ck[i]
+        for seg in range(n_seg):
+            j = j0 + seg
+            a_re = e_re[k, j]
+            a_im = e_im[k, j]
+            d_re = (e_re[k, j + 1] - a_re) * inv
+            d_im = (e_im[k, j + 1] - a_im) * inv
+            i0 = seg * hop_env
+            i1 = min(i0 + hop_env, n)
+            for i in range(i0, i1):
+                fr = np.float32(i - i0)
+                er = a_re + d_re * fr
+                ei = a_im + d_im * fr
+                zbuf[k, i] = er * ck[i] - ei * sk[i]
+                zbuf[K + k, i] = er * sk[i] + ei * ck[i]
 
 
 @njit(cache=True, fastmath=True)
@@ -221,11 +238,25 @@ def _render_lines(
     hop_env: int,
     mix: np.ndarray,
 ) -> None:
+    _render_lines_from(audio, c1, s1, env, hop_env, mix, 1)
+
+
+def _render_lines_from(
+    audio: np.ndarray,
+    c1: np.ndarray,
+    s1: np.ndarray,
+    env: np.ndarray,
+    hop_env: int,
+    mix: np.ndarray,
+    k0: int,
+) -> None:
     """``audio (M, T) += Re(sum_k G_mk Z_k(t))`` for one rotor: ``env`` the
     ``(K, n_env)`` complex line envelopes, ``mix`` ``(M, K)`` complex mic
     gains ``g_mk e^{i alpha_mk}``; the kernel's block is mixed by one BLAS
     product ``[Re G, -Im G] @ [Re Z; Im Z]``."""
     K, T = env.shape[0], c1.shape[0]
+    if K == 0:
+        return
     a = np.concatenate([mix.real, -mix.imag], axis=1).astype(np.float32)
     e_re = np.ascontiguousarray(env.real, dtype=np.float32)
     e_im = np.ascontiguousarray(env.imag, dtype=np.float32)
@@ -234,7 +265,7 @@ def _render_lines(
     sk = np.empty(LINE_BLOCK, dtype=np.float32)
     for t0 in range(0, T, LINE_BLOCK):
         n = min(LINE_BLOCK, T - t0)
-        _line_kernel(c1, s1, e_re, e_im, hop_env, t0, n, zbuf, ck, sk)
+        _line_kernel(c1, s1, e_re, e_im, hop_env, t0, n, zbuf, ck, sk, k0)
         audio[:, t0 : t0 + n] += a @ zbuf[:, :n]
 
 
@@ -527,15 +558,20 @@ def render_noise(
         assert rng_dev is not None
         mic_dev = 10.0 ** (dev_sd * rng_dev.standard_normal((n_mics, n_rotors, k_max)) / 20.0)
 
-    # LINES: every slow factor on the envelope grid, the carriers at the work
-    # rate, mixed per block (``_line_kernel`` / ``_render_lines``)
-    hop_env = int(sr_work) // ENV_RATE_HZ
-    if hop_env * ENV_RATE_HZ != int(sr_work):
-        raise ValueError(f"sr_work {sr_work} is not a multiple of the envelope rate {ENV_RATE_HZ}")
-    dt_env = hop_env * dt
-    n_env = n_work // hop_env + 2
+    # LINES: every slow factor on the envelope grid (1 kHz), the carriers at the
+    # rate each order needs. An order whose line stays under the anti-alias
+    # passband edge for the clip's fastest carrier is rendered straight at the
+    # output rate (the chain is unity there); the orders reaching the transition
+    # band are rendered at the work rate and go through the chain
+    # (``antialias`` + ``decimate_audio``), which is what shapes a comb's top.
+    hop_env = int(sr) // ENV_RATE_HZ
+    if hop_env * ENV_RATE_HZ != int(sr):
+        raise ValueError(f"sr {sr} is not a multiple of the envelope rate {ENV_RATE_HZ}")
+    dt_env = hop_env / float(sr)
+    n_env = n_out // hop_env + 2
     t_env_s = np.arange(n_env) * dt_env
-    knots = np.minimum(np.arange(n_env) * hop_env, n_work - 1)
+    knots = np.minimum(np.arange(n_env) * hop_env * oversample, n_work - 1)
+    k_lo = min(k_max, SP.k_max_for_carrier(f0.max(axis=1), int(2 * AA_PASS_HZ), k_cap=k_max))
     am_env = None
     if v3 and p.get("am") is not None:
         am_s2 = np.asarray(p["am"]["sigma2"], dtype=np.float64)
@@ -545,7 +581,8 @@ def render_noise(
         am_env = _am_envelopes(rng_am, am_s2[:, :k_max], am_g[:, :k_max], n_env, dt_env)
     amp_exp = float(p["profile"]["amp_exp"])
     speed = f0 / AMP_RPS_REF
-    audio = np.zeros((n_mics, n_work), dtype=np.float32)
+    audio = np.zeros((n_mics, n_out), dtype=np.float32)
+    audio_hi = np.zeros((n_mics, n_work), dtype=np.float32) if k_lo < k_max else None
     for r in range(n_rotors):
         env = (
             np.sqrt(2.0 * 10.0 ** (profile_db[r, :k_max] / 10.0))[:, None]
@@ -571,16 +608,38 @@ def render_noise(
         )
         if mic_dev is not None:
             g = g * mic_dev[:, r, :]
+        mix = g * np.exp(1j * alpha)
         ph = phase[r]
+        ph_out = ph[::oversample]
         _render_lines(
             audio,
-            np.cos(ph).astype(np.float32),
-            np.sin(ph).astype(np.float32),
-            env,
+            np.cos(ph_out).astype(np.float32),
+            np.sin(ph_out).astype(np.float32),
+            env[:k_lo],
             hop_env,
-            g * np.exp(1j * alpha),
+            mix[:, :k_lo],
         )
+        if audio_hi is not None:
+            # orders k_lo + 1 .. k_max: cos(k phi) = cos(k_lo phi) cos(k' phi) - ..., so the
+            # kernel runs on the carrier e^{i k_lo phi} with (k' - 1)-th harmonics of phi
+            _render_lines_from(
+                audio_hi,
+                np.cos(ph).astype(np.float32),
+                np.sin(ph).astype(np.float32),
+                env[k_lo:],
+                hop_env * oversample,
+                mix[:, k_lo:],
+                k_lo + 1,
+            )
     audio = audio.astype(np.float64)
+    if audio_hi is not None:
+        audio += np.asarray(
+            decimate_audio(antialias(audio_hi.astype(np.float64), sr_work), int(sr_work), int(sr)),
+            dtype=np.float64,
+        )[:, :n_out]
+    # the broadband parts (floor, wind, array response): straight at the output rate
+    n_work, dt, sr_work = n_out, 1.0 / float(sr), int(sr)
+    speed, t_work = speed[:, ::oversample], t_work[::oversample]
 
     ctrl_hz = SP.floor_ctrl_hz(sr)
     shape_mat, tilt_oct = floor_geometry(np.fft.rfftfreq(n_work, d=dt), ctrl_hz)
@@ -599,7 +658,7 @@ def render_noise(
         mean_db=float(p["floor"]["floor_mean_db"]),
         ctrl_db=shape_db,
         tilt_db_oct=tilt_db_oct,
-        rate_factor=float(sr_work) / float(sr),
+        rate_factor=1.0,
     )
     floor_gain_t = (speed ** float(p["floor"]["floor_exp"])).mean(axis=0) + float(
         p["floor"]["floor_static_rel"]
@@ -638,7 +697,7 @@ def render_noise(
     if wind_db is not None:
         assert rng_wind is not None
         # static, per capsule: no speed law, no channel gain, no wander
-        wind_amp = np.sqrt((float(sr_work) / float(sr)) * wind_shape(np.fft.rfftfreq(n_work, d=dt)))
+        wind_amp = np.sqrt(wind_shape(np.fft.rfftfreq(n_work, d=dt)))
         for m in range(n_mics):
             white = rng_wind.standard_normal(n_work)
             level = math.sqrt(10.0 ** (float(wind_db[m]) / 10.0))
@@ -656,11 +715,10 @@ def render_noise(
         for m in range(n_mics):
             audio[m] = np.fft.irfft(np.fft.rfft(audio[m]) * 10.0 ** (curve[m] / 20.0), n=n_work)
 
-    rendered = np.asarray(
-        decimate_audio(antialias(audio, sr_work), int(sr_work), int(sr)), dtype=np.float64
-    )[:, :n_out]
-    if rendered.shape[1] < n_out:
-        raise ValueError(f"render produced {rendered.shape[1]} samples, asked for {n_out}")
+    # the chain's low-pass at the output rate: a recording's floor and its top
+    # orders roll off through the decimator's transition band (the orders rendered
+    # at the work rate have been through it once already; the band is 100 Hz wide)
+    rendered = antialias(audio, sr)[:, :n_out]
     if not return_diagnostics:
         return rendered
     diagnostics: dict[str, Any] = dict(

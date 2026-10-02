@@ -15,6 +15,7 @@ NOT peak-normalised: callers scale it (:func:`wind_noise` returns unit-RMS).
 from __future__ import annotations
 
 import numpy as np
+from numba import njit
 from scipy.signal import lfilter, resample_poly
 from scipy.signal import resample as _resample
 
@@ -96,9 +97,18 @@ def lsf2poly(lsf: np.ndarray) -> np.ndarray:
     return np.real(a[:-1])
 
 
+_LPC_STEP = 0.02  # m/s: the speed grid the LPC polynomials are cached on
+_LPC_CACHE: dict[int, np.ndarray] = {}
+
+
 def _lpc_for_speed(speed: float) -> np.ndarray:
-    lsf = np.array([np.polyval(_LSF_REGRESSION[:, i], speed) for i in range(5)])
-    return lsf2poly(lsf)
+    key = int(round(float(speed) / _LPC_STEP))
+    a = _LPC_CACHE.get(key)
+    if a is None:
+        sp = key * _LPC_STEP
+        a = lsf2poly(np.array([np.polyval(_LSF_REGRESSION[:, i], sp) for i in range(5)]))
+        _LPC_CACHE[key] = a
+    return a
 
 
 def wind_speed_profile(rng: np.random.Generator, n: int, fs: int, gustiness: int = 3) -> np.ndarray:
@@ -106,10 +116,25 @@ def wind_speed_profile(rng: np.random.Generator, n: int, fs: int, gustiness: int
     resampled over the clip, plus 100 ms-smoothed Gaussian fluctuations."""
     pts = 2.0 * rng.weibull(2.0, max(1, int(gustiness)))
     prof = _rs(pts, n) if pts.size > 1 else np.full(n, float(pts[0]))
-    fl = 10.0 * rng.standard_normal(n)
-    h = np.hanning(int(fs * 0.1))
-    h /= h.sum()
-    return prof + lfilter(h, [1.0], fl)
+    return prof + _smooth(rng, n, fs)
+
+
+def _smooth(rng: np.random.Generator, n: int, fs: int) -> np.ndarray:
+    """SC's speed fluctuations: Gaussian noise (sd 10) through a causal
+    100 ms Hann FIR of unit sum (``lfilter(h, [1], x)``, by FFT convolution)."""
+    m = int(fs * 0.1)
+    h = np.hanning(m)
+    x = 10.0 * rng.standard_normal(n)
+    # hann(u) = 0.5 (1 - cos(2 pi u / (m - 1))): a boxcar and a modulated boxcar, both
+    # running sums (the FIR is causal: y[t] = sum_u h[u] x[t - u])
+    w = 2.0 * np.pi / (m - 1)
+    box = np.concatenate([[0.0], np.cumsum(x)])
+    y = 0.5 * (box[1 : n + 1] - box[np.maximum(np.arange(n) + 1 - m, 0)])
+    t = np.arange(n)
+    rot = np.exp(1j * w * t)
+    box_c = np.concatenate([[0.0], np.cumsum(x * np.conj(rot))])
+    y -= 0.5 * np.real(rot * (box_c[1 : n + 1] - box_c[np.maximum(t + 1 - m, 0)]))
+    return y / h.sum()
 
 
 def wind_noise(
@@ -127,10 +152,7 @@ def wind_noise(
     if speed_profile is None:
         prof = wind_speed_profile(rng, n48, FS_NATIVE, gustiness)
     else:
-        prof = _rs(np.asarray(speed_profile, dtype=np.float64), n48)
-        h = np.hanning(int(FS_NATIVE * 0.1))
-        h /= h.sum()
-        prof = prof + lfilter(h, [1.0], 10.0 * rng.standard_normal(n48))
+        prof = _rs(np.asarray(speed_profile, dtype=np.float64), n48) + _smooth(rng, n48, FS_NATIVE)
     exc = _excitation(rng, prof, short_term_var)
     x = _lpc_filter(exc, prof)
     if fs != FS_NATIVE:
@@ -143,32 +165,47 @@ def wind_noise(
 
 
 def _excitation(rng: np.random.Generator, prof: np.ndarray, short_term_var: bool) -> np.ndarray:
+    """White noise under SC's envelope: the long-term gain of the speed per
+    sample, times the GARCH short-term standard deviation per 64-sample hop,
+    overlap-added in 128-sample Hann frames (the frame sum is the Hann
+    convolution of the per-hop gains, one FFT convolution)."""
     win, hop = 128, 64
     n = prof.size
-    wgn = np.concatenate([np.zeros(win), rng.standard_normal(n), np.zeros(win)])
+    wgn = rng.standard_normal(n)
     lt = np.sqrt(10.0 ** (np.polyval(_LT_REGRESSION, prof) / 10.0))
-    lt = np.concatenate([np.zeros(win), lt, np.zeros(win)])
-    hann = np.hanning(win)
     pr = np.concatenate([2.0 * np.ones(win), prof, 2.0 * np.ones(win)])
     n_fr = (pr.size - win) // hop + 1
-    # GARCH short-term variance per 64-sample hop
-    st = np.zeros(n_fr)
-    cv = np.zeros(n_fr)
-    for i in range(n_fr):
-        sp = float(np.clip(pr[i * hop : i * hop + win].mean(), SPEED_MIN, SPEED_MAX))
-        alpha, beta, omega = (np.polyval(c, sp) for c in (_GP_ALPHA, _GP_BETA, _GP_OMEGA))
-        if alpha + beta > 1:
-            beta = 0.0
-        cv[i] = omega + alpha * st[i - 1] ** 2 + beta * cv[i - 1]
-        st[i] = np.sqrt(abs(cv[i])) * rng.standard_normal()
+    cs = np.concatenate([[0.0], np.cumsum(pr)])
+    starts = np.arange(n_fr) * hop
+    sp = np.clip((cs[starts + win] - cs[starts]) / win, SPEED_MIN, SPEED_MAX)
+    alpha, beta, omega = (np.polyval(c, sp) for c in (_GP_ALPHA, _GP_BETA, _GP_OMEGA))
+    beta = np.where(alpha + beta > 1.0, 0.0, beta)
+    st = _garch(alpha, beta, omega, rng.standard_normal(n_fr))
     st /= max(float(np.abs(st).max()), 1e-12)
-    cond = np.abs(st)
-    exc = np.zeros(wgn.size)
-    for i in range(n_fr - 1):
-        idx = slice(i * hop, i * hop + win)
-        g = lt[idx] * (np.sqrt(cond[i]) if short_term_var else 1.0)
-        exc[idx] += g * wgn[idx] * hann
-    return exc[win:-win]
+    gain = np.sqrt(np.abs(st)) if short_term_var else np.ones(n_fr)
+    gain[-1] = 0.0  # SC's loop stops one frame short
+    # sum_i gain_i hann(t - i hop): with hop = win / 2 the sample t = hop j + u lies in
+    # frame j (offset u) and frame j - 1 (offset u + hop)
+    hann = np.hanning(win)
+    env = (
+        gain[:, None] * hann[None, :hop]
+        + np.concatenate([[0.0], gain[:-1]])[:, None] * hann[None, hop:]
+    )
+    return (wgn * lt) * env.ravel()[win : win + n]
+
+
+@njit(cache=True)
+def _garch(alpha: np.ndarray, beta: np.ndarray, omega: np.ndarray, noise: np.ndarray) -> np.ndarray:
+    """SC's GARCH(1, 1) short-term variance, one step per hop (``st[-1]`` and
+    ``cv[-1]`` read the last entry at ``i = 0``, as SC's numpy loop does)."""
+    n = noise.size
+    st = np.zeros(n)
+    cv = np.zeros(n)
+    for i in range(n):
+        prev = n - 1 if i == 0 else i - 1
+        cv[i] = omega[i] + alpha[i] * st[prev] ** 2 + beta[i] * cv[prev]
+        st[i] = np.sqrt(abs(cv[i])) * noise[i]
+    return st
 
 
 def _lpc_filter(exc: np.ndarray, prof: np.ndarray) -> np.ndarray:

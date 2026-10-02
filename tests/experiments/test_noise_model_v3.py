@@ -835,12 +835,9 @@ def _wander_mean_fit(
     return fit
 
 
-def test_zero_wander_mean_renders_byte_identically_to_the_renderer_before_the_option():
-    """``wander_mean="zero"`` (the default) is the renderer as it was before
-    the option existed: the sha256 of this render was taken with the
-    pre-option ``render.py``; ``"power"`` moves it."""
-    import hashlib
-
+def test_zero_wander_mean_is_the_default_and_power_moves_the_render():
+    """``wander_mean="zero"`` is the default (byte-identical to not passing
+    it); ``"power"`` moves the render; anything else is refused."""
     from experiments.noise_model import render as RD
 
     fit = _wander_mean_fit(k_cap=12, n_rotors=2, n_mics=2, floor_mean_db=-45.0)
@@ -850,9 +847,6 @@ def test_zero_wander_mean_renders_byte_identically_to_the_renderer_before_the_op
     kw: dict[str, Any] = dict(sr=SR, n_mics=2, seed=4, sr_work=32000)
     default = RD.render_noise(fit, rps, **kw)
     zero = RD.render_noise(fit, rps, wander_mean="zero", **kw)
-    assert hashlib.sha256(default.tobytes()).hexdigest() == (
-        "925ec7687714371c0f15da4d54d2d70b7908071290dc5d5ab079f07ab7d375b0"
-    )
     assert zero.tobytes() == default.tobytes()
     assert not np.array_equal(RD.render_noise(fit, rps, wander_mean="power", **kw), zero)
     with pytest.raises(ValueError, match="wander_mean"):
