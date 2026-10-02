@@ -531,3 +531,30 @@ gone (an implementation pin). `test_regime_composition_crosses_the_bands_
 without_a_level_step` fails at 3.41 dB vs 3.0 with the committed renderer
 too (seed 4; seeds 5/6 pass) — pre-existing, not touched.
 
+### How likely are the real rigs under the prior? (2026-10-02)
+
+`drone_prior.measure_laws` / `law_scores` read a payload's comb in the
+prior's coordinates (per-rotor line-over-floor at the profile's reference
+speed) and find the posterior mode of the seven comb laws given the curve
+(misfit over rotors × orders in units of `rotor_line_sd_db`, plus each
+parameter's standard score); `scripts/static_rig_scratch/prior_law_scores.py`
+prints the table (`results/prior_rigs/law_scores_r4_fits.txt`). The prior's
+own draws score d² = 4–10 over 7 laws (χ²₇ tail 0.2–0.75: the estimator
+recovers what was drawn). The round-4 flight fits do not:
+
+| rig | comb d² | P(χ²₇ ≥ d²) | what is off |
+|---|---|---|---|
+| Michael cruise | 125 | 6e−24 | tail −8.5 dB (z −4.3), odd penalty 22 dB at k = 3 shrinking with k (a +21.9 z +8.4, b −11.2 z −5.3), no motor family (1.9 dB, z −2.4) |
+| Michael standby | 78 | 3e−14 | k2 8 dB (z −3.6), tail −9.4 (z −4.7), no odd penalty (a −7.2, z −6.1) |
+| DREGON free flight | 86 | 9e−16 | k2 −5.5 dB under the wind floor (z −6.3), slope 3 dB/dec (z −4.4), tail −6 (z −3.0), no motor family |
+
+Common to all three: the tail sits 6–9 dB BELOW the floor (the prior puts it
+at the floor, N(0, 2)), there is no motor family (+9 ± 3 dB in the prior,
+from the DREGON bench lines at k = 42/63/84/126), and the per-line scatter is
+4–5.6 dB (prior 2.5) with per-rotor levels 2.3–5.2 dB apart (prior 1.5). The
+odd-order law has no common shape across the three. The global parameters of
+the flight fits (σ_ν 5.6 rad/s, λ 100, amp_exp 12.4, floor_exp 0.02 on
+cruise and DREGON) are the known degeneracy of a fit over a narrow speed
+range and are not scored. Open: recentre the comb laws on the population
+(3 flight fits + 5 bench drones), with the motor family as a mixture.
+

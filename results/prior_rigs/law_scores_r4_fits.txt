@@ -1,0 +1,22 @@
+law                          michaels cruise        michaels standby      dregon free flight             prior rig_0             prior rig_1             prior rig_2
+k2_over_floor_db           26.56 (z +0.1)           8.00 (z -3.6)          -5.52 (z -6.3)          17.83 (z -1.6)          33.65 (z +1.5)          22.80 (z -0.6)   
+slope_db_dec               29.02 (z +0.8)          17.33 (z -1.5)           3.12 (z -4.4)          25.98 (z +0.2)          20.69 (z -0.9)          23.43 (z -0.3)   
+tail_over_floor_db         -8.52 (z -4.3)          -9.43 (z -4.7)          -6.07 (z -3.0)          -0.10 (z -0.0)          -0.87 (z -0.4)          -5.32 (z -2.7)   
+bpf_boost_db                2.68 (z -1.3)          10.39 (z +0.6)           2.43 (z -1.4)          11.28 (z +0.8)          10.54 (z +0.6)           9.75 (z +0.4)   
+odd_a_db                   21.85 (z +8.4)          -7.21 (z -6.1)           4.78 (z -0.1)           7.86 (z +1.4)           4.93 (z -0.0)           4.56 (z -0.2)   
+odd_b_db                  -11.20 (z -5.3)           5.48 (z -1.1)          -3.06 (z -3.3)           4.14 (z -1.5)          12.18 (z +0.5)          11.70 (z +0.4)   
+motor_boost_db              1.85 (z -2.4)           4.82 (z -1.4)           2.17 (z -2.3)          13.52 (z +1.5)           7.51 (z -0.5)          10.04 (z +0.3)   
+amp_exp                    12.37 (z +4.6)           3.62 (z -1.3)          12.88 (z +4.9)           5.68 (z +0.1)           4.52 (z -0.7)           4.36 (z -0.8)   
+floor_mean_db             -33.05 (z +0.7)         -27.02 (z +2.2)         -38.45 (z -0.6)         -31.88 (z +1.0)         -32.09 (z +1.0)         -34.16 (z +0.5)   
+sigma_nu                    5.59 (z +6.6)           0.41 (z +0.1)           5.23 (z +6.4)           0.33 (z -0.5)           0.72 (z +1.5)           0.27 (z -1.0)   
+lam                       100.53 (z +5.3)         100.53 (z +5.3)         100.53 (z +5.3)          17.49 (z +0.9)          10.17 (z -0.4)          23.91 (z +1.7)   
+floor_exp                   0.02 (z-19.3)           4.92 (z -0.1)           0.07 (z-14.2)           4.74 (z -0.2)           5.18 (z +0.1)          11.01 (z +2.6)   
+rotor_line_sd_db            4.03 (z +1.6)           5.57 (z +2.2)           5.01 (z +2.0)           2.89 (z +1.2)           2.57 (z +1.0)           2.56 (z +1.0)   
+rotor_level_sd_db           5.22 (z +3.5)           2.27 (z +1.5)           3.57 (z +2.4)           2.49 (z +1.7)           1.33 (z +0.9)           1.77 (z +1.2)   
+
+michaels cruise       : comb Mahalanobis d^2 =  125.3 over 7 laws, P(chi2_7 >= d^2) = 6.01e-24
+michaels standby      : comb Mahalanobis d^2 =   78.4 over 7 laws, P(chi2_7 >= d^2) = 2.91e-14
+dregon free flight    : comb Mahalanobis d^2 =   85.9 over 7 laws, P(chi2_7 >= d^2) = 8.52e-16
+prior rig_0           : comb Mahalanobis d^2 =    9.8 over 7 laws, P(chi2_7 >= d^2) = 0.198
+prior rig_1           : comb Mahalanobis d^2 =    4.2 over 7 laws, P(chi2_7 >= d^2) = 0.754
+prior rig_2           : comb Mahalanobis d^2 =    8.1 over 7 laws, P(chi2_7 >= d^2) = 0.322

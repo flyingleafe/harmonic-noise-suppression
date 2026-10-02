@@ -38,7 +38,7 @@ import numpy as np
 
 from data_processing.noise_model import FIT_SCHEMA_V3
 from data_processing.noise_model import spectrum as SP
-from data_processing.noise_model.constants import FLOOR_SHAPE_N_CTRL
+from data_processing.noise_model.constants import AMP_RPS_REF, FLOOR_SHAPE_N_CTRL
 from data_processing.noise_model.spectrum import floor_ctrl_hz, floor_shape_chol
 
 SR_WORK = 32000
@@ -393,3 +393,154 @@ def gated_draws(
         else:
             reasons.append(res.reason)
     return out, dict(tried=tried, accepted=len(out), reasons=reasons)
+
+
+# ── how likely is a FIT under the laws? ──────────────────────────────────────
+
+
+def _one_rotor(fit: dict[str, Any], r: int) -> dict[str, Any]:
+    p = fit["params"]
+    q = {**fit, "params": {**p, "profile": {**p["profile"]}}}
+    q["params"]["profile"]["profile_db"] = [list(p["profile"]["profile_db"][r])]
+    q["params"]["gamma_hz"] = [list(np.atleast_2d(np.asarray(p["gamma_hz"]))[r])]
+    if p.get("am") is not None:
+        q["params"]["am"] = None
+    return q
+
+
+def _comb_law(
+    theta: np.ndarray, k: np.ndarray, blades: int, period: int, decay: float
+) -> np.ndarray:
+    """The prior's comb (line over floor, dB) at orders ``k`` for
+    ``theta = (k2, slope, tail, boost, odd_a, odd_b, motor)``."""
+    k2, slope, tail, boost, odd_a, odd_b, motor = theta
+    law = np.maximum(k2 - slope * np.maximum(np.log10(k / 2.0), 0.0), tail)
+    law = np.where(k == 2, law + boost, law)
+    law = np.where(k % blades == 0, law, law - (odd_a + odd_b * np.log10(k)))
+    mult = (k % period == 0) & (k > 0)
+    return np.where(mult, law + motor * decay ** (k / period - 1), law)
+
+
+def measure_laws(
+    fit: dict[str, Any], spec: PriorSpec = PriorSpec(), *, rps: float = AMP_RPS_REF
+) -> dict[str, Any]:
+    """Read a payload's comb in the prior's own coordinates and find the law
+    parameters that explain it best UNDER THE PRIOR: the per-rotor
+    line-over-floor curve ``L / B`` (dB, :func:`line_contrast_db` at ``rps`` -
+    the profile's own reference speed by default, so a fit whose speed laws
+    are degenerate is read where it was fitted), then the posterior mode of
+    ``(k2, slope, tail, bpf boost, odd_a, odd_b, motor boost)`` given the
+    curve: the misfit ``(L/B - law) / rotor_line_sd_db`` over every rotor
+    and order plus each parameter's standard score under its law (the motor
+    period is the best of ``spec.pole_pairs``). A comb the laws cannot shape
+    shows as a large ``misfit`` (mean squared standardised residual, 1 for a
+    draw); a comb they can shape only from their tails shows as large
+    ``z``. ``rotor_level_sd_db`` / ``rotor_line_sd_db`` are the residual's
+    per-rotor mean and remainder; the global parameters are copied."""
+    from scipy.optimize import least_squares
+
+    p = fit["params"]
+    prof = np.atleast_2d(np.asarray(p["profile"]["profile_db"], dtype=np.float64))
+    R, K = prof.shape
+    k_max = min(K, int(SP.k_max_for_carrier(rps, SR, k_cap=K)))
+    k = np.arange(1, k_max + 1, dtype=np.float64)
+    lb = np.empty((R, k_max))
+    for r in range(R):
+        c = line_contrast_db(_one_rotor(fit, r), rps, k.astype(int))
+        lb[r] = 10.0 * np.log10(np.maximum(10.0 ** (c / 10.0) - 1.0, 1e-12))
+    lb = np.maximum(lb, -40.0)  # a line 40 dB under the floor is not measured, it is absent
+    laws = (
+        spec.k2_over_floor_db,
+        spec.slope_db_dec,
+        spec.tail_over_floor_db,
+        spec.bpf_boost_db,
+        spec.odd_a_db,
+        spec.odd_b_db,
+        spec.motor_boost_db,
+    )
+    mu = np.array([law[0] for law in laws])
+    sd = np.array([law[1] for law in laws])
+    best: tuple[float, Any, int] | None = None
+    for pp in sorted(set(spec.pole_pairs)):
+        period = 3 * pp
+
+        def resid(theta: np.ndarray, period: int = period) -> np.ndarray:
+            law = _comb_law(theta, k, spec.blades, period, spec.motor_decay_per_multiple)
+            return np.concatenate(
+                [((lb - law[None, :]) / spec.rotor_line_sd_db).ravel(), (theta - mu) / sd]
+            )
+
+        sol = least_squares(resid, mu, method="trf")
+        if best is None or sol.cost < best[0]:
+            best = (float(sol.cost), sol, pp)
+    assert best is not None
+    _, sol, p_best = best
+    theta = sol.x
+    law = _comb_law(theta, k, spec.blades, 3 * p_best, spec.motor_decay_per_multiple)
+    resid_db = lb - law[None, :]
+    level = resid_db.mean(axis=1)
+    return dict(
+        k_max=int(k_max),
+        over_floor_db=lb,
+        law_db=law,
+        k2_over_floor_db=float(theta[0]),
+        slope_db_dec=float(theta[1]),
+        tail_over_floor_db=float(theta[2]),
+        bpf_boost_db=float(theta[3]),
+        odd_a_db=float(theta[4]),
+        odd_b_db=float(theta[5]),
+        motor_boost_db=float(theta[6]),
+        motor_pole_pairs=int(p_best),
+        misfit=float(np.mean((resid_db / spec.rotor_line_sd_db) ** 2)),
+        rotor_level_sd_db=float(level.std(ddof=1)) if R > 1 else float("nan"),
+        rotor_line_sd_db=float((resid_db - level[:, None]).std()),
+        sigma_nu=float(p["sigma_nu"]),
+        lam=float(p["lam"]),
+        amp_exp=float(p["profile"]["amp_exp"]),
+        floor_mean_db=float(p["floor"]["floor_mean_db"]),
+        floor_exp=float(p["floor"]["floor_exp"]),
+    )
+
+
+def law_scores(
+    fit: dict[str, Any], spec: PriorSpec = PriorSpec(), *, rps: float = AMP_RPS_REF
+) -> list[tuple[str, float, float]]:
+    """``(law, measured, z)`` per law of ``spec`` for a payload: ``z`` is the
+    measured value's standard score under the law (Normal in dB; log-normal
+    laws scored in log; the scatter laws, which have no width, scored as the
+    ratio to the prior's sd). The comb's laws come from :func:`measure_laws`.
+    ``sum(z**2)`` over the comb rows is the Mahalanobis distance of the comb
+    from the prior's centre."""
+    m = measure_laws(fit, spec, rps=rps)
+    rows: list[tuple[str, float, float]] = []
+    normal = (
+        ("k2_over_floor_db", spec.k2_over_floor_db),
+        ("slope_db_dec", spec.slope_db_dec),
+        ("tail_over_floor_db", spec.tail_over_floor_db),
+        ("bpf_boost_db", spec.bpf_boost_db),
+        ("odd_a_db", spec.odd_a_db),
+        ("odd_b_db", spec.odd_b_db),
+        ("motor_boost_db", spec.motor_boost_db),
+        ("amp_exp", spec.amp_exp),
+        ("floor_mean_db", spec.floor_mean_db),
+    )
+    for name, (mu, sd) in normal:
+        rows.append((name, float(m[name]), (float(m[name]) - mu) / sd))
+    for name, (mu, sd) in (
+        ("sigma_nu", spec.log_sigma_nu),
+        ("lam", spec.log_lam),
+        ("floor_exp", spec.log_floor_exp),
+    ):
+        v = max(float(m[name]), 1e-12)
+        rows.append((name, v, (np.log(v) - mu) / sd))
+    rows.append(
+        ("rotor_line_sd_db", m["rotor_line_sd_db"], m["rotor_line_sd_db"] / spec.rotor_line_sd_db)
+    )
+    rows.append(
+        (
+            "rotor_level_sd_db",
+            m["rotor_level_sd_db"],
+            m["rotor_level_sd_db"] / spec.rotor_level_sd_db,
+        )
+    )
+    return rows
