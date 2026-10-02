@@ -1,0 +1,19 @@
+# @package _global_
+# SCv2 on the GENERIC DRONE PRIOR bank: `nv3r4_easy_scv2` with the training
+# stream replaced by conf/online_mix/noise_prior_v1_5050.yaml (16 384 gated
+# prior rigs, trajectory hyperprior, 4 s renders reused 40 times as 2 s
+# windows). Same `real_r1_scv2` architecture, same `override /validation:
+# rps_unified`, bfloat16, batch 128, 12 workers, 2 s clips,
+# `samples_per_validation: null`, synthetic only. Read against
+# `nv3r4_easy_scv2` (4.68-level), `nv3r3_easy_scv2` (4.68), the legacy easy arm
+# (6.09) and `real_r4_scv2_unified` (2.99). Batch doc:
+# docs/experiments/static-rig-profiles.md § "Generic drone prior".
+defaults:
+  - rig_easy_scv2_unified
+  - _self_
+
+experiment_name: prior_v1_scv2
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_prior_v1_5050.yaml

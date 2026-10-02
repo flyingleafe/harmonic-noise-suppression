@@ -1,0 +1,69 @@
+# ARM: GENERIC DRONE PRIOR -- conf/online_mix/noise_v3r4_easy_5050.yaml with the
+# round-4 neighbourhood bank replaced by a bank of PRIOR-DRAWN rigs
+# (experiments.noise_model.drone_prior; docs/experiments/static-rig-profiles.md
+# § "Generic drone prior"): 16 384 gated draws (3 dB / >= 2 orders per rotor in
+# 80 % of the hyperprior frames) by scripts/prior_bank_build.py on uni-cpu (job
+# prior-bank-16k), stored as the compact noise-prior-bank/1 .npz
+# (data_processing.noise_model.prior_bank), published as the pinned dload
+# dataset `prior-v1-banks`. Every rig flies the trajectory hyperprior
+# (`posterior`, hover 40-95 rev/s: the trajectories the gate ran on) at unit
+# scale. Renders are 4 s, reused 40 times, each draw its own 2 s window
+# (NoiseV2Pool.render_duration_s) - against 192 reuses of the clip itself
+# before the renderer was rewritten. Everything else is the round-4 stream.
+sample_rate: 16000
+duration_s: 4.0
+base_seed: 20260909
+snr_ref_floor_rms: 0.02
+sources:
+  noise:
+  - kind: noise_v2
+    weight: 0.8
+    n_mics: 8
+    n_rotors: 4
+    preset_bank: dload:prior-v1-banks@edbe77d9b3444460edd24f76d189dd2aef624a8bf13f37f87fcb979bed3515db/prior_v1_n16384.npz
+    render_reuse: 40
+    render_duration_s: 4.0
+    rps_scale_range:
+    - 1.0
+    - 1.0
+    normalize_rms_range:
+    - 0.02
+    - 0.25
+    level_mode: flight
+    rps:
+      kind: fitted_traj
+      fits: dload:rps-traj-fits
+      rigs:
+        posterior: 1
+      flight_fs: 200
+      flight_reuse: 32
+      rps_max: 150
+      hover_range:
+      - 40
+      - 95
+      rotor_sep:
+      - 2.0
+      - 15.0
+  - kind: silence
+    weight: 0.2
+    n_channels: 8
+  speech:
+  - dataset: librispeech
+    subpath: LibriSpeech/train-clean-100
+policy:
+  stages:
+  - until: null
+    source_prob: 1.0
+    snr_db:
+      uniform:
+        low: -30.0
+        high: 0.0
+    speech_per_channel: independent
+    snr_per_channel: false
+    augmentations:
+      probability: 0.5
+      choices:
+      - random_gain:
+          min_db: -6.0
+          max_db: 6.0
+      - random_polarity: {}

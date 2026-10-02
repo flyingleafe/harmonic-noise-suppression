@@ -1,0 +1,16 @@
+# @package _global_
+# HPPNet-L2 on the GENERIC DRONE PRIOR bank: `rig_easy_hppnet_l2_unified`
+# with the training stream replaced by conf/online_mix/noise_prior_v1_5050.yaml
+# (the same stream as prior_v1_scv2) and 12 workers, as the scv2 twin. Read
+# against `nv3r4_hard_*_hppnet_l2` and `rig_easy_hppnet_l2_unified`. Batch doc:
+# docs/experiments/static-rig-profiles.md § "Generic drone prior".
+defaults:
+  - rig_easy_hppnet_l2_unified
+  - _self_
+
+experiment_name: prior_v1_hppnet_l2
+num_workers: 12
+data:
+  train:
+    params:
+      path: conf/online_mix/noise_prior_v1_5050.yaml
