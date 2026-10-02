@@ -469,10 +469,10 @@ in `results/prior_rigs/<name>/` (payloads with `_prior` provenance) and
 
 | Block | Law | Source |
 |---|---|---|
-| Comb, even orders | line over floor: `k2 − slope·log10(k/2)`, floored at a tail; `k2 ~ N(26, 5)` dB per rotor, `slope ~ N(25, 5)` dB/dec, `tail ~ N(0, 2)` dB; `k = 2` + N(8, 4) | Michael's cruise/standby v3 fits at 80 rev/s (stacked `k = 2` 36/29 dB, tail 3–8 dB stacked from k ≈ 15 to 75–100); bench slope of the table profiles |
-| Odd orders | even law − (N(5, 2) + N(10, 4)·log10 k); `k = 1` = `k2` − N(5, 2) | gallery: odd lines sink with k |
-| Motor family | multiples of 3p, p ∈ {6, 7, 7, 8, 11}: + N(9, 3) dB × 0.8 per multiple | k = 42, 63, 84, 126 lines (21 = 3 × 7) |
-| Rotor scatter | N(0, 2.5) per line + N(0, 1.5) level | between-run 3.7 dB minus the per-mic part |
+| Comb, even orders | line over floor: `k2 − slope·log10(k/2)`, floored at a tail; `k2 ~ N(22, 7)` dB per rotor, `slope ~ N(25, 5)` dB/dec, `tail ~ N(−4, 4)` dB; `k = 2` + N(8, 4) | Michael's cruise/standby v3 fits read through `measure_laws` (k2 29 / 7, slope 31 / 16, tail −9 / −9); bench slope of the table profiles |
+| Odd orders | even law − penalty, linear in log10 k through N(8, 9) dB at k = 3 and N(9, 9) at k = 30; `k = 1` = `k2` − penalty(1) | Michael cruise 20 / 6, standby −6 / 0.5, bench 10 / 20 |
+| Motor family | multiples of 3p, p ∈ {6, 7, 7, 8, 11}: + N(5, 4) dB × 0.8 per multiple | bench k = 42, 63, 84, 126 lines (21 = 3 × 7) at +9–12 dB; Michael 2–5 dB |
+| Rotor scatter | N(0, 3.5) per line + N(0, 2.5) level | bench between-run 3.7 dB; Michael's fits 4–5.6 dB per line, 2.3–5.2 dB per rotor |
 | Mic scatter | 3.4 dB per (mic, line), redrawn per clip | `mic_variance.py` (raw 3.64 dB) |
 | Shaft | OU: σ_ν ~ LogN(log 0.4 rad/s, 0.4), λ ~ LogN(log 12, 0.4); `gamma_hz` ≡ 0 | quick OU fits, 16/20 recordings |
 | Pedestal (AM + fast wobble) | per order, shared by mics: σ² ~ LogN(log 0.05, 1) (k ≤ 8), LogN(log 0.12, 0.7) (9–30), min(0.07 + k²σ_ψ², 0.6) above (σ_ψ ~ LogN(log 0.012, 0.7) rad); rate 0.4 → 1 Hz, 25 Hz where the wobble dominates; same-parity AR(1) ρ 0.25 | direct AM measurement; six-rig telemetry S_max |
@@ -548,13 +548,22 @@ recovers what was drawn). The round-4 flight fits do not:
 | Michael standby | 78 | 3e−14 | k2 8 dB (z −3.6), tail −9.4 (z −4.7), no odd penalty (a −7.2, z −6.1) |
 | DREGON free flight | 86 | 9e−16 | k2 −5.5 dB under the wind floor (z −6.3), slope 3 dB/dec (z −4.4), tail −6 (z −3.0), no motor family |
 
-Common to all three: the tail sits 6–9 dB BELOW the floor (the prior puts it
+Common to all three: the tail sits 6–9 dB BELOW the floor (the prior put it
 at the floor, N(0, 2)), there is no motor family (+9 ± 3 dB in the prior,
 from the DREGON bench lines at k = 42/63/84/126), and the per-line scatter is
 4–5.6 dB (prior 2.5) with per-rotor levels 2.3–5.2 dB apart (prior 1.5). The
-odd-order law has no common shape across the three. The global parameters of
+odd-order law had no common shape across the three. The global parameters of
 the flight fits (σ_ν 5.6 rad/s, λ 100, amp_exp 12.4, floor_exp 0.02 on
 cruise and DREGON) are the known degeneracy of a fit over a narrow speed
-range and are not scored. Open: recentre the comb laws on the population
-(3 flight fits + 5 bench drones), with the motor family as a mixture.
+range and are not scored; the DREGON flight fit is a bad fit (Dmitrii) and
+is not a target.
+
+Decision (Dmitrii, 2026-10-02): Michael's rigs must be possible under the
+prior. Recentred laws (the table above): k2 N(22, 7), tail N(−4, 4), the odd
+penalty through its values at k = 3 and k = 30 (N(8, 9), N(9, 9) — the
+former `a + b log10 k` pair scored a steep-then-flat penalty twice), motor
+family N(5, 4), scatter 3.5 / 2.5 dB. Scores now: Michael cruise d² 10.2
+(P 0.18), standby 14.3 (P 0.05, its k = 2 line 6.5 dB over the floor with
+k = 1 dominant); the prior's own draws 7–10 (P 0.2–0.5)
+(`results/prior_rigs/law_scores_r4_fits.txt`).
 

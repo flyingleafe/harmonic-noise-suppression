@@ -54,21 +54,23 @@ class PriorSpec:
     k_max: int = 115
     blades: int = 2
     # aero comb (even orders), line over floor: k2 - slope log10(k/2), floored at the tail
-    k2_over_floor_db: tuple[float, float] = (26.0, 5.0)  # per rotor, at cal_rps
+    k2_over_floor_db: tuple[float, float] = (22.0, 7.0)  # per rotor, at cal_rps
     slope_db_dec: tuple[float, float] = (25.0, 5.0)
-    tail_over_floor_db: tuple[float, float] = (0.0, 2.0)  # per rotor
+    # the tail may sit under the floor: Michael's flight fits -8.5 / -9.4 dB
+    tail_over_floor_db: tuple[float, float] = (-4.0, 4.0)  # per rotor
     cal_rps: float = 60.0  # the whole comb in band
     bpf_boost_db: tuple[float, float] = (8.0, 4.0)  # k = 2 over the law
-    # odd orders: law - (a + b log10 k)
-    odd_a_db: tuple[float, float] = (5.0, 2.0)
-    odd_b_db: tuple[float, float] = (10.0, 4.0)
+    # odd orders: law - penalty, the penalty linear in log10 k through its values at
+    # k = 3 and k = 30 (Michael cruise 16.6 / 5.4, standby -4.6 / 0.9, bench 9.8 / 19.8)
+    odd_pen_k3_db: tuple[float, float] = (8.0, 9.0)
+    odd_pen_k30_db: tuple[float, float] = (9.0, 9.0)
     # motor family: multiples of 3 p
     pole_pairs: tuple[int, ...] = (6, 7, 7, 8, 11)
-    motor_boost_db: tuple[float, float] = (9.0, 3.0)
+    motor_boost_db: tuple[float, float] = (5.0, 4.0)  # bench 9-12, Michael 2-5
     motor_decay_per_multiple: float = 0.8
     # per-rotor scatter about the drone profile
-    rotor_line_sd_db: float = 2.5
-    rotor_level_sd_db: float = 1.5
+    rotor_line_sd_db: float = 3.5
+    rotor_level_sd_db: float = 2.5
     # per-(mic, line) scatter, redrawn per clip (per-run near-field + the pair EQ it absorbs)
     mic_dev_sd_db: float = 3.4
     # speed laws (power)
@@ -109,6 +111,12 @@ def _n(rng: np.random.Generator, law: tuple[float, float], size: Any = None) -> 
 
 def _ln(rng: np.random.Generator, law: tuple[float, float], size: Any = None) -> Any:
     return np.exp(rng.normal(law[0], law[1], size))
+
+
+def _odd_penalty(pen3: float, pen30: float, k: np.ndarray) -> np.ndarray:
+    """The odd-order penalty (dB), linear in ``log10 k`` through ``pen3`` at
+    ``k = 3`` and ``pen30`` at ``k = 30``."""
+    return pen3 + (pen30 - pen3) * np.log10(k / 3.0)
 
 
 def _template_ctrl_db(
@@ -217,8 +225,8 @@ def sample_prior(rng: np.random.Generator, spec: PriorSpec = PriorSpec()) -> dic
     law = np.maximum(k2 - slope * np.maximum(np.log10(k / 2.0), 0.0), tail)
     law[1] += _n(rng, spec.bpf_boost_db)
     even = (k % spec.blades) == 0
-    odd_pen = _n(rng, spec.odd_a_db) + _n(rng, spec.odd_b_db) * np.log10(k)
-    law = np.where(even, law, law - odd_pen)
+    pen3, pen30 = float(_n(rng, spec.odd_pen_k3_db)), float(_n(rng, spec.odd_pen_k30_db))
+    law = np.where(even, law, law - _odd_penalty(pen3, pen30, k))
     p = int(rng.choice(spec.pole_pairs))
     period = 3 * p
     boost = _n(rng, spec.motor_boost_db)
@@ -296,6 +304,8 @@ def sample_prior(rng: np.random.Generator, spec: PriorSpec = PriorSpec()) -> dic
             slope_db_dec=slope,
             k2_over_floor_db=k2,
             tail_over_floor_db=tail,
+            odd_pen_k3_db=pen3,
+            odd_pen_k30_db=pen30,
             over_floor_db=law.tolist(),
             pole_pairs=p,
             motor_period=period,
@@ -412,11 +422,11 @@ def _comb_law(
     theta: np.ndarray, k: np.ndarray, blades: int, period: int, decay: float
 ) -> np.ndarray:
     """The prior's comb (line over floor, dB) at orders ``k`` for
-    ``theta = (k2, slope, tail, boost, odd_a, odd_b, motor)``."""
-    k2, slope, tail, boost, odd_a, odd_b, motor = theta
+    ``theta = (k2, slope, tail, boost, pen3, pen30, motor)``."""
+    k2, slope, tail, boost, pen3, pen30, motor = theta
     law = np.maximum(k2 - slope * np.maximum(np.log10(k / 2.0), 0.0), tail)
     law = np.where(k == 2, law + boost, law)
-    law = np.where(k % blades == 0, law, law - (odd_a + odd_b * np.log10(k)))
+    law = np.where(k % blades == 0, law, law - _odd_penalty(pen3, pen30, k))
     mult = (k % period == 0) & (k > 0)
     return np.where(mult, law + motor * decay ** (k / period - 1), law)
 
@@ -429,7 +439,7 @@ def measure_laws(
     line-over-floor curve ``L / B`` (dB, :func:`line_contrast_db` at ``rps`` -
     the profile's own reference speed by default, so a fit whose speed laws
     are degenerate is read where it was fitted), then the posterior mode of
-    ``(k2, slope, tail, bpf boost, odd_a, odd_b, motor boost)`` given the
+    ``(k2, slope, tail, bpf boost, odd penalty at k = 3 and 30, motor boost)`` given the
     curve: the misfit ``(L/B - law) / rotor_line_sd_db`` over every rotor
     and order plus each parameter's standard score under its law (the motor
     period is the best of ``spec.pole_pairs``). A comb the laws cannot shape
@@ -454,8 +464,8 @@ def measure_laws(
         spec.slope_db_dec,
         spec.tail_over_floor_db,
         spec.bpf_boost_db,
-        spec.odd_a_db,
-        spec.odd_b_db,
+        spec.odd_pen_k3_db,
+        spec.odd_pen_k30_db,
         spec.motor_boost_db,
     )
     mu = np.array([law[0] for law in laws])
@@ -487,8 +497,8 @@ def measure_laws(
         slope_db_dec=float(theta[1]),
         tail_over_floor_db=float(theta[2]),
         bpf_boost_db=float(theta[3]),
-        odd_a_db=float(theta[4]),
-        odd_b_db=float(theta[5]),
+        odd_pen_k3_db=float(theta[4]),
+        odd_pen_k30_db=float(theta[5]),
         motor_boost_db=float(theta[6]),
         motor_pole_pairs=int(p_best),
         misfit=float(np.mean((resid_db / spec.rotor_line_sd_db) ** 2)),
@@ -518,8 +528,8 @@ def law_scores(
         ("slope_db_dec", spec.slope_db_dec),
         ("tail_over_floor_db", spec.tail_over_floor_db),
         ("bpf_boost_db", spec.bpf_boost_db),
-        ("odd_a_db", spec.odd_a_db),
-        ("odd_b_db", spec.odd_b_db),
+        ("odd_pen_k3_db", spec.odd_pen_k3_db),
+        ("odd_pen_k30_db", spec.odd_pen_k30_db),
         ("motor_boost_db", spec.motor_boost_db),
         ("amp_exp", spec.amp_exp),
         ("floor_mean_db", spec.floor_mean_db),

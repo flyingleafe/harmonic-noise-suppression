@@ -24,8 +24,8 @@ COMB = (
     "slope_db_dec",
     "tail_over_floor_db",
     "bpf_boost_db",
-    "odd_a_db",
-    "odd_b_db",
+    "odd_pen_k3_db",
+    "odd_pen_k30_db",
     "motor_boost_db",
 )
 FITS = {
