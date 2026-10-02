@@ -18,6 +18,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import matplotlib
 
@@ -107,17 +108,23 @@ def mc_floor(
     return out, out_a
 
 
-def main() -> None:
+def analyse(
+    seg: np.ndarray,
+    tag: str,
+    rate0: float,
+    mic: int | None = None,
+    start_s: float = 0.0,
+) -> dict[str, Any]:
+    """The whole measurement on one ``(M, T)`` segment at 44.1 kHz; figures and
+    JSON go to ``OUT / tag``. ``mic`` None picks the least windy microphone."""
+    global OUT
+    base = OUT
+    OUT = base / tag
     OUT.mkdir(parents=True, exist_ok=True)
-    jobs = [j for j in decoh.load_bench() if j.name == RECORDING]
-    if not jobs:
-        raise SystemExit(f"{RECORDING} not in the local DREGON-frames")
-    job = jobs[0]
-    job.max_seg_s = 30.0
-    seg, start_s, span_s = decoh.job_segment(job)
-    mic, wind_db = pick_mic(seg)
+    span_s = seg.shape[-1] / FS
+    picked, wind_db = pick_mic(seg)
+    mic = picked if mic is None else mic
     x = seg[mic]
-    rate0 = decoh.survey_rates()[RECORDING]
     rate = rate0
     work = decoh.pre_decimate(seg[mic : mic + 1])
     for k in (10, 40):
@@ -224,7 +231,10 @@ def main() -> None:
     for k in MOTOR_ORDERS:
         ax.annotate(f"k={k}", (k * rate, p[np.argmin(np.abs(f - k * rate))] * 3), color="C1")
     ax.set(
-        xlim=(0, 8000), xlabel="Hz", ylabel="PSD", title=f"{RECORDING} mic {mic}, {rate:.2f} rev/s"
+        xlim=(0, 8000),
+        xlabel="Hz",
+        ylabel="PSD",
+        title=f"{RECORDING} ({tag}) mic {mic}, {rate:.2f} rev/s",
     )
     fig.tight_layout()
     fig.savefig(OUT / "spectrum.png", dpi=130)
@@ -497,6 +507,45 @@ def main() -> None:
         },
     )
 
+    # 10. amplitude distribution of a few orders against a steady line in the
+    # same noise at the same SNR: is the line's amplitude steadier or wilder?
+    sos_b = signal.butter(6, band, btype="low", fs=FS_PHASE, output="sos")
+    rng_a = np.random.default_rng(3)
+    ks_a = (4, 10, 20, 40, 42)
+    fig, axes = plt.subplots(1, len(ks_a), figsize=(3.2 * len(ks_a), 3.4))
+    cv = {}
+    for ax, k in zip(axes, ks_a):
+        a = np.abs(z[k - 1]) / np.mean(np.abs(z[k - 1]))
+        nn = z.shape[-1] * 4
+        noise = signal.sosfiltfilt(
+            sos_b, (rng_a.standard_normal(nn) + 1j * rng_a.standard_normal(nn)) / np.sqrt(2)
+        )
+        noise /= np.sqrt(np.mean(np.abs(noise) ** 2))
+        sim = np.abs(np.sqrt(snr_eff[k - 1]) + noise)
+        sim /= sim.mean()
+        bins = np.linspace(0, 3, 61)
+        ax.hist(a, bins, density=True, alpha=0.6, label="measured |z_k|")
+        ax.hist(
+            sim,
+            bins,
+            density=True,
+            histtype="step",
+            lw=1.5,
+            color="k",
+            label="steady line + noise, same SNR",
+        )
+        ax.set(title=f"k={k} ({10 * np.log10(snr_eff[k - 1]):.0f} dB)", xlabel="|z| / mean")
+        cv[int(k)] = (round(float(a.std()), 3), round(float(sim.std()), 3))
+    axes[0].legend(fontsize=7)
+    axes[0].set_ylabel("density")
+    fig.suptitle(
+        "is the line's amplitude steadier or wilder than a constant line in the same noise?"
+    )
+    fig.tight_layout()
+    fig.savefig(OUT / "amplitude_hist.png", dpi=130)
+    plt.close(fig)
+    print("amplitude CV (measured, steady-line sim):", cv)
+
     rows = {
         "recording": RECORDING,
         "mic": mic,
@@ -519,8 +568,10 @@ def main() -> None:
         "floor_amp": floor_a.round(4).tolist(),
         "amp_corr_200ms_orders_1_12": amp_corr.round(3).tolist(),
         "coherent_share": [None if np.isnan(s) else round(float(s), 3) for s in share],
+        "amplitude_cv": cv,
     }
     (OUT / "one_rotor.json").write_text(json.dumps(rows))
+    OUT = base
     print(
         f"mic {mic}, wind ratio dB per mic {wind_db.round(1)}, rate {rate0:.3f} -> {rate:.3f} rev/s, segment {span_s:.1f} s"
     )
@@ -542,6 +593,116 @@ def main() -> None:
             f"floor50 {floor[i50, k - 1]:.3f} ana {floor_analytic[k - 1]:.3f}  derot50 {v_derot[i50, k - 1]:.3f} net50 {v_net[i50, k - 1]:.3f} "
             f"derot500 {v_derot[i500, k - 1]:.3f} net500 {v_net[i500, k - 1]:.3f}  shaft50 {k**2 * v_shaft[i50]:.3f}"
         )
+
+    return rows
+
+
+def real_floor_psd(seg: np.ndarray, rate: float) -> tuple[np.ndarray, np.ndarray]:
+    """``(f, (M, F))`` broadband floor of each microphone: the Welch spectrum
+    with the lines removed by a running median 1.5 harmonic spacings wide."""
+    f, p = signal.welch(seg, fs=FS, nperseg=8192, axis=-1)
+    width = int(round(1.5 * rate / (f[1] - f[0]))) | 1
+    floor = np.stack([signal.medfilt(np.log(row), width) for row in p])
+    return f, np.exp(floor)
+
+
+def shaped_noise(f: np.ndarray, psd: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
+    """``(M, n)`` independent Gaussian noise per microphone with the given
+    one-sided Welch PSD (``psd`` in the units ``signal.welch`` returns)."""
+    fr = np.fft.rfftfreq(n, 1.0 / FS)
+    out = np.empty((psd.shape[0], n))
+    for m in range(psd.shape[0]):
+        amp = np.sqrt(
+            np.interp(fr, f, psd[m]) * FS / 2.0
+        )  # PSD -> amplitude per bin of unit white noise
+        white = np.fft.rfft(rng.standard_normal(n))
+        out[m] = np.fft.irfft(white * amp, n=n)
+    return out
+
+
+def synthetic_rotor(
+    seg_real: np.ndarray, rate: float, seed: int = 0
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """The fitted single-rotor model of this recording (OU shaft from the width
+    law, per-order amplitudes per microphone, measured per-order amplitude
+    jitter shared by the mics; `results/static_rig/single_rotor`) rendered for
+    the length of ``seg_real`` at 44.1 kHz, plus a broadband floor shaped like
+    the real recording's. No per-order phase noise of any kind: every harmonic
+    is an exact multiple of one shaft angle."""
+    sys.path.insert(0, str(ROOT / "notebooks"))
+    import single_rotor_lab as lab
+    from experiments.static_rig import single_rotor as SR
+
+    fit = lab.load_ou(RECORDING)
+    assert fit is not None
+    am = lab.am_per_order(RECORDING, fit.orders.size)
+    n = seg_real.shape[-1]
+    lines = SR.synthesise(fit, int(FS), n, seed=seed, am=am).astype(np.float64)
+    # level match: the k = 2..10 line powers of mic 2 real vs synthetic
+    f, pr = signal.welch(seg_real, fs=FS, nperseg=8192, axis=-1)
+    _, ps = signal.welch(lines, fs=FS, nperseg=8192, axis=-1)
+    ratios = []
+    for k in range(2, 11):
+        i = np.argmin(np.abs(f - k * rate))
+        sl = slice(max(i - 3, 0), i + 4)
+        ratios.append(pr[:, sl].max(axis=-1) / ps[:, sl].max(axis=-1))
+    gain = np.sqrt(np.median(np.array(ratios), axis=0))  # per mic
+    lines *= gain[:, None]
+    ff, floor = real_floor_psd(seg_real, rate)
+    noise = shaped_noise(ff, floor, n, np.random.default_rng(seed + 1))
+    info = {
+        "sigma_nu_rev_s": fit.sigma_nu,
+        "lam": fit.lam,
+        "orders": int(fit.orders.size),
+        "am_sigma2_median": None if am is None else float(np.median(am[0])),
+        "am_gamma_median": None if am is None else float(np.median(am[1])),
+        "line_gain_db_per_mic": (20 * np.log10(gain)).round(2).tolist(),
+    }
+    return lines + noise, info
+
+
+def compare_real_synth(real: np.ndarray, synth: np.ndarray, mic: int, rate: float) -> None:
+    import soundfile as sf
+
+    out = OUT / "synthetic"
+    out.mkdir(parents=True, exist_ok=True)
+    f, pr = signal.welch(real[mic], fs=FS, nperseg=16384)
+    _, ps = signal.welch(synth[mic], fs=FS, nperseg=16384)
+    fig, axes = plt.subplots(2, 1, figsize=(12, 7))
+    for ax, lim in zip(axes, ((0, 8000), (0, 1500))):
+        ax.semilogy(f, pr, lw=0.6, color="k", label=f"real, mic {mic}")
+        ax.semilogy(
+            f, ps, lw=0.6, color="C3", alpha=0.75, label="synthetic (fitted rotor + shaped floor)"
+        )
+        ax.set(xlim=lim, xlabel="Hz", ylabel="PSD")
+        ax.grid(alpha=0.3)
+    axes[0].legend()
+    axes[0].set_title("real vs synthetic spectrum")
+    fig.tight_layout()
+    fig.savefig(out / "real_vs_synth_spectrum.png", dpi=130)
+    plt.close(fig)
+    peak = max(np.abs(real[mic]).max(), np.abs(synth[mic]).max())
+    n = int(6 * FS)
+    sf.write(out / "real_mic.wav", (real[mic, :n] / peak * 0.9).astype(np.float32), int(FS))
+    sf.write(out / "synth_mic.wav", (synth[mic, :n] / peak * 0.9).astype(np.float32), int(FS))
+
+
+def main() -> None:
+    jobs = [j for j in decoh.load_bench() if j.name == RECORDING]
+    if not jobs:
+        raise SystemExit(f"{RECORDING} not in the local DREGON-frames")
+    job = jobs[0]
+    job.max_seg_s = 30.0
+    seg, start_s, _span = decoh.job_segment(job)
+    rate0 = decoh.survey_rates()[RECORDING]
+    rows = analyse(seg, "real", rate0, start_s=start_s)
+    mic, rate = int(rows["mic"]), float(rows["rate"])
+    synth, info = synthetic_rotor(seg, rate)
+    print("synthetic:", info)
+    compare_real_synth(seg, synth, mic, rate)
+    rows_s = analyse(synth, "synthetic", rate, mic=mic)
+    (OUT / "synthetic" / "model.json").write_text(json.dumps(info))
+    print("synthetic rate", rows_s["rate"])
 
 
 if __name__ == "__main__":

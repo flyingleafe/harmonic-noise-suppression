@@ -26,7 +26,7 @@ one microphone**, so that every step is visible, and answers three questions tha
 3. whether the motor's own tones (orders 42, 63, 84) are more coherent than the propeller's.
 
 Everything here is produced by `scripts/static_rig_scratch/one_rotor_coherence.py`; numbers are in
-`results/noise_v2/decoherence/one_rotor/one_rotor.json`.
+`results/noise_v2/decoherence/one_rotor/{real,synthetic}/one_rotor.json`.
 
 ## The signal
 
@@ -34,7 +34,7 @@ DREGON bench recording `motor_Motor1_70`: one motor with its two-blade propeller
 8 microphones. Microphone 2 is used — it has the least power in 20–200 Hz relative to 1–4 kHz,
 i.e. the least wind. The shaft rate, refined on the lines themselves, is 68.47 rev/s.
 
-![The spectrum of microphone 2. Blue ticks: multiples of the shaft rate. Orange: the motor family (k = 42, 63, 84 — pole-pair × commutation tones), which does not come from the blades.](../../results/noise_v2/decoherence/one_rotor/spectrum.png){#fig-spectrum}
+![The spectrum of microphone 2. Blue ticks: multiples of the shaft rate. Orange: the motor family (k = 42, 63, 84 — pole-pair × commutation tones), which does not come from the blades.](../../results/noise_v2/decoherence/one_rotor/real/spectrum.png){#fig-spectrum}
 
 ## Step 1 — look at one line through a narrow window
 
@@ -49,7 +49,7 @@ enter the window. The phase of a perfectly steady line is constant; the phase of
 exactly on the $k$-th harmonic of a wandering shaft is $k\,\theta(t)$ with $\theta$ the shaft's
 angle error.
 
-![Phase of each order after the shaft's contribution $k\theta$ has been removed (step 4), unwrapped for display. Low orders stay within a radian over 30 s; order 10 drifts in steps; orders 20 and 40 wander by hundreds of radians (at 4 and 1 dB SNR the unwrapping itself slips, so these two traces are indicative only — the estimator used below never unwraps). The motor order 42 (orange) stays within ±10 rad at 9 dB SNR.](../../results/noise_v2/decoherence/one_rotor/phase_tracks.png){#fig-tracks}
+![Phase of each order after the shaft's contribution $k\theta$ has been removed (step 4), unwrapped for display. Low orders stay within a radian over 30 s; order 10 drifts in steps; orders 20 and 40 wander by hundreds of radians (at 4 and 1 dB SNR the unwrapping itself slips, so these two traces are indicative only — the estimator used below never unwraps). The motor order 42 (orange) stays within ±10 rad at 9 dB SNR.](../../results/noise_v2/decoherence/one_rotor/real/phase_tracks.png){#fig-tracks}
 
 ## Step 2 — measure how far the phase moves in a lag τ
 
@@ -76,7 +76,7 @@ independent as two samples 500 ms apart, so the noise adds the same amount of ph
 every lag — a flat floor. A phase that genuinely moves (a random walk, or a slow fluctuation)
 adds variance that *grows* with τ. @fig-sim shows both on a simulated line.
 
-![Simulated line in band-limited noise at three SNRs. Dotted: steady line — the variance is flat in τ (its level is the noise floor at that SNR). Solid: the same line with a phase random walk of 0.5 rad²/s added — the curve climbs away from the floor and follows the walk (dashed black) once the walk exceeds the floor. The ceiling of the estimator is the red line.](../../results/noise_v2/decoherence/one_rotor/noise_vs_walk.png){#fig-sim}
+![Simulated line in band-limited noise at three SNRs. Dotted: steady line — the variance is flat in τ (its level is the noise floor at that SNR). Solid: the same line with a phase random walk of 0.5 rad²/s added — the curve climbs away from the floor and follows the walk (dashed black) once the walk exceeds the floor. The ceiling of the estimator is the red line.](../../results/noise_v2/decoherence/one_rotor/real/noise_vs_walk.png){#fig-sim}
 
 So the procedure is: measure each order's SNR inside its window (line power over noise power),
 simulate a steady line at that SNR in the same band-limited noise, read the floor with the same
@@ -102,7 +102,7 @@ disagreement measures the error $B$ of the combined estimate, and $k^2 B$ — wh
 to order $k$ after de-rotation — is subtracted too. Then order $k$ is de-rotated,
 $z_k \to z_k e^{-ik\hat\theta}$, and step 2 is repeated.
 
-![Phase-increment variance against lag for a few orders, before (left) and after (right) the shaft term is removed. Dotted in each colour: that order's noise floor. Dashed black: the shaft's own variance (what order 1 would inherit). The shaft removal takes orders 2 and 4 down to their floors and leaves orders 10, 20, 40 far above theirs and still climbing.](../../results/noise_v2/decoherence/one_rotor/variance_vs_lag.png){#fig-lag}
+![Phase-increment variance against lag for a few orders, before (left) and after (right) the shaft term is removed. Dotted in each colour: that order's noise floor. Dashed black: the shaft's own variance (what order 1 would inherit). The shaft removal takes orders 2 and 4 down to their floors and leaves orders 10, 20, 40 far above theirs and still climbing.](../../results/noise_v2/decoherence/one_rotor/real/variance_vs_lag.png){#fig-lag}
 
 What the shaft itself does: $\mathrm{Var}[\Delta\theta]$ = 6.4e-4 rad² at 50 ms and 1.5e-2 rad²
 at 500 ms. Multiplied by $k^2$ that is 0.06 / 1.5 rad² at order 10 and 1.0 / 24 rad² at order
@@ -111,7 +111,7 @@ pile up at the ceiling. The question is what remains after it is taken out.
 
 ## Result — each order has phase motion of its own
 
-![The independent per-order term — variance after floor and shaft removal — against order, at three lags. Lines: the power law fitted on 12 recordings, $0.09\,k^{1.08}\tau^{0.43}$. Points above the ceiling of the raw read are omitted; orange verticals mark the motor family.](../../results/noise_v2/decoherence/one_rotor/veps_vs_k.png){#fig-vk}
+![The independent per-order term — variance after floor and shaft removal — against order, at three lags. Lines: the power law fitted on 12 recordings, $0.09\,k^{1.08}\tau^{0.43}$. Points above the ceiling of the raw read are omitted; orange verticals mark the motor family.](../../results/noise_v2/decoherence/one_rotor/real/veps_vs_k.png){#fig-vk}
 
 | k | SNR | net @ 50 ms | 12-rec law | net @ 500 ms | 12-rec law |
 |---|---|---|---|---|---|
@@ -129,13 +129,13 @@ law (lower at high $k$, where the ceiling caps what can be read).
 
 What it looks like in the frequency domain:
 
-![Baseband spectrum of each order (0 Hz = exactly $k$ × shaft rate) before (grey) and after (blue/orange) the shaft phase is removed. After removal every order shows a **needle** at 0 Hz — the part of the line that is phase-locked to the shaft — standing on a **pedestal** a few Hz wide, which is the per-order term. The pedestal grows with $k$ relative to the needle; at order 40 the needle is ~10 dB above it. The motor order 42 is the opposite: the shaft removal collapses a 10 Hz smear into a clean needle with a pedestal 20 dB down.](../../results/noise_v2/decoherence/one_rotor/line_shapes.png){#fig-shapes}
+![Baseband spectrum of each order (0 Hz = exactly $k$ × shaft rate) before (grey) and after (blue/orange) the shaft phase is removed. After removal every order shows a **needle** at 0 Hz — the part of the line that is phase-locked to the shaft — standing on a **pedestal** a few Hz wide, which is the per-order term. The pedestal grows with $k$ relative to the needle; at order 40 the needle is ~10 dB above it. The motor order 42 is the opposite: the shaft removal collapses a 10 Hz smear into a clean needle with a pedestal 20 dB down.](../../results/noise_v2/decoherence/one_rotor/real/line_shapes.png){#fig-shapes}
 
 The needle surviving at orders 20–40 is the direct answer to "bounded or random walk?": a
 random walk leaves no needle. The per-order phase process is bounded; what grows with $k$ is the
 pedestal's share, i.e. how much of the line is *not* locked to the shaft.
 
-![Fraction of each order's power still phase-locked to the shaft after 1 s and 2 s, $|\gamma|^2$ from the lag law with floor and shaft leakage removed. It falls from ~1 at k = 2 to ~0.1 by k = 12 for the aerodynamic orders; the motor order 42 sits at 0.5–0.6.](../../results/noise_v2/decoherence/one_rotor/coherent_share.png){#fig-share}
+![Fraction of each order's power still phase-locked to the shaft after 1 s and 2 s, $|\gamma|^2$ from the lag law with floor and shaft leakage removed. It falls from ~1 at k = 2 to ~0.1 by k = 12 for the aerodynamic orders; the motor order 42 sits at 0.5–0.6.](../../results/noise_v2/decoherence/one_rotor/real/coherent_share.png){#fig-share}
 
 ### Caveat — the demodulation band
 
@@ -167,6 +167,49 @@ bounds; the direction of every conclusion is unchanged. The other $k$-dependent 
 smear, stays inside the band on this bench (±10 Hz at order 40); in flight it would not, and the
 demodulation would have to follow the tracked carrier before filtering.
 
+## Control — the same procedure on a rotor that has no per-order phase noise
+
+If the procedure is sound, a signal in which every harmonic is an exact multiple of one shaft
+angle must read zero after the shaft is removed. The single-rotor model fitted to this very
+recording yesterday (`results/static_rig/single_rotor`: OU shaft speed from the width law,
+σ_ν = 0.089 rev/s, λ = 12.4 /s; every order's power per microphone; the measured per-order
+log-amplitude jitter, median σ² = 0.11, γ = 0.47 Hz, shared by the mics) is rendered for 30 s at
+44.1 kHz, its lines level-matched to the recording (within 1 dB per mic), and a broadband floor
+with the recording's own spectral shape per microphone is added. It has the shaft wander, the
+amplitude jitter and the coloured floor of the real signal — and **no** independent phase motion
+of any order.
+
+![Real against synthetic spectrum on mic 2 (top: full band; bottom: the first 20 orders). Lines and floor match; the synthetic keeps rendering orders above 5 kHz where the real lines have sunk into the floor.](../../results/noise_v2/decoherence/one_rotor/synthetic/real_vs_synth_spectrum.png){#fig-synth-spec}
+
+{{< include ../../results/noise_v2/decoherence/one_rotor/synthetic/audio.html >}}
+
+Same microphone, same analysis, same floor simulation:
+
+![The synthetic rotor through steps 1–4. Left: raw increments pile up at the ceiling exactly as the real ones do — the shaft alone does that. Right: after the shaft is removed every order sits on its own noise floor (dotted) at every lag. Nothing is left.](../../results/noise_v2/decoherence/one_rotor/synthetic/variance_vs_lag.png){#fig-synth-lag}
+
+| k | SNR real / synth | net @ 500 ms real | synth | net @ 2 s real | synth |
+|---|---|---|---|---|---|
+| 4 | 19 / 20 dB | 0.07 | −0.00 | 0.21 | 0.00 |
+| 10 | 8 / 9 | 1.17 | 0.03 | 2.03 | 0.05 |
+| 20 | 4 / 6 | 1.45 | 0.04 | 3.41 | 0.08 |
+| 40 | 1 / 1 | 2.18 | 0.07 | 2.15 | 0.26 |
+| 42 | 9 / 10 | 0.66 | −0.01 | 0.53 | 0.14 |
+
+: Independent per-order term, real recording against the synthetic control at matched SNR. {#tbl-ctrl}
+
+![Per-order term against order for the synthetic rotor: zero within ±0.1 rad² at every order and lag (the pooled real law is drawn for scale).](../../results/noise_v2/decoherence/one_rotor/synthetic/veps_vs_k.png){#fig-synth-vk}
+
+![Line shapes of the synthetic rotor after shaft removal: a needle at every order with no pedestal beyond the floor — compare @fig-shapes.](../../results/noise_v2/decoherence/one_rotor/synthetic/line_shapes.png){#fig-synth-shapes}
+
+The synthetic's amplitudes fluctuate as much as the real ones (CV of $|z_k|$ 0.71 / 0.55 / 0.47 at
+k = 4 / 10 / 20 against 0.51 / 0.50 / 0.50 real) and its phase read is zero — the amplitude
+jitter the model carries does not leak into the phase read. The synthetic reads at most 0.07 rad²
+at 500 ms where the real recording reads 1.2–2.2, and
+0.26 at 2 s at order 40 (the shaft-estimate leakage, $k^2 B$, is at its largest there). The
+difference is stark, and in the expected direction: the procedure does not manufacture
+per-order phase noise from shaft wander, amplitude jitter or a coloured floor. What it finds on
+the real recording is in the real recording.
+
 ## Is it amplitude modulation in disguise?
 
 Unsteady blade loading certainly modulates the lines' amplitudes. Could that be what the phase
@@ -177,9 +220,9 @@ floor (a momentarily weak line is noisier), and that contribution is flat in τ.
 
 The recording shows it directly:
 
-![Amplitude distribution of five orders (blue) against a steady line in the same noise at the same SNR (black). Order 4 swings by ±50 % (a slow 0.1–0.2 Hz wander) yet its phase stays coherent (0.07 rad² at 500 ms). Order 42 is as steady as a constant tone. Orders 10–40 fluctuate beyond the noise.](../../results/noise_v2/decoherence/one_rotor/amplitude_hist.png){#fig-amp}
+![Amplitude distribution of five orders (blue) against a steady line in the same noise at the same SNR (black). Order 4 swings by ±50 % (a slow 0.1–0.2 Hz wander) yet its phase stays coherent (0.07 rad² at 500 ms). Order 42 is as steady as a constant tone. Orders 10–40 fluctuate beyond the noise.](../../results/noise_v2/decoherence/one_rotor/real/amplitude_hist.png){#fig-amp}
 
-![Left: phase increment variance (solid) against log-amplitude increment variance (dashed), each with its own simulated floor removed, same order, same lags. Orders 4–8 have the two equal — an isotropic complex fluctuation of the line, i.e. a change of the waveform's shape. From order 10 up the phase term exceeds the amplitude term 3–6×. Right: log-amplitude increments are uncorrelated across orders 1–12 — the amplitude modulation is not a common gain either.](../../results/noise_v2/decoherence/one_rotor/phase_vs_amplitude.png){#fig-pva}
+![Left: phase increment variance (solid) against log-amplitude increment variance (dashed), each with its own simulated floor removed, same order, same lags. Orders 4–8 have the two equal — an isotropic complex fluctuation of the line, i.e. a change of the waveform's shape. From order 10 up the phase term exceeds the amplitude term 3–6×. Right: log-amplitude increments are uncorrelated across orders 1–12 — the amplitude modulation is not a common gain either.](../../results/noise_v2/decoherence/one_rotor/real/phase_vs_amplitude.png){#fig-pva}
 
 So: at low orders the independent term is a small, isotropic wobble of the complex amplitude; at
 high orders the phase wanders more than the amplitude does. Neither is amplitude modulation
@@ -191,7 +234,7 @@ The motor family on this drone sits at $k$ = 42, 63, 84 (@fig-spectrum). On micr
 order 42 is strong enough to read (9 dB; order 63 is at −2 dB, order 84 at −1 dB, and on no
 microphone does 84 exceed 2.7 dB). Order 42 behaves unlike any aerodynamic order near it:
 
-![Coherence left after floor and shaft removal, $|\gamma| = e^{-V/2}$, for the motor order 42 (thick) against aerodynamic orders. Dashed: what order 42 would do if it followed the pooled aerodynamic law.](../../results/noise_v2/decoherence/one_rotor/motor_orders.png){#fig-motor}
+![Coherence left after floor and shaft removal, $|\gamma| = e^{-V/2}$, for the motor order 42 (thick) against aerodynamic orders. Dashed: what order 42 would do if it followed the pooled aerodynamic law.](../../results/noise_v2/decoherence/one_rotor/real/motor_orders.png){#fig-motor}
 
 At 50 ms its residual is at the floor (0.00 rad²); at 0.5–2 s it keeps $|\gamma| \approx 0.7$–0.8,
 where order 40 has 0.34, order 20 has 0.48 and even order 10 has 0.56. The aerodynamic law would
@@ -226,6 +269,6 @@ PYTHONPATH=src .venv/bin/python scripts/static_rig_scratch/one_rotor_coherence.p
 ```
 
 Reads the DREGON bench frames (`DREGON-frames`, split `motor`), writes the figures and
-`one_rotor.json` to `results/noise_v2/decoherence/one_rotor/`. The 12-recording study is
+`one_rotor.json` to `results/noise_v2/decoherence/one_rotor/real/`. The 12-recording study is
 `scripts/noise_v2_order_decoherence.py`; its findings and the controls it ran are in
 `results/noise_v2/decoherence/findings.md`.
