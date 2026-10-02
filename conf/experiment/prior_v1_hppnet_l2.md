@@ -23,7 +23,7 @@ workers. **Exact diff against `rig_easy_hppnet_l2_unified`:
 
 Close to the fitted-rig streams on real data, far better on the static
 synthetic views. vast A100 job `prior-v1-hppnet-l2-d8bcf7`, ran to the LR
-floor (1.25e-4 by round 106, plateau 7.2 ± 0.4 Hz from round 110).
+floor (1.25e-4 by round 106, plateau 7.2 ± 0.4 Hz from round 110), 143 rounds, 8.4 h.
 `val/real_overall` best **6.5 Hz at round 84** (r1 7.7, r2 8.1, nosource
 4.3, source-present 10.2); `rig_easy_hppnet_l2_unified` 4.45 at round 72,
 `nv3r4_hard_fullhyper_hppnet_l2` 4.24 at round 45. Static views 1.6 / 1.7 Hz
