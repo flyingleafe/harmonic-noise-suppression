@@ -1,6 +1,7 @@
 ---
 title: "Do the harmonics of one rotor move together? — the phase-coherence measurement, explained on one recording"
 date: 2026-10-02
+bibliography: ../../writing/papers/2026-08_wrapup/src/references.bib
 format:
   html:
     toc: true
@@ -318,6 +319,75 @@ the same rotor, in the same anechoic chamber, through the same microphone, split
 some phase-locked to the shaft, the aerodynamic family not. No room is needed to produce the
 term, and no room can explain why it skips orders.
 
+## Why this happens — what rotor aeroacoustics says
+
+The measurement says: one shaft term shared by all orders, plus a bounded, independent,
+source-side phase process on each aerodynamic order whose share grows with order, absent on the
+shaft-locked tones. That is what the aeroacoustic picture of a rotor at low advance ratio
+predicts, and the ingredients are in the literature.
+
+**The rigid-rotor baseline.** For a rigid propeller with $B$ blades in perfectly steady
+rotation and steady blade loading, the far-field pressure is a periodic function of shaft angle,
+$p(t) = \sum_k A_k\cos\big(kB\,\theta(t) + \phi_k\big)$: every harmonic rides the same
+$\theta(t)$, the offsets $\phi_k$ are constants, and independent phase drift between harmonics
+is impossible. The realistic form is
+$$\Phi_k(t) = kB\,\Theta(t) + \phi_k + \eta_k(t),$$
+with $\Theta$ the common shaft phase and $\eta_k$ a harmonic-dependent aerodynamic term. The
+measurement above is a direct estimate of $\eta_k$: the shaft part is what $k\hat\theta$ removes,
+and $\eta_k$ is what is left.
+
+**1. Unsteady rotation is common-mode.** Small fluctuations of the rotational speed enter every
+harmonic as $\delta\Phi_k = kB\,\delta\Theta$, so higher harmonics are proportionally more
+sensitive, and even small speed fluctuations produce sidebands and extra tonal structure around
+the BPF harmonics. Zhong et al. showed this for small rotors (rotational-speed fluctuations,
+blade vibration and geometric asymmetry) [@zhong2020revisit; @zhong2023unsteady], and Zhu et al.
+predicted and measured, with an encoder on the shaft, the tones a UAV propeller radiates when its
+motor drives it in nearly sinusoidal unsteady rotation at 14× the shaft frequency
+[@zhu2026unsteady]. In this document that term is the shaft OU — large (it alone decorrelates
+order 40 within half a second) but shared, which is why removing $k\hat\theta$ takes the synthetic
+rotor to its noise floor and leaves the real one with a residual. The residual is, by
+construction, what unsteady rotation cannot explain.
+
+**2. Stochastic unsteady loading is per-harmonic.** The flow through a static or hovering rotor is
+not deterministic: inflow turbulence, blade boundary layers and separation, tip vortices, wake
+recirculation and blade–wake interaction vary from revolution to revolution. Writing the blade
+loading as $L(r,\psi,t) = \bar L(r,\psi) + L'(r,\psi,t)$, the steady part radiates the
+phase-locked BPF tones and $L'$ radiates stochastic sound near the same frequencies. The
+rotor-noise literature calls the result **haystacking**: broadened peaks at the BPF harmonics
+produced by unsteady loading that is *correlated between neighbouring blades*. Alexander,
+Devenport and Glegg attribute the haystacked peaks explicitly to correlated stochastic blade
+loading, measured as blade-to-blade upwash coherence near the tips, and explain the mechanism
+after Hanson: at low advance ratio the inflow stretches turbulent structures into long
+filaments that are drawn into the rotor and cut many times by successive blades, so each eddy
+produces a *train* of loading pulses at the blade-passing rate — a tone of finite duration —
+and the width of the haystack is set by how many blades cut the same eddy
+[@alexander2017haystacking; @hanson1974spectrum; @majumdar1998ingested]. Raposo and Azarpeyvand
+show that Amiet's turbulence-ingestion theory, derived with blade-to-blade source correlation
+kept, predicts the haystacking tones for open rotors [@raposo2024ingestion]. Hanson's original
+model is a train of enveloped lift pulses with small random variations in pulse position and
+amplitude [@hanson1974spectrum] — precisely a per-harmonic complex-amplitude fluctuation
+around a coherent core.
+
+Put together, the harmonic $k$ of the measured signal is the sum of the steady-loading tone
+(locked to $kB\Theta$) and a haystack: a narrowband random process centred on the same
+frequency whose bandwidth is the inverse lifetime of the correlated loading (a few Hz here, the
+pedestals of @fig-shapes), whose power relative to the tone grows with harmonic order because
+the steady loading's harmonics fall off faster than the stochastic loading's, and which is
+independent from one harmonic to the next because different harmonics sample different details
+of the pulse train. That is exactly a bounded, independent, source-side phase process with a
+coherent core whose share falls with order. It is aerodynamic, so the electromagnetic tones of
+the motor — locked to the rotor angle, with no loading pulse behind them — do not carry it,
+and it does not need a room; the DREGON bench, the AGH anechoic chamber and the planted
+synthetic controls agree.
+
+What the literature does not settle and the data here add: the odd/even split (the
+blade-difference family carries several times the phase noise of the blade-pass family, as the
+difference of two nearly equal blade pulse trains would), the phase-dominated anisotropy above
+order 10, and the slight upward centroid shift of the high-order haystacks. The reference
+measurements above are from loading-dominated small rotors; drone-specific transfer functions
+(scattering by the airframe, [@manamperi2025drtf]) and the state of propeller noise prediction
+against experiment [@limapereira2026accuracy] bound what a model can be expected to reproduce.
+
 ## What this means for the noise model
 
 - The harmonics of the propeller do **not** move in lockstep. Beyond the shared shaft term, each
@@ -354,3 +424,8 @@ Reads the DREGON bench frames (`DREGON-frames`, split `motor`), writes the figur
 `one_rotor.json` to `results/noise_v2/decoherence/one_rotor/real/`. The 12-recording study is
 `scripts/noise_v2_order_decoherence.py`; its findings and the controls it ran are in
 `results/noise_v2/decoherence/findings.md`.
+
+## References
+
+::: {#refs}
+:::
