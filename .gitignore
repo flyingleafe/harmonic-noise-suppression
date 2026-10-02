@@ -1,4 +1,7 @@
 *.pyc
+__pycache__/
+*.nbi
+*.nbc
 # data/ and datasets/ contents are managed by dload (PyPI dload-ml); the
 # remote + pinned dataset versions live in dload.toml / dload.lock at repo root.
 /data/*
