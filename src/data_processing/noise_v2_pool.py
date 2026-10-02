@@ -126,6 +126,7 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -179,8 +180,9 @@ def _read_fit(path: str | Path, *, where: str) -> dict[str, Any]:
     return fit
 
 
-def load_preset_bank(path: str | Path) -> tuple[NoiseV2Entry, ...]:
-    """Every entry of a ``noise-v2-bank/1`` file, unvalidated against a pool.
+def load_preset_bank(path: str | Path) -> Sequence[NoiseV2Entry]:
+    """Every entry of a ``noise-v2-bank/1`` file (or, for a ``.npz``, the lazy
+    sequence of a ``noise-prior-bank/1`` file), unvalidated against a pool.
 
     ``path`` is a plain path or a dload URI — ``dload:NAME[@VERSION]/file`` —
     resolved by :func:`data_processing.streams.resolve_source`, the same
@@ -196,6 +198,11 @@ def load_preset_bank(path: str | Path) -> tuple[NoiseV2Entry, ...]:
     p = Path(resolve_source(str(path)))
     if not p.is_file():
         raise ValueError(f"preset_bank: no such bank file: {p}")
+    if p.suffix == ".npz":
+        # a compact bank of prior draws: a LAZY sequence (noise_model.prior_bank)
+        from data_processing.noise_model.prior_bank import PriorBank
+
+        return PriorBank(p)
     bank = json.loads(p.read_text())
     fmt = bank.get("format") if isinstance(bank, dict) else None
     if fmt != PRESET_BANK_FORMAT:
@@ -259,7 +266,7 @@ class NoiseV2Pool:
         duration_s: float = 1.0,
         n_mics: int = 8,
         n_rotors: int = 4,
-        entries: tuple[NoiseV2Entry, ...] = (),
+        entries: Sequence[NoiseV2Entry] = (),
         rps_kind: str = "full_flight",
         flight_fs: float = 200.0,
         flight_reuse: int = 32,
@@ -336,22 +343,30 @@ class NoiseV2Pool:
                 f"noise_v2 renders on a whole flight; rps.kind must be one of "
                 f"{list(trajectory_model.FLIGHT_KINDS)}, got {self.rps_kind!r}"
             )
-        self.entries = tuple(entries)
-        if not self.entries:
+        from data_processing.noise_model.prior_bank import PriorBank
+
+        if len(entries) == 0:
             raise ValueError("noise_v2 needs at least one entry: give it 'fits' or 'preset_bank'")
-        self.entries = tuple(
-            NoiseV2Entry(
-                name=e.name,
-                cruise=_offset_comb(e.cruise, self.comb_offset_db),
-                standby=(
-                    None if e.standby is None else _offset_comb(e.standby, self.comb_offset_db)
-                ),
-                traj_rig=e.traj_rig,
-                provenance=e.provenance,
+        self.entries: Sequence[NoiseV2Entry]
+        if isinstance(entries, PriorBank):
+            # LAZY: a payload is assembled (offset included) when indexed; the
+            # builder validated every rig, the pool checks one against itself
+            self.entries = entries.with_offset(self.comb_offset_db)
+            self._check_entries(self.entries[:1])
+        else:
+            self.entries = tuple(
+                NoiseV2Entry(
+                    name=e.name,
+                    cruise=_offset_comb(e.cruise, self.comb_offset_db),
+                    standby=(
+                        None if e.standby is None else _offset_comb(e.standby, self.comb_offset_db)
+                    ),
+                    traj_rig=e.traj_rig,
+                    provenance=e.provenance,
+                )
+                for e in entries
             )
-            for e in self.entries
-        )
-        self._check_entries()
+            self._check_entries(self.entries)
         # ``rps.kind: fitted_traj``: resolve the fitted-model source(s) here so
         # a bad policy fails when the pool is built and not in a DataLoader
         # worker on some later window. ``None`` is the policy's own ``rps``
@@ -364,7 +379,12 @@ class NoiseV2Pool:
         self._flights: dict[str | None, trajectory_model.FlightCache] = {}
         if self.rps_kind == trajectory_model.FITTED_KIND:
             self._traj[None] = trajectory_model.build_from_config(self._rps_cfg)
-            for rig in sorted({e.traj_rig for e in self.entries if e.traj_rig is not None}):
+            rigs = (
+                set(self.entries.traj_rigs)
+                if isinstance(self.entries, PriorBank)
+                else {e.traj_rig for e in self.entries if e.traj_rig is not None}
+            )
+            for rig in sorted(rigs):
                 self._traj[rig] = trajectory_model.build_from_config(
                     dict(self._rps_cfg, rigs={rig: 1.0})
                 )
@@ -381,7 +401,7 @@ class NoiseV2Pool:
 
     # ── validation ──────────────────────────────────────────────────────────
 
-    def _check_entries(self) -> None:
+    def _check_entries(self, entries: Sequence[NoiseV2Entry]) -> None:
         """Refuse a fit this pool cannot render, naming the mismatch.
 
         Everything checked here would otherwise surface as a ``ValueError``
@@ -389,7 +409,7 @@ class NoiseV2Pool:
         window — or, for a ``/1`` payload with no ``gamma_hz``, as a ``KeyError``
         three frames deeper.
         """
-        for entry in self.entries:
+        for entry in entries:
             for regime, fit in (("cruise", entry.cruise), ("standby", entry.standby)):
                 if fit is None:
                     continue
