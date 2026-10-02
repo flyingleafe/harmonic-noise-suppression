@@ -567,3 +567,59 @@ family N(5, 4), scatter 3.5 / 2.5 dB. Scores now: Michael cruise d² 10.2
 k = 1 dominant); the prior's own draws 7–10 (P 0.2–0.5)
 (`results/prior_rigs/law_scores_r4_fits.txt`).
 
+### Prior stream training (2026-10-02)
+
+Bank `prior_v1_n16384.npz` (`scripts/prior_bank_build.py`, uni-cpu job
+`prior-bank-16k-125150`: 16 384 gated rigs of 19 199 draws, 5183 s on 16
+workers, 33 MB float16; `dload:prior-v1-banks@edbe77d9…`;
+`results/prior_rigs/prior_v1_n16384.report.json`: k2 23.1 ± 6.6, slope
+24.7 ± 5, tail −3.7 ± 4, motor 5.0 ± 4 dB, hump share 0.51). Stream
+`conf/online_mix/noise_prior_v1_5050.yaml`: trajectory hyperprior, hover
+40–95 rev/s, 4 s renders reused 40× with a random 2 s window each. Two arms
+on vast A100 (`--cpus 16`), each the exact stream swap of a unified
+reference: `prior_v1_scv2` ← `nv3r4_easy_scv2`, `prior_v1_hppnet_l2` ←
+`rig_easy_hppnet_l2_unified`. First submission failed on `allow_dirty`:
+numba's `cache=True` wrote `.nbi/.nbc` into `__pycache__/`, which only
+ignored `*.pyc` (fixed in `454ee231`).
+
+`val/real_overall` (MAE Hz, best round) and the panel views at that round:
+
+| arm | best | r1 | r2 | nosource | source | static nomix / mix | stochastic nomix / mix | s/round |
+|---|---|---|---|---|---|---|---|---|
+| `prior_v1_scv2` | **9.8** @ r29 | 8.3 | 9.0 | 9.7 | 9.9 | 3.6 / 3.5 | 16.3 / 17.0 | 158–172 |
+| `nv3r4_easy_scv2` | 4.63 @ r33 | 4.0 | 4.9 | 4.2 | 5.4 | 14.6 / 13.2 | 19.0 / 19.5 | 100 |
+| `nv3r3_easy_scv2` | 4.68 @ r125 | 5.2 | 4.7 | 4.4 | 5.1 | 5.3 / 4.9 | 23.2 / 23.6 | 100 |
+| `prior_v1_hppnet_l2` | **6.5** @ r84 | 7.7 | 8.1 | 4.3 | 10.2 | 1.6 / 1.7 | 28.9 / 29.6 | 192–200 |
+| `rig_easy_hppnet_l2_unified` | 4.45 @ r72 | 2.8 | 4.2 | 4.4 | 4.6 | 13.9 / 14.1 | 19.3 / 20.1 | 180 |
+| `nv3r4_hard_fullhyper_hppnet_l2` | 4.24 @ r45 | 4.4 | 4.9 | 3.8 | 5.0 | 14.6 / 14.6 | 28.0 / 30.1 | 177 |
+
+Reading (Dmitrii): the stochastic views are an anti-validation portion —
+models that do well there output average predictions — so the ranking is
+real + static. On that reading the prior stream makes both architectures
+much better generic trackers (static 1.6–3.6 Hz vs 13–15) and costs real
+accuracy: scv2 loses 5 Hz and plateaus at 15 from round 35 with the LR
+decaying (train loss 18 at the end vs 7.2 — the stream is harder to fit);
+HPPNet-L2 loses 2 Hz, still at the level of its `nv3r4_hard` version, and
+its real curve was still falling when the LR hit the floor. The scv2 arm is
+loader-bound (64 000 mixes × 23 ms + 1600 renders × 0.4 s over 12 workers
+≈ 175 s per round against 100 s GPU-bound); HPPNet is ~90 % fed.
+
+Open question raised by the result: how far apart the 16 k rigs are from
+each other and from the real rigs. Discussed (not built): a deterministic
+distance on mean-removed log-mel of the expected periodogram at fixed label
+speeds (nearest-neighbour and real-to-bank distances, not just the mean
+pairwise) is blind to the AM pedestal, the shaft-OU widths, `mic_dev`,
+wind (`p_wind`, gust level — the largest omission), spatial structure, the
+speed laws between the sampled speeds, and rotor assignment at equal
+speeds; a per-rotor frame-distribution distance (energy distance on log-mel
+frames, normalised by the same-rig render-to-render distance) recovers
+wind, the pedestal and `mic_dev` variances but not line widths or spatial
+structure. Line-shape note recorded in the discussion: bounded phase jitter
+and lognormal AM share the lag law exp(σ² ρ(τ)) and are indistinguishable at
+second order (hence the single `am` term); the only unbounded phase in a
+prior rig is the shaft OU (angle = integral of a speed-regulated error),
+coherent across orders with width k² σ_ν² / (2π λ); per-line Wiener widths
+have no physical mechanism for shaft-locked harmonics and `gamma_hz` = 0 in
+the bank; additive floor noise never broadens a line, it only makes widths
+of lines under the floor unidentifiable.
+
