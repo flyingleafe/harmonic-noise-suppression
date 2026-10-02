@@ -620,8 +620,102 @@ def shaped_noise(f: np.ndarray, psd: np.ndarray, n: int, rng: np.random.Generato
     return out
 
 
+def render_rotor(
+    fit: Any,
+    n: int,
+    seed: int,
+    am: tuple[Any, Any] | None,
+    phase_mode: str = "none",
+    d_per_order: float = 0.12,
+    s2_per_order: float = 0.1,
+    tau_c: float = 0.5,
+    env_rate: int = 200,
+) -> np.ndarray:
+    """``(C, n)`` at 44.1 kHz: `experiments.static_rig.single_rotor.synthesise`
+    (OU shaft shared by all orders, per-order amplitudes per mic, per-order
+    log-amplitude OU jitter) plus an INDEPENDENT per-order phase process
+    psi_k(t) on the envelope grid:
+
+    - ``"none"``: psi = 0 (every harmonic an exact multiple of the shaft angle);
+    - ``"wiener"``: unbounded random walk, Var[psi_k(t+tau) - psi_k(t)] = 2 D_k tau
+      with D_k = d_per_order * k rad^2/s;
+    - ``"bounded"``: stationary OU phase with variance s2_per_order * k rad^2
+      and correlation time tau_c (increment variance saturates at 2 sigma_k^2).
+    """
+    import math
+
+    from scipy.signal import lfilter
+
+    rng = np.random.default_rng(seed)
+    C, K = fit.amp2.shape
+    fs = int(FS)
+    hop = fs // env_rate
+    dt = hop / fs
+    n_blk = -(-n // hop)
+    n_pad = n_blk * hop
+    rho = math.exp(-fit.lam * dt)
+    e = rng.standard_normal(n_blk + 1) * fit.sigma_nu * math.sqrt(1 - rho**2)
+    e[0] = rng.standard_normal() * fit.sigma_nu
+    nu = lfilter([1.0], [1.0, -rho], e)
+    rate = fit.s + np.interp(np.arange(n_pad) / hop, np.arange(n_blk + 1), nu)
+    theta = np.cumsum(rate / fs)
+    frac = np.mod(theta, 1.0).reshape(n_blk, 1, hop)
+    orders = np.asarray(fit.orders, dtype=np.float64)
+    phase0 = rng.uniform(0, 2 * np.pi, (C, K))
+    cr = (np.sqrt(fit.amp2) * np.cos(phase0)).astype(np.float32)
+    ci = (np.sqrt(fit.amp2) * np.sin(phase0)).astype(np.float32)
+    env = None
+    if am is not None:
+        sm = np.broadcast_to(np.asarray(am[0], float), (K,))
+        gm = np.broadcast_to(np.asarray(am[1], float), (K,))
+        r_am = np.exp(-2 * np.pi * gm * dt)[:, None]
+        sd = np.sqrt(sm)[:, None]
+        noise = rng.standard_normal((K, n_blk + 1)) * sd * np.sqrt(1 - r_am**2)
+        noise[:, :1] = rng.standard_normal((K, 1)) * sd
+        g = np.empty_like(noise)
+        g[:, 0] = noise[:, 0]
+        for i in range(1, n_blk + 1):
+            g[:, i] = r_am[:, 0] * g[:, i - 1] + noise[:, i]
+        env = np.exp(g - 0.5 * sm[:, None]).astype(np.float32)
+    psi = np.zeros((K, n_blk + 1), dtype=np.float64)
+    if phase_mode == "wiener":
+        d_k = d_per_order * orders
+        psi = np.cumsum(
+            rng.standard_normal((K, n_blk + 1)) * np.sqrt(2 * d_k * dt)[:, None], axis=1
+        )
+    elif phase_mode == "bounded":
+        s_k = np.sqrt(s2_per_order * orders)
+        r_p = math.exp(-dt / tau_c)
+        noise = rng.standard_normal((K, n_blk + 1)) * s_k[:, None] * math.sqrt(1 - r_p**2)
+        noise[:, 0] = rng.standard_normal(K) * s_k
+        psi = np.empty_like(noise)
+        psi[:, 0] = noise[:, 0]
+        for i in range(1, n_blk + 1):
+            psi[:, i] = r_p * psi[:, i - 1] + noise[:, i]
+    elif phase_mode != "none":
+        raise ValueError(phase_mode)
+    psi = psi.astype(np.float32)
+    w = (np.arange(hop, dtype=np.float32) / hop)[None, None, :]
+    out = np.empty((C, n_pad), dtype=np.float32)
+    B = max(1, (1 << 22) // (K * hop))
+    for b0 in range(0, n_blk, B):
+        b1 = min(n_blk, b0 + B)
+        ang = (2 * np.pi * (orders[None, :, None] * frac[b0:b1])).astype(np.float32)
+        if phase_mode != "none":
+            ang = ang + psi.T[b0:b1, :, None] * (1 - w) + psi.T[b0 + 1 : b1 + 1, :, None] * w
+        zr, zi = np.cos(ang), np.sin(ang)
+        if env is not None:
+            ee = env.T[b0:b1, :, None] * (1 - w) + env.T[b0 + 1 : b1 + 1, :, None] * w
+            zr *= ee
+            zi *= ee
+        zr = zr.transpose(1, 0, 2).reshape(K, -1)
+        zi = zi.transpose(1, 0, 2).reshape(K, -1)
+        out[:, b0 * hop : b1 * hop] = cr @ zr - ci @ zi
+    return out[:, :n]
+
+
 def synthetic_rotor(
-    seg_real: np.ndarray, rate: float, seed: int = 0
+    seg_real: np.ndarray, rate: float, seed: int = 0, phase_mode: str = "none"
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """The fitted single-rotor model of this recording (OU shaft from the width
     law, per-order amplitudes per microphone, measured per-order amplitude
@@ -631,13 +725,12 @@ def synthetic_rotor(
     is an exact multiple of one shaft angle."""
     sys.path.insert(0, str(ROOT / "notebooks"))
     import single_rotor_lab as lab
-    from experiments.static_rig import single_rotor as SR
 
     fit = lab.load_ou(RECORDING)
     assert fit is not None
     am = lab.am_per_order(RECORDING, fit.orders.size)
     n = seg_real.shape[-1]
-    lines = SR.synthesise(fit, int(FS), n, seed=seed, am=am).astype(np.float64)
+    lines = render_rotor(fit, n, seed, am, phase_mode=phase_mode).astype(np.float64)
     # level match: the k = 2..10 line powers of mic 2 real vs synthetic
     f, pr = signal.welch(seg_real, fs=FS, nperseg=8192, axis=-1)
     _, ps = signal.welch(lines, fs=FS, nperseg=8192, axis=-1)
@@ -657,6 +750,7 @@ def synthetic_rotor(
         "am_sigma2_median": None if am is None else float(np.median(am[0])),
         "am_gamma_median": None if am is None else float(np.median(am[1])),
         "line_gain_db_per_mic": (20 * np.log10(gain)).round(2).tolist(),
+        "phase_mode": phase_mode,
     }
     return lines + noise, info
 
@@ -703,6 +797,12 @@ def main() -> None:
     rows_s = analyse(synth, "synthetic", rate, mic=mic)
     (OUT / "synthetic" / "model.json").write_text(json.dumps(info))
     print("synthetic rate", rows_s["rate"])
+    for mode in ("wiener", "bounded"):
+        synth_m, info_m = synthetic_rotor(seg, rate, phase_mode=mode)
+        print(f"synthetic ({mode}):", info_m)
+        rows_m = analyse(synth_m, f"synthetic_{mode}", rate, mic=mic)
+        (OUT / f"synthetic_{mode}" / "model.json").write_text(json.dumps(info_m))
+        print(f"synthetic ({mode}) rate", rows_m["rate"])
 
 
 if __name__ == "__main__":

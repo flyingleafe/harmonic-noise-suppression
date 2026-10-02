@@ -210,6 +210,47 @@ difference is stark, and in the expected direction: the procedure does not manuf
 per-order phase noise from shaft wander, amplitude jitter or a coloured floor. What it finds on
 the real recording is in the real recording.
 
+## Bounded or unbounded? Two planted per-order phase processes
+
+The needle in @fig-shapes says the per-order phase is bounded; a direct test is to plant each
+kind into the synthetic rotor and read it with the same procedure. Two more renders, identical
+to the control except for an independent phase $\psi_k(t)$ on every order:
+
+- **unbounded**: a random walk, $\mathrm{Var}[\Delta\psi_k(\tau)] = 2D_k\tau$ with
+  $D_k = 0.12\,k$ rad²/s — sized so that order 10 reads ≈ 1.2 rad² at 500 ms, as the real one does;
+- **bounded**: a stationary OU phase of variance $\sigma_k^2 = 0.1\,k$ rad² and correlation time
+  0.5 s, so $\mathrm{Var}[\Delta\psi_k(\tau)] = 2\sigma_k^2(1 - e^{-\tau/0.5})$ — the same
+  1.2 rad² at order 10 and 500 ms, then saturating at 2 rad².
+
+![Per-order term against lag for orders 4, 10, 20: the real recording (black) against the control (green), the planted walk (red) and the planted bounded phase (blue), with the planted laws dashed. Crosses: raw read at the estimator ceiling — the subtraction is meaningless there.](../../results/noise_v2/decoherence/one_rotor/bounded_vs_wiener.png){#fig-bounded}
+
+| k | τ | real | walk read | walk planted | bounded read | bounded planted |
+|---|---|---|---|---|---|---|
+| 4 | 0.5 s | 0.07 | 0.27 | 0.48 | 0.25 | 0.51 |
+| 4 | 2 s | 0.21 | 2.22 | 1.92 | 0.82 | 0.79 |
+| 10 | 0.2 s | 0.48 | 0.34 | 0.48 | 0.45 | 0.66 |
+| 10 | 0.5 s | 1.17 | 0.92 | 1.20 | 0.90 | 1.26 |
+| 10 | 1 s | 1.62 | ceiling | 2.40 | 1.69 | 1.73 |
+| 10 | 2 s | 2.03 | ceiling | 4.80 | ceiling | 1.96 |
+| 20 | 0.5 s | 1.44 | ceiling | 2.40 | ceiling | 2.53 |
+
+: Reads of the two planted processes against the real recording, rad². {#tbl-planted}
+
+Three things to take from it. The procedure *recovers* what is planted — at 0.6–0.8× of the
+planted value at mid lags and ≈ 1× at long lags, which is the recovery ratio the 12-recording
+controls reported — and it recovers the *shape*: the walk keeps doubling per doubling of τ
+(order 4: 0.27 → 0.84 → 2.22 from 0.5 to 2 s), the bounded phase bends over (0.25 → 0.60 →
+0.82). The real order 10 bends: 0.48 → 1.17 → 1.62 → 2.03 from 0.2 to 2 s (×2.4, ×1.4, ×1.25),
+and sits on the bounded curve, not the walk. And in the frequency domain the planted walk leaves
+**no needle** at any order ≥ 20 (`synthetic_wiener/line_shapes.png`), while the real recording
+keeps one up to order 42.
+
+What a 30 s record cannot rule out: a walk slow enough to stay under the bounded term over 2 s —
+at order 10 that is $D \lesssim 0.05$ rad²/s, a line width of a few mHz. Order 4's small term
+does grow from 1 to 2 s (0.10 → 0.21) and could be either a very slow walk or a bounded process
+with a correlation time beyond 2 s. "Bounded" is therefore the reading on the 0.05–2 s range
+where the data decide, plus the needles; it is not a proof for all time scales.
+
 ## Is it amplitude modulation in disguise?
 
 Unsteady blade loading certainly modulates the lines' amplitudes. Could that be what the phase
@@ -248,8 +289,9 @@ carry the aerodynamic unsteadiness. **Yes — phase coherence is much better at 
   order carries its own phase motion, independent across orders, growing with order: roughly
   0.1 rad² at order 10 and 0.5 rad² at order 20–40 over 50 ms, saturating towards full
   decorrelation over 0.5–2 s at orders ≥ 12.
-- It is **bounded**, not a random walk: a needle locked to the shaft survives at every order up
-  to 40. In model terms it is a per-order pedestal with a coherent core whose share falls with
+- It is **bounded** on the 0.05–2 s range the record resolves, not a random walk: the lag law
+  bends where a planted walk keeps doubling (@fig-bounded), and a needle locked to the shaft
+  survives at every order up to 42 where a planted walk leaves none. In model terms it is a per-order pedestal with a coherent core whose share falls with
   order — the `am`-type term — not an independent Wiener width per line. The width of the
   pedestal (a few Hz) is far below an STFT bin, so the training-stream front-ends never see it;
   phase-coherent tracking over > 100 ms does.
