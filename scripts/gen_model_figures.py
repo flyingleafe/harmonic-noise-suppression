@@ -256,6 +256,304 @@ def fig_noise_hyperprior(n: int = 4) -> None:
     save(fig, "gen_noise_hyperprior")
 
 
+# ── fitted rigs ─────────────────────────────────────────────────────────────
+
+BENCH_FITS = ROOT / "results/noise_v2/rounds/round3/fits"
+FLIGHT_FITS = ROOT / "results/noise_v3/fits_r4"
+SPEED_LAWS = ROOT / "results/static_rig/single_rotor/speed_laws.json"
+SINGLES = ROOT / "results/static_rig/single_rotor/dregon_singles.json"
+MOTOR_ORDER_STEP = 21  # 3 p for the DREGON motors (p = 7 pole pairs)
+
+
+def _load_json(path: Path) -> dict:
+    import json
+
+    with open(path) as fh:
+        return json.load(fh)
+
+
+def _floor_curve_db(floor: dict, freqs: np.ndarray, *, v3: bool) -> np.ndarray:
+    """The fitted floor shape ``F(f)`` in dB at the reference speed (16 kHz grid units)."""
+    from data_processing.noise_model.floor import floor_geometry
+    from data_processing.noise_model.spectrum import floor_ctrl_hz, floor_shape_db
+
+    ctrl_hz = floor_ctrl_hz(SR)
+    shape, tilt_oct = floor_geometry(freqs, ctrl_hz)
+    z = np.asarray(floor["floor_shape_z"], dtype=np.float64)
+    if v3:
+        ctrl_db = floor_shape_db(z, sr=SR, scale_db=float(floor["floor_shape_sd_db"]))
+        tilt = 0.0
+    else:
+        ctrl_db = floor_shape_db(z, sr=SR)
+        tilt = float(floor.get("floor_tilt_db_oct", 0.0))
+    return float(floor["floor_mean_db"]) + shape @ ctrl_db + tilt * tilt_oct
+
+
+def _dregon_ambient_db(freqs: np.ndarray) -> np.ndarray:
+    """Rotors-off ambient of the single-rotor recordings at 80 % throttle, in the
+    units of a 16 kHz support periodogram (``|rfft(x w)|^2 / sum w^2``), smoothed
+    in 1/6-octave bands and averaged over the non-windy microphones and the
+    four recordings."""
+    import importlib.util
+
+    from scipy import signal
+
+    spec = importlib.util.spec_from_file_location(
+        "decoh", ROOT / "scripts" / "noise_v2_order_decoherence.py"
+    )
+    assert spec is not None and spec.loader is not None
+    decoh = importlib.util.module_from_spec(spec)
+    sys.modules["decoh"] = decoh
+    spec.loader.exec_module(decoh)
+    singles = _load_json(SINGLES)["recordings"]
+    want = {f"motor_Motor{m}_80" for m in (1, 2, 3, 4)}
+    curves = []
+    for rid, a in decoh.dregon_motor_audio(lambda r: r in want):
+        fs = float(decoh.FS_NATIVE)
+        mics = [m for m in range(a.shape[0]) if m not in set(singles[rid]["wind_mics"])]
+        act0, _ = decoh.active_window(a)
+        off = a[mics, : max(int(act0 - 0.5 * fs), int(fs))]
+        off = off - off.mean(axis=1, keepdims=True)
+        x = signal.resample_poly(off, SR, int(round(fs)), axis=-1)
+        n_fft = 8192
+        w = np.hanning(n_fft + 1)[:n_fft]
+        n_blk = x.shape[-1] // n_fft
+        acc = np.zeros(n_fft // 2 + 1)
+        for b in range(n_blk):
+            blk = x[:, b * n_fft : (b + 1) * n_fft] * w
+            acc += np.mean(np.abs(np.fft.rfft(blk, axis=-1)) ** 2, axis=0)
+        acc /= n_blk * float(np.sum(w**2))
+        f = np.fft.rfftfreq(n_fft, 1.0 / SR)
+        out = np.empty_like(freqs)
+        for i, fc in enumerate(freqs):
+            sel = (f >= fc / 2 ** (1 / 12)) & (f <= fc * 2 ** (1 / 12))
+            out[i] = np.median(acc[sel]) if sel.any() else np.nan
+        curves.append(10 * np.log10(np.maximum(out, 1e-30)))
+    return np.nanmean(np.array(curves), axis=0)
+
+
+def _per_rotor_exponents() -> tuple[list[float], list[float]]:
+    """``(alpha_i, beta_i)`` per DREGON rotor from the single-rotor ladders:
+    the median exponent over the even aerodynamic orders 4-40 and over the
+    motor orders 63 and 84."""
+    laws = _load_json(SPEED_LAWS)["alpha_k_per_motor"]
+    alpha, beta = [], []
+    for m in ("1", "2", "3", "4"):
+        a = np.asarray(laws[m], dtype=np.float64)
+        k = np.arange(1, len(a) + 1)
+        even = (k % 2 == 0) & (k >= 4) & (k <= 40) & (k % MOTOR_ORDER_STEP != 0)
+        motor = np.isin(k, [63, 84])
+        alpha.append(float(np.median(a[even])))
+        beta.append(float(np.median(a[motor])))
+    return alpha, beta
+
+
+def _dregon_single_rotor_floor_db(freqs: np.ndarray) -> np.ndarray:
+    """Measured floor between the lines of the single-rotor supports at 80 %
+    throttle: the 20th percentile of the support periodogram in 1/6-octave bands
+    (divided by 0.223, the 20th percentile of a unit exponential), averaged over
+    the non-windy microphones and the four rotors."""
+    singles = _load_json(SINGLES)["recordings"]
+    curves = []
+    for m in (1, 2, 3, 4):
+        rid = f"motor_Motor{m}_80"
+        z = np.load(SUPPORTS / f"bench_dregon_{rid[6:]}.npz", allow_pickle=True)
+        power = np.asarray(z["power"])[:, 0, :]
+        f = np.asarray(z["freqs_hz"])
+        mics = [i for i in range(power.shape[0]) if i not in set(singles[rid]["wind_mics"])]
+        out = np.empty_like(freqs)
+        for i, fc in enumerate(freqs):
+            sel = (f >= fc / 2 ** (1 / 12)) & (f <= fc * 2 ** (1 / 12))
+            out[i] = np.mean(np.percentile(power[mics][:, sel], 20, axis=1)) / 0.223
+        curves.append(10 * np.log10(np.maximum(out, 1e-30)))
+    return np.mean(np.array(curves), axis=0)
+
+
+def fig_noise_rigs() -> None:
+    bench = [_load_json(BENCH_FITS / f"bench_dregon_Motor{m}_80__bench.json") for m in (1, 2, 3, 4)]
+    dre = _load_json(FLIGHT_FITS / "dregon_room2_floor__flight_v3.json")
+    cru = _load_json(FLIGHT_FITS / "michaels_fly125_cruise__flight_v3.json")
+    stb = _load_json(FLIGHT_FITS / "michaels_fly125_standby__flight_v3.json")
+    alpha, beta = _per_rotor_exponents()
+    freqs = np.geomspace(30.0, 7900.0, 400)
+    K_DRE = 88  # orders below the 8 kHz Nyquist at the DREGON reference speed
+
+    fig, axes = plt.subplots(2, 3, figsize=(10.5, 5.6))
+    (ax_pd, ax_fd, ax_gd), (ax_pm, ax_fm, ax_gm) = axes
+
+    def motor_ticks(ax, k_max):
+        for k in range(MOTOR_ORDER_STEP, k_max + 1, MOTOR_ORDER_STEP):
+            ax.axvline(k, color="0.75", lw=0.6, ls=":", zorder=0)
+
+    # (a) DREGON comb profiles: single-rotor fits (80 %) and the flight fit
+    for i, (b, c) in enumerate(zip(bench, COLOURS)):
+        p = np.asarray(b["params"]["profile"]["profile_db"])[0][:K_DRE]
+        ax_pd.plot(
+            np.arange(1, len(p) + 1),
+            p,
+            ".",
+            ms=3,
+            color=c,
+            alpha=0.85,
+            label=rf"rotor {i + 1}: $\alpha_i$={alpha[i]:.1f}, $\beta_i$={beta[i]:.1f}",
+        )
+    pf = np.asarray(dre["params"]["profile"]["profile_db"])
+    for i, c in enumerate(COLOURS):
+        ax_pd.plot(np.arange(1, pf.shape[1] + 1), pf[i], "-", lw=0.9, color=c, alpha=0.6)
+    motor_ticks(ax_pd, K_DRE)
+    ax_pd.set_title("(a) DREGON: comb profiles $p_{ik}$", fontsize=9)
+    ax_pd.set_ylabel("line power at $r_{\\mathrm{ref}}$ (dB)")
+    ax_pd.legend(
+        fontsize=6.5,
+        loc="upper right",
+        frameon=False,
+        title="dots: single-rotor fits; lines: flight fit",
+        title_fontsize=6.5,
+    )
+    ax_pd.set_xlim(0, K_DRE + 1)
+    ax_pd.set_ylim(-100, -15)
+
+    # (b) Matrice 100 comb profiles: cruise and standby flight fits
+    from matplotlib.lines import Line2D
+
+    for fit, ls in ((cru, "-"), (stb, "--")):
+        pf = np.asarray(fit["params"]["profile"]["profile_db"])
+        for i, c in enumerate(COLOURS):
+            ax_pm.plot(np.arange(1, pf.shape[1] + 1), pf[i], ls, lw=0.9, color=c, alpha=0.8)
+    motor_ticks(ax_pm, 81)
+    ax_pm.set_title("(d) Matrice 100: comb profiles $p_{ik}$", fontsize=9)
+    ax_pm.legend(
+        handles=[
+            Line2D([], [], color="0.3", ls="-", label="cruise, rotors 1-4"),
+            Line2D([], [], color="0.3", ls="--", label="standby, rotors 1-4"),
+        ],
+        fontsize=6.5,
+        loc="upper right",
+        frameon=False,
+        title=r"$\alpha_i$, $\beta_i$ pinned at the prior centres",
+        title_fontsize=6.5,
+    )
+    ax_pm.set_xlim(0, 82)
+    ax_pm.set_ylim(-115, -15)
+    for ax in (ax_pd, ax_pm):
+        ax.set_xlabel("order $k$")
+
+    # (c) DREGON floor: flight fit F(f), measured single-rotor floor, measured ambient
+    ax_fd.semilogx(
+        freqs,
+        _floor_curve_db(dre["params"]["floor"], freqs, v3=True),
+        color="k",
+        lw=1.4,
+        label="flight fit $F(f)$ (room 2, four rotors)",
+    )
+    ax_fd.semilogx(
+        freqs,
+        _dregon_single_rotor_floor_db(freqs),
+        color="tab:blue",
+        lw=1.0,
+        label="measured floor, one rotor at 80 %",
+    )
+    ax_fd.semilogx(
+        freqs,
+        _dregon_ambient_db(freqs),
+        color="0.45",
+        lw=1.0,
+        ls="--",
+        label="measured ambient $N(f)$ (rotors off)",
+    )
+    ax_fd.set_title("(b) DREGON: floor shape $F(f)$ and ambient", fontsize=9)
+    ax_fd.set_ylabel("power density (dB)")
+    ax_fd.set_ylim(-85, -5)
+    ax_fd.legend(fontsize=6.5, loc="upper right", frameon=False)
+
+    # (d) Matrice 100 floor: cruise and standby
+    ax_fm.semilogx(
+        freqs, _floor_curve_db(cru["params"]["floor"], freqs, v3=True), "k-", lw=1.4, label="cruise"
+    )
+    ax_fm.semilogx(
+        freqs,
+        _floor_curve_db(stb["params"]["floor"], freqs, v3=True),
+        "k--",
+        lw=1.2,
+        label="standby",
+    )
+    ax_fm.set_title("(e) Matrice 100: floor shape $F(f)$", fontsize=9)
+    ax_fm.legend(fontsize=6.5, loc="upper right", frameon=False)
+    for ax in (ax_fd, ax_fm):
+        ax.set_xlabel("frequency (Hz)")
+        ax.set_xlim(30, 7900)
+
+    # (e) DREGON pedestal rate gamma_k; shaft parameters in the legend
+    for i, (b, c) in enumerate(zip(bench, COLOURS)):
+        g = np.asarray(b["params"]["gamma_hz"])[0][:K_DRE]
+        ax_gd.semilogy(
+            np.arange(1, len(g) + 1),
+            g,
+            ".",
+            ms=3,
+            color=c,
+            alpha=0.85,
+            label=rf"rotor {i + 1}: $\sigma_\nu$={b['params']['sigma_nu']:.2f}, "
+            rf"$\lambda$={b['params']['lam']:.2f}",
+        )
+    gf = np.asarray(dre["params"]["gamma_hz"])
+    for i, c in enumerate(COLOURS):
+        ax_gd.semilogy(
+            np.arange(1, gf.shape[1] + 1),
+            gf[i],
+            "-",
+            lw=0.9,
+            color=c,
+            alpha=0.6,
+            label=rf"flight fit: $\sigma_\nu$={dre['params']['sigma_nu']:.1f}, "
+            rf"$\lambda$={dre['params']['lam']:.0f}"
+            if i == 0
+            else None,
+        )
+    ax_gd.set_title(
+        r"(c) DREGON: pedestal rate $\gamma_k$ and shaft $(\sigma_\nu, \lambda)$", fontsize=9
+    )
+    ax_gd.set_ylabel(r"$\gamma_k$ (Hz)")
+    ax_gd.set_ylim(1e-3, 3e5)
+    ax_gd.legend(
+        fontsize=6.5,
+        loc="upper left",
+        frameon=False,
+        ncol=1,
+        title=r"$\sigma_\nu$ in rad/s, $\lambda$ in 1/s",
+        title_fontsize=6.5,
+    )
+    ax_gd.set_xlim(0, K_DRE + 1)
+
+    # (f) Matrice 100 pedestal rate
+    for fit, ls, tag in ((cru, "-", "cruise"), (stb, "--", "standby")):
+        gf = np.asarray(fit["params"]["gamma_hz"])
+        for i, c in enumerate(COLOURS):
+            ax_gm.semilogy(
+                np.arange(1, gf.shape[1] + 1),
+                gf[i],
+                ls,
+                lw=0.9,
+                color=c,
+                label=rf"{tag}: $\sigma_\nu$={fit['params']['sigma_nu']:.1f}, "
+                rf"$\lambda$={fit['params']['lam']:.0f}"
+                if i == 0
+                else None,
+            )
+    ax_gm.set_title(r"(f) Matrice 100: $\gamma_k$ and $(\sigma_\nu, \lambda)$", fontsize=9)
+    ax_gm.set_ylim(1e-3, 3e5)
+    ax_gm.legend(fontsize=6.5, loc="upper left", frameon=False)
+    ax_gm.set_xlim(0, 82)
+    for ax in (ax_gd, ax_gm):
+        ax.set_xlabel("order $k$")
+    ax_gm.set_ylabel(r"$\gamma_k$ (Hz)")
+    ax_fm.set_ylabel("power density (dB)")
+    ax_pm.set_ylabel("line power at $r_{\\mathrm{ref}}$ (dB)")
+
+    fig.tight_layout(h_pad=0.6, w_pad=0.6)
+    save(fig, "gen_noise_rigs")
+
+
 # ── tables ──────────────────────────────────────────────────────────────────
 
 
@@ -716,7 +1014,7 @@ def tables() -> None:
 
 
 def main() -> None:
-    which = sys.argv[1:] or ["tables", "traj", "traj_other", "hyper", "noise", "bank"]
+    which = sys.argv[1:] or ["tables", "traj", "traj_other", "hyper", "noise", "bank", "rigs"]
     if "tables" in which:
         tables()
     if "traj" in which:
@@ -733,6 +1031,8 @@ def main() -> None:
         fig_noise_real_vs_sampled()
     if "bank" in which:
         fig_noise_hyperprior()
+    if "rigs" in which:
+        fig_noise_rigs()
 
 
 if __name__ == "__main__":
