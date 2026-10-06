@@ -119,14 +119,19 @@ def highpass(
     return signal.sosfiltfilt(sos, x, axis=-1)
 
 
-def label_residual(x: np.ndarray, fs: float, label_fs: float = LABEL_RATE_HZ) -> np.ndarray:
+def label_residual(
+    x: np.ndarray, fs: float, label_fs: float = LABEL_RATE_HZ, ret_back: bool = False
+) -> np.ndarray:
     """``x`` minus ``x`` resampled to the label rate and back (linear both ways)."""
     n = x.shape[-1]
     t = np.arange(n) / fs
     tl = np.arange(0.0, t[-1], 1.0 / label_fs)
     down = np.stack([np.interp(tl, t, row) for row in np.atleast_2d(x)])
     back = np.stack([np.interp(t, tl, row) for row in down])
-    return x - (back[0] if x.ndim == 1 else back)
+    res = x - (back[0] if x.ndim == 1 else back)
+    if ret_back:
+        return res, back
+    return res
 
 
 def acf(x: np.ndarray, fs: float, max_lag_s: float = 0.5) -> tuple[np.ndarray, np.ndarray]:

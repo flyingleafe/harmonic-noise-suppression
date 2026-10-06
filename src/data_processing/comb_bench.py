@@ -88,11 +88,10 @@ def rotor_tracks_ou(rng, centre, spread, excursion, n_rotors, t):
     not represent.
     """
     dur = float(t[-1] - t[0]) + 1.0 / TRAJ_FS
-    w = rps_synthesis.generate(dur, TRAJ_FS, aggressiveness=max(excursion / 1.5, 1e-3),
-                               rng=rng)
+    w = rps_synthesis.generate(dur, TRAJ_FS, aggressiveness=max(excursion / 1.5, 1e-3), rng=rng)
     w = w[:n_rotors] if w.shape[0] >= n_rotors else np.repeat(w, n_rotors, 0)[:n_rotors]
     mid = w.mean(axis=0, keepdims=True)
-    off = w - mid                                   # differential part
+    off = w - mid  # differential part
     # SPREAD IS THE SEPARATION OF THE ROTORS' MEANS, and the wander around those
     # means is kept at its calibrated amplitude regardless. Rescaling the
     # instantaneous offsets instead would make `spread=0` mean four LITERALLY
@@ -107,9 +106,17 @@ def rotor_tracks_ou(rng, centre, spread, excursion, n_rotors, t):
 
 
 def comb_clip(
-    seed: int, centre: float = 75.0, spread: float = 11.0, excursion: float = 1.5,
-    n_rotors: int = 4, sr: int = 16000, dur_s: float = 8.0, hop: int = 512,
-    n_harmonics: int = 100, noise_rms: float = 0.01, trajectory: str = "ou",
+    seed: int,
+    centre: float = 75.0,
+    spread: float = 11.0,
+    excursion: float = 1.5,
+    n_rotors: int = 4,
+    sr: int = 16000,
+    dur_s: float = 8.0,
+    hop: int = 512,
+    n_harmonics: int = 100,
+    noise_rms: float = 0.01,
+    trajectory: str = "ou",
 ):
     """One pure static-comb clip: ``(audio, rps, ft)``.
 
@@ -124,8 +131,9 @@ def comb_clip(
     rng = np.random.default_rng(seed)
     n_t = int(round(sr * dur_s))
     t = np.arange(n_t) / sr
-    prof = sample_profile(rng, ProfileRanges(), n_harmonics=n_harmonics,
-                          ref_rps=centre, sample_rate=sr)
+    prof = sample_profile(
+        rng, ProfileRanges(), n_harmonics=n_harmonics, ref_rps=centre, sample_rate=sr
+    )
     a_k = np.asarray(prof.a_k, dtype=np.float64)
     if trajectory == "ou":
         tracks = list(rotor_tracks_ou(rng, centre, spread, excursion, n_rotors, t))
@@ -134,9 +142,12 @@ def comb_clip(
         tracks = []
         for i in range(n_rotors):
             ph = rng.uniform(0.0, 2.0 * np.pi, 2)
-            tracks.append(centre + offs[i]
-                          + excursion * np.sin(2 * np.pi * 0.11 * t + ph[0])
-                          + 0.33 * excursion * np.sin(2 * np.pi * 0.37 * t + ph[1]))
+            tracks.append(
+                centre
+                + offs[i]
+                + excursion * np.sin(2 * np.pi * 0.11 * t + ph[0])
+                + 0.33 * excursion * np.sin(2 * np.pi * 0.37 * t + ph[1])
+            )
     else:
         raise ValueError(f"unknown trajectory {trajectory!r}")
     audio = np.zeros(n_t)

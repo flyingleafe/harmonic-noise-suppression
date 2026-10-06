@@ -201,6 +201,52 @@ def _istft(Z: np.ndarray, sample_rate: int, target_len: int) -> np.ndarray:
 # ── The six augmentations ───────────────────────────────────────────────────
 
 
+def frequency_scale(
+    audio: np.ndarray,
+    label: np.ndarray,
+    alpha: float,
+    *,
+    sample_rate: int,
+    label_rate_hz: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    assert alpha > 0
+    assert sample_rate > 0
+    assert label_rate_hz > 0
+    # Playback at alpha x speed: all frequencies (and the comb) scale by alpha,
+    # duration scales by 1/alpha. soxr takes (T, C) float32 and float rates.
+    #
+    # The output keeps its NATURAL scaled length (T/alpha) — no padding.
+    # The sourcing pipeline oversamples the noise window by the worst-case
+    # compression factor (``source_factor`` below, wired into
+    # ``_generate_rps_sample``), so for every alpha <= alpha_high the scaled
+    # chunk still covers the training duration and the downstream
+    # ``target_len`` extraction CROPS instead of zero-padding. (The previous
+    # fit-to-input-length behaviour zero-padded audio AND zeroed the label
+    # tail whenever alpha > 1 — training saw silence+0-RPS tails on roughly
+    # half the fires.)
+    import soxr
+
+    T = audio.shape[-1]
+    y = soxr.resample(np.ascontiguousarray(audio.T), float(sample_rate), sample_rate / alpha).T
+    out = np.ascontiguousarray(np.asarray(y, dtype=np.float32))
+    T_out = out.shape[-1]
+
+    # Labels on the scaled time base, covering the full scaled duration:
+    # r_new(t) = alpha * r_old(alpha * t).
+    L = label.shape[-1]
+    t_label_src = np.arange(L, dtype=np.float64) / float(label_rate_hz)
+    L_out = max(1, int(np.ceil(T_out / float(sample_rate) * float(label_rate_hz))))
+    t_label_out = np.arange(L_out, dtype=np.float64) / float(label_rate_hz)
+    dur = T / float(sample_rate)
+    src_t = np.minimum(alpha * t_label_out, dur)
+    new_label = np.empty((label.shape[0], L_out), dtype=np.float32)
+    for r in range(label.shape[0]):
+        new_label[r] = (alpha * np.interp(src_t, t_label_src, label[r].astype(np.float64))).astype(
+            np.float32
+        )
+    return out, new_label
+
+
 def _freq_scale(
     audio: np.ndarray,
     label: np.ndarray,
@@ -210,8 +256,6 @@ def _freq_scale(
     sample_rate: int,
     label_rate_hz: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    import soxr
-
     alpha_low = float(params.get("alpha_low", 0.75))
     alpha_high = float(params.get("alpha_high", 1.3))
     # `rps_max` (optional; None = the historical behaviour) is a CEILING ON THE
@@ -231,37 +275,9 @@ def _freq_scale(
     alpha = float(rng.uniform(alpha_low, max(alpha_low, alpha_cap)))
     if alpha_cap < alpha_low:
         alpha = 1.0
-    T = audio.shape[-1]
-    # Playback at alpha x speed: all frequencies (and the comb) scale by alpha,
-    # duration scales by 1/alpha. soxr takes (T, C) float32 and float rates.
-    #
-    # The output keeps its NATURAL scaled length (T/alpha) — no padding.
-    # The sourcing pipeline oversamples the noise window by the worst-case
-    # compression factor (``source_factor`` below, wired into
-    # ``_generate_rps_sample``), so for every alpha <= alpha_high the scaled
-    # chunk still covers the training duration and the downstream
-    # ``target_len`` extraction CROPS instead of zero-padding. (The previous
-    # fit-to-input-length behaviour zero-padded audio AND zeroed the label
-    # tail whenever alpha > 1 — training saw silence+0-RPS tails on roughly
-    # half the fires.)
-    y = soxr.resample(np.ascontiguousarray(audio.T), float(sample_rate), sample_rate / alpha).T
-    out = np.ascontiguousarray(np.asarray(y, dtype=np.float32))
-    T_out = out.shape[-1]
-
-    # Labels on the scaled time base, covering the full scaled duration:
-    # r_new(t) = alpha * r_old(alpha * t).
-    L = label.shape[-1]
-    t_label_src = np.arange(L, dtype=np.float64) / float(label_rate_hz)
-    L_out = max(1, int(np.ceil(T_out / float(sample_rate) * float(label_rate_hz))))
-    t_label_out = np.arange(L_out, dtype=np.float64) / float(label_rate_hz)
-    dur = T / float(sample_rate)
-    src_t = np.minimum(alpha * t_label_out, dur)
-    new_label = np.empty((label.shape[0], L_out), dtype=np.float32)
-    for r in range(label.shape[0]):
-        new_label[r] = (alpha * np.interp(src_t, t_label_src, label[r].astype(np.float64))).astype(
-            np.float32
-        )
-    return out, new_label
+    return frequency_scale(
+        audio, label, alpha, sample_rate=sample_rate, label_rate_hz=label_rate_hz
+    )
 
 
 def freq_scale_source_factor(

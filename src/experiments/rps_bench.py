@@ -484,8 +484,8 @@ def _cached_live_pred(
 
 def overlay(
     exp: str,
-    part_name: str,
-    i: int,
+    target: str | td.Frame,
+    i: int | None = None,
     *,
     source: str = "auto",
     device: str = "cpu",
@@ -495,6 +495,12 @@ def overlay(
     dump_root: Path = DUMP_ROOT,
 ) -> td.Frame:
     """One model on one frame: ``audio`` + ``rps`` (label) + ``rps_pred``, ready for ``dwym``.
+
+    ``target`` is either a part name, with ``i`` the frame index in it, or a
+    raw ``td.Frame`` (``i`` ignored), which the checkpoint is run on live and
+    uncached — ``source``, ``cache`` and ``dump_root`` do not apply to it. A
+    raw frame must be a model-input frame like a part's: ``mixture`` (what the
+    codecs and the deployed decoder read) and the ``rps`` label.
 
     ``rps_pred`` is PIT-aligned to the label and ``meta`` carries the
     experiment, the checkpoint, the readout, the part, the frame index, the
@@ -511,34 +517,46 @@ def overlay(
     ``"dump"``  the dump, and ``ValueError`` when ``readout != "peak"``;
     ``"live"``  the checkpoint, always.
     """
-    if source == "dump" and readout != "peak":
-        raise ValueError(
-            f'source="dump" holds peak-decoded predictions only, but readout={readout!r}; '
-            'pass readout="peak" for the dumped array or source="live"/"auto" to run '
-            f"{exp} through its own decoder"
-        )
-    frame = part(part_name)[i]
-    pred = None
-    if source in ("auto", "dump") and readout == "peak":
-        pred = _dump_pred(exp, part_name, i, dump_root)
-        if pred is None and source == "dump":
-            raise FileNotFoundError(f"{dump_root / part_name / exp}.npz")
-    if pred is None:
-        pred = (
-            _cached_live_pred(exp, part_name, i, frame, device, ckpt, readout)
-            if cache
-            else _live_pred(exp, frame, device, ckpt, readout)
-        )
+    if isinstance(target, td.Frame):
+        missing = [k for k in ("mixture", "rps") if k not in target]
+        if missing:
+            raise KeyError(f"a raw frame needs {missing} (model input + label)")
+        frame, part_name = target, None
+        pred = _live_pred(exp, frame, device, ckpt, readout)
+    else:
+        if i is None:
+            raise ValueError(f"part {target!r} needs a frame index i")
+        part_name = target
+        if source == "dump" and readout != "peak":
+            raise ValueError(
+                f'source="dump" holds peak-decoded predictions only, but readout={readout!r}; '
+                'pass readout="peak" for the dumped array or source="live"/"auto" to run '
+                f"{exp} through its own decoder"
+            )
+        frame = part(part_name)[i]
+        pred = None
+        if source in ("auto", "dump") and readout == "peak":
+            pred = _dump_pred(exp, part_name, i, dump_root)
+            if pred is None and source == "dump":
+                raise FileNotFoundError(f"{dump_root / part_name / exp}.npz")
+        if pred is None:
+            pred = (
+                _cached_live_pred(exp, part_name, i, frame, device, ckpt, readout)
+                if cache
+                else _live_pred(exp, frame, device, ckpt, readout)
+            )
     gt = np.asarray(get_array(frame, "rps"), dtype=np.float64)
     pred = align_rps_to_gt(pred, gt)
-    meta = meta_dict(frame)
+    meta = meta_dict(frame) if "meta" in frame else {}
     meta.update(
         experiment=exp,
         ckpt=ckpt,
         readout=readout,
         part=part_name,
-        index=i,
-        flight=str(meta.get("recording_id", meta.get("sample_id", i // 8))),
+        index=i if part_name is not None else None,
+        flight=str(
+            meta.get("recording_id", meta.get("sample_id", i // 8 if i is not None else ""))
+        ),
         mae=pit_mae(pred, gt),
     )
     return td.Frame(
@@ -573,8 +591,11 @@ def model_specs(models: ModelSpec, ckpt: str = "best") -> list[tuple[str, str, s
     return [(str(exp), str(exp), ckpt) for exp in models]
 
 
-def compare(models: ModelSpec, part_name: str, i: int, **kw: Any) -> td.Frame:
+def compare(models: ModelSpec, target: str | td.Frame, i: int | None = None, **kw: Any) -> td.Frame:
     """Several models on ONE frame: ``audio`` + ``rps`` + one aligned entry per model.
+
+    ``target`` / ``i`` are :func:`overlay`'s: a part name and frame index, or
+    a raw ``td.Frame`` every model runs on live and uncached.
 
     Draw it with :func:`show`; ``meta.mae`` maps each label to its PIT MAE,
     ``meta.ckpt`` each label to the checkpoint it was read from, and
@@ -587,7 +608,7 @@ def compare(models: ModelSpec, part_name: str, i: int, **kw: Any) -> td.Frame:
     ckpts: dict[str, str] = {}
     base_meta: dict[str, Any] = {}
     for label, exp, exp_ckpt in specs:
-        one = overlay(exp, part_name, i, ckpt=exp_ckpt, **kw)
+        one = overlay(exp, target, i, ckpt=exp_ckpt, **kw)
         entries.setdefault("audio", one["audio"])
         entries.setdefault("rps", one["rps"])
         entries[label] = one["rps_pred"]
