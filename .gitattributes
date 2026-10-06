@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Notebook outputs stay on disk, never in git (filter configured by the devShell)
+*.ipynb filter=nbstripout diff=ipynb

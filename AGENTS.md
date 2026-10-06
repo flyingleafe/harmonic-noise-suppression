@@ -101,6 +101,9 @@ Details: `docs/data-and-artifacts.md` § "Job running"; workflow: the
   larger `timeout` or fall back to `grep` for callsites.
 - Browser verification uses Brave via CDP (user-wide policy), not Playwright.
 - Tests deselect slow/GPU markers by default — `tests/AGENTS.md`.
+- Notebook outputs live on disk only: the devShell's git filter
+  (`scripts/nb_output_filter.sh`) strips them on `git add` and restores them when
+  git rewrites unchanged inputs; `status` may show `M` with empty diff until `add`.
 
 ## References
 

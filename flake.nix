@@ -13,6 +13,20 @@
         pkgs = nixpkgs.legacyPackages.${system};
         python = pkgs.python312;
 
+        # Notebook outputs stay on disk but never enter git: the clean filter
+        # (configured by the devShell hook, bound by .gitattributes) strips them
+        # from what `git add` stores, and caches the full file so the smudge
+        # filter restores outputs whenever git rewrites unchanged inputs (e.g.
+        # pre-commit's stash). Logic: scripts/nb_output_filter.sh. Built into
+        # the store, not run from the checkout: an old checkout lacking the
+        # script must not break the (required) filter mid-checkout.
+        nbstripout = "${pkgs.nbstripout}/bin/nbstripout";
+        nb-output-filter = pkgs.writeShellApplication {
+          name = "nb-output-filter";
+          runtimeInputs = [ pkgs.nbstripout pkgs.coreutils pkgs.diffutils ];
+          text = builtins.readFile ./scripts/nb_output_filter.sh;
+        };
+
         # `mk-worktree <name> [<base-ref>]` — creates .worktrees/<name>, links the
         # shared gitignored resources, then drops you into a shell there.
         # Only a launcher: the logic stays in the repo at scripts/mk-worktree.sh
@@ -105,6 +119,25 @@
               pass_filenames = false;
               language = "system";
             };
+            # Guard for a checkout where the filter was never configured (git
+            # silently ignores an undefined filter): checks the STAGED blob,
+            # since the working copy is expected to keep its outputs.
+            notebook-outputs = {
+              enable = true;
+              name = "notebook outputs stripped";
+              entry = "${pkgs.writeShellScript "check-staged-notebooks" ''
+                bad=0
+                for f in "$@"; do
+                  if ! ${pkgs.git}/bin/git cat-file blob ":$f" | ${nbstripout} --verify >/dev/null 2>&1; then
+                    echo "staged $f carries outputs; enter the devShell (it configures the nbstripout filter), then: git add --renormalize $f" >&2
+                    bad=1
+                  fi
+                done
+                exit $bad
+              ''}";
+              files = "\\.ipynb$";
+              language = "system";
+            };
           };
         };
       in
@@ -159,6 +192,10 @@
 
           shellHook = ''
             ${pre-commit-check.shellHook}
+            git config filter.nbstripout.clean "${nb-output-filter}/bin/nb-output-filter clean %f"
+            git config filter.nbstripout.smudge "${nb-output-filter}/bin/nb-output-filter smudge %f"
+            git config filter.nbstripout.required true
+            git config diff.ipynb.textconv "${nbstripout} -t"
             if [ ! -d .venv ]; then
               uv venv
             fi
