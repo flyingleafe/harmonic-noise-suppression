@@ -1,0 +1,41 @@
+# hppnet_pyramid_convlstm — hppnet_pyramid with its 1x1 head replaced by a
+# RateConvLSTM (variant A of docs/pyramid-harmonic-frontend-design.md § 7):
+# a bidirectional ConvLSTM over time whose gate convolutions run along the
+# rate axis. Everything up to block_8 is conf/model/hppnet_pyramid.yaml
+# verbatim (grid, pyramid, taps: see that file's header).
+#
+# THE KERNEL. Half-width = ceil(max_slew / Δr) bins, Δr = 0.9765625 rev/s.
+# max_slew 15.0 rev/s per 32 ms frame is the largest SUSTAINED (5-frame mean)
+# speed change in the raw telemetry of the training pools: 14.6 on DREGON
+# `updown` (a throttle punch, ~460 rev/s^2); every other recording is <= 8
+# (FLY125 7.3, rectangle 4.9, the rest ~3). Single-frame diffs above ~10 are
+# 900 Hz ESC-telemetry jitter, not motion. -> half-width 16, kernel 33: the
+# state at bin g is written from bins g ± 16 of the previous frame, so it can
+# follow any physical ramp. lstm_size 128 = HPPNet's FreqGroupLSTM width,
+# split 64 + 64 over the two directions.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_pyramid
+  sr: 16000
+  hop_length: 512
+  num_rotors: 4
+  n_ffts: [16384, 8192, 4096, 2048]
+  level0_fmax: 1200.0
+  out_bins: 307
+  k_max: 32
+  k_sub: 8
+  f_min: null
+  f_max: 7500.0
+  c_har: 16
+  embedding: 128
+  n_maps: 4
+  head: convlstm
+  lstm_size: 128
+  max_slew: 15.0
+model_type: null
+legacy_config_path: null

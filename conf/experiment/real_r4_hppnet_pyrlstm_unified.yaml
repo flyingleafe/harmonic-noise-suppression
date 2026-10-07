@@ -1,0 +1,37 @@
+# @package _global_
+# HPPNet on the multi-resolution STFT pyramid with the RateConvLSTM head
+# (variant A: ConvLSTM over time, gates convolved along the rate axis with a
+# half-width of 16 bins = the raw telemetry's largest sustained speed change
+# per frame), real rung R4 under the unified regime. Identical to
+# real_r4_hppnet_pyr_unified except the model: same data (2-second clips of
+# conf/online_mix/hb_m3s2_dload.yaml), same panel, same LR/stopping policy,
+# same effective batch (64 x 2). Read against real_r4_hppnet_pyr_unified
+# (variant C, no recurrence) and real_r4_hppnet_l2_unified (CQT + FreqGroupLSTM).
+# Batch doc: docs/experiments/pyramid-harmonic.md.
+defaults:
+  - override /data: e12_real_fullflight
+  - override /model: hppnet_pyramid_convlstm
+  - override /loss: salience_layers_pyr
+  - override /metrics: salience_layers_pyr
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: real_r4_hppnet_pyrlstm_unified
+epochs: 200
+patience: 20
+batch_size: 64
+grad_accum_steps: 2
+num_workers: 6
+samples_per_validation: null
+data:
+  train:
+    params:
+      path: conf/online_mix/hb_m3s2_dload.yaml
+      duration_s: 2.0
+validation:
+  batch_size: 32
+optim:
+  lr: 0.001
+  weight_decay: 0.0001
+  monitor: rps_mae
+  monitor_mode: min

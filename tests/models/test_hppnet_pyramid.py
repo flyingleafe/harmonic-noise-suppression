@@ -12,6 +12,7 @@ import torch
 
 from models.harmonic_ports.hppnet_pyramid import (
     HPPNetPyramid,
+    RateConvLSTM,
     build_tap_table,
     upsample2_along_freq,
 )
@@ -101,3 +102,45 @@ def test_predict_rps_decodes_on_the_rate_grid(model: HPPNetPyramid) -> None:
     rps = model.predict_rps(torch.randn(1, 8000))
     assert rps.shape == (1, 4, 8000 // 512 + 1)
     assert float(rps.min()) >= 0.0 and float(rps.max()) <= model.output_freqs()[-1] + 1e-6
+
+
+def test_rate_convlstm_state_reach_is_half_width_per_frame() -> None:
+    """Output at (t, g) depends on input at (t - s, g ± s * half) and nothing wider."""
+    torch.manual_seed(0)
+    lstm = RateConvLSTM(3, 2, kernel_size=9, bidirectional=False).double()
+    x = torch.randn(1, 3, 4, 60, dtype=torch.double, requires_grad=True)
+    for step in (1, 2, 3):
+        g = torch.autograd.grad(lstm(x)[0, :, step, 30].sum(), x)[0][0, :, 0]
+        reach = (g.abs().sum(0) > 0).nonzero().flatten()
+        assert (int(reach.min()), int(reach.max())) == (30 - 4 * step, 30 + 4 * step)
+
+
+def test_rate_convlstm_directions() -> None:
+    torch.manual_seed(0)
+    lstm = RateConvLSTM(3, 2, kernel_size=3).double()
+    x = torch.randn(1, 3, 5, 10, dtype=torch.double, requires_grad=True)
+    fwd = torch.autograd.grad(lstm(x)[0, :2, 2].sum(), x)[0][0].abs().sum((0, 2))
+    bwd = torch.autograd.grad(lstm(x)[0, 2:, 2].sum(), x)[0][0].abs().sum((0, 2))
+    assert (fwd > 0).tolist() == [True, True, True, False, False]
+    assert (bwd > 0).tolist() == [False, False, True, True, True]
+
+
+def test_convlstm_head_kernel_from_max_slew() -> None:
+    torch.manual_seed(0)
+    m = HPPNetPyramid(
+        n_ffts=N_FFTS,
+        level0_fmax=LEVEL0_FMAX,
+        out_bins=OUT_BINS,
+        k_max=K_MAX,
+        k_sub=K_SUB,
+        head="convlstm",
+        lstm_size=16,
+        max_slew=15.0,
+    ).eval()
+    dr = 16000 / N_FFTS[0]  # 7.8125 rev/s -> half 2 -> kernel 5
+    assert isinstance(m.temporal, RateConvLSTM)
+    assert m.temporal.kernel_size == 2 * int(np.ceil(15.0 / dr)) + 1 == 5
+    y = m(torch.randn(1, 8000))
+    assert y.shape == (1, 4 * OUT_BINS, 8000 // 512 + 1)
+    with pytest.raises(ValueError):
+        HPPNetPyramid(n_ffts=N_FFTS, level0_fmax=LEVEL0_FMAX, out_bins=OUT_BINS, head="lstm")

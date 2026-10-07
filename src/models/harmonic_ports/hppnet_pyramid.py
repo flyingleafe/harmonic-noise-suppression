@@ -14,7 +14,7 @@ order is kept and only the coordinate system changes:
                                            level covering each frequency
           -> block_4, block_5              3-tap gathers at r*{1/2,1,2}, r*{2^-1/4,1,2^1/4}
           -> block_6..8                    temporal [5,1] convolutions
-          -> 1x1 head                      n_maps per-rotor layers
+          -> head                          1x1 (variant C) or RateConvLSTM + 1x1 (variant A)
           -> LayerCRFReadout
 
 WHY A PYRAMID. The CQT's advantage over a fixed STFT is its window length per
@@ -39,11 +39,17 @@ dilation reaches and an index table does. Same weights for every rate, same
 taps as the paper (``k = 1..K`` and ``1/k`` for ``k = 2..K_sub``), read with
 linear interpolation from the level whose window suits the frequency.
 
-NO RECURRENCE (variant C). `FreqGroupLSTM` runs one recurrence per rate bin and
-cannot move state across bins; a rotor moves ~0.5 bins per frame on average and
-holds a bin for ~2 frames outside cruise. This model has temporal convolutions
-and the CRF decoder as its temporal model, which measures what the LSTM was
-worth; the trajectory-following alternatives are § 7 of the design note.
+TEMPORAL HEAD. `FreqGroupLSTM` runs one recurrence per rate bin and cannot move
+state across bins; a rotor moves ~0.5 bins per frame on average and holds a bin
+for ~2 frames outside cruise. ``head="conv1x1"`` (variant C) has temporal
+convolutions and the CRF decoder as its only temporal model, which measures what
+the LSTM was worth. ``head="convlstm"`` (variant A) is `RateConvLSTM`: a
+bidirectional ConvLSTM over time whose gate convolutions run along the rate
+axis with a half-width of ``ceil(max_slew / Δr)`` bins, ``max_slew`` being the
+largest sustained speed change per frame in the raw telemetry (≈ 15 rev/s per
+32 ms frame on DREGON `updown`, ≤ 8 elsewhere; design note § 7), so the state
+can follow a rotor through any physical ramp. The other alternatives are § 7 of
+the design note.
 
 GRID. The output axis inherits level 0's step (``Δr = sr / n_fft[0]``, 0.977
 rev/s) over ``out_bins`` bins from 0. Loss and metrics must build the same grid
@@ -71,6 +77,7 @@ __all__ = [
     "HPPNetPyramid",
     "PyramidSTFT",
     "ProportionalTapConv",
+    "RateConvLSTM",
     "build_tap_table",
     "upsample2_along_freq",
 ]
@@ -247,6 +254,59 @@ class ProportionalTapConv(nn.Module):
 # ── the model ───────────────────────────────────────────────────────────────
 
 
+class RateConvLSTM(nn.Module):
+    """ConvLSTM over time with gate convolutions along the rate axis.
+
+    ``(B, C_in, T, G) -> (B, D * hidden, T, G)``, ``D = 2`` if bidirectional.
+    The input contribution to the gates is a 1x1 convolution (the trunk has
+    already supplied the rate context); the recurrent contribution is a
+    ``k``-tap 1-D convolution of the previous hidden map, so state at rate bin
+    ``g`` is updated from bins ``g ± k // 2`` of the previous frame and that is
+    the state's whole reach per frame. The forget-gate bias starts at 1.
+    """
+
+    def __init__(
+        self, c_in: int, hidden: int, kernel_size: int, bidirectional: bool = True
+    ) -> None:
+        super().__init__()
+        if kernel_size % 2 == 0:
+            raise ValueError(f"kernel_size must be odd, got {kernel_size}")
+        self.hidden, self.kernel_size = int(hidden), int(kernel_size)
+        self.n_dir = 2 if bidirectional else 1
+        pad = self.kernel_size // 2
+        self.x_conv = nn.Conv2d(int(c_in), self.n_dir * 4 * self.hidden, kernel_size=1)
+        self.h_conv = nn.ModuleList(
+            [
+                nn.Conv1d(self.hidden, 4 * self.hidden, self.kernel_size, padding=pad, bias=False)
+                for _ in range(self.n_dir)
+            ]
+        )
+        with torch.no_grad():
+            bias = cast(torch.Tensor, self.x_conv.bias).view(self.n_dir, 4, self.hidden)
+            bias[:, 1].fill_(1.0)
+
+    def _run(self, gx: torch.Tensor, h_conv: nn.Conv1d, reverse: bool) -> torch.Tensor:
+        b, _, t, g = gx.shape
+        h = gx.new_zeros(b, self.hidden, g)
+        c = gx.new_zeros(b, self.hidden, g)
+        outs: list[torch.Tensor] = [h] * t
+        steps = range(t - 1, -1, -1) if reverse else range(t)
+        for s in steps:
+            gi, gf, go, gu = (gx[:, :, s] + h_conv(h)).chunk(4, dim=1)
+            c = torch.sigmoid(gf) * c + torch.sigmoid(gi) * torch.tanh(gu)
+            h = torch.sigmoid(go) * torch.tanh(c)
+            outs[s] = h
+        return torch.stack(outs, dim=2)  # (B, hidden, T, G)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        gates = self.x_conv(x).chunk(self.n_dir, dim=1)
+        outs = [
+            self._run(gx, cast(nn.Conv1d, conv), reverse=bool(d))
+            for d, (gx, conv) in enumerate(zip(gates, self.h_conv, strict=True))
+        ]
+        return torch.cat(outs, dim=1)
+
+
 class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
     """Audio -> ``(B, n_maps * out_bins, T)`` rotor-rate salience logits.
 
@@ -261,6 +321,10 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         c_har, embedding: HPPNet's trunk widths.
         octave_taps: multipliers of ``block_4``; ``quarter_taps``: of ``block_5``.
         n_maps: per-rotor salience layers (``LayerCRFReadout``).
+        head: ``"conv1x1"`` (variant C) or ``"convlstm"`` (variant A, `RateConvLSTM`
+            of width ``lstm_size`` split over two directions, then 1x1).
+        max_slew: rev/s per frame the ConvLSTM state must be able to follow; the
+            gate kernel half-width is ``ceil(max_slew / Δr)`` bins.
     """
 
     def __init__(
@@ -280,6 +344,9 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         octave_taps: tuple[float, ...] = (0.5, 1.0, 2.0),
         quarter_taps: tuple[float, ...] = (2**-0.25, 1.0, 2**0.25),
         n_maps: int = 4,
+        head: str = "conv1x1",
+        lstm_size: int = 128,
+        max_slew: float = 15.0,
     ):
         super().__init__(int(n_ffts[0]), hop_length, num_rotors)
         self.sr, self.n_maps = int(sr), int(n_maps)
@@ -344,7 +411,16 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         self.block_6 = _conv2d_block(embedding, embedding, (5, 1))
         self.block_7 = _conv2d_block(embedding, embedding, (5, 1))
         self.block_8 = _conv2d_block(embedding, embedding, (5, 1))
-        self.head = nn.Conv2d(embedding, self.n_maps, kernel_size=1)
+        if head == "conv1x1":
+            self.temporal: nn.Module = nn.Identity()
+            head_in = embedding
+        elif head == "convlstm":
+            half = math.ceil(float(max_slew) / dr)
+            self.temporal = RateConvLSTM(embedding, int(lstm_size) // 2, 2 * half + 1)
+            head_in = 2 * (int(lstm_size) // 2)
+        else:
+            raise ValueError(f"head must be 'conv1x1' or 'convlstm', got {head!r}")
+        self.head = nn.Conv2d(head_in, self.n_maps, kernel_size=1)
 
     # ── grid ────────────────────────────────────────────────────────────────
 
@@ -382,6 +458,6 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
             torch.relu(self.block_5(x, self.quart_lo, self.quart_frac, self.quart_valid))
         )
         x = self.block_8(self.block_7(self.block_6(x)))  # (B, emb, T, G)
-        y = self.head(x).transpose(2, 3)  # (B, n_maps, G, T)
+        y = self.head(self.temporal(x)).transpose(2, 3)  # (B, n_maps, G, T)
         b, m, g, t = y.shape
         return y.reshape(b, m * g, t)

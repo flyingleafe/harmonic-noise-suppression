@@ -172,13 +172,27 @@ against the 0.5 grid: 0.025 / 0.078 / 0.25 rev/s at 40 / 30 / 20 dB peak SNR
 harmonics collapse into one bin (`r_min` = one bin); fundamentals under ~4 Hz
 sit in the DC lobe.
 
-## 7. Temporal modelling (open; variant C shipped)
+## 7. Temporal modelling (C shipped; A implemented)
 
 `FreqGroupLSTM` cannot move state across rate bins, which is what a
 continuously changing pitch needs. Options, minimal to redesign:
 
-- **A** ConvGRU/ConvLSTM over time with gate convolutions along rate (±3 bins
-  per frame covers the 99th-percentile slew); state follows the rotor.
+- **A** ConvLSTM over time with gate convolutions along rate; state follows
+  the rotor. **Implemented** as `RateConvLSTM` (`head: convlstm`,
+  `conf/model/hppnet_pyramid_convlstm.yaml`): the input-to-gate map is 1×1
+  (the trunk already supplies rate context), the hidden-to-gate map is a
+  `2·half + 1`-tap 1-D convolution, so the state's whole reach is `± half`
+  bins per frame. `half = ceil(max_slew / Δr)`, `max_slew` the largest
+  **sustained** per-frame speed change in the raw telemetry of the training
+  pools (DREGON in-flight + FLY125 resampled to the 31.25 Hz loss grid,
+  motor-on frames; 5-frame mean): `updown` 14.6 rev/s per frame (a throttle
+  punch, ~460 rev/s²), FLY125 7.3, `rectangle` 4.9, others ≈ 3. Single-frame
+  diffs run to 53 on `updown` but reverse within a frame — 900 Hz ESC jitter,
+  not motion — so the sustained figure is the one to cover: `max_slew = 15` →
+  half-width 16, kernel 33. The earlier "±3 bins covers the 99th percentile"
+  figure was the mean-slew view; the kernel must cover the ramps, which are
+  exactly the frames the per-bin LSTM loses. Cost: 1.15 M params (33-tap
+  recurrent conv on 64 + 64 hidden), 126 sequential steps per 2 s clip.
 - **B** dual-path (rate ↔ time) blocks, as `edge_bs_rof` does for bands/time.
 - **C** no recurrence: temporal convs + the CRF as the temporal model; the
   principled form is a trainable linear-chain CRF (forward-algorithm NLL

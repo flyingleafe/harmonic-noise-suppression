@@ -33,5 +33,7 @@ L2 row), AdamW 1e-3 / 1e-4, monitor `rps_mae`. Train with
 
 ## Conclusion
 
-Submitted 2026-10-07 to `uni-gpushort` as a 1 h smoke of the training
-dynamics; to be resumed elsewhere if it trains. Results go to the batch doc.
+Submitted 2026-10-07. `uni-gpushort` had no free slot; repinned to `vast`,
+where the first rental (Tesla P40, 10 s/step) was cancelled and the run
+resubmitted on an A100 (`hppnet-pyr-unified-6980ca`, 1.2–1.3 s/step at batch
+64, 8 h allocation). Results go to the batch doc.

@@ -36,7 +36,15 @@ split under the historical recipe).
 
 | experiment | model | temporal model | status |
 |---|---|---|---|
-| `real_r4_hppnet_pyr_unified` | `hppnet_pyramid` (4 levels, 307-bin grid) | temporal convs + CRF (no LSTM) | submitted 2026-10-07, `uni-gpushort`, 1 h smoke |
+| `real_r4_hppnet_pyr_unified` | `hppnet_pyramid` (4 levels, 307-bin grid, 0.45 M params) | temporal convs + CRF (no LSTM) | running on `vast` A100 since 2026-10-07 22:55 UTC (`hppnet-pyr-unified-6980ca`, W&B `real_r4_hppnet_pyr_unified`) |
+| `real_r4_hppnet_pyrlstm_unified` | `hppnet_pyramid` + `RateConvLSTM` head (1.60 M params) | bidirectional ConvLSTM, 33-tap gate conv along rate (±16 bins per frame = the telemetry's largest sustained slew, 15 rev/s per frame) | prepared 2026-10-08, not submitted |
+
+Placement notes. `uni-gpushort` was full (two `kla-loglinear` jobs holding both
+slots behind a 53-job backlog), so the smoke was repinned to `vast`. The first
+vast rental was a **Tesla P40** (Pascal, no fp16 tensor cores): 10 s/step at
+batch 64, GPU at 100 % — cancelled. Resubmitted with `--gpu-type A100`
+(the project's vast convention): 1.2–1.3 s/step at batch 64 → ~21 min per
+1000-step epoch.
 
 ## Results
 
