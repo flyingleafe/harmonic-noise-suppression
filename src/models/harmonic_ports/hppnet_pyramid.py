@@ -66,7 +66,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint
 
 from models.harmonic_ports.hppnet_orig import _conv2d_block
 from models.harmonic_ports.layer_readout import LayerCRFReadout
@@ -203,6 +202,61 @@ def build_tap_table(
     return torch.from_numpy(lo), torch.from_numpy(frac), torch.from_numpy(valid)
 
 
+class _TapConvFn(torch.autograd.Function):
+    """Fused gather-lerp-GEMM over taps with ONE dense input gradient.
+
+    Autograd's own graph for ``J`` taps materialises ``2J`` full-size dense
+    gradients of ``x`` (one per `index_select`) and sums them, which is what
+    made this layer 87 % of a training step. Here the backward scatters every
+    tap's gradient into a single fp32 buffer with `index_add_` and recomputes
+    the cheap per-tap gathers for the weight gradient, so nothing but ``x``
+    is stored and no activation checkpointing is needed.
+    """
+
+    @staticmethod
+    def forward(  # type: ignore[override]
+        ctx,
+        x: torch.Tensor,
+        weight: torch.Tensor,
+        bias: torch.Tensor,
+        lo: torch.Tensor,
+        wa: torch.Tensor,
+        wc: torch.Tensor,
+    ) -> torch.Tensor:
+        b, _c, t, _f = x.shape
+        n_taps, c_out, _ = weight.shape
+        w = weight.to(x.dtype)
+        y = x.new_zeros((b, c_out, t, lo.shape[1]))
+        for j in range(n_taps):
+            h = (
+                torch.index_select(x, 3, lo[j]) * wa[j]
+                + torch.index_select(x, 3, lo[j] + 1) * wc[j]
+            )
+            y = y + torch.einsum("bctg,oc->botg", h, w[j])
+        ctx.save_for_backward(x, weight, lo, wa, wc)
+        return y + bias.to(x.dtype)[None, :, None, None]
+
+    @staticmethod
+    def backward(ctx, gy: torch.Tensor):  # type: ignore[override]
+        x, weight, lo, wa, wc = ctx.saved_tensors
+        n_taps = weight.shape[0]
+        w = weight.to(x.dtype)
+        gy = gy.to(x.dtype)
+        gx = torch.zeros(x.shape, dtype=torch.float32, device=x.device)
+        gw = torch.zeros_like(weight, dtype=torch.float32)
+        for j in range(n_taps):
+            h = (
+                torch.index_select(x, 3, lo[j]) * wa[j]
+                + torch.index_select(x, 3, lo[j] + 1) * wc[j]
+            )
+            gw[j] = torch.einsum("botg,bctg->oc", gy, h).float()
+            gh = torch.einsum("botg,oc->bctg", gy, w[j])
+            gx.index_add_(3, lo[j], (gh * wa[j]).float())
+            gx.index_add_(3, lo[j] + 1, (gh * wc[j]).float())
+        gb = gy.float().sum(dim=(0, 2, 3))
+        return gx.to(x.dtype), gw.to(weight.dtype), gb.to(weight.dtype), None, None, None
+
+
 class ProportionalTapConv(nn.Module):
     """``y = Σ_j W_j · x[m_j · r]``: per-tap ``(C_out, C_in)`` weights shared across rate.
 
@@ -211,10 +265,9 @@ class ProportionalTapConv(nn.Module):
     per tap serves every candidate rate. Reads are linear interpolations off a
     concatenated feature axis, described by a table from :func:`build_tap_table`.
 
-    Input ``(B, C_in, T, F_cat)``; output ``(B, C_out, T, G)``. The loop over
-    taps keeps one ``(B, C_in, T, G)`` slice alive at a time; the whole layer
-    runs under activation checkpointing in training so the slices are
-    recomputed in backward rather than stored ``J`` times.
+    Input ``(B, C_in, T, F_cat)``; output ``(B, C_out, T, G)``. Forward and
+    backward are `_TapConvFn`: a loop over taps that keeps one
+    ``(B, C_in, T, G)`` slice alive at a time and one dense input gradient.
     """
 
     def __init__(self, n_taps: int, c_in: int, c_out: int):
@@ -226,29 +279,13 @@ class ProportionalTapConv(nn.Module):
         )
         self.bias = nn.Parameter(torch.zeros(self.c_out))
 
-    def _run(
-        self, x: torch.Tensor, lo: torch.Tensor, frac: torch.Tensor, valid: torch.Tensor
-    ) -> torch.Tensor:
-        b, _c, t, _f = x.shape
-        g = lo.shape[1]
-        y = x.new_zeros((b, self.c_out, t, g))
-        fr = frac.to(x.dtype)
-        va = valid.to(x.dtype)
-        for j in range(self.n_taps):
-            a = torch.index_select(x, 3, lo[j])
-            c = torch.index_select(x, 3, lo[j] + 1)
-            h = (a + (c - a) * fr[j]) * va[j]  # (B, C_in, T, G)
-            y = y + torch.einsum("bctg,oc->botg", h, self.weight[j].to(x.dtype))
-        return y + self.bias.to(x.dtype)[None, :, None, None]
-
     def forward(
         self, x: torch.Tensor, lo: torch.Tensor, frac: torch.Tensor, valid: torch.Tensor
     ) -> torch.Tensor:
-        if self.training and x.requires_grad:
-            return cast(
-                torch.Tensor, checkpoint(self._run, x, lo, frac, valid, use_reentrant=False)
-            )
-        return self._run(x, lo, frac, valid)
+        fr, va = frac.to(x.dtype), valid.to(x.dtype)
+        return cast(
+            torch.Tensor, _TapConvFn.apply(x, self.weight, self.bias, lo, (1 - fr) * va, fr * va)
+        )
 
 
 # ── the model ───────────────────────────────────────────────────────────────

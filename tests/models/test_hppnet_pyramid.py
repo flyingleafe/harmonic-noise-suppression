@@ -12,6 +12,7 @@ import torch
 
 from models.harmonic_ports.hppnet_pyramid import (
     HPPNetPyramid,
+    ProportionalTapConv,
     RateConvLSTM,
     build_tap_table,
     upsample2_along_freq,
@@ -102,6 +103,32 @@ def test_predict_rps_decodes_on_the_rate_grid(model: HPPNetPyramid) -> None:
     rps = model.predict_rps(torch.randn(1, 8000))
     assert rps.shape == (1, 4, 8000 // 512 + 1)
     assert float(rps.min()) >= 0.0 and float(rps.max()) <= model.output_freqs()[-1] + 1e-6
+
+
+def test_proportional_tap_conv_matches_autograd_reference() -> None:
+    """The fused Function's forward and all three gradients equal the plain-autograd lerp-gather."""
+    torch.manual_seed(0)
+    n_taps, c_in, c_out, b, t, f_cat, g = 5, 3, 4, 2, 4, 40, 9
+    layer = ProportionalTapConv(n_taps, c_in, c_out).double()
+    lo = torch.randint(0, f_cat - 1, (n_taps, g))
+    frac = torch.rand(n_taps, g, dtype=torch.double)
+    valid = (torch.rand(n_taps, g) > 0.2).double()
+    x = torch.randn(b, c_in, t, f_cat, dtype=torch.double, requires_grad=True)
+
+    ref = layer.bias[None, :, None, None]
+    for j in range(n_taps):
+        a, c = x.index_select(3, lo[j]), x.index_select(3, lo[j] + 1)
+        ref = ref + torch.einsum(
+            "bctg,oc->botg", (a + (c - a) * frac[j]) * valid[j], layer.weight[j]
+        )
+    y = layer(x, lo, frac, valid)
+    assert torch.allclose(y, ref)
+    gy = torch.randn_like(y)
+    leaves = (x, layer.weight, layer.bias)
+    for got, want in zip(
+        torch.autograd.grad(y, leaves, gy), torch.autograd.grad(ref, leaves, gy), strict=True
+    ):
+        assert torch.allclose(got, want, atol=1e-10)
 
 
 def test_rate_convlstm_state_reach_is_half_width_per_frame() -> None:
