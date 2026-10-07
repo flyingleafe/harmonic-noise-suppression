@@ -203,15 +203,26 @@ def build_tap_table(
 
 
 class _TapConvFn(torch.autograd.Function):
-    """Fused gather-lerp-GEMM over taps with ONE dense input gradient.
+    """Fused gather-lerp-GEMM over taps, with the gathered axis OUTERMOST.
 
-    Autograd's own graph for ``J`` taps materialises ``2J`` full-size dense
-    gradients of ``x`` (one per `index_select`) and sums them, which is what
-    made this layer 87 % of a training step. Here the backward scatters every
-    tap's gradient into a single fp32 buffer with `index_add_` and recomputes
-    the cheap per-tap gathers for the weight gradient, so nothing but ``x``
-    is stored and no activation checkpointing is needed.
+    Profiled on a T4 (B=32, 2 s), the layer in ``(B, C, T, F)`` layout spent
+    62 % of the whole training step in the backward's `index_add_` on the
+    innermost axis (inner size 1: one uncoalesced atomicAdd per element) and
+    another ~15 % in the permute copies around `einsum`. Here ``x`` is
+    transposed ONCE to ``(F, B*T, C)``: every `index_select` / `index_add_`
+    moves whole contiguous rows of ``B*T*C`` elements, and the per-tap
+    contraction is a plain ``(G*B*T, C) @ (C, O)`` GEMM. The backward keeps
+    one fp32 input gradient and recomputes the cheap gathers for the weight
+    gradient, so only ``x`` is stored.
     """
+
+    @staticmethod
+    def _gather(
+        xt: torch.Tensor, lo: torch.Tensor, wa: torch.Tensor, wc: torch.Tensor
+    ) -> torch.Tensor:
+        """``(G, N, C)`` lerp read of ``xt (F, N, C)`` at ``lo`` / ``lo + 1``."""
+        a = torch.index_select(xt, 0, lo) * wa[:, None, None]
+        return a.addcmul_(torch.index_select(xt, 0, lo + 1), wc[:, None, None])
 
     @staticmethod
     def forward(  # type: ignore[override]
@@ -223,38 +234,39 @@ class _TapConvFn(torch.autograd.Function):
         wa: torch.Tensor,
         wc: torch.Tensor,
     ) -> torch.Tensor:
-        b, _c, t, _f = x.shape
+        b, c, t, f = x.shape
         n_taps, c_out, _ = weight.shape
+        g = lo.shape[1]
+        xt = x.permute(3, 0, 2, 1).reshape(f, b * t, c)
         w = weight.to(x.dtype)
-        y = x.new_zeros((b, c_out, t, lo.shape[1]))
+        y = bias.to(x.dtype).expand(g * b * t, c_out).clone()
         for j in range(n_taps):
-            h = (
-                torch.index_select(x, 3, lo[j]) * wa[j]
-                + torch.index_select(x, 3, lo[j] + 1) * wc[j]
-            )
-            y = y + torch.einsum("bctg,oc->botg", h, w[j])
-        ctx.save_for_backward(x, weight, lo, wa, wc)
-        return y + bias.to(x.dtype)[None, :, None, None]
+            h = _TapConvFn._gather(xt, lo[j], wa[j], wc[j]).reshape(g * b * t, c)
+            y.addmm_(h, w[j].t())
+        ctx.save_for_backward(xt, weight, lo, wa, wc)
+        ctx.dims = (b, c, t, f)
+        return y.reshape(g, b, t, c_out).permute(1, 3, 2, 0)
 
     @staticmethod
     def backward(ctx, gy: torch.Tensor):  # type: ignore[override]
-        x, weight, lo, wa, wc = ctx.saved_tensors
-        n_taps = weight.shape[0]
-        w = weight.to(x.dtype)
-        gy = gy.to(x.dtype)
-        gx = torch.zeros(x.shape, dtype=torch.float32, device=x.device)
-        gw = torch.zeros_like(weight, dtype=torch.float32)
+        xt, weight, lo, wa, wc = ctx.saved_tensors
+        b, c, t, f = ctx.dims
+        n_taps, c_out, _ = weight.shape
+        g = lo.shape[1]
+        w = weight.to(xt.dtype)
+        acc = torch.float64 if xt.dtype == torch.float64 else torch.float32
+        gyt = gy.to(xt.dtype).permute(3, 0, 2, 1).reshape(g * b * t, c_out)  # (G*N, O)
+        gxt = torch.zeros((f, b * t, c), dtype=acc, device=xt.device)
+        gw = torch.empty_like(weight, dtype=acc)
         for j in range(n_taps):
-            h = (
-                torch.index_select(x, 3, lo[j]) * wa[j]
-                + torch.index_select(x, 3, lo[j] + 1) * wc[j]
-            )
-            gw[j] = torch.einsum("botg,bctg->oc", gy, h).float()
-            gh = torch.einsum("botg,oc->bctg", gy, w[j])
-            gx.index_add_(3, lo[j], (gh * wa[j]).float())
-            gx.index_add_(3, lo[j] + 1, (gh * wc[j]).float())
-        gb = gy.float().sum(dim=(0, 2, 3))
-        return gx.to(x.dtype), gw.to(weight.dtype), gb.to(weight.dtype), None, None, None
+            h = _TapConvFn._gather(xt, lo[j], wa[j], wc[j]).reshape(g * b * t, c)
+            gw[j] = (gyt.t() @ h).to(acc)
+            gh = (gyt @ w[j]).reshape(g, b * t, c)  # (G, N, C)
+            gxt.index_add_(0, lo[j], (gh * wa[j][:, None, None]).to(acc))
+            gxt.index_add_(0, lo[j] + 1, (gh * wc[j][:, None, None]).to(acc))
+        gb = gyt.to(acc).sum(dim=0)
+        gx = gxt.to(xt.dtype).reshape(f, b, t, c).permute(1, 3, 2, 0)
+        return gx, gw.to(weight.dtype), gb.to(weight.dtype), None, None, None
 
 
 class ProportionalTapConv(nn.Module):
