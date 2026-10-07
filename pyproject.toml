@@ -85,6 +85,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "torchlens",
     "torchsummary",
+    "torchview>=0.2.6",
     "torchviz",
     "visualtorch",
 ]

@@ -28,6 +28,7 @@ __all__ = [
     "HarmoF0RPS",
     "HFTRPS",
     "HPPNetOrig",
+    "HPPNetPyramid",
     "HPPNetRPS",
     "LayerCRFReadout",
     "split_maps",
@@ -38,6 +39,7 @@ _MODEL_MODULES = {
     "HarmoF0RPS": "models.harmonic_ports.harmof0_rps",
     "HFTRPS": "models.harmonic_ports.hft_rps",
     "HPPNetOrig": "models.harmonic_ports.hppnet_orig",
+    "HPPNetPyramid": "models.harmonic_ports.hppnet_pyramid",
     "HPPNetRPS": "models.harmonic_ports.hppnet_rps",
 }
 

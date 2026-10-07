@@ -1,0 +1,44 @@
+# hppnet_pyramid — HPPNet's block order on a nested multi-resolution STFT
+# pyramid, harmonic taps gathered at k*r / r/k, no LSTM (variant C).
+# Design record: docs/pyramid-harmonic-frontend-design.md; module docstring:
+# src/models/harmonic_ports/hppnet_pyramid.py.
+#
+# THE GRID. Output step = level 0's bin width = 16000 / 16384 = 0.9765625 rev/s;
+# out_bins 307 -> 0 .. 298.83 rev/s (1229 // 4 of level 0's bins: the current
+# data never leaves 0-150; widening is this one number plus the loss/metrics
+# twins). conf/loss/salience_layers_pyr.yaml and conf/metrics/salience_layers_pyr.yaml
+# build the same grid (out_fmax = 306 * 0.9765625 = 298.828125, out_bins 307).
+#
+# THE PYRAMID. n_ffts 16384/8192/4096/2048 at hop 512: windows 1.02 s / 0.51 /
+# 0.26 / 0.13, bins 0.98 / 1.95 / 3.9 / 7.8 Hz, kept to 1200 / 2400 / 4800 /
+# 8000 Hz (1230 / 1230 / 1230 / 1025 bins). Level 0 needs >= 2 s clips.
+#
+# TAPS. k_max 32 harmonics + sub-harmonics 1/2..1/8; f_max 7500 (Nyquist
+# margin); f_min defaults to one level-0 bin (DC lobe). block_4/5 read
+# r*{1/2, 1, 2} and r*{2^-1/4, 1, 2^1/4} on the rate axis — HPPNet's octave and
+# quarter-octave dilations in rate coordinates.
+#
+# frame_rate [16000, 512]: nothing pools along time.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_pyramid
+  sr: 16000
+  hop_length: 512
+  num_rotors: 4
+  n_ffts: [16384, 8192, 4096, 2048]
+  level0_fmax: 1200.0
+  out_bins: 307
+  k_max: 32
+  k_sub: 8
+  f_min: null
+  f_max: 7500.0
+  c_har: 16
+  embedding: 128
+  n_maps: 4
+model_type: null
+legacy_config_path: null

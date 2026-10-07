@@ -1,0 +1,23 @@
+# Validation twin of conf/loss/salience_layers_pyr.yaml (grid 0 -> 298.828125
+# rev/s, 307 bins). See conf/metrics/salience_layers_r150.yaml for what the two
+# terms are.
+terms:
+  - name: bce
+    _target_: metrics.LayerPITSalienceBCEMetric
+    params:
+      out_fmin: 0.0
+      out_fmax: 298.828125
+      out_bins: 307
+      n_layers: 4
+      sigma_bins: 1.0
+      focus: 122.0
+      rate: [16000, 512]
+  - name: rps_mae
+    _target_: metrics.LayerPeakRPSMetric
+    params:
+      out_fmin: 0.0
+      out_fmax: 298.828125
+      out_bins: 307
+      n_layers: 4
+      sigma_bins: 1.0
+      rate: [16000, 512]

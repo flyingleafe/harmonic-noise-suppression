@@ -1,0 +1,39 @@
+# @package _global_
+# HPPNet on the multi-resolution STFT pyramid (variant C: no LSTM), real rung R4
+# under the unified regime — the recipe of real_r4_hppnet_l2_unified, which is
+# the row this one is read against: same data (conf/online_mix/hb_m3s2_dload.yaml,
+# 2-second clips), same full deterministic panel every 500 optimizer updates
+# through the model's own on-device decoder, same LR/stopping policy, same
+# effective batch. Only the model (and its grid twins in loss/metrics) change.
+#
+# Effective batch 128 frames as in the L2 row, reached as 64 x 2 accumulation
+# steps: the pyramid's 16-channel stage runs on ~4.7k bins (13x the CQT's 352),
+# which is where this model spends memory where L2 spent it in the LSTM.
+# Batch doc: docs/experiments/pyramid-harmonic.md.
+defaults:
+  - override /data: e12_real_fullflight
+  - override /model: hppnet_pyramid
+  - override /loss: salience_layers_pyr
+  - override /metrics: salience_layers_pyr
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: real_r4_hppnet_pyr_unified
+epochs: 200
+patience: 20
+batch_size: 64
+grad_accum_steps: 2
+num_workers: 6
+samples_per_validation: null
+data:
+  train:
+    params:
+      path: conf/online_mix/hb_m3s2_dload.yaml
+      duration_s: 2.0
+validation:
+  batch_size: 32
+optim:
+  lr: 0.001
+  weight_decay: 0.0001
+  monitor: rps_mae
+  monitor_mode: min

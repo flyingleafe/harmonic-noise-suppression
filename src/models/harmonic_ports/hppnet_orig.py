@@ -261,17 +261,22 @@ class CQTLogSpecgram(nn.Module):
         fmin: float = 27.5,
         n_bins: int = 352,
         bins_per_octave: int = 48,
+        filter_scale: float = 1.0,
     ):
         super().__init__()
         import torchaudio
         from nnAudio.features.cqt import CQT2010v2
 
+        # nnAudio: Q = filter_scale / (2 ** (1 / bins_per_octave) - 1), so
+        # `filter_scale` scales every kernel length (and bandwidth) without
+        # moving the grid; 1.0 is the published HPPNet ("bins just touch").
         self.cqt = CQT2010v2(
             sr=int(sample_rate),
             hop_length=int(hop_length),
             fmin=float(fmin),
             n_bins=int(n_bins),
             bins_per_octave=int(bins_per_octave),
+            filter_scale=int(filter_scale),
             output_format="Magnitude",
             verbose=False,
         )
@@ -305,6 +310,9 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
             (the CQT has no ``n_fft`` of its own to agree with).
         num_rotors: rotors to track at eval.
         sr, fmin, n_bins, bins_per_octave: the CQT grid.
+        filter_scale: nnAudio's Q multiplier (``Q = filter_scale / (2^(1/B) - 1)``):
+            scales every kernel's length and bandwidth, leaves the grid alone.
+            1.0 is the published transform.
         c_har, embedding: HPPNet's trunk widths (16 and 128).
         lstm_size: `FreqGroupLSTM`'s recurrent width. Its cost is ``B * F``
             sequences of length ``T``; with the frequency pool off ``F`` is 352
@@ -335,6 +343,7 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         fmin: float = 27.5,
         n_bins: int = 352,
         bins_per_octave: int = 48,
+        filter_scale: float = 1.0,
         c_har: int = 16,
         embedding: int = 128,
         lstm_size: int = 128,
@@ -367,6 +376,7 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
             fmin=float(fmin),
             n_bins=int(n_bins),
             bins_per_octave=int(bins_per_octave),
+            filter_scale=float(filter_scale),
         )
         self.trunk = CNNTrunk(
             c_in=1,

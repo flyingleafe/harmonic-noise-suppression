@@ -48,8 +48,7 @@ src/models/
 **Noise generators** (`NOISE_GEN_MODEL_REGISTRY`): `positional_harmonic_gen`,
 `positional_harmonic_wind_gen`.
 
-**RPS models** (`RPS_MODEL_REGISTRY`, `build_model(name, **params)`) — the dict
-is the authoritative key list. By family:
+**RPS models** (`RPS_MODEL_REGISTRY`, `build_model(name, **params)`; the dict is the key list). By family:
 
 | Family | Keys | Notes |
 |--------|------|-------|
@@ -57,10 +56,10 @@ is the authoritative key list. By family:
 | `simple_conv_v2` (residual + SE + attn pool + BiGRU) | `_tcn`, `_causal_tcn`, `_smol_tcn`, `_smol_causal_tcn`, `_smol_bigru`, `_uni_gru*`, `_causal_gru{,96}`, `_transformer`, `_local_attn`, `_multires`, `_dwt`, `_magphase`, `_dual_pool`, `_freqpos`, `_freqcat`, `_freqhires`, `_gru96` | `_uni_gru*` head-only causal; `_causal_gru*` fully time-causal |
 | SMoLnet backbone | `smolnet_rps_{tcn,simple_head,causal_tcn}` | compressed re/im STFT body |
 | Transformer × front-end | `simple_conv_v2_transformer_{hcqt,if,learned,comb,pyramid}` | VK-parity arms (G2a/G2b/G4/G8) |
-| CKLA heads | `simple_conv_v2_ckla{,_mag,_norot,_mag_norot,_phasediff,_phaseonly,_phaseunit}`, `_ckla_phaseonly_cond` (refiner: `forward(audio, cond)`, non-PIT MSE), `_fkla`, `hg_ckla_refiner` | docs/ckla-design.md, docs/pikalman-ckla-design.md |
+| CKLA heads | `simple_conv_v2_ckla{,_mag,_norot,_mag_norot,_phasediff,_phaseonly,_phaseunit}`, `_ckla_phaseonly_cond` (refiner `forward(audio, cond)`, non-PIT MSE), `_fkla`, `hg_ckla_refiner` | docs/ckla-design.md, docs/pikalman-ckla-design.md |
 | Complex-encoder RPS | `dcunet_enc_rps`, `dccrn_enc_rps`, `dccrn_lite_rps`, `edge_bs_rof_rps` (lazy) | encoder + `RPSPredictionHead` |
 | Salience (multi-pitch) | `multif0_rps`, `multif0_salience`, `basic_pitch_salience` | `salience_rps.py` |
-| Harmonic ports | `harmof0_rps`, `hppnet_rps`, `hft_rps`; controls `harmof0_orig`, `hppnet_orig` | `harmonic_ports/` |
+| Harmonic ports | `hppnet_pyramid` (STFT pyramid + harmonic taps; docs/pyramid-harmonic-frontend-design.md); retired `harmof0_rps`, `hppnet_rps`, `hft_rps`; controls `*_orig` | `harmonic_ports/` |
 
 ## Spectral front-ends (`frontends/`)
 
@@ -77,9 +76,9 @@ class SpectralFrontEnd(nn.Module):
 | `stft_magphase` | 3 | log mag + cos θ + sin θ |
 | `stft_mag_if` | 2 | log₁₊ mag + IF deviation (fractional bins) |
 | `stft_ssq` | 1 | log₁₊ synchrosqueezed magnitude (power scattered to the rounded IF bin); same grid as `stft_mag` |
-| `hcqt` | H / 2H | Harmonic CQT (librosa); `phase=True` → 2H; `stacked=True` = one CQT + shifts (lossy at h≥3) |
-| `pyramid_if` | 2 / 8 | 4-band multi-window STFT pyramid, log1p-mag + IF on a 340-row log-f axis (`collapse_bands`) |
-| `comb_if`, `comb_if_ramp` | 4 / 3 | whitened comb matched-filter + IF consensus + occupancy + coord row on a 361-row candidate-f0 grid (`coord_channel`); `_ramp` widened for ramps |
+| `hcqt` | H / 2H | Harmonic CQT (librosa); `phase=True` → 2H; `stacked=True` = one CQT + shifts |
+| `pyramid_if` | 2 / 8 | 4-band multi-window STFT pyramid, log1p-mag + IF on a 340-row log-f axis |
+| `comb_if`, `comb_if_ramp` | 4 / 3 | whitened comb matched-filter + IF consensus + occupancy + coord row on a 361-row candidate-f0 grid; `_ramp` widened |
 | `learned_conv` | C | free time-domain filterbank on the raw waveform (phase kept) |
 
 Adding one: subclass `SpectralFrontEnd`, set `key`/`out_channels`, decorate
