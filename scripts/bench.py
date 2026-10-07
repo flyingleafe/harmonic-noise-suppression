@@ -20,6 +20,10 @@ targets, replacing the per-kernel bench scripts:
   position-aware harmonic noise generator, forward and forward+backward on
   synthetic RPS + geometry. ``--shape B,ROTORS,MICS,SAMPLES``
   (default ``32,4,8,16000``).
+* ``--target hppnet_pyramid``: per-stage forward+backward cost of
+  `HPPNetPyramid` (front end + block_1 + fusion, block_2/2_5, harmonic
+  taps, block_4/5, temporal blocks + head) on a training batch under
+  autocast. ``--shape B,SAMPLES`` (default ``64,32000``).
 
 ``vk_bench_opt_job.sh`` is gone too; the VK regression bench it drove stays
 as ``scripts/vk_bench.py`` (fixtures + scoring live there), e.g.::
@@ -259,10 +263,75 @@ def bench_noise_gen(device: torch.device, iters: int, warmup: int, shape: str | 
     _report([("forward", fwd), ("forward+backward", timeit(step, device, iters, warmup))])
 
 
+def bench_hppnet_pyramid(device: torch.device, iters: int, warmup: int, shape: str | None) -> None:
+    """Per-stage forward+backward cost of `HPPNetPyramid` on a training batch.
+
+    ``--shape B,SAMPLES`` (default ``64,32000``: the real_r4_hppnet_pyr_unified
+    batch). Autocast as in training (fp16 on cuda, bf16 on cpu). Stages are
+    timed cumulatively (front end alone, + block_1, ...) so the per-stage
+    column is the difference; the per-stage backward is included because the
+    loss is taken at the stage's output.
+    """
+    from models.harmonic_ports.hppnet_pyramid import HPPNetPyramid
+
+    b, samples = _shape(shape, (64, 32000))
+    torch.manual_seed(0)
+    model = HPPNetPyramid().to(device).train()
+    audio = torch.randn(b, samples, device=device)
+    amp_dtype = torch.float16 if device.type == "cuda" else torch.bfloat16
+    print(
+        f"hppnet_pyramid, B={b} samples={samples} "
+        f"params={sum(p.numel() for p in model.parameters()):,}, {device.type}"
+    )
+
+    def stage(name: str, fn: Callable[[], torch.Tensor]) -> tuple[str, float]:
+        def step() -> None:
+            model.zero_grad(set_to_none=True)
+            with torch.autocast(device.type, dtype=amp_dtype):
+                out = fn()
+            out.float().pow(2).mean().backward()
+
+        return (name, timeit(step, device, iters, warmup))
+
+    m = model
+
+    def upto_fuse() -> torch.Tensor:
+        return torch.cat(m.fuse([m.block_1(x) for x in m.frontend(audio)]), dim=-1)
+
+    def upto_block2() -> torch.Tensor:
+        return torch.cat(
+            [m.block_2_5(m.block_2(x)) for x in m.fuse([m.block_1(x) for x in m.frontend(audio)])],
+            dim=-1,
+        )
+
+    def upto_conv3() -> torch.Tensor:
+        return torch.relu(m.conv_3(upto_block2(), m.harm_lo, m.harm_frac, m.harm_valid))
+
+    def upto_block5() -> torch.Tensor:
+        x = upto_conv3()
+        x = m.norm_4(torch.relu(m.block_4(x, m.oct_lo, m.oct_frac, m.oct_valid)))
+        return m.norm_5(torch.relu(m.block_5(x, m.quart_lo, m.quart_frac, m.quart_valid)))
+
+    rows = [
+        stage("frontend+block_1+fuse", upto_fuse),
+        stage("+block_2, block_2_5", upto_block2),
+        stage("+conv_3 (harmonic taps)", upto_conv3),
+        stage("+block_4, block_5", upto_block5),
+        stage("full (+block_6..8, head)", lambda: m(audio)),
+    ]
+    prev = 0.0
+    for label, ms in rows:
+        print(f"  {label:<28}{ms:10.1f} ms cumulative   {ms - prev:+9.1f} ms stage")
+        prev = ms
+    if device.type == "cuda":
+        print(f"  peak allocated {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB")
+
+
 TARGETS: dict[str, Callable[[torch.device, int, int, str | None], None]] = {
     "ckla_scan": bench_ckla_scan,
     "cqt": bench_cqt,
     "grouped_branches": bench_grouped_branches,
+    "hppnet_pyramid": bench_hppnet_pyramid,
     "noise_gen": bench_noise_gen,
 }
 
