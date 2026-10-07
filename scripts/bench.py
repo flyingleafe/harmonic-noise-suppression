@@ -41,6 +41,7 @@ Examples::
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from collections.abc import Callable
 from typing import Any
@@ -325,6 +326,22 @@ def bench_hppnet_pyramid(device: torch.device, iters: int, warmup: int, shape: s
         prev = ms
     if device.type == "cuda":
         print(f"  peak allocated {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB")
+        # Kernel-level breakdown of one full step (BENCH_PROFILE=1).
+        if os.environ.get("BENCH_PROFILE"):
+            from torch.profiler import ProfilerActivity, profile
+
+            def full_step() -> None:
+                model.zero_grad(set_to_none=True)
+                with torch.autocast(device.type, dtype=amp_dtype):
+                    out = m(audio)
+                out.float().pow(2).mean().backward()
+
+            full_step()
+            torch.cuda.synchronize()
+            with profile(activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU]) as prof:
+                full_step()
+                torch.cuda.synchronize()
+            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=25))
 
 
 TARGETS: dict[str, Callable[[torch.device, int, int, str | None], None]] = {
