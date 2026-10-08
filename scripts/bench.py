@@ -347,14 +347,14 @@ def bench_hppnet_pyramid(device: torch.device, iters: int, warmup: int, shape: s
 
 
 def bench_rate_convlstm(device: torch.device, iters: int, warmup: int, shape: str | None) -> None:
-    """`RateConvLSTM` forward+backward: dense vs separable recurrent kernel.
+    """`RateConvLSTM` forward+backward by cell implementation (eager / script / compile).
 
-    ``--shape B,C_IN,T,G`` (default ``64,128,63,352``). The recurrence is
-    ``T`` sequential steps per direction, each a ``hidden -> 4*hidden``
-    ``k``-tap conv on ``(B, hidden, G)``: dense ``Conv1d`` (the published
-    ConvLSTM form) or depthwise ``k``-tap + 1x1 (``separable=True``).
-    ``cudnn.benchmark`` is on, as in training. Expressing the dense conv as
-    ``Conv2d((1, k))``, ``unfold + matmul`` or fp32 measured the same on a T4.
+    ``--shape B,C_IN,T,G`` (default ``64,128,63,352``). The recurrence runs
+    the pointwise cell ``2T`` times with nothing to overlap, so launch latency
+    sets its cost; fusing the cell is the lever. ``cudnn.benchmark`` is on, as
+    in training. Dense vs separable recurrent conv, and the dense conv as
+    ``Conv2d((1, k))`` / ``unfold + matmul`` / fp32, all measured within 15 %
+    of each other on a T4 — the conv is not the cost.
     """
     from models.harmonic_ports.rate_convlstm import RateConvLSTM
 
@@ -376,9 +376,9 @@ def bench_rate_convlstm(device: torch.device, iters: int, warmup: int, shape: st
         return run
 
     rows = []
-    for label, sep in (("dense recurrent conv", False), ("separable recurrent conv", True)):
-        module = RateConvLSTM(c_in, hidden, k, separable=sep).to(device).train()
-        rows.append((label, timeit(step_fn(module), device, iters, warmup)))
+    for cell in ("eager", "script", "compile"):
+        module = RateConvLSTM(c_in, hidden, k, cell=cell).to(device).train()
+        rows.append((f"cell={cell}", timeit(step_fn(module), device, iters, warmup)))
     _report(rows)
     if device.type == "cuda":
         print(f"  peak allocated {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB")

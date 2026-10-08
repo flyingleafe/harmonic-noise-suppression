@@ -12,12 +12,46 @@ for `HPPNetPyramid`, CQT log bins for `HPPNetOrig`).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import cast
 
 import torch
 import torch.nn as nn
 
 __all__ = ["RateConvLSTM"]
+
+
+def _cell_eager(
+    gx: torch.Tensor, gh: torch.Tensor, c: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """One LSTM cell update: ``gx + gh`` are the four stacked gate pre-activations."""
+    gi, gf, go, gu = (gx + gh).chunk(4, dim=1)
+    c = torch.sigmoid(gf) * c + torch.sigmoid(gi) * torch.tanh(gu)
+    h = torch.sigmoid(go) * torch.tanh(c)
+    return h, c
+
+
+# The cell is ~10 pointwise kernels per step and the recurrence runs it 2T
+# times with nothing to overlap, so launch latency, not work, sets its cost;
+# fusing them is the whole optimisation. ``script``: TorchScript's pointwise
+# fuser; ``compile``: Inductor (Triton), compiled once per shape.
+_CELLS: dict[str, object] = {
+    "eager": _cell_eager,
+    "script": torch.jit.script(_cell_eager),
+}
+
+
+def _cell_compiled(
+    gx: torch.Tensor, gh: torch.Tensor, c: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    fn = _CELLS.get("_compiled")
+    if fn is None:
+        fn = torch.compile(_cell_eager, dynamic=False)
+        _CELLS["_compiled"] = fn
+    return cast(Callable[..., tuple[torch.Tensor, torch.Tensor]], fn)(gx, gh, c)
+
+
+_CELLS["compile"] = _cell_compiled
 
 
 class RateConvLSTM(nn.Module):
@@ -29,6 +63,8 @@ class RateConvLSTM(nn.Module):
     ``k``-tap 1-D convolution of the previous hidden map, so state at rate bin
     ``g`` is updated from bins ``g ± k // 2`` of the previous frame and that is
     the state's whole reach per frame. The forget-gate bias starts at 1.
+    ``cell`` selects the pointwise-cell implementation: ``"script"`` (fused,
+    default), ``"compile"`` (Inductor) or ``"eager"``.
     """
 
     def __init__(
@@ -38,8 +74,13 @@ class RateConvLSTM(nn.Module):
         kernel_size: int,
         bidirectional: bool = True,
         separable: bool = False,
+        cell: str = "script",
     ) -> None:
         super().__init__()
+        if cell not in ("eager", "script", "compile"):
+            raise ValueError(f"cell must be 'eager', 'script' or 'compile', got {cell!r}")
+        self.cell = cell
+
         if kernel_size % 2 == 0:
             raise ValueError(f"kernel_size must be odd, got {kernel_size}")
         self.hidden, self.kernel_size = int(hidden), int(kernel_size)
@@ -77,10 +118,9 @@ class RateConvLSTM(nn.Module):
         c = gx.new_zeros(b, self.hidden, g)
         outs: list[torch.Tensor] = [h] * t
         steps = range(t - 1, -1, -1) if reverse else range(t)
+        cell = cast(Callable[..., tuple[torch.Tensor, torch.Tensor]], _CELLS[self.cell])
         for s in steps:
-            gi, gf, go, gu = (gx[:, :, s] + h_conv(h)).chunk(4, dim=1)
-            c = torch.sigmoid(gf) * c + torch.sigmoid(gi) * torch.tanh(gu)
-            h = torch.sigmoid(go) * torch.tanh(c)
+            h, c = cell(gx[:, :, s], h_conv(h), c)
             outs[s] = h
         return torch.stack(outs, dim=2)  # (B, hidden, T, G)
 
