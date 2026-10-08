@@ -11,9 +11,12 @@ integer taps, so both models run the same kernel.
 
 from __future__ import annotations
 
+import os
 from typing import cast
 
 import torch
+
+from models.harmonic_ports.tap_conv_triton import HAS_TRITON, tap_conv_triton
 
 __all__ = ["shift_tap_table", "tap_conv"]
 
@@ -111,12 +114,20 @@ def tap_conv(
     chunk_elems: int = 160_000_000,
 ) -> torch.Tensor:
     """``(B, C_in, T, F) -> (B, C_out, T, G)`` for ``weight (J, C_out, C_in)`` and a
-    ``(J, G)`` table. ``chunk_elems`` bounds the gathered block (about three such
-    blocks are alive at once)."""
+    ``(J, G)`` table.
+
+    On CUDA with triton present this runs the fused kernels of
+    `models.harmonic_ports.tap_conv_triton` (``TAP_CONV_TORCH=1`` forces the
+    torch path, for A/B runs). ``chunk_elems`` bounds the torch path's gathered
+    block (about three such blocks are alive at once).
+    """
     fr, va = frac.to(x.dtype), valid.to(x.dtype)
+    wa, wc = (1 - fr) * va, fr * va
+    if x.is_cuda and HAS_TRITON and not os.environ.get("TAP_CONV_TORCH"):
+        return tap_conv_triton(x, weight, bias, lo, wa, wc)
     per_tap = lo.shape[1] * x.shape[0] * x.shape[2] * x.shape[1]
     chunk = max(1, min(int(weight.shape[0]), chunk_elems // max(1, per_tap)))
-    return cast(torch.Tensor, _TapConvFn.apply(x, weight, bias, lo, (1 - fr) * va, fr * va, chunk))
+    return cast(torch.Tensor, _TapConvFn.apply(x, weight, bias, lo, wa, wc, chunk))
 
 
 def shift_tap_table(
