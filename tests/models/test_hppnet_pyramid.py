@@ -13,10 +13,10 @@ import torch
 from models.harmonic_ports.hppnet_pyramid import (
     HPPNetPyramid,
     ProportionalTapConv,
-    RateConvLSTM,
     build_tap_table,
     upsample2_along_freq,
 )
+from models.harmonic_ports.rate_convlstm import RateConvLSTM
 
 N_FFTS: tuple[int, ...] = (2048, 1024, 512)
 LEVEL0_FMAX = 600.0

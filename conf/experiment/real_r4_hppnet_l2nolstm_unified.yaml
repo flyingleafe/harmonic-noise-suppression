@@ -1,0 +1,32 @@
+# @package _global_
+# HPPNet-L2 WITHOUT its FreqGroupLSTM (conf/model/hppnet_l2_nolstm.yaml) on
+# real rung R4 under the unified regime — real_r4_hppnet_l2_unified verbatim
+# except the model. The CQT-side counterpart of real_r4_hppnet_pyr_unified
+# (pyramid, variant C): the pair separates the front end's effect from the
+# recurrence's. Batch doc: docs/experiments/pyramid-harmonic.md.
+defaults:
+  - override /data: e12_real_fullflight
+  - override /model: hppnet_l2_nolstm
+  - override /loss: salience_layers_r150
+  - override /metrics: salience_layers_r150
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: real_r4_hppnet_l2nolstm_unified
+epochs: 200
+patience: 20
+batch_size: 128
+num_workers: 6
+samples_per_validation: null
+data:
+  train:
+    params:
+      path: conf/online_mix/hb_m3s2_dload.yaml
+      duration_s: 2.0
+validation:
+  batch_size: 64
+optim:
+  lr: 0.001
+  weight_decay: 0.0001
+  monitor: rps_mae
+  monitor_mode: min

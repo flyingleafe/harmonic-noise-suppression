@@ -93,6 +93,13 @@ published module so the L0 checkpoints keep loading. ``n_maps > 1`` requires
 it, as in `LateDeepSalience`, because `LayerCRFReadout`'s band and vertex fit
 are defined on a uniform axis. The clamp below the CQT's ``fmin`` (output bins
 0-54 read the bottom input bin) is L2's documented limit and is not moved here.
+
+TEMPORAL-HEAD ABLATIONS (``head``). ``"freq_group_lstm"`` is the published
+module. ``"conv1x1"`` drops the recurrence (a 1x1 to ``n_maps``; the temporal
+model is ``block_6-8`` and the CRF) and ``"convlstm"`` replaces it with
+`models.harmonic_ports.rate_convlstm.RateConvLSTM` — gates convolved along the
+log axis with half-width ``convlstm_half_width`` CQT bins, then a 1x1. The
+two are the CQT-side counterparts of `HPPNetPyramid`'s variants C and A.
 """
 
 from __future__ import annotations
@@ -103,6 +110,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from models.harmonic_ports.layer_readout import LayerCRFReadout
+from models.harmonic_ports.rate_convlstm import RateConvLSTM
 from models.multif0.utils import linear_freq_grid
 from models.salience_rps import FreqSuperResHead, SalienceRPSPredictor
 
@@ -332,6 +340,12 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
             the grid its loss builds (conf/loss/salience_layers_r150.yaml).
         head_hidden, head_kernel: the sharpening stack's width and its
             frequency kernel, `FreqSuperResHead`'s own defaults.
+        head: ``"freq_group_lstm"`` (published), ``"conv1x1"`` (no recurrence)
+            or ``"convlstm"`` (`RateConvLSTM` of width ``lstm_size`` over two
+            directions, then 1x1); module docstring.
+        convlstm_half_width: `RateConvLSTM` gate reach in CQT bins per frame.
+            15 = the raw telemetry's largest sustained per-frame slew at rates
+            on the grid (`updown`, 14.9 log-bins; the rest <= 6).
     """
 
     def __init__(
@@ -357,6 +371,8 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         out_bins: int = 300,
         head_hidden: int = 32,
         head_kernel: int = 5,
+        head: str = "freq_group_lstm",
+        convlstm_half_width: int = 15,
     ):
         super().__init__(n_fft, hop_length, num_rotors)
         if int(n_bins) % int(freq_pool):
@@ -385,7 +401,23 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
             freq_pool=self.freq_pool,
             dilations=dilations,
         )
-        self.head = FreqGroupLSTM(int(embedding), self.n_maps, int(lstm_size), sigmoid=False)
+        self.temporal: nn.Module
+        if head == "freq_group_lstm":
+            self.temporal = nn.Identity()
+            self.head: nn.Module = FreqGroupLSTM(
+                int(embedding), self.n_maps, int(lstm_size), sigmoid=False
+            )
+        elif head == "conv1x1":
+            self.temporal = nn.Identity()
+            self.head = nn.Conv2d(int(embedding), self.n_maps, kernel_size=1)
+        elif head == "convlstm":
+            hidden = int(lstm_size) // 2
+            self.temporal = RateConvLSTM(int(embedding), hidden, 2 * int(convlstm_half_width) + 1)
+            self.head = nn.Conv2d(2 * hidden, self.n_maps, kernel_size=1)
+        else:
+            raise ValueError(
+                f"head must be 'freq_group_lstm', 'conv1x1' or 'convlstm', got {head!r}"
+            )
 
         # Grid descriptor. With the pool off these are the CQT's own bins; with
         # ``freq_pool = n`` output bin j takes the max over input bins
@@ -436,7 +468,7 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         n_time = x.shape[2]
         if self.time_pooling:
             x = F.max_pool2d(x, (2, 1))
-        y = self.head(self.trunk(x))  # (B, n_maps, T', F_out)
+        y = self.head(self.temporal(self.trunk(x)))  # (B, n_maps, T', F_out)
         if self.time_pooling:
             y = F.interpolate(y, size=(n_time, y.shape[-1]), mode="bilinear", align_corners=False)
         y = y.transpose(2, 3)  # (B, n_maps, F_out, T)

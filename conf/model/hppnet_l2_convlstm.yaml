@@ -1,0 +1,46 @@
+# L2 with its FreqGroupLSTM replaced by RateConvLSTM: conf/model/hppnet_l2.yaml
+# with `head: convlstm` — a bidirectional ConvLSTM over time whose gates are
+# 1-D convolutions along the CQT's log axis (48 bins/octave), lstm_size 128
+# split 64 + 64 over the directions, then a 1x1 to the four maps and the
+# FreqSuperResHead onto the 0-150 rev/s / 300-bin linear grid. The CQT-side
+# counterpart of hppnet_pyramid_convlstm (variant A).
+#
+# THE KERNEL. convlstm_half_width 15 CQT bins = the largest SUSTAINED (5-frame
+# mean) per-frame slew in the raw telemetry of the training pools, measured
+# in log bins at rates >= 27.5 rev/s (the CQT floor; below it the superres
+# head clamps to bin 0): `updown` 14.9, FLY125 5.8, `rectangle` 4.4, the rest
+# ~3. Kernel 31: the state at bin g is written from g ± 15 of the previous
+# frame. (15 rev/s per frame at 27.5 rev/s would be 30 bins; the ramps in the
+# data happen at higher rates, where the log axis is coarser in rev/s.)
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_orig
+  n_fft: 2048
+  hop_length: 512
+  num_rotors: 4
+  sr: 16000
+  fmin: 27.5
+  n_bins: 352
+  bins_per_octave: 48
+  c_har: 16
+  embedding: 128
+  lstm_size: 128
+  dilations: [48, 12]
+  freq_pool: 1
+  time_pooling: false
+  n_maps: 4
+  superres_out: true
+  out_fmin: 0.0
+  out_fmax: 150.0
+  out_bins: 300
+  head_hidden: 32
+  head_kernel: 5
+  head: convlstm
+  convlstm_half_width: 15
+model_type: null
+legacy_config_path: null
