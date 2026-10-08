@@ -31,10 +31,10 @@ def _cell_eager(
     return h, c
 
 
-# The cell is ~10 pointwise kernels per step and the recurrence runs it 2T
-# times with nothing to overlap, so launch latency, not work, sets its cost;
-# fusing them is the whole optimisation. ``script``: TorchScript's pointwise
-# fuser; ``compile``: Inductor (Triton), compiled once per shape.
+# Cell implementations. Measured on a T4 (B=16, T=63, G=352, fwd+bwd) once
+# the per-step slicing was fixed: eager 190 ms, TorchScript-fused 217 ms,
+# Inductor 179 ms — the ~10 pointwise kernels per step are not the cost, so
+# the plain function is the default; the others stay selectable.
 _CELLS: dict[str, object] = {
     "eager": _cell_eager,
     "script": torch.jit.script(_cell_eager),
@@ -63,8 +63,8 @@ class RateConvLSTM(nn.Module):
     ``k``-tap 1-D convolution of the previous hidden map, so state at rate bin
     ``g`` is updated from bins ``g ± k // 2`` of the previous frame and that is
     the state's whole reach per frame. The forget-gate bias starts at 1.
-    ``cell`` selects the pointwise-cell implementation: ``"script"`` (fused,
-    default), ``"compile"`` (Inductor) or ``"eager"``.
+    ``cell`` selects the pointwise-cell implementation: ``"eager"`` (default),
+    ``"script"`` (TorchScript fuser) or ``"compile"`` (Inductor).
     """
 
     def __init__(
@@ -74,7 +74,7 @@ class RateConvLSTM(nn.Module):
         kernel_size: int,
         bidirectional: bool = True,
         separable: bool = False,
-        cell: str = "script",
+        cell: str = "eager",
     ) -> None:
         super().__init__()
         if cell not in ("eager", "script", "compile"):
