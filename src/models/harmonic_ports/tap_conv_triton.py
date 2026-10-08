@@ -110,11 +110,13 @@ if HAS_TRITON:
 
     @triton.jit
     def _dw_kernel(
-        XT, LO, WA, WC, GY, GW_PART,
-        T, G, F, R, RPS, SPLITS,
+        XT, LO, WA, WC, GYR, GW_PART,
+        G, F, R, RPS, SPLITS,
         C: tl.constexpr, CO: tl.constexpr,
         BC: tl.constexpr, BO: tl.constexpr, BR: tl.constexpr,
     ):  # fmt: skip
+        # GYR is gy in row-major (N*G, O): row r = n*G + g, O contiguous, so a
+        # (BR, BO) tile is BR coalesced reads instead of BR*BO scattered ones.
         j = tl.program_id(0)
         s = tl.program_id(1)
         offs_c = tl.arange(0, BC)
@@ -129,8 +131,6 @@ if HAS_TRITON:
             rmask = offs_r < r1
             n = offs_r // G
             g = offs_r % G
-            b = n // T
-            t = n % T
             lo = tl.load(LO + j * G + g, mask=rmask, other=0)
             wa = tl.load(WA + j * G + g, mask=rmask, other=0.0).to(tl.float32)
             wc = tl.load(WC + j * G + g, mask=rmask, other=0.0).to(tl.float32)
@@ -139,11 +139,7 @@ if HAS_TRITON:
             xa = tl.load(pa, mask=m, other=0.0).to(tl.float32)
             xc = tl.load(pa + C, mask=m, other=0.0).to(tl.float32)
             a = xa * wa[:, None] + xc * wc[:, None]  # (BR, BC)
-            pgy = (
-                GY
-                + ((b[None, :].to(tl.int64) * CO + offs_o[:, None]) * T + t[None, :]) * G
-                + g[None, :]
-            )
+            pgy = GYR + offs_r[None, :].to(tl.int64) * CO + offs_o[:, None]
             gy = tl.load(pgy, mask=omask[:, None] & rmask[None, :], other=0.0)  # (BO, BR)
             acc += tl.dot(gy, a.to(gy.dtype), input_precision="ieee")
         pw = GW_PART + (j * SPLITS + s) * CO * C + offs_o[:, None] * C + offs_c[None, :]
@@ -211,9 +207,10 @@ if HAS_TRITON:
             rps = triton.cdiv(triton.cdiv(r, _TapConvTritonFn.SPLITS), br) * br
             splits = triton.cdiv(r, rps)
             gw_part = torch.empty((j, splits, o, c), dtype=torch.float32, device=xt.device)
+            gyr = gy.permute(0, 2, 3, 1).reshape(r, o).contiguous()  # (N*G, O), row n*G + g
             _dw_kernel[(j, splits)](  # pyright: ignore[reportArgumentType]
-                xt, lo, wa, wc, gy, gw_part,
-                t, g, f, r, rps, splits,
+                xt, lo, wa, wc, gyr, gw_part,
+                g, f, r, rps, splits,
                 C=c, CO=o, BC=_pow2(c), BO=_pow2(o), BR=br,  # pyright: ignore[reportArgumentType]
                 num_warps=4, num_stages=2,  # pyright: ignore[reportCallIssue]
             )  # fmt: skip

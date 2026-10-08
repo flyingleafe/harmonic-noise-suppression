@@ -496,6 +496,18 @@ def bench_tap_conv(device: torch.device, iters: int, warmup: int, shape: str | N
                 torch.autograd.grad(y, (x, w, bias), gy, retain_graph=True)
 
             rows.append((f"{label} backward", timeit(bwd, device, iters, warmup)))
+            if label == "triton" and os.environ.get("BENCH_PROFILE"):
+                from torch.profiler import ProfilerActivity, profile
+
+                with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                    bwd()
+                    torch.cuda.synchronize()
+                for ev in prof.key_averages():
+                    if any(
+                        k in ev.key
+                        for k in ("_dx_kernel", "_dw_kernel", "_fwd_kernel", "copy_", "sum", "zero")
+                    ):
+                        print(f"    {ev.key[:40]:<40} {ev.device_time_total / 1e3:8.2f} ms")
         _report(rows)
 
     for name, args in cases.items():
