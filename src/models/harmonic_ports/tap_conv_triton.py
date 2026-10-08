@@ -153,9 +153,14 @@ if HAS_TRITON:
         return max(lo, 1 << (int(n) - 1).bit_length())
 
     class _TapConvTritonFn(torch.autograd.Function):
-        BG = 64  # rate bins per program (fwd, dx)
-        BR = 64  # rows per inner step (dw)
         SPLITS = 32  # row splits per tap (dw); partials summed in torch
+
+        @staticmethod
+        def _rows(c: int) -> int:
+            """Rows per program: the ``(rows, BC)`` operand tile plus the
+            ``(BC, BO)`` weight tile must fit a 64 KB shared memory; 64 rows at
+            C = 16, 16 rows at C = 128."""
+            return 64 if c <= 32 else 16
 
         @staticmethod
         def forward(  # type: ignore[override]
@@ -174,11 +179,12 @@ if HAS_TRITON:
             xt = x.permute(0, 2, 3, 1).reshape(n, f, c).contiguous()  # (N, F, C)
             w = weight.to(x.dtype).contiguous()
             y = torch.empty((b, o, t, g), dtype=x.dtype, device=x.device)
-            bg = _TapConvTritonFn.BG
+            bg = _TapConvTritonFn._rows(c)
             _fwd_kernel[(n, triton.cdiv(g, bg))](  # pyright: ignore[reportArgumentType]
                 xt, w, bias.to(torch.float32).contiguous(), lo, wa, wc, y,
                 t, g, f, j,
                 C=c, CO=o, BC=_pow2(c), BO=_pow2(o), BG=bg,  # pyright: ignore[reportArgumentType]
+                num_warps=4, num_stages=2,  # pyright: ignore[reportCallIssue]
             )  # fmt: skip
             ctx.save_for_backward(xt, weight, lo, wa, wc)
             ctx.dims = (b, c, t, f, g)
@@ -192,15 +198,16 @@ if HAS_TRITON:
             n = b * t
             gy = gy.to(xt.dtype).contiguous()
             w = weight.to(xt.dtype).contiguous()
-            bg = _TapConvTritonFn.BG
+            bg = _TapConvTritonFn._rows(c)
             gxt = torch.zeros((n, f, c), dtype=torch.float32, device=xt.device)
             _dx_kernel[(n, triton.cdiv(g, bg))](  # pyright: ignore[reportArgumentType]
                 gxt, w, lo, wa, wc, gy,
                 t, g, f, j,
                 C=c, CO=o, BC=_pow2(c), BO=_pow2(o), BG=bg,  # pyright: ignore[reportArgumentType]
+                num_warps=4, num_stages=2,  # pyright: ignore[reportCallIssue]
             )  # fmt: skip
             r = n * g
-            br = _TapConvTritonFn.BR
+            br = _TapConvTritonFn._rows(c)
             rps = triton.cdiv(triton.cdiv(r, _TapConvTritonFn.SPLITS), br) * br
             splits = triton.cdiv(r, rps)
             gw_part = torch.empty((j, splits, o, c), dtype=torch.float32, device=xt.device)
@@ -208,6 +215,7 @@ if HAS_TRITON:
                 xt, lo, wa, wc, gy, gw_part,
                 t, g, f, r, rps, splits,
                 C=c, CO=o, BC=_pow2(c), BO=_pow2(o), BR=br,  # pyright: ignore[reportArgumentType]
+                num_warps=4, num_stages=2,  # pyright: ignore[reportCallIssue]
             )  # fmt: skip
             gw = gw_part.sum(dim=1)
             gb = gy.float().sum(dim=(0, 2, 3))
