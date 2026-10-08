@@ -220,7 +220,17 @@ class HarmonicDilatedConv(nn.Module):
             self._table = (n_bins, lo.to(device), frac.to(device), valid.to(device))
         return self._table[1:]
 
+    # Measured on a T4 (B=32, full L2 step): fused 0.81x the branch sum at
+    # K = 83 but 1.14x at the published K = 8 — cuDNN's eight small convs beat
+    # the gather there. Both paths are the same function; pick by K.
+    FUSED_FROM: int = 16
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if len(self.convs) < self.FUSED_FROM:
+            y = self.convs[0](x)
+            for conv in list(self.convs)[1:]:
+                y = y + conv(x)
+            return torch.relu(y)
         weight, bias = self._stacked()
         lo, frac, valid = self._table_for(x.shape[-1], x.device)
         return torch.relu(tap_conv(x, weight, bias, lo, frac, valid))

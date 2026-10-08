@@ -224,6 +224,7 @@ def test_harmonic_dilated_conv_matches_the_published_block():
     """
     torch.manual_seed(0)
     mine = HarmonicDilatedConv(4, 6).double()
+    mine.FUSED_FROM = 0  # the fused kernel, which K = 8 would otherwise not take
     theirs = _UpstreamHarmonicDilatedConv(4, 6).double()
     theirs.load_state_dict(_hdc_state(mine))
     x = torch.randn(2, 4, 7, 100, dtype=torch.double, requires_grad=True)
