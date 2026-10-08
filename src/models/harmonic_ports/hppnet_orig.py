@@ -105,6 +105,7 @@ two are the CQT-side counterparts of `HPPNetPyramid`'s variants C and A.
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import numpy as np
 import torch
@@ -113,6 +114,7 @@ import torch.nn.functional as F
 
 from models.harmonic_ports.layer_readout import LayerCRFReadout
 from models.harmonic_ports.rate_convlstm import RateConvLSTM
+from models.harmonic_ports.tap_conv import shift_tap_table, tap_conv
 from models.multif0.utils import linear_freq_grid
 from models.salience_rps import FreqSuperResHead, SalienceRPSPredictor
 
@@ -173,11 +175,22 @@ class FreqGroupLSTM(nn.Module):
 
 
 class HarmonicDilatedConv(nn.Module):
-    """HPPNet's `HarmonicDilatedConv`, verbatim.
+    """HPPNet's `HarmonicDilatedConv`: the published parameters, a fused kernel.
 
     Eight ``Conv2d(c_in, c_out, [1, 3], padding='same', dilation=[1, d])``
     branches summed, then ReLU. Branch ``k`` reads the log axis at an offset of
     ``round(log2(k) * 48)`` bins, which is where the ``k``-th harmonic sits.
+
+    The parameters ARE the branch convolutions (``convs[k].weight`` of shape
+    ``(c_out, c_in, 1, 3)`` and its bias; state-dict keys unchanged, published
+    checkpoints load). The forward is the same function computed once: the
+    sum of ``K`` three-tap dilated convolutions is one sparse convolution with
+    taps at ``{0} ∪ {±d_k}`` — the ``K`` centre matrices collapse into their
+    sum, the biases into theirs — run through `tap_conv` (zero padding is the
+    table's validity mask). Per parameter the gradients are those of the
+    branch sum, so training dynamics are unchanged as well. With 83 branches
+    the branch sum wrote 83 full ``(B, c_out, T, F)`` outputs per forward; the
+    fused form writes one.
     """
 
     def __init__(self, c_in: int, c_out: int, dilations: tuple[int, ...] = HPPNET_DILATIONS):
@@ -188,12 +201,29 @@ class HarmonicDilatedConv(nn.Module):
                 for d in dilations
             ]
         )
+        d = torch.as_tensor([int(x) for x in dilations], dtype=torch.int64)
+        self.register_buffer(
+            "offsets", torch.cat([-d, torch.zeros(1, dtype=d.dtype), d]), persistent=False
+        )
+        self._table: tuple[int, torch.Tensor, torch.Tensor, torch.Tensor] | None = None
+
+    def _stacked(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """``(2K + 1, c_out, c_in)`` tap weights in `offsets` order and the summed bias."""
+        w = torch.stack([cast(nn.Conv2d, c).weight[:, :, 0] for c in self.convs])  # (K, O, C, 3)
+        weight = torch.cat([w[:, :, :, 0], w[:, :, :, 1].sum(0, keepdim=True), w[:, :, :, 2]])
+        bias = torch.stack([cast(torch.Tensor, cast(nn.Conv2d, c).bias) for c in self.convs]).sum(0)
+        return weight, bias
+
+    def _table_for(self, n_bins: int, device: torch.device) -> tuple[torch.Tensor, ...]:
+        if self._table is None or self._table[0] != n_bins or self._table[1].device != device:
+            lo, frac, valid = shift_tap_table(cast(torch.Tensor, self.offsets).cpu(), n_bins)
+            self._table = (n_bins, lo.to(device), frac.to(device), valid.to(device))
+        return self._table[1:]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        y = self.convs[0](x)
-        for conv in self.convs[1:]:
-            y = y + conv(x)
-        return torch.relu(y)
+        weight, bias = self._stacked()
+        lo, frac, valid = self._table_for(x.shape[-1], x.device)
+        return torch.relu(tap_conv(x, weight, bias, lo, frac, valid))
 
 
 def _conv2d_block(

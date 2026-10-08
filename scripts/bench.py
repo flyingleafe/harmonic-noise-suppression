@@ -346,6 +346,51 @@ def bench_hppnet_pyramid(device: torch.device, iters: int, warmup: int, shape: s
             print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=25))
 
 
+def bench_hppnet_l2(device: torch.device, iters: int, warmup: int, shape: str | None) -> None:
+    """Full-step forward+backward of `HPPNetOrig` (L2, conv head) by harmonic reach.
+
+    ``--shape B,SAMPLES,N_BINS,K_MAX`` (default ``128,32000,385,84``: the
+    real_r4_hppnet_l2k84nolstm_unified batch). The fused `HarmonicDilatedConv`
+    is compared with the literal branch sum it replaces (same parameters).
+    """
+    from models.harmonic_ports.hppnet_orig import HarmonicDilatedConv, HPPNetOrig
+
+    b, samples, n_bins, k_max = _shape(shape, (128, 32000, 385, 84))
+    torch.backends.cudnn.benchmark = True
+    torch.manual_seed(0)
+    model = (
+        HPPNetOrig(n_maps=4, superres_out=True, head="conv1x1", n_bins=n_bins, harmonic_k_max=k_max)
+        .to(device)
+        .train()
+    )
+    audio = torch.randn(b, samples, device=device)
+    amp_dtype = torch.float16 if device.type == "cuda" else torch.bfloat16
+    print(
+        f"hppnet_l2, B={b} samples={samples} n_bins={n_bins} k_max={k_max} "
+        f"params={sum(p.numel() for p in model.parameters()):,}, {device.type}"
+    )
+
+    def step() -> None:
+        model.zero_grad(set_to_none=True)
+        with torch.autocast(device.type, dtype=amp_dtype):
+            out = model(audio)
+        out.float().pow(2).mean().backward()
+
+    rows = [("fused HarmonicDilatedConv", timeit(step, device, iters, warmup))]
+
+    def branch_sum(self: HarmonicDilatedConv, x: torch.Tensor) -> torch.Tensor:
+        y = self.convs[0](x)
+        for conv in list(self.convs)[1:]:
+            y = y + conv(x)
+        return torch.relu(y)
+
+    model.trunk.conv_3.forward = branch_sum.__get__(model.trunk.conv_3)  # type: ignore[method-assign]
+    rows.append(("branch sum (published form)", timeit(step, device, iters, warmup)))
+    _report(rows)
+    if device.type == "cuda":
+        print(f"  peak allocated {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB")
+
+
 def bench_rate_convlstm(device: torch.device, iters: int, warmup: int, shape: str | None) -> None:
     """`RateConvLSTM` forward+backward by cell implementation (eager / script / compile).
 
@@ -399,6 +444,7 @@ TARGETS: dict[str, Callable[[torch.device, int, int, str | None], None]] = {
     "cqt": bench_cqt,
     "grouped_branches": bench_grouped_branches,
     "hppnet_pyramid": bench_hppnet_pyramid,
+    "hppnet_l2": bench_hppnet_l2,
     "noise_gen": bench_noise_gen,
     "rate_convlstm": bench_rate_convlstm,
 }

@@ -215,13 +215,45 @@ def test_mrdconv_matches_the_published_block():
     assert torch.equal(mine(x), theirs(x))
 
 
-@torch.no_grad()
 def test_harmonic_dilated_conv_matches_the_published_block():
-    mine = HarmonicDilatedConv(4, 6)
-    theirs = _UpstreamHarmonicDilatedConv(4, 6)
+    """Same function and same per-parameter gradients as the upstream branch sum.
+
+    The fused kernel sums the taps in a different order, so fp64 with a
+    tolerance, not `torch.equal`; the grid is smaller than the largest dilation
+    so the zero-padding path is exercised.
+    """
+    torch.manual_seed(0)
+    mine = HarmonicDilatedConv(4, 6).double()
+    theirs = _UpstreamHarmonicDilatedConv(4, 6).double()
     theirs.load_state_dict(_hdc_state(mine))
-    x = torch.randn(2, 4, 7, N_BINS)
-    assert torch.equal(mine(x), theirs(x))
+    x = torch.randn(2, 4, 7, 100, dtype=torch.double, requires_grad=True)
+    y_mine, y_theirs = mine(x), theirs(x)
+    assert torch.allclose(y_mine, y_theirs, atol=1e-12)
+    gy = torch.randn_like(y_mine)
+    g_mine = torch.autograd.grad(y_mine, [x, *mine.parameters()], gy)
+    g_theirs = torch.autograd.grad(y_theirs, [x, *theirs.parameters()], gy)
+    for a, b in zip(g_mine, g_theirs, strict=True):
+        assert torch.allclose(a, b, atol=1e-12)
+
+
+def test_harmonic_dilated_conv_extended_branches_match_the_branch_sum():
+    """`harmonic_k_max` > 9 appends branches to the same operator; the published
+    eight stay the first eight, and the fused forward is still the branch sum."""
+    dil = tuple(round(np.log2(k) * 48) for k in range(2, 85))
+    assert dil[:8] == HPPNET_DILATIONS and dil[-1] == 307
+    torch.manual_seed(0)
+    mine = HarmonicDilatedConv(3, 5, dil).double()
+    x = torch.randn(1, 3, 4, 385, dtype=torch.double, requires_grad=True)
+    ref = torch.relu(sum(c(x) for c in mine.convs))
+    y = mine(x)
+    assert torch.allclose(y, ref, atol=1e-12)
+    gy = torch.randn_like(y)
+    for a, b in zip(
+        torch.autograd.grad(y, [x, *mine.parameters()], gy),
+        torch.autograd.grad(ref, [x, *mine.parameters()], gy),
+        strict=True,
+    ):
+        assert torch.allclose(a, b, atol=1e-12)
 
 
 def test_the_harmonic_offsets_are_the_published_numbers():
