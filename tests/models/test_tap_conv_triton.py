@@ -31,21 +31,43 @@ def _torch_path(x, w, b, lo, frac, valid) -> torch.Tensor:
 
 
 def _compare(x, w, b, lo, frac, valid, *, rtol, atol):
+    """Triton (in ``x.dtype``) and the torch path (in ``x.dtype``) against the torch
+    path in fp32 on the same values. The fp16 torch path rounds its dW GEMM output
+    to fp16, so it is not a reference for the fp32-accumulating kernel."""
     lo = lo.to(DEV)
     frac, valid = frac.to(DEV), valid.to(DEV)
+    x32 = x.detach().float().requires_grad_(True)
+    w32 = w.detach().float().requires_grad_(True)
+    b32 = b.detach().float().requires_grad_(True)
+    y_ref = _torch_path(x32, w32, b32, lo, frac, valid)
+    gy = torch.randn_like(y_ref)
+    g_ref = torch.autograd.grad(y_ref, (x32, w32, b32), gy)
+
     x_t = x.detach().clone().requires_grad_(True)
     w_t = w.detach().clone().requires_grad_(True)
     b_t = b.detach().clone().requires_grad_(True)
     fr, va = frac.to(x.dtype), valid.to(x.dtype)
     y_tri = tap_conv_triton(x_t, w_t, b_t, lo, (1 - fr) * va, fr * va)
-    y_ref = _torch_path(x, w, b, lo, frac, valid)
     assert y_tri.shape == y_ref.shape
-    torch.testing.assert_close(y_tri.float(), y_ref.float(), rtol=rtol, atol=atol)
-    gy = torch.randn_like(y_ref)
-    g_tri = torch.autograd.grad(y_tri, (x_t, w_t, b_t), gy)
-    g_ref = torch.autograd.grad(y_ref, (x, w, b), gy)
-    for name, a, r in zip(("dx", "dW", "db"), g_tri, g_ref, strict=True):
-        torch.testing.assert_close(a.float(), r.float(), rtol=rtol, atol=atol, msg=name)
+    torch.testing.assert_close(y_tri.float(), y_ref, rtol=rtol, atol=atol, msg=lambda m: f"y: {m}")
+    g_tri = torch.autograd.grad(y_tri, (x_t, w_t, b_t), gy.to(y_tri.dtype))
+    # The same-dtype torch path, held to the same tolerance: if it fails too, the
+    # tolerance is unrealistic for the dtype, not the kernel.
+    x_p = x.detach().clone().requires_grad_(True)
+    w_p = w.detach().clone().requires_grad_(True)
+    b_p = b.detach().clone().requires_grad_(True)
+    y_tor = _torch_path(x_p, w_p, b_p, lo, frac, valid)
+    g_tor = torch.autograd.grad(y_tor, (x_p, w_p, b_p), gy.to(y_tor.dtype))
+    for impl, got in (("torch", g_tor), ("triton", g_tri)):
+        for name, a, r in zip(("dx", "dW", "db"), got, g_ref, strict=True):
+            scale = r.abs().max().clamp_min(1.0)  # dW/db are sums over ~10^5 rows
+            torch.testing.assert_close(
+                a.float() / scale,
+                r / scale,
+                rtol=rtol,
+                atol=atol,
+                msg=lambda m, n=f"{impl} {name}": f"{n}: {m}",
+            )
 
 
 def _random_case(seed, b, c, t, f, g, j, dtype):
