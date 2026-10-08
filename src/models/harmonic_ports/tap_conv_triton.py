@@ -68,7 +68,7 @@ if HAS_TRITON:
                 mask=cmask[:, None] & omask[None, :],
                 other=0.0,
             )  # (BC, BO)
-            acc += tl.dot(a.to(w.dtype), w)
+            acc += tl.dot(a.to(w.dtype), w, input_precision="ieee")
         py = Y + ((b.to(tl.int64) * CO + offs_o[None, :]) * T + t) * G + offs_g[:, None]
         tl.store(py, acc.to(Y.dtype.element_ty), mask=gmask[:, None] & omask[None, :])
 
@@ -102,7 +102,7 @@ if HAS_TRITON:
                 mask=omask[:, None] & cmask[None, :],
                 other=0.0,
             )  # (BO, BC)
-            gh = tl.dot(gy.to(wt.dtype), wt)  # (BG, BC) fp32
+            gh = tl.dot(gy.to(wt.dtype), wt, input_precision="ieee")  # (BG, BC) fp32
             pa = grow + lo[:, None] * C + offs_c[None, :]
             m = gmask[:, None] & cmask[None, :]
             tl.atomic_add(pa, gh * wa[:, None], mask=m)
@@ -145,7 +145,7 @@ if HAS_TRITON:
                 + g[None, :]
             )
             gy = tl.load(pgy, mask=omask[:, None] & rmask[None, :], other=0.0)  # (BO, BR)
-            acc += tl.dot(gy, a.to(gy.dtype))
+            acc += tl.dot(gy, a.to(gy.dtype), input_precision="ieee")
         pw = GW_PART + (j * SPLITS + s) * CO * C + offs_o[:, None] * C + offs_c[None, :]
         tl.store(pw, acc, mask=omask[:, None] & cmask[None, :])
 

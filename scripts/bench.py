@@ -439,6 +439,69 @@ def bench_rate_convlstm(device: torch.device, iters: int, warmup: int, shape: st
             print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
 
 
+def bench_tap_conv(device: torch.device, iters: int, warmup: int, shape: str | None) -> None:
+    """`tap_conv` alone: forward and backward separately, Triton vs the torch path.
+
+    ``--shape B,T`` (default ``64,63``: the 2 s training batch). Two production
+    tables: the pyramid's ``conv_3`` (k ≤ 84 on the 154-bin grid, 91 taps,
+    C 16 → O 128 off 4715 pyramid bins) and its ``block_4`` (3 taps, 128 → 128
+    on the output grid). fp16 inputs as under autocast.
+    """
+    from models.harmonic_ports.hppnet_pyramid import HPPNetPyramid
+    from models.harmonic_ports.tap_conv import _TapConvFn
+    from models.harmonic_ports.tap_conv_triton import HAS_TRITON, tap_conv_triton
+
+    b, t = _shape(shape, (64, 63))
+    torch.manual_seed(0)
+    m = HPPNetPyramid(out_bins=154, k_max=84)
+    cases = {
+        "conv_3 (91 taps, 16->128, F=4715, G=154)": (
+            m.harm_lo,
+            m.harm_frac,
+            m.harm_valid,
+            16,
+            128,
+            m.cat_width,
+        ),
+        "block_4 (3 taps, 128->128, F=G=154)": (m.oct_lo, m.oct_frac, m.oct_valid, 128, 128, 154),
+    }
+    use_triton = HAS_TRITON and device.type == "cuda"
+
+    def one(name: str, lo, frac, valid, c: int, o: int, f: int) -> None:
+        lo_t = torch.as_tensor(lo).to(device)
+        fr = torch.as_tensor(frac).to(device, torch.float16)
+        va = torch.as_tensor(valid).to(device, torch.float16)
+        wa, wc = (1 - fr) * va, fr * va
+        j = lo_t.shape[0]
+        x = torch.randn(b, c, t, f, device=device, dtype=torch.float16, requires_grad=True)
+        w = (torch.randn(j, o, c, device=device) / (c * j) ** 0.5).requires_grad_(True)
+        bias = torch.zeros(o, device=device, requires_grad=True)
+        print(f"tap_conv {name}, B={b} T={t}, {device.type}")
+        rows: list[tuple[str, float]] = []
+
+        def fwd_torch() -> torch.Tensor:
+            return cast(torch.Tensor, _TapConvFn.apply(x, w, bias, lo_t, wa, wc, 8))
+
+        def fwd_triton() -> torch.Tensor:
+            return tap_conv_triton(x, w, bias, lo_t, wa.float(), wc.float())
+
+        impls = [("torch", fwd_torch)] + ([("triton", fwd_triton)] if use_triton else [])
+        for label, fn in impls:
+            with torch.no_grad():
+                rows.append((f"{label} forward", timeit(fn, device, iters, warmup)))
+            y = fn()
+            gy = torch.randn_like(y)
+
+            def bwd(y: torch.Tensor = y, gy: torch.Tensor = gy) -> None:
+                torch.autograd.grad(y, (x, w, bias), gy, retain_graph=True)
+
+            rows.append((f"{label} backward", timeit(bwd, device, iters, warmup)))
+        _report(rows)
+
+    for name, args in cases.items():
+        one(name, *args)
+
+
 TARGETS: dict[str, Callable[[torch.device, int, int, str | None], None]] = {
     "ckla_scan": bench_ckla_scan,
     "cqt": bench_cqt,
@@ -447,6 +510,7 @@ TARGETS: dict[str, Callable[[torch.device, int, int, str | None], None]] = {
     "hppnet_l2": bench_hppnet_l2,
     "noise_gen": bench_noise_gen,
     "rate_convlstm": bench_rate_convlstm,
+    "tap_conv": bench_tap_conv,
 }
 
 
