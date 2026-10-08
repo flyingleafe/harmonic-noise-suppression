@@ -149,10 +149,73 @@ tables with duplicates/invalid entries and on the real k ≤ 84 pyramid and
 CQT tables. A100, B=64, fwd+bwd: conv_3 (91 taps) 127 → 34 ms, block_4
 (C=128) 37 → 11.6 ms; full pyramid step 498 → 293 ms (1.70×); the
 taps are now ~25 % of the step. The T4 is not a target (sm_75: fp16 dot
-failed to lower in Triton 3.3). On the CQT arm the kernel ties cuDNN's 83
-branch convs (579 ms both), so `HarmonicDilatedConv` keeps the branch sum.
+failed to lower in Triton 3.3). On the CQT arm the first (T4) measurement
+tied cuDNN's 83 branch convs; the A100 one (`--target hppnet_l2`, B=64,
+385 bins, k ≤ 84) did not: branch sum 551 ms vs fused 239 ms per step, so
+`HarmonicDilatedConv.FUSED_FROM = 16` — the published k ≤ 9 stays on the
+branch sum, the k ≤ 84 arm was resumed on the fused path at epoch 20
+(`hppnet-l2k84nolstm-r3-939d4b`, 1.24 s/it → 1.9 it/s).
 The `dx` atomics (19 ms) are the remaining tap cost; an inverse-table gather
 (no atomics, ~2.6× the forward's dot work) is the next step if needed.
+
+**Round-2 diagnosis (2026-10-08, probes on the held-out
+`free-flight_nosource_room1`, mic 0, cruise 2 s clips; `best_real_overall`
+checkpoints at pyrk84 epoch 13 / l2k84 epoch 6).** At the time of the probe
+the panel read pyr 2.69 → pyrk84 2.67 and l2nolstm 2.45 → l2k84 2.31
+(`val/real_overall`; per view pyrk84 is *worse* on the DREGON views r1/r2
+3.73/3.42 vs 3.58/3.28 and better only on `real_nosource`/FLY124).
+
+1. *Band knock-out.* Low-passing the clips at 1.2 kHz (k ≤ 15 at 80 rev/s)
+   leaves pyrk84 unchanged (2.99 → 2.73 PIT-MAE) and costs l2k84 0.7
+   (2.57 → 3.26); the k ≤ 32 pyramid collapses (3.10 → 13.6) and l2nolstm
+   loses 3 (1.72 → 4.72). Every model outputs zero on a clip with the band
+   below 1.2 kHz removed (the empty low band reads as "no rotor"), so only
+   the low-pass row is interpretable: **pyrk84 does not use anything above
+   1.2 kHz; the CQT k ≤ 84 arm does.**
+2. *Tap knock-out by order* (zeroing `conv_3.weight[k]` / the `+d_k` branch
+   tap, 12 clips, mean PIT-MAE): pyrk84 2.85 all taps → 2.76 without k ≥ 16
+   → **1.94 without k ≥ 31 → 1.56 without k ≥ 61**; l2k84 2.55 → 19.6 (k ≥ 16
+   removed: it leans on 1.2–2.4 kHz) → 2.41 → **1.88 without k ≥ 61**. In
+   both families the taps that read above 4.8 kHz (pyramid level 3) are
+   *harmful* on DREGON cruise, twice as much on the pyramid (−1.29 vs −0.67
+   rev/s when removed); the k = 31–60 taps help both by a similar amount
+   (pyramid 0.38, CQT 0.53). The null panel delta is level 3's harm
+   cancelling level 2's gain. The k ≤ 32 pyramid is also better without its
+   top taps (k ≥ 16: 3.00 → 2.39).
+3. *The signal is there.* Rate-synchronous average spectrum of the recording
+   (8 mics, telemetry × 0.9935 — the acoustic rate is 0.65 % below
+   `motors_measured`): per-rotor lines at **k = 14, 42, 70** (motor-pole
+   multiples; 3–5 dB per frame at the tap position), weak at 28/56, nothing
+   at 84. Per-frame tap contrast at k = 70 is 4.3 dB and *does not depend on
+   the window* (4.7 at 1 s, 5.1 at 16 ms; contrast = dB at the tap over the
+   median of the ±300 Hz band): the slew-smear argument for short windows up
+   top (design note § 2) buys nothing at the tap position on DREGON cruise.
+   The k = 70 tap discriminates the right hypothesis from one 1 rev/s off by
+   3.9 dB at level 3, so the level-3 harm is learned, not inherent.
+4. *Grid-offset sweep* (resampling the clips so the rates move through one
+   0.977 rev/s cell): no dependence of |err| or of the logit at the true bin
+   on the distance to the nearest grid point, for any arm. The pyramid's
+   tap misalignment (harmonic k of a mid-cell rate sits `k·0.49/Δf_l` bins
+   from the nearest hypothesis' tap — 3–7 bins at the top of every level
+   against a 2-bin Hann half-lobe; the CQT's is ≤ 0.5 bin for every k) is
+   therefore absorbed by the learned blur, not visible at the output.
+5. *Code checks, no bug found:* `build_tap_table` level assignment, ceilings
+   (`lo + 1` always inside its level), `f_min`/`f_max` masks (91/91 taps
+   valid at 80 rev/s), per-level `InstanceNorm` (per call, no train/eval
+   mismatch), FPN upsampling alignment, shared frame grid. **One config
+   regression:** on the 154-bin grid `block_4`'s `2r` tap is masked for
+   r > 73.2 rev/s (ceiling `(G−2)·Δr`), i.e. across the whole DREGON cruise
+   band; the 307-bin k ≤ 32 arm had it to 148 rev/s and the CQT's octave
+   dilation always has it. Not the cause of item 2 but a confound of the
+   k ≤ 32 → k ≤ 84 comparison.
+
+Reading: the pyramid reads its high harmonics as well as the CQT does up to
+level 2 (k ≤ 60, < 4.8 kHz); level 3 (128 ms window, 7.8 Hz bins) is what
+it does not profit from, and since the k = 70 line keeps its contrast at a
+1 s window, level 3's short window buys nothing on this data. Next arms
+(not run): (a) pyrk84 with `k_max` 60 (reads to 4.8 kHz, drops level 3 from
+the taps) and `out_bins` 307 to restore the `2r` tap, (b) a pyramid whose
+top level keeps the 4096 window to 8 kHz.
 
 ## Results
 
