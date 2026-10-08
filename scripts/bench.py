@@ -376,6 +376,7 @@ def bench_hppnet_l2(device: torch.device, iters: int, warmup: int, shape: str | 
             out = model(audio)
         out.float().pow(2).mean().backward()
 
+    model.trunk.conv_3.FUSED_FROM = 0  # the fused kernel regardless of the class threshold
     rows = [("fused HarmonicDilatedConv", timeit(step, device, iters, warmup))]
 
     def branch_sum(self: HarmonicDilatedConv, x: torch.Tensor) -> torch.Tensor:
