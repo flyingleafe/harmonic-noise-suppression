@@ -1,0 +1,39 @@
+# hppnet_pyramid_k84 — conf/model/hppnet_pyramid.yaml with the grid cut to
+# 0-150 rev/s and the harmonic taps extended to k = 84 (head: 1x1, variant C).
+#
+# WHY. At the data's 60-90 rev/s, k_max 32 reads up to 1.9-2.9 kHz, so the
+# pyramid's levels 2 and 3 (2.4-8 kHz) were never read by the taps in the
+# first arm — the model was effectively two levels. DREGON's rotor comb is
+# strong around 6 kHz (harmonics ~40-80); k_max 84 reaches 7.5 kHz (f_max)
+# from 89 rev/s up and 84 harmonics below that. 91 taps (84 + 7 sub-harmonic).
+#
+# THE GRID. out_bins 154 at level 0's step 0.9765625 rev/s -> 0 .. 149.41,
+# the L2 rows' range, so training losses are comparable across families and
+# the G-proportional stages (taps, block_4/5, block_6-8) halve: the step is
+# ~15 % cheaper than the 307-bin / k_max 32 arm despite 2.3x the taps.
+# Loss/metrics twins: conf/{loss,metrics}/salience_layers_pyr154.yaml
+# (out_fmax = 153 * 0.9765625 = 149.4140625, out_bins 154, focus 61).
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_pyramid
+  sr: 16000
+  hop_length: 512
+  num_rotors: 4
+  n_ffts: [16384, 8192, 4096, 2048]
+  level0_fmax: 1200.0
+  out_bins: 154
+  k_max: 84
+  k_sub: 8
+  f_min: null
+  f_max: 7500.0
+  c_har: 16
+  embedding: 128
+  n_maps: 4
+  head: conv1x1
+model_type: null
+legacy_config_path: null

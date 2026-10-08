@@ -1,0 +1,18 @@
+# conf/loss/salience_layers_pyr.yaml on the 0-150 rev/s pyramid grid: linear
+# 0 -> 149.4140625 rev/s in 154 bins (0.9765625 rev/s per bin = level 0's STFT
+# bin width, 16000 / 16384; 149.4140625 = 153 * 0.9765625). Same range as the
+# L2 rows' salience_layers_r150 (300 bins at 0.5), so the per-bin BCE of the
+# two families is on the same footing. focus = G / (sqrt(2 pi) sigma) =
+# 154 / 2.507 = 61.
+terms:
+  - name: bce
+    _target_: losses.LayerPITSalienceBCELoss
+    weight: 1.0
+    params:
+      out_fmin: 0.0
+      out_fmax: 149.4140625
+      out_bins: 154
+      n_layers: 4
+      sigma_bins: 1.0
+      focus: 61.0
+      rate: [16000, 512]

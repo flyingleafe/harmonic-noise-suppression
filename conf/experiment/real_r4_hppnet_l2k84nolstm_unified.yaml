@@ -1,0 +1,35 @@
+# @package _global_
+# HPPNet-L2 without FreqGroupLSTM, CQT extended to 7.04 kHz (385 bins) and
+# HarmonicDilatedConv extended to k = 84 (conf/model/hppnet_l2k84_nolstm.yaml),
+# real rung R4 under the unified regime — real_r4_hppnet_l2nolstm_unified's
+# recipe with the model swapped. Read against real_r4_hppnet_pyrk84_unified
+# (pyramid, same k set), the pair that isolates the front end with the high
+# harmonics in play, and against real_r4_hppnet_l2nolstm_unified (k = 9,
+# 4.4 kHz) for what the high harmonics are worth on the CQT.
+# Batch doc: docs/experiments/pyramid-harmonic.md.
+defaults:
+  - override /data: e12_real_fullflight
+  - override /model: hppnet_l2k84_nolstm
+  - override /loss: salience_layers_r150
+  - override /metrics: salience_layers_r150
+  - override /validation: rps_unified
+  - _self_
+
+experiment_name: real_r4_hppnet_l2k84nolstm_unified
+epochs: 200
+patience: 20
+batch_size: 128
+num_workers: 6
+samples_per_validation: null
+data:
+  train:
+    params:
+      path: conf/online_mix/hb_m3s2_dload.yaml
+      duration_s: 2.0
+validation:
+  batch_size: 64
+optim:
+  lr: 0.001
+  weight_decay: 0.0001
+  monitor: rps_mae
+  monitor_mode: min

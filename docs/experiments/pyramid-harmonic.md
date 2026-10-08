@@ -34,16 +34,40 @@ split under the historical recipe).
 
 ## Arms
 
-| experiment | model | temporal model | status |
-|---|---|---|---|
-| `real_r4_hppnet_pyr_unified` | `hppnet_pyramid` (4 levels, 307-bin grid, 0.45 M params) | temporal convs + CRF (no LSTM) | restarted on `vast` A100 2026-10-08 on the fixed tap conv (`hppnet-pyr-unified-64a67e`, 1.74 it/s, ~9.6 min/epoch); the first A100 run (`-6980ca`, slow kernel, 3 epochs) was cancelled |
-| `real_r4_hppnet_pyrlstm_unified` | `hppnet_pyramid` + `RateConvLSTM` head (1.60 M params) | bidirectional ConvLSTM, 33-tap gate conv along rate (±16 bins per frame = the telemetry's largest sustained slew, 15 rev/s per frame) | submitted 2026-10-08 to `vast` A100 after the optimisation rounds below |
-| `real_r4_hppnet_l2nolstm_unified` | HPPNet-L2 (CQT) with `head: conv1x1` (0.43 M) | temporal convs + CRF (no LSTM) — the CQT-side counterpart of variant C | `vast` A100 `hppnet-l2nolstm-88d4e8`, 3.6 it/s at batch 128 |
-| `real_r4_hppnet_l2convlstm_unified` | HPPNet-L2 (CQT) with `head: convlstm` (1.51 M) | `RateConvLSTM` on the log axis, half-width 15 CQT bins (= the telemetry's largest sustained slew at r ≥ 27.5: `updown` 14.9 log-bins/frame) — the CQT-side counterpart of variant A | first run `-e09290` (2 s/it, slicing bug below) cancelled at epoch 3; resubmitted on the fix |
+**Round 1 (k ≤ 32 / k ≤ 9, stopped 2026-10-08).** Best `val/real_overall`
+(rev/s, unified panel, one seed) at the stop:
 
-The 2×2 — {CQT, pyramid} × {no recurrence, ConvLSTM} — plus the published
-`real_r4_hppnet_l2_unified` (CQT + `FreqGroupLSTM`) separates the front
-end's contribution from the temporal model's.
+| experiment | model | temporal model | best real_overall (epoch) | status |
+|---|---|---|---|---|
+| `real_r4_hppnet_pyr_unified` | `hppnet_pyramid` (4 levels, 307-bin grid, k ≤ 32, 0.45 M params) | temporal convs + CRF (no LSTM) | 2.69 (5; never improved after) | `hppnet-pyr-unified-64a67e`, 1.74 it/s, cancelled at round 68 |
+| `real_r4_hppnet_pyrlstm_unified` | `hppnet_pyramid` + `RateConvLSTM` head (1.60 M) | bidirectional ConvLSTM, 33-tap gate conv along rate (±16 bins per frame = the telemetry's largest sustained slew, 15 rev/s per frame) | **2.17** (34) | `hppnet-pyrlstm-c5c30d`, 1.21 it/s, cancelled at round 40 |
+| `real_r4_hppnet_l2nolstm_unified` | HPPNet-L2 (CQT, k ≤ 9) with `head: conv1x1` (0.43 M) | temporal convs + CRF (no LSTM) | 2.45 (24) | `hppnet-l2nolstm-88d4e8`, 3.6 it/s, saturation stop at round 77 |
+| `real_r4_hppnet_l2convlstm_unified` | HPPNet-L2 (CQT, k ≤ 9) with `head: convlstm` (1.51 M) | `RateConvLSTM` on the log axis, half-width 15 CQT bins (= the telemetry's largest sustained slew at r ≥ 27.5: `updown` 14.9 log-bins/frame) | **2.16** (23) | `hppnet-l2convlstm-4051fc` (restart of `-e09290`, slicing bug below), cancelled at round 77 |
+
+Reading: the ConvLSTM head is worth ~0.3–0.5 on both front ends (2.16/2.17
+vs 2.45/2.69) and lands where the published L2 sits (`hppnet_l2_r2_s0` 2.27
+on the frozen split, `nv2_mixed_hppnet_l2` 2.25 on this panel); the pyramid
+shows no margin over the CQT. The round was stopped on a diagnosis, not on
+these numbers: at the data's 60–90 rev/s, k_max 32 reads up to 1.9–2.9 kHz,
+so pyramid levels 2 and 3 (2.4–8 kHz) were never read by the taps, and on
+the CQT side the grid ends at 4.37 kHz with k ≤ 9 — neither family saw
+DREGON's strong rotor comb around 6 kHz (harmonics ~40–80). The loss grids
+also differed (0–299 vs 0–150), which made the training losses only roughly
+comparable.
+
+**Round 2 (k ≤ 84, conv-only heads, submitted 2026-10-08).**
+
+| experiment | model | status |
+|---|---|---|
+| `real_r4_hppnet_pyrk84_unified` | `hppnet_pyramid` on 0–150 rev/s (154 bins), taps k ≤ 84 + 1/2..1/8 (91), `f_max` 7.5 kHz, `head: conv1x1` (0.56 M) | `vast` A100 |
+| `real_r4_hppnet_l2k84nolstm_unified` | HPPNet-L2, CQT 385 bins (to 7.04 kHz), `HarmonicDilatedConv` k = 2..84 (83 branches, the published eight first and unchanged), `head: conv1x1` (0.90 M) | `vast` A100 |
+
+Same k set, same sub-harmonics, same head, same loss range; the only
+difference is the axis (CQT: Δf/k = 0.0145·r at every k, so high harmonics
+add evidence, not resolution; pyramid level 3: 7.8 Hz bins → 0.13 rev/s per
+harmonic at k = 60). The pyramid step is ~15 % cheaper than round 1's
+despite 2.3× the taps (halving G pays for them). The published
+`real_r4_hppnet_l2_unified` (CQT + `FreqGroupLSTM`) has still never been run.
 
 Placement notes. `uni-gpushort` was full (two `kla-loglinear` jobs holding both
 slots behind a 53-job backlog), so the smoke was repinned to `vast`. The first

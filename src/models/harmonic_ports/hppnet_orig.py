@@ -104,6 +104,8 @@ two are the CQT-side counterparts of `HPPNetPyramid`'s variants C and A.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -328,6 +330,11 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         dilations: ``block_4``/``block_5`` frequency dilations. The published
             ``(48, 12)`` is one octave on each block's own axis only when the
             frequency pool is on (deviation 3).
+        harmonic_k_max: `HarmonicDilatedConv` reads harmonics ``2..harmonic_k_max``
+            at offsets ``round(log2(k) * bins_per_octave)`` — the published
+            branch list is ``k_max = 9`` (`HPPNET_DILATIONS`). Larger values
+            only append branches; the operator itself is unchanged. Harmonics
+            above the grid's top bin fall into the zero padding.
         freq_pool, time_pooling: the two published pools (deviations 1 and 2).
         n_maps: salience maps emitted. > 1 stacks per-rotor layers along the
             output axis for `LayerCRFReadout` and needs ``superres_out=True``.
@@ -362,6 +369,7 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         embedding: int = 128,
         lstm_size: int = 128,
         dilations: tuple[int, int] = (48, 12),
+        harmonic_k_max: int = 9,
         freq_pool: int = 1,
         time_pooling: bool = False,
         n_maps: int = 1,
@@ -394,12 +402,16 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
             bins_per_octave=int(bins_per_octave),
             filter_scale=float(filter_scale),
         )
+        harmonic_dilations = tuple(
+            round(math.log2(k) * int(bins_per_octave)) for k in range(2, int(harmonic_k_max) + 1)
+        )
         self.trunk = CNNTrunk(
             c_in=1,
             c_har=int(c_har),
             embedding=int(embedding),
             freq_pool=self.freq_pool,
             dilations=dilations,
+            harmonic_dilations=harmonic_dilations,
         )
         self.temporal: nn.Module
         if head == "freq_group_lstm":
