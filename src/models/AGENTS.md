@@ -59,7 +59,7 @@ src/models/
 | CKLA heads | `simple_conv_v2_ckla{,_mag,_norot,_mag_norot,_phasediff,_phaseonly,_phaseunit}`, `_ckla_phaseonly_cond` (refiner `forward(audio, cond)`, non-PIT MSE), `_fkla`, `hg_ckla_refiner` | docs/ckla-design.md, docs/pikalman-ckla-design.md |
 | Complex-encoder RPS | `dcunet_enc_rps`, `dccrn_enc_rps`, `dccrn_lite_rps`, `edge_bs_rof_rps` (lazy) | encoder + `RPSPredictionHead` |
 | Salience (multi-pitch) | `multif0_rps`, `multif0_salience`, `basic_pitch_salience` | `salience_rps.py` |
-| Harmonic ports | `hppnet_pyramid` (STFT pyramid + harmonic taps; docs/pyramid-harmonic-frontend-design.md); retired `harmof0_rps`, `hppnet_rps`, `hft_rps`; controls `*_orig` | `harmonic_ports/` |
+| Harmonic ports | `hppnet_pyramid` (STFT pyramid + taps; docs/pyramid-harmonic-frontend-design.md), `hppnet_orig` (`harmonic_k_max`, `head`) | `harmonic_ports/`; taps: `tap_conv` (Triton on CUDA) |
 
 ## Spectral front-ends (`frontends/`)
 

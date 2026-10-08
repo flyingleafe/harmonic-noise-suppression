@@ -132,6 +132,28 @@ One `gx.unbind(2)` before the loop: 1131 → 190 ms (B=16); 593 ms at the A
 arm's shape (B=64, G=307). Same maths (verified against the slicing form in
 fp64, forward and all gradients).
 
+**Fused Triton `tap_conv` (2026-10-08).** `models/harmonic_ports/tap_conv_triton.py`,
+dispatched on CUDA by `tap_conv` (`TAP_CONV_TORCH=1` forces the torch path).
+Forward: one program per `(frame, 64 rate bins)` tile (16 bins at C = 128),
+per tap the two interpolation rows are read straight from `x` in `(N, F, C)`
+layout, lerped in registers and fed to `tl.dot`; the `(bins, O)` accumulator
+is written once into the model's `(B, O, T, G)`. Backward: `dx` — per tile,
+`gy · W_jᵀ` scattered with **relaxed** fp32 atomics onto the two source rows
+(acq-rel atomics were 2× slower); `dw` — per `(tap, 32 row splits)`,
+`gyᵀ · a_j` accumulated in registers from a row-major copy of `gy` (reading
+`gy` in `(B, O, T, G)` per row cost 16× in sectors: 96 → 4 ms), partials
+summed in torch. fp32 operands use `input_precision="ieee"` (TF32 failed the
+fp32 dW test). GPU tests (`tests/models/test_tap_conv_triton.py`, CUDA only)
+compare forward and all three gradients to the fp32 torch path on random
+tables with duplicates/invalid entries and on the real k ≤ 84 pyramid and
+CQT tables. A100, B=64, fwd+bwd: conv_3 (91 taps) 127 → 34 ms, block_4
+(C=128) 37 → 11.6 ms; full pyramid step 498 → 293 ms (1.70×); the
+taps are now ~25 % of the step. The T4 is not a target (sm_75: fp16 dot
+failed to lower in Triton 3.3). On the CQT arm the kernel ties cuDNN's 83
+branch convs (579 ms both), so `HarmonicDilatedConv` keeps the branch sum.
+The `dx` atomics (19 ms) are the remaining tap cost; an inverse-table gather
+(no atomics, ~2.6× the forward's dot work) is the next step if needed.
+
 ## Results
 
 Pending.
