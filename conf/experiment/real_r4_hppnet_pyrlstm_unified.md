@@ -41,4 +41,6 @@ steps (effective 128), AdamW 1e-3 / 1e-4, monitor `rps_mae`. Train with
 
 ## Conclusion
 
-Prepared 2026-10-08; not yet submitted. Results go to the batch doc.
+Submitted 2026-10-08 to `vast` (A100, `hppnet-pyrlstm-c5c30d`) after the
+tap-conv and `RateConvLSTM` efficiency rounds recorded in the batch doc
+(both exact; the model is unchanged). Results go to the batch doc.

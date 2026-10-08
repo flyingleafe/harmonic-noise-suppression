@@ -36,4 +36,7 @@ verbatim. Train with
 
 ## Conclusion
 
-Submitted 2026-10-08 to `vast` (A100). Results go to the batch doc.
+Submitted 2026-10-08 to `vast` (A100). The first run (`-e09290`) ran at
+2 s/it because of a per-step slicing bug in `RateConvLSTM`'s backward
+(batch doc) and was cancelled at epoch 3; resubmitted on the fix, same
+model. Results go to the batch doc.
