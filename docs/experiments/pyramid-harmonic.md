@@ -36,8 +36,14 @@ split under the historical recipe).
 
 | experiment | model | temporal model | status |
 |---|---|---|---|
-| `real_r4_hppnet_pyr_unified` | `hppnet_pyramid` (4 levels, 307-bin grid, 0.45 M params) | temporal convs + CRF (no LSTM) | restarted on `vast` A100 2026-10-08 on the fixed tap conv (`hppnet-pyr-unified-64a67e`); the first A100 run (`-6980ca`, slow kernel, 3 epochs) was cancelled |
-| `real_r4_hppnet_pyrlstm_unified` | `hppnet_pyramid` + `RateConvLSTM` head (1.60 M params) | bidirectional ConvLSTM, 33-tap gate conv along rate (±16 bins per frame = the telemetry's largest sustained slew, 15 rev/s per frame) | prepared 2026-10-08, not submitted |
+| `real_r4_hppnet_pyr_unified` | `hppnet_pyramid` (4 levels, 307-bin grid, 0.45 M params) | temporal convs + CRF (no LSTM) | restarted on `vast` A100 2026-10-08 on the fixed tap conv (`hppnet-pyr-unified-64a67e`, 1.74 it/s, ~9.6 min/epoch); the first A100 run (`-6980ca`, slow kernel, 3 epochs) was cancelled |
+| `real_r4_hppnet_pyrlstm_unified` | `hppnet_pyramid` + `RateConvLSTM` head (1.60 M params) | bidirectional ConvLSTM, 33-tap gate conv along rate (±16 bins per frame = the telemetry's largest sustained slew, 15 rev/s per frame) | submitted 2026-10-08 to `vast` A100 after the optimisation rounds below |
+| `real_r4_hppnet_l2nolstm_unified` | HPPNet-L2 (CQT) with `head: conv1x1` (0.43 M) | temporal convs + CRF (no LSTM) — the CQT-side counterpart of variant C | `vast` A100 `hppnet-l2nolstm-88d4e8`, 3.6 it/s at batch 128 |
+| `real_r4_hppnet_l2convlstm_unified` | HPPNet-L2 (CQT) with `head: convlstm` (1.51 M) | `RateConvLSTM` on the log axis, half-width 15 CQT bins (= the telemetry's largest sustained slew at r ≥ 27.5: `updown` 14.9 log-bins/frame) — the CQT-side counterpart of variant A | first run `-e09290` (2 s/it, slicing bug below) cancelled at epoch 3; resubmitted on the fix |
+
+The 2×2 — {CQT, pyramid} × {no recurrence, ConvLSTM} — plus the published
+`real_r4_hppnet_l2_unified` (CQT + `FreqGroupLSTM`) separates the front
+end's contribution from the temporal model's.
 
 Placement notes. `uni-gpushort` was full (two `kla-loglinear` jobs holding both
 slots behind a 53-job backlog), so the smoke was repinned to `vast`. The first
@@ -60,10 +66,32 @@ The fix is the layout: `x` transposed once to `(F, B·T, C)`, so every
 `index_select`/`index_add_` moves contiguous rows of `B·T·C` and the per-tap
 contraction is a plain `(G·B·T, C) @ (C, O)` GEMM with no permute copies.
 T4 step 9.64 → 2.71 s (B=64); taps 8.4 → 1.6 s; `index_add_` 62 → 7.5 %.
-Remaining profile (B=32, 1.25 s): cuDNN convs 29 %, copies 14 %,
-`index_select` 8.5 %, `index_add_` 7.5 %, ReLU backward 7.5 %. Further
-headroom is the strided-conv form of the gather (design note § 5), which
-would hand the taps to cuDNN and remove the scatter entirely.
+
+Further exact rounds (T4, B=64 unless noted): chunking the taps so one
+gather feeds one `(G·B·T, J_c·C) @ (J_c·C, O)` GEMM per chunk, 2.71 →
+2.50 s; an `(F, C, N)` layout that reads the gathered block as a transposed
+GEMM operand, block_4/5 0.76 → 1.85 s (reverted); `channels_last` for the
+conv stack, no change (B=32: 1.19 → 1.26 s). Profile after all of it (B=32,
+1.21 s) is flat: cuDNN conv bwd 23 %, copies 18 %, elementwise 19 %,
+`index_select` 9 %, `index_add_` 8 %, ReLU bwd 8 %, cuDNN conv fwd 7.5 %.
+That is the exact-optimisation floor without a fused gather-GEMM kernel;
+the structural levers (drop level 3 — only read for `k·r ≥ 4800 Hz`, i.e.
+r ≥ 150 rev/s at `k_max` 32 — ~−22 %; `block_2/2_5` only on the half of
+each coarse level the taps read, ~−35 % of that stage) change the model and
+are for the next generation, not the running arm. Variant C was therefore
+left running (the "replace if another 2×" rule was not met).
+
+**`RateConvLSTM` was 6× slower than it should be.** The L2 ConvLSTM arm ran
+at 2 s/it at batch 128 (GPU 100 %). Bench (`--target rate_convlstm`, T4,
+B=16, T=63, G=352): dense vs separable recurrent conv, `Conv1d` vs
+`Conv2d((1,k))` vs `unfold+matmul` vs fp32, eager vs TorchScript vs
+Inductor cell — all within 15 % (1.06–1.36 s). Profile: `gx[:, :, s]` per
+step — its backward (`SliceBackward`/`SelectBackward`) materialises a
+full-size zero copy of the `(B, 4H, T, G)` gate tensor every step: `fill_`
+25 % + `copy_` 36 % + `add_` 24 % = 85 % of CUDA time; the conv was 9 %.
+One `gx.unbind(2)` before the loop: 1131 → 190 ms (B=16); 593 ms at the A
+arm's shape (B=64, G=307). Same maths (verified against the slicing form in
+fp64, forward and all gradients).
 
 ## Results
 
