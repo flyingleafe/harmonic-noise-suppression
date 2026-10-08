@@ -208,6 +208,29 @@ the panel read pyr 2.69 → pyrk84 2.67 and l2nolstm 2.45 → l2k84 2.31
    band; the 307-bin k ≤ 32 arm had it to 148 rev/s and the CQT's octave
    dilation always has it. Not the cause of item 2 but a confound of the
    k ≤ 32 → k ≤ 84 comparison.
+6. *Full frozen real split, four regimes*
+   (`scripts/tap_ablation_regimes.py`, `uni-cpu` job
+   `tap-ablation-regimes-660f0b`, `results/regime_decomp/tap_ablation.json`;
+   current `best_real_overall` of both arms re-fetched from R2, 296 clips,
+   per-frame PIT MAE, rev/s; shares zero 12.7 % / standby 11.6 / ramp 3.8 /
+   cruise 72.0; dregon/standby and michaels/ramp are too thin to read):
+
+   | taps zeroed | pyrk84 all / dregon / michaels | zero · standby · ramp · cruise | l2k84 all / dregon / michaels | zero · standby · ramp · cruise |
+   |---|---|---|---|---|
+   | none | 2.68 / 3.33 / 1.73 | 1.98 · 2.00 · 8.39 · 2.62 | 2.31 / 2.70 / 1.74 | 0.37 · 2.72 · 9.78 · 2.20 |
+   | k ≥ 61 | **2.22** / 2.59 / 1.69 | 1.72 · 2.25 · 8.28 · **1.99** | 2.31 / 2.58 / 1.92 | 1.09 · 2.66 · 10.36 · 2.05 |
+   | k ≥ 31 | 3.31 / 3.59 / 2.90 | 0.66 · 3.44 · 15.0 · 3.14 | 4.53 / 5.79 / 2.68 | 2.01 · 3.37 · 13.6 · 4.69 |
+   | k ≥ 16 | 4.65 / 5.65 / 3.20 | 0.52 · 3.70 · 20.7 · 4.70 | 11.1 / 17.3 / 2.03 | 0.41 · 3.43 · 15.0 · 14.0 |
+
+   The 12-clip picture holds on the split: the pyramid's k ≥ 61 rows cost
+   0.46 overall and 0.74 on DREGON (cruise 3.47 → 2.50), nothing on
+   michaels; the CQT's k ≥ 61 taps are neutral (DREGON −0.12, michaels
+   +0.18). The k = 31–60 taps are worth 1.1 (pyramid) and 2.2 (CQT); the
+   k = 16–30 taps 1.3 and 6.6. Without its level-3 rows the pyramid conv
+   arm (2.22) is ahead of the CQT conv arm (2.31) and at the ConvLSTM arms'
+   2.16/2.17. Zero-regime errors move the other way for both families
+   (pyramid 1.98 → 1.72 but CQT 0.37 → 1.09): the top taps also carry the
+   "all rotors stopped" evidence.
 
 Reading: the pyramid reads its high harmonics as well as the CQT does up to
 level 2 (k ≤ 60, < 4.8 kHz); level 3 (128 ms window, 7.8 Hz bins) is what
