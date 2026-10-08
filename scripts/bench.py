@@ -382,6 +382,16 @@ def bench_rate_convlstm(device: torch.device, iters: int, warmup: int, shape: st
     _report(rows)
     if device.type == "cuda":
         print(f"  peak allocated {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB")
+        if os.environ.get("BENCH_PROFILE"):
+            from torch.profiler import ProfilerActivity, profile
+
+            step = step_fn(RateConvLSTM(c_in, hidden, k).to(device).train())
+            step()
+            torch.cuda.synchronize()
+            with profile(activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU]) as prof:
+                step()
+                torch.cuda.synchronize()
+            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
 
 
 TARGETS: dict[str, Callable[[torch.device, int, int, str | None], None]] = {
