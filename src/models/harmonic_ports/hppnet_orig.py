@@ -220,10 +220,12 @@ class HarmonicDilatedConv(nn.Module):
             self._table = (n_bins, lo.to(device), frac.to(device), valid.to(device))
         return self._table[1:]
 
-    # Measured on a T4 (B=32, full L2 step): fused 0.81x the branch sum at
-    # K = 83 but 1.14x at the published K = 8 — cuDNN's eight small convs beat
-    # the gather there. Both paths are the same function; pick by K.
-    FUSED_FROM: int = 16
+    # Both paths are the same function. The torch-level `tap_conv` path was
+    # 0.81x the branch sum at K = 83 on a T4 but 1.15x SLOWER on an A100
+    # (1.23 -> 1.42 s/it, real_r4_hppnet_l2k84nolstm_unified), where cuDNN's
+    # small convs are cheap and the gather's memory passes are not. Branch sum
+    # until the fused Triton kernel is measured faster there.
+    FUSED_FROM: int = 1 << 30
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if len(self.convs) < self.FUSED_FROM:
