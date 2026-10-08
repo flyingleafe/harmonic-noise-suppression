@@ -99,7 +99,10 @@ def _checkpoint_ref(name: str, ckpt: str, cfg: Any) -> str:
     if Path(ckpt).exists():
         return ckpt
     filename = ckpt if "." in Path(ckpt).name else f"{ckpt}.ckpt"
-    local = Path(cfg.results_root) / name / filename
+    results_root = Path(cfg.results_root)
+    if not results_root.is_absolute():  # the Hydra default is "results", relative to the repo
+        results_root = REPO_ROOT / results_root
+    local = results_root / name / filename
     if local.is_file():
         return str(local)
     prefix = str(cfg.artifacts.prefix).strip("/")
