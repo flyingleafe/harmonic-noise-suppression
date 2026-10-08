@@ -32,7 +32,12 @@ class RateConvLSTM(nn.Module):
     """
 
     def __init__(
-        self, c_in: int, hidden: int, kernel_size: int, bidirectional: bool = True
+        self,
+        c_in: int,
+        hidden: int,
+        kernel_size: int,
+        bidirectional: bool = True,
+        separable: bool = False,
     ) -> None:
         super().__init__()
         if kernel_size % 2 == 0:
@@ -41,17 +46,32 @@ class RateConvLSTM(nn.Module):
         self.n_dir = 2 if bidirectional else 1
         pad = self.kernel_size // 2
         self.x_conv = nn.Conv2d(int(c_in), self.n_dir * 4 * self.hidden, kernel_size=1)
-        self.h_conv = nn.ModuleList(
-            [
-                nn.Conv1d(self.hidden, 4 * self.hidden, self.kernel_size, padding=pad, bias=False)
-                for _ in range(self.n_dir)
-            ]
-        )
+
+        def recurrent() -> nn.Module:
+            if not separable:
+                return nn.Conv1d(
+                    self.hidden, 4 * self.hidden, self.kernel_size, padding=pad, bias=False
+                )
+            # Rank-factorised: a per-channel k-tap displacement kernel (where
+            # the state moves along the axis), then a 1x1 channel mix.
+            return nn.Sequential(
+                nn.Conv1d(
+                    self.hidden,
+                    self.hidden,
+                    self.kernel_size,
+                    padding=pad,
+                    groups=self.hidden,
+                    bias=False,
+                ),
+                nn.Conv1d(self.hidden, 4 * self.hidden, 1, bias=False),
+            )
+
+        self.h_conv = nn.ModuleList([recurrent() for _ in range(self.n_dir)])
         with torch.no_grad():
             bias = cast(torch.Tensor, self.x_conv.bias).view(self.n_dir, 4, self.hidden)
             bias[:, 1].fill_(1.0)
 
-    def _run(self, gx: torch.Tensor, h_conv: nn.Conv1d, reverse: bool) -> torch.Tensor:
+    def _run(self, gx: torch.Tensor, h_conv: nn.Module, reverse: bool) -> torch.Tensor:
         b, _, t, g = gx.shape
         h = gx.new_zeros(b, self.hidden, g)
         c = gx.new_zeros(b, self.hidden, g)
@@ -67,7 +87,7 @@ class RateConvLSTM(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gates = self.x_conv(x).chunk(self.n_dir, dim=1)
         outs = [
-            self._run(gx, cast(nn.Conv1d, conv), reverse=bool(d))
+            self._run(gx, conv, reverse=bool(d))
             for d, (gx, conv) in enumerate(zip(gates, self.h_conv, strict=True))
         ]
         return torch.cat(outs, dim=1)
