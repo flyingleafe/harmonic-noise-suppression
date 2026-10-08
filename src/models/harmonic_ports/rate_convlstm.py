@@ -119,8 +119,11 @@ class RateConvLSTM(nn.Module):
         outs: list[torch.Tensor] = [h] * t
         steps = range(t - 1, -1, -1) if reverse else range(t)
         cell = cast(Callable[..., tuple[torch.Tensor, torch.Tensor]], _CELLS[self.cell])
+        # One unbind, not ``gx[:, :, s]`` per step: each select/slice backward
+        # materialises a full-size zero copy of ``gx`` (85 % of the step on a T4).
+        frames = gx.unbind(2)
         for s in steps:
-            h, c = cell(gx[:, :, s], h_conv(h), c)
+            h, c = cell(frames[s], h_conv(h), c)
             outs[s] = h
         return torch.stack(outs, dim=2)  # (B, hidden, T, G)
 
