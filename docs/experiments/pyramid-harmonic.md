@@ -59,8 +59,8 @@ comparable.
 
 | experiment | model | status |
 |---|---|---|
-| `real_r4_hppnet_pyrk84_unified` | `hppnet_pyramid` on 0–150 rev/s (154 bins), taps k ≤ 84 + 1/2..1/8 (91), `f_max` 7.5 kHz, `head: conv1x1` (0.56 M) | `vast` A100 |
-| `real_r4_hppnet_l2k84nolstm_unified` | HPPNet-L2, CQT 385 bins (to 7.04 kHz), `HarmonicDilatedConv` k = 2..84 (83 branches, the published eight first and unchanged), `head: conv1x1` (0.90 M) | `vast` A100 |
+| `real_r4_hppnet_pyrk84_unified` | `hppnet_pyramid` on 0–150 rev/s (154 bins), taps k ≤ 84 + 1/2..1/8 (91), `f_max` 7.5 kHz, `head: conv1x1` (0.56 M) | `hppnet-pyrk84-400534`, `vast` A100, 2.29 it/s (~7.3 min/epoch) |
+| `real_r4_hppnet_l2k84nolstm_unified` | HPPNet-L2, CQT 385 bins (to 7.04 kHz), `HarmonicDilatedConv` k = 2..84 (83 branches, the published eight first and unchanged), `head: conv1x1` (0.90 M) | `hppnet-l2k84nolstm-375978` at 1.23 s/it (~10 min/epoch) for 2 epochs, then resumed from its R2 checkpoint as `hppnet-l2k84nolstm-r-e9732d` on the fused operator below (W&B `g8egadgl` continues) |
 
 Same k set, same sub-harmonics, same head, same loss range; the only
 difference is the axis (CQT: Δf/k = 0.0145·r at every k, so high harmonics
@@ -68,6 +68,21 @@ add evidence, not resolution; pyramid level 3: 7.8 Hz bins → 0.13 rev/s per
 harmonic at k = 60). The pyramid step is ~15 % cheaper than round 1's
 despite 2.3× the taps (halving G pays for them). The published
 `real_r4_hppnet_l2_unified` (CQT + `FreqGroupLSTM`) has still never been run.
+
+**`HarmonicDilatedConv` with 83 branches, fused.** The CQT arm went from
+3.6 it/s (k ≤ 9) to 1.23 s/it (k ≤ 84): the published operator sums 83
+`Conv2d((1,3), dilation=d_k)` outputs. Algebraically that is one sparse
+convolution with taps at `{0} ∪ {±d_k}` (167 taps; the 83 centre matrices
+collapse into their sum), so it now runs through the same `tap_conv` kernel
+as the pyramid (`models/harmonic_ports/tap_conv.py`) **on the unchanged
+branch parameters** — same state-dict keys, same function, same
+per-parameter gradients (fp64 tests against the upstream branch sum, k ≤ 9
+and k ≤ 84), so every earlier L2 result and checkpoint stands. Measured
+(T4, B=32, full step): k = 84 1.65 → 1.33 s (1.24×); k = 9 0.35 → 0.40 s
+(cuDNN's eight small convs win there), so the branch sum is kept below 16
+branches. Predicted ~2.5× from output-write traffic; the gather kernel,
+not cuDNN, turned out to be the limiter — the same ~6 ms per tap per 700k
+rows the pyramid's `conv_3` shows.
 
 Placement notes. `uni-gpushort` was full (two `kla-loglinear` jobs holding both
 slots behind a 53-job backlog), so the smoke was repinned to `vast`. The first
