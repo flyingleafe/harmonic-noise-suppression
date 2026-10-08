@@ -105,8 +105,9 @@ if HAS_TRITON:
             gh = tl.dot(gy.to(wt.dtype), wt, input_precision="ieee")  # (BG, BC) fp32
             pa = grow + lo[:, None] * C + offs_c[None, :]
             m = gmask[:, None] & cmask[None, :]
-            tl.atomic_add(pa, gh * wa[:, None], mask=m)
-            tl.atomic_add(pa + C, gh * wc[:, None], mask=m)
+            # Pure accumulation: no ordering needed, so no acquire/release fences.
+            tl.atomic_add(pa, gh * wa[:, None], mask=m, sem="relaxed")
+            tl.atomic_add(pa + C, gh * wc[:, None], mask=m, sem="relaxed")
 
     @triton.jit
     def _dw_kernel(
