@@ -346,12 +346,93 @@ def bench_hppnet_pyramid(device: torch.device, iters: int, warmup: int, shape: s
             print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=25))
 
 
+def bench_rate_convlstm(device: torch.device, iters: int, warmup: int, shape: str | None) -> None:
+    """`RateConvLSTM` forward+backward: the module vs. alternative gate-conv forms.
+
+    ``--shape B,C_IN,T,G`` (default ``128,128,63,352``: the L2 ConvLSTM arm).
+    The recurrence is ``T`` sequential steps per direction, each a
+    ``Conv1d(hidden, 4*hidden, k)`` on ``(B, hidden, G)``; the alternatives
+    swap that conv for ``Conv2d((1, k))`` and for ``unfold + matmul`` to see
+    which path cuDNN/cuBLAS runs well under fp16.
+    """
+    from models.harmonic_ports.rate_convlstm import RateConvLSTM
+
+    b, c_in, t, g = _shape(shape, (128, 128, 63, 352))
+    hidden, k = 64, 33
+    amp_dtype = torch.float16 if device.type == "cuda" else torch.bfloat16
+    torch.manual_seed(0)
+    x = torch.randn(b, c_in, t, g, device=device)
+    print(f"rate_convlstm, B={b} c_in={c_in} T={t} G={g} hidden={hidden} k={k}, {device.type}")
+
+    def step_fn(module: torch.nn.Module) -> Callable[[], None]:
+        def run() -> None:
+            module.zero_grad(set_to_none=True)
+            with torch.autocast(device.type, dtype=amp_dtype):
+                out = module(x)
+            out.float().pow(2).mean().backward()
+
+        return run
+
+    base = RateConvLSTM(c_in, hidden, k).to(device).train()
+    rows = [("module (Conv1d gates)", timeit(step_fn(base), device, iters, warmup))]
+
+    # Same recurrence with the hidden-to-gate conv expressed differently.
+    class _Alt(torch.nn.Module):
+        def __init__(self, form: str) -> None:
+            super().__init__()
+            self.form = form
+            self.x_conv = base.x_conv
+            w = torch.stack([cast(torch.nn.Conv1d, conv).weight for conv in base.h_conv])
+            self.w = torch.nn.Parameter(w.detach().clone())
+
+        def _hconv(self, h: torch.Tensor, d: int) -> torch.Tensor:
+            w = self.w[d]
+            if self.form == "conv2d":
+                return torch.nn.functional.conv2d(
+                    h.unsqueeze(2), w.unsqueeze(2), padding=(0, k // 2)
+                ).squeeze(2)
+            if self.form == "unfold":
+                cols = torch.nn.functional.unfold(
+                    h.unsqueeze(2), (1, k), padding=(0, k // 2)
+                )  # (B, H*k, G)
+                return torch.matmul(w.reshape(4 * hidden, hidden * k), cols)
+            if self.form == "fp32":
+                with torch.autocast(device.type, enabled=False):
+                    return torch.nn.functional.conv1d(h.float(), w.float(), padding=k // 2)
+            raise ValueError(self.form)
+
+        def forward(self, inp: torch.Tensor) -> torch.Tensor:
+            gates = self.x_conv(inp).chunk(2, dim=1)
+            outs = []
+            for d, gx in enumerate(gates):
+                bb, _, tt, gg = gx.shape
+                h = gx.new_zeros(bb, hidden, gg)
+                c = gx.new_zeros(bb, hidden, gg)
+                seq: list[torch.Tensor] = [h] * tt
+                for s in range(tt - 1, -1, -1) if d else range(tt):
+                    gi, gf, go, gu = (gx[:, :, s] + self._hconv(h, d).to(gx.dtype)).chunk(4, dim=1)
+                    c = torch.sigmoid(gf) * c + torch.sigmoid(gi) * torch.tanh(gu)
+                    h = torch.sigmoid(go) * torch.tanh(c)
+                    seq[s] = h
+                outs.append(torch.stack(seq, dim=2))
+            return torch.cat(outs, dim=1)
+
+    for form in ("conv2d", "unfold", "fp32"):
+        rows.append(
+            (f"{form} gates", timeit(step_fn(_Alt(form).to(device).train()), device, iters, warmup))
+        )
+    _report(rows)
+    if device.type == "cuda":
+        print(f"  peak allocated {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB")
+
+
 TARGETS: dict[str, Callable[[torch.device, int, int, str | None], None]] = {
     "ckla_scan": bench_ckla_scan,
     "cqt": bench_cqt,
     "grouped_branches": bench_grouped_branches,
     "hppnet_pyramid": bench_hppnet_pyramid,
     "noise_gen": bench_noise_gen,
+    "rate_convlstm": bench_rate_convlstm,
 }
 
 
