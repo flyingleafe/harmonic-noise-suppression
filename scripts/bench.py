@@ -44,7 +44,7 @@ import argparse
 import os
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -278,6 +278,8 @@ def bench_hppnet_pyramid(device: torch.device, iters: int, warmup: int, shape: s
     b, samples = _shape(shape, (64, 32000))
     torch.manual_seed(0)
     model = HPPNetPyramid().to(device).train()
+    if os.environ.get("BENCH_CHANNELS_LAST"):  # cuDNN NHWC kernels for the conv stack
+        model = cast(HPPNetPyramid, model.to(memory_format=torch.channels_last))  # type: ignore[call-overload]
     audio = torch.randn(b, samples, device=device)
     amp_dtype = torch.float16 if device.type == "cuda" else torch.bfloat16
     print(

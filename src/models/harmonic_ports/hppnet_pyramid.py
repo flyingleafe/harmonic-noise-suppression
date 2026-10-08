@@ -223,14 +223,14 @@ class _TapConvFn(torch.autograd.Function):
     def _gather(
         xt: torch.Tensor, lo: torch.Tensor, wa: torch.Tensor, wc: torch.Tensor
     ) -> torch.Tensor:
-        """``(G*N, J_c*C)`` lerp read of ``xt (F, N, C)`` for a ``(J_c, G)`` tap block."""
+        """``(G, J_c*C, N)`` lerp read of ``xt (F, C, N)`` for a ``(J_c, G)`` tap block."""
         jc, g = lo.shape
-        n, c = xt.shape[1:]
-        rows = lo.t().reshape(-1)  # (G*J_c): g-major so the reshape below is a view
+        c, n = xt.shape[1:]
+        rows = lo.t().reshape(-1)  # (G*J_c), g-major: the view below needs no copy
         wa_t, wc_t = wa.t().reshape(-1, 1, 1), wc.t().reshape(-1, 1, 1)
         h = torch.index_select(xt, 0, rows) * wa_t
-        h.addcmul_(torch.index_select(xt, 0, rows + 1), wc_t)  # (G*J_c, N, C)
-        return h.view(g, jc, n, c).transpose(1, 2).reshape(g * n, jc * c)
+        h.addcmul_(torch.index_select(xt, 0, rows + 1), wc_t)  # (G*J_c, C, N)
+        return h.view(g, jc * c, n)
 
     @staticmethod
     def forward(  # type: ignore[override]
@@ -246,13 +246,15 @@ class _TapConvFn(torch.autograd.Function):
         b, c, t, f = x.shape
         n_taps, c_out, _ = weight.shape
         g = lo.shape[1]
-        xt = x.permute(3, 0, 2, 1).reshape(f, b * t, c)
+        n = b * t
+        xt = x.permute(3, 1, 0, 2).reshape(f, c, n)
         w = weight.to(x.dtype)
-        y = bias.to(x.dtype).expand(g * b * t, c_out).clone()
+        y = bias.to(x.dtype).expand(g, n, c_out).clone()
         for j0 in range(0, n_taps, chunk):
             j1 = min(n_taps, j0 + chunk)
-            h = _TapConvFn._gather(xt, lo[j0:j1], wa[j0:j1], wc[j0:j1])
-            y.addmm_(h, w[j0:j1].transpose(1, 2).reshape((j1 - j0) * c, c_out))
+            h = _TapConvFn._gather(xt, lo[j0:j1], wa[j0:j1], wc[j0:j1])  # (G, J_c*C, N)
+            ws = w[j0:j1].transpose(1, 2).reshape((j1 - j0) * c, c_out)  # rows (j, c_in)
+            y.baddbmm_(h.transpose(1, 2), ws.expand(g, -1, -1))  # transposed operand: no copy
         ctx.save_for_backward(xt, weight, lo, wa, wc)
         ctx.dims = (b, c, t, f, chunk)
         return y.reshape(g, b, t, c_out).permute(1, 3, 2, 0)
@@ -266,22 +268,24 @@ class _TapConvFn(torch.autograd.Function):
         n = b * t
         w = weight.to(xt.dtype)
         acc = torch.float64 if xt.dtype == torch.float64 else torch.float32
-        gyt = gy.to(xt.dtype).permute(3, 0, 2, 1).reshape(g * n, c_out)  # (G*N, O)
-        gxt = torch.zeros((f, n, c), dtype=acc, device=xt.device)
+        gyt = gy.to(xt.dtype).permute(3, 0, 2, 1).reshape(g, n, c_out)  # (G, N, O)
+        gxt = torch.zeros((f, c, n), dtype=acc, device=xt.device)
         gw = torch.empty_like(weight, dtype=acc)
         for j0 in range(0, n_taps, chunk):
             j1 = min(n_taps, j0 + chunk)
             jc = j1 - j0
-            h = _TapConvFn._gather(xt, lo[j0:j1], wa[j0:j1], wc[j0:j1])  # (G*N, J_c*C)
-            ws = w[j0:j1].transpose(1, 2).reshape(jc * c, c_out)  # rows (j, c_in), as forward
-            gw[j0:j1] = (gyt.t() @ h).reshape(c_out, jc, c).transpose(0, 1).to(acc)
-            gh = (gyt @ ws.t()).view(g, n, jc, c).transpose(1, 2).reshape(g * jc, n, c)
+            h = _TapConvFn._gather(xt, lo[j0:j1], wa[j0:j1], wc[j0:j1])  # (G, J_c*C, N)
+            ws = w[j0:j1].transpose(1, 2).reshape(jc * c, c_out)
+            gws = torch.bmm(h, gyt).sum(dim=0)  # (J_c*C, O)
+            gw[j0:j1] = gws.reshape(jc, c, c_out).transpose(1, 2).to(acc)
+            gh = torch.bmm(gyt, ws.t().expand(g, -1, -1))  # (G, N, J_c*C)
+            gh = gh.view(g, n, jc, c).permute(0, 2, 3, 1).reshape(g * jc, c, n)  # rows as _gather
             rows = lo[j0:j1].t().reshape(-1)
             wa_t, wc_t = wa[j0:j1].t().reshape(-1, 1, 1), wc[j0:j1].t().reshape(-1, 1, 1)
             gxt.index_add_(0, rows, (gh * wa_t).to(acc))
             gxt.index_add_(0, rows + 1, (gh * wc_t).to(acc))
-        gb = gyt.to(acc).sum(dim=0)
-        gx = gxt.to(xt.dtype).reshape(f, b, t, c).permute(1, 3, 2, 0)
+        gb = gyt.to(acc).sum(dim=(0, 1))
+        gx = gxt.to(xt.dtype).reshape(f, c, b, t).permute(2, 1, 3, 0)
         return gx, gw.to(weight.dtype), gb.to(weight.dtype), None, None, None, None
 
 
