@@ -242,8 +242,26 @@ top level keeps the 4096 window to 8 kHz.
 
 ## Results
 
-Pending.
+Round 2 finished (2026-10-09): `real_r4_hppnet_pyrk84_unified` best
+`val/real_overall` **2.67** @ epoch 13 (79 epochs, last five ~2.95; W&B
+`rnzenk2s`), `real_r4_hppnet_l2k84nolstm_unified` **2.31** @ 6 (66 epochs,
+last five ~2.5; `g8egadgl`). With round 1: pyramid conv-only 2.69 → 2.67
+for k ≤ 32 → 84; CQT conv-only 2.45 → 2.31 for k ≤ 9 → 84; ConvLSTM heads
+2.17 (pyramid) / 2.16 (CQT) at k ≤ 32 / 9. Per-rotor room ownership of the
+k ≈ 70 line (rate-synchronous spectra, 8-mic mean, cruise): room 1 rotor 0
+(fastest), room 2 rotor 3 (third fastest); room 2's command labels sit
+×0.978 / ×0.969 / ×0.983 / ×0.995 above the acoustic rate per rotor.
 
 ## Conclusion
 
-Pending.
+The pyramid front end reads high harmonics as well as the CQT up to 4.8 kHz
+(its level-2 taps are worth 1.1 rev/s) and is hurt by its level-3 taps
+(−0.46 overall, −0.74 on DREGON), which the CQT's equivalents are not; the
+two cancel on the panel. The level-3 harm is a learned rotor-identity cue
+(the k ≈ 70 motor-pole line sits on a different rotor in the training room
+than in the validation room) amplified on the pyramid by room 2's 1–3 %
+per-rotor command-label error, which a linear 7.8 Hz grid turns into a
+10+-bin tap misplacement at k = 70 where the CQT's log grid keeps it under
+two bins. Zeroing the k ≥ 61 rows of the trained pyramid gives 2.22, ahead
+of the CQT conv arm and level with the ConvLSTM arms. Handoff and next
+arms: `docs/handoff-pyramid-harmonic.md`.

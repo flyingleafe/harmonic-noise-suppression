@@ -1,0 +1,2000 @@
+---
+title: "`tap_conv`: the harmonic gather behind the HPPNet salience models"
+subtitle: "What it computes, how it realises harmonic dilated convolution on the CQT and on the STFT pyramid, how the torch path works, and how the fused Triton kernels are built"
+date: 2026-10-08
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    code-fold: true
+    code-summary: "Code"
+    html-math-method: katex
+    fig-cap-location: bottom
+    fig-dpi: 110
+execute:
+  echo: true
+  warning: false
+---
+
+```{=html}
+<style>.figure img{max-width:100%} table{font-size:0.9em}</style>
+```
+
+This note explains one operator, `tap_conv`, from the formula down to the GPU kernel. Two
+model families use it:
+
+- **HPPNet on the CQT** (`hppnet_orig`, configs `hppnet_l2*`). Its `HarmonicDilatedConv`
+  reads the log-frequency axis at constant offsets $\pm d_k$ (`src/models/harmonic_ports/hppnet_orig.py`).
+- **HPPNet on the STFT pyramid** (`hppnet_pyramid`). Its `ProportionalTapConv` layers
+  (`conv_3`, `block_4`, `block_5`) read a linear axis at positions proportional to the rate,
+  $k\,r$ (`src/models/harmonic_ports/hppnet_pyramid.py`).
+
+Both are the same operator with a different index table. The torch implementation is
+`_TapConvFn` in `src/models/harmonic_ports/tap_conv.py`. Fused Triton kernels for it are in
+`src/models/harmonic_ports/tap_conv_triton.py`.
+
+::: {.callout-note}
+## How to read this document
+
+- Every number and every figure below is computed at render time by importing the real
+  modules (`src/` on `sys.path`) and building the two models from their configs
+  (`conf/model/hppnet_pyramid_k84.yaml`, `conf/model/hppnet_l2k84_nolstm.yaml`). Nothing is
+  copied by hand. The code of each cell is behind the "Code" toggles.
+- Sections 1–4 are about the mathematics and the torch code. Section 5 is a short course on
+  GPUs and Triton for readers who have never written a kernel. Section 6 uses it to explain the
+  Triton kernels.
+- The Triton kernels were added on 2026-10-08 and are still being tuned. Section 6 reads their
+  launch parameters and the dispatch rule from the code at render time; the prose describes the
+  version read on that date. Details (tile sizes, masks) may change.
+:::
+
+```{python}
+#| label: setup
+import inspect
+import math
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import yaml
+from IPython.display import Markdown, display
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import FancyBboxPatch, Rectangle
+
+ROOT = Path.cwd()
+while not (ROOT / "src" / "models").exists() and ROOT != ROOT.parent:
+    ROOT = ROOT.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from models.harmonic_ports import tap_conv as tc_mod  # noqa: E402
+from models.harmonic_ports import tap_conv_triton as tct  # noqa: E402
+from models.harmonic_ports.hppnet_orig import HPPNET_DILATIONS, HarmonicDilatedConv  # noqa: E402
+from models.harmonic_ports.hppnet_pyramid import build_tap_table  # noqa: E402
+from models.harmonic_ports.tap_conv import _TapConvFn, shift_tap_table, tap_conv  # noqa: E402
+from models.registry import build_model  # noqa: E402
+
+torch.manual_seed(0)
+plt.rcParams.update(
+    {
+        "font.size": 11,
+        "axes.titlesize": 12,
+        "axes.labelsize": 11,
+        "legend.fontsize": 9.5,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+    }
+)
+LEVEL_COLORS = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a"]
+GREY = "#bbbbbb"
+
+
+def load_model(name: str):
+    params = yaml.safe_load((ROOT / "conf" / "model" / f"{name}.yaml").read_text())["params"]
+    return build_model(**params), params
+
+
+def md_table(rows: list[dict]) -> str:
+    cols = list(rows[0])
+    out = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    out += ["| " + " | ".join(str(r[c]) for c in cols) + " |" for r in rows]
+    return "\n".join(out)
+
+
+def box(ax, x, y, w, h, label="", fc="#e8e8e8", ec="k", fs=10, lw=1.0, **kw):
+    ax.add_patch(Rectangle((x, y), w, h, fc=fc, ec=ec, lw=lw, **kw))
+    if label:
+        ax.text(x + w / 2, y + h / 2, label, ha="center", va="center", fontsize=fs)
+
+
+def arrow(ax, x0, y0, x1, y1, color="k", lw=1.3, style="->"):
+    ax.annotate(
+        "", xy=(x1, y1), xytext=(x0, y0),
+        arrowprops=dict(arrowstyle=style, lw=lw, color=color, shrinkA=0, shrinkB=0),
+    )
+
+
+# ── the pyramid model (conf/model/hppnet_pyramid_k84.yaml) ──────────────────
+PYR, PYR_P = load_model("hppnet_pyramid_k84")
+FE = PYR.frontend
+NLEV = PYR.n_levels
+DF = list(FE.df)
+NB = list(FE.n_bins)
+CEIL = [FE.ceiling(lvl) for lvl in range(NLEV)]
+OFF = np.cumsum([0, *NB[:-1]]).astype(int)
+F_CAT = int(PYR.cat_width)
+DR = DF[0]
+G_PYR = int(PYR.n_bins)
+RATES = np.asarray(PYR.out_freqs, dtype=np.float64)
+K_MAX, K_SUB = int(PYR_P["k_max"]), int(PYR_P["k_sub"])
+F_MIN = DR if PYR_P["f_min"] is None else float(PYR_P["f_min"])
+F_MAX = float(PYR_P["f_max"])
+# The tap multipliers as HPPNetPyramid.__init__ builds them; checked against its buffers.
+MULTS = np.concatenate([np.arange(1, K_MAX + 1, dtype=np.float64), 1.0 / np.arange(2, K_SUB + 1)])
+H_LO, H_FR, H_VA = build_tap_table(MULTS, RATES, DF, CEIL, list(OFF), F_MIN, F_MAX)
+assert torch.equal(H_LO, PYR.harm_lo) and torch.equal(H_VA, PYR.harm_valid)
+assert torch.allclose(H_FR, PYR.harm_frac)
+H_LO, H_FR, H_VA = H_LO.numpy(), H_FR.numpy(), H_VA.numpy()
+H_LEV = np.where(H_VA > 0, np.searchsorted(OFF, H_LO, side="right") - 1, -1)
+MULT_LABELS = [f"{int(m)}" if m >= 1 else f"1/{round(1 / m)}" for m in MULTS]
+
+# ── the CQT model (conf/model/hppnet_l2k84_nolstm.yaml) ─────────────────────
+CQT, CQT_P = load_model("hppnet_l2k84_nolstm")
+HDC = CQT.trunk.conv_3
+F_CQT = int(CQT_P["n_bins"])
+BPO = int(CQT_P["bins_per_octave"])
+FMIN_CQT = float(CQT_P["fmin"])
+CQT_DIL = [int(c.dilation[1]) for c in HDC.convs]
+CQT_OFFS = HDC.offsets.numpy()
+C_LO, C_FR, C_VA = (t.numpy() for t in HDC._table_for(F_CQT, torch.device("cpu")))
+
+# ── the shapes used for cost numbers: the bench batch, 2 s clips ────────────
+SR, HOP = int(PYR_P["sr"]), int(PYR_P["hop_length"])
+B_BENCH = 64
+T_BENCH = PYR.num_grid_frames(2 * SR)
+N_BENCH = B_BENCH * T_BENCH
+LAYERS = [  # (name, J, C, O, F, G)
+    ("pyramid conv_3", PYR.conv_3.n_taps, PYR.conv_3.c_in, PYR.conv_3.c_out, F_CAT, G_PYR),
+    ("pyramid block_4", PYR.block_4.n_taps, PYR.block_4.c_in, PYR.block_4.c_out, G_PYR, G_PYR),
+    ("pyramid block_5", PYR.block_5.n_taps, PYR.block_5.c_in, PYR.block_5.c_out, G_PYR, G_PYR),
+    ("CQT conv_3 (k ≤ 84)", len(CQT_OFFS), HDC.convs[0].in_channels, HDC.convs[0].out_channels,
+     F_CQT, F_CQT),
+]
+```
+
+**Notation.** One symbol per size, used throughout:
+
+| symbol | meaning | pyramid `conv_3` | CQT `conv_3` |
+|---|---|---|---|
+| $B$ | batch | `{python} B_BENCH` (bench) | `{python} B_BENCH` |
+| $T$ | frames (2 s clip, hop `{python} HOP`) | `{python} T_BENCH` | `{python} T_BENCH` |
+| $N = B\,T$ | frames in the batch | `{python} N_BENCH` | `{python} N_BENCH` |
+| $C$ | input channels | `{python} LAYERS[0][2]` | `{python} LAYERS[3][2]` |
+| $O$ | output channels | `{python} LAYERS[0][3]` | `{python} LAYERS[3][3]` |
+| $F$ | input bins (the axis that is read) | `{python} F_CAT` | `{python} F_CQT` |
+| $G$ | output bins | `{python} G_PYR` | `{python} F_CQT` |
+| $J$ | taps | `{python} LAYERS[0][1]` | `{python} LAYERS[3][1]` |
+
+## 1. What the operation computes
+
+### 1.1 The formula
+
+The inputs are a feature map $x$ of shape $(B, C, T, F)$, a weight $W$ of shape $(J, O, C)$, a
+bias $\beta$ of shape $(O)$, and an index table of three $(J, G)$ arrays: `lo` $=\ell$,
+`frac` $=\phi$ and `valid` $=v$. The output $y$ has shape $(B, O, T, G)$:
+
+$$
+y[b,o,t,g] \;=\; \beta_o \;+\; \sum_{j=0}^{J-1}\;\sum_{c=0}^{C-1} W[j,o,c]\;\hat x_j[b,c,t,g],
+$$
+
+$$
+\hat x_j[b,c,t,g] \;=\; v_{jg}\,\Big[(1-\phi_{jg})\,x[b,c,t,\ell_{jg}] \;+\; \phi_{jg}\,x[b,c,t,\ell_{jg}+1]\Big].
+$$
+
+In words: for output bin $g$ and tap $j$, read the $C$-channel feature vector at the
+fractional position $\mathrm{pos}_j(g) = \ell_{jg} + \phi_{jg}$ by linear interpolation
+("lerp") between the two neighbouring bins. If the tap is invalid ($v_{jg}=0$), read zero.
+Multiply the vector by the $O\times C$ matrix $W_j$. Sum over taps and add the bias.
+
+Three properties matter later:
+
+1. **Frames do not mix.** $b$ and $t$ only index. The operator is a 1-D operation along the
+   frequency-like axis, repeated for each of the $N = B\,T$ frames.
+2. **Weights are shared along $g$.** Tap $j$ uses the same $W_j$ for every output bin, as a
+   convolution does. A convolution is the special case $\mathrm{pos}_j(g) = g + s_j$ with
+   integer shifts $s_j$. Here the positions may be any function of $g$.
+3. **The table is data.** It is built once (a non-persistent buffer). Only $W$ and $\beta$
+   are learned.
+
+The code folds `valid` and `frac` into two weights before anything else (`tap_conv`, before it
+chooses an implementation):
+
+$$
+a_{jg} = (1-\phi_{jg})\,v_{jg}, \qquad c_{jg} = \phi_{jg}\,v_{jg}, \qquad
+\hat x_j = a_{jg}\,x[\ell_{jg}] + c_{jg}\,x[\ell_{jg}+1].
+$$
+
+They are called `wa` and `wc` in both implementations.
+
+### 1.2 A worked example
+
+A toy problem small enough to do by hand: one level of $F = 10$ bins of width 1 Hz, six output
+rates $r_g = 0.75\,g$ Hz, and three taps that read $1\cdot r$, $2\cdot r$ and $r/2$. The table
+comes from the real `build_tap_table` with $f_{\min} = 0.5$ Hz and the level's ceiling
+$(F-2)\cdot 1$ Hz $= 8$ Hz.
+
+```{python}
+#| label: toy
+TOY_F, TOY_DF, TOY_FMIN = 10, 1.0, 0.5
+toy_rates = 0.75 * np.arange(6)
+toy_mults = np.array([1.0, 2.0, 0.5])
+toy_names = ["1·r", "2·r", "r/2"]
+t_lo, t_fr, t_va = build_tap_table(
+    toy_mults, toy_rates, [TOY_DF], [(TOY_F - 2) * TOY_DF], [0], TOY_FMIN, np.inf
+)
+x_vals = [3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0, 5.0, 3.0]
+x_toy = torch.tensor(x_vals, dtype=torch.float64).view(1, 1, 1, TOY_F)  # B = C = T = 1
+w_vals = [1.0, 0.5, -1.0]
+W_toy = torch.tensor(w_vals, dtype=torch.float64).view(3, 1, 1)  # (J, O, C)
+b_toy = torch.zeros(1, dtype=torch.float64)
+y_toy = tap_conv(x_toy, W_toy, b_toy, t_lo, t_fr, t_va).flatten().numpy()
+
+rows = []
+for j, name in enumerate(toy_names):
+    row = {"tap": name}
+    for g in range(len(toy_rates)):
+        if t_va[j, g] > 0:
+            row[f"g={g} (r={toy_rates[g]:g})"] = f"{int(t_lo[j, g])} + {t_fr[j, g]:.3g}"
+        else:
+            row[f"g={g} (r={toy_rates[g]:g})"] = "invalid"
+    rows.append(row)
+display(Markdown(md_table(rows)))
+```
+
+Each cell is $\ell + \phi$, the read position in bins. At $g=0$ every read is at 0 Hz, below
+$f_{\min}$, so all three taps are invalid. At $g=1$ the tap $r/2$ reads 0.375 Hz, also below
+$f_{\min}$. Output bin $g = 3$ in full:
+
+```{python}
+#| output: asis
+def num(v: float) -> str:
+    return f"{v:g}" if v >= 0 else f"({v:g})"
+
+
+print(
+    f"With input $x = ({', '.join(f'{v:g}' for v in x_vals)})$, one channel in and one out, "
+    f"tap weights $W = ({', '.join(f'{v:g}' for v in w_vals)})$ and $\\beta = 0$:"
+)
+print()
+g = 3
+rows_tex, total = [], 0.0
+for j in range(3):
+    lo_, fr_ = int(t_lo[j, g]), float(t_fr[j, g])
+    val = (1 - fr_) * x_vals[lo_] + fr_ * x_vals[lo_ + 1]
+    total += w_vals[j] * val
+    lead = rf"y[{g}] &= " if j == 0 else "&+ "
+    rows_tex.append(
+        lead + rf"\underbrace{{{num(w_vals[j])}}}_{{W_{j}}}\,\big({1 - fr_:g}\,x[{lo_}] + {fr_:g}\,x[{lo_ + 1}]\big)"
+        rf" && = {num(w_vals[j])}\cdot({1 - fr_:g}\cdot{x_vals[lo_]:g} + {fr_:g}\cdot{x_vals[lo_ + 1]:g})"
+        rf" = {num(w_vals[j])}\cdot{val:g}"
+    )
+print("$$")
+print(r"\begin{aligned}")
+print(r"\\".join(rows_tex) + rf"\\ &= {total:g}")
+print(r"\end{aligned}")
+print("$$")
+print()
+print(
+    f"`tap_conv` on the same tensors returns $y[{g}] = {y_toy[g]:g}$; the whole output is "
+    f"$y = ({', '.join(f'{v:.4g}' for v in y_toy)})$."
+)
+```
+
+```{python}
+#| label: fig-toy
+#| fig-cap: "The toy example. Top: the input $x$ over its 10 bins (grey bars) and the three reads of output bin $g = 3$ ($r = 2.25$ Hz). Each read sits between two bins; the dot is the interpolated value, the thin line joins the two bins it mixes. Bottom: the output $y$ for every $g$ ($g = 0$ is all-invalid, hence the bias, 0)."
+tap_colors = ["#1f77b4", "#2ca02c", "#d62728"]
+fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(9, 5.6), height_ratios=[1.35, 1])
+ax0.bar(np.arange(TOY_F), x_vals, color="#dddddd", edgecolor="#888888", width=0.85)
+g = 3
+for j in range(3):
+    lo_, fr_ = int(t_lo[j, g]), float(t_fr[j, g])
+    pos = lo_ + fr_
+    val = (1 - fr_) * x_vals[lo_] + fr_ * x_vals[lo_ + 1]
+    ax0.plot([lo_, lo_ + 1], [x_vals[lo_], x_vals[lo_ + 1]], color=tap_colors[j], lw=1.2)
+    ax0.plot(pos, val, "o", color=tap_colors[j], ms=9, zorder=5,
+             label=f"tap {toy_names[j]}: pos {pos:g} = {lo_} + {fr_:g},  value {val:g}")
+    ax0.axvline(pos, color=tap_colors[j], ls=":", lw=1)
+ax0.set_xticks(np.arange(TOY_F))
+ax0.set_xlabel("input bin f (= Hz in the toy)")
+ax0.set_ylabel("x[f]")
+ax0.set_title(f"three reads for output bin g = {g} (r = {toy_rates[g]:g} Hz)")
+ax0.legend(loc="upper right", frameon=False)
+ax0.set_ylim(0, 12.5)
+ax1.stem(np.arange(len(y_toy)), y_toy, basefmt=" ")
+ax1.plot(g, y_toy[g], "o", color="k", ms=10, mfc="none")
+for gi, yv in enumerate(y_toy):
+    ax1.text(gi + 0.08, yv + (0.4 if yv >= 0 else -0.5), f"{yv:.3g}", ha="left",
+             va="bottom" if yv >= 0 else "top", fontsize=10)
+ax1.set_xticks(np.arange(len(y_toy)), [f"g={gi}\nr={r:g}" for gi, r in enumerate(toy_rates)])
+ax1.set_ylabel("y[g]")
+ax1.set_ylim(min(0, y_toy.min()) - 1.5, y_toy.max() + 1.5)
+fig.tight_layout()
+plt.show()
+```
+
+The same table, with $C$ channels in and $O$ out, is the whole operator. What changes between
+the two model families is only how the table is built (sections 2 and 3). What changes between
+the two implementations is only how the sums are scheduled on the GPU (sections 4 and 6).
+
+## 2. Harmonic dilated convolution on the CQT log axis
+
+### 2.1 A harmonic is a constant shift on a log axis
+
+The CQT of `hppnet_l2k84_nolstm` has bin centres
+
+$$
+f_i = f_{\min}\,2^{\,i/b}, \qquad f_{\min} = 27.5\ \text{Hz},\quad b = 48\ \text{bins per octave},\quad i = 0,\dots,F-1,
+$$
+
+with $F = `{python} F_CQT`$ bins, so the top bin is at
+`{python} f"{FMIN_CQT * 2 ** ((F_CQT - 1) / BPO):.0f}"` Hz. The $k$-th harmonic of $f_i$ is
+
+$$
+k\,f_i = f_{\min}\,2^{\,(i + b\log_2 k)/b} = f_{\,i + b\log_2 k}.
+$$
+
+The shift $b \log_2 k$ does not depend on $i$. Every fundamental has its $k$-th harmonic the
+same number of bins above it. A fixed offset reaches it, so a dilated convolution can.
+
+```{python}
+#| output: asis
+f0, k = 75.0, 3
+i0 = BPO * math.log2(f0 / FMIN_CQT)
+sh = BPO * math.log2(k)
+print("$$")
+print(r"\begin{aligned}")
+print(rf"f_0 = {f0:g}\ \text{{Hz}}:&\quad i_0 = {BPO}\log_2\tfrac{{{f0:g}}}{{{FMIN_CQT:g}}} = {i0:.2f}\\")
+print(rf"k = {k}:&\quad {BPO}\log_2 {k} = {sh:.2f}\\")
+print(rf"\text{{harmonic at }} {k * f0:g}\ \text{{Hz}}:&\quad {BPO}\log_2\tfrac{{{k * f0:g}}}{{{FMIN_CQT:g}}} "
+      rf"= {BPO * math.log2(k * f0 / FMIN_CQT):.2f} = {i0:.2f} + {sh:.2f}")
+print(r"\end{aligned}")
+print("$$")
+```
+
+The bins are integers, so HPPNet rounds: $d_k = \mathrm{round}(b\log_2 k)$
+(`HPPNetOrig.__init__`, `harmonic_dilations`). The rounding error is at most half a bin, a
+frequency factor $2^{0.5/48}$, i.e. at most
+`{python} f"{(2 ** (0.5 / BPO) - 1) * 100:.2f}"` %. The CQT cannot separate frequencies closer
+than one bin anyway, so the rounded tap still reads the bin that contains the harmonic.
+
+```{python}
+#| output: asis
+k = 60
+exact = BPO * math.log2(k)
+dk = round(exact)
+f_read = 4500.0 * 2 ** ((dk - exact) / BPO)
+print(
+    f"Example, $k = {k}$: $48\\log_2 {k} = {exact:.2f}$, so $d_{{{k}}} = {dk}$. For a 75 Hz "
+    f"fundamental the tap reads {f_read:.0f} Hz instead of 4500 Hz, an error of "
+    f"{f_read - 4500:.0f} Hz. The CQT bin at 4500 Hz is "
+    f"{4500 * (2 ** (1 / BPO) - 1):.0f} Hz wide."
+)
+```
+
+### 2.2 The published layer: eight three-tap branches
+
+HPPNet's `HarmonicDilatedConv` has one branch per harmonic $k = 2,\dots,9$. Branch $k$ is a
+`Conv2d(C, O, kernel=(1, 3), dilation=(1, d_k), padding='same')`. Per frame, with
+$x[p] \in \mathbb{R}^C$ the feature vector at bin $p$ and three $O\times C$ matrices per
+branch, it computes (PyTorch convolutions are cross-correlations, so kernel element 0 reads
+the left neighbour):
+
+$$
+y^{(k)}[p] = b_k + W_k^{-}\,x[p-d_k] + W_k^{0}\,x[p] + W_k^{+}\,x[p+d_k].
+$$
+
+The layer output is $\mathrm{ReLU}\big(\sum_k y^{(k)}[p]\big)$. The three taps of branch $k$
+read the $k$-th sub-harmonic $f/k$, the bin itself, and the $k$-th harmonic $k f$. The
+published offsets are `HPPNET_DILATIONS` = `{python} str(HPPNET_DILATIONS)`.
+
+### 2.3 Eight branches are one sparse convolution
+
+Expand the sum over branches and group by read position:
+
+$$
+\sum_k y^{(k)}[p] =
+\underbrace{\Big(\sum_k b_k\Big)}_{\beta}
++ \underbrace{\Big(\sum_k W_k^{0}\Big)}_{\text{one centre tap}} x[p]
++ \sum_k W_k^{-}\,x[p-d_k]
++ \sum_k W_k^{+}\,x[p+d_k].
+$$
+
+All $K$ branches read $x[p]$ with their own centre matrix, so the centre matrices add into one.
+The result is one convolution with $J = 2K+1$ taps at the offsets $\{-d_K,\dots,-d_1,\;0,\;d_1,\dots,d_K\}$.
+That is `tap_conv` with the table of `shift_tap_table(offsets, F)`. The module keeps the
+branch parameters (same state-dict keys, so published checkpoints load). `_stacked()` builds
+the $(2K+1, O, C)$ weight in the order of the `offsets` buffer: the $K$ left matrices, the
+summed centre, the $K$ right matrices, and the summed bias. For $K = 8$ this is $J = 17$ taps;
+for the $k \le 84$ configuration, $K = `{python} len(CQT_DIL)`$ and
+$J = `{python} len(CQT_OFFS)`$.
+
+The gradients agree as well. Each centre matrix $W_k^0$ receives the gradient of the sum,
+which is what it receives in the branch form. The check below runs both forward paths of the
+real module in float64 on the CPU, on random weights, and compares outputs and parameter
+gradients.
+
+```{python}
+#| output: asis
+hdc = HarmonicDilatedConv(3, 5, tuple(CQT_DIL)).double()
+xin = torch.randn(2, 3, 2, F_CQT, dtype=torch.float64)
+gup = torch.randn(2, 5, 2, F_CQT, dtype=torch.float64)
+out = {}
+for mode, fused_from in (("branch sum", 1 << 30), ("fused tap_conv", 0)):
+    hdc.FUSED_FROM = fused_from  # instance attribute; the class default is untouched
+    hdc.zero_grad()
+    y = hdc(xin)
+    (y * gup).sum().backward()
+    out[mode] = (y.detach().clone(), [p.grad.clone() for p in hdc.parameters()])
+dy = (out["branch sum"][0] - out["fused tap_conv"][0]).abs().max().item()
+dg = max((a - b).abs().max().item() for a, b in zip(out["branch sum"][1], out["fused tap_conv"][1]))
+print(
+    f"$K = {len(CQT_DIL)}$ branches, $F = {F_CQT}$ bins: largest output difference "
+    f"{dy:.1e}, largest parameter-gradient difference {dg:.1e} (float64 rounding)."
+)
+```
+
+### 2.4 Zero padding is the validity mask
+
+`padding='same'` with a kernel of 3 and dilation $d$ pads $d$ zeros on each side. A read at
+$p\pm d$ outside $[0, F)$ returns zero. `shift_tap_table` encodes exactly that:
+
+$$
+\mathrm{pos}_{jg} = g + s_j,\qquad v_{jg} = [\,0 \le \mathrm{pos}_{jg} < F\,],
+$$
+
+$$
+\ell_{jg} = \min(\max(\mathrm{pos}_{jg}, 0), F-2)\,v_{jg},\qquad
+\phi_{jg} = (\mathrm{pos}_{jg} - \ell_{jg})\,v_{jg}.
+$$
+
+Integer shifts need no interpolation, so $\phi = 0$ almost everywhere. The exception is the top
+bin. Every read touches $\ell$ and $\ell+1$, so $\ell$ is kept at most $F-2$; position $F-1$ is
+then read as $\ell = F-2$, $\phi = 1$. No special case is needed in any kernel.
+
+```{python}
+#| output: asis
+j_plus48 = int(np.flatnonzero(CQT_OFFS == 48)[0])
+rows = []
+for g in (0, F_CQT - 49, F_CQT - 48, F_CQT - 1):
+    rows.append({
+        "g": g, "shift": "+48", "pos = g + 48": g + 48,
+        "lo": int(C_LO[j_plus48, g]), "frac": f"{C_FR[j_plus48, g]:g}",
+        "valid": int(C_VA[j_plus48, g]),
+    })
+print(md_table(rows))
+```
+
+### 2.5 The extension to $k \le 84$
+
+`harmonic_k_max = 84` appends branches $k = 10,\dots,84$ to the same operator. The published
+eight stay first and unchanged. The CQT grows to $F = `{python} F_CQT`$ bins so that the axis
+reaches the DREGON comb near 6 kHz. Two facts follow from the rounded offsets:
+
+```{python}
+#| output: asis
+dil_k = {k: d for k, d in zip(range(2, 2 + len(CQT_DIL)), CQT_DIL)}
+dups = [d for d, c in Counter(CQT_DIL).items() if c > 1]
+dup_txt = "; ".join(
+    f"$k = {', '.join(str(k) for k, d in dil_k.items() if d == dd)}$ "
+    f"{'both' if CQT_DIL.count(dd) == 2 else 'all'} round to {dd} bins"
+    for dd in dups
+)
+print(
+    f"- The new offsets run from {CQT_DIL[8]} ($k = 10$) to {CQT_DIL[-1]} ($k = {1 + len(CQT_DIL)}$) "
+    f"bins. Neighbouring harmonics get closer than one bin above $k \\approx 69$ "
+    f"($48\\log_2(1 + 1/k) < 1$), so rounding can merge two: {dup_txt}. Two taps at one "
+    f"position with two weights act as one tap with their sum. Nothing breaks; one of the "
+    f"two branches is redundant."
+)
+print(
+    f"- A harmonic tap is valid only if $p + d_k \\le {F_CQT - 1}$, a sub-harmonic tap only if "
+    f"$p \\ge d_k$. In this table {100 * (1 - C_VA.mean()):.0f} % of all (tap, bin) pairs are "
+    f"padding (@fig-cqt-table)."
+)
+```
+
+```{python}
+#| label: fig-cqt-offsets
+#| fig-cap: "The harmonic offsets on the CQT axis. (a) Offset $d_k$ against harmonic number: exact $48\\log_2 k$ (line), rounded (dots), published $k \\le 9$ in blue, the $k \\le 84$ extension in orange. (b) Rounding error in bins; the dashed lines are ±0.5 bin. (b') The same error as a frequency error. (c) Where the taps of bin $p$ land for a fundamental near 75 Hz: harmonic taps $p + d_k$ above the axis, sub-harmonic taps $p - d_k$ below. Taps that land left of bin 0 (grey crosses, grey region) read the zero padding: here all sub-harmonics except $1/2$."
+ks = np.arange(2, 2 + len(CQT_DIL))
+dk = np.asarray(CQT_DIL)
+exact = BPO * np.log2(ks)
+pub = ks <= 9
+fig = plt.figure(figsize=(10, 8.2))
+gs = fig.add_gridspec(3, 2, height_ratios=[1.1, 0.8, 1.0], hspace=0.55, wspace=0.25)
+ax = fig.add_subplot(gs[0, :])
+kk = np.linspace(2, ks[-1], 400)
+ax.plot(kk, BPO * np.log2(kk), color="#999999", lw=1, label=r"exact $48\log_2 k$")
+ax.plot(ks[pub], dk[pub], "o", color="#1f77b4", ms=6, label="published, k = 2..9")
+ax.plot(ks[~pub], dk[~pub], "o", color="#ff7f0e", ms=3.5, label="extension, k = 10..84")
+for kd in dups:
+    kk_d = [k for k, d in dil_k.items() if d == kd]
+    ax.annotate(f"k = {', '.join(map(str, kk_d))}\nboth {kd}", xy=(kk_d[0], kd), xytext=(kk_d[0] - 22, kd - 80),
+                arrowprops=dict(arrowstyle="->", lw=0.8), fontsize=9.5)
+ax.set_xlabel("harmonic k")
+ax.set_ylabel(r"offset $d_k$ (bins)")
+ax.set_title("(a) offsets of the harmonic taps")
+ax.legend(frameon=False, loc="center right")
+ax = fig.add_subplot(gs[1, 0])
+ax.axhline(0.5, ls="--", color="#999999", lw=0.8)
+ax.axhline(-0.5, ls="--", color="#999999", lw=0.8)
+ax.plot(ks[pub], dk[pub] - exact[pub], "o", color="#1f77b4", ms=5)
+ax.plot(ks[~pub], dk[~pub] - exact[~pub], "o", color="#ff7f0e", ms=3)
+ax.set_xlabel("harmonic k")
+ax.set_ylabel("rounding error (bins)")
+ax.set_title("(b) rounding error")
+ax2 = fig.add_subplot(gs[1, 1])
+ax2.plot(ks, (2 ** ((dk - exact) / BPO) - 1) * 100, ".", color="#555555")
+ax2.set_xlabel("harmonic k")
+ax2.set_ylabel("frequency error (%)")
+ax2.set_title("(b') the same as a frequency error")
+ax = fig.add_subplot(gs[2, :])
+p = int(round(BPO * math.log2(75.0 / FMIN_CQT)))
+left = p - max(dk) - 15
+ax.axvspan(left, -0.5, color="#e2e8f0")
+ax.text((left - 0.5) / 2, 0.75, "outside the axis:\nzero padding", ha="center", fontsize=9, color="#4a5568")
+ax.axhline(0, color="k", lw=1)
+ax.plot([0, F_CQT - 1], [0, 0], "|", color="k", ms=14)
+for k_, d in zip(ks, dk):
+    col = "#1f77b4" if k_ <= 9 else "#ff7f0e"
+    for sgn, yy in ((1, 0.55), (-1, -0.55)):
+        q = p + sgn * d
+        if 0 <= q < F_CQT:
+            ax.plot([q, q], [0, yy * (1.0 if k_ <= 9 else 0.6)], color=col, lw=1.1 if k_ <= 9 else 0.6)
+        else:
+            ax.plot(q, yy * 0.6, "x", color="#718096", ms=4 if k_ > 9 else 6)
+ax.plot([p, p], [-0.8, 0.8], color="k", lw=2.5)
+ax.text(p, 0.88, f"p = {p}\n({FMIN_CQT * 2 ** (p / BPO):.1f} Hz)", ha="center", fontsize=9.5)
+for k_ in (2, 3, 9, 20, 84):
+    q = p + dil_k[k_]
+    ax.text(q, 0.62 if k_ <= 9 else 0.4, f"k={k_}", ha="center", fontsize=8.5, rotation=90, va="bottom")
+ax.text(p - dil_k[2], -0.62, "1/2", ha="center", va="top", fontsize=8.5)
+for k_ in (3, 9, 84):
+    ax.text(p - dil_k[k_], -0.45, f"1/{k_}", ha="center", va="top", fontsize=8, color="#4a5568")
+tick_bins = [0, 48, 96, 144, 192, 240, 288, 336, F_CQT - 1]
+ax.set_xticks(tick_bins, [f"{b}\n{FMIN_CQT * 2 ** (b / BPO):.0f} Hz" for b in tick_bins], fontsize=9)
+ax.set_xlim(left, F_CQT + 15)
+ax.set_ylim(-1.0, 1.35)
+ax.set_yticks([])
+ax.spines["left"].set_visible(False)
+ax.set_title(f"(c) taps read by output bin p = {p}: harmonics above, sub-harmonics below")
+plt.show()
+```
+
+```{python}
+#| label: fig-cqt-table
+#| fig-cap: "The real index table of the $k \\le 84$ CQT layer, `shift_tap_table(offsets, 385)`: 167 taps × 385 output bins. Left: `valid` (white = padding). Right: `lo`, the bin read. For display the rows are sorted by offset, from $-d_{84} = -307$ (sub-harmonic 1/84) at the top through the centre tap to $+d_{84} = +307$ at the bottom; the `offsets` buffer itself is ordered $-d_2..-d_{84}, 0, +d_2..+d_{84}$, matching `_stacked()`. The published 17 taps ($|s| \\le 152$) lie between the red dashed lines. `frac` is 0 everywhere except at the top bin (not shown). Low bins have no sub-harmonics on the axis, high bins no harmonics."
+order = np.argsort(CQT_OFFS, kind="stable")
+offs_sorted = CQT_OFFS[order]
+fig, axs = plt.subplots(1, 2, figsize=(10.5, 4.8), sharey=True)
+axs[0].imshow(C_VA[order], aspect="auto", cmap=ListedColormap(["white", "#2b6cb0"]), interpolation="nearest")
+axs[0].set_title("valid (blue = 1)")
+im = axs[1].imshow(np.where(C_VA > 0, C_LO, np.nan)[order], aspect="auto", cmap="viridis",
+                   interpolation="nearest")
+axs[1].set_title("lo (blank = invalid)")
+fig.colorbar(im, ax=axs[1], label="input bin")
+pub_lo = int(np.flatnonzero(offs_sorted >= -max(HPPNET_DILATIONS)).min())
+pub_hi = int(np.flatnonzero(offs_sorted <= max(HPPNET_DILATIONS)).max())
+centre = int(np.flatnonzero(offs_sorted == 0)[0])
+yt = [0, pub_lo, centre, pub_hi, len(offs_sorted) - 1]
+for ax in axs:
+    ax.set_xlabel("output bin g")
+    for yy in (pub_lo - 0.5, pub_hi + 0.5):
+        ax.axhline(yy, color="#e53e3e", lw=0.9, ls="--")
+axs[0].set_yticks(yt, [f"{int(offs_sorted[i]):+d}" for i in yt])
+axs[0].set_ylabel("tap offset s (bins)")
+axs[0].annotate("published 17 taps", xy=(20, centre), xytext=(12, 22), fontsize=9.5, color="#c53030",
+                arrowprops=dict(arrowstyle="->", color="#c53030", lw=0.9))
+fig.tight_layout()
+plt.show()
+```
+
+### 2.6 What runs today on the CQT side
+
+```{python}
+#| output: asis
+print(
+    f"`HarmonicDilatedConv.FUSED_FROM` is {HarmonicDilatedConv.FUSED_FROM} "
+    f"({'$2^{' + str(int(math.log2(HarmonicDilatedConv.FUSED_FROM))) + '}$' if HarmonicDilatedConv.FUSED_FROM & (HarmonicDilatedConv.FUSED_FROM - 1) == 0 else ''}). "
+    f"The forward uses the fused `tap_conv` path only when the module has at least that many "
+    f"branches, so with this value the **branch sum runs** for every configuration. The two "
+    f"paths compute the same function; the reason for the choice is speed, and it is in "
+    f"section 4.6. If the fused path is enabled, on a GPU it runs the Triton kernels of section 6."
+)
+```
+
+## 3. The pyramid's linear axis
+
+### 3.1 On a linear axis the harmonic offset grows with the rate
+
+On a linear grid of bin width $\Delta$, frequency $f$ sits at position $f/\Delta$. The
+harmonic $k$ of rate $r$ is at $k\,r$ Hz, i.e. at position $k\,r/\Delta$. The pyramid's output
+grid is $r_g = g\,\Delta r$, so harmonic $k$ of output bin $g$ is at position
+$k\,g\,\Delta r/\Delta$. Its distance from the fundamental's own position is
+$(k-1)\,g\,\Delta r/\Delta$: it grows with $g$. No fixed dilation reaches it. An index table
+does: one row per tap, one column per output bin, and the "dilation" becomes position-dependent.
+This is `ProportionalTapConv`, $y = \sum_j W_j\, x[m_j\,r]$, with tap multipliers $m_j$.
+
+### 3.2 The nested levels
+
+`PyramidSTFT` computes $L = `{python} NLEV`$ STFTs on one hop. Level $\ell$ has window
+`n_ffts[ℓ]`, bin width $\Delta f_\ell = \text{sr}/n_{\text{fft},\ell}$ and keeps the bins from
+0 Hz up to its ceiling:
+
+$$
+F_\ell = \min\Big(\Big\lfloor \tfrac{1200\cdot 2^\ell}{\Delta f_\ell}\Big\rfloor + 2,\ \tfrac{n_{\text{fft},\ell}}{2}+1\Big),
+\qquad \text{ceiling}_\ell = (F_\ell - 2)\,\Delta f_\ell .
+$$
+
+The "+2" is one bin for the closed range and one spare bin, so that a linear read at the
+ceiling still has its right neighbour $\ell+1$. The ceiling is the highest frequency a read may
+address on that level. Range and bin width double together, so every level has about the same
+number of bins and a spectral line is about as many bins wide on every level.
+
+```{python}
+#| output: asis
+rows = []
+for lvl in range(NLEV):
+    rows.append({
+        "level": lvl, "n_fft": FE.n_ffts[lvl], "window (s)": f"{FE.n_ffts[lvl] / SR:.3f}",
+        "Δf (Hz)": f"{DF[lvl]:.4g}", "bins F_ℓ": NB[lvl], "ceiling (Hz)": f"{CEIL[lvl]:.2f}",
+        "offset in the concatenated axis": int(OFF[lvl]),
+    })
+print(md_table(rows))
+print()
+print(
+    f"Worked example, level 2: $\\Delta f_2 = {SR}/{FE.n_ffts[2]} = {DF[2]:g}$ Hz; "
+    f"$\\lfloor 4800/{DF[2]:g}\\rfloor + 2 = {int(4800 // DF[2]) + 2}$ bins; ceiling "
+    f"$({NB[2]} - 2)\\cdot {DF[2]:g} = {CEIL[2]:.2f}$ Hz. Level 3 would need "
+    f"{int(9600 // DF[3]) + 2} bins but stops at Nyquist, {FE.n_ffts[3] // 2 + 1} bins."
+)
+print()
+print(
+    f"After `block_1`, the fusion and `block_2/2_5`, the {NLEV} level maps are concatenated "
+    f"along frequency into one axis of $F = {F_CAT}$ bins. Level $\\ell$ starts at the offset "
+    f"in the last column. The harmonic layer reads this concatenated axis."
+)
+```
+
+### 3.3 Which level a tap reads: the finest one that covers it
+
+`build_tap_table` takes the multipliers $m_j$, the output rates $r_g$, and the level list
+(bin widths, ceilings, offsets), ordered fine to coarse. For each pair $(j, g)$:
+
+$$
+f = m_j\,r_g,\qquad
+\ell^\ast = \min\{\ell : f < \text{ceiling}_\ell\},\qquad
+\mathrm{pos} = \frac{f}{\Delta f_{\ell^\ast}},
+$$
+
+$$
+\text{lo} = \text{offset}_{\ell^\ast} + \lfloor \mathrm{pos} \rfloor,\qquad
+\text{frac} = \mathrm{pos} - \lfloor \mathrm{pos} \rfloor,
+$$
+
+$$
+\text{valid} = [\,f \ge f_{\min}\,]\cdot[\,f < f_{\max}\,]\cdot[\,f < \text{ceiling}_{L-1}\,].
+$$
+
+Invalid entries get $\text{lo} = 0$, $\text{frac} = 0$. The finest covering level is chosen
+because it has the longest window that still contains $f$, hence the narrowest bins. A coarser
+level contains $f$ too, at half the resolution per level.
+
+```{python}
+#| output: asis
+def one(mult, r):
+    lo, fr, va = build_tap_table(np.array([mult]), np.array([r]), DF, CEIL, list(OFF), F_MIN, F_MAX)
+    return int(lo.item()), float(fr.item()), int(va.item())
+
+
+def explain(mult, r, label):
+    f = mult * r
+    lo, fr, va = one(mult, r)
+    lvl = next((i for i in range(NLEV) if f < CEIL[i]), None)
+    if not va:
+        why = []
+        if f < F_MIN:
+            why.append(f"$f < f_{{\\min}} = {F_MIN:.3f}$ Hz")
+        if f >= F_MAX:
+            why.append(f"$f \\ge f_{{\\max}} = {F_MAX:g}$ Hz")
+        if lvl is None:
+            why.append("above every ceiling")
+        return (f"- **{label}**: $f = {f:g}$ Hz, {' and '.join(why)} → invalid "
+                f"(`lo` = {lo}, `frac` = {fr:g}, `valid` = {va}).")
+    lower = (f"$\\text{{ceiling}}_{lvl - 1} = {CEIL[lvl - 1]:.1f}$ Hz $\\le f <$ " if lvl > 0
+             else "$f <$ ")
+    pos = f / DF[lvl]
+    return (
+        f"- **{label}**: $f = {f:g}$ Hz. {lower}$\\text{{ceiling}}_{lvl} = {CEIL[lvl]:.1f}$ Hz "
+        f"→ level {lvl}. pos $= {f:g}/{DF[lvl]:.8g} = {pos:.6g}$ → `lo` $= {OFF[lvl]} + "
+        f"{math.floor(pos)} = {lo}$, `frac` $= {fr:.4g}$, `valid` $= {va}$ (real `build_tap_table`)."
+    )
+
+
+for mult, r, label in [
+    (60, 75.0, "r = 75 rev/s, k = 60"),
+    (61, 75.0, "r = 75 rev/s, k = 61"),
+    (1 / 8, 75.0, "r = 75 rev/s, sub-harmonic 1/8"),
+    (5, 75.0, "r = 75 rev/s, k = 5"),
+    (84, 89.0, "r = 89 rev/s, k = 84"),
+    (84, 100.0, "r = 100 rev/s, k = 84"),
+    (1 / 2, DR, f"r = {DR:g} rev/s (g = 1), sub-harmonic 1/2"),
+]:
+    print(explain(mult, r, label))
+```
+
+In the model the rates are the grid points $r_g = g\,\Delta r$ with $\Delta r = \Delta f_0$, not
+75.0 exactly; 75 rev/s lies between $g = 76$ and $g = 77$. On the grid the position has a simple
+form, $\mathrm{pos} = m_j\,g\,\Delta f_0/\Delta f_\ell = m_j\,g/2^\ell$. For a harmonic tap the
+fraction is a multiple of $1/2^\ell$; for the sub-harmonic $1/k$ (always on level 0 here) a
+multiple of $1/k$. The table confirms it:
+
+```{python}
+#| output: asis
+harm = MULTS >= 1
+rows = []
+for lvl in range(NLEV):
+    sel = (H_LEV == lvl) & harm[:, None]
+    fr_set = sorted({round(v, 6) for v in H_FR[sel]})
+    rows.append({"taps": "harmonic", "level": lvl, "(tap, rate) entries": int(sel.sum()),
+                 "distinct frac values": ", ".join(f"{v:g}" for v in fr_set)})
+sel = (H_VA > 0) & ~harm[:, None]
+rows.append({"taps": "sub-harmonic", "level": "0 (all)", "(tap, rate) entries": int(sel.sum()),
+             "distinct frac values": f"{len({round(v, 6) for v in H_FR[sel]})} values, multiples of 1/k"})
+print(md_table(rows))
+g_ex, k_ex = 77, 61
+lo_ex, fr_ex = H_LO[k_ex - 1, g_ex], H_FR[k_ex - 1, g_ex]
+lvl_ex = H_LEV[k_ex - 1, g_ex]
+print()
+print(
+    f"Grid example: $g = {g_ex}$ ($r = {RATES[g_ex]:.4f}$ rev/s), $k = {k_ex}$: "
+    f"$f = {k_ex * RATES[g_ex]:.2f}$ Hz → level {lvl_ex}, pos $= {k_ex}\\cdot{g_ex}/2^{lvl_ex} = "
+    f"{k_ex * g_ex / 2 ** lvl_ex:g}$ → `lo` $= {OFF[lvl_ex]} + {int(lo_ex - OFF[lvl_ex])} = {lo_ex}$, "
+    f"`frac` $= {fr_ex:g}$ (row $k = {k_ex}$, column $g = {g_ex}$ of the model's `harm_lo`/`harm_frac`)."
+)
+```
+
+This regularity is the design note's "strided convolution" view (§5 of
+`docs/pyramid-harmonic-frontend-design.md`): within one level a tap is a convolution with stride
+$k/2^\ell$ and a constant fractional offset per residue class. The code does not exploit it; it
+uses the general table.
+
+### 3.4 The masks
+
+```{python}
+#| output: asis
+g_hi = int(np.flatnonzero(H_VA[K_MAX - 1] > 0).max())
+print(
+    f"- $f_{{\\min}}$ = one level-0 bin = {F_MIN:.4f} Hz (`f_min: null` in the config means "
+    f"this default). It masks the DC lobe: at $g = 0$ every tap reads 0 Hz and is invalid; at "
+    f"$g = 1$ the sub-harmonic taps read $<{DR:.3f}$ Hz and are invalid too."
+)
+print(
+    f"- $f_{{\\max}}$ = {F_MAX:g} Hz masks the band top. Harmonic $k = {K_MAX}$ is valid up to "
+    f"$g = {g_hi}$ ($r = {RATES[g_hi]:.2f}$ rev/s; ${K_MAX}\\cdot{RATES[g_hi]:.2f} = "
+    f"{K_MAX * RATES[g_hi]:.0f}$ Hz) and masked above."
+)
+print(
+    f"- The last ceiling, {CEIL[-1]:.1f} Hz, is above $f_{{\\max}}$, so in this configuration "
+    f"$f_{{\\max}}$ binds first. The \"above every ceiling\" case exists for configurations "
+    f"without it."
+)
+print(
+    f"- Overall {100 * H_VA.mean():.1f} % of the {H_VA.size} entries of the "
+    f"${len(MULTS)}\\times{G_PYR}$ table are valid."
+)
+```
+
+### 3.5 The tap positions, drawn
+
+```{python}
+#| label: fig-levels
+#| fig-cap: "The four nested STFT levels. (a) Each bar spans a level's kept range, 0 Hz to its ceiling; the label gives the window and bin width. The bottom bar is the rule of section 3.3: the level a read at frequency $f$ uses. The dashed line is $f_{\\max}$. (b) Why the finest level: rate resolution of harmonic $k$, i.e. the bin width at $k r$ divided by $k$, for three rates. The pyramid (solid) improves with $k$ while it stays on level 0, then follows a saw-tooth; the CQT (dashed) gives $0.0145\\,r$ at every $k$."
+fig, (ax, axr) = plt.subplots(2, 1, figsize=(10, 8.0), height_ratios=[1, 1.15])
+for lvl in range(NLEV):
+    yy = NLEV - lvl
+    ax.barh(yy, CEIL[lvl], left=0, height=0.6, color=LEVEL_COLORS[lvl], alpha=0.85)
+    ax.text(CEIL[lvl] + 60, yy,
+            f"level {lvl}: n_fft {FE.n_ffts[lvl]}, window {FE.n_ffts[lvl] / SR:.2f} s, "
+            f"Δf {DF[lvl]:.3g} Hz, {NB[lvl]} bins, ceiling {CEIL[lvl]:.0f} Hz",
+            va="center", fontsize=9.5)
+edges = [0.0, *CEIL]
+for lvl in range(NLEV):
+    ax.barh(-0.2, edges[lvl + 1] - edges[lvl], left=edges[lvl], height=0.6, color=LEVEL_COLORS[lvl])
+    ax.text((edges[lvl] + edges[lvl + 1]) / 2, -0.2, f"L{lvl}", ha="center", va="center",
+            fontsize=10, color="white", fontweight="bold")
+ax.plot([F_MAX, F_MAX], [-0.6, 1.45], color="k", ls="--", lw=1)
+ax.text(F_MAX + 80, -0.62, f"f_max = {F_MAX:g} Hz", ha="left", va="center", fontsize=9.5)
+ax.set_yticks([*range(1, NLEV + 1), -0.2],
+              [*(f"level {l}" for l in range(NLEV - 1, -1, -1)), "level read\nat f"])
+ax.set_xlim(0, 14500)
+ax.set_xticks(np.arange(0, 8001, 1000))
+ax.set_xlabel("frequency (Hz)")
+ax.set_title("(a) kept range of each level (all start at 0 Hz)")
+ax.set_ylim(-0.8, NLEV + 0.6)
+ks_all = np.arange(1, K_MAX + 1)
+for r, ls_col in zip((50.0, 75.0, 120.0), ("#4c78a8", "#f58518", "#54a24b")):
+    f = ks_all * r
+    res = np.full(len(ks_all), np.nan)
+    for i, fk in enumerate(f):
+        lvl = next((l for l in range(NLEV) if fk < CEIL[l]), None)
+        if lvl is not None and fk < F_MAX:
+            res[i] = DF[lvl] / ks_all[i]
+    axr.plot(ks_all, res, "-", color=ls_col, lw=1.6, label=f"pyramid, r = {r:g} rev/s")
+    axr.axhline((2 ** (1 / BPO) - 1) * r, color=ls_col, ls="--", lw=1.1, label=f"CQT, r = {r:g} rev/s")
+axr.set_yscale("log")
+axr.set_xlabel("harmonic k")
+axr.set_ylabel("Δf(k r) / k  (rev/s)")
+axr.set_title("(b) rate resolution per harmonic")
+axr.legend(ncol=3, frameon=False, fontsize=9, loc="upper center", bbox_to_anchor=(0.5, -0.17))
+fig.tight_layout()
+plt.show()
+```
+
+```{python}
+#| label: fig-tap-vs-rate
+#| fig-cap: "Where a few taps read, for every output rate of the model (columns of the real `harm_*` table). (a) Frequency $m_j r$ (log scale), coloured by the level the table assigns; grey = invalid. Horizontal lines: the level ceilings and $f_{\\max}$. A tap crosses to the next coarser level at $r = \\text{ceiling}_\\ell / k$. (b) The same taps as an index into the concatenated axis, $\\text{lo} + \\text{frac}$; the shaded bands are the levels' blocks. Crossing a ceiling makes the index jump from the top of one block into the middle of the next."
+show = ["1", "2", "8", "20", "40", "60", "84", "1/2", "1/8"]
+rows_idx = [MULT_LABELS.index(s) for s in show]
+fig, (axa, axb) = plt.subplots(1, 2, figsize=(11, 5.2))
+for j in rows_idx:
+    f = MULTS[j] * RATES
+    pos = H_LO[j] + H_FR[j]
+    for lvl in range(-1, NLEV):
+        sel = H_LEV[j] == lvl
+        if not sel.any():
+            continue
+        col = GREY if lvl < 0 else LEVEL_COLORS[lvl]
+        axa.plot(RATES[sel], np.maximum(f[sel], 0.3), ".", color=col, ms=3)
+        if lvl >= 0:
+            axb.plot(RATES[sel], pos[sel], ".", color=col, ms=3)
+    j_lab = len(RATES) - 1
+    axa.text(RATES[j_lab] + 1.5, f[j_lab], MULT_LABELS[j] if MULTS[j] < 1 else f"k={MULT_LABELS[j]}",
+             fontsize=9, va="center")
+for lvl in range(NLEV):
+    axa.axhline(CEIL[lvl], color=LEVEL_COLORS[lvl], lw=0.8, ls="--")
+    axb.axhspan(OFF[lvl], OFF[lvl] + NB[lvl], color=LEVEL_COLORS[lvl], alpha=0.12)
+    axb.text(RATES[-1] + 3, OFF[lvl] + NB[lvl] / 2, f"level {lvl}\nbins {OFF[lvl]}–{OFF[lvl] + NB[lvl] - 1}",
+             fontsize=9, va="center", color=LEVEL_COLORS[lvl])
+axa.axhline(F_MAX, color="k", lw=0.8, ls=":")
+axb.set_xlim(-3, RATES[-1] + 38)
+axa.set_yscale("log")
+axa.set_xlabel("rate r (rev/s)")
+axa.set_ylabel("frequency read (Hz)")
+axa.set_title("(a) frequency of each tap")
+axa.set_xlim(0, RATES[-1] + 14)
+axb.set_xlabel("rate r (rev/s)")
+axb.set_ylabel("lo + frac  (concatenated bin)")
+axb.set_title("(b) index into the concatenated axis")
+handles = [plt.Line2D([], [], marker="o", ls="", color=c, label=f"level {i}") for i, c in enumerate(LEVEL_COLORS)]
+handles.append(plt.Line2D([], [], marker="o", ls="", color=GREY, label="invalid"))
+handles.append(plt.Line2D([], [], ls="--", color="#666666", lw=0.8, label="level ceilings"))
+handles.append(plt.Line2D([], [], ls=":", color="k", lw=0.8, label="f_max"))
+axa.legend(handles=handles, frameon=False, loc="lower right")
+fig.tight_layout()
+plt.show()
+```
+
+```{python}
+#| label: fig-table-images
+#| fig-cap: "The real index table of the pyramid's `conv_3` (91 taps × 154 output rates) as images. Rows: harmonics $k = 1..84$ from the top, then sub-harmonics $1/2..1/8$ (below the red line). (a) Level each entry reads (grey = invalid). (b) `lo`, the concatenated bin. (c) `frac`. (d) `valid`. The level boundaries in (a) are the hyperbolas $k\\,r = \\text{ceiling}_\\ell$; the invalid wedge at the lower right of the harmonic block is $k\\,r \\ge f_{\\max}$; the invalid first column is $r = 0$, and the small invalid corner of the sub-harmonic block is $r/k < f_{\\min}$. In (c) harmonic taps on level 0 have frac 0 (black), on level $\\ell$ multiples of $1/2^\\ell$."
+fig, axs = plt.subplots(2, 2, figsize=(11, 8.6), sharex=True, sharey=True)
+lev_cmap = ListedColormap([GREY, *LEVEL_COLORS])
+ext = [RATES[0] - DR / 2, RATES[-1] + DR / 2, len(MULTS) - 0.5, -0.5]
+im0 = axs[0, 0].imshow(H_LEV, aspect="auto", cmap=lev_cmap, vmin=-1.5, vmax=NLEV - 0.5,
+                       interpolation="nearest", extent=ext)
+cb = fig.colorbar(im0, ax=axs[0, 0], ticks=range(-1, NLEV))
+cb.ax.set_yticklabels(["invalid", *(f"level {l}" for l in range(NLEV))])
+axs[0, 0].set_title("(a) level read")
+im1 = axs[0, 1].imshow(np.where(H_VA > 0, H_LO, np.nan), aspect="auto", cmap="viridis",
+                       interpolation="nearest", extent=ext)
+fig.colorbar(im1, ax=axs[0, 1], label="concatenated bin")
+axs[0, 1].set_title("(b) lo")
+im2 = axs[1, 0].imshow(np.where(H_VA > 0, H_FR, np.nan), aspect="auto", cmap="magma",
+                       interpolation="nearest", extent=ext, vmin=0, vmax=1)
+fig.colorbar(im2, ax=axs[1, 0], label="frac")
+axs[1, 0].set_title("(c) frac")
+im3 = axs[1, 1].imshow(H_VA, aspect="auto", cmap=ListedColormap(["white", "#2b6cb0"]),
+                       interpolation="nearest", extent=ext, vmin=0, vmax=1)
+cb3 = fig.colorbar(im3, ax=axs[1, 1], ticks=[0.25, 0.75])
+cb3.ax.set_yticklabels(["invalid", "valid"])
+axs[1, 1].set_title("(d) valid")
+yt = [0, 9, 19, 39, 59, 79, K_MAX, len(MULTS) - 1]
+for ax in axs.flat:
+    ax.axhline(K_MAX - 0.5, color="#e53e3e", lw=0.8)
+    ax.set_yticks(yt, [MULT_LABELS[i] for i in yt])
+for ax in axs[1]:
+    ax.set_xlabel("rate r (rev/s)")
+for ax in axs[:, 0]:
+    ax.set_ylabel("tap multiplier")
+fig.tight_layout()
+plt.show()
+```
+
+A small slice of the same table, around $r \approx 75$ rev/s and $k \approx 60$, written out:
+
+```{python}
+#| output: asis
+rows = []
+for k_ in (59, 60, 61, 62, 63):
+    row = {"tap": f"k = {k_}"}
+    for g in (76, 77, 78):
+        j = k_ - 1
+        row[f"g = {g} (r = {RATES[g]:.2f})"] = (
+            f"L{H_LEV[j, g]}: lo {H_LO[j, g]}, frac {H_FR[j, g]:g}" if H_VA[j, g] else "invalid"
+        )
+    rows.append(row)
+print(md_table(rows))
+```
+
+### 3.6 Sub-harmonic taps and the rate-axis blocks
+
+The sub-harmonic taps $r/k$, $k = 2..`{python} K_SUB`$, are HPPNet's $p - d_k$ taps on the linear
+axis: they let the layer check whether rate $r$ is itself a harmonic of a slower rotor (the
+octave-error guard). All of them land below `{python} f"{RATES[-1] / 2:.0f}"` Hz, on level 0.
+
+HPPNet's `block_4` and `block_5` are `(1, 3)` convolutions dilated by 48 bins (one octave on the
+CQT) and 12 bins (a quarter octave with the frequency pool off). On the rate axis an octave up
+is the rate $2r$, so the pyramid replaces them by two more `ProportionalTapConv` layers on the
+uniform output grid: taps $r\cdot\{1/2, 1, 2\}$ (`octave_taps`) and
+$r\cdot\{2^{-1/4}, 1, 2^{1/4}\}$ (`quarter_taps`), with $C = O = 128$. The same
+`build_tap_table` builds them with one "level" (step $\Delta r$, ceiling $(G-2)\,\Delta r$),
+$f_{\min} = 0$ and $f_{\max} = \infty$. Then `HPPNetPyramid.__init__` overrides the identity tap
+($m = 1$) to be valid everywhere, including the top bin, through the $\text{lo} = G-2$,
+$\text{frac} = 1$ trick of section 2.4.
+
+```{python}
+#| output: asis
+rows = []
+for name in ("oct", "quart"):
+    lo_b = getattr(PYR, f"{name}_lo").numpy()
+    fr_b = getattr(PYR, f"{name}_frac").numpy()
+    va_b = getattr(PYR, f"{name}_valid").numpy()
+    for j in range(lo_b.shape[0]):
+        ok = np.flatnonzero(va_b[j] > 0)
+        rows.append({
+            "layer": "block_4" if name == "oct" else "block_5", "tap": j,
+            "position at g = 100": f"{lo_b[j, 100] + fr_b[j, 100]:.3f}" if va_b[j, 100] else "invalid",
+            "valid output bins": f"{ok.min()}..{ok.max()} ({len(ok)} of {G_PYR})",
+            f"top bin g = {G_PYR - 1}": f"lo {lo_b[j, -1]}, frac {fr_b[j, -1]:.3g}, valid {int(va_b[j, -1])}",
+        })
+print(md_table(rows))
+print()
+print(
+    f"Example: the tap $2r$ at $g = 75$ reads position 150 < {G_PYR - 2} (valid); at $g = 76$ it "
+    f"would read 152, which is not below the ceiling $({G_PYR}-2)\\,\\Delta r$, so it is invalid. "
+    f"The octave above the top half of the grid is off the grid."
+)
+```
+
+```{python}
+#| label: fig-octave-tables
+#| fig-cap: "The tables of `block_4` (octave taps) and `block_5` (quarter-octave taps): read position $\\text{lo} + \\text{frac}$ against output bin. Solid = valid, grey = invalid. The identity taps are the diagonal. The up-taps leave the grid at the top: $2r$ for $g > 75$, $2^{1/4} r$ for $g > 127$."
+sig = inspect.signature(type(PYR).__init__).parameters
+TAPS = {name: tuple(PYR_P.get(key, sig[key].default)) for name, key in
+        (("oct", "octave_taps"), ("quart", "quarter_taps"))}
+fig, axs = plt.subplots(1, 2, figsize=(10.5, 4.2), sharey=True)
+gg = np.arange(G_PYR)
+for ax, name, title, labels in (
+    (axs[0], "oct", r"block_4: $r\cdot\{1/2,\ 1,\ 2\}$", [r"$r/2$", r"$r$", r"$2r$"]),
+    (axs[1], "quart", r"block_5: $r\cdot\{2^{-1/4},\ 1,\ 2^{1/4}\}$",
+     [r"$2^{-1/4}r$", r"$r$", r"$2^{1/4}r$"]),
+):
+    lo_b = getattr(PYR, f"{name}_lo").numpy()
+    fr_b = getattr(PYR, f"{name}_frac").numpy()
+    va_b = getattr(PYR, f"{name}_valid").numpy()
+    for j, col in zip(range(3), ("#1f77b4", "#000000", "#d62728")):
+        pos = lo_b[j] + fr_b[j]
+        ok = va_b[j] > 0
+        ax.plot(gg[ok], pos[ok], "-", color=col, lw=1.6, label=labels[j])
+        if (~ok).any():
+            ax.plot(gg[~ok], TAPS[name][j] * gg[~ok], ":", color=GREY, lw=1.6,
+                    label="invalid (off the grid)")
+    ax.axhline(G_PYR - 1, color="#999999", lw=0.8, ls="--")
+    ax.text(2, G_PYR + 4, f"top bin G − 1 = {G_PYR - 1}", fontsize=9, color="#666666")
+    ax.set_title(title)
+    ax.set_xlabel("output bin g")
+    ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(0.0, 0.93))
+axs[0].set_ylabel("read position lo + frac (bins)")
+fig.tight_layout()
+plt.show()
+```
+
+## 4. The torch implementation: `_TapConvFn`
+
+### 4.1 Overview
+
+`tap_conv(x, weight, bias, lo, frac, valid, chunk_elems)` computes `wa`, `wc` (section 1.1) and
+then picks one of two implementations. On a CUDA tensor with Triton installed it calls the fused
+kernels (`tap_conv_triton`, section 6) unless the environment variable `TAP_CONV_TORCH` is set.
+Otherwise — on the CPU, or when forced for A/B runs — it picks a chunk size and calls the autograd
+function `_TapConvFn`, described here. `_TapConvFn` has a hand-written forward and backward.
+Three decisions shape it:
+
+1. **Layout.** `x` is transposed once from $(B, C, T, F)$ to $(F, B\,T, C)$, so the read axis is
+   outermost.
+2. **Chunking.** Taps are processed `chunk` at a time. Each chunk does one gather and one matrix
+   multiplication (GEMM).
+3. **Recompute in backward.** Only `x` is saved. The backward redoes the gathers it needs.
+
+### 4.2 Layout: make one bin one contiguous row
+
+A tensor is a flat block of memory plus a rule that maps indices to an address. In the model's
+layout $(B, C, T, F)$ the last axis is contiguous: the address of $x[b,c,t,f]$ is
+$((b\,C + c)\,T + t)\,F + f$. Reading "bin $f$ for every $b, c, t$" therefore touches one
+element every $F$ addresses. `_TapConvFn.forward` does
+
+```python
+xt = x.permute(3, 0, 2, 1).reshape(f, b * t, c)    # (F, N, C), one copy
+```
+
+after which bin $f$ is one contiguous row of $N\,C$ elements. All gathers then move whole rows.
+
+```{python}
+#| label: fig-layout
+#| fig-cap: "Memory order before and after the transpose, for a toy tensor with B = C = T = 2 and F = 4 (computed with the same `permute`/`reshape` as `_TapConvFn`). Each cell is one element in address order; the large digit is its bin f, the small digits below are its (b, c, t). The highlighted cells are the ones a read of bin f = 2 needs. Top: scattered, one element in every F. Bottom: one contiguous run of N·C = 8 elements, ordered by frame n = (b, t), then channel c."
+Bt, Ct, Tt, Ft = 2, 2, 2, 4
+bct = np.stack(np.meshgrid(np.arange(Bt), np.arange(Ct), np.arange(Tt), np.arange(Ft), indexing="ij"), -1)
+cells = torch.from_numpy(bct)  # (B, C, T, F, 4): each element carries its (b, c, t, f)
+orig = cells.reshape(-1, 4).numpy()
+xt_cells = cells.permute(3, 0, 2, 1, 4).reshape(Ft, Bt * Tt, Ct, 4).reshape(-1, 4).numpy()
+fig, axs = plt.subplots(2, 1, figsize=(11, 3.8))
+for ax, cs, title in (
+    (axs[0], orig, "model layout (B, C, T, F): address = ((b·C + c)·T + t)·F + f"),
+    (axs[1], xt_cells, "after permute(3, 0, 2, 1).reshape(F, B·T, C): address = (f·N + n)·C + c,  n = b·T + t"),
+):
+    for a, (bb, cc, tt, ff) in enumerate(cs):
+        box(ax, a, 0, 1, 1, "", fc="#f6ad55" if ff == 2 else "#edf2f7")
+        ax.text(a + 0.5, 0.62, f"{ff}", ha="center", va="center", fontsize=11)
+        ax.text(a + 0.5, 0.2, f"{bb}{cc}{tt}", ha="center", va="center", fontsize=7, color="#4a5568")
+    ax.set_xlim(-0.2, len(cs) + 0.2)
+    ax.set_ylim(-0.6, 1.3)
+    ax.set_title(title, fontsize=10.5, loc="left")
+    ax.axis("off")
+    ax.text(-0.1, -0.4, "address 0", fontsize=8.5)
+    ax.text(len(cs) - 2.4, -0.4, f"address {len(cs) - 1}", fontsize=8.5)
+fig.tight_layout()
+plt.show()
+```
+
+### 4.3 Forward: gather a chunk of taps, then one GEMM
+
+For a chunk of taps $j_0 \le j < j_1$ ($J_c = j_1 - j_0$), `_gather` builds the matrix
+$H$ of shape $(G\,N,\ J_c\,C)$ whose row $(g, n)$ is the concatenation of the lerped reads
+$\hat x_{j_0}[n, :, g],\dots,\hat x_{j_1-1}[n, :, g]$:
+
+```python
+rows = lo.t().reshape(-1)                                   # (G*J_c,) g-major
+h = torch.index_select(xt, 0, rows) * wa_t                  # (G*J_c, N, C)
+h.addcmul_(torch.index_select(xt, 0, rows + 1), wc_t)      # + the right neighbour
+h = h.view(g, jc, n, c).transpose(1, 2).reshape(g * n, jc * c)   # (G*N, J_c*C), a copy
+```
+
+The weights of the chunk are stacked into one matrix of shape $(J_c\,C,\ O)$ whose row
+$(j, c)$ is $W[j, :, c]$. Then
+
+$$
+Y \mathrel{+}= H\,W_{\text{stack}},\qquad Y \in \mathbb{R}^{(G N)\times O},\quad Y \text{ initialised to } \beta .
+$$
+
+The inner dimension of this product is $J_c\,C$: the sum over taps **and** channels happens
+inside the GEMM, in one call. The alternative, one GEMM per tap, would read and write the whole
+$(G N, O)$ output $J$ times. At the end $Y$ is returned as the view
+`y.reshape(g, b, t, c_out).permute(1, 3, 2, 0)`, of shape $(B, O, T, G)$, without a copy.
+
+**Chunk size.** $H$ for all taps at once is too big. `tap_conv` bounds it:
+$J_c = \max\big(1, \min(J, \lfloor \texttt{chunk\_elems} / (G\,B\,T\,C) \rfloor)\big)$ with
+`chunk_elems` = 160 M elements ("about three such blocks are alive at once").
+
+```{python}
+#| output: asis
+CHUNK_ELEMS = inspect.signature(tap_conv).parameters["chunk_elems"].default
+rows = []
+for name, J, C, O, F, G in LAYERS:
+    per_tap = G * B_BENCH * T_BENCH * C
+    jc = max(1, min(J, CHUNK_ELEMS // per_tap))
+    rows.append({
+        "layer": name, "J": J, "C → O": f"{C} → {O}", "F": F, "G": G,
+        "G·B·T·C (one tap)": f"{per_tap / 1e6:.1f} M",
+        "J_c": jc, "chunks": math.ceil(J / jc),
+        "H per chunk (fp16)": f"{2 * per_tap * jc / 1e6:.0f} MB",
+        "H for all taps (fp16)": f"{2 * per_tap * J / 1e9:.2f} GB",
+    })
+print(md_table(rows))
+print()
+print(
+    f"Worked example, pyramid `conv_3` at $B = {B_BENCH}$, $T = {T_BENCH}$: one tap is "
+    f"${G_PYR}\\cdot{N_BENCH}\\cdot{LAYERS[0][2]} = {G_PYR * N_BENCH * LAYERS[0][2]:,}$ elements; "
+    f"$\\lfloor 160\\,000\\,000 / {G_PYR * N_BENCH * LAYERS[0][2]:,} \\rfloor = {rows[0]['J_c']}$ taps per chunk, "
+    f"so {rows[0]['chunks']} chunks cover the {LAYERS[0][1]} taps. Each chunk's GEMM is "
+    f"$({G_PYR * N_BENCH:,} \\times {rows[0]['J_c'] * LAYERS[0][2]}) \\cdot ({rows[0]['J_c'] * LAYERS[0][2]} \\times {LAYERS[0][3]})$."
+)
+```
+
+```{python}
+#| label: fig-gather-gemm
+#| fig-cap: "Data flow of one forward chunk of `_TapConvFn`, with the sizes of the pyramid's `conv_3` at the bench batch. Two row gathers (`index_select` at `lo` and `lo + 1`) pull $G \\cdot J_c$ rows of $N \\cdot C$ elements out of the transposed input; the lerp and a transposing copy turn them into $H$; one GEMM against the stacked weights accumulates into $Y$. Every arrow is a pass through GPU memory. Box sizes are schematic."
+name, J, C, O, F, G = LAYERS[0]
+jc = max(1, min(J, CHUNK_ELEMS // (G * N_BENCH * C)))
+fig, ax = plt.subplots(figsize=(12, 4.8))
+ax.set_xlim(0, 25)
+ax.set_ylim(0, 9)
+ax.axis("off")
+box(ax, 0.2, 1.4, 2.6, 6.2, "", fc="#c6f6d5")
+ax.text(1.5, 4.5, f"xt\n(F, N, C)\n\n{F} rows\nof {N_BENCH}·{C}", ha="center", va="center", fontsize=10)
+for yy in (7.0, 6.75, 2.15, 1.9):
+    ax.add_patch(Rectangle((0.2, yy), 2.6, 0.18, fc="#f6ad55", ec="none"))
+ax.text(1.5, 8.0, "orange: rows lo, lo+1\nof two reads", ha="center", fontsize=9)
+box(ax, 4.0, 5.0, 3.6, 2.3, f"index_select(lo)\n(G·J_c, N, C)\n{G}·{jc} rows", fc="#fefcbf", fs=9.5)
+box(ax, 4.0, 1.4, 3.6, 2.3, f"index_select(lo+1)\n(G·J_c, N, C)\n{G}·{jc} rows", fc="#fefcbf", fs=9.5)
+arrow(ax, 2.8, 6.9, 4.0, 6.3)
+arrow(ax, 2.8, 2.1, 4.0, 2.5)
+box(ax, 8.7, 3.2, 2.6, 2.6, "lerp\n· wa + · wc\n(G·J_c, N, C)", fc="#fefcbf", fs=9.5)
+arrow(ax, 7.6, 6.1, 8.7, 5.2)
+arrow(ax, 7.6, 2.6, 8.7, 3.8)
+arrow(ax, 11.3, 4.5, 12.6, 4.5)
+ax.text(11.95, 4.75, "transpose\n+ copy", ha="center", fontsize=8.5, va="bottom")
+box(ax, 12.6, 0.9, 2.8, 7.2, "", fc="#bee3f8")
+ax.text(14.0, 4.5, f"H\n(G·N, J_c·C)\n\n{G * N_BENCH:,}\n× {jc * C}", ha="center", va="center", fontsize=10)
+ax.text(16.0, 4.5, "@", fontsize=20, ha="center", va="center")
+box(ax, 16.6, 3.2, 2.2, 2.6, f"W_stack\n(J_c·C, O)\n{jc * C} × {O}", fc="#fed7e2", fs=9.5)
+ax.text(19.5, 4.5, "+=", fontsize=16, ha="center", va="center")
+box(ax, 20.3, 0.9, 4.4, 7.2, "", fc="#e9d8fd")
+ax.text(22.5, 4.5, f"Y\n(G·N, O)\n\n{G * N_BENCH:,}\n× {O}\n\nstarts as the bias;\none addmm_\nper chunk",
+        ha="center", va="center", fontsize=10)
+ax.text(12.5, 0.25, f"repeat for {math.ceil(J / jc)} chunks of ≤ {jc} taps ({J} taps)", ha="center", fontsize=10.5)
+plt.show()
+```
+
+The pass count explains why this path is limited by memory traffic. Let $M = G\,J_c\,N\,C$ be the
+size of one chunk's block. Per chunk the forward moves, in units of $M$ elements:
+
+| step | reads | writes |
+|---|---|---|
+| `index_select(xt, 0, rows)` | 1 | 1 |
+| `* wa_t` | 1 | 1 |
+| `index_select(xt, 0, rows + 1)` | 1 | 1 |
+| `h.addcmul_(…, wc_t)` | 2 | 1 |
+| `view/transpose/reshape` (a copy) | 1 | 1 |
+| GEMM reads $H$ | 1 | 0 |
+| **total** | **7** | **5** |
+
+The backward recomputes the gather and adds the scatter (next section), roughly doubling it. The
+docstring of `tap_conv_triton.py` summarises this as "~15 memory passes per tap".
+
+### 4.4 Backward
+
+Write $\bar y = \partial\mathcal{L}/\partial y$ for the incoming gradient, and similarly for the
+other tensors. The forward formula gives three gradients:
+
+$$
+\bar W[j,o,c] = \sum_{b,t,g} \bar y[b,o,t,g]\;\hat x_j[b,c,t,g],
+\qquad
+\bar\beta_o = \sum_{b,t,g} \bar y[b,o,t,g],
+$$
+
+$$
+\bar{\hat x}_j[b,c,t,g] = \sum_o W[j,o,c]\;\bar y[b,o,t,g],
+$$
+
+$$
+\bar x[b,c,t,f] = \sum_{(j,g):\ \ell_{jg} = f} a_{jg}\,\bar{\hat x}_j[b,c,t,g]
+\;+\; \sum_{(j,g):\ \ell_{jg}+1 = f} c_{jg}\,\bar{\hat x}_j[b,c,t,g].
+$$
+
+The last line is a **scatter**: every read $(j, g)$ sends its gradient back to the two bins it
+read, weighted by the same $a$ and $c$. Many reads can come from one bin, so many contributions
+add into one place. In matrix form per chunk ($\bar Y$ is $(G N, O)$):
+
+- $\bar W_{\text{chunk}} = \bar Y^{\top} H$, shape $(O, J_c C)$. This needs $H$ again.
+  `_TapConvFn` does not store it — for the pyramid's `conv_3` the whole $H$ would be
+  `{python} f"{2 * G_PYR * N_BENCH * LAYERS[0][2] * LAYERS[0][1] / 1e9:.1f}"` GB in fp16 — it
+  recomputes it with the same `_gather`. Only `xt` is saved.
+- $\bar H = \bar Y\,W_{\text{stack}}^{\top}$, shape $(G N, J_c C)$, reshaped to $(G J_c, N, C)$:
+  one row of $N\,C$ gradients per read.
+- Scatter: `gxt.index_add_(0, rows, gh * wa_t)` and `gxt.index_add_(0, rows + 1, gh * wc_t)`.
+  `index_add_` adds row $i$ of its source into row `rows[i]` of `gxt`. Repeated indices are
+  allowed; on the GPU it uses atomic additions (section 5) so that colliding rows add correctly.
+- `gxt` is **one** fp32 buffer of shape $(F, N, C)$ shared by all chunks (fp64 if the input is
+  fp64). Contributions are cast to fp32 before they are added; the result is cast back to the
+  input dtype once at the end. Under fp16 autocast many small terms add into one row, which in
+  fp16 would lose precision.
+- $\bar\beta$ is a column sum of $\bar Y$ in fp32.
+
+The real function passes PyTorch's numerical gradient check on a tiny problem in float64, with
+the chunk forced to 2 taps so that the chunk loop runs more than once:
+
+```{python}
+#| output: asis
+lo_s, fr_s, va_s = build_tap_table(np.array([1.0, 2.0, 3.0, 0.5, 1 / 3]), np.arange(7) * 0.9,
+                                   [1.0, 2.0], [7.0, 14.0], [0, 9], 0.5, 13.0)
+wa_s, wc_s = (1 - fr_s) * va_s, fr_s * va_s
+xs = torch.randn(2, 3, 2, 18, dtype=torch.float64, requires_grad=True)
+ws = torch.randn(5, 4, 3, dtype=torch.float64, requires_grad=True)
+bs = torch.randn(4, dtype=torch.float64, requires_grad=True)
+ok = torch.autograd.gradcheck(lambda a, b, c: _TapConvFn.apply(a, b, c, lo_s, wa_s, wc_s, 2), (xs, ws, bs))
+y1 = _TapConvFn.apply(xs, ws, bs, lo_s, wa_s, wc_s, 2)
+y5 = _TapConvFn.apply(xs, ws, bs, lo_s, wa_s, wc_s, 5)
+print(f"`torch.autograd.gradcheck` (chunk = 2, two levels, 5 taps): **{ok}**. "
+      f"Output with chunk 2 vs chunk 5: max difference {(y1 - y5).abs().max().item():.1e}.")
+```
+
+### 4.5 Why rows and not the innermost axis
+
+The first version of the layer kept the model's $(B, C, T, F)$ layout and called
+`index_select`/`index_add_` along the last axis. The profile (T4, $B = 32$) put **62 % of the
+whole training step** in the backward's `index_add_`. The reason is how the scatter maps onto
+memory. A GPU moves memory in 32-byte sectors (section 5). With the gathered axis innermost,
+each index entry adds a slice whose elements are $F$ addresses apart ("inner size 1"). Each
+thread then does one 4-byte atomic addition into its own sector: 1/8 of every sector moved is
+useful, and nothing can be combined. With the gathered axis outermost, each index entry adds a
+contiguous row of $N\,C$ elements; neighbouring threads add into neighbouring addresses, and
+every sector is used fully.
+
+```{python}
+#| label: fig-scatter
+#| fig-cap: "Schematic of one warp step of the backward scatter, eight threads shown. Each small cell is 4 bytes (one fp32 element); each outlined group of eight cells is one 32-byte memory sector. Top: gathered axis innermost, as in the first version (\"inner size 1\") — consecutive threads add into elements F apart (F = 4715 for the pyramid's `conv_3`), so eight threads touch eight sectors and use 4 of each sector's 32 bytes. Bottom: the (F, N, C) layout — the eight threads add into eight consecutive elements of one row: one sector, fully used."
+fig, axs = plt.subplots(2, 1, figsize=(11, 3.9))
+for ax, title, mode in (
+    (axs[0], f"(B, C, T, F) layout, index_add_ along F: thread i adds at address i·F (F = {F_CAT})", "strided"),
+    (axs[1], "(F, N, C) layout, index_add_ along rows: thread i adds at address row·N·C + i", "row"),
+):
+    n_sec = 8 if mode == "strided" else 3
+    gap = 0.8
+    for s in range(n_sec):
+        x0 = s * (8 + gap)
+        for e in range(8):
+            hit = (mode == "strided" and e == 3) or (mode == "row" and s == 1)
+            box(ax, x0 + e, 0, 1, 1, "", fc="#f56565" if hit else "#edf2f7", ec="#a0aec0", lw=0.6)
+        ax.add_patch(Rectangle((x0, 0), 8, 1, fc="none", ec="k", lw=1.4))
+        if mode == "strided":
+            ax.text(x0 + 4, -0.45, f"≈ {s}·F", ha="center", fontsize=8.5)
+            ax.text(x0 + 3.5, 1.35, f"t{s}", ha="center", fontsize=9, color="#c53030")
+    if mode == "row":
+        ax.text(8 + gap + 4, 1.35, "threads t0 … t7", ha="center", fontsize=9, color="#c53030")
+        ax.text(4, -0.45, "previous sector", ha="center", fontsize=8.5)
+        ax.text(2 * (8 + gap) + 4, -0.45, "next sector", ha="center", fontsize=8.5)
+        ax.text(3 * (8 + gap) + 0.5, 0.5, "8 threads → 1 sector, 32 of 32 bytes used",
+                fontsize=10, va="center")
+    else:
+        ax.text(8 * (8 + gap) + 0.5, 0.5, "8 threads → 8 sectors,\n4 of 32 bytes used in each",
+                fontsize=10, va="center")
+    ax.set_xlim(-0.5, 8 * (8 + gap) + 24)
+    ax.set_ylim(-0.9, 1.8)
+    ax.set_title(title, fontsize=10.5, loc="left")
+    ax.axis("off")
+fig.tight_layout()
+plt.show()
+```
+
+How many reads land on each source bin is fixed by the table. @fig-fanin counts them for the
+pyramid's `conv_3`; each count is the number of rows `index_add_` adds into that bin (for every
+one of the $N\,C$ elements of the row). The same counts matter for the atomic additions of the
+Triton backward (section 6.3).
+
+```{python}
+#| label: fig-fanin
+#| fig-cap: "Fan-in of the backward scatter for the pyramid's `conv_3`: for each bin of the concatenated axis, how many (tap, rate) reads take a non-zero weight from it (as `lo` with $a > 0$ or as `lo + 1` with $c > 0$). Colours = levels. Each coarse level is read only above the previous level's ceiling — its lower half receives no reads and no gradient through this layer. The grey bar at bin 0 counts the invalid entries, which point at `lo = 0` with zero weights."
+wa_h = (1 - H_FR) * H_VA
+wc_h = H_FR * H_VA
+fan = np.zeros(F_CAT)
+np.add.at(fan, H_LO[wa_h > 0], 1)
+np.add.at(fan, H_LO[wc_h > 0] + 1, 1)
+n_invalid = int((H_VA == 0).sum())
+fig, ax = plt.subplots(figsize=(11, 3.8))
+for lvl in range(NLEV):
+    sl = slice(OFF[lvl], OFF[lvl] + NB[lvl])
+    ax.bar(np.arange(F_CAT)[sl], fan[sl], width=1.0, color=LEVEL_COLORS[lvl], label=f"level {lvl}")
+    ax.axvline(OFF[lvl], color="#666666", lw=0.6)
+ax.bar([0], [n_invalid], width=25, color=GREY, label=f"invalid entries ({n_invalid}) → lo = 0")
+ax.set_yscale("log")
+ax.set_xlabel("concatenated bin")
+ax.set_ylabel("reads per bin")
+ax.legend(frameon=False, ncol=5, loc="upper center", bbox_to_anchor=(0.5, 1.13))
+fig.tight_layout()
+plt.show()
+```
+
+```{python}
+#| output: asis
+print(
+    f"Bins read at least once: {int((fan > 0).sum())} of {F_CAT}; the others get no gradient "
+    f"through this layer. The largest fan-in is {int(fan.max())} reads: that bin's gradient row "
+    f"receives {int(fan.max())} additions over the backward, which is why the scatter must "
+    f"accept repeated indices."
+)
+```
+
+### 4.6 The measured history
+
+The numbers come from `docs/experiments/pyramid-harmonic.md` ("Where the time went" and the
+`HarmonicDilatedConv` paragraph) and the comments in the code. All are full training steps
+(forward + backward) unless noted.
+
+| change | GPU, batch | before → after | note |
+|---|---|---|---|
+| first version, gathered axis innermost | T4, B = 64 | 9.64 s per step | the two `ProportionalTapConv` layers were 87 % of it; `index_add_` alone 62 % of CUDA time (B = 32 profile) |
+| transpose once to $(F, B T, C)$ | T4, B = 64 | 9.64 → **2.71 s** | taps 8.4 → 1.6 s; `index_add_` 62 → 7.5 % |
+| chunk taps into one GEMM each | T4, B = 64 | 2.71 → **2.50 s** | the sum over taps moves into the GEMM's inner dimension |
+| $(F, C, N)$ layout, transposed GEMM operand | T4, B = 64 | `block_4/5` 0.76 → 1.85 s | reverted |
+| `channels_last` for the conv stack | T4, B = 32 | 1.19 → 1.26 s | no gain |
+| profile after all exact changes | T4, B = 32 | 1.21 s, flat | cuDNN conv bwd 23 %, copies 18 %, elementwise 19 %, `index_select` 9 %, `index_add_` 8 % |
+| CQT `HarmonicDilatedConv`, k ≤ 84, fused `tap_conv` vs branch sum | T4, B = 32 | 1.65 → 1.33 s (**0.81×**) | the gather kernel, not cuDNN, became the limit: ~6 ms per tap per 700 k rows |
+| same, k ≤ 9 | T4, B = 32 | 0.35 → 0.40 s | cuDNN's eight small convolutions win |
+| same, k ≤ 84, on the training GPU | A100 | 1.23 → 1.42 s/it (**1.15× slower**) | cuDNN's small convs are cheap there; the gather's memory passes are not |
+
+The last row is why `FUSED_FROM` is set so that the branch sum always runs (section 2.6), and why
+the fused Triton kernel exists. The `tap_conv_triton.py` docstring adds: on a T4 the torch path's
+tap layers were still 58 % of a pyramid step.
+
+## 5. Preliminaries: GPUs and Triton, for a non-expert
+
+This section defines the terms section 6 needs. It is general; the numbers in the table are
+the vendors' peak figures.
+
+### 5.1 Kernels, programs, threads
+
+A **kernel** is a function that runs on the GPU. The CPU launches it with a **grid**: a 1-, 2- or
+3-D array of independent **programs** (CUDA calls them *thread blocks*). Each program runs on
+one **streaming multiprocessor (SM)**, one of the GPU's tens of independent cores; an SM runs
+several programs at once and the hardware schedules the rest as SMs free up. Inside a program,
+work is done by **threads**, grouped in **warps** of 32 that execute the same instruction in
+lockstep. Programs of one launch cannot wait for each other. They can only communicate through
+memory, and only safely through atomic operations (5.4). Every PyTorch operation on a CUDA
+tensor is one or more kernel launches.
+
+### 5.2 Memory hierarchy, coalescing, and why memory passes dominate
+
+Data lives at several levels, from big and slow to small and fast:
+
+- **Global memory** (HBM on the A100, GDDR6 on the T4; "HBM" below means this level): the GPU's
+  main memory, gigabytes. Every tensor lives here between kernels.
+- **L2 cache**: a few MB (T4) to 40 MB (A100), shared by all SMs.
+- **Shared memory / L1**: tens to ~160 KB per SM, shared by the threads of one program.
+- **Registers**: private to each thread; 256 KB per SM in total. Arithmetic happens only here.
+
+Global memory is read and written in **32-byte sectors**. When the 32 threads of a warp access
+32 consecutive 4-byte elements, the hardware **coalesces** them into four sectors (128 bytes).
+When they access 32 scattered elements, it moves 32 sectors to deliver 128 useful bytes; seven
+eighths of the traffic is waste.
+
+A kernel's time is at least the larger of two bounds: bytes moved ÷ memory bandwidth, and
+arithmetic ÷ peak compute. Their ratio is the **arithmetic intensity** (FLOPs per byte). Elementwise
+operations (a copy, a multiply, a lerp) do about one FLOP per element moved, far below the
+roughly 200 FLOP/byte at which these GPUs become compute-bound. Such kernels run at memory
+speed, and a chain of $k$ of them costs $k$ passes over memory. **Fusion** — doing the whole
+chain in one kernel, keeping intermediates in registers — removes the intermediate passes.
+
+```{python}
+#| output: asis
+HW = [
+    ("T4 (Turing)", 320, 65, 8.1, 40),
+    ("A100 40 GB (Ampere)", 1555, 312, 19.5, 108),
+]
+rows = []
+for name, bw, tc, f32, sms in HW:
+    rows.append({"GPU": name, "memory bandwidth (GB/s)": bw, "fp16 tensor-core TFLOP/s": tc,
+                 "fp32 TFLOP/s (no tensor cores)": f32, "SMs": sms,
+                 "FLOP per byte to be compute-bound": f"{tc * 1e12 / (bw * 1e9):.0f}"})
+print(md_table(rows))
+```
+
+Sources: [NVIDIA T4 product page](https://www.nvidia.com/en-us/data-center/tesla-t4/),
+[NVIDIA A100 datasheet](https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf),
+[NVIDIA Ampere architecture in depth](https://developer.nvidia.com/blog/nvidia-ampere-architecture-in-depth/)
+(SM count). The T4 SM count is its 2560 CUDA cores ÷ 64 per SM.
+
+A worked example with the torch path's forward (section 4.3) against the smallest traffic a fused
+kernel needs (read $x$ once, write $y$ once), at peak bandwidth:
+
+```{python}
+#| output: asis
+rows = []
+for name, J, C, O, F, G in LAYERS:
+    block = G * N_BENCH * C * J  # elements of H over all taps
+    torch_fwd = 12 * block * 2  # 7 reads + 5 writes of H per chunk, fp16
+    fused = (N_BENCH * F * C + N_BENCH * G * O) * 2
+    flops = 2 * N_BENCH * G * J * C * O
+    rows.append({
+        "layer": name, "torch fwd traffic": f"{torch_fwd / 1e9:.1f} GB",
+        "fused minimum": f"{fused / 1e9:.2f} GB",
+        "ratio": f"{torch_fwd / fused:.0f}×",
+        "torch fwd at T4 / A100 peak": f"{torch_fwd / 320e9 * 1e3:.0f} / {torch_fwd / 1555e9 * 1e3:.0f} ms",
+        "GEMM FLOPs": f"{flops / 1e9:.0f} G",
+        "FLOPs at T4 / A100 tensor peak": f"{flops / 65e12 * 1e3:.1f} / {flops / 312e12 * 1e3:.2f} ms",
+    })
+print(md_table(rows))
+```
+
+This is an estimate, not a measurement: real kernels reach a fraction of peak bandwidth, and
+the fused kernel re-reads $x$ from L2. It shows the order of magnitude. The torch path's
+arithmetic intensity is about $2\,O$ FLOPs per element of $H$ over 12 element-transfers of 2
+bytes, i.e. `{python} f"{2 * LAYERS[0][3] / 24:.0f}"` FLOP/byte for $O = `{python} LAYERS[0][3]`$
+— twenty times below the compute-bound threshold. A faster GPU with more compute per byte (the
+A100) helps the cuDNN convolutions more than this gather, which matches the 1.15× slowdown in
+section 4.6.
+
+```{python}
+#| label: fig-gpu
+#| fig-cap: "Left: the memory hierarchy a kernel works through (sizes for the A100; T4 in brackets where they differ). Data is loaded from HBM, possibly via L2, into registers; the tensor cores multiply tiles held in registers/shared memory; results go back to HBM. Right: coalescing. A warp whose threads read consecutive 4-byte elements needs 4 sectors per 32 threads; a warp whose threads read elements far apart needs 32."
+fig, (ax, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.6), width_ratios=[1.2, 1])
+ax.axis("off")
+ax.set_xlim(0, 10)
+ax.set_ylim(0, 10)
+box(ax, 0.3, 0.3, 9.4, 1.6, "global memory (HBM; GDDR6 on the T4)\n40 GB [16 GB], 1555 GB/s [320 GB/s]; all tensors live here between kernels", fc="#c6f6d5", fs=9)
+box(ax, 0.3, 2.6, 9.4, 1.2, "L2 cache: 40 MB [4 MB], shared by all SMs", fc="#fefcbf", fs=9.5)
+for i, x0 in enumerate((0.3, 3.5, 6.7)):
+    box(ax, x0, 4.5, 3.0, 5.0, "", fc="#ebf8ff", ec="#2b6cb0")
+    ax.text(x0 + 1.5, 9.1, f"SM {i if i < 2 else '…'}", ha="center", fontsize=10, color="#2b6cb0")
+    box(ax, x0 + 0.2, 7.1, 2.6, 1.5, "shared mem / L1\n≤ 164 KB [64 KB]", fc="#fed7e2", fs=8.5)
+    box(ax, x0 + 0.2, 5.4, 1.5, 1.4, "registers\n256 KB", fc="#e9d8fd", fs=8.5)
+    box(ax, x0 + 1.8, 5.4, 1.0, 1.4, "tensor\ncores", fc="#feebc8", fs=8)
+    arrow(ax, x0 + 1.5, 3.8, x0 + 1.5, 4.5, style="<->")
+arrow(ax, 5.0, 1.9, 5.0, 2.6, style="<->")
+ax.text(5.0, 9.8, "108 SMs [40]", ha="center", fontsize=10)
+ax2.axis("off")
+ax2.set_xlim(-0.5, 33)
+ax2.set_ylim(-1, 11)
+for row, (title, addr) in enumerate((
+    ("coalesced: thread i reads element i", np.arange(32)),
+    ("strided: thread i reads element 64·i", np.arange(32) * 64),
+)):
+    y0 = 7.5 - row * 6
+    ax2.text(0, y0 + 2.1, title, fontsize=10)
+    sectors = sorted(set(a // 8 for a in addr))
+    for i in range(32):
+        ax2.add_patch(Rectangle((i, y0 + 1.0), 0.9, 0.6, fc="#c53030", ec="none"))
+    ax2.text(32.5, y0 + 1.3, "32 threads", fontsize=8.5, va="center")
+    for si in range(min(len(sectors), 32)):
+        ax2.add_patch(Rectangle((si, y0 - 0.2), 0.9, 0.6, fc="#3182ce", ec="none"))
+    ax2.text(32.5, y0 + 0.1, f"{len(sectors)} sectors", fontsize=8.5, va="center")
+    ax2.text(0, y0 - 0.9, f"bytes moved {32 * len(sectors)}, useful 128 → "
+             f"{100 * 128 / (32 * len(sectors)):.0f} % efficiency", fontsize=9)
+fig.tight_layout()
+plt.show()
+```
+
+### 5.3 Tensor cores
+
+**Tensor cores** are matrix-multiply units. One instruction makes a warp multiply small tiles,
+$D = A\,B + C$, with $A, B$ in half precision (fp16 or bf16; on Ampere also tf32) and $C, D$ in
+fp32. They are 8× (T4) to 16× (A100, fp16) faster than the ordinary fp32 units (table above).
+To use them, a kernel must hand over tiles of at least 16 rows, 16 columns and an inner
+dimension of 16, in fp16/bf16 (or tf32), and accumulate in fp32. A GEMM is fast when it reads
+each operand once and keeps the accumulator in registers across the inner loop.
+
+### 5.4 Atomics, and why a scatter needs them
+
+An **atomic addition** `atomic_add(p, v)` reads the value at address `p`, adds `v` and writes it
+back as one indivisible operation. Without it, two programs that add into the same address at the
+same time can both read the old value, and one of the two updates is lost. A gather (many
+outputs read one input) needs no atomics: reads do not conflict. Its gradient is a scatter (many
+inputs write one output), and if several programs may write one place, the additions must be
+atomic. Costs: colliding atomics on one address are serialised, and the order of additions is
+not fixed, so float sums can differ in the last bits from run to run. fp32 atomic addition is a
+native hardware operation.
+
+### 5.5 Triton
+
+[Triton](https://triton-lang.org/) is a Python-embedded language for writing GPU kernels at the
+level of a **program**, not of individual threads. Inside a `@triton.jit` function the values are
+whole **blocks** — small arrays (vectors, tiles) held in registers. The compiler decides how the
+threads of the program share a block, how loads are coalesced, when to stage data in shared
+memory and which tensor-core instructions to use. The primitives used in section 6:
+
+- `tl.program_id(axis)`: this program's coordinate in the grid.
+- `tl.arange(0, BLOCK)`: the vector $0, 1, \dots, \text{BLOCK}-1$. Block sizes must be powers of
+  two.
+- Pointer arithmetic: `X + offsets` is a block of addresses, one per element of `offsets`.
+  Broadcasting (`a[:, None] + b[None, :]`) builds 2-D tiles of addresses.
+- `tl.load(ptrs, mask=m, other=0)`: load a block; where the mask is false, nothing is read and
+  `other` is returned. `tl.store(ptrs, vals, mask=m)` writes only where the mask is true. Masks
+  handle the ragged edges of a problem whose sizes are not multiples of the block.
+- `tl.dot(a, b)`: matrix product of two tiles on the tensor cores, accumulated in fp32. Every
+  dimension must be at least 16.
+- `tl.atomic_add(ptrs, vals, mask=m)`: atomic addition of a block.
+- `tl.constexpr`: an argument fixed at compile time. Block shapes must be `constexpr`; each new
+  combination of values compiles a new kernel variant.
+- Launch: `kernel[grid](args…)`, with `grid` a tuple giving the number of programs per axis.
+
+A minimal example, $y = x + 1$ over $n$ elements in blocks of 1024 (not executed here):
+
+```python
+@triton.jit
+def add_one(X, Y, n, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)   # this program's elements
+    m = offs < n                                            # the last block is partial
+    tl.store(Y + offs, tl.load(X + offs, mask=m) + 1, mask=m)
+
+add_one[(triton.cdiv(n, 1024),)](x, y, n, BLOCK=1024)
+```
+
+## 6. The fused Triton kernels
+
+```{python}
+#| output: asis
+FN = tct._TapConvTritonFn
+pow2 = tct._pow2  # block sizes: next power of two, at least 16
+rows_for = FN._rows  # tile rows of all three kernels, a function of C
+SPLITS0 = FN.SPLITS  # dw row splits per tap
+
+
+def launch_opt(name: str) -> int:
+    """A launch option (num_warps / num_stages) as written in `_TapConvTritonFn`'s source."""
+    vals = set(re.findall(rf"\b{name}\s*=\s*(\d+)", inspect.getsource(FN)))
+    if len(vals) != 1:
+        raise RuntimeError(f"{name}: expected one value in _TapConvTritonFn, found {vals}")
+    return int(vals.pop())
+
+
+NUM_WARPS, NUM_STAGES = launch_opt("num_warps"), launch_opt("num_stages")
+BG = rows_for(LAYERS[0][2])  # the conv_3 layers (C = 16), used in the drawings
+dispatch = "tap_conv_triton" in inspect.getsource(tc_mod)
+print(
+    f"Status of the code read for this section: `tap_conv_triton.py` defines three kernels "
+    f"(`_fwd_kernel`, `_dx_kernel`, `_dw_kernel`) and the autograd function `_TapConvTritonFn`. "
+    f"Launch parameters read from it at render time: tile rows `_rows(C)` = "
+    f"{rows_for(16)} for $C = 16$ and {rows_for(128)} for $C = 128$, `SPLITS` = {SPLITS0}, "
+    f"`num_warps` = {NUM_WARPS}, `num_stages` = {NUM_STAGES}. "
+    + (
+        "`tap_conv.py` dispatches to it."
+        if dispatch
+        else "`tap_conv.py` does **not** call it yet: the module docstring says `tap_conv` falls "
+        "back to the torch path, but the dispatch is not in `tap_conv.py` at render time."
+    )
+)
+```
+
+### 6.1 What the fusion changes
+
+The torch path writes the gathered block $H$ to memory and reads it back several times. The
+Triton forward never materialises $H$. One program owns a tile of `BG` output bins of **one**
+frame $n = (b, t)$. For each tap it reads the two interpolation rows straight from $x$, does the
+lerp in registers, and feeds the result to the tensor cores. The $(\text{BG}, O)$ accumulator
+stays in registers over all $J$ taps and is written once. The backward is two kernels: `dx`
+(the scatter, with fp32 atomics) and `dw` (the weight gradient, as per-tap partial sums).
+
+**Layout.** The Triton path transposes $x$ to $(N, F, C)$:
+
+```python
+xt = x.permute(0, 2, 3, 1).reshape(n, f, c).contiguous()   # (N, F, C), one copy
+```
+
+This is frame-major, unlike the torch path's $(F, N, C)$. The unit of work has changed. In torch
+one `index_select` serves all frames at once, so long rows across frames pay. In Triton one
+program serves one frame, so the frame's whole $F \times C$ slab should be contiguous: then bins
+$\ell$ and $\ell+1$ of a read are **adjacent** — $2C$ consecutive elements — and the slab is
+small enough to stay in L2 while all taps and all bin tiles of that frame read it.
+
+```{python}
+#| output: asis
+rows = []
+for name, J, C, O, F, G in LAYERS:
+    rows.append({"layer": name, "frame slab F·C": f"{F * C:,}",
+                 "slab (fp16)": f"{2 * F * C / 1e3:.0f} KB",
+                 "one read = 2C contiguous (fp16)": f"{2 * 2 * C} B"})
+print(md_table(rows))
+```
+
+$y$ is written directly in the model's $(B, O, T, G)$ layout, so no output transpose is needed.
+
+### 6.2 Forward kernel `_fwd_kernel`
+
+**Grid.** $(N,\ \lceil G/\text{BG}\rceil)$: program $(n, p_g)$ handles frame $n$ (so
+$b = n \,\mathrm{div}\, T$, $t = n \bmod T$) and output bins $g \in [p_g\,\text{BG},\ (p_g+1)\,\text{BG})$.
+The tile height is `BG = _rows(C)`: `{python} rows_for(16)` bins when $C \le 32$ (the two
+`conv_3` layers), `{python} rows_for(128)` when $C = 128$ (`block_4/5`). The reason given in the
+code: the $(\text{BG}, \text{BC})$ operand tile and the $(\text{BC}, \text{BO})$ weight tile of
+one `tl.dot` must fit into 64 KB of shared memory (the T4's per-SM maximum). In fp16 at
+$C = O = 128$ that is $16 \cdot 128 \cdot 2 + 128 \cdot 128 \cdot 2$ B = 36 KB with 16 rows and
+48 KB with 64 rows, one copy each. Both fit 64 KB, so the stated rule alone does not force 16
+rows; the real budget also contains what the compiler adds (with `num_stages = 2` it keeps extra
+copies of loaded tiles to overlap loading with computing, plus layout-conversion buffers). The
+code gives the rule, not this accounting, and it is not checked here. The kernels call the
+output-channel count `CO`; this text keeps $O$.
+
+**Body**, per program (`offs_g`, `offs_c`, `offs_o` are the index vectors of the bin, input-channel
+and output-channel tiles):
+
+1. `acc = bias` broadcast to a $(\text{BG}, \text{BO})$ fp32 tile.
+2. For $j = 0,\dots,J-1$:
+   a. load `lo`, `wa`, `wc` for the tile's bins: three contiguous vectors of BG values from the
+      $(J, G)$ tables;
+   b. build the address tile `xrow + lo[:, None]·C + offs_c[None, :]` — BG rows of $C$ elements in
+      this frame's slab — and load `xa` there and `xc` at `+ C` (the next bin);
+   c. lerp in fp32: `a = xa·wa + xc·wc`, a $(\text{BG}, \text{BC})$ tile;
+   d. load the $(\text{BC}, \text{BO})$ tile $W_j^\top$ (`W + j·O·C + o·C + c`);
+   e. `acc += tl.dot(a, W_jᵀ)` on the tensor cores.
+3. Store `acc` to `y[b, :, t, g-tile]` at address $((b\,O + o)\,T + t)\,G + g$, cast to the output
+   dtype; consecutive $g$ are consecutive addresses, so the store is coalesced.
+
+The frame offset $n\,F\,C$ (`xrow`) and the batch offset $b\,O$ are computed in 64-bit integers
+(`n.to(tl.int64)`, `b.to(tl.int64)`); the in-frame offsets $\ell\,C + c$ stay 32-bit. Without the
+cast, `program_id` and the size arguments are 32-bit and the product would overflow for tensors
+of more than $2^{31}$ elements.
+
+```{python}
+#| label: fig-triton-fwd
+#| fig-cap: "The forward kernel, drawn with the real table of the pyramid's `conv_3` (BG = 64). (a) The launch grid: one program per (frame n, tile of BG output bins); one program is highlighted. (b) What that program reads for one tap ($k = 61$, bins 64–127): one row `lo` per bin (the `lo + 1` row is the next one), coloured by level; invalid bins ($61\\,r \\ge f_{\\max}$) read row 0 with zero weight. (c) Zoom into the frame's slab for the first three bins of the tile: each read is two adjacent rows of C = 16 channels, i.e. 2C consecutive elements, mixed with the weights (1 − frac, frac). (d) Per tap, the lerped tile times $W_j^\\top$ is added into the accumulator in registers; after the last tap the accumulator is stored once."
+name, J, C, O, F, G = LAYERS[0]
+n_tiles = math.ceil(G / BG)
+pg_demo, k_demo = 1, 61
+gs_demo = np.arange(pg_demo * BG, min((pg_demo + 1) * BG, G))
+lo_demo = H_LO[k_demo - 1, gs_demo]
+fr_demo = H_FR[k_demo - 1, gs_demo]
+va_demo = H_VA[k_demo - 1, gs_demo]
+lev_demo = H_LEV[k_demo - 1, gs_demo]
+fig = plt.figure(figsize=(12, 9.6))
+gsp = fig.add_gridspec(2, 2, width_ratios=[1, 1.35], height_ratios=[1, 1], wspace=0.25, hspace=0.3)
+# (a) the grid
+ax = fig.add_subplot(gsp[0, 0])
+n_show = 8
+for i in range(n_show):
+    for p in range(n_tiles):
+        hl = (i == 3 and p == pg_demo)
+        box(ax, p, n_show - 1 - i, 0.95, 0.95, "", fc="#f6ad55" if hl else "#edf2f7", ec="#a0aec0", lw=0.6)
+ax.set_xlim(-0.2, n_tiles + 0.2)
+ax.set_ylim(-1.2, n_show + 0.2)
+ax.set_xticks(np.arange(n_tiles) + 0.47, [f"bins\n{p * BG}–{min((p + 1) * BG, G) - 1}" for p in range(n_tiles)], fontsize=9)
+ax.set_yticks(np.arange(n_show) + 0.47, [f"n={n_show - 1 - i}" for i in range(n_show)], fontsize=9)
+ax.text(n_tiles / 2, -0.8, f"… down to n = {N_BENCH - 1:,}", ha="center", fontsize=9)
+ax.set_title(f"(a) grid ({N_BENCH:,}, {n_tiles}): one program per (frame, bin tile)", fontsize=10.5)
+for s in ax.spines.values():
+    s.set_visible(False)
+ax.tick_params(length=0)
+# (b) reads of one tap over the whole slab
+ax = fig.add_subplot(gsp[0, 1])
+for lvl in range(NLEV):
+    ax.axhspan(OFF[lvl], OFF[lvl] + NB[lvl], color=LEVEL_COLORS[lvl], alpha=0.10)
+    ax.text(len(gs_demo) + 1, OFF[lvl] + NB[lvl] / 2, f"level {lvl}", fontsize=9, color=LEVEL_COLORS[lvl], va="center")
+    sel = lev_demo == lvl
+    if sel.any():
+        ax.plot(np.arange(len(gs_demo))[sel], lo_demo[sel], "o", ms=3, color=LEVEL_COLORS[lvl])
+bad = va_demo == 0
+ax.plot(np.arange(len(gs_demo))[bad], lo_demo[bad], "x", color="#718096", ms=4, label="invalid → row 0, weight 0")
+ax.set_ylim(-150, F_CAT + 100)
+ax.set_xlim(-2, len(gs_demo) + 11)
+ax.set_xlabel(f"bin in the tile (g = {gs_demo[0]}…{gs_demo[-1]})")
+ax.set_ylabel("row lo of the frame slab")
+ax.set_title(f"(b) rows read for tap k = {k_demo}", fontsize=10.5)
+ax.legend(frameon=False, fontsize=9, loc="upper left")
+# (c) zoom: three reads as adjacent row pairs
+ax = fig.add_subplot(gsp[1, 0])
+r0, r1 = int(lo_demo[0]) - 2, int(lo_demo[2]) + 4
+read_cols = ["#2b6cb0", "#dd6b20", "#38a169"]
+for row in range(r0, r1):
+    y = r1 - 1 - row
+    owner = [i for i in range(3) if row in (lo_demo[i], lo_demo[i] + 1)]
+    for c in range(C):
+        ax.add_patch(Rectangle((c, y), 1, 1, fc=read_cols[owner[0]] if owner else "#f7fafc",
+                               ec="#cbd5e0", lw=0.3, alpha=0.85 if owner else 1))
+    if row in lo_demo[:3]:
+        ax.text(-0.4, y + 0.5, f"{row}", ha="right", va="center", fontsize=8)
+for i in range(3):
+    y = r1 - 1 - lo_demo[i]
+    ax.text(C + 0.6, y, f"g = {gs_demo[i]}: lo = {lo_demo[i]}, frac = {fr_demo[i]:g}\n"
+            f"weights {1 - fr_demo[i]:g} (row lo), {fr_demo[i]:g} (row lo+1)",
+            va="center", fontsize=8.5, color=read_cols[i])
+ax.set_xlim(-3, C + 13)
+ax.set_ylim(-0.5, r1 - r0 + 0.5)
+ax.axis("off")
+ax.set_title(f"(c) slab rows {r0}…{r1 - 1} × {C} channels: three reads", fontsize=10.5)
+# (d) the compute
+ax = fig.add_subplot(gsp[1, 1])
+ax.axis("off")
+ax.set_xlim(0, 14)
+ax.set_ylim(0, 10)
+bc, bo = pow2(C), pow2(O)
+box(ax, 0.0, 3.2, 2.7, 4.0, f"a ({BG}×{bc})\n\nlerp in fp32,\ncast to fp16", fc="#bee3f8", fs=9)
+ax.text(3.15, 5.2, "@", fontsize=18, ha="center", va="center")
+box(ax, 3.6, 4.4, 3.0, 1.6, f"W_jᵀ ({bc}×{bo})", fc="#fed7e2", fs=9.5)
+ax.text(7.2, 5.2, "+=", fontsize=16, ha="center", va="center")
+box(ax, 7.9, 3.2, 3.9, 4.0, f"acc ({BG}×{bo})\nfp32, in registers\n{BG * bo * 4 // 1024} KB", fc="#e9d8fd", fs=9.5)
+ax.text(6.0, 8.6, f"loop over j = 0 … J−1  (J = {J})", ha="center", fontsize=10.5)
+arrow(ax, 9.85, 3.2, 9.85, 1.8)
+box(ax, 6.9, 0.3, 5.9, 1.5, "after the loop: store once\ninto y[b, :, t, g-tile]", fc="#c6f6d5", fs=9.5)
+ax.set_title("(d) per tap: one tensor-core dot into the accumulator", fontsize=10.5)
+plt.show()
+```
+
+**Masks.** Three masks handle the ragged edges:
+
+- `gmask = offs_g < G`: the last bin tile is partial (for $G = `{python} G_PYR`$:
+  `{python} G_PYR // rows_for(16)` tiles of `{python} rows_for(16)` + `{python} G_PYR % rows_for(16)` at
+  $C = 16$; `{python} G_PYR // rows_for(128)` tiles of `{python} rows_for(128)` +
+  `{python} G_PYR % rows_for(128)` at $C = 128$). Its `lo`, `wa`, `wc` load as 0 there.
+- `cmask = offs_c < C`, `omask = offs_o < O`: channel tiles are padded up to a power of two,
+  at least 16, because `tl.arange` needs powers of two and `tl.dot` needs ≥ 16
+  (`_pow2(n) = max(16, next power of two)`). For $C = 16$, $O = 128$ the padding is empty.
+- The $x$ loads use only `cmask`. A bin past $G$ and an invalid tap both have `lo = 0` and zero
+  weights, so they read row 0 of the frame — a valid address — and multiply it by zero. No extra
+  mask is needed for correctness.
+
+**Dtypes.** $x$ arrives in the autocast dtype (fp16 by default in this project's training loop,
+`amp_dtype`) and the weight is cast to it on the host. In the kernel the two rows are upcast to
+fp32 for the lerp, the result is cast back to the weight dtype for `tl.dot` (so the tensor cores
+see fp16 × fp16), and the accumulator and bias are fp32. `lo` is int32, `wa`/`wc` fp32. The output
+is stored in $x$'s dtype.
+
+```{python}
+#| output: asis
+src_t = inspect.getsource(tct)
+n_dot = len(re.findall(r"tl\.dot\(", src_t))
+n_ieee = src_t.count('input_precision="ieee"')
+if n_ieee == n_dot:
+    print(
+        f"All {n_dot} `tl.dot` calls pass `input_precision=\"ieee\"`. That option only matters "
+        "for fp32 operands: it makes an fp32 run use exact fp32 multiplies instead of Triton's "
+        "default tf32 (10-bit mantissa) tensor-core path, so fp32 results match the torch path "
+        "to fp32 rounding, at the price of not using the tensor cores in fp32. fp16/bf16 "
+        "operands use the tensor cores either way."
+    )
+else:
+    print(f"{n_ieee} of the {n_dot} `tl.dot` calls pass `input_precision=\"ieee\"`; the others use "
+          "Triton's default, tf32 for fp32 operands on Ampere and newer.")
+```
+
+**Tile sizes and work per layer**, at the bench batch (computed with the kernel's own `_rows`,
+`_pow2` and `SPLITS`; launched with `num_warps` = `{python} NUM_WARPS`, `num_stages` =
+`{python} NUM_STAGES`):
+
+```{python}
+#| output: asis
+rows = []
+for name, J, C, O, F, G in LAYERS:
+    bc, bo, bg = pow2(C), pow2(O), rows_for(C)
+    progs = N_BENCH * math.ceil(G / bg)
+    smem = (bg * bc + bc * bo) * 2
+    per_tap_bytes = 2 * bg * bc * 2 + bc * bo * 2 + bg * 12
+    r = N_BENCH * G
+    rps = math.ceil(math.ceil(r / SPLITS0) / bg) * bg
+    splits = math.ceil(r / rps)
+    rows.append({
+        "layer": name, "BG (= BR)": bg, "BC × BO": f"{bc} × {bo}",
+        "fwd/dx grid": f"({N_BENCH:,}, {math.ceil(G / bg)}) = {progs:,}",
+        "acc (fp32)": f"{bg * bo * 4 // 1024} KB",
+        "dot operands (fp16)": f"{smem / 1024:.0f} KB",
+        "bytes read per tap per program": f"{per_tap_bytes / 1024:.1f} KB",
+        "dw grid (J, S)": f"({J}, {splits}) = {J * splits:,}",
+        "dw rows per program": f"{rps:,} ({rps // bg} blocks)",
+    })
+print(md_table(rows))
+```
+
+The weight tile is reloaded by every program for every tap. All of $W$ is small
+(`{python} f"{LAYERS[0][1] * pow2(LAYERS[0][2]) * pow2(LAYERS[0][3]) * 2 / 1e3:.0f}"` KB for the
+pyramid's `conv_3`), so these reloads hit L2, not HBM.
+
+### 6.3 Input-gradient kernel `_dx_kernel`
+
+Same grid and tiles as the forward. Per program:
+
+1. Load the $(\text{BG}, \text{BO})$ tile of $\bar y$ for this frame and bin tile once.
+2. For each tap $j$: load $W_j$ as a $(\text{BO}, \text{BC})$ tile; compute
+   $\bar{\hat x}_j = \bar y\,W_j$ with `tl.dot`, a $(\text{BG}, \text{BC})$ fp32 tile; then
+   `tl.atomic_add` it, times `wa`, into rows `lo` of the fp32 gradient slab of frame $n$, and,
+   times `wc`, into rows `lo + 1`.
+
+The gradient buffer is a zero-initialised fp32 $(N, F, C)$ tensor. After the kernel it is cast to
+$x$'s dtype and permuted back to $(B, C, T, F)$ as a view.
+
+**Why atomics.** Collisions come from two sources. Inside one program, two taps or two bins can
+read the same row — neighbouring bins of a sub-harmonic tap, or the `lo + 1` of one read and the
+`lo` of the next. Across programs, the $\lceil G/\text{BG}\rceil$ tiles of the same frame run
+concurrently and read overlapping rows. Programs of different frames never collide: each frame
+has its own slab. So atomics resolve contention among the programs of one frame —
+`{python} math.ceil(G_PYR / rows_for(16))` for the pyramid's `conv_3`,
+`{python} math.ceil(G_PYR / rows_for(128))` for `block_4/5`, `{python} math.ceil(F_CQT / rows_for(16))`
+for the CQT's `conv_3` — never across the whole batch.
+
+```{python}
+#| label: fig-triton-dx
+#| fig-cap: "Atomic traffic of the `dx` kernel for one frame of the pyramid's `conv_3`, from the real table. Top left: each dot is one row a program adds into (at `lo`; the `lo + 1` add goes to the next row), for every tap, coloured by bin tile (program). Bottom left: how many of the frame's programs add into each row; rows with 2 or 3 need the atomics across programs. Right: how many atomic adds each row receives per frame, counting every add the kernel issues (also those with zero weight: `lo + 1` when frac = 0, and invalid entries). Rows 0 and 1 receive the invalid entries' zero adds."
+n_t = math.ceil(G_PYR / BG)
+fig = plt.figure(figsize=(12, 5.6))
+gsp = fig.add_gridspec(2, 2, width_ratios=[1.6, 1], height_ratios=[3, 1], hspace=0.08, wspace=0.22)
+ax = fig.add_subplot(gsp[0, 0])
+axs_ = fig.add_subplot(gsp[1, 0], sharex=ax)
+axh = fig.add_subplot(gsp[:, 1])
+tile_cols = ["#2b6cb0", "#dd6b20", "#38a169", "#805ad5", "#d53f8c", "#319795", "#718096"]
+n_tiles_row = np.zeros(F_CAT + 1, dtype=int)
+for p in range(n_t):
+    gsel = np.arange(p * BG, min((p + 1) * BG, G_PYR))
+    rows_p = np.unique(np.concatenate([H_LO[:, gsel].ravel(), H_LO[:, gsel].ravel() + 1]))
+    n_tiles_row[rows_p] += 1
+    jj = np.repeat(np.arange(len(MULTS))[:, None], len(gsel), 1).ravel()
+    ax.plot(H_LO[:, gsel].ravel(), jj + 0.25 * p, ".", ms=1.6, color=tile_cols[p], label=f"tile {p}: g = {gsel[0]}…{gsel[-1]}")
+for a_ in (ax, axs_):
+    for lvl in range(NLEV):
+        a_.axvline(OFF[lvl], color="#666666", lw=0.6)
+ax.set_ylabel("tap index j")
+ax.set_title("rows each bin tile (program) adds into", fontsize=11)
+ax.legend(frameon=False, markerscale=6, fontsize=9, ncol=3, loc="lower center", bbox_to_anchor=(0.5, 1.06))
+plt.setp(ax.get_xticklabels(), visible=False)
+axs_.fill_between(np.arange(F_CAT + 1), n_tiles_row, step="mid", color="#4a5568", lw=0)
+axs_.set_yticks(range(n_t + 1))
+axs_.set_ylabel("programs", fontsize=10)
+axs_.set_xlabel("row of the frame's gradient slab (concatenated bin)")
+counts = Counter(np.concatenate([H_LO.ravel(), H_LO.ravel() + 1]).tolist())
+vals = np.array(sorted(counts.values()))
+axh.hist(vals, bins=np.logspace(0, np.log10(vals.max() + 1), 30), color="#4a5568")
+axh.set_xscale("log")
+axh.set_yscale("log")
+axh.set_xlabel("atomic adds issued per row per frame")
+axh.set_ylabel("rows")
+axh.set_title("adds per row (one frame)", fontsize=11)
+row0 = counts[0]
+axh.annotate(f"rows 0 and 1: {counts[0]} and {counts[1]}\nadds (invalid entries)", xy=(row0, 2), xytext=(row0 / 60, 40),
+             arrowprops=dict(arrowstyle="->", lw=0.8), fontsize=9)
+plt.show()
+```
+
+```{python}
+#| output: asis
+n_read = int((n_tiles_row[:F_CAT] >= 1).sum())
+print(
+    f"In one frame of the pyramid's `conv_3`, {n_read} slab rows receive adds; "
+    f"{int((n_tiles_row >= 2).sum())} of them from two or more of the frame's {n_t} programs "
+    f"(so atomics are needed across programs, not only within one), "
+    f"{int((n_tiles_row >= n_t).sum())} from all {n_t}. "
+    f"Invalid entries: {int((H_VA == 0).sum())} of {H_VA.size} "
+    f"({100 * (H_VA == 0).mean():.1f} %) in the pyramid's `conv_3` table, "
+    f"{int((C_VA == 0).sum())} of {C_VA.size} ({100 * (C_VA == 0).mean():.1f} %) in the CQT's."
+)
+```
+
+### 6.4 Weight-gradient kernel `_dw_kernel`
+
+$\bar W_j = \sum_{n, g} \bar y[n, :, g]\,\hat x_j[n, :, g]^\top$ is a sum over all
+$R = N\,G$ (frame, bin) pairs. It is a GEMM with a long inner dimension $R$ and a small
+$(O, C)$ output per tap.
+
+**Grid.** $(J, S)$: program $(j, s)$ handles tap $j$ and a contiguous slice of `RPS` rows
+$r \in [s\cdot\text{RPS},\ \min((s+1)\cdot\text{RPS}, R))$, where row $r$ is the pair
+$n = r \,\mathrm{div}\, G$, $g = r \bmod G$. `RPS` is $\lceil R/\texttt{SPLITS} \rceil$
+($\texttt{SPLITS} = `{python} SPLITS0`$) rounded up to a multiple of `BR`, and
+$S = \lceil R/\text{RPS}\rceil$ (so $S \le \texttt{SPLITS}$).
+
+**Body.** Walk the slice in blocks of `BR = _rows(C)` rows (`{python} rows_for(16)` at $C = 16$,
+`{python} rows_for(128)` at $C = 128$). For each block: recover $(n, g)$ from $r$; load `lo`,
+`wa`, `wc` at $(j, g)$; gather and lerp the $(\text{BR}, \text{BC})$ tile $\hat x_j$ from the frame
+slabs; load the matching tile of $\bar y$; `acc += tl.dot(ȳᵀ, x̂_j)`, an $(\text{BO}, \text{BC})$
+fp32 tile. At the end store `acc` into its own slot `gw_part[j, s]`. The host sums the partials
+over $s$; the bias gradient is a plain sum of $\bar y$ in torch.
+
+**Reading $\bar y$.** The kernel does not read $\bar y$ in the model's $(B, O, T, G)$ layout.
+Before the launch the host makes a row-major copy `gyr` of shape $(N G, O)$, row $r = n G + g$
+(`gy.permute(0, 2, 3, 1).reshape(r, o)`). A block of `BR` consecutive rows is then `BR` contiguous
+runs of $O$ values. In $(B, O, T, G)$ the $O$ values of one row are $T G$ elements apart; the
+commit that introduced the copy (585a8646, the same day) describes the old access as `BR`·`BO`
+scattered reads and the new one as `BR` coalesced reads. The copy costs one extra pass over
+$\bar y$ (`{python} f"{2 * N_BENCH * G_PYR * LAYERS[0][3] / 1e6:.0f}"` MB in fp16 for the
+pyramid's `conv_3`).
+
+No atomics are needed: every program owns its output slot, so the result is deterministic. The
+split over $s$ exists because $J$ programs alone are too few to fill the GPU — 3 for `block_4/5`
+— and each would walk all `{python} f"{N_BENCH * G_PYR:,}"` rows alone.
+
+```{python}
+#| label: fig-triton-dw
+#| fig-cap: "The weight-gradient kernel. The $R = N G$ (frame, bin) rows are cut into S slices; program (j, s) walks slice s in blocks of BR rows, gathers the lerped tile of tap j, multiplies it with the matching tile of the output gradient (read from the row-major copy `gyr`), and accumulates an $O \\times C$ partial in registers. The partials `gw_part[j, s]` are summed over s by torch. Sizes: pyramid `conv_3` at the bench batch."
+name, J, C, O, F, G = LAYERS[0]
+r = N_BENCH * G
+rps = math.ceil(math.ceil(r / SPLITS0) / rows_for(C)) * rows_for(C)
+BR = rows_for(C)
+S = math.ceil(r / rps)
+fig, ax = plt.subplots(figsize=(11.5, 4.4))
+ax.axis("off")
+ax.set_xlim(0, 24)
+ax.set_ylim(0, 10)
+box(ax, 0.3, 8.0, 15.0, 1.0, "", fc="#edf2f7")
+for s_ in range(1, 8):
+    ax.plot([0.3 + 15 * s_ / 8] * 2, [8.0, 9.0], color="k", lw=0.8)
+ax.add_patch(Rectangle((0.3 + 15 * 2 / 8, 8.0), 15 / 8, 1.0, fc="#f6ad55", ec="k"))
+ax.text(7.8, 9.35, f"R = N·G = {r:,} rows, cut into S = {S} slices of RPS = {rps:,} (8 drawn)", ha="center", fontsize=9.5)
+ax.text(8.2, 7.45, "orange: slice s → program (j, s)", ha="left", fontsize=9)
+box(ax, 0.6, 3.2, 4.4, 2.2, f"ȳ block\n({pow2(O)}×{BR})", fc="#fefcbf", fs=9.5)
+ax.text(5.5, 4.3, "@", fontsize=16, ha="center", va="center")
+box(ax, 6.1, 2.2, 2.6, 4.2, f"x̂_j block\n({BR}×{pow2(C)})\ngathered +\nlerped", fc="#bee3f8", fs=9.5)
+arrow(ax, 4.6, 7.9, 2.8, 5.5)
+arrow(ax, 4.6, 7.9, 7.4, 6.5)
+ax.text(9.6, 4.3, "+=", fontsize=15, ha="center", va="center")
+box(ax, 10.4, 2.8, 2.8, 3.0, f"acc\n({pow2(O)}×{pow2(C)})\nfp32", fc="#e9d8fd", fs=9.5)
+ax.text(6.5, 1.3, f"{rps // BR} blocks of {BR} rows per program", ha="center", fontsize=10)
+box(ax, 15.5, 1.2, 4.0, 7.2, "", fc="#fff5f5", ec="#c53030")
+ax.text(17.5, 7.6, "gw_part (J, S, O, C)\nrows j, columns s", ha="center", va="center", fontsize=9.5)
+for jj in range(4):
+    for ss in range(4):
+        hl = jj == 1 and ss == 2
+        box(ax, 15.8 + ss * 0.9, 5.6 - jj * 1.2, 0.8, 1.0, "", fc="#f6ad55" if hl else "#fed7e2", ec="#a0aec0")
+ax.text(17.5, 0.8, f"J = {J} taps × S = {S}", ha="center", fontsize=9)
+arrow(ax, 13.2, 4.3, 17.6, 4.8)
+ax.text(21.8, 4.3, "sum over s\n(torch)\n→ ∂L/∂W\n(J, O, C)", ha="center", va="center", fontsize=10)
+arrow(ax, 19.5, 4.3, 20.6, 4.3)
+plt.show()
+```
+
+### 6.5 Host side and what is still open
+
+`_TapConvTritonFn.forward` makes the $(N, F, C)$ copy of $x$, casts the weight to $x$'s dtype,
+allocates $y$ as $(B, O, T, G)$ and launches the forward kernel. It saves the $(N, F, C)$ copy
+(not $H$) for the backward. `backward` makes $\bar y$ contiguous, runs `dx` into the fp32 buffer,
+makes the row-major copy `gyr` of $\bar y$, runs `dw` into the partials, and sums.
+`tap_conv_triton(x, weight, bias, lo, wa, wc)` takes `wa`
+and `wc` directly (it does not build them from `frac`/`valid`) and converts `lo` to int32 and
+`wa`/`wc` to fp32.
+
+The following points are open in the version read, or are observations from reading it. They are
+not measured.
+
+```{python}
+#| output: asis
+br4 = rows_for(LAYERS[1][2])
+r4 = N_BENCH * LAYERS[1][5]
+blk_progs = LAYERS[1][1] * math.ceil(r4 / (math.ceil(math.ceil(r4 / SPLITS0) / br4) * br4))
+items = [
+    ("Dispatch", "`tap_conv` uses the kernels for every CUDA call (unless `TAP_CONV_TORCH` is set), "
+     "so the pyramid's three `ProportionalTapConv` layers run on them. On the CQT side "
+     f"`HarmonicDilatedConv.FUSED_FROM` = {HarmonicDilatedConv.FUSED_FROM} still selects the branch "
+     "sum; whether the kernel beats cuDNN's branch sum on the A100 is the measurement that decides "
+     "it (the comment above `FUSED_FROM`)" if dispatch else
+     "not wired into `tap_conv` yet; `HarmonicDilatedConv.FUSED_FROM` still selects the branch sum. "
+     "Whether the kernel beats cuDNN's branch sum on the A100 is the measurement that decides it "
+     "(the comment above `FUSED_FROM`)"),
+    ("Measurements", "no timing of the kernels is recorded in `docs/experiments/pyramid-harmonic.md` "
+     "yet; everything in this section is design, not measured speed"
+     if "triton" not in (ROOT / "docs/experiments/pyramid-harmonic.md").read_text().lower() else
+     "`docs/experiments/pyramid-harmonic.md` now mentions Triton; see it for measured speed"),
+    ("Tuning", f"tile rows by a fixed rule ({rows_for(16)} at $C \\le 32$, {rows_for(128)} above), "
+     f"{SPLITS0} `dw` splits, `num_warps` = {NUM_WARPS}, `num_stages` = {NUM_STAGES}; no "
+     "autotuning. For `block_4/5` ($C = O = 128$) every tap loads a full 128×128 weight tile for "
+     f"only {rows_for(128)} output bins, so the weight traffic per useful FLOP is 4× that of a "
+     "64-row tile; whether a larger tile with fewer pipeline stages is faster is an open "
+     "measurement"),
+    ("Invalid entries", f"are computed, not skipped: they load row 0 and, in `dx`, issue atomic "
+     f"adds of zero into rows 0 and 1 (the mask is `gmask & cmask`, not the validity). That is "
+     f"{100 * (H_VA == 0).mean():.0f} % of the pyramid `conv_3` table and "
+     f"{100 * (C_VA == 0).mean():.0f} % of the CQT k ≤ 84 table (@fig-cqt-table). Skipping "
+     f"all-invalid (tap, tile) pairs would remove that work"),
+    ("`dw` occupancy", f"`block_4/5` launch $J \\times S$ = {blk_progs} programs. The A100 has "
+     f"108 SMs, so the grid does not fill one wave"),
+    ("Determinism", "`dx` uses atomics, so the input gradient can differ in the last bits between "
+     "runs. `dw` and the forward are deterministic"),
+]
+for k_, v in items:
+    print(f"- **{k_}**: {v}.")
+```
+
+## Summary
+
+- `tap_conv` computes $y = \beta + \sum_j W_j\,\hat x_j$, where $\hat x_j$ is a linear-interpolated,
+  masked read of the input at a position given by an index table. It is a convolution whose tap
+  positions may depend on the output bin.
+- On the CQT, harmonics are constant shifts $d_k = \mathrm{round}(48\log_2 k)$; the published sum
+  of $K$ three-tap dilated convolutions is one sparse convolution with $2K+1$ taps, and zero
+  padding is the table's validity mask.
+- On the STFT pyramid, harmonics sit at $k\,r$; the table reads each one from the finest level
+  that covers it, with `lo`/`frac` interpolation and $f_{\min}$, $f_{\max}$ and ceiling masks.
+- The torch path transposes once to $(F, B T, C)$, gathers chunks of taps into a block $H$ and runs
+  one GEMM per chunk; the backward recomputes the gather and scatters with row-wise `index_add_`
+  into one fp32 buffer. It is exact but moves $H$ through memory about a dozen times.
+- The Triton kernels keep $H$ in registers: one program per (frame, tile of output bins) for the
+  forward and the input gradient (fp32 atomics for the scatter), one per (tap, row slice) for the
+  weight gradient (partials, no atomics).
