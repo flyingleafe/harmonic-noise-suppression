@@ -584,25 +584,27 @@ def cqt_vs_pyramid() -> None:
 ARCH_HORIZONTAL = r"""
 \begin{tikzpicture}[font=\small,
   img/.style={inner sep=0, outer sep=0, anchor=south west, draw=black!50, line width=0.2pt},
-  blk/.style={draw, rounded corners=1.5pt, align=center, inner sep=2.5pt, fill=white, font=\small, minimum height=7mm},
+  blk/.style={draw, rounded corners=1.5pt, align=center, inner sep=2.5pt, fill=white, font=\small, minimum height=9mm, text width=1.75cm},
   new/.style={blk, fill=blue!8, draw=blue!50!black},
   shp/.style={font=\footnotesize, text=gray!30!black, align=center},
   big/.style={-{Triangle[length=2mm,width=2.4mm]}, line width=1.4pt, magenta!55!black},
-  arr/.style={-{Latex[length=1.2mm]}, thin},
   tap/.style={-{Latex[length=0.9mm]}, very thin, blue!70!black}]
 \def\dx{0.18}\def\dy{0.15}
-% ---- input: pyramid deck ----
+% ================= row 1: input, per-level convolutions, HPDC =================
 \foreach \l in {3,2,1,0} {
-  \pgfmathsetmacro{\ox}{\l*\dx}\pgfmathsetmacro{\oy}{1.0+\l*\dy}
+  \pgfmathsetmacro{\ox}{\l*\dx}\pgfmathsetmacro{\oy}{1.1+\l*\dy}
   \node[img] (L\l) at (\ox,\oy) {\includegraphics[width=1.9cm,height=1.2cm]{level\l.png}};
 }
-\node[shp, anchor=north] at (1.2,0.85) {STFT pyramid\\ 4 levels, hop 512\\ $T \times F_\ell$};
-% ---- pre-convolutions per level ----
-\node[blk, text width=2.6cm, minimum height=2.6cm] (pre) at (4.6,1.9) {conv $7{\times}7$, 16 ch\\ (shared across levels)\\[2pt] top-down fusion\\ $\times 2\uparrow$, $1{\times}1$, add\\[2pt] conv $7{\times}7$ $\times 2$};
-\node[shp, anchor=north] at (4.6,0.45) {per level\\ $T \times F_\ell \times 16$};
-\draw[big] (3.0,1.9) -- (pre.west);
-% ---- HPDC: frequency strips -> rate strip ----
-\begin{scope}[shift={(6.6,0.55)}]
+\node[shp, anchor=north] at (1.2,0.95) {STFT pyramid\\ 4 levels, hop 512\\ $T \times F_\ell$};
+\node[blk] (b1) at (4.1,1.9) {conv $7{\times}7$\\ $1 \to 16$ ch};
+\node[blk] (fu) at (6.25,1.9) {top-down fusion\\ $\times 2\uparrow$, $1{\times}1$, add};
+\node[blk] (b2) at (8.4,1.9) {conv $7{\times}7$\\ $16 \to 16$};
+\node[blk] (b25) at (10.55,1.9) {conv $7{\times}7$\\ $16 \to 16$};
+\node[shp, anchor=north] at (7.3,1.2) {per level, weights shared across levels, $T \times F_\ell \times 16$};
+\draw[big] (3.0,1.9) -- (b1.west);
+\draw[big] (b1) -- (fu); \draw[big] (fu) -- (b2); \draw[big] (b2) -- (b25);
+% HPDC: frequency strips -> rate strip
+\begin{scope}[shift={(12.2,0.5)}]
 \foreach \l/\x/\h in {0/0/2.8, 1/0.4/2.8, 2/0.8/2.8, 3/1.2/2.8} {
   \draw[fill=gray!10] (\x,0) rectangle (\x+0.3,\h);
   \foreach \k in {1,...,24} {
@@ -620,28 +622,37 @@ ARCH_HORIZONTAL = r"""
   \pgfmathsetmacro{\yy}{\k*200/(1200*2^\l)*2.8}
   \draw[tap] (g) -- (\x,\yy);
 }
-\node[new, anchor=south, text width=3.2cm] at (1.45,2.95) {\textbf{HPDC}: taps at $kg$, $k \le 84$\\ frequency grid $\to$ rate grid};
+\node[new, anchor=south, text width=3.2cm] at (1.45,2.95) {\textbf{HPDC}: taps at $kg$, $k \le 84$\\ frequency grid $\to$ rate grid, $16 \to C$};
 \end{scope}
-\node[shp, anchor=west] at (11.85,-0.6) {$T \times 307 \times C$};
-% ---- rate-axis + temporal convolutions ----
-\node[blk, text width=2.4cm] (rb) at (11.6,1.9) {3-tap HPDC at\\ $g\cdot\{\tfrac12,1,2\}$,\\ $g\cdot\{2^{-\frac14},1,2^{\frac14}\}$\\[1pt] temporal conv\\ $5{\times}1$ $\times 3$};
-\draw[big] (9.7,1.9) -- (rb.west);
-% ---- ConvLSTM ----
-\node[new, text width=2.8cm] (lstm) at (1.5,-3.0) {\textbf{rate ConvLSTM}\\ bidirectional, gate conv\\ 33 taps along rate};
-\draw[big] (rb.south) -- (rb.south |- 0,-1.35) -- (lstm.north |- 0,-1.35) -- (lstm.north);
-% ---- salience deck ----
+\draw[big] (b25.east) -- (12.1,1.9);
+% ================= row 2: rate-axis blocks, temporal convolutions, ConvLSTM =================
+\def\ry{-2.6}
+\node[blk] (b4) at (1.0,\ry) {3-tap HPDC\\ $g\cdot\{\tfrac12,1,2\}$};
+\node[blk] (b5) at (3.15,\ry) {3-tap HPDC\\ $g\cdot\{2^{-\frac14},1,2^{\frac14}\}$};
+\node[blk] (b6) at (5.3,\ry) {temporal conv\\ $5{\times}1$};
+\node[blk] (b7) at (7.45,\ry) {temporal conv\\ $5{\times}1$};
+\node[blk] (b8) at (9.6,\ry) {temporal conv\\ $5{\times}1$};
+\node[new, text width=2.9cm] (lstm) at (12.6,\ry) {\textbf{rate ConvLSTM}\\ bidirectional, gate conv\\ 33 taps along rate};
+\node[shp, anchor=north] at (2.1,\ry-0.75) {octave / quarter-octave priors on the rate axis};
+\node[shp, anchor=north] at (7.45,\ry-0.75) {$T \times 307 \times C$ throughout};
+\node[shp, anchor=east] at (14.3,\ry-0.95) {$T \times 307 \times 2H$};
+\draw[big] (15.1,0.45) -- (15.1,-0.9) -- (1.0,-0.9) -- (b4.north);
+\draw[big] (b4) -- (b5); \draw[big] (b5) -- (b6); \draw[big] (b6) -- (b7); \draw[big] (b7) -- (b8); \draw[big] (b8) -- (lstm);
+% ================= row 3: head, salience layers, readout =================
+\def\sy{-5.7}
+\node[blk] (hd) at (1.0,\sy) {conv $1{\times}1$\\ $2H \to 4$};
 \foreach \i in {3,2,1,0} {
-  \pgfmathsetmacro{\ox}{3.6+\i*\dx}\pgfmathsetmacro{\oy}{-3.75+\i*\dy}
+  \pgfmathsetmacro{\ox}{2.6+\i*\dx}\pgfmathsetmacro{\oy}{\sy-0.75+\i*\dy}
   \node[img] (S\i) at (\ox,\oy) {\includegraphics[width=2.2cm,height=1.1cm]{layer\i.png}};
 }
-\draw[big] (lstm.east) -- (3.5,-3.0);
-\node[shp, anchor=north] at (5.0,-3.9) {$1{\times}1$ $\to$ 4 per-rotor salience layers\\ $T \times 307 \times 4$};
-% ---- CRF -> tracks ----
-\node[blk] (crf) at (7.6,-3.0) {CRF\\ readout};
-\draw[big] (6.5,-3.0) -- (crf.west);
-\node[img, draw=none, anchor=west] (tr) at (8.5,-3.0) {\includegraphics[width=3.4cm]{tracks.png}};
+\node[shp, anchor=north] at (3.9,\sy-0.9) {4 per-rotor salience layers\\ $T \times 307 \times 4$, PIT cross-entropy};
+\node[blk] (crf) at (7.0,\sy) {CRF readout\\ one path per layer};
+\node[img, draw=none, anchor=west] (tr) at (8.4,\sy) {\includegraphics[width=3.4cm]{tracks.png}};
+\node[shp, anchor=north] at (10.1,\sy-0.9) {$\hat{\mathbf r}[\tau]$, $T \times 4$, against telemetry};
+\draw[big] (lstm.east) -- (14.6,\ry) -- (14.6,-4.1) -- (1.0,-4.1) -- (hd.north);
+\draw[big] (hd.east) -- (2.5,\sy);
+\draw[big] (5.5,\sy) -- (crf.west);
 \draw[big] (crf.east) -- (tr.west);
-\node[shp, anchor=north] at (10.2,-3.9) {$\hat{\mathbf r}[\tau]$, $T \times 4$, against telemetry};
 \end{tikzpicture}
 """
 

@@ -37,7 +37,7 @@ execute:
 
 ## HRSPNet: the full model
 
-![](assets/arch_horizontal.png){width="70%" fig-align="center"}
+![](assets/arch_horizontal.png){width="66%" fig-align="center"}
 
 ::: {.notes}
 Shapes: T×F_ℓ per level (1229 bins, 1025 on level 3) → T×307×C after the HPDC (C = 128) → T×307×4 layers. Fused Triton kernel for the HPDC; A100 pyramid step 293 ms. The output grid is level 0's bin width, so no super-resolution head is needed any more, and the range is a config number (307 bins → 300 rev/s).
