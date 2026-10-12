@@ -1,0 +1,41 @@
+/*-- scss:defaults --*/
+$presentation-font-size-root: 26px;
+$presentation-heading-font-weight: 700;
+$presentation-h2-font-size: 1.2em;
+
+/*-- scss:rules --*/
+.reveal .slides section { text-align: left; }
+.reveal h2 { margin-bottom: 0.35em; }
+.reveal p { margin: 0.28em 0; }
+.reveal ul { margin: 0.15em 0 0.15em 0.9em; }
+.reveal li { margin: 0.1em 0; }
+.reveal .small { font-size: 0.8em; }
+.reveal .tiny { font-size: 0.66em; line-height: 1.3; }
+.reveal .columns { display: flex; gap: 0.8em; align-items: flex-start; }
+.reveal .column > p:first-child, .reveal .column > div:first-child { margin-top: 0; }
+.reveal figure { margin: 0; }
+.reveal figcaption { font-size: 0.6em; color: #555; }
+
+/* compact labelled audio row (Quarto rewrites raw HTML tables, so use a flex div) */
+.reveal .audio-row {
+  display: flex; flex-wrap: wrap; gap: 0.15em 1.2em; align-items: center;
+  font-size: 0.62em; margin: 0.4em 0 0 0;
+}
+.reveal .audio-row > span { display: inline-flex; align-items: center; gap: 0.45em; white-space: nowrap; }
+.reveal .audio-row audio { height: 30px; width: 190px; }
+.reveal .audio-row.wide audio { width: 225px; }
+
+/* pending-result placeholder */
+.reveal .pending {
+  background: #fdecec; border: 2px dashed #b03000; border-radius: 4px;
+  padding: 0.4em 0.7em; margin: 0.3em 0;
+}
+.reveal .pending p:last-child { margin-bottom: 0; }
+.reveal .tag {
+  display: inline-block; background: #b03000; color: #fff;
+  font-size: 0.62em; padding: 0.1em 0.45em; border-radius: 3px; vertical-align: middle;
+}
+.reveal .tag strong { color: #fff; }
+
+.reveal table { font-size: 0.8em; margin: 0.25em 0; }
+.reveal table th, .reveal table td { padding: 0.15em 0.5em; border-bottom: 1px solid #c8c8c8; }

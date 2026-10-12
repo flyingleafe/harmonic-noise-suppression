@@ -1,0 +1,211 @@
+---
+title: "HRSPNet: rotor speed tracking from drone ego-noise"
+subtitle: "What the model is, why it is built this way, and where the paper is"
+author: "Dmitrii Mukhutdinov"
+date: 2026-10-12
+format:
+  revealjs:
+    output-file: slides.html
+    embed-resources: true
+    width: 1280
+    height: 720
+    margin: 0.05
+    slide-number: c/t
+    transition: none
+    fig-align: center
+    auto-stretch: false
+    html-math-method: katex
+    theme: [default, styles.scss]
+  beamer:
+    output-file: slides.pdf
+    pdf-engine: tectonic
+    aspectratio: 169
+    fontsize: 8pt
+    navigation: empty
+    fig-align: center
+    header-includes: |
+      \setbeamertemplate{navigation symbols}{}
+      \setbeamertemplate{footline}[frame number]
+      \setbeamerfont{title}{size=\large}
+      \setbeamerfont{frametitle}{size=\normalsize}
+      \setbeamersize{text margin left=4mm,text margin right=4mm}
+      \usepackage{xcolor}
+      \setlength{\parskip}{2pt}
+execute:
+  echo: false
+---
+
+## The signal and the task
+
+![](assets/spectrogram_comb.png){width="100%"}
+
+::: {.small}
+Each rotor is a harmonic comb spaced by its speed $r_i(t)$, on a broadband floor. The task: from one microphone, $\hat{\mathbf r}[\tau] \approx \mathbf r(\tau/f_{\mathrm r})$, four speeds per frame at $f_{\mathrm r} = 31.25$ Hz (the STFT frame rate; the MD2 telemetry has no more).
+:::
+
+::: {.notes}
+Frame 24 of the frozen real split: DREGON room 1, mic 0, 8 s cruise. Right panel overlays k·r_i for k ≤ 10 from the telemetry. Motivation in one line if asked: rotor-conditioned suppression (Gulli et al. 2025) needs these speeds; telemetry is not always there.
+:::
+
+## HRSPNet
+
+::: {.content-visible when-format="revealjs"}
+![](assets/fig_hrspnet.png){width="36%" fig-align="center"}
+:::
+::: {.content-visible unless-format="revealjs"}
+![](assets/fig_hrspnet.png){width="46%"}
+:::
+
+::: {.notes}
+Real MD2 validation clip (FLY124, frame 264), pyramid + rate ConvLSTM checkpoint. (a) four STFTs on one hop, range doubling, same bins per level. (b) harmonic proportionally dilated convolution + rate ConvLSTM. (c) the four per-rotor salience layers as the model emits them. (d, e) CRF readout, tracks against telemetry (identity-order MAE 0.93 rev/s on this clip).
+:::
+
+## How it reads a comb: pyramid + HPDC
+
+![](assets/hpdc_fans.png){width="88%"}
+
+::: {.small}
+Output on a **linear rate grid** (0.977 rev/s, 307 bins to 300 rev/s); the harmonic dilated convolution of HPPNet becomes a *proportionally* dilated one. Four per-rotor layers, permutation-invariant cross-entropy, CRF path per layer.
+:::
+
+::: {.notes}
+Levels: 16384/8192/4096/2048 at hop 512, kept to 1.2·2^l kHz. Tap k of rate g reads kg from the finest level which holds it, linear interpolation, one (C_out, C_in) weight per tap shared across g; implemented as a gather with a fused Triton kernel (A100: pyramid step 498 → 293 ms). Taps currently read below 4.8 kHz (levels 0–2); level 3 enters via fusion.
+:::
+
+## How it tracks: a recurrence that follows the rotor
+
+::: {.columns}
+::: {.column width="55%"}
+![](assets/lstm_cartoon.png){width="100%"}
+:::
+::: {.column width="45%"}
+![](assets/slew_hist.png){width="100%"}
+:::
+:::
+
+::: {.small}
+Rotors move between bins continuously; a throttle punch is 15 rev/s per frame. The hidden-to-gate map is a 33-tap convolution along rate ($\pm 16$ bins), sized from the telemetry.
+:::
+
+::: {.notes}
+Histogram: per-frame |Δr| over the validation telemetry (motors on); median ~0.2 rev/s per frame at 31.25 fps, 99th percentile ~2; the sustained 15 rev/s/frame punch is in the DREGON up/down training recording. FreqGroupLSTM is a cruise denoiser, not a tracker.
+:::
+
+## Where it stands: real-data training, no synthetic pretraining
+
+![](assets/bars_current.png){width="80%"}
+
+::: {.small}
+Both rate-ConvLSTM variants beat the best adapted HPPNet (2.27) and the best regressor (2.99) from real data alone. These are the numbers *before* synthetic pretraining; the pretraining arms for HRSPNet are running.
+:::
+
+::: {.notes}
+Unified panel, val/real_overall, one seed: CQT k≤9 + ConvLSTM 2.16, pyramid k≤32 + ConvLSTM 2.17 (docs/handoff-pyramid-harmonic.md §2). HPPNet-L2 2.27 is the frozen-split number under the earlier 1 s recipe (2.25 on this panel as nv2_mixed_hppnet_l2). Conv+BiGRU 2.99 = real_r4_scv2_unified. Differences of 0.1 are within single-seed noise; the 0.3–0.8 gaps are not.
+:::
+
+## Why: it is multi-pitch tracking, but not music
+
+![](assets/tracks_vs_pianoroll.png){width="100%"}
+
+::: {.small}
+| rotors | notes | what it breaks in a music model |
+|---|---|---|
+| always present, continuous pitch | on/off events on a semitone grid | onset/offset heads, per-bin recurrence |
+| four within one octave, often $<1$ rev/s apart, crossing | simultaneous semitones are rare | one shared salience map on a log axis |
+:::
+
+## Why per-rotor layers: a shared map cannot even encode the tracks
+
+![](assets/encode_decode.png){width="74%"}
+
+::: {.small}
+Telemetry → one 48-bin/octave map → peak-pick + assign, no model in the loop: pairs closer than one bin merge. On the DREGON validation clips this floor is **8.2 rev/s**; four per-rotor layers on a linear grid return the tracks exactly.
+:::
+
+::: {.content-visible when-format="revealjs"}
+![](assets/bars_output.png){width="56%"}
+:::
+::: {.content-visible unless-format="revealjs"}
+![](assets/bars_output.png){width="60%"}
+:::
+
+::: {.notes}
+8.2 rev/s and 2e-16 rev/s: encode–decode test of the paper's appendix (55 % of DREGON frames have a pair < 1 Hz apart). Bars: Block S of paper-regime-matrix.md, one seed each. Basic Pitch has no harmonic device → not carried further.
+:::
+
+## Why the harmonic range: the motor lines live at high orders
+
+![](assets/rate_sync_spectrum.png){width="100%"}
+
+::: {.small}
+DREGON's motors put lines at orders 14, 42, 70 (brightest) — far above HPPNet's nine. A rate difference $\delta$ is $k\delta$ Hz at order $k$: close rotors separate there. Extending to $k \le 84$: CQT model 2.45 → 2.31 (no recurrence).
+:::
+
+::: {.notes}
+Rate-synchronous spectrum: frame 24, rotor 0, 16384-point STFT resampled to order axis per frame and averaged, local floor removed. The wide bumps at k ≈ 10–20 are the aerodynamic lines with their pedestal (haystacking). The k ≈ 70 line is the one that becomes a rotor-identity cue (next slide).
+:::
+
+## Why the pyramid: resolution where the harmonics are
+
+::: {.columns}
+::: {.column width="46%"}
+![](assets/resolution_curves.png){width="100%"}
+:::
+::: {.column width="54%"}
+![](assets/bars_taps.png){width="100%"}
+:::
+:::
+
+::: {.small}
+Rate resolution at order $k$ is $\Delta f/k$: the CQT throws the $1/k$ lever away, a single STFT smears under slew; the pyramid keeps both. Zeroing taps in the trained models shows the pyramid *does* read $k = 31$–60 (worth 1.1 rev/s). Its top level hurts on DREGON only: the $k \approx 70$ line belongs to a different rotor in room 2 (training) than in room 1 (validation), and room 2's command labels are 1–3 % off — a data problem, not a front-end one. HRSPNet therefore reads taps below 4.8 kHz.
+:::
+
+::: {.notes}
+Tap ablation: handoff §3, no retraining. Without level-3 taps the pyramid conv model is 2.22 vs CQT 2.31. The slew/resolution balance: T*_k = 1/sqrt(k ṙ), optimum Δf ∝ f^{1/2}; a VQT would realise it exactly (docs/vqt-frontend-idea.md) — only if asked.
+:::
+
+## Why generative pretraining: no model transfers between drones
+
+::: {.columns}
+::: {.column width="40%"}
+![](assets/bars_transfer.png){width="100%"}
+:::
+::: {.column width="60%"}
+![](assets/genmodel_overview.png){width="100%"}
+:::
+:::
+
+::: {.small}
+Two drones with telemetry exist (DREGON, public; MD2, ours). Trained on one, a model fails on the other; one flight of the second drone closes the gap — coverage, not capacity. Hence a probabilistic generative model: a state-space law for the four speed trajectories (fitted to 7 rigs' telemetry) and a harmonic-plus-broadband law for the audio given them (fitted to recordings); every rendered clip is labeled exactly.
+:::
+
+## The model is faithful, and pretraining on it works
+
+::: {.columns}
+::: {.column width="34%"}
+![](assets/gen_traj_real_vs_sampled.png){width="92%"}
+
+![](assets/gen_noise_real_vs_sampled.png){width="92%"}
+:::
+::: {.column width="66%"}
+![](assets/bars_pretrain.png){width="100%"}
+:::
+:::
+
+::: {.small}
+On the previous models: synthetic-only pretraining reads real audio without fine-tuning (6.5–8 rev/s); pretrain → fine-tune beats real-only training (2.23 vs 2.99; 2.11 vs 2.27); mixing is weaker; static and stochastic combs do not transfer (9.5–10.7 alone, no gain as warm start). **HRSPNet pretraining arms: in progress.**
+:::
+
+::: {.notes}
+Parity gate: real-trained HPPNet reads the renders at 1.82 (DREGON) / 1.62 (MD2) rev/s against bars 2.19 / 3.03. Simpler generators: static comb 9.50 alone, 2.74 as warm start (= real-only 2.77 under that recipe); stochastic comb 10.74; HPPNet on static comb 66. Sources: noise-v2-transfer.md, paper tab:nv2 / tab:ablation.
+:::
+
+## Next
+
+::: {.small}
+1. **Unified protocol rerun** of every row in the paper (2 s chunks, same panel): output adaptation × 4 models, the HPPNet → HRSPNet grid (front end × harmonic range × head), regressors R3/R4.
+2. **HRSPNet with the full harmonic set** ($k \le 84$, taps below 4.8 kHz) + rate ConvLSTM — the headline cell.
+3. **Pretraining arms for HRSPNet**: easy / hard / mixed / fine-tuned, plus the two held-out views (synthetic rigs, unseen drone after fine-tuning).
+4. **Cross-drone table**: DREGON-only and MD2-only training for HRSPNet and the regressor.
+5. Paper draft is restructured around the method; results above sit behind `\wip{}` until the arms land.
+:::
