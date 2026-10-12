@@ -760,8 +760,12 @@ def room_lines(k: int = 70, band: tuple[float, float] = (4.6, 7.0), win_s: float
         rw = r[:, f0:f1]
         rank = np.argsort(np.argsort(-rw.mean(-1)))  # 0 = fastest rotor
         tr = np.arange(rw.shape[1]) / FR
+        kern = np.ones(5) / 5  # 160 ms smoothing of the telemetry staircase
         for i in range(4):
-            ax.plot(tr, k * rw[i] / 1000, color=ROTOR_COLORS[rank[i]], lw=1.0, ls="--", alpha=0.9)
+            y = np.convolve(np.pad(k * rw[i] / 1000, 2, mode="edge"), kern, mode="valid")
+            ax.plot(tr, y, color="white", lw=2.6, alpha=0.5)
+            ax.plot(tr, y, color=ROTOR_COLORS[rank[i]], lw=1.4, ls="--")
+        ax.set_ylim(*band)
         ax.set_title(title, fontsize=10)
         ax.set_ylabel("kHz")
     axes[-1].set_xlabel("time (s); 2048-point STFT, 4.6–7 kHz")
