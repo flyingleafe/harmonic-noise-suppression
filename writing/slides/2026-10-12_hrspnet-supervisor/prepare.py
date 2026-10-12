@@ -432,7 +432,7 @@ def all_bars() -> None:
 
 # ── 8. TikZ assets compiled standalone ────────────────────────────────────────
 STANDALONE = r"""\documentclass[border=3pt]{standalone}
-\usepackage{tikz,graphicx,amsmath}
+\usepackage{tikz,graphicx,amsmath,amssymb}
 \usetikzlibrary{positioning,arrows.meta,calc,fit,backgrounds}
 \newcommand{\revps}{\ensuremath{\,\mathrm{rev/s}}}
 \graphicspath{{%s/}}
@@ -524,6 +524,186 @@ LSTM_CARTOON = r"""
 """
 
 
+# ── 9. CQT vs pyramid on an MD2 and a DREGON clip ─────────────────────────────
+def cqt_vs_pyramid() -> None:
+    import librosa
+
+    rows = [(264, "MD2 (FLY124), no wind at the ring"), (24, "DREGON room 1, in the downwash")]
+    fig, axes = plt.subplots(
+        2, 5, figsize=(14, 5.2), gridspec_kw={"width_ratios": [1.3, 1, 1, 1, 1]}
+    )
+    for row, (i, title) in enumerate(rows):
+        au, _ = frame_arrays(i)
+        c = librosa.cqt(au, sr=FS, hop_length=HOP, fmin=27.5, n_bins=352, bins_per_octave=48)
+        cdb = 20 * np.log10(np.abs(c) + 1e-6)
+        ax = axes[row, 0]
+        ax.imshow(
+            cdb,
+            origin="lower",
+            aspect="auto",
+            cmap="magma",
+            vmin=np.percentile(cdb, 5),
+            vmax=np.percentile(cdb, 99.5),
+        )
+        yt = [0, 48, 96, 144, 192, 240, 288, 336]
+        ax.set_yticks(yt)
+        ax.set_yticklabels([f"{27.5 * 2 ** (b / 48):.0f}" for b in yt], fontsize=8)
+        ax.set_xticks([])
+        ax.set_ylabel("Hz (log)", fontsize=9)
+        ax.set_title(f"CQT, 48 bins/oct\n{title}", fontsize=10)
+        for lvl, (n_fft, f_hi) in enumerate(
+            [(16384, 1200), (8192, 2400), (4096, 4800), (2048, 8000)]
+        ):
+            s = stft_db(au, n_fft)
+            f = np.arange(s.shape[0]) * FS / n_fft
+            keep = f <= f_hi
+            ax = axes[row, lvl + 1]
+            ax.imshow(
+                s[keep],
+                origin="lower",
+                aspect="auto",
+                cmap="magma",
+                vmin=np.percentile(s[keep], 5),
+                vmax=np.percentile(s[keep], 99.5),
+                extent=(0, 8, 0, f_hi / 1000),
+            )
+            ax.set_xticks([])
+            ax.tick_params(labelsize=8)
+            if row == 0:
+                ax.set_title(
+                    f"pyramid level {lvl}: 0–{f_hi / 1000:g} kHz, Δf = {FS / n_fft:.3g} Hz",
+                    fontsize=9,
+                )
+            if lvl == 0:
+                ax.set_ylabel("kHz (linear)", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(ASSETS / "cqt_vs_pyramid.png", dpi=150)
+    plt.close(fig)
+
+
+ARCH_HORIZONTAL = r"""
+\begin{tikzpicture}[font=\small,
+  img/.style={inner sep=0, outer sep=0, anchor=south west, draw=black!50, line width=0.2pt},
+  blk/.style={draw, rounded corners=1.5pt, align=center, inner sep=2.5pt, fill=white, font=\small, minimum height=7mm},
+  new/.style={blk, fill=blue!8, draw=blue!50!black},
+  shp/.style={font=\footnotesize, text=gray!30!black, align=center},
+  big/.style={-{Triangle[length=2mm,width=2.4mm]}, line width=1.4pt, magenta!55!black},
+  arr/.style={-{Latex[length=1.2mm]}, thin},
+  tap/.style={-{Latex[length=0.9mm]}, very thin, blue!70!black}]
+\def\dx{0.18}\def\dy{0.15}
+% ---- input: pyramid deck ----
+\foreach \l in {3,2,1,0} {
+  \pgfmathsetmacro{\ox}{\l*\dx}\pgfmathsetmacro{\oy}{1.0+\l*\dy}
+  \node[img] (L\l) at (\ox,\oy) {\includegraphics[width=1.9cm,height=1.2cm]{level\l.png}};
+}
+\node[shp, anchor=north] at (1.2,0.85) {STFT pyramid\\ 4 levels, hop 512\\ $T \times F_\ell$};
+% ---- pre-convolutions per level ----
+\node[blk, text width=2.6cm, minimum height=2.6cm] (pre) at (4.6,1.9) {conv $7{\times}7$, 16 ch\\ (shared across levels)\\[2pt] top-down fusion\\ $\times 2\uparrow$, $1{\times}1$, add\\[2pt] conv $7{\times}7$ $\times 2$};
+\node[shp, anchor=north] at (4.6,0.45) {per level\\ $T \times F_\ell \times 16$};
+\draw[big] (3.0,1.9) -- (pre.west);
+% ---- HPDC: frequency strips -> rate strip ----
+\begin{scope}[shift={(6.6,0.55)}]
+\foreach \l/\x/\h in {0/0/2.8, 1/0.4/2.8, 2/0.8/2.8, 3/1.2/2.8} {
+  \draw[fill=gray!10] (\x,0) rectangle (\x+0.3,\h);
+  \foreach \k in {1,...,24} {
+    \pgfmathsetmacro{\yy}{\k*200/(1200*2^\l)*\h}
+    \ifdim \yy pt < 2.75pt \draw[gray!60, very thin] (\x+0.02,\yy) -- (\x+0.28,\yy); \fi
+  }
+}
+\node[shp, anchor=north] at (0.75,-0.05) {fused levels,\\ frequency axis};
+\draw[fill=blue!8, draw=blue!50!black] (2.6,0) rectangle (2.9,2.8);
+\node[shp, anchor=north] at (2.9,-0.05) {rate axis,\\ 307 bins\\ of 0.977 rev/s};
+\coordinate (g) at (2.6,0.45);
+\fill[blue!70!black] (g) circle (1.2pt);
+\foreach \k/\l in {1/0, 2/0, 3/0, 5/0, 8/1, 16/2, 20/2} {
+  \pgfmathsetmacro{\x}{\l*0.4+0.3}
+  \pgfmathsetmacro{\yy}{\k*200/(1200*2^\l)*2.8}
+  \draw[tap] (g) -- (\x,\yy);
+}
+\node[new, anchor=south, text width=3.2cm] at (1.45,2.95) {\textbf{HPDC}: taps at $kg$, $k \le 84$\\ frequency grid $\to$ rate grid};
+\end{scope}
+\node[shp, anchor=west] at (11.85,-0.6) {$T \times 307 \times C$};
+% ---- rate-axis + temporal convolutions ----
+\node[blk, text width=2.4cm] (rb) at (11.6,1.9) {3-tap HPDC at\\ $g\cdot\{\tfrac12,1,2\}$,\\ $g\cdot\{2^{-\frac14},1,2^{\frac14}\}$\\[1pt] temporal conv\\ $5{\times}1$ $\times 3$};
+\draw[big] (9.7,1.9) -- (rb.west);
+% ---- ConvLSTM ----
+\node[new, text width=2.8cm] (lstm) at (1.5,-3.0) {\textbf{rate ConvLSTM}\\ bidirectional, gate conv\\ 33 taps along rate};
+\draw[big] (rb.south) -- (rb.south |- 0,-1.35) -- (lstm.north |- 0,-1.35) -- (lstm.north);
+% ---- salience deck ----
+\foreach \i in {3,2,1,0} {
+  \pgfmathsetmacro{\ox}{3.6+\i*\dx}\pgfmathsetmacro{\oy}{-3.75+\i*\dy}
+  \node[img] (S\i) at (\ox,\oy) {\includegraphics[width=2.2cm,height=1.1cm]{layer\i.png}};
+}
+\draw[big] (lstm.east) -- (3.5,-3.0);
+\node[shp, anchor=north] at (5.0,-3.9) {$1{\times}1$ $\to$ 4 per-rotor salience layers\\ $T \times 307 \times 4$};
+% ---- CRF -> tracks ----
+\node[blk] (crf) at (7.6,-3.0) {CRF\\ readout};
+\draw[big] (6.5,-3.0) -- (crf.west);
+\node[img, draw=none, anchor=west] (tr) at (8.5,-3.0) {\includegraphics[width=3.4cm]{tracks.png}};
+\draw[big] (crf.east) -- (tr.west);
+\node[shp, anchor=north] at (10.2,-3.9) {$\hat{\mathbf r}[\tau]$, $T \times 4$, against telemetry};
+\end{tikzpicture}
+"""
+
+HPPNET_VS_L2 = r"""
+\begin{tikzpicture}[font=\footnotesize, node distance=3mm,
+  blk/.style={draw, rounded corners=1.5pt, align=center, inner sep=2.5pt, fill=white, minimum height=7mm},
+  old/.style={blk, fill=gray!10, draw=gray!50!black},
+  chg/.style={blk, fill=blue!8, draw=blue!50!black},
+  gone/.style={blk, fill=red!6, draw=red!50!black, dashed},
+  arr/.style={-{Latex[length=1.2mm]}, thin}]
+% row 1: HPPNet as published
+\node[anchor=west, font=\small\bfseries] at (-0.2,1.2) {HPPNet (Wei et al. 2022), piano transcription};
+\node[old] (a1) at (0.9,0) {CQT\\ 352 log bins};
+\node[old, right=of a1] (a2) {conv $7{\times}7$\\ $\times 3$};
+\node[old, right=of a2] (a3) {harmonic dilated conv\\ $k \le 9$, dilation $48\log_2 k$};
+\node[old, right=of a3] (a4) {pool $\to$ 88 keys\\ dilated conv $\times 4$};
+\node[old, right=of a4] (a5) {FreqGroupLSTM\\ one LSTM per key};
+\node[old, right=of a5] (a6) {shared salience map\\ + onset / offset / velocity};
+\node[old, right=of a6] (a7) {threshold,\\ note events};
+\foreach \i/\j in {a1/a2, a2/a3, a3/a4, a4/a5, a5/a6, a6/a7} { \draw[arr] (\i) -- (\j); }
+% row 2: HPPNet-L2
+\node[anchor=west, font=\small\bfseries] at (-0.2,-1.7) {HPPNet-L2 (last week): the output made for rotors};
+\node[old] (b1) at (0.9,-2.9) {CQT\\ 352 log bins};
+\node[old, right=of b1] (b2) {conv $7{\times}7$\\ $\times 3$};
+\node[old, right=of b2] (b3) {harmonic dilated conv\\ $k \le 9$, dilation $48\log_2 k$};
+\node[old, right=of b3] (b4) {dilated conv $\times 4$\\ (no pool)};
+\node[old, right=of b4] (b5) {FreqGroupLSTM\\ one LSTM per bin};
+\node[chg, right=of b5] (b6) {log $\to$ linear grid\\ 0--150 rev/s, 300 bins};
+\node[chg, right=of b6] (b7) {4 per-rotor layers\\ PIT cross-entropy};
+\node[chg, right=of b7] (b8) {CRF readout\\ one path per layer};
+\foreach \i/\j in {b1/b2, b2/b3, b3/b4, b4/b5, b5/b6, b6/b7, b7/b8} { \draw[arr] (\i) -- (\j); }
+\node[gone, below=4mm of b5, text width=4.2cm] (gone) {dropped: onset / offset / velocity heads, note decoding (a rotor is always on)};
+\node[anchor=north west, align=left, text width=10cm] at (b1.south west |- gone.south) {\vspace{1mm}\\ why: one shared map on a log axis cannot hold four close, crossing tracks (8.2 rev/s floor with no model); four layers on a linear grid are lossless. HPPNet 7.77 $\to$ 2.27 rev/s, HarmoF0 10.8 $\to$ 2.45, LateDeep 12.6 $\to$ 3.83.};
+\end{tikzpicture}
+"""
+
+LSTM_BLOCKS = r"""
+\begin{tikzpicture}[font=\footnotesize,
+  blk/.style={draw, rounded corners=1.5pt, align=center, inner sep=3pt, fill=white, minimum height=7mm},
+  old/.style={blk, fill=gray!10, draw=gray!50!black},
+  chg/.style={blk, fill=blue!8, draw=blue!50!black},
+  arr/.style={-{Latex[length=1.2mm]}, thin}]
+% FreqGroupLSTM
+\node[anchor=west, font=\small\bfseries] at (0,2.4) {FreqGroupLSTM (HPPNet)};
+\node[old, text width=3.0cm] (f1) at (1.6,1.3) {feature map\\ $x[t, b, :]$, $T \times B \times C$};
+\node[old, text width=4.6cm, right=4mm of f1] (f2) {for every bin $b$ separately:\\ $h_b[t] = \mathrm{LSTM}\bigl(x[t,b,:],\, h_b[t{-}1]\bigr)$\\ same weights for all $b$};
+\node[old, text width=2.2cm, right=4mm of f2] (f3) {$h[t, b, :]$\\ $T \times B \times H$};
+\draw[arr] (f1) -- (f2); \draw[arr] (f2) -- (f3);
+\node[anchor=north west, text width=9.6cm, align=left] at (0,0.45) {no term couples $h_b$ and $h_{b\pm1}$: the state of a bin cannot move; a rotor which leaves the bin starts from nothing in the next one. Fine for a held piano key, not for a continuously moving pitch.};
+% rate ConvLSTM
+\begin{scope}[yshift=-3.2cm]
+\node[anchor=west, font=\small\bfseries] at (0,2.4) {rate ConvLSTM (HRSPNet)};
+\node[chg, text width=3.0cm] (c1) at (1.6,1.3) {feature map\\ $x[t, g, :]$, $T \times G \times C$};
+\node[chg, text width=5.6cm, right=4mm of c1] (c2) {gates $i,f,o,\tilde c$ at every rate bin $g$:\\ $W_x\, x[t]$ ($1{\times}1$) $\;+\; W_h \circledast_g h[t{-}1]$ (33 taps along $g$)\\ forward and backward in time};
+\node[chg, text width=2.2cm, right=4mm of c2] (c3) {$h[t, g, :]$\\ $T \times G \times 2H$};
+\draw[arr] (c1) -- (c2); \draw[arr] (c2) -- (c3);
+\node[anchor=north west, text width=9.6cm, align=left] at (0,0.45) {the hidden-to-gate map is a convolution along rate, so the state at $g$ reads the state at $g \pm 16$ bins of the previous frame: it follows a rotor moving up to 15 rev/s per frame (the largest sustained slew in the telemetry). 1.15 M parameters.};
+\end{scope}
+\end{tikzpicture}
+"""
+
+
 def main() -> None:
     ASSETS.mkdir(exist_ok=True)
     spectrogram_comb()
@@ -538,6 +718,10 @@ def main() -> None:
     compile_tikz("genmodel_overview", tikz_from_paper("fig:overview"), PAPER / "figures")
     compile_tikz("hpdc_fans", HPDC_FANS, PAPER / "figures")
     compile_tikz("lstm_cartoon", LSTM_CARTOON, PAPER / "figures")
+    cqt_vs_pyramid()
+    compile_tikz("arch_horizontal", ARCH_HORIZONTAL, PAPER / "figures/overview")
+    compile_tikz("hppnet_vs_l2", HPPNET_VS_L2, PAPER / "figures")
+    compile_tikz("lstm_blocks", LSTM_BLOCKS, PAPER / "figures")
     for name in ("gen_traj_real_vs_sampled", "gen_noise_real_vs_sampled"):
         shutil.copy(PAPER / "src/figures" / f"{name}.png", ASSETS / f"{name}.png")
     shutil.copy(PAPER / "figures/freq_probe_panels.png", ASSETS / "freq_probe_panels.png")
