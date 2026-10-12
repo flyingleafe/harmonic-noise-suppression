@@ -352,29 +352,31 @@ def all_bars() -> None:
         figsize=(9, 3.4),
     )
     # source: docs/handoff-pyramid-harmonic.md sec. 3 (tap ablation, no retraining)
-    fig, axes = plt.subplots(1, 2, figsize=(10, 3.4), sharey=True)
+    fig, axes = plt.subplots(3, 1, figsize=(5.6, 6.0), sharex=True)
     lad = ["none", "k ≥ 61", "k ≥ 31", "k ≥ 16"]
     pyr = {
         "all": [2.68, 2.22, 3.31, 4.65],
         "DREGON": [3.33, 2.59, 3.59, 5.65],
-        "FLY124": [1.73, 1.69, 2.90, 3.20],
+        "MD2": [1.73, 1.69, 2.90, 3.20],
     }
     cqt = {
         "all": [2.31, 2.31, 4.53, 11.1],
         "DREGON": [2.70, 2.58, 5.79, 17.3],
-        "FLY124": [1.74, 1.92, 2.68, 2.03],
+        "MD2": [1.74, 1.92, 2.68, 2.03],
     }
-    for ax, name, d in ((axes[0], "pyramid, k ≤ 84", pyr), (axes[1], "CQT, k ≤ 84", cqt)):
-        x = np.arange(4)
-        for j, (ds, c) in enumerate((("all", "#333"), ("DREGON", b), ("FLY124", o))):
-            ax.bar(x + (j - 1) * 0.26, d[ds], width=0.26, color=c, label=ds)
-        ax.set_xticks(x)
-        ax.set_xticklabels(["taps zeroed: " + lad[0]] + lad[1:], fontsize=9)
-        ax.set_title(name, fontsize=11)
-        ax.set_ylim(0, 8)
-    axes[0].set_ylabel("matched MAE (rev/s)")
-    axes[0].legend(fontsize=8, frameon=False)
-    axes[1].text(3.0, 7.3, "11.1 / 17.3\n(clipped)", fontsize=8, color="0.35", ha="center")
+    x = np.arange(4)
+    for ax, ds in zip(axes, ("all", "DREGON", "MD2")):
+        ax.bar(x - 0.18, pyr[ds], width=0.34, color=b, label="pyramid, k ≤ 84")
+        ax.bar(x + 0.18, cqt[ds], width=0.34, color=g, label="CQT, k ≤ 84")
+        for xi, (vp, vc) in enumerate(zip(pyr[ds], cqt[ds])):
+            ax.text(xi - 0.18, min(vp, 7.4) + 0.12, f"{vp:.2f}", ha="center", fontsize=8)
+            ax.text(xi + 0.18, min(vc, 7.4) + 0.12, f"{vc:.2f}", ha="center", fontsize=8)
+        ax.set_ylim(0, 8.3)
+        ax.set_ylabel("MAE (rev/s)", fontsize=9)
+        ax.text(0.01, 0.92, ds, transform=ax.transAxes, fontsize=10, va="top")
+    axes[0].legend(fontsize=8, frameon=False, loc="upper center", ncol=2)
+    axes[-1].set_xticks(x)
+    axes[-1].set_xticklabels(["taps zeroed: " + lad[0]] + lad[1:], fontsize=9)
     fig.tight_layout()
     fig.savefig(ASSETS / "bars_taps.png", dpi=170)
     plt.close(fig)
@@ -715,10 +717,69 @@ LSTM_BLOCKS = r"""
 """
 
 
+# ── 10. why level 3 hurts: the k ≈ 70 line belongs to a different rotor per room ──
+def room_lines(k: int = 70, band: tuple[float, float] = (4.6, 7.0), win_s: float = 8.0) -> None:
+    """Level-3 spectrogram of a cruise window in each DREGON room with the k-th
+    harmonic of every rotor overlaid, rotors coloured by rank of mean speed.
+    Room 1 uses the measured speeds (validation labels), room 2 the commanded
+    ones (training labels)."""
+    from data_processing.sources import dregon as D
+
+    dd = ROOT / "data/DREGON"
+    geo = D.get_geometry(dd)
+    samples = {s["recording_id"]: s for s in D.discover_recordings(dd)}
+    rooms = [
+        ("free-flight_nosource_room1", "motors_measured", "room 1 (validation), measured speeds"),
+        ("free-flight_nosource_room2", "motors_command", "room 2 (training), commanded speeds"),
+    ]
+    fig, axes = plt.subplots(2, 1, figsize=(7.2, 5.4), sharex=True)
+    for ax, (rid, key, title) in zip(axes, rooms):
+        tf = D.load_timeframe(samples[rid], geometry=geo, target_sr=FS)
+        tel = tf[key].resample((16000, 512))
+        r = np.asarray(tel.data, dtype=np.float64)  # (4, N) on the frame grid
+        idx = np.flatnonzero(r.mean(0) > 70)
+        run = max(np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1), key=len)
+        n = int(win_s * FR)
+        mid = run[len(run) // 2]
+        f0, f1 = max(run[0], mid - n // 2), min(run[-1], mid + n // 2)
+        t0 = float(tel.t_start) + f0 / FR
+        au = np.asarray(tf["audio"].time[t0 : t0 + (f1 - f0) / FR].data)[0]
+        s = stft_db(au.astype(np.float32), 2048)
+        f = np.arange(s.shape[0]) * FS / 2048 / 1000
+        keep = (f >= band[0]) & (f <= band[1])
+        t = np.arange(s.shape[1]) / FR
+        ax.imshow(
+            s[keep],
+            origin="lower",
+            aspect="auto",
+            cmap="magma",
+            extent=(t[0], t[-1], band[0], band[1]),
+            vmin=np.percentile(s[keep], 10),
+            vmax=np.percentile(s[keep], 99.7),
+        )
+        rw = r[:, f0:f1]
+        rank = np.argsort(np.argsort(-rw.mean(-1)))  # 0 = fastest rotor
+        tr = np.arange(rw.shape[1]) / FR
+        for i in range(4):
+            ax.plot(tr, k * rw[i] / 1000, color=ROTOR_COLORS[rank[i]], lw=1.0, ls="--", alpha=0.9)
+        ax.set_title(title, fontsize=10)
+        ax.set_ylabel("kHz")
+    axes[-1].set_xlabel("time (s); 2048-point STFT, 4.6–7 kHz")
+    fig.suptitle(
+        f"dashed: {k}·r_i(t) for the four rotors, coloured by speed rank (blue = fastest)",
+        fontsize=10,
+        y=0.995,
+    )
+    fig.tight_layout()
+    fig.savefig(ASSETS / "room_lines.png", dpi=170)
+    plt.close(fig)
+
+
 def main() -> None:
     ASSETS.mkdir(exist_ok=True)
     spectrogram_comb()
     tracks_vs_pianoroll()
+    room_lines()
     encode_decode()
     slew_hist()
     rate_sync_spectrum()

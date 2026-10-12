@@ -66,16 +66,20 @@ Both panels: frozen-split frames 264 (FLY124) and 24 (DREGON room 1), mic 0, 8 s
 ## Change 1: HPDC on the pyramid, and what it reads
 
 ::: {.columns}
-::: {.column width="52%"}
-![](assets/hpdc_fans.png){width="100%"}
-:::
-::: {.column width="48%"}
-![](assets/bars_taps.png){width="100%"}
-:::
-:::
+::: {.column width="42%"}
+![](assets/bars_taps.png){width="84%" fig-align="center"}
 
 ::: {.small}
-Taps at $kg$ with a dilation proportional to $g$ (HPPNet's dilated conv is the log-axis special case). Zeroing taps in the trained $k \le 84$ models: the pyramid *does* read $k = 31$–60 (1.1 rev/s). Its top level hurts on DREGON only — the $k \approx 70$ line belongs to a different rotor in room 2 (training) than in room 1 (validation), and room 2's command labels are 1–3 % off: a data problem, not a front-end one. HRSPNet reads taps below 4.8 kHz.
+Taps zeroed in the trained $k \le 84$ models, no retraining. Above $k = 30$ the pyramid loses less than the CQT: it reads the high orders better. The one place it loses is the top level ($k \ge 61$) on DREGON.
+:::
+:::
+::: {.column width="58%"}
+![](assets/room_lines.png){width="88%" fig-align="center"}
+
+::: {.small}
+Why: the bright $k \approx 70$ motor line belongs to the fastest rotor in room 1 and to the third fastest in room 2, so the per-rotor layers learn it as an identity cue and point at the wrong rotor in validation; room 2's commanded speeds also sit above the line (1–3 %, 10+ bins at 7.8 Hz). A data problem; HRSPNet reads taps below 4.8 kHz for now.
+:::
+:::
 :::
 
 ::: {.notes}
