@@ -22,10 +22,9 @@ mapping it (2026-10-14):
 1. **The LR depended on validation.** `MultiMetricController` halves the LR on
    8 stale rounds of the median-smoothed `overall_macro`
    (`src/training/validation.py:296-303`); the nominal `ReduceLROnPlateau`
-   is never stepped in that branch (`src/training/loop.py:893-895`). Stopping
-   was also validation-driven ("saturation", `final_patience 12`). Runs were
-   therefore not comparable in budget and the selection signal leaked into
-   the optimisation.
+   is never stepped in that branch (`src/training/loop.py:893-895`). The
+   selection signal therefore leaked into the optimisation, and the
+   realised LR trajectory differed per arm.
 2. **The control signal was half synthetic.** `overall_macro` = ½ real + ½
    the four `salv2_*` synthetic sets, so real-only arms were selected and
    LR-scheduled on synthetic audio.
@@ -149,16 +148,23 @@ Cadence: every 500 optimizer steps, 200 rounds (= the step budget).
 
 ### Budget and LR
 
-Budget in optimizer steps: **100 000** (today's "200 epochs" is exactly 200
-validation rounds × 500 steps at the step cap). AdamW, lr 1e-3, weight decay
-1e-4, batch 64 × grad-accum 2 (128 mono frames = 16 chunks × 8 mics), AMP,
-grad-clip 5 — unchanged. Schedule: linear warm-up 0 → 1e-3 over the first 5 %
-(5 000 steps), then cosine to 1e-5 at 100 %. **No early stopping, no plateau
-logic, no validation-driven LR**: the `MultiMetricController` keeps only its
-median smoothing for checkpoint selection; `lr_patience`, `lr_factor`,
-`min_lr_reductions`, `final_patience`, `min_rounds` and the plateau
-scheduler are removed. Scheduler state goes into `train_state.pt` so a
-resumed run continues the cosine.
+Budget in optimizer steps: **up to 100 000** (today's "200 epochs" is
+exactly 200 validation rounds × 500 steps at the step cap). AdamW, lr 1e-3,
+weight decay 1e-4, batch 64 × grad-accum 2 (128 mono frames = 16 chunks ×
+8 mics), AMP, grad-clip 5 — unchanged. Schedule: linear warm-up 0 → 1e-3
+over the first 5 % (5 000 steps), then cosine to 1e-5 at 100 000 steps,
+a pure function of the step count. **The LR no longer depends on
+validation**: the `MultiMetricController` loses its LR branch
+(`lr_patience`, `lr_factor`, `min_lr_reductions`) and the plateau
+scheduler goes; it keeps median smoothing for checkpoint selection and the
+**saturation early stop** (`min_rounds`, `final_patience` on the control
+score `real`), which stays. Scheduler state goes into `train_state.pt` so
+a resumed run continues the cosine.
+
+Consequence to keep in mind: an arm that stops early never reaches the
+cosine tail, so arms differ in realised budget; `final_patience` should be
+long enough (12 rounds = 6 000 steps today) that a stop means a genuinely
+flat median, and every table reports the stopping step next to the score.
 
 Precedent: PESTO trains 50 epochs under cosine annealing (Adam 1e-4);
 FCNF0++ omits early stopping and trains a fixed 250k steps (library full
@@ -297,7 +303,8 @@ paper-real-protocol.md`.
   views by meta predicates, not index ranges; 15 scores; `control: real`);
   the controller loses its LR branch; validation emits no `_log` scores.
 - `src/training/loop.py`: step-based warm-up + cosine; remove
-  `ReduceLROnPlateau`, `patience`/early stop; dual best checkpoints per score;
+  `ReduceLROnPlateau` and the epoch-level `patience` counter (the
+  controller's saturation stop stays); dual best checkpoints per score;
   drop `best.ckpt`/`optim.monitor`; scheduler state in `train_state.pt`.
 - `src/data_processing/`: `rate_warp` (native-rate pool, one resampling,
   label transform), severity ramps per augmentation (today only
