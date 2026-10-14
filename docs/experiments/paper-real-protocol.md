@@ -151,11 +151,14 @@ Cadence: every 500 optimizer steps, 200 rounds (= the step budget).
 Budget in optimizer steps: **up to 100 000** (today's "200 epochs" is
 exactly 200 validation rounds × 500 steps at the step cap). AdamW, max LR
 per family (below), weight decay 1e-4, **effective batch 128** mono frames
-(16 chunks × 8 mics); the micro-batch is a memory knob, not a protocol
-parameter — 128 where it fits, 64 × grad-accum 2 for the pyramid arms
-(the historical 64 × 2 came from `97b25a89`, "to fit any backend"), and
-always 128 for the two BatchNorm models (Basic Pitch, LateDeep) so no
-result depends on the split. AMP, grad-clip 5 — unchanged. Schedule:
+(16 chunks × 8 mics), micro-batch 128 for every arm unless a one-batch
+forward/backward memory probe on the 40 GB A100 (`uni-gpushort`) says
+otherwise — then 64 × grad-accum 2, a memory knob, not a protocol
+parameter. The pyramid arms are the only candidates (the historical
+64 × 2 came from `97b25a89`, "to fit any backend", with the 307-bin grid
+and the dense ConvLSTM; the 164-bin grid and the separable ConvLSTM halve
+the post-gather activations). The two BatchNorm models (Basic Pitch,
+LateDeep) always run at 128. AMP, grad-clip 5 — unchanged. Schedule:
 linear warm-up 0 → max over the first 5 % (5 000 steps), then cosine to
 1 % of max at 100 000 steps, a pure function of the step count. **The LR
 no longer depends on
