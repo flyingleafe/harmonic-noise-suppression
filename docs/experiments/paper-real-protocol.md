@@ -1,6 +1,6 @@
 # Paper real-data protocol (v2): streams, schedule, panel, checkpoints
 
-**Status:** design (2026-10-14 –) · no run started · supersedes the "unified
+**Status:** design complete (2026-10-14) · no run started · supersedes the "unified
 regime" of `pyramid-harmonic.md` / `paper-regime-matrix.md` for every real-data
 number the wrap-up paper will report. Synthetic pretraining is a separate,
 later protocol and is out of scope here.
@@ -366,24 +366,61 @@ log bin is comparable to the 0.977 linear bin, so L1 → L2 is expected to be
 small — the precision HRSPNet buys comes from its front end (linear-STFT
 levels 4.5–9× finer than the CQT at high k), not from the grid.
 
-**HPPNet chain to HRSPNet**, one addition per step, all on the 0–160 grid:
+**HPPNet chain to HRSPNet**, one addition per step, all on the 0–160 grid.
+Parameter counts from the registry builds (2026-10-14; trunk blocks
+`block_4…8` are identical everywhere, 49 k + 49 k + 3 × 82 k):
 
-| step | adds |
-|---|---|
-| HPPNet‑L2 | (above) |
-| +k84 | HPDC harmonic range k ≤ 84 on the CQT (published: 8 branches, k ≤ 8) |
-| +ConvLSTM | rate ConvLSTM in place of FreqGroupLSTM |
-| +pyramid = **HRSPNet** | multi-resolution STFT pyramid in place of the CQT; no translation head (the output grid is level 0's own) |
+| step | adds | params |
+|---|---|---|
+| HPPNet‑L2 | per-rotor maps + translation head on the published CQT trunk, k ≤ 8, FreqGroupLSTM (100 k) | ≈ 0.52 M |
+| +k84 | HDC harmonic range k ≤ 84 on the CQT (one `Conv2d(16→128, 1×3)` per harmonic: 6.1 k each, 520 k for 84) | ≈ 0.99 M |
+| +ConvLSTM | **separable** rate ConvLSTM (hidden 64, kernel 33, bidirectional; per-channel 33-tap displacement kernel + 1 × 1 mix ≈ 37 k) in place of FreqGroupLSTM | ≈ 0.93 M |
+| +pyramid = **HRSPNet** | multi-resolution STFT pyramid (16384/8192/4096/2048) in place of the CQT; HPDC k ≤ 84 + sub-harmonics 1/2…1/8 as ONE gather with a 1-tap mix per harmonic (`(91, 128, 16)` = 186 k; HDC's 3-tap kernel is 3× that), taps read below 4.8 kHz; no translation head (the output grid is level 0's own) | ≈ 0.59 M |
+
+Decisions (2026-10-14): (a) **HRSPNet is k ≤ 84 with the 4.8 kHz tap
+ceiling**, as the paper defines it — the 2.17 rev/s run
+(`real_r4_hppnet_pyrlstm_unified`) used `k_max 32` / `f_max 7500` and the
+dense ConvLSTM, so the protocol's HRSPNet is a new configuration, not that
+checkpoint. (b) The chain uses the **separable** ConvLSTM: the dense form
+(`Conv1d(64 → 256, k = 33)` per direction = 1.08 M, 72 % of the old model
+and 11× the FreqGroupLSTM it replaces) made "+ConvLSTM" also a ×3
+parameter step; the separable form keeps the mechanism (state moves along
+the rate axis) at the baseline's size. One dense-ConvLSTM HRSPNet run on
+`all` is the control; if it wins clearly, the paper reports both and says
+why. (c) Every model table in the paper carries the parameter count.
 
 **Regressors**: the published SimpleConv (Quiet Drones 2026) and its best
-modification (name fixed when the matrix is written), unchanged, on the
-same frame grid.
+modification (the `all` results name it; Conv+BiGRU and SCv2 are the
+candidates from `paper-regime-matrix.md`), unchanged, on the same frame
+grid.
 
-## Experiment matrix — TBD
+## Experiment grid (31 runs, one seed, up to 100k steps each)
 
-Models and per-model arms are decided after the augmentation section is
-revised. Each experiment config gets its sibling `.md` with `batch:
-paper-real-protocol.md`.
+`rp_<model>_<stream>[_<ablation>]`; streams `all`, `alllab` (= `all-labelaug`),
+`dregon`, `md2`, `dregonlab`/`md2lab`. Not runs: the blind two-stage tracker
+and the encode–decode floor (training-free).
+
+| claim | arms | runs |
+|---|---|---|
+| 1. unadapted salience models fail | L0 of HPPNet, HarmoF0, Basic Pitch, LateDeep on `all` | 4 |
+| 2. HPPNet best up to L2; L0→L1 vs L1→L2 attribution | L1 and L2 of all four on `all` | 8 |
+| 3. HRSPNet > HPPNet‑L2, with each step attributed | `+k84`, `+k84+ConvLSTM`, HRSPNet on `all`; dense-ConvLSTM HRSPNet control | 4 |
+| regressor row | SimpleConv, best modification on `all` | 2 |
+| label-altering augmentation | `alllab` for HRSPNet, HPPNet‑L2, best regressor | 3 |
+| 4. schedule (on HRSPNet only) | `alllab`: everything at full strength from step 0; `{gain, speech}` only | 2 |
+| 5. no cross-drone transfer | HRSPNet, HPPNet‑L2, best regressor on `dregon` and on `md2` | 6 |
+| 6. labelaug does not buy transfer | `<direction>lab` for HRSPNet and HPPNet‑L2; the direction with the nominally better transfer in claim 5 | 2 |
+
+Dependencies: claims 1–4 and the HRSPNet transfer pair start at once; the
+HPPNet‑L2 / regressor transfer runs need only the regressor's name; claim 6
+waits for claim 5. Not in the grid (possible later ablations): the other
+two baselines at L2 on `alllab`, `dregonlab` + `md2lab` for the regressor,
+a second seed anywhere — case by case, if a one-seed gap is inconclusive.
+The schedule verdict rests on one model and one seed; the paper says "on
+HRSPNet", not "overall", unless the gaps are large.
+
+Each `conf/experiment/rp_*.yaml` gets its sibling `.md` with
+`batch: paper-real-protocol.md`.
 
 ## Implementation notes (for the cutover)
 
