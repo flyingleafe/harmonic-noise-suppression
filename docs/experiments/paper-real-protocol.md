@@ -323,6 +323,35 @@ which is why it is kept minimal; today's `FreqSuperResHead` (2 × Conv(5×1)
 → 32 ch → BN → ReLU, first layer mixing the maps, ~6k parameters) is
 replaced.
 
+Translation head, definition:
+1. **Logit domain.** Input and output are logits (BCE-with-logits, as every
+   per-rotor model); the map is non-negative after the sigmoid. No ReLU:
+   a ReLU on logits would floor p at 0.5 everywhere.
+2. **Resampling matrix W** (fixed): per output bin, the mean of the log
+   bins inside ±0.49 rev/s where the log grid is finer (below ≈ 67 rev/s,
+   where a log bin = 1.45 % of the rate < 0.977), linear interpolation
+   where it is coarser. Rows sum to 1 (logit scale preserved); no log bin
+   is skipped (today's point-sampling `_freq_interp_matrix` skips bins
+   below 67 rev/s).
+3. **Below the trunk's grid.** Output bins in (0, 27.5) rev/s have no input
+   bin (CQT `fmin` 27.5): rows are 0, not a clamped copy of the 27.5 bin.
+   A rotor passing 1–27 rev/s is unrepresentable by L0/L1/L2 — a stated
+   limitation of the published grids.
+4. **Zero bin = off state.** L1 needs a per-map off logit for its CRF (a
+   linear read of the trunk's frequency-pooled last features, C → 1 per
+   map); L2 routes it into bin 0 (identity). "Off" then means the same on
+   every model and the CRF is one implementation.
+5. **Depthwise linear conv**, kernel 9 (±4 rev/s), identity-initialised
+   (centre tap 1, bias 0): L2 starts as L1 re-gridded; the only thing it can
+   learn is a 9-tap sharpening kernel per rotor.
+
+Attainable precision is a fraction of the TRUNK's bin (1.45 % of the rate:
+1.16 rev/s at 80, 2.3 at 160), via mass split across adjacent bins and the
+CRF's sub-bin readout; the head neither adds nor removes any. At cruise a
+log bin is comparable to the 0.977 linear bin, so L1 → L2 is expected to be
+small — the precision HRSPNet buys comes from its front end (linear-STFT
+levels 4.5–9× finer than the CQT at high k), not from the grid.
+
 **HPPNet chain to HRSPNet**, one addition per step, all on the 0–160 grid:
 
 | step | adds |
