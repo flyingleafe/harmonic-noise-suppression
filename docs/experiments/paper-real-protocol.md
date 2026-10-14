@@ -161,10 +161,29 @@ scheduler goes; it keeps median smoothing for checkpoint selection and the
 score `real`), which stays. Scheduler state goes into `train_state.pt` so
 a resumed run continues the cosine.
 
-Consequence to keep in mind: an arm that stops early never reaches the
-cosine tail, so arms differ in realised budget; `final_patience` should be
-long enough (12 rounds = 6 000 steps today) that a stop means a genuinely
-flat median, and every table reports the stopping step next to the score.
+Stop parameters (Dmitrii, 2026-10-14): **`min_rounds` 40** (20 000 steps)
+and **`final_patience` 30** (15 000 steps) — larger than today's 30 / 12
+because the LR-patience rounds no longer accumulate before a stop. The
+earliest possible stop is therefore 20k + 15k = 35k steps, exactly where
+the last augmentation ramp ends, so the saturation test never runs on a
+moving training distribution (schedule plot: `scripts/_sched_plot.py`).
+An arm that stops early never reaches the cosine tail, so arms differ in
+realised budget; every table reports the stopping step next to the score.
+
+**Max LR per model** — never tuned so far; decided by an **LR range test**
+(Smith 2017; fastai `lr_find`) per trunk family, not per arm: the real
+data/loss/optimizer on `all` with the step-0 augmentation set, no
+validation, LR growing geometrically 1e-5 → 1e-1 over 3 000 steps, logging
+(step, LR, EMA of the training loss). Max LR = the LR of the steepest
+sustained descent of the smoothed loss, capped at ⅓ of the LR where the
+loss first rises, then snapped to the half-decade grid
+{1e-4, 3e-4, 1e-3, 3e-3}; `min_lr` stays 1 % of it. Families: HPPNet L0,
+HPPNet L2 (inherited by L1), +k84, +ConvLSTM, HRSPNet, HarmoF0 L2, Basic
+Pitch L2, LateDeep L2, SimpleConv, best regressor — 10 tests × 3k steps,
+under a third of one run, each a `uni-gpushort` job. Labelaug and transfer
+arms inherit their family's LR. Driver: `scripts/lr_range_test.py` (to
+write); results committed under `results/rp_lr_range/` and the chosen
+values stated in each experiment's sibling `.md`.
 
 Precedent: PESTO trains 50 epochs under cosine annealing (Adam 1e-4);
 FCNF0++ omits early stopping and trains a fixed 250k steps (library full
