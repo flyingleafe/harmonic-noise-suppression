@@ -291,6 +291,51 @@ transform at full strength from step 0 (= multi-condition training), same
 budget. Whether recolor and reverb earn their place is a second ablation
 (`{gain, speech}` only) if we want to claim them.
 
+## Models, output grid and the adaptation ladder
+
+**Output grid (decided 2026-10-14): 0–160 rev/s, 164 bins at the pyramid's
+native 0.977 rev/s step**, for every per-rotor model including HRSPNet.
+Measured maxima of the real data (published frames, rotors > 5 rev/s):
+FLY125 100.8 (p99.9 97.1), FLY124 99.5, DREGON room 1 measured ≤ 92.3,
+room 2 commanded ≤ 90.0 rev/s; at `rate_warp` α = 1.5 the tail reaches
+151, so the old L2 grid (0–150) would clip it and HRSPNet's 0–300 (a
+by-product of `level0_fmax` 1200 Hz ÷ 4 harmonics, not a data choice) is
+twice what is needed. 164 states halve the CRF against today's 307. The
+Gaussian target width (rev/s), the CRF readout with its off state and the
+BCE loss are shared by every per-rotor model, so rows differ only in the
+trunk.
+
+**Ladder for the four multi-pitch baselines** (HPPNet, HarmoF0, Basic
+Pitch, LateDeep), replacing Block S of `paper-regime-matrix.md`
+(L1-as-resolution-only was never run; L3 is retired):
+
+| level | content | grid | readout |
+|---|---|---|---|
+| L0 | the published architecture, trained on our data: own log-frequency map (352 bins @ 48/oct from 27.5), own harmonic device, seam deviations as documented (`freq_pool: 1`, logits, hop-512 frames) | log | threshold + Hungarian |
+| L1 | **four per-rotor maps on the model's own log grid** — the last layer emits 4 maps instead of 1; nothing else changes | log | CRF (log-domain sub-bin interpolation, off state for a stopped rotor — the log grid has no zero bin) |
+| L2 | L1 + a **minimal translation head** to the linear 0–160 grid: the fixed interpolation matrix W (log → linear, 0 parameters) followed by ONE depthwise linear convolution along frequency per map (kernel 9, no normalisation, no activation, no cross-map mixing; 4 × 10 parameters) | linear 0–160 | CRF |
+
+L0 → L1 isolates the per-rotor encoding principle (the large effect: the
+encode–decode floor of a shared map is a crossing floor, 8.2 rev/s on
+DREGON); L1 → L2 isolates the target grid. The head cannot add resolution
+the trunk's grid lacks — that is what HRSPNet's linear front end is for —
+which is why it is kept minimal; today's `FreqSuperResHead` (2 × Conv(5×1)
+→ 32 ch → BN → ReLU, first layer mixing the maps, ~6k parameters) is
+replaced.
+
+**HPPNet chain to HRSPNet**, one addition per step, all on the 0–160 grid:
+
+| step | adds |
+|---|---|
+| HPPNet‑L2 | (above) |
+| +k84 | HPDC harmonic range k ≤ 84 on the CQT (published: 8 branches, k ≤ 8) |
+| +ConvLSTM | rate ConvLSTM in place of FreqGroupLSTM |
+| +pyramid = **HRSPNet** | multi-resolution STFT pyramid in place of the CQT; no translation head (the output grid is level 0's own) |
+
+**Regressors**: the published SimpleConv (Quiet Drones 2026) and its best
+modification (name fixed when the matrix is written), unchanged, on the
+same frame grid.
+
 ## Experiment matrix — TBD
 
 Models and per-model arms are decided after the augmentation section is
@@ -306,6 +351,11 @@ paper-real-protocol.md`.
   `ReduceLROnPlateau` and the epoch-level `patience` counter (the
   controller's saturation stop stays); dual best checkpoints per score;
   drop `best.ckpt`/`optim.monitor`; scheduler state in `train_state.pt`.
+- `src/models/salience_rps.py`: replace `FreqSuperResHead` by the minimal
+  translation head (W + depthwise linear conv); `n_maps: 4` on the native
+  log grid for L1 (`out_freqs` unset); CRF readout on a log grid with an
+  off state; every per-rotor config on the 0–160 / 164-bin grid (pyramid:
+  truncate `out_bins`).
 - `src/data_processing/`: `rate_warp` (native-rate pool, one resampling,
   label transform), severity ramps per augmentation (today only
   *probability* ramps exist, `online_mixing.py:131-152`), `test` split in
