@@ -323,6 +323,20 @@ which is why it is kept minimal; today's `FreqSuperResHead` (2 × Conv(5×1)
 → 32 ch → BN → ReLU, first layer mixing the maps, ~6k parameters) is
 replaced.
 
+What the old head actually does, measured (`scripts/_probe_l2_head.py`,
+2026-10-14; `hppnet_l2_r2_s0` `best.ckpt`, the frozen real split at mic 0,
+rotors-on frames): full model PIT-MAE 1.92 rev/s; with the head's conv
+stack removed (W interpolation only, same CRF) **27.5**; the trunk's own
+maps read by argmax **203** — they are saturated (sigmoid median 0.94,
+half-max width 253 of 352 bins), i.e. not a salience map but a code only
+this net decodes. The net's output peak is 8 rev/s wide at half max;
+flattening the other three maps moves a rotor's output by 3.5 rev/s
+(identity is partly decided in the head); and an ideal one-bin input at
+65/80/95 rev/s decodes to 0.0 rev/s — the net is tuned to the trunk's
+code, not to peaks. So the published L2 number belonged to trunk + decoder
+jointly and could not separate "per-rotor encoding" from "this 6k-parameter
+decoder"; the minimal head below forces the trunk to express the map.
+
 Translation head, definition:
 1. **Logit domain.** Input and output are logits (BCE-with-logits, as every
    per-rotor model); the map is non-negative after the sigmoid. No ReLU:
