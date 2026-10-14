@@ -149,11 +149,16 @@ Cadence: every 500 optimizer steps, 200 rounds (= the step budget).
 ### Budget and LR
 
 Budget in optimizer steps: **up to 100 000** (today's "200 epochs" is
-exactly 200 validation rounds × 500 steps at the step cap). AdamW, lr 1e-3,
-weight decay 1e-4, batch 64 × grad-accum 2 (128 mono frames = 16 chunks ×
-8 mics), AMP, grad-clip 5 — unchanged. Schedule: linear warm-up 0 → 1e-3
-over the first 5 % (5 000 steps), then cosine to 1e-5 at 100 000 steps,
-a pure function of the step count. **The LR no longer depends on
+exactly 200 validation rounds × 500 steps at the step cap). AdamW, max LR
+per family (below), weight decay 1e-4, **effective batch 128** mono frames
+(16 chunks × 8 mics); the micro-batch is a memory knob, not a protocol
+parameter — 128 where it fits, 64 × grad-accum 2 for the pyramid arms
+(the historical 64 × 2 came from `97b25a89`, "to fit any backend"), and
+always 128 for the two BatchNorm models (Basic Pitch, LateDeep) so no
+result depends on the split. AMP, grad-clip 5 — unchanged. Schedule:
+linear warm-up 0 → max over the first 5 % (5 000 steps), then cosine to
+1 % of max at 100 000 steps, a pure function of the step count. **The LR
+no longer depends on
 validation**: the `MultiMetricController` loses its LR branch
 (`lr_patience`, `lr_factor`, `min_lr_reductions`) and the plateau
 scheduler goes; it keeps median smoothing for checkpoint selection and the
