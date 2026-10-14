@@ -177,22 +177,41 @@ legacy single `best.ckpt` and `optim.monitor` go away. Which checkpoint the
 paper reports is decided after the runs; `last.ckpt` is also reported
 (selection-free).
 
-### Augmentations and their schedule — DRAFT, to be revised next
+### Augmentations and their schedule
 
-Inventory of the recipe (nothing else; `spec_mask` and `floor_inject` exist
-in code and stay out — `floor_inject` duplicates the drone's own floor and the
-speech mix). "Full strength" = the parameters listed.
+Selection rule (Dmitrii, 2026-10-14): a label-preserving augmentation is
+in the recipe only if it is in common use for pitch tracking AND for other
+audio tasks (separation, ASR); the label-altering one is compared against
+the existing pitch-tracking alternative. Dropped on that rule:
+`random_polarity` (only magnitude front ends are considered now; a no-op),
+`tooth_dropout` and `spec_mask` (masking is an ASR/SED convention — no
+pitch-tracking paper in the library uses it), `floor_inject` (duplicates
+the drone's own floor and the speech mix). "Full strength" = the
+parameters listed.
 
 | transform | where | parameters | labels | class | schedule |
 |---|---|---|---|---|---|
 | `random_gain` | post-mix, p 0.5 | U(−6, +6) dB | kept | info-preserving | full from step 0 |
-| `random_polarity` | post-mix, p 0.5 | sign flip | kept | info-preserving (no-op for magnitude front ends) | full from step 0 |
 | `spectral_recolor` | pre-mix | ±8 dB smooth EQ, 10 log-spaced anchors | kept | mild | full from step 0 |
-| `random_reverb` | pre-mix | RT60 U(0.1, 0.8) s, DRR U(3, 15) dB, per-channel diffuse tails | kept | mildly destroying (smears transients, not stationary lines) | DRR upper→lower bound ramp over 5–20 % |
-| `tooth_dropout` | pre-mix | 1–4 (rotor, k ≤ 25) teeth, ±2 bins | kept | strongly destroying, ambiguity-inducing | max teeth 0 → 4 over 10–35 % |
+| `random_reverb` | pre-mix | RT60 U(0.1, 0.8) s, DRR U(3, 15) dB, per-channel diffuse tails | kept | mildly destroying (smears transients, not stationary lines) | DRR lower bound ramps 15 → 3 dB over 5–20 % |
 | speech mixing | mix, p 1 | source-to-noise SNR | kept | strongly destroying at high SNR | lower bound fixed at −30 dB; **upper bound ramps −30 → +5 dB** over 10–35 % |
 | `rate_warp` (`all-labelaug` only) | pre-mix, native rate | α(t) = α₀·(c + a sin(2πft+φ)), α₀ ~ U(0.5, 1.5), c ~ U(1 ± 0.08), a ~ U(0, 0.04), f ~ U(0.1, 1) Hz | r̃(t) = α(t)·r(τ(t)) | info-preserving, label-altering | full from step 0 |
 | silence arm | source | weight 0.4 | zero | a class, not an augmentation | constant |
+
+Precedent for the label-preserving set (library, full text unless noted):
+
+| ours | pitch / F0 tracking | separation / other audio |
+|---|---|---|
+| `random_gain` | PESTO U(−6, 3) dB; SwiftF0 U(−6, 6) dB; LPCNet-pitch U(−60, 10) dB | Demucs / Open-Unmix / MMDenseLSTM random scaling 0.25–1.25 per source (Uhlich 2017 recipe) |
+| speech mixing (additive interference) | PESTO white noise + background mix; SwiftF0 CHiME/Gaussian at SNR U(10, 30) dB; LPCNet-pitch DEMAND; Airaksinen 2019 (PiENet) NOISEX at SNR U(−5, 15) dB | Demucs in-batch remix; WHAM!/WHAMR; MUSAN |
+| `spectral_recolor` (random EQ) | LPCNet-pitch random 2nd-order IIR; Airaksinen 2019 random 17-tap FIR "channel augmentation" (reported to greatly increase noise robustness) | VTLP / channel simulation in ASR |
+| `random_reverb` | — (none of the pitch papers) | RIR augmentation in ASR (Ko 2017), speaker verification (MUSAN + RIR), WHAMR |
+
+Reverb is the one with precedent only outside pitch work; the paper says
+so. Airaksinen 2019 also reports that its label-altering "diversity
+augmentation" (vocoder resynthesis at a new mean F0 U(100, 350) Hz) did
+nothing with 43k utterances but helped with 4k — the small-data regime is
+ours (the real pool is ~7 min).
 
 SNR semantics (`src/data_processing/mixing.py:196`): `snr_db` is the
 *speech* level relative to the rotor noise; −30 dB is the easy end for RPS,
@@ -213,28 +232,53 @@ soxr call on a 2 s × 8-ch window is milliseconds. The stream-window
 oversampling (`freq_scale_source_factor`, warp margin) collapses to one
 factor, 1/α_min·(1 + dev) + margin.
 
-Literature (library, full text): no pitch-estimator paper schedules
-augmentations — PESTO (noise σ U(0.1, 2) + gain U(−6, 3) dB at p 0.7),
-SwiftF0 (gain ±6 dB, CHiME/Gaussian noise at SNR U(10, 30) dB, no pitch
-shift), LPCNet-pitch (gain U(−60, 10) dB, random 2nd-order IIR, 80 % of data
-augmented), FCNF0++ (none). Range-bound schedules of an online augmentation
-exist in neighbouring tasks: ACCAN (Braun, Neil & Liu, EUSIPCO 2017,
-arXiv 1606.06864) stages the SNR range of per-epoch noise mixing (start at
-0 dB, widen to 50 dB) and reports up to −31.4 % WER against multi-condition
-training (the fixed range from step 0) — note the direction is hard → easy;
-PS-SapAug (arXiv 2412.00415) ramps the SpecAugment probability over epochs
-plus per-sample loss-adaptive strength, up to −8.1 % relative WER over fixed
-SpecAugment; SNR-decaying curriculum for speaker verification
-(arXiv 2510.18533), easy → hard. In this project, G5 (`noise_augmentations.py`
-docstring; `data_processing/AGENTS.md`) found augmentations from sample 0
-regressed a regressor's validation 63.7 → 117.9 (MSE) against a 50k
-unaugmented warm-up; that is the easy → hard argument kept here: the hard
-regime (strong speech) is where prior-regression wins.
+**`rate_warp` against the existing label-altering augmentations.** What
+pitch work does to move the label: (1) integer bin shift of a
+log-frequency input (SPICE, PESTO, Cwitkowitz self-supervised MPE) —
+exact, but needs a log axis and is equivariance training rather than data
+augmentation; not applicable to the pyramid's linear grid. (2)
+Phase-vocoder pitch shift with duration preserved (Cuesta et al. 2020
+multi-f0 vocals: −2…+2 semitones per voice then remixed; Salamon & Bello
+2017; Demucs: 20 % of batches, pitch {−2…+2} semitones and tempo
+U(0.88, 1.12) via Soundstretch). (3) Vocoder resynthesis at a scaled F0
+(Airaksinen 2019) — speech only. (4) Resampling / speed perturbation (Ko
+et al. 2015, factors 0.9/1.0/1.1; torchaudio `SpeedPerturbation`) — pitch
+and tempo scale together; standard in ASR, not used in pitch papers.
+`rate_warp` is (4) with a time-varying factor and a wide range: at constant
+α it IS speed perturbation. For a rotating source it is the physically
+exact transform — comb, floor, line widths and modulation sidebands scale
+as a real rotor at α·r would produce — except for the room, whose RIR does
+not scale; a phase-vocoder shift is the converse (room and time structure
+kept, source approximated: phasiness, line widths and AM not scaled). The
+time-varying part has no precedent in pitch work (nearest: SpecAugment's
+feature-domain time warp, which changes no label).
+
+Ablation arms on the `all` stream, same budget: **A** `rate_warp` as above
+(ours); **B** phase-vocoder pitch shift (pyrubberband/librosa), same α
+range, duration preserved, labels ×α — the existing method at our range;
+**C** (only if A ≈ B) A at the literature's range, ±2 semitones
+(α 0.89–1.12), to separate range from mechanism.
+
+Literature on scheduling (library, full text): no pitch-estimator paper
+schedules augmentations — PESTO (noise σ U(0.1, 2) + gain U(−6, 3) dB at
+p 0.7), SwiftF0, LPCNet-pitch, Airaksinen 2019, FCNF0++ (none). Range-bound
+schedules of an online augmentation exist in neighbouring tasks: ACCAN
+(Braun, Neil & Liu, EUSIPCO 2017, arXiv 1606.06864) stages the SNR range of
+per-epoch noise mixing (start at 0 dB, widen to 50 dB) and reports up to
+−31.4 % WER against multi-condition training (the fixed range from step 0)
+— note the direction is hard → easy; PS-SapAug (arXiv 2412.00415) ramps the
+SpecAugment probability over epochs plus per-sample loss-adaptive strength,
+up to −8.1 % relative WER over fixed SpecAugment; SNR-decaying curriculum
+for speaker verification (arXiv 2510.18533), easy → hard. In this project,
+G5 (`noise_augmentations.py` docstring; `data_processing/AGENTS.md`) found
+augmentations from sample 0 regressed a regressor's validation 63.7 → 117.9
+(MSE) against a 50k unaugmented warm-up; that is the easy → hard argument
+kept here: the hard regime (strong speech) is where prior-regression wins.
 
 The schedule is justified by one ablation: `all-labelaug` with every
 transform at full strength from step 0 (= multi-condition training), same
-budget. Whether recolor/reverb/tooth-dropout earn their place is a second
-ablation (`{gain, polarity, speech}` only) if we want to claim them.
+budget. Whether recolor and reverb earn their place is a second ablation
+(`{gain, speech}` only) if we want to claim them.
 
 ## Experiment matrix — TBD
 
