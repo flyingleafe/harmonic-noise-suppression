@@ -375,10 +375,19 @@ Parameter counts from the registry builds (2026-10-14; trunk blocks
 | HPPNet‑L2 | per-rotor maps + translation head on the published CQT trunk, k ≤ 8, FreqGroupLSTM (100 k) | ≈ 0.52 M |
 | +k84 | HDC harmonic range k ≤ 84 on the CQT (one `Conv2d(16→128, 1×3)` per harmonic: 6.1 k each, 520 k for 84) | ≈ 0.99 M |
 | +ConvLSTM | **separable** rate ConvLSTM (hidden 64, kernel 33, bidirectional; per-channel 33-tap displacement kernel + 1 × 1 mix ≈ 37 k) in place of FreqGroupLSTM | ≈ 0.93 M |
-| +pyramid = **HRSPNet** | multi-resolution STFT pyramid (16384/8192/4096/2048) in place of the CQT; HPDC k ≤ 84 + sub-harmonics 1/2…1/8 as ONE gather with a 1-tap mix per harmonic (`(91, 128, 16)` = 186 k; HDC's 3-tap kernel is 3× that), taps read below 4.8 kHz; no translation head (the output grid is level 0's own) | ≈ 0.59 M |
+| +pyramid = **HRSPNet** | multi-resolution STFT pyramid (16384/8192/4096/2048) in place of the CQT; HPDC k ≤ 84 + sub-harmonics 1/2…1/8 as ONE gather with a 1-tap mix per harmonic (`(91, 128, 16)` = 186 k; HDC's 3-tap kernel is 3× that), **no frequency ceiling on the taps**; no translation head (the output grid is level 0's own) | ≈ 0.59 M |
 
-Decisions (2026-10-14): (a) **HRSPNet is k ≤ 84 with the 4.8 kHz tap
-ceiling**, as the paper defines it — the 2.17 rev/s run
+Decisions (2026-10-14): (a) **HRSPNet is k ≤ 84 with no tap ceiling.** The
+paper draft's "taps read below 4.8 kHz" was an eval-time patch for a data
+artefact (the k ≈ 70 motor line belongs to a different rotor in room 2 than
+in room 1, and room 2's commanded labels put it 10+ bins off on the 7.8 Hz
+top level; the CQT suffers less only because the same error is 1.4 of its
+bins) and is dropped: masking input frequencies is not architecture. The
+tap-zeroing stays in the paper as the eval-time DIAGNOSTIC that explains a
+DREGON deficit; the remedies are on the data side (ConvLSTM, labelaug,
+later synthetic pretraining), which the grid exercises. One extra run,
+HRSPNet at k ≤ 64 on `all`, makes the harmonic-range axis a curve
+(8 → 84) instead of a single point. The 2.17 rev/s run
 (`real_r4_hppnet_pyrlstm_unified`) used `k_max 32` / `f_max 7500` and the
 dense ConvLSTM, so the protocol's HRSPNet is a new configuration, not that
 checkpoint. (b) The chain uses the **separable** ConvLSTM: the dense form
@@ -394,7 +403,7 @@ modification (the `all` results name it; Conv+BiGRU and SCv2 are the
 candidates from `paper-regime-matrix.md`), unchanged, on the same frame
 grid.
 
-## Experiment grid (31 runs, one seed, up to 100k steps each)
+## Experiment grid (32 runs, one seed, up to 100k steps each)
 
 `rp_<model>_<stream>[_<ablation>]`; streams `all`, `alllab` (= `all-labelaug`),
 `dregon`, `md2`, `dregonlab`/`md2lab`. Not runs: the blind two-stage tracker
@@ -404,7 +413,7 @@ and the encode–decode floor (training-free).
 |---|---|---|
 | 1. unadapted salience models fail | L0 of HPPNet, HarmoF0, Basic Pitch, LateDeep on `all` | 4 |
 | 2. HPPNet best up to L2; L0→L1 vs L1→L2 attribution | L1 and L2 of all four on `all` | 8 |
-| 3. HRSPNet > HPPNet‑L2, with each step attributed | `+k84`, `+k84+ConvLSTM`, HRSPNet on `all`; dense-ConvLSTM HRSPNet control | 4 |
+| 3. HRSPNet > HPPNet‑L2, with each step attributed | `+k84`, `+k84+ConvLSTM`, HRSPNet on `all`; dense-ConvLSTM HRSPNet control; HRSPNet k ≤ 64 (harmonic-range curve) | 5 |
 | regressor row | SimpleConv, best modification on `all` | 2 |
 | label-altering augmentation | `alllab` for HRSPNet, HPPNet‑L2, best regressor | 3 |
 | 4. schedule (on HRSPNet only) | `alllab`: everything at full strength from step 0; `{gain, speech}` only | 2 |
