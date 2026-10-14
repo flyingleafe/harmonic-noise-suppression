@@ -253,11 +253,16 @@ kept, source approximated: phasiness, line widths and AM not scaled). The
 time-varying part has no precedent in pitch work (nearest: SpecAugment's
 feature-domain time warp, which changes no label).
 
-Ablation arms on the `all` stream, same budget: **A** `rate_warp` as above
-(ours); **B** phase-vocoder pitch shift (pyrubberband/librosa), same α
-range, duration preserved, labels ×α — the existing method at our range;
-**C** (only if A ≈ B) A at the literature's range, ±2 semitones
-(α 0.89–1.12), to separate range from mechanism.
+Decision (Dmitrii, 2026-10-14): no ablation against the phase-vocoder or
+narrow-range variants; `rate_warp` is used as is. Motivation stated in the
+paper: it is simple (one resampling), rich (a continuum of rates plus slow
+wander, not a few fixed semitone steps), and it destroys no structure of
+this signal — the duration-preserving (vocoder) form exists for music
+because tempo must not change, a constraint rotor noise does not have.
+Scope of the "not used in pitch tracking" claims above: the neural pitch
+estimators we build on and have read in full, plus the melody-extraction
+review (arXiv 2202.01078) — not an exhaustive survey; the paper words it as
+"not among the augmentations used by the estimators we build on".
 
 Literature on scheduling (library, full text): no pitch-estimator paper
 schedules augmentations — PESTO (noise σ U(0.1, 2) + gain U(−6, 3) dB at
