@@ -130,7 +130,9 @@ def test_plan_requires_the_control_among_primaries():
     with pytest.raises(ValueError, match="control"):
         build_validation_plan(
             _panel_cfg(
-                {"dregon": {"where": {"dataset": "dregon"}}}, primary=["dregon"], control="real"
+                {"dregon": {"where": {"dataset": "dregon"}}},
+                primary=["dregon"],
+                control="real_macro",
             )
         )
 
@@ -142,11 +144,11 @@ def test_scores_are_frame_weighted_over_every_view_shape():
         "dregon_zero": {"where": {"dataset": "dregon"}, "regime": "zero"},
         "dregon_cruise": {"where": {"dataset": "dregon"}, "regime": "cruise"},
         "md2_ramp": {"where": {"dataset": "md2"}, "regime": "ramp"},
-        "all": {"where": {}},
-        "all_cruise": {"where": {}, "regime": "cruise"},
+        "real": {"where": {}},
+        "real_cruise": {"where": {}, "regime": "cruise"},
     }
     plan = build_validation_plan(
-        _panel_cfg(views, aggregates={"real": {"dregon": 0.5, "md2": 0.5}})
+        _panel_cfg(views, aggregates={"real_macro": {"dregon": 0.5, "md2": 0.5}})
     )
     targets = _targets(plan)
     n_frames = targets.shape[-1]
@@ -172,8 +174,8 @@ def test_scores_are_frame_weighted_over_every_view_shape():
             mask = mask & (regimes == view.regime)
         assert scores[view.name] == pytest.approx(expected_err[mask].mean(), rel=1e-5)
     assert plan.views[5].samples.all()  # an empty `where` pools the whole panel
-    assert scores["all"] == pytest.approx(expected_err.mean(), rel=1e-5)
-    assert scores["real"] == pytest.approx(0.5 * scores["dregon"] + 0.5 * scores["md2"])
+    assert scores["real"] == pytest.approx(expected_err.mean(), rel=1e-5)
+    assert scores["real_macro"] == pytest.approx(0.5 * scores["dregon"] + 0.5 * scores["md2"])
     # Frame weighting differs from averaging per-item means on a regime cell.
     zero_mask = (regimes == REGIMES.index("zero")) & plan.views[2].samples[:, None]
     assert scores["dregon_zero"] != pytest.approx(samples.pit_mae[zero_mask.any(axis=1)].mean())

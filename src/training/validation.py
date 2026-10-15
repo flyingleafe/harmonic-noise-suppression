@@ -13,7 +13,7 @@ the target's regime labels, then reduces every view on the host:
   a clip being every item sharing ``(dataset, meta["clip_index"])`` (the 8
   flattened channels of one recording window).
 
-Aggregates are weighted sums of views (e.g. ``real = ½ dregon + ½ md2``).
+Aggregates are weighted sums of views (e.g. ``real_macro = ½ dregon + ½ md2``).
 """
 
 from __future__ import annotations

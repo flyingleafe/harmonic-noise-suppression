@@ -8,14 +8,16 @@
 # 0.4 / 2.4 = 16.7 % of noise chunks; LibriSpeech train-clean-100, an
 # independent utterance per channel.
 #
-# SCHEDULE UNITS. `ramp.from`/`ramp.until` are GLOBAL SAMPLE IDS (chunks of 8
-# mics). One optimizer step = 128 mono frames = 16 chunks, so gid = 16 x step;
-# 100k steps = 1.6 M chunks.
-#   5 % =  80 000 gids =  5 000 steps    10 % = 160 000 gids = 10 000 steps
-#  20 % = 320 000 gids = 20 000 steps    35 % = 560 000 gids = 35 000 steps
-# Cosine ramps in the severity parameter: speech SNR upper bound -30 -> +5 dB
-# over 10-35 %; random_reverb DRR lower bound 15 -> 3 dB over 5-20 %.
-# random_gain, spectral_recolor and noise_rate_warp at full strength from 0.
+# NO SCHEDULE (Dmitrii, 2026-10-15). The first HPPNet-L2 pilot, trained with
+# the speech SNR upper bound ramping -30 -> +5 dB over 10-35 % and a reverb
+# DRR ramp, memorised the quiet-speech early regime and collapsed to zeros
+# off the memorised clips (saturation stop at 20k steps), unlike every
+# earlier unified HPPNet-L2 run, which saw clearly audible mixtures from
+# sample 1. So: one stage, everything at full strength from step 0 - speech
+# SNR U(-30, +5) dB, random_gain, spectral_recolor.
+# random_reverb is dropped altogether: the earlier runs never used it and the
+# pitch-estimation literature does not either. Label-altering noise_rate_warp
+# (p = 1) stays, at full strength from step 0.
 #
 # noise_rate_warp: ONE time-varying resampling of the native 44.1 kHz noise,
 # alpha(t) = alpha0 (c + a sin(2 pi f t + phi)), alpha0 ~ U(0.5, 1.5),
@@ -53,24 +55,15 @@ policy:
       speech_per_channel: independent
       snr_per_channel: false
       snr_db:
-        uniform:
-          low: -30.0
-          high: {ramp: {from: 160000, until: 560000, start: -30.0, end: 5.0, shape: cosine}}
+        uniform: {low: -30.0, high: 5.0}
       augmentations:
         probability: 0.5
         choices:
           - random_gain: {min_db: -6.0, max_db: 6.0}
       noise_augmentations:
-        - probability: 0.5
-          choices:
-            - spectral_recolor: {}
-        - probability: 0.5
-          choices:
-            - random_reverb:
-                rt60_low: 0.1
-                rt60_high: 0.8
-                drr_db_low: {ramp: {from: 80000, until: 320000, start: 15.0, end: 3.0, shape: cosine}}
-                drr_db_high: 15.0
+        probability: 0.5
+        choices:
+          - spectral_recolor: {}
       noise_rate_warp:
         probability: 1.0
         alpha_low: 0.5

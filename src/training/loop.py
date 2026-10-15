@@ -515,7 +515,7 @@ def _warm_start(
     """Initialise a curriculum stage from explicit weights or a score's best.
 
     ``best:<score>@<experiment>`` resolves that run's median-selected R2
-    checkpoint ``best_<score>_median.ckpt``, e.g. ``best:real@rp_hrspnet_all``.
+    checkpoint ``best_<score>_median.ckpt``, e.g. ``best:real_macro@rp_hrspnet_all``.
     A curriculum always starts fresh optimizer/scheduler state; same-run
     continuation remains ``resume``.
     """

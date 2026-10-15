@@ -3,7 +3,7 @@
 
 Reads ``results/<experiment>/validation_history.jsonl`` (pulled with ``omnirun
 pull``) and prints one row per round: optimizer step, LR, the control score
-(``real``), its 5-round median, the per-dataset views and the stop verdict.
+(``real_macro``), its 5-round median, the per-dataset views and the stop verdict.
 ``--best`` prints only the best-median round per run, next to the stopping
 step, which is what the result tables quote.
 
@@ -19,16 +19,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VIEWS = (
+    "real_macro",
     "real",
-    "all",
     "dregon",
     "md2",
-    "all_nosource",
-    "all_source",
-    "all_zero",
-    "all_standby",
-    "all_ramp",
-    "all_cruise",
+    "real_nosource",
+    "real_source",
+    "real_zero",
+    "real_standby",
+    "real_ramp",
+    "real_cruise",
 )
 
 
@@ -44,7 +44,7 @@ def wandb_rounds(run_id: str) -> tuple[str, list[dict]]:
     import wandb
 
     run = wandb.Api().run(f"flyingleafe/harmonic-noise-suppression/{run_id}")
-    keys = ["optimizer_step", "lr", "val/real_median", "validation/stop_reason"] + [
+    keys = ["optimizer_step", "lr", "val/real_macro_median", "validation/stop_reason"] + [
         f"val/{v}" for v in VIEWS
     ]
     return f"{run.name} [{run.state}]", list(run.scan_history(keys=keys))
@@ -59,18 +59,18 @@ def print_run(experiment: str, rows: list[dict], best_only: bool) -> None:
     if not rows:
         print(f"{experiment}: no validation_history.jsonl")
         return
-    header = f"{'step':>7} {'lr':>8} " + " ".join(f"{v[:10]:>10}" for v in VIEWS) + "  real_med"
+    header = f"{'step':>7} {'lr':>8} " + " ".join(f"{v[:10]:>10}" for v in VIEWS) + "  macro_med"
     print(f"== {experiment} ({len(rows)} rounds)")
     print(header)
     chosen = rows
     if best_only:
-        scored = [r for r in rows if isinstance(r.get("val/real_median"), (int, float))]
-        chosen = [min(scored, key=lambda r: r["val/real_median"])] if scored else []
+        scored = [r for r in rows if isinstance(r.get("val/real_macro_median"), (int, float))]
+        chosen = [min(scored, key=lambda r: r["val/real_macro_median"])] if scored else []
     for r in chosen:
         views = " ".join(f"{fmt(r, f'val/{v}'):>10}" for v in VIEWS)
         mark = " <- best median" if best_only else ""
         print(
-            f"{int(r['optimizer_step']):7d} {r['lr']:8.2e} {views}  {fmt(r, 'val/real_median')}{mark}"
+            f"{int(r['optimizer_step']):7d} {r['lr']:8.2e} {views}  {fmt(r, 'val/real_macro_median')}{mark}"
         )
     last = rows[-1]
     stop = last.get("validation/stop_reason")

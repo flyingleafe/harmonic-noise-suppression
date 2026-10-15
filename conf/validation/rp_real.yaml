@@ -12,9 +12,9 @@ batch_size: 128
 num_workers: null
 smoothing_window: 5
 min_relative_improvement: 0.01
-min_rounds: 40  # 20k steps
-final_patience: 30  # 15k steps on the control's median: earliest stop 35k
-control: real
+min_rounds: 50  # 25k steps, a quarter of the budget
+final_patience: 30  # 15k stale rounds of the control's median; both conditions in parallel
+control: real_macro
 
 datasets:
   real:
@@ -42,22 +42,24 @@ views:
   md2_standby: {where: {dataset: md2}, regime: standby}
   md2_ramp: {where: {dataset: md2}, regime: ramp}
   md2_cruise: {where: {dataset: md2}, regime: cruise}
-  # pooled over both datasets, frame-weighted (`real` above is the macro mean)
-  all: {where: {}}
-  all_nosource: {where: {source_type: nosource}}
-  all_source: {where: {source_type: [loudspeaker, mixed]}}
-  all_zero: {where: {}, regime: zero}
-  all_standby: {where: {}, regime: standby}
-  all_ramp: {where: {}, regime: ramp}
-  all_cruise: {where: {}, regime: cruise}
+  # pooled over both datasets, frame-weighted; the same `real*` names are the
+  # contract for a future synthetic panel (`synth*`). The control `real_macro`
+  # (aggregate below) is the macro mean of the two datasets.
+  real: {where: {}}
+  real_nosource: {where: {source_type: nosource}}
+  real_source: {where: {source_type: [loudspeaker, mixed]}}
+  real_zero: {where: {}, regime: zero}
+  real_standby: {where: {}, regime: standby}
+  real_ramp: {where: {}, regime: ramp}
+  real_cruise: {where: {}, regime: cruise}
 
 aggregates:
-  real: {dregon: 0.5, md2: 0.5}
+  real_macro: {dregon: 0.5, md2: 0.5}
 
 primary:
   - dregon
   - md2
-  - real
+  - real_macro
   - dregon_nosource
   - dregon_source
   - md2_nosource
@@ -70,10 +72,10 @@ primary:
   - md2_standby
   - md2_ramp
   - md2_cruise
-  - all
-  - all_nosource
-  - all_source
-  - all_zero
-  - all_standby
-  - all_ramp
-  - all_cruise
+  - real
+  - real_nosource
+  - real_source
+  - real_zero
+  - real_standby
+  - real_ramp
+  - real_cruise

@@ -133,7 +133,7 @@ else `cruise`. Computed over all clips of a drone.
 
 | | scores |
 |---|---|
-| totals | `dregon` (22 clips), `md2` (30), `real` = ½ `dregon` + ½ `md2` — the **control** |
+| totals | `dregon` (22 clips), `md2` (30), `real_macro` = ½ `dregon` + ½ `md2` — the **control** |
 | source | `dregon_nosource`, `dregon_source`, `md2_nosource`, `md2_source` |
 | regime | `{dregon,md2}_{zero,standby,ramp,cruise}` |
 
@@ -150,19 +150,17 @@ Cadence: every 500 optimizer steps, 200 rounds (= the step budget).
 
 Budget in optimizer steps: **up to 100 000** (today's "200 epochs" is
 exactly 200 validation rounds × 500 steps at the step cap). AdamW, max LR
-per family (below), weight decay 1e-4, **effective batch 128** mono frames
-(16 chunks × 8 mics), micro-batch 128 for every arm unless a one-batch
-forward/backward memory probe says otherwise — then 64 × grad-accum 2, a
-memory knob, not a protocol parameter. Probe outcome (the range tests,
-2026-10-15): **HPPNet** (L0 and L2; the `FreqGroupLSTM` over 352 bins
-asks for a further 10.9 GiB on top of 10.6 GiB at 16 GB and 24.9 GiB at
-32 GB) runs at **64 × 2** for every rp_hppnet_* arm; HarmoF0 L2 ran at
-128 on the same cards. The pyramid arms are probed when they are
-configured (the historical 64 × 2 came from `97b25a89`, "to fit any
-backend", with the 307-bin grid and the dense ConvLSTM; the 164-bin grid
-and the separable ConvLSTM halve the post-gather activations). The two
-BatchNorm models (Basic Pitch, LateDeep) always run at 128. AMP,
-grad-clip 5 — unchanged. Schedule:
+per family (below), weight decay 1e-4, **batch 128** mono frames (16
+chunks × 8 mics), **micro-batch 128, no gradient accumulation, for every
+arm** (Dmitrii, 2026-10-15). Target hardware is the A100-80; a smaller
+card only where the model fits (the range tests measured: HPPNet's
+`FreqGroupLSTM` over 352 bins OOMs at 128 on 16 and 32 GB — 10.9 GiB more
+on top of 24.9 GiB at 32 GB — and LateDeep OOMs at 128 on 16 GB; HarmoF0,
+Basic Pitch and the regressors run at 128 on 16 GB). If the `uni` queue
+for the large cards is too slow, the arm goes to `vast` (A100-80). The
+64 × 2 variant the first HPPNet pilot used is retired: the historical
+64 × 2 came from `97b25a89`, "to fit any backend". AMP, grad-clip 5 —
+unchanged. Schedule:
 linear warm-up 0 → max over the first 5 % (5 000 steps), then cosine to
 1 % of max at 100 000 steps, a pure function of the step count. **The LR
 no longer depends on
@@ -170,17 +168,21 @@ validation**: the `MultiMetricController` loses its LR branch
 (`lr_patience`, `lr_factor`, `min_lr_reductions`) and the plateau
 scheduler goes; it keeps median smoothing for checkpoint selection and the
 **saturation early stop** (`min_rounds`, `final_patience` on the control
-score `real`), which stays. Scheduler state goes into `train_state.pt` so
+score `real_macro`), which stays. Scheduler state goes into `train_state.pt` so
 a resumed run continues the cosine.
 
-Stop parameters (Dmitrii, 2026-10-14): **`min_rounds` 40** (20 000 steps)
-and **`final_patience` 30** (15 000 steps) — larger than today's 30 / 12
-because the LR-patience rounds no longer accumulate before a stop. The
-earliest possible stop is therefore 20k + 15k = 35k steps, exactly where
-the last augmentation ramp ends, so the saturation test never runs on a
-moving training distribution (schedule plot: `scripts/_sched_plot.py`).
-An arm that stops early never reaches the cosine tail, so arms differ in
-realised budget; every table reports the stopping step next to the score.
+Stop parameters (Dmitrii, 2026-10-15): **`min_rounds` 50** (25 000 steps,
+a quarter of the budget) and **`final_patience` 30** (15 000 steps on the
+control's 5-round median). The two are parallel conditions
+(`rounds_completed ≥ min_rounds` AND `stale_rounds ≥ final_patience`, in
+`training/stopping.py`), not additive: stale rounds count from round 5,
+so a run whose control never improves after its first window stops at
+round 50 = 25k steps, and one that improves at round r stops no earlier
+than round max(50, r + 30). (The first HPPNet pilot stopped at round 40
+under the earlier `min_rounds` 40 — the earliest the rule allows, not
+"20k + 15k = 35k" as the 2026-10-14 text wrongly claimed.) An arm that
+stops early never reaches the cosine tail, so arms differ in realised
+budget; every table reports the stopping step next to the score.
 
 **Max LR: 1e-3 for every model** (decided 2026-10-15, Dmitrii) — the LR
 each architecture we build on was published with, so the choice is
@@ -229,8 +231,7 @@ Precedent for the schedule: PESTO trains 50 epochs under cosine annealing
 ### Checkpoints
 
 Every round writes `last.ckpt`. For each of the 22 scores (the 14
-dataset × {source, regime} views, the macro `real`, and the seven pooled
-`all`, `all_{nosource,source}`, `all_{zero,standby,ramp,cruise}` — frame-
+dataset × {source, regime} views, the macro `real_macro` (the control, ½ dregon + ½ md2), and the seven pooled frame-weighted `real`, `real_{nosource,source}`, `real_{zero,standby,ramp,cruise}` — frame-
 weighted over both datasets; added 2026-10-15, Dmitrii), two bests:
 `best_<score>_median.ckpt` (5-round median improves, ≥ 1 % relative — what
 `stable_improvements` does today) and `best_<score>_raw.ckpt` (raw round
@@ -242,7 +243,7 @@ legacy single `best.ckpt` and `optim.monitor` go away. Which checkpoint the
 paper reports is decided after the runs; `last.ckpt` is also reported
 (selection-free).
 
-### Augmentations and their schedule
+### Augmentations (no schedule)
 
 Selection rule (Dmitrii, 2026-10-14): a label-preserving augmentation is
 in the recipe only if it is in common use for pitch tracking AND for other
@@ -251,17 +252,40 @@ the existing pitch-tracking alternative. Dropped on that rule:
 `random_polarity` (only magnitude front ends are considered now; a no-op),
 `tooth_dropout` and `spec_mask` (masking is an ASR/SED convention — no
 pitch-tracking paper in the library uses it), `floor_inject` (duplicates
-the drone's own floor and the speech mix). "Full strength" = the
-parameters listed.
+the drone's own floor and the speech mix).
 
-| transform | where | parameters | labels | class | schedule |
-|---|---|---|---|---|---|
-| `random_gain` | post-mix, p 0.5 | U(−6, +6) dB | kept | info-preserving | full from step 0 |
-| `spectral_recolor` | pre-mix | ±8 dB smooth EQ, 10 log-spaced anchors | kept | mild | full from step 0 |
-| `random_reverb` | pre-mix | RT60 U(0.1, 0.8) s, DRR U(3, 15) dB, per-channel diffuse tails | kept | mildly destroying (smears transients, not stationary lines) | DRR lower bound ramps 15 → 3 dB over 5–20 % |
-| speech mixing | mix, p 1 | source-to-noise SNR | kept | strongly destroying at high SNR | lower bound fixed at −30 dB; **upper bound ramps −30 → +5 dB** over 10–35 % |
-| `rate_warp` (`all-labelaug` only) | pre-mix, native rate | α(t) = α₀·(c + a sin(2πft+φ)), α₀ ~ U(0.5, 1.5), c ~ U(1 ± 0.08), a ~ U(0, 0.04), f ~ U(0.1, 1) Hz | r̃(t) = α(t)·r(τ(t)) | info-preserving, label-altering | full from step 0 |
-| silence arm | source | weight 0.4 | zero | a class, not an augmentation | constant |
+**Revision 2026-10-15 (Dmitrii): everything at full strength from step 0,
+and `random_reverb` is out.** The first HPPNet-L2 pilot (`rp_hppnet_l2_all`
+at `8c3053b7`…`b90f7bb5`, 64 × 2, LR 1e-3) trained under the ramps below
+memorised: `real_macro` 7.9 rev/s at step 1.5k, then rising monotonically to ~59
+by step 7.5k and flat there — zeros everywhere except on the memorised
+clips — until the saturation stop at round 40 (20k steps). Every earlier
+unified HPPNet-L2 run (`hppnet_l2_r2_s0`, `real_r4_hppnet_l2_unified`)
+saw the full −30…0 dB mixture distribution from sample 1 and fell steadily
+through its first rounds; the ramped stream instead handed the model 10k
+steps of near-noise-only input (speech ≤ −30 dB) on a 7-minute pool, in
+which the per-clip label prior is the winning strategy. Hence one stage,
+no ramps: `rp_all` = speech SNR U(−30, +5) dB from step 0, `random_gain`
+and `spectral_recolor` at full strength from step 0. `random_reverb` is
+dropped altogether — the earlier runs never used it and no pitch paper
+does (table below); it had been the one transform with precedent only
+outside pitch work. The ramped `rp_*` streams are history (`b90f7bb5`).
+
+| transform | where | parameters | labels | class |
+|---|---|---|---|---|
+| `random_gain` | post-mix, p 0.5 | U(−6, +6) dB | kept | info-preserving |
+| `spectral_recolor` | pre-mix, p 0.5 | ±8 dB smooth EQ, 10 log-spaced anchors | kept | mild |
+| speech mixing | mix, p 1 | source-to-noise SNR U(−30, +5) dB, independent utterance per channel, `snr_ref_floor_rms` 0.02 | kept | strongly destroying at high SNR |
+| `rate_warp` (`*_labelaug` only) | pre-mix, native rate, p 1 | α(t) = α₀·(c + a sin(2πft+φ)), α₀ ~ U(0.5, 1.5), c ~ U(1 ± 0.08), a ~ U(0, 0.04), f ~ U(0.1, 1) Hz | r̃(t) = α(t)·r(τ(t)) | info-preserving, label-altering |
+| silence arm | source | weight 0.4 (0.2 on the single-drone streams) against the merged real 2.0 | zero | a class, not an augmentation |
+
+Note on the plain streams (`rp_all`, `rp_dregon`, `rp_md2`): they carry **no
+label-altering augmentation**, unlike `hppnet_l2_r2_s0` and every
+`real_r*_unified` run, which trained with `freq_scale` α U(0.7, 1.3) at
+p 1 (after a 50k-chunk unaugmented warm-up) plus `noise_time_warp` p 0.5.
+The `*_labelaug` arms are therefore the comparison to those numbers; the
+plain arms ask whether any label-altering augmentation is needed at all
+(decision: Dmitrii, 2026-10-15).
 
 Precedent for the label-preserving set (library, full text unless noted):
 
@@ -270,19 +294,18 @@ Precedent for the label-preserving set (library, full text unless noted):
 | `random_gain` | PESTO U(−6, 3) dB; SwiftF0 U(−6, 6) dB; LPCNet-pitch U(−60, 10) dB | Demucs / Open-Unmix / MMDenseLSTM random scaling 0.25–1.25 per source (Uhlich 2017 recipe) |
 | speech mixing (additive interference) | PESTO white noise + background mix; SwiftF0 CHiME/Gaussian at SNR U(10, 30) dB; LPCNet-pitch DEMAND; Airaksinen 2019 (PiENet) NOISEX at SNR U(−5, 15) dB | Demucs in-batch remix; WHAM!/WHAMR; MUSAN |
 | `spectral_recolor` (random EQ) | LPCNet-pitch random 2nd-order IIR; Airaksinen 2019 random 17-tap FIR "channel augmentation" (reported to greatly increase noise robustness) | VTLP / channel simulation in ASR |
-| `random_reverb` | — (none of the pitch papers) | RIR augmentation in ASR (Ko 2017), speaker verification (MUSAN + RIR), WHAMR |
+| `random_reverb` (dropped 2026-10-15) | — (none of the pitch papers) | RIR augmentation in ASR (Ko 2017), speaker verification (MUSAN + RIR), WHAMR |
 
-Reverb is the one with precedent only outside pitch work; the paper says
-so. Airaksinen 2019 also reports that its label-altering "diversity
+Airaksinen 2019 also reports that its label-altering "diversity
 augmentation" (vocoder resynthesis at a new mean F0 U(100, 350) Hz) did
 nothing with 43k utterances but helped with 4k — the small-data regime is
 ours (the real pool is ~7 min).
 
 SNR semantics (`src/data_processing/mixing.py:196`): `snr_db` is the
 *speech* level relative to the rotor noise; −30 dB is the easy end for RPS,
-0…+5 dB the hard end. Ramps are cosine in the severity parameter, not in
-probability; done by 35 % of training; the full distribution stays active
-through the cosine LR tail.
+0…+5 dB the hard end. The upper bound +5 dB (vs 0 dB in every earlier
+stream) extends the audible-speech end; the validation panel's MD2 mixes
+sit at −5 and −20 dB, inside the range either way.
 
 `rate_warp` replaces `freq_scale` + `noise_time_warp`: the warp is already a
 local frequency scale with the same label transform
@@ -342,13 +365,15 @@ up to −8.1 % relative WER over fixed SpecAugment; SNR-decaying curriculum
 for speaker verification (arXiv 2510.18533), easy → hard. In this project,
 G5 (`noise_augmentations.py` docstring; `data_processing/AGENTS.md`) found
 augmentations from sample 0 regressed a regressor's validation 63.7 → 117.9
-(MSE) against a 50k unaugmented warm-up; that is the easy → hard argument
-kept here: the hard regime (strong speech) is where prior-regression wins.
-
-The schedule is justified by one ablation: `all-labelaug` with every
-transform at full strength from step 0 (= multi-condition training), same
-budget. Whether recolor and reverb earn their place is a second ablation
-(`{gain, speech}` only) if we want to claim them.
+(MSE) against a 50k unaugmented warm-up — the easy → hard argument the
+first draft of this protocol took, with cosine ramps of the speech SNR
+upper bound (−30 → +5 dB over 10–35 %) and the reverb DRR. The HPPNet-L2
+pilot showed the opposite failure on the salience side (above): the easy
+regime is where a salience net memorises the 7-minute pool. Multi-condition
+training from step 0 is what every earlier run of this project and every
+pitch paper did, and is what the protocol does; no schedule ablation.
+Whether recolor earns its place is a second ablation (`{gain, speech}`
+only) if we want to claim it.
 
 ## Models, output grid and the adaptation ladder
 
@@ -497,7 +522,7 @@ Each `conf/experiment/rp_*.yaml` gets its sibling `.md` with
 ## Implementation notes (for the cutover)
 
 - `conf/validation/`: new panel config (datasets = the new derived split;
-  views by meta predicates, not index ranges; 22 scores; `control: real`);
+  views by meta predicates, not index ranges; 22 scores; `control: real_macro`);
   the controller loses its LR branch; validation emits no `_log` scores and
   no per-clip `_clips`/`_clip_mean`/`_clip_std` (dropped 2026-10-15; the
   SCv2 pilot still logs them — reads in `val_samples/` instead).

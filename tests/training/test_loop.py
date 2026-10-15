@@ -31,7 +31,7 @@ PANEL_CLIPS = [
     {"dataset": "dregon", "source_type": "nosource", "profile": "cruise"},
     {"dataset": "md2", "source_type": "mixed", "profile": "zero_then_cruise"},
 ]
-PRIMARY = ["dregon", "md2", "md2_cruise", "real"]
+PRIMARY = ["dregon", "md2", "md2_cruise", "real_macro"]
 
 
 class _FakeRun:
@@ -77,9 +77,9 @@ def _panel_validation(**overrides):
             "md2": {"where": {"dataset": "md2"}},
             "md2_cruise": {"where": {"dataset": "md2"}, "regime": "cruise"},
         },
-        "aggregates": {"real": {"dregon": 0.5, "md2": 0.5}},
+        "aggregates": {"real_macro": {"dregon": 0.5, "md2": 0.5}},
         "primary": PRIMARY,
-        "control": "real",
+        "control": "real_macro",
         "smoothing_window": 1,
         "min_rounds": 0,
         "min_relative_improvement": 0.01,
@@ -148,19 +148,21 @@ def test_panel_run_writes_dual_bests_history_and_per_sample_arrays(tmp_path, mon
     run_dir = tmp_path / "tiny_panel"
     index = json.loads((run_dir / "best_checkpoints.json").read_text())
     assert set(index) == {f"{score}/{kind}" for score in PRIMARY for kind in ("median", "raw")}
-    entry = index["real/median"]
+    entry = index["real_macro/median"]
     assert set(entry) == {"checkpoint", "validation_round", "optimizer_step", "raw", "median"}
     assert (entry["checkpoint"], entry["validation_round"], entry["optimizer_step"]) == (
-        "best_real_median.ckpt",
+        "best_real_macro_median.ckpt",
         0,
         2,
     )
     # Coincident bests are hard links to that round's last.ckpt: one inode.
-    assert os.path.samefile(run_dir / "best_real_median.ckpt", run_dir / "last.ckpt")
-    assert os.path.samefile(run_dir / "best_real_raw.ckpt", run_dir / "best_md2_cruise_raw.ckpt")
+    assert os.path.samefile(run_dir / "best_real_macro_median.ckpt", run_dir / "last.ckpt")
+    assert os.path.samefile(
+        run_dir / "best_real_macro_raw.ckpt", run_dir / "best_md2_cruise_raw.ckpt"
+    )
     assert not (run_dir / "best.ckpt").exists()
     assert result["optimizer_steps"] == 2.0
-    assert result["best_real_raw"] == pytest.approx(entry["raw"])
+    assert result["best_real_macro_raw"] == pytest.approx(entry["raw"])
 
     with np.load(run_dir / "val_samples" / "round_0000.npz") as arrays:
         assert set(arrays.files) == {
@@ -181,7 +183,7 @@ def test_panel_run_writes_dual_bests_history_and_per_sample_arrays(tmp_path, mon
     ]
     row = history[0]
     assert row["optimizer_step"] == 2 and row["validation_round"] == 0 and "lr" in row
-    assert row["val/real"] == pytest.approx(0.5 * row["val/dregon"] + 0.5 * row["val/md2"])
+    assert row["val/real_macro"] == pytest.approx(0.5 * row["val/dregon"] + 0.5 * row["val/md2"])
     assert not [key for key in row if key.endswith(("_clips", "_clip_mean", "_clip_std"))]
     assert set(row["validation/improved_raw"]) == set(PRIMARY)
     assert not [key for key in row if key.endswith(("_log", "_log_median"))]
@@ -213,17 +215,20 @@ def test_median_and_raw_bests_follow_their_own_rounds(tmp_path, monkeypatch):
 
     run_dir = tmp_path / "tiny_dual"
     index = json.loads((run_dir / "best_checkpoints.json").read_text())
-    assert index["real/raw"]["validation_round"] == 1 and index["real/raw"]["raw"] == 4.0
-    assert index["real/median"]["validation_round"] == 2
-    assert index["real/median"]["median"] == pytest.approx(4.25)
-    assert os.path.samefile(run_dir / "best_real_raw.ckpt", run_dir / "step4.ckpt")
-    assert os.path.samefile(run_dir / "best_real_median.ckpt", run_dir / "step6.ckpt")
+    assert (
+        index["real_macro/raw"]["validation_round"] == 1 and index["real_macro/raw"]["raw"] == 4.0
+    )
+    assert index["real_macro/median"]["validation_round"] == 2
+    assert index["real_macro/median"]["median"] == pytest.approx(4.25)
+    assert os.path.samefile(run_dir / "best_real_macro_raw.ckpt", run_dir / "step4.ckpt")
+    assert os.path.samefile(run_dir / "best_real_macro_median.ckpt", run_dir / "step6.ckpt")
     uploaded = {key.rsplit("/", 1)[-1] for key in client.objects if "/val_samples/" in key}
     assert uploaded == {"round_0000.npz", "round_0001.npz", "round_0002.npz"}
     assert len(list((run_dir / "val_samples").glob("round_*.npz"))) == 4
     prefix = "ml-data/artifacts/tiny_dual/checkpoints"
     assert (
-        client.objects[f"{prefix}/best_real_median.ckpt"] == (run_dir / "step6.ckpt").read_bytes()
+        client.objects[f"{prefix}/best_real_macro_median.ckpt"]
+        == (run_dir / "step6.ckpt").read_bytes()
     )
 
 

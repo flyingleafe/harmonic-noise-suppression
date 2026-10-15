@@ -114,9 +114,9 @@ class ValidationConfig:
     views: dict[str, dict[str, Any]] = field(default_factory=dict)
     aggregates: dict[str, dict[str, float]] = field(default_factory=dict)
     primary: list[str] = field(default_factory=list)
-    control: str = "real"
+    control: str = "real_macro"
     smoothing_window: int = 5
-    min_rounds: int = 40
+    min_rounds: int = 50
     min_relative_improvement: float = 0.01
     final_patience: int = 30
 
