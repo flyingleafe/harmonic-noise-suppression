@@ -46,73 +46,47 @@ def test_the_optimum_is_the_target_on_a_log_grid_with_stopped_rotors():
     rps[:, 2] = 130.0
     tgt = gaussian_layer_target(rps, loss._freqs, loss.sigma_rev_s, has_off=True)
     ideal = torch.logit(tgt.clamp(1e-6, 1 - 1e-6))
-    at_opt = float(layer_pit_bce(ideal, tgt, focus=loss.focus, off_bin=True))
+    at_opt = float(layer_pit_bce(ideal, tgt, focus=loss.focus))
     torch.manual_seed(0)
     for _ in range(5):
         noisy = ideal + torch.randn_like(ideal) * 0.3
-        worse = float(layer_pit_bce(noisy, tgt, focus=loss.focus, off_bin=True))
+        worse = float(layer_pit_bce(noisy, tgt, focus=loss.focus))
         assert worse > at_opt
     pred, target = _frames(ideal.reshape(2, -1, 12), rps)
     assert float(loss(pred, target)) == pytest.approx(at_opt, rel=1e-5)
 
 
-def test_the_off_bin_is_not_focus_weighted():
-    """Focus balances a sparse Gaussian peak against its grid; the off bin is a
-    class present on every stopped frame, and weighting it the same way made
-    an off head that says off everywhere (HPPNet-L2 pilot, 2026-10-15). With
-    the off bin unweighted, saying off on ON frames must cost as much as
-    saying on-at-the-wrong-rate, not 1/66 of it."""
-    loss = LayerPITSalienceBCELoss(grid=LOG48, focus="auto")
-    assert loss.focus > 10  # the weight that tilted the off head
-    rps = torch.full((1, 4, 8), 60.0)  # every rotor ON
-    tgt = gaussian_layer_target(rps, loss._freqs, loss.sigma_rev_s, has_off=True)
-    ideal = torch.logit(tgt.clamp(1e-6, 1 - 1e-6))
-    off_everywhere = ideal.clone()
-    off_everywhere[:, :, 0] = 3.0  # p(off) ~ 0.95 above a correct map
-    base = float(layer_pit_bce(ideal, tgt, focus=loss.focus, off_bin=True))
-    g = ideal.shape[2]
-    off_cost = float(layer_pit_bce(off_everywhere, tgt, focus=loss.focus, off_bin=True)) - base
-    # The same logit error on a far-off rate bin (target 0, weight 1).
-    wrong_rate = ideal.clone()
-    wrong_rate[:, :, g // 2] = 3.0
-    rate_cost = float(layer_pit_bce(wrong_rate, tgt, focus=loss.focus, off_bin=True)) - base
-    assert off_cost == pytest.approx(rate_cost, rel=1e-4)
-    # and the stopped frame's off bin still carries its (unweighted) BCE
-    rps_off = torch.zeros((1, 4, 8))
-    tgt_off = gaussian_layer_target(rps_off, loss._freqs, loss.sigma_rev_s, has_off=True)
-    ideal_off = torch.logit(tgt_off.clamp(1e-6, 1 - 1e-6))
-    said_on = ideal_off.clone()
-    said_on[:, :, 0] = -3.0
-    base_off = float(layer_pit_bce(ideal_off, tgt_off, focus=loss.focus, off_bin=True))
-    miss = float(layer_pit_bce(said_on, tgt_off, focus=loss.focus, off_bin=True)) - base_off
-    assert miss == pytest.approx(rate_cost, rel=0.05)
-
-
-def test_on_the_linear_grid_a_stopped_rotor_is_a_focus_weighted_peak():
-    """On the linear grid bin 0 is the 0 rev/s rate bin, not an off class: a
-    stopped rotor is a Gaussian peak there and carries the focus weight of any
-    peak. Saying 'stopped' on running frames costs the same as the same logit
-    error on a far rate bin; missing a stopped rotor costs 1 + focus times it."""
-    loss = LayerPITSalienceBCELoss(grid=RP, focus="auto")
-    assert loss.has_off is False and loss.focus > 1
+@pytest.mark.parametrize("name", ["log48", "linear"])
+def test_bin_0_is_not_focus_weighted_on_any_grid(name):
+    """Focus balances a sparse Gaussian peak against its grid; bin 0 is a class
+    present on every stopped frame (the off state on a log grid, the 0 rev/s
+    bin on the linear grid, which a log trunk reaches only through its pooled
+    off logit), and weighting it the same way made the head say "0"
+    everywhere (HPPNet-L2 pilots 1, 2 and 4, 2026-10-15). With bin 0 at
+    weight 1, saying "stopped" on running frames must cost as much as the same
+    logit error on a far rate bin, not 1/66 of it; and missing a stopped rotor
+    costs the same again, not (1 + focus) times it."""
+    grid, has_off = (LOG48, True) if name == "log48" else (RP, False)
+    loss = LayerPITSalienceBCELoss(grid=grid, focus="auto")
+    assert loss.has_off is has_off and loss.focus > 10  # the weight that tilted the head
     rps = torch.full((1, 4, 8), 60.0)  # every rotor running
-    tgt = gaussian_layer_target(rps, loss._freqs, loss.sigma_rev_s, has_off=False)
+    tgt = gaussian_layer_target(rps, loss._freqs, loss.sigma_rev_s, has_off=has_off)
     ideal = torch.logit(tgt.clamp(1e-6, 1 - 1e-6))
     base = float(layer_pit_bce(ideal, tgt, focus=loss.focus))
     said_stopped = ideal.clone()
-    said_stopped[:, :, 0] = 3.0
+    said_stopped[:, :, 0] = 3.0  # p(stopped) ~ 0.95 above a correct map
     stop_cost = float(layer_pit_bce(said_stopped, tgt, focus=loss.focus)) - base
     wrong_rate = ideal.clone()
-    wrong_rate[:, :, ideal.shape[2] // 2] = 3.0
+    wrong_rate[:, :, ideal.shape[2] // 2] = 3.0  # the same error on a far rate bin
     rate_cost = float(layer_pit_bce(wrong_rate, tgt, focus=loss.focus)) - base
     assert stop_cost == pytest.approx(rate_cost, rel=1e-4)
-    # A stopped rotor's bin-0 peak is weighted 1 + focus, through the loss itself.
+    # A stopped rotor's bin 0 (target 1) carries weight 1, through the loss itself.
     rps_off = torch.zeros((1, 4, 8))
-    tgt_off = gaussian_layer_target(rps_off, loss._freqs, loss.sigma_rev_s, has_off=False)
-    assert float(tgt_off[0, 0, 0, 0]) == 1.0 and float(tgt_off[0, 0, 1, 0]) > 0.0
+    tgt_off = gaussian_layer_target(rps_off, loss._freqs, loss.sigma_rev_s, has_off=has_off)
+    assert float(tgt_off[0, 0, 0, 0]) == 1.0
     ideal_off = torch.logit(tgt_off.clamp(1e-6, 1 - 1e-6))
     said_running = ideal_off.clone()
     said_running[:, :, 0] = -3.0
     base_off = float(loss(*_frames(ideal_off.reshape(1, -1, 8), rps_off)))
     miss = float(loss(*_frames(said_running.reshape(1, -1, 8), rps_off))) - base_off
-    assert miss == pytest.approx((1.0 + loss.focus) * rate_cost, rel=1e-3)
+    assert miss == pytest.approx(rate_cost, rel=0.05)

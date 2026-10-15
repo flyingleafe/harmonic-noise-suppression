@@ -113,7 +113,7 @@ class LayerPITSalienceBCEMetric(_LayerGridMetric):
         tgt = gaussian_layer_target(
             rps_grid, self._freqs, sigma_rev_s=self.sigma_rev_s, has_off=self.has_off
         )
-        return float(layer_pit_bce(layers, tgt, focus=self.focus, off_bin=self.has_off).item())
+        return float(layer_pit_bce(layers, tgt, focus=self.focus).item())
 
 
 class LayerPeakRPSMetric(_LayerGridMetric):

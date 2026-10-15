@@ -23,8 +23,12 @@
 # pos_weight IS ABSENT AND MUST STAY ABSENT (weight 1): weighted BCE against a
 # soft target p is minimized at w p / (w p + 1 - p), not at p, which flattens
 # the parabola the readout fits. focus is the imbalance handle instead (a
-# per-bin weight 1 + focus * target, which moves no minimum); `auto` =
-# G / expected layer mass = 164 / 2.555 = 64.2 (models.salience_crf.layer_focus).
+# per-bin weight 1 + focus * target on bins 1.., which moves no minimum);
+# `auto` = G / expected layer mass = 164 / 2.555 = 64.2
+# (models.salience_crf.layer_focus). Bin 0 stays at weight 1 on every grid:
+# its positive is a CLASS on ~20 % of frames (stopped rotors), not a sparse
+# peak, and focus-weighting it collapsed the HPPNet-L2 pilots (protocol doc,
+# post-mortem).
 #
 # rate [16000, 512] mirrors the models' frame_rate: nothing pools along time.
 terms:

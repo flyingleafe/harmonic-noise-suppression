@@ -180,6 +180,25 @@ def test_perfect_layers_decode_with_stops_and_hard_starts(name, level):
     assert float(rest.max()) < 1e-4
 
 
+@pytest.mark.parametrize("name", list(BASELINES))
+def test_l2_reads_zero_or_at_least_the_trunk_s_lowest_rate(name):
+    """A log trunk re-gridded to linear can say 0 (the pooled off logit on bin
+    0) or any rate from its own fmin up; bins 1..fmin are `UNREACHABLE_LOGIT`,
+    so whatever the net emits, the CRF never decodes a rate strictly between
+    0 and fmin (Dmitrii, 2026-10-15: silence or >= ~27.5 rev/s)."""
+    m = _build(name, n_maps=4, translation_head=True).eval()
+    assert m.translation is not None
+    fmin = float(LOG_GRIDS[name][0])
+    unreachable = m.translation.unreachable
+    assert bool(unreachable[0]) is False and bool(unreachable[1:].any())
+    torch.manual_seed(1)
+    with torch.no_grad():
+        y = m(torch.randn(3, SR))
+    rec = m.decode_salience(y)
+    low = rec[(rec > 1e-9) & (rec < fmin - 1.0)]
+    assert low.numel() == 0, low[:5]
+
+
 @pytest.mark.parametrize("name", ["harmof0", "basicpitch"])
 def test_one_step_trains_the_off_logit_and_the_head(name):
     torch.manual_seed(0)
@@ -192,7 +211,7 @@ def test_one_step_trains_the_off_logit_and_the_head(name):
 
     def loss() -> torch.Tensor:
         layers, tgt = loss_fn.layers_and_target(m(audio), rps)
-        return layer_pit_bce(layers, tgt, focus=loss_fn.focus, off_bin=loss_fn.has_off)
+        return layer_pit_bce(layers, tgt, focus=loss_fn.focus)
 
     before = loss()
     before.backward()

@@ -288,14 +288,26 @@ the cheapest `Linear` off head on pooled energy then says off everywhere.
 The earlier runs had no off bin (a stopped rotor was bin 0 of a plain
 0–150 grid). First fix (`a2407adc`): the off bin excluded from the focus
 weight; its rerun held through the collapse window (`real_macro` 5.8 →
-5.2 → 4.7 over steps 2–4.5k, `real_cruise` 1.3–1.5). Final fix (Dmitrii,
+5.2 → 4.7 over steps 2–4.5k, `real_cruise` 1.3–1.5). Second fix (Dmitrii,
 same day, item 4 of the ladder): the linear grid goes back to the uniform
-convention — no off class at all, bin 0 is the 0 rev/s rate bin and a
-stopped rotor a Gaussian peak there — and only the log grids (L1) keep an
-off state, where it stays excluded from the focus (regression test
-`test_the_off_bin_is_not_focus_weighted`). The no-schedule stream stays —
-it is what every earlier run and every pitch paper did — but the ramp was
-not what broke HPPNet.
+convention — no off class, bin 0 is the 0 rev/s rate bin and a stopped
+rotor a Gaussian peak there, focus-weighted like any peak. **Pilot 4 on
+that convention reproduced the collapse** (`rp_hppnet_l2_all` W&B
+`pxdmmjuk`: 6.7 → 4.65 at 2.5k → 7.8 → 13.7 → 20.8 at 4.5k;
+`rp_hppnet_l2_alllab` `t8o60jqx`: 4.1 at 2.5k → 18.4 at 4k, `real_zero`
+1.6 and `real_cruise` 22 — "0 everywhere" again). Reading: on a log trunk
+re-gridded to linear, bin 0 is still a pooled scalar (the L1 off logit is
+the only path into it; bins 1–27 are unreachable), its target is still a
+class on ~20 % of frames, and the ~65× focus on that class made "0" the
+cheapest answer — the off state was never the issue, the weight was. The
+published `hppnet_l2_r2_s0` survived because its conv stack over all bins
+had no pooled scalar feeding bin 0. **Final fix (Dmitrii, 2026-10-15):**
+keep the uniform linear convention and the pooled logit into bin 0 (an L2
+model reads 0 or ≥ `fmin`, never in between), and leave bin 0 at weight 1
+on every grid — the only configuration that empirically held (regression
+test `test_bin_0_is_not_focus_weighted_on_any_grid`, both grids). The
+no-schedule stream stays — it is what every earlier run and every pitch
+paper did — but the ramp was not what broke HPPNet.
 
 | transform | where | parameters | labels | class |
 |---|---|---|---|---|
@@ -465,22 +477,27 @@ Translation head, definition:
    weak frame); the mask is the head's `unreachable` buffer. A rotor
    passing 1–27 rev/s is unrepresentable by L0/L1/L2 — a stated limitation
    of the published grids.
-4. **Zero on the linear grid is a rate; on a log grid it is a state**
-   (Dmitrii, 2026-10-15, replacing the 2026-10-14 "one off state everywhere").
-   The linear 0–160 grid keeps the uniform convention of every earlier
-   linear-grid run — bin 0 is the 0 rev/s rate bin, a stopped rotor is a
-   Gaussian peak at 0, the loss, focus, CRF and readout treat it like any
-   rate — because that is what keeps the linear grid simple and stable; it
-   applies to L2, HRSPNet, the pyramid and the plain ports. A log grid has
-   no zero rate, so L1 emits ``G_log + 1`` bins with an OFF state at bin 0
-   (hard target 1 on stopped frames, free transitions, excluded from the
-   focus weight, read as exactly 0.0), fed by one per-map off logit (a
-   linear read of the trunk's frequency-pooled last features). L2's
-   translation head routes that logit into linear bin 0, where it is
-   trained as the 0 rev/s rate logit — a log trunk has no bins below its
-   `fmin`, so the pooled logit is the only thing that can say "0 rev/s"
-   there. The flag is the grid kind (`grid_from_spec` → `has_off`;
-   `linear` False, `log_off` True), carried by the model as `out_has_off`.
+4. **Zero on the linear grid is a rate; on a log grid it is a state; bin 0
+   is never focus-weighted** (Dmitrii, 2026-10-15, replacing the 2026-10-14
+   "one off state everywhere"). The linear 0–160 grid keeps the uniform
+   convention of every earlier linear-grid run — bin 0 is the 0 rev/s rate
+   bin, a stopped rotor is a Gaussian peak at 0, the CRF and readout treat
+   it like any rate — because that is what keeps the linear grid simple;
+   it applies to L2, HRSPNet, the pyramid and the plain ports. A log grid
+   has no zero rate, so L1 emits ``G_log + 1`` bins with an OFF state at
+   bin 0 (hard target 1 on stopped frames, free transitions, read as
+   exactly 0.0), fed by one per-map off logit (a linear read of the trunk's
+   frequency-pooled last features). L2's translation head routes that
+   logit into linear bin 0, where it is trained as the 0 rev/s rate logit —
+   a log trunk has no bins below its `fmin`, so the pooled logit is the only
+   thing that can say "0 rev/s" there, and an L2 model reads **either 0 or a
+   rate ≥ `fmin`** (~27.5 rev/s), never in between (test
+   `test_l2_reads_zero_or_at_least_the_trunk_s_lowest_rate`). The flag is
+   the grid kind (`grid_from_spec` → `has_off`; `linear` False, `log_off`
+   True), carried by the model as `out_has_off`. On EVERY grid the loss
+   leaves bin 0 at weight 1 (`layer_pit_bce`): its positive is a class
+   present on ~20 % of training frames, not a sparse peak, and the ~65×
+   focus there is what collapsed the HPPNet-L2 pilots (post-mortem below).
 5. **Depthwise linear conv**, kernel 9 (±4 rev/s), identity-initialised
    (centre tap 1, bias 0): L2 starts as L1 re-gridded; the only thing it can
    learn is a 9-tap sharpening kernel per rotor.

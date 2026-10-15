@@ -66,8 +66,6 @@ def layer_pit_bce(
     target: torch.Tensor,
     pos_weight: float | None = None,
     focus: float = 0.0,
-    *,
-    off_bin: bool = False,
 ) -> torch.Tensor:
     """Permutation-invariant BCE between two stacks of layers.
 
@@ -76,23 +74,28 @@ def layer_pit_bce(
         target: ``(B, R, G, T)`` soft per-rotor target in ``[0, 1]``.
         pos_weight: positive-class weight; ``None`` (the default) means 1, and
             see the module docstring for why anything else breaks the readout.
-        focus: PER-BIN emphasis, weight ``1 + focus * target``. This is the
-            class-imbalance handle that ``pos_weight`` cannot be here. It
-            scales each bin's WHOLE cross-entropy by a positive constant, and
-            a positive constant does not move a minimum — every bin's optimum
-            stays ``sigmoid(z) = target``, so the readout stays exact.
-            ``focus = G / m``, ``m`` the layer's expected Gaussian mass in bins
-            (`models.salience_crf.layer_focus`), puts about equal total weight
-            on the peak and on everything else.
-        off_bin: the grid carries an OFF state at bin 0 (log grids). That bin
-            is then EXCLUDED from the focus weight: its positive is a class
-            present on every stopped frame (silence arm + ground spans, ~20 %
-            of training), not a sparse peak, so the same weight there tilts
-            its BCE ~65:1 towards "off" and the cheapest off head says off
-            everywhere — the HPPNet-L2 pilot collapse of 2026-10-15 (off p
-            0.95 on cruise frames above a correct map). On the linear grid
-            (``off_bin`` False) bin 0 is the 0 rev/s rate bin and a stopped
-            rotor is a Gaussian peak there, weighted like any other peak.
+        focus: PER-BIN emphasis, weight ``1 + focus * target`` on bins
+            ``1..``. This is the class-imbalance handle that ``pos_weight``
+            cannot be here. It scales each bin's WHOLE cross-entropy by a
+            positive constant, and a positive constant does not move a
+            minimum — every bin's optimum stays ``sigmoid(z) = target``, so
+            the readout stays exact. ``focus = G / m``, ``m`` the layer's
+            expected Gaussian mass in bins (`models.salience_crf.layer_focus`),
+            puts about equal total weight on the peak and on everything else.
+
+            BIN 0 IS NEVER FOCUS-WEIGHTED, on any grid. Its positive is a
+            CLASS present on every stopped frame (silence arm + ground spans,
+            ~20 % of training), not a sparse peak among ``G`` competitors: on
+            a log grid it is the off state; on the linear grid it is the
+            0 rev/s bin, which a log trunk reaches only through its pooled
+            off logit (bins 1-27 are unreachable) and which on a 0-floored
+            grid is the edge the stopped class sits on. Weighting that class
+            ~65:1 made the cheapest head say "0" everywhere above a correct
+            map — the HPPNet-L2 collapses of 2026-10-15 (off-state pilots 1-2:
+            off p 0.95 on cruise frames; linear-convention pilot 4: the same
+            drift through bin 0, `real_cruise` 1.7 → 22 by step 4.5k). The
+            one run that held was the one with bin 0 at weight 1. Bin 0 gets
+            plain BCE; the rate bins keep the emphasis.
 
     Returns:
         Scalar: the mean over the batch of the best assignment's mean BCE.
@@ -116,8 +119,7 @@ def layer_pit_bce(
         bce = F.binary_cross_entropy_with_logits(logits, tgt, pos_weight=pw, reduction="none")
         if focus:
             weight = 1.0 + float(focus) * tgt
-            if off_bin:
-                weight[:, :, :1] = 1.0
+            weight[:, :, :1] = 1.0
             bce = bce * weight
         cols.append(bce.mean(dim=(2, 3)))  # (B, R)
     cost = torch.stack(cols, dim=2)  # (B, R, R)
@@ -209,9 +211,7 @@ class LayerPITSalienceBCELoss:
         logits = get_tensor(pred, self.pred_key)
         rps = get_tensor(target, self.target_key).float()
         layers, tgt = self.layers_and_target(logits, rps)
-        return layer_pit_bce(
-            layers, tgt, pos_weight=self.pos_weight, focus=self.focus, off_bin=self.has_off
-        )
+        return layer_pit_bce(layers, tgt, pos_weight=self.pos_weight, focus=self.focus)
 
 
 def resolve_focus(focus: float | str, grid: Any, sigma_rev_s: float, *, has_off: bool) -> float:
