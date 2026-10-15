@@ -17,4 +17,4 @@ data:
     params:
       path: conf/online_mix/rp_all.yaml
 optim:
-  lr: 1.0e-3  # placeholder: set from results/rp_lr_range/harmof0.json (LR range test)
+  lr: 1.0e-3  # LR range test rp_harmof0_l2_all: flat 1e-4..1e-2, rises from 1.6e-2

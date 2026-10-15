@@ -12,4 +12,4 @@ Regressor row (pilot run of the grid): the best SimpleConv modification, SimpleC
 
 ## Conclusion
 
-Defined 2026-10-14; not yet run. Max LR to be set from the family's LR range test.
+Defined 2026-10-14; not yet run. Max LR 3.0e-4 from the family's LR range test (`results/rp_lr_range/rp_scv2_all.json`, read 2026-10-15: loss non-finite at 3.5e-3 (fp16 forward), a tenth of it).

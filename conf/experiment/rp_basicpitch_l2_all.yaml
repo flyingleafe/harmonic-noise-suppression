@@ -17,4 +17,4 @@ data:
     params:
       path: conf/online_mix/rp_all.yaml
 optim:
-  lr: 1.0e-3  # placeholder: set from results/rp_lr_range/basicpitch.json (LR range test)
+  lr: 3.0e-3  # LR range test rp_basicpitch_l2_all: never rises, floor at 4.8e-3

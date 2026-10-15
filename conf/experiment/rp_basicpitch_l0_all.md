@@ -12,4 +12,4 @@ Claim 1 (unadapted salience models fail): Basic Pitch (hop 256) at ladder level 
 
 ## Conclusion
 
-Defined 2026-10-14; not yet run. Max LR to be set from the family's LR range test.
+Defined 2026-10-14; not yet run. Max LR 3.0e-3 from the family's LR range test (`results/rp_lr_range/rp_basicpitch_l2_all.json`, read 2026-10-15: never rises, floor at 4.8e-3).

@@ -17,4 +17,4 @@ data:
     params:
       path: conf/online_mix/rp_all.yaml
 optim:
-  lr: 1.0e-3  # placeholder: set from results/rp_lr_range/simpleconv.json (LR range test)
+  lr: 1.0e-3  # LR range test rp_simpleconv_all: floor at 7.3e-3, rises from 7.8e-3

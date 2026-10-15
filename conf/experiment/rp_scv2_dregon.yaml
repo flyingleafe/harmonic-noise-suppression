@@ -17,4 +17,4 @@ data:
     params:
       path: conf/online_mix/rp_dregon.yaml
 optim:
-  lr: 1.0e-3  # placeholder: set from results/rp_lr_range/scv2.json (LR range test)
+  lr: 3.0e-4  # LR range test rp_scv2_all: loss non-finite at 3.5e-3 (fp16 forward), a tenth of it
