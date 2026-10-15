@@ -183,10 +183,27 @@ def run(args: argparse.Namespace) -> dict:
     return result
 
 
+def ema_curve(losses: list[float], beta: float) -> np.ndarray:
+    """Zero-seeded, bias-corrected EMA of the per-step loss."""
+    out = np.empty(len(losses))
+    val = 0.0
+    for i, x in enumerate(losses):
+        val = beta * val + (1 - beta) * x
+        out[i] = val / (1 - beta ** (i + 1))
+    return out
+
+
 def summarize() -> None:
-    """One line per committed range test: the numbers the sibling .md files quote."""
+    """One line per committed range test, recomputed from the raw (lr, loss) curve.
+
+    The recommendation fields stored at run time are not trusted here: runs
+    before 44c1aa89 seeded the EMA with the first loss and then bias-corrected
+    it, which put the steepest slope at the first window.
+    """
     for path in sorted((REPO_ROOT / "results" / "rp_lr_range").glob("*.json")):
         r = json.loads(path.read_text())
+        ema = ema_curve(r["loss"], r["ema_beta"])
+        r.update(recommend(np.asarray(r["lr"]), ema, r["divergence"], r["window"]))
         if r["step_divergence"] is None:
             diverge = "none"
         else:
