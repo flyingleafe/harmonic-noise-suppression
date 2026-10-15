@@ -8,7 +8,7 @@
 enabled: true
 every_optimizer_steps: 500
 max_optimizer_steps: 100000  # 200 rounds; the root `epochs: 200` is the round cap
-batch_size: 128
+batch_size: 32  # loader knob, no_grad: 8 s panel clips are 4x the 2 s training chunk, so 32 = the training activation footprint (128 OOMed HPPNet at 43 GiB on an A100-80)
 num_workers: null
 smoothing_window: 5
 min_relative_improvement: 0.01
