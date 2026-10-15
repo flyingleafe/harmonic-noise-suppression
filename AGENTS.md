@@ -43,7 +43,7 @@ python train.py experiment=<name>          # the only training entry point
 python eval.py experiment=<name>           # the only evaluation entry point
 python scripts/derive.py list|derive|adopt # the only dataset driver
 dload pull <name>                          # prefetch a dataset (R2 bucket ml-data-new; pins in dload.lock)
-omnirun submit --backend <b> --gpus 1 --time 30m --yes -- python train.py experiment=<name>
+omnirun submit --backend <b> --gpus 1 --time 30m --outputs 'results/<name>/**' -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=<name>'
 omnirun ps | status <job> | logs -f <job> | wait <job> | pull <job>
 ```
 
