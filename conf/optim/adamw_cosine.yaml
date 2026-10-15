@@ -1,0 +1,13 @@
+# AdamW + step-based LR schedule (docs/experiments/paper-real-protocol.md
+# § "Budget and LR"): linear warm-up 0 -> `lr` (the MAX LR, set per model
+# family by the LR range test) over the first `warmup_steps` optimizer steps,
+# cosine to `min_lr_frac * lr` at `total_steps` (= the step budget), constant
+# after. A pure function of the optimizer-step count; validation never
+# changes it. Its state rides in train_state.pt.
+optimizer: adamw
+lr: 1.0e-3
+weight_decay: 1.0e-4
+optimizer_params: {}
+warmup_steps: 5000
+min_lr_frac: 0.01
+total_steps: ${validation.max_optimizer_steps}

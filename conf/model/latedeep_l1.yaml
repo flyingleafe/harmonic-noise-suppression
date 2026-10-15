@@ -1,0 +1,26 @@
+# latedeep_l1 — level L1 of the adaptation ladder (docs/experiments/
+# paper-real-protocol.md): conf/model/latedeep_l0.yaml with FOUR per-rotor maps
+# on the published HCQT grid. LateDeep's final 1x1 (squishy.1) emits 4 maps
+# instead of 1, and a per-map OFF logit (models.salience_rps.OffLogitHead:
+# Linear(8 -> 4) on LateDeep.features pooled over frequency) is prepended as
+# bin 0. Output (B, 4 * 361, T): per map [off, 32.7 * 2**(b/60) for b < 360].
+# Readout: one CRF path per map with a free off state.
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_log60_h256.yaml (hop 256,
+# the HCQT's own).
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 256]
+_target_: models.registry.build_model
+params:
+  name: multif0_salience
+  n_fft: 2048
+  hop_length: 512
+  num_rotors: 4
+  fmin: 32.7
+  n_maps: 4
+  translation_head: false
+model_type: null
+legacy_config_path: null

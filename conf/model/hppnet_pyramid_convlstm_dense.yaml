@@ -1,0 +1,35 @@
+# hppnet_pyramid_convlstm_dense — the dense-ConvLSTM control of HRSPNet
+# (docs/experiments/paper-real-protocol.md, decision (b)):
+# conf/model/hppnet_pyramid_convlstm.yaml verbatim except `separable: false`,
+# i.e. the recurrence is a dense Conv1d(64 -> 256, k=33) per direction (about
+# 1.08 M parameters) instead of the per-channel tap kernel + 1x1 mix. If it
+# wins clearly, the paper reports both and says why.
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_rp.yaml.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_pyramid
+  sr: 16000
+  hop_length: 512
+  num_rotors: 4
+  n_ffts: [16384, 8192, 4096, 2048]
+  level0_fmax: 1200.0
+  out_bins: 164
+  k_max: 84
+  k_sub: 8
+  f_min: null
+  f_max: null
+  c_har: 16
+  embedding: 128
+  n_maps: 4
+  head: convlstm
+  lstm_size: 128
+  max_slew: 15.0
+  separable: false
+model_type: null
+legacy_config_path: null

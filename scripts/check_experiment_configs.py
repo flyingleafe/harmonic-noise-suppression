@@ -34,14 +34,20 @@ def _experiment_names() -> list[str]:
     return sorted(p.stem for p in EXPERIMENT_DIR.glob("*.yaml"))
 
 
-def check_all() -> tuple[list[str], list[tuple[str, str]]]:
-    """Compose+resolve every experiment. Returns (ok_names, [(name, error)])."""
+def check_all() -> tuple[list[str], list[str], list[tuple[str, str]]]:
+    """Compose+resolve every runnable experiment.
+
+    Returns ``(ok_names, legacy_names, [(name, error)])``; legacy experiments
+    (``training.config.legacy_protocol_error``) are frozen records of the
+    plateau-LR protocol and are not composed.
+    """
     sys.path.insert(0, str(REPO_ROOT / "src"))
-    from training.config import register_configs
+    from training.config import legacy_protocol_error, register_configs
 
     register_configs()
 
     ok: list[str] = []
+    legacy: list[str] = []
     failed: list[tuple[str, str]] = []
     names = _experiment_names()
 
@@ -50,6 +56,9 @@ def check_all() -> tuple[list[str], list[tuple[str, str]]]:
 
     with initialize(version_base=None, config_path="../conf"):
         for name in names:
+            if legacy_protocol_error([f"experiment={name}"], REPO_ROOT / "conf"):
+                legacy.append(name)
+                continue
             try:
                 cfg = compose(
                     config_name="config",
@@ -61,12 +70,12 @@ def check_all() -> tuple[list[str], list[tuple[str, str]]]:
             else:
                 ok.append(name)
 
-    return ok, failed
+    return ok, legacy, failed
 
 
 def main() -> int:
-    ok, failed = check_all()
-    print(f"Composed OK: {len(ok)}/{len(ok) + len(failed)}")
+    ok, legacy, failed = check_all()
+    print(f"Composed OK: {len(ok)}/{len(ok) + len(failed)} (legacy, not composed: {len(legacy)})")
     for name in ok:
         print(f"  OK   {name}")
     if failed:

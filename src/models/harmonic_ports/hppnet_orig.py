@@ -75,30 +75,30 @@ DEVIATIONS, and what forces each:
    `losses.SalienceRPSBCELoss` takes logits, so the sigmoid moves into the loss.
    ``BCEWithLogitsLoss(x) == BCELoss(sigmoid(x))``.
 8. MULTI-PITCH. HPPNet's frame head is already polyphonic, one bin per pitch;
-   ``n_maps=1`` reads it multi-hot (four rotors, four bumps). ``n_maps>1`` emits
-   one map per rotor and reaches `LayerCRFReadout`, as in the ports.
+   ``n_maps=1`` reads it multi-hot (four rotors, four bumps; level L0).
+   ``n_maps>1`` emits one map per rotor plus an off bin and reaches
+   `LayerCRFReadout` (levels L1/L2, below).
 
 WHAT THE GRID MEANS HERE. Under ``f0 = rps`` the 352 bins span 27.5-4370 rev/s,
 of which rotors occupy bins 0-118. See `harmof0_orig` for the full reading of
 that axis; the two share it exactly.
 
-LEVEL L2 — THE LINEAR OUTPUT GRID (``superres_out=True``). The same seam
-`harmof0_orig` carries, read there in full: the whole published path above —
-CQT, `HarmonicDilatedConv`, `CNNTrunk`, `FreqGroupLSTM` — is untouched, and
-its ``n_maps x 352`` log-grid logits pass through
-`models.salience_rps.FreqSuperResHead` onto ``out_bins`` uniform bins over
-``[out_fmin, out_fmax]``. The adapter is ``superres_head``, NOT ``head``:
-``head`` is HPPNet's own `FreqGroupLSTM`, and that name stays on the
-published module so the L0 checkpoints keep loading. ``n_maps > 1`` requires
-it, as in `LateDeepSalience`, because `LayerCRFReadout`'s band and vertex fit
-are defined on a uniform axis. The clamp below the CQT's ``fmin`` (output bins
-0-54 read the bottom input bin) is L2's documented limit and is not moved here.
+LEVELS L1 AND L2 — the seam `harmof0_orig` carries, read there in full. The
+published path above — CQT, `HarmonicDilatedConv`, `CNNTrunk` — is untouched.
+L1 (``n_maps=R``): the head emits ``R`` maps on the 352-bin log grid and
+`models.salience_rps.OffLogitHead` reads a per-map OFF logit from the features
+the head consumes (the trunk's, or the ConvLSTM's), pooled over frequency, as
+bin 0. L2 (``translation_head=True``) adds `models.salience_rps.
+TranslationHead` onto the 164-bin 0-159.2 rev/s grid. The adapter is
+``translation``, NOT ``head``: ``head`` is HPPNet's own `FreqGroupLSTM`, and
+that name stays on the published module so the L0 checkpoints keep loading.
 
 TEMPORAL-HEAD ABLATIONS (``head``). ``"freq_group_lstm"`` is the published
 module. ``"conv1x1"`` drops the recurrence (a 1x1 to ``n_maps``; the temporal
 model is ``block_6-8`` and the CRF) and ``"convlstm"`` replaces it with
 `models.harmonic_ports.rate_convlstm.RateConvLSTM` — gates convolved along the
-log axis with half-width ``convlstm_half_width`` CQT bins, then a 1x1. The
+log axis with half-width ``convlstm_half_width`` CQT bins (rank-factorised
+``separable`` by default, the protocol's "+ConvLSTM" step), then a 1x1. The
 two are the CQT-side counterparts of `HPPNetPyramid`'s variants C and A.
 """
 
@@ -115,8 +115,7 @@ import torch.nn.functional as F
 from models.harmonic_ports.layer_readout import LayerCRFReadout
 from models.harmonic_ports.rate_convlstm import RateConvLSTM
 from models.harmonic_ports.tap_conv import shift_tap_table, tap_conv
-from models.multif0.utils import linear_freq_grid
-from models.salience_rps import FreqSuperResHead, SalienceRPSPredictor
+from models.salience_rps import SalienceRPSPredictor
 
 __all__ = [
     "HPPNetOrig",
@@ -345,16 +344,15 @@ class CQTLogSpecgram(nn.Module):
 
 
 class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
-    """Audio -> rotor-rate salience logits ``(B, n_maps * 352, T)`` on the LOG grid.
+    """Audio -> rotor-rate salience logits ``(B, n_maps * G, T)``.
 
-    The `salience_rps` contract: ``forward(audio) -> (B, F, T)`` logits,
-    ``outputs_salience = True``, BCE against the RPS-derived target, Hungarian
-    tracking at eval. The output axis is the CQT's own grid, so
-    ``output_freqs()`` is ``27.5 * 2 ** (i / 48)`` for ``i = 0 .. 351`` — the
-    same array `HarmoF0Orig` emits and the same one
-    `conf/loss/salience_bce_orig.yaml` builds. With ``superres_out=True``
-    (level L2) the output is ``(B, n_maps * out_bins, T)`` on the LINEAR
-    ``[out_fmin, out_fmax]`` grid instead, and ``output_freqs()`` follows it.
+    The `salience_rps` contract: ``forward(audio) -> (B, n_maps * G, T)``
+    logits, ``outputs_salience = True``. Level L0 (``n_maps=1``): one shared
+    map on the CQT's own grid, ``output_freqs()`` = ``27.5 * 2 ** (i / 48)``
+    for ``i = 0 .. 351`` (the array `HarmoF0Orig` emits and
+    `conf/loss/salience_bce_orig.yaml` builds), threshold + Hungarian at eval.
+    L1 (``n_maps=R``): ``G = n_bins + 1``, bin 0 the off logit. L2
+    (``translation_head=True``): ``G = 164`` on `RP_LINEAR_GRID`.
 
     Args:
         n_fft, hop_length: the frame grid `predict_rps` resamples its output
@@ -379,23 +377,21 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
             only append branches; the operator itself is unchanged. Harmonics
             above the grid's top bin fall into the zero padding.
         freq_pool, time_pooling: the two published pools (deviations 1 and 2).
-        n_maps: salience maps emitted. > 1 stacks per-rotor layers along the
-            output axis for `LayerCRFReadout` and needs ``superres_out=True``.
-        superres_out: level L2 (module docstring). Resample the log-grid
-            logits onto a LINEAR grid through ``superres_head``, a
-            `FreqSuperResHead`; ``out_freqs`` becomes that grid. With
-            ``freq_pool > 1`` the input grid is the pooled bin centres.
-        out_fmin, out_fmax, out_bins: the linear output grid; the defaults are
-            the ports' 0-150 rev/s in 300 bins, and a config must pin them to
-            the grid its loss builds (conf/loss/salience_layers_r150.yaml).
-        head_hidden, head_kernel: the sharpening stack's width and its
-            frequency kernel, `FreqSuperResHead`'s own defaults.
+        n_maps: salience maps emitted. 1 is the shared multi-hot map (L0);
+            > 1 adds the off bin and stacks per-rotor layers along the output
+            axis for `LayerCRFReadout` (L1).
+        translation_head: level L2 — `models.salience_rps.TranslationHead`
+            onto `RP_LINEAR_GRID`; needs ``n_maps > 1``. With ``freq_pool > 1``
+            its input grid is the pooled bin centres.
         head: ``"freq_group_lstm"`` (published), ``"conv1x1"`` (no recurrence)
             or ``"convlstm"`` (`RateConvLSTM` of width ``lstm_size`` over two
             directions, then 1x1); module docstring.
         convlstm_half_width: `RateConvLSTM` gate reach in CQT bins per frame.
             15 = the raw telemetry's largest sustained per-frame slew at rates
             on the grid (`updown`, 14.9 log-bins; the rest <= 6).
+        separable: the ``"convlstm"`` recurrence as a per-channel tap kernel
+            plus a 1x1 mix (`RateConvLSTM(separable=True)`, the protocol's
+            chain) instead of a dense ``hidden -> 4 * hidden`` convolution.
     """
 
     def __init__(
@@ -416,25 +412,15 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         freq_pool: int = 1,
         time_pooling: bool = False,
         n_maps: int = 1,
-        superres_out: bool = False,
-        out_fmin: float = 0.0,
-        out_fmax: float = 150.0,
-        out_bins: int = 300,
-        head_hidden: int = 32,
-        head_kernel: int = 5,
+        translation_head: bool = False,
         head: str = "freq_group_lstm",
         convlstm_half_width: int = 15,
+        separable: bool = True,
     ):
         super().__init__(n_fft, hop_length, num_rotors)
         if int(n_bins) % int(freq_pool):
             raise ValueError(f"n_bins={n_bins} is not divisible by freq_pool={freq_pool}")
-        self.sr, self.n_maps = int(sr), int(n_maps)
-        if self.n_maps > 1 and not superres_out:
-            raise ValueError(
-                "per-rotor layers need an explicit LINEAR output grid: the "
-                "log-parabolic readout and the CRF band are both defined on a "
-                "uniform axis. Set superres_out=True."
-            )
+        self.sr = int(sr)
         self.freq_pool, self.time_pooling = int(freq_pool), bool(time_pooling)
 
         self.frontend = CQTLogSpecgram(
@@ -457,18 +443,20 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
             harmonic_dilations=harmonic_dilations,
         )
         self.temporal: nn.Module
+        n_out, head_in = int(n_maps), int(embedding)
         if head == "freq_group_lstm":
             self.temporal = nn.Identity()
-            self.head: nn.Module = FreqGroupLSTM(
-                int(embedding), self.n_maps, int(lstm_size), sigmoid=False
-            )
+            self.head: nn.Module = FreqGroupLSTM(head_in, n_out, int(lstm_size), sigmoid=False)
         elif head == "conv1x1":
             self.temporal = nn.Identity()
-            self.head = nn.Conv2d(int(embedding), self.n_maps, kernel_size=1)
+            self.head = nn.Conv2d(head_in, n_out, kernel_size=1)
         elif head == "convlstm":
             hidden = int(lstm_size) // 2
-            self.temporal = RateConvLSTM(int(embedding), hidden, 2 * int(convlstm_half_width) + 1)
-            self.head = nn.Conv2d(2 * hidden, self.n_maps, kernel_size=1)
+            self.temporal = RateConvLSTM(
+                int(embedding), hidden, 2 * int(convlstm_half_width) + 1, separable=separable
+            )
+            head_in = 2 * hidden
+            self.head = nn.Conv2d(head_in, n_out, kernel_size=1)
         else:
             raise ValueError(
                 f"head must be 'freq_group_lstm', 'conv1x1' or 'convlstm', got {head!r}"
@@ -485,23 +473,12 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         centers = (
             np.arange(self.n_bins, dtype=np.float64) * self.freq_pool + (self.freq_pool - 1) / 2.0
         )
-        self.out_freqs = float(fmin) * 2.0 ** (centers / float(bins_per_octave))
+        log_freqs = float(fmin) * 2.0 ** (centers / float(bins_per_octave))
+        self.out_freqs = log_freqs
         self.spec_sr = int(sr)
         self.spec_hop = int(hop_length)
-
-        # Level L2: the published log-grid logits resampled and sharpened onto a
-        # linear output grid. `in_freqs` is the CQT grid (pooled centres when
-        # `freq_pool > 1`) computed above; `out_freqs` moves to the linear grid
-        # so the target, the CRF band and the tracker all read the axis the
-        # model emits. Named `superres_head`: `head` is the `FreqGroupLSTM`.
-        self.superres_head: FreqSuperResHead | None = None
-        if superres_out:
-            in_freqs = self.out_freqs
-            out_freqs = linear_freq_grid(out_fmin, out_fmax, out_bins)
-            self.out_freqs = out_freqs
-            self.superres_head = FreqSuperResHead(
-                in_freqs, out_freqs, hidden=head_hidden, kernel=head_kernel, n_maps=self.n_maps
-            )
+        # The off logit reads what the map head reads (trunk or ConvLSTM output).
+        self._setup_rotor_output(log_freqs, head_in, n_out, translation_head)
 
     # ── grid ────────────────────────────────────────────────────────────────
 
@@ -523,14 +500,12 @@ class HPPNetOrig(LayerCRFReadout, SalienceRPSPredictor):
         n_time = x.shape[2]
         if self.time_pooling:
             x = F.max_pool2d(x, (2, 1))
-        y = self.head(self.temporal(self.trunk(x)))  # (B, n_maps, T', F_out)
+        feats = self.temporal(self.trunk(x))  # (B, C, T', F_out)
+        y = self.head(feats).transpose(2, 3)  # (B, n_maps, F_out, T')
+        y = self._prepend_off(y, feats.transpose(2, 3))  # (B, n_maps, [1 +] F_out, T')
         if self.time_pooling:
-            y = F.interpolate(y, size=(n_time, y.shape[-1]), mode="bilinear", align_corners=False)
-        y = y.transpose(2, 3)  # (B, n_maps, F_out, T)
-        if self.superres_head is not None:
-            y = self.superres_head(y)  # (B, n_maps, out_bins, T) on the linear grid
-        b, m, f, t = y.shape
-        return y.reshape(b, m * f, t)
+            y = F.interpolate(y, size=(y.shape[2], n_time), mode="bilinear", align_corners=False)
+        return self._translate_and_flatten(y)
 
     # No `to()` override, unlike `LateDeepSalience`: nnAudio's `CQT2010v2` is an
     # ordinary submodule holding ordinary buffers, so `nn.Module.to` moves it.

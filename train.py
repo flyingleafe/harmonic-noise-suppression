@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import random
 import sys
+from pathlib import Path
 
 import hydra
 import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
 
-from training.config import register_configs
+from training.config import legacy_protocol_error, register_configs
 from training.loop import run_training
 from training.validate import validate_config
 
@@ -56,4 +57,9 @@ def main(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
+    # Before Hydra composes: a legacy experiment would otherwise die on a bare
+    # "Key 'monitor' not in 'OptimConfig'" instead of naming the protocol.
+    refusal = legacy_protocol_error(sys.argv[1:], Path(__file__).resolve().parent / "conf")
+    if refusal:
+        raise SystemExit(refusal)
     main()

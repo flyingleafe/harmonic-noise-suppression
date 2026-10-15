@@ -1,161 +1,79 @@
+"""Full-panel validation: meta-predicate views, frame-weighted scores, clip
+statistics and the per-sample arrays (``training.validation``)."""
+
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import cast
 
+import numpy as np
 import pytest
 import tdseries as td
 import torch
+import torch.nn.functional as F
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 from data_processing.collate import frame_collate
-from losses import PITMSELoss
 from losses._common import get_tensor
-from metrics.rps import batched_pit_mae
-from tasks.codecs import RPSPredictionCodec, SalienceRPSCodec
-from tests.training._fixtures import TinyRPSModel
-from training.validation import (
-    MultiMetricController,
-    build_validation_plan,
-    rps_readout_for,
-    validate_rps,
-)
+from metrics.regimes import REGIMES, frame_regimes
+from tasks.codecs import SalienceRPSCodec
+from training.validation import build_validation_plan, rps_readout_for, validate_rps
+
+FPS = 16000 / 512
+PANEL_CLIPS = [
+    {"dataset": "dregon", "source_type": "nosource", "profile": "cruise"},
+    {"dataset": "dregon", "source_type": "loudspeaker", "profile": "zero_then_cruise"},
+    {"dataset": "md2", "source_type": "nosource", "profile": "ramp"},
+    {"dataset": "md2", "source_type": "mixed", "profile": "standby"},
+]
 
 
-def _dataset(seed: int, size: int) -> dict:
-    return {
-        "_target_": "tests.training._fixtures.TinyRPSFrameDataset",
-        "params": {
-            "n_samples": size,
-            "duration_s": 0.5,
-            "sample_rate": 16000,
-            "seed": seed,
-        },
-        "iterable": False,
-    }
-
-
-def test_validation_plan_reuses_datasets_for_overlapping_views():
-    cfg = OmegaConf.create(
+def _panel_cfg(views: dict, *, clips=None, duration_s: float = 2.0, **extra):
+    return OmegaConf.create(
         {
-            "datasets": {"real": _dataset(1, 8), "synthetic": _dataset(2, 4)},
-            "views": {
-                "r1": {
-                    "dataset": "real",
-                    "start": 0,
-                    "stop": 8,
-                    "channels": [0],
-                    "channels_per_clip": 2,
-                },
-                "r2": {"dataset": "real", "start": 0, "stop": 8},
-                "synthetic": {"dataset": "synthetic"},
+            "datasets": {
+                "real": {
+                    "_target_": "tests.training._fixtures.TinyPanelFrameDataset",
+                    "params": {
+                        "clips": clips or PANEL_CLIPS,
+                        "n_channels": 2,
+                        "duration_s": duration_s,
+                    },
+                    "iterable": False,
+                }
             },
-            "aggregates": {
-                "overall": {"r2": 0.5, "synthetic": 0.5},
-            },
-            "primary": ["r1", "r2", "synthetic", "overall"],
-            "control": "overall",
+            "views": views,
+            "aggregates": extra.pop("aggregates", {}),
+            "primary": extra.pop("primary", list(views)),
+            "control": extra.pop("control", next(iter(views))),
         }
     )
-    plan = build_validation_plan(cfg)
-
-    assert plan.size == 12
-    assert len(plan.dataset.datasets) == 2
-    views = {view.name: view for view in plan.views}
-    assert (views["r1"].start, views["r1"].stop, views["r1"].channels) == (0, 8, (0,))
-    assert (views["synthetic"].start, views["synthetic"].stop) == (8, 12)
 
 
-def test_gpu_style_validation_reduces_overlapping_views_in_one_pass():
-    cfg = OmegaConf.create(
-        {
-            "datasets": {"real": _dataset(1, 8), "synthetic": _dataset(2, 4)},
-            "views": {
-                "r1": {
-                    "dataset": "real",
-                    "start": 0,
-                    "stop": 8,
-                    "channels": [0],
-                    "channels_per_clip": 2,
-                },
-                "r2": {"dataset": "real"},
-                "synthetic": {"dataset": "synthetic"},
-            },
-            "aggregates": {"overall": {"r2": 0.5, "synthetic": 0.5}},
-            "primary": ["r1", "r2", "synthetic", "overall"],
-            "control": "overall",
-        }
-    )
-    plan = build_validation_plan(cfg)
-    loader = DataLoader(plan.dataset, batch_size=5, collate_fn=frame_collate)
-    scores, loss = validate_rps(
-        model=TinyRPSModel(),
-        codec=RPSPredictionCodec(frame_rate=(125, 4)),
-        loss_fn=PITMSELoss(rate=(125, 4)),
-        valid_loader=loader,
-        plan=plan,
-        device=torch.device("cpu"),
-        amp=False,
-        amp_dtype=None,
-    )
-
-    assert set(scores) == {"r1", "r2", "synthetic", "overall"}
-    assert scores["overall"] == pytest.approx(0.5 * scores["r2"] + 0.5 * scores["synthetic"])
-    assert all(torch.isfinite(torch.tensor(value)) for value in [*scores.values(), loss])
-
-
-class _StubSalienceModel(torch.nn.Module):
-    """Emits a fixed salience map and decodes it to a fixed RPS table, so the
-    validator's scores can be checked against the table independently."""
+class _TableModel(torch.nn.Module):
+    """Salience stand-in whose deployed decoder returns rows of a fixed RPS
+    table in loader order, so expected errors are known independently."""
 
     def __init__(self, table: torch.Tensor) -> None:
         super().__init__()
         self.table = table
         self.cursor = 0
-        self.seen: list[tuple[tuple[int, ...], int]] = []
 
     def forward(self, mixture: torch.Tensor) -> torch.Tensor:
         return torch.zeros(mixture.shape[0], 6, 10)
 
     def decode_logits(self, logits: torch.Tensor, n_samples: int) -> torch.Tensor:
-        self.seen.append((tuple(logits.shape), n_samples))
         out = self.table[self.cursor : self.cursor + logits.shape[0]]
         self.cursor += logits.shape[0]
         return out
 
 
-def test_salience_task_is_scored_through_the_model_decoder():
-    cfg = OmegaConf.create(
-        {
-            "datasets": {"real": _dataset(1, 8), "synthetic": _dataset(2, 4)},
-            "views": {
-                "r1": {
-                    "dataset": "real",
-                    "start": 0,
-                    "stop": 8,
-                    "channels": [0],
-                    "channels_per_clip": 2,
-                },
-                "synthetic": {"dataset": "synthetic"},
-            },
-            "aggregates": {},
-            "primary": ["r1", "synthetic"],
-            "control": "synthetic",
-        }
-    )
-    plan = build_validation_plan(cfg)
-    frames = [cast(td.Frame, plan.dataset[i]) for i in range(plan.size)]
-    targets = torch.stack([get_tensor(frame, "rps") for frame in frames])
-    table = targets + torch.arange(plan.size, dtype=torch.float32)[:, None, None]
-    model = _StubSalienceModel(table)
-    loader = DataLoader(plan.dataset, batch_size=5, collate_fn=frame_collate)
-
-    scores, _loss = validate_rps(
-        model=model,
+def _run(plan, table: torch.Tensor):
+    return validate_rps(
+        model=_TableModel(table),
         codec=SalienceRPSCodec(frame_rate=(125, 4)),
         loss_fn=lambda pred_frame, batch: torch.zeros(()),
-        valid_loader=loader,
+        valid_loader=DataLoader(plan.dataset, batch_size=3, collate_fn=frame_collate),
         plan=plan,
         device=torch.device("cpu"),
         amp=False,
@@ -163,115 +81,131 @@ def test_salience_task_is_scored_through_the_model_decoder():
         readout=rps_readout_for("salience_rps"),
     )
 
-    n_samples = get_tensor(frames[0], "mixture").shape[-1]
-    assert model.seen == [((5, 6, 10), n_samples), ((5, 6, 10), n_samples), ((2, 6, 10), n_samples)]
-    per_sample = batched_pit_mae(table, targets)
-    assert scores["r1"] == pytest.approx(float(per_sample[0:8:2].mean()))
-    assert scores["synthetic"] == pytest.approx(float(per_sample[8:].mean()))
+
+def _targets(plan) -> torch.Tensor:
+    return torch.stack(
+        [get_tensor(cast(td.Frame, plan.dataset[i]), "rps") for i in range(plan.size)]
+    )
+
+
+def test_views_select_items_by_meta_predicates():
+    plan = build_validation_plan(
+        _panel_cfg(
+            {
+                "dregon": {"where": {"dataset": "dregon"}},
+                "md2_source": {"where": {"dataset": "md2", "source_type": "mixed"}},
+                "source": {"where": {"source_type": ["loudspeaker", "mixed"]}},
+                "dregon_zero": {"where": {"dataset": "dregon"}, "regime": "zero"},
+            }
+        )
+    )
+    views = {view.name: view for view in plan.views}
+
+    assert plan.size == 8
+    assert views["dregon"].samples.tolist() == [True] * 4 + [False] * 4
+    assert views["md2_source"].samples.tolist() == [False] * 6 + [True] * 2
+    assert views["source"].samples.tolist() == [False, False, True, True, False, False, True, True]
+    assert views["dregon_zero"].regime == REGIMES.index("zero")
+    assert plan.clip_index.tolist() == [0, 0, 1, 1, 2, 2, 3, 3]
+    assert plan.channel.tolist() == [0, 1] * 4
+    assert plan.frame_rate == pytest.approx(FPS)
+
+
+@pytest.mark.parametrize(
+    ("views", "message"),
+    [
+        ({"real": {"dataset": "real", "start": 0, "stop": 8}}, "unknown keys"),
+        ({"md2_zero": {"where": {"dataset": "md2"}, "regime": "zero"}}, "selects no frames"),
+        ({"x": {"where": {"dataset": "nope"}}}, "selects no frames"),
+        ({"x": {"where": {"drone": "dregon"}}}, "lacks meta"),
+        ({"x": {"where": {"dataset": "md2"}, "regime": "hover"}}, "not in"),
+    ],
+)
+def test_plan_rejects_index_ranges_empty_cells_and_unknown_meta(views, message):
+    with pytest.raises(ValueError, match=message):
+        build_validation_plan(_panel_cfg(views))
+
+
+def test_plan_requires_the_control_among_primaries():
+    with pytest.raises(ValueError, match="control"):
+        build_validation_plan(
+            _panel_cfg(
+                {"dregon": {"where": {"dataset": "dregon"}}}, primary=["dregon"], control="real"
+            )
+        )
+
+
+def test_scores_are_frame_weighted_and_clip_stats_pool_channels():
+    views = {
+        "dregon": {"where": {"dataset": "dregon"}},
+        "md2": {"where": {"dataset": "md2"}},
+        "dregon_zero": {"where": {"dataset": "dregon"}, "regime": "zero"},
+        "dregon_cruise": {"where": {"dataset": "dregon"}, "regime": "cruise"},
+        "md2_ramp": {"where": {"dataset": "md2"}, "regime": "ramp"},
+    }
+    plan = build_validation_plan(
+        _panel_cfg(views, aggregates={"real": {"dregon": 0.5, "md2": 0.5}})
+    )
+    targets = _targets(plan)
+    n_frames = targets.shape[-1]
+    # A per-item, per-frame offset common to all rotors, smaller than every
+    # rotor gap, so the identity assignment is optimal and the error IS it.
+    offsets = (
+        0.005 * (torch.arange(plan.size)[:, None] + 1) * (1 + torch.arange(n_frames) / n_frames)
+    )
+    table = targets + offsets[:, None, :]
+    scores, loss, samples = _run(plan, table)
+
+    # Identity-assignment error of the realised float32 table, per frame.
+    expected_err = (table - targets).abs().mean(dim=1).numpy()
+    regimes = frame_regimes(targets, FPS).numpy()
+    np.testing.assert_allclose(samples.frame_err, expected_err, rtol=1e-5)
+    np.testing.assert_array_equal(samples.frame_regime, regimes)
+    np.testing.assert_allclose(samples.pit_mae, expected_err.mean(axis=1), rtol=1e-5)
+    assert samples.frame_regime.dtype == np.int8 and loss == 0.0
+
+    for view in plan.views:
+        mask = np.broadcast_to(view.samples[:, None], regimes.shape)
+        if view.regime is not None:
+            mask = mask & (regimes == view.regime)
+        assert scores[view.name] == pytest.approx(expected_err[mask].mean(), rel=1e-5)
+        clip_means = [
+            expected_err[(plan.clip_index == clip)[:, None] & mask].mean()
+            for clip in np.unique(plan.clip_index)
+            if mask[plan.clip_index == clip].any()
+        ]
+        stats = samples.clip_stats[view.name]
+        assert stats.count == len(clip_means)
+        assert stats.mean == pytest.approx(np.mean(clip_means), rel=1e-5)
+        assert stats.std == pytest.approx(np.std(clip_means), rel=1e-5, abs=1e-9)
+    assert samples.clip_stats["dregon_zero"].count == 1  # only clip 1 has stopped rotors
+    assert scores["real"] == pytest.approx(0.5 * scores["dregon"] + 0.5 * scores["md2"])
+    # Frame weighting differs from averaging per-item means on a regime cell.
+    zero_mask = (regimes == REGIMES.index("zero")) & plan.views[2].samples[:, None]
+    assert scores["dregon_zero"] != pytest.approx(samples.pit_mae[zero_mask.any(axis=1)].mean())
+
+
+def test_regimes_on_a_coarser_prediction_grid_keep_physical_slopes():
+    """Predictions on half the target's frame rate: the target is resampled
+    onto the prediction grid and labelled at THAT grid's rate — a 25 rev/s^2
+    spin-up stays a ramp (a mislabelled rate would halve the slope to 12.5)."""
+    plan = build_validation_plan(
+        _panel_cfg(
+            {"md2": {"where": {"dataset": "md2"}}},
+            clips=[{"dataset": "md2", "source_type": "nosource", "profile": "ramp"}],
+            duration_s=4.0,
+        )
+    )
+    targets = _targets(plan)
+    coarse = F.interpolate(targets, size=targets.shape[-1] // 2, mode="linear", align_corners=False)
+    scores, _, samples = _run(plan, coarse)
+
+    assert samples.frame_err.shape == (2, coarse.shape[-1])
+    interior = samples.frame_regime[:, 10:-10]
+    assert (interior == REGIMES.index("ramp")).all()
+    assert scores["md2"] == pytest.approx(float(samples.frame_err.mean()), rel=1e-5)
 
 
 def test_readout_dispatch_rejects_unsupported_tasks():
     with pytest.raises(ValueError, match="multi-validation supports tasks"):
         rps_readout_for("speech_enhancement")
-
-
-def test_any_subset_progress_delays_lr_reduction_and_all_subset_stagnation_stops():
-    cfg = SimpleNamespace(
-        smoothing_window=1,
-        min_rounds=0,
-        min_relative_improvement=0.01,
-        lr_patience=2,
-        lr_factor=0.5,
-        min_lr_reductions=2,
-        final_patience=2,
-    )
-    parameter = torch.nn.Parameter(torch.tensor(1.0))
-    optimizer = torch.optim.SGD([parameter], lr=1.0)
-    controller = MultiMetricController(cfg, ("real", "synthetic"))
-
-    assert controller.step({"real": 5.0, "synthetic": 5.0}, optimizer).improved
-    assert not controller.step({"real": 5.0, "synthetic": 4.9}, optimizer).lr_reduced
-    assert not controller.step({"real": 5.0, "synthetic": 4.9}, optimizer).lr_reduced
-    assert controller.step({"real": 5.0, "synthetic": 4.9}, optimizer).lr_reduced
-    assert optimizer.param_groups[0]["lr"] == pytest.approx(0.5)
-    controller.step({"real": 5.0, "synthetic": 4.9}, optimizer)
-    assert controller.step({"real": 5.0, "synthetic": 4.9}, optimizer).lr_reduced
-    controller.step({"real": 5.0, "synthetic": 4.9}, optimizer)
-    verdict = controller.step({"real": 5.0, "synthetic": 4.9}, optimizer)
-    assert verdict.stop_reason == "saturation"
-
-
-def test_meaningful_improvement_is_scale_invariant_in_log_space():
-    cfg = SimpleNamespace(
-        smoothing_window=1,
-        min_rounds=0,
-        min_relative_improvement=0.01,
-        lr_patience=10,
-        lr_factor=0.5,
-        min_lr_reductions=1,
-        final_patience=10,
-    )
-    parameter = torch.nn.Parameter(torch.tensor(1.0))
-    optimizer = torch.optim.SGD([parameter], lr=1.0)
-    controller = MultiMetricController(cfg, ("large", "small"))
-    controller.step({"large": 100.0, "small": 1.0}, optimizer)
-
-    subpercent = controller.step({"large": 99.5, "small": 0.995}, optimizer)
-    meaningful = controller.step({"large": 98.9, "small": 0.989}, optimizer)
-
-    assert subpercent.improved == ()
-    assert set(meaningful.improved) == {"large", "small"}
-
-
-def test_revised_policy_stops_after_exactly_thirty_six_stagnant_rounds():
-    cfg = SimpleNamespace(
-        smoothing_window=1,
-        min_rounds=30,
-        min_relative_improvement=0.01,
-        lr_patience=8,
-        lr_factor=0.5,
-        min_lr_reductions=3,
-        final_patience=12,
-    )
-    parameter = torch.nn.Parameter(torch.tensor(1.0))
-    optimizer = torch.optim.SGD([parameter], lr=1e-3)
-    controller = MultiMetricController(cfg, ("score",))
-    controller.step({"score": 1.0}, optimizer)
-
-    verdicts = [controller.step({"score": 1.0}, optimizer) for _ in range(36)]
-
-    assert [i + 1 for i, verdict in enumerate(verdicts) if verdict.lr_reduced] == [8, 16, 24]
-    assert all(verdict.stop_reason is None for verdict in verdicts[:-1])
-    assert verdicts[-1].stop_reason == "saturation"
-    assert optimizer.param_groups[0]["lr"] == pytest.approx(1.25e-4)
-
-
-def test_controller_state_resume_matches_uninterrupted_decisions():
-    cfg = SimpleNamespace(
-        smoothing_window=3,
-        min_rounds=0,
-        min_relative_improvement=0.01,
-        lr_patience=2,
-        lr_factor=0.5,
-        min_lr_reductions=1,
-        final_patience=2,
-    )
-    values = [5.0, 4.8, 4.7, 4.7, 4.7, 4.7]
-
-    def rig() -> tuple[MultiMetricController, torch.optim.Optimizer]:
-        parameter = torch.nn.Parameter(torch.tensor(1.0))
-        return MultiMetricController(cfg, ("score",)), torch.optim.SGD([parameter], lr=1.0)
-
-    full, full_opt = rig()
-    full_verdicts = [full.step({"score": value}, full_opt) for value in values]
-
-    first, first_opt = rig()
-    for value in values[:3]:
-        first.step({"score": value}, first_opt)
-    resumed, resumed_opt = rig()
-    resumed.load_state_dict(first.state_dict())
-    resumed_opt.param_groups[0]["lr"] = first_opt.param_groups[0]["lr"]
-    resumed_verdicts = [resumed.step({"score": value}, resumed_opt) for value in values[3:]]
-
-    assert resumed_verdicts == full_verdicts[3:]
-    assert resumed_opt.param_groups[0]["lr"] == full_opt.param_groups[0]["lr"]

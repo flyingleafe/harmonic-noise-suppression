@@ -1,0 +1,20 @@
+# @package _global_
+# Label-altering augmentation: SimpleConv-v2 regressor on the rp_all_labelaug stream. Batch doc: docs/experiments/paper-real-protocol.md.
+defaults:
+  - override /data: rp_real
+  - override /model: hb_scv2_mag_nogate
+  - override /loss: pit_mse
+  - override /metrics: rps
+  - override /validation: rp_real
+  - _self_
+
+experiment_name: rp_scv2_alllab
+batch_size: 128
+grad_accum_steps: 1
+num_workers: 6
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_all_labelaug.yaml
+optim:
+  lr: 1.0e-3  # placeholder: set from results/rp_lr_range/scv2.json (LR range test)

@@ -6,6 +6,7 @@ import torch
 
 from metrics.rps import (
     RPSMetric,
+    batched_pit_frame_errors,
     batched_pit_mae,
     rps_mae_clip,
     rps_mae_frame,
@@ -52,6 +53,32 @@ def test_batched_pit_mae_matches_mae_optimal_reference_with_resampling():
 
     expected = np.array([pit_mae(p, t) for p, t in zip(pred, target)])
     np.testing.assert_allclose(got, expected, rtol=1e-6, atol=1e-6)
+
+
+def test_frame_errors_average_to_the_clip_pit_mae_including_resampling():
+    rng = np.random.default_rng(11)
+    target = torch.from_numpy(rng.uniform(0, 100, size=(5, 4, 23)).astype(np.float32))
+    pred = torch.from_numpy(rng.uniform(0, 100, size=(5, 4, 19)).astype(np.float32))
+
+    frames = batched_pit_frame_errors(pred, target)
+
+    assert frames.shape == (5, 19)
+    torch.testing.assert_close(frames.mean(dim=-1), batched_pit_mae(pred, target))
+
+
+def test_frame_errors_keep_one_rotor_assignment_per_clip():
+    """A per-frame assignment would score these frames 0; the clip-optimal one
+    must not: rotors swap identity halfway, so half the frames pay for it."""
+    first = torch.tensor([[10.0] * 4 + [20.0] * 4, [20.0] * 4 + [10.0] * 4])
+    target = torch.tensor([[10.0] * 8, [20.0] * 8])
+    pred = torch.cat([first, torch.full((2, 8), 50.0)])[None]
+    target = torch.cat([target, torch.full((2, 8), 50.0)])[None]
+
+    frames = batched_pit_frame_errors(pred, target)[0]
+
+    # Rotors 3/4 are exact; rotors 1/2 are exact on one half and swapped (each
+    # off by 10) on the other, under whichever assignment the clip picks.
+    assert sorted(frames.tolist()) == [0.0] * 4 + [5.0] * 4
 
 
 def test_rps_r2_perfect_prediction_is_one():

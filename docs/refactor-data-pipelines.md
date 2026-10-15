@@ -141,8 +141,8 @@ pairs with `kind: silence`), `sources.noise` (one spec or a list),
 `sources.speech` (`dataset` default `librispeech`, `subpath` default
 `LibriSpeech/train-clean-100`, `include`/`exclude` speaker-id path-token
 filters, `shuffle_buffer`, `version`), `policy` (curriculum stages,
-`augmentations`, `noise_augmentations`, `noise_time_warp`, speech-lane
-options such as `speech_per_channel: independent`).
+`augmentations`, `noise_augmentations`, `noise_rate_warp`, `snr_db`,
+speech-lane options such as `speech_per_channel: independent`).
 
 **Pool weighting** (`build_noise_stream`). Unweighted real (`kind: frames`)
 sources merge into one duration-weighted `dload.choice` over per-record window
@@ -349,34 +349,54 @@ independently of the rotor-speed trajectory; the generative direction of
 `colored` / `lf_rumble` floors, independent per channel, `rps` all zeros;
 `docs/experiments/honest-base-frontends.md`).
 
-### `policy.noise_augmentations` — strong noise-chunk augmentations (G6)
+### Augmentations: `policy.noise_augmentations`, `policy.noise_rate_warp`, ramps
 
-`noise_augmentations.py`: six strong transforms of the **noise chunk** (audio +
-RPS pair, before speech mixing — unlike `policy.augmentations`, which is
-post-mix on the mixture and provably weak for RPS prediction: polarity is an
-exact no-op for mag/IF front-ends, gain a log-offset). Same `probability` +
-`choices` fire/choice schema; on a hit the chunk Frame is rebuilt in
-`time_warp.apply_time_warp`'s output convention (audio exactly `target_len` +
-a clean uniform 100 Hz `rps` track). The six: `freq_scale` (resample by
-α∈U(0.75,1.3) at natural scaled length — the sourcing pipeline oversamples the
-noise window by α_high so the crop never pads; labels ×α — the one that
-manufactures new (audio, RPS) pairs), `spectral_recolor` (smooth random EQ
-±8 dB, 10 log-spaced anchors, per channel), `random_reverb` (deterministic
-200-RIR synthetic bank: RT60 U(0.1,0.8) s, DRR U(3,15) dB; RMS renormalized),
-`tooth_dropout` (zero ±2 STFT bins around k·rps_r(t), 1–4 random teeth k≤25 —
-label-aware), `spec_mask` (SpecAugment bands/time masks), `floor_inject`
-(1/f^tilt floor at U(−20,0) dB rel RMS). STFT ops run on the model's 2048/512
-grid. Keep the 50k unaugmented warmup stage — G5 measured a real regression
-without it. Policy `conf/online_mix/g6_strongaug_dload.yaml`;
-`docs/experiments/g1-vk-parity.md` § "Phase G6"; tests
-`tests/test_noise_augmentations.py`.
+**Pre-rp policies are archival.** The rp cutover (2026-10-14,
+`docs/experiments/paper-real-protocol.md` § "Augmentations and their
+schedule") removed `freq_scale`, `noise_time_warp`, `tooth_dropout`,
+`spec_mask`, `floor_inject`, `random_polarity` and `channel_drop`, and renamed
+the reverb parameters. Every `conf/online_mix/*.yaml` written before it stays
+as the record of its runs but no longer renders: `build_online_mix_pipeline`
+raises at build time naming the removed augmentation. New training uses
+`conf/online_mix/rp_*.yaml`.
+
+Per sample, in this RNG order: `noise_rate_warp` (fire + `alpha0, c, a, f,
+phi`), each `noise_augmentations` block (list = sequential blocks; fire,
+choice, parameters), `source_prob`, the `snr_db` draw, the post-mix
+`augmentations` block (`random_gain` only). Choices and parameters are
+validated at build (unknown names/keys raise).
+
+- `noise_augmentations` (pre-mix, label-preserving, audio-only — the rotor
+  track stays bit-identical): `spectral_recolor` (`gain_db` 8, `n_anchors`
+  10, `f_low`/`f_high` 30/8000 Hz; smooth random EQ per channel on the
+  2048/512 grid) and `random_reverb` (one room per chunk: RT60
+  U(`rt60_low`, `rt60_high`) = 0.1–0.8 s, DRR U(`drr_db_low`, `drr_db_high`)
+  = 3–15 dB, independent diffuse tail per channel, RMS renormalised).
+- `noise_rate_warp` (`rate_warp.py`): `{probability, alpha_low, alpha_high,
+  dev_const, dev_sine, f_low, f_high}`, all required; α(t) =
+  α₀·(c + a·sin(2πft + φ)), labels α(t)·r(τ(t)). With it the real pool stays
+  at the recordings' native rate (each must reach 16 kHz / the lowest local
+  rate, 36.4 kHz for the protocol's U(0.5, 1.5) ± 12 %), every chunk is
+  resampled once at τ(t) (32-tap Kaiser sinc) and decimated to 16 kHz by
+  soxr HQ — un-fired chunks only decimated — and the stream window is
+  α_high·(1 + dev_const + dev_sine)·(duration + 40 ms) + 50 ms. Only `kind:
+  frames` and `kind: silence` may feed it; the silence floor renders at 16 kHz
+  and is never warped (zero labels). RPS task only.
+- **Ramps.** Wherever a number is accepted under `snr_db` or an augmentation
+  block (any choice parameter, any `noise_rate_warp` field, `probability`),
+  `{ramp: {from, until, start, end, shape: linear|cosine}}` resolves per
+  GLOBAL SAMPLE ID before any draw (no RNG consumed): `t = clip((gid −
+  from)/(until − from), 0, 1)`, cosine `start + (end − start)(1 − cos πt)/2`.
+  A ramped `probability` is floored at 1e-9 (its fire draw stays consumed).
+
+Tests: `tests/data_processing/test_{noise_augmentations,rate_warp,online_mixing}.py`.
 
 ### `task: speech_enhancement` — SE target mode (F1 baselines)
 
 With `task: speech_enhancement` the stream yields `(mixture, clean_speech)`
 instead of `(audio, rps_target)`: the clean target is the gain-scaled speech
 exactly as mixed (SNR of the pair == the drawn SNR), post-mix augmentation
-(`random_gain`/`random_polarity`) is applied identically to mixture and
+(`random_gain`) is applied identically to mixture and
 target, and RPS interpolation is skipped (telemetry-free noise sources work).
 The stream is **mono** — a random mic channel is picked from multichannel
 noise. `OnlineMixFrameDataset` packs each pair into a `{mixture, target, meta}`
@@ -407,11 +427,13 @@ python scripts/check_stream.py --experiment <name>   # exactly what train.py tra
 It measures, on the actually-generated stream: (1) the chunk→frame expansion
 ratio C; (2) each stage boundary in chunks / frames / effective epochs (WARN
 beyond `--warn-boundary-epoch`); (3) **empirical** per-key fire rates of
-`augmentations` / `noise_augmentations` / `noise_time_warp` at the probed
+`augmentations` / `noise_augmentations` / `noise_rate_warp` at the probed
 epochs vs the configured probabilities (exact binomial test), plus the
-label-diff rate (`freq_scale` must change labels on every nonzero-RPS fire —
-all-zero-RPS full-flight chunks are exempt; post-mix augs must never touch
-labels); (4) per-id determinism. Nonzero exit on any FAIL — usable as a
+label-diff rate (`noise_rate_warp` must change labels on every nonzero-RPS
+fire — all-zero-RPS chunks are exempt, and its fire rate is measured over the
+label-bearing chunks since the silence floor is never warped; every other
+block must never touch labels); every ramp is listed with its window; (4)
+per-id determinism. Nonzero exit on any FAIL — usable as a
 submission gate. Fire detection compares each sample against a control stream
 whose aug block has `probability: 1e-9` (never removes the key — a
 present-but-missed block still consumes the fire-decision RNG draw, so

@@ -95,6 +95,32 @@ def test_default_dataset_unaffected_by_flatten_channels_flag(tmp_path):
     assert "channel" not in ds[0]["meta"]
 
 
+def test_sample_meta_json_reaches_every_flattened_item(tmp_path):
+    """Every key of a sample's meta.json (str, float, None, list) lands in
+    frame["meta"] of each of its mono items, next to that item's channel, and
+    overrides the sample-dir default recording_id."""
+    import json
+
+    root = _make_split(tmp_path, n_samples=2, n_channels=4)
+    clip_meta = {
+        "recording_id": "FLY124",
+        "dataset": "md2",
+        "source_type": "mixed",
+        "snr_db": None,
+        "t_start_s": 64.0,
+        "speech_utterances": [f"84-121123-{i:04d}" for i in range(4)],
+        "clip_index": 1,
+    }
+    (root / "sample_00001" / "meta.json").write_text(json.dumps(clip_meta))
+    ds = DregonLMFrameDataset(root, flatten_channels=True)
+    for ch in range(4):
+        meta = ds[4 + ch]["meta"]
+        assert {k: meta[k] for k in clip_meta} == clip_meta
+        assert meta["channel"] == ch
+    # A sample without meta.json keeps the dir-name default and nothing else leaks.
+    assert dict(ds[0]["meta"].entries) == {"recording_id": "sample_00000", "channel": 0}
+
+
 # ─── OnlineMixFrameDataset.flatten_channels ────────────────────────────────────
 
 

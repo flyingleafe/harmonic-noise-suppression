@@ -1,178 +1,109 @@
-"""Behavioral regressions for ``training.stopping.StoppingController``.
-
-Each test drives the controller with a scripted metric sequence through a
-real ``ReduceLROnPlateau`` — the same wiring ``training.loop`` uses.
-"""
+"""Behaviour of ``training.stopping.MultiMetricController``: dual-best
+bookkeeping per score and the saturation stop on the control score."""
 
 from __future__ import annotations
 
-import math
+from types import SimpleNamespace
 
 import pytest
-import torch
 
-from training.config import EarlyStoppingConfig
-from training.stopping import StoppingController
+from training.stopping import MultiMetricController
 
 
-def _rig(es: EarlyStoppingConfig, *, sched_patience: int, cooldown: int = 0, lr: float = 1e-3):
-    model = torch.nn.Linear(2, 2)
-    opt = torch.optim.SGD(model.parameters(), lr=lr)
-    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        opt,
-        mode="min",
-        patience=sched_patience,
-        factor=0.5,
-        cooldown=cooldown,
-        threshold=es.min_delta_abs,
-        threshold_mode="abs",
-    )
-    return StoppingController(es, mode="min"), opt, sched
-
-
-def _drive(ctrl, opt, sched, values, *, start=0, train_loss=None):
-    """Feed ``values`` as successive epochs (halting on a stop verdict, as the
-    loop does); return the list of verdicts."""
-    out = []
-    for i, v in enumerate(values):
-        tl = train_loss[i] if train_loss is not None else 1.0
-        out.append(
-            ctrl.step(epoch=start + i, train_loss=tl, raw_metric=v, optimizer=opt, scheduler=sched)
-        )
-        if out[-1].stop_reason:
-            break
-    return out
-
-
-def test_single_spike_neither_resets_patience_nor_counts_as_improvement():
-    es = EarlyStoppingConfig(enabled=True, median_window=5, min_epochs=0, patience=100)
-    ctrl, opt, sched = _rig(es, sched_patience=1000)
-
-    _drive(ctrl, opt, sched, [10.0] * 8)
-    stalled = ctrl.checks_without_improvement
-    assert stalled == 7  # first value set the best, the rest did not move it
-
-    # One spuriously GOOD epoch: the 5-median stays at 10, so it is not a new
-    # best and the stall counter keeps climbing instead of resetting.
-    _drive(ctrl, opt, sched, [5.0], start=8)
-    assert ctrl.best_smoothed == 10.0
-    assert ctrl.checks_without_improvement == stalled + 1
-
-    # One spuriously BAD epoch: no divergence streak starts either.
-    _drive(ctrl, opt, sched, [50.0], start=9)
-    assert ctrl.diverge_streak == 0
-    assert ctrl.stop_reason is None
-
-
-def test_saturation_waits_for_min_epochs_then_lr_reductions_then_grace():
-    es = EarlyStoppingConfig(
-        enabled=True,
-        median_window=1,
-        min_epochs=12,
-        patience=3,
-        min_lr_reductions=2,
-        lr_grace_epochs=4,
-    )
-    ctrl, opt, sched = _rig(es, sched_patience=4, cooldown=0)
-    verdicts = _drive(ctrl, opt, sched, [10.0] * 40)
-    stop_at = len(verdicts) - 1
-    assert verdicts[stop_at].stop_reason == "saturation"
-
-    # Patience (3) was exhausted by epoch 3, but the epoch floor is 12 ...
-    assert all(v.stop_reason is None for v in verdicts[:12])
-    # ... and the scheduler needed patience=4 bad epochs per reduction, so the
-    # second reduction landed at epoch 10 and the 4-epoch grace ends at 14.
-    assert [v.lr_reduced for v in verdicts].index(True) == 5
-    assert ctrl.lr_reductions == 2
-    assert ctrl.last_reduction_epoch == 10
-    assert stop_at == 14
-    assert opt.param_groups[0]["lr"] == pytest.approx(1e-3 * 0.25)
-
-
-def test_serialized_state_continues_exactly_like_an_uninterrupted_run():
-    es = EarlyStoppingConfig(
-        enabled=True,
-        median_window=3,
-        min_epochs=6,
-        patience=4,
-        min_lr_reductions=1,
-        lr_grace_epochs=2,
-    )
-    values = [10.0, 9.0, 8.5, 8.4, 8.4, 8.6, 8.3, 8.5, 8.4, 8.4, 8.4, 8.4, 8.4, 8.4, 8.4]
-
-    ref_ctrl, ref_opt, ref_sched = _rig(es, sched_patience=2)
-    ref = _drive(ref_ctrl, ref_opt, ref_sched, values)
-
-    a_ctrl, a_opt, a_sched = _rig(es, sched_patience=2)
-    first = _drive(a_ctrl, a_opt, a_sched, values[:6])
-    saved = {
-        "early_stopping": a_ctrl.state_dict(),
-        "scheduler": a_sched.state_dict(),
-        "optimizer": a_opt.state_dict(),
+def _cfg(**overrides):
+    values = {
+        "smoothing_window": 5,
+        "min_relative_improvement": 0.01,
+        "min_rounds": 40,
+        "final_patience": 30,
+        "control": "real",
     }
-
-    b_ctrl, b_opt, b_sched = _rig(es, sched_patience=2)
-    b_ctrl.load_state_dict(saved["early_stopping"])
-    b_sched.load_state_dict(saved["scheduler"])
-    b_opt.load_state_dict(saved["optimizer"])
-    second = _drive(b_ctrl, b_opt, b_sched, values[6:], start=6)
-
-    assert first + second == ref
-    assert b_ctrl.state_dict() == ref_ctrl.state_dict()
-    assert any(v.stop_reason == "saturation" for v in second)
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
-def test_fresh_controller_has_no_history_and_absent_state_is_not_loaded():
-    es = EarlyStoppingConfig(enabled=True)
-    ctrl = StoppingController(es, mode="min")
-    state = ctrl.state_dict()
-    assert state["window"] == [] and state["lr_reductions"] == 0
-    assert state["last_reduction_epoch"] is None and state["stop_reason"] is None
+def _stop_round(controller: MultiMetricController, series) -> int | None:
+    """1-based round of the first stop verdict while feeding ``series``."""
+    for round_index, scores in enumerate(series, start=1):
+        if controller.step(scores).stop_reason is not None:
+            return round_index
+    return None
 
 
-def test_sustained_divergence_gets_one_lr_recovery_then_stops():
-    es = EarlyStoppingConfig(
-        enabled=True, median_window=1, min_epochs=0, diverge_rel=0.25, diverge_epochs=3
-    )
-    ctrl, opt, sched = _rig(es, sched_patience=1000)
-    _drive(ctrl, opt, sched, [1.0, 1.0], train_loss=[1.0, 1.0])  # establish bests
-
-    # A single bad epoch on BOTH signals is a spike, not divergence.
-    _drive(ctrl, opt, sched, [2.0], start=2, train_loss=[2.0])
-    _drive(ctrl, opt, sched, [1.05], start=3, train_loss=[1.05])
-    assert ctrl.diverge_streak == 0 and ctrl.recovery_attempts == 0
-
-    # Train loss worsening alone (val fine) never counts.
-    _drive(ctrl, opt, sched, [1.0] * 3, start=4, train_loss=[2.0] * 3)
-    assert ctrl.diverge_streak == 0
-
-    # Three consecutive epochs worse on both -> ONE recovery LR reduction.
-    v = _drive(ctrl, opt, sched, [2.0] * 3, start=7, train_loss=[2.0] * 3)
-    assert [x.lr_reduced for x in v] == [False, False, True]
-    assert opt.param_groups[0]["lr"] == pytest.approx(5e-4)
-    assert ctrl.recovery_attempts == 1 and ctrl.lr_reductions == 1
-    assert ctrl.stop_reason is None
-
-    # Persisting after the recovery -> stop.
-    v = _drive(ctrl, opt, sched, [2.0] * 3, start=10, train_loss=[2.0] * 3)
-    assert [x.stop_reason for x in v] == [None, None, "divergence"]
-    assert opt.param_groups[0]["lr"] == pytest.approx(5e-4)  # no second reduction
+def test_flat_control_stops_at_min_rounds_not_after_patience_alone():
+    """The first full window (round 5) sets the best; 30 stale rounds are
+    reached at round 35, but nothing stops before min_rounds = 40."""
+    controller = MultiMetricController(_cfg(), ("real",))
+    verdicts = [controller.step({"real": 3.0}) for _ in range(39)]
+    assert all(v.stop_reason is None for v in verdicts)
+    assert controller.stale_rounds == 34
+    assert controller.step({"real": 3.0}).stop_reason == "saturation"
 
 
-def test_nonfinite_epoch_stops_and_leaves_state_untouched():
-    es = EarlyStoppingConfig(enabled=True, median_window=3, min_epochs=0)
-    ctrl, opt, sched = _rig(es, sched_patience=1000)
-    _drive(ctrl, opt, sched, [3.0, 2.0])
-    before = ctrl.state_dict()
-    v = ctrl.step(epoch=2, train_loss=math.nan, raw_metric=1.0, optimizer=opt, scheduler=sched)
-    assert v.stop_reason == "nonfinite"
-    v = ctrl.step(epoch=2, train_loss=1.0, raw_metric=math.inf, optimizer=opt, scheduler=sched)
-    assert v.stop_reason == "nonfinite"
-    assert ctrl.state_dict() == before  # not recorded: resume re-runs this epoch
+def test_stop_comes_exactly_final_patience_rounds_after_the_last_median_improvement():
+    controller = MultiMetricController(_cfg(min_rounds=0), ("real",))
+    series = [{"real": 10.0 * 0.97**i} for i in range(60)] + [{"real": 10.0 * 0.97**59}] * 100
+    last_improvement = 0
+    for round_index, scores in enumerate(series, start=1):
+        verdict = controller.step(scores)
+        if "real" in verdict.improved_median:
+            last_improvement = round_index
+        if verdict.stop_reason is not None:
+            break
+    assert last_improvement >= 60  # improving rounds never count as stale
+    assert round_index == last_improvement + 30
 
 
-def test_deadline_is_a_wall_clock_gate():
-    ctrl = StoppingController(EarlyStoppingConfig(enabled=True, deadline_unix=1000.0), mode="min")
-    assert not ctrl.deadline_reached(now=999.0)
-    assert ctrl.deadline_reached(now=1000.0)
-    assert not StoppingController(EarlyStoppingConfig(enabled=True), mode="min").deadline_reached()
+def test_only_the_control_score_keeps_a_run_alive():
+    """A primary that keeps improving earns checkpoints, not extra rounds."""
+    controller = MultiMetricController(_cfg(), ("real", "md2_ramp"))
+    series = [{"real": 3.0, "md2_ramp": 8.0 * 0.95**i} for i in range(60)]
+
+    assert _stop_round(controller, series) == 40
+    # md2_ramp's median still improved at the stopping round (median of i = 35..39).
+    assert controller.best_smoothed["md2_ramp"] == pytest.approx(8.0 * 0.95**37)
+
+
+def test_raw_best_tracks_single_round_dips_the_median_ignores():
+    controller = MultiMetricController(_cfg(smoothing_window=3, min_rounds=0), ("real",))
+    first = controller.step({"real": 5.0})
+    assert first.improved_raw == ("real",) and first.improved_median == ()  # window filling
+    controller.step({"real": 5.0})
+    full = controller.step({"real": 5.0})
+    assert full.improved_median == ("real",) and full.improved_raw == ()
+    dip = controller.step({"real": 4.0})
+    assert dip.improved_raw == ("real",)  # raw best: 4.0 < 5.0
+    assert dip.improved_median == ()  # median [5, 5, 4] = 5 does not move
+    assert controller.best_raw == {"real": 4.0}
+    assert controller.best_smoothed == {"real": 5.0}
+
+
+def test_median_improvement_is_relative_and_scale_free():
+    controller = MultiMetricController(_cfg(smoothing_window=1, min_rounds=0), ("real", "md2"))
+    controller.step({"real": 100.0, "md2": 1.0})
+    small = controller.step({"real": 99.5, "md2": 0.995})  # 0.5 %: raw best, not meaningful
+    assert small.improved_median == () and set(small.improved_raw) == {"real", "md2"}
+    meaningful = controller.step({"real": 98.0, "md2": 0.98})  # 2 % against the 100 / 1.0 best
+    assert set(meaningful.improved_median) == {"real", "md2"}
+
+
+def test_resumed_controller_reaches_the_same_verdicts():
+    series = [{"real": 5.0 - 0.1 * (i % 7), "md2": 3.0 + 0.05 * i} for i in range(70)]
+    full = MultiMetricController(_cfg(min_rounds=10, final_patience=8), ("real", "md2"))
+    expected = [full.step(scores) for scores in series]
+
+    first = MultiMetricController(_cfg(min_rounds=10, final_patience=8), ("real", "md2"))
+    head = [first.step(scores) for scores in series[:23]]
+    resumed = MultiMetricController(_cfg(min_rounds=10, final_patience=8), ("real", "md2"))
+    resumed.load_state_dict(first.state_dict())
+    tail = [resumed.step(scores) for scores in series[23:]]
+
+    assert head + tail == expected
+
+
+def test_control_must_be_a_tracked_score_and_scores_must_be_finite():
+    with pytest.raises(ValueError, match="control"):
+        MultiMetricController(_cfg(control="real"), ("dregon", "md2"))
+    controller = MultiMetricController(_cfg(), ("real",))
+    with pytest.raises(ValueError, match="non-finite"):
+        controller.step({"real": float("nan")})

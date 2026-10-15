@@ -1,0 +1,35 @@
+# Permutation-invariant BCE over FOUR PER-ROTOR Gaussian salience layers on
+# the protocol's output grid (docs/experiments/paper-real-protocol.md): linear
+# 0 -> 159.1796875 rev/s in 164 bins (0.9765625 rev/s, the HRSPNet pyramid's
+# level-0 step; = models.salience_crf.RP_LINEAR_GRID), bin 0 = the OFF state.
+# Every L2 model (conf/model/{hppnet,harmof0}_l2*.yaml, hppnet_l2k84*.yaml)
+# and every pyramid (conf/model/hppnet_pyramid*.yaml) emits 4 x 164 bins at
+# hop 512. The hop-256 twin is salience_layers_rp_h256.yaml.
+#
+# WHY LAYERS + GAUSSIAN + CRF. `models.salience_crf` encodes real training
+# telemetry and decodes it back — a PERFECT target, no model: one shared
+# triangular map + Hungarian loses 8.24 rev/s on average; Gaussian per-rotor
+# layers + CRF + parabolic readout lose nothing. Four layers (one map cannot
+# hold rotors 0.13-0.86 rev/s apart), a Gaussian in rev/s (its log is a
+# parabola on any grid), and a stopped rotor as bin 0 alone.
+#
+# sigma_rev_s 1.0: the Gaussian width in rev/s, shared by every per-rotor
+# model so rows differ only in the trunk (about one bin here).
+#
+# pos_weight IS ABSENT AND MUST STAY ABSENT (weight 1): weighted BCE against a
+# soft target p is minimized at w p / (w p + 1 - p), not at p, which flattens
+# the parabola the readout fits. focus is the imbalance handle instead (a
+# per-bin weight 1 + focus * target, which moves no minimum); `auto` =
+# G / expected layer mass = 164 / 2.555 = 64.2 (models.salience_crf.layer_focus).
+#
+# rate [16000, 512] mirrors the models' frame_rate: nothing pools along time.
+terms:
+  - name: bce
+    _target_: losses.LayerPITSalienceBCELoss
+    weight: 1.0
+    params:
+      grid: {kind: linear, fmin: 0.0, fmax: 159.1796875, bins: 164}
+      n_layers: 4
+      sigma_rev_s: 1.0
+      focus: auto
+      rate: [16000, 512]

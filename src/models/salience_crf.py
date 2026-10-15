@@ -13,99 +13,279 @@ FLY125; speeds 0.00-91.58 rev/s, per-frame |d rps| mean 0.718, p99 3.008, max
 
 The old pair loses 8.24 rev/s on a PERFECT target, and 39-45% of frames land
 more than 0.5 rev/s away. That is an oracle floor: no model reading that
-representation can score better, however well it predicts. Three separate causes,
-all fixed here:
+representation can score better, however well it predicts. Three causes, all
+fixed here:
 
 1. ONE MAP CANNOT HOLD FOUR ROTORS. DREGON's rotor pairs sit 0.13-0.86 rev/s
    apart, inside a single 0.5 rev/s bin, so a shared map has fewer peaks than
-   rotors and the tracker assigns several tracks to one peak. One layer per rotor
-   removes the failure completely -- there is nothing left to merge.
-2. THE KERNEL MUST BE GAUSSIAN. ``log`` of a Gaussian is a parabola *globally*,
-   so a three-point log-parabolic fit recovers the peak's sub-bin position
-   EXACTLY from any three consecutive bins. The framework's triangular kernel has
-   no such property and leaves a quantization residue.
-3. ZERO IS A VALUE, NOT AN ABSENCE. ``salience_target_from_resampled_rps`` drops
-   any rotor below 0.1 rev/s (``active = rps_grid > 0.1``), so a stopped rotor
-   lights no bin and "stopped" is encoded as absence of evidence -- which is what
-   forces a decode threshold. Here a stopped rotor is simply a peak at bin 0.
+   rotors. One layer per rotor removes the failure completely.
+2. THE KERNEL MUST BE GAUSSIAN IN REV/S. ``log`` of a Gaussian is a parabola
+   *globally*, so a three-point parabolic fit through ANY three bins — uniform
+   or log-spaced, the fit is done in rev/s coordinates — recovers the peak
+   exactly. The width ``sigma_rev_s`` is one number in rev/s shared by every
+   grid, so a log grid and the linear grid carry the same target.
+3. ZERO IS A STATE, NOT AN ABSENCE. Every per-rotor grid has bin 0 at 0.0 rev/s:
+   the OFF state. A stopped rotor (below `OFF_RPS`) puts its whole mass on bin
+   0 and nothing elsewhere; a running rotor puts nothing on bin 0. A log grid
+   has no zero rate of its own, which is why its models emit ``G_log + 1``
+   bins (`log_off_grid`).
 
-The transition band must also admit what real rotors do: 15.3 rev/s in one 32 ms
-frame at the extreme, which is 31 bins at 0.5 rev/s, against the 3 bins the comb
-tracker's default allows. `band_for_rev_s` sizes it from that number rather than
-from a slew constant chosen on synthetic data.
+THE CHAIN. `crf_decode_layers` runs one best path per layer under a DENSE
+transition cost in rev/s (`transition_penalty`): free up to
+``max_step_rev_s`` per frame (`MAX_STEP_REV_S`, sized from the telemetry's
+23.8 rev/s per-frame extreme), quadratic past it, forbidden past four times it —
+on any grid, because the cost reads the rates, not the bin offsets. Transitions
+into and out of bin 0 cost nothing, so a 0 -> 60 rev/s start in one frame is
+decodable. On the 164-bin grid the dense ``G x G`` step is also cheaper than the
+old ``(2 * span + 1) x G`` band (span 102 at 25 rev/s / 0.977).
+
+`band_for_rev_s` is the older uniform-grid band without an off state; only
+`losses.LayerPITCRFLoss` still uses it.
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 import torch
 
 from models import comb_crf
+from models.multif0.utils import linear_freq_grid
 
-__all__ = ["gaussian_layer_target", "crf_decode_layers", "band_for_rev_s"]
+__all__ = [
+    "RP_LINEAR_STEP",
+    "RP_LINEAR_GRID",
+    "OFF_RPS",
+    "MAX_STEP_REV_S",
+    "log_off_grid",
+    "grid_from_spec",
+    "gaussian_layer_target",
+    "expected_layer_mass",
+    "layer_focus",
+    "transition_penalty",
+    "refine_peak",
+    "crf_decode_layers",
+    "band_for_rev_s",
+]
+
+#: The protocol's output step: level 0 of the HRSPNet pyramid, 16000 / 16384.
+RP_LINEAR_STEP = 0.9765625
+#: The output grid of every per-rotor model (``docs/experiments/
+#: paper-real-protocol.md``): ``g * 0.9765625`` rev/s, ``g = 0..163``. Bin 0 is
+#: the off state. The real data peaks at 100.8 rev/s and ``rate_warp`` at
+#: alpha 1.5 reaches 151, so 159.2 covers both.
+RP_LINEAR_GRID = linear_freq_grid(0.0, 163 * RP_LINEAR_STEP, 164)
+
+#: A rotor below this is STOPPED: its target is bin 0 alone. Half the linear
+#: step, so a stopped rotor and the first rate bin never share a label.
+OFF_RPS = 0.5
+
+#: The per-frame change the transition cost makes FREE, in rev/s. 40 clips of
+#: real training telemetry on the 32 ms frame grid move 0.476 rev/s per frame
+#: on average, 2.65 at the 99th percentile and 23.8 at the extreme; at 16 the
+#: perfect-target round trip loses 0.203 rev/s on its worst frame, at 25 it
+#: loses 1.4e-14.
+MAX_STEP_REV_S = 25.0
+
+_GRID_KEYS = {
+    "linear": {"fmin", "fmax", "bins"},
+    "log_off": {"fmin", "bins_per_octave", "n_bins"},
+}
 
 
-def band_for_rev_s(
-    max_step_rev_s: float, grid_step: float, stiff: float = 40.0, dtype=torch.float32
-):
-    """Transition band that ADMITS a per-frame change of ``max_step_rev_s``.
+def log_off_grid(fmin: float, bins_per_octave: int, n_bins: int) -> np.ndarray:
+    """``[0.0, fmin * 2**(b / bins_per_octave) for b < n_bins]`` — ``n_bins + 1`` entries.
 
-    Sized from the data, not from a slew constant: real training telemetry moves
-    up to 15.3 rev/s per 32 ms frame, so a band that forbids more than 1.5 rev/s
-    makes the true trajectory undecodable.
+    A model's own log grid plus the off state at bin 0.
     """
-    return comb_crf.band_penalty(max(max_step_rev_s / grid_step, 1e-9), stiff, dtype=dtype)
+    b = np.arange(int(n_bins), dtype=np.float64)
+    return np.concatenate([[0.0], float(fmin) * 2.0 ** (b / int(bins_per_octave))])
 
 
-def gaussian_layer_target(rps: torch.Tensor, grid, sigma_bins: float = 1.0) -> torch.Tensor:
+def grid_from_spec(spec: Mapping[str, Any]) -> np.ndarray:
+    """A per-rotor output grid (rev/s) from its config spec.
+
+    ``{kind: linear, fmin, fmax, bins}`` or ``{kind: log_off, fmin,
+    bins_per_octave, n_bins}`` (``n_bins`` log bins; the grid holds one more,
+    the off state). Unknown or missing keys raise, so a typo cannot silently
+    build a different grid than the model's.
+    """
+    params = {str(k): v for k, v in dict(spec).items()}
+    kind = params.pop("kind", None)
+    if kind not in _GRID_KEYS:
+        raise ValueError(f"grid kind must be one of {sorted(_GRID_KEYS)}, got {kind!r}")
+    if set(params) != _GRID_KEYS[kind]:
+        raise ValueError(
+            f"grid {kind!r} takes keys {sorted(_GRID_KEYS[kind])}, got {sorted(params)}"
+        )
+    if kind == "linear":
+        grid = linear_freq_grid(float(params["fmin"]), float(params["fmax"]), int(params["bins"]))
+    else:
+        grid = log_off_grid(
+            float(params["fmin"]), int(params["bins_per_octave"]), int(params["n_bins"])
+        )
+    _check_off_state(grid)
+    return grid
+
+
+def _check_off_state(grid: np.ndarray) -> None:
+    g = np.asarray(grid, dtype=np.float64)
+    if g.ndim != 1 or g.size < 4:
+        raise ValueError(f"a per-rotor grid needs >= 4 bins, got shape {g.shape}")
+    if g[0] != 0.0:
+        raise ValueError(f"a per-rotor grid has the off state at bin 0 (0.0 rev/s); got {g[0]}")
+    if not np.all(np.diff(g) > 0):
+        raise ValueError("a per-rotor grid must be strictly ascending")
+
+
+def gaussian_layer_target(rps: torch.Tensor, grid: Any, sigma_rev_s: float = 1.0) -> torch.Tensor:
     """``(B, R, T)`` rev/s -> ``(B, R, G, T)``: one Gaussian layer per rotor.
 
-    A stopped rotor is a peak at bin 0, not an empty column.
+    A running rotor is ``exp(-(f_g - r)^2 / 2 sigma^2)`` over bins ``g >= 1``
+    and 0 on bin 0; a stopped rotor (``r < OFF_RPS``) is 1 on bin 0 and 0
+    everywhere else.
     """
-    g = torch.as_tensor(np.asarray(grid), dtype=rps.dtype, device=rps.device)
-    step = float(g[1] - g[0])
-    pos = (rps - g[0]) / step  # (B, R, T) in bins
-    idx = torch.arange(g.numel(), device=rps.device, dtype=rps.dtype)
-    d = (idx.view(1, 1, -1, 1) - pos.unsqueeze(2)) / float(sigma_bins)
-    return torch.exp(-0.5 * d * d)
+    g_np = np.asarray(grid, dtype=np.float64)
+    _check_off_state(g_np)
+    g = torch.as_tensor(g_np[1:], dtype=rps.dtype, device=rps.device)
+    stopped = (rps < OFF_RPS).unsqueeze(2)  # (B, R, 1, T)
+    d = (g.view(1, 1, -1, 1) - rps.unsqueeze(2)) / float(sigma_rev_s)
+    on = torch.exp(-0.5 * d * d) * (~stopped).to(rps.dtype)
+    return torch.cat([stopped.to(rps.dtype), on], dim=2)
+
+
+def expected_layer_mass(grid: Any, sigma_rev_s: float = 1.0) -> float:
+    """Mean target mass of one running rotor on ``grid``, in bins.
+
+    Averaged over the rotor rates the grid represents: the `RP_LINEAR_GRID`
+    rates inside ``[grid[1], grid[-1]]``. On a linear grid this is
+    ``sqrt(2 pi) sigma / step``; on a log grid it falls with the rate as the
+    bins widen, hence the average.
+    """
+    g = np.asarray(grid, dtype=np.float64)
+    _check_off_state(g)
+    rates = RP_LINEAR_GRID[(g[1] <= RP_LINEAR_GRID) & (g[-1] >= RP_LINEAR_GRID)]
+    d = (g[1:, None] - rates[None, :]) / float(sigma_rev_s)
+    return float(np.exp(-0.5 * d * d).sum(axis=0).mean())
+
+
+def layer_focus(grid: Any, sigma_rev_s: float = 1.0) -> float:
+    """``G / expected_layer_mass``: the focus that splits the BCE weight evenly
+    between a layer's Gaussian mass and the rest of its ``G`` bins."""
+    return float(len(np.asarray(grid))) / expected_layer_mass(grid, sigma_rev_s)
+
+
+def transition_penalty(
+    grid: Any,
+    max_step_rev_s: float = MAX_STEP_REV_S,
+    stiff: float = 40.0,
+    *,
+    dtype: torch.dtype = torch.float32,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """``(G, G)`` cost of moving from bin ``j`` (row) to bin ``i`` (column).
+
+    In rev/s, on any grid: 0 up to ``max_step_rev_s``, ``stiff * (excess /
+    max_step_rev_s)^2`` past it, forbidden (a huge cost) past four times it —
+    the hinge of `comb_crf.band_penalty`, with the truncation at the same
+    multiple. Row 0 and column 0 are zero: the off state is entered and left
+    for free.
+    """
+    g = np.asarray(grid, dtype=np.float64)
+    _check_off_state(g)
+    m = max(float(max_step_rev_s), 1e-9)
+    d = np.abs(g[:, None] - g[None, :])
+    pen = float(stiff) * (np.clip(d - m, 0.0, None) / m) ** 2
+    pen[d > 4.0 * m] = np.inf
+    pen[0, :] = 0.0
+    pen[:, 0] = 0.0
+    big = min(1e30, float(torch.finfo(dtype).max) / 4.0)
+    return torch.as_tensor(np.minimum(pen, big), dtype=dtype, device=device)
+
+
+def _viterbi_dense(scores: torch.Tensor, pen: torch.Tensor) -> torch.Tensor:
+    """Best path: ``(N, G, T)`` scores, ``(G, G)`` cost -> ``(N, T)`` bin indices."""
+    n, n_g, n_t = scores.shape
+    best = scores[:, :, 0]
+    back = torch.zeros((n_t, n, n_g), dtype=torch.int32, device=scores.device)
+    for t in range(1, n_t):
+        val, src = (best.unsqueeze(2) - pen.unsqueeze(0)).max(dim=1)
+        back[t] = src.to(torch.int32)
+        best = val + scores[:, :, t]
+    path = torch.zeros((n, n_t), dtype=torch.long, device=scores.device)
+    path[:, -1] = best.argmax(dim=1)
+    for t in range(n_t - 1, 0, -1):
+        path[:, t - 1] = back[t].gather(1, path[:, t : t + 1]).squeeze(1).long()
+    return path
+
+
+def refine_peak(scores: torch.Tensor, idx: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
+    """Sub-bin rate at ``idx`` by a three-point parabola in rev/s coordinates.
+
+    ``scores`` is ``(N, G, T)`` LOG-domain, ``idx`` ``(N, T)`` bin indices,
+    ``grid`` ``(G,)`` rev/s with the off state at bin 0. The triplet always
+    lies in the rate bins ``1..G-1`` (centre clamped to ``2..G-2``), so it
+    never straddles the off state; ``idx == 0`` reads exactly 0.0. A flat
+    triplet keeps the bin's own rate; the vertex is clamped to the triplet's
+    span. On a Gaussian in rev/s the vertex is exact on any grid.
+    """
+    n_g = grid.numel()
+    i0 = idx.clamp(2, n_g - 2)
+    x0, x1, x2 = grid[i0 - 1], grid[i0], grid[i0 + 1]
+    y0 = scores.gather(1, (i0 - 1).unsqueeze(1)).squeeze(1)
+    y1 = scores.gather(1, i0.unsqueeze(1)).squeeze(1)
+    y2 = scores.gather(1, (i0 + 1).unsqueeze(1)).squeeze(1)
+    a, c = x1 - x0, x1 - x2
+    num = a * a * (y1 - y2) - c * c * (y1 - y0)
+    den = a * (y1 - y2) - c * (y1 - y0)
+    # A fixed tolerance underflows to zero in float32; exact zero is the case.
+    curved = den != 0
+    vertex = x1 - 0.5 * num / torch.where(curved, den, torch.ones_like(den))
+    vertex = torch.minimum(torch.maximum(vertex, x0), x2)
+    rate = torch.where(curved, vertex, grid[idx])
+    return torch.where(idx == 0, torch.zeros_like(rate), rate)
 
 
 def crf_decode_layers(
     layers: torch.Tensor,
-    grid,
-    span: int,
-    pen: torch.Tensor,
+    grid: Any,
     *,
+    max_step_rev_s: float = MAX_STEP_REV_S,
+    stiff: float = 40.0,
     logits: bool = False,
     subgrid: bool = True,
 ) -> torch.Tensor:
     """``(B, R, G, T)`` per-rotor layers -> ``(B, R, T)`` rev/s.
 
-    One CRF best path per layer, so there is no assignment step at decode time and
-    no threshold: a stopped rotor is decoded as the path sitting at bin 0.
-    ``logits=True`` treats the input as already log-domain (a model's raw output);
-    otherwise it is a probability-like map and is logged here.
+    One best path per layer under `transition_penalty`, so there is no
+    assignment step and no threshold: a stopped rotor is the path sitting at
+    bin 0 and reads 0.0. ``logits=True`` treats the input as already
+    log-domain; otherwise it is a probability-like map and is logged here.
+    ``subgrid`` refines each frame with `refine_peak`.
     """
-    g = torch.as_tensor(np.asarray(grid), dtype=torch.get_default_dtype(), device=layers.device)
-    step = float(g[1] - g[0])
-    s_all = layers if logits else torch.log(layers.clamp_min(torch.finfo(layers.dtype).tiny))
-    b, r, n_g, _ = s_all.shape
-    out = []
-    for i in range(r):
-        s = s_all[:, i]  # (B, G, T)
-        path = comb_crf.viterbi(s, span, pen)
-        rate = g[path]
-        if subgrid:
-            i0 = path.clamp(1, n_g - 2)
-            a = s.gather(1, (i0 - 1).unsqueeze(1)).squeeze(1)
-            c0 = s.gather(1, i0.unsqueeze(1)).squeeze(1)
-            c = s.gather(1, (i0 + 1).unsqueeze(1)).squeeze(1)
-            den = a - 2 * c0 + c
-            # A flat triplet has no parabolic vertex: retain the discrete path.
-            # A fixed 1e-300 tolerance underflows to zero in float32.
-            curved = den != 0
-            safe_den = torch.where(curved, den, torch.ones_like(den))
-            delta = 0.5 * (a - c) / safe_den
-            rate = torch.where(curved, g[i0] + delta.clamp(-1, 1) * step, rate)
-        out.append(rate)
-    return torch.stack(out, dim=1)
+    g_np = np.asarray(grid, dtype=np.float64)
+    _check_off_state(g_np)
+    s = layers if logits else torch.log(layers.clamp_min(torch.finfo(layers.dtype).tiny))
+    b, r, n_g, n_t = s.shape
+    if n_g != g_np.size:
+        raise ValueError(f"layers carry {n_g} bins, the grid has {g_np.size}")
+    pen = transition_penalty(g_np, max_step_rev_s, stiff, dtype=s.dtype, device=s.device)
+    flat = s.reshape(b * r, n_g, n_t)
+    path = _viterbi_dense(flat, pen)
+    g = torch.as_tensor(g_np, dtype=s.dtype, device=s.device)
+    rate = refine_peak(flat, path, g) if subgrid else g[path]
+    return rate.reshape(b, r, n_t)
+
+
+def band_for_rev_s(
+    max_step_rev_s: float, grid_step: float, stiff: float = 40.0, dtype=torch.float32
+):
+    """Uniform-grid band ``(span, pen)`` that ADMITS a per-frame change of
+    ``max_step_rev_s`` — `comb_crf`'s Toeplitz form, with no off state.
+
+    Only `losses.LayerPITCRFLoss` reads it; the decoder uses the dense,
+    off-aware `transition_penalty`.
+    """
+    return comb_crf.band_penalty(max(max_step_rev_s / grid_step, 1e-9), stiff, dtype=dtype)

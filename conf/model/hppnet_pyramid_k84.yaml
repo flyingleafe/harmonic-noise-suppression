@@ -1,5 +1,5 @@
-# hppnet_pyramid_k84 — conf/model/hppnet_pyramid.yaml with the grid cut to
-# 0-150 rev/s and the harmonic taps extended to k = 84 (head: 1x1, variant C).
+# hppnet_pyramid_k84 — conf/model/hppnet_pyramid.yaml with the harmonic taps
+# extended to k = 84 (head: 1x1, variant C).
 #
 # WHY. At the data's 60-90 rev/s, k_max 32 reads up to 1.9-2.9 kHz, so the
 # pyramid's levels 2 and 3 (2.4-8 kHz) were never read by the taps in the
@@ -7,12 +7,9 @@
 # strong around 6 kHz (harmonics ~40-80); k_max 84 reaches 7.5 kHz (f_max)
 # from 89 rev/s up and 84 harmonics below that. 91 taps (84 + 7 sub-harmonic).
 #
-# THE GRID. out_bins 154 at level 0's step 0.9765625 rev/s -> 0 .. 149.41,
-# the L2 rows' range, so training losses are comparable across families and
-# the G-proportional stages (taps, block_4/5, block_6-8) halve: the step is
-# ~15 % cheaper than the 307-bin / k_max 32 arm despite 2.3x the taps.
-# Loss/metrics twins: conf/{loss,metrics}/salience_layers_pyr154.yaml
-# (out_fmax = 153 * 0.9765625 = 149.4140625, out_bins 154, focus 61).
+# THE GRID. out_bins 164 at level 0's step 0.9765625 rev/s -> 0 .. 159.18
+# (models.salience_crf.RP_LINEAR_GRID). Loss/metrics:
+# conf/{loss,metrics}/salience_layers_rp.yaml.
 task: salience_rps
 task_params:
   n_channels: null
@@ -26,7 +23,7 @@ params:
   num_rotors: 4
   n_ffts: [16384, 8192, 4096, 2048]
   level0_fmax: 1200.0
-  out_bins: 154
+  out_bins: 164
   k_max: 84
   k_sub: 8
   f_min: null

@@ -1,7 +1,7 @@
 # BCE-on-RPS-derived-salience on the PUBLISHED LOG GRID of
-# conf/model/{harmof0,hppnet}_orig.yaml: 352 bins, 48 per octave, from 27.5 Hz.
-# Both arms emit that grid bit-identically, so one file serves both and the two
-# controls are read on one axis.
+# conf/model/{harmof0,hppnet}_l0.yaml: 352 bins, 48 per octave, from 27.5 Hz.
+# Both L0 arms emit that grid bit-identically, so one file serves both and the
+# two are read on one axis.
 #
 # THE GRID IS GIVEN AS n_bins + bins_per_octave, not as n_octaves +
 # over_sample, because 352 / 48 is 7.333 octaves and the octave-count form

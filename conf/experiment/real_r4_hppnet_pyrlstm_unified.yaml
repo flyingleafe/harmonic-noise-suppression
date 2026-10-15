@@ -10,7 +10,7 @@
 # Batch doc: docs/experiments/pyramid-harmonic.md.
 defaults:
   - override /data: e12_real_fullflight
-  - override /model: hppnet_pyramid_convlstm
+  - override /model: hppnet_pyramid_convlstm_r4legacy  # frozen build of this run (307 bins, k<=32, dense ConvLSTM); the protocol HRSPNet is hppnet_pyramid_convlstm
   - override /loss: salience_layers_pyr
   - override /metrics: salience_layers_pyr
   - override /validation: rps_unified

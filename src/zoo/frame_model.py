@@ -113,7 +113,13 @@ def load(name: str, ckpt: str = "best", device: str | torch.device = "cpu") -> F
     """Load experiment ``name``'s model as a ready-to-call :class:`FrameModel`.
 
     ``ckpt`` selects the checkpoint (see :func:`_checkpoint_ref`); the default
-    ``"best"`` picks ``best.ckpt`` — locally when present, else from R2.
+    ``"best"`` is the legacy protocol's ``best.ckpt`` — rp-protocol runs have
+    ``best_<score>_median``/``best_<score>_raw``/``last`` instead.
+
+    The experiment is composed WITHOUT the current ``RootConfig`` schema
+    (``~schema``) and with validation disabled: only ``model``/``artifacts``/
+    ``results_root`` are read, so legacy experiments (removed optim keys,
+    retired validation panels) still load.
     """
     from hydra import compose, initialize_config_dir
 
@@ -121,7 +127,10 @@ def load(name: str, ckpt: str = "best", device: str | torch.device = "cpu") -> F
 
     register_configs()
     with initialize_config_dir(config_dir=str(REPO_ROOT / "conf"), version_base=None):
-        cfg = compose(config_name="config", overrides=[f"experiment={name}"])
+        cfg = compose(
+            config_name="config",
+            overrides=[f"experiment={name}", "~schema", "validation=disabled"],
+        )
 
     task, codec = build_task_and_codec(cfg.model)
     model = instantiate_model(cfg.model)

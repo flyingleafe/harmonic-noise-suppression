@@ -7,8 +7,8 @@ trajectory 8.24 rev/s away on average, with 39-45% of frames more than half a bi
 off. The cause is representational, not statistical — DREGON's rotor pairs sit
 0.13-0.86 rev/s apart, INSIDE one 0.5 rev/s bin, so a shared map has fewer peaks
 than it has rotors. One layer per rotor removes the merge entirely, and a
-Gaussian kernel makes the sub-bin readout exact, because the log of a Gaussian is
-a parabola globally and three consecutive bins locate its vertex.
+Gaussian kernel in rev/s makes the sub-bin readout exact on any grid, because
+the log of a Gaussian is a parabola globally and three bins locate its vertex.
 
 Per-rotor layers cost one thing: the layers have no canonical order, so the loss
 must be permutation invariant. This is ordinary PIT — all ``R!`` assignments per
@@ -29,14 +29,24 @@ weight is applied. ``pos_weight`` reweights ONE SIDE of a bin's cross-entropy
 against the other, which moves that bin's minimum. ``focus`` multiplies a bin's
 WHOLE cross-entropy by ``1 + focus * target``, and a positive constant does not
 move a minimum: every bin still bottoms out at ``sigmoid(z) = target``, so the
-readout stays exact while the peak gets the emphasis. A Gaussian layer holds
-about ``sqrt(2 pi) sigma`` bins of mass in ``G``, so ``focus = G / (sqrt(2 pi)
-sigma)`` splits the total weight about evenly between the peak and the rest.
+readout stays exact while the peak gets the emphasis. ``focus="auto"`` takes
+``G / m`` with ``m`` the expected Gaussian mass of one layer on its grid
+(`models.salience_crf.layer_focus`: ``sqrt(2 pi) sigma / step`` bins on a linear
+grid, averaged over the represented rotor rates on a log grid, whose bins widen
+with the rate), which splits the total weight about evenly between the peak and
+the rest.
+
+THE GRID IS A SPEC, NOT THREE NUMBERS. ``grid: {kind: linear, fmin, fmax,
+bins}`` or ``{kind: log_off, fmin, bins_per_octave, n_bins}``
+(`models.salience_crf.grid_from_spec`); bin 0 is the off state on both. The
+model must emit ``n_layers * len(grid)`` bins, checked on every call.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from itertools import permutations
+from typing import Any
 
 import tdseries as td
 import torch
@@ -44,10 +54,9 @@ import torch.nn.functional as F
 
 from framespec import FrameSpec, SeriesSpec
 from losses._common import get_tensor
-from models.multif0.utils import linear_freq_grid
-from models.salience_crf import gaussian_layer_target
+from models.salience_crf import gaussian_layer_target, grid_from_spec, layer_focus
 
-__all__ = ["layer_pit_bce", "LayerPITSalienceBCELoss"]
+__all__ = ["layer_pit_bce", "LayerPITSalienceBCELoss", "resolve_focus"]
 
 
 def layer_pit_bce(
@@ -67,10 +76,10 @@ def layer_pit_bce(
             class-imbalance handle that ``pos_weight`` cannot be here. It scales
             each bin's WHOLE cross-entropy by a positive constant, and a
             positive constant does not move a minimum — every bin's optimum
-            stays ``sigmoid(z) = target``, so the readout stays exact. A
-            Gaussian layer carries about ``sqrt(2 pi) sigma`` bins of mass out
-            of ``G``, so ``focus ~ G / (sqrt(2 pi) sigma)`` puts about equal
-            total weight on the peak and on everything else.
+            stays ``sigmoid(z) = target``, so the readout stays exact.
+            ``focus = G / m``, ``m`` the layer's expected Gaussian mass in bins
+            (`models.salience_crf.layer_focus`), puts about equal total weight
+            on the peak and on everything else.
 
     Returns:
         Scalar: the mean over the batch of the best assignment's mean BCE.
@@ -116,37 +125,43 @@ class LayerPITSalienceBCELoss:
     it exists:
 
     1. The target is :func:`models.salience_crf.gaussian_layer_target` — one
-       GAUSSIAN layer per rotor, sigma in bins — not one triangular-kernel map
-       shared by every rotor.
-    2. A stopped rotor is a peak at bin 0, not a dark column. The old target
-       drops any rotor under 0.1 rev/s, which encodes "stopped" as absence of
-       evidence and is what forces the decoder to carry a threshold.
+       GAUSSIAN layer per rotor, ``sigma_rev_s`` wide in rev/s on any grid —
+       not one triangular-kernel map shared by every rotor.
+    2. A stopped rotor is bin 0 (the off state) alone, not a dark column. The
+       old target drops any rotor under 0.1 rev/s, which encodes "stopped" as
+       absence of evidence and is what forces the decoder to carry a threshold.
     3. The loss is permutation invariant over the layers.
 
     The prediction arrives in the codec's ``(batch, freq, time)`` wire format
     with the rotor layers stacked along the frequency axis, so ``n_layers *
-    out_bins`` must equal the model's output width.
+    len(grid)`` must equal the model's output width.
+
+    Args:
+        grid: the output grid spec (module docstring) — the model's own.
+        n_layers: per-rotor layers stacked in the prediction.
+        sigma_rev_s: Gaussian width in rev/s, shared by every grid.
+        pos_weight: must stay ``None`` (module docstring).
+        focus: per-bin emphasis ``1 + focus * target``; ``"auto"`` is
+            `models.salience_crf.layer_focus` on ``grid``.
     """
 
     def __init__(
         self,
         *,
-        out_fmin: float = 0.0,
-        out_fmax: float = 150.0,
-        out_bins: int = 300,
+        grid: Mapping[str, Any],
         n_layers: int = 4,
-        sigma_bins: float = 1.0,
+        sigma_rev_s: float = 1.0,
         pos_weight: float | None = None,
-        focus: float = 0.0,
+        focus: float | str = 0.0,
         rate: tuple[int, int] | None = None,
         pred_key: str = "salience",
         target_key: str = "rps",
     ) -> None:
-        self._freqs = linear_freq_grid(out_fmin, out_fmax, out_bins)
+        self._freqs = grid_from_spec(grid)
         self.n_layers = int(n_layers)
-        self.sigma_bins = float(sigma_bins)
+        self.sigma_rev_s = float(sigma_rev_s)
         self.pos_weight = pos_weight
-        self.focus = float(focus)
+        self.focus = resolve_focus(focus, self._freqs, self.sigma_rev_s)
         self.pred_key = pred_key
         self.target_key = target_key
         self.requires_pred = FrameSpec(
@@ -169,7 +184,7 @@ class LayerPITSalienceBCELoss:
             )
         layers = logits.reshape(b, r, len(self._freqs), n_grid_t)
         rps_grid = F.interpolate(rps.float(), size=n_grid_t, mode="linear", align_corners=False)
-        tgt = gaussian_layer_target(rps_grid, self._freqs, sigma_bins=self.sigma_bins)
+        tgt = gaussian_layer_target(rps_grid, self._freqs, sigma_rev_s=self.sigma_rev_s)
         return layers, tgt
 
     def __call__(self, pred: td.Frame, target: td.Frame) -> torch.Tensor:
@@ -177,3 +192,12 @@ class LayerPITSalienceBCELoss:
         rps = get_tensor(target, self.target_key).float()
         layers, tgt = self.layers_and_target(logits, rps)
         return layer_pit_bce(layers, tgt, pos_weight=self.pos_weight, focus=self.focus)
+
+
+def resolve_focus(focus: float | str, grid: Any, sigma_rev_s: float) -> float:
+    """A config's ``focus``: a number, or ``"auto"`` = `layer_focus` on ``grid``."""
+    if isinstance(focus, str):
+        if focus != "auto":
+            raise ValueError(f"focus must be a number or 'auto', got {focus!r}")
+        return layer_focus(grid, sigma_rev_s)
+    return float(focus)

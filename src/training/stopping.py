@@ -1,220 +1,136 @@
-"""Noise-tolerant stopping policy — opt-in via ``early_stopping.enabled``.
+"""Checkpoint selection and the saturation stop for full-panel validation.
 
-The historical loop stops after ``RootConfig.patience`` raw epochs without a
-new best, which a noisy validation metric trips long before a model has
-saturated. :class:`StoppingController` replaces that decision (never the
-``best.ckpt`` selection, which stays on the RAW monitor value) with:
+:class:`MultiMetricController` folds one validation round's scores in and
+reports, per tracked score, whether its RAW round value set a new best and
+whether its median over the last ``smoothing_window`` rounds improved by at
+least ``min_relative_improvement`` (relative, i.e. on a log scale, so every
+score is judged scale-free). The loop links ``best_<score>_raw.ckpt`` /
+``best_<score>_median.ckpt`` to ``last.ckpt`` on those verdicts.
 
-* **Smoothing** — every check uses the median of the last ``median_window``
-  raw monitor values (a partial window at the start). The same smoothed
-  value drives ``ReduceLROnPlateau``, whose ``threshold`` is re-derived each
-  epoch so scheduler and controller share one notion of *meaningful*
-  improvement: ``max(min_delta_abs, min_delta_rel * |best_smoothed|)``.
-* **Saturation stop** — all four gates at once: ``epoch + 1 >= min_epochs``
-  (absolute, counting the original run's epochs on a continuation),
-  ``patience`` consecutive checks without meaningful improvement,
-  ``min_lr_reductions`` ACTUAL reductions observed on the optimizer, and
-  ``lr_grace_epochs`` checks since the latest one.
-* **Non-finite stop** — a NaN/inf train loss or monitor ends the run before
-  anything for that epoch is checkpointed, so ``last.ckpt``/``train_state``
-  keep the last good weights.
-* **Divergence guard** — a *finite* but sustained worsening: the raw train
-  loss AND the smoothed monitor are both worse than their best-so-far by
-  ``diverge_rel`` (relative; the monitor side floored at ``min_delta_abs``)
-  for ``diverge_epochs`` consecutive epochs. A single spike resets the
-  streak. The first trigger reduces the LR once (``scheduler.factor``) as a
-  recovery attempt; a second full streak stops the run.
-* **Deadline** — ``deadline_unix`` is checked by the loop between epochs
-  (before the first and after each saved one), never mid-epoch.
+The stop is decided on the CONTROL score alone (``validation.control``, the
+protocol's ``real``): ``stale_rounds`` counts full-window rounds since the
+control's median last improved, and the run stops (``"saturation"``) once
+``rounds_completed >= min_rounds`` and ``stale_rounds >= final_patience``.
+The other primaries only select checkpoints — a sub-panel cell drifting down
+by 1 % cannot keep a converged run alive. The controller never touches the
+optimizer: the LR is a pure function of the step count (``training.loop``).
 
-Every counter lives in :meth:`StoppingController.state_dict` and is persisted
-under ``train_state["early_stopping"]`` next to the optimizer/scaler, so a
-preempted run continues the policy instead of restarting it. A bundle without
-that key (a freshly prepared continuation) starts a clean controller.
+A non-finite round never reaches the controller (it raises on one): the loop
+stops the run (``"nonfinite"``) before anything for that round is
+checkpointed. All state rides in ``train_state.pt`` under :data:`STATE_KEY`,
+so a resumed run continues the same windows and counters.
 """
 
 from __future__ import annotations
 
-import logging
 import math
 import statistics
-import time
+from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-import torch
+__all__ = ["STATE_KEY", "MultiValidationVerdict", "MultiMetricController"]
 
-__all__ = ["StoppingController", "Verdict", "STATE_KEY"]
-
-logger = logging.getLogger(__name__)
-
-STATE_KEY = "early_stopping"
+STATE_KEY = "multi_validation"
 
 
 @dataclass(frozen=True)
-class Verdict:
-    smoothed: float
-    lr_reduced: bool
-    stop_reason: str | None  # "nonfinite" | "divergence" | "saturation" | None
+class MultiValidationVerdict:
+    smoothed: dict[str, float]
+    improved_median: tuple[str, ...]
+    improved_raw: tuple[str, ...]
+    stop_reason: str | None  # "saturation" | None
 
 
-class StoppingController:
-    def __init__(self, cfg: Any, *, mode: str) -> None:
-        if mode not in ("min", "max"):
-            raise ValueError(f"monitor_mode must be 'min' or 'max', got {mode!r}")
-        self.cfg = cfg
-        self.mode = mode
-        self.window: list[float] = []
-        self.best_smoothed: float | None = None
-        self.checks_without_improvement = 0
-        self.lr_reductions = 0
-        self.last_reduction_epoch: int | None = None
-        self.best_train_loss: float | None = None
-        self.diverge_streak = 0
-        self.recovery_attempts = 0
+class MultiMetricController:
+    """Dual-best bookkeeping per score; saturation stop on the control score."""
+
+    def __init__(self, cfg: Any, names: tuple[str, ...]) -> None:
+        self.window = int(cfg.smoothing_window)
+        self.min_log_improvement = math.log1p(float(cfg.min_relative_improvement))
+        self.min_rounds = int(cfg.min_rounds)
+        self.final_patience = int(cfg.final_patience)
+        self.control = str(cfg.control)
+        if self.control not in names:
+            raise ValueError(
+                f"validation.control {self.control!r} must be one of the primary scores {names}"
+            )
+        self.names = names
+        self.windows: dict[str, deque[float]] = {name: deque(maxlen=self.window) for name in names}
+        self.best_smoothed: dict[str, float] = {}
+        self.best_raw: dict[str, float] = {}
+        self.stale_rounds = 0
+        self.rounds_completed = 0
         self.stop_reason: str | None = None
 
-    # ── persistence ────────────────────────────────────────────────────────
+    def _improved(self, value: float, best: float) -> bool:
+        if value < 0.0 or best < 0.0:
+            raise ValueError("log-scale validation scores must be non-negative")
+        if best == 0.0:
+            return False
+        if value == 0.0:
+            return True
+        return math.log(best) - math.log(value) >= self.min_log_improvement
 
-    _FIELDS = (
-        "window",
-        "best_smoothed",
-        "checks_without_improvement",
-        "lr_reductions",
-        "last_reduction_epoch",
-        "best_train_loss",
-        "diverge_streak",
-        "recovery_attempts",
-        "stop_reason",
-    )
+    def step(self, scores: Mapping[str, float]) -> MultiValidationVerdict:
+        self.rounds_completed += 1
+        values = {name: float(scores[name]) for name in self.names}
+        if not all(math.isfinite(value) for value in values.values()):
+            raise ValueError(f"non-finite validation scores reached the controller: {values}")
+
+        improved_raw: list[str] = []
+        for name, value in values.items():
+            best = self.best_raw.get(name)
+            if best is None or value < best:
+                self.best_raw[name] = value
+                improved_raw.append(name)
+            self.windows[name].append(value)
+        smoothed = {name: statistics.median(window) for name, window in self.windows.items()}
+        if any(len(window) < self.window for window in self.windows.values()):
+            return MultiValidationVerdict(smoothed, (), tuple(improved_raw), None)
+
+        improved_median: list[str] = []
+        for name, value in smoothed.items():
+            best = self.best_smoothed.get(name)
+            if best is None or self._improved(value, best):
+                self.best_smoothed[name] = value
+                improved_median.append(name)
+
+        if self.control in improved_median:
+            self.stale_rounds = 0
+        else:
+            self.stale_rounds += 1
+        if self.rounds_completed >= self.min_rounds and self.stale_rounds >= self.final_patience:
+            self.stop_reason = "saturation"
+        return MultiValidationVerdict(
+            smoothed=smoothed,
+            improved_median=tuple(improved_median),
+            improved_raw=tuple(improved_raw),
+            stop_reason=self.stop_reason,
+        )
 
     def state_dict(self) -> dict[str, Any]:
-        d = {k: getattr(self, k) for k in self._FIELDS}
-        d["window"] = list(self.window)
-        return d
+        return {
+            "names": list(self.names),
+            "control": self.control,
+            "windows": {name: list(window) for name, window in self.windows.items()},
+            "best_smoothed": dict(self.best_smoothed),
+            "best_raw": dict(self.best_raw),
+            "stale_rounds": self.stale_rounds,
+            "rounds_completed": self.rounds_completed,
+            "stop_reason": self.stop_reason,
+        }
 
-    def load_state_dict(self, state: dict[str, Any]) -> None:
-        for k in self._FIELDS:
-            setattr(self, k, state[k])
-        self.window = list(self.window)
-
-    # ── comparisons ────────────────────────────────────────────────────────
-
-    def min_delta(self, best: float | None) -> float:
-        """Meaningful-improvement margin around ``best``: ``max(abs, rel*|best|)``."""
-        if best is None or not math.isfinite(best):
-            return float(self.cfg.min_delta_abs)
-        return max(float(self.cfg.min_delta_abs), float(self.cfg.min_delta_rel) * abs(best))
-
-    def _better(self, value: float, ref: float, margin: float) -> bool:
-        return value < ref - margin if self.mode == "min" else value > ref + margin
-
-    def _worse(self, value: float, ref: float, margin: float) -> bool:
-        return value > ref + margin if self.mode == "min" else value < ref - margin
-
-    def deadline_reached(self, now: float | None = None) -> bool:
-        deadline = self.cfg.deadline_unix
-        return deadline is not None and (time.time() if now is None else now) >= float(deadline)
-
-    # ── one check per epoch ────────────────────────────────────────────────
-
-    def step(
-        self,
-        *,
-        epoch: int,
-        train_loss: float,
-        raw_metric: float,
-        optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
-    ) -> Verdict:
-        """Fold this epoch's results in, step the scheduler on the smoothed
-        monitor, and decide whether to stop. On ``"nonfinite"`` nothing is
-        recorded: the caller must not checkpoint that epoch."""
-        if not (math.isfinite(train_loss) and math.isfinite(raw_metric)):
-            logger.error(
-                "epoch %d: non-finite train_loss=%r / monitor=%r; stopping without "
-                "saving this epoch (last good weights and train state kept)",
-                epoch,
-                train_loss,
-                raw_metric,
-            )
-            return Verdict(smoothed=math.nan, lr_reduced=False, stop_reason="nonfinite")
-
-        self.window.append(float(raw_metric))
-        del self.window[: -int(self.cfg.median_window)]
-        smoothed = statistics.median(self.window)
-
-        # Scheduler and controller agree on what "improved" means.
-        scheduler.threshold = self.min_delta(scheduler.best)
-        lr_before = optimizer.param_groups[0]["lr"]
-        scheduler.step(smoothed)
-        reduced = optimizer.param_groups[0]["lr"] < lr_before
-
-        if self.best_smoothed is None or self._better(
-            smoothed, self.best_smoothed, self.min_delta(self.best_smoothed)
-        ):
-            self.best_smoothed = smoothed
-            self.checks_without_improvement = 0
-        else:
-            self.checks_without_improvement += 1
-
-        # Divergence: both signals must be clearly worse than their best.
-        if self.best_train_loss is None or train_loss < self.best_train_loss:
-            self.best_train_loss = float(train_loss)
-        rel = float(self.cfg.diverge_rel)
-        train_worse = train_loss - self.best_train_loss > rel * abs(self.best_train_loss)
-        diverging = train_worse and self._worse(
-            smoothed,
-            self.best_smoothed,
-            max(float(self.cfg.min_delta_abs), rel * abs(self.best_smoothed)),
-        )
-        self.diverge_streak = self.diverge_streak + 1 if diverging else 0
-        if self.diverge_streak >= int(self.cfg.diverge_epochs):
-            self.diverge_streak = 0
-            if self.recovery_attempts == 0:
-                self.recovery_attempts = 1
-                if not reduced:
-                    for group in optimizer.param_groups:
-                        group["lr"] *= scheduler.factor
-                    scheduler.num_bad_epochs = 0
-                    scheduler.cooldown_counter = scheduler.cooldown
-                    reduced = True
-                logger.warning(
-                    "epoch %d: sustained divergence (%d epochs); one recovery LR reduction to %.3g",
-                    epoch,
-                    self.cfg.diverge_epochs,
-                    optimizer.param_groups[0]["lr"],
-                )
-            else:
-                self.stop_reason = "divergence"
-
-        if reduced:
-            self.lr_reductions += 1
-            self.last_reduction_epoch = epoch
-        since_reduction = (
-            math.inf if self.last_reduction_epoch is None else epoch - self.last_reduction_epoch
-        )
-        if self.stop_reason is None and (
-            epoch + 1 >= int(self.cfg.min_epochs)
-            and self.checks_without_improvement >= int(self.cfg.patience)
-            and self.lr_reductions >= int(self.cfg.min_lr_reductions)
-            and since_reduction >= int(self.cfg.lr_grace_epochs)
-        ):
-            self.stop_reason = "saturation"
-
-        logger.info(
-            "epoch %d: monitor=%.4g median=%.4g best=%.4g no_improve=%d/%d "
-            "lr_reductions=%d/%d since_reduction=%s streak=%d%s",
-            epoch,
-            raw_metric,
-            smoothed,
-            self.best_smoothed,
-            self.checks_without_improvement,
-            self.cfg.patience,
-            self.lr_reductions,
-            self.cfg.min_lr_reductions,
-            since_reduction,
-            self.diverge_streak,
-            f" -> STOP ({self.stop_reason})" if self.stop_reason else "",
-        )
-        return Verdict(smoothed=smoothed, lr_reduced=reduced, stop_reason=self.stop_reason)
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+        if tuple(state["names"]) != self.names or state["control"] != self.control:
+            raise ValueError("saved validation scores/control differ from the current config")
+        self.windows = {
+            name: deque((float(value) for value in state["windows"][name]), maxlen=self.window)
+            for name in self.names
+        }
+        self.best_smoothed = {str(k): float(v) for k, v in state["best_smoothed"].items()}
+        self.best_raw = {str(k): float(v) for k, v in state["best_raw"].items()}
+        self.stale_rounds = int(state["stale_rounds"])
+        self.rounds_completed = int(state["rounds_completed"])
+        self.stop_reason = state["stop_reason"]

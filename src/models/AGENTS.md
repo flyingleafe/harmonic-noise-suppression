@@ -11,12 +11,12 @@ built through `models.registry`.
 ```
 src/models/
   registry.py           RPS_MODEL_REGISTRY / LEGACY_MODEL_BUILDERS / NOISE_GEN_MODEL_REGISTRY /
-                        DIRECT_FACTORY_TYPES; build_model(), build_noise_gen_model(), model_types()
+                        DIRECT_FACTORY_TYPES; build_model() (logs count_parameters()), model_types()
   frontends/            Spectral front-ends (build_frontend, register_frontend)
   rps_predictor.py      SimpleConv* family (encoders, pools, temporal heads, GatedProjection)
-  salience_rps.py       Salience-map RPS baselines; `decode_logits` = readout seam
-  salience_tracker.py   Shared-map (L0/L1) readout, GPU-batched
-  salience_crf.py       Per-rotor salience layers + CRF readout (L2/3)
+  salience_rps.py       Salience baselines, L0/L1/L2 ladder (OffLogitHead, TranslationHead)
+  salience_tracker.py   Shared-map (L0) readout, GPU-batched
+  salience_crf.py       Per-rotor grids (RP_LINEAR_GRID, log_off), Gaussian target, off-aware CRF
   multif0/              Multi-F0 HCQT+CNN (Cuesta 2020): LateDeep etc., hcqt.py, nnaudio_cqt.py
   basic_pitch/          Basic Pitch PyTorch port (Bittner 2022) — own AGENTS.md
   harmonic_ports/       HarmoF0/HPPNet/hFT on a linear rate grid + *_orig controls + layer_readout.py
@@ -59,7 +59,7 @@ src/models/
 | CKLA heads | `simple_conv_v2_ckla{,_mag,_norot,_mag_norot,_phasediff,_phaseonly,_phaseunit}`, `_ckla_phaseonly_cond` (refiner `forward(audio, cond)`, non-PIT MSE), `_fkla`, `hg_ckla_refiner` | docs/ckla-design.md, docs/pikalman-ckla-design.md |
 | Complex-encoder RPS | `dcunet_enc_rps`, `dccrn_enc_rps`, `dccrn_lite_rps`, `edge_bs_rof_rps` (lazy) | encoder + `RPSPredictionHead` |
 | Salience (multi-pitch) | `multif0_rps`, `multif0_salience`, `basic_pitch_salience` | `salience_rps.py` |
-| Harmonic ports | `hppnet_pyramid` (STFT pyramid + taps; docs/pyramid-harmonic-frontend-design.md), `hppnet_orig` (`harmonic_k_max`, `head`) | `harmonic_ports/`; taps: `tap_conv` (Triton on CUDA) |
+| Harmonic ports | `hppnet_pyramid` (164-bin grid, `separable` ConvLSTM), `hppnet_orig` (`harmonic_k_max`, `head`) | `harmonic_ports/`; taps: `tap_conv` (Triton on CUDA) |
 
 ## Spectral front-ends (`frontends/`)
 
@@ -97,15 +97,15 @@ SimpleConv* models take `frontend=` as an instance **or a registry key string**
   (`dcunet_rps_fusion` ∈ `bottleneck`/`gru`/`hierarchical`),
   `dcunet_refactored.py` decoder-side only (`rps_fusion` ∈
   `bottleneck`/`hierarchical`/None) — docs/dcunet-refactored.md.
-- **Salience models** (`outputs_salience = True`): `forward(audio) -> (B, G, T)`
-  logits; BCE via a salience `conf/loss`; `predict_rps()` decodes to the STFT
-  grid so PIT metrics apply unchanged. Harmonic ports declare their linear rate
-  grid as `SalienceRPSPredictor.out_freqs`. `n_maps=4` (`_l4` configs) stacks
-  per-rotor layers along the codec's freq axis (width `n_maps * G`), needs a
-  linear output grid and `conf/{loss,metrics}/salience_layers_r150{,_h256}.yaml`;
-  `n_maps=1` is the old model exactly. Zero convention: target dark only for
-  `rps <= 0.1`; a frame with no peak decodes to 0 rev/s for every rotor (never
-  hold-over, never NaN), track identity survives.
+- **Salience models** (`outputs_salience = True`): `forward(audio) -> (B, n_maps*G, T)`
+  logits; `decode_logits(logits, n_samples)` -> rev/s on the STFT grid. Ladder of
+  the four baselines (`conf/model/{hppnet,harmof0,basicpitch,latedeep}_l{0,1,2}.yaml`):
+  L0 `n_maps=1` shared map, threshold + Hungarian; L1 `n_maps=4` on the own log
+  grid + off bin 0 (`OffLogitHead`); L2 `translation_head=True` → `TranslationHead`
+  (fixed W + one identity-init depthwise 9-tap conv) onto `RP_LINEAR_GRID` (164 bins
+  × 0.9765625 rev/s, also the pyramid's grid). Every per-rotor `output_freqs()` has
+  bin 0 = 0.0 = off; loss/metrics take the SAME `grid` spec + `sigma_rev_s`; the CRF
+  is a dense rev/s hinge with the off state free (`salience_crf`).
 - **Slot-comb CRF**: `SlotCombNet(emission="classical"|"partial"|"v2", parts=…,
   off_state, learned_transition, mask_below_grid)`; every option holds the
   zero-parameter corner at init. OFF index is `G` in every `comb_crf` path.
@@ -131,9 +131,8 @@ SimpleConv* models take `frontend=` as an instance **or a registry key string**
   (docs/experiments/simpleconv-rps-architecture-search.md § causal follow-up).
 - A rate grid that reaches 0 needs `f_min` (near-DC gather), constant-`k_max`
   normalisation and `r_min` (sub-bin candidates): `harmof0_rps.py`, `hft_rps.py`.
-- `*_orig` L2 adapter (`superres_out=True`, `n_maps=4`; `FreqSuperResHead` as
-  `superres_head`): 352-bin log grid → four 300-bin maps on 0–150 rev/s, clamped
-  below 27.5 Hz. `n_maps>1` REQUIRES it. `conf/model/{harmof0,hppnet}_l2.yaml`.
+- `TranslationHead` works on LOGITS: a zero W row would read p = 0.5, so the rates
+  below the trunk's fmin (`unreachable` buffer) are a fixed logit -10.
 - Slot-comb v2: a knob that starts "off" starts with ~0 gradient (`gap_mu_init`,
   `read_sigma_init`); weights are `softplus`, never `1 + MLP` (went non-finite).
   `mask_k_max` caps a 121 s mask-bank build at `r_lo=10`.
@@ -145,8 +144,9 @@ SimpleConv* models take `frontend=` as an instance **or a registry key string**
 ## Further reading
 
 - `docs/noise-generator-models.md` — generative package, conditioning, geometry, losses.
-- `docs/harmonic-ports-design.md` + `docs/experiments/harmonic-multipitch-ports.md` — linear rate grid, per-rotor layers, controls.
-- `docs/experiments/comb-slot-crf.md` § "Implementation reference" — v2 emission parts, chain flags, costs.
-- `docs/experiments/salience-map-rps-tracking.md` § "Implementation notes" — BCE path, `_l4`, `fused_branches`, `stacked_hcqt`.
-- `docs/experiments/honest-base-frontends.md` § "Code" — voicing gate, string front-ends, `hb_*` configs.
+- `docs/experiments/paper-real-protocol.md` — output grid, L0/L1/L2 ladder, HRSPNet chain.
+- `docs/harmonic-ports-design.md`, `docs/experiments/harmonic-multipitch-ports.md` — ports, linear rate grid.
+- `docs/pyramid-harmonic-frontend-design.md` — the pyramid; `docs/experiments/comb-slot-crf.md` — slot-comb CRF.
+- `docs/experiments/salience-map-rps-tracking.md` — BCE path, `fused_branches`.
+- `docs/experiments/honest-base-frontends.md` § "Code" — voicing gate, `hb_*` configs.
 - `docs/ckla-design.md`, `docs/pikalman-ckla-design.md`, `docs/slot-comb-v2-design.md` (archived), `docs/dcunet-refactored.md`.

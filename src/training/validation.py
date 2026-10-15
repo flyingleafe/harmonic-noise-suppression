@@ -1,40 +1,63 @@
-"""GPU-resident, multi-subset validation for RPS regressors.
+"""Full-panel RPS validation: one inference pass, per-frame errors, meta views.
 
-A validation plan concatenates each unique finite dataset exactly once. Named
-views are cheap index masks over the resulting per-sample PIT-MAE tensor, so
-nested real views (R1/R2/R3, source/no-source) never repeat model inference.
+A validation plan concatenates each finite dataset once and reads every
+sample's ``frame["meta"]`` (and its target, for the regime check) ONCE at
+build time. Named views are predicates over that meta (``where``) optionally
+restricted to one frame regime of :mod:`metrics.regimes` (``regime``); the
+per-round pass only computes ``(N, T)`` per-frame errors under each clip's
+optimal rotor assignment (:func:`metrics.rps.batched_pit_frame_errors`) and
+the target's regime labels, then reduces every view on the host:
+
+* score = frame-weighted mean error over the view's frames;
+* clip statistics = mean, population std and count of the per-clip means,
+  a clip being every item sharing ``(dataset, meta["clip_index"])`` (the 8
+  flattened channels of one recording window).
+
+Aggregates are weighted sums of views (e.g. ``real = ½ dregon + ½ md2``).
 """
 
 from __future__ import annotations
 
 import math
-import statistics
-from collections import deque
-from collections.abc import Callable, Mapping, Sized
+from collections.abc import Callable, Sized
 from dataclasses import dataclass
 from typing import Any, cast
 
+import numpy as np
 import tdseries as td
 import torch
-from omegaconf import DictConfig, OmegaConf
+import torch.nn.functional as F
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from torch.utils.data import ConcatDataset, Dataset
 
+from data_processing.frames import meta_dict
 from losses._common import get_tensor
-from metrics.rps import batched_pit_mae
+from metrics.regimes import REGIMES, frame_regimes
+from metrics.rps import batched_pit_frame_errors
 from training.config import build_dataset
 
-MULTI_VALIDATION_STATE_KEY = "multi_validation"
+__all__ = [
+    "CLIP_KEY",
+    "ResolvedView",
+    "ValidationPlan",
+    "ViewClipStats",
+    "ValidationSamples",
+    "RPSReadout",
+    "build_validation_plan",
+    "rps_readout_for",
+    "validate_rps",
+]
+
+#: Meta key grouping flattened items into clips for the clip-level statistics.
+CLIP_KEY = "clip_index"
+_VIEW_KEYS = {"where", "regime"}
 
 
 @dataclass(frozen=True)
 class ResolvedView:
     name: str
-    dataset: str
-    dataset_offset: int
-    start: int
-    stop: int
-    channels: tuple[int, ...]
-    channels_per_clip: int | None
+    samples: np.ndarray  # (N,) bool over the concatenated panel
+    regime: int | None  # metrics.regimes code, or None for every frame
 
 
 @dataclass(frozen=True)
@@ -44,69 +67,119 @@ class ValidationPlan:
     views: tuple[ResolvedView, ...]
     aggregates: dict[str, dict[str, float]]
     primary: tuple[str, ...]
+    control: str
+    clip_ids: np.ndarray  # (N,) dense clip id, unique per (dataset, clip_index)
+    clip_index: np.ndarray  # (N,) meta clip_index
+    channel: np.ndarray  # (N,) meta channel, -1 when absent
+    frame_rate: float  # frames/s of every target rps series
+
+
+@dataclass(frozen=True)
+class ViewClipStats:
+    mean: float
+    std: float
+    count: int
+
+
+@dataclass(frozen=True)
+class ValidationSamples:
+    """Per-sample output of one validation round (host arrays)."""
+
+    pit_mae: np.ndarray  # (N,) float32, clip score = frame_err.mean(-1)
+    frame_err: np.ndarray  # (N, T) float32
+    frame_regime: np.ndarray  # (N, T) int8, metrics.regimes codes
+    clip_index: np.ndarray  # (N,)
+    channel: np.ndarray  # (N,)
+    clip_stats: dict[str, ViewClipStats]
+
+    def arrays(self) -> dict[str, np.ndarray]:
+        """The per-sample arrays written to ``val_samples/round_<N>.npz``."""
+        return {
+            "pit_mae": self.pit_mae,
+            "frame_err": self.frame_err,
+            "frame_regime": self.frame_regime,
+            "clip_index": self.clip_index,
+            "channel": self.channel,
+        }
 
 
 def _plain(value: Any) -> Any:
-    if isinstance(value, DictConfig):
+    if isinstance(value, DictConfig | ListConfig):
         return OmegaConf.to_container(value, resolve=True)
     return value
+
+
+def _target_rate(frame: td.Frame) -> float:
+    entry = frame["rps"]
+    index = entry.tindex if isinstance(entry, td.Series) and entry.has_time else None
+    if not isinstance(index, td.GridIndex):
+        raise TypeError("validation targets must be rps Series on a uniform time grid")
+    return index.sr_num / index.sr_den
 
 
 def build_validation_plan(cfg: Any) -> ValidationPlan:
     datasets_cfg = dict(_plain(cfg.datasets) or {})
     if not datasets_cfg:
         raise ValueError("validation.datasets must contain at least one finite dataset")
+    views_cfg = {str(name): dict(raw) for name, raw in dict(_plain(cfg.views) or {}).items()}
+    for name, view in views_cfg.items():
+        unknown = set(view) - _VIEW_KEYS
+        if unknown:
+            raise ValueError(
+                f"validation view {name!r} has unknown keys {sorted(unknown)}; views are "
+                f"meta predicates {{where: {{key: value | [values]}}, regime: <name>}}"
+            )
+        regime = view.get("regime")
+        if regime is not None and regime not in REGIMES:
+            raise ValueError(f"validation view {name!r}: regime {regime!r} not in {REGIMES}")
+    meta_keys = {CLIP_KEY} | {key for view in views_cfg.values() for key in view.get("where", {})}
 
     datasets: list[Dataset] = []
-    offsets: dict[str, tuple[int, int]] = {}
-    offset = 0
-    for name, spec in datasets_cfg.items():
+    metas: list[dict[str, Any]] = []
+    regimes: list[torch.Tensor] = []
+    clip_keys: list[tuple[str, int]] = []
+    frame_rate: float | None = None
+    for dataset_name, spec in datasets_cfg.items():
         dataset = build_dataset(spec)
         if not isinstance(dataset, Dataset):
-            raise TypeError(f"validation dataset {name!r} must be finite/map-style")
-        size = len(cast(Sized, dataset))
-        offsets[str(name)] = (offset, size)
+            raise TypeError(f"validation dataset {dataset_name!r} must be finite/map-style")
         datasets.append(dataset)
-        offset += size
+        for index in range(len(cast(Sized, dataset))):
+            frame = cast(td.Frame, dataset[index])
+            meta = meta_dict(frame)
+            missing = meta_keys - set(meta)
+            if missing:
+                raise ValueError(
+                    f"validation dataset {dataset_name!r} sample {index} lacks meta "
+                    f"{sorted(missing)}"
+                )
+            rate = _target_rate(frame)
+            if frame_rate is None:
+                frame_rate = rate
+            elif not math.isclose(rate, frame_rate):
+                raise ValueError(
+                    f"validation targets mix frame rates ({frame_rate} and {rate} frames/s)"
+                )
+            metas.append(meta)
+            regimes.append(frame_regimes(get_tensor(frame, "rps")[None], rate)[0])
+            clip_keys.append((str(dataset_name), int(meta[CLIP_KEY])))
+    assert frame_rate is not None
+    size = len(metas)
 
     views: list[ResolvedView] = []
-    for name, raw in dict(_plain(cfg.views) or {}).items():
-        view = dict(raw)
-        dataset_name = str(view["dataset"])
-        if dataset_name not in offsets:
-            raise ValueError(
-                f"validation view {name!r} references unknown dataset {dataset_name!r}"
-            )
-        dataset_offset, dataset_size = offsets[dataset_name]
-        start = int(view.get("start", 0))
-        stop = int(view.get("stop", dataset_size))
-        if not 0 <= start < stop <= dataset_size:
-            raise ValueError(
-                f"validation view {name!r} range [{start}, {stop}) is outside "
-                f"dataset {dataset_name!r} of length {dataset_size}"
-            )
-        channels = tuple(int(x) for x in (view.get("channels") or ()))
-        channels_per_clip = view.get("channels_per_clip")
-        channels_per_clip = int(channels_per_clip) if channels_per_clip is not None else None
-        if channels and (channels_per_clip is None or channels_per_clip <= 0):
-            raise ValueError(
-                f"validation view {name!r} selects channels but has no channels_per_clip"
-            )
-        if channels_per_clip is not None and any(
-            channel < 0 or channel >= channels_per_clip for channel in channels
-        ):
-            raise ValueError(f"validation view {name!r} has an invalid channel index")
-        views.append(
-            ResolvedView(
-                name=str(name),
-                dataset=dataset_name,
-                dataset_offset=dataset_offset,
-                start=dataset_offset + start,
-                stop=dataset_offset + stop,
-                channels=channels,
-                channels_per_clip=channels_per_clip,
-            )
+    for name, view in views_cfg.items():
+        samples = np.ones(size, dtype=bool)
+        for key, wanted in dict(view.get("where") or {}).items():
+            allowed = list(wanted) if isinstance(wanted, list | tuple) else [wanted]
+            samples &= np.array([meta[key] in allowed for meta in metas], dtype=bool)
+        regime = REGIMES.index(view["regime"]) if view.get("regime") is not None else None
+        has_frames = samples.any() and (
+            regime is None
+            or any(bool((regimes[i] == regime).any()) for i in np.flatnonzero(samples))
         )
+        if not has_frames:
+            raise ValueError(f"validation view {name!r} selects no frames of the panel")
+        views.append(ResolvedView(name=name, samples=samples, regime=regime))
 
     aggregates = {
         str(name): {str(part): float(weight) for part, weight in dict(weights).items()}
@@ -126,15 +199,22 @@ def build_validation_plan(cfg: Any) -> ValidationPlan:
     missing_primary = set(primary) - known
     if missing_primary:
         raise ValueError(f"validation.primary contains unknown scores {sorted(missing_primary)}")
-    if str(cfg.control) not in known:
-        raise ValueError(f"validation.control references unknown score {cfg.control!r}")
+    control = str(cfg.control)
+    if control not in primary:
+        raise ValueError(f"validation.control {control!r} must be a primary score")
 
+    dense = {key: i for i, key in enumerate(dict.fromkeys(clip_keys))}
     return ValidationPlan(
         dataset=ConcatDataset(datasets),
-        size=offset,
+        size=size,
         views=tuple(views),
         aggregates=aggregates,
         primary=primary,
+        control=control,
+        clip_ids=np.array([dense[key] for key in clip_keys], dtype=np.int64),
+        clip_index=np.array([key[1] for key in clip_keys], dtype=np.int64),
+        channel=np.array([int(meta.get("channel", -1)) for meta in metas], dtype=np.int64),
+        frame_rate=float(frame_rate),
     )
 
 
@@ -151,8 +231,7 @@ def _direct_readout(
 def _salience_readout(
     model: torch.nn.Module, pred_frame: td.Frame, inputs: dict[str, torch.Tensor]
 ) -> torch.Tensor:
-    # The model's deployed decoder (``SalienceRPSPredictor.decode_logits``):
-    # shared-map tracking or per-layer CRF, on the logits' device.
+    # The model's deployed decoder (``decode_logits``), on the logits' device.
     return model.decode_logits(  # type: ignore[operator]
         get_tensor(pred_frame, "salience"), int(inputs["mixture"].shape[-1])
     )
@@ -174,6 +253,33 @@ def rps_readout_for(task_name: str) -> RPSReadout:
         ) from None
 
 
+def _reduce_views(
+    plan: ValidationPlan, frame_err: np.ndarray, frame_regime: np.ndarray
+) -> tuple[dict[str, float], dict[str, ViewClipStats]]:
+    scores: dict[str, float] = {}
+    clip_stats: dict[str, ViewClipStats] = {}
+    n_clips = int(plan.clip_ids.max()) + 1
+    errors = frame_err.astype(np.float64)
+    for view in plan.views:
+        mask = np.broadcast_to(view.samples[:, None], frame_err.shape)
+        if view.regime is not None:
+            mask = mask & (frame_regime == view.regime)
+        frames = mask.sum(axis=1)
+        if not frames.any():
+            raise RuntimeError(f"validation view {view.name!r} selected no frames this round")
+        sums = np.where(mask, errors, 0.0).sum(axis=1)
+        scores[view.name] = float(sums.sum() / frames.sum())
+        clip_sums = np.bincount(plan.clip_ids, weights=sums, minlength=n_clips)
+        clip_frames = np.bincount(plan.clip_ids, weights=frames, minlength=n_clips)
+        clip_means = clip_sums[clip_frames > 0] / clip_frames[clip_frames > 0]
+        clip_stats[view.name] = ViewClipStats(
+            mean=float(clip_means.mean()), std=float(clip_means.std()), count=len(clip_means)
+        )
+    for name, weights in plan.aggregates.items():
+        scores[name] = sum(scores[part] * weight for part, weight in weights.items())
+    return scores, clip_stats
+
+
 def validate_rps(
     *,
     model: torch.nn.Module,
@@ -185,14 +291,16 @@ def validate_rps(
     amp: bool,
     amp_dtype: torch.dtype | None,
     readout: RPSReadout = _direct_readout,
-) -> tuple[dict[str, float], float]:
-    """Run one batched inference pass and reduce all RPS scores on the GPU."""
+) -> tuple[dict[str, float], float, ValidationSamples]:
+    """One batched inference pass; returns ``(scores, mean loss, per-sample arrays)``.
+
+    Everything stays on ``device`` until one host transfer at the end.
+    """
     model.eval()
-    score_sums = torch.zeros(len(plan.views), device=device, dtype=torch.float64)
-    score_counts = torch.zeros(len(plan.views), device=device, dtype=torch.int64)
+    errors: list[torch.Tensor] = []
+    labels: list[torch.Tensor] = []
     loss_sum = torch.zeros((), device=device, dtype=torch.float64)
     sample_count = 0
-    offset = 0
     kwargs: dict[str, Any] = (
         {"dtype": amp_dtype} if amp_dtype is not None and device.type == "cuda" else {}
     )
@@ -206,161 +314,32 @@ def validate_rps(
                 pred_frame = codec.to_frame(outputs, batch)
                 loss = loss_fn(pred_frame, batch)
             pred = readout(model, pred_frame, inputs)
-            target = get_tensor(batch, "rps")
-            per_sample = batched_pit_mae(pred, target).to(torch.float64)
-            batch_size = int(per_sample.shape[0])
-            indices = torch.arange(offset, offset + batch_size, device=device)
-
-            for view_idx, view in enumerate(plan.views):
-                mask = (indices >= view.start) & (indices < view.stop)
-                if view.channels:
-                    assert view.channels_per_clip is not None
-                    local = indices - view.dataset_offset
-                    channel_mask = torch.zeros_like(mask)
-                    for channel in view.channels:
-                        channel_mask |= local.remainder(view.channels_per_clip) == channel
-                    mask &= channel_mask
-                score_sums[view_idx] += per_sample.masked_select(mask).sum()
-                score_counts[view_idx] += mask.sum()
-
+            target = get_tensor(batch, "rps").float()
+            errors.append(batched_pit_frame_errors(pred, target))
+            n_pred, n_target = int(pred.shape[-1]), int(target.shape[-1])
+            if n_target != n_pred:
+                target = F.interpolate(target, size=n_pred, mode="linear", align_corners=False)
+            labels.append(frame_regimes(target, plan.frame_rate * n_pred / n_target))
+            batch_size = int(target.shape[0])
             loss_sum += loss.detach().to(torch.float64) * batch_size
             sample_count += batch_size
-            offset += batch_size
 
-    if offset != plan.size:
-        raise RuntimeError(f"validation loader yielded {offset} samples, expected {plan.size}")
-    packed = torch.cat((score_sums, score_counts.to(torch.float64), loss_sum[None])).cpu()
-    count = len(plan.views)
-    sums = packed[:count]
-    counts = packed[count : 2 * count]
-    scores = {
-        view.name: float(sums[i] / counts[i]) for i, view in enumerate(plan.views) if counts[i] > 0
-    }
-    for name, weights in plan.aggregates.items():
-        scores[name] = sum(scores[part] * weight for part, weight in weights.items())
-    return scores, float(packed[-1] / max(sample_count, 1))
-
-
-__all__ = [
-    "MULTI_VALIDATION_STATE_KEY",
-    "ResolvedView",
-    "ValidationPlan",
-    "RPSReadout",
-    "build_validation_plan",
-    "rps_readout_for",
-    "validate_rps",
-    "MultiValidationVerdict",
-    "MultiMetricController",
-]
-
-
-@dataclass(frozen=True)
-class MultiValidationVerdict:
-    smoothed: dict[str, float]
-    improved: tuple[str, ...]
-    lr_reduced: bool
-    stop_reason: str | None
-
-
-class MultiMetricController:
-    """Any-subset meaningful-progress LR and saturation controller."""
-
-    def __init__(self, cfg: Any, names: tuple[str, ...]) -> None:
-        self.window = int(cfg.smoothing_window)
-        self.min_log_improvement = math.log1p(float(cfg.min_relative_improvement))
-        self.min_rounds = int(cfg.min_rounds)
-        self.lr_patience = int(cfg.lr_patience)
-        self.lr_factor = float(cfg.lr_factor)
-        self.min_lr_reductions = int(cfg.min_lr_reductions)
-        self.final_patience = int(cfg.final_patience)
-        self.names = names
-        self.windows = {name: deque(maxlen=self.window) for name in names}
-        self.best_smoothed: dict[str, float] = {}
-        self.stale_rounds = 0
-        self.lr_reductions = 0
-        self.rounds_completed = 0
-        self.stop_reason: str | None = None
-
-    def _improved(self, value: float, best: float) -> bool:
-        if value < 0.0 or best < 0.0:
-            raise ValueError("log-scale validation monitors must be non-negative")
-        if best == 0.0:
-            return False
-        if value == 0.0:
-            return True
-        return math.log(best) - math.log(value) >= self.min_log_improvement
-
-    def step(
-        self,
-        scores: Mapping[str, float],
-        optimizer: torch.optim.Optimizer,
-    ) -> MultiValidationVerdict:
-        self.rounds_completed += 1
-        values = {name: float(scores[name]) for name in self.names}
-        if not all(math.isfinite(value) for value in values.values()):
-            self.stop_reason = "nonfinite"
-            return MultiValidationVerdict({}, (), False, self.stop_reason)
-
-        for name, value in values.items():
-            self.windows[name].append(value)
-        smoothed = {name: statistics.median(window) for name, window in self.windows.items()}
-        if any(len(window) < self.window for window in self.windows.values()):
-            return MultiValidationVerdict(smoothed, (), False, None)
-
-        improved: list[str] = []
-        for name, value in smoothed.items():
-            best = self.best_smoothed.get(name)
-            if best is None or self._improved(value, best):
-                self.best_smoothed[name] = value
-                improved.append(name)
-
-        reduced = False
-        if improved:
-            self.stale_rounds = 0
-        else:
-            self.stale_rounds += 1
-            if self.lr_reductions < self.min_lr_reductions:
-                if self.stale_rounds >= self.lr_patience:
-                    for group in optimizer.param_groups:
-                        group["lr"] *= self.lr_factor
-                    self.lr_reductions += 1
-                    self.stale_rounds = 0
-                    reduced = True
-            elif (
-                self.rounds_completed >= self.min_rounds
-                and self.stale_rounds >= self.final_patience
-            ):
-                self.stop_reason = "saturation"
-
-        return MultiValidationVerdict(
-            smoothed=smoothed,
-            improved=tuple(improved),
-            lr_reduced=reduced,
-            stop_reason=self.stop_reason,
+    if sample_count != plan.size:
+        raise RuntimeError(
+            f"validation loader yielded {sample_count} samples, expected {plan.size}"
         )
-
-    def state_dict(self) -> dict[str, Any]:
-        return {
-            "names": list(self.names),
-            "windows": {name: list(window) for name, window in self.windows.items()},
-            "best_smoothed": dict(self.best_smoothed),
-            "stale_rounds": self.stale_rounds,
-            "lr_reductions": self.lr_reductions,
-            "stop_reason": self.stop_reason,
-            "rounds_completed": self.rounds_completed,
-        }
-
-    def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        if tuple(state["names"]) != self.names:
-            raise ValueError("saved multi-validation monitor names differ from current config")
-        self.windows = {
-            name: deque((float(value) for value in state["windows"][name]), maxlen=self.window)
-            for name in self.names
-        }
-        self.best_smoothed = {
-            str(name): float(value) for name, value in state["best_smoothed"].items()
-        }
-        self.stale_rounds = int(state["stale_rounds"])
-        self.lr_reductions = int(state["lr_reductions"])
-        self.rounds_completed = int(state.get("rounds_completed", 0))
-        self.stop_reason = state.get("stop_reason")
+    if len({int(error.shape[-1]) for error in errors}) != 1:
+        raise RuntimeError("validation predictions must share one frame count across the panel")
+    frame_err = torch.cat(errors).cpu().numpy().astype(np.float32)
+    frame_regime = torch.cat(labels).cpu().numpy()
+    loss_value = float(loss_sum.cpu()) / max(sample_count, 1)
+    scores, clip_stats = _reduce_views(plan, frame_err, frame_regime)
+    samples = ValidationSamples(
+        pit_mae=frame_err.mean(axis=1, dtype=np.float64).astype(np.float32),
+        frame_err=frame_err,
+        frame_regime=frame_regime,
+        clip_index=plan.clip_index,
+        channel=plan.channel,
+        clip_stats=clip_stats,
+    )
+    return scores, loss_value, samples

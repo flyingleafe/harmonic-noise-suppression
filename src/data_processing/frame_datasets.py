@@ -93,10 +93,12 @@ class DregonLMFrameDataset(Dataset):
 
     ``data_dir`` is a split folder (e.g. ``datasets/DREGON-LM-V4/train``)
     containing ``sample_*/`` subdirectories, each with ``mixture.wav`` and
-    ``rps.npy``. Per-sample metadata is read once from the sibling
-    ``metadata.json`` (``{"train": [{"id": ..., "input_snr": ...}, ...],
-    "valid": [...]}}`` — see ``derivations.generate_dregon_lm_split``) and merged under
-    ``"meta"``; absent when no ``metadata.json`` exists.
+    ``rps.npy``. ``frame["meta"]`` holds, in increasing precedence: the
+    sample's row of a sibling ``metadata.json`` (``{"train": [{"id": ...},
+    ...], "valid": [...]}`` — legacy local trees), every key of the sample's
+    own ``meta.json`` when present (scalars, strings, lists, ``None``; the
+    ``rp-real-valid-*`` panel views are predicates over these), then
+    ``recording_id`` defaulting to the sample dir name.
 
     ``channel``, when set, selects one mic channel (``audio[channel]``) from
     a multichannel recording, producing a genuinely mono ``(time,)`` Frame —
@@ -159,6 +161,10 @@ class DregonLMFrameDataset(Dataset):
         if not self.samples:
             raise ValueError(f"no sample_* directories with mixture.wav+rps.npy under {data_dir}")
         self._meta = self._load_metadata()
+        self._sample_meta = [
+            json.loads((d / "meta.json").read_text()) if (d / "meta.json").is_file() else {}
+            for d in self.samples
+        ]
 
         self._n_channels_per_sample = 1
         if self.flatten_channels:
@@ -208,7 +214,7 @@ class DregonLMFrameDataset(Dataset):
         # train_rps_predictor.py::DREGONRPSDataset — see class docstring.
         rps = stretch_rps_to_frames(rps_raw, n_frames)
 
-        meta = dict(self._meta.get(d.name, {}))
+        meta = {**self._meta.get(d.name, {}), **self._sample_meta[sample_idx]}
         meta.setdefault("recording_id", d.name)
         if self.flatten_channels:
             meta["channel"] = channel
@@ -1331,7 +1337,7 @@ class FixedSynthFrameDataset(Dataset):
             cfg.duration_s = float(duration_s)
         if not augment:
             for stage in cfg.policy.stages:
-                for key in ("augmentations", "noise_augmentations", "noise_time_warp"):
+                for key in ("augmentations", "noise_augmentations", "noise_rate_warp"):
                     if key in stage:
                         del stage[key]
         apply_flight_reuse(cfg, flight_reuse)

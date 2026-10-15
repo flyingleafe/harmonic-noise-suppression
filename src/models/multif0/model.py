@@ -171,7 +171,13 @@ class GroupedConvBlock(nn.Module):
         self.bn = nn.BatchNorm2d(2 * in_per_group)
         self.padding = _keras_same_padding(kernel_size)
         self.conv = nn.Conv2d(
-            2 * in_per_group, 2 * out_per_group, kernel_size, stride=1, padding=0, bias=False, groups=2
+            2 * in_per_group,
+            2 * out_per_group,
+            kernel_size,
+            stride=1,
+            padding=0,
+            bias=False,
+            groups=2,
         )
         self.act = nn.ReLU(inplace=True)
 
@@ -200,7 +206,7 @@ def _fused_base_branch(in_channels: int) -> nn.Sequential:
 def _merge_branches_in_state_dict(sd: dict, prefix: str) -> None:
     """In place: ``branch_mag.* + branch_phase.* → fused_branch.*`` (concat dim 0)."""
     mp, pp, fp = prefix + "branch_mag.", prefix + "branch_phase.", prefix + "fused_branch."
-    idxs = sorted({int(k[len(mp):].split(".")[0]) for k in sd if k.startswith(mp)})
+    idxs = sorted({int(k[len(mp) :].split(".")[0]) for k in sd if k.startswith(mp)})
     for i in idxs:
         for sub in ("bn.weight", "bn.bias", "bn.running_mean", "bn.running_var", "conv.weight"):
             sd[f"{fp}{i}.{sub}"] = torch.cat([sd[f"{mp}{i}.{sub}"], sd[f"{pp}{i}.{sub}"]], dim=0)
@@ -214,7 +220,7 @@ def _merge_branches_in_state_dict(sd: dict, prefix: str) -> None:
 def _split_branch_in_state_dict(sd: dict, prefix: str) -> None:
     """In place: ``fused_branch.* → branch_mag.* + branch_phase.*`` (split dim 0)."""
     fp, mp, pp = prefix + "fused_branch.", prefix + "branch_mag.", prefix + "branch_phase."
-    idxs = sorted({int(k[len(fp):].split(".")[0]) for k in sd if k.startswith(fp)})
+    idxs = sorted({int(k[len(fp) :].split(".")[0]) for k in sd if k.startswith(fp)})
     for i in idxs:
         for sub in ("bn.weight", "bn.bias", "bn.running_mean", "bn.running_var", "conv.weight"):
             v = sd[f"{fp}{i}.{sub}"]
@@ -369,7 +375,7 @@ class LateDeep(MultiF0Estimator):
     ``n_maps`` is the number of output maps. 1 is the paper model — one shared
     multi-hot salience map. ``n_maps > 1`` widens the final 1x1 convolution
     only, so the trunk emits ONE MAP PER SOURCE; `models.salience_rps` uses it
-    for the per-rotor salience layers (the ``_l4`` rows). The parameter name
+    for the per-rotor salience layers (ladder levels L1/L2). The parameter name
     stays ``squishy.1``, thus a ``n_maps=1`` model is weight-identical to every
     checkpoint made before this option existed.
     """
@@ -419,12 +425,8 @@ class LateDeep(MultiF0Estimator):
         elif not self.fused_branches and has_fused and not has_split:
             _split_branch_in_state_dict(state_dict, prefix)
 
-    def forward(
-        self,
-        mag: torch.Tensor,
-        dphase: torch.Tensor | None = None,
-        return_logits: bool = False,
-    ) -> torch.Tensor:
+    def features(self, mag: torch.Tensor, dphase: torch.Tensor | None = None) -> torch.Tensor:
+        """The trunk's last features, ``(B, 8, F, T)``: everything before ``squishy``."""
         if dphase is None:
             raise ValueError("LateDeep requires dphase input")
 
@@ -439,14 +441,27 @@ class LateDeep(MultiF0Estimator):
         x = F.pad(x, self.dist_pad, mode="constant", value=0)
         x = self.dist_conv(x)  # (B, 8, F, T)
         x = self.dist_bn(x)
-        x = self.dist_act(x)
+        return self.dist_act(x)
+
+    def logits(self, feats: torch.Tensor) -> torch.Tensor:
+        """``features()`` -> pre-sigmoid ``(B, n_maps, F, T)`` logits for BCE-with-logits.
+
+        squishy = [BN, Conv(1x1), Sigmoid]; this replays BN + Conv and skips the
+        final activation. Indexing the Sequential (rather than restructuring it)
+        keeps checkpoints loadable.
+        """
+        return self.squishy[1](self.squishy[0](feats))
+
+    def forward(
+        self,
+        mag: torch.Tensor,
+        dphase: torch.Tensor | None = None,
+        return_logits: bool = False,
+    ) -> torch.Tensor:
+        x = self.features(mag, dphase)
         if return_logits:
-            # Pre-sigmoid logits for BCEWithLogitsLoss. squishy = [BN, Conv(1×1),
-            # Sigmoid]; replay BN + Conv and skip the final activation. Indexing the
-            # Sequential (rather than restructuring it) keeps checkpoints loadable.
-            return self.squishy[1](self.squishy[0](x))  # (B, n_maps, F, T) logits
-        x = self.squishy(x)  # (B, n_maps, F, T)
-        return x
+            return self.logits(x)  # (B, n_maps, F, T) logits
+        return self.squishy(x)  # (B, n_maps, F, T)
 
 
 class LateDeepNoPhase(MultiF0Estimator):

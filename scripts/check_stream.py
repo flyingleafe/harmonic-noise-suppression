@@ -31,9 +31,8 @@ therefore keeps the block but sets ``probability`` to 1e-9: the decision draw
 is still consumed (byte-identical stream on the miss path) while the block
 essentially never fires — real-vs-control outputs then differ iff the real
 policy actually fired on that sample id. Caveat: a fired block whose chosen
-transform is an exact no-op (e.g. ``channel_drop`` on a mono stream) is
-counted as not-fired; for the multichannel RPS stream all choices are
-observable.
+transform is an exact no-op on the probed chunk is counted as not-fired; for
+the multichannel RPS stream all choices are observable.
 """
 
 from __future__ import annotations
@@ -44,9 +43,9 @@ import itertools
 import sys
 import time
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 _ROOT = Path(__file__).resolve().parent.parent
 for _p in (str(_ROOT), str(_ROOT / "src")):
@@ -60,7 +59,7 @@ load_dotenv(_ROOT / ".env", override=False)
 import numpy as np  # noqa: E402
 
 #: Policy keys that are probabilistic augmentation blocks (fire/choice schema).
-AUG_KEYS = ("augmentations", "noise_augmentations", "noise_time_warp")
+AUG_KEYS = ("augmentations", "noise_augmentations", "noise_rate_warp")
 
 #: Control probability: >0 so the fire-decision draw is still consumed (keeps
 #: the RNG stream aligned with the real policy's miss path), but so small the
@@ -96,7 +95,7 @@ def _block_probability(block: Any, key: str) -> float:
         p = max(float(ramp.get("start", 0.0)), float(ramp.get("end", 1.0)))
     else:
         p = float(p)
-    if key != "noise_time_warp" and not block.get("choices"):
+    if key != "noise_rate_warp" and not block.get("choices"):
         return 0.0  # a block with no choices never changes anything
     return min(max(p, 0.0), 1.0)
 
@@ -119,40 +118,43 @@ def _row_probability(stage: Mapping[str, Any], key: str, block_idx: int | None) 
     return _block_probability(blocks[block_idx], key)
 
 
+def _iter_ramps(value: Any, path: str) -> Iterator[tuple[str, Mapping[str, Any]]]:
+    """``(dotted path, ramp spec)`` of every ``{ramp: ...}`` leaf under ``value``."""
+    if isinstance(value, Mapping):
+        if set(value) == {"ramp"}:
+            yield path, value["ramp"]
+            return
+        for k, v in value.items():
+            yield from _iter_ramps(v, f"{path}.{k}")
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            yield from _iter_ramps(v, f"{path}[{i}]")
+
+
 def _label_rule(policy: Mapping[str, Any], key: str, block_idx: int | None = None) -> str | None:
     """PASS/FAIL rule for the label-diff count of one row, or None (report only).
 
-    ``augmentations`` is post-mix on the mixture only — labels must NEVER
-    change ("zero"). A ``noise_augmentations`` row (one block of a list, or a
-    single-mapping key) whose every choice is ``freq_scale`` must change
-    labels on EVERY fire whose chunk has nonzero RPS ("match_fired") — the
-    check that label augmentation actually reaches the targets. (Chunks whose
-    labels are all-zero in BOTH the real and the control stream — full-flight
-    policies with ``min_motor_rps: 0`` contain pre-takeoff ground windows —
-    are exempt: ``0 * alpha == 0``. A control-zero chunk whose scaled crop
-    gains flight content still counts as label-bearing.) A row whose
-    every choice is label-preserving (no ``freq_scale``) must NEVER change
-    labels ("zero"). Mixed rows get no rule.
+    ``augmentations`` (post-mix) and ``noise_augmentations`` (pre-mix
+    ``spectral_recolor``/``random_reverb``) are label-preserving — labels
+    must NEVER change ("zero"). ``noise_rate_warp`` rewrites the labels to
+    ``alpha(t) * r(tau(t))`` on EVERY fire whose chunk has nonzero RPS
+    ("match_fired") — the check that the label transform reaches the targets.
+    Chunks whose labels are all-zero in BOTH the real and the control stream
+    are exempt (``alpha * 0 == 0``: ground windows of ``min_motor_rps: 0``
+    policies, the silence floor). A control-zero chunk whose warped read
+    gains flight content still counts as label-bearing.
     """
+    if key == "noise_rate_warp":
+        return "match_fired"
     if key == "augmentations":
         return "zero"
     if key != "noise_augmentations":
         return None
-    names: set[str] = set()
     for stage in _stage_blocks(policy):
         blocks = _spec_blocks(stage.get(key))
         sel = blocks if block_idx is None else blocks[block_idx : block_idx + 1]
-        for block in sel:
-            if not isinstance(block, Mapping):
-                continue
-            for choice in block.get("choices", []):
-                names.add(choice if isinstance(choice, str) else next(iter(choice)))
-    if not names:
-        return None
-    if "freq_scale" not in names:
-        return "zero"
-    if names == {"freq_scale"}:
-        return "match_fired"
+        if any(isinstance(b, Mapping) and b.get("choices") for b in sel):
+            return "zero"
     return None
 
 
@@ -263,9 +265,9 @@ def _frames_equal(a: Any, b: Any) -> bool:
     bm, br = _frame_arrays(b)
     if am.shape != bm.shape or not np.array_equal(am, bm):
         return False
-    if (ar is None) != (br is None):
-        return False
-    return ar is None or (ar.shape == br.shape and np.array_equal(ar, br))
+    if ar is None or br is None:
+        return ar is br
+    return ar.shape == br.shape and np.array_equal(ar, br)
 
 
 def main() -> int:
@@ -337,7 +339,9 @@ def main() -> int:
     print(f"flatten_channels={flatten} samples_per_epoch={spe} probes={args.probes}")
 
     t_build = time.perf_counter()
-    cfg = dict(OmegaConf.to_container(OmegaConf.load(str(policy_path)), resolve=True))
+    cfg = dict(
+        cast(dict[str, Any], OmegaConf.to_container(OmegaConf.load(str(policy_path)), resolve=True))
+    )
     policy = cfg.get("policy", {})
     task = str(cfg.get("task", "rps_prediction"))
     print(f"[build] policy loaded in {time.perf_counter() - t_build:.1f} s (task={task})")
@@ -377,25 +381,16 @@ def main() -> int:
                 f"stage {i} boundary at effective epoch {epoch:.1f} "
                 f"(> {args.warn_boundary_epoch:g}) — staging-bug territory, check units"
             )
-    # Probability ramps live INSIDE a stage (they do not move stage
-    # boundaries); report each one with its window in chunks and epochs.
+    # Ramps (probability and severity) live INSIDE a stage (they do not move
+    # stage boundaries); report each one with its window in chunks and epochs.
     for i, stage in enumerate(stages, start=1):
-        for key in AUG_KEYS:
-            spec = stage.get(key)
-            blocks = _spec_blocks(spec)
-            for j, block in enumerate(blocks):
-                if not isinstance(block, Mapping):
-                    continue
-                p = block.get("probability")
-                if not (isinstance(p, Mapping) and "ramp" in p):
-                    continue
-                ramp = p["ramp"]
+        for key in ("snr_db", *AUG_KEYS):
+            for path, ramp in _iter_ramps(stage.get(key), key):
                 a, b = float(ramp["from"]), float(ramp["until"])
-                label = f"{key}[{j}]" if isinstance(spec, list) else key
                 print(
-                    f"  ramp: stage {i} {label}: "
-                    f"p {float(ramp.get('start', 0.0)):g} -> {float(ramp.get('end', 1.0)):g} "
-                    f"over chunks {a:g}..{b:g} "
+                    f"  ramp: stage {i} {path}: "
+                    f"{float(ramp['start']):g} -> {float(ramp['end']):g} "
+                    f"({ramp.get('shape', 'linear')}) over chunks {a:g}..{b:g} "
                     f"(epochs {a * fpc / spe:.2f}..{b * fpc / spe:.2f})"
                 )
 
@@ -440,21 +435,24 @@ def main() -> int:
             fired = 0
             label_diff = 0
             fired_nonzero_rps = 0
+            label_bearing = 0
             for rf, cf in zip(real, ctl):
                 rm, rl = _frame_arrays(rf)
                 cm, cl = _frame_arrays(cf)
                 this_fired = not (
-                    np.array_equal(rm, cm) and (rl is None and cl is None or np.array_equal(rl, cl))
+                    np.array_equal(rm, cm)
+                    and (rl is cl if rl is None or cl is None else np.array_equal(rl, cl))
                 )
+                # A chunk is label-bearing when EITHER stream's labels are
+                # nonzero (the rate warp reads a different source span, so a
+                # control-side all-zero chunk can gain flight content).
+                bearing = (cl is not None and bool(np.any(cl != 0))) or (
+                    rl is not None and bool(np.any(rl != 0))
+                )
+                label_bearing += int(bearing)
                 if this_fired:
                     fired += 1
-                    # A fire is label-bearing when EITHER stream's labels are
-                    # nonzero (see the historical comment: freq_scale re-crops,
-                    # so a control-side all-zero crop can gain flight content).
-                    if (cl is not None and bool(np.any(cl != 0))) or (
-                        rl is not None and bool(np.any(rl != 0))
-                    ):
-                        fired_nonzero_rps += 1
+                    fired_nonzero_rps += int(bearing)
                 if rl is not None and cl is not None and not np.array_equal(rl, cl):
                     label_diff += 1
             # _resolve_policy materializes ramps to floats for each probed id,
@@ -463,7 +461,15 @@ def main() -> int:
                 sum(_row_probability(_resolve_policy(policy, g), key, bidx) for g in ids)
                 / max(1, len(ids))
             )
-            ok = _fire_verdict(fired, len(ids), p_cfg)
+            # The silence floor is never warped (zero labels, model rate): a
+            # warp fire on it can be an exact no-op, so the warp's fire rate is
+            # measured over the label-bearing chunks only.
+            k_n = (
+                (fired_nonzero_rps, label_bearing)
+                if key == "noise_rate_warp"
+                else (fired, len(ids))
+            )
+            ok = _fire_verdict(k_n[0], k_n[1], p_cfg)
             rule = _label_rule(policy, key, bidx)
             label_ok = True
             if rule == "zero":
@@ -474,7 +480,7 @@ def main() -> int:
             if verdict == "FAIL":
                 expect = fired_nonzero_rps if rule == "match_fired" else 0
                 failures.append(
-                    f"epoch {epoch:g} {row_label}: fired {fired}/{len(ids)} vs p_cfg={p_cfg:.2f}"
+                    f"epoch {epoch:g} {row_label}: fired {k_n[0]}/{k_n[1]} vs p_cfg={p_cfg:.2f}"
                     + (
                         ""
                         if label_ok
@@ -483,7 +489,7 @@ def main() -> int:
                 )
             print(
                 f"  {epoch:<7g}{f'{ids[0]}..{ids[-1]}':<16}{stage_str:<7}{row_label:<25}"
-                f"{p_cfg:<8.2f}{f'{fired}/{len(ids)}':<10}{fired / max(1, len(ids)):<8.3f}"
+                f"{p_cfg:<8.2f}{f'{k_n[0]}/{k_n[1]}':<10}{k_n[0] / max(1, k_n[1]):<8.3f}"
                 f"{f'{label_diff}/{len(ids)}':<12}{verdict}"
             )
     print(f"  ({time.perf_counter() - t3:.1f} s)")

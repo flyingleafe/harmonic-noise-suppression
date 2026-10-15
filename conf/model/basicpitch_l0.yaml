@@ -1,0 +1,26 @@
+# basicpitch_l0 — level L0 of the adaptation ladder (docs/experiments/
+# paper-real-protocol.md): the Basic Pitch contour branch (Bittner et al.
+# ICASSP 2022), one shared multi-hot map on its published contour grid
+# (bp_fmin 27.5, 3 bins per semitone, 88 semitones -> 264 bins at 36 per
+# octave), threshold + Hungarian readout (decode_logits, rev/s out). Native
+# 16 kHz, trained from scratch. Loss/metrics
+# conf/{loss,metrics}/salience_bce_basic_pitch.yaml. L1/L2: basicpitch_l1.yaml /
+# basicpitch_l2.yaml.
+#
+# frame_rate [16000, 256] is FFT_HOP = 256 always (models.basic_pitch.cqt),
+# independent of the sample rate.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 256]
+_target_: models.registry.build_model
+params:
+  name: basic_pitch_salience
+  n_fft: 2048
+  hop_length: 512
+  num_rotors: 4
+  sr: 16000
+  n_maps: 1
+model_type: null
+legacy_config_path: null

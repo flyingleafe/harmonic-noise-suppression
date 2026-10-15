@@ -54,7 +54,9 @@ def real_slices(want_per_cell: int = 1) -> list[dict]:
         cell = (rigs[i] if i < len(rigs) else "dregon", slice_regime(target))
         rows = picked.setdefault(cell, [])
         if len(rows) < want_per_cell:
-            rows.append({"frame": frame, "target": target, "rig": cell[0], "regime": cell[1], "idx": i})
+            rows.append(
+                {"frame": frame, "target": target, "rig": cell[0], "regime": cell[1], "idx": i}
+            )
     out = []
     for cell in sorted(picked):
         out.extend(picked[cell])
@@ -71,21 +73,27 @@ def synth_slices(policy: str, base_seed: int, n_per_regime: int = 3) -> list[dic
     cfg.base_seed = int(base_seed)
     cfg.duration_s = 8.0
     for stage in cfg.policy.stages:
-        for key in ("augmentations", "noise_augmentations", "noise_time_warp"):
+        for key in ("augmentations", "noise_augmentations", "noise_rate_warp"):
             if key in stage:
                 del stage[key]
     stream = OnlineMixFrameDataset.from_config(cfg, flatten_channels=True)
 
     picked: dict[str, list[dict]] = {}
-    seen = 0
-    for frame in stream:
+    for seen, frame in enumerate(stream):
         target = np.asarray(frame["rps"].data, dtype=np.float64)
         regime = slice_regime(target)
         rows = picked.setdefault(regime, [])
         if len(rows) < n_per_regime:
-            rows.append({"frame": frame, "target": target, "rig": "synthetic", "regime": regime, "idx": seen})
-        seen += 1
-        if seen > 400 or sum(len(v) for v in picked.values()) >= n_per_regime * 3:
+            rows.append(
+                {
+                    "frame": frame,
+                    "target": target,
+                    "rig": "synthetic",
+                    "regime": regime,
+                    "idx": seen,
+                }
+            )
+        if seen + 1 > 400 or sum(len(v) for v in picked.values()) >= n_per_regime * 3:
             break
     out = []
     for regime in ("zero", "low", "flight"):
@@ -108,8 +116,15 @@ def render(rows: list[dict], models: dict, out_dir: Path, tag: str) -> list[dict
         hop_s = 512 / 16000.0
         t = np.arange(target.shape[1]) * hop_s
         for r in range(target.shape[0]):
-            ax.plot(t, target[r], color="#111", lw=2.0, alpha=0.85,
-                    label="ground truth" if r == 0 else None, zorder=3)
+            ax.plot(
+                t,
+                target[r],
+                color="#111",
+                lw=2.0,
+                alpha=0.85,
+                label="ground truth" if r == 0 else None,
+                zorder=3,
+            )
         colors = {"best": "#1f77b4", "last": "#d62728"}
         maes = {}
         for name, model in models.items():
@@ -120,8 +135,15 @@ def render(rows: list[dict], models: dict, out_dir: Path, tag: str) -> list[dict
             aligned = align_rps_to_gt(pred[:, :width], target[:, :width])
             tp = np.arange(width) * hop_s
             for r in range(aligned.shape[0]):
-                ax.plot(tp, aligned[r], color=colors[name], lw=1.1, alpha=0.8,
-                        label=f"{name} (MAE {maes[name]:.1f})" if r == 0 else None, zorder=4)
+                ax.plot(
+                    tp,
+                    aligned[r],
+                    color=colors[name],
+                    lw=1.1,
+                    alpha=0.8,
+                    label=f"{name} (MAE {maes[name]:.1f})" if r == 0 else None,
+                    zorder=4,
+                )
         ax.set_xlabel("time (s)", fontsize=8)
         ax.set_ylabel("rev/s", fontsize=8)
         ax.set_title(f"{row['rig']} · {row['regime']}", fontsize=9, loc="left")
@@ -132,8 +154,15 @@ def render(rows: list[dict], models: dict, out_dir: Path, tag: str) -> list[dict
         name = f"{tag}_{k:02d}_{row['rig']}_{row['regime']}.png"
         fig.savefig(out_dir / name, bbox_inches="tight")
         plt.close(fig)
-        meta.append({"file": name, "rig": row["rig"], "regime": row["regime"],
-                     "idx": row["idx"], "mae": maes})
+        meta.append(
+            {
+                "file": name,
+                "rig": row["rig"],
+                "regime": row["regime"],
+                "idx": row["idx"],
+                "mae": maes,
+            }
+        )
         print(f"  {name}  " + "  ".join(f"{n}={v:.2f}" for n, v in maes.items()), flush=True)
     return meta
 
@@ -157,9 +186,10 @@ def main() -> int:
     print("synthetic slices:", flush=True)
     meta_syn = render(synth_slices(args.policy, args.base_seed), models, out_dir, "synth")
 
-    (out_dir / "meta.json").write_text(json.dumps(
-        {"experiment": args.exp, "real": meta_real, "synthetic": meta_syn}, indent=1))
-    print(f"wrote {out_dir/'meta.json'}")
+    (out_dir / "meta.json").write_text(
+        json.dumps({"experiment": args.exp, "real": meta_real, "synthetic": meta_syn}, indent=1)
+    )
+    print(f"wrote {out_dir / 'meta.json'}")
     return 0
 
 

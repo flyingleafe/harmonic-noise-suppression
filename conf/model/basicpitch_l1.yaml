@@ -1,0 +1,26 @@
+# basicpitch_l1 — level L1 of the adaptation ladder (docs/experiments/
+# paper-real-protocol.md): conf/model/basicpitch_l0.yaml with FOUR per-rotor
+# maps on the published contour grid. contour_out emits 4 maps instead of 1,
+# and a per-map OFF logit (models.salience_rps.OffLogitHead: Linear(8 -> 4) on
+# the contour branch's last features pooled over frequency) is prepended as
+# bin 0. Output (B, 4 * 265, T): per map [off, 27.5 * 2**(b/36) for b < 264].
+# Readout: one CRF path per map with a free off state.
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_log36_h256.yaml (hop 256,
+# FFT_HOP of the contour front end).
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 256]
+_target_: models.registry.build_model
+params:
+  name: basic_pitch_salience
+  n_fft: 2048
+  hop_length: 512
+  num_rotors: 4
+  sr: 16000
+  n_maps: 4
+  translation_head: false
+model_type: null
+legacy_config_path: null

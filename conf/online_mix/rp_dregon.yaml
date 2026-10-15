@@ -1,0 +1,65 @@
+# PAPER REAL-DATA PROTOCOL, stream `dregon` (docs/experiments/paper-real-protocol.md).
+# Identical to rp_all.yaml except the noise pool: DREGON only.
+#
+# SOURCES. DREGON `in_flight_noise` minus `free-flight_nosource_room1` (= the
+# five room-2 flights, labels `motors_command`, cleaned at publish time) at
+# `min_motor_rps: 0.0` (whole envelope); duration-weighted over the flights.
+# One merged real spec = pool weight 1.0, so the silence arm is 0.2 to keep
+# the protocol's 16.7 % of noise chunks (0.2 / 1.2; rp_all: 0.4 / 2.4).
+# LibriSpeech train-clean-100, an independent utterance per channel.
+# Scored on both drones (the md2 views are the dregon -> md2 transfer cell).
+#
+# SCHEDULE UNITS. `ramp.from`/`ramp.until` are GLOBAL SAMPLE IDS (chunks of 8
+# mics). One optimizer step = 128 mono frames = 16 chunks, so gid = 16 x step;
+# 100k steps = 1.6 M chunks.
+#   5 % =  80 000 gids =  5 000 steps    10 % = 160 000 gids = 10 000 steps
+#  20 % = 320 000 gids = 20 000 steps    35 % = 560 000 gids = 35 000 steps
+# Cosine ramps in the severity parameter: speech SNR upper bound -30 -> +5 dB
+# over 10-35 %; random_reverb DRR lower bound 15 -> 3 dB over 5-20 %.
+# random_gain and spectral_recolor at full strength from step 0. No
+# label-altering augmentation (that is rp_dregon_labelaug.yaml).
+
+sample_rate: 16000
+duration_s: 2.0
+base_seed: 20261014
+snr_ref_floor_rms: 0.02
+
+sources:
+  noise:
+    - kind: frames
+      dataset: DREGON-frames
+      splits: [in_flight_noise]
+      exclude_recording_ids: [free-flight_nosource_room1]
+      min_motor_rps: 0.0
+    - kind: silence
+      weight: 0.2
+      n_channels: 8
+  speech:
+    - dataset: librispeech
+      subpath: LibriSpeech/train-clean-100
+
+policy:
+  stages:
+    - until: null
+      source_prob: 1.0
+      speech_per_channel: independent
+      snr_per_channel: false
+      snr_db:
+        uniform:
+          low: -30.0
+          high: {ramp: {from: 160000, until: 560000, start: -30.0, end: 5.0, shape: cosine}}
+      augmentations:
+        probability: 0.5
+        choices:
+          - random_gain: {min_db: -6.0, max_db: 6.0}
+      noise_augmentations:
+        - probability: 0.5
+          choices:
+            - spectral_recolor: {}
+        - probability: 0.5
+          choices:
+            - random_reverb:
+                rt60_low: 0.1
+                rt60_high: 0.8
+                drr_db_low: {ramp: {from: 80000, until: 320000, start: 15.0, end: 3.0, shape: cosine}}
+                drr_db_high: 15.0

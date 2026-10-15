@@ -1,0 +1,27 @@
+# latedeep_l0 — level L0 of the adaptation ladder (docs/experiments/
+# paper-real-protocol.md): LateDeep (Cuesta et al. ISMIR 2020) over an HCQT,
+# one shared multi-hot map on its published grid (fmin 32.7 = C1, 60 bins per
+# octave, 360 bins), threshold + Hungarian readout (decode_logits, rev/s out).
+# Loss/metrics conf/{loss,metrics}/salience_bce_multif0.yaml (same fmin — keep
+# in sync). L1/L2: latedeep_l1.yaml / latedeep_l2.yaml.
+#
+# fmin 32.7 (3 harmonics at 16 kHz) matches the historical headline checkpoint
+# construction (.pi/checkpoints/salience-baselines-dregon-v4-report.md), NOT
+# the model class's own code default (fmin 27.5, 4 harmonics).
+# frame_rate [16000, 256] is the HCQT front end's native time grid (hop 256);
+# n_fft/hop_length below only feed decode_logits' resample onto the STFT grid.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 256]
+_target_: models.registry.build_model
+params:
+  name: multif0_salience
+  n_fft: 2048
+  hop_length: 512
+  num_rotors: 4
+  fmin: 32.7
+  n_maps: 1
+model_type: null
+legacy_config_path: null

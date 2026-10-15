@@ -1,0 +1,35 @@
+# hppnet_l2k84 — "+k84" of the HPPNet -> HRSPNet chain (docs/experiments/
+# paper-real-protocol.md § "HPPNet chain to HRSPNet"): conf/model/hppnet_l2.yaml
+# with the harmonic organ extended to k <= 84 — n_bins 385 (CQT to 7.04 kHz)
+# and harmonic_k_max 84 (branches at round(48 log2 k), one Conv2d(16 -> 128,
+# 1x3) per harmonic); FreqGroupLSTM, off logit and TranslationHead unchanged.
+# Read conf/model/hppnet_l2k84_nolstm.yaml for why the grid grows. Next link:
+# hppnet_l2k84_convlstm.yaml.
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_rp.yaml.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_orig
+  n_fft: 2048
+  hop_length: 512
+  num_rotors: 4
+  sr: 16000
+  fmin: 27.5
+  n_bins: 385
+  bins_per_octave: 48
+  c_har: 16
+  embedding: 128
+  lstm_size: 128
+  dilations: [48, 12]
+  harmonic_k_max: 84
+  freq_pool: 1
+  time_pooling: false
+  n_maps: 4
+  translation_head: true
+model_type: null
+legacy_config_path: null

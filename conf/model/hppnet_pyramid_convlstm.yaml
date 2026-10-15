@@ -1,18 +1,24 @@
-# hppnet_pyramid_convlstm — hppnet_pyramid with its 1x1 head replaced by a
-# RateConvLSTM (variant A of docs/pyramid-harmonic-frontend-design.md § 7):
-# a bidirectional ConvLSTM over time whose gate convolutions run along the
-# rate axis. Everything up to block_8 is conf/model/hppnet_pyramid.yaml
-# verbatim (grid, pyramid, taps: see that file's header).
+# hppnet_pyramid_convlstm — HRSPNet, the last link of the HPPNet -> HRSPNet
+# chain (docs/experiments/paper-real-protocol.md § "HPPNet chain to HRSPNet",
+# decisions (a) and (b)): the multi-resolution STFT pyramid
+# (16384/8192/4096/2048) in place of the CQT; harmonic taps k <= 84 plus
+# sub-harmonics 1/2..1/8 as ONE gather with a 1-tap mix per harmonic; NO
+# frequency ceiling on the taps (f_max null: masking input frequencies is not
+# architecture); a SEPARABLE RateConvLSTM head (variant A of
+# docs/pyramid-harmonic-frontend-design.md § 7); no translation head — the
+# output grid is level 0's own, 164 bins = models.salience_crf.RP_LINEAR_GRID.
+# The dense-ConvLSTM control is hppnet_pyramid_convlstm_dense.yaml.
 #
 # THE KERNEL. Half-width = ceil(max_slew / Δr) bins, Δr = 0.9765625 rev/s.
 # max_slew 15.0 rev/s per 32 ms frame is the largest SUSTAINED (5-frame mean)
 # speed change in the raw telemetry of the training pools: 14.6 on DREGON
 # `updown` (a throttle punch, ~460 rev/s^2); every other recording is <= 8
-# (FLY125 7.3, rectangle 4.9, the rest ~3). Single-frame diffs above ~10 are
-# 900 Hz ESC-telemetry jitter, not motion. -> half-width 16, kernel 33: the
-# state at bin g is written from bins g ± 16 of the previous frame, so it can
-# follow any physical ramp. lstm_size 128 = HPPNet's FreqGroupLSTM width,
-# split 64 + 64 over the two directions.
+# (FLY125 7.3, rectangle 4.9, the rest ~3). -> half-width 16, kernel 33.
+# lstm_size 128 = HPPNet's FreqGroupLSTM width, split 64 + 64 over the two
+# directions; the recurrence is a per-channel 33-tap displacement kernel + a
+# 1x1 mix (separable) instead of a dense Conv1d(64 -> 256, k=33).
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_rp.yaml.
 task: salience_rps
 task_params:
   n_channels: null
@@ -26,16 +32,17 @@ params:
   num_rotors: 4
   n_ffts: [16384, 8192, 4096, 2048]
   level0_fmax: 1200.0
-  out_bins: 307
-  k_max: 32
+  out_bins: 164
+  k_max: 84
   k_sub: 8
   f_min: null
-  f_max: 7500.0
+  f_max: null
   c_har: 16
   embedding: 128
   n_maps: 4
   head: convlstm
   lstm_size: 128
   max_slew: 15.0
+  separable: true
 model_type: null
 legacy_config_path: null

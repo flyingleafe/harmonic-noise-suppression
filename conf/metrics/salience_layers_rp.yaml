@@ -1,0 +1,25 @@
+# Validation twin of conf/loss/salience_layers_rp.yaml (that file carries the
+# grid argument and why pos_weight is absent).
+#
+# `bce` mirrors the training objective exactly (same grid spec, sigma, focus).
+# `rps_mae` is the same layers read in rev/s: each layer's argmax refined by the
+# three-point parabola in rev/s (bin 0 = off reads 0.0), PIT-aligned to the
+# label. It is NOT the deployed decoder — that is a CRF best path per layer
+# (models.harmonic_ports.layer_readout), which the training-time validation
+# panel uses through decode_logits.
+terms:
+  - name: bce
+    _target_: metrics.LayerPITSalienceBCEMetric
+    params:
+      grid: {kind: linear, fmin: 0.0, fmax: 159.1796875, bins: 164}
+      n_layers: 4
+      sigma_rev_s: 1.0
+      focus: auto  # mirrors the loss; `rps_mae` is focus-free by construction
+      rate: [16000, 512]
+  - name: rps_mae
+    _target_: metrics.LayerPeakRPSMetric
+    params:
+      grid: {kind: linear, fmin: 0.0, fmax: 159.1796875, bins: 164}
+      n_layers: 4
+      sigma_rev_s: 1.0
+      rate: [16000, 512]

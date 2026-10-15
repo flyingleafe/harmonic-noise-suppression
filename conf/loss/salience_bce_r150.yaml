@@ -3,7 +3,7 @@
 # bin). The loss owns the grid parameters because no dataset emits a
 # `salience` entry — it derives the target from `rps` on every call.
 #
-# blur_bins 1, not the 2 of conf/loss/salience_bce_w150.yaml. The design note's
+# blur_bins 1, not the 2 of the (deleted) salience_bce_w150 row. The design note's
 # recovery error is LINEAR in the blur width, and this grid is 3.3x coarser
 # (0.5017 rev/s per bin against 0.1502), so +-1 bin here is already +-0.5 rev/s
 # — wider in rev/s than +-2 bins on that grid. The kernel the framework applies

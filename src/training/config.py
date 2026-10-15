@@ -24,7 +24,9 @@ constructor's kwargs — see its docstring.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, is_dataclass
+from pathlib import Path
 from typing import Any
 
 import hydra.utils
@@ -49,12 +51,12 @@ __all__ = [
     "MetricTermConfig",
     "MetricsConfig",
     "OptimConfig",
-    "EarlyStoppingConfig",
     "WandbConfig",
     "ArtifactsConfig",
     "LoraConfig",
     "RootConfig",
     "register_configs",
+    "legacy_protocol_error",
     "instantiate_target",
     "build_dataset",
     "instantiate_model",
@@ -94,7 +96,14 @@ class DataConfig:
 
 @dataclass
 class ValidationConfig:
-    """Optional multi-dataset RPS validation and convergence protocol."""
+    """Optional full-panel RPS validation and convergence protocol.
+
+    ``views`` are meta predicates (``{where: {<meta key>: value | [values]},
+    regime: <name>}``) over the concatenated ``datasets``; ``aggregates`` are
+    weighted sums of views; ``primary`` scores get median and raw best
+    checkpoints; ``control`` alone drives the saturation stop (see
+    ``training.stopping.MultiMetricController``).
+    """
 
     enabled: bool = False
     every_optimizer_steps: int = 500
@@ -105,14 +114,11 @@ class ValidationConfig:
     views: dict[str, dict[str, Any]] = field(default_factory=dict)
     aggregates: dict[str, dict[str, float]] = field(default_factory=dict)
     primary: list[str] = field(default_factory=list)
-    control: str = "overall_macro"
+    control: str = "real"
     smoothing_window: int = 5
-    min_rounds: int = 30
+    min_rounds: int = 40
     min_relative_improvement: float = 0.01
-    lr_patience: int = 8
-    lr_factor: float = 0.5
-    min_lr_reductions: int = 3
-    final_patience: int = 12
+    final_patience: int = 30
 
 
 @dataclass
@@ -157,47 +163,21 @@ class MetricsConfig:
 
 @dataclass
 class OptimConfig:
-    """Optimizer + ReduceLROnPlateau scheduler + the metric that drives both
-    the scheduler and checkpointing/early-stopping (``monitor``)."""
+    """Optimizer + the step-based LR schedule (``training.loop.warmup_cosine``).
+
+    ``lr`` is the MAX LR: linear warm-up 0 -> ``lr`` over ``warmup_steps``
+    optimizer steps, cosine to ``min_lr_frac * lr`` at ``total_steps``,
+    constant after. A pure function of the optimizer-step count; validation
+    never touches it.
+    """
 
     optimizer: str = "adamw"  # adam/adamw/radam/rmsprop/sgd/prodigy/adamw8bit
     lr: float = 1e-3
-    weight_decay: float = 0.0
+    weight_decay: float = 1e-4
     optimizer_params: dict[str, Any] = field(default_factory=dict)
-    patience: int = 5  # ReduceLROnPlateau patience (epochs)
-    factor: float = 0.5  # ReduceLROnPlateau reduce factor
-    cooldown: int = 0  # ReduceLROnPlateau cooldown (epochs after a reduction)
-    monitor: str = MISSING  # metric name from metrics.terms (or "loss")
-    monitor_mode: str = "min"  # "min" or "max"
-
-
-@dataclass
-class EarlyStoppingConfig:
-    """Opt-in noise-tolerant stopping policy — see ``training.stopping``.
-
-    Disabled by default, in which case the loop keeps its historical raw
-    ``RootConfig.patience`` early stop. When enabled, the median of the last
-    ``median_window`` raw monitor values drives BOTH ``ReduceLROnPlateau``
-    (``threshold_mode='abs'``, threshold re-derived every epoch) and stopping;
-    ``best.ckpt`` selection still uses the raw monitor value.
-    """
-
-    enabled: bool = False
-    median_window: int = 5  # raw validation values per smoothed check
-    min_epochs: int = 100  # absolute completed-epoch floor before stopping
-    patience: int = 30  # smoothed checks without meaningful improvement
-    min_delta_abs: float = 0.05  # meaningful improvement = max(abs, rel*|best|)
-    min_delta_rel: float = 0.01
-    min_lr_reductions: int = 2  # actual LR reductions required before stopping
-    lr_grace_epochs: int = 10  # checks since the latest reduction before stopping
-    deadline_unix: float | None = None  # wall-clock stop, checked between epochs
-    # Divergence guard (finite but sustained worsening): BOTH the raw train
-    # loss and the smoothed monitor must be worse than their best-so-far by
-    # ``diverge_rel`` (relative, floored at ``min_delta_abs``) for
-    # ``diverge_epochs`` CONSECUTIVE epochs; a single spike resets the streak.
-    # First trigger: one LR reduction (``optim.factor``); second: stop.
-    diverge_rel: float = 0.25
-    diverge_epochs: int = 5
+    warmup_steps: int = 5_000
+    min_lr_frac: float = 0.01
+    total_steps: int = 100_000
 
 
 @dataclass
@@ -251,17 +231,18 @@ class RootConfig:
     allow_dirty: bool = False
     resume: bool = False
     results_root: str = "results"
-    epochs: int = 100
+    # Round cap: validation rounds under `validation.enabled` (rp: 200 =
+    # max_optimizer_steps / every_optimizer_steps), epochs otherwise.
+    epochs: int = 200
     batch_size: int = 16
     num_workers: int = 4
-    patience: int = 10  # early-stop patience (epochs without monitor improvement)
     grad_clip: float | None = 5.0
     grad_accum_steps: int = 1
     amp: bool = True
     amp_dtype: str = "float16"  # autocast dtype on cuda: "float16" | "bfloat16"
     samples_per_validation: int | None = None  # iterable-dataset "epoch" size
-    checkpoint_every: int = 0  # 0 = only best.ckpt; N>0 = also every N epochs
-    checkpoint: str | None = None  # eval.py: explicit checkpoint path override
+    checkpoint_every: int = 0  # N>0: also keep step<optimizer_step>.ckpt every N rounds
+    checkpoint: str | None = None  # warm-start weights (train) / checkpoint override (eval)
     data: DataConfig = field(default_factory=DataConfig)
     validation: ValidationConfig = field(default_factory=ValidationConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
@@ -271,17 +252,88 @@ class RootConfig:
     logging: WandbConfig = field(default_factory=WandbConfig)
     artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     lora: LoraConfig = field(default_factory=LoraConfig)
-    early_stopping: EarlyStoppingConfig = field(default_factory=EarlyStoppingConfig)
 
 
 def register_configs() -> None:
-    """Register :class:`RootConfig` (and friends) in Hydra's ConfigStore.
+    """Register :class:`RootConfig` in Hydra's ConfigStore as ``schema/root``.
 
-    Idempotent — safe to call from every entry point
-    (``train.py``/``eval.py``/tests) before ``@hydra.main`` composes.
+    ``conf/config.yaml`` selects it with ``- schema: root``, so every compose
+    is typed against it; ``zoo.load`` passes ``~schema`` to compose a legacy
+    experiment's model without the current schema. Idempotent — safe to call
+    from every entry point (``train.py``/``eval.py``/tests).
     """
     cs = ConfigStore.instance()
-    cs.store(name="base_config", node=RootConfig)
+    cs.store(group="schema", name="root", node=RootConfig, package="_global_")
+
+
+# ─── Legacy (pre-rp-protocol) experiments ─────────────────────────────────────
+
+RP_PROTOCOL_DOC = "docs/experiments/paper-real-protocol.md"
+
+# Keys the plateau/early-stop loop read and the rp protocol removed.
+_REMOVED_KEYS: tuple[tuple[str, ...], ...] = (
+    ("patience",),
+    ("early_stopping",),
+    ("optim", "monitor"),
+    ("optim", "monitor_mode"),
+    ("optim", "patience"),
+    ("optim", "factor"),
+    ("optim", "cooldown"),
+)
+_RETIRED_OPTIONS: dict[str, tuple[str, ...]] = {
+    "validation": ("rps_unified",),
+    "optim": ("adamw_plateau",),
+}
+
+
+def _legacy_findings(path: Path, seen: set[Path]) -> list[str]:
+    import yaml
+
+    if path in seen or not path.is_file():
+        return []
+    seen.add(path)
+    body = yaml.safe_load(path.read_text()) or {}
+    found: list[str] = []
+    for key in _REMOVED_KEYS:
+        node: Any = body
+        for part in key:
+            node = node.get(part) if isinstance(node, dict) else None
+        if node is not None:
+            found.append(".".join(key))
+    for entry in body.get("defaults") or []:
+        if isinstance(entry, str):  # a parent experiment in the same group
+            found += _legacy_findings(path.with_name(f"{entry}.yaml"), seen)
+            continue
+        for raw_group, option in dict(entry).items():
+            group = str(raw_group).removeprefix("override").strip().lstrip("/")
+            if option in _RETIRED_OPTIONS.get(group, ()):
+                found.append(f"{group}={option}")
+    return found
+
+
+def legacy_protocol_error(overrides: Sequence[str], conf_dir: str | Path) -> str | None:
+    """Refusal message if the ``experiment=<name>`` among Hydra CLI
+    ``overrides`` (or an experiment it extends) carries a key or group option
+    the rp protocol removed; ``None`` for a runnable command line.
+
+    Legacy experiment yamls are frozen records of the plateau-LR protocol:
+    their checkpoints still load through ``zoo.load`` (schema-free compose),
+    but ``train.py``/``eval.py`` refuse them with this message instead of a
+    bare Hydra key error.
+    """
+    for override in overrides:
+        key, _, experiment = override.partition("=")
+        if key.lstrip("+") != "experiment" or not experiment:
+            continue
+        path = Path(conf_dir) / "experiment" / f"{experiment}.yaml"
+        found = list(dict.fromkeys(_legacy_findings(path, set())))
+        if found:
+            return (
+                f"experiment {experiment!r} is a legacy experiment; not runnable under the "
+                f"rp protocol (removed: {', '.join(found)}). See {RP_PROTOCOL_DOC}; its "
+                f"checkpoints still load via zoo.load({experiment!r})."
+            )
+    return None
 
 
 # ─── Generic dict/target helpers ─────────────────────────────────────────────

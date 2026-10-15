@@ -5,8 +5,8 @@
 #
 # THE OUTPUT GRID: linear 0 -> 150 rev/s, 300 bins = 0.5017 rev/s/bin.
 #
-#   Span. Identical to conf/model/multif0_salience_w150.yaml, deliberately, so
-#   this row and that one are read on one axis. The synthetic curricula excite
+#   Span. Identical to the (deleted) multif0_salience_w150 row's, deliberately,
+#   so the two were read on one axis. The synthetic curricula excite
 #   the full flight envelope and then freq-scale each chunk by
 #   alpha ~ U(0.7, 1.3), so the augmented cruise top is 100 * 1.3 = 130 and 150
 #   leaves margin; the bottom goes to 0 because the stream spends real time on

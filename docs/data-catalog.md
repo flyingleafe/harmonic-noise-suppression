@@ -19,12 +19,21 @@ All recordings are **8-channel, 44.1 kHz**; motor telemetry rate ≈ 929 Hz.
 | `in_flight_noise` | `rectangle_nosource_room2` | 44 s | — | ✓ | rectangle path |
 | `in_flight_noise` | `spinning_nosource_room2` | 41 s | — | ✓ | spinning |
 | `in_flight_source` | `free-flight_speech-low_room1` | 63 s | ✓ | ✓ | drone + co-recorded speech (low level) |
-| `in_flight_source` | `free-flight_speech-high_room1` | 53 s | ✓ | ✓ | drone + co-recorded speech (high level) |
 | `in_flight_source` | `free-flight_whitenoise-low_room1` | 65 s | ✓ | ✓ | drone + co-recorded whitenoise (low) |
-| `in_flight_source` | `free-flight_whitenoise-high_room1` | 61 s | ✓ | ✓ | drone + co-recorded whitenoise (high) |
-| `noise_free` | `silent-flight_whitenoise-low_room1` | 78 s | — | — | no drone motors |
+| **`test`** | `free-flight_speech-high_room1` | 53 s | ✓ | ✓ | drone + co-recorded speech (high level) |
+| **`test`** | `free-flight_whitenoise-high_room1` | 61 s | ✓ | ✓ | drone + co-recorded whitenoise (high) |
+| **`test`** | `silent-flight_whitenoise-low_room1` | 78 s | — | — | no drone motors |
 | `clean_source` | `clean_speech_*`, `clean_whitenoise_*`, `clean_chirps_*` | 1–10 s | — | — | isolated sources, no drone |
 | `motor` | `motor_Motor{1-4}_{50,60,70,80,90}`, `motor_allMotors_70` | 25–45 s | — | — | individual/combined motor runs |
+
+**`test` split (2026-10-14, paper real-data protocol).** The three `test`
+recordings are held out: scored once at the end, never in a training stream or
+a validation panel. `sources.dregon.TEST_RECORDING_IDS` is the guard key
+(`mixing.load_noise_source_frames` and the `real_valid_panel` generator raise
+on them). The published `DREGON-frames@261b09971c8a` predates the split: its
+`meta.split` still reads `in_flight_source` (the two high flights) and
+`noise_free` (silent flight), so select or exclude by `recording_id`, never by
+`meta.split`. The `noise_free` split no longer exists in the builder.
 
 ### Telemetry tracks: `motors_command` vs `motors_measured`
 
@@ -280,6 +289,45 @@ prefers `motors_measured` while the parent was cut from `motors_command`) and
 moves the FLY124 audio (the 2026-07-31 telemetry calibration changed the
 alignment). A twin whose labels had moved would not be comparable.
 
+### `rp-real-valid-v1` — the paper real-data validation panel (2026-10-14)
+
+Spec `rp-real-valid-v1` (generator `real_valid_panel`, **derivable**, pin
+`a73562cdd610`), the validation set of every `rp_*` run
+(`docs/experiments/paper-real-protocol.md`, `conf/data/rp_real.yaml`). It
+replaces `DREGON-LM-V4-michaels-valid-full` for that protocol only. 52 clips
+of 8 s, 8 ch, 16 kHz, `sample-dir-v1` with a per-clip `meta.json`:
+
+| clips | `dataset` | `source_type` | content | label |
+|---|---|---|---|---|
+| 0–7 | `dregon` | `nosource` | `free-flight_nosource_room1` | `motors_measured` |
+| 8–14 | `dregon` | `loudspeaker` | `free-flight_speech-low_room1` | `motors_measured` |
+| 15–21 | `dregon` | `loudspeaker` | `free-flight_whitenoise-low_room1` | `motors_measured` |
+| 22–36 | `md2` | `nosource` | FLY124 raw | `rps` (calibrated) |
+| 37–51 | `md2` | `mixed` | the clips 22–36 again, + LibriSpeech dev-clean: 37–44 at −5 dB, 45–51 at −20 dB | `rps` (calibrated) |
+
+- Clip recipe = the frozen split's (`mixing.iter_real_valid_clips`, 8 s,
+  `max_non_overlapping`, `min_motor_rps 0`, seed 43) on today's pinned
+  frames. Measured against `DREGON-LM-V4-michaels-valid-full`: the 22 DREGON
+  clips have byte-identical audio (same `start_time`s). Their labels changed
+  from `motors_command` to `motors_measured` (old/new ≈ 0.999). FLY124 labels
+  are the calibrated track: panel/published ratio 1.00000 on clip 30, frozen/new
+  0.9931. The frozen FLY124 clips sit 86 ms later in the recording than the
+  new ones (cross-correlation r ≥ 0.994), which is the calibration's time shift.
+- `meta.json` keys (`derivations.REAL_VALID_PANEL_META_KEYS`): `recording_id`
+  (the real recording, not unique per clip; `clip_index` is), `dataset`,
+  `source_type`, `snr_db` (`null` unless mixed), `t_start_s` (seconds from the
+  recording's audio start), `label_key`, `channels`, `sample_rate`,
+  `duration_s`, `clip_index`, `speech_utterances` (8 dev-clean ids or `null`).
+  `DregonLMFrameDataset` exposes them all as `frame["meta"]` (+ `channel` when
+  flattened).
+- Mixing: one distinct dev-clean utterance ≥ 8 s per (clip, channel), cut at
+  a seeded offset (`default_rng(20261014)`). Source-to-noise SNR is computed over
+  the whole 8-ch clip (`mix_at_source_to_noise_snr`, `per_channel=False`) with
+  the online mixer's reference floor (0.02 rms → power 4e-4). No augmentation.
+  The speech parent is the raw dload tree `librispeech-dev-clean`
+  (`175724bf2911`, fetched by `downloaders.fetch_librispeech_dev_clean` from
+  OpenSLR SLR12, md5-checked). No training stream uses it.
+
 ### Superseded variants
 
 The V1/V2/V3/test recipes and the one-off `rps_*` probe sets are consumed as
@@ -327,12 +375,13 @@ module's `PROVENANCE`):
   not. Four segments of `2021-02-18-16-43-54` are logged at 164 Hz, not 400:
   **group by `meta.system.native_rate_hz`**, never assume the nominal rate.
 
-## Pinned catalog (`dload.lock` — 56 datasets)
+## Pinned catalog (`dload.lock` — 66 datasets)
 
 Tests assert every `dload.lock` name is a `SPECS` entry, a `sources.REGISTRY`
 entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
 
-- **Raw sources** (7, CLI convention, from `data/`): `DREGON`, `librispeech`,
+- **Raw sources** (8, CLI convention, from `data/`): `DREGON`, `librispeech`,
+  `librispeech-dev-clean` (the `rp-real-valid-*` speech, validation only),
   `drone_audio`, `music`, `new-drone-noises`, `recording_with_motor_speed`,
   `zenodo_drone_noises`.
 - **Derived DREGON-LM** (17, `sample-dir-v1`, per split):
@@ -342,6 +391,8 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
   `DREGON-LM-V4-michaels-valid-full-nospeech` (its noise-only twin),
   `DREGON-LM-test-{train,valid}`,
   `DREGON-LM-rps_{eval_long,eval_specific,train_specific}_samples`.
+- **Real validation panel** (1, `sample-dir-v1` + per-clip `meta.json`):
+  `rp-real-valid-v1` (`a73562cdd610`, derivable).
 - **DN-LM** (2, `sample-dir-v1`): `DN-LM-{train,valid}`.
 - **Rich frames** (3, `tdframe-v1`): `DREGON-frames` (`recipe_version 2`,
   `261b09971c8a`), `michaels-frames` (`recipe_version 3`, `8e9d149560dd`) —

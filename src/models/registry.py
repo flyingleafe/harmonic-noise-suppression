@@ -31,6 +31,7 @@ direct ``conf/model`` ``_target_`` factories).
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
@@ -107,6 +108,8 @@ from models.rps_predictor import (
     SMoLnetRPSTCN,
 )
 from models.salience_rps import BasicPitchSalience, LateDeepSalience
+
+logger = logging.getLogger(__name__)
 
 
 # Verbatim copy of the former train_rps_predictor.py::MODEL_REGISTRY.
@@ -234,8 +237,15 @@ RPS_MODEL_REGISTRY: dict[str, Any] = {
 }
 
 
+def count_parameters(model: nn.Module) -> int:
+    """Total number of parameters (trainable or not) — the count every model
+    table in the paper carries."""
+    return sum(p.numel() for p in model.parameters())
+
+
 def build_model(name: str, **params: Any) -> nn.Module:
-    """Build an RPS-family model by name (``RPS_MODEL_REGISTRY``).
+    """Build an RPS-family model by name (``RPS_MODEL_REGISTRY``) and log its
+    parameter count.
 
     For the legacy registry (:data:`LEGACY_MODEL_BUILDERS`) use
     :func:`build_legacy_model` instead — it needs a config file, not bare
@@ -243,7 +253,9 @@ def build_model(name: str, **params: Any) -> nn.Module:
     """
     if name not in RPS_MODEL_REGISTRY:
         raise ValueError(f"Unknown model {name!r}; choose one of {sorted(RPS_MODEL_REGISTRY)}")
-    return RPS_MODEL_REGISTRY[name](**params)
+    model = RPS_MODEL_REGISTRY[name](**params)
+    logger.info("built %s: %s parameters", name, f"{count_parameters(model):,}")
+    return model
 
 
 def get_rps_model(
@@ -261,15 +273,14 @@ def get_rps_model(
     Verbatim port of the former ``train_rps_predictor.py::get_model`` (kept
     under a different name here since :func:`build_model` already owns the
     plain ``name, **params`` contract). Still needed by report/slide figure
-    scripts that reconstruct a narrow-input/super-resolution salience model
-    to load a checkpoint (e.g. ``writing/reports/2026-06-15/prepare_narrow.py``).
+    scripts that reconstruct a salience model to load a checkpoint.
 
     ``hcqt_fmin`` overrides the HCQT base frequency for ``multif0_salience``
     (default in the model is A0 = 27.5 Hz); ``fused_branches`` runs LateDeep's
     mag/phase branches as one grouped stack; ``stacked_hcqt`` uses the
     single-CQT + harmonic-shift front-end. ``salience_cfg`` is a dict of
-    optional narrow-input / super-resolution-output overrides (keys ignored
-    when ``None``). All ignored by non-salience models.
+    optional input-grid overrides (keys ignored when ``None``). All ignored by
+    non-salience models.
     """
     if model_name not in RPS_MODEL_REGISTRY:
         raise ValueError(f"Unknown model: {model_name}. Available: {sorted(RPS_MODEL_REGISTRY)}")
@@ -288,29 +299,9 @@ def get_rps_model(
             kwargs["fused_branches"] = True
         if stacked_hcqt:
             kwargs["stacked"] = True  # rides through LateDeepSalience -> build_frontend
-        _merge(
-            [
-                "n_octaves",
-                "over_sample",
-                "harmonics",
-                "superres_out",
-                "out_fmin",
-                "out_fmax",
-                "out_bins",
-            ]
-        )
+        _merge(["n_octaves", "over_sample", "harmonics"])
     elif model_name == "basic_pitch_salience":
-        _merge(
-            [
-                "bp_fmin",
-                "bins_per_semitone",
-                "n_contour_semitones",
-                "superres_out",
-                "out_fmin",
-                "out_fmax",
-                "out_bins",
-            ]
-        )
+        _merge(["bp_fmin", "bins_per_semitone", "n_contour_semitones"])
     return RPS_MODEL_REGISTRY[model_name](**kwargs)
 
 

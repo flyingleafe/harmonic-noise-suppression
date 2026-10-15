@@ -1,0 +1,25 @@
+# basicpitch_l2 — level L2 of the adaptation ladder (docs/experiments/
+# paper-real-protocol.md): conf/model/basicpitch_l1.yaml + the minimal
+# translation head (models.salience_rps.TranslationHead) onto the 164-bin
+# 0-159.2 rev/s grid (models.salience_crf.RP_LINEAR_GRID). conf/model/
+# hppnet_l2.yaml carries the head's definition. The contour grid is coarser
+# than the output step above ~50 rev/s (36 bins per octave), where W
+# interpolates.
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_rp_h256.yaml (hop 256).
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 256]
+_target_: models.registry.build_model
+params:
+  name: basic_pitch_salience
+  n_fft: 2048
+  hop_length: 512
+  num_rotors: 4
+  sr: 16000
+  n_maps: 4
+  translation_head: true
+model_type: null
+legacy_config_path: null

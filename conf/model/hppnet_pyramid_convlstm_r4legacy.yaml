@@ -1,0 +1,40 @@
+# hppnet_pyramid_convlstm_r4legacy — the build of the historical checkpoint
+# real_r4_hppnet_pyrlstm_unified (2.17 rev/s; docs/experiments/
+# paper-real-protocol.md decision (a)): the pyramid with k_max 32, f_max 7500,
+# the 307-bin 0-298.8 rev/s grid and the DENSE RateConvLSTM. It exists so that
+# checkpoint keeps loading; it is NOT a protocol arm — HRSPNet is
+# conf/model/hppnet_pyramid_convlstm.yaml (k84, no ceiling, 164 bins,
+# separable).
+#
+# Old checkpoints decode under the current off-state CRF semantics
+# (models.salience_crf: free transitions into and out of bin 0, stopped rotor =
+# bin 0). Bin 0 of the 307-bin grid was already 0 rev/s, so the reading is
+# unchanged for this model. Loss/metrics: conf/{loss,metrics}/
+# salience_layers_pyr.yaml (the 307-bin grid).
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_pyramid
+  sr: 16000
+  hop_length: 512
+  num_rotors: 4
+  n_ffts: [16384, 8192, 4096, 2048]
+  level0_fmax: 1200.0
+  out_bins: 307
+  k_max: 32
+  k_sub: 8
+  f_min: null
+  f_max: 7500.0
+  c_har: 16
+  embedding: 128
+  n_maps: 4
+  head: convlstm
+  lstm_size: 128
+  max_slew: 15.0
+  separable: false
+model_type: null
+legacy_config_path: null

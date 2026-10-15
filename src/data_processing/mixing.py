@@ -32,7 +32,7 @@ import soundfile as sf
 import tdseries as td
 
 from data_processing.frames import adapt_recording_frame, get_meta
-from data_processing.sources.dregon import clean_command_spikes
+from data_processing.sources.dregon import TEST_RECORDING_IDS, clean_command_spikes
 
 SAMPLE_RATE = 16000
 MOTOR_SAMPLE_RATE = 929.0  # Hz — default DREGON motor logging rate
@@ -417,7 +417,9 @@ def extract_non_overlapping_multichannel_chunks(
 # =============================================================================
 
 
-def load_noise_source_frames(specs: list[dict[str, Any]], *, sample_rate: int) -> list[td.Frame]:
+def load_noise_source_frames(
+    specs: list[dict[str, Any]], *, sample_rate: int | None
+) -> list[td.Frame]:
     """Compose a noise-source pool (``list[td.Frame]``) from declarative specs.
 
     Each spec selects recordings from one published ``tdframe-v1`` dataset::
@@ -429,8 +431,10 @@ def load_noise_source_frames(specs: list[dict[str, Any]], *, sample_rate: int) -
     Keys: ``dataset`` (required, optional ``@version``), ``splits`` /
     ``split``, ``recording_ids``, ``exclude_recording_ids``, ``take``. Every
     selected frame is reduced to the canonical (audio + rps + meta) noise
-    frame at ``sample_rate`` (:func:`frames.adapt_recording_frame`) — fixes
-    are baked in at derivation time, so nothing is re-cleaned here.
+    frame at ``sample_rate`` — ``None`` keeps each recording's native rate
+    (:func:`frames.adapt_recording_frame`) — fixes are baked in at derivation
+    time, so nothing is re-cleaned here. A DREGON test recording
+    (``TEST_RECORDING_IDS``) raises: no pool may resolve it.
     """
     from data_processing.streams import iter_published_frames
 
@@ -458,6 +462,11 @@ def load_noise_source_frames(specs: list[dict[str, Any]], *, sample_rate: int) -
                 continue
             if excluded is not None and rid in excluded:
                 continue
+            if rid in TEST_RECORDING_IDS:
+                raise ValueError(
+                    f"{name}: recording {rid!r} is in the DREGON test split; "
+                    "no training/validation pool may resolve it"
+                )
             adapted = adapt_recording_frame(frame, sample_rate=sample_rate)
             if adapted is None:
                 continue

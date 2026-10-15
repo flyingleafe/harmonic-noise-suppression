@@ -1,19 +1,17 @@
-# conf/loss/salience_layers_r150.yaml on the hppnet_pyramid grid: linear
-# 0 -> 298.828125 rev/s in 307 bins (0.9765625 rev/s per bin = level 0's STFT
-# bin width, 16000 / 16384). The model builds its grid with
-# models.multif0.utils.linear_freq_grid from the same three numbers, so the
-# target lands on the model's own bins. Everything that file argues (Gaussian
-# per-rotor layers, no pos_weight, focus as the imbalance handle) holds here;
-# focus = G / (sqrt(2 pi) sigma) = 307 / 2.507 = 122.
+# Per-rotor layer BCE on the LEGACY 307-bin pyramid grid: linear 0 ->
+# 298.828125 rev/s (0.9765625 rev/s per bin = level 0's STFT bin width,
+# 16000 / 16384). Serves only conf/model/hppnet_pyramid_convlstm_r4legacy.yaml
+# (the historical real_r4_hppnet_pyrlstm_unified checkpoint); every protocol
+# pyramid is on conf/loss/salience_layers_rp.yaml (164 bins). Everything that
+# file argues holds; sigma_rev_s 0.9765625 = one bin, focus 122 = the value
+# that run trained with (G / (sqrt(2 pi) sigma) = 307 / 2.507).
 terms:
   - name: bce
     _target_: losses.LayerPITSalienceBCELoss
     weight: 1.0
     params:
-      out_fmin: 0.0
-      out_fmax: 298.828125
-      out_bins: 307
+      grid: {kind: linear, fmin: 0.0, fmax: 298.828125, bins: 307}
       n_layers: 4
-      sigma_bins: 1.0
+      sigma_rev_s: 0.9765625
       focus: 122.0
       rate: [16000, 512]

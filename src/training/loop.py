@@ -1,18 +1,26 @@
 """One generic training loop (docs/refactor-unified-framework.md § "train.py
-/ eval.py").
+/ eval.py"; schedule, panel and checkpoints: docs/experiments/paper-real-protocol.md).
 
-Covers the union of behaviors of the three old trainers (``train.py``,
-``train_rps_predictor.py``, ``train_noise_gen.py``): map-style *or* iterable
-(online-mixing) datasets, AMP autocast + ``GradScaler``, gradient
-accumulation, grad-norm clipping, an optimizer factory ported from
-``train.py::get_optimizer``, ``ReduceLROnPlateau`` + early stopping on a
-configurable monitor metric (raw ``patience`` by default, or the opt-in
-median-smoothed policy in ``training.stopping`` when
-``early_stopping.enabled``), checkpointing (``best.ckpt`` best-monitor +
-``last.ckpt`` latest-epoch + optional periodic
-``ep{N}_{monitor}_{value:.4f}.ckpt``), and wandb logging (run name =
-experiment name, git commit hash, dirty-tree guard, run-id file for the
-job runner to pick up — mirrors ``train.py::wandb_init``).
+Covers map-style *or* iterable (online-mixing) datasets, AMP autocast +
+``GradScaler``, gradient accumulation, grad-norm clipping, an optimizer
+factory, a step-based LR schedule (linear warm-up then cosine, stepped once per
+OPTIMIZER step, a pure function of the step count — validation never touches
+it), atomic checkpointing and wandb logging (run name = experiment name, git
+commit hash, dirty-tree guard, run-id file for the job runner).
+
+Two validation paths:
+
+* ``validation.enabled`` (RPS tasks): the full panel of
+  :mod:`training.validation` every ``every_optimizer_steps`` optimizer steps,
+  up to ``max_optimizer_steps``; :class:`~training.stopping.MultiMetricController`
+  picks ``best_<score>_median.ckpt`` / ``best_<score>_raw.ckpt`` per primary
+  score and stops on the control score's saturation. Every round appends to
+  ``validation_history.jsonl`` and writes ``val_samples/round_<N>.npz``.
+* otherwise the per-sample :class:`~metrics.suite.MetricSuite` over
+  ``data.valid`` once per epoch, logged only (no selection, no early stop).
+
+``last.ckpt`` is written every round; a non-finite round stops the run before
+anything for it is written.
 
 Everything Frame-shaped funnels through the task's :class:`~tasks.codecs.Codec`
 (``to_inputs`` / ``call_model`` / ``to_frame``) and
@@ -34,13 +42,15 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import tdseries as td
 import torch
-import wandb
 from torch.amp.grad_scaler import GradScaler
+from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, IterableDataset
 from tqdm.auto import tqdm
 
+import wandb
 from data_processing.collate import batch_size as frame_batch_size
 from data_processing.collate import frame_collate, slice_sample
 from tasks.codecs import Codec
@@ -54,21 +64,27 @@ from training.config import (
     instantiate_model,
 )
 from training.lora import maybe_apply_lora
-from training.stopping import STATE_KEY, StoppingController
+from training.stopping import STATE_KEY, MultiMetricController, MultiValidationVerdict
 from training.validation import (
-    MULTI_VALIDATION_STATE_KEY,
-    MultiMetricController,
+    ValidationSamples,
     build_validation_plan,
     rps_readout_for,
     validate_rps,
 )
 
-__all__ = ["run_training", "get_optimizer", "git_commit_hash", "is_git_dirty"]
+__all__ = [
+    "run_training",
+    "get_optimizer",
+    "warmup_cosine_factor",
+    "build_lr_scheduler",
+    "git_commit_hash",
+    "is_git_dirty",
+]
 
 logger = logging.getLogger(__name__)
 
 
-# ─── Optimizer factory (ported from train.py::get_optimizer) ─────────────────
+# ─── Optimizer factory + LR schedule ──────────────────────────────────────────
 
 
 def get_optimizer(
@@ -81,10 +97,8 @@ def get_optimizer(
 ) -> torch.optim.Optimizer:
     """Build an optimizer by name — adam/adamw/radam/rmsprop/sgd/prodigy/adamw8bit.
 
-    ``weight_decay`` is a named kwarg so every optimizer gets it uniformly
-    (the original ``train.py`` version relied on each optimizer accepting it
-    via ``**optim_params``); ``extra_params`` are the optimizer-specific
-    passthrough kwargs (``config.optimizer`` in the original).
+    ``weight_decay`` is a named kwarg so every optimizer gets it uniformly;
+    ``extra_params`` are the optimizer-specific passthrough kwargs.
     """
     params = dict(extra_params or {})
     params.setdefault("weight_decay", weight_decay)
@@ -108,6 +122,40 @@ def get_optimizer(
 
         return bnb.optim.AdamW8bit(trainable, lr=lr, **params)
     raise ValueError(f"unknown optimizer {name!r}")
+
+
+def warmup_cosine_factor(
+    step: int, *, warmup_steps: int, total_steps: int, min_lr_frac: float
+) -> float:
+    """LR multiplier after ``step`` completed optimizer steps.
+
+    Linear 0 -> 1 over ``warmup_steps``, then cosine 1 -> ``min_lr_frac`` at
+    ``total_steps``, constant after.
+    """
+    if step < warmup_steps:
+        return step / warmup_steps
+    progress = min(1.0, (step - warmup_steps) / max(1, total_steps - warmup_steps))
+    return min_lr_frac + (1.0 - min_lr_frac) * 0.5 * (1.0 + math.cos(math.pi * progress))
+
+
+def build_lr_scheduler(optimizer: torch.optim.Optimizer, optim_cfg: Any) -> LambdaLR:
+    """The ``optim`` group's warm-up + cosine schedule; step it once per optimizer step."""
+    warmup_steps = int(optim_cfg.warmup_steps)
+    total_steps = int(optim_cfg.total_steps)
+    min_lr_frac = float(optim_cfg.min_lr_frac)
+    if not 0 <= warmup_steps < total_steps:
+        raise ValueError(
+            f"optim needs 0 <= warmup_steps < total_steps, got {warmup_steps}, {total_steps}"
+        )
+    if not 0.0 <= min_lr_frac <= 1.0:
+        raise ValueError(f"optim.min_lr_frac must be in [0, 1], got {min_lr_frac}")
+    factor = partial(
+        warmup_cosine_factor,
+        warmup_steps=warmup_steps,
+        total_steps=total_steps,
+        min_lr_frac=min_lr_frac,
+    )
+    return LambdaLR(optimizer, factor)
 
 
 # ─── Git state (dirty-tree guard + commit hash for wandb) ────────────────────
@@ -167,14 +215,6 @@ def _take(it: Iterator[td.Frame], n: int) -> Iterable[td.Frame]:
         yield next(it)
 
 
-def _better(mode: str):
-    if mode == "min":
-        return lambda new, best: new < best
-    if mode == "max":
-        return lambda new, best: new > best
-    raise ValueError(f"optim.monitor_mode must be 'min' or 'max', got {mode!r}")
-
-
 # ─── Core epoch steps ──────────────────────────────────────────────────────────
 
 
@@ -204,6 +244,7 @@ def _train_one_epoch(
     codec: Codec,
     loss_fn: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
+    scheduler: LambdaLR,
     scaler: GradScaler,
     batches: Iterable[td.Frame],
     n_batches: int | None,
@@ -245,6 +286,9 @@ def _train_one_epoch(
             scaler.update()
             accepted = not scaler.is_enabled() or scaler.get_scale() >= scale_before
             if accepted:
+                # Only steps the optimizer actually took advance the schedule,
+                # so scheduler.last_epoch == completed optimizer steps.
+                scheduler.step()
                 optimizer_steps += 1
             optimizer.zero_grad(set_to_none=True)
 
@@ -316,6 +360,15 @@ def _replace_link_or_copy(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
 
 
+def _save_validation_samples(path: Path, samples: ValidationSamples) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    arrays: dict[str, Any] = samples.arrays()
+    with tmp.open("wb") as handle:  # a file handle: savez must not append ".npz"
+        np.savez_compressed(handle, **arrays)
+    tmp.replace(path)
+
+
 # ``train_state.pt`` is deliberately SEPARATE from ``last.ckpt`` rather than a
 # richer dict inside it: every existing consumer (eval.py, _warm_start,
 # scripts/se_eval.py, the R2 artifact store) reads the .ckpt files as
@@ -328,14 +381,11 @@ def _save_train_state(
     path: Path,
     *,
     optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    scheduler: LambdaLR,
     scaler: GradScaler,
     epoch: int,
-    best_metric: float | None,
-    no_improve: int,
-    stopping: StoppingController | None = None,
-    multi_validation: MultiMetricController | None = None,
-    optimizer_steps: int = 0,
+    optimizer_steps: int,
+    controller: MultiMetricController | None = None,
 ) -> None:
     """Persist everything needed to continue training after ``epoch``."""
     tmp = path.with_suffix(".pt.tmp")
@@ -345,13 +395,9 @@ def _save_train_state(
         "scheduler": scheduler.state_dict(),
         "scaler": scaler.state_dict(),
         "next_epoch": epoch + 1,
-        "best_metric": best_metric,
-        "no_improve": no_improve,
     }
-    if multi_validation is not None:
-        state[MULTI_VALIDATION_STATE_KEY] = multi_validation.state_dict()
-    if stopping is not None:
-        state[STATE_KEY] = stopping.state_dict()
+    if controller is not None:
+        state[STATE_KEY] = controller.state_dict()
     torch.save(state, tmp)
     tmp.replace(path)  # atomic: a job killed mid-save leaves the old state intact
 
@@ -386,17 +432,15 @@ def _load_train_state(
     *,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    scheduler: LambdaLR,
     scaler: GradScaler,
     device: torch.device,
     store: ArtifactStore | None = None,
-    stopping: StoppingController | None = None,
-    multi_validation: MultiMetricController | None = None,
-    progress: dict[str, int] | None = None,
-) -> tuple[int, float | None, int]:
-    """Restore an interrupted run in place; return ``(start_epoch, best, no_improve)``.
+    controller: MultiMetricController | None = None,
+) -> tuple[int, int]:
+    """Restore an interrupted run in place; return ``(start_epoch, optimizer_steps)``.
 
-    Returns ``(0, None, 0)`` when there is nothing to resume from, so a first
+    Returns ``(0, 0)`` when there is nothing to resume from, so a first
     launch with ``resume=true`` (the safe default for preemptible queues) just
     starts normally.
     """
@@ -409,60 +453,52 @@ def _load_train_state(
         # Kaggle, Colab and a reclaimed vast instance all hand back an empty
         # filesystem, so "resume" there means "resume from R2 or not at all".
         # Measured: `salv2_hf0_comb_mix` was killed at the 12 h session cap on
-        # epoch 101 of ~105, and only `last.ckpt`/`best.ckpt` had been uploaded
-        # -- the optimizer, the plateau scheduler (its LR had decayed 1e-3 ->
-        # 8e-6 over seven reductions), the epoch counter and the early-stop
-        # counter were all on the dead VM.
+        # epoch 101 of ~105 with only the checkpoints uploaded -- the
+        # optimizer, the LR schedule, the epoch counter and the stopping
+        # counters were all on the dead VM.
         remote_state, remote_weights = _fetch_train_state(store, state_path, weights_path)
         state_local = state_local or remote_state
         weights_local = weights_local or remote_weights
     if state_local is None and weights_local is None:
-        return 0, None, 0  # a genuine first launch: nothing to resume from
+        return 0, 0  # a genuine first launch: nothing to resume from
     if state_local is None or weights_local is None:
         # WEIGHTS WITHOUT BOOKKEEPING (or the reverse) MUST NOT START FRESH.
-        # `best_metric` would come back None, and the epoch loop treats a None
-        # best as "improved", so the very next epoch OVERWRITES `best.ckpt`
-        # with a worse model and resets `no_improve` -- losing both the best
-        # checkpoint and the early-stop counter, silently. Measured on
-        # `m3mixv2_scv2`: its best sat at epoch 8 (val/mse 48.09) and the
-        # `best.ckpt` left on R2 scores 85.4, its epoch-77 value, while the run
-        # continued 69 epochs past a patience of 20. Refusing is strictly
-        # better than destroying a run's best weights.
+        # A fresh controller treats its first round as a new best, so the
+        # next round OVERWRITES every best checkpoint with a worse model and
+        # resets the stopping counters -- silently. Measured on
+        # `m3mixv2_scv2`: its best sat at epoch 8 (val/mse 48.09) and the best
+        # checkpoint left on R2 scored 85.4, its epoch-77 value. Refusing is
+        # strictly better than destroying a run's best weights.
         missing = TRAIN_STATE_NAME if state_local is None else weights_path.name
         present = weights_path.name if state_local is None else TRAIN_STATE_NAME
         raise RuntimeError(
             f"cannot resume {run_dir.name}: found {present} but no {missing}. "
-            f"Starting fresh here would overwrite best.ckpt with a worse model "
-            f"and reset early stopping. Either restore {missing}, or run under a "
-            f"new experiment_name, or set `resume=false` to start deliberately."
+            f"Starting fresh here would overwrite the best checkpoints with a worse "
+            f"model and reset the stopping counters. Either restore {missing}, or run "
+            f"under a new experiment_name, or set `resume=false` to start deliberately."
         )
-    state_path, weights_path = state_local, weights_local
-    state = torch.load(state_path, map_location=device, weights_only=False)
-    model.load_state_dict(torch.load(weights_path, map_location=device, weights_only=False))
+    state = torch.load(state_local, map_location=device, weights_only=False)
+    if "best_metric" in state or (controller is not None and STATE_KEY not in state):
+        raise RuntimeError(
+            f"cannot resume {run_dir.name}: its train_state.pt was written by the retired "
+            f"plateau-LR protocol or without the validation controller; start a new experiment"
+        )
+    model.load_state_dict(torch.load(weights_local, map_location=device, weights_only=False))
     optimizer.load_state_dict(state["optimizer"])
-    if multi_validation is not None:
-        if MULTI_VALIDATION_STATE_KEY not in state:
-            raise RuntimeError(
-                "cannot resume a multi-validation run from state written by "
-                "the single-monitor protocol; start a new experiment"
-            )
-        multi_validation.load_state_dict(state[MULTI_VALIDATION_STATE_KEY])
-    if progress is not None:
-        progress["optimizer_steps"] = int(state.get("optimizer_steps", 0))
     scheduler.load_state_dict(state["scheduler"])
     scaler.load_state_dict(state["scaler"])
-    if stopping is not None and STATE_KEY in state:
-        # Absent on a freshly prepared continuation bundle: fresh controller.
-        stopping.load_state_dict(state[STATE_KEY])
+    if controller is not None:
+        controller.load_state_dict(state[STATE_KEY])
     start_epoch = int(state["next_epoch"])
+    optimizer_steps = int(state["optimizer_steps"])
     logger.info(
-        "resuming %s at epoch %d (best=%s, no_improve=%d)",
+        "resuming %s at round %d, optimizer step %d (lr %.3g)",
         run_dir.name,
         start_epoch,
-        state["best_metric"],
-        state["no_improve"],
+        optimizer_steps,
+        optimizer.param_groups[0]["lr"],
     )
-    return start_epoch, state["best_metric"], int(state["no_improve"])
+    return start_epoch, optimizer_steps
 
 
 def _checkpoint_slug(name: str) -> str:
@@ -476,20 +512,21 @@ def _warm_start(
     *,
     artifacts_cfg: Any,
 ) -> None:
-    """Initialise a curriculum stage from explicit weights or a subset best.
+    """Initialise a curriculum stage from explicit weights or a score's best.
 
-    ``best:<score>@<experiment>`` resolves the independently selected R2
-    checkpoint, e.g. ``best:real_r3@m3cur_scv2_s1``. A curriculum always starts
-    fresh optimizer/scheduler state; same-run continuation remains ``resume``.
+    ``best:<score>@<experiment>`` resolves that run's median-selected R2
+    checkpoint ``best_<score>_median.ckpt``, e.g. ``best:real@rp_hrspnet_all``.
+    A curriculum always starts fresh optimizer/scheduler state; same-run
+    continuation remains ``resume``.
     """
     if checkpoint.startswith("best:"):
         try:
             score, experiment = checkpoint.removeprefix("best:").rsplit("@", 1)
         except ValueError as error:
-            raise ValueError("subset checkpoint syntax is best:<score>@<experiment>") from error
+            raise ValueError("best-checkpoint syntax is best:<score>@<experiment>") from error
         checkpoint = (
             f"r2://{artifacts_cfg.bucket}/{artifacts_cfg.prefix}/{experiment}/"
-            f"checkpoints/best_{_checkpoint_slug(score)}.ckpt"
+            f"checkpoints/best_{_checkpoint_slug(score)}_median.ckpt"
         )
     path = resolve_checkpoint_uri(checkpoint)
     state = torch.load(path, map_location=device, weights_only=False)
@@ -506,9 +543,8 @@ def _warm_start(
 def _upload_checkpoint_and_record(
     *, store: ArtifactStore, upload_enabled: bool, path: Path, run: Any, summary_key: str
 ) -> None:
-    """Upload ``path`` (best/periodic checkpoint) to R2 and, if it succeeded,
-    write its ``r2://...`` URI into the wandb run summary under
-    ``summary_key`` (e.g. ``"r2/best_checkpoint"``). No-op when
+    """Upload ``path`` to R2 and, if it succeeded, write its ``r2://...`` URI
+    into the wandb run summary under ``summary_key``. No-op when
     ``upload_enabled`` is false; never raises (``ArtifactStore`` already
     swallows its own upload failures)."""
     if not upload_enabled:
@@ -518,15 +554,52 @@ def _upload_checkpoint_and_record(
         run.summary[summary_key] = uri
 
 
+def _link_best_checkpoints(
+    *,
+    verdict: MultiValidationVerdict,
+    scores: dict[str, float],
+    run_dir: Path,
+    last_ckpt_path: Path,
+    checkpoint_index: dict[str, Any],
+    epoch: int,
+    optimizer_steps: int,
+    store: ArtifactStore,
+    upload: bool,
+    run: Any,
+) -> bool:
+    """Hard-link ``best_<score>_{median,raw}.ckpt`` to ``last.ckpt`` for every
+    improved score and record them in ``checkpoint_index``; True if any did."""
+    improved = False
+    for kind, names in (("median", verdict.improved_median), ("raw", verdict.improved_raw)):
+        for score in names:
+            slug = _checkpoint_slug(score)
+            best_path = run_dir / f"best_{slug}_{kind}.ckpt"
+            _replace_link_or_copy(last_ckpt_path, best_path)
+            # Server-side copy of the just-uploaded last.ckpt: no re-upload.
+            uri = store.alias_checkpoint(last_ckpt_path.name, best_path.name) if upload else None
+            if uri is not None and run is not None:
+                run.summary[f"r2/best_{slug}_{kind}"] = uri
+            checkpoint_index[f"{score}/{kind}"] = {
+                "checkpoint": best_path.name,
+                "validation_round": epoch,
+                "optimizer_step": optimizer_steps,
+                "raw": scores[score],
+                "median": verdict.smoothed[score],
+            }
+            improved = True
+    return improved
+
+
 # ─── Main entry point ──────────────────────────────────────────────────────────
 
 
 def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> dict[str, float]:
     """Train per ``cfg`` (a composed ``training.config.RootConfig``).
 
-    Sets up the run dir + wandb, builds every component, then runs
-    epochs/iterable-stream-chunks with early stopping. Returns the best
-    monitored metric value and the epoch it stopped at.
+    Sets up the run dir + wandb, builds every component, then runs validation
+    rounds until the step budget, the round cap (``epochs``) or the
+    controller's saturation stop. Returns the final round, the optimizer-step
+    count and (full-panel runs) the control score's best median and raw values.
 
     ``artifact_store`` is dependency-injected for tests (an
     :class:`~training.artifacts.ArtifactStore` built around a fake
@@ -566,18 +639,18 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             enabled=cfg.artifacts.enabled,
         )
     )
+    upload = bool(cfg.artifacts.upload_checkpoints)
     if getattr(cfg, "checkpoint", None):
         _warm_start(model, str(cfg.checkpoint), device, artifacts_cfg=cfg.artifacts)
     loss_fn = build_losses(cfg.loss).to(device)
     metric_suite = build_metrics(cfg.metrics)
     validation_cfg = getattr(cfg, "validation", None)
-    multi_validation_enabled = bool(
-        validation_cfg is not None and getattr(validation_cfg, "enabled", False)
+    multi_cfg: Any = (
+        validation_cfg
+        if validation_cfg is not None and getattr(validation_cfg, "enabled", False)
+        else None
     )
-    multi_cfg: Any = validation_cfg if multi_validation_enabled else None
-    rps_readout = rps_readout_for(task.name) if multi_validation_enabled else None
-    if multi_validation_enabled and getattr(cfg.early_stopping, "enabled", False):
-        raise ValueError("validation.enabled and early_stopping.enabled are mutually exclusive")
+    rps_readout = rps_readout_for(task.name) if multi_cfg is not None else None
 
     optimizer = get_optimizer(
         model,
@@ -586,24 +659,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
         weight_decay=cfg.optim.weight_decay,
         extra_params=dict(cfg.optim.optimizer_params or {}),
     )
-    es_cfg = getattr(cfg, "early_stopping", None)
-    stopping = (
-        StoppingController(es_cfg, mode=cfg.optim.monitor_mode)
-        if es_cfg is not None and es_cfg.enabled
-        else None
-    )
-    scheduler_kwargs: dict[str, Any] = dict(
-        mode=cfg.optim.monitor_mode,
-        patience=cfg.optim.patience,
-        factor=cfg.optim.factor,
-        cooldown=getattr(cfg.optim, "cooldown", 0),
-    )
-    if stopping is not None:
-        # Absolute threshold: the controller re-derives it every epoch from
-        # the best smoothed value (see training.stopping).
-        scheduler_kwargs.update(threshold=stopping.min_delta(None), threshold_mode="abs")
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, **scheduler_kwargs)
-    better = _better(cfg.optim.monitor_mode)
+    scheduler = build_lr_scheduler(optimizer, cfg.optim)
 
     train_ds = build_dataset(cfg.data.train)
     batch_size = cfg.data.batch_size or cfg.batch_size
@@ -635,9 +691,9 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
         shuffle=False,
         persistent_workers=True,
     )
-    multi_validation = (
+    controller = (
         MultiMetricController(multi_cfg, validation_plan.primary)
-        if validation_plan is not None and multi_cfg is not None
+        if validation_plan is not None
         else None
     )
 
@@ -694,9 +750,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
     if run is not None and getattr(run, "id", None):
         (run_dir / "wandb_run_id.txt").write_text(run.id)
 
-    monitor = str(multi_cfg.control) if multi_cfg is not None else cfg.optim.monitor
-    progress: dict[str, int] = {}
-    start_epoch, best_metric, no_improve = (
+    start_epoch, optimizer_steps = (
         _load_train_state(
             run_dir,
             model=model,
@@ -704,40 +758,32 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             scheduler=scheduler,
             scaler=scaler,
             device=device,
-            store=store if cfg.artifacts.upload_checkpoints else None,
-            stopping=stopping,
-            multi_validation=multi_validation,
-            progress=progress,
+            store=store if upload else None,
+            controller=controller,
         )
         if cfg.resume
-        else (0, None, 0)
+        else (0, 0)
     )
-    optimizer_steps = int(progress.get("optimizer_steps", 0))
-    if stopping is not None and cfg.resume:
-        for key in ("patience", "factor", "cooldown"):
-            setattr(scheduler, key, scheduler_kwargs[key])
-        scheduler.threshold_mode = "abs"
+
+    def summary(final_epoch: int) -> dict[str, float]:
+        result = {"final_epoch": float(final_epoch), "optimizer_steps": float(optimizer_steps)}
+        if controller is not None:
+            control = controller.control
+            if control in controller.best_smoothed:
+                result[f"best_{control}_median"] = controller.best_smoothed[control]
+            if control in controller.best_raw:
+                result[f"best_{control}_raw"] = controller.best_raw[control]
+        return result
 
     epoch = start_epoch
     max_optimizer_steps = int(multi_cfg.max_optimizer_steps) if multi_cfg is not None else None
     done_reason: str | None = None
     if max_optimizer_steps is not None and optimizer_steps >= max_optimizer_steps:
         done_reason = "censored at optimizer-step budget"
-    elif multi_validation is not None and multi_validation.stop_reason:
-        done_reason = multi_validation.stop_reason
-    elif best_metric is not None and start_epoch >= cfg.epochs:
-        done_reason = "epoch budget"
-    elif (
-        multi_validation is None
-        and stopping is None
-        and best_metric is not None
-        and no_improve >= cfg.patience
-    ):
-        done_reason = "early stopping"
-    elif stopping is not None and stopping.stop_reason:
-        done_reason = stopping.stop_reason
-    elif stopping is not None and stopping.deadline_reached():
-        done_reason = "deadline"
+    elif controller is not None and controller.stop_reason:
+        done_reason = controller.stop_reason
+    elif start_epoch >= cfg.epochs:
+        done_reason = "round budget"
     if done_reason:
         logger.info(
             "%s not training at validation round %d (%s)",
@@ -746,36 +792,27 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             done_reason,
         )
         wandb.finish()
-        best = best_metric if best_metric is not None else math.nan
-        return {
-            f"best_{monitor}": best,
-            "final_epoch": float(start_epoch),
-            "optimizer_steps": float(optimizer_steps),
-        }
+        return summary(start_epoch)
 
+    history_path = run_dir / "validation_history.jsonl"
     checkpoint_index_path = run_dir / "best_checkpoints.json"
     checkpoint_index = (
         json.loads(checkpoint_index_path.read_text()) if checkpoint_index_path.exists() else {}
     )
+    grad_accum = max(1, int(cfg.grad_accum_steps))
     stop_reason: str | None = None
     for epoch in range(start_epoch, cfg.epochs):
-        grad_accum = max(1, int(cfg.grad_accum_steps))
         target_updates: int | None = None
         if train_iterable:
             assert train_iter is not None and batches_per_epoch is not None
-            if multi_validation is not None:
+            if multi_cfg is not None:
                 target_updates = batches_per_epoch // grad_accum
                 if max_optimizer_steps is not None:
-                    remaining_updates = max_optimizer_steps - optimizer_steps
-                    if remaining_updates <= 0:
-                        stop_reason = "censored at optimizer-step budget"
-                        break
-                    target_updates = min(target_updates, remaining_updates)
+                    target_updates = min(target_updates, max_optimizer_steps - optimizer_steps)
                 n_batches = target_updates * grad_accum
-                batches = _take(train_iter, n_batches)
             else:
                 n_batches = batches_per_epoch
-                batches = _take(train_iter, n_batches)
+            batches = _take(train_iter, n_batches)
         else:
             batches = train_loader
             n_batches = len(train_loader)
@@ -786,6 +823,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             codec=codec,
             loss_fn=loss_fn,
             optimizer=optimizer,
+            scheduler=scheduler,
             scaler=scaler,
             device=device,
             amp=cfg.amp,
@@ -801,6 +839,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
         train_started = time.perf_counter()
         train_loss, completed_steps = train_once(batches=batches, n_batches=n_batches)
         if target_updates is not None:
+            assert train_iter is not None  # step-cadence rounds only exist for streams
             weighted_loss = train_loss * completed_steps
             while completed_steps < target_updates:
                 missing = target_updates - completed_steps
@@ -821,9 +860,10 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
 
         validation_started_unix = time.time()
         validation_started = time.perf_counter()
+        samples: ValidationSamples | None = None
         if validation_plan is not None:
             assert rps_readout is not None
-            val_metrics, val_loss = validate_rps(
+            val_metrics, val_loss, samples = validate_rps(
                 model=model,
                 codec=codec,
                 loss_fn=loss_fn,
@@ -854,78 +894,37 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             torch.cuda.max_memory_reserved(device) / 2**30 if device.type == "cuda" else 0.0
         )
 
-        if multi_validation is not None:
-            multi_verdict = multi_validation.step(val_metrics, optimizer)
-            stop_reason = multi_verdict.stop_reason
-            metric_value = val_metrics[monitor]
-            smoothed_log = {
-                f"val/{name}_median": value for name, value in multi_verdict.smoothed.items()
-            }
-            smoothed_log.update(
-                {
-                    f"val/{name}_log_median": math.log(value)
-                    for name, value in multi_verdict.smoothed.items()
-                    if value > 0.0
-                }
-            )
-            stable_improvements = multi_verdict.improved
-            if monitor in multi_validation.best_smoothed:
-                best_metric = multi_validation.best_smoothed[monitor]
-            no_improve = multi_validation.stale_rounds
-        else:
-            if monitor == "loss":
-                metric_value = train_loss
-            elif monitor == "val_loss":
-                metric_value = val_loss
-            else:
-                metric_value = val_metrics[monitor]
-            stable_improvements = ()
-            if stopping is not None:
-                verdict = stopping.step(
-                    epoch=epoch,
-                    train_loss=train_loss,
-                    raw_metric=metric_value,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                )
-                stop_reason = verdict.stop_reason
-                smoothed_log = {f"val/{monitor}_median": verdict.smoothed}
-            else:
-                scheduler.step(metric_value)
-                smoothed_log = {}
-
-        if stop_reason == "nonfinite":
-            nonfinite_scores = sorted(
-                name for name, value in val_metrics.items() if not math.isfinite(value)
-            )
+        round_values = {
+            "train/loss": train_loss,
+            "val/loss": val_loss,
+            **{f"val/{key}": value for key, value in val_metrics.items()},
+        }
+        nonfinite = sorted(name for name, value in round_values.items() if not math.isfinite(value))
+        if nonfinite:
             failure_payload = {
                 "epoch": epoch,
                 "validation_round": epoch,
                 "optimizer_step": optimizer_steps,
-                "train/loss": train_loss,
-                "val/loss": val_loss,
-                "validation/nonfinite_scores": nonfinite_scores,
-                **{f"val/{key}": value for key, value in val_metrics.items()},
+                **round_values,
             }
             logger.error(
-                "non-finite validation at optimizer step %d: scores=%s val_loss=%s",
+                "non-finite round at optimizer step %d (%s); stopping before any checkpoint",
                 optimizer_steps,
-                nonfinite_scores,
-                val_loss,
+                nonfinite,
             )
-            with (run_dir / "validation_history.jsonl").open("a") as history:
-                history.write(json.dumps(failure_payload, sort_keys=True) + "\n")
+            with history_path.open("a") as history:
+                history.write(
+                    json.dumps({**failure_payload, "validation/nonfinite": nonfinite}) + "\n"
+                )
             wandb.log(failure_payload)
+            stop_reason = "nonfinite"
             break
 
-        lr = optimizer.param_groups[0]["lr"]
-        log_payload = {
+        log_payload: dict[str, Any] = {
             "epoch": epoch,
             "validation_round": epoch,
             "optimizer_step": optimizer_steps,
-            "train/loss": train_loss,
-            "val/loss": val_loss,
-            "lr": lr,
+            "lr": optimizer.param_groups[0]["lr"],
             "perf/train_s": train_seconds,
             "perf/validation_s": validation_seconds,
             "perf/train_started_unix": train_started_unix,
@@ -934,99 +933,77 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             "perf/validation_finished_unix": validation_finished_unix,
             "perf/peak_allocated_gb": peak_allocated_gb,
             "perf/peak_reserved_gb": peak_reserved_gb,
-            **{f"val/{key}": value for key, value in val_metrics.items()},
-            **{
-                f"val/{key}_log": math.log(value)
-                for key, value in val_metrics.items()
-                if multi_validation is not None and value > 0.0
-            },
-            **smoothed_log,
+            **round_values,
         }
-        with (run_dir / "validation_history.jsonl").open("a") as history:
-            history.write(json.dumps(log_payload, sort_keys=True) + "\n")
-        wandb.log(log_payload)
-        if cfg.artifacts.upload_checkpoints:
-            store.upload_file(
-                run_dir / "validation_history.jsonl",
-                "checkpoints/validation_history.jsonl",
+        verdict: MultiValidationVerdict | None = None
+        history_extra: dict[str, Any] = {}
+        if controller is not None:
+            assert samples is not None
+            verdict = controller.step(val_metrics)
+            stop_reason = verdict.stop_reason
+            log_payload.update(
+                {f"val/{name}_median": value for name, value in verdict.smoothed.items()}
             )
+            for name, stats in samples.clip_stats.items():
+                log_payload[f"val/{name}_clip_mean"] = stats.mean
+                log_payload[f"val/{name}_clip_std"] = stats.std
+                log_payload[f"val/{name}_clips"] = stats.count
+            log_payload["validation/stale_rounds"] = controller.stale_rounds
+            log_payload["validation/rounds_completed"] = controller.rounds_completed
+            history_extra = {
+                "validation/improved_median": list(verdict.improved_median),
+                "validation/improved_raw": list(verdict.improved_raw),
+                "validation/stop_reason": verdict.stop_reason,
+            }
+        with history_path.open("a") as history:
+            history.write(json.dumps({**log_payload, **history_extra}, sort_keys=True) + "\n")
+        wandb.log(log_payload)
+        if upload:
+            store.upload_file(history_path, "checkpoints/validation_history.jsonl")
 
         last_ckpt_path = run_dir / "last.ckpt"
         _save_checkpoint(model, last_ckpt_path)
         _upload_checkpoint_and_record(
             store=store,
-            upload_enabled=cfg.artifacts.upload_checkpoints,
+            upload_enabled=upload,
             path=last_ckpt_path,
             run=run,
             summary_key="r2/last_checkpoint",
         )
 
-        if multi_validation is not None:
-            for score_name in stable_improvements:
-                slug = _checkpoint_slug(score_name)
-                best_path = run_dir / f"best_{slug}.ckpt"
-                _replace_link_or_copy(last_ckpt_path, best_path)
-                uri = (
-                    store.alias_checkpoint(last_ckpt_path.name, best_path.name)
-                    if cfg.artifacts.upload_checkpoints
-                    else None
-                )
-                if uri is not None and run is not None:
-                    run.summary[f"r2/best_{slug}"] = uri
-                checkpoint_index[score_name] = {
-                    "checkpoint": best_path.name,
-                    "validation_round": epoch,
-                    "optimizer_step": optimizer_steps,
-                    "raw": val_metrics[score_name],
-                    "smoothed": multi_verdict.smoothed[score_name],
-                    "scores": val_metrics,
-                }
-                if score_name == monitor:
-                    legacy_best_path = run_dir / "best.ckpt"
-                    _replace_link_or_copy(last_ckpt_path, legacy_best_path)
-                    uri = (
-                        store.alias_checkpoint(last_ckpt_path.name, legacy_best_path.name)
-                        if cfg.artifacts.upload_checkpoints
-                        else None
-                    )
-                    if uri is not None and run is not None:
-                        run.summary["r2/best_checkpoint"] = uri
-            if stable_improvements:
+        if verdict is not None and samples is not None:
+            samples_path = run_dir / "val_samples" / f"round_{epoch:04d}.npz"
+            _save_validation_samples(samples_path, samples)
+            improved = _link_best_checkpoints(
+                verdict=verdict,
+                scores=val_metrics,
+                run_dir=run_dir,
+                last_ckpt_path=last_ckpt_path,
+                checkpoint_index=checkpoint_index,
+                epoch=epoch,
+                optimizer_steps=optimizer_steps,
+                store=store,
+                upload=upload,
+                run=run,
+            )
+            if improved:
                 checkpoint_index_path.write_text(
                     json.dumps(checkpoint_index, indent=2, sort_keys=True) + "\n"
                 )
-                if cfg.artifacts.upload_checkpoints:
-                    store.upload_file(
-                        checkpoint_index_path,
-                        "checkpoints/best_checkpoints.json",
-                    )
-        else:
-            improved = best_metric is None or better(metric_value, best_metric)
-            if improved:
-                best_metric = metric_value
-                no_improve = 0
-                best_ckpt_path = run_dir / "best.ckpt"
-                _replace_link_or_copy(last_ckpt_path, best_ckpt_path)
-                uri = (
-                    store.alias_checkpoint(last_ckpt_path.name, best_ckpt_path.name)
-                    if cfg.artifacts.upload_checkpoints
-                    else None
-                )
-                if uri is not None and run is not None:
-                    run.summary["r2/best_checkpoint"] = uri
-            else:
-                no_improve += 1
+                if upload:
+                    store.upload_file(checkpoint_index_path, "checkpoints/best_checkpoints.json")
+                    store.upload_file(samples_path, f"val_samples/{samples_path.name}")
 
         if cfg.checkpoint_every and (epoch + 1) % cfg.checkpoint_every == 0:
-            periodic_ckpt_path = run_dir / f"ep{epoch}_{monitor}_{metric_value:.4f}.ckpt"
+            periodic_ckpt_path = run_dir / f"step{optimizer_steps}.ckpt"
             _replace_link_or_copy(last_ckpt_path, periodic_ckpt_path)
             uri = (
                 store.alias_checkpoint(last_ckpt_path.name, periodic_ckpt_path.name)
-                if cfg.artifacts.upload_checkpoints
+                if upload
                 else None
             )
             if uri is not None and run is not None:
-                run.summary[f"r2/checkpoint_ep{epoch}"] = uri
+                run.summary[f"r2/checkpoint_step{optimizer_steps}"] = uri
 
         train_state_path = run_dir / TRAIN_STATE_NAME
         _save_train_state(
@@ -1035,25 +1012,20 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             scheduler=scheduler,
             scaler=scaler,
             epoch=epoch,
-            best_metric=best_metric,
-            no_improve=no_improve,
-            stopping=stopping,
-            multi_validation=multi_validation,
             optimizer_steps=optimizer_steps,
+            controller=controller,
         )
         _upload_checkpoint_and_record(
             store=store,
-            upload_enabled=cfg.artifacts.upload_checkpoints,
+            upload_enabled=upload,
             path=train_state_path,
             run=run,
             summary_key="r2/train_state",
         )
 
-        if multi_validation is None and stopping is None and no_improve >= cfg.patience:
-            stop_reason = "early stopping"
-        elif stopping is not None and stop_reason is None and stopping.deadline_reached():
-            stop_reason = "deadline"
-        elif max_optimizer_steps is not None and optimizer_steps >= max_optimizer_steps:
+        if stop_reason is None and (
+            max_optimizer_steps is not None and optimizer_steps >= max_optimizer_steps
+        ):
             stop_reason = "censored at optimizer-step budget"
         if stop_reason:
             break
@@ -1069,9 +1041,4 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
     if run is not None and stop_reason is not None:
         run.summary["stop_reason"] = stop_reason
     wandb.finish()
-    best = best_metric if best_metric is not None else math.nan
-    return {
-        f"best_{monitor}": best,
-        "final_epoch": float(epoch),
-        "optimizer_steps": float(optimizer_steps),
-    }
+    return summary(epoch)

@@ -1,17 +1,14 @@
 """Pre-run spec validation (docs/refactor-unified-framework.md § "Pre-run
 validation").
 
-Four checks, run once before any GPU time is spent (and standalone via
+Three checks, run once before any GPU time is spent (and standalone via
 ``python train.py ... validate_only=true``):
 
 1. the train dataset's per-sample spec covers the model's (batch-stripped)
-   input spec;
+   input spec (and, under ``validation.enabled``, the panel plan builds);
 2. the model's batched output spec, unioned with the dataset's batched spec,
    covers every loss/metric's ``requires_pred`` *and* ``requires_target``;
-3. the optimizer's scheduler ``monitor`` metric exists (a metric-suite name, or
-   the literals ``"loss"`` = train loss / ``"val_loss"`` = the objective on
-   held-out data);
-4. a one-batch CPU forward pass actually runs, and its output spec covers
+3. a one-batch CPU forward pass actually runs, and its output spec covers
    the task's declared output spec.
 
 :func:`validate_config` never raises — a failure to even build a component
@@ -63,7 +60,7 @@ def _draw_samples(dataset: Any, n: int) -> list[Any]:
 
 
 def validate_config(cfg: Any) -> list[str]:  # noqa: C901 - linear checklist, not complex branching
-    """Run all four pre-run checks against a composed root config.
+    """Run all three pre-run checks against a composed root config.
 
     Returns a list of human-readable problem strings; ``[]`` means the
     pipeline is valid and safe to train/eval.
@@ -142,20 +139,7 @@ def validate_config(cfg: Any) -> list[str]:  # noqa: C901 - linear checklist, no
                     for p in check_subsumes(provided, metric.requires_target)
                 ]
 
-    # ── 3. scheduler monitor metric exists ─────────────────────────────────
-    if not multi_validation:
-        try:
-            monitor = cfg.optim.monitor
-            metric_names = set(metric_suite.metrics) if metric_suite is not None else set()
-            if monitor not in ("loss", "val_loss") and monitor not in metric_names:
-                problems.append(
-                    f"optim.monitor {monitor!r} is neither 'loss'/'val_loss' nor a "
-                    f"metrics.terms name {sorted(metric_names)}"
-                )
-        except Exception as exc:
-            problems.append(f"failed to read optim.monitor: {exc!r}")
-
-    # ── 4. one-batch CPU smoke test ─────────────────────────────────────────
+    # ── 3. one-batch CPU smoke test ─────────────────────────────────────────
     if batch is not None:
         try:
             model = instantiate_model(cfg.model)

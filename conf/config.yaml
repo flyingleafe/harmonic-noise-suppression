@@ -1,17 +1,18 @@
 # Root Hydra config — see docs/refactor-unified-framework.md § "Hydra config
-# architecture". `base_config` (training.config.RootConfig, registered in the
+# architecture". `schema: root` (training.config.RootConfig, registered in the
 # ConfigStore by training.config.register_configs) supplies every field's
-# default/type; the four `???` groups below are mandatory — an experiment
-# file (conf/experiment/*.yaml) or a `data=... model=... loss=... metrics=...`
-# CLI override must set them.
+# default/type; zoo.load drops it with `~schema` to compose legacy experiments.
+# The four `???` groups below are mandatory — an experiment file
+# (conf/experiment/*.yaml) or a `data=... model=... loss=... metrics=...` CLI
+# override must set them.
 defaults:
-  - base_config
+  - schema: root
   - data: ???
   - model: ???
   - validation: disabled
   - loss: ???
   - metrics: ???
-  - optim: adamw_plateau
+  - optim: adamw_cosine
   - logging: wandb
   - artifacts: r2
   - lora: disabled
@@ -31,10 +32,11 @@ resume: false
 # Point RESULTS_ROOT at a path outside the worktree (e.g. the cluster scratch)
 # and a chain resumes correctly no matter how the code moves underneath it.
 results_root: ${oc.env:RESULTS_ROOT,results}
-epochs: 100
+# Round cap: validation rounds when `validation.enabled` (rp protocol: 200 =
+# max_optimizer_steps / every_optimizer_steps), epochs otherwise.
+epochs: 200
 batch_size: 16
 num_workers: 4
-patience: 10
 grad_clip: 5.0
 grad_accum_steps: 1
 amp: true

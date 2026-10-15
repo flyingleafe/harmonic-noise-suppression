@@ -42,6 +42,16 @@ def test_output_grid_is_level0_grid(model: HPPNetPyramid) -> None:
     assert model.frontend.n_bins[0] == model.frontend.n_bins[1] == model.frontend.n_bins[2]
 
 
+def test_the_default_pyramid_emits_the_protocol_grid() -> None:
+    """Level 0's native step IS the 164-bin protocol grid every per-rotor loss builds."""
+    from models.salience_crf import RP_LINEAR_GRID
+
+    m = HPPNetPyramid()
+    assert m.frontend.df[0] == 0.9765625
+    assert np.array_equal(m.output_freqs(), RP_LINEAR_GRID)
+    assert len(RP_LINEAR_GRID) == 164
+
+
 def test_forward_shape_and_frame_grid(model: HPPNetPyramid) -> None:
     n = 16000  # 1 s
     y = model(torch.randn(2, n))

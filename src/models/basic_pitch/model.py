@@ -112,9 +112,7 @@ class BasicPitch(nn.Module):
             harmonics: list[float] = [0.5] + list(range(1, n_harmonics))
         else:
             harmonics = [1]
-        self.harmonic_stacking = HarmonicStacking(
-            bins_per_semitone, harmonics, self.contour_bins
-        )
+        self.harmonic_stacking = HarmonicStacking(bins_per_semitone, harmonics, self.contour_bins)
         n_h = len(harmonics)
 
         # --- contour branch --------------------------------------------------
@@ -140,10 +138,10 @@ class BasicPitch(nn.Module):
     def forward(self, audio: torch.Tensor) -> dict[str, torch.Tensor]:
         # The note and onset branches read ONE contour map, thus the full
         # transcription forward is defined for n_maps == 1 only. A multi-map
-        # head is a salience model and calls `contour_logits` instead.
+        # head is a salience model and reads `contour_features` instead.
         if not self.no_contours and self.n_maps != 1:
             raise ValueError(
-                "the note/onset branches take one contour map; n_maps > 1 needs contour_logits()"
+                "the note/onset branches take one contour map; n_maps > 1 needs contour_features()"
             )
         # audio: (B, n_samples) at 22050 Hz
         x = self.cqt(audio)  # (B, 1, time, n_bins)
@@ -176,23 +174,20 @@ class BasicPitch(nn.Module):
             out["contour"] = contour
         return out
 
-    def contour_logits(self, audio: torch.Tensor) -> torch.Tensor:
-        """Pre-sigmoid contour posteriorgram, ``(B, time, n_maps * 264)``.
+    def contour_features(self, audio: torch.Tensor) -> torch.Tensor:
+        """The contour branch's last features, ``(B, CONTOUR_FILTERS_2, time, 264)``.
 
-        Runs only the CQT → harmonic-stacking → contour branch (skipping the
-        note/onset heads and the final sigmoid), for use as raw salience logits
-        with ``BCEWithLogitsLoss``. Requires ``no_contours=False``. With
-        ``n_maps > 1`` the maps are stacked along the frequency axis, map-major
-        (see :func:`flatten_freq_ch`).
+        CQT → harmonic stacking → ``contour_conv1`` → BN → ReLU: everything
+        before ``contour_out``. A salience model applies ``contour_out`` itself
+        (pre-sigmoid logits, ``(B, n_maps, time, 264)``) and also reads these
+        features for its per-map off logit (`models.salience_rps`).
         """
         if self.no_contours:
-            raise ValueError("contour_logits requires no_contours=False")
+            raise ValueError("contour_features requires no_contours=False")
         x = self.cqt(audio)  # (B, 1, time, n_bins)
         x = self.cqt_bn(x)
         x = self.harmonic_stacking(x)  # (B, n_h, time, 264)
-        xc = F.relu(self.contour_bn(self.contour_conv1(x)))
-        logits = self.contour_out(xc)  # (B, n_maps, time, 264) — no sigmoid
-        return flatten_freq_ch(logits)  # (B, time, n_maps * 264)
+        return F.relu(self.contour_bn(self.contour_conv1(x)))
 
     # ------------------------------------------------------------------ weights
     @torch.no_grad()
@@ -226,10 +221,12 @@ class BasicPitch(nn.Module):
             v = conv_by_shape[tf_shape]
             k = np.transpose(v["kernel"], (3, 2, 0, 1))  # (kh,kw,in,out)->(out,in,kh,kw)
             layer.weight.copy_(torch.from_numpy(np.ascontiguousarray(k)))
+            assert layer.bias is not None
             layer.bias.copy_(torch.from_numpy(np.ascontiguousarray(v["bias"])))
 
         def set_bn(layer: nn.BatchNorm2d, ch: int):
             v = bn_by_ch[ch]
+            assert layer.running_mean is not None and layer.running_var is not None
             layer.weight.copy_(torch.from_numpy(v["gamma"].copy()))
             layer.bias.copy_(torch.from_numpy(v["beta"].copy()))
             layer.running_mean.copy_(torch.from_numpy(v["moving_mean"].copy()))

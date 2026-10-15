@@ -10,7 +10,7 @@ Directories mirror `src/` package by package.
 
 | Path | Covers |
 |---|---|
-| `data_processing/` | Raw-source registry + DREGON/Michael's loaders, `derivations` specs and fingerprints, the dload↔tdseries `streams` bridge, Frame datasets, the online-mix compiler (offline `test_online_mixing.py`, published-frames `test_online_mixing_frames.py`, SE/`audio_pool` `test_se_online_mixing.py`), the generated-noise spawn producer, static-comb model, RPS synthesis, RPS corruption, time-warp, harmonicity |
+| `data_processing/` | Raw-source registry + DREGON/Michael's loaders, `derivations` specs and fingerprints, the dload↔tdseries `streams` bridge, Frame datasets, the online-mix compiler (offline `test_online_mixing.py`, published-frames `test_online_mixing_frames.py`, SE/`audio_pool` `test_se_online_mixing.py`), the generated-noise spawn producer, static-comb model, RPS synthesis, RPS corruption, rate warp (`test_rate_warp.py`), noise augmentations, harmonicity |
 | `tracking/` | The VK/refinement stack, one file per module: `test_vk_tracking.py`, `test_vk_kscaled.py` (k-scaled bandwidth + WP18 weight), `test_vk_blind_seeding.py`, `test_rps_refinement.py`, `test_phase_increment_tracker.py`, `test_phase_noise.py` (WP18 rank-one covariance estimator), `test_warp_refinement.py`, `test_joint_beam_tracker.py`, `test_rotor_dp.py`, `test_stages.py` (the Frame stage contract), `test_pipelines.py` (frozen vit2dsp ladder + config registry), `test_protocols.py` (window specs as data), `test_decompose.py` (the windowed VK decomposition core + `decompose_stage`) |
 | `losses/` | spectral, SI-SDR, masked, PIT, regularizers, salience, spectral/spatial likelihood, composite |
 | `metrics/` | separation, RPS (PIT-aware), salience, perf + `MetricSuite` |
@@ -30,7 +30,6 @@ Root-level modules (no natural package home):
 | `test_basic_pitch.py` | PyTorch Basic Pitch port vs the frozen `basic_pitch_ref.npz` fixture |
 | `test_fkla_model.py` | Vendored flat-KLA op/layer + the FKLA RPS model against a NumPy fp64 port |
 | `test_wind_wake_gen.py` | Wind-wake noise channel physics |
-| `test_noise_augmentations.py` | G6 strong noise-chunk augmentations |
 | `test_plot_timeframe.py` | Generic `plot_timeframe` machinery |
 | `test_dataloader_benchmark.py` | Dataloader throughput smoke |
 | `test_geom_calibration.py` | The **frozen** `notebooks/geom_calibration.py` study — the one deliberate `notebooks/` import; see the file's header for why it is not moved into `src` |

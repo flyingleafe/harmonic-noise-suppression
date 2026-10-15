@@ -146,15 +146,6 @@ def test_augmentation_pair_applies_identical_transform():
     np.testing.assert_allclose(target / mixture, tgt2 / mix2, atol=1e-5)
 
 
-def test_augmentation_pair_polarity_flips_both():
-    mixture = np.array([[1.0, -2.0, 3.0]], np.float32)
-    target = np.array([[0.5, -1.0, 1.5]], np.float32)
-    spec = {"probability": 1.0, "choices": ["random_polarity"]}
-    mix2, tgt2 = _apply_one_augmentation((mixture, target), spec, np.random.default_rng(0))
-    np.testing.assert_allclose(mix2, -mixture)
-    np.testing.assert_allclose(tgt2, -target)
-
-
 def test_augmentation_preserves_se_pair_snr(speech_dataset):  # noqa: F811
     cfg = _se_cfg(
         [{"kind": "audio_pool", "dataset": SPEECH_DATASET}],
@@ -162,7 +153,7 @@ def test_augmentation_preserves_se_pair_snr(speech_dataset):  # noqa: F811
             "snr_db": -8.0,
             "augmentations": {
                 "probability": 1.0,
-                "choices": [{"random_gain": {"min_db": -6, "max_db": 6}}, "random_polarity"],
+                "choices": [{"random_gain": {"min_db": -6, "max_db": 6}}],
             },
         },
     )

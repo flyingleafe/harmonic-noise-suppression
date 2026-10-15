@@ -48,13 +48,20 @@ bidirectional ConvLSTM over time whose gate convolutions run along the rate
 axis with a half-width of ``ceil(max_slew / Δr)`` bins, ``max_slew`` being the
 largest sustained speed change per frame in the raw telemetry (≈ 15 rev/s per
 32 ms frame on DREGON `updown`, ≤ 8 elsewhere; design note § 7), so the state
-can follow a rotor through any physical ramp. The other alternatives are § 7 of
-the design note.
+can follow a rotor through any physical ramp. Its recurrence is rank-factorised
+(``separable``, a per-channel tap kernel + 1x1 mix) by default — the protocol's
+HRSPNet; ``separable=False`` is the dense control. The other alternatives are
+§ 7 of the design note.
 
-GRID. The output axis inherits level 0's step (``Δr = sr / n_fft[0]``, 0.977
-rev/s) over ``out_bins`` bins from 0. Loss and metrics must build the same grid
-(``conf/loss/salience_layers_pyr.yaml``): ``out_fmin 0``, ``out_fmax =
-(out_bins - 1) * Δr``, ``out_bins``.
+GRID. The output axis inherits level 0's step (``Δr = sr / n_fft[0]`` = 0.9765625
+rev/s) over ``out_bins`` bins from 0: ``r_g = g * Δr``. The default 164 bins IS
+`models.salience_crf.RP_LINEAR_GRID` (0-159.2 rev/s, bin 0 = the off state),
+which loss and metrics build from ``grid: {kind: linear, fmin: 0, fmax:
+159.1796875, bins: 164}`` (``conf/loss/salience_layers_rp.yaml``).
+
+TAP CEILING. ``f_max=None`` (default) masks nothing below the levels' own
+ceilings: masking input frequencies is not architecture
+(``docs/experiments/paper-real-protocol.md``, decision (a)).
 """
 
 from __future__ import annotations
@@ -242,10 +249,12 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         sr, hop_length: audio rate and the frame hop (the salience time grid).
         n_ffts: pyramid windows, fine to coarse; level 0 sets the output step.
         level0_fmax: ceiling of level 0 in Hz; level ``l`` covers ``2**l`` times it.
-        out_bins: output rate bins, ``r_g = g * sr / n_ffts[0]``.
+        out_bins: output rate bins, ``r_g = g * sr / n_ffts[0]``; 164 =
+            `models.salience_crf.RP_LINEAR_GRID` at the default pyramid.
         k_max: harmonics ``1..k_max``; ``k_sub``: sub-harmonics ``1/2..1/k_sub``.
-        f_min, f_max: reads below/at-or-above these are masked (DC lobe; band top).
-            ``f_min`` defaults to one level-0 bin.
+        f_min, f_max: reads below/at-or-above these are masked (DC lobe; band
+            top). ``f_min`` defaults to one level-0 bin; ``f_max=None`` masks
+            nothing beyond the levels' own ceilings.
         c_har, embedding: HPPNet's trunk widths.
         octave_taps: multipliers of ``block_4``; ``quarter_taps``: of ``block_5``.
         n_maps: per-rotor salience layers (``LayerCRFReadout``).
@@ -253,6 +262,7 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
             of width ``lstm_size`` split over two directions, then 1x1).
         max_slew: rev/s per frame the ConvLSTM state must be able to follow; the
             gate kernel half-width is ``ceil(max_slew / Δr)`` bins.
+        separable: rank-factorised ConvLSTM recurrence (`RateConvLSTM`).
     """
 
     def __init__(
@@ -262,11 +272,11 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         num_rotors: int = 4,
         n_ffts: tuple[int, ...] = (16384, 8192, 4096, 2048),
         level0_fmax: float = 1200.0,
-        out_bins: int = 307,
+        out_bins: int = 164,
         k_max: int = 32,
         k_sub: int = 8,
         f_min: float | None = None,
-        f_max: float = 7500.0,
+        f_max: float | None = None,
         c_har: int = 16,
         embedding: int = 128,
         octave_taps: tuple[float, ...] = (0.5, 1.0, 2.0),
@@ -275,6 +285,7 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         head: str = "conv1x1",
         lstm_size: int = 128,
         max_slew: float = 15.0,
+        separable: bool = True,
     ):
         super().__init__(int(n_ffts[0]), hop_length, num_rotors)
         self.sr, self.n_maps = int(sr), int(n_maps)
@@ -309,7 +320,7 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
             [self.frontend.ceiling(lvl) for lvl in range(self.n_levels)],
             offsets,
             fmin,
-            float(f_max),
+            float("inf") if f_max is None else float(f_max),
         )
         self.register_buffer("harm_lo", lo, persistent=False)
         self.register_buffer("harm_frac", frac, persistent=False)
@@ -344,7 +355,9 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
             head_in = embedding
         elif head == "convlstm":
             half = math.ceil(float(max_slew) / dr)
-            self.temporal = RateConvLSTM(embedding, int(lstm_size) // 2, 2 * half + 1)
+            self.temporal = RateConvLSTM(
+                embedding, int(lstm_size) // 2, 2 * half + 1, separable=separable
+            )
             head_in = 2 * (int(lstm_size) // 2)
         else:
             raise ValueError(f"head must be 'conv1x1' or 'convlstm', got {head!r}")

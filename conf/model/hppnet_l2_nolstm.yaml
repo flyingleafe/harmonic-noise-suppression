@@ -1,8 +1,10 @@
 # L2 without its FreqGroupLSTM: conf/model/hppnet_l2.yaml with `head: conv1x1`,
 # i.e. the published CQT front end, HarmonicDilatedConv, CNNTrunk (block_6-8
-# are the only temporal model) and a 1x1 to the four maps, then the
-# FreqSuperResHead onto the 0-150 rev/s / 300-bin linear grid. The CQT-side
+# are the only temporal model) and a 1x1 to the four maps, the off logit and
+# the TranslationHead onto the 164-bin 0-159.2 rev/s grid. The CQT-side
 # counterpart of hppnet_pyramid (variant C): what the per-bin LSTM was worth.
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_rp.yaml.
 task: salience_rps
 task_params:
   n_channels: null
@@ -25,12 +27,7 @@ params:
   freq_pool: 1
   time_pooling: false
   n_maps: 4
-  superres_out: true
-  out_fmin: 0.0
-  out_fmax: 150.0
-  out_bins: 300
-  head_hidden: 32
-  head_kernel: 5
+  translation_head: true
   head: conv1x1
 model_type: null
 legacy_config_path: null

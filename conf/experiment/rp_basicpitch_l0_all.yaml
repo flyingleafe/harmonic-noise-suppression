@@ -1,0 +1,20 @@
+# @package _global_
+# Claim 1: unadapted Basic Pitch (L0) on the rp_all stream. Batch doc: docs/experiments/paper-real-protocol.md.
+defaults:
+  - override /data: rp_real
+  - override /model: basicpitch_l0
+  - override /loss: salience_bce_basic_pitch
+  - override /metrics: salience_bce_basic_pitch
+  - override /validation: rp_real
+  - _self_
+
+experiment_name: rp_basicpitch_l0_all
+batch_size: 128
+grad_accum_steps: 1
+num_workers: 6
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_all.yaml
+optim:
+  lr: 1.0e-3  # placeholder: set from results/rp_lr_range/basicpitch.json (LR range test)

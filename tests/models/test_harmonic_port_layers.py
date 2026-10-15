@@ -23,6 +23,8 @@ PORTS = [HarmoF0RPS, HPPNetRPS, HFTRPS]
 # A small grid keeps the CRF's O(span * G * T) decode cheap in the test suite;
 # the port's own 0-150/300 grid is exercised by the shape test.
 SMALL = dict(r_lo=0.0, r_hi=50.0, n_grid=100)
+# One bin of that grid, in rev/s: the width the layer target is built with.
+SIGMA = 50.0 / 99.0
 
 
 def _tracks(seed=0, n=2, r=4, t=24, step=0.4):
@@ -62,7 +64,7 @@ def test_the_round_trip_is_exact(cls):
     """
     m = cls(n_maps=4, **SMALL).double().eval()
     rps = _tracks()
-    tgt = gaussian_layer_target(rps, m.out_freqs, sigma_bins=1.0)
+    tgt = gaussian_layer_target(rps, m.out_freqs, sigma_rev_s=SIGMA)
     ideal = torch.logit(tgt.clamp(1e-15, 1 - 1e-15))
     rec = m.decode_salience(ideal.reshape(ideal.shape[0], -1, ideal.shape[-1]))
     assert float((rec - rps).abs().max()) < 1e-6
@@ -73,7 +75,7 @@ def test_a_stopped_rotor_decodes_to_zero_with_no_threshold(cls):
     m = cls(n_maps=4, **SMALL).double().eval()
     rps = torch.zeros(1, 4, 16, dtype=torch.float64)
     rps[0, 2] = 31.0
-    tgt = gaussian_layer_target(rps, m.out_freqs, sigma_bins=1.0)
+    tgt = gaussian_layer_target(rps, m.out_freqs, sigma_rev_s=SIGMA)
     ideal = torch.logit(tgt.clamp(1e-15, 1 - 1e-15))
     rec = m.decode_salience(ideal.reshape(1, -1, 16))
     assert float(rec[0, 0].abs().max()) < 1e-6
@@ -84,7 +86,7 @@ def test_the_readout_and_the_loss_agree_on_which_target_is_optimal():
     """BCE is minimized at the target, and the peak readout inverts it exactly."""
     grid = np.linspace(0.0, 50.0, 100)
     rps = _tracks()
-    tgt = gaussian_layer_target(rps, grid, sigma_bins=1.0)
+    tgt = gaussian_layer_target(rps, grid, sigma_rev_s=SIGMA)
     ideal = torch.logit(tgt.clamp(1e-15, 1 - 1e-15))
     assert float((peak_readout(F.logsigmoid(ideal), grid) - rps).abs().max()) < 1e-9
     at_opt = float(layer_pit_bce(ideal, tgt))
@@ -105,7 +107,9 @@ def test_the_loss_does_not_care_which_layer_holds_which_rotor():
 @pytest.mark.parametrize("cls", PORTS)
 def test_every_parameter_gets_a_gradient(cls):
     m = cls(n_maps=4, **SMALL).train()
-    loss_fn = LayerPITSalienceBCELoss(out_fmin=0.0, out_fmax=50.0, out_bins=100)
+    loss_fn = LayerPITSalienceBCELoss(
+        grid={"kind": "linear", "fmin": 0.0, "fmax": 50.0, "bins": 100}, sigma_rev_s=SIGMA
+    )
     logits = m(torch.randn(2, 16000))
     layers, tgt = loss_fn.layers_and_target(logits, _tracks(t=32).float())
     layer_pit_bce(layers, tgt).backward()

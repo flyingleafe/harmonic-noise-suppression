@@ -13,11 +13,11 @@ Historical experiments are catalogued in `REPLICATION.md` (repo root).
 | `data/` | Dataset source (folder datasets via `frame_datasets`, dload streaming via `data_processing.streams`, online-mix wrappers referencing `conf/online_mix/*.yaml` policies) |
 | `model/` | Task name + task params + model instantiation via `_target_` into `models.registry` — either `build_model` (native RPS registry, flat `params`), or `build_legacy_inline` (`params.model_type` + the ZFTurbo config tree inlined under `params.config`, routed through `models.registry.LEGACY_MODEL_BUILDERS`; this replaced the former `legacy_config_path`→`configs/*.yaml` indirection) |
 | `loss/` | Loss composition (entries instantiate `src/losses` Frame adapters; multiple terms via `losses.composite`) |
-| `metrics/` | MetricSuite membership (must include the monitor metric) |
-| `optim/` | Optimizer + scheduler + monitor |
+| `metrics/` | MetricSuite membership (per-sample metrics of the non-panel validation path; logged, never selects) |
+| `optim/` | Optimizer + step-based LR schedule: `adamw_cosine` (max `lr`, linear warm-up, cosine to `min_lr_frac·lr` at `total_steps = validation.max_optimizer_steps`); no monitor, no plateau |
 | `logging/` | wandb (entity/project; run name = `experiment_name`) |
 | `artifacts/`, `lora/` | R2 artifact uploads; LoRA seam |
-| `validation/` | Optional validation protocol. `rps_unified` freezes the complete real/static/stochastic panel, optimizer-step cadence, nested views, aggregates, log-scale progress and saturation policy; `disabled` preserves other tasks. |
+| `validation/` | Optional full-panel RPS protocol. `rp_real` = the paper real-data panel (`rp-real-valid-v1`, 15 meta-predicate views/aggregates, control `real`, 500-step rounds, 100k-step cap, median/raw bests, saturation stop); `disabled` = the per-epoch MetricSuite path for other tasks. |
 
 ## Conventions (enforced by train.py)
 
@@ -52,11 +52,13 @@ Historical experiments are catalogued in `REPLICATION.md` (repo root).
   So any folder-based data config runs checkout-free with a one-line CLI
   override, e.g. `data.train.params.data_dir=dload:DREGON-LM-V4-train`.
 
-Unified RPS reruns inherit their historical architecture/training policy and
-override `/validation: rps_unified`. The sixteen
-`real_r{1,2,3,4}_{sc,scv2,tm,gru}_unified` configs use fresh names so
-historical W&B/R2 artifacts are never overwritten. All use 2-second training
-clips at batch 128; one validation round is 500 successful optimizer updates.
+Legacy experiments (anything setting `optim.monitor`/`monitor_mode`/`patience`/
+`factor`/`cooldown`, top-level `patience`, `early_stopping`, or the retired
+`validation: rps_unified`) are frozen records of the plateau-LR protocol:
+`train.py`/`eval.py` refuse them with a pointer to
+`docs/experiments/paper-real-protocol.md`; `zoo.load` still builds their models
+(schema-free compose, `~schema`). New real-data runs are `rp_*` experiments
+selecting `validation: rp_real`; the root `epochs: 200` is their round cap.
 
 ## Adding an experiment
 

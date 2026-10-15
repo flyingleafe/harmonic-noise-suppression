@@ -1,9 +1,16 @@
-# L1: original hppnet front end/harmonic blocks/FreqGroupLSTM, ONE shared map,
-# FreqSuperResHead onto the LateDeep L1 output grid (linear 20–130 rev/s, 720
-# bins = 0.153 rev/s per bin). The finer output grid only: threshold + Hungarian
-# decode as at L0, no per-rotor layers, no CRF (those are L2, hppnet_l2.yaml).
-# Below the native fmin=27.5 Hz the interpolation clamps; it adds no new
-# acoustic evidence. Ladder: docs/experiments/paper-regime-matrix.md § "Block S".
+# hppnet_l1 — level L1 of the adaptation ladder (docs/experiments/
+# paper-real-protocol.md): conf/model/hppnet_l0.yaml with FOUR per-rotor maps
+# on HPPNet's own log grid. The last layer (FreqGroupLSTM's Linear) emits 4
+# maps instead of 1, and a per-map OFF logit (models.salience_rps.OffLogitHead:
+# Linear(128 -> 4) on the trunk features pooled over frequency) is prepended as
+# bin 0 — the log grid has no zero rate and a stopped rotor needs a state.
+# Output (B, 4 * 353, T): per map [off, 27.5 * 2**(b/48) for b < 352]. Readout:
+# one CRF path per map (models.harmonic_ports.layer_readout), off state free to
+# enter and leave, sub-bin parabola in rev/s. Nothing else changes from L0.
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_log48.yaml (the same
+# log_off grid). L0 -> L1 isolates the per-rotor encoding; L1 -> L2
+# (hppnet_l2.yaml) the target grid.
 task: salience_rps
 task_params:
   n_channels: null
@@ -25,12 +32,7 @@ params:
   dilations: [48, 12]
   freq_pool: 1
   time_pooling: false
-  n_maps: 1
-  superres_out: true
-  out_fmin: 20.0
-  out_fmax: 130.0
-  out_bins: 720
-  head_hidden: 32
-  head_kernel: 5
+  n_maps: 4
+  translation_head: false
 model_type: null
 legacy_config_path: null

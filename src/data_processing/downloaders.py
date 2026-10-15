@@ -13,6 +13,8 @@ they are intentionally torch-free.
 
 from __future__ import annotations
 
+import hashlib
+import tarfile
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,8 @@ __all__ = [
     "hf_fetch",
     "gdrive_fetch",
     "extract_zip",
+    "librispeech_fetch",
+    "fetch_librispeech_dev_clean",
 ]
 
 _CHUNK = 1 << 20  # 1 MiB
@@ -174,3 +178,45 @@ def extract_zip(zip_path: Path, dest: Path) -> Path:
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(dest)
     return dest
+
+
+#: OpenSLR SLR12 (LibriSpeech) tarballs: subset -> published md5
+#: (https://www.openslr.org/resources/12/md5sum.txt).
+LIBRISPEECH_URL = "https://www.openslr.org/resources/12/{subset}.tar.gz"
+LIBRISPEECH_MD5 = {"dev-clean": "42e2234ba48799c1f50f24a7926300a1"}
+
+
+def _md5(path: Path) -> str:
+    digest = hashlib.md5()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def librispeech_fetch(subset: str, dest: Path) -> Path:
+    """Fetch one LibriSpeech subset from OpenSLR into ``dest`` (idempotent).
+
+    Streams ``<subset>.tar.gz``, checks it against the published md5, and
+    extracts it in place: ``dest/LibriSpeech/<subset>/<spk>/<chapter>/*.flac``
+    plus the corpus ``*.TXT`` files — the layout of the ``librispeech`` dload
+    raw tree. The tarball is deleted after extraction; a marker skips reruns.
+    """
+    dest = Path(dest)
+    marker = dest / f".{subset}.extracted"
+    if marker.exists():
+        return dest
+    tar_path = http_fetch(LIBRISPEECH_URL.format(subset=subset), dest / f"{subset}.tar.gz")
+    got = _md5(tar_path)
+    if got != LIBRISPEECH_MD5[subset]:
+        raise RuntimeError(f"{tar_path}: md5 {got} != published {LIBRISPEECH_MD5[subset]}")
+    with tarfile.open(tar_path, "r:gz") as tf:
+        tf.extractall(dest, filter="data")
+    tar_path.unlink()
+    marker.touch()
+    return dest
+
+
+def fetch_librispeech_dev_clean(dest: Path) -> Path:
+    """Registry fetcher of ``librispeech-dev-clean`` (the RP validation speech)."""
+    return librispeech_fetch("dev-clean", dest)

@@ -1,0 +1,15 @@
+# Per-rotor layer BCE on Basic Pitch's L1 grid (conf/model/basicpitch_l1.yaml):
+# the published contour grid 27.5 * 2**(b/36) for b < 264 plus the OFF state at
+# bin 0 -> 265 bins per map, hop 256 (FFT_HOP). Read
+# conf/loss/salience_layers_rp.yaml for the argument. focus `auto` =
+# 265 / 1.721 = 154.0.
+terms:
+  - name: bce
+    _target_: losses.LayerPITSalienceBCELoss
+    weight: 1.0
+    params:
+      grid: {kind: log_off, fmin: 27.5, bins_per_octave: 36, n_bins: 264}
+      n_layers: 4
+      sigma_rev_s: 1.0
+      focus: auto
+      rate: [16000, 256]

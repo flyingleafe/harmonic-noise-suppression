@@ -18,6 +18,7 @@ from torch.utils.data import Dataset, IterableDataset
 __all__ = [
     "TinyRPSFrameDataset",
     "TinyRPSIterableDataset",
+    "TinyPanelFrameDataset",
     "TinyRPSModel",
     "make_tiny_frame",
     "TinyNoiseGenFrameDataset",
@@ -93,6 +94,76 @@ class TinyRPSIterableDataset(IterableDataset):
         while True:
             for index in range(len(self._finite)):
                 yield self._finite[index]
+
+
+def _profile_level(profile: str, n_frames: int) -> np.ndarray:
+    """Rotor-mean speed track (rev/s) of one scripted panel clip."""
+    if profile == "zero":
+        return np.zeros(n_frames)
+    if profile == "standby":
+        return np.full(n_frames, 30.0)
+    if profile == "cruise":
+        return np.full(n_frames, 80.0)
+    if profile == "ramp":
+        return np.linspace(10.0, 110.0, n_frames)
+    if profile == "zero_then_cruise":
+        return np.where(np.arange(n_frames) < n_frames // 2, 0.0, 80.0)
+    raise ValueError(f"unknown profile {profile!r}")
+
+
+class TinyPanelFrameDataset(Dataset):
+    """A stand-in for the flattened rp validation panel: one mono item per
+    (clip, channel), clip-major, each carrying the panel meta (``dataset``,
+    ``source_type``, ``clip_index``, ``channel``, ``recording_id``,
+    ``snr_db``) and a scripted target. ``clips`` entries are
+    ``{dataset, source_type, profile}`` with ``profile`` in zero / standby /
+    cruise / ramp / zero_then_cruise; rotors sit 0/2/4/6 % above the level."""
+
+    def __init__(
+        self,
+        *,
+        clips: list[dict],
+        n_channels: int = 2,
+        duration_s: float = 2.0,
+        sample_rate: int = 16000,
+        hop_length: int = 512,
+        seed: int = 0,
+    ) -> None:
+        rng = np.random.default_rng(seed)
+        n_audio = int(round(duration_s * sample_rate))
+        n_frames = n_audio // hop_length + 1
+        scale = 1.0 + 0.02 * np.arange(4)[:, None]
+        self._frames: list[td.Frame] = []
+        for clip_index, clip in enumerate(clips):
+            rps = (scale * _profile_level(str(clip["profile"]), n_frames)).astype(np.float32)
+            for channel in range(n_channels):
+                audio = (rng.standard_normal(n_audio) * 0.1).astype(np.float32)
+                rps_idx = td.GridIndex.create((sample_rate, hop_length), n_frames, t_start=0)
+                meta = td.Frame(
+                    {
+                        "dataset": str(clip["dataset"]),
+                        "source_type": str(clip["source_type"]),
+                        "clip_index": clip_index,
+                        "channel": channel,
+                        "recording_id": f"{clip['dataset']}_rec",
+                        "snr_db": None,
+                    }
+                )
+                self._frames.append(
+                    td.Frame(
+                        {
+                            "mixture": td.uniform(audio, sample_rate, dims=("time",), t_start=0.0),
+                            "rps": td.Series(rps, ("rotor", "time"), {"time": rps_idx}),
+                            "meta": meta,
+                        }
+                    )
+                )
+
+    def __len__(self) -> int:
+        return len(self._frames)
+
+    def __getitem__(self, idx: int) -> td.Frame:
+        return self._frames[idx]
 
 
 class TinyRPSModel(nn.Module):

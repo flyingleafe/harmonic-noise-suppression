@@ -1,0 +1,18 @@
+# conf/loss/salience_layers_rp.yaml on the HOP-256 time grid. READ THAT FILE:
+# grid, sigma, pos_weight and focus are its values. The one line that differs
+# is `rate`: the two multi-pitch baselines emit salience on their own front
+# end's grid at hop 256 (LateDeep's HCQT, Basic Pitch's FFT_HOP), and a loss
+# must declare the rate the task emits (training.validate). The loss
+# interpolates the label onto the model's own time axis on every call.
+#
+# Used with conf/model/{basicpitch,latedeep}_l2.yaml.
+terms:
+  - name: bce
+    _target_: losses.LayerPITSalienceBCELoss
+    weight: 1.0
+    params:
+      grid: {kind: linear, fmin: 0.0, fmax: 159.1796875, bins: 164}
+      n_layers: 4
+      sigma_rev_s: 1.0
+      focus: auto
+      rate: [16000, 256]

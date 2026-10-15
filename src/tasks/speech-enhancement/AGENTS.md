@@ -105,8 +105,9 @@ params: {model_type: dcunet, config: {...}}
   at ultra-low SNR: it rewards attenuation toward silence
   (`docs/experiments/f1-se-blind-baselines.md`).
 - Metrics: `conf/metrics/separation_basic.yaml` / `separation_full.yaml`, or
-  `separation_plus_rps.yaml` for the `predict_rps` families. Monitor
-  `si_sdr` with `optim.monitor_mode: max`.
+  `separation_plus_rps.yaml` for the `predict_rps` families. There is no
+  monitored-metric scheduling any more (rp protocol: step-based cosine LR;
+  the RPS panel is the only stopping/selection mechanism).
 
 ## Code placement
 

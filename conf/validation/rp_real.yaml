@@ -1,0 +1,64 @@
+# Paper real-data protocol panel (docs/experiments/paper-real-protocol.md
+# § "Validation panel"): 52 clips x 8 channels of rp-real-valid-v1, flattened
+# to 416 mono items. Views are predicates over each item's meta (`where`)
+# and, for the regime cells, one frame regime of metrics.regimes (ramp |
+# zero | standby | cruise, from the TARGET). Score = frame-weighted mean of
+# the per-frame PIT error (one rotor assignment per clip); the history also
+# carries clip-level mean / std / count per view.
+enabled: true
+every_optimizer_steps: 500
+max_optimizer_steps: 100000  # 200 rounds; the root `epochs: 200` is the round cap
+batch_size: 128
+num_workers: null
+smoothing_window: 5
+min_relative_improvement: 0.01
+min_rounds: 40  # 20k steps
+final_patience: 30  # 15k steps on the control's median: earliest stop 35k
+control: real
+
+datasets:
+  real:
+    _target_: data_processing.frame_datasets.DregonLMFrameDataset
+    params:
+      data_dir: dload:rp-real-valid-v1
+      n_fft: 2048
+      hop_length: 512
+      sample_rate: 16000
+      flatten_channels: true
+    iterable: false
+
+views:
+  dregon: {where: {dataset: dregon}}
+  md2: {where: {dataset: md2}}
+  dregon_nosource: {where: {dataset: dregon, source_type: nosource}}
+  dregon_source: {where: {dataset: dregon, source_type: loudspeaker}}
+  md2_nosource: {where: {dataset: md2, source_type: nosource}}
+  md2_source: {where: {dataset: md2, source_type: mixed}}
+  dregon_zero: {where: {dataset: dregon}, regime: zero}
+  dregon_standby: {where: {dataset: dregon}, regime: standby}
+  dregon_ramp: {where: {dataset: dregon}, regime: ramp}
+  dregon_cruise: {where: {dataset: dregon}, regime: cruise}
+  md2_zero: {where: {dataset: md2}, regime: zero}
+  md2_standby: {where: {dataset: md2}, regime: standby}
+  md2_ramp: {where: {dataset: md2}, regime: ramp}
+  md2_cruise: {where: {dataset: md2}, regime: cruise}
+
+aggregates:
+  real: {dregon: 0.5, md2: 0.5}
+
+primary:
+  - dregon
+  - md2
+  - real
+  - dregon_nosource
+  - dregon_source
+  - md2_nosource
+  - md2_source
+  - dregon_zero
+  - dregon_standby
+  - dregon_ramp
+  - dregon_cruise
+  - md2_zero
+  - md2_standby
+  - md2_ramp
+  - md2_cruise

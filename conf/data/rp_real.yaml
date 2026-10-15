@@ -1,0 +1,25 @@
+# PAPER REAL-DATA PROTOCOL data group (docs/experiments/paper-real-protocol.md).
+# Train = one of the six online-mix streams conf/online_mix/rp_{all,dregon,md2}
+# [_labelaug].yaml, chosen by the experiment:
+#   data.train.params.path: conf/online_mix/rp_<stream>.yaml
+# (mandatory — `???` fails loudly when unset). Chunks are 2 s (the policies'
+# duration_s), flattened to mono frames per mic.
+# Valid = the rp-real-valid-v1 panel (52 clips x 8 mics, 8 s, flattened to 416
+# mono items; meta per clip: dataset/source_type/snr_db/clip_index/... + channel).
+train:
+  _target_: data_processing.frame_datasets.OnlineMixFrameDataset.from_yaml
+  params:
+    path: ???
+    flatten_channels: true
+  iterable: true
+valid:
+  _target_: data_processing.frame_datasets.DregonLMFrameDataset
+  params:
+    data_dir: "dload:rp-real-valid-v1"
+    n_fft: 2048
+    hop_length: 512
+    sample_rate: 16000
+    flatten_channels: true
+  iterable: false
+batch_size: null
+num_workers: null

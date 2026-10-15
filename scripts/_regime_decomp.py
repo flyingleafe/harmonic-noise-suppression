@@ -52,8 +52,7 @@ for _p in (REPO_ROOT / "src", REPO_ROOT / "scripts"):
 
 from valid_regime_eval import RIGS, VALID, clip_rigs  # noqa: E402
 
-#: Regime order used by every table, JSON key and figure in this decomposition.
-REGIMES = ("zero", "standby", "ramp", "cruise")
+from metrics.regimes import REGIMES, THRESHOLDS, frame_regimes  # noqa: E402
 
 #: The two finished scv2 transfer arms plus the real-data-trained reference the
 #: whole comparison is against — all three are part of the deliverable table.
@@ -81,60 +80,18 @@ HISTORY_BEST = {
 
 FPS = 16000 / 512  # the STFT frame rate the rps target lives on: 31.25 Hz
 
-#: Every number that defines the split, recorded verbatim in the JSON output.
-THRESHOLDS = {
-    "ramp_slew_rev_s2": 20.0,
-    "zero_max_rev_s": 1.0,
-    "standby_mean_rev_s": 45.0,
-    "derivative_halfwidth_s": 0.25,
-    "smoothing_width_s": 9 / FPS,
-    "frame_rate_hz": FPS,
-}
-
-_SMOOTH_W = 9  # 0.288 s boxcar, odd so it is centred
-_DERIV_HALF = int(round(0.25 * FPS))  # 8 frames -> a +-0.256 s central difference
-
-
-def _smooth(x: np.ndarray, width: int = _SMOOTH_W) -> np.ndarray:
-    """Centred boxcar moving average with edge padding, length preserved."""
-    if width < 3:
-        return x
-    pad = width // 2
-    return np.convolve(np.pad(x, pad, mode="edge"), np.ones(width) / width, mode="valid")
-
-
-def mean_speed_slew(target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """``(mean_speed, |d mean_speed/dt|)`` from the ``(R, F)`` target speeds.
-
-    Both are ``(F,)``. The derivative is a central difference over
-    ``+-_DERIV_HALF`` frames of the smoothed rotor mean, with the indices
-    clamped at the clip edges (so the first and last quarter-second see a
-    one-sided difference over a shorter base — still the right units, just
-    noisier; no clip in the split starts or ends mid-slew).
-    """
-    mean = target.mean(axis=0)
-    smoothed = _smooth(mean)
-    idx = np.arange(mean.size)
-    hi = np.minimum(idx + _DERIV_HALF, mean.size - 1)
-    lo = np.maximum(idx - _DERIV_HALF, 0)
-    span = (hi - lo) / FPS
-    slew = np.divide(smoothed[hi] - smoothed[lo], span, out=np.zeros_like(mean), where=span > 0)
-    return mean, np.abs(slew)
-
 
 def frame_regimes4(target: np.ndarray) -> np.ndarray:
     """``(F,)`` four-regime label per frame, from the ``(R, F)`` target speeds.
 
-    Slew first, then level — a spin-up through 45 rev/s is a ``ramp``, not half
-    a ``standby`` and half a ``cruise``.
+    The rule is :func:`metrics.regimes.frame_regimes` (slew first, then level —
+    a spin-up through 45 rev/s is a ``ramp``, not half a ``standby`` and half
+    a ``cruise``); this wrapper only maps its codes to names.
     """
-    mean, slew = mean_speed_slew(target)
-    ramp = slew >= THRESHOLDS["ramp_slew_rev_s2"]
-    labels = np.full(target.shape[1], "cruise", dtype=object)
-    labels[~ramp & (mean < THRESHOLDS["standby_mean_rev_s"])] = "standby"
-    labels[~ramp & (target.max(axis=0) < THRESHOLDS["zero_max_rev_s"])] = "zero"
-    labels[ramp] = "ramp"
-    return labels
+    import torch
+
+    codes = frame_regimes(torch.as_tensor(target, dtype=torch.float64)[None], FPS)[0]
+    return np.asarray(REGIMES, dtype=object)[codes.numpy().astype(np.int64)]
 
 
 def pit_abs_error_clip(pred: np.ndarray, target: np.ndarray) -> np.ndarray:
@@ -538,7 +495,7 @@ def main() -> int:
             "checkpoint_digest": checkpoint_digest(uri),
             "split": VALID,
             "split_version": split_version(),
-            "thresholds": THRESHOLDS,
+            "thresholds": {**THRESHOLDS, "frame_rate_hz": FPS},
             "git_head": git_head(),
             "scored_object": (
                 "Every per-regime and per-clip number in this row belongs to the "

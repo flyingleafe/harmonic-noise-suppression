@@ -1,9 +1,13 @@
-# L1: original harmof0 front end/MRDConv/blocks, ONE shared map, FreqSuperResHead
-# onto the LateDeep L1 output grid (linear 20–130 rev/s, 720 bins = 0.153 rev/s
-# per bin). The finer output grid only: threshold + Hungarian decode as at L0,
-# no per-rotor layers, no CRF (those are L2, harmof0_l2.yaml).
-# Below the native fmin=27.5 Hz the interpolation clamps; it adds no new
-# acoustic evidence. Ladder: docs/experiments/paper-regime-matrix.md § "Block S".
+# harmof0_l1 — level L1 of the adaptation ladder (docs/experiments/
+# paper-real-protocol.md): conf/model/harmof0_l0.yaml with FOUR per-rotor maps
+# on HarmoF0's own log grid. conv_6 emits 4 maps instead of 1, and a per-map
+# OFF logit (models.salience_rps.OffLogitHead: Linear(64 -> 4) on
+# relu(conv_5) pooled over frequency) is prepended as bin 0. Output
+# (B, 4 * 353, T): per map [off, 27.5 * 2**(b/48) for b < 352]. Readout: one
+# CRF path per map with a free off state. Nothing else changes from L0.
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_log48.yaml (shared with
+# hppnet_l1 — the two log grids are bit-identical).
 task: salience_rps
 task_params:
   n_channels: null
@@ -24,12 +28,7 @@ params:
   channels: [32, 64, 128, 128]
   dilation_rates: [48, 48, 48, 48]
   published_interp: true
-  n_maps: 1
-  superres_out: true
-  out_fmin: 20.0
-  out_fmax: 130.0
-  out_bins: 720
-  head_hidden: 32
-  head_kernel: 5
+  n_maps: 4
+  translation_head: false
 model_type: null
 legacy_config_path: null

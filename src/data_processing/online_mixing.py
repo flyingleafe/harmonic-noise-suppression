@@ -7,7 +7,11 @@ sampling loops. The mapping (see ``docs/refactor-data-pipelines.md``):
 - **real recordings** (``kind: frames``) — loaded once via
   :func:`mixing.load_noise_source_frames` (published frames; fixes baked in),
   then ``dload.choice`` over per-record window streams weighted by valid
-  duration; each window's start is a uniform draw from a ``random_stream``;
+  duration; each window's start is a uniform draw from a ``random_stream``.
+  Resampled to ``sample_rate`` at load — unless the policy has
+  ``noise_rate_warp``: then the pool keeps the native rate and every chunk is
+  warped (or only decimated) to ``sample_rate`` per sample
+  (:mod:`data_processing.rate_warp`);
 - **synthetic engines** (``kind: generated`` / ``gp`` / ``static_comb`` /
   ``stochastic`` / ``silence``) — the
   engine object (a genuinely stateful resource: CUDA producer, GP coefficient
@@ -28,7 +32,8 @@ sampling loops. The mapping (see ``docs/refactor-data-pipelines.md``):
   exactly) carries the global sample id that drives curriculum staging and
   the per-sample augmentation RNG (``make_rng``), exactly as before;
 - **augmentation firing** stays on the per-sample-id RNG so the check_stream
-  control-stream methodology (draw-count stability) keeps working.
+  control-stream methodology (draw-count stability) keeps working; severity
+  and probability ramps resolve per sample id before any draw (no RNG).
 
 Determinism model: stream content is deterministic per
 ``(base_seed, epoch, worker, position)`` — dload's model. The pre-refactor
@@ -48,7 +53,7 @@ from dataclasses import replace as _dc_replace
 from fractions import Fraction
 from functools import partial
 from pathlib import Path
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
 import dload
 import librosa
@@ -82,15 +87,24 @@ from data_processing.mixing import (
     scale_source_to_snr,
 )
 from data_processing.noise_augmentations import (
-    freq_scale_source_factor,
+    NOISE_AUGMENTATION_PARAMS,
+    REMOVED_AUGMENTATIONS,
+    check_block,
+    draw_augmentation,
     maybe_apply_noise_augmentation,
+    removed_error,
+)
+from data_processing.rate_warp import (
+    PARAM_KEYS as RATE_WARP_PARAM_KEYS,
+)
+from data_processing.rate_warp import (
+    RateWarpParams,
+    apply_rate_warp,
+    lowest_rate,
+    sample_rate_warp_params,
+    source_window_s,
 )
 from data_processing.streams import open_repository
-from data_processing.time_warp import (
-    WarpParams,
-    apply_time_warp,
-    sample_warp_params,
-)
 
 DEFAULT_SAMPLE_RATE = 16_000
 DEFAULT_DURATION_S = 1.0
@@ -133,7 +147,7 @@ def make_rng(base_seed: int, global_sample_id: int) -> np.random.Generator:
 
 
 # =============================================================================
-# Policy resolution (curriculum staging + probability ramps; unchanged)
+# Policy resolution (curriculum staging + severity/probability ramps)
 # =============================================================================
 
 
@@ -153,49 +167,103 @@ def _sample_snr_db(policy: Mapping[str, Any], rng: np.random.Generator) -> float
 #: keeps check_stream's 1e-9 control stream draw-aligned with the real stream.
 _RAMP_PROBABILITY_FLOOR = 1e-9
 
-#: Policy keys whose value is a probabilistic augmentation block —
-#: ``noise_augmentations`` may also be a LIST of blocks (applied sequentially).
-_AUG_BLOCK_KEYS = ("augmentations", "noise_augmentations", "noise_time_warp")
+#: Stage keys whose numeric leaves may be ramps (resolved per sample id by
+#: :func:`_materialize_ramps`): the SNR draw bounds and every parameter (and
+#: ``probability``) of the augmentation blocks.
+_RAMPABLE_KEYS = ("snr_db", "augmentations", "noise_augmentations", "noise_rate_warp")
+
+_RAMP_KEYS = frozenset({"from", "until", "start", "end", "shape"})
+
+#: Post-mix (``policy.augmentations``) choices and their parameters.
+_MIX_AUGMENTATION_PARAMS: dict[str, tuple[str, ...]] = {"random_gain": ("min_db", "max_db")}
+
+
+def _is_ramp(value: Any) -> bool:
+    return isinstance(value, Mapping) and set(value) == {"ramp"}
+
+
+def _ramp_fields(value: Mapping[str, Any]) -> tuple[float, float, float, float, str]:
+    ramp = cast(Mapping[str, Any], value["ramp"])
+    unknown = set(ramp) - _RAMP_KEYS
+    if unknown or not {"from", "until", "start", "end"} <= set(ramp):
+        raise ValueError(
+            f"a ramp needs from/until/start/end (+ optional shape), got {dict(ramp)!r}"
+        )
+    x0, x1 = float(ramp["from"]), float(ramp["until"])
+    shape = str(ramp.get("shape", "linear"))
+    if x1 <= x0 or shape not in ("linear", "cosine"):
+        raise ValueError(f"a ramp needs until > from and shape linear|cosine, got {dict(ramp)!r}")
+    return x0, x1, float(ramp["start"]), float(ramp["end"]), shape
+
+
+def _resolve_scalar(value: Any, global_sample_id: int) -> float:
+    """Resolve a numeric field — a plain number, or a ramp mapping
+    ``{ramp: {from, until, start, end, shape: linear|cosine}}`` over GLOBAL
+    SAMPLE IDS: ``t = clip((gid - from) / (until - from), 0, 1)``, value
+    ``start + (end - start) * t`` (linear) or
+    ``start + (end - start) * (1 - cos(pi * t)) / 2`` (cosine)."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if _is_ramp(value):
+        x0, x1, y0, y1, shape = _ramp_fields(value)
+        t = min(max((float(global_sample_id) - x0) / (x1 - x0), 0.0), 1.0)
+        if shape == "cosine":
+            t = 0.5 * (1.0 - float(np.cos(np.pi * t)))
+        return y0 + (y1 - y0) * t
+    raise ValueError(f"unsupported scalar spec: {value!r}")
 
 
 def _resolve_probability(value: Any, global_sample_id: int) -> float:
-    """Resolve a ``probability`` field — a plain float, or a linear-ramp mapping
-    (floored at ``_RAMP_PROBABILITY_FLOOR``; see its comment)."""
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, Mapping) and "ramp" in value:
-        ramp = cast(Mapping[str, Any], value["ramp"])
-        x0, x1 = float(ramp["from"]), float(ramp["until"])
-        y0, y1 = float(ramp.get("start", 0.0)), float(ramp.get("end", 1.0))
-        gid = float(global_sample_id)
-        if gid <= x0:
-            p = y0
-        elif gid >= x1:
-            p = y1
-        else:
-            p = y0 + (y1 - y0) * (gid - x0) / (x1 - x0)
-        return max(p, _RAMP_PROBABILITY_FLOOR)
-    raise ValueError(f"unsupported probability spec: {value!r}")
+    """Resolve a ``probability`` field: :func:`_resolve_scalar`, with a ramp
+    floored at ``_RAMP_PROBABILITY_FLOOR`` (see its comment)."""
+    p = _resolve_scalar(value, global_sample_id)
+    return max(p, _RAMP_PROBABILITY_FLOOR) if _is_ramp(value) else p
+
+
+def _scalar_bound(value: Any, pick: Any) -> float:
+    """``pick`` (min/max) of a scalar over all sample ids: a ramp's values
+    stay between its ``start`` and ``end`` for both shapes."""
+    if _is_ramp(value):
+        _, _, y0, y1, _ = _ramp_fields(value)
+        return float(pick(y0, y1))
+    return float(value)
+
+
+def _materialize(value: Any, global_sample_id: int) -> Any:
+    """``value`` with every ramp leaf resolved; unchanged sub-trees keep their
+    identity, changed ones are fresh copies (the policy is never mutated)."""
+    if _is_ramp(value):
+        return _resolve_scalar(value, global_sample_id)
+    if isinstance(value, Mapping):
+        out: dict[str, Any] | None = None
+        for k, v in value.items():
+            if k == "probability" and _is_ramp(v):
+                new = _resolve_probability(v, global_sample_id)
+            else:
+                new = _materialize(v, global_sample_id)
+            if new is not v:
+                if out is None:
+                    out = dict(value)
+                out[k] = new
+        return out if out is not None else value
+    if isinstance(value, list):
+        items = [_materialize(v, global_sample_id) for v in value]
+        return items if any(n is not o for n, o in zip(items, value)) else value
+    return value
 
 
 def _materialize_ramps(stage: Mapping[str, Any], global_sample_id: int) -> Mapping[str, Any]:
-    """Resolve any ramp-valued ``probability`` in ``stage`` to a float (on a
-    copy — the source policy is never mutated)."""
+    """Resolve every ramp under the ``_RAMPABLE_KEYS`` of ``stage`` for this
+    id. Consumes no RNG, so ramps never shift the per-sample draw order."""
     out: dict[str, Any] | None = None
-    for key in _AUG_BLOCK_KEYS:
-        spec = stage.get(key)
-        blocks = spec if isinstance(spec, list) else [spec] if isinstance(spec, Mapping) else []
-        if not any(isinstance(b.get("probability"), Mapping) for b in blocks):
+    for key in _RAMPABLE_KEYS:
+        if key not in stage:
             continue
-        new_blocks = [
-            {**b, "probability": _resolve_probability(b["probability"], global_sample_id)}
-            if isinstance(b.get("probability"), Mapping)
-            else b
-            for b in blocks
-        ]
-        if out is None:
-            out = dict(stage)
-        out[key] = new_blocks if isinstance(spec, list) else new_blocks[0]
+        new = _materialize(stage[key], global_sample_id)
+        if new is not stage[key]:
+            if out is None:
+                out = dict(stage)
+            out[key] = new
     return out if out is not None else stage
 
 
@@ -203,7 +271,7 @@ def _resolve_policy(policy: Mapping[str, Any], global_sample_id: int) -> Mapping
     """Resolve constant or staged policy for a global sample id.
 
     The first stage whose ``until`` is ``None`` or greater than the current id
-    is active; ramp-valued probabilities are materialized for this id.
+    is active; its ramps are materialized for this id.
     """
     stages = policy.get("stages") if isinstance(policy, Mapping) else None
     if not stages:
@@ -213,6 +281,61 @@ def _resolve_policy(policy: Mapping[str, Any], global_sample_id: int) -> Mapping
         if until is None or int(global_sample_id) < int(until):
             return _materialize_ramps(stage, global_sample_id)
     return _materialize_ramps(stages[-1], global_sample_id)
+
+
+def _policy_stages(policy: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    stages = policy.get("stages") if isinstance(policy, Mapping) else None
+    return [s for s in (list(stages) if stages else [policy]) if isinstance(s, Mapping)]
+
+
+def _block_active(block: Any) -> bool:
+    """A block that can fire: a ramp probability, or a float > 0."""
+    if not isinstance(block, Mapping):
+        return False
+    p = block.get("probability", 0.0)
+    return _is_ramp(p) or float(p or 0.0) > 0.0
+
+
+def _rate_warp_bounds(warp: Mapping[str, Any]) -> dict[str, float]:
+    """The extreme-rate float spec of a (possibly ramped) warp block: the
+    smallest ``alpha_low``/``f_low``, the largest ``alpha_high``/``dev_*``/``f_high``."""
+    missing = [k for k in RATE_WARP_PARAM_KEYS if k not in warp]
+    if missing:
+        raise ValueError(f"noise_rate_warp is missing {missing}")
+    lows = ("alpha_low", "f_low")
+    return {k: _scalar_bound(warp[k], min if k in lows else max) for k in RATE_WARP_PARAM_KEYS}
+
+
+def _active_rate_warps(policy: Mapping[str, Any]) -> list[dict[str, float]]:
+    """Bound specs of every stage's active ``noise_rate_warp`` block."""
+    return [
+        _rate_warp_bounds(cast(Mapping[str, Any], s["noise_rate_warp"]))
+        for s in _policy_stages(policy)
+        if _block_active(s.get("noise_rate_warp"))
+    ]
+
+
+def _validate_policy(policy: Mapping[str, Any]) -> None:
+    """Fail at build time on removed keys/choices, unknown choices or
+    parameters — never mid-training on the first sample that draws them."""
+    for stage in _policy_stages(policy):
+        for key in stage:
+            if key in REMOVED_AUGMENTATIONS:
+                raise removed_error(str(key))
+        if stage.get("augmentations"):
+            check_block(stage["augmentations"], _MIX_AUGMENTATION_PARAMS, "augmentations")
+        noise_aug = stage.get("noise_augmentations")
+        for block in noise_aug if isinstance(noise_aug, list) else [noise_aug] if noise_aug else []:
+            check_block(block, NOISE_AUGMENTATION_PARAMS, "noise_augmentations")
+        warp = stage.get("noise_rate_warp")
+        if warp is not None:
+            if not isinstance(warp, Mapping):
+                raise ValueError(f"noise_rate_warp must be a mapping, got {warp!r}")
+            unknown = sorted(set(warp) - {"probability", *RATE_WARP_PARAM_KEYS})
+            if unknown:
+                raise ValueError(f"noise_rate_warp: unknown keys {unknown}")
+            _rate_warp_bounds(warp)
+        _materialize_ramps(stage, 0)  # malformed ramps raise here, not mid-training
 
 
 # =============================================================================
@@ -290,16 +413,36 @@ def _spec_channels(spec: Mapping[str, Any]) -> tuple[int, ...] | None:
 
 
 def _load_real_records(
-    spec: Mapping[str, Any], *, sample_rate: int, window_s: float
+    spec: Mapping[str, Any],
+    *,
+    sample_rate: int,
+    window_s: float,
+    native_min_rate: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Load one real source spec (``kind: frames``) into chunkable records."""
-    frames = mixing.load_noise_source_frames([dict(spec)], sample_rate=sample_rate)
+    """Load one real source spec (``kind: frames``) into chunkable records.
+
+    ``native_min_rate`` set (a ``noise_rate_warp`` policy) keeps the audio at
+    the recording's native rate, which must exceed ``sample_rate`` and reach
+    ``native_min_rate`` (= ``sample_rate`` / the lowest local warp rate, so
+    no warp leaves a silent band); otherwise audio is resampled to
+    ``sample_rate`` at load.
+    """
+    frames = mixing.load_noise_source_frames(
+        [dict(spec)], sample_rate=None if native_min_rate is not None else sample_rate
+    )
     min_motor_rps = float(_cfg_get(spec, "min_motor_rps", 30.0))
     channels = _spec_channels(spec)
     records: list[dict[str, Any]] = []
     for tf in frames:
         if "audio" not in tf:
             continue
+        if native_min_rate is not None:
+            sr = float(cast(td.GridIndex, tf["audio"].tindex).sr)
+            if sr <= sample_rate or sr < native_min_rate:
+                raise ValueError(
+                    f"noise_rate_warp needs native audio above {sample_rate} Hz and >= "
+                    f"{native_min_rate:.0f} Hz; {get_meta(tf, 'recording_id', '?')} is {sr:g} Hz"
+                )
         try:
             detect_key, _rps_key, needs_clean = resolve_motor_tracks(tf)
             audio = tf["audio"]
@@ -609,8 +752,22 @@ def _records_window_stream(
     return dload.choice(per_record, durations, seed=dload.seeded(seed, "records-choice"))
 
 
+class NativePool(NamedTuple):
+    """A ``noise_rate_warp`` pool: real recordings kept at their native rate
+    (each >= ``min_rate`` Hz) and cut in ``window_s``-second windows (the
+    warp's worst-case source read, :func:`_max_window_s`)."""
+
+    min_rate: float
+    window_s: float
+
+
 def build_noise_stream(
-    specs: Any, *, sample_rate: int, window_s: float, seed: int
+    specs: Any,
+    *,
+    sample_rate: int,
+    window_s: float,
+    seed: int,
+    native: NativePool | None = None,
 ) -> tuple[dload.Pipeline, int]:
     """Compile ``sources.noise`` (one spec or a list) into one chunk Pipeline.
 
@@ -622,6 +779,11 @@ def build_noise_stream(
     merged pool's weight is the number of merged items, as before). A real
     source with an explicit ``weight``, and every engine/audio_pool source,
     becomes its own sub-stream at that pool-level weight.
+
+    ``native`` (a ``noise_rate_warp`` policy) keeps the real recordings at
+    their native rate in ``native.window_s`` windows
+    (:func:`_load_real_records`); the only engine admitted then is
+    ``silence``, which renders ``window_s`` at ``sample_rate`` (never warped).
     """
     specs = _to_plain(specs)
     items = list(specs) if isinstance(specs, list) else [specs]
@@ -638,6 +800,20 @@ def build_noise_stream(
     real_items = [c for c in items if _cfg_get(c, "kind") not in engine_kinds]
     weighted_real = [c for c in real_items if _cfg_get(c, "weight", None) is not None]
     merged_real = [c for c in real_items if _cfg_get(c, "weight", None) is None]
+    if native is not None:
+        model_rate = sorted({str(_cfg_get(c, "kind")) for c in standalone} - {"silence"})
+        if model_rate:
+            raise ValueError(
+                f"noise_rate_warp needs native-rate noise (kind: frames); {model_rate} "
+                f"render at the model rate {sample_rate} Hz and would get a silent band"
+            )
+    record_window_s = native.window_s if native is not None else window_s
+    load = partial(
+        _load_real_records,
+        sample_rate=sample_rate,
+        window_s=record_window_s,
+        native_min_rate=native.min_rate if native is not None else None,
+    )
 
     streams: list[dload.Pipeline] = []
     weights: list[float] = []
@@ -646,13 +822,13 @@ def build_noise_stream(
     if merged_real:
         records: list[dict[str, Any]] = []
         for spec in merged_real:
-            records.extend(_load_real_records(spec, sample_rate=sample_rate, window_s=window_s))
-        streams.append(_records_window_stream(records, window_s=window_s, seed=seed))
+            records.extend(load(spec))
+        streams.append(_records_window_stream(records, window_s=record_window_s, seed=seed))
         weights.append(float(len(merged_real)))
         ceiling = max(ceiling, _records_channels(records))
     for c in weighted_real:
-        records = _load_real_records(c, sample_rate=sample_rate, window_s=window_s)
-        streams.append(_records_window_stream(records, window_s=window_s, seed=seed))
+        records = load(c)
+        streams.append(_records_window_stream(records, window_s=record_window_s, seed=seed))
         weights.append(float(_cfg_get(c, "weight", 1.0)))
         ceiling = max(ceiling, _records_channels(records))
     for c in standalone:
@@ -807,75 +983,28 @@ def _as_lane_list(x: Any) -> list[Any]:
 def _max_window_s(policy: Mapping[str, Any], duration_s: float) -> float:
     """Static worst-case noise-window length (seconds) over all policy stages.
 
-    Covers freq_scale compression (``freq_scale_source_factor``, compounding
-    over list blocks) and the time-warp's worst-case source read
-    (``1 + dev_const + dev_sine`` + a fixed margin), so the noise stream can
-    cut fixed-length windows that always cover whatever a per-sample stage
-    needs. A warp block whose probability is a ramp Mapping counts as active.
+    ``duration_s`` without an active ``noise_rate_warp``; with one, the
+    warp's worst-case source read ``alpha_high * (1 + dev_const + dev_sine)``
+    (each at its ramp extreme) over the chunk plus its decimation edges, plus
+    a margin (:func:`rate_warp.source_window_s`) — so every window the noise
+    stream cuts covers every warp any sample id can draw.
     """
-    from data_processing.time_warp import (
-        DEFAULT_DEV_CONST,
-        DEFAULT_DEV_SINE,
-        WARP_SOURCE_MARGIN_S,
-    )
-
-    stages = policy.get("stages") if isinstance(policy, Mapping) else None
-    stage_list = list(stages) if stages else [policy]
-    window = duration_s
-    for stage in stage_list:
-        if not isinstance(stage, Mapping):
-            continue
-        base = duration_s * float(freq_scale_source_factor(stage.get("noise_augmentations")))
-        warp = stage.get("noise_time_warp")
-        if isinstance(warp, Mapping):
-            p = warp.get("probability", 0.0)
-            active = isinstance(p, Mapping) or float(p or 0.0) > 0.0
-            if active:
-                dev_c = float(warp.get("dev_const", DEFAULT_DEV_CONST))
-                dev_s = float(warp.get("dev_sine", DEFAULT_DEV_SINE))
-                base = base * (1.0 + dev_c + dev_s) + WARP_SOURCE_MARGIN_S
-        window = max(window, base)
+    window = float(duration_s)
+    for bounds in _active_rate_warps(policy):
+        window = max(window, source_window_s(bounds, duration_s))
     return window
 
 
-def _maybe_sample_time_warp(
-    spec: Mapping[str, Any] | None,
-    rng: np.random.Generator,
-) -> WarpParams | None:
-    """Fire-and-sample the noise time-warp (absent key / p<=0 consumes no RNG)."""
-    if not spec:
-        return None
-    probability = float(spec.get("probability", 0.0))
-    if probability <= 0.0 or rng.random() >= probability:
-        return None
-    return sample_warp_params(spec, rng)
-
-
-def _augmentation_draw(
+def _maybe_sample_rate_warp(
     spec: Mapping[str, Any] | None, rng: np.random.Generator
-) -> tuple[str, Mapping[str, Any]] | None:
-    """Fire the block and pick a choice — ``None`` when it does not fire.
-
-    Consumes exactly the historical draws (one fire decision, then one choice
-    index), which the ``check_stream`` control-stream methodology depends on.
-    """
+) -> RateWarpParams | None:
+    """Fire-and-sample ``noise_rate_warp`` (absent key / p<=0 consumes no RNG)."""
     if not spec:
         return None
     probability = float(spec.get("probability", 0.0))
     if probability <= 0.0 or rng.random() >= probability:
         return None
-    choices = list(spec.get("choices", []))
-    if not choices:
-        return None
-    choice = choices[int(rng.integers(0, len(choices)))]
-    if isinstance(choice, str):
-        return choice, {}
-    if isinstance(choice, Mapping):
-        if len(choice) != 1:
-            raise ValueError(f"augmentation choice must have one key, got {choice!r}")
-        name, params = next(iter(choice.items()))
-        return str(name), params or {}
-    raise ValueError(f"unsupported augmentation choice: {choice!r}")
+    return sample_rate_warp_params(spec, rng)
 
 
 def _apply_one_augmentation(
@@ -887,33 +1016,18 @@ def _apply_one_augmentation(
     ``signals`` — one array for the RPS stream (the mixture), two for the SE
     stream (mixture + clean target, which must stay the mixture's speech
     component exactly)."""
-    drawn = _augmentation_draw(spec, rng)
+    drawn = draw_augmentation(spec, rng)
     if drawn is None:
         return signals
     name, params = drawn
-
-    out = tuple(x.copy() for x in signals)
-    if name == "random_gain":
-        min_db = float(params.get("min_db", -6.0))
-        max_db = float(params.get("max_db", 6.0))
-        gain = np.float32(10.0 ** (float(rng.uniform(min_db, max_db)) / 20.0))
-        for x in out:
-            x *= gain
-    elif name == "random_polarity":
-        for x in out:
-            x *= -1.0
-    elif name == "channel_drop":
-        n_ch = out[0].shape[0]
-        if n_ch <= 1:
-            return out
-        max_channels = int(params.get("max_channels", 1))
-        n_drop = int(rng.integers(1, min(max_channels, n_ch - 1) + 1))
-        drop = rng.choice(n_ch, size=n_drop, replace=False)
-        for x in out:
-            x[drop, :] = 0.0
-    else:
+    if name != "random_gain":
+        if name in REMOVED_AUGMENTATIONS:
+            raise removed_error(name)
         raise ValueError(f"unsupported augmentation: {name!r}")
-    return tuple(x.astype(np.float32, copy=False) for x in out)
+    min_db = float(params.get("min_db", -6.0))
+    max_db = float(params.get("max_db", 6.0))
+    gain = np.float32(10.0 ** (float(rng.uniform(min_db, max_db)) / 20.0))
+    return tuple((x * gain).astype(np.float32, copy=False) for x in signals)
 
 
 def _render_rps_sample(
@@ -921,37 +1035,37 @@ def _render_rps_sample(
 ) -> td.Frame:
     """One RPS-prediction sample: (warped/augmented noise + speech mix) + RPS.
 
-    The per-sample-id RNG drives — in the historical fixed draw order — the
-    time-warp fire/params, the noise-augmentation blocks, the source_prob
-    fire, the SNR draw, and the post-mix augmentation. Chunk *content* comes
-    from the streams (see the module docstring's determinism note).
+    The per-sample-id RNG drives, in this fixed order: the rate-warp fire and
+    parameters, the noise-augmentation blocks, the source_prob fire, the SNR
+    draw, and the post-mix augmentation. Ramps are resolved before any draw
+    and consume none. Chunk *content* comes from the streams (see the module
+    docstring's determinism note).
+
+    A chunk above the model rate comes from a native-rate pool (the policy
+    has ``noise_rate_warp``) and always goes through
+    :func:`rate_warp.apply_rate_warp` — warped when the block fired, only
+    decimated otherwise. A model-rate chunk under a warp policy is the
+    ``silence`` floor (``build_noise_stream`` admits no other model-rate
+    source then): zero labels, nothing to warp; the drawn warp is discarded.
     """
     rng = make_rng(int(static["base_seed"]), int(gid))
     policy = _resolve_policy(cast(Mapping[str, Any], static["policy"]), int(gid))
     target_len = int(static["target_len"])
     sample_rate = int(static["sample_rate"])
     hop_length = int(static["hop_length"])
-    duration_s = float(static["duration_s"])
+
+    warp = _maybe_sample_rate_warp(
+        cast("Mapping[str, Any] | None", policy.get("noise_rate_warp")), rng
+    )
+    if int(round(cast(td.GridIndex, noise_tf["audio"].tindex).sr)) != sample_rate:
+        noise_tf = apply_rate_warp(noise_tf, warp, target_len=target_len, sample_rate=sample_rate)
 
     aug_spec = policy.get("noise_augmentations")
     aug_blocks: list[Mapping[str, Any]] = (
         list(aug_spec) if isinstance(aug_spec, list) else [aug_spec] if aug_spec else []
     )
-    # Per-stage oversampling factor (the resolved stage's freq_scale worst
-    # case); the stream window is statically sized to cover every stage.
-    aug_factor = float(freq_scale_source_factor(aug_spec))
-    base_len = int(round(duration_s * aug_factor * sample_rate))
-
-    warp = _maybe_sample_time_warp(
-        cast("Mapping[str, Any] | None", policy.get("noise_time_warp")), rng
-    )
-    if warp is not None:
-        noise_tf = apply_time_warp(noise_tf, warp, target_len=base_len, sample_rate=sample_rate)
-
     for aug_block in aug_blocks:
-        noise_tf = maybe_apply_noise_augmentation(
-            noise_tf, aug_block, rng, target_len=base_len, sample_rate=sample_rate
-        )
+        noise_tf = maybe_apply_noise_augmentation(noise_tf, aug_block, rng, sample_rate=sample_rate)
 
     audio_track = noise_tf["audio"]
     noise_audio = _extract_audio_array(noise_tf, target_len=target_len)
@@ -1092,13 +1206,29 @@ def build_online_mix_pipeline(cfg: Any) -> dload.Pipeline:
     )
     print(f"[online-mix] task={task} base_seed={base_seed} stages: {stage_desc}", flush=True)
 
-    window_s = _max_window_s(policy, duration_s)
+    _validate_policy(policy)
+    warps = _active_rate_warps(policy)
+    native = None
+    if warps:
+        if task != "rps_prediction":
+            raise ValueError("noise_rate_warp is an rps_prediction augmentation")
+        # The pool stays at its native rate; it must cover the lowest local
+        # rate any stage can draw without a silent band below Nyquist, and
+        # its windows the worst-case source read.
+        native = NativePool(
+            min_rate=sample_rate / min(lowest_rate(b) for b in warps),
+            window_s=_max_window_s(policy, duration_s),
+        )
     sources = _cfg_get(cfg, "sources", {})
     noise_cfg = _cfg_get(sources, "noise", None)
     if noise_cfg is None:
         raise ValueError("online mix config requires sources.noise")
     noise_stream, channel_ceiling = build_noise_stream(
-        noise_cfg, sample_rate=sample_rate, window_s=window_s, seed=base_seed
+        noise_cfg,
+        sample_rate=sample_rate,
+        window_s=duration_s,
+        seed=base_seed,
+        native=native,
     )
 
     speech_cfgs = _cfg_get(sources, "speech", None)
@@ -1134,7 +1264,6 @@ def build_online_mix_pipeline(cfg: Any) -> dload.Pipeline:
         "sample_rate": sample_rate,
         "n_fft": n_fft,
         "hop_length": hop_length,
-        "duration_s": duration_s,
         "speech_present": speech_present,
         "task": task,
         "snr_ref_floor_power": snr_ref_floor_power,

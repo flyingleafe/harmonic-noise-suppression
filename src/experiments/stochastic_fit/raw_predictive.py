@@ -681,11 +681,7 @@ def render_matched_population(
                 )
                 for augmentation in observation_augmentations:
                     frame = maybe_apply_noise_augmentation(
-                        frame,
-                        augmentation,
-                        rng,
-                        target_len=clip.audio.shape[1],
-                        sample_rate=clip.sr,
+                        frame, augmentation, rng, sample_rate=clip.sr
                     )
                 audio = np.asarray(frame["audio"].data, dtype=np.float32)
             rendered.append(

@@ -1,0 +1,19 @@
+# Per-rotor layer BCE on the L1 grid of HPPNet and HarmoF0 (conf/model/
+# {hppnet,harmof0}_l1.yaml): the models' own log grid, 27.5 * 2**(b/48) for
+# b < 352, plus the OFF state at bin 0 -> 353 bins per map (log_off spec,
+# models.salience_crf.log_off_grid). Everything conf/loss/salience_layers_rp.yaml
+# argues holds; the Gaussian is in rev/s (sigma_rev_s 1.0), so on this grid it
+# spans ~5 bins at 27.5 rev/s and under one bin above ~70.
+#
+# focus `auto` = G / expected layer mass, the mass averaged over the rotor
+# rates the grid represents (27.5-159.2): 353 / 2.292 = 154.0.
+terms:
+  - name: bce
+    _target_: losses.LayerPITSalienceBCELoss
+    weight: 1.0
+    params:
+      grid: {kind: log_off, fmin: 27.5, bins_per_octave: 48, n_bins: 352}
+      n_layers: 4
+      sigma_rev_s: 1.0
+      focus: auto
+      rate: [16000, 512]

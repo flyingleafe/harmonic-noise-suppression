@@ -85,3 +85,25 @@ def test_discover_recordings_finds_dirs(tmp_path):
 
     recordings = discover_recordings(tmp_path)
     assert isinstance(recordings, list)
+
+
+def test_test_split_recordings_are_discovered_as_test_and_nowhere_else(tmp_path):
+    """A held-out recording must surface ONLY under split "test", so no
+    split-based selection (in_flight_source, in_flight_noise, ...) reaches it."""
+    from data_processing.sources.dregon import (
+        SPLIT_RECORDINGS,
+        TEST_RECORDING_IDS,
+        discover_recordings,
+    )
+
+    for rid in [*TEST_RECORDING_IDS, "free-flight_speech-low_room1"]:
+        rec_dir = tmp_path / f"DREGON_{rid}"
+        rec_dir.mkdir()
+        (rec_dir / f"DREGON_{rid}.wav").write_bytes(b"")
+    split_of = {s["recording_id"]: s["split"] for s in discover_recordings(tmp_path)}
+    assert {rid: split_of[rid] for rid in TEST_RECORDING_IDS} == dict.fromkeys(
+        TEST_RECORDING_IDS, "test"
+    )
+    assert split_of["free-flight_speech-low_room1"] == "in_flight_source"
+    others = [r for name, ids in SPLIT_RECORDINGS.items() if name != "test" for r in ids]
+    assert not set(others) & set(TEST_RECORDING_IDS)

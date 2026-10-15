@@ -97,11 +97,11 @@ def build_stream(policy: str, base_seed: int, duration_s: float | None, augment:
        reading ~250, so ``duration_s`` must match before the two numbers can be
        subtracted.
     2. Augmentation. The stream fires random gain, spectral recolor, reverb and
-       time-warp at probability 1.0. Those are a training device, not a
-       property of the synthetic distribution, and the real split has none of
-       them. (They are label-CONSISTENT — ``freq_scale`` and the time warp
-       rescale the RPS labels with the audio — so leaving them on is not
-       cheating, it is just a harder task than the one being compared to.)
+       the rate warp. Those are a training device, not a property of the
+       synthetic distribution, and the real split has none of them. (They are
+       label-CONSISTENT — ``noise_rate_warp`` rescales the RPS labels with the
+       audio — so leaving them on is not cheating, it is just a harder task
+       than the one being compared to.)
     3. The noise family itself, which is the only difference anyone wants to
        measure.
 
@@ -119,7 +119,7 @@ def build_stream(policy: str, base_seed: int, duration_s: float | None, augment:
         cfg.duration_s = float(duration_s)
     if not augment:
         for stage in cfg.policy.stages:
-            for key in ("augmentations", "noise_augmentations", "noise_time_warp"):
+            for key in ("augmentations", "noise_augmentations", "noise_rate_warp"):
                 if key in stage:
                     del stage[key]
     return OnlineMixFrameDataset.from_config(cfg, flatten_channels=True)
@@ -176,9 +176,7 @@ def score(
         "salience": salience,
         "n_samples": seen,
         "aggregate_mse": float(all_squared.mean()),
-        "all_mae": float(
-            np.concatenate([np.concatenate(v) for v in errors.values() if v]).mean()
-        ),
+        "all_mae": float(np.concatenate([np.concatenate(v) for v in errors.values() if v]).mean()),
         "n_frames": int(all_squared.size),
     }
     for regime in REGIMES:

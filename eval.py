@@ -2,7 +2,7 @@
 "train.py / eval.py"). Composition + dispatch only.
 
 Loads a checkpoint (``cfg.checkpoint`` or
-``results/<experiment_name>/best.ckpt``), runs the configured
+``results/<experiment_name>/last.ckpt``), runs the configured
 :class:`~metrics.suite.MetricSuite` over ``cfg.data.valid``, and writes
 ``results/<experiment_name>/eval/{metrics.json,per_sample.csv,per_snr.csv}``
 (the last only when any sample carries ``meta.input_snr``).
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ from training.config import (
     build_metrics,
     build_task_and_codec,
     instantiate_model,
+    legacy_protocol_error,
     register_configs,
 )
 from training.validate import validate_config
@@ -47,7 +49,7 @@ def _checkpoint_path(cfg: DictConfig) -> Path:
         # ``r2://`` URIs are downloaded (once, cached) to a local path;
         # plain paths pass through unchanged.
         return Path(resolve_checkpoint_uri(str(cfg.checkpoint)))
-    return Path(cfg.results_root) / cfg.experiment_name / "best.ckpt"
+    return Path(cfg.results_root) / cfg.experiment_name / "last.ckpt"
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -141,4 +143,7 @@ def main(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
+    refusal = legacy_protocol_error(sys.argv[1:], Path(__file__).resolve().parent / "conf")
+    if refusal:
+        raise SystemExit(refusal)
     main()

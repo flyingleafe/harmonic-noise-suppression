@@ -1,16 +1,12 @@
 """Validation-time BCE-on-salience metric — a ``MetricSuite``-compatible
 wrapper around the same computation as ``losses.salience.SalienceRPSBCELoss``.
 
-``training.loop.run_training``'s ``optim.monitor`` scheduling/early-stop/
-checkpoint decision reads ``val_metrics[monitor]`` (from the *validation*
-``MetricSuite``) unless ``monitor == "loss"``, in which case it uses the
-*training* loss instead (``training/loop.py::run_training``). A salience
-model's BCE loss has no comparable RPS-space metric (no metric that runs
-``predict_rps()`` exists yet — see REPLICATION.md § C7/C8), so this metric
-exists purely to let ``optim.monitor: bce`` track the BCE objective on the
-*validation* split, matching best practice for early stopping / LR
-scheduling (rather than falling back to the train-loss ``monitor: loss``
-path). See docs/refactor-unified-framework.md § "Pre-run validation".
+Historically ``optim.monitor: bce`` let the plateau scheduler / early stop
+follow this value on the validation split. Under the rp protocol (2026-10-14,
+docs/experiments/paper-real-protocol.md) the LR is a function of the step and
+the RPS panel is the only stopping/selection signal; this metric remains the
+per-sample BCE readout logged next to the panel scores for shared-map (L0)
+models.
 """
 
 from __future__ import annotations

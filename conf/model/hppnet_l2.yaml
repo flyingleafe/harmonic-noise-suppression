@@ -1,8 +1,18 @@
-# L2: original hppnet front end/harmonic blocks plus four linear-output maps.
-# FreqSuperResHead adapts the native 352-bin log grid to 0–150 rev/s, 300 bins.
-# Below native fmin=27.5 Hz, interpolation clamps; it adds no new acoustic evidence.
-# L2→L3 changes the front-end/harmonic-coordinate bundle, not only one operator.
-# Matched training controls: docs/experiments/paper-regime-matrix.md.
+# hppnet_l2 — level L2 of the adaptation ladder (docs/experiments/
+# paper-real-protocol.md): conf/model/hppnet_l1.yaml + the minimal translation
+# head (models.salience_rps.TranslationHead) onto the protocol's linear grid,
+# 0-159.2 rev/s in 164 bins (models.salience_crf.RP_LINEAR_GRID, bin 0 = off):
+#   1. fixed W (0 parameters): per output bin the mean of the log bins inside
+#      ±half a bin where the log grid is finer (below ~67 rev/s), linear
+#      interpolation where coarser; the off logit routed to bin 0; output bins
+#      whose window holds no log bin (1-26 rev/s, below the CQT's 27.5) are a
+#      fixed logit -10 — not representable by L0-L2;
+#   2. ONE depthwise linear Conv2d(4, 4, (9, 1), groups=4), identity-initialised,
+#      no normalisation, no activation (40 parameters).
+# The head adds no resolution the trunk's grid lacks; the first link of the
+# HPPNet -> HRSPNet chain (+k84: hppnet_l2k84.yaml).
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_rp.yaml.
 task: salience_rps
 task_params:
   n_channels: null
@@ -25,11 +35,6 @@ params:
   freq_pool: 1
   time_pooling: false
   n_maps: 4
-  superres_out: true
-  out_fmin: 0.0
-  out_fmax: 150.0
-  out_bins: 300
-  head_hidden: 32
-  head_kernel: 5
+  translation_head: true
 model_type: null
 legacy_config_path: null

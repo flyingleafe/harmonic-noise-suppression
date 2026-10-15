@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from omegaconf import OmegaConf
-
-from training.config import EarlyStoppingConfig
 
 
 def make_tiny_config(
@@ -19,10 +16,10 @@ def make_tiny_config(
     n_valid: int = 4,
     epochs: int = 1,
     batch_size: int = 2,
-    monitor: str = "mse",
     artifacts_enabled: bool = False,
     upload_checkpoints: bool = True,
-    early_stopping: dict[str, Any] | None = None,
+    warmup_steps: int = 0,
+    total_steps: int = 100,
 ) -> Any:
     """Build a minimal RootConfig-shaped ``DictConfig`` around
     ``tests.training._fixtures`` (``TinyRPSFrameDataset`` / ``TinyRPSModel``)
@@ -76,11 +73,9 @@ def make_tiny_config(
         "lr": 1.0e-3,
         "weight_decay": 0.0,
         "optimizer_params": {},
-        "patience": 5,
-        "factor": 0.5,
-        "cooldown": 0,
-        "monitor": monitor,
-        "monitor_mode": "min",
+        "warmup_steps": warmup_steps,
+        "min_lr_frac": 0.01,
+        "total_steps": total_steps,
     }
     logging = {
         "enabled": True,
@@ -117,7 +112,6 @@ def make_tiny_config(
             "epochs": epochs,
             "batch_size": batch_size,
             "num_workers": 0,
-            "patience": 5,
             "grad_clip": None,
             "grad_accum_steps": 1,
             "amp": False,
@@ -132,6 +126,5 @@ def make_tiny_config(
             "logging": logging,
             "artifacts": artifacts,
             "lora": lora,
-            "early_stopping": {**asdict(EarlyStoppingConfig()), **(early_stopping or {})},
         }
     )

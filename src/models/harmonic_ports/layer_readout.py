@@ -1,4 +1,4 @@
-"""Per-rotor salience layers with the lossless CRF readout, for the three ports.
+"""Per-rotor salience layers with the lossless CRF readout, for every per-rotor model.
 
 WHY THIS MODULE EXISTS. `models.salience_crf` measured the framework's shared
 salience representation and found it is NOT an isomorphism: a PERFECT target,
@@ -8,17 +8,19 @@ oracle floor — no model reading that representation can score better, however
 well it predicts. The Gaussian-per-rotor-layer target with a CRF plus
 log-parabolic readout comes back at 2.22e-16.
 
-This module is the seam that puts the three harmonic ports on that pair. It
-holds the two halves the framework contract does not:
+This module is the seam that puts the per-rotor models on that pair. It holds
+the two halves the framework contract does not:
 
-1. ``split_maps`` — the ports keep returning ``(B, n_maps*G, T)``, because the
+1. ``split_maps`` — the models keep returning ``(B, n_maps*G, T)``, because the
    ``salience_rps`` codec declares ``("batch", "freq", "time")`` and a 4-D model
    output would not type-check through it. The per-rotor layers are therefore
    STACKED ALONG THE OUTPUT AXIS and split back out here. The tensor a loss or a
    decoder sees is ``(B, R, G, T)``; only the wire format is flat.
 2. ``LayerCRFReadout`` — ``predict_rps`` by one CRF best path per rotor layer,
-   with NO threshold and NO Hungarian step. A stopped rotor is the path sitting
-   at bin 0, which is a value; the old decoder had to call it an absence.
+   with NO threshold and NO Hungarian step, on the model's own ``out_freqs``
+   (linear or log; bin 0 is always the off state at 0.0 rev/s). A stopped rotor
+   is the path sitting at bin 0, which is a value; the old decoder had to call
+   it an absence.
 
 THE READOUT IS ``logsigmoid``, NOT THE RAW LOGIT, and the reason is the loss.
 `losses.LayerPITSalienceBCELoss` drives ``sigmoid(z) -> exp(-d^2 / 2 sigma^2)``,
@@ -28,7 +30,7 @@ EXACTLY. Feeding the raw logit instead fits the vertex on
 ``log p - log(1 - p)``, which diverges at the peak. Measured on 40 clips of real
 training telemetry (DREGON ``in_flight_noise`` minus the held-out room1, plus
 FLY125) by pushing a PERFECT model's output — ``logit(target)`` — through this
-decode, on the ports' own 0-150 rev/s grid at 0.5017 rev/s:
+decode, on the ports' 0-150 rev/s grid at 0.5017 rev/s:
 
     readout        mean err        max err
     logsigmoid     3.55e-15        1.42e-14
@@ -36,12 +38,11 @@ decode, on the ports' own 0-150 rev/s grid at 0.5017 rev/s:
 
 ``readout="raw"`` keeps the other branch available for that comparison.
 
-THE BAND IS SIZED FROM THE SAME MEASUREMENT. At ``MAX_STEP_REV_S = 16`` the same
-round trip returns 1.22e-05 mean and 0.203 max: exact almost everywhere, and
-wrong on the frames whose slew the band does not make free, where the transition
-penalty shaves the corner of a ramp. Those clips reach 23.8 rev/s in one 32 ms
-frame, so 16 is too small for them and 25 is not — at 25 the error is the
-``logsigmoid`` row above, everywhere.
+THE TRANSITION COST IS SIZED FROM THE SAME MEASUREMENT
+(`models.salience_crf.MAX_STEP_REV_S`). At 16 rev/s free the same round trip
+returns 1.22e-05 mean and 0.203 max: exact almost everywhere, and wrong on the
+frames whose slew the cost does not make free. Those clips reach 23.8 rev/s in
+one 32 ms frame, so 16 is too small for them and 25 is not.
 """
 
 from __future__ import annotations
@@ -52,17 +53,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from models.salience_crf import band_for_rev_s, crf_decode_layers
+from models.salience_crf import MAX_STEP_REV_S, crf_decode_layers
 
-__all__ = ["split_maps", "LayerCRFReadout", "MAX_STEP_REV_S"]
-
-# The per-frame change the transition band makes FREE, in rev/s. Sized from the
-# data and not from a slew constant chosen on synthetic data: 40 clips of real
-# training telemetry on the 32 ms frame grid move 0.476 rev/s per frame on
-# average, 2.65 at the 99th percentile and 23.8 at the extreme. A band that
-# forbids more than the extreme makes the true trajectory undecodable — at 16
-# the round trip loses 0.203 rev/s on its worst frame, at 25 it loses 1.4e-14.
-MAX_STEP_REV_S = 25.0
+__all__ = ["split_maps", "LayerCRFReadout"]
 
 
 def split_maps(logits: torch.Tensor, n_maps: int) -> torch.Tensor:
@@ -78,7 +71,7 @@ class LayerCRFReadout:
 
     Mix it in BEFORE :class:`models.salience_rps.SalienceRPSPredictor` so this
     ``predict_rps`` wins. With ``n_maps == 1`` every call falls through to the
-    base class, so an old single-map config keeps its old behaviour exactly.
+    base class: the shared-map threshold + Hungarian readout (level L0).
     """
 
     n_maps: int
@@ -88,18 +81,6 @@ class LayerCRFReadout:
     readout: str = "logsigmoid"
     max_step_rev_s: float = MAX_STEP_REV_S
     crf_stiff: float = 40.0
-
-    # ── the band ────────────────────────────────────────────────────────────
-
-    def grid_step(self) -> float:
-        g = np.asarray(cast(np.ndarray, self.out_freqs), dtype=np.float64)
-        return float(np.median(np.diff(g)))
-
-    def crf_band(self, dtype=torch.float32) -> tuple[int, torch.Tensor]:
-        """``(span, pen)`` for :func:`models.salience_crf.crf_decode_layers`."""
-        return band_for_rev_s(self.max_step_rev_s, self.grid_step(), self.crf_stiff, dtype=dtype)
-
-    # ── decode ──────────────────────────────────────────────────────────────
 
     def decode_salience(self, logits: torch.Tensor) -> torch.Tensor:
         """``(B, R*G, T)`` raw model output -> ``(B, R, T)`` rev/s.
@@ -115,9 +96,12 @@ class LayerCRFReadout:
             scores = layers
         else:
             raise ValueError(f"unknown readout {self.readout!r}")
-        span, pen = self.crf_band(dtype=scores.dtype)
         return crf_decode_layers(
-            scores, cast(np.ndarray, self.out_freqs), span, pen.to(scores.device), logits=True
+            scores,
+            cast(np.ndarray, self.out_freqs),
+            max_step_rev_s=self.max_step_rev_s,
+            stiff=self.crf_stiff,
+            logits=True,
         )
 
     def decode_logits(
@@ -132,7 +116,7 @@ class LayerCRFReadout:
 
         ``threshold`` and ``max_jump_bins`` are accepted and IGNORED: they are
         the single-map decoder's parameters, and this readout has neither a
-        detection decision nor a per-frame jump cap (the CRF's transition band
+        detection decision nor a per-frame jump cap (the CRF's transition cost
         is the jump model, and it is sized from the data).
         """
         if int(self.n_maps) == 1:

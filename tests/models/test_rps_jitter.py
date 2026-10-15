@@ -213,32 +213,6 @@ def test_build_noise_gen_model_plumbs_random_phases():
     assert _emitter_of(model).use_random_phases is True
 
 
-@pytest.mark.parametrize(
-    "experiment",
-    [
-        "e6_noisegen_baseline",
-        "e6_noisegen_randphase",
-        "e6_noisegen_jitter",
-        "e6_noisegen_jitter_latreg",
-    ],
-)
-def test_e6_experiments_compose(experiment: str):
-    from hydra import compose, initialize_config_dir
-    from hydra.core.global_hydra import GlobalHydra
-    from omegaconf import OmegaConf
-
-    from training.config import register_configs
-
-    register_configs()
-    if GlobalHydra().is_initialized():
-        GlobalHydra.instance().clear()
-    with initialize_config_dir(version_base=None, config_dir=str(REPO_ROOT / "conf")):
-        cfg = compose(
-            config_name="config", overrides=[f"experiment={experiment}", "validate_only=true"]
-        )
-        OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
-
-
 # ---------------------------------------------------------------------------
 # (e) latent-space regularisation: vicinal z-noise + FiLM spectral norm
 # ---------------------------------------------------------------------------

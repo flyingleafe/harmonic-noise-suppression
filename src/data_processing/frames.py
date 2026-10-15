@@ -100,7 +100,7 @@ def with_meta(frame: td.Frame, **updates: Any) -> td.Frame:
 PUBLISHED_RPS_KEYS = ("rps", "motors_measured", "motors_command")
 
 
-def adapt_recording_frame(frame: td.Frame, *, sample_rate: int) -> td.Frame | None:
+def adapt_recording_frame(frame: td.Frame, *, sample_rate: int | None) -> td.Frame | None:
     """Rich published recording -> the minimal (audio + rps) noise-source Frame.
 
     Published frames datasets (``DREGON-frames`` / ``michaels-frames`` / any
@@ -111,7 +111,8 @@ def adapt_recording_frame(frame: td.Frame, *, sample_rate: int) -> td.Frame | No
     treats as needing **no** cleaning, so no fix logic is ever re-applied at
     load time. Everything else (IMU, raw telemetry, geometry, per-sample
     clocks) is dropped so pools keep only what they slice; audio is
-    soxr-resampled to ``sample_rate``. Returns ``None`` for frames without
+    soxr-resampled to ``sample_rate`` (``None`` keeps the published native
+    rate — the ``noise_rate_warp`` pool). Returns ``None`` for frames without
     audio or a rotor track (e.g. clean-source recordings).
     """
     if "audio" not in frame:
@@ -119,8 +120,9 @@ def adapt_recording_frame(frame: td.Frame, *, sample_rate: int) -> td.Frame | No
     rps_key = next((k for k in PUBLISHED_RPS_KEYS if k in frame), None)
     if rps_key is None:
         return None
+    audio = frame["audio"]
     entries: dict[str, Any] = {
-        "audio": resample_audio_series(frame["audio"], int(sample_rate)),
+        "audio": audio if sample_rate is None else resample_audio_series(audio, int(sample_rate)),
         "rps": frame[rps_key],
     }
     if "meta" in frame:

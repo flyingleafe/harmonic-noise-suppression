@@ -2,24 +2,27 @@
 
 Two numbers, and the split between them is deliberate.
 
-``bce`` mirrors :class:`losses.LayerPITSalienceBCELoss` exactly, so
-``optim.monitor: bce`` selects checkpoints on the training objective itself
-rather than on a second, misaligned scalar.
+``bce`` mirrors :class:`losses.LayerPITSalienceBCELoss` exactly (same grid
+spec, ``sigma_rev_s`` and ``focus``), so the training objective can be read on
+the validation set.
 
 ``rps_mae`` is the same object in rev/s: each layer's peak, refined by the
-three-point log-parabolic fit, PIT-aligned to the target. It reads the layers
-the way `models.salience_crf` proves is exact — the log of a Gaussian is a
-parabola, so three consecutive bins locate the vertex with no residue — and it
-is NOT the deployed decoder, which is a CRF best path per layer
+three-point log-parabolic fit in rev/s coordinates, PIT-aligned to the target.
+It reads the layers the way `models.salience_crf` proves is exact — the log of a
+Gaussian is a parabola, so three bins locate the vertex with no residue on any
+grid; an argmax at bin 0 (the off state) reads 0.0 — and it is NOT the deployed
+decoder, which is a CRF best path per layer
 (`models.harmonic_ports.layer_readout`). The difference is temporal robustness
 only: on a correct layer the two agree, and the CRF additionally survives a
-frame whose own peak is wrong. The CRF is not used here because it costs about
-15 s per clip on CPU, and metrics run per sample on CPU.
+frame whose own peak is wrong. The CRF is not used here because metrics run per
+sample on CPU.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from itertools import permutations
+from typing import Any
 
 import numpy as np
 import tdseries as td
@@ -27,10 +30,9 @@ import torch
 import torch.nn.functional as F
 
 from framespec import FrameSpec, SeriesSpec
-from losses.salience_layers import layer_pit_bce
+from losses.salience_layers import layer_pit_bce, resolve_focus
 from metrics._common import get_array
-from models.multif0.utils import linear_freq_grid
-from models.salience_crf import gaussian_layer_target
+from models.salience_crf import gaussian_layer_target, grid_from_spec, refine_peak
 
 __all__ = ["LayerPITSalienceBCEMetric", "LayerPeakRPSMetric", "peak_readout"]
 
@@ -38,21 +40,15 @@ __all__ = ["LayerPITSalienceBCEMetric", "LayerPeakRPSMetric", "peak_readout"]
 def peak_readout(scores: torch.Tensor, grid: np.ndarray) -> torch.Tensor:
     """``(B, R, G, T)`` LOG-domain layers -> ``(B, R, T)`` rev/s.
 
-    Argmax along the rate axis, then the three-point log-parabolic vertex. On a
-    Gaussian layer this is exact; it is the readout without the CRF's temporal
-    model.
+    Argmax along the rate axis, then `models.salience_crf.refine_peak` (the
+    three-point parabola in rev/s; bin 0 reads 0.0). On a Gaussian layer this
+    is exact; it is the readout without the CRF's temporal model.
     """
-    g = torch.as_tensor(np.asarray(grid), dtype=torch.float64, device=scores.device)
-    step = float(g[1] - g[0])
-    n_g = g.numel()
     s = scores.double()
-    i0 = s.argmax(dim=2).clamp(1, n_g - 2)  # (B, R, T)
-    a = s.gather(2, (i0 - 1).unsqueeze(2)).squeeze(2)
-    c0 = s.gather(2, i0.unsqueeze(2)).squeeze(2)
-    c = s.gather(2, (i0 + 1).unsqueeze(2)).squeeze(2)
-    den = a - 2 * c0 + c
-    delta = torch.where(den.abs() < 1e-300, torch.zeros_like(den), 0.5 * (a - c) / den)
-    return g[i0] + delta.clamp(-1, 1) * step
+    b, r, n_g, n_t = s.shape
+    flat = s.reshape(b * r, n_g, n_t)
+    g = torch.as_tensor(np.asarray(grid), dtype=torch.float64, device=scores.device)
+    return refine_peak(flat, flat.argmax(dim=1), g).reshape(b, r, n_t)
 
 
 def _pit_mae(pred: torch.Tensor, tgt: torch.Tensor) -> float:
@@ -71,20 +67,18 @@ class _LayerGridMetric:
     def __init__(
         self,
         *,
-        out_fmin: float = 0.0,
-        out_fmax: float = 150.0,
-        out_bins: int = 300,
+        grid: Mapping[str, Any],
         n_layers: int = 4,
-        sigma_bins: float = 1.0,
-        focus: float = 0.0,
+        sigma_rev_s: float = 1.0,
+        focus: float | str = 0.0,
         rate: tuple[int, int] | None = None,
         pred_key: str = "salience",
         target_key: str = "rps",
     ) -> None:
-        self._freqs = linear_freq_grid(out_fmin, out_fmax, out_bins)
+        self._freqs = grid_from_spec(grid)
         self.n_layers = int(n_layers)
-        self.sigma_bins = float(sigma_bins)
-        self.focus = float(focus)
+        self.sigma_rev_s = float(sigma_rev_s)
+        self.focus = resolve_focus(focus, self._freqs, self.sigma_rev_s)
         self.pred_key = pred_key
         self.target_key = target_key
         self.requires_pred = FrameSpec(
@@ -114,7 +108,7 @@ class LayerPITSalienceBCEMetric(_LayerGridMetric):
 
     def __call__(self, pred: td.Frame, target: td.Frame) -> float:
         layers, rps_grid = self._unpack(pred, target)
-        tgt = gaussian_layer_target(rps_grid, self._freqs, sigma_bins=self.sigma_bins)
+        tgt = gaussian_layer_target(rps_grid, self._freqs, sigma_rev_s=self.sigma_rev_s)
         return float(layer_pit_bce(layers, tgt, focus=self.focus).item())
 
 

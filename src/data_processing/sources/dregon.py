@@ -76,13 +76,11 @@ DOWNLOAD_URLS = {
     "spinning_nosource_room2": f"{DREGON_BASE_URL}/?smd_process_download=1&download_id=370",
 }
 
-SplitName = Literal["in_flight_source", "in_flight_noise", "noise_free", "motor", "clean_source"]
+SplitName = Literal["in_flight_source", "in_flight_noise", "test", "motor", "clean_source"]
 
 SPLIT_RECORDINGS: dict[SplitName, list[str]] = {
     "in_flight_source": [
-        "free-flight_speech-high_room1",
         "free-flight_speech-low_room1",
-        "free-flight_whitenoise-high_room1",
         "free-flight_whitenoise-low_room1",
     ],
     "in_flight_noise": [
@@ -93,10 +91,21 @@ SPLIT_RECORDINGS: dict[SplitName, list[str]] = {
         "rectangle_nosource_room2",
         "spinning_nosource_room2",
     ],
-    "noise_free": ["silent-flight_whitenoise-low_room1"],
+    # Held-out TEST recordings (paper-real protocol, scored once at the end):
+    # no training or validation derivation / online-mix pool may resolve them.
+    # The published DREGON-frames@261b… predates this split (its meta still
+    # says in_flight_source / noise_free), so guards key on TEST_RECORDING_IDS.
+    "test": [
+        "free-flight_speech-high_room1",
+        "free-flight_whitenoise-high_room1",
+        "silent-flight_whitenoise-low_room1",
+    ],
     "motor": [],
     "clean_source": [],
 }
+
+#: The DREGON held-out test recordings, by recording id (see ``SPLIT_RECORDINGS``).
+TEST_RECORDING_IDS: tuple[str, ...] = tuple(SPLIT_RECORDINGS["test"])
 
 
 # ─── Raw download (custom fetch: some "zips" are raw wavs) ────────────────────

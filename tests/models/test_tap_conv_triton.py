@@ -95,8 +95,8 @@ def test_random_table_fp16():
 
 
 def test_pyramid_table_k84():
-    """The real k ≤ 84 pyramid table on the 154-bin grid (duplicates from 1/k taps)."""
-    m = HPPNetPyramid(out_bins=154, k_max=84)
+    """The real k ≤ 84 pyramid table on the 164-bin grid (duplicates from 1/k taps)."""
+    m = HPPNetPyramid(k_max=84)
     lo, frac, valid = (
         torch.as_tensor(getattr(m, k)) for k in ("harm_lo", "harm_frac", "harm_valid")
     )

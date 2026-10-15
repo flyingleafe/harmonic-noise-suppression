@@ -33,6 +33,7 @@ from typing import Any
 
 import tdseries as td
 
+from data_processing import downloaders
 from data_processing.sources import (
     aerosonicdb,
     avq,
@@ -266,6 +267,21 @@ REGISTRY: dict[str, SourceDataset] = {
             raw_dataset="librispeech",
         ),
         SourceDataset(
+            name="librispeech-dev-clean",
+            provenance={
+                "source_url": "https://www.openslr.org/12",
+                "license": "CC BY 4.0",
+                "citation": "Panayotov et al., LibriSpeech (ICASSP 2015).",
+                "description": (
+                    "dev-clean speech utterances (flac, LibriSpeech/dev-clean), "
+                    "consumed as files: the speech of the rp-real-valid panel "
+                    "(never in a training stream)."
+                ),
+            },
+            fetcher=downloaders.fetch_librispeech_dev_clean,
+            raw_dataset="librispeech-dev-clean",
+        ),
+        SourceDataset(
             name="drone_audio",
             provenance={
                 "source_url": "https://github.com/saraalemadi/DroneAudioDataset",
@@ -342,8 +358,6 @@ def download_dataset(name: str, dest: Path) -> Path:
     Entries whose raw files live in a dload ``raw_dataset`` have nothing to
     fetch here — use :func:`raw_root`.
     """
-    from data_processing import downloaders
-
     entry = get(name)
     dest = Path(dest)
     if entry.fetcher is not None:

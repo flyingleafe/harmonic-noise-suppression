@@ -350,8 +350,9 @@ which is why it is kept minimal; today's `FreqSuperResHead` (2 × Conv(5×1)
 → 32 ch → BN → ReLU, first layer mixing the maps, ~6k parameters) is
 replaced.
 
-What the old head actually does, measured (`scripts/_probe_l2_head.py`,
-2026-10-14; `hppnet_l2_r2_s0` `best.ckpt`, the frozen real split at mic 0,
+What the old head actually does, measured (`scripts/_probe_l2_head.py` at
+commit eb62e8d8, removed with `FreqSuperResHead` on 2026-10-14;
+`hppnet_l2_r2_s0` `best.ckpt`, the frozen real split at mic 0,
 rotors-on frames): full model PIT-MAE 1.92 rev/s; with the head's conv
 stack removed (W interpolation only, same CRF) **27.5**; the trunk's own
 maps read by argmax **203** — they are saturated (sigmoid median 0.94,
@@ -374,10 +375,13 @@ Translation head, definition:
    where it is coarser. Rows sum to 1 (logit scale preserved); no log bin
    is skipped (today's point-sampling `_freq_interp_matrix` skips bins
    below 67 rev/s).
-3. **Below the trunk's grid.** Output bins in (0, 27.5) rev/s have no input
-   bin (CQT `fmin` 27.5): rows are 0, not a clamped copy of the 27.5 bin.
-   A rotor passing 1–27 rev/s is unrepresentable by L0/L1/L2 — a stated
-   limitation of the published grids.
+3. **Below the trunk's grid.** Output bins whose ±half-bin window holds no
+   log bin (those in (0, ~27.3) rev/s for CQT `fmin` 27.5) have zero W rows
+   AND a fixed, non-learned logit of −10 after the conv (a zero logit would
+   be p = 0.5 there, an unlearnable BCE term the CRF could prefer on a
+   weak frame); the mask is the head's `unreachable` buffer. A rotor
+   passing 1–27 rev/s is unrepresentable by L0/L1/L2 — a stated limitation
+   of the published grids.
 4. **Zero bin = off state.** L1 needs a per-map off logit for its CRF (a
    linear read of the trunk's frequency-pooled last features, C → 1 per
    map); L2 routes it into bin 0 (identity). "Off" then means the same on

@@ -1,0 +1,19 @@
+# Validation twin of conf/loss/salience_layers_log48.yaml (HPPNet / HarmoF0
+# L1: 352-bin log grid from 27.5 at 48 per octave + the off state). See
+# conf/metrics/salience_layers_rp.yaml for what the two terms are.
+terms:
+  - name: bce
+    _target_: metrics.LayerPITSalienceBCEMetric
+    params:
+      grid: {kind: log_off, fmin: 27.5, bins_per_octave: 48, n_bins: 352}
+      n_layers: 4
+      sigma_rev_s: 1.0
+      focus: auto
+      rate: [16000, 512]
+  - name: rps_mae
+    _target_: metrics.LayerPeakRPSMetric
+    params:
+      grid: {kind: log_off, fmin: 27.5, bins_per_octave: 48, n_bins: 352}
+      n_layers: 4
+      sigma_rev_s: 1.0
+      rate: [16000, 512]

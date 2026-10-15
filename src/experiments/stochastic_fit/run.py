@@ -189,19 +189,19 @@ def fit(args: argparse.Namespace) -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"device {device}", flush=True)
-    rows = clip_set(args, args.recordings)
+    clips = clip_set(args, args.recordings)
     if args.shard:
         i, n = (int(x) for x in args.shard.split("/"))
-        rows = rows[i::n]
+        clips = clips[i::n]
     variants = {k: VARIANTS[k] for k in args.variants}
-    print(f"{len(rows)} clips x {list(variants)}", flush=True)
+    print(f"{len(clips)} clips x {list(variants)}", flush=True)
     results = Path(args.results_dir)
     results.mkdir(parents=True, exist_ok=True)
     summary_path = results / f"summary_{args.tag}.json"
     rows: list[dict[str, Any]] = (
         json.loads(summary_path.read_text()) if summary_path.exists() else []
     )
-    for _cid, _group, clip, pg in rows:
+    for _cid, _group, clip, pg in clips:
         for name, variant in variants.items():
             out = results / name / f"{clip.clip_id}.npz"
             if out.exists():
@@ -716,11 +716,10 @@ def population_raw_gate(args: argparse.Namespace) -> None:
                 "choices": [
                     {
                         "random_reverb": {
-                            "n_rirs": 200,
                             "rt60_low": 0.1,
                             "rt60_high": 0.8,
-                            "drr_low_db": 3.0,
-                            "drr_high_db": 15.0,
+                            "drr_db_low": 3.0,
+                            "drr_db_high": 15.0,
                         }
                     }
                 ],
