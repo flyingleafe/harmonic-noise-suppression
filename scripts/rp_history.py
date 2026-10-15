@@ -44,9 +44,9 @@ def wandb_rounds(run_id: str) -> tuple[str, list[dict]]:
     import wandb
 
     run = wandb.Api().run(f"flyingleafe/harmonic-noise-suppression/{run_id}")
-    keys = ["optimizer_step", "lr", "val/real_macro_median", "validation/stop_reason"] + [
-        f"val/{v}" for v in VIEWS
-    ]
+    # scan_history(keys=...) yields only rows carrying EVERY key: the stop
+    # reason lives in the jsonl alone, so it must not be requested here.
+    keys = ["optimizer_step", "lr", "val/real_macro_median"] + [f"val/{v}" for v in VIEWS]
     return f"{run.name} [{run.state}]", list(run.scan_history(keys=keys))
 
 
