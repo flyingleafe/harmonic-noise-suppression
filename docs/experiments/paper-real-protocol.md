@@ -182,43 +182,49 @@ moving training distribution (schedule plot: `scripts/_sched_plot.py`).
 An arm that stops early never reaches the cosine tail, so arms differ in
 realised budget; every table reports the stopping step next to the score.
 
-**Max LR per model** — never tuned so far; decided by an **LR range test**
-(Smith 2017; fastai `lr_find`) per trunk family, not per arm: the real
-data/loss/optimizer on `all` with the step-0 augmentation set, no
-validation, LR growing geometrically 1e-5 → 1e-1 over 3 000 steps, logging
-(step, LR, training loss). Reading (revised 2026-10-15 on the first
-curves): smooth the loss with a bias-corrected EMA (β = 0.99); floor = its
-minimum. Two endings: **hard divergence** — the loss goes non-finite (fp16
-forward overflow) and the sweep stops: **max LR = divergence / 3**, the
-classic Smith reading, since the loss was still falling right up to it;
-**drift** — the loss creeps up instead: rise = the first LR after the floor
-from which the smoothed loss stays ≥ 5 % above the floor for 100 steps,
-**max LR = rise / 10, at most the floor's LR** (the creep starts well
-before the band fires). Snapped to the half-decade grid {1e-4, 3e-4,
-1e-3, 3e-3, …}; `min_lr` stays 1 % of it. The "steepest sustained descent"
-rule first written here is not used: the loss falls at any LR during the
-first few hundred steps (the HarmoF0 curve put the steepest slope at
-1.8e-5), and with AdamW + gradient clipping the salience losses never
-diverge inside the range (the 50 % divergence cap never fired). Readings
-so far — HarmoF0: flat from 1e-4 to 1e-2, drifts up from 1.6e-2 →
-**1e-3**; Basic Pitch: never rises, floor at 4.8e-3 → **3e-3**;
-SimpleConv: the PIT-MSE falls 4 800 → 95 between 1e-4 and 6e-3, rises
-from 7.8e-3 → **1e-3**; SCv2: still falling steeply at 3.4e-3 when the
-fp16 forward went non-finite at 3.5e-3 → **1e-3** (the drift reading,
-3e-4, was first written here and reverted the same day: every earlier
-SCv2 run trained stably at 1e-3, which the curve confirms — Dmitrii).
-Families: HPPNet L0,
-HPPNet L2 (inherited by L1), +k84, +ConvLSTM, HRSPNet, HarmoF0 L2, Basic
-Pitch L2, LateDeep L2, SimpleConv, best regressor — 10 tests × 3k steps,
-under a third of one run, each a `uni-gpushort` job. Labelaug and transfer
-arms inherit their family's LR. Driver: `scripts/lr_range_test.py`
-(`--summary` recomputes every reading from the committed raw curves under
-`results/rp_lr_range/`); the chosen values are stated in each experiment's
-sibling `.md`.
+**Max LR: 1e-3 for every model** (decided 2026-10-15, Dmitrii) — the LR
+each architecture we build on was published with, so the choice is
+citable rather than ours: HarmoF0 "Adam with default hyperparameters and
+a learning rate of 10⁻³ for 50 epochs" (Wei et al. 2022, § 3); Cuesta et
+al. 2020 (the Late/Deep HCQT CNN) "Adam optimizer with a learning rate of
+0.001 … batch size of 16"; SimpleConv "AdamW (learning rate 10⁻³, weight
+decay 10⁻⁴), batch size 16, mixed-precision, gradient clipping at 5.0"
+(Mukhutdinov & Wang, Quiet Drones 2026, § 2.4) — the regime every earlier
+run of this project used; HPPNet "Adam optimizer with mini-batch size 4,
+and a learning rate of 0.0006" (Wei et al. 2022, § 3.2), rounded up to
+1e-3 at our 32× larger batch; Basic Pitch's paper states no optimizer
+(its public code trains with Adam at 1e-3). Context, not adopted: PESTO
+Adam 1e-4 at batch 256; Liu et al. 2025 AdamW 5e-4; FCNF0++ a fixed 250k
+steps with no early stopping. All library full texts, read 2026-10-15.
+`min_lr` stays 1 % of the max.
 
-Precedent: PESTO trains 50 epochs under cosine annealing (Adam 1e-4);
-FCNF0++ omits early stopping and trains a fixed 250k steps (library full
-texts, 2026-10-14).
+**LR range test (appendix check, not the selection rule).** One sweep per
+trunk family (Smith 2017; fastai `lr_find`): the real data/loss/optimizer
+on `all` with the step-0 augmentation set, no validation, LR growing
+geometrically 1e-5 → 1e-1 over 3 000 steps, logging (step, LR, training
+loss); the sweep stops on a non-finite loss. Driver
+`scripts/lr_range_test.py`; raw curves committed under
+`results/rp_lr_range/`; `--summary` reads them with the rule below. The
+curves so far all put 1e-3 inside the stable descent: HarmoF0 flat from
+1e-4 to 1e-2, drifting up from 1.6e-2; Basic Pitch never rises (floor at
+4.8e-3); SimpleConv's PIT-MSE falls 4 800 → 95 between 1e-4 and 6e-3 and
+rises from 7.8e-3; SCv2 still falling steeply at 3.4e-3 when the fp16
+forward went non-finite at 3.5e-3. HPPNet (64 × 2) and LateDeep pending
+(32 GB cards; 16 GB OOMs). The automatic reading the driver reports —
+EMA β = 0.99; hard divergence → divergence / 3; else rise = first LR after
+the floor staying ≥ 5 % above it for 100 steps → rise / 10, at most the
+floor's LR; snapped to half-decades — gave 1e-3, 3e-3, 1e-3, 1e-3 for the
+four; it is ours (the ÷10 is fastai's `minimum` heuristic, the ÷3 Smith
+folklore) and is reported, not used. A "steepest sustained descent"
+reading was tried first and dropped: the loss falls at any LR during the
+first few hundred steps (HarmoF0's steepest slope landed at 1.8e-5).
+Families: HPPNet L0, HPPNet L2 (inherited by L1), +k84, +ConvLSTM, HRSPNet,
+HarmoF0 L2, Basic Pitch L2, LateDeep L2, SimpleConv, best regressor — 10
+sweeps × 3k steps, each a `uni-gpushort` job.
+
+Precedent for the schedule: PESTO trains 50 epochs under cosine annealing
+(Adam 1e-4); FCNF0++ omits early stopping and trains a fixed 250k steps
+(library full texts, 2026-10-14).
 
 ### Checkpoints
 

@@ -12,4 +12,4 @@ Claim 6 (labelaug does not buy transfer): HPPNet at ladder level L2 (rp linear g
 
 ## Conclusion
 
-Defined 2026-10-14; not yet run. Max LR to be set from the family's LR range test.
+Defined 2026-10-14; not yet run. Max LR 1e-3 — the LR every architecture we build on was published with (docs/experiments/paper-real-protocol.md § "Budget and LR"); the family's LR range test is reported in the appendix.

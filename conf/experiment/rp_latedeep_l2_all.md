@@ -12,4 +12,4 @@ Claim 2 (HPPNet best up to L2; L0→L1 vs L1→L2 attribution): LateDeep (hop 25
 
 ## Conclusion
 
-Defined 2026-10-14; not yet run. Max LR to be set from the family's LR range test.
+Defined 2026-10-14; not yet run. Max LR 1e-3 — the LR every architecture we build on was published with (docs/experiments/paper-real-protocol.md § "Budget and LR"); the family's LR range test is reported in the appendix.

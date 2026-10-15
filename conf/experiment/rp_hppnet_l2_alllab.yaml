@@ -17,4 +17,4 @@ data:
     params:
       path: conf/online_mix/rp_all_labelaug.yaml
 optim:
-  lr: 1.0e-3  # placeholder: set from results/rp_lr_range/hppnet.json (LR range test)
+  lr: 1.0e-3  # the max LR of published practice (HarmoF0, Cuesta 2020, Quiet Drones 2026: 1e-3; HPPNet 6e-4 at batch 4); range tests -> appendix
