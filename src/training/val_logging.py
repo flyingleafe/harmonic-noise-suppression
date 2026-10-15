@@ -35,8 +35,8 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 import tdseries as td
-import wandb
 
+import wandb
 from data_processing.frames import get_meta
 from plots.noise_gen import extract_noise_gen_pair
 from plots.se import extract_se_triple

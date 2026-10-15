@@ -182,7 +182,7 @@ def test_panel_run_writes_dual_bests_history_and_per_sample_arrays(tmp_path, mon
     row = history[0]
     assert row["optimizer_step"] == 2 and row["validation_round"] == 0 and "lr" in row
     assert row["val/real"] == pytest.approx(0.5 * row["val/dregon"] + 0.5 * row["val/md2"])
-    assert row["val/md2_cruise_clips"] == 1 and row["val/dregon_clip_std"] == 0.0
+    assert not [key for key in row if key.endswith(("_clips", "_clip_mean", "_clip_std"))]
     assert set(row["validation/improved_raw"]) == set(PRIMARY)
     assert not [key for key in row if key.endswith(("_log", "_log_median"))]
 

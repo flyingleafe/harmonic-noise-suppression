@@ -135,13 +135,15 @@ def test_plan_requires_the_control_among_primaries():
         )
 
 
-def test_scores_are_frame_weighted_and_clip_stats_pool_channels():
+def test_scores_are_frame_weighted_over_every_view_shape():
     views = {
         "dregon": {"where": {"dataset": "dregon"}},
         "md2": {"where": {"dataset": "md2"}},
         "dregon_zero": {"where": {"dataset": "dregon"}, "regime": "zero"},
         "dregon_cruise": {"where": {"dataset": "dregon"}, "regime": "cruise"},
         "md2_ramp": {"where": {"dataset": "md2"}, "regime": "ramp"},
+        "all": {"where": {}},
+        "all_cruise": {"where": {}, "regime": "cruise"},
     }
     plan = build_validation_plan(
         _panel_cfg(views, aggregates={"real": {"dregon": 0.5, "md2": 0.5}})
@@ -169,16 +171,8 @@ def test_scores_are_frame_weighted_and_clip_stats_pool_channels():
         if view.regime is not None:
             mask = mask & (regimes == view.regime)
         assert scores[view.name] == pytest.approx(expected_err[mask].mean(), rel=1e-5)
-        clip_means = [
-            expected_err[(plan.clip_index == clip)[:, None] & mask].mean()
-            for clip in np.unique(plan.clip_index)
-            if mask[plan.clip_index == clip].any()
-        ]
-        stats = samples.clip_stats[view.name]
-        assert stats.count == len(clip_means)
-        assert stats.mean == pytest.approx(np.mean(clip_means), rel=1e-5)
-        assert stats.std == pytest.approx(np.std(clip_means), rel=1e-5, abs=1e-9)
-    assert samples.clip_stats["dregon_zero"].count == 1  # only clip 1 has stopped rotors
+    assert plan.views[5].samples.all()  # an empty `where` pools the whole panel
+    assert scores["all"] == pytest.approx(expected_err.mean(), rel=1e-5)
     assert scores["real"] == pytest.approx(0.5 * scores["dregon"] + 0.5 * scores["md2"])
     # Frame weighting differs from averaging per-item means on a regime cell.
     zero_mask = (regimes == REGIMES.index("zero")) & plan.views[2].samples[:, None]

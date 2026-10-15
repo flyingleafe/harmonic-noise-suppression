@@ -40,7 +40,6 @@ __all__ = [
     "CLIP_KEY",
     "ResolvedView",
     "ValidationPlan",
-    "ViewClipStats",
     "ValidationSamples",
     "RPSReadout",
     "build_validation_plan",
@@ -75,13 +74,6 @@ class ValidationPlan:
 
 
 @dataclass(frozen=True)
-class ViewClipStats:
-    mean: float
-    std: float
-    count: int
-
-
-@dataclass(frozen=True)
 class ValidationSamples:
     """Per-sample output of one validation round (host arrays)."""
 
@@ -90,7 +82,6 @@ class ValidationSamples:
     frame_regime: np.ndarray  # (N, T) int8, metrics.regimes codes
     clip_index: np.ndarray  # (N,)
     channel: np.ndarray  # (N,)
-    clip_stats: dict[str, ViewClipStats]
 
     def arrays(self) -> dict[str, np.ndarray]:
         """The per-sample arrays written to ``val_samples/round_<N>.npz``."""
@@ -255,10 +246,8 @@ def rps_readout_for(task_name: str) -> RPSReadout:
 
 def _reduce_views(
     plan: ValidationPlan, frame_err: np.ndarray, frame_regime: np.ndarray
-) -> tuple[dict[str, float], dict[str, ViewClipStats]]:
+) -> dict[str, float]:
     scores: dict[str, float] = {}
-    clip_stats: dict[str, ViewClipStats] = {}
-    n_clips = int(plan.clip_ids.max()) + 1
     errors = frame_err.astype(np.float64)
     for view in plan.views:
         mask = np.broadcast_to(view.samples[:, None], frame_err.shape)
@@ -267,17 +256,10 @@ def _reduce_views(
         frames = mask.sum(axis=1)
         if not frames.any():
             raise RuntimeError(f"validation view {view.name!r} selected no frames this round")
-        sums = np.where(mask, errors, 0.0).sum(axis=1)
-        scores[view.name] = float(sums.sum() / frames.sum())
-        clip_sums = np.bincount(plan.clip_ids, weights=sums, minlength=n_clips)
-        clip_frames = np.bincount(plan.clip_ids, weights=frames, minlength=n_clips)
-        clip_means = clip_sums[clip_frames > 0] / clip_frames[clip_frames > 0]
-        clip_stats[view.name] = ViewClipStats(
-            mean=float(clip_means.mean()), std=float(clip_means.std()), count=len(clip_means)
-        )
+        scores[view.name] = float(np.where(mask, errors, 0.0).sum() / frames.sum())
     for name, weights in plan.aggregates.items():
         scores[name] = sum(scores[part] * weight for part, weight in weights.items())
-    return scores, clip_stats
+    return scores
 
 
 def validate_rps(
@@ -333,13 +315,12 @@ def validate_rps(
     frame_err = torch.cat(errors).cpu().numpy().astype(np.float32)
     frame_regime = torch.cat(labels).cpu().numpy()
     loss_value = float(loss_sum.cpu()) / max(sample_count, 1)
-    scores, clip_stats = _reduce_views(plan, frame_err, frame_regime)
+    scores = _reduce_views(plan, frame_err, frame_regime)
     samples = ValidationSamples(
         pit_mae=frame_err.mean(axis=1, dtype=np.float64).astype(np.float32),
         frame_err=frame_err,
         frame_regime=frame_regime,
         clip_index=plan.clip_index,
         channel=plan.channel,
-        clip_stats=clip_stats,
     )
     return scores, loss_value, samples

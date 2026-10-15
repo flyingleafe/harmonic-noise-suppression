@@ -944,10 +944,6 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
             log_payload.update(
                 {f"val/{name}_median": value for name, value in verdict.smoothed.items()}
             )
-            for name, stats in samples.clip_stats.items():
-                log_payload[f"val/{name}_clip_mean"] = stats.mean
-                log_payload[f"val/{name}_clip_std"] = stats.std
-                log_payload[f"val/{name}_clips"] = stats.count
             log_payload["validation/stale_rounds"] = controller.stale_rounds
             log_payload["validation/rounds_completed"] = controller.rounds_completed
             history_extra = {

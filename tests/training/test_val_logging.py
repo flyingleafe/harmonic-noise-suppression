@@ -12,8 +12,8 @@ from typing import Any
 
 import numpy as np
 import tdseries as td
-import wandb
 
+import wandb
 from framespec import FrameSpec
 from tasks.task import Task
 from training.val_logging import log_validation_samples, select_val_sample_indices

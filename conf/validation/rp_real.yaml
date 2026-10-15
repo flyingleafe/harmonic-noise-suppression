@@ -42,6 +42,14 @@ views:
   md2_standby: {where: {dataset: md2}, regime: standby}
   md2_ramp: {where: {dataset: md2}, regime: ramp}
   md2_cruise: {where: {dataset: md2}, regime: cruise}
+  # pooled over both datasets, frame-weighted (`real` above is the macro mean)
+  all: {where: {}}
+  all_nosource: {where: {source_type: nosource}}
+  all_source: {where: {source_type: [loudspeaker, mixed]}}
+  all_zero: {where: {}, regime: zero}
+  all_standby: {where: {}, regime: standby}
+  all_ramp: {where: {}, regime: ramp}
+  all_cruise: {where: {}, regime: cruise}
 
 aggregates:
   real: {dregon: 0.5, md2: 0.5}
@@ -62,3 +70,10 @@ primary:
   - md2_standby
   - md2_ramp
   - md2_cruise
+  - all
+  - all_nosource
+  - all_source
+  - all_zero
+  - all_standby
+  - all_ramp
+  - all_cruise

@@ -228,7 +228,10 @@ Precedent for the schedule: PESTO trains 50 epochs under cosine annealing
 
 ### Checkpoints
 
-Every round writes `last.ckpt`. For each of the 15 scores, two bests:
+Every round writes `last.ckpt`. For each of the 22 scores (the 14
+dataset × {source, regime} views, the macro `real`, and the seven pooled
+`all`, `all_{nosource,source}`, `all_{zero,standby,ramp,cruise}` — frame-
+weighted over both datasets; added 2026-10-15, Dmitrii), two bests:
 `best_<score>_median.ckpt` (5-round median improves, ≥ 1 % relative — what
 `stable_improvements` does today) and `best_<score>_raw.ckpt` (raw round
 value improves). All are hard links to `last.ckpt`
@@ -494,8 +497,10 @@ Each `conf/experiment/rp_*.yaml` gets its sibling `.md` with
 ## Implementation notes (for the cutover)
 
 - `conf/validation/`: new panel config (datasets = the new derived split;
-  views by meta predicates, not index ranges; 15 scores; `control: real`);
-  the controller loses its LR branch; validation emits no `_log` scores.
+  views by meta predicates, not index ranges; 22 scores; `control: real`);
+  the controller loses its LR branch; validation emits no `_log` scores and
+  no per-clip `_clips`/`_clip_mean`/`_clip_std` (dropped 2026-10-15; the
+  SCv2 pilot still logs them — reads in `val_samples/` instead).
 - `src/training/loop.py`: step-based warm-up + cosine; remove
   `ReduceLROnPlateau` and the epoch-level `patience` counter (the
   controller's saturation stop stays); dual best checkpoints per score;

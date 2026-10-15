@@ -27,10 +27,10 @@ trainer scripts.
 - `best_checkpoints.json`: `"<score>/median"|"<score>/raw" → {checkpoint,
   validation_round, optimizer_step, raw, median}`; `_warm_start`'s
   `best:<score>@<exp>` resolves the median file.
-- `validation_history.jsonl` per round: `val/<score>`, `val/<view>_median`,
-  `val/<view>_clip_{mean,std}`, `val/<view>_clips`, `lr`, `optimizer_step`,
+- `validation_history.jsonl` per round: `val/<score>`, `val/<score>_median`,
+  `lr`, `optimizer_step`,
   `validation/{stale_rounds,rounds_completed,improved_median,improved_raw,stop_reason}`;
-  no `_log` scores.
+  no `_log` scores, no per-clip stats (read `val_samples/` for those).
 - `val_samples/round_<NNNN>.npz` every round (`pit_mae`, `frame_err`,
   `frame_regime` int8, `clip_index`, `channel`); uploaded only on rounds
   where some best moved. A non-finite round stops before any write.
