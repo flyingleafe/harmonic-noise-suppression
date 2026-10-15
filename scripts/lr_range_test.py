@@ -117,8 +117,10 @@ def run(args: argparse.Namespace) -> dict:
     _task, codec = build_task_and_codec(cfg.model)
     model = instantiate_model(cfg.model).to(device)
     loss_fn = build_losses(cfg.loss).to(device)
-    batch_size = int(cfg.data.batch_size or cfg.batch_size)
-    grad_accum = max(1, int(cfg.grad_accum_steps))
+    # The experiment's batch (128 x 1, A100-80) OOMs on the 16 GB short-queue
+    # cards; the same effective batch as 64 x 2 is gradient-equivalent here.
+    batch_size = int(args.batch_size or cfg.data.batch_size or cfg.batch_size)
+    grad_accum = max(1, int(args.grad_accum or cfg.grad_accum_steps))
     workers = cfg.data.num_workers if cfg.data.num_workers is not None else cfg.num_workers
     loader = _make_loader(
         build_dataset(cfg.data.train), batch_size=batch_size, num_workers=int(workers), shuffle=True
@@ -260,6 +262,8 @@ def main() -> None:
         help="relative rise over the floor that ends the plateau",
     )
     p.add_argument("--window", type=int, default=100, help="steps the rise must persist")
+    p.add_argument("--batch-size", type=int, help="override the experiment's batch size")
+    p.add_argument("--grad-accum", type=int, help="override the experiment's grad_accum_steps")
     p.add_argument(
         "--stop-factor",
         type=float,
