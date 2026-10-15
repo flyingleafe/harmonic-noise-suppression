@@ -271,6 +271,27 @@ dropped altogether — the earlier runs never used it and no pitch paper
 does (table below); it had been the one transform with precedent only
 outside pitch work. The ramped `rp_*` streams are history (`b90f7bb5`).
 
+**Post-mortem, same day (the collapse was the off head, not the regime).**
+The rerun on the no-schedule stream degraded identically, ~1k steps later
+(`real_macro` 5.8 at step 2.5k → 20.3 at 4.5k → 36.8 at 5k) while
+`hppnet_l2_r2_s0`'s own W&B history shows it training at a flat 1e-3 from
+step 0 with no upturn, which ruled out the LR too. Probing the collapsed
+checkpoint on the panel (`/tmp/off_probe.py`, 12 clips): the salience map
+was correct throughout — cruise peak p 0.81 at ≈ 80 rev/s — but the OFF
+logit sat at p 0.94–0.97 on every regime, cruise included, so the CRF
+decoded "off" on 98 % of frames; forcing the off bin to −8 at decode time
+took the same checkpoint from 64.8 to 10.7 rev/s MAE. Cause: the layer
+BCE's `focus` weight (`1 + focus·target`, focus ≈ 65 = G / Gaussian mass)
+also multiplied bin 0, whose positive is a class present on every stopped
+frame (~20 % of training), tilting the off bin's loss ~65:1 towards "off";
+the cheapest `Linear` off head on pooled energy then says off everywhere.
+The earlier runs had no off bin (a stopped rotor was bin 0 of a plain
+0–150 grid). Fix: the off bin is excluded from the focus weight
+(`losses/salience_layers.py`, regression test
+`test_the_off_bin_is_not_focus_weighted`). The no-schedule stream stays —
+it is what every earlier run and every pitch paper did — but the ramp was
+not what broke HPPNet.
+
 | transform | where | parameters | labels | class |
 |---|---|---|---|---|
 | `random_gain` | post-mix, p 0.5 | U(−6, +6) dB | kept | info-preserving |

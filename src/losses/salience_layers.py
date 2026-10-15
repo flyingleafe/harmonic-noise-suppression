@@ -72,14 +72,21 @@ def layer_pit_bce(
         target: ``(B, R, G, T)`` soft per-rotor target in ``[0, 1]``.
         pos_weight: positive-class weight; ``None`` (the default) means 1, and
             see the module docstring for why anything else breaks the readout.
-        focus: PER-BIN emphasis, weight ``1 + focus * target``. This is the
-            class-imbalance handle that ``pos_weight`` cannot be here. It scales
-            each bin's WHOLE cross-entropy by a positive constant, and a
-            positive constant does not move a minimum — every bin's optimum
-            stays ``sigmoid(z) = target``, so the readout stays exact.
-            ``focus = G / m``, ``m`` the layer's expected Gaussian mass in bins
+        focus: PER-BIN emphasis, weight ``1 + focus * target`` on the RATE
+            bins (``1..``). This is the class-imbalance handle that
+            ``pos_weight`` cannot be here. It scales each bin's WHOLE
+            cross-entropy by a positive constant, and a positive constant does
+            not move a minimum — every bin's optimum stays ``sigmoid(z) =
+            target``, so the readout stays exact. ``focus = G / m``, ``m`` the
+            layer's expected Gaussian mass in bins
             (`models.salience_crf.layer_focus`), puts about equal total weight
-            on the peak and on everything else.
+            on the peak and on everything else. Bin 0 (the off state) is
+            EXCLUDED: its positive is a class present on every stopped frame
+            (silence arm + ground spans, ~20 % of training), not a sparse
+            peak, so the same weight there tilts its BCE ~65:1 towards "off"
+            and the cheapest off head says off everywhere — the HPPNet-L2
+            pilot collapse of 2026-10-15 (off p 0.95 on cruise frames above a
+            correct map). The off bin gets plain BCE.
 
     Returns:
         Scalar: the mean over the batch of the best assignment's mean BCE.
@@ -102,7 +109,9 @@ def layer_pit_bce(
         tgt = target[:, j : j + 1].expand(-1, r, -1, -1).to(logits.dtype)
         bce = F.binary_cross_entropy_with_logits(logits, tgt, pos_weight=pw, reduction="none")
         if focus:
-            bce = bce * (1.0 + float(focus) * tgt)
+            weight = 1.0 + float(focus) * tgt
+            weight[:, :, :1] = 1.0
+            bce = bce * weight
         cols.append(bce.mean(dim=(2, 3)))  # (B, R)
     cost = torch.stack(cols, dim=2)  # (B, R, R)
 

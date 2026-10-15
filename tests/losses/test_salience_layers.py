@@ -51,3 +51,37 @@ def test_the_optimum_is_the_target_on_a_log_grid_with_stopped_rotors():
         assert worse > at_opt
     pred, target = _frames(ideal.reshape(2, -1, 12), rps)
     assert float(loss(pred, target)) == pytest.approx(at_opt, rel=1e-5)
+
+
+def test_the_off_bin_is_not_focus_weighted():
+    """Focus balances a sparse Gaussian peak against its grid; the off bin is a
+    class present on every stopped frame, and weighting it the same way made
+    an off head that says off everywhere (HPPNet-L2 pilot, 2026-10-15). With
+    the off bin unweighted, saying off on ON frames must cost as much as
+    saying on-at-the-wrong-rate, not 1/66 of it."""
+    loss = LayerPITSalienceBCELoss(grid=LOG48, focus="auto")
+    assert loss.focus > 10  # the weight that tilted the off head
+    rps = torch.full((1, 4, 8), 60.0)  # every rotor ON
+    tgt = gaussian_layer_target(rps, loss._freqs, loss.sigma_rev_s)
+    ideal = torch.logit(tgt.clamp(1e-6, 1 - 1e-6))
+    off_everywhere = ideal.clone()
+    off_everywhere[:, :, 0] = 3.0  # p(off) ~ 0.95 above a correct map
+    base = float(layer_pit_bce(ideal, tgt, focus=loss.focus))
+    g = ideal.shape[2]
+    off_cost = float(layer_pit_bce(off_everywhere, tgt, focus=loss.focus)) - base
+    # The same logit error on a far-off rate bin (target 0, weight 1).
+    wrong_rate = ideal.clone()
+    wrong_rate[:, :, g // 2] = 3.0
+    rate_cost = float(layer_pit_bce(wrong_rate, tgt, focus=loss.focus)) - base
+    assert off_cost == pytest.approx(rate_cost, rel=1e-4)
+    # and the stopped frame's off bin still carries its (unweighted) BCE
+    rps_off = torch.zeros((1, 4, 8))
+    tgt_off = gaussian_layer_target(rps_off, loss._freqs, loss.sigma_rev_s)
+    said_on = torch.logit(tgt_off.clamp(1e-6, 1 - 1e-6))
+    said_on[:, :, 0] = -3.0
+    base_off = float(
+        layer_pit_bce(torch.logit(tgt_off.clamp(1e-6, 1 - 1e-6)), tgt_off, focus=loss.focus)
+    )
+    assert float(layer_pit_bce(said_on, tgt_off, focus=loss.focus)) - base_off == pytest.approx(
+        rate_cost, rel=0.05
+    )
