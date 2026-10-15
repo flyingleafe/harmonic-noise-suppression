@@ -183,11 +183,29 @@ def run(args: argparse.Namespace) -> dict:
     return result
 
 
+def summarize() -> None:
+    """One line per committed range test: the numbers the sibling .md files quote."""
+    for path in sorted((REPO_ROOT / "results" / "rp_lr_range").glob("*.json")):
+        r = json.loads(path.read_text())
+        if r["step_divergence"] is None:
+            diverge = "none"
+        else:
+            diverge = f"{r['lr_divergence']:.2e} @{r['step_divergence']}"
+        print(
+            f"{r['experiment']:28s} steps {r['steps_run']:4d}/{r['steps_requested']} "
+            f"batch {r['batch_size']}x{r['grad_accum_steps']} "
+            f"steepest {r['lr_steepest']:.2e} @{r['step_steepest']} "
+            f"diverge {diverge} cap {r['lr_cap']:.2e} "
+            f"-> {r['lr_recommended']:.0e}"
+        )
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--experiment", required=True)
+    p.add_argument("--experiment", help="omit with --summary")
+    p.add_argument("--summary", action="store_true", help="tabulate results/rp_lr_range/*.json")
     p.add_argument("--steps", type=int, default=3000)
     p.add_argument("--lr-start", type=float, default=1e-5)
     p.add_argument("--lr-end", type=float, default=1e-1)
@@ -202,7 +220,13 @@ def main() -> None:
         default=4.0,
         help="stop when the EMA exceeds this x its minimum",
     )
-    run(p.parse_args())
+    args = p.parse_args()
+    if args.summary:
+        summarize()
+    elif args.experiment:
+        run(args)
+    else:
+        p.error("--experiment or --summary is required")
 
 
 if __name__ == "__main__":
