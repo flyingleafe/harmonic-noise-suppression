@@ -182,16 +182,24 @@ realised budget; every table reports the stopping step next to the score.
 (Smith 2017; fastai `lr_find`) per trunk family, not per arm: the real
 data/loss/optimizer on `all` with the step-0 augmentation set, no
 validation, LR growing geometrically 1e-5 → 1e-1 over 3 000 steps, logging
-(step, LR, EMA of the training loss). Max LR = the LR of the steepest
-sustained descent of the smoothed loss, capped at ⅓ of the LR where the
-loss first rises, then snapped to the half-decade grid
-{1e-4, 3e-4, 1e-3, 3e-3}; `min_lr` stays 1 % of it. Families: HPPNet L0,
+(step, LR, training loss). Reading (revised 2026-10-15 on the first
+curve, `rp_harmof0_l2_all`): smooth the loss with a bias-corrected EMA
+(β = 0.99); floor = its minimum; rise = the first LR after the floor from
+which the smoothed loss stays ≥ 5 % above the floor for 100 steps; **max
+LR = rise / 10**, snapped to the half-decade grid {1e-4, 3e-4, 1e-3,
+3e-3, …}; `min_lr` stays 1 % of it. The "steepest sustained descent" rule
+first written here is not used: the loss falls at any LR during the first
+few hundred steps (the HarmoF0 curve put the steepest slope at 1.8e-5),
+and with AdamW + gradient clipping nothing diverges inside the range (the
+50 % divergence cap never fired; the curve is flat from 1e-4 to 1e-2 and
+drifts up from 1.6e-2, hence 1e-3 for HarmoF0). Families: HPPNet L0,
 HPPNet L2 (inherited by L1), +k84, +ConvLSTM, HRSPNet, HarmoF0 L2, Basic
 Pitch L2, LateDeep L2, SimpleConv, best regressor — 10 tests × 3k steps,
 under a third of one run, each a `uni-gpushort` job. Labelaug and transfer
-arms inherit their family's LR. Driver: `scripts/lr_range_test.py` (to
-write); results committed under `results/rp_lr_range/` and the chosen
-values stated in each experiment's sibling `.md`.
+arms inherit their family's LR. Driver: `scripts/lr_range_test.py`
+(`--summary` recomputes every reading from the committed raw curves under
+`results/rp_lr_range/`); the chosen values are stated in each experiment's
+sibling `.md`.
 
 Precedent: PESTO trains 50 epochs under cosine annealing (Adam 1e-4);
 FCNF0++ omits early stopping and trains a fixed 250k steps (library full

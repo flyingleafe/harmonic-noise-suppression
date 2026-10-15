@@ -4,10 +4,11 @@
 Composes the experiment as ``train.py`` does (model, loss, data stream), runs
 ``--steps`` optimizer steps with the LR growing geometrically from
 ``--lr-start`` to ``--lr-end`` (Smith 2017; fastai ``lr_find``), logging the
-EMA of the training loss; no validation. Recommendation = LR of the steepest
-sustained descent of the smoothed loss, capped at 1/3 of the LR where the
-loss first rises ``--divergence`` (relative) above its running minimum, then
-snapped to the half-decade grid. Output: ``results/rp_lr_range/<exp>.json``.
+EMA of the training loss; no validation. Recommendation = a tenth of the LR
+at which the smoothed loss leaves its floor for good (stays ``--rise``
+relative above the minimum for ``--window`` steps), snapped to the
+half-decade grid. Output:
+``results/rp_lr_range/<exp>.json`` (the raw curve; ``--summary`` recomputes).
 
 Run from the project root on a GPU: ``python scripts/lr_range_test.py --experiment rp_hppnet_l2_all``
 """
@@ -38,6 +39,7 @@ from training.config import (  # noqa: E402
 from training.loop import _forward, _make_loader, _to_device, get_optimizer  # noqa: E402
 
 HALF_DECADES = [10 ** (k / 2) for k in range(-10, 1)]  # 1e-5 .. 1 in sqrt(10) steps
+READ_BETA = 0.99  # EMA factor the recommendation is read from (~100-step memory)
 
 
 def snap_half_decade(lr: float) -> float:
@@ -45,36 +47,38 @@ def snap_half_decade(lr: float) -> float:
     return min(HALF_DECADES, key=lambda g: abs(math.log10(g) - math.log10(lr)))
 
 
-def recommend(lrs: np.ndarray, loss_ema: np.ndarray, divergence: float, window: int) -> dict:
-    """Steepest sustained descent, capped at 1/3 of the divergence LR.
+def recommend(lrs: np.ndarray, loss_ema: np.ndarray, rise: float, window: int) -> dict:
+    """Max LR = a tenth of the rise LR, snapped to the half-decade grid.
 
-    ``loss_ema`` is already smoothed; the slope is d(loss)/d(log lr) over
-    ``window`` steps. Divergence = first step where the loss exceeds its
-    running minimum by ``divergence`` (relative) after that minimum.
+    ``loss_ema`` is already smoothed. Floor = its global minimum. Rise = the
+    first step after the floor from which the loss stays above
+    ``floor * (1 + rise)`` for ``window`` consecutive steps. With AdamW and
+    gradient clipping the loss does not blow up inside the swept range, it
+    drifts up, so the rise is read at a small relative threshold rather than
+    at a divergence; a steepest-slope reading is not used because the loss
+    falls at any LR during the first few hundred steps. The plateau's lower
+    edge (first step inside the same band) is reported with it.
     """
-    log_lr = np.log10(lrs)
     n = len(lrs)
-    run_min = np.minimum.accumulate(loss_ema)
-    diverged = np.flatnonzero(loss_ema > run_min * (1.0 + divergence))
-    end = int(diverged[0]) if diverged.size else n
-    cap = lrs[end - 1] / 3.0 if diverged.size else lrs[-1]
-    slopes = np.full(n, np.nan)
-    for i in range(window, end):
-        d_lr = log_lr[i] - log_lr[i - window]
-        if d_lr > 0:
-            slopes[i] = (loss_ema[i] - loss_ema[i - window]) / d_lr
-    valid = np.flatnonzero(np.isfinite(slopes) & (lrs <= cap))
-    if valid.size == 0:
-        raise RuntimeError("no descending segment below the divergence cap; widen the range")
-    best = int(valid[np.argmin(slopes[valid])])
-    raw = float(lrs[best])
+    floor_step = int(np.argmin(loss_ema))
+    band = loss_ema[floor_step] * (1.0 + rise)
+    above = loss_ema > band
+    rise_step = None
+    for i in range(floor_step, n - window + 1):
+        if above[i : i + window].all():
+            rise_step = i
+            break
+    lr_rise = float(lrs[rise_step]) if rise_step is not None else float(lrs[-1])
+    plateau_start = int(np.flatnonzero(loss_ema <= band)[0])
     return {
-        "lr_steepest": raw,
-        "lr_divergence": float(lrs[end - 1]) if diverged.size else None,
-        "lr_cap": float(cap),
-        "lr_recommended": float(snap_half_decade(min(raw, cap))),
-        "step_steepest": best,
-        "step_divergence": int(end) if diverged.size else None,
+        "lr_plateau_start": float(lrs[plateau_start]),
+        "lr_floor": float(lrs[floor_step]),
+        "lr_rise": float(lrs[rise_step]) if rise_step is not None else None,
+        "lr_recommended": float(snap_half_decade(lr_rise / 10.0)),
+        "step_plateau_start": plateau_start,
+        "step_floor": floor_step,
+        "step_rise": rise_step,
+        "loss_floor": float(loss_ema[floor_step]),
     }
 
 
@@ -152,7 +156,7 @@ def run(args: argparse.Namespace) -> dict:
                 flush=True,
             )
             break
-    rec = recommend(np.asarray(lrs), np.asarray(ema), args.divergence, args.window)
+    rec = recommend(np.asarray(lrs), ema_curve(losses, READ_BETA), args.rise, args.window)
     result = {
         "experiment": args.experiment,
         "model": str(cfg.model.params.get("name", cfg.model.get("_target_", ""))),
@@ -163,7 +167,7 @@ def run(args: argparse.Namespace) -> dict:
         "batch_size": batch_size,
         "grad_accum_steps": grad_accum,
         "ema_beta": args.beta,
-        "divergence": args.divergence,
+        "rise": args.rise,
         "window": args.window,
         "seconds": time.time() - t0,
         "device": str(device),
@@ -176,7 +180,7 @@ def run(args: argparse.Namespace) -> dict:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1) + "\n")
     print(
-        f"{args.experiment}: steepest {rec['lr_steepest']:.2e}, cap {rec['lr_cap']:.2e} "
+        f"{args.experiment}: floor {rec['lr_floor']:.2e}, rise {rec['lr_rise']} "
         f"-> recommended max LR {rec['lr_recommended']:.0e} ({out})",
         flush=True,
     )
@@ -196,24 +200,22 @@ def ema_curve(losses: list[float], beta: float) -> np.ndarray:
 def summarize() -> None:
     """One line per committed range test, recomputed from the raw (lr, loss) curve.
 
-    The recommendation fields stored at run time are not trusted here: runs
-    before 44c1aa89 seeded the EMA with the first loss and then bias-corrected
-    it, which put the steepest slope at the first window.
+    The recommendation fields stored at run time are not trusted: runs before
+    44c1aa89 seeded the EMA with the first loss (its first window looked like
+    the steepest descent) and runs before the rise rule stored a steepest-slope
+    reading; ``rise`` falls back to the default for them.
     """
     for path in sorted((REPO_ROOT / "results" / "rp_lr_range").glob("*.json")):
         r = json.loads(path.read_text())
-        ema = ema_curve(r["loss"], r["ema_beta"])
-        r.update(recommend(np.asarray(r["lr"]), ema, r["divergence"], r["window"]))
-        if r["step_divergence"] is None:
-            diverge = "none"
-        else:
-            diverge = f"{r['lr_divergence']:.2e} @{r['step_divergence']}"
+        ema = ema_curve(r["loss"], READ_BETA)
+        r.update(recommend(np.asarray(r["lr"]), ema, r.get("rise", 0.05), r["window"]))
+        rise = "none" if r["step_rise"] is None else f"{r['lr_rise']:.2e} @{r['step_rise']}"
         print(
             f"{r['experiment']:28s} steps {r['steps_run']:4d}/{r['steps_requested']} "
             f"batch {r['batch_size']}x{r['grad_accum_steps']} "
-            f"steepest {r['lr_steepest']:.2e} @{r['step_steepest']} "
-            f"diverge {diverge} cap {r['lr_cap']:.2e} "
-            f"-> {r['lr_recommended']:.0e}"
+            f"plateau {r['lr_plateau_start']:.2e} @{r['step_plateau_start']} "
+            f"floor {r['loss_floor']:.3f} @ {r['lr_floor']:.2e} "
+            f"rise {rise} -> {r['lr_recommended']:.0e}"
         )
 
 
@@ -228,9 +230,12 @@ def main() -> None:
     p.add_argument("--lr-end", type=float, default=1e-1)
     p.add_argument("--beta", type=float, default=0.98, help="EMA factor of the loss")
     p.add_argument(
-        "--divergence", type=float, default=0.5, help="relative rise over the running minimum"
+        "--rise",
+        type=float,
+        default=0.05,
+        help="relative rise over the floor that ends the plateau",
     )
-    p.add_argument("--window", type=int, default=100, help="slope window in steps")
+    p.add_argument("--window", type=int, default=100, help="steps the rise must persist")
     p.add_argument(
         "--stop-factor",
         type=float,
