@@ -274,8 +274,8 @@ The committed repo-level `omnirun.toml` holds job *defaults* only
 (`outputs = results/**`, 1 GPU, 1 h, `env kind = uv`).
 
 ```bash
-omnirun submit --backend uni-gpushort --gpus 1 --time 30m --yes -- \
-    python train.py experiment=<name>
+omnirun submit --backend uni-gpushort --gpus 1 --time 30m --name <name> -- \
+    bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=<name>'
 omnirun ps                    # in-flight + recent jobs (-A: all repos)
 omnirun status <job>          # one job (unique id prefix is enough)
 omnirun logs -f <job>         # stream logs (there is no --tail)
@@ -289,6 +289,20 @@ omnirun backends check        # re-establish the SSH ControlMaster after expiry
 - `omnirun ssh <job>` is **not available in daemon mode**; marketplace
   backends have no ssh entry at all. Inspect a running job through its logs
   and `results/**`, not by shelling in.
+
+- **Always `export PYTHONPATH="$PWD/src"`** in the submitted command: the
+  remote `.venv` is shared by every omnirun worktree and its editable
+  install resolves `training`/`models` to whichever tree first built it,
+  so a bare `python train.py` imports stale code from another commit
+  (`rp_scv2_all`, 2026-10-15: `train.py` of `49d43423` importing
+  `training.config` of `5ce0d62f`). Scripts that insert `src/` themselves
+  (`scripts/lr_range_test.py`) are immune. There is no `--yes` option.
+
+- `omnirun pull` ships the job's whole `results/**` unless the job was
+  submitted with `--outputs '<glob>'`; the full tree (~7.7k files) exceeds
+  the client's 60 s read timeout. Submit with `--outputs 'results/<exp>/**'`,
+  or pull through `omnirun.client.RemoteClient("http://10.100.0.1:8787",
+  timeout=900).pull(client.resolve_job(<id>), <dest>)`.
 
 - Requires a **clean, pushed HEAD** (`--push`/`--dirty` exist; prefer clean —
   `train.py` errors on a dirty tree anyway).
