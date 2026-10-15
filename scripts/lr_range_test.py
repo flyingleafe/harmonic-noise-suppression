@@ -48,7 +48,7 @@ def snap_half_decade(lr: float) -> float:
 
 
 def recommend(lrs: np.ndarray, loss_ema: np.ndarray, rise: float, window: int) -> dict:
-    """Max LR = a tenth of the rise LR, snapped to the half-decade grid.
+    """Max LR = a tenth of the rise LR, at most the floor LR, snapped to the half-decade grid.
 
     ``loss_ema`` is already smoothed. Floor = its global minimum. Rise = the
     first step after the floor from which the loss stays above
@@ -56,8 +56,10 @@ def recommend(lrs: np.ndarray, loss_ema: np.ndarray, rise: float, window: int) -
     gradient clipping the loss does not blow up inside the swept range, it
     drifts up, so the rise is read at a small relative threshold rather than
     at a divergence; a steepest-slope reading is not used because the loss
-    falls at any LR during the first few hundred steps. The plateau's lower
-    edge (first step inside the same band) is reported with it.
+    falls at any LR during the first few hundred steps. A curve that never
+    rises (Basic Pitch) is capped at the LR of its floor instead of at a
+    tenth of the sweep's end. The plateau's lower edge (first step inside
+    the same band) is reported with it.
     """
     n = len(lrs)
     floor_step = int(np.argmin(loss_ema))
@@ -74,7 +76,7 @@ def recommend(lrs: np.ndarray, loss_ema: np.ndarray, rise: float, window: int) -
         "lr_plateau_start": float(lrs[plateau_start]),
         "lr_floor": float(lrs[floor_step]),
         "lr_rise": float(lrs[rise_step]) if rise_step is not None else None,
-        "lr_recommended": float(snap_half_decade(lr_rise / 10.0)),
+        "lr_recommended": float(snap_half_decade(min(lr_rise / 10.0, float(lrs[floor_step])))),
         "step_plateau_start": plateau_start,
         "step_floor": floor_step,
         "step_rise": rise_step,

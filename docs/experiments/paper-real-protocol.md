@@ -190,13 +190,15 @@ validation, LR growing geometrically 1e-5 → 1e-1 over 3 000 steps, logging
 curve, `rp_harmof0_l2_all`): smooth the loss with a bias-corrected EMA
 (β = 0.99); floor = its minimum; rise = the first LR after the floor from
 which the smoothed loss stays ≥ 5 % above the floor for 100 steps; **max
-LR = rise / 10**, snapped to the half-decade grid {1e-4, 3e-4, 1e-3,
-3e-3, …}; `min_lr` stays 1 % of it. The "steepest sustained descent" rule
-first written here is not used: the loss falls at any LR during the first
-few hundred steps (the HarmoF0 curve put the steepest slope at 1.8e-5),
-and with AdamW + gradient clipping nothing diverges inside the range (the
-50 % divergence cap never fired; the curve is flat from 1e-4 to 1e-2 and
-drifts up from 1.6e-2, hence 1e-3 for HarmoF0). Families: HPPNet L0,
+LR = rise / 10, at most the floor's LR**, snapped to the half-decade grid
+{1e-4, 3e-4, 1e-3, 3e-3, …}; `min_lr` stays 1 % of it. The "steepest
+sustained descent" rule first written here is not used: the loss falls at
+any LR during the first few hundred steps (the HarmoF0 curve put the
+steepest slope at 1.8e-5), and with AdamW + gradient clipping nothing
+diverges inside the range (the 50 % divergence cap never fired; the
+HarmoF0 curve is flat from 1e-4 to 1e-2 and drifts up from 1.6e-2, hence
+1e-3; the Basic Pitch curve never rises at all, its floor at 4.8e-3 gives
+3e-3). Families: HPPNet L0,
 HPPNet L2 (inherited by L1), +k84, +ConvLSTM, HRSPNet, HarmoF0 L2, Basic
 Pitch L2, LateDeep L2, SimpleConv, best regressor — 10 tests × 3k steps,
 under a third of one run, each a `uni-gpushort` job. Labelaug and transfer
