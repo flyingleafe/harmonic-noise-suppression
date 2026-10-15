@@ -17,4 +17,4 @@ data:
     params:
       path: conf/online_mix/rp_all_labelaug.yaml
 optim:
-  lr: 3.0e-4  # LR range test rp_scv2_all: loss non-finite at 3.5e-3 (fp16 forward), a tenth of it
+  lr: 1.0e-3  # LR range test rp_scv2_all: loss non-finite at 3.5e-3 (fp16 forward), a third of it; every earlier SCv2 run trained at 1e-3

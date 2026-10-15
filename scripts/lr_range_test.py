@@ -4,7 +4,8 @@
 Composes the experiment as ``train.py`` does (model, loss, data stream), runs
 ``--steps`` optimizer steps with the LR growing geometrically from
 ``--lr-start`` to ``--lr-end`` (Smith 2017; fastai ``lr_find``), logging the
-EMA of the training loss; no validation. Recommendation = a tenth of the LR
+EMA of the training loss; no validation. Recommendation: a third of the LR
+at which the loss went non-finite (hard divergence), else a tenth of the LR
 at which the smoothed loss leaves its floor for good (stays ``--rise``
 relative above the minimum for ``--window`` steps), snapped to the
 half-decade grid. Output:
@@ -47,19 +48,29 @@ def snap_half_decade(lr: float) -> float:
     return min(HALF_DECADES, key=lambda g: abs(math.log10(g) - math.log10(lr)))
 
 
-def recommend(lrs: np.ndarray, loss_ema: np.ndarray, rise: float, window: int) -> dict:
-    """Max LR = a tenth of the rise LR, at most the floor LR, snapped to the half-decade grid.
+def recommend(
+    lrs: np.ndarray, loss_ema: np.ndarray, rise: float, window: int, diverged: bool
+) -> dict:
+    """Max LR from the sweep, snapped to the half-decade grid.
 
-    ``loss_ema`` is already smoothed. Floor = its global minimum. Rise = the
-    first step after the floor from which the loss stays above
-    ``floor * (1 + rise)`` for ``window`` consecutive steps. With AdamW and
-    gradient clipping the loss does not blow up inside the swept range, it
-    drifts up, so the rise is read at a small relative threshold rather than
-    at a divergence; a steepest-slope reading is not used because the loss
-    falls at any LR during the first few hundred steps. A curve that never
-    rises (Basic Pitch) is capped at the LR of its floor instead of at a
-    tenth of the sweep's end. The plateau's lower edge (first step inside
-    the same band) is reported with it.
+    ``loss_ema`` is already smoothed. Floor = its global minimum. Two ways
+    the sweep can end:
+
+    * **hard divergence** (``diverged``: the loss went non-finite or exploded
+      and the sweep stopped early) — the classic reading, max LR = a third
+      of the LR at which it happened (Smith 2017); the loss was still falling
+      right up to it, e.g. the SCv2 regressor at 3.5e-3 → 1e-3, the LR every
+      earlier regressor trained at.
+    * **drift** — with AdamW and gradient clipping the salience losses do not
+      blow up inside the swept range, they creep up; rise = the first step
+      after the floor from which the loss stays above ``floor * (1 + rise)``
+      for ``window`` consecutive steps, and max LR = a tenth of it, because
+      the creep starts well before the band fires. A curve that never rises
+      (Basic Pitch) is capped at the LR of its floor instead.
+
+    A steepest-slope reading is not used: the loss falls at any LR during
+    the first few hundred steps. The plateau's lower edge (first step inside
+    the band) is reported with the rest.
     """
     n = len(lrs)
     floor_step = int(np.argmin(loss_ema))
@@ -70,13 +81,19 @@ def recommend(lrs: np.ndarray, loss_ema: np.ndarray, rise: float, window: int) -
         if above[i : i + window].all():
             rise_step = i
             break
-    lr_rise = float(lrs[rise_step]) if rise_step is not None else float(lrs[-1])
+    if diverged:
+        raw = float(lrs[-1]) / 3.0
+    elif rise_step is not None:
+        raw = min(float(lrs[rise_step]) / 10.0, float(lrs[floor_step]))
+    else:
+        raw = float(lrs[floor_step])
     plateau_start = int(np.flatnonzero(loss_ema <= band)[0])
     return {
         "lr_plateau_start": float(lrs[plateau_start]),
         "lr_floor": float(lrs[floor_step]),
         "lr_rise": float(lrs[rise_step]) if rise_step is not None else None,
-        "lr_recommended": float(snap_half_decade(min(lr_rise / 10.0, float(lrs[floor_step])))),
+        "lr_divergence": float(lrs[-1]) if diverged else None,
+        "lr_recommended": float(snap_half_decade(raw)),
         "step_plateau_start": plateau_start,
         "step_floor": floor_step,
         "step_rise": rise_step,
@@ -158,7 +175,8 @@ def run(args: argparse.Namespace) -> dict:
                 flush=True,
             )
             break
-    rec = recommend(np.asarray(lrs), ema_curve(losses, READ_BETA), args.rise, args.window)
+    diverged = len(lrs) < args.steps  # the loop only leaves early on a non-finite/exploded loss
+    rec = recommend(np.asarray(lrs), ema_curve(losses, READ_BETA), args.rise, args.window, diverged)
     result = {
         "experiment": args.experiment,
         "model": str(cfg.model.params.get("name", cfg.model.get("_target_", ""))),
@@ -182,7 +200,8 @@ def run(args: argparse.Namespace) -> dict:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1) + "\n")
     print(
-        f"{args.experiment}: floor {rec['lr_floor']:.2e}, rise {rec['lr_rise']} "
+        f"{args.experiment}: floor {rec['lr_floor']:.2e}, rise {rec['lr_rise']}, "
+        f"divergence {rec['lr_divergence']} "
         f"-> recommended max LR {rec['lr_recommended']:.0e} ({out})",
         flush=True,
     )
@@ -210,8 +229,11 @@ def summarize() -> None:
     for path in sorted((REPO_ROOT / "results" / "rp_lr_range").glob("*.json")):
         r = json.loads(path.read_text())
         ema = ema_curve(r["loss"], READ_BETA)
-        r.update(recommend(np.asarray(r["lr"]), ema, r.get("rise", 0.05), r["window"]))
+        diverged = r["steps_run"] < r["steps_requested"]
+        r.update(recommend(np.asarray(r["lr"]), ema, r.get("rise", 0.05), r["window"], diverged))
         rise = "none" if r["step_rise"] is None else f"{r['lr_rise']:.2e} @{r['step_rise']}"
+        if diverged:
+            rise = f"DIVERGED @ {r['lr_divergence']:.2e}"
         print(
             f"{r['experiment']:28s} steps {r['steps_run']:4d}/{r['steps_requested']} "
             f"batch {r['batch_size']}x{r['grad_accum_steps']} "

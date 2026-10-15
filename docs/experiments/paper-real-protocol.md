@@ -187,21 +187,27 @@ realised budget; every table reports the stopping step next to the score.
 data/loss/optimizer on `all` with the step-0 augmentation set, no
 validation, LR growing geometrically 1e-5 → 1e-1 over 3 000 steps, logging
 (step, LR, training loss). Reading (revised 2026-10-15 on the first
-curve, `rp_harmof0_l2_all`): smooth the loss with a bias-corrected EMA
-(β = 0.99); floor = its minimum; rise = the first LR after the floor from
-which the smoothed loss stays ≥ 5 % above the floor for 100 steps; **max
-LR = rise / 10, at most the floor's LR**, snapped to the half-decade grid
-{1e-4, 3e-4, 1e-3, 3e-3, …}; `min_lr` stays 1 % of it. The "steepest
-sustained descent" rule first written here is not used: the loss falls at
-any LR during the first few hundred steps (the HarmoF0 curve put the
-steepest slope at 1.8e-5), and with AdamW + gradient clipping the salience
-losses do not diverge inside the range (the 50 % divergence cap never
-fired). Readings so far — HarmoF0: flat from 1e-4 to 1e-2, drifts up from
-1.6e-2 → **1e-3**; Basic Pitch: never rises, floor at 4.8e-3 → **3e-3**;
+curves): smooth the loss with a bias-corrected EMA (β = 0.99); floor = its
+minimum. Two endings: **hard divergence** — the loss goes non-finite (fp16
+forward overflow) and the sweep stops: **max LR = divergence / 3**, the
+classic Smith reading, since the loss was still falling right up to it;
+**drift** — the loss creeps up instead: rise = the first LR after the floor
+from which the smoothed loss stays ≥ 5 % above the floor for 100 steps,
+**max LR = rise / 10, at most the floor's LR** (the creep starts well
+before the band fires). Snapped to the half-decade grid {1e-4, 3e-4,
+1e-3, 3e-3, …}; `min_lr` stays 1 % of it. The "steepest sustained descent"
+rule first written here is not used: the loss falls at any LR during the
+first few hundred steps (the HarmoF0 curve put the steepest slope at
+1.8e-5), and with AdamW + gradient clipping the salience losses never
+diverge inside the range (the 50 % divergence cap never fired). Readings
+so far — HarmoF0: flat from 1e-4 to 1e-2, drifts up from 1.6e-2 →
+**1e-3**; Basic Pitch: never rises, floor at 4.8e-3 → **3e-3**;
 SimpleConv: the PIT-MSE falls 4 800 → 95 between 1e-4 and 6e-3, rises
-from 7.8e-3 → **1e-3**; SCv2: still falling at 3.4e-3 when the fp16
-forward went non-finite at 3.5e-3 (the sweep stops there; a non-finite
-loss is read as the rise) → **3e-4**. Families: HPPNet L0,
+from 7.8e-3 → **1e-3**; SCv2: still falling steeply at 3.4e-3 when the
+fp16 forward went non-finite at 3.5e-3 → **1e-3** (the drift reading,
+3e-4, was first written here and reverted the same day: every earlier
+SCv2 run trained stably at 1e-3, which the curve confirms — Dmitrii).
+Families: HPPNet L0,
 HPPNet L2 (inherited by L1), +k84, +ConvLSTM, HRSPNet, HarmoF0 L2, Basic
 Pitch L2, LateDeep L2, SimpleConv, best regressor — 10 tests × 3k steps,
 under a third of one run, each a `uni-gpushort` job. Labelaug and transfer
