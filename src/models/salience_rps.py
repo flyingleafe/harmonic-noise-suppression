@@ -127,12 +127,17 @@ class TranslationHead(nn.Module):
     """L2's minimal head: ``(B, M, G_in, T)`` off+log logits -> ``(B, M, G_out, T)``.
 
     1. ``W`` (`translation_matrix`, fixed, 0 parameters) re-grids every map;
-       the off logit lands on output bin 0.
+       the L1 off logit lands on output bin 0, which on the LINEAR grid is the
+       0 rev/s RATE bin: the loss trains it as a Gaussian peak at 0 like any
+       other rate (no off class on linear grids — `models.salience_crf`). A
+       log trunk has no bins below its ``fmin`` (27.5 rev/s), so the pooled
+       off logit is the only thing that can say "0 rev/s" there; bins 1-27
+       stay `UNREACHABLE_LOGIT`.
     2. ONE depthwise linear ``Conv2d(M, M, (9, 1), groups=M)`` along the rate
        bins ``1..``, identity-initialised (centre tap 1, bias 0): no
        normalisation, no activation, no cross-map mixing, ``M * 10``
        parameters. At init the head IS the re-gridding; all it can learn is a
-       9-tap sharpening kernel per rotor. Bin 0 (off) bypasses it.
+       9-tap sharpening kernel per rotor. Bin 0 bypasses it.
     3. ``unreachable`` output bins (zero rows of ``W``) are set to the fixed
        logit `UNREACHABLE_LOGIT` after the conv. The head works in the LOGIT
        domain, where a zero row means logit 0 = probability 0.5 — the floor a
@@ -200,6 +205,10 @@ class SalienceRPSPredictor(nn.Module):
     # Optional explicit OUTPUT salience grid (rev/s). When set, the salience
     # target and the readout run on this grid instead of ``grid_params()``.
     out_freqs: np.ndarray | None = None
+    #: Whether ``out_freqs`` bin 0 is an OFF state (per-rotor maps on a log
+    #: grid, L1) rather than a rate bin (every linear grid; L0's log map has
+    #: no bin 0 state either — its readout is threshold + Hungarian).
+    out_has_off: bool = False
 
     def __init__(self, n_fft: int, hop_length: int, num_rotors: int):
         super().__init__()
@@ -216,8 +225,9 @@ class SalienceRPSPredictor(nn.Module):
 
         ``n_maps == 1`` (L0) leaves the shared map and ``out_freqs`` alone.
         ``n_maps > 1`` adds the off logit and puts ``out_freqs`` on
-        ``[0.0] + log_freqs`` (L1); ``translation_head`` then re-grids onto
-        `RP_LINEAR_GRID` (L2).
+        ``[0.0] + log_freqs`` with ``out_has_off`` True (L1);
+        ``translation_head`` then re-grids onto `RP_LINEAR_GRID`, a plain rate
+        grid, ``out_has_off`` False (L2).
         """
         self.n_maps = int(n_maps)
         self.off_head: OffLogitHead | None = None
@@ -229,9 +239,11 @@ class SalienceRPSPredictor(nn.Module):
         l1_grid = np.concatenate([[0.0], np.asarray(log_freqs, dtype=np.float64)])
         self.off_head = OffLogitHead(feat_channels, self.n_maps)
         self.out_freqs = l1_grid
+        self.out_has_off = True
         if translation_head:
             self.translation = TranslationHead(l1_grid, RP_LINEAR_GRID, self.n_maps)
             self.out_freqs = RP_LINEAR_GRID.copy()
+            self.out_has_off = False
 
     def _prepend_off(self, maps: torch.Tensor, feats: torch.Tensor) -> torch.Tensor:
         """``(B, M, F, T)`` maps + ``(B, C, F', T)`` features -> ``(B, M, [1 +] F, T)``."""

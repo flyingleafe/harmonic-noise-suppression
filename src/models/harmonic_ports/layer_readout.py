@@ -18,9 +18,9 @@ the two halves the framework contract does not:
    decoder sees is ``(B, R, G, T)``; only the wire format is flat.
 2. ``LayerCRFReadout`` — ``predict_rps`` by one CRF best path per rotor layer,
    with NO threshold and NO Hungarian step, on the model's own ``out_freqs``
-   (linear or log; bin 0 is always the off state at 0.0 rev/s). A stopped rotor
-   is the path sitting at bin 0, which is a value; the old decoder had to call
-   it an absence.
+   (linear: bin 0 is the 0 rev/s rate bin; log: bin 0 is the OFF state, the
+   model's ``out_has_off``). A stopped rotor is the path sitting at bin 0,
+   which is a value; the old decoder had to call it an absence.
 
 THE READOUT IS ``logsigmoid``, NOT THE RAW LOGIT, and the reason is the loss.
 `losses.LayerPITSalienceBCELoss` drives ``sigmoid(z) -> exp(-d^2 / 2 sigma^2)``,
@@ -76,6 +76,7 @@ class LayerCRFReadout:
 
     n_maps: int
     out_freqs: np.ndarray | None
+    out_has_off: bool
     num_rotors: int
     hop_length: int
     readout: str = "logsigmoid"
@@ -99,6 +100,7 @@ class LayerCRFReadout:
         return crf_decode_layers(
             scores,
             cast(np.ndarray, self.out_freqs),
+            has_off=bool(self.out_has_off),
             max_step_rev_s=self.max_step_rev_s,
             stiff=self.crf_stiff,
             logits=True,

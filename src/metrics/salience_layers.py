@@ -10,7 +10,8 @@ the validation set.
 three-point log-parabolic fit in rev/s coordinates, PIT-aligned to the target.
 It reads the layers the way `models.salience_crf` proves is exact — the log of a
 Gaussian is a parabola, so three bins locate the vertex with no residue on any
-grid; an argmax at bin 0 (the off state) reads 0.0 — and it is NOT the deployed
+grid; on a log grid an argmax at bin 0 (the off state) reads 0.0, on the linear
+grid bin 0 is the 0 rev/s rate bin — and it is NOT the deployed
 decoder, which is a CRF best path per layer
 (`models.harmonic_ports.layer_readout`). The difference is temporal robustness
 only: on a correct layer the two agree, and the CRF additionally survives a
@@ -37,18 +38,19 @@ from models.salience_crf import gaussian_layer_target, grid_from_spec, refine_pe
 __all__ = ["LayerPITSalienceBCEMetric", "LayerPeakRPSMetric", "peak_readout"]
 
 
-def peak_readout(scores: torch.Tensor, grid: np.ndarray) -> torch.Tensor:
+def peak_readout(scores: torch.Tensor, grid: np.ndarray, *, has_off: bool) -> torch.Tensor:
     """``(B, R, G, T)`` LOG-domain layers -> ``(B, R, T)`` rev/s.
 
     Argmax along the rate axis, then `models.salience_crf.refine_peak` (the
-    three-point parabola in rev/s; bin 0 reads 0.0). On a Gaussian layer this
-    is exact; it is the readout without the CRF's temporal model.
+    three-point parabola in rev/s; with an off state bin 0 reads 0.0). On a
+    Gaussian layer this is exact; it is the readout without the CRF's temporal
+    model.
     """
     s = scores.double()
     b, r, n_g, n_t = s.shape
     flat = s.reshape(b * r, n_g, n_t)
     g = torch.as_tensor(np.asarray(grid), dtype=torch.float64, device=scores.device)
-    return refine_peak(flat, flat.argmax(dim=1), g).reshape(b, r, n_t)
+    return refine_peak(flat, flat.argmax(dim=1), g, has_off=has_off).reshape(b, r, n_t)
 
 
 def _pit_mae(pred: torch.Tensor, tgt: torch.Tensor) -> float:
@@ -75,10 +77,10 @@ class _LayerGridMetric:
         pred_key: str = "salience",
         target_key: str = "rps",
     ) -> None:
-        self._freqs = grid_from_spec(grid)
+        self._freqs, self.has_off = grid_from_spec(grid)
         self.n_layers = int(n_layers)
         self.sigma_rev_s = float(sigma_rev_s)
-        self.focus = resolve_focus(focus, self._freqs, self.sigma_rev_s)
+        self.focus = resolve_focus(focus, self._freqs, self.sigma_rev_s, has_off=self.has_off)
         self.pred_key = pred_key
         self.target_key = target_key
         self.requires_pred = FrameSpec(
@@ -108,8 +110,10 @@ class LayerPITSalienceBCEMetric(_LayerGridMetric):
 
     def __call__(self, pred: td.Frame, target: td.Frame) -> float:
         layers, rps_grid = self._unpack(pred, target)
-        tgt = gaussian_layer_target(rps_grid, self._freqs, sigma_rev_s=self.sigma_rev_s)
-        return float(layer_pit_bce(layers, tgt, focus=self.focus).item())
+        tgt = gaussian_layer_target(
+            rps_grid, self._freqs, sigma_rev_s=self.sigma_rev_s, has_off=self.has_off
+        )
+        return float(layer_pit_bce(layers, tgt, focus=self.focus, off_bin=self.has_off).item())
 
 
 class LayerPeakRPSMetric(_LayerGridMetric):
@@ -119,5 +123,5 @@ class LayerPeakRPSMetric(_LayerGridMetric):
 
     def __call__(self, pred: td.Frame, target: td.Frame) -> float:
         layers, rps_grid = self._unpack(pred, target)
-        speeds = peak_readout(F.logsigmoid(layers), self._freqs)  # (1, R, T)
+        speeds = peak_readout(F.logsigmoid(layers), self._freqs, has_off=self.has_off)
         return _pit_mae(speeds[0], rps_grid[0].double())

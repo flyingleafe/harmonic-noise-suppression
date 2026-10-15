@@ -71,11 +71,13 @@ def _build(name: str, **kw):
 
 @pytest.mark.parametrize("name", list(LOG_GRIDS))
 def test_translation_rows_sum_to_one_or_are_unreachable_zeros(name):
+    """The L1 off logit feeds linear bin 0 and nothing else; on the linear grid
+    the loss reads that bin as the 0 rev/s rate bin (a stopped rotor's peak)."""
     w, unreachable = translation_matrix(LOG_GRIDS[name], RP_LINEAR_GRID)
     sums = w.sum(axis=1)
     assert np.allclose(sums[~unreachable], 1.0, atol=1e-6)
     assert np.all(w[unreachable] == 0.0)
-    # The off logit lands on output bin 0 and nowhere else.
+    # The off logit lands on output bin 0 (0 rev/s) and nowhere else.
     assert w[0, 0] == 1.0 and w[0, 1:].sum() == 0.0 and w[1:, 0].sum() == 0.0
 
 
@@ -98,6 +100,9 @@ def test_no_log_bin_inside_the_output_range_is_skipped(name):
 
 
 def test_the_identity_initialised_head_is_pure_regridding():
+    """At init the head is the fixed matrix, so the L1 off logit passes
+    straight through to linear bin 0, which L2's loss and CRF treat as the
+    0 rev/s rate bin."""
     grid = LOG_GRIDS["hppnet"]
     head = TranslationHead(grid, RP_LINEAR_GRID, n_maps=4)
     assert count_parameters(head) == 4 * (9 + 1)
@@ -142,19 +147,37 @@ def test_the_translation_head_needs_per_rotor_maps():
 @pytest.mark.parametrize("name", list(BASELINES))
 @pytest.mark.parametrize("level", ["l1", "l2"])
 def test_perfect_layers_decode_with_stops_and_hard_starts(name, level):
-    """A perfect model's own output through its own CRF readout, on its own grid."""
+    """A perfect model's own output through its own CRF readout, on its own grid.
+
+    L1 (log grid, ``out_has_off``) takes the 0 -> 60 start for free through the
+    off state and a stopped rotor reads exactly 0. L2 (linear grid, no off
+    state) refines a stopped rotor on the 0 rev/s bin like any rate, and pays
+    the hinge for the 60 rev/s jump: the best path shaves it through ONE
+    intermediate rate next to the step (see test_salience_crf.py's hard-start
+    test; real telemetry never jumps that far in a frame)."""
     m = _build(name, n_maps=4, translation_head=level == "l2").double().eval()
+    assert m.out_has_off is (level == "l1")
     t = 24
     rps = torch.zeros(1, 4, t, dtype=torch.float64)
     rps[0, 0] = 70.0 + torch.linspace(0, 6, t, dtype=torch.float64)
     rps[0, 1, 8:] = 60.0  # 0 -> 60 in one frame
     rps[0, 2] = 95.3
     # rotor 3 stays stopped
-    tgt = gaussian_layer_target(rps, m.output_freqs(), sigma_rev_s=1.0)
+    tgt = gaussian_layer_target(rps, m.output_freqs(), sigma_rev_s=1.0, has_off=m.out_has_off)
     logits = torch.logit(tgt.clamp(1e-12, 1 - 1e-12)).reshape(1, -1, t)
     rec = m.decode_salience(logits)
-    assert torch.equal(rec[0, 3], torch.zeros(t, dtype=torch.float64))
-    assert float((rec - rps).abs().max()) < 1e-4
+    err = (rec - rps).abs()
+    if m.out_has_off:
+        assert torch.equal(rec[0, 3], torch.zeros(t, dtype=torch.float64))
+        assert float(err.max()) < 1e-4
+        return
+    assert float(rec[0, 3].abs().max()) < 1e-9
+    step = err[0, 1, 7:9] > 1e-4  # the frames either side of the step
+    assert int(step.sum()) == 1
+    assert 0.0 < float(rec[0, 1, 7:9][step]) < 60.0  # an intermediate rate
+    rest = err.clone()
+    rest[0, 1, 7:9] = 0.0
+    assert float(rest.max()) < 1e-4
 
 
 @pytest.mark.parametrize("name", ["harmof0", "basicpitch"])
@@ -169,7 +192,7 @@ def test_one_step_trains_the_off_logit_and_the_head(name):
 
     def loss() -> torch.Tensor:
         layers, tgt = loss_fn.layers_and_target(m(audio), rps)
-        return layer_pit_bce(layers, tgt, focus=loss_fn.focus)
+        return layer_pit_bce(layers, tgt, focus=loss_fn.focus, off_bin=loss_fn.has_off)
 
     before = loss()
     before.backward()
@@ -192,10 +215,12 @@ def _yaml(kind: str, name: str) -> dict[str, Any]:
 
 @pytest.mark.parametrize("model_cfg", list(PAIRS))
 def test_each_per_rotor_config_pairs_with_a_loss_on_its_own_grid(model_cfg):
-    """The loss checks only the bin COUNT at run time; a wrong fmin would not raise."""
+    """The loss checks only the bin COUNT at run time; a wrong fmin or grid kind
+    (bin 0 as off state vs 0 rev/s) would not raise."""
     params = dict(_yaml("model", model_cfg)["params"])
     m = cast(SalienceRPSPredictor, build_model(params.pop("name"), **params))
     for kind in ("loss", "metrics"):
         for term in _yaml(kind, PAIRS[model_cfg])["terms"]:
-            grid = grid_from_spec(term["params"]["grid"])
+            grid, has_off = grid_from_spec(term["params"]["grid"])
             assert np.allclose(grid, m.output_freqs(), rtol=1e-12, atol=0), (kind, term["name"])
+            assert has_off is m.out_has_off, (kind, term["name"])

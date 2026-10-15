@@ -10,7 +10,8 @@
 # eight branches are the first eight, unchanged. The counterpart of
 # hppnet_pyramid_k84: same k set, the only difference the axis.
 #
-# Output: off logit + TranslationHead onto the 164-bin 0-159.2 rev/s grid.
+# Output: the L1 off logit (routed to bin 0 as the 0 rev/s rate) plus the
+# TranslationHead onto the 164-bin 0-159.2 rev/s grid.
 # Loss/metrics: conf/{loss,metrics}/salience_layers_rp.yaml.
 task: salience_rps
 task_params:

@@ -64,7 +64,7 @@ def test_the_round_trip_is_exact(cls):
     """
     m = cls(n_maps=4, **SMALL).double().eval()
     rps = _tracks()
-    tgt = gaussian_layer_target(rps, m.out_freqs, sigma_rev_s=SIGMA)
+    tgt = gaussian_layer_target(rps, m.out_freqs, sigma_rev_s=SIGMA, has_off=m.out_has_off)
     ideal = torch.logit(tgt.clamp(1e-15, 1 - 1e-15))
     rec = m.decode_salience(ideal.reshape(ideal.shape[0], -1, ideal.shape[-1]))
     assert float((rec - rps).abs().max()) < 1e-6
@@ -75,7 +75,7 @@ def test_a_stopped_rotor_decodes_to_zero_with_no_threshold(cls):
     m = cls(n_maps=4, **SMALL).double().eval()
     rps = torch.zeros(1, 4, 16, dtype=torch.float64)
     rps[0, 2] = 31.0
-    tgt = gaussian_layer_target(rps, m.out_freqs, sigma_rev_s=SIGMA)
+    tgt = gaussian_layer_target(rps, m.out_freqs, sigma_rev_s=SIGMA, has_off=m.out_has_off)
     ideal = torch.logit(tgt.clamp(1e-15, 1 - 1e-15))
     rec = m.decode_salience(ideal.reshape(1, -1, 16))
     assert float(rec[0, 0].abs().max()) < 1e-6
@@ -86,9 +86,10 @@ def test_the_readout_and_the_loss_agree_on_which_target_is_optimal():
     """BCE is minimized at the target, and the peak readout inverts it exactly."""
     grid = np.linspace(0.0, 50.0, 100)
     rps = _tracks()
-    tgt = gaussian_layer_target(rps, grid, sigma_rev_s=SIGMA)
+    tgt = gaussian_layer_target(rps, grid, sigma_rev_s=SIGMA, has_off=False)
     ideal = torch.logit(tgt.clamp(1e-15, 1 - 1e-15))
-    assert float((peak_readout(F.logsigmoid(ideal), grid) - rps).abs().max()) < 1e-9
+    rec = peak_readout(F.logsigmoid(ideal), grid, has_off=False)
+    assert float((rec - rps).abs().max()) < 1e-9
     at_opt = float(layer_pit_bce(ideal, tgt))
     for _ in range(5):
         worse = float(layer_pit_bce(ideal + torch.randn_like(ideal) * 0.5, tgt))

@@ -38,8 +38,10 @@ the rest.
 
 THE GRID IS A SPEC, NOT THREE NUMBERS. ``grid: {kind: linear, fmin, fmax,
 bins}`` or ``{kind: log_off, fmin, bins_per_octave, n_bins}``
-(`models.salience_crf.grid_from_spec`); bin 0 is the off state on both. The
-model must emit ``n_layers * len(grid)`` bins, checked on every call.
+(`models.salience_crf.grid_from_spec`); the kind decides whether bin 0 is an
+OFF state (``log_off``) or the 0 rev/s rate bin (``linear``), and that flag
+(``has_off``) drives the target, the focus and the readout. The model must
+emit ``n_layers * len(grid)`` bins, checked on every call.
 """
 
 from __future__ import annotations
@@ -64,6 +66,8 @@ def layer_pit_bce(
     target: torch.Tensor,
     pos_weight: float | None = None,
     focus: float = 0.0,
+    *,
+    off_bin: bool = False,
 ) -> torch.Tensor:
     """Permutation-invariant BCE between two stacks of layers.
 
@@ -72,21 +76,23 @@ def layer_pit_bce(
         target: ``(B, R, G, T)`` soft per-rotor target in ``[0, 1]``.
         pos_weight: positive-class weight; ``None`` (the default) means 1, and
             see the module docstring for why anything else breaks the readout.
-        focus: PER-BIN emphasis, weight ``1 + focus * target`` on the RATE
-            bins (``1..``). This is the class-imbalance handle that
-            ``pos_weight`` cannot be here. It scales each bin's WHOLE
-            cross-entropy by a positive constant, and a positive constant does
-            not move a minimum — every bin's optimum stays ``sigmoid(z) =
-            target``, so the readout stays exact. ``focus = G / m``, ``m`` the
-            layer's expected Gaussian mass in bins
+        focus: PER-BIN emphasis, weight ``1 + focus * target``. This is the
+            class-imbalance handle that ``pos_weight`` cannot be here. It
+            scales each bin's WHOLE cross-entropy by a positive constant, and
+            a positive constant does not move a minimum — every bin's optimum
+            stays ``sigmoid(z) = target``, so the readout stays exact.
+            ``focus = G / m``, ``m`` the layer's expected Gaussian mass in bins
             (`models.salience_crf.layer_focus`), puts about equal total weight
-            on the peak and on everything else. Bin 0 (the off state) is
-            EXCLUDED: its positive is a class present on every stopped frame
-            (silence arm + ground spans, ~20 % of training), not a sparse
-            peak, so the same weight there tilts its BCE ~65:1 towards "off"
-            and the cheapest off head says off everywhere — the HPPNet-L2
-            pilot collapse of 2026-10-15 (off p 0.95 on cruise frames above a
-            correct map). The off bin gets plain BCE.
+            on the peak and on everything else.
+        off_bin: the grid carries an OFF state at bin 0 (log grids). That bin
+            is then EXCLUDED from the focus weight: its positive is a class
+            present on every stopped frame (silence arm + ground spans, ~20 %
+            of training), not a sparse peak, so the same weight there tilts
+            its BCE ~65:1 towards "off" and the cheapest off head says off
+            everywhere — the HPPNet-L2 pilot collapse of 2026-10-15 (off p
+            0.95 on cruise frames above a correct map). On the linear grid
+            (``off_bin`` False) bin 0 is the 0 rev/s rate bin and a stopped
+            rotor is a Gaussian peak there, weighted like any other peak.
 
     Returns:
         Scalar: the mean over the batch of the best assignment's mean BCE.
@@ -110,7 +116,8 @@ def layer_pit_bce(
         bce = F.binary_cross_entropy_with_logits(logits, tgt, pos_weight=pw, reduction="none")
         if focus:
             weight = 1.0 + float(focus) * tgt
-            weight[:, :, :1] = 1.0
+            if off_bin:
+                weight[:, :, :1] = 1.0
             bce = bce * weight
         cols.append(bce.mean(dim=(2, 3)))  # (B, R)
     cost = torch.stack(cols, dim=2)  # (B, R, R)
@@ -166,11 +173,11 @@ class LayerPITSalienceBCELoss:
         pred_key: str = "salience",
         target_key: str = "rps",
     ) -> None:
-        self._freqs = grid_from_spec(grid)
+        self._freqs, self.has_off = grid_from_spec(grid)
         self.n_layers = int(n_layers)
         self.sigma_rev_s = float(sigma_rev_s)
         self.pos_weight = pos_weight
-        self.focus = resolve_focus(focus, self._freqs, self.sigma_rev_s)
+        self.focus = resolve_focus(focus, self._freqs, self.sigma_rev_s, has_off=self.has_off)
         self.pred_key = pred_key
         self.target_key = target_key
         self.requires_pred = FrameSpec(
@@ -193,20 +200,24 @@ class LayerPITSalienceBCELoss:
             )
         layers = logits.reshape(b, r, len(self._freqs), n_grid_t)
         rps_grid = F.interpolate(rps.float(), size=n_grid_t, mode="linear", align_corners=False)
-        tgt = gaussian_layer_target(rps_grid, self._freqs, sigma_rev_s=self.sigma_rev_s)
+        tgt = gaussian_layer_target(
+            rps_grid, self._freqs, sigma_rev_s=self.sigma_rev_s, has_off=self.has_off
+        )
         return layers, tgt
 
     def __call__(self, pred: td.Frame, target: td.Frame) -> torch.Tensor:
         logits = get_tensor(pred, self.pred_key)
         rps = get_tensor(target, self.target_key).float()
         layers, tgt = self.layers_and_target(logits, rps)
-        return layer_pit_bce(layers, tgt, pos_weight=self.pos_weight, focus=self.focus)
+        return layer_pit_bce(
+            layers, tgt, pos_weight=self.pos_weight, focus=self.focus, off_bin=self.has_off
+        )
 
 
-def resolve_focus(focus: float | str, grid: Any, sigma_rev_s: float) -> float:
+def resolve_focus(focus: float | str, grid: Any, sigma_rev_s: float, *, has_off: bool) -> float:
     """A config's ``focus``: a number, or ``"auto"`` = `layer_focus` on ``grid``."""
     if isinstance(focus, str):
         if focus != "auto":
             raise ValueError(f"focus must be a number or 'auto', got {focus!r}")
-        return layer_focus(grid, sigma_rev_s)
+        return layer_focus(grid, sigma_rev_s, has_off=has_off)
     return float(focus)

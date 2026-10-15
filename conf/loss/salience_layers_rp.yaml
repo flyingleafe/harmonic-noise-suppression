@@ -1,7 +1,11 @@
 # Permutation-invariant BCE over FOUR PER-ROTOR Gaussian salience layers on
 # the protocol's output grid (docs/experiments/paper-real-protocol.md): linear
 # 0 -> 159.1796875 rev/s in 164 bins (0.9765625 rev/s, the HRSPNet pyramid's
-# level-0 step; = models.salience_crf.RP_LINEAR_GRID), bin 0 = the OFF state.
+# level-0 step; = models.salience_crf.RP_LINEAR_GRID), bin 0 = the 0 rev/s RATE
+# bin: no off state on the linear grid (Dmitrii, 2026-10-15), a stopped rotor is
+# a Gaussian peak at 0 like any other rate - the convention of every earlier
+# linear-grid run. Only the log grids (salience_layers_log*.yaml, L1) carry an
+# off state at bin 0.
 # Every L2 model (conf/model/{hppnet,harmof0}_l2*.yaml, hppnet_l2k84*.yaml)
 # and every pyramid (conf/model/hppnet_pyramid*.yaml) emits 4 x 164 bins at
 # hop 512. The hop-256 twin is salience_layers_rp_h256.yaml.
@@ -11,7 +15,7 @@
 # triangular map + Hungarian loses 8.24 rev/s on average; Gaussian per-rotor
 # layers + CRF + parabolic readout lose nothing. Four layers (one map cannot
 # hold rotors 0.13-0.86 rev/s apart), a Gaussian in rev/s (its log is a
-# parabola on any grid), and a stopped rotor as bin 0 alone.
+# parabola on any grid), and a stopped rotor as a peak at 0 rev/s.
 #
 # sigma_rev_s 1.0: the Gaussian width in rev/s, shared by every per-rotor
 # model so rows differ only in the trunk (about one bin here).

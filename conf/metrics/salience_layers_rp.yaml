@@ -2,11 +2,10 @@
 # grid argument and why pos_weight is absent).
 #
 # `bce` mirrors the training objective exactly (same grid spec, sigma, focus).
-# `rps_mae` is the same layers read in rev/s: each layer's argmax refined by the
-# three-point parabola in rev/s (bin 0 = off reads 0.0), PIT-aligned to the
-# label. It is NOT the deployed decoder — that is a CRF best path per layer
-# (models.harmonic_ports.layer_readout), which the training-time validation
-# panel uses through decode_logits.
+# `rps_mae` is the same layers read in rev/s: each layer's argmax refined by
+# the three-point parabola in rev/s (bin 0 is the 0 rev/s rate bin),
+# PIT-aligned to the label. It is NOT the deployed decoder — that is a CRF best
+# path per layer (models.harmonic_ports.layer_readout), which the training-time
 terms:
   - name: bce
     _target_: metrics.LayerPITSalienceBCEMetric

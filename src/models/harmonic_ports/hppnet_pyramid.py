@@ -55,7 +55,8 @@ HRSPNet; ``separable=False`` is the dense control. The other alternatives are
 
 GRID. The output axis inherits level 0's step (``Δr = sr / n_fft[0]`` = 0.9765625
 rev/s) over ``out_bins`` bins from 0: ``r_g = g * Δr``. The default 164 bins IS
-`models.salience_crf.RP_LINEAR_GRID` (0-159.2 rev/s, bin 0 = the off state),
+`models.salience_crf.RP_LINEAR_GRID` (0-159.2 rev/s, bin 0 = the 0 rev/s
+rate bin),
 which loss and metrics build from ``grid: {kind: linear, fmin: 0, fmax:
 159.1796875, bins: 164}`` (``conf/loss/salience_layers_rp.yaml``).
 

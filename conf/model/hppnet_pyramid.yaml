@@ -6,8 +6,8 @@
 # THE GRID. Output step = level 0's bin width = 16000 / 16384 = 0.9765625 rev/s;
 # out_bins 164 -> 0 .. 159.18 rev/s = models.salience_crf.RP_LINEAR_GRID, the
 # protocol grid of every per-rotor model (docs/experiments/
-# paper-real-protocol.md; bin 0 = the off state). Loss/metrics:
-# conf/{loss,metrics}/salience_layers_rp.yaml.
+# paper-real-protocol.md; bin 0 = the 0 rev/s rate bin, no off state).
+# Loss/metrics: conf/{loss,metrics}/salience_layers_rp.yaml.
 #
 # THE PYRAMID. n_ffts 16384/8192/4096/2048 at hop 512: windows 1.02 s / 0.51 /
 # 0.26 / 0.13, bins 0.98 / 1.95 / 3.9 / 7.8 Hz, kept to 1200 / 2400 / 4800 /
