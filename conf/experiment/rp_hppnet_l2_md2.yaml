@@ -9,8 +9,8 @@ defaults:
   - _self_
 
 experiment_name: rp_hppnet_l2_md2
-batch_size: 128
-grad_accum_steps: 1
+batch_size: 64  # x2 accumulation = effective 128: 128 OOMs at 32 GB (range test, 2026-10-15)
+grad_accum_steps: 2
 num_workers: 6
 data:
   train:
