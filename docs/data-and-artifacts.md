@@ -306,6 +306,12 @@ omnirun backends check        # re-establish the SSH ControlMaster after expiry
   `No space left on device`, leaving a torch without `torch._C`
   (`rp_hppnet_l0_all` resumes, 2026-10-15, twice).
 
+- **`uni-gpushort` can hand out a V100 (sm_70)**, where the Triton tap
+  kernel (`models.harmonic_ports.tap_conv_triton`) fails to compile
+  (`PassManager::run failed`). Pyramid / HDC models there need
+  `TAP_CONV_TORCH=1` in the submitted environment (the eager path; scores
+  identical — `rp-panel-eval-dropk`, 2026-10-16).
+
 - `omnirun pull` ships the job's whole `results/**` unless the job was
   submitted with `--outputs '<glob>'`; the full tree (~7.7k files) exceeds
   the client's 60 s read timeout. Submit with `--outputs 'results/<exp>/**'`,
