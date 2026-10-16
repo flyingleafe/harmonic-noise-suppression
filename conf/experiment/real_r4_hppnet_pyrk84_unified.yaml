@@ -8,7 +8,7 @@
 # Batch doc: docs/experiments/pyramid-harmonic.md.
 defaults:
   - override /data: e12_real_fullflight
-  - override /model: hppnet_pyramid_k84
+  - override /model: hppnet_pyramid_k84_r4legacy  # frozen build of this run (154 bins, k<=84, f_max 7.5 kHz); the live hppnet_pyramid_k84 is the protocol's 164-bin grid
   - override /loss: salience_layers_pyr154
   - override /metrics: salience_layers_pyr154
   - override /validation: rps_unified

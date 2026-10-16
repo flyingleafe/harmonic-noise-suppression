@@ -1,0 +1,30 @@
+# hppnet_pyramid_k84_r4legacy — FROZEN build of `real_r4_hppnet_pyrk84_unified`
+# (docs/experiments/pyramid-harmonic.md, round 2; commit a7e7c8e2's
+# conf/model/hppnet_pyramid_k84.yaml): 154-bin 0-150 rev/s grid, taps k <= 84
+# + sub-harmonics 1/2..1/8, f_max 7.5 kHz, conv1x1 head, block_4/block_5 on,
+# instance norm. Kept so the checkpoint builds in its own grid (the live
+# hppnet_pyramid_k84.yaml is the protocol's 164-bin grid).
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_pyramid
+  sr: 16000
+  hop_length: 512
+  num_rotors: 4
+  n_ffts: [16384, 8192, 4096, 2048]
+  level0_fmax: 1200.0
+  out_bins: 154
+  k_max: 84
+  k_sub: 8
+  f_min: null
+  f_max: 7500.0
+  c_har: 16
+  embedding: 128
+  n_maps: 4
+  head: conv1x1
+model_type: null
+legacy_config_path: null

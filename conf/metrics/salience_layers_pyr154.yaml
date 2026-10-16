@@ -1,0 +1,18 @@
+# Metrics twin of conf/loss/salience_layers_pyr154.yaml (the frozen
+# `real_r4_hppnet_pyrk84_unified` build, 154-bin 0-149.4 rev/s grid).
+terms:
+  - name: bce
+    _target_: metrics.LayerPITSalienceBCEMetric
+    params:
+      grid: {kind: linear, fmin: 0.0, fmax: 149.4140625, bins: 154}
+      n_layers: 4
+      sigma_rev_s: 0.9765625
+      focus: 61.0
+      rate: [16000, 512]
+  - name: rps_mae
+    _target_: metrics.LayerPeakRPSMetric
+    params:
+      grid: {kind: linear, fmin: 0.0, fmax: 149.4140625, bins: 154}
+      n_layers: 4
+      sigma_rev_s: 0.9765625
+      rate: [16000, 512]

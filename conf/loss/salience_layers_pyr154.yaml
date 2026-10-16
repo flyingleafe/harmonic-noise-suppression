@@ -1,0 +1,16 @@
+# Loss of the FROZEN round-2 pyramid run `real_r4_hppnet_pyrk84_unified`
+# (docs/experiments/pyramid-harmonic.md): four per-rotor Gaussian layers on the
+# 154-bin 0-149.4 rev/s grid (level-0 step 0.9765625), sigma one bin, focus 61
+# (= 154 / 2.52). Restored from commit a7e7c8e2 in the grid convention of
+# `models.salience_crf.grid_from_spec` so the checkpoint can be re-scored
+# (scripts/rp_panel_eval.py); the protocol grid is salience_layers_rp.yaml.
+terms:
+  - name: bce
+    _target_: losses.LayerPITSalienceBCELoss
+    weight: 1.0
+    params:
+      grid: {kind: linear, fmin: 0.0, fmax: 149.4140625, bins: 154}
+      n_layers: 4
+      sigma_rev_s: 0.9765625
+      focus: 61.0
+      rate: [16000, 512]
