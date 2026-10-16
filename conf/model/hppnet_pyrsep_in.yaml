@@ -1,0 +1,43 @@
+# hppnet_pyrsep_in — the pyramid with a SEPARABLE RATE KERNEL head and no
+# block_4 / block_5, INSTANCE norm (HPPNet's). Pair: hppnet_pyrsep_bn.yaml
+# (batch norm); the pair asks whether the 0 rev/s decision needs absolute
+# level (docs/experiments/paper-real-protocol.md, HPPNet post-mortem of
+# 2026-10-15: every HPPNet-family row is level-blind under instance norm and
+# its real_zero error is 10-20x HarmoF0's).
+#
+# Relative to hppnet_pyramid_convlstm.yaml (HRSPNet): the ConvLSTM's 33-tap
+# rate kernel (half-width ceil(15 / 0.9765625) = 16) is applied to the CURRENT
+# frame as a per-channel (1, 33) depthwise conv + 1x1 mix (128 -> 128) + ReLU,
+# no recurrence; block_4 / block_5 (octave and quarter-octave gathers) are
+# dropped — the harmonic gather already reads r/k, and the head's kernel
+# carries the local rate context. Time context: block_6..8 and the CRF.
+# Everything else (pyramid, k <= 84, sub-harmonics 1/2..1/8, no ceiling, 164-bin
+# grid) is HRSPNet's.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_pyramid
+  sr: 16000
+  hop_length: 512
+  num_rotors: 4
+  n_ffts: [16384, 8192, 4096, 2048]
+  level0_fmax: 1200.0
+  out_bins: 164
+  k_max: 84
+  k_sub: 8
+  f_min: null
+  f_max: null
+  c_har: 16
+  embedding: 128
+  norm: instance
+  rate_taps: false
+  n_maps: 4
+  head: sepconv
+  lstm_size: 128
+  max_slew: 15.0
+model_type: null
+legacy_config_path: null

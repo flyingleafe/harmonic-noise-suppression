@@ -13,8 +13,10 @@ order is kept and only the coordinate system changes:
           -> HARMONIC TAPS                 gather at k*r and r/k from the finest
                                            level covering each frequency
           -> block_4, block_5              3-tap gathers at r*{1/2,1,2}, r*{2^-1/4,1,2^1/4}
+                                           (``rate_taps=False`` drops both)
           -> block_6..8                    temporal [5,1] convolutions
-          -> head                          1x1 (variant C) or RateConvLSTM + 1x1 (variant A)
+          -> head                          1x1 (variant C), separable rate kernel + 1x1
+                                           (``sepconv``) or RateConvLSTM + 1x1 (variant A)
           -> LayerCRFReadout
 
 WHY A PYRAMID. The CQT's advantage over a fixed STFT is its window length per
@@ -75,7 +77,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.harmonic_ports.hppnet_orig import _conv2d_block
+from models.harmonic_ports.hppnet_orig import _conv2d_block, _norm2d
 from models.harmonic_ports.layer_readout import LayerCRFReadout
 from models.harmonic_ports.rate_convlstm import RateConvLSTM
 from models.harmonic_ports.tap_conv import tap_conv
@@ -257,12 +259,27 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
             top). ``f_min`` defaults to one level-0 bin; ``f_max=None`` masks
             nothing beyond the levels' own ceilings.
         c_har, embedding: HPPNet's trunk widths.
+        norm: ``"instance"`` (HPPNet's, the default) or ``"batch"`` (HarmoF0's)
+            after every convolution block. Instance norm makes every feature
+            per-clip and gain-invariant, so "nothing is spinning" (an all-stopped
+            clip) is indistinguishable from "everything is normalised away";
+            batch norm keeps absolute level, which is the evidence the 0 rev/s
+            bin needs (protocol doc, HPPNet post-mortem of 2026-10-15).
+        rate_taps: keep HPPNet's ``block_4`` / ``block_5`` (octave and
+            quarter-octave gathers on the rate axis). ``False`` drops both: the
+            harmonic gather already reads the sub-harmonics ``r/k``, and the
+            ``sepconv``/``convlstm`` heads carry the local rate context.
         octave_taps: multipliers of ``block_4``; ``quarter_taps``: of ``block_5``.
         n_maps: per-rotor salience layers (``LayerCRFReadout``).
-        head: ``"conv1x1"`` (variant C) or ``"convlstm"`` (variant A, `RateConvLSTM`
-            of width ``lstm_size`` split over two directions, then 1x1).
-        max_slew: rev/s per frame the ConvLSTM state must be able to follow; the
-            gate kernel half-width is ``ceil(max_slew / Δr)`` bins.
+        head: ``"conv1x1"`` (variant C, no rate context after the taps),
+            ``"sepconv"`` (a separable ``(1, k)`` rate-axis kernel — per-channel
+            k-tap displacement + 1x1 mix, ReLU — of width ``lstm_size`` on the
+            CURRENT frame: the ConvLSTM's kernel without its recurrence), or
+            ``"convlstm"`` (variant A, `RateConvLSTM` of width ``lstm_size``
+            split over two directions, then 1x1).
+        max_slew: rev/s per frame the rate kernel must span (ConvLSTM state
+            reach per frame; sepconv receptive field); half-width
+            ``ceil(max_slew / Δr)`` bins.
         separable: rank-factorised ConvLSTM recurrence (`RateConvLSTM`).
     """
 
@@ -280,6 +297,8 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         f_max: float | None = None,
         c_har: int = 16,
         embedding: int = 128,
+        norm: str = "instance",
+        rate_taps: bool = True,
         octave_taps: tuple[float, ...] = (0.5, 1.0, 2.0),
         quarter_taps: tuple[float, ...] = (2**-0.25, 1.0, 2**0.25),
         n_maps: int = 4,
@@ -300,12 +319,13 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         self.out_freqs = grid
 
         # Shared across levels: a line is ~1.4 bins wide on every level.
-        self.block_1 = _conv2d_block(1, c_har, kernel_size=7)
+        self.norm = str(norm)
+        self.block_1 = _conv2d_block(1, c_har, kernel_size=7, norm=self.norm)
         self.lateral = nn.ModuleList(
             [nn.Conv2d(c_har, c_har, kernel_size=1) for _ in range(self.n_levels - 1)]
         )
-        self.block_2 = _conv2d_block(c_har, c_har, kernel_size=7)
-        self.block_2_5 = _conv2d_block(c_har, c_har, kernel_size=7)
+        self.block_2 = _conv2d_block(c_har, c_har, kernel_size=7, norm=self.norm)
+        self.block_2_5 = _conv2d_block(c_har, c_har, kernel_size=7, norm=self.norm)
 
         # Harmonic taps off the concatenated level maps.
         offsets = np.cumsum([0, *self.frontend.n_bins[:-1]]).tolist()
@@ -330,38 +350,53 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
 
         # Rate-axis context: HPPNet's octave / quarter-octave dilations as gathers
         # on the uniform output grid (one "level": step dr, ceiling (G-2)*dr).
-        for name, taps in (("oct", octave_taps), ("quart", quarter_taps)):
-            taps_np = np.asarray(taps, dtype=np.float64)
-            lo, frac, valid = build_tap_table(
-                taps_np, grid, [dr], [(self.n_bins - 2) * dr], [0], 0.0, float("inf")
-            )
-            # The identity tap (mult 1) must stay valid at the top bin too.
-            for j in np.flatnonzero(np.isclose(taps_np, 1.0)):
-                idx = torch.arange(self.n_bins)
-                lo[j] = idx.clamp(max=self.n_bins - 2)
-                frac[j] = (idx - lo[j]).to(frac.dtype)
-                valid[j] = 1.0
-            self.register_buffer(f"{name}_lo", lo, persistent=False)
-            self.register_buffer(f"{name}_frac", frac, persistent=False)
-            self.register_buffer(f"{name}_valid", valid, persistent=False)
-        self.block_4 = ProportionalTapConv(len(octave_taps), embedding, embedding)
-        self.norm_4 = nn.InstanceNorm2d(embedding)
-        self.block_5 = ProportionalTapConv(len(quarter_taps), embedding, embedding)
-        self.norm_5 = nn.InstanceNorm2d(embedding)
-        self.block_6 = _conv2d_block(embedding, embedding, (5, 1))
-        self.block_7 = _conv2d_block(embedding, embedding, (5, 1))
-        self.block_8 = _conv2d_block(embedding, embedding, (5, 1))
+        self.rate_taps = bool(rate_taps)
+        self.block_4: ProportionalTapConv | None = None
+        self.block_5: ProportionalTapConv | None = None
+        if self.rate_taps:
+            for name, taps in (("oct", octave_taps), ("quart", quarter_taps)):
+                taps_np = np.asarray(taps, dtype=np.float64)
+                lo, frac, valid = build_tap_table(
+                    taps_np, grid, [dr], [(self.n_bins - 2) * dr], [0], 0.0, float("inf")
+                )
+                # The identity tap (mult 1) must stay valid at the top bin too.
+                for j in np.flatnonzero(np.isclose(taps_np, 1.0)):
+                    idx = torch.arange(self.n_bins)
+                    lo[j] = idx.clamp(max=self.n_bins - 2)
+                    frac[j] = (idx - lo[j]).to(frac.dtype)
+                    valid[j] = 1.0
+                self.register_buffer(f"{name}_lo", lo, persistent=False)
+                self.register_buffer(f"{name}_frac", frac, persistent=False)
+                self.register_buffer(f"{name}_valid", valid, persistent=False)
+            self.block_4 = ProportionalTapConv(len(octave_taps), embedding, embedding)
+            self.norm_4 = _norm2d(self.norm, embedding)
+            self.block_5 = ProportionalTapConv(len(quarter_taps), embedding, embedding)
+            self.norm_5 = _norm2d(self.norm, embedding)
+        self.block_6 = _conv2d_block(embedding, embedding, (5, 1), norm=self.norm)
+        self.block_7 = _conv2d_block(embedding, embedding, (5, 1), norm=self.norm)
+        self.block_8 = _conv2d_block(embedding, embedding, (5, 1), norm=self.norm)
+        half = math.ceil(float(max_slew) / dr)
         if head == "conv1x1":
             self.temporal: nn.Module = nn.Identity()
             head_in = embedding
+        elif head == "sepconv":
+            # The ConvLSTM's rate kernel on the current frame, no recurrence:
+            # per-channel (1, k) displacement kernel, then a 1x1 channel mix.
+            self.temporal = nn.Sequential(
+                nn.Conv2d(
+                    embedding, embedding, (1, 2 * half + 1), padding=(0, half), groups=embedding
+                ),
+                nn.Conv2d(embedding, int(lstm_size), kernel_size=1),
+                nn.ReLU(),
+            )
+            head_in = int(lstm_size)
         elif head == "convlstm":
-            half = math.ceil(float(max_slew) / dr)
             self.temporal = RateConvLSTM(
                 embedding, int(lstm_size) // 2, 2 * half + 1, separable=separable
             )
             head_in = 2 * (int(lstm_size) // 2)
         else:
-            raise ValueError(f"head must be 'conv1x1' or 'convlstm', got {head!r}")
+            raise ValueError(f"head must be 'conv1x1', 'sepconv' or 'convlstm', got {head!r}")
         self.head = nn.Conv2d(head_in, self.n_maps, kernel_size=1)
 
     # ── grid ────────────────────────────────────────────────────────────────
@@ -395,10 +430,11 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         maps = [self.block_2_5(self.block_2(m)) for m in maps]
         x = torch.cat(maps, dim=-1)  # (B, c_har, T, sum F_l)
         x = torch.relu(self.conv_3(x, self.harm_lo, self.harm_frac, self.harm_valid))
-        x = self.norm_4(torch.relu(self.block_4(x, self.oct_lo, self.oct_frac, self.oct_valid)))
-        x = self.norm_5(
-            torch.relu(self.block_5(x, self.quart_lo, self.quart_frac, self.quart_valid))
-        )
+        if self.block_4 is not None and self.block_5 is not None:
+            x = self.norm_4(torch.relu(self.block_4(x, self.oct_lo, self.oct_frac, self.oct_valid)))
+            x = self.norm_5(
+                torch.relu(self.block_5(x, self.quart_lo, self.quart_frac, self.quart_valid))
+            )
         x = self.block_8(self.block_7(self.block_6(x)))  # (B, emb, T, G)
         y = self.head(self.temporal(x)).transpose(2, 3)  # (B, n_maps, G, T)
         b, m, g, t = y.shape

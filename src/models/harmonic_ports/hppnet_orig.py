@@ -238,21 +238,33 @@ class HarmonicDilatedConv(nn.Module):
         return torch.relu(tap_conv(x, weight, bias, lo, frac, valid))
 
 
+def _norm2d(kind: str, channels: int) -> nn.Module:
+    """``"instance"`` (HPPNet's, per clip and channel over the whole plane — the
+    map is gain-invariant and so is everything the head reads) or ``"batch"``
+    (HarmoF0's, dataset statistics, affine — absolute level survives)."""
+    if kind == "instance":
+        return nn.InstanceNorm2d(channels)
+    if kind == "batch":
+        return nn.BatchNorm2d(channels)
+    raise ValueError(f"norm must be 'instance' or 'batch', got {kind!r}")
+
+
 def _conv2d_block(
     channel_in: int,
     channel_out: int,
     kernel_size: int | tuple[int, int] = (1, 3),
     pool_size: tuple[int, int] | None = None,
     dilation: tuple[int, int] = (1, 1),
+    norm: str = "instance",
 ) -> nn.Sequential:
-    """HPPNet's ``CNNTrunk.get_conv2d_block``: conv -> ReLU -> [pool] -> InstanceNorm."""
+    """HPPNet's ``CNNTrunk.get_conv2d_block``: conv -> ReLU -> [pool] -> norm."""
     conv = nn.Conv2d(
         channel_in, channel_out, kernel_size=kernel_size, padding="same", dilation=dilation
     )
     layers: list[nn.Module] = [conv, nn.ReLU()]
     if pool_size is not None:
         layers.append(nn.MaxPool2d(pool_size))
-    layers.append(nn.InstanceNorm2d(channel_out))
+    layers.append(_norm2d(norm, channel_out))
     return nn.Sequential(*layers)
 
 

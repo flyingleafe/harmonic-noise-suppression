@@ -181,3 +181,61 @@ def test_convlstm_head_kernel_from_max_slew() -> None:
     assert y.shape == (1, 4 * OUT_BINS, 8000 // 512 + 1)
     with pytest.raises(ValueError):
         HPPNetPyramid(n_ffts=N_FFTS, level0_fmax=LEVEL0_FMAX, out_bins=OUT_BINS, head="lstm")
+
+
+def test_sepconv_head_spans_max_slew_on_the_current_frame() -> None:
+    """The separable rate kernel reaches ``ceil(max_slew / dr)`` bins either side
+    WITHIN a frame (the ConvLSTM reaches that far only across frames), and no
+    further: a perturbation at bin g of the head's input moves bins g ± half
+    and nothing beyond."""
+    torch.manual_seed(0)
+    m = HPPNetPyramid(
+        n_ffts=N_FFTS,
+        level0_fmax=LEVEL0_FMAX,
+        out_bins=OUT_BINS,
+        k_max=K_MAX,
+        k_sub=K_SUB,
+        head="sepconv",
+        lstm_size=16,
+        max_slew=15.0,
+    ).eval()
+    half = int(np.ceil(15.0 / (16000 / N_FFTS[0])))  # 2
+    feats = torch.randn(1, 128, 3, OUT_BINS)
+    base = m.head(m.temporal(feats))
+    bumped = feats.clone()
+    bumped[:, :, 1, 20] += 5.0
+    moved = (m.head(m.temporal(bumped)) - base).abs().sum(dim=(0, 1))  # (T, G)
+    assert bool((moved[1, 20 - half : 20 + half + 1] > 0).all())
+    assert (
+        float(moved[1, : 20 - half].max()) == 0.0 and float(moved[1, 20 + half + 1 :].max()) == 0.0
+    )
+    assert float(moved[[0, 2]].max()) == 0.0  # no reach across frames
+
+
+@pytest.mark.parametrize("norm", ["instance", "batch"])
+def test_rate_taps_off_drops_block_4_and_5_and_norm_selects_the_layer(norm: str) -> None:
+    torch.manual_seed(0)
+    m = HPPNetPyramid(
+        n_ffts=N_FFTS,
+        level0_fmax=LEVEL0_FMAX,
+        out_bins=OUT_BINS,
+        k_max=K_MAX,
+        k_sub=K_SUB,
+        head="sepconv",
+        lstm_size=16,
+        norm=norm,
+        rate_taps=False,
+    )
+    assert m.block_4 is None and m.block_5 is None and not hasattr(m, "oct_lo")
+    kinds = {
+        type(x)
+        for x in m.modules()
+        if isinstance(x, (torch.nn.InstanceNorm2d, torch.nn.BatchNorm2d))
+    }
+    assert kinds == {torch.nn.BatchNorm2d if norm == "batch" else torch.nn.InstanceNorm2d}
+    y = m(torch.randn(2, 8000))
+    assert y.shape == (2, 4 * OUT_BINS, 8000 // 512 + 1) and bool(torch.isfinite(y).all())
+    y.mean().backward()
+    assert all(p.grad is not None for p in m.parameters())
+    with pytest.raises(ValueError, match="norm"):
+        HPPNetPyramid(n_ffts=N_FFTS, level0_fmax=LEVEL0_FMAX, out_bins=OUT_BINS, norm="layer")

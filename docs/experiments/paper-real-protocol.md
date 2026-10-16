@@ -541,6 +541,31 @@ the rate axis) at the baseline's size. One dense-ConvLSTM HRSPNet run on
 `all` is the control; if it wins clearly, the paper reports both and says
 why. (c) Every model table in the paper carries the parameter count.
 
+**Zero-path pair (Dmitrii, 2026-10-15; `rp_pyrsep_{in,bn}_all`).** The
+first seven baseline cells put a number on the HPPNet family's zero
+problem: at L1 HPPNet's `real_cruise` is the best of any row (1.56; L2 1.32)
+and its `real_zero` the worst (9.5; L2 16.6) against HarmoF0's 0.5. Cause,
+read off the ports: every HPPNet block ends in a non-affine
+`InstanceNorm2d`, so from `block_1` on every feature is per-clip and
+gain-invariant — an all-stopped clip is normalised to the same scale as a
+cruise clip, the frequency-pooled off logit (L1/L2) sees contrast only, and
+the pyramid's 0 rev/s bin (whose harmonic taps all read DC and are masked)
+can only be a "nothing else fired" default. HarmoF0's blocks end in
+`BatchNorm2d` (dataset statistics, affine): absolute level survives to the
+off path, and "silent" is a linear threshold. The published `hppnet_l2_r2_s0`
+only escaped because its deleted `FreqSuperResHead` clamped the bins below
+27.5 rev/s to copies of the trunk's lowest bin and ran a BatchNorm'd conv
+stack over them — a level read smuggled in on the head's own path. The pair
+tests the mechanism on the HRSPNet line without a zero head: the pyramid
+with `block_4`/`block_5` dropped (the harmonic gather already reads `r/k`)
+and a **separable rate kernel** head (`head: sepconv`: the ConvLSTM's 33-tap
+per-channel kernel + 1 × 1 mix on the CURRENT frame, no recurrence, ≈ 21 k
+params; ≈ 0.48 M total), `norm: instance` vs `norm: batch`, everything else
+HRSPNet's. Expected: batch norm much better on `real_zero` at equal cruise.
+If it is, the norm becomes a chain step for the whole HPPNet family (L0–L2
+rows rerun with it), and the ConvLSTM row is then the recurrence-only
+ablation against `sepconv`.
+
 **Regressors**: the published SimpleConv (Quiet Drones 2026) and its best
 modification (the `all` results name it; Conv+BiGRU and SCv2 are the
 candidates from `paper-regime-matrix.md`), unchanged, on the same frame

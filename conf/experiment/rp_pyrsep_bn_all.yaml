@@ -1,0 +1,20 @@
+# @package _global_
+# Claim 3 (zero-path pair): pyramid + separable rate kernel, no block_4/5, batch norm, on the rp_all stream. Batch doc: docs/experiments/paper-real-protocol.md.
+defaults:
+  - override /data: rp_real
+  - override /model: hppnet_pyrsep_bn
+  - override /loss: salience_layers_rp
+  - override /metrics: salience_layers_rp
+  - override /validation: rp_real
+  - _self_
+
+experiment_name: rp_pyrsep_bn_all
+batch_size: 128  # no accumulation anywhere (Dmitrii, 2026-10-15): needs an A100-80 (128 OOMs at 32 GB)
+grad_accum_steps: 1
+num_workers: 6
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_all.yaml
+optim:
+  lr: 1.0e-3  # the max LR of published practice (HarmoF0, Cuesta 2020, Quiet Drones 2026: 1e-3; HPPNet 6e-4 at batch 4); range tests -> appendix
