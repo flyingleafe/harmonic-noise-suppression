@@ -243,3 +243,25 @@ def test_each_per_rotor_config_pairs_with_a_loss_on_its_own_grid(model_cfg):
             grid, has_off = grid_from_spec(term["params"]["grid"])
             assert np.allclose(grid, m.output_freqs(), rtol=1e-12, atol=0), (kind, term["name"])
             assert has_off is m.out_has_off, (kind, term["name"])
+
+
+def test_harmof0_cqt_frontend_is_a_drop_in_on_the_same_grid():
+    """``frontend="cqt"`` swaps the interpolated-STFT log spectrogram for HPPNet's
+    CQT on the same (fmin, bins/octave, bins) grid: identical output grid,
+    identical parameters (both front ends are parameter-free), and a trained
+    STFT state dict loads into the default build unchanged."""
+    stft = _build("harmof0", n_maps=4, translation_head=True)
+    cqt = _build("harmof0", n_maps=4, translation_head=True, frontend="cqt")
+    assert np.array_equal(stft.output_freqs(), cqt.output_freqs())
+    assert count_parameters(stft) == count_parameters(cqt)
+    assert type(stft.waveform_to_logspecgram).__name__ == "WaveformToLogSpecgram"
+    assert type(cqt.waveform_to_logspecgram).__name__ == "CQTLogSpecgram"
+    x = torch.randn(1, SR)
+    with torch.no_grad():
+        a, b = stft.eval()(x), cqt.eval()(x)
+    assert a.shape == b.shape and torch.isfinite(b).all()
+    assert not torch.allclose(a, b)  # a different front end, not a relabelled one
+    fresh = _build("harmof0", n_maps=4, translation_head=True)
+    fresh.load_state_dict(stft.state_dict(), strict=True)
+    with pytest.raises(ValueError, match="frontend"):
+        _build("harmof0", frontend="mel")

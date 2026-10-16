@@ -300,6 +300,7 @@ class HarmoF0Orig(LayerCRFReadout, SalienceRPSPredictor):
         published_interp: bool = True,
         n_maps: int = 1,
         translation_head: bool = False,
+        frontend: str = "stft",
     ):
         super().__init__(n_fft, hop_length, num_rotors)
         if len(channels) != 4 or len(dilation_rates) != 4:
@@ -322,15 +323,32 @@ class HarmoF0Orig(LayerCRFReadout, SalienceRPSPredictor):
         self.spec_sr = int(sr)
         self.spec_hop = int(hop_length)
 
-        self.waveform_to_logspecgram = WaveformToLogSpecgram(
-            int(sr),
-            int(n_freq) * 2,
-            float(fmin),
-            int(bins_per_octave),
-            int(freq_bins),
-            int(hop_length),
-            published_interp=published_interp,
-        )
+        # ``frontend``: the paper's interpolated-STFT log spectrogram (``"stft"``,
+        # default — every HarmoF0 checkpoint) or HPPNet's nnAudio CQT (``"cqt"``,
+        # `hppnet_orig.CQTLogSpecgram`) on the SAME grid (fmin, bins_per_octave,
+        # freq_bins), so the trunk and every head are untouched. Both emit
+        # ``(B, T, freq_bins)`` dB and hold no parameters; the CQT's dB is of the
+        # magnitude (as HPPNet applies it), the STFT's of the power.
+        self.frontend_kind = str(frontend)
+        self.waveform_to_logspecgram: nn.Module
+        if self.frontend_kind == "stft":
+            self.waveform_to_logspecgram = WaveformToLogSpecgram(
+                int(sr),
+                int(n_freq) * 2,
+                float(fmin),
+                int(bins_per_octave),
+                int(freq_bins),
+                int(hop_length),
+                published_interp=published_interp,
+            )
+        elif self.frontend_kind == "cqt":
+            from models.harmonic_ports.hppnet_orig import CQTLogSpecgram
+
+            self.waveform_to_logspecgram = CQTLogSpecgram(
+                int(sr), int(hop_length), float(fmin), int(freq_bins), int(bins_per_octave)
+            )
+        else:
+            raise ValueError(f"frontend must be 'stft' or 'cqt', got {frontend!r}")
 
         bins = int(bins_per_octave)
         self.block_1 = dila_conv_block(

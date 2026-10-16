@@ -1,0 +1,36 @@
+# harmof0_l2_cqt — conf/model/harmof0_l2.yaml with HPPNet's CQT front end
+# (`hppnet_orig.CQTLogSpecgram`, nnAudio CQT2010v2, fmin 27.5, 48 bins/octave,
+# 352 bins, magnitude -> dB) in place of HarmoF0's interpolated 64 ms STFT log
+# spectrogram. Same grid, same trunk (MRDConv k <= 12, BatchNorm blocks), same
+# L2 head: the one-axis test of "front end" between the two families — HarmoF0
+# L2 (2.62) vs HPPNet L2 (4.35) differ in front end, harmonic organ, norm and
+# head at once (Dmitrii, 2026-10-16). The CQT's window grows with 1/f (1.7 s at
+# 40 Hz vs the STFT's 64 ms), which is the published HPPNet advantage on slow
+# airframes and its cost on standby/ramp transitions.
+#
+# Loss/metrics: conf/{loss,metrics}/salience_layers_rp.yaml.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: harmof0_orig
+  n_fft: 1024
+  hop_length: 512
+  num_rotors: 4
+  sr: 16000
+  n_freq: 512
+  fmin: 27.5
+  bins_per_octave: 48
+  freq_bins: 352
+  n_har: 12
+  channels: [32, 64, 128, 128]
+  dilation_rates: [48, 48, 48, 48]
+  published_interp: true
+  n_maps: 4
+  translation_head: true
+  frontend: cqt
+model_type: null
+legacy_config_path: null
