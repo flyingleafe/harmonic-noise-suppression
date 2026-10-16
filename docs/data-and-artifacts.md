@@ -298,6 +298,14 @@ omnirun backends check        # re-establish the SSH ControlMaster after expiry
   `training.config` of `5ce0d62f`). Scripts that insert `src/` themselves
   (`scripts/lr_range_test.py`) are immune. There is no `--yes` option.
 
+- **vast: always `--disk 64`** (plus `--gpu-type A100-80` and the `--env`
+  credentials from `.env`). Each vast job is a fresh instance that builds
+  the `.venv` (6.8 GB) and pulls the dload data (≈ 14 GB materialised +
+  shards) onto the root disk; without a disk floor the offer omnirun picks
+  can be too small and `uv sync` dies mid-install with
+  `No space left on device`, leaving a torch without `torch._C`
+  (`rp_hppnet_l0_all` resumes, 2026-10-15, twice).
+
 - `omnirun pull` ships the job's whole `results/**` unless the job was
   submitted with `--outputs '<glob>'`; the full tree (~7.7k files) exceeds
   the client's 60 s read timeout. Submit with `--outputs 'results/<exp>/**'`,
