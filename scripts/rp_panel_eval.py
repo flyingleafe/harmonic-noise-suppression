@@ -20,10 +20,13 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "src"))
+for _p in (REPO_ROOT / "src", REPO_ROOT / "scripts"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import torch  # noqa: E402
 from hydra import compose, initialize_config_dir  # noqa: E402
+from tap_ablation_regimes import ablate  # noqa: E402
 from torch.utils.data import DataLoader  # noqa: E402
 
 import zoo  # noqa: E402
@@ -79,6 +82,14 @@ def main() -> None:
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--out", type=Path, help="JSON file to write {target: scores}")
+    p.add_argument(
+        "--drop-k",
+        nargs="*",
+        type=int,
+        default=[],
+        help="also score each target with its harmonic taps of order >= K zeroed "
+        "(scripts/tap_ablation_regimes.py's knock-out; pyramid and CQT families)",
+    )
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -98,20 +109,25 @@ def main() -> None:
         name, _, ckpt = target.partition(":")
         fm = zoo.load(name, ckpt or "best", device=device)
         loss_fn = _loss_for(name).to(device)
-        scores, loss, _ = validate_rps(
-            model=fm.model,
-            codec=fm.codec,
-            loss_fn=loss_fn,
-            valid_loader=loader,
-            plan=plan,
-            device=device,
-            amp=device.type == "cuda",
-            amp_dtype=torch.float16,
-            readout=rps_readout_for(fm.task.name),
-        )
-        scores["loss"] = loss
-        results[target] = scores
-        print(f"{target:52s} " + " ".join(f"{scores[v]:10.2f}" for v in VIEWS), flush=True)
+        full_state = {k: v.clone() for k, v in fm.model.state_dict().items()}
+        for k_from in (None, *args.drop_k):
+            label = target if k_from is None else f"{target}/drop_k{k_from}"
+            state = full_state if k_from is None else ablate(full_state, k_from)[0]
+            fm.model.load_state_dict(state)
+            scores, loss, _ = validate_rps(
+                model=fm.model,
+                codec=fm.codec,
+                loss_fn=loss_fn,
+                valid_loader=loader,
+                plan=plan,
+                device=device,
+                amp=device.type == "cuda",
+                amp_dtype=torch.float16,
+                readout=rps_readout_for(fm.task.name),
+            )
+            scores["loss"] = loss
+            results[label] = scores
+            print(f"{label:52s} " + " ".join(f"{scores[v]:10.2f}" for v in VIEWS), flush=True)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(results, indent=2, sort_keys=True))
