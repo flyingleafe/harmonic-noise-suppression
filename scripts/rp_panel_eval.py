@@ -70,6 +70,26 @@ def _loss_for(name: str):
     return build_losses(cfg.loss)
 
 
+def _windowed(readout, fm, seconds: float, sr: int = 16000):
+    """A readout that re-runs the model on ``seconds``-long windows of the clip
+    and concatenates the decoded rates: the panel's 8 s clips scored at the
+    2 s training-chunk horizon, which is the length-generalisation probe for
+    recurrent heads (a stateless head gives the same answer either way)."""
+    w = int(seconds * sr)
+
+    def read(model, pred_frame, inputs):
+        audio = inputs["mixture"]
+        parts = []
+        for s in range(0, audio.shape[-1], w):
+            sub = dict(inputs)
+            sub["mixture"] = audio[..., s : s + w]
+            out = fm.codec.call_model(model, sub)
+            parts.append(readout(model, fm.codec.to_frame(out, pred_frame), sub))
+        return torch.cat(parts, dim=-1)
+
+    return read
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -89,6 +109,13 @@ def main() -> None:
         default=[],
         help="also score each target with its harmonic taps of order >= K zeroed "
         "(scripts/tap_ablation_regimes.py's knock-out; pyramid and CQT families)",
+    )
+    p.add_argument(
+        "--window",
+        type=float,
+        default=None,
+        help="run inference in windows of this many seconds and concatenate "
+        "(length-generalisation probe for recurrent heads; 2 = the training chunk)",
     )
     args = p.parse_args()
 
@@ -112,8 +139,13 @@ def main() -> None:
         full_state = {k: v.clone() for k, v in fm.model.state_dict().items()}
         for k_from in (None, *args.drop_k):
             label = target if k_from is None else f"{target}/drop_k{k_from}"
+            if args.window:
+                label += f"/win{args.window:g}s"
             state = full_state if k_from is None else ablate(full_state, k_from)[0]
             fm.model.load_state_dict(state)
+            readout = rps_readout_for(fm.task.name)
+            if args.window:
+                readout = _windowed(readout, fm, args.window)
             scores, loss, _ = validate_rps(
                 model=fm.model,
                 codec=fm.codec,
@@ -123,7 +155,7 @@ def main() -> None:
                 device=device,
                 amp=device.type == "cuda",
                 amp_dtype=torch.float16,
-                readout=rps_readout_for(fm.task.name),
+                readout=readout,
             )
             scores["loss"] = loss
             results[label] = scores
