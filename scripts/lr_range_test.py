@@ -174,7 +174,9 @@ def run(args: argparse.Namespace) -> dict:
             print(f"step {step:5d} lr {lr:.2e} loss {total:.4f} ema {ema[-1]:.4f}", flush=True)
             # Checkpoint the curve: a wall-clock kill (uni-gpushort's 1 h cap,
             # LateDeep 2026-10-16/18) must still leave the steps run so far.
-            _write_result(args, cfg, lrs, losses, ema, batch_size, grad_accum, t0, device, True)
+            _write_result(
+                args, cfg, lrs, losses, ema, batch_size, grad_accum, t0, device, False, True
+            )
         if ema[-1] > args.stop_factor * min(ema):
             print(
                 f"step {step}: loss exploded ({ema[-1]:.3g} > {args.stop_factor}x min); stopping",
@@ -182,7 +184,9 @@ def run(args: argparse.Namespace) -> dict:
             )
             break
     diverged = len(lrs) < args.steps  # the loop only leaves early on a non-finite/exploded loss
-    out = _write_result(args, cfg, lrs, losses, ema, batch_size, grad_accum, t0, device, diverged)
+    out = _write_result(
+        args, cfg, lrs, losses, ema, batch_size, grad_accum, t0, device, diverged, False
+    )
     rec = json.loads(out.read_text())
     print(
         f"{args.experiment}: floor {rec['lr_floor']:.2e}, rise {rec['lr_rise']}, "
@@ -204,11 +208,14 @@ def _write_result(
     t0: float,
     device: torch.device,
     diverged: bool,
+    partial: bool,
 ) -> Path:
-    """Write ``results/rp_lr_range/<experiment>.json`` from the steps run so far."""
+    """Write ``results/rp_lr_range/<experiment>.json`` from the steps run so far;
+    ``partial`` marks a mid-run checkpoint (a killed run keeps it set)."""
     rec = recommend(np.asarray(lrs), ema_curve(losses, READ_BETA), args.rise, args.window, diverged)
     result = {
         "experiment": args.experiment,
+        "partial": partial,
         "model": str(cfg.model.params.get("name", cfg.model.get("_target_", ""))),
         "steps_run": len(lrs),
         "steps_requested": args.steps,
@@ -253,11 +260,16 @@ def summarize() -> None:
     for path in sorted((REPO_ROOT / "results" / "rp_lr_range").glob("*.json")):
         r = json.loads(path.read_text())
         ema = ema_curve(r["loss"], READ_BETA)
-        diverged = r["steps_run"] < r["steps_requested"]
+        # A short curve is a divergence only if the run ended itself; a curve
+        # cut by a wall-clock kill (``partial``) is read as far as it goes.
+        partial = bool(r.get("partial", False))
+        diverged = r["steps_run"] < r["steps_requested"] and not partial
         r.update(recommend(np.asarray(r["lr"]), ema, r.get("rise", 0.05), r["window"], diverged))
         rise = "none" if r["step_rise"] is None else f"{r['lr_rise']:.2e} @{r['step_rise']}"
         if diverged:
             rise = f"DIVERGED @ {r['lr_divergence']:.2e}"
+        elif partial:
+            rise = f"{rise} (PARTIAL, killed at step {r['steps_run']})"
         print(
             f"{r['experiment']:28s} steps {r['steps_run']:4d}/{r['steps_requested']} "
             f"batch {r['batch_size']}x{r['grad_accum_steps']} "
