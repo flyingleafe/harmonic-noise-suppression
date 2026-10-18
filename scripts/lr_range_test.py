@@ -22,6 +22,7 @@ import math
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -171,6 +172,9 @@ def run(args: argparse.Namespace) -> dict:
         ema.append(ema_val / (1 - args.beta ** (step + 1)))  # bias-corrected
         if step % 100 == 0:
             print(f"step {step:5d} lr {lr:.2e} loss {total:.4f} ema {ema[-1]:.4f}", flush=True)
+            # Checkpoint the curve: a wall-clock kill (uni-gpushort's 1 h cap,
+            # LateDeep 2026-10-16/18) must still leave the steps run so far.
+            _write_result(args, cfg, lrs, losses, ema, batch_size, grad_accum, t0, device, True)
         if ema[-1] > args.stop_factor * min(ema):
             print(
                 f"step {step}: loss exploded ({ema[-1]:.3g} > {args.stop_factor}x min); stopping",
@@ -178,6 +182,30 @@ def run(args: argparse.Namespace) -> dict:
             )
             break
     diverged = len(lrs) < args.steps  # the loop only leaves early on a non-finite/exploded loss
+    out = _write_result(args, cfg, lrs, losses, ema, batch_size, grad_accum, t0, device, diverged)
+    rec = json.loads(out.read_text())
+    print(
+        f"{args.experiment}: floor {rec['lr_floor']:.2e}, rise {rec['lr_rise']}, "
+        f"divergence {rec['lr_divergence']} "
+        f"-> recommended max LR {rec['lr_recommended']:.0e} ({out})",
+        flush=True,
+    )
+    return rec
+
+
+def _write_result(
+    args: argparse.Namespace,
+    cfg: Any,
+    lrs: list[float],
+    losses: list[float],
+    ema: list[float],
+    batch_size: int,
+    grad_accum: int,
+    t0: float,
+    device: torch.device,
+    diverged: bool,
+) -> Path:
+    """Write ``results/rp_lr_range/<experiment>.json`` from the steps run so far."""
     rec = recommend(np.asarray(lrs), ema_curve(losses, READ_BETA), args.rise, args.window, diverged)
     result = {
         "experiment": args.experiment,
@@ -201,13 +229,7 @@ def run(args: argparse.Namespace) -> dict:
     out = REPO_ROOT / "results" / "rp_lr_range" / f"{args.experiment}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1) + "\n")
-    print(
-        f"{args.experiment}: floor {rec['lr_floor']:.2e}, rise {rec['lr_rise']}, "
-        f"divergence {rec['lr_divergence']} "
-        f"-> recommended max LR {rec['lr_recommended']:.0e} ({out})",
-        flush=True,
-    )
-    return result
+    return out
 
 
 def ema_curve(losses: list[float], beta: float) -> np.ndarray:
