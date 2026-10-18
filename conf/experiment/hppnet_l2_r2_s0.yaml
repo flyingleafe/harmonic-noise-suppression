@@ -4,7 +4,7 @@
 # Not the regressor ladder's DREGON-only R2; no comb pretraining/checkpoint.
 defaults:
   - override /data: e12_real_fullflight
-  - override /model: hppnet_l2
+  - override /model: hppnet_l2_r2legacy  # frozen build of this run (FreqSuperResHead, 300 bins); the live hppnet_l2 is the protocol's translation head
   - override /loss: salience_layers_r150
   - override /metrics: salience_layers_r150
 

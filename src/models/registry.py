@@ -56,6 +56,7 @@ from models.harmonic_ports import (
     HarmoF0Orig,
     HarmoF0RPS,
     HPPNetOrig,
+    HPPNetOrigSuperResLegacy,
     HPPNetPyramid,
     HPPNetRPS,
 )
@@ -234,6 +235,10 @@ RPS_MODEL_REGISTRY: dict[str, Any] = {
     # say what the comb gather and the linear rate grid actually buy.
     "harmof0_orig": HarmoF0Orig,
     "hppnet_orig": HPPNetOrig,
+    # FROZEN pre-cutover L2 (the retired FreqSuperResHead) so `hppnet_l2_r2_s0`
+    # and the `real_r4_hppnet_l2*_unified` checkpoints can be re-scored;
+    # nothing new trains with it (models.harmonic_ports.hppnet_superres_legacy).
+    "hppnet_orig_superres_legacy": HPPNetOrigSuperResLegacy,
 }
 
 

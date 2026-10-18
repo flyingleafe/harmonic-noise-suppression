@@ -265,3 +265,25 @@ def test_harmof0_cqt_frontend_is_a_drop_in_on_the_same_grid():
     fresh.load_state_dict(stft.state_dict(), strict=True)
     with pytest.raises(ValueError, match="frontend"):
         _build("harmof0", frontend="mel")
+
+
+def test_legacy_superres_l2_builds_the_retired_head_on_the_published_trunk():
+    """`HPPNetOrigSuperResLegacy` is the pre-cutover L2 that old checkpoints
+    (`hppnet_l2_r2_s0`) load into: same trunk/head keys as `HPPNetOrig`, no off
+    logit, a 300-bin 0-150 linear grid, and the retired head's CLAMP — every
+    output bin below the trunk's 27.5 rev/s is a copy of its lowest log bin."""
+    from models.harmonic_ports import HPPNetOrigSuperResLegacy
+
+    legacy = HPPNetOrigSuperResLegacy(n_fft=2048, hop_length=512, num_rotors=4, n_maps=4)
+    new = _build("hppnet", n_maps=4, translation_head=True)
+    trunk_keys = {k for k in new.state_dict() if k.startswith(("trunk.", "head.", "frontend."))}
+    assert trunk_keys <= set(legacy.state_dict())
+    assert legacy.off_head is None and legacy.translation is None and legacy.out_has_off is False
+    grid = legacy.output_freqs()
+    assert len(grid) == 300 and grid[0] == 0.0 and abs(grid[-1] - 150.0) < 1e-9
+    w = legacy.superres_head.W
+    below = grid < 27.5
+    assert bool((w[below, 0] == 1.0).all()) and bool((w[below, 1:] == 0).all())
+    assert bool((w[~below].sum(dim=1) - 1.0).abs().max() < 1e-6)
+    y = legacy.eval()(torch.randn(1, SR))
+    assert y.shape == (1, 4 * 300, SR // 512 + 1) and torch.isfinite(y).all()
