@@ -1,0 +1,36 @@
+# hppnet_pyrseplstm_k64 — hppnet_pyrseplstm.yaml with the harmonic range cut to
+# k <= 64 (sub-harmonics unchanged). The eval-time knock-out of taps k >= 61 on
+# rp_pyrseplstm_alllab took dregon 4.18 -> 3.30 (D-cruise 3.43 -> 2.29) at an MD2
+# cost (1.31 -> 1.79): the top taps read the room-2 motor line and the recurrent
+# head carries the misreading forward. This config asks whether that DREGON
+# number is reachable by TRAINING without the taps while MD2 is kept
+# (docs/experiments/paper-real-protocol.md, panel re-scores, 2026-10-18).
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_pyramid
+  sr: 16000
+  hop_length: 512
+  num_rotors: 4
+  n_ffts: [16384, 8192, 4096, 2048]
+  level0_fmax: 1200.0
+  out_bins: 164
+  k_max: 64
+  k_sub: 8
+  f_min: null
+  f_max: null
+  c_har: 16
+  embedding: 128
+  norm: instance
+  rate_taps: false
+  n_maps: 4
+  head: convlstm
+  lstm_size: 128
+  max_slew: 15.0
+  separable: true
+model_type: null
+legacy_config_path: null
