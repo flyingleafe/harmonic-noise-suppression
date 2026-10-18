@@ -312,6 +312,22 @@ omnirun backends check        # re-establish the SSH ControlMaster after expiry
   `TAP_CONV_TORCH=1` in the submitted environment (the eager path; scores
   identical — `rp-panel-eval-dropk`, 2026-10-16).
 
+- **kaggle** (enabled in `~/.config/omnirun/config.toml`): good for short
+  evals, not for anything that must start promptly. (a) Kaggle stores every
+  push as the generic `machine_shape: "Gpu"` and ignores `--gpu-type`
+  (`P100` was requested, the server metadata says `Gpu`); it assigns a P100
+  or a 2×T4 at its discretion, and the 2×T4 pool can queue for hours — a
+  2×T4 kernel just uses `cuda:0`. (b) The account allows **2 concurrent
+  batch GPU sessions**, and a *queued* kernel holds one. (c) The installed
+  `kaggle` client has no cancel endpoint, so `omnirun cancel` only marks the
+  job locally and the kernel keeps its slot: **after cancelling a kaggle job
+  run `uvx --from 'kaggle>=2.2' kaggle kernels delete
+  flyingleafe/omnirun-<job-id>`** (with `yes` on stdin), or every later
+  placement is rolled back with "Maximum batch GPU session count of 2
+  reached" (visible only in the daemon's `/events`, 2026-10-18). Needs
+  `TAP_CONV_TORCH=1` like the V100s (P100 is sm_60). `uni-cpu` is the
+  better home for a single-checkpoint panel eval (~15 min at 8 threads).
+
 - `omnirun pull` ships the job's whole `results/**` unless the job was
   submitted with `--outputs '<glob>'`; the full tree (~7.7k files) exceeds
   the client's 60 s read timeout. Submit with `--outputs 'results/<exp>/**'`,

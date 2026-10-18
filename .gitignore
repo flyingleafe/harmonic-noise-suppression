@@ -17,6 +17,8 @@ results/S2/*
 !results/S2/dregon_room2_cruise_refined.json
 # EXCEPTION: the LR range-test curves of the rp protocol (paper-real-protocol.md)
 !results/rp_lr_range/
+# EXCEPTION: rp_real-panel re-scores of trained checkpoints (scripts/rp_panel_eval.py)
+!results/rp_panel_eval/
 # dload / online-mix / download scratch caches
 .cache/
 # zoo checkpoint index (R2 is the source of truth; this is a local cache)

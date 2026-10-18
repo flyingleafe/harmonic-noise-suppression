@@ -571,6 +571,50 @@ modification (the `all` results name it; Conv+BiGRU and SCv2 are the
 candidates from `paper-regime-matrix.md`), unchanged, on the same frame
 grid.
 
+**Panel re-scores of earlier checkpoints (2026-10-16 → 18;
+`scripts/rp_panel_eval.py`, JSONs in `results/rp_panel_eval/`).** Every
+trained checkpoint, old or new, can be scored on the rp_real panel through
+`zoo.load` + the loop's own `validate_rps`; the old pyramid/ConvLSTM builds
+are frozen as `hppnet_pyramid{,_k84}_r4legacy` and the retired
+`FreqSuperResHead` as `hppnet_orig_superres_legacy` / `hppnet_l2_r2legacy`
+(`real_r4_hppnet_l2_unified`'s checkpoints were deleted in the R2 cleanup and
+cannot be scored). Correction (2026-10-18): the old `real_r4_*_unified` and
+`hppnet_l2_r2_s0` runs trained on the same recording selection as `rp_all`
+(`in_flight_noise` minus room 1, FLY125) and were validated on room 1 /
+FLY124 — **held out at recording level like the new runs**; their caveats
+are label-altering augmentation (`freq_scale` + `noise_time_warp`),
+selection on the pre-calibration MD2 labels, and the retired regime's LR /
+selection-signal defects — not leakage. Findings so far (best-median
+checkpoints, `real_macro` on rp_real; per-view rows in the JSONs):
+
+| row | real_macro | zero | standby | ramp | cruise | note |
+|---|---:|---:|---:|---:|---:|---|
+| old conv-only pyrk84 (labelaug) | 2.86 | 2.54 | 3.92 | 8.11 | 2.03 | |
+| ↳ taps k ≥ 61 zeroed at eval | 2.47 | 2.11 | 4.09 | 7.85 | 1.57 | all of it DREGON cruise 3.48 → 2.52 |
+| old dense ConvLSTM pyrlstm (labelaug, 1.6 M) | 2.57 | 1.24 | 4.12 | 5.71 | 1.83 | the old 2.17 was the pre-calibration panel |
+| old HPPNet L2 + FreqSuperResHead (`hppnet_l2_r2_s0`) | 2.62 | 0.35 | 5.29 | 12.20 | 1.40 | the frozen-split 2.27 was a panel effect of ≈ 0.35 |
+| `rp_pyrsep_in_all` (sepconv, instance norm) | 2.59 | 1.83 | 4.25 | 9.93 | 1.57 | |
+| `rp_pyrsep_bn_all` (batch norm) | 3.17 | 3.14 | 8.28 | 10.78 | 1.25 | batch norm refuted: standby collapses |
+| `rp_pyrseplstm_all` (separable ConvLSTM) | 3.01 | 1.31 | 4.98 | 9.89 | 1.91 | 8 s vs 2 s windows identical (3.01 / 3.03): no length mismatch |
+| ↳ taps k ≥ 61 zeroed | 37.8 | — | — | — | — | plain-stream models USE the top taps |
+| `rp_pyrseplstm_alllab` | 2.74 | 2.27 | 3.95 | 6.34 | 1.96 | ramps 5.0 on DREGON — recurrence + moving labels |
+| ↳ taps k ≥ 61 zeroed | 2.55 | 3.27 | 4.93 | 6.60 | 1.41 | labelaug models gain from the knock-out, like the old ones |
+| `rp_harmof0_l2cqt_all` (HarmoF0 trunk, CQT front end) | 2.56 | 1.50 | 4.79 | 9.52 | 1.47 | front end alone: STFT 2.62 → CQT 2.56, all md2 cruise |
+
+Readings: (1) held-out plain-stream rows cluster at 2.56–2.65 across four
+families; no architecture is ahead by more than the ±0.3 round scatter.
+(2) The eval-time tap knock-out helps every labelaug-trained model and
+destroys every plain-stream one: with `rate_warp` the high harmonics are
+unreliable as a comb and the model leans on k < 61; on the plain stream it
+builds on them. The knock-out is therefore not a transferable diagnostic;
+the k ≤ 64 arm (trained without the taps) is the honest test, on both
+streams. (3) Recurrence owns DREGON ramps (5.0–5.1 vs 8–12 for every
+stateless head) only when the stream has moving rotors; on steady DREGON
+cruise it costs ≈ 0.8 rev/s against the same-frame kernel. (4) The HPPNet
+trunk's zero problem was the pooled off logit, not instance norm: bin 0 as a
+map default with same-frame neighbours (sepconv) or the old clamp-copy +
+BatchNorm head both solve it; batch norm in the trunk does not.
+
 ## Experiment grid (32 runs, one seed, up to 100k steps each)
 
 `rp_<model>_<stream>[_<ablation>]`; streams `all`, `alllab` (= `all-labelaug`),
