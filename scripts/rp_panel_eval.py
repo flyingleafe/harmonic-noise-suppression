@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -129,12 +130,24 @@ def main() -> None:
         num_workers=args.num_workers,
         collate_fn=frame_collate,
     )
-    results: dict[str, dict[str, float]] = {}
+    results: dict[str, Mapping[str, float | str]] = {}
     header = f"{'target':52s} " + " ".join(f"{v[:10]:>10s}" for v in VIEWS)
     print(header, flush=True)
+
+    def flush() -> None:
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(json.dumps(results, indent=2, sort_keys=True))
+
     for target in args.targets:
         name, _, ckpt = target.partition(":")
-        fm = zoo.load(name, ckpt or "best", device=device)
+        try:
+            fm = zoo.load(name, ckpt or "best", device=device)
+        except Exception as e:  # a checkpoint gone from R2 must not void the others
+            print(f"{target:52s} SKIPPED: {type(e).__name__}: {str(e)[:120]}", flush=True)
+            results[target] = {"error": f"{type(e).__name__}: {e}"}
+            flush()
+            continue
         loss_fn = _loss_for(name).to(device)
         full_state = {k: v.clone() for k, v in fm.model.state_dict().items()}
         for k_from in (None, *args.drop_k):
@@ -160,9 +173,7 @@ def main() -> None:
             scores["loss"] = loss
             results[label] = scores
             print(f"{label:52s} " + " ".join(f"{scores[v]:10.2f}" for v in VIEWS), flush=True)
-    if args.out:
-        args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps(results, indent=2, sort_keys=True))
+            flush()  # each row lands on disk as it is scored
 
 
 if __name__ == "__main__":
