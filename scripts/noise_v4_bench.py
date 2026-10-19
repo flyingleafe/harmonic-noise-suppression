@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -90,7 +91,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
     git = _git()
     units = [
         Unit(
-            uid=f"{m}__s{s}{_variant(args.exclude_windy)}",
+            uid=f"{m}__s{s}{_variant(args.exclude_windy)}" + (f"__{args.tag}" if args.tag else ""),
             params=dict(
                 motor=m,
                 seed=s,
@@ -104,7 +105,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
             ),
         )
         for m in args.motors
-        for s in range(args.seeds)
+        for s in range(args.seed_start, args.seed_start + args.seeds)
     ]
     res = run_grid(units, _fit_worker, str(args.out), jobs=args.jobs, mp_context="spawn")
     return res.exit_code
@@ -116,7 +117,7 @@ def cmd_reduce(args: argparse.Namespace) -> int:
     groups: dict[str, list[dict[str, Any]]] = {}
     for p in sorted((args.out / "restarts").glob("*.json")):
         pay = json.loads(p.read_text())
-        name = p.stem.split("__s")[0] + ("__nowindy" if p.stem.endswith("__nowindy") else "")
+        name = re.sub(r"__s\d+", "", p.stem)
         groups.setdefault(name, []).append(dict(path=str(p), pay=pay))
     (args.out / "fits").mkdir(parents=True, exist_ok=True)
     for name, items in groups.items():
@@ -400,6 +401,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--motors", nargs="+", default=["Motor1", "Motor2", "Motor3", "Motor4"])
     p.add_argument("--seeds", type=int, default=4)
     p.add_argument("--exclude-windy", action="store_true")
+    p.add_argument("--tag", default="", help="suffix for a schedule variant, e.g. 'lbfgsonly'")
+    p.add_argument("--seed-start", type=int, default=0)
     p.add_argument("--adam-steps", type=int, default=1500)
     p.add_argument("--lbfgs-iters", type=int, default=400)
     p.add_argument("--device", default="cpu")
