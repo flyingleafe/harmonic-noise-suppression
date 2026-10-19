@@ -211,4 +211,51 @@ corner 10–17 Hz); on Motor3 it runs off (a, b three prior sd from 1). α^a
 stays at 2.65–2.88 in every arm, independent of the shaft.
 <!-- source: results/noise_v4/bench_law/restarts/Motor{1,3}__s0{,__lam12}.json -->
 
+### Round 3 — the pedestal without its render cap
+
+Why the floor does not take the inter-line power: there is no broadband floor
+to take. Folded by distance to the nearest line (Motor1_70, 1–2 kHz, mic mean),
+the data fall without a plateau from −34.6 dB on the line to −41.9 (2–3 Hz),
+−49.1 (12–18 Hz) and −52.0 dB midway; the line-to-midway drop is 9–24 dB on
+every setting at 0.3–2 kHz, and across the 8 mics the midway level tracks the
+line level (r = 0.92, drop 14.7–18.5 dB per mic). The floor (one spline, scalar
+mic gains) is flat in Δf and cannot follow the line EQ. The only line-attached
+wide terms are the pedestal and the shaft; R2 fitted σ²_k at the 0.6 cap
+(0.56–0.59 for k ≥ 30, γ 8–50 Hz), so the rest went to the shaft at large λ.
+The cap is a render limit (explainer § am-pm, 2026-10-02), not a measurement.
+
+`--no-sigma2-cap` (σ²_k = e^u, priors unchanged), free law and λ pinned at 12 r
+(`nv4-nocap-motor{1,3}`, 400 + 200 L-BFGS), then the free law at 1200 + 600
+with and without `--center-delta` (zero-mean δ per setting;
+`nv4-nocap-long-motor{1,3}`):
+
+| Arm | Total (nats) | vs capped free law | λ over ladder (1/s) | σ_ν (rad/s) | D vs quick | conv |
+|---|--:|--:|---|---|---|:-:|
+| Motor1 uncapped, 1200 | −72 319 049 | −71 755 | 12.4–29.6 | 0.49–0.83 | 0.85–1.08× | no (2.1e-4) |
+| Motor1 uncapped, λ pinned, 400 | −72 311 462 | — | 7.4–13.2 | 0.46–0.71 | — | no |
+| Motor1 uncapped + δ centred | −72 317 460 | −70 166 | 12.4–29.9 | 0.49–0.83 | same | no (2.6e-4) |
+| Motor3 uncapped, 1200 | −29 944 760 | −43 695 | 18.8–32.0 | 0.54–0.61 | 0.57–0.88× | yes (9.2e-5) |
+| Motor3 uncapped, λ pinned, 400 | −29 941 796 | — | 7.4–13.3 | 0.38–0.56 | — | no |
+| Motor3 uncapped + δ centred | −29 943 254 | −42 189 | 17.6–32.8 | 0.55–0.60 | same | no (2.5e-4) |
+
+Lifting the cap is worth 44–72 k nats, and the shaft returns to the quick
+fit's regime: at equal schedule (400 + 200) the free law beats λ pinned at
+12 r by 709 (Motor1) and 683 nats (Motor3), against 14–24 k with the cap.
+σ²_k grows with order, 0.15 at k = 12, 0.5–0.9 at k = 16–20, 1.5 at k = 30,
+2.1–2.9 at k = 40, 2.7–4.1 at k = 60–80 (a coherent share e^{−σ²} of 2–7 %
+at high order), with γ_k 1.5–7 Hz (prior centre 1 Hz). The pedestal now draws
+the wings: the Motor1_70 fold matches within 0.5 dB from the line to midway
+except the 2–3 Hz bin (model 1.7 dB high), and the floor sits at −79.6 dB at 1–2 kHz, 27 dB
+under the midway level — the bench shows no broadband floor there, and its
+speed exponent b0 wanders (3.4–9.0) because nothing pins it.
+
+The line speed exponent leaked into δ: in R2 and the uncapped fits the mean
+δ over k ≤ 40 rises 3–4 dB across the ladder, so the effective exponent
+(α^a plus the δ trend) is 4.0–4.5 at k ≤ 40 and 5.7–6.8 on the BPF, matching
+the measurement (4.7/5.0 at k ≤ 20, 6.2 on the BPF), while α^a alone reads
+2.7–3.8. Centring δ moves α^a to 4.12 (Motor1) / 3.69 (Motor3) at a cost of
+~1.5 k nats; the effective exponents stay where they were, so the residual
+trend is an order dependence of the exponent, not a free offset.
+<!-- source: results/noise_v4/bench_law/restarts/Motor{1,3}__s0__nocap{,__long,__dc__long}.json, Motor{1,3}__s0__lam12__nocap.json -->
+
 ## Conclusion
