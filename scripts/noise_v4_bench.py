@@ -43,11 +43,12 @@ def _git() -> str | None:
     return r.stdout.strip() or None
 
 
-def _variant(exclude_windy: bool, pin_lam: float | None, no_cap: bool) -> str:
+def _variant(args: argparse.Namespace) -> str:
     return (
-        ("__nowindy" if exclude_windy else "")
-        + (f"__lam{pin_lam:g}" if pin_lam else "")
-        + ("__nocap" if no_cap else "")
+        ("__nowindy" if args.exclude_windy else "")
+        + (f"__lam{args.pin_lam:g}" if args.pin_lam else "")
+        + ("__nocap" if args.no_sigma2_cap else "")
+        + ("__dc" if args.center_delta else "")
     )
 
 
@@ -69,6 +70,7 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
         exclude_mics=exclude,
         pin_lam=prm["pin_lam"],
         sigma2_cap=None if prm["no_sigma2_cap"] else B.SIGMA2_CAP,
+        center_delta=bool(prm["center_delta"]),
     )
     pay = B.payload(model, rec, git=prm["git"])
     path = Path(prm["out"]) / "restarts" / f"{unit.uid}.json"
@@ -99,14 +101,14 @@ def cmd_fit(args: argparse.Namespace) -> int:
     git = _git()
     units = [
         Unit(
-            uid=f"{m}__s{s}{_variant(args.exclude_windy, args.pin_lam, args.no_sigma2_cap)}"
-            + (f"__{args.tag}" if args.tag else ""),
+            uid=f"{m}__s{s}{_variant(args)}" + (f"__{args.tag}" if args.tag else ""),
             params=dict(
                 motor=m,
                 seed=s,
                 exclude_windy=bool(args.exclude_windy),
                 pin_lam=args.pin_lam,
                 no_sigma2_cap=bool(args.no_sigma2_cap),
+                center_delta=bool(args.center_delta),
                 adam_steps=args.adam_steps,
                 lbfgs_iters=args.lbfgs_iters,
                 device=args.device,
@@ -431,6 +433,11 @@ def main(argv: list[str] | None = None) -> int:
         "--no-sigma2-cap",
         action="store_true",
         help="fit the pedestal sigma2_k without the 0.6 render cap (explainer section am-pm)",
+    )
+    p.add_argument(
+        "--center-delta",
+        action="store_true",
+        help="zero-mean line scatter per setting, so the ladder level trend goes through alpha",
     )
     p.add_argument("--tag", default="", help="suffix for a schedule variant, e.g. 'lbfgsonly'")
     p.add_argument("--seed-start", type=int, default=0)

@@ -594,10 +594,14 @@ class LadderModel:
         exclude_mics: tuple[int, ...] = (),
         pin_lam: float | None = None,
         sigma2_cap: float | None = SIGMA2_CAP,
+        center_delta: bool = False,
     ):
         self.lad = lad
         #: the pedestal cap (explainer § am-pm, a RENDER limit); None fits it free
         self.sigma2_cap = sigma2_cap
+        #: ``center_delta``: the scatter delta of a setting has zero mean over
+        #: (mic, line), so a ladder-wide level trend can only go through alpha
+        self.center_delta = center_delta
         self.device = torch.device(device)
         dd: dict[str, Any] = dict(dtype=torch.float64, device=self.device)
         rng = np.random.default_rng(seed)
@@ -698,6 +702,11 @@ class LadderModel:
     def gamma_am(self) -> Tensor:
         return torch.exp(self.params["log_gamma"])
 
+    def delta(self, j: int) -> Tensor:
+        """``(M, K)`` per-run line scatter of setting ``j`` (dB)."""
+        d = self.params[f"delta_{j}"]
+        return d - d.mean() if self.center_delta else d
+
     def shaft(self, j: int) -> tuple[Tensor, Tensor]:
         """``(sigma_nu rad/s, lam 1/s)`` of setting ``j`` from the ladder's
         shaft law: ``sigma_nu = 2 pi f_ref eps r^a``, ``lam = lam_ref r^b``."""
@@ -724,7 +733,7 @@ class LadderModel:
         p, fz, s = self.params, self.frozen[j], self.lad.settings[j]
         K = s.k_max
         lr10 = 10.0 * fz.log_r / math.log(10.0)
-        mic_db = fz.eq_db + p[f"delta_{j}"]  # (M, K)
+        mic_db = fz.eq_db + self.delta(j)  # (M, K)
         w_aero = 10.0 ** ((p["p_aero"][:K][None, :] + p["alpha_aero"] * lr10 + mic_db) / 10.0)
         motor_k = self.lad.motor_orders[self.lad.motor_orders <= K]
         w_motor = 10.0 ** (
@@ -950,6 +959,7 @@ def fit_ladder(
     exclude_mics: tuple[int, ...] = (),
     pin_lam: float | None = None,
     sigma2_cap: float | None = SIGMA2_CAP,
+    center_delta: bool = False,
     log: Any = print,
 ) -> tuple[LadderModel, dict[str, Any]]:
     """MAP of one ladder: Adam, then L-BFGS, then a fresh-memory L-BFGS restart
@@ -963,6 +973,7 @@ def fit_ladder(
         exclude_mics=exclude_mics,
         pin_lam=pin_lam,
         sigma2_cap=sigma2_cap,
+        center_delta=center_delta,
     )
     t_all = time.perf_counter()
     t0 = time.perf_counter()
@@ -993,6 +1004,7 @@ def fit_ladder(
         jitter=float(jitter if seed > 0 else 0.0),
         pin_lam=pin_lam,
         sigma2_cap=sigma2_cap,
+        center_delta=center_delta,
         adam_steps=int(adam_steps),
         adam_lr=float(adam_lr),
         lbfgs_iters=int(lbfgs_iters),
@@ -1104,7 +1116,7 @@ def payload(
                 sigma_nu_rad_s=float(sig_t),
                 lam_per_s=float(lam_t),
                 wind_db=p[f"wind_{j}"].tolist(),
-                delta_db=p[f"delta_{j}"].tolist(),
+                delta_db=model.delta(j).detach().cpu().numpy().tolist(),
                 eq_db=lad.eq[j].tolist(),
                 whittle_nats=record["whittle_per_setting"][j],
                 n_cells=int(model.frozen[j].band.sum()) * int(model.mics.numel()),
