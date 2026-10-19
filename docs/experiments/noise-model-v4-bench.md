@@ -190,4 +190,25 @@ and Motor3: the free law, and the pinned arm `--pin-lam 12` (λ = 12 r,
 i.e. 7–13 1/s, ε and a still free). The objective gap between them, with
 floor, wind and δ refitted, decides between a prior and a model change.
 
+Jobs `nv4-law-motor1-a04b4d`, `nv4-law-motor3-17ccc4` (uni, one seed each,
+1500 Adam + 400 + 200 L-BFGS; `results/noise_v4/bench_law/restarts/`):
+
+| Arm | Total (nats) | vs per-setting R1 | ε | a | λ_ref (1/s) | b | λ over ladder | D (rad²/s) | α^a | conv |
+|---|--:|--:|--:|--:|--:|--:|---|---|--:|:-:|
+| Motor1 free law | −72 247 294 | +10 639 | 0.28 % | 0.86 | 98 | 0.96 | 61–107 | 0.028–0.044 | 2.83 | yes |
+| Motor1 λ pinned | −72 233 155 | +24 778 | 0.17 % | 0.79 | 12 | 1 | 7.4–13.2 | 0.097–0.135 | 2.86 | yes |
+| Motor3 free law | −29 901 065 | +3 838 | 2.6 % | −0.37 | 13 062 | −1.05 | 11 751–21 817 | 0.023–0.028 | 2.65 | no |
+| Motor3 λ pinned | −29 876 716 | +28 187 | 0.15 % | 0.58 | 12 | 1 | 7.4–13.3 | 0.089–0.097 | 2.88 | no |
+
+Pinning λ near the quick-fit value costs 14 139 nats on Motor1 (2.1e-3/cell)
+and 24 350 on Motor3 (8.4e-3/cell) once everything else is refitted (Motor1_70:
+5 677 nats against the scan's 125 550), still far beyond any prior. 75–80 % of the loss sits
+more than 1.5 Hz from a line (Motor1: 11 508 of 14 139 nats; Motor3: 18 107
+of 24 350), 1–7 kHz mostly: the data carry 1/Δf² wings on the high orders
+that a single OU at λ ≈ 10 (corner 1.6 Hz, 1/Δf⁴ beyond it) cannot make.
+On Motor1 the tie alone settles to a coherent law (a = 0.86, b = 0.96, wing
+corner 10–17 Hz); on Motor3 it runs off (a, b three prior sd from 1). α^a
+stays at 2.65–2.88 in every arm, independent of the shaft.
+<!-- source: results/noise_v4/bench_law/restarts/Motor{1,3}__s0{,__lam12}.json -->
+
 ## Conclusion
