@@ -5,12 +5,13 @@ single-rotor ladders, the planted-synthetic check and the acceptance checks::
 
     python scripts/noise_v4_bench.py fit --motors Motor1 Motor2 --seeds 4 --device cuda
     python scripts/noise_v4_bench.py fit --motors Motor1 --seeds 4 --exclude-windy
+    python scripts/noise_v4_bench.py fit --motors Motor1 Motor3 --seeds 1 --pin-lam 12
     python scripts/noise_v4_bench.py planted --motor Motor1 [--truth <fit.json>]
     python scripts/noise_v4_bench.py reduce
     python scripts/noise_v4_bench.py check
 
 Outputs under ``--out`` (default ``results/noise_v4/bench``): ``restarts/`` one
-``noise-v4-fit/1`` payload per (motor, seed[, no-windy]); ``raw/`` the gridrun
+``noise-v4-fit/2`` payload per (motor, seed[, no-windy][, pinned rate]); ``raw/`` the gridrun
 unit records; ``fits/<motor>[__nowindy].json`` the selected restart (lowest
 objective) with the restart spread; ``planted/<motor>.json``;
 ``checks.json`` + ``checks.md``.
@@ -42,8 +43,8 @@ def _git() -> str | None:
     return r.stdout.strip() or None
 
 
-def _variant(exclude_windy: bool) -> str:
-    return "__nowindy" if exclude_windy else ""
+def _variant(exclude_windy: bool, pin_lam: float | None) -> str:
+    return ("__nowindy" if exclude_windy else "") + (f"__lam{pin_lam:g}" if pin_lam else "")
 
 
 def _fit_worker(unit: Unit) -> dict[str, Any]:
@@ -62,6 +63,7 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
         lbfgs_iters=int(prm["lbfgs_iters"]),
         device=prm["device"],
         exclude_mics=exclude,
+        pin_lam=prm["pin_lam"],
     )
     pay = B.payload(model, rec, git=prm["git"])
     path = Path(prm["out"]) / "restarts" / f"{unit.uid}.json"
@@ -79,6 +81,7 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
         alpha_motor=pay["shared"]["alpha_motor"],
         b0=pay["shared"]["floor"]["b0"],
         b1=pay["shared"]["floor"]["b1"],
+        shaft=pay["shared"]["shaft"],
         sigma_nu=[s["sigma_nu_rad_s"] for s in pay["settings"]],
         lam=[s["lam_per_s"] for s in pay["settings"]],
         eval_s=rec["eval_s"],
@@ -91,11 +94,13 @@ def cmd_fit(args: argparse.Namespace) -> int:
     git = _git()
     units = [
         Unit(
-            uid=f"{m}__s{s}{_variant(args.exclude_windy)}" + (f"__{args.tag}" if args.tag else ""),
+            uid=f"{m}__s{s}{_variant(args.exclude_windy, args.pin_lam)}"
+            + (f"__{args.tag}" if args.tag else ""),
             params=dict(
                 motor=m,
                 seed=s,
                 exclude_windy=bool(args.exclude_windy),
+                pin_lam=args.pin_lam,
                 adam_steps=args.adam_steps,
                 lbfgs_iters=args.lbfgs_iters,
                 device=args.device,
@@ -136,6 +141,7 @@ def cmd_reduce(args: argparse.Namespace) -> int:
             alpha_motor=[it["pay"]["shared"]["alpha_motor"] for it in items],
             sigma_nu=[[s["sigma_nu_rad_s"] for s in it["pay"]["settings"]] for it in items],
             lam=[[s["lam_per_s"] for s in it["pay"]["settings"]] for it in items],
+            shaft=[it["pay"]["shared"]["shaft"] for it in items],
             rule="reported fit = restart with the lowest total objective",
         )
         (args.out / "fits" / f"{name}.json").write_text(json.dumps(best))
@@ -169,6 +175,8 @@ def cmd_planted(args: argparse.Namespace) -> int:
     )
     t = {k: v.detach().cpu().numpy() for k, v in truth.params.items()}
     f = {k: v.detach().cpu().numpy() for k, v in model.params.items()}
+    shaft_t = [tuple(float(v) for v in truth.shaft(j)) for j in range(len(lad.settings))]
+    shaft_f = [tuple(float(v) for v in model.shaft(j)) for j in range(len(lad.settings))]
     s2_t = truth.sigma2().detach().cpu().numpy()
     s2_f = model.sigma2().detach().cpu().numpy()
     rows = []
@@ -183,8 +191,8 @@ def cmd_planted(args: argparse.Namespace) -> int:
         rows.append(
             dict(
                 key=s.key,
-                sigma_nu_rel_err=float(math.exp(f["log_sigma_nu"][j] - t["log_sigma_nu"][j]) - 1.0),
-                lam_rel_err=float(math.exp(f["log_lam"][j] - t["log_lam"][j]) - 1.0),
+                sigma_nu_rel_err=shaft_f[j][0] / shaft_t[j][0] - 1.0,
+                lam_rel_err=shaft_f[j][1] / shaft_t[j][1] - 1.0,
                 n_lines_15db=int(vis15.sum()),
                 sigma2_rel_err_median_15db=float(
                     np.median(np.abs(s2_f[:K][vis15] / s2_t[:K][vis15] - 1.0))
@@ -214,6 +222,10 @@ def cmd_planted(args: argparse.Namespace) -> int:
         alpha_motor=dict(truth=float(t["alpha_motor"]), fit=float(f["alpha_motor"])),
         b0=dict(truth=float(t["b0"]), fit=float(f["b0"])),
         b1=dict(truth=float(t["b1"]), fit=float(f["b1"])),
+        eps=dict(truth=float(np.exp(t["log_eps"])), fit=float(np.exp(f["log_eps"]))),
+        a_sigma=dict(truth=float(t["a_sigma"]), fit=float(f["a_sigma"])),
+        lam_ref=dict(truth=float(np.exp(t["log_lam_ref"])), fit=float(np.exp(f["log_lam_ref"]))),
+        b_lam=dict(truth=float(t["b_lam"]), fit=float(f["b_lam"])),
         settings=rows,
         objective=rec["objective"],
         converged=rec["converged"],
@@ -401,6 +413,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--motors", nargs="+", default=["Motor1", "Motor2", "Motor3", "Motor4"])
     p.add_argument("--seeds", type=int, default=4)
     p.add_argument("--exclude-windy", action="store_true")
+    p.add_argument(
+        "--pin-lam",
+        type=float,
+        default=None,
+        help="hold the shaft rate at lam = PIN_LAM (f / f_ref) instead of fitting lam_ref, b",
+    )
     p.add_argument("--tag", default="", help="suffix for a schedule variant, e.g. 'lbfgsonly'")
     p.add_argument("--seed-start", type=int, default=0)
     p.add_argument("--adam-steps", type=int, default=1500)

@@ -14,9 +14,11 @@ The expected periodogram of setting ``j``, microphone ``m``::
 * ``P^a_jk = 10^{(p^a_k + 10 alpha^a log10 r_j)/10}``, ``r_j = f_j / 80 rev/s``;
   ``P^m`` the same with ``p^m_n``, ``alpha^m`` at the motor orders ``k = 3 p n``;
 * ``L_jk`` is the window-convolved line of lag law :func:`lag.r_tau_v4`: the
-  shaft OU ``(sigma_nu_j, lam_j)`` times the per-order pedestal
+  shaft OU ``(sigma_nu(f_j), lam(f_j))`` times the per-order pedestal
   ``(sigma2_k, gamma_k)`` for the aerodynamic family, the shaft alone for the
-  motor family;
+  motor family. The shaft follows ONE speed law per motor (:meth:`LadderModel.shaft`):
+  ``sigma_nu = 2 pi f_ref eps r^a`` (``eps`` the relative speed jitter at
+  ``f_ref``, half-normal in linear space) and ``lam = lam_ref r^b``;
 * ``h_jmk = 10^{(E_jmk + delta_jmk)/10}``: the pair EQ ``E`` (a constant,
   measured on the OTHER settings of the ladder, :func:`pair_eq`) plus the
   per-run, per-line scatter ``delta ~ N(0, 2.4 dB)`` (6 dB below ``k = 8`` on
@@ -27,8 +29,8 @@ The expected periodogram of setting ``j``, microphone ``m``::
 * ``N_jm`` the Welch spectrum of the recording's quiet (rotors stopped) tail.
 
 Shared across the ladder: ``p^a, p^m, alpha^a, alpha^m, b0, b1, F, g, sigma2,
-gamma``. Per setting: the carrier (frozen, the measured core speed), the shaft
-pair, ``delta``, the wind and the ambient.
+gamma`` and the shaft law ``(eps, a, lam_ref, b)``. Per setting: the carrier
+(frozen, the measured core speed), ``delta``, the wind and the ambient.
 
 Deviations from the explainer, each forced by the data: (i) the ambient is
 read on the QUIET run of the recording (the rotors stopped), not on "the span
@@ -80,7 +82,7 @@ __all__ = [
     "prepare_setting",
 ]
 
-FIT_SCHEMA = "noise-v4-fit/1"
+FIT_SCHEMA = "noise-v4-fit/2"
 DATASET = "DREGON-frames"
 RPS_KEY = "motors_command"
 SR = 16000
@@ -111,8 +113,15 @@ ALPHA_AERO = (5.5, 1.0)
 ALPHA_MOTOR = (0.0, 2.0)
 B0 = (3.0, 1.0)
 B1 = (0.5, 0.25)
-LOG_SIGMA_NU = (math.log(0.4), 0.5)  # rad/s
-LOG_LAM = (math.log(12.0), 0.5)  # 1/s
+#: The shaft law. ``eps``: relative rms speed jitter at f_ref, HalfNormal in
+#: linear space (a percent-level speed regulation error). ``a``, ``b``: speed
+#: exponents of sigma_nu and lam; 1 is the aero-damped motor whose disturbance
+#: torque scales with its load (constant relative jitter, damping ~ speed).
+EPS_HALF_NORMAL = 0.005
+A_SIGMA = (1.0, 0.5)
+B_LAM = (1.0, 0.5)
+#: Seed of a setting whose quick fit fell into the random-walk corner.
+SHAFT_SEED = (0.4, 12.0)  # (rad/s, 1/s)
 SIGMA2_CAP = 0.6
 SCATTER_SD_DB = 2.4
 SCATTER_WINDY_SD_DB = 6.0
@@ -511,7 +520,7 @@ def build_ladder(motor: str, settings: list[Setting] | None = None) -> Ladder:
     shaft = []
     for s in settings:
         q = _quick_shaft(s.key)
-        shaft.append(q if q is not None else (math.exp(LOG_SIGMA_NU[0]), math.exp(LOG_LAM[0])))
+        shaft.append(q if q is not None else SHAFT_SEED)
 
     # wind centres: each mic's lower envelope at 30-90 Hz (lines excluded by the
     # percentile) over the calm-mic median; a calm mic sits 20 dB under it
@@ -581,6 +590,7 @@ class LadderModel:
         seed: int = 0,
         jitter: float = 0.0,
         exclude_mics: tuple[int, ...] = (),
+        pin_lam: float | None = None,
     ):
         self.lad = lad
         self.device = torch.device(device)
@@ -639,7 +649,11 @@ class LadderModel:
         def P(v: Any) -> Tensor:
             return torch.as_tensor(np.asarray(v, dtype=np.float64), **dd).requires_grad_(True)
 
+        # the shaft law, seeded at a = b = 1 through the per-setting seeds
         sh = np.asarray(lad.seeds["shaft"], dtype=np.float64)
+        log_r = np.log([s.carrier / F_REF for s in lad.settings])
+        log_eps0 = float(np.median(np.log(sh[:, 0]) - log_r)) - math.log(2.0 * math.pi * F_REF)
+        log_lam0 = float(np.median(np.log(sh[:, 1]) - log_r))
         self.params: dict[str, Tensor] = dict(
             p_aero=P(lad.seeds["p_aero"]),
             p_motor=P(lad.seeds["p_motor"]),
@@ -652,11 +666,19 @@ class LadderModel:
             floor_mean_db=P(lad.centres["floor_mean_db"]),
             floor_z=P(z0),
             mic_floor_db=P(np.zeros(M)),
-            log_sigma_nu=P(np.log(sh[:, 0]) + jit(len(sh))),
-            log_lam=P(np.log(sh[:, 1]) + jit(len(sh))),
+            log_eps=P(log_eps0 + jit(1)[0]),
+            a_sigma=P(A_SIGMA[0]),
             **{f"delta_{j}": P(np.zeros((M, s.k_max))) for j, s in enumerate(lad.settings)},
             **{f"wind_{j}": P(lad.centres["wind_db"][j]) for j in range(len(lad.settings))},
         )
+        #: ``pin_lam``: lam = pin_lam r^1, both held fixed (the pinned-rate arm)
+        self.pinned: dict[str, Tensor] = {}
+        if pin_lam is None:
+            self.params["log_lam_ref"] = P(log_lam0 + jit(1)[0])
+            self.params["b_lam"] = P(B_LAM[0])
+        else:
+            self.pinned["log_lam_ref"] = torch.as_tensor(math.log(pin_lam), **dd)
+            self.pinned["b_lam"] = torch.as_tensor(B_LAM[0], **dd)
         assert self.params["p_motor"].numel() == n_m
         #: the microphones the likelihood reads (all unless ``exclude_mics``)
         self.mics = torch.as_tensor(
@@ -670,6 +692,14 @@ class LadderModel:
 
     def gamma_am(self) -> Tensor:
         return torch.exp(self.params["log_gamma"])
+
+    def shaft(self, j: int) -> tuple[Tensor, Tensor]:
+        """``(sigma_nu rad/s, lam 1/s)`` of setting ``j`` from the ladder's
+        shaft law: ``sigma_nu = 2 pi f_ref eps r^a``, ``lam = lam_ref r^b``."""
+        p, lr = {**self.pinned, **self.params}, self.frozen[j].log_r
+        sig = 2.0 * math.pi * F_REF * torch.exp(p["log_eps"] + p["a_sigma"] * lr)
+        lam = torch.exp(p["log_lam_ref"] + p["b_lam"] * lr)
+        return sig, lam
 
     def _floor_params(self) -> SP.FloorParams:
         p = self.params
@@ -709,8 +739,7 @@ class LadderModel:
         grid = fz.grid
         n = grid.n
         M = s.power.shape[0]
-        sig = torch.exp(p["log_sigma_nu"][j])
-        lam = torch.exp(p["log_lam"][j])
+        sig, lam = self.shaft(j)
         s2 = self.sigma2()
         gam = self.gamma_am()
         w_aero, w_motor, motor_k = self.line_weights(j)
@@ -755,8 +784,9 @@ class LadderModel:
         return out.clamp_min(MODEL_FLOOR)
 
     def load_payload(self, pay: dict[str, Any]) -> None:
-        """Set every parameter from a ``noise-v4-fit/1`` payload of the same
-        ladder geometry (the planted check's truth)."""
+        """Set every parameter from a ``noise-v4-fit/2`` payload of the same
+        ladder geometry (the planted check's truth); a pinned rate takes the
+        payload's value too."""
         sh = pay["shared"]
         s2 = np.asarray(sh["pedestal"]["sigma2"], dtype=np.float64)
         log_cap = math.log(SIGMA2_CAP)
@@ -774,15 +804,18 @@ class LadderModel:
             floor_mean_db=sh["floor"]["mean_db"],
             floor_z=sh["floor"]["shape_z"],
             mic_floor_db=sh["floor"]["mic_floor_db"],
-            log_sigma_nu=np.log([st["sigma_nu_rad_s"] for st in pay["settings"]]),
-            log_lam=np.log([st["lam_per_s"] for st in pay["settings"]]),
+            log_eps=math.log(sh["shaft"]["eps"]),
+            a_sigma=sh["shaft"]["a_sigma"],
+            log_lam_ref=math.log(sh["shaft"]["lam_ref_per_s"]),
+            b_lam=sh["shaft"]["b_lam"],
         )
         for j, st in enumerate(pay["settings"]):
             vals[f"delta_{j}"] = st["delta_db"]
             vals[f"wind_{j}"] = st["wind_db"]
         with torch.no_grad():
             for k, v in vals.items():
-                self.params[k].copy_(torch.as_tensor(np.asarray(v, dtype=np.float64)))
+                dst = self.params[k] if k in self.params else self.pinned[k]
+                dst.copy_(torch.as_tensor(np.asarray(v, dtype=np.float64)))
 
     def whittle(self, j: int) -> Tensor:
         fz = self.frozen[j]
@@ -814,9 +847,11 @@ class LadderModel:
             + nrm(p["floor_mean_db"], lad.centres["floor_mean_db"], FLOOR_MEAN_SD_DB)
             + nrm(p["floor_z"], 0.0, 1.0)
             + nrm(p["mic_floor_db"], 0.0, MIC_FLOOR_SD_DB)
-            + nrm(p["log_sigma_nu"], *LOG_SIGMA_NU)
-            + nrm(p["log_lam"], *LOG_LAM)
+            + 0.5 * (torch.exp(p["log_eps"]) / EPS_HALF_NORMAL) ** 2
+            + nrm(p["a_sigma"], *A_SIGMA)
         )
+        if "b_lam" in p:
+            out = out + nrm(p["b_lam"], *B_LAM)
         for j, s in enumerate(lad.settings):
             M, K = s.power.shape[0], s.k_max
             sd = np.full((M, K), SCATTER_SD_DB)
@@ -846,8 +881,8 @@ def lag_support_check(model: LadderModel, *, nats: float = 20.0) -> list[dict[st
     ``e^-nats`` where the frozen lag grid cuts them (a grid that was too short)."""
     out = []
     for j, (fz, s) in enumerate(zip(model.frozen, model.lad.settings)):
-        sig = float(torch.exp(model.params["log_sigma_nu"][j]))
-        lam = float(torch.exp(model.params["log_lam"][j]))
+        sig_t, lam_t = model.shaft(j)
+        sig, lam = float(sig_t), float(lam_t)
         short = []
         for length, orders in fz.groups:
             need = order_lag_support_s(
@@ -905,6 +940,7 @@ def fit_ladder(
     lbfgs_iters: int = 400,
     device: Any = "cpu",
     exclude_mics: tuple[int, ...] = (),
+    pin_lam: float | None = None,
     log: Any = print,
 ) -> tuple[LadderModel, dict[str, Any]]:
     """MAP of one ladder: Adam, then L-BFGS, then a fresh-memory L-BFGS restart
@@ -916,6 +952,7 @@ def fit_ladder(
         seed=seed,
         jitter=jitter if seed > 0 else 0.0,
         exclude_mics=exclude_mics,
+        pin_lam=pin_lam,
     )
     t_all = time.perf_counter()
     t0 = time.perf_counter()
@@ -944,6 +981,7 @@ def fit_ladder(
     record = dict(
         seed=int(seed),
         jitter=float(jitter if seed > 0 else 0.0),
+        pin_lam=pin_lam,
         adam_steps=int(adam_steps),
         adam_lr=float(adam_lr),
         lbfgs_iters=int(lbfgs_iters),
@@ -990,8 +1028,8 @@ def render_planted(truth: LadderModel, *, seed: int = 0) -> list[Setting]:
             w_aero, w_motor, motor_k = truth.line_weights(j)
             comp = truth.components(j)
         K = s.k_max
-        sig = float(torch.exp(truth.params["log_sigma_nu"][j])) / (2.0 * math.pi)
-        lam = float(torch.exp(truth.params["log_lam"][j]))
+        sig_t, lam_t = truth.shaft(j)
+        sig, lam = float(sig_t) / (2.0 * math.pi), float(lam_t)
         shaft_seed = int(rng.integers(2**31))
         aero = OUFit(
             s=s.carrier,
@@ -1035,13 +1073,14 @@ def render_planted(truth: LadderModel, *, seed: int = 0) -> list[Setting]:
 def payload(
     model: LadderModel, record: dict[str, Any], *, git: str | None = None
 ) -> dict[str, Any]:
-    """The ``noise-v4-fit/1`` bench payload of one ladder."""
-    p = {k: v.detach().cpu().numpy() for k, v in model.params.items()}
+    """The ``noise-v4-fit/2`` bench payload of one ladder."""
+    p = {k: v.detach().cpu().numpy() for k, v in {**model.pinned, **model.params}.items()}
     lad = model.lad
     s2 = model.sigma2().detach().cpu().numpy()
     gm = model.gamma_am().detach().cpu().numpy()
     settings = []
     for j, s in enumerate(lad.settings):
+        sig_t, lam_t = model.shaft(j)
         settings.append(
             dict(
                 key=s.key,
@@ -1051,8 +1090,8 @@ def payload(
                 ambient_runs_s=[list(r) for r in s.ambient_runs_s],
                 n_samples=s.n,
                 k_max=s.k_max,
-                sigma_nu_rad_s=float(np.exp(p["log_sigma_nu"][j])),
-                lam_per_s=float(np.exp(p["log_lam"][j])),
+                sigma_nu_rad_s=float(sig_t),
+                lam_per_s=float(lam_t),
                 wind_db=p[f"wind_{j}"].tolist(),
                 delta_db=p[f"delta_{j}"].tolist(),
                 eq_db=lad.eq[j].tolist(),
@@ -1079,6 +1118,15 @@ def payload(
             alpha_aero=float(p["alpha_aero"]),
             alpha_motor=float(p["alpha_motor"]),
             pedestal=dict(sigma2=s2.tolist(), gamma_hz=gm.tolist(), cap=SIGMA2_CAP),
+            shaft=dict(
+                eps=float(np.exp(p["log_eps"])),
+                a_sigma=float(p["a_sigma"]),
+                lam_ref_per_s=float(np.exp(p["log_lam_ref"])),
+                b_lam=float(p["b_lam"]),
+                f_ref_rev_s=F_REF,
+                pinned=sorted(model.pinned),
+                law="sigma_nu = 2 pi f_ref eps r^a_sigma, lam = lam_ref r^b_lam, r = f / f_ref",
+            ),
             floor=dict(
                 mean_db=float(p["floor_mean_db"]),
                 shape_z=p["floor_z"].tolist(),
