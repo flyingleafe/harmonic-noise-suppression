@@ -59,7 +59,7 @@ from torch import Tensor
 
 from data_processing.noise_model.ou import integrated_ou_increment_var
 
-__all__ = ["order_lag_support_s", "r_tau"]
+__all__ = ["order_lag_support_s", "r_tau", "r_tau_v4"]
 
 TWO_PI = 2.0 * math.pi
 
@@ -138,6 +138,50 @@ def r_tau(tau_s: Any, k: Any, *, sigma_nu: Any, lam: Any, gamma_hz: Any) -> Any:
         * integrated_ou_increment_var(tau, lam=_cast(lam, ref), sigma=_cast(sigma_nu, ref))
     )
     return torch.exp(-shaft - TWO_PI * g_t * tau)
+
+
+def r_tau_v4(tau_s: Any, k: Any, *, sigma_nu: Any, lam: Any, sigma2: Any, gamma_am_hz: Any) -> Any:
+    """The v4 lag law of an aerodynamic line (``docs/explainers/noise-model-v4.qmd``, eq-lag)::
+
+        R_k(tau) = exp[-k^2 V_theta(tau) / 2] * exp[sigma2_k (exp(-2 pi gamma_k |tau|) - 1)]
+
+    The first factor is the shaft of :func:`r_tau` with no Wiener width. The
+    second is the PEDESTAL: the line's amplitude carries ``exp(g_k(t))`` with
+    ``g_k`` a stationary OU of variance ``sigma2`` (the variance of ``ln A``,
+    what ``static_rig.single_rotor.amplitude_jitter`` measures) and rate
+    ``gamma_am_hz``, and the factor is normalised to one at ``tau = 0``, so
+    ``10^(p/10)`` stays the line's MEAN POWER. The line holds a coherent core of
+    power share ``exp(-sigma2)`` and a pedestal of half-width ``~gamma_am_hz``
+    around it. ``sigma2 = 0`` is the motor line (shaft only). ``sigma2`` and
+    ``gamma_am_hz`` broadcast against ``k`` with an explicit lag axis, exactly
+    as ``gamma_hz`` does in :func:`r_tau`.
+    """
+    ref = _ref_tensor(tau_s, k, sigma_nu, lam, sigma2, gamma_am_hz)
+    if ref is not None and not ref.is_floating_point():
+        ref = torch.zeros((), dtype=torch.float64, device=ref.device)
+    if ref is None:
+        tau = np.abs(np.asarray(tau_s, dtype=np.float64))
+        s2 = np.asarray(sigma2, dtype=np.float64)
+        g = np.asarray(gamma_am_hz, dtype=np.float64)
+        _check_lag_axis(s2.shape, tau.shape)
+        _check_lag_axis(g.shape, tau.shape)
+        shaft = (
+            0.5
+            * np.asarray(k, dtype=np.float64) ** 2
+            * integrated_ou_increment_var(tau, lam=lam, sigma=sigma_nu)
+        )
+        return np.exp(-shaft + s2 * np.expm1(-TWO_PI * g * tau))
+    tau = torch.abs(_cast(tau_s, ref))
+    s2_t = _cast(sigma2, ref)
+    g_t = _cast(gamma_am_hz, ref)
+    _check_lag_axis(tuple(s2_t.shape), tuple(tau.shape))
+    _check_lag_axis(tuple(g_t.shape), tuple(tau.shape))
+    shaft = (
+        0.5
+        * _cast(k, ref) ** 2
+        * integrated_ou_increment_var(tau, lam=_cast(lam, ref), sigma=_cast(sigma_nu, ref))
+    )
+    return torch.exp(-shaft + s2_t * torch.expm1(-TWO_PI * g_t * tau))
 
 
 def order_lag_support_s(
