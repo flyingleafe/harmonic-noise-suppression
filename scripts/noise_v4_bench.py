@@ -43,8 +43,12 @@ def _git() -> str | None:
     return r.stdout.strip() or None
 
 
-def _variant(exclude_windy: bool, pin_lam: float | None) -> str:
-    return ("__nowindy" if exclude_windy else "") + (f"__lam{pin_lam:g}" if pin_lam else "")
+def _variant(exclude_windy: bool, pin_lam: float | None, no_cap: bool) -> str:
+    return (
+        ("__nowindy" if exclude_windy else "")
+        + (f"__lam{pin_lam:g}" if pin_lam else "")
+        + ("__nocap" if no_cap else "")
+    )
 
 
 def _fit_worker(unit: Unit) -> dict[str, Any]:
@@ -64,6 +68,7 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
         device=prm["device"],
         exclude_mics=exclude,
         pin_lam=prm["pin_lam"],
+        sigma2_cap=None if prm["no_sigma2_cap"] else B.SIGMA2_CAP,
     )
     pay = B.payload(model, rec, git=prm["git"])
     path = Path(prm["out"]) / "restarts" / f"{unit.uid}.json"
@@ -94,13 +99,14 @@ def cmd_fit(args: argparse.Namespace) -> int:
     git = _git()
     units = [
         Unit(
-            uid=f"{m}__s{s}{_variant(args.exclude_windy, args.pin_lam)}"
+            uid=f"{m}__s{s}{_variant(args.exclude_windy, args.pin_lam, args.no_sigma2_cap)}"
             + (f"__{args.tag}" if args.tag else ""),
             params=dict(
                 motor=m,
                 seed=s,
                 exclude_windy=bool(args.exclude_windy),
                 pin_lam=args.pin_lam,
+                no_sigma2_cap=bool(args.no_sigma2_cap),
                 adam_steps=args.adam_steps,
                 lbfgs_iters=args.lbfgs_iters,
                 device=args.device,
@@ -161,9 +167,11 @@ def cmd_planted(args: argparse.Namespace) -> int:
 
     torch.set_num_threads(args.threads)
     real = B.build_ladder(args.motor)
-    truth = B.LadderModel(real, device=args.device)
-    if args.truth:
-        truth.load_payload(json.loads(Path(args.truth).read_text()))
+    pay_t = json.loads(Path(args.truth).read_text()) if args.truth else None
+    cap = pay_t["shared"]["pedestal"]["cap"] if pay_t else B.SIGMA2_CAP
+    truth = B.LadderModel(real, device=args.device, sigma2_cap=cap)
+    if pay_t:
+        truth.load_payload(pay_t)
     planted = B.render_planted(truth, seed=args.render_seed)
     lad = B.build_ladder(args.motor, settings=planted)
     model, rec = B.fit_ladder(
@@ -272,7 +280,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         pay = json.loads(fit_path.read_text())
         motor = pay["motor"]
         lad = B.build_ladder(motor)
-        model = B.LadderModel(lad, device=args.device)
+        model = B.LadderModel(lad, device=args.device, sigma2_cap=pay["shared"]["pedestal"]["cap"])
         model.load_payload(pay)
         sh = pay["shared"]
         s2 = np.asarray(sh["pedestal"]["sigma2"])
@@ -418,6 +426,11 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=None,
         help="hold the shaft rate at lam = PIN_LAM (f / f_ref) instead of fitting lam_ref, b",
+    )
+    p.add_argument(
+        "--no-sigma2-cap",
+        action="store_true",
+        help="fit the pedestal sigma2_k without the 0.6 render cap (explainer section am-pm)",
     )
     p.add_argument("--tag", default="", help="suffix for a schedule variant, e.g. 'lbfgsonly'")
     p.add_argument("--seed-start", type=int, default=0)

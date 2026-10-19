@@ -150,11 +150,13 @@ def _log_gamma_prior(k: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return mu.astype(np.float64), np.full(k.shape, 0.6)
 
 
-def _capped_sigma2(u: Tensor) -> Tensor:
-    """``sigma2 = cap - softplus(cap - e^u)``-like smooth cap in log space:
-    ``log sigma2 = log cap - softplus(log cap - u)``, equal to ``e^u`` far below
-    the cap and never above it."""
-    log_cap = math.log(SIGMA2_CAP)
+def _capped_sigma2(u: Tensor, cap: float | None) -> Tensor:
+    """``log sigma2 = log cap - softplus(log cap - u)``: a smooth cap in log
+    space, equal to ``e^u`` far below the cap and never above it; ``e^u`` when
+    ``cap`` is None."""
+    if cap is None:
+        return torch.exp(u)
+    log_cap = math.log(cap)
     return torch.exp(log_cap - torch.nn.functional.softplus(log_cap - u))
 
 
@@ -591,8 +593,11 @@ class LadderModel:
         jitter: float = 0.0,
         exclude_mics: tuple[int, ...] = (),
         pin_lam: float | None = None,
+        sigma2_cap: float | None = SIGMA2_CAP,
     ):
         self.lad = lad
+        #: the pedestal cap (explainer § am-pm, a RENDER limit); None fits it free
+        self.sigma2_cap = sigma2_cap
         self.device = torch.device(device)
         dd: dict[str, Any] = dict(dtype=torch.float64, device=self.device)
         rng = np.random.default_rng(seed)
@@ -688,7 +693,7 @@ class LadderModel:
 
     # ── pieces ──
     def sigma2(self) -> Tensor:
-        return _capped_sigma2(self.params["u_sigma2"])
+        return _capped_sigma2(self.params["u_sigma2"], self.sigma2_cap)
 
     def gamma_am(self) -> Tensor:
         return torch.exp(self.params["log_gamma"])
@@ -789,9 +794,12 @@ class LadderModel:
         payload's value too."""
         sh = pay["shared"]
         s2 = np.asarray(sh["pedestal"]["sigma2"], dtype=np.float64)
-        log_cap = math.log(SIGMA2_CAP)
-        # inverse of _capped_sigma2: u = log cap - softplus^-1(log cap - log s2)
-        u = log_cap - np.log(np.expm1(np.maximum(log_cap - np.log(s2), 1e-12)))
+        if self.sigma2_cap is None:
+            u = np.log(s2)
+        else:
+            # inverse of _capped_sigma2: u = log cap - softplus^-1(log cap - log s2)
+            log_cap = math.log(self.sigma2_cap)
+            u = log_cap - np.log(np.expm1(np.maximum(log_cap - np.log(s2), 1e-12)))
         vals = dict(
             p_aero=sh["profile_aero_db"],
             p_motor=sh["profile_motor_db"],
@@ -941,6 +949,7 @@ def fit_ladder(
     device: Any = "cpu",
     exclude_mics: tuple[int, ...] = (),
     pin_lam: float | None = None,
+    sigma2_cap: float | None = SIGMA2_CAP,
     log: Any = print,
 ) -> tuple[LadderModel, dict[str, Any]]:
     """MAP of one ladder: Adam, then L-BFGS, then a fresh-memory L-BFGS restart
@@ -953,6 +962,7 @@ def fit_ladder(
         jitter=jitter if seed > 0 else 0.0,
         exclude_mics=exclude_mics,
         pin_lam=pin_lam,
+        sigma2_cap=sigma2_cap,
     )
     t_all = time.perf_counter()
     t0 = time.perf_counter()
@@ -982,6 +992,7 @@ def fit_ladder(
         seed=int(seed),
         jitter=float(jitter if seed > 0 else 0.0),
         pin_lam=pin_lam,
+        sigma2_cap=sigma2_cap,
         adam_steps=int(adam_steps),
         adam_lr=float(adam_lr),
         lbfgs_iters=int(lbfgs_iters),
@@ -1117,7 +1128,7 @@ def payload(
             profile_motor_db=p["p_motor"].tolist(),
             alpha_aero=float(p["alpha_aero"]),
             alpha_motor=float(p["alpha_motor"]),
-            pedestal=dict(sigma2=s2.tolist(), gamma_hz=gm.tolist(), cap=SIGMA2_CAP),
+            pedestal=dict(sigma2=s2.tolist(), gamma_hz=gm.tolist(), cap=model.sigma2_cap),
             shaft=dict(
                 eps=float(np.exp(p["log_eps"])),
                 a_sigma=float(p["a_sigma"]),
