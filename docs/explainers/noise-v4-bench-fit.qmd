@@ -401,6 +401,74 @@ HTML(fig.to_html(include_plotlyjs=True, full_html=False))
   Above that it drops 10–50 dB under it. That is the non-identifiability of §4,
   not a measurement of the floor.
 
+### Motor lines against aerodynamic lines
+
+At the motor orders, k = 21, 42, 63, … (7 pole pairs × 3), the model has **two
+lines on top of each other**:
+
+| | aerodynamic line | motor line |
+|---|---|---|
+| source | the propeller's pressure field | the motor's electromagnetic forces |
+| level | profile p<sup>a</sup><sub>k</sub>, speed exponent α<sup>a</sup> | profile p<sup>m</sup><sub>n</sub>, speed exponent α<sup>m</sup> |
+| shape | core on the shaft plus the pedestal (σ²<sub>k</sub>, γ<sub>k</sub>) | the shaft alone, no pedestal |
+| at the other orders | present | absent |
+
+Both are smeared by the same shaft wander, so at k = 42 the motor line is a few
+Hz wide in the raw spectrum. The motor line has no pedestal of its own. The
+R3 fit, figures and table below:
+
+![Motor1, R3 fit. Top left: line power per order at 70 % throttle, the aerodynamic family (orange), the motor family at k = 21 n (purple squares) and the measured line power (dots). Top right: power against rotor speed at k = 21, 42, 63, each family and the measurement. Bottom: the data around k = 21 and 42 at 70 %, with the fit split into its aerodynamic lines (orange) and motor lines (purple).](noise-v4-bench-fit/motor_lines_Motor1.png)
+
+![Motor3, same layout.](noise-v4-bench-fit/motor_lines_Motor3.png)
+
+```{python}
+ML = json.loads(Path(f"{ASSETS}/motor_lines.json").read_text())
+rows = []
+for motor, v in ML.items():
+    for o in v["orders"]:
+        rows.append({
+            "motor": motor,
+            "k": o["k"],
+            "motor − aerodynamic at f_ref (dB)": f"{o['motor_minus_aero_db']:+.1f}",
+            "aerodynamic σ²ₖ": f"{o['aero_sigma2']:.2f}",
+            "aerodynamic core share": f"{100 * o['aero_core_share']:.0f} %",
+            "aerodynamic γₖ (Hz)": f"{o['aero_gamma_hz']:.1f}",
+        })
+_d(HTML(pd.DataFrame(rows).to_html(index=False)))
+_d(Markdown(" · ".join(f"**{m}**: α<sup>a</sup> = {v['alpha_aero']:.2f}, α<sup>m</sup> = {v['alpha_motor']:.2f}"
+                       for m, v in ML.items())))
+```
+
+What the fit says:
+
+- **The two families scale differently with speed.** α<sup>m</sup> is 1.1 (Motor1)
+  and 1.9 (Motor3) against α<sup>a</sup> = 3.6–3.8. α<sup>a</sup> itself reads low because
+  part of the speed trend sits in the per-recording scatter δ
+  (`docs/experiments/noise-model-v4-bench.md` § Round 3); counting it, the
+  effective aerodynamic exponent is 4.0–4.5.
+  The motor tones grow far more slowly with speed than the propeller's.
+- **Which family owns an order differs between motors.** On Motor1 the fit gives
+  k = 21 and 42 to the aerodynamic family (motor 16 dB below) and k = 63 and 84 to
+  the motor family (5 and 11 dB above). On Motor3 k = 21 is aerodynamic and
+  k = 42–84 are motor (5–14 dB above).
+- **At Motor1 k = 63 the aerodynamic line is all pedestal** (σ² = 7.7, core
+  share 0.04 %). The motor line carries the sharp part and the aerodynamic one
+  only a 5.5 Hz-wide noise band. The fit gave each family the shape it is
+  allowed to have.
+
+**This split is weakly identified, and on Motor1 it contradicts a direct
+measurement.** In a single spectrum, a motor line and an aerodynamic line with a
+small pedestal have nearly the same shape, as the bottom panels show. The fit
+can only tell them apart through their different speed laws across the five
+recordings. The order-decoherence measurement on this same recording
+(`order-decoherence.qmd` § "The motor orders", Motor1_70, mic 2) found k = 42
+locked to the shaft, steady in amplitude, with its pedestal 20 dB below the
+needle: a motor line. The R3 fit calls it aerodynamic. That measurement is
+the evidence that could fix the split: give the motor family the orders where
+the shaft-removed phase stays locked.
+
+Built by `noise-v4-bench-fit/motor_lines.py`.
+
 ## 6. What the result means
 
 1. **The model reproduces the measured spectrum** of a single rotor at five
