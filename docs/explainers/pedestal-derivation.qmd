@@ -211,15 +211,53 @@ $p(g)=\frac{1}{\sqrt{2\pi s^2}}e^{-g^2/(2s^2)}$.
 
 **Fact A (real exponential).** $\;\mathbb E[e^{cG}]=e^{c^2s^2/2}$ for any real $c$.
 
-*Proof.* Write the average as an integral and complete the square in the exponent:
+*Proof.* An expectation is the integral of the quantity times the density:
 
 $$
-\mathbb E[e^{cG}]=\int \frac{e^{-g^2/(2s^2)+cg}}{\sqrt{2\pi s^2}}\,dg,\qquad
--\frac{g^2}{2s^2}+cg=-\frac{(g-cs^2)^2}{2s^2}+\frac{c^2s^2}{2}.
+\mathbb E[e^{cG}]=\int_{-\infty}^{\infty} e^{cg}\,\frac{1}{\sqrt{2\pi s^2}}\,e^{-g^2/(2s^2)}\,dg
+=\frac{1}{\sqrt{2\pi s^2}}\int_{-\infty}^{\infty} e^{\,-\frac{g^2}{2s^2}+cg}\,dg .
 $$
 
-The first part is a normal density centred at $cs^2$, which integrates to 1.
-What is left is $e^{c^2s^2/2}$. ∎
+(The two exponentials merged because $e^{p}e^{q}=e^{p+q}$.)
+
+**Complete the square in the exponent.** Pull out $-\frac{1}{2s^2}$:
+
+$$
+-\frac{g^2}{2s^2}+cg=-\frac{1}{2s^2}\big(g^2-2cs^2\,g\big).
+$$
+
+Inside the bracket, add and subtract $(cs^2)^2$ so that the first three terms form a square,
+$g^2-2cs^2g+(cs^2)^2=(g-cs^2)^2$:
+
+$$
+g^2-2cs^2\,g=(g-cs^2)^2-c^2s^4 .
+$$
+
+Put it back:
+
+$$
+-\frac{1}{2s^2}\Big((g-cs^2)^2-c^2s^4\Big)=-\frac{(g-cs^2)^2}{2s^2}+\frac{c^2s^4}{2s^2}
+=-\frac{(g-cs^2)^2}{2s^2}+\frac{c^2s^2}{2}.
+$$
+
+**Split the exponential.** The second term does not depend on $g$, so it leaves the integral:
+
+$$
+\mathbb E[e^{cG}]=e^{c^2s^2/2}\cdot\underbrace{\int_{-\infty}^{\infty}\frac{1}{\sqrt{2\pi s^2}}\,e^{-\frac{(g-cs^2)^2}{2s^2}}\,dg}_{=\,1}.
+$$
+
+**Why the integral is 1.** The integrand is the density of a normal variable with
+mean $m=cs^2$ and variance $s^2$: compare with
+$\frac{1}{\sqrt{2\pi s^2}}e^{-(g-m)^2/(2s^2)}$. Every probability density
+integrates to 1. (Directly: substitute $h=g-cs^2$, $dh=dg$. The integral becomes
+$\int\frac{1}{\sqrt{2\pi s^2}}e^{-h^2/(2s^2)}dh$, the original normal density,
+which is 1.)
+
+So $\mathbb E[e^{cG}]=e^{c^2s^2/2}$. ∎
+
+**Check with a number.** $s^2=1$, $c=1$: $\mathbb E[e^{G}]=e^{1/2}\approx1.65$. The
+average of $e^{G}$ is larger than $e^{\mathbb E G}=e^0=1$, because $e^{x}$ bends
+upward: the large values of $G$ add more than the small values take away.
 
 **Fact B (imaginary exponential).** $\;\mathbb E[e^{iG}]=e^{-s^2/2}$.
 
