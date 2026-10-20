@@ -584,6 +584,84 @@ The two simulated spectra and the formula agree within the scatter of a
 300-realisation average. A spectrum cannot tell amplitude wander from phase
 wander.
 
+## Same spectrum, different sound
+
+The averaged spectrum is the same; single realisations are not. Below is one 6 s
+realisation of each, at 16 kHz with a 400 Hz carrier so it is audible, the same
+wander sizes as above ($\sigma^2=s_u^2=1.5$, memory $1/\beta=53$ ms), plus a
+perfect tone for reference. All three have mean power 1 and the same playback
+gain.
+
+- **Phase wander**: the level is constant and the phase jitters. Its energy
+  spreads a few Hz either side of 400 Hz, which is less than one 7.8 Hz
+  spectrogram bin, so the line keeps its brightness and only widens slightly.
+- **Amplitude wander**: the pitch is exactly 400 Hz and the level flutters. The
+  log-amplitude rms of 1.2 is 10.6 dB in level; averaging over a 128 ms frame
+  reduces that a little. In the spectrogram the line stays in place but
+  brightens and fades.
+
+```{python}
+#| label: fig-spec-listen
+#| fig-cap: "Spectrograms (128 ms frames, 75 % overlap) of one realisation each: perfect tone, phase wander, amplitude wander. Same colour scale. Bottom: the level of the 400 Hz line in each frame (sum over 380–420 Hz)."
+import soundfile as sf
+from pathlib import Path
+from scipy.signal import stft
+from IPython.display import HTML
+
+fs_a, T_a, f_a = 16000.0, 6.0, 400.0
+dt = 1 / fs_a
+n_a = int(T_a * fs_a)
+t_a = np.arange(n_a) * dt
+rng = np.random.default_rng(11)
+psi_a = ou(n_a, 1.5, 2 * np.pi * 3.0, rng)
+u_a = ou(n_a, 1.5, 2 * np.pi * 3.0, rng)
+sig = {
+    "tone": np.sqrt(2) * np.cos(2 * np.pi * f_a * t_a),
+    "phase": np.sqrt(2) * np.cos(2 * np.pi * f_a * t_a + psi_a),
+    "amplitude": np.sqrt(2) * np.exp(u_a - 1.5) * np.cos(2 * np.pi * f_a * t_a),
+}
+out = Path("pedestal-derivation")
+out.mkdir(exist_ok=True)
+gain = 0.9 / max(np.abs(x).max() for x in sig.values())
+for name, x in sig.items():
+    sf.write(out / f"{name}.wav", (gain * x).astype(np.float32), int(fs_a))
+
+labels = {"tone": "perfect tone", "phase": "phase wander", "amplitude": "amplitude wander"}
+fig, ax = plt.subplots(4, 1, figsize=(10, 9), sharex=True, height_ratios=[1, 1, 1, 0.8])
+lev = {}
+for a, (name, x) in zip(ax[:3], sig.items()):
+    fq, ts, Z = stft(x, fs=fs_a, nperseg=2048, noverlap=1536, window="hann")
+    S = 10 * np.log10(np.abs(Z) ** 2 + 1e-12)
+    im = a.pcolormesh(ts, fq, S, vmin=-60, vmax=0, shading="auto", cmap="magma")
+    a.set_ylim(370, 430)
+    a.set_ylabel("Hz")
+    a.set_title(labels[name], fontsize=10)
+    band = (fq >= 380) & (fq <= 420)
+    lev[name] = 10 * np.log10((np.abs(Z[band]) ** 2).sum(axis=0))
+for name, v in lev.items():
+    ax[3].plot(ts, v - lev["tone"].mean(), label=labels[name])
+ax[3].set_ylabel("line level (dB)")
+ax[3].set_xlabel("time (s)")
+ax[3].legend(fontsize=8, ncol=3)
+fig.colorbar(im, ax=ax[:3], shrink=0.8, label="dB")
+for name, v in lev.items():
+    print(f"{labels[name]:17s}: line level sd over frames = {np.std(v):.2f} dB, range {np.ptp(v):.1f} dB")
+
+rows = "".join(
+    f"<tr><td style='padding:4px 10px'><b>{labels[n]}</b></td><td><audio controls preload='metadata' "
+    f"src='pedestal-derivation/{n}.wav'></audio></td></tr>"
+    for n in sig
+)
+HTML(f"<table>{rows}</table>")
+```
+
+The level trace makes the difference measurable. Over frames, the line level
+has a standard deviation of 0.7 dB with phase wander, the same as the perfect
+tone (0.6 dB, the frames at the clip edges), because the frame captures the
+whole widened line. With amplitude wander it is 7.7 dB. That frame-to-frame
+level statistic is the kind of quantity a spectrogram fit would need to tell
+the two wanders apart. Its frame-averaged spectrum alone cannot.
+
 # What *can* tell them apart
 
 The periodogram uses $\mathbb E[x(t)x(t+\tau)]$, a **second-order** average.
