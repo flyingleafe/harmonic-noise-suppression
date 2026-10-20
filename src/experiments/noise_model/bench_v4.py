@@ -250,14 +250,21 @@ def _welch(runs: list[np.ndarray], seg: int = SR, hop: int = SR // 2) -> np.ndar
     return np.mean(parts, axis=0)
 
 
+def load_audio(motor: str, throttle: int) -> tuple[np.ndarray, tuple[float, float]]:
+    """``(x (M, T) at 16 kHz, strict rotor-on span in s)`` of one recording."""
+    key = f"motor_{motor}_{int(throttle)}"
+    singles = json.loads(SINGLES_PATH.read_text())["recordings"][key]
+    rec = C.load_recording(DATASET, key, None, RPS_KEY)
+    x = decimate_audio(np.asarray(rec.audio, dtype=np.float64), int(rec.sr), SR)
+    return x, (float(singles["span_s"][0]), float(singles["span_s"][1]))
+
+
 def prepare_setting(motor: str, throttle: int) -> Setting:
     """Load one recording, decimate it to 16 kHz, cut the strict span and the
     quiet run, and read the periodogram and the ambient."""
     key = f"motor_{motor}_{int(throttle)}"
     singles = json.loads(SINGLES_PATH.read_text())["recordings"][key]
-    rec = C.load_recording(DATASET, key, None, RPS_KEY)
-    x = decimate_audio(np.asarray(rec.audio, dtype=np.float64), int(rec.sr), SR)
-    span = (float(singles["span_s"][0]), float(singles["span_s"][1]))
+    x, span = load_audio(motor, throttle)
     seg = x[:, int(round(span[0] * SR)) : int(round(span[1] * SR))]
     amb = ambient_runs(x, span)
     quiet = [x[:, int(round(a * SR)) : int(round(b * SR))] for a, b in amb]
@@ -656,7 +663,9 @@ class LadderModel:
         n_m = lad.motor_orders.size
 
         def P(v: Any) -> Tensor:
-            return torch.as_tensor(np.asarray(v, dtype=np.float64), **dd).requires_grad_(True)
+            # torch.tensor COPIES: as_tensor would alias the ladder's seed and
+            # centre arrays, so two models of one ladder would share parameters
+            return torch.tensor(np.asarray(v, dtype=np.float64), **dd).requires_grad_(True)
 
         # the shaft law, seeded at a = b = 1 through the per-setting seeds
         sh = np.asarray(lad.seeds["shaft"], dtype=np.float64)
@@ -1028,10 +1037,10 @@ def fit_ladder(
     return model, record
 
 
-def render_planted(truth: LadderModel, *, seed: int = 0) -> list[Setting]:
-    """Time-domain renders of ``truth``'s ladder at its own geometry (carrier,
-    span length, mics): the aerodynamic lines with their pedestal and the motor
-    lines on ONE shared OU shaft per setting
+def render_setting(truth: LadderModel, j: int, rng: np.random.Generator) -> np.ndarray:
+    """``(M, n)`` time-domain render of setting ``j`` of ``truth`` at its own
+    geometry (carrier, span length, mics): the aerodynamic lines with their
+    pedestal and the motor lines on ONE shared OU shaft
     (:func:`static_rig.single_rotor.synthesise`, same seed for both families so
     they share the shaft), plus Gaussian noise shaped to the model's floor and
     wind, plus Gaussian noise shaped to the measured ambient.
@@ -1042,41 +1051,49 @@ def render_planted(truth: LadderModel, *, seed: int = 0) -> list[Setting]:
     """
     from experiments.static_rig.single_rotor import OUFit, synthesise
 
-    rng = np.random.default_rng(seed)
+    s = truth.lad.settings[j]
     s2 = truth.sigma2().detach().cpu().numpy()
     gam = truth.gamma_am().detach().cpu().numpy()
-    out = []
-    for j, s in enumerate(truth.lad.settings):
-        with torch.no_grad():
-            w_aero, w_motor, motor_k = truth.line_weights(j)
-            comp = truth.components(j)
-        K = s.k_max
-        sig_t, lam_t = truth.shaft(j)
-        sig, lam = float(sig_t) / (2.0 * math.pi), float(lam_t)
-        shaft_seed = int(rng.integers(2**31))
-        aero = OUFit(
+    with torch.no_grad():
+        w_aero, w_motor, motor_k = truth.line_weights(j)
+        comp = truth.components(j)
+    K = s.k_max
+    sig_t, lam_t = truth.shaft(j)
+    sig, lam = float(sig_t) / (2.0 * math.pi), float(lam_t)
+    shaft_seed = int(rng.integers(2**31))
+    aero = OUFit(
+        s=s.carrier,
+        sigma_nu=sig,
+        lam=lam,
+        orders=np.arange(1, K + 1),
+        amp2=2.0 * w_aero.cpu().numpy() * np.exp(-s2[:K])[None, :],
+        T=s.n / SR,
+    )
+    x = synthesise(aero, SR, s.n, seed=shaft_seed, am=(s2[:K], gam[:K])).astype(np.float64)
+    if motor_k.size:
+        motor = OUFit(
             s=s.carrier,
             sigma_nu=sig,
             lam=lam,
-            orders=np.arange(1, K + 1),
-            amp2=2.0 * w_aero.cpu().numpy() * np.exp(-s2[:K])[None, :],
+            orders=motor_k,
+            amp2=2.0 * w_motor.cpu().numpy(),
             T=s.n / SR,
         )
-        x = synthesise(aero, SR, s.n, seed=shaft_seed, am=(s2[:K], gam[:K])).astype(np.float64)
-        if motor_k.size:
-            motor = OUFit(
-                s=s.carrier,
-                sigma_nu=sig,
-                lam=lam,
-                orders=motor_k,
-                amp2=2.0 * w_motor.cpu().numpy(),
-                T=s.n / SR,
-            )
-            x += synthesise(motor, SR, s.n, seed=shaft_seed).astype(np.float64)
-        shaped = (comp["floor"] + comp["wind"]).cpu().numpy()
-        for spec in (shaped, s.ambient):
-            white = np.fft.rfft(rng.standard_normal(x.shape), axis=-1)
-            x += np.fft.irfft(white * np.sqrt(np.maximum(spec, 0.0)), n=s.n, axis=-1)
+        x += synthesise(motor, SR, s.n, seed=shaft_seed).astype(np.float64)
+    shaped = (comp["floor"] + comp["wind"]).cpu().numpy()
+    for spec in (shaped, s.ambient):
+        white = np.fft.rfft(rng.standard_normal(x.shape), axis=-1)
+        x += np.fft.irfft(white * np.sqrt(np.maximum(spec, 0.0)), n=s.n, axis=-1)
+    return x
+
+
+def render_planted(truth: LadderModel, *, seed: int = 0) -> list[Setting]:
+    """:func:`render_setting` of every setting of ``truth``'s ladder, as
+    :class:`Setting` periodograms (the planted-synthetic check's data)."""
+    rng = np.random.default_rng(seed)
+    out = []
+    for j, s in enumerate(truth.lad.settings):
+        x = render_setting(truth, j, rng)
         out.append(
             Setting(
                 key=s.key,
