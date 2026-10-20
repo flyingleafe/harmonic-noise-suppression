@@ -285,6 +285,101 @@ the same thing over frequency for all five settings.
 
 ## 5. The fitted parameters
 
+### Interactive view
+
+The same design as the rig parameter view of `notebooks/prior_rigs_explainer.ipynb`
+(`noise_lab.rig_view_plotly`). Use the dropdown to pick a motor and a fit, and
+the slider to pick a throttle setting. Grey is the data, black the fit's
+expected periodogram. The fit is split into the steady tones (blue), the
+pedestals (orange), the floor (green) and the measured ambient (brown). The
+stems run from the floor to the line level at k·f<sub>r</sub>. The red caps are
+± the pedestal half-width γ<sub>k</sub>. Hover over a stem top to read k, σ²<sub>k</sub>
+and γ<sub>k</sub>. All curves are means over 3 Hz bins on the calm mics, so the
+sharp line peaks read lower than at full resolution. Built by
+`noise-v4-bench-fit/browser.py`.
+
+```{python}
+import numpy as np
+import plotly.graph_objects as go
+
+BR = json.loads(Path(f"{ASSETS}/browser.json").read_text())
+fx = BR["freqs"]
+STY = [
+    ("data", dict(mode="lines", line=dict(color="rgba(120,120,120,0.8)", width=1))),
+    ("total", dict(mode="lines", line=dict(color="black", width=1.2))),
+    ("core", dict(mode="lines", line=dict(color="#1f77b4", width=1))),
+    ("pedestal", dict(mode="lines", line=dict(color="#ff7f0e", width=1))),
+    ("floor", dict(mode="lines", line=dict(color="#2ca02c", width=1.5))),
+    ("ambient", dict(mode="lines", line=dict(color="#8c564b", width=1))),
+]
+
+
+def step_traces(st):
+    out = [(fx, st["curves"][n]) for n, _ in STY]
+    fk, lv, fl = np.array(st["fk"]), np.array(st["line_db"]), np.array(st["floor_db"])
+    nan = np.full(fk.size, np.nan)
+    out.append((np.column_stack([fk, fk, nan]).ravel(), np.column_stack([fl, lv, nan]).ravel()))
+    g = np.array(st["gamma"])
+    out.append((np.column_stack([fk - g, fk + g, nan]).ravel(), np.column_stack([lv, lv, nan]).ravel()))
+    return out
+
+
+def hover(st):
+    return [f"k={k} σ²={s:.2f} γ={g:.1f} Hz" for k, s, g in zip(range(1, len(st["fk"]) + 1), st["sigma2"], st["gamma"])]
+
+
+n_steps = len(BR["views"][0]["steps"])
+fig = go.Figure()
+per_view = 8
+for vi, view in enumerate(BR["views"]):
+    st = view["steps"][2]
+    for (x, y), (name, style) in zip(step_traces(st)[:6], STY):
+        fig.add_trace(go.Scatter(x=x, y=y, name=name, visible=vi == 0, legendgroup=name, showlegend=vi == 0, **style))
+    (sx, sy), (cx, cy) = step_traces(st)[6:]
+    fig.add_trace(go.Scatter(x=sx, y=sy, name="line level at k·f_r", mode="lines", visible=vi == 0,
+                             line=dict(color="#1f77b4", width=1.5), showlegend=vi == 0, hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=cx, y=cy, name="± pedestal half-width γ_k", mode="lines", visible=vi == 0,
+                             line=dict(color="#d62728", width=2.5), showlegend=vi == 0, hoverinfo="skip"))
+
+# hover markers on the stem tops: one trace per view, updated by the slider
+for vi, view in enumerate(BR["views"]):
+    st = view["steps"][2]
+    fig.add_trace(go.Scatter(x=st["fk"], y=st["line_db"], mode="markers", marker=dict(size=4, color="#1f77b4"),
+                             text=hover(st), hoverinfo="text", visible=vi == 0, showlegend=False))
+n_views = len(BR["views"])
+n_main = per_view * n_views
+
+
+def visible(vi):
+    return [i // per_view == vi for i in range(n_main)] + [i == vi for i in range(n_views)]
+
+
+steps = []
+for j in range(n_steps):
+    xs, ys, texts = [], [], []
+    for view in BR["views"]:
+        for x, y in step_traces(view["steps"][j]):
+            xs.append(x); ys.append(y); texts.append(None)
+    for view in BR["views"]:
+        st = view["steps"][j]
+        xs.append(st["fk"]); ys.append(st["line_db"]); texts.append(hover(st))
+    s0 = BR["views"][0]["steps"][j]
+    steps.append(dict(method="restyle", label=f"{s0['throttle']} %",
+                      args=[{"x": xs, "y": ys, "text": texts}, list(range(n_main + n_views))]))
+
+fig.update_layout(
+    xaxis=dict(title="frequency (Hz)", type="log", range=[np.log10(30), np.log10(7200)]),
+    yaxis=dict(title="power, calm-mic mean, 3 Hz bins (dB)", range=[-95, 0]),
+    sliders=[dict(active=2, steps=steps, currentvalue=dict(prefix="throttle: "), pad=dict(t=50))],
+    updatemenus=[dict(buttons=[dict(method="restyle", label=v["label"], args=[{"visible": visible(i)}])
+                               for i, v in enumerate(BR["views"])],
+                      x=0.0, xanchor="left", y=1.12, yanchor="bottom")],
+    legend=dict(orientation="h", x=0.0, y=-0.35, yanchor="top"),
+    margin=dict(t=80, b=40), height=700,
+)
+HTML(fig.to_html(include_plotlyjs=True, full_html=False))
+```
+
 ![Motor1. Top: harmonic level per order (measured dots, R3 lines, one colour per setting); pedestal share σ²ₖ (log axis; R2's cap is the dotted line); pedestal half-width γₖ. Bottom: shaft speed jitter and rate against rotor speed (diamonds: the per-recording quick fit); the data between the lines (o), R3's floor (dashed) and the ambient (dotted) per setting.](noise-v4-bench-fit/params_Motor1.png)
 
 ![Motor3, same layout.](noise-v4-bench-fit/params_Motor3.png)
