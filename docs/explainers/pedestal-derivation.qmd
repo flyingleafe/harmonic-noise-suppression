@@ -1,0 +1,565 @@
+---
+title: "Why amplitude wander and phase wander give the same spectrum"
+subtitle: "From the signal of one rotor harmonic to its expected periodogram, one step at a time"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-fold: true
+    code-summary: "code"
+    html-math-method: katex
+    lightbox: true
+execute:
+  echo: true
+  warning: false
+---
+
+::: {.callout-note}
+## What this page shows
+
+A rotor harmonic is not a perfect sine wave. Its **phase** wanders a little (the
+per-order phase term $\psi_k$) and its **amplitude** wanders a little (the
+amplitude term $a_k$). Both are bounded: they wander around a fixed value and
+come back.
+
+The claim: **once you average the periodogram, both wanders produce exactly the
+same formula**, $e^{-\sigma^2(1-\rho(\tau))}$. The averaged spectrum cannot tell
+them apart. This page derives that claim step by step and then checks it with a
+simulation.
+
+Background needed: complex numbers $e^{i x}=\cos x+i\sin x$, expectation and
+variance, the normal distribution, and the idea of a Fourier transform.
+:::
+
+# Step 0 — the questions and the plan
+
+We observe a microphone signal $x(t)$. We compute its **periodogram**, the
+squared magnitude of its Fourier transform. The fit compares that periodogram to
+a model of its **expected value**. So we need the formula
+
+$$
+\mathbb E\big[\text{periodogram of } x\big]
+$$
+
+for a harmonic whose phase and amplitude wander. The plan:
+
+1. write down the signal (Step 1);
+2. show that the expected periodogram depends on the signal only through its
+   **autocorrelation** $\mathbb E[x(t)\,x(t+\tau)]$ (Step 2);
+3. reduce that autocorrelation to one average of a complex number, the
+   "envelope correlation" (Step 3);
+4. learn two facts about the normal distribution (Step 4);
+5. use them to compute the envelope correlation for phase wander (Step 5) and
+   for amplitude wander (Step 6). The two answers are the same;
+6. add the shaft (Step 7) and put it together (Step 8);
+7. check it all with a simulation (Step 9).
+
+# Step 1 — the signal of one harmonic
+
+Take one harmonic of the rotor, order $k$, at frequency $f_k = k f_r$, and write
+$\omega = 2\pi f_k$. A perfect harmonic is
+
+$$
+x(t)=A\cos(\omega t+\varphi).
+$$
+
+$\varphi$ is a fixed starting phase. We do not know it, so we treat it as random
+and uniform on $[0,2\pi)$. That is the honest statement of "we don't know where
+the cycle started".
+
+The real harmonic has three imperfections:
+
+$$
+x(t)=\sqrt{2P}\;a(t)\,\cos\!\big(\omega t+k\theta(t)+\psi(t)+\varphi\big)
+$$
+
+| symbol | meaning | typical size on the bench |
+|---|---|---|
+| $P$ | mean power of the harmonic | — |
+| $a(t)$ | **amplitude wander**, a positive factor around 1 | ±20–50 % |
+| $\psi(t)$ | **per-order phase wander**, independent for every $k$ | 0.1–2 rad² |
+| $\theta(t)$ | **shaft wander**, the rotor angle's error, shared by every order; order $k$ sees $k\theta$ | grows with time |
+
+The factor $\sqrt{2P}$ is there because the average of $\cos^2$ is $\tfrac12$, so
+a cosine of amplitude $\sqrt{2P}$ has mean power $P$.
+
+It is easier to work with complex numbers. Define the **complex envelope**
+
+$$
+z(t)=a(t)\,e^{\,i(k\theta(t)+\psi(t))}.
+$$
+
+Its magnitude $|z|=a$ is the amplitude, its angle is the total phase error. The
+signal is the real part of the envelope riding on the carrier:
+
+$$
+x(t)=\sqrt{2P}\;\operatorname{Re}\!\big[z(t)\,e^{\,i(\omega t+\varphi)}\big].
+$$
+
+Check: $\operatorname{Re}[a e^{i\alpha}]=a\cos\alpha$, which gives back the line
+above.
+
+# Step 2 — the expected periodogram only needs the autocorrelation
+
+Sample the signal at times $t=n\Delta$, $n=0,\dots,N-1$, multiply by a window
+$w_n$ (we use a Hann window), and take the discrete Fourier transform:
+
+$$
+X(f)=\sum_{n=0}^{N-1} w_n\,x_n\,e^{-i2\pi f n\Delta}.
+$$
+
+The periodogram is $I(f)=|X(f)|^2/\sum_n w_n^2$. Write the squared magnitude as
+the number times its complex conjugate:
+
+$$
+|X(f)|^2=X(f)\,\overline{X(f)}=\sum_{n}\sum_{m} w_n w_m\, x_n x_m\, e^{-i2\pi f (n-m)\Delta}.
+$$
+
+Take the expectation. Only $x_n x_m$ is random, so the expectation moves inside:
+
+$$
+\mathbb E|X(f)|^2=\sum_{n}\sum_{m} w_n w_m\, \mathbb E[x_n x_m]\, e^{-i2\pi f (n-m)\Delta}.
+$$
+
+Our signal is **stationary**: its statistics do not change over time. Then
+$\mathbb E[x_n x_m]$ depends only on the gap $j=n-m$. Call it the
+**autocorrelation** $C(j\Delta)=\mathbb E[x_{m+j}x_m]$. Group the double sum by
+the gap $j$:
+
+$$
+\mathbb E|X(f)|^2=\sum_{j=-(N-1)}^{N-1} \underbrace{\Big(\sum_m w_{m+j}w_m\Big)}_{c_w(j)}\; C(j\Delta)\; e^{-i2\pi f j\Delta}.
+$$
+
+$c_w(j)$ is the window's own autocorrelation, a fixed known number for every gap.
+So
+
+$$
+\boxed{\;\mathbb E[I(f)]=\frac{1}{\sum_n w_n^2}\sum_{j} c_w(j)\,C(j\Delta)\,e^{-i2\pi f j\Delta}\;}
+$$
+
+**The expected periodogram is the Fourier transform of the autocorrelation,
+seen through the window.** Two signals with the same autocorrelation have the
+same expected periodogram, whatever else differs between them. This one line is
+why amplitude and phase wander will be indistinguishable. From here on we only
+need $C(\tau)$. (This is the finite-window form of the Wiener–Khinchin theorem.
+The v4 bench fit computes exactly this sum, in `bench_v4.LadderModel.components`.)
+
+# Step 3 — from the autocorrelation to one complex average
+
+We need $C(\tau)=\mathbb E[x(t)\,x(t+\tau)]$. Write both factors with the
+complex envelope, using $\operatorname{Re}[u]=\tfrac12(u+\bar u)$:
+
+$$
+x(t)=\sqrt{2P}\cdot\tfrac12\Big(z(t)e^{i(\omega t+\varphi)}+\overline{z(t)}e^{-i(\omega t+\varphi)}\Big).
+$$
+
+Multiplying $x(t)$ by $x(t+\tau)$ gives four terms. Two of them contain
+$e^{\pm i(2\omega t+\omega\tau+2\varphi)}$. Because $\varphi$ is uniform on
+$[0,2\pi)$, $\mathbb E[e^{\pm 2i\varphi}]=0$, and those two terms average to
+zero. They are the "twice the frequency" terms of the trigonometric identity
+$\cos A\cos B=\tfrac12[\cos(A-B)+\cos(A+B)]$. The two surviving terms are
+complex conjugates of each other:
+
+$$
+C(\tau)=\frac{2P}{4}\Big(\mathbb E\big[z(t+\tau)\overline{z(t)}\big]e^{i\omega\tau}+\text{conjugate}\Big)
+=P\,\operatorname{Re}\!\Big[e^{i\omega\tau}\;\mathbb E\big[z(t+\tau)\,\overline{z(t)}\big]\Big].
+$$
+
+Define the **envelope correlation**
+
+$$
+R(\tau)=\mathbb E\big[z(t+\tau)\,\overline{z(t)}\big].
+$$
+
+Then
+
+$$
+\boxed{\;C(\tau)=P\,\operatorname{Re}\big[R(\tau)\,e^{i\omega\tau}\big]\;}
+$$
+
+Read it as: the carrier $e^{i\omega\tau}$ puts the line at frequency $f_k$, and
+$R(\tau)$ decides its **shape**. A perfect harmonic has $z=1$, $R=1$ at every
+lag, and its spectrum is a single spike. Everything that blurs the line is in
+$R(\tau)$.
+
+Now substitute the envelope $z=a\,e^{i(k\theta+\psi)}$:
+
+$$
+R(\tau)=\mathbb E\Big[a(t+\tau)\,a(t)\;e^{\,ik(\theta(t+\tau)-\theta(t))}\;e^{\,i(\psi(t+\tau)-\psi(t))}\Big].
+$$
+
+The shaft, the per-order phase and the amplitude come from different physical
+causes, so we take them **independent**. The expectation of a product of
+independent factors is the product of the expectations:
+
+$$
+R(\tau)=\underbrace{\mathbb E\big[e^{ik\,\Delta\theta}\big]}_{\text{shaft}}\cdot
+\underbrace{\mathbb E\big[e^{i\,\Delta\psi}\big]}_{\text{phase wander}}\cdot
+\underbrace{\mathbb E\big[a(t+\tau)a(t)\big]}_{\text{amplitude wander}},
+$$
+
+with $\Delta\theta=\theta(t+\tau)-\theta(t)$ and $\Delta\psi=\psi(t+\tau)-\psi(t)$.
+
+Three averages remain. All three are averages of an exponential of a normally
+distributed number. One fact about the normal distribution handles all of them.
+
+# Step 4 — two facts about the normal distribution
+
+Let $G$ be normal with mean 0 and variance $s^2$. Its density is
+$p(g)=\frac{1}{\sqrt{2\pi s^2}}e^{-g^2/(2s^2)}$.
+
+**Fact A (real exponential).** $\;\mathbb E[e^{cG}]=e^{c^2s^2/2}$ for any real $c$.
+
+*Proof.* Write the average as an integral and complete the square in the exponent:
+
+$$
+\mathbb E[e^{cG}]=\int \frac{e^{-g^2/(2s^2)+cg}}{\sqrt{2\pi s^2}}\,dg,\qquad
+-\frac{g^2}{2s^2}+cg=-\frac{(g-cs^2)^2}{2s^2}+\frac{c^2s^2}{2}.
+$$
+
+The first part is a normal density centred at $cs^2$, which integrates to 1.
+What is left is $e^{c^2s^2/2}$. ∎
+
+**Fact B (imaginary exponential).** $\;\mathbb E[e^{iG}]=e^{-s^2/2}$.
+
+*Proof.* Put $c=i$ in Fact A. The same completing-the-square step works for
+complex $c$, and $c^2=i^2=-1$ gives $e^{-s^2/2}$. ∎
+
+Fact B carries the main intuition. $e^{iG}$ is a point on the unit circle at
+random angle $G$. Averaging many such points gives a vector **shorter than 1**:
+the more the angle is spread, the shorter it gets. That shrinking factor is
+$e^{-s^2/2}$.
+
+```{python}
+#| label: fig-circle
+#| fig-cap: "Fact B. 2000 points e^{iG} on the unit circle (grey) for three spreads of the angle G, and their average (red arrow). Its length equals e^{-s²/2} (dashed circle)."
+import numpy as np
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(0)
+fig, axes = plt.subplots(1, 3, figsize=(10, 3.4))
+for ax, s2 in zip(axes, (0.1, 1.0, 3.0)):
+    g = rng.normal(0, np.sqrt(s2), 2000)
+    pts = np.exp(1j * g)
+    m = pts.mean()
+    ax.plot(pts.real, pts.imag, ".", ms=2, color="0.6")
+    ax.add_patch(plt.Circle((0, 0), np.exp(-s2 / 2), fill=False, ls="--", color="tab:blue"))
+    ax.annotate("", xy=(m.real, m.imag), xytext=(0, 0), arrowprops=dict(color="tab:red", width=2))
+    ax.set_title(f"s² = {s2}: |mean| = {abs(m):.3f}, e^(-s²/2) = {np.exp(-s2/2):.3f}", fontsize=9)
+    ax.set_aspect("equal"); ax.set_xlim(-1.2, 1.2); ax.set_ylim(-1.2, 1.2); ax.axis("off")
+plt.tight_layout()
+```
+
+# Step 5 — the per-order phase wander
+
+**The model.** $\psi(t)$ is a bounded, mean-reverting random phase: an
+Ornstein–Uhlenbeck (OU) process. In discrete time with step $\Delta$, it is
+
+$$
+\psi_{n+1}=c\,\psi_n+\sigma\sqrt{1-c^2}\;\xi_n,\qquad c=e^{-\beta\Delta},\quad \xi_n\sim\mathcal N(0,1)\ \text{independent}.
+$$
+
+Each step keeps a fraction $c<1$ of the old value (it is pulled back to 0) and
+adds a fresh random kick. Two properties follow by induction:
+
+- **the variance stays at $\sigma^2$:** $\operatorname{Var}\psi_{n+1}=c^2\sigma^2+\sigma^2(1-c^2)=\sigma^2$;
+- **the correlation decays geometrically:** $\operatorname{Cov}(\psi_{n+m},\psi_n)=c^m\sigma^2$, because the kicks after step $n$ are independent of $\psi_n$.
+
+In continuous time, $\operatorname{Cov}(\psi(t+\tau),\psi(t))=\sigma^2\rho(\tau)$
+with $\rho(\tau)=e^{-\beta|\tau|}$. $\rho$ is the **correlation**: 1 at lag 0,
+falling to 0 at long lags. $1/\beta$ is the memory time of the wander.
+
+**The phase increment.** $\Delta\psi=\psi(t+\tau)-\psi(t)$ is a difference of
+two normal variables, so it is normal with mean 0 and variance
+
+$$
+\operatorname{Var}\Delta\psi=\operatorname{Var}\psi(t+\tau)+\operatorname{Var}\psi(t)-2\operatorname{Cov}=\sigma^2+\sigma^2-2\sigma^2\rho(\tau)=2\sigma^2\big(1-\rho(\tau)\big).
+$$
+
+**Apply Fact B** with $s^2=2\sigma^2(1-\rho)$:
+
+$$
+\boxed{\;\mathbb E\big[e^{i\Delta\psi}\big]=e^{-\sigma^2(1-\rho(\tau))}\;}
+$$
+
+Check the two ends. At $\tau=0$: $\rho=1$, so the factor is 1, no blurring at
+zero lag. At long lags: $\rho\to0$, so the factor tends to $e^{-\sigma^2}$,
+**not to 0**. The phase is bounded, so the harmonic never fully forgets its
+phase. That surviving constant is the **narrow core** of the line.
+
+# Step 6 — the amplitude wander
+
+**The model.** The amplitude must stay positive, so we let its logarithm wander:
+
+$$
+a(t)=\exp\!\big(u(t)-s_u^2\big),
+$$
+
+where $u(t)$ is an OU process with variance $s_u^2$ and correlation $\rho(\tau)$,
+built exactly like $\psi$ in Step 5. The shift $-s_u^2$ keeps the mean power at
+1, as we check now.
+
+**The product of two amplitudes.**
+$a(t+\tau)\,a(t)=\exp\big(u(t+\tau)+u(t)-2s_u^2\big)$. The **sum**
+$u(t+\tau)+u(t)$ is normal with mean 0 and variance
+
+$$
+s_u^2+s_u^2+2s_u^2\rho(\tau)=2s_u^2\big(1+\rho(\tau)\big).
+$$
+
+**Apply Fact A** with $c=1$:
+
+$$
+\mathbb E[a(t+\tau)a(t)]=e^{-2s_u^2}\cdot e^{\,s_u^2(1+\rho)}=\boxed{\;e^{-s_u^2(1-\rho(\tau))}\;}
+$$
+
+At $\tau=0$ this is $e^0=1=\mathbb E[a^2]$: the mean power is exactly 1, which is
+what the shift was for.
+
+# The two results are the same function
+
+$$
+\text{phase wander:}\quad e^{-\sigma^2(1-\rho(\tau))}\qquad\qquad
+\text{amplitude wander:}\quad e^{-s_u^2(1-\rho(\tau))}
+$$
+
+Same function of the lag. The phase variance $\sigma^2$ and the log-amplitude
+variance $s_u^2$ enter in exactly the same place. Where they came from differs:
+
+- phase: a **difference** $\psi(t+\tau)-\psi(t)$ inside $e^{i\,\cdot}$, so Fact B
+  with variance $2\sigma^2(1-\rho)$;
+- amplitude: a **sum** $u(t+\tau)+u(t)$ inside $e^{\,\cdot}$, so Fact A with
+  variance $2s_u^2(1+\rho)$, minus the normalisation $2s_u^2$.
+
+Both leave $-(\text{variance})\times(1-\rho)$ in the exponent. Together, with
+the same correlation $\rho$:
+
+$$
+e^{-\sigma^2(1-\rho)}\cdot e^{-s_u^2(1-\rho)}=e^{-(\sigma^2+s_u^2)(1-\rho)}.
+$$
+
+**Only the sum $\sigma^2+s_u^2$ appears.** By Step 2 the expected periodogram
+sees nothing but $R(\tau)$. So no periodogram, however long or fine, can split
+$\sigma^2$ from $s_u^2$. This is the v4 pedestal: its fitted $\sigma^2_k$ is that
+sum.
+
+What does differ is visible in single realisations, not in averages. Under phase
+wander $|z(t)|=1$ always and the angle moves. Under amplitude wander the angle is
+fixed and $|z(t)|$ moves.
+
+```{python}
+#| label: fig-paths
+#| fig-cap: "One realisation of each wander with the same variance (1) and memory time (1/β = 53 ms). Left: the envelope z(t) in the complex plane. Phase wander slides along the unit circle; amplitude wander slides along a ray. Right: the same paths as magnitude and angle over time."
+fs = 2000.0
+dt = 1 / fs
+beta = 2 * np.pi * 3.0
+n = int(1.0 * fs)
+
+
+def ou(n, var, beta, rng):
+    c = np.exp(-beta * dt)
+    x = np.empty(n)
+    x[0] = rng.normal(0, np.sqrt(var))
+    kick = rng.normal(0, np.sqrt(var * (1 - c * c)), n)
+    for i in range(1, n):
+        x[i] = c * x[i - 1] + kick[i]
+    return x
+
+
+rng = np.random.default_rng(3)
+psi = ou(n, 1.0, beta, rng)
+u = ou(n, 1.0, beta, rng)
+z_phase = np.exp(1j * psi)
+z_amp = np.exp(u - 1.0)
+t = np.arange(n) * dt
+fig = plt.figure(figsize=(10, 3.6))
+ax = fig.add_subplot(1, 3, 1)
+ax.plot(z_phase.real, z_phase.imag, color="tab:orange", lw=0.8, label="phase wander")
+ax.plot(z_amp.real, z_amp.imag, color="tab:blue", lw=0.8, label="amplitude wander")
+ax.set_aspect("equal"); ax.legend(fontsize=8, loc="lower left"); ax.set_title("z(t) in the plane", fontsize=10)
+ax.axhline(0, color="0.8", lw=0.5); ax.axvline(0, color="0.8", lw=0.5)
+ax2 = fig.add_subplot(1, 3, (2, 3))
+ax2.plot(t, np.abs(z_phase), color="tab:orange", label="|z|, phase wander")
+ax2.plot(t, np.abs(z_amp), color="tab:blue", label="|z|, amplitude wander")
+ax2.plot(t, np.angle(z_phase), color="tab:orange", ls=":", label="angle, phase wander")
+ax2.plot(t, np.angle(z_amp), color="tab:blue", ls=":", label="angle, amplitude wander")
+ax2.set_xlabel("time (s)"); ax2.legend(fontsize=8, ncol=2); ax2.set_title("magnitude and angle", fontsize=10)
+plt.tight_layout()
+```
+
+# Step 7 — the shaft
+
+The shaft adds $k\theta$ to the phase. It differs from $\psi$ in one way: the OU
+process is the shaft **speed** $\nu=\dot\theta$, not its angle. The angle is the
+running integral of the speed,
+$\Delta\theta=\int_t^{t+\tau}\nu(s)\,ds$, so it keeps drifting: it is **not**
+bounded.
+
+$\Delta\theta$ is a sum (an integral) of normal values, so it is normal with mean
+0. Its variance is the double integral of the speed covariance
+$\sigma_\nu^2 e^{-\lambda|s-s'|}$ over the square $[0,\tau]^2$:
+
+$$
+V_\theta(\tau)=\operatorname{Var}\Delta\theta=\int_0^\tau\!\!\int_0^\tau \sigma_\nu^2e^{-\lambda|s-s'|}\,ds\,ds'
+=2\sigma_\nu^2\left[\frac{\tau}{\lambda}-\frac{1-e^{-\lambda\tau}}{\lambda^2}\right].
+$$
+
+(Do the inner integral for $s'<s$ and $s'>s$ separately, then the outer one.)
+Order $k$ sees $k\Delta\theta$, with variance $k^2V_\theta$. Fact B gives
+
+$$
+\boxed{\;\mathbb E\big[e^{ik\Delta\theta}\big]=e^{-k^2V_\theta(\tau)/2}\;}
+$$
+
+The behaviour is different from the per-order wander:
+
+- **short lags** ($\lambda\tau\ll1$): $V_\theta\approx\sigma_\nu^2\tau^2$, so the factor is a Gaussian in $\tau$;
+- **long lags** ($\lambda\tau\gg1$): $V_\theta\approx 2\sigma_\nu^2\tau/\lambda$ grows without bound, so the factor goes to **0**. No core survives.
+
+Because $V_\theta$ is multiplied by $k^2$, the shaft blurs high orders far more
+than low ones.
+
+# Step 8 — the whole formula
+
+Put Steps 3–7 together:
+
+$$
+R_k(\tau)=e^{-k^2V_\theta(\tau)/2}\;\cdot\;e^{-(\sigma^2_{\psi,k}+\sigma^2_{u,k})\,(1-\rho_k(\tau))}
+$$
+
+$$
+C_k(\tau)=P_k\,R_k(\tau)\cos(\omega_k\tau)
+$$
+
+$$
+\mathbb E[I(f)]=\frac{1}{\sum w^2}\sum_j c_w(j)\sum_k C_k(j\Delta)\,e^{-i2\pi fj\Delta}\;+\;\text{floor}+\text{wind}+\text{ambient}
+$$
+
+(The cosine is the real part from Step 3: $R_k$ is real here, because every
+factor is real.)
+
+**What shape that gives.** Write $S=\sigma^2_\psi+\sigma^2_u$ and use the series
+$e^{x}=\sum_n x^n/n!$ on the per-order factor:
+
+$$
+e^{-S(1-e^{-\beta|\tau|})}=e^{-S}\,e^{S e^{-\beta|\tau|}}=e^{-S}\sum_{n=0}^{\infty}\frac{S^n}{n!}\,e^{-n\beta|\tau|}.
+$$
+
+- The $n=0$ term, $e^{-S}$, is a **constant** in $\tau$. Its Fourier transform is
+  a spike: the **core**, holding a share $e^{-S}$ of the power.
+- Each $n\ge1$ term is an exponential decay, whose Fourier transform is a
+  **Lorentzian** of half-width $n\beta/2\pi$ Hz. Together they form the
+  **pedestal**, holding the rest, $1-e^{-S}$.
+
+The shaft factor then smears the core and the pedestal alike: a Gaussian blur at
+low $k$, a Lorentzian of half-width $k^2D/4\pi$ (with $D=2\sigma_\nu^2/\lambda$) when
+$k$ is large enough that the shaft decorrelates fast.
+
+```{python}
+#| label: fig-split
+#| fig-cap: "The per-order factor for S = 1.5 and β/2π = 3 Hz. Left: in the lag domain, e^{-S(1-ρ)} (black) settles on the constant e^{-S} (blue, the core) instead of falling to 0. Right: its spectrum, a core spike (drawn as an arrow, height = its power share) on a pedestal (orange)."
+import math
+
+S, g = 1.5, 3.0
+tau = np.linspace(0, 1.0, 500)
+rho = np.exp(-2 * np.pi * g * tau)
+fig, ax = plt.subplots(1, 2, figsize=(10, 3.4))
+ax[0].plot(tau * 1e3, np.exp(-S * (1 - rho)), "k", label="e^{-S(1-ρ)}")
+ax[0].axhline(np.exp(-S), color="tab:blue", ls="--", label="core share e^{-S}")
+ax[0].set_xlabel("lag τ (ms)"); ax[0].legend(); ax[0].set_ylim(0, 1.05)
+fq = np.linspace(-40, 40, 2001)
+ped = np.zeros_like(fq)
+for nn in range(1, 30):
+    wgt = np.exp(-S) * S**nn / math.factorial(nn)
+    hw = nn * g
+    ped += wgt * (hw / np.pi) / (fq**2 + hw**2)
+ax[1].plot(fq, ped, color="tab:orange", label=f"pedestal, share {1-np.exp(-S):.2f}")
+ax[1].annotate("", xy=(0, np.exp(-S) * 0.3), xytext=(0, 0), arrowprops=dict(color="tab:blue", width=2))
+ax[1].text(1, np.exp(-S) * 0.28, f"core, share {np.exp(-S):.2f}", color="tab:blue")
+ax[1].set_xlabel("frequency offset from k·f_r (Hz)"); ax[1].set_ylabel("power density (1/Hz)"); ax[1].legend()
+plt.tight_layout()
+```
+
+# Step 9 — check it with a simulation
+
+The derivation used independence, normal distributions and stationarity. To make
+sure no step went wrong, simulate both wanders and compare the **averaged**
+periodogram with the formula of Step 2 + Step 5/6.
+
+Setup: a 200 Hz harmonic sampled at 2 kHz for 4 s, Hann window, 300 independent
+realisations of each wander. Case "phase": $a=1$, $\psi$ OU with $\sigma^2=1.5$.
+Case "amplitude": $\psi=0$, $u$ OU with $s_u^2=1.5$. Both have $\beta/2\pi=3$ Hz.
+No shaft and no noise, so only the term under test is present.
+
+```{python}
+#| label: fig-sim
+#| fig-cap: "Averaged periodogram of 300 simulated realisations, phase wander (orange) and amplitude wander (blue), against the formula (black dashed). The two simulated curves lie on top of each other and on the formula. Right: zoom on the core."
+fs, T, f0 = 2000.0, 4.0, 200.0
+dt = 1 / fs
+N = int(T * fs)
+var, beta = 1.5, 2 * np.pi * 3.0
+w = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(N) / N)
+tt = np.arange(N) * dt
+rng = np.random.default_rng(7)
+
+
+def periodogram(x):
+    return np.abs(np.fft.rfft(w * x)) ** 2 / np.sum(w**2)
+
+
+acc = {"phase": 0.0, "amplitude": 0.0}
+R = 300
+for _ in range(R):
+    phi = rng.uniform(0, 2 * np.pi)
+    psi = ou(N, var, beta, rng)
+    acc["phase"] += periodogram(np.sqrt(2) * np.cos(2 * np.pi * f0 * tt + psi + phi))
+    uu = ou(N, var, beta, rng)
+    acc["amplitude"] += periodogram(np.sqrt(2) * np.exp(uu - var) * np.cos(2 * np.pi * f0 * tt + phi))
+mean = {k: v / R for k, v in acc.items()}
+
+# the formula: sum over lags j of c_w(j) C(j dt) e^{-i 2 pi f j dt}, with
+# C(tau) = R(tau) cos(2 pi f0 tau), R = e^{-var (1 - e^{-beta |tau|})}, P = 1
+lags = np.arange(N)
+cw = np.array([np.dot(w[j:], w[: N - j]) for j in lags])
+C = np.exp(-var * (1 - np.exp(-beta * lags * dt))) * np.cos(2 * np.pi * f0 * lags * dt)
+q = cw * C
+expected = (2 * np.fft.rfft(q, n=N).real - q[0]) / np.sum(w**2)
+f = np.fft.rfftfreq(N, dt)
+
+fig, ax = plt.subplots(1, 2, figsize=(10, 3.6))
+for a in ax:
+    a.plot(f, 10 * np.log10(mean["phase"]), color="tab:orange", lw=1.2, label="simulated, phase wander")
+    a.plot(f, 10 * np.log10(mean["amplitude"]), color="tab:blue", lw=1.0, label="simulated, amplitude wander")
+    a.plot(f, 10 * np.log10(expected), "k--", lw=1.0, label="formula")
+    a.set_xlabel("frequency (Hz)"); a.set_ylabel("dB")
+ax[0].set_xlim(100, 300); ax[0].set_ylim(-60, 40); ax[0].legend(fontsize=8)
+ax[1].set_xlim(195, 205); ax[1].set_ylim(-20, 40)
+plt.tight_layout()
+band = (f > 150) & (f < 250)
+for k, v in mean.items():
+    print(f"{k:9s}: mean |simulated - formula| over 150-250 Hz = "
+          f"{np.mean(np.abs(10*np.log10(v[band]) - 10*np.log10(expected[band]))):.2f} dB")
+```
+
+The two simulated spectra and the formula agree within the scatter of a
+300-realisation average. A spectrum cannot tell amplitude wander from phase
+wander.
+
+# What *can* tell them apart
+
+The periodogram uses $\mathbb E[x(t)x(t+\tau)]$, a **second-order** average.
+Anything that separates the two wanders must look at single realisations, or
+equivalently at **fourth-order** averages such as how $|z(t)|^2$ fluctuates:
+
+| quantity | phase wander | amplitude wander |
+|---|---|---|
+| $\lvert z(t)\rvert$ over time | constant (= 1) | varies |
+| angle of $z(t+\tau)\overline{z(t)}$ | varies, variance $2\sigma^2(1-\rho)$ | 0 |
+| expected periodogram | $e^{-\sigma^2(1-\rho)}$ | $e^{-s_u^2(1-\rho)}$ — the same |
+
+The first two rows are what the order-decoherence measurement reads
+(`order-decoherence.qmd` § "Is it amplitude modulation in disguise?"): the
+shaft-removed phase increments and log-amplitude increments of each demodulated
+order. Those are the inputs that can split the fitted $\sigma^2_k$ into
+$\sigma^2_{\psi,k}$ and $\sigma^2_{u,k}$.
