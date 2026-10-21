@@ -293,7 +293,8 @@ the slider to pick a throttle setting. Grey is the data, black the fit's
 expected periodogram. The fit is split into the steady tones (blue), the
 pedestals (orange), the floor (green) and the measured ambient (brown). The
 stems run from the floor to the line level at k·f<sub>r</sub>. The red caps are
-± the pedestal half-width γ<sub>k</sub>. Hover over a stem top to read k, σ²<sub>k</sub>
+± the pedestal half-width γ<sub>k</sub>. The buttons at the top right switch the
+frequency axis between log and linear. Hover over a stem top to read k, σ²<sub>k</sub>
 and γ<sub>k</sub>. All curves are means over 3 Hz bins on the calm mics, so the
 sharp line peaks read lower than at full resolution. Built by
 `noise-v4-bench-fit/browser.py`.
@@ -373,7 +374,13 @@ fig.update_layout(
     sliders=[dict(active=2, steps=steps, currentvalue=dict(prefix="throttle: "), pad=dict(t=50))],
     updatemenus=[dict(buttons=[dict(method="restyle", label=v["label"], args=[{"visible": visible(i)}])
                                for i, v in enumerate(BR["views"])],
-                      x=0.0, xanchor="left", y=1.12, yanchor="bottom")],
+                      x=0.0, xanchor="left", y=1.12, yanchor="bottom"),
+                 dict(type="buttons", direction="right", showactive=True, active=0,
+                      buttons=[dict(method="relayout", label="log frequency",
+                                    args=[{"xaxis.type": "log", "xaxis.range": [np.log10(30), np.log10(7200)]}]),
+                               dict(method="relayout", label="linear frequency",
+                                    args=[{"xaxis.type": "linear", "xaxis.range": [0, 7200]}])],
+                      x=1.0, xanchor="right", y=1.12, yanchor="bottom")],
     legend=dict(orientation="h", x=0.0, y=-0.35, yanchor="top"),
     margin=dict(t=80, b=40), height=700,
 )
