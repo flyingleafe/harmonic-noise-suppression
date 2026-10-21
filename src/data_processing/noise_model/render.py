@@ -75,6 +75,15 @@ The same draws are used, only shifted. Between block centres the linear
 interpolation in dB has less variance than ``s^2`` — short by
 ``(1 - rho) s^2 / 3`` averaged over a block, ``rho`` the block-to-block
 correlation — so there the mean power sits slightly BELOW the fitted one.
+
+A ``noise-v4-fit/3`` PAYLOAD (``docs/explainers/noise-model-v4.qmd``) is drawn
+by :func:`_render_noise_v4` from the laws :mod:`.v4` reads: per line a
+bounded log-amplitude OU and an independent bounded PHASE OU (no Wiener
+phase), motor lines at ``k = 3 p n`` on the shaft alone, the line powers on
+``s^alpha``, the floor as the sum of per-rotor floors ``s_r^{b(f)}`` through
+the WOLA gain, and the rotor-to-mic response ``E_rm(f)``. It shares the line
+kernel, the anti-alias chain and the WOLA with v2/v3, which render
+bit-identically to before.
 """
 
 from __future__ import annotations
@@ -86,7 +95,7 @@ from typing import Any, Literal, overload
 import numpy as np
 from numba import njit
 
-from data_processing.noise_model import FIT_SCHEMA_V3, READABLE_FIT_SCHEMAS
+from data_processing.noise_model import FIT_SCHEMA_V3, FIT_SCHEMA_V4, READABLE_FIT_SCHEMAS
 from data_processing.noise_model import spectrum as SP
 from data_processing.noise_model.constants import AMP_RPS_REF, SPEED_FLOOR_RPS
 from data_processing.noise_model.floor import floor_geometry, floor_power_spectrum
@@ -95,6 +104,8 @@ from data_processing.noise_model.params import array_response_db, gamma_from_par
 from data_processing.noise_model.params import check_schema as _check_schema
 from data_processing.noise_model.resample import AA_PASS_HZ, antialias, decimate_audio
 from data_processing.noise_model.v3 import Wander, ou_blocks, wind_shape
+from data_processing.noise_model.v4 import WORK_RATE_HZ as V4_WORK_RATE_HZ
+from data_processing.noise_model.v4 import V4Params
 
 __all__ = [
     "REGIME_ORDER",
@@ -108,8 +119,9 @@ __all__ = [
 
 
 #: The fit schemas the renderer reads: its own, R1/R2's, whose per-order OU
-#: :func:`.params.gamma_from_params` maps onto an equivalent width, and v3's.
-READABLE_SCHEMAS = READABLE_FIT_SCHEMAS
+#: :func:`.params.gamma_from_params` maps onto an equivalent width, v3's, and
+#: v4's (:mod:`.v4`).
+READABLE_SCHEMAS = READABLE_FIT_SCHEMAS + (FIT_SCHEMA_V4,)
 
 #: WOLA frame (work samples) of the floor wander's short-time gain: 64 ms at
 #: 64 kHz, hop half of it. The gain it applies moves on the block scale
@@ -117,6 +129,12 @@ READABLE_SCHEMAS = READABLE_FIT_SCHEMAS
 #: steps resolve it; a sqrt-Hann pair at 50 % overlap reconstructs a constant
 #: gain exactly.
 WANDER_WOLA_FRAME = 4096
+
+#: WOLA frame of v4's floor speed law ``sum_r 10^{E_rm(f)/10} s_r(t)^{b(f)}``,
+#: at the OUTPUT rate the floor is synthesised at: 64 ms at 16 kHz, hop 32 ms,
+#: 15.6 Hz bins. The gain follows the carriers (seconds) and is smooth in
+#: frequency (``b(f)`` is linear in log2 f, the pair EQ is a 200 Hz smooth).
+V4_FLOOR_WOLA_FRAME = 1024
 
 
 #: ``render_noise``'s ``wander_mean``: the wander tracks' mean in dB, ``"zero"``
@@ -127,13 +145,38 @@ WANDER_MEANS: tuple[str, ...] = ("zero", "power")
 
 
 #: The LINE ENVELOPE grid: every slow per-line factor (speed law, wander, the
-#: AM pedestal, the Wiener phase) is drawn or sampled at this rate and
+#: AM pedestal, the Wiener phase, v4's amplitude and phase OUs) is drawn or sampled at this rate and
 #: interpolated linearly onto the work grid by :func:`_line_kernel`. 1 kHz
 #: resolves a 25 Hz pedestal and a Lorentzian of tens of Hz; the carriers
 #: themselves (``k phi_r``) stay at the work rate.
 ENV_RATE_HZ = 1000
 #: Work samples per :func:`_line_kernel` block (``2 K x block`` float32 live).
 LINE_BLOCK = 4096
+
+
+def _ou_paths(
+    rng: np.random.Generator | None,
+    sigma2: np.ndarray,
+    gamma_hz: np.ndarray,
+    n_env: int,
+    dt_env: float,
+    dtype: Any = np.float64,
+) -> np.ndarray:
+    """``(R, K, n_env)`` STATIONARY OU paths on the envelope grid, one per
+    (rotor, order): variance ``sigma2``, autocorrelation ``exp(-2 pi gamma_hz |tau|)``."""
+    assert rng is not None
+    R, K = sigma2.shape
+    rho = np.exp(-2.0 * np.pi * gamma_hz * dt_env).astype(dtype, copy=False)  # (R, K)
+    sd = np.sqrt(np.maximum(sigma2, 0.0)).astype(dtype, copy=False)
+    g = np.empty((R, K, n_env), dtype=dtype)
+    g[:, :, 0] = sd * rng.standard_normal((R, K), dtype=dtype)
+    drive = (
+        sd[:, :, None]
+        * np.sqrt(1.0 - rho[:, :, None] ** 2)
+        * rng.standard_normal((R, K, n_env), dtype=dtype)
+    )
+    _ar1(g, rho, drive)
+    return g
 
 
 def _am_envelopes(
@@ -147,16 +190,7 @@ def _am_envelopes(
     MEAN AMPLITUDE: the profile stays the coherent core, the pedestal adds
     ``e^{sigma2} - 1`` of it) on the envelope grid, one per (rotor, order),
     shared by the mics: ``g`` has variance ``sigma2`` and rate ``2 pi gamma_hz``."""
-    assert rng is not None
-    R, K = sigma2.shape
-    rho = np.exp(-2.0 * np.pi * gamma_hz * dt_env)  # (R, K)
-    sd = np.sqrt(np.maximum(sigma2, 0.0))
-    g = np.empty((R, K, n_env))
-    g[:, :, 0] = sd * rng.standard_normal((R, K))
-    drive = (
-        sd[:, :, None] * np.sqrt(1.0 - rho[:, :, None] ** 2) * rng.standard_normal((R, K, n_env))
-    )
-    _ar1(g, rho, drive)
+    g = _ou_paths(rng, sigma2, gamma_hz, n_env, dt_env)
     return np.exp(g - 0.5 * sigma2[:, :, None])
 
 
@@ -164,6 +198,9 @@ def _am_envelopes(
 def _line_kernel(
     c1: np.ndarray,
     s1: np.ndarray,
+    c0: np.ndarray,
+    s0: np.ndarray,
+    k_init: int,
     e_re: np.ndarray,
     e_im: np.ndarray,
     hop_env: int,
@@ -172,52 +209,49 @@ def _line_kernel(
     zbuf: np.ndarray,
     ck: np.ndarray,
     sk: np.ndarray,
-    k0: int,
+    orders: np.ndarray,
 ) -> None:
-    """Fill ``zbuf[:, :n]`` (``(2 K, block)`` float32) with ``Re`` and ``Im`` of
-    ``Z_k(t) = E_k(t) e^{i k phi(t)}`` for work samples ``t0 .. t0 + n`` and
-    orders ``k0 .. k0 + K - 1``: ``cos / sin(k phi)`` by the angle-addition
-    recurrence in ``k`` from ``(c1, s1) = (cos phi, sin phi)`` (``ck``,
-    ``sk``: block-length scratch), ``E_k`` linearly interpolated from the
-    envelope grid (``hop_env`` work samples per knot; ``t0`` is a knot). Loops
-    are ``k`` outer, ``t`` inner within a knot segment: every ``t`` is an
-    independent lane."""
-    K = e_re.shape[0]
+    """Fill ``zbuf[:, :n]`` (``(2 L, block)`` float32) with ``Re`` and ``Im`` of
+    ``Z_l(t) = E_l(t) e^{i k_l phi(t)}`` for work samples ``t0 .. t0 + n`` and
+    the ``L`` lines of orders ``orders`` (ascending, ``>= k_init``; an order
+    may repeat, e.g. v4's aerodynamic and motor lines at ``k = 3 p n``):
+    ``cos / sin(k phi)`` by the angle-addition recurrence in ``k`` from
+    ``(c0, s0) = (cos, sin)(k_init phi)`` in steps of ``(c1, s1) = (cos phi,
+    sin phi)`` (``ck``, ``sk``: block-length scratch), ``E_l`` linearly
+    interpolated from the envelope grid (``hop_env`` work samples per knot;
+    ``t0`` is a knot). Loops are line outer, ``t`` inner within a knot
+    segment: every ``t`` is an independent lane."""
+    L = e_re.shape[0]
     inv = np.float32(1.0 / hop_env)
     for i in range(n):
-        ck[i] = c1[t0 + i]
-        sk[i] = s1[t0 + i]
-    for _ in range(k0 - 1):  # up to cos / sin(k0 phi)
-        for i in range(n):
-            c = c1[t0 + i]
-            s = s1[t0 + i]
-            cn = ck[i] * c - sk[i] * s
-            sk[i] = sk[i] * c + ck[i] * s
-            ck[i] = cn
+        ck[i] = c0[t0 + i]
+        sk[i] = s0[t0 + i]
+    k = k_init
     j0 = t0 // hop_env
     n_seg = (n + hop_env - 1) // hop_env
-    for k in range(K):
-        if k > 0:
+    for line in range(L):
+        while k < orders[line]:
             for i in range(n):
                 c = c1[t0 + i]
                 s = s1[t0 + i]
                 cn = ck[i] * c - sk[i] * s
                 sk[i] = sk[i] * c + ck[i] * s
                 ck[i] = cn
+            k += 1
         for seg in range(n_seg):
             j = j0 + seg
-            a_re = e_re[k, j]
-            a_im = e_im[k, j]
-            d_re = (e_re[k, j + 1] - a_re) * inv
-            d_im = (e_im[k, j + 1] - a_im) * inv
+            a_re = e_re[line, j]
+            a_im = e_im[line, j]
+            d_re = (e_re[line, j + 1] - a_re) * inv
+            d_im = (e_im[line, j + 1] - a_im) * inv
             i0 = seg * hop_env
             i1 = min(i0 + hop_env, n)
             for i in range(i0, i1):
                 fr = np.float32(i - i0)
                 er = a_re + d_re * fr
                 ei = a_im + d_im * fr
-                zbuf[k, i] = er * ck[i] - ei * sk[i]
-                zbuf[K + k, i] = er * sk[i] + ei * ck[i]
+                zbuf[line, i] = er * ck[i] - ei * sk[i]
+                zbuf[L + line, i] = er * sk[i] + ei * ck[i]
 
 
 @njit(cache=True, fastmath=True)
@@ -237,35 +271,52 @@ def _render_lines(
     env: np.ndarray,
     hop_env: int,
     mix: np.ndarray,
+    orders: np.ndarray,
 ) -> None:
-    _render_lines_from(audio, c1, s1, env, hop_env, mix, 1)
+    """``audio (M, T) += Re(sum_l G_ml Z_l(t))`` for one rotor: ``env`` the
+    ``(L, n_env)`` complex line envelopes of the ascending ``orders (L,)``,
+    ``mix`` ``(M, L)`` complex mic gains ``g_ml e^{i alpha_ml}``."""
+    _render_lines_ri(
+        audio,
+        c1,
+        s1,
+        np.ascontiguousarray(env.real, dtype=np.float32),
+        np.ascontiguousarray(env.imag, dtype=np.float32),
+        hop_env,
+        mix,
+        orders,
+    )
 
 
-def _render_lines_from(
+def _render_lines_ri(
     audio: np.ndarray,
     c1: np.ndarray,
     s1: np.ndarray,
-    env: np.ndarray,
+    e_re: np.ndarray,
+    e_im: np.ndarray,
     hop_env: int,
     mix: np.ndarray,
-    k0: int,
+    orders: np.ndarray,
+    *,
+    start: tuple[np.ndarray, np.ndarray, int] | None = None,
 ) -> None:
-    """``audio (M, T) += Re(sum_k G_mk Z_k(t))`` for one rotor: ``env`` the
-    ``(K, n_env)`` complex line envelopes, ``mix`` ``(M, K)`` complex mic
-    gains ``g_mk e^{i alpha_mk}``; the kernel's block is mixed by one BLAS
-    product ``[Re G, -Im G] @ [Re Z; Im Z]``."""
-    K, T = env.shape[0], c1.shape[0]
-    if K == 0:
+    """:func:`_render_lines` on the envelope's C-contiguous float32 ``Re`` and
+    ``Im`` planes; the kernel's block is mixed by one BLAS product
+    ``[Re G, -Im G] @ [Re Z; Im Z]``. ``start = (cos, sin)(k phi), k``: the
+    harmonic the kernel's recurrence starts from (default ``phi`` itself), so a
+    block of high orders does not walk the recurrence up from ``k = 1``."""
+    L, T = e_re.shape[0], c1.shape[0]
+    if L == 0:
         return
+    c0, s0, k_init = (c1, s1, 1) if start is None else start
     a = np.concatenate([mix.real, -mix.imag], axis=1).astype(np.float32)
-    e_re = np.ascontiguousarray(env.real, dtype=np.float32)
-    e_im = np.ascontiguousarray(env.imag, dtype=np.float32)
-    zbuf = np.empty((2 * K, LINE_BLOCK), dtype=np.float32)
+    k_l = np.ascontiguousarray(orders, dtype=np.int64)
+    zbuf = np.empty((2 * L, LINE_BLOCK), dtype=np.float32)
     ck = np.empty(LINE_BLOCK, dtype=np.float32)
     sk = np.empty(LINE_BLOCK, dtype=np.float32)
     for t0 in range(0, T, LINE_BLOCK):
         n = min(LINE_BLOCK, T - t0)
-        _line_kernel(c1, s1, e_re, e_im, hop_env, t0, n, zbuf, ck, sk, k0)
+        _line_kernel(c1, s1, c0, s0, int(k_init), e_re, e_im, hop_env, t0, n, zbuf, ck, sk, k_l)
         audio[:, t0 : t0 + n] += a @ zbuf[:, :n]
 
 
@@ -309,17 +360,19 @@ def _power_mean_shift_db(var_db2: Any) -> np.ndarray:
     return -np.asarray(var_db2, dtype=np.float64) * math.log(10.0) / 20.0
 
 
-def _slow_gain(x: np.ndarray, gain_db: Any, *, sr_work: int) -> np.ndarray:
+def _slow_gain(
+    x: np.ndarray, gain_db: Any, *, sr_work: int, frame: int = WANDER_WOLA_FRAME
+) -> np.ndarray:
     """``x`` with a slowly varying, frequency-dependent gain applied.
 
-    ``gain_db(t_s) -> (len(t_s), WANDER_WOLA_FRAME // 2 + 1)`` gives the dB gain
-    at frame-centre times ``t_s`` (seconds from the first sample) on the rfft
+    ``gain_db(t_s) -> (len(t_s), frame // 2 + 1)`` gives the dB gain at
+    frame-centre times ``t_s`` (seconds from the first sample) on the rfft
     bins of one frame. Weighted overlap-add with a sqrt-periodic-Hann pair at
     50 % overlap, which sums to one, so a constant gain returns ``x`` scaled
     exactly and a slow one multiplies the local power by ``10^{gain/10}``.
     """
     n = int(x.size)
-    nf = int(WANDER_WOLA_FRAME)
+    nf = int(frame)
     hop = nf // 2
     extra = (-(n + nf)) % hop
     xp = np.concatenate([np.zeros(nf), np.asarray(x, dtype=np.float64), np.zeros(nf + extra)])
@@ -341,10 +394,12 @@ def fit_work_rate(fit: Mapping[str, Any]) -> int:
     """The work rate a fit renders at unless told otherwise: the one its
     likelihood's kernel ran on and whose render-chain transfer it carries
     (``front_end.sr_work``: 64 kHz for the v2 fits, 32 kHz for the GPU
-    ``flight_v3`` fits), :data:`.spectrum.SAMPLE_RATE_WORK` for a payload
-    that records none (bench fits, hand-built payloads)."""
+    ``flight_v3`` fits), :data:`.spectrum.SAMPLE_RATE_WORK` for a v2/v3
+    payload that records none (bench fits, hand-built payloads) and
+    :data:`.v4.WORK_RATE_HZ` for a v4 one."""
     front_end = fit.get("front_end") or {}
-    return int(front_end.get("sr_work") or SP.SAMPLE_RATE_WORK)
+    default = V4_WORK_RATE_HZ if fit.get("schema") == FIT_SCHEMA_V4 else SP.SAMPLE_RATE_WORK
+    return int(front_end.get("sr_work") or default)
 
 
 @overload
@@ -392,7 +447,8 @@ def render_noise(
     ----------
     fit
         A ``noise-v2-fit/{1,2}`` or ``noise-v3-fit/1`` payload
-        (:func:`experiments.noise_model.fit.write_fit`'s output).
+        (:func:`experiments.noise_model.fit.write_fit`'s output), or a
+        ``noise-v4-fit/3`` one (:func:`_render_noise_v4`).
     rps_rev_s
         ``(R, T)`` per-rotor carrier in rev/s on the OUTPUT grid at ``sr``. A
         bench fit's own constant carriers are NOT used here: the renderer is
@@ -407,17 +463,22 @@ def render_noise(
     wander_mean
         ``"zero"``: the v3 wander tracks drawn zero-mean in dB (the default);
         ``"power"``: the same draws shifted so every power multiplier has mean
-        one (module docstring, WANDER MEAN). A v2 payload ignores it.
+        one (module docstring, WANDER MEAN). A v2 or v4 payload ignores it.
 
     Returns
     -------
     ``(n_mics, T)`` float64 in ABSOLUTE units — the same units the fitted ``M``
     and :func:`revised_eval.window_periodogram` are in. No RMS normalisation.
     """
-    p = _check_schema(fit)
     if wander_mean not in WANDER_MEANS:
         raise ValueError(f"wander_mean {wander_mean!r} is not one of {WANDER_MEANS}")
     sr_work = fit_work_rate(fit) if sr_work is None else int(sr_work)
+    if fit.get("schema") == FIT_SCHEMA_V4:
+        out_v4, diag_v4 = _render_noise_v4(
+            fit, rps_rev_s, sr=int(sr), n_mics=int(n_mics), seed=int(seed), sr_work=sr_work
+        )
+        return (out_v4, diag_v4) if return_diagnostics else out_v4
+    p = _check_schema(fit)
     v3 = fit.get("schema") == FIT_SCHEMA_V3
     rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
     n_rotors, n_out = rps.shape
@@ -618,18 +679,19 @@ def render_noise(
             env[:k_lo],
             hop_env,
             mix[:, :k_lo],
+            np.arange(1, k_lo + 1),
         )
         if audio_hi is not None:
-            # orders k_lo + 1 .. k_max: cos(k phi) = cos(k_lo phi) cos(k' phi) - ..., so the
-            # kernel runs on the carrier e^{i k_lo phi} with (k' - 1)-th harmonics of phi
-            _render_lines_from(
+            # orders k_lo + 1 .. k_max at the work rate: the kernel walks the
+            # angle-addition recurrence up to cos / sin((k_lo + 1) phi) first
+            _render_lines(
                 audio_hi,
                 np.cos(ph).astype(np.float32),
                 np.sin(ph).astype(np.float32),
                 env[k_lo:],
                 hop_env * oversample,
                 mix[:, k_lo:],
-                k_lo + 1,
+                np.arange(k_lo + 1, k_max + 1),
             )
     audio = audio.astype(np.float64)
     if audio_hi is not None:
@@ -735,6 +797,244 @@ def render_noise(
         # the FRESH tracks this clip was drawn with, at the block centres: what
         # a prior-predictive or a recovery check compares the fit against
         diagnostics["wander_tracks"] = dict(t_knot_s=t_knot, **tracks)
+    return rendered, diagnostics
+
+
+# ── noise model v4 ──────────────────────────────────────────────────────────
+
+
+def _render_noise_v4(
+    fit: Mapping[str, Any],
+    rps_rev_s: np.ndarray,
+    *,
+    sr: int,
+    n_mics: int,
+    seed: int,
+    sr_work: int,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """A ``noise-v4-fit/3`` payload on the carriers ``rps_rev_s``
+    (``docs/explainers/noise-model-v4.qmd`` § The model, § The renderer).
+
+    WHAT IS DRAWN, fresh per clip from six streams of ``seed``:
+
+    * per rotor, ONE integrated-OU shaft path at the work rate
+      (:func:`.ou.simulate_state`), shared by the rotor's orders and mics, with
+      ``(sigma_nu, lam)`` from the shaft law at the rotor's CLIP-MEAN speed (the
+      transition is time-invariant; the flight law is flat);
+    * per aerodynamic line ``(r, k)``, on the 1 kHz envelope grid, the complex
+      envelope ``sqrt(2 P_rk(t)) exp(a - sigma2_amp) exp(i psi)``:
+      ``P_rk(t) = 10^{p/10} s_r(t)^alpha_a``, ``a`` a stationary OU of
+      variance ``sigma2_amp`` and rate ``gamma_amp_hz`` in log-amplitude, ``psi``
+      an independent stationary OU of variance ``sigma2_phase`` and rate
+      ``gamma_phase_hz`` ON THE PHASE (bounded, not a Wiener phase). The
+      ``- sigma2_amp`` keeps ``10^{p/10}`` the MEAN power, as the lag law (one
+      at ``tau = 0``) says it is (:mod:`.v4` module docstring);
+    * per motor line ``(r, k = 3 p n)``: ``sqrt(2 P^m_rn(t))`` on the same
+      carrier, no pedestal;
+    * per (rotor, mic, line) a fixed uniform start phase, and the mic gain
+      ``10^{E_rm/20}`` of the ROTOR-SPECIFIC response read at the line's
+      CLIP-MEAN frequency ``k mean(f_r)`` — the bench pair EQ, or the flight
+      ``Delta G_rm`` (frequency-independent, so exact). The flight array
+      response ``A_m(f)`` is applied to the whole channel at the end, exactly.
+      On the fitted trajectories (``data/rps-traj-fits``, michaels + dregon) the
+      R3 bench pair EQ read at the clip-mean instead of the instantaneous
+      frequency is off by 0.12 dB at the 95th percentile and 0.4 dB at the
+      99th over 2 s clips (0.18 / 1.0 dB over 4 s); the clip's mean line
+      power by 0.02 dB at the 95th;
+    * the floor per mic: white noise shaped by ``sqrt(F(f))`` and given the
+      short-time gain ``sum_r 10^{E_rm(f)/10} s_r(t)^{b(f)} + s`` per bin
+      through the WOLA of :func:`_slow_gain` — the SUM of the rotors'
+      independent Gaussian floors, drawn as one Gaussian with their summed
+      spectrum; the static share ``s`` carries no rotor response;
+    * flight only: the static per-mic wind block (v3's ``wind_db``), then the
+      array response.
+
+    The lines are synthesised by :func:`_line_kernel` on the 1 kHz envelope
+    knots, the orders under the anti-alias passband edge at the output rate and
+    the rest at ``sr_work`` through the chain, as v3. The kernel's chord between
+    two knots keeps ``2/3 + rho/3`` of a line's power (``rho`` the envelope's
+    correlation over one knot: 0.97 at a 5 Hz, 1 rad^2 phase OU, 0.86 at
+    25 Hz); each aerodynamic envelope is raised by the inverse, so the
+    rendered MEAN power is the payload's.
+    """
+    par = V4Params.from_payload(fit)
+    rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
+    n_rotors, n_out = rps.shape
+    if n_rotors != par.n_rotors:
+        raise ValueError(f"fit carries {par.n_rotors} rotors, asked to render {n_rotors}")
+    if n_mics > par.n_mics:
+        raise ValueError(f"fit carries {par.n_mics} microphones, asked for {n_mics}")
+    oversample = sr_work // sr
+    if oversample * sr != sr_work:
+        raise ValueError(f"sr_work {sr_work} must be an integer multiple of sr {sr}")
+    hop_env = sr // ENV_RATE_HZ
+    if hop_env * ENV_RATE_HZ != sr:
+        raise ValueError(f"sr {sr} is not a multiple of the envelope rate {ENV_RATE_HZ}")
+    n_work = n_out * oversample
+    dt = 1.0 / float(sr_work)
+    t_src = np.arange(n_out) / float(sr)
+    t_work = np.arange(n_work) / float(sr_work)
+    f0 = np.maximum(np.stack([np.interp(t_work, t_src, r) for r in rps]), SPEED_FLOOR_RPS)
+    k_max = min(par.k_max, SP.k_max_for_carrier(f0.max(axis=1), sr_work, k_cap=par.k_max))
+    k_lo = min(k_max, SP.k_max_for_carrier(f0.max(axis=1), int(2 * AA_PASS_HZ), k_cap=k_max))
+    rng_state, rng_alpha, rng_amp, rng_phase, rng_floor, rng_wind = (
+        np.random.default_rng(s) for s in np.random.SeedSequence(int(seed)).spawn(6)
+    )
+
+    f_bar = f0.mean(axis=1)
+    s_bar = par.speed(f_bar)
+    sigma_nu, lam = par.shaft.sigma_nu(s_bar), par.shaft.lam(s_bar)
+    innov = rng_state.standard_normal((n_rotors, n_work, 2))
+    theta = np.stack(
+        [
+            simulate_state(innov[r], lam=float(lam[r]), sigma=float(sigma_nu[r]), dt=dt)[0]
+            for r in range(n_rotors)
+        ]
+    )
+    phase = 2.0 * np.pi * np.cumsum(f0, axis=1) * dt + theta  # (R, n_work)
+
+    # LINES: every slow factor on the 1 kHz envelope grid, in the kernel's
+    # float32, as the Re / Im planes of the lines sorted by order
+    dt_env = hop_env / float(sr)
+    n_env = n_out // hop_env + 2
+    knots = np.minimum(np.arange(n_env) * hop_env * oversample, n_work - 1)
+    p_aero, p_motor = par.line_power(par.speed(f0[:, knots]))  # (R, K, n_env), (R, n_m, n_env)
+    ped = par.pedestal
+    block = (n_rotors, k_max)
+    a = _ou_paths(
+        rng_amp,
+        np.broadcast_to(ped.sigma2_amp[:k_max], block),
+        np.broadcast_to(ped.gamma_amp_hz[:k_max], block),
+        n_env,
+        dt_env,
+        np.float32,
+    )
+    psi = _ou_paths(
+        rng_phase,
+        np.broadcast_to(ped.sigma2_phase[:k_max], block),
+        np.broadcast_to(ped.gamma_phase_hz[:k_max], block),
+        n_env,
+        dt_env,
+        np.float32,
+    )
+    a -= ped.sigma2_amp[:k_max, None].astype(np.float32)
+    # the kernel's chord between two knots keeps 2/3 + rho/3 of a line's power,
+    # rho = exp(s2A (e^{-2 pi gA dt} - 1) + s2P (e^{-2 pi gP dt} - 1)) the
+    # envelope's correlation over one knot: each aerodynamic envelope is raised
+    # by the inverse, so the rendered mean power stays the payload's
+    rho_knot = np.exp(
+        ped.sigma2_amp[:k_max] * np.expm1(-2.0 * np.pi * ped.gamma_amp_hz[:k_max] * dt_env)
+        + ped.sigma2_phase[:k_max] * np.expm1(-2.0 * np.pi * ped.gamma_phase_hz[:k_max] * dt_env)
+    )
+    chord = 1.0 / np.sqrt(2.0 / 3.0 + rho_knot / 3.0)  # (K,)
+    mod_aero = (np.sqrt(2.0 * p_aero[:, :k_max]) * chord[None, :, None]).astype(np.float32)
+    mod_aero *= np.exp(a)  # (R, K, n_env)
+    motor = par.motor_orders <= k_max
+    mod_motor = np.sqrt(2.0 * p_motor[:, motor]).astype(np.float32)
+    orders = np.concatenate([np.arange(1, k_max + 1), par.motor_orders[motor]])
+    by_order = np.argsort(orders, kind="stable")
+    row = np.empty_like(by_order)
+    row[by_order] = np.arange(by_order.size)  # each line's row in order
+    orders = orders[by_order]
+    n_lo = int(np.searchsorted(orders, k_lo, side="right"))  # rows rendered at sr
+    e_re = np.zeros((orders.size, n_env), dtype=np.float32)
+    e_im = np.zeros_like(e_re)  # the motor rows stay real
+    audio = np.zeros((n_mics, n_out), dtype=np.float32)
+    audio_hi = np.zeros((n_mics, n_work), dtype=np.float32) if n_lo < orders.size else None
+    for r in range(n_rotors):
+        e_re[row[:k_max]] = mod_aero[r] * np.cos(psi[r])
+        e_im[row[:k_max]] = mod_aero[r] * np.sin(psi[r])
+        e_re[row[k_max:]] = mod_motor[r]
+        gain_db = par.mic.rotor_db(orders * f_bar[r])[r, :n_mics]  # (M, L)
+        alpha = rng_alpha.uniform(0.0, 2.0 * np.pi, size=gain_db.shape)
+        mix = 10.0 ** (gain_db / 20.0) * np.exp(1j * alpha)
+        ph = phase[r]
+        ph_out = ph[::oversample]
+        _render_lines_ri(
+            audio,
+            np.cos(ph_out).astype(np.float32),
+            np.sin(ph_out).astype(np.float32),
+            e_re[:n_lo],
+            e_im[:n_lo],
+            hop_env,
+            mix[:, :n_lo],
+            orders[:n_lo],
+        )
+        if audio_hi is not None:
+            k_hi = int(orders[n_lo])
+            _render_lines_ri(
+                audio_hi,
+                np.cos(ph).astype(np.float32),
+                np.sin(ph).astype(np.float32),
+                e_re[n_lo:],
+                e_im[n_lo:],
+                hop_env * oversample,
+                mix[:, n_lo:],
+                orders[n_lo:],
+                start=(
+                    np.cos(k_hi * ph).astype(np.float32),
+                    np.sin(k_hi * ph).astype(np.float32),
+                    k_hi,
+                ),
+            )
+    out = audio.astype(np.float64)
+    if audio_hi is not None:
+        out += np.asarray(
+            decimate_audio(antialias(audio_hi.astype(np.float64), sr_work), sr_work, sr),
+            dtype=np.float64,
+        )[:, :n_out]
+
+    # FLOOR (and wind, array response): straight at the output rate
+    freqs = np.fft.rfftfreq(n_out, d=1.0 / float(sr))
+    floor_amp = np.sqrt(par.floor.psd(freqs))
+    f_wola = np.fft.rfftfreq(V4_FLOOR_WOLA_FRAME, d=1.0 / float(sr))
+    b_wola = par.floor.exponent(f_wola)
+    rotor_lin = 10.0 ** (par.mic.rotor_db(f_wola)[:, :n_mics] / 10.0)  # (R, M, Fw)
+    t_out = np.arange(n_out) / float(sr)
+    log_s = np.log(par.speed(f0[:, ::oversample]))
+    speed_law: dict[int, np.ndarray] = {}
+
+    def rotor_floor_gain(t_s: np.ndarray) -> np.ndarray:
+        """``(R, n_t, Fw)`` ``s_r(t)^{b(f)}`` at the WOLA frame centres (the
+        same centres for every mic, so computed once)."""
+        if t_s.size not in speed_law:
+            ls = np.stack([np.interp(t_s, t_out, row) for row in log_s])
+            speed_law[t_s.size] = np.exp(ls[:, :, None] * b_wola[None, None, :])
+        return speed_law[t_s.size]
+
+    static = par.floor.static_rel
+    for m in range(n_mics):
+        white = rng_floor.standard_normal(n_out)
+        shaped = np.fft.irfft(np.fft.rfft(white) * floor_amp, n=n_out)
+
+        def floor_gain_db(t_s: np.ndarray, m: int = m) -> np.ndarray:
+            g = np.einsum("rf,rtf->tf", rotor_lin[:, m], rotor_floor_gain(t_s)) + static
+            return 10.0 * np.log10(g)
+
+        out[m] += _slow_gain(shaped, floor_gain_db, sr_work=sr, frame=V4_FLOOR_WOLA_FRAME)
+    if par.wind_db is not None:
+        wind_amp = np.sqrt(wind_shape(freqs))
+        for m in range(n_mics):
+            white = rng_wind.standard_normal(n_out)
+            level = math.sqrt(10.0 ** (float(par.wind_db[m]) / 10.0))
+            out[m] += level * np.fft.irfft(np.fft.rfft(white) * wind_amp, n=n_out)
+    if par.mic.array_response is not None:
+        curve = par.mic.array_db(freqs)
+        for m in range(n_mics):
+            out[m] = np.fft.irfft(np.fft.rfft(out[m]) * 10.0 ** (curve[m] / 20.0), n=n_out)
+    rendered = antialias(out, sr)[:, :n_out]
+    diagnostics: dict[str, Any] = dict(
+        schema=FIT_SCHEMA_V4,
+        seed=int(seed),
+        sr=int(sr),
+        sr_work=int(sr_work),
+        n_orders=int(k_max),
+        n_rotors=int(n_rotors),
+        n_mics=int(n_mics),
+        shaft=dict(sigma_nu_rad_s=sigma_nu.tolist(), lam_per_s=lam.tolist()),
+        rms=np.sqrt((rendered**2).mean(axis=1)).tolist(),
+        normalisation="none (absolute fitted level)",
+    )
     return rendered, diagnostics
 
 

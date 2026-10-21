@@ -1,4 +1,4 @@
-"""The rotor-noise model v2 — the parts a DATA STREAM needs.
+"""The rotor-noise model v2/v3/v4 — the parts a DATA STREAM needs.
 
 This package holds the renderer of the 2026-09 noise-model-v2 campaign and the
 handful of primitives it stands on, so that an online-mixing noise source can
@@ -22,9 +22,14 @@ WHAT LIVES HERE, and what does not:
   hyperparameters (:class:`.v3.Wander`), their stationary OU block draw and the
   fixed per-mic wind shape. :func:`.render.render_noise` reads a
   ``noise-v3-fit/1`` payload with them.
-* NOT here: the Pyro model, the MAP fit, the supports, the expected-periodogram
-  forward model. Those stay in :mod:`experiments.noise_model`; nothing a
-  training stream does needs them.
+* :mod:`.v4` — the reader of a ``noise-v4-fit/3`` payload
+  (``docs/explainers/noise-model-v4.qmd``): line powers, pedestal, shaft law,
+  per-rotor floor, microphone response, and the constant-speed expected
+  periodogram of a render. :func:`.render.render_noise` draws v4 payloads
+  through it.
+* NOT here: the Pyro model, the MAP fit, the supports, the moving-frame
+  expected-periodogram forward model. Those stay in
+  :mod:`experiments.noise_model`; nothing a training stream does needs them.
 
 :mod:`data_processing.noise_v2_pool` is the consumer: the ``noise_v2`` online
 mixing source.
@@ -58,4 +63,15 @@ equivalent width by :func:`.params.gamma_from_params`, so the renderer, the
 regime study and the round score read both; and v3's, which
 :func:`.render.render_noise` draws with fresh wander latents. One tuple so a
 new schema tag is accepted in one place instead of five.
+"""
+
+FIT_SCHEMA_V4 = "noise-v4-fit/3"
+"""The fit-JSON schema tag of noise model v4: ONE schema for the DREGON bench
+fit and the MD2 flight fit (``docs/explainers/noise-model-v4.qmd``).
+
+Its ``params`` are read by :mod:`.v4` only. It is NOT in
+:data:`READABLE_FIT_SCHEMAS`: the v2/v3 readers (:func:`.params.check_schema`,
+the identifiability gate, the ``noise_v2`` bank checks) read keys a v4 payload
+does not carry, and must refuse it by its tag rather than fail on a missing key.
+:data:`.render.READABLE_SCHEMAS` lists it: :func:`.render.render_noise` draws it.
 """

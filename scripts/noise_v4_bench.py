@@ -1,30 +1,28 @@
-"""Noise model v4 — the bench fit driver (``docs/experiments/noise-model-v4-bench.md``).
+"""Noise model v4 — the DREGON bench rig fit driver (Procedure A of
+``docs/explainers/noise-model-v4.qmd``): one joint fit over the 20 single-rotor
+recordings, its restarts and the planted check::
 
-Fit procedure A of ``docs/explainers/noise-model-v4.qmd`` on the DREGON
-single-rotor ladders, the planted-synthetic check and the acceptance checks::
-
-    python scripts/noise_v4_bench.py fit --motors Motor1 Motor2 --seeds 4 --device cuda
-    python scripts/noise_v4_bench.py fit --motors Motor1 --seeds 4 --exclude-windy
-    python scripts/noise_v4_bench.py fit --motors Motor1 Motor3 --seeds 1 --pin-lam 12
-    python scripts/noise_v4_bench.py planted --motor Motor1 [--truth <fit.json>]
+    python scripts/noise_v4_bench.py fit --seeds 4 --kappa K --device cuda [--flat-shaft]
     python scripts/noise_v4_bench.py reduce
-    python scripts/noise_v4_bench.py check
+    python scripts/noise_v4_bench.py planted --truth <payload.json> --kappa K --device cuda
+    python scripts/noise_v4_bench.py refit --from <payload.json> --flat-shaft --device cuda
 
 Outputs under ``--out`` (default ``results/noise_v4/bench``): ``restarts/`` one
-``noise-v4-fit/2`` payload per (motor, seed[, no-windy][, pinned rate]); ``raw/`` the gridrun
-unit records; ``fits/<motor>[__nowindy].json`` the selected restart (lowest
-objective) with the restart spread; ``planted/<motor>.json``;
-``checks.json`` + ``checks.md``.
+``noise-v4-fit/3`` payload per restart; ``raw/`` the gridrun unit records;
+``fits/<name>.json`` the selected restart (lowest objective) with the restart
+spread per parameter group; ``planted/<name>.json`` the recovery report;
+``restarts/<source>__flat.json`` + ``refit/<source>__flat.json`` the nested
+flat-shaft refit (one ``(sigma_nu, lam)`` for every speed) and its comparison.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import re
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from utils.gridrun import Unit, run_grid  # noqa: E402
 
 OUT = Path("results/noise_v4/bench")
-WIDTH_LAW = Path("results/static_rig/single_rotor/width_law.json")
-#: The recordings whose quick fit fell into the random-walk corner (lam < 3).
-RW_CORNER = ("motor_Motor1_90", "motor_Motor2_80", "motor_Motor3_90", "motor_Motor4_90")
+ALL_MOTORS = ("Motor1", "Motor2", "Motor3", "Motor4")
+ALL_THROTTLES = (50, 60, 70, 80, 90)
 
 
 def _git() -> str | None:
@@ -43,13 +40,27 @@ def _git() -> str | None:
     return r.stdout.strip() or None
 
 
-def _variant(args: argparse.Namespace) -> str:
-    return (
-        ("__nowindy" if args.exclude_windy else "")
-        + (f"__lam{args.pin_lam:g}" if args.pin_lam else "")
-        + ("__nocap" if args.no_sigma2_cap else "")
-        + ("__dc" if args.center_delta else "")
-    )
+def _rig_name(
+    motors: list[str], throttles: list[int], kappa: float, tag: str, flat: bool = False
+) -> str:
+    """``dregon[-<motors>][-t<throttles>]__kappa<k>[__flat][__tag]``."""
+    name = "dregon"
+    if tuple(motors) != ALL_MOTORS:
+        name += "-" + "-".join(motors)
+    if tuple(throttles) != ALL_THROTTLES:
+        name += "-t" + "-".join(str(t) for t in throttles)
+    return f"{name}__kappa{kappa:g}" + ("__flat" if flat else "") + (f"__{tag}" if tag else "")
+
+
+def _rig_of_payload(pay: dict[str, Any]) -> Any:
+    """The real-data rig of a payload's recordings (cached settings)."""
+    from experiments.noise_model import bench_v4 as B
+
+    keys = [r["key"] for r in pay["recordings"]]
+    motors = tuple(dict.fromkeys(r["motor"] for r in pay["recordings"]))
+    pairs = [re.fullmatch(r"motor_(\w+?)_(\d+)", k) for k in keys]
+    settings = [B.load_setting(m.group(1), int(m.group(2))) for m in pairs if m is not None]
+    return B.build_rig(motors, settings=settings)
 
 
 def _fit_worker(unit: Unit) -> dict[str, Any]:
@@ -59,18 +70,15 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
 
     prm = unit.params
     torch.set_num_threads(int(prm["threads"]))
-    lad = B.build_ladder(prm["motor"])
-    exclude = B.WIND_MICS[prm["motor"]] if prm["exclude_windy"] else ()
-    model, rec = B.fit_ladder(
-        lad,
+    rig = B.build_rig(tuple(prm["motors"]), throttles=tuple(prm["throttles"]))
+    model, rec = B.fit_rig(
+        rig,
         seed=int(prm["seed"]),
+        kappa=float(prm["kappa"]),
         adam_steps=int(prm["adam_steps"]),
         lbfgs_iters=int(prm["lbfgs_iters"]),
         device=prm["device"],
-        exclude_mics=exclude,
-        pin_lam=prm["pin_lam"],
-        sigma2_cap=None if prm["no_sigma2_cap"] else B.SIGMA2_CAP,
-        center_delta=bool(prm["center_delta"]),
+        flat_shaft=bool(prm["flat_shaft"]),
     )
     pay = B.payload(model, rec, git=prm["git"])
     path = Path(prm["out"]) / "restarts" / f"{unit.uid}.json"
@@ -78,19 +86,19 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
     path.write_text(json.dumps(pay))
     return dict(
         uid=unit.uid,
-        motor=prm["motor"],
         seed=int(prm["seed"]),
-        exclude_windy=bool(prm["exclude_windy"]),
+        kappa=float(prm["kappa"]),
         objective=rec["objective"],
         converged=rec["converged"],
         restart_gain_per_cell=rec["restart_gain_per_cell"],
-        alpha_aero=pay["shared"]["alpha_aero"],
-        alpha_motor=pay["shared"]["alpha_motor"],
-        b0=pay["shared"]["floor"]["b0"],
-        b1=pay["shared"]["floor"]["b1"],
-        shaft=pay["shared"]["shaft"],
-        sigma_nu=[s["sigma_nu_rad_s"] for s in pay["settings"]],
-        lam=[s["lam_per_s"] for s in pay["settings"]],
+        restart_movement=rec["restart_pass"]["movement"],
+        release_gain_per_cell=rec["release_pass"]["gain_per_cell"],
+        held_orders=rec["evidence"]["held_orders"],
+        alpha_aero=pay["params"]["alpha_aero"],
+        alpha_motor=pay["params"]["alpha_motor"],
+        b0=pay["params"]["floor"]["b0"],
+        b1=pay["params"]["floor"]["b1"],
+        shaft=pay["params"]["shaft"],
         eval_s=rec["eval_s"],
         wall_s=rec["wall_s"],
         path=str(path),
@@ -99,16 +107,16 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
 
 def cmd_fit(args: argparse.Namespace) -> int:
     git = _git()
+    name = _rig_name(args.motors, args.throttles, args.kappa, args.tag, args.flat_shaft)
     units = [
         Unit(
-            uid=f"{m}__s{s}{_variant(args)}" + (f"__{args.tag}" if args.tag else ""),
+            uid=f"{name}__s{s}",
             params=dict(
-                motor=m,
+                motors=list(args.motors),
+                throttles=list(args.throttles),
                 seed=s,
-                exclude_windy=bool(args.exclude_windy),
-                pin_lam=args.pin_lam,
-                no_sigma2_cap=bool(args.no_sigma2_cap),
-                center_delta=bool(args.center_delta),
+                kappa=args.kappa,
+                flat_shaft=bool(args.flat_shaft),
                 adam_steps=args.adam_steps,
                 lbfgs_iters=args.lbfgs_iters,
                 device=args.device,
@@ -117,7 +125,6 @@ def cmd_fit(args: argparse.Namespace) -> int:
                 git=git,
             ),
         )
-        for m in args.motors
         for s in range(args.seed_start, args.seed_start + args.seeds)
     ]
     res = run_grid(units, _fit_worker, str(args.out), jobs=args.jobs, mp_context="spawn")
@@ -127,30 +134,39 @@ def cmd_fit(args: argparse.Namespace) -> int:
 def cmd_reduce(args: argparse.Namespace) -> int:
     import numpy as np
 
+    from experiments.noise_model import bench_v4 as B
+
     groups: dict[str, list[dict[str, Any]]] = {}
     for p in sorted((args.out / "restarts").glob("*.json")):
         pay = json.loads(p.read_text())
-        name = re.sub(r"__s\d+", "", p.stem)
-        groups.setdefault(name, []).append(dict(path=str(p), pay=pay))
+        if pay.get("schema") != "noise-v4-fit/3":
+            continue
+        groups.setdefault(re.sub(r"__s\d+$", "", p.stem), []).append(dict(path=str(p), pay=pay))
     (args.out / "fits").mkdir(parents=True, exist_ok=True)
     for name, items in groups.items():
         obj = np.array([it["pay"]["objective"]["total_nats"] for it in items])
         n_cells = items[0]["pay"]["objective"]["n_cells"]
         best = items[int(np.argmin(obj))]["pay"]
+        vecs = [B.payload_group_vectors(it["pay"]) for it in items]
+        lo = {g: np.min([v[g] for v in vecs], axis=0) for g in vecs[0]}
+        hi = {g: np.max([v[g] for v in vecs], axis=0) for g in vecs[0]}
+        opt = [it["pay"]["optimiser"] for it in items]
         best["restarts"] = dict(
             paths=[it["path"] for it in items],
-            seeds=[it["pay"]["optimiser"]["seed"] for it in items],
+            seeds=[o["seed"] for o in opt],
             objective=obj.tolist(),
-            converged=[it["pay"]["optimiser"]["converged"] for it in items],
-            restart_gain_per_cell=[it["pay"]["optimiser"]["restart_gain_per_cell"] for it in items],
+            converged=[o["converged"] for o in opt],
+            restart_gain_per_cell=[o["restart_gain_per_cell"] for o in opt],
+            release_gain_per_cell=[o["release_pass"]["gain_per_cell"] for o in opt],
             best_minus_median_per_cell=float((np.median(obj) - obj.min()) / n_cells),
             best_minus_worst_per_cell=float((obj.max() - obj.min()) / n_cells),
-            alpha_aero=[it["pay"]["shared"]["alpha_aero"] for it in items],
-            alpha_motor=[it["pay"]["shared"]["alpha_motor"] for it in items],
-            sigma_nu=[[s["sigma_nu_rad_s"] for s in it["pay"]["settings"]] for it in items],
-            lam=[[s["lam_per_s"] for s in it["pay"]["settings"]] for it in items],
-            shaft=[it["pay"]["shared"]["shaft"] for it in items],
-            rule="reported fit = restart with the lowest total objective",
+            spread=B.group_movement(lo, hi),
+            alpha_aero=[it["pay"]["params"]["alpha_aero"] for it in items],
+            alpha_motor=[it["pay"]["params"]["alpha_motor"] for it in items],
+            b0=[it["pay"]["params"]["floor"]["b0"] for it in items],
+            shaft=[it["pay"]["params"]["shaft"] for it in items],
+            rule="reported fit = restart with the lowest total objective; spread = "
+            "per-group range over restarts (levels median, others as the movement rule)",
         )
         (args.out / "fits" / f"{name}.json").write_text(json.dumps(best))
         print(
@@ -161,6 +177,14 @@ def cmd_reduce(args: argparse.Namespace) -> int:
     return 0
 
 
+def _within(
+    fit: float, truth: float, *, abs_tol: float | None = None, rel_tol: float | None = None
+) -> dict[str, Any]:
+    err = fit - truth
+    ok = abs(err) <= abs_tol if abs_tol is not None else abs(err / truth) <= float(rel_tol or 0.0)
+    return dict(truth=truth, fit=fit, err=err, rel_err=err / truth if truth else None, ok=bool(ok))
+
+
 def cmd_planted(args: argparse.Namespace) -> int:
     import numpy as np
     import torch
@@ -168,250 +192,178 @@ def cmd_planted(args: argparse.Namespace) -> int:
     from experiments.noise_model import bench_v4 as B
 
     torch.set_num_threads(args.threads)
-    real = B.build_ladder(args.motor)
-    pay_t = json.loads(Path(args.truth).read_text()) if args.truth else None
-    cap = pay_t["shared"]["pedestal"]["cap"] if pay_t else B.SIGMA2_CAP
-    truth = B.LadderModel(real, device=args.device, sigma2_cap=cap)
-    if pay_t:
-        truth.load_payload(pay_t)
+    pay_t = json.loads(Path(args.truth).read_text())
+    real = _rig_of_payload(pay_t)
+    truth = B.RigModel(real, device=args.device, kappa=args.kappa)
+    truth.load_payload(pay_t)
     planted = B.render_planted(truth, seed=args.render_seed)
-    lad = B.build_ladder(args.motor, settings=planted)
-    model, rec = B.fit_ladder(
-        lad,
-        seed=0,
+    rig = B.build_rig(real.motors, settings=planted)
+    model, rec = B.fit_rig(
+        rig,
+        seed=args.seed,
+        kappa=args.kappa,
         adam_steps=args.adam_steps,
         lbfgs_iters=args.lbfgs_iters,
         device=args.device,
     )
-    t = {k: v.detach().cpu().numpy() for k, v in truth.params.items()}
-    f = {k: v.detach().cpu().numpy() for k, v in model.params.items()}
-    shaft_t = [tuple(float(v) for v in truth.shaft(j)) for j in range(len(lad.settings))]
-    shaft_f = [tuple(float(v) for v in model.shaft(j)) for j in range(len(lad.settings))]
-    s2_t = truth.sigma2().detach().cpu().numpy()
-    s2_f = model.sigma2().detach().cpu().numpy()
-    rows = []
-    for j, s in enumerate(lad.settings):
-        tab = lad.tables[j]
-        snr = np.median(tab["snr_db"], axis=0)
-        K = s.k_max
-        prof_t = t["p_aero"][:K]
-        prof_f = f["p_aero"][:K]
-        vis10 = snr >= 10.0
-        vis15 = snr >= 15.0
-        rows.append(
-            dict(
-                key=s.key,
-                sigma_nu_rel_err=shaft_f[j][0] / shaft_t[j][0] - 1.0,
-                lam_rel_err=shaft_f[j][1] / shaft_t[j][1] - 1.0,
-                n_lines_15db=int(vis15.sum()),
-                sigma2_rel_err_median_15db=float(
-                    np.median(np.abs(s2_f[:K][vis15] / s2_t[:K][vis15] - 1.0))
-                )
-                if vis15.any()
-                else None,
-                sigma2_within_30pct_15db=float(
-                    np.mean(np.abs(s2_f[:K][vis15] / s2_t[:K][vis15] - 1.0) <= 0.3)
-                )
-                if vis15.any()
-                else None,
-                profile_abs_err_db_median_10db=float(
-                    np.median(np.abs(prof_f[vis10] - prof_t[vis10]))
-                )
-                if vis10.any()
-                else None,
-                profile_within_1db_10db=float(np.mean(np.abs(prof_f[vis10] - prof_t[vis10]) <= 1.0))
-                if vis10.any()
-                else None,
-            )
-        )
+
+    def P(m: Any, name: str) -> np.ndarray:
+        return m.params[name].detach().cpu().numpy()
+
+    # line visibility on the planted data: per (rotor, order) the median over
+    # the rotor's recordings of the mic-median line SNR
+    R, K = rig.n_rotors, rig.k_prof
+    snr = np.full((R, K), np.nan)
+    for r in range(R):
+        rows = []
+        for j, s in enumerate(rig.settings):
+            if rig.rotors[j] == r:
+                row = np.full(K, np.nan)
+                row[: s.k_max] = np.median(rig.tables[j]["snr_db"], axis=0)
+                rows.append(row)
+        # orders above every recording of the rotor are all-NaN by intent
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            snr[r] = np.nanmedian(np.asarray(rows), axis=0)
+    snr = np.nan_to_num(snr, nan=-np.inf)
+    pa_t, pa_f = P(truth, "p_aero"), P(model, "p_aero")
+    v10 = snr >= 10.0
+    err10 = np.abs(pa_f - pa_t)[v10]
+    with torch.no_grad():
+        W_t, W_f = truth.width_phase().cpu().numpy(), model.width_phase().cpu().numpy()
+        basis = model.frozen[0].grid.floor
+        f_psd = model.frozen[0].floor_f.cpu().numpy()
+        inband = (f_psd >= B.BAND_HZ[0]) & (f_psd <= B.BAND_HZ[1])
+        fl_t = 10 * np.log10(basis.psd(truth._floor_params()).cpu().numpy()[inband])
+        fl_f = 10 * np.log10(basis.psd(model._floor_params()).cpu().numpy()[inband])
+    v15 = snr.max(axis=0) >= 15.0
+    werr = np.abs(W_f[v15] / W_t[v15] - 1.0)
+    eps = (float(np.exp(P(truth, "log_eps"))), float(np.exp(P(model, "log_eps"))))
+    lam = (float(np.exp(P(truth, "log_lam_ref"))), float(np.exp(P(model, "log_lam_ref"))))
+    checks: dict[str, Any] = dict(
+        profiles_10db=dict(
+            n_lines=int(v10.sum()),
+            median_abs_err_db=float(np.median(err10)) if err10.size else None,
+            frac_within_1db=float(np.mean(err10 <= 1.0)) if err10.size else None,
+            ok=bool(err10.size and np.all(err10 <= 1.0)),
+        ),
+        alpha_aero=_within(
+            float(P(model, "alpha_aero")), float(P(truth, "alpha_aero")), abs_tol=0.3
+        ),
+        b0=_within(float(P(model, "b0")), float(P(truth, "b0")), abs_tol=0.3),
+        floor=dict(
+            max_abs_err_db=float(np.max(np.abs(fl_f - fl_t))),
+            rms_err_db=float(np.sqrt(np.mean((fl_f - fl_t) ** 2))),
+            mean_err_db=float(np.mean(fl_f - fl_t)),
+            ok=bool(np.max(np.abs(fl_f - fl_t)) <= 1.0),
+        ),
+        eps=_within(eps[1], eps[0], rel_tol=0.2),
+        lam_ref=_within(lam[1], lam[0], rel_tol=0.2),
+        width_phase_15db=dict(
+            orders=(np.flatnonzero(v15) + 1).tolist(),
+            median_rel_err=float(np.median(werr)) if werr.size else None,
+            frac_within_30pct=float(np.mean(werr <= 0.3)) if werr.size else None,
+            ok=bool(werr.size and np.all(werr <= 0.3)),
+        ),
+    )
+    checks["all_ok"] = all(bool(v["ok"]) for v in checks.values() if isinstance(v, dict))
     out = dict(
-        motor=args.motor,
-        truth=args.truth or "seed model of the real ladder",
+        truth=str(args.truth),
+        kappa=args.kappa,
         render_seed=args.render_seed,
-        alpha_aero=dict(truth=float(t["alpha_aero"]), fit=float(f["alpha_aero"])),
-        alpha_motor=dict(truth=float(t["alpha_motor"]), fit=float(f["alpha_motor"])),
-        b0=dict(truth=float(t["b0"]), fit=float(f["b0"])),
-        b1=dict(truth=float(t["b1"]), fit=float(f["b1"])),
-        eps=dict(truth=float(np.exp(t["log_eps"])), fit=float(np.exp(f["log_eps"]))),
-        a_sigma=dict(truth=float(t["a_sigma"]), fit=float(f["a_sigma"])),
-        lam_ref=dict(truth=float(np.exp(t["log_lam_ref"])), fit=float(np.exp(f["log_lam_ref"]))),
-        b_lam=dict(truth=float(t["b_lam"]), fit=float(f["b_lam"])),
-        settings=rows,
+        seed=args.seed,
+        checks=checks,
+        info=dict(
+            alpha_motor=_within(
+                float(P(model, "alpha_motor")), float(P(truth, "alpha_motor")), abs_tol=0.3
+            ),
+            b1=_within(float(P(model, "b1")), float(P(truth, "b1")), abs_tol=0.1),
+            a_sigma=_within(float(P(model, "a_sigma")), float(P(truth, "a_sigma")), abs_tol=0.2),
+            b_lam=_within(float(P(model, "b_lam")), float(P(truth, "b_lam")), abs_tol=0.2),
+        ),
         objective=rec["objective"],
         converged=rec["converged"],
         restart_gain_per_cell=rec["restart_gain_per_cell"],
+        held_orders=rec["evidence"]["held_orders"],
         wall_s=rec["wall_s"],
         git=_git(),
     )
-    path = args.out / "planted" / f"{args.motor}.json"
+    path = (
+        args.out
+        / "planted"
+        / f"{Path(args.truth).stem}__kappa{args.kappa:g}__r{args.render_seed}.json"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=1))
-    print(json.dumps(out, indent=1))
+    path.with_suffix(".fit.json").write_text(json.dumps(B.payload(model, rec, git=_git())))
+    print(json.dumps(out["checks"], indent=1))
     return 0
 
 
-def _hwhm_hz(k: float, sigma_nu: float, lam: float, s2: float, gam: float) -> float:
-    """Half-width at half-maximum of the v4 line (no window) at order ``k``."""
-    import numpy as np
-
-    from data_processing.noise_model.lag import r_tau_v4
-
-    dt = 1e-4
-    tau = np.arange(0, 60.0, dt)
-    r = r_tau_v4(tau, k, sigma_nu=sigma_nu, lam=lam, sigma2=s2, gamma_am_hz=gam)
-    # the coherent core never decays when s2 < inf and the shaft is bounded at
-    # low k; the half-width is read where the shape falls to half its peak
-    nfft = 1 << 22
-    shape = 2.0 * np.fft.rfft(r * dt, n=nfft).real - r[0] * dt
-    f = np.fft.rfftfreq(nfft, d=dt)
-    half = shape[0] / 2.0
-    i = int(np.argmax(shape < half))
-    return float(f[i])
-
-
-def cmd_check(args: argparse.Namespace) -> int:
-    import numpy as np
+def cmd_refit(args: argparse.Namespace) -> int:
+    """The nested test of the shaft law: re-optimise a fitted payload with
+    ``a_sigma = b_lam = 0`` (one ``(sigma_nu, lam)`` for every speed) under
+    :func:`bench_v4.fit_rig`'s schedule, and compare."""
     import torch
 
     from experiments.noise_model import bench_v4 as B
 
     torch.set_num_threads(args.threads)
-    width_law = json.loads(WIDTH_LAW.read_text())
-    report: dict[str, Any] = dict(motors={}, git=_git())
-    for fit_path in sorted((args.out / "fits").glob("Motor?.json")):
-        pay = json.loads(fit_path.read_text())
-        motor = pay["motor"]
-        lad = B.build_ladder(motor)
-        model = B.LadderModel(lad, device=args.device, sigma2_cap=pay["shared"]["pedestal"]["cap"])
-        model.load_payload(pay)
-        sh = pay["shared"]
-        s2 = np.asarray(sh["pedestal"]["sigma2"])
-        gm = np.asarray(sh["pedestal"]["gamma_hz"])
-        rows = []
-        for j, (s, st) in enumerate(zip(lad.settings, pay["settings"])):
-            with torch.no_grad():
-                Mx = model.expected(j).cpu().numpy()
-                w_aero, w_motor, motor_k = model.line_weights(j)
-            f = s.freqs
-            pw = s.power
-            bands = {}
-            for a, b in zip((30, 100, 300, 1000, 2000, 4000), (100, 300, 1000, 2000, 4000, 7200)):
-                sel = (f >= a) & (f < b)
-                r = pw[:, sel] / Mx[:, sel]
-                bands[f"{a}-{b}"] = dict(
-                    mean_ratio=float(r.mean()),
-                    median_ratio_over_ln2=float(np.median(r) / math.log(2.0)),
-                    level_db=float(10 * np.log10(pw[:, sel].mean() / Mx[:, sel].mean())),
-                )
-            # the line bins: data over model power in +-1 Hz around k f_r
-            line_db = {}
-            for k0, k1 in ((1, 4), (5, 10), (11, 20), (21, 40), (41, 80), (81, 160)):
-                sel = np.zeros(f.size, bool)
-                for k in range(k0, min(k1, s.k_max) + 1):
-                    sel |= np.abs(f - k * s.carrier) <= 1.0
-                if sel.any():
-                    line_db[f"{k0}-{k1}"] = float(
-                        10 * np.log10(pw[:, sel].sum() / Mx[:, sel].sum())
-                    )
-            # quick-fit agreement
-            quick = B._quick_shaft(s.key)
-            ou = json.loads((B.OU_DIR / f"{s.key}.json").read_text())
-            mm = w_aero.cpu().numpy().mean(axis=0)
-            if motor_k.size:
-                mm[motor_k - 1] += w_motor.cpu().numpy().mean(axis=0)
-            fit_db = 10 * np.log10(mm)
-            ou_db = 10 * np.log10(np.asarray(ou["amp2"], dtype=float).mean(axis=0) / 2.0)
-            snr = np.median(lad.tables[j]["snr_db"], axis=0)
-            Kc = min(fit_db.size, ou_db.size)
-            vis = snr[:Kc] >= 10.0
-            prof_diff = fit_db[:Kc][vis] - ou_db[:Kc][vis]
-            sig, lam = st["sigma_nu_rad_s"], st["lam_per_s"]
-            row = dict(
-                key=s.key,
-                sigma_nu_rad_s=sig,
-                lam_per_s=lam,
-                quick=None
-                if quick is None
-                else dict(
-                    sigma_nu_rad_s=quick[0],
-                    lam_per_s=quick[1],
-                    dlog_sigma=float(math.log(sig / quick[0])),
-                    lam_ratio=float(lam / quick[1]),
-                    pass_sigma=bool(abs(math.log(sig / quick[0])) <= 0.3),
-                    pass_lam=bool(1 / 1.5 <= lam / quick[1] <= 1.5),
-                ),
-                profile_vs_quick_db=dict(
-                    n_lines=int(vis.sum()),
-                    median_abs=float(np.median(np.abs(prof_diff))) if vis.any() else None,
-                    within_2db=float(np.mean(np.abs(prof_diff) <= 2.0)) if vis.any() else None,
-                ),
-                bands=bands,
-                line_bins_db=line_db,
-                whittle_per_cell=st["whittle_nats"] / st["n_cells"],
-            )
-            if s.key in RW_CORNER:
-                k80 = np.asarray(width_law[s.key]["gamma_k"], dtype=float)
-                ok = np.asarray(width_law[s.key]["ok"], dtype=bool)
-                ks = np.arange(1, k80.size + 1)
-                sel = ok & (ks >= 75) & (ks <= 85)
-                free = float(np.median(k80[sel])) if sel.any() else None
-                kk = min(80, s2.size)
-                model_hw = _hwhm_hz(80.0, sig, lam, float(s2[kk - 1]), float(gm[kk - 1]))
-                row["rw_corner"] = dict(
-                    lam_in_5_30=bool(5.0 <= lam <= 30.0),
-                    hwhm_k80_model_hz=model_hw,
-                    hwhm_k80_free_hz=free,
-                    hwhm_ratio=None if not free else model_hw / free,
-                    pass_hwhm=None if not free else bool(1 / 1.5 <= model_hw / free <= 1.5),
-                )
-            rows.append(row)
-        # the BPF line (k = 2) against its own law over the ladder
-        bpf = []
-        for j, s in enumerate(lad.settings):
-            lev = float(lad.tables[j]["level_db"][:, 1].mean())
-            law = sh["profile_aero_db"][1] + sh["alpha_aero"] * 10 * math.log10(s.carrier / B.F_REF)
-            bpf.append(lev - law)
-        bpf = np.asarray(bpf)
-        exps = dict(
-            alpha_aero=sh["alpha_aero"],
-            alpha_motor=sh["alpha_motor"],
-            b0=sh["floor"]["b0"],
-            b1=sh["floor"]["b1"],
-            pass_alpha_aero=bool(4.5 <= sh["alpha_aero"] <= 6.5),
-            pass_alpha_motor=bool(-3.0 <= sh["alpha_motor"] <= 2.0),
-            bpf_rms_db=float(np.sqrt(np.mean((bpf - bpf.mean()) ** 2))),
-            pass_bpf=bool(np.sqrt(np.mean((bpf - bpf.mean()) ** 2)) <= 1.0),
-        )
-        rep = dict(
-            settings=rows,
-            exponents=exps,
-            restarts=pay.get("restarts"),
-            optimiser=dict(
-                converged=pay["optimiser"]["converged"],
-                restart_gain_per_cell=pay["optimiser"]["restart_gain_per_cell"],
-                eval_s=pay["optimiser"]["eval_s"],
-                wall_s=pay["optimiser"]["wall_s"],
-            ),
-            lag_support=pay["lag_support"],
-        )
-        nowindy = args.out / "fits" / f"{motor}__nowindy.json"
-        if nowindy.exists():
-            pw = json.loads(nowindy.read_text())
-            a = np.asarray(sh["profile_aero_db"])
-            b = np.asarray(pw["shared"]["profile_aero_db"])
-            snr = np.median(lad.tables[2]["snr_db"], axis=0)
-            vis = snr >= 10.0
-            K = min(vis.size, a.size)
-            d = a[:K][vis[:K]] - b[:K][vis[:K]]
-            rep["wind"] = dict(
-                n_lines=int(vis[:K].sum()),
-                median_abs_db=float(np.median(np.abs(d))),
-                max_abs_db=float(np.max(np.abs(d))),
-                pass_median_0p5db=bool(np.median(np.abs(d)) < 0.5),
-            )
-        report["motors"][motor] = rep
-    (args.out / "checks.json").write_text(json.dumps(report, indent=1))
-    print(json.dumps(report, indent=1)[:20000])
+    src_path = Path(args.source)
+    src = json.loads(src_path.read_text())
+    kappa = float(src["priors"]["floor_push_kappa"] if args.kappa is None else args.kappa)
+    rig = _rig_of_payload(src)
+    model, rec = B.fit_rig(
+        rig,
+        seed=int(src["optimiser"]["seed"]),
+        kappa=kappa,
+        adam_steps=args.adam_steps,
+        lbfgs_iters=args.lbfgs_iters,
+        device=args.device,
+        flat_shaft=bool(args.flat_shaft),
+        start=src,
+    )
+    pay = B.payload(model, rec, git=_git())
+    uid = src_path.stem + ("__flat" if args.flat_shaft else "__refit")
+    path = args.out / "restarts" / f"{uid}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(pay))
+    o_src, o_new = src["objective"], pay["objective"]
+    n = int(o_new["n_cells"])
+    mv = B.group_movement(B.payload_group_vectors(src), B.payload_group_vectors(pay))
+    out = dict(
+        source=str(src_path),
+        refit=str(path),
+        flat_shaft=bool(args.flat_shaft),
+        kappa=kappa,
+        source_kappa=src["priors"]["floor_push_kappa"],
+        n_cells=n,
+        objective_source=o_src["total_nats"],
+        objective_refit_start=rec["objective_start"],
+        objective_refit=o_new["total_nats"],
+        delta_total_nats=o_new["total_nats"] - o_src["total_nats"],
+        delta_total_per_cell=(o_new["total_nats"] - o_src["total_nats"]) / n,
+        delta_whittle_nats=o_new["whittle_nats"] - o_src["whittle_nats"],
+        delta_whittle_per_cell=(o_new["whittle_nats"] - o_src["whittle_nats"]) / n,
+        note="the flat refit drops the a_sigma and b_lam prior terms, so its total "
+        "objective is not strictly nested; the Whittle delta is the like-for-like term",
+        movement=dict(
+            levels=mv["levels"],
+            exponents_max=mv["exponents"],
+            floor=mv["floor"],
+            shaft_logs=mv["shaft_logs"],
+            pedestal_logs=mv["pedestal_logs"],
+        ),
+        shaft_source=src["params"]["shaft"],
+        shaft_refit=pay["params"]["shaft"],
+        converged=rec["converged"],
+        restart_gain_per_cell=rec["restart_gain_per_cell"],
+        wall_s=rec["wall_s"],
+    )
+    rep = args.out / "refit" / f"{uid}.json"
+    rep.parent.mkdir(parents=True, exist_ok=True)
+    rep.write_text(json.dumps(out, indent=1))
+    print(json.dumps(out, indent=1))
     return 0
 
 
@@ -419,49 +371,46 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--out", type=Path, default=OUT)
     sub = ap.add_subparsers(dest="cmd", required=True)
+    kappa_help = "floor push (nats per dB per control value); set by the planted check"
     p = sub.add_parser("fit")
-    p.add_argument("--motors", nargs="+", default=["Motor1", "Motor2", "Motor3", "Motor4"])
+    p.add_argument("--motors", nargs="+", default=list(ALL_MOTORS))
+    p.add_argument("--throttles", nargs="+", type=int, default=list(ALL_THROTTLES))
     p.add_argument("--seeds", type=int, default=4)
-    p.add_argument("--exclude-windy", action="store_true")
-    p.add_argument(
-        "--pin-lam",
-        type=float,
-        default=None,
-        help="hold the shaft rate at lam = PIN_LAM (f / f_ref) instead of fitting lam_ref, b",
-    )
-    p.add_argument(
-        "--no-sigma2-cap",
-        action="store_true",
-        help="fit the pedestal sigma2_k without the 0.6 render cap (explainer section am-pm)",
-    )
-    p.add_argument(
-        "--center-delta",
-        action="store_true",
-        help="zero-mean line scatter per setting, so the ladder level trend goes through alpha",
-    )
-    p.add_argument("--tag", default="", help="suffix for a schedule variant, e.g. 'lbfgsonly'")
     p.add_argument("--seed-start", type=int, default=0)
+    p.add_argument("--kappa", type=float, required=True, help=kappa_help)
+    p.add_argument("--tag", default="", help="suffix of a schedule variant")
     p.add_argument("--adam-steps", type=int, default=1500)
-    p.add_argument("--lbfgs-iters", type=int, default=400)
+    p.add_argument("--lbfgs-iters", type=int, default=1200)
     p.add_argument("--device", default="cpu")
     p.add_argument("--jobs", type=int, default=1)
     p.add_argument("--threads", type=int, default=8)
+    p.add_argument(
+        "--flat-shaft",
+        action="store_true",
+        help="pin a_sigma = b_lam = 0: one shaft for all speeds",
+    )
     p.set_defaults(func=cmd_fit)
     p = sub.add_parser("reduce")
     p.set_defaults(func=cmd_reduce)
     p = sub.add_parser("planted")
-    p.add_argument("--motor", default="Motor1")
-    p.add_argument("--truth", default=None, help="a fit payload; default: the seed model")
+    p.add_argument("--truth", required=True, help="a noise-v4-fit/3 bench payload")
+    p.add_argument("--kappa", type=float, required=True, help=kappa_help)
     p.add_argument("--render-seed", type=int, default=1)
+    p.add_argument("--seed", type=int, default=0, help="the fit's restart index")
     p.add_argument("--adam-steps", type=int, default=1500)
-    p.add_argument("--lbfgs-iters", type=int, default=400)
+    p.add_argument("--lbfgs-iters", type=int, default=1200)
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
     p.set_defaults(func=cmd_planted)
-    p = sub.add_parser("check")
+    p = sub.add_parser("refit", help="nested refit of a payload with the shaft law pinned flat")
+    p.add_argument("--from", dest="source", required=True, help="a noise-v4-fit/3 bench payload")
+    p.add_argument("--flat-shaft", action="store_true", help="pin a_sigma = b_lam = 0")
+    p.add_argument("--kappa", type=float, default=None, help="default: the source's kappa")
+    p.add_argument("--adam-steps", type=int, default=300)
+    p.add_argument("--lbfgs-iters", type=int, default=1200)
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
-    p.set_defaults(func=cmd_check)
+    p.set_defaults(func=cmd_refit)
     args = ap.parse_args(argv)
     return int(args.func(args))
 

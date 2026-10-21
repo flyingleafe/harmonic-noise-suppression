@@ -62,8 +62,8 @@ Design: `docs/refactor-data-pipelines.md`. VK/refinement: `src/tracking`.
   `stochastic_rotor_noise.StochasticNoisePool`; `noise_v2` →
   `noise_v2_pool.NoiseV2Pool` (FITTED v2 rigs; `fits:`/`preset_bank:`);
   `silence` → `silence_noise.SilenceNoisePool`.
-- `noise_model/` — v2/v3 renderer (numba line kernel; prior-rig blocks
-  `am`/`mic_dev_sd_db`/`wind_sc`), re-exported by `experiments.noise_model`.
+- `noise_model/` — v2/v3/v4 renderer (numba line kernel; prior-rig blocks
+  `am`/`mic_dev_sd_db`/`wind_sc`; `v4.py`: `noise-v4-fit/3` reader).
 - `trajectory_model/` — the FITTED rps trajectory model: `rps.kind:
   fitted_traj` + `FlightCache`/`window_flight`, fed by `rps-traj-fits`
   (fitted by `experiments.rps_traj`).

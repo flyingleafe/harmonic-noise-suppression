@@ -287,7 +287,7 @@ synthesis with the per-rotor gain $\sum_r s_r(t)^{b(f)}$ per bin.
 | $\sigma^2_{A,k}$ | rig, order | LogN$(\log m_{g}, 0.5)$ truncated at $c_{g}$; $(m_g, c_g)$ per order group $g$ in @tbl-amp | @sec-ev-pedestal |
 | $\gamma_{A,k}$ | rig, order | LogN$(\log 0.4\,\mathrm{Hz}, 0.5)$ for $k \le 8$; LogN$(\log 1.0\,\mathrm{Hz}, 0.5)$ above | direct amplitude measurement |
 | $\sigma^2_{\phi,k}$ | rig, order | LogN$(\log 1, 1.5)$ | wide; the data set it on the bench |
-| $W_{\phi,k}$ (@eq-width) | rig, order | HalfNormal$(c_W^{\rm even})$ for $k \bmod B = 0$, HalfNormal$(c_W^{\rm odd})$ otherwise, in Hz | @sec-ev-pedestal; $c_W$ measured in step A0 |
+| $W_{\phi,k}$ (@eq-width) | rig, order | HalfNormal$(c_W^{\rm even})$ for $k \bmod B = 0$, HalfNormal$(c_W^{\rm odd})$ otherwise, in Hz; $c_W^{\rm even} = 6.94$, $c_W^{\rm odd} = 30.68$ | @sec-ev-pedestal; $c_W$ measured in step A0 (`results/noise_v4/phase_width/findings.md`) |
 | $\varepsilon$ | rig | HalfNormal$(0.005)$ | bench round R2 |
 | $a_\sigma$, $b_\lambda$ | rig | $\mathcal N(1, 0.5)$ | bench round R2 |
 | $\lambda_{\rm ref}$ | rig | LogN$(\log 12, 0.5)$ 1/s | bench quick fits |
@@ -389,16 +389,20 @@ rotor-on span (9.8–36 s; 0.03–0.1 Hz bins). Band 30 Hz–7.2 kHz.
 
 ## Steps
 
-**A0. Measure the pedestal width scale.** Run the per-order phase coherence
-(`scripts/static_rig_scratch/one_rotor_coherence.py`) on all 20 recordings,
-calm microphones, at lags 2.5, 5, 10, 15, 20, 30, 40, 50, 100, 200, 500, 1000
-and 2000 ms. Fit $2\sigma^2_\phi(1 - e^{-2\pi\gamma_\phi\tau})$ to the net
-phase increment variance of every gated order. Compute $W_\phi$ with
-@eq-width. Set $c_W^{\rm even}$ and $c_W^{\rm odd}$ so that the 97.5th
-percentile of the measured $W_\phi$ of each parity sits at the half-normal's
-97.5th percentile ($2.24\,c_W$). The current lag grid (5 ms, then 10, 20, 50 ms)
-does not resolve the fast part: the net variance jumps by 0.2–0.75 rad²
-between 20 and 50 ms at $k \ge 8$.
+**A0. Measure the pedestal width scale.** Run `scripts/noise_v4_phase_width.py`
+(`experiments.static_rig.phase_width`) on all 20 recordings, calm microphones.
+It removes the shaft, demodulates every order on a band of $\pm f_0/2$, and
+fits the complex autocorrelation with the window, the in-band floor and the
+tails of the neighbouring orders in the forward model, at lags 2.5, 5, 10, 15,
+20, 30, 40, 50, 100, 200, 500, 1000 and 2000 ms. The lags below about one
+revolution are not resolved by the band; a second fit on the resolved lags
+only is reported next to the main one. Compute $W_\phi$ with @eq-width. Set
+$c_W^{\rm even}$ and $c_W^{\rm odd}$ so that the 97.5th percentile of the
+measured $W_\phi$ of each parity sits at the half-normal's 97.5th percentile
+($2.24\,c_W$). Output: `results/noise_v4/phase_width/{summary.json,findings.md}`.
+The old instrument (`scripts/static_rig_scratch/one_rotor_coherence.py`) read
+its floor from the band flank, inside the pedestal; its jump of the net
+variance between 20 and 50 ms is an artefact of that floor.
 
 **A1. Span and carrier.** Strict span per recording
 (`single_rotor.strict_span`). Refine the carrier on the cores of orders 2–7.
@@ -449,6 +453,14 @@ $F$, and per recording the carrier, ambient and wind.
   and the listening clips of `docs/explainers/noise-v4-bench-fit.qmd`, on the
   new fit.
 - **Convergence** (@sec-optimiser) on the selected restart.
+- **Flat shaft law** (decision, 2026-10-21: one $(\lambda, \sigma_\nu)$ pair
+  for all speeds is preferred if the bench allows it). Refit the selected
+  restart with $a_\sigma = b_\lambda = 0$ pinned, starting from it, under the
+  same convergence rule (`noise_v4_bench.py refit --flat-shaft`). Adopt the
+  flat law if the refit loses less than the BIC penalty of the two dropped
+  parameters ($\ln N_{\rm cells}$ each, about 33 nats on the full ladder) and
+  the line levels and widths move less than the convergence tolerances. Flight
+  keeps the flat law either way.
 
 # Procedure B — free flight on MD2 {#sec-flight-fit}
 
@@ -744,8 +756,13 @@ within 1.5 rev/s of each other in cruise); above 4 kHz no rotor has enough.
 Above 2 kHz the measured term is smaller than the geometric prediction (slope
 0.57), consistent with scattering by the body at short wavelengths
 [INFERENCE]. The geometric term is used at every frequency without a slope.
-$|\Delta G_{rm}| \le 1.0$ dB on MD2 (sd 0.55 dB), so at 2–4 kHz the term
-overstates the rotor-specific part by 0.24 dB rms, 0.43 dB at most.
+On MD2, $\Delta G_{rm}$ has two parts: a level per rotor (its mean over the
+microphones: the front rotors are 2.1 dB above the mean, the rear rotors
+2.1 dB below), which the rotor profiles absorb for the lines but which weights
+the rotors' shares of the summed floor; and the part across the microphones,
+$|\cdot| \le 1.0$ dB (sd 0.55 dB), which the isolated lines test. At 2–4 kHz
+the across-microphone part overstates the measured one by 0.24 dB rms,
+0.43 dB at most.
 
 ## The Whittle likelihood on both supports
 

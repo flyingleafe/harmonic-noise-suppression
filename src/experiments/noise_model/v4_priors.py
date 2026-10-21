@@ -88,10 +88,13 @@ GAMMA_AMP_LOG_SD = 0.5
 PHASE_SIGMA2_LN = (0.0, 1.5)
 
 #: Half-normal scales (Hz) of the phase-pedestal mean half-width W, blade-pass
-#: orders and the others. PROVISIONAL until step A0 (dense-lag coherence on the
-#: 20 bench recordings) measures them; the odd/even ratio follows nv3r4 B3.
-C_W_EVEN = 2.0
-C_W_ODD = 6.0
+#: orders and the others: p97.5 of the measured W per parity / 2.24 (step A0,
+#: 20 bench recordings, results/noise_v4/phase_width/summary.json; even n = 387,
+#: odd n = 94). The fit on the resolved lags only (>= 33-61 ms) gives
+#: c_W 18.4 / 163 Hz: a width much above 1/(2 pi 33 ms) ~ 5 Hz is decorrelated
+#: at every resolved lag and is set there by its tail, so it is not used.
+C_W_EVEN = 6.94
+C_W_ODD = 30.68
 
 
 def _group(k: np.ndarray, col: int) -> np.ndarray:
