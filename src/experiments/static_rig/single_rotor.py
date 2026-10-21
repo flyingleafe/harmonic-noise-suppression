@@ -594,6 +594,22 @@ def amplitude_jitter(
 # ─── synthesis ────────────────────────────────────────────────────────────────
 
 
+def _ou_tracks(
+    rng: np.random.Generator, var: np.ndarray, rate_hz: np.ndarray, dt: float, n: int
+) -> np.ndarray:
+    """``(K, n)`` stationary OU tracks, variance ``var``, autocorrelation
+    ``exp(-2 pi rate |tau|)``, sampled every ``dt`` s; independent per row."""
+    rho = np.exp(-2 * np.pi * rate_hz * dt)
+    sd = np.sqrt(var)
+    noise = rng.standard_normal((var.size, n)) * (sd * np.sqrt(1 - rho**2))[:, None]
+    noise[:, 0] = rng.standard_normal(var.size) * sd
+    g = np.empty_like(noise)
+    g[:, 0] = noise[:, 0]
+    for i in range(1, n):
+        g[:, i] = rho * g[:, i - 1] + noise[:, i]
+    return g
+
+
 def synthesise(
     fit: LineFit | WhittleFit | OUFit,
     fs: int,
@@ -601,6 +617,7 @@ def synthesise(
     seed: int = 0,
     am: tuple[Any, Any] | None = None,
     env_rate: int = 200,
+    pm: tuple[Any, Any] | None = None,
 ) -> np.ndarray:
     """``(C, n)`` audio from the profile: one shaft shared by all mics — an
     OU speed error (``σ_ν``, ``λ``) for an `OUFit`, a phase random walk
@@ -608,7 +625,9 @@ def synthesise(
     random phase; with ``am = (σ_m², γ_m)`` — scalars or per-order arrays —
     each order also carries a log-amplitude OU jitter ``exp(g_k(t))``
     (variance ``σ_m²``, memory ``1/(2π γ_m)``), independent across orders
-    and shared by the mics. Nothing else."""
+    and shared by the mics; with ``pm = (σ_φ², γ_φ)`` likewise a stationary OU
+    ON THE PHASE ``e^{iψ_k(t)}`` (bounded, not a random walk), independent of
+    the amplitude process. Nothing else."""
     rng = np.random.default_rng(seed)
     C, K = fit.amp2.shape
     hop = fs // env_rate  # envelope sample spacing; blocks of one hop
@@ -642,6 +661,12 @@ def synthesise(
         for i in range(1, n_blk + 1):
             g[:, i] = rho[:, 0] * g[:, i - 1] + noise[:, i]
         env = np.exp(g - 0.5 * sm[:, None]).astype(np.float32)  # (K, n_blk + 1)
+    pha = None
+    if pm is not None:  # one bounded phase OU per order, shared by the mics
+        sp = np.ascontiguousarray(np.broadcast_to(np.asarray(pm[0], float), (K,)))
+        gp = np.ascontiguousarray(np.broadcast_to(np.asarray(pm[1], float), (K,)))
+        psi = _ou_tracks(rng, sp, gp, dt, n_blk + 1)
+        pha = (np.cos(psi).astype(np.float32), np.sin(psi).astype(np.float32))
     w = (np.arange(hop, dtype=np.float32) / hop)[None, None, :]
     out = np.empty((C, n_pad), dtype=np.float32)
     B = max(1, (1 << 22) // (K * hop))  # blocks per chunk (~16 MB per bank)
@@ -653,6 +678,10 @@ def synthesise(
             e = env.T[b0:b1, :, None] * (1 - w) + env.T[b0 + 1 : b1 + 1, :, None] * w
             zr *= e
             zi *= e
+        if pha is not None:  # z e^{i psi}, e^{i psi} blended between the hop endpoints
+            pc = pha[0].T[b0:b1, :, None] * (1 - w) + pha[0].T[b0 + 1 : b1 + 1, :, None] * w
+            ps = pha[1].T[b0:b1, :, None] * (1 - w) + pha[1].T[b0 + 1 : b1 + 1, :, None] * w
+            zr, zi = zr * pc - zi * ps, zr * ps + zi * pc
         zr = zr.transpose(1, 0, 2).reshape(K, -1)
         zi = zi.transpose(1, 0, 2).reshape(K, -1)
         out[:, b0 * hop : b1 * hop] = cr @ zr - ci @ zi  # Re(coef · e^{i2πkθ})
