@@ -95,7 +95,7 @@ v4 keeps from nv3r4:
 | 6 | Pedestal priors | half-normal $\gamma$ with parity floor | measured amplitude prior with a cap; **half-normal on the phase-pedestal width** with parity | @sec-ev-pedestal |
 | 7 | Floor prior | spline with measured $\sigma_B$ | the same, plus a **soft push upward** to the bases of the lines | @sec-ev-floor-push |
 | 8 | Shaft on the bench | — | free, with one speed law shared by the rotors | @sec-ev-shaft |
-| 9 | Microphones | channels normalised in the data | the same in flight; **pair EQ** on the bench; **no per-line scatter** | @sec-ev-mics |
+| 9 | Microphones | channels normalised in the data by the array response | in flight the same, **plus a fixed geometric term per rotor–mic pair**; **pair EQ** on the bench; **no per-line scatter** | @sec-ev-mics |
 | 10 | Initialisation | warm start from the v2 fit | **from the data and the priors only**; no earlier fit is read | @sec-init |
 | 11 | Convergence | objective change per cell | objective change **and** parameter movement | @sec-optimiser |
 
@@ -218,8 +218,17 @@ It applies to the lines and to the floor of the rotor.
   relative to the microphone mean, smoothed in frequency, measured on the
   rotor's recordings before the fit (`bench_v4.pair_eq`). It is a constant of
   the fit.
-- **Flight.** The channels are normalised in the data by the measured array
-  response, as nv3r4 (round-4 amendment F13). $E_{rm} \equiv 0$.
+- **Flight.** $E_{rm}(f) = A_m(f) + \Delta G_{rm}$, with no fitted parameter:
+  - $A_m(f)$ is the measured **array response** of nv3r4 (round-4 amendment
+    F13): one curve per microphone, shared by the rotors. The data are divided
+    by it before the fit, and the renderer applies it back.
+  - $\Delta G_{rm} = G_{rm} - \tfrac1R\sum_{r'} G_{r'm}$ with
+    $G_{rm} = -20\log_{10} d_{rm}$, $d_{rm}$ the distance from rotor $r$ to
+    microphone $m$ in the rig geometry (MD2: `michaels.get_geometry`). It is
+    independent of the frequency. The mean over rotors is removed because
+    $A_m$ is measured on the mix of all rotors and already contains it.
+    $\Delta G_{rm}$ enters the expected periodogram of the fit and the
+    renderer.
 
 There is **no per-line, per-microphone scatter term** $\delta$ in the model
 (decision, Dmitrii, 2026-10-21). The variation it carried on the bench stays
@@ -486,7 +495,8 @@ bin.
 ## Steps
 
 **B1. Measure the pool**, latent-free, as nv3r4: $\sigma_B$, $\hat F_k$, the
-array response, the block wander.
+array response $A_m(f)$, the block wander. Compute $\Delta G_{rm}$ from the
+rig geometry (@sec-mic). Store both as constants of the fit.
 
 **B2. One joint fit over the standby and cruise windows.** Shared by the four
 rotors: $F$, $b_0$, $b_1$, $s$, $\alpha^{a}$, $\alpha^{m}$, the pedestal
@@ -709,6 +719,34 @@ $k = 56$ grew to $\sigma^2 = 1.6$ to spread the power of a line that one
 setting lifted by 22 dB. The planted check and the comparison with the R3
 shared parameters (@sec-bench-fit) measure this risk.
 
+**MD2: the rotor-specific response is the geometry.** The array response
+$A_m(f)$ (`results/noise_v2/mic_gains/mic_gains.json`,
+`rigs.michaels.levels_db.full`: each microphone's deviation from the array
+mean, 24 third-octave bands 34 Hz–6.8 kHz, mean over 11 FLY125 windows)
+spans about 12 dB across the microphones, with a window-to-window sd of
+0.65 dB (median). It is mostly a constant gain per microphone, with a tilt at
+4–7 kHz on mics 0, 3 and 7. To test for a response per rotor, every line of
+FLY125 (171 s, the flight front end, calibrated telemetry) was kept where it
+was more than 11.7 Hz from every line of the other rotors and at least 6 dB
+over the local floor. Each rotor's level per microphone and octave band, minus
+the mean over the rotors, gives the rotor-specific part:
+
+| band | rotor-specific sd | split-half correlation | slope on $\Delta G_{rm}$ | residual after $\Delta G_{rm}$ |
+|---|--:|--:|--:|--:|
+| 250–500 Hz | 0.68 dB | 0.80 | 1.14 | 0.26 dB |
+| 500–1000 Hz | 0.74 dB | 0.93 | 1.16 | 0.36 dB |
+| 1–2 kHz | 0.54 dB | 0.94 | 0.85 | 0.26 dB |
+| 2–4 kHz | 0.43 dB | 0.63 | 0.57 | 0.29 dB |
+
+The residual after the geometric term is near the noise of the estimate
+(0.2 dB). Below 250 Hz rotors 2 and 4 have too few isolated lines (they run
+within 1.5 rev/s of each other in cruise); above 4 kHz no rotor has enough.
+Above 2 kHz the measured term is smaller than the geometric prediction (slope
+0.57), consistent with scattering by the body at short wavelengths
+[INFERENCE]. The geometric term is used at every frequency without a slope.
+$|\Delta G_{rm}| \le 1.0$ dB on MD2 (sd 0.55 dB), so at 2–4 kHz the term
+overstates the rotor-specific part by 0.24 dB rms, 0.43 dB at most.
+
 ## The Whittle likelihood on both supports
 
 The periodogram cell of a Gaussian process is exponential with mean equal to
@@ -732,6 +770,9 @@ measurements. The two procedures follow from the two resolutions.
    microphone the rotor's mean line level times the pair EQ.
 6. **The floor rule** (summed per-rotor floors) is tested on one recording
    (`motor_allMotors_70`).
+7. **The rotor–microphone term in flight** is the spherical-spreading
+   correction from the geometry. It is measured on MD2 at 250 Hz–4 kHz only;
+   below and above it is an extrapolation.
 
 # Reproduce
 
