@@ -19,30 +19,39 @@ L-BFGS is :class:`.lbfgs.LBFGS` (strong Wolfe); no wander latents.
 WHY A MODULE OF ITS OWN. v4 adds blocks the v2/v3 parameter set
 (:class:`.spectrum.V2Params`) and its Pyro site builder cannot express: two
 line families, the hierarchical rotor profiles, the two-process pedestal in
-place of the Lorentzian ``gamma_rk``, the per-rotor floor with ``b(f)`` and the
+place of the Lorentzian ``gamma_rk``, the floor with ``b(f)`` and the
 rotor-microphone geometry term. Threading them through ``model.sample_params``
 would touch every v2/v3 mode; the forward model here is ~150 lines over the
 shared kernels, and the MAP objective is plain torch, as in :mod:`.bench_v4`.
 
 THE FORWARD MODEL (mic ``m``, frame ``n``)::
 
-    E I_m = T(f) [ sum_r g_rm (L_r + F_r) + s F_s ],   g_rm = 10^{Delta G_rm / 10}
+    E I_m = T(f) [ sum_r g_rm L_r + F_1 + s F_s ],   g_rm = 10^{Delta G_rm / 10}
 
 * ``L_r``: rotor ``r``'s aerodynamic lines at every ``k`` (power
   ``2 10^{p^a_rk/10}``, envelope ``s_r(t)^{alpha^a/2}``, lag law shaft x
   amplitude-OU x phase-OU) plus its motor lines at ``k = 3 p n`` (``p^m_rn``,
   ``s^{alpha^m/2}``, shaft only), summed in the lag domain through each order's
   unit-atom autocorrelation exactly as :func:`.spectrum._line_sum_unit_autocorr`;
-* ``F_r``: rotor ``r``'s floor, the window kernel of the atom
-  ``w(t) s_r(t)^{b0/2}`` on the floor autocovariance, times the frame's
-  ``sbar_rn^{b1 log2(max(f, 30)/2 kHz)}`` (``sbar`` the window's geometric mean
-  speed); ``F_s`` the same kernel with a unit atom (the static share ``s``);
+* ``F_1``: ONE floor for the rig (decision 2026-10-21, payload
+  ``floor.floor_rule = "one_floor_mean_speed"``), driven by the rotor-MEAN
+  speed ``sbar(t) = mean_r s_r(t)``: the window kernel of the atom
+  ``w(t) sbar(t)^{b0/2}`` on the floor autocovariance, times the frame's
+  ``sbar_n^{b1 log2(max(f, 30)/2 kHz)}`` (``sbar_n`` the window's geometric
+  mean of ``sbar``); no geometry weight (``Delta G`` is on the lines only).
+  A sum of four rotor floors let ``b`` select a rotor (b0 ~ 34 put 97 % of the
+  cruise floor on one rotor); ``F_s`` is the same kernel with a unit atom
+  (the static share ``s``);
 * ``T(f)``: the render chain transfer.
 
 The pedestal is HELD: the amplitude OU from MD2's own block-wander measurement,
 capped at :func:`.v4_priors.amp_cap`; the phase OU at the prior medians. The
-shaft has ``lam`` pinned at :data:`.v4_priors.FLIGHT_LAM` and ``sigma_nu`` free
-under :data:`.v4_priors.FLIGHT_SIGMA_NU_LN`, constant in speed.
+shaft has ``lam`` pinned at :data:`.v4_priors.FLIGHT_LAM` (``b_lam = 0``) and
+the speed law ``sigma_nu = sigma_ref s^{a_sigma}`` per rotor and frame (``s``
+the rotor's frame speed over ``f_ref``, the window-power-weighted geometric
+mean), ``sigma_ref ~`` :data:`.v4_priors.FLIGHT_SIGMA_NU_LN`, ``a_sigma ~``
+:data:`.v4_priors.FLIGHT_A_SIGMA`: nv3's per-regime fits gave standby 0.35
+rad/s against cruise 3.8, so a flat ``sigma_nu`` fits neither regime.
 """
 
 from __future__ import annotations
@@ -59,6 +68,8 @@ import numpy as np
 import torch
 from torch import Tensor
 
+from data_processing.noise_model.ou import integrated_ou_increment_var
+from data_processing.noise_model.v4 import FLOOR_RULE_ONE
 from data_processing.sources.michaels import ROTOR_ORDER, get_geometry
 from experiments.stochastic_fit.revised_phase import (
     MODEL_FLOOR,
@@ -69,7 +80,6 @@ from experiments.stochastic_fit.revised_phase import (
 from . import model as MD
 from . import spectrum as SP
 from . import v4_priors as V4
-from .lag import r_tau
 from .lbfgs import LBFGS
 
 __all__ = [
@@ -292,13 +302,18 @@ def _family_lag_sum(
     speed: Tensor,
     orders: Tensor,
     power: Tensor,
-    rho: Tensor,
+    sigma2: Tensor,
+    v_unit: Tensor,
+    ped: Tensor | None,
     alpha: Tensor,
     chunk: int,
 ) -> Tensor:
     """``(R, n_c, n)`` lag-domain sum of one line family: ``sum_k power_rk
-    rho_k(tau) G_rk(tau)`` with ``G`` the unit atom ``w s^{alpha/2} e^{i k phi}``'s
-    autocorrelation, ``alpha``'s gradient through the tangent ``dG/d alpha``."""
+    rho_rkn(tau) G_rkn(tau)`` with ``G`` the unit atom ``w s^{alpha/2} e^{i k phi}``'s
+    autocorrelation, ``alpha``'s gradient through the tangent ``dG/d alpha``.
+    ``rho`` is built per order chunk: the shaft factor of each rotor and frame
+    (:func:`_shaft_frames`, ``sigma2`` ``(R, n_c)``) times the held pedestal
+    ``ped`` ``(K, n)`` (``None``: the motor family, shaft only)."""
     n = int(grid.n_fft_work)
     fitted = bool(alpha.requires_grad)
     with torch.no_grad():
@@ -310,7 +325,10 @@ def _family_lag_sum(
     for c0 in range(0, int(orders.numel()), max(1, int(chunk))):
         c1 = min(c0 + max(1, int(chunk)), int(orders.numel()))
         g, dg = _unit_autocorr(phase, env, orders[c0:c1], n, log_half)
-        weight = power[:, c0:c1, None, None] * rho[:, c0:c1, None, :]
+        rho = _shaft_frames(orders[c0:c1], sigma2, v_unit)
+        if ped is not None:
+            rho = rho * ped[c0:c1, None, :]
+        weight = power[:, c0:c1, None, None] * rho
         lag = lag + (g * weight).sum(dim=1)
         if tangent is not None and dg is not None:
             with torch.no_grad():
@@ -349,9 +367,25 @@ def _log_sbar(grid: SP.FlightGrid, speed: Tensor) -> Tensor:
     return (torch.log(speed) * w2).sum(dim=-1) / w2.sum()
 
 
-def _shaft(grid: SP.FlightGrid, k: Tensor, sigma_nu: Tensor, lam: Tensor) -> Tensor:
-    """``(K, n)`` the shaft factor ``exp(-k^2 V_theta / 2)`` on the work lags."""
-    return r_tau(grid.tau_s_work[None, :], k[:, None], sigma_nu=sigma_nu, lam=lam, gamma_hz=0.0)
+def _v_unit(grid: SP.FlightGrid, lam: float) -> Tensor:
+    """``(n,)`` the shaft structure function ``V_theta`` on the work lags at
+    ``sigma_nu = 1`` (``V_theta`` is linear in ``sigma_nu^2``); ``lam`` pinned."""
+    return integrated_ou_increment_var(grid.tau_s_work, lam=float(lam), sigma=1.0)
+
+
+def _shaft_frames(k: Tensor, sigma2: Tensor, v_unit: Tensor) -> Tensor:
+    """``(R, K, n_c, n)`` the shaft factor ``exp(-k^2 sigma2_rn V_1(tau) / 2)``."""
+    return torch.exp(-0.5 * k[None, :, None, None] ** 2 * sigma2[:, None, :, None] * v_unit)
+
+
+def _sigma2_frames(
+    grid: SP.FlightGrid, speed: Tensor, log_sigma_ref: Tensor, a_sigma: Tensor
+) -> Tensor:
+    """``(R, n_c)`` ``sigma_nu^2`` of each rotor and frame from the shaft law
+    ``sigma_nu = sigma_ref sbar_rn^{a_sigma}`` (``sbar_rn`` the frame's speed / f_ref)."""
+    with torch.no_grad():
+        log_sbar = _log_sbar(grid, speed)
+    return torch.exp(2.0 * (log_sigma_ref + a_sigma * log_sbar))
 
 
 def pedestal_lag(grid: SP.FlightGrid, ped: dict[str, np.ndarray]) -> Tensor:
@@ -367,7 +401,7 @@ def pedestal_lag(grid: SP.FlightGrid, ped: dict[str, np.ndarray]) -> Tensor:
     )
 
 
-def _floor_rotor(
+def _floor_one(
     grid: SP.FlightGrid,
     speed: Tensor,
     c: Tensor,
@@ -375,13 +409,14 @@ def _floor_rotor(
     b1: Tensor,
     l_f: Tensor,
 ) -> Tensor:
-    """``(R, n_c, F)`` each rotor's floor at unit level: the kernel of the atom
-    ``w s_r(t)^{b0/2}`` on the floor autocovariance ``c``, times the frame's
-    ``sbar^{b1 l(f)}``."""
-    atom = grid.window_work * torch.sqrt(speed**b0)
+    """``(n_c, F)`` the rig's ONE floor at unit level: the kernel of the atom
+    ``w sbar(t)^{b0/2}`` (``sbar`` the rotor-mean speed ``mean_r s_r(t)``) on
+    the floor autocovariance ``c``, times the frame's ``sbar_n^{b1 l(f)}``."""
+    mean_speed = speed.mean(dim=0)  # (n_c, n_work)
+    atom = grid.window_work * torch.sqrt(mean_speed**b0)
     g1 = _atom_autocorr(atom, int(grid.n_fft_work))
     fr = SP.floor_frames_from_autocov(grid, g1, c)
-    return fr * torch.exp(b1 * _log_sbar(grid, speed)[..., None] * l_f)
+    return fr * torch.exp(b1 * _log_sbar(grid, mean_speed)[..., None] * l_f)
 
 
 # ── measurement and initialisation (spec step B1, § Initialisation) ────────
@@ -429,14 +464,15 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
        bins between neighbouring lines of all rotors (lines at ``k sbar_rn``,
        +-1 bin excluded), times the run length (the minimum of ``m`` iid
        exponential cells has mean ``1/m`` of theirs), divided by the model's
-       unit floor at the run centre times ``sum_r g_rm sbar^{b_init} + s_init``;
+       unit floor at the run centre times ``sbar_n^{b_init} + s_init`` (``sbar_n``
+       the frame's rotor-mean speed, the one-floor rule);
        averaged per bin over every periodogram; the median per spline cell
        gives the control values. ``mu`` is their mean (a measured constant, as
        in nv3r4), ``sigma_B`` their rms about it (at least 1 dB), ``z`` the
        ridge solution.
     2. ``F-hat_rk``: the mean over in-band frames of the floor at the line's
        bin over the line's unit kernel there (power 0 dB at f_ref, ``alpha^a``
-       at its prior centre, the held pedestal, ``sigma_nu`` at its median,
+       at its prior centre, the held pedestal, the shaft law at its prior centres,
        mic-mean geometry). Aerodynamic start: ``sum (I - floor) / sum unit``
        over the frames, or the prior centre where it is not positive.
     3. Motor start at ``k = 3 p n``: the aerodynamic level is the mean of
@@ -461,8 +497,8 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
     s_init = math.exp(STATIC_SHARE_LN[0])
     alpha_a0, alpha_m0 = V4.ALPHA_AERO[0], V4.ALPHA_MOTOR[0]
     sigma0 = math.exp(V4.FLIGHT_SIGMA_NU_LN[0])
-    lam = torch.tensor(V4.FLIGHT_LAM, dtype=torch.float64, device=dev)
-    sig_t = torch.tensor(sigma0, dtype=torch.float64, device=dev)
+    log_sig_t = torch.tensor(V4.FLIGHT_SIGMA_NU_LN[0], dtype=torch.float64, device=dev)
+    a_sig_t = torch.tensor(V4.FLIGHT_A_SIGMA[0], dtype=torch.float64, device=dev)
     k_a = torch.arange(1, kk + 1, dtype=torch.float64, device=dev)
     k_m = _t(data.motor_orders, ref)
     n_work = int(grid.n_fft_work)
@@ -474,10 +510,13 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
         )
         u0 = (u0 * grid.transfer_power).cpu().numpy()  # (F,)
         log_sbar = np.empty((r_n, n_frames))
+        log_sbar_mean = np.empty(n_frames)
         for sl in _frame_slices(n_frames, batch.chunk_frames):
             _ph, sp = _phase_speed(grid, batch.rate_work[:, sl])
             log_sbar[:, sl] = _log_sbar(grid, sp).cpu().numpy()
+            log_sbar_mean[sl] = _log_sbar(grid, sp.mean(dim=0)).cpu().numpy()
     sbar = np.exp(log_sbar)  # (R, N)
+    sbar_mean = np.exp(log_sbar_mean)  # (N,)
     obs = batch.power.detach().cpu().numpy()  # (M, N, F)
     orders = np.arange(1, kk + 1, dtype=np.float64)
 
@@ -498,10 +537,8 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
         lengths = np.diff(np.append(starts, allowed.size))
         minima = np.minimum.reduceat(obs[:, n, allowed], starts, axis=1)  # (M, runs)
         centre = allowed[starts + lengths // 2]
-        factor = (
-            np.einsum("rm,rj->mj", gain, sbar[:, n, None] ** b_init[None, centre]) + s_init
-        )  # (M, runs)
-        ratio = minima * lengths[None, :] / (u0[centre][None, :] * factor)
+        factor = sbar_mean[n] ** b_init[centre] + s_init  # (runs,)
+        ratio = minima * lengths[None, :] / (u0[centre] * factor)[None, :]
         np.add.at(sums, centre, ratio.sum(axis=0))
         np.add.at(counts, centre, float(ratio.shape[0]))
     have = counts > 0
@@ -541,33 +578,28 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
         b0_t = _t(V4.B0[0], ref)
         b1_t = _t(V4.B1[0], ref)
         l_f = _t(l_f_np, ref)
-        rho_a = (_shaft(grid, k_a, sig_t, lam) * ped)[None]
-        rho_m = _shaft(grid, k_m, sig_t, lam)[None] if k_m.numel() else None
-        gain_t = _t(gain, ref)
+        v_unit = _v_unit(grid, V4.FLIGHT_LAM)
         fs = SP.floor_frames_from_autocov(grid, g1_static, c_init)
         for sl in _frame_slices(n_frames, batch.chunk_frames):
             phase, speed = _phase_speed(grid, batch.rate_work[:, sl])
-            fr = _floor_rotor(grid, speed, c_init, b0_t, b1_t, l_f)
-            fl_mean = (
-                (
-                    (torch.einsum("rm,rnf->nf", gain_t, fr) / gain_t.shape[1] + s_init * fs)
-                    * grid.transfer_power
-                )
-                .cpu()
-                .numpy()
-            )  # (n_c, F)
+            fr = _floor_one(grid, speed, c_init, b0_t, b1_t, l_f)
+            fl_mean = ((fr + s_init * fs) * grid.transfer_power).cpu().numpy()  # (n_c, F)
             frames = np.arange(sl.start, sl.stop)
-            for fam, kt, alpha, rho, sink in (
-                ("a", k_a, alpha_a0, rho_a, unit_a),
-                ("m", k_m, alpha_m0, rho_m, unit_m),
+            sigma2 = _sigma2_frames(grid, speed, log_sig_t, a_sig_t)
+            for fam, kt, alpha, fam_ped, sink in (
+                ("a", k_a, alpha_a0, ped, unit_a),
+                ("m", k_m, alpha_m0, None, unit_m),
             ):
-                if rho is None or kt.numel() == 0:
+                if kt.numel() == 0:
                     continue
                 env = torch.sqrt(speed ** float(alpha)) * grid.window_work
                 for c0 in range(0, int(kt.numel()), chunk_orders):
                     c1 = min(c0 + chunk_orders, int(kt.numel()))
                     g, _ = _unit_autocorr(phase, env, kt[c0:c1], n_work, None)
-                    spec = _lag_to_bins(grid, 2.0 * g * rho[:, c0:c1, None, :])
+                    rho = _shaft_frames(kt[c0:c1], sigma2, v_unit)
+                    if fam_ped is not None:
+                        rho = rho * fam_ped[c0:c1, None, :]
+                    spec = _lag_to_bins(grid, 2.0 * g * rho)
                     spec = (spec * grid.transfer_power).cpu().numpy()  # (R, kc, n_c, F)
                     kidx = (kt[c0:c1].cpu().numpy() - 1).astype(np.int64)
                     for r in range(r_n):
@@ -642,11 +674,12 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
         z=z0,
         log_s=np.asarray(STATIC_SHARE_LN[0]),
         log_sigma_nu=np.asarray(V4.FLIGHT_SIGMA_NU_LN[0]),
+        a_sigma=np.asarray(V4.FLIGHT_A_SIGMA[0]),
     )
     record = dict(
         floor_rule=(
             "per frame and mic the minimum in each run of bins between neighbouring lines of all "
-            "rotors (+-1 bin excluded) x run length, over the unit floor x (sum_r g_rm sbar^b_init "
+            "rotors (+-1 bin excluded) x run length, over the unit floor x (sbar_mean^b_init "
             "+ s_init); mean per bin, median per spline cell; mu = mean, sigma_B = rms about it"
         ),
         floor_bins_read=int(have.sum()),
@@ -659,7 +692,8 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
         line_frames_in_band=cnt.tolist(),
         init_rule="spec § Initialisation steps 1-5 (no earlier fit read)",
         init_alpha_aero=alpha_a0,
-        init_sigma_nu=sigma0,
+        init_sigma_nu_ref=sigma0,
+        init_a_sigma=V4.FLIGHT_A_SIGMA[0],
         sbar_range_rev_s=[float(sbar.min() * SP.AMP_RPS_REF), float(sbar.max() * SP.AMP_RPS_REF)],
     )
     return FlightMeasured(
@@ -704,7 +738,7 @@ class FlightV4Model:
         self.gain = _t(10.0 ** (data.geometry_db.T / 10.0), ref)  # (M, R)
         self.l_f = _t(np.log2(np.maximum(grid.freqs_hz, B_F_LO_HZ) / B_F_REF_HZ), ref)
         self.g1_static = _atom_autocorr(grid.window_work, int(grid.n_fft_work))
-        self.lam = _t(V4.FLIGHT_LAM, ref)
+        self.v_unit = _v_unit(grid, V4.FLIGHT_LAM)
         self.mu = _t(measured.floor_mean_db, ref)
         self.sigma_b = _t(measured.floor_shape_sd_db, ref)
         odd = (np.arange(1, kk + 1) % int(data.blades) != 0).astype(np.float64)
@@ -730,6 +764,7 @@ class FlightV4Model:
                 "z",
                 "log_s",
                 "log_sigma_nu",
+                "a_sigma",
             )
         }
         self.n_cells = int(data.batch.n_cells)
@@ -759,39 +794,42 @@ class FlightV4Model:
         return _floor_c(self.grid, self.mu, self.params["z"], self.sigma_b, self.ref)
 
     def components(self, rate_work: Tensor) -> dict[str, Tensor]:
-        """A chunk's modelled parts before the transfer: ``lines_r`` and
-        ``floor_r`` per rotor ``(R, n_c, F)``, ``floor_s`` ``(F,)``."""
+        """A chunk's modelled parts before the transfer: ``lines_r`` per rotor
+        ``(R, n_c, F)``, the one ``floor`` ``(n_c, F)`` and ``floor_s`` ``(F,)``."""
         v = self.values()
         grid = self.grid
         rate = rate_work.to(dtype=self.ref.dtype, device=self.ref.device)
         phase, speed = _phase_speed(grid, rate)
-        rho_a = (_shaft(grid, self.k_a, v["sigma_nu"], self.lam) * self.ped)[None]
+        sigma2 = _sigma2_frames(grid, speed, v["log_sigma_nu"], v["a_sigma"])
         lag = _family_lag_sum(
             grid,
             phase,
             speed,
             self.k_a,
             2.0 * 10.0 ** (v["p_a"] / 10.0),
-            rho_a,
+            sigma2,
+            self.v_unit,
+            self.ped,
             v["alpha_a"],
             self.harmonic_chunk,
         )
         if self.k_m.numel():
-            rho_m = _shaft(grid, self.k_m, v["sigma_nu"], self.lam)[None]
             lag = lag + _family_lag_sum(
                 grid,
                 phase,
                 speed,
                 self.k_m,
                 2.0 * 10.0 ** (v["p_m"] / 10.0),
-                rho_m,
+                sigma2,
+                self.v_unit,
+                None,
                 v["alpha_m"],
                 self.harmonic_chunk,
             )
         c = self.floor_c()
         return dict(
             lines_r=_lag_to_bins(grid, lag),
-            floor_r=_floor_rotor(grid, speed, c, v["b0"], v["b1"], self.l_f),
+            floor=_floor_one(grid, speed, c, v["b0"], v["b1"], self.l_f),
             floor_s=v["s"] * SP.floor_frames_from_autocov(grid, self.g1_static, c),
         )
 
@@ -799,8 +837,8 @@ class FlightV4Model:
         """``(M, n_c, F)`` expected periodogram of ``batch``'s frames."""
         assert batch.rate_work is not None
         parts = self.components(batch.rate_work)
-        rotor = torch.einsum("mr,rnf->mnf", self.gain, parts["lines_r"] + parts["floor_r"])
-        observed = (rotor + parts["floor_s"]) * self.grid.transfer_power
+        lines = torch.einsum("mr,rnf->mnf", self.gain, parts["lines_r"])
+        observed = (lines + parts["floor"] + parts["floor_s"]) * self.grid.transfer_power
         return observed.clamp_min(MODEL_FLOOR)
 
     def log_prior(self) -> tuple[Tensor, dict[str, float]]:
@@ -831,7 +869,8 @@ class FlightV4Model:
             static=ln(_t(STATIC_SHARE_LN[0], ref), STATIC_SHARE_LN[1]).log_prob(v["s"]),
             sigma_nu=ln(_t(V4.FLIGHT_SIGMA_NU_LN[0], ref), V4.FLIGHT_SIGMA_NU_LN[1]).log_prob(
                 v["sigma_nu"]
-            ),
+            )
+            + n_(V4.FLIGHT_A_SIGMA[0], V4.FLIGHT_A_SIGMA[1], v["a_sigma"]),
             floor_push=self.kappa * self.ctrl_db().sum(),
         )
         total = torch.stack([t.reshape(()) for t in parts.values()]).sum()
@@ -872,7 +911,9 @@ class FlightV4Model:
                 levels_db=np.concatenate(
                     [v["p_a"].cpu().numpy().ravel(), v["p_m"].cpu().numpy().ravel()]
                 ),
-                exponents=np.array([float(v[k]) for k in ("alpha_a", "alpha_m", "b0", "b1")]),
+                exponents=np.array(
+                    [float(v[k]) for k in ("alpha_a", "alpha_m", "b0", "b1", "a_sigma")]
+                ),
                 floor_ctrl_db=self.ctrl_db().cpu().numpy(),
                 log_sigma_nu=np.array([float(v["log_sigma_nu"])]),
                 log_s=np.array([float(v["log_s"])]),
@@ -930,14 +971,16 @@ class OptimV4:
 
 
 def restart_init(measured: FlightMeasured, seed: int) -> dict[str, np.ndarray]:
-    """Restart ``seed``'s start: 0 takes the prior medians of the shaft (the
-    pedestal is held); 1, 2, ... draw ``sigma_nu`` from its prior."""
+    """Restart ``seed``'s start: 0 takes the prior centres of the shaft law (the
+    pedestal is held); 1, 2, ... draw ``sigma_ref`` and ``a_sigma`` from their
+    priors."""
     init = {k: np.array(v, copy=True) for k, v in measured.init.items()}
     if int(seed) > 0:
         rng = np.random.default_rng(int(seed))
         init["log_sigma_nu"] = np.asarray(
             rng.normal(V4.FLIGHT_SIGMA_NU_LN[0], V4.FLIGHT_SIGMA_NU_LN[1])
         )
+        init["a_sigma"] = np.asarray(rng.normal(V4.FLIGHT_A_SIGMA[0], V4.FLIGHT_A_SIGMA[1]))
     return init
 
 
@@ -1167,14 +1210,16 @@ def payload(
             ),
             shaft=dict(
                 eps=sigma_nu / (2.0 * math.pi * float(SP.AMP_RPS_REF)),
-                a_sigma=0.0,
+                a_sigma=float(v["a_sigma"]),
                 lam_ref_per_s=float(V4.FLIGHT_LAM),
                 b_lam=0.0,
                 f_ref_rev_s=float(SP.AMP_RPS_REF),
-                pinned=["lam_ref_per_s", "a_sigma", "b_lam"],
+                pinned=["lam_ref_per_s", "b_lam"],
                 sigma_nu_rad_s=sigma_nu,
+                sigma_nu_note="sigma_ref at f_ref; per rotor and frame sigma_ref s^a_sigma",
             ),
             floor=dict(
+                floor_rule=FLOOR_RULE_ONE,
                 mean_db=float(meas.floor_mean_db),
                 shape_z=_np(v["z"]).tolist(),
                 shape_sd_db=float(meas.floor_shape_sd_db),
@@ -1240,6 +1285,8 @@ def priors_record(model: FlightV4Model) -> dict[str, Any]:
         floor_shape_sd_min_db=FLOOR_SHAPE_SD_MIN_DB,
         static_rel_lognormal=list(STATIC_SHARE_LN),
         sigma_nu_lognormal=list(V4.FLIGHT_SIGMA_NU_LN),
+        sigma_nu_at="f_ref",
+        a_sigma_normal=list(V4.FLIGHT_A_SIGMA),
         lam_pinned_per_s=V4.FLIGHT_LAM,
         kappa=model.kappa,
         floor_push="+kappa sum_j cbar_j on the log prior (dB)",
@@ -1281,6 +1328,7 @@ def reduce_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
         static_rel=_spread([p["floor"]["static_rel"] for p in pr]),
         floor_ctrl_db=_spread([p["floor"]["ctrl_db"] for p in pr]),
         sigma_nu_rad_s=_spread([p["shaft"]["sigma_nu_rad_s"] for p in pr]),
+        a_sigma=_spread([p["shaft"]["a_sigma"] for p in pr]),
     )
     out = dict(best)
     out["restarts"] = dict(

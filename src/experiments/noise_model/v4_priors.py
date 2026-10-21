@@ -27,6 +27,7 @@ __all__ = [
     "A_SIGMA",
     "B_LAM",
     "FIT_SCHEMA",
+    "FLIGHT_A_SIGMA",
     "FLIGHT_LAM",
     "FLIGHT_SIGMA_NU_LN",
     "GAMMA_AMP_LOG_SD",
@@ -68,6 +69,9 @@ LAM_REF_LN = (math.log(12.0), 0.5)
 #: LogNormal from the telemetry residuals of six drones; a = b = 0.
 FLIGHT_LAM = 2.0 * math.pi * 16.0
 FLIGHT_SIGMA_NU_LN = (1.68, 0.66)
+#: Flight shaft speed exponent ``sigma_nu = sigma_ref s^a``: wider than the bench's
+#: N(1, 0.5) because nv3 per-regime fits gave 0.35 vs 3.8 rad/s over ~2.3x (a ~ 3).
+FLIGHT_A_SIGMA = (1.0, 2.0)
 
 #: Amplitude pedestal: (k_lo, k_hi, median, cap) of the per-recording
 #: log-amplitude variance over the 20 DREGON bench recordings

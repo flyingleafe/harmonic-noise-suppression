@@ -80,8 +80,10 @@ A ``noise-v4-fit/3`` PAYLOAD (``docs/explainers/noise-model-v4.qmd``) is drawn
 by :func:`_render_noise_v4` from the laws :mod:`.v4` reads: per line a
 bounded log-amplitude OU and an independent bounded PHASE OU (no Wiener
 phase), motor lines at ``k = 3 p n`` on the shaft alone, the line powers on
-``s^alpha``, the floor as the sum of per-rotor floors ``s_r^{b(f)}`` through
-the WOLA gain, and the rotor-to-mic response ``E_rm(f)``. It shares the line
+``s^alpha``, the floor through the WOLA gain — the sum of per-rotor floors
+``s_r^{b(f)}`` with ``E_rm`` (``floor_rule`` ``per_rotor_sum``, the bench) or
+ONE floor ``sbar^{b(f)}`` on the rotor-mean speed (``one_floor_mean_speed``,
+MD2 flight) — and the rotor-to-mic response ``E_rm(f)``. It shares the line
 kernel, the anti-alias chain and the WOLA with v2/v3, which render
 bit-identically to before.
 """
@@ -104,8 +106,8 @@ from data_processing.noise_model.params import array_response_db, gamma_from_par
 from data_processing.noise_model.params import check_schema as _check_schema
 from data_processing.noise_model.resample import AA_PASS_HZ, antialias, decimate_audio
 from data_processing.noise_model.v3 import Wander, ou_blocks, wind_shape
+from data_processing.noise_model.v4 import FLOOR_RULE_ONE, V4Params
 from data_processing.noise_model.v4 import WORK_RATE_HZ as V4_WORK_RATE_HZ
-from data_processing.noise_model.v4 import V4Params
 
 __all__ = [
     "REGIME_ORDER",
@@ -992,14 +994,21 @@ def _render_noise_v4(
     rotor_lin = 10.0 ** (par.mic.rotor_db(f_wola)[:, :n_mics] / 10.0)  # (R, M, Fw)
     t_out = np.arange(n_out) / float(sr)
     log_s = np.log(par.speed(f0[:, ::oversample]))
+    one_floor = par.floor.rule == FLOOR_RULE_ONE
+    log_sbar = np.log(np.exp(log_s).mean(axis=0))  # the rotor-mean speed
     speed_law: dict[int, np.ndarray] = {}
 
     def rotor_floor_gain(t_s: np.ndarray) -> np.ndarray:
-        """``(R, n_t, Fw)`` ``s_r(t)^{b(f)}`` at the WOLA frame centres (the
-        same centres for every mic, so computed once)."""
+        """``(R, n_t, Fw)`` ``s_r(t)^{b(f)}`` at the WOLA frame centres, or
+        ``(n_t, Fw)`` ``sbar(t)^{b(f)}`` under the one-floor rule (the same
+        centres for every mic, so computed once)."""
         if t_s.size not in speed_law:
-            ls = np.stack([np.interp(t_s, t_out, row) for row in log_s])
-            speed_law[t_s.size] = np.exp(ls[:, :, None] * b_wola[None, None, :])
+            if one_floor:
+                ls = np.interp(t_s, t_out, log_sbar)
+                speed_law[t_s.size] = np.exp(ls[:, None] * b_wola[None, :])
+            else:
+                ls = np.stack([np.interp(t_s, t_out, row) for row in log_s])
+                speed_law[t_s.size] = np.exp(ls[:, :, None] * b_wola[None, None, :])
         return speed_law[t_s.size]
 
     static = par.floor.static_rel
@@ -1008,7 +1017,10 @@ def _render_noise_v4(
         shaped = np.fft.irfft(np.fft.rfft(white) * floor_amp, n=n_out)
 
         def floor_gain_db(t_s: np.ndarray, m: int = m) -> np.ndarray:
-            g = np.einsum("rf,rtf->tf", rotor_lin[:, m], rotor_floor_gain(t_s)) + static
+            if one_floor:
+                g = rotor_floor_gain(t_s) + static
+            else:
+                g = np.einsum("rf,rtf->tf", rotor_lin[:, m], rotor_floor_gain(t_s)) + static
             return 10.0 * np.log10(g)
 
         out[m] += _slow_gain(shaped, floor_gain_db, sr_work=sr, frame=V4_FLOOR_WOLA_FRAME)

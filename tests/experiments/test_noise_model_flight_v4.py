@@ -2,7 +2,9 @@
 
 The v4 forward model must reduce to the nv3r4 ``flight_v3`` expected
 periodogram when the v4 extras are off (pedestal 0, no motor family, b1 = 0,
-Delta G = 0), and its hand-made gradients (the unit-atom tangent of the speed
+Delta G = 0) — the lines rotor by rotor, and the ONE floor as nv3r4's floor
+driven by the rotor-mean carrier — and its hand-made gradients (the unit-atom
+tangent of the speed
 exponents) must be the objective's derivative. CPU-small by construction.
 """
 
@@ -30,10 +32,16 @@ def _t(v: Any) -> torch.Tensor:
     return torch.as_tensor(np.asarray(v, dtype=np.float64), dtype=torch.float64)
 
 
-def _pool(n_rotors: int, n_mics: int = 2, n_frames: int = 6, seed: int = 0) -> MD.SupportBatch:
+def _pool(
+    n_rotors: int, n_mics: int = 2, n_frames: int = 6, seed: int = 0, mean_rotor: bool = False
+) -> MD.SupportBatch:
+    """A moving-carrier pool; ``mean_rotor`` replaces the rotors by ONE rotor on
+    their mean carrier."""
     n = N_FFT + (n_frames - 1) * HOP
     t = np.linspace(0.0, 1.0, n)
     rps = np.stack([60.0 + 7.0 * r + 25.0 * t + 2.0 * np.sin(9.0 * t + r) for r in range(n_rotors)])
+    if mean_rotor:
+        rps = rps.mean(axis=0, keepdims=True)
     starts = np.arange(n_frames) * HOP
     obs = np.random.default_rng(seed).standard_exponential((n_mics, n_frames, N_FFT // 2 + 1))
     return MD.flight_batch(
@@ -57,6 +65,7 @@ def _model(
     b1: float = 0.0,
     log_s: float = -200.0,
     floor_mean_db: float = -60.0,
+    a_sigma: float = 0.0,
     seed: int = 1,
 ) -> FV.FlightV4Model:
     rng = np.random.default_rng(seed)
@@ -97,6 +106,7 @@ def _model(
         z=rng.normal(0.0, 0.7, NC),
         log_s=np.asarray(log_s),
         log_sigma_nu=np.asarray(math.log(3.0)),
+        a_sigma=np.asarray(a_sigma),
     )
     meas = FV.FlightMeasured(
         floor_mean_db=floor_mean_db,
@@ -110,12 +120,14 @@ def _model(
     return FV.FlightV4Model(data, meas, kappa=0.3)
 
 
-def _v3(model: FV.FlightV4Model, batch: MD.SupportBatch) -> torch.Tensor:
+def _v3(
+    model: FV.FlightV4Model, batch: MD.SupportBatch, sigma_nu: float | None = None
+) -> torch.Tensor:
     """The nv3r4 ``flight_v3`` expected periodogram at the model's values."""
     v = {k: t.detach() for k, t in model.values().items()}
     r, m = batch.n_rotors, batch.n_mics
     par = SP.V2Params(
-        sigma_nu=v["sigma_nu"],
+        sigma_nu=v["sigma_nu"] if sigma_nu is None else _t(sigma_nu),
         lam=_t(V4.FLIGHT_LAM),
         gamma_hz=_t(np.zeros((r, K))),
         profile_db=v["p_a"],
@@ -153,19 +165,51 @@ def test_lines_reduce_to_nv3r4_with_the_v4_extras_off():
     assert float(rel.max()) < 1e-6
 
 
-def test_one_rotor_floor_reduces_to_nv3r4():
-    """One rotor, b1 = 0, no static share: the per-rotor floor is nv3r4's
-    floor (the sum over rotors and the mean over rotors coincide)."""
-    batch = _pool(1)
+def test_one_floor_is_nv3r4_floor_on_the_rotor_mean_carrier():
+    """Four rotors on different moving carriers, lines silenced, b1 = 0, no
+    static share: the rig's one floor is nv3r4's floor of one rotor riding the
+    rotor-mean carrier ``mean_r f_r(t)`` (not a sum of rotor floors, not the
+    mean of ``s_r^b``)."""
+    batch = _pool(4)
     model = _model(batch, floor_mean_db=-20.0)
+    ref = _model(_pool(4, mean_rotor=True), floor_mean_db=-20.0)
     with torch.no_grad():
+        model.params["p_a"].fill_(-300.0)
+        ref.params["p_a"].fill_(-300.0)
+        ref.params["z"].copy_(model.params["z"])
         v4 = model.forward(batch)
-    v3 = _v3(model, batch)
+    v3 = _v3(ref, _pool(4, mean_rotor=True))
     rel = (v4 - v3).abs() / v3
     assert float(rel.max()) < 1e-6
 
 
-@pytest.mark.parametrize("name", ["alpha_a", "alpha_m", "b0", "b1", "log_sigma_nu", "log_s"])
+def test_shaft_law_is_per_rotor_and_frame():
+    """``sigma_nu = sigma_ref sbar_rn^a_sigma``: with one rotor sounding, each
+    frame's comb is nv3r4's flat-shaft comb at THAT rotor's frame speed (sbar
+    the window-power-weighted geometric mean over f_ref), not the rig's mean
+    speed or the clip's."""
+    batch = _pool(2, n_frames=4)
+    a_sigma = 2.5
+    assert batch.rate_work is not None and isinstance(batch.grid, SP.FlightGrid)
+    w2 = batch.grid.window_work**2
+    log_s = torch.log(batch.rate_work / SP.AMP_RPS_REF)
+    sbar = torch.exp((log_s * w2).sum(-1) / w2.sum())  # (R, N)
+    for r in range(2):
+        model = _model(batch, floor_mean_db=-300.0, a_sigma=a_sigma)
+        with torch.no_grad():
+            model.params["p_a"][1 - r].fill_(-300.0)
+            v4 = model.forward(batch)
+        for n in range(int(batch.power.shape[1])):
+            sub = MD.batch_slice(batch, np.array([n]))
+            v3 = _v3(model, sub, sigma_nu=3.0 * float(sbar[r, n]) ** a_sigma)
+            live = v3 > 1e-9
+            rel = ((v4[:, n : n + 1] - v3).abs() / v3)[live]
+            assert float(rel.max()) < 1e-6
+
+
+@pytest.mark.parametrize(
+    "name", ["alpha_a", "alpha_m", "b0", "b1", "log_sigma_nu", "a_sigma", "log_s"]
+)
 def test_objective_gradient_matches_finite_differences(name: str):
     """Every extra on: the accumulated gradient of a scalar site equals the
     central difference of the objective."""
@@ -179,14 +223,15 @@ def test_objective_gradient_matches_finite_differences(name: str):
         b1=0.4,
         log_s=math.log(0.02),
         floor_mean_db=-35.0,
+        a_sigma=1.5,
     )
     for p in model.params.values():
         p.grad = None
-    model.objective(batch, grad=True)
+    total = float(model.objective(batch, grad=True))
     p = model.params[name]
     assert p.grad is not None
     g = float(p.grad)
-    h = 1e-4
+    h = 1e-3
     with torch.no_grad():
         x0 = float(p)
         p.fill_(x0 + h)
@@ -195,4 +240,5 @@ def test_objective_gradient_matches_finite_differences(name: str):
         dn = float(model.objective(batch, grad=False))
         p.fill_(x0)
     fd = (up - dn) / (2.0 * h)
-    assert abs(g - fd) <= 1e-4 * max(1.0, abs(fd))
+    # truncation O(h^2) plus the roundoff of a ~5e6-nat sum over cells, / h
+    assert abs(g - fd) <= 1e-4 * max(1.0, abs(fd)) + 1e-13 * abs(total) / h

@@ -8,7 +8,9 @@ octave bands and in a band above the last line where only the two rotors'
 floors are, and the log-amplitude flicker of a high order must be the
 payload's ``sigma2_amp``. A renderer that drew the pedestal as amplitude, kept
 the mean amplitude instead of the mean power, averaged instead of summed the
-rotor floors, or dropped the floor's ``b1`` fails one of the three.
+rotor floors, or dropped the floor's ``b1`` fails one of the three. The same
+holds under the flight rule ``one_floor_mean_speed`` (ONE floor on the
+rotor-mean speed, no pair EQ on it).
 
 The aerodynamic lines at the motor orders are silent: an aerodynamic and a
 motor line of one order share the carrier and keep their start phases for the
@@ -22,6 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pytest
 from scipy.signal import firwin, oaconvolve
 
 from data_processing.noise_model import FIT_SCHEMA_V4
@@ -49,7 +52,7 @@ QUIET_HALF_HZ = 150.0
 SIGMA2_AMP_HI = 0.2
 
 
-def _payload() -> dict[str, Any]:
+def _payload(floor_rule: str | None = None) -> dict[str, Any]:
     k = np.arange(1, K + 1)
     base = -20.0 - 18.0 * np.log10(k) - 6.0 * (k % 2)
     base[np.asarray(MOTOR_ORDERS) - 1] = -150.0
@@ -101,6 +104,7 @@ def _payload() -> dict[str, Any]:
                 "b0": 3.0,
                 "b1": 0.5,
                 "static_rel": 0.0,
+                **({} if floor_rule is None else {"floor_rule": floor_rule}),
             },
             "mic_response": {
                 "kind": "pair_eq",
@@ -118,8 +122,11 @@ def _mean_periodogram(x: np.ndarray, n_fft: int = 2048, hop: int = 512) -> np.nd
     return spec.mean(axis=1)
 
 
-def test_v4_render_matches_its_expected_periodogram_and_amplitude_pedestal():
-    fit = _payload()
+@pytest.mark.parametrize("floor_rule", [None, "one_floor_mean_speed"])
+def test_v4_render_matches_its_expected_periodogram_and_amplitude_pedestal(
+    floor_rule: str | None,
+):
+    fit = _payload(floor_rule)
     rps = np.repeat(np.asarray(RPS)[:, None], 20 * SR, axis=1)
     x = render_noise(fit, rps, sr=SR, n_mics=2, seed=7)
 

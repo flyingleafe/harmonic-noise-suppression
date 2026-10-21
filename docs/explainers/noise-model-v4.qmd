@@ -236,23 +236,39 @@ in the residual (@sec-ev-mics).
 
 ## The floor {#sec-floor}
 
+On the bench (one rotor per recording, rotor $r$ at relative speed $s_r$):
+
 $$
-S_m(f,t) = \sum_r 10^{E_{rm}(f)/10}\,F(f)\,s_r(t)^{\,b(f)} \;+\; F(f)\,s\;+\;N_m(f) \;+\; W_m(f,t),
+S_m(f,t) = 10^{E_{rm}(f)/10}\,F(f)\,s_r(t)^{\,b(f)} \;+\;N_m(f) \;+\; W_m(f,t).
 $$ {#eq-floor}
+
+In flight (decision, 2026-10-21: **one shared floor**, not a sum of rotor
+floors):
+
+$$
+S_m(f,t) = 10^{A_m(f)/10}\,F(f)\,\big[\bar s(t)^{\,b(f)} + s\big] \;+\; W_m(f,t),
+\qquad \bar s(t) = \tfrac1R\textstyle\sum_r s_r(t).
+$$ {#eq-floor-flight}
 
 $$
 b(f) = b_0 + b_1\log_2\!\big(f/2\,\mathrm{kHz}\big).
 $$ {#eq-floor-exp}
 
-- $F(f) = 10^{(\mu + \sigma_B(Lz)(f))/10}$: the floor of **one rotor** at
-  $f_{\rm ref}$, shared by the rotors of the rig. $L$ is the Cholesky factor of
-  a squared-exponential kernel over 14 control points on a geometric grid; the
-  spline alone carries the level and the tilt (nv3r4).
-- $b(f)$: the speed exponent of the floor, shared by the rotors.
-- The rig floor is the **sum** over the rotors. In a single-rotor recording
-  the sum has one term.
+- $F(f) = 10^{(\mu + \sigma_B(Lz)(f))/10}$: on the bench the floor of one
+  rotor at $f_{\rm ref}$, shared by the rotors; in flight the floor of the
+  drone at $\bar s = 1$. $L$ is the Cholesky factor of a squared-exponential
+  kernel over 14 control points on a geometric grid; the spline alone carries
+  the level and the tilt (nv3r4).
+- $b(f)$: the speed exponent of the floor, one per rig.
+- Why not the per-rotor sum in flight: the first MD2 fit with
+  $\sum_r F s_r^{b}$ drove $b_0$ to 34 ($b_1 \approx -7$). The exponent then
+  works as a rotor selector: at cruise RFront carries 97 % of the floor, at
+  standby the rotor floor is zero and $s \approx 6$ carries it. The data show a
+  rise of 12.5 dB at 6–7.5 kHz and 17 dB at 2.2–2.5 kHz from standby to
+  cruise, a speed ratio of about 2.2, i.e. $b \approx 3.6$–5
+  (`results/noise_v4/flight/restarts/*__s{0..3}.json`, first launch).
 - $s$: a static share for sound that does not scale with the rotor speed.
-  Flight only; it is 0 on the bench, where the ambient is measured.
+  Flight only; on the bench the ambient is measured.
 - $N_m(f)$: the measured ambient of the room. Bench only.
 - $W_m(f,t)$: the wind on a capsule. On the bench it is one level per
   recording on the windy microphones (the downwash grows with throttle). In
@@ -289,7 +305,8 @@ synthesis with the per-rotor gain $\sum_r s_r(t)^{b(f)}$ per bin.
 | $\sigma^2_{\phi,k}$ | rig, order | LogN$(\log 1, 1.5)$ | wide; the data set it on the bench |
 | $W_{\phi,k}$ (@eq-width) | rig, order | HalfNormal$(c_W^{\rm even})$ for $k \bmod B = 0$, HalfNormal$(c_W^{\rm odd})$ otherwise, in Hz; $c_W^{\rm even} = 6.94$, $c_W^{\rm odd} = 30.68$ | @sec-ev-pedestal; $c_W$ measured in step A0 (`results/noise_v4/phase_width/findings.md`) |
 | $\varepsilon$ | rig | HalfNormal$(0.005)$ | bench round R2 |
-| $a_\sigma$, $b_\lambda$ | rig | $\mathcal N(1, 0.5)$ | bench round R2 |
+| $a_\sigma$, $b_\lambda$ | rig | $\mathcal N(1, 0.5)$; flight: $a_\sigma \sim \mathcal N(1, 2)$, $b_\lambda = 0$ | bench round R2; flight: per-regime nv3 fits (@sec-flight-fit) |
+| $\sigma_{\rm ref}$ (flight) | rig | LogN$(1.68, 0.66)$ rad/s | nv3r4 A2 |
 | $\lambda_{\rm ref}$ | rig | LogN$(\log 12, 0.5)$ 1/s | bench quick fits |
 | wind level | recording or rig, windy mic | $\mathcal N(\text{measured}, 6)$ dB | nv3r4 |
 | $s$ | rig (flight) | LogN$(\log 2.5\cdot10^{-3}, 1)$ | nv3r4 |
@@ -445,7 +462,7 @@ $F$, and per recording the carrier, ambient and wind.
   payload: four line sets plus the **sum** of the four rotor floors plus its
   ambient. The prediction must match the data within 1.5 dB per octave band
   between the lines, and within 2 dB rms on the line levels of the orders the
-  four rotors do not share. This tests the summed-floor rule (@eq-floor).
+  four rotors do not share. This tests whether single-rotor floors add up.
 - **Flicker.** The frame-to-frame level sd at $k$ = 40–80 (64 ms frames) of
   renders must match the recordings (5.5–5.8 dB) within 0.5 dB. This is the
   only check of the amplitude/phase split.
@@ -496,13 +513,21 @@ bin.
   group: $\sigma^2_A = (\sigma_v \ln 10/20)^2$, $\gamma_A = 1/(2\pi\tau_v)$),
   truncated at the caps $c_g$ of @tbl-amp.
 - **The shaft** carries the label error as well as the jitter, as in nv3r4.
-  The speed law is pinned flat ($a_\sigma = b_\lambda = 0$),
-  $\lambda = 2\pi\cdot16$ 1/s (the band edge of the 31 Hz label) and
-  $\sigma_\nu \sim$ LogN$(1.68, 0.66)$ rad/s from the telemetry residuals of
-  six drones (round-4 changes A1, A2). There is no separate label-error term
-  (decision, 2026-10-21): a second OU of the same form as the shaft error
-  cannot be told apart from it, and nv3r4, whose shaft term absorbed the label
-  error, gave renders that looked and sounded right.
+  The rate is pinned ($b_\lambda = 0$, $\lambda = 2\pi\cdot16$ 1/s, the band
+  edge of the 31 Hz label), so the periodogram sees only the size. The size
+  keeps the speed law of @eq-shaft-law (decision, 2026-10-21):
+  $\sigma_\nu = \sigma_{\rm ref}\,s_r^{a_\sigma}$ per rotor and frame, with
+  $\sigma_{\rm ref} \sim$ LogN$(1.68, 0.66)$ rad/s from the telemetry
+  residuals of six drones (round-4 changes A1, A2) and $a_\sigma \sim
+  \mathcal N(1, 2)$. Why: the first joint fit with one flat $\sigma_\nu$ put
+  it at 6.4 rad/s, set by cruise; that smears order 84 by
+  $k\sigma_\nu/2\pi \approx 86$ Hz (sd), so the standby $k=84$ lines, which
+  are 1–3 bins wide and 5–16 dB over their neighbours, could not be modelled
+  (the fitted expected periodogram is flat across them). The per-regime nv3
+  fits gave 0.35 rad/s at standby and 3.8 at cruise, a speed ratio of about
+  2.3, i.e. $a_\sigma \approx 3$; hence the wide prior. There is no separate
+  label-error term: a second OU of the same form as the shaft error cannot be
+  told apart from it.
 
 ## Steps
 
@@ -512,7 +537,7 @@ rig geometry (@sec-mic). Store both as constants of the fit.
 
 **B2. One joint fit over the standby and cruise windows.** Shared by the four
 rotors: $F$, $b_0$, $b_1$, $s$, $\alpha^{a}$, $\alpha^{m}$, the pedestal
-parameters (held as above) and the shaft (pinned as above). Per rotor: the
+parameters (held as above) and the shaft ($\sigma_{\rm ref}$, $a_\sigma$; rate pinned). Per rotor: the
 profiles. Initialise by @sec-init. Optimise by @sec-optimiser. If the
 standby–cruise residual check fails, fall back to the nv3r4 arrangement: one
 fit per regime, composed in the renderer by the smoothstep in the slowest
@@ -541,7 +566,7 @@ both rigs. The bank laws of the generic drone prior
 (`src/experiments/noise_model/drone_prior.py`) are revised from the two fits
 once both pass their checks. Until then the round-4 bank policy stays in force.
 The revision must read: four profiles per rig with the hierarchical spread of
-@tbl-priors, one speed law per family per rig, the summed floor, and the
+@tbl-priors, one speed law per family per rig, one shared floor in flight, and the
 two-process pedestal.
 
 # Evidence and justification {#sec-evidence}
@@ -758,8 +783,8 @@ Above 2 kHz the measured term is smaller than the geometric prediction (slope
 [INFERENCE]. The geometric term is used at every frequency without a slope.
 On MD2, $\Delta G_{rm}$ has two parts: a level per rotor (its mean over the
 microphones: the front rotors are 2.1 dB above the mean, the rear rotors
-2.1 dB below), which the rotor profiles absorb for the lines but which weights
-the rotors' shares of the summed floor; and the part across the microphones,
+2.1 dB below), which the rotor profiles absorb for the lines (the flight
+floor is one shared floor and carries no geometry); and the part across the microphones,
 $|\cdot| \le 1.0$ dB (sd 0.55 dB), which the isolated lines test. At 2–4 kHz
 the across-microphone part overstates the measured one by 0.24 dB rms,
 0.43 dB at most.

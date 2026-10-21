@@ -17,7 +17,9 @@ definition of each law:
   payload's 14 ``ctrl_hz``, no tilt, in the analysis periodogram units of
   :class:`experiments.noise_model.spectrum.FloorBasis`: white noise of
   variance ``v`` reads ``v``) and its speed exponent
-  ``b(f) = b0 + b1 log2(max(f, band_lo) / 2 kHz)``;
+  ``b(f) = b0 + b1 log2(max(f, band_lo) / 2 kHz)``, combined over the rotors
+  by the payload's ``floor_rule`` (:data:`FLOOR_RULES`: the bench's per-rotor
+  sum, or MD2 flight's one floor on the rotor-mean speed);
 * :class:`MicResponse` — ``E_rm(f)`` in dB, split into the part that differs
   between the rotors (:meth:`~MicResponse.rotor_db`: the bench pair EQ, or the
   flight geometric term ``Delta G_rm``) and the part shared by them
@@ -54,6 +56,9 @@ from data_processing.noise_model.v3 import wind_shape
 
 __all__ = [
     "FLOOR_EXP_REF_HZ",
+    "FLOOR_RULE_ONE",
+    "FLOOR_RULE_SUM",
+    "FLOOR_RULES",
     "WORK_RATE_HZ",
     "FloorLaw",
     "MicResponse",
@@ -72,6 +77,16 @@ WORK_RATE_HZ = 32000
 
 #: The pivot of the floor's speed exponent ``b(f) = b0 + b1 log2(f / 2 kHz)``.
 FLOOR_EXP_REF_HZ = 2000.0
+
+#: How the rotors make the floor (payload ``params.floor.floor_rule``).
+#: ``per_rotor_sum`` (the bench, and any payload without the key): one floor
+#: per rotor, ``sum_r 10^{E_rm/10} F(f) s_r^{b(f)}``. ``one_floor_mean_speed``
+#: (MD2 flight, decision 2026-10-21): ONE rig floor ``F(f) sbar^{b(f)}`` driven
+#: by the rotor-mean speed ``sbar = mean_r s_r``, with the array response and
+#: no per-rotor ``E_rm``. Both add the static share ``F(f) s``.
+FLOOR_RULE_SUM = "per_rotor_sum"
+FLOOR_RULE_ONE = "one_floor_mean_speed"
+FLOOR_RULES = (FLOOR_RULE_SUM, FLOOR_RULE_ONE)
 
 TWO_PI = 2.0 * math.pi
 
@@ -138,7 +153,9 @@ class ShaftLaw:
 
 @dataclass(frozen=True)
 class FloorLaw:
-    """eq-floor without the mics: one rotor's floor ``F(f)`` and its exponent ``b(f)``."""
+    """eq-floor without the mics: the floor ``F(f)`` at ``f_ref`` and its exponent
+    ``b(f)``; ``rule`` (:data:`FLOOR_RULES`) says whether ``F`` is ONE rotor's
+    floor summed over the rotors or the rig's one floor on the mean speed."""
 
     mean_db: float
     shape_z: np.ndarray
@@ -148,6 +165,7 @@ class FloorLaw:
     b1: float
     static_rel: float
     band_lo_hz: float
+    rule: str = FLOOR_RULE_SUM
 
     @classmethod
     def from_mapping(cls, d: Mapping[str, Any], band_lo_hz: float) -> FloorLaw:
@@ -155,6 +173,9 @@ class FloorLaw:
         z = _arr(d["shape_z"], 1, "floor.shape_z")
         if z.size != ctrl.size or np.any(np.diff(ctrl) <= 0.0) or ctrl[0] <= 0.0:
             raise ValueError("floor.ctrl_hz must be increasing, positive, and as long as shape_z")
+        rule = str(d.get("floor_rule") or FLOOR_RULE_SUM)
+        if rule not in FLOOR_RULES:
+            raise ValueError(f"floor.floor_rule must be one of {FLOOR_RULES}, got {rule!r}")
         return cls(
             mean_db=float(d["mean_db"]),
             shape_z=z,
@@ -164,6 +185,7 @@ class FloorLaw:
             b1=float(d["b1"]),
             static_rel=float(d.get("static_rel") or 0.0),
             band_lo_hz=float(band_lo_hz),
+            rule=rule,
         )
 
     def ctrl_db(self) -> np.ndarray:
@@ -195,6 +217,13 @@ class FloorLaw:
         s = np.maximum(np.atleast_1d(np.asarray(s, dtype=np.float64)), SPEED_FLOOR_RPS)
         b = self.exponent(freqs_hz)
         return self.psd(freqs_hz)[None, :] * np.exp(np.log(s)[:, None] * b[None, :])
+
+    def mean_speed_psd(self, freqs_hz: Any, s: Any) -> np.ndarray:
+        """``(F,)`` the one-floor rule's ``F(f) sbar^{b(f)}``, ``sbar = mean_r s_r``
+        at relative speeds ``s (R,)``."""
+        s = np.atleast_1d(np.asarray(s, dtype=np.float64))
+        sbar = max(float(s.mean()), SPEED_FLOOR_RPS)
+        return self.psd(freqs_hz) * np.exp(math.log(sbar) * self.exponent(freqs_hz))
 
 
 @dataclass(frozen=True)
@@ -414,7 +443,9 @@ def expected_periodogram(
       ``10^{E_rm(k f_r)/10} P^a_rk(s_r) R_rk(tau) cos(2 pi k f_r tau)`` with
       the full eq-lag; each motor line the same with the shaft factor only;
     * the floor ``F(f) [sum_r 10^{E_rm(f)/10} s_r^{b(f)} + 10^{A_m(f)/10} s]``
-      (``s`` the static share) and, in flight, the static per-mic wind
+      (rule ``per_rotor_sum``) or ``F(f) 10^{A_m(f)/10} [sbar^{b(f)} + s]``,
+      ``sbar = mean_r s_r`` (rule ``one_floor_mean_speed``), ``s`` the static
+      share, and, in flight, the static per-mic wind
       ``10^{w_m/10} wind_shape(f) 10^{A_m(f)/10}``, transformed from a PSD
       grid ``floor_oversample`` times finer than the window.
 
@@ -464,9 +495,12 @@ def expected_periodogram(
             )
     n_psd = int(floor_oversample) * n
     f_psd = np.fft.rfftfreq(n_psd, d=1.0 / float(sr))
-    rotor = par.floor.rotor_psd(f_psd, s)  # (R, F)
     array_lin = 10.0 ** (par.mic.array_db(f_psd) / 10.0)  # (M, F)
-    psd = np.einsum("rmf,rf->mf", 10.0 ** (par.mic.db(f_psd) / 10.0), rotor)
+    if par.floor.rule == FLOOR_RULE_ONE:
+        psd = par.floor.mean_speed_psd(f_psd, s)[None, :] * array_lin
+    else:
+        rotor = par.floor.rotor_psd(f_psd, s)  # (R, F)
+        psd = np.einsum("rmf,rf->mf", 10.0 ** (par.mic.db(f_psd) / 10.0), rotor)
     psd += par.floor.psd(f_psd)[None, :] * par.floor.static_rel * array_lin
     if par.wind_db is not None:
         psd += 10.0 ** (par.wind_db[:, None] / 10.0) * wind_shape(f_psd)[None, :] * array_lin
