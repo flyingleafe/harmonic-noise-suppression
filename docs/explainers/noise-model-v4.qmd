@@ -1,7 +1,7 @@
 ---
-title: "Rotor-noise model v4 — the final form, the bench fit and the flight fit"
-subtitle: "nv3r4 with the revisions of 2026-09-30 … 2026-10-02"
-date: 2026-10-02
+title: "Rotor-noise model v4 — one model, two fits"
+subtitle: "nv3r4 revised by the bench rounds R1–R3 and the decisions of 2026-10-21"
+date: 2026-10-21
 bibliography: ../../writing/papers/2026-08_wrapup/src/references.bib
 format:
   html:
@@ -10,6 +10,7 @@ format:
     embed-resources: true
     fig-cap-location: bottom
     number-sections: true
+    lightbox: true
 execute:
   echo: false
 ---
@@ -21,88 +22,82 @@ execute:
 ::: {.callout-note}
 This document is written in Simplified Technical English. Sentences are short.
 Each sentence gives one fact, one rule or one step. "Must" gives a requirement.
-"Can" gives a permission. A value in square brackets with the word INFERENCE is
-a reading of the data, not a measurement.
+"Can" gives a permission. A statement marked INFERENCE is a reading of the
+data, not a measurement.
 :::
 
 # Purpose and scope
 
-This document gives the final form of the rotor-noise model. The model is a
-generator of multi-rotor drone noise. The generated noise trains speech
-enhancement and rotor-speed models. The model is the round-4 model of the
-noise-model-v3 campaign (`nv3r4`, @sec-baseline) with the changes that the
-measurements of 2026-09-30 to 2026-10-02 require (@sec-changes).
+This document specifies the rotor-noise model v4 and the two procedures that
+fit it. The model generates multi-rotor drone noise for the training of speech
+enhancement and rotor-speed models.
+
+There is **one model**: one set of parameters, one formula, one renderer, one
+payload schema. There are **two fit procedures**:
+
+- **Procedure A, the bench.** It fits the DREGON drone from its single-rotor
+  recordings (four motors, five throttle settings each).
+- **Procedure B, free flight.** It fits Michael's drone (MD2) from its
+  free-flight recordings with telemetry labels.
+
+The two procedures share the model, the priors, the initialisation rule and the
+optimiser. They differ only where the data differ: the resolution of the
+periodogram, the number of rotors in one recording, and what is measured
+independently.
 
 The model must reproduce these properties of real recordings:
 
-1. The harmonic comb of each rotor: the levels of the lines, their widths and
-   their motion with the rotor speed.
-2. The broadband floor: its shape, its level and its motion with the rotor
+1. The harmonic comb of each rotor: the line levels, the line shapes and their
+   change with the rotor speed.
+2. The broadband floor: its shape, its level and its change with the rotor
    speed.
-3. The slow fluctuations of the lines and of the floor over seconds.
-4. The differences between microphones of one array.
+3. The frame-to-frame flicker of the lines.
+4. The differences between the microphones of one array.
 5. The wind on some capsules.
 
 The model does not reproduce the room, the propagation path, or the phase
 relations between microphones. The downstream consumers read magnitude
-spectrograms. The model is tuned for them (@sec-am-pm).
+spectrograms.
 
-The document has three parts. Part 1 gives the model (@sec-model, @sec-priors).
-Part 2 gives the two fit procedures: the bench fit (@sec-bench-fit) and the
-flight fit (@sec-flight-fit). Part 3 gives the evidence for each decision
+Part 1 gives the model (@sec-model) and its priors (@sec-priors). Part 2 gives
+the shared initialisation and optimiser (@sec-shared-fit) and the two
+procedures (@sec-bench-fit, @sec-flight-fit). Part 3 gives the evidence
 (@sec-evidence) and the known limits (@sec-limits).
 
-# The baseline: nv3r4 {#sec-baseline}
+# The baseline and the changes {#sec-changes}
 
-The baseline is the noise-model-v3 flight model under the round-4 priors
-(`model.PRIORS_V4`, `src/experiments/noise_model/model.py:471-484`). Its
-definition is `docs/explainers/noise-model-v3-wander.qmd`. Its campaign log is
-`docs/experiments/noise-model-v3.md` § Round 4. The parts of nv3r4 that v4
-keeps without change:
+The baseline is nv3r4: the noise-model-v3 flight model under the round-4 priors
+(`model.PRIORS_V4`; definition `docs/explainers/noise-model-v3-wander.qmd`;
+campaign log `docs/experiments/noise-model-v3.md` § Round 4). nv3r4 fitted
+Michael's cruise and standby pools and the DREGON free-flight pool without
+wander latents. Its renders passed the parity and LTAS criteria of round 4.
 
-- One cosine per (rotor, order) with a shared shaft phase, plus a broadband
-  floor (§2.1–2.2 of the v3 explainer).
-- The shaft speed error is an Ornstein–Uhlenbeck (OU) process with stationary
-  standard deviation $\sigma_\nu$ (rad/s) and rate $\lambda$ (1/s)
-  [@uhlenbeck1930brownian].
-- The floor shape is a 14-point spline on a geometric grid 30 Hz … Nyquist
-  with a squared-exponential prior of measured scale $\sigma_B$
-  (`spectrum.py:291-306`).
-- The static per-microphone wind term for DREGON (`v3.py:41-70`).
-- The Whittle likelihood on periodogram cells [@whittle1953], the exposure
-  weights and the 30 Hz – 7.9 kHz band (`model.py:2072-2074`).
-- The flight front end: 16 kHz, 2048-point periodic Hann, hop 512
-  (`supports.py:41-43`).
-- The MAP fit: Adam 1500 steps, then strong-Wolfe L-BFGS, four restarts with
-  jittered dynamics, the lowest objective kept (`fit.py:1296-1601`).
-- The identifiability gate: a harmonic is identifiable in a frame when it lifts
-  the mic-mean expected spectrum by ≥ 2 dB at its centre bin; a rotor passes a
-  frame with ≥ 3 identifiable harmonics; a rig passes when every rotor passes
-  ≥ 90 % of its eligible frames (`identifiability.py:86-127`).
-- The renderer: a 1 kHz envelope grid for every slow factor, the carriers at
-  the work rate, one BLAS product for the microphone mix
-  (`render.py:378-746`).
-- The regime composition: standby and cruise renders summed with a smoothstep
-  weight in the slowest rotor's rate, 0 at 45 rev/s, 1 at 65 rev/s
-  (`render.py:804-905`).
+v4 keeps from nv3r4:
 
-# What v4 changes, and why {#sec-changes}
-
-@tbl-changes lists each change, the nv3r4 form, the v4 form and the evidence.
-The evidence section numbers refer to @sec-evidence.
+- one cosine per (rotor, order) on a carrier shared by the orders of the rotor;
+- the shaft speed error as an Ornstein–Uhlenbeck (OU) process
+  [@uhlenbeck1930brownian];
+- the floor shape as a 14-point spline with a measured prior scale $\sigma_B$;
+- the Whittle likelihood on periodogram cells [@whittle1953];
+- the flight front end, the flight shaft treatment, the 64-frame stratified
+  L-BFGS subset, the all-frames polish and the four restarts;
+- no wander latents;
+- the level prior relative to the measured floor (round-4 change C4);
+- the identifiability gate and the round-4 acceptance criteria.
 
 | # | Block | nv3r4 | v4 | Evidence |
 |---|---|---|---|---|
-| 1 | Line families | one family; odd orders only penalised in the profile prior | **two families**: aerodynamic (all $k \ge 1$) and motor ($k = 3pn$); a motor line and an aerodynamic line can share one order | @sec-ev-families |
-| 2 | Speed law of the lines | one exponent `amp_exp` per rig for every line | **one exponent per rotor per family**: $\alpha^{a}_r$ (aerodynamic), $\alpha^{m}_r$ (motor) | @sec-ev-speed-lines |
-| 3 | Speed law of the floor | one exponent `floor_exp` per rig | **a frequency-dependent exponent** $b(f) = b_0 + b_1\log_2(f/2\,\mathrm{kHz})$ | @sec-ev-speed-floor |
-| 4 | Per-line Wiener phase $\gamma_{rk}$ | free site, HalfNormal prior | **removed** ($\gamma \equiv 0$) | @sec-ev-pedestal |
-| 5 | Per-order pedestal | none in the fit; the prior's `am` block only | **a log-amplitude OU per aerodynamic order**, variance $\sigma^2_k$ and rate $\gamma^{\rm AM}_k$, shared by the microphones; fitted on the bench, measured in flight | @sec-ev-pedestal, @sec-am-pm |
-| 6 | Motor lines | same dynamics as every line | **shaft only**: no pedestal, no amplitude modulation | @sec-ev-families |
-| 7 | Shaft OU | $\lambda$ pinned at 100.5 1/s in flight; $\sigma_\nu$ LogNormal | unchanged in flight; **on the bench both free**, with the bench law as prior | @sec-ev-shaft |
-| 8 | Microphones | channels normalised in the data; no per-line mic term | **pair EQ** (fixed per rotor–mic, smooth in $f$) + **per-run per-line scatter** (2.4 dB) on the bench; unchanged in flight | @sec-ev-mics |
-| 9 | Bench fit | none (v3 is flight-only) | **a joint fit over a motor's throttle ladder** with one profile at the reference speed | @sec-bench-fit |
-| 10 | Bank policy | speed laws pinned at (6, 6) | speed laws **drawn from the bench laws** per family and per rotor | @sec-prior |
+| 1 | Line families | one family; odd orders penalised in the level prior | **aerodynamic** (every $k$) and **motor** ($k = 3pn$) | @sec-ev-families |
+| 2 | Profiles | one per rotor, independent | **one per rotor per family**, tied by a hierarchical prior | @sec-ev-profiles |
+| 3 | Line speed law | one `amp_exp` per rig | **one exponent per family per rig**, shared by the rotors | @sec-ev-speed-lines |
+| 4 | Floor | one floor for the rig, mean speed law $\tfrac1R\sum_r s_r^{b}$ | **one floor per rotor**, shape $F(f)$ and exponent $b(f)$ shared by the rotors; the rig floor is the **sum** | @sec-ev-floor |
+| 5 | Line shape | Lorentzian width $\gamma_{rk}$ (random-walk phase) | **two bounded processes per order**: log-amplitude OU and phase OU | @sec-ev-pedestal |
+| 6 | Pedestal priors | half-normal $\gamma$ with parity floor | measured amplitude prior with a cap; **half-normal on the phase-pedestal width** with parity | @sec-ev-pedestal |
+| 7 | Floor prior | spline with measured $\sigma_B$ | the same, plus a **soft push upward** to the bases of the lines | @sec-ev-floor-push |
+| 8 | Shaft on the bench | — | free, with one speed law shared by the rotors | @sec-ev-shaft |
+| 9 | Microphones | channels normalised in the data | the same in flight; **pair EQ** on the bench; **no per-line scatter** | @sec-ev-mics |
+| 10 | Initialisation | warm start from the v2 fit | **from the data and the priors only**; no earlier fit is read | @sec-init |
+| 11 | Convergence | objective change per cell | objective change **and** parameter movement | @sec-optimiser |
 
 : The changes from nv3r4 to v4. {#tbl-changes}
 
@@ -115,421 +110,497 @@ The evidence section numbers refer to @sec-evidence.
 | $r = 1 \dots R$ | rotor | – |
 | $m = 1 \dots M$ | microphone | – |
 | $k = 1 \dots K$ | harmonic order of the shaft rate | – |
-| $B$ | number of blades of the propeller | – |
+| $B$ | number of blades | – |
 | $p$ | number of pole pairs of the motor | – |
-| $f_r(t)$ | the rotor's shaft rate from the label (telemetry or refined track) | rev/s |
-| $f_{\rm ref}$ | the reference speed of every level, 80 rev/s (`AMP_RPS_REF`) | rev/s |
+| $f_r(t)$ | the shaft rate of rotor $r$ (measured on the bench, the label in flight) | rev/s |
+| $f_{\rm ref}$ | the reference speed of every level, 80 rev/s | rev/s |
 | $s_r(t) = f_r(t)/f_{\rm ref}$ | the relative speed | – |
-| $\theta_r(t)$ | the shaft phase error (integrated OU speed error) | rad |
-| $g_{rk}(t)$ | the log-amplitude process of aerodynamic line $(r,k)$ | neper |
-| $d_r(b)$, $u(b)$, $u_j(b)$ | the slow block fluctuations of flight (rotor level, floor level, floor colour) | dB |
-| $n_m(t)$ | broadband noise at microphone $m$ | Pa |
+| $\theta_r(t)$ | the shaft phase error | rad |
+| $a_{rk}(t)$ | the log-amplitude process of aerodynamic line $(r,k)$ | neper |
+| $\psi_{rk}(t)$ | the phase process of aerodynamic line $(r,k)$ | rad |
 
-All levels are in decibels on power. A level $L$ in dB gives the power
-$10^{L/10}$ and the amplitude $10^{L/20}$.
+All levels are in dB on power. A level $L$ gives the power $10^{L/10}$.
 
 ## The signal
 
 $$
-x_m(t) \;=\; \sum_{r}\sum_{k} h_{mrk}\Big[\,A^{a}_{rk}(t)\cos\!\big(k\phi_r(t)+\alpha^{a}_{rk}\big)
-\;+\; A^{m}_{rk}\cos\!\big(k\phi_r(t)+\alpha^{m}_{rk}\big)\Big] \;+\; n_m(t).
+x_m(t) = \sum_{r}\sum_{k} h_{mr}(k f_r)\Big[A^{a}_{rk}(t)\cos\!\big(k\phi_r(t)+\psi_{rk}(t)+\varphi^{a}_{rk}\big)
++ \mathbb 1[k=3pn]\,A^{m}_{rk}(t)\cos\!\big(k\phi_r(t)+\varphi^{m}_{rk}\big)\Big] + n_m(t).
 $$ {#eq-signal}
 
-Each rotor has two families of lines on the same carrier $k\phi_r(t)$:
+- $h_{mr}(f) = 10^{E_{rm}(f)/20}$: the magnitude response from rotor $r$ to
+  microphone $m$ (@sec-mic).
+- $\varphi^{a}_{rk}$, $\varphi^{m}_{rk}$: fixed random start phases.
+- $n_m(t)$: the broadband part (@sec-floor).
 
-- the **aerodynamic family** $A^{a}_{rk}$, present at every order $k \ge 1$;
-- the **motor family** $A^{m}_{rk}$, present only at $k = 3pn$, $n = 1, 2, \dots$
-  (DREGON: $p = 7$, orders 21, 42, 63, 84, 105, 126).
-
-At an order that both families occupy, the two cosines add with independent
-fixed phases $\alpha^{a}_{rk}$, $\alpha^{m}_{rk}$. The fit sees one line at
-that order. The two levels separate only across speeds, because their speed
-laws differ (@sec-ev-families).
+Each rotor has two families of lines on the same carrier. The **aerodynamic
+family** is present at every order. The **motor family** is present only at
+$k = 3pn$, $n = 1, 2, \dots$ At an order that both families occupy, the two
+cosines add with independent phases.
 
 ## The carrier
 
 $$
-\phi_r(t) \;=\; 2\pi\!\int_0^t f_r(s)\,ds \;+\; \theta_r(t),
+\phi_r(t) = 2\pi\!\int_0^t f_r(s)\,ds + \theta_r(t),
 \qquad
-d\nu_r = -\lambda\,\nu_r\,dt + \sqrt{2\lambda}\,\sigma_\nu\,dW_r,\quad d\theta_r = \nu_r\,dt .
+d\nu_r = -\lambda\nu_r\,dt + \sqrt{2\lambda}\,\sigma_\nu\,dW_r,\quad d\theta_r = \nu_r\,dt .
 $$ {#eq-carrier}
 
 The shaft phase error $\theta_r$ is shared by every order and every microphone
-of the rotor. Order $k$ carries $k\theta_r$. The factor $\sqrt{2\lambda}$ makes
-$\sigma_\nu$ the stationary standard deviation of the speed error in rad/s,
-independent of $\lambda$. The structure function of the increment is
+of the rotor. Order $k$ carries $k\theta_r$. $\sigma_\nu$ is the stationary
+standard deviation of the speed error (rad/s) and $\lambda$ its rate (1/s).
+Both follow one speed law, shared by the rotors of the rig:
 
 $$
-V_\theta(\tau) = 2\sigma_\nu^2\Big[\frac{|\tau|}{\lambda} - \frac{1-e^{-\lambda|\tau|}}{\lambda^2}\Big]
-$$
+\sigma_\nu(s) = 2\pi f_{\rm ref}\,\varepsilon\,s^{a_\sigma},\qquad
+\lambda(s) = \lambda_{\rm ref}\,s^{b_\lambda}.
+$$ {#eq-shaft-law}
 
-(`ou.py:88-105`). There is **no per-line Wiener phase** in v4. The lag law of
-a line is the shaft factor times the pedestal factor of @eq-lag.
+The structure function of the increment is
+$V_\theta(\tau) = 2\sigma_\nu^2\big[|\tau|/\lambda - (1-e^{-\lambda|\tau|})/\lambda^2\big]$.
 
 ## The aerodynamic line
 
 $$
-A^{a}_{rk}(t) = \sqrt{2}\;
-10^{\big(p^{a}_{rk} \;+\; 10\,\alpha^{a}_r \log_{10} s_r(t) \;+\; d_r(b)\big)/20}\;
-e^{\,g_{rk}(t) - \sigma^2_{k}/2}.
+A^{a}_{rk}(t) = \sqrt2\;10^{\big(p^{a}_{rk} + 10\,\alpha^{a}\log_{10}s_r(t)\big)/20}\;
+e^{\,a_{rk}(t) - \sigma^2_{A,k}/2}.
 $$ {#eq-aero}
 
-- $p^{a}_{rk}$: the mean power of the line at $f_{\rm ref}$, in dB (`profile_db`).
-- $\alpha^{a}_r$: the speed exponent of the rotor's aerodynamic lines. One
-  value for every aerodynamic order of the rotor (@sec-ev-speed-lines).
-- $d_r(b)$: the rotor's slow level fluctuation per block in flight (dB), an OU
-  across blocks with measured $(\sigma_d, \tau_d)$; zero on the bench.
-- $g_{rk}(t)$: a stationary OU process in log-amplitude with variance
-  $\sigma^2_k$ and rate $\gamma^{\rm AM}_k$ (Hz), independent across orders,
-  shared by the microphones. The term $-\sigma^2_k/2$ keeps the mean power at
-  $10^{p/10}$. This process is the **pedestal** of the line. Its lag law is
+- $p^{a}_{rk}$: the mean power of the line at $f_{\rm ref}$ (dB).
+- $\alpha^{a}$: the speed exponent of the aerodynamic lines, **one value for
+  the rig**.
+- $a_{rk}(t)$: a stationary OU in log-amplitude, variance $\sigma^2_{A,k}$,
+  rate $\gamma_{A,k}$ (Hz). The term $-\sigma^2_{A,k}/2$ keeps the mean power.
+- $\psi_{rk}(t)$: a stationary OU **on the phase itself** (bounded), variance
+  $\sigma^2_{\phi,k}$ (rad²), rate $\gamma_{\phi,k}$ (Hz), independent of
+  $a_{rk}$.
+
+The pedestal parameters $(\sigma^2_{A,k}, \gamma_{A,k}, \sigma^2_{\phi,k},
+\gamma_{\phi,k})$ are per order and shared by the rotors and the
+microphones of the rig. They do not depend on the speed.
+
+The lag law of the line is
 
 $$
-R_{rk}(\tau) \;=\; \exp\!\Big[-\tfrac12 k^2 V_\theta(\tau)\Big]\;
-\exp\!\Big[\sigma^2_k\big(e^{-2\pi\gamma^{\rm AM}_k|\tau|}-1\big)\Big].
+R_{rk}(\tau) = \exp\!\Big[-\tfrac12 k^2 V_\theta(\tau)\Big]\,
+\exp\!\Big[\sigma^2_{A,k}\big(e^{-2\pi\gamma_{A,k}|\tau|}-1\big)\Big]\,
+\exp\!\Big[\sigma^2_{\phi,k}\big(e^{-2\pi\gamma_{\phi,k}|\tau|}-1\big)\Big].
 $$ {#eq-lag}
 
-The second factor makes a line with a coherent core of power share
-$e^{-\sigma^2_k}$ and a pedestal of half-width $\approx\gamma^{\rm AM}_k$
-around it. The pedestal carries the amplitude modulation **and** the per-order
-phase noise of the real line (@sec-am-pm).
+The last two factors make a coherent core of power share
+$e^{-\sigma^2_{A,k}-\sigma^2_{\phi,k}}$ and a pedestal around it. The
+pedestal of one process expands into Lorentzians of half-widths $n\gamma$,
+$n \ge 1$, with weights $\sigma^{2n}/n!$. Its power-weighted mean half-width is
+
+$$
+W = \gamma\,\frac{\sigma^2}{1-e^{-\sigma^2}} ,
+$$ {#eq-width}
+
+which is $\gamma$ for small $\sigma^2$ and $\gamma\sigma^2$ for large
+$\sigma^2$. The priors act on $W$ (@sec-priors).
 
 ## The motor line
 
 $$
-A^{m}_{rk} = \sqrt{2}\;10^{\big(p^{m}_{rk} \;+\; 10\,\alpha^{m}_r \log_{10} s_r(t) \;+\; d_r(b)\big)/20},
-\qquad k = 3pn .
+A^{m}_{rk} = \sqrt2\;10^{\big(p^{m}_{rn} + 10\,\alpha^{m}\log_{10}s_r(t)\big)/20},\qquad k = 3pn .
 $$ {#eq-motor}
 
-A motor line has no pedestal. Its lag law is the shaft factor alone. Its speed
-exponent $\alpha^{m}_r$ is separate from $\alpha^{a}_r$.
+A motor line has no pedestal. Its lag law is the shaft factor alone. Its level
+$p^{m}_{rn}$ is free per multiple $n$. Its speed exponent $\alpha^{m}$ is one
+value for the rig.
 
-## The microphone term
+## The microphones {#sec-mic}
+
+$E_{rm}(f)$ is the magnitude response from rotor $r$ to microphone $m$ in dB.
+It applies to the lines and to the floor of the rotor.
+
+- **Bench.** $E_{rm}$ is the **pair EQ**: the line levels of microphone $m$
+  relative to the microphone mean, smoothed in frequency, measured on the
+  rotor's recordings before the fit (`bench_v4.pair_eq`). It is a constant of
+  the fit.
+- **Flight.** The channels are normalised in the data by the measured array
+  response, as nv3r4 (round-4 amendment F13). $E_{rm} \equiv 0$.
+
+There is **no per-line, per-microphone scatter term** $\delta$ in the model
+(decision, Dmitrii, 2026-10-21). The variation it carried on the bench stays
+in the residual (@sec-ev-mics).
+
+## The floor {#sec-floor}
 
 $$
-h_{mrk} = 10^{\big(E_{rm}(k f_r) + \delta_{mrk}\big)/20}.
-$$ {#eq-mic}
-
-- $E_{rm}(f)$: the **pair EQ**, a fixed smooth function of frequency for each
-  (rotor, microphone) pair. On the bench it is measured and is a constant of
-  the fit. In flight the channels are normalised by the measured array response
-  and $E \equiv 0$ (as nv3r4).
-- $\delta_{mrk}$: the per-run, per-line scatter, $\mathcal N(0, 2.4\ \mathrm{dB})$,
-  independent per line and per recording; same-parity neighbours correlate
-  with $\rho \approx 0.25$. The renderer draws it per clip.
-
-## The floor
-
-$$
-S_m(f,t) \;=\; F(f)\,\Big[\tfrac1R\sum_r s_r(t)^{\,b(f)} + s\Big]\,10^{(u(b)+\sum_j B_j(f)u_j(b))/10}
-\;+\; N_m(f) \;+\; W_m(f),
+S_m(f,t) = \sum_r 10^{E_{rm}(f)/10}\,F(f)\,s_r(t)^{\,b(f)} \;+\; F(f)\,s\;+\;N_m(f) \;+\; W_m(f,t),
 $$ {#eq-floor}
 
 $$
 b(f) = b_0 + b_1\log_2\!\big(f/2\,\mathrm{kHz}\big).
 $$ {#eq-floor-exp}
 
-- $F(f) = 10^{(\mu + \sigma_B (Lz)(f))/10}$: the floor shape at $f_{\rm ref}$
-  — the nv3r4 spline (14 control points, SE kernel of correlation length 1.5
-  octaves, measured $\sigma_B$).
-- $b(f)$: the speed exponent of the floor, linear in $\log_2 f$. The exponent
-  is small at low frequency and large at high frequency (@sec-ev-speed-floor).
-- $s$: the static share (`floor_static_rel`), unchanged.
-- $u(b)$, $u_j(b)$: the slow level and colour fluctuations per block in flight,
-  measured, zero on the bench.
-- $N_m(f)$: the **ambient** spectrum of the room, a measured constant per
-  microphone. Bench only. In flight it is inside $F$.
-- $W_m(f)$: the static per-capsule wind term of nv3r4 (DREGON only).
+- $F(f) = 10^{(\mu + \sigma_B(Lz)(f))/10}$: the floor of **one rotor** at
+  $f_{\rm ref}$, shared by the rotors of the rig. $L$ is the Cholesky factor of
+  a squared-exponential kernel over 14 control points on a geometric grid; the
+  spline alone carries the level and the tilt (nv3r4).
+- $b(f)$: the speed exponent of the floor, shared by the rotors.
+- The rig floor is the **sum** over the rotors. In a single-rotor recording
+  the sum has one term.
+- $s$: a static share for sound that does not scale with the rotor speed.
+  Flight only; it is 0 on the bench, where the ambient is measured.
+- $N_m(f)$: the measured ambient of the room. Bench only.
+- $W_m(f,t)$: the wind on a capsule. On the bench it is one level per
+  recording on the windy microphones (the downwash grows with throttle). In
+  DREGON flight it is the static per-mic term of nv3r4. MD2 has none.
 
-## The prior laws of the generator {#sec-prior}
+## The renderer
 
-The generic drone prior (`src/experiments/noise_model/drone_prior.py`) draws
-rigs for the training bank. v4 changes its speed-law and family blocks. The
-other laws (`docs/experiments/static-rig-profiles.md` § Generic drone prior)
-stay. @tbl-prior-laws gives the v4 laws.
+The renderer draws, per clip and per aerodynamic line, both processes
+$a_{rk}(t)$ and $\psi_{rk}(t)$ on the 1 kHz envelope grid of the nv3r4
+renderer. The complex envelope of the line is
+$10^{(\cdot)/20}\,e^{a_{rk}-\sigma^2_{A,k}/2}\,e^{i\psi_{rk}}$. This
+replaces the 2026-10-02 rule that rendered the whole pedestal as amplitude:
+that renderer missed the expected spectrum of the R3 bench fit by 1.8–2.6 dB
+and over-flickered the lines at $k$ = 40–80 by 2.5–3.5 dB
+(`docs/explainers/noise-v4-bench-fit.qmd` § 2–3). The floor is the nv3r4 WOLA
+synthesis with the per-rotor gain $\sum_r s_r(t)^{b(f)}$ per bin.
 
-| Block | v4 law | Source |
-|---|---|---|
-| Blades, pole pairs | $B$ and $p$ declared per rig; prior $B = 2$ (0.7) or 3 (0.3), $p \in \{6, 7, 7, 8, 11\}$ | DREGON $B=2$, $p=7$; AGH $B=3$, $p=7$ |
-| Aerodynamic profile | BPF orders ($k = Bn$): line over floor $k_B - \text{slope}\cdot\log_{10}(k/B)$, $k_B \sim \mathcal N(22, 7)$ dB, slope $\mathcal N(25, 5)$ dB/dec, tail $\mathcal N(-4, 4)$; non-BPF orders from $k = 1$: the BPF law minus a penalty that grows from $\mathcal N(8, 9)$ dB at $k = 3$ to $\mathcal N(9, 9)$ dB at $k = 30$ | Michael's cruise/standby fits; DREGON bench |
-| Motor profile | the aerodynamic law at $k = 3pn$ plus a boost $\mathcal N(5, 4)$ dB at $f_{\rm ref}$, decaying 0.8 per multiple | bench +9…12 dB at 70 rev/s; Michael's 2–5 dB |
-| $\alpha^{a}_r$ | $\mathcal N(5.5, 1.0)$ per rotor | @sec-ev-speed-lines |
-| $\alpha^{m}_r$ | $\mathcal N(0, 2)$ per rotor | @sec-ev-speed-lines |
-| $b_0$, $b_1$ | $\mathcal N(3.0, 1.0)$ at 2 kHz; $\mathcal N(0.5, 0.25)$ per octave | @sec-ev-speed-floor |
-| Pedestal $\sigma^2_k$ | $k \le 3$: $\approx 0$ (LogN$(\log 0.003, 1)$); $4 \le k \le 8$: LogN$(\log 0.05, 1)$; $9 \le k \le 20$: LogN$(\log 0.3, 0.7)$; $k > 20$: LogN$(\log 0.5, 0.5)$; cap 0.6 | @sec-ev-pedestal |
-| Pedestal $\gamma^{\rm AM}_k$ | LogN$(\log 0.4, 0.6)$ Hz for $k \le 8$; LogN$(\log 1.0, 0.6)$ above | direct amplitude measurement |
-| Shaft | $\sigma_\nu \sim$ LogN$(\log 0.4, 0.4)$ rad/s, $\lambda \sim$ LogN$(\log 12, 0.4)$ 1/s | @sec-ev-shaft |
-| Scatter | per line $\mathcal N(0, 3.5)$ dB, per rotor $\mathcal N(0, 2.5)$ dB, per (mic, line) 3.4 dB redrawn per clip | bench, Michael's fits |
+# The priors {#sec-priors}
 
-: The prior laws of the v4 generator. {#tbl-prior-laws}
+| Site | Per | Prior | Source |
+|---|---|---|---|
+| $\bar p^{a}_k$ | rig, order | $\mathcal N(\hat F_k - 12 - 15\,\mathbb 1[k \bmod B \ne 0],\ 10)$ dB | nv3r4 C4; $\hat F_k$ = the measured floor at the line's peak bin in the line's units |
+| $p^{a}_{rk} - \bar p^{a}_k$ | rotor, order | $\mathcal N(c^{a}_r, 3.5)$ dB | @sec-ev-profiles |
+| $c^{a}_r$, $c^{m}_r$ | rotor | $\mathcal N(0, 2.5)$ dB, mean over rotors pinned at 0 | @sec-ev-profiles |
+| $\bar p^{m}_n$ | rig, multiple | $\mathcal N(\hat F_{3pn} - 12,\ 10)$ dB | C4 without the parity penalty |
+| $p^{m}_{rn} - \bar p^{m}_n$ | rotor, multiple | $\mathcal N(c^{m}_r, 3.5)$ dB | @sec-ev-profiles |
+| $\alpha^{a}$ | rig | $\mathcal N(5.5, 1.0)$ | @sec-ev-speed-lines |
+| $\alpha^{m}$ | rig | $\mathcal N(0, 2)$ | @sec-ev-speed-lines |
+| $b_0$, $b_1$ | rig | $\mathcal N(3, 1)$; $\mathcal N(0.5, 0.25)$ per octave | @sec-ev-floor |
+| $z$ | rig | $\mathcal N(0, I)$, scale $\sigma_B$ measured | nv3r4 |
+| floor push | rig | $+\kappa\sum_j \bar c_j$ on the log-prior, $\bar c_j$ the control values in dB | @sec-ev-floor-push |
+| $\sigma^2_{A,k}$ | rig, order | LogN$(\log m_{g}, 0.5)$ truncated at $c_{g}$; $(m_g, c_g)$ per order group $g$ in @tbl-amp | @sec-ev-pedestal |
+| $\gamma_{A,k}$ | rig, order | LogN$(\log 0.4\,\mathrm{Hz}, 0.5)$ for $k \le 8$; LogN$(\log 1.0\,\mathrm{Hz}, 0.5)$ above | direct amplitude measurement |
+| $\sigma^2_{\phi,k}$ | rig, order | LogN$(\log 1, 1.5)$ | wide; the data set it on the bench |
+| $W_{\phi,k}$ (@eq-width) | rig, order | HalfNormal$(c_W^{\rm even})$ for $k \bmod B = 0$, HalfNormal$(c_W^{\rm odd})$ otherwise, in Hz | @sec-ev-pedestal; $c_W$ measured in step A0 |
+| $\varepsilon$ | rig | HalfNormal$(0.005)$ | bench round R2 |
+| $a_\sigma$, $b_\lambda$ | rig | $\mathcal N(1, 0.5)$ | bench round R2 |
+| $\lambda_{\rm ref}$ | rig | LogN$(\log 12, 0.5)$ 1/s | bench quick fits |
+| wind level | recording or rig, windy mic | $\mathcal N(\text{measured}, 6)$ dB | nv3r4 |
+| $s$ | rig (flight) | LogN$(\log 2.5\cdot10^{-3}, 1)$ | nv3r4 |
 
-The bank policy of round 4 pinned the speed laws at (6, 6) for every entry.
-v4 draws $\alpha^{a}_r$, $\alpha^{m}_r$, $b_0$, $b_1$ from @tbl-prior-laws.
-The tonality guard, the standby composition and the array-response coin of
-round 4 do not change.
+: The priors of v4. The bench and the flight fit read the same table, except
+the shaft (@sec-flight-fit). {#tbl-priors}
 
-# The priors of the fit {#sec-priors}
+| Order group $g$ | $k$ | $m_g$ (median) | $c_g$ (cap) |
+|---|---|--:|--:|
+| 1 | 1–3 | 0.001 | 0.075 |
+| 2 | 4–8 | 0.11 | 0.29 |
+| 3 | 9–20 | 0.14 | 0.24 |
+| 4 | 21–40 | 0.10 | 0.20 |
+| 5 | ≥ 41 | 0.02 | 0.12 |
 
-@tbl-fit-priors gives each site of the fit, its prior and where it is free.
+: The amplitude prior of the pedestal. $m_g$ is the median over the 20 DREGON
+bench recordings of the per-recording median log-amplitude variance; $c_g$ is
+the largest per-recording 90th percentile (`results/static_rig/single_rotor/amplitude_jitter.json`,
+0.25 s frames, calm microphones, lines more than 6 dB over the floor). Group 5
+is measured on $k$ = 41–80 and extended to every higher order. {#tbl-amp}
 
-| Site | Per | Prior | Bench | Flight |
-|---|---|---|---|---|
-| $\sigma_\nu$ | recording | LogN$(\log 0.4, 0.5)$ rad/s | free | free, prior LogN$(1.68, 0.66)$ as nv3r4 |
-| $\lambda$ | recording | LogN$(\log 12, 0.5)$ 1/s | free | pinned at $2\pi\cdot 16$ 1/s as nv3r4 |
-| $p^{a}_{rk}$ | rotor | $\mathcal N(\hat p_{rk}, 10)$ dB; $\hat p$ = the measured level at $k f_r$ | free | free |
-| $p^{m}_{rk}$ | rotor, $k = 3pn$ | $\mathcal N(\hat p_{rk} + 6, 10)$ dB | free | free only where the pool resolves two speed laws; else pinned at the prior centre minus the aerodynamic line |
-| $\alpha^{a}_r$ | rotor | $\mathcal N(5.5, 1.0)$ | free (ladder) | pinned at the bench value of the rig, else at 5.5 |
-| $\alpha^{m}_r$ | rotor | $\mathcal N(0, 2)$ | free (ladder) | pinned at the bench value, else at 0 |
-| $\sigma^2_k$, $\gamma^{\rm AM}_k$ | rig (per order) | @tbl-prior-laws | free | **measured**, not fitted (@sec-flight-fit) |
-| $b_0$, $b_1$ | rig | $\mathcal N(3, 1)$, $\mathcal N(0.5, 0.25)$ | free (ladder) | pinned at the bench value, else at the prior centre |
-| $s$ | rig | LogN$(\log 2.5\cdot10^{-3}, 1)$ | pinned 0 (ambient is explicit) | span-pinned as nv3r4 |
-| $z$ (floor shape) | rig | $\mathcal N(0, I)$, scale $\sigma_B$ measured | free | free |
-| $E_{rm}(f)$ | rotor–mic | measured constant | constant | $\equiv 0$ (array response in the data) |
-| $\delta_{mrk}$ | recording, mic, line | $\mathcal N(0, 2.4)$ dB; 6 dB below $k = 8$ on windy mics | free | none |
-| $N_m(f)$ | recording, mic | measured constant | constant | none |
-| $w_m$ (wind) | mic | $\mathcal N(\text{measured}, 6)$ dB | free | free (DREGON) |
-| $d_r, u, u_j$ | window, block | OU with measured $(\sigma, \tau)$ | none | measured, not fitted (round-4 practice) |
+Three properties of the priors matter for the fit:
 
-: The sites of the v4 fit. "Ladder" means identified only by the joint fit over
-several speeds. {#tbl-fit-priors}
+1. **Unresolved orders sink.** The level prior centres a line 12 dB under the
+   floor (27 dB for a non-blade-pass order). A line that the data do not
+   resolve stays under the floor instead of building a pedestal. No order is
+   switched on or off before the fit (decision, 2026-09-22).
+2. **Pedestals stay narrow unless the data ask.** The half-normal on $W_\phi$
+   is light-tailed in linear Hz. A broad skirt on a weak line costs more than
+   it buys.
+3. **The floor is pushed up.** Between the lines, the floor and the pedestal
+   skirts explain the same cells. The push breaks that tie toward the floor.
+   The Whittle term stops the floor at the bases of the lines.
 
-The speed-span pin of nv3r4 stays in force: a pool whose carrier span
-$\max/\min$ is below 1.2 cannot identify an exponent and keeps the pinned
-value (`model.py:620-632`).
+# Fitting: what both procedures share {#sec-shared-fit}
 
-# Fit procedure A — the bench {#sec-bench-fit}
+## The objective
+
+The objective is the Whittle negative log-likelihood summed over the cells of
+every recording, every microphone and every frame, minus the log-prior of
+@tbl-priors. The parameters are MAP estimates in an unconstrained
+parametrisation. There are no latent tracks.
+
+## Initialisation {#sec-init}
+
+Both procedures start the same way. No parameter is read from an earlier fit
+of any model generation.
+
+1. **Floor.** For each periodogram (bench: per recording and microphone;
+   flight: per frame and microphone), take the minimum of the spectrum in each
+   gap between two neighbouring lines of all rotors. Average these minima over
+   the periodograms. Take the median within each spline cell to get the 14
+   control values. On the bench subtract the ambient. Divide by
+   $\sum_r 10^{E_{rm}/10} s_r^{b_{\rm init}}$, with $b$ at its prior centre.
+   Solve for $(\mu, z)$ by ridge least squares.
+2. **Aerodynamic levels.** For each rotor and order, average the spectral
+   height at $k f_r$ over the rotor's recordings or frames. Move each height to
+   $f_{\rm ref}$ with $\alpha^{a}$ at its prior centre. Subtract the floor
+   initialised in step 1. Convert the height to line power with the line's
+   kernel at the initial pedestal. Where the height is under the floor, start
+   at the prior centre.
+3. **Motor levels.** At $k = 3pn$, set the aerodynamic level to the mean of
+   the aerodynamic levels at $k \pm B$. Give the motor line the rest of the
+   measured power, or the prior centre where the rest is negative.
+4. **Pedestal and shaft.** Restart $j = 0$ takes the prior medians. Restarts
+   $j = 1, 2, 3$ draw every pedestal and shaft parameter from its prior.
+5. **Exponents.** At the prior centres.
+6. **Wind.** At the measured centres.
+
+## The optimiser {#sec-optimiser}
+
+1. Adam, learning rate 0.02, 1500 steps.
+2. Strong-Wolfe L-BFGS. Bench: on every cell. Flight: on a 64-frame subset
+   stratified over the windows, then one all-frames polish.
+3. **Evidence freeze.** After step 2, compute for each order the Fisher
+   information of its phase-pedestal parameters from the Whittle term. Where the
+   data shrink the prior variance by less than 10 %, hold those parameters at
+   the prior median for the rest of the run. Release them for one final
+   L-BFGS pass and report its gain. The freeze changes the search, not the
+   objective.
+4. A fresh-memory L-BFGS restart pass.
+5. **Convergence.** A restart is converged when the restart pass gains less
+   than $10^{-4}$ nats per cell **and** moves no parameter group by more than
+   its tolerance: levels 0.1 dB (median over lines), exponents 0.02, floor
+   control values 0.1 dB, log-dynamics 0.05.
+6. Four restarts. Keep the lowest objective. Report the spread of every group
+   over the restarts.
+
+# Procedure A — the DREGON bench {#sec-bench-fit}
 
 ## Data
 
-The bench data are stationary single-rotor recordings of one rig at several
-throttle settings. DREGON gives four motors at five settings each
-(48–89 rev/s, span 1.8×, 8 microphones, 30 s, a rotor-off segment before each
-run). AGH gives one rotor at five settings (78–160 rev/s, span 2.05×, one
-microphone, no rotor-off segment).
-
-## Front end
-
-One periodogram per microphone over the whole stationary span, at 16 kHz after
-decimation, periodic Hann, no averaging (`supports.py:14-35`). The resolution
-is 0.03 Hz on 30 s. This resolves the pedestals ($\gamma^{\rm AM}$ 0.2–1 Hz)
-and the OU cores of the lines. The band is 30 Hz to 7.9 kHz.
+`DREGON-frames` `motor_Motor{1-4}_{50,60,70,80,90}`: four motors, five
+throttle settings each (48–89 rev/s, span 1.8×), 8 microphones, decimated
+44.1 → 16 kHz. One periodic-Hann periodogram per microphone over the strict
+rotor-on span (9.8–36 s; 0.03–0.1 Hz bins). Band 30 Hz–7.2 kHz.
 
 ## Steps
 
-The fit of one motor runs **jointly over its throttle ladder**. The shared
-quantities are one profile at $f_{\rm ref}$, the two exponents, the floor
-exponents and the pedestal law. The per-recording quantities are the carrier,
-the shaft OU, the per-line scatter and the ambient.
+**A0. Measure the pedestal width scale.** Run the per-order phase coherence
+(`scripts/static_rig_scratch/one_rotor_coherence.py`) on all 20 recordings,
+calm microphones, at lags 2.5, 5, 10, 15, 20, 30, 40, 50, 100, 200, 500, 1000
+and 2000 ms. Fit $2\sigma^2_\phi(1 - e^{-2\pi\gamma_\phi\tau})$ to the net
+phase increment variance of every gated order. Compute $W_\phi$ with
+@eq-width. Set $c_W^{\rm even}$ and $c_W^{\rm odd}$ so that the 97.5th
+percentile of the measured $W_\phi$ of each parity sits at the half-normal's
+97.5th percentile ($2.24\,c_W$). The current lag grid (5 ms, then 10, 20, 50 ms)
+does not resolve the fast part: the net variance jumps by 0.2–0.75 rad²
+between 20 and 50 ms at $k \ge 8$.
 
-1. **Span.** Take the longest run of 0.25 s blocks whose blade-pass line stays
-   within 1 % of its plateau, trimmed by 1 s (`single_rotor.strict_span`).
-2. **Carrier.** Refine the shaft rate on the cores of orders 2–7 (resolution
-   limited). Freeze it. The precision is ±0.003 rev/s.
-3. **Ambient.** Compute the Welch spectrum of the rotor-off segment per
-   microphone (before the span minus 0.5 s). Smooth it. Store it as $N_m(f)$.
-4. **Pair EQ.** Compute $E_{rm}(f)$ from the other settings of the ladder:
-   the line levels of microphone $m$ relative to the microphone mean, smoothed
-   with a 200 Hz Gaussian kernel on the frequency axis. Store it as a constant.
-5. **Windy microphones.** Mark the microphones whose 20–200 Hz power relative to
-   1–4 kHz exceeds the array median by 6 dB. Their $\delta_{mrk}$ prior is
-   widened to 6 dB below $k = 8$.
-6. **Seeds.** Shaft $(\sigma_\nu, \lambda)$ from the width-law quick fit
-   (`single_rotor.fit_width_law`), or the prior median where the quick fit
-   failed. Pedestal $(\sigma^2_k, \gamma_k)$ from the direct amplitude-jitter
-   measurement (`single_rotor.amplitude_jitter`). Profile from the OU peak
-   reading (`single_rotor.line_powers_ou`) at the setting nearest $f_{\rm ref}$,
-   moved to $f_{\rm ref}$ with the prior-median exponents. Exponents at the
-   prior medians. Floor shape at the ridge solution of the measured control
-   values.
-7. **MAP.** AutoDelta guide; Adam, learning rate 0.02, 1500 steps; then
-   strong-Wolfe L-BFGS, 200 iterations. Four restarts with log-normal jitter
-   (sd 0.8) on the dynamics seeds. Keep the lowest objective.
-8. **Motor family.** Where $k = 3pn$ coincides with an aerodynamic order, the
-   two levels are separate sites with separate exponents. The ladder identifies
-   them: the aerodynamic part follows $\alpha^{a}_r$, the motor part follows
-   $\alpha^{m}_r$. Where the ladder has fewer than three settings, pin
-   $p^{m}_{rk}$ at the prior centre.
-9. **Export.** Write one `noise-v4-fit/1` payload per motor with the shared
-   profile at $f_{\rm ref}$, the family masks, the exponents and the pedestal
-   law, plus one block per setting with its carrier, shaft, scatter and
-   ambient.
+**A1. Span and carrier.** Strict span per recording
+(`single_rotor.strict_span`). Refine the carrier on the cores of orders 2–7.
+Freeze it (±0.003 rev/s).
+
+**A2. Ambient.** Read the ambient on every rotor-stopped run of the recording
+within 2 dB of its 5th-percentile level, at least 1 s from the span
+(`bench_v4.ambient_runs`). Store it as $N_m(f)$.
+
+**A3. Pair EQ.** Compute $E_{rm}(f)$ per motor (`bench_v4.pair_eq`). Store it
+as a constant.
+
+**A4. Windy microphones.** Motor1 {5, 6}, Motor2 {0}, Motor3 {1, 2}, Motor4
+{4} (20–200 Hz power over 1–4 kHz more than 6 dB above the array median). They
+get the wind term.
+
+**A5. One joint fit over the 20 recordings.** Shared by the four motors:
+$F$, $b_0$, $b_1$, $\alpha^{a}$, $\alpha^{m}$, the pedestal parameters and
+the shaft law. Per motor: the profiles $p^{a}_{rk}$, $p^{m}_{rn}$. Per
+recording: the frozen carrier, the ambient and the wind levels. Initialise by
+@sec-init. Optimise by @sec-optimiser.
+
+**A6. Export** one `noise-v4-fit/3` payload for the DREGON rig: four rotor
+profiles per family, the shared laws, the pedestal parameters, the shaft law,
+$F$, and per recording the carrier, ambient and wind.
 
 ## Checks before acceptance
 
-- **Planted synthetic.** Render a ladder from known parameters
-  (`single_rotor.synthesise` plus a recorded ambient). The fit must recover
-  $\sigma_\nu$ and $\lambda$ within 20 %, $\sigma^2_k$ within 30 % on lines
-  ≥ 15 dB over the floor, the profile within 1 dB, $\alpha^{a}$ within 0.3.
-- **Agreement with the quick fits.** On the 16 DREGON recordings where the
-  width-law quick fit held: $|\ln\sigma_\nu - \ln\sigma_{\nu,\rm quick}| \le 0.3$,
-  $\lambda$ within ×1.5, profile within 2 dB on lines ≥ 10 dB over the floor.
-- **No random-walk corner.** On M1_90, M2_80, M3_90, M4_90 the fitted
-  $\lambda$ must stay in 5–30 1/s and the half-width at $k = 80$ within ×1.5 of
-  the free per-order width.
-- **Exponents.** $\alpha^{a}_r$ within 4.5–6.5; $\alpha^{m}_r$ within −3…+2;
-  the BPF line ($k = B$) must fit its own law within 1 dB rms over the ladder.
-- **Wind.** On Motor 1 (channels 5, 6 windy) the profile from the clean
-  microphones must change by < 0.5 dB when the windy microphones are included.
-- **Cost.** ≤ 10 min per setting on CPU; the ladder in one `uni-cpu` job.
+- **Planted ladder.** Render 20 recordings from known parameters with the v4
+  renderer plus the recorded ambients. Fit them with A5. The fit must recover
+  the profiles within 1 dB on lines ≥ 10 dB over the floor, $\alpha^{a}$
+  within 0.3, $b_0$ within 0.3, the floor within 1 dB, $\varepsilon$ and
+  $\lambda_{\rm ref}$ within 20 %, $W_\phi$ within 30 % on lines ≥ 15 dB over
+  the floor. **The floor push $\kappa$ is set here:** the smallest value that
+  recovers the planted floor within 1 dB.
+- **Floor at the bases.** At the midpoints between lines, the fitted expected
+  spectrum minus the data is within ±1 dB in every octave band.
+- **The four-rotor recording.** Without refitting, predict `motor_allMotors_70`
+  (four rotors at 65.7 rev/s mean, carriers 0.83–3.0 Hz apart) from the bench
+  payload: four line sets plus the **sum** of the four rotor floors plus its
+  ambient. The prediction must match the data within 1.5 dB per octave band
+  between the lines, and within 2 dB rms on the line levels of the orders the
+  four rotors do not share. This tests the summed-floor rule (@eq-floor).
+- **Flicker.** The frame-to-frame level sd at $k$ = 40–80 (64 ms frames) of
+  renders must match the recordings (5.5–5.8 dB) within 0.5 dB. This is the
+  only check of the amplitude/phase split.
+- **Spectrum and sound.** The LTAS, the zoom panels, the fold by line distance
+  and the listening clips of `docs/explainers/noise-v4-bench-fit.qmd`, on the
+  new fit.
+- **Convergence** (@sec-optimiser) on the selected restart.
 
-# Fit procedure B — free flight {#sec-flight-fit}
+# Procedure B — free flight on MD2 {#sec-flight-fit}
 
 ## Data
 
-The flight data are the pools of nv3r4: Michael's rig cruise and standby
-(FLY125, 8 microphones, calibrated telemetry) and DREGON free flight
-(`motors_measured` recordings). Each pool is one regime. The carrier is the
-label (telemetry, refined).
+Michael's drone (DJI Matrice 100, 4 rotors, 8 microphones). FLY125: the
+standby run (1.8–15.3 s; rotors at about 31, 35, 40 and 36 rev/s) and the
+cruise windows (68–98 rev/s) of nv3r4, labels as nv3r4 (`rps_refined`).
+FLY124 stays the held-out evaluation cohort.
 
 ## Front end
 
-The nv3r4 front end: 16 kHz, 2048-point periodic Hann, hop 512, frames thinned
-by 4 to disjoint windows, exposure weights composite (`model.py:930-1030`).
-The resolution is 7.8 Hz. The pedestals are inside one bin.
+The nv3r4 front end: 16 kHz, 2048-point periodic Hann (7.8 Hz bins), hop 512,
+frames thinned by 4, composite exposure weights. The pedestal is inside one
+bin.
 
 ## What the flight fit can and cannot identify
 
-A short-window periodogram does not resolve a pedestal. The flight fit
-therefore does not fit $\sigma^2_k$ and $\gamma^{\rm AM}_k$. A short-window
-periodogram does see the frame-to-frame level of a line. That level variance
-is the amplitude part of the pedestal. nv3r4 already measures it as the block
-wander of each line ($\sigma_v$ by order group, `noise-v3-wander/2`).
-
-A flight pool with a carrier span below 1.2 cannot identify an exponent. A
-pool with a wider span can, but the per-clip levels absorb part of the law
-(`docs/experiments/stochastic-fit.md` § "DREGON's speed law is not
-identifiable from 4 s crops"). Therefore the flight fit **pins** every exponent
-at the bench value of the rig. Where no bench exists for the rig, it pins the
-prior centre.
+- **Levels, the floor and the speed laws** are identified. The pool spans
+  31–98 rev/s (3.2×), wider than the bench ladder.
+- **The motor family.** On the standby run only order 84 stands out, on all
+  four rotors (@fig-md2-orders). The multiples $n \ne 4$ sink by the level
+  prior.
+- **The phase pedestal** is not identified at 7.8 Hz. With the half-normal
+  prior its MAP would be zero. The flight fit therefore does not fit
+  $\sigma^2_{\phi,k}$ or $\gamma_{\phi,k}$; it holds them at the prior
+  medians.
+- **The amplitude pedestal** shows as frame-to-frame line flicker. The
+  Whittle likelihood does not model the correlation of a line's level across
+  frames, so it does not identify it. The flight fit sets $\sigma^2_{A,k}$ and
+  $\gamma_{A,k}$ from the pool's own block-wander measurement
+  (`scripts/noise_v3_measure_wander.py`, $\sigma_v$ and $\tau_v$ per order
+  group: $\sigma^2_A = (\sigma_v \ln 10/20)^2$, $\gamma_A = 1/(2\pi\tau_v)$),
+  truncated at the caps $c_g$ of @tbl-amp.
+- **The shaft** carries the label error as well as the jitter, as in nv3r4.
+  The speed law is pinned flat ($a_\sigma = b_\lambda = 0$),
+  $\lambda = 2\pi\cdot16$ 1/s (the band edge of the 31 Hz label) and
+  $\sigma_\nu \sim$ LogN$(1.68, 0.66)$ rad/s from the telemetry residuals of
+  six drones (round-4 changes A1, A2). There is no separate label-error term
+  (decision, 2026-10-21): a second OU of the same form as the shaft error
+  cannot be told apart from it, and nv3r4, whose shaft term absorbed the label
+  error, gave renders that looked and sounded right.
 
 ## Steps
 
-1. **Measure the pool** once, latent-free, as nv3r4 (`fit.py:584-749`): the
-   floor level and control values, $\sigma_B$, the per-line prior centres at
-   $k f_r$, the wind centres, the channel gains and the array response.
-2. **Measure the wander** on the real windows as nv3r4
-   (`scripts/noise_v3_measure_wander.py`): $(\sigma_d, \tau_d)$ per rotor,
-   $(\sigma_v, \tau_v)$ per order group, $(\sigma_u, \tau_u)$, $(\sigma_{uj},
-   \tau_{uj})$ for the floor. Store them. Do not fit them.
-3. **Set the pedestal law** of the rig for the renderer: $\sigma^2_k$ from the
-   measured $\sigma_v$ of the order group (converted from dB to nepers,
-   $\sigma_k = \sigma_v \ln 10/20$) with the bench value as the floor of the
-   estimate; $\gamma^{\rm AM}_k = 1/(2\pi\tau_v)$.
-4. **Pin** $\lambda$, $\alpha^{a}_r$, $\alpha^{m}_r$, $b_0$, $b_1$ and $s$ as in
-   @tbl-fit-priors. Declare $B$ and $p$ for the rig.
-5. **Family masks.** Mark the orders $k = 3pn$. At those orders the profile site
-   is the sum line. Its prior centre is the aerodynamic centre plus the motor
-   boost. Its speed law is the power-weighted mix of the two exponents at the
-   prior centre. The fit does not separate the two levels in flight.
-6. **MAP** of the rig with the latents at zero, as round 4: Adam 1500 steps,
-   L-BFGS 150 then 600 iterations on a 64-frame stratified subset, four
-   restarts, all-frames polish, lowest objective kept
-   (`scripts/_nv3_mkjobs_r4.py`).
-7. **Gate.** Run the identifiability gate on the fit with the trajectory
-   frames. A rig that fails the gate is not a bank anchor.
-8. **Export** the `noise-v4-fit/1` payload: the nv3r4 payload with the family
-   masks, the two exponents, $b_0$, $b_1$, the pedestal law and the pinned
-   provenance.
+**B1. Measure the pool**, latent-free, as nv3r4: $\sigma_B$, $\hat F_k$, the
+array response, the block wander.
+
+**B2. One joint fit over the standby and cruise windows.** Shared by the four
+rotors: $F$, $b_0$, $b_1$, $s$, $\alpha^{a}$, $\alpha^{m}$, the pedestal
+parameters (held as above) and the shaft (pinned as above). Per rotor: the
+profiles. Initialise by @sec-init. Optimise by @sec-optimiser. If the
+standby–cruise residual check fails, fall back to the nv3r4 arrangement: one
+fit per regime, composed in the renderer by the smoothstep in the slowest
+rotor's speed (0 at 45 rev/s, 1 at 65 rev/s).
+
+**B3. Gate.** Run the identifiability gate on the fit with the trajectory
+frames.
+
+**B4. Export** one `noise-v4-fit/3` payload for the MD2 rig.
 
 ## Checks before acceptance
 
-The round-4 criteria stay: DREGON parity ≤ 2.188 rev/s; Michael's parity
-ratio ≤ 1.05; Michael's LTAS proxy ≤ 1.332. In addition:
-
-- **Pinned laws do not break the fit.** The Whittle objective of the pinned
-  fit must be within 0.01 nats per cell of the nv3r4 fit of the same pool.
-- **Regime consistency.** The standby and cruise fits of one rig must give
-  profiles at $f_{\rm ref}$ within 6 dB rms on the lines both regimes resolve.
-  A larger gap means the exponent is wrong for that rig.
+- The round-4 criteria: Michael's parity ratio ≤ 1.05; Michael's LTAS proxy
+  ≤ 1.332 dB; the Listen comparison on FLY124.
+- **Standby–cruise residual.** The mean residual on the line levels per
+  regime is within ±2 dB. A larger gap means one speed law does not hold over
+  3.2× for this rig.
+- **The motor line.** On standby renders, order 84 stands 7–14 dB over its
+  neighbouring half-orders on every rotor, as in the recording.
+- **Convergence** (@sec-optimiser).
 
 # From the fits to the generator
 
-A bank entry is a rig payload plus a trajectory. v4 keeps the round-4 policy
-(standby on every hard entry, the tonality guard, the array-response coin) and
-changes the speed laws: each entry carries its own $\alpha^{a}_r$, $\alpha^{m}_r$,
-$b_0$, $b_1$, drawn from @tbl-prior-laws or taken from the bench fit of the
-anchor rig. The renderer applies them per order and per frequency:
-
-- the aerodynamic line envelope is $\sqrt{2\cdot10^{p/10}}\;s_r(t)^{\alpha^{a}_r/2}\;e^{g_{rk}(t)-\sigma^2_k/2}$;
-- the motor line envelope is $\sqrt{2\cdot10^{p/10}}\;s_r(t)^{\alpha^{m}_r/2}$;
-- the floor gain per frequency is $\tfrac1R\sum_r s_r(t)^{b(f)} + s$, applied in
-  the WOLA floor synthesis of nv3r4 as a per-bin gain.
-
-The identifiability gate reads the same lag law (@eq-lag) through
-`identifiability.line_shapes`.
+A bank entry is a rig payload plus a trajectory. The renderer is the same for
+both rigs. The bank laws of the generic drone prior
+(`src/experiments/noise_model/drone_prior.py`) are revised from the two fits
+once both pass their checks. Until then the round-4 bank policy stays in force.
+The revision must read: four profiles per rig with the hierarchical spread of
+@tbl-priors, one speed law per family per rig, the summed floor, and the
+two-process pedestal.
 
 # Evidence and justification {#sec-evidence}
 
 ## Two line families {#sec-ev-families}
 
-**Measurement.** On the DREGON bench the orders 84, 105 and 126 of every motor
-are 10–21 dB above their local floor at every throttle, and their absolute
-power falls or stays constant from 50 % to 90 % throttle: exponents
-−1.1/−1.3/+1.9/−2.1 (k = 84), −2.4/0.0/−1.6/−3.0 (k = 105), −2.7/−3.1/−3.2/−3.7
-(k = 126) for motors 1–4 (`results/static_rig/single_rotor/speed_laws.json`,
-`scripts/static_rig_scratch/speed_laws.py`). The gain of the recordings is
-consistent: the rotor-off ambient of each motor agrees within 1 dB across the
-five settings with no trend. The blade-pass line of the same recordings follows
-its law with 0.6 dB rms. On the AGH rotor the lines at 42 and 84 fall from +10
-and +14 dB over the floor at 78 rev/s to −5 and −3 dB at 160 rev/s, while the
-floor under them rises with exponent 4.3 and 2.5.
+**DREGON bench.** The orders 84, 105 and 126 of every motor are 10–21 dB above
+their local floor at every throttle. Their power falls or stays constant from
+50 % to 90 % throttle: exponents −1.1/−1.3/+1.9/−2.1 at $k = 84$ for motors
+1–4 (`results/static_rig/single_rotor/speed_laws.json`). The blade-pass line
+of the same recordings follows its law with 0.6 dB rms. The motor orders are
+coherent: $|\gamma|$ = 0.7–0.8 at lags 0.5–2 s at $k = 42$, against ≤ 0.3 for
+the aerodynamic orders around it (`docs/explainers/order-decoherence.qmd`).
 
-**Dynamics.** On the bench the motor orders are coherent: $|\gamma|$ = 0.7–0.8
-at lags 0.5–2 s at $k = 42$ against ≤ 0.3 for the aerodynamic orders around
-it, and their phase noise is the shaft's alone (∝ $k^2$)
-(`docs/explainers/order-decoherence.qmd` § The motor orders; AGH orders 21 and
-42). The pedestal measured at $k = 42$ is 17–20 dB below the line. An
-aerodynamic line at $k = 42$ carries a pedestal 8–10 dB below itself and sits
-9–12 dB below the motor line at bench speeds. The sum gives −17 … −22 dB. The
-motor line needs no pedestal of its own [INFERENCE, consistent].
+**MD2 standby.** Order 84 is the only motor line. @fig-md2-orders shows the
+standby spectrum (3–15 s) resampled on each rotor's own order axis
+($k = f/f_r(t)$, telemetry speed every 125 ms). Line height over the
+neighbouring half-orders:
+
+| order | rotor 1 | rotor 2 | rotor 3 | rotor 4 |
+|---|--:|--:|--:|--:|
+| 2 (blade pass) | 16.3 dB | 13.0 | 6.9 | 10.4 |
+| **84** | **7.6** | **13.5** | **7.0** | **13.5** |
+| 21, 42, 63, 105, 126 | ≤ 3 | ≤ 3 | ≤ 3 | ≤ 3.8 |
+
+In the raw spectrum the four order-84 lines sit at 2596, 2924, 3050 and
+3378 Hz. Each is as wide as its rotor's speed drift over the span. Nothing else
+in 2.45–3.5 kHz rises above the floor. 84 is $3pn$ with $p = 7$, $n = 4$. It is
+also $12 \times 14$, the cogging order of a 12-slot, 14-pole motor
+[INFERENCE: the MD2 motor type is not confirmed].
 
 **Physics.** A permanent-magnet motor radiates at the slot-passing and
-commutation multiples $3pn$ of the shaft rate. The cogging force is set by the
-magnet–slot geometry, not by the current. A constant force that climbs a
-falling structural transfer function gives a flat or falling tone with speed
-[INFERENCE]. The loading noise of the blades is a dipole source whose power
-grows with a high power of the tip speed [@gojon2021lowre; @zhong2020revisit].
-The two sources differ in origin, in speed law and in coherence. The model
-gives them separate families.
+commutation multiples of the shaft rate. The cogging force is set by the
+magnet–slot geometry, not by the current; its tone can be flat or fall with
+speed [INFERENCE]. The loading noise of the blades grows with a high power of
+the tip speed [@gojon2021lowre; @zhong2020revisit]. The two sources differ in
+origin, speed law and coherence. The model gives them separate families. A
+free level per multiple $n$ lets one rig show 42–126 (DREGON) and another only
+84 (MD2).
 
-**Why not three families.** The odd (non-BPF) orders of a two-blade rotor come
-from blade-to-blade inequality. They are a separate population in level:
-10 dB below the BPF law at $k = 3$, 20 dB at $k = 30$ on the bench. Their speed
-law is not separate: at $k = 1$ the exponents are 4.7/8.2/5.6/6.4 and at
-$k = 3$ 5.8/5.7/–/3.4, the same as the BPF orders within the scatter. Above
-$k \approx 5$ the odd lines are weak and their level is not monotone in speed:
-they cross fixed-frequency resonances (@sec-ev-speed-floor). A separate
-exponent would fit noise. The odd orders stay in the aerodynamic family with
-their own level law.
+**Multiples of 7 that are not multiples of 21.** On the DREGON bench they rise
+8–11 dB above their neighbours at 3.8–5.2 kHz, and only there. Order 56 at
+80 % throttle (4380 Hz) reaches +22 dB. A structural mode of the motor that
+only the electromagnetic forces excite gives this pattern [INFERENCE]. v4 does
+not model it. These lines stay in the residual.
 
-## One speed exponent per rotor for the aerodynamic lines {#sec-ev-speed-lines}
+![MD2 FLY125 standby, 3–15 s: the spectrum resampled on each rotor's own order
+axis, 8-microphone mean. Dotted: multiples of 21. The broad humps in each panel
+are the other rotors' order-84 lines, smeared on the wrong axis.](../../results/noise_v4/md2_motor_orders/md2_standby_orders.png){#fig-md2-orders}
 
-**Measurement.** @fig-speed-laws shows the per-order exponent $\alpha_k$ of
-the line power on the DREGON ladder, pooled over the four motors with a level
-offset per motor. The blade-pass line ($k = 2$) gives $\alpha = 6.2 \pm 0.2$
-(0.6 dB rms). The even orders 4–40 give a median of 5.3 (10–90 %: 3.4–6.2) with
-no trend in $k$. A separate exponent per order lowers the residual from 2.4 to
-2.1 dB rms only. The per-motor values are M1 4.7, M2 5.4, M3 5.0, M4 4.5 at
-$k \le 20$ and 5.3/4.8/5.7/4.9 at $k = 22$–40. On the AGH rotor the BPF
-orders 3, 6, 9, 12, 15, 18 give 4.2, 4.1, 4.4, 6.9, 6.2, 4.2.
+## Four profiles with a common centre {#sec-ev-profiles}
 
-**Per microphone.** The exponent is a rotor property. Per microphone the
-median exponent over the BPF orders is 4.1–6.1 for the 32 (microphone, motor)
-cells; the spread across microphones (sd 0.3–0.5) equals the spread across
-motors. The pair EQ does not change it: after normalisation by the held-out
-pair EQ the rotor means move by ≤ 0.15.
+The rotors of one rig are of one type. Their profiles differ by a level offset
+and by a scatter per line. The bench gives 3.7 dB between runs per line;
+Michael's v3 fits give 4–5.6 dB per line and 2.3–5.2 dB per rotor
+(`docs/experiments/static-rig-profiles.md` § Generic drone prior). The
+hierarchical prior uses 3.5 dB per line and 2.5 dB per rotor. The spreads are
+fixed, not fitted: a jointly maximised spread collapses to zero.
 
-**Literature.** @gojon2021lowre measured isolated low-Reynolds rotors in an
-anechoic chamber: the BPF tone grows as $U^7$, its first harmonic as $U^8$,
-the overall level as $U^6$ (all on power, in dB). @zhong2020revisit derived
-low-Mach scaling laws in which the exponent depends on the harmonic order and
-on the azimuthal order of the unsteady loading, $M_t^{|\mu B + n| + 2}$. The
-steady-loading term grows with the order, but the authors state that the
-unsteady loading governs the higher harmonics; the attachment of 2026-10-02
-and @zhu2026unsteady, @zhong2023unsteady give the same reading. The bench data
-agree: the exponent does not grow with $k$ beyond the blade-pass line. v4 uses
-one exponent per rotor with the prior $\mathcal N(5.5, 1.0)$, between the
-bench values (4.5–6.2) and the anechoic literature (6–8).
+## One speed exponent per family {#sec-ev-speed-lines}
+
+**Measurement.** On the DREGON ladder the blade-pass line gives
+$\alpha = 6.2 \pm 0.2$. The even orders 4–40 give a median of 5.3 (10–90 %:
+3.4–6.2) **with no trend in $k$**. A separate exponent per order lowers the
+residual from 2.4 to 2.1 dB rms only. The per-motor values are 4.5–5.4 at
+$k \le 20$ and 4.8–5.7 at $k$ = 22–40: the motors agree within their scatter,
+so one exponent per rig suffices.
+
+**Literature.** @gojon2021lowre measured the BPF tone of isolated low-Reynolds
+rotors growing as $U^7$, the overall level as $U^6$. @zhong2020revisit show
+that unsteady loading governs the higher harmonics. The prior
+$\mathcal N(5.5, 1)$ sits between the bench values and the anechoic
+literature.
+
+**What the R3 fit showed.** With a free scatter $\delta$ per (recording, mic,
+line), $\alpha^{a}$ drifted from 2.9 to 3.6 (Motor1) and from 3.2 to 3.8
+(Motor3) between L-BFGS iteration 400 and the end, while the $\delta$ means
+per setting fell by about 1 dB at 80–90 %: the level trend with speed could go
+either into $\alpha$ or into $\delta$. nv3r4 showed the same confound
+(`amp_exp` 9 → 13 between 150 and 600 iterations). Without $\delta$ the
+confound is gone.
 
 ![The speed laws on the DREGON bench ladder. Left: the per-order exponent of
 the line power (blue even orders, orange odd, red multiples of 21). Middle: the
@@ -537,189 +608,142 @@ exponent of the floor under harmonic $k$. Right: the exponent of the floor at
 fixed frequency, raw and with the rotor-off ambient removed; the thin lines are
 the per-motor fits of $b(f) = b_0 + b_1\log_2(f/2\,\mathrm{kHz})$.](../../results/static_rig/single_rotor/speed_laws.png){#fig-speed-laws}
 
-## A frequency-dependent floor exponent {#sec-ev-speed-floor}
+## The floor: per rotor, shared shape, summed {#sec-ev-floor}
 
-**Measurement.** The floor between the lines (20th percentile of the Welch
-spectrum over the quiet microphones) grows with speed with an exponent that
-depends on the frequency: 5.1 at 100–200 Hz, 3.2 at 200–400 Hz, 1.4 at
-400–800 Hz, 1.3 at 800–1600 Hz, 2.5 at 1.6–3.2 kHz, 3.2 at 3.2–6.4 kHz, 4.2 at
-6.4–12.8 kHz, 4.0 at 12.8–20 kHz (pooled over motors, se 0.1–0.3). The ambient
-is 8–25 dB below the floor and changes the exponent by ≤ 0.3 except at
-100–400 Hz. The law $b(f) = b_0 + b_1 \log_2(f/2\,\mathrm{kHz})$ fits the four
-motors with $b_0$ = 2.35/2.60/2.46/2.47 and $b_1$ = 0.51/0.49/0.42/0.60 per
-octave and reduces the spread of $b$ over bands from 1.15 to 0.8. On the AGH
-rotor the floor above 1.6 kHz grows with 3.5–5.1; below 1.5 kHz the AGH
-spectrum is hydrodynamic pressure on the microphone (exponents 7–14, a hump at
-40–80 Hz) and is not used.
+**Frequency-dependent exponent.** The floor between the lines grows with speed
+with an exponent of 5.1 at 100–200 Hz, 1.3–1.4 at 0.4–1.6 kHz and 3.2–4.2
+above 3.2 kHz (pooled over the motors, se 0.1–0.3). The law
+$b_0 + b_1\log_2(f/2\,\mathrm{kHz})$ fits the four motors with
+$b_0$ = 2.35–2.60 and $b_1$ = 0.42–0.60 per octave. A Strouhal-scaled floor
+leaves 2.0–2.5 dB against 1.2–1.4 dB for the fixed-frequency axis.
 
-**Not a Strouhal-scaled floor.** A self-similar broadband spectrum
-$S(f, \Omega) = \Omega^\beta F(f/\Omega)$ predicts that the floor collapses on
-the $f/\Omega$ axis with one exponent. It does not: on the DREGON ladder one
-exponent on the $f/\Omega$ axis leaves 2.0–2.5 dB residual over the five
-settings, against 1.2–1.4 dB on the fixed-$f$ axis; at 4–16 kHz the
-fixed-$f$ axis wins by 0.5 vs 2.0 dB. The exponent of the floor under harmonic
-$k$ (the Strouhal position) varies from −1.5 to 4.2 over $k$ (@fig-speed-laws,
-middle). On the AGH rotor the fixed-$f$ axis wins at 4–16 kHz (0.8 vs 1.7 dB)
-and ties at 1.5–4 kHz.
+**Shared shape.** The four DREGON motors are one type. A floor shape per motor
+would add 3 × 15 parameters that the single-rotor recordings cannot tell
+apart from the pair EQ. One shape for the rig, entered through each pair's
+EQ, keeps the rotor differences in the profiles.
 
-**Fixed-frequency structure.** Both rigs show humps that stay at the same
-frequency at every speed: DREGON at 0.4–1.6 kHz (where the exponent falls to
-1.3 and the odd orders 9–13 are non-monotone in speed), AGH at 1.13, 1.60 and
-1.75 kHz (@fig-agh-orders). These are structural or motor resonances
-[INFERENCE]. A fixed-frequency colouring of the microphone or the array has the
-same effect on the test. The law $F(f)\,s^{b(f)}$ describes both cases on a 2×
-speed span.
+**Summed in flight.** The broadband sources of different rotors are
+independent. Their powers add. nv3r4 wrote the rig floor as one floor times
+the mean speed factor; v4 writes one floor per rotor and sums them, so that a
+bench fit and a flight fit read the same $F$. The DREGON four-rotor recording
+tests the rule (@sec-bench-fit).
 
-**Literature.** @gojon2021lowre report the broadband noise in 1–16 kHz as
-$U^4$ and note that its peak moves up in frequency with speed. The bench
-values at 3–13 kHz (3.2–4.2 on DREGON, 3.5–5.1 on AGH) agree with $U^4$. The
-rise of the exponent with frequency is what a broadband peak that moves up
-with speed produces below its peak. The model keeps the fixed-frequency shape
-with the tilting exponent because the data on both rigs select it.
+## The floor push {#sec-ev-floor-push}
 
-![The AGH single rotor (rotor 4) at five speeds on the order axis. Blue:
-multiples of 3 (blade-pass orders of the 3-blade propeller). Orange: the other
-orders. The humps at orders 20.5/16.5/14.1/12.0/10.0 (top to bottom) sit at
-1.6 kHz at every speed.](../../results/static_rig/single_rotor/agh_rotor4_orders.png){#fig-agh-orders}
+Between two lines the data can be explained by the floor or by the pedestal
+skirts of the neighbouring lines. In the R3 bench fit the skirts took the
+space: on Motor1, $W$ reached a median of 23 Hz at $k$ = 30–80 and 28 Hz at
+$k$ = 80–146, and the floor fell to about
+−80 dB above 400 Hz, under the data, where nothing identified it. In nv3r4 the
+same space was taken by the floor because the lines were needles. The push
+gives the tie to the floor; the half-normal on $W_\phi$ limits the skirts;
+the Whittle term forbids a floor above the data. $\kappa$ is the smallest value
+that recovers a planted floor (@sec-bench-fit).
 
-## The pedestal: one per-order amplitude process, no Wiener phase {#sec-ev-pedestal}
+## The pedestal: amplitude and phase {#sec-ev-pedestal}
 
-**Measurement.** The phase of order $k$ after removal of $k\hat\theta$ (the
-shaft estimate pooled over 8 microphones and orders 1–10) has motion of its
-own. On `motor_Motor1_70` the net increment variance at 500 ms is 0.07 rad² at
-$k = 4$, 1.17 at $k = 10$, 1.44 at $k = 20$ and ≥ 2.2 at $k = 40$ (ceiling 3
-for a uniform phase). The lag law bends to a plateau; the needle survives at
-every order to $k = 42$. A planted Wiener phase (Lorentzian width ∝ $k$)
-gives a lag law that does not bend and kills the needle. A planted bounded OU
-phase reproduces the bend and the needle
-(`docs/explainers/order-decoherence.qmd` § Bounded or unbounded). The same
-rotor physics appears in the AGH anechoic chamber. Therefore v4 removes the
-per-line Wiener width and gives each aerodynamic order a bounded process.
+**Measurement.** On `motor_Motor1_70` (mic 2), after the removal of the shaft:
 
-**Amplitude or phase.** At $k = 4$ the fluctuation is amplitude only: the
-log-amplitude variance is 0.1 and the net phase variance 0.01 rad². Above
-$k \approx 10$ the phase dominates: the amplitude coefficient of variation
-(0.50 at $k = 20$–40) is near the steady-line prediction (0.38–0.45) while the
-phase variance is 1.4–2.2 rad². The two faces are one bounded complex process
-per order. @sec-am-pm gives the reason for rendering it as amplitude only.
+- $k$ = 1–3: amplitude and phase are steady (≤ 0.03 rad² and ≤ 0.01 neper² at
+  2 s).
+- $k = 4$: the fluctuation is amplitude (log-amplitude variance 0.1, net phase
+  variance 0.01 rad² at 500 ms).
+- $k \ge 8$: the log-amplitude increment variance plateaus at 0.25–0.48
+  ($\sigma^2_A \approx$ 0.12–0.24). The phase loses 0.2–0.75 rad² within
+  50 ms and then grows to its ceiling (≥ 1.5 rad²) for $k \ge 12$.
 
-**Physics.** Rotor aeroacoustics calls this **haystacking**: broadened peaks
-at the BPF harmonics from unsteady blade loading that is correlated between
-successive blades. Ingested turbulence is stretched into filaments that
-successive blades cut many times, so each eddy makes a train of loading pulses
-at the blade-passing rate — a tone of finite duration — with small random
-variations of pulse position and amplitude [@hanson1974spectrum;
-@majumdar1998ingested; @alexander2017haystacking; @raposo2024ingestion]. This
-is a per-order complex envelope with a coherent core, bounded, independent
-across orders, growing in share with the order. The motor tones have no
-loading pulse behind them and carry none of it.
+So at high orders the pedestal is mostly phase. Over the 20 bench recordings
+the amplitude part is small and bounded (@tbl-amp).
 
-## Amplitude modulation or phase noise: what a magnitude model sees {#sec-am-pm}
+**Why both processes, why a cap on amplitude.** No periodogram, long or
+short, separates the two: both give the same factor in @eq-lag. The split
+matters only for what a magnitude model sees frame to frame: amplitude makes a
+line flicker; phase noise does not. The amplitude prior centres the split on
+the direct measurement and caps it. The phase takes the rest of the measured
+pedestal. A render with the whole pedestal in amplitude over-flickered by
+2.5–3.5 dB (@sec-model, the renderer).
 
-To first order the lag factor of a Gaussian phase OU and of a log-normal
-amplitude OU are the same function, $\exp[\sigma^2(\rho(\tau) - 1)]$. The
-long-window periodogram therefore cannot separate them. The two differ only in
-the complex envelope after de-rotation by the shaft: amplitude modulation
-moves $|z_k|$, phase noise moves $\arg z_k$.
+**Why a width prior.** Without one, the R3 bench fit gave the odd low orders a
+faint broad skirt: $W$ = 22–60 Hz at $\sigma^2 \approx 0.02$ on Motor1
+$k$ = 1, 3, 5, 7, 9, against 1.5–4.7 Hz on the even orders. The direct
+measurement shows $k$ = 1–3 coherent. nv3r4's width prior with a parity floor
+(odd 3 Hz, even 1 Hz) prevented this; v4 applies the same idea to $W_\phi$.
 
-The downstream models read magnitude spectrograms with bins ≥ 8 Hz and hops
-≥ 32 ms. A pedestal of width 0.4–1 Hz is inside one bin. Frame to frame, an
-amplitude process of variance $\sigma^2$ gives a level flicker of
-$4.3\,\sigma$ dB. A phase OU with correlation time 0.5 s changes the phase by
-~0.1 rad inside a 64 ms frame and shifts the instantaneous frequency by
-≤ 0.3 Hz. A magnitude model does not see it.
-
-Decision (Dmitrii, 2026-10-02): v4 renders the **total** pedestal as a
-log-amplitude process. The fit reads one $\sigma^2_k$ per order from the
-resolved pedestal. The cost: at orders where the pedestal carries ~50 % of the
-line ($k \gtrsim 10$–20), the rendered line flickers by 3–4 dB rms where the
-real line is steady. These lines sit 5–15 dB over the floor at 1–3 kHz. The
-coherent core is the same in both forms (power share $e^{-\sigma^2}$). The
-cap $\sigma^2 \le 0.6$ keeps ≥ 55 % of every line in the core. This removes a
-parameter class and keeps the payload schema of the pedestal block. A
-phase-aware consumer (complex losses, comb filters locked to the shaft) would
-need the split restored from the bench measurement.
+**Physics.** Haystacking: unsteady blade loading from ingested turbulence that
+successive blades cut many times gives a per-order complex envelope with a
+coherent core, bounded, independent across orders, growing with the order
+[@hanson1974spectrum; @majumdar1998ingested; @alexander2017haystacking;
+@raposo2024ingestion]. The motor tones have no loading pulse behind them and
+carry no pedestal.
 
 ## The shaft {#sec-ev-shaft}
 
-The shaft speed error on the bench is an OU process: the per-order line widths
-grow as $k^{1.4\text{–}1.9}$, quadratic to $k \approx 20$ and then bending
-towards linear (Lorentzian core while the coherence time exceeds $1/\lambda$,
-Gaussian $1.18\,k\,\sigma_\nu$ beyond). The quick fits give $\sigma_\nu$ =
-0.04–0.09 rev/s (0.05–0.15 % of the rate) and $\lambda$ = 9–15 1/s on 16 of 20
-recordings (`docs/experiments/static-rig-profiles.md` § Width law → OU shaft).
-The phase random walk read directly gives 0.015–0.038 rev after 1 s. In flight
-the label residual sets $\sigma_\nu$ (2.7–11.3 rad/s on six rigs) and $\lambda$
-is pinned at the band edge of the 31 Hz label, as nv3r4.
-
-@zhu2026unsteady measured the rotation of a UAV propeller with an encoder and
-showed that unsteady rotation produces sidebands and extra tones around the BPF
-harmonics; @zhong2020revisit and @zhong2023unsteady showed the same for
-rotational-speed fluctuations of small rotors. In the model that term is the
-shaft OU: large (it alone decorrelates order 40 within half a second) but
-common to every order.
+On the bench the shaft speed error is an OU process: the line widths grow as
+$k^{1.4\text{–}1.9}$. The R3 bench fit gives $\lambda$ = 12–30 1/s and
+$\sigma_\nu$ = 0.49–0.83 rad/s on Motor1 and $\lambda$ = 19–32 1/s on
+Motor3, close to the quick fits (9–15 1/s). The R1 fit, with the pedestal
+capped at $\sigma^2 \le 0.6$, drove $\lambda$ to 25–9058 1/s: the shaft
+supplied the line wings that the capped pedestal could not. In flight the
+label residual dominates (2.7–11.3 rad/s on six rigs) and nv3r4's pinned
+treatment stays (@sec-flight-fit). @zhu2026unsteady and @zhong2023unsteady
+measured the sidebands that unsteady rotation adds around the BPF harmonics;
+in the model that is the shaft term, common to the orders.
 
 ## Microphones {#sec-ev-mics}
 
-The DREGON array is in the near field of each rotor above ~1.5 kHz
-(rotor–microphone distances 0.22–0.40 m, rotor radius 0.12 m). The
-microphone-to-microphone spread of a rotor's line levels is 3.6–4.0 dB rms. A
-rank-1 factorisation (rotor profile × microphone response) fails: it leaves
-3.1 dB. A fixed per-pair transfer function exists on the **frequency** axis
-(cross-duty correlation +0.54 … +0.60 against +0.18 … +0.24 on the order
-axis), of size 1.4–2.7 dB sd, broad in shape. It explains 45 % of the
-variance. The rest, 2.4 dB per line, changes from run to run (1.73 dB rms
-within a run, 3.71 dB between runs) and is tied neither to the frequency nor
-to the order. Same-parity neighbours correlate with $\rho \approx 0.25$
-(`docs/experiments/static-rig-profiles.md` § Microphone structure). v4 writes
-this as the pair EQ (a constant of the bench fit) plus the per-run scatter
-$\delta_{mrk}$. In flight the array response of nv3r4 (per-band deviation of
-each microphone from the array mean) plays the role of the pair EQ for the
-whole rig, and the per-line scatter is inside the per-line wander.
+The DREGON array is in the near field of each rotor above about 1.5 kHz. The
+spread of a rotor's line levels across microphones is 3.6–4.0 dB rms. A fixed
+per-pair transfer on the frequency axis explains 45 % of it (the pair EQ).
+
+The R3 bench fit carried the rest as $\delta$ per (recording, mic, line):
+4.0–4.35 dB rms, symmetric, mildly heavy-tailed. About 45 % of the
+per-microphone part repeats across recordings within 15 Hz; the part common to
+the microphones repeats only 0.2–0.3. The recordings were made with the drone
+hanging on a string, held by an operator, in rooms with $T_{60} < 150$ ms
+[Strauss et al., IROS 2018]: the geometry is not fixed from one recording to the
+next.
+
+v4 drops $\delta$ (decision, 2026-10-21), as nv3r4 dropped its latents. The
+risk: the shared parameters can absorb level mismatch. In R3 the pedestal of
+$k = 56$ grew to $\sigma^2 = 1.6$ to spread the power of a line that one
+setting lifted by 22 dB. The planted check and the comparison with the R3
+shared parameters (@sec-bench-fit) measure this risk.
 
 ## The Whittle likelihood on both supports
 
 The periodogram cell of a Gaussian process is exponential with mean equal to
-the expected periodogram. The Whittle likelihood sums $I/M + \log M$ over the
-cells [@whittle1953]. nv3r4 uses it with exposure weights so that duplicated
-audio does not count twice. v4 keeps it. The bench support (one periodogram of
-30 s) resolves the pedestals and the shaft cores, so the bench fit identifies
-the dynamics. The flight support (2048-point windows) does not resolve them,
-so the flight fit identifies only the levels, the floor shape and the shaft
-width, and takes the dynamics from the measurements. The split of the fit into
-two procedures follows from the resolution of the two supports, not from a
-choice.
+the expected periodogram [@whittle1953]. The bench support resolves the
+pedestals and the shaft cores, so the bench fit identifies the dynamics. The
+flight support (7.8 Hz bins) does not, so the flight fit identifies the
+levels, the floor and the speed laws, and takes the dynamics from priors and
+measurements. The two procedures follow from the two resolutions.
 
 # Known limits {#sec-limits}
 
-1. **One bench rig with a ladder per family.** The motor-family exponent and
-   the floor tilt are measured on DREGON (four motors) and on one AGH rotor.
-   The prior widths in @tbl-prior-laws carry this.
-2. **The odd family above $k \approx 5$** is resonance-shaped on DREGON and
-   invisible on AGH. Its level law is a prior, not a measurement.
-3. **The pedestal split** (amplitude vs phase) is measured on the bench only.
-   In flight it is not identifiable from magnitudes. A phase-aware consumer
-   cannot use the rendered phase statistics.
-4. **The floor model** $F(f)\,s^{b(f)}$ describes a 2× speed span. The
-   extrapolation to 4× (standby to cruise on Michael's rig) is not tested.
-5. **The flight exponents are pinned.** A rig whose true aerodynamic exponent
-   differs from the bench value by 1 renders its comb 2.6 dB too high or too
-   low at 1.8× the reference speed. The regime-consistency check of
-   @sec-flight-fit bounds this.
-6. **Free-flight ladders are not used** for the speed laws (decision, Dmitrii,
-   2026-10-02): the per-clip levels and the wind confound them.
+1. **The amplitude/phase split** rests on the amplitude prior. No likelihood
+   term identifies it. The flicker check tests it on the bench only.
+2. **The phase pedestal in flight** is the prior median, not a measurement of
+   MD2.
+3. **One speed law per family over 3.2×** on MD2 is untested. The fallback is
+   the nv3r4 regime composition.
+4. **Resonance-shaped lines** (DREGON odd orders 9–13 at 0.4–1.6 kHz, the
+   multiples of 7 at 3.8–5.2 kHz) are not in the model.
+5. **Per-line scatter** is not in the model. The renderer gives every
+   microphone the rotor's mean line level times the pair EQ.
+6. **The floor rule** (summed per-rotor floors) is tested on one recording
+   (`motor_allMotors_70`).
 
 # Reproduce
 
-- Bench speed laws: `PYTHONPATH=src .venv/bin/python scripts/static_rig_scratch/speed_laws.py`
-  → `results/static_rig/single_rotor/speed_laws.{json,png}`.
-- AGH ladder: `scripts/static_rig_scratch/agh_speed_laws.py`,
-  `scripts/static_rig_scratch/agh_orders_plot.py`.
-- Per-order decoherence: `scripts/static_rig_scratch/one_rotor_coherence.py`
-  (see `docs/explainers/order-decoherence.qmd`).
-- Single-rotor quick fits: `src/experiments/static_rig/single_rotor.py`,
-  outputs in `results/static_rig/single_rotor/`.
-- nv3r4 fits and banks: `docs/experiments/noise-model-v3.md` § Round 4.
+- Bench speed laws: `scripts/static_rig_scratch/speed_laws.py` →
+  `results/static_rig/single_rotor/speed_laws.{json,png}`.
+- Per-order coherence: `scripts/static_rig_scratch/one_rotor_coherence.py`
+  (`docs/explainers/order-decoherence.qmd`).
+- Amplitude jitter: `results/static_rig/single_rotor/amplitude_jitter.json`.
+- Bench rounds R1–R3: `docs/experiments/noise-model-v4-bench.md`;
+  `docs/explainers/noise-v4-bench-fit.qmd`.
+- MD2 motor orders: `results/noise_v4/md2_motor_orders/`.
+- nv3r4: `docs/experiments/noise-model-v3.md` § Round 4.
 
 # References
 
