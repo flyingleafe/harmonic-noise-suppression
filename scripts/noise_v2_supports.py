@@ -345,8 +345,12 @@ def findings(index: dict[str, Any]) -> str:
                         + ", ".join(f"{v:.2f}" for v in (r.get("line_margin_db") or []))
                         + " dB (recording "
                         + ", ".join(f"{v:.2f}" for v in (r.get("line_margin_recording_db") or []))
-                        + f" dB), window {r['duration_s']:.2f} s, level deficit "
-                        f"{r['level_deficit_db']:.2f} dB"
+                        + f" dB), window {r['duration_s']:.2f} s"
+                        + (
+                            f", level deficit {r['level_deficit_db']:.2f} dB"
+                            if r.get("level_deficit_db") is not None
+                            else ""
+                        )
                         for r in fails
                     )
                 )
