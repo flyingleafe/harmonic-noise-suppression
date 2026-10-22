@@ -379,16 +379,20 @@ def cmd_insample(args: argparse.Namespace) -> int:
     pay = json.loads(Path(args.v4).read_text())
     keys = [r["key"] for r in pay["recordings"]]
     want = [k for k in keys if k.endswith("_80")] + ["motor_Motor1_50", "motor_Motor1_90"]
-    settings = [B.load_setting(k.split("_")[1], int(k.split("_")[2])) for k in want]
-    rig = B.build_rig(tuple(dict.fromkeys(s.motor for s in settings)), settings=settings)
+    # the payload's whole rig: per-recording parameters exist only for all of them
+    settings = [B.load_setting(k.split("_")[1], int(k.split("_")[2])) for k in keys]
+    motors = tuple(dict.fromkeys(r["motor"] for r in pay["recordings"]))
+    rig = B.build_rig(motors, settings=settings)
     model = B.RigModel(rig, device="cpu", kappa=float(pay["priors"]["floor_push_kappa"]))
     model.load_payload(pay)
     edges = _octave_bands(per_oct=6)
     centres = np.sqrt(edges[:-1] * edges[1:])
     rows = []
     fig, axes = plt.subplots(len(want), 2, figsize=(13, 2.7 * len(want)))
+    shown = [keys.index(k) for k in want]
     with torch.no_grad():
-        for j, (s, fz) in enumerate(zip(rig.settings, model.frozen)):
+        for row_i, j in enumerate(shown):
+            s, fz = rig.settings[j], model.frozen[j]
             f = np.asarray(fz.grid.freqs_hz)
             band = np.asarray(fz.band.cpu())
             comp = {k: v.cpu().numpy() for k, v in model.components(j).items()}
@@ -413,7 +417,7 @@ def cmd_insample(args: argparse.Namespace) -> int:
                     ),
                 )
             )
-            ax = axes[j, 0]
+            ax = axes[row_i, 0]
             for k, c in (
                 ("data", "black"),
                 ("model", "tab:red"),
@@ -428,7 +432,7 @@ def cmd_insample(args: argparse.Namespace) -> int:
             ax.set_title(f"{s.key} ({s.carrier:.1f} rev/s): sixth-octave, mic mean", fontsize=9)
             ax.grid(alpha=0.3, which="both")
             ax.set_ylabel("dB")
-            ax = axes[j, 1]
+            ax = axes[row_i, 1]
             sel = band & (f <= 600)
             ax.plot(f[sel], _db(parts["data"][sel]), color="black", lw=0.6, label="data")
             ax.plot(f[sel], _db(parts["model"][sel]), color="tab:red", lw=0.8, label="model")
