@@ -101,8 +101,8 @@ def _model(
         c_m=np.zeros(r - 1),
         alpha_a=np.asarray(5.0),
         alpha_m=np.asarray(-0.5),
-        b0=np.asarray(2.5),
-        b1=np.asarray(b1),
+        # b0 = 2.5 and b1 in the fit's band-edge coordinates (b >= 0 on the band)
+        **dict(zip(("u_blo", "u_bhi"), map(np.asarray, V4.floor_coords(2.5, b1)))),
         z=rng.normal(0.0, 0.7, NC),
         log_s=np.asarray(log_s),
         log_sigma_nu=np.asarray(math.log(3.0)),
@@ -208,7 +208,7 @@ def test_shaft_law_is_per_rotor_and_frame():
 
 
 @pytest.mark.parametrize(
-    "name", ["alpha_a", "alpha_m", "b0", "b1", "log_sigma_nu", "a_sigma", "log_s"]
+    "name", ["alpha_a", "alpha_m", "u_blo", "u_bhi", "log_sigma_nu", "a_sigma", "log_s"]
 )
 def test_objective_gradient_matches_finite_differences(name: str):
     """Every extra on: the accumulated gradient of a scalar site equals the

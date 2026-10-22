@@ -111,7 +111,7 @@ STATIC_SHARE_LN = (math.log(2.5e-3), 1.0)
 FLOOR_SHAPE_SD_MIN_DB = 1.0
 #: ``b(f)`` reads the frequency no lower than the band edge (contract).
 B_F_LO_HZ = SP.BAND_F_MIN
-B_F_REF_HZ = 2000.0
+B_F_REF_HZ = V4.B_F_REF_HZ
 #: The half-normal's median as a multiple of its scale.
 HALFNORMAL_MEDIAN = 0.6744897501960817
 #: Log-space coordinates are held inside +-LOG_BOX (nv3r4 ``fit.LOG_BOX``).
@@ -669,8 +669,8 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
         c_m=c_m[:-1],
         alpha_a=np.asarray(alpha_a0),
         alpha_m=np.asarray(alpha_m0),
-        b0=np.asarray(V4.B0[0]),
-        b1=np.asarray(V4.B1[0]),
+        # b(f) >= 0 over the band: fitted at the band edges (v4_priors)
+        **dict(zip(("u_blo", "u_bhi"), map(np.asarray, V4.floor_coords(V4.B0[0], V4.B1[0])))),
         z=z0,
         log_s=np.asarray(STATIC_SHARE_LN[0]),
         log_sigma_nu=np.asarray(V4.FLIGHT_SIGMA_NU_LN[0]),
@@ -759,8 +759,8 @@ class FlightV4Model:
                 "c_m",
                 "alpha_a",
                 "alpha_m",
-                "b0",
-                "b1",
+                "u_blo",
+                "u_bhi",
                 "z",
                 "log_s",
                 "log_sigma_nu",
@@ -777,12 +777,15 @@ class FlightV4Model:
 
     def values(self) -> dict[str, Tensor]:
         p = self.params
+        b0, b1 = V4.floor_exponents(p["u_blo"], p["u_bhi"])
         return dict(
             p,
             c_a_full=self._full_c(p["c_a"]),
             c_m_full=self._full_c(p["c_m"]),
             s=torch.exp(p["log_s"]),
             sigma_nu=torch.exp(p["log_sigma_nu"]),
+            b0=b0,
+            b1=b1,
         )
 
     def ctrl_db(self, z: Tensor | None = None) -> Tensor:
@@ -1002,8 +1005,7 @@ def init_from_payload(pay: dict[str, Any]) -> dict[str, np.ndarray]:
         c_m=a(h["c_motor_db"])[:-1],
         alpha_a=a(pr["alpha_aero"]),
         alpha_m=a(pr["alpha_motor"]),
-        b0=a(fl["b0"]),
-        b1=a(fl["b1"]),
+        **dict(zip(("u_blo", "u_bhi"), map(np.asarray, V4.floor_coords(fl["b0"], fl["b1"])))),
         z=a(fl["shape_z"]),
         log_s=np.log(a(fl["static_rel"])),
         log_sigma_nu=np.log(a(sh["sigma_nu_rad_s"])),

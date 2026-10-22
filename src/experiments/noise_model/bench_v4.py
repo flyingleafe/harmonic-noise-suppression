@@ -720,8 +720,8 @@ class RigModel:
             c_motor=P((p_motor - pbar_m).mean(axis=1)),
             alpha_aero=P(PR.ALPHA_AERO[0]),
             alpha_motor=P(PR.ALPHA_MOTOR[0]),
-            b0=P(PR.B0[0]),
-            b1=P(PR.B1[0]),
+            # b(f) >= 0 over the band: fitted at the band edges (v4_priors)
+            **dict(zip(("u_blo", "u_bhi"), map(P, PR.floor_coords(PR.B0[0], PR.B1[0])))),
             floor_mean_db=P(floor_mean),
             floor_z=P(_ridge_z(chol, self.sigma_b, ctrl - floor_mean)),
             **{name: P(v) for name, v in dyn.items()},
@@ -934,11 +934,16 @@ class RigModel:
         )
         return torch.cos(2.0 * math.pi * ang)
 
+    def floor_exps(self) -> tuple[Tensor, Tensor]:
+        """``(b0, b1)`` of the floor's speed exponent, from the edge coordinates."""
+        return PR.floor_exponents(self.params["u_blo"], self.params["u_bhi"])
+
     def floor_psd(self, j: int) -> Tensor:
         """One rotor's floor at recording ``j``'s speed on the PSD grid."""
-        p, fz = self.params, self.frozen[j]
+        fz = self.frozen[j]
         psd = fz.grid.floor.psd(self._floor_params())
-        b = p["b0"] + p["b1"] * torch.log2(torch.clamp(fz.floor_f, min=BAND_HZ[0]) / 2000.0)
+        b0, b1 = self.floor_exps()
+        b = b0 + b1 * torch.log2(torch.clamp(fz.floor_f, min=BAND_HZ[0]) / PR.B_F_REF_HZ)
         return psd * torch.exp(b * fz.log_s)
 
     def components(self, j: int) -> dict[str, Tensor]:
@@ -1008,8 +1013,8 @@ class RigModel:
             out
             + nrm(p["alpha_aero"], *PR.ALPHA_AERO)
             + nrm(p["alpha_motor"], *PR.ALPHA_MOTOR)
-            + nrm(p["b0"], *PR.B0)
-            + nrm(p["b1"], *PR.B1)
+            + nrm(self.floor_exps()[0], *PR.B0)
+            + nrm(self.floor_exps()[1], *PR.B1)
             + nrm(p["floor_mean_db"], rig.centres["floor_mean_db"], FLOOR_MEAN_SD_DB)
             + nrm(p["floor_z"], 0.0, 1.0)
             - self.kappa * self.cbar().sum()
@@ -1076,8 +1081,7 @@ class RigModel:
             c_motor=hier.get("c_motor_db", (p_motor - p_motor.mean(axis=0)).mean(axis=1)),
             alpha_aero=pr["alpha_aero"],
             alpha_motor=pr["alpha_motor"],
-            b0=fl["b0"],
-            b1=fl["b1"],
+            **dict(zip(("u_blo", "u_bhi"), PR.floor_coords(fl["b0"], fl["b1"]))),
             floor_mean_db=fl["mean_db"],
             floor_z=fl["shape_z"],
             u_amp=_uncapped(a(ped["sigma2_amp"])[:K], self.cap),
@@ -1236,6 +1240,7 @@ def group_vectors(model: RigModel) -> dict[str, np.ndarray]:
             ]
         )
         cbar = model.cbar().cpu().numpy()
+        p["b0"], p["b1"] = (t.cpu().numpy() for t in model.floor_exps())
     return dict(
         levels=np.concatenate([p["p_aero"].ravel(), p["p_motor"].ravel()]),
         exponents=np.array(
@@ -1534,6 +1539,8 @@ def _priors_block(model: RigModel) -> dict[str, Any]:
 def payload(model: RigModel, record: dict[str, Any], *, git: str | None = None) -> dict[str, Any]:
     """The ``noise-v4-fit/3`` bench payload of the DREGON rig."""
     p = {k: v.detach().cpu().numpy() for k, v in model.params.items()}
+    with torch.no_grad():
+        p["b0"], p["b1"] = (t.cpu().numpy() for t in model.floor_exps())
     rig = model.rig
     with torch.no_grad():
         s2A, gA = model.s2A().cpu().numpy(), model.gA().cpu().numpy()

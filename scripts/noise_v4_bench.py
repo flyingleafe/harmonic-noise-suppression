@@ -247,6 +247,9 @@ def cmd_planted(args: argparse.Namespace) -> int:
     )
 
     def P(m: Any, name: str) -> np.ndarray:
+        if name in ("b0", "b1"):
+            with torch.no_grad():
+                return m.floor_exps()[int(name == "b1")].cpu().numpy()
         return m.params[name].detach().cpu().numpy()
 
     # line visibility on the planted data: per (rotor, order) the median over

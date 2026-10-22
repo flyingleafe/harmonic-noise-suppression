@@ -32,6 +32,10 @@ __all__ = [
     "GAMMA_AMP_LOG_SD",
     "LAM_REF_LN",
     "PHASE_SIGMA2_MAX",
+    "B_EDGES_HZ",
+    "B_F_REF_HZ",
+    "floor_coords",
+    "floor_exponents",
     "PHASE_SIGMA2_LN",
     "PROFILE_LINE_SD_DB",
     "PROFILE_ROTOR_SD_DB",
@@ -59,6 +63,13 @@ ALPHA_AERO = (5.5, 1.0)
 ALPHA_MOTOR = (0.0, 2.0)
 B0 = (3.0, 1.0)
 B1 = (0.5, 0.25)
+#: The floor exponent ``b(f) = b0 + b1 log2(f / B_F_REF_HZ)`` is truncated to
+#: ``b >= 0`` over the likelihood band (``spectrum.BAND_F_MIN`` / ``BAND_F_MAX``):
+#: the broadband floor does not get quieter as the rotor speeds up at any
+#: frequency. ``b`` is linear in ``log f``, so the two band edges carry the
+#: constraint; the fit's coordinates are ``u = softplus^-1 b`` at the edges.
+B_F_REF_HZ = 2000.0
+B_EDGES_HZ = (30.0, 7900.0)
 
 #: Bench shaft law: sigma_nu = 2 pi f_ref eps s^a, lam = lam_ref s^b.
 EPS_HALF_NORMAL = 0.005
@@ -143,3 +154,33 @@ def pedestal_width(gamma, sigma2):
     """Power-weighted mean half-width ``gamma sigma2 / (1 - e^{-sigma2})`` of a
     bounded OU pedestal; works on numpy arrays and torch tensors alike."""
     return gamma * sigma2 / (-(-sigma2).expm1() if hasattr(sigma2, "expm1") else -np.expm1(-sigma2))
+
+
+def _edge_logs() -> tuple[float, float]:
+    lo, hi = B_EDGES_HZ
+    return math.log2(lo / B_F_REF_HZ), math.log2(hi / B_F_REF_HZ)
+
+
+def floor_exponents(u_lo, u_hi):
+    """``(b0, b1)`` from the edge coordinates: ``b = softplus(u) >= 0`` at both
+    band edges, the line through them in ``log2(f / B_F_REF_HZ)``; numpy arrays
+    or torch tensors alike."""
+    if hasattr(u_lo, "clamp_min"):
+        b_lo = (-u_lo.abs()).exp().log1p() + u_lo.clamp_min(0.0)
+        b_hi = (-u_hi.abs()).exp().log1p() + u_hi.clamp_min(0.0)
+    else:
+        b_lo, b_hi = np.logaddexp(0.0, u_lo), np.logaddexp(0.0, u_hi)
+    l_lo, l_hi = _edge_logs()
+    b1 = (b_hi - b_lo) / (l_hi - l_lo)
+    return b_lo - b1 * l_lo, b1
+
+
+def floor_coords(b0: float, b1: float, *, b_min: float = 0.01) -> tuple[float, float]:
+    """Inverse of :func:`floor_exponents`; an edge exponent under ``b_min``
+    (an untruncated start, e.g. the prior centre) starts at ``b_min``."""
+    l_lo, l_hi = _edge_logs()
+    out = []
+    for b in (b0 + b1 * l_lo, b0 + b1 * l_hi):
+        b = max(float(b), b_min)
+        out.append(b + math.log(-math.expm1(-b)))  # softplus^-1, overflow-safe
+    return out[0], out[1]
