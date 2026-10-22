@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -107,21 +108,40 @@ def eta_report(
     band_hz: float = 200.0,
     coarsen: tuple[int, ...] = (1, 2, 4, 8),
     log: Any = print,
+    save: Path | None = None,
 ) -> dict[str, Any]:
     """``eta`` at ``band_hz`` blocks and at blocks ``coarsen`` times wider (the
-    block-size check), plus one block per recording."""
+    block-size check), plus one block per recording; ``save`` writes ``H``,
+    ``P`` and the block scores (``.npz``) for re-analysis."""
     names = [(n, t.numel()) for n, t in free_params(model)]
     t0 = time.perf_counter()
     G, index = block_scores(model, band_hz)
     log(f"[eta] {G.shape[0]} block scores ({time.perf_counter() - t0:.0f} s)")
     H, P = hessians(model, log=log)
     Hp = H + P
-    # the posterior curvature is positive definite at the MAP; a tiny ridge
-    # guards round-off in directions the prior barely holds
+    # at a MAP the posterior curvature is positive definite. Directions of
+    # non-positive curvature mean the payload is not a minimum: they are
+    # counted and left out (the inverse lives on the positive subspace), and
+    # eta is not reported if any is materially negative
     w, V = np.linalg.eigh(Hp)
-    floor = max(float(w.max()) * 1e-12, 1e-12)
-    inv = (V / np.maximum(w, floor)) @ V.T
+    tol = float(np.abs(w).max()) * 1e-10
+    keep = w > tol
+    n_neg = int((w < -tol).sum())
+    inv = (V[:, keep] / w[keep]) @ V[:, keep].T
     p_eff = float(np.trace(inv @ H))
+    at_minimum = n_neg == 0
+    if save is not None:
+        save.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            save,
+            H=H,
+            P=P,
+            G=G,
+            recording=np.asarray([b["recording"] for b in index]),
+            band=np.asarray([b["band"] for b in index]),
+            names=np.asarray([n for n, _ in names]),
+            sizes=np.asarray([s for _, s in names]),
+        )
     rec = np.asarray([b["recording"] for b in index])
     band = np.asarray([b["band"] for b in index])
 
@@ -132,7 +152,8 @@ def eta_report(
         C = S - S.mean(axis=0, keepdims=True)
         J = (B / max(B - 1, 1)) * (C.T @ C)
         tr = float(np.trace(inv @ J))
-        return dict(n_blocks=int(B), tr_Hinv_J=tr, eta=p_eff / tr if tr > 0 else math.nan)
+        eta = p_eff / tr if tr > 0 and at_minimum else math.nan
+        return dict(n_blocks=int(B), tr_Hinv_J=tr, eta=eta)
 
     by_size = {}
     for c in coarsen:
@@ -144,6 +165,9 @@ def eta_report(
         params=[dict(name=n, size=s) for n, s in names],
         p_eff=p_eff,
         hessian_min_eig=float(w.min()),
+        n_negative_curvature=n_neg,
+        at_minimum=at_minimum,
+        n_dropped_directions=int((~keep).sum()),
         by_block=by_size,
         wall_s=time.perf_counter() - t0,
     )
