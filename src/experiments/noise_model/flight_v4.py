@@ -101,6 +101,7 @@ __all__ = [
     "FlightMeasured",
     "FlightV4Model",
     "OptimV4",
+    "alpha_m_coord",
     "FLIGHT_V4_MODE",
     "MD2_BLADES",
     "MD2_POLE_PAIRS",
@@ -149,6 +150,20 @@ DEFAULT_WANDER = "results/noise_v3/wander/michaels.json"
 
 def _t(v: Any, ref: Tensor) -> Tensor:
     return torch.as_tensor(np.asarray(v, dtype=np.float64), dtype=torch.float64, device=ref.device)
+
+
+def _alpha_m(u: Tensor) -> Tensor:
+    """``alpha_motor = A tanh(u / A)``, ``A =`` :data:`.v4_priors.ALPHA_MOTOR_MAX`:
+    the truncation of its N(0, 2) prior (MAP in ``u`` needs no Jacobian, as for
+    the bench's capped coordinates)."""
+    return V4.ALPHA_MOTOR_MAX * torch.tanh(u / V4.ALPHA_MOTOR_MAX)
+
+
+def alpha_m_coord(alpha_m: float) -> np.ndarray:
+    """The coordinate ``u`` of :func:`_alpha_m`; values at or past the bound
+    start just inside it (0.999 A)."""
+    a = V4.ALPHA_MOTOR_MAX
+    return np.asarray(a * math.atanh(float(np.clip(alpha_m / a, -0.999, 0.999))))
 
 
 def _git_sha() -> str | None:
@@ -719,7 +734,7 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
         pbar_m=pbar_m,
         c_m=c_m[:-1],
         alpha_a=np.asarray(alpha_a0),
-        alpha_m=np.asarray(alpha_m0),
+        u_alpha_m=alpha_m_coord(alpha_m0),
         # b(f) >= 0 over the band: fitted at the band edges (v4_priors)
         **dict(zip(("u_blo", "u_bhi"), map(np.asarray, V4.floor_coords(V4.B0[0], V4.B1[0])))),
         z=z0,
@@ -819,7 +834,7 @@ class FlightV4Model:
             "pbar_m",
             "c_m",
             "alpha_a",
-            "alpha_m",
+            "u_alpha_m",
             "u_blo",
             "u_bhi",
             "z",
@@ -852,6 +867,7 @@ class FlightV4Model:
             p,
             c_a_full=self._full_c(p["c_a"]),
             c_m_full=self._full_c(p["c_m"]),
+            alpha_m=_alpha_m(p["u_alpha_m"]),
             s=torch.exp(p["log_s"]),
             sigma_nu=torch.exp(p["log_sigma_nu"]),
             b0=b0,
@@ -1122,7 +1138,7 @@ def init_from_payload(pay: dict[str, Any]) -> dict[str, np.ndarray]:
         pbar_m=a(h["pbar_motor_db"]),
         c_m=a(h["c_motor_db"])[:-1],
         alpha_a=a(pr["alpha_aero"]),
-        alpha_m=a(pr["alpha_motor"]),
+        u_alpha_m=alpha_m_coord(float(pr["alpha_motor"])),
         **dict(
             zip(
                 ("u_blo", "u_bhi"),
@@ -1488,6 +1504,7 @@ def priors_record(model: FlightV4Model) -> dict[str, Any]:
         rotor_offset_rule="sum over rotors pinned at 0",
         alpha_aero=list(V4.ALPHA_AERO),
         alpha_motor=list(V4.ALPHA_MOTOR),
+        alpha_motor_max=V4.ALPHA_MOTOR_MAX,
         b0=list(V4.B0),
         b1=list(V4.B1),
         floor_z="N(0, I), control values mu + sigma_B (L z)",

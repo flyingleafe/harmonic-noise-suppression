@@ -14,6 +14,7 @@ import numpy as np
 __all__ = [
     "ALPHA_AERO",
     "ALPHA_MOTOR",
+    "ALPHA_MOTOR_MAX",
     "AMP_GROUPS",
     "AMP_LOG_SD",
     "B0",
@@ -61,6 +62,13 @@ PROFILE_ROTOR_SD_DB = 2.5
 #: Speed exponents (line power ~ s^alpha; floor ~ s^{b0 + b1 log2(f/2 kHz)}).
 ALPHA_AERO = (5.5, 1.0)
 ALPHA_MOTOR = (0.0, 2.0)
+#: Hard bound |alpha_motor| <= ALPHA_MOTOR_MAX (the flight fit's truncation of
+#: the N(0, 2) prior at 2 sd). The bench measures the motor-line exponents at
+#: -2.1..+1.9 (k = 84, four motors; static-rig speed_laws.json). A per-regime
+#: flight pool spans 1.4-1.9x in speed, so its Whittle term can push alpha_motor
+#: far out (MD2 cruise-only r5: -40.8, standby-only: +17.5), and the regime
+#: composition then extrapolates the motor lines by 10^10 into the ramp.
+ALPHA_MOTOR_MAX = 4.0
 B0 = (3.0, 1.0)
 B1 = (0.5, 0.25)
 #: The floor exponent ``b(f) = b0 + b1 log2(f / B_F_REF_HZ)`` is truncated to
