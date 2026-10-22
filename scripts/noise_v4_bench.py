@@ -360,7 +360,8 @@ def cmd_planted(args: argparse.Namespace) -> int:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     """A continuation: the convergence loop of :func:`bench_v4.fit_rig` from a
-    payload (no Adam, no evidence freeze), written as ``<stem>__c<n+1>``."""
+    payload (no Adam, no evidence freeze), written as ``<stem>__c<n+1>``;
+    ``--kappa`` continues under another floor push (``__kappa<K>`` in the stem)."""
     import torch
 
     from experiments.noise_model import bench_v4 as B
@@ -372,7 +373,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     model, rec = B.fit_rig(
         rig,
         seed=int(src["optimiser"]["seed"]),
-        kappa=float(src["priors"]["floor_push_kappa"]),
+        kappa=float(src["priors"]["floor_push_kappa"] if args.kappa is None else args.kappa),
         lbfgs_iters=args.lbfgs_iters,
         device=args.device,
         flat_shaft=bool(src["params"]["shaft"]["pinned"]),
@@ -384,7 +385,10 @@ def cmd_resume(args: argparse.Namespace) -> int:
     pay["optimiser"]["resumed_from"] = str(src_path)
     m = re.fullmatch(r"(.*?)(?:__c(\d+))?", src_path.stem)
     assert m is not None
-    path = args.out / "restarts" / f"{m.group(1)}__c{int(m.group(2) or 0) + 1}.json"
+    stem = m.group(1)
+    if args.kappa is not None:
+        stem = re.sub(r"__kappa[^_]+", f"__kappa{args.kappa:g}", stem)
+    path = args.out / "restarts" / f"{stem}__c{int(m.group(2) or 0) + 1}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(pay))
     print(
@@ -564,6 +568,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from", dest="source", required=True, help="a noise-v4-fit/3 bench payload")
     p.add_argument("--lbfgs-iters", type=int, default=1200, help="loop passes of a quarter")
     p.add_argument("--deadline-min", type=float, default=52.0)
+    p.add_argument("--kappa", type=float, default=None, help="default: the source's kappa")
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
     p.set_defaults(func=cmd_resume)
