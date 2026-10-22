@@ -148,6 +148,35 @@ their floors differ by up to 170 dB below 2 kHz: s0 is at −216 dB at 109 Hz,
 where s2 is at −46 dB. The floor push $\kappa$ of the spec exists for this
 case. Rounds 4 and 5 used $\kappa = 0$.
 
+## The bench fit itself is good on the bench
+
+Is the bench fit simply bad? No. On its own recordings it fits well.
+@fig-insample evaluates the round-5 bench fit
+(`results/noise_v4/bench/restarts/dregon__kappa0__r5__s2.json`) with the
+bench fit's own forward model on six of its 20 recordings: the four motors at
+80 % throttle and motor 1 at 50 % and 90 %.
+
+![The round-5 bench fit (r5 s2) on its own recordings, mic mean. Left:
+sixth-octave bands, 30 Hz–8 kHz. Black: data. Red: model. Orange: lines.
+Green: floor. Grey: rotor-off ambient. The per-recording bench wind is in the
+model total but not drawn separately. Right: every bin, 30–600 Hz. Above about
+400 Hz the green floor reads ≤ 10⁻³⁰ in alternate bins and is drawn at the
+−300 dB clip; it is 55–60 dB below the total there either way.](noise-model-v4-dregon-gap/fig_bench_insample.png){#fig-insample}
+
+The mean absolute sixth-octave error is 1.6–2.6 dB at 80–90 % throttle and
+3.2 dB at 50 %. The error by band is −1.4 to +1.3 dB below 300 Hz, +0.8 to
++1.7 dB at 300 Hz–2 kHz, and −0.9 to +1.5 dB above 2 kHz
+(`figdata_insample.json`; job `nv4-insample-r5b-72401b`).
+
+But look at *what* fits the bench. Between 400 Hz and 2 kHz the floor is
+55–60 dB below the model total. The broadband level there is made entirely of
+line pedestals. Below 150 Hz the floor is 7–17 dB below the total; the rest is
+the per-recording bench wind. So the bench data explain the broadband noise
+with pedestals and bench wind, and leave the floor almost free. INFERENCE:
+this is why the floor wanders between restarts, and why a floor taken from the
+bench cannot predict the flight broadband level. The flight stage fits that
+level where it is observed.
+
 ## Cause 1: no flight wind
 
 In DREGON flight the downwash hits some microphones much more than others.
