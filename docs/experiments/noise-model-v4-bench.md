@@ -258,4 +258,50 @@ the measurement (4.7/5.0 at k ≤ 20, 6.2 on the BPF), while α^a alone reads
 trend is an order dependence of the exponent, not a free offset.
 <!-- source: results/noise_v4/bench_law/restarts/Motor{1,3}__s0__nocap{,__long,__dc__long}.json, Motor{1,3}__s0__lam12__nocap.json -->
 
+### Round 4 — the v4 spec: one model, two fits (2026-10-21)
+
+Code at `b2de6db3` (bench, flight, renderer) and `453b847c` (flight: one
+shared floor, shaft speed law). Spec: `docs/explainers/noise-model-v4.qmd`.
+
+**A0, phase-pedestal width** (`nv4-a0-phasewidth-ff6078`, uni-cpu, 20
+recordings). New instrument (`scripts/noise_v4_phase_width.py`): the old
+20→50 ms jump was its band-flank floor. $c_W$ = p97.5/2.24: even orders
+6.94 Hz (n = 387), odd 30.68 Hz (n = 94); median W 1.0–1.6 Hz at k ≤ 20,
+8.7 Hz at k > 40 (even). Resolved lags only: 18.4 / 163 Hz.
+<!-- source: results/noise_v4/phase_width/{summary.json,findings.md} -->
+
+**Timing (A100).** Bench 15.3 M cells, 0.98–1.98 s per objective; L-BFGS
+0.29 s per evaluation; one restart 1125–1139 s, so the bench fits on
+uni-gpushort. Flight 4.75 M cells, 1.71 s; one restart ~910 s.
+
+**Bench restarts s1, s2** (`nv4-bench-s1-deb00a`, `nv4-bench-s2-aeb4e9`,
+κ = 0, Adam 1500 + L-BFGS 1200). Not converged (restart-pass gain 3.1e-3 /
+2.9e-3 nats/cell; floor moved 3.5 / 6.4 dB, exponents 0.29 / 0.42). They end
+662 k nats apart: α 5.37 / 4.22, β 1.00 / 0.15, b₀ 1.11 / 0.57, b₁ 0.89 / 1.54.
+The shaft agrees: σ_ν(80 rev/s) 0.72 / 0.74 rad/s, a_σ 1.11 / 1.56, λ_ref
+54.5 / 47.0 1/s, b_λ 2.54 / 2.45 (λ ×4.7 over the ladder). The floor
+collapses below 300 Hz (control values −103 to −213 dB at 30–260 Hz against
+−48 to −66 dB above 400 Hz): with κ = 0 nothing holds it there. The evidence
+freeze plus the restart and release passes end 826 nats worse than the
+L-BFGS pass (s1).
+<!-- source: results/noise_v4/bench/restarts/dregon__kappa0__s{1,2}.json params, optimiser -->
+
+**Flight, first launch: summed floor, flat shaft** (`nv4-flight-s01/s23`, 4
+restarts). Not converged (polish gain 2.1–2.7e-4 nats/cell). Restarts agree
+to 550 nats but the floor law is a rotor selector: b₀ 34.0–35.0, b₁ −6.7 to
+−7.3, s₀ 5.6–6.6 (prior median 2.5e-3); at cruise s^34 gives RFront 97 % of
+the floor, at standby the rotor floor is zero. α 4.04–4.07, β 7.96–8.68,
+σ_ν 6.36–6.44 rad/s. The flat σ_ν smears order 84 by 86 Hz (sd): the fitted
+expected periodogram is flat across the standby k = 84 lines, which stand
+5.4–16.2 dB over their neighbours in 5.4 Hz bins. Cruise k = 84 (6.2–7.7 kHz)
+is invisible at 44.1 kHz too. Decisions: one shared flight floor on the
+rotor-mean speed; the flight shaft size keeps its speed law (a_σ ~ N(1, 2)),
+rate pinned. Relaunched as group `nv4-flight2`.
+<!-- source: results/noise_v4/flight_r0_sumfloor_flatshaft/restarts/*.json;
+results/noise_v4/md2_motor_orders/fly125_{spectrogram,cruise_k84}_44k.png -->
+
+**Next.** κ from a planted check whose truth has a measured floor below
+400 Hz; then a longer bench schedule until the restart pass gains < 1e-4
+nats/cell; then the flat-shaft refit.
+
 ## Conclusion

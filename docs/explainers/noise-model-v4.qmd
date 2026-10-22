@@ -266,7 +266,7 @@ $$ {#eq-floor-exp}
   standby the rotor floor is zero and $s \approx 6$ carries it. The data show a
   rise of 12.5 dB at 6–7.5 kHz and 17 dB at 2.2–2.5 kHz from standby to
   cruise, a speed ratio of about 2.2, i.e. $b \approx 3.6$–5
-  (`results/noise_v4/flight/restarts/*__s{0..3}.json`, first launch).
+  (`results/noise_v4/flight_r0_sumfloor_flatshaft/restarts/*__s{0..3}.json`, first launch).
 - $s$: a static share for sound that does not scale with the rotor speed.
   Flight only; on the bench the ambient is measured.
 - $N_m(f)$: the measured ambient of the room. Bench only.
