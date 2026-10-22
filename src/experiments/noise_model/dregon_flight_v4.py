@@ -512,6 +512,8 @@ class LineRenderer:
         self.hw = self._t(ww / float(np.sum(w**2)))
 
     def _t(self, x: Any) -> Tensor:
+        if isinstance(x, Tensor):
+            return x.to(**self.dd)
         return torch.as_tensor(np.asarray(x, dtype=np.float64), **self.dd)
 
     def expected(
@@ -656,6 +658,8 @@ class FlightStageModel:
         return dict(MOVE_TOL, **(COHERENCE_MOVE_TOL if self.free_coherence else {}))
 
     def _t(self, x: Any) -> Tensor:
+        if isinstance(x, Tensor):
+            return x.to(**self.dd)
         return torch.as_tensor(np.asarray(x, dtype=np.float64), **self.dd)
 
     def _transform(self, psd: Tensor) -> Tensor:
