@@ -181,9 +181,14 @@ def cmd_flight(args: argparse.Namespace) -> int:
 
     # Fig 1: Welch PSD, mic 0, each window
     fig, axes = plt.subplots(len(keys), 1, figsize=(10, 2.6 * len(keys)), sharex=True)
+    inband = (f >= 30.0) & (f <= 7900.0)
     for ax, key in zip(axes, keys):
-        for n in names:
-            ax.semilogx(f, _db(spectra[key][n][0]), color=COLORS[n], lw=0.8, label=n)
+        curves = [_db(spectra[key][n][0]) for n in names]
+        for n, c in zip(names, curves):
+            ax.semilogx(f, c, color=COLORS[n], lw=0.8, label=n)
+        lo = min(float(np.min(c[inband])) for c in curves)
+        hi = max(float(np.max(c[inband])) for c in curves)
+        ax.set_ylim(lo - 3.0, hi + 3.0)
         ax.set_xlim(30, 8000)
         ax.set_ylabel("PSD (dB)")
         ax.set_title(f"{key}: mic 0", fontsize=10)
