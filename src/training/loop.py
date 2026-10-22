@@ -14,7 +14,7 @@ Two validation paths:
   :mod:`training.validation` every ``every_optimizer_steps`` optimizer steps,
   up to ``max_optimizer_steps``; :class:`~training.stopping.MultiMetricController`
   picks ``best_<score>_median.ckpt`` / ``best_<score>_raw.ckpt`` per primary
-  score and stops on the control score's saturation. Every round appends to
+  score and stops once none of the control scores improves. Every round appends to
   ``validation_history.jsonl`` and writes ``val_samples/round_<N>.npz``.
 * otherwise the per-sample :class:`~metrics.suite.MetricSuite` over
   ``data.valid`` once per epoch, logged only (no selection, no early stop).
@@ -599,7 +599,7 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
     Sets up the run dir + wandb, builds every component, then runs validation
     rounds until the step budget, the round cap (``epochs``) or the
     controller's saturation stop. Returns the final round, the optimizer-step
-    count and (full-panel runs) the control score's best median and raw values.
+    count and (full-panel runs) each control score's best median and raw values.
 
     ``artifact_store`` is dependency-injected for tests (an
     :class:`~training.artifacts.ArtifactStore` built around a fake
@@ -768,11 +768,11 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
     def summary(final_epoch: int) -> dict[str, float]:
         result = {"final_epoch": float(final_epoch), "optimizer_steps": float(optimizer_steps)}
         if controller is not None:
-            control = controller.control
-            if control in controller.best_smoothed:
-                result[f"best_{control}_median"] = controller.best_smoothed[control]
-            if control in controller.best_raw:
-                result[f"best_{control}_raw"] = controller.best_raw[control]
+            for control in controller.control:
+                if control in controller.best_smoothed:
+                    result[f"best_{control}_median"] = controller.best_smoothed[control]
+                if control in controller.best_raw:
+                    result[f"best_{control}_raw"] = controller.best_raw[control]
         return result
 
     epoch = start_epoch

@@ -1,0 +1,61 @@
+# rp_real.yaml plus a frozen panel of PRE-DRAWN rp_combdiv samples, for the
+# rp arms trained on the diverse static comb (docs/experiments/rp-synthetic.md).
+#
+# static_comb: 64 draws x 8 mics = 512 mono items of conf/online_mix/rp_combdiv.yaml
+# itself, drawn once at the start of the run from base_seed 771001 (training
+# streams from 20261022): 8 s like the real clips, flight_reuse 1 and
+# render_reuse 1 so every clip is its own drone, flight and render; speech and
+# SNR as the stream (LibriSpeech train-clean-100, U(-30, +5) dB), the silence arm
+# at its stream weight, augmentations stripped as on the real panel.
+#
+# Every rp_real score is unchanged (its pooled real* views name their datasets).
+# The stop waits on BOTH controls: the run continues while the 5-round median of
+# real_macro OR of static_comb still improves.
+defaults:
+  - rp_real
+  - _self_
+
+control: [real_macro, static_comb]
+
+datasets:
+  static_comb:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/rp_combdiv.yaml
+      n: 512
+      base_seed: 771001
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      render_reuse: 1
+      meta: {dataset: static_comb, source_type: speech}
+    iterable: false
+
+views:
+  static_comb: {where: {dataset: static_comb}}
+
+primary:
+  - dregon
+  - md2
+  - real_macro
+  - dregon_nosource
+  - dregon_source
+  - md2_nosource
+  - md2_source
+  - dregon_zero
+  - dregon_standby
+  - dregon_ramp
+  - dregon_cruise
+  - md2_zero
+  - md2_standby
+  - md2_ramp
+  - md2_cruise
+  - real
+  - real_nosource
+  - real_source
+  - real_zero
+  - real_standby
+  - real_ramp
+  - real_cruise
+  - static_comb

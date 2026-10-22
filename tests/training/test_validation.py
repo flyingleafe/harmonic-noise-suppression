@@ -45,7 +45,7 @@ def _panel_cfg(views: dict, *, clips=None, duration_s: float = 2.0, **extra):
             "views": views,
             "aggregates": extra.pop("aggregates", {}),
             "primary": extra.pop("primary", list(views)),
-            "control": extra.pop("control", next(iter(views))),
+            "control": extra.pop("control", [next(iter(views))]),
         }
     )
 
@@ -132,7 +132,7 @@ def test_plan_requires_the_control_among_primaries():
             _panel_cfg(
                 {"dregon": {"where": {"dataset": "dregon"}}},
                 primary=["dregon"],
-                control="real_macro",
+                control=["real_macro"],
             )
         )
 

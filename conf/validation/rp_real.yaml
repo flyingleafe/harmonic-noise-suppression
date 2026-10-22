@@ -13,8 +13,8 @@ num_workers: null
 smoothing_window: 5
 min_relative_improvement: 0.01
 min_rounds: 50  # 25k steps, a quarter of the budget
-final_patience: 30  # 15k stale rounds of the control's median; both conditions in parallel
-control: real_macro
+final_patience: 30  # 15k stale rounds of the controls' medians; both conditions in parallel
+control: [real_macro]  # the run stops once NONE of these improves (training/stopping.py)
 
 datasets:
   real:
@@ -43,15 +43,16 @@ views:
   md2_ramp: {where: {dataset: md2}, regime: ramp}
   md2_cruise: {where: {dataset: md2}, regime: cruise}
   # pooled over both datasets, frame-weighted; the same `real*` names are the
-  # contract for a future synthetic panel (`synth*`). The control `real_macro`
-  # (aggregate below) is the macro mean of the two datasets.
-  real: {where: {}}
-  real_nosource: {where: {source_type: nosource}}
-  real_source: {where: {source_type: [loudspeaker, mixed]}}
-  real_zero: {where: {}, regime: zero}
-  real_standby: {where: {}, regime: standby}
-  real_ramp: {where: {}, regime: ramp}
-  real_cruise: {where: {}, regime: cruise}
+  # contract for a synthetic panel added beside this one (rp_real_combdiv.yaml),
+  # hence the explicit dataset predicate. The control `real_macro` (aggregate
+  # below) is the macro mean of the two datasets.
+  real: {where: {dataset: [dregon, md2]}}
+  real_nosource: {where: {dataset: [dregon, md2], source_type: nosource}}
+  real_source: {where: {dataset: [dregon, md2], source_type: [loudspeaker, mixed]}}
+  real_zero: {where: {dataset: [dregon, md2]}, regime: zero}
+  real_standby: {where: {dataset: [dregon, md2]}, regime: standby}
+  real_ramp: {where: {dataset: [dregon, md2]}, regime: ramp}
+  real_cruise: {where: {dataset: [dregon, md2]}, regime: cruise}
 
 aggregates:
   real_macro: {dregon: 0.5, md2: 0.5}

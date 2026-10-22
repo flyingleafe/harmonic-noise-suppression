@@ -12,4 +12,4 @@ The `all`-stream twin of `rp_pyrseplstm_k64_alllab` (Dmitrii, 2026-10-22): pyram
 
 ## Conclusion
 
-Defined 2026-10-22; not yet run.
+Job `rp-pyrseplstm-k64-all-d5d991` (vast A100-80, 2026-10-22, commit `459a84d6`). Best `real_macro` median **2.81** at step 5 000 (round 9); saturation stop at step 25 000 (round 50, `min_rounds`), the lowest single round 2.57. At the selected round: dregon 3.50, md2 2.12; pooled zero 4.56, standby 5.45, ramp 10.78, cruise 1.30. Against the k ≤ 84 twin `rp_pyrseplstm_all` (3.01) the harmonic cap helps on the plain stream too, but the labelaug arm (2.52, md2 1.14) stays ahead: the plain-stream run selects early and is weak at zero / standby and on MD2.

@@ -52,7 +52,7 @@ import logging
 import os
 import pickle
 import zlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -64,7 +64,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import Dataset, IterableDataset
 
 from data_processing.frames import audio_series as _audio_series
-from data_processing.frames import get_meta, meta_dict
+from data_processing.frames import get_meta, meta_dict, with_meta
 from data_processing.frames import rps_series as _rps_series
 from data_processing.streams import (
     iter_published_frames,
@@ -451,6 +451,22 @@ def apply_flight_reuse(cfg: Any, flight_reuse: int | None) -> Any:
     for src in cfg.sources.noise:
         if "rps" in src:
             src.rps.flight_reuse = int(flight_reuse)
+    return cfg
+
+
+def apply_render_reuse(cfg: Any, render_reuse: int | None) -> Any:
+    """Override ``sources.noise[*].render_reuse`` in place where a source has one.
+
+    Like ``flight_reuse``, render reuse is a TRAINING economy (one render cut
+    into ``render_reuse`` windows); on a fixed validation set it repeats one
+    render across consecutive clips, and when the clip is as long as the render
+    every window is the whole render. Validation sets pass 1.
+    """
+    if render_reuse is None:
+        return cfg
+    for src in cfg.sources.noise:
+        if "render_reuse" in src:
+            src.render_reuse = int(render_reuse)
     return cfg
 
 
@@ -1307,6 +1323,10 @@ class FixedSynthFrameDataset(Dataset):
     synthetic validation number is directly comparable with a real one. Set
     ``augment=True`` to select on the augmented task the model actually
     optimizes.
+
+    ``meta`` joins a meta-predicate panel (:mod:`training.validation`): every
+    frame gets those keys plus ``clip_index`` = the stream's ``sample_id``, which
+    the per-mic frames of one draw share.
     """
 
     def __init__(
@@ -1320,6 +1340,8 @@ class FixedSynthFrameDataset(Dataset):
         flight_reuse: int | None = None,
         speech: bool | None = None,
         cache_path: str | Path | None = None,
+        render_reuse: int | None = None,
+        meta: Mapping[str, Any] | None = None,
     ):
         cache = Path(cache_path) if cache_path is not None else None
         if cache is not None and cache.is_file():
@@ -1330,6 +1352,7 @@ class FixedSynthFrameDataset(Dataset):
                     f"invalid fixed-synthetic validation cache {cache}: expected {n} frames"
                 )
             self._frames = frames
+            self._tag(meta)
             return
         cfg = OmegaConf.load(path) if isinstance(path, str) else path
         cfg.base_seed = int(base_seed)
@@ -1341,6 +1364,7 @@ class FixedSynthFrameDataset(Dataset):
                     if key in stage:
                         del stage[key]
         apply_flight_reuse(cfg, flight_reuse)
+        apply_render_reuse(cfg, render_reuse)
         apply_speech_override(cfg, speech)
         stream = OnlineMixFrameDataset.from_config(cfg, flatten_channels=flatten_channels)
         self._frames: list[td.Frame] = []
@@ -1354,6 +1378,14 @@ class FixedSynthFrameDataset(Dataset):
             with tmp.open("wb") as handle:
                 pickle.dump(self._frames, handle, protocol=pickle.HIGHEST_PROTOCOL)
             tmp.replace(cache)
+        self._tag(meta)
+
+    def _tag(self, meta: Mapping[str, Any] | None) -> None:
+        if meta:
+            self._frames = [
+                with_meta(frame, **dict(meta), clip_index=int(get_meta(frame, "sample_id")))
+                for frame in self._frames
+            ]
 
     def __len__(self) -> int:
         return len(self._frames)

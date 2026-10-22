@@ -101,7 +101,8 @@ class ValidationConfig:
     ``views`` are meta predicates (``{where: {<meta key>: value | [values]},
     regime: <name>}``) over the concatenated ``datasets``; ``aggregates`` are
     weighted sums of views; ``primary`` scores get median and raw best
-    checkpoints; ``control`` alone drives the saturation stop (see
+    checkpoints; the ``control`` scores alone drive the saturation stop, which
+    waits until none of them improves (see
     ``training.stopping.MultiMetricController``).
     """
 
@@ -114,7 +115,7 @@ class ValidationConfig:
     views: dict[str, dict[str, Any]] = field(default_factory=dict)
     aggregates: dict[str, dict[str, float]] = field(default_factory=dict)
     primary: list[str] = field(default_factory=list)
-    control: str = "real_macro"
+    control: list[str] = field(default_factory=lambda: ["real_macro"])
     smoothing_window: int = 5
     min_rounds: int = 50
     min_relative_improvement: float = 0.01

@@ -35,6 +35,7 @@ from losses._common import get_tensor
 from metrics.regimes import REGIMES, frame_regimes
 from metrics.rps import batched_pit_frame_errors
 from training.config import build_dataset
+from training.stopping import control_scores
 
 __all__ = [
     "CLIP_KEY",
@@ -66,7 +67,7 @@ class ValidationPlan:
     views: tuple[ResolvedView, ...]
     aggregates: dict[str, dict[str, float]]
     primary: tuple[str, ...]
-    control: str
+    control: tuple[str, ...]
     clip_ids: np.ndarray  # (N,) dense clip id, unique per (dataset, clip_index)
     clip_index: np.ndarray  # (N,) meta clip_index
     channel: np.ndarray  # (N,) meta channel, -1 when absent
@@ -190,9 +191,10 @@ def build_validation_plan(cfg: Any) -> ValidationPlan:
     missing_primary = set(primary) - known
     if missing_primary:
         raise ValueError(f"validation.primary contains unknown scores {sorted(missing_primary)}")
-    control = str(cfg.control)
-    if control not in primary:
-        raise ValueError(f"validation.control {control!r} must be a primary score")
+    control = control_scores(_plain(cfg.control))
+    unknown_control = [name for name in control if name not in primary]
+    if unknown_control:
+        raise ValueError(f"validation.control {unknown_control} must be primary scores")
 
     dense = {key: i for i, key in enumerate(dict.fromkeys(clip_keys))}
     return ValidationPlan(

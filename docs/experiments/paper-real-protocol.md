@@ -183,6 +183,9 @@ under the earlier `min_rounds` 40 — the earliest the rule allows, not
 "20k + 15k = 35k" as the 2026-10-14 text wrongly claimed.) An arm that
 stops early never reaches the cosine tail, so arms differ in realised
 budget; every table reports the stopping step next to the score.
+`validation.control` is a list (2026-10-22): real arms use `[real_macro]`;
+synthetic arms (`rp-synthetic.md`) use `[real_macro, static_comb]`, and
+`stale_rounds` then counts rounds since EITHER median last improved.
 
 **Max LR: 1e-3 for every model** (decided 2026-10-15, Dmitrii) — the LR
 each architecture we build on was published with, so the choice is
@@ -602,6 +605,7 @@ checkpoints, `real_macro` on rp_real; per-view rows in the JSONs):
 | `rp_harmof0_l2cqt_all` (HarmoF0 trunk, CQT front end) | 2.56 | 1.50 | 4.79 | 9.52 | 1.47 | front end alone: STFT 2.62 → CQT 2.56, all md2 cruise |
 | old CQT HPPNet L2 + dense ConvLSTM (`real_r4_hppnet_l2convlstm_unified`, labelaug, k ≤ 9) | 2.59 | 0.17 | 4.73 | 7.95 | 1.71 | frozen build `hppnet_l2_convlstm_r4legacy`; dregon 3.90, md2 1.29, DREGON cruise 2.80 (2026-10-22) |
 | `rp_pyrseplstm_k64_alllab` (separable ConvLSTM, k ≤ 64 at training) | 2.52 | 2.08 | 3.65 | 6.12 | 1.76 | dregon 3.89, md2 1.14: both drones gain over k ≤ 84 (2.74), unlike the knock-out |
+| `rp_pyrseplstm_k64_all` (k ≤ 64, plain stream) | 2.81 | 4.56 | 5.45 | 10.78 | 1.30 | dregon 3.50, md2 2.12; best median at step 5k, saturation stop at 25k (raw low 2.57); k ≤ 84 twin 3.01 (2026-10-22) |
 
 Readings: (1) held-out plain-stream rows cluster at 2.56–2.65 across four
 families; no architecture is ahead by more than the ±0.3 round scatter.

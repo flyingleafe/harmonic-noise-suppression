@@ -1,5 +1,5 @@
 """Behaviour of ``training.stopping.MultiMetricController``: dual-best
-bookkeeping per score and the saturation stop on the control score."""
+bookkeeping per score and the saturation stop on the control scores."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def _cfg(**overrides):
         "min_relative_improvement": 0.01,
         "min_rounds": 40,
         "final_patience": 30,
-        "control": "real",
+        "control": ["real"],
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -64,6 +64,29 @@ def test_only_the_control_score_keeps_a_run_alive():
     assert controller.best_smoothed["md2_ramp"] == pytest.approx(8.0 * 0.95**37)
 
 
+def test_a_run_stops_only_once_no_control_score_improves():
+    """Two controls: the real score worsens from its first window on while the
+    synthetic one keeps improving. The run outlives the real score's own
+    saturation (round 35) and stops exactly ``final_patience`` rounds after the
+    synthetic median last improved."""
+    controller = MultiMetricController(
+        _cfg(min_rounds=0, control=["real", "static_comb"]), ("real", "static_comb")
+    )
+    series = [{"real": 3.0 * 1.02**i, "static_comb": 8.0 * 0.97 ** min(i, 59)} for i in range(200)]
+    last_improvement = 0
+    stop_round = None
+    for round_index, scores in enumerate(series, start=1):
+        verdict = controller.step(scores)
+        if "static_comb" in verdict.improved_median:
+            last_improvement = round_index
+        if verdict.stop_reason is not None:
+            stop_round = round_index
+            break
+    assert controller.best_smoothed["real"] == pytest.approx(3.0 * 1.02**2)  # round 5 only
+    assert last_improvement > 35
+    assert stop_round == last_improvement + 30
+
+
 def test_raw_best_tracks_single_round_dips_the_median_ignores():
     controller = MultiMetricController(_cfg(smoothing_window=3, min_rounds=0), ("real",))
     first = controller.step({"real": 5.0})
@@ -103,7 +126,9 @@ def test_resumed_controller_reaches_the_same_verdicts():
 
 def test_control_must_be_a_tracked_score_and_scores_must_be_finite():
     with pytest.raises(ValueError, match="control"):
-        MultiMetricController(_cfg(control="real"), ("dregon", "md2"))
+        MultiMetricController(_cfg(control=["real"]), ("dregon", "md2"))
+    with pytest.raises(ValueError, match="list"):
+        MultiMetricController(_cfg(control="real"), ("real",))
     controller = MultiMetricController(_cfg(), ("real",))
     with pytest.raises(ValueError, match="non-finite"):
         controller.step({"real": float("nan")})

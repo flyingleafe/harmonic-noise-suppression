@@ -7,13 +7,16 @@ least ``min_relative_improvement`` (relative, i.e. on a log scale, so every
 score is judged scale-free). The loop links ``best_<score>_raw.ckpt`` /
 ``best_<score>_median.ckpt`` to ``last.ckpt`` on those verdicts.
 
-The stop is decided on the CONTROL score alone (``validation.control``, the
-protocol's ``real``): ``stale_rounds`` counts full-window rounds since the
-control's median last improved, and the run stops (``"saturation"``) once
-``rounds_completed >= min_rounds`` and ``stale_rounds >= final_patience``.
-The other primaries only select checkpoints — a sub-panel cell drifting down
-by 1 % cannot keep a converged run alive. The controller never touches the
-optimizer: the LR is a pure function of the step count (``training.loop``).
+The stop is decided on the CONTROL scores alone (``validation.control``, a
+list: the protocol's ``[real_macro]``, or ``[real_macro, static_comb]`` for a
+synthetic-trained arm): ``stale_rounds`` counts full-window rounds since the
+median of ANY control score last improved, and the run stops
+(``"saturation"``) once ``rounds_completed >= min_rounds`` and
+``stale_rounds >= final_patience``. So a run that still improves on one
+control keeps training while it gets worse on another. The other primaries
+only select checkpoints — a sub-panel cell drifting down by 1 % cannot keep a
+converged run alive. The controller never touches the optimizer: the LR is a
+pure function of the step count (``training.loop``).
 
 A non-finite round never reaches the controller (it raises on one): the loop
 stops the run (``"nonfinite"``) before anything for that round is
@@ -30,7 +33,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["STATE_KEY", "MultiValidationVerdict", "MultiMetricController"]
+__all__ = ["STATE_KEY", "MultiValidationVerdict", "MultiMetricController", "control_scores"]
 
 STATE_KEY = "multi_validation"
 
@@ -43,18 +46,26 @@ class MultiValidationVerdict:
     stop_reason: str | None  # "saturation" | None
 
 
+def control_scores(control: Any) -> tuple[str, ...]:
+    """``validation.control`` as a tuple of score names (a non-empty list)."""
+    if isinstance(control, str) or not control:
+        raise ValueError(f"validation.control must be a non-empty list of scores, got {control!r}")
+    return tuple(str(name) for name in control)
+
+
 class MultiMetricController:
-    """Dual-best bookkeeping per score; saturation stop on the control score."""
+    """Dual-best bookkeeping per score; saturation stop on the control scores."""
 
     def __init__(self, cfg: Any, names: tuple[str, ...]) -> None:
         self.window = int(cfg.smoothing_window)
         self.min_log_improvement = math.log1p(float(cfg.min_relative_improvement))
         self.min_rounds = int(cfg.min_rounds)
         self.final_patience = int(cfg.final_patience)
-        self.control = str(cfg.control)
-        if self.control not in names:
+        self.control = control_scores(cfg.control)
+        missing = [name for name in self.control if name not in names]
+        if missing:
             raise ValueError(
-                f"validation.control {self.control!r} must be one of the primary scores {names}"
+                f"validation.control {missing} must be among the primary scores {names}"
             )
         self.names = names
         self.windows: dict[str, deque[float]] = {name: deque(maxlen=self.window) for name in names}
@@ -97,7 +108,7 @@ class MultiMetricController:
                 self.best_smoothed[name] = value
                 improved_median.append(name)
 
-        if self.control in improved_median:
+        if any(name in improved_median for name in self.control):
             self.stale_rounds = 0
         else:
             self.stale_rounds += 1
@@ -113,7 +124,7 @@ class MultiMetricController:
     def state_dict(self) -> dict[str, Any]:
         return {
             "names": list(self.names),
-            "control": self.control,
+            "control": list(self.control),
             "windows": {name: list(window) for name, window in self.windows.items()},
             "best_smoothed": dict(self.best_smoothed),
             "best_raw": dict(self.best_raw),
@@ -123,7 +134,11 @@ class MultiMetricController:
         }
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        if tuple(state["names"]) != self.names or state["control"] != self.control:
+        saved_control = state["control"]
+        # a run written before ``control`` became a list stored one name
+        if isinstance(saved_control, str):
+            saved_control = [saved_control]
+        if tuple(state["names"]) != self.names or tuple(saved_control) != self.control:
             raise ValueError("saved validation scores/control differ from the current config")
         self.windows = {
             name: deque((float(value) for value in state["windows"][name]), maxlen=self.window)

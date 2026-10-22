@@ -79,7 +79,7 @@ def _panel_validation(**overrides):
         },
         "aggregates": {"real_macro": {"dregon": 0.5, "md2": 0.5}},
         "primary": PRIMARY,
-        "control": "real_macro",
+        "control": ["real_macro"],
         "smoothing_window": 1,
         "min_rounds": 0,
         "min_relative_improvement": 0.01,
