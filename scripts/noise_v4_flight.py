@@ -19,6 +19,9 @@ are reduced afterwards to the lowest objective.
     # DREGON flight stage on a bench payload (module experiments.noise_model.dregon_flight_v4)
     python scripts/noise_v4_flight.py dregon \\
         --bench results/noise_v4/bench/restarts/dregon__kappa0__r5__s2.json --threads 8
+    # ... with the line coherence refitted in flight (GPU)
+    python scripts/noise_v4_flight.py dregon --free-coherence --device cuda --chunk-frames 64 \\
+        --bench results/noise_v4/bench/restarts/dregon__kappa10__r5__s2__c1.json --progress 1
 
 The pool is FLY125 standby (``michaels-standby``, 3 x 4 s) and cruise
 (``michaels-cruise`` FLY125 rows, 8 x 8 s), labels ``rps_refined``, the nv3r4
@@ -34,7 +37,9 @@ Writes ``<out>/restarts/<name>__flight_v4__s<seed>.json`` (``noise-v4-fit/3``);
 floor refitted and a static per-mic wind, fitted on the five 8 s
 ``dregon-floor`` segments with every bench line-shape, pedestal, shaft and
 pair-EQ parameter frozen (``--no-line-gain`` holds the gains at 0,
-``--max-frames`` for a smoke run).
+``--max-frames`` for a smoke run). ``--free-coherence`` also fits the phase
+pedestal per aerodynamic order and the shaft ``eps`` in flight and writes
+``<...>__coh.json``.
 """
 
 from __future__ import annotations
@@ -222,6 +227,7 @@ def cmd_reduce(args: argparse.Namespace) -> int:
 
 
 def cmd_dregon(args: argparse.Namespace) -> int:
+    import numpy as np
     import torch
 
     from experiments.noise_model import dregon_flight_v4 as DF
@@ -243,12 +249,23 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         max_passes=int(args.max_passes),
         progress=int(args.progress),
         line_gain=not args.no_line_gain,
+        free_coherence=bool(args.free_coherence),
     )
-    out = Path(args.out) / f"{DF.NAME}__flight_v4__{bench_path.stem}.json"
+    tag = "__coh" if args.free_coherence else ""
+    out = Path(args.out) / f"{DF.NAME}__flight_v4__{bench_path.stem}{tag}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(pay, indent=1))
     st, fl = pay["flight_stage"], pay["params"]["floor"]
     obj, conv = st["objective"], st["optimiser"]["convergence"]
+    coh = st["coherence"]
+    coh_line = (
+        f"coherence: eps {coh['fitted']['eps']:.4g} (sigma_ref "
+        f"{coh['fitted']['sigma_ref_rad_s']:.3g} rad/s; bench {coh['bench']['eps']:.4g}), "
+        f"median sigma2_phase {np.median(coh['fitted']['sigma2_phase']):.3g}, "
+        f"median W {np.median(coh['fitted']['width_phase_hz']):.3g} Hz"
+        if coh["free"]
+        else "coherence: frozen at the bench's"
+    )
     print(
         f"wrote {out}\n"
         f"objective {obj['total_nats']:.10g} nats (whittle {obj['whittle_nats']:.10g}, "
@@ -262,6 +279,7 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         f"wind_db {[round(w, 2) for w in pay['params']['wind']['wind_db']]}\n"
         f"line_gain_db {[round(g, 3) for g in st['line_gain']['gain_db']]} "
         f"(free {st['line_gain']['free']})\n"
+        f"{coh_line}\n"
         f"wall {time.time() - t0:.1f}s",
         flush=True,
     )
@@ -346,6 +364,13 @@ def main(argv: list[str] | None = None) -> int:
         "--no-line-gain",
         action="store_true",
         help="hold the per-rotor line gains at 0 (the bench line levels)",
+    )
+    d.add_argument(
+        "--free-coherence",
+        action="store_true",
+        help="also fit the line coherence in flight: the phase pedestal (sigma2_phi, W_phi) per "
+        "aerodynamic order and the shaft eps, under the bench / flight priors (output "
+        "<...>__coh.json)",
     )
     args = ap.parse_args(argv)
     if args.cmd == "dregon":
