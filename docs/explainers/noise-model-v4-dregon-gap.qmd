@@ -1,6 +1,6 @@
 ---
-title: "Why the v4 bench fit sounds wrong in DREGON flight"
-subtitle: "Real recording vs nv3r4 vs v4 round 4 on the five DREGON scoring windows"
+title: "Why v4 round 4 scores worse than nv3r4 in flight"
+subtitle: "Real recording vs nv3r4 vs v4 round 4 on the DREGON and MD2 scoring windows"
 date: 2026-10-22
 format:
   html:
@@ -47,7 +47,15 @@ more causes, both specific to flight:
 The round-5 priors fix neither of them. Only a flight stage can fix them: a fit
 of the wind and of the floor on flight recordings, with the bench lines held.
 
-# What is compared
+MD2 (Michael's drone) is a different case (@sec-md2). Its v4 fit is a flight
+fit, so it has its own flight floor and needs no wind. Its broadband spectrum is
+close to the real one. Its failures are local: a standby floor that is too high
+below 70 Hz, standby lines that are too weak, and cruise lines that are too wide.
+The round-5 priors target exactly these.
+
+# DREGON
+
+## What is compared
 
 - **real**: `DREGON-frames`, room 2, no source. The five scoring windows of
   4 s (free-flight, hovering, updown, rectangle, spinning), 8 mics.
@@ -59,10 +67,10 @@ of the wind and of the floor on flight recordings, with the bench lines held.
 Both models are rendered with the scorer's renderer and the scorer's carrier
 (the measured rotor speeds of each window), render seed 2001, all eight mics.
 The spectra are Welch estimates (Hann, 4096 samples, 75 % overlap, 16 kHz).
-Script: `scripts/noise_v4_dregon_gap.py flight`, job `nv4-dregon-gap2-8297a3`,
-git `d94b41a3`.
+Script: `scripts/noise_v4_dregon_gap.py flight`, job `nv4-gap-md2-574b70`,
+git `24276934`.
 
-# Listen
+## Listen
 
 Window free-flight, mic 0, 4 s each.
 
@@ -75,7 +83,7 @@ Window free-flight, mic 0, 4 s each.
 The real recording is a broadband roar with gusts. nv3r4 is a steady roar. v4 is
 a quieter set of tones.
 
-# Spectra
+## Spectra
 
 ![Welch PSD on mic 0, one panel per window. Black: real. Blue: nv3r4. Red: v4
 round 4.](noise-model-v4-dregon-gap/fig_psd_mic0.png){#fig-psd}
@@ -119,7 +127,7 @@ The scorer's LTAS error per window (mean absolute dB over the bands
 The missing power is at low frequency. (Numbers: `figdata_flight.json`,
 `windows[*].scorer_*`.)
 
-# Where the v4 power comes from
+## Where the v4 power comes from
 
 ![The v4 expected periodogram on free-flight mic 0, split into its parts.
 Orange: the lines (with pedestal and shaft). Green: the floor. Black: real.
@@ -140,7 +148,7 @@ their floors differ by up to 170 dB below 2 kHz: s0 is at −216 dB at 109 Hz,
 where s2 is at −46 dB. The floor push $\kappa$ of the spec exists for this
 case. Rounds 4 and 5 used $\kappa = 0$.
 
-# Cause 1: no flight wind
+## Cause 1: no flight wind
 
 In DREGON flight the downwash hits some microphones much more than others.
 nv3r4 has a **static per-mic wind** term for it: one level per mic, with a
@@ -172,7 +180,7 @@ The v4 renderer can already render this term. A payload of kind `flight` reads
 *recording* (it grows with throttle), so it is not a term of the rig. Nothing
 in the procedure gives v4 a flight wind for DREGON today.
 
-# Cause 2: the flight floor is higher than the bench floor
+## Cause 2: the flight floor is higher than the bench floor
 
 The calm mics 3 and 7 have almost no wind (−37 and −44 dB). Their v4 deficit is
 still −3.6 to −4.4 dB, and nv3r4 is at −3.3 to −3.6 dB on the same mics.
@@ -184,7 +192,7 @@ a single-rotor bench.
 nv3r4 fitted its floor on flight recordings (mean −38.4 dB, exponent 0.07,
 static share 5.5 × 10⁻⁴). v4 takes its floor from the bench only.
 
-# Not the cause: gusts
+## Not the cause: gusts
 
 ![Spectrograms, free-flight window, mic 0, 0–3 kHz.](noise-model-v4-dregon-gap/fig_spectrogram.png){#fig-spec}
 
@@ -194,12 +202,158 @@ broadband noise; v4 is a set of steady horizontal lines. The gusts therefore do
 not explain the difference between nv3r4 and v4. They are a limit of both
 models.
 
+# MD2 (Michael's drone) {#sec-md2}
+
+## What is compared
+
+- **real**: `michaels-frames` FLY124, the five 8 s scoring windows of the
+  scorer (`gates.MICHAELS_SUPPORTS`): standby at 8 s and 16 s (31–42 rev/s),
+  the ramp at 27.68 s (31–99 rev/s), cruise at 40 s and 56 s (67–98 rev/s),
+  8 mics.
+- **nv3r4**: a per-regime pair,
+  `results/noise_v3/fits_r4/michaels_fly125_standby__flight_v3.json` and
+  `…_cruise__flight_v3.json`. The scorer renders it with
+  `render_noise_regimes`: the standby fit below 45 rev/s, the cruise fit above
+  65 rev/s, and the power interpolated between them.
+- **v4 round 4**: one joint fit, `results/noise_v4/flight/md2_fly125__flight_v4.json`.
+  It was fitted on the FLY125 standby and cruise pools together, and is rendered
+  alone on every window.
+
+Both v4 and nv3r4 are fitted on FLY125. FLY124 is a different flight. Unlike
+DREGON, v4 here is a **flight** fit: it has its own flight floor, and MD2 has no
+wind term in either model. The render settings and the script are the same as
+for DREGON (`--rig michaels`).
+
+## Scores
+
+| Window | PIT nv3r4 (rev/s) | PIT v4 r4 (rev/s) | LTAS nv3r4 (dB) | LTAS v4 r4 (dB) | shape-only nv3r4 | shape-only v4 |
+|---|---|---|---|---|---|---|
+| standby @8 s | 0.40 | 36.37 | 1.01 | 1.09 | 1.00 | 1.59 |
+| standby @16 s | 0.34 | 36.31 | 0.72 | 0.89 | 0.71 | 1.11 |
+| ramp @27.68 s | 3.60 | 7.73 | 3.65 | 4.48 | 1.39 | 1.47 |
+| cruise @40 s | 0.97 | 1.59 | 0.75 | 1.17 | 0.99 | 1.40 |
+| cruise @56 s | 0.43 | 0.80 | 2.33 | 2.74 | 1.07 | 3.67 |
+
+PIT is the HPPNet rotor-speed error of the frozen scorer
+(`nv4-score-r4d-6b13ec`, `nv3r4-rescore2-8d6bd9`). The LTAS columns are
+the scorer's LTAS error; this script reproduces the scorer's values to the
+second decimal (`figdata_md2.json`).
+
+The LTAS error of v4 is only 0.1–0.8 dB worse than nv3r4 in every window. The
+broadband level is right. The PIT error in standby is 100 times worse. So the
+MD2 failure is not in the broadband spectrum. It is in a few narrow parts of
+the spectrum that the tracker reads.
+
+## Listen
+
+Mic 0, the first window of each regime, 8 s each.
+
+```{=html}
+<table><tr><th></th><th>real</th><th>nv3r4</th><th>v4 round 4</th></tr>
+<tr><td>standby</td><td><audio controls src="noise-model-v4-dregon-gap/audio/md2_standby_real_mic0.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/md2_standby_nv3r4_mic0.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/md2_standby_v4_mic0.wav"></audio></td></tr>
+<tr><td>ramp</td><td><audio controls src="noise-model-v4-dregon-gap/audio/md2_ramp_real_mic0.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/md2_ramp_nv3r4_mic0.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/md2_ramp_v4_mic0.wav"></audio></td></tr>
+<tr><td>cruise</td><td><audio controls src="noise-model-v4-dregon-gap/audio/md2_cruise_real_mic0.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/md2_cruise_nv3r4_mic0.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/md2_cruise_v4_mic0.wav"></audio></td></tr>
+</table>
+```
+
+## Spectra
+
+![Welch PSD on mic 0, one panel per window. Black: real. Blue: nv3r4. Red: v4
+round 4.](noise-model-v4-dregon-gap/md2_fig_psd_mic0.png){#fig-md2-psd}
+
+![Third-octave error, model − real. Left: mic 0. Right: the mean over the eight
+mics. One line per window.](noise-model-v4-dregon-gap/md2_fig_band_error.png){#fig-md2-band}
+
+Mean third-octave error over the eight mics, model − real (dB):
+
+| Window | below 70 Hz nv3r4 | below 70 Hz v4 | 70–300 Hz nv3r4 | 70–300 Hz v4 | above 300 Hz nv3r4 | above 300 Hz v4 |
+|---|---|---|---|---|---|---|
+| standby @8 s | −4.2 | +5.0 | −1.4 | −2.4 | +0.4 | −0.2 |
+| standby @16 s | +3.1 | +12.3 | +0.8 | −0.3 | +0.7 | +0.2 |
+| ramp @27.68 s | +0.5 | +6.0 | −1.4 | −4.2 | −4.3 | −5.2 |
+| cruise @40 s | −9.9 | −9.6 | −2.6 | −2.8 | −0.2 | −1.2 |
+| cruise @56 s | +2.6 | +3.0 | +1.0 | +1.9 | +1.4 | +0.7 |
+
+![The v4 expected periodogram on mic 0, split into its parts. Top: standby
+@8 s. Bottom: cruise @40 s. Orange: lines. Green: floor. Black: real.](noise-model-v4-dregon-gap/md2_fig_v4_parts.png){#fig-md2-parts}
+
+## Problem 1: the standby floor is too high below 70 Hz
+
+In standby (@fig-md2-psd, top two panels) the v4 floor rises towards low
+frequency. At 30 Hz it is about −48 dB. The real level is −57 to −65 dB. The
+error below 70 Hz is +5 to +12 dB (table above). nv3r4 has no such rise.
+
+The cause is the floor exponent. Round 4 fitted $b_0 = 1.55$ and $b_1 = 0.85$,
+so $b(31\ \text{Hz}) = 1.55 + 0.85 \log_2(31/2000) = -3.5$. The floor scales as
+$s^{b(f)}$, with $s$ the speed over 80 rev/s. In standby $s \approx 0.45$. A
+negative exponent makes the floor *grow* as the rotors slow down: at 31 Hz,
+$0.45^{-3.5} \approx 16$, that is +12 dB. The cruise pool cannot see this,
+because there $s \approx 1$.
+
+The parts figure (@fig-md2-parts, top) shows the result. Below 100 Hz the
+green floor is above the orange lines, so the first shaft orders (about 63 Hz
+at 31.5 rev/s) are under the floor. INFERENCE: the tracker cannot see the
+shaft orders in standby, which explains the standby PIT error of 36 rev/s
+(about the rotor speed itself).
+
+There is a second, smaller standby error. The round-4 diagnosis found the
+standby lines 4–6 dB too weak: the joint fit gives $\alpha = 5.66$, but the
+FLY124 standby-to-cruise level change implies $\alpha \approx 4.2$–4.8 at
+$k = 2$. One speed law over a 3× speed span cannot fit both regimes.
+
+The round-5 prior $b(f) \ge 0$ over 30 Hz–7.9 kHz removes the first error. If
+the joint fit still fails in standby, the fallback is a per-regime pair, as in
+nv3r4.
+
+## Problem 2: the cruise lines are too wide
+
+In cruise (@fig-md2-psd, bottom two panels) the v4 blade-pass peaks at
+150–190 Hz are 5–7 dB lower than the real ones. The valleys at 100–130 Hz and
+200–260 Hz are 5–10 dB too high. The shape-only LTAS error at cruise @56 s is
+3.67 dB for v4 against 1.07 dB for nv3r4.
+
+The cause is the held phase pedestal. In flight, v4 does not fit the pedestal.
+It holds it at the prior medians: $\sigma^2_\phi = 1$ (so 63 % of every line's
+power goes into the pedestal) and a width that, in round 4, depended on the
+parity of the order. The odd orders got $\gamma_\phi = 13.1$ Hz, the even
+orders 3.0 Hz. The odd orders $k = 1$ (80–95 Hz) and $k = 3$ (240–285 Hz) are
+next to the valleys that v4 fills. INFERENCE: the 13 Hz odd-order pedestals
+spread line power into the valleys.
+
+Round 5 uses one $c_W$ for every order. The held width is then 3.0 Hz for all
+orders, and the 13 Hz odd-order pedestals are gone.
+
+## Not specific to v4: the ramp
+
+In the ramp window both models are 4–5 dB low above 300 Hz. nv3r4 has the same
+error with a different model, so it is not a v4 problem. INFERENCE: neither
+fit pool contains a ramp, so neither model has the broadband noise of a fast
+acceleration.
+
+## Per microphone
+
+![Broadband level error per microphone, one dot per window.](noise-model-v4-dregon-gap/md2_fig_mic_offsets.png){#fig-md2-mics}
+
+The v4 dots split into two groups: +1.2 to +6.6 dB in the two standby windows
+(the high low-frequency floor) and −1.4 to −5.7 dB in the ramp and cruise
+windows. This broadband level is the mean PSD over 31–7900 Hz, so the
+low-frequency bands dominate it. Inside each window the mics spread by 2–5 dB
+for both models. There is no mic pattern like the DREGON wind: MD2 needs no
+per-mic wind term.
+
 # What follows
 
-The round-5 priors cap $W$ and the pedestal power share, keep $b(f) \ge 0$ and
-add the floor push. They correct the bench fit. They do not add a flight wind,
-and they do not raise the floor to the flight level. INFERENCE: with the bench
-payload alone, v4 cannot reach the nv3r4 DREGON scores.
+**MD2.** The round-5 priors target both MD2 problems: $b(f) \ge 0$ stops the
+standby floor from growing at low speed, and one $c_W$ for every order
+removes the 13 Hz odd-order pedestals. The round-5 MD2 flight fits (r5 s0–s3)
+test this. If standby still fails, the fallback is a per-regime pair (standby
+and cruise fitted separately and interpolated over the ramp), as in nv3r4.
+
+**DREGON.** The round-5 priors cap $W$ and the pedestal power share, keep
+$b(f) \ge 0$ and add the floor push. They correct the bench fit. They do not
+add a flight wind, and they do not raise the floor to the flight level.
+INFERENCE: with the bench payload alone, v4 cannot reach the nv3r4 DREGON
+scores.
 
 The fix keeps the model and adds a **DREGON flight stage**, as nv3r4 had:
 

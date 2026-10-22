@@ -1,7 +1,10 @@
 {
- "git": "d94b41a30b6b",
+ "git": "24276934dd83",
+ "rig": "dregon",
  "v4": "results/noise_v4/bench/restarts/dregon__kappa0__s3.json",
+ "v4_standby": null,
  "v3": "results/noise_v3/fits_r4/dregon_room2_floor__flight_v3.json",
+ "v3_standby": null,
  "seed": 2001,
  "welch": {
   "nperseg": 4096,
