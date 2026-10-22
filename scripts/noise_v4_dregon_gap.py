@@ -30,7 +30,8 @@ from typing import Any
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+# appended, not prepended: ``insample`` puts the payload's own ``src/`` first
+sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
 OUT = Path("docs/explainers/noise-model-v4-dregon-gap")
 SEED = 2001
