@@ -1005,7 +1005,12 @@ def init_from_payload(pay: dict[str, Any]) -> dict[str, np.ndarray]:
         c_m=a(h["c_motor_db"])[:-1],
         alpha_a=a(pr["alpha_aero"]),
         alpha_m=a(pr["alpha_motor"]),
-        **dict(zip(("u_blo", "u_bhi"), map(np.asarray, V4.floor_coords(fl["b0"], fl["b1"])))),
+        **dict(
+            zip(
+                ("u_blo", "u_bhi"),
+                map(np.asarray, V4.floor_coords(fl["b0"], fl["b1"], b_min=1e-9)),
+            )
+        ),
         z=a(fl["shape_z"]),
         log_s=np.log(a(fl["static_rel"])),
         log_sigma_nu=np.log(a(sh["sigma_nu_rad_s"])),
@@ -1066,17 +1071,21 @@ def fit_flight(
     optim: OptimV4 = OptimV4(),
     progress: int = 0,
     start: dict[str, Any] | None = None,
+    deadline_s: float | None = None,
+    max_restart_passes: int = 20,
 ) -> tuple[FlightV4Model, dict[str, Any]]:
     """MAP-fit one restart (spec steps B2, § The optimiser).
 
     Adam on ``adam_batch``-frame minibatches; L-BFGS on the stratified
     ``lbfgs_frames`` subset and a fresh-memory restart pass of half its
-    budget; the all-frames polish and its fresh-memory restart pass, which is
-    the convergence test: gain per cell under ``tol_nats_per_cell`` AND every
-    group's movement under :data:`MOVE_TOL`. ``start`` (a payload of the same
-    pool) replaces the restart's initialisation (a continuation); with
-    ``lbfgs_iters = 0`` the subset stage is skipped and the polish runs
-    ``polish_iters``."""
+    budget; the all-frames polish, then fresh-memory restart passes of half
+    its budget until one passes the convergence test (gain per cell under
+    ``tol_nats_per_cell`` AND every group's movement under :data:`MOVE_TOL`),
+    ``max_restart_passes`` passes, or the next pass would end after
+    ``deadline_s`` seconds from the call (resume from the payload). ``start``
+    (a payload of the same pool) replaces the restart's initialisation (a
+    continuation); with ``lbfgs_iters = 0`` the subset stage is skipped and
+    the polish runs ``polish_iters``."""
     torch.manual_seed(int(optim.seed))
     batch = data.batch
     dev = batch.power.device
@@ -1127,22 +1136,39 @@ def fit_flight(
         int(optim.polish_iters) if stages or int(optim.lbfgs_iters) == 0 else int(optim.lbfgs_iters)
     )
     stages["polish"] = _lbfgs_pass(model, batch, polish_iters, optim.lbfgs_history)
-    before_restart = model.snapshot()
-    stages["polish_restart"] = _lbfgs_pass(
-        model, batch, max(1, polish_iters // 2), optim.lbfgs_history
-    )
-    moved = movement(before_restart, model.snapshot())
-    gain = max(0.0, stages["polish"]["loss_after"] - stages["polish_restart"]["loss_after"])
-    gain_cell = gain / max(1, model.n_cells)
-    gain_ok = bool(gain_cell < float(optim.tol_nats_per_cell))
-    move_ok = {k: bool(moved[k] < tol) for k, tol in MOVE_TOL.items()}
-    converged = gain_ok and all(move_ok.values())
-    if progress:
-        print(
-            f"  polish {stages['polish_restart']['loss_after']:.6g}  gain/cell {gain_cell:.3g}  "
-            f"moved {moved}  converged {converged}",
-            flush=True,
-        )
+    restarts: list[dict[str, Any]] = []
+    moved: dict[str, float] = {}
+    gain = gain_cell = math.inf
+    gain_ok, converged, stop = False, False, "max_restart_passes"
+    move_ok: dict[str, bool] = {}
+    prev_loss = stages["polish"]["loss_after"]
+    while len(restarts) < int(max_restart_passes):
+        est = restarts[-1]["wall_s"] if restarts else 0.5 * stages["polish"]["wall_s"]
+        if deadline_s is not None and time.time() - t0 + est > float(deadline_s):
+            stop = "deadline"
+            break
+        before_restart = model.snapshot()
+        out = _lbfgs_pass(model, batch, max(1, polish_iters // 2), optim.lbfgs_history)
+        restarts.append(out)
+        moved = movement(before_restart, model.snapshot())
+        gain = max(0.0, prev_loss - out["loss_after"])
+        prev_loss = out["loss_after"]
+        gain_cell = gain / max(1, model.n_cells)
+        gain_ok = bool(gain_cell < float(optim.tol_nats_per_cell))
+        move_ok = {k: bool(moved[k] < tol) for k, tol in MOVE_TOL.items()}
+        converged = gain_ok and all(move_ok.values())
+        if progress:
+            print(
+                f"  restart {len(restarts)} {out['loss_after']:.6g}  gain/cell {gain_cell:.3g}  "
+                f"moved {moved}  converged {converged}",
+                flush=True,
+            )
+        if converged:
+            stop = "converged"
+            break
+    if restarts:
+        stages["polish_restart"] = restarts[-1]
+    stages["restart_passes"] = [{k: v for k, v in r.items() if k != "trace"} for r in restarts]
 
     with torch.no_grad():
         lp, lp_parts = model.log_prior()
@@ -1173,13 +1199,15 @@ def fit_flight(
             total_after_adam=after_adam,
             stages=stages,
             convergence=dict(
-                test="the all-frames polish's fresh-memory restart pass",
-                gain_nats=gain,
-                gain_per_cell=gain_cell,
+                test="the last of the fresh-memory all-frames restart passes after the polish",
+                gain_nats=gain if math.isfinite(gain) else None,
+                gain_per_cell=gain_cell if math.isfinite(gain_cell) else None,
                 gain_ok=gain_ok,
                 movement=moved,
                 movement_ok=move_ok,
                 converged=bool(converged),
+                stop=stop,
+                n_restart_passes=len(restarts),
             ),
             wall_s=time.time() - t0,
         ),

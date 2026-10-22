@@ -79,6 +79,7 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
         lbfgs_iters=int(prm["lbfgs_iters"]),
         device=prm["device"],
         flat_shaft=bool(prm["flat_shaft"]),
+        deadline_s=60.0 * float(prm["deadline_min"]) if prm.get("deadline_min") else None,
     )
     pay = B.payload(model, rec, git=prm["git"])
     path = Path(prm["out"]) / "restarts" / f"{unit.uid}.json"
@@ -91,8 +92,9 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
         objective=rec["objective"],
         converged=rec["converged"],
         restart_gain_per_cell=rec["restart_gain_per_cell"],
-        restart_movement=rec["restart_pass"]["movement"],
-        release_gain_per_cell=rec["release_pass"]["gain_per_cell"],
+        restart_movement=rec["restart_movement"],
+        stop=rec["stop"],
+        n_convergence_passes=len(rec["convergence_passes"]),
         held_orders=rec["evidence"]["held_orders"],
         alpha_aero=pay["params"]["alpha_aero"],
         alpha_motor=pay["params"]["alpha_motor"],
@@ -119,6 +121,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
                 flat_shaft=bool(args.flat_shaft),
                 adam_steps=args.adam_steps,
                 lbfgs_iters=args.lbfgs_iters,
+                deadline_min=args.deadline_min,
                 device=args.device,
                 threads=args.threads,
                 out=str(args.out),
@@ -136,12 +139,21 @@ def cmd_reduce(args: argparse.Namespace) -> int:
 
     from experiments.noise_model import bench_v4 as B
 
-    groups: dict[str, list[dict[str, Any]]] = {}
+    # per restart (seed), its latest continuation ``__c<n>`` stands for it
+    latest: dict[str, dict[int, tuple[int, Path]]] = {}
     for p in sorted((args.out / "restarts").glob("*.json")):
-        pay = json.loads(p.read_text())
-        if pay.get("schema") != "noise-v4-fit/3":
+        m = re.fullmatch(r"(.*)__s(\d+)(?:__c(\d+))?", p.stem)
+        if m is None:
             continue
-        groups.setdefault(re.sub(r"__s\d+$", "", p.stem), []).append(dict(path=str(p), pay=pay))
+        name, seed, c = m.group(1), int(m.group(2)), int(m.group(3) or 0)
+        if c >= latest.setdefault(name, {}).get(seed, (-1, p))[0]:
+            latest[name][seed] = (c, p)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for name, by_seed in latest.items():
+        for _, p in sorted(by_seed.values(), key=lambda cp: str(cp[1])):
+            pay = json.loads(p.read_text())
+            if pay.get("schema") == "noise-v4-fit/3":
+                groups.setdefault(name, []).append(dict(path=str(p), pay=pay))
     (args.out / "fits").mkdir(parents=True, exist_ok=True)
     for name, items in groups.items():
         obj = np.array([it["pay"]["objective"]["total_nats"] for it in items])
@@ -157,7 +169,7 @@ def cmd_reduce(args: argparse.Namespace) -> int:
             objective=obj.tolist(),
             converged=[o["converged"] for o in opt],
             restart_gain_per_cell=[o["restart_gain_per_cell"] for o in opt],
-            release_gain_per_cell=[o["release_pass"]["gain_per_cell"] for o in opt],
+            stop=[o.get("stop") for o in opt],
             best_minus_median_per_cell=float((np.median(obj) - obj.min()) / n_cells),
             best_minus_worst_per_cell=float((obj.max() - obj.min()) / n_cells),
             spread=B.group_movement(lo, hi),
@@ -237,6 +249,7 @@ def cmd_planted(args: argparse.Namespace) -> int:
         kappa=args.kappa,
         device=args.device,
     )
+    start = json.loads(Path(args.resume_from).read_text()) if args.resume_from else None
     model, rec = B.fit_rig(
         rig,
         seed=args.seed,
@@ -244,6 +257,9 @@ def cmd_planted(args: argparse.Namespace) -> int:
         adam_steps=args.adam_steps,
         lbfgs_iters=args.lbfgs_iters,
         device=args.device,
+        start=start,
+        resume=start is not None,
+        deadline_s=60.0 * args.deadline_min,
     )
 
     def P(m: Any, name: str) -> np.ndarray:
@@ -342,6 +358,44 @@ def cmd_planted(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resume(args: argparse.Namespace) -> int:
+    """A continuation: the convergence loop of :func:`bench_v4.fit_rig` from a
+    payload (no Adam, no evidence freeze), written as ``<stem>__c<n+1>``."""
+    import torch
+
+    from experiments.noise_model import bench_v4 as B
+
+    torch.set_num_threads(args.threads)
+    src_path = Path(args.source)
+    src = json.loads(src_path.read_text())
+    rig = _rig_of_payload(src)
+    model, rec = B.fit_rig(
+        rig,
+        seed=int(src["optimiser"]["seed"]),
+        kappa=float(src["priors"]["floor_push_kappa"]),
+        lbfgs_iters=args.lbfgs_iters,
+        device=args.device,
+        flat_shaft=bool(src["params"]["shaft"]["pinned"]),
+        start=src,
+        resume=True,
+        deadline_s=60.0 * args.deadline_min,
+    )
+    pay = B.payload(model, rec, git=_git())
+    pay["optimiser"]["resumed_from"] = str(src_path)
+    m = re.fullmatch(r"(.*?)(?:__c(\d+))?", src_path.stem)
+    assert m is not None
+    path = args.out / "restarts" / f"{m.group(1)}__c{int(m.group(2) or 0) + 1}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(pay))
+    print(
+        f"wrote {path}: {rec['objective']:.1f} nats (from {rec['objective_start']:.1f}); "
+        f"converged {rec['converged']} ({rec['stop']}, {len(rec['convergence_passes'])} passes, "
+        f"last gain {rec['restart_gain_per_cell']})",
+        flush=True,
+    )
+    return 0
+
+
 def cmd_refit(args: argparse.Namespace) -> int:
     """The nested test of the shaft law: re-optimise a fitted payload with
     ``a_sigma = b_lam = 0`` (one ``(sigma_nu, lam)`` for every speed) under
@@ -364,6 +418,7 @@ def cmd_refit(args: argparse.Namespace) -> int:
         device=args.device,
         flat_shaft=bool(args.flat_shaft),
         start=src,
+        deadline_s=60.0 * args.deadline_min,
     )
     pay = B.payload(model, rec, git=_git())
     uid = src_path.stem + ("__flat" if args.flat_shaft else "__refit")
@@ -460,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tag", default="", help="suffix of a schedule variant")
     p.add_argument("--adam-steps", type=int, default=1500)
     p.add_argument("--lbfgs-iters", type=int, default=1200)
+    p.add_argument("--deadline-min", type=float, default=None, help="stop the loop before this")
     p.add_argument("--device", default="cpu")
     p.add_argument("--jobs", type=int, default=1)
     p.add_argument("--threads", type=int, default=8)
@@ -478,6 +534,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed", type=int, default=0, help="the fit's restart index")
     p.add_argument("--adam-steps", type=int, default=1500)
     p.add_argument("--lbfgs-iters", type=int, default=1200)
+    p.add_argument("--deadline-min", type=float, default=50.0)
+    p.add_argument(
+        "--resume-from",
+        default=None,
+        help="continue this planted fit (its .fit.json) on the same re-rendered twin",
+    )
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
     p.add_argument(
@@ -494,9 +556,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--kappa", type=float, default=None, help="default: the source's kappa")
     p.add_argument("--adam-steps", type=int, default=300)
     p.add_argument("--lbfgs-iters", type=int, default=1200)
+    p.add_argument("--deadline-min", type=float, default=50.0)
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
     p.set_defaults(func=cmd_refit)
+    p = sub.add_parser("resume", help="a continuation of a payload's convergence loop")
+    p.add_argument("--from", dest="source", required=True, help="a noise-v4-fit/3 bench payload")
+    p.add_argument("--lbfgs-iters", type=int, default=1200, help="loop passes of a quarter")
+    p.add_argument("--deadline-min", type=float, default=52.0)
+    p.add_argument("--device", default="cpu")
+    p.add_argument("--threads", type=int, default=8)
+    p.set_defaults(func=cmd_resume)
     p = sub.add_parser("eta", help="step 3: the likelihood weight by block jackknife")
     p.add_argument("--fit", required=True, help="a noise-v4-fit/3 bench payload")
     p.add_argument("--planted", default=None, help="the planted report of a planted twin's fit")

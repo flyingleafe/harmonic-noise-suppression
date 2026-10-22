@@ -297,7 +297,7 @@ synthesis with the per-rotor gain $\sum_r s_r(t)^{b(f)}$ per bin.
 | $p^{m}_{rn} - \bar p^{m}_n$ | rotor, multiple | $\mathcal N(c^{m}_r, 3.5)$ dB | @sec-ev-profiles |
 | $\alpha^{a}$ | rig | $\mathcal N(5.5, 1.0)$ | @sec-ev-speed-lines |
 | $\alpha^{m}$ | rig | $\mathcal N(0, 2)$ | @sec-ev-speed-lines |
-| $b_0$, $b_1$ | rig | $\mathcal N(3, 1)$; $\mathcal N(0.5, 0.25)$ per octave | @sec-ev-floor |
+| $b_0$, $b_1$ | rig | $\mathcal N(3, 1)$; $\mathcal N(0.5, 0.25)$ per octave; truncated to $b(f) \ge 0$ on the band (30 Hz–7.9 kHz) | @sec-ev-floor; truncation: round 5 (the floor does not get quieter as the rotor speeds up) |
 | $z$ | rig | $\mathcal N(0, I)$, scale $\sigma_B$ measured | nv3r4 |
 | floor push | rig | $+\kappa\sum_j \bar c_j$ on the log-prior, $\bar c_j$ the control values in dB | @sec-ev-floor-push |
 | $\sigma^2_{A,k}$ | rig, order | LogN$(\log m_{g}, 0.5)$ truncated at $c_{g}$; $(m_g, c_g)$ per order group $g$ in @tbl-amp | @sec-ev-pedestal |

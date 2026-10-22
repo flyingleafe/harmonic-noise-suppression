@@ -156,6 +156,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
         optim=optim,
         progress=int(args.progress),
         start=start,
+        deadline_s=60.0 * float(args.deadline_min) if args.deadline_min else None,
     )
     pay = FV.payload(model, record, channel_gains=gains)
     pay["pool"]["specs"] = (
@@ -173,7 +174,8 @@ def cmd_fit(args: argparse.Namespace) -> int:
     print(
         f"wrote {out}: total {record['objective']['total_nats']:.6g} nats "
         f"(start {record['objective']['start_total_nats']:.6g}); converged {conv['converged']} "
-        f"(gain/cell {conv['gain_per_cell']:.3g}, moved {conv['movement']}); "
+        f"({conv['stop']}, {conv['n_restart_passes']} restart passes, gain/cell "
+        f"{conv['gain_per_cell']}, moved {conv['movement']}); "
         f"wall {time.time() - t0:.1f}s",
         flush=True,
     )
@@ -241,6 +243,9 @@ def main(argv: list[str] | None = None) -> int:
         "--lbfgs-iters 0 so only the all-frames polish and its restart run",
     )
     f.add_argument("--tag", default="", help="suffix of the restart file (a continuation)")
+    f.add_argument(
+        "--deadline-min", type=float, default=None, help="no restart pass ends after this"
+    )
     f.add_argument(
         "--time-eval", action="store_true", help="time ONE objective call on the pool and exit"
     )

@@ -1081,7 +1081,9 @@ class RigModel:
             c_motor=hier.get("c_motor_db", (p_motor - p_motor.mean(axis=0)).mean(axis=1)),
             alpha_aero=pr["alpha_aero"],
             alpha_motor=pr["alpha_motor"],
-            **dict(zip(("u_blo", "u_bhi"), PR.floor_coords(fl["b0"], fl["b1"]))),
+            # a payload's own edges load exactly; only a pre-truncation fit's
+            # negative edge is moved to the floor of the support
+            **dict(zip(("u_blo", "u_bhi"), PR.floor_coords(fl["b0"], fl["b1"], b_min=1e-9))),
             floor_mean_db=fl["mean_db"],
             floor_z=fl["shape_z"],
             u_amp=_uncapped(a(ped["sigma2_amp"])[:K], self.cap),
@@ -1347,56 +1349,94 @@ def fit_rig(
     device: Any = "cpu",
     flat_shaft: bool = False,
     start: dict[str, Any] | None = None,
+    resume: bool = False,
+    deadline_s: float | None = None,
+    max_passes: int = 40,
     log: Any = print,
 ) -> tuple[RigModel, dict[str, Any]]:
-    """MAP of the rig (spec § The optimiser): Adam; L-BFGS on every cell; the
-    evidence freeze of the phase pedestal; a fresh-memory L-BFGS restart pass
-    with the hold (``lbfgs_iters // 2``), converged iff it gains less than
-    ``TOL_NATS_PER_CELL`` per cell AND moves no group beyond ``TOL_MOVE``; a
-    final pass with the hold released (``lbfgs_iters // 4``). ``flat_shaft``
-    pins ``a_sigma = b_lam = 0``; ``start`` (a payload of the same rig) replaces
-    the data-only initialisation (the nested refit)."""
+    """MAP of the rig (spec § The optimiser).
+
+    Stages: Adam; L-BFGS on every cell (``lbfgs_iters``); the evidence freeze
+    of the phase pedestal and one L-BFGS pass with the hold
+    (``lbfgs_iters // 2``); the hold released. Then the CONVERGENCE LOOP:
+    fresh-memory L-BFGS passes of ``lbfgs_iters // 4`` with every parameter
+    free, until one gains less than ``TOL_NATS_PER_CELL`` per cell AND moves no
+    group beyond ``TOL_MOVE`` (converged), ``max_passes`` passes, or the next
+    pass would end after ``deadline_s`` seconds from the call (stopped; resume
+    from the payload). The test pass is the reported state's own objective:
+    no hold is reset in front of it.
+
+    ``start`` (a payload of the same rig) replaces the data-only
+    initialisation; with ``resume`` the run goes straight to the convergence
+    loop and carries the payload's evidence record (a continuation).
+    ``flat_shaft`` pins ``a_sigma = b_lam = 0``."""
     tag = f"[rig s{seed}{' flat' if flat_shaft else ''}]"
     t_all = time.perf_counter()
     model = RigModel(rig, device=device, seed=seed, kappa=kappa, flat_shaft=flat_shaft)
     if start is not None:
         model.load_payload(start)
+    if resume and start is None:
+        raise ValueError("resume needs a start payload")
     init_s = time.perf_counter() - t_all
     t0 = time.perf_counter()
     first, _ = model.objective_and_grad()
     eval_s = time.perf_counter() - t0
     nc = model.n_cells
     log(f"{tag} start {first:.1f} nats ({nc} cells, {eval_s:.2f} s/eval, init {init_s:.1f} s)")
-    adam_trace = []
-    if adam_steps > 0:
-        opt = torch.optim.Adam(list(model.params.values()), lr=adam_lr)
-        for step in range(int(adam_steps)):
-            total, _ = model.objective_and_grad()
-            opt.step()
-            adam_trace.append(total)
-            if step % 50 == 0:
-                log(f"{tag} adam {step} {total:.1f}")
-    pass1 = _pass(model, lbfgs_iters, nc)
-    log(f"{tag} lbfgs {pass1['trace'][-1]:.1f} ({pass1['iters']} it)")
-    t0 = time.perf_counter()
-    ev = phase_evidence(model)
-    evidence_s = time.perf_counter() - t0
-    held = _apply_hold(model, ev)
-    log(f"{tag} evidence freeze: held s2P {held['log_s2P']}, W {held['log_W']}")
-    restart = _pass(model, lbfgs_iters // 2, nc)
-    mv = restart["movement"]
-    converged = bool(restart["gain_per_cell"] < TOL_NATS_PER_CELL and all(mv["within"].values()))
-    log(f"{tag} restart gain {restart['gain_per_cell']:.2e}/cell, movement {mv}")
-    model.hold = {}
-    release = _pass(model, lbfgs_iters // 4, nc)
-    log(f"{tag} release gain {release['gain_per_cell']:.2e}/cell")
+    adam_trace: list[float] = []
+    pass1 = held_pass = None
+    if resume:
+        assert start is not None
+        evidence = dict(start["optimiser"]["evidence"], carried_from_payload=True)
+    else:
+        if adam_steps > 0:
+            opt = torch.optim.Adam(list(model.params.values()), lr=adam_lr)
+            for step in range(int(adam_steps)):
+                total, _ = model.objective_and_grad()
+                opt.step()
+                adam_trace.append(total)
+                if step % 50 == 0:
+                    log(f"{tag} adam {step} {total:.1f}")
+        pass1 = _pass(model, lbfgs_iters, nc)
+        log(f"{tag} lbfgs {pass1['trace'][-1]:.1f} ({pass1['iters']} it)")
+        t0 = time.perf_counter()
+        ev = phase_evidence(model)
+        evidence_s = time.perf_counter() - t0
+        held = _apply_hold(model, ev)
+        log(f"{tag} evidence freeze: held s2P {held['log_s2P']}, W {held['log_W']}")
+        held_pass = _pass(model, lbfgs_iters // 2, nc)
+        log(f"{tag} held pass gain {held_pass['gain_per_cell']:.2e}/cell")
+        model.hold = {}
+        evidence = {
+            **{k: v for k, v in ev.items() if not k.startswith("hold_")},
+            "held_orders": held,
+            "wall_s": evidence_s,
+        }
+    passes: list[dict[str, Any]] = []
+    converged, stop = False, "max_passes"
+    loop_iters = max(1, lbfgs_iters // 4)
+    while len(passes) < int(max_passes):
+        est = passes[-1]["wall_s"] if passes else 1.15 * loop_iters * eval_s
+        if deadline_s is not None and time.perf_counter() - t_all + est > float(deadline_s):
+            stop = "deadline"
+            break
+        out = _pass(model, loop_iters, nc)
+        out.pop("trace")
+        passes.append(out)
+        mv = out["movement"]
+        log(f"{tag} pass {len(passes)} gain {out['gain_per_cell']:.2e}/cell, within {mv['within']}")
+        if out["gain_per_cell"] < TOL_NATS_PER_CELL and all(mv["within"].values()):
+            converged, stop = True, "converged"
+            break
     total, parts = model.objective_and_grad()
+    last = passes[-1] if passes else None
     record = dict(
         seed=int(seed),
         kappa=float(kappa),
         flat_shaft=bool(flat_shaft),
         started_from_payload=start is not None,
-        adam_steps=int(adam_steps),
+        resumed=bool(resume),
+        adam_steps=0 if resume else int(adam_steps),
         adam_lr=float(adam_lr),
         lbfgs_iters=int(lbfgs_iters),
         objective_start=first,
@@ -1407,18 +1447,16 @@ def fit_rig(
         init_s=init_s,
         adam_trace=adam_trace,
         lbfgs_pass=pass1,
-        evidence={
-            **{k: v for k, v in ev.items() if not k.startswith("hold_")},
-            "held_orders": held,
-            "wall_s": evidence_s,
-        },
-        restart_pass=restart,
-        restart_gain_per_cell=restart["gain_per_cell"],
+        evidence=evidence,
+        held_pass=held_pass,
+        convergence_passes=passes,
+        restart_gain_per_cell=None if last is None else last["gain_per_cell"],
+        restart_movement=None if last is None else last["movement"],
         converged=converged,
-        release_pass=release,
+        stop=stop,
         wall_s=time.perf_counter() - t_all,
     )
-    log(f"{tag} done {total:.1f} nats, converged={converged}")
+    log(f"{tag} done {total:.1f} nats, converged={converged} ({stop}, {len(passes)} passes)")
     return model, record
 
 
