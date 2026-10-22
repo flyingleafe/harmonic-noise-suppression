@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""Noise model v4, procedure B: fit MD2 (Michael's drone) in free flight.
+"""Noise model v4, procedure B: fit MD2 (Michael's drone) in free flight; and the
+DREGON flight stage (wind and floor from flight on a frozen bench rig).
 
 Spec: ``docs/explainers/noise-model-v4.qmd`` § Procedure B; module
 :mod:`experiments.noise_model.flight_v4`. One restart per call; the restarts
@@ -12,6 +13,9 @@ are reduced afterwards to the lowest objective.
     # a CPU smoke: one standby + one cruise window, mics 0,1, 24 orders
     python scripts/noise_v4_flight.py fit --max-windows 2 --mics 0,1 --k-cap 24 \\
         --adam-steps 20 --lbfgs-iters 10 --polish-iters 4 --out /tmp/nv4_smoke
+    # DREGON flight stage on a bench payload (module experiments.noise_model.dregon_flight_v4)
+    python scripts/noise_v4_flight.py dregon \\
+        --bench results/noise_v4/bench/restarts/dregon__kappa0__r5__s2.json --threads 8
 
 The pool is FLY125 standby (``michaels-standby``, 3 x 4 s) and cruise
 (``michaels-cruise`` FLY125 rows, 8 x 8 s), labels ``rps_refined``, the nv3r4
@@ -21,7 +25,11 @@ transfer``). Supports come from the ``.npz`` cache or are built from the data
 (``scripts/noise_v2_supports.py build`` fills the cache in a remote job).
 
 Writes ``<out>/restarts/<name>__flight_v4__s<seed>.json`` (``noise-v4-fit/3``);
-``reduce`` writes ``<out>/<name>__flight_v4.json``.
+``reduce`` writes ``<out>/<name>__flight_v4.json``; ``dregon`` writes
+``<out>/dregon_room2__flight_v4__<bench stem>.json``: the bench payload with
+``kind="flight"``, the floor refitted and a static per-mic wind, fitted on the
+five 8 s ``dregon-floor`` segments with every bench line, pedestal, shaft and
+pair-EQ parameter frozen (``--max-frames`` for a smoke run).
 """
 
 from __future__ import annotations
@@ -202,6 +210,50 @@ def cmd_reduce(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dregon(args: argparse.Namespace) -> int:
+    import torch
+
+    from experiments.noise_model import dregon_flight_v4 as DF
+
+    torch.set_num_threads(max(1, int(args.threads)))
+    t0 = time.time()
+    bench_path = Path(args.bench)
+    pay = DF.run_stage(
+        json.loads(bench_path.read_text()),
+        bench_path=str(bench_path),
+        kappa=args.kappa,
+        stride=int(args.frames_thin),
+        max_frames=args.max_frames,
+        wind_start_path=str(args.wind_start),
+        chunk_frames=int(args.chunk_frames),
+        device=str(args.device),
+        iters=int(args.iters),
+        restart_iters=int(args.restart_iters),
+        max_passes=int(args.max_passes),
+        progress=int(args.progress),
+    )
+    out = Path(args.out) / f"{DF.NAME}__flight_v4__{bench_path.stem}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(pay, indent=1))
+    st, fl = pay["flight_stage"], pay["params"]["floor"]
+    obj, conv = st["objective"], st["optimiser"]["convergence"]
+    print(
+        f"wrote {out}\n"
+        f"objective {obj['total_nats']:.10g} nats (whittle {obj['whittle_nats']:.10g}, "
+        f"-log prior {obj['neg_log_prior_nats']:.6g}, start {obj['start_total_nats']:.10g}, "
+        f"{obj['n_cells']} cells)\n"
+        f"converged {conv['converged']} ({conv['stop']}, {conv['n_passes']} passes, last gain/cell "
+        f"{conv['gain_per_cell']:.3g}, moved {conv['movement']})\n"
+        f"renderer check: max rel err {st['renderer_check']['max_rel_err']:.3g}\n"
+        f"floor mean_db {fl['mean_db']:.3f}  b0 {fl['b0']:.4f}  b1 {fl['b1']:.4f}  "
+        f"static_rel {fl['static_rel']:.4g}\n"
+        f"wind_db {[round(w, 2) for w in pay['params']['wind']['wind_db']]}\n"
+        f"wall {time.time() - t0:.1f}s",
+        flush=True,
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     from experiments.noise_model import flight_v4 as FV
 
@@ -252,7 +304,29 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("reduce", help="lowest objective over the restarts")
     r.add_argument("--out", required=True)
     r.add_argument("--name", default=NAME)
+    d = sub.add_parser("dregon", help="DREGON flight stage: wind + floor on a frozen bench rig")
+    d.add_argument("--bench", required=True, help="a DREGON noise-v4-fit/3 bench payload")
+    d.add_argument(
+        "--kappa", type=float, default=None, help="floor push (default: the bench payload's)"
+    )
+    d.add_argument("--frames-thin", type=int, default=4, help="keep every N-th frame")
+    d.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    d.add_argument("--threads", type=int, default=4)
+    d.add_argument("--out", default="results/noise_v4/flight")
+    d.add_argument("--max-frames", type=int, default=None, help="first N frames only (smoke)")
+    d.add_argument("--chunk-frames", type=int, default=16)
+    d.add_argument("--iters", type=int, default=200, help="L-BFGS iterations of the first pass")
+    d.add_argument("--restart-iters", type=int, default=100, help="... of each fresh pass")
+    d.add_argument("--max-passes", type=int, default=20)
+    d.add_argument("--wind-start", default=None, help="nv3r4 DREGON payload (wind start)")
+    d.add_argument("--progress", type=int, default=0, help="print every N frozen frames")
     args = ap.parse_args(argv)
+    if args.cmd == "dregon":
+        if args.wind_start is None:
+            from experiments.noise_model import dregon_flight_v4 as DF
+
+            args.wind_start = DF.WIND_START
+        return cmd_dregon(args)
     return cmd_fit(args) if args.cmd == "fit" else cmd_reduce(args)
 
 
