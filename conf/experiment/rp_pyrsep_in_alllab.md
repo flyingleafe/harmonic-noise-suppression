@@ -12,4 +12,4 @@ The missing cell of the head × stream square (Dmitrii, 2026-10-18): the pyramid
 
 ## Conclusion
 
-Defined 2026-10-18; not yet run.
+Defined 2026-10-18. Ran on `uni` (job `rp-pyrsep-in-alllab-eb97f2`), stopped at step 33500 (saturation); pulled 2026-10-22. Best median round (step 24500, `scripts/rp_history.py --best`): real_macro **2.73**, real 2.50, dregon 4.22, md2 1.23; real_zero 1.86, real_standby 3.39, real_ramp 7.07, real_cruise 2.09. Against `rp_pyrsep_in_all` (2.59; dregon 3.78, md2 1.39, ramp 9.93, cruise 1.57): labelaug trades DREGON and cruise for MD2 and the ramps, the pattern of every other family. The sepconv and ConvLSTM heads end level on labelaug overall (2.73 vs 2.74); most of the ramp gain is the stream's (9.93 → 7.07), the recurrence adds the rest (6.34 in `rp_pyrseplstm_alllab`).

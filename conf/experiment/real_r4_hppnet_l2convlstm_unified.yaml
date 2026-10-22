@@ -7,7 +7,7 @@
 # Batch doc: docs/experiments/pyramid-harmonic.md.
 defaults:
   - override /data: e12_real_fullflight
-  - override /model: hppnet_l2_convlstm
+  - override /model: hppnet_l2_convlstm_r4legacy  # frozen build of this run (dense RateConvLSTM, FreqSuperResHead, 300 bins); the live hppnet_l2_convlstm is the protocol's separable + translation-head form
   - override /loss: salience_layers_r150
   - override /metrics: salience_layers_r150
   - override /validation: rps_unified

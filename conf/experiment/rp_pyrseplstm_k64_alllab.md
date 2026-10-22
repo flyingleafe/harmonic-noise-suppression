@@ -12,4 +12,4 @@ Harmonic-range arm of the HRSPNet candidate (Dmitrii, 2026-10-18): `rp_pyrseplst
 
 ## Conclusion
 
-Defined 2026-10-18; not yet run.
+Defined 2026-10-18. Ran on `vast` (A100-80, job `rp-pyrseplstm-k64-alllab-c5228f`, HEAD `ec86c6d0`), stopped at step 32000 (saturation). Best median round (step 17000, `scripts/rp_history.py --best`): real_macro **2.52**, real 2.30, dregon 3.89, md2 1.14; real_zero 2.08, real_standby 3.65, real_ramp 6.12, real_cruise 1.76. Against the k ≤ 84 twin `rp_pyrseplstm_alllab` (2.74; dregon 4.18, md2 1.31), training without the k > 64 taps improves both drones, unlike the eval-time knock-out, which bought DREGON at an MD2 cost; the best real_macro of the rp grid so far. Its `all` twin: `rp_pyrseplstm_k64_all`.
