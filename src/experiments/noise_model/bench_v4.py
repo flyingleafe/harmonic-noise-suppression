@@ -71,6 +71,7 @@ __all__ = [
     "payload",
     "payload_group_vectors",
     "phase_evidence",
+    "phase_pedestal_neg_log_prior",
     "prepare_setting",
     "render_planted",
     "render_setting",
@@ -610,6 +611,21 @@ def _gamma_from_width(W: Any, s2: Any) -> Any:
     return W * (-np.expm1(-s2)) / s2
 
 
+def phase_pedestal_neg_log_prior(s2P: Tensor, width: Tensor, c_w: Any) -> Tensor:
+    """``-log p`` (constants dropped) of the per-order phase pedestal:
+    ``log sigma2_phi ~ N(PHASE_SIGMA2_LN)`` truncated at ``PHASE_SIGMA2_MAX`` and
+    ``W_phi ~ HalfNormal(c_w)`` truncated at ``W_MAX_HZ`` (:mod:`.v4_priors`).
+    The priors act on the capped quantities themselves; MAP in the capped
+    coordinates (:func:`_capped`) needs no Jacobian, since each ``u -> value``
+    is a monotone bijection onto ``(0, cap)`` and both share the optimum."""
+    dd = dict(dtype=s2P.dtype, device=s2P.device)
+
+    def nrm(x: Tensor, mu: Any, sd: Any) -> Tensor:
+        return (0.5 * ((x - torch.as_tensor(mu, **dd)) / torch.as_tensor(sd, **dd)) ** 2).sum()
+
+    return nrm(torch.log(s2P), *PR.PHASE_SIGMA2_LN) + nrm(width, 0.0, c_w)
+
+
 @dataclass
 class _Frozen:
     """Per-recording tensors the fit never changes."""
@@ -1019,13 +1035,11 @@ class RigModel:
             + nrm(p["floor_z"], 0.0, 1.0)
             - self.kappa * self.cbar().sum()
             # the truncated priors act on the capped quantities themselves; MAP
-            # in log s2 / W needs no Jacobian (each u -> capped value is a
-            # monotone bijection onto (0, cap), so both coordinates share the
-            # optimum)
+            # in log s2 needs no Jacobian (u -> capped value is a monotone
+            # bijection onto (0, cap), so both coordinates share the optimum)
             + nrm(torch.log(self.s2A()), PR.amp_log_median(k), PR.AMP_LOG_SD)
             + nrm(p["log_gA"], PR.gamma_amp_log_median(k), PR.GAMMA_AMP_LOG_SD)
-            + nrm(torch.log(self.s2P()), *PR.PHASE_SIGMA2_LN)
-            + nrm(self.width_phase(), 0.0, self.c_w)
+            + phase_pedestal_neg_log_prior(self.s2P(), self.width_phase(), self.c_w)
             + nrm(torch.exp(p["log_eps"]), 0.0, PR.EPS_HALF_NORMAL)
             + nrm(p["log_lam_ref"], *PR.LAM_REF_LN)
         )

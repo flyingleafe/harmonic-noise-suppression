@@ -1,19 +1,32 @@
-"""Noise model v4, the DREGON FLIGHT STAGE: the wind and the floor from free
-flight, on top of a frozen bench rig.
+"""Noise model v4, the DREGON FLIGHT STAGE: the wind, the floor and a per-rotor
+line gain from free flight, on top of a frozen bench rig.
 
 WHY. A v4 BENCH payload (``kind="bench"``, :mod:`.bench_v4`) rendered on
-DREGON free flight is 6-23 dB too quiet below 2 kHz, for two reasons: it has
-no flight wind (the bench wind is per RECORDING, not a rig term), and its
-broadband floor is the bench floor while the flight floor is higher. The
-lines, their pedestal, the shaft law and the pair EQ are properties of the
-rotors and the array, and the bench is where they are seen best (one rotor at
-a time, 0.03-0.1 Hz bins); the flight wind and the flight floor exist only in
-flight. So this stage refits ONLY the floor and the wind, from flight
-recordings only, and holds every bench line / pedestal / shaft / pair-EQ
-parameter fixed. The v4 model is unchanged: the stage is a procedure, and its
-payload is the bench payload with ``kind="flight"``, the floor refitted and a
-static per-mic wind block, which :func:`data_processing.noise_model.v4.expected_periodogram`
-and the renderer read as they stand.
+DREGON free flight is 6-23 dB too quiet below 2 kHz, for three reasons: it has
+no flight wind (the bench wind is per RECORDING, not a rig term), its
+broadband floor is the bench floor while the flight floor is higher, and its
+lines are quieter than the flight lines (HPPNet pitch scoring: +6 dB on every
+line profile takes the flight PIT from 15.8 to 2.7 rev/s). The line SHAPES
+(the profiles across orders, the pedestal, the shaft law and the pair EQ) are
+properties of the rotors and the array, and the bench is where they are seen
+best (one rotor at a time, 0.03-0.1 Hz bins); the flight wind, the flight
+floor and the flight line LEVEL exist only in flight. So this stage refits the
+floor, the wind and one level per rotor, from flight recordings only, and
+holds every bench line-shape / pedestal / shaft / pair-EQ parameter fixed. The
+v4 model is unchanged: the stage is a procedure, and its payload is the bench
+payload with ``kind="flight"``, the gains written into the line profiles, the
+floor refitted and a static per-mic wind block, which
+:func:`data_processing.noise_model.v4.expected_periodogram` and the renderer
+read as they stand.
+
+WHY PER ROTOR. The bench fitted each rotor's profiles from that rotor's own
+recordings, alone on the rig, so each rotor carries its own bench-to-flight
+level error (its own load at flight thrust, its own mounting); one shared gain
+would force the four errors equal. The gain is ONE number per rotor, applied
+to both line families, because what changes from bench to flight is that
+rotor's level, not the shape of its spectrum. The four gains are identifiable:
+the rotors differ in their pair EQ across the eight mics and in their speeds
+per frame.
 
 THE POOL. nv3r4's DREGON flight pool: support set ``dregon-floor``'s five
 DISJOINT 8 s room-2 segments ``flight_dregon_<rec>@<t>+8_motors_command``
@@ -30,22 +43,29 @@ bench payload's ``band_hz`` (the bench Whittle's 30 Hz-7.2 kHz, clear of the
 
 THE MODEL, mic ``m``, frame ``n``::
 
-    E_mn = L_mn + T[ sum_r h_rm F s_rn^b + s F + 10^{w_m/10} W ]
+    E_mn = sum_r 10^{g_r/10} L_rmn + T[ sum_r h_rm F s_rn^b + s F + 10^{w_m/10} W ]
 
-``L`` (:func:`frozen_lines`) is the bench payload's own expected periodogram
-at the frame's speeds with the floor switched off: lines, pedestal, shaft and
-pair EQ, computed once per frame by ``expected_periodogram``. ``T`` is that
-function's window transform of a PSD on its ``floor_oversample``-times finer
-grid (linear in the PSD), done in torch, so the floor and wind terms are
-exactly what ``expected_periodogram`` adds for them (:func:`renderer_check`
-holds the whole ``E`` to 1e-6 of the renderer's at random parameters). ``h``
+``L_r`` (:func:`frozen_lines`) is rotor ``r``'s expected periodogram at the
+frame's speeds from the bench payload with the floor switched off and the
+other rotors' profiles silenced: its lines, pedestal, shaft and pair EQ,
+computed once per frame by ``expected_periodogram`` (``sum_r L_r`` is asserted
+to equal the all-rotor periodogram). ``T`` is that function's window
+transform of a PSD on its ``floor_oversample``-times finer grid (linear in the
+PSD), done in torch, so the floor and wind terms are exactly what
+``expected_periodogram`` adds for them (:func:`renderer_check` holds the whole
+``E`` to 1e-6 of the renderer's at random parameters, gains included). ``h``
 is the frozen pair EQ, ``F`` the 14-point floor spline on the bench's
 ``ctrl_hz`` and ``shape_sd_db``, ``b(f) = b0 + b1 log2(f / 2 kHz)``, ``s`` the
-static share, ``W`` the nv3 wind shape.
+static share, ``W`` the nv3 wind shape. The payload writes ``g_r`` into
+``profile_aero_db[r]`` and ``profile_motor_db[r]``.
 
-FREE: ``mean_db``, ``shape_z`` (14), ``static_rel``, ``b0``/``b1`` (in the
-``b >= 0`` band-edge coordinates of :func:`.v4_priors.floor_exponents`) and
-``wind_db`` (8). PRIORS: the bench's floor terms
+FREE: ``g_r`` (4, ``line_gain_db``; held at 0 by ``line_gain=False``),
+``mean_db``, ``shape_z`` (14), ``static_rel``, ``b0``/``b1`` (in the ``b >= 0``
+band-edge coordinates of :func:`.v4_priors.floor_exponents`) and ``wind_db``
+(8). FROZEN: the profile shapes across orders, ``alpha_aero``/``alpha_motor``,
+the motor orders, the hierarchy, the pedestal, the shaft, the pair EQ and the
+floor's ``ctrl_hz``/``shape_sd_db``/rule. PRIORS: ``g_r ~ N(LINE_GAIN_MU_DB,
+LINE_GAIN_SD_DB)``; the bench's floor terms
 (:meth:`.bench_v4.RigModel.neg_log_prior`): ``mean_db ~ N(measured,
 FLOOR_MEAN_SD_DB)``, the centre measured on THIS pool as the bench measured
 its own, ``z ~ N(0, I)``, ``b0 ~ N(B0)``, ``b1 ~ N(B1)``; the flight static
@@ -56,11 +76,11 @@ push ``-kappa sum_j ctrl_j`` with the bench payload's ``floor_push_kappa``.
 
 OPTIMISER. Start: the floor measured from the pool (low quantile of
 ``(I - L - W0) / (sum_r h s^b)`` per bin, projected on the 14 controls), the
-bench's exponents, the static share at its prior median and the nv3r4 DREGON
-wind (a START only). Then double-precision strong-Wolfe L-BFGS
+bench's exponents, the static share at its prior median, ``g_r = 0`` and the
+nv3r4 DREGON wind (a START only). Then double-precision strong-Wolfe L-BFGS
 (:class:`.lbfgs.LBFGS`) in fresh-memory passes until one gains under
 ``1e-4`` nats per cell AND moves the floor controls under 0.1 dB, the
-exponents under 0.02 and the wind under 0.1 dB.
+exponents under 0.02, the wind under 0.1 dB and the line gains under 0.1 dB.
 """
 
 from __future__ import annotations
@@ -126,21 +146,32 @@ WIND_START = "results/noise_v3/fits_r4/dregon_room2_floor__flight_v3.json"
 FLOOR_OVERSAMPLE = int(
     inspect.signature(V4.expected_periodogram).parameters["floor_oversample"].default
 )
-#: ``mean_db`` of the silenced floor: ``10^{-1000}`` underflows to exactly 0.
+#: ``mean_db`` of the silenced floor and the profile rows of the silenced
+#: rotors: ``10^{-1000}`` underflows to exactly 0.
 SILENT_DB = -1.0e4
+#: ``sum_r L_r`` against the all-rotor periodogram (max relative error).
+SPLIT_RTOL = 1e-9
+#: The per-rotor flight line gain prior ``g_r ~ N(mu, sd)`` (dB): centred on the
+#: bench level; a 6 dB scale because bench -> flight changes the level by that
+#: order (four rotors loading the airframe in flight vs one on the bench).
+LINE_GAIN_MU_DB = 0.0
+LINE_GAIN_SD_DB = 6.0
 #: nv3r4's DREGON prior set (``--priors v4``): the wind prior's sd.
 WIND_PRIORS = MD.PRIOR_SETS["v4"]
 TOL_NATS_PER_CELL = FV.TOL_NATS_PER_CELL
 #: Convergence movement: floor controls (dB), exponents (b0, b1), wind levels
-#: (dB, held to the line-level tolerance).
+#: and line gains (dB, held to the line-level tolerance).
 MOVE_TOL = dict(
     floor_ctrl_db=FV.MOVE_TOL["floor_ctrl_db"],
     exponents=FV.MOVE_TOL["exponents"],
     wind_db=FV.MOVE_TOL["levels_db"],
+    line_gain_db=FV.MOVE_TOL["levels_db"],
 )
 #: :func:`renderer_check`'s tolerance (max relative error of ``E``).
 CHECK_RTOL = 1e-6
 PARAM_KEYS = ("floor_mean_db", "floor_z", "u_blo", "u_bhi", "log_static", "wind_db")
+#: The line gains' key: free (in ``params``) or held at 0 (``line_gain=False``).
+GAIN_KEY = "line_gain_db"
 
 
 # ── the pool ────────────────────────────────────────────────────────────────
@@ -271,13 +302,27 @@ def silent_floor(bench: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def rotor_payload(payload: dict[str, Any], rotor: int) -> dict[str, Any]:
+    """``payload`` with every rotor's line profiles but ``rotor``'s silenced
+    (``SILENT_DB``: their line powers are exactly 0)."""
+    out = copy.deepcopy(payload)
+    p = out["params"]
+    for key in ("profile_aero_db", "profile_motor_db"):
+        rows = np.array(p[key], dtype=np.float64)
+        rows[np.arange(rows.shape[0]) != int(rotor)] = SILENT_DB
+        p[key] = rows.tolist()
+    return out
+
+
 def frozen_lines(
     bench: dict[str, Any], rps: np.ndarray, *, n_fft: int, sr: int, progress: int = 0
 ) -> np.ndarray:
-    """``(M, N, n_fft // 2 + 1)``: ``expected_periodogram`` of the bench payload
-    at each frame's speeds ``rps (R, N)`` with the floor off: lines, pedestal,
-    shaft and pair EQ only. Asserts that nothing of the floor, its static share
-    or a wind can leak in."""
+    """``(R, M, N, n_fft // 2 + 1)``: per rotor ``r``, ``expected_periodogram``
+    of the bench payload at each frame's speeds ``rps (R, N)`` with the floor
+    off and the other rotors silenced: rotor ``r``'s lines, pedestal, shaft and
+    pair EQ only. Asserts that nothing of the floor, its static share, a wind
+    or another rotor can leak in, and that ``sum_r L_r`` is the all-rotor
+    periodogram to :data:`SPLIT_RTOL`."""
     silent = silent_floor(bench)
     par = _bench_params(silent)
     f_psd = np.fft.rfftfreq(FLOOR_OVERSAMPLE * int(n_fft), d=1.0 / float(sr))
@@ -287,13 +332,30 @@ def frozen_lines(
         or par.wind_db is not None
     ):
         raise AssertionError("the silenced bench floor still adds power")
+    rotors = [rotor_payload(silent, r) for r in range(par.n_rotors)]
+    for r, pay in enumerate(rotors):
+        pr = V4.V4Params.from_payload(pay)
+        others = np.arange(par.n_rotors) != r
+        if np.any(10.0 ** (pr.profile_aero_db[others] / 10.0) != 0.0) or np.any(
+            10.0 ** (pr.profile_motor_db[others] / 10.0) != 0.0
+        ):
+            raise AssertionError(f"rotor {r}'s payload still has power on another rotor")
     rps = np.asarray(rps, dtype=np.float64)
-    out = np.empty((par.n_mics, rps.shape[1], int(n_fft) // 2 + 1))
+    shape = (par.n_rotors, par.n_mics, rps.shape[1], int(n_fft) // 2 + 1)
+    out = np.empty(shape)
+    split_err = 0.0
     t0 = time.time()
     for i in range(rps.shape[1]):
-        out[:, i] = V4.expected_periodogram(silent, rps[:, i], n_fft=int(n_fft), sr=int(sr))
+        for r, pay in enumerate(rotors):
+            out[r, :, i] = V4.expected_periodogram(pay, rps[:, i], n_fft=int(n_fft), sr=int(sr))
+        full = V4.expected_periodogram(silent, rps[:, i], n_fft=int(n_fft), sr=int(sr))
+        split_err = max(split_err, float(np.max(np.abs(out[:, :, i].sum(axis=0) - full) / full)))
         if progress and (i + 1) % int(progress) == 0:
             print(f"  frozen lines {i + 1}/{rps.shape[1]}  {time.time() - t0:.1f}s", flush=True)
+    if not split_err < SPLIT_RTOL:
+        raise AssertionError(
+            f"sum_r L_r differs from the all-rotor periodogram by {split_err:.3g} (relative)"
+        )
     return out
 
 
@@ -301,8 +363,10 @@ def frozen_lines(
 
 
 class FlightStageModel:
-    """The flight stage's forward model and MAP objective: ``E = L + T[floor +
-    static + wind]`` with ``L`` frozen and ``T`` the renderer's window transform."""
+    """The flight stage's forward model and MAP objective: ``E = sum_r
+    10^{g_r/10} L_r + T[floor + static + wind]`` with ``L_r`` frozen and ``T``
+    the renderer's window transform; ``g_r`` free unless ``line_gain=False``
+    (then held at 0, with no prior term)."""
 
     def __init__(
         self,
@@ -315,6 +379,7 @@ class FlightStageModel:
         floor_centre_db: float,
         wind_centre_db: np.ndarray,
         init: dict[str, Any],
+        line_gain: bool = True,
         chunk_frames: int = 16,
         device: Any = "cpu",
     ) -> None:
@@ -342,7 +407,9 @@ class FlightStageModel:
         self.band = np.flatnonzero((f >= self.band_hz[0]) & (f <= self.band_hz[1]))
         self.band_t = torch.as_tensor(self.band, device=self.dd["device"])
         self.log_s = self._t(np.log(np.maximum(par.speed(pool.rps), SPEED_FLOOR_RPS)))  # (R, N)
-        self.lines = self._t(lines)  # (M, N, n // 2 + 1)
+        self.lines = self._t(lines)  # (R, M, N, n // 2 + 1)
+        if self.lines.shape[0] != par.n_rotors:
+            raise ValueError(f"lines must be per rotor (R={par.n_rotors}, ...), got {lines.shape}")
         self.power = self._t(pool.power[:, :, self.band])
         self.weights = self._t(pool.weights)
         self.t_wind = self._transform(self._t(wind_shape(f_psd))[None, :] * self.array)
@@ -353,6 +420,16 @@ class FlightStageModel:
             k: torch.tensor(np.asarray(init[k], dtype=np.float64), **self.dd).requires_grad_(True)
             for k in PARAM_KEYS
         }
+        self.line_gain = bool(line_gain)
+        g0 = np.asarray(init.get(GAIN_KEY, np.zeros(par.n_rotors)), dtype=np.float64)
+        if g0.shape != (par.n_rotors,):
+            raise ValueError(f"{GAIN_KEY} must be (R,) = ({par.n_rotors},), got {g0.shape}")
+        if not self.line_gain and np.any(g0 != 0.0):
+            raise ValueError(f"line_gain=False holds {GAIN_KEY} at 0, got {g0.tolist()}")
+        #: ``g_r`` (dB): in ``params`` when free, else a constant zero tensor
+        self.line_gain_db = torch.tensor(g0, **self.dd).requires_grad_(self.line_gain)
+        if self.line_gain:
+            self.params[GAIN_KEY] = self.line_gain_db
 
     def _t(self, x: Any) -> Tensor:
         return torch.as_tensor(np.asarray(x, dtype=np.float64), **self.dd)
@@ -369,6 +446,7 @@ class FlightStageModel:
         ctrl_rel = self.sigma_b * (self.chol @ p["floor_z"])
         return dict(
             p,
+            line_gain_db=self.line_gain_db,
             b0=b0,
             b1=b1,
             static_rel=torch.exp(p["log_static"]),
@@ -396,11 +474,14 @@ class FlightStageModel:
             v["static_rel"] * self._transform(fl[None, :] * self.array)
             + 10.0 ** (v["wind_db"][:, None] / 10.0) * self.t_wind
         )
-        out = self.lines[:, frames] + floor + fixed[:, None, :]
+        scale = 10.0 ** (v["line_gain_db"] / 10.0)
+        lines = torch.tensordot(scale, self.lines[:, :, frames], dims=1)  # (M, n_c, F)
+        out = lines + floor + fixed[:, None, :]
         return out if all_bins else out.index_select(-1, self.band_t)
 
     def log_prior(self) -> tuple[Tensor, dict[str, float]]:
-        """``log p`` of the free values plus the floor push ``kappa sum_j ctrl_j``."""
+        """``log p`` of the free values plus the floor push ``kappa sum_j ctrl_j``
+        (the line gains' term only when they are free)."""
         v = self.values()
         nd, ln = torch.distributions.Normal, torch.distributions.LogNormal
 
@@ -417,6 +498,8 @@ class FlightStageModel:
             wind=n_(self.wind_centre, WIND_PRIORS.wind_db_sd, v["wind_db"]),
             floor_push=self.kappa * v["ctrl_db"].sum(),
         )
+        if self.line_gain:
+            parts["line_gain"] = n_(LINE_GAIN_MU_DB, LINE_GAIN_SD_DB, v["line_gain_db"])
         total = torch.stack([t.reshape(()) for t in parts.values()]).sum()
         return total, {k: float(t.detach()) for k, t in parts.items()}
 
@@ -457,11 +540,12 @@ class FlightStageModel:
             exponents=np.array([float(v["b0"]), float(v["b1"])]),
             wind_db=v["wind_db"].cpu().numpy().copy(),
             log_static=np.array([float(v["log_static"])]),
+            line_gain_db=v["line_gain_db"].cpu().numpy().copy(),
         )
 
     @torch.no_grad()
-    def exported(self) -> tuple[dict[str, Any], list[float]]:
-        """``(floor fields, wind_db)`` of the payload at the current values."""
+    def exported(self) -> tuple[dict[str, Any], list[float], list[float]]:
+        """``(floor fields, wind_db, line_gain_db)`` of the payload at the current values."""
         v = self.values()
         floor = dict(
             mean_db=float(v["floor_mean_db"]),
@@ -471,19 +555,31 @@ class FlightStageModel:
             b1=float(v["b1"]),
             static_rel=float(v["static_rel"]),
         )
-        return floor, v["wind_db"].cpu().numpy().tolist()
+        return floor, v["wind_db"].cpu().numpy().tolist(), v["line_gain_db"].cpu().numpy().tolist()
 
 
 def flight_payload(
-    bench: dict[str, Any], *, floor: dict[str, Any], wind_db: list[float]
+    bench: dict[str, Any],
+    *,
+    floor: dict[str, Any],
+    wind_db: list[float],
+    line_gain_db: list[float],
 ) -> dict[str, Any]:
-    """The bench payload with ``kind="flight"``, the floor fields ``floor`` and
-    the static per-mic wind ``wind_db``; ``ctrl_hz``, ``shape_sd_db`` and the
-    per-rotor-sum floor rule are the bench's."""
+    """The bench payload with ``kind="flight"``, the line gains written into the
+    profiles (``profile_aero_db[r] += g_r``, ``profile_motor_db[r] += g_r``),
+    the floor fields ``floor`` and the static per-mic wind ``wind_db``;
+    ``ctrl_hz``, ``shape_sd_db`` and the per-rotor-sum floor rule are the bench's."""
     pay = copy.deepcopy(bench)
     pay["kind"] = "flight"
-    pay["params"]["floor"].update(floor, floor_rule=V4.FLOOR_RULE_SUM)
-    pay["params"]["wind"] = dict(
+    p = pay["params"]
+    g = np.asarray(line_gain_db, dtype=np.float64)
+    for key in ("profile_aero_db", "profile_motor_db"):
+        rows = np.array(p[key], dtype=np.float64)
+        if rows.shape[0] != g.size:
+            raise ValueError(f"{key} has {rows.shape[0]} rotors, line_gain_db {g.size}")
+        p[key] = (rows + g[:, None]).tolist()
+    p["floor"].update(floor, floor_rule=V4.FLOOR_RULE_SUM)
+    p["wind"] = dict(
         kind="static_per_mic", wind_db=[float(x) for x in wind_db], shape=wind_shape_spec()
     )
     return pay
@@ -493,11 +589,12 @@ def renderer_check(
     model: FlightStageModel, frames: list[int], *, seed: int = 0, rtol: float = CHECK_RTOL
 ) -> dict[str, Any]:
     """The torch ``E`` against ``expected_periodogram`` of the exported payload,
-    on every bin of the pool frames ``frames``, at RANDOM parameter values
-    (restored afterwards)."""
+    on every bin of the pool frames ``frames``, at RANDOM parameter values,
+    nonzero line gains included even when they are held (restored afterwards)."""
     rng = np.random.default_rng(int(seed))
     p = model.params
     saved = {k: t.detach().clone() for k, t in p.items()}
+    saved_gain = model.line_gain_db.detach().clone()
     try:
         with torch.no_grad():
             p["floor_mean_db"].add_(float(rng.uniform(-6.0, 6.0)))
@@ -506,10 +603,13 @@ def renderer_check(
             p["u_bhi"].fill_(float(rng.uniform(-1.0, 4.0)))
             p["log_static"].fill_(math.log(float(rng.uniform(1e-4, 0.1))))
             p["wind_db"].add_(model._t(rng.normal(0.0, 6.0, p["wind_db"].numel())))
+            model.line_gain_db.copy_(
+                model._t(rng.normal(0.0, LINE_GAIN_SD_DB, model.line_gain_db.numel()))
+            )
             idx = torch.as_tensor(np.asarray(frames, dtype=np.int64), device=model.dd["device"])
             mine = model.expected(idx, all_bins=True).cpu().numpy()
-        floor, wind = model.exported()
-        pay = flight_payload(model.bench, floor=floor, wind_db=wind)
+        floor, wind, gain = model.exported()
+        pay = flight_payload(model.bench, floor=floor, wind_db=wind, line_gain_db=gain)
         if V4.V4Params.from_payload(pay).wind_db is None:
             raise AssertionError("the exported flight payload carries no wind")
         ref = np.stack(
@@ -523,6 +623,7 @@ def renderer_check(
         with torch.no_grad():
             for k, t in saved.items():
                 p[k].copy_(t)
+            model.line_gain_db.copy_(saved_gain)
     rel = np.abs(mine - ref) / np.abs(ref)
     return dict(
         frames=[int(i) for i in frames],
@@ -532,7 +633,7 @@ def renderer_check(
         band_max_rel_err=float(rel[..., model.band].max()),
         rtol=float(rtol),
         passed=bool(rel.max() < rtol),
-        at=dict(floor=floor, wind_db=wind),
+        at=dict(floor=floor, wind_db=wind, line_gain_db=gain),
     )
 
 
@@ -571,17 +672,18 @@ def measure_start(
     band_hz: tuple[float, float],
     wind_db: np.ndarray,
 ) -> Start:
-    """The floor measured from the pool at the bench exponents: per band bin,
-    the nv3r4 floor quantile (+ its exponential-percentile correction) over
-    mics and frames of ``max(I - L - W0, 0.1 I) / sum_r h_rm s_rn^b``, least
-    squares on the 14 controls; the wind prior centres by nv3r4's rule."""
+    """The floor measured from the pool at the bench exponents and ``g_r = 0``:
+    per band bin, the nv3r4 floor quantile (+ its exponential-percentile
+    correction) over mics and frames of ``max(I - L - W0, 0.1 I) / sum_r h_rm
+    s_rn^b`` with ``L = sum_r L_r`` (``lines (R, M, N, F)``), least squares on
+    the 14 controls; the wind prior centres by nv3r4's rule."""
     par = _bench_params(bench)
     f_all = np.asarray(pool.freqs_hz, dtype=np.float64)
     band = (f_all >= band_hz[0]) & (f_all <= band_hz[1])
     f = f_all[band]
     power = pool.power[:, :, band]
     wind = 10.0 ** (np.asarray(wind_db)[:, None] / 10.0) * wind_shape(f)[None, :]
-    resid = np.maximum(power - lines[:, :, band] - wind[:, None, :], 0.1 * power)
+    resid = np.maximum(power - lines[:, :, :, band].sum(axis=0) - wind[:, None, :], 0.1 * power)
     ls = np.log(np.maximum(par.speed(pool.rps), SPEED_FLOOR_RPS))
     drive = np.einsum(
         "rmf,rnf->mnf",
@@ -606,6 +708,7 @@ def measure_start(
         u_bhi=u_hi,
         log_static=FV.STATIC_SHARE_LN[0],
         wind_db=np.asarray(wind_db, dtype=np.float64),
+        line_gain_db=np.zeros(par.n_rotors),
     )
     return Start(
         init=init,
@@ -619,6 +722,7 @@ def measure_start(
             floor_quantile=float(FLOOR_INIT_QUANTILE),
             floor_db_correction=float(FLOOR_INIT_DB_CORRECTION),
             exponents="the bench payload's b0, b1",
+            line_gain_db=np.zeros(par.n_rotors).tolist(),
             static_rel=math.exp(FV.STATIC_SHARE_LN[0]),
             wind_centre_db=np.asarray(centres).tolist(),
         ),
@@ -772,6 +876,16 @@ def priors_record(model: FlightStageModel, *, kappa_source: str) -> dict[str, An
         floor_push_kappa=model.kappa,
         kappa_source=kappa_source,
         floor_push="+kappa sum_j ctrl_j on the log prior (dB)",
+        line_gain=dict(
+            family="Normal",
+            mu_db=LINE_GAIN_MU_DB,
+            sd_db=LINE_GAIN_SD_DB,
+            free=model.line_gain,
+            rule="per rotor, on both line families; centred on the bench level, a 6 dB scale "
+            "for the bench -> flight level change (four rotors in flight vs one on the bench)"
+            if model.line_gain
+            else "held at 0 (--no-line-gain): no prior term",
+        ),
     )
 
 
@@ -789,9 +903,10 @@ def run_stage(
     restart_iters: int = 100,
     max_passes: int = 20,
     progress: int = 0,
+    line_gain: bool = True,
 ) -> dict[str, Any]:
-    """The whole stage: pool, frozen lines, start, the renderer check, the fit
-    and the flight payload."""
+    """The whole stage: pool, frozen per-rotor lines, start, the renderer check,
+    the fit and the flight payload (``line_gain=False`` holds ``g_r`` at 0)."""
     t0 = time.time()
     _bench_params(bench)
     band_hz = (float(bench["band_hz"][0]), float(bench["band_hz"][1]))
@@ -818,6 +933,7 @@ def run_stage(
         floor_centre_db=start.floor_centre_db,
         wind_centre_db=start.wind_centre_db,
         init=start.init,
+        line_gain=line_gain,
         chunk_frames=chunk_frames,
         device=device,
     )
@@ -836,8 +952,8 @@ def run_stage(
         max_passes=max_passes,
         progress=bool(progress),
     )
-    floor, wind = model.exported()
-    pay = flight_payload(bench, floor=floor, wind_db=wind)
+    floor, wind, gain = model.exported()
+    pay = flight_payload(bench, floor=floor, wind_db=wind, line_gain_db=gain)
     pay["support"] = POOL
     pay["supports"] = list(pool.names)
     pay["flight_stage"] = dict(
@@ -860,10 +976,22 @@ def run_stage(
                 "floor.shape_sd_db",
                 "floor.floor_rule",
             ],
-            rule="L = v4.expected_periodogram of the bench payload with the floor off "
-            f"(mean_db {SILENT_DB:g}, static_rel 0), per frame",
+            profiles="frozen up to the per-rotor line gain: profile_*_db[r] = bench + g_r"
+            if line_gain
+            else "frozen (line gains held at 0)",
+            rule="L_r = v4.expected_periodogram of the bench payload with the floor off "
+            f"(mean_db {SILENT_DB:g}, static_rel 0) and the other rotors' profiles at "
+            f"{SILENT_DB:g} dB, per frame; sum_r L_r = all-rotor L to {SPLIT_RTOL:g}",
         ),
-        free=["floor.mean_db", "floor.shape_z", "floor.static_rel", "floor.b0", "floor.b1", "wind"],
+        free=(["line_gain_db"] if line_gain else [])
+        + ["floor.mean_db", "floor.shape_z", "floor.static_rel", "floor.b0", "floor.b1", "wind"],
+        line_gain=dict(
+            free=bool(line_gain),
+            gain_db=[float(x) for x in gain],
+            prior=dict(family="Normal", mu_db=LINE_GAIN_MU_DB, sd_db=LINE_GAIN_SD_DB),
+            start_db=start.record["line_gain_db"],
+            export="profile_aero_db[r] += g_r and profile_motor_db[r] += g_r",
+        ),
         band_hz=list(band_hz),
         band_rule="the bench payload's band_hz: the bench Whittle's band (bench_v4.BAND_HZ)",
         floor_oversample=FLOOR_OVERSAMPLE,

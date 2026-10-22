@@ -44,8 +44,15 @@ THE FORWARD MODEL (mic ``m``, frame ``n``)::
   (the static share ``s``);
 * ``T(f)``: the render chain transfer.
 
-The pedestal is HELD: the amplitude OU from MD2's own block-wander measurement,
-capped at :func:`.v4_priors.amp_cap`; the phase OU at the prior medians. The
+The amplitude pedestal is HELD, from MD2's own block-wander measurement capped
+at :func:`.v4_priors.amp_cap`. The phase pedestal is held at the prior medians
+by default, or FREED per aerodynamic order (``free_phase_pedestal``): one
+``sigma2_phi`` and one width ``W_phi`` per order ``k``, in the bench's capped
+coordinates under the bench's truncated priors (:mod:`.bench_v4`). Why free it:
+the held median ``sigma2_phi = 1`` puts ``1 - e^{-1} = 63 %`` of every line's
+power in its pedestal, while the valleys between the MD2 cruise lines are
+~10 dB deeper than that allows (the held v4 fills 100-130 Hz and 200-260 Hz
+10 dB too high). The motor lines carry no pedestal either way (shaft only). The
 shaft has ``lam`` pinned at :data:`.v4_priors.FLIGHT_LAM` (``b_lam = 0``) and
 the speed law ``sigma_nu = sigma_ref s^{a_sigma}`` per rotor and frame (``s``
 the rotor's frame speed over ``f_ref``, the window-power-weighted geometric
@@ -80,6 +87,13 @@ from experiments.stochastic_fit.revised_phase import (
 from . import model as MD
 from . import spectrum as SP
 from . import v4_priors as V4
+from .bench_v4 import (
+    _capped,
+    _gamma_from_width,
+    _uncapped,
+    _under,
+    phase_pedestal_neg_log_prior,
+)
 from .lbfgs import LBFGS
 
 __all__ = [
@@ -96,6 +110,8 @@ __all__ = [
     "geometry_db",
     "joint_k_max",
     "measure",
+    "phase_coords",
+    "phase_pedestal_free",
     "payload",
     "prepare",
     "reduce_payloads",
@@ -118,7 +134,16 @@ HALFNORMAL_MEDIAN = 0.6744897501960817
 LOG_BOX = 60.0
 #: Convergence tolerances (spec § The optimiser, step 5).
 TOL_NATS_PER_CELL = 1e-4
-MOVE_TOL = dict(levels_db=0.1, exponents=0.02, floor_ctrl_db=0.1, log_sigma_nu=0.05)
+#: ``log_sigma2_phase`` / ``log_width_phase`` are tested only when the phase
+#: pedestal is free (:meth:`FlightV4Model.snapshot` carries them then).
+MOVE_TOL = dict(
+    levels_db=0.1,
+    exponents=0.02,
+    floor_ctrl_db=0.1,
+    log_sigma_nu=0.05,
+    log_sigma2_phase=0.05,
+    log_width_phase=0.05,
+)
 DEFAULT_WANDER = "results/noise_v3/wander/michaels.json"
 
 
@@ -388,16 +413,42 @@ def _sigma2_frames(
     return torch.exp(2.0 * (log_sigma_ref + a_sigma * log_sbar))
 
 
+def _pedestal_lag_t(
+    grid: SP.FlightGrid, s2a: Tensor, ga: Tensor, s2p: Tensor, gp: Tensor
+) -> Tensor:
+    """:func:`pedestal_lag` on ``(K,)`` tensors (differentiable)."""
+    tau = grid.tau_s_work[None, :]
+    s2a, ga, s2p, gp = (x[:, None] for x in (s2a, ga, s2p, gp))
+    return torch.exp(
+        s2a * torch.expm1(-2.0 * math.pi * ga * tau) + s2p * torch.expm1(-2.0 * math.pi * gp * tau)
+    )
+
+
 def pedestal_lag(grid: SP.FlightGrid, ped: dict[str, np.ndarray]) -> Tensor:
     """``(K, n)`` ``exp[s2A (e^{-2 pi gA tau} - 1) + s2P (e^{-2 pi gP tau} - 1)]``."""
     ref = grid.window_work
-    tau = grid.tau_s_work[None, :]
-    s2a, ga, s2p, gp = (
-        _t(ped[key], ref)[:, None]
-        for key in ("sigma2_amp", "gamma_amp_hz", "sigma2_phase", "gamma_phase_hz")
+    return _pedestal_lag_t(
+        grid,
+        *(
+            _t(ped[key], ref)
+            for key in ("sigma2_amp", "gamma_amp_hz", "sigma2_phase", "gamma_phase_hz")
+        ),
     )
-    return torch.exp(
-        s2a * torch.expm1(-2.0 * math.pi * ga * tau) + s2p * torch.expm1(-2.0 * math.pi * gp * tau)
+
+
+def phase_coords(ped: dict[str, Any]) -> dict[str, np.ndarray]:
+    """``(u_s2P, u_W)``, the capped coordinates (:mod:`.bench_v4`) of a pedestal's
+    ``sigma2_phase`` and width (``width_phase_hz``, else derived from
+    ``gamma_phase_hz``); values at or over a cap start just under it."""
+    s2p = np.asarray(ped["sigma2_phase"], dtype=np.float64)
+    w = (
+        np.asarray(ped["width_phase_hz"], dtype=np.float64)
+        if "width_phase_hz" in ped
+        else V4.pedestal_width(np.asarray(ped["gamma_phase_hz"], dtype=np.float64), s2p)
+    )
+    return dict(
+        u_s2P=_uncapped(_under(s2p, V4.PHASE_SIGMA2_MAX), V4.PHASE_SIGMA2_MAX),
+        u_W=_uncapped(_under(w, V4.W_MAX_HZ), V4.W_MAX_HZ),
     )
 
 
@@ -711,7 +762,12 @@ def measure(data: FlightData, *, chunk_orders: int = 32) -> FlightMeasured:
 
 
 class FlightV4Model:
-    """The v4 flight forward model and MAP objective of one MD2 pool."""
+    """The v4 flight forward model and MAP objective of one MD2 pool.
+
+    ``free_phase_pedestal``: fit ``u_s2P`` and ``u_W`` ``(K,)`` (the bench's
+    capped coordinates of ``sigma2_phi`` and ``W_phi``) instead of holding
+    ``data.pedestal``'s phase part; the start takes them from ``init`` when it
+    carries them, else from ``data.pedestal`` (the prior medians)."""
 
     def __init__(
         self,
@@ -721,6 +777,7 @@ class FlightV4Model:
         kappa: float = 0.0,
         harmonic_chunk: int = 32,
         init: dict[str, np.ndarray] | None = None,
+        free_phase_pedestal: bool = False,
     ) -> None:
         self.data = data
         self.meas = measured
@@ -734,7 +791,15 @@ class FlightV4Model:
         kk = data.k_max
         self.k_a = torch.arange(1, kk + 1, dtype=torch.float64, device=ref.device)
         self.k_m = _t(data.motor_orders, ref)
-        self.ped = pedestal_lag(grid, data.pedestal)
+        self.free_phase_pedestal = bool(free_phase_pedestal)
+        ped = data.pedestal
+        if self.free_phase_pedestal:
+            self.ped: Tensor | None = None
+            self.s2a_held = _t(ped["sigma2_amp"], ref)
+            self.ga_held = _t(ped["gamma_amp_hz"], ref)
+            self.c_w = V4.width_scale(np.arange(1, kk + 1))
+        else:
+            self.ped = pedestal_lag(grid, ped)
         self.gain = _t(10.0 ** (data.geometry_db.T / 10.0), ref)  # (M, R)
         self.l_f = _t(np.log2(np.maximum(grid.freqs_hz, B_F_LO_HZ) / B_F_REF_HZ), ref)
         self.g1_static = _atom_autocorr(grid.window_work, int(grid.n_fft_work))
@@ -745,27 +810,32 @@ class FlightV4Model:
         fk = measured.floor_order_db
         self.centre_a = _t(fk - V4.C4_OFFSET_DB - V4.C4_ODD_PENALTY_DB * odd, ref)
         self.centre_m = _t(fk[data.motor_orders - 1] - V4.C4_OFFSET_DB, ref)
-        start = measured.init if init is None else init
+        start = dict(measured.init if init is None else init)
+        keys = [
+            "p_a",
+            "pbar_a",
+            "c_a",
+            "p_m",
+            "pbar_m",
+            "c_m",
+            "alpha_a",
+            "alpha_m",
+            "u_blo",
+            "u_bhi",
+            "z",
+            "log_s",
+            "log_sigma_nu",
+            "a_sigma",
+        ]
+        if self.free_phase_pedestal:
+            keys += ["u_s2P", "u_W"]
+            if "u_s2P" not in start:
+                start.update(phase_coords(ped))
         self.params: dict[str, Tensor] = {
             key: torch.tensor(np.asarray(start[key], dtype=np.float64), device=ref.device)
             .to(torch.float64)
             .requires_grad_(True)
-            for key in (
-                "p_a",
-                "pbar_a",
-                "c_a",
-                "p_m",
-                "pbar_m",
-                "c_m",
-                "alpha_a",
-                "alpha_m",
-                "u_blo",
-                "u_bhi",
-                "z",
-                "log_s",
-                "log_sigma_nu",
-                "a_sigma",
-            )
+            for key in keys
         }
         self.n_cells = int(data.batch.n_cells)
 
@@ -796,6 +866,25 @@ class FlightV4Model:
     def floor_c(self) -> Tensor:
         return _floor_c(self.grid, self.mu, self.params["z"], self.sigma_b, self.ref)
 
+    def s2P(self) -> Tensor:
+        """``(K,)`` free ``sigma2_phi``, capped at :data:`.v4_priors.PHASE_SIGMA2_MAX`."""
+        return _capped(self.params["u_s2P"], math.log(V4.PHASE_SIGMA2_MAX))
+
+    def width_phase(self) -> Tensor:
+        """``(K,)`` free ``W_phi`` (Hz), capped at :data:`.v4_priors.W_MAX_HZ`."""
+        return _capped(self.params["u_W"], math.log(V4.W_MAX_HZ))
+
+    def gP(self) -> Tensor:
+        """``(K,)`` ``gamma_phi`` (Hz) of the free width and variance."""
+        return _gamma_from_width(self.width_phase(), self.s2P())
+
+    def pedestal(self) -> Tensor:
+        """``(K, n)`` the aerodynamic lines' pedestal lag factor: precomputed when
+        held, rebuilt from the free phase coordinates on every call otherwise."""
+        if self.ped is not None:
+            return self.ped
+        return _pedestal_lag_t(self.grid, self.s2a_held, self.ga_held, self.s2P(), self.gP())
+
     def components(self, rate_work: Tensor) -> dict[str, Tensor]:
         """A chunk's modelled parts before the transfer: ``lines_r`` per rotor
         ``(R, n_c, F)``, the one ``floor`` ``(n_c, F)`` and ``floor_s`` ``(F,)``."""
@@ -812,7 +901,7 @@ class FlightV4Model:
             2.0 * 10.0 ** (v["p_a"] / 10.0),
             sigma2,
             self.v_unit,
-            self.ped,
+            self.pedestal(),
             v["alpha_a"],
             self.harmonic_chunk,
         )
@@ -876,6 +965,10 @@ class FlightV4Model:
             + n_(V4.FLIGHT_A_SIGMA[0], V4.FLIGHT_A_SIGMA[1], v["a_sigma"]),
             floor_push=self.kappa * self.ctrl_db().sum(),
         )
+        if self.free_phase_pedestal:
+            parts["phase_pedestal"] = -phase_pedestal_neg_log_prior(
+                self.s2P(), self.width_phase(), self.c_w
+            )
         total = torch.stack([t.reshape(()) for t in parts.values()]).sum()
         return total, {k: float(t.detach()) for k, t in parts.items()}
 
@@ -902,15 +995,16 @@ class FlightV4Model:
             )
 
     def box(self) -> None:
+        keys = ("log_s", "log_sigma_nu") + (("u_s2P", "u_W") if self.free_phase_pedestal else ())
         with torch.no_grad():
-            for key in ("log_s", "log_sigma_nu"):
+            for key in keys:
                 self.params[key].clamp_(-LOG_BOX, LOG_BOX)
 
     def snapshot(self) -> dict[str, np.ndarray]:
         """The groups the convergence test reads, as numbers."""
         with torch.no_grad():
             v = self.values()
-            return dict(
+            out = dict(
                 levels_db=np.concatenate(
                     [v["p_a"].cpu().numpy().ravel(), v["p_m"].cpu().numpy().ravel()]
                 ),
@@ -921,17 +1015,26 @@ class FlightV4Model:
                 log_sigma_nu=np.array([float(v["log_sigma_nu"])]),
                 log_s=np.array([float(v["log_s"])]),
             )
+            if self.free_phase_pedestal:
+                out["log_sigma2_phase"] = _np(torch.log(self.s2P()))
+                out["log_width_phase"] = _np(torch.log(self.width_phase()))
+            return out
 
 
 def movement(a: dict[str, np.ndarray], b: dict[str, np.ndarray]) -> dict[str, float]:
-    """Per-group parameter movement between two snapshots (spec step 5)."""
-    return dict(
+    """Per-group parameter movement between two snapshots (spec step 5); the
+    phase-pedestal groups when both snapshots carry them (a free pedestal)."""
+    out = dict(
         levels_db=float(np.median(np.abs(b["levels_db"] - a["levels_db"]))),
         exponents=float(np.max(np.abs(b["exponents"] - a["exponents"]))),
         floor_ctrl_db=float(np.max(np.abs(b["floor_ctrl_db"] - a["floor_ctrl_db"]))),
         log_sigma_nu=float(np.max(np.abs(b["log_sigma_nu"] - a["log_sigma_nu"]))),
         log_s=float(np.max(np.abs(b["log_s"] - a["log_s"]))),
     )
+    for key in ("log_sigma2_phase", "log_width_phase"):
+        if key in a and key in b:
+            out[key] = float(np.max(np.abs(b[key] - a[key])))
+    return out
 
 
 # ── the optimiser (spec § The optimiser; nv3r4 schedule) ───────────────────
@@ -951,7 +1054,8 @@ class OptimV4:
     tol_nats_per_cell: float = TOL_NATS_PER_CELL
     seed: int = 0
 
-    def as_dict(self) -> dict[str, Any]:
+    def as_dict(self, *, free_phase_pedestal: bool = False) -> dict[str, Any]:
+        phase_keys = ("log_sigma2_phase", "log_width_phase")
         return dict(
             adam_steps=self.adam_steps,
             adam_lr=self.adam_lr,
@@ -964,10 +1068,16 @@ class OptimV4:
             lbfgs_history=self.lbfgs_history,
             lbfgs_line_search="strong_wolfe",
             tol_nats_per_cell=self.tol_nats_per_cell,
-            movement_tolerances=dict(MOVE_TOL),
+            movement_tolerances={
+                k: v for k, v in MOVE_TOL.items() if free_phase_pedestal or k not in phase_keys
+            },
             seed=self.seed,
+            free_phase_pedestal=bool(free_phase_pedestal),
             evidence_freeze=(
-                "not run: the flight fit holds the phase pedestal at its prior medians "
+                "not run: the phase pedestal is free per order under the bench priors, "
+                "with no evidence freeze in the flight fit"
+                if free_phase_pedestal
+                else "not run: the flight fit holds the phase pedestal at its prior medians "
                 "(spec § Procedure B), so there is nothing to freeze"
             ),
         )
@@ -975,8 +1085,8 @@ class OptimV4:
 
 def restart_init(measured: FlightMeasured, seed: int) -> dict[str, np.ndarray]:
     """Restart ``seed``'s start: 0 takes the prior centres of the shaft law (the
-    pedestal is held); 1, 2, ... draw ``sigma_ref`` and ``a_sigma`` from their
-    priors."""
+    pedestal, held or free, starts at the prior medians); 1, 2, ... draw
+    ``sigma_ref`` and ``a_sigma`` from their priors."""
     init = {k: np.array(v, copy=True) for k, v in measured.init.items()}
     if int(seed) > 0:
         rng = np.random.default_rng(int(seed))
@@ -987,9 +1097,17 @@ def restart_init(measured: FlightMeasured, seed: int) -> dict[str, np.ndarray]:
     return init
 
 
+def phase_pedestal_free(pay: dict[str, Any]) -> bool:
+    """Whether a flight payload's phase pedestal was fitted (``held.phase`` false)."""
+    held = pay["params"]["pedestal"].get("held", True)
+    return isinstance(held, dict) and not bool(held.get("phase", True))
+
+
 def init_from_payload(pay: dict[str, Any]) -> dict[str, np.ndarray]:
     """The raw parameters of a ``noise-v4-fit/3`` flight payload of the same
-    pool: the start of a continuation (warm-start) fit."""
+    pool: the start of a continuation (warm-start) fit. ``u_s2P`` / ``u_W``
+    carry the payload's phase pedestal (held or fitted); a model with the
+    phase pedestal held ignores them."""
     pr, h = pay["params"], pay["hierarchy"]
     sh, fl = pr["shaft"], pr["floor"]
 
@@ -1015,6 +1133,7 @@ def init_from_payload(pay: dict[str, Any]) -> dict[str, np.ndarray]:
         log_s=np.log(a(fl["static_rel"])),
         log_sigma_nu=np.log(a(sh["sigma_nu_rad_s"])),
         a_sigma=a(sh["a_sigma"]),
+        **phase_coords(pr["pedestal"]),
     )
 
 
@@ -1073,6 +1192,7 @@ def fit_flight(
     start: dict[str, Any] | None = None,
     deadline_s: float | None = None,
     max_restart_passes: int = 20,
+    free_phase_pedestal: bool = False,
 ) -> tuple[FlightV4Model, dict[str, Any]]:
     """MAP-fit one restart (spec steps B2, § The optimiser).
 
@@ -1085,14 +1205,22 @@ def fit_flight(
     ``deadline_s`` seconds from the call (resume from the payload). ``start``
     (a payload of the same pool) replaces the restart's initialisation (a
     continuation); with ``lbfgs_iters = 0`` the subset stage is skipped and
-    the polish runs ``polish_iters``."""
+    the polish runs ``polish_iters``. ``free_phase_pedestal`` fits the phase
+    pedestal per order (:class:`FlightV4Model`); a ``start`` whose phase
+    pedestal was fitted needs it."""
+    if start is not None and phase_pedestal_free(start) and not free_phase_pedestal:
+        raise ValueError(
+            "the start payload fitted the phase pedestal: continue it with free_phase_pedestal"
+        )
     torch.manual_seed(int(optim.seed))
     batch = data.batch
     dev = batch.power.device
     init = (
         init_from_payload(start) if start is not None else restart_init(measured, int(optim.seed))
     )
-    model = FlightV4Model(data, measured, kappa=kappa, init=init)
+    model = FlightV4Model(
+        data, measured, kappa=kappa, init=init, free_phase_pedestal=free_phase_pedestal
+    )
     rng = np.random.default_rng(int(optim.seed))
     n_frames = int(batch.power.shape[1])
     t0 = time.time()
@@ -1155,7 +1283,7 @@ def fit_flight(
         prev_loss = out["loss_after"]
         gain_cell = gain / max(1, model.n_cells)
         gain_ok = bool(gain_cell < float(optim.tol_nats_per_cell))
-        move_ok = {k: bool(moved[k] < tol) for k, tol in MOVE_TOL.items()}
+        move_ok = {k: bool(moved[k] < tol) for k, tol in MOVE_TOL.items() if k in moved}
         converged = gain_ok and all(move_ok.values())
         if progress:
             print(
@@ -1186,7 +1314,7 @@ def fit_flight(
             exposure_scale=batch.exposure_scale,
         ),
         optimiser=dict(
-            **optim.as_dict(),
+            **optim.as_dict(free_phase_pedestal=model.free_phase_pedestal),
             started_from_payload=start is not None,
             device=str(dev),
             chunk_frames=batch.chunk_frames,
@@ -1237,6 +1365,13 @@ def payload(
     band_f = grid.freqs_hz[np.asarray(batch.band.cpu())]
     sigma_nu = float(v["sigma_nu"])
     ped = data.pedestal
+    free = model.free_phase_pedestal
+    if free:
+        with torch.no_grad():
+            s2p, gp, wp = _np(model.s2P()), _np(model.gP()), _np(model.width_phase())
+    else:
+        s2p, gp = np.asarray(ped["sigma2_phase"]), np.asarray(ped["gamma_phase_hz"])
+        wp = V4.pedestal_width(gp, s2p)
     meas = model.meas
     array_response = None if channel_gains is None else channel_gains.array_response()
     return dict(
@@ -1263,15 +1398,22 @@ def payload(
             pedestal=dict(
                 sigma2_amp=np.asarray(ped["sigma2_amp"]).tolist(),
                 gamma_amp_hz=np.asarray(ped["gamma_amp_hz"]).tolist(),
-                sigma2_phase=np.asarray(ped["sigma2_phase"]).tolist(),
-                gamma_phase_hz=np.asarray(ped["gamma_phase_hz"]).tolist(),
-                held=True,
+                sigma2_phase=np.asarray(s2p).tolist(),
+                gamma_phase_hz=np.asarray(gp).tolist(),
+                width_phase_hz=np.asarray(wp).tolist(),
+                held=dict(amplitude=True, phase=not free),
                 source=dict(
                     amplitude=(
                         f"block wander {data.wander_path}: sigma2 = (sigma_v ln10/20)^2 capped at "
                         "v4_priors.amp_cap, gamma = 1/(2 pi tau_v), per order group"
                     ),
-                    phase="prior medians: sigma2 = exp(PHASE_SIGMA2_LN[0]); W = c_W x 0.6745",
+                    phase=(
+                        "fitted per order: sigma2 capped at PHASE_SIGMA2_MAX, W capped at "
+                        "W_MAX_HZ (bench_v4 capped coordinates), gamma = W (1 - e^-sigma2) "
+                        "/ sigma2; started at the prior medians"
+                        if free
+                        else "prior medians: sigma2 = exp(PHASE_SIGMA2_LN[0]); W = c_W x 0.6745"
+                    ),
                     sigma2_amp_uncapped=np.asarray(ped["sigma2_amp_uncapped"]).tolist(),
                 ),
             ),
@@ -1359,6 +1501,14 @@ def priors_record(model: FlightV4Model) -> dict[str, Any]:
         floor_push="+kappa sum_j cbar_j on the log prior (dB)",
         amp_groups=[list(g) for g in V4.AMP_GROUPS],
         amp_log_sd=V4.AMP_LOG_SD,
+        phase_pedestal=(
+            "free per order: log sigma2_phi ~ N(phase_sigma2_ln) truncated at "
+            "phase_sigma2_max, W_phi ~ HalfNormal(c_w) truncated at w_max_hz (the bench priors, "
+            "bench_v4.phase_pedestal_neg_log_prior)"
+            if model.free_phase_pedestal
+            else "held at the prior medians: sigma2_phi = exp(phase_sigma2_ln[0]), "
+            "W_phi = c_w x the half-normal median"
+        ),
         phase_sigma2_ln=list(V4.PHASE_SIGMA2_LN),
         c_w=V4.C_W,
         w_max_hz=V4.W_MAX_HZ,
@@ -1397,6 +1547,8 @@ def reduce_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
         floor_ctrl_db=_spread([p["floor"]["ctrl_db"] for p in pr]),
         sigma_nu_rad_s=_spread([p["shaft"]["sigma_nu_rad_s"] for p in pr]),
         a_sigma=_spread([p["shaft"]["a_sigma"] for p in pr]),
+        sigma2_phase=_spread([p["pedestal"]["sigma2_phase"] for p in pr]),
+        gamma_phase_hz=_spread([p["pedestal"]["gamma_phase_hz"] for p in pr]),
     )
     out = dict(best)
     out["restarts"] = dict(

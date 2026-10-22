@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """Noise model v4, procedure B: fit MD2 (Michael's drone) in free flight; and the
-DREGON flight stage (wind and floor from flight on a frozen bench rig).
+DREGON flight stage (wind, floor and per-rotor line gains from flight on a frozen bench rig).
 
 Spec: ``docs/explainers/noise-model-v4.qmd`` § Procedure B; module
 :mod:`experiments.noise_model.flight_v4`. One restart per call; the restarts
@@ -10,6 +10,9 @@ are reduced afterwards to the lowest objective.
     python scripts/noise_v4_flight.py fit --seed 0 --device cuda --out results/noise_v4/flight
     # the four restarts reduced to one payload
     python scripts/noise_v4_flight.py reduce --out results/noise_v4/flight
+    # one regime with the phase pedestal fitted per order (held at the prior medians otherwise)
+    python scripts/noise_v4_flight.py fit --sets michaels-cruise --name md2_fly125_cruise \\
+        --free-phase-pedestal --device cuda --out results/noise_v4/flight
     # a CPU smoke: one standby + one cruise window, mics 0,1, 24 orders
     python scripts/noise_v4_flight.py fit --max-windows 2 --mics 0,1 --k-cap 24 \\
         --adam-steps 20 --lbfgs-iters 10 --polish-iters 4 --out /tmp/nv4_smoke
@@ -27,9 +30,11 @@ transfer``). Supports come from the ``.npz`` cache or are built from the data
 Writes ``<out>/restarts/<name>__flight_v4__s<seed>.json`` (``noise-v4-fit/3``);
 ``reduce`` writes ``<out>/<name>__flight_v4.json``; ``dregon`` writes
 ``<out>/dregon_room2__flight_v4__<bench stem>.json``: the bench payload with
-``kind="flight"``, the floor refitted and a static per-mic wind, fitted on the
-five 8 s ``dregon-floor`` segments with every bench line, pedestal, shaft and
-pair-EQ parameter frozen (``--max-frames`` for a smoke run).
+``kind="flight"``, a per-rotor line gain written into both profile rows, the
+floor refitted and a static per-mic wind, fitted on the five 8 s
+``dregon-floor`` segments with every bench line-shape, pedestal, shaft and
+pair-EQ parameter frozen (``--no-line-gain`` holds the gains at 0,
+``--max-frames`` for a smoke run).
 """
 
 from __future__ import annotations
@@ -134,7 +139,12 @@ def cmd_fit(args: argparse.Namespace) -> int:
     if args.time_eval:
         import torch
 
-        model = FV.FlightV4Model(data, measured, kappa=float(args.kappa))
+        model = FV.FlightV4Model(
+            data,
+            measured,
+            kappa=float(args.kappa),
+            free_phase_pedestal=bool(args.free_phase_pedestal),
+        )
         t2 = time.time()
         loss = float(model.objective(b, grad=True))
         FV._sync(b.power.device)
@@ -165,6 +175,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
         progress=int(args.progress),
         start=start,
         deadline_s=60.0 * float(args.deadline_min) if args.deadline_min else None,
+        free_phase_pedestal=bool(args.free_phase_pedestal),
     )
     pay = FV.payload(model, record, channel_gains=gains)
     pay["pool"]["specs"] = (
@@ -231,6 +242,7 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         restart_iters=int(args.restart_iters),
         max_passes=int(args.max_passes),
         progress=int(args.progress),
+        line_gain=not args.no_line_gain,
     )
     out = Path(args.out) / f"{DF.NAME}__flight_v4__{bench_path.stem}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -248,6 +260,8 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         f"floor mean_db {fl['mean_db']:.3f}  b0 {fl['b0']:.4f}  b1 {fl['b1']:.4f}  "
         f"static_rel {fl['static_rel']:.4g}\n"
         f"wind_db {[round(w, 2) for w in pay['params']['wind']['wind_db']]}\n"
+        f"line_gain_db {[round(g, 3) for g in st['line_gain']['gain_db']]} "
+        f"(free {st['line_gain']['free']})\n"
         f"wall {time.time() - t0:.1f}s",
         flush=True,
     )
@@ -301,10 +315,18 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument(
         "--time-eval", action="store_true", help="time ONE objective call on the pool and exit"
     )
+    f.add_argument(
+        "--free-phase-pedestal",
+        action="store_true",
+        help="fit sigma2_phi and W_phi per order under the bench priors (default: held at "
+        "the prior medians); a --start payload that fitted them needs it",
+    )
     r = sub.add_parser("reduce", help="lowest objective over the restarts")
     r.add_argument("--out", required=True)
     r.add_argument("--name", default=NAME)
-    d = sub.add_parser("dregon", help="DREGON flight stage: wind + floor on a frozen bench rig")
+    d = sub.add_parser(
+        "dregon", help="DREGON flight stage: line gains + wind + floor on a frozen bench rig"
+    )
     d.add_argument("--bench", required=True, help="a DREGON noise-v4-fit/3 bench payload")
     d.add_argument(
         "--kappa", type=float, default=None, help="floor push (default: the bench payload's)"
@@ -320,6 +342,11 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--max-passes", type=int, default=20)
     d.add_argument("--wind-start", default=None, help="nv3r4 DREGON payload (wind start)")
     d.add_argument("--progress", type=int, default=0, help="print every N frozen frames")
+    d.add_argument(
+        "--no-line-gain",
+        action="store_true",
+        help="hold the per-rotor line gains at 0 (the bench line levels)",
+    )
     args = ap.parse_args(argv)
     if args.cmd == "dregon":
         if args.wind_start is None:

@@ -1,9 +1,11 @@
 """The DREGON flight stage (``experiments.noise_model.dregon_flight_v4``).
 
-Its torch forward model must BE the renderer's: at random floor, static-share
-and wind values, the frozen bench lines plus the stage's window transform of
-the floor terms equal ``v4.expected_periodogram`` of the exported flight
-payload on every bin. CPU-small (n_fft 256, three frames).
+Its torch forward model must BE the renderer's: at random floor, static-share,
+wind and per-rotor line-gain values, the gained frozen per-rotor bench lines
+plus the stage's window transform of the floor terms equal
+``v4.expected_periodogram`` of the exported flight payload (gains written into
+the profiles) on every bin, with the gains free or held. CPU-small (n_fft 256,
+three frames).
 """
 
 from __future__ import annotations
@@ -42,7 +44,8 @@ def test_stage_expectation_is_the_renderers() -> None:
         n_frames_read=n,
         exposure_scale=1.0,
     )
-    lines = DF.frozen_lines(bench, rps, n_fft=N_FFT, sr=SR)
+    lines = DF.frozen_lines(bench, rps, n_fft=N_FFT, sr=SR)  # asserts sum_r L_r = L
+    assert lines.shape == (4, 8, n, f.size)
     floor = bench["params"]["floor"]
     # a floor 20 dB over the bench's, so the floor terms carry much of E
     init = dict(
@@ -53,16 +56,27 @@ def test_stage_expectation_is_the_renderers() -> None:
         log_static=-6.0,
         wind_db=np.full(8, -30.0),
     )
-    model = DF.FlightStageModel(
-        bench,
-        pool,
-        lines,
+    common = dict(
         band_hz=tuple(bench["band_hz"]),
         kappa=0.0,
         floor_centre_db=floor["mean_db"],
         wind_centre_db=np.full(8, -30.0),
-        init=init,
     )
-    for seed in (0, 1, 2):
-        out = DF.renderer_check(model, [0, 1, 2], seed=seed)
-        assert out["max_rel_err"] < DF.CHECK_RTOL, out
+    free = DF.FlightStageModel(
+        bench, pool, lines, init=dict(init, line_gain_db=[4.0, -3.0, 7.0, 1.0]), **common
+    )
+    held = DF.FlightStageModel(bench, pool, lines, init=init, line_gain=False, **common)
+    assert DF.GAIN_KEY in free.params and DF.GAIN_KEY not in held.params
+    for model in (free, held):
+        for seed in (0, 1, 2):
+            out = DF.renderer_check(model, [0, 1, 2], seed=seed)
+            assert out["max_rel_err"] < DF.CHECK_RTOL, out
+            assert np.all(np.abs(out["at"]["line_gain_db"]) > 0.0)
+    # the check restores the gains; the payload carries them in the profiles
+    np.testing.assert_array_equal(free.line_gain_db.detach().numpy(), [4.0, -3.0, 7.0, 1.0])
+    np.testing.assert_array_equal(held.line_gain_db.detach().numpy(), np.zeros(4))
+    fl, wind, gain = free.exported()
+    pay = DF.flight_payload(bench, floor=fl, wind_db=wind, line_gain_db=gain)
+    for key in ("profile_aero_db", "profile_motor_db"):
+        diff = np.asarray(pay["params"][key]) - np.asarray(bench["params"][key])
+        np.testing.assert_allclose(diff, np.broadcast_to(np.array(gain)[:, None], diff.shape))
