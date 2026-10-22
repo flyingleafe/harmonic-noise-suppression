@@ -7,11 +7,12 @@
 #
 #   bash scripts/noise_v4_score.sh <bench payload> <flight payload> <out dir>
 #
-# CPU only (uni-cpu, 4 threads): the four steps run concurrently.
+# CPU only (uni-cpu, --cpus 6 --mem 32): the three steps run concurrently, two
+# threads each.
 set -uo pipefail
 BENCH=$1 FLIGHT=$2 O=$3
 set -a; [ -f ./.env ] && . ./.env; set +a
-export PYTHONPATH=src:scripts OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+export PYTHONPATH=src:scripts OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
 L=$O/logs; mkdir -p "$L" "$O/parity" "$O/proxy"
 FITS=results/noise_v2/rounds/round3/fits
 step() { local name=$1; shift; local t0; t0=$(date +%s); "$@" > "$L/$name.log" 2>&1; local e=$?
