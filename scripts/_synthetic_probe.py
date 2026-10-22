@@ -138,7 +138,7 @@ def score(
         pred = pred_t.numpy()
     else:
         layers, rps_grid = metric._unpack(out, tgt)
-        pred = peak_readout(F.logsigmoid(layers), metric._freqs)[0].numpy()
+        pred = peak_readout(F.logsigmoid(layers), metric._freqs, has_off=metric.has_off)[0].numpy()
         truth = rps_grid[0].numpy()
     from itertools import permutations
 
@@ -216,7 +216,8 @@ def figure(
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     fm = zoo.load(MODEL, ckpt="best")
-    metric = LayerPeakRPSMetric()
+    # hppnet_l2_r2_s0's output grid (conf/metrics/salience_layers_r150.yaml)
+    metric = LayerPeakRPSMetric(grid=dict(kind="linear", fmin=0.0, fmax=150.0, bins=300))
     results: dict[str, Any] = {}
     for tag, path in POLICIES.items():
         clips = sample_clips(path, N_CLIPS)

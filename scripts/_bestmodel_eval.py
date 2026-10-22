@@ -152,7 +152,7 @@ def predict(
     tgt = rps_frame(clip.rps, clip.sr)
     if kind == "salience":
         layers, rps_grid = metric._unpack(out, tgt)
-        pred = peak_readout(F.logsigmoid(layers), metric._freqs)[0].numpy()
+        pred = peak_readout(F.logsigmoid(layers), metric._freqs, has_off=metric.has_off)[0].numpy()
         truth = rps_grid[0].numpy()
     else:
         entry = next(k for k in list(out.keys()) if k != "meta")
@@ -243,7 +243,8 @@ def figure(
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    metric = LayerPeakRPSMetric()
+    # the pre-rp-protocol default grid of the salience ports evaluated here
+    metric = LayerPeakRPSMetric(grid=dict(kind="linear", fmin=0.0, fmax=150.0, bins=300))
     results: dict[str, Any] = {}
     for model, info in MODELS.items():
         fm = zoo.load(model, ckpt="best")
