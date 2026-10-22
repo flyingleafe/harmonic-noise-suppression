@@ -19,12 +19,19 @@ comparison measures this:
 On a planted twin (data rendered from the model) ``eta`` measures the
 dependence alone; the gap to the real-data ``eta`` is model error. Growing the
 blocks until ``eta`` stops moving is the block-size check.
+
+``eta`` needs the fit at a true minimum: ``H_post`` without materially
+negative eigenvalues. A converged fit can stop on a flat saddle (a near-
+invisible line's level or pedestal); :func:`saddle_escape` walks down each
+negative direction on the MAP objective, re-runs the convergence loop and
+re-checks the Hessian.
 """
 
 from __future__ import annotations
 
 import math
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +41,15 @@ from torch import Tensor
 
 from experiments.noise_model.bench_v4 import RigModel
 
-__all__ = ["block_scores", "eta_report", "hessians", "free_params"]
+__all__ = [
+    "block_scores",
+    "curvature",
+    "eta_report",
+    "free_params",
+    "hessians",
+    "line_search",
+    "saddle_escape",
+]
 
 
 def free_params(model: RigModel) -> list[tuple[str, Tensor]]:
@@ -102,6 +117,14 @@ def hessians(model: RigModel, *, log: Any = print) -> tuple[np.ndarray, np.ndarr
     return 0.5 * (H + H.T), 0.5 * (P + P.T)
 
 
+def curvature(H: np.ndarray, P: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
+    """``(w, V, tol)``: the eigenpairs of ``H + P`` (ascending) and the
+    tolerance of the rule: ``w < -tol`` is materially negative curvature,
+    ``|w| <= tol`` a flat direction."""
+    w, V = np.linalg.eigh(H + P)
+    return w, V, float(np.abs(w).max()) * 1e-10
+
+
 def eta_report(
     model: RigModel,
     *,
@@ -109,22 +132,22 @@ def eta_report(
     coarsen: tuple[int, ...] = (1, 2, 4, 8),
     log: Any = print,
     save: Path | None = None,
+    hp: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     """``eta`` at ``band_hz`` blocks and at blocks ``coarsen`` times wider (the
     block-size check), plus one block per recording; ``save`` writes ``H``,
-    ``P`` and the block scores (``.npz``) for re-analysis."""
+    ``P`` and the block scores (``.npz``) for re-analysis; ``hp`` is ``(H, P)``
+    already computed at the model's parameters (:func:`hessians`)."""
     names = [(n, t.numel()) for n, t in free_params(model)]
     t0 = time.perf_counter()
     G, index = block_scores(model, band_hz)
     log(f"[eta] {G.shape[0]} block scores ({time.perf_counter() - t0:.0f} s)")
-    H, P = hessians(model, log=log)
-    Hp = H + P
+    H, P = hessians(model, log=log) if hp is None else hp
     # at a MAP the posterior curvature is positive definite. Directions of
     # non-positive curvature mean the payload is not a minimum: they are
     # counted and left out (the inverse lives on the positive subspace), and
     # eta is not reported if any is materially negative
-    w, V = np.linalg.eigh(Hp)
-    tol = float(np.abs(w).max()) * 1e-10
+    w, V, tol = curvature(H, P)
     keep = w > tol
     n_neg = int((w < -tol).sum())
     inv = (V[:, keep] / w[keep]) @ V[:, keep].T
@@ -171,3 +194,150 @@ def eta_report(
         by_block=by_size,
         wall_s=time.perf_counter() - t0,
     )
+
+
+#: the trial steps of the line search along a negative-curvature direction
+#: (unit eigenvector, free coordinates), tried in both signs
+ESCAPE_STEPS: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)
+
+
+def _get_flat(model: RigModel) -> Tensor:
+    return torch.cat([t.detach().reshape(-1) for _, t in free_params(model)]).clone()
+
+
+@torch.no_grad()
+def _set_flat(model: RigModel, x: Tensor) -> None:
+    """Write the flat free-parameter vector ``x`` into the model in place."""
+    o = 0
+    for _, t in free_params(model):
+        n = t.numel()
+        t.copy_(x[o : o + n].view_as(t))
+        o += n
+
+
+def _coordinate(model: RigModel, v: np.ndarray) -> dict[str, Any]:
+    """The free coordinate carrying most of the unit vector ``v``."""
+    i = int(np.argmax(v**2))
+    o = 0
+    for name, t in free_params(model):
+        if i < o + t.numel():
+            return dict(param=name, index=i - o, mass=float(v[i] ** 2))
+        o += t.numel()
+    raise IndexError(i)
+
+
+def line_search(
+    model: RigModel, v: np.ndarray, f0: float, steps: tuple[float, ...] = ESCAPE_STEPS
+) -> dict[str, Any]:
+    """Move the model to the best of ``x + s t v`` (``s = +-1``, ``t`` in
+    ``steps``) on the MAP objective (:meth:`RigModel.objective`), or leave it
+    at ``x`` if none is below ``f0`` (its objective there). Each sign walks
+    out until the objective stops falling."""
+    x0 = _get_flat(model)
+    d = torch.as_tensor(v, dtype=x0.dtype, device=x0.device)
+    best_s, best_f, n_evals = 0.0, f0, 0
+    for sign in (1.0, -1.0):
+        prev = f0
+        for t in steps:
+            _set_flat(model, x0 + (sign * t) * d)
+            f, _ = model.objective()
+            n_evals += 1
+            if f < best_f:
+                best_s, best_f = sign * t, f
+            if not f < prev:  # stopped falling (or not finite)
+                break
+            prev = f
+    _set_flat(model, x0 + best_s * d)
+    return dict(step=best_s, gain=f0 - best_f, objective=best_f, n_evals=n_evals)
+
+
+def saddle_escape(
+    model: RigModel,
+    converge: Callable[[RigModel, float | None], dict[str, Any]],
+    *,
+    max_rounds: int = 4,
+    steps: tuple[float, ...] = ESCAPE_STEPS,
+    deadline: float | None = None,
+    log: Any = print,
+) -> tuple[dict[str, Any], tuple[np.ndarray, np.ndarray] | None]:
+    """Leave the saddle a converged fit can stop on, in place on ``model``.
+
+    A round: the Hessian ``H + P`` (:func:`hessians`); each materially
+    negative direction (:func:`curvature`'s rule), most negative first, by
+    :func:`line_search` on the MAP objective; then ``converge(model,
+    budget_s)`` (the fit's convergence loop, returning its summary) so the
+    other coordinates re-balance; the Hessian again. Stops at a minimum (no
+    materially negative curvature), after ``max_rounds`` rounds, when no
+    direction lowers the objective (``stuck``), or when the next Hessian would
+    end past ``deadline`` (a ``time.perf_counter()`` instant).
+
+    Returns the record and the last ``(H, P)`` if it is at the model's final
+    parameters (``None`` if the deadline stopped the run before it)."""
+    t_all = time.perf_counter()
+
+    def left() -> float:
+        return math.inf if deadline is None else deadline - time.perf_counter()
+
+    t0 = time.perf_counter()
+    hp: tuple[np.ndarray, np.ndarray] | None = hessians(model, log=log)
+    hess_s = time.perf_counter() - t0
+    rounds: list[dict[str, Any]] = []
+    check: dict[str, Any] = {}
+    while True:
+        assert hp is not None
+        w, V, tol = curvature(*hp)
+        neg = np.flatnonzero(w < -tol)
+        check = dict(n_negative=int(neg.size), min_eig=float(w.min()), tol=tol, hessian_s=hess_s)
+        log(f"[escape] round {len(rounds)}: {neg.size} negative, min eig {w.min():.4g}")
+        if neg.size == 0:
+            stop = "at_minimum"
+            break
+        if len(rounds) >= max_rounds:
+            stop = "max_rounds"
+            break
+        f_start, _ = model.objective()
+        f, directions = f_start, []
+        for i in neg:  # ascending: most negative first
+            if left() < 1.25 * hess_s:
+                break
+            ls = line_search(model, V[:, i], f, steps)
+            f = ls["objective"]
+            directions.append(dict(eig=float(w[i]), **_coordinate(model, V[:, i]), **ls))
+        n_moved = sum(d["step"] != 0.0 for d in directions)
+        log(
+            f"[escape] {n_moved}/{neg.size} directions moved, "
+            f"gain {f_start - f:.4g} nats ({len(directions)} searched)"
+        )
+        if n_moved == 0:
+            rounds.append(dict(check, objective_start=f_start, directions=directions))
+            stop = "stuck"
+            break
+        budget = None if deadline is None else left() - 1.25 * hess_s
+        conv = converge(model, budget)
+        rounds.append(
+            dict(
+                check,
+                objective_start=f_start,
+                objective_escaped=f,
+                directions=directions,
+                convergence=conv,
+            )
+        )
+        if left() < 1.15 * hess_s:
+            hp, stop = None, "deadline"
+            break
+        t0 = time.perf_counter()
+        hp = hessians(model, log=log)
+        hess_s = time.perf_counter() - t0
+    final = check if hp is not None else dict(n_negative=None, min_eig=None)
+    record = dict(
+        rounds=rounds,
+        max_rounds=int(max_rounds),
+        steps=list(steps),
+        stop=stop,
+        n_negative=final["n_negative"],
+        min_eig=final["min_eig"],
+        at_minimum=None if hp is None else final["n_negative"] == 0,
+        wall_s=time.perf_counter() - t_all,
+    )
+    return record, hp

@@ -1073,6 +1073,14 @@ class RigModel:
                 g.zero_()
         return float(prior.detach()) + sum(parts), parts
 
+    @torch.no_grad()
+    def objective(self) -> tuple[float, list[float]]:
+        """:meth:`objective_and_grad`'s total and per-recording Whittle terms
+        (the MAP objective incl. the floor push), with no graph or gradient."""
+        prior = float(self.neg_log_prior())
+        parts = [float(self.whittle(j)) for j in range(len(self.frozen))]
+        return prior + sum(parts), parts
+
     def load_payload(self, pay: dict[str, Any]) -> None:
         """Set every parameter from a ``noise-v4-fit/3`` bench payload of the
         same rig geometry (the planted truth, a refit's start), and its pair
@@ -1364,6 +1372,7 @@ def fit_rig(
     flat_shaft: bool = False,
     start: dict[str, Any] | None = None,
     resume: bool = False,
+    model: RigModel | None = None,
     deadline_s: float | None = None,
     max_passes: int = 40,
     log: Any = print,
@@ -1383,12 +1392,17 @@ def fit_rig(
     ``start`` (a payload of the same rig) replaces the data-only
     initialisation; with ``resume`` the run goes straight to the convergence
     loop and carries the payload's evidence record (a continuation).
+    ``model`` (with ``resume``) continues that model's parameters as they
+    stand instead of loading ``start``; ``start`` still gives the evidence.
     ``flat_shaft`` pins ``a_sigma = b_lam = 0``."""
     tag = f"[rig s{seed}{' flat' if flat_shaft else ''}]"
     t_all = time.perf_counter()
-    model = RigModel(rig, device=device, seed=seed, kappa=kappa, flat_shaft=flat_shaft)
-    if start is not None:
-        model.load_payload(start)
+    if model is None:
+        model = RigModel(rig, device=device, seed=seed, kappa=kappa, flat_shaft=flat_shaft)
+        if start is not None:
+            model.load_payload(start)
+    elif not resume:
+        raise ValueError("a given model is continued: it needs resume")
     if resume and start is None:
         raise ValueError("resume needs a start payload")
     init_s = time.perf_counter() - t_all

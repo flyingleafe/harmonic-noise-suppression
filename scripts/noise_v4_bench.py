@@ -6,13 +6,18 @@ recordings, its restarts and the planted check::
     python scripts/noise_v4_bench.py reduce
     python scripts/noise_v4_bench.py planted --truth <payload.json> --kappa K --device cuda
     python scripts/noise_v4_bench.py refit --from <payload.json> --flat-shaft --device cuda
+    python scripts/noise_v4_bench.py resume --from <payload.json> --device cuda
+    python scripts/noise_v4_bench.py eta --fit <payload.json> --device cuda
+    python scripts/noise_v4_bench.py escape --from <payload.json> --device cuda
 
 Outputs under ``--out`` (default ``results/noise_v4/bench``): ``restarts/`` one
 ``noise-v4-fit/3`` payload per restart; ``raw/`` the gridrun unit records;
 ``fits/<name>.json`` the selected restart (lowest objective) with the restart
 spread per parameter group; ``planted/<name>.json`` the recovery report;
 ``restarts/<source>__flat.json`` + ``refit/<source>__flat.json`` the nested
-flat-shaft refit (one ``(sigma_nu, lam)`` for every speed) and its comparison.
+flat-shaft refit (one ``(sigma_nu, lam)`` for every speed) and its comparison;
+``restarts/<source>__c<n+1>.json`` a continuation (``resume``, ``escape``);
+``eta/<fit>.json`` + ``.npz`` the likelihood weight and its Hessians.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 import warnings
 from pathlib import Path
 from typing import Any
@@ -383,12 +389,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     )
     pay = B.payload(model, rec, git=_git())
     pay["optimiser"]["resumed_from"] = str(src_path)
-    m = re.fullmatch(r"(.*?)(?:__c(\d+))?", src_path.stem)
-    assert m is not None
-    stem = m.group(1)
-    if args.kappa is not None:
-        stem = re.sub(r"__kappa[^_]+", f"__kappa{args.kappa:g}", stem)
-    path = args.out / "restarts" / f"{stem}__c{int(m.group(2) or 0) + 1}.json"
+    path = _next_continuation(args.out, src_path, args.kappa)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(pay))
     print(
@@ -397,6 +398,90 @@ def cmd_resume(args: argparse.Namespace) -> int:
         f"last gain {rec['restart_gain_per_cell']})",
         flush=True,
     )
+    return 0
+
+
+def _next_continuation(out: Path, src_path: Path, kappa: float | None = None) -> Path:
+    """``restarts/<stem>__c<n+1>.json`` of a payload ``<stem>[__c<n>]``;
+    ``kappa`` replaces the stem's ``__kappa<K>``."""
+    m = re.fullmatch(r"(.*?)(?:__c(\d+))?", src_path.stem)
+    assert m is not None
+    stem = m.group(1)
+    if kappa is not None:
+        stem = re.sub(r"__kappa[^_]+", f"__kappa{kappa:g}", stem)
+    return out / "restarts" / f"{stem}__c{int(m.group(2) or 0) + 1}.json"
+
+
+def cmd_escape(args: argparse.Namespace) -> int:
+    """Leave a negative-curvature saddle before step 3
+    (:func:`bench_eta.saddle_escape`): rounds of the Hessian, a line search on
+    the MAP objective down every materially negative direction and the
+    convergence loop of :func:`bench_v4.fit_rig`; written as
+    ``<stem>__c<n+1>`` with the rounds in ``optimiser.saddle_escape``, then
+    ``eta`` on it (as ``eta`` writes it) if it ends at a minimum."""
+    import torch
+
+    from experiments.noise_model import bench_eta as E
+    from experiments.noise_model import bench_v4 as B
+
+    deadline = time.perf_counter() + 60.0 * args.deadline_min
+    torch.set_num_threads(args.threads)
+    src_path = Path(args.source)
+    src = json.loads(src_path.read_text())
+    seed = int(src["optimiser"]["seed"])
+    kappa = float(src["priors"]["floor_push_kappa"])
+    flat = bool(src["params"]["shaft"]["pinned"])
+    model = B.RigModel(
+        _rig_of_payload(src), device=args.device, seed=seed, kappa=kappa, flat_shaft=flat
+    )
+    model.load_payload(src)
+    f, parts = model.objective()
+    # with no round run the payload is the source's state and record
+    last: dict[str, Any] = {**src["optimiser"], "objective": f, "whittle_per_recording": parts}
+
+    def converge(m: Any, budget_s: float | None) -> dict[str, Any]:
+        _, rec = B.fit_rig(
+            m.rig,
+            seed=seed,
+            kappa=kappa,
+            lbfgs_iters=args.lbfgs_iters,
+            device=args.device,
+            flat_shaft=flat,
+            start=src,
+            resume=True,
+            model=m,
+            deadline_s=budget_s,
+        )
+        last.clear()
+        last.update(rec)
+        return {
+            k: rec[k]
+            for k in (
+                "objective_start",
+                "objective",
+                "converged",
+                "stop",
+                "restart_gain_per_cell",
+                "restart_movement",
+                "wall_s",
+            )
+        } | dict(n_passes=len(rec["convergence_passes"]))
+
+    esc, hp = E.saddle_escape(model, converge, max_rounds=args.max_rounds, deadline=deadline)
+    pay = B.payload(model, last, git=_git())
+    pay["optimiser"]["resumed_from"] = str(src_path)
+    pay["optimiser"]["saddle_escape"] = esc
+    path = _next_continuation(args.out, src_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(pay))
+    print(
+        f"wrote {path}: {pay['objective']['total_nats']:.1f} nats (from "
+        f"{src['objective']['total_nats']:.1f}); escape {esc['stop']} after "
+        f"{len(esc['rounds'])} rounds, {esc['n_negative']} negative (min eig {esc['min_eig']})",
+        flush=True,
+    )
+    if esc["at_minimum"]:
+        _write_eta(model, path, args.out, band_hz=args.band_hz, planted=None, hp=hp)
     return 0
 
 
@@ -474,7 +559,6 @@ def cmd_eta(args: argparse.Namespace) -> int:
     planted report describes."""
     import torch
 
-    from experiments.noise_model import bench_eta as E
     from experiments.noise_model import bench_v4 as B
 
     torch.set_num_threads(args.threads)
@@ -496,13 +580,28 @@ def cmd_eta(args: argparse.Namespace) -> int:
         rig, device=args.device, kappa=kappa, flat_shaft=bool(pay["params"]["shaft"]["pinned"])
     )
     model.load_payload(pay)
-    path = args.out / "eta" / (Path(args.fit).stem + ".json")
-    rep_out = E.eta_report(model, band_hz=args.band_hz, save=path.with_suffix(".npz"))
-    rep_out.update(fit=str(args.fit), planted=args.planted, git=_git())
+    _write_eta(model, Path(args.fit), args.out, band_hz=args.band_hz, planted=args.planted)
+    return 0
+
+
+def _write_eta(
+    model: Any,
+    fit: Path,
+    out: Path,
+    *,
+    band_hz: float,
+    planted: str | None,
+    hp: Any = None,
+) -> None:
+    """``eta/<fit stem>.json`` and its ``.npz`` (:func:`bench_eta.eta_report`)."""
+    from experiments.noise_model import bench_eta as E
+
+    path = out / "eta" / (fit.stem + ".json")
+    rep_out = E.eta_report(model, band_hz=band_hz, save=path.with_suffix(".npz"), hp=hp)
+    rep_out.update(fit=str(fit), planted=planted, git=_git())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(rep_out, indent=1))
     print(json.dumps({k: v for k, v in rep_out.items() if k != "params"}, indent=1))
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -579,6 +678,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
     p.set_defaults(func=cmd_eta)
+    p = sub.add_parser("escape", help="leave a saddle (negative curvature), then step 3")
+    p.add_argument("--from", dest="source", required=True, help="a noise-v4-fit/3 bench payload")
+    p.add_argument("--max-rounds", type=int, default=4, help="escape rounds (Hessian each)")
+    p.add_argument("--lbfgs-iters", type=int, default=1200, help="loop passes of a quarter")
+    p.add_argument("--band-hz", type=float, default=200.0, help="eta's finest block's band")
+    p.add_argument("--deadline-min", type=float, default=170.0)
+    p.add_argument("--device", default="cpu")
+    p.add_argument("--threads", type=int, default=8)
+    p.set_defaults(func=cmd_escape)
     args = ap.parse_args(argv)
     return int(args.func(args))
 
