@@ -21,8 +21,7 @@ __all__ = [
     "C4_ODD_PENALTY_DB",
     "C4_OFFSET_DB",
     "C4_SD_DB",
-    "C_W_EVEN",
-    "C_W_ODD",
+    "C_W",
     "EPS_HALF_NORMAL",
     "A_SIGMA",
     "B_LAM",
@@ -32,9 +31,11 @@ __all__ = [
     "FLIGHT_SIGMA_NU_LN",
     "GAMMA_AMP_LOG_SD",
     "LAM_REF_LN",
+    "PHASE_SIGMA2_MAX",
     "PHASE_SIGMA2_LN",
     "PROFILE_LINE_SD_DB",
     "PROFILE_ROTOR_SD_DB",
+    "W_MAX_HZ",
     "amp_cap",
     "amp_log_median",
     "gamma_amp_log_median",
@@ -88,17 +89,24 @@ AMP_LOG_SD = 0.5
 #: sd of log gamma_A around its median (``gamma_amp_log_median``).
 GAMMA_AMP_LOG_SD = 0.5
 
-#: Phase pedestal variance: wide; the bench data set it.
+#: Phase pedestal variance: wide; the bench data set it. Hard cap: the A0
+#: p97.5 of s2P (2.81, results/noise_v4/phase_width/summary.json) rounded up,
+#: so the pedestal holds at most 1 - e^-3 = 95 % of a line's power.
 PHASE_SIGMA2_LN = (0.0, 1.5)
+PHASE_SIGMA2_MAX = 3.0
 
-#: Half-normal scales (Hz) of the phase-pedestal mean half-width W, blade-pass
-#: orders and the others: p97.5 of the measured W per parity / 2.24 (step A0,
-#: 20 bench recordings, results/noise_v4/phase_width/summary.json; even n = 387,
-#: odd n = 94). The fit on the resolved lags only (>= 33-61 ms) gives
-#: c_W 18.4 / 163 Hz: a width much above 1/(2 pi 33 ms) ~ 5 Hz is decorrelated
-#: at every resolved lag and is set there by its tail, so it is not used.
-C_W_EVEN = 6.94
-C_W_ODD = 30.68
+#: Half-normal scale (Hz) of the phase-pedestal mean half-width W, every order:
+#: p97.5 of the measured W on the blade-pass (even) orders / 2.24 (step A0, 20
+#: bench recordings, n = 387). The odd orders measured wider (c_W 30.7 Hz,
+#: n = 94), but a scale that wide let the round-4 bench fits trade odd-order
+#: pedestals for floor at ~6-10 nats, so the even scale holds for all orders.
+#: The fit on the resolved lags only (>= 33-61 ms) gives c_W 18.4 Hz: a width
+#: much above 1/(2 pi 33 ms) ~ 5 Hz is decorrelated at every resolved lag and
+#: is set there by its tail, so it is not used.
+C_W = 6.94
+#: Hard upper bound on W: half the slowest bench line spacing (48.4 rev/s). A
+#: wider pedestal reaches its neighbours' lines and becomes floor.
+W_MAX_HZ = 24.0
 
 
 def _group(k: np.ndarray, col: int) -> np.ndarray:
@@ -126,10 +134,9 @@ def gamma_amp_log_median(k: np.ndarray) -> np.ndarray:
     return np.where(k <= 8, math.log(0.4), math.log(1.0))
 
 
-def width_scale(k: np.ndarray, blades: int) -> np.ndarray:
+def width_scale(k: np.ndarray) -> np.ndarray:
     """Half-normal scale (Hz) of the phase-pedestal width of order ``k``."""
-    k = np.asarray(k, dtype=np.int64)
-    return np.where(k % int(blades) == 0, C_W_EVEN, C_W_ODD).astype(np.float64)
+    return np.full(np.shape(k), C_W, dtype=np.float64)
 
 
 def pedestal_width(gamma, sigma2):

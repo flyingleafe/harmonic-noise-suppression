@@ -161,7 +161,7 @@ def _by_order(k: np.ndarray, block: dict[str, Any] | None, key: str, pooled: flo
     return vals[idx]
 
 
-def flight_pedestal(k_max: int, *, blades: int, wander: dict[str, Any]) -> dict[str, np.ndarray]:
+def flight_pedestal(k_max: int, *, wander: dict[str, Any]) -> dict[str, np.ndarray]:
     """The HELD pedestal per order ``1..k_max`` (spec § Procedure B).
 
     Amplitude: ``sigma2 = (sigma_v ln10 / 20)^2`` capped at
@@ -176,7 +176,7 @@ def flight_pedestal(k_max: int, *, blades: int, wander: dict[str, Any]) -> dict[
     s2a = np.minimum(s2a_raw, V4.amp_cap(k))
     ga = 1.0 / (2.0 * math.pi * tau_s)
     s2p = np.full(k.shape, math.exp(V4.PHASE_SIGMA2_LN[0]))
-    w_med = V4.width_scale(k, blades) * HALFNORMAL_MEDIAN
+    w_med = V4.width_scale(k) * HALFNORMAL_MEDIAN
     gp = w_med * (-np.expm1(-s2p)) / s2p
     return dict(
         sigma2_amp=s2a,
@@ -253,7 +253,7 @@ def prepare(
         k_max=k,
         motor_orders=np.arange(step, k + 1, step, dtype=np.int64),
         geometry_db=geometry_db(used),
-        pedestal=flight_pedestal(k, blades=blades, wander=wander),
+        pedestal=flight_pedestal(k, wander=wander),
         wander_path=str(wander_path),
         mics=used,
         blades=int(blades),
@@ -1293,9 +1293,10 @@ def priors_record(model: FlightV4Model) -> dict[str, Any]:
         amp_groups=[list(g) for g in V4.AMP_GROUPS],
         amp_log_sd=V4.AMP_LOG_SD,
         phase_sigma2_ln=list(V4.PHASE_SIGMA2_LN),
-        c_w_even=V4.C_W_EVEN,
-        c_w_odd=V4.C_W_ODD,
-        c_w_note="v4_priors.C_W_EVEN / C_W_ODD (step A0)",
+        c_w=V4.C_W,
+        w_max_hz=V4.W_MAX_HZ,
+        phase_sigma2_max=V4.PHASE_SIGMA2_MAX,
+        c_w_note="v4_priors.C_W (step A0, even orders, every order)",
     )
 
 
