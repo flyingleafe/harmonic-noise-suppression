@@ -74,6 +74,7 @@ from typing import Any
 
 import numpy as np
 
+from data_processing.noise_model import FIT_SCHEMA_V4
 from experiments.noise_model import READABLE_FIT_SCHEMAS
 from experiments.noise_model import gates as GT
 from experiments.stochastic_fit import revised_eval as RE
@@ -88,6 +89,13 @@ ORACLE_JSON = Path("results/noise_v2/short_whittle/short_whittle.json")
 #: renderer is imported dynamically (see ``_v2_modules``), so the pair is taken
 #: from the package, which stays importable with no v2 renderer present.
 FIT_SCHEMAS: tuple[str, ...] = READABLE_FIT_SCHEMAS
+#: A noise-model-v4 payload (``noise-v4-fit/3``) names no ``support``: it is
+#: admitted through ``--fit <rig>=PATH`` only, by its ``rig`` field. The DREGON
+#: arm renders the BENCH payload on the flight carrier, rotor row i <-> bench
+#: Motor(i+1) (the pair EQ follows the inverse-distance pattern of
+#: ``dregon.get_geometry``'s rotor i, 150-1500 Hz); Michael's renders the one
+#: joint MD2 flight payload on every regime.
+V4_SCHEMA = FIT_SCHEMA_V4
 
 #: The fit each rig's arm is RENDERED from, by the ``"support"`` field of the
 #: fit JSON (R1Core's naming). The DREGON arm is the flight floor-only fit
@@ -426,16 +434,21 @@ def v2_arm(
     fits = read_fits(fits_dir)
     admissible = MICHAELS_FIT_SUPPORTS if rig == "michaels" else (DREGON_FIT_SUPPORT,)
     named = " or ".join(repr(name) for name in admissible)
+    v4 = False
     if fit_path is not None:
         fit = json.loads(Path(fit_path).read_text())
-        if str(fit.get("schema")) not in FIT_SCHEMAS:
+        v4 = str(fit.get("schema")) == V4_SCHEMA
+        if v4:
+            if str(fit.get("rig")) != rig:
+                die(f"{fit_path}: a v4 payload of rig {fit.get('rig')!r}, not {rig!r}")
+        elif str(fit.get("schema")) not in FIT_SCHEMAS:
             die(f"{fit_path}: schema {fit.get('schema')!r} is none of {list(FIT_SCHEMAS)}")
-        if str(fit.get("support")) not in admissible:
+        elif str(fit.get("support")) not in admissible:
             die(
                 f"{fit_path}: carries support {fit.get('support')!r}, but the {rig} arm is "
                 f"defined on {named}"
             )
-        want = str(fit.get("support"))
+        want = f"v4:{fit.get('kind')}" if v4 else str(fit.get("support"))
         fit["_path"] = str(fit_path)
     else:
         present = [name for name in admissible if name in fits]
@@ -447,7 +460,13 @@ def v2_arm(
         want = present[0]
         fit = fits[want]
     source: dict[str, Any] = dict(support=want, path=fit["_path"], kind=fit.get("kind"))
-    if rig != "michaels":
+    if v4:
+        label = (
+            "v4 bench rig fit (Motor i -> flight rotor i, per-rotor floor, pair EQ)"
+            if rig == "dregon"
+            else "v4 MD2 joint flight fit (one shared floor; all regimes)"
+        )
+    elif rig != "michaels":
         label = "v2 DREGON room-2 floor fit with the bench comb (mean of Motor1-4 @70)"
     elif want == "michaels_fly125_all":
         label = (
@@ -456,7 +475,7 @@ def v2_arm(
         )
     else:
         label = "v2 FLY125 cruise fit (drives FLY124 standby/ramp through the trajectory sampler)"
-    if rig == "dregon":
+    if rig == "dregon" and not v4:
         source["comb_mean_check"] = _comb_mean_check(fit, fits)
     return Arm(
         rig=rig,
@@ -465,7 +484,9 @@ def v2_arm(
         source=source,
         fit=fit,
         _render=render_mod.render_noise,
-        _spectrum=spectrum_fn,
+        # the likelihood gate's expected periodogram is v2/v3 code; a v4 arm
+        # is scored on parity and the LTAS proxy, as nv3r4 was
+        _spectrum=None if v4 else spectrum_fn,
     )
 
 
@@ -599,7 +620,8 @@ def _fit_row(fit: dict[str, Any]) -> dict[str, Any]:
         path=fit.get("_path"),
         mode=fit.get("mode"),
         n_fit_windows=len(fit.get("supports") or []),
-        converged=opt.get("converged"),
+        # v4 flight payloads keep the flag under optimiser.convergence
+        converged=opt.get("converged", (opt.get("convergence") or {}).get("converged")),
         which_converged=opt.get("which_converged"),
         grad_norm=opt.get("grad_norm"),
         tol_nats_per_cell=opt.get("tol_nats_per_cell"),

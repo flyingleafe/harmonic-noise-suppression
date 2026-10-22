@@ -182,7 +182,40 @@ LISTEN_LABELS = {
     "legacy": "legacy anchor fit (donor dynamics)",
     "v2": "v2 fit",
     "v3": "v3 round-2 fit",
+    "v4": "v4 fit",
 }
+#: ``--listen-v4 rig=PATH``: the noise-v4-fit/3 payload each rig's ``"v4"``
+#: Listen clip is rendered from (``render.render_noise``, which dispatches v4)
+LISTEN_V4_FITS: dict[str, str] = {}
+
+
+def _v4_source(nl: Any, rig: str) -> Any:
+    """The ``"v4"`` Listen source of ``rig``: :data:`LISTEN_V4_FITS`'s payload
+    under the same render call the scorer's arms use."""
+    from experiments.noise_model import render as render_mod
+
+    path = LISTEN_V4_FITS[rig]
+    fit = json.loads(Path(path).read_text())
+
+    class V4Fit(nl.NoiseSource):
+        generation = "v4"
+        name = f"v4-fit {rig}"
+        entry = str(path)
+        span = None
+
+        def render(self, rps_16k, *, seed, n_mics=1, comb_offset_db=0.0):
+            if comb_offset_db:
+                raise ValueError("a v4 source takes no comb offset")
+            return np.asarray(
+                render_mod.render_noise(
+                    fit, np.atleast_2d(rps_16k), n_mics=int(n_mics), seed=int(seed)
+                ),
+                dtype=np.float64,
+            )
+
+    return V4Fit()
+
+
 #: § 6 Listen (later rows): the anchor fit of :data:`LEGACY_FITS` each listen rig was
 #: drawn around, rendered as the legacy training streams render a bank entry
 #: (``noise_lab.LegacyFit``'s default ``dynamics="donor"``, line mode ``fm``)
@@ -1083,6 +1116,8 @@ def listen_variant(key: str) -> str | None:
 def listen_rigs(key: str) -> tuple[str, ...]:
     """The listen rigs clip ``key`` is rendered on (a :data:`LISTEN_VARIANTS` key:
     :data:`LISTEN_LAM_RIGS`; every other key: all of :data:`LISTEN_WINDOWS`)."""
+    if key == "v4":
+        return tuple(LISTEN_V4_FITS)
     return LISTEN_LAM_RIGS if listen_variant(key) else tuple(LISTEN_WINDOWS)
 
 
@@ -1108,6 +1143,8 @@ def listen_source(nl: Any, rig: str, key: str) -> Any:
     + a :data:`LISTEN_LAM` suffix (the same fit, shaft OU rate ``lam`` set)."""
     if key == "legacy":
         return nl.LegacyFit(LISTEN_LEGACY[rig], dynamics=LISTEN_LEGACY_DYNAMICS)
+    if key == "v4":
+        return _v4_source(nl, rig)
     if key == "v2":
         return nl.V2Fit(rig)
     lam = listen_lam(key)
@@ -2021,7 +2058,26 @@ def main(argv: list[str] | None = None) -> int:
         "for its shaft OU rate lam set, Michael's only) into "
         "figdata_TAG.json beside the clips already there, then redraw",
     )
+    ap.add_argument(
+        "--listen-v4",
+        nargs="+",
+        metavar="RIG=PATH",
+        help="render § Listen from noise-v4-fit/3 payloads (rig dregon or michaels) beside the "
+        "real window alone, into figdata_v4.json (no figures)",
+    )
     args = ap.parse_args(argv)
+    if args.listen_v4:
+        for spec in args.listen_v4:
+            rig, _, path = spec.partition("=")
+            if rig not in LISTEN_WINDOWS or not path:
+                ap.error(f"--listen-v4 {spec!r}: want RIG=PATH, RIG in {list(LISTEN_WINDOWS)}")
+            LISTEN_V4_FITS[rig] = path
+        d = json.loads(json.dumps(_r(listen(("v4",)), 4)))
+        data = OUT / "figdata_v4.json"
+        OUT.mkdir(parents=True, exist_ok=True)
+        data.write_text(json.dumps(dict(listen=d, fits=LISTEN_V4_FITS), ensure_ascii=False) + "\n")
+        print(f"wrote {data}")
+        return 0
     if args.round:
         if args.listen_only or (args.rigs_only and args.listen_add):
             ap.error("--round takes --plot-only, --rigs-only or --listen-add")
