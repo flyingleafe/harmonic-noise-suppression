@@ -78,6 +78,47 @@ def _band_db(f: np.ndarray, p: np.ndarray, edges: np.ndarray) -> np.ndarray:
     return np.stack(out, axis=-1)
 
 
+#: Orders of the line-prominence diagnostic and its STFT (256 ms frames).
+PROM_K_MAX = 60
+PROM_NFFT = 4096
+PROM_HOP = 1024
+
+
+def _order_prominence(x: np.ndarray, rps: np.ndarray) -> np.ndarray:
+    """``(PROM_K_MAX,)`` line prominence (dB) per integer order: per frame and
+    rotor, the peak mic-mean power within 0.08 orders of ``k f_r`` over the median
+    power 0.3-0.5 orders away, averaged over frames and rotors."""
+    from scipy.signal import stft
+
+    f, t, z = stft(
+        x,
+        fs=SR,
+        nperseg=PROM_NFFT,
+        noverlap=PROM_NFFT - PROM_HOP,
+        window="hann",
+        boundary=None,
+        padded=False,
+    )
+    p = (np.abs(z) ** 2).mean(axis=0)  # (F, N)
+    n_samp = x.shape[-1]
+    t_rps = np.arange(rps.shape[1]) * (n_samp / rps.shape[1]) / SR
+    out = np.zeros((rps.shape[0], PROM_K_MAX))
+    for r in range(rps.shape[0]):
+        fr = np.interp(t, t_rps, rps[r])
+        acc = np.zeros(PROM_K_MAX)
+        for n in range(p.shape[1]):
+            kk = f / max(fr[n], 1.0)
+            col = p[:, n]
+            for k in range(1, PROM_K_MAX + 1):
+                d = np.abs(kk - k)
+                peak = col[d < 0.08]
+                side = col[(d > 0.3) & (d < 0.5)]
+                if peak.size and side.size:
+                    acc[k - 1] += _db(peak.max()) - _db(np.median(side))
+        out[r] = acc / p.shape[1]
+    return out.mean(axis=0)
+
+
 def _wav(path: Path, x: np.ndarray, scale: float) -> None:
     import soundfile as sf
 
@@ -166,6 +207,7 @@ def cmd_flight(args: argparse.Namespace) -> int:
             row[f"level_db_per_mic_{name}"] = _db(
                 p[:, (f >= 31.25) & (f <= 7900)].mean(axis=1)
             ).tolist()
+            row[f"prominence_{name}"] = _order_prominence(x, rps).tolist()
         for name in fits:
             dev = RE.ltas_deviation_db(real, audio[name], mic=0)
             row[f"scorer_{name}"] = {
@@ -340,6 +382,26 @@ def cmd_flight(args: argparse.Namespace) -> int:
     axes[0][0].legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(out / f"{tag}fig_v4_parts.png", dpi=130)
+    plt.close(fig)
+
+    # Fig 6: line prominence per order (peak over the 0.3-0.5-order sides), the
+    # mean over the windows of each regime
+    groups = ["cruise"] if rig == "dregon" else ["standby", "ramp", "cruise"]
+    fig, axes = plt.subplots(1, len(groups), figsize=(5.2 * len(groups), 3.8), squeeze=False)
+    korders = np.arange(1, PROM_K_MAX + 1)
+    for ax, g in zip(axes[0], groups):
+        sel = [r for r in rows if rig == "dregon" or r["key"].startswith(g)]
+        for n in names:
+            v = np.mean([r[f"prominence_{n}"] for r in sel], axis=0)
+            ax.plot(korders, v, color=COLORS[n], lw=1.0, marker=".", ms=3, label=n)
+        ax.axhline(0, color="black", lw=0.6)
+        ax.set_title(f"{g}: {len(sel)} window(s)", fontsize=10)
+        ax.set_xlabel("rotor order k")
+        ax.grid(alpha=0.3)
+    axes[0][0].set_ylabel("line prominence (dB)")
+    axes[0][0].legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out / f"{tag}fig_prominence.png", dpi=130)
     plt.close(fig)
 
     data = dict(
