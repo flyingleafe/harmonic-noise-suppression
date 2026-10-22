@@ -92,7 +92,7 @@ v4 keeps from nv3r4:
 | 3 | Line speed law | one `amp_exp` per rig | **one exponent per family per rig**, shared by the rotors | @sec-ev-speed-lines |
 | 4 | Floor | one floor for the rig, mean speed law $\tfrac1R\sum_r s_r^{b}$ | **one floor per rotor**, shape $F(f)$ and exponent $b(f)$ shared by the rotors; the rig floor is the **sum** | @sec-ev-floor |
 | 5 | Line shape | Lorentzian width $\gamma_{rk}$ (random-walk phase) | **two bounded processes per order**: log-amplitude OU and phase OU | @sec-ev-pedestal |
-| 6 | Pedestal priors | half-normal $\gamma$ with parity floor | measured amplitude prior with a cap; **half-normal on the phase-pedestal width** with parity | @sec-ev-pedestal |
+| 6 | Pedestal priors | half-normal $\gamma$ with parity floor | measured amplitude prior with a cap; **half-normal on the phase-pedestal width, hard caps on the width and the phase variance** | @sec-ev-pedestal |
 | 7 | Floor prior | spline with measured $\sigma_B$ | the same, plus a **soft push upward** to the bases of the lines | @sec-ev-floor-push |
 | 8 | Shaft on the bench | — | free, with one speed law shared by the rotors | @sec-ev-shaft |
 | 9 | Microphones | channels normalised in the data by the array response | in flight the same, **plus a fixed geometric term per rotor–mic pair**; **pair EQ** on the bench; **no per-line scatter** | @sec-ev-mics |
@@ -302,8 +302,8 @@ synthesis with the per-rotor gain $\sum_r s_r(t)^{b(f)}$ per bin.
 | floor push | rig | $+\kappa\sum_j \bar c_j$ on the log-prior, $\bar c_j$ the control values in dB | @sec-ev-floor-push |
 | $\sigma^2_{A,k}$ | rig, order | LogN$(\log m_{g}, 0.5)$ truncated at $c_{g}$; $(m_g, c_g)$ per order group $g$ in @tbl-amp | @sec-ev-pedestal |
 | $\gamma_{A,k}$ | rig, order | LogN$(\log 0.4\,\mathrm{Hz}, 0.5)$ for $k \le 8$; LogN$(\log 1.0\,\mathrm{Hz}, 0.5)$ above | direct amplitude measurement |
-| $\sigma^2_{\phi,k}$ | rig, order | LogN$(\log 1, 1.5)$ | wide; the data set it on the bench |
-| $W_{\phi,k}$ (@eq-width) | rig, order | HalfNormal$(c_W^{\rm even})$ for $k \bmod B = 0$, HalfNormal$(c_W^{\rm odd})$ otherwise, in Hz; $c_W^{\rm even} = 6.94$, $c_W^{\rm odd} = 30.68$ | @sec-ev-pedestal; $c_W$ measured in step A0 (`results/noise_v4/phase_width/findings.md`) |
+| $\sigma^2_{\phi,k}$ | rig, order | LogN$(\log 1, 1.5)$ truncated at 3 (the pedestal holds at most $1 - e^{-3}$ = 95 % of the line) | wide; the data set it on the bench. Cap: the A0 97.5th percentile (2.81) rounded up |
+| $W_{\phi,k}$ (@eq-width) | rig, order | HalfNormal$(c_W)$ truncated at $W_{\max} = 24$ Hz; $c_W = 6.94$ Hz for every order | @sec-ev-pedestal; $c_W$ from the blade-pass orders in step A0 (`results/noise_v4/phase_width/findings.md`); $W_{\max}$ half the slowest bench line spacing (48.4 rev/s) |
 | $\varepsilon$ | rig | HalfNormal$(0.005)$ | bench round R2 |
 | $a_\sigma$, $b_\lambda$ | rig | $\mathcal N(1, 0.5)$; flight: $a_\sigma \sim \mathcal N(1, 2)$, $b_\lambda = 0$ | bench round R2; flight: per-regime nv3 fits (@sec-flight-fit) |
 | $\sigma_{\rm ref}$ (flight) | rig | LogN$(1.68, 0.66)$ rad/s | nv3r4 A2 |
@@ -336,7 +336,9 @@ Three properties of the priors matter for the fit:
    switched on or off before the fit (decision, 2026-09-22).
 2. **Pedestals stay narrow unless the data ask.** The half-normal on $W_\phi$
    is light-tailed in linear Hz. A broad skirt on a weak line costs more than
-   it buys.
+   it buys. Two hard caps bound what the data can ask for: $W_\phi \le 24$ Hz,
+   so a skirt never reaches the neighbouring lines, and $\sigma^2_\phi \le 3$,
+   so a line keeps at least 5 % of its power in the carrier.
 3. **The floor is pushed up.** Between the lines, the floor and the pedestal
    skirts explain the same cells. The push breaks that tie toward the floor.
    The Whittle term stops the floor at the bases of the lines.
@@ -715,6 +717,18 @@ faint broad skirt: $W$ = 22–60 Hz at $\sigma^2 \approx 0.02$ on Motor1
 $k$ = 1, 3, 5, 7, 9, against 1.5–4.7 Hz on the even orders. The direct
 measurement shows $k$ = 1–3 coherent. nv3r4's width prior with a parity floor
 (odd 3 Hz, even 1 Hz) prevented this; v4 applies the same idea to $W_\phi$.
+
+**Why caps, and one scale for every order (round 5).** A0 measured the odd
+orders wider ($c_W^{\rm odd}$ = 30.7 Hz, 94 orders) than the blade-pass ones
+(6.94 Hz, 387 orders). Under the odd scale the round-4 bench fits bought
+odd-order skirts of 100–140 Hz for 6–10 nats each, and with no cap one width
+ran to 9.4 kHz and the floor under 300 Hz fell to −103 to −213 dB: the skirts
+took the floor's cells. A half-normal tail is too cheap against a likelihood of
+$1.5\times10^7$ cells. So every order now takes the blade-pass scale, the width
+is capped at half the slowest bench line spacing (24 Hz) and the phase variance
+at 3 (the A0 97.5th percentile, 2.81, rounded up). The caps are hard: the fit
+parameter maps onto $(0, \text{cap})$ through a softplus, as the amplitude
+variance's cap already did.
 
 **Physics.** Haystacking: unsteady blade loading from ingested turbulence that
 successive blades cut many times gives a per-order complex envelope with a
