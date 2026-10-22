@@ -185,6 +185,44 @@ def _within(
     return dict(truth=truth, fit=fit, err=err, rel_err=err / truth if truth else None, ok=bool(ok))
 
 
+def _planted(
+    truth_path: str | Path,
+    *,
+    floor_below: float | None,
+    render_seed: int,
+    kappa: float,
+    device: str,
+) -> tuple[Any, Any, dict[str, Any] | None]:
+    """``(truth model, planted rig, floor patch)``: the truth payload, its floor
+    below ``floor_below`` Hz replaced by the measured inter-line floor (the
+    data-only initial control values), rendered with ``render_seed``."""
+    import numpy as np
+    import torch
+
+    from experiments.noise_model import bench_v4 as B
+
+    pay_t = json.loads(Path(truth_path).read_text())
+    real = _rig_of_payload(pay_t)
+    truth = B.RigModel(real, device=device, kappa=kappa)
+    truth.load_payload(pay_t)
+    floor_patch = None
+    if floor_below is not None:
+        ctrl_hz = np.asarray(truth.frozen[0].grid.floor.ctrl_hz, dtype=np.float64)
+        with torch.no_grad():
+            target = truth.cbar().cpu().numpy()
+        low = ctrl_hz < float(floor_below)
+        target[low] = np.asarray(real.init["floor_ctrl_db"])[low]
+        err = truth.set_floor_ctrl(target)
+        floor_patch = dict(
+            below_hz=float(floor_below),
+            ctrl_hz=ctrl_hz[low].tolist(),
+            ctrl_db=target[low].tolist(),
+            max_reproduction_err_db=err,
+        )
+    planted = B.render_planted(truth, seed=render_seed)
+    return truth, B.build_rig(real.motors, settings=planted), floor_patch
+
+
 def cmd_planted(args: argparse.Namespace) -> int:
     import numpy as np
     import torch
@@ -192,12 +230,13 @@ def cmd_planted(args: argparse.Namespace) -> int:
     from experiments.noise_model import bench_v4 as B
 
     torch.set_num_threads(args.threads)
-    pay_t = json.loads(Path(args.truth).read_text())
-    real = _rig_of_payload(pay_t)
-    truth = B.RigModel(real, device=args.device, kappa=args.kappa)
-    truth.load_payload(pay_t)
-    planted = B.render_planted(truth, seed=args.render_seed)
-    rig = B.build_rig(real.motors, settings=planted)
+    truth, rig, floor_patch = _planted(
+        args.truth,
+        floor_below=args.floor_data_below,
+        render_seed=args.render_seed,
+        kappa=args.kappa,
+        device=args.device,
+    )
     model, rec = B.fit_rig(
         rig,
         seed=args.seed,
@@ -269,6 +308,7 @@ def cmd_planted(args: argparse.Namespace) -> int:
     checks["all_ok"] = all(bool(v["ok"]) for v in checks.values() if isinstance(v, dict))
     out = dict(
         truth=str(args.truth),
+        floor_patch=floor_patch,
         kappa=args.kappa,
         render_seed=args.render_seed,
         seed=args.seed,
@@ -288,11 +328,10 @@ def cmd_planted(args: argparse.Namespace) -> int:
         wall_s=rec["wall_s"],
         git=_git(),
     )
-    path = (
-        args.out
-        / "planted"
-        / f"{Path(args.truth).stem}__kappa{args.kappa:g}__r{args.render_seed}.json"
+    stem = Path(args.truth).stem + (
+        f"__floor{args.floor_data_below:g}" if args.floor_data_below is not None else ""
     )
+    path = args.out / "planted" / f"{stem}__kappa{args.kappa:g}__r{args.render_seed}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=1))
     path.with_suffix(".fit.json").write_text(json.dumps(B.payload(model, rec, git=_git())))
@@ -367,6 +406,43 @@ def cmd_refit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eta(args: argparse.Namespace) -> int:
+    """Step 3: the likelihood weight ``eta`` by block jackknife at a fitted
+    payload, on the real recordings or (``--planted``) on the planted twin the
+    planted report describes."""
+    import torch
+
+    from experiments.noise_model import bench_eta as E
+    from experiments.noise_model import bench_v4 as B
+
+    torch.set_num_threads(args.threads)
+    pay = json.loads(Path(args.fit).read_text())
+    kappa = float(pay["priors"]["floor_push_kappa"])
+    if args.planted:
+        rep = json.loads(Path(args.planted).read_text())
+        patch = rep.get("floor_patch")
+        _, rig, _ = _planted(
+            rep["truth"],
+            floor_below=None if patch is None else patch["below_hz"],
+            render_seed=int(rep["render_seed"]),
+            kappa=kappa,
+            device=args.device,
+        )
+    else:
+        rig = _rig_of_payload(pay)
+    model = B.RigModel(
+        rig, device=args.device, kappa=kappa, flat_shaft=bool(pay["params"]["shaft"]["pinned"])
+    )
+    model.load_payload(pay)
+    rep_out = E.eta_report(model, band_hz=args.band_hz)
+    rep_out.update(fit=str(args.fit), planted=args.planted, git=_git())
+    path = args.out / "eta" / (Path(args.fit).stem + ".json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rep_out, indent=1))
+    print(json.dumps({k: v for k, v in rep_out.items() if k != "params"}, indent=1))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--out", type=Path, default=OUT)
@@ -401,6 +477,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lbfgs-iters", type=int, default=1200)
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
+    p.add_argument(
+        "--floor-data-below",
+        type=float,
+        default=None,
+        metavar="HZ",
+        help="replace the truth's floor below HZ by the measured inter-line floor",
+    )
     p.set_defaults(func=cmd_planted)
     p = sub.add_parser("refit", help="nested refit of a payload with the shaft law pinned flat")
     p.add_argument("--from", dest="source", required=True, help="a noise-v4-fit/3 bench payload")
@@ -411,6 +494,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
     p.set_defaults(func=cmd_refit)
+    p = sub.add_parser("eta", help="step 3: the likelihood weight by block jackknife")
+    p.add_argument("--fit", required=True, help="a noise-v4-fit/3 bench payload")
+    p.add_argument("--planted", default=None, help="the planted report of a planted twin's fit")
+    p.add_argument("--band-hz", type=float, default=200.0, help="the finest block's band")
+    p.add_argument("--device", default="cpu")
+    p.add_argument("--threads", type=int, default=8)
+    p.set_defaults(func=cmd_eta)
     args = ap.parse_args(argv)
     return int(args.func(args))
 

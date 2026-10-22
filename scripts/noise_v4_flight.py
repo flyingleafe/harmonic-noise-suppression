@@ -148,14 +148,25 @@ def cmd_fit(args: argparse.Namespace) -> int:
         polish_iters=int(args.polish_iters),
         seed=int(args.seed),
     )
+    start = json.loads(Path(args.start).read_text()) if args.start else None
     model, record = FV.fit_flight(
-        data, measured, kappa=float(args.kappa), optim=optim, progress=int(args.progress)
+        data,
+        measured,
+        kappa=float(args.kappa),
+        optim=optim,
+        progress=int(args.progress),
+        start=start,
     )
     pay = FV.payload(model, record, channel_gains=gains)
     pay["pool"]["specs"] = (
         list(args.support) if args.support else _pool_specs(list(args.sets), args.max_windows)
     )
-    out = Path(args.out) / "restarts" / f"{args.name}__{FV.FLIGHT_V4_MODE}__s{int(args.seed)}.json"
+    uid = f"{args.name}__{FV.FLIGHT_V4_MODE}__s{int(args.seed)}" + (
+        f"__{args.tag}" if args.tag else ""
+    )
+    out = Path(args.out) / "restarts" / f"{uid}.json"
+    if start is not None:
+        pay["optimiser"]["start_payload"] = str(args.start)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(pay, indent=1))
     conv = record["optimiser"]["convergence"]
@@ -223,6 +234,13 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--lbfgs-frames", type=int, default=64)
     f.add_argument("--polish-iters", type=int, default=150)
     f.add_argument("--progress", type=int, default=0)
+    f.add_argument(
+        "--start",
+        default=None,
+        help="continue from this flight payload (same pool); use with --adam-steps 0 "
+        "--lbfgs-iters 0 so only the all-frames polish and its restart run",
+    )
+    f.add_argument("--tag", default="", help="suffix of the restart file (a continuation)")
     f.add_argument(
         "--time-eval", action="store_true", help="time ONE objective call on the pool and exit"
     )

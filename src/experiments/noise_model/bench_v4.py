@@ -133,6 +133,11 @@ def _uncapped(s2: np.ndarray, cap: np.ndarray | float) -> np.ndarray:
     return lc - np.log(np.expm1(np.maximum(lc - np.log(s2), 1e-12)))
 
 
+def _under(v: np.ndarray, cap: float) -> np.ndarray:
+    """``v`` with entries at or over ``cap`` moved to ``0.99 cap``."""
+    return np.where(v >= cap, 0.99 * cap, v)
+
+
 # ── data ─────────────────────────────────────────────────────────────────────
 
 
@@ -880,6 +885,22 @@ class RigModel:
         basis = self.frozen[0].grid.floor
         return self.params["floor_mean_db"] + basis.shape_db(self.params["floor_z"], self.sigma_b)
 
+    @torch.no_grad()
+    def set_floor_ctrl(self, ctrl_db: np.ndarray) -> float:
+        """Set the floor to the control values ``ctrl_db`` (dB): ``mean`` their
+        mean, ``z`` the least-squares solve of the (linear) shape map. Returns
+        the largest reproduction error (dB); a planted truth's floor."""
+        basis = self.frozen[0].grid.floor
+        target = np.asarray(ctrl_db, dtype=np.float64)
+        mean = float(target.mean())
+        z0 = torch.zeros_like(self.params["floor_z"])
+        with torch.enable_grad():
+            A = torch.autograd.functional.jacobian(lambda z: basis.shape_db(z, self.sigma_b), z0)
+        z = np.linalg.lstsq(A.cpu().numpy(), target - mean, rcond=None)[0]
+        self.params["floor_mean_db"].copy_(torch.as_tensor(mean, **self.dd))
+        self.params["floor_z"].copy_(torch.as_tensor(z, **self.dd))
+        return float(np.max(np.abs(self.cbar().cpu().numpy() - target)))
+
     def line_weights(self, j: int) -> tuple[Tensor, Tensor, np.ndarray]:
         """``(w_aero (M, K_j), w_motor (M, n_m_j), motor_k)``: each line's mean
         power at recording ``j`` per mic, ``10^{(p + 10 alpha log10 s + E)/10}``."""
@@ -1061,17 +1082,17 @@ class RigModel:
             floor_z=fl["shape_z"],
             u_amp=_uncapped(a(ped["sigma2_amp"])[:K], self.cap),
             log_gA=np.log(a(ped["gamma_amp_hz"])[:K]),
-            # a payload at or over a cap (pre-cap fits) starts just under it
+            # a payload at or over a cap (pre-cap fits) starts just under it;
+            # values under the cap load exactly
             u_s2P=_uncapped(
-                np.minimum(a(ped["sigma2_phase"])[:K], 0.99 * PR.PHASE_SIGMA2_MAX),
-                PR.PHASE_SIGMA2_MAX,
+                _under(a(ped["sigma2_phase"])[:K], PR.PHASE_SIGMA2_MAX), PR.PHASE_SIGMA2_MAX
             ),
             u_W=_uncapped(
-                np.minimum(
+                _under(
                     a(ped["width_phase_hz"])[:K]
                     if "width_phase_hz" in ped
                     else PR.pedestal_width(a(ped["gamma_phase_hz"]), a(ped["sigma2_phase"]))[:K],
-                    0.99 * PR.W_MAX_HZ,
+                    PR.W_MAX_HZ,
                 ),
                 PR.W_MAX_HZ,
             ),

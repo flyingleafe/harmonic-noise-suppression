@@ -984,6 +984,33 @@ def restart_init(measured: FlightMeasured, seed: int) -> dict[str, np.ndarray]:
     return init
 
 
+def init_from_payload(pay: dict[str, Any]) -> dict[str, np.ndarray]:
+    """The raw parameters of a ``noise-v4-fit/3`` flight payload of the same
+    pool: the start of a continuation (warm-start) fit."""
+    pr, h = pay["params"], pay["hierarchy"]
+    sh, fl = pr["shaft"], pr["floor"]
+
+    def a(v: Any) -> np.ndarray:
+        return np.asarray(v, dtype=np.float64)
+
+    return dict(
+        p_a=a(pr["profile_aero_db"]),
+        pbar_a=a(h["pbar_aero_db"]),
+        c_a=a(h["c_aero_db"])[:-1],
+        p_m=a(pr["profile_motor_db"]),
+        pbar_m=a(h["pbar_motor_db"]),
+        c_m=a(h["c_motor_db"])[:-1],
+        alpha_a=a(pr["alpha_aero"]),
+        alpha_m=a(pr["alpha_motor"]),
+        b0=a(fl["b0"]),
+        b1=a(fl["b1"]),
+        z=a(fl["shape_z"]),
+        log_s=np.log(a(fl["static_rel"])),
+        log_sigma_nu=np.log(a(sh["sigma_nu_rad_s"])),
+        a_sigma=a(sh["a_sigma"]),
+    )
+
+
 def _sync(dev: torch.device) -> None:
     if dev.type == "cuda":
         torch.cuda.synchronize(dev)
@@ -1036,6 +1063,7 @@ def fit_flight(
     kappa: float = 0.0,
     optim: OptimV4 = OptimV4(),
     progress: int = 0,
+    start: dict[str, Any] | None = None,
 ) -> tuple[FlightV4Model, dict[str, Any]]:
     """MAP-fit one restart (spec steps B2, § The optimiser).
 
@@ -1043,11 +1071,17 @@ def fit_flight(
     ``lbfgs_frames`` subset and a fresh-memory restart pass of half its
     budget; the all-frames polish and its fresh-memory restart pass, which is
     the convergence test: gain per cell under ``tol_nats_per_cell`` AND every
-    group's movement under :data:`MOVE_TOL`."""
+    group's movement under :data:`MOVE_TOL`. ``start`` (a payload of the same
+    pool) replaces the restart's initialisation (a continuation); with
+    ``lbfgs_iters = 0`` the subset stage is skipped and the polish runs
+    ``polish_iters``."""
     torch.manual_seed(int(optim.seed))
     batch = data.batch
     dev = batch.power.device
-    model = FlightV4Model(data, measured, kappa=kappa, init=restart_init(measured, int(optim.seed)))
+    init = (
+        init_from_payload(start) if start is not None else restart_init(measured, int(optim.seed))
+    )
+    model = FlightV4Model(data, measured, kappa=kappa, init=init)
     rng = np.random.default_rng(int(optim.seed))
     n_frames = int(batch.power.shape[1])
     t0 = time.time()
@@ -1087,7 +1121,9 @@ def fit_flight(
         )
         if progress:
             print(f"  lbfgs subset {stages['subset_restart']['loss_after']:.6g}", flush=True)
-    polish_iters = int(optim.polish_iters) if stages else int(optim.lbfgs_iters)
+    polish_iters = (
+        int(optim.polish_iters) if stages or int(optim.lbfgs_iters) == 0 else int(optim.lbfgs_iters)
+    )
     stages["polish"] = _lbfgs_pass(model, batch, polish_iters, optim.lbfgs_history)
     before_restart = model.snapshot()
     stages["polish_restart"] = _lbfgs_pass(
@@ -1123,6 +1159,7 @@ def fit_flight(
         ),
         optimiser=dict(
             **optim.as_dict(),
+            started_from_payload=start is not None,
             device=str(dev),
             chunk_frames=batch.chunk_frames,
             adam_first_loss=adam_losses[0] if adam_losses else None,
