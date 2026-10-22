@@ -4,7 +4,14 @@ on the five frozen DREGON cruise scoring windows, plus the v4 bench fit against
 its own bench recordings (``docs/explainers/noise-model-v4-dregon-gap.qmd``)::
 
     python scripts/noise_v4_dregon_gap.py flight --v4 <bench payload> --v3 <nv3r4 payload>
+    python scripts/noise_v4_dregon_gap.py flight --rig michaels --v4 <MD2 payload> \\
+        --v3 <nv3r4 cruise> --v3-standby <nv3r4 standby> [--v4-standby <v4 standby>]
     python scripts/noise_v4_dregon_gap.py insample --v4 <bench payload>
+
+``--rig michaels`` does the same on Michael's five FLY124 scoring windows
+(standby, ramp, cruise); a per-regime pair renders through the scorer's
+``render_noise_regimes``; its outputs carry the prefix ``md2_``
+(``figdata_md2.json``, ``md2_fig_*.png``, ``audio/md2_<regime>_*.wav``).
 
 ``flight`` renders each window from both fits on the window's raw telemetry
 (the scorer's carrier, render seed 2001, all eight mics), and writes Welch
@@ -86,17 +93,26 @@ def cmd_flight(args: argparse.Namespace) -> int:
     from scipy.signal import spectrogram
 
     from data_processing.noise_model import v4 as V4
-    from data_processing.noise_model.render import render_noise
+    from data_processing.noise_model.render import render_noise, render_noise_regimes
     from experiments.noise_model import gates as GT
     from experiments.stochastic_fit import accept_stats
     from experiments.stochastic_fit import revised_eval as RE
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    rig = str(args.rig)
+    tag = "" if rig == "dregon" else "md2_"
     fits = {
         "nv3r4": json.loads(Path(args.v3).read_text()),
         "v4": json.loads(Path(args.v4).read_text()),
     }
+    # a per-regime pair (standby below 45 rev/s, cruise above 65) renders through
+    # the scorer's composition, ``render_noise_regimes``
+    standby = {
+        "nv3r4": json.loads(Path(args.v3_standby).read_text()) if args.v3_standby else None,
+        "v4": json.loads(Path(args.v4_standby).read_text()) if args.v4_standby else None,
+    }
+    supports = GT.DREGON_CRUISE_SUPPORTS if rig == "dregon" else GT.MICHAELS_SUPPORTS
     edges = _octave_bands()
     centres = np.sqrt(edges[:-1] * edges[1:])
     ltas_bands = [list(b) for b in accept_stats.BANDS]
@@ -104,23 +120,34 @@ def cmd_flight(args: argparse.Namespace) -> int:
     spectra: dict[str, dict[str, np.ndarray]] = {}
     first: dict[str, np.ndarray] = {}
     decomp: dict[str, Any] = {}
-    for i, sup in enumerate(GT.DREGON_CRUISE_SUPPORTS):
+    n_mics = 8
+    heard: set[str] = set()
+    for i, sup in enumerate(supports):
         clip = RE.load_window(
             sup.window,
-            dataset=GT.DATASET["dregon"],
+            dataset=GT.DATASET[rig],
             version=None,
             channels=None,
-            rps_key=GT.RAW_RPS_KEY["dregon"],
+            rps_key=GT.RAW_RPS_KEY[rig],
         )
         real = np.asarray(clip.audio, dtype=np.float64)[:8]
+        n_mics = real.shape[0]
         rps = np.atleast_2d(np.asarray(clip.rps, dtype=np.float64))
         audio = {"real": real}
         for name, fit in fits.items():
-            audio[name] = np.asarray(render_noise(fit, rps, n_mics=8, seed=SEED), dtype=np.float64)[
-                :, : real.shape[1]
-            ]
+            sb = standby[name]
+            x = (
+                render_noise_regimes({"standby": sb, "cruise": fit}, rps, n_mics=n_mics, seed=SEED)
+                if sb is not None
+                else render_noise(fit, rps, n_mics=n_mics, seed=SEED)
+            )
+            audio[name] = np.asarray(x, dtype=np.float64)[:, : real.shape[1]]
         f, _ = _welch(real[0])
-        key = sup.recording.replace("_nosource_room2", "")
+        key = (
+            sup.recording.replace("_nosource_room2", "")
+            if rig == "dregon"
+            else f"{sup.regime} @{sup.start_s:g} s"
+        )
         spectra[key] = {}
         row: dict[str, Any] = dict(
             key=key,
@@ -146,17 +173,21 @@ def cmd_flight(args: argparse.Namespace) -> int:
                 for k in ("mean_abs_db", "max_abs_db", "level_offset_db", "shape_only_mean_abs_db")
             }
         # the v4 expected periodogram at the window's mean speeds, total and parts
+        # (of the regime's own fit when v4 is a pair: standby below the ramp)
         rbar = rps.mean(axis=1)
-        lines_only = copy.deepcopy(fits["v4"])
+        v4_fit = (
+            standby["v4"] if standby["v4"] is not None and float(rbar.min()) < 45.0 else fits["v4"]
+        )
+        lines_only = copy.deepcopy(v4_fit)
         lines_only["params"]["floor"]["mean_db"] = -300.0
-        floor_only = copy.deepcopy(fits["v4"])
+        floor_only = copy.deepcopy(v4_fit)
         pr = floor_only["params"]
         pr["profile_aero_db"] = (np.asarray(pr["profile_aero_db"]) - 300.0).tolist()
         pr["profile_motor_db"] = (np.asarray(pr["profile_motor_db"]) - 300.0).tolist()
         n_fft = NPERSEG
         fe = np.fft.rfftfreq(n_fft, 1.0 / SR)
         parts = {
-            "total": V4.expected_periodogram(fits["v4"], rbar, n_fft=n_fft, sr=SR),
+            "total": V4.expected_periodogram(v4_fit, rbar, n_fft=n_fft, sr=SR),
             "lines": V4.expected_periodogram(lines_only, rbar, n_fft=n_fft, sr=SR),
             "floor": V4.expected_periodogram(floor_only, rbar, n_fft=n_fft, sr=SR),
         }
@@ -168,9 +199,12 @@ def cmd_flight(args: argparse.Namespace) -> int:
         rows.append(row)
         if i == 0:
             first = {k: v[0] for k, v in audio.items()}
+        if rig == "dregon" and i == 0 or rig != "dregon" and sup.regime not in heard:
+            heard.add(sup.regime)
             scale = 0.5 / float(np.max(np.abs(real[0])))
+            slug = key if rig == "dregon" else f"md2_{sup.regime}"
             for name, x in audio.items():
-                _wav(out / "audio" / f"{key}_{name}_mic0.wav", x[0], scale)
+                _wav(out / "audio" / f"{slug}_{name}_mic0.wav", x[0], scale)
         print(
             f"{key}: " + ", ".join(f"{n} {row[f'scorer_{n}']['mean_abs_db']:.2f} dB" for n in fits),
             flush=True,
@@ -196,7 +230,7 @@ def cmd_flight(args: argparse.Namespace) -> int:
     axes[0].legend(loc="upper right", ncol=3)
     axes[-1].set_xlabel("frequency (Hz)")
     fig.tight_layout()
-    fig.savefig(out / "fig_psd_mic0.png", dpi=130)
+    fig.savefig(out / f"{tag}fig_psd_mic0.png", dpi=130)
     plt.close(fig)
 
     # Fig 2: third-octave model - real, mic 0 and mic mean, every window
@@ -209,15 +243,15 @@ def cmd_flight(args: argparse.Namespace) -> int:
                 ax.semilogx(centres, d, color=COLORS[n], lw=1.0, alpha=0.7, ls=ls)
         ax.axhline(0, color="black", lw=0.8)
         ax.set_xlim(30, 8000)
-        ax.set_title("mic 0" if which == "mic0" else "mean over the 8 mics", fontsize=10)
+        ax.set_title("mic 0" if which == "mic0" else f"mean over the {n_mics} mics", fontsize=10)
         ax.set_xlabel("third-octave band centre (Hz)")
         ax.grid(alpha=0.3, which="both")
     axes[0].set_ylabel("model − real (dB)")
-    axes[0].plot([], [], color=COLORS["nv3r4"], label="nv3r4 (5 windows)")
-    axes[0].plot([], [], color=COLORS["v4"], label="v4 round 4 (5 windows)")
+    axes[0].plot([], [], color=COLORS["nv3r4"], label=f"nv3r4 ({len(keys)} windows)")
+    axes[0].plot([], [], color=COLORS["v4"], label=f"v4 ({len(keys)} windows)")
     axes[0].legend(loc="lower left")
     fig.tight_layout()
-    fig.savefig(out / "fig_band_error.png", dpi=130)
+    fig.savefig(out / f"{tag}fig_band_error.png", dpi=130)
     plt.close(fig)
 
     # Fig 3: per-mic level offset (31-7900 Hz mean PSD, model - real)
@@ -227,7 +261,7 @@ def cmd_flight(args: argparse.Namespace) -> int:
             r = next(x for x in rows if x["key"] == key)
             d = np.asarray(r[f"level_db_per_mic_{n}"]) - np.asarray(r["level_db_per_mic_real"])
             ax.plot(
-                np.arange(8) + off,
+                np.arange(n_mics) + off,
                 d,
                 "o",
                 color=COLORS[n],
@@ -236,13 +270,13 @@ def cmd_flight(args: argparse.Namespace) -> int:
                 label=n if j == 0 else None,
             )
     ax.axhline(0, color="black", lw=0.8)
-    ax.set_xticks(range(8))
+    ax.set_xticks(range(n_mics))
     ax.set_xlabel("microphone")
     ax.set_ylabel("broadband level, model − real (dB)")
     ax.legend()
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(out / "fig_mic_offsets.png", dpi=130)
+    fig.savefig(out / f"{tag}fig_mic_offsets.png", dpi=130)
     plt.close(fig)
 
     # Fig 4: spectrograms of the first window, mic 0
@@ -259,58 +293,71 @@ def cmd_flight(args: argparse.Namespace) -> int:
         ax.set_xlabel("time (s)")
     axes[0].set_ylabel("frequency (Hz)")
     fig.colorbar(im, ax=axes, shrink=0.9, label="dB")
-    fig.savefig(out / "fig_spectrogram.png", dpi=130, bbox_inches="tight")
+    fig.savefig(out / f"{tag}fig_spectrogram.png", dpi=130, bbox_inches="tight")
     plt.close(fig)
 
-    # Fig 5: v4 decomposition vs real, first window, mic 0
-    key = keys[0]
-    dk = decomp[key]
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4.2))
-    for ax, xlim in zip(axes, ((30, 8000), (30, 600))):
-        ax.plot(f, _db(spectra[key]["real"][0]), color="black", lw=0.8, label="real (Welch)")
-        ax.plot(
-            f,
-            _db(spectra[key]["v4"][0]),
-            color="tab:red",
-            lw=0.8,
-            alpha=0.6,
-            label="v4 render (Welch)",
-        )
-        ax.plot(
-            dk["f"],
-            _db(dk["total"][0]),
-            color="tab:red",
-            lw=1.4,
-            ls="--",
-            label="v4 expected: total",
-        )
-        ax.plot(
-            dk["f"], _db(dk["lines"][0]), color="tab:orange", lw=1.0, label="v4 expected: lines"
-        )
-        ax.plot(dk["f"], _db(dk["floor"][0]), color="tab:green", lw=1.0, label="v4 expected: floor")
-        ax.set_xscale("log")
-        ax.set_xlim(*xlim)
-        ax.set_xlabel("frequency (Hz)")
-        ax.grid(alpha=0.3, which="both")
-    axes[0].set_ylabel("PSD (dB)")
-    axes[0].legend(fontsize=8)
-    axes[0].set_title(f"{key}: mic 0, 30 Hz – 8 kHz", fontsize=10)
-    axes[1].set_title("30 – 600 Hz", fontsize=10)
+    # Fig 5: v4 decomposition vs real, mic 0: the first window (DREGON), or the
+    # first window of each regime (MD2)
+    shown = (
+        [keys[0]]
+        if rig == "dregon"
+        else [next(r["key"] for r in rows if r["key"].startswith(g)) for g in ("standby", "cruise")]
+    )
+    fig, axes = plt.subplots(len(shown), 2, figsize=(13, 4.2 * len(shown)), squeeze=False)
+    for row_axes, key in zip(axes, shown):
+        dk = decomp[key]
+        for ax, xlim in zip(row_axes, ((30, 8000), (30, 600))):
+            ax.plot(f, _db(spectra[key]["real"][0]), color="black", lw=0.8, label="real (Welch)")
+            ax.plot(
+                f,
+                _db(spectra[key]["v4"][0]),
+                color="tab:red",
+                lw=0.8,
+                alpha=0.6,
+                label="v4 render (Welch)",
+            )
+            ax.plot(
+                dk["f"],
+                _db(dk["total"][0]),
+                color="tab:red",
+                lw=1.4,
+                ls="--",
+                label="v4 expected: total",
+            )
+            ax.plot(
+                dk["f"], _db(dk["lines"][0]), color="tab:orange", lw=1.0, label="v4 expected: lines"
+            )
+            ax.plot(
+                dk["f"], _db(dk["floor"][0]), color="tab:green", lw=1.0, label="v4 expected: floor"
+            )
+            ax.set_xscale("log")
+            ax.set_xlim(*xlim)
+            ax.set_xlabel("frequency (Hz)")
+            ax.grid(alpha=0.3, which="both")
+        row_axes[0].set_ylabel("PSD (dB)")
+        row_axes[0].set_title(f"{key}: mic 0, 30 Hz – 8 kHz", fontsize=10)
+        row_axes[1].set_title(f"{key}: 30 – 600 Hz", fontsize=10)
+    axes[0][0].legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(out / "fig_v4_parts.png", dpi=130)
+    fig.savefig(out / f"{tag}fig_v4_parts.png", dpi=130)
     plt.close(fig)
 
     data = dict(
         git=_git(),
+        rig=rig,
         v4=str(args.v4),
+        v4_standby=args.v4_standby,
         v3=str(args.v3),
+        v3_standby=args.v3_standby,
         seed=SEED,
         welch=dict(nperseg=NPERSEG, overlap=0.75, window="hann", sr=SR),
         third_octave_centres_hz=centres.round(2).tolist(),
         ltas_bands_hz=ltas_bands,
         windows=rows,
     )
-    (out / "figdata_flight.json").write_text(json.dumps(data, indent=1))
+    (out / ("figdata_flight.json" if rig == "dregon" else "figdata_md2.json")).write_text(
+        json.dumps(data, indent=1)
+    )
     print(f"wrote {out}", flush=True)
     return 0
 
@@ -410,8 +457,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("flight")
-    p.add_argument("--v4", required=True)
-    p.add_argument("--v3", required=True)
+    p.add_argument("--rig", choices=("dregon", "michaels"), default="dregon")
+    p.add_argument("--v4", required=True, help="the v4 payload (MD2: joint, or the cruise half)")
+    p.add_argument("--v3", required=True, help="the nv3r4 payload (MD2: the cruise half)")
+    p.add_argument("--v4-standby", default=None, help="MD2: the v4 standby half of a pair")
+    p.add_argument("--v3-standby", default=None, help="MD2: the nv3r4 standby half")
     p.add_argument("--out", default=str(OUT))
     p.set_defaults(func=cmd_flight)
     p = sub.add_parser("insample")
