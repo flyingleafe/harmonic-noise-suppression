@@ -571,7 +571,7 @@ modification (the `all` results name it; Conv+BiGRU and SCv2 are the
 candidates from `paper-regime-matrix.md`), unchanged, on the same frame
 grid.
 
-**Panel re-scores of earlier checkpoints (2026-10-16 → 18;
+**Panel re-scores of earlier checkpoints (2026-10-16 → 22;
 `scripts/rp_panel_eval.py`, JSONs in `results/rp_panel_eval/`).** Every
 trained checkpoint, old or new, can be scored on the rp_real panel through
 `zoo.load` + the loop's own `validate_rps`; the old pyramid/ConvLSTM builds
@@ -600,6 +600,8 @@ checkpoints, `real_macro` on rp_real; per-view rows in the JSONs):
 | `rp_pyrseplstm_alllab` | 2.74 | 2.27 | 3.95 | 6.34 | 1.96 | ramps 5.0 on DREGON — recurrence + moving labels |
 | ↳ taps k ≥ 61 zeroed | 2.55 | 3.27 | 4.93 | 6.60 | 1.41 | labelaug models gain from the knock-out, like the old ones |
 | `rp_harmof0_l2cqt_all` (HarmoF0 trunk, CQT front end) | 2.56 | 1.50 | 4.79 | 9.52 | 1.47 | front end alone: STFT 2.62 → CQT 2.56, all md2 cruise |
+| old CQT HPPNet L2 + dense ConvLSTM (`real_r4_hppnet_l2convlstm_unified`, labelaug, k ≤ 9) | 2.59 | 0.17 | 4.73 | 7.95 | 1.71 | frozen build `hppnet_l2_convlstm_r4legacy`; dregon 3.90, md2 1.29, DREGON cruise 2.80 (2026-10-22) |
+| `rp_pyrseplstm_k64_alllab` (separable ConvLSTM, k ≤ 64 at training) | 2.52 | 2.08 | 3.65 | 6.12 | 1.76 | dregon 3.89, md2 1.14: both drones gain over k ≤ 84 (2.74), unlike the knock-out |
 
 Readings: (1) held-out plain-stream rows cluster at 2.56–2.65 across four
 families; no architecture is ahead by more than the ±0.3 round scatter.

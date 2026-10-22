@@ -40,3 +40,11 @@ Submitted 2026-10-08 to `vast` (A100). The first run (`-e09290`) ran at
 2 s/it because of a per-step slicing bug in `RateConvLSTM`'s backward
 (batch doc) and was cancelled at epoch 3; resubmitted on the fix, same
 model. Results go to the batch doc.
+
+Re-scored 2026-10-22 on the rp_real panel (`scripts/rp_panel_eval.py`,
+`best_real_overall`, job `rp-panel-eval-l2convlstm-9a6d5b`,
+`results/rp_panel_eval/l2convlstm.json`) through the frozen build
+`conf/model/hppnet_l2_convlstm_r4legacy.yaml` (strict load): real_macro
+2.59, real 2.39, dregon 3.90, md2 1.29; zero 0.17, standby 4.73, ramp 7.95,
+cruise 1.71 (DREGON cruise 2.80, MD2 cruise 0.68). Table and readings:
+`docs/experiments/paper-real-protocol.md` § "Panel re-scores".
