@@ -432,6 +432,37 @@ class Params:
         mean_var = zero * (1.0 / n + 2.0 * (acf * weights).sum(axis=1))
         return np.maximum(zero - mean_var, 0.0)
 
+    def shaft_dynamics(
+        self, *, window_s: float = 2.0, lag_s: float = 0.32, fs: float = RATE_HZ
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """``(window_std, increment_std)``, each ``(4,)`` rev/s per rotor: how
+        much the SHAFT moves in cruise, from the exact rotor autocovariance.
+
+        ``window_std`` is the expected std of an ``window_s`` window about its
+        own mean (``C(0) - Var(mean)``, as :meth:`mode_var_in_window`);
+        ``increment_std`` is the std of ``w(t + lag_s) - w(t)``,
+        ``sqrt(2 (C(0) - C(lag)))`` — the speed of change.  Shaft only: the
+        measurement process and the per-flight offset (a constant within a
+        flight) are left out, so this is what a stream that renders audio from
+        the labels makes the rotors do.
+        """
+        n = max(int(round(float(window_s) * float(fs))), 2)
+        lag = max(int(round(float(lag_s) * float(fs))), 1)
+        n_lags = max(n - 1, lag)
+        mode_cov = np.zeros((NUM_ROTORS, n_lags + 1))
+        for i, (phi, _, p) in enumerate(self.component_state_spaces(float(fs))):
+            phi, cov = np.atleast_2d(phi), np.atleast_2d(p).copy()
+            for k in range(n_lags + 1):
+                mode_cov[i % NUM_ROTORS, k] += cov[0, 0]
+                cov = phi @ cov
+        a = self.mixing
+        rotor_cov = (a * a) @ mode_cov  # modes are independent: (4 rotors, lags)
+        increment = np.sqrt(np.maximum(2.0 * (rotor_cov[:, 0] - rotor_cov[:, lag]), 0.0))
+        k = np.arange(1, n)
+        mean_var = (n * rotor_cov[:, 0] + 2.0 * ((n - k) * rotor_cov[:, 1:n]).sum(axis=1)) / n**2
+        window = np.sqrt(np.maximum(rotor_cov[:, 0] - mean_var, 0.0))
+        return window, increment
+
     # ── gauge ──
     def canonical(self) -> Params:
         """Equivalent parameters with ``theta`` in ``(-pi/4, pi/4]``.

@@ -272,6 +272,68 @@ def test_b_rotor_sep_bounds_the_airborne_separation_by_rejection(fits_tree: Path
         hopeless.flight(np.random.default_rng(1), 50.0, duration_s=10.0)
 
 
+def test_b_shrink_pulls_posterior_drones_to_the_named_rigs_shaft_only(fits_tree: Path):
+    """``shrink`` moves the hyperprior's SHAFT coordinates toward the mean of
+    the named stored rigs: at weight 1 every posterior drone moves exactly
+    like their average, while its size (``hover_range``) and trims keep their
+    law; at weight 0 the stream is the unshrunk one, draw for draw; a stored
+    rig is never touched."""
+    lo, hi = 40.0, 60.0
+    both = ["dregon", "michaels"]
+    target = np.mean([tm.rig_vector(tm.Params(**RIGS[r])) for r in both], axis=0)
+    pulled = _source(
+        fits_tree,
+        rigs={tm.POSTERIOR_RIG: 1.0},
+        hover_range=[lo, hi],
+        shrink={"rigs": both, "weight": 1.0},
+    )
+    rng = np.random.default_rng(31)
+    vectors = np.stack([tm.rig_vector(pulled.draw(rng).params) for _ in range(48)])
+    shaft = slice(5, 25)
+    np.testing.assert_allclose(vectors[:, shaft], np.broadcast_to(target[shaft], (48, 20)))
+    hovers = np.exp(vectors[:, 0])
+    assert lo <= hovers.min() and hovers.max() <= hi and np.ptp(hovers) > 0.5 * (hi - lo)
+    assert np.all(np.std(vectors[:, 1:4], axis=0) > 0.0)  # trims still vary
+
+    plain = _source(fits_tree, rigs={tm.POSTERIOR_RIG: 1.0}, hover_range=[lo, hi])
+    idle = _source(
+        fits_tree,
+        rigs={tm.POSTERIOR_RIG: 1.0},
+        hover_range=[lo, hi],
+        shrink={"rigs": both, "weight": 0.0},
+    )
+    ra, rb = np.random.default_rng(5), np.random.default_rng(5)
+    for _ in range(8):
+        assert plain.draw(ra).params.to_dict() == idle.draw(rb).params.to_dict()
+
+    stored = _source(fits_tree, shrink={"rigs": ["dregon"], "weight": 1.0})
+    assert (
+        stored.draw(np.random.default_rng(0)).params.to_dict()
+        == tm.Params(**RIGS["michaels"]).to_dict()
+    )
+
+    with pytest.raises(ValueError, match="shrink"):
+        _source(fits_tree, shrink={"rigs": ["no_such_rig"], "weight": 0.5})
+    with pytest.raises(ValueError, match="weight"):
+        _source(fits_tree, shrink={"rigs": both, "weight": 1.5})
+
+
+def test_b_shaft_dynamics_matches_a_long_sampled_cruise():
+    """The closed-form cruise statistics the shrink calibration reads are what the sampler
+    produces: the mean in-window std over 2 s windows and the std of the
+    0.32 s increment of a long shaft-only realisation (no measurement process,
+    no per-flight offset) agree with :meth:`Params.shaft_dynamics`."""
+    fs, n_win, lag = 31.25, 62, 10
+    p = tm.Params(**{**RIGS["michaels"], "sigma_e": 0.0, "s_c": 0.0, "s_r": [0.0] * 4})
+    window, increment = p.shaft_dynamics(window_s=n_win / fs, lag_s=lag / fs, fs=fs)
+    x = p.sample_airborne(400_000, np.random.default_rng(7), fs)
+    inc = np.std(x[:, lag:] - x[:, :-lag], axis=1)
+    w = x[:, : (x.shape[1] // n_win) * n_win].reshape(4, -1, n_win)
+    win = np.sqrt(np.mean(np.var(w, axis=2), axis=1))
+    np.testing.assert_allclose(inc, increment, rtol=0.03)
+    np.testing.assert_allclose(win, window, rtol=0.03)
+
+
 # ── the mean shift ───────────────────────────────────────────────────────────
 
 

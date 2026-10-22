@@ -1,0 +1,93 @@
+# SYNTHETIC STREAM `combdiv` (first simple variant; Dmitrii, 2026-10-22):
+# rp_all.yaml with the real noise replaced by the DIVERSE STATIC COMB
+# (kind: diverse_comb, src/data_processing/rotor_spectral_model.py), driven by
+# the fitted trajectory model with the reduced hyperprior.
+#
+# COMB, per window and rotor: even orders on -even_slope_db*log10(k), odd orders
+# odd_penalty_db under that and odd_extra_slope_db/decade steeper; a Student-t
+# departure per line (dof 3, scale line_scatter_db, clipped at 30 dB); each line
+# dropped with a per-rotor probability; a per-rotor level. Constant inside the
+# window; level x (rps / 80)^2.5, so a stopped rotor is silent.
+# FLOOR: independent white noise per microphone; its variance is set so that
+# the most buried rotor at that microphone loses floor_subsumed of its counted
+# lines, floor_subsumed ~ U(0, 0.9). A line is buried when it stands under the
+# floor in a 2048-point Hann spectrogram (floor_ref_nfft): line power a^2/2
+# under the floor's power inside one bin, 3 sigma^2 / 2048.
+# TRAJECTORY: the posterior drone at hover U[35, 95], rotor_sep [2, 15],
+# rps_max 150, measurement process off, shrink 0.57 toward DREGON + michaels
+# (docs/experiments/rps-trajectory-model.md § "Reduced hyperprior"). Take-off
+# and landing are shortened from the scaffold's 1.5-4 / 1.5-4.5 s raised cosines
+# (peak slew ~25 rev/s^2) toward the measured ramps: take-off 0.6-1.6 s, landing
+# 0.25-0.8 s (real take-off peaks 61-115 rev/s^2, landing 70-390 on DREGON /
+# M100-class flights; Dmitrii, 2026-10-22: shorter ramps only, shape unchanged).
+# RENDERS: 4 s, reused 40 times, each draw its own 2 s window - the prior
+# stream's amortisation (noise_prior_v1_5050.yaml), on the same line kernel.
+# Everything outside `sources.noise` is rp_all.yaml's: 2 s clips, the silence arm
+# at 0.4 / 2.4, LibriSpeech train-clean-100 per channel at U(-30, +5) dB,
+# random_gain and spectral_recolor at p 0.5. Draws: docs/explainers/diverse-comb.qmd.
+
+sample_rate: 16000
+duration_s: 2.0
+base_seed: 20261022
+snr_ref_floor_rms: 0.02
+
+sources:
+  noise:
+    - kind: diverse_comb
+      weight: 2.0
+      n_mics: 8
+      n_rotors: 4
+      n_harmonics: 500  # reaches the Nyquist taper down to 16 rev/s (idle is 0.35 x hover)
+      band_taper_frac: 0.1
+      amp_rps_exponent: 2.5
+      amp_rps_ref: 80.0
+      mic_gain_db: [-4.0, 0.0]
+      floor_ref_nfft: 2048
+      render_reuse: 40
+      render_duration_s: 4.0
+      comb_ranges:
+        even_slope_db: [10.0, 30.0]
+        odd_penalty_db: [3.0, 20.0]
+        odd_extra_slope_db: [0.0, 5.0]
+        line_scatter_db: [2.0, 5.0]
+        line_scatter_dof: 3.0
+        line_scatter_max_db: 30.0
+        drop_prob: [0.0, 0.3]
+        rotor_gain_db: [-4.0, 4.0]
+        floor_subsumed: [0.0, 0.9]
+      rps:
+        kind: fitted_traj
+        fits: dload:rps-traj-fits
+        rigs: {posterior: 1.0}
+        mean_shift: [0.0, 0.0]
+        hover_range: [35.0, 95.0]
+        rotor_sep: [2.0, 15.0]
+        rps_max: 150.0
+        measurement_noise: false
+        shrink: {rigs: [dregon, michaels], weight: 0.57}
+        flight_fs: 200
+        flight_reuse: 32
+        phases: {takeoff_s: [0.6, 1.6], landing_s: [0.25, 0.8]}
+    - kind: silence
+      weight: 0.4
+      n_channels: 8
+  speech:
+    - dataset: librispeech
+      subpath: LibriSpeech/train-clean-100
+
+policy:
+  stages:
+    - until: null
+      source_prob: 1.0
+      speech_per_channel: independent
+      snr_per_channel: false
+      snr_db:
+        uniform: {low: -30.0, high: 5.0}
+      augmentations:
+        probability: 0.5
+        choices:
+          - random_gain: {min_db: -6.0, max_db: 6.0}
+      noise_augmentations:
+        probability: 0.5
+        choices:
+          - spectral_recolor: {}

@@ -1,0 +1,168 @@
+---
+title: "The diverse static comb"
+subtitle: "Draws of the first simple synthetic training stream (`rp_combdiv`): a static harmonic comb with a wide, realistic-shaped profile population over a white floor, flown by the fitted trajectory model at shrink 0.57"
+date: 2026-10-22
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    page-layout: full
+    grid:
+      body-width: 1300px
+      sidebar-width: 220px
+      margin-width: 120px
+execute:
+  echo: false
+---
+
+## The generator
+
+`kind: diverse_comb` (`src/data_processing/rotor_spectral_model.py`,
+`DiverseCombNoisePool`), configured by `conf/online_mix/rp_combdiv.yaml`. One
+window, $M = 8$ microphones, $R = 4$ rotors:
+
+$$
+x_m(t) \;=\; \sum_{\rho=1}^{R} g_{m\rho}\,\Big(\frac{r_\rho(t)}{80}\Big)^{2.5}
+\sum_{k=1}^{K} a_{\rho k}\,\cos\!\big(k\,\phi_\rho(t) + \psi_{\rho k}\big)
+\;+\; \sigma_m\, n_m(t),
+\qquad \phi_\rho(t) = 2\pi\!\int_0^t r_\rho ,
+$$
+
+with $r_\rho$ the label (rev/s), $n_m$ independent unit white noise per
+microphone, $\psi_{\rho k}$ uniform phases, $g_{m\rho}$ uniform on
+$[-4, 0]$ dB, $K = 500$ orders (the comb reaches Nyquist down to 16 rev/s)
+faded out over the top 10 % of the band. Every
+quantity below is drawn **once per window** and held constant inside it. The
+lines go through the noise model's line kernel (`noise_model.render`, the
+renderer of the `prior` streams): each line a complex envelope on a 1 kHz grid
+(level, phase, speed law, band-top fade) on the carrier $k\phi_\rho$ at 16 kHz.
+
+**Line levels** (power, dB): two power laws, odd under even,
+
+$$
+20\log_{10} a_{\rho k} \;=\; G_\rho \;+\;
+\begin{cases}
+-S_\rho \log_{10} k & k \text{ even} \\[2pt]
+-P_\rho - (S_\rho + \Delta_\rho)\log_{10} k & k \text{ odd}
+\end{cases}
+\;+\; \varepsilon_{\rho k},
+\qquad
+\varepsilon_{\rho k} = \operatorname{clip}_{\pm 30\,\text{dB}}\!\big(s_\rho\, t_{3}\big),
+$$
+
+and line $k$ is **dropped** ($a_{\rho k} = 0$) with probability $p_\rho$.
+The Student-$t_3$ departure is heavy-tailed: at $s = 4$ dB about 6 % of the
+lines leave their law by more than 12 dB and 1.5 % by more than 20 dB.
+
+**Floor.** A line is *buried* when it stands under the white floor in a
+2048-point Hann spectrogram (128 ms, the campaign's analysis window): its power
+$a^2/2$ at the microphone is below the floor's power inside one bin,
+$3\sigma_m^2/2048$. Compared with the floor's *total* variance $\sigma_m^2$
+instead, a "buried" line would still stand $10\log_{10}(2048/3) = 28$ dB over
+the floor on screen, so nothing would ever disappear. $\sigma_m$ is the largest
+value at which no rotor loses more than a fraction $f$ of its counted lines
+(kept, below Nyquist at the rotor's window-median speed), so the most buried
+rotor at each microphone loses $\lfloor f n\rfloor / n$ of them and the
+others fewer.
+
+| draw | range | anchor (`docs/experiments/static-rig-profiles.md`) |
+|---|---|---|
+| even slope $S_\rho$ | U(10, 30) dB/decade | measured 25 ± 5 |
+| odd penalty $P_\rho$ | U(3, 20) dB | measured 8–9 ± 9 |
+| extra odd slope $\Delta_\rho$ | U(0, 5) dB/decade | ≥ 0: odd law under even law everywhere; measured penalty barely grows from k = 3 to 30 |
+| line scatter $s_\rho$ | U(2, 5) dB, $t_3$, clipped ± 30 dB | measured 3.5–5.6 dB (Gaussian fits) |
+| drop probability $p_\rho$ | U(0, 0.3) | — |
+| rotor level $G_\rho$ | U(−4, +4) dB | measured rotors 2.3–5.2 dB apart |
+| buried share $f$ | U(0, 0.9) | — |
+
+**Trajectory.** `rps.kind: fitted_traj`: a posterior drone per flight at hover
+U[35, 95] rev/s, `rotor_sep` [2, 15], `rps_max` 150, measurement process off,
+`shrink: {rigs: [dregon, michaels], weight: 0.57}` (`rps-trajectory-model.md`
+§ "Reduced hyperprior"). Take-off and landing are raised-cosine ramps of
+0.6–1.6 s and 0.25–0.8 s (`rps.phases`; the scaffold default is 1.5–4 and
+1.5–4.5 s): peak rotor-mean slew 43 / 69 / 110 rev/s² at take-off and
+80 / 128 / 210 at landing (p10 / p50 / p90, 100 flights), against 61–115 and
+70–390 measured on DREGON room 2 and M100-class flights. Training renders 32
+random **4 s** windows from each flight, ground and idle phases included, and
+cuts 40 random **2 s** windows from each render (`render_reuse: 40`,
+`render_duration_s: 4.0`, as in the `prior` stream); the draws below are
+**6 s** windows, one per flight, so each is a fresh drone.
+
+## Draws
+
+Ten consecutive draws (seed 20261022), microphone 0, every clip played at the
+same RMS (training draws the level log-uniform on 0.02–0.25 instead). Left:
+spectrogram, 2048-point Hann, 70 dB range; middle: the bottom 1.5 kHz; right:
+each rotor's lines over the floor in the same 2048-point spectrogram at this
+microphone — points under the dashed line are buried. Below: the labels.
+Second row: the drawn profile of each rotor as a line spectrum over harmonic
+order, in the same units — dark stems even orders, light stems odd orders,
+grey crosses dropped lines at the level they were drawn at; the solid and
+dotted curves are the even and odd power laws the lines were drawn around;
+the dashed line is the burial threshold.
+
+```{python}
+#| output: asis
+import json
+from pathlib import Path
+
+here = Path("diverse-comb")
+index = json.loads((here / "index.json").read_text())
+
+
+def rotor_table(item):
+    rows = [
+        "| rotor | median rev/s | even slope | odd penalty | odd slope | scatter | drop p | level | buried (mic 0) |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r, (p, v, b) in enumerate(zip(item["rotors"], item["median_rps"], item["buried_mic0"])):
+        rows.append(
+            f"| {r + 1} | {v:.1f} | {p['even_slope_db']:.1f} dB/dec | {p['odd_penalty_db']:.1f} dB "
+            f"| {p['odd_slope_db']:.1f} dB/dec | {p['scatter_db']:.1f} dB | {p['drop_prob']:.2f} "
+            f"| {p['gain_db']:+.1f} dB | {b:.0%} |"
+        )
+    return "\n".join(rows)
+
+
+def show(item, heading):
+    print(f"\n### {heading}\n")
+    print(f"![]({here.name}/{item['slug']}.png)\n")
+    print(f"![]({here.name}/{item['slug']}_profiles.png)\n")
+    print(f'<audio controls preload="none" src="{here.name}/{item["slug"]}.wav"></audio>\n')
+    print(f"Buried share drawn: **{item['subsumed']:.0%}** (most buried rotor).\n")
+    print(rotor_table(item) + "\n")
+
+
+for i, item in enumerate(i for i in index if i["kind"] == "draw"):
+    show(item, f"Draw {i + 1}")
+```
+
+## Take-off and landing
+
+Take-off and landing fill a few percent of a flight, so ten random windows
+rarely catch one. These are the first take-off and the first landing among
+further random windows of the same stream (seed 20261023), drawn exactly as
+above.
+
+```{python}
+#| output: asis
+for item in (i for i in index if i["kind"] == "ramp"):
+    show(item, item["label"].capitalize())
+```
+
+## Real references
+
+Two cruise windows from the `rp_all` training sources, same microphone, level
+and spectrogram settings.
+
+```{python}
+#| output: asis
+for item in (i for i in index if i["kind"] == "real"):
+    print(f"\n### {item['label']}\n")
+    print(f"![]({here.name}/{item['slug']}.png)\n")
+    print(f'<audio controls preload="none" src="{here.name}/{item["slug"]}.wav"></audio>\n')
+```
+
+Rebuild: `PYTHONPATH=src .venv/bin/python docs/explainers/diverse-comb/build.py`,
+then `quarto render docs/explainers/diverse-comb.qmd`.

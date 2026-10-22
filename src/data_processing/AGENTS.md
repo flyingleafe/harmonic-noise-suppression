@@ -57,8 +57,8 @@ Design: `docs/refactor-data-pipelines.md`. VK/refinement: `src/tracking`.
   DREGON `in_flight_noise` + Michael's (`frames:NAME[@VER]`, `dload:`, paths).
 - Noise engines (`sources.noise[].kind` → class): `generated` →
   `generated_noise.GeneratedNoisePool` (CUDA + shm ring); `gp` →
-  `gp_noise.GPRotorNoisePool`; `static_comb` →
-  `rotor_spectral_model.StaticCombNoisePool`; `stochastic` →
+  `gp_noise.GPRotorNoisePool`; `static_comb`/`diverse_comb` →
+  `rotor_spectral_model.{StaticComb,DiverseComb}NoisePool`; `stochastic` →
   `stochastic_rotor_noise.StochasticNoisePool`; `noise_v2` →
   `noise_v2_pool.NoiseV2Pool` (FITTED v2 rigs; `fits:`/`preset_bank:`);
   `silence` → `silence_noise.SilenceNoisePool`.

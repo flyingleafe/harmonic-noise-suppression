@@ -7,9 +7,12 @@ import tdseries as td
 
 from data_processing.online_mixing import build_noise_stream
 from data_processing.rotor_spectral_model import (
+    DiverseCombRanges,
     ProfileRanges,
     StaticCombNoisePool,
     _comb_waveform,
+    render_diverse_comb,
+    sample_diverse_rotor,
     sample_profile,
 )
 
@@ -148,3 +151,52 @@ def test_amp_scaling_config_wired():
 
     frame = next(iter(stream))
     assert frame["audio"].data.shape[-1] == 16000
+
+
+# ── The diverse static comb ───────────────────────────────────────────────────
+
+
+def test_diverse_comb_floor_buries_the_drawn_share_as_heard_in_the_audio():
+    """Measured from the rendered audio — line amplitudes by projection, the
+    floor from the residual — the white floor buries at most the drawn share
+    of every rotor's lines at every microphone, and that share on the most
+    buried one, where "buried" is a line under the floor in a 2048-point Hann
+    spectrogram (a^2/2 < 3 sigma^2 / 2048). Rotor and microphone gains and the
+    speed law all sit between the drawn profile and what is heard, so a slip in
+    any of them moves the floor off the drawn share."""
+    sr, dur, nfft, n_harm = 16000, 2.0, 2048, 60
+    speeds = (50.0, 61.0)  # integer-Hz lines; lcm 3050 Hz lies above both combs' overlap
+    ranges = DiverseCombRanges(drop_prob=(0.2, 0.2), rotor_gain_db=(-4.0, 4.0))
+    rng = np.random.default_rng(11)
+    n = int(sr * dur)
+    rps = np.stack([np.full(n, s) for s in speeds])
+    t = np.arange(n) / sr
+    for subsumed in (0.0, 0.4, 0.85):
+        profiles = [sample_diverse_rotor(rng, ranges, n_harmonics=n_harm) for _ in speeds]
+        mic_gains = 10.0 ** (rng.uniform(-4.0, 0.0, size=(3, len(speeds))) / 20.0)
+        audio, _, _ = render_diverse_comb(
+            rps,
+            profiles,
+            mic_gains,
+            subsumed,
+            rng,
+            sample_rate=sr,
+            amp_rps_exponent=2.5,
+            amp_rps_ref=80.0,
+            band_taper_frac=0.0,
+            floor_ref_nfft=nfft,
+        )
+        for x in audio:
+            residual = x.copy()
+            amps = []
+            for s, prof in zip(speeds, profiles, strict=True):
+                k = np.arange(1, n_harm + 1)[prof.kept]
+                basis = np.exp(-2j * np.pi * np.outer(k * s, t))
+                coef = 2.0 * (basis @ x) / n
+                amps.append(np.abs(coef))
+                residual -= np.real(coef[:, None] * np.conj(basis)).sum(axis=0)
+            sigma2 = float(np.var(residual))
+            buried = [float(np.mean(a**2 / 2 < 3.0 * sigma2 / nfft)) for a in amps]
+            n_lines = min(a.size for a in amps)
+            assert max(buried) <= subsumed + 2.0 / n_lines
+            assert max(buried) >= subsumed - 2.0 / n_lines

@@ -508,6 +508,10 @@ def _build_engine(spec: Mapping[str, Any], *, window_s: float, sample_rate: int)
         from data_processing.rotor_spectral_model import StaticCombNoisePool
 
         return StaticCombNoisePool.from_config(spec, duration_s=window_s, sample_rate=sample_rate)
+    if kind == "diverse_comb":
+        from data_processing.rotor_spectral_model import DiverseCombNoisePool
+
+        return DiverseCombNoisePool.from_config(spec, duration_s=window_s, sample_rate=sample_rate)
     if kind == "stochastic":
         from data_processing.stochastic_rotor_noise import StochasticNoisePool
 
@@ -790,6 +794,7 @@ def build_noise_stream(
     engine_kinds = {
         "generated",
         "static_comb",
+        "diverse_comb",
         "stochastic",
         "noise_v2",
         "gp",

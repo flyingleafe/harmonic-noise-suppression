@@ -55,6 +55,13 @@ IDX_LOG_SIGMA_E = 26
 IDX_LOG_S_C = 27
 IDX_LOG_S_R = slice(28, 32)
 
+#: The SHAFT coordinates: per mode the slow OU's time-constant logit and
+#: relative std, the oscillator's log ``f0``, damping logit and relative std —
+#: everything that sets how the rotors move in cruise, and nothing that sets
+#: the operating point (scale, trims, ``theta``), the measurement process or
+#: the per-flight offsets.
+IDX_SHAFT = slice(5, 25)
+
 #: Relative trims are clipped to this range when mapping a draw back, which is
 #: what keeps every rotor mean positive.
 TRIM_CLIP = 0.3
@@ -152,6 +159,23 @@ class Posterior:
             v[IDX_LOG_SCALE] = np.log(float(hover))
         return params_from_rig_vector(v)
 
+    def shrunk_toward(self, target: np.ndarray, weight: float) -> Posterior:
+        """This posterior with its :data:`IDX_SHAFT` coordinates pulled
+        ``weight`` of the way to ``target`` (a :func:`rig_vector`): each such
+        mean moves to ``(1 - weight) mean + weight target`` and each std
+        shrinks to ``(1 - weight) std``, so 0 is the posterior as fitted and 1
+        draws every drone with exactly ``target``'s shaft.  Every other
+        coordinate keeps its law.
+        """
+        w = float(weight)
+        if not (0.0 <= w <= 1.0):
+            raise ValueError(f"shrink weight must lie in [0, 1], got {weight!r}")
+        target = np.asarray(target, dtype=np.float64).reshape(RIG_DIM)
+        mean, std = self.mean.copy(), self.std.copy()
+        mean[IDX_SHAFT] = (1.0 - w) * mean[IDX_SHAFT] + w * target[IDX_SHAFT]
+        std[IDX_SHAFT] = (1.0 - w) * std[IDX_SHAFT]
+        return Posterior(mean=mean, std=std, rigs=self.rigs)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": "rig_posterior",
@@ -183,6 +207,7 @@ __all__ = [
     "IDX_LOG_SIGMA_OSC",
     "IDX_LOG_SIGMA_SLOW",
     "IDX_LOG_TAU_E",
+    "IDX_SHAFT",
     "IDX_THETA",
     "IDX_TRIM",
     "IDX_U_SLOW",

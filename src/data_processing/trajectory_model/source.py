@@ -31,6 +31,9 @@ One noise source's ``rps`` block::
                                   # the hyperprior's own scale coordinate
       rotor_sep: [2.0, 15.0]      # OPTIONAL [closest pair >=, pair mean <=]
                                   # rev/s over the airborne part, by rejection
+      shrink:                     # OPTIONAL: pull the posterior's shaft coordinates
+        rigs: [dregon, michaels]  # toward these stored rigs' mean coordinates;
+        weight: 0.57              # 0 = as fitted, 1 = exactly their shaft
       phases: {warmup_s: [3.0, 25.0]}   # optional FlightPhaseRanges overrides
 
 Per flight the source picks a rig by weight, turns it into
@@ -73,6 +76,23 @@ within 2 rev/s of each other 22 % of the time, where real cruise keeps every
 pair 2-4 rev/s apart and the pair mean at 6-9), and the pair-mean separation
 must stay under ``rotor_sep[1]`` (the trim coordinates' Gaussian tail reaches
 40 rev/s where real rigs never pass 11). Both are counted in :attr:`stats`.
+``shrink`` is the hyperprior's DYNAMICS answer, as ``hover_range`` is its scale
+answer. The rig posterior's shaft coordinates are wide (log-std 2-3.4 on the
+relative ``sigma_slow``: the racing quads fluctuate 5-8 % of their hover where
+DREGON and michaels move 2-3 %), so at 35-95 rev/s a draw's cruise moves about
+3x as much as DREGON's or MD2's at the median and 3-4.5x in the tail
+(``docs/experiments/rps-trajectory-model.md`` § "Reduced hyperprior").
+``shrink`` MOVES the hyperprior instead of rejecting its draws
+(:meth:`~data_processing.trajectory_model.posterior.Posterior.shrunk_toward`):
+the 20 shaft coordinates (per-mode time constants, frequencies, dampings and
+stds relative to hover) are pulled ``weight`` of the way to the mean
+:func:`~data_processing.trajectory_model.posterior.rig_vector` of the named
+stored rigs, and their spread shrinks by the same factor. Scale, trims, the
+measurement process and the offsets keep the fitted law, so ``hover_range``
+is untouched, and stored rigs are their own measured dynamics. The weight is
+calibrated, not fitted: ``scripts/rps_traj_shaft_shrink.py`` finds the weight
+at which a chosen share of drones moves within a chosen multiple of the
+livelier reference rig.
 ``flight_fs``/``flight_reuse`` stay the POOL's knobs (they are the same keys the
 incumbent kind uses); everything else above belongs to this source, and every
 draw comes from the pool's own rng, so a stream stays reproducible per
@@ -91,7 +111,7 @@ import numpy as np
 
 from data_processing.trajectory_model.flight import FlightPhaseRanges, wrap_airborne
 from data_processing.trajectory_model.params import Params
-from data_processing.trajectory_model.posterior import Posterior
+from data_processing.trajectory_model.posterior import Posterior, rig_vector
 from data_processing.trajectory_model.sampler import NewFit
 from tracking.rotors import NUM_ROTORS
 
@@ -154,6 +174,15 @@ MAX_RPS_REDRAWS = 64
 
 
 @dataclass(frozen=True)
+class Shrink:
+    """``shrink``: the stored rigs whose mean shaft coordinates the posterior
+    is pulled toward, and how far (:meth:`Posterior.shrunk_toward`)."""
+
+    rigs: tuple[str, ...]
+    weight: float
+
+
+@dataclass(frozen=True)
 class RigDraw:
     """One flight's drone: where it came from and what it is."""
 
@@ -203,10 +232,11 @@ def load_bundle(source: str | Path) -> FitBundle:
 class FittedTrajectorySource:
     """A weighted mixture of fitted rigs, drawn one drone per flight.
 
-    Stateful in exactly three ways, all documented: :attr:`last_draw` (the
+    Stateful in exactly four ways, all documented: :attr:`last_draw` (the
     drone of the most recently generated flight, which is what a pool reports
-    as the window's provenance), the antithetic offset pairing, and
-    :attr:`stats` (the ``rps_max`` accept/reject tally).
+    as the window's provenance), :attr:`last_airborne` (that flight's
+    stationary airborne part, before the envelope), the antithetic offset
+    pairing, and :attr:`stats` (the accept/reject tally).
     """
 
     def __init__(
@@ -222,6 +252,7 @@ class FittedTrajectorySource:
         hover_range: tuple[float, float] | None = None,
         rotor_sep: tuple[float, float] | None = None,
         phases: FlightPhaseRanges | None = None,
+        shrink: Shrink | None = None,
     ):
         if not weights:
             raise ValueError("rps.rigs is empty: name at least one rig to draw from")
@@ -258,7 +289,25 @@ class FittedTrajectorySource:
             )
         self.rotor_sep = None if rotor_sep is None else (float(rotor_sep[0]), float(rotor_sep[1]))
         self.phases = phases or FlightPhaseRanges()
+        #: The posterior a ``posterior`` draw samples: the bundle's, moved by
+        #: ``shrink`` when one is set (:meth:`Posterior.shrunk_toward`).
+        self.posterior: Posterior | None = bundle.posterior
+        self.shrink = shrink
+        if shrink is not None:
+            if bundle.posterior is None:
+                raise ValueError(f"rps.shrink needs a posterior, and {bundle.root} has none")
+            if not shrink.rigs:
+                raise ValueError("rps.shrink.rigs is empty: name the stored rigs to pull toward")
+            missing = [r for r in shrink.rigs if r not in bundle.fits]
+            if missing:
+                raise ValueError(
+                    f"unknown rig(s) {missing} in rps.shrink.rigs; stored rigs are "
+                    f"{tuple(sorted(bundle.fits))}"
+                )
+            target = np.mean([rig_vector(bundle.fits[r].params) for r in shrink.rigs], axis=0)
+            self.posterior = bundle.posterior.shrunk_toward(target, shrink.weight)
         self.last_draw: RigDraw | None = None
+        self.last_airborne: np.ndarray | None = None
         self._last_z: np.ndarray | None = None
         #: The rejection tally over this source's lifetime: flights returned,
         #: flights thrown away (``rejected``, every cause), and the breakdown
@@ -282,8 +331,8 @@ class FittedTrajectorySource:
         """Pick a rig by weight and move its hover level."""
         rig = str(self.names[int(rng.choice(len(self.names), p=self.probs))])
         if rig == POSTERIOR_RIG:
-            assert self.bundle.posterior is not None  # guaranteed by bundle.names
-            params = self.bundle.posterior.sample(
+            assert self.posterior is not None  # guaranteed by bundle.names
+            params = self.posterior.sample(
                 rng,
                 hover=None if self.hover_range is None else float(rng.uniform(*self.hover_range)),
             )
@@ -412,6 +461,7 @@ class FittedTrajectorySource:
                     self.stats["rejected_sep"] += 1
                     self._last_z = paired_z
                     continue
+            self.last_airborne = cruise[0] if cruise else None
             self.last_draw = replace(draw, redraws=attempt)
             self.stats["flights"] += 1
             return track
@@ -475,6 +525,15 @@ def build_from_config(cfg: Any) -> FittedTrajectorySource:
         if phases_cfg
         else None
     )
+    shrink_cfg = _get(cfg, "shrink")
+    shrink = None
+    if shrink_cfg is not None:
+        shrink_rigs = _get(shrink_cfg, "rigs")
+        if not shrink_rigs or _get(shrink_cfg, "weight") is None:
+            raise ValueError("rps.shrink requires rigs (stored rigs to pull toward) and weight")
+        shrink = Shrink(
+            rigs=tuple(str(r) for r in shrink_rigs), weight=float(_get(shrink_cfg, "weight"))
+        )
     return FittedTrajectorySource(
         load_bundle(str(fits)),
         weights,
@@ -488,6 +547,7 @@ def build_from_config(cfg: Any) -> FittedTrajectorySource:
         ),
         rotor_sep=(None if _get(cfg, "rotor_sep") is None else _pair(cfg, "rotor_sep", (0.0, 0.0))),
         phases=phases,
+        shrink=shrink,
     )
 
 
@@ -503,6 +563,7 @@ __all__ = [
     "FitBundle",
     "FittedTrajectorySource",
     "RigDraw",
+    "Shrink",
     "build_from_config",
     "load_bundle",
     "rotor_separation",

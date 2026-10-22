@@ -335,11 +335,18 @@ per-rotor labels; `mean` = four_way_lib convention, degenerate labels),
 40–85; no full-flight excitation). Policy `conf/online_mix/g3_gp_aug_dload.yaml`;
 `docs/experiments/g3-gp-curriculum.md`.
 
-### `kind: static_comb`, `kind: stochastic`, `kind: silence`
+### `kind: static_comb`, `kind: diverse_comb`, `kind: stochastic`, `kind: silence`
 
 Analytic engines, documented in their modules: `rotor_spectral_model.py`
 (`StaticCombNoisePool`; `FixedCombSpec`/`render_fixed_comb` for the
-frozen-profile generator probe; `rps_scale_range`, `normalize_rms`),
+frozen-profile generator probe; `rps_scale_range`, `normalize_rms`,
+`render_reuse`/`render_duration_s` as in `noise_v2`;
+`DiverseCombNoisePool` — the static comb with per-window even/odd power laws,
+Student-t line departures, drop-outs and rotor levels (`comb_ranges`) over one
+white floor per mic set by the share of lines it buries in a
+`floor_ref_nfft`-point spectrogram, its lines through the `noise_model.render`
+line kernel; `conf/online_mix/rp_combdiv.yaml`,
+`docs/explainers/diverse-comb.qmd`),
 `stochastic_rotor_noise.py` (`StochasticNoisePool` — colored floor + one
 Lorentzian line per harmonic per rotor with GP-drifting amplitudes drawn
 independently of the rotor-speed trajectory; the generative direction of

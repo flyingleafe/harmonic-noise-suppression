@@ -42,6 +42,15 @@ import tdseries as td
 
 from data_processing import rps_synthesis, trajectory_model
 from data_processing.frames import make_recording_frame
+from data_processing.noise_model.render import ENV_RATE_HZ, _render_lines
+
+
+def _cfg_value(cfg: Any, key: str, default: Any = None) -> Any:
+    """``cfg[key]`` for a mapping, ``cfg.key`` for an OmegaConf node or object."""
+    if isinstance(cfg, dict):
+        return cfg.get(key, default)
+    return getattr(cfg, key, default)
+
 
 # ── Profile sampling ────────────────────────────────────────────────────────
 
@@ -203,8 +212,12 @@ def _comb_waveform(
     cur = np.ones(T, dtype=np.complex128)
     rps_min, rps_max = float(np.min(rps)), float(np.max(rps))
     for i in range(K):
-        cur *= step  # now exp(i*(i+1)*phase)
         k = i + 1
+        # This order and every higher one stay above Nyquist: nothing is left to
+        # add, and skipping them changes neither the output nor the rng stream.
+        if k * rps_min >= nyq:
+            break
+        cur *= step  # now exp(i*(i+1)*phase)
         if taper > 0.0:
             # Three cases, cheapest first. An order that stays under the taper's
             # onset for the whole window has a flat amplitude and needs no
@@ -251,6 +264,9 @@ class StaticCombNoisePool:
     """Analytic static-comb + broadband-floor noise source (``kind:
     static_comb``). Same ``sample_timeframe`` interface as the other pools."""
 
+    #: ``meta.recording_id`` of every rendered window.
+    RECORDING_ID = "static_comb"
+
     def __init__(
         self,
         *,
@@ -272,6 +288,9 @@ class StaticCombNoisePool:
         mic_gain_db: tuple[float, float] = (-12.0, 0.0),
         rps_scale_range: tuple[float, float] = (1.0, 1.0),
         normalize_rms: float | tuple[float, float] = 0.1,
+        render_reuse: int = 1,
+        render_pool: int = 0,
+        render_duration_s: float | None = None,
         ranges: ProfileRanges | dict[str, Any] | None = None,
         seed: int = 0,
     ):
@@ -327,6 +346,17 @@ class StaticCombNoisePool:
             if isinstance(normalize_rms, (list, tuple))
             else float(normalize_rms)
         )
+        # Render reuse, the noise_v2 pool's (NoiseV2Pool._pooled_render): one
+        # slot of a rolling pool of ``render_pool`` renders (4 x render_reuse
+        # by default) is refreshed every ``render_reuse`` draws; a slot holds
+        # ``render_duration_s`` of audio (the window when unset) and every draw
+        # cuts its own uniformly placed window out of it, rotor track alike.
+        # ``render_reuse: 1`` without a duration renders every window afresh.
+        self.render_reuse = max(int(render_reuse), 1)
+        self.render_pool = int(render_pool) if render_pool else 4 * self.render_reuse
+        self.render_duration_s = None if render_duration_s is None else float(render_duration_s)
+        self._pool: list[tuple[float, np.ndarray, np.ndarray]] = []
+        self._pool_draws = 0
         self.ranges = (
             ranges if isinstance(ranges, ProfileRanges) else ProfileRanges.from_dict(ranges)
         )
@@ -337,11 +367,11 @@ class StaticCombNoisePool:
         self.rotor_pos = np.zeros((self.n_rotors, 3), dtype=np.float64)
 
     @classmethod
-    def from_config(cls, cfg: Any, *, duration_s: float, sample_rate: int) -> StaticCombNoisePool:
+    def _config_kwargs(cls, cfg: Any, *, duration_s: float, sample_rate: int) -> dict[str, Any]:
+        """The constructor keywords one ``sources.noise`` entry names."""
+
         def g(key, default=None):
-            if isinstance(cfg, dict):
-                return cfg.get(key, default)
-            return getattr(cfg, key, default)
+            return _cfg_value(cfg, key, default)
 
         rps = g("rps", {}) or {}
         ranges = g("profile_ranges")
@@ -354,7 +384,7 @@ class StaticCombNoisePool:
             v = g(key, default)
             return (float(v[0]), float(v[1]))
 
-        return cls(
+        return dict(
             sample_rate=sample_rate,
             duration_s=duration_s,
             n_harmonics=int(g("n_harmonics", 100)),
@@ -377,9 +407,18 @@ class StaticCombNoisePool:
                 if g("normalize_rms_range") is not None
                 else float(g("normalize_rms", 0.1))
             ),
+            render_reuse=int(g("render_reuse", 1)),
+            render_pool=int(g("render_pool", 0)),
+            render_duration_s=(
+                None if g("render_duration_s") is None else float(g("render_duration_s"))
+            ),
             ranges=ranges,
             seed=int(g("seed", 0)),
         )
+
+    @classmethod
+    def from_config(cls, cfg: Any, *, duration_s: float, sample_rate: int) -> StaticCombNoisePool:
+        return cls(**cls._config_kwargs(cfg, duration_s=duration_s, sample_rate=sample_rate))
 
     def close(self) -> None:  # interface parity with GeneratedNoisePool
         return None
@@ -436,7 +475,7 @@ class StaticCombNoisePool:
 
     def render(
         self, rng: np.random.Generator, duration_s: float
-    ) -> tuple[np.ndarray, np.ndarray, list[RotorProfile]]:
+    ) -> tuple[np.ndarray, np.ndarray, list[Any]]:
         """Render (audio (M,T), rps (R,T), per-rotor profiles) — factored out of
         ``sample_timeframe`` so diagnostics can inspect the profiles."""
         T = int(round(duration_s * self.sample_rate))
@@ -480,18 +519,47 @@ class StaticCombNoisePool:
         per_rotor = (combs + floors) * amp  # (R, T)
         for m in range(self.n_mics):
             audio[m] = (gains[m][:, None] * per_rotor).sum(axis=0).astype(np.float32)
-        # Normalise to the clip's level target.
+        audio = self._normalized(audio, rng)
+        return audio, rps.astype(np.float32), profiles
+
+    def _normalized(self, audio: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        """``audio`` scaled to the clip's RMS target (log-uniform if a range)."""
         if isinstance(self.normalize_rms, tuple):
             lo, hi = self.normalize_rms
             level = float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
         else:
             level = float(self.normalize_rms)
         rms = float(np.sqrt(np.mean(audio**2))) or 1.0
-        audio = (audio / rms * level).astype(np.float32)
-        return audio, rps.astype(np.float32), profiles
+        return (audio / rms * level).astype(np.float32)
+
+    def _pooled_render(
+        self, rng: np.random.Generator, duration_s: float
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """``(audio, rps)`` of one ``duration_s`` window, from the rolling
+        render pool when reuse is on (the constructor's ``render_reuse``)."""
+        span = max(float(duration_s), self.render_duration_s or 0.0)
+        if self.render_reuse <= 1 and span == float(duration_s):
+            audio, rps, _ = self.render(rng, duration_s)
+            return audio, rps
+        matching = [item for item in self._pool if item[0] == span]
+        if not matching or self._pool_draws % self.render_reuse == 0:
+            audio, rps, _ = self.render(rng, span)
+            slot = (span, audio, rps)
+            if len(self._pool) < self.render_pool:
+                self._pool.append(slot)
+            else:
+                self._pool[int(rng.integers(len(self._pool)))] = slot
+            matching = [item for item in self._pool if item[0] == span]
+        self._pool_draws += 1
+        _, audio, rps = matching[int(rng.integers(len(matching)))]
+        n = int(round(float(duration_s) * self.sample_rate))
+        if audio.shape[-1] > n:
+            start = int(rng.integers(audio.shape[-1] - n + 1))
+            audio, rps = audio[:, start : start + n], rps[:, start : start + n]
+        return audio, rps
 
     def sample_timeframe(self, rng: np.random.Generator, duration_s: float) -> td.Frame:
-        audio, rps, _ = self.render(rng, duration_s)
+        audio, rps = self._pooled_render(rng, duration_s)
         audio_us = td.uniform(
             np.ascontiguousarray(audio), self.sample_rate, dims=("mic", "time"), t_start=0.0
         )
@@ -499,7 +567,7 @@ class StaticCombNoisePool:
         rps_es = td.events(t, np.ascontiguousarray(rps), dims=("rotor", "time"), t_start=0.0)
         return make_recording_frame(
             {"audio": audio_us, "rps": rps_es},
-            meta={"recording_id": "static_comb"},
+            meta={"recording_id": self.RECORDING_ID},
             mic_pos=self.mic_pos,
             rotor_pos=self.rotor_pos,
         )
@@ -588,3 +656,309 @@ def render_fixed_comb(
             rps.shape[-1], profile.floor_tilt, profile.floor_level, sample_rate, rng
         )
     return (out * float(gain)).astype(np.float64)
+
+
+# ── The diverse static comb (``kind: diverse_comb``) ────────────────────────
+#
+# The static comb above draws a profile from one rolloff, a Gaussian texture
+# and a blade emphasis, over a per-rotor pink floor kept under 70 % of the
+# lines. This family keeps the comb static within a clip and makes the
+# population wide: separate power laws for the even (blade-passing) and odd
+# (imbalance) orders, the odd one always under the even one; heavy-tailed
+# per-line departures, so a line is occasionally far above its law; random line
+# drop-outs; random rotor levels; and ONE white floor per microphone whose level
+# is drawn as the share of a rotor's lines it buries.
+
+
+@dataclass
+class DiverseCombRanges:
+    """Per-clip sampling ranges of :class:`DiverseCombNoisePool`, all uniform.
+
+    Levels are line POWER in dB (``20 log10`` of a line amplitude). The
+    defaults widen the measured rig profiles
+    (``docs/experiments/static-rig-profiles.md``: even-order slope 25 +/- 5
+    dB/decade, odd orders 8-9 +/- 9 dB under the even law, per-line scatter
+    3.5-5.6 dB, rotor levels 2.3-5.2 dB apart).
+    """
+
+    #: Even-order law ``-even_slope_db * log10(k)``.
+    even_slope_db: tuple[float, float] = (10.0, 30.0)
+    #: The odd-order law sits this far under the even law at ``k = 1`` ...
+    odd_penalty_db: tuple[float, float] = (3.0, 20.0)
+    #: ... and falls this much faster (dB/decade), so it is under it everywhere.
+    odd_extra_slope_db: tuple[float, float] = (0.0, 5.0)
+    #: Scale (dB) of the per-line Student-t departure from the law.
+    line_scatter_db: tuple[float, float] = (2.0, 5.0)
+    line_scatter_dof: float = 3.0
+    #: Departures are clipped to +/- this (dB).
+    line_scatter_max_db: float = 30.0
+    #: Probability that a line is dropped, drawn per rotor.
+    drop_prob: tuple[float, float] = (0.0, 0.3)
+    #: Level of each rotor's whole comb (dB), drawn per rotor.
+    rotor_gain_db: tuple[float, float] = (-4.0, 4.0)
+    #: Share of its counted lines the white floor buries on the MOST buried
+    #: rotor of a microphone (:func:`white_floor_std`).
+    floor_subsumed: tuple[float, float] = (0.0, 0.9)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any] | None) -> DiverseCombRanges:
+        if not d:
+            return cls()
+        known = set(cls.__dataclass_fields__)
+        unknown = sorted(set(d) - known)
+        if unknown:
+            raise ValueError(f"unknown comb_ranges key(s) {unknown}; known: {sorted(known)}")
+        kwargs: dict[str, Any] = {
+            k: tuple(v) if isinstance(v, (list, tuple)) else v for k, v in d.items()
+        }
+        return cls(**kwargs)
+
+
+@dataclass
+class DiverseRotorProfile:
+    """One rotor's static comb for one clip, and the draws that made it."""
+
+    level_db: np.ndarray  # (K,) line power (dB) incl. the rotor gain; dropped lines too
+    kept: np.ndarray  # (K,) False where the line is dropped
+    even_slope_db: float
+    odd_penalty_db: float
+    odd_slope_db: float
+    scatter_db: float
+    drop_prob: float
+    gain_db: float
+
+    @property
+    def amplitudes(self) -> np.ndarray:
+        """``(K,)`` line amplitudes, zero where dropped."""
+        return np.where(self.kept, 10.0 ** (self.level_db / 20.0), 0.0)
+
+
+def sample_diverse_rotor(
+    rng: np.random.Generator, ranges: DiverseCombRanges, *, n_harmonics: int
+) -> DiverseRotorProfile:
+    """Draw one rotor's static comb: two power laws, Student-t departures,
+    drop-outs and a level."""
+    k = np.arange(1, int(n_harmonics) + 1, dtype=np.float64)
+    lk = np.log10(k)
+    even_slope = float(rng.uniform(*ranges.even_slope_db))
+    penalty = float(rng.uniform(*ranges.odd_penalty_db))
+    odd_slope = even_slope + float(rng.uniform(*ranges.odd_extra_slope_db))
+    law = np.where(k % 2 == 0, -even_slope * lk, -penalty - odd_slope * lk)
+    scatter = float(rng.uniform(*ranges.line_scatter_db))
+    cap = float(ranges.line_scatter_max_db)
+    departure = np.clip(scatter * rng.standard_t(ranges.line_scatter_dof, size=k.size), -cap, cap)
+    drop = float(rng.uniform(*ranges.drop_prob))
+    kept = rng.random(k.size) >= drop
+    gain = float(rng.uniform(*ranges.rotor_gain_db))
+    return DiverseRotorProfile(
+        level_db=law + departure + gain,
+        kept=kept,
+        even_slope_db=even_slope,
+        odd_penalty_db=penalty,
+        odd_slope_db=odd_slope,
+        scatter_db=scatter,
+        drop_prob=drop,
+        gain_db=gain,
+    )
+
+
+def white_floor_std(
+    line_level: list[np.ndarray] | tuple[np.ndarray, ...], subsumed: float
+) -> tuple[float, np.ndarray]:
+    """``(sigma, buried)``: the white floor's std on one microphone and the
+    share of each rotor's counted lines it buries.
+
+    ``line_level[r]`` holds rotor ``r``'s counted lines at this microphone on
+    the floor's scale: a line is BURIED when its value is under ``sigma``
+    (:func:`render_diverse_comb` passes the line's power per spectrogram bin,
+    as an RMS). ``sigma`` is the largest value at which no rotor loses more
+    than ``subsumed`` of its lines, so the most buried rotor loses
+    ``floor(subsumed * n) / n`` of them. A rotor with no counted line does not
+    constrain it.
+    """
+    bounds = []
+    for v in line_level:
+        if v.size:
+            ordered = np.sort(v)
+            bounds.append(float(ordered[min(int(np.floor(subsumed * v.size)), v.size - 1)]))
+    sigma = min(bounds) if bounds else 0.0
+    buried = np.array([float(np.mean(v < sigma)) if v.size else 0.0 for v in line_level])
+    return sigma, buried
+
+
+def render_diverse_comb(
+    rps: np.ndarray,
+    profiles: list[DiverseRotorProfile],
+    mic_gains: np.ndarray,
+    subsumed: float,
+    rng: np.random.Generator,
+    *,
+    sample_rate: int,
+    amp_rps_exponent: float,
+    amp_rps_ref: float,
+    band_taper_frac: float,
+    floor_ref_nfft: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(audio (M, T) float32, sigma (M,), buried (M, R))`` from ``(R, T)`` rev/s.
+
+    Rotor ``r`` reaches microphone ``m`` with amplitude gain
+    ``mic_gains[m, r]`` and its whole comb scales with
+    ``(rps / amp_rps_ref) ** amp_rps_exponent`` (silent when stopped). Each
+    microphone adds independent white noise at :func:`white_floor_std` of the
+    lines it hears, read at each rotor's window-median speed (at least a
+    quarter of ``amp_rps_ref``, so a stopped window still gets a floor); the
+    counted lines are the kept ones below Nyquist at that speed.
+
+    The lines are the noise-model renderer's (:mod:`.noise_model.render`): one
+    complex envelope per line, ``a_k e^{i psi_k}`` (``psi_k`` uniform) times
+    the speed law and the band-top taper, on its 1 kHz envelope grid, carried
+    by ``cos / sin(k phi)`` of the rotor's phase at the output rate. The
+    static comb is that model with every per-line wander, width and per-mic
+    phase set to zero. Orders that are dropped, or over Nyquist for the whole
+    window, are not rendered.
+
+    "Buried" is read in the spectrogram: line ``a cos(...)`` stands at
+    ``(a^2 / 2) * N / 3`` in a ``N = floor_ref_nfft`` Hann periodogram
+    normalised by ``sum(w^2)``, where white noise of variance ``sigma^2``
+    stands at ``sigma^2``; equivalently the line's power is compared with the
+    floor's power inside one Hann bin (ENBW ``1.5 fs / N``). Against the
+    floor's TOTAL variance instead, a "buried" line would still stand
+    ``10 log10(N / 3)`` dB (28 dB at N = 2048) over the floor on screen.
+    """
+    rps = np.asarray(rps, dtype=np.float64)
+    n_rotors, n = rps.shape
+    nyq = sample_rate / 2.0
+    f_lo = nyq * (1.0 - float(np.clip(band_taper_frac, 0.0, 1.0)))
+    ref = np.maximum(np.median(rps, axis=1), 0.25 * amp_rps_ref)
+    speed_gain = (ref / amp_rps_ref) ** amp_rps_exponent
+    in_bin = np.sqrt(float(floor_ref_nfft) / 3.0)
+    hop_env = sample_rate // ENV_RATE_HZ
+    if hop_env * ENV_RATE_HZ != sample_rate:
+        raise ValueError(f"sample_rate {sample_rate} is not a multiple of {ENV_RATE_HZ} Hz")
+    knots = np.minimum(np.arange(n // hop_env + 2) * hop_env, n - 1)
+    n_mics = mic_gains.shape[0]
+    audio = np.zeros((n_mics, n), dtype=np.float32)
+    counted: list[np.ndarray] = []
+    for r, prof in enumerate(profiles):
+        a = prof.amplitudes
+        k = np.arange(1, a.size + 1)
+        counted.append(a[prof.kept & (k * ref[r] < nyq)] * speed_gain[r] * in_bin / np.sqrt(2.0))
+        live = (a > 0.0) & (k * rps[r].min() < nyq)
+        k, a = k[live], a[live]
+        rk = rps[r, knots]
+        law = (np.maximum(rk, 0.0) / amp_rps_ref) ** amp_rps_exponent
+        env = (a * np.exp(1j * rng.uniform(0.0, 2.0 * np.pi, size=k.size)))[:, None] * law
+        # raised-cosine fade over the top band_taper_frac of the band (a brick
+        # wall at Nyquist when 0), only on the orders that ever reach it
+        top = k * rps[r].max() > f_lo
+        if top.any():
+            x = np.clip((k[top, None] * rk - f_lo) / max(nyq - f_lo, 1e-9), 0.0, 1.0)
+            env[top] *= 0.5 * (1.0 + np.cos(np.pi * x))
+        phase = 2.0 * np.pi * np.cumsum(rps[r]) / sample_rate
+        _render_lines(
+            audio,
+            np.cos(phase).astype(np.float32),
+            np.sin(phase).astype(np.float32),
+            env,
+            hop_env,
+            np.repeat(mic_gains[:, r : r + 1], k.size, axis=1),
+            k,
+        )
+    sigma = np.empty(n_mics)
+    buried = np.empty((n_mics, n_rotors))
+    for m in range(n_mics):
+        sigma[m], buried[m] = white_floor_std(
+            [c * mic_gains[m, r] for r, c in enumerate(counted)], subsumed
+        )
+        audio[m] += sigma[m] * rng.standard_normal(n, dtype=np.float32)
+    return audio, sigma, buried
+
+
+class DiverseCombNoisePool(StaticCombNoisePool):
+    """``kind: diverse_comb``: the static comb with a wide, realistic-shaped
+    profile population and one white floor per microphone
+    (:func:`sample_diverse_rotor`, :func:`render_diverse_comb`).
+
+    Everything else is the static comb's: the trajectory (``rps`` block, so
+    ``fitted_traj`` and its flight cache), ``n_harmonics``,
+    ``band_taper_frac``, the speed law, ``mic_gain_db`` (per microphone and
+    rotor), ``rps_scale_range``, the output level and the render reuse.
+    :attr:`last_render` keeps the draws behind the most recent render for
+    diagnostics.
+    """
+
+    RECORDING_ID = "diverse_comb"
+
+    def __init__(
+        self,
+        *,
+        comb_ranges: DiverseCombRanges | dict[str, Any] | None = None,
+        floor_ref_nfft: int = 2048,
+        **kwargs: Any,
+    ):
+        super().__init__(**kwargs)
+        self.comb_ranges = (
+            comb_ranges
+            if isinstance(comb_ranges, DiverseCombRanges)
+            else DiverseCombRanges.from_dict(comb_ranges)
+        )
+        #: The spectrogram resolution "buried" is read at
+        #: (:func:`render_diverse_comb`): the campaign's 128 ms analysis window.
+        self.floor_ref_nfft = int(floor_ref_nfft)
+        self.last_render: dict[str, Any] | None = None
+
+    @classmethod
+    def from_config(cls, cfg: Any, *, duration_s: float, sample_rate: int) -> DiverseCombNoisePool:
+        for legacy in ("profile_ranges", "min_harm_above_floor"):
+            if _cfg_value(cfg, legacy) is not None:
+                raise ValueError(
+                    f"kind: diverse_comb has no {legacy!r} (a kind: static_comb key); "
+                    "its profile lives in comb_ranges"
+                )
+        kwargs = cls._config_kwargs(cfg, duration_s=duration_s, sample_rate=sample_rate)
+        del kwargs["ranges"], kwargs["min_harm_above_floor"]
+        ranges = _cfg_value(cfg, "comb_ranges")
+        if ranges is not None and not isinstance(ranges, dict):
+            from data_processing.generated_noise import _to_plain
+
+            ranges = _to_plain(ranges)
+        return cls(
+            comb_ranges=ranges,
+            floor_ref_nfft=int(_cfg_value(cfg, "floor_ref_nfft", 2048)),
+            **kwargs,
+        )
+
+    def render(
+        self, rng: np.random.Generator, duration_s: float
+    ) -> tuple[np.ndarray, np.ndarray, list[Any]]:
+        """``(audio (M, T), rps (R, T), per-rotor profiles)``."""
+        n = int(round(duration_s * self.sample_rate))
+        rps = self._sample_rps_window(rng, n, duration_s)
+        n_rotors = rps.shape[0]
+        profiles = [
+            sample_diverse_rotor(rng, self.comb_ranges, n_harmonics=self.n_harmonics)
+            for _ in range(n_rotors)
+        ]
+        lo, hi = self.mic_gain_db
+        mic_gains = 10.0 ** (rng.uniform(lo, hi, size=(self.n_mics, n_rotors)) / 20.0)
+        subsumed = float(rng.uniform(*self.comb_ranges.floor_subsumed))
+        audio, sigma, buried = render_diverse_comb(
+            rps,
+            profiles,
+            mic_gains,
+            subsumed,
+            rng,
+            sample_rate=self.sample_rate,
+            amp_rps_exponent=self.amp_rps_exponent,
+            amp_rps_ref=self.amp_rps_ref,
+            band_taper_frac=self.band_taper_frac,
+            floor_ref_nfft=self.floor_ref_nfft,
+        )
+        self.last_render = {
+            "profiles": profiles,
+            "mic_gains": mic_gains,
+            "subsumed": subsumed,
+            "floor_std": sigma,
+            "buried": buried,
+        }
+        return self._normalized(audio, rng), rps.astype(np.float32), profiles

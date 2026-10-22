@@ -1062,3 +1062,80 @@ renders audio FROM the labels should not render DREGON's 45 Hz sample-and-hold
 as sound.
 
 `baseline.py` fits the incumbent but never edits it.
+
+## Reduced hyperprior
+
+**2026-10-22, for the simple synthetic training streams.** The streams that fly
+the hyperprior fix its scale with `hover_range: [35, 95]` and bound it with
+`rps_max: 150`, but every scale-free coordinate stays as fitted, and the
+shaft-std coordinates are the widest of the 32 (log-std 2.0-3.4 on
+`sigma_slow`): the racing quads fluctuate 5-8 % of their hover, DREGON and
+michaels 2-3 %. At 35-95 rev/s the draws' cruise therefore moves far more than
+either measured drone's.
+
+**The statistic.** `Params.shaft_dynamics` on the 31.25 Hz label grid: the
+expected std inside a 2 s window and the std of the 0.32 s increment, each the
+maximum over rotors, in closed form from the state spaces (shaft only: no
+measurement process, no per-flight offset), divided by the drone's hover. A
+drone's `ratio` is the larger of the two after dividing by the same statistic
+of the livelier of DREGON and michaels (2.12 % and 2.79 % of hover). It is
+scale-free, so `hover_range` is untouched by anything that acts on it.
+
+**First form, rejection (`cap xM`, superseded).** Refuse posterior drones with
+`ratio > M`. Acceptance at 1 / 1.5 / 2: 0.02 / 0.12 / 0.27 — the reduced
+population is a truncation the hyperprior's parameters do not describe.
+
+**Adopted form, `rps.shrink`** (`Posterior.shrunk_toward`,
+`src/data_processing/trajectory_model/{posterior,source}.py`). The hyperprior's
+20 SHAFT coordinates (per mode: slow time-constant logit, relative slow std,
+log `f0`, damping logit, relative oscillator std) are pulled a fraction `w` of
+the way to the mean `rig_vector` of `[dregon, michaels]`, and their stds shrink
+to `(1 - w)` of the fitted ones; scale, trims, `theta`, measurement and offsets
+keep the fitted law. One number, 0 = the fitted hyperprior, 1 = exactly the
+two rigs' average shaft (whose own `ratio` is 0.95). The weight is CALIBRATED:
+the smallest `w` at which at most 5 % of drones have `ratio > 2` ("cap x2,
+roughly"), by bisection on common random numbers, 2000 drones, seed 0
+(`scripts/rps_traj_shaft_shrink.py`).
+
+Moves that leave the target alone were tried first (6000 drones, seed 0) and
+cost more: moving only the 8 relative-std coordinates (common log shift, common
+spread factor) needs the spread cut to 0.2 or less, a near-fixed amplitude, and
+still leaves ~5 % above x2, because the time-constant coordinates alone spread
+the ratio by 1.4x between median and 99th percentile; tempering all 20 shaft
+coordinates (spread x0.4) plus an amplitude shift (-0.3 in log) gets 4.5 % above
+x2 at a median ratio of 1.36, but with two knobs where the shrink has one.
+
+**Comparison** (`python scripts/rps_traj_shaft_shrink.py`: calibration, then
+200 accepted flights per arm, seed 0;
+`results/rps_traj/shaft_shrink/{stats.json,cdf.png,draws.png}`). Every arm is
+the stream's own draw (posterior, `hover_range` [35, 95], `rps_max` 150,
+`rotor_sep` [2, 15], measurement off) read on its airborne part; the real rows
+are the airborne segments of the campaign's DREGON and michaels (MD2) flights.
+At 31.25 Hz: per-rotor std in 2 s windows (rev/s), per-rotor change
+`|w(t+0.32) - w(t)| / 0.32` (rev/s per s), and the accepted drones' `ratio`.
+
+| arm | window std p50 / p90 / p99 | change p50 / p90 / p99 | drone ratio p50 / p90 / p99 | ratio > 2 | drone acceptance | median hover |
+|---|---|---|---|---|---|---|
+| DREGON (real) | 1.01 / 2.08 / 5.76 | 2.8 / 8.0 / 27.1 | — | — | — | 81 |
+| MD2 (real) | 1.28 / 2.35 / 4.01 | 3.6 / 10.0 / 21.2 | — | — | — | 78 |
+| full hyperprior | 3.20 / 6.85 / 18.0 | 9.0 / 28.9 / 74.0 | 2.68 / 5.09 / 16.4 | 0.75 | 1 | 65 |
+| cap x1 | 1.18 / 1.85 / 3.32 | 3.2 / 8.8 / 15.4 | 0.90 / 0.98 / 1.00 | 0 | 0.019 | 74 |
+| cap x1.5 | 1.63 / 2.56 / 3.95 | 4.5 / 12.0 / 21.1 | 1.27 / 1.46 / 1.49 | 0 | 0.12 | 71 |
+| cap x2 | 1.89 / 3.05 / 4.62 | 5.3 / 14.4 / 25.5 | 1.49 / 1.92 / 2.00 | 0 | 0.26 | 70 |
+| **shrink 0.57** | 1.83 / 3.00 / 4.31 | 5.4 / 14.7 / 26.9 | 1.37 / 1.90 / 2.17 | 0.045 | 1 | 71 |
+
+Readings. (1) The full hyperprior's cruise is 2.5-3.2x livelier than either
+real drone at the median and 3-4.5x in the tail; some draws swing between the
+ESC clamps (`draws.png`, row "full"). (2) `shrink 0.57` reproduces `cap x2` on
+every flight statistic to within 0.3 rev/s (window) and 1.4 rev/s/s (change),
+with no refused drone: the x2 truncation is, to this resolution, a moved
+Gaussian. Its 4.5 % of drones above x2 reach 2.17 at the 99th percentile.
+(3) Both sit at DREGON's tail and at 1.4-1.9x the real medians; cap x1 matches
+the real medians and undershoots the real tails, which carry manoeuvres a
+stationary model does not make. (4) The calmer the shaft, the more flights
+`rotor_sep` refuses (per 200 accepted: full 142, x2 134, x1.5 168, shrink 229,
+x1 278), and the accepted median hover rises from 65 to 70-74 rev/s: its
+2 rev/s floor on the closest pair is absolute and a calm small drone's rotors
+sit closer `[INFERENCE]`. (5) No arm leaves the cruise regime (ramp share 0-3 %
+of frames against 0-1 % real). In `draws.png` panels 2-3 of "shrink" are
+panels 2-3 of "full" (common random numbers): same size and trims, shaft moved.
