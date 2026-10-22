@@ -492,6 +492,12 @@ def v2_arm(
 
 def _named_fit(path: Path, *, rig: str, admissible: tuple[str, ...], role: str) -> dict[str, Any]:
     fit = json.loads(Path(path).read_text())
+    if str(fit.get("schema")) == V4_SCHEMA:
+        # a v4 per-regime flight payload names its rig, not a support
+        if str(fit.get("rig")) != rig or fit.get("kind") != "flight":
+            die(f"{path}: a v4 {fit.get('kind')} payload of rig {fit.get('rig')!r}, not {rig!r}")
+        fit["_path"] = str(path)
+        return fit
     if str(fit.get("schema")) not in FIT_SCHEMAS:
         die(f"{path}: schema {fit.get('schema')!r} is none of {list(FIT_SCHEMAS)}")
     named = " or ".join(repr(name) for name in admissible)
@@ -562,7 +568,13 @@ def v2_regime_arm(
         fit=cruise,
         regime_fits={"standby": standby, "cruise": cruise},
         _render_regimes=render_mod.render_noise_regimes,
-        _spectrum_regimes=render_mod.expected_periodogram_regimes,
+        # the regime likelihood hook is v2/v3 code; a v4 pair is scored on parity
+        # and the LTAS proxy, as nv3r4 was
+        _spectrum_regimes=(
+            None
+            if V4_SCHEMA in (standby.get("schema"), cruise.get("schema"))
+            else render_mod.expected_periodogram_regimes
+        ),
     )
 
 
