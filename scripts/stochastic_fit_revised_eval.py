@@ -835,8 +835,11 @@ class Tracker:
         self.record = checkpoint_record(name, ckpt)
         self.fm = zoo.load(name, ckpt=ckpt)
         # the frozen scorer's output grid: linear 0-150 rev/s in 300 bins, the
-        # metric's pre-rp-protocol default (conf/metrics/salience_layers_r150.yaml)
-        self.metric = LayerPeakRPSMetric(grid=dict(kind="linear", fmin=0.0, fmax=150.0, bins=300))
+        # metric's pre-rp-protocol default (conf/metrics/salience_layers_r150.yaml);
+        # an rp-protocol scorer passes its own `metric` kwargs (salience_layers_rp.yaml)
+        metric = dict(grid=dict(kind="linear", fmin=0.0, fmax=150.0, bins=300))
+        metric.update(scorer.get("metric") or {})
+        self.metric = LayerPeakRPSMetric(**metric)
         self.score = probe_helpers().score
 
     def pit(
