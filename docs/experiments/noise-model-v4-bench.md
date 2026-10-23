@@ -503,6 +503,19 @@ the 4 s scoring windows the half-split floor is large (LTAS 3.6) because the
 real windows drift in level inside 4 s, and every model is 1.6–3.7 dB quieter
 than real there (the level gap).
 
+*Correction and time-aware measures (`f6ab4cf9`).* The half-split floor is
+invalid (the halves run on different speed trajectories, so lines are
+misplaced, and the level drifts); it is replaced by a seed floor (seed 2001
+vs 2002 of the same payload on the same trajectory). The linear-bin IS is
+time-blind and 65–72 % from 2–8 kHz; v4's IS deficit is all in 4–8 kHz
+(0.25 vs 0.15 per bin), while v4 is closer than nv3r4 at 62–250 Hz. Frame
+third-octave Fréchet distance (tuning; seed floors 9–14 dB²): nv3r4 362
+(mean term 241, covariance 121), C-wind 308 (247, 61); scoring windows:
+543 vs 466. Cross-band co-modulation (mean off-diagonal r of frame levels):
+real 0.241 (scoring 0.444), nv3r4 0.067 (0.119), static v4 0.019 (0.039),
+C-wind 0.124 (0.153). Time-aware measures favour C-wind; it carries half of
+the real broadband co-modulation, nv3r4 a quarter.
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
