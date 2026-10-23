@@ -483,6 +483,10 @@ nv3r4 1.81 (LTAS 1.56; $g_a$ +2.2, $g_f$ −5.2 dB). Main effects: $g_a$
 moves PIT by 14.6 rev/s and $g_f$ by 7.0; every exponent by ≤ 1.3 (noise).
 The in-flight speed laws are not what is missing; the line-to-floor ratio is,
 and it saturates at PIT ≈ 1.8.
+Point A on the official scorer (held-out windows, `nv4-score-lawsa-1c2691`):
+PIT 3.03 (C-wind 9.62, bar 1.680), LTAS 2.61 (C-wind 1.95, bar 2.384),
+Listen 3.23 (C-wind 2.39, bar 3.08). The tuning gain transfers only in part
+(PIT 1.81 on the tuning segments) and costs both spectral measures.
 
 **Similarity battery (2026-10-23).** `experiments/noise_model/similarity.py`,
 report `results/noise_v4/similarity/report.md` (render seed 2001, 8 mics;
