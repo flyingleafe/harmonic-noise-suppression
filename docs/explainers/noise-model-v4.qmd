@@ -666,6 +666,36 @@ PIT 9.62 (stage 15.8, bar 1.680), LTAS 1.952 (bar 2.384), Listen 2.39
 the line set, not the wind (`docs/experiments/noise-model-v4-bench.md`
 § Round 6, C-wind).
 
+## C-alt — alternating lines and gust law {#sec-calt}
+
+The model does not change. The procedure alternates two parameter blocks on
+the wide pool `dregon-flight-wide` (18 windows of 8 s, the five tuning
+segments first; never within 2 s of a scoring window).
+
+**L. Lines** by the Whittle likelihood, gust law fixed
+(`scripts/noise_v4_flight.py dregon --lines --hold-eps --k-free 10`).
+Free: `profile_aero_db[:, :10]` with prior $\mathcal N(\text{centre}, 6)$ dB,
+the pedestal for $k \le 10$, the floor shape, the wind levels, the mic gains.
+Held: the line gains, the motor family, $\alpha$, and the shaft scale
+$\varepsilon$ at its bench value. The rotor-speed labels carry 0.5–0.7 Hz of
+error. With $\varepsilon$ free, the likelihood widens the lines to absorb it
+($\varepsilon$ 0.00145 → 0.049) and smears the high orders. For $k \le 10$
+the error moves a line by at most 7 Hz, inside one 7.8 Hz bin.
+
+**G. Gust law** by the similarity battery (`wind --targets battery`):
+grid offset × scale × rate (7 × 5 × 5), each measure divided by its seed
+floor, with an inner Whittle refit of the wind levels and the floor mean.
+
+**Order** L, G, L; at most two rounds. **Gate** on the tuning segments: PIT
+≤ 1.54 and every battery measure no worse than nv3r4.
+
+**Result.** Both line fits converge (gain below 2e-7 nats per cell). The
+gust law is offset 2, scale 1 m/s, rate 8 Hz. The gate fails: tuning PIT
+1.92 (HPPNet); official windows PIT 2.24 (bar 1.680) under HPPNet and 1.86
+(nv3r4 1.105) under HRSPNet. The fit beats nv3r4 on the Fréchet distance
+and the cross-band co-modulation, but its broadband level is 2–4 dB high on
+the tuning segments and its order-1 line 3–6 dB low.
+
 # From the fits to the generator
 
 A bank entry is a rig payload plus a trajectory. The renderer is the same for
