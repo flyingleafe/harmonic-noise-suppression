@@ -304,4 +304,124 @@ results/noise_v4/md2_motor_orders/fly125_{spectrogram,cruise_k84}_44k.png -->
 400 Hz; then a longer bench schedule until the restart pass gains < 1e-4
 nats/cell; then the flat-shaft refit.
 
+### Round 5 — bounded priors, κ, converged bench fits (2026-10-22)
+
+**Priors.** $W_\phi \le 24$ Hz, $\sigma^2_\phi \le 3$, one $c_W = 6.94$ Hz
+for every order, $b(f) \ge 0$ on the band (`v4_priors`). Spec
+`docs/explainers/noise-model-v4.qmd` § The priors.
+
+**κ by the planted check.** Truth: the r5 s2 fit with its floor below
+2.5 kHz replaced by the measured inter-line floor.
+
+| κ | floor err ≥ 500 Hz, rms / max | mean err < 500 Hz | median $W$ err |
+|---|---|---|---|
+| 0 | 1.5 / 2.4 dB | +2.5 dB | 29 % |
+| 100 | 1.4 / 2.1 dB | +16.5 dB | 35 % |
+| 1000 | 1.8 / 4.3 dB | +19.5 dB | 45 % |
+| 1e4 | diverged | | |
+
+No κ meets the 1 dB rule. Below 500 Hz the bench floor and the bench wind
+explain the same cells and the push only lifts the floor. Decision: κ = 0.
+<!-- source: results/noise_v4/bench/planted/dregon__kappa0__r5__s2__floor2500__kappa{0,100}__r1.json -->
+
+**Converged bench fits** (uni, 3 h): κ 0 / 10 / 100 at −158,957,322.8 /
+−158,948,445.0 / −158,905,892.1 nats, 13 restart passes. In-sample check
+(`nv4-insample-r5b-72401b`): mean |model − data| 1.6–3.2 dB per recording; at
+0.4–2 kHz the floor sits 55–60 dB under the total, so the pedestals carry the
+broadband level.
+<!-- source: results/noise_v4/bench/restarts/dregon__kappa{0,10,100}__r5__s2__c1.json -->
+
+### Round 6 — minimum, η, flight fits (2026-10-23)
+
+**Saddle escape.** The κ = 0 fit `c1` passed the convergence test but had 38
+directions of negative curvature (each on one coordinate: `log_gA`, `u_amp`,
+`u_W`, `p_aero` of near-invisible orders; η came out NaN). `noise_v4_bench.py
+escape` (Hessian, line search down each negative direction, convergence loop,
+repeat; uni-gpushort, one Hessian 1290–1310 s):
+
+| step | negative directions | gain | objective (nats) |
+|---|---|---|---|
+| c1 → c2 | 38 → 12 | 1835 | |
+| c2 → c3 | 12 → 5 | 607.9 | −158,965,903.0 |
+| c3 → c4 | 5 → 4 | 135.4 | −158,966,038.4 |
+| c4 → c5 | 4 → 1 | 26.8 | −158,966,065.2 |
+| c5 → c6 → c7 | 1 → 1 | 0 | −158,966,065.2 |
+
+The last direction (eigenvalue −0.275, a quadratic gain of 0.034 nats at the
+smallest trial step) lowers the objective at no trial step in either sign.
+Rule adopted (`bench_eta.MINIMUM_RULE`): such a payload is a minimum, and the
+direction is left out of $H^{-1}$ like a flat one. `c7` is the final bench fit.
+Jobs `nv4-escape-k0g2-78e2a2`, `-k0g3-edff74`, `-k0g4-6580d2`,
+`-k0g5-c7131a`, `nv4-eta-final-16b888`.
+<!-- source: results/noise_v4/bench/restarts/dregon__kappa0__r5__s2__c{3..7}.json optimiser.saddle_escape -->
+
+**η on the final fit** (block jackknife; $p_{\rm eff}$ = 655):
+
+| blocks | 200 Hz | 400 Hz | 800 Hz | 1600 Hz | one per recording |
+|---|---|---|---|---|---|
+| η | 0.00152 | 0.00145 | 0.00140 | 0.00135 | 0.00132 |
+
+η falls slowly with block size: the cells are strongly dependent, and the
+dependence reaches across 1.6 kHz.
+<!-- source: results/noise_v4/bench/eta/dregon__kappa0__r5__s2__c7.json -->
+
+**Planted twin of the final fit** (truth `c6`, κ = 0, resumed from the truth;
+`nv4-planted-final-3143af`): converged (1.3e-6 nats/cell). α (0.04), ε (4 %),
+λ (5 %) recover; profiles on lines ≥ 10 dB: median error 0.35 dB, 88 % within
+1 dB; $W_\phi$ on lines ≥ 15 dB: median 18 %, 71 % within 30 %; $b_0$ off by
+1.0; the floor off by up to 55 dB (rms 16 dB), where the truth floor had
+collapsed below 300 Hz.
+<!-- source: results/noise_v4/bench/planted/dregon__kappa0__r5__s2__c6__kappa0__r1.json -->
+
+**MD2 flight.** The converged joint fit (`md2_fly125__flight_v4__s0__r5c1`)
+scored standby PIT 27.8 and parity ratio 3.57, so the per-regime fallback
+applies. Two changes of procedure and prior: the phase pedestal is fitted per
+order (`--free-phase-pedestal`; the held median filled the cruise valleys 10 dB
+too high), and $\lvert\alpha^m\rvert \le 4$ (per-regime pools pushed it to
+−40.8 / +17.5). Per-order pedestal groups move by the median over orders in
+the convergence test. Converged pair: standby `…_standby_fpb__flight_v4__s0__r6c1`
+(17 passes), cruise `…_cruise_fpb__flight_v4__s0__r6c3`
+(`nv4-md2-cruise-fpg4-caa813`). Scores (`nv4-score-md2-r6c3-449bbb`):
+
+| | v4 pair | nv3r4 |
+|---|---|---|
+| parity ratio | **0.481** | 0.515 |
+| PIT standby / ramp / cruise | 0.359 / 3.309 / 0.700 | 0.369 / 3.604 / 0.701 |
+| cruise LTAS | 1.516 dB | 1.541 dB |
+| Listen LTAS, seed 0 | 0.97 dB | 0.95 dB |
+| Listen LTAS, seeds 0–5 | 0.987 ± 0.054 | 0.975 ± 0.029 |
+
+The Listen band errors are the same for both models (FLY125 fit, FLY124 clip);
+accepted as on par (Dmitrii, 2026-10-23).
+
+**DREGON flight stage** (procedure C of the spec). Scores against nv3r4's
+PIT 1.680 / LTAS 2.384:
+
+| stage | PIT | LTAS | job |
+|---|---|---|---|
+| no gains (bench κ = 0) | 15.8 | 2.384 | |
+| + gain per mic | 19.57 | 2.47 | `nv4-score-mgnl-k0-ccc534` |
+| + gain per rotor (bench κ = 10) | 61.24 | 2.60 | `nv4-score-lg-k10-ba7b42` |
+| + gain per rotor and mic | 66.36 | 2.85 | `nv4-score-mg-k0-4f5cf2` |
+| + coherence free (40 passes, not converged) | 29.4 | 3.20 | |
+| probe: shaft ε 0.02 / 0.05 (no refit) | 21.7 / 43.1 | 2.33 / 2.31 | |
+
+Local scorer probes (hovering and spinning windows): the scorer reads
+absolute CQT dB; the scoring windows are 2–6 dB louder above 120 Hz than the
+fit segments; v4 matches the fit segments, nv3r4 sits 3.5–4.5 dB above them on
+mic 2. Lines +3 dB or floor −6 dB bring every mic back (2.01 / 2.16), still
+above nv3r4 (1.43 / 1.61); with the four rotors' profiles averaged it is 8.3 /
+10.3. Details and the comparison: `docs/explainers/noise-model-v4-dregon-gap.qmd`
+§ 5–6.
+
 ## Conclusion
+
+- **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
+  κ = 0 (no κ passes the planted 1 dB floor rule).
+- **η (step 3).** 0.00152 (200 Hz blocks) to 0.00132 (per recording) on the
+  final fit.
+- **MD2 flight.** The converged per-regime pair beats nv3r4 on parity
+  (0.481 vs 0.515) and on every regime and cruise LTAS; Listen is on par
+  within render-seed noise.
+- **DREGON flight.** Not reached: every converged stage on the frozen bench
+  lines fails the PIT bar (best 15.8 vs 1.680; LTAS 2.384 equal).
