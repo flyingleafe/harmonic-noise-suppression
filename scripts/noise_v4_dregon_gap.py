@@ -680,6 +680,183 @@ def cmd_hppnet(args: argparse.Namespace) -> int:
     return 0
 
 
+#: ``full``: the clip length, and the log-frequency axis of its spectrograms
+FULL_SECONDS = 8.0
+FULL_FMIN, FULL_FMAX = 30.0, 8000.0
+FULL_NPERSEG, FULL_HOP = 2048, 256
+
+
+def cmd_full(args: argparse.Namespace) -> int:
+    """8 s spectrograms over the whole band (log frequency, 30 Hz - 8 kHz) on
+    each window's real rotor-speed track: real, nv3r4, v4 (and v4 with its lines
+    raised ``--line-db``). DREGON: the five recordings from the start of each
+    4 s scoring window (scored 4 s, the 2 s guard, then the first 2 s of the fit
+    segment). MD2: the scorer's five 8 s FLY124 windows; per-regime pairs render
+    through ``render_noise_regimes``. One colour scale per mic (the real clip's);
+    WAVs on one scale per mic and window."""
+    import dataclasses
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from scipy.signal import spectrogram
+
+    from data_processing.noise_model.render import render_noise, render_noise_regimes
+    from experiments.noise_model import gates as GT
+    from experiments.stochastic_fit import revised_eval as RE
+
+    out = Path(args.out)
+    rig = str(args.rig)
+    tag = "dregon" if rig == "dregon" else "md2"
+    mics = [int(m) for m in (args.mics or ("1,2" if rig == "dregon" else "0,4")).split(",")]
+    v4 = json.loads(Path(args.v4).read_text())
+    fits: dict[str, tuple[dict[str, Any], dict[str, Any] | None]] = {
+        "nv3r4": (
+            json.loads(Path(args.v3).read_text()),
+            json.loads(Path(args.v3_standby).read_text()) if args.v3_standby else None,
+        ),
+        "v4": (v4, json.loads(Path(args.v4_standby).read_text()) if args.v4_standby else None),
+    }
+    labels = {"real": "real", "nv3r4": "nv3r4", "v4": "v4"}
+    if args.line_db is not None:
+        raised = copy.deepcopy(v4)
+        for key in ("profile_aero_db", "profile_motor_db"):
+            raised["params"][key] = (np.asarray(raised["params"][key]) + args.line_db).tolist()
+        fits["v4_lines"] = (raised, None)
+        labels["v4_lines"] = f"v4, lines +{args.line_db:g} dB"
+    supports = GT.DREGON_CRUISE_SUPPORTS if rig == "dregon" else GT.MICHAELS_SUPPORTS
+    rows = []
+    for sup in supports:
+        window = dataclasses.replace(sup.window, duration_s=float(args.seconds))
+        clip = RE.load_window(
+            window,
+            dataset=GT.DATASET[rig],
+            version=None,
+            channels=None,
+            rps_key=GT.RAW_RPS_KEY[rig],
+        )
+        real = np.asarray(clip.audio, dtype=np.float64)[:8]
+        rps = np.atleast_2d(np.asarray(clip.rps, dtype=np.float64))
+        audio = {"real": real}
+        for name, (fit, sb) in fits.items():
+            x = (
+                render_noise_regimes({"standby": sb, "cruise": fit}, rps, n_mics=8, seed=SEED)
+                if sb is not None
+                else render_noise(fit, rps, n_mics=8, seed=SEED)
+            )
+            audio[name] = np.asarray(x, dtype=np.float64)[:, : real.shape[1]]
+        key = (
+            sup.recording.replace("_nosource_room2", "")
+            if rig == "dregon"
+            else f"{sup.regime}_{sup.start_s:g}s"
+        )
+        fig, axes = plt.subplots(
+            len(audio),
+            len(mics),
+            figsize=(6.4 * len(mics), 2.3 * len(audio)),
+            sharex=True,
+            sharey=True,
+            layout="constrained",
+        )
+        axes = np.atleast_2d(axes).reshape(len(audio), len(mics))
+        levels = {}
+        for c, m in enumerate(mics):
+            spec = {}
+            for name, x in audio.items():
+                f, t, s = spectrogram(
+                    x[m],
+                    fs=SR,
+                    nperseg=FULL_NPERSEG,
+                    noverlap=FULL_NPERSEG - FULL_HOP,
+                    window="hann",
+                )
+                spec[name] = (f, t, _db(s))
+            f, _, s_real = spec["real"]
+            sel = (f >= FULL_FMIN) & (f <= FULL_FMAX)
+            # the top of the scale: the real clip's loudest time-averaged bin + 6 dB
+            # (a percentile over all bins is set by the many high-frequency bins and
+            # saturates the low band on a log axis)
+            hi = float(np.max(_db(np.mean(10.0 ** (s_real[sel] / 10.0), axis=1)))) + 6.0
+            for r, (name, (f, t, s)) in enumerate(spec.items()):
+                ax = axes[r, c]
+                mesh = ax.pcolormesh(
+                    t, f[sel], s[sel], vmin=hi - 70, vmax=hi, shading="auto", cmap="magma"
+                )
+                ax.set_yscale("log")
+                ax.set_ylim(FULL_FMIN, FULL_FMAX)
+                ax.set_title(f"{labels[name]}, mic {m}", fontsize=10)
+                if c == 0:
+                    ax.set_ylabel("Hz (log)")
+            fig.colorbar(mesh, ax=axes[:, c], shrink=0.5, label="dB (real clip's scale)")
+            for name, x in audio.items():
+                levels.setdefault(name, []).append(float(_db(np.mean(x[m] ** 2))))
+            scale = 0.5 / max(float(np.max(np.abs(x[m]))) for x in audio.values())
+            for name, x in audio.items():
+                _wav(out / "audio" / f"full_{tag}_{key}_{name}_mic{m}.wav", x[m], scale)
+        for ax in axes[-1]:
+            ax.set_xlabel("time (s)")
+        fig.suptitle(
+            f"{tag.upper()} {sup.recording} @ {sup.start_s:.2f} s, {args.seconds:g} s, "
+            f"rotors {rps.min():.0f}-{rps.max():.0f} rev/s",
+            fontsize=11,
+        )
+        fig.savefig(out / f"fig_full_{tag}_{key}.png", dpi=100)
+        plt.close(fig)
+        rows.append(
+            dict(
+                key=key,
+                recording=sup.recording,
+                start_s=sup.start_s,
+                regime=sup.regime,
+                rps_min=float(rps.min()),
+                rps_max=float(rps.max()),
+                rms_db_per_mic=levels,
+                figure=f"fig_full_{tag}_{key}.png",
+            )
+        )
+        print(f"{tag} {key}: rotors {rps.min():.1f}-{rps.max():.1f} rev/s", flush=True)
+    (out / f"figdata_full_{tag}.json").write_text(
+        json.dumps(
+            dict(
+                rig=rig,
+                seconds=args.seconds,
+                mics=mics,
+                seed=SEED,
+                labels=labels,
+                v3=[args.v3, args.v3_standby],
+                v4=[args.v4, args.v4_standby],
+                line_db=args.line_db,
+                windows=rows,
+                git=_git(),
+            ),
+            indent=1,
+        )
+    )
+    # the explainer's tabs (one per window: figure + audio), read by a Quarto
+    # ``include`` from the .qmd; paths are relative to the .qmd's directory
+    rel = f"{out.name}"
+    md = ["::: {.panel-tabset}", ""]
+    for row in rows:
+        k = row["key"]
+        title = (
+            k if rig == "dregon" else f"{row['regime']} @ {row['start_s']:g} s"
+        ) + f" ({row['rps_min']:.0f}–{row['rps_max']:.0f} rev/s)"
+        md += [f"### {title}", "", f"![]({rel}/{row['figure']})", "", "```{=html}", "<table>"]
+        md.append("<tr><th></th>" + "".join(f"<th>mic {m}</th>" for m in mics) + "</tr>")
+        for name, lab in labels.items():
+            cells = "".join(
+                f'<td><audio controls preload="none" '
+                f'src="{rel}/audio/full_{tag}_{k}_{name}_mic{m}.wav"></audio></td>'
+                for m in mics
+            )
+            md.append(f"<tr><td>{lab}</td>{cells}</tr>")
+        md += ["</table>", "```", ""]
+    md += [":::", ""]
+    (out / f"_full_{tag}.md").write_text("\n".join(md))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -705,6 +882,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fmax", type=float, default=1000.0)
     p.add_argument("--out", default=str(OUT))
     p.set_defaults(func=cmd_hppnet)
+    p = sub.add_parser("full")
+    p.add_argument("--rig", choices=("dregon", "michaels"), default="dregon")
+    p.add_argument("--v4", required=True, help="the v4 payload (MD2: the cruise half)")
+    p.add_argument("--v3", required=True, help="the nv3r4 payload (MD2: the cruise half)")
+    p.add_argument("--v4-standby", default=None, help="MD2: the v4 standby half")
+    p.add_argument("--v3-standby", default=None, help="MD2: the nv3r4 standby half")
+    p.add_argument("--line-db", type=float, default=None, help="add a v4 arm with lines +dB")
+    p.add_argument("--mics", default=None, help="default: DREGON 1,2; MD2 0,4")
+    p.add_argument("--seconds", type=float, default=FULL_SECONDS)
+    p.add_argument("--out", default=str(OUT))
+    p.set_defaults(func=cmd_full)
     args = ap.parse_args(argv)
     return int(args.func(args))
 
