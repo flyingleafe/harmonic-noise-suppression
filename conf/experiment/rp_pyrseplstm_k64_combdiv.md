@@ -12,4 +12,4 @@ First synthetic-only arm of the rp protocol (Dmitrii, 2026-10-22): `rp_pyrseplst
 
 ## Conclusion
 
-Defined 2026-10-22; not yet run.
+Ran 2026-10-23 (job `rp-pyrseplstm-k64-combdi-a48dbc`, W&B `al9s52jz`) to the 100 000-step cap; the stop never fired because `static_comb` kept improving. The model learns its own comb (`static_comb` 0.387 rev/s at step 97 000) but does not read real recordings: `real_macro` 16.20 at that checkpoint and 15.39 at the best real round (step 100 000), against 2.52 for the real-trained `rp_pyrseplstm_k64_alllab`. It keeps the stopped rotors (zero 0.73) and fails on standby, ramps and cruise (27.60 / 31.77 / 13.13). Paper: the static-comb row of the simplistic-synthetic ablation. Details in `docs/experiments/rp-synthetic.md`.

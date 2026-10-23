@@ -649,6 +649,56 @@ HRSPNet", not "overall", unless the gaps are large.
 Each `conf/experiment/rp_*.yaml` gets its sibling `.md` with
 `batch: paper-real-protocol.md`.
 
+### Paper grid after the experiments rewrite (2026-10-23): pending approval
+
+Nothing below is submitted until Dmitrii approves the grid. Section VI of
+the paper (submodule `writing/papers/2026-08_wrapup`) was rewritten on
+2026-10-23. HRSPNet in the paper is now `hppnet_pyrseplstm_k64` (k ≤ 64);
+k ≤ 84 (`rp_pyrseplstm_{all,alllab}`) is an ablation row. Finished runs
+supply every number in the output-level, real-data and chain tables
+(`scripts/rp_history.py --best`). The remaining `\wip` cells on the real
+streams need these runs:
+
+| paper cell | run | model config | stream | state |
+|---|---|---|---|---|
+| chain table, `+ harmonics k ≤ 64` | `rp_hppnet_l2k64_{all,alllab}` | `hppnet_l2k64` (new: `hppnet_l2k84` with `harmonic_k_max: 64`, 385 CQT bins, 0.87M) | `all` / `alllab` | config to write |
+| chain table, `+ ConvLSTM` | `rp_hppnet_l2k64_convlstm_{all,alllab}` | `hppnet_l2k64_convlstm` (new: `hppnet_l2k84_convlstm` with `harmonic_k_max: 64`, 0.87M) | `all` / `alllab` | config to write |
+| transfer table, HRSPNet | `rp_pyrseplstm_k64_{dregonlab,md2lab}` | `hppnet_pyrseplstm_k64` | `dregonlab` / `md2lab` | submitted to `uni` 2026-10-23 (Dmitrii) |
+| transfer table, Conv+BiGRU | `rp_scv2_{dregon,md2}` | `hb_scv2_mag_nogate` | `dregon` / `md2` | submitted to `uni` 2026-10-23 (Dmitrii) |
+
+The four transfer runs stop on the training drone's score alone
+(`validation.control: [dregon]` or `[md2]`), so the held-out drone never
+steers the run. The transfer cell is the held-out drone's score (all, cruise)
+at the round with the best five-round median of the training drone.
+
+That is 8 training runs on `uni`. The finished siblings took 1.4–4.7 GPU-h
+each: `rp_pyrseplstm_k64_alllab` 4.1 h to step 32 000, `rp_hppnet_l2_all`
+2.8 h, `rp_scv2_all` 3.2 h.
+
+Evaluation only, on saved checkpoints (no training):
+
+- **Outputs figure.** One DREGON room-1 clip with a take-off and one FLY124
+  clip with close rotors at cruise. Models: HRSPNet `alllab`, HarmoF0-L2
+  `all`, Conv+BiGRU `all`. Tool: `scripts/rp_panel_eval.py` with `--dump`.
+- **Frequency-scaling probe figure.** `freq_probe_panels.pdf` regenerated
+  with the checkpoints of the real-data and pretraining tables.
+- **Discussion.** The line-zeroing probe (taps above 4.8 kHz zeroed, DREGON
+  validation) on `rp_pyrseplstm_alllab` (k ≤ 84).
+- **Synthetic-data section, parity check.** The best HRSPNet scored on the
+  renders at the validation labels and on the recordings, per drone.
+
+Second seed (the `\wip` in the limits paragraph of the Discussion): HRSPNet
+`all` / `alllab`, and the fine-tuned HRSPNet. The project rule is one seed
+unless asked, so these are listed, not proposed.
+
+Configs which the rewrite leaves out of the paper are kept but not run:
+
+- `rp_hppnet_l2_{dregon,md2,dregonlab,md2lab}`: the transfer table has
+  HRSPNet and Conv+BiGRU only.
+- Claim 4 (schedule) and the dense-ConvLSTM control.
+
+The synthetic pretraining grid is in `rp-synthetic.md`, § "Paper grid".
+
 ## Implementation notes (for the cutover)
 
 - `conf/validation/`: new panel config (datasets = the new derived split;

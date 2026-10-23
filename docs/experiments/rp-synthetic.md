@@ -60,7 +60,14 @@ and `raw`, including `best_static_comb_{median,raw}.ckpt`.
 
 | run | model | stream | job | real_macro | static_comb |
 |---|---|---|---|---|---|
-| `rp_pyrseplstm_k64_combdiv` | `hppnet_pyrseplstm_k64` (as `rp_pyrseplstm_k64_all`) | `rp_combdiv` | `rp-pyrseplstm-k64-combdi-a48dbc` (vast A100-80, `b44b5d29`; W&B `al9s52jz`) | running | running |
+| `rp_pyrseplstm_k64_combdiv` | `hppnet_pyrseplstm_k64` (as `rp_pyrseplstm_k64_all`) | `rp_combdiv` | `rp-pyrseplstm-k64-combdi-a48dbc` (vast A100-80, `b44b5d29`; W&B `al9s52jz`); finished 2026-10-23 17:48 UTC at the 100 000-step cap (200 rounds, 17.4 h) | 16.20 at the synthetic-selected step 97 000; 15.39 at the real-selected step 100 000 (5-round median 15.80) | 0.387 at step 97 000 |
+
+At the synthetic-selected step 97 000, the real scores are: DREGON 20.08,
+MD2 12.32; zero 0.73, standby 27.60, ramp 31.77, cruise 13.13 rev/s
+(`results/rp_pyrseplstm_k64_combdiv/validation_history.jsonl`, identical to
+W&B `al9s52jz`). `omnirun pull` timed out three times (ReadTimeout after about
+60 s, 486 files / 469 MB), so the outputs were fetched straight from the
+daemon's artifact bucket (`omnirun-artifacts/<job>/outputs/`).
 
 The run was submitted twice by mistake. Both jobs write to the same R2 prefix,
 so the R2 best-checkpoint aliases are whichever job last improved. The
@@ -135,6 +142,59 @@ fitted-noise arms, and 20.5 on DREGON alone.
   - **Decision (Dmitrii, 2026-10-23): tolerated.** The streams stay as they
     are and no run is retrained: retraining every run on these streams costs
     too much for ≈ 3 % of the room-2 frames.
+
+## Paper grid (2026-10-23): pending approval
+
+Nothing below is submitted until Dmitrii approves the grid. These runs fill
+the `\wip` cells of the pretraining table and the simplistic-synthetic
+ablation in the rewritten Section VI of the paper. Recipe (Dmitrii,
+2026-10-23):
+
+- **Synthetic stream.** The real stream with the recordings replaced by
+  renders. No label augmentation.
+- **Stop and selection.** The stop works as in combdiv: both controls. Two
+  checkpoints are reported, synthetic-selected and real-selected.
+- **Fine-tuning.** Starts from the synthetic-selected checkpoint and uses
+  `rp_all` without label augmentation. A fresh AdamW, max LR 1e-4, a short
+  warm-up, and a cosine over 20 000 steps.
+- **Reference.** The better of the model's two real-only runs.
+
+Models: HRSPNet (`hppnet_pyrseplstm_k64`), HarmoF0-L2, Conv+BiGRU
+(`hb_scv2_mag_nogate`), HPPNet-L2.
+
+| paper cell | runs | stream | blocked on |
+|---|---|---|---|
+| pretraining table, easy | 4 (one per model) | drones drawn around the DREGON / MD2 fits, each flown on its own drone's trajectory law | (a), (b), (d) |
+| pretraining table, hard | 4 | drones from the revised wide prior, flown on the constrained hyperprior (`hover_range` [35, 95], `rotor_sep` [2, 15], shrink 0.57) | (c), (d) |
+| pretraining table, tuned | 8 | `rp_all` without label augmentation | the 8 runs above |
+| ablation table, static comb, tuned | 1 (HRSPNet) | `rp_all` without label augmentation, from combdiv's synthetic-selected checkpoint (step 97 000) | nothing; can start on approval |
+| ablation table, stochastic comb | 2 (HRSPNet: alone, tuned) | a stochastic-comb stream under this protocol | (e) |
+
+Open decisions:
+
+- **(a)** The perturbation of the easy setup. The η-tempered Laplace draw was
+  explained; Dmitrii answered "not yet".
+- **(b)** The DREGON flight stage of noise v4 fails the parity gate (best
+  converged stage 15.8 rev/s against the bar 2.188;
+  `noise-model-v4-bench.md`, round 6). Without it, the DREGON half of the
+  easy setup has no fitted flight drone.
+- **(c)** The wide prior has not been revised from the v4 fits.
+  `drone_prior.py` still carries the prior_v1 laws, and the paper's
+  wide-prior table is `\wip`.
+- **(d)** The synthetic validation set: "sectors" of the wide prior, among
+  them the fit neighbourhoods and one sector close to the static comb. The
+  split is undecided ("we need to think about it").
+- **(e)** The stochastic comb under the rp protocol is not defined.
+
+Cost, from combdiv: a synthetic-only run hit the 100 000-step cap after
+17.4 h on a vast A100-80. Per draw, fitted-model renders cost more than combs
+(v2: 1.97 s per 2 s × 8 mics; v4 not measured). A fine-tuning run is 20 000
+steps, 1–3 GPU-h at the real runs' rate (HarmoF0-L2 1.4 h per 25 000 steps,
+HRSPNet 4.1 h per 32 000). In total: 19 training runs, 8 of them
+synthetic-only at up to ~17 h each.
+
+The real-data runs which the rewrite needs are in `paper-real-protocol.md`,
+§ "Paper grid after the experiments rewrite".
 
 ## Conclusion
 

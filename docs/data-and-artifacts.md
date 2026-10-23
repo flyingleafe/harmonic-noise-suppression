@@ -332,7 +332,10 @@ omnirun backends check        # re-establish the SSH ControlMaster after expiry
   submitted with `--outputs '<glob>'`; the full tree (~7.7k files) exceeds
   the client's 60 s read timeout. Submit with `--outputs 'results/<exp>/**'`,
   or pull through `omnirun.client.RemoteClient("http://10.100.0.1:8787",
-  timeout=900).pull(client.resolve_job(<id>), <dest>)`.
+  timeout=900).pull(client.resolve_job(<id>), <dest>)`. The collected outputs
+  live in the daemon's R2 bucket `omnirun-artifacts` under `<job_id>/outputs/`
+  (hetzner `/home/omnirun/artifacts/<job_id>/` keeps only the log); the `.env`
+  R2 credentials read it with boto3 at that endpoint (2026-10-23, 469 MB in 15 s).
 
 - Requires a **clean, pushed HEAD** (`--push`/`--dirty` exist; prefer clean —
   `train.py` errors on a dirty tree anyway).

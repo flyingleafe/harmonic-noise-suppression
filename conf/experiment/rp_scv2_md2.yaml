@@ -18,3 +18,5 @@ data:
       path: conf/online_mix/rp_md2.yaml
 optim:
   lr: 1.0e-3  # the max LR of published practice (HarmoF0, Cuesta 2020, Quiet Drones 2026: 1e-3; HPPNet 6e-4 at batch 4); range tests -> appendix
+validation:
+  control: [md2]  # stop on the training drone only; the held-out drone never steers the run
