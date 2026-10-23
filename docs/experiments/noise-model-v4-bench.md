@@ -471,6 +471,34 @@ survive nv3r4's; the failures are whole rotors lost on single mics (mics 0
 and 4 under C-wind), which points at the bench per-(rotor, mic) line balance
 [INFERENCE].
 
+**Speed-law search (2026-10-23).** A direct Sobol search (256 + 128 points)
+over the line level $g_a$ and exponent $\alpha_a$, the motor level and
+exponent, the floor level $g_f$ and $b_0$, on the C-wind payload, scored by
+HPPNet PIT and the scorer LTAS on the five 8 s tuning segments (never the
+scoring windows); code `e61f289d`, job `nv4-lawsearch-5f4381`, table
+`results/noise_v4/flight/lawsearch/…__laws.table.json`. Tuning references:
+real PIT 0.93; nv3r4 PIT 1.54, LTAS 1.72; C-wind PIT 5.57, LTAS 1.86. No
+point beats nv3r4 on PIT; best overall 1.79 (LTAS 3.54), best with LTAS ≤
+nv3r4 1.81 (LTAS 1.56; $g_a$ +2.2, $g_f$ −5.2 dB). Main effects: $g_a$
+moves PIT by 14.6 rev/s and $g_f$ by 7.0; every exponent by ≤ 1.3 (noise).
+The in-flight speed laws are not what is missing; the line-to-floor ratio is,
+and it saturates at PIT ≈ 1.8.
+
+**Similarity battery (2026-10-23).** `experiments/noise_model/similarity.py`,
+report `results/noise_v4/similarity/report.md` (render seed 2001, 8 mics;
+noise floor = a real window's first half against its second half). On the
+tuning segments: Itakura–Saito real‖arm nv3r4 0.170 (floor 0.175), C-wind
+0.231, law point A 0.289, B 0.413; order prominence |Δ| nv3r4 0.71, C-wind
+0.91 (floor 0.97); frame-level distribution shape (W1 centred) C-wind 0.94,
+nv3r4 1.26 (floor 0.60); modulation spectrum C-wind 5.7, nv3r4 7.0 dB (floor
+4.6); level sd still 1.0 dB too small for C-wind, 1.5 for nv3r4. Reading:
+C-wind is closer than nv3r4 in time structure and per-mic spread, nv3r4 is
+closer in line and order structure; the PIT-best law point B (+6 dB lines) is
+the least realistic spectrally, so PIT alone rewards over-prominent lines. On
+the 4 s scoring windows the half-split floor is large (LTAS 3.6) because the
+real windows drift in level inside 4 s, and every model is 1.6–3.7 dB quieter
+than real there (the level gap).
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
