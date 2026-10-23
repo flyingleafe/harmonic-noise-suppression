@@ -745,6 +745,10 @@ class RigModel:
         )
         #: gradient masks of the evidence freeze (1 free, 0 held)
         self.hold: dict[str, Tensor] = {}
+        #: ``(freqs_hz, (R, M, Fq) dB)``: the pair EQ the model's ``eq_line`` /
+        #: ``eq_floor`` were set from by :meth:`load_payload`; ``None`` while they
+        #: are the rig's own measurement (leave-one-out at the lines)
+        self.pair_eq: tuple[np.ndarray, np.ndarray] | None = None
 
     # ── initialisation ──
     def _initial_dynamics(self, rng: np.random.Generator) -> dict[str, np.ndarray]:
@@ -1135,6 +1139,7 @@ class RigModel:
         self.sigma_b = float(fl["shape_sd_db"])
         eq = pr["mic_response"]["pair_eq"]
         grid, db = a(eq["freqs_hz"]), a(eq["db"])
+        self.pair_eq = (grid, db)
         for j, (s, fz) in enumerate(zip(self.rig.settings, self.frozen)):
             rows = db[self.rig.rotors[j]]
             f_lines = s.carrier * np.arange(1, s.k_max + 1, dtype=np.float64)
@@ -1694,7 +1699,14 @@ def payload(model: RigModel, record: dict[str, Any], *, git: str | None = None) 
             ),
             mic_response=dict(
                 kind="pair_eq",
-                pair_eq=dict(freqs_hz=EQ_GRID_HZ.tolist(), db=rig.eq_all.tolist()),
+                # the EQ the model computed with: a loaded payload's (a planted
+                # twin resumed from its truth carries the TRUTH's EQ, not the one
+                # measured on the planted data), else the rig's measurement
+                pair_eq=(
+                    dict(freqs_hz=EQ_GRID_HZ.tolist(), db=rig.eq_all.tolist())
+                    if model.pair_eq is None
+                    else dict(freqs_hz=model.pair_eq[0].tolist(), db=model.pair_eq[1].tolist())
+                ),
             ),
             wind=dict(kind="per_recording", shape=wind_shape_spec()),
         ),
