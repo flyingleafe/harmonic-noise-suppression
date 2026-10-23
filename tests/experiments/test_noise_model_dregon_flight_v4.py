@@ -5,9 +5,10 @@ wind, per-rotor line-gain and per-mic line-gain values, the gained frozen
 per-rotor bench lines plus the stage's window transform of the floor terms
 equal ``v4.expected_periodogram`` of the exported flight payload (rotor gains
 written into the profiles, mic gains into the pair EQ) on every bin, with the
-gains free or held; and with the line coherence free, the torch line renderer
-at a random phase pedestal and shaft ``eps`` too. CPU-small (n_fft 256, three
-frames).
+gains free or held; and with the line coherence free (``coherence="shaft"``:
+``eps`` only, the bench phase pedestal held; ``"full"``: pedestal and ``eps``),
+the torch line renderer at a random ``eps`` (and pedestal) too. CPU-small
+(n_fft 256, three frames).
 """
 
 from __future__ import annotations
@@ -110,22 +111,28 @@ def test_stage_expectation_is_the_renderers() -> None:
 
 
 @pytest.mark.skipif(not BENCH.exists(), reason="needs the tracked DREGON v4 bench payload")
-def test_free_coherence_lines_are_the_renderers() -> None:
+@pytest.mark.parametrize("coherence", ["shaft", "full"])
+def test_coherence_lines_are_the_renderers(coherence: str) -> None:
     bench = json.loads(BENCH.read_text())
     model = DF.FlightStageModel(
         bench,
         _pool(RPS),
         None,
         init=dict(_init(bench), line_gain_db=LINE_GAIN, mic_gain_db=MIC_GAIN),
-        free_coherence=True,
+        coherence=coherence,
         **_common(bench),
     )
-    start = {k: model.params[k].detach().clone() for k in DF.COHERENCE_KEYS}
+    free = DF.COHERENCE_FREE[coherence]
+    assert [k for k in DF.COHERENCE_KEYS if k in model.params] == list(free)
+    start = {k: model.params[k].detach().clone() for k in free}
     for seed in (0, 1):
         out = DF.renderer_check(model, [0, 1, 2], seed=seed)
         assert out["max_rel_err"] < DF.CHECK_RTOL, out
+        assert np.all(np.abs(out["at"]["mic_gain_db"]) > 0.0)
         # the check ran at a shaft scale other than the bench's
         assert out["at"]["coherence"]["shaft"]["eps"] != bench["params"]["shaft"]["eps"]
+        # "shaft" leaves the bench phase pedestal as it is
+        assert ("pedestal" in out["at"]["coherence"]) == (coherence == "full")
     # ... and restored the start
     for k, t in start.items():
         np.testing.assert_array_equal(model.params[k].detach().numpy(), t.numpy())

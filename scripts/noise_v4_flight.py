@@ -19,8 +19,11 @@ are reduced afterwards to the lowest objective.
     # DREGON flight stage on a bench payload (module experiments.noise_model.dregon_flight_v4)
     python scripts/noise_v4_flight.py dregon \\
         --bench results/noise_v4/bench/restarts/dregon__kappa0__r5__s2.json --threads 8
-    # ... with the line coherence refitted in flight (GPU)
-    python scripts/noise_v4_flight.py dregon --free-coherence --device cuda --chunk-frames 64 \\
+    # ... with the flight smear allowed only into the shaft wander eps (GPU)
+    python scripts/noise_v4_flight.py dregon --coherence shaft --device cuda --chunk-frames 64 \\
+        --bench results/noise_v4/bench/restarts/dregon__kappa10__r5__s2__c1.json --progress 1
+    # ... with the phase pedestal per order and eps refitted in flight (GPU)
+    python scripts/noise_v4_flight.py dregon --coherence full --device cuda --chunk-frames 64 \\
         --bench results/noise_v4/bench/restarts/dregon__kappa10__r5__s2__c1.json --progress 1
 
 The pool is FLY125 standby (``michaels-standby``, 3 x 4 s) and cruise
@@ -38,9 +41,10 @@ per-mic line gain (sum 0) into the pair EQ, the floor refitted and a static
 per-mic wind, fitted on the five 8 s ``dregon-floor`` segments with every
 bench line-shape, pedestal, shaft and pair-EQ shape parameter frozen
 (``--no-line-gain`` / ``--no-mic-gain`` hold those gains at 0,
-``--max-frames`` for a smoke run). ``--free-coherence`` also fits the phase
-pedestal per aerodynamic order and the shaft ``eps`` in flight and writes
-``<...>__coh.json``.
+``--max-frames`` for a smoke run). ``--coherence shaft`` also fits the shaft
+``eps`` in flight (the bench phase pedestal held; writes ``<...>__shaft.json``),
+``--coherence full`` the phase pedestal per aerodynamic order and ``eps``
+(writes ``<...>__coh.json``).
 """
 
 from __future__ import annotations
@@ -58,6 +62,8 @@ NAME = "md2_fly125"
 SETS = ("michaels-standby", "michaels-cruise")
 K_CAP = 130
 CHANNEL_GAINS = "results/noise_v2/mic_gains/mic_gains.json"
+#: ``dregon --coherence`` modes (``dregon_flight_v4.COHERENCE_MODES``) and their output suffixes.
+COHERENCE_TAGS = {"none": "", "shaft": "__shaft", "full": "__coh"}
 
 
 def _pool_specs(sets: list[str], max_windows: int | None) -> list[str]:
@@ -251,9 +257,9 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         progress=int(args.progress),
         line_gain=not args.no_line_gain,
         mic_gain=not args.no_mic_gain,
-        free_coherence=bool(args.free_coherence),
+        coherence=str(args.coherence),
     )
-    tag = "__coh" if args.free_coherence else ""
+    tag = COHERENCE_TAGS[args.coherence]
     out = Path(args.out) / f"{DF.NAME}__flight_v4__{bench_path.stem}{tag}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(pay, indent=1))
@@ -261,12 +267,13 @@ def cmd_dregon(args: argparse.Namespace) -> int:
     obj, conv = st["objective"], st["optimiser"]["convergence"]
     coh = st["coherence"]
     coh_line = (
-        f"coherence: eps {coh['fitted']['eps']:.4g} (sigma_ref "
-        f"{coh['fitted']['sigma_ref_rad_s']:.3g} rad/s; bench {coh['bench']['eps']:.4g}), "
-        f"median sigma2_phase {np.median(coh['fitted']['sigma2_phase']):.3g}, "
-        f"median W {np.median(coh['fitted']['width_phase_hz']):.3g} Hz"
+        f"coherence {coh['mode']}: eps {coh['start']['eps']:.4g} -> {coh['fitted']['eps']:.4g} "
+        f"(sigma_ref {coh['fitted']['sigma_ref_rad_s']:.3g} rad/s; bench "
+        f"{coh['bench']['eps']:.4g}), median sigma2_phase "
+        f"{np.median(coh['fitted']['sigma2_phase']):.3g}, median W "
+        f"{np.median(coh['fitted']['width_phase_hz']):.3g} Hz"
         if coh["free"]
-        else "coherence: frozen at the bench's"
+        else "coherence none: frozen at the bench's"
     )
     print(
         f"wrote {out}\n"
@@ -375,11 +382,12 @@ def main(argv: list[str] | None = None) -> int:
         help="hold the per-mic line gains at 0 (the bench pair EQ levels)",
     )
     d.add_argument(
-        "--free-coherence",
-        action="store_true",
-        help="also fit the line coherence in flight: the phase pedestal (sigma2_phi, W_phi) per "
-        "aerodynamic order and the shaft eps, under the bench / flight priors (output "
-        "<...>__coh.json)",
+        "--coherence",
+        choices=tuple(COHERENCE_TAGS),
+        default="none",
+        help="the line coherence in flight: none (the bench's, frozen L_r), shaft (fit the "
+        "shaft eps only, the bench phase pedestal held; output <...>__shaft.json) or full "
+        "(fit the phase pedestal per aerodynamic order and eps; output <...>__coh.json)",
     )
     args = ap.parse_args(argv)
     if args.cmd == "dregon":

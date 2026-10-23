@@ -13,15 +13,15 @@ best (one rotor at a time, 0.03-0.1 Hz bins); the flight wind, the flight
 floor and the flight line LEVEL exist only in flight. So this stage refits the
 floor, the wind, one level per rotor and one per mic, from flight recordings
 only, and holds every bench line-shape / pedestal / shaft / pair-EQ shape
-parameter fixed (``free_coherence`` also refits the line COHERENCE: see
-below). The v4 model is unchanged: the stage is a procedure, and its payload
+parameter fixed (``coherence="shaft"`` / ``"full"`` also refit the line
+COHERENCE: see below). The v4 model is unchanged: the stage is a procedure, and its payload
 is the bench payload with ``kind="flight"``, the rotor gains written into the
 line profiles, the mic gains into the pair EQ, the floor refitted and a static
 per-mic wind block, which
 :func:`data_processing.noise_model.v4.expected_periodogram` and the renderer
 read as they stand.
 
-WHY THE COHERENCE IN FLIGHT (``free_coherence``, CLI ``--free-coherence``).
+WHY THE COHERENCE IN FLIGHT (``coherence="full"``, CLI ``--coherence full``).
 The bench fitted its phase pedestal and shaft wander against a MEASURED
 carrier (bench sigma_nu 0.73 rad/s at f_ref, lam 49 /s). The flight scorer's
 carrier is the ``motors_command`` LABEL, not the true speed: in flight its
@@ -43,6 +43,18 @@ holds it to 1e-6 of the numpy renderer at random pedestal, ``eps`` and gains),
 started at the bench pedestal (clamped under its caps) and the bench ``eps``.
 The payload carries the fitted ``sigma2_phase``, ``gamma_phase_hz``,
 ``width_phase_hz`` and ``eps``.
+
+WHY SHAFT ONLY (``coherence="shaft"``, CLI ``--coherence shaft``; the
+2026-10-23 probe). Under ``"full"`` the flight fit drove every phase pedestal
+to its caps (``sigma2_phase`` 1-3, ``W`` 24 Hz) and ``eps`` from 0.0014 to
+0.049, and the HPPNet scorer got WORSE (PIT 29 vs 16 rev/s). The phase
+pedestal smears each order independently, which breaks the harmonic coherence
+HPPNet reads; the shaft wander smears all orders of a rotor coherently (FM),
+which is how nv3r4 absorbed the flight smear (``sigma_nu`` 5.2 rad/s). So
+``"shaft"`` frees ``eps`` alone (the same ``sigma_ref`` prior as ``"full"``)
+and holds the phase pedestal at the bench payload's own values (no gradient,
+no pedestal prior term); the flight smear can only go into the shaft. The
+payload carries the bench pedestal unchanged and the fitted ``eps``.
 
 WHY PER ROTOR. The bench fitted each rotor's profiles from that rotor's own
 recordings, alone on the rig, so each rotor carries its own bench-to-flight
@@ -102,10 +114,11 @@ FREE: ``g_r`` (4, ``line_gain_db``; held at 0 by ``line_gain=False``),
 ``h_m`` (8 with ``sum = 0``, ``mic_gain_db``; held at 0 by ``mic_gain=False``),
 ``mean_db``, ``shape_z`` (14), ``static_rel``, ``b0``/``b1`` (in the ``b >= 0``
 band-edge coordinates of :func:`.v4_priors.floor_exponents`) and ``wind_db``
-(8); under ``free_coherence`` also ``sigma2_phase``/``W`` per aerodynamic order
-and ``eps``. FROZEN: the profile shapes across orders, ``alpha_aero``/``alpha_motor``,
-the motor orders, the hierarchy, the pedestal and the shaft (but for the free
-coherence), the pair EQ's shape (up to ``h_m``) and the
+(8); under ``coherence="shaft"`` also ``eps``, under ``"full"`` also
+``sigma2_phase``/``W`` per aerodynamic order and ``eps``. FROZEN: the profile
+shapes across orders, ``alpha_aero``/``alpha_motor``, the motor orders, the
+hierarchy, the pedestal and the shaft (but for what the coherence mode frees),
+the pair EQ's shape (up to ``h_m``) and the
 floor's ``ctrl_hz``/``shape_sd_db``/rule. PRIORS: ``g_r ~ N(LINE_GAIN_MU_DB,
 LINE_GAIN_SD_DB)``; ``h_m ~ N(0, MIC_GAIN_SD_DB)`` on all eight; the bench's floor terms
 (:meth:`.bench_v4.RigModel.neg_log_prior`): ``mean_db ~ N(measured,
@@ -123,9 +136,9 @@ nv3r4 DREGON wind (a START only). Then double-precision strong-Wolfe L-BFGS
 (:class:`.lbfgs.LBFGS`) in fresh-memory passes until one gains under
 ``1e-4`` nats per cell AND moves the floor controls under 0.1 dB, the
 exponents under 0.02, the wind under 0.1 dB and the line and mic gains under 0.1 dB
-(and, under ``free_coherence``, ``log sigma2_phase``, ``log W`` and ``log eps``
-under 0.05: :data:`COHERENCE_MOVE_TOL`). The L-BFGS cost under
-``free_coherence`` is the line renderer's (R x K' x n_fft per frame): ~19 s
+(and ``log eps`` under 0.05 under ``"shaft"``; ``log sigma2_phase``, ``log W``
+and ``log eps`` under 0.05 under ``"full"``: :data:`COHERENCE_MOVE_TOL`). The
+L-BFGS cost under ``"shaft"``/``"full"`` is the line renderer's (R x K' x n_fft per frame): ~19 s
 per objective + gradient on the 310 frames on 2 CPU threads, so the full
 stage runs on a GPU (``--device cuda``).
 """
@@ -137,6 +150,7 @@ import inspect
 import json
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -177,10 +191,13 @@ __all__ = [
     "fit_stage",
     "flight_payload",
     "frozen_lines",
+    "held_pedestal",
     "load_pool",
     "measure_start",
     "renderer_check",
     "run_stage",
+    "shaft_values",
+    "start_coherence_values",
     "wind_start",
 ]
 
@@ -223,8 +240,9 @@ MOVE_TOL = dict(
     line_gain_db=FV.MOVE_TOL["levels_db"],
     mic_gain_db=FV.MOVE_TOL["levels_db"],
 )
-#: The free-coherence movement tolerances (``free_coherence=True``): the per-order
-#: phase pedestal variance and width and the shaft wander scale, in logs.
+#: The coherence movement tolerances (in logs): the per-order phase pedestal
+#: variance and width (``coherence="full"``) and the shaft wander scale
+#: (``"shaft"`` and ``"full"``).
 COHERENCE_MOVE_TOL = dict(log_sigma2_phase=0.05, log_width_phase=0.05, log_eps=0.05)
 #: :func:`renderer_check`'s tolerance (max relative error of ``E``).
 CHECK_RTOL = 1e-6
@@ -234,11 +252,23 @@ GAIN_KEY = "line_gain_db"
 #: The mic gains' key: the first ``M - 1`` of ``h_m`` (the last is ``-sum``),
 #: free (in ``params``) or held at 0 (``mic_gain=False``).
 MIC_GAIN_KEY = "mic_gain_free_db"
-#: The free-coherence keys: the phase pedestal's variance and width per
+#: The coherence modes: ``"none"`` (frozen ``L_r``), ``"shaft"`` (free ``eps``,
+#: the bench phase pedestal held) and ``"full"`` (free phase pedestal and ``eps``).
+COHERENCE_MODES = ("none", "shaft", "full")
+#: The full-coherence keys: the phase pedestal's variance and width per
 #: aerodynamic order in the bench's capped coordinates (``sigma2 = _capped(u_s2P,
 #: PHASE_SIGMA2_MAX)``, ``W = _capped(u_W, W_MAX_HZ)``) and ``log eps``.
 COHERENCE_KEYS = ("u_s2P", "u_W", "log_eps")
-#: The free-coherence start holds the bench pedestal at most this fraction of
+#: Per mode: the free coherence parameters, their snapshot groups (movement
+#: test) and the payload fields they set.
+COHERENCE_FREE = dict(none=(), shaft=("log_eps",), full=COHERENCE_KEYS)
+COHERENCE_MOVES = dict(none=(), shaft=("log_eps",), full=tuple(COHERENCE_MOVE_TOL))
+COHERENCE_FIELDS = dict(
+    none=(),
+    shaft=("shaft.eps",),
+    full=("pedestal.sigma2_phase", "pedestal.width_phase_hz", "shaft.eps"),
+)
+#: The full-coherence start holds the bench pedestal at most this fraction of
 #: its caps (the bench's own reload margin, ``bench_v4._under``'s 0.99).
 START_CAP_FRACTION = 0.99
 
@@ -428,13 +458,10 @@ def frozen_lines(
     return out
 
 
-def coherence_start(bench: dict[str, Any]) -> dict[str, np.ndarray]:
-    """The free-coherence start: the bench payload's phase pedestal (variance
-    and ``width_phase_hz``; a payload without it gets
-    :func:`.v4_priors.pedestal_width`) clamped to at most :data:`START_CAP_FRACTION`
-    of its caps, in the capped coordinates, and the bench ``log eps``. The
-    bench parks orders a hair under a cap (``sigma2 = 2.999998``), where the
-    capped coordinate's slope is ~1e-6: the clamp gives them a usable gradient."""
+def held_pedestal(bench: dict[str, Any]) -> dict[str, np.ndarray]:
+    """The bench payload's own phase pedestal per order: ``sigma2_phase``,
+    ``gamma_phase_hz`` (what the renderer reads) and ``width_phase_hz`` (a
+    payload without it gets :func:`.v4_priors.pedestal_width`)."""
     par = _bench_params(bench)
     ped, raw = par.pedestal, bench["params"]["pedestal"]
     width = (
@@ -442,8 +469,24 @@ def coherence_start(bench: dict[str, Any]) -> dict[str, np.ndarray]:
         if "width_phase_hz" in raw
         else PR.pedestal_width(ped.gamma_phase_hz, ped.sigma2_phase)
     )
-    s2 = np.minimum(ped.sigma2_phase, START_CAP_FRACTION * PR.PHASE_SIGMA2_MAX)
-    w = np.minimum(width, START_CAP_FRACTION * PR.W_MAX_HZ)
+    return dict(
+        sigma2_phase=np.asarray(ped.sigma2_phase, dtype=np.float64),
+        gamma_phase_hz=np.asarray(ped.gamma_phase_hz, dtype=np.float64),
+        width_phase_hz=width,
+    )
+
+
+def coherence_start(bench: dict[str, Any]) -> dict[str, np.ndarray]:
+    """The coherence start: the bench payload's phase pedestal
+    (:func:`held_pedestal`) clamped to at most :data:`START_CAP_FRACTION` of its
+    caps, in the capped coordinates, and the bench ``log eps``. The bench parks
+    orders a hair under a cap (``sigma2 = 2.999998``), where the capped
+    coordinate's slope is ~1e-6: the clamp gives them a usable gradient
+    (``coherence="full"``; ``"shaft"`` reads only ``log_eps``)."""
+    par = _bench_params(bench)
+    held = held_pedestal(bench)
+    s2 = np.minimum(held["sigma2_phase"], START_CAP_FRACTION * PR.PHASE_SIGMA2_MAX)
+    w = np.minimum(held["width_phase_hz"], START_CAP_FRACTION * PR.W_MAX_HZ)
     if np.any(s2 <= 0.0) or np.any(w <= 0.0) or par.shaft.eps <= 0.0:
         raise ValueError("the bench phase pedestal and eps must be positive to free them")
     return dict(
@@ -453,20 +496,23 @@ def coherence_start(bench: dict[str, Any]) -> dict[str, np.ndarray]:
     )
 
 
+def shaft_values(log_eps: Tensor, *, f_ref: float) -> dict[str, Tensor]:
+    """``eps`` and ``sigma_ref = 2 pi f_ref eps`` (``sigma_nu`` at ``f_ref``, rad/s)."""
+    eps = torch.exp(log_eps)
+    return dict(eps=eps, sigma_ref=V4.TWO_PI * float(f_ref) * eps)
+
+
 def coherence_values(u_s2P: Tensor, u_W: Tensor, log_eps: Tensor, *, f_ref: float) -> dict:
-    """The free-coherence coordinates' values: ``sigma2_phase`` and
+    """The full-coherence coordinates' values: ``sigma2_phase`` and
     ``width_phase_hz`` under their caps, ``gamma_phase_hz`` of that width
-    (eq-width), ``eps`` and ``sigma_ref = 2 pi f_ref eps`` (``sigma_nu`` at
-    ``f_ref``, rad/s)."""
+    (eq-width) and :func:`shaft_values`."""
     s2 = BV._capped(u_s2P, math.log(PR.PHASE_SIGMA2_MAX))
     width = BV._capped(u_W, math.log(PR.W_MAX_HZ))
-    eps = torch.exp(log_eps)
     return dict(
         sigma2_phase=s2,
         width_phase_hz=width,
         gamma_phase_hz=BV._gamma_from_width(width, s2),
-        eps=eps,
-        sigma_ref=V4.TWO_PI * float(f_ref) * eps,
+        **shaft_values(log_eps, f_ref=f_ref),
     )
 
 
@@ -585,10 +631,12 @@ class FlightStageModel:
     ``line_gain=False`` and ``h_m`` (``sum_m h_m = 0``) free unless
     ``mic_gain=False`` (then held at 0, with no prior term). ``h_m`` is a pair-EQ
     change, so it scales the per-rotor floor term (which the renderer weighs by
-    the pair EQ) with the lines. ``L_r`` is frozen (``lines``) unless
-    ``free_coherence``: then :class:`LineRenderer` computes it from the free
-    phase pedestal and shaft scale (``lines`` must be ``None``; ``renderer``
-    reuses one built on the pool's speeds, else one is built)."""
+    the pair EQ) with the lines. ``L_r`` is frozen (``lines``) under
+    ``coherence="none"``; under ``"shaft"`` / ``"full"`` :class:`LineRenderer`
+    computes it from the shaft scale ``eps`` (free) and the phase pedestal (the
+    bench's, held, under ``"shaft"``; free under ``"full"``) (``lines`` must be
+    ``None``; ``renderer`` reuses one built on the pool's speeds, else one is
+    built)."""
 
     def __init__(
         self,
@@ -603,7 +651,7 @@ class FlightStageModel:
         init: dict[str, Any],
         line_gain: bool = True,
         mic_gain: bool = True,
-        free_coherence: bool = False,
+        coherence: str = "none",
         renderer: LineRenderer | None = None,
         chunk_frames: int = 16,
         device: Any = "cpu",
@@ -632,10 +680,12 @@ class FlightStageModel:
         self.band = np.flatnonzero((f >= self.band_hz[0]) & (f <= self.band_hz[1]))
         self.band_t = torch.as_tensor(self.band, device=self.dd["device"])
         self.log_s = self._t(np.log(np.maximum(par.speed(pool.rps), SPEED_FLOOR_RPS)))  # (R, N)
-        self.free_coherence = bool(free_coherence)
-        if self.free_coherence:
+        if coherence not in COHERENCE_MODES:
+            raise ValueError(f"coherence must be one of {COHERENCE_MODES}, got {coherence!r}")
+        self.coherence = coherence
+        if self.coherence != "none":
             if lines is not None:
-                raise ValueError("free_coherence renders the lines: pass lines=None")
+                raise ValueError(f"coherence={coherence!r} renders the lines: pass lines=None")
             self.lines = None
             self.renderer = renderer or LineRenderer(
                 par, pool.rps, n_fft=self.n, sr=pool.sr, device=self.dd["device"]
@@ -681,19 +731,23 @@ class FlightStageModel:
         self.mic_gain_free_db = torch.tensor(h0[:-1], **self.dd).requires_grad_(self.mic_gain)
         if self.mic_gain:
             self.params[MIC_GAIN_KEY] = self.mic_gain_free_db
-        if self.free_coherence:
+        if self.coherence != "none":
             c0 = coherence_start(bench)
-            for key in COHERENCE_KEYS:
+            for key in COHERENCE_FREE[self.coherence]:
                 self.params[key] = torch.tensor(
                     np.asarray(init.get(key, c0[key]), dtype=np.float64), **self.dd
                 ).requires_grad_(True)
+        if self.coherence == "full":
             #: the phase-width half-normal scales per aerodynamic order
             self.c_w = self._t(PR.width_scale(np.arange(1, par.k_max + 1)))
+        elif self.coherence == "shaft":
+            #: the held phase pedestal: the bench payload's own values, no gradient
+            self.held_pedestal = {k: self._t(a) for k, a in held_pedestal(bench).items()}
 
     @property
     def move_tol(self) -> dict[str, float]:
         """The convergence movement tolerance per snapshot group."""
-        return dict(MOVE_TOL, **(COHERENCE_MOVE_TOL if self.free_coherence else {}))
+        return dict(MOVE_TOL, **{k: COHERENCE_MOVE_TOL[k] for k in COHERENCE_MOVES[self.coherence]})
 
     def _t(self, x: Any) -> Tensor:
         if isinstance(x, Tensor):
@@ -720,12 +774,11 @@ class FlightStageModel:
             ctrl_rel=ctrl_rel,
             ctrl_db=p["floor_mean_db"] + ctrl_rel,
         )
-        if self.free_coherence:
-            out.update(
-                coherence_values(
-                    p["u_s2P"], p["u_W"], p["log_eps"], f_ref=self.par.shaft.f_ref_rev_s
-                )
-            )
+        f_ref = self.par.shaft.f_ref_rev_s
+        if self.coherence == "full":
+            out.update(coherence_values(p["u_s2P"], p["u_W"], p["log_eps"], f_ref=f_ref))
+        elif self.coherence == "shaft":
+            out.update(self.held_pedestal, **shaft_values(p["log_eps"], f_ref=f_ref))
         return out
 
     def expected(self, frames: slice | Tensor, *, all_bins: bool = False) -> Tensor:
@@ -767,8 +820,9 @@ class FlightStageModel:
 
     def log_prior(self) -> tuple[Tensor, dict[str, float]]:
         """``log p`` of the free values plus the floor push ``kappa sum_j ctrl_j``
-        (the line and mic gains' terms only when they are free, the phase
-        pedestal's and the shaft scale's only under ``free_coherence``)."""
+        (the line and mic gains' terms only when they are free; the shaft
+        scale's under ``coherence="shaft"``/``"full"``, the phase pedestal's only
+        under ``"full"``)."""
         v = self.values()
         nd, ln = torch.distributions.Normal, torch.distributions.LogNormal
 
@@ -789,10 +843,11 @@ class FlightStageModel:
             parts["line_gain"] = n_(LINE_GAIN_MU_DB, LINE_GAIN_SD_DB, v["line_gain_db"])
         if self.mic_gain:
             parts["mic_gain"] = n_(0.0, MIC_GAIN_SD_DB, v["mic_gain_db"])
-        if self.free_coherence:
+        if self.coherence == "full":
             parts["phase_pedestal"] = -BV.phase_pedestal_neg_log_prior(
                 v["sigma2_phase"], v["width_phase_hz"], self.c_w
             )
+        if self.coherence != "none":
             parts["sigma_ref"] = ln(
                 self._t(PR.FLIGHT_SIGMA_NU_LN[0]), PR.FLIGHT_SIGMA_NU_LN[1]
             ).log_prob(v["sigma_ref"])
@@ -839,12 +894,13 @@ class FlightStageModel:
             line_gain_db=v["line_gain_db"].cpu().numpy().copy(),
             mic_gain_db=v["mic_gain_db"].cpu().numpy().copy(),
         )
-        if self.free_coherence:
+        if self.coherence == "full":
             out.update(
                 log_sigma2_phase=torch.log(v["sigma2_phase"]).cpu().numpy(),
                 log_width_phase=torch.log(v["width_phase_hz"]).cpu().numpy(),
-                log_eps=np.array([float(v["log_eps"])]),
             )
+        if self.coherence != "none":
+            out.update(log_eps=np.array([float(v["log_eps"])]))
         return out
 
     @torch.no_grad()
@@ -869,19 +925,20 @@ class FlightStageModel:
 
     @torch.no_grad()
     def exported_coherence(self) -> dict[str, Any] | None:
-        """The payload's free-coherence fields at the current values (``None``
-        when the coherence is frozen): the phase pedestal ``sigma2_phase``,
-        ``gamma_phase_hz`` and ``width_phase_hz`` per order and the shaft ``eps``."""
-        if not self.free_coherence:
+        """The payload's coherence fields at the current values (``None`` under
+        ``coherence="none"``): the shaft ``eps``, and under ``"full"`` the phase
+        pedestal ``sigma2_phase``, ``gamma_phase_hz`` and ``width_phase_hz`` per
+        order (under ``"shaft"`` the pedestal is the bench's, left as it is)."""
+        if self.coherence == "none":
             return None
         v = self.values()
-        return dict(
-            pedestal={
+        out: dict[str, Any] = dict(shaft=dict(eps=float(v["eps"])))
+        if self.coherence == "full":
+            out["pedestal"] = {
                 k: v[k].cpu().numpy().tolist()
                 for k in ("sigma2_phase", "gamma_phase_hz", "width_phase_hz")
-            },
-            shaft=dict(eps=float(v["eps"])),
-        )
+            }
+        return out
 
 
 def flight_payload(
@@ -900,8 +957,9 @@ def flight_payload(
     floor fields ``floor`` and the static per-mic wind ``wind_db``; ``ctrl_hz``,
     ``shape_sd_db`` and the per-rotor-sum floor rule are the bench's.
     ``coherence`` (:meth:`FlightStageModel.exported_coherence`) replaces the
-    phase pedestal and the shaft ``eps`` (and drops the bench's
-    ``held_by_evidence``, which no longer describes them)."""
+    shaft ``eps`` and, when it carries one (``coherence="full"``), the phase
+    pedestal (then dropping the bench's ``held_by_evidence``, which no longer
+    describes it)."""
     pay = copy.deepcopy(bench)
     pay["kind"] = "flight"
     p = pay["params"]
@@ -924,8 +982,9 @@ def flight_payload(
         kind="static_per_mic", wind_db=[float(x) for x in wind_db], shape=wind_shape_spec()
     )
     if coherence is not None:
-        p["pedestal"].update(coherence["pedestal"])
-        p["pedestal"].pop("held_by_evidence", None)
+        if "pedestal" in coherence:
+            p["pedestal"].update(coherence["pedestal"])
+            p["pedestal"].pop("held_by_evidence", None)
         p["shaft"].update(coherence["shaft"])
     return pay
 
@@ -936,8 +995,8 @@ def renderer_check(
     """The torch ``E`` against ``expected_periodogram`` of the exported payload,
     on every bin of the pool frames ``frames``, at RANDOM parameter values,
     nonzero line and mic gains included even when they are held (restored afterwards);
-    under ``free_coherence`` also a random phase pedestal per order and ``eps``
-    drawn from their priors."""
+    under ``coherence="shaft"``/``"full"`` also a random ``eps`` and under
+    ``"full"`` a random phase pedestal per order, drawn from their priors."""
     rng = np.random.default_rng(int(seed))
     p = model.params
     saved = {k: t.detach().clone() for k, t in p.items()}
@@ -956,7 +1015,7 @@ def renderer_check(
             )
             h = rng.normal(0.0, MIC_GAIN_SD_DB, model.par.n_mics)
             model.mic_gain_free_db.copy_(model._t((h - h.mean())[:-1]))
-            if model.free_coherence:
+            if model.coherence == "full":
                 k = p["u_s2P"].numel()
                 s2 = np.exp(rng.normal(PR.PHASE_SIGMA2_LN[0], PR.PHASE_SIGMA2_LN[1], k))
                 width = np.abs(rng.normal(0.0, model.c_w.cpu().numpy()))
@@ -968,6 +1027,7 @@ def renderer_check(
                         BV._uncapped(BV._under(np.maximum(width, 1e-3), PR.W_MAX_HZ), PR.W_MAX_HZ)
                     )
                 )
+            if model.coherence != "none":
                 sigma_ref = math.exp(rng.normal(*PR.FLIGHT_SIGMA_NU_LN))
                 p["log_eps"].fill_(math.log(sigma_ref / (V4.TWO_PI * model.par.shaft.f_ref_rev_s)))
             idx = torch.as_tensor(np.asarray(frames, dtype=np.int64), device=model.dd["device"])
@@ -1178,7 +1238,7 @@ def fit_stage(
     """L-BFGS passes until a FRESH pass (the second or later) passes the test:
     gain per cell under :data:`TOL_NATS_PER_CELL` and every group's movement
     under its tolerance (``model.move_tol``: :data:`MOVE_TOL`, plus
-    :data:`COHERENCE_MOVE_TOL` under ``free_coherence``); every pass recorded."""
+    :data:`COHERENCE_MOVE_TOL`'s groups the coherence mode frees); every pass recorded."""
     t0 = time.time()
     with torch.no_grad():
         start = float(model.objective(grad=False))
@@ -1290,7 +1350,7 @@ def priors_record(model: FlightStageModel, *, kappa_source: str) -> dict[str, An
             else "held at 0 (--no-mic-gain): no prior term",
         ),
     )
-    if model.free_coherence:
+    if model.coherence == "full":
         out.update(
             phase_pedestal=dict(
                 sigma2_phase=dict(
@@ -1306,7 +1366,10 @@ def priors_record(model: FlightStageModel, *, kappa_source: str) -> dict[str, An
                 ),
                 rule="bench_v4.phase_pedestal_neg_log_prior in the capped coordinates "
                 "(bench_v4._capped), per aerodynamic order",
-            ),
+            )
+        )
+    if model.coherence != "none":
+        out.update(
             sigma_ref=dict(
                 family="LogNormal",
                 ln=list(PR.FLIGHT_SIGMA_NU_LN),
@@ -1319,19 +1382,36 @@ def priors_record(model: FlightStageModel, *, kappa_source: str) -> dict[str, An
     return out
 
 
-def coherence_record(
-    model: FlightStageModel, bench: dict[str, Any], start: dict[str, np.ndarray] | None
-) -> dict[str, Any]:
-    """``flight_stage.coherence``: what of the line coherence was free, its
-    start, its priors and its fitted values (the bench's, held, when frozen)."""
+def start_coherence_values(
+    bench: dict[str, Any], coherence: str, t: Callable[[Any], Tensor]
+) -> dict[str, Tensor]:
+    """The line coherence at the start of mode ``coherence`` (``"shaft"`` or
+    ``"full"``), as tensors ``t(.)``: :func:`coherence_start` through
+    :func:`coherence_values` (``"full"``), or the held bench pedestal and the
+    bench ``eps`` (``"shaft"``)."""
+    c0, f_ref = coherence_start(bench), _bench_params(bench).shaft.f_ref_rev_s
+    if coherence == "full":
+        return coherence_values(*(t(c0[k]) for k in COHERENCE_KEYS), f_ref=f_ref)
+    if coherence == "shaft":
+        held = {k: t(a) for k, a in held_pedestal(bench).items()}
+        return dict(held, **shaft_values(t(c0["log_eps"]), f_ref=f_ref))
+    raise ValueError(f"no start coherence for coherence={coherence!r}")
+
+
+def coherence_record(model: FlightStageModel, bench: dict[str, Any]) -> dict[str, Any]:
+    """``flight_stage.coherence``: the mode, what of the line coherence was free,
+    its start, its priors and its fitted values (the bench's, held, when frozen)."""
     ped, shaft = bench["params"]["pedestal"], bench["params"]["shaft"]
-    if not model.free_coherence or start is None:
+    mode = model.coherence
+    if mode == "none":
         return dict(
-            free=False, rule="phase pedestal and shaft held at the bench payload's (frozen L_r)"
+            mode=mode,
+            free=False,
+            rule="phase pedestal and shaft held at the bench payload's (frozen L_r)",
         )
-    f_ref = model.par.shaft.f_ref_rev_s
+    full = mode == "full"
     with torch.no_grad():
-        s = coherence_values(*(model._t(start[k]) for k in COHERENCE_KEYS), f_ref=f_ref)
+        s = start_coherence_values(bench, mode, model._t)
         v = model.values()
 
     def arrays(d: dict[str, Tensor]) -> dict[str, Any]:
@@ -1344,26 +1424,38 @@ def coherence_record(
         )
 
     return dict(
+        mode=mode,
         free=True,
-        free_keys=["pedestal.sigma2_phase", "pedestal.width_phase_hz", "shaft.eps"],
-        derived=["pedestal.gamma_phase_hz = W (1 - e^-sigma2) / sigma2 (eq-width)"],
+        free_keys=list(COHERENCE_FIELDS[mode]),
+        derived=["pedestal.gamma_phase_hz = W (1 - e^-sigma2) / sigma2 (eq-width)"] if full else [],
         held=dict(
-            pedestal=["sigma2_amp", "gamma_amp_hz"],
+            pedestal=["sigma2_amp", "gamma_amp_hz"]
+            if full
+            else ["sigma2_amp", "gamma_amp_hz", "sigma2_phase", "gamma_phase_hz", "width_phase_hz"],
             shaft=dict(
                 a_sigma=float(shaft["a_sigma"]),
                 lam_ref_per_s=float(shaft["lam_ref_per_s"]),
                 b_lam=float(shaft["b_lam"]),
             ),
         ),
-        coordinates="u_s2P, u_W: bench_v4._capped under PHASE_SIGMA2_MAX / W_MAX_HZ; log eps",
-        f_ref_rev_s=f_ref,
+        coordinates="u_s2P, u_W: bench_v4._capped under PHASE_SIGMA2_MAX / W_MAX_HZ; log eps"
+        if full
+        else "log eps",
+        f_ref_rev_s=model.par.shaft.f_ref_rev_s,
         why="the scorer's carrier is the motors_command LABEL; its error in flight acts as "
         "phase wander the bench (measured carrier) never saw, so the bench pedestal and shaft "
-        "are too coherent for flight",
+        "are too coherent for flight"
+        if full
+        else "the 2026-10-23 probe: the free phase pedestal went to its caps and HPPNet got "
+        "worse (PIT 29 vs 16); the pedestal smears each order independently, the shaft "
+        "wander all orders of a rotor coherently (FM, how nv3r4 absorbed the flight smear), "
+        "so the flight smear goes only into the shaft",
         start=dict(
             arrays(s),
             rule="the bench pedestal (sigma2_phase, width_phase_hz) clamped to at most "
-            f"{START_CAP_FRACTION:g} of its cap, and the bench eps",
+            f"{START_CAP_FRACTION:g} of its cap, and the bench eps"
+            if full
+            else "the bench pedestal (held, unclamped) and the bench eps",
         ),
         bench=dict(
             sigma2_phase=ped["sigma2_phase"],
@@ -1372,9 +1464,11 @@ def coherence_record(
             eps=float(shaft["eps"]),
         ),
         fitted=arrays(v),
-        move_tol=dict(COHERENCE_MOVE_TOL),
+        move_tol={k: COHERENCE_MOVE_TOL[k] for k in COHERENCE_MOVES[mode]},
         export="params.pedestal.{sigma2_phase, gamma_phase_hz, width_phase_hz} and "
-        "params.shaft.eps replaced; pedestal.held_by_evidence dropped",
+        "params.shaft.eps replaced; pedestal.held_by_evidence dropped"
+        if full
+        else "params.shaft.eps replaced; params.pedestal the bench's, unchanged",
     )
 
 
@@ -1394,12 +1488,14 @@ def run_stage(
     progress: int = 0,
     line_gain: bool = True,
     mic_gain: bool = True,
-    free_coherence: bool = False,
+    coherence: str = "none",
 ) -> dict[str, Any]:
-    """The whole stage: pool, the per-rotor lines (frozen, or the torch line
-    renderer under ``free_coherence``), start, the renderer check, the fit and
-    the flight payload (``line_gain=False`` holds ``g_r`` at 0, ``mic_gain=False``
-    holds ``h_m`` at 0)."""
+    """The whole stage: pool, the per-rotor lines (frozen under
+    ``coherence="none"``, else the torch line renderer), start, the renderer
+    check, the fit and the flight payload (``line_gain=False`` holds ``g_r`` at
+    0, ``mic_gain=False`` holds ``h_m`` at 0)."""
+    if coherence not in COHERENCE_MODES:
+        raise ValueError(f"coherence must be one of {COHERENCE_MODES}, got {coherence!r}")
     t0 = time.time()
     par = _bench_params(bench)
     band_hz = (float(bench["band_hz"][0]), float(bench["band_hz"][1]))
@@ -1410,13 +1506,11 @@ def run_stage(
             f"(of {pool.n_frames_read}), band {band_hz} Hz  {time.time() - t0:.1f}s",
             flush=True,
         )
-    renderer, c_start = None, None
-    if free_coherence:
+    renderer, c_start = None, {}
+    if coherence != "none":
         renderer = LineRenderer(par, pool.rps, n_fft=pool.n_fft, sr=pool.sr, device=device)
-        c_start = coherence_start(bench)
-        c_vals = coherence_values(
-            *(renderer._t(c_start[k]) for k in COHERENCE_KEYS), f_ref=par.shaft.f_ref_rev_s
-        )
+        c_start = {k: coherence_start(bench)[k] for k in COHERENCE_FREE[coherence]}
+        c_vals = start_coherence_values(bench, coherence, renderer._t)
         # the start's L = sum_r L_r at the start coherence (measure_start sums over axis 0)
         lines = renderer.all_frames(
             chunk=chunk_frames,
@@ -1431,7 +1525,7 @@ def run_stage(
         lines = frozen_lines(bench, pool.rps, n_fft=pool.n_fft, sr=pool.sr, progress=progress)
     w0, w0_record = wind_start(wind_start_path)
     start = measure_start(bench, pool, lines, band_hz=band_hz, wind_db=w0)
-    init = dict(start.init, **(c_start or {}))
+    init = dict(start.init, **c_start)
     if kappa is None:
         kappa, kappa_source = float(bench["priors"]["floor_push_kappa"]), "bench payload priors"
     else:
@@ -1439,7 +1533,7 @@ def run_stage(
     model = FlightStageModel(
         bench,
         pool,
-        None if free_coherence else lines,
+        None if coherence != "none" else lines,
         band_hz=band_hz,
         kappa=float(kappa),
         floor_centre_db=start.floor_centre_db,
@@ -1447,7 +1541,7 @@ def run_stage(
         init=init,
         line_gain=line_gain,
         mic_gain=mic_gain,
-        free_coherence=free_coherence,
+        coherence=coherence,
         renderer=renderer,
         chunk_frames=chunk_frames,
         device=device,
@@ -1469,14 +1563,14 @@ def run_stage(
         progress=bool(progress),
     )
     floor, wind, gain, mic_gain_db = model.exported()
-    coherence = model.exported_coherence()
+    exported_coh = model.exported_coherence()
     pay = flight_payload(
         bench,
         floor=floor,
         wind_db=wind,
         line_gain_db=gain,
         mic_gain_db=mic_gain_db,
-        coherence=coherence,
+        coherence=exported_coh,
     )
     pay["support"] = POOL
     pay["supports"] = list(pool.names)
@@ -1493,17 +1587,17 @@ def run_stage(
                 "alpha_aero",
                 "alpha_motor",
                 "hierarchy",
-                *(
-                    [
+                *dict(
+                    none=["pedestal", "shaft"],
+                    shaft=["pedestal", "shaft.a_sigma", "shaft.lam_ref_per_s", "shaft.b_lam"],
+                    full=[
                         "pedestal.sigma2_amp",
                         "pedestal.gamma_amp_hz",
                         "shaft.a_sigma",
                         "shaft.lam_ref_per_s",
                         "shaft.b_lam",
-                    ]
-                    if free_coherence
-                    else ["pedestal", "shaft"]
-                ),
+                    ],
+                )[coherence],
                 "mic_response",
                 "floor.ctrl_hz",
                 "floor.shape_sd_db",
@@ -1516,21 +1610,22 @@ def run_stage(
             if mic_gain
             else "pair EQ frozen (mic gains held at 0)",
             rule="L_r rendered per frame by LineRenderer (the torch port of the line part of "
-            "v4.expected_periodogram) at the free phase pedestal and eps"
-            if free_coherence
+            "v4.expected_periodogram) at the "
+            + (
+                "free phase pedestal and eps"
+                if coherence == "full"
+                else "bench phase pedestal and the free eps"
+            )
+            if coherence != "none"
             else "L_r = v4.expected_periodogram of the bench payload with the floor off "
             f"(mean_db {SILENT_DB:g}, static_rel 0) and the other rotors' profiles at "
             f"{SILENT_DB:g} dB, per frame; sum_r L_r = all-rotor L to {SPLIT_RTOL:g}",
         ),
         free=(["line_gain_db"] if line_gain else [])
         + (["mic_gain_db"] if mic_gain else [])
-        + (
-            ["pedestal.sigma2_phase", "pedestal.width_phase_hz", "shaft.eps"]
-            if free_coherence
-            else []
-        )
+        + list(COHERENCE_FIELDS[coherence])
         + ["floor.mean_db", "floor.shape_z", "floor.static_rel", "floor.b0", "floor.b1", "wind"],
-        coherence=coherence_record(model, bench, c_start),
+        coherence=coherence_record(model, bench),
         line_gain=dict(
             free=bool(line_gain),
             gain_db=[float(x) for x in gain],
