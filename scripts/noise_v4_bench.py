@@ -8,7 +8,8 @@ recordings, its restarts and the planted check::
     python scripts/noise_v4_bench.py refit --from <payload.json> --flat-shaft --device cuda
     python scripts/noise_v4_bench.py resume --from <payload.json> --device cuda
     python scripts/noise_v4_bench.py eta --fit <payload.json> --device cuda
-    python scripts/noise_v4_bench.py escape --from <payload.json> --device cuda
+    python scripts/noise_v4_bench.py escape --from <payload.json> --device cuda \\
+        [--hessian <payload>.hessian.npz] [--planted planted/<stem>.json]
 
 Outputs under ``--out`` (default ``results/noise_v4/bench``): ``restarts/`` one
 ``noise-v4-fit/3`` payload per restart; ``raw/`` the gridrun unit records;
@@ -16,7 +17,9 @@ Outputs under ``--out`` (default ``results/noise_v4/bench``): ``restarts/`` one
 spread per parameter group; ``planted/<name>.json`` the recovery report;
 ``restarts/<source>__flat.json`` + ``refit/<source>__flat.json`` the nested
 flat-shaft refit (one ``(sigma_nu, lam)`` for every speed) and its comparison;
-``restarts/<source>__c<n+1>.json`` a continuation (``resume``, ``escape``);
+``restarts/<source>__c<n+1>.json`` a continuation (``resume``, ``escape``; an
+``escape`` also writes ``<continuation>.hessian.npz``, its exact state and last
+Hessian, which ``--hessian`` resumes from);
 ``eta/<fit>.json`` + ``.npz`` the likelihood weight and its Hessians.
 """
 
@@ -432,9 +435,20 @@ def cmd_escape(args: argparse.Namespace) -> int:
     seed = int(src["optimiser"]["seed"])
     kappa = float(src["priors"]["floor_push_kappa"])
     flat = bool(src["params"]["shaft"]["pinned"])
-    model = B.RigModel(
-        _rig_of_payload(src), device=args.device, seed=seed, kappa=kappa, flat_shaft=flat
-    )
+    if args.planted:
+        # a planted twin's fit: the planted recordings its report describes
+        rep = json.loads(Path(args.planted).read_text())
+        patch = rep.get("floor_patch")
+        _, rig, _ = _planted(
+            rep["truth"],
+            floor_below=None if patch is None else float(patch["below_hz"]),
+            render_seed=int(rep["render_seed"]),
+            kappa=float(rep["kappa"]),
+            device=args.device,
+        )
+    else:
+        rig = _rig_of_payload(src)
+    model = B.RigModel(rig, device=args.device, seed=seed, kappa=kappa, flat_shaft=flat)
     model.load_payload(src)
     f, parts = model.objective()
     # with no round run the payload is the source's state and record
@@ -470,14 +484,25 @@ def cmd_escape(args: argparse.Namespace) -> int:
 
     hp0, hess_s0 = None, None
     if args.hessian is not None:
+        # the previous escape's EXACT state and its Hessian there: the payload's
+        # reload re-derives capped coordinates (bench_v4's reload margin), so it
+        # is not the point the Hessian was taken at
         hz = np.load(args.hessian)
-        x = E.get_flat(model).cpu().numpy()
-        # the payload's JSON round trip may re-derive a coordinate to the last ulp
-        if hz["x"].shape == x.shape and np.allclose(hz["x"], x, rtol=1e-12, atol=1e-12):
-            hp0, hess_s0 = (hz["H"], hz["P"]), float(hz["hessian_s"])
-            print(f"[escape] Hessian from {args.hessian} ({hess_s0:.0f} s to compute)", flush=True)
-        else:
-            print(f"[escape] {args.hessian} is not at these parameters: recomputed", flush=True)
+        x = E.get_flat(model)
+        if tuple(hz["x"].shape) != tuple(x.shape):
+            raise SystemExit(
+                f"{args.hessian}: {hz['x'].shape} coordinates, the model has {x.shape}"
+            )
+        dx = float(np.max(np.abs(hz["x"] - x.cpu().numpy())))
+        E.set_flat(model, torch.as_tensor(hz["x"], dtype=x.dtype, device=x.device))
+        f_state, parts = model.objective()
+        last.update(objective=f_state, whittle_per_recording=parts)
+        hp0, hess_s0 = (hz["H"], hz["P"]), float(hz["hessian_s"])
+        print(
+            f"[escape] state + Hessian from {args.hessian} (max |dx| vs the payload {dx:.3g}, "
+            f"objective {f_state:.1f}; Hessian took {hess_s0:.0f} s)",
+            flush=True,
+        )
     esc, hp = E.saddle_escape(
         model,
         converge,
@@ -508,7 +533,15 @@ def cmd_escape(args: argparse.Namespace) -> int:
         flush=True,
     )
     if esc["at_minimum"]:
-        _write_eta(model, path, args.out, band_hz=args.band_hz, planted=None, hp=hp)
+        _write_eta(
+            model,
+            path,
+            args.out,
+            band_hz=args.band_hz,
+            planted=args.planted,
+            hp=hp,
+            descent_free=esc["stop"] == "stuck",
+        )
     return 0
 
 
@@ -619,12 +652,15 @@ def _write_eta(
     band_hz: float,
     planted: str | None,
     hp: Any = None,
+    descent_free: bool = False,
 ) -> None:
     """``eta/<fit stem>.json`` and its ``.npz`` (:func:`bench_eta.eta_report`)."""
     from experiments.noise_model import bench_eta as E
 
     path = out / "eta" / (fit.stem + ".json")
-    rep_out = E.eta_report(model, band_hz=band_hz, save=path.with_suffix(".npz"), hp=hp)
+    rep_out = E.eta_report(
+        model, band_hz=band_hz, save=path.with_suffix(".npz"), hp=hp, descent_free=descent_free
+    )
     rep_out.update(fit=str(fit), planted=planted, git=_git())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(rep_out, indent=1))
@@ -714,7 +750,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--hessian",
         default=None,
-        help="a previous escape's <payload>.hessian.npz (used only at its exact parameters)",
+        help="a previous escape's <payload>.hessian.npz: resume at its exact state and Hessian",
+    )
+    p.add_argument(
+        "--planted",
+        default=None,
+        help="a planted report (planted/<stem>.json): --from is its .fit.json, on its planted rig",
     )
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)

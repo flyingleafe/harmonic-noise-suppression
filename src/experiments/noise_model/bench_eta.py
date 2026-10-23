@@ -133,26 +133,30 @@ def eta_report(
     log: Any = print,
     save: Path | None = None,
     hp: tuple[np.ndarray, np.ndarray] | None = None,
+    descent_free: bool = False,
 ) -> dict[str, Any]:
     """``eta`` at ``band_hz`` blocks and at blocks ``coarsen`` times wider (the
     block-size check), plus one block per recording; ``save`` writes ``H``,
     ``P`` and the block scores (``.npz``) for re-analysis; ``hp`` is ``(H, P)``
-    already computed at the model's parameters (:func:`hessians`)."""
+    already computed at the model's parameters (:func:`hessians`).
+    ``descent_free``: :func:`saddle_escape` found no negative direction that
+    lowers the objective at these parameters (:data:`MINIMUM_RULE`), so eta is
+    reported with them left out like flat directions."""
     names = [(n, t.numel()) for n, t in free_params(model)]
     t0 = time.perf_counter()
     G, index = block_scores(model, band_hz)
     log(f"[eta] {G.shape[0]} block scores ({time.perf_counter() - t0:.0f} s)")
     H, P = hessians(model, log=log) if hp is None else hp
     # at a MAP the posterior curvature is positive definite. Directions of
-    # non-positive curvature mean the payload is not a minimum: they are
-    # counted and left out (the inverse lives on the positive subspace), and
-    # eta is not reported if any is materially negative
+    # non-positive curvature are counted and left out (the inverse lives on the
+    # positive subspace); eta is not reported if any is materially negative,
+    # unless the escape found that none of them lowers the objective
     w, V, tol = curvature(H, P)
     keep = w > tol
     n_neg = int((w < -tol).sum())
     inv = (V[:, keep] / w[keep]) @ V[:, keep].T
     p_eff = float(np.trace(inv @ H))
-    at_minimum = n_neg == 0
+    at_minimum = n_neg == 0 or descent_free
     if save is not None:
         save.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
@@ -189,6 +193,8 @@ def eta_report(
         p_eff=p_eff,
         hessian_min_eig=float(w.min()),
         n_negative_curvature=n_neg,
+        negative_without_descent=bool(descent_free and n_neg > 0),
+        minimum_rule=MINIMUM_RULE,
         at_minimum=at_minimum,
         n_dropped_directions=int((~keep).sum()),
         by_block=by_size,
@@ -199,6 +205,16 @@ def eta_report(
 #: the trial steps of the line search along a negative-curvature direction
 #: (unit eigenvector, free coordinates), tried in both signs
 ESCAPE_STEPS: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)
+#: When a payload counts as a minimum (``at_minimum``). ``curvature``'s tolerance
+#: (1e-10 of the largest eigenvalue) also flags curvature of a fraction of a nat
+#: per unit step on coordinates of near-invisible orders: on the DREGON bench fit
+#: (c6) the last one has eigenvalue -0.275, a quadratic gain of 0.034 nats at the
+#: smallest step, and no trial step lowers the objective at all.
+MINIMUM_RULE = (
+    "no materially negative curvature, or none of those directions lowers the MAP "
+    "objective at any trial step (ESCAPE_STEPS, both signs); those directions are "
+    "then left out of H^-1 like flat ones"
+)
 
 
 def get_flat(model: RigModel) -> Tensor:
@@ -207,7 +223,7 @@ def get_flat(model: RigModel) -> Tensor:
 
 
 @torch.no_grad()
-def _set_flat(model: RigModel, x: Tensor) -> None:
+def set_flat(model: RigModel, x: Tensor) -> None:
     """Write the flat free-parameter vector ``x`` into the model in place."""
     o = 0
     for _, t in free_params(model):
@@ -240,7 +256,7 @@ def line_search(
     for sign in (1.0, -1.0):
         prev = f0
         for t in steps:
-            _set_flat(model, x0 + (sign * t) * d)
+            set_flat(model, x0 + (sign * t) * d)
             f, _ = model.objective()
             n_evals += 1
             if f < best_f:
@@ -248,7 +264,7 @@ def line_search(
             if not f < prev:  # stopped falling (or not finite)
                 break
             prev = f
-    _set_flat(model, x0 + best_s * d)
+    set_flat(model, x0 + best_s * d)
     return dict(step=best_s, gain=f0 - best_f, objective=best_f, n_evals=n_evals)
 
 
@@ -271,8 +287,9 @@ def saddle_escape(
     budget_s)`` (the fit's convergence loop, returning its summary) so the
     other coordinates re-balance; the Hessian again. Stops at a minimum (no
     materially negative curvature), after ``max_rounds`` rounds, when no
-    direction lowers the objective (``stuck``), or when the next Hessian would
-    end past ``deadline`` (a ``time.perf_counter()`` instant).
+    negative direction lowers the objective at any trial step (``stuck``: a
+    minimum by :data:`MINIMUM_RULE`), or when the next Hessian would end past
+    ``deadline`` (a ``time.perf_counter()`` instant).
 
     ``hp`` is ``(H, P)`` already computed at the model's parameters (a previous
     run's last Hessian) and ``hessian_s`` its wall time; the first round then
@@ -321,8 +338,10 @@ def saddle_escape(
         )
         if n_moved == 0:
             rounds.append(dict(check, objective_start=f_start, directions=directions))
-            # no direction searched at all: the deadline, not a stuck saddle
-            stop = "stuck" if directions else "deadline"
+            # every negative direction searched, none lowers the objective at any
+            # trial step: a minimum to the objective's resolution; fewer searched
+            # means the deadline cut the round
+            stop = "stuck" if len(directions) == neg.size else "deadline"
             break
         budget = None if deadline is None else left() - 1.25 * hess_s
         conv = converge(model, budget)
@@ -349,7 +368,8 @@ def saddle_escape(
         stop=stop,
         n_negative=final["n_negative"],
         min_eig=final["min_eig"],
-        at_minimum=None if hp is None else final["n_negative"] == 0,
+        at_minimum=None if hp is None else (final["n_negative"] == 0 or stop == "stuck"),
+        minimum_rule=MINIMUM_RULE,
         hessian_s=hess_s,
         wall_s=time.perf_counter() - t_all,
     )

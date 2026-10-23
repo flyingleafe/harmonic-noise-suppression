@@ -78,3 +78,22 @@ def test_line_search_without_descent_leaves_the_model() -> None:
     out = E.line_search(model, np.array([0.0, 0.6, 0.8]), f0)
     assert out["step"] == 0.0 and out["gain"] == 0.0
     assert torch.equal(model.params["x"].detach(), before)
+
+
+class Shallow(Toy):
+    """A materially negative curvature (-0.2) that no trial step can use: at
+    ``t >= 0.5`` the quartic term already outweighs it."""
+
+    def whittle(self, j: int) -> torch.Tensor:
+        x0, x1, _ = self.params["x"]
+        return 0.5 * x0**2 - 0.1 * x1**2 + x1**4
+
+
+def test_escape_counts_a_descent_free_saddle_as_a_minimum() -> None:
+    model = Shallow([0.0, 0.0, 0.0])
+    rec, hp = E.saddle_escape(model, lbfgs, log=lambda *_: None)
+    assert rec["stop"] == "stuck" and rec["n_negative"] == 1
+    assert rec["at_minimum"] is True
+    (d,) = rec["rounds"][0]["directions"]
+    assert d["step"] == 0.0 and d["gain"] == 0.0
+    assert torch.equal(model.params["x"].detach(), torch.zeros(3, dtype=torch.float64))
