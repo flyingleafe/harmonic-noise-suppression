@@ -757,7 +757,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--hessian",
         default=None,
-        help="a previous escape's <payload>.hessian.npz: resume at its exact state and Hessian",
+        help="a state file: escape's <payload>.hessian.npz (state + Hessian) or planted's "
+        "<report>.fit.state.npz (state only); resume at that exact state",
     )
     p.add_argument(
         "--planted",
