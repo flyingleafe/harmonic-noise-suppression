@@ -296,7 +296,7 @@ synthesis with the per-rotor gain $\sum_r s_r(t)^{b(f)}$ per bin.
 | $\bar p^{m}_n$ | rig, multiple | $\mathcal N(\hat F_{3pn} - 12,\ 10)$ dB | C4 without the parity penalty |
 | $p^{m}_{rn} - \bar p^{m}_n$ | rotor, multiple | $\mathcal N(c^{m}_r, 3.5)$ dB | @sec-ev-profiles |
 | $\alpha^{a}$ | rig | $\mathcal N(5.5, 1.0)$ | @sec-ev-speed-lines |
-| $\alpha^{m}$ | rig | $\mathcal N(0, 2)$ | @sec-ev-speed-lines |
+| $\alpha^{m}$ | rig | $\mathcal N(0, 2)$; flight: truncated to $\lvert\alpha^{m}\rvert \le 4$ | @sec-ev-speed-lines; truncation: round 6 (a per-regime flight pool spans only 1.4–1.9× in speed and pushed $\alpha^m$ to −40.8 / +17.5; the bench measures −2.1 to +1.9) |
 | $b_0$, $b_1$ | rig | $\mathcal N(3, 1)$; $\mathcal N(0.5, 0.25)$ per octave; truncated to $b(f) \ge 0$ on the band (30 Hz–7.9 kHz) | @sec-ev-floor; truncation: round 5 (the floor does not get quieter as the rotor speeds up) |
 | $z$ | rig | $\mathcal N(0, I)$, scale $\sigma_B$ measured | nv3r4 |
 | floor push | rig | $+\kappa\sum_j \bar c_j$ on the log-prior, $\bar c_j$ the control values in dB | @sec-ev-floor-push |
@@ -393,7 +393,10 @@ of any model generation.
 5. **Convergence.** A restart is converged when the restart pass gains less
    than $10^{-4}$ nats per cell **and** moves no parameter group by more than
    its tolerance: levels 0.1 dB (median over lines), exponents 0.02, floor
-   control values 0.1 dB, log-dynamics 0.05.
+   control values 0.1 dB, log-dynamics 0.05. A group with one value per order
+   (the phase pedestal in flight) moves by the **median** over its orders, as
+   the levels do: an order the data cannot see drifts without end in log
+   width and would otherwise block convergence (round 6).
 6. Four restarts. Keep the lowest objective. Report the spread of every group
    over the restarts.
 
@@ -456,7 +459,13 @@ $F$, and per recording the carrier, ambient and wind.
   within 0.3, $b_0$ within 0.3, the floor within 1 dB, $\varepsilon$ and
   $\lambda_{\rm ref}$ within 20 %, $W_\phi$ within 30 % on lines ≥ 15 dB over
   the floor. **The floor push $\kappa$ is set here:** the smallest value that
-  recovers the planted floor within 1 dB.
+  recovers the planted floor within 1 dB. **Round 5 outcome: $\kappa = 0$.**
+  On a planted twin of the r5 s2 fit (floor below 2.5 kHz replaced by the
+  measured one), no $\kappa$ recovers the floor within 1 dB: $\kappa = 0$ gives
+  1.5 / 2.4 dB (rms / max, ≥ 500 Hz) and +2.5 dB mean below 500 Hz; $\kappa =
+  100$ and $1000$ raise the error below 500 Hz to +16.5 and +19.5 dB; $10^4$
+  diverges. Below 500 Hz the bench floor and the bench wind explain the same
+  cells, and the push only moves the floor up (`results/noise_v4/bench/planted/`).
 - **Floor at the bases.** At the midpoints between lines, the fitted expected
   spectrum minus the data is within ±1 dB in every octave band.
 - **The four-rotor recording.** Without refitting, predict `motor_allMotors_70`
@@ -472,6 +481,16 @@ $F$, and per recording the carrier, ambient and wind.
   and the listening clips of `docs/explainers/noise-v4-bench-fit.qmd`, on the
   new fit.
 - **Convergence** (@sec-optimiser) on the selected restart.
+- **A minimum before step 3** (round 6). A converged restart can sit on a
+  saddle: the first converged κ = 0 fit had 38 directions of negative
+  curvature, each on one coordinate of a near-invisible order. `noise_v4_bench.py
+  escape` takes the Hessian, line-searches every negative direction, runs the
+  convergence loop again, and repeats. The payload counts as a minimum when no
+  materially negative direction is left, **or** none of them lowers the
+  objective at any trial step (steps 0.5–64, both signs); such directions are
+  then left out of $H^{-1}$ like flat ones (`bench_eta.MINIMUM_RULE`). The
+  final fit `dregon__kappa0__r5__s2__c7` has one such direction (eigenvalue
+  −0.275, a quadratic gain of 0.034 nats at the smallest step).
 - **Flat shaft law** (decision, 2026-10-21: one $(\lambda, \sigma_\nu)$ pair
   for all speeds is preferred if the bench allows it). Refit the selected
   restart with $a_\sigma = b_\lambda = 0$ pinned, starting from it, under the
@@ -503,10 +522,12 @@ bin.
 - **The motor family.** On the standby run only order 84 stands out, on all
   four rotors (@fig-md2-orders). The multiples $n \ne 4$ sink by the level
   prior.
-- **The phase pedestal** is not identified at 7.8 Hz. With the half-normal
-  prior its MAP would be zero. The flight fit therefore does not fit
-  $\sigma^2_{\phi,k}$ or $\gamma_{\phi,k}$; it holds them at the prior
-  medians.
+- **The phase pedestal** is weakly identified at 7.8 Hz. Held at the prior
+  median ($\sigma^2_\phi = 1$) it puts 63 % of every line's power in the
+  pedestal, and the valleys between the MD2 cruise lines are about 10 dB
+  deeper than that allows. Round 6 therefore **fits it per aerodynamic order**
+  (one $\sigma^2_{\phi,k}$ and one $W_{\phi,k}$, under the bench's truncated
+  priors; `noise_v4_flight.py fit --free-phase-pedestal`).
 - **The amplitude pedestal** shows as frame-to-frame line flicker. The
   Whittle likelihood does not model the correlation of a line's level across
   frames, so it does not identify it. The flight fit sets $\sigma^2_{A,k}$ and
@@ -539,11 +560,16 @@ rig geometry (@sec-mic). Store both as constants of the fit.
 
 **B2. One joint fit over the standby and cruise windows.** Shared by the four
 rotors: $F$, $b_0$, $b_1$, $s$, $\alpha^{a}$, $\alpha^{m}$, the pedestal
-parameters (held as above) and the shaft ($\sigma_{\rm ref}$, $a_\sigma$; rate pinned). Per rotor: the
-profiles. Initialise by @sec-init. Optimise by @sec-optimiser. If the
+parameters (amplitude held, phase per order as above) and the shaft
+($\sigma_{\rm ref}$, $a_\sigma$; rate pinned). Per rotor: the profiles.
+Initialise by @sec-init. Optimise by @sec-optimiser. If the
 standby–cruise residual check fails, fall back to the nv3r4 arrangement: one
 fit per regime, composed in the renderer by the smoothstep in the slowest
-rotor's speed (0 at 45 rev/s, 1 at 65 rev/s).
+rotor's speed (0 at 45 rev/s, 1 at 65 rev/s). **Round 6 uses the fallback:**
+the converged joint fit (`md2_fly125__flight_v4__s0__r5c1`) scored standby
+PIT 27.8 and parity ratio 3.57. The converged pair is
+`md2_fly125_standby_fpb__flight_v4__s0__r6c1` and
+`md2_fly125_cruise_fpb__flight_v4__s0__r6c3`.
 
 **B3. Gate.** Run the identifiability gate on the fit with the trajectory
 frames.
@@ -560,6 +586,49 @@ frames.
 - **The motor line.** On standby renders, order 84 stands 7–14 dB over its
   neighbouring half-orders on every rotor, as in the recording.
 - **Convergence** (@sec-optimiser).
+
+# Procedure C — the DREGON flight stage {#sec-dregon-flight}
+
+The bench payload has no flight wind and a bench floor. On DREGON flight
+renders it scored PIT 3.51 against nv3r4's 1.680, LTAS 8.73 against 2.384 dB
+(`docs/explainers/noise-model-v4-dregon-gap.qmd`). nv3r4 had a flight fit too.
+The flight stage is a change of the procedure, not of the model.
+
+**C1. Pool.** The five 8 s `dregon-floor` segments of nv3r4, each 2 s after a
+4 s scoring window, every 4th frame (310 frames), labels `motors_command`.
+
+**C2. Frozen.** Every bench line parameter: profiles, speed laws, pedestal,
+shaft and pair EQ, as per-rotor line periodograms $L_r$.
+
+**C3. Free.** The flight floor (mean, the 14-point shape, $b_0$, $b_1$, the
+static share) and the static per-mic wind `wind_db` (8 values, start at
+nv3r4's). Options: a gain per rotor $g_r \sim \mathcal N(0, 6)$ dB; a gain per
+mic $h_m \sim \mathcal N(0, 6)$ dB with $\sum_m h_m = 0$, written into the
+pair EQ; the coherence (`--coherence shaft`: the shaft $\varepsilon$ only;
+`full`: also the phase pedestal per order).
+
+**C4. Export** the bench payload with `kind = "flight"`, the new floor, the
+wind and any gains; the renderer reads it unchanged (`renderer_check`:
+$< 10^{-6}$ relative).
+
+**Result (round 6).** Every variant fails the DREGON PIT bar; all but the
+free-coherence one converged:
+
+| stage | PIT (rev/s) | LTAS (dB) |
+|---|---|---|
+| no gains (bench κ = 0) | 15.8 | 2.384 |
+| + gain per mic | 19.57 | 2.47 |
+| + gain per rotor (bench κ = 10) | 61.24 | 2.60 |
+| + gain per rotor and per mic | 66.36 | 2.85 |
+| + coherence free (not converged) | 29.4 | 3.20 |
+
+The likelihood lowers the rotor gains (−4.6 to −14.8 dB) and pushes every
+phase pedestal to its cap. Probes through the scorer show two causes: the
+scorer reads absolute CQT dB, and the held-out scoring windows are 2–6 dB
+louder than the fit segments; and at matched level the bench per-rotor
+profiles are weaker rotor-identity cues than nv3r4's flight-fitted profiles
+(`noise-model-v4-dregon-gap.qmd` § "The DREGON flight stage through the
+scorer").
 
 # From the fits to the generator
 
@@ -816,8 +885,8 @@ measurements. The two procedures follow from the two resolutions.
 
 1. **The amplitude/phase split** rests on the amplitude prior. No likelihood
    term identifies it. The flicker check tests it on the bench only.
-2. **The phase pedestal in flight** is the prior median, not a measurement of
-   MD2.
+2. **The phase pedestal in flight** is fitted per order on MD2 (round 6), but
+   at 7.8 Hz it is weakly identified; the bench caps bound it.
 3. **One speed law per family over 3.2×** on MD2 is untested. The fallback is
    the nv3r4 regime composition.
 4. **Resonance-shaped lines** (DREGON odd orders 9–13 at 0.4–1.6 kHz, the
@@ -829,6 +898,10 @@ measurements. The two procedures follow from the two resolutions.
 7. **The rotor–microphone term in flight** is the spherical-spreading
    correction from the geometry. It is measured on MD2 at 250 Hz–4 kHz only;
    below and above it is an extrapolation.
+8. **DREGON flight.** The flight stage holds the bench line profiles. On the
+   DREGON scorer it fails (@sec-dregon-flight): the bench per-rotor profiles
+   do not carry the flight rotor-identity cues, and the fit segments are
+   quieter than the scoring windows.
 
 # Reproduce
 
@@ -841,6 +914,11 @@ measurements. The two procedures follow from the two resolutions.
   `docs/explainers/noise-v4-bench-fit.qmd`.
 - MD2 motor orders: `results/noise_v4/md2_motor_orders/`.
 - nv3r4: `docs/experiments/noise-model-v3.md` § Round 4.
+- Saddle escape and η: `scripts/noise_v4_bench.py escape` / `eta` →
+  `results/noise_v4/bench/eta/`.
+- DREGON flight stage: `scripts/noise_v4_flight.py dregon` →
+  `results/noise_v4/flight/`.
+- Scoring against nv3r4: `scripts/noise_v4_score.sh`.
 
 # References
 
