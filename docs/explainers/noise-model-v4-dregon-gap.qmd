@@ -23,6 +23,13 @@ This document is written in Simplified Technical English. Sentences are short.
 A statement marked INFERENCE is a reading of the data, not a measurement.
 :::
 
+::: {.callout-important}
+**Update 2026-10-23.** The DREGON flight stage of § "What follows" exists and
+converges. It still scores badly. @sec-stage shows why, with the scorer itself:
+real vs nv3r4 vs v4 on one window, as spectrograms, the scorer's readout and
+audio.
+:::
+
 # The question
 
 The v4 round-4 bench fit scores badly on DREGON flight:
@@ -398,3 +405,163 @@ The fix keeps the model and adds a **DREGON flight stage**, as nv3r4 had:
 
 This is a change of the procedure, not of the model: the wind term and the
 floor are already in the v4 model.
+
+# The DREGON flight stage through the scorer (2026-10-23) {#sec-stage}
+
+## What was fitted, and how it scores
+
+The flight stage (`experiments.noise_model.dregon_flight_v4`, CLI
+`scripts/noise_v4_flight.py dregon`) holds the bench lines. On the five 8 s
+flight segments it fits the per-mic wind and the flight floor. Options can also
+free a gain per rotor, a gain per mic (sum 0), or the line coherence. Every
+stage below converged unless marked. The scores use the full protocol: five
+windows, render seeds 2001–2004, all 8 mics.
+
+| stage | HPPNet PIT (rev/s) | LTAS proxy (dB) |
+|---|---|---|
+| nv3r4 (target) | **1.680** | **2.384** |
+| v4 stage, no gains (bench κ = 0) | 15.8 | 2.384 |
+| + gain per mic | 19.57 | 2.47 |
+| + gain per rotor (bench κ = 10) | 61.24 | 2.60 |
+| + gain per rotor and per mic | 66.36 | 2.85 |
+| + line coherence free (not converged) | 29.4 | 3.20 |
+
+The likelihood pulls the rotor gains down (−4.6 to −14.8 dB), and the scorer
+then reads the rotors as off. Freeing the coherence pushes every phase
+pedestal to its cap. Raising the shaft wander by hand ($\varepsilon$ 0.02 and
+0.05) gives 21.7 and 43.1. No option of the stage comes near 1.680.
+
+## Real vs nv3r4 vs v4 on one window
+
+Window hovering, mics 1 and 2, render seed 2001. Mic 1 is a mic that v4
+passes; mic 2 is a mic that v4 fails. "v4 as fitted" is the no-gain stage
+(`results/noise_v4/flight/dregon_room2__flight_v4__dregon__kappa0__r5__s2.json`).
+"v4, lines +3 dB" is the same payload with both line-profile rows raised by
+3 dB. This is a probe, not a fit: it shows what the scorer needs. Script:
+`scripts/noise_v4_dregon_gap.py hppnet`, git `a71ade84`.
+
+Scorer error per mic on this window (rev/s):
+
+| arm | mean | m0 | m1 | m2 | m3 | m4 | m5 | m6 | m7 |
+|---|---|---|---|---|---|---|---|---|---|
+| real | 0.89 | 1.1 | 0.8 | 0.8 | 0.9 | 0.9 | 0.8 | 1.0 | 0.8 |
+| nv3r4 | 1.43 | 1.5 | 1.5 | 1.4 | 1.6 | 1.3 | 1.3 | 1.5 | 1.4 |
+| v4 as fitted | 22.33 | 3.4 | 4.0 | **80.3** | 2.0 | 3.9 | 1.9 | **80.9** | 2.2 |
+| v4, lines +3 dB | 2.01 | 2.1 | 1.9 | 1.6 | 2.3 | 1.9 | 2.2 | 1.9 | 2.2 |
+
+An error of 80 rev/s is the whole rotor speed: the scorer reads every rotor
+as off.
+
+![Spectrograms, 0–500 Hz, 256 ms frames. One colour scale per column (the real
+clip's).](noise-model-v4-dregon-gap/fig_hppnet_window.png){#fig-hpp-spec}
+
+![The scorer's per-rotor readout (dots, one colour per rotor) against the label
+(grey). Readings below 61 rev/s are drawn at 61.](noise-model-v4-dregon-gap/fig_hppnet_readout.png){#fig-hpp-read}
+
+Listen. Each mic has one level scale for all four clips, so the loudness
+differences are real.
+
+```{=html}
+<table>
+<tr><th></th><th>mic 1</th><th>mic 2</th></tr>
+<tr><td>real</td><td><audio controls src="noise-model-v4-dregon-gap/audio/hppnet_real_mic1.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/hppnet_real_mic2.wav"></audio></td></tr>
+<tr><td>nv3r4</td><td><audio controls src="noise-model-v4-dregon-gap/audio/hppnet_nv3r4_mic1.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/hppnet_nv3r4_mic2.wav"></audio></td></tr>
+<tr><td>v4 as fitted</td><td><audio controls src="noise-model-v4-dregon-gap/audio/hppnet_v4_mic1.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/hppnet_v4_mic2.wav"></audio></td></tr>
+<tr><td>v4, lines +3 dB</td><td><audio controls src="noise-model-v4-dregon-gap/audio/hppnet_v4_matched_mic1.wav"></audio></td><td><audio controls src="noise-model-v4-dregon-gap/audio/hppnet_v4_matched_mic2.wav"></audio></td></tr>
+</table>
+```
+
+What the figures show:
+
+- **Real.** Strong gusts below 300 Hz in the first 2 s, then a calm part. The
+  k = 1 lines (about 80 Hz) are visible through both.
+- **nv3r4.** A steady broadband band below about 180 Hz. Its lines are *less*
+  clear than the v4 lines. The scorer still tracks all four rotors.
+- **v4 as fitted.** Clear lines at k = 1 and k = 2, and a broadband level 2–3 dB
+  below nv3r4 on mic 2 (band levels below). On mic 2 the scorer reads off for
+  the whole window.
+- **v4, lines +3 dB.** The scorer tracks all rotors on both mics, but with a
+  larger error than on nv3r4 (1.6–1.9 against 1.4–1.5 rev/s here).
+
+Band levels on mic 2, this window (Welch, dB):
+
+| arm | 30–60 | 60–120 | 120–250 | 250–500 | 500–1000 Hz |
+|---|---|---|---|---|---|
+| real | −49.4 | −47.6 | −52.3 | −58.2 | −64.9 |
+| nv3r4 | −50.5 | −49.1 | −53.6 | −61.2 | −65.6 |
+| v4 as fitted | −52.8 | −50.8 | −56.3 | −63.2 | −66.7 |
+| v4, lines +3 dB | −52.8 | −49.2 | −55.1 | −62.4 | −65.7 |
+
+## Cause A: the scorer is level-sensitive, and the scoring windows are louder
+
+The scorer's input is the CQT in absolute dB (`AmplitudeToDB(top_db=80)`), with
+no level normalisation. So the absolute level of a render matters, not only its
+shape. Probes on the k0 stage (hovering and spinning windows, scorer error on
+mics 2 and 6, rev/s):
+
+| probe | hovering m2 | hovering m6 | spinning m2 | spinning m6 |
+|---|---|---|---|---|
+| v4 as fitted | 80.3 | 80.9 | 56.5 | 11.0 |
+| lines +3 dB | 1.6 | 1.9 | 2.0 | 2.3 |
+| floor −6 dB | 1.6 | 2.0 | 2.0 | 2.2 |
+| floor +3 dB | 80.9 | 80.9 | 80.7 | 9.4 |
+| no wind | 1.7 | 1.9 | 2.5 | 2.5 |
+| whole render +2 dB | 6.3 | 80.9 | 1.9 | 3.4 |
+| nv3r4, +0 dB and +6 dB | 1.4 / 1.4 | 1.5 / 1.5 | 1.5 / 1.5 | 1.5 / 1.5 |
+
+The v4 render sits near a threshold of the scorer: a 2–3 dB change of the
+lines, the floor or the whole clip moves mic 2 from "off" to tracked. nv3r4 is
+far from that threshold: its error does not change from +0 to +6 dB.
+
+Why is v4 below the threshold? The stage fits the 8 s segments that start 2 s
+after each 4 s scoring window. The real recording is louder in the scoring
+windows (mean of the five windows, dB):
+
+| | mic 1, 120–250 / 250–500 / 500–1000 Hz | mic 2, same bands |
+|---|---|---|
+| real, scoring windows minus fit segments | +0.1 / +2.4 / +2.7 | **+3.8 / +5.9 / +4.8** |
+| nv3r4 minus real, fit segments | −2.9 / −1.3 / −2.7 | **+3.6 / +3.5 / +4.5** |
+| v4 stage minus real, fit segments | −0.0 / +1.2 / +0.3 | +0.7 / +1.6 / +3.2 |
+| nv3r4 minus real, scoring windows | −3.0 / −3.6 / −5.7 | −0.4 / −2.4 / −0.5 |
+| v4 stage minus real, scoring windows | −0.4 / −1.2 / −2.4 | −3.1 / −4.5 / −1.7 |
+
+On mic 2 the v4 stage is close to its fit data, and nv3r4 is 3.5–4.5 dB above
+its fit data. The scoring windows are 4–6 dB louder than the fit segments.
+So nv3r4 lands near the real scoring level by its bias, and v4 lands 2–4 dB
+below it. INFERENCE: the stage is the better fit of its own data, and that is
+exactly why it fails here.
+
+## Cause B: the rotors are harder to tell apart
+
+With the level matched (lines +3 dB), v4 is still worse than nv3r4 on every
+mic: 2.01 against 1.43 (hovering) and 2.16 against 1.61 (spinning). The line
+shape does not explain it:
+
+| probe, all on lines +3 dB | hovering | spinning |
+|---|---|---|
+| as is | 2.01 | 2.16 |
+| no pedestals | 2.09 | 2.24 |
+| no phase pedestal | 4.09 | 2.10 |
+| no amplitude pedestal | 2.08 | 2.20 |
+| no shaft wander | 1.98 | 2.13 |
+| the four rotors' profiles set to their mean | **8.30** | **10.28** |
+| nv3r4 | 1.43 | 1.61 |
+
+The scorer has one output map per rotor. It tells the rotors apart by their
+harmonic profiles: with four equal profiles it fails. The extra error of v4 is
+spread evenly over the four rotors (2.05 / 2.34 / 1.94 / 1.74 against
+1.45 / 1.69 / 1.38 / 1.19 on hovering). INFERENCE: the per-rotor profiles that
+v4 takes from the single-rotor bench are weaker identity cues than the
+profiles nv3r4 fitted in flight.
+
+## What this means
+
+- Cause A is a level shift between the fit segments and the scoring windows.
+  A fit that matches its own data better does worse on this scorer. A fit on
+  more of each flight (everything outside the scoring windows and their
+  guards) would see a level closer to the whole flight.
+- Cause B needs the per-rotor line profiles from flight, not from the bench:
+  a full DREGON flight fit, as MD2 has.
+- With both causes fixed by hand (level matched), v4 is at 2.0–2.2 on these
+  two windows. That is still above nv3r4's 1.680 over the five windows.
+

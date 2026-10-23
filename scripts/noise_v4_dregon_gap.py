@@ -7,6 +7,7 @@ its own bench recordings (``docs/explainers/noise-model-v4-dregon-gap.qmd``)::
     python scripts/noise_v4_dregon_gap.py flight --rig michaels --v4 <MD2 payload> \\
         --v3 <nv3r4 cruise> --v3-standby <nv3r4 standby> [--v4-standby <v4 standby>]
     python scripts/noise_v4_dregon_gap.py insample --v4 <bench payload>
+    python scripts/noise_v4_dregon_gap.py hppnet --v4 <DREGON flight payload> --v3 <nv3r4 payload>
 
 ``--rig michaels`` does the same on Michael's five FLY124 scoring windows
 (standby, ramp, cruise); a per-regime pair renders through the scorer's
@@ -22,7 +23,11 @@ on its own recordings with the bench fit's forward model; run it with the
 ``src/`` of the commit that produced the payload first on ``PYTHONPATH`` (the
 payload must be read by its own code). Outputs: ``--out`` (default
 ``docs/explainers/noise-model-v4-dregon-gap``) ``figdata_<mode>.json``,
-``fig_*.png``, ``audio/*.wav``.
+``fig_*.png``, ``audio/*.wav``. ``hppnet`` puts one scoring window (default
+hovering) through the frozen scorer for real, nv3r4, the v4 payload and the v4
+payload with its lines raised ``--line-db`` (matched level): spectrograms with
+the scorer's readout, WAVs on one scale per mic, the per-mic MAE
+(``fig_hppnet_window.png``, ``audio/hppnet_*.wav``, ``figdata_hppnet.json``).
 """
 
 from __future__ import annotations
@@ -519,6 +524,162 @@ def cmd_insample(args: argparse.Namespace) -> int:
     return 0
 
 
+#: ``hppnet``: the matched-level v4 arm raises both line-profile rows by this much
+#: (the probe that brought every mic of the k0 stage above the scorer's level
+#: threshold on the hovering and spinning windows)
+MATCHED_LINE_DB = 3.0
+
+
+def cmd_hppnet(args: argparse.Namespace) -> int:
+    """Real vs nv3r4 vs a v4 flight payload (as fitted, and with its lines raised
+    by ``--line-db``) on ONE DREGON scoring window, through the frozen scorer:
+    spectrograms with the scorer's per-rotor readout over the label, WAVs on one
+    scale per mic (levels stay comparable), the per-mic MAE and band levels."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from scipy.signal import spectrogram
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import _synthetic_probe as SP
+    import stochastic_fit_revised_eval as SRE
+
+    from data_processing.noise_model.render import render_noise
+    from experiments.noise_model import gates as GT
+    from experiments.stochastic_fit import revised_eval as RE
+
+    out = Path(args.out)
+    sup = GT.DREGON_CRUISE_SUPPORTS[int(args.window)]
+    clip = RE.load_window(
+        sup.window, dataset="DREGON-frames", version=None, channels=None, rps_key="motors_command"
+    )
+    real = np.asarray(clip.audio, dtype=np.float64)[:8]
+    rps = np.atleast_2d(np.asarray(clip.rps, dtype=np.float64))
+    v4 = json.loads(Path(args.v4).read_text())
+    raised = copy.deepcopy(v4)
+    for key in ("profile_aero_db", "profile_motor_db"):
+        raised["params"][key] = (np.asarray(raised["params"][key]) + args.line_db).tolist()
+    labels = {
+        "real": "real",
+        "nv3r4": "nv3r4",
+        "v4": "v4 as fitted",
+        "v4_matched": f"v4, lines +{args.line_db:g} dB",
+    }
+    arms = {"real": real}
+    for key, pay in (
+        ("nv3r4", json.loads(Path(args.v3).read_text())),
+        ("v4", v4),
+        ("v4_matched", raised),
+    ):
+        arms[key] = np.asarray(render_noise(pay, rps, n_mics=8, seed=SEED))[:, : real.shape[1]]
+    tr = SRE.Tracker(dict(experiment="hppnet_l2_r2_s0", ckpt="best"))
+    mics = [int(m) for m in args.mics.split(",")]
+    n = real.shape[1]
+    scores: dict[str, Any] = {}
+    reads: dict[tuple[str, int], tuple[np.ndarray, np.ndarray]] = {}
+    for key, a in arms.items():
+        per = []
+        for m in range(8):
+            pred, truth, mae = SP.score(tr.fm, tr.metric, a, rps, SR, m)
+            per.append(float(mae))
+            if m in mics:
+                reads[(key, m)] = (pred, truth)
+        scores[key] = dict(mae=float(np.mean(per)), per_mic=per)
+        print(f"{key}: MAE {np.mean(per):.2f}  per mic {np.round(per, 1).tolist()}", flush=True)
+    edges = np.array([30, 60, 120, 250, 500, 1000, 2000, 4000, 8000], dtype=float)
+    bands: dict[str, Any] = {}
+    for key, a in arms.items():
+        f, p = _welch(a[mics])
+        bands[key] = _band_db(f, p, edges).round(2).tolist()
+    # spectrograms: rows arms, columns mics; one colour scale per mic (the real clip's)
+    fig, axes = plt.subplots(
+        len(arms),
+        len(mics),
+        figsize=(5.6 * len(mics), 2.5 * len(arms)),
+        sharex=True,
+        sharey=True,
+        layout="constrained",
+    )
+    axes = np.atleast_2d(axes).reshape(len(arms), len(mics))
+    nper = 4096  # 3.9 Hz bins: the four rotors' k = 1 lines are 2-8 Hz apart
+    for c, m in enumerate(mics):
+        f, t, s = spectrogram(real[m], fs=SR, nperseg=nper, noverlap=nper - 512, window="hann")
+        hi = float(np.percentile(_db(s[f <= args.fmax]), 99.5))
+        for r, (key, a) in enumerate(arms.items()):
+            f, t, s = spectrogram(a[m], fs=SR, nperseg=nper, noverlap=nper - 512, window="hann")
+            ax = axes[r, c]
+            sel = f <= args.fmax
+            mesh = ax.pcolormesh(
+                t, f[sel], _db(s[sel]), vmin=hi - 50, vmax=hi, shading="auto", cmap="magma"
+            )
+            ax.set_title(f"{labels[key]}, mic {m}", fontsize=10)
+            if c == 0:
+                ax.set_ylabel("frequency (Hz)")
+        fig.colorbar(mesh, ax=axes[:, c], shrink=0.6, label="dB (same scale in this column)")
+    for ax in axes[-1]:
+        ax.set_xlabel("time (s)")
+    fig.savefig(out / "fig_hppnet_window.png", dpi=110, bbox_inches="tight")
+    plt.close(fig)
+    # the scorer's per-rotor readout against the label, one panel per arm and mic
+    fig, axes = plt.subplots(
+        len(arms), len(mics), figsize=(5.2 * len(mics), 1.9 * len(arms)), sharex=True, sharey=True
+    )
+    axes = np.atleast_2d(axes).reshape(len(arms), len(mics))
+    for c, m in enumerate(mics):
+        for r, key in enumerate(arms):
+            pred, truth = reads[(key, m)]
+            tc = np.asarray(RE.output_frame_centres(int(pred.shape[-1]), n, sr=SR))
+            ax = axes[r, c]
+            for j in range(pred.shape[0]):
+                ax.plot(tc, truth[j], color="0.6", lw=1.2)
+                # a reading below the axis (the scorer's "off") is drawn on its floor
+                ax.plot(tc, np.maximum(pred[j], 61.0), lw=0.0, marker=".", ms=2.5, color=f"C{j}")
+            ax.set_ylim(60, 95)
+            ax.set_title(
+                f"{labels[key]}, mic {m}: MAE {scores[key]['per_mic'][m]:.1f} rev/s", fontsize=10
+            )
+            ax.grid(alpha=0.3)
+            if c == 0:
+                ax.set_ylabel("rev/s")
+    for ax in axes[-1]:
+        ax.set_xlabel("time (s)")
+    axes[0, 0].plot([], [], color="0.6", lw=1.2, label="label (motors_command)")
+    axes[0, 0].plot([], [], lw=0, marker=".", color="C0", label="scorer, one colour per rotor")
+    axes[0, 0].legend(fontsize=8, loc="lower right")
+    fig.text(0.5, 0.0, "readings below 61 rev/s (the scorer's 'off') are drawn at 61", ha="center")
+    fig.tight_layout()
+    fig.savefig(out / "fig_hppnet_readout.png", dpi=110)
+    plt.close(fig)
+    for m in mics:
+        scale = 0.5 / max(float(np.max(np.abs(a[m]))) for a in arms.values())
+        for key, a in arms.items():
+            _wav(out / "audio" / f"hppnet_{key}_mic{m}.wav", a[m], scale)
+    (out / "figdata_hppnet.json").write_text(
+        json.dumps(
+            dict(
+                window=sup.window.recording,
+                window_start_s=sup.window.start_s,
+                v4=str(args.v4),
+                v3=str(args.v3),
+                line_db=args.line_db,
+                seed=SEED,
+                scorer=tr.record,
+                mics=mics,
+                labels=labels,
+                scores=scores,
+                band_edges_hz=edges.tolist(),
+                band_db=bands,
+                wav_scale="one per mic: 0.5 / the largest |sample| over the four arms",
+                git=_git(),
+            ),
+            indent=1,
+        )
+    )
+    print(f"wrote {out}", flush=True)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -535,6 +696,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default=str(OUT))
     p.add_argument("--threads", type=int, default=4)
     p.set_defaults(func=cmd_insample)
+    p = sub.add_parser("hppnet")
+    p.add_argument("--v4", required=True, help="a DREGON v4 flight payload")
+    p.add_argument("--v3", required=True, help="the nv3r4 DREGON payload")
+    p.add_argument("--window", type=int, default=1, help="index into DREGON_CRUISE_SUPPORTS")
+    p.add_argument("--mics", default="1,2")
+    p.add_argument("--line-db", type=float, default=MATCHED_LINE_DB)
+    p.add_argument("--fmax", type=float, default=1000.0)
+    p.add_argument("--out", default=str(OUT))
+    p.set_defaults(func=cmd_hppnet)
     args = ap.parse_args(argv)
     return int(args.func(args))
 
