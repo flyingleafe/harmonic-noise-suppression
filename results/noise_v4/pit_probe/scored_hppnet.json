@@ -1,0 +1,87 @@
+{
+ "tracker": {
+  "experiment": "hppnet_l2_r2_s0",
+  "ckpt": "best",
+  "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+  "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/8b3e5552b59a/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
+  "bytes": 2746881,
+  "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
+ },
+ "set": "scored",
+ "seeds": [
+  2001,
+  2002,
+  2003,
+  2004
+ ],
+ "rows": [
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727397.2050455,
+   "pit": {
+    "real": 0.6381290749163699,
+    "nv3r4": 1.2304383578483549,
+    "cwind": 10.77085946365424,
+    "r1k10": 2.6295839995598094,
+    "gust1": 1.9461293031620543,
+    "r2": 1.8383750885925558
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903905.3944898,
+   "pit": {
+    "real": 0.8884082634564182,
+    "nv3r4": 1.4530481804604976,
+    "cwind": 9.392151943176788,
+    "r1k10": 2.5786324385666832,
+    "gust1": 2.0883710376712155,
+    "r2": 2.0308971261281887
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903578.348311,
+   "pit": {
+    "real": 1.694930324695644,
+    "nv3r4": 1.9285865008913698,
+    "cwind": 10.610652805404088,
+    "r1k10": 3.6049891168596804,
+    "gust1": 2.4779395057723623,
+    "r2": 2.3908371116495295
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905725.952559,
+   "pit": {
+    "real": 1.685141578973265,
+    "nv3r4": 2.2103236036873284,
+    "cwind": 8.648069513654377,
+    "r1k10": 3.3323999058858655,
+    "gust1": 2.7925928163627507,
+    "r2": 2.7773172900939143
+   }
+  },
+  {
+   "window": "spinning_nosource_room2",
+   "start_s": 1511905200.978012,
+   "pit": {
+    "real": 1.186931186759788,
+    "nv3r4": 1.5764879115412196,
+    "cwind": 8.665997560016459,
+    "r1k10": 2.8357539285085345,
+    "gust1": 2.3004786976856755,
+    "r2": 2.159641496368753
+   }
+  }
+ ],
+ "mean": {
+  "real": 1.2187080857602972,
+  "nv3r4": 1.679776910885754,
+  "cwind": 9.617546257181191,
+  "r1k10": 2.996271877876114,
+  "gust1": 2.321102272130812,
+  "r2": 2.2394136225665884
+ }
+}

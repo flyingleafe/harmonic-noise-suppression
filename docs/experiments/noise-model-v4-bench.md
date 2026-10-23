@@ -553,6 +553,21 @@ on the same arms: real 0.93, nv3r4 1.54, C-wind 5.57, R2 1.92. The ranking
 holds (nv3r4 is better than every v4 arm under both trackers), but the
 C-wind collapse is HPPNet-specific (5.57 vs 1.67), and the alternating fit
 changes HRSPNet PIT little (1.67 → 1.63).
+Official scoring windows (report only; 4 s, seeds 2001–2004, job
+`nv4-pit-trackers3-804ecd`, `results/noise_v4/pit_probe/scored_*.json`; the
+HPPNet column reproduces the official nv3r4 1.680 and C-wind 9.62 exactly):
+
+|Arm|HPPNet (bar 1.680)|HRSPNet k64|
+|---|---|---|
+|real|1.219|0.956|
+|nv3r4|1.680|1.105|
+|C-wind|9.618|1.926|
+|R1 lines k ≤ 10|2.996|2.202|
+|gust search|2.321|1.885|
+|R2 lines k ≤ 10|2.239|1.861|
+
+Under HRSPNet, nv3r4 is 0.15 rev/s from real and R2 0.91; the v4 gap is not
+a property of HPPNet alone.
 
 ## Conclusion
 
