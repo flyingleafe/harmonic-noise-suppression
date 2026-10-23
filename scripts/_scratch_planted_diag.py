@@ -20,7 +20,6 @@ R = Path("results/noise_v4/bench/planted/dregon__kappa0__r5__s2__c6__kappa0__r1"
 rep = json.loads(R.with_suffix(".json").read_text())
 fit = json.loads(R.with_suffix(".fit.json").read_text())
 truth_pay = json.loads(Path(rep["truth"]).read_text())
-x = torch.as_tensor(np.load(R.with_suffix(".fit.state.npz"))["x"], dtype=torch.float64)
 _, rig, _ = NB._planted(
     rep["truth"],
     floor_below=None,
@@ -31,6 +30,21 @@ _, rig, _ = NB._planted(
 seed = int(fit["optimiser"]["seed"])
 out = {}
 models = {}
+m0 = B.RigModel(rig, device="cuda", seed=seed, kappa=float(rep["kappa"]))
+m0.load_payload(fit)
+x = E.get_flat(m0)
+# the fit's own path: fit_rig(start=truth, resume=True) built RigModel and loaded the
+# truth, then optimised; and the same through fit_rig with zero passes
+_, rec = B.fit_rig(
+    rig,
+    seed=seed,
+    kappa=float(rep["kappa"]),
+    device="cuda",
+    start=truth_pay,
+    resume=True,
+    deadline_s=1.0,
+)
+print("fit_rig(start=truth, resume) objective at the truth state:", rec["objective"], flush=True)
 for tag, pay in (("A_fitjson", fit), ("B_truth", truth_pay)):
     m = B.RigModel(rig, device="cuda", seed=seed, kappa=float(rep["kappa"]))
     m.load_payload(pay)
