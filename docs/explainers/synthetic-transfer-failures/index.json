@@ -1,0 +1,652 @@
+{
+ "scores": {
+  "nv3r4_hard_fullhyper_hppnet_l2:best_real_overall": {
+   "dregon": 6.070883107268242,
+   "dregon_cruise": 5.152281411675654,
+   "dregon_nosource": 5.787499605418755,
+   "dregon_ramp": 13.170048998248193,
+   "dregon_source": 6.23281653689652,
+   "dregon_standby": 15.313880250083677,
+   "dregon_zero": 0.006303715717660475,
+   "loss": 0.9342296857100266,
+   "md2": 3.2764398723788304,
+   "md2_cruise": 2.6704985592215285,
+   "md2_nosource": 3.128556232943891,
+   "md2_ramp": 11.308481013723489,
+   "md2_source": 3.42432351181377,
+   "md2_standby": 3.813056578011026,
+   "md2_zero": 3.0365871903199038,
+   "real": 4.458704317908966,
+   "real_cruise": 3.8799261014205917,
+   "real_macro": 4.673661489823536,
+   "real_nosource": 4.0534061016308,
+   "real_ramp": 12.20816977239133,
+   "real_source": 4.780147730819236,
+   "real_standby": 6.188813580692701,
+   "real_zero": 1.902026078975936
+  },
+  "nv3r4_hard_legacytraj_hppnet_l2:best_real_overall": {
+   "dregon": 5.219404500671175,
+   "dregon_cruise": 3.6826571917925617,
+   "dregon_nosource": 4.5754083894045685,
+   "dregon_ramp": 20.121076946889268,
+   "dregon_source": 5.587402278537807,
+   "dregon_standby": 15.596311004663056,
+   "dregon_zero": 0.21018210211179303,
+   "loss": 1.4723491026804998,
+   "md2": 3.2746244438065624,
+   "md2_cruise": 2.819647964945067,
+   "md2_nosource": 3.1353205274131457,
+   "md2_ramp": 10.533518023275096,
+   "md2_source": 3.4139283601999786,
+   "md2_standby": 3.892435471343586,
+   "md2_zero": 2.0025903427000618,
+   "real": 4.097416006326206,
+   "real_cruise": 3.2402114026725717,
+   "real_macro": 4.2470144722388685,
+   "real_nosource": 3.6362206533232055,
+   "real_ramp": 15.167148950723371,
+   "real_source": 4.463191631121689,
+   "real_standby": 6.310137459447138,
+   "real_zero": 1.3314991057025582
+  },
+  "prior_v1_hppnet_l2:best_real_overall": {
+   "dregon": 8.093309367061732,
+   "dregon_cruise": 3.9115318400791277,
+   "dregon_nosource": 4.432852388200057,
+   "dregon_ramp": 17.635546884456573,
+   "dregon_source": 10.184999069268404,
+   "dregon_standby": 23.244418141403884,
+   "dregon_zero": 28.989760377467906,
+   "loss": 1.0735188447512114,
+   "md2": 5.45543040329036,
+   "md2_cruise": 2.0803823867485476,
+   "md2_nosource": 5.2477241395096845,
+   "md2_ramp": 17.887876845896244,
+   "md2_source": 5.6631366670710355,
+   "md2_standby": 12.829090984975386,
+   "md2_zero": 2.0021881637690857,
+   "real": 6.571456118732095,
+   "real_cruise": 2.972741917942342,
+   "real_macro": 6.774369885176046,
+   "real_nosource": 4.964290486880249,
+   "real_ramp": 17.765926730902017,
+   "real_source": 7.846104723304248,
+   "real_standby": 14.980613965646063,
+   "real_zero": 12.106539845675279
+  },
+  "rp_pyrseplstm_k64_combdiv:best_real_macro_median": {
+   "dregon": 18.993147312310327,
+   "dregon_cruise": 20.506396961941235,
+   "dregon_nosource": 13.334191335791878,
+   "dregon_ramp": 33.79991938402095,
+   "dregon_source": 22.226836441749445,
+   "dregon_standby": 14.478537281410713,
+   "dregon_zero": 0.10601969730061821,
+   "loss": 3.070344704848069,
+   "md2": 12.379688078825529,
+   "md2_cruise": 4.130188599868865,
+   "md2_nosource": 12.288977967279424,
+   "md2_ramp": 26.668646478961254,
+   "md2_source": 12.470398190371636,
+   "md2_standby": 32.870233973787634,
+   "md2_zero": 2.016547433637033,
+   "real": 15.177690062222945,
+   "real_cruise": 12.110676260300485,
+   "real_macro": 15.686417695567929,
+   "real_nosource": 12.652530443283755,
+   "real_ramp": 30.115163673611487,
+   "real_source": 17.180402863450578,
+   "real_standby": 29.071010243906954,
+   "real_zero": 1.3012313617385651
+  }
+ },
+ "breakdown": {
+  "cells": [
+   {
+    "model": "prior_v1",
+    "cell": "dregon zero",
+    "mae": 28.98975944519043,
+    "on": 0.43378164556962023
+   },
+   {
+    "model": "prior_v1",
+    "cell": "dregon standby",
+    "mae": 23.244417190551758,
+    "ok": 0.0,
+    "off": 0.7721665852467025,
+    "x2": 0.032547630679042504,
+    "xh": 6.106497313141182e-05,
+    "other": 0.1952247191011236
+   },
+   {
+    "model": "prior_v1",
+    "cell": "dregon ramp",
+    "mae": 17.63554573059082,
+    "ok": 0.2470965770171149,
+    "off": 0.15235330073349634,
+    "x2": 0.02047677261613692,
+    "xh": 0.09245110024449878,
+    "other": 0.48762224938875304
+   },
+   {
+    "model": "prior_v1",
+    "cell": "dregon cruise",
+    "mae": 3.9115312099456787,
+    "ok": 0.8630976152441807,
+    "off": 0.00017828617069831127,
+    "x2": 0.0,
+    "xh": 0.013285885440438155,
+    "other": 0.1234382131446828
+   },
+   {
+    "model": "prior_v1",
+    "cell": "md2 zero",
+    "mae": 2.002187967300415,
+    "on": 0.06278409090909091
+   },
+   {
+    "model": "prior_v1",
+    "cell": "md2 standby",
+    "mae": 12.829090118408203,
+    "ok": 0.2064550463310794,
+    "off": 0.28366829451540193,
+    "x2": 0.004288755321813173,
+    "xh": 6.260956674179814e-05,
+    "other": 0.50557225144002
+   },
+   {
+    "model": "prior_v1",
+    "cell": "md2 ramp",
+    "mae": 17.887876510620117,
+    "ok": 0.34832974137931033,
+    "off": 0.3432112068965517,
+    "x2": 0.056707974137931036,
+    "xh": 0.0017510775862068966,
+    "other": 0.25
+   },
+   {
+    "model": "prior_v1",
+    "cell": "md2 cruise",
+    "mae": 2.0803825855255127,
+    "ok": 0.9296705531453362,
+    "off": 0.007449837310195228,
+    "x2": 0.0,
+    "xh": 0.00018980477223427331,
+    "other": 0.06268980477223428
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "cell": "dregon zero",
+    "mae": 0.2101821005344391,
+    "on": 0.0
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "cell": "dregon standby",
+    "mae": 15.596311569213867,
+    "ok": 0.0002442598925256473,
+    "off": 0.8875183194919394,
+    "x2": 0.03688324377137274,
+    "xh": 0.0,
+    "other": 0.0753541768441622
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "cell": "dregon ramp",
+    "mae": 20.121076583862305,
+    "ok": 0.20568459657701713,
+    "off": 0.4517114914425428,
+    "x2": 0.0004584352078239609,
+    "xh": 0.023685819070904647,
+    "other": 0.3184596577017115
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "cell": "dregon cruise",
+    "mae": 3.682656764984131,
+    "ok": 0.8734453445915107,
+    "off": 0.006553799634869922,
+    "x2": 0.0,
+    "xh": 0.0029809447740757646,
+    "other": 0.11701991099954359
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "cell": "md2 zero",
+    "mae": 2.0025901794433594,
+    "on": 0.05535037878787879
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "cell": "md2 standby",
+    "mae": 3.892435073852539,
+    "ok": 0.5308508640120211,
+    "off": 0.03916228399699474,
+    "x2": 0.001721763085399449,
+    "xh": 0.0008139243676433759,
+    "other": 0.42771725519659404
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "cell": "md2 ramp",
+    "mae": 10.53351879119873,
+    "ok": 0.41998922413793105,
+    "off": 0.12863685344827586,
+    "x2": 0.0390625,
+    "xh": 0.020339439655172414,
+    "other": 0.39197198275862066
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "cell": "md2 cruise",
+    "mae": 2.819647789001465,
+    "ok": 0.8720986984815619,
+    "off": 4.067245119305857e-05,
+    "x2": 0.0,
+    "xh": 0.0003863882863340564,
+    "other": 0.12747424078091107
+   }
+  ],
+  "recordings": [
+   {
+    "model": "prior_v1",
+    "recording": "FLY124",
+    "zero": 2.002187967300415,
+    "standby": 12.829092025756836,
+    "ramp": 17.887876510620117,
+    "cruise": 2.0803825855255127
+   },
+   {
+    "model": "prior_v1",
+    "recording": "free-flight_nosource_room1",
+    "zero": 0.009204995818436146,
+    "standby": 15.007845878601074,
+    "ramp": 13.4017915725708,
+    "cruise": 3.2935421466827393
+   },
+   {
+    "model": "prior_v1",
+    "recording": "free-flight_speech-low_room1",
+    "zero": 2.218601703643799,
+    "standby": 15.402276992797852,
+    "ramp": 17.524429321289062,
+    "cruise": 4.4852070808410645
+   },
+   {
+    "model": "prior_v1",
+    "recording": "free-flight_whitenoise-low_room1",
+    "zero": 64.37625885009766,
+    "standby": 36.63737106323242,
+    "ramp": 22.749631881713867,
+    "cruise": 4.082705974578857
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "recording": "FLY124",
+    "zero": 2.0025901794433594,
+    "standby": 3.8924355506896973,
+    "ramp": 10.533517837524414,
+    "cruise": 2.819648027420044
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "recording": "free-flight_nosource_room1",
+    "zero": 0.051063161343336105,
+    "standby": 19.744056701660156,
+    "ramp": 13.469970703125,
+    "cruise": 2.9985203742980957
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "recording": "free-flight_speech-low_room1",
+    "zero": 0.10093285143375397,
+    "standby": 13.766216278076172,
+    "ramp": 19.80971336364746,
+    "cruise": 3.3595731258392334
+   },
+   {
+    "model": "nv3r4 legacytraj",
+    "recording": "free-flight_whitenoise-low_room1",
+    "zero": 0.3801814019680023,
+    "standby": 13.755510330200195,
+    "ramp": 28.32887077331543,
+    "cruise": 4.884674549102783
+   }
+  ]
+ },
+ "room_tone_hz": 84.9609375,
+ "examples": [
+  {
+   "slug": "ex_dregon_stopped_whitenoise",
+   "title": "DREGON stopped, loudspeaker white noise: free-flight_whitenoise-low_room1 t0 0 s, mic 0; prior_v1 zero MAE 69.1",
+   "wav": "ex_dregon_stopped_whitenoise.wav"
+  },
+  {
+   "slug": "ex_dregon_stopped_speech",
+   "title": "DREGON stopped, loudspeaker speech: free-flight_speech-low_room1 t0 0 s, mic 3; prior_v1 zero MAE 10.3",
+   "wav": "ex_dregon_stopped_speech.wav"
+  },
+  {
+   "slug": "ex_dregon_standby_nosource",
+   "title": "DREGON standby, no loudspeaker: free-flight_nosource_room1 t0 0 s, mic 7; prior_v1 standby MAE 16.2",
+   "wav": "ex_dregon_standby_nosource.wav"
+  },
+  {
+   "slug": "ex_dregon_standby_whitenoise",
+   "title": "DREGON standby and take-off, loudspeaker white noise: free-flight_whitenoise-low_room1 t0 8 s, mic 0; prior_v1 standby MAE 27.4",
+   "wav": "ex_dregon_standby_whitenoise.wav"
+  },
+  {
+   "slug": "ex_md2_standby",
+   "title": "MD2 standby: FLY124 t0 24 s, mic 5; prior_v1 standby MAE 35.2",
+   "wav": "ex_md2_standby.wav"
+  },
+  {
+   "slug": "ex_md2_ramp",
+   "title": "MD2 ramp: FLY124 t0 24 s, mic 0; prior_v1 ramp MAE 46.6",
+   "wav": "ex_md2_ramp.wav"
+  }
+ ],
+ "lag": [
+  {
+   "recording": "free-flight_nosource_room1",
+   "first_stamp_s": 5.470263719558716,
+   "clip0_frames_without_telemetry": 171,
+   "clip0_max_lag_s": 5.476219211916525,
+   "other_clips_max_lag_s": 0.08061772519754129
+  },
+  {
+   "recording": "free-flight_speech-low_room1",
+   "first_stamp_s": 5.47627854347229,
+   "clip0_frames_without_telemetry": 171,
+   "clip0_max_lag_s": 5.483028504952967,
+   "other_clips_max_lag_s": 0.04716540336608688
+  },
+  {
+   "recording": "free-flight_whitenoise-low_room1",
+   "first_stamp_s": 6.486872911453247,
+   "clip0_frames_without_telemetry": 203,
+   "clip0_max_lag_s": 6.48878126980299,
+   "other_clips_max_lag_s": 0.08740006600338113
+  }
+ ],
+ "rescore": [
+  {
+   "model": "prior_v1",
+   "labels": "panel",
+   "all": 8.093310356140137,
+   "zero": 28.989761352539062,
+   "n_zero": 3160,
+   "standby": 23.244417190551758,
+   "n_standby": 4224,
+   "ramp": 17.63554573059082,
+   "n_ramp": 1736,
+   "cruise": 3.911531686782837,
+   "n_cruise": 35056
+  },
+  {
+   "model": "prior_v1",
+   "labels": "panel, telemetry frames only",
+   "all": 5.919826984405518,
+   "zero": NaN,
+   "n_zero": 0,
+   "standby": 21.60712242126465,
+   "n_standby": 3200,
+   "ramp": 18.870763778686523,
+   "n_ramp": 1560,
+   "cruise": 3.911531686782837,
+   "n_cruise": 35056
+  },
+  {
+   "model": "prior_v1",
+   "labels": "true time",
+   "all": 5.830982647273619,
+   "zero": 26.30799704747131,
+   "n_zero": 728,
+   "standby": 17.361724573996913,
+   "n_standby": 2136,
+   "ramp": 20.507652428969596,
+   "n_ramp": 1880,
+   "cruise": 3.916946651937929,
+   "n_cruise": 35072
+  },
+  {
+   "model": "nv3r4 legacytraj",
+   "labels": "panel",
+   "all": 5.219404697418213,
+   "zero": 0.21018211543560028,
+   "n_zero": 3160,
+   "standby": 15.596309661865234,
+   "n_standby": 4224,
+   "ramp": 20.121078491210938,
+   "n_ramp": 1736,
+   "cruise": 3.682657241821289,
+   "n_cruise": 35056
+  },
+  {
+   "model": "nv3r4 legacytraj",
+   "labels": "panel, telemetry frames only",
+   "all": 5.408905982971191,
+   "zero": NaN,
+   "n_zero": 0,
+   "standby": 16.409265518188477,
+   "n_standby": 3200,
+   "ramp": 21.635982513427734,
+   "n_ramp": 1560,
+   "cruise": 3.682657241821289,
+   "n_cruise": 35056
+  },
+  {
+   "model": "nv3r4 legacytraj",
+   "labels": "true time",
+   "all": 5.165006572937826,
+   "zero": 1.5816838143925582,
+   "n_zero": 728,
+   "standby": 17.51065022967315,
+   "n_standby": 2136,
+   "ramp": 20.062895824556684,
+   "n_ramp": 1880,
+   "cruise": 3.688909752807547,
+   "n_cruise": 35072
+  }
+ ],
+ "starts": [
+  {
+   "recording": "free-flight_nosource_room1",
+   "panel_idle_onset_s": [
+    3.87,
+    3.68,
+    3.84,
+    3.49
+   ],
+   "true_idle_onset_s": [
+    6.69,
+    6.66,
+    6.69,
+    6.59
+   ],
+   "slug": "start_free_flight_nosource_room1",
+   "wav": "start_free_flight_nosource_room1.wav",
+   "first_stamp_s": 5.470263719558716,
+   "takeoff_s": 9.024000000000001,
+   "whine_onset_s": 6.144,
+   "band_onset_s": 5.952
+  },
+  {
+   "recording": "free-flight_speech-low_room1",
+   "panel_idle_onset_s": [
+    4.13,
+    3.71,
+    3.71,
+    3.81
+   ],
+   "true_idle_onset_s": [
+    6.78,
+    6.66,
+    6.66,
+    6.69
+   ],
+   "slug": "start_free_flight_speech_low_room1",
+   "wav": "start_free_flight_speech_low_room1.wav",
+   "first_stamp_s": 5.47627854347229,
+   "takeoff_s": 9.376,
+   "whine_onset_s": 6.176,
+   "band_onset_s": null
+  },
+  {
+   "recording": "free-flight_whitenoise-low_room1",
+   "panel_idle_onset_s": [
+    5.57,
+    6.34,
+    6.18,
+    5.92
+   ],
+   "true_idle_onset_s": [
+    7.55,
+    7.68,
+    7.68,
+    7.62
+   ],
+   "slug": "start_free_flight_whitenoise_low_room1",
+   "wav": "start_free_flight_whitenoise_low_room1.wav",
+   "first_stamp_s": 6.486872911453247,
+   "takeoff_s": 11.872,
+   "whine_onset_s": null,
+   "band_onset_s": null
+  }
+ ],
+ "command_vs_measured": [
+  {
+   "recording": "free-flight_nosource_room1",
+   "motors_measured_above_1_s": 6.56590461730957,
+   "motors_measured_reaches_idle_s": 6.6848227977752686,
+   "motors_command_above_1_s": 7.844839811325073,
+   "motors_command_reaches_idle_s": 8.088883638381958
+  },
+  {
+   "recording": "free-flight_speech-low_room1",
+   "motors_measured_above_1_s": 6.642363548278809,
+   "motors_measured_reaches_idle_s": 6.773415565490723,
+   "motors_command_above_1_s": 8.548370838165283,
+   "motors_command_reaches_idle_s": 8.878370523452759
+  },
+  {
+   "recording": "free-flight_whitenoise-low_room1",
+   "motors_measured_above_1_s": 7.538172721862793,
+   "motors_measured_reaches_idle_s": 7.680158853530884,
+   "motors_command_above_1_s": 10.690199851989746,
+   "motors_command_reaches_idle_s": 11.637282848358154
+  }
+ ],
+ "training": [
+  {
+   "slug": "train_free_flight_nosource_room2",
+   "wav": "train_free_flight_nosource_room2.wav",
+   "first_stamp_s": 5.213059425354004,
+   "takeoff_s": 7.808,
+   "whine_onset_s": 6.752,
+   "band_onset_s": 5.6,
+   "recording": "free-flight_nosource_room2",
+   "track": "motors_command",
+   "label_onset_s": [
+    6.59,
+    6.59,
+    6.59,
+    6.59
+   ],
+   "idle_reached_s": 7.616,
+   "span_s": 78.78789043426514
+  },
+  {
+   "slug": "train_hovering_nosource_room2",
+   "wav": "train_hovering_nosource_room2.wav",
+   "first_stamp_s": 4.222547292709351,
+   "takeoff_s": 6.88,
+   "whine_onset_s": 6.56,
+   "band_onset_s": 4.672,
+   "recording": "hovering_nosource_room2",
+   "track": "motors_command",
+   "label_onset_s": [
+    5.54,
+    5.54,
+    5.54,
+    5.54
+   ],
+   "idle_reached_s": 6.688,
+   "span_s": 39.95636224746704
+  },
+  {
+   "slug": "train_rectangle_nosource_room2",
+   "wav": "train_rectangle_nosource_room2.wav",
+   "first_stamp_s": 4.986811637878418,
+   "takeoff_s": 7.52,
+   "whine_onset_s": 7.2,
+   "band_onset_s": 5.504,
+   "recording": "rectangle_nosource_room2",
+   "track": "motors_command",
+   "label_onset_s": [
+    6.3,
+    6.3,
+    6.3,
+    6.3
+   ],
+   "idle_reached_s": 7.328,
+   "span_s": 40.953553676605225
+  },
+  {
+   "slug": "train_spinning_nosource_room2",
+   "wav": "train_spinning_nosource_room2.wav",
+   "first_stamp_s": 6.203851938247681,
+   "takeoff_s": 8.608,
+   "whine_onset_s": 7.264,
+   "band_onset_s": 6.464,
+   "recording": "spinning_nosource_room2",
+   "track": "motors_command",
+   "label_onset_s": [
+    6.21,
+    6.21,
+    6.21,
+    6.21
+   ],
+   "idle_reached_s": 8.544,
+   "span_s": 36.72262382507324
+  },
+  {
+   "slug": "train_updown_nosource_room2",
+   "wav": "train_updown_nosource_room2.wav",
+   "first_stamp_s": 2.514389991760254,
+   "takeoff_s": 5.44,
+   "whine_onset_s": 4.32,
+   "band_onset_s": 3.2,
+   "recording": "updown_nosource_room2",
+   "track": "motors_command",
+   "label_onset_s": [
+    4.38,
+    4.38,
+    4.38,
+    4.38
+   ],
+   "idle_reached_s": 5.28,
+   "span_s": 47.29806399345398
+  },
+  {
+   "slug": "train_FLY125",
+   "wav": "train_FLY125.wav",
+   "first_stamp_s": -0.138714634,
+   "takeoff_s": 1.184,
+   "whine_onset_s": null,
+   "band_onset_s": null,
+   "recording": "FLY125",
+   "track": "calibrated rps",
+   "label_onset_s": [
+    0.06,
+    0.0,
+    0.0,
+    0.06
+   ],
+   "idle_reached_s": 1.12,
+   "span_s": 177.702
+  }
+ ]
+}

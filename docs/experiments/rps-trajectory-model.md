@@ -991,6 +991,25 @@ differences, not the dynamics.
 
 ### Open questions
 
+- **The fit corpus includes validation and held-out telemetry (internal only;
+  the paper does not mention it).** The `dregon` and `michaels` rigs are fitted
+  on every flight:
+  - DREGON: all 10 flights, including the room-1 rp validation flights and the
+    held-out high-level flights.
+  - MD2: FLY124/FLY125/FLY103/FLY108, including validation FLY124 and held-out
+    FLY103/FLY108.
+
+  Since 2026-10-23, the wrap-up paper's Table II (`tables/gen_traj_data.tex`)
+  lists only the training recordings, by Dmitrii's decision. On the frozen
+  airborne rule these give DREGON room-2 (5 flights) 189.79 s, overall mean
+  80.9 rev/s and rotor variance 4.4–4.9; MD2 FLY125 153.87 s, overall mean
+  80.6 rev/s and rotor variance 3.9–5.0. The total is 7432 s instead of
+  7912 s; hover level 81–278 rev/s, variance factor ≈ 800.
+
+  The fits, round tables, rig posterior and the paper's `tab:traj` still come
+  from the all-flight corpus. Refitting `dregon` and `michaels` on the training
+  flights only would make them consistent and remove the leakage of validation
+  flights' trajectory statistics into the synthetic streams.
 - **Heavy tails.** The model is Gaussian throughout, while every series in the
   corpus has excess kurtosis 2.7-46 at the lags we can measure. The frozen five
   families are all second-order, so they cannot see this: a model can pass and
