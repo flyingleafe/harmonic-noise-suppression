@@ -88,6 +88,7 @@ its margin, in the window, rather than on a proxy.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1197,6 +1198,27 @@ DREGON_SCORED_DUR_S = 4.0
 #: material. ``scripts/noise_v2_likelihood_window.py`` uses the same 2 s guard.
 DREGON_FLOOR_GUARD_S = 2.0
 DREGON_FLOOR_DUR_S = 8.0
+#: ``dregon-flight-wide``: every disjoint :data:`DREGON_FLOOR_DUR_S` window of the
+#: five scored recordings on the grid ``floor start + j 8 s`` (``j`` any integer,
+#: so the five ``dregon-floor`` 8 s segments are its ``j = 0`` rows) that lies in
+#: the label's coverage, does not overlap ``[scored - guard, scored + 4 s + guard]``
+#: and keeps EVERY rotor's ``motors_command`` at or above this (cruise-like
+#: flight, read at :data:`DREGON_WIDE_READ_HZ` as :func:`.clips.windows` reads it).
+DREGON_WIDE_MIN_RPS = 50.0
+DREGON_WIDE_READ_HZ = 200.0
+#: The offsets (s after each recording's floor start) :func:`dregon_wide_offsets`
+#: derives from DREGON-frames (2026-10-23): 18 windows, 144 s, the five floor
+#: segments among them; every rotor's label 51.6-90.0 rev/s over them. No
+#: window precedes a scored window (the rotors spin up until ~2 s
+#: before it); the tails after the last row are shorter than 8 s or dip under
+#: 50 rev/s (updown 42 s: 25 rev/s).
+DREGON_WIDE_OFFSETS_S: dict[str, tuple[float, ...]] = {
+    "free-flight_nosource_room2": (0.0, 8.0, 16.0, 24.0, 32.0, 40.0, 48.0),
+    "hovering_nosource_room2": (0.0, 8.0, 16.0),
+    "updown_nosource_room2": (0.0, 8.0, 16.0),
+    "rectangle_nosource_room2": (0.0, 8.0, 16.0),
+    "spinning_nosource_room2": (0.0, 8.0),
+}
 
 
 def set_dregon_bench() -> list[SupportSpec]:
@@ -1274,10 +1296,56 @@ def set_michaels_standby() -> list[SupportSpec]:
 def set_dregon_floor() -> list[SupportSpec]:
     specs = [flight_dregon(rec, start, DREGON_SCORED_DUR_S) for rec, start in DREGON_SCORED]
     specs += [
-        flight_dregon(rec, start + DREGON_SCORED_DUR_S + DREGON_FLOOR_GUARD_S, DREGON_FLOOR_DUR_S)
+        flight_dregon(rec, dregon_floor_start(start), DREGON_FLOOR_DUR_S)
         for rec, start in DREGON_SCORED
     ]
     return specs
+
+
+def dregon_floor_start(scored_start: float) -> float:
+    """The ``dregon-floor`` 8 s segment's start after the scored window ``scored_start``."""
+    return scored_start + DREGON_SCORED_DUR_S + DREGON_FLOOR_GUARD_S
+
+
+def dregon_wide_offsets(rec: C.Recording, scored_start: float) -> tuple[float, ...]:
+    """The ``dregon-flight-wide`` rule on one recording: the offsets ``j 8 s``
+    (from :func:`dregon_floor_start`, ascending) of every window ``[t, t + 8 s]``
+    inside :attr:`.clips.Recording.coverage`, clear of ``[scored - guard,
+    scored + 4 s + guard]`` (touching its edge is allowed) and with every
+    rotor's label at or over :data:`DREGON_WIDE_MIN_RPS` over the window."""
+    dur, f0 = DREGON_FLOOR_DUR_S, dregon_floor_start(scored_start)
+    lo, hi = scored_start - DREGON_FLOOR_GUARD_S, f0
+    cov0, cov1 = rec.coverage
+    j_lo, j_hi = math.floor((cov0 - f0) / dur), math.ceil((cov1 - f0) / dur)
+    out = []
+    for j in range(j_lo, j_hi + 1):
+        t0 = f0 + j * dur
+        if t0 < cov0 - 1e-9 or t0 + dur > cov1 + 1e-9 or (t0 < hi - 1e-9 and t0 + dur > lo + 1e-9):
+            continue
+        speeds = rec.rps_at(np.arange(t0, t0 + dur, 1.0 / DREGON_WIDE_READ_HZ))
+        if float(np.nanmin(speeds)) >= DREGON_WIDE_MIN_RPS:
+            out.append(j * dur)
+    return tuple(out)
+
+
+def set_dregon_flight_wide() -> list[SupportSpec]:
+    """Every cruise-like disjoint 8 s window of the five scored room-2
+    recordings (:data:`DREGON_WIDE_OFFSETS_S`), never within the guard of a
+    scored window. The five ``dregon-floor`` 8 s segments come FIRST, in
+    :data:`DREGON_SCORED` order (the tuning segments), then the others by
+    recording and time."""
+    floor = [
+        flight_dregon(rec, dregon_floor_start(start), DREGON_FLOOR_DUR_S)
+        for rec, start in DREGON_SCORED
+        if 0.0 in DREGON_WIDE_OFFSETS_S[rec]
+    ]
+    rest = [
+        flight_dregon(rec, dregon_floor_start(start) + off, DREGON_FLOOR_DUR_S)
+        for rec, start in DREGON_SCORED
+        for off in DREGON_WIDE_OFFSETS_S[rec]
+        if off != 0.0
+    ]
+    return floor + rest
 
 
 SUPPORT_SETS: dict[str, Callable[[], list[SupportSpec]]] = {
@@ -1287,6 +1355,7 @@ SUPPORT_SETS: dict[str, Callable[[], list[SupportSpec]]] = {
     "michaels-all": set_michaels_all,
     "michaels-standby": set_michaels_standby,
     "dregon-floor": set_dregon_floor,
+    "dregon-flight-wide": set_dregon_flight_wide,
 }
 
 
@@ -1316,6 +1385,9 @@ __all__ = [
     "dregon_bench_point_key",
     "flight_clip",
     "flight_dregon",
+    "dregon_floor_start",
+    "dregon_wide_offsets",
+    "set_dregon_flight_wide",
     "flight_michaels",
     "index_row",
     "iter_supports",

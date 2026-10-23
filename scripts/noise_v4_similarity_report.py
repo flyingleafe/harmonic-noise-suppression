@@ -20,6 +20,14 @@ payload on the same trajectory, seed 2001 as "real" against seed 2002: the
 realisation noise of every measure at that window length and trajectory.
 Outputs ``report.json`` (every per-window, per-band, per-mic number) and
 ``report.md`` (one row per arm, its seed floor under it).
+
+``--arm NAME=PATH`` (repeatable) adds a payload arm after the built-in ones
+(:data:`ARMS`; a built-in name is replaced); ``--arm NAME`` names a built-in.
+``--only`` restricts the report to the ``--arm`` arms, in their order (each with
+its seed-floor row), e.g. to gate a new payload against nv3r4::
+
+    python scripts/noise_v4_similarity_report.py --out results/noise_v4/similarity/gate/ \\
+        --only --arm nv3r4 --arm v4_gust=results/noise_v4/flight/wind/<stem>__gust.json
 """
 
 from __future__ import annotations
@@ -70,15 +78,41 @@ ARMS: dict[str, Any] = {
     ),
 }
 FLOOR_SUFFIX = " seed floor"
-ARM_ORDER = tuple(row for arm in ARMS for row in (arm, f"{arm}{FLOOR_SUFFIX}"))
 SETS = ("scoring", "tuning")
 
 
-def _payloads() -> dict[str, dict[str, Any]]:
+def arm_rows(arms: dict[str, Any]) -> tuple[str, ...]:
+    """The report's rows: each arm, then its seed floor."""
+    return tuple(row for arm in arms for row in (arm, f"{arm}{FLOOR_SUFFIX}"))
+
+
+def select_arms(specs: list[str], only: bool) -> dict[str, Any]:
+    """The arms of a run: :data:`ARMS` (none with ``only``) then each ``--arm``
+    spec, ``NAME=PATH`` (a payload; a built-in name is replaced in place) or
+    ``NAME`` (a built-in)."""
+    arms: dict[str, Any] = {} if only else dict(ARMS)
+    for spec in specs:
+        name, sep, path = spec.partition("=")
+        if not name or (sep and not path):
+            raise SystemExit(f"--arm {spec!r}: expected NAME=PATH or a built-in NAME")
+        if sep:
+            if not Path(path).is_file():
+                raise SystemExit(f"--arm {spec!r}: no payload at {path}")
+            arms[name] = path
+        elif name in ARMS:
+            arms[name] = ARMS[name]
+        else:
+            raise SystemExit(f"--arm {name!r} is not a built-in arm ({', '.join(ARMS)})")
+    if not arms:
+        raise SystemExit("--only needs at least one --arm")
+    return arms
+
+
+def _payloads(arms: dict[str, Any]) -> dict[str, dict[str, Any]]:
     from experiments.noise_model import dregon_lawsearch_v4 as LS
 
     out = {}
-    for name, spec in ARMS.items():
+    for name, spec in arms.items():
         if isinstance(spec, tuple):
             out[name] = LS.edit_payload(json.loads(Path(spec[0]).read_text()), spec[1])
         else:
@@ -154,11 +188,11 @@ def _mean(xs: Any, axis: int = 0) -> Any:
     return float(m) if np.ndim(m) == 0 else m
 
 
-def _aggregate(per_window: list[dict[str, Any]]) -> dict[str, Any]:
+def _aggregate(per_window: list[dict[str, Any]], rows_order: tuple[str, ...]) -> dict[str, Any]:
     """Per arm: the window mean of every summary scalar, and of the per-band
     rows of the tables (mic-averaged first)."""
     out: dict[str, Any] = {}
-    for arm in ARM_ORDER:
+    for arm in rows_order:
         rows = [w["arms"][arm] for w in per_window]
         summ = {
             f"{meas}.{k}": _mean([r[meas]["summary"][k] for r in rows])
@@ -202,6 +236,7 @@ def _markdown(report: dict[str, Any]) -> str:
     from experiments.noise_model import similarity as SIM
 
     groups = [f"k{lo}-{hi}" for lo, hi in SIM.ORDER_GROUPS]
+    order = tuple(report["arm_order"])
     md = [
         "# Noise model v4 — DREGON similarity battery",
         "",
@@ -252,7 +287,7 @@ def _markdown(report: dict[str, Any]) -> str:
                     s(a, "itakura_saito.is_octave", 3),
                     s(a, "itakura_saito.is_octave_symmetric", 3),
                 ]
-                for a in ARM_ORDER
+                for a in order
             ],
         )
         md += [
@@ -285,7 +320,7 @@ def _markdown(report: dict[str, Any]) -> str:
                     s(a, "spectro_temporal.sd_signed_diff_db"),
                     s(a, "spectro_temporal.sd_abs_diff_db"),
                 ]
-                for a in ARM_ORDER
+                for a in order
             ],
         )
         md += [
@@ -309,7 +344,7 @@ def _markdown(report: dict[str, Any]) -> str:
                     *[s(a, f"order_level_error.prominence_abs_db_{g}") for g in groups],
                     s(a, "order_level_error.prominence_abs_db"),
                 ]
-                for a in ARM_ORDER
+                for a in order
             ],
         )
         md += ["", "### Time structure and space", ""]
@@ -341,7 +376,7 @@ def _markdown(report: dict[str, Any]) -> str:
                     s(a, "spatial.msc_abs_diff", 3),
                     s(a, "spatial.msc_signed_diff", 3),
                 ]
-                for a in ARM_ORDER
+                for a in order
             ],
         )
         for key, title, nd in (
@@ -356,9 +391,9 @@ def _markdown(report: dict[str, Any]) -> str:
             md += ["", f"### {title}", ""]
             md += _table(
                 ["arm", *SIM.BAND_NAMES],
-                [[a, *[_fmt(v, nd) for v in agg[a]["bands"][key]]] for a in ARM_ORDER],
+                [[a, *[_fmt(v, nd) for v in agg[a]["bands"][key]]] for a in order],
             )
-        smear = agg["v4_cwind"]["bands"]["smear_fraction"]
+        smear = agg[order[0]]["bands"]["smear_fraction"]
         md += [
             "",
             "Line-bin smearing on the arms' (= real) label (fraction of frames whose label "
@@ -418,13 +453,27 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", default="results/noise_v4/similarity/")
+    ap.add_argument(
+        "--arm",
+        action="append",
+        default=[],
+        metavar="NAME[=PATH]",
+        help="add a payload arm NAME=PATH (a built-in NAME is replaced) or name a built-in arm; "
+        "repeatable",
+    )
+    ap.add_argument(
+        "--only",
+        action="store_true",
+        help="report only the --arm arms (each with its seed floor row); use another --out",
+    )
     args = ap.parse_args(argv)
+    arms = select_arms(list(args.arm), bool(args.only))
     from data_processing.noise_model.render import render_noise
 
     t_start = time.time()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    payloads = _payloads()
+    payloads = _payloads(arms)
     report: dict[str, Any] = dict(
         schema="noise-v4-similarity/1",
         git=subprocess.run(
@@ -432,8 +481,9 @@ def main(argv: list[str] | None = None) -> int:
         ).stdout.strip(),
         seed=SEED,
         arms={
-            k: (v if isinstance(v, str) else dict(base=v[0], point=v[1])) for k, v in ARMS.items()
+            k: (v if isinstance(v, str) else dict(base=v[0], point=v[1])) for k, v in arms.items()
         },
+        arm_order=list(arm_rows(arms)),
         sets={},
         notes=NOTES,
     )
@@ -465,14 +515,14 @@ def main(argv: list[str] | None = None) -> int:
                 + "  ".join(
                     f"{a} LTAS {rows[a]['ltas']['mean_abs_db']:.2f}"
                     f"/{rows[a + FLOOR_SUFFIX]['ltas']['mean_abs_db']:.2f}"
-                    for a in ARMS
+                    for a in arms
                 ),
                 flush=True,
             )
         report["sets"][set_name] = dict(
             windows=[w["window"] for w in per_window],
             window_seconds=per_window[0]["seconds"],
-            aggregate=_aggregate(per_window),
+            aggregate=_aggregate(per_window, arm_rows(arms)),
             per_window=per_window,
         )
     report["wall_s"] = time.time() - t_start
