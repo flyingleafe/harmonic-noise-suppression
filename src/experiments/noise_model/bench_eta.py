@@ -310,7 +310,8 @@ def saddle_escape(
         )
         if n_moved == 0:
             rounds.append(dict(check, objective_start=f_start, directions=directions))
-            stop = "stuck"
+            # no direction searched at all: the deadline, not a stuck saddle
+            stop = "stuck" if directions else "deadline"
             break
         budget = None if deadline is None else left() - 1.25 * hess_s
         conv = converge(model, budget)
