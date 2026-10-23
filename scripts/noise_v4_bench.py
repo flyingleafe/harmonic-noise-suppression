@@ -419,6 +419,7 @@ def cmd_escape(args: argparse.Namespace) -> int:
     convergence loop of :func:`bench_v4.fit_rig`; written as
     ``<stem>__c<n+1>`` with the rounds in ``optimiser.saddle_escape``, then
     ``eta`` on it (as ``eta`` writes it) if it ends at a minimum."""
+    import numpy as np
     import torch
 
     from experiments.noise_model import bench_eta as E
@@ -467,13 +468,39 @@ def cmd_escape(args: argparse.Namespace) -> int:
             )
         } | dict(n_passes=len(rec["convergence_passes"]))
 
-    esc, hp = E.saddle_escape(model, converge, max_rounds=args.max_rounds, deadline=deadline)
+    hp0, hess_s0 = None, None
+    if args.hessian is not None:
+        hz = np.load(args.hessian)
+        x = E.get_flat(model).cpu().numpy()
+        # the payload's JSON round trip may re-derive a coordinate to the last ulp
+        if hz["x"].shape == x.shape and np.allclose(hz["x"], x, rtol=1e-12, atol=1e-12):
+            hp0, hess_s0 = (hz["H"], hz["P"]), float(hz["hessian_s"])
+            print(f"[escape] Hessian from {args.hessian} ({hess_s0:.0f} s to compute)", flush=True)
+        else:
+            print(f"[escape] {args.hessian} is not at these parameters: recomputed", flush=True)
+    esc, hp = E.saddle_escape(
+        model,
+        converge,
+        max_rounds=args.max_rounds,
+        deadline=deadline,
+        hp=hp0,
+        hessian_s=hess_s0,
+    )
     pay = B.payload(model, last, git=_git())
     pay["optimiser"]["resumed_from"] = str(src_path)
     pay["optimiser"]["saddle_escape"] = esc
     path = _next_continuation(args.out, src_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(pay))
+    if hp is not None:
+        # the last Hessian is at the written parameters: the next escape starts from it
+        np.savez(
+            path.with_suffix(".hessian.npz"),
+            H=hp[0],
+            P=hp[1],
+            x=E.get_flat(model).cpu().numpy(),
+            hessian_s=esc["hessian_s"],
+        )
     print(
         f"wrote {path}: {pay['objective']['total_nats']:.1f} nats (from "
         f"{src['objective']['total_nats']:.1f}); escape {esc['stop']} after "
@@ -684,6 +711,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lbfgs-iters", type=int, default=1200, help="loop passes of a quarter")
     p.add_argument("--band-hz", type=float, default=200.0, help="eta's finest block's band")
     p.add_argument("--deadline-min", type=float, default=170.0)
+    p.add_argument(
+        "--hessian",
+        default=None,
+        help="a previous escape's <payload>.hessian.npz (used only at its exact parameters)",
+    )
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
     p.set_defaults(func=cmd_escape)

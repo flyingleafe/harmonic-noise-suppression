@@ -201,7 +201,8 @@ def eta_report(
 ESCAPE_STEPS: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)
 
 
-def _get_flat(model: RigModel) -> Tensor:
+def get_flat(model: RigModel) -> Tensor:
+    """The flat free-parameter vector (:func:`free_params` order), detached."""
     return torch.cat([t.detach().reshape(-1) for _, t in free_params(model)]).clone()
 
 
@@ -233,7 +234,7 @@ def line_search(
     ``steps``) on the MAP objective (:meth:`RigModel.objective`), or leave it
     at ``x`` if none is below ``f0`` (its objective there). Each sign walks
     out until the objective stops falling."""
-    x0 = _get_flat(model)
+    x0 = get_flat(model)
     d = torch.as_tensor(v, dtype=x0.dtype, device=x0.device)
     best_s, best_f, n_evals = 0.0, f0, 0
     for sign in (1.0, -1.0):
@@ -258,6 +259,8 @@ def saddle_escape(
     max_rounds: int = 4,
     steps: tuple[float, ...] = ESCAPE_STEPS,
     deadline: float | None = None,
+    hp: tuple[np.ndarray, np.ndarray] | None = None,
+    hessian_s: float | None = None,
     log: Any = print,
 ) -> tuple[dict[str, Any], tuple[np.ndarray, np.ndarray] | None]:
     """Leave the saddle a converged fit can stop on, in place on ``model``.
@@ -271,6 +274,10 @@ def saddle_escape(
     direction lowers the objective (``stuck``), or when the next Hessian would
     end past ``deadline`` (a ``time.perf_counter()`` instant).
 
+    ``hp`` is ``(H, P)`` already computed at the model's parameters (a previous
+    run's last Hessian) and ``hessian_s`` its wall time; the first round then
+    starts at the line search.
+
     Returns the record and the last ``(H, P)`` if it is at the model's final
     parameters (``None`` if the deadline stopped the run before it)."""
     t_all = time.perf_counter()
@@ -278,9 +285,13 @@ def saddle_escape(
     def left() -> float:
         return math.inf if deadline is None else deadline - time.perf_counter()
 
-    t0 = time.perf_counter()
-    hp: tuple[np.ndarray, np.ndarray] | None = hessians(model, log=log)
-    hess_s = time.perf_counter() - t0
+    if hp is None:
+        t0 = time.perf_counter()
+        hp = hessians(model, log=log)
+        hessian_s = time.perf_counter() - t0
+    elif hessian_s is None:
+        raise ValueError("a precomputed Hessian needs its wall time (hessian_s)")
+    hess_s = float(hessian_s)
     rounds: list[dict[str, Any]] = []
     check: dict[str, Any] = {}
     while True:
@@ -339,6 +350,7 @@ def saddle_escape(
         n_negative=final["n_negative"],
         min_eig=final["min_eig"],
         at_minimum=None if hp is None else final["n_negative"] == 0,
+        hessian_s=hess_s,
         wall_s=time.perf_counter() - t_all,
     )
     return record, hp
