@@ -858,6 +858,255 @@ def cmd_full(args: argparse.Namespace) -> int:
     return 0
 
 
+def _v4_rig_view(fits: dict[str, dict[str, Any]], *, speeds: np.ndarray, title: str) -> Any:
+    """The parameter view of a v4 per-regime pair as an interactive Plotly figure,
+    the v4 counterpart of ``notebooks/noise_lab.rig_view_plotly``: every rotor at
+    the slider's speed, the expected periodogram (2048-point periodic Hann, the
+    MD2 flight front end, mic mean) split exactly into the floor (grey; lines
+    silenced) and each rotor's comb (floor silenced, the other rotors' lines
+    silenced); the dropdown picks ``all rotors`` / ``rotor mean`` / ``rotor N``
+    on the floor, stems at ``k f_r`` from the floor to the curve, red caps of
+    +/- the line half width (the shaft's Gaussian HWHM, ``k sigma_nu(s) / 2 pi``
+    sd, combined by the Voigt rule with the phase-pedestal width ``W_k``). The
+    standby and cruise halves blend by the renderer's regime weight (power)."""
+    import math
+
+    import plotly.graph_objects as go
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks"))
+    from noise_lab import line_half_width_hz
+
+    from data_processing.noise_model import v4 as V4
+    from data_processing.noise_model.render import regime_blend_weight
+    from experiments.noise_model.dregon_flight_v4 import rotor_payload
+
+    n_fft, fmax = 2048, 7900.0
+
+    def silent(p: dict[str, Any], *, lines: bool = False, floor: bool = False) -> dict[str, Any]:
+        q = copy.deepcopy(p)
+        pr = q["params"]
+        if lines:
+            for key in ("profile_aero_db", "profile_motor_db"):
+                pr[key] = (np.asarray(pr[key]) - 300.0).tolist()
+        if floor:
+            pr["floor"]["mean_db"] -= 300.0
+            pr["floor"]["static_rel"] = 0.0
+        return q
+
+    def db(x: np.ndarray) -> np.ndarray:
+        return 10.0 * np.log10(np.maximum(x, 1e-300))
+
+    n_rot = int(np.asarray(next(iter(fits.values()))["params"]["profile_aero_db"]).shape[0])
+    views = ["all rotors", "rotor mean"] + [f"rotor {r + 1}" for r in range(n_rot)]
+    parts = {
+        g: dict(
+            floor=silent(p, lines=True),
+            combs=[silent(rotor_payload(p, r), floor=True) for r in range(n_rot)],
+            par=V4.V4Params.from_payload(p),
+            width=np.asarray(p["params"]["pedestal"]["width_phase_hz"], dtype=np.float64),
+        )
+        for g, p in fits.items()
+    }
+    f = np.fft.rfftfreq(n_fft, 1.0 / SR)
+    band = f <= fmax
+    per_speed = []
+    for v in speeds:
+        rps = np.full(n_rot, float(v))
+        w = float(regime_blend_weight(np.full((n_rot, 2 * n_fft), float(v)), sr=SR)[n_fft])
+        weights = {"standby": 1.0 - w, "cruise": w} if set(fits) == {"standby", "cruise"} else {}
+        weights = weights or {g: 1.0 for g in fits}
+        floor = np.zeros(f.size)
+        combs = np.zeros((n_rot, f.size))
+        hws = []
+        for g, wt in weights.items():
+            if wt <= 0.0:
+                continue
+            pt = parts[g]
+            floor += wt * V4.expected_periodogram(pt["floor"], rps, n_fft=n_fft).mean(axis=0)
+            for r in range(n_rot):
+                combs[r] += wt * V4.expected_periodogram(pt["combs"][r], rps, n_fft=n_fft).mean(
+                    axis=0
+                )
+            par = pt["par"]
+            sig = float(par.shaft.sigma_nu(par.speed(np.array([float(v)])))[0])
+            k = np.arange(1, pt["width"].size + 1)
+            hws.append(line_half_width_hz(sig * k / (2.0 * math.pi), pt["width"]))
+        curves = [floor + combs.sum(axis=0), floor + combs.mean(axis=0)] + [
+            floor + c for c in combs
+        ]
+        k_all = np.arange(1, max(h.size for h in hws) + 1)
+        fk = k_all * float(v)
+        keep = fk <= fmax
+        bins = np.rint(fk[keep] * n_fft / SR).astype(int)
+        traces = [(f[band], db(floor[band]))]
+        for curve in curves:
+            lvl, base = db(curve[bins]), db(floor[bins])
+            stem_x = np.repeat(fk[keep], 3)
+            stem_x[2::3] = np.nan
+            stem_y = np.column_stack([base, lvl, np.full(lvl.size, np.nan)]).ravel()
+            cap_x: list[float] = []
+            cap_y: list[float] = []
+            for h in hws:
+                own = k_all[keep] <= h.size
+                hh, c = h[k_all[keep][own] - 1], fk[keep][own]
+                nan = np.full(hh.size, np.nan)
+                cap_x += np.column_stack([c - hh, c + hh, nan]).ravel().tolist()
+                cap_y += np.column_stack([lvl[own], lvl[own], nan]).ravel().tolist()
+            traces += [
+                (f[band], db(curve[band])),
+                (stem_x, stem_y),
+                (np.asarray(cap_x), np.asarray(cap_y)),
+            ]
+        per_speed.append(traces)
+    start = int(np.argmin(np.abs(speeds - 80.0)))
+    styles = [dict(name="floor", mode="lines", line=dict(color="grey", width=2))]
+    for view in views:
+        styles += [
+            dict(
+                name=f"{view}: expected periodogram",
+                mode="lines",
+                line=dict(color="#1f77b4", width=1),
+            ),
+            dict(
+                name=f"{view}: line level at k f_r",
+                mode="lines",
+                line=dict(color="#1f77b4", width=1.5),
+            ),
+            dict(
+                name=f"{view}: +/- half width", mode="lines", line=dict(color="#d62728", width=2.5)
+            ),
+        ]
+    fig = go.Figure()
+    for (x, y), style in zip(per_speed[start], styles, strict=True):
+        fig.add_trace(go.Scatter(x=x, y=y, **style))
+
+    def visible(i: int) -> list[bool]:
+        return [True] + [j // 3 == i for j in range(3 * len(views))]
+
+    for trace, vis in zip(fig.data, visible(0), strict=True):
+        trace.visible = vis
+    idx = list(range(len(fig.data)))
+    steps = [
+        dict(
+            method="restyle",
+            label=f"{v:g}",
+            args=[{"x": [t[0] for t in tr], "y": [t[1] for t in tr]}, idx],
+        )
+        for v, tr in zip(speeds, per_speed, strict=True)
+    ]
+    ys = np.concatenate([np.asarray(t[1], dtype=float) for tr in per_speed for t in tr[:2]])
+    ys = ys[np.isfinite(ys)]
+    fig.update_layout(
+        title=dict(text=f"{title}: every rotor at the slider's speed", x=0.98, xanchor="right"),
+        xaxis=dict(title="frequency (Hz)", type="log", range=[math.log10(20.0), math.log10(fmax)]),
+        yaxis=dict(title="expected periodogram, mic mean (dB)", range=[ys.min() - 5, ys.max() + 5]),
+        sliders=[
+            dict(
+                active=start,
+                steps=steps,
+                currentvalue=dict(prefix="rotor speed (rev/s): "),
+                pad=dict(t=60),
+            )
+        ],
+        updatemenus=[
+            dict(
+                buttons=[
+                    dict(method="restyle", label=view, args=[{"visible": visible(i)}])
+                    for i, view in enumerate(views)
+                ],
+                x=0.0,
+                xanchor="left",
+                y=1.12,
+                yanchor="bottom",
+            )
+        ],
+        legend=dict(orientation="h", x=0.0, y=-0.5, yanchor="top"),
+        margin=dict(t=90, b=40),
+        height=720,
+    )
+    return fig
+
+
+def _round_fig(fig: Any) -> Any:
+    """The figure with every trace's and slider step's x / y rounded to 0.1 (Hz,
+    dB): the embedded HTML shrinks several-fold, nothing visible changes."""
+
+    def r(a: Any) -> Any:
+        return None if a is None else np.round(np.asarray(a, dtype=np.float64), 1)
+
+    for t in fig.data:
+        t.x, t.y = r(t.x), r(t.y)
+    for slider in fig.layout.sliders:
+        for step in slider.steps:
+            upd = step.args[0]
+            step.args = [
+                {"x": [r(x) for x in upd["x"]], "y": [r(y) for y in upd["y"]]},
+                step.args[1],
+            ]
+    return fig
+
+
+def cmd_params(args: argparse.Namespace) -> int:
+    """MD2 parameter views (Plotly) of the v4 pair and of nv3r4's pair, and a
+    per-rotor table of the v4 parameters, written as an include for the explainer
+    (``_md2_params.md``)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "notebooks"))
+    from noise_lab import rig_view_plotly
+
+    out = Path(args.out)
+    speeds = np.arange(25.0, 101.0, 5.0)
+    v4 = {
+        "standby": json.loads(Path(args.v4_standby).read_text()),
+        "cruise": json.loads(Path(args.v4).read_text()),
+    }
+    v3 = {
+        "standby": json.loads(Path(args.v3_standby).read_text()),
+        "cruise": json.loads(Path(args.v3).read_text()),
+    }
+    fig4 = _round_fig(_v4_rig_view(v4, speeds=speeds, title="MD2 v4 pair"))
+    fig3 = _round_fig(rig_view_plotly(v3, speeds=speeds, title="MD2 nv3r4 pair"))
+    rows = []
+    for g, p in v4.items():
+        pr = p["params"]
+        aero, motor = np.asarray(pr["profile_aero_db"]), np.asarray(pr["profile_motor_db"])
+        for r in range(aero.shape[0]):
+            rows.append(
+                f"| {g} | {r + 1} | {aero[r, 0]:.1f} | {aero[r, 1]:.1f} | {aero[r, :20].mean():.1f} "
+                f"| {aero[r, 20:].mean():.1f} | {motor[r].max():.1f} |"
+            )
+        sh, fl = pr["shaft"], pr["floor"]
+        rows.append(
+            f"| {g} | rig | α_aero {pr['alpha_aero']:.2f} | α_motor {pr['alpha_motor']:.2f} "
+            f"| b0 {fl['b0']:.2f}, b1 {fl['b1']:.2f} | σ_ref {sh['sigma_nu_rad_s']:.3g} rad/s, "
+            f"a_σ {sh['a_sigma']:.2f} | floor {fl['mean_db']:.1f} dB |"
+        )
+    md = [
+        "```{=html}",
+        fig4.to_html(include_plotlyjs=True, full_html=False),
+        "```",
+        "",
+        f"v4 MD2 pair (`{args.v4_standby}`, `{args.v4}`).",
+        "",
+        "```{=html}",
+        fig3.to_html(include_plotlyjs=False, full_html=False),
+        "```",
+        "",
+        f"nv3r4 MD2 pair (`{args.v3_standby}`, `{args.v3}`), drawn by "
+        "`notebooks/noise_lab.rig_view_plotly`.",
+        "",
+        "| regime | rotor | p_aero k=1 (dB) | k=2 | mean k ≤ 20 | mean k > 20 | max motor line |",
+        "|---|---|---|---|---|---|---|",
+        *rows,
+        "",
+        ": v4 MD2 per-rotor line profiles (dB at 80 rev/s, before the pair EQ) and the rig-level "
+        "laws of each half.",
+        "",
+    ]
+    (out / "_md2_params.md").write_text("\n".join(md))
+    print(f"wrote {out / '_md2_params.md'}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -894,6 +1143,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seconds", type=float, default=FULL_SECONDS)
     p.add_argument("--out", default=str(OUT))
     p.set_defaults(func=cmd_full)
+    p = sub.add_parser("params")
+    p.add_argument("--v4", required=True, help="the v4 cruise half")
+    p.add_argument("--v4-standby", required=True)
+    p.add_argument("--v3", required=True, help="the nv3r4 cruise half")
+    p.add_argument("--v3-standby", required=True)
+    p.add_argument("--out", default=str(OUT))
+    p.set_defaults(func=cmd_params)
     args = ap.parse_args(argv)
     return int(args.func(args))
 

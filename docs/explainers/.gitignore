@@ -1,2 +1,4 @@
 /.quarto/
 **/*.wav
+# generated Plotly include (scripts/noise_v4_dregon_gap.py params), ~10 MB
+noise-model-v4-dregon-gap/_md2_params.md
