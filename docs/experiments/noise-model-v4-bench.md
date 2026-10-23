@@ -516,6 +516,34 @@ real 0.241 (scoring 0.444), nv3r4 0.067 (0.119), static v4 0.019 (0.039),
 C-wind 0.124 (0.153). Time-aware measures favour C-wind; it carries half of
 the real broadband co-modulation, nv3r4 a quarter.
 
+**Alternating flight fit (2026-10-23/24).** Wide pool `dregon-flight-wide`
+(18 windows, 144 s, the five tuning segments first), source the c7-lines C-wind
+payload. Gate on the tuning segments: PIT ≤ 1.54 and every battery measure no
+worse than nv3r4. Round 1, lines k ≤ 30 with ε free (`nv4-lines-r1-f076f0`,
+not converged in 20 passes): ε 0.00145 → 0.049 (σ_ref 24.6 rad/s), PIT 8.78;
+the same payload with the bench ε restored gives 1.84. ε absorbs the 0.5–0.7 Hz
+label error and smears the high orders. Fix (`daae59f7`, `--hold-eps`): ε held
+at the bench value, only k ≤ 10 free (a 0.7 Hz label error moves k = 10 by
+7 Hz, inside one 7.8 Hz bin). Results (render seed 2001; tuning segments):
+
+|Stage|Job|Converged|PIT|LTAS|Line / floor Δ (dB)|IS oct.|Fréchet (mean, cov)|Off-diag r (real 0.241)|
+|---|---|---|---|---|---|---|---|---|
+|nv3r4|—|—|1.54|1.72|+0.8 / +0.7|0.240|362 (241, 121)|0.067|
+|R1 lines k ≤ 10|`nv4-lines-k10-a27434` + `c1-480a90`|yes (80 passes, 9e-8/cell)|2.18|2.60|+2.6 / +3.1|0.348|439 (383, 56)|0.153|
+|Gust search|`nv4-gust-r1-7fa8a6`|175/175 points|1.97|2.40|+2.5 / +2.4|0.337|324 (260, 64)|0.240|
+|R2 lines k ≤ 10|`nv4-lines-r2-608b60`|yes (30 passes, 1.4e-7/cell)|1.92|2.35|+2.4 / +2.5|0.327|311 (250, 61)|0.234|
+
+Gust search: battery objective (sum of measure / seed-floor ratios) 113 → 92;
+chosen law offset 2 m/s, scale 1 m/s, rate 8 Hz (rate on the grid edge, but the
+objective is flat in rate: 91.7 / 93.5 / 94.1 at 8 / 4 / 2 Hz). R2 payload
+`results/noise_v4/flight/lines_r2/…__c1__gust__wide__lines.json`. On the scoring
+windows (report only) R1 was closer than nv3r4 on every spectral measure (LTAS
+1.72 vs 2.38, IS 0.40 vs 1.55, Fréchet 312 vs 543). Reading: the gate fails
+at the round cap (2). R2 beats nv3r4 on time structure (Fréchet, covariance
+term, co-modulation close to real), but is 2.4 dB too loud on the tuning
+segments and 0.9–1.2 dB too quiet on the scoring windows. One shared level law
+cannot fit both window sets. It fits the mean of the 18 windows [INFERENCE].
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
