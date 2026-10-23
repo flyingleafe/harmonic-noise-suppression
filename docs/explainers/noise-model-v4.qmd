@@ -272,7 +272,8 @@ $$ {#eq-floor-exp}
 - $N_m(f)$: the measured ambient of the room. Bench only.
 - $W_m(f,t)$: the wind on a capsule. On the bench it is one level per
   recording on the windy microphones (the downwash grows with throttle). In
-  DREGON flight it is the static per-mic term of nv3r4. MD2 has none.
+  DREGON flight it is either the static per-mic term of nv3r4 (kind
+  `static_per_mic`) or a gusty term (kind `sc`, @sec-cwind). MD2 has none.
 
 ## The renderer
 
@@ -629,6 +630,41 @@ louder than the fit segments; and at matched level the bench per-rotor
 profiles are weaker rotor-identity cues than nv3r4's flight-fitted profiles
 (`noise-model-v4-dregon-gap.qmd` § "The DREGON flight stage through the
 scorer").
+
+## C-wind — the wind as a separate gusty term {#sec-cwind}
+
+Real DREGON wind is gusty and independent per capsule (between-line
+20–400 Hz level sd 2.9–3.4 dB over 128 ms frames, cross-mic correlation
+0.07–0.24). A static wind gives 1.3–1.5 dB. C-wind runs after procedure C,
+with the lines and the floor frozen.
+
+**Wind kind `sc`.** Per capsule, one independent draw of the SC wind
+generator (`data_processing/noise_model/wind_sc.py`; Mirabilii et al.,
+IWAENC 2022). Wind speed: `offset + scale · Weibull(2)` m/s at
+`rate · duration` knots, plus SC's 100 ms fluctuations. The long-run shape
+`shape.psd` is measured by Monte Carlo (64 clips of 8 s, fixed seed) and
+normalised to a mean of 1 over 20–100 Hz. `level_db[m]` is the capsule's
+expected wind PSD over 20–100 Hz. The renderer scales the unit-RMS draw by
+$\sqrt{10^{L_m/10} / \text{unit\_psd\_ref}}$, so the expected PSD is
+$10^{L_m/10}\,\text{shape}(f)$, then applies the array response.
+
+**W1. Levels** by the Whittle likelihood on the C1 pool: lines, floor and
+static share frozen at the stage payload, one level per mic, prior
+$\mathcal N(\text{stage wind level}, 6)$ dB.
+
+**W2. Gust law** by simulated moments: `floor_envelope` (8192-point STFT,
+50–500 Hz floor cells) on the five C1 segments, each mic's envelope
+regressed on its 1–4 kHz level (this removes the common thrust modulation).
+Statistics per capsule: std, p5, p95, burst fraction, burst run length,
+lag-1; plus the cross-mic correlation and the between-line third-octave
+spectrum. Grid offset × scale × rate (5 × 5 × 5), 4 seeds, W1 at every
+point, distance in units of the across-segment sd.
+
+**Result.** Offset 2, scale 0.5 m/s, rate 2 Hz; renderer check 0.30 dB.
+PIT 9.62 (stage 15.8, bar 1.680), LTAS 1.952 (bar 2.384), Listen 2.39
+(bar 3.08). Swap probes through the scorer place the remaining PIT gap in
+the line set, not the wind (`docs/experiments/noise-model-v4-bench.md`
+§ Round 6, C-wind).
 
 # From the fits to the generator
 
