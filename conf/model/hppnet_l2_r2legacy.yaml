@@ -1,6 +1,7 @@
 # hppnet_l2_r2legacy — FROZEN build of `hppnet_l2_r2_s0` (the frozen-real-split
 # reference, 2.27; docs/experiments/paper-regime-matrix.md review B) and of the
-# `real_r4_hppnet_l2*_unified` arms: the published HPPNet trunk + FreqGroupLSTM,
+# `real_r4_hppnet_l2*_unified` arms, and of `rig_easy_hppnet_l2_unified` with every
+# arm inheriting it (`nv2_*`, `nv3r4_*`, `prior_v1` HPPNet-L2): the published HPPNet trunk + FreqGroupLSTM,
 # four per-rotor maps, resampled onto a linear 0-150 rev/s grid of 300 bins by
 # the RETIRED `FreqSuperResHead` (clamped sub-27.5 bins, 2 x Conv(5,1)+BN+ReLU
 # mixing the maps, 1x1; models.harmonic_ports.hppnet_superres_legacy). Kept so

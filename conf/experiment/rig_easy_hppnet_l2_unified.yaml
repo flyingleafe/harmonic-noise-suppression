@@ -23,7 +23,7 @@
 # Batch doc: docs/experiments/rig-sampler-transfer-pair.md.
 defaults:
   - override /data: e12_real_fullflight
-  - override /model: hppnet_l2
+  - override /model: hppnet_l2_r2legacy  # frozen build every arm inheriting this one trained with (FreqSuperResHead, 300 bins); the live hppnet_l2 is the protocol's translation head
   - override /loss: salience_layers_r150
   - override /metrics: salience_layers_r150
   - override /validation: rps_unified
