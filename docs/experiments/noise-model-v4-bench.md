@@ -387,7 +387,13 @@ the same measurement, so the bench chain c1–c7 is unaffected (its reload
 reproduced the objective exactly). Caveat for the twin: it used the truth's
 pair EQ (an oracle constant), not one measured on the planted data. The
 recovery checks above are unchanged (they read the fitted model, not the
-payload). Escape and η on the repaired twin: `nv4-planted-escape-61cfde`.
+payload). Escape on the repaired twin (`nv4-planted-escape-61cfde`, kaggle,
+500 min): the reload reproduces −166,174,609.7, so the fix holds. Four rounds
+lower the objective by 4,713.9 nats to −166,179,323.0 (negative directions
+57 → 32 → 12 → 8; min eigenvalue −0.53). The deadline stopped round 4 before
+its line search, so the twin is not yet at a minimum and η did not run. The
+continuation reuses the saved Hessian (`nv4-planted-escape2-c75cd0`, from
+`restarts/…r1.fit__c1.json`).
 
 **MD2 flight.** The converged joint fit (`md2_fly125__flight_v4__s0__r5c1`)
 scored standby PIT 27.8 and parity ratio 3.57, so the per-regime fallback
