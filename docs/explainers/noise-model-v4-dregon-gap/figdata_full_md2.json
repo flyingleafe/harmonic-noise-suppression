@@ -1,0 +1,141 @@
+{
+ "rig": "michaels",
+ "seconds": 8.0,
+ "mics": [
+  0,
+  4
+ ],
+ "seed": 2001,
+ "labels": {
+  "real": "real",
+  "nv3r4": "nv3r4",
+  "v4": "v4"
+ },
+ "v3": [
+  "results/noise_v3/fits_r4/michaels_fly125_cruise__flight_v3.json",
+  "results/noise_v3/fits_r4/michaels_fly125_standby__flight_v3.json"
+ ],
+ "v4": [
+  "results/noise_v4/flight/restarts/md2_fly125_cruise_fpb__flight_v4__s0__r6c3.json",
+  "results/noise_v4/flight/restarts/md2_fly125_standby_fpb__flight_v4__s0__r6c1.json"
+ ],
+ "line_db": null,
+ "windows": [
+  {
+   "key": "standby_8s",
+   "recording": "FLY124",
+   "start_s": 8.0,
+   "regime": "standby",
+   "rps_min": 31.501716208457946,
+   "rps_max": 41.605035877227785,
+   "rms_db_per_mic": {
+    "real": [
+     -36.767754968762056,
+     -33.69161698336281
+    ],
+    "nv3r4": [
+     -39.52304644187835,
+     -35.9480435344036
+    ],
+    "v4": [
+     -39.3821057368968,
+     -36.103833820347745
+    ]
+   },
+   "figure": "fig_full_md2_standby_8s.png"
+  },
+  {
+   "key": "standby_16s",
+   "recording": "FLY124",
+   "start_s": 16.0,
+   "regime": "standby",
+   "rps_min": 31.434558868408203,
+   "rps_max": 41.521141052246094,
+   "rms_db_per_mic": {
+    "real": [
+     -39.23580236957708,
+     -36.39546801120569
+    ],
+    "nv3r4": [
+     -39.42536803173216,
+     -35.89180507631771
+    ],
+    "v4": [
+     -39.435698062735646,
+     -36.16570310176651
+    ]
+   },
+   "figure": "fig_full_md2_standby_16s.png"
+  },
+  {
+   "key": "ramp_27.68s",
+   "recording": "FLY124",
+   "start_s": 27.68,
+   "regime": "ramp",
+   "rps_min": 31.367427825927734,
+   "rps_max": 99.30500793457031,
+   "rms_db_per_mic": {
+    "real": [
+     -26.54127482640309,
+     -22.785562762411672
+    ],
+    "nv3r4": [
+     -29.024160073880616,
+     -25.734252479744164
+    ],
+    "v4": [
+     -29.087795018699552,
+     -25.792482002133696
+    ]
+   },
+   "figure": "fig_full_md2_ramp_27.68s.png"
+  },
+  {
+   "key": "cruise_40s",
+   "recording": "FLY124",
+   "start_s": 40.0,
+   "regime": "cruise",
+   "rps_min": 67.18330802917481,
+   "rps_max": 98.44908142089844,
+   "rms_db_per_mic": {
+    "real": [
+     -23.71061318977221,
+     -20.53339101031066
+    ],
+    "nv3r4": [
+     -24.518252916117174,
+     -21.469713276971927
+    ],
+    "v4": [
+     -24.482746213844322,
+     -21.419717113382013
+    ]
+   },
+   "figure": "fig_full_md2_cruise_40s.png"
+  },
+  {
+   "key": "cruise_56s",
+   "recording": "FLY124",
+   "start_s": 56.0,
+   "regime": "cruise",
+   "rps_min": 71.34456634521486,
+   "rps_max": 94.05193328857422,
+   "rms_db_per_mic": {
+    "real": [
+     -24.989513670207234,
+     -22.16862367564385
+    ],
+    "nv3r4": [
+     -24.987149460798165,
+     -21.845386496105643
+    ],
+    "v4": [
+     -25.07238817102695,
+     -21.91713236836781
+    ]
+   },
+   "figure": "fig_full_md2_cruise_56s.png"
+  }
+ ],
+ "git": "e7ce130e131c"
+}

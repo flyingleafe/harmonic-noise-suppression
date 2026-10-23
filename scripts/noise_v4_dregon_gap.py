@@ -842,7 +842,8 @@ def cmd_full(args: argparse.Namespace) -> int:
         title = (
             k if rig == "dregon" else f"{row['regime']} @ {row['start_s']:g} s"
         ) + f" ({row['rps_min']:.0f}–{row['rps_max']:.0f} rev/s)"
-        md += [f"### {title}", "", f"![]({rel}/{row['figure']})", "", "```{=html}", "<table>"]
+        fig_md = f"![]({rel}/{row['figure']}){{.column-page}}"
+        md += [f"### {title}", "", fig_md, "", "```{=html}", "<table>"]
         md.append("<tr><th></th>" + "".join(f"<th>mic {m}</th>" for m in mics) + "</tr>")
         for name, lab in labels.items():
             cells = "".join(

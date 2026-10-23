@@ -1,0 +1,162 @@
+{
+ "rig": "dregon",
+ "seconds": 8.0,
+ "mics": [
+  1,
+  2
+ ],
+ "seed": 2001,
+ "labels": {
+  "real": "real",
+  "nv3r4": "nv3r4",
+  "v4": "v4",
+  "v4_lines": "v4, lines +3 dB"
+ },
+ "v3": [
+  "results/noise_v3/fits_r4/dregon_room2_floor__flight_v3.json",
+  null
+ ],
+ "v4": [
+  "results/noise_v4/flight/dregon_room2__flight_v4__dregon__kappa0__r5__s2.json",
+  null
+ ],
+ "line_db": 3.0,
+ "windows": [
+  {
+   "key": "free-flight",
+   "recording": "free-flight_nosource_room2",
+   "start_s": 1512727397.2050455,
+   "regime": "cruise",
+   "rps_min": 73.86699676513672,
+   "rps_max": 86.6246566772461,
+   "rms_db_per_mic": {
+    "real": [
+     -19.52621404466276,
+     -25.779293706967074
+    ],
+    "nv3r4": [
+     -22.30764611358915,
+     -26.166999997415715
+    ],
+    "v4": [
+     -19.35682180520314,
+     -28.139530180892258
+    ],
+    "v4_lines": [
+     -18.353438776233453,
+     -26.980835747395567
+    ]
+   },
+   "figure": "fig_full_dregon_free-flight.png"
+  },
+  {
+   "key": "hovering",
+   "recording": "hovering_nosource_room2",
+   "start_s": 1511903905.3944898,
+   "regime": "cruise",
+   "rps_min": 72.20103454589844,
+   "rps_max": 90.00159454345703,
+   "rms_db_per_mic": {
+    "real": [
+     -17.86288008754235,
+     -27.012457488347017
+    ],
+    "nv3r4": [
+     -22.388259955399825,
+     -26.13960834313945
+    ],
+    "v4": [
+     -19.45959152526153,
+     -28.023674204379798
+    ],
+    "v4_lines": [
+     -18.466626286865917,
+     -26.83454075122777
+    ]
+   },
+   "figure": "fig_full_dregon_hovering.png"
+  },
+  {
+   "key": "updown",
+   "recording": "updown_nosource_room2",
+   "start_s": 1511903578.348311,
+   "regime": "cruise",
+   "rps_min": 51.609806060791016,
+   "rps_max": 90.01045989990234,
+   "rms_db_per_mic": {
+    "real": [
+     -19.25664693405207,
+     -26.203716377295898
+    ],
+    "nv3r4": [
+     -22.227616258117024,
+     -26.0158058321614
+    ],
+    "v4": [
+     -19.378455153006428,
+     -28.10297252954185
+    ],
+    "v4_lines": [
+     -18.362301370261086,
+     -26.923287248221392
+    ]
+   },
+   "figure": "fig_full_dregon_updown.png"
+  },
+  {
+   "key": "rectangle",
+   "recording": "rectangle_nosource_room2",
+   "start_s": 1511905725.952559,
+   "regime": "cruise",
+   "rps_min": 62.52782440185547,
+   "rps_max": 90.00741577148438,
+   "rms_db_per_mic": {
+    "real": [
+     -19.09386001967578,
+     -29.250389057714603
+    ],
+    "nv3r4": [
+     -22.27812480714226,
+     -25.998443867646902
+    ],
+    "v4": [
+     -19.55783632225955,
+     -28.0682426602467
+    ],
+    "v4_lines": [
+     -18.576826485320833,
+     -26.872833711855932
+    ]
+   },
+   "figure": "fig_full_dregon_rectangle.png"
+  },
+  {
+   "key": "spinning",
+   "recording": "spinning_nosource_room2",
+   "start_s": 1511905200.978012,
+   "regime": "cruise",
+   "rps_min": 59.57908248901367,
+   "rps_max": 88.30181884765625,
+   "rms_db_per_mic": {
+    "real": [
+     -20.710215327763063,
+     -29.247976387149723
+    ],
+    "nv3r4": [
+     -22.207379872932208,
+     -25.942564305383687
+    ],
+    "v4": [
+     -19.308551745972792,
+     -27.99788589286073
+    ],
+    "v4_lines": [
+     -18.281375286064325,
+     -26.791963059658627
+    ]
+   },
+   "figure": "fig_full_dregon_spinning.png"
+  }
+ ],
+ "git": "e7ce130e131c"
+}

@@ -565,3 +565,33 @@ profiles nv3r4 fitted in flight.
 - With both causes fixed by hand (level matched), v4 is at 2.0–2.2 on these
   two windows. That is still above nv3r4's 1.680 over the five windows.
 
+
+# Full spectrograms over 8 s {#sec-full}
+
+Each tab is one window: 8 s of the real recording and of each model rendered on
+that window's real rotor-speed track (render seed 2001). The frequency axis is
+logarithmic, 30 Hz to 8 kHz, so the low orders and the high band show
+together. Frames are 128 ms (2048 samples) with a 16 ms hop. Each column
+(mic) has one colour scale: the real clip's loudest time-averaged bin + 6 dB
+at the top, 70 dB range. The audio below each figure has one level scale per
+mic and window, so loudness differences are real. Script:
+`scripts/noise_v4_dregon_gap.py full`.
+
+## DREGON
+
+The 8 s start at each 4 s scoring window: the scored 4 s, the 2 s guard, then
+the first 2 s of the stage's fit segment. Models: nv3r4; the v4 flight stage as
+fitted (no gains, bench κ = 0); the same with its lines +3 dB (the probe of
+@sec-stage). Mic 1 passes the scorer for v4; mic 2 fails.
+
+{{< include noise-model-v4-dregon-gap/_full_dregon.md >}}
+
+## MD2
+
+The scorer's five 8 s FLY124 windows. Models: the nv3r4 per-regime pair and
+the converged v4 per-regime pair (standby
+`md2_fly125_standby_fpb__flight_v4__s0__r6c1`, cruise
+`md2_fly125_cruise_fpb__flight_v4__s0__r6c3`), both composed by the scorer's
+`render_noise_regimes`. Mics 0 and 4.
+
+{{< include noise-model-v4-dregon-gap/_full_md2.md >}}
