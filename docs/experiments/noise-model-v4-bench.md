@@ -373,18 +373,21 @@ dependence reaches across 1.6 kHz.
 collapsed below 300 Hz.
 <!-- source: results/noise_v4/bench/planted/dregon__kappa0__r5__s2__c6__kappa0__r1.json -->
 
-**Open defect: the planted fit's state does not reload to its objective.**
-The planted fit records −166,174,609.7 nats. Its `.fit.json` reloaded on a
-fresh build of the same planted rig scores −166,146,685.6
-(`nv4-eta-planted-d5a7a4`) and −166,140,705.1 (twice, `nv4-planted-repro-475bc8`,
-power checksums equal to 1e-12, so the planted data are reproducible). In one
-job (`nv4-planted-chain-ccaeba`) the planted fit ends at −166,174,636.9 and
-the escape that reloads its exact flat state (`.fit.state.npz`, max |dx|
-1.4e-10) scores −166,140,727.8. So it is not a cross-node effect: something
-outside the flat vector differs between the fit's model and a reloaded one.
-On real data the same reload reproduces the objective exactly. Diagnosis job:
-`nv4-planted-diag-ecd5a6`. Until it is fixed, the planted-twin checks above and
-any planted η are not valid.
+**Defect found and fixed: the planted payload recorded the wrong pair EQ.**
+The planted fit records −166,174,609.7 nats, but its `.fit.json` reloaded on
+the same planted rig scored −166,140,705.1 (also inside one job, so not a
+cross-node effect). Cause (`nv4-planted-diag-23ee04`): the fit resumed from
+the truth payload, and `load_payload` set the model's pair EQ to the TRUTH's;
+`bench_v4.payload` then wrote the EQ measured on the planted data
+(`rig.eq_all`), up to 3.2 dB different. Loading the truth's EQ with the same
+parameters reproduces −166,174,609.7 exactly. Fix (`5c13fc73`): the payload
+writes the EQ the model computed with; the planted `.fit.json` is repaired
+(truth EQ, `mic_response.repair` records it). On real data the two EQs are
+the same measurement, so the bench chain c1–c7 is unaffected (its reload
+reproduced the objective exactly). Caveat for the twin: it used the truth's
+pair EQ (an oracle constant), not one measured on the planted data. The
+recovery checks above are unchanged (they read the fitted model, not the
+payload). Escape and η on the repaired twin: `nv4-planted-escape-61cfde`.
 
 **MD2 flight.** The converged joint fit (`md2_fly125__flight_v4__s0__r5c1`)
 scored standby PIT 27.8 and parity ratio 3.57, so the per-regime fallback
