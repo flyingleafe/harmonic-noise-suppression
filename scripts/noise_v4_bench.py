@@ -363,6 +363,12 @@ def cmd_planted(args: argparse.Namespace) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=1))
     path.with_suffix(".fit.json").write_text(json.dumps(B.payload(model, rec, git=_git())))
+    # the exact final state (escape --hessian resumes from it): planted data
+    # re-rendered on another node score differently, so a planted chain runs in
+    # one job and must not depend on the payload's reload alone
+    from experiments.noise_model import bench_eta as E
+
+    np.savez(path.with_suffix(".fit.state.npz"), x=E.get_flat(model).cpu().numpy())
     print(json.dumps(out["checks"], indent=1))
     return 0
 
@@ -484,9 +490,8 @@ def cmd_escape(args: argparse.Namespace) -> int:
 
     hp0, hess_s0 = None, None
     if args.hessian is not None:
-        # the previous escape's EXACT state and its Hessian there: the payload's
-        # reload re-derives capped coordinates (bench_v4's reload margin), so it
-        # is not the point the Hessian was taken at
+        # a previous run's EXACT state, and its Hessian there when it has one
+        # (escape writes both; planted writes the state only)
         hz = np.load(args.hessian)
         x = E.get_flat(model)
         if tuple(hz["x"].shape) != tuple(x.shape):
@@ -497,10 +502,12 @@ def cmd_escape(args: argparse.Namespace) -> int:
         E.set_flat(model, torch.as_tensor(hz["x"], dtype=x.dtype, device=x.device))
         f_state, parts = model.objective()
         last.update(objective=f_state, whittle_per_recording=parts)
-        hp0, hess_s0 = (hz["H"], hz["P"]), float(hz["hessian_s"])
+        if "H" in hz.files:
+            hp0, hess_s0 = (hz["H"], hz["P"]), float(hz["hessian_s"])
         print(
-            f"[escape] state + Hessian from {args.hessian} (max |dx| vs the payload {dx:.3g}, "
-            f"objective {f_state:.1f}; Hessian took {hess_s0:.0f} s)",
+            f"[escape] state from {args.hessian} (max |dx| vs the payload {dx:.3g}, "
+            f"objective {f_state:.1f}; Hessian "
+            + (f"reused, took {hess_s0:.0f} s)" if hp0 is not None else "recomputed)"),
             flush=True,
         )
     esc, hp = E.saddle_escape(
