@@ -807,6 +807,7 @@ class FlightStageModel:
         k_free: int = K_FREE,
         profile_sd_db: float = PROFILE_FLIGHT_SD_DB,
         profile_centre_db: np.ndarray | None = None,
+        hold_eps: bool = False,
     ) -> None:
         par = _bench_params(bench)
         self.bench, self.par, self.pool = bench, par, pool
@@ -892,6 +893,12 @@ class FlightStageModel:
                 self.params[key] = torch.tensor(
                     np.asarray(init.get(key, c0[key]), dtype=np.float64), **self.dd
                 ).requires_grad_(True)
+        #: ``"lines"`` with ``hold_eps``: the shaft scale stays at the source's (the
+        #: free low orders sit inside one bin despite the label error, so the
+        #: line width need not absorb it); a constant, not a parameter
+        self.held_log_eps: Tensor | None = None
+        if self.coherence == "lines" and hold_eps:
+            self.held_log_eps = self.params.pop("log_eps").detach().requires_grad_(False)
         if self.coherence in ("full", "lines"):
             #: the phase-width half-normal scales per free aerodynamic order
             self.c_w = self._t(PR.width_scale(np.arange(1, (self.k_free or par.k_max) + 1)))
@@ -957,10 +964,10 @@ class FlightStageModel:
             out.update(self.held_pedestal, **shaft_values(p["log_eps"], f_ref=f_ref))
         elif self.coherence == "lines":
             # p carries PROFILE_KEY ("profile_free_db") itself
+            log_eps = p["log_eps"] if self.held_log_eps is None else self.held_log_eps
             out.update(
-                lines_values(
-                    p["u_s2P"], p["u_W"], p["log_eps"], held=self.held_pedestal, f_ref=f_ref
-                )
+                lines_values(p["u_s2P"], p["u_W"], log_eps, held=self.held_pedestal, f_ref=f_ref),
+                log_eps=log_eps,
             )
         return out
 
@@ -1244,7 +1251,7 @@ def renderer_check(
                 pk = p[PROFILE_KEY]
                 noise = rng.normal(0.0, model.profile_sd_db, tuple(pk.shape))
                 pk.copy_(model.profile_centre + model._t(noise))
-            if model.coherence != "none":
+            if model.coherence != "none" and "log_eps" in p:
                 sigma_ref = math.exp(rng.normal(*PR.FLIGHT_SIGMA_NU_LN))
                 p["log_eps"].fill_(math.log(sigma_ref / (V4.TWO_PI * model.par.shaft.f_ref_rev_s)))
             idx = torch.as_tensor(np.asarray(frames, dtype=np.int64), device=model.dd["device"])
@@ -1821,6 +1828,7 @@ def run_stage(
     deadline_s: float | None = None,
     resume: dict[str, Any] | None = None,
     resume_path: str | None = None,
+    hold_eps: bool = False,
 ) -> dict[str, Any]:
     """The whole stage on ``source`` (a DREGON bench payload, or a flight
     payload: then its floor and wind levels are the start, its wind levels the
@@ -1858,6 +1866,7 @@ def run_stage(
         kappa=float(kappa),
         k_free=int(k_free) if lines_mode else None,
         profile_sd_db=float(profile_sd_db) if lines_mode else None,
+        hold_eps=bool(hold_eps) if lines_mode else None,
     )
     sha = _sha(source)
     if resume is not None:
@@ -1954,6 +1963,7 @@ def run_stage(
         k_free=int(k_free),
         profile_sd_db=profile_sd_db,
         profile_centre_db=p_centre,
+        hold_eps=bool(hold_eps),
     )
     del lines
     check = renderer_check(model, sorted({0, fp.n_frames - 1}))

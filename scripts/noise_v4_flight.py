@@ -310,6 +310,7 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         args.coherence, args.kappa = s["coherence"], s["kappa"]
         args.no_line_gain, args.no_mic_gain = not s["line_gain"], not s["mic_gain"]
         args.k_free, args.profile_sd_db = s["k_free"], s["profile_sd_db"]
+        args.hold_eps = bool(s.get("hold_eps"))
     if args.k_free is None:
         args.k_free = DF.K_FREE
     if args.profile_sd_db is None:
@@ -336,6 +337,7 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         coherence=str(args.coherence),
         k_free=int(args.k_free),
         profile_sd_db=float(args.profile_sd_db),
+        hold_eps=bool(args.hold_eps),
         deadline_s=None if args.deadline_min is None else 60.0 * float(args.deadline_min),
         resume=resume,
         resume_path=args.resume,
@@ -650,6 +652,12 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=None,
         help="--lines: the profile prior's sd (default PROFILE_FLIGHT_SD_DB = 6 dB)",
+    )
+    d.add_argument(
+        "--hold-eps",
+        action="store_true",
+        help="--lines: hold the shaft scale eps at the source's (the free low orders "
+        "stay inside one bin despite the label error)",
     )
     d.add_argument(
         "--deadline-min",
