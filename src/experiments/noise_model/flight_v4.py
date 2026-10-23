@@ -1039,7 +1039,10 @@ class FlightV4Model:
 
 def movement(a: dict[str, np.ndarray], b: dict[str, np.ndarray]) -> dict[str, float]:
     """Per-group parameter movement between two snapshots (spec step 5); the
-    phase-pedestal groups when both snapshots carry them (a free pedestal)."""
+    phase-pedestal groups when both snapshots carry them (a free pedestal). The
+    per-order groups (levels, pedestal) move by their MEDIAN over orders, as in
+    the bench test (:func:`.bench_v4.group_movement`): a pedestal on an order the data
+    do not see drifts towards its prior mode at W = 0 without end in log W."""
     out = dict(
         levels_db=float(np.median(np.abs(b["levels_db"] - a["levels_db"]))),
         exponents=float(np.max(np.abs(b["exponents"] - a["exponents"]))),
@@ -1049,7 +1052,7 @@ def movement(a: dict[str, np.ndarray], b: dict[str, np.ndarray]) -> dict[str, fl
     )
     for key in ("log_sigma2_phase", "log_width_phase"):
         if key in a and key in b:
-            out[key] = float(np.max(np.abs(b[key] - a[key])))
+            out[key] = float(np.median(np.abs(b[key] - a[key])))
     return out
 
 

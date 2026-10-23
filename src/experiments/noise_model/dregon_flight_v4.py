@@ -1035,9 +1035,18 @@ def measure_start(
 # ── the optimiser ───────────────────────────────────────────────────────────
 
 
+#: Per-order groups that move by their median over orders (as in the bench test,
+#: :func:`.bench_v4.group_movement`); every other group by its largest change.
+PER_ORDER_GROUPS = ("log_sigma2_phase", "log_width_phase")
+
+
 def movement(a: dict[str, np.ndarray], b: dict[str, np.ndarray]) -> dict[str, float]:
-    """Largest absolute change per snapshot group."""
-    return {k: float(np.max(np.abs(b[k] - a[k]))) for k in a}
+    """Change per snapshot group: the largest absolute change, or the median over
+    orders for :data:`PER_ORDER_GROUPS` (a pedestal on an order the data do not
+    see drifts towards its prior mode at W = 0 without end in log W)."""
+    return {
+        k: float((np.median if k in PER_ORDER_GROUPS else np.max)(np.abs(b[k] - a[k]))) for k in a
+    }
 
 
 def _pass(model: FlightStageModel, iters: int, history: int) -> dict[str, Any]:
