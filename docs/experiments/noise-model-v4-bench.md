@@ -435,6 +435,9 @@ Whittle with lines and floor frozen, gust law by simulated moments of
 scale 0.5 m/s, rate 2 Hz; renderer check 0.30 dB (tol 1). Payload
 `results/noise_v4/flight/wind/…__scwind.json`. One gust law for all mics
 under-reads the gust sd on mics 1, 2, 5, 6 (1.9–2.9 against 4.2–5.2 dB).
+Full scorer (`nv4-score-cwind-4955be`, seeds 2001–2004): **PIT 9.62**
+(k0 15.8, bar 1.680), **LTAS 1.952** (bar 2.384), **Listen 2.39** (bar
+3.08). The gust wind beats nv3r4 on both spectral measures and fails PIT.
 
 Local HPPNet probes (render seed 2001, all five windows, mean of 8 mics; bar
 1.680; scripts `/tmp/hpp_gust_v3.py`, `hpp_odd.py`, `hpp_swap.py`, not kept):
