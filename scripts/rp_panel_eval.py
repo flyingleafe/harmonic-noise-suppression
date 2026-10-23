@@ -10,11 +10,18 @@ numbers are a floor, not a fair row (docs/experiments/paper-real-protocol.md).
 
     python scripts/rp_panel_eval.py real_r4_hppnet_pyrlstm_unified:best_real_overall \\
         rp_pyrsep_in_all:best_real_macro_median --out results/rp_panel_eval/legacy.json
+
+``--dump DIR`` also writes one ``<target>.npz`` per scored target: the decoded
+``pred`` (N, R, T) with its rotor rows put in the TARGET's order by the clip's
+PIT assignment (the one the score uses), ``target`` on the same frame grid, the
+frame ``regime`` codes (``metrics.regimes``), ``frame_err`` and the panel items'
+``meta`` (JSON), for plotting predictions against the labels.
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import sys
 from collections.abc import Mapping
@@ -25,13 +32,18 @@ for _p in (REPO_ROOT / "src", REPO_ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+import numpy as np  # noqa: E402
 import torch  # noqa: E402
+import torch.nn.functional as F  # noqa: E402
 from hydra import compose, initialize_config_dir  # noqa: E402
 from tap_ablation_regimes import ablate  # noqa: E402
 from torch.utils.data import DataLoader  # noqa: E402
 
 import zoo  # noqa: E402
 from data_processing.collate import frame_collate  # noqa: E402
+from data_processing.frames import meta_dict  # noqa: E402
+from losses._common import get_tensor  # noqa: E402
+from metrics.regimes import frame_regimes  # noqa: E402
 from training.config import build_losses, register_configs  # noqa: E402
 from training.validation import build_validation_plan, rps_readout_for, validate_rps  # noqa: E402
 
@@ -91,6 +103,45 @@ def _windowed(readout, fm, seconds: float, sr: int = 16000):
     return read
 
 
+def _capturing(readout, sink: list[torch.Tensor]):
+    """``readout`` that also keeps every batch's decoded rates (host, float32)."""
+
+    def read(model, pred_frame, inputs):
+        out = readout(model, pred_frame, inputs)
+        sink.append(out.detach().float().cpu())
+        return out
+
+    return read
+
+
+def _dump(path: Path, plan, preds: list[torch.Tensor], frame_err) -> None:
+    """Write one target's predictions against the panel labels (module docstring)."""
+    pred = torch.cat(preds)  # (N, R, T), loader order = plan order
+    target = torch.stack([get_tensor(plan.dataset[i], "rps").float() for i in range(plan.size)])
+    n_pred, n_target = int(pred.shape[-1]), int(target.shape[-1])
+    if n_target != n_pred:
+        target = F.interpolate(target, size=n_pred, mode="linear", align_corners=False)
+    rotors = int(pred.shape[1])
+    perms = torch.tensor(list(itertools.permutations(range(rotors))))  # (P, R)
+    pair = (pred[:, :, None, :] - target[:, None, :, :]).abs().mean(-1)  # (N, R_pred, R_target)
+    cost = pair[:, torch.arange(rotors), perms].mean(-1)  # (N, P)
+    chosen = perms[cost.argmin(-1)]  # (N, R): target row of each prediction row
+    aligned = torch.empty_like(pred)
+    aligned.scatter_(1, chosen[:, :, None].expand_as(pred), pred)
+    regime = frame_regimes(target, plan.frame_rate * n_pred / n_target)
+    metas = [meta_dict(plan.dataset[i]) for i in range(plan.size)]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        path,
+        pred=aligned.numpy(),
+        target=target.numpy(),
+        regime=regime.numpy(),
+        frame_err=frame_err,
+        frame_rate=np.float64(plan.frame_rate * n_pred / n_target),
+        meta=np.array(json.dumps(metas, default=str)),
+    )
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -118,6 +169,7 @@ def main() -> None:
         help="run inference in windows of this many seconds and concatenate "
         "(length-generalisation probe for recurrent heads; 2 = the training chunk)",
     )
+    p.add_argument("--dump", type=Path, help="directory for per-target prediction npz files")
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -159,7 +211,10 @@ def main() -> None:
             readout = rps_readout_for(fm.task.name)
             if args.window:
                 readout = _windowed(readout, fm, args.window)
-            scores, loss, _ = validate_rps(
+            captured: list[torch.Tensor] = []
+            if args.dump:
+                readout = _capturing(readout, captured)
+            scores, loss, samples = validate_rps(
                 model=fm.model,
                 codec=fm.codec,
                 loss_fn=loss_fn,
@@ -170,6 +225,9 @@ def main() -> None:
                 amp_dtype=torch.float16,
                 readout=readout,
             )
+            if args.dump:
+                slug = label.replace(":", "__").replace("/", "_")
+                _dump(args.dump / f"{slug}.npz", plan, captured, samples.frame_err)
             scores["loss"] = loss
             results[label] = scores
             print(f"{label:52s} " + " ".join(f"{scores[v]:10.2f}" for v in VIEWS), flush=True)
