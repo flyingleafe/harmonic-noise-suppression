@@ -873,8 +873,13 @@ def _bench_point_support(spec: SupportSpec, rec: C.Recording, point: dict[str, A
     )
 
 
-def _flight_support(spec: SupportSpec) -> Support:
-    """One flight window on the frozen front-end grid, all channels, 16 kHz."""
+def flight_clip(spec: SupportSpec | str) -> Clip:
+    """A flight support's raw window: every channel at :data:`SR` and its
+    label on the audio grid, exactly as :func:`load_support` reads it before
+    the periodogram (no cache of the audio beyond the clip cache)."""
+    spec = as_spec(spec)
+    if spec.kind != "flight" or spec.family == "synthetic":
+        raise ValueError(f"{spec.name}: not a flight support read from the data")
     args = spec.args
     clip = C.load_clip(
         args["dataset"],
@@ -886,7 +891,13 @@ def _flight_support(spec: SupportSpec) -> Support:
         rps_key=args["rps_key"],
         clip_id=spec.name,
     )
-    clip = C.decimate(clip, SR)
+    return C.decimate(clip, SR)
+
+
+def _flight_support(spec: SupportSpec) -> Support:
+    """One flight window on the frozen front-end grid, all channels, 16 kHz."""
+    args = spec.args
+    clip = flight_clip(spec)
     meta = dict(
         recording_id=args["recording"],
         dataset=args["dataset"],
@@ -1303,6 +1314,7 @@ __all__ = [
     "bench_support",
     "block_periodogram",
     "dregon_bench_point_key",
+    "flight_clip",
     "flight_dregon",
     "flight_michaels",
     "index_row",

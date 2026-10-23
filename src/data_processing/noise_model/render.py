@@ -83,9 +83,11 @@ phase), motor lines at ``k = 3 p n`` on the shaft alone, the line powers on
 ``s^alpha``, the floor through the WOLA gain — the sum of per-rotor floors
 ``s_r^{b(f)}`` with ``E_rm`` (``floor_rule`` ``per_rotor_sum``, the bench) or
 ONE floor ``sbar^{b(f)}`` on the rotor-mean speed (``one_floor_mean_speed``,
-MD2 flight) — and the rotor-to-mic response ``E_rm(f)``. It shares the line
-kernel, the anti-alias chain and the WOLA with v2/v3, which render
-bit-identically to before.
+MD2 flight) — the rotor-to-mic response ``E_rm(f)`` and, in flight, the wind
+block of either kind (:func:`_v4_wind`: v3's static Gaussian wind, or the SC
+gust generator drawn independently per capsule; :func:`render_v4_wind` is its
+additive share alone). It shares the line kernel, the anti-alias chain and the
+WOLA with v2/v3, which render bit-identically to before.
 """
 
 from __future__ import annotations
@@ -106,7 +108,7 @@ from data_processing.noise_model.params import array_response_db, gamma_from_par
 from data_processing.noise_model.params import check_schema as _check_schema
 from data_processing.noise_model.resample import AA_PASS_HZ, antialias, decimate_audio
 from data_processing.noise_model.v3 import Wander, ou_blocks, wind_shape
-from data_processing.noise_model.v4 import FLOOR_RULE_ONE, V4Params
+from data_processing.noise_model.v4 import FLOOR_RULE_ONE, V4Params, Wind
 from data_processing.noise_model.v4 import WORK_RATE_HZ as V4_WORK_RATE_HZ
 
 __all__ = [
@@ -117,6 +119,7 @@ __all__ = [
     "regime_seeds",
     "render_noise",
     "render_noise_regimes",
+    "render_v4_wind",
 ]
 
 
@@ -805,6 +808,80 @@ def render_noise(
 # ── noise model v4 ──────────────────────────────────────────────────────────
 
 
+def _v4_streams(seed: int) -> tuple[np.random.Generator, ...]:
+    """The six independent streams of a v4 render of ``seed``: shaft state,
+    start phases, amplitude OU, phase OU, floor, wind (in that order)."""
+    return tuple(np.random.default_rng(s) for s in np.random.SeedSequence(int(seed)).spawn(6))
+
+
+def _v4_wind(wind: Wind, rng: np.random.Generator, n_mics: int, n_out: int, sr: int) -> np.ndarray:
+    """``(n_mics, n_out)`` the flight wind block as the v4 renderer adds it to
+    each channel BEFORE the array response, at the output rate.
+
+    ``static_per_mic``: per mic white noise shaped by ``sqrt(wind_shape(f))``
+    times ``10^{w_m/20}`` (stationary Gaussian, PSD ``10^{w_m/10}
+    wind_shape``). ``sc``: per capsule an INDEPENDENT unit-RMS draw of
+    :func:`.wind_sc.wind_noise` with the payload's ``speed_offset_ms``,
+    ``speed_scale_ms`` and ``gust_rate_hz`` over the clip, times
+    :meth:`.v4.ScGust.gain` ``= sqrt(10^{L_m/10} / unit_psd_ref)``: the
+    unit-RMS output's mean PSD is ``unit_psd_ref shape.psd(f)``, so the scaled
+    draw's is ``10^{L_m/10} shape.psd(f)`` (for clips near the shape's
+    ``clip_s``; the knot count follows the clip length)."""
+    out = np.zeros((n_mics, n_out))
+    gust = wind.gust
+    if gust is None:
+        wind_amp = np.sqrt(wind.shape(np.fft.rfftfreq(n_out, d=1.0 / float(sr))))
+        for m in range(n_mics):
+            white = rng.standard_normal(n_out)
+            level = math.sqrt(10.0 ** (float(wind.level_db[m]) / 10.0))
+            out[m] = level * np.fft.irfft(np.fft.rfft(white) * wind_amp, n=n_out)
+        return out
+    from data_processing.noise_model.wind_sc import wind_noise
+
+    for m in range(n_mics):
+        x, _ = wind_noise(
+            rng,
+            int(sr),
+            n_out / float(sr),
+            speed_offset_ms=gust.speed_offset_ms,
+            speed_scale_ms=gust.speed_scale_ms,
+            gust_rate_hz=gust.gust_rate_hz,
+        )
+        x = x[:n_out] if x.size >= n_out else np.pad(x, (0, n_out - x.size))
+        out[m] = gust.gain(float(wind.level_db[m])) * x
+    return out
+
+
+def _v4_output(par: V4Params, out: np.ndarray, sr: int) -> np.ndarray:
+    """The v4 channels ``out (n_mics, n_out)`` through the flight array response
+    (in place; none on the bench) and the anti-alias filter: what the renderer
+    returns."""
+    n_out = out.shape[1]
+    if par.mic.array_response is not None:
+        curve = par.mic.array_db(np.fft.rfftfreq(n_out, d=1.0 / float(sr)))
+        for m in range(out.shape[0]):
+            out[m] = np.fft.irfft(np.fft.rfft(out[m]) * 10.0 ** (curve[m] / 20.0), n=n_out)
+    return antialias(out, sr)[:, :n_out]
+
+
+def render_v4_wind(
+    fit: Mapping[str, Any], n_out: int, *, sr: int = SP.FLIGHT_SR, n_mics: int = 8, seed: int = 0
+) -> np.ndarray:
+    """``(n_mics, n_out)`` the WIND's additive share of ``render_noise(fit, .,
+    sr=sr, n_mics=n_mics, seed=seed)`` for a ``noise-v4-fit/3`` flight payload:
+    the same draw (the render's own wind stream of ``seed``) through the same
+    array response and anti-alias filter. The lines and the floor draw from
+    other streams and every step after the sum is linear, so ``render_noise``
+    of ``fit`` minus that of ``fit`` without its wind is this, to rounding."""
+    par = V4Params.from_payload(fit)
+    if par.wind is None:
+        raise ValueError("the payload carries no flight wind block")
+    if n_mics > par.n_mics:
+        raise ValueError(f"fit carries {par.n_mics} microphones, asked for {n_mics}")
+    rng_wind = _v4_streams(seed)[5]
+    return _v4_output(par, _v4_wind(par.wind, rng_wind, int(n_mics), int(n_out), int(sr)), sr)
+
+
 def _render_noise_v4(
     fit: Mapping[str, Any],
     rps_rev_s: np.ndarray,
@@ -848,8 +925,9 @@ def _render_noise_v4(
       through the WOLA of :func:`_slow_gain` — the SUM of the rotors'
       independent Gaussian floors, drawn as one Gaussian with their summed
       spectrum; the static share ``s`` carries no rotor response;
-    * flight only: the static per-mic wind block (v3's ``wind_db``), then the
-      array response.
+    * flight only: the wind block (:func:`_v4_wind`: the static per-mic
+      Gaussian wind of v3, or the SC gust generator drawn independently per
+      capsule), then the array response.
 
     The lines are synthesised by :func:`_line_kernel` on the 1 kHz envelope
     knots, the orders under the anti-alias passband edge at the output rate and
@@ -879,9 +957,7 @@ def _render_noise_v4(
     f0 = np.maximum(np.stack([np.interp(t_work, t_src, r) for r in rps]), SPEED_FLOOR_RPS)
     k_max = min(par.k_max, SP.k_max_for_carrier(f0.max(axis=1), sr_work, k_cap=par.k_max))
     k_lo = min(k_max, SP.k_max_for_carrier(f0.max(axis=1), int(2 * AA_PASS_HZ), k_cap=k_max))
-    rng_state, rng_alpha, rng_amp, rng_phase, rng_floor, rng_wind = (
-        np.random.default_rng(s) for s in np.random.SeedSequence(int(seed)).spawn(6)
-    )
+    rng_state, rng_alpha, rng_amp, rng_phase, rng_floor, rng_wind = _v4_streams(seed)
 
     f_bar = f0.mean(axis=1)
     s_bar = par.speed(f_bar)
@@ -1024,17 +1100,9 @@ def _render_noise_v4(
             return 10.0 * np.log10(g)
 
         out[m] += _slow_gain(shaped, floor_gain_db, sr_work=sr, frame=V4_FLOOR_WOLA_FRAME)
-    if par.wind_db is not None:
-        wind_amp = np.sqrt(wind_shape(freqs))
-        for m in range(n_mics):
-            white = rng_wind.standard_normal(n_out)
-            level = math.sqrt(10.0 ** (float(par.wind_db[m]) / 10.0))
-            out[m] += level * np.fft.irfft(np.fft.rfft(white) * wind_amp, n=n_out)
-    if par.mic.array_response is not None:
-        curve = par.mic.array_db(freqs)
-        for m in range(n_mics):
-            out[m] = np.fft.irfft(np.fft.rfft(out[m]) * 10.0 ** (curve[m] / 20.0), n=n_out)
-    rendered = antialias(out, sr)[:, :n_out]
+    if par.wind is not None:
+        out += _v4_wind(par.wind, rng_wind, n_mics, n_out, sr)
+    rendered = _v4_output(par, out, sr)
     diagnostics: dict[str, Any] = dict(
         schema=FIT_SCHEMA_V4,
         seed=int(seed),

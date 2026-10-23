@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-"""Noise model v4, procedure B: fit MD2 (Michael's drone) in free flight; and the
-DREGON flight stage (wind, floor and per-rotor line gains from flight on a frozen bench rig).
+"""Noise model v4, procedure B: fit MD2 (Michael's drone) in free flight; the
+DREGON flight stage (wind, floor and per-rotor line gains from flight on a frozen bench rig);
+and the DREGON wind stage (procedure C-wind: the SC gust wind per capsule on a flight payload).
 
 Spec: ``docs/explainers/noise-model-v4.qmd`` § Procedure B; module
 :mod:`experiments.noise_model.flight_v4`. One restart per call; the restarts
@@ -25,6 +26,14 @@ are reduced afterwards to the lowest objective.
     # ... with the phase pedestal per order and eps refitted in flight (GPU)
     python scripts/noise_v4_flight.py dregon --coherence full --device cuda --chunk-frames 64 \\
         --bench results/noise_v4/bench/restarts/dregon__kappa10__r5__s2__c1.json --progress 1
+    # DREGON wind stage on a flight-stage payload: the SC gust wind per capsule
+    # (module experiments.noise_model.dregon_wind_v4); a 6-CPU node, single-threaded workers
+    OMP_NUM_THREADS=1 NUMBA_NUM_THREADS=1 python scripts/noise_v4_flight.py wind \\
+        --from results/noise_v4/flight/dregon_room2__flight_v4__dregon__kappa0__r5__s2.json \\
+        --workers 6 --progress 1
+    # ... a smoke: one grid point, one seed, one segment
+    python scripts/noise_v4_flight.py wind --from <payload> --offsets 2 --scales 1 --rates 1 \\
+        --seeds 1 --max-segments 1 --out /tmp/nv4_wind_smoke
 
 The pool is FLY125 standby (``michaels-standby``, 3 x 4 s) and cruise
 (``michaels-cruise`` FLY125 rows, 8 x 8 s), labels ``rps_refined``, the nv3r4
@@ -44,7 +53,12 @@ bench line-shape, pedestal, shaft and pair-EQ shape parameter frozen
 ``--max-frames`` for a smoke run). ``--coherence shaft`` also fits the shaft
 ``eps`` in flight (the bench phase pedestal held; writes ``<...>__shaft.json``),
 ``--coherence full`` the phase pedestal per aerodynamic order and ``eps``
-(writes ``<...>__coh.json``).
+(writes ``<...>__coh.json``). ``wind`` writes ``<out>/<stem>__scwind.json``: the
+``--from`` payload with ``params.wind`` the SC gust wind (kind ``sc``: per-mic
+levels by likelihood, the gust law by simulated moments over the
+``--offsets`` x ``--scales`` x ``--rates`` grid) and a ``wind_stage`` block, plus
+``<stem>__scwind.grid.json`` (the whole grid); its restartable work (one
+``utils.gridrun`` unit per base render and grid point) is ``<out>/<stem>__scwind/``.
 """
 
 from __future__ import annotations
@@ -297,6 +311,49 @@ def cmd_dregon(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_wind(args: argparse.Namespace) -> int:
+    import numpy as np
+
+    from experiments.noise_model import dregon_wind_v4 as DW
+
+    t0 = time.time()
+    pay, report, pay_path, report_path = DW.run_wind_stage(
+        args.source,
+        out=args.out,
+        offsets=tuple(args.offsets),
+        scales=tuple(args.scales),
+        rates=tuple(args.rates),
+        seeds=int(args.seeds),
+        workers=int(args.workers),
+        max_segments=args.max_segments,
+        n_mc=int(args.n_mc),
+        check_seeds=int(args.check_seeds),
+        resume=not args.no_resume,
+        progress=int(args.progress),
+    )
+    st, w = pay["wind_stage"], pay["params"]["wind"]
+    ch, chk = st["gust_law"]["chosen"], st["renderer_check"]
+    centre = [r["centre_db"] for r in st["amplitude"]["fit"]["mics"]]
+    print(
+        f"wrote {pay_path}\n      {report_path}\n"
+        f"chosen law: offset {ch['speed_offset_ms']:g} m/s, scale {ch['speed_scale_ms']:g} m/s, "
+        f"rate {ch['gust_rate_hz']:g} Hz (distance {ch['distance']:.4g}; "
+        f"{st['gust_law']['n_finished']}/{st['gust_law']['n_points']} grid points)\n"
+        f"level_db {[round(x, 2) for x in w['level_db']]}\n"
+        f"   prior centre (source wind, 20-100 Hz) {[round(x, 2) for x in centre]}\n"
+        f"distance by statistic { ({k: round(v, 2) for k, v in ch['terms']['by_stat'].items()}) }\n"
+        + "\n".join(DW.stats_table(st["real"], st["fitted"]))
+        + f"\nwind renderer check: max |band err| {chk['max_abs_err_db']:.3f} dB "
+        f"(tol {chk['tol_db']:g}, {chk['n_seeds']} seeds) passed {chk['passed']}\n"
+        f"grid point wall: median {st['point_wall_s']['median']:.1f}s, max "
+        f"{st['point_wall_s']['max']:.1f}s; best 3 "
+        f"{[(t['uid'], round(t['distance'], 2)) for t in report['table'][:3]]}\n"
+        f"wall {time.time() - t0:.1f}s (mean level {np.mean(w['level_db']):.2f} dB)",
+        flush=True,
+    )
+    return 0 if chk["passed"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     from experiments.noise_model import flight_v4 as FV
 
@@ -389,7 +446,26 @@ def main(argv: list[str] | None = None) -> int:
         "shaft eps only, the bench phase pedestal held; output <...>__shaft.json) or full "
         "(fit the phase pedestal per aerodynamic order and eps; output <...>__coh.json)",
     )
+    from experiments.noise_model import dregon_wind_v4 as DW
+
+    wd = sub.add_parser(
+        "wind", help="DREGON wind stage: the SC gust wind per capsule on a flight-stage payload"
+    )
+    wd.add_argument("--from", dest="source", required=True, help="a DREGON flight payload")
+    wd.add_argument("--offsets", type=float, nargs="+", default=list(DW.OFFSETS_MS))
+    wd.add_argument("--scales", type=float, nargs="+", default=list(DW.SCALES_MS))
+    wd.add_argument("--rates", type=float, nargs="+", default=list(DW.RATES_HZ))
+    wd.add_argument("--seeds", type=int, default=DW.N_SEEDS, help="sim seeds per segment")
+    wd.add_argument("--workers", type=int, default=1, help="parallel grid processes")
+    wd.add_argument("--out", default="results/noise_v4/flight/wind")
+    wd.add_argument("--max-segments", type=int, default=None, help="first N segments (smoke)")
+    wd.add_argument("--n-mc", type=int, default=DW.SHAPE_N_MC, help="shape Monte-Carlo clips")
+    wd.add_argument("--check-seeds", type=int, default=DW.CHECK_SEEDS)
+    wd.add_argument("--no-resume", action="store_true", help="re-run every finished unit")
+    wd.add_argument("--progress", type=int, default=0)
     args = ap.parse_args(argv)
+    if args.cmd == "wind":
+        return cmd_wind(args)
     if args.cmd == "dregon":
         if args.wind_start is None:
             from experiments.noise_model import dregon_flight_v4 as DF

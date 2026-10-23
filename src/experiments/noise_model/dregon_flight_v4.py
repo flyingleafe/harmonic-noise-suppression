@@ -425,11 +425,7 @@ def frozen_lines(
     silent = silent_floor(bench)
     par = _bench_params(silent)
     f_psd = np.fft.rfftfreq(FLOOR_OVERSAMPLE * int(n_fft), d=1.0 / float(sr))
-    if (
-        np.any(par.floor.psd(f_psd) != 0.0)
-        or par.floor.static_rel != 0.0
-        or par.wind_db is not None
-    ):
+    if np.any(par.floor.psd(f_psd) != 0.0) or par.floor.static_rel != 0.0 or par.wind is not None:
         raise AssertionError("the silenced bench floor still adds power")
     rotors = [rotor_payload(silent, r) for r in range(par.n_rotors)]
     for r, pay in enumerate(rotors):
@@ -1042,7 +1038,7 @@ def renderer_check(
             mic_gain_db=mic_gain,
             coherence=coherence,
         )
-        if V4.V4Params.from_payload(pay).wind_db is None:
+        if V4.V4Params.from_payload(pay).wind is None:
             raise AssertionError("the exported flight payload carries no wind")
         ref = np.stack(
             [
