@@ -422,6 +422,44 @@ above nv3r4 (1.43 / 1.61); with the four rotors' profiles averaged it is 8.3 /
 10.3. Details and the comparison: `docs/explainers/noise-model-v4-dregon-gap.qmd`
 § 5–6.
 
+**C-wind: the wind as a separate gusty term (2026-10-23).** Real DREGON
+wind is gusty and independent per capsule: on the five scoring windows the
+20–400 Hz level between the lines has an sd of 2.9–3.4 dB over 128 ms frames
+(cross-mic correlation 0.07–0.24); the static wind of v4 and nv3r4 gives
+1.3–1.5 dB (only the scatter of a steady noise). New wind kind `sc` (code
+`bd6c7596`): per capsule one SC generator draw (`wind_sc.py`, speed
+`offset + scale · Weibull(2)`, `rate` knots per second), level per mic by
+Whittle with lines and floor frozen, gust law by simulated moments of
+`floor_envelope` after a regression on the 1–4 kHz level (grid 5 × 5 × 5,
+4 seeds, job `nv4-cwind-grid-e2ddae`, 11 min on uni-cpu). Chosen: offset 2,
+scale 0.5 m/s, rate 2 Hz; renderer check 0.30 dB (tol 1). Payload
+`results/noise_v4/flight/wind/…__scwind.json`. One gust law for all mics
+under-reads the gust sd on mics 1, 2, 5, 6 (1.9–2.9 against 4.2–5.2 dB).
+
+Local HPPNet probes (render seed 2001, all five windows, mean of 8 mics; bar
+1.680; scripts `/tmp/hpp_gust_v3.py`, `hpp_odd.py`, `hpp_swap.py`, not kept):
+
+| arm | HPPNet |
+|---|---|
+| real | 1.22 |
+| nv3r4 (static wind) | 1.67 |
+| nv3r4, static wind → SC gusts (default law, 3 / 8 knots), same band power | 1.73 / 1.80 |
+| v4 k0 (static wind) | 17.57 |
+| v4 k0, static wind → SC gusts, 8 knots, same band power | 2.30 |
+| v4 C-wind (fitted gust law) | 15.57 |
+| v4 k0 + gusts (8 knots), odd orders 3 / 5 / 7 raised by 10 / 14 / 7 dB | 7.27 |
+| v4 k0 + gusts (8 knots), all lines +3 dB | 2.21 |
+| v4 lines + nv3r4 floor and wind | 15.02 |
+| nv3r4 lines + v4 floor + gusts (8 knots) | 2.03 |
+
+Reading: the default SC law (gust sd 5.9 dB, twice the real one) hides the
+gap; the fitted law does not. The weak odd orders and the motor family are
+not the cause (raising or removing them makes it worse). The fragile part is
+the v4 line set: nv3r4's lines survive v4's background, v4's lines do not
+survive nv3r4's; the failures are whole rotors lost on single mics (mics 0
+and 4 under C-wind), which points at the bench per-(rotor, mic) line balance
+[INFERENCE].
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
