@@ -373,6 +373,14 @@ dependence reaches across 1.6 kHz.
 collapsed below 300 Hz.
 <!-- source: results/noise_v4/bench/planted/dregon__kappa0__r5__s2__c6__kappa0__r1.json -->
 
+The planted data are reproducible inside one job but not across GPU nodes:
+the same `.fit.json` scores −166,174,609.7 nats in the planted job,
+−166,146,685.6 in the escape job (`nv4-eta-planted-d5a7a4`, which then ended
+at its deadline with 30 negative directions) and −166,140,705.1 twice in a
+probe job (`nv4-planted-repro-475bc8`). So the planted chain (fit, escape, η)
+runs in one job (`nv4-planted-chain-ccaeba`, kaggle), and `planted` now saves
+its exact final state (`.fit.state.npz`).
+
 **MD2 flight.** The converged joint fit (`md2_fly125__flight_v4__s0__r5c1`)
 scored standby PIT 27.8 and parity ratio 3.57, so the per-regime fallback
 applies. Two changes of procedure and prior: the phase pedestal is fitted per
