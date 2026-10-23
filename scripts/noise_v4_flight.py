@@ -33,10 +33,11 @@ transfer``). Supports come from the ``.npz`` cache or are built from the data
 Writes ``<out>/restarts/<name>__flight_v4__s<seed>.json`` (``noise-v4-fit/3``);
 ``reduce`` writes ``<out>/<name>__flight_v4.json``; ``dregon`` writes
 ``<out>/dregon_room2__flight_v4__<bench stem>.json``: the bench payload with
-``kind="flight"``, a per-rotor line gain written into both profile rows, the
-floor refitted and a static per-mic wind, fitted on the five 8 s
-``dregon-floor`` segments with every bench line-shape, pedestal, shaft and
-pair-EQ parameter frozen (``--no-line-gain`` holds the gains at 0,
+``kind="flight"``, a per-rotor line gain written into both profile rows, a
+per-mic line gain (sum 0) into the pair EQ, the floor refitted and a static
+per-mic wind, fitted on the five 8 s ``dregon-floor`` segments with every
+bench line-shape, pedestal, shaft and pair-EQ shape parameter frozen
+(``--no-line-gain`` / ``--no-mic-gain`` hold those gains at 0,
 ``--max-frames`` for a smoke run). ``--free-coherence`` also fits the phase
 pedestal per aerodynamic order and the shaft ``eps`` in flight and writes
 ``<...>__coh.json``.
@@ -249,6 +250,7 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         max_passes=int(args.max_passes),
         progress=int(args.progress),
         line_gain=not args.no_line_gain,
+        mic_gain=not args.no_mic_gain,
         free_coherence=bool(args.free_coherence),
     )
     tag = "__coh" if args.free_coherence else ""
@@ -279,6 +281,8 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         f"wind_db {[round(w, 2) for w in pay['params']['wind']['wind_db']]}\n"
         f"line_gain_db {[round(g, 3) for g in st['line_gain']['gain_db']]} "
         f"(free {st['line_gain']['free']})\n"
+        f"mic_gain_db {[round(g, 3) for g in st['mic_gain']['gain_db']]} "
+        f"(free {st['mic_gain']['free']})\n"
         f"{coh_line}\n"
         f"wall {time.time() - t0:.1f}s",
         flush=True,
@@ -364,6 +368,11 @@ def main(argv: list[str] | None = None) -> int:
         "--no-line-gain",
         action="store_true",
         help="hold the per-rotor line gains at 0 (the bench line levels)",
+    )
+    d.add_argument(
+        "--no-mic-gain",
+        action="store_true",
+        help="hold the per-mic line gains at 0 (the bench pair EQ levels)",
     )
     d.add_argument(
         "--free-coherence",
