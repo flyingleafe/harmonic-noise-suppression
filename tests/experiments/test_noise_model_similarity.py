@@ -27,11 +27,18 @@ def _render(line_gain: float) -> tuple[np.ndarray, np.ndarray]:
 
 def test_identical_inputs_read_zero():
     x, lab = _render(1.0)
-    for name, res in S.battery(x, x.copy(), lab).items():
+    out = S.battery(x, x.copy(), lab)
+    assert "spectro_temporal" in out
+    st = out["spectro_temporal"]["summary"]
+    # the co-modulation levels are per-side statistics: equal, not zero
+    assert st.pop("real_offdiag_corr") == pytest.approx(st.pop("arm_offdiag_corr"), abs=1e-12)
+    for name, res in out.items():
         vals = np.asarray(list(res["summary"].values()), dtype=float)
         fin = vals[np.isfinite(vals)]
         assert fin.size, name
-        np.testing.assert_allclose(fin, 0.0, atol=1e-9, err_msg=name)
+        # the Fréchet covariance term goes through two matrix square roots
+        tol = 1e-6 if name == "spectro_temporal" else 1e-9
+        np.testing.assert_allclose(fin, 0.0, atol=tol, err_msg=name)
 
 
 def test_line_only_offset_moves_line_column_not_floor():

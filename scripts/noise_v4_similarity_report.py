@@ -8,15 +8,18 @@ DREGON flight arms — REPORT ONLY, nothing is optimised::
 The measures (:mod:`experiments.noise_model.similarity`): line/floor
 log-spectral distance per octave band, order-tracked line levels, frame band
 level distributions and modulation spectra, spatial level spread and
-coherence, Itakura-Saito divergence, next to the old mic-0 band LTAS
+coherence, Itakura-Saito divergence (linear-bin and octave-balanced) and the
+spectro-temporal Fréchet / co-modulation measures, next to the old mic-0 band LTAS
 (``revised_eval.ltas_deviation_db``) for reference. Two window sets, scored
 separately: the five official 4 s DREGON cruise scoring windows
 (``gates.DREGON_CRUISE_SUPPORTS``) and the five 8 s tuning segments
-(``dregon_flight_v4.pool_specs()``). Every arm is rendered on the window's
-``motors_command`` label, render seed 2001, all eight mics. ``real_self`` is
-the noise floor: the real window's first half against its second half (each
-side on its own label). Outputs ``report.json`` (every per-window, per-band,
-per-mic number) and ``report.md`` (one row per arm).
+(``dregon_flight_v4.pool_specs()``). Every arm is rendered on the window's real
+``motors_command`` trajectory (lines aligned with the data), render seed 2001,
+all eight mics. Each arm's SEED FLOOR (``<arm> seed floor``) is the same
+payload on the same trajectory, seed 2001 as "real" against seed 2002: the
+realisation noise of every measure at that window length and trajectory.
+Outputs ``report.json`` (every per-window, per-band, per-mic number) and
+``report.md`` (one row per arm, its seed floor under it).
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-SEED = 2001
+SEED, FLOOR_SEED = 2001, 2002
 N_MICS = 8
 CWIND = "results/noise_v4/flight/wind/dregon_room2__flight_v4__dregon__kappa0__r5__s2__scwind.json"
 #: Payload arms; a ``(base, point)`` pair is ``dregon_lawsearch_v4.edit_payload(base, point)``.
@@ -66,7 +69,8 @@ ARMS: dict[str, Any] = {
         ),
     ),
 }
-ARM_ORDER = ("real_self", *ARMS)
+FLOOR_SUFFIX = " seed floor"
+ARM_ORDER = tuple(row for arm in ARMS for row in (arm, f"{arm}{FLOOR_SUFFIX}"))
 SETS = ("scoring", "tuning")
 
 
@@ -114,13 +118,11 @@ def _windows(which: str) -> list[tuple[str, np.ndarray, np.ndarray]]:
     ]
 
 
-def _compare(
-    real: np.ndarray, arm: np.ndarray, rps: np.ndarray, arm_rps: np.ndarray | None = None
-) -> dict[str, Any]:
+def _compare(real: np.ndarray, arm: np.ndarray, rps: np.ndarray) -> dict[str, Any]:
     from experiments.noise_model import similarity as SIM
     from experiments.stochastic_fit import revised_eval as RE
 
-    res: dict[str, Any] = SIM.battery(real, arm, rps, arm_labels=arm_rps)
+    res: dict[str, Any] = SIM.battery(real, arm, rps)
     res["ltas"] = RE.ltas_deviation_db(real, arm)
     res["ltas"]["summary"] = dict(mean_abs_db=res["ltas"]["mean_abs_db"])
     return res
@@ -172,6 +174,10 @@ def _aggregate(per_window: list[dict[str, Any]]) -> dict[str, Any]:
             "w1_db": _mean([r["level_distribution"]["w1_db"].mean(axis=0) for r in rows]),
             "msc_diff": _mean([r["spatial"]["msc_diff"] for r in rows]),
             "level_sd_diff_db": _mean([r["spatial"]["level_sd_diff_db"] for r in rows]),
+            "is_octave": _mean([_mean(r["itakura_saito"]["is_octave_real_arm"]) for r in rows]),
+            "is_octave_symmetric": _mean(
+                [_mean(r["itakura_saito"]["is_octave_symmetric"]) for r in rows]
+            ),
         }
         out[arm] = dict(summary=summ, bands=bands)
     return out
@@ -199,11 +205,13 @@ def _markdown(report: dict[str, Any]) -> str:
     md = [
         "# Noise model v4 — DREGON similarity battery",
         "",
-        f"git `{report['git']}`, render seed {SEED}, label `motors_command`, all {N_MICS} mics; "
-        f"wall {report['wall_s']:.0f} s. Real is the reference; signed numbers are arm − real. "
-        "`real_self` = real first half vs real second half of each window (the noise floor a "
-        "perfect generator would roughly reach; see Notes). Every number is the mean over the "
-        "five windows of the set (and over mics/bands/orders as stated).",
+        f"git `{report['git']}`, render seeds {SEED} (arm) and {FLOOR_SEED} (seed floor), "
+        f"label `motors_command`, all {N_MICS} mics; wall {report['wall_s']:.0f} s. Real is the "
+        "reference; signed numbers are arm − real. `<arm> seed floor` = the arm's seed-"
+        f"{SEED} render as reference against its seed-{FLOOR_SEED} render on the same "
+        "trajectory: the distance a perfect generator would have from data that were one "
+        "more draw from it. Every number is the mean over the five windows of the set (and "
+        "over mics/bands/orders as stated).",
         "",
     ]
     for set_name in SETS:
@@ -226,8 +234,10 @@ def _markdown(report: dict[str, Any]) -> str:
                 "line Δ",
                 "floor |Δ|",
                 "floor Δ",
-                "IS(real‖arm)",
-                "IS sym",
+                "IS (linear bins, long-term PSD)",
+                "IS sym (linear)",
+                "IS octave-balanced",
+                "IS sym octave-balanced",
             ],
             [
                 [
@@ -239,6 +249,41 @@ def _markdown(report: dict[str, Any]) -> str:
                     s(a, "line_floor_lsd.floor_signed_db"),
                     s(a, "itakura_saito.is_div", 3),
                     s(a, "itakura_saito.is_symmetric", 3),
+                    s(a, "itakura_saito.is_octave", 3),
+                    s(a, "itakura_saito.is_octave_symmetric", 3),
+                ]
+                for a in ARM_ORDER
+            ],
+        )
+        md += [
+            "",
+            "### Spectro-temporal: 128 ms / 16 ms frames, third-octave log levels "
+            f"({len(SIM.THIRD_OCTAVE_EDGES) - 1} bands, 31.5 Hz-7.9 kHz), mic mean",
+            "",
+        ]
+        md += _table(
+            [
+                "arm",
+                "Fréchet (dB²)",
+                "FD mean term",
+                "FD cov term",
+                "co-mod ‖ΔR‖_F / n",
+                "off-diag r (ref)",
+                "off-diag r (arm)",
+                "band sd Δ",
+                "band sd |Δ|",
+            ],
+            [
+                [
+                    a,
+                    s(a, "spectro_temporal.frechet_db2", 1),
+                    s(a, "spectro_temporal.frechet_mean_term_db2", 1),
+                    s(a, "spectro_temporal.frechet_cov_term_db2", 1),
+                    s(a, "spectro_temporal.comod_frobenius", 3),
+                    s(a, "spectro_temporal.real_offdiag_corr", 3),
+                    s(a, "spectro_temporal.arm_offdiag_corr", 3),
+                    s(a, "spectro_temporal.sd_signed_diff_db"),
+                    s(a, "spectro_temporal.sd_abs_diff_db"),
                 ]
                 for a in ARM_ORDER
             ],
@@ -306,6 +351,7 @@ def _markdown(report: dict[str, Any]) -> str:
             ("floor_signed_db", "Floor cells ΔdB per octave band (mic mean, arm − real)", 2),
             ("w1_db", "Frame band-level W1 (dB) per octave band (mic mean)", 2),
             ("msc_diff", "Mean pairwise MSC, arm − real, per octave band", 3),
+            ("is_octave", "IS(real‖arm) per octave band, long-term PSD (mic mean)", 3),
         ):
             md += ["", f"### {title}", ""]
             md += _table(
@@ -334,7 +380,7 @@ NOTES = [
     "there (`line_bins`/`floor_bins` per band in the JSON), so the line/floor split is "
     "trustworthy below ~500 Hz only.",
     "Floor PSD: per bin the mean power over the frames where it is a floor cell; a bin enters "
-    "only if it is a floor cell in ≥ 25 % of frames on both sides.",
+    "only if it is a floor cell in ≥ 25 % of the frames (same cells on both sides: one label).",
     "Order levels: per 4096-point frame and rotor, the peak within ±0.08 order of k·f_r (frame-mean "
     "label) and its prominence over the median 0.3-0.5 orders away, frame-averaged in dB, per mic; "
     "orders up to 100 whose side window stays below 7.9 kHz. `accept_stats.order_profile` was not "
@@ -345,19 +391,25 @@ NOTES = [
     "dB); `mod norm` divides by the mean first (modulation depth only) and is the level-free one.",
     "Coherence: Welch's MSC estimator (identical to `scipy.signal.coherence` with a 4096-point "
     "Hann) computed from one shared STFT at 75 % overlap; it is biased up by ≈ 1/n_frames.",
-    "real_self compares halves (2 s on the scoring set, 4 s on the tuning set) while the arms "
-    "compare full windows (4 s / 8 s): the estimation noise of every measure is larger for the "
-    "halves (fewer frames: 28 vs 61 fine frames on the scoring set; MSC bias higher), and the "
-    "halves carry different labels (the per-window label drift is in the JSON), so real_self is "
-    "a pessimistic floor. No measure needed a window-length change beyond the modulation "
-    "spectrum's segment length (2 s → one segment on a 2 s half).",
-    "The real flight audio is not stationary within a window: the real_self LTAS error is "
-    "4.8-5.7 dB on hovering, rectangle and spinning (mic 0 of hovering's halves differs by 3-7 dB "
-    "per band; rectangle's label ramps 65 → 90 rev/s in its first 0.5 s), so real_self's "
-    "level-sensitive columns (LTAS, line/floor Δ, W1, IS) "
-    "measure that drift as well as estimation noise; its level-free columns (W1 centred, "
-    "mod norm, MSC, prominence) are less affected and are the better floors.",
+    "Model-vs-real comparisons render each arm on the REAL window's `motors_command` "
+    "trajectory, so the arm's lines sit where the data's do. The seed floor renders the same "
+    "payload on the same trajectory with a second seed, so it measures realisation noise "
+    "only; it is a floor for the arm's own variability (an arm that is less variable than the "
+    "data has a lower floor than the data would). The earlier half-split floor (real first half "
+    "vs second half) was dropped: the halves follow different speed trajectories, so their "
+    "lines sit at different frequencies, and they also differ by level drift.",
     "LTAS (old) is `revised_eval.ltas_deviation_db` (mic 0, 8192-point Welch, 7 bands 100-7900 Hz).",
+    "Itakura-Saito: both forms read the LONG-TERM (whole-window) fine PSDs, so they are "
+    "time-blind. The linear-bin mean weights every 3.9 Hz bin equally, so 2-8 kHz holds most "
+    "of it; the octave-balanced form averages the eight per-octave means (per-octave values in "
+    "report.json, `bands.is_octave`).",
+    "Spectro-temporal (time-aware): per mic, 128 ms periodic-Hann frames at a 16 ms hop, "
+    "log power summed in 24 third-octave bands (31.5 Hz-7.9 kHz). Fréchet distance between "
+    "Gaussians fitted to the frame level vectors (dB², `scipy.linalg.sqrtm`, real part, ridge "
+    "1e-6 dB²), split into the mean term (long-term spectrum) and the covariance term (how "
+    "band levels vary and co-vary over time). Co-modulation: the 24×24 correlation matrix of "
+    "frame levels; ‖R_arm − R_ref‖_F / 24 and each side's mean off-diagonal correlation "
+    "(broadband bursts raise it). In seed-floor rows 'ref' is the seed-2001 render.",
 ]
 
 
@@ -391,27 +443,30 @@ def main(argv: list[str] | None = None) -> int:
         for name, real, rps in windows:
             t0 = time.time()
             n = real.shape[1]
-            h = n // 2
-            rows: dict[str, Any] = {
-                "real_self": _compare(
-                    real[:, :h], real[:, h : 2 * h], rps[:, :h], rps[:, h : 2 * h]
-                )
-            }
+            rows: dict[str, Any] = {}
             for arm, pay in payloads.items():
-                x = np.asarray(render_noise(pay, rps, sr=16000, n_mics=N_MICS, seed=SEED))[:, :n]
+                x, y = (
+                    np.asarray(render_noise(pay, rps, sr=16000, n_mics=N_MICS, seed=s))[:, :n]
+                    for s in (SEED, FLOOR_SEED)
+                )
                 rows[arm] = _compare(real, x, rps)
+                rows[f"{arm}{FLOOR_SUFFIX}"] = _compare(x, y, rps)
             per_window.append(
                 dict(
                     window=name,
                     seconds=n / 16000.0,
                     label_mean_rps=rps.mean(axis=1),
-                    half_label_shift_rps=rps[:, h : 2 * h].mean(axis=1) - rps[:, :h].mean(axis=1),
+                    label_sd_rps=rps.std(axis=1),
                     arms=rows,
                 )
             )
             print(
                 f"{set_name} {name}: {time.time() - t0:.1f}s  "
-                + "  ".join(f"{a} LTAS {rows[a]['ltas']['mean_abs_db']:.2f}" for a in ARM_ORDER),
+                + "  ".join(
+                    f"{a} LTAS {rows[a]['ltas']['mean_abs_db']:.2f}"
+                    f"/{rows[a + FLOOR_SUFFIX]['ltas']['mean_abs_db']:.2f}"
+                    for a in ARMS
+                ),
                 flush=True,
             )
         report["sets"][set_name] = dict(
