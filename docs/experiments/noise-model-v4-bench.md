@@ -544,6 +544,16 @@ term, co-modulation close to real), but is 2.4 dB too loud on the tuning
 segments and 0.9–1.2 dB too quiet on the scoring windows. One shared level law
 cannot fit both window sets. It fits the mean of the 18 windows [INFERENCE].
 
+*Second tracker (2026-10-24).* The same arms under HRSPNet
+`rp_pyrseplstm_k64_alllab` (`best_real_median`, rp-protocol grid 0–159 rev/s,
+164 bins; `scripts/noise_v4_pit_probe.py`, `e1f211e5`), tuning segments, seed
+2001, mean PIT (rev/s): real 0.67, nv3r4 0.98, C-wind 1.67, R1 k ≤ 30 13.58
+(bench ε restored: 1.71), R1 k ≤ 10 1.69, gust search 1.63, R2 1.63. HPPNet
+on the same arms: real 0.93, nv3r4 1.54, C-wind 5.57, R2 1.92. The ranking
+holds (nv3r4 is better than every v4 arm under both trackers), but the
+C-wind collapse is HPPNet-specific (5.57 vs 1.67), and the alternating fit
+changes HRSPNet PIT little (1.67 → 1.63).
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
