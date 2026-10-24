@@ -510,6 +510,11 @@ def cmd_escape(args: argparse.Namespace) -> int:
             + (f"reused, took {hess_s0:.0f} s)" if hp0 is not None else "recomputed)"),
             flush=True,
         )
+    # --flat-gain-per-cell: a negative direction gaining less than the fit's own
+    # convergence tolerance (per cell, times the rig's cells) counts as flat
+    flat_gain = (
+        0.0 if args.flat_gain_per_cell is None else float(args.flat_gain_per_cell) * model.n_cells
+    )
     esc, hp = E.saddle_escape(
         model,
         converge,
@@ -517,6 +522,7 @@ def cmd_escape(args: argparse.Namespace) -> int:
         deadline=deadline,
         hp=hp0,
         hessian_s=hess_s0,
+        flat_gain_nats=flat_gain,
     )
     pay = B.payload(model, last, git=_git())
     pay["optimiser"]["resumed_from"] = str(src_path)
@@ -764,6 +770,13 @@ def main(argv: list[str] | None = None) -> int:
         "--planted",
         default=None,
         help="a planted report (planted/<stem>.json): --from is its .fit.json, on its planted rig",
+    )
+    p.add_argument(
+        "--flat-gain-per-cell",
+        type=float,
+        default=None,
+        help="a negative direction gaining at most this many nats per cell counts as flat "
+        f"(e.g. the fit's convergence tolerance {1e-4:g}); default: the strict rule",
     )
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)

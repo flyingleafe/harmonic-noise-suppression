@@ -277,6 +277,7 @@ def saddle_escape(
     deadline: float | None = None,
     hp: tuple[np.ndarray, np.ndarray] | None = None,
     hessian_s: float | None = None,
+    flat_gain_nats: float = 0.0,
     log: Any = print,
 ) -> tuple[dict[str, Any], tuple[np.ndarray, np.ndarray] | None]:
     """Leave the saddle a converged fit can stop on, in place on ``model``.
@@ -294,6 +295,11 @@ def saddle_escape(
     ``hp`` is ``(H, P)`` already computed at the model's parameters (a previous
     run's last Hessian) and ``hessian_s`` its wall time; the first round then
     starts at the line search.
+
+    ``flat_gain_nats`` > 0: a negative direction whose best trial step lowers the
+    MAP objective by at most that much counts as flat (the step is undone), so a
+    round where every direction is flat ends ``stuck``. The strict rule
+    (:data:`MINIMUM_RULE`) is ``flat_gain_nats = 0``.
 
     Returns the record and the last ``(H, P)`` if it is at the model's final
     parameters (``None`` if the deadline stopped the run before it)."""
@@ -328,7 +334,11 @@ def saddle_escape(
         for i in neg:  # ascending: most negative first
             if left() < 1.25 * hess_s:
                 break
+            x0 = get_flat(model)
             ls = line_search(model, V[:, i], f, steps)
+            if 0.0 < ls["gain"] <= flat_gain_nats:
+                set_flat(model, x0)
+                ls = dict(ls, step=0.0, gain=0.0, objective=f, flat_gain=ls["gain"])
             f = ls["objective"]
             directions.append(dict(eig=float(w[i]), **_coordinate(model, V[:, i]), **ls))
         n_moved = sum(d["step"] != 0.0 for d in directions)
@@ -369,7 +379,13 @@ def saddle_escape(
         n_negative=final["n_negative"],
         min_eig=final["min_eig"],
         at_minimum=None if hp is None else (final["n_negative"] == 0 or stop == "stuck"),
-        minimum_rule=MINIMUM_RULE,
+        minimum_rule=MINIMUM_RULE
+        + (
+            f"; a direction gaining at most {flat_gain_nats:.4g} nats counts as flat"
+            if flat_gain_nats > 0.0
+            else ""
+        ),
+        flat_gain_nats=float(flat_gain_nats),
         hessian_s=hess_s,
         wall_s=time.perf_counter() - t_all,
     )

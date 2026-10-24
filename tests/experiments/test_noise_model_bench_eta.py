@@ -97,3 +97,17 @@ def test_escape_counts_a_descent_free_saddle_as_a_minimum() -> None:
     (d,) = rec["rounds"][0]["directions"]
     assert d["step"] == 0.0 and d["gain"] == 0.0
     assert torch.equal(model.params["x"].detach(), torch.zeros(3, dtype=torch.float64))
+
+
+def test_escape_counts_a_direction_under_the_flat_gain_as_flat() -> None:
+    # the planted saddle's best step gains 0.25: under a 0.3 tolerance it is undone
+    model = Toy([0.0, 0.0, 0.0])
+    rec, _ = E.saddle_escape(model, lbfgs, flat_gain_nats=0.3, log=lambda *_: None)
+    assert rec["stop"] == "stuck" and rec["at_minimum"] is True and rec["n_negative"] == 1
+    (d,) = rec["rounds"][0]["directions"]
+    assert d["step"] == 0.0 and d["gain"] == 0.0 and np.isclose(d["flat_gain"], 0.25)
+    assert torch.equal(model.params["x"].detach(), torch.zeros(3, dtype=torch.float64))
+    # under a 0.2 tolerance the same direction is taken and the escape reaches the minimum
+    model = Toy([0.0, 0.0, 0.0])
+    rec, _ = E.saddle_escape(model, lbfgs, flat_gain_nats=0.2, log=lambda *_: None)
+    assert rec["stop"] == "at_minimum"
