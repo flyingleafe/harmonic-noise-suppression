@@ -392,8 +392,14 @@ payload). Escape on the repaired twin (`nv4-planted-escape-61cfde`, kaggle,
 lower the objective by 4,713.9 nats to −166,179,323.0 (negative directions
 57 → 32 → 12 → 8; min eigenvalue −0.53). The deadline stopped round 4 before
 its line search, so the twin is not yet at a minimum and η did not run. The
-continuation reuses the saved Hessian (`nv4-planted-escape2-c75cd0`, from
-`restarts/…r1.fit__c1.json`).
+continuation (`nv4-planted-escape2-c75cd0`, reused Hessian, 480 min) ran
+five more rounds to −166,179,350.7 (`…r1.fit__c2.json`). Negative directions
+8 → 4 → 8 → 6 → 6, min eigenvalue −0.53 → −0.31. They are all pedestal
+amplitude, width and share coordinates (`u_amp`, `u_W`, `u_s2P`). The round
+gains are 1.17, 0.10, 0.08 and 0.04 nats. On 15.3 M cells that is 8e-8 to
+3e-9 per cell, under the convergence tolerance. The strict minimum rule
+(no direction lowers the objective at any step) is never met, so η on the
+twin is not reported yet.
 
 **MD2 flight.** The converged joint fit (`md2_fly125__flight_v4__s0__r5c1`)
 scored standby PIT 27.8 and parity ratio 3.57, so the per-regime fallback
