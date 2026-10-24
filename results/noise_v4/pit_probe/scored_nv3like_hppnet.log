@@ -1,0 +1,8 @@
+free-flight_nosource_room2 {'real': 0.64, 'nv3like': 4.8}
+hovering_nosource_room2 {'real': 0.89, 'nv3like': 5.31}
+updown_nosource_room2 {'real': 1.69, 'nv3like': 6.4}
+rectangle_nosource_room2 {'real': 1.69, 'nv3like': 5.59}
+spinning_nosource_room2 {'real': 1.19, 'nv3like': 4.43}
+tracker hppnet (default ckpt) set scored seeds 2001-2004
+real              0.64  0.89  1.69  1.69  1.19  mean 1.219
+nv3like           4.80  5.31  6.40  5.59  4.43  mean 5.305

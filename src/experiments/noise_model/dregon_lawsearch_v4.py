@@ -173,9 +173,10 @@ BOX: dict[str, tuple[float, float]] = dict(
 )
 #: Feasibility gates: beat nv3r4's tuning-set mean PIT and mean LTAS, or PIT only.
 GATES: tuple[str, ...] = ("pit+ltas", "pit")
-#: Selection among feasible points: lowest mean PIT, or lowest mean LTAS (the
-#: smallest loss of spectral similarity that still passes the gate).
-SELECTIONS: tuple[str, ...] = ("min-pit", "min-ltas")
+#: Selection among feasible points: lowest mean PIT, lowest mean mic-0 LTAS, or
+#: lowest LTAS error averaged over all mics (the smallest loss of spectral
+#: similarity that still passes the gate).
+SELECTIONS: tuple[str, ...] = ("min-pit", "min-ltas", "min-ltas-all")
 #: Scrambled Sobol seeds of stage 1 and stage 2.
 SOBOL_SEEDS: tuple[int, int] = (20261023, 20261024)
 #: The composition check: its seed, its random points (plus the base point).
@@ -371,12 +372,24 @@ def render_parts(
     )
 
 
+#: The tuning pools: the five 8 s ``dregon-floor`` segments, or the 18-window
+#: ``dregon-flight-wide`` set (those five first; never the scoring windows).
+POOLS: tuple[str, ...] = ("floor", "wide")
+
+
+def pool_specs(pool: str = "floor") -> list[Any]:
+    """The tuning segments of ``pool`` (:data:`POOLS`)."""
+    if pool not in POOLS:
+        raise ValueError(f"pool {pool!r} not in {POOLS}")
+    return DF.pool_specs() if pool == "floor" else DF.wide_pool_specs()
+
+
 def build_components(
-    base: Mapping[str, Any], segment: int, *, seed: int = RENDER_SEED
+    base: Mapping[str, Any], segment: int, *, seed: int = RENDER_SEED, pool: str = "floor"
 ) -> dict[str, Any]:
     """The arrays :func:`save_components` writes for pool segment ``segment``:
     its data, its identity and :func:`render_parts` on its label."""
-    spec = DF.pool_specs()[int(segment)]
+    spec = pool_specs(pool)[int(segment)]
     clip = SU.flight_clip(spec)  # the loader of the flight stage's supports
     audio = np.asarray(clip.audio, dtype=np.float32)
     rps = np.asarray(clip.rps, dtype=np.float64)
@@ -520,8 +533,9 @@ def cruise_support(comp: Components) -> Any:
 
 
 def score(tracker: Any, comp: Components, audio: np.ndarray) -> dict[str, Any]:
-    """``noise_v2_round_score.measure_support``'s two numbers on one segment:
-    the tracker's PIT MAE (all mics, cruise support) and the mic-0 LTAS error."""
+    """``noise_v2_round_score.measure_support``'s two numbers on one segment
+    (the tracker's PIT MAE over all mics on the cruise support, the mic-0 LTAS
+    error) plus the LTAS error averaged over all mics (``ltas_all_abs_db``)."""
     audio = np.asarray(audio, dtype=np.float64)
     mics = list(range(comp.n_mics))
     t0 = time.time()
@@ -533,13 +547,15 @@ def score(tracker: Any, comp: Components, audio: np.ndarray) -> dict[str, Any]:
         support=cruise_support(comp),
     )
     t1 = time.time()
-    ltas = RE.ltas_deviation_db(comp.real.astype(np.float64), audio, mic=0)
+    real = comp.real.astype(np.float64)
+    per_mic = [RE.ltas_deviation_db(real, audio, mic=m) for m in mics]
     return dict(
         pit_mae=float(pit["mae"]),
         pit_per_mic=[float(v) for v in pit["per_mic"]],
         n_scored_frames=pit.get("n_scored_frames"),
-        ltas_abs_db=float(ltas["mean_abs_db"]),
-        ltas_level_offset_db=float(ltas["level_offset_db"]),
+        ltas_abs_db=float(per_mic[0]["mean_abs_db"]),
+        ltas_level_offset_db=float(per_mic[0]["level_offset_db"]),
+        ltas_all_abs_db=float(np.mean([d["mean_abs_db"] for d in per_mic])),
         pit_s=t1 - t0,
         ltas_s=time.time() - t1,
     )
@@ -601,6 +617,7 @@ def bars(ref_rows: Sequence[Mapping[str, Any]], n_segments: int) -> dict[str, An
             ltas_abs_db=[r["ltas_abs_db"] for r in rows],
             mean_pit_mae=float(np.mean([r["pit_mae"] for r in rows])),
             mean_ltas_abs_db=float(np.mean([r["ltas_abs_db"] for r in rows])),
+            mean_ltas_all_abs_db=float(np.mean([r["ltas_all_abs_db"] for r in rows])),
         )
     return out
 
@@ -628,6 +645,9 @@ def point_table(rows: Sequence[Mapping[str, Any]], n_segments: int) -> list[dict
                 mean_ltas_abs_db=(
                     float(np.mean([r["ltas_abs_db"] for r in rs])) if complete else None
                 ),
+                mean_ltas_all_abs_db=(
+                    float(np.mean([r["ltas_all_abs_db"] for r in rs])) if complete else None
+                ),
             )
         )
     return table
@@ -653,7 +673,11 @@ def mark_feasible(
 def _key(selection: str) -> str:
     if selection not in SELECTIONS:
         raise ValueError(f"selection {selection!r} not in {SELECTIONS}")
-    return "mean_pit_mae" if selection == "min-pit" else "mean_ltas_abs_db"
+    return {
+        "min-pit": "mean_pit_mae",
+        "min-ltas": "mean_ltas_abs_db",
+        "min-ltas-all": "mean_ltas_all_abs_db",
+    }[selection]
 
 
 def stage2_box(
