@@ -623,6 +623,26 @@ Listen did not run because the render clips (peak 1.38). Reading: the
 gate on five segments does not transfer, and mic-0 LTAS is a weak stand-in
 for spectral similarity.
 
+*The nv3r4-like refit (2026-10-24; Dmitrii: "remember what was done for
+nv3r4; achieve that, but keep the gusty wind and thin higher harmonics").*
+nv3r4 fitted every rotor's per-order line level in flight (4 × 88, prior sd
+10 dB). The v4 analogue (`3d718f1b`): lines mode with all 148 aerodynamic
+orders free per rotor, N(bench, 10 dB). The shaft ε and the phase pedestal
+of every order are held at the bench (`--hold-eps --hold-pedestal`: thin
+lines). The gust law comes from the battery search (`--wind-from`, offset
+2, scale 1 m/s, rate 8 Hz). Wide pool. Converged after 60 + 62 passes
+(`nv4-nv3like-88bcd7`, `nv4-nv3like-c1-6f7fd5`;
+`results/noise_v4/flight/nv3like/…__lines__c1.json`). Whittle −53.43 M
+against R2's −52.97 M. Battery, tuning: Fréchet 280 (nv3r4 362, R2 311),
+mic-0 LTAS 1.77 (1.72), linear IS 0.173 (0.170), octave IS 0.299 (0.240),
+co-modulation 0.262 (real 0.241), line / floor Δ +2.1 / +2.1 dB. PIT:
+tuning 1.87 (HPPNet). Held-out windows (`nv4-pit-nv3like-872215`): HPPNet
+5.31, HRSPNet 1.68 (nv3r4 1.105). The HPPNet collapse on the scoring
+windows looks like C-wind's 9.6; the tuning segments do not show it.
+Next: per-rotor trim search on the 18-window wide pool (`921d0b92`, job
+`nv4-trim-nv3like-35fe89`). Gate: PIT below nv3r4's wide-pool mean.
+Selection: the lowest all-mic LTAS.
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
