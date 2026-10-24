@@ -16,6 +16,8 @@ share, wind):
 
 * ``g_a``: dB added to every ``params.profile_aero_db`` entry;
 * ``g_a1``: dB added on top of ``g_a`` to the aerodynamic order 1 (column 0);
+* ``g_r1`` .. ``g_r4``: dB added on top of ``g_a`` to rotor r's aerodynamic row
+  (the rotor balance the tracker reads to tell the rotors apart);
 * ``alpha_a``: ``params.alpha_aero`` (line power ``10^{p/10} s^alpha``);
 * ``g_m``: dB added to every ``params.profile_motor_db`` entry;
 * ``alpha_m``: ``params.alpha_motor``;
@@ -142,14 +144,27 @@ __all__ = [
 ]
 
 STAGE = "dregon_lawsearch_v4"
+#: The DREGON rotors (per-rotor line gains ``g_r1`` .. ``g_r4``).
+N_ROTORS = 4
+ROTOR_GAINS: tuple[str, ...] = tuple(f"g_r{r + 1}" for r in range(N_ROTORS))
 #: The searched numbers, in the order of every point vector.
-PARAMS: tuple[str, ...] = ("g_a", "g_a1", "alpha_a", "g_m", "alpha_m", "g_f", "b0")
+PARAMS: tuple[str, ...] = (
+    "g_a",
+    "g_a1",
+    *ROTOR_GAINS,
+    "alpha_a",
+    "g_m",
+    "alpha_m",
+    "g_f",
+    "b0",
+)
 #: The stage-1 box. ``b0``'s lower edge keeps ``b(f) >= 0`` on the band (the v4
 #: prior's truncation) with the DREGON stage payload's ``b1`` = 0.771:
 #: ``b(30 Hz) = b0 - 0.771 * log2(2000 / 30) >= 0`` needs ``b0 >= 4.67``.
 BOX: dict[str, tuple[float, float]] = dict(
     g_a=(-6.0, 12.0),
     g_a1=(-6.0, 12.0),
+    **{k: (-6.0, 6.0) for k in ROTOR_GAINS},
     alpha_a=(0.0, 14.0),
     g_m=(-12.0, 6.0),
     alpha_m=(-4.0, 4.0),
@@ -200,6 +215,8 @@ def check_base(base: Mapping[str, Any]) -> None:
     par = V4Params.from_payload(base)
     if par.floor.rule != FLOOR_RULE_SUM:
         raise ValueError(f"floor rule {par.floor.rule!r}: the composition is the per-rotor sum's")
+    if par.n_rotors != N_ROTORS:
+        raise ValueError(f"{par.n_rotors} rotors, the search space has {N_ROTORS}")
 
 
 def base_point(base: Mapping[str, Any]) -> dict[str, float]:
@@ -208,6 +225,7 @@ def base_point(base: Mapping[str, Any]) -> dict[str, float]:
     return dict(
         g_a=0.0,
         g_a1=0.0,
+        **{k: 0.0 for k in ROTOR_GAINS},
         alpha_a=float(p["alpha_aero"]),
         g_m=0.0,
         alpha_m=float(p["alpha_motor"]),
@@ -232,11 +250,12 @@ def pinned_box(
 
 def edit_payload(base: Mapping[str, Any], point: Mapping[str, float]) -> dict[str, Any]:
     """The base payload with the point's numbers written in (``g_a1`` on top of
-    ``g_a`` for order 1, the first profile column)."""
+    ``g_a`` for order 1, the first profile column; ``g_r<r>`` on rotor r's row)."""
     out = copy.deepcopy(dict(base))
     p = out["params"]
     aero = np.asarray(p["profile_aero_db"], dtype=np.float64) + float(point["g_a"])
     aero[:, 0] += float(point["g_a1"])
+    aero += np.array([float(point[k]) for k in ROTOR_GAINS[: aero.shape[0]]])[:, None]
     p["profile_aero_db"] = aero.tolist()
     p["alpha_aero"] = float(point["alpha_a"])
     p["profile_motor_db"] = (np.asarray(p["profile_motor_db"]) + float(point["g_m"])).tolist()
@@ -474,10 +493,11 @@ def compose(comp: Components, point: Mapping[str, float]) -> np.ndarray:
     out = comp.wind.astype(np.float64)
     ga = 10.0 ** (float(point["g_a"]) / 20.0)
     gm = 10.0 ** (float(point["g_m"]) / 20.0)
-    ga1 = ga * 10.0 ** (float(point["g_a1"]) / 20.0)
+    g1 = 10.0 ** (float(point["g_a1"]) / 20.0)
     for r in range(comp.aero.shape[0]):
+        gr = ga * 10.0 ** (float(point[ROTOR_GAINS[r]]) / 20.0)
         env_a = _envelope_gain(comp, r, float(point["alpha_a"]))[None, :]
-        out += (ga * env_a) * comp.aero[r] + (ga1 * env_a) * comp.aero1[r]
+        out += (gr * env_a) * comp.aero[r] + (gr * g1 * env_a) * comp.aero1[r]
         out += (gm * _envelope_gain(comp, r, float(point["alpha_m"])))[None, :] * comp.motor[r]
     out += floor_output(comp, b0=float(point["b0"]), g_f=float(point["g_f"]))
     return out
