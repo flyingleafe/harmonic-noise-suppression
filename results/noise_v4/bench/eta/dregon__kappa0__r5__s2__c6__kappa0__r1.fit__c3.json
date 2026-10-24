@@ -1,0 +1,204 @@
+{
+ "band_hz": 200.0,
+ "n_params": 1428,
+ "params": [
+  {
+   "name": "p_aero",
+   "size": 592
+  },
+  {
+   "name": "pbar_aero",
+   "size": 148
+  },
+  {
+   "name": "c_aero",
+   "size": 4
+  },
+  {
+   "name": "p_motor",
+   "size": 28
+  },
+  {
+   "name": "pbar_motor",
+   "size": 7
+  },
+  {
+   "name": "c_motor",
+   "size": 4
+  },
+  {
+   "name": "alpha_aero",
+   "size": 1
+  },
+  {
+   "name": "alpha_motor",
+   "size": 1
+  },
+  {
+   "name": "u_blo",
+   "size": 1
+  },
+  {
+   "name": "u_bhi",
+   "size": 1
+  },
+  {
+   "name": "floor_mean_db",
+   "size": 1
+  },
+  {
+   "name": "floor_z",
+   "size": 14
+  },
+  {
+   "name": "u_amp",
+   "size": 148
+  },
+  {
+   "name": "log_gA",
+   "size": 148
+  },
+  {
+   "name": "u_s2P",
+   "size": 148
+  },
+  {
+   "name": "u_W",
+   "size": 148
+  },
+  {
+   "name": "log_eps",
+   "size": 1
+  },
+  {
+   "name": "a_sigma",
+   "size": 1
+  },
+  {
+   "name": "log_lam_ref",
+   "size": 1
+  },
+  {
+   "name": "b_lam",
+   "size": 1
+  },
+  {
+   "name": "wind_0",
+   "size": 2
+  },
+  {
+   "name": "wind_1",
+   "size": 2
+  },
+  {
+   "name": "wind_2",
+   "size": 2
+  },
+  {
+   "name": "wind_3",
+   "size": 2
+  },
+  {
+   "name": "wind_4",
+   "size": 2
+  },
+  {
+   "name": "wind_5",
+   "size": 1
+  },
+  {
+   "name": "wind_6",
+   "size": 1
+  },
+  {
+   "name": "wind_7",
+   "size": 1
+  },
+  {
+   "name": "wind_8",
+   "size": 1
+  },
+  {
+   "name": "wind_9",
+   "size": 1
+  },
+  {
+   "name": "wind_10",
+   "size": 2
+  },
+  {
+   "name": "wind_11",
+   "size": 2
+  },
+  {
+   "name": "wind_12",
+   "size": 2
+  },
+  {
+   "name": "wind_13",
+   "size": 2
+  },
+  {
+   "name": "wind_14",
+   "size": 2
+  },
+  {
+   "name": "wind_15",
+   "size": 1
+  },
+  {
+   "name": "wind_16",
+   "size": 1
+  },
+  {
+   "name": "wind_17",
+   "size": 1
+  },
+  {
+   "name": "wind_18",
+   "size": 1
+  },
+  {
+   "name": "wind_19",
+   "size": 1
+  }
+ ],
+ "p_eff": 647.3435559840772,
+ "hessian_min_eig": -0.3079277072921734,
+ "n_negative_curvature": 6,
+ "negative_without_descent": true,
+ "minimum_rule": "no materially negative curvature, or none of those directions lowers the MAP objective at any trial step (ESCAPE_STEPS, both signs); those directions are then left out of H^-1 like flat ones",
+ "at_minimum": true,
+ "n_dropped_directions": 15,
+ "by_block": {
+  "200Hz": {
+   "n_blocks": 720,
+   "tr_Hinv_J": 19586.281074457125,
+   "eta": 0.033050866242713695
+  },
+  "400Hz": {
+   "n_blocks": 360,
+   "tr_Hinv_J": 19643.074848689495,
+   "eta": 0.03295530669055437
+  },
+  "800Hz": {
+   "n_blocks": 180,
+   "tr_Hinv_J": 20691.467281190733,
+   "eta": 0.03128553172121027
+  },
+  "1600Hz": {
+   "n_blocks": 100,
+   "tr_Hinv_J": 20163.66269913654,
+   "eta": 0.032104462648633675
+  },
+  "recording": {
+   "n_blocks": 20,
+   "tr_Hinv_J": 21211.29865795522,
+   "eta": 0.030518808226826476
+  }
+ },
+ "wall_s": 58.81318796800008,
+ "fit": "results/noise_v4/bench/restarts/dregon__kappa0__r5__s2__c6__kappa0__r1.fit__c3.json",
+ "planted": "results/noise_v4/bench/planted/dregon__kappa0__r5__s2__c6__kappa0__r1.json",
+ "git": "44a17f3944e5621483c1e263f68d83aab9a1cecd"
+}

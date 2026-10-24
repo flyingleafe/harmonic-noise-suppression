@@ -401,6 +401,29 @@ gains are 1.17, 0.10, 0.08 and 0.04 nats. On 15.3 M cells that is 8e-8 to
 (no direction lowers the objective at any step) is never met, so η on the
 twin is not reported yet.
 
+**η on the planted twin (Dmitrii: tolerance-based minimum).** A negative
+direction whose best line-search step gains at most the fit's convergence
+tolerance (1e-4 nats per cell × 15.3 M cells = 1,527 nats) counts as flat
+(`44a17f39`, `--flat-gain-per-cell 1e-4`). From `…r1.fit__c2` with its
+saved Hessian (`nv4-planted-eta-33829f`), the 6 directions gain less than
+that (0/6 moved), so the escape ends `stuck`. η is then computed with those
+directions left out (`results/noise_v4/bench/eta/…r1.fit__c3.json`):
+
+|Blocks|Twin η|Real (c7) η|
+|---|---|---|
+|200 Hz (720)|0.0331|0.00152|
+|400 Hz (360)|0.0330|0.00145|
+|800 Hz (180)|0.0313|0.00140|
+|1600 Hz (100)|0.0321|0.00135|
+|per recording (20)|0.0305|0.00132|
+
+Reading: η is stable over block size on both. With an exact model the
+Whittle likelihood is still overconfident by about 30× (η ≈ 0.032). Real
+data add about 22× from model error (0.032 / 0.0014). The state file
+differs from the `c2` payload by up to 68 in one coordinate (a flat
+direction); its objective matches the payload's (−166,179,350.7), so the
+chain uses the state file, as the planted protocol requires.
+
 **MD2 flight.** The converged joint fit (`md2_fly125__flight_v4__s0__r5c1`)
 scored standby PIT 27.8 and parity ratio 3.57, so the per-regime fallback
 applies. Two changes of procedure and prior: the phase pedestal is fitted per
@@ -648,7 +671,8 @@ Selection: the lowest all-mic LTAS.
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
   κ = 0 (no κ passes the planted 1 dB floor rule).
 - **η (step 3).** 0.00152 (200 Hz blocks) to 0.00132 (per recording) on the
-  final fit.
+  final fit; 0.033 to 0.031 on its planted twin (the Whittle likelihood's
+  own overconfidence, about 30×; model error adds about 22×).
 - **MD2 flight.** The converged per-regime pair beats nv3r4 on parity
   (0.481 vs 0.515) and on every regime and cruise LTAS; Listen is on par
   within render-seed noise.

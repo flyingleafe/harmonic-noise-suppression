@@ -120,8 +120,14 @@ floor fails its 1 dB rule where the truth floor lies far under the lines. The fi
 minimum: one direction of curvature $-0.28$ is left, along which no step lowers the
 objective. The likelihood weight of the bench fit by block jackknife is
 $\eta = 1.5\times10^{-3}$ at 200 Hz blocks and $1.3\times10^{-3}$ with one block per recording.
+On the planted twin, where the model is exact, $\eta = 3.3\times10^{-2}$ and $3.1\times10^{-2}$.
+The Whittle likelihood is therefore overconfident by a factor of about 30 even without model
+error, and the model error of the real recordings adds a factor of about 22. The twin is a minimum
+in the same sense: 6 directions of curvature down to $-0.31$ are left, along which the best step
+gains less than the fit's convergence tolerance ($10^{-4}$ nats per cell).
 % source: results/noise_v4/bench/planted/dregon__kappa0__r5__s2__c6__kappa0__r1.json;
-% results/noise_v4/bench/eta/dregon__kappa0__r5__s2__c7.json
+% results/noise_v4/bench/eta/dregon__kappa0__r5__s2__c7.json;
+% results/noise_v4/bench/eta/dregon__kappa0__r5__s2__c6__kappa0__r1.fit__c3.json
 ```
 
 ## 8. Flight fit of the Matrice 100 (after the "Flight fit." paragraph, ≈ l. 1645)
