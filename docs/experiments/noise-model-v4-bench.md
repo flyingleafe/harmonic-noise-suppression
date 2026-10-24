@@ -581,6 +581,34 @@ HPPNet column reproduces the official nv3r4 1.680 and C-wind 9.62 exactly):
 Under HRSPNet, nv3r4 is 0.15 rev/s from real and R2 0.91; the v4 gap is not
 a property of HPPNet alone.
 
+*Trim search on R2 (2026-10-24; Dmitrii: "adjust the floor and lines a
+little until the gate is passed, at the smallest loss of spectral
+similarity").* Gate: tuning PIT below nv3r4's 1.541. Selection: the
+lowest mic-0 LTAS error. Law-search composition with an order-1 gain
+`g_a1` (`2c9dba52`). Box: `g_a` −3…9, `g_a1` −3…9, `g_f` −9…3 dB. 256 + 128
+Sobol points, job `nv4-trim-r2-dae303`, table `results/noise_v4/flight/trim/`.
+Result: no feasible point. PIT floors at 1.635 near `g_a` +5…7, `g_a1`
++7…9, `g_f` −5…−7 dB (LTAS 2.8–4.5 there, against 2.36 for R2).
+Direct-render probes at the trim (seed 2001, tuning, HPPNet):
+
+|Change at the trim|Mean PIT|
+|---|---|
+|none|1.637|
+|wind −10 dB|1.658|
+|ε × 0.3|1.661|
+|motor lines off|1.632|
+|orders ≥ 11 −4 / +4 / +8 dB|1.655 / 1.644 / 1.987|
+|orders ≥ 11 off|2.098|
+|bench pedestal for k ≤ 10|1.684 (R2 untrimmed: 1.92 → 1.81)|
+
+The R2 refit moved the k ≤ 10 pedestals far from the bench: σ²_φ for k = 1
+went from 0.001 to 1.2 (8.8 Hz wide), and for k = 6–10 to the cap 3 at
+24 Hz. The label error enters through the pedestal when ε is held. No
+global level, width or wind change passes 1.635. Orders ≥ 11 carry
+tracker information (off: +0.46). Their per-rotor pattern differs from
+nv3r4's flight-fitted one (per-order rotor-pattern correlation −0.96…0.99).
+Next: per-rotor line gains (`9d8f96c2`, job `nv4-trim-rotors-62814f`).
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
