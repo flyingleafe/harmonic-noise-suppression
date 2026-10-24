@@ -12,4 +12,4 @@ Paper, "Transfer between drones" (claim 5): the SimpleConv-v2 regressor (Conv+Bi
 
 ## Conclusion
 
-Defined 2026-10-14; submitted to `uni` 2026-10-23. Max LR 1e-3 — the LR every architecture we build on was published with (docs/experiments/paper-real-protocol.md § "Budget and LR"); the family's LR range test is reported in the appendix.
+Ran 2026-10-23/24 on `uni` (job `rp-scv2-dregon-f26b2b`, `b734dd28`); stopped by saturation at step 26 000. At the best `dregon` median (step 11 000): DREGON 3.45 (cruise 2.23), better than the both-drone `rp_scv2_all` (3.82); MD2 14.99 against 1.49 for the both-drone model, but MD2 cruise only 4.02 (standby 41.47, ramp 26.04). Paper: "other drone" row of the transfer table. Max LR 1e-3 — the LR every architecture we build on was published with (docs/experiments/paper-real-protocol.md § "Budget and LR").

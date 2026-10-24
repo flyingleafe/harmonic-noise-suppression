@@ -12,4 +12,4 @@ Paper, "Transfer between drones": HRSPNet (`hppnet_pyrseplstm_k64`, as `rp_pyrse
 
 ## Conclusion
 
-Defined 2026-10-23; submitted to `uni`.
+Ran 2026-10-24 on `uni` (job `rp-pyrseplstm-k64-md2lab-b481c0`, `b734dd28`); stopped by saturation at step 59 500. At the best `md2` median (step 44 500): MD2 0.82 (cruise 0.67), better than the both-drone `rp_pyrseplstm_k64_alllab` (1.14); DREGON 12.66 (cruise 13.31) against 3.89 for the both-drone model. No transfer to DREGON, though far less wrong there than `rp_scv2_md2` (31.75). Paper: "other drone" row of the transfer table.
