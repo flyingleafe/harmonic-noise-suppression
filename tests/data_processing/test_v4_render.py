@@ -20,7 +20,12 @@ clips removes.
 
 A flight payload with the STATIC per-mic wind (``static_per_mic``) renders and
 reads exactly as it did before the typed wind block and the ``sc`` kind: a
-golden of its render samples and expected periodogram.
+golden of its render samples and expected periodogram. An ``sc`` one renders
+exactly as before the ``line_scatter_db`` option and :data:`.v4.WIND_OFF_DB`
+existed, at the option's default and at an explicit zero; a capsule at the
+off level draws no wind. ``line_scatter_db > 0`` moves every (mic, line) gain
+of a render by its own static ``N(0, sd^2)`` dB, the shaft, envelopes and
+phases being the same draw.
 """
 
 from __future__ import annotations
@@ -32,9 +37,9 @@ import pytest
 from scipy.signal import firwin, oaconvolve
 
 from data_processing.noise_model import FIT_SCHEMA_V4
-from data_processing.noise_model.render import render_noise
+from data_processing.noise_model.render import render_noise, render_v4_wind
 from data_processing.noise_model.spectrum import floor_ctrl_hz
-from data_processing.noise_model.v4 import expected_periodogram, hann_window
+from data_processing.noise_model.v4 import WIND_OFF_DB, expected_periodogram, hann_window
 
 SR = 16000
 K = 90
@@ -221,3 +226,93 @@ def test_static_per_mic_wind_renders_as_before() -> None:
     np.testing.assert_allclose(x[:, ::997], STATIC_WIND_GOLDEN, rtol=1e-12, atol=1e-15)
     e = expected_periodogram(fit, np.asarray(RPS), n_fft=256, sr=SR)
     np.testing.assert_allclose(e[:, 1:40:6], STATIC_WIND_GOLDEN_E, rtol=1e-12)
+
+
+def _sc_wind_flight_payload(level_db: list[float]) -> dict[str, Any]:
+    """The static-wind flight payload with an ``sc`` wind on a flat shape."""
+    fit = _static_wind_flight_payload()
+    fit["params"]["wind"] = {
+        "kind": "sc",
+        "level_db": list(level_db),
+        "speed_offset_ms": 0.0,
+        "speed_scale_ms": 2.0,
+        "gust_rate_hz": 0.75,
+        "shape": {"freqs_hz": [0.0, 8000.0], "psd": [1.0, 1.0], "unit_psd_ref": 1.0},
+    }
+    return fit
+
+
+#: ``render_noise(_sc_wind_flight_payload([-30, -36]), 0.5 s at (72, 64) rev/s,
+#: seed=3)[:, ::997]`` from the renderer as it was BEFORE ``line_scatter_db`` and
+#: ``WIND_OFF_DB`` existed.
+SC_WIND_GOLDEN = np.array(
+    [
+        [-0.003863947118281391, -0.11101616471591923, -0.05442338062546269, -0.06943848402120668,
+         -0.09744564199817274, -0.14721465575408388, -0.03293016420782411, -0.11388083415470701,
+         -0.045317625274431075],
+        [-0.12918205163155005, -0.2970618244909733, -0.15558180313799638, -0.19613154302765187,
+         -0.139198091557284, -0.1334575683597426, -0.022272399884021295, -0.09327992732458082,
+         0.04594166902594644],
+    ]
+)  # fmt: skip
+
+
+def test_sc_wind_render_is_unchanged_without_line_scatter() -> None:
+    fit = _sc_wind_flight_payload([-30.0, -36.0])
+    rps = np.repeat(np.asarray(RPS)[:, None], SR // 2, axis=1)
+    x = render_noise(fit, rps, sr=SR, n_mics=2, seed=3)
+    np.testing.assert_allclose(x[:, ::997], SC_WIND_GOLDEN, rtol=1e-12, atol=1e-15)
+    x0 = render_noise(fit, rps, sr=SR, n_mics=2, seed=3, line_scatter_db=0.0)
+    np.testing.assert_array_equal(x0, x)
+
+
+def test_a_capsule_at_the_off_level_carries_no_wind() -> None:
+    wind = render_v4_wind(_sc_wind_flight_payload([WIND_OFF_DB, -30.0]), SR // 2, sr=SR, n_mics=2)
+    assert np.all(wind[0] == 0.0) and np.sqrt(np.mean(wind[1] ** 2)) > 1e-3
+
+
+def test_line_scatter_moves_each_line_gain_by_its_own_static_draw() -> None:
+    """One rotor of pure lines (no pedestal, no shaft noise, no floor): the
+    same seed with and without the scatter draws the same carriers, so the
+    Hann-weighted projection of a mic on a line's frequency changes by that
+    (mic, line)'s gain alone. 4 mics x 60 lines (58 aerodynamic, 2 motor)."""
+    fit = _payload()
+    k_max, orders = 60, np.asarray(MOTOR_ORDERS)
+    base = -20.0 - 12.0 * np.log10(np.arange(1, k_max + 1))
+    base[orders - 1] = -150.0  # the motor lines alone at their orders
+    eq = np.zeros((1, 4, 2))
+    fit.update(n_rotors=1, n_mics=4)
+    fit["params"].update(
+        profile_aero_db=[base.tolist()],
+        profile_motor_db=[[-30.0, -36.0]],
+        pedestal={
+            key: np.zeros(k_max).tolist()
+            for key in ("sigma2_amp", "gamma_amp_hz", "sigma2_phase", "gamma_phase_hz")
+        },
+        mic_response={
+            "kind": "pair_eq",
+            "pair_eq": {"freqs_hz": [100.0, 7000.0], "db": eq.tolist()},
+        },
+    )
+    fit["params"]["shaft"]["eps"] = 0.0
+    fit["params"]["floor"]["mean_db"] = -200.0
+    f_r, n = 72.0, 2 * SR
+    rps = np.full((1, n), f_r)
+    plain = render_noise(fit, rps, sr=SR, n_mics=4, seed=11)
+    scat = render_noise(fit, rps, sr=SR, n_mics=4, seed=11, line_scatter_db=3.0)
+    t, w = np.arange(n) / SR, hann_window(n)
+    k = np.arange(1, k_max + 1)  # at 21 and 42 the motor line (the aero one is silent)
+    probe = w * np.exp(-2j * np.pi * f_r * k[:, None] * t)  # (L, n)
+    delta = 20.0 * np.log10(np.abs((scat @ probe.T) / (plain @ probe.T)))  # (M, L)
+    assert delta.shape == (4, 60)
+    assert abs(delta.std() / 3.0 - 1.0) < 0.12 and abs(delta.mean()) < 0.5
+    # per line, not per mic or rotor: every capsule's lines scatter about it,
+    # and the same line moves differently on every capsule
+    assert np.all(np.abs(np.std(delta, axis=1) / 3.0 - 1.0) < 0.27)
+    assert np.all(np.std(delta, axis=0) > 0.0)
+
+
+def test_line_scatter_is_refused_for_a_v3_payload() -> None:
+    fit = {"schema": "noise-v3-fit/1", "params": {}}
+    with pytest.raises(ValueError, match="line_scatter_db"):
+        render_noise(fit, np.full((1, SR // 4), 80.0), sr=SR, n_mics=1, line_scatter_db=1.0)

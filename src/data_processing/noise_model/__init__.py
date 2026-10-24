@@ -28,6 +28,10 @@ WHAT LIVES HERE, and what does not:
   Gaussian, or the SC gust generator of :mod:`.wind_sc` per capsule), and the
   constant-speed expected periodogram of a render. :func:`.render.render_noise`
   draws v4 payloads through it.
+* :mod:`.prior_bank`, :mod:`.prior_bank_v4` — compact ``.npz`` banks of
+  prior-drawn rigs read lazily by the ``noise_v2`` pool: the prior_v1 draws as
+  ``noise-v3-fit/1`` payloads, and the same rigs converted to
+  ``noise-v4-fit/3`` (``experiments.noise_model.prior_v4``).
 * NOT here: the Pyro model, the MAP fit, the supports, the moving-frame
   expected-periodogram forward model. Those stay in
   :mod:`experiments.noise_model`; nothing a training stream does needs them.

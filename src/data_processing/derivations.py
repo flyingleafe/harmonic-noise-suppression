@@ -2528,6 +2528,7 @@ ARTEFACT_PINS = {
             "noise-v3r4plain-banks",
             "noise-v3r4plain6-banks",
             "prior-v1-banks",
+            "prior-v4-banks",
         )
     },
 }

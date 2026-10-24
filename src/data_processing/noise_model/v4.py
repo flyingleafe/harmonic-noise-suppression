@@ -68,6 +68,7 @@ __all__ = [
     "ScGust",
     "V4Params",
     "WIND_KINDS",
+    "WIND_OFF_DB",
     "WIND_REF_BAND_HZ",
     "WIND_SC",
     "WIND_STATIC",
@@ -111,6 +112,11 @@ WIND_KINDS = (WIND_STATIC, WIND_SC)
 #: is 10 log10 of the capsule's mean wind PSD over 20-100 Hz (the static
 #: shape's flat part, where ``wind_db`` reads the same).
 WIND_REF_BAND_HZ = (20.0, 100.0)
+#: A capsule whose wind level (either kind) is at or below this carries NO
+#: wind: the renderer skips its draw (:func:`.render._v4_wind`), which is exact
+#: (``10^{-20}`` of the reference PSD) and saves the ``sc`` generator's cost.
+#: A rig with wind on some capsules only writes this level on the others.
+WIND_OFF_DB = -200.0
 
 TWO_PI = 2.0 * math.pi
 
@@ -281,8 +287,11 @@ class MicResponse:
                 raise ValueError(
                     f"geometry_db must be (R, M) = {(n_rotors, n_mics)}, got {geo.shape}"
                 )
-            response = d["array_response"]
-            if np.atleast_2d(np.asarray(response["gain_db"])).shape[0] != n_mics:
+            response = d.get("array_response")
+            if (
+                response is not None
+                and np.atleast_2d(np.asarray(response["gain_db"])).shape[0] != n_mics
+            ):
                 raise ValueError(f"array_response must carry {n_mics} channels")
             return cls(kind, n_rotors, n_mics, array_response=response, geometry_db=geo)
         raise ValueError(f"mic_response.kind must be 'pair_eq' or 'array_geometry', got {kind!r}")
@@ -302,7 +311,9 @@ class MicResponse:
 
     def array_db(self, freqs_hz: Any) -> np.ndarray:
         """``(M, F)`` the part shared by the rotors: the array response
-        ``A_m(f)`` (flight; the data were divided by it), zero on the bench."""
+        ``A_m(f)`` (flight; the data were divided by it), zero on the bench and
+        for a flight payload whose ``array_response`` is ``None`` (unit
+        capsules: the prior rigs of :mod:`.prior_bank_v4`)."""
         f = np.atleast_1d(np.asarray(freqs_hz, dtype=np.float64))
         if self.array_response is None:
             return np.zeros((self.n_mics, f.size))

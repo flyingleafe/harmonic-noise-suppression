@@ -143,6 +143,43 @@ fitted-noise arms, and 20.5 on DREGON alone.
     are and no run is retrained: retraining every run on these streams costs
     too much for ≈ 3 % of the room-2 frames.
 
+## The prior_v1 rigs in noise model v4 (2026-10-24)
+
+The hard setup draws drones from the wide prior. Instead of resampling it, the
+16 384 gated rigs of the old wide prior that `prior_v1_scv2` /
+`prior_v1_hppnet_l2` trained on (`prior-v1-banks`, `prior_v1_n16384.npz`,
+`static-rig-profiles.md` § "Generic drone prior") are rewritten as
+`noise-v4-fit/3` payloads (Dmitrii, 2026-10-24; `noise-v4` merged into main
+for this at `a7968caf`). Code: `experiments.noise_model.prior_v4.convert_prior_v1`,
+bank `data_processing.noise_model.prior_bank_v4` (`noise-prior-bank-v4/1`,
+lazy `PriorBankV4`, read by `kind: noise_v2` via `preset_bank`), builder
+`scripts/prior_bank_v4_build.py` (77 s on 13 workers), report
+`results/prior_rigs/prior_v4_n16384.report.json`.
+
+Rules (`RULES_VERSION = prior_v4/1`), per rig:
+
+| v4 part | from the v1 rig | decision |
+|---|---|---|
+| aero + motor lines | power-preserving split at `k = 3pn`: the motor line takes the boost's share of the coherent core, `C (1 - 10^{-b/10})`, without pedestal; a boost ≤ 0 leaves no motor line | the coherent core is exact; the boosted line loses its pedestal skirt |
+| `alpha_aero` | `amp_exp` | — |
+| `alpha_motor` | **redrawn** from N(0, 2) truncated to ±4 | Dmitrii: v4 physics (bench −2.1…+1.9) |
+| pedestal | rotor mean of v1's σ² per order; `σ²_A = min(σ², c_g)`, the rest to the phase at the same rate | Dmitrii: same expected spectrum, no flicker above the v4 caps |
+| shaft | `eps = σ_ν / (2π·80)`, `λ_ref = λ`, flat law | exact |
+| floor | one floor on the mean speed, `b0 = floor_exp`, `b1 = 0` | v4 flight rule (v1 summed `s_r^b` per rotor) |
+| mics | unit response; v1's 3.4 dB per-(mic, line) scatter becomes the pool option `line_scatter_db: 3.4`, drawn per clip outside the model | Dmitrii |
+| wind | SC `sc` block drawn once per rig from v1's law (p 0.7; per mic `33u − Exp(8)` dB over the rig's 20–100 Hz floor at s̄ = 1; gust law offset 0, scale 2 m/s, 0.75 Hz) | Dmitrii: fixed windy capsules per rig |
+
+Result: 89.5 % of rigs have live motor lines (3–6 orders); `alpha_motor`
+sd 1.77; 70.3 % windy, 65.5 % of all capsules live; 72.8 % of (rig, order)
+cells exceed the amplitude cap (96 % at k ≥ 41, mean phase σ² 0.40 there).
+Checks: the coherent core is identical to v1's; with a rotor-shared pedestal
+the expected spectrum at 80 rev/s matches v1 to < 0.05 dB away from motor
+orders. On the real rigs the rotor-mean pedestal moves it by up to 0.58 dB
+(median worst 0.23 dB), and within ±2 orders of a boosted motor line by up to
+3 dB (the removed skirt). Two cells keep a phase σ² above v4's cap of 3 (3.25,
+4.41, both k ≤ 8). The renderer is no slower than v1's (8 rigs × 4 s × 8
+mics: 15.8 s against 17.5 s).
+
 ## Paper grid (2026-10-23): pending approval
 
 Nothing below is submitted until Dmitrii approves the grid. These runs fill
@@ -178,9 +215,9 @@ Open decisions:
   converged stage 15.8 rev/s against the bar 2.188;
   `noise-model-v4-bench.md`, round 6). Without it, the DREGON half of the
   easy setup has no fitted flight drone.
-- **(c)** The wide prior has not been revised from the v4 fits.
-  `drone_prior.py` still carries the prior_v1 laws, and the paper's
-  wide-prior table is `\wip`.
+- **(c)** Resolved 2026-10-24: the hard setup's wide prior is the prior_v1
+  bank converted to v4 (§ "The prior_v1 rigs in noise model v4"); the
+  paper's wide-prior table still needs rewriting from those laws.
 - **(d)** The synthetic validation set: "sectors" of the wide prior, among
   them the fit neighbourhoods and one sector close to the static comb. The
   split is undecided ("we need to think about it").

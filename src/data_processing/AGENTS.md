@@ -4,7 +4,7 @@
 
 Everything between raw recordings and a training loop's `td.Frame`s. Every
 dataset is declared once and materialized only through `scripts/derive.py`.
-Design: `docs/refactor-data-pipelines.md`. VK/refinement: `src/tracking`.
+VK/refinement: `src/tracking`.
 
 ## Map
 
@@ -63,7 +63,8 @@ Design: `docs/refactor-data-pipelines.md`. VK/refinement: `src/tracking`.
   `noise_v2_pool.NoiseV2Pool` (FITTED v2 rigs; `fits:`/`preset_bank:`);
   `silence` → `silence_noise.SilenceNoisePool`.
 - `noise_model/` — v2/v3/v4 renderer (numba line kernel; prior-rig blocks
-  `am`/`mic_dev_sd_db`/`wind_sc`; `v4.py`: `noise-v4-fit/3` reader).
+  `am`/`mic_dev_sd_db`/`wind_sc`; `v4.py` reader); prior-rig `.npz` banks
+  `prior_bank.py`, `prior_bank_v4.py`.
 - `trajectory_model/` — the FITTED rps trajectory model: `rps.kind:
   fitted_traj` + `FlightCache`/`window_flight`, fed by `rps-traj-fits`
   (fitted by `experiments.rps_traj`).

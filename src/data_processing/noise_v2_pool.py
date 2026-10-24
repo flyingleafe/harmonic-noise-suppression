@@ -116,6 +116,17 @@ an optional per-mic ``wind`` level (DREGON's), which must cover ``n_mics``.
 Each fit renders at its OWN work rate (``front_end.sr_work``: 64 kHz for every
 v2 fit, 32 kHz for v3) unless the pool is built with an explicit ``sr_work``.
 
+NOISE MODEL V4. A ``noise-v4-fit/3`` payload is checked by
+:meth:`~data_processing.noise_model.v4.V4Params.from_payload` (rotor and
+microphone counts) and drawn by the same ``render_noise``; ``comb_offset_db``
+moves its aerodynamic AND motor lines. ``preset_bank: <file>.npz`` is read on
+the file's ``meta.format``: a ``noise-prior-bank/1`` (v3 prior rigs,
+:mod:`.noise_model.prior_bank`) or a ``noise-prior-bank-v4/1`` (the same rigs
+converted to v4, :mod:`.noise_model.prior_bank_v4`), both lazy.
+``line_scatter_db`` (default 0) is the v4 renderer's per-clip static
+(mic, rotor, line) gain scatter in dB, a render-time augmentation; a pool
+holding any non-v4 entry refuses a positive one.
+
 EVERYTHING IS VALIDATED WHEN THE POOL IS BUILT — the fit files are read, the
 schemas checked, the rotor and microphone counts compared against the policy's
 — so a bad policy fails where it is loaded and not in a DataLoader worker on
@@ -136,12 +147,13 @@ import tdseries as td
 
 from data_processing import rps_synthesis, trajectory_model
 from data_processing.frames import make_recording_frame
-from data_processing.noise_model import FIT_SCHEMA_V3
+from data_processing.noise_model import FIT_SCHEMA_V3, FIT_SCHEMA_V4
 from data_processing.noise_model.constants import AMP_RPS_REF
 from data_processing.noise_model.params import check_schema
 from data_processing.noise_model.render import render_noise, render_noise_regimes
 from data_processing.noise_model.spectrum import FLIGHT_SR
 from data_processing.noise_model.v3 import Wander
+from data_processing.noise_model.v4 import FLOOR_RULE_ONE, FLOOR_RULE_SUM, V4Params
 
 #: The bank-file tag :func:`load_preset_bank` accepts, documented above.
 PRESET_BANK_FORMAT = "noise-v2-bank/1"
@@ -182,7 +194,8 @@ def _read_fit(path: str | Path, *, where: str) -> dict[str, Any]:
 
 def load_preset_bank(path: str | Path) -> Sequence[NoiseV2Entry]:
     """Every entry of a ``noise-v2-bank/1`` file (or, for a ``.npz``, the lazy
-    sequence of a ``noise-prior-bank/1`` file), unvalidated against a pool.
+    sequence of a ``noise-prior-bank/1`` or ``noise-prior-bank-v4/1`` file, on
+    its ``meta.format``), unvalidated against a pool.
 
     ``path`` is a plain path or a dload URI — ``dload:NAME[@VERSION]/file`` —
     resolved by :func:`data_processing.streams.resolve_source`, the same
@@ -199,10 +212,19 @@ def load_preset_bank(path: str | Path) -> Sequence[NoiseV2Entry]:
     if not p.is_file():
         raise ValueError(f"preset_bank: no such bank file: {p}")
     if p.suffix == ".npz":
-        # a compact bank of prior draws: a LAZY sequence (noise_model.prior_bank)
-        from data_processing.noise_model.prior_bank import PriorBank
+        # a compact bank of prior rigs: a LAZY sequence (noise_model.prior_bank{,_v4})
+        from data_processing.noise_model.prior_bank import PRIOR_BANK_FORMAT, PriorBank
+        from data_processing.noise_model.prior_bank_v4 import PRIOR_BANK_V4_FORMAT, PriorBankV4
 
-        return PriorBank(p)
+        with np.load(p) as z:
+            fmt = json.loads(str(z["meta"])).get("format") if "meta" in z.files else None
+        if fmt == PRIOR_BANK_V4_FORMAT:
+            return PriorBankV4(p)
+        if fmt == PRIOR_BANK_FORMAT:
+            return PriorBank(p)
+        raise ValueError(
+            f"{p}: expected format {PRIOR_BANK_FORMAT!r} or {PRIOR_BANK_V4_FORMAT!r}, got {fmt!r}"
+        )
     bank = json.loads(p.read_text())
     fmt = bank.get("format") if isinstance(bank, dict) else None
     if fmt != PRESET_BANK_FORMAT:
@@ -243,7 +265,8 @@ def _plain_cfg(cfg: Any) -> dict[str, Any]:
 
 
 def _offset_comb(fit: dict[str, Any], comb_offset_db: float) -> dict[str, Any]:
-    """``fit`` with ``comb_offset_db`` on every rotor's ``profile_db``.
+    """``fit`` with ``comb_offset_db`` on every rotor's ``profile_db`` (a v4
+    payload: on every aerodynamic and motor line).
 
     A DEEP COPY: the loaded payload is never mutated, so the same file read by
     two arms at two offsets cannot leak one arm's comb into the other.
@@ -251,9 +274,29 @@ def _offset_comb(fit: dict[str, Any], comb_offset_db: float) -> dict[str, Any]:
     if not comb_offset_db:
         return fit
     out = copy.deepcopy(fit)
+    if out.get("schema") == FIT_SCHEMA_V4:
+        p = out["params"]
+        for key in ("profile_aero_db", "profile_motor_db"):
+            if p.get(key) is not None:
+                p[key] = (np.asarray(p[key], dtype=np.float64) + float(comb_offset_db)).tolist()
+        return out
     prof = np.asarray(out["params"]["profile"]["profile_db"], dtype=np.float64)
     out["params"]["profile"]["profile_db"] = (prof + float(comb_offset_db)).tolist()
     return out
+
+
+def _floor_envelope_v4(fit: dict[str, Any], rps: np.ndarray) -> np.ndarray:
+    """``(T,)`` the speed envelope of a ``noise-v4-fit/3`` floor as a power, the
+    ``level_mode: flight`` factor: the exponent at 2 kHz (``b0``; ``b1`` pivots
+    there) on ``s = rps / f_ref``, by the payload's rule — one floor on the
+    rotor-mean speed, ``sbar^b0`` (``one_floor_mean_speed``), or
+    ``mean_r s_r^b0`` (``per_rotor_sum``) — plus the static share."""
+    floor = fit["params"]["floor"]
+    speed = np.maximum(np.atleast_2d(rps), 0.0) / float(fit.get("f_ref_rev_s", AMP_RPS_REF))
+    b0 = float(floor["b0"])
+    rule = str(floor.get("floor_rule") or FLOOR_RULE_SUM)
+    moving = speed.mean(axis=0) ** b0 if rule == FLOOR_RULE_ONE else (speed**b0).mean(axis=0)
+    return moving + float(floor.get("static_rel") or 0.0)
 
 
 class NoiseV2Pool:
@@ -284,6 +327,7 @@ class NoiseV2Pool:
         level_mode: str = "window",
         comb_offset_db: float = 0.0,
         sr_work: int | None = None,
+        line_scatter_db: float = 0.0,
         seed: int = 0,
     ):
         self.sample_rate = int(sample_rate)
@@ -337,6 +381,11 @@ class NoiseV2Pool:
         # ``None``: each fit's OWN work rate (render.fit_work_rate), the rate
         # its likelihood carried — 64 kHz for every v2 fit, 32 kHz for v3.
         self.sr_work = None if sr_work is None else int(sr_work)
+        # the v4 renderer's per-clip (mic, rotor, line) gain scatter, dB
+        # (render_noise ``line_scatter_db``): v1's mic_dev_sd_db for v4 rigs
+        self.line_scatter_db = float(line_scatter_db)
+        if not self.line_scatter_db >= 0.0:
+            raise ValueError(f"line_scatter_db must be >= 0, got {self.line_scatter_db}")
         self._base_seed = int(seed)
         if self.rps_kind not in trajectory_model.FLIGHT_KINDS:
             raise ValueError(
@@ -344,11 +393,12 @@ class NoiseV2Pool:
                 f"{list(trajectory_model.FLIGHT_KINDS)}, got {self.rps_kind!r}"
             )
         from data_processing.noise_model.prior_bank import PriorBank
+        from data_processing.noise_model.prior_bank_v4 import PriorBankV4
 
         if len(entries) == 0:
             raise ValueError("noise_v2 needs at least one entry: give it 'fits' or 'preset_bank'")
         self.entries: Sequence[NoiseV2Entry]
-        if isinstance(entries, PriorBank):
+        if isinstance(entries, (PriorBank, PriorBankV4)):
             # LAZY: a payload is assembled (offset included) when indexed; the
             # builder validated every rig, the pool checks one against itself
             self.entries = entries.with_offset(self.comb_offset_db)
@@ -381,7 +431,7 @@ class NoiseV2Pool:
             self._traj[None] = trajectory_model.build_from_config(self._rps_cfg)
             rigs = (
                 set(self.entries.traj_rigs)
-                if isinstance(self.entries, PriorBank)
+                if isinstance(self.entries, (PriorBank, PriorBankV4))
                 else {e.traj_rig for e in self.entries if e.traj_rig is not None}
             )
             for rig in sorted(rigs):
@@ -414,6 +464,14 @@ class NoiseV2Pool:
                 if fit is None:
                     continue
                 where = f"noise_v2 entry {entry.name!r} ({regime})"
+                if fit.get("schema") == FIT_SCHEMA_V4:
+                    self._check_v4(fit, where=where)
+                    continue
+                if self.line_scatter_db > 0.0:
+                    raise ValueError(
+                        f"{where}: line_scatter_db is a {FIT_SCHEMA_V4} render option, this "
+                        f"payload is {fit.get('schema')!r}"
+                    )
                 try:
                     params = check_schema(fit)
                 except (ValueError, KeyError) as exc:
@@ -421,6 +479,24 @@ class NoiseV2Pool:
                 if not isinstance(params, dict):
                     raise ValueError(f"{where}: 'params' is not an object")
                 self._check_params(params, where=where, v3=fit.get("schema") == FIT_SCHEMA_V3)
+
+    def _check_v4(self, fit: dict[str, Any], *, where: str) -> None:
+        """A ``noise-v4-fit/3`` payload: read whole by :class:`V4Params` (the
+        renderer's own reader), then the rotor and microphone counts."""
+        try:
+            par = V4Params.from_payload(fit)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError(f"{where}: {exc}") from exc
+        if par.n_rotors != self.n_rotors:
+            raise ValueError(
+                f"{where}: the fit carries {par.n_rotors} rotors, this pool renders "
+                f"n_rotors={self.n_rotors}"
+            )
+        if par.n_mics < self.n_mics:
+            raise ValueError(
+                f"{where}: the fit carries {par.n_mics} microphones, this pool renders "
+                f"n_mics={self.n_mics}"
+            )
 
     def _check_params(self, params: dict[str, Any], *, where: str, v3: bool = False) -> None:
         required = ("sigma_nu", "lam", "profile", "floor") + (
@@ -542,6 +618,7 @@ class NoiseV2Pool:
             ),
             level_mode=str(g("level_mode", "window")),
             comb_offset_db=float(g("comb_offset_db", 0.0)),
+            line_scatter_db=float(g("line_scatter_db", 0.0)),
             seed=int(g("seed", 0)),
         )
 
@@ -655,18 +732,21 @@ class NoiseV2Pool:
         window's own speed envelope back — here the fitted floor envelope
         ``mean_r(speed_r ** floor_exp) + floor_static_rel``, which is the very
         factor :func:`render_noise` shaped the floor with, as a power, hence
-        the square root.
+        the square root. A v4 payload's is :func:`_floor_envelope_v4`'s.
         """
         if level is None:
             return audio
         rms = float(np.sqrt(np.mean(np.square(audio)))) or 1.0
         gain = float(level) / rms
         if self.level_mode == "flight":
-            floor = check_schema(entry.cruise)["floor"]
-            speed = np.maximum(rps, 0.0) / AMP_RPS_REF
-            envelope = (speed ** float(floor["floor_exp"])).mean(axis=0) + float(
-                floor["floor_static_rel"]
-            )
+            if entry.cruise.get("schema") == FIT_SCHEMA_V4:
+                envelope = _floor_envelope_v4(entry.cruise, rps)
+            else:
+                floor = check_schema(entry.cruise)["floor"]
+                speed = np.maximum(rps, 0.0) / AMP_RPS_REF
+                envelope = (speed ** float(floor["floor_exp"])).mean(axis=0) + float(
+                    floor["floor_static_rel"]
+                )
             gain *= float(np.sqrt(max(float(np.mean(envelope)), 0.0)))
         return audio * gain
 
@@ -702,6 +782,7 @@ class NoiseV2Pool:
                 n_mics=self.n_mics,
                 seed=seed,
                 sr_work=self.sr_work,
+                line_scatter_db=self.line_scatter_db,
             )
         else:
             audio = render_noise(
@@ -711,6 +792,7 @@ class NoiseV2Pool:
                 n_mics=self.n_mics,
                 seed=seed,
                 sr_work=self.sr_work,
+                line_scatter_db=self.line_scatter_db,
             )
         audio = self._apply_level(np.asarray(audio, dtype=np.float64), rps, entry, level)
         return audio.astype(np.float32), rps.astype(np.float32), entry
