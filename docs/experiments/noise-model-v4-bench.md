@@ -662,9 +662,18 @@ co-modulation 0.262 (real 0.241), line / floor Δ +2.1 / +2.1 dB. PIT:
 tuning 1.87 (HPPNet). Held-out windows (`nv4-pit-nv3like-872215`): HPPNet
 5.31, HRSPNet 1.68 (nv3r4 1.105). The HPPNet collapse on the scoring
 windows looks like C-wind's 9.6; the tuning segments do not show it.
-Next: per-rotor trim search on the 18-window wide pool (`921d0b92`, job
-`nv4-trim-nv3like-35fe89`). Gate: PIT below nv3r4's wide-pool mean.
-Selection: the lowest all-mic LTAS.
+Per-rotor trim search on the 18-window wide pool (`921d0b92`). Gate: PIT
+below nv3r4's wide-pool mean. Selection: the lowest all-mic LTAS.
+Wide-pool references (seed 2001): real 1.091, nv3r4 1.683 (all-mic LTAS
+2.02), nv3like 2.009 (all-mic LTAS 1.80). Box 1 (`nv4-trim-nv3like-35fe89`;
+`g_a` −3…6, `g_a1` −3…9, rotors −6…6, `g_f` −6…3): 0/768 feasible, best
+1.743. That point gives 1.542 on the five tuning segments (nv3r4 1.541) and
+1.82 on the other 13 windows (nv3r4 1.74). Box 2, widened past box 1's
+edges (`nv4-trim-nv3like2-fd1df8`; `g_a` 0…14, rotors 3/4 −3…12, `g_f`
+−12…0): 0/768, best 1.705, at lines +5.6 dB, order 1 +9.3, rotors 3/4
++10 / +9 and floor −11 dB (all-mic LTAS 2.16). PIT saturates near 1.71
+whatever the levels. With thin lines (bench ε and pedestal), level trims
+cannot reach nv3r4's wide-pool PIT.
 
 ## Conclusion
 
