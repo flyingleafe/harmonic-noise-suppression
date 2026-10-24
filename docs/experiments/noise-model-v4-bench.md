@@ -607,7 +607,21 @@ went from 0.001 to 1.2 (8.8 Hz wide), and for k = 6–10 to the cap 3 at
 global level, width or wind change passes 1.635. Orders ≥ 11 carry
 tracker information (off: +0.46). Their per-rotor pattern differs from
 nv3r4's flight-fitted one (per-order rotor-pattern correlation −0.96…0.99).
-Next: per-rotor line gains (`9d8f96c2`, job `nv4-trim-rotors-62814f`).
+Per-rotor line gains (`9d8f96c2`, job `nv4-trim-rotors-62814f`; box `g_a`
+3…9, `g_a1` 3…11, `g_r1..4` −6…6, `g_f` −9…−3 dB; 512 + 256 points): 204
+of 768 points pass the PIT gate (best 1.423). The chosen point, the lowest
+mic-0 LTAS among them (`results/noise_v4/flight/trim_rotors/…__laws.json`),
+has `g_a` +5.0, `g_a1` +7.5, rotor gains −4.9 / −4.8 / −3.1 / 0.0, `g_f`
+−8.4 dB, which nets rotor lines +0.1 / +0.2 / +1.9 / +5.0 dB. Main effect:
+`g_r4` (PIT spread 0.32). Tuning: PIT 1.516 (bar 1.541), mic-0 LTAS 1.50
+(nv3r4 1.72), so the tuning gate passes. But the all-mic battery is much
+worse than R2: Fréchet 741 vs 311 dB², IS octave-balanced 0.51 vs 0.33,
+line Δ +3.3 dB, k = 1–2 peak error 5.8 vs 2.6 dB. Held-out windows
+(`nv4-score-trim-1d6809`, `nv4-pit-trim-dddfd2`): HPPNet PIT 1.808 (bar
+1.680; R2 2.239), LTAS 3.061 (bar 2.384), HRSPNet 1.617 (nv3r4 1.105).
+Listen did not run because the render clips (peak 1.38). Reading: the
+gate on five segments does not transfer, and mic-0 LTAS is a weak stand-in
+for spectral similarity.
 
 ## Conclusion
 

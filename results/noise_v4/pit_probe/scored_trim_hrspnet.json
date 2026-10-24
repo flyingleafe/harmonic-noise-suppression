@@ -1,0 +1,63 @@
+{
+ "tracker": {
+  "experiment": "rp_pyrseplstm_k64_alllab",
+  "ckpt": "best_real_median",
+  "reference": "r2://ml-data/artifacts/rp_pyrseplstm_k64_alllab/checkpoints/best_real_median.ckpt",
+  "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/275d355f9266/.cache/r2_checkpoints/ml-data__artifacts__rp_pyrseplstm_k64_alllab__checkpoints__best_real_median.ckpt",
+  "bytes": 2098579,
+  "sha256": "7b9c444ce5797310d82f5566ce5c7159470f1a31ba27f4685f128695cdcd8778"
+ },
+ "set": "scored",
+ "seeds": [
+  2001,
+  2002,
+  2003,
+  2004
+ ],
+ "rows": [
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727397.2050455,
+   "pit": {
+    "real": 0.451766756683197,
+    "trim": 1.2654182531258893
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903905.3944898,
+   "pit": {
+    "real": 0.7230554941352715,
+    "trim": 1.3994232875300914
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903578.348311,
+   "pit": {
+    "real": 1.0359760360838361,
+    "trim": 1.402468026398691
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905725.952559,
+   "pit": {
+    "real": 1.5549721540582044,
+    "trim": 2.245112599885017
+   }
+  },
+  {
+   "window": "spinning_nosource_room2",
+   "start_s": 1511905200.978012,
+   "pit": {
+    "real": 1.0159856481369773,
+    "trim": 1.7706582897322678
+   }
+  }
+ ],
+ "mean": {
+  "real": 0.9563512178194973,
+  "trim": 1.6166160913343912
+ }
+}
