@@ -1,6 +1,7 @@
 """PIT MAE of DREGON flight payloads under a chosen frozen tracker.
 
 Sets: ``tuning`` = the five 8 s ``dregon-floor`` segments (``dregon_flight_v4.pool_specs``);
+``wide`` = the 18-window ``dregon-flight-wide`` set (those five first);
 ``scored`` = the five 4 s official cruise windows (``gates.DREGON_CRUISE_SUPPORTS``; report
 only, never tune on them). Cruise support, all 8 mics; the arm ``real`` scores the recording.
 Trackers: ``hppnet`` = the frozen nv3r4 scorer (``gates.SCORER_*``); ``hrspnet`` = HRSPNet
@@ -45,8 +46,8 @@ def tracker(name: str, ckpt: str | None) -> ev.Tracker:
 
 def windows(which: str):
     """(label, window, real (8, T), raw rps (R, T)) per window of the set."""
-    if which == "tuning":
-        for spec in DF.pool_specs():
+    if which in ("tuning", "wide"):
+        for spec in DF.pool_specs() if which == "tuning" else DF.wide_pool_specs():
             clip = SU.flight_clip(spec)
             a = spec.args
             win = RE.Window(str(a["recording"]), float(a["start_s"]), float(a["dur_s"]), "cruise")
@@ -67,7 +68,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--tracker", choices=("hppnet", "hrspnet"), default="hrspnet")
     ap.add_argument("--ckpt", default=None)
-    ap.add_argument("--set", choices=("tuning", "scored"), default="tuning")
+    ap.add_argument("--set", choices=("tuning", "wide", "scored"), default="tuning")
     ap.add_argument("--seeds", default="2001", help="one seed or a range a-b")
     ap.add_argument("--out", default=None, help="write the per-window table as JSON")
     ap.add_argument("arms", nargs="+", help="name=payload")

@@ -675,6 +675,19 @@ edges (`nv4-trim-nv3like2-fd1df8`; `g_a` 0…14, rotors 3/4 −3…12, `g_f`
 whatever the levels. With thin lines (bench ε and pedestal), level trims
 cannot reach nv3r4's wide-pool PIT.
 
+Two probes (seed 2001, HPPNet). (1) High orders as wide as nv3r4's: ε set
+to 0.0103 (σ_ν(80 rev/s) = 5.2 rad/s, nv3r4's value). Wide pool: nv3like
+2.028 (2.009 at the bench ε); best box-1 trim 1.763 (1.743). Wider lines do
+not help. (2) The HPPNet collapse on 4 s windows (nv3like 5.31 official,
+11.6 on 4 s crops of the tuning segments, 1.87 on the 8 s segments). It is
+not a render-length defect. Lines alone score the same on a 4 s render and
+on a cropped 8 s render (1.73 / 1.72). With lines and floor, both collapse
+(hovering crop: 11.2 direct, 9.7 cropped). The failure sits on single mics:
+mic 2 PIT 43–80 rev/s, mics 0 and 4 up to 14, the rest 2–3. Whether it
+happens depends on the random draw (the wind realisation differs between a
+4 s and an 8 s render). On that window the model's mics 0, 1, 2 and 4 are
+6–9 dB quieter than real without the wind. HRSPNet shows no such failure.
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
