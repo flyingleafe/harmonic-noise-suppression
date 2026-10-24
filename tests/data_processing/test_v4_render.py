@@ -17,6 +17,10 @@ motor line of one order share the carrier and keep their start phases for the
 whole clip, so one clip carries their cross term ``2 sqrt(P_a P_m)
 e^{-sigma2_phase/2} cos(phase difference)``, which only the expectation over
 clips removes.
+
+A flight payload with the STATIC per-mic wind (``static_per_mic``) renders and
+reads exactly as it did before the typed wind block and the ``sc`` kind: a
+golden of its render samples and expected periodogram.
 """
 
 from __future__ import annotations
@@ -154,3 +158,66 @@ def test_v4_render_matches_its_expected_periodogram_and_amplitude_pedestal(
         z = oaconvolve(x[0] * np.exp(-2j * np.pi * K_FLICKER * f_r * t), lp, mode="same")
         var.append(np.var(np.log(np.abs(z[SR : -SR : SR // 100]))))
     assert abs(np.mean(var) / SIGMA2_AMP_HI - 1.0) < 0.25, var
+
+
+def _static_wind_flight_payload() -> dict[str, Any]:
+    """A small two-rotor, two-mic FLIGHT payload with v3's static per-mic wind."""
+    k = np.arange(1, 13)
+    base = -20.0 - 18.0 * np.log10(k) - 6.0 * (k % 2)
+    rng = np.random.default_rng(0)
+    eq_f = np.array([100.0, 500.0, 1000.0, 2000.0, 4000.0, 7000.0])
+    eq = rng.normal(0.0, 1.5, size=(2, 2, eq_f.size))
+    eq -= eq.mean(axis=1, keepdims=True)
+    fit = _payload()
+    fit["kind"] = "flight"
+    fit["params"].update(
+        profile_aero_db=np.stack([base, base - 2.0]).tolist(),
+        motor_orders=[21],
+        profile_motor_db=[[-42.0], [-44.0]],
+        pedestal={
+            "sigma2_amp": np.full(12, 0.02).tolist(),
+            "gamma_amp_hz": np.full(12, 3.0).tolist(),
+            "sigma2_phase": np.full(12, 0.05).tolist(),
+            "gamma_phase_hz": np.full(12, 1.0).tolist(),
+        },
+        mic_response={"kind": "pair_eq", "pair_eq": {"freqs_hz": eq_f.tolist(), "db": eq.tolist()}},
+        wind={"kind": "static_per_mic", "wind_db": [-20.0, -26.0]},
+    )
+    fit["params"]["floor"].update(shape_z=rng.normal(0.0, 1.0, size=14).tolist(), static_rel=0.01)
+    return fit
+
+
+#: ``render_noise(_static_wind_flight_payload(), 0.5 s at (72, 64) rev/s, seed=3)[:, ::997]``
+#: and ``expected_periodogram(., (72, 64), n_fft=256)[:, 1:40:6]`` from the renderer as it was
+#: BEFORE the ``sc`` wind kind existed (the static wind dominates the samples).
+STATIC_WIND_GOLDEN = np.array(
+    [
+        [-0.01624978686105636, -0.09185363978496798, -0.0299637979298215, -0.08379446059770775,
+         -0.0889859086130272, -0.16372149182278684, -0.05468641711615371, -0.12944735763036969,
+         -0.0537935919666867],
+        [-0.1184129194458974, -0.29015012575494303, -0.17121666345328493, -0.19350894392100268,
+         -0.1576983348959862, -0.13094573719700184, -0.01270186104491509, -0.0808193581612045,
+         0.04625597100499262],
+    ]
+)  # fmt: skip
+STATIC_WIND_GOLDEN_E = np.array(
+    [
+        [1.4467517651937845e-01, 2.0187828052768184e-02, 4.9552153331956636e-03,
+         2.7547154313054372e-05, 2.8475387962512960e-03, 2.5468257181419279e-05,
+         2.6420186436482474e-05],
+        [2.3778386460169457e-01, 2.9826164569598627e-02, 4.6614661790552025e-03,
+         2.8064373681837363e-05, 1.7912476509030374e-03, 2.6330191031333808e-05,
+         2.7036750966798380e-05],
+    ]
+)  # fmt: skip
+
+
+def test_static_per_mic_wind_renders_as_before() -> None:
+    """A ``static_per_mic`` flight payload (the flight stage's wind kind, and
+    every payload written before the ``sc`` kind) renders and reads as before."""
+    fit = _static_wind_flight_payload()
+    rps = np.repeat(np.asarray(RPS)[:, None], SR // 2, axis=1)
+    x = render_noise(fit, rps, sr=SR, n_mics=2, seed=3)
+    np.testing.assert_allclose(x[:, ::997], STATIC_WIND_GOLDEN, rtol=1e-12, atol=1e-15)
+    e = expected_periodogram(fit, np.asarray(RPS), n_fft=256, sr=SR)
+    np.testing.assert_allclose(e[:, 1:40:6], STATIC_WIND_GOLDEN_E, rtol=1e-12)

@@ -1,0 +1,14 @@
+/data/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.venv/lib/python3.12/site-packages/pyro/ops/stats.py:527: SyntaxWarning: invalid escape sequence '\g'
+  we have :math:`ES^{*}(P,Q) \ge ES^{*}(Q,Q)` with equality holding if and only if :math:`P=Q`, i.e.
+free-flight_nosource_room2 {'real': 0.64, 'nv3r4': 1.23, 'cwind': 10.77, 'r1k10': 2.63, 'gust1': 1.95, 'r2': 1.84}
+hovering_nosource_room2 {'real': 0.89, 'nv3r4': 1.45, 'cwind': 9.39, 'r1k10': 2.58, 'gust1': 2.09, 'r2': 2.03}
+updown_nosource_room2 {'real': 1.69, 'nv3r4': 1.93, 'cwind': 10.61, 'r1k10': 3.6, 'gust1': 2.48, 'r2': 2.39}
+rectangle_nosource_room2 {'real': 1.69, 'nv3r4': 2.21, 'cwind': 8.65, 'r1k10': 3.33, 'gust1': 2.79, 'r2': 2.78}
+spinning_nosource_room2 {'real': 1.19, 'nv3r4': 1.58, 'cwind': 8.67, 'r1k10': 2.84, 'gust1': 2.3, 'r2': 2.16}
+tracker hppnet (default ckpt) set scored seeds 2001-2004
+real              0.64  0.89  1.69  1.69  1.19  mean 1.219
+nv3r4             1.23  1.45  1.93  2.21  1.58  mean 1.680
+cwind            10.77  9.39 10.61  8.65  8.67  mean 9.618
+r1k10             2.63  2.58  3.60  3.33  2.84  mean 2.996
+gust1             1.95  2.09  2.48  2.79  2.30  mean 2.321
+r2                1.84  2.03  2.39  2.78  2.16  mean 2.239

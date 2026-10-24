@@ -1,0 +1,87 @@
+{
+ "tracker": {
+  "experiment": "rp_pyrseplstm_k64_alllab",
+  "ckpt": "best_real_median",
+  "reference": "r2://ml-data/artifacts/rp_pyrseplstm_k64_alllab/checkpoints/best_real_median.ckpt",
+  "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/8b3e5552b59a/.cache/r2_checkpoints/ml-data__artifacts__rp_pyrseplstm_k64_alllab__checkpoints__best_real_median.ckpt",
+  "bytes": 2098579,
+  "sha256": "7b9c444ce5797310d82f5566ce5c7159470f1a31ba27f4685f128695cdcd8778"
+ },
+ "set": "scored",
+ "seeds": [
+  2001,
+  2002,
+  2003,
+  2004
+ ],
+ "rows": [
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727397.2050455,
+   "pit": {
+    "real": 0.4517667179850202,
+    "nv3r4": 0.6932895728903952,
+    "cwind": 1.4522673901619694,
+    "r1k10": 1.5964460325439842,
+    "gust1": 1.479978960650544,
+    "r2": 1.4529449328507376
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903905.3944898,
+   "pit": {
+    "real": 0.7230555002269564,
+    "nv3r4": 0.8662988807887662,
+    "cwind": 1.7503882092021386,
+    "r1k10": 2.201699324595457,
+    "gust1": 1.7377569835466464,
+    "r2": 1.6937203202132391
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903578.348311,
+   "pit": {
+    "real": 1.0359760281587194,
+    "nv3r4": 1.1974836671443878,
+    "cwind": 1.7629821141062103,
+    "r1k10": 1.9865172779666955,
+    "gust1": 1.7964814712531316,
+    "r2": 1.7734809340040492
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905725.952559,
+   "pit": {
+    "real": 1.5549721286188753,
+    "nv3r4": 1.6442273774832175,
+    "cwind": 2.6021674527187972,
+    "r1k10": 2.577898030714138,
+    "gust1": 2.45980675750523,
+    "r2": 2.4823189733237214
+   }
+  },
+  {
+   "window": "spinning_nosource_room2",
+   "start_s": 1511905200.978012,
+   "pit": {
+    "real": 1.0159856533835527,
+    "nv3r4": 1.1216868091962495,
+    "cwind": 2.0635822975750067,
+    "r1k10": 2.645388476717844,
+    "gust1": 1.9502127236121805,
+    "r2": 1.9038648562561815
+   }
+  }
+ ],
+ "mean": {
+  "real": 0.9563512056746248,
+  "nv3r4": 1.1045972615006032,
+  "cwind": 1.9262774927528246,
+  "r1k10": 2.201589828507624,
+  "gust1": 1.8848473793135465,
+  "r2": 1.8612660033295856
+ }
+}

@@ -152,7 +152,8 @@ def speeds(fm: Any, frame: Any, grid: np.ndarray) -> np.ndarray:
                 dtype=np.float64,
             )
     layers = logits.reshape(1, N_LAYERS, len(grid), n_t).double()
-    return np.asarray(peak_readout(F.logsigmoid(layers), grid)[0].numpy(), dtype=np.float64)
+    rates = peak_readout(F.logsigmoid(layers), grid, has_off=False)  # linear grid, no off state
+    return np.asarray(rates[0].numpy(), dtype=np.float64)
 
 
 def pit(pred: np.ndarray, gt: np.ndarray) -> tuple[float, np.ndarray]:

@@ -363,7 +363,7 @@ class Readout:
         self.n_layers = n_layers
         self.reg_metric = RPSMetric("mae_frame", rate=rate)
         self.sal_metric = LayerPeakRPSMetric(
-            out_fmin=fmin, out_fmax=fmax, out_bins=bins, n_layers=n_layers, rate=rate
+            grid=dict(kind="linear", fmin=fmin, fmax=fmax, bins=bins), n_layers=n_layers, rate=rate
         )
 
     def __call__(self, pred: td.Frame, frame: td.Frame) -> tuple[np.ndarray, float]:
@@ -380,7 +380,7 @@ class Readout:
                     f"{self.n_layers} layers x {len(self.grid)} bins"
                 )
             layers = logits.reshape(1, self.n_layers, len(self.grid), n_t).double()
-            speeds = peak_readout(F.logsigmoid(layers), self.grid)[0].numpy()
+            speeds = peak_readout(F.logsigmoid(layers), self.grid, has_off=False)[0].numpy()
             return speeds.astype(np.float32), metric
         raise KeyError(f"no rps_pred or salience in {list(pred.keys())}")
 

@@ -1,0 +1,8 @@
+free-flight_nosource_room2 {'real': 0.45, 'trim': 1.27}
+hovering_nosource_room2 {'real': 0.72, 'trim': 1.4}
+updown_nosource_room2 {'real': 1.04, 'trim': 1.4}
+rectangle_nosource_room2 {'real': 1.55, 'trim': 2.25}
+spinning_nosource_room2 {'real': 1.02, 'trim': 1.77}
+tracker hrspnet (default ckpt) set scored seeds 2001-2004
+real              0.45  0.72  1.04  1.55  1.02  mean 0.956
+trim              1.27  1.40  1.40  2.25  1.77  mean 1.617

@@ -111,10 +111,19 @@ def _lpc_for_speed(speed: float) -> np.ndarray:
     return a
 
 
-def wind_speed_profile(rng: np.random.Generator, n: int, fs: int, gustiness: int = 3) -> np.ndarray:
-    """Wind speed (m/s) per sample: ``gustiness`` Weibull(2) draws (scale 2)
-    resampled over the clip, plus 100 ms-smoothed Gaussian fluctuations."""
-    pts = 2.0 * rng.weibull(2.0, max(1, int(gustiness)))
+def wind_speed_profile(
+    rng: np.random.Generator,
+    n: int,
+    fs: int,
+    gustiness: int = 3,
+    *,
+    speed_offset_ms: float = 0.0,
+    speed_scale_ms: float = 2.0,
+) -> np.ndarray:
+    """Wind speed (m/s) per sample: ``gustiness`` knots ``speed_offset_ms +
+    speed_scale_ms * Weibull(2)`` resampled over the clip, plus 100 ms-smoothed
+    Gaussian fluctuations. SC's own law is the default (offset 0, scale 2)."""
+    pts = float(speed_offset_ms) + float(speed_scale_ms) * rng.weibull(2.0, max(1, int(gustiness)))
     prof = _rs(pts, n) if pts.size > 1 else np.full(n, float(pts[0]))
     return prof + _smooth(rng, n, fs)
 
@@ -144,13 +153,30 @@ def wind_noise(
     *,
     speed_profile: np.ndarray | None = None,
     gustiness: int = 3,
+    speed_offset_ms: float = 0.0,
+    speed_scale_ms: float = 2.0,
+    gust_rate_hz: float | None = None,
     short_term_var: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     """``(x, speed)``: unit-RMS wind noise of ``duration_s`` seconds at ``fs``
-    and the wind-speed profile (m/s) it was generated from (at ``fs``)."""
+    and the wind-speed profile (m/s) it was generated from (at ``fs``).
+
+    Without an explicit ``speed_profile`` the profile is
+    :func:`wind_speed_profile`'s with ``speed_offset_ms`` / ``speed_scale_ms``
+    and ``gustiness`` knots, or, when ``gust_rate_hz`` is given,
+    ``max(1, round(gust_rate_hz * duration_s))`` knots (the knot RATE of the
+    v4 ``sc`` wind). The defaults are SC's: offset 0, scale 2, 3 knots."""
     n48 = int(round(duration_s * FS_NATIVE))
     if speed_profile is None:
-        prof = wind_speed_profile(rng, n48, FS_NATIVE, gustiness)
+        knots = gustiness if gust_rate_hz is None else round(float(gust_rate_hz) * duration_s)
+        prof = wind_speed_profile(
+            rng,
+            n48,
+            FS_NATIVE,
+            max(1, int(knots)),
+            speed_offset_ms=speed_offset_ms,
+            speed_scale_ms=speed_scale_ms,
+        )
     else:
         prof = _rs(np.asarray(speed_profile, dtype=np.float64), n48) + _smooth(rng, n48, FS_NATIVE)
     exc = _excitation(rng, prof, short_term_var)

@@ -71,6 +71,7 @@ __all__ = [
     "payload",
     "payload_group_vectors",
     "phase_evidence",
+    "phase_pedestal_neg_log_prior",
     "prepare_setting",
     "render_planted",
     "render_setting",
@@ -115,16 +116,27 @@ TOL_NATS_PER_CELL = 1e-4
 TOL_MOVE = dict(levels=0.1, exponents=0.02, floor=0.1, dynamics=0.05)
 
 
-def _capped(u: Tensor, log_cap: Tensor) -> Tensor:
+def _capped(u: Tensor, log_cap: Tensor | float) -> Tensor:
     """``exp(log cap - softplus(log cap - u))``: ``e^u`` far below the cap,
-    never above it (the truncation of the amplitude-variance prior)."""
+    never above it (the truncation of a prior's support)."""
     return torch.exp(log_cap - torch.nn.functional.softplus(log_cap - u))
 
 
-def _uncapped(s2: np.ndarray, cap: np.ndarray) -> np.ndarray:
+def _capped_np(u: np.ndarray, cap: np.ndarray | float) -> np.ndarray:
+    """:func:`_capped` on numpy arrays."""
+    lc = np.log(cap)
+    return np.exp(lc - np.logaddexp(0.0, lc - u))
+
+
+def _uncapped(s2: np.ndarray, cap: np.ndarray | float) -> np.ndarray:
     """Inverse of :func:`_capped`."""
     lc = np.log(cap)
     return lc - np.log(np.expm1(np.maximum(lc - np.log(s2), 1e-12)))
+
+
+def _under(v: np.ndarray, cap: float) -> np.ndarray:
+    """``v`` with entries at or over ``cap`` moved to ``0.99 cap``."""
+    return np.where(v >= cap, 0.99 * cap, v)
 
 
 # ── data ─────────────────────────────────────────────────────────────────────
@@ -599,6 +611,21 @@ def _gamma_from_width(W: Any, s2: Any) -> Any:
     return W * (-np.expm1(-s2)) / s2
 
 
+def phase_pedestal_neg_log_prior(s2P: Tensor, width: Tensor, c_w: Any) -> Tensor:
+    """``-log p`` (constants dropped) of the per-order phase pedestal:
+    ``log sigma2_phi ~ N(PHASE_SIGMA2_LN)`` truncated at ``PHASE_SIGMA2_MAX`` and
+    ``W_phi ~ HalfNormal(c_w)`` truncated at ``W_MAX_HZ`` (:mod:`.v4_priors`).
+    The priors act on the capped quantities themselves; MAP in the capped
+    coordinates (:func:`_capped`) needs no Jacobian, since each ``u -> value``
+    is a monotone bijection onto ``(0, cap)`` and both share the optimum."""
+    dd = dict(dtype=s2P.dtype, device=s2P.device)
+
+    def nrm(x: Tensor, mu: Any, sd: Any) -> Tensor:
+        return (0.5 * ((x - torch.as_tensor(mu, **dd)) / torch.as_tensor(sd, **dd)) ** 2).sum()
+
+    return nrm(torch.log(s2P), *PR.PHASE_SIGMA2_LN) + nrm(width, 0.0, c_w)
+
+
 @dataclass
 class _Frozen:
     """Per-recording tensors the fit never changes."""
@@ -650,7 +677,7 @@ class RigModel:
         self.k = k
         self.cap = PR.amp_cap(k)
         self.log_cap = torch.as_tensor(np.log(self.cap), **dd)
-        self.c_w = PR.width_scale(k, BLADES)
+        self.c_w = PR.width_scale(k)
         self.sigma_b = float(rig.centres["sigma_b_db"])
         self.frozen: list[_Frozen] = []
         for j, s in enumerate(rig.settings):
@@ -709,8 +736,8 @@ class RigModel:
             c_motor=P((p_motor - pbar_m).mean(axis=1)),
             alpha_aero=P(PR.ALPHA_AERO[0]),
             alpha_motor=P(PR.ALPHA_MOTOR[0]),
-            b0=P(PR.B0[0]),
-            b1=P(PR.B1[0]),
+            # b(f) >= 0 over the band: fitted at the band edges (v4_priors)
+            **dict(zip(("u_blo", "u_bhi"), map(P, PR.floor_coords(PR.B0[0], PR.B1[0])))),
             floor_mean_db=P(floor_mean),
             floor_z=P(_ridge_z(chol, self.sigma_b, ctrl - floor_mean)),
             **{name: P(v) for name, v in dyn.items()},
@@ -718,10 +745,15 @@ class RigModel:
         )
         #: gradient masks of the evidence freeze (1 free, 0 held)
         self.hold: dict[str, Tensor] = {}
+        #: ``(freqs_hz, (R, M, Fq) dB)``: the pair EQ the model's ``eq_line`` /
+        #: ``eq_floor`` were set from by :meth:`load_payload`; ``None`` while they
+        #: are the rig's own measurement (leave-one-out at the lines)
+        self.pair_eq: tuple[np.ndarray, np.ndarray] | None = None
 
     # ── initialisation ──
     def _initial_dynamics(self, rng: np.random.Generator) -> dict[str, np.ndarray]:
-        """Pedestal and shaft: prior medians (restart 0) or prior draws."""
+        """Pedestal and shaft: prior medians (restart 0) or prior draws; the
+        capped variances and width in their coordinates ``u``."""
         k, c_w = self.k, self.c_w
         mu_u, mu_g = PR.amp_log_median(k), PR.gamma_amp_log_median(k)
         log_cap = np.log(self.cap)
@@ -729,24 +761,39 @@ class RigModel:
             return dict(
                 u_amp=_uncapped(np.exp(mu_u), self.cap),
                 log_gA=mu_g,
-                log_s2P=np.full(k.size, PR.PHASE_SIGMA2_LN[0]),
-                log_W=np.log(HALF_NORMAL_MEDIAN * c_w),
+                u_s2P=_uncapped(
+                    np.full(k.size, math.exp(PR.PHASE_SIGMA2_LN[0])), PR.PHASE_SIGMA2_MAX
+                ),
+                u_W=_uncapped(HALF_NORMAL_MEDIAN * c_w, PR.W_MAX_HZ),
                 log_eps=np.asarray(math.log(HALF_NORMAL_MEDIAN * PR.EPS_HALF_NORMAL)),
                 a_sigma=np.asarray(PR.A_SIGMA[0]),
                 log_lam_ref=np.asarray(PR.LAM_REF_LN[0]),
                 b_lam=np.asarray(PR.B_LAM[0]),
             )
-        # the truncated prior of the log-variance itself, then its coordinate u
-        ls2A = mu_u + PR.AMP_LOG_SD * rng.standard_normal(k.size)
-        while np.any(over := ls2A >= log_cap):
-            ls2A[over] = mu_u[over] + PR.AMP_LOG_SD * rng.standard_normal(int(over.sum()))
-        log_s2P = PR.PHASE_SIGMA2_LN[0] + PR.PHASE_SIGMA2_LN[1] * rng.standard_normal(k.size)
-        W = np.abs(c_w * rng.standard_normal(k.size))
+
+        def truncated(mu: Any, sd: Any, cap: Any, fold: bool = False) -> np.ndarray:
+            # rejection sampling of N(mu, sd) (|.| if ``fold``) truncated at ``cap``
+            mu, sd = np.broadcast_to(mu, k.shape), np.broadcast_to(sd, k.shape)
+
+            def draw(m: np.ndarray) -> np.ndarray:
+                x = mu[m] + sd[m] * rng.standard_normal(int(m.sum()))
+                return np.abs(x) if fold else x
+
+            x = draw(np.ones(k.shape, dtype=bool))
+            while np.any(over := x >= cap):
+                x[over] = draw(over)
+            return x
+
+        ls2A = truncated(mu_u, PR.AMP_LOG_SD, log_cap)
+        ls2P = truncated(
+            PR.PHASE_SIGMA2_LN[0], PR.PHASE_SIGMA2_LN[1], math.log(PR.PHASE_SIGMA2_MAX)
+        )
+        W = truncated(0.0, c_w, PR.W_MAX_HZ, fold=True)
         return dict(
             u_amp=_uncapped(np.exp(ls2A), self.cap),
             log_gA=mu_g + PR.GAMMA_AMP_LOG_SD * rng.standard_normal(k.size),
-            log_s2P=log_s2P,
-            log_W=np.log(np.maximum(W, 1e-3)),
+            u_s2P=_uncapped(np.exp(ls2P), PR.PHASE_SIGMA2_MAX),
+            u_W=_uncapped(np.maximum(W, 1e-3), PR.W_MAX_HZ),
             log_eps=np.asarray(math.log(abs(PR.EPS_HALF_NORMAL * rng.standard_normal()))),
             a_sigma=np.asarray(PR.A_SIGMA[0] + PR.A_SIGMA[1] * rng.standard_normal()),
             log_lam_ref=np.asarray(PR.LAM_REF_LN[0] + PR.LAM_REF_LN[1] * rng.standard_normal()),
@@ -763,9 +810,9 @@ class RigModel:
         is the mean of ``k +- B`` and the motor line takes the rest."""
         rig, K = self.rig, self.rig.k_prof
         R, mo = rig.n_rotors, rig.motor_orders
-        s2A = np.exp(np.log(self.cap) - np.logaddexp(0.0, np.log(self.cap) - dyn["u_amp"]))
-        gA, s2P = np.exp(dyn["log_gA"]), np.exp(dyn["log_s2P"])
-        gP = _gamma_from_width(np.exp(dyn["log_W"]), s2P)
+        s2A = _capped_np(dyn["u_amp"], self.cap)
+        gA, s2P = np.exp(dyn["log_gA"]), _capped_np(dyn["u_s2P"], PR.PHASE_SIGMA2_MAX)
+        gP = _gamma_from_width(_capped_np(dyn["u_W"], PR.W_MAX_HZ), s2P)
         num, cnt = np.zeros((R, K)), np.zeros((R, K))
         phis = []
         for j, s in enumerate(rig.settings):
@@ -824,15 +871,16 @@ class RigModel:
         return torch.exp(self.params["log_gA"])
 
     def s2P(self) -> Tensor:
-        return torch.exp(self.params["log_s2P"])
+        """``sigma2_phi`` per order, capped at :data:`.v4_priors.PHASE_SIGMA2_MAX`."""
+        return _capped(self.params["u_s2P"], math.log(PR.PHASE_SIGMA2_MAX))
 
     def gP(self) -> Tensor:
         """``gamma_phi`` per order, derived from the fitted width and variance."""
         return _gamma_from_width(self.width_phase(), self.s2P())
 
     def width_phase(self) -> Tensor:
-        """``W_phi`` per order (Hz, eq-width): the fitted coordinate."""
-        return torch.exp(self.params["log_W"])
+        """``W_phi`` per order (Hz, eq-width), capped at :data:`.v4_priors.W_MAX_HZ`."""
+        return _capped(self.params["u_W"], math.log(PR.W_MAX_HZ))
 
     def shaft(self, j: int) -> tuple[Tensor, Tensor]:
         """``(sigma_nu rad/s, lam 1/s)`` of recording ``j`` from the rig's
@@ -856,6 +904,22 @@ class RigModel:
         """``(14,)`` the floor's control values (dB)."""
         basis = self.frozen[0].grid.floor
         return self.params["floor_mean_db"] + basis.shape_db(self.params["floor_z"], self.sigma_b)
+
+    @torch.no_grad()
+    def set_floor_ctrl(self, ctrl_db: np.ndarray) -> float:
+        """Set the floor to the control values ``ctrl_db`` (dB): ``mean`` their
+        mean, ``z`` the least-squares solve of the (linear) shape map. Returns
+        the largest reproduction error (dB); a planted truth's floor."""
+        basis = self.frozen[0].grid.floor
+        target = np.asarray(ctrl_db, dtype=np.float64)
+        mean = float(target.mean())
+        z0 = torch.zeros_like(self.params["floor_z"])
+        with torch.enable_grad():
+            A = torch.autograd.functional.jacobian(lambda z: basis.shape_db(z, self.sigma_b), z0)
+        z = np.linalg.lstsq(A.cpu().numpy(), target - mean, rcond=None)[0]
+        self.params["floor_mean_db"].copy_(torch.as_tensor(mean, **self.dd))
+        self.params["floor_z"].copy_(torch.as_tensor(z, **self.dd))
+        return float(np.max(np.abs(self.cbar().cpu().numpy() - target)))
 
     def line_weights(self, j: int) -> tuple[Tensor, Tensor, np.ndarray]:
         """``(w_aero (M, K_j), w_motor (M, n_m_j), motor_k)``: each line's mean
@@ -890,11 +954,16 @@ class RigModel:
         )
         return torch.cos(2.0 * math.pi * ang)
 
+    def floor_exps(self) -> tuple[Tensor, Tensor]:
+        """``(b0, b1)`` of the floor's speed exponent, from the edge coordinates."""
+        return PR.floor_exponents(self.params["u_blo"], self.params["u_bhi"])
+
     def floor_psd(self, j: int) -> Tensor:
         """One rotor's floor at recording ``j``'s speed on the PSD grid."""
-        p, fz = self.params, self.frozen[j]
+        fz = self.frozen[j]
         psd = fz.grid.floor.psd(self._floor_params())
-        b = p["b0"] + p["b1"] * torch.log2(torch.clamp(fz.floor_f, min=BAND_HZ[0]) / 2000.0)
+        b0, b1 = self.floor_exps()
+        b = b0 + b1 * torch.log2(torch.clamp(fz.floor_f, min=BAND_HZ[0]) / PR.B_F_REF_HZ)
         return psd * torch.exp(b * fz.log_s)
 
     def components(self, j: int) -> dict[str, Tensor]:
@@ -964,18 +1033,17 @@ class RigModel:
             out
             + nrm(p["alpha_aero"], *PR.ALPHA_AERO)
             + nrm(p["alpha_motor"], *PR.ALPHA_MOTOR)
-            + nrm(p["b0"], *PR.B0)
-            + nrm(p["b1"], *PR.B1)
+            + nrm(self.floor_exps()[0], *PR.B0)
+            + nrm(self.floor_exps()[1], *PR.B1)
             + nrm(p["floor_mean_db"], rig.centres["floor_mean_db"], FLOOR_MEAN_SD_DB)
             + nrm(p["floor_z"], 0.0, 1.0)
             - self.kappa * self.cbar().sum()
-            # the truncated LogNormal acts on the capped variance itself; MAP in
-            # log s2A needs no Jacobian (u -> log s2A is a monotone bijection
-            # onto (-inf, log cap), so both coordinates share the optimum)
+            # the truncated priors act on the capped quantities themselves; MAP
+            # in log s2 needs no Jacobian (u -> capped value is a monotone
+            # bijection onto (0, cap), so both coordinates share the optimum)
             + nrm(torch.log(self.s2A()), PR.amp_log_median(k), PR.AMP_LOG_SD)
             + nrm(p["log_gA"], PR.gamma_amp_log_median(k), PR.GAMMA_AMP_LOG_SD)
-            + nrm(p["log_s2P"], *PR.PHASE_SIGMA2_LN)
-            + nrm(self.width_phase(), 0.0, self.c_w)
+            + phase_pedestal_neg_log_prior(self.s2P(), self.width_phase(), self.c_w)
             + nrm(torch.exp(p["log_eps"]), 0.0, PR.EPS_HALF_NORMAL)
             + nrm(p["log_lam_ref"], *PR.LAM_REF_LN)
         )
@@ -1009,6 +1077,14 @@ class RigModel:
                 g.zero_()
         return float(prior.detach()) + sum(parts), parts
 
+    @torch.no_grad()
+    def objective(self) -> tuple[float, list[float]]:
+        """:meth:`objective_and_grad`'s total and per-recording Whittle terms
+        (the MAP objective incl. the floor push), with no graph or gradient."""
+        prior = float(self.neg_log_prior())
+        parts = [float(self.whittle(j)) for j in range(len(self.frozen))]
+        return prior + sum(parts), parts
+
     def load_payload(self, pay: dict[str, Any]) -> None:
         """Set every parameter from a ``noise-v4-fit/3`` bench payload of the
         same rig geometry (the planted truth, a refit's start), and its pair
@@ -1031,17 +1107,26 @@ class RigModel:
             c_motor=hier.get("c_motor_db", (p_motor - p_motor.mean(axis=0)).mean(axis=1)),
             alpha_aero=pr["alpha_aero"],
             alpha_motor=pr["alpha_motor"],
-            b0=fl["b0"],
-            b1=fl["b1"],
+            # a payload's own edges load exactly; only a pre-truncation fit's
+            # negative edge is moved to the floor of the support
+            **dict(zip(("u_blo", "u_bhi"), PR.floor_coords(fl["b0"], fl["b1"], b_min=1e-9))),
             floor_mean_db=fl["mean_db"],
             floor_z=fl["shape_z"],
             u_amp=_uncapped(a(ped["sigma2_amp"])[:K], self.cap),
             log_gA=np.log(a(ped["gamma_amp_hz"])[:K]),
-            log_s2P=np.log(a(ped["sigma2_phase"])[:K]),
-            log_W=np.log(
-                a(ped["width_phase_hz"])[:K]
-                if "width_phase_hz" in ped
-                else PR.pedestal_width(a(ped["gamma_phase_hz"]), a(ped["sigma2_phase"]))[:K]
+            # a payload at or over a cap (pre-cap fits) starts just under it;
+            # values under the cap load exactly
+            u_s2P=_uncapped(
+                _under(a(ped["sigma2_phase"])[:K], PR.PHASE_SIGMA2_MAX), PR.PHASE_SIGMA2_MAX
+            ),
+            u_W=_uncapped(
+                _under(
+                    a(ped["width_phase_hz"])[:K]
+                    if "width_phase_hz" in ped
+                    else PR.pedestal_width(a(ped["gamma_phase_hz"]), a(ped["sigma2_phase"]))[:K],
+                    PR.W_MAX_HZ,
+                ),
+                PR.W_MAX_HZ,
             ),
             log_eps=math.log(sh["eps"]),
             a_sigma=sh["a_sigma"],
@@ -1054,6 +1139,7 @@ class RigModel:
         self.sigma_b = float(fl["shape_sd_db"])
         eq = pr["mic_response"]["pair_eq"]
         grid, db = a(eq["freqs_hz"]), a(eq["db"])
+        self.pair_eq = (grid, db)
         for j, (s, fz) in enumerate(zip(self.rig.settings, self.frozen)):
             rows = db[self.rig.rotors[j]]
             f_lines = s.carrier * np.arange(1, s.k_max + 1, dtype=np.float64)
@@ -1150,16 +1236,18 @@ def _apply_hold(model: RigModel, ev: dict[str, Any]) -> dict[str, list[int]]:
     held width stays put) and mask their gradients."""
     hs, hw = np.asarray(ev["hold_log_s2P"]), np.asarray(ev["hold_log_W"])
     p = model.params
+    u_s2P_med = _uncapped(np.exp(PR.PHASE_SIGMA2_LN[0]), PR.PHASE_SIGMA2_MAX)
+    u_W_med = _uncapped(HALF_NORMAL_MEDIAN * model.c_w, PR.W_MAX_HZ)
     with torch.no_grad():
-        ls = p["log_s2P"].detach().cpu().numpy().copy()
-        ls[hs] = PR.PHASE_SIGMA2_LN[0]
-        lw = p["log_W"].detach().cpu().numpy().copy()
-        lw[hw] = np.log(HALF_NORMAL_MEDIAN * model.c_w)[hw]
-        p["log_s2P"].copy_(torch.as_tensor(ls))
-        p["log_W"].copy_(torch.as_tensor(lw))
+        us = p["u_s2P"].detach().cpu().numpy().copy()
+        us[hs] = u_s2P_med
+        uw = p["u_W"].detach().cpu().numpy().copy()
+        uw[hw] = u_W_med[hw]
+        p["u_s2P"].copy_(torch.as_tensor(us))
+        p["u_W"].copy_(torch.as_tensor(uw))
     model.hold = {
-        "log_s2P": torch.as_tensor(~hs, **model.dd),
-        "log_W": torch.as_tensor(~hw, **model.dd),
+        "u_s2P": torch.as_tensor(~hs, **model.dd),
+        "u_W": torch.as_tensor(~hw, **model.dd),
     }
     k = model.k
     return dict(log_s2P=k[hs].tolist(), log_W=k[hw].tolist())
@@ -1176,11 +1264,12 @@ def group_vectors(model: RigModel) -> dict[str, np.ndarray]:
             [
                 np.log(model.s2A().cpu().numpy()),
                 p["log_gA"],
-                p["log_s2P"],
-                p["log_W"],
+                np.log(model.s2P().cpu().numpy()),
+                np.log(model.width_phase().cpu().numpy()),
             ]
         )
         cbar = model.cbar().cpu().numpy()
+        p["b0"], p["b1"] = (t.cpu().numpy() for t in model.floor_exps())
     return dict(
         levels=np.concatenate([p["p_aero"].ravel(), p["p_motor"].ravel()]),
         exponents=np.array(
@@ -1287,56 +1376,100 @@ def fit_rig(
     device: Any = "cpu",
     flat_shaft: bool = False,
     start: dict[str, Any] | None = None,
+    resume: bool = False,
+    model: RigModel | None = None,
+    deadline_s: float | None = None,
+    max_passes: int = 40,
     log: Any = print,
 ) -> tuple[RigModel, dict[str, Any]]:
-    """MAP of the rig (spec § The optimiser): Adam; L-BFGS on every cell; the
-    evidence freeze of the phase pedestal; a fresh-memory L-BFGS restart pass
-    with the hold (``lbfgs_iters // 2``), converged iff it gains less than
-    ``TOL_NATS_PER_CELL`` per cell AND moves no group beyond ``TOL_MOVE``; a
-    final pass with the hold released (``lbfgs_iters // 4``). ``flat_shaft``
-    pins ``a_sigma = b_lam = 0``; ``start`` (a payload of the same rig) replaces
-    the data-only initialisation (the nested refit)."""
+    """MAP of the rig (spec § The optimiser).
+
+    Stages: Adam; L-BFGS on every cell (``lbfgs_iters``); the evidence freeze
+    of the phase pedestal and one L-BFGS pass with the hold
+    (``lbfgs_iters // 2``); the hold released. Then the CONVERGENCE LOOP:
+    fresh-memory L-BFGS passes of ``lbfgs_iters // 4`` with every parameter
+    free, until one gains less than ``TOL_NATS_PER_CELL`` per cell AND moves no
+    group beyond ``TOL_MOVE`` (converged), ``max_passes`` passes, or the next
+    pass would end after ``deadline_s`` seconds from the call (stopped; resume
+    from the payload). The test pass is the reported state's own objective:
+    no hold is reset in front of it.
+
+    ``start`` (a payload of the same rig) replaces the data-only
+    initialisation; with ``resume`` the run goes straight to the convergence
+    loop and carries the payload's evidence record (a continuation).
+    ``model`` (with ``resume``) continues that model's parameters as they
+    stand instead of loading ``start``; ``start`` still gives the evidence.
+    ``flat_shaft`` pins ``a_sigma = b_lam = 0``."""
     tag = f"[rig s{seed}{' flat' if flat_shaft else ''}]"
     t_all = time.perf_counter()
-    model = RigModel(rig, device=device, seed=seed, kappa=kappa, flat_shaft=flat_shaft)
-    if start is not None:
-        model.load_payload(start)
+    if model is None:
+        model = RigModel(rig, device=device, seed=seed, kappa=kappa, flat_shaft=flat_shaft)
+        if start is not None:
+            model.load_payload(start)
+    elif not resume:
+        raise ValueError("a given model is continued: it needs resume")
+    if resume and start is None:
+        raise ValueError("resume needs a start payload")
     init_s = time.perf_counter() - t_all
     t0 = time.perf_counter()
     first, _ = model.objective_and_grad()
     eval_s = time.perf_counter() - t0
     nc = model.n_cells
     log(f"{tag} start {first:.1f} nats ({nc} cells, {eval_s:.2f} s/eval, init {init_s:.1f} s)")
-    adam_trace = []
-    if adam_steps > 0:
-        opt = torch.optim.Adam(list(model.params.values()), lr=adam_lr)
-        for step in range(int(adam_steps)):
-            total, _ = model.objective_and_grad()
-            opt.step()
-            adam_trace.append(total)
-            if step % 50 == 0:
-                log(f"{tag} adam {step} {total:.1f}")
-    pass1 = _pass(model, lbfgs_iters, nc)
-    log(f"{tag} lbfgs {pass1['trace'][-1]:.1f} ({pass1['iters']} it)")
-    t0 = time.perf_counter()
-    ev = phase_evidence(model)
-    evidence_s = time.perf_counter() - t0
-    held = _apply_hold(model, ev)
-    log(f"{tag} evidence freeze: held s2P {held['log_s2P']}, W {held['log_W']}")
-    restart = _pass(model, lbfgs_iters // 2, nc)
-    mv = restart["movement"]
-    converged = bool(restart["gain_per_cell"] < TOL_NATS_PER_CELL and all(mv["within"].values()))
-    log(f"{tag} restart gain {restart['gain_per_cell']:.2e}/cell, movement {mv}")
-    model.hold = {}
-    release = _pass(model, lbfgs_iters // 4, nc)
-    log(f"{tag} release gain {release['gain_per_cell']:.2e}/cell")
+    adam_trace: list[float] = []
+    pass1 = held_pass = None
+    if resume:
+        assert start is not None
+        evidence = dict(start["optimiser"]["evidence"], carried_from_payload=True)
+    else:
+        if adam_steps > 0:
+            opt = torch.optim.Adam(list(model.params.values()), lr=adam_lr)
+            for step in range(int(adam_steps)):
+                total, _ = model.objective_and_grad()
+                opt.step()
+                adam_trace.append(total)
+                if step % 50 == 0:
+                    log(f"{tag} adam {step} {total:.1f}")
+        pass1 = _pass(model, lbfgs_iters, nc)
+        log(f"{tag} lbfgs {pass1['trace'][-1]:.1f} ({pass1['iters']} it)")
+        t0 = time.perf_counter()
+        ev = phase_evidence(model)
+        evidence_s = time.perf_counter() - t0
+        held = _apply_hold(model, ev)
+        log(f"{tag} evidence freeze: held s2P {held['log_s2P']}, W {held['log_W']}")
+        held_pass = _pass(model, lbfgs_iters // 2, nc)
+        log(f"{tag} held pass gain {held_pass['gain_per_cell']:.2e}/cell")
+        model.hold = {}
+        evidence = {
+            **{k: v for k, v in ev.items() if not k.startswith("hold_")},
+            "held_orders": held,
+            "wall_s": evidence_s,
+        }
+    passes: list[dict[str, Any]] = []
+    converged, stop = False, "max_passes"
+    loop_iters = max(1, lbfgs_iters // 4)
+    while len(passes) < int(max_passes):
+        est = passes[-1]["wall_s"] if passes else 1.15 * loop_iters * eval_s
+        if deadline_s is not None and time.perf_counter() - t_all + est > float(deadline_s):
+            stop = "deadline"
+            break
+        out = _pass(model, loop_iters, nc)
+        out.pop("trace")
+        passes.append(out)
+        mv = out["movement"]
+        log(f"{tag} pass {len(passes)} gain {out['gain_per_cell']:.2e}/cell, within {mv['within']}")
+        if out["gain_per_cell"] < TOL_NATS_PER_CELL and all(mv["within"].values()):
+            converged, stop = True, "converged"
+            break
     total, parts = model.objective_and_grad()
+    last = passes[-1] if passes else None
     record = dict(
         seed=int(seed),
         kappa=float(kappa),
         flat_shaft=bool(flat_shaft),
         started_from_payload=start is not None,
-        adam_steps=int(adam_steps),
+        resumed=bool(resume),
+        adam_steps=0 if resume else int(adam_steps),
         adam_lr=float(adam_lr),
         lbfgs_iters=int(lbfgs_iters),
         objective_start=first,
@@ -1347,18 +1480,16 @@ def fit_rig(
         init_s=init_s,
         adam_trace=adam_trace,
         lbfgs_pass=pass1,
-        evidence={
-            **{k: v for k, v in ev.items() if not k.startswith("hold_")},
-            "held_orders": held,
-            "wall_s": evidence_s,
-        },
-        restart_pass=restart,
-        restart_gain_per_cell=restart["gain_per_cell"],
+        evidence=evidence,
+        held_pass=held_pass,
+        convergence_passes=passes,
+        restart_gain_per_cell=None if last is None else last["gain_per_cell"],
+        restart_movement=None if last is None else last["movement"],
         converged=converged,
-        release_pass=release,
+        stop=stop,
         wall_s=time.perf_counter() - t_all,
     )
-    log(f"{tag} done {total:.1f} nats, converged={converged}")
+    log(f"{tag} done {total:.1f} nats, converged={converged} ({stop}, {len(passes)} passes)")
     return model, record
 
 
@@ -1463,8 +1594,9 @@ def _priors_block(model: RigModel) -> dict[str, Any]:
         gamma_amp_log_median=PR.gamma_amp_log_median(k).tolist(),
         gamma_amp_log_sd=PR.GAMMA_AMP_LOG_SD,
         phase_sigma2_ln=list(PR.PHASE_SIGMA2_LN),
-        c_w_even=PR.C_W_EVEN,
-        c_w_odd=PR.C_W_ODD,
+        phase_sigma2_max=PR.PHASE_SIGMA2_MAX,
+        c_w=PR.C_W,
+        w_max_hz=PR.W_MAX_HZ,
         eps_half_normal=PR.EPS_HALF_NORMAL,
         a_sigma=list(PR.A_SIGMA),
         b_lam=list(PR.B_LAM),
@@ -1478,6 +1610,8 @@ def _priors_block(model: RigModel) -> dict[str, Any]:
 def payload(model: RigModel, record: dict[str, Any], *, git: str | None = None) -> dict[str, Any]:
     """The ``noise-v4-fit/3`` bench payload of the DREGON rig."""
     p = {k: v.detach().cpu().numpy() for k, v in model.params.items()}
+    with torch.no_grad():
+        p["b0"], p["b1"] = (t.cpu().numpy() for t in model.floor_exps())
     rig = model.rig
     with torch.no_grad():
         s2A, gA = model.s2A().cpu().numpy(), model.gA().cpu().numpy()
@@ -1565,7 +1699,14 @@ def payload(model: RigModel, record: dict[str, Any], *, git: str | None = None) 
             ),
             mic_response=dict(
                 kind="pair_eq",
-                pair_eq=dict(freqs_hz=EQ_GRID_HZ.tolist(), db=rig.eq_all.tolist()),
+                # the EQ the model computed with: a loaded payload's (a planted
+                # twin resumed from its truth carries the TRUTH's EQ, not the one
+                # measured on the planted data), else the rig's measurement
+                pair_eq=(
+                    dict(freqs_hz=EQ_GRID_HZ.tolist(), db=rig.eq_all.tolist())
+                    if model.pair_eq is None
+                    else dict(freqs_hz=model.pair_eq[0].tolist(), db=model.pair_eq[1].tolist())
+                ),
             ),
             wind=dict(kind="per_recording", shape=wind_shape_spec()),
         ),

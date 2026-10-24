@@ -304,4 +304,333 @@ results/noise_v4/md2_motor_orders/fly125_{spectrogram,cruise_k84}_44k.png -->
 400 Hz; then a longer bench schedule until the restart pass gains < 1e-4
 nats/cell; then the flat-shaft refit.
 
+### Round 5 — bounded priors, κ, converged bench fits (2026-10-22)
+
+**Priors.** $W_\phi \le 24$ Hz, $\sigma^2_\phi \le 3$, one $c_W = 6.94$ Hz
+for every order, $b(f) \ge 0$ on the band (`v4_priors`). Spec
+`docs/explainers/noise-model-v4.qmd` § The priors.
+
+**κ by the planted check.** Truth: the r5 s2 fit with its floor below
+2.5 kHz replaced by the measured inter-line floor.
+
+| κ | floor err ≥ 500 Hz, rms / max | mean err < 500 Hz | median $W$ err |
+|---|---|---|---|
+| 0 | 1.5 / 2.4 dB | +2.5 dB | 29 % |
+| 100 | 1.4 / 2.1 dB | +16.5 dB | 35 % |
+| 1000 | 1.8 / 4.3 dB | +19.5 dB | 45 % |
+| 1e4 | diverged | | |
+
+No κ meets the 1 dB rule. Below 500 Hz the bench floor and the bench wind
+explain the same cells and the push only lifts the floor. Decision: κ = 0.
+<!-- source: results/noise_v4/bench/planted/dregon__kappa0__r5__s2__floor2500__kappa{0,100}__r1.json -->
+
+**Converged bench fits** (uni, 3 h): κ 0 / 10 / 100 at −158,957,322.8 /
+−158,948,445.0 / −158,905,892.1 nats, 13 restart passes. In-sample check
+(`nv4-insample-r5b-72401b`): mean |model − data| 1.6–3.2 dB per recording; at
+0.4–2 kHz the floor sits 55–60 dB under the total, so the pedestals carry the
+broadband level.
+<!-- source: results/noise_v4/bench/restarts/dregon__kappa{0,10,100}__r5__s2__c1.json -->
+
+### Round 6 — minimum, η, flight fits (2026-10-23)
+
+**Saddle escape.** The κ = 0 fit `c1` passed the convergence test but had 38
+directions of negative curvature (each on one coordinate: `log_gA`, `u_amp`,
+`u_W`, `p_aero` of near-invisible orders; η came out NaN). `noise_v4_bench.py
+escape` (Hessian, line search down each negative direction, convergence loop,
+repeat; uni-gpushort, one Hessian 1290–1310 s):
+
+| step | negative directions | gain | objective (nats) |
+|---|---|---|---|
+| c1 → c2 | 38 → 12 | 1835 | |
+| c2 → c3 | 12 → 5 | 607.9 | −158,965,903.0 |
+| c3 → c4 | 5 → 4 | 135.4 | −158,966,038.4 |
+| c4 → c5 | 4 → 1 | 26.8 | −158,966,065.2 |
+| c5 → c6 → c7 | 1 → 1 | 0 | −158,966,065.2 |
+
+The last direction (eigenvalue −0.275, a quadratic gain of 0.034 nats at the
+smallest trial step) lowers the objective at no trial step in either sign.
+Rule adopted (`bench_eta.MINIMUM_RULE`): such a payload is a minimum, and the
+direction is left out of $H^{-1}$ like a flat one. `c7` is the final bench fit.
+Jobs `nv4-escape-k0g2-78e2a2`, `-k0g3-edff74`, `-k0g4-6580d2`,
+`-k0g5-c7131a`, `nv4-eta-final-16b888`.
+<!-- source: results/noise_v4/bench/restarts/dregon__kappa0__r5__s2__c{3..7}.json optimiser.saddle_escape -->
+
+**η on the final fit** (block jackknife; $p_{\rm eff}$ = 655):
+
+| blocks | 200 Hz | 400 Hz | 800 Hz | 1600 Hz | one per recording |
+|---|---|---|---|---|---|
+| η | 0.00152 | 0.00145 | 0.00140 | 0.00135 | 0.00132 |
+
+η falls slowly with block size: the cells are strongly dependent, and the
+dependence reaches across 1.6 kHz.
+<!-- source: results/noise_v4/bench/eta/dregon__kappa0__r5__s2__c7.json -->
+
+**Planted twin of the final fit** (truth `c6`, κ = 0, resumed from the truth;
+`nv4-planted-final-3143af`): converged (1.3e-6 nats/cell). α (0.04), ε (4 %),
+λ (5 %) recover; profiles on lines ≥ 10 dB: median error 0.35 dB, 88 % within
+1 dB; $W_\phi$ on lines ≥ 15 dB: median 18 %, 71 % within 30 %; $b_0$ off by
+1.0; the floor off by up to 55 dB (rms 16 dB), where the truth floor had
+collapsed below 300 Hz.
+<!-- source: results/noise_v4/bench/planted/dregon__kappa0__r5__s2__c6__kappa0__r1.json -->
+
+**Defect found and fixed: the planted payload recorded the wrong pair EQ.**
+The planted fit records −166,174,609.7 nats, but its `.fit.json` reloaded on
+the same planted rig scored −166,140,705.1 (also inside one job, so not a
+cross-node effect). Cause (`nv4-planted-diag-23ee04`): the fit resumed from
+the truth payload, and `load_payload` set the model's pair EQ to the TRUTH's;
+`bench_v4.payload` then wrote the EQ measured on the planted data
+(`rig.eq_all`), up to 3.2 dB different. Loading the truth's EQ with the same
+parameters reproduces −166,174,609.7 exactly. Fix (`5c13fc73`): the payload
+writes the EQ the model computed with; the planted `.fit.json` is repaired
+(truth EQ, `mic_response.repair` records it). On real data the two EQs are
+the same measurement, so the bench chain c1–c7 is unaffected (its reload
+reproduced the objective exactly). Caveat for the twin: it used the truth's
+pair EQ (an oracle constant), not one measured on the planted data. The
+recovery checks above are unchanged (they read the fitted model, not the
+payload). Escape on the repaired twin (`nv4-planted-escape-61cfde`, kaggle,
+500 min): the reload reproduces −166,174,609.7, so the fix holds. Four rounds
+lower the objective by 4,713.9 nats to −166,179,323.0 (negative directions
+57 → 32 → 12 → 8; min eigenvalue −0.53). The deadline stopped round 4 before
+its line search, so the twin is not yet at a minimum and η did not run. The
+continuation (`nv4-planted-escape2-c75cd0`, reused Hessian, 480 min) ran
+five more rounds to −166,179,350.7 (`…r1.fit__c2.json`). Negative directions
+8 → 4 → 8 → 6 → 6, min eigenvalue −0.53 → −0.31. They are all pedestal
+amplitude, width and share coordinates (`u_amp`, `u_W`, `u_s2P`). The round
+gains are 1.17, 0.10, 0.08 and 0.04 nats. On 15.3 M cells that is 8e-8 to
+3e-9 per cell, under the convergence tolerance. The strict minimum rule
+(no direction lowers the objective at any step) is never met, so η on the
+twin is not reported yet.
+
+**MD2 flight.** The converged joint fit (`md2_fly125__flight_v4__s0__r5c1`)
+scored standby PIT 27.8 and parity ratio 3.57, so the per-regime fallback
+applies. Two changes of procedure and prior: the phase pedestal is fitted per
+order (`--free-phase-pedestal`; the held median filled the cruise valleys 10 dB
+too high), and $\lvert\alpha^m\rvert \le 4$ (per-regime pools pushed it to
+−40.8 / +17.5). Per-order pedestal groups move by the median over orders in
+the convergence test. Converged pair: standby `…_standby_fpb__flight_v4__s0__r6c1`
+(17 passes), cruise `…_cruise_fpb__flight_v4__s0__r6c3`
+(`nv4-md2-cruise-fpg4-caa813`). Scores (`nv4-score-md2-r6c3-449bbb`):
+
+| | v4 pair | nv3r4 |
+|---|---|---|
+| parity ratio | **0.481** | 0.515 |
+| PIT standby / ramp / cruise | 0.359 / 3.309 / 0.700 | 0.369 / 3.604 / 0.701 |
+| cruise LTAS | 1.516 dB | 1.541 dB |
+| Listen LTAS, seed 0 | 0.97 dB | 0.95 dB |
+| Listen LTAS, seeds 0–5 | 0.987 ± 0.054 | 0.975 ± 0.029 |
+
+The Listen band errors are the same for both models (FLY125 fit, FLY124 clip);
+accepted as on par (Dmitrii, 2026-10-23).
+
+**DREGON flight stage** (procedure C of the spec). Scores against nv3r4's
+PIT 1.680 / LTAS 2.384:
+
+| stage | PIT | LTAS | job |
+|---|---|---|---|
+| no gains (bench κ = 0) | 15.8 | 2.384 | |
+| + gain per mic | 19.57 | 2.47 | `nv4-score-mgnl-k0-ccc534` |
+| + gain per rotor (bench κ = 10) | 61.24 | 2.60 | `nv4-score-lg-k10-ba7b42` |
+| + gain per rotor and mic | 66.36 | 2.85 | `nv4-score-mg-k0-4f5cf2` |
+| + coherence free (40 passes, not converged) | 29.4 | 3.20 | |
+| probe: shaft ε 0.02 / 0.05 (no refit) | 21.7 / 43.1 | 2.33 / 2.31 | |
+
+Local scorer probes (hovering and spinning windows): the scorer reads
+absolute CQT dB; the scoring windows are 2–6 dB louder above 120 Hz than the
+fit segments; v4 matches the fit segments, nv3r4 sits 3.5–4.5 dB above them on
+mic 2. Lines +3 dB or floor −6 dB bring every mic back (2.01 / 2.16), still
+above nv3r4 (1.43 / 1.61); with the four rotors' profiles averaged it is 8.3 /
+10.3. Details and the comparison: `docs/explainers/noise-model-v4-dregon-gap.qmd`
+§ 5–6.
+
+**C-wind: the wind as a separate gusty term (2026-10-23).** Real DREGON
+wind is gusty and independent per capsule: on the five scoring windows the
+20–400 Hz level between the lines has an sd of 2.9–3.4 dB over 128 ms frames
+(cross-mic correlation 0.07–0.24); the static wind of v4 and nv3r4 gives
+1.3–1.5 dB (only the scatter of a steady noise). New wind kind `sc` (code
+`bd6c7596`): per capsule one SC generator draw (`wind_sc.py`, speed
+`offset + scale · Weibull(2)`, `rate` knots per second), level per mic by
+Whittle with lines and floor frozen, gust law by simulated moments of
+`floor_envelope` after a regression on the 1–4 kHz level (grid 5 × 5 × 5,
+4 seeds, job `nv4-cwind-grid-e2ddae`, 11 min on uni-cpu). Chosen: offset 2,
+scale 0.5 m/s, rate 2 Hz; renderer check 0.30 dB (tol 1). Payload
+`results/noise_v4/flight/wind/…__scwind.json`. One gust law for all mics
+under-reads the gust sd on mics 1, 2, 5, 6 (1.9–2.9 against 4.2–5.2 dB).
+Full scorer (`nv4-score-cwind-4955be`, seeds 2001–2004): **PIT 9.62**
+(k0 15.8, bar 1.680), **LTAS 1.952** (bar 2.384), **Listen 2.39** (bar
+3.08). The gust wind beats nv3r4 on both spectral measures and fails PIT.
+
+Local HPPNet probes (render seed 2001, all five windows, mean of 8 mics; bar
+1.680; scripts `/tmp/hpp_gust_v3.py`, `hpp_odd.py`, `hpp_swap.py`, not kept):
+
+| arm | HPPNet |
+|---|---|
+| real | 1.22 |
+| nv3r4 (static wind) | 1.67 |
+| nv3r4, static wind → SC gusts (default law, 3 / 8 knots), same band power | 1.73 / 1.80 |
+| v4 k0 (static wind) | 17.57 |
+| v4 k0, static wind → SC gusts, 8 knots, same band power | 2.30 |
+| v4 C-wind (fitted gust law) | 15.57 |
+| v4 k0 + gusts (8 knots), odd orders 3 / 5 / 7 raised by 10 / 14 / 7 dB | 7.27 |
+| v4 k0 + gusts (8 knots), all lines +3 dB | 2.21 |
+| v4 lines + nv3r4 floor and wind | 15.02 |
+| nv3r4 lines + v4 floor + gusts (8 knots) | 2.03 |
+
+Reading: the default SC law (gust sd 5.9 dB, twice the real one) hides the
+gap; the fitted law does not. The weak odd orders and the motor family are
+not the cause (raising or removing them makes it worse). The fragile part is
+the v4 line set: nv3r4's lines survive v4's background, v4's lines do not
+survive nv3r4's; the failures are whole rotors lost on single mics (mics 0
+and 4 under C-wind), which points at the bench per-(rotor, mic) line balance
+[INFERENCE].
+
+**Speed-law search (2026-10-23).** A direct Sobol search (256 + 128 points)
+over the line level $g_a$ and exponent $\alpha_a$, the motor level and
+exponent, the floor level $g_f$ and $b_0$, on the C-wind payload, scored by
+HPPNet PIT and the scorer LTAS on the five 8 s tuning segments (never the
+scoring windows); code `e61f289d`, job `nv4-lawsearch-5f4381`, table
+`results/noise_v4/flight/lawsearch/…__laws.table.json`. Tuning references:
+real PIT 0.93; nv3r4 PIT 1.54, LTAS 1.72; C-wind PIT 5.57, LTAS 1.86. No
+point beats nv3r4 on PIT; best overall 1.79 (LTAS 3.54), best with LTAS ≤
+nv3r4 1.81 (LTAS 1.56; $g_a$ +2.2, $g_f$ −5.2 dB). Main effects: $g_a$
+moves PIT by 14.6 rev/s and $g_f$ by 7.0; every exponent by ≤ 1.3 (noise).
+The in-flight speed laws are not what is missing; the line-to-floor ratio is,
+and it saturates at PIT ≈ 1.8.
+Point A on the official scorer (held-out windows, `nv4-score-lawsa-1c2691`):
+PIT 3.03 (C-wind 9.62, bar 1.680), LTAS 2.61 (C-wind 1.95, bar 2.384),
+Listen 3.23 (C-wind 2.39, bar 3.08). The tuning gain transfers only in part
+(PIT 1.81 on the tuning segments) and costs both spectral measures.
+
+**Similarity battery (2026-10-23).** `experiments/noise_model/similarity.py`,
+report `results/noise_v4/similarity/report.md` (render seed 2001, 8 mics;
+noise floor = a real window's first half against its second half). On the
+tuning segments: Itakura–Saito real‖arm nv3r4 0.170 (floor 0.175), C-wind
+0.231, law point A 0.289, B 0.413; order prominence |Δ| nv3r4 0.71, C-wind
+0.91 (floor 0.97); frame-level distribution shape (W1 centred) C-wind 0.94,
+nv3r4 1.26 (floor 0.60); modulation spectrum C-wind 5.7, nv3r4 7.0 dB (floor
+4.6); level sd still 1.0 dB too small for C-wind, 1.5 for nv3r4. Reading:
+C-wind is closer than nv3r4 in time structure and per-mic spread, nv3r4 is
+closer in line and order structure; the PIT-best law point B (+6 dB lines) is
+the least realistic spectrally, so PIT alone rewards over-prominent lines. On
+the 4 s scoring windows the half-split floor is large (LTAS 3.6) because the
+real windows drift in level inside 4 s, and every model is 1.6–3.7 dB quieter
+than real there (the level gap).
+
+*Correction and time-aware measures (`f6ab4cf9`).* The half-split floor is
+invalid (the halves run on different speed trajectories, so lines are
+misplaced, and the level drifts); it is replaced by a seed floor (seed 2001
+vs 2002 of the same payload on the same trajectory). The linear-bin IS is
+time-blind and 65–72 % from 2–8 kHz; v4's IS deficit is all in 4–8 kHz
+(0.25 vs 0.15 per bin), while v4 is closer than nv3r4 at 62–250 Hz. Frame
+third-octave Fréchet distance (tuning; seed floors 9–14 dB²): nv3r4 362
+(mean term 241, covariance 121), C-wind 308 (247, 61); scoring windows:
+543 vs 466. Cross-band co-modulation (mean off-diagonal r of frame levels):
+real 0.241 (scoring 0.444), nv3r4 0.067 (0.119), static v4 0.019 (0.039),
+C-wind 0.124 (0.153). Time-aware measures favour C-wind; it carries half of
+the real broadband co-modulation, nv3r4 a quarter.
+
+**Alternating flight fit (2026-10-23/24).** Wide pool `dregon-flight-wide`
+(18 windows, 144 s, the five tuning segments first), source the c7-lines C-wind
+payload. Gate on the tuning segments: PIT ≤ 1.54 and every battery measure no
+worse than nv3r4. Round 1, lines k ≤ 30 with ε free (`nv4-lines-r1-f076f0`,
+not converged in 20 passes): ε 0.00145 → 0.049 (σ_ref 24.6 rad/s), PIT 8.78;
+the same payload with the bench ε restored gives 1.84. ε absorbs the 0.5–0.7 Hz
+label error and smears the high orders. Fix (`daae59f7`, `--hold-eps`): ε held
+at the bench value, only k ≤ 10 free (a 0.7 Hz label error moves k = 10 by
+7 Hz, inside one 7.8 Hz bin). Results (render seed 2001; tuning segments):
+
+|Stage|Job|Converged|PIT|LTAS|Line / floor Δ (dB)|IS oct.|Fréchet (mean, cov)|Off-diag r (real 0.241)|
+|---|---|---|---|---|---|---|---|---|
+|nv3r4|—|—|1.54|1.72|+0.8 / +0.7|0.240|362 (241, 121)|0.067|
+|R1 lines k ≤ 10|`nv4-lines-k10-a27434` + `c1-480a90`|yes (80 passes, 9e-8/cell)|2.18|2.60|+2.6 / +3.1|0.348|439 (383, 56)|0.153|
+|Gust search|`nv4-gust-r1-7fa8a6`|175/175 points|1.97|2.40|+2.5 / +2.4|0.337|324 (260, 64)|0.240|
+|R2 lines k ≤ 10|`nv4-lines-r2-608b60`|yes (30 passes, 1.4e-7/cell)|1.92|2.35|+2.4 / +2.5|0.327|311 (250, 61)|0.234|
+
+Gust search: battery objective (sum of measure / seed-floor ratios) 113 → 92;
+chosen law offset 2 m/s, scale 1 m/s, rate 8 Hz (rate on the grid edge, but the
+objective is flat in rate: 91.7 / 93.5 / 94.1 at 8 / 4 / 2 Hz). R2 payload
+`results/noise_v4/flight/lines_r2/…__c1__gust__wide__lines.json`. On the scoring
+windows (report only) R1 was closer than nv3r4 on every spectral measure (LTAS
+1.72 vs 2.38, IS 0.40 vs 1.55, Fréchet 312 vs 543). Reading: the gate fails
+at the round cap (2). R2 beats nv3r4 on time structure (Fréchet, covariance
+term, co-modulation close to real), but is 2.4 dB too loud on the tuning
+segments and 0.9–1.2 dB too quiet on the scoring windows. One shared level law
+cannot fit both window sets. It fits the mean of the 18 windows [INFERENCE].
+
+*Second tracker (2026-10-24).* The same arms under HRSPNet
+`rp_pyrseplstm_k64_alllab` (`best_real_median`, rp-protocol grid 0–159 rev/s,
+164 bins; `scripts/noise_v4_pit_probe.py`, `e1f211e5`), tuning segments, seed
+2001, mean PIT (rev/s): real 0.67, nv3r4 0.98, C-wind 1.67, R1 k ≤ 30 13.58
+(bench ε restored: 1.71), R1 k ≤ 10 1.69, gust search 1.63, R2 1.63. HPPNet
+on the same arms: real 0.93, nv3r4 1.54, C-wind 5.57, R2 1.92. The ranking
+holds (nv3r4 is better than every v4 arm under both trackers), but the
+C-wind collapse is HPPNet-specific (5.57 vs 1.67), and the alternating fit
+changes HRSPNet PIT little (1.67 → 1.63).
+Official scoring windows (report only; 4 s, seeds 2001–2004, job
+`nv4-pit-trackers3-804ecd`, `results/noise_v4/pit_probe/scored_*.json`; the
+HPPNet column reproduces the official nv3r4 1.680 and C-wind 9.62 exactly):
+
+|Arm|HPPNet (bar 1.680)|HRSPNet k64|
+|---|---|---|
+|real|1.219|0.956|
+|nv3r4|1.680|1.105|
+|C-wind|9.618|1.926|
+|R1 lines k ≤ 10|2.996|2.202|
+|gust search|2.321|1.885|
+|R2 lines k ≤ 10|2.239|1.861|
+
+Under HRSPNet, nv3r4 is 0.15 rev/s from real and R2 0.91; the v4 gap is not
+a property of HPPNet alone.
+
+*Trim search on R2 (2026-10-24; Dmitrii: "adjust the floor and lines a
+little until the gate is passed, at the smallest loss of spectral
+similarity").* Gate: tuning PIT below nv3r4's 1.541. Selection: the
+lowest mic-0 LTAS error. Law-search composition with an order-1 gain
+`g_a1` (`2c9dba52`). Box: `g_a` −3…9, `g_a1` −3…9, `g_f` −9…3 dB. 256 + 128
+Sobol points, job `nv4-trim-r2-dae303`, table `results/noise_v4/flight/trim/`.
+Result: no feasible point. PIT floors at 1.635 near `g_a` +5…7, `g_a1`
++7…9, `g_f` −5…−7 dB (LTAS 2.8–4.5 there, against 2.36 for R2).
+Direct-render probes at the trim (seed 2001, tuning, HPPNet):
+
+|Change at the trim|Mean PIT|
+|---|---|
+|none|1.637|
+|wind −10 dB|1.658|
+|ε × 0.3|1.661|
+|motor lines off|1.632|
+|orders ≥ 11 −4 / +4 / +8 dB|1.655 / 1.644 / 1.987|
+|orders ≥ 11 off|2.098|
+|bench pedestal for k ≤ 10|1.684 (R2 untrimmed: 1.92 → 1.81)|
+
+The R2 refit moved the k ≤ 10 pedestals far from the bench: σ²_φ for k = 1
+went from 0.001 to 1.2 (8.8 Hz wide), and for k = 6–10 to the cap 3 at
+24 Hz. The label error enters through the pedestal when ε is held. No
+global level, width or wind change passes 1.635. Orders ≥ 11 carry
+tracker information (off: +0.46). Their per-rotor pattern differs from
+nv3r4's flight-fitted one (per-order rotor-pattern correlation −0.96…0.99).
+Per-rotor line gains (`9d8f96c2`, job `nv4-trim-rotors-62814f`; box `g_a`
+3…9, `g_a1` 3…11, `g_r1..4` −6…6, `g_f` −9…−3 dB; 512 + 256 points): 204
+of 768 points pass the PIT gate (best 1.423). The chosen point, the lowest
+mic-0 LTAS among them (`results/noise_v4/flight/trim_rotors/…__laws.json`),
+has `g_a` +5.0, `g_a1` +7.5, rotor gains −4.9 / −4.8 / −3.1 / 0.0, `g_f`
+−8.4 dB, which nets rotor lines +0.1 / +0.2 / +1.9 / +5.0 dB. Main effect:
+`g_r4` (PIT spread 0.32). Tuning: PIT 1.516 (bar 1.541), mic-0 LTAS 1.50
+(nv3r4 1.72), so the tuning gate passes. But the all-mic battery is much
+worse than R2: Fréchet 741 vs 311 dB², IS octave-balanced 0.51 vs 0.33,
+line Δ +3.3 dB, k = 1–2 peak error 5.8 vs 2.6 dB. Held-out windows
+(`nv4-score-trim-1d6809`, `nv4-pit-trim-dddfd2`): HPPNet PIT 1.808 (bar
+1.680; R2 2.239), LTAS 3.061 (bar 2.384), HRSPNet 1.617 (nv3r4 1.105).
+Listen did not run because the render clips (peak 1.38). Reading: the
+gate on five segments does not transfer, and mic-0 LTAS is a weak stand-in
+for spectral similarity.
+
 ## Conclusion
+
+- **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
+  κ = 0 (no κ passes the planted 1 dB floor rule).
+- **η (step 3).** 0.00152 (200 Hz blocks) to 0.00132 (per recording) on the
+  final fit.
+- **MD2 flight.** The converged per-regime pair beats nv3r4 on parity
+  (0.481 vs 0.515) and on every regime and cruise LTAS; Listen is on par
+  within render-seed noise.
+- **DREGON flight.** Not reached: every converged stage on the frozen bench
+  lines fails the PIT bar (best 15.8 vs 1.680; LTAS 2.384 equal).

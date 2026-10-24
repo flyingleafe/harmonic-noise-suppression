@@ -25,6 +25,9 @@ definition of each law:
   flight geometric term ``Delta G_rm``) and the part shared by them
   (:meth:`~MicResponse.array_db`: the flight array response ``A_m(f)``, zero on
   the bench);
+* :class:`Wind` — the flight per-mic wind block (:data:`WIND_KINDS`): the
+  static Gaussian wind of v3 (``static_per_mic``) or the SC gust generator per
+  capsule (``sc``, :class:`ScGust`), both as ``10^{L_m/10} shape(f)``;
 * :func:`line_lag_law` — eq-lag; :func:`expected_periodogram` — the
   Hann-window expected periodogram of a CONSTANT-speed render.
 
@@ -61,10 +64,14 @@ __all__ = [
     "FLOOR_RULES",
     "WORK_RATE_HZ",
     "FloorLaw",
-    "MicResponse",
-    "Pedestal",
     "ShaftLaw",
+    "ScGust",
     "V4Params",
+    "WIND_KINDS",
+    "WIND_REF_BAND_HZ",
+    "WIND_SC",
+    "WIND_STATIC",
+    "Wind",
     "expected_periodogram",
     "hann_window",
     "line_lag_law",
@@ -87,6 +94,23 @@ FLOOR_EXP_REF_HZ = 2000.0
 FLOOR_RULE_SUM = "per_rotor_sum"
 FLOOR_RULE_ONE = "one_floor_mean_speed"
 FLOOR_RULES = (FLOOR_RULE_SUM, FLOOR_RULE_ONE)
+
+#: The flight wind kinds (payload ``params.wind.kind``; a block without one is
+#: ``static_per_mic``). ``static_per_mic`` (the flight stage's, v3's block):
+#: stationary Gaussian noise per mic of PSD ``10^{w_m/10} wind_shape(f)``.
+#: ``sc`` (the wind stage, :mod:`experiments.noise_model.dregon_wind_v4`): per
+#: capsule an INDEPENDENT draw of the SC gust generator
+#: (:func:`.wind_sc.wind_noise`: Weibull knots ``offset + scale Weibull(2)`` at
+#: ``gust_rate_hz``, 8 dB per m/s long-term gain, GARCH envelope, speed LPC),
+#: scaled so its expected PSD is ``10^{L_m/10} shape.psd(f)``. Both add to the
+#: channel before the array response.
+WIND_STATIC = "static_per_mic"
+WIND_SC = "sc"
+WIND_KINDS = (WIND_STATIC, WIND_SC)
+#: The ``sc`` level's band: ``shape.psd`` has mean one over it, so ``level_db``
+#: is 10 log10 of the capsule's mean wind PSD over 20-100 Hz (the static
+#: shape's flat part, where ``wind_db`` reads the same).
+WIND_REF_BAND_HZ = (20.0, 100.0)
 
 TWO_PI = 2.0 * math.pi
 
@@ -290,6 +314,88 @@ class MicResponse:
 
 
 @dataclass(frozen=True)
+class ScGust:
+    """The ``sc`` wind's gust law and its long-run mean shape.
+
+    ``psd`` on ``freqs_hz`` is the mean periodogram of the UNIT-RMS generator
+    output at this law (a Monte-Carlo over clips of ``clip_s``), divided by
+    ``unit_psd_ref``, its mean over ``ref_band_hz``. So a unit-RMS draw times
+    ``sqrt(10^{L/10} / unit_psd_ref)`` has expected PSD ``10^{L/10} psd(f)``
+    (:meth:`gain`, the renderer's calibration)."""
+
+    speed_offset_ms: float
+    speed_scale_ms: float
+    gust_rate_hz: float
+    freqs_hz: np.ndarray
+    psd: np.ndarray
+    ref_band_hz: tuple[float, float]
+    unit_psd_ref: float
+
+    @classmethod
+    def from_mapping(cls, d: Mapping[str, Any]) -> ScGust:
+        shape = d["shape"]
+        f = _arr(shape["freqs_hz"], 1, "wind.shape.freqs_hz")
+        psd = _arr(shape["psd"], 1, "wind.shape.psd")
+        if psd.size != f.size or np.any(np.diff(f) <= 0.0) or np.any(psd < 0.0):
+            raise ValueError("wind.shape.psd must be non-negative on increasing freqs_hz")
+        ref = tuple(float(x) for x in shape.get("ref_band_hz", WIND_REF_BAND_HZ))
+        unit = float(shape["unit_psd_ref"])
+        if not (unit > 0.0 and math.isfinite(unit)):
+            raise ValueError(f"wind.shape.unit_psd_ref must be positive, got {unit}")
+        law = (float(d["speed_offset_ms"]), float(d["speed_scale_ms"]), float(d["gust_rate_hz"]))
+        if law[1] < 0.0 or law[2] <= 0.0:
+            raise ValueError(f"wind speed_scale_ms must be >= 0 and gust_rate_hz > 0, got {law}")
+        return cls(*law, freqs_hz=f, psd=psd, ref_band_hz=(ref[0], ref[1]), unit_psd_ref=unit)
+
+    def shape(self, freqs_hz: Any) -> np.ndarray:
+        """``psd`` interpolated linearly at ``|f|``, held at its first value below
+        the grid and zero above it."""
+        f = np.abs(np.asarray(freqs_hz, dtype=np.float64))
+        return np.interp(f, self.freqs_hz, self.psd, right=0.0)
+
+    def gain(self, level_db: float) -> float:
+        """The amplitude factor on a unit-RMS draw: ``sqrt(10^{L/10} / unit_psd_ref)``."""
+        return math.sqrt(10.0 ** (float(level_db) / 10.0) / self.unit_psd_ref)
+
+
+@dataclass(frozen=True)
+class Wind:
+    """The flight per-mic wind block of either kind (:data:`WIND_KINDS`):
+    ``(M,)`` levels ``level_db`` (``static_per_mic``: v3's ``wind_db``, the flat
+    part of :func:`.v3.wind_shape`; ``sc``: the 20-100 Hz mean) times the
+    kind's shape, :meth:`psd`; ``gust`` is the ``sc`` law (``None`` when static)."""
+
+    kind: str
+    level_db: np.ndarray
+    gust: ScGust | None = None
+
+    @classmethod
+    def from_mapping(cls, d: Mapping[str, Any], n_mics: int) -> Wind:
+        kind = str(d.get("kind") or WIND_STATIC)
+        if kind == WIND_STATIC:
+            level, key, gust = d["wind_db"], "wind_db", None
+        elif kind == WIND_SC:
+            level, key, gust = d["level_db"], "level_db", ScGust.from_mapping(d)
+        else:
+            raise ValueError(f"wind.kind must be one of {WIND_KINDS}, got {kind!r}")
+        level_db = _arr(level, 1, f"wind.{key}")
+        if level_db.size != n_mics:
+            raise ValueError(f"wind.{key} must carry {n_mics} levels, got {level_db.size}")
+        return cls(kind, level_db, gust)
+
+    def shape(self, freqs_hz: Any) -> np.ndarray:
+        """``(F,)`` the kind's power shape: :func:`.v3.wind_shape` or ``gust.shape``."""
+        if self.gust is None:
+            return wind_shape(freqs_hz)
+        return self.gust.shape(freqs_hz)
+
+    def psd(self, freqs_hz: Any) -> np.ndarray:
+        """``(M, F)`` ``10^{L_m/10} shape(f)``, the model's periodogram units,
+        before the array response."""
+        return 10.0 ** (self.level_db[:, None] / 10.0) * self.shape(freqs_hz)[None, :]
+
+
+@dataclass(frozen=True)
 class V4Params:
     """Everything the renderer reads out of a ``noise-v4-fit/3`` payload."""
 
@@ -310,9 +416,9 @@ class V4Params:
     shaft: ShaftLaw
     floor: FloorLaw
     mic: MicResponse
-    #: ``(M,)`` the flight static per-mic wind block (DREGON, v3's ``wind_db``)
-    #: or ``None``. A bench payload's wind is per RECORDING and is not a rig term.
-    wind_db: np.ndarray | None
+    #: The flight wind block (:class:`Wind`, either kind) or ``None``. A bench
+    #: payload's wind is per RECORDING and is not a rig term.
+    wind: Wind | None
 
     @classmethod
     def from_payload(cls, fit: Mapping[str, Any]) -> V4Params:
@@ -339,12 +445,10 @@ class V4Params:
             )
         if np.any(orders < 1):
             raise ValueError(f"motor_orders must be positive orders, got {orders.tolist()}")
-        wind_db = None
         wind = p.get("wind")
-        if fit.get("kind") == "flight" and wind is not None:
-            wind_db = _arr(wind["wind_db"], 1, "wind.wind_db")
-            if wind_db.size != M:
-                raise ValueError(f"wind.wind_db must carry {M} levels, got {wind_db.size}")
+        flight_wind = (
+            Wind.from_mapping(wind, M) if fit.get("kind") == "flight" and wind is not None else None
+        )
         return cls(
             kind=str(fit.get("kind")),
             n_rotors=R,
@@ -363,7 +467,7 @@ class V4Params:
             shaft=ShaftLaw.from_mapping(p["shaft"], f_ref),
             floor=FloorLaw.from_mapping(p["floor"], band[0]),
             mic=MicResponse.from_mapping(p["mic_response"], R, M),
-            wind_db=wind_db,
+            wind=flight_wind,
         )
 
     @property
@@ -445,8 +549,9 @@ def expected_periodogram(
     * the floor ``F(f) [sum_r 10^{E_rm(f)/10} s_r^{b(f)} + 10^{A_m(f)/10} s]``
       (rule ``per_rotor_sum``) or ``F(f) 10^{A_m(f)/10} [sbar^{b(f)} + s]``,
       ``sbar = mean_r s_r`` (rule ``one_floor_mean_speed``), ``s`` the static
-      share, and, in flight, the static per-mic wind
-      ``10^{w_m/10} wind_shape(f) 10^{A_m(f)/10}``, transformed from a PSD
+      share, and, in flight, the wind block's ``10^{L_m/10} shape(f)
+      10^{A_m(f)/10}`` (:meth:`Wind.psd`: the static ``wind_shape`` or the
+      ``sc`` gust law's measured mean shape), transformed from a PSD
       grid ``floor_oversample`` times finer than the window.
 
     The render chain's anti-alias/decimator transfer is NOT applied: it is one
@@ -502,8 +607,8 @@ def expected_periodogram(
         rotor = par.floor.rotor_psd(f_psd, s)  # (R, F)
         psd = np.einsum("rmf,rf->mf", 10.0 ** (par.mic.db(f_psd) / 10.0), rotor)
     psd += par.floor.psd(f_psd)[None, :] * par.floor.static_rel * array_lin
-    if par.wind_db is not None:
-        psd += 10.0 ** (par.wind_db[:, None] / 10.0) * wind_shape(f_psd)[None, :] * array_lin
+    if par.wind is not None:
+        psd += par.wind.psd(f_psd) * array_lin
     c += np.fft.irfft(psd, n=n_psd, axis=1)[:, :n]
     q = c * (ww / float(np.sum(w**2)))[None, :]
     # the even sequence q(|tau|), |tau| < n, read at f_j = j sr / n off one

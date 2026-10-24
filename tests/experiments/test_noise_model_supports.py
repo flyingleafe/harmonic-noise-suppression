@@ -271,6 +271,7 @@ class TestSpecsAndCache:
             "michaels-all": 10,
             "michaels-standby": 3,
             "dregon-floor": 10,
+            "dregon-flight-wide": 18,
         }
         # the floor segments never touch the five frozen scoring windows
         floor = S.support_set("dregon-floor")
@@ -297,6 +298,55 @@ class TestSpecsAndCache:
         )
         assert len(starts) == 8
         assert all(b - a >= 8.0 for a, b in zip(starts, starts[1:]))
+
+    def test_the_wide_pool_never_touches_a_scored_window(self):
+        """``dregon-flight-wide``: 8 s windows of the five scored recordings,
+        disjoint per recording, none overlapping ``[scored - 2 s, scored + 4 s +
+        2 s]``; the five ``dregon-floor`` 8 s segments are its first rows."""
+        wide = S.support_set("dregon-flight-wide")
+        scored = dict(S.DREGON_SCORED)
+        assert {s.args["dur_s"] for s in wide} == {S.DREGON_FLOOR_DUR_S}
+        assert {s.args["rps_key"] for s in wide} == {"motors_command"}
+        for spec in wide:
+            t0, t1 = spec.args["start_s"], spec.args["start_s"] + spec.args["dur_s"]
+            lo = scored[spec.args["recording"]] - S.DREGON_FLOOR_GUARD_S
+            hi = scored[spec.args["recording"]] + S.DREGON_SCORED_DUR_S + S.DREGON_FLOOR_GUARD_S
+            assert t1 <= lo + 1e-9 or t0 >= hi - 1e-9, spec.name
+        for rec in scored:
+            starts = sorted(s.args["start_s"] for s in wide if s.args["recording"] == rec)
+            assert all(b - a >= S.DREGON_FLOOR_DUR_S - 1e-9 for a, b in zip(starts, starts[1:]))
+        floor = [s for s in S.support_set("dregon-floor") if s.args["dur_s"] == 8.0]
+        assert wide[: len(floor)] == floor
+
+    def test_the_wide_rule_keeps_cruise_windows_clear_of_the_guard(self):
+        """The rule on a planted label: the grid is anchored on the floor
+        segment, a window ending exactly at ``scored - guard`` is kept, one
+        inside the guard, one with a rotor under 50 rev/s and one past the
+        label's coverage are not."""
+        from experiments.stochastic_fit import clips as C
+
+        t_start, sr, scored = 1000.0, 10.0, 1010.0  # floor segment at 1016
+        t = t_start + np.arange(0.0, 60.0, 0.05)
+        rps = np.full((4, t.size), 70.0)
+        rps[2, (t >= 1035.0) & (t < 1035.5)] = 45.0  # inside j = 2: [1032, 1040)
+        rps[1, (t >= 1050.0) & (t < 1051.0)] = 40.0  # inside j = 4: [1048, 1056)
+        rec = C.Recording(
+            dataset="planted",
+            version=None,
+            recording_id="planted",
+            group="planted",
+            audio=np.zeros((1, int(60.0 * sr)), dtype=np.float32),
+            sr=sr,
+            t_start=t_start,
+            rps=rps,
+            rps_t=t,
+            rps_key="motors_command",
+            meta={},
+        )
+        # j = -2 [1000, 1008) touches the guard start 1008; j = -1 is inside it;
+        # j = 2 has the 45 rev/s dip, j = 4 the 40 rev/s one; j = 5 [1056, 1064)
+        # leaves the 60 s label
+        assert S.dregon_wide_offsets(rec, scored) == (-16.0, 0.0, 8.0, 24.0)
 
     def test_the_standby_pool_is_disjoint_and_inside_the_standby_band(self):
         """Every ``michaels-standby`` window keeps all four rotors inside

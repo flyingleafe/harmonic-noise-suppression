@@ -24,9 +24,10 @@ WHAT LIVES HERE, and what does not:
   ``noise-v3-fit/1`` payload with them.
 * :mod:`.v4` — the reader of a ``noise-v4-fit/3`` payload
   (``docs/explainers/noise-model-v4.qmd``): line powers, pedestal, shaft law,
-  per-rotor floor, microphone response, and the constant-speed expected
-  periodogram of a render. :func:`.render.render_noise` draws v4 payloads
-  through it.
+  per-rotor floor, microphone response, the flight wind block (static
+  Gaussian, or the SC gust generator of :mod:`.wind_sc` per capsule), and the
+  constant-speed expected periodogram of a render. :func:`.render.render_noise`
+  draws v4 payloads through it.
 * NOT here: the Pyro model, the MAP fit, the supports, the moving-frame
   expected-periodogram forward model. Those stay in
   :mod:`experiments.noise_model`; nothing a training stream does needs them.

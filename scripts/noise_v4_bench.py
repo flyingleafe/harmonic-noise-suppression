@@ -6,13 +6,21 @@ recordings, its restarts and the planted check::
     python scripts/noise_v4_bench.py reduce
     python scripts/noise_v4_bench.py planted --truth <payload.json> --kappa K --device cuda
     python scripts/noise_v4_bench.py refit --from <payload.json> --flat-shaft --device cuda
+    python scripts/noise_v4_bench.py resume --from <payload.json> --device cuda
+    python scripts/noise_v4_bench.py eta --fit <payload.json> --device cuda
+    python scripts/noise_v4_bench.py escape --from <payload.json> --device cuda \\
+        [--hessian <payload>.hessian.npz] [--planted planted/<stem>.json]
 
 Outputs under ``--out`` (default ``results/noise_v4/bench``): ``restarts/`` one
 ``noise-v4-fit/3`` payload per restart; ``raw/`` the gridrun unit records;
 ``fits/<name>.json`` the selected restart (lowest objective) with the restart
 spread per parameter group; ``planted/<name>.json`` the recovery report;
 ``restarts/<source>__flat.json`` + ``refit/<source>__flat.json`` the nested
-flat-shaft refit (one ``(sigma_nu, lam)`` for every speed) and its comparison.
+flat-shaft refit (one ``(sigma_nu, lam)`` for every speed) and its comparison;
+``restarts/<source>__c<n+1>.json`` a continuation (``resume``, ``escape``; an
+``escape`` also writes ``<continuation>.hessian.npz``, its exact state and last
+Hessian, which ``--hessian`` resumes from);
+``eta/<fit>.json`` + ``.npz`` the likelihood weight and its Hessians.
 """
 
 from __future__ import annotations
@@ -22,6 +30,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 import warnings
 from pathlib import Path
 from typing import Any
@@ -79,6 +88,7 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
         lbfgs_iters=int(prm["lbfgs_iters"]),
         device=prm["device"],
         flat_shaft=bool(prm["flat_shaft"]),
+        deadline_s=60.0 * float(prm["deadline_min"]) if prm.get("deadline_min") else None,
     )
     pay = B.payload(model, rec, git=prm["git"])
     path = Path(prm["out"]) / "restarts" / f"{unit.uid}.json"
@@ -91,8 +101,9 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
         objective=rec["objective"],
         converged=rec["converged"],
         restart_gain_per_cell=rec["restart_gain_per_cell"],
-        restart_movement=rec["restart_pass"]["movement"],
-        release_gain_per_cell=rec["release_pass"]["gain_per_cell"],
+        restart_movement=rec["restart_movement"],
+        stop=rec["stop"],
+        n_convergence_passes=len(rec["convergence_passes"]),
         held_orders=rec["evidence"]["held_orders"],
         alpha_aero=pay["params"]["alpha_aero"],
         alpha_motor=pay["params"]["alpha_motor"],
@@ -119,6 +130,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
                 flat_shaft=bool(args.flat_shaft),
                 adam_steps=args.adam_steps,
                 lbfgs_iters=args.lbfgs_iters,
+                deadline_min=args.deadline_min,
                 device=args.device,
                 threads=args.threads,
                 out=str(args.out),
@@ -136,12 +148,21 @@ def cmd_reduce(args: argparse.Namespace) -> int:
 
     from experiments.noise_model import bench_v4 as B
 
-    groups: dict[str, list[dict[str, Any]]] = {}
+    # per restart (seed), its latest continuation ``__c<n>`` stands for it
+    latest: dict[str, dict[int, tuple[int, Path]]] = {}
     for p in sorted((args.out / "restarts").glob("*.json")):
-        pay = json.loads(p.read_text())
-        if pay.get("schema") != "noise-v4-fit/3":
+        m = re.fullmatch(r"(.*)__s(\d+)(?:__c(\d+))?", p.stem)
+        if m is None:
             continue
-        groups.setdefault(re.sub(r"__s\d+$", "", p.stem), []).append(dict(path=str(p), pay=pay))
+        name, seed, c = m.group(1), int(m.group(2)), int(m.group(3) or 0)
+        if c >= latest.setdefault(name, {}).get(seed, (-1, p))[0]:
+            latest[name][seed] = (c, p)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for name, by_seed in latest.items():
+        for _, p in sorted(by_seed.values(), key=lambda cp: str(cp[1])):
+            pay = json.loads(p.read_text())
+            if pay.get("schema") == "noise-v4-fit/3":
+                groups.setdefault(name, []).append(dict(path=str(p), pay=pay))
     (args.out / "fits").mkdir(parents=True, exist_ok=True)
     for name, items in groups.items():
         obj = np.array([it["pay"]["objective"]["total_nats"] for it in items])
@@ -157,7 +178,7 @@ def cmd_reduce(args: argparse.Namespace) -> int:
             objective=obj.tolist(),
             converged=[o["converged"] for o in opt],
             restart_gain_per_cell=[o["restart_gain_per_cell"] for o in opt],
-            release_gain_per_cell=[o["release_pass"]["gain_per_cell"] for o in opt],
+            stop=[o.get("stop") for o in opt],
             best_minus_median_per_cell=float((np.median(obj) - obj.min()) / n_cells),
             best_minus_worst_per_cell=float((obj.max() - obj.min()) / n_cells),
             spread=B.group_movement(lo, hi),
@@ -185,6 +206,44 @@ def _within(
     return dict(truth=truth, fit=fit, err=err, rel_err=err / truth if truth else None, ok=bool(ok))
 
 
+def _planted(
+    truth_path: str | Path,
+    *,
+    floor_below: float | None,
+    render_seed: int,
+    kappa: float,
+    device: str,
+) -> tuple[Any, Any, dict[str, Any] | None]:
+    """``(truth model, planted rig, floor patch)``: the truth payload, its floor
+    below ``floor_below`` Hz replaced by the measured inter-line floor (the
+    data-only initial control values), rendered with ``render_seed``."""
+    import numpy as np
+    import torch
+
+    from experiments.noise_model import bench_v4 as B
+
+    pay_t = json.loads(Path(truth_path).read_text())
+    real = _rig_of_payload(pay_t)
+    truth = B.RigModel(real, device=device, kappa=kappa)
+    truth.load_payload(pay_t)
+    floor_patch = None
+    if floor_below is not None:
+        ctrl_hz = np.asarray(truth.frozen[0].grid.floor.ctrl_hz, dtype=np.float64)
+        with torch.no_grad():
+            target = truth.cbar().cpu().numpy()
+        low = ctrl_hz < float(floor_below)
+        target[low] = np.asarray(real.init["floor_ctrl_db"])[low]
+        err = truth.set_floor_ctrl(target)
+        floor_patch = dict(
+            below_hz=float(floor_below),
+            ctrl_hz=ctrl_hz[low].tolist(),
+            ctrl_db=target[low].tolist(),
+            max_reproduction_err_db=err,
+        )
+    planted = B.render_planted(truth, seed=render_seed)
+    return truth, B.build_rig(real.motors, settings=planted), floor_patch
+
+
 def cmd_planted(args: argparse.Namespace) -> int:
     import numpy as np
     import torch
@@ -192,12 +251,14 @@ def cmd_planted(args: argparse.Namespace) -> int:
     from experiments.noise_model import bench_v4 as B
 
     torch.set_num_threads(args.threads)
-    pay_t = json.loads(Path(args.truth).read_text())
-    real = _rig_of_payload(pay_t)
-    truth = B.RigModel(real, device=args.device, kappa=args.kappa)
-    truth.load_payload(pay_t)
-    planted = B.render_planted(truth, seed=args.render_seed)
-    rig = B.build_rig(real.motors, settings=planted)
+    truth, rig, floor_patch = _planted(
+        args.truth,
+        floor_below=args.floor_data_below,
+        render_seed=args.render_seed,
+        kappa=args.kappa,
+        device=args.device,
+    )
+    start = json.loads(Path(args.resume_from).read_text()) if args.resume_from else None
     model, rec = B.fit_rig(
         rig,
         seed=args.seed,
@@ -205,9 +266,15 @@ def cmd_planted(args: argparse.Namespace) -> int:
         adam_steps=args.adam_steps,
         lbfgs_iters=args.lbfgs_iters,
         device=args.device,
+        start=start,
+        resume=start is not None,
+        deadline_s=60.0 * args.deadline_min,
     )
 
     def P(m: Any, name: str) -> np.ndarray:
+        if name in ("b0", "b1"):
+            with torch.no_grad():
+                return m.floor_exps()[int(name == "b1")].cpu().numpy()
         return m.params[name].detach().cpu().numpy()
 
     # line visibility on the planted data: per (rotor, order) the median over
@@ -269,6 +336,7 @@ def cmd_planted(args: argparse.Namespace) -> int:
     checks["all_ok"] = all(bool(v["ok"]) for v in checks.values() if isinstance(v, dict))
     out = dict(
         truth=str(args.truth),
+        floor_patch=floor_patch,
         kappa=args.kappa,
         render_seed=args.render_seed,
         seed=args.seed,
@@ -288,15 +356,205 @@ def cmd_planted(args: argparse.Namespace) -> int:
         wall_s=rec["wall_s"],
         git=_git(),
     )
-    path = (
-        args.out
-        / "planted"
-        / f"{Path(args.truth).stem}__kappa{args.kappa:g}__r{args.render_seed}.json"
+    stem = Path(args.truth).stem + (
+        f"__floor{args.floor_data_below:g}" if args.floor_data_below is not None else ""
     )
+    path = args.out / "planted" / f"{stem}__kappa{args.kappa:g}__r{args.render_seed}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=1))
     path.with_suffix(".fit.json").write_text(json.dumps(B.payload(model, rec, git=_git())))
+    # the exact final state (escape --hessian resumes from it): planted data
+    # re-rendered on another node score differently, so a planted chain runs in
+    # one job and must not depend on the payload's reload alone
+    from experiments.noise_model import bench_eta as E
+
+    np.savez(path.with_suffix(".fit.state.npz"), x=E.get_flat(model).cpu().numpy())
     print(json.dumps(out["checks"], indent=1))
+    return 0
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """A continuation: the convergence loop of :func:`bench_v4.fit_rig` from a
+    payload (no Adam, no evidence freeze), written as ``<stem>__c<n+1>``;
+    ``--kappa`` continues under another floor push (``__kappa<K>`` in the stem)."""
+    import torch
+
+    from experiments.noise_model import bench_v4 as B
+
+    torch.set_num_threads(args.threads)
+    src_path = Path(args.source)
+    src = json.loads(src_path.read_text())
+    rig = _rig_of_payload(src)
+    model, rec = B.fit_rig(
+        rig,
+        seed=int(src["optimiser"]["seed"]),
+        kappa=float(src["priors"]["floor_push_kappa"] if args.kappa is None else args.kappa),
+        lbfgs_iters=args.lbfgs_iters,
+        device=args.device,
+        flat_shaft=bool(src["params"]["shaft"]["pinned"]),
+        start=src,
+        resume=True,
+        deadline_s=60.0 * args.deadline_min,
+    )
+    pay = B.payload(model, rec, git=_git())
+    pay["optimiser"]["resumed_from"] = str(src_path)
+    path = _next_continuation(args.out, src_path, args.kappa)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(pay))
+    print(
+        f"wrote {path}: {rec['objective']:.1f} nats (from {rec['objective_start']:.1f}); "
+        f"converged {rec['converged']} ({rec['stop']}, {len(rec['convergence_passes'])} passes, "
+        f"last gain {rec['restart_gain_per_cell']})",
+        flush=True,
+    )
+    return 0
+
+
+def _next_continuation(out: Path, src_path: Path, kappa: float | None = None) -> Path:
+    """``restarts/<stem>__c<n+1>.json`` of a payload ``<stem>[__c<n>]``;
+    ``kappa`` replaces the stem's ``__kappa<K>``."""
+    m = re.fullmatch(r"(.*?)(?:__c(\d+))?", src_path.stem)
+    assert m is not None
+    stem = m.group(1)
+    if kappa is not None:
+        stem = re.sub(r"__kappa[^_]+", f"__kappa{kappa:g}", stem)
+    return out / "restarts" / f"{stem}__c{int(m.group(2) or 0) + 1}.json"
+
+
+def cmd_escape(args: argparse.Namespace) -> int:
+    """Leave a negative-curvature saddle before step 3
+    (:func:`bench_eta.saddle_escape`): rounds of the Hessian, a line search on
+    the MAP objective down every materially negative direction and the
+    convergence loop of :func:`bench_v4.fit_rig`; written as
+    ``<stem>__c<n+1>`` with the rounds in ``optimiser.saddle_escape``, then
+    ``eta`` on it (as ``eta`` writes it) if it ends at a minimum."""
+    import numpy as np
+    import torch
+
+    from experiments.noise_model import bench_eta as E
+    from experiments.noise_model import bench_v4 as B
+
+    deadline = time.perf_counter() + 60.0 * args.deadline_min
+    torch.set_num_threads(args.threads)
+    src_path = Path(args.source)
+    src = json.loads(src_path.read_text())
+    seed = int(src["optimiser"]["seed"])
+    kappa = float(src["priors"]["floor_push_kappa"])
+    flat = bool(src["params"]["shaft"]["pinned"])
+    if args.planted:
+        # a planted twin's fit: the planted recordings its report describes
+        rep = json.loads(Path(args.planted).read_text())
+        patch = rep.get("floor_patch")
+        _, rig, _ = _planted(
+            rep["truth"],
+            floor_below=None if patch is None else float(patch["below_hz"]),
+            render_seed=int(rep["render_seed"]),
+            kappa=float(rep["kappa"]),
+            device=args.device,
+        )
+    else:
+        rig = _rig_of_payload(src)
+    model = B.RigModel(rig, device=args.device, seed=seed, kappa=kappa, flat_shaft=flat)
+    model.load_payload(src)
+    f, parts = model.objective()
+    # with no round run the payload is the source's state and record
+    last: dict[str, Any] = {**src["optimiser"], "objective": f, "whittle_per_recording": parts}
+
+    def converge(m: Any, budget_s: float | None) -> dict[str, Any]:
+        _, rec = B.fit_rig(
+            m.rig,
+            seed=seed,
+            kappa=kappa,
+            lbfgs_iters=args.lbfgs_iters,
+            device=args.device,
+            flat_shaft=flat,
+            start=src,
+            resume=True,
+            model=m,
+            deadline_s=budget_s,
+        )
+        last.clear()
+        last.update(rec)
+        return {
+            k: rec[k]
+            for k in (
+                "objective_start",
+                "objective",
+                "converged",
+                "stop",
+                "restart_gain_per_cell",
+                "restart_movement",
+                "wall_s",
+            )
+        } | dict(n_passes=len(rec["convergence_passes"]))
+
+    hp0, hess_s0 = None, None
+    if args.hessian is not None:
+        # a previous run's EXACT state, and its Hessian there when it has one
+        # (escape writes both; planted writes the state only)
+        hz = np.load(args.hessian)
+        x = E.get_flat(model)
+        if tuple(hz["x"].shape) != tuple(x.shape):
+            raise SystemExit(
+                f"{args.hessian}: {hz['x'].shape} coordinates, the model has {x.shape}"
+            )
+        dx = float(np.max(np.abs(hz["x"] - x.cpu().numpy())))
+        E.set_flat(model, torch.as_tensor(hz["x"], dtype=x.dtype, device=x.device))
+        f_state, parts = model.objective()
+        last.update(objective=f_state, whittle_per_recording=parts)
+        if "H" in hz.files:
+            hp0, hess_s0 = (hz["H"], hz["P"]), float(hz["hessian_s"])
+        print(
+            f"[escape] state from {args.hessian} (max |dx| vs the payload {dx:.3g}, "
+            f"objective {f_state:.1f}; Hessian "
+            + (f"reused, took {hess_s0:.0f} s)" if hp0 is not None else "recomputed)"),
+            flush=True,
+        )
+    # --flat-gain-per-cell: a negative direction gaining less than the fit's own
+    # convergence tolerance (per cell, times the rig's cells) counts as flat
+    flat_gain = (
+        0.0 if args.flat_gain_per_cell is None else float(args.flat_gain_per_cell) * model.n_cells
+    )
+    esc, hp = E.saddle_escape(
+        model,
+        converge,
+        max_rounds=args.max_rounds,
+        deadline=deadline,
+        hp=hp0,
+        hessian_s=hess_s0,
+        flat_gain_nats=flat_gain,
+    )
+    pay = B.payload(model, last, git=_git())
+    pay["optimiser"]["resumed_from"] = str(src_path)
+    pay["optimiser"]["saddle_escape"] = esc
+    path = _next_continuation(args.out, src_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(pay))
+    if hp is not None:
+        # the last Hessian is at the written parameters: the next escape starts from it
+        np.savez(
+            path.with_suffix(".hessian.npz"),
+            H=hp[0],
+            P=hp[1],
+            x=E.get_flat(model).cpu().numpy(),
+            hessian_s=esc["hessian_s"],
+        )
+    print(
+        f"wrote {path}: {pay['objective']['total_nats']:.1f} nats (from "
+        f"{src['objective']['total_nats']:.1f}); escape {esc['stop']} after "
+        f"{len(esc['rounds'])} rounds, {esc['n_negative']} negative (min eig {esc['min_eig']})",
+        flush=True,
+    )
+    if esc["at_minimum"]:
+        _write_eta(
+            model,
+            path,
+            args.out,
+            band_hz=args.band_hz,
+            planted=args.planted,
+            hp=hp,
+            descent_free=esc["stop"] == "stuck",
+        )
     return 0
 
 
@@ -322,6 +580,7 @@ def cmd_refit(args: argparse.Namespace) -> int:
         device=args.device,
         flat_shaft=bool(args.flat_shaft),
         start=src,
+        deadline_s=60.0 * args.deadline_min,
     )
     pay = B.payload(model, rec, git=_git())
     uid = src_path.stem + ("__flat" if args.flat_shaft else "__refit")
@@ -367,6 +626,60 @@ def cmd_refit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eta(args: argparse.Namespace) -> int:
+    """Step 3: the likelihood weight ``eta`` by block jackknife at a fitted
+    payload, on the real recordings or (``--planted``) on the planted twin the
+    planted report describes."""
+    import torch
+
+    from experiments.noise_model import bench_v4 as B
+
+    torch.set_num_threads(args.threads)
+    pay = json.loads(Path(args.fit).read_text())
+    kappa = float(pay["priors"]["floor_push_kappa"])
+    if args.planted:
+        rep = json.loads(Path(args.planted).read_text())
+        patch = rep.get("floor_patch")
+        _, rig, _ = _planted(
+            rep["truth"],
+            floor_below=None if patch is None else patch["below_hz"],
+            render_seed=int(rep["render_seed"]),
+            kappa=kappa,
+            device=args.device,
+        )
+    else:
+        rig = _rig_of_payload(pay)
+    model = B.RigModel(
+        rig, device=args.device, kappa=kappa, flat_shaft=bool(pay["params"]["shaft"]["pinned"])
+    )
+    model.load_payload(pay)
+    _write_eta(model, Path(args.fit), args.out, band_hz=args.band_hz, planted=args.planted)
+    return 0
+
+
+def _write_eta(
+    model: Any,
+    fit: Path,
+    out: Path,
+    *,
+    band_hz: float,
+    planted: str | None,
+    hp: Any = None,
+    descent_free: bool = False,
+) -> None:
+    """``eta/<fit stem>.json`` and its ``.npz`` (:func:`bench_eta.eta_report`)."""
+    from experiments.noise_model import bench_eta as E
+
+    path = out / "eta" / (fit.stem + ".json")
+    rep_out = E.eta_report(
+        model, band_hz=band_hz, save=path.with_suffix(".npz"), hp=hp, descent_free=descent_free
+    )
+    rep_out.update(fit=str(fit), planted=planted, git=_git())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rep_out, indent=1))
+    print(json.dumps({k: v for k, v in rep_out.items() if k != "params"}, indent=1))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--out", type=Path, default=OUT)
@@ -381,6 +694,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tag", default="", help="suffix of a schedule variant")
     p.add_argument("--adam-steps", type=int, default=1500)
     p.add_argument("--lbfgs-iters", type=int, default=1200)
+    p.add_argument("--deadline-min", type=float, default=None, help="stop the loop before this")
     p.add_argument("--device", default="cpu")
     p.add_argument("--jobs", type=int, default=1)
     p.add_argument("--threads", type=int, default=8)
@@ -399,8 +713,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed", type=int, default=0, help="the fit's restart index")
     p.add_argument("--adam-steps", type=int, default=1500)
     p.add_argument("--lbfgs-iters", type=int, default=1200)
+    p.add_argument("--deadline-min", type=float, default=50.0)
+    p.add_argument(
+        "--resume-from",
+        default=None,
+        help="continue this planted fit (its .fit.json) on the same re-rendered twin",
+    )
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
+    p.add_argument(
+        "--floor-data-below",
+        type=float,
+        default=None,
+        metavar="HZ",
+        help="replace the truth's floor below HZ by the measured inter-line floor",
+    )
     p.set_defaults(func=cmd_planted)
     p = sub.add_parser("refit", help="nested refit of a payload with the shaft law pinned flat")
     p.add_argument("--from", dest="source", required=True, help="a noise-v4-fit/3 bench payload")
@@ -408,9 +735,52 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--kappa", type=float, default=None, help="default: the source's kappa")
     p.add_argument("--adam-steps", type=int, default=300)
     p.add_argument("--lbfgs-iters", type=int, default=1200)
+    p.add_argument("--deadline-min", type=float, default=50.0)
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
     p.set_defaults(func=cmd_refit)
+    p = sub.add_parser("resume", help="a continuation of a payload's convergence loop")
+    p.add_argument("--from", dest="source", required=True, help="a noise-v4-fit/3 bench payload")
+    p.add_argument("--lbfgs-iters", type=int, default=1200, help="loop passes of a quarter")
+    p.add_argument("--deadline-min", type=float, default=52.0)
+    p.add_argument("--kappa", type=float, default=None, help="default: the source's kappa")
+    p.add_argument("--device", default="cpu")
+    p.add_argument("--threads", type=int, default=8)
+    p.set_defaults(func=cmd_resume)
+    p = sub.add_parser("eta", help="step 3: the likelihood weight by block jackknife")
+    p.add_argument("--fit", required=True, help="a noise-v4-fit/3 bench payload")
+    p.add_argument("--planted", default=None, help="the planted report of a planted twin's fit")
+    p.add_argument("--band-hz", type=float, default=200.0, help="the finest block's band")
+    p.add_argument("--device", default="cpu")
+    p.add_argument("--threads", type=int, default=8)
+    p.set_defaults(func=cmd_eta)
+    p = sub.add_parser("escape", help="leave a saddle (negative curvature), then step 3")
+    p.add_argument("--from", dest="source", required=True, help="a noise-v4-fit/3 bench payload")
+    p.add_argument("--max-rounds", type=int, default=4, help="escape rounds (Hessian each)")
+    p.add_argument("--lbfgs-iters", type=int, default=1200, help="loop passes of a quarter")
+    p.add_argument("--band-hz", type=float, default=200.0, help="eta's finest block's band")
+    p.add_argument("--deadline-min", type=float, default=170.0)
+    p.add_argument(
+        "--hessian",
+        default=None,
+        help="a state file: escape's <payload>.hessian.npz (state + Hessian) or planted's "
+        "<report>.fit.state.npz (state only); resume at that exact state",
+    )
+    p.add_argument(
+        "--planted",
+        default=None,
+        help="a planted report (planted/<stem>.json): --from is its .fit.json, on its planted rig",
+    )
+    p.add_argument(
+        "--flat-gain-per-cell",
+        type=float,
+        default=None,
+        help="a negative direction gaining at most this many nats per cell counts as flat "
+        f"(e.g. the fit's convergence tolerance {1e-4:g}); default: the strict rule",
+    )
+    p.add_argument("--device", default="cpu")
+    p.add_argument("--threads", type=int, default=8)
+    p.set_defaults(func=cmd_escape)
     args = ap.parse_args(argv)
     return int(args.func(args))
 

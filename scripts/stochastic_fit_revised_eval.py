@@ -109,8 +109,13 @@ def checkpoint_record(experiment: str, ckpt: str) -> dict[str, Any]:
     from zoo.frame_model import _checkpoint_ref
 
     register_configs()
+    # composed as zoo.load composes it: without the current RootConfig schema and
+    # with validation disabled, so a pre-rp-protocol scorer experiment still resolves
     with initialize_config_dir(config_dir=str(REPO_ROOT / "conf"), version_base=None):
-        cfg = compose(config_name="config", overrides=[f"experiment={experiment}"])
+        cfg = compose(
+            config_name="config",
+            overrides=[f"experiment={experiment}", "~schema", "validation=disabled"],
+        )
     ref = _checkpoint_ref(experiment, ckpt, cfg)
     local = Path(resolve_checkpoint_uri(ref, REPO_ROOT / ".cache" / "r2_checkpoints"))
     return dict(
@@ -121,6 +126,7 @@ def checkpoint_record(experiment: str, ckpt: str) -> dict[str, Any]:
         bytes=local.stat().st_size,
         sha256=hashlib.sha256(local.read_bytes()).hexdigest(),
     )
+
 
 def _load_env_file() -> None:
     env = Path(".env")
@@ -182,13 +188,13 @@ def ensure_candidate_artifacts(man: dict[str, Any]) -> list[dict[str, Any]]:
             digest = hashlib.sha256(body).hexdigest()
             print(f"fetched {path} from {uri}", flush=True)
         else:
-            die(f"candidate export {path} is missing and no candidate_artifacts.{rig}.r2_uri is set")
+            die(
+                f"candidate export {path} is missing and no candidate_artifacts.{rig}.r2_uri is set"
+            )
         if expected and digest != expected:
             die(f"candidate export {path} sha256 {digest} != expected {expected}")
         ensured.append(dict(rig=rig, path=str(path), sha256=digest))
     return ensured
-
-
 
 
 # ── the manifest and the frozen input record ────────────────────────────────
@@ -218,6 +224,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     man["gates"] = gates
     return man
 
+
 def training_guard_seconds(man: dict[str, Any]) -> float:
     """Protocol-level symmetric fit-support guard, hashed with observations."""
     obs = dict(require(man, "observation", str(man.get("_path", "manifest"))))
@@ -230,17 +237,13 @@ def training_guard_seconds(man: dict[str, Any]) -> float:
 def reject_candidate_guard_override(spec: dict[str, Any], *, context: str) -> None:
     """Candidate arms may not redefine the protocol guard."""
     if "training_guard_seconds" in spec:
-        die(
-            f"{context}: training_guard_seconds belongs in observation, not in the candidate arm"
-        )
+        die(f"{context}: training_guard_seconds belongs in observation, not in the candidate arm")
     for rig, rig_spec in dict(spec.get("per_rig") or {}).items():
         if isinstance(rig_spec, dict) and "training_guard_seconds" in rig_spec:
             die(
                 f"{context}.per_rig.{rig}: training_guard_seconds belongs in observation, "
                 "not in the candidate arm"
             )
-
-
 
 
 def _canonical_manifest(man: dict[str, Any]) -> dict[str, Any]:
@@ -599,10 +602,7 @@ def arm_model(
         export_path, _ = _resolve_candidate_export(spec, rig, context=f"arm {name}")
         cand = RE.read_candidate_export(export_path)
         if rig is not None and cand.rig_id != rig:
-            die(
-                f"arm {name}: candidate export rig_id is {cand.rig_id!r}, "
-                f"cohort rig is {rig!r}"
-            )
+            die(f"arm {name}: candidate export rig_id is {cand.rig_id!r}, cohort rig is {rig!r}")
         return ArmModel(
             name,
             "revised",
@@ -834,7 +834,12 @@ class Tracker:
         name, ckpt = str(scorer["experiment"]), str(scorer.get("ckpt", "best"))
         self.record = checkpoint_record(name, ckpt)
         self.fm = zoo.load(name, ckpt=ckpt)
-        self.metric = LayerPeakRPSMetric()
+        # the frozen scorer's output grid: linear 0-150 rev/s in 300 bins, the
+        # metric's pre-rp-protocol default (conf/metrics/salience_layers_r150.yaml);
+        # an rp-protocol scorer passes its own `metric` kwargs (salience_layers_rp.yaml)
+        metric = dict(grid=dict(kind="linear", fmin=0.0, fmax=150.0, bins=300))
+        metric.update(scorer.get("metric") or {})
+        self.metric = LayerPeakRPSMetric(**metric)
         self.score = probe_helpers().score
 
     def pit(
@@ -1447,7 +1452,9 @@ def run_prepare(
     for cohort in man["cohorts"]:
         name = str(cohort["name"])
         bundles_by_regime = all_families(cohort)
-        cres: dict[str, Any] = dict(plan=cohort_plan(cohort, guard_seconds=guard_seconds), regimes={})
+        cres: dict[str, Any] = dict(
+            plan=cohort_plan(cohort, guard_seconds=guard_seconds), regimes={}
+        )
         temp_config = dict(man.get("composite_temperature") or {})
         temp_master = temp_config.get("master_seed")
         temp_B = temp_config.get("B")
@@ -1790,9 +1797,7 @@ def run_check(
     report: dict[str, Any] = dict(
         mode="check",
         schema=RE.SCHEMA,
-        manifest=dict(
-            path=man["_path"], sha256=man["_digest"], protocol_sha256=protocol_sha
-        ),
+        manifest=dict(path=man["_path"], sha256=man["_digest"], protocol_sha256=protocol_sha),
         import_provenance=provenance,
         scorer=tracker.record,
         frozen_inputs=now,
@@ -1842,9 +1847,13 @@ def run_check(
             )
 
             def model_for(
-                arm: str, spec: dict[str, Any], w: RE.Window, _r: str = regime
+                arm: str,
+                spec: dict[str, Any],
+                w: RE.Window,
+                _r: str = regime,
+                _rig: str = rig,
             ) -> ArmModel:
-                return arm_model(arm, spec, regime=_r, recording=w.recording, rig=rig)
+                return arm_model(arm, spec, regime=_r, recording=w.recording, rig=_rig)
 
             rows = measure_arm_set(
                 cohort,
@@ -1988,9 +1997,7 @@ def run_check(
 
     decisions = dict(
         mode="check",
-        manifest=dict(
-            path=man["_path"], sha256=man["_digest"], protocol_sha256=protocol_sha
-        ),
+        manifest=dict(path=man["_path"], sha256=man["_digest"], protocol_sha256=protocol_sha),
         scorer=tracker.record,
         frozen_inputs=now,
         candidate_arm=cand_spec,
@@ -2034,7 +2041,9 @@ def run_verify_adapter(
             regime = str(regime_spec["regime"])
             bundles = bundles_by_regime[regime]
             calibration = [w for b in bundles.values() for w in b.calibration_windows()]
-            windows, _ = resolve_windows(cohort, regime_spec, calibration, guard_seconds=guard_seconds)
+            windows, _ = resolve_windows(
+                cohort, regime_spec, calibration, guard_seconds=guard_seconds
+            )
             for family in bundles:
                 for w in windows[:1]:
                     mp = baseline_params(
