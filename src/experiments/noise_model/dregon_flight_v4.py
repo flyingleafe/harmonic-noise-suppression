@@ -68,6 +68,10 @@ priors (the ``"full"`` machinery on ``k <= k_free``), plus ``eps`` (as
 (the free profiles carry the level); the orders above, the motor family,
 ``alpha`` and the amplitude pedestal stay the source's. Movement tolerances:
 :data:`LINES_MOVE_TOL` on the profiles, :data:`COHERENCE_MOVE_TOL` on the rest.
+``hold_eps`` holds ``eps`` and ``hold_pedestal`` the phase pedestal of every
+order at the source's (thin lines: the rotor-speed label's 0.5-0.7 Hz error
+cannot widen them; the nv3r4-like refit frees every order's profile with both
+held, ``k_free = k_max``).
 
 FLIGHT SOURCES. The source may be a flight payload (this stage's or the wind
 stage's): its floor, static share and wind levels are the start
@@ -808,6 +812,7 @@ class FlightStageModel:
         profile_sd_db: float = PROFILE_FLIGHT_SD_DB,
         profile_centre_db: np.ndarray | None = None,
         hold_eps: bool = False,
+        hold_pedestal: bool = False,
     ) -> None:
         par = _bench_params(bench)
         self.bench, self.par, self.pool = bench, par, pool
@@ -899,6 +904,13 @@ class FlightStageModel:
         self.held_log_eps: Tensor | None = None
         if self.coherence == "lines" and hold_eps:
             self.held_log_eps = self.params.pop("log_eps").detach().requires_grad_(False)
+        #: ``"lines"`` with ``hold_pedestal``: the phase pedestal of EVERY order stays
+        #: the source's (thin lines: the label error cannot widen them), as under
+        #: ``"shaft"``; only the profiles (and eps unless held) carry the lines
+        self.hold_pedestal = bool(self.coherence == "lines" and hold_pedestal)
+        if self.hold_pedestal:
+            for key in ("u_s2P", "u_W"):
+                self.params.pop(key)
         if self.coherence in ("full", "lines"):
             #: the phase-width half-normal scales per free aerodynamic order
             self.c_w = self._t(PR.width_scale(np.arange(1, (self.k_free or par.k_max) + 1)))
@@ -965,10 +977,15 @@ class FlightStageModel:
         elif self.coherence == "lines":
             # p carries PROFILE_KEY ("profile_free_db") itself
             log_eps = p["log_eps"] if self.held_log_eps is None else self.held_log_eps
-            out.update(
-                lines_values(p["u_s2P"], p["u_W"], log_eps, held=self.held_pedestal, f_ref=f_ref),
-                log_eps=log_eps,
-            )
+            if self.hold_pedestal:
+                out.update(self.held_pedestal, **shaft_values(log_eps, f_ref=f_ref))
+            else:
+                out.update(
+                    lines_values(
+                        p["u_s2P"], p["u_W"], log_eps, held=self.held_pedestal, f_ref=f_ref
+                    )
+                )
+            out["log_eps"] = log_eps
         return out
 
     def expected(self, frames: slice | Tensor, *, all_bins: bool = False) -> Tensor:
@@ -1039,7 +1056,7 @@ class FlightStageModel:
             parts["line_gain"] = n_(LINE_GAIN_MU_DB, LINE_GAIN_SD_DB, v["line_gain_db"])
         if self.mic_gain:
             parts["mic_gain"] = n_(0.0, MIC_GAIN_SD_DB, v["mic_gain_db"])
-        if self.coherence in ("full", "lines"):
+        if self.coherence in ("full", "lines") and not self.hold_pedestal:
             k = self.c_w.numel()
             parts["phase_pedestal"] = -BV.phase_pedestal_neg_log_prior(
                 v["sigma2_phase"][:k], v["width_phase_hz"][:k], self.c_w
@@ -1235,7 +1252,7 @@ def renderer_check(
             )
             h = rng.normal(0.0, MIC_GAIN_SD_DB, model.par.n_mics)
             model.mic_gain_free_db.copy_(model._t((h - h.mean())[:-1]))
-            if model.coherence in ("full", "lines"):
+            if model.coherence in ("full", "lines") and "u_s2P" in p:
                 k = p["u_s2P"].numel()
                 s2 = np.exp(rng.normal(PR.PHASE_SIGMA2_LN[0], PR.PHASE_SIGMA2_LN[1], k))
                 width = np.abs(rng.normal(0.0, model.c_w.cpu().numpy()))
@@ -1692,10 +1709,12 @@ def coherence_record(model: FlightStageModel, bench: dict[str, Any]) -> dict[str
             free=False,
             rule="phase pedestal and shaft held at the bench payload's (frozen L_r)",
         )
-    free_ped = mode in ("full", "lines")
+    free_ped = mode in ("full", "lines") and not model.hold_pedestal
     k = model.k_free
     with torch.no_grad():
-        s = start_coherence_values(bench, mode, model._t, k_free=k or None)
+        # a held pedestal starts (and stays) at the source's own, as under "shaft"
+        s_mode = "shaft" if model.hold_pedestal else mode
+        s = start_coherence_values(bench, s_mode, model._t, k_free=k or None)
         v = model.values()
 
     def arrays(d: dict[str, Tensor]) -> dict[str, Any]:
@@ -1720,7 +1739,8 @@ def coherence_record(model: FlightStageModel, bench: dict[str, Any]) -> dict[str
         held=dict(
             pedestal=dict(
                 full=["sigma2_amp", "gamma_amp_hz"],
-                lines=["sigma2_amp", "gamma_amp_hz", *(f"{p}[{k}:]" for p in phase)],
+                lines=["sigma2_amp", "gamma_amp_hz"]
+                + (phase if model.hold_pedestal else [f"{p}[{k}:]" for p in phase]),
                 shaft=["sigma2_amp", "gamma_amp_hz", *phase],
             )[mode],
             shaft=dict(
@@ -1829,6 +1849,7 @@ def run_stage(
     resume: dict[str, Any] | None = None,
     resume_path: str | None = None,
     hold_eps: bool = False,
+    hold_pedestal: bool = False,
 ) -> dict[str, Any]:
     """The whole stage on ``source`` (a DREGON bench payload, or a flight
     payload: then its floor and wind levels are the start, its wind levels the
@@ -1867,6 +1888,7 @@ def run_stage(
         k_free=int(k_free) if lines_mode else None,
         profile_sd_db=float(profile_sd_db) if lines_mode else None,
         hold_eps=bool(hold_eps) if lines_mode else None,
+        hold_pedestal=bool(hold_pedestal) if lines_mode else None,
     )
     sha = _sha(source)
     if resume is not None:
@@ -1964,6 +1986,7 @@ def run_stage(
         profile_sd_db=profile_sd_db,
         profile_centre_db=p_centre,
         hold_eps=bool(hold_eps),
+        hold_pedestal=bool(hold_pedestal),
     )
     del lines
     check = renderer_check(model, sorted({0, fp.n_frames - 1}))
@@ -2007,8 +2030,10 @@ def run_stage(
         lines=[
             "pedestal.sigma2_amp",
             "pedestal.gamma_amp_hz",
-            f"pedestal.{{sigma2_phase, gamma_phase_hz, width_phase_hz}}[{kf}:]",
-        ],
+            "pedestal.{sigma2_phase, gamma_phase_hz, width_phase_hz}"
+            + ("" if hold_pedestal else f"[{kf}:]"),
+        ]
+        + (["shaft.eps"] if hold_eps else []),
     )[coherence]
     if coherence in ("full", "lines"):
         held_ped += ["shaft.a_sigma", "shaft.lam_ref_per_s", "shaft.b_lam"]
@@ -2062,7 +2087,9 @@ def run_stage(
             + dict(
                 full="free phase pedestal and eps",
                 shaft="bench phase pedestal and the free eps",
-                lines=f"free profiles and phase pedestal of k <= {kf} and the free eps",
+                lines=f"free profiles of k <= {kf}"
+                + ("" if hold_pedestal else f" and phase pedestal of k <= {kf}")
+                + (", the source's eps" if hold_eps else " and the free eps"),
             )[coherence]
             if coherence != "none"
             else "L_r = v4.expected_periodogram of the bench payload with the floor off "
@@ -2071,7 +2098,12 @@ def run_stage(
         ),
         free=(["line_gain_db"] if line_gain else [])
         + (["mic_gain_db"] if mic_gain else [])
-        + list(COHERENCE_FIELDS[coherence])
+        + [
+            f
+            for f in COHERENCE_FIELDS[coherence]
+            if not (hold_pedestal and f.startswith("pedestal."))
+            and not (hold_eps and f == "shaft.eps")
+        ]
         + ["floor.mean_db", "floor.shape_z", "floor.static_rel", "floor.b0", "floor.b1"]
         + ["wind.level_db" if model.wind_kind == V4.WIND_SC else "wind.wind_db"],
         coherence=coherence_record(model, source),
@@ -2091,8 +2123,9 @@ def run_stage(
         ),
         lines=dict(
             k_free=kf,
-            free="profile_aero_db[:, :k_free], pedestal sigma2_phase/width_phase_hz[:k_free], "
-            "shaft.eps",
+            free="profile_aero_db[:, :k_free]"
+            + ("" if hold_pedestal else ", pedestal sigma2_phase/width_phase_hz[:k_free]")
+            + ("" if hold_eps else ", shaft.eps"),
             prior=dict(
                 family="Normal",
                 centre_db=p_centre.tolist(),

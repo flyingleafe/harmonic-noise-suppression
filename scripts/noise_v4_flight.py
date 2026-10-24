@@ -311,6 +311,8 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         args.no_line_gain, args.no_mic_gain = not s["line_gain"], not s["mic_gain"]
         args.k_free, args.profile_sd_db = s["k_free"], s["profile_sd_db"]
         args.hold_eps = bool(s.get("hold_eps"))
+        args.hold_pedestal = bool(s.get("hold_pedestal"))
+        args.wind_from = rs.get("wind_from")
     if args.k_free is None:
         args.k_free = DF.K_FREE
     if args.profile_sd_db is None:
@@ -318,8 +320,12 @@ def cmd_dregon(args: argparse.Namespace) -> int:
     if not args.source:
         raise SystemExit("dregon needs --from <payload> (or --resume <payload>)")
     source_path = Path(args.source)
+    source = json.loads(source_path.read_text())
+    if args.wind_from:
+        # the gust law and levels of another payload (the battery gust search's)
+        source["params"]["wind"] = json.loads(Path(args.wind_from).read_text())["params"]["wind"]
     pay = DF.run_stage(
-        json.loads(source_path.read_text()),
+        source,
         source_path=str(source_path),
         kappa=args.kappa,
         pool=str(args.pool),
@@ -338,10 +344,13 @@ def cmd_dregon(args: argparse.Namespace) -> int:
         k_free=int(args.k_free),
         profile_sd_db=float(args.profile_sd_db),
         hold_eps=bool(args.hold_eps),
+        hold_pedestal=bool(args.hold_pedestal),
         deadline_s=None if args.deadline_min is None else 60.0 * float(args.deadline_min),
         resume=resume,
         resume_path=args.resume,
     )
+    if args.wind_from:
+        pay["flight_stage"]["wind_from"] = str(args.wind_from)
     out = _dregon_out(args, source_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(pay, indent=1))
@@ -658,6 +667,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="--lines: hold the shaft scale eps at the source's (the free low orders "
         "stay inside one bin despite the label error)",
+    )
+    d.add_argument(
+        "--hold-pedestal",
+        action="store_true",
+        help="--lines: hold the phase pedestal of every order at the source's (thin lines)",
+    )
+    d.add_argument(
+        "--wind-from",
+        default=None,
+        help="replace the source's params.wind (sc law, shape, levels) by this payload's",
     )
     d.add_argument(
         "--deadline-min",
