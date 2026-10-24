@@ -696,6 +696,29 @@ gust law is offset 2, scale 1 m/s, rate 8 Hz. The gate fails: tuning PIT
 and the cross-band co-modulation, but its broadband level is 2–4 dB high on
 the tuning segments and its order-1 line 3–6 dB low.
 
+## C-nv3 — every order's level, thin lines {#sec-cnv3}
+
+nv3r4 fitted every rotor's level per order in flight. C-nv3 does the same
+in v4: lines mode with all 148 aerodynamic orders free per rotor, prior
+$\mathcal N(\text{bench}, 10)$ dB (nv3r4's width). The shaft scale
+$\varepsilon$ and the phase pedestal of every order are held at the bench
+(`--hold-eps --hold-pedestal`), so the lines stay as thin as on the bench.
+The gust law is C-alt's (`--wind-from`). Wide pool.
+
+**Trim search.** After the fit, the law search (`--free`) moves a few
+levels on the composed renders: all lines, order 1, one gain per rotor, and
+the floor. Gate: PIT below nv3r4's on the 18 wide-pool windows. Selection:
+the lowest LTAS error averaged over all mics (`--select min-ltas-all`).
+
+**Result.** The fit converges and is the closest to real so far on the
+spectral battery (Fréchet distance 280 dB² against nv3r4's 362). It fails
+the trackers: HPPNet PIT 1.87 on the tuning segments and 5.31 on the
+scoring windows (bar 1.680); HRSPNet 1.68 (nv3r4 1.105). No trim passes
+the wide-pool gate: PIT stops near 1.71 against nv3r4's 1.683. The HPPNet
+failures on the scoring windows are single-mic failures (mic 2 up to
+80 rev/s) whose occurrence depends on the random draw
+(`docs/experiments/noise-model-v4-bench.md` § Round 6).
+
 # From the fits to the generator
 
 A bank entry is a rig payload plus a trajectory. The renderer is the same for
