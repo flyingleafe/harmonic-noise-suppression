@@ -4,7 +4,7 @@ floor speed laws searched DIRECTLY on the official scorer's metrics.
 WHY. The DREGON flight payload carries the BENCH speed laws (per-rotor line
 profiles and exponents fitted on the single-rotor bench, the flight floor of
 the flight stage). In flight the laws may differ; a Whittle refit optimises the
-likelihood, not what the gates read. This search moves six numbers of the
+likelihood, not what the gates read. This search moves up to seven numbers of the
 payload and scores every candidate exactly as ``scripts/noise_v2_round_score.py``
 scores a support (``measure_support``): the frozen HPPNet-L2 tracker's PIT MAE
 over all eight mics on the raw-telemetry cruise support, and the absolute LTAS
@@ -15,6 +15,7 @@ THE SPACE (:data:`BOX`, in :data:`PARAMS` order), edits of the base payload
 share, wind):
 
 * ``g_a``: dB added to every ``params.profile_aero_db`` entry;
+* ``g_a1``: dB added on top of ``g_a`` to the aerodynamic order 1 (column 0);
 * ``alpha_a``: ``params.alpha_aero`` (line power ``10^{p/10} s^alpha``);
 * ``g_m``: dB added to every ``params.profile_motor_db`` entry;
 * ``alpha_m``: ``params.alpha_motor``;
@@ -27,13 +28,16 @@ THE TUNING SET: the five 8 s ``dregon-floor`` fit segments
 never the 4 s scoring windows :data:`.gates.DREGON_CRUISE_SUPPORTS`; one render
 seed (:data:`RENDER_SEED`, the scorer's first). The BARS are nv3r4's
 (:data:`NV3R4`) mean PIT and mean LTAS over the segments under the same
-protocol: a candidate is FEASIBLE when it beats both.
+protocol: a candidate is FEASIBLE when it beats both (gate ``pit+ltas``) or
+the PIT bar alone (gate ``pit``). :func:`pinned_box` searches a subset and
+pins the rest at the base payload's values.
 
 COMPOSITION (:func:`build_components`, :func:`compose`). A render of seed
 ``s`` is linear in its parts and every part's random draw is independent of
-these six numbers, so a segment's parts are rendered ONCE:
+these numbers, so a segment's parts are rendered ONCE:
 
-* per rotor ``r`` and family (aerodynamic, motor) the lines alone,
+* per rotor ``r`` and family (aerodynamic order 1, aerodynamic orders >= 2,
+  motor) the lines alone,
   ``render_noise`` of the base payload with both exponents 0, the other
   family and the other rotors at :data:`OFF_DB` (exactly zero in the kernel's
   float32), the floor off and no wind: the same streams, so the same shaft
@@ -64,7 +68,8 @@ THE SEARCH (the script ``scripts/noise_v4_dregon_lawsearch.py``): stage 1 a
 scrambled Sobol sample of the box (:data:`SOBOL_SEEDS`), stage 2 a second
 Sobol sample in the box :func:`stage2_box` shrinks around stage 1's best
 feasible points; selection (:func:`select`): the feasible point of lowest mean
-PIT; the Pareto front (mean PIT vs mean LTAS) and the main-effect spread of
+PIT (``min-pit``) or of lowest mean LTAS (``min-ltas``: the gate passed at the
+smallest spectral cost); the Pareto front (mean PIT vs mean LTAS) and the main-effect spread of
 each parameter over the stage-1 sample (:func:`main_effects`) are reported.
 """
 
@@ -103,9 +108,11 @@ from . import supports as SU
 
 __all__ = [
     "BOX",
+    "GATES",
     "NV3R4",
     "PARAMS",
     "RENDER_SEED",
+    "SELECTIONS",
     "SOBOL_SEEDS",
     "STAGE",
     "Components",
@@ -122,6 +129,7 @@ __all__ = [
     "main_effects",
     "mark_feasible",
     "pareto",
+    "pinned_box",
     "point_table",
     "read_rows",
     "render_parts",
@@ -134,19 +142,25 @@ __all__ = [
 ]
 
 STAGE = "dregon_lawsearch_v4"
-#: The six searched numbers, in the order of every point vector.
-PARAMS: tuple[str, ...] = ("g_a", "alpha_a", "g_m", "alpha_m", "g_f", "b0")
+#: The searched numbers, in the order of every point vector.
+PARAMS: tuple[str, ...] = ("g_a", "g_a1", "alpha_a", "g_m", "alpha_m", "g_f", "b0")
 #: The stage-1 box. ``b0``'s lower edge keeps ``b(f) >= 0`` on the band (the v4
 #: prior's truncation) with the DREGON stage payload's ``b1`` = 0.771:
 #: ``b(30 Hz) = b0 - 0.771 * log2(2000 / 30) >= 0`` needs ``b0 >= 4.67``.
 BOX: dict[str, tuple[float, float]] = dict(
     g_a=(-6.0, 12.0),
+    g_a1=(-6.0, 12.0),
     alpha_a=(0.0, 14.0),
     g_m=(-12.0, 6.0),
     alpha_m=(-4.0, 4.0),
     g_f=(-12.0, 6.0),
     b0=(4.7, 12.0),
 )
+#: Feasibility gates: beat nv3r4's tuning-set mean PIT and mean LTAS, or PIT only.
+GATES: tuple[str, ...] = ("pit+ltas", "pit")
+#: Selection among feasible points: lowest mean PIT, or lowest mean LTAS (the
+#: smallest loss of spectral similarity that still passes the gate).
+SELECTIONS: tuple[str, ...] = ("min-pit", "min-ltas")
 #: Scrambled Sobol seeds of stage 1 and stage 2.
 SOBOL_SEEDS: tuple[int, int] = (20261023, 20261024)
 #: The composition check: its seed, its random points (plus the base point).
@@ -168,7 +182,7 @@ STAGE2_TOP = 8
 STAGE2_PAD = 0.1
 #: Main effects: equal-width bins of each parameter over its stage-1 range.
 MAIN_EFFECT_BINS = 8
-FAMILIES = ("aero", "motor")
+FAMILIES = ("aero1", "aero", "motor")
 
 
 # ── the payload edits ───────────────────────────────────────────────────────
@@ -193,6 +207,7 @@ def base_point(base: Mapping[str, Any]) -> dict[str, float]:
     p = base["params"]
     return dict(
         g_a=0.0,
+        g_a1=0.0,
         alpha_a=float(p["alpha_aero"]),
         g_m=0.0,
         alpha_m=float(p["alpha_motor"]),
@@ -201,11 +216,28 @@ def base_point(base: Mapping[str, Any]) -> dict[str, float]:
     )
 
 
+def pinned_box(
+    base: Mapping[str, Any], free: Mapping[str, Sequence[float]]
+) -> dict[str, tuple[float, float]]:
+    """A box that searches only ``free`` (name -> (lo, hi)) and pins every other
+    number at the base payload's value (:func:`base_point`)."""
+    unknown = set(free) - set(PARAMS)
+    if unknown:
+        raise ValueError(f"unknown parameters {sorted(unknown)}; the space is {PARAMS}")
+    b = base_point(base)
+    return {
+        k: (float(free[k][0]), float(free[k][1])) if k in free else (b[k], b[k]) for k in PARAMS
+    }
+
+
 def edit_payload(base: Mapping[str, Any], point: Mapping[str, float]) -> dict[str, Any]:
-    """The base payload with the point's six numbers written in."""
+    """The base payload with the point's numbers written in (``g_a1`` on top of
+    ``g_a`` for order 1, the first profile column)."""
     out = copy.deepcopy(dict(base))
     p = out["params"]
-    p["profile_aero_db"] = (np.asarray(p["profile_aero_db"]) + float(point["g_a"])).tolist()
+    aero = np.asarray(p["profile_aero_db"], dtype=np.float64) + float(point["g_a"])
+    aero[:, 0] += float(point["g_a1"])
+    p["profile_aero_db"] = aero.tolist()
     p["alpha_aero"] = float(point["alpha_a"])
     p["profile_motor_db"] = (np.asarray(p["profile_motor_db"]) + float(point["g_m"])).tolist()
     p["alpha_motor"] = float(point["alpha_m"])
@@ -218,17 +250,23 @@ def edit_payload(base: Mapping[str, Any], point: Mapping[str, float]) -> dict[st
 
 
 def _lines_payload(base: Mapping[str, Any], rotor: int, family: str) -> dict[str, Any]:
-    """Rotor ``rotor``'s ``family`` lines alone, exponents 0, no floor, no wind."""
+    """Rotor ``rotor``'s ``family`` lines alone, exponents 0, no floor, no wind.
+    Families: ``aero1`` the aerodynamic order 1, ``aero`` the aerodynamic orders
+    2 and up, ``motor`` the motor family."""
     out = copy.deepcopy(dict(base))
     p = out["params"]
     keep, drop = (
-        ("profile_aero_db", "profile_motor_db")
-        if family == "aero"
-        else ("profile_motor_db", "profile_aero_db")
+        ("profile_motor_db", "profile_aero_db")
+        if family == "motor"
+        else ("profile_aero_db", "profile_motor_db")
     )
     kept = np.asarray(p[keep], dtype=np.float64)
     off = np.full_like(kept, OFF_DB)
     off[rotor] = kept[rotor]
+    if family == "aero1":
+        off[rotor, 1:] = OFF_DB
+    elif family == "aero":
+        off[rotor, 0] = OFF_DB
     p[keep] = off.tolist()
     p[drop] = np.full_like(np.asarray(p[drop], dtype=np.float64), OFF_DB).tolist()
     p["alpha_aero"] = 0.0
@@ -254,7 +292,8 @@ class Components:
     seed: int
     rps: np.ndarray  #: (R, T) the motors_command label on the audio grid
     real: np.ndarray  #: (M, T) the raw audio
-    aero: np.ndarray  #: (R, M, T) the rotor's aerodynamic lines at alpha 0, post output
+    aero1: np.ndarray  #: (R, M, T) the rotor's aerodynamic order 1 at alpha 0, post output
+    aero: np.ndarray  #: (R, M, T) the rotor's aerodynamic orders >= 2 at alpha 0, post output
     motor: np.ndarray  #: (R, M, T) the rotor's motor lines at alpha 0, post output
     wind: np.ndarray  #: (M, T) the wind, post output
     shaped: np.ndarray  #: (M, T) the floor's shaped white noise at the base F, pre WOLA
@@ -304,6 +343,7 @@ def render_parts(
         shaped[m] = np.fft.irfft(np.fft.rfft(white) * floor_amp, n=n)
     walls["floor"] = time.time() - t0
     return dict(
+        aero1=lines["aero1"],
         aero=lines["aero"],
         motor=lines["motor"],
         wind=np.asarray(wind, dtype=np.float32),
@@ -379,6 +419,7 @@ def components(a: Mapping[str, Any], base: Mapping[str, Any]) -> Components:
         seed=int(a["seed"]),
         rps=rps,
         real=a["real"],
+        aero1=a["aero1"],
         aero=a["aero"],
         motor=a["motor"],
         wind=a["wind"],
@@ -433,8 +474,10 @@ def compose(comp: Components, point: Mapping[str, float]) -> np.ndarray:
     out = comp.wind.astype(np.float64)
     ga = 10.0 ** (float(point["g_a"]) / 20.0)
     gm = 10.0 ** (float(point["g_m"]) / 20.0)
+    ga1 = ga * 10.0 ** (float(point["g_a1"]) / 20.0)
     for r in range(comp.aero.shape[0]):
-        out += (ga * _envelope_gain(comp, r, float(point["alpha_a"])))[None, :] * comp.aero[r]
+        env_a = _envelope_gain(comp, r, float(point["alpha_a"]))[None, :]
+        out += (ga * env_a) * comp.aero[r] + (ga1 * env_a) * comp.aero1[r]
         out += (gm * _envelope_gain(comp, r, float(point["alpha_m"])))[None, :] * comp.motor[r]
     out += floor_output(comp, b0=float(point["b0"]), g_f=float(point["g_f"]))
     return out
@@ -485,29 +528,41 @@ def score(tracker: Any, comp: Components, audio: np.ndarray) -> dict[str, Any]:
 # ── the samplers ────────────────────────────────────────────────────────────
 
 
+def _free(box: Mapping[str, Sequence[float]]) -> list[str]:
+    """The parameters the box varies (``hi > lo``), in :data:`PARAMS` order."""
+    return [k for k in PARAMS if float(box[k][1]) > float(box[k][0])]
+
+
 def _scale(u: np.ndarray, box: Mapping[str, Sequence[float]]) -> list[dict[str, float]]:
-    lo = np.array([float(box[k][0]) for k in PARAMS])
-    hi = np.array([float(box[k][1]) for k in PARAMS])
-    x = lo + np.asarray(u) * (hi - lo)
-    return [dict(zip(PARAMS, (float(v) for v in row), strict=True)) for row in x]
+    """Unit-cube rows over the box's free parameters -> points (pinned ones at ``lo``)."""
+    free = _free(box)
+    out = []
+    for row in np.atleast_2d(np.asarray(u)):
+        pt = {k: float(box[k][0]) for k in PARAMS}
+        for k, v in zip(free, row, strict=True):
+            pt[k] = float(box[k][0]) + float(v) * (float(box[k][1]) - float(box[k][0]))
+        out.append(pt)
+    return out
 
 
 def sobol_points(n: int, box: Mapping[str, Sequence[float]], seed: int) -> list[dict[str, float]]:
-    """The first ``n`` points of a scrambled Sobol sequence (``2^ceil(log2 n)``
-    drawn, so a prefix of a balanced sample) mapped into ``box``."""
+    """The first ``n`` points of a scrambled Sobol sequence over the box's free
+    parameters (``2^ceil(log2 n)`` drawn, so a prefix of a balanced sample)."""
     from scipy.stats import qmc
 
     if n <= 0:
         return []
     m = max(0, math.ceil(math.log2(n)))
-    u = qmc.Sobol(d=len(PARAMS), scramble=True, seed=int(seed)).random_base2(m)[:n]
+    u = qmc.Sobol(d=len(_free(box)), scramble=True, seed=int(seed)).random_base2(m)[:n]
     return _scale(u, box)
 
 
-def verify_points(base: Mapping[str, Any]) -> list[dict[str, float]]:
-    """The composition check's points: the base, then :data:`N_VERIFY` uniform draws."""
-    u = np.random.default_rng(VERIFY_SEED).random((N_VERIFY, len(PARAMS)))
-    return [base_point(base), *_scale(u, BOX)]
+def verify_points(
+    base: Mapping[str, Any], box: Mapping[str, Sequence[float]] = BOX
+) -> list[dict[str, float]]:
+    """The composition check's points: the base, then :data:`N_VERIFY` uniform draws in ``box``."""
+    u = np.random.default_rng(VERIFY_SEED).random((N_VERIFY, len(_free(box))))
+    return [base_point(base), *_scale(u, box)]
 
 
 # ── the table, the bars, the selection ──────────────────────────────────────
@@ -558,43 +613,60 @@ def point_table(rows: Sequence[Mapping[str, Any]], n_segments: int) -> list[dict
     return table
 
 
-def _feasible(entry: Mapping[str, Any], bar: Mapping[str, Any]) -> bool:
+def _feasible(entry: Mapping[str, Any], bar: Mapping[str, Any], gate: str = "pit+ltas") -> bool:
+    if gate not in GATES:
+        raise ValueError(f"gate {gate!r} not in {GATES}")
     return bool(
         entry["complete"]
         and entry["mean_pit_mae"] < bar["mean_pit_mae"]
-        and entry["mean_ltas_abs_db"] < bar["mean_ltas_abs_db"]
+        and (gate == "pit" or entry["mean_ltas_abs_db"] < bar["mean_ltas_abs_db"])
     )
 
 
-def mark_feasible(table: list[dict[str, Any]], bar: Mapping[str, Any]) -> None:
+def mark_feasible(
+    table: list[dict[str, Any]], bar: Mapping[str, Any], gate: str = "pit+ltas"
+) -> None:
     for e in table:
-        e["feasible"] = _feasible(e, bar)
+        e["feasible"] = _feasible(e, bar, gate)
 
 
-def stage2_box(stage1: Sequence[Mapping[str, Any]], bar: Mapping[str, Any]) -> dict[str, Any]:
+def _key(selection: str) -> str:
+    if selection not in SELECTIONS:
+        raise ValueError(f"selection {selection!r} not in {SELECTIONS}")
+    return "mean_pit_mae" if selection == "min-pit" else "mean_ltas_abs_db"
+
+
+def stage2_box(
+    stage1: Sequence[Mapping[str, Any]],
+    bar: Mapping[str, Any],
+    *,
+    box: Mapping[str, Sequence[float]] = BOX,
+    gate: str = "pit+ltas",
+    selection: str = "min-pit",
+) -> dict[str, Any]:
     """The stage-2 box: per parameter the span of the stage-1 best
-    :data:`STAGE2_TOP` FEASIBLE points by mean PIT, padded by
+    :data:`STAGE2_TOP` FEASIBLE points by the selection's key, padded by
     :data:`STAGE2_PAD` of the stage-1 range per side and clipped to it. With
     no feasible point, the best points by mean PIT alone (``fallback``)."""
     done = [e for e in stage1 if e["complete"]]
     if not done:
         raise ValueError("stage 1 has no complete point")
-    feas = [e for e in done if _feasible(e, bar)]
-    pool = feas or done
-    top = sorted(pool, key=lambda e: e["mean_pit_mae"])[:STAGE2_TOP]
-    box: dict[str, list[float]] = {}
+    feas = [e for e in done if _feasible(e, bar, gate)]
+    key = _key(selection) if feas else "mean_pit_mae"
+    top = sorted(feas or done, key=lambda e: e[key])[:STAGE2_TOP]
+    out: dict[str, list[float]] = {}
     for k in PARAMS:
-        lo, hi = BOX[k]
+        lo, hi = float(box[k][0]), float(box[k][1])
         pad = STAGE2_PAD * (hi - lo)
         vals = [float(e["point"][k]) for e in top]
-        box[k] = [max(lo, min(vals) - pad), min(hi, max(vals) + pad)]
+        out[k] = [max(lo, min(vals) - pad), min(hi, max(vals) + pad)]
     return dict(
-        box=box,
+        box=out,
         rule=(
             f"per parameter [min - {STAGE2_PAD:g} R, max + {STAGE2_PAD:g} R] of the stage-1 best "
-            f"{STAGE2_TOP} feasible points by mean PIT (feasible: beats nv3r4's tuning-set mean "
-            "PIT and mean LTAS), R the stage-1 range, clipped to the stage-1 box; with no "
-            "feasible point the best by mean PIT alone"
+            f"{STAGE2_TOP} feasible points by {key} (gate {gate!r} against nv3r4's tuning-set "
+            "means), R the stage-1 range, clipped to the stage-1 box; with no feasible point "
+            "the best by mean PIT alone"
         ),
         fallback=not feas,
         n_feasible_stage1=len(feas),
@@ -640,7 +712,7 @@ def main_effects(
     pit = np.array([e["mean_pit_mae"] for e in done])
     ltas = np.array([e["mean_ltas_abs_db"] for e in done])
     out: dict[str, Any] = dict(n_points=len(done), bins=MAIN_EFFECT_BINS)
-    for k in PARAMS:
+    for k in _free(box):
         x = np.array([e["point"][k] for e in done])
         lo, hi = float(box[k][0]), float(box[k][1])
         b = np.clip(((x - lo) / (hi - lo) * MAIN_EFFECT_BINS).astype(int), 0, MAIN_EFFECT_BINS - 1)
@@ -663,10 +735,12 @@ def main_effects(
     return out
 
 
-def select(table: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
-    """The feasible point of lowest mean PIT, or ``None``."""
+def select(table: Sequence[Mapping[str, Any]], selection: str = "min-pit") -> dict[str, Any] | None:
+    """The feasible point of lowest mean PIT (``min-pit``) or lowest mean LTAS
+    (``min-ltas``), or ``None``."""
+    key = _key(selection)
     feas = [e for e in table if e.get("feasible")]
-    return dict(min(feas, key=lambda e: e["mean_pit_mae"])) if feas else None
+    return dict(min(feas, key=lambda e: e[key])) if feas else None
 
 
 def read_rows(raw_dir: Path) -> list[dict[str, Any]]:

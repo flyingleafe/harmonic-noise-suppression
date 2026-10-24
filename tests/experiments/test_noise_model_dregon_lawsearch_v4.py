@@ -106,7 +106,7 @@ def _composed_and_direct(fit: dict[str, Any], point: dict[str, float]) -> np.nda
 def test_gains_and_the_floor_law_compose_exactly() -> None:
     fit = _payload(0.0, 0.0)
     err = _composed_and_direct(
-        fit, dict(g_a=5.0, alpha_a=0.0, g_m=-7.0, alpha_m=0.0, g_f=3.0, b0=9.0)
+        fit, dict(g_a=5.0, g_a1=-4.0, alpha_a=0.0, g_m=-7.0, alpha_m=0.0, g_f=3.0, b0=9.0)
     )
     assert np.abs(err).max() < 1e-5
 
@@ -114,7 +114,7 @@ def test_gains_and_the_floor_law_compose_exactly() -> None:
 def test_moved_line_exponents_compose_to_a_small_error() -> None:
     fit = _payload(4.0, 0.5)
     err = _composed_and_direct(
-        fit, dict(g_a=-2.0, alpha_a=12.0, g_m=4.0, alpha_m=-3.0, g_f=-6.0, b0=2.5)
+        fit, dict(g_a=-2.0, g_a1=0.0, alpha_a=12.0, g_m=4.0, alpha_m=-3.0, g_f=-6.0, b0=2.5)
     )
     # measured: rms 3.4e-5, max 4.0e-4 of the direct render's rms
     assert np.sqrt(np.mean(err**2)) < 3e-4

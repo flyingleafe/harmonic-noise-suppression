@@ -253,6 +253,16 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--max-segments", type=int, default=None, help="first N tuning segments")
     ap.add_argument("--points", type=int, default=None, help="cap both stages (smoke)")
     ap.add_argument("--no-resume", action="store_true", help="re-run every unit")
+    ap.add_argument(
+        "--free",
+        default=None,
+        help="search only these numbers, the rest pinned at the base payload's: "
+        "'g_a=-3:9,g_a1=-3:9,g_f=-9:3' (default: the full BOX)",
+    )
+    ap.add_argument("--gate", default="pit+ltas", help="feasibility: 'pit+ltas' or 'pit'")
+    ap.add_argument(
+        "--select", default="min-pit", help="among feasible points: 'min-pit' or 'min-ltas'"
+    )
     args = ap.parse_args(argv)
     os.environ.setdefault("NUMBA_NUM_THREADS", str(args.threads))
 
@@ -266,6 +276,16 @@ def main(argv: list[str] | None = None) -> None:
     raw = base_path.read_bytes()
     base = json.loads(raw)
     LS.check_base(base)
+    if args.gate not in LS.GATES or args.select not in LS.SELECTIONS:
+        _die(f"--gate in {LS.GATES}, --select in {LS.SELECTIONS}")
+    box: dict[str, tuple[float, float]] = dict(LS.BOX)
+    if args.free:
+        free = {}
+        for item in str(args.free).split(","):
+            name, _, rng = item.partition("=")
+            lo, _, hi = rng.partition(":")
+            free[name.strip()] = (float(lo), float(hi))
+        box = LS.pinned_box(base, free)
     stem = base_path.stem
     out = Path(args.out)
     work = out / f"{stem}__laws"
@@ -280,7 +300,9 @@ def main(argv: list[str] | None = None) -> None:
         n_segments=n_seg,
         render_seed=LS.RENDER_SEED,
         params=list(LS.PARAMS),
-        box={k: list(v) for k, v in LS.BOX.items()},
+        box={k: list(v) for k, v in box.items()},
+        gate=args.gate,
+        select=args.select,
         sobol_seeds=list(LS.SOBOL_SEEDS),
         verify_seed=LS.VERIFY_SEED,
         nv3r4=LS.NV3R4,
@@ -324,7 +346,7 @@ def main(argv: list[str] | None = None) -> None:
     ]
     refs += [
         Unit(f"verify__v{j}__seg0", dict(common, kind="verify", idx=j, point=pt, segment=0))
-        for j, pt in enumerate(LS.verify_points(base))
+        for j, pt in enumerate(LS.verify_points(base, box))
     ]
     res = run_grid(refs, unit_worker, work / "refs", jobs=int(args.workers), **grid)
     _check_grid(res, "reference")
@@ -348,7 +370,7 @@ def main(argv: list[str] | None = None) -> None:
         rows = LS.read_rows(work / f"stage{stage}" / "raw")
         return [r for r in rows if r["idx"] < n and r["segment"] < n_seg]
 
-    pts1 = LS.sobol_points(n1, LS.BOX, LS.SOBOL_SEEDS[0])
+    pts1 = LS.sobol_points(n1, box, LS.SOBOL_SEEDS[0])
     res = run_grid(
         point_units(1, pts1),
         unit_worker,
@@ -359,7 +381,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     _check_grid(res, "stage-1")
     table = LS.point_table(rows_of(1, n1), n_seg)
-    LS.mark_feasible(table, bar)
+    LS.mark_feasible(table, bar, args.gate)
 
     # 4. stage 2
     s2: dict[str, Any] | None = None
@@ -370,7 +392,7 @@ def main(argv: list[str] | None = None) -> None:
             if int(s2["n_stage1"]) != n1:
                 _die(f"{s2_path} was drawn from {s2['n_stage1']} stage-1 points, not {n1}")
         else:
-            s2 = LS.stage2_box(table, bar)
+            s2 = LS.stage2_box(table, bar, box=box, gate=args.gate, selection=args.select)
             _atomic_json(s2_path, s2)
         pts2 = LS.sobol_points(n2, s2["box"], LS.SOBOL_SEEDS[1])
         res = run_grid(
@@ -383,10 +405,10 @@ def main(argv: list[str] | None = None) -> None:
         )
         _check_grid(res, "stage-2")
         table += LS.point_table(rows_of(2, n2), n_seg)
-        LS.mark_feasible(table, bar)
+        LS.mark_feasible(table, bar, args.gate)
 
     # 5. the table, the selection, the export
-    chosen = LS.select(table)
+    chosen = LS.select(table, args.select)
     point_rows = rows_of(1, n1) + (rows_of(2, n2) if n2 > 0 else [])
     comp_rows = LS.read_rows(work / "components" / "raw")
     timings = dict(
@@ -410,7 +432,7 @@ def main(argv: list[str] | None = None) -> None:
         bar=dict(arm="nv3r4", mean_pit_mae=bar["mean_pit_mae"], mean_ltas=bar["mean_ltas_abs_db"]),
         verification=verification,
         stage2=s2,
-        main_effects=LS.main_effects(table),
+        main_effects=LS.main_effects(table, box),
         pareto=LS.pareto(table),
         n_feasible=sum(1 for e in table if e.get("feasible")),
         chosen=chosen,
@@ -437,8 +459,7 @@ def main(argv: list[str] | None = None) -> None:
                 n_stage2=n2,
             ),
             stage2=s2,
-            selection="among points beating nv3r4 on BOTH tuning-set means (PIT MAE, LTAS), "
-            "the lowest mean PIT MAE",
+            selection=f"gate {args.gate!r} against nv3r4's tuning-set means, then {args.select}",
             scorer=dict(
                 experiment=GT.SCORER_EXPERIMENT,
                 ckpt=GT.SCORER_CKPT,
