@@ -524,6 +524,123 @@ def cmd_insample(args: argparse.Namespace) -> int:
     return 0
 
 
+#: ``bench``: the recordings shown by default (the insample set) and the orders
+#: of the line-zoom panels
+BENCH_KEYS = (
+    "motor_Motor1_80",
+    "motor_Motor2_80",
+    "motor_Motor3_80",
+    "motor_Motor4_80",
+    "motor_Motor1_50",
+    "motor_Motor1_90",
+)
+BENCH_ZOOM_ORDERS = (2, 10, 20, 40, 60, 90)
+BENCH_ZOOM_HZ = 25.0
+
+
+def cmd_bench(args: argparse.Namespace) -> int:
+    """The bench payload against the real single-rotor recordings: per recording,
+    the time-domain render of the fitted model on its own setting
+    (``bench_v4.render_setting``: both pedestal processes and the shaft OU, the
+    floor, the measured ambient) against the strict rotor-on span of the
+    recording, as :func:`_spectrogram_views` figures and WAVs over the first
+    ``--seconds``; and line zooms of the whole-span periodograms (0.1 Hz bins,
+    mic mean): data, the render and the model's expected periodogram, +-25 Hz
+    around orders :data:`BENCH_ZOOM_ORDERS`."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import torch
+
+    from experiments.noise_model import bench_v4 as B
+
+    torch.set_num_threads(int(args.threads))
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    pay = json.loads(Path(args.v4).read_text())
+    keys = [r["key"] for r in pay["recordings"]]
+    settings = [B.load_setting(k.split("_")[1], int(k.split("_")[2])) for k in keys]
+    motors = tuple(dict.fromkeys(r["motor"] for r in pay["recordings"]))
+    rig = B.build_rig(motors, settings=settings)
+    model = B.RigModel(rig, device="cpu", kappa=float(pay["priors"]["floor_push_kappa"]))
+    model.load_payload(pay)
+    mics = [int(m) for m in args.mics.split(",")]
+    want = args.keys.split(",") if args.keys else list(BENCH_KEYS)
+    labels = {"real": "real", "v4": "v4 bench fit"}
+    rng = np.random.default_rng(SEED)
+    rows = []
+    for key in want:
+        j = keys.index(key)
+        s, fz = rig.settings[j], model.frozen[j]
+        x, span = B.load_audio(s.motor, s.throttle)
+        seg = x[:8, int(round(span[0] * SR)) : int(round(span[0] * SR)) + s.n]
+        render = B.render_setting(model, j, rng)[:8, : seg.shape[1]]
+        n_show = min(seg.shape[1], int(float(args.seconds) * SR))
+        audio = {"real": seg[:, :n_show], "v4": render[:, :n_show]}
+        stem = f"bench_{key.removeprefix('motor_')}"
+        levels, figures = _spectrogram_views(
+            audio,
+            mics,
+            labels,
+            out,
+            stem=stem,
+            title=f"DREGON bench {key} ({s.carrier:.2f} rev/s), first {n_show / SR:g} s of the "
+            "rotor-on span",
+        )
+        # line zooms on the whole span (the fit's own 1/T bins)
+        f = np.fft.rfftfreq(seg.shape[1], d=1.0 / SR)
+        p_data = B._periodogram(seg).mean(0)
+        p_render = B._periodogram(render).mean(0)
+        with torch.no_grad():
+            comp = {k: v.cpu().numpy() for k, v in model.components(j).items()}
+        f_fit = np.asarray(fz.grid.freqs_hz)
+        p_model = (comp["lines"] + comp["floor"] + comp["wind"] + fz.ambient.cpu().numpy()).mean(0)
+        orders = [k for k in BENCH_ZOOM_ORDERS if k * s.carrier + BENCH_ZOOM_HZ < SR / 2]
+        fig, axes = plt.subplots(
+            1, len(orders), figsize=(3.2 * len(orders), 3.0), layout="constrained"
+        )
+        peaks = {}
+        for ax, k in zip(np.atleast_1d(axes), orders, strict=True):
+            fc = k * s.carrier
+            sel = np.abs(f - fc) <= BENCH_ZOOM_HZ
+            sel_fit = np.abs(f_fit - fc) <= BENCH_ZOOM_HZ
+            for name, ff, pp, sl, col, lw in (
+                ("real", f, p_data, sel, "black", 0.7),
+                ("v4 render", f, p_render, sel, "tab:red", 0.7),
+                ("v4 expected", f_fit, p_model, sel_fit, "tab:orange", 1.2),
+            ):
+                ax.plot(ff[sl] - fc, _db(pp[sl]), color=col, lw=lw, label=name)
+                peaks.setdefault(name, {})[k] = float(_db(pp[sl].max()) - _db(np.median(pp[sl])))
+            ax.set_title(f"k = {k} ({fc:.0f} Hz)", fontsize=9)
+            ax.set_xlabel("Hz from k x carrier")
+            ax.grid(alpha=0.3)
+        np.atleast_1d(axes)[0].set_ylabel("dB, mic mean")
+        np.atleast_1d(axes)[0].legend(fontsize=7)
+        fig.suptitle(f"{key}: whole-span periodogram ({f[1]:.3f} Hz bins) around the orders")
+        zoom = f"fig_{stem}_zoom.png"
+        fig.savefig(out / zoom, dpi=100)
+        plt.close(fig)
+        rows.append(
+            dict(
+                key=key,
+                carrier_rev_s=s.carrier,
+                span_s=list(span),
+                rms_db_per_mic=levels,
+                figures=figures,
+                zoom=zoom,
+                peak_over_median_db=peaks,
+            )
+        )
+        print(f"bench {key}: {s.carrier:.2f} rev/s, {seg.shape[1] / SR:.1f} s", flush=True)
+    (out / "figdata_bench.json").write_text(
+        json.dumps(
+            dict(v4=str(args.v4), mics=mics, seed=SEED, recordings=rows, git=_git()), indent=1
+        )
+    )
+    return 0
+
+
 #: ``hppnet``: the matched-level v4 arm raises both line-profile rows by this much
 #: (the probe that brought every mic of the k0 stage above the scorer's level
 #: threshold on the hovering and spinning windows)
@@ -694,6 +811,78 @@ FULL_VIEWS = dict(
 FULL_VIEW_SUFFIX = dict(log="", lin="_lin", lin2k="_lin2k")
 
 
+def _spectrogram_views(
+    audio: dict[str, np.ndarray],
+    mics: list[int],
+    labels: dict[str, str],
+    out: Path,
+    *,
+    stem: str,
+    title: str,
+) -> tuple[dict[str, list[float]], dict[str, str]]:
+    """Rows ``audio`` (real first) x columns ``mics``: one figure per
+    :data:`FULL_VIEWS` view (``fig_<stem><suffix>.png``), one colour scale per mic
+    (the real clip's), and one WAV per arm and mic on one scale per mic
+    (``audio/<stem>_<arm>_mic<m>.wav``). Returns the per-arm mic levels (dB)
+    and the figure names per view."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from scipy.signal import spectrogram
+
+    specs: dict[int, dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
+    levels: dict[str, list[float]] = {}
+    for m in mics:
+        specs[m] = {}
+        for name, x in audio.items():
+            f, t, s = spectrogram(
+                x[m], fs=SR, nperseg=FULL_NPERSEG, noverlap=FULL_NPERSEG - FULL_HOP, window="hann"
+            )
+            specs[m][name] = (f, t, _db(s))
+            levels.setdefault(name, []).append(float(_db(np.mean(x[m] ** 2))))
+        scale = 0.5 / max(float(np.max(np.abs(x[m]))) for x in audio.values())
+        for name, x in audio.items():
+            _wav(out / "audio" / f"{stem}_{name}_mic{m}.wav", x[m], scale)
+    figures = {}
+    for view, (fmin, fmax, yscale) in FULL_VIEWS.items():
+        fig, axes = plt.subplots(
+            len(audio),
+            len(mics),
+            figsize=(6.4 * len(mics), 2.3 * len(audio)),
+            sharex=True,
+            sharey=True,
+            layout="constrained",
+        )
+        axes = np.atleast_2d(axes).reshape(len(audio), len(mics))
+        for c, m in enumerate(mics):
+            f, _, s_real = specs[m]["real"]
+            sel = (f >= fmin) & (f <= fmax)
+            # the top of the scale: the real clip's loudest time-averaged bin in the
+            # view + 6 dB (a percentile over all bins is set by the many
+            # high-frequency bins and saturates the low band)
+            hi = float(np.max(_db(np.mean(10.0 ** (s_real[sel] / 10.0), axis=1)))) + 6.0
+            for r, (name, (f, t, s)) in enumerate(specs[m].items()):
+                ax = axes[r, c]
+                mesh = ax.pcolormesh(
+                    t, f[sel], s[sel], vmin=hi - 70, vmax=hi, shading="auto", cmap="magma"
+                )
+                ax.set_yscale(yscale)
+                ax.set_ylim(fmin, fmax)
+                ax.set_title(f"{labels[name]}, mic {m}", fontsize=10)
+                if c == 0:
+                    ax.set_ylabel(f"Hz ({'log' if yscale == 'log' else 'linear'})")
+            fig.colorbar(mesh, ax=axes[:, c], shrink=0.5, label="dB (real clip's scale)")
+        for ax in axes[-1]:
+            ax.set_xlabel("time (s)")
+        fig.suptitle(f"{title}, {fmin:g}-{fmax:g} Hz {yscale}", fontsize=11)
+        name = f"fig_{stem}{FULL_VIEW_SUFFIX[view]}.png"
+        fig.savefig(out / name, dpi=100)
+        plt.close(fig)
+        figures[view] = name
+    return levels, figures
+
+
 def cmd_full(args: argparse.Namespace) -> int:
     """8 s spectrograms (log frequency 30 Hz - 8 kHz, plus linear 0 - 8 kHz and 0 - 2 kHz views, :data:`FULL_VIEWS`) on
     each window's real rotor-speed track: real, nv3r4, v4 (and v4 with its lines
@@ -703,12 +892,6 @@ def cmd_full(args: argparse.Namespace) -> int:
     through ``render_noise_regimes``. One colour scale per mic (the real clip's);
     WAVs on one scale per mic and window."""
     import dataclasses
-
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from scipy.signal import spectrogram
 
     from data_processing.noise_model.render import render_noise, render_noise_regimes
     from experiments.noise_model import gates as GT
@@ -759,63 +942,15 @@ def cmd_full(args: argparse.Namespace) -> int:
             if rig == "dregon"
             else f"{sup.regime}_{sup.start_s:g}s"
         )
-        specs: dict[int, dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
-        levels = {}
-        for m in mics:
-            specs[m] = {}
-            for name, x in audio.items():
-                f, t, s = spectrogram(
-                    x[m],
-                    fs=SR,
-                    nperseg=FULL_NPERSEG,
-                    noverlap=FULL_NPERSEG - FULL_HOP,
-                    window="hann",
-                )
-                specs[m][name] = (f, t, _db(s))
-                levels.setdefault(name, []).append(float(_db(np.mean(x[m] ** 2))))
-            scale = 0.5 / max(float(np.max(np.abs(x[m]))) for x in audio.values())
-            for name, x in audio.items():
-                _wav(out / "audio" / f"full_{tag}_{key}_{name}_mic{m}.wav", x[m], scale)
-        figures = {}
-        for view, (fmin, fmax, yscale) in FULL_VIEWS.items():
-            fig, axes = plt.subplots(
-                len(audio),
-                len(mics),
-                figsize=(6.4 * len(mics), 2.3 * len(audio)),
-                sharex=True,
-                sharey=True,
-                layout="constrained",
-            )
-            axes = np.atleast_2d(axes).reshape(len(audio), len(mics))
-            for c, m in enumerate(mics):
-                f, _, s_real = specs[m]["real"]
-                sel = (f >= fmin) & (f <= fmax)
-                # the top of the scale: the real clip's loudest time-averaged bin in
-                # the view + 6 dB (a percentile over all bins is set by the many
-                # high-frequency bins and saturates the low band)
-                hi = float(np.max(_db(np.mean(10.0 ** (s_real[sel] / 10.0), axis=1)))) + 6.0
-                for r, (name, (f, t, s)) in enumerate(specs[m].items()):
-                    ax = axes[r, c]
-                    mesh = ax.pcolormesh(
-                        t, f[sel], s[sel], vmin=hi - 70, vmax=hi, shading="auto", cmap="magma"
-                    )
-                    ax.set_yscale(yscale)
-                    ax.set_ylim(fmin, fmax)
-                    ax.set_title(f"{labels[name]}, mic {m}", fontsize=10)
-                    if c == 0:
-                        ax.set_ylabel(f"Hz ({'log' if yscale == 'log' else 'linear'})")
-                fig.colorbar(mesh, ax=axes[:, c], shrink=0.5, label="dB (real clip's scale)")
-            for ax in axes[-1]:
-                ax.set_xlabel("time (s)")
-            fig.suptitle(
-                f"{tag.upper()} {sup.recording} @ {sup.start_s:.2f} s, {args.seconds:g} s, "
-                f"rotors {rps.min():.0f}-{rps.max():.0f} rev/s, {fmin:g}-{fmax:g} Hz {yscale}",
-                fontsize=11,
-            )
-            name = f"fig_full_{tag}_{key}{FULL_VIEW_SUFFIX[view]}.png"
-            fig.savefig(out / name, dpi=100)
-            plt.close(fig)
-            figures[view] = name
+        levels, figures = _spectrogram_views(
+            audio,
+            mics,
+            labels,
+            out,
+            stem=f"full_{tag}_{key}",
+            title=f"{tag.upper()} {sup.recording} @ {sup.start_s:.2f} s, {args.seconds:g} s, "
+            f"rotors {rps.min():.0f}-{rps.max():.0f} rev/s",
+        )
         rows.append(
             dict(
                 key=key,
@@ -1157,6 +1292,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seconds", type=float, default=FULL_SECONDS)
     p.add_argument("--out", default=str(OUT))
     p.set_defaults(func=cmd_full)
+    p = sub.add_parser("bench")
+    p.add_argument("--v4", required=True, help="the DREGON bench payload")
+    p.add_argument("--keys", default=None, help="recordings (default: BENCH_KEYS)")
+    p.add_argument("--mics", default="1,2")
+    p.add_argument("--seconds", type=float, default=FULL_SECONDS)
+    p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--out", default=str(OUT))
+    p.set_defaults(func=cmd_bench)
     p = sub.add_parser("params")
     p.add_argument("--v4", required=True, help="the v4 cruise half")
     p.add_argument("--v4-standby", required=True)
