@@ -290,6 +290,18 @@ caps are part of the laws: 20 % of the k 9–20 amplitude pedestals sit at
 `AMP_CAPS`, and the phase σ² reaches its cap of 3 at the p95. Cost: ~2.5 s of
 gate per draw on one thread, ~1.6 GB RSS per worker.
 
+**Built and published (2026-10-25).** omnirun `prior-v4-bank-a14f5a`
+(`uni-cpu`, 48 workers, 2794 s, code at `055f746c`) kept 16 384 of 31 257
+draws (52.4 %). By first failing rotor, the rejections were rotor 1: 3877,
+rotor 2: 9512, rotor 3: 195 and rotor 4: 1289, matching the pool's eligible
+counts of 46 / 37 / 48 / 27 frames. The gate selects louder lines: the kept
+draws have motor boost 6.25 vs 4.98 dB (mean over all draws), k = 2 over the
+floor 22.9 vs 22.0 dB, tail −3.2 vs −4.0 dB, slope 24.3 vs 24.9 dB/decade.
+The float16 round trip is within 0.031 dB on the tables and 5e-4 relative on
+the pedestal. Published as `prior-v4-banks@2ee5131e`
+(`prior_v4_n16384.npz`, 23.3 MiB, pinned); report
+`results/prior_rigs/prior_v4_n16384.report.json`.
+
 ## Paper grid (2026-10-23): pending approval
 
 Nothing below is submitted until Dmitrii approves the grid. These runs fill
