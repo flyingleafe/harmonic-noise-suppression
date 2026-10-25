@@ -916,6 +916,12 @@ def cmd_full(args: argparse.Namespace) -> int:
             raised["params"][key] = (np.asarray(raised["params"][key]) + args.line_db).tolist()
         fits["v4_lines"] = (raised, None)
         labels["v4_lines"] = f"v4, lines +{args.line_db:g} dB"
+    for spec in args.arm or []:
+        # an extra row: NAME=PATH[:LABEL] (a payload rendered as it is, e.g. the bench fit)
+        name, _, rest = spec.partition("=")
+        path, _, label = rest.partition(":")
+        fits[name] = (json.loads(Path(path).read_text()), None)
+        labels[name] = label or name
     supports = GT.DREGON_CRUISE_SUPPORTS if rig == "dregon" else GT.MICHAELS_SUPPORTS
     rows = []
     for sup in supports:
@@ -1288,6 +1294,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--v4-standby", default=None, help="MD2: the v4 standby half")
     p.add_argument("--v3-standby", default=None, help="MD2: the nv3r4 standby half")
     p.add_argument("--line-db", type=float, default=None, help="add a v4 arm with lines +dB")
+    p.add_argument(
+        "--arm",
+        action="append",
+        help="an extra row rendered as it is: NAME=PATH[:LABEL] (repeatable)",
+    )
     p.add_argument("--mics", default=None, help="default: DREGON 1,2; MD2 0,4")
     p.add_argument("--seconds", type=float, default=FULL_SECONDS)
     p.add_argument("--out", default=str(OUT))
