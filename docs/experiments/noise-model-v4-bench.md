@@ -688,6 +688,12 @@ happens depends on the random draw (the wind realisation differs between a
 4 s and an 8 s render). On that window the model's mics 0, 1, 2 and 4 are
 6–9 dB quieter than real without the wind. HRSPNet shows no such failure.
 
+*Bench fit rendered as it is (2026-10-24).* c7 on the flight tracks, no
+flight stage, no wind. It shows thin lines up to about 6 kHz but scores
+poorly (`nv4-pit-benchonly-d684d0`): HPPNet 3.72 on the scoring windows
+(bar 1.680), 2.36 on the tuning segments; HRSPNet 2.10 (nv3r4 1.105),
+1.83 on tuning. Visible thin lines are not what the trackers need.
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
