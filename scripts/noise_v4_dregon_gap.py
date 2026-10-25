@@ -680,14 +680,22 @@ def cmd_hppnet(args: argparse.Namespace) -> int:
     return 0
 
 
-#: ``full``: the clip length, and the log-frequency axis of its spectrograms
+#: ``full``: the clip length, and the frequency axes of its spectrograms
 FULL_SECONDS = 8.0
 FULL_FMIN, FULL_FMAX = 30.0, 8000.0
 FULL_NPERSEG, FULL_HOP = 2048, 256
+#: ``full``: the figure views, (fmin, fmax, axis scale) each, and their file suffixes:
+#: log 30 Hz - 8 kHz, linear 0 - 8 kHz, and linear 0 - 2 kHz (the low orders resolved)
+FULL_VIEWS = dict(
+    log=(FULL_FMIN, FULL_FMAX, "log"),
+    lin=(0.0, FULL_FMAX, "linear"),
+    lin2k=(0.0, 2000.0, "linear"),
+)
+FULL_VIEW_SUFFIX = dict(log="", lin="_lin", lin2k="_lin2k")
 
 
 def cmd_full(args: argparse.Namespace) -> int:
-    """8 s spectrograms over the whole band (log frequency, 30 Hz - 8 kHz) on
+    """8 s spectrograms (log frequency 30 Hz - 8 kHz, plus linear 0 - 8 kHz and 0 - 2 kHz views, :data:`FULL_VIEWS`) on
     each window's real rotor-speed track: real, nv3r4, v4 (and v4 with its lines
     raised ``--line-db``). DREGON: the five recordings from the start of each
     4 s scoring window (scored 4 s, the 2 s guard, then the first 2 s of the fit
@@ -751,18 +759,10 @@ def cmd_full(args: argparse.Namespace) -> int:
             if rig == "dregon"
             else f"{sup.regime}_{sup.start_s:g}s"
         )
-        fig, axes = plt.subplots(
-            len(audio),
-            len(mics),
-            figsize=(6.4 * len(mics), 2.3 * len(audio)),
-            sharex=True,
-            sharey=True,
-            layout="constrained",
-        )
-        axes = np.atleast_2d(axes).reshape(len(audio), len(mics))
+        specs: dict[int, dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
         levels = {}
-        for c, m in enumerate(mics):
-            spec = {}
+        for m in mics:
+            specs[m] = {}
             for name, x in audio.items():
                 f, t, s = spectrogram(
                     x[m],
@@ -771,38 +771,51 @@ def cmd_full(args: argparse.Namespace) -> int:
                     noverlap=FULL_NPERSEG - FULL_HOP,
                     window="hann",
                 )
-                spec[name] = (f, t, _db(s))
-            f, _, s_real = spec["real"]
-            sel = (f >= FULL_FMIN) & (f <= FULL_FMAX)
-            # the top of the scale: the real clip's loudest time-averaged bin + 6 dB
-            # (a percentile over all bins is set by the many high-frequency bins and
-            # saturates the low band on a log axis)
-            hi = float(np.max(_db(np.mean(10.0 ** (s_real[sel] / 10.0), axis=1)))) + 6.0
-            for r, (name, (f, t, s)) in enumerate(spec.items()):
-                ax = axes[r, c]
-                mesh = ax.pcolormesh(
-                    t, f[sel], s[sel], vmin=hi - 70, vmax=hi, shading="auto", cmap="magma"
-                )
-                ax.set_yscale("log")
-                ax.set_ylim(FULL_FMIN, FULL_FMAX)
-                ax.set_title(f"{labels[name]}, mic {m}", fontsize=10)
-                if c == 0:
-                    ax.set_ylabel("Hz (log)")
-            fig.colorbar(mesh, ax=axes[:, c], shrink=0.5, label="dB (real clip's scale)")
-            for name, x in audio.items():
+                specs[m][name] = (f, t, _db(s))
                 levels.setdefault(name, []).append(float(_db(np.mean(x[m] ** 2))))
             scale = 0.5 / max(float(np.max(np.abs(x[m]))) for x in audio.values())
             for name, x in audio.items():
                 _wav(out / "audio" / f"full_{tag}_{key}_{name}_mic{m}.wav", x[m], scale)
-        for ax in axes[-1]:
-            ax.set_xlabel("time (s)")
-        fig.suptitle(
-            f"{tag.upper()} {sup.recording} @ {sup.start_s:.2f} s, {args.seconds:g} s, "
-            f"rotors {rps.min():.0f}-{rps.max():.0f} rev/s",
-            fontsize=11,
-        )
-        fig.savefig(out / f"fig_full_{tag}_{key}.png", dpi=100)
-        plt.close(fig)
+        figures = {}
+        for view, (fmin, fmax, yscale) in FULL_VIEWS.items():
+            fig, axes = plt.subplots(
+                len(audio),
+                len(mics),
+                figsize=(6.4 * len(mics), 2.3 * len(audio)),
+                sharex=True,
+                sharey=True,
+                layout="constrained",
+            )
+            axes = np.atleast_2d(axes).reshape(len(audio), len(mics))
+            for c, m in enumerate(mics):
+                f, _, s_real = specs[m]["real"]
+                sel = (f >= fmin) & (f <= fmax)
+                # the top of the scale: the real clip's loudest time-averaged bin in
+                # the view + 6 dB (a percentile over all bins is set by the many
+                # high-frequency bins and saturates the low band)
+                hi = float(np.max(_db(np.mean(10.0 ** (s_real[sel] / 10.0), axis=1)))) + 6.0
+                for r, (name, (f, t, s)) in enumerate(specs[m].items()):
+                    ax = axes[r, c]
+                    mesh = ax.pcolormesh(
+                        t, f[sel], s[sel], vmin=hi - 70, vmax=hi, shading="auto", cmap="magma"
+                    )
+                    ax.set_yscale(yscale)
+                    ax.set_ylim(fmin, fmax)
+                    ax.set_title(f"{labels[name]}, mic {m}", fontsize=10)
+                    if c == 0:
+                        ax.set_ylabel(f"Hz ({'log' if yscale == 'log' else 'linear'})")
+                fig.colorbar(mesh, ax=axes[:, c], shrink=0.5, label="dB (real clip's scale)")
+            for ax in axes[-1]:
+                ax.set_xlabel("time (s)")
+            fig.suptitle(
+                f"{tag.upper()} {sup.recording} @ {sup.start_s:.2f} s, {args.seconds:g} s, "
+                f"rotors {rps.min():.0f}-{rps.max():.0f} rev/s, {fmin:g}-{fmax:g} Hz {yscale}",
+                fontsize=11,
+            )
+            name = f"fig_full_{tag}_{key}{FULL_VIEW_SUFFIX[view]}.png"
+            fig.savefig(out / name, dpi=100)
+            plt.close(fig)
+            figures[view] = name
         rows.append(
             dict(
                 key=key,
@@ -812,7 +825,8 @@ def cmd_full(args: argparse.Namespace) -> int:
                 rps_min=float(rps.min()),
                 rps_max=float(rps.max()),
                 rms_db_per_mic=levels,
-                figure=f"fig_full_{tag}_{key}.png",
+                figure=figures["log"],
+                figures=figures,
             )
         )
         print(f"{tag} {key}: rotors {rps.min():.1f}-{rps.max():.1f} rev/s", flush=True)
