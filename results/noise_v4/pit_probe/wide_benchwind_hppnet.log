@@ -1,0 +1,38 @@
+Error processing line 1 of /data/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.venv/lib/python3.12/site-packages/_virtualenv.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 206, in addpackage
+    File "<string>", line 1, in <module>
+  ModuleNotFoundError: No module named '_virtualenv'
+
+Remainder of file ignored
+Error processing line 1 of /data/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.venv/lib/python3.12/site-packages/_virtualenv.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 206, in addpackage
+    File "<string>", line 1, in <module>
+  ModuleNotFoundError: No module named '_virtualenv'
+
+Remainder of file ignored
+free-flight_nosource_room2 {'real': 0.76, 'bw_gust': 1.77, 'bw_nv3like': 1.76}
+hovering_nosource_room2 {'real': 0.67, 'bw_gust': 2.03, 'bw_nv3like': 2.02}
+updown_nosource_room2 {'real': 1.03, 'bw_gust': 2.0, 'bw_nv3like': 2.01}
+rectangle_nosource_room2 {'real': 0.83, 'bw_gust': 1.86, 'bw_nv3like': 1.86}
+spinning_nosource_room2 {'real': 1.33, 'bw_gust': 1.87, 'bw_nv3like': 1.87}
+free-flight_nosource_room2 {'real': 1.26, 'bw_gust': 2.21, 'bw_nv3like': 2.21}
+free-flight_nosource_room2 {'real': 0.84, 'bw_gust': 1.89, 'bw_nv3like': 1.89}
+free-flight_nosource_room2 {'real': 1.37, 'bw_gust': 2.3, 'bw_nv3like': 2.3}
+free-flight_nosource_room2 {'real': 0.71, 'bw_gust': 1.78, 'bw_nv3like': 1.77}
+free-flight_nosource_room2 {'real': 1.03, 'bw_gust': 2.14, 'bw_nv3like': 2.16}
+free-flight_nosource_room2 {'real': 1.14, 'bw_gust': 2.17, 'bw_nv3like': 2.18}
+hovering_nosource_room2 {'real': 0.8, 'bw_gust': 1.76, 'bw_nv3like': 1.76}
+hovering_nosource_room2 {'real': 1.64, 'bw_gust': 2.17, 'bw_nv3like': 2.17}
+updown_nosource_room2 {'real': 1.03, 'bw_gust': 2.02, 'bw_nv3like': 2.02}
+updown_nosource_room2 {'real': 1.03, 'bw_gust': 2.26, 'bw_nv3like': 2.26}
+rectangle_nosource_room2 {'real': 1.27, 'bw_gust': 2.53, 'bw_nv3like': 2.53}
+rectangle_nosource_room2 {'real': 1.31, 'bw_gust': 1.92, 'bw_nv3like': 1.91}
+spinning_nosource_room2 {'real': 1.58, 'bw_gust': 2.04, 'bw_nv3like': 2.05}
+tracker hppnet (default ckpt) set wide seeds 2001
+real              0.76  0.67  1.03  0.83  1.33  1.26  0.84  1.37  0.71  1.03  1.14  0.80  1.64  1.03  1.03  1.27  1.31  1.58  mean 1.091
+bw_gust           1.77  2.03  2.00  1.86  1.87  2.21  1.89  2.30  1.78  2.14  2.17  1.76  2.17  2.02  2.26  2.53  1.92  2.04  mean 2.039
+bw_nv3like        1.76  2.02  2.01  1.86  1.87  2.21  1.89  2.30  1.77  2.16  2.18  1.76  2.17  2.02  2.26  2.53  1.91  2.05  mean 2.040

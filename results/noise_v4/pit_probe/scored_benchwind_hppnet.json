@@ -1,0 +1,69 @@
+{
+ "tracker": {
+  "experiment": "hppnet_l2_r2_s0",
+  "ckpt": "best",
+  "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+  "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/7787de670e7a/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
+  "bytes": 2746881,
+  "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
+ },
+ "set": "scored",
+ "seeds": [
+  2001,
+  2002,
+  2003,
+  2004
+ ],
+ "rows": [
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727397.2050455,
+   "pit": {
+    "real": 0.6381290749163699,
+    "bw_gust": 2.369304393386242,
+    "bw_nv3like": 2.374793502464755
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903905.3944898,
+   "pit": {
+    "real": 0.8884082634564182,
+    "bw_gust": 2.455699465417677,
+    "bw_nv3like": 2.4384999693650826
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903578.348311,
+   "pit": {
+    "real": 1.694930324695644,
+    "bw_gust": 2.9592029426595703,
+    "bw_nv3like": 2.957323551134926
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905725.952559,
+   "pit": {
+    "real": 1.685141578973265,
+    "bw_gust": 2.851957489156012,
+    "bw_nv3like": 2.8563071936302467
+   }
+  },
+  {
+   "window": "spinning_nosource_room2",
+   "start_s": 1511905200.978012,
+   "pit": {
+    "real": 1.186931186759788,
+    "bw_gust": 2.5003323976831315,
+    "bw_nv3like": 2.5110107134874715
+   }
+  }
+ ],
+ "mean": {
+  "real": 1.2187080857602972,
+  "bw_gust": 2.6272993376605265,
+  "bw_nv3like": 2.627586986016496
+ }
+}

@@ -1,0 +1,25 @@
+Error processing line 1 of /data/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.venv/lib/python3.12/site-packages/_virtualenv.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 206, in addpackage
+    File "<string>", line 1, in <module>
+  ModuleNotFoundError: No module named '_virtualenv'
+
+Remainder of file ignored
+Error processing line 1 of /data/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.venv/lib/python3.12/site-packages/_virtualenv.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 206, in addpackage
+    File "<string>", line 1, in <module>
+  ModuleNotFoundError: No module named '_virtualenv'
+
+Remainder of file ignored
+free-flight_nosource_room2 {'real': 0.45, 'bw_gust': 1.54, 'bw_nv3like': 1.53}
+hovering_nosource_room2 {'real': 0.72, 'bw_gust': 1.63, 'bw_nv3like': 1.63}
+updown_nosource_room2 {'real': 1.04, 'bw_gust': 1.52, 'bw_nv3like': 1.52}
+rectangle_nosource_room2 {'real': 1.55, 'bw_gust': 2.47, 'bw_nv3like': 2.48}
+spinning_nosource_room2 {'real': 1.02, 'bw_gust': 1.95, 'bw_nv3like': 1.95}
+tracker hrspnet (default ckpt) set scored seeds 2001-2004
+real              0.45  0.72  1.04  1.55  1.02  mean 0.956
+bw_gust           1.54  1.63  1.52  2.47  1.95  mean 1.822
+bw_nv3like        1.53  1.63  1.52  2.48  1.95  mean 1.824

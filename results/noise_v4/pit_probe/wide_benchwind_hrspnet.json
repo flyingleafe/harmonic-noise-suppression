@@ -1,0 +1,183 @@
+{
+ "tracker": {
+  "experiment": "rp_pyrseplstm_k64_alllab",
+  "ckpt": "best_real_median",
+  "reference": "r2://ml-data/artifacts/rp_pyrseplstm_k64_alllab/checkpoints/best_real_median.ckpt",
+  "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/7787de670e7a/.cache/r2_checkpoints/ml-data__artifacts__rp_pyrseplstm_k64_alllab__checkpoints__best_real_median.ckpt",
+  "bytes": 2098579,
+  "sha256": "7b9c444ce5797310d82f5566ce5c7159470f1a31ba27f4685f128695cdcd8778"
+ },
+ "set": "wide",
+ "seeds": [
+  2001
+ ],
+ "rows": [
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727403.2050455,
+   "pit": {
+    "real": 0.48549660729948724,
+    "bw_gust": 1.5460781006265336,
+    "bw_nv3like": 1.54631864686574
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903911.3944898,
+   "pit": {
+    "real": 0.5575172983838801,
+    "bw_gust": 1.7041197474403451,
+    "bw_nv3like": 1.6837190650086438
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903584.348311,
+   "pit": {
+    "real": 0.8753819931256541,
+    "bw_gust": 1.7075440139086802,
+    "bw_nv3like": 1.7067783956326208
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905731.952559,
+   "pit": {
+    "real": 0.5362395497004222,
+    "bw_gust": 1.5882423332322508,
+    "bw_nv3like": 1.587626162724744
+   }
+  },
+  {
+   "window": "spinning_nosource_room2",
+   "start_s": 1511905206.978012,
+   "pit": {
+    "real": 0.8969815797204335,
+    "bw_gust": 1.8443960541815079,
+    "bw_nv3like": 1.8461223931184552
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727411.2050455,
+   "pit": {
+    "real": 0.7984492503270857,
+    "bw_gust": 2.0139159895273093,
+    "bw_nv3like": 2.009237987994454
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727419.2050455,
+   "pit": {
+    "real": 0.5461791119421604,
+    "bw_gust": 1.5275176124204175,
+    "bw_nv3like": 1.528254187582271
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727427.2050455,
+   "pit": {
+    "real": 0.705071749215403,
+    "bw_gust": 2.181834503314354,
+    "bw_nv3like": 2.1016280423897533
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727435.2050455,
+   "pit": {
+    "real": 0.496516461045187,
+    "bw_gust": 1.5977354147892782,
+    "bw_nv3like": 1.59867832889553
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727443.2050455,
+   "pit": {
+    "real": 0.7365730712221898,
+    "bw_gust": 1.7784363863389991,
+    "bw_nv3like": 1.7800258208468551
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727451.2050455,
+   "pit": {
+    "real": 0.7510932945184268,
+    "bw_gust": 1.7313473349427424,
+    "bw_nv3like": 1.7335308487102592
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903919.3944898,
+   "pit": {
+    "real": 0.6651639866911795,
+    "bw_gust": 1.631057777951659,
+    "bw_nv3like": 1.629774841340254
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903927.3944898,
+   "pit": {
+    "real": 1.0346346018080115,
+    "bw_gust": 1.953346235306325,
+    "bw_nv3like": 1.9814283684081386
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903592.348311,
+   "pit": {
+    "real": 0.7287690623804501,
+    "bw_gust": 1.688145834932777,
+    "bw_nv3like": 1.6885108432728506
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903600.348311,
+   "pit": {
+    "real": 0.744762644862055,
+    "bw_gust": 2.010721539740174,
+    "bw_nv3like": 2.010959129540225
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905739.952559,
+   "pit": {
+    "real": 0.7239483889367782,
+    "bw_gust": 2.570594012105019,
+    "bw_nv3like": 2.573271816479384
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905747.952559,
+   "pit": {
+    "real": 0.7408634210997804,
+    "bw_gust": 1.7774019265912584,
+    "bw_nv3like": 1.7790269957544909
+   }
+  },
+  {
+   "window": "spinning_nosource_room2",
+   "start_s": 1511905214.978012,
+   "pit": {
+    "real": 0.8143432903675324,
+    "bw_gust": 1.7897201425545561,
+    "bw_nv3like": 1.801815539716124
+   }
+  }
+ ],
+ "mean": {
+  "real": 0.7132214090358953,
+  "bw_gust": 1.8134530533280104,
+  "bw_nv3like": 1.8103726341267108
+ }
+}

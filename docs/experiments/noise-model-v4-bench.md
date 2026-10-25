@@ -693,6 +693,11 @@ flight stage, no wind. It shows thin lines up to about 6 kHz but scores
 poorly (`nv4-pit-benchonly-d684d0`): HPPNet 3.72 on the scoring windows
 (bar 1.680), 2.36 on the tuning segments; HRSPNet 2.10 (nv3r4 1.105),
 1.83 on tuning. Visible thin lines are not what the trackers need.
+Bench c7 plus the fitted SC gust wind, no other flight change
+(`results/noise_v4/flight/benchwind/`, job `nv4-pit-benchwind-21131c`):
+HRSPNet 1.82 on the scoring windows (nv3r4 1.105, bench alone 2.10, R2
+1.86), 1.81 on the wide pool; HPPNet 2.63 (bar 1.680), 2.04 wide. The two
+wind-level variants score the same.
 
 ## Conclusion
 
