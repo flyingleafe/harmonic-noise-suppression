@@ -25,7 +25,8 @@ exactly as before the ``line_scatter_db`` option and :data:`.v4.WIND_OFF_DB`
 existed, at the option's default and at an explicit zero; a capsule at the
 off level draws no wind. ``line_scatter_db > 0`` moves every (mic, line) gain
 of a render by its own static ``N(0, sd^2)`` dB, the shaft, envelopes and
-phases being the same draw.
+phases being the same draw. ``wind_sc`` adds v1's per-clip SC wind over each
+capsule's rendered floor.
 """
 
 from __future__ import annotations
@@ -316,3 +317,37 @@ def test_line_scatter_is_refused_for_a_v3_payload() -> None:
     fit = {"schema": "noise-v3-fit/1", "params": {}}
     with pytest.raises(ValueError, match="line_scatter_db"):
         render_noise(fit, np.full((1, SR // 4), 80.0), sr=SR, n_mics=1, line_scatter_db=1.0)
+
+
+def test_wind_sc_draws_v1s_per_clip_wind_over_each_capsules_rendered_floor() -> None:
+    """``wind_sc`` on a windless flight payload adds v1's SC wind. With
+    ``p_wind`` 1 and a vanishing shield, every capsule's wind is ``30 u`` dB
+    over its OWN rendered 20-100 Hz floor (the realisation, not the
+    expectation), one ``u`` per clip: the capsules agree, two clips differ. The
+    lines are silent, so a render without the option is the floor alone and
+    the wind is the difference (independent streams, linear after the sum). A
+    payload with its own wind refuses the option."""
+    fit = _static_wind_flight_payload()
+    fit["params"].update(
+        wind=None,
+        profile_aero_db=np.full((2, 12), -300.0).tolist(),
+        profile_motor_db=[[-300.0], [-300.0]],
+    )
+    law = {"p_wind": 1.0, "max_over_floor_db": 30.0, "shield_mean_db": 1e-9, "gustiness": 3}
+    rps = np.repeat(np.asarray(RPS)[:, None], SR, axis=1)
+    f = np.fft.rfftfreq(SR, 1.0 / SR)
+    band = (f >= 20.0) & (f <= 100.0)
+
+    def band_power(x: np.ndarray) -> np.ndarray:
+        return np.mean(np.abs(np.fft.rfft(x, axis=1)[:, band]) ** 2, axis=1)
+
+    excess = []
+    for seed in (3, 4):
+        floor = render_noise(fit, rps, sr=SR, n_mics=2, seed=seed)
+        wind = render_noise(fit, rps, sr=SR, n_mics=2, seed=seed, wind_sc=law) - floor
+        excess.append(10.0 * np.log10(band_power(wind) / band_power(floor)))
+    db = np.asarray(excess)  # (clip, mic)
+    assert np.ptp(db, axis=1).max() < 0.05, db
+    assert abs(db[0, 0] - db[1, 0]) > 0.5 and np.all((db > -10.0) & (db < 30.05)), db
+    with pytest.raises(ValueError, match="wind_sc"):
+        render_noise(_static_wind_flight_payload(), rps, sr=SR, n_mics=2, wind_sc=law)

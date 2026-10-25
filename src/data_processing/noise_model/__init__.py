@@ -76,7 +76,9 @@ fit and the MD2 flight fit (``docs/explainers/noise-model-v4.qmd``).
 
 Its ``params`` are read by :mod:`.v4` only. It is NOT in
 :data:`READABLE_FIT_SCHEMAS`: the v2/v3 readers (:func:`.params.check_schema`,
-the identifiability gate, the ``noise_v2`` bank checks) read keys a v4 payload
-does not carry, and must refuse it by its tag rather than fail on a missing key.
-:data:`.render.READABLE_SCHEMAS` lists it: :func:`.render.render_noise` draws it.
+the v2/v3 path of the identifiability gate, the ``noise_v2`` bank checks) read
+keys a v4 payload does not carry, and must refuse it by its tag rather than
+fail on a missing key. :data:`.render.READABLE_SCHEMAS` lists it:
+:func:`.render.render_noise` draws it; the identifiability gate reads it
+through its own v4 path.
 """

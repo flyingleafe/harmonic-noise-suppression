@@ -118,6 +118,8 @@ from data_processing.noise_model.v4 import WORK_RATE_HZ as V4_WORK_RATE_HZ
 __all__ = [
     "REGIME_ORDER",
     "READABLE_SCHEMAS",
+    "SC_WIND_KEYS",
+    "check_sc_wind",
     "fit_work_rate",
     "regime_blend_weight",
     "regime_seeds",
@@ -131,6 +133,9 @@ __all__ = [
 #: :func:`.params.gamma_from_params` maps onto an equivalent width, v3's, and
 #: v4's (:mod:`.v4`).
 READABLE_SCHEMAS = READABLE_FIT_SCHEMAS + (FIT_SCHEMA_V4,)
+#: The keys of v1's per-clip SC wind law (:func:`_sc_wind`): a v3 prior rig's
+#: ``params.wind_sc`` block, the v4 render option ``wind_sc``.
+SC_WIND_KEYS = ("p_wind", "max_over_floor_db", "shield_mean_db", "gustiness")
 
 #: WOLA frame (work samples) of the floor wander's short-time gain: 64 ms at
 #: 64 kHz, hop half of it. The gain it applies moves on the block scale
@@ -329,6 +334,21 @@ def _render_lines_ri(
         audio[:, t0 : t0 + n] += a @ zbuf[:, :n]
 
 
+def check_sc_wind(spec: Mapping[str, Any]) -> None:
+    """Raise unless ``spec`` is a valid :func:`_sc_wind` law: keys among
+    :data:`SC_WIND_KEYS`, ``0 <= p_wind <= 1``, ``shield_mean_db > 0``,
+    ``gustiness >= 1``."""
+    unknown = set(spec) - set(SC_WIND_KEYS)
+    if unknown:
+        raise ValueError(f"wind_sc: unknown keys {sorted(unknown)}; expected {SC_WIND_KEYS}")
+    if not 0.0 <= float(spec.get("p_wind", 0.7)) <= 1.0:
+        raise ValueError(f"wind_sc.p_wind must be in [0, 1], got {spec['p_wind']}")
+    if not float(spec.get("shield_mean_db", 8.0)) > 0.0:
+        raise ValueError(f"wind_sc.shield_mean_db must be > 0, got {spec['shield_mean_db']}")
+    if not int(spec.get("gustiness", 3)) >= 1:
+        raise ValueError(f"wind_sc.gustiness must be >= 1, got {spec['gustiness']}")
+
+
 def _sc_wind(
     rng: np.random.Generator,
     spec: Mapping[str, Any],
@@ -423,6 +443,7 @@ def render_noise(
     wander_mean: WanderMean = "zero",
     return_diagnostics: Literal[False] = False,
     line_scatter_db: float = 0.0,
+    wind_sc: Mapping[str, Any] | None = None,
 ) -> np.ndarray: ...
 
 
@@ -438,6 +459,7 @@ def render_noise(
     wander_mean: WanderMean = "zero",
     return_diagnostics: Literal[True],
     line_scatter_db: float = 0.0,
+    wind_sc: Mapping[str, Any] | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]: ...
 
 
@@ -452,6 +474,7 @@ def render_noise(
     wander_mean: WanderMean = "zero",
     return_diagnostics: bool = False,
     line_scatter_db: float = 0.0,
+    wind_sc: Mapping[str, Any] | None = None,
 ) -> np.ndarray | tuple[np.ndarray, dict[str, Any]]:
     """Synthesise the fitted noise on the carriers ``rps_rev_s``.
 
@@ -482,6 +505,13 @@ def render_noise(
         line) gain, aerodynamic and motor lines alike — a render-time
         augmentation (:func:`_render_noise_v4`), zero-mean in dB. ``0``: the
         render is bit-identical to one without the option.
+    wind_sc
+        A ``noise-v4-fit/3`` payload WITHOUT its own wind only (anything else
+        raises): v1's per-clip SC wind law (:func:`_sc_wind`; keys
+        :data:`SC_WIND_KEYS`, v1's defaults for the missing ones) drawn fresh
+        per clip over each capsule's rendered 20-100 Hz floor — the prior
+        rigs' wind as a render-time augmentation. ``None``: no wind beyond
+        the payload's.
 
     Returns
     -------
@@ -493,6 +523,8 @@ def render_noise(
     line_scatter_db = float(line_scatter_db)
     if not line_scatter_db >= 0.0:
         raise ValueError(f"line_scatter_db must be >= 0, got {line_scatter_db}")
+    if wind_sc is not None:
+        check_sc_wind(wind_sc)
     sr_work = fit_work_rate(fit) if sr_work is None else int(sr_work)
     if fit.get("schema") == FIT_SCHEMA_V4:
         out_v4, diag_v4 = _render_noise_v4(
@@ -503,12 +535,18 @@ def render_noise(
             seed=int(seed),
             sr_work=sr_work,
             line_scatter_db=line_scatter_db,
+            wind_sc=wind_sc,
         )
         return (out_v4, diag_v4) if return_diagnostics else out_v4
     if line_scatter_db > 0.0:
         raise ValueError(
             f"line_scatter_db is a {FIT_SCHEMA_V4} render option; this payload is "
             f"{fit.get('schema')!r} (its own per-line scatter is profile.mic_dev_sd_db)"
+        )
+    if wind_sc is not None:
+        raise ValueError(
+            f"wind_sc is a {FIT_SCHEMA_V4} render option; this payload is "
+            f"{fit.get('schema')!r} (its own per-clip wind is params.wind_sc)"
         )
     p = _check_schema(fit)
     v3 = fit.get("schema") == FIT_SCHEMA_V3
@@ -925,6 +963,7 @@ def _render_noise_v4(
     seed: int,
     sr_work: int,
     line_scatter_db: float = 0.0,
+    wind_sc: Mapping[str, Any] | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """A ``noise-v4-fit/3`` payload on the carriers ``rps_rev_s``
     (``docs/explainers/noise-model-v4.qmd`` § The model, § The renderer).
@@ -967,7 +1006,9 @@ def _render_noise_v4(
       spectrum; the static share ``s`` carries no rotor response;
     * flight only: the wind block (:func:`_v4_wind`: the static per-mic
       Gaussian wind of v3, or the SC gust generator drawn independently per
-      capsule), then the array response.
+      capsule), or, for a payload without one, the ``wind_sc`` option: v1's
+      per-clip SC wind (:func:`_sc_wind`) over each capsule's RENDERED
+      20-100 Hz floor, from the wind stream; then the array response.
 
     The lines are synthesised by :func:`_line_kernel` on the 1 kHz envelope
     knots, the orders under the anti-alias passband edge at the output rate and
@@ -984,6 +1025,8 @@ def _render_noise_v4(
         raise ValueError(f"fit carries {par.n_rotors} rotors, asked to render {n_rotors}")
     if n_mics > par.n_mics:
         raise ValueError(f"fit carries {par.n_mics} microphones, asked for {n_mics}")
+    if wind_sc is not None and par.wind is not None:
+        raise ValueError("wind_sc is for a payload without wind; this one carries params.wind")
     oversample = sr_work // sr
     if oversample * sr != sr_work:
         raise ValueError(f"sr_work {sr_work} must be an integer multiple of sr {sr}")
@@ -1130,6 +1173,9 @@ def _render_noise_v4(
         return speed_law[t_s.size]
 
     static = par.floor.static_rel
+    # each capsule's rendered floor power in 20-100 Hz: wind_sc's reference (v1's)
+    band = (freqs >= 20.0) & (freqs <= 100.0)
+    floor_band = np.zeros(n_mics)
     for m in range(n_mics):
         white = rng_floor.standard_normal(n_out)
         shaped = np.fft.irfft(np.fft.rfft(white) * floor_amp, n=n_out)
@@ -1141,9 +1187,14 @@ def _render_noise_v4(
                 g = np.einsum("rf,rtf->tf", rotor_lin[:, m], rotor_floor_gain(t_s)) + static
             return 10.0 * np.log10(g)
 
-        out[m] += _slow_gain(shaped, floor_gain_db, sr_work=sr, frame=V4_FLOOR_WOLA_FRAME)
+        floor_m = _slow_gain(shaped, floor_gain_db, sr_work=sr, frame=V4_FLOOR_WOLA_FRAME)
+        out[m] += floor_m
+        if wind_sc is not None:
+            floor_band[m] = float(np.mean(np.abs(np.fft.rfft(floor_m)[band]) ** 2))
     if par.wind is not None:
         out += _v4_wind(par.wind, rng_wind, n_mics, n_out, sr)
+    elif wind_sc is not None:
+        out += _sc_wind(rng_wind, wind_sc, n_mics, n_out, sr, floor_band, band)
     rendered = _v4_output(par, out, sr)
     diagnostics: dict[str, Any] = dict(
         schema=FIT_SCHEMA_V4,
@@ -1234,6 +1285,7 @@ def render_noise_regimes(
     wander_mean: WanderMean = "zero",
     return_diagnostics: bool = False,
     line_scatter_db: float = 0.0,
+    wind_sc: Mapping[str, Any] | None = None,
 ) -> np.ndarray | tuple[np.ndarray, dict[str, Any]]:
     """Synthesise ONE carrier track from a PER-REGIME pair of fits.
 
@@ -1269,8 +1321,8 @@ def render_noise_regimes(
 
     A regime whose weight is zero everywhere is NOT rendered: a cruise-only
     window costs exactly one render, and only a window that actually crosses
-    the band costs two. ``wander_mean`` and ``line_scatter_db`` go to each
-    :func:`render_noise`.
+    the band costs two. ``wander_mean``, ``line_scatter_db`` and ``wind_sc`` go
+    to each :func:`render_noise`.
     """
     fits = _regime_fits(fits_by_regime)
     rps = np.atleast_2d(np.asarray(rps_rev_s, dtype=np.float64))
@@ -1294,6 +1346,7 @@ def render_noise_regimes(
                 sr_work=sr_work,
                 wander_mean=wander_mean,
                 line_scatter_db=line_scatter_db,
+                wind_sc=wind_sc,
             ),
             dtype=np.float64,
         )

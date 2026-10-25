@@ -121,11 +121,15 @@ NOISE MODEL V4. A ``noise-v4-fit/3`` payload is checked by
 microphone counts) and drawn by the same ``render_noise``; ``comb_offset_db``
 moves its aerodynamic AND motor lines. ``preset_bank: <file>.npz`` is read on
 the file's ``meta.format``: a ``noise-prior-bank/1`` (v3 prior rigs,
-:mod:`.noise_model.prior_bank`) or a ``noise-prior-bank-v4/1`` (the same rigs
+:mod:`.noise_model.prior_bank`) or a ``noise-prior-bank-v4/2`` (the same rigs
 converted to v4, :mod:`.noise_model.prior_bank_v4`), both lazy.
 ``line_scatter_db`` (default 0) is the v4 renderer's per-clip static
 (mic, rotor, line) gain scatter in dB, a render-time augmentation; a pool
-holding any non-v4 entry refuses a positive one.
+holding any non-v4 entry refuses a positive one. ``wind_sc`` (default none)
+is the v4 renderer's per-clip SC wind, v1's law (``render_noise``
+``wind_sc``: ``p_wind``, ``max_over_floor_db``, ``shield_mean_db``,
+``gustiness``), the prior-v4 rigs' wind; a pool holding a non-v4 entry or a
+v4 one with its own wind refuses it.
 
 EVERYTHING IS VALIDATED WHEN THE POOL IS BUILT — the fit files are read, the
 schemas checked, the rotor and microphone counts compared against the policy's
@@ -150,7 +154,7 @@ from data_processing.frames import make_recording_frame
 from data_processing.noise_model import FIT_SCHEMA_V3, FIT_SCHEMA_V4
 from data_processing.noise_model.constants import AMP_RPS_REF
 from data_processing.noise_model.params import check_schema
-from data_processing.noise_model.render import render_noise, render_noise_regimes
+from data_processing.noise_model.render import check_sc_wind, render_noise, render_noise_regimes
 from data_processing.noise_model.spectrum import FLIGHT_SR
 from data_processing.noise_model.v3 import Wander
 from data_processing.noise_model.v4 import FLOOR_RULE_ONE, FLOOR_RULE_SUM, V4Params
@@ -194,7 +198,7 @@ def _read_fit(path: str | Path, *, where: str) -> dict[str, Any]:
 
 def load_preset_bank(path: str | Path) -> Sequence[NoiseV2Entry]:
     """Every entry of a ``noise-v2-bank/1`` file (or, for a ``.npz``, the lazy
-    sequence of a ``noise-prior-bank/1`` or ``noise-prior-bank-v4/1`` file, on
+    sequence of a ``noise-prior-bank/1`` or ``noise-prior-bank-v4/2`` file, on
     its ``meta.format``), unvalidated against a pool.
 
     ``path`` is a plain path or a dload URI — ``dload:NAME[@VERSION]/file`` —
@@ -328,6 +332,7 @@ class NoiseV2Pool:
         comb_offset_db: float = 0.0,
         sr_work: int | None = None,
         line_scatter_db: float = 0.0,
+        wind_sc: dict[str, Any] | None = None,
         seed: int = 0,
     ):
         self.sample_rate = int(sample_rate)
@@ -386,6 +391,10 @@ class NoiseV2Pool:
         self.line_scatter_db = float(line_scatter_db)
         if not self.line_scatter_db >= 0.0:
             raise ValueError(f"line_scatter_db must be >= 0, got {self.line_scatter_db}")
+        # v1's per-clip SC wind law for v4 rigs without wind (render_noise ``wind_sc``)
+        self.wind_sc = None if wind_sc is None else dict(wind_sc)
+        if self.wind_sc is not None:
+            check_sc_wind(self.wind_sc)
         self._base_seed = int(seed)
         if self.rps_kind not in trajectory_model.FLIGHT_KINDS:
             raise ValueError(
@@ -467,10 +476,10 @@ class NoiseV2Pool:
                 if fit.get("schema") == FIT_SCHEMA_V4:
                     self._check_v4(fit, where=where)
                     continue
-                if self.line_scatter_db > 0.0:
+                if self.line_scatter_db > 0.0 or self.wind_sc is not None:
                     raise ValueError(
-                        f"{where}: line_scatter_db is a {FIT_SCHEMA_V4} render option, this "
-                        f"payload is {fit.get('schema')!r}"
+                        f"{where}: line_scatter_db and wind_sc are {FIT_SCHEMA_V4} render "
+                        f"options, this payload is {fit.get('schema')!r}"
                     )
                 try:
                     params = check_schema(fit)
@@ -497,6 +506,8 @@ class NoiseV2Pool:
                 f"{where}: the fit carries {par.n_mics} microphones, this pool renders "
                 f"n_mics={self.n_mics}"
             )
+        if self.wind_sc is not None and par.wind is not None:
+            raise ValueError(f"{where}: wind_sc is for rigs without wind; this fit carries one")
 
     def _check_params(self, params: dict[str, Any], *, where: str, v3: bool = False) -> None:
         required = ("sigma_nu", "lam", "profile", "floor") + (
@@ -619,6 +630,7 @@ class NoiseV2Pool:
             level_mode=str(g("level_mode", "window")),
             comb_offset_db=float(g("comb_offset_db", 0.0)),
             line_scatter_db=float(g("line_scatter_db", 0.0)),
+            wind_sc=None if g("wind_sc") is None else dict(g("wind_sc")),
             seed=int(g("seed", 0)),
         )
 
@@ -783,6 +795,7 @@ class NoiseV2Pool:
                 seed=seed,
                 sr_work=self.sr_work,
                 line_scatter_db=self.line_scatter_db,
+                wind_sc=self.wind_sc,
             )
         else:
             audio = render_noise(
@@ -793,6 +806,7 @@ class NoiseV2Pool:
                 seed=seed,
                 sr_work=self.sr_work,
                 line_scatter_db=self.line_scatter_db,
+                wind_sc=self.wind_sc,
             )
         audio = self._apply_level(np.asarray(audio, dtype=np.float64), rps, entry, level)
         return audio.astype(np.float32), rps.astype(np.float32), entry

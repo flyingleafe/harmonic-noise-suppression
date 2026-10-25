@@ -10,33 +10,20 @@ import pytest
 
 from data_processing.noise_model.prior_bank import PriorBank, write_prior_bank
 from data_processing.noise_model.prior_bank_v4 import PriorBankV4, write_prior_bank_v4
-from data_processing.noise_model.v4 import WIND_OFF_DB
 from data_processing.noise_v2_pool import NoiseV2Pool, load_preset_bank
 from experiments.noise_model.drone_prior import sample_prior
 from experiments.noise_model.prior_v4 import SEED, convert_prior_v1
 
-SHAPE: dict[str, Any] = {
-    "freqs_hz": np.fft.rfftfreq(4096, 1.0 / 16000).tolist(),
-    "psd": np.ones(2049).tolist(),
-    "ref_band_hz": [20.0, 100.0],
-    "unit_psd_ref": 1.0,
-}
 RPS = {"kind": "fitted_traj", "fits": "dload:rps-traj-fits", "rigs": {"posterior": 1.0}}
 
 
 @pytest.fixture(scope="module")
 def banks(tmp_path_factory) -> tuple[Any, list[dict[str, Any]], Any]:
-    """A v1 bank of three draws and its v4 conversion: rig 0 without wind,
-    rig 1 with one capsule off, rig 2 as drawn."""
+    """A v1 bank of three draws and its v4 conversion."""
     tmp = tmp_path_factory.mktemp("banks")
     rng = np.random.default_rng(0)
     v1 = write_prior_bank(tmp / "v1.npz", [sample_prior(rng) for _ in range(3)], {"note": "v1"})
-    payloads = [convert_prior_v1(PriorBank(v1), i, shape=SHAPE, seed=SEED) for i in range(3)]
-    payloads[0]["params"]["wind"] = None
-    wind = payloads[1]["params"]["wind"] or copy.deepcopy(payloads[2]["params"]["wind"])
-    assert wind is not None, "the fixture needs one windy draw"
-    wind["level_db"] = [WIND_OFF_DB, *[-30.0 - m for m in range(7)]]
-    payloads[1]["params"]["wind"] = wind
+    payloads = [convert_prior_v1(PriorBank(v1), i, seed=SEED) for i in range(3)]
     v4 = write_prior_bank_v4(tmp / "v4.npz", payloads, {"note": "v4"})
     return v1, payloads, v4
 
@@ -67,22 +54,19 @@ def test_round_trip_keeps_every_payload_within_float16(banks) -> None:
         assert pq["mic_response"] == p["mic_response"]
         assert pq["alpha_aero"] == pytest.approx(p["alpha_aero"], rel=1e-6)
         assert pq["alpha_motor"] == pytest.approx(p["alpha_motor"], rel=1e-6)
-        if p["wind"] is None:
-            assert pq["wind"] is None
-            continue
-        assert {k: v for k, v in pq["wind"].items() if k != "level_db"} == {
-            k: v for k, v in p["wind"].items() if k != "level_db"
-        }
-        np.testing.assert_allclose(pq["wind"]["level_db"], p["wind"]["level_db"], atol=0.05)
-    assert b.payload(1)["params"]["wind"]["level_db"][0] == WIND_OFF_DB
+        assert pq["wind"] is None
 
 
-def test_a_rig_off_the_shared_part_is_refused(banks, tmp_path) -> None:
+def test_a_rig_off_the_shared_part_or_with_wind_is_refused(banks, tmp_path) -> None:
     _, payloads, _ = banks
     odd = copy.deepcopy(payloads[2])
     odd["band_hz"] = [20.0, 7900.0]
     with pytest.raises(ValueError, match="rig 1"):
         write_prior_bank_v4(tmp_path / "x.npz", [payloads[2], odd], {})
+    windy = copy.deepcopy(payloads[2])
+    windy["params"]["wind"] = {"kind": "static_per_mic", "wind_db": [-30.0] * windy["n_mics"]}
+    with pytest.raises(ValueError, match="carries no wind"):
+        write_prior_bank_v4(tmp_path / "y.npz", [payloads[2], windy], {})
 
 
 def test_the_bank_is_read_on_its_format_and_the_pool_renders_from_it(banks) -> None:

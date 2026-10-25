@@ -1,19 +1,22 @@
-"""Build a ``noise-prior-bank-v4/1`` bank: the prior_v1 rigs converted to noise model v4.
+"""Build a ``noise-prior-bank-v4/2`` bank: gated draws from the wide prior in noise model v4.
 
-    PYTHONPATH=src python scripts/prior_bank_v4_build.py --workers 16
+    PYTHONPATH=src python scripts/prior_bank_v4_build.py --n 16384 --workers 32
 
-Reads the pinned v1 bank (``experiments.noise_model.prior_v4.SOURCE_BANK``,
-through ``noise_v2_pool.load_preset_bank``), computes the bank's one SC wind
-shape (:func:`prior_v4.wind_shape_block`), converts every rig
-(:func:`prior_v4.convert_prior_v1`, per-rig stream ``SeedSequence([seed, i])``)
-in ``--workers`` processes, reads every payload back through
-``V4Params.from_payload``, and writes the bank with
-:func:`data_processing.noise_model.prior_bank_v4.write_prior_bank_v4`
-(default ``data/rig_banks/prior_v4_n<N>.npz``). The report — counts of motor
-lines, the ``alpha_motor`` draw, the wind share and levels, the pedestal split,
-floor and level ranges, a float16 round trip of a sample of rigs — goes to
-``results/prior_rigs/<stem>.report.json`` and into the bank's ``meta.header``.
-Publishing to dload is a separate step.
+Each worker draws with :func:`experiments.noise_model.prior_v4.sample_prior_v4`
+(draw ``attempt`` of worker ``w`` from ``SeedSequence([seed, w, attempt])``: the
+prior_v1 laws, the v4 rules, the phase pedestal; no wind, which is the
+``noise_v2`` render option ``wind_sc``) and gates every draw on ONE shared
+trajectory pool (``experiments.noise_model.identifiability.gate``, the rule
+from the flags, by default the agreed one of ``GateConfig``; the pool is
+``--pool-windows`` windows of ``--pool-duration-s`` from the trajectory
+hyperprior, ``SeedSequence([seed, 7919])``, ``--pool-frames`` frames). A draw
+that fails is rejected and redrawn; a worker stops at its quota. The bank is
+written by :func:`data_processing.noise_model.prior_bank_v4.write_prior_bank_v4`
+(default ``data/rig_banks/prior_v4_n<N>.npz``). The report — draws and
+rejections, every v1 law's scalar over all draws and over the kept ones, the
+pedestal by order group, motor lines, floor and level ranges, a float16 round
+trip of a sample of rigs — goes to ``results/prior_rigs/<stem>.report.json``
+and into the bank's ``meta.header``. Publishing to dload is a separate step.
 """
 
 from __future__ import annotations
@@ -21,16 +24,18 @@ from __future__ import annotations
 import argparse
 import json
 import multiprocessing as mp
+import os
 import platform
 import subprocess
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-_BANK: Any = None
-_SHAPE: dict[str, Any] | None = None
+#: The trajectory pool's stream tag (``scripts/prior_bank_build.py``'s).
+POOL_TAG = 7919
 
 
 def _git_sha() -> str:
@@ -42,26 +47,48 @@ def _git_sha() -> str:
         return "unknown"
 
 
-def _init(source: str, shape: dict[str, Any]) -> None:
-    global _BANK, _SHAPE
-    from data_processing.noise_v2_pool import load_preset_bank
+def _worker(job: tuple[int, int, int, dict[str, Any], dict[str, Any]]) -> dict[str, Any]:
+    """Draw and gate until ``quota`` draws pass; the kept payloads, each
+    draw's v1 scalars and verdict, and the rejections by failing rotor."""
+    seed, worker, quota, gate_cfg, pool_cfg = job
+    from experiments.noise_model import drone_prior as PR
+    from experiments.noise_model.identifiability import GateConfig, frame_pool, gate, pool_coverage
+    from experiments.noise_model.prior_v4 import sample_prior_v4
 
-    _BANK, _SHAPE = load_preset_bank(source), shape
-
-
-def _convert(job: tuple[str, int, int, int]) -> list[dict[str, Any]]:
-    """Convert rigs ``lo .. hi - 1`` and read each back through the v4 reader."""
-    source, seed, lo, hi = job
-    from data_processing.noise_model.v4 import V4Params
-    from experiments.noise_model.prior_v4 import convert_prior_v1
-
-    assert _BANK is not None and _SHAPE is not None
-    out = []
-    for i in range(lo, hi):
-        pl = convert_prior_v1(_BANK, i, shape=_SHAPE, seed=seed, source_bank=source)
-        V4Params.from_payload(pl)
-        out.append(pl)
-    return out
+    rng_pool = np.random.default_rng(np.random.SeedSequence([seed, POOL_TAG]))
+    wins = PR.trajectory_windows(rng_pool, int(pool_cfg["windows"]), float(pool_cfg["duration_s"]))
+    pool = frame_pool(wins, n_frames=int(pool_cfg["frames"]), seed=seed)
+    cfg = GateConfig(**gate_cfg)
+    kept: list[dict[str, Any]] = []
+    drawn: list[dict[str, Any]] = []
+    reasons: dict[str, int] = {}
+    t0 = time.time()
+    attempt = 0
+    while len(kept) < quota:
+        pl = sample_prior_v4(seed, worker, attempt)
+        attempt += 1
+        res = gate(pl, pool, cfg)
+        drawn.append(dict(pl.pop("_prior_v1_drawn"), kept=bool(res.passed)))
+        if res.passed:
+            kept.append(pl)
+            if len(kept) % 100 == 0 or len(kept) == quota:
+                print(
+                    f"worker {worker}: {len(kept)}/{quota} kept of {attempt} draws "
+                    f"in {time.time() - t0:.0f} s",
+                    flush=True,
+                )
+        else:
+            key = str(res.reason).split(" passed")[0]  # "rotor r" or the untestable reason
+            reasons[key] = reasons.get(key, 0) + 1
+    return dict(
+        worker=worker,
+        kept=kept,
+        drawn=drawn,
+        tried=attempt,
+        rejected=reasons,
+        eligible=pool_coverage(pool, cfg).eligible.tolist(),
+        seconds=time.time() - t0,
+    )
 
 
 def _q(x: Any) -> dict[str, float]:
@@ -81,54 +108,38 @@ def _q(x: Any) -> dict[str, float]:
     )
 
 
-def _stats(payloads: list[dict[str, Any]], bank: Any) -> dict[str, Any]:
-    """The report's counts and distributions over the converted rigs."""
+def _stats(payloads: list[dict[str, Any]]) -> dict[str, Any]:
+    """The report's counts and distributions over the kept rigs."""
     from data_processing.noise_model.prior_bank_v4 import SILENT_LINE_DB
-    from data_processing.noise_model.v4 import WIND_OFF_DB
+    from experiments.noise_model import prior_v4 as PV4
     from experiments.noise_model import v4_priors as VP
-    from experiments.noise_model.prior_v4 import floor_band_db
 
     P = [pl["params"] for pl in payloads]
-    idx = np.asarray([pl["_prior_v4"]["source_index"] for pl in payloads])
-    boost = np.asarray(bank.arrays["motor_boost_db"], dtype=np.float64)[idx]
     motor = [np.asarray(p["profile_motor_db"]) for p in P]
     live = np.asarray([bool(np.any(m > SILENT_LINE_DB)) for m in motor])
     n_orders = np.asarray([len(p["motor_orders"]) for p in P])
     alpha = np.asarray([p["alpha_motor"] for p in P])
     s2a = np.stack([p["pedestal"]["sigma2_amp"] for p in P])
     s2p = np.stack([p["pedestal"]["sigma2_phase"] for p in P])
+    w = np.stack([p["pedestal"]["width_phase_hz"] for p in P])
     K = s2a.shape[1]
     k = np.arange(1, K + 1)
     groups = []
-    for lo, hi, _med, cap in VP.AMP_GROUPS:
+    for lo, hi, cap in PV4.AMP_CAPS:
         sel = (k >= lo) & (k <= min(hi, K))
         if not np.any(sel):
             continue
-        a, ph = s2a[:, sel], s2p[:, sel]
+        a = s2a[:, sel]
         groups.append(
             dict(
                 orders=[int(lo), int(min(hi, K))],
-                cap=float(cap),
-                capped_frac=float(np.mean(ph > 0.0)),
-                sigma2_total=_q(a + ph),
+                amp_cap=float(cap),
+                amp_at_cap_frac=float(np.mean(a >= cap * (1.0 - 1e-9))),
                 sigma2_amp=_q(a),
-                sigma2_phase=_q(ph),
+                sigma2_phase=_q(s2p[:, sel]),
+                width_phase_hz=_q(w[:, sel]),
             )
         )
-    winds = [p["wind"] for p in P]
-    has = np.asarray([w is not None for w in winds])
-    levels = np.concatenate(
-        [np.asarray(w["level_db"]) for w in winds if w is not None] or [np.zeros(0)]
-    )
-    on = levels > WIND_OFF_DB
-    with_wind = [i for i, w in enumerate(winds) if w is not None]
-    ref = np.asarray(
-        [floor_band_db(payloads[i], P[i]["wind"]["shape"]["freqs_hz"]) for i in with_wind]
-    )
-    excess = np.concatenate(
-        [np.asarray(P[i]["wind"]["level_db"]) - r for i, r in zip(with_wind, ref, strict=True)]
-        or [np.zeros(0)]
-    )
     aero = np.stack([np.asarray(p["profile_aero_db"]) for p in P])
     live_motor = np.concatenate([m[m > SILENT_LINE_DB] for m in motor] or [np.zeros(0)])
     return dict(
@@ -137,11 +148,9 @@ def _stats(payloads: list[dict[str, Any]], bank: Any) -> dict[str, Any]:
             rigs_with_motor_lines=int(live.sum()),
             rigs_with_motor_lines_frac=float(live.mean()),
             rigs_silent_motor=int((~live).sum()),
-            v1_boost_positive=int((boost > 0.0).sum()),
             orders_per_rig=_q(n_orders),
             live_lines=int(sum(int(np.sum(m > SILENT_LINE_DB)) for m in motor)),
             profile_motor_db=_q(live_motor),
-            v1_motor_boost_db=_q(boost),
         ),
         alpha_motor=dict(
             **_q(alpha),
@@ -150,26 +159,10 @@ def _stats(payloads: list[dict[str, Any]], bank: Any) -> dict[str, Any]:
             prior=dict(normal=list(VP.ALPHA_MOTOR), bound=VP.ALPHA_MOTOR_MAX),
         ),
         alpha_aero=_q([p["alpha_aero"] for p in P]),
-        wind=dict(
-            rigs_with_wind=int(has.sum()),
-            rigs_with_wind_frac=float(has.mean()),
-            rigs_with_wind_all_capsules_off=int(
-                sum(
-                    1
-                    for w in winds
-                    if w is not None and np.all(np.asarray(w["level_db"]) <= WIND_OFF_DB)
-                )
-            ),
-            capsules_on_frac_of_windy=float(on.mean()) if on.size else 0.0,
-            capsules_on_frac_of_all=float(on.sum() / (len(P) * int(payloads[0]["n_mics"]))),
-            level_db_on=_q(levels[on]),
-            excess_over_floor_db_on=_q(excess[excess > -100.0]),
-            floor_20_100_db=_q(ref),
-        ),
         pedestal=dict(
-            capped_frac_all=float(np.mean(s2p > 0.0)),
-            sigma2_phase_over_v4_max=int(np.sum(s2p > VP.PHASE_SIGMA2_MAX)),
-            phase_sigma2_max_v4=VP.PHASE_SIGMA2_MAX,
+            sigma2_phase_at_max_frac=float(np.mean(s2p >= VP.PHASE_SIGMA2_MAX * (1 - 1e-9))),
+            width_at_max_frac=float(np.mean(w >= VP.W_MAX_HZ * (1 - 1e-9))),
+            caps=dict(sigma2_phase=VP.PHASE_SIGMA2_MAX, width_hz=VP.W_MAX_HZ),
             by_group=groups,
         ),
         shaft=dict(
@@ -187,6 +180,19 @@ def _stats(payloads: list[dict[str, Any]], bank: Any) -> dict[str, Any]:
             profile_aero_max_db_per_rig=_q(aero.max(axis=(1, 2))),
         ),
     )
+
+
+def _laws(drawn: list[dict[str, Any]]) -> dict[str, Any]:
+    """Every v1 law's scalar draw over all draws and over the kept ones: what
+    the gate selects."""
+    kept = np.asarray([d["kept"] for d in drawn])
+    out: dict[str, Any] = {}
+    for key in drawn[0]:
+        if key == "kept":
+            continue
+        x = np.asarray([d[key] for d in drawn], dtype=np.float64)
+        out[key] = dict(all=_q(x), kept=_q(x[kept]), rejected=_q(x[~kept]))
+    return out
 
 
 def _round_trip(path: Path, payloads: list[dict[str, Any]], n: int = 64) -> dict[str, Any]:
@@ -208,73 +214,96 @@ def _round_trip(path: Path, payloads: list[dict[str, Any]], n: int = 64) -> dict
         upd("profile_motor_db", q["profile_motor_db"], p["profile_motor_db"])
         for key in ("sigma2_amp", "sigma2_phase", "gamma_amp_hz"):
             upd(f"pedestal.{key}_rel", q["pedestal"][key], p["pedestal"][key], rel=True)
-        if p["wind"] is not None:
-            upd("wind.level_db", q["wind"]["level_db"], p["wind"]["level_db"])
         if q["motor_orders"] != p["motor_orders"]:
             raise RuntimeError(f"rig {i}: motor orders differ after the round trip")
     return dict(rigs=int(pick.size), max_abs_dev=worst)
 
 
 def _args() -> argparse.Namespace:
-    from experiments.noise_model.prior_v4 import SEED, SOURCE_BANK
+    from experiments.noise_model.prior_v4 import SEED
 
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--source", default=SOURCE_BANK, help="the v1 bank (dload URI or path)")
-    ap.add_argument("--n", type=int, default=None, help="convert the first N rigs only")
+    ap.add_argument("--n", type=int, default=16384)
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--workers", type=int, default=max(1, (mp.cpu_count() or 2) - 1))
-    ap.add_argument("--chunk", type=int, default=256)
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--threshold-db", type=float, default=None)
+    ap.add_argument("--min-orders", type=int, default=None)
+    ap.add_argument("--pass-frac", type=float, default=None)
+    ap.add_argument("--min-eligible-frames", type=int, default=None)
+    ap.add_argument("--pool-windows", type=int, default=8)
+    ap.add_argument("--pool-frames", type=int, default=80)
+    ap.add_argument("--pool-duration-s", type=float, default=8.0)
     return ap.parse_args()
 
 
 def main() -> None:
     a = _args()
-    from data_processing.noise_model.prior_bank import PriorBank
+    # one BLAS / OpenMP thread per worker: the workers are the parallelism
+    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ.setdefault(var, "1")
     from data_processing.noise_model.prior_bank_v4 import write_prior_bank_v4
-    from data_processing.noise_v2_pool import load_preset_bank
-    from experiments.noise_model.prior_v4 import RULES, wind_shape_block
+    from experiments.noise_model.identifiability import GateConfig
+    from experiments.noise_model.prior_v4 import PRIOR, RULES
 
     t0 = time.time()
-    bank = load_preset_bank(a.source)
-    if not isinstance(bank, PriorBank):
-        raise SystemExit(f"{a.source} is not a noise-prior-bank/1 file")
-    n = len(bank) if a.n is None else min(int(a.n), len(bank))
-    out = a.out or Path(f"data/rig_banks/prior_v4_n{n}.npz")
-    t_shape = time.time()
-    shape = wind_shape_block()
-    t_shape = time.time() - t_shape
-    jobs = [(a.source, a.seed, lo, min(lo + a.chunk, n)) for lo in range(0, n, a.chunk)]
-    t_conv = time.time()
-    with mp.get_context("spawn").Pool(
-        a.workers, initializer=_init, initargs=(a.source, shape)
-    ) as pool:
-        payloads = [pl for part in pool.imap(_convert, jobs) for pl in part]
-    t_conv = time.time() - t_conv
-    print(f"{len(payloads)} rigs converted in {t_conv:.1f} s ({a.workers} workers)", flush=True)
-    stats = _stats(payloads, bank)
+    out = a.out or Path(f"data/rig_banks/prior_v4_n{a.n}.npz")
+    flags = dict(
+        threshold_db=a.threshold_db,
+        min_orders=a.min_orders,
+        pass_frac=a.pass_frac,
+        min_eligible_frames=a.min_eligible_frames,
+    )
+    gate_cfg = asdict(GateConfig(**{k: v for k, v in flags.items() if v is not None}))
+    pool_cfg = dict(windows=a.pool_windows, frames=a.pool_frames, duration_s=a.pool_duration_s)
+    quotas = [a.n // a.workers + (1 if w < a.n % a.workers else 0) for w in range(a.workers)]
+    jobs = [(a.seed, w, q, gate_cfg, pool_cfg) for w, q in enumerate(quotas) if q > 0]
+    t_draw = time.time()
+    with mp.get_context("spawn").Pool(len(jobs)) as pool:
+        parts = pool.map(_worker, jobs)
+    t_draw = time.time() - t_draw
+    payloads = [pl for part in parts for pl in part["kept"]]
+    drawn = [d for part in parts for d in part["drawn"]]
+    tried = sum(p["tried"] for p in parts)
+    rejected: dict[str, int] = {}
+    for p in parts:
+        for key, v in p["rejected"].items():
+            rejected[key] = rejected.get(key, 0) + v
+    print(
+        f"{len(payloads)} rigs kept of {tried} draws ({len(payloads) / tried:.1%}) in "
+        f"{t_draw:.0f} s ({len(jobs)} workers)",
+        flush=True,
+    )
     header: dict[str, Any] = dict(
         builder="scripts/prior_bank_v4_build.py",
         git=_git_sha(),
         host=platform.node(),
         built_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
-        source_bank=a.source,
-        source_n=len(bank),
+        prior=PRIOR,
         seed=a.seed,
-        workers=a.workers,
+        workers=len(jobs),
         n=len(payloads),
         rules=RULES,
-        stats=stats,
+        gate=dict(
+            config=gate_cfg,
+            pool=dict(pool_cfg, stream=[a.seed, POOL_TAG]),
+            eligible_frames=parts[0]["eligible"],
+            tried=tried,
+            kept=len(payloads),
+            kept_frac=len(payloads) / tried,
+            rejected_by=rejected,
+        ),
+        laws=_laws(drawn),
+        stats=_stats(payloads),
     )
     t_write = time.time()
     path = write_prior_bank_v4(out, payloads, header)
     t_write = time.time() - t_write
     header["round_trip"] = _round_trip(path, payloads)
     header["seconds"] = dict(
-        shape=round(t_shape, 1),
-        convert=round(t_conv, 1),
+        draw=round(t_draw, 1),
         write=round(t_write, 1),
         total=round(time.time() - t0, 1),
     )

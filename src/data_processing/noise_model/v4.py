@@ -73,6 +73,8 @@ __all__ = [
     "WIND_SC",
     "WIND_STATIC",
     "Wind",
+    "broadband_periodogram",
+    "broadband_psd",
     "expected_periodogram",
     "hann_window",
     "line_lag_law",
@@ -537,6 +539,25 @@ def hann_window(n_fft: int) -> np.ndarray:
     return np.hanning(int(n_fft) + 1)[: int(n_fft)]
 
 
+def broadband_psd(par: V4Params, freqs_hz: Any, s: Any, *, wind: bool = True) -> np.ndarray:
+    """``(M, F)`` PSD of everything but the lines at relative speeds ``s (R,)``:
+    the floor under its rule, its static share and (``wind``) the flight wind,
+    through the pair EQ and the array response, in the units of
+    :func:`expected_periodogram` (white noise of variance ``v`` reads ``v``, so
+    ``v`` is a one-sided density of ``2 v / sr`` per Hz)."""
+    f = np.asarray(freqs_hz, dtype=np.float64)
+    array_lin = 10.0 ** (par.mic.array_db(f) / 10.0)  # (M, F)
+    if par.floor.rule == FLOOR_RULE_ONE:
+        psd = par.floor.mean_speed_psd(f, s)[None, :] * array_lin
+    else:
+        rotor = par.floor.rotor_psd(f, s)  # (R, F)
+        psd = np.einsum("rmf,rf->mf", 10.0 ** (par.mic.db(f) / 10.0), rotor)
+    psd = psd + par.floor.psd(f)[None, :] * par.floor.static_rel * array_lin
+    if wind and par.wind is not None:
+        psd = psd + par.wind.psd(f) * array_lin
+    return psd
+
+
 def expected_periodogram(
     fit: Mapping[str, Any],
     rps_rev_s: Any,
@@ -578,8 +599,6 @@ def expected_periodogram(
     f_r = np.maximum(rps, SPEED_FLOOR_RPS)
     s = par.speed(f_r)
     tau = np.arange(n) / float(sr)
-    w = hann_window(n)
-    ww = np.correlate(w, w, mode="full")[n - 1 :]  # (w * w)(tau), tau = 0 .. n - 1
     p_aero, p_motor = par.line_power(s)
     ped = par.pedestal
     c = np.zeros((par.n_mics, n))
@@ -609,20 +628,48 @@ def expected_periodogram(
             c += (gain_m * p_motor[r, mk][None, :]) @ (
                 lag_m * np.cos(TWO_PI * f_r[r] * km[:, None] * tau)
             )
+    c += _broadband_autocov(par, s, n, sr, floor_oversample)
+    return _periodogram_of_lags(c)
+
+
+def _broadband_autocov(
+    par: V4Params, s: Any, n: int, sr: int, floor_oversample: int, *, wind: bool = True
+) -> np.ndarray:
+    """``(M, n)`` autocovariance at lags ``0 .. n - 1`` of :func:`broadband_psd`,
+    from a PSD grid ``floor_oversample`` times finer than the window."""
     n_psd = int(floor_oversample) * n
     f_psd = np.fft.rfftfreq(n_psd, d=1.0 / float(sr))
-    array_lin = 10.0 ** (par.mic.array_db(f_psd) / 10.0)  # (M, F)
-    if par.floor.rule == FLOOR_RULE_ONE:
-        psd = par.floor.mean_speed_psd(f_psd, s)[None, :] * array_lin
-    else:
-        rotor = par.floor.rotor_psd(f_psd, s)  # (R, F)
-        psd = np.einsum("rmf,rf->mf", 10.0 ** (par.mic.db(f_psd) / 10.0), rotor)
-    psd += par.floor.psd(f_psd)[None, :] * par.floor.static_rel * array_lin
-    if par.wind is not None:
-        psd += par.wind.psd(f_psd) * array_lin
-    c += np.fft.irfft(psd, n=n_psd, axis=1)[:, :n]
+    return np.fft.irfft(broadband_psd(par, f_psd, s, wind=wind), n=n_psd, axis=1)[:, :n]
+
+
+def _periodogram_of_lags(c: np.ndarray) -> np.ndarray:
+    """``(M, n // 2 + 1)`` expected periodic-Hann periodogram of a process with
+    autocovariance ``c (M, n)`` at lags ``0 .. n - 1``."""
+    n = c.shape[1]
+    w = hann_window(n)
+    ww = np.correlate(w, w, mode="full")[n - 1 :]  # (w * w)(tau), tau = 0 .. n - 1
     q = c * (ww / float(np.sum(w**2)))[None, :]
     # the even sequence q(|tau|), |tau| < n, read at f_j = j sr / n off one
     # length-2n rFFT at its even bins
     ext = np.concatenate([q, np.zeros((q.shape[0], 1)), q[:, :0:-1]], axis=1)
     return np.fft.rfft(ext, axis=1).real[:, ::2]
+
+
+def broadband_periodogram(
+    par: V4Params,
+    rps_rev_s: Any,
+    *,
+    n_fft: int = 2048,
+    sr: int | None = None,
+    floor_oversample: int = 16,
+    wind: bool = True,
+) -> np.ndarray:
+    """``(M, n_fft // 2 + 1)``: the part of :func:`expected_periodogram` that is
+    not a line (the floor under its rule, its static share and, ``wind``, the
+    flight wind) at CONSTANT rotor speeds ``rps_rev_s (R,)``, exactly."""
+    sr = par.sr if sr is None else int(sr)
+    rps = np.atleast_1d(np.asarray(rps_rev_s, dtype=np.float64))
+    s = par.speed(np.maximum(rps, SPEED_FLOOR_RPS))
+    return _periodogram_of_lags(
+        _broadband_autocov(par, s, int(n_fft), sr, floor_oversample, wind=wind)
+    )

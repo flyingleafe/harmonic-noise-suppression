@@ -1,4 +1,4 @@
-"""Per-rotor IDENTIFIABILITY gate of a v3 rig payload on a trajectory pool.
+"""Per-rotor IDENTIFIABILITY gate of a v3 (or v4) rig payload on a trajectory pool.
 
 The rule (agreed with Dmitrii, 2026-09-29; ``docs/experiments/noise-model-v3.md``
 § "Identifiability gate"):
@@ -42,6 +42,17 @@ HOW ``L`` AND ``B`` ARE COMPUTED (:func:`line_contrasts`, Dmitrii's scheme):
   before the mean. Regimes: power-blended per frame by
   :func:`regime_blend_weight`, as :func:`render.expected_periodogram_regimes`.
 
+NOISE MODEL v4 (``noise-v4-fit/3``, :func:`_line_contrasts_v4`; Dmitrii,
+2026-10-25): the same rule, frames and verdict, with ``L`` and ``B`` read off
+:mod:`data_processing.noise_model.v4` at the frame-centre speeds: one periodogram
+kernel per order from ``v4.line_lag_law`` (shaft, amplitude AND phase
+pedestal; a motor line the shaft only, counted as part of its order's
+harmonic), ``B`` = ``v4.broadband_periodogram`` WITHOUT the payload's wind
+(floor and static share) plus every other line. A prior rig is gated AFTER its phase
+pedestal is drawn. A v4 payload is one regime and needs a shaft law flat in
+speed; :func:`decompose` stays v2/v3 (the v4 exact reference is
+``v4.expected_periodogram``).
+
 :func:`decompose` is the EXACT reference (every line of every rotor through
 :func:`spectrum.flight_cache`, chirp included); the tests pin the fast scheme
 against it.
@@ -57,6 +68,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from data_processing.noise_model import FIT_SCHEMA_V4
+from data_processing.noise_model import v4 as V4
 from data_processing.noise_model.constants import AMP_RPS_REF, SPEED_FLOOR_RPS
 from data_processing.noise_model.params import array_response_db, check_schema
 from data_processing.noise_model.render import fit_work_rate, regime_blend_weight
@@ -334,8 +347,11 @@ def line_contrasts(
     ``10 log10((L + B) / B)`` of every line ``(r, k)`` at its centre bin, and
     that centre ``k f_r``. ``B`` sums the floor and EVERY other line of every
     rotor at that bin. ``K`` is the largest profile over the regimes; an order a
-    regime lacks has no line there."""
+    regime lacks has no line there. A ``noise-v4-fit/3`` payload goes through
+    :func:`_line_contrasts_v4`."""
     cfg = config or GateConfig()
+    if "params" in fits and fits.get("schema") == FIT_SCHEMA_V4:
+        return _line_contrasts_v4(dict(fits), pool, cfg)
     regimes = regimes_of(fits)
     n_fft, sr = pool.n_fft, pool.sr
     payloads = {
@@ -388,6 +404,128 @@ def line_contrasts(
         tiny = np.finfo(np.float64).tiny
         contrast = 10.0 * np.log10((line + np.maximum(rest, tiny)) / np.maximum(rest, tiny))
         out.append((contrast.reshape(n, n_rot, k_all).transpose(1, 0, 2), centre_hz))
+    return out
+
+
+# -- noise model v4 ---------------------------------------------------------------------
+
+
+def _v4_shapes(par: V4.V4Params, n: int, sr: int, step_hz: float) -> tuple[np.ndarray, float]:
+    """``(H, step)``: ``H[q, j]`` the periodogram kernel of a unit-power line
+    ``q`` at offset ``j * step`` Hz (``0 .. sr / 2``), ``H(d) = [x_0 + 2 sum_tau
+    x_tau cos(2 pi d tau / sr)] / sum w^2``, ``x_tau = (w * w)(tau) rho_q(tau)``;
+    a line of power ``P`` at ``f`` adds ``P / 2 [H(nu - f) + H(nu + f)]`` at
+    ``nu`` (:func:`.v4.expected_periodogram`'s arithmetic). Rows ``0 .. K - 1``:
+    the aerodynamic orders (``.v4.line_lag_law``, shaft and both pedestals);
+    then the motor orders (shaft only). The pedestal is the rig's and the
+    shaft law flat in speed, so one table serves every rotor and frame."""
+    sh = par.shaft
+    if sh.a_sigma != 0.0 or sh.b_lam != 0.0:
+        raise ValueError(
+            "the v4 gate tabulates one line shape per order: it needs a shaft law flat in "
+            f"speed (a_sigma = b_lam = 0), got a_sigma {sh.a_sigma}, b_lam {sh.b_lam}"
+        )
+    sig, lam = float(sh.sigma_nu(1.0)), float(sh.lam(1.0))
+    big = 1 << max(math.ceil(math.log2(sr / float(step_hz))), math.ceil(math.log2(2 * n)))
+    w = V4.hann_window(n)
+    ww = np.correlate(w, w, mode="full")[n - 1 :] / float(np.sum(w**2))
+    tau = np.arange(n) / float(sr)
+    ped = par.pedestal
+    k = np.arange(1, par.k_max + 1, dtype=np.float64)
+    rho = [
+        V4.line_lag_law(
+            tau[None, :],
+            k[:, None],
+            sigma_nu=sig,
+            lam=lam,
+            sigma2_amp=ped.sigma2_amp[:, None],
+            gamma_amp_hz=ped.gamma_amp_hz[:, None],
+            sigma2_phase=ped.sigma2_phase[:, None],
+            gamma_phase_hz=ped.gamma_phase_hz[:, None],
+        )
+    ]
+    km = np.asarray(par.motor_orders, dtype=np.float64)
+    if km.size:
+        rho.append(V4.line_lag_law(tau[None, :], km[:, None], sigma_nu=sig, lam=lam))
+    x = np.concatenate(rho) * ww[None, :]
+    return 2.0 * np.fft.rfft(x, n=big, axis=1).real - x[:, :1], sr / big
+
+
+def _v4_shape_at(
+    table: np.ndarray, rows: np.ndarray, d_hz: np.ndarray, step: float, sr: int
+) -> np.ndarray:
+    """``H_rows(d)`` by linear interpolation, ``d`` folded into ``[0, sr / 2]``
+    (the kernel is even and ``sr``-periodic; the last table step is held)."""
+    d = np.abs(d_hz) % float(sr)
+    d = np.minimum(np.minimum(d, float(sr) - d), (table.shape[1] - 2) * step)
+    return _shape_at(table, rows, d, step)
+
+
+def _line_contrasts_v4(
+    fit: dict[str, Any], pool: FramePool, cfg: GateConfig
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """:func:`line_contrasts` of a ``noise-v4-fit/3`` payload, each frame at its
+    centre speeds (constant within the frame, as for v2/v3). A harmonic
+    ``(r, k)`` is rotor ``r``'s aerodynamic line of order ``k`` plus its motor
+    line when ``k`` is a motor order (one frequency); ``B`` is
+    :func:`.v4.broadband_periodogram` WITHOUT the payload's wind (floor and
+    static share: the gate judges the rig, not its weather) plus every other
+    line of every rotor through the same kernels. Mic mean of the payload's own
+    mic response; lines at or above the Nyquist do not exist (as in
+    :func:`.v4.expected_periodogram`). Needs a shaft law flat
+    in speed (:func:`_v4_shapes`)."""
+    par = V4.V4Params.from_payload(fit)
+    n_fft, sr = pool.n_fft, pool.sr
+    df = sr / n_fft
+    table, step = _v4_shapes(par, n_fft, sr, cfg.shape_step_hz)
+    K = par.k_max
+    k = np.arange(1, K + 1, dtype=np.float64)
+    km = np.asarray(par.motor_orders, dtype=np.float64)
+    n_q = K + km.size  # sources per rotor: aero orders, then motor orders
+    shape_row = np.arange(n_q)
+    orders = np.concatenate([k, km])
+    # a target (r, k) owns its aero source and, at a motor order, that motor source
+    motor_of = {int(o): K + j for j, o in enumerate(km)}
+    out: list[tuple[np.ndarray, np.ndarray]] = []
+    for w, st in zip(pool.windows, pool.starts, strict=True):
+        R, n = w.shape[0], st.size
+        centres = np.clip(st + n_fft // 2, 0, w.shape[1] - 1)
+        f = w[:, centres]  # (R, n)
+        centre_hz = f[:, :, None] * k[None, None, :]
+        contrast = np.zeros((R, n, K))
+        for i in range(n):
+            fr = np.maximum(f[:, i], SPEED_FLOOR_RPS)
+            s = par.speed(fr)
+            p_aero, p_motor = par.line_power(s)  # (R, K), (R, n_m)
+            src_hz = fr[:, None] * orders[None, :]  # (R, Q)
+            db = par.mic.db(src_hz.ravel())  # (R, M, R * Q)
+            gain = np.stack(
+                [
+                    (10.0 ** (db[r, :, r * n_q : (r + 1) * n_q] / 10.0)).mean(axis=0)
+                    for r in range(R)
+                ]
+            )
+            power = np.concatenate([p_aero, p_motor], axis=1) * gain
+            power = np.where(src_hz < 0.5 * sr, power, 0.0).ravel()  # (R * Q,)
+            t_bin = np.clip(np.rint(fr[:, None] * k[None, :] / df).astype(np.int64), 0, n_fft // 2)
+            t_nu = (t_bin * df).ravel()  # (R * K,)
+            rows = np.tile(shape_row, R)[None, :]
+            src = src_hz.ravel()[None, :]
+            h = _v4_shape_at(table, rows, t_nu[:, None] - src, step, sr)
+            h += _v4_shape_at(table, rows, t_nu[:, None] + src, step, sr)
+            c = 0.5 * power[None, :] * h  # (R * K, R * Q)
+            tr = np.repeat(np.arange(R), K)
+            tk = np.tile(np.arange(K), R)
+            line = c[np.arange(R * K), tr * n_q + tk]
+            for kk, j in motor_of.items():
+                sel = tk == kk - 1
+                line[sel] += c[np.flatnonzero(sel), tr[sel] * n_q + j]
+            floor = V4.broadband_periodogram(par, fr, n_fft=n_fft, sr=sr, wind=False).mean(axis=0)
+            rest = floor[t_bin.ravel()] + c.sum(axis=1) - line
+            tiny = np.finfo(np.float64).tiny
+            cr = 10.0 * np.log10((line + np.maximum(rest, tiny)) / np.maximum(rest, tiny))
+            contrast[:, i, :] = cr.reshape(R, K)
+        out.append((contrast, centre_hz))
     return out
 
 

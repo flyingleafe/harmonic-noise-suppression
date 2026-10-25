@@ -8,13 +8,13 @@ rate; the shaft is v1's at every speed. With the rotors sharing their
 pedestal (where rule 3 is exact) the v4 expected spectrum at 80 rev/s is the
 v1 rig's (:mod:`.identifiability`'s line shapes and floor, the v1 reference)
 away from the motor orders. The per-rig draws follow their laws and are
-deterministic in the seed.
+deterministic in the seed; a bank rig drawn from the wide prior is given back
+by the draw it records.
 """
 
 from __future__ import annotations
 
 import copy
-import math
 from typing import Any
 
 import numpy as np
@@ -23,21 +23,24 @@ import torch
 
 from data_processing.noise_model import v4 as V4
 from data_processing.noise_model.prior_bank import PriorBank, write_prior_bank
-from data_processing.noise_model.prior_bank_v4 import SILENT_LINE_DB
+from data_processing.noise_model.prior_bank_v4 import (
+    SILENT_LINE_DB,
+    PriorBankV4,
+    write_prior_bank_v4,
+)
+from data_processing.noise_model.v3 import wind_shape_spec
 from experiments.noise_model import identifiability as ID
 from experiments.noise_model import v4_priors as VP
 from experiments.noise_model.drone_prior import sample_prior
-from experiments.noise_model.prior_v4 import SEED, convert_prior_v1, floor_band_db
+from experiments.noise_model.prior_v4 import (
+    SEED,
+    amp_cap,
+    convert_prior_v1,
+    sample_prior_v4,
+    with_phase_pedestal,
+)
 
 SR, N_FFT, RPS = 16000, 2048, 80.0
-#: A flat stand-in for the bank's measured SC shape: the conversion only
-#: passes it through and reads its frequency grid for the 20-100 Hz level.
-SHAPE: dict[str, Any] = {
-    "freqs_hz": np.fft.rfftfreq(4096, 1.0 / SR).tolist(),
-    "psd": np.ones(2049).tolist(),
-    "ref_band_hz": [20.0, 100.0],
-    "unit_psd_ref": 1.0,
-}
 
 
 @pytest.fixture(scope="module")
@@ -68,7 +71,7 @@ def _shared(bank: PriorBank) -> PriorBank:
 @pytest.mark.parametrize("i", [0, 1, 2])
 def test_line_powers_pedestal_and_shaft_follow_the_rules(bank: PriorBank, i: int) -> None:
     v1 = bank.payload(i)
-    pl = convert_prior_v1(bank, i, shape=SHAPE, seed=SEED)
+    pl = convert_prior_v1(bank, i, seed=SEED)
     par = V4.V4Params.from_payload(pl)
     p, d = v1["params"], v1["_prior"]["drawn"]
     core = 10.0 ** (np.asarray(p["profile"]["profile_db"]) / 10.0)  # (R, K)
@@ -100,7 +103,7 @@ def test_line_powers_pedestal_and_shaft_follow_the_rules(bank: PriorBank, i: int
         assert np.all(par.profile_motor_db == SILENT_LINE_DB)
 
     ped = par.pedestal
-    assert np.all(ped.sigma2_amp <= VP.amp_cap(k) + 1e-15)
+    assert np.all(ped.sigma2_amp <= amp_cap(k) + 1e-15)
     np.testing.assert_allclose(ped.sigma2_amp + ped.sigma2_phase, s2_k, rtol=1e-12)
     np.testing.assert_allclose(ped.gamma_amp_hz, np.asarray(p["am"]["gamma_hz"])[0])
     np.testing.assert_array_equal(ped.gamma_phase_hz, ped.gamma_amp_hz)
@@ -162,8 +165,7 @@ def _v4_expected(fit: dict[str, Any]) -> np.ndarray:
 def test_expected_spectrum_at_80_rev_s_is_v1s_away_from_motor_orders(bank: PriorBank, i: int):
     shared = _shared(bank)
     v1 = shared.payload(i)
-    pl = convert_prior_v1(shared, i, shape=SHAPE, seed=SEED)
-    pl["params"]["wind"] = None
+    pl = convert_prior_v1(shared, i, seed=SEED)
     err = 10.0 * np.log10(_v4_expected(pl) / _v1_expected(v1))
     nu = np.fft.rfftfreq(N_FFT, 1.0 / SR)
     orders = np.asarray(pl["params"]["motor_orders"])
@@ -178,19 +180,79 @@ def test_expected_spectrum_at_80_rev_s_is_v1s_away_from_motor_orders(bank: Prior
 
 
 def test_per_rig_draws_follow_their_laws_and_the_seed(bank: PriorBank) -> None:
-    a = convert_prior_v1(bank, 1, shape=SHAPE, seed=SEED)
-    assert a == convert_prior_v1(bank, 1, shape=SHAPE, seed=SEED)
-    draws = [convert_prior_v1(bank, 1, shape=SHAPE, seed=s) for s in range(400)]
+    a = convert_prior_v1(bank, 1, seed=SEED)
+    assert a == convert_prior_v1(bank, 1, seed=SEED)
+    draws = [convert_prior_v1(bank, 1, seed=s) for s in range(400)]
+    assert all(d["params"]["wind"] is None for d in draws)  # wind is the render's wind_sc
     alpha = np.array([d["params"]["alpha_motor"] for d in draws])
     assert np.abs(alpha).max() <= VP.ALPHA_MOTOR_MAX
     # N(0, 2) truncated at 2 sd: sd 1.76
     assert abs(alpha.std() - 1.759) < 0.15 and abs(alpha.mean()) < 0.25
-    windy = [d for d in draws if d["params"]["wind"] is not None]
-    assert abs(len(windy) / len(draws) - 0.7) < 0.07  # v1's p_wind
-    ref = floor_band_db(a, SHAPE["freqs_hz"])
-    levels = np.concatenate([np.asarray(d["params"]["wind"]["level_db"]) for d in windy])
-    on = levels > V4.WIND_OFF_DB
-    assert np.all(levels[~on] == V4.WIND_OFF_DB)
-    # live capsules: 33 u - Exp(8) dB over the floor's 20-100 Hz, above -10
-    assert np.all((levels[on] > ref - 10.0) & (levels[on] <= ref + 33.0))
-    assert 0.8 < on.mean() < 1.0 and math.isclose(np.median(levels[on]) - ref, 11.0, abs_tol=2.0)
+
+
+def test_the_v4_gate_splits_the_exact_spectrum_into_one_line_and_the_rest(bank: PriorBank) -> None:
+    """The identifiability gate's v4 contrasts of a converted rig with the phase
+    pedestal and motor lines (the bank's gate input) are the exact
+    ``v4.expected_periodogram`` of the rig WITHOUT wind at constant speed,
+    split into one harmonic (aerodynamic + motor line) and everything else, up
+    to the shape table: the gate ignores a payload's wind (given here a loud
+    static one)."""
+    rng = np.random.default_rng(0)
+    fit = with_phase_pedestal(convert_prior_v1(bank, 0, seed=SEED), rng, guard=False)
+    loud = float(fit["params"]["floor"]["mean_db"]) + 20.0
+    fit["params"]["wind"] = {
+        "kind": V4.WIND_STATIC,
+        "wind_db": [loud] * int(fit["n_mics"]),
+        "shape": wind_shape_spec(),
+    }
+    par = V4.V4Params.from_payload(fit)
+    assert par.wind is not None and par.motor_orders.tolist()[:2] == [21, 42]
+    speeds = np.array([55.0, 64.0, 81.0, 98.0])
+    pool = ID.frame_pool([np.repeat(speeds[:, None], N_FFT, 1)], n_frames=1, seed=0)
+    ((fast, _),) = ID.line_contrasts(fit, pool)
+    calm = dict(fit, params=dict(fit["params"], wind=None))
+    total = V4.expected_periodogram(calm, speeds, n_fft=N_FFT, sr=SR).mean(axis=0)
+
+    def only(r: int, k: int) -> dict[str, Any]:
+        """``fit`` with harmonic ``(r, k)`` alone: no other line, floor or wind."""
+        out = copy.deepcopy(fit)
+        p = out["params"]
+        aero, motor = (
+            np.asarray(p[key], dtype=np.float64) for key in ("profile_aero_db", "profile_motor_db")
+        )
+        keep_aero = np.full_like(aero, SILENT_LINE_DB)
+        keep_aero[r, k - 1] = aero[r, k - 1]
+        keep_motor = np.full_like(motor, SILENT_LINE_DB)
+        j = np.flatnonzero(par.motor_orders == k)
+        keep_motor[r, j] = motor[r, j]
+        p["profile_aero_db"], p["profile_motor_db"] = keep_aero.tolist(), keep_motor.tolist()
+        p["floor"] = dict(p["floor"], mean_db=-10000.0, static_rel=0.0)
+        p["wind"] = None
+        return out
+
+    err = []
+    for r, k in [(1, k) for k in (1, 2, 3, 8, 13, 21, 42, 60, 100)] + [(3, 2), (3, 21), (3, 50)]:
+        b = int(np.rint(k * speeds[r] / (SR / N_FFT)))
+        line = V4.expected_periodogram(only(r, k), speeds, n_fft=N_FFT, sr=SR).mean(axis=0)[b]
+        exact = 10.0 * np.log10(total[b] / (total[b] - line))
+        err.append(abs(exact - fast[r, 0, k - 1]))
+    assert max(err) < 0.05, err
+
+
+def test_a_bank_rig_is_redrawn_from_the_draw_it_records(tmp_path) -> None:
+    """``sample_prior_v4(seed, worker, attempt)`` is a pure function of its
+    three integers, and a rig read back from a bank names the draw that gives
+    it again (up to the bank's float16), phase pedestal included."""
+    drawn = [sample_prior_v4(SEED, 3, a) for a in (0, 1)]
+    back = PriorBankV4(write_prior_bank_v4(tmp_path / "b.npz", drawn, {"note": "test"})).payload(1)
+    prov = back["_prior_v4"]
+    assert (prov["draw_worker"], prov["draw_attempt"]) == (3, 1) and back["params"]["wind"] is None
+    again = sample_prior_v4(prov["seed"], prov["draw_worker"], prov["draw_attempt"])["params"]
+    np.testing.assert_allclose(
+        back["params"]["profile_aero_db"], again["profile_aero_db"], atol=0.04
+    )
+    for key in ("sigma2_amp", "sigma2_phase", "gamma_phase_hz"):
+        np.testing.assert_allclose(
+            back["params"]["pedestal"][key], again["pedestal"][key], rtol=1e-3
+        )
+    assert not np.allclose(drawn[0]["params"]["profile_aero_db"], again["profile_aero_db"])

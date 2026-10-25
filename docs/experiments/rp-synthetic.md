@@ -163,7 +163,7 @@ Rules (`RULES_VERSION = prior_v4/1`), per rig:
 | aero + motor lines | power-preserving split at `k = 3pn`: the motor line takes the boost's share of the coherent core, `C (1 - 10^{-b/10})`, without pedestal; a boost ≤ 0 leaves no motor line | the coherent core is exact; the boosted line loses its pedestal skirt |
 | `alpha_aero` | `amp_exp` | — |
 | `alpha_motor` | **redrawn** from N(0, 2) truncated to ±4 | Dmitrii: v4 physics (bench −2.1…+1.9) |
-| pedestal | rotor mean of v1's σ² per order; `σ²_A = min(σ², c_g)`, the rest to the phase at the same rate | Dmitrii: same expected spectrum, no flicker above the v4 caps |
+| pedestal | rotor mean of v1's σ² per order; `σ²_A = min(σ², c_g)`, the rest to the phase at the same rate; `c_g` the bank's own caps `prior_v4.AMP_CAPS` (rules `prior_v4/2`, below) | Dmitrii: same expected spectrum, no flicker above the caps |
 | shaft | `eps = σ_ν / (2π·80)`, `λ_ref = λ`, flat law | exact |
 | floor | one floor on the mean speed, `b0 = floor_exp`, `b1 = 0` | v4 flight rule (v1 summed `s_r^b` per rotor) |
 | mics | unit response; v1's 3.4 dB per-(mic, line) scatter becomes the pool option `line_scatter_db: 3.4`, drawn per clip outside the model | Dmitrii |
@@ -179,6 +179,116 @@ orders. On the real rigs the rotor-mean pedestal moves it by up to 0.58 dB
 3 dB (the removed skirt). Two cells keep a phase σ² above v4's cap of 3 (3.25,
 4.41, both k ≤ 8). The renderer is no slower than v1's (8 rigs × 4 s × 8
 mics: 15.8 s against 17.5 s).
+
+**Phase pedestal proposal (2026-10-25, under review).** The converted lines
+are needles: v1 measured only the slow amplitude flicker (0.25 s frames,
+0.2–1 Hz) and gave the phase to one quiet shaft, while the bench measures a
+per-line phase pedestal once the shaft is removed (step A0). Skirt over floor
+at the midpoints between lines, 80 rev/s: the DREGON flight fit stays under
+the floor up to k = 60 (−21 to −3.6 dB) and goes above it only where its
+bench data say nothing (k > 60, +1.9 dB median, pedestals at their caps);
+the converted median rig sits 11–26 dB under. Proposed
+(`prior_v4.with_phase_pedestal`, not in the published bank): σ²_φ and W
+log-normal around the A0 blade-pass medians per order group (σ² 0.04 / 0.20 /
+0.96 / 1.70 / 1.67, W 0.8 / 0.8 / 1.6 / 4.9 / 8.4 Hz for k 1–3 / 4–8 / 9–20 /
+21–40 / 41+), caps σ² ≤ 3 and W ≤ 24 Hz, and a floor guard: all pedestal
+skirts 3 dB under the wind-free floor at every midpoint at 80 rev/s (σ²_φ
+shrinks; the analytic guard reads 1.6 dB under the exact periodogram, so it
+is that lenient). On rig 13504 the guard shrinks 43 orders. Listening
+comparison (v1 / converted / proposed on one trajectory):
+`notebooks/prior_rigs_explainer.ipynb`, last section.
+
+**Without the guard (2026-10-25, Dmitrii).** The guard cut the total pedestal
+(amplitude + phase σ²) below the converted rig's on 13–72 of 115 orders on
+the six comparison rigs (2–5 of them because the draw replaces the
+converted phase part, the rest the guard). Without it, the total drops on
+2–5 orders per rig, and the skirts over the wind-free floor at the midpoints
+(80 rev/s, exact periodogram, median per k 1–8 / 9–20 / 21–40 / 41–60 /
+61–98) are −10.1 / −12.2 / −6.6 / −2.5 / −2.3 dB on rig 13504 but reach
++6 / +14 / +18 dB above k = 20 on rig 2624 (whose converted skirts are
+already +3 / +7 dB over the floor above k = 40). The notebook comparison now
+shows the unguarded draw (`prior_rigs_lab.PED_GUARD`).
+
+**The amplitude cap** (`v4_priors.AMP_GROUPS`, from the 0.25 s-frame
+`amplitude_jitter.json`) sits under A0's demodulated amplitude measurement
+(non-motor orders, unfiltered; p90 0.05 / 0.61 / 0.23 / 0.21 / 0.23 against
+caps 0.075 / 0.29 / 0.24 / 0.20 / 0.12 for k 1–3 / 4–8 / 9–20 / 21–40 / 41+;
+7–22 % of orders above the cap). The MD2 flight fit holds all 90 orders at
+k ≥ 41 at the cap; the DREGON bench fit 8 of 108 there and 5 of 12 at
+k 9–20. In the v1 bank the cap moves v1's σ² into the slow phase part on
+95 % of orders at k ≥ 41 (that σ² is v1's k² σ_ψ² wobble term, meant at
+25 Hz, but `drone_prior.PriorSpec.wobble_gamma_hz` is never used: v1 renders
+it at its 1 Hz amplitude rate).
+
+**Bank amplitude caps raised (2026-10-25, Dmitrii; rules `prior_v4/2`).**
+`prior_v4.AMP_CAPS` = the larger of the fits' cap and the A0 p90: 0.075 /
+0.61 / 0.24 / 0.21 / 0.23 for k 1–3 / 4–8 / 9–20 / 21–40 / 41+. The fits'
+priors (`v4_priors.AMP_GROUPS`, used by the bench and flight fits and the
+paper's amplitude table) are unchanged. The converted expected spectrum does
+not move (the total σ² per order equals the published bank's to the float16
+storage, ≤ 5e-4 relative); only the split does: v1's σ² exceeds the cap on
+1 / 17 / 39 / 84 % of orders at k 4–8 / 9–20 / 21–40 / 41+ (was 4 / 17 / 41
+/ 95 %), and the amplitude part at k > 40 goes from 0.12 to 0.23 (median of
+five of the six comparison rigs). With the phase pedestal on top (no guard),
+the total falls below the converted one on 1–5 of 115 orders per rig. The
+published `prior-v4-banks@fd1e8ae9` is still `prior_v4/1`; it is rebuilt
+once the phase-pedestal rule is fixed. The notebook comparison converts on
+the fly under the current rules.
+
+**Identifiability gate for v4 rigs (2026-10-25, Dmitrii).** The gate of
+`experiments.noise_model.identifiability` now reads `noise-v4-fit/3` payloads
+(same rule, frame pool and verdict; `L` and `B` from the v4 lag law and
+`v4.broadband_periodogram`). Decisions: a rig is gated AFTER its phase
+pedestal is drawn, and the gate IGNORES the rig's wind (`B` = floor + static
+share + every other line). A motor line counts as part of its order's
+harmonic. Checked against the exact wind-free `v4.expected_periodogram`
+split into one harmonic and the rest: 0.004 dB worst over 195 lines of rig
+13504 (`test_prior_v4.py` pins 0.05 dB). On 49 bank rigs (every 341st; the
+v1 bank's own pool, seed 20261002), with the phase pedestal: 98.0 % pass the
+bank's rule (3 dB, 2 orders, 80 %), 95.9 % the v3 rule (2 dB / 3 / 90 %);
+±2–3 % at n = 49. Without the pedestal, 100 % pass. For reference, counting
+the wind in `B` would drop the pass rate to 79.6 % / 73.5 %. Cost: ~26
+core-s per rig (49 rigs in 105 s on 12 workers with a test run alongside),
+so a full regate is ~120 core-h on `uni-cpu`.
+
+**Wind per clip, not per rig (2026-10-25, Dmitrii; rules `prior_v4/3`, bank
+format `noise-prior-bank-v4/2`).** Converted rigs carry no wind
+(`params.wind` None). As in v1, wind is a render-time augmentation: the
+`render_noise` / `kind: noise_v2` option `wind_sc` (v1's law, keys
+`p_wind`, `max_over_floor_db`, `shield_mean_db`, `gustiness`; v1's bank uses
+0.7 / 33 / 8 / 3) draws per clip none with probability `1 - p_wind`, else
+one intensity `u` and per capsule `max_over_floor_db u - Exp(shield)` dB
+over that capsule's rendered 20-100 Hz floor (v1's `_sc_wind`, reused). It is
+refused for a payload with its own wind and for non-v4 payloads. Every clip
+draws its own wind, so the audio is more diverse, and the gate question
+above no longer depends on wind. The published `prior-v4-banks@fd1e8ae9`
+(`/1`, per-rig wind) no longer loads; the rebuild with the phase pedestal
+and the gate replaces it.
+
+**The bank is redrawn from the prior, not converted (2026-10-25, Dmitrii;
+rules `prior_v4/4`).** So that the paper can say every training rig is a draw
+from the described prior, the bank no longer maps the 16 384 v1-bank rigs
+(which had passed v1's own gate). `prior_v4.sample_prior_v4(seed, worker,
+attempt)` draws a drone from the v1 laws (`drone_prior.sample_prior`,
+`PriorSpec` defaults), maps it by the rules above (`v4_from_v1`), and draws its
+phase pedestal (`PHASE_GROUPS`, no floor guard; it replaces the map's phase
+part). `scripts/prior_bank_v4_build.py` gates every draw on one trajectory
+pool (8 hyperprior windows of 8 s, 80 frames, stream `[20261024, 7919]`)
+under the agreed rule `GateConfig()` (2 dB, 3 orders, 90 % of eligible
+frames, at least 10 eligible; the rule the fits pass). A failing draw is
+rejected and redrawn. Each bank rig records `(draw_worker, draw_attempt)`,
+which gives it back exactly (`test_prior_v4.py`). The report gives every v1
+law's scalar over all draws and over the kept ones.
+
+Measured before the build (120 draws): 49 % pass the agreed rule, 70 % the v1
+bank's rule (3 dB, 2, 80 %), and 64 % pass the agreed rule without the phase
+pedestal. The failures are rotors short of 90 % of their eligible frames;
+the pool's eligible counts are 46 / 37 / 48 / 27. A 12-rig smoke kept 12 of
+28 draws. Over these few draws, the kept ones have a higher tail (−2.6 vs −4.5 dB),
+a larger odd penalty at k = 3 (7.6 vs 4.7 dB) and a larger motor boost (7.7 vs 5.6 dB). The
+caps are part of the laws: 20 % of the k 9–20 amplitude pedestals sit at
+`AMP_CAPS`, and the phase σ² reaches its cap of 3 at the p95. Cost: ~2.5 s of
+gate per draw on one thread, ~1.6 GB RSS per worker.
 
 ## Paper grid (2026-10-23): pending approval
 
