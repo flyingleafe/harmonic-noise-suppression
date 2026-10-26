@@ -479,12 +479,18 @@ HarmoF0-L2, 120 + 60 steps, rounds of 20):
   median window fills;
 - `checkpoint: best:uniform@…` loads it with 0 missing and 0 unexpected keys.
 
-| model | pretraining job | fine-tuning job |
-|---|---|---|
-| HRSPNet | `rp-pyrseplstm-k64-priorv-952a47` (H100) | `rp-pyrseplstm-k64-priorv-6d5279` |
-| HPPNet-L2 | `rp-hppnet-l2-priorv4-87756c` (H100) | `rp-hppnet-l2-priorv4-ft-0dc27e` |
-| HarmoF0-L2 | `rp-harmof0-l2-priorv4-e2322c` | `rp-harmof0-l2-priorv4-ft-969c0d` |
-| Conv+BiGRU | `rp-scv2-priorv4-5a5364` | `rp-scv2-priorv4-ft-cd0055` |
+| model | pretraining job | fine-tuning job, max LR 1e-4 | fine-tuning job, max LR 5e-4 |
+|---|---|---|---|
+| HRSPNet | `rp-pyrseplstm-k64-priorv-952a47` (H100) | `rp-pyrseplstm-k64-priorv-6d5279` | `rp-pyrseplstm-k64-priorv-a462b2` |
+| HPPNet-L2 | `rp-hppnet-l2-priorv4-87756c` (H100) | `rp-hppnet-l2-priorv4-ft-0dc27e` | `rp-hppnet-l2-priorv4-ftl-d77f38` |
+| HarmoF0-L2 | `rp-harmof0-l2-priorv4-e2322c` | `rp-harmof0-l2-priorv4-ft-969c0d` | `rp-harmof0-l2-priorv4-ft-bd45da` |
+| Conv+BiGRU | `rp-scv2-priorv4-5a5364` | `rp-scv2-priorv4-ft-cd0055` | `rp-scv2-priorv4-ftlr5e4-d4da7a` |
+
+The 5e-4 fine-tunes (`rp_*_priorv4_ft_lr5e4`, `ef74a51e`; Dmitrii,
+2026-10-26) set the max LR to half the pretraining max (1e-3) instead of a
+tenth. Everything else is the same as the 1e-4 fine-tunes. The HarmoF0-L2 and
+Conv+BiGRU jobs were submitted directly; the HRSPNet and HPPNet-L2 jobs wait
+`--after` their pretraining jobs, next to the 1e-4 ones.
 
 **Results so far (2026-10-26, W&B).** Each score is the raw value at the
 round with the lowest 5-round median of the selection score, as in
