@@ -1,0 +1,51 @@
+# rp_real_priorv4.yaml (the real panel, static_comb and the six synthetic
+# sectors of validation-sectors-v4) for the EASY setup of the paper grid
+# (docs/experiments/rp-synthetic.md § "Easy setup"; Dmitrii, 2026-10-26).
+#
+# STOP AND SELECTION: the easy runs train on drones drawn around the two fits,
+# so the synthetic score that stops the run and selects the synthetic
+# checkpoint is near_macro, the mean of the two neighbourhood sectors
+# (near_dregon, near_md2), not uniform: the run continues while the 5-round
+# median of real_macro OR of near_macro still improves, and the fine-tuning
+# starts from best_near_macro_median.ckpt. Every other view is reported as in
+# rp_real_priorv4.yaml.
+defaults:
+  - rp_real_priorv4
+  - _self_
+
+control: [real_macro, near_macro]
+
+aggregates:
+  near_macro: {near_dregon: 0.5, near_md2: 0.5}
+
+primary:
+  - dregon
+  - md2
+  - real_macro
+  - dregon_nosource
+  - dregon_source
+  - md2_nosource
+  - md2_source
+  - dregon_zero
+  - dregon_standby
+  - dregon_ramp
+  - dregon_cruise
+  - md2_zero
+  - md2_standby
+  - md2_ramp
+  - md2_cruise
+  - real
+  - real_nosource
+  - real_source
+  - real_zero
+  - real_standby
+  - real_ramp
+  - real_cruise
+  - static_comb
+  - uniform
+  - weak_comb
+  - strong_motor
+  - wide_pedestal
+  - near_dregon
+  - near_md2
+  - near_macro

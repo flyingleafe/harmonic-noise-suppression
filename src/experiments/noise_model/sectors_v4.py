@@ -195,11 +195,15 @@ def perturb_fit(
     rng: np.random.Generator,
     strength: float,
     spec: PriorSpec = PriorSpec(),
+    *,
+    keep_wind: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """One prior-shaped perturbation of ``regimes`` (``{"single": fit}`` or a
     ``standby``/``cruise`` pair of ``noise-v4-fit/3`` payloads) at ``strength``
     (module docstring): ONE draw, applied to every regime on its own orders.
-    Returns new payloads, wind dropped, each with ``perturbation`` provenance."""
+    Returns new payloads, each with ``perturbation`` provenance; the wind is
+    dropped (a validation sector renders calm rigs) unless ``keep_wind`` (the
+    easy training bank keeps DREGON's fitted gust wind)."""
     s = float(strength)
     pars = {name: V4.V4Params.from_payload(fit) for name, fit in regimes.items()}
     R = {p.n_rotors for p in pars.values()}
@@ -249,7 +253,8 @@ def perturb_fit(
         Kr = par.k_max
         q = copy.deepcopy(dict(fit))
         p = q["params"]
-        p["wind"] = None
+        if not keep_wind:
+            p["wind"] = None
         p.pop("hierarchy", None)
         p["profile_aero_db"] = (par.profile_aero_db + s * d_aero[:, :Kr]).tolist()
         if par.motor_orders.size:

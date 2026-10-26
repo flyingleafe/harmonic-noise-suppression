@@ -222,7 +222,9 @@ def load_preset_bank(path: str | Path) -> Sequence[NoiseV2Entry]:
     if not p.is_file():
         raise ValueError(f"preset_bank: no such bank file: {p}")
     if p.suffix == ".npz":
-        # a compact bank of prior rigs: a LAZY sequence (noise_model.prior_bank{,_v4})
+        # a compact bank of prior or neighbourhood rigs: a LAZY sequence
+        # (noise_model.prior_bank{,_v4}, noise_model.nbhd_bank_v4)
+        from data_processing.noise_model.nbhd_bank_v4 import NBHD_BANK_V4_FORMAT, NbhdBankV4
         from data_processing.noise_model.prior_bank import PRIOR_BANK_FORMAT, PriorBank
         from data_processing.noise_model.prior_bank_v4 import PRIOR_BANK_V4_FORMAT, PriorBankV4
 
@@ -232,8 +234,11 @@ def load_preset_bank(path: str | Path) -> Sequence[NoiseV2Entry]:
             return PriorBankV4(p)
         if fmt == PRIOR_BANK_FORMAT:
             return PriorBank(p)
+        if fmt == NBHD_BANK_V4_FORMAT:
+            return NbhdBankV4(p)
         raise ValueError(
-            f"{p}: expected format {PRIOR_BANK_FORMAT!r} or {PRIOR_BANK_V4_FORMAT!r}, got {fmt!r}"
+            f"{p}: expected format {PRIOR_BANK_FORMAT!r}, {PRIOR_BANK_V4_FORMAT!r} or "
+            f"{NBHD_BANK_V4_FORMAT!r}, got {fmt!r}"
         )
     bank = json.loads(p.read_text())
     fmt = bank.get("format") if isinstance(bank, dict) else None
@@ -416,17 +421,24 @@ class NoiseV2Pool:
                 f"noise_v2 renders on a whole flight; rps.kind must be one of "
                 f"{list(trajectory_model.FLIGHT_KINDS)}, got {self.rps_kind!r}"
             )
+        from data_processing.noise_model.nbhd_bank_v4 import NbhdBankV4
         from data_processing.noise_model.prior_bank import PriorBank
         from data_processing.noise_model.prior_bank_v4 import PriorBankV4
+
+        lazy = (PriorBank, PriorBankV4, NbhdBankV4)
 
         if len(entries) == 0:
             raise ValueError("noise_v2 needs at least one entry: give it 'fits' or 'preset_bank'")
         self.entries: Sequence[NoiseV2Entry]
-        if isinstance(entries, (PriorBank, PriorBankV4)):
+        if isinstance(entries, lazy):
             # LAZY: a payload is assembled (offset included) when indexed; the
             # builder validated every rig, the pool checks one against itself
+            # (a neighbourhood bank: one draw of each base fit)
             self.entries = entries.with_offset(self.comb_offset_db)
-            self._check_entries(self.entries[:1])
+            if isinstance(self.entries, NbhdBankV4):
+                self._check_entries(self.entries.probe())
+            else:
+                self._check_entries(self.entries[:1])
         else:
             self.entries = tuple(
                 NoiseV2Entry(
@@ -455,7 +467,7 @@ class NoiseV2Pool:
             self._traj[None] = trajectory_model.build_from_config(self._rps_cfg)
             rigs = (
                 set(self.entries.traj_rigs)
-                if isinstance(self.entries, (PriorBank, PriorBankV4))
+                if isinstance(self.entries, lazy)
                 else {e.traj_rig for e in self.entries if e.traj_rig is not None}
             )
             for rig in sorted(rigs):
