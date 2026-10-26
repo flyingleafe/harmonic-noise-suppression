@@ -136,6 +136,208 @@ def fig_traj_hyperprior(n: int = 4) -> None:
     save(fig, "gen_traj_hyperprior")
 
 
+#: Paper names of the trajectory rigs (Table tab:gen-traj-data).
+TRAJ_LABELS = {
+    "michaels": "MD2",
+    "dregon": "DREGON",
+    "neurobem_quad": "NeuroBEM",
+    "pitcn_quad": "PI-TCN",
+    "nanobench_cf21b": "NanoBench",
+    "vid_m100": "VID",
+    "blackbird_quad": "Blackbird",
+}
+#: Label offsets (points, horizontal alignment) where the default collides.
+_TRAJ_LABEL_POS = {
+    "dregon": ((6, 1), "left"),
+    "michaels": ((-6, -7), "right"),
+    "vid_m100": ((-6, 3), "right"),
+    "blackbird_quad": ((-6, 3), "right"),
+    "pitcn_quad": ((5, -9), "left"),
+}
+
+
+def _traj_level_and_fluctuation(params) -> tuple[float, float]:
+    """``(log hover, log relative std)`` of one drone: the hover level in Hz and
+    the stationary std of a rotor speed within a flight (RMS over rotors, speed
+    modes only: no measurement process, no per-flight offset) over the hover."""
+    hover = float(np.mean(params.mu))
+    var = (params.mixing**2) @ params.mode_var
+    return float(np.log(hover)), float(np.log(np.sqrt(np.mean(var)) / hover))
+
+
+def fig_traj_fit_map(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> None:
+    """The seven fitted drones, the hyperprior and the constrained hyperprior on
+    two axes: hover level and speed std relative to it, both log, each scaled by
+    its hyperprior sd so that a step of one sd has the same length on both.
+
+    Also writes ``results/rps_traj/fit_map.json``: the plotted numbers and how
+    much of the fits' spread in the 25 drone coordinates of the hyperprior
+    (scale, trims, theta, speed modes; whitened by its std) the map keeps,
+    against the best linear map (the top two principal components).
+    """
+    import json
+
+    from matplotlib.lines import Line2D
+    from omegaconf import OmegaConf
+
+    from data_processing.trajectory_model.posterior import IDX_SHAFT, rig_vector
+    from data_processing.trajectory_model.source import build_from_config, load_bundle
+
+    bundle = load_bundle("dload:rps-traj-fits")
+    post = bundle.posterior
+    assert post is not None
+    rng = np.random.default_rng(seed)
+    hyper = np.array([_traj_level_and_fluctuation(post.sample(rng)) for _ in range(n_hyper)])
+    rps = OmegaConf.load(ROOT / "conf/online_mix/rp_priorv4.yaml").sources.noise[0].rps
+    source = build_from_config(OmegaConf.to_container(rps, resolve=True))
+    reduced = []
+    for _ in range(n_reduced):
+        source.flight(
+            rng, 200.0
+        )  # the stream's own draw, its rotor_sep / rps_max rejection included
+        assert source.last_draw is not None
+        reduced.append(_traj_level_and_fluctuation(source.last_draw.params))
+    reduced = np.array(reduced)
+    rigs = [r for r in TRAJ_LABELS if r in bundle.fits]
+    fits = np.array([_traj_level_and_fluctuation(bundle.fits[r].params) for r in rigs])
+    centre, sd = hyper.mean(axis=0), hyper.std(axis=0)
+
+    # How much of the fits' spread the two axes keep (pairwise distances).
+    drone = slice(0, IDX_SHAFT.stop)
+    z = np.array([(rig_vector(bundle.fits[r].params) - post.mean) / post.std for r in rigs])[
+        :, drone
+    ]
+    iu = np.triu_indices(len(rigs), 1)
+
+    def dists(x: np.ndarray) -> np.ndarray:
+        return np.sqrt(((x[:, None, :] - x[None, :, :]) ** 2).sum(-1))[iu]
+
+    full = dists(z)
+    zc = z - z.mean(axis=0)
+    pcs = zc @ np.linalg.svd(zc, full_matrices=False)[2][:2].T
+    kept = {
+        name: {
+            "r": round(float(np.corrcoef(dists(x), full)[0, 1]), 3),
+            "squared_share": round(float(np.sum(dists(x) ** 2) / np.sum(full**2)), 3),
+        }
+        for name, x in (("map", (fits - centre) / sd), ("pca2", pcs))
+    }
+
+    fig, ax = plt.subplots(figsize=(3.5, 2.9))
+    ax.scatter(
+        np.exp(hyper[:, 0]),
+        100 * np.exp(hyper[:, 1]),
+        s=1.5,
+        color="0.55",
+        alpha=0.25,
+        lw=0,
+        rasterized=True,
+    )
+    t = np.linspace(0.0, 2.0 * np.pi, 200)
+    for k in (1, 2):
+        ax.plot(
+            np.exp(centre[0] + k * sd[0] * np.cos(t)),
+            100 * np.exp(centre[1] + k * sd[1] * np.sin(t)),
+            color="0.35",
+            lw=0.8,
+            ls="-" if k == 1 else "--",
+        )
+    ax.scatter(
+        np.exp(reduced[:, 0]),
+        100 * np.exp(reduced[:, 1]),
+        s=1.5,
+        color="#e6550d",
+        alpha=0.35,
+        lw=0,
+        rasterized=True,
+    )
+    for (lx, ly), rig in zip(fits, rigs):
+        ours = rig in ("dregon", "michaels")
+        ax.scatter(
+            np.exp(lx),
+            100 * np.exp(ly),
+            s=90 if ours else 28,
+            marker="*" if ours else "o",
+            color="#08519c" if ours else "black",
+            zorder=7,
+            edgecolors="white",
+            linewidths=0.6,
+        )
+        offset, ha = _TRAJ_LABEL_POS.get(rig, ((5, 3), "left"))
+        ax.annotate(
+            TRAJ_LABELS[rig],
+            (np.exp(lx), 100 * np.exp(ly)),
+            xytext=offset,
+            textcoords="offset points",
+            ha=ha,
+            fontsize=6.5,
+            zorder=6,
+            bbox={"boxstyle": "round,pad=0.1", "fc": "white", "ec": "none", "alpha": 0.7},
+        )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(25, 500)
+    ax.set_ylim(1.0, 150.0)
+    xt, yt = [30, 50, 100, 200, 400], [1, 2, 5, 10, 20, 50, 100]
+    ax.set_xticks(xt, [str(v) for v in xt])
+    ax.set_yticks(yt, [str(v) for v in yt])
+    ax.minorticks_off()
+    # one hyperprior sd is as long on y as on x (log10 units of each axis)
+    ax.set_aspect(sd[0] / sd[1], adjustable="box")
+    ax.set_xlabel("hover level (Hz)", fontsize=8)
+    ax.set_ylabel("speed std (% of hover)", fontsize=8)
+    ax.tick_params(labelsize=7)
+    handles = [
+        Line2D([], [], ls="", marker="o", ms=3, color="0.55", label="hyperprior"),
+        Line2D([], [], color="0.35", lw=0.8, label=r"its 1$\sigma$, 2$\sigma$"),
+        Line2D([], [], ls="", marker="o", ms=3, color="#e6550d", label="constrained"),
+        Line2D([], [], ls="", marker="*", ms=8, color="#08519c", label="fit, DREGON, MD2"),
+        Line2D([], [], ls="", marker="o", ms=4, color="black", label="fit, other drones"),
+    ]
+    ax.legend(
+        handles=handles,
+        fontsize=6,
+        loc="upper left",
+        framealpha=0.9,
+        handletextpad=0.3,
+        borderpad=0.4,
+    )
+    fig.tight_layout()
+    save(fig, "gen_traj_fit_map")
+
+    def pct(x: np.ndarray, scale: float = 1.0) -> list[float]:
+        return [round(float(scale * np.exp(v)), 2) for v in np.percentile(x, [5, 50, 95])]
+
+    summary = {
+        "axes": "hover = mean(mu) Hz; std = sqrt(mean over rotors of (A*A) @ mode_var) / hover",
+        "fits": {
+            TRAJ_LABELS[r]: {
+                "hover_hz": round(float(np.exp(f[0])), 1),
+                "std_pct": round(float(100 * np.exp(f[1])), 2),
+            }
+            for r, f in zip(rigs, fits)
+        },
+        "hyperprior": {
+            "n": n_hyper,
+            "hover_hz_p5_50_95": pct(hyper[:, 0]),
+            "std_pct_p5_50_95": pct(hyper[:, 1], 100.0),
+            "sd_log": [round(float(v), 3) for v in sd],
+        },
+        "constrained": {
+            "n": n_reduced,
+            "hover_hz_p5_50_95": pct(reduced[:, 0]),
+            "std_pct_p5_50_95": pct(reduced[:, 1], 100.0),
+            "source_stats": dict(source.stats),
+        },
+        "distance_kept_vs_25d_whitened": kept,
+        "seed": seed,
+    }
+    out = ROOT / "results/rps_traj/fit_map.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(summary, indent=2))
+    print(json.dumps(summary, indent=2), flush=True)
+
+
 # ── noise ───────────────────────────────────────────────────────────────────
 
 
@@ -1014,7 +1216,16 @@ def tables() -> None:
 
 
 def main() -> None:
-    which = sys.argv[1:] or ["tables", "traj", "traj_other", "hyper", "noise", "bank", "rigs"]
+    which = sys.argv[1:] or [
+        "tables",
+        "traj",
+        "traj_other",
+        "hyper",
+        "map",
+        "noise",
+        "bank",
+        "rigs",
+    ]
     if "tables" in which:
         tables()
     if "traj" in which:
@@ -1027,6 +1238,8 @@ def main() -> None:
         )
     if "hyper" in which:
         fig_traj_hyperprior()
+    if "map" in which:
+        fig_traj_fit_map()
     if "noise" in which:
         fig_noise_real_vs_sampled()
     if "bank" in which:

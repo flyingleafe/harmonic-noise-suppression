@@ -1,0 +1,80 @@
+{
+  "axes": "hover = mean(mu) Hz; std = sqrt(mean over rotors of (A*A) @ mode_var) / hover",
+  "fits": {
+    "MD2": {
+      "hover_hz": 78.4,
+      "std_pct": 2.64
+    },
+    "DREGON": {
+      "hover_hz": 80.5,
+      "std_pct": 2.92
+    },
+    "NeuroBEM": {
+      "hover_hz": 216.8,
+      "std_pct": 15.26
+    },
+    "PI-TCN": {
+      "hover_hz": 201.9,
+      "std_pct": 6.28
+    },
+    "NanoBench": {
+      "hover_hz": 277.7,
+      "std_pct": 7.18
+    },
+    "VID": {
+      "hover_hz": 87.7,
+      "std_pct": 4.7
+    },
+    "Blackbird": {
+      "hover_hz": 181.1,
+      "std_pct": 12.1
+    }
+  },
+  "hyperprior": {
+    "n": 3000,
+    "hover_hz_p5_50_95": [
+      62.75,
+      142.36,
+      309.31
+    ],
+    "std_pct_p5_50_95": [
+      3.11,
+      7.61,
+      92.09
+    ],
+    "sd_log": [
+      0.489,
+      1.078
+    ]
+  },
+  "constrained": {
+    "n": 1500,
+    "hover_hz_p5_50_95": [
+      42.4,
+      72.84,
+      93.11
+    ],
+    "std_pct_p5_50_95": [
+      2.33,
+      3.29,
+      5.89
+    ],
+    "source_stats": {
+      "flights": 1500,
+      "rejected": 1543,
+      "rejected_cap": 0,
+      "rejected_sep": 1543
+    }
+  },
+  "distance_kept_vs_25d_whitened": {
+    "map": {
+      "r": 0.236,
+      "squared_share": 0.059
+    },
+    "pca2": {
+      "r": 0.893,
+      "squared_share": 0.587
+    }
+  },
+  "seed": 0
+}

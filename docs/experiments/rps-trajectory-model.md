@@ -1158,3 +1158,18 @@ x1 278), and the accepted median hover rises from 65 to 70-74 rev/s: its
 sit closer `[INFERENCE]`. (5) No arm leaves the cruise regime (ramp share 0-3 %
 of frames against 0-1 % real). In `draws.png` panels 2-3 of "shrink" are
 panels 2-3 of "full" (common random numbers): same size and trims, shaft moved.
+
+**Paper map (2026-10-26).** `scripts/gen_model_figures.py map` →
+`gen_traj_fit_map.{pdf,png}` (paper Fig. "fit map") and
+`results/rps_traj/fit_map.json`: the seven fits, 3000 hyperprior draws and 1500
+draws of the constrained stream (`rp_priorv4` rps block, its own rejection) on
+log hover vs log stationary rotor-speed std / hover (speed modes only, RMS over
+rotors), each axis scaled by its hyperprior sd (0.489, 1.078 in ln). On this
+statistic the three racing quads sit at 6.3-15.3 % (PI-TCN, NanoBench,
+NeuroBEM), DREGON 2.92 %, MD2 2.64 %, hyperprior median 7.61 % (the "5-8 %"
+above is closer to the 2 s window statistic: 5.3-7.0 %). Constrained draws:
+hover 42-93 Hz, std 2.3-5.9 % (p5-p95), vs 63-309 Hz, 3.1-92 % for the
+hyperprior. The two axes keep little of the fits' spread in the 25 drone
+coordinates (whitened): pairwise-distance r = 0.24, 6 % of the squared
+distance; the top two principal components keep r = 0.89, 59 %, but load
+mostly on the relative stds and the time constants (hover: 7 % of PC1).
