@@ -13,15 +13,16 @@ Figures
 ``gen_traj_hyperprior``
     Four flights drawn from the rig hyperprior (``traj_rig="posterior"``),
     30 s each, hover level in the title.
-``gen_noise_real_vs_sampled``
-    Real DREGON room-2 free-flight and MD2 FLY125 standby-to-cruise windows
+``gen_noise_fits``
+    (a) Real DREGON room-2 free-flight and MD2 FLY125 standby-to-cruise windows
     against the noise-model-v4 fits of the easy training bank rendered on the
-    SAME speed label, one colour range per pair.
+    SAME speed label, one colour range per pair; (b) the two fits with every
+    rotor at 80 Hz: line cores, pedestals and broadband.
 ``gen_noise_hyperprior``
     Four hard-bank entries rendered on hyperprior trajectories -- the noise the
     ``nv2_hard`` arm trains on.
 
-The paper's figures (``fits``, ``noise``, ``rigs``, ``hyper``, ``bank``) are drawn
+The paper's figures (``fits``, ``noise``, ``hyper``, ``bank``) are drawn
 at print size in :func:`plots.paper.paper_style`; the deck's (``traj``,
 ``traj_other``) keep the deck style.
 
@@ -52,7 +53,6 @@ from plots.paper import COLUMN_IN, TEXT_IN, paper_style  # noqa: E402
 PAPER = ROOT / "writing/papers/2026-08_wrapup/src"
 FIGS = PAPER / "figures"
 TABLES = PAPER / "tables"
-SUPPORTS = ROOT / "results/noise_v2/rounds/round2/supports"
 
 SR = 16000
 NFFT = 2048
@@ -447,13 +447,26 @@ def _show_spec(ax, db, title, *, fmax=8000.0, dur=None, vmax=None, dyn_range=45.
     return im
 
 
-#: ``gen_noise_real_vs_sampled``: the microphone (capsule 3: the DREGON gust
-#: fit's least windy capsule, as in the recording), the render seed, the band
-#: shown and the colour range (dB below the pair's 99.5th percentile).
+#: ``gen_noise_fits`` (a): the microphone (capsule 3: the DREGON gust fit's
+#: least windy capsule, as in the recording), the render seed, the band shown
+#: and the colour range (dB below the pair's 99.5th percentile). (b): the
+#: reference speed every rotor turns at.
 NOISESAMP_MIC = 3
 NOISESAMP_SEED = 7
 NOISESAMP_FMAX_HZ = 3000.0
 NOISESAMP_DYN_DB = 50.0
+PROFILE_F0_HZ = 80.0
+#: (b)'s colours: aerodynamic and motor lines, pedestals, broadband floor, wind.
+PROFILE_COLOURS = {
+    "aero": "#1f5fbf",
+    "motor": "#e6550d",
+    "ped": "#c51b1b",
+    "bb": "0.45",
+    "wind": "#2a9d8f",
+}
+#: Offsets (Hz) at which each line's pedestal is sampled for the 1 Hz bin
+#: integral: geometric down to below the narrowest width the skirt law allows.
+_PROFILE_OFFSETS = np.geomspace(1e-11, 50.0, 300)
 
 
 def _easy_bank_bases() -> dict:
@@ -485,12 +498,87 @@ def _render_regimes(paths: dict[str, str], rps: np.ndarray, seed: int) -> np.nda
     return np.asarray(render_noise(fit, rps, sr=SR, n_mics=n_mics, seed=seed))
 
 
+def _fit_at_speed(fit: dict, f0: float, fmax: float) -> dict[str, np.ndarray]:
+    """A ``noise-v4-fit/3`` payload with every rotor at ``f0`` rev/s, as
+    ``notebooks/prior_rigs_lab.py`` ``plot_rig_profiles`` draws it, simplified:
+    POWER IN 1 Hz BINS (centred on the integers, so on every line at an integer
+    ``f0``) in the render's units, microphone mean, lines and pedestals the
+    MEAN over the rotors. A broadband density reads the same per 1 Hz; a
+    needle reads its power; a pedestal its skirt integrated over the bin, so
+    a pedestal much narrower than 1 Hz reads at most its own power instead of
+    a peak density far above its line.
+
+    ``f_aero, needle_aero``: each aerodynamic line's core (power
+    ``e^-(s2a + s2p)`` of the line); ``f_motor, needle_motor``: the motor lines
+    (no pedestal); ``grid, ped``: bin centres and the summed amplitude + phase
+    pedestal skirts of all lines; ``bb``: the broadband floor (its speed law and
+    static share, through the array response) without the wind, the whole
+    drone's; ``wind``: the mean of the fitted wind alone (zero without one)."""
+    from data_processing.noise_model import v4 as V4
+    from experiments.noise_model.prior_v4 import pedestal_skirt_density
+
+    par = V4.V4Params.from_payload(fit)
+    s = par.speed(np.full(par.n_rotors, float(f0)))
+    p_aero, p_motor = par.line_power(s)  # (R, K), (R, n_m)
+    k = np.arange(1, par.k_max + 1, dtype=np.float64)
+    km = np.asarray(par.motor_orders, dtype=np.float64)
+    # E_rm at each line, mean over the mics, then the mean over the rotors
+    aero = (10.0 ** (par.mic.db(k * f0) / 10.0)).mean(axis=1) * p_aero
+    motor = (10.0 ** (par.mic.db(km * f0) / 10.0)).mean(axis=1) * p_motor
+    aero, motor = aero.mean(axis=0), motor.mean(axis=0)
+    ped = par.pedestal
+    shape = (ped.sigma2_amp, ped.gamma_amp_hz, ped.sigma2_phase, ped.gamma_phase_hz)
+    tot = ped.sigma2_amp + ped.sigma2_phase
+    in_band = k * f0 < fmax
+    # the skirt density (of a UNIT-power line: it integrates to 1 - e^-(s2a +
+    # s2p) itself) on the bin edges plus a geometric grid around every line in
+    # the band, times the line power, integrated (trapezoid), differenced
+    edges = np.arange(0.5, fmax, 1.0)
+    near = np.concatenate([-_PROFILE_OFFSETS[::-1], [0.0], _PROFILE_OFFSETS])
+    x = np.unique(np.concatenate([edges, (k[in_band, None] * f0 + near).ravel()]))
+    x = x[(x >= edges[0]) & (x <= edges[-1])]
+    dens = np.zeros(x.size)
+    for a in range(0, x.size, 4096):
+        s2a, ga, s2p, gp = (v[None, :] for v in shape)
+        d = pedestal_skirt_density(
+            s2a, ga, s2p, gp, x[a : a + 4096, None] - k[None, :] * f0, tol=1e-6
+        )
+        dens[a : a + 4096] = d @ aero
+    cum = np.concatenate([[0.0], np.cumsum(0.5 * (dens[1:] + dens[:-1]) * np.diff(x))])
+    grid = edges[:-1] + 0.5
+    bb = 2.0 * V4.broadband_psd(par, grid, s, wind=False).mean(axis=0) / par.sr
+    wind = 2.0 * V4.broadband_psd(par, grid, s).mean(axis=0) / par.sr - bb
+    keep_m = km * f0 < fmax
+    return dict(
+        f_aero=k[in_band] * f0,
+        needle_aero=(aero * np.exp(-tot))[in_band],
+        f_motor=km[keep_m] * f0,
+        needle_motor=motor[keep_m],
+        grid=grid,
+        ped=np.diff(cum[np.searchsorted(x, edges)]),
+        bb=bb,
+        wind=np.maximum(wind, 0.0),
+    )
+
+
+def _db(x: np.ndarray) -> np.ndarray:
+    return 10.0 * np.log10(np.maximum(x, 1e-30))
+
+
 @_paper
-def fig_noise_real_vs_sampled() -> None:
-    """Real DREGON and MD2 windows beside the noise-model-v4 fits of the easy
+def fig_noise_fits() -> None:
+    """The paper's noise-fit figure, ``gen_noise_fits``, full text width.
+
+    (a) Real DREGON and MD2 windows beside the noise-model-v4 fits of the easy
     training bank rendered on the SAME speed labels: DREGON the bench fit c7
-    with its fitted gust wind, MD2 the FLY125 standby/cruise pair composed
-    per regime. Same microphone, same STFT, one colour range per pair."""
+    with its fitted gust wind, MD2 the FLY125 standby/cruise pair composed per
+    regime. Same microphone, same STFT, one colour range per pair.
+
+    (b) The same fits with every rotor at :data:`PROFILE_F0_HZ` (MD2: the
+    cruise fit alone, the blend weight being one there), :func:`_fit_at_speed`.
+    """
+    from matplotlib.lines import Line2D
+
     from experiments.noise_model import supports as S
 
     bases = _easy_bank_bases()
@@ -511,16 +599,10 @@ def fig_noise_real_vs_sampled() -> None:
             "standby/cruise fits",
         ),
     )
-    from matplotlib.layout_engine import ConstrainedLayoutEngine
-
-    fig, axes = plt.subplots(
-        2,
-        2,
-        figsize=(COLUMN_IN, 2.75),
-        sharex=True,
-        sharey=True,
-        layout=ConstrainedLayoutEngine(w_pad=0.02, h_pad=0.02, wspace=0.03, hspace=0.06),
-    )
+    fig = plt.figure(figsize=(TEXT_IN, 3.0), layout="constrained")
+    left, right = fig.subfigures(1, 2, width_ratios=[1.2, 1.0], wspace=0.01)
+    spec_axes = left.subplots(2, 2, sharex=True, sharey=True)
+    prof_axes = right.subplots(2, 1, sharex=True)
     for row, (drone, spec, paths, fit_tag) in enumerate(rows):
         clip = S.flight_clip(spec)
         rps = np.asarray(clip.rps, dtype=np.float64)
@@ -531,29 +613,87 @@ def fig_noise_real_vs_sampled() -> None:
         top = float(np.percentile(np.concatenate([d[:, keep].ravel() for d in dbs]), 99.5))
         dur = rps.shape[1] / SR
         for col, (db, what) in enumerate(zip(dbs, ("recording", fit_tag))):
-            pane = "abcd"[2 * row + col]
             im = _show_spec(
-                axes[row, col],
+                spec_axes[row, col],
                 db,
-                f"({pane}) {drone}, {what}",
+                f"{drone}, {what}",
                 fmax=NOISESAMP_FMAX_HZ,
                 dur=dur,
                 vmax=top,
                 dyn_range=NOISESAMP_DYN_DB,
             )
-        cb = fig.colorbar(im, ax=axes[row], pad=0.02, aspect=12, fraction=0.04)
+        cb = left.colorbar(im, ax=spec_axes[row], pad=0.02, aspect=12, fraction=0.04)
         cb.set_label("dB", labelpad=1)
         cb.ax.tick_params(length=1.5, pad=1)
-        axes[row, 0].set_ylabel("frequency (kHz)")
+        spec_axes[row, 0].set_ylabel("frequency (kHz)")
         print(
             f"  {drone}: {spec.text}, mic {NOISESAMP_MIC}, seed {NOISESAMP_SEED}, "
             f"rotor label {rps.min():.1f}-{rps.max():.1f} Hz (mean {rps.mean():.1f}), "
             f"colour range {top - NOISESAMP_DYN_DB:.1f}..{top:.1f} dB, payloads {paths}",
             flush=True,
         )
-    for ax in axes[1]:
+
+        # (b): at 80 Hz the regime blend weight is one, so MD2 is its cruise fit
+        path = paths.get("single") or paths["cruise"]
+        prof = _fit_at_speed(_load_json(ROOT / path), PROFILE_F0_HZ, NOISESAMP_FMAX_HZ)
+        ax = prof_axes[row]
+        bb_db, ped_db, wind_db = _db(prof["bb"]), _db(prof["ped"]), _db(prof["wind"])
+        tops = np.concatenate([_db(prof["needle_aero"]), _db(prof["needle_motor"])])
+        hi = float(max(tops.max(), ped_db.max())) + 5.0
+        lo = hi - 70.0  # DREGON's bench floor dips far below and leaves the axis
+        grid_khz = prof["grid"] / 1000.0
+        ax.plot(grid_khz, bb_db, color=PROFILE_COLOURS["bb"], lw=0.9, zorder=2)
+        if prof["wind"].max() > 0.0:
+            ax.plot(grid_khz, wind_db, color=PROFILE_COLOURS["wind"], lw=0.9, zorder=2)
+        ax.plot(grid_khz, ped_db, color=PROFILE_COLOURS["ped"], lw=0.6, zorder=3)
+        for fam in ("aero", "motor"):
+            ax.vlines(
+                prof[f"f_{fam}"] / 1000.0,
+                lo,
+                _db(prof[f"needle_{fam}"]),
+                color=PROFILE_COLOURS[fam],
+                lw=0.7,
+                zorder=4,
+            )
+        ax.set_xlim(0.0, NOISESAMP_FMAX_HZ / 1000.0)
+        ax.set_ylim(lo, hi)
+        ax.set_ylabel("dB per Hz")
+        ax.set_title(f"{drone}, fit, every rotor at {PROFILE_F0_HZ:.0f} Hz", pad=2)
+        probe = (100.0, 500.0, 1000.0, 2000.0, 2999.0)
+
+        def at(x: np.ndarray, fs=probe, g=prof["grid"]) -> list[float]:
+            return [round(float(np.interp(f, g, x)), 1) for f in fs]
+
+        print(
+            f"  {drone} at {PROFILE_F0_HZ:.0f} Hz ({path}): aero needles k 1-6 "
+            f"{_db(prof['needle_aero'][:6]).round(1)}, max {tops.max():.1f} at "
+            f"{np.concatenate([prof['f_aero'], prof['f_motor']])[tops.argmax()]:.0f} Hz; "
+            f"motor {_db(prof['needle_motor']).round(1)} at {prof['f_motor']} Hz; "
+            f"broadband floor at {probe} Hz {at(bb_db)}, wind {at(wind_db)}; "
+            f"pedestals in the line bins k 1-12 "
+            f"{at(ped_db, fs=prof['f_aero'][:12])}, max {ped_db.max():.1f}; "
+            f"y range {lo:.1f}..{hi:.1f}",
+            flush=True,
+        )
+    for ax in spec_axes[1]:
         ax.set_xlabel("time (s)")
-    save(fig, "gen_noise_real_vs_sampled", paper=True)
+    prof_axes[1].set_xlabel("frequency (kHz)")
+    prof_axes[0].legend(
+        handles=[
+            Line2D([], [], color=PROFILE_COLOURS["aero"], lw=0.9, label="aerodynamic lines"),
+            Line2D([], [], color=PROFILE_COLOURS["motor"], lw=0.9, label="motor lines"),
+            Line2D([], [], color=PROFILE_COLOURS["ped"], lw=0.9, label="line pedestals"),
+            Line2D([], [], color=PROFILE_COLOURS["bb"], lw=0.9, label="broadband floor"),
+            Line2D([], [], color=PROFILE_COLOURS["wind"], lw=0.9, label="wind (DREGON)"),
+        ],
+        loc="upper right",
+        ncol=2,
+        handlelength=1.2,
+        columnspacing=0.8,
+    )
+    left.suptitle("(a)", x=0.01, ha="left", fontweight="bold")
+    right.suptitle("(b)", x=0.01, ha="left", fontweight="bold")
+    save(fig, "gen_noise_fits", paper=True)
 
 
 def _hard_pool(n_mics: int = 1):
@@ -596,294 +736,11 @@ def fig_noise_hyperprior(n: int = 4) -> None:
     save(fig, "gen_noise_hyperprior", paper=True)
 
 
-# ── fitted rigs ─────────────────────────────────────────────────────────────
-
-BENCH_FITS = ROOT / "results/noise_v2/rounds/round3/fits"
-FLIGHT_FITS = ROOT / "results/noise_v3/fits_r4"
-SPEED_LAWS = ROOT / "results/static_rig/single_rotor/speed_laws.json"
-SINGLES = ROOT / "results/static_rig/single_rotor/dregon_singles.json"
-MOTOR_ORDER_STEP = 21  # 3 p for the DREGON motors (p = 7 pole pairs)
-
-
 def _load_json(path: Path) -> dict:
     import json
 
     with open(path) as fh:
         return json.load(fh)
-
-
-def _floor_curve_db(floor: dict, freqs: np.ndarray, *, v3: bool) -> np.ndarray:
-    """The fitted floor shape ``F(f)`` in dB at the reference speed (16 kHz grid units)."""
-    from data_processing.noise_model.floor import floor_geometry
-    from data_processing.noise_model.spectrum import floor_ctrl_hz, floor_shape_db
-
-    ctrl_hz = floor_ctrl_hz(SR)
-    shape, tilt_oct = floor_geometry(freqs, ctrl_hz)
-    z = np.asarray(floor["floor_shape_z"], dtype=np.float64)
-    if v3:
-        ctrl_db = floor_shape_db(z, sr=SR, scale_db=float(floor["floor_shape_sd_db"]))
-        tilt = 0.0
-    else:
-        ctrl_db = floor_shape_db(z, sr=SR)
-        tilt = float(floor.get("floor_tilt_db_oct", 0.0))
-    return float(floor["floor_mean_db"]) + shape @ ctrl_db + tilt * tilt_oct
-
-
-def _dregon_ambient_db(freqs: np.ndarray) -> np.ndarray:
-    """Rotors-off ambient of the single-rotor recordings at 80 % throttle, in the
-    units of a 16 kHz support periodogram (``|rfft(x w)|^2 / sum w^2``), smoothed
-    in 1/6-octave bands and averaged over the non-windy microphones and the
-    four recordings."""
-    import importlib.util
-
-    from scipy import signal
-
-    spec = importlib.util.spec_from_file_location(
-        "decoh", ROOT / "scripts" / "noise_v2_order_decoherence.py"
-    )
-    assert spec is not None and spec.loader is not None
-    decoh = importlib.util.module_from_spec(spec)
-    sys.modules["decoh"] = decoh
-    spec.loader.exec_module(decoh)
-    singles = _load_json(SINGLES)["recordings"]
-    want = {f"motor_Motor{m}_80" for m in (1, 2, 3, 4)}
-    curves = []
-    for rid, a in decoh.dregon_motor_audio(lambda r: r in want):
-        fs = float(decoh.FS_NATIVE)
-        mics = [m for m in range(a.shape[0]) if m not in set(singles[rid]["wind_mics"])]
-        act0, _ = decoh.active_window(a)
-        off = a[mics, : max(int(act0 - 0.5 * fs), int(fs))]
-        off = off - off.mean(axis=1, keepdims=True)
-        x = signal.resample_poly(off, SR, int(round(fs)), axis=-1)
-        n_fft = 8192
-        w = np.hanning(n_fft + 1)[:n_fft]
-        n_blk = x.shape[-1] // n_fft
-        acc = np.zeros(n_fft // 2 + 1)
-        for b in range(n_blk):
-            blk = x[:, b * n_fft : (b + 1) * n_fft] * w
-            acc += np.mean(np.abs(np.fft.rfft(blk, axis=-1)) ** 2, axis=0)
-        acc /= n_blk * float(np.sum(w**2))
-        f = np.fft.rfftfreq(n_fft, 1.0 / SR)
-        out = np.empty_like(freqs)
-        for i, fc in enumerate(freqs):
-            sel = (f >= fc / 2 ** (1 / 12)) & (f <= fc * 2 ** (1 / 12))
-            out[i] = np.median(acc[sel]) if sel.any() else np.nan
-        curves.append(10 * np.log10(np.maximum(out, 1e-30)))
-    return np.nanmean(np.array(curves), axis=0)
-
-
-def _per_rotor_exponents() -> tuple[list[float], list[float]]:
-    """``(alpha_i, beta_i)`` per DREGON rotor from the single-rotor ladders:
-    the median exponent over the even aerodynamic orders 4-40 and over the
-    motor orders 63 and 84."""
-    laws = _load_json(SPEED_LAWS)["alpha_k_per_motor"]
-    alpha, beta = [], []
-    for m in ("1", "2", "3", "4"):
-        a = np.asarray(laws[m], dtype=np.float64)
-        k = np.arange(1, len(a) + 1)
-        even = (k % 2 == 0) & (k >= 4) & (k <= 40) & (k % MOTOR_ORDER_STEP != 0)
-        motor = np.isin(k, [63, 84])
-        alpha.append(float(np.median(a[even])))
-        beta.append(float(np.median(a[motor])))
-    return alpha, beta
-
-
-def _dregon_single_rotor_floor_db(freqs: np.ndarray) -> np.ndarray:
-    """Measured floor between the lines of the single-rotor supports at 80 %
-    throttle: the 20th percentile of the support periodogram in 1/6-octave bands
-    (divided by 0.223, the 20th percentile of a unit exponential), averaged over
-    the non-windy microphones and the four rotors."""
-    singles = _load_json(SINGLES)["recordings"]
-    curves = []
-    for m in (1, 2, 3, 4):
-        rid = f"motor_Motor{m}_80"
-        z = np.load(SUPPORTS / f"bench_dregon_{rid[6:]}.npz", allow_pickle=True)
-        power = np.asarray(z["power"])[:, 0, :]
-        f = np.asarray(z["freqs_hz"])
-        mics = [i for i in range(power.shape[0]) if i not in set(singles[rid]["wind_mics"])]
-        out = np.empty_like(freqs)
-        for i, fc in enumerate(freqs):
-            sel = (f >= fc / 2 ** (1 / 12)) & (f <= fc * 2 ** (1 / 12))
-            out[i] = np.mean(np.percentile(power[mics][:, sel], 20, axis=1)) / 0.223
-        curves.append(10 * np.log10(np.maximum(out, 1e-30)))
-    return np.mean(np.array(curves), axis=0)
-
-
-@_paper
-def fig_noise_rigs() -> None:
-    bench = [_load_json(BENCH_FITS / f"bench_dregon_Motor{m}_80__bench.json") for m in (1, 2, 3, 4)]
-    dre = _load_json(FLIGHT_FITS / "dregon_room2_floor__flight_v3.json")
-    cru = _load_json(FLIGHT_FITS / "michaels_fly125_cruise__flight_v3.json")
-    stb = _load_json(FLIGHT_FITS / "michaels_fly125_standby__flight_v3.json")
-    alpha, beta = _per_rotor_exponents()
-    freqs = np.geomspace(30.0, 7900.0, 400)
-    K_DRE = 88  # orders below the 8 kHz Nyquist at the DREGON reference speed
-
-    fig, axes = plt.subplots(2, 3, figsize=(TEXT_IN, 4.0), layout="constrained")
-    (ax_pd, ax_fd, ax_gd), (ax_pm, ax_fm, ax_gm) = axes
-
-    def motor_ticks(ax, k_max):
-        for k in range(MOTOR_ORDER_STEP, k_max + 1, MOTOR_ORDER_STEP):
-            ax.axvline(k, color="0.75", lw=0.6, ls=":", zorder=0)
-
-    # (a) DREGON comb profiles: single-rotor fits (80 %) and the flight fit
-    for i, (b, c) in enumerate(zip(bench, COLOURS)):
-        p = np.asarray(b["params"]["profile"]["profile_db"])[0][:K_DRE]
-        ax_pd.plot(
-            np.arange(1, len(p) + 1),
-            p,
-            ".",
-            ms=2,
-            color=c,
-            alpha=0.85,
-            label=rf"rotor {i + 1}: $\alpha_i$={alpha[i]:.1f}, $\beta_i$={beta[i]:.1f}",
-        )
-    pf = np.asarray(dre["params"]["profile"]["profile_db"])
-    for i, c in enumerate(COLOURS):
-        ax_pd.plot(np.arange(1, pf.shape[1] + 1), pf[i], "-", lw=0.9, color=c, alpha=0.6)
-    motor_ticks(ax_pd, K_DRE)
-    ax_pd.set_title("(a) DREGON: comb profiles $p_{ik}$")
-    ax_pd.set_ylabel("line power at $r_{\\mathrm{ref}}$ (dB)")
-    ax_pd.legend(
-        loc="upper right",
-        frameon=False,
-        title="dots: single-rotor fits; lines: flight fit",
-    )
-    ax_pd.set_xlim(0, K_DRE + 1)
-    ax_pd.set_ylim(-100, 20)  # the top 50 dB hold the legend
-
-    # (b) Matrice 100 comb profiles: cruise and standby flight fits
-    from matplotlib.lines import Line2D
-
-    for fit, ls in ((cru, "-"), (stb, "--")):
-        pf = np.asarray(fit["params"]["profile"]["profile_db"])
-        for i, c in enumerate(COLOURS):
-            ax_pm.plot(np.arange(1, pf.shape[1] + 1), pf[i], ls, lw=0.9, color=c, alpha=0.8)
-    motor_ticks(ax_pm, 81)
-    ax_pm.set_title("(d) Matrice 100: comb profiles $p_{ik}$")
-    ax_pm.legend(
-        handles=[
-            Line2D([], [], color="0.3", ls="-", label="cruise, rotors 1-4"),
-            Line2D([], [], color="0.3", ls="--", label="standby, rotors 1-4"),
-        ],
-        loc="upper right",
-        frameon=False,
-        title=r"$\alpha_i$, $\beta_i$ pinned at the prior centres",
-    )
-    ax_pm.set_xlim(0, 82)
-    ax_pm.set_ylim(-115, -5)
-    for ax in (ax_pd, ax_pm):
-        ax.set_xlabel("order $k$")
-
-    # (c) DREGON floor: flight fit F(f), measured single-rotor floor, measured ambient
-    ax_fd.semilogx(
-        freqs,
-        _floor_curve_db(dre["params"]["floor"], freqs, v3=True),
-        color="k",
-        lw=1.1,
-        label="flight fit $F(f)$ (room 2, four rotors)",
-    )
-    ax_fd.semilogx(
-        freqs,
-        _dregon_single_rotor_floor_db(freqs),
-        color="tab:blue",
-        lw=1.0,
-        label="measured floor, one rotor at 80 %",
-    )
-    ax_fd.semilogx(
-        freqs,
-        _dregon_ambient_db(freqs),
-        color="0.45",
-        lw=1.0,
-        ls="--",
-        label="measured ambient $N(f)$ (rotors off)",
-    )
-    ax_fd.set_title("(b) DREGON: floor shape $F(f)$ and ambient")
-    ax_fd.set_ylabel("power density (dB)")
-    ax_fd.set_ylim(-85, 10)
-    ax_fd.legend(loc="upper right", frameon=False)
-
-    # (d) Matrice 100 floor: cruise and standby
-    ax_fm.semilogx(
-        freqs, _floor_curve_db(cru["params"]["floor"], freqs, v3=True), "k-", lw=1.1, label="cruise"
-    )
-    ax_fm.semilogx(
-        freqs,
-        _floor_curve_db(stb["params"]["floor"], freqs, v3=True),
-        "k--",
-        lw=1.2,
-        label="standby",
-    )
-    ax_fm.set_title("(e) Matrice 100: floor shape $F(f)$")
-    ax_fm.legend(loc="upper right", frameon=False)
-    for ax in (ax_fd, ax_fm):
-        ax.set_xlabel("frequency (Hz)")
-        ax.set_xlim(30, 7900)
-
-    # (e) DREGON pedestal rate gamma_k; shaft parameters in the legend
-    for i, (b, c) in enumerate(zip(bench, COLOURS)):
-        g = np.asarray(b["params"]["gamma_hz"])[0][:K_DRE]
-        ax_gd.semilogy(
-            np.arange(1, len(g) + 1),
-            g,
-            ".",
-            ms=2,
-            color=c,
-            alpha=0.85,
-            label=rf"rotor {i + 1}: $\sigma_\nu$={b['params']['sigma_nu']:.2f}, "
-            rf"$\lambda$={b['params']['lam']:.2f}",
-        )
-    gf = np.asarray(dre["params"]["gamma_hz"])
-    for i, c in enumerate(COLOURS):
-        ax_gd.semilogy(
-            np.arange(1, gf.shape[1] + 1),
-            gf[i],
-            "-",
-            lw=0.9,
-            color=c,
-            alpha=0.6,
-            label=rf"flight fit: $\sigma_\nu$={dre['params']['sigma_nu']:.1f}, "
-            rf"$\lambda$={dre['params']['lam']:.0f}"
-            if i == 0
-            else None,
-        )
-    ax_gd.set_title(r"(c) DREGON: pedestal rate $\gamma_k$ and shaft $(\sigma_\nu, \lambda)$")
-    ax_gd.set_ylabel(r"$\gamma_k$ (Hz)")
-    ax_gd.set_ylim(1e-3, 1e12)  # the top decades hold the legend
-    ax_gd.legend(
-        loc="upper left",
-        frameon=False,
-        ncol=1,
-        title=r"$\sigma_\nu$ in rad/s, $\lambda$ in 1/s",
-    )
-    ax_gd.set_xlim(0, K_DRE + 1)
-
-    # (f) Matrice 100 pedestal rate
-    for fit, ls, tag in ((cru, "-", "cruise"), (stb, "--", "standby")):
-        gf = np.asarray(fit["params"]["gamma_hz"])
-        for i, c in enumerate(COLOURS):
-            ax_gm.semilogy(
-                np.arange(1, gf.shape[1] + 1),
-                gf[i],
-                ls,
-                lw=0.9,
-                color=c,
-                label=rf"{tag}: $\sigma_\nu$={fit['params']['sigma_nu']:.1f}, "
-                rf"$\lambda$={fit['params']['lam']:.0f}"
-                if i == 0
-                else None,
-            )
-    ax_gm.set_title(r"(f) Matrice 100: $\gamma_k$ and $(\sigma_\nu, \lambda)$")
-    ax_gm.set_ylim(1e-3, 1e12)
-    ax_gm.legend(loc="upper left", frameon=False)
-    ax_gm.set_xlim(0, 82)
-    for ax in (ax_gd, ax_gm):
-        ax.set_xlabel("order $k$")
-    ax_gm.set_ylabel(r"$\gamma_k$ (Hz)")
-    ax_fm.set_ylabel("power density (dB)")
-    ax_pm.set_ylabel("line power at $r_{\\mathrm{ref}}$ (dB)")
-
-    save(fig, "gen_noise_rigs", paper=True)
 
 
 # ── tables ──────────────────────────────────────────────────────────────────
@@ -1285,7 +1142,6 @@ def main() -> None:
         "fits",
         "noise",
         "bank",
-        "rigs",
     ]
     if "tables" in which:
         tables()
@@ -1302,11 +1158,9 @@ def main() -> None:
     if "fits" in which:
         fig_traj_fits()
     if "noise" in which:
-        fig_noise_real_vs_sampled()
+        fig_noise_fits()
     if "bank" in which:
         fig_noise_hyperprior()
-    if "rigs" in which:
-        fig_noise_rigs()
 
 
 if __name__ == "__main__":
