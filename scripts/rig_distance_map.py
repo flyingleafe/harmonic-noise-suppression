@@ -25,7 +25,7 @@ import multiprocessing as mp
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -58,6 +58,8 @@ def _source(path: str) -> Any:
 
 def _rig(job: tuple[str, str, Any]) -> Any:
     group, path, key = job
+    if group == "extra":
+        return json.loads((ROOT / path).read_text())
     if group == "fit":
         from experiments.noise_model.sectors_v4 import fit_regimes
 
@@ -78,9 +80,15 @@ def _features(job: tuple[str, str, Any]) -> tuple[np.ndarray, np.ndarray]:
     return features(_rig(job))
 
 
-def _jobs(n_bank: int, seed: int) -> tuple[list[tuple[str, str, Any]], list[str], list[str]]:
+def _jobs(
+    n_bank: int, seed: int, extra: list[tuple[str, str]]
+) -> tuple[list[tuple[str, str, Any]], list[str], list[str]]:
     jobs: list[tuple[str, str, Any]] = [("fit", "", "dregon"), ("fit", "", "md2")]
     groups, names = ["fit_dregon", "fit_md2"], ["dregon", "md2"]
+    for name, path in extra:
+        jobs.append(("extra", path, name))
+        groups.append(f"fit_{name}")
+        names.append(name)
     n_total = len(_source(BANK))
     pick = np.sort(np.random.default_rng(seed).choice(n_total, n_bank, replace=False))
     jobs += [("bank", BANK, int(i)) for i in pick]
@@ -108,7 +116,8 @@ def compute(a: argparse.Namespace) -> None:
     from experiments.noise_model.rig_distance import metric_mds, pairwise
 
     t0 = time.time()
-    jobs, groups, names = _jobs(a.n_bank, a.seed)
+    extra = [tuple(e.split("=", 1)) for e in a.extra]
+    jobs, groups, names = _jobs(a.n_bank, a.seed, cast(list[tuple[str, str]], extra))
     with mp.get_context("fork").Pool(a.workers, initializer=_init_worker) as pool:
         feats = pool.map(_features, jobs, chunksize=4)
     t_feat = time.time() - t0
@@ -138,11 +147,15 @@ def compute(a: argparse.Namespace) -> None:
         "rigs": {k: int((g == k).sum()) for k in dict.fromkeys(groups)},
         "stress1": stress,
         "fit_to_fit": {c: float(dist[c][0, 1]) for c in COMPONENTS},
+        "fit_matrix": {
+            "names": names[: 2 + len(extra)],
+            **{c: dist[c][: 2 + len(extra), : 2 + len(extra)].tolist() for c in COMPONENTS},
+        },
         "to_fit": {},
         "seconds": {"features": round(t_feat, 1), "total": round(time.time() - t0, 1)},
         "args": vars(a),
     }
-    for i, fit in enumerate(("dregon", "md2")):
+    for i, fit in enumerate(names[: 2 + len(extra)]):
         row: dict[str, Any] = {}
         for c in COMPONENTS:
             d = dist[c][i]
@@ -259,6 +272,13 @@ def _args() -> argparse.Namespace:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--out", default="results/rig_distance_v4")
     ap.add_argument("--plot", action="store_true", help="plot from <out>/distances.npz only")
+    ap.add_argument(
+        "--extra",
+        action="append",
+        default=[],
+        metavar="NAME=PAYLOAD",
+        help="one more fit payload (repo-relative), group fit_NAME; repeatable",
+    )
     return ap.parse_args()
 
 
