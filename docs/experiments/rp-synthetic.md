@@ -624,26 +624,34 @@ All four pretraining runs stopped by saturation.
   lower by only 0.001); HarmoF0-L2 matches (53 500). Same for the
   real-selected column: HRSPNet `best_real_macro_median` is 81 500 (table
   83 000), Conv+BiGRU 41 000 (45 000).
-- The fine-tunes are validated on the real split only, so they have no
-  `uniform` score yet.
+- The fine-tunes are validated on the real split only; their synthetic scores
+  come from the panel re-score below.
 - The 5e-4 numbers are in the paper's Table IX.
-- **Real-only models on the synthetic panel** (`scripts/rp_panel_eval.py
-  --validation rp_real_v4easy`, omnirun `rp-realonly-synth-eval-8c2de7` and
-  `rp-scv2-raw-synth-eval-a513dd`, `results/rp_panel_eval/realonly_synth_v4*.json`).
-  Checkpoints of Table VII's rows: `best_real_macro_median`, except
-  Conv+BiGRU `best_real_macro_raw` (its median checkpoint is step 53 000,
-  real_macro 2.71; the table's argmin-median round is 67 000, 2.65, which is
-  the raw-best checkpoint). The real views reproduce Table VII exactly.
+- **Real-only and hard-tuned models on the synthetic panel**
+  (`scripts/rp_panel_eval.py --validation rp_real_v4easy`; omnirun
+  `rp-realonly-synth-eval-8c2de7`, `rp-scv2-raw-synth-eval-a513dd`,
+  `rp-hardtuned-synth-eval-fc38f9`; `results/rp_panel_eval/{realonly,hardtuned}_synth_v4*.json`).
+  Each model is scored at the checkpoint of its table round: real-only
+  `best_real_macro_median`, except Conv+BiGRU `best_real_macro_raw` (its
+  median checkpoint is step 53 000, real_macro 2.71; the table's argmin-median
+  round is 67 000, 2.65); tuned HRSPNet and HPPNet-L2 `best_real_macro_median`,
+  HarmoF0-L2 `best_real_median` (step 11 500), Conv+BiGRU `best_real_macro_raw`
+  (13 000). The real views reproduce Tables VII and IX exactly.
 
-  | model | `uniform` | weak_comb | strong_motor | wide_pedestal | near_dregon | near_md2 | `near_macro` | static_comb |
-  |---|---|---|---|---|---|---|---|---|
-  | HRSPNet | 30.54 | 25.21 | 34.13 | 18.62 | 6.84 | 13.53 | 10.19 | 11.90 |
-  | HarmoF0-L2 | 28.63 | 28.37 | 36.37 | 24.53 | 5.63 | 13.04 | 9.34 | 16.37 |
-  | Conv+BiGRU | 49.14 | 59.99 | 52.20 | 55.86 | 9.61 | 47.08 | 28.35 | 17.97 |
-  | HPPNet-L2 | 26.03 | 31.38 | 20.92 | 28.09 | 14.12 | 12.03 | 13.08 | 9.73 |
+  | model | training | `uniform` | weak_comb | strong_motor | wide_pedestal | near_dregon | near_md2 | `near_macro` | static_comb |
+  |---|---|---|---|---|---|---|---|---|---|
+  | HRSPNet | real only | 30.54 | 25.21 | 34.13 | 18.62 | 6.84 | 13.53 | 10.19 | 11.90 |
+  | | hard, tuned | 9.05 | 17.23 | 10.34 | 12.79 | 2.87 | 8.04 | 5.46 | 4.59 |
+  | HarmoF0-L2 | real only | 28.63 | 28.37 | 36.37 | 24.53 | 5.63 | 13.04 | 9.34 | 16.37 |
+  | | hard, tuned | 20.20 | 27.03 | 26.10 | 22.44 | 5.38 | 11.93 | 8.66 | 14.29 |
+  | Conv+BiGRU | real only | 49.14 | 59.99 | 52.20 | 55.86 | 9.61 | 47.08 | 28.35 | 17.97 |
+  | | hard, tuned | 21.06 | 27.47 | 34.28 | 22.99 | 4.15 | 11.42 | 7.79 | 14.50 |
+  | HPPNet-L2 | real only | 26.03 | 31.38 | 20.92 | 28.09 | 14.12 | 12.03 | 13.08 | 9.73 |
+  | | hard, tuned | 13.55 | 23.81 | 13.90 | 18.71 | 5.82 | 9.72 | 7.77 | 11.18 |
 
-  Real-only models are 24–48 Hz off on `uniform` (hard pretraining: 1.10–4.73)
-  and 9–28 Hz on `near_macro`. Table IX's real-only Synth. is `uniform`.
+  Real-only models are 26–49 Hz off on `uniform` (hard pretraining: 1.10–4.73).
+  Fine-tuning keeps part of the synthetic skill: `uniform` 9.05 (HRSPNet) to
+  21.06, between the two; HRSPNet keeps the most. Table IX's Synth. is `uniform`.
 
 ### Easy setup (decided 2026-10-26)
 
