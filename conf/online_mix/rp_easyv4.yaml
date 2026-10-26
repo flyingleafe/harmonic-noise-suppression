@@ -1,0 +1,75 @@
+# SYNTHETIC STREAM `easyv4`: the paper grid's EASY setup (Dmitrii, 2026-10-26).
+# rp_priorv4.yaml with the wide prior replaced by drones drawn AROUND the two
+# fits, each flown on its own drone's fitted trajectory law.
+#
+# BANK: `easy-v4-banks` easy_v4_n2048.npz (noise-nbhd-bank-v4/1,
+# scripts/easy_bank_v4_build.py, seed 20261027, omnirun easy-bank-v4-749cde):
+# 1024 ungated prior-shaped perturbations (experiments.noise_model.sectors_v4
+# .perturb_fit, at the validation neighbourhoods' strengths 0.375 / 0.374) of
+#   * the accepted DREGON flight payload: the bench fit c7 with its fitted SC
+#     gust wind (results/noise_v4/flight/benchwind/), wind kept, traj_rig dregon;
+#   * the MD2 standby/cruise flight pair, traj_rig michaels.
+# Equal counts, so the pool's uniform entry draw is a 50/50 mix.
+# WIND: DREGON draws carry their fitted gust wind and MD2's flight fits their own
+# floor, so there is no per-clip `wind_sc` (the pool refuses it on a windy
+# payload). `line_scatter_db` 3.4, the level rule and everything else are
+# rp_priorv4's.
+# TRAJECTORY: every entry flies its traj_rig's fitted law through this rps
+# block (rotor_sep, rps_max, take-off / landing ramps, no measurement
+# process); hover_range and shrink act on posterior draws only, which no entry
+# uses. Validation: conf/validation/rp_real_v4easy.yaml.
+
+sample_rate: 16000
+duration_s: 2.0
+base_seed: 20261027
+snr_ref_floor_rms: 0.02
+
+sources:
+  noise:
+    - kind: noise_v2
+      weight: 2.0
+      n_mics: 8
+      n_rotors: 4
+      preset_bank: dload:easy-v4-banks@80fa07c85d53a38b341a129e4f2994f889d5646d56fb3f6799f1bc669b8d90ad/easy_v4_n2048.npz
+      render_reuse: 40
+      render_duration_s: 4.0
+      rps_scale_range: [1.0, 1.0]
+      normalize_rms_range: [0.02, 0.25]
+      level_mode: flight
+      line_scatter_db: 3.4
+      rps:
+        kind: fitted_traj
+        fits: dload:rps-traj-fits
+        rigs: {posterior: 1.0}
+        mean_shift: [0.0, 0.0]
+        hover_range: [35.0, 95.0]
+        rotor_sep: [2.0, 15.0]
+        rps_max: 150.0
+        measurement_noise: false
+        shrink: {rigs: [dregon, michaels], weight: 0.57}
+        flight_fs: 200
+        flight_reuse: 32
+        phases: {takeoff_s: [0.6, 1.6], landing_s: [0.25, 0.8]}
+    - kind: silence
+      weight: 0.4
+      n_channels: 8
+  speech:
+    - dataset: librispeech
+      subpath: LibriSpeech/train-clean-100
+
+policy:
+  stages:
+    - until: null
+      source_prob: 1.0
+      speech_per_channel: independent
+      snr_per_channel: false
+      snr_db:
+        uniform: {low: -30.0, high: 5.0}
+      augmentations:
+        probability: 0.5
+        choices:
+          - random_gain: {min_db: -6.0, max_db: 6.0}
+      noise_augmentations:
+        probability: 0.5
+        choices:
+          - spectral_recolor: {}

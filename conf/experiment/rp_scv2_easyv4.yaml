@@ -1,0 +1,20 @@
+# @package _global_
+# rp_scv2_all with the real noise replaced by drones drawn AROUND the two fits in noise model v4 (the paper grid's easy setup), synthesized online (conf/online_mix/rp_easyv4.yaml), validated on the real panel, static_comb and the six synthetic sectors, stopped and selected on real_macro and near_macro (conf/validation/rp_real_v4easy.yaml). Batch doc: docs/experiments/rp-synthetic.md.
+defaults:
+  - override /data: rp_real
+  - override /model: hb_scv2_mag_nogate
+  - override /loss: pit_mse
+  - override /metrics: rps
+  - override /validation: rp_real_v4easy
+  - _self_
+
+experiment_name: rp_scv2_easyv4
+batch_size: 128
+grad_accum_steps: 1
+num_workers: 12  # as rp_scv2_priorv4
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_easyv4.yaml
+optim:
+  lr: 1.0e-3  # as rp_scv2_all
