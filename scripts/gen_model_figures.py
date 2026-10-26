@@ -18,12 +18,14 @@ Figures
     against the noise-model-v4 fits of the easy training bank rendered on the
     SAME speed label, one colour range per pair; (b) the two fits with every
     rotor at 80 Hz: line cores, pedestals and broadband.
-``gen_noise_hyperprior``
-    Four hard-bank entries rendered on hyperprior trajectories -- the noise the
-    ``nv2_hard`` arm trains on.
+``gen_noise_prior``
+    (a) One drone of each wide-prior validation sector on the same training
+    trajectory, rotor noise at unit RMS, one colour range; (b) the metric MDS
+    of the spectral rig distance: training bank, easy neighbourhoods, fits and
+    the drones of (a).
 
-The paper's figures (``fits``, ``noise``, ``hyper``, ``bank``) are drawn
-at print size in :func:`plots.paper.paper_style`; the deck's (``traj``,
+The paper's figures (``fits``, ``noise``, ``hyper``, ``bank``, ``prior``) are
+drawn at print size in :func:`plots.paper.paper_style`; the deck's (``traj``,
 ``traj_other``) keep the deck style.
 
 Run: ``systemd-run --user --scope -p MemoryMax=10G python scripts/gen_model_figures.py [targets]``
@@ -31,12 +33,12 @@ Run: ``systemd-run --user --scope -p MemoryMax=10G python scripts/gen_model_figu
 
 from __future__ import annotations
 
-import contextlib
 import functools
 import sys
 import warnings
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import matplotlib
 
@@ -696,44 +698,242 @@ def fig_noise_fits() -> None:
     save(fig, "gen_noise_fits", paper=True)
 
 
-def _hard_pool(n_mics: int = 1):
+#: ``gen_noise_prior``: the rig-distance map (``scripts/rig_distance_map.py``),
+#: the validation sectors it maps, and per sector of (a) its label, the v1
+#: draw (or the payload statistic) that defines it (``None``: the medoid), the
+#: marker of its drone in (b) and its colour (the map's).
+PRIOR_MAP = ROOT / "results/rig_distance_v4/distances.npz"
+PRIOR_SECTORS_SRC = "dload:validation-sectors-v4"
+PRIOR_SECTORS = (
+    ("uniform", "uniform", None, "o", "#1f77b4"),
+    ("weak_comb", "weak comb", "k2_over_floor_db", "s", "#2ca02c"),
+    ("strong_motor", "strong motor", "motor_boost_db", "^", "#9467bd"),
+    ("wide_pedestal", "wide pedestal", "pedestal_width_hz", "v", "#8c564b"),
+)
+#: The easy neighbourhoods and the fits: map group, legend label, colour.
+PRIOR_NEAR = (
+    ("near_dregon", "easy neighbourhood, DREGON", "#d62728"),
+    ("near_md2", "easy neighbourhood, MD2", "#ff7f0e"),
+)
+#: The seed of the one training trajectory every drone of (a) flies.
+PRIOR_TRAJ_SEED = 0
+PRIOR_DUR_S = 8.0
+#: Where (points) each drone's tag sits beside its marker in (b).
+PRIOR_TAG_OFFSETS = ((-6, -6), (6, 6), (7, 0), (-6, 6))
+
+
+def _sector_stat(job: tuple[int, int, int, str]) -> float:
+    """The statistic ``key`` of the prior draw ``(seed, worker, attempt)``,
+    redrawn as ``scripts/validation_sectors_v4_build.py`` drew it: a v1 law
+    draw, or the payload's :func:`.sectors_v4.pedestal_width_hz`."""
+    import torch
+
+    from experiments.noise_model.prior_v4 import sample_prior_v4
+    from experiments.noise_model.sectors_v4 import pedestal_width_hz
+
+    torch.set_num_threads(2)
+    seed, worker, attempt, key = job
+    pl = sample_prior_v4(seed, worker, attempt)
+    drawn = pl.pop("_prior_v1_drawn")
+    return float(pedestal_width_hz(pl) if key == "pedestal_width_hz" else drawn[key])
+
+
+def _prior_picks(z) -> list[tuple[int, int, float]]:
+    """Per sector of :data:`PRIOR_SECTORS`, ``(member, map row, value)``: an
+    axis sector's member at its median statistic (the lower middle member of
+    the 32), the uniform sector's ``d_total`` medoid (value: its mean
+    distance to the other members)."""
+    import concurrent.futures as cf
+    import json
+    import multiprocessing as mp
+
+    from data_processing.streams import resolve_source
+
+    root = Path(resolve_source(PRIOR_SECTORS_SRC))
+    seed = int(json.loads((root / "report.json").read_text())["seed"])
+    names = list(z["names"])
+    jobs: list[tuple[int, int, int, str]] = []
+    for sec, _, key, _, _ in PRIOR_SECTORS:
+        if key is not None:
+            with np.load(root / f"{sec}.npz") as b:
+                jobs += [
+                    (seed, int(w), int(a), key)
+                    for w, a in zip(b["draw_worker"], b["draw_attempt"], strict=True)
+                ]
+    with cf.ProcessPoolExecutor(6, mp_context=mp.get_context("spawn")) as ex:
+        vals = iter(list(ex.map(_sector_stat, jobs)))
+    out = []
+    for sec, _, key, _, _ in PRIOR_SECTORS:
+        rows = np.flatnonzero(z["groups"] == sec)
+        if key is None:
+            d = z["d_total"][np.ix_(rows, rows)].sum(axis=1) / (len(rows) - 1)
+            i = int(np.argmin(d))
+            value = float(d[i])
+        else:
+            x = np.asarray([next(vals) for _ in rows])
+            i = int(np.argsort(x)[(len(x) - 1) // 2])
+            value = float(x[i])
+        out.append((i, names.index(f"{sec}_{i}"), value))
+    return out
+
+
+def _prior_rps() -> np.ndarray:
+    """``(R, T)`` one :data:`PRIOR_DUR_S` window as the wide-prior training
+    stream flies its bank (``conf/online_mix/rp_priorv4.yaml``'s ``rps``
+    block, ``NoiseV2Pool.sample_rps``), drawn from :data:`PRIOR_TRAJ_SEED`."""
     import yaml
 
     from data_processing.noise_v2_pool import NoiseV2Pool
 
-    cfg = yaml.safe_load((ROOT / "conf/online_mix/noise_v2_hard_5050.yaml").read_text())
-    src = dict(cfg["sources"]["noise"][0])
-    src["n_mics"] = n_mics
-    src["render_reuse"] = 1
-    src["render_pool"] = 1
-    src["normalize_rms_range"] = None
-    return NoiseV2Pool.from_config(src, duration_s=4.0, sample_rate=SR)
+    cfg = yaml.safe_load((ROOT / "conf/online_mix/rp_priorv4.yaml").read_text())
+    src = dict(cfg["sources"]["noise"][0], n_mics=NOISESAMP_MIC + 1)
+    pool = NoiseV2Pool.from_config(src, duration_s=PRIOR_DUR_S, sample_rate=SR)
+    rps = pool.sample_rps(np.random.default_rng(PRIOR_TRAJ_SEED), PRIOR_DUR_S)
+    return np.asarray(rps, dtype=np.float64)
 
 
 @_paper
-def fig_noise_hyperprior(n: int = 4) -> None:
-    """Four hard-bank entries on hyperprior flights, 4 s each, every panel
-    clipped to its own 45 dB below its 99.5th percentile; column width."""
-    pool = _hard_pool()
-    fig, axes = plt.subplots(
-        2, 2, figsize=(COLUMN_IN, 2.5), sharex=True, sharey=True, layout="constrained"
-    )
-    rng = np.random.default_rng(2026)
-    for i, ax in enumerate(axes.ravel()[:n]):
-        frame = pool.sample_timeframe(rng, 4.0)
-        audio = np.asarray(frame["audio"].data)[0].astype(np.float64)
-        rps = np.asarray(frame["rps"].data)
-        hover = float(np.mean(rps))
-        name = ""
-        with contextlib.suppress(Exception):
-            name = str(frame["meta"]["entry"])
-        print(f"  panel {i + 1}: entry {name or '?'}, mean speed {hover:.1f} Hz", flush=True)
-        _show_spec(ax, _spec_db(audio), f"drone {i + 1}, {hover:.0f} Hz", dur=len(audio) / SR)
-    for ax in axes[:, 0]:
+def fig_noise_prior() -> None:
+    """The paper's prior figure, ``gen_noise_prior``, full text width.
+
+    (a) One drone per validation sector of the wide prior
+    (:data:`PRIOR_SECTORS`, :func:`_prior_picks`), rotor noise only, all on the
+    SAME training trajectory (:func:`_prior_rps`) with the same render seed,
+    microphone and STFT as ``gen_noise_fits``; each render at unit RMS, one
+    colour range for all four. (b) The 2-D metric MDS of the spectral rig
+    distance ``d_total`` (``scripts/rig_distance_map.py``): the training bank,
+    the easy neighbourhoods of the two fits, the fits, and the drones of (a).
+    """
+    from data_processing.noise_model.prior_bank_v4 import PriorBankV4
+    from data_processing.noise_model.render import render_noise
+    from data_processing.streams import resolve_source
+
+    z = dict(np.load(PRIOR_MAP))
+    picks = _prior_picks(z)
+    rps = _prior_rps()
+    root = Path(resolve_source(PRIOR_SECTORS_SRC))
+    dbs = []
+    for (sec, *_), (i, _, _) in zip(PRIOR_SECTORS, picks, strict=True):
+        payload = PriorBankV4(root / f"{sec}.npz").payload(i)
+        audio = np.asarray(
+            render_noise(payload, rps, sr=SR, n_mics=NOISESAMP_MIC + 1, seed=NOISESAMP_SEED),
+            dtype=np.float64,
+        )[NOISESAMP_MIC]
+        dbs.append(_spec_db(audio / np.sqrt(np.mean(audio**2))))
+    keep = np.linspace(0, SR / 2, dbs[0].shape[1]) <= NOISESAMP_FMAX_HZ
+    top = float(np.percentile(np.concatenate([d[:, keep].ravel() for d in dbs]), 99.5))
+
+    fig = plt.figure(figsize=(TEXT_IN, 3.0), layout="constrained")
+    left, right = fig.subfigures(1, 2, width_ratios=[1.2, 1.0], wspace=0.01)
+    spec_axes = left.subplots(2, 2, sharex=True, sharey=True)
+    for n, (ax, db, (_, label, *_)) in enumerate(
+        zip(spec_axes.ravel(), dbs, PRIOR_SECTORS, strict=True), start=1
+    ):
+        im = _show_spec(
+            ax,
+            db,
+            f"{n}: {label}",
+            fmax=NOISESAMP_FMAX_HZ,
+            dur=rps.shape[1] / SR,
+            vmax=top,
+            dyn_range=NOISESAMP_DYN_DB,
+        )
+    cb = left.colorbar(im, ax=spec_axes, pad=0.02, aspect=25, fraction=0.04)
+    cb.set_label("dB re RMS", labelpad=1)
+    cb.ax.tick_params(length=1.5, pad=1)
+    for ax in spec_axes[:, 0]:
         ax.set_ylabel("frequency (kHz)")
-    for ax in axes[1]:
+    for ax in spec_axes[1]:
         ax.set_xlabel("time (s)")
-    save(fig, "gen_noise_hyperprior", paper=True)
+    _prior_map(right.subplots(), z, picks)
+    left.suptitle("(a)", x=0.01, ha="left", fontweight="bold")
+    right.suptitle("(b)", x=0.01, ha="left", fontweight="bold")
+    save(fig, "gen_noise_prior", paper=True)
+    _prior_report(z, picks, rps, top)
+
+
+def _prior_map(ax, z: dict, picks: list[tuple[int, int, float]]) -> None:
+    """(b) of ``gen_noise_prior``: ``xy_total`` with equal aspect."""
+    from scipy.spatial import ConvexHull
+
+    xy, g = z["xy_total"], z["groups"]
+    bank = xy[g == "bank"]
+    ax.scatter(*bank.T, s=1.5, c="0.72", lw=0, rasterized=True, label="training bank")
+    for grp, label, colour in PRIOR_NEAR:
+        pts = xy[g == grp]
+        loop = ConvexHull(pts).vertices
+        loop = np.append(loop, loop[0])
+        ax.fill(*pts[loop].T, color=colour, alpha=0.12, lw=0)
+        ax.plot(*pts[loop].T, color=colour, lw=0.7)
+        ax.scatter(*pts.T, s=4, c=colour, lw=0, label=label)
+    for grp, label, marker, colour, size in (
+        ("fit_dregon", "DREGON fit", "*", "#d62728", 90),
+        ("fit_md2", "MD2 fit", "D", "#ff7f0e", 28),
+    ):
+        ax.scatter(
+            *xy[g == grp][0],
+            s=size,
+            marker=marker,
+            c=colour,
+            edgecolors="k",
+            lw=0.6,
+            zorder=5,
+            label=label,
+        )
+    for n, ((_, _, _, marker, colour), (_, row, _)) in enumerate(
+        zip(PRIOR_SECTORS, picks, strict=True), start=1
+    ):
+        ax.scatter(*xy[row], s=24, marker=marker, c=colour, edgecolors="k", lw=0.6, zorder=6)
+        ax.annotate(
+            str(n),
+            xy[row],
+            xytext=PRIOR_TAG_OFFSETS[n - 1],
+            textcoords="offset points",
+            ha="center",
+            va="center",
+            fontweight="bold",
+            zorder=7,
+        )
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_xlabel("MDS 1 (dB)")
+    ax.set_ylabel("MDS 2 (dB)")
+    leg = ax.legend(loc="upper left", handletextpad=0.3, borderaxespad=0.3)
+    for h in leg.legend_handles[:3]:  # the bank's and the neighbourhoods' dots
+        cast(Any, h).set_sizes([10.0])
+    print(f"  map: {len(bank)} bank rigs drawn", flush=True)
+
+
+def _prior_report(
+    z: dict, picks: list[tuple[int, int, float]], rps: np.ndarray, top: float
+) -> None:
+    """Print what ``gen_noise_prior`` shows: the drones, the trajectory, the
+    colour range, the map's stress and the FULL ``d_total`` to each fit."""
+    g, d = z["groups"], z["d_total"]
+    fits = {f: int(np.flatnonzero(g == f"fit_{f}")[0]) for f in ("dregon", "md2")}
+    print(
+        f"  trajectory: rp_priorv4.yaml rps block, seed {PRIOR_TRAJ_SEED}, {PRIOR_DUR_S:g} s, "
+        f"rotors {rps.min():.1f}-{rps.max():.1f} Hz (mean {rps.mean():.1f}); render seed "
+        f"{NOISESAMP_SEED}, mic {NOISESAMP_MIC}, unit RMS, colour range "
+        f"{top - NOISESAMP_DYN_DB:.1f}..{top:.1f} dB; MDS stress-1 {float(z['stress'][0]):.3f}; "
+        f"fit-to-fit d_total {d[fits['dregon'], fits['md2']]:.2f} dB",
+        flush=True,
+    )
+    for n, ((sec, _, key, _, _), (i, row, value)) in enumerate(
+        zip(PRIOR_SECTORS, picks, strict=True), start=1
+    ):
+        what = f"{key} {value:.3f}" if key else f"medoid, mean d_total {value:.2f} dB"
+        to = ", ".join(f"{f} {d[row, j]:.2f}" for f, j in fits.items())
+        print(
+            f"  {n}: {sec}_{i} ({what}); map ({z['xy_total'][row][0]:.1f}, "
+            f"{z['xy_total'][row][1]:.1f}); d_total to fits: {to} dB",
+            flush=True,
+        )
+    for f, j in fits.items():
+        for grp in ("bank", "near_dregon", "near_md2"):
+            x = d[j, g == grp]
+            print(
+                f"  d_total {grp} -> {f}: min {x.min():.2f} median {np.median(x):.2f}", flush=True
+            )
 
 
 def _load_json(path: Path) -> dict:
@@ -1141,7 +1341,7 @@ def main() -> None:
         "hyper",
         "fits",
         "noise",
-        "bank",
+        "prior",
     ]
     if "tables" in which:
         tables()
@@ -1159,8 +1359,8 @@ def main() -> None:
         fig_traj_fits()
     if "noise" in which:
         fig_noise_fits()
-    if "bank" in which:
-        fig_noise_hyperprior()
+    if "prior" in which:
+        fig_noise_prior()
 
 
 if __name__ == "__main__":
