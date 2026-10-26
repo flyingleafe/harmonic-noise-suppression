@@ -78,6 +78,7 @@ __all__ = [
     "expected_periodogram",
     "hann_window",
     "line_lag_law",
+    "rotor_line_periodograms",
 ]
 
 #: The render work rate of a v4 payload that records none: the 32 kHz the GPU
@@ -599,37 +600,73 @@ def expected_periodogram(
     f_r = np.maximum(rps, SPEED_FLOOR_RPS)
     s = par.speed(f_r)
     tau = np.arange(n) / float(sr)
+    c = _broadband_autocov(par, s, n, sr, floor_oversample)
+    for r in range(par.n_rotors):
+        c = c + _rotor_line_autocov(par, r, f_r, s, tau, sr)
+    return _periodogram_of_lags(c)
+
+
+def rotor_line_periodograms(
+    par: V4Params,
+    rps_rev_s: Any,
+    *,
+    n_fft: int = 2048,
+    sr: int | None = None,
+) -> np.ndarray:
+    """``(R, M, n_fft // 2 + 1)``: each rotor's lines alone (its aerodynamic
+    orders and motor lines) in :func:`expected_periodogram` at CONSTANT speeds
+    ``rps_rev_s (R,)``. The periodogram is linear in the autocovariance, so
+    these summed over the rotors plus :func:`broadband_periodogram` are
+    :func:`expected_periodogram`."""
+    sr = par.sr if sr is None else int(sr)
+    n = int(n_fft)
+    rps = np.atleast_1d(np.asarray(rps_rev_s, dtype=np.float64))
+    if rps.shape != (par.n_rotors,):
+        raise ValueError(f"rps_rev_s must be (R,) = ({par.n_rotors},), got {rps.shape}")
+    f_r = np.maximum(rps, SPEED_FLOOR_RPS)
+    s = par.speed(f_r)
+    tau = np.arange(n) / float(sr)
+    return np.stack(
+        [
+            _periodogram_of_lags(_rotor_line_autocov(par, r, f_r, s, tau, sr))
+            for r in range(par.n_rotors)
+        ]
+    )
+
+
+def _rotor_line_autocov(
+    par: V4Params, r: int, f_r: np.ndarray, s: np.ndarray, tau: np.ndarray, sr: int
+) -> np.ndarray:
+    """``(M, n)`` autocovariance at lags ``tau`` of rotor ``r``'s lines: every
+    aerodynamic order and motor line under the Nyquist (:func:`expected_periodogram`)."""
     p_aero, p_motor = par.line_power(s)
     ped = par.pedestal
-    c = np.zeros((par.n_mics, n))
-    for r in range(par.n_rotors):
-        sig, lam = float(par.shaft.sigma_nu(s[r])), float(par.shaft.lam(s[r]))
-        k = np.arange(1, par.k_max + 1, dtype=np.float64)
-        keep = k * f_r[r] < 0.5 * sr
-        k = k[keep]
-        lag = line_lag_law(
-            tau[None, :],
-            k[:, None],
-            sigma_nu=sig,
-            lam=lam,
-            sigma2_amp=ped.sigma2_amp[keep][:, None],
-            gamma_amp_hz=ped.gamma_amp_hz[keep][:, None],
-            sigma2_phase=ped.sigma2_phase[keep][:, None],
-            gamma_phase_hz=ped.gamma_phase_hz[keep][:, None],
+    sig, lam = float(par.shaft.sigma_nu(s[r])), float(par.shaft.lam(s[r]))
+    k = np.arange(1, par.k_max + 1, dtype=np.float64)
+    keep = k * f_r[r] < 0.5 * sr
+    k = k[keep]
+    lag = line_lag_law(
+        tau[None, :],
+        k[:, None],
+        sigma_nu=sig,
+        lam=lam,
+        sigma2_amp=ped.sigma2_amp[keep][:, None],
+        gamma_amp_hz=ped.gamma_amp_hz[keep][:, None],
+        sigma2_phase=ped.sigma2_phase[keep][:, None],
+        gamma_phase_hz=ped.gamma_phase_hz[keep][:, None],
+    )
+    gain = 10.0 ** (par.mic.db(k * f_r[r])[r] / 10.0)  # (M, K')
+    c = (gain * p_aero[r, keep][None, :]) @ (lag * np.cos(TWO_PI * f_r[r] * k[:, None] * tau))
+    km = par.motor_orders.astype(np.float64)
+    mk = km * f_r[r] < 0.5 * sr
+    if np.any(mk):
+        km = km[mk]
+        lag_m = line_lag_law(tau[None, :], km[:, None], sigma_nu=sig, lam=lam)
+        gain_m = 10.0 ** (par.mic.db(km * f_r[r])[r] / 10.0)
+        c = c + (gain_m * p_motor[r, mk][None, :]) @ (
+            lag_m * np.cos(TWO_PI * f_r[r] * km[:, None] * tau)
         )
-        gain = 10.0 ** (par.mic.db(k * f_r[r])[r] / 10.0)  # (M, K')
-        c += (gain * p_aero[r, keep][None, :]) @ (lag * np.cos(TWO_PI * f_r[r] * k[:, None] * tau))
-        km = par.motor_orders.astype(np.float64)
-        mk = km * f_r[r] < 0.5 * sr
-        if np.any(mk):
-            km = km[mk]
-            lag_m = line_lag_law(tau[None, :], km[:, None], sigma_nu=sig, lam=lam)
-            gain_m = 10.0 ** (par.mic.db(km * f_r[r])[r] / 10.0)
-            c += (gain_m * p_motor[r, mk][None, :]) @ (
-                lag_m * np.cos(TWO_PI * f_r[r] * km[:, None] * tau)
-            )
-    c += _broadband_autocov(par, s, n, sr, floor_oversample)
-    return _periodogram_of_lags(c)
+    return c
 
 
 def _broadband_autocov(

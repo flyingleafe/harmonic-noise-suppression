@@ -40,7 +40,14 @@ from scipy.signal import firwin, oaconvolve
 from data_processing.noise_model import FIT_SCHEMA_V4
 from data_processing.noise_model.render import render_noise, render_v4_wind
 from data_processing.noise_model.spectrum import floor_ctrl_hz
-from data_processing.noise_model.v4 import WIND_OFF_DB, expected_periodogram, hann_window
+from data_processing.noise_model.v4 import (
+    WIND_OFF_DB,
+    V4Params,
+    broadband_periodogram,
+    expected_periodogram,
+    hann_window,
+    rotor_line_periodograms,
+)
 
 SR = 16000
 K = 90
@@ -227,6 +234,22 @@ def test_static_per_mic_wind_renders_as_before() -> None:
     np.testing.assert_allclose(x[:, ::997], STATIC_WIND_GOLDEN, rtol=1e-12, atol=1e-15)
     e = expected_periodogram(fit, np.asarray(RPS), n_fft=256, sr=SR)
     np.testing.assert_allclose(e[:, 1:40:6], STATIC_WIND_GOLDEN_E, rtol=1e-12)
+
+
+def test_rotor_lines_and_broadband_add_up_to_the_expected_periodogram() -> None:
+    """Each rotor's lines alone plus the one broadband part (floor, static share
+    and wind) are the expected periodogram, bin for bin: nothing is dropped or
+    counted twice when a spectrum is split per rotor."""
+    fit = _static_wind_flight_payload()
+    par = V4Params.from_payload(fit)
+    lines = rotor_line_periodograms(par, np.asarray(RPS), n_fft=512, sr=SR)
+    assert lines.shape == (par.n_rotors, par.n_mics, 257)
+    broad = broadband_periodogram(par, np.asarray(RPS), n_fft=512, sr=SR)
+    np.testing.assert_allclose(
+        lines.sum(axis=0) + broad,
+        expected_periodogram(fit, np.asarray(RPS), n_fft=512, sr=SR),
+        rtol=1e-10,
+    )
 
 
 def _sc_wind_flight_payload(level_db: list[float]) -> dict[str, Any]:
