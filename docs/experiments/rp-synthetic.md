@@ -409,6 +409,37 @@ smallest other-fit distance is 4.5 / 3.3 dB.
 The stop waits on `real_macro` and `uniform`. `uniform` alone selects the
 synthetic checkpoint (`best_uniform_median`), which seeds the fine-tuning.
 
+## Prior coverage map (2026-10-26)
+
+**Question (Dmitrii).** Does the wide-prior bank cover the neighbourhood of the
+MD2 fit at all? The `near_md2` scores and the synthetic-only models' real MD2
+against real DREGON cruise suggest it does not.
+
+**Distance** (`experiments.noise_model.rig_distance`, decided with Dmitrii).
+The old sector distance (`sectors_v4.log_mel`) fixes which rotor gets which
+speed offset, so relabelling a rig's rotors moved it by 0.85–2.0 dB (median
+over 24 labellings; max 3.0 dB). That is the size of the neighbourhoods
+themselves. The new distance is invariant by construction:
+
+- every rotor at each of 15 reference speeds, 10–150 rev/s;
+- the expected periodogram on a 4096-point Hann window at 16 kHz (3.9 Hz bins),
+  mic-mean, 30 Hz – 7.9 kHz, no wind, split into each rotor's lines `L_r`
+  (`v4.rotor_line_periodograms`) and the one broadband part `B`;
+- harmonic feature per rotor: `10 log10(1 + L_r / B)` per bin and speed;
+- broadband feature: `10 log10 B`, the rig's mean removed;
+- harmonic distance: RMS over (speed, bin) of two rotors' feature difference,
+  averaged over the best of the 24 rotor matchings (one matching for all
+  speeds); broadband distance: RMS difference of the broadband features;
+  total = their sum, in dB;
+- a standby/cruise pair is power-blended per speed with the renderer's weight.
+
+A relabelled rig is at exactly 0. The map is metric MDS (SMACOF from the
+classical solution) of each distance, with Kruskal's stress-1.
+
+**Run.** `scripts/rig_distance_map.py` (`37822beb`) on `uni-cpu`
+(`rig-distance-map-159b00`): 2048 random rigs of the 16 384-rig bank (seed 0),
+both fits and all 192 sector rigs.
+
 ## Paper grid (2026-10-23): hard setup approved 2026-10-26
 
 Dmitrii approved the hard setup for the four models on 2026-10-26. The rest of
