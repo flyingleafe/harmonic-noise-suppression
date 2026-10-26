@@ -165,23 +165,31 @@ def _traj_level_and_fluctuation(params) -> tuple[float, float]:
     return float(np.log(hover)), float(np.log(np.sqrt(np.mean(var)) / hover))
 
 
-def fig_traj_fit_map(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> None:
-    """The seven fitted drones, the hyperprior and the constrained hyperprior on
+def fig_traj_fits(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> None:
+    """The paper's two-pane trajectory figure, ``gen_traj_fits``, at its print size
+    (full text width), one font size throughout.
+
+    (a) 30 s of real airborne telemetry of DREGON and MD2 beside a 30 s draw from
+    that drone's fitted law, y-axis shared per drone.
+
+    (b) The seven fitted drones, the hyperprior and the constrained hyperprior on
     two axes: hover level and speed std relative to it, both log, each scaled by
     its hyperprior sd so that a step of one sd has the same length on both.
 
-    Also writes ``results/rps_traj/fit_map.json``: the plotted numbers and how
+    Also writes ``results/rps_traj/fit_map.json``: the numbers of (b) and how
     much of the fits' spread in the 25 drone coordinates of the hyperprior
     (scale, trims, theta, speed modes; whitened by its std) the map keeps,
     against the best linear map (the top two principal components).
     """
     import json
 
+    import noise_lab as NL
     from matplotlib.lines import Line2D
     from omegaconf import OmegaConf
 
     from data_processing.trajectory_model.posterior import IDX_SHAFT, rig_vector
     from data_processing.trajectory_model.source import build_from_config, load_bundle
+    from experiments.rps_traj.data import RATE_HZ
 
     bundle = load_bundle("dload:rps-traj-fits")
     post = bundle.posterior
@@ -223,7 +231,38 @@ def fig_traj_fit_map(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) 
         for name, x in (("map", (fits - centre) / sd), ("pca2", pcs))
     }
 
-    fig, ax = plt.subplots(figsize=(3.5, 2.9))
+    fig = plt.figure(figsize=(7.16, 3.0), layout="constrained")
+    left, right = fig.subfigures(1, 2, width_ratios=[1.3, 1.0], wspace=0.01)
+    tracks = left.subplots(2, 2, sharex=True)
+    for row, rig in enumerate(("dregon", "michaels")):
+        real = _real_window(rig, 30.0)
+        draw = NL.trajectory("fitted", rig=rig, seed=11 + row, duration_s=30.0)
+        samp = np.asarray(draw["rps"].data)  # already on the RATE_HZ plot grid
+        lo, hi = min(np.nanmin(real), samp.min()), max(np.nanmax(real), samp.max())
+        pad = 0.06 * (hi - lo)
+        for col, (rps, what) in enumerate(((real, "real flight"), (samp, "fitted law"))):
+            axt = tracks[row, col]
+            t = np.arange(rps.shape[1]) / RATE_HZ
+            for r in range(rps.shape[0]):
+                axt.plot(t, rps[r], lw=0.45, color=COLOURS[r % 4], label=f"rotor {r + 1}")
+            axt.set_xlim(0, t[-1])
+            axt.set_ylim(lo - pad, hi + pad)
+            axt.set_title(f"{TRAJ_LABELS[rig]}, {what}", fontsize=8, pad=2)
+            axt.tick_params(labelsize=7, labelleft=col == 0)
+        tracks[row, 0].set_ylabel("rotor speed (Hz)", fontsize=8)
+    for axt in tracks[1]:
+        axt.set_xlabel("time (s)", fontsize=8)
+    left.legend(
+        *tracks[0, 0].get_legend_handles_labels(),
+        loc="outside lower center",
+        ncol=4,
+        fontsize=7,
+        frameon=False,
+        handlelength=1.5,
+    )
+    left.suptitle("(a)", x=0.01, ha="left", fontsize=9, fontweight="bold")
+    right.suptitle("(b)", x=0.01, ha="left", fontsize=9, fontweight="bold")
+    ax = right.subplots()
     ax.scatter(
         np.exp(hyper[:, 0]),
         100 * np.exp(hyper[:, 1]),
@@ -270,7 +309,7 @@ def fig_traj_fit_map(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) 
             xytext=offset,
             textcoords="offset points",
             ha=ha,
-            fontsize=6.5,
+            fontsize=7,
             zorder=6,
             bbox={"boxstyle": "round,pad=0.1", "fc": "white", "ec": "none", "alpha": 0.7},
         )
@@ -294,16 +333,16 @@ def fig_traj_fit_map(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) 
         Line2D([], [], ls="", marker="*", ms=8, color="#08519c", label="fit, DREGON, MD2"),
         Line2D([], [], ls="", marker="o", ms=4, color="black", label="fit, other drones"),
     ]
-    ax.legend(
+    right.legend(
         handles=handles,
-        fontsize=6,
-        loc="upper left",
-        framealpha=0.9,
+        loc="outside lower center",
+        ncol=3,
+        fontsize=7,
+        frameon=False,
         handletextpad=0.3,
-        borderpad=0.4,
+        columnspacing=1.0,
     )
-    fig.tight_layout()
-    save(fig, "gen_traj_fit_map")
+    save(fig, "gen_traj_fits")
 
     def pct(x: np.ndarray, scale: float = 1.0) -> list[float]:
         return [round(float(scale * np.exp(v)), 2) for v in np.percentile(x, [5, 50, 95])]
@@ -860,75 +899,6 @@ def tables() -> None:
     )
 
     write_table(
-        "gen_traj_data",
-        "llrrll",
-        ["rig", "vehicle", "flights", "airborne (s)", "native rate", "speed source"],
-        [
-            [
-                "\\texttt{michaels}",
-                "DJI Matrice 100",
-                "4",
-                "395",
-                "29.41\\,Hz",
-                "DatCon ESC feedback",
-            ],
-            [
-                "\\texttt{dregon}",
-                "MikroKopter quad",
-                "10",
-                "429",
-                "$\\sim$1\\,kHz grid",
-                "\\texttt{motor.measured}",
-            ],
-            [
-                "\\texttt{neurobem\\_quad}",
-                "custom quad",
-                "247",
-                "2479",
-                "400\\,Hz",
-                "Betaflight ESC feedback",
-            ],
-            [
-                "\\texttt{pitcn\\_quad}",
-                "micro quad, 0.25\\,kg",
-                "68",
-                "3345",
-                "100\\,Hz",
-                "ESC telemetry",
-            ],
-            [
-                "\\texttt{nanobench\\_cf21b}",
-                "Crazyflie 2.1 Brushless",
-                "15",
-                "668",
-                "100\\,Hz",
-                "bidirectional DSHOT eRPM",
-            ],
-            [
-                "\\texttt{vid\\_m100}",
-                "DJI M100 derivative",
-                "4",
-                "397",
-                "$\\sim$1\\,kHz CAN",
-                "M3508/C620 CAN feedback",
-            ],
-            [
-                "\\texttt{blackbird\\_quad}",
-                "custom quad",
-                "1",
-                "199",
-                "187\\,Hz",
-                "optical motor encoders",
-            ],
-            ["\\textbf{total}", "", "\\textbf{349}", "\\textbf{7912}", "", ""],
-        ],
-        "The seven ingested rigs, on the frozen airborne rule and the common 100\\,Hz "
-        "analysis grid. Hover level spans 78--278\\,Hz and per-rotor variance a factor of 600.",
-        "tab:gen-traj-data",
-        star=True,
-    )
-
-    write_table(
         "gen_noise_model_params",
         "lllp{0.30\\linewidth}",
         ["symbol", "meaning", "shape", "prior"],
@@ -1221,7 +1191,7 @@ def main() -> None:
         "traj",
         "traj_other",
         "hyper",
-        "map",
+        "fits",
         "noise",
         "bank",
         "rigs",
@@ -1238,8 +1208,8 @@ def main() -> None:
         )
     if "hyper" in which:
         fig_traj_hyperprior()
-    if "map" in which:
-        fig_traj_fit_map()
+    if "fits" in which:
+        fig_traj_fits()
     if "noise" in which:
         fig_noise_real_vs_sampled()
     if "bank" in which:

@@ -1159,8 +1159,9 @@ sit closer `[INFERENCE]`. (5) No arm leaves the cruise regime (ramp share 0-3 %
 of frames against 0-1 % real). In `draws.png` panels 2-3 of "shrink" are
 panels 2-3 of "full" (common random numbers): same size and trims, shaft moved.
 
-**Paper map (2026-10-26).** `scripts/gen_model_figures.py map` →
-`gen_traj_fit_map.{pdf,png}` (paper Fig. "fit map") and
+**Paper map (2026-10-26).** `scripts/gen_model_figures.py fits` →
+`gen_traj_fits.{pdf,png}` (paper Fig. `fig:trajfits`, pane b; pane a is the
+real-vs-sampled tracks of DREGON and MD2) and
 `results/rps_traj/fit_map.json`: the seven fits, 3000 hyperprior draws and 1500
 draws of the constrained stream (`rp_priorv4` rps block, its own rejection) on
 log hover vs log stationary rotor-speed std / hover (speed modes only, RMS over
