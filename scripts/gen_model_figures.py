@@ -14,20 +14,27 @@ Figures
     Four flights drawn from the rig hyperprior (``traj_rig="posterior"``),
     30 s each, hover level in the title.
 ``gen_noise_real_vs_sampled``
-    Real DREGON room-2 flight and Michael's FLY125 cruise windows against the
-    fitted model rendered on the SAME telemetry label, percentile-clipped dB.
+    Real DREGON room-2 free-flight and MD2 FLY125 standby-to-cruise windows
+    against the noise-model-v4 fits of the easy training bank rendered on the
+    SAME speed label, one colour range per pair.
 ``gen_noise_hyperprior``
     Four hard-bank entries rendered on hyperprior trajectories -- the noise the
     ``nv2_hard`` arm trains on.
 
-Run: ``systemd-run --user --scope -p MemoryMax=10G python scripts/gen_model_figures.py``
+The paper's figures (``fits``, ``noise``, ``rigs``, ``hyper``, ``bank``) are drawn
+at print size in :func:`plots.paper.paper_style`; the deck's (``traj``,
+``traj_other``) keep the deck style.
+
+Run: ``systemd-run --user --scope -p MemoryMax=10G python scripts/gen_model_figures.py [targets]``
 """
 
 from __future__ import annotations
 
 import contextlib
+import functools
 import sys
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 
 import matplotlib
@@ -39,6 +46,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "notebooks"))
+
+from plots.paper import COLUMN_IN, TEXT_IN, paper_style  # noqa: E402
 
 PAPER = ROOT / "writing/papers/2026-08_wrapup/src"
 FIGS = PAPER / "figures"
@@ -55,12 +64,26 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 plt.rcParams.update({"figure.dpi": 130, "font.size": 9, "axes.grid": True, "grid.alpha": 0.25})
 
 
-def save(fig, name: str) -> None:
+def save(fig, name: str, *, paper: bool = False) -> None:
+    """Write ``name``.pdf/.png. A ``paper`` figure is drawn at its print size and
+    saved at exactly that size (no tight bbox), so it is included unscaled."""
     FIGS.mkdir(parents=True, exist_ok=True)
-    fig.savefig(FIGS / f"{name}.pdf", bbox_inches="tight")
-    fig.savefig(FIGS / f"{name}.png", bbox_inches="tight", dpi=160)
+    kw = {} if paper else {"bbox_inches": "tight"}
+    fig.savefig(FIGS / f"{name}.pdf", **kw)
+    fig.savefig(FIGS / f"{name}.png", dpi=300 if paper else 160, **kw)
     plt.close(fig)
     print(f"wrote {name}.pdf/.png", flush=True)
+
+
+def _paper(fn: Callable[..., None]) -> Callable[..., None]:
+    """Draw ``fn``'s figure in the paper's house style (:mod:`plots.paper`)."""
+
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs) -> None:
+        with paper_style():
+            fn(*args, **kwargs)
+
+    return wrapped
 
 
 # ── trajectories ────────────────────────────────────────────────────────────
@@ -120,20 +143,35 @@ def fig_traj_real_vs_sampled(
     save(fig, name)
 
 
+@_paper
 def fig_traj_hyperprior(n: int = 4) -> None:
+    """Four 30 s flights drawn from the drone hyperprior (``traj_rig="posterior"``),
+    one per panel, the drawn hover level in the title; column width."""
     import noise_lab as NL
 
     from experiments.rps_traj.data import RATE_HZ
 
-    fig, axes = plt.subplots(2, 2, figsize=(11, 6))
+    fig, axes = plt.subplots(2, 2, figsize=(COLUMN_IN, 2.6), sharex=True, layout="constrained")
     for i, ax in enumerate(axes.ravel()[:n]):
         traj = NL.trajectory("fitted", rig="posterior", seed=101 + i, duration_s=30.0)
         rps = np.asarray(traj["rps"].data)
         hover = float(traj["meta"]["hover_rev_s"])
-        _plot_tracks(ax, rps, RATE_HZ, f"hyperprior drone {i + 1} — hover {hover:.0f} Hz")
-    axes[0, 1].legend(ncol=4, fontsize=7, loc="upper right")
-    fig.tight_layout()
-    save(fig, "gen_traj_hyperprior")
+        t = np.arange(rps.shape[1]) / RATE_HZ
+        for r in range(rps.shape[0]):
+            ax.plot(t, rps[r], lw=0.45, color=COLOURS[r % 4], label=f"rotor {r + 1}")
+        ax.set_xlim(0, t[-1])
+        ax.set_title(f"drone {i + 1}, hover {hover:.0f} Hz", pad=2)
+    for ax in axes[:, 0]:
+        ax.set_ylabel("rotor speed (Hz)")
+    for ax in axes[1]:
+        ax.set_xlabel("time (s)")
+    fig.legend(
+        *axes[0, 0].get_legend_handles_labels(),
+        loc="outside lower center",
+        ncol=4,
+        handlelength=1.5,
+    )
+    save(fig, "gen_traj_hyperprior", paper=True)
 
 
 #: Paper names of the trajectory rigs (Table tab:gen-traj-data).
@@ -165,9 +203,10 @@ def _traj_level_and_fluctuation(params) -> tuple[float, float]:
     return float(np.log(hover)), float(np.log(np.sqrt(np.mean(var)) / hover))
 
 
+@_paper
 def fig_traj_fits(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> None:
     """The paper's two-pane trajectory figure, ``gen_traj_fits``, at its print size
-    (full text width), one font size throughout.
+    (full text width) in the paper style.
 
     (a) 30 s of real airborne telemetry of DREGON and MD2 beside a 30 s draw from
     that drone's fitted law, y-axis shared per drone.
@@ -231,7 +270,7 @@ def fig_traj_fits(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> 
         for name, x in (("map", (fits - centre) / sd), ("pca2", pcs))
     }
 
-    fig = plt.figure(figsize=(7.16, 3.0), layout="constrained")
+    fig = plt.figure(figsize=(TEXT_IN, 3.0), layout="constrained")
     left, right = fig.subfigures(1, 2, width_ratios=[1.3, 1.0], wspace=0.01)
     tracks = left.subplots(2, 2, sharex=True)
     for row, rig in enumerate(("dregon", "michaels")):
@@ -247,21 +286,19 @@ def fig_traj_fits(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> 
                 axt.plot(t, rps[r], lw=0.45, color=COLOURS[r % 4], label=f"rotor {r + 1}")
             axt.set_xlim(0, t[-1])
             axt.set_ylim(lo - pad, hi + pad)
-            axt.set_title(f"{TRAJ_LABELS[rig]}, {what}", fontsize=8, pad=2)
-            axt.tick_params(labelsize=7, labelleft=col == 0)
-        tracks[row, 0].set_ylabel("rotor speed (Hz)", fontsize=8)
+            axt.set_title(f"{TRAJ_LABELS[rig]}, {what}", pad=2)
+            axt.tick_params(labelleft=col == 0)
+        tracks[row, 0].set_ylabel("rotor speed (Hz)")
     for axt in tracks[1]:
-        axt.set_xlabel("time (s)", fontsize=8)
+        axt.set_xlabel("time (s)")
     left.legend(
         *tracks[0, 0].get_legend_handles_labels(),
         loc="outside lower center",
         ncol=4,
-        fontsize=7,
-        frameon=False,
         handlelength=1.5,
     )
-    left.suptitle("(a)", x=0.01, ha="left", fontsize=9, fontweight="bold")
-    right.suptitle("(b)", x=0.01, ha="left", fontsize=9, fontweight="bold")
+    left.suptitle("(a)", x=0.01, ha="left", fontweight="bold")
+    right.suptitle("(b)", x=0.01, ha="left", fontweight="bold")
     ax = right.subplots()
     ax.scatter(
         np.exp(hyper[:, 0]),
@@ -309,7 +346,6 @@ def fig_traj_fits(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> 
             xytext=offset,
             textcoords="offset points",
             ha=ha,
-            fontsize=7,
             zorder=6,
             bbox={"boxstyle": "round,pad=0.1", "fc": "white", "ec": "none", "alpha": 0.7},
         )
@@ -323,9 +359,8 @@ def fig_traj_fits(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> 
     ax.minorticks_off()
     # one hyperprior sd is as long on y as on x (log10 units of each axis)
     ax.set_aspect(sd[0] / sd[1], adjustable="box")
-    ax.set_xlabel("hover level (Hz)", fontsize=8)
-    ax.set_ylabel("speed std (% of hover)", fontsize=8)
-    ax.tick_params(labelsize=7)
+    ax.set_xlabel("hover level (Hz)")
+    ax.set_ylabel("speed std (% of hover)")
     handles = [
         Line2D([], [], ls="", marker="o", ms=3, color="0.55", label="hyperprior"),
         Line2D([], [], color="0.35", lw=0.8, label=r"its 1$\sigma$, 2$\sigma$"),
@@ -337,12 +372,10 @@ def fig_traj_fits(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> 
         handles=handles,
         loc="outside lower center",
         ncol=3,
-        fontsize=7,
-        frameon=False,
         handletextpad=0.3,
         columnspacing=1.0,
     )
-    save(fig, "gen_traj_fits")
+    save(fig, "gen_traj_fits", paper=True)
 
     def pct(x: np.ndarray, scale: float = 1.0) -> list[float]:
         return [round(float(scale * np.exp(v)), 2) for v in np.percentile(x, [5, 50, 95])]
@@ -381,6 +414,8 @@ def fig_traj_fits(n_hyper: int = 3000, n_reduced: int = 1500, seed: int = 0) -> 
 
 
 def _spec_db(audio: np.ndarray) -> np.ndarray:
+    """``(frames, bins)`` periodogram in dB on the model's flight front end (NFFT
+    2048, hop 512, periodic Hann, ``|rfft(x w)|^2 / sum w^2``)."""
     w = np.hanning(NFFT + 1)[:NFFT]
     n = (len(audio) - NFFT) // HOP + 1
     frames = np.stack([audio[i * HOP : i * HOP + NFFT] * w for i in range(n)])
@@ -388,80 +423,137 @@ def _spec_db(audio: np.ndarray) -> np.ndarray:
     return 10.0 * np.log10(np.maximum(p, 1e-30))
 
 
-def _show_spec(ax, db, title, dyn_range=45.0, fmax=8000.0, dur=None):
+def _show_spec(ax, db, title, *, fmax=8000.0, dur=None, vmax=None, dyn_range=45.0):
+    """``db`` (frames, bins) as an image, frequency in kHz up to ``fmax``, clipped
+    to ``[vmax - dyn_range, vmax]`` (``vmax`` None: its own 99.5th percentile)."""
     freqs = np.linspace(0, SR / 2, db.shape[1])
     keep = freqs <= fmax
     d = db[:, keep]
-    top = float(np.percentile(d, 99.5))
+    top = float(np.percentile(d, 99.5)) if vmax is None else float(vmax)
     dur = dur if dur is not None else d.shape[0] * HOP / SR
-    ax.imshow(
-        np.clip(d, top - dyn_range, top).T,
+    im = ax.imshow(
+        d.T,
         origin="lower",
         aspect="auto",
-        extent=(0.0, dur, 0.0, freqs[keep][-1]),
+        extent=(0.0, dur, 0.0, freqs[keep][-1] / 1000.0),
         cmap="magma",
+        vmin=top - dyn_range,
+        vmax=top,
+        interpolation="nearest",
+        rasterized=True,
     )
-    ax.set_title(title, fontsize=9)
-    ax.set_xlabel("time (s)")
-    ax.set_ylabel("frequency (Hz)")
+    ax.set_title(title, pad=2)
     ax.grid(False)
+    return im
 
 
-def _support(name_contains: str, prefer: str = "+4_"):
-    cands = sorted(SUPPORTS.glob("*.npz"))
-    hit = [p for p in cands if name_contains in p.name and prefer in p.name]
-    if not hit:
-        hit = [p for p in cands if name_contains in p.name]
-    if not hit:
-        raise RuntimeError(f"no support matching {name_contains!r}")
-    return np.load(hit[0], allow_pickle=True), hit[0].name
+#: ``gen_noise_real_vs_sampled``: the microphone (capsule 3: the DREGON gust
+#: fit's least windy capsule, as in the recording), the render seed, the band
+#: shown and the colour range (dB below the pair's 99.5th percentile).
+NOISESAMP_MIC = 3
+NOISESAMP_SEED = 7
+NOISESAMP_FMAX_HZ = 3000.0
+NOISESAMP_DYN_DB = 50.0
 
 
-def _render_on_label(rig_name: str, carrier: np.ndarray, seed: int) -> np.ndarray:
-    import noise_lab as NL
-    import tdseries as td
+def _easy_bank_bases() -> dict:
+    """The easy training bank's base fits, ``scripts/easy_bank_v4_build.BASES``:
+    name -> (regime payload paths, trajectory rig, strength, seed tag)."""
+    import importlib.util
 
-    carrier = np.ascontiguousarray(carrier, dtype=np.float64)
-    step = max(int(round(SR / NL.RPS_PLOT_SR)), 1)
-    traj = td.Frame(
-        {
-            "rps": td.uniform(
-                np.ascontiguousarray(carrier[:, ::step]),
-                NL.RPS_PLOT_SR,
-                dims=("rotor", "time"),
-                t_start=0.0,
-            ),
-            "rps_render": td.uniform(carrier, SR, dims=("rotor", "time"), t_start=0.0),
-            "meta": td.Frame({"traj_kind": "real-label", "seed": int(seed), "rig": rig_name}),
-        }
+    spec = importlib.util.spec_from_file_location(
+        "easy_bank_v4_build", ROOT / "scripts" / "easy_bank_v4_build.py"
     )
-    out = NL.render(NL.V2Fit(rig_name), traj, seed=seed, n_mics=1)
-    return np.asarray(out["audio"].data)[0].astype(np.float64)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.BASES
 
 
+def _render_regimes(paths: dict[str, str], rps: np.ndarray, seed: int) -> np.ndarray:
+    """``(n_mics, T)`` the fit(s) of ``paths`` on the carriers ``rps``, as
+    ``NoiseV2Pool.render`` renders an entry: a standby/cruise pair through
+    ``render_noise_regimes``, a single fit through ``render_noise`` (its own
+    wind included), absolute level, no render-time augmentation."""
+    from data_processing.noise_model.render import render_noise, render_noise_regimes
+
+    fits = {k: _load_json(ROOT / p) for k, p in paths.items()}
+    n_mics = NOISESAMP_MIC + 1
+    if set(fits) == {"standby", "cruise"}:
+        return np.asarray(render_noise_regimes(fits, rps, sr=SR, n_mics=n_mics, seed=seed))
+    (fit,) = fits.values()
+    return np.asarray(render_noise(fit, rps, sr=SR, n_mics=n_mics, seed=seed))
+
+
+@_paper
 def fig_noise_real_vs_sampled() -> None:
-    panels = []
-    for tag, contains, rig_name in (
-        ("DREGON room 2, hovering", "hovering_nosource_room2", "dregon"),
-        ("Michael's FLY125, cruise", "michaels", "michaels"),
-    ):
-        z, fname = _support(contains)
-        power = np.asarray(z["power"])[0]
-        real_db = 10.0 * np.log10(np.maximum(power, 1e-30))
-        carrier = np.asarray(z["carrier_rev_s_audio"], dtype=np.float64)
-        dur = carrier.shape[1] / SR
-        audio = _render_on_label(rig_name, carrier, seed=7)
-        panels.append((tag, real_db, _spec_db(audio), carrier, dur, fname))
+    """Real DREGON and MD2 windows beside the noise-model-v4 fits of the easy
+    training bank rendered on the SAME speed labels: DREGON the bench fit c7
+    with its fitted gust wind, MD2 the FLY125 standby/cruise pair composed
+    per regime. Same microphone, same STFT, one colour range per pair."""
+    from experiments.noise_model import supports as S
 
-    fig, axes = plt.subplots(len(panels), 2, figsize=(11, 3.4 * len(panels)))
-    axes = np.atleast_2d(axes)
-    for row, (tag, real_db, samp_db, carrier, dur, fname) in enumerate(panels):
-        mean_rps = float(np.mean(carrier))
-        _show_spec(axes[row, 0], real_db, f"{tag} — real, {mean_rps:.0f} Hz", dur=dur)
-        _show_spec(axes[row, 1], samp_db, f"{tag} — fitted model on the same label", dur=dur)
-        print(f"  {tag}: support {fname}", flush=True)
-    fig.tight_layout()
-    save(fig, "gen_noise_real_vs_sampled")
+    bases = _easy_bank_bases()
+    scored = dict(S.DREGON_SCORED)["free-flight_nosource_room2"]
+    rows = (
+        (
+            "DREGON",
+            # dregon-flight-wide row j = 1 of free-flight (the gust wind's pool)
+            S.flight_dregon("free-flight_nosource_room2", S.dregon_floor_start(scored) + 8.0, 8.0),
+            bases["dregon"][0],
+            "fit + wind",
+        ),
+        (
+            "MD2",
+            # FLY125's ramp context window: standby, spool-up, cruise
+            S.flight_michaels("FLY125", S.MICHAELS_RAMP_STARTS[0], 8.0),
+            bases["md2"][0],
+            "standby/cruise fits",
+        ),
+    )
+    from matplotlib.layout_engine import ConstrainedLayoutEngine
+
+    fig, axes = plt.subplots(
+        2,
+        2,
+        figsize=(COLUMN_IN, 2.75),
+        sharex=True,
+        sharey=True,
+        layout=ConstrainedLayoutEngine(w_pad=0.02, h_pad=0.02, wspace=0.03, hspace=0.06),
+    )
+    for row, (drone, spec, paths, fit_tag) in enumerate(rows):
+        clip = S.flight_clip(spec)
+        rps = np.asarray(clip.rps, dtype=np.float64)
+        real = np.asarray(clip.audio[NOISESAMP_MIC], dtype=np.float64)
+        samp = _render_regimes(paths, rps, NOISESAMP_SEED)[NOISESAMP_MIC]
+        dbs = (_spec_db(real), _spec_db(samp))
+        keep = np.linspace(0, SR / 2, dbs[0].shape[1]) <= NOISESAMP_FMAX_HZ
+        top = float(np.percentile(np.concatenate([d[:, keep].ravel() for d in dbs]), 99.5))
+        dur = rps.shape[1] / SR
+        for col, (db, what) in enumerate(zip(dbs, ("recording", fit_tag))):
+            pane = "abcd"[2 * row + col]
+            im = _show_spec(
+                axes[row, col],
+                db,
+                f"({pane}) {drone}, {what}",
+                fmax=NOISESAMP_FMAX_HZ,
+                dur=dur,
+                vmax=top,
+                dyn_range=NOISESAMP_DYN_DB,
+            )
+        cb = fig.colorbar(im, ax=axes[row], pad=0.02, aspect=12, fraction=0.04)
+        cb.set_label("dB", labelpad=1)
+        cb.ax.tick_params(length=1.5, pad=1)
+        axes[row, 0].set_ylabel("frequency (kHz)")
+        print(
+            f"  {drone}: {spec.text}, mic {NOISESAMP_MIC}, seed {NOISESAMP_SEED}, "
+            f"rotor label {rps.min():.1f}-{rps.max():.1f} Hz (mean {rps.mean():.1f}), "
+            f"colour range {top - NOISESAMP_DYN_DB:.1f}..{top:.1f} dB, payloads {paths}",
+            flush=True,
+        )
+    for ax in axes[1]:
+        ax.set_xlabel("time (s)")
+    save(fig, "gen_noise_real_vs_sampled", paper=True)
 
 
 def _hard_pool(n_mics: int = 1):
@@ -478,9 +570,14 @@ def _hard_pool(n_mics: int = 1):
     return NoiseV2Pool.from_config(src, duration_s=4.0, sample_rate=SR)
 
 
+@_paper
 def fig_noise_hyperprior(n: int = 4) -> None:
+    """Four hard-bank entries on hyperprior flights, 4 s each, every panel
+    clipped to its own 45 dB below its 99.5th percentile; column width."""
     pool = _hard_pool()
-    fig, axes = plt.subplots(2, 2, figsize=(11, 6.4))
+    fig, axes = plt.subplots(
+        2, 2, figsize=(COLUMN_IN, 2.5), sharex=True, sharey=True, layout="constrained"
+    )
     rng = np.random.default_rng(2026)
     for i, ax in enumerate(axes.ravel()[:n]):
         frame = pool.sample_timeframe(rng, 4.0)
@@ -490,11 +587,13 @@ def fig_noise_hyperprior(n: int = 4) -> None:
         name = ""
         with contextlib.suppress(Exception):
             name = str(frame["meta"]["entry"])
-        label = name or f"entry {i + 1}"
-        title = f"hard bank {label} — hyperprior flight, {hover:.0f} Hz"
-        _show_spec(ax, _spec_db(audio), title, dur=len(audio) / SR)
-    fig.tight_layout()
-    save(fig, "gen_noise_hyperprior")
+        print(f"  panel {i + 1}: entry {name or '?'}, mean speed {hover:.1f} Hz", flush=True)
+        _show_spec(ax, _spec_db(audio), f"drone {i + 1}, {hover:.0f} Hz", dur=len(audio) / SR)
+    for ax in axes[:, 0]:
+        ax.set_ylabel("frequency (kHz)")
+    for ax in axes[1]:
+        ax.set_xlabel("time (s)")
+    save(fig, "gen_noise_hyperprior", paper=True)
 
 
 # ── fitted rigs ─────────────────────────────────────────────────────────────
@@ -610,6 +709,7 @@ def _dregon_single_rotor_floor_db(freqs: np.ndarray) -> np.ndarray:
     return np.mean(np.array(curves), axis=0)
 
 
+@_paper
 def fig_noise_rigs() -> None:
     bench = [_load_json(BENCH_FITS / f"bench_dregon_Motor{m}_80__bench.json") for m in (1, 2, 3, 4)]
     dre = _load_json(FLIGHT_FITS / "dregon_room2_floor__flight_v3.json")
@@ -619,7 +719,7 @@ def fig_noise_rigs() -> None:
     freqs = np.geomspace(30.0, 7900.0, 400)
     K_DRE = 88  # orders below the 8 kHz Nyquist at the DREGON reference speed
 
-    fig, axes = plt.subplots(2, 3, figsize=(10.5, 5.6))
+    fig, axes = plt.subplots(2, 3, figsize=(TEXT_IN, 4.0), layout="constrained")
     (ax_pd, ax_fd, ax_gd), (ax_pm, ax_fm, ax_gm) = axes
 
     def motor_ticks(ax, k_max):
@@ -633,7 +733,7 @@ def fig_noise_rigs() -> None:
             np.arange(1, len(p) + 1),
             p,
             ".",
-            ms=3,
+            ms=2,
             color=c,
             alpha=0.85,
             label=rf"rotor {i + 1}: $\alpha_i$={alpha[i]:.1f}, $\beta_i$={beta[i]:.1f}",
@@ -642,17 +742,15 @@ def fig_noise_rigs() -> None:
     for i, c in enumerate(COLOURS):
         ax_pd.plot(np.arange(1, pf.shape[1] + 1), pf[i], "-", lw=0.9, color=c, alpha=0.6)
     motor_ticks(ax_pd, K_DRE)
-    ax_pd.set_title("(a) DREGON: comb profiles $p_{ik}$", fontsize=9)
+    ax_pd.set_title("(a) DREGON: comb profiles $p_{ik}$")
     ax_pd.set_ylabel("line power at $r_{\\mathrm{ref}}$ (dB)")
     ax_pd.legend(
-        fontsize=6.5,
         loc="upper right",
         frameon=False,
         title="dots: single-rotor fits; lines: flight fit",
-        title_fontsize=6.5,
     )
     ax_pd.set_xlim(0, K_DRE + 1)
-    ax_pd.set_ylim(-100, -15)
+    ax_pd.set_ylim(-100, 20)  # the top 50 dB hold the legend
 
     # (b) Matrice 100 comb profiles: cruise and standby flight fits
     from matplotlib.lines import Line2D
@@ -662,20 +760,18 @@ def fig_noise_rigs() -> None:
         for i, c in enumerate(COLOURS):
             ax_pm.plot(np.arange(1, pf.shape[1] + 1), pf[i], ls, lw=0.9, color=c, alpha=0.8)
     motor_ticks(ax_pm, 81)
-    ax_pm.set_title("(d) Matrice 100: comb profiles $p_{ik}$", fontsize=9)
+    ax_pm.set_title("(d) Matrice 100: comb profiles $p_{ik}$")
     ax_pm.legend(
         handles=[
             Line2D([], [], color="0.3", ls="-", label="cruise, rotors 1-4"),
             Line2D([], [], color="0.3", ls="--", label="standby, rotors 1-4"),
         ],
-        fontsize=6.5,
         loc="upper right",
         frameon=False,
         title=r"$\alpha_i$, $\beta_i$ pinned at the prior centres",
-        title_fontsize=6.5,
     )
     ax_pm.set_xlim(0, 82)
-    ax_pm.set_ylim(-115, -15)
+    ax_pm.set_ylim(-115, -5)
     for ax in (ax_pd, ax_pm):
         ax.set_xlabel("order $k$")
 
@@ -684,7 +780,7 @@ def fig_noise_rigs() -> None:
         freqs,
         _floor_curve_db(dre["params"]["floor"], freqs, v3=True),
         color="k",
-        lw=1.4,
+        lw=1.1,
         label="flight fit $F(f)$ (room 2, four rotors)",
     )
     ax_fd.semilogx(
@@ -702,14 +798,14 @@ def fig_noise_rigs() -> None:
         ls="--",
         label="measured ambient $N(f)$ (rotors off)",
     )
-    ax_fd.set_title("(b) DREGON: floor shape $F(f)$ and ambient", fontsize=9)
+    ax_fd.set_title("(b) DREGON: floor shape $F(f)$ and ambient")
     ax_fd.set_ylabel("power density (dB)")
-    ax_fd.set_ylim(-85, -5)
-    ax_fd.legend(fontsize=6.5, loc="upper right", frameon=False)
+    ax_fd.set_ylim(-85, 10)
+    ax_fd.legend(loc="upper right", frameon=False)
 
     # (d) Matrice 100 floor: cruise and standby
     ax_fm.semilogx(
-        freqs, _floor_curve_db(cru["params"]["floor"], freqs, v3=True), "k-", lw=1.4, label="cruise"
+        freqs, _floor_curve_db(cru["params"]["floor"], freqs, v3=True), "k-", lw=1.1, label="cruise"
     )
     ax_fm.semilogx(
         freqs,
@@ -718,8 +814,8 @@ def fig_noise_rigs() -> None:
         lw=1.2,
         label="standby",
     )
-    ax_fm.set_title("(e) Matrice 100: floor shape $F(f)$", fontsize=9)
-    ax_fm.legend(fontsize=6.5, loc="upper right", frameon=False)
+    ax_fm.set_title("(e) Matrice 100: floor shape $F(f)$")
+    ax_fm.legend(loc="upper right", frameon=False)
     for ax in (ax_fd, ax_fm):
         ax.set_xlabel("frequency (Hz)")
         ax.set_xlim(30, 7900)
@@ -731,7 +827,7 @@ def fig_noise_rigs() -> None:
             np.arange(1, len(g) + 1),
             g,
             ".",
-            ms=3,
+            ms=2,
             color=c,
             alpha=0.85,
             label=rf"rotor {i + 1}: $\sigma_\nu$={b['params']['sigma_nu']:.2f}, "
@@ -751,18 +847,14 @@ def fig_noise_rigs() -> None:
             if i == 0
             else None,
         )
-    ax_gd.set_title(
-        r"(c) DREGON: pedestal rate $\gamma_k$ and shaft $(\sigma_\nu, \lambda)$", fontsize=9
-    )
+    ax_gd.set_title(r"(c) DREGON: pedestal rate $\gamma_k$ and shaft $(\sigma_\nu, \lambda)$")
     ax_gd.set_ylabel(r"$\gamma_k$ (Hz)")
-    ax_gd.set_ylim(1e-3, 3e5)
+    ax_gd.set_ylim(1e-3, 1e12)  # the top decades hold the legend
     ax_gd.legend(
-        fontsize=6.5,
         loc="upper left",
         frameon=False,
         ncol=1,
         title=r"$\sigma_\nu$ in rad/s, $\lambda$ in 1/s",
-        title_fontsize=6.5,
     )
     ax_gd.set_xlim(0, K_DRE + 1)
 
@@ -781,9 +873,9 @@ def fig_noise_rigs() -> None:
                 if i == 0
                 else None,
             )
-    ax_gm.set_title(r"(f) Matrice 100: $\gamma_k$ and $(\sigma_\nu, \lambda)$", fontsize=9)
-    ax_gm.set_ylim(1e-3, 3e5)
-    ax_gm.legend(fontsize=6.5, loc="upper left", frameon=False)
+    ax_gm.set_title(r"(f) Matrice 100: $\gamma_k$ and $(\sigma_\nu, \lambda)$")
+    ax_gm.set_ylim(1e-3, 1e12)
+    ax_gm.legend(loc="upper left", frameon=False)
     ax_gm.set_xlim(0, 82)
     for ax in (ax_gd, ax_gm):
         ax.set_xlabel("order $k$")
@@ -791,8 +883,7 @@ def fig_noise_rigs() -> None:
     ax_fm.set_ylabel("power density (dB)")
     ax_pm.set_ylabel("line power at $r_{\\mathrm{ref}}$ (dB)")
 
-    fig.tight_layout(h_pad=0.6, w_pad=0.6)
-    save(fig, "gen_noise_rigs")
+    save(fig, "gen_noise_rigs", paper=True)
 
 
 # ── tables ──────────────────────────────────────────────────────────────────

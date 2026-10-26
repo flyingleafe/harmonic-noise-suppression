@@ -704,6 +704,29 @@ uploaded, the fine-tune loads it with 0 missing / 0 unexpected keys.
 | HarmoF0-L2 | `rp-harmof0-l2-easyv4-981698` | `rp-harmof0-l2-easyv4-ft-75b117` |
 | Conv+BiGRU | `rp-scv2-easyv4-1cc57d` | `rp-scv2-easyv4-ft-147745` |
 
+## Frequency-scaling probe of the grid (2026-10-26)
+
+`scripts/rps_cue_probe.py freq` (six DREGON cruise clips, alpha 0.70-1.30) on the
+checkpoints of the paper's real and pretraining tables (the table round of each
+run: `best_real_macro_median`, except `rp_harmof0_l2_alllab`
+`best_md2_nosource_raw`, `rp_scv2_all` and `rp_scv2_priorv4_ft_lr5e4`
+`best_real_macro_raw`, `rp_harmof0_l2_priorv4_ft_lr5e4` `best_real_median`),
+omnirun `rp-freq-probe-v4-a65a7d` (uni-cpu), JSONs in
+`results/rps_probe_v4/freq/`; figure `make_probe_panels.py` (paper `fig:probe`).
+Local slope (+-4 %) / full-range slope:
+
+| model | real, no label aug | real, label aug | hard + ft |
+|---|---|---|---|
+| HRSPNet | 0.50 / 0.47 | 1.01 / 0.99 | 0.57 / -0.38 |
+| HarmoF0-L2 | 0.32 / 0.04 | 0.98 / 0.99 | 0.22 / 0.03 |
+| Conv+BiGRU | 0.15 / -0.05 | 1.15 / 1.11 | 0.26 / 0.13 |
+| HPPNet-L2 | 0.43 / 0.21 | 0.99 / 1.00 | 0.38 / 0.31 |
+
+Label augmentation alone decides the response; the hard-setup fine-tunes (on
+`rp_all`, no label augmentation) respond like the real-only models. The
+pretrained checkpoints were not probed, so whether fine-tuning erased a
+response is open. Easy + ft rows: pending the `rp_*_easyv4_ft_lr5e4` runs.
+
 ## Conclusion
 
 Pending.
