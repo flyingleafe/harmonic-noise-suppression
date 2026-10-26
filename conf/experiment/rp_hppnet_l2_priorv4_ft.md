@@ -12,4 +12,4 @@ The paper grid's "tuned" row for HPPNet-L2: `rp_hppnet_l2_priorv4` (wide-prior v
 
 ## Conclusion
 
-Pending.
+Ran 2026-10-26 (`rp-hppnet-l2-priorv4-ft-0dc27e`, W&B `g7l98xsa`): `real_macro` 4.39 at step 8000, against 3.39 real-only. Superseded by `rp_hppnet_l2_priorv4_ft_lr5e4` (3.89): 5e-4 is the fine-tuning recipe (Dmitrii, 2026-10-26).

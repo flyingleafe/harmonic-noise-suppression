@@ -521,8 +521,9 @@ ablation in the rewritten Section VI of the paper. Recipe (Dmitrii,
 - **Stop and selection.** The stop works as in combdiv: both controls. Two
   checkpoints are reported, synthetic-selected and real-selected.
 - **Fine-tuning.** Starts from the synthetic-selected checkpoint and uses
-  `rp_all` without label augmentation. A fresh AdamW, max LR 1e-4, a short
-  warm-up, and a cosine over 20 000 steps.
+  `rp_all` without label augmentation. A fresh AdamW, max LR 5e-4 (half the
+  pretraining max; Dmitrii, 2026-10-26, replacing 1e-4), a short warm-up, and
+  a cosine over 20 000 steps. Configs `rp_*_priorv4_ft_lr5e4`.
 - **Reference.** The better of the model's two real-only runs.
 
 Models: HRSPNet (`hppnet_pyrseplstm_k64`), HarmoF0-L2, Conv+BiGRU
@@ -591,28 +592,36 @@ tenth. Everything else is the same as the 1e-4 fine-tunes. The HarmoF0-L2 and
 Conv+BiGRU jobs were submitted directly; the HRSPNet and HPPNet-L2 jobs wait
 `--after` their pretraining jobs, next to the 1e-4 ones.
 
-**Results so far (2026-10-26, W&B).** Each score is the raw value at the
-round with the lowest 5-round median of the selection score, as in
+**Results (2026-10-26, W&B).** Each score is the raw value at the round with
+the lowest 5-round median of the selection score, as in
 `paper-real-protocol.md`. All values are PIT-MAE in Hz on `val/real_macro`
-unless the column says `uniform`.
+unless the column says `uniform`; tuned columns give the step of 20 000.
 
-| model | state | synth-selected step: `uniform` / `real_macro` | real-selected step: `real_macro` | hard, tuned (step of 20 000) | real-only reference |
-|---|---|---|---|---|---|
-| HRSPNet | running, step 60 000 | 50 500: 1.25 / 5.81 | 36 000: 5.57 | held | 2.52 |
-| HPPNet-L2 | running, step 55 500 | 52 500: 2.61 / 7.98 | 40 000: 6.44 | held | 3.39 |
-| HarmoF0-L2 | saturation stop at 68 500 | 53 500: 4.73 / 12.28 | 36 500: 9.84 | 2.66 (19 000) | 2.62 |
-| Conv+BiGRU | saturation stop at 73 500 | 71 500: 3.28 / 9.89 | 45 000: 8.62 | 3.18 (3000) | 2.65 |
+| model | pretraining stop | synth-selected: `uniform` / `real_macro` | real-selected: `real_macro` | tuned, 1e-4 | tuned, 5e-4 | real-only |
+|---|---|---|---|---|---|---|
+| HRSPNet | 96 500 | 78 500: 1.10 / 6.15 | 83 000: 5.77 | not run (git fetch failure) | **2.15** (8 500; running at 13 000) | 2.52 |
+| HPPNet-L2 | 66 000 | 52 500: 2.61 / 7.98 | 40 000: 6.44 | 4.39 (8 000) | 3.89 (16 000) | 3.39 |
+| HarmoF0-L2 | 68 500 | 53 500: 4.73 / 12.28 | 36 500: 9.84 | 2.66 (19 000) | 2.59 (11 500) | 2.62 |
+| Conv+BiGRU | 73 500 | 71 500: 3.28 / 9.89 | 45 000: 8.62 | 3.18 (3 000) | 2.55 (13 000) | 2.65 |
 
+All four pretraining runs stopped by saturation.
+
+- **5e-4 is the fine-tuning recipe** (Dmitrii, 2026-10-26). It beats 1e-4 on
+  every model run at both (by 0.07–0.63 Hz). The 1e-4 runs stay as the record
+  of the switch; no further 1e-4 fine-tunes.
+- HRSPNet is the first fine-tune clearly under its reference: 2.15 against
+  2.52, all of it on DREGON (all 3.89 → 3.05, cruise 2.97 → 1.94); MD2 level
+  (1.14 → 1.25), zero frames worse on both drones (DREGON 0.62 → 1.03, MD2
+  2.96 → 4.56). Rounds since step 3000 lie within 2.05–2.25.
+- Conv+BiGRU ends 0.10 under its reference, HarmoF0-L2 0.03 under (about the
+  round-to-round wobble), HPPNet-L2 0.50 over.
 - The fine-tuning started from the loop's `best_uniform_median.ckpt`. For
   Conv+BiGRU, that checkpoint is from step 58 500, not 71 500: the median at
   71 500 is lower by only 0.001, which the loop does not count as an
   improvement.
-- Neither finished fine-tune beats its real-only reference. HarmoF0-L2 ends
-  level with it (2.66 against 2.62). Conv+BiGRU is worse (3.18 against 2.65);
-  its best round comes at step 3000 and no later round improves on it.
 - The fine-tunes are validated on the real split only, so they have no
   `uniform` score yet.
-- The same numbers are in the paper's Table IX. The two running rows are
+- The 5e-4 numbers are in the paper's Table IX; the running HRSPNet row is
   marked `\prov` there.
 
 ## Conclusion

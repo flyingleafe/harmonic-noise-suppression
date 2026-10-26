@@ -12,4 +12,4 @@ batch: docs/experiments/rp-synthetic.md
 
 ## Conclusion
 
-Pending.
+Ran 2026-10-26 (`rp-hppnet-l2-priorv4-ftl-d77f38`, W&B `vc7wrtkl`): `real_macro` 3.89 at step 16 000, against 3.39 real-only and 4.39 at 1e-4. DREGON zero and standby stay far off (28.1 / 20.7). The fine-tuning recipe from here on (Dmitrii, 2026-10-26).

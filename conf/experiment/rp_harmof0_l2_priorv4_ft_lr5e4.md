@@ -12,4 +12,4 @@ batch: docs/experiments/rp-synthetic.md
 
 ## Conclusion
 
-Pending.
+Ran 2026-10-26 (`rp-harmof0-l2-priorv4-ft-bd45da`, W&B `uny4qk1r`): `real_macro` 2.59 at step 11 500, against 2.62 real-only and 2.66 at 1e-4: level with the reference. MD2 improves (1.60 against 1.74), DREGON does not (3.59 against 3.50). The fine-tuning recipe from here on (Dmitrii, 2026-10-26).

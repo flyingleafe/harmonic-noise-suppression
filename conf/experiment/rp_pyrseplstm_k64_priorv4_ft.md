@@ -12,4 +12,4 @@ The paper grid's "tuned" row for HRSPNet: `rp_pyrseplstm_k64_priorv4` (wide-prio
 
 ## Conclusion
 
-Pending.
+Never ran: `rp-pyrseplstm-k64-priorv-6d5279` failed at start on a GitHub fetch error (2026-10-26) and was not resubmitted, because 5e-4 became the fine-tuning recipe (`rp_pyrseplstm_k64_priorv4_ft_lr5e4`; Dmitrii, 2026-10-26).

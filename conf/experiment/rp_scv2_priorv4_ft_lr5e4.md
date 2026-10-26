@@ -12,4 +12,4 @@ batch: docs/experiments/rp-synthetic.md
 
 ## Conclusion
 
-Pending.
+Ran 2026-10-26 (`rp-scv2-priorv4-ftlr5e4-d4da7a`, W&B `sfmgu5wg`): `real_macro` 2.55 at step 13 000 (lowest 5-round median), against 2.65 real-only and 3.18 at 1e-4. The gain is on DREGON (3.55 against 3.82; ramps 6.45 against 11.28); MD2 is level (1.54 against 1.49). The fine-tuning recipe from here on (Dmitrii, 2026-10-26).

@@ -12,4 +12,4 @@ The paper grid's "tuned" row for Conv+BiGRU: `rp_scv2_priorv4` (wide-prior v4 pr
 
 ## Conclusion
 
-Pending.
+Ran 2026-10-26 (`rp-scv2-priorv4-ft-cd0055`, W&B `p8vl31te`): `real_macro` 3.18 at step 3000 (lowest 5-round median), against 2.65 real-only; no later round improves. Superseded by `rp_scv2_priorv4_ft_lr5e4` (2.55): 5e-4 is the fine-tuning recipe (Dmitrii, 2026-10-26).

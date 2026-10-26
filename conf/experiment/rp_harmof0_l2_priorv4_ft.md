@@ -12,4 +12,4 @@ The paper grid's "tuned" row for HarmoF0-L2: `rp_harmof0_l2_priorv4` (wide-prior
 
 ## Conclusion
 
-Pending.
+Ran 2026-10-26 (`rp-harmof0-l2-priorv4-ft-969c0d`, W&B `vb5qn2ch`): `real_macro` 2.66 at step 19 000, against 2.62 real-only. Superseded by `rp_harmof0_l2_priorv4_ft_lr5e4` (2.59): 5e-4 is the fine-tuning recipe (Dmitrii, 2026-10-26).
