@@ -616,13 +616,34 @@ All four pretraining runs stopped by saturation.
   2.96 → 4.56). Rounds after step 3000 lie within 2.05–2.38.
 - Conv+BiGRU ends 0.10 under its reference, HarmoF0-L2 0.03 under (about the
   round-to-round wobble), HPPNet-L2 0.50 over.
-- The fine-tuning started from the loop's `best_uniform_median.ckpt`. For
-  Conv+BiGRU, that checkpoint is from step 58 500, not 71 500: the median at
-  71 500 is lower by only 0.001, which the loop does not count as an
-  improvement.
+- The fine-tuning started from the loop's `best_uniform_median.ckpt`, which
+  moves only on a median improvement of at least `min_relative_improvement`;
+  the tables report the plain argmin of the five-round median. They differ
+  for three of the four runs: HRSPNet starts from 75 000 (table 78 500),
+  HPPNet-L2 from 51 000 (52 500), Conv+BiGRU from 58 500 (71 500; median
+  lower by only 0.001); HarmoF0-L2 matches (53 500). Same for the
+  real-selected column: HRSPNet `best_real_macro_median` is 81 500 (table
+  83 000), Conv+BiGRU 41 000 (45 000).
 - The fine-tunes are validated on the real split only, so they have no
   `uniform` score yet.
 - The 5e-4 numbers are in the paper's Table IX.
+- **Real-only models on the synthetic panel** (`scripts/rp_panel_eval.py
+  --validation rp_real_v4easy`, omnirun `rp-realonly-synth-eval-8c2de7` and
+  `rp-scv2-raw-synth-eval-a513dd`, `results/rp_panel_eval/realonly_synth_v4*.json`).
+  Checkpoints of Table VII's rows: `best_real_macro_median`, except
+  Conv+BiGRU `best_real_macro_raw` (its median checkpoint is step 53 000,
+  real_macro 2.71; the table's argmin-median round is 67 000, 2.65, which is
+  the raw-best checkpoint). The real views reproduce Table VII exactly.
+
+  | model | `uniform` | weak_comb | strong_motor | wide_pedestal | near_dregon | near_md2 | `near_macro` | static_comb |
+  |---|---|---|---|---|---|---|---|---|
+  | HRSPNet | 30.54 | 25.21 | 34.13 | 18.62 | 6.84 | 13.53 | 10.19 | 11.90 |
+  | HarmoF0-L2 | 28.63 | 28.37 | 36.37 | 24.53 | 5.63 | 13.04 | 9.34 | 16.37 |
+  | Conv+BiGRU | 49.14 | 59.99 | 52.20 | 55.86 | 9.61 | 47.08 | 28.35 | 17.97 |
+  | HPPNet-L2 | 26.03 | 31.38 | 20.92 | 28.09 | 14.12 | 12.03 | 13.08 | 9.73 |
+
+  Real-only models are 24–48 Hz off on `uniform` (hard pretraining: 1.10–4.73)
+  and 9–28 Hz on `near_macro`. Table IX's real-only Synth. is `uniform`.
 
 ### Easy setup (decided 2026-10-26)
 
