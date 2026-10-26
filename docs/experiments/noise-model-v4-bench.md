@@ -634,7 +634,9 @@ floor up to the line bases, then re-measure the rig distance to the wide prior.
 
 **Setup.** Continuations of `c7` (`noise_v4_bench.py resume`) under a phase-
 pedestal width cap `--w-max-hz 6.94` (= c_W; W over it starts just under it)
-and the floor push κ = 10 and κ = 100. One seed, uni.
+and the floor push κ = 10 and κ = 100. One seed, 500 min deadline; jobs
+`nv4-r7-wmax-k10-964b17` (kaggle), `nv4-r7-wmax-k100-959311` (colab).
+Then `scripts/rig_distance_map.py --extra` with both payloads.
 
 ## Conclusion
 
