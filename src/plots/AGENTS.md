@@ -101,6 +101,9 @@ layout is new rendering code; everything else delegates.
 - `noise_gen.py` — noise-gen recipes: `extract_noise_gen_pair(pred, target)`
   (real/generated pair for `val_logging`) and
   `plot_noise_gen_comparison` / `noise_gen_comparison_tracks`.
+- `paper.py` — house style of paper figures: `paper_style()` (serif TeX Gyre
+  Termes, 6.5-7 pt, matching the TikZ figures as printed), `COLUMN_IN` /
+  `TEXT_IN`. Draw at print width and include at that width, never rescaled.
 - `rps_prediction/` — high-level comparison plots (sample, salience,
   full-sequence, summary/per-SNR/curves; `slide_comparison` was deleted as
   dead code). RPS plots PIT-align predictions to GT via
