@@ -474,11 +474,39 @@ Fit to fit: total 36.6. Two random bank rigs: median about 10.7 total.
   1 rev/s 0.48 vs 0.31. MD2's law spends more windows at low speed (p10 of a
   window's mean speed 8 vs 16 rev/s; bank 27).
 
-Open: why `near_md2` scores far worse than `uniform` when MD2's spectra are
-typical of the bank. Diagnostic `sector-diag-5f321c` (`uni-gpushort`) scores
-the four pretrained checkpoints (`best_uniform_median`) on the whole
-`rp_real_priorv4` panel with per-frame dumps (`scripts/rp_panel_eval.py
---dump`).
+**Why `near_md2` scores worse than `uniform`** (diagnostic `sector-diag-5f321c`,
+`uni-gpushort`: the four pretrained `best_uniform_median` checkpoints on the
+whole `rp_real_priorv4` panel, per-frame dumps from `scripts/rp_panel_eval.py
+--dump`; PIT-MAE in rev/s):
+
+| model | `uniform` | `near_dregon` | `near_md2` | `near_md2` frames under 20 rev/s (18 %) | `near_md2` cruise |
+|---|---|---|---|---|---|
+| HRSPNet | 1.11 | 0.77 | 7.85 | 22.9 | 4.3 |
+| HPPNet-L2 | 2.64 | 4.50 | 10.31 | 36.8 | 4.2 |
+| HarmoF0-L2 | 4.73 | 6.88 | 10.78 | 16.9 | 9.2 |
+| Conv+BiGRU | 3.28 | 2.58 | 12.71 | 32.5 | 7.9 |
+
+Two MD2 properties lie outside what the bank trains on; the errors are not tied
+to a microphone (per-mic MAE flat).
+
+1. **Idle level.** MD2's fitted law idles at 7.5–9 rev/s (0.105 of hover);
+   DREGON's at 15–17 (0.198). The hyperprior idles at 0.35 of hover, i.e.
+   12–33 rev/s over `hover_range`. On `near_md2` frames under 20 rev/s the
+   targets have median 7.8 rev/s, HRSPNet predicts median 16.1 (90th
+   percentile 69); on `near_dregon` (target 15.3) it predicts 16.0.
+2. **Line broadening with order.** At 80 rev/s the −3 dB width of an MD2
+   cruise line (4096-point periodogram) is 11.7 Hz at k = 10, 46.9 at k = 30 and
+   82 at k = 60: above k ≈ 20 its comb merges. Bank rigs (40): median 7.8 /
+   7.8 / 15.6, 90th percentile 7.8 / 15.6 / 31.6; DREGON 7.8 / 7.8 / 31.2. MD2's
+   speed-dependent shaft law (`a_sigma` 2.35) has no counterpart in the
+   prior's flat shaft. On `near_md2` cruise the error grows as rotors close in
+   (HRSPNet 1.5 at a closest pair ≥ 4 rev/s, 6.4 under 1 rev/s), which
+   `uniform` cruise does not show (0.7 / 0.8): with only the low orders
+   resolved, close rotors are separated only by `k Δ` at small `k`.
+
+The spectral distance misses property 2: `10 log10(1 + L/B)` compresses lines
+that stand only 1–4 dB over the floor, so narrow and wide weak lines read
+alike.
 
 ## Paper grid (2026-10-23): hard setup approved 2026-10-26
 
