@@ -461,6 +461,31 @@ synthetic-only at up to ~17 h each.
 The real-data runs which the rewrite needs are in `paper-real-protocol.md`,
 § "Paper grid after the experiments rewrite".
 
+### Hard setup runs (submitted 2026-10-26)
+
+All eight run on `uni` at `0d839b3b`. The pretraining runs use 16 CPUs (12
+data workers), 64 GB and a 48 h limit. HRSPNet and HPPNet-L2 run on an H100,
+because `sae` rejects the A100-80 request ("Requested node configuration is
+not available"). Each fine-tune runs with `--after` its pretraining, on the
+same GPU type, with 8 h.
+
+Smoke on `uni-gpushort` (`smoke-priorv4-8c23e2`, `smoke-priorv4-ft-cfa194`;
+HarmoF0-L2, 120 + 60 steps, rounds of 20):
+
+- the six sectors build at start, about 1 min each;
+- one validation pass over all panels takes 11–13 s;
+- every sector is scored each round;
+- the pretraining stage uploads `best_uniform_median.ckpt` once the 5-round
+  median window fills;
+- `checkpoint: best:uniform@…` loads it with 0 missing and 0 unexpected keys.
+
+| model | pretraining job | fine-tuning job |
+|---|---|---|
+| HRSPNet | `rp-pyrseplstm-k64-priorv-952a47` (H100) | `rp-pyrseplstm-k64-priorv-6d5279` |
+| HPPNet-L2 | `rp-hppnet-l2-priorv4-87756c` (H100) | `rp-hppnet-l2-priorv4-ft-0dc27e` |
+| HarmoF0-L2 | `rp-harmof0-l2-priorv4-e2322c` | `rp-harmof0-l2-priorv4-ft-969c0d` |
+| Conv+BiGRU | `rp-scv2-priorv4-5a5364` | `rp-scv2-priorv4-ft-cd0055` |
+
 ## Conclusion
 
 Pending.
