@@ -14,6 +14,10 @@ squares slopes through the origin of percent shift against percent alpha: over
 the whole range, and inside +-4 %. This is the operation
 ``data_processing.noise_augmentations.freq_scale`` applies in training, without
 the label rescaling -- the point of the probe is that the label stays put.
+``--clips`` picks other clips of the real split (its MD2 cruise clips are 27-32);
+``--part sector:<name>`` reads a synthetic validation sector of the wide-prior
+panel instead (``conf/validation/rp_real_priorv4.yaml``, e.g. ``sector:uniform``),
+with the same cruise-clip rule.
 
     python scripts/rps_cue_probe.py freq --exp r4hb_scv2 hb_scv2_mag_nogate
 
@@ -78,6 +82,8 @@ LOCAL = 4.001  # the +-4 % window of the local slope
 SALIENCE_GRID = (0.0, 150.0, 300)  # the salv2 / r4_l4 rate grid
 N_LAYERS = 4
 RATIO_FLOOR = 1.0  # rotor-frames whose truth is at or below this carry no ratio
+#: The validation panel whose ``datasets.<name>`` a ``sector:<name>`` part reads.
+SECTOR_PANEL = REPO_ROOT / "conf/validation/rp_real_priorv4.yaml"
 
 
 # ─── Shared ───────────────────────────────────────────────────────────────────
@@ -364,7 +370,11 @@ def run_freq(a: argparse.Namespace, out_dir: Path) -> None:
     from experiments import rps_bench as rb
 
     tag = variant(a)
-    frames = rb.part(a.part)
+    frames = (
+        sector_frames(a.part.removeprefix("sector:"))
+        if a.part.startswith("sector:")
+        else rb.part(a.part)
+    )
     n_ch = 1 + max(int(f["meta"]["channel"]) for f in frames) if "meta" in frames[0] else 1
     clips = [int(c) for c in a.clips] if a.clips else cruise_clips(frames, n_ch, a.n_clips)
     print(f"{a.part}: {len(frames)} frames, {n_ch} mics; cruise clips {clips}", flush=True)
@@ -400,6 +410,25 @@ def run_freq(a: argparse.Namespace, out_dir: Path) -> None:
             lines.append(f"{e},{al},{ms:.6f},{rp:.6f},{r['slope_full']:.6f},{r['slope_local']:.6f}")
     (out_dir / f"summary{tag}.csv").write_text("\n".join(lines) + "\n")
     print(f"\nwrote {out_dir}/summary{tag}.json and summary{tag}.csv", flush=True)
+
+
+def sector_frames(name: str) -> list:
+    """Every frame of one synthetic validation sector (``datasets.<name>`` of
+    :data:`SECTOR_PANEL`), built as the training loop's validation builds it."""
+    from typing import cast
+
+    from omegaconf import OmegaConf
+
+    from training.config import build_dataset
+
+    cfg = OmegaConf.load(SECTOR_PANEL)
+    spec = cast(dict[str, Any], OmegaConf.to_container(cfg.datasets[name], resolve=True))
+    params = dict(cast(dict[str, Any], spec["params"]))
+    if not Path(params["path"]).is_absolute():
+        params["path"] = str(REPO_ROOT / params["path"])
+    spec["params"] = params
+    ds = cast(Any, build_dataset(spec))  # a map-style FixedSynthFrameDataset
+    return [ds[i] for i in range(len(ds))]
 
 
 def run_cutoff(a: argparse.Namespace, out_dir: Path) -> None:
@@ -459,11 +488,15 @@ def run_cutoff(a: argparse.Namespace, out_dir: Path) -> None:
 
 def variant(a: argparse.Namespace) -> str:
     """The suffix that keeps two settings of one probe from sharing a cache file."""
+    part = "" if a.part in (None, "real", "stoch") else "." + a.part.replace(":", "-")
     if a.probe == "freq":
-        return (
+        clips = (
             "" if a.clips is None and a.n_clips == 6 else f".c{'-'.join(map(str, a.clips or []))}"
         )
-    return "" if a.lowpass == "stft" and not a.n_frames else f".{a.lowpass}-n{a.n_frames or 'all'}"
+        return part + clips
+    return part + (
+        "" if a.lowpass == "stft" and not a.n_frames else f".{a.lowpass}-n{a.n_frames or 'all'}"
+    )
 
 
 def load_cached(out_dir: Path, exp: str, tag: str, force: bool, expect: dict) -> dict | None:
