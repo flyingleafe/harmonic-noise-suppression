@@ -600,7 +600,7 @@ unless the column says `uniform`; tuned columns give the step of 20 000.
 
 | model | pretraining stop | synth-selected: `uniform` / `real_macro` | real-selected: `real_macro` | tuned, 1e-4 | tuned, 5e-4 | real-only |
 |---|---|---|---|---|---|---|
-| HRSPNet | 96 500 | 78 500: 1.10 / 6.15 | 83 000: 5.77 | not run (git fetch failure) | **2.15** (8 500; running at 13 000) | 2.52 |
+| HRSPNet | 96 500 | 78 500: 1.10 / 6.15 | 83 000: 5.77 | not run (git fetch failure) | **2.15** (8 500) | 2.52 |
 | HPPNet-L2 | 66 000 | 52 500: 2.61 / 7.98 | 40 000: 6.44 | 4.39 (8 000) | 3.89 (16 000) | 3.39 |
 | HarmoF0-L2 | 68 500 | 53 500: 4.73 / 12.28 | 36 500: 9.84 | 2.66 (19 000) | 2.59 (11 500) | 2.62 |
 | Conv+BiGRU | 73 500 | 71 500: 3.28 / 9.89 | 45 000: 8.62 | 3.18 (3 000) | 2.55 (13 000) | 2.65 |
@@ -613,7 +613,7 @@ All four pretraining runs stopped by saturation.
 - HRSPNet is the first fine-tune clearly under its reference: 2.15 against
   2.52, all of it on DREGON (all 3.89 → 3.05, cruise 2.97 → 1.94); MD2 level
   (1.14 → 1.25), zero frames worse on both drones (DREGON 0.62 → 1.03, MD2
-  2.96 → 4.56). Rounds since step 3000 lie within 2.05–2.25.
+  2.96 → 4.56). Rounds after step 3000 lie within 2.05–2.38.
 - Conv+BiGRU ends 0.10 under its reference, HarmoF0-L2 0.03 under (about the
   round-to-round wobble), HPPNet-L2 0.50 over.
 - The fine-tuning started from the loop's `best_uniform_median.ckpt`. For
@@ -622,8 +622,7 @@ All four pretraining runs stopped by saturation.
   improvement.
 - The fine-tunes are validated on the real split only, so they have no
   `uniform` score yet.
-- The 5e-4 numbers are in the paper's Table IX; the running HRSPNet row is
-  marked `\prov` there.
+- The 5e-4 numbers are in the paper's Table IX.
 
 ### Easy setup (decided 2026-10-26)
 
@@ -664,6 +663,17 @@ Caveat: `near_dregon` (the selection's DREGON half) is built from the
 bench-only fit without wind, while the training DREGON half carries the gust
 wind; the validation neighbourhood is therefore cleaner than what the easy runs
 train on.
+
+**Runs (submitted 2026-10-26, `uni`).** Smoke `smoke-easyv4-586ce9`
+(HarmoF0-L2, 120 + 60 steps): every panel scored, `best_near_macro_median.ckpt`
+uploaded, the fine-tune loads it with 0 missing / 0 unexpected keys.
+
+| model | pretraining job | fine-tuning job (5e-4, `--after`) |
+|---|---|---|
+| HRSPNet | `rp-pyrseplstm-k64-easyv4-8a85c9` (H100) | `rp-pyrseplstm-k64-easyv4-e521d6` |
+| HPPNet-L2 | `rp-hppnet-l2-easyv4-ec4193` (H100) | `rp-hppnet-l2-easyv4-ft-467001` |
+| HarmoF0-L2 | `rp-harmof0-l2-easyv4-981698` | `rp-harmof0-l2-easyv4-ft-75b117` |
+| Conv+BiGRU | `rp-scv2-easyv4-1cc57d` | `rp-scv2-easyv4-ft-147745` |
 
 ## Conclusion
 

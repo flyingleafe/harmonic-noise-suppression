@@ -12,4 +12,4 @@ batch: docs/experiments/rp-synthetic.md
 
 ## Conclusion
 
-Running (`rp-pyrseplstm-k64-priorv-a462b2`, W&B `conb1f2j`): at step 13 000, `real_macro` 2.15 at step 8500 (lowest 5-round median), against 2.52 real-only, all of it on DREGON (3.05 against 3.89; cruise 1.94 against 2.97); MD2 level (1.25 against 1.14). The fine-tuning recipe from here on (Dmitrii, 2026-10-26). Final numbers pending.
+Ran 2026-10-26 (`rp-pyrseplstm-k64-priorv-a462b2`, W&B `conb1f2j`, finished at 20 000): `real_macro` 2.15 at step 8500 (lowest 5-round median), against 2.52 real-only, the first fine-tune clearly under its reference. All of the gain is on DREGON (3.05 against 3.89; cruise 1.94 against 2.97); MD2 is level (1.25 against 1.14); zero frames are worse on both drones (DREGON 1.03 against 0.62, MD2 4.56 against 2.96). Later rounds drift up to 2.3. The fine-tuning recipe from here on (Dmitrii, 2026-10-26).
