@@ -531,20 +531,21 @@ Models: HRSPNet (`hppnet_pyrseplstm_k64`), HarmoF0-L2, Conv+BiGRU
 
 | paper cell | runs | stream | blocked on |
 |---|---|---|---|
-| pretraining table, easy | 4 (one per model) | drones drawn around the DREGON / MD2 fits, each flown on its own drone's trajectory law | (a), (b) |
+| pretraining table, easy | 4: `rp_{pyrseplstm_k64,harmof0_l2,scv2,hppnet_l2}_easyv4` | `rp_easyv4`: 1024 + 1024 ungated perturbations of the DREGON bench fit with its fitted gust wind and of the MD2 pair (`easy-v4-banks@80fa07c8`), each flown on its own drone's trajectory law; validation `rp_real_v4easy` | decided 2026-10-26 (§ "Easy setup") |
 | pretraining table, hard | 4: `rp_{pyrseplstm_k64,harmof0_l2,scv2,hppnet_l2}_priorv4` | `rp_priorv4`: the wide prior in v4 (`prior-v4-banks@2ee5131e`), flown on the constrained hyperprior (`hover_range` [35, 95], `rotor_sep` [2, 15], shrink 0.57); validation `rp_real_priorv4` | approved 2026-10-26; submitted (§ "Hard setup runs") |
-| pretraining table, tuned | 8: the hard four are `rp_*_priorv4_ft` (`checkpoint: best:uniform@rp_*_priorv4`) | `rp_all` without label augmentation | the hard four: queued after their pretraining (`--after`) |
+| pretraining table, tuned | 8: `rp_*_{priorv4,easyv4}_ft_lr5e4` (`checkpoint: best:uniform@rp_*_priorv4`, `best:near_macro@rp_*_easyv4`) | `rp_all` without label augmentation, max LR 5e-4 | queued after their pretraining (`--after`) |
 | ablation table, static comb, tuned | 1 (HRSPNet) | `rp_all` without label augmentation, from combdiv's synthetic-selected checkpoint (step 97 000) | nothing; can start on approval |
 | ablation table, stochastic comb | 2 (HRSPNet: alone, tuned) | a stochastic-comb stream under this protocol | (e) |
 
 Open decisions:
 
-- **(a)** The perturbation of the easy setup. The η-tempered Laplace draw was
-  explained; Dmitrii answered "not yet".
-- **(b)** The DREGON flight stage of noise v4 fails the parity gate (best
-  converged stage 15.8 rev/s against the bar 2.188;
-  `noise-model-v4-bench.md`, round 6). Without it, the DREGON half of the
-  easy setup has no fitted flight drone.
+- **(a)** Resolved 2026-10-26: prior-shaped perturbations
+  (`sectors_v4.perturb_fit`) at the validation neighbourhoods' strengths,
+  ungated (§ "Easy setup").
+- **(b)** Resolved 2026-10-26 for the easy setup: the DREGON half is drawn
+  around the accepted DREGON flight payload, the bench fit c7 with its fitted
+  SC gust wind and no flight refit (`noise-model-v4.qmd` § 8.4; PIT 2.63 against
+  the bar 1.680, so still short of parity).
 - **(c)** Resolved 2026-10-25: the hard setup's wide prior is drawn fresh
   from the prior_v1 laws in v4 (rules `prior_v4/4`, `prior-v4-banks@2ee5131e`);
   the paper's wide-prior table still needs rewriting from those laws.
@@ -623,6 +624,46 @@ All four pretraining runs stopped by saturation.
   `uniform` score yet.
 - The 5e-4 numbers are in the paper's Table IX; the running HRSPNet row is
   marked `\prov` there.
+
+### Easy setup (decided 2026-10-26)
+
+Dmitrii's decisions:
+
+- **Drones.** Each entry is ONE prior-shaped perturbation
+  (`sectors_v4.perturb_fit`) of a base fit, at the strengths the validation
+  neighbourhoods were calibrated to (0.375 DREGON, 0.374 MD2: median spectral
+  distance one third of the fit-to-fit gap). Bases: the accepted DREGON flight
+  payload (bench fit c7 + fitted SC gust wind,
+  `results/noise_v4/flight/benchwind/dregon__c7__benchwind_gust.json`, imported
+  from branch `noise-v4`; the perturbation keeps the wind) and the MD2
+  standby/cruise pair. Each entry flies its base's fitted trajectory law
+  (`traj_rig` dregon / michaels).
+- **No gate.** The fits are real drones; the gate is for prior draws. Gated, the
+  MD2 half would keep only 28 % of draws (the `near_md2` build), biased toward
+  louder lines.
+- **Size.** 1024 per fit, 50/50 (equal counts under the pool's uniform draw).
+- **Selection.** `near_macro` = mean of `near_dregon` and `near_md2`
+  (`conf/validation/rp_real_v4easy.yaml`); the stop waits on `real_macro` and
+  `near_macro`; `best_near_macro_median` seeds the fine-tuning (5e-4 recipe).
+
+**Bank.** `noise-nbhd-bank-v4/1`
+(`data_processing.noise_model.nbhd_bank_v4`): every base payload once in the
+meta, per draw only the fields a perturbation moves (float64, read back
+exactly). `scripts/easy_bank_v4_build.py` (seed 20261027, draw `i` of a fit
+from `SeedSequence([seed, tag, i])`), omnirun `easy-bank-v4-749cde`: 2048
+draws in 18 s, 22.9 MB; published `easy-v4-banks@80fa07c8`, pinned. Render
+cost (one thread, 4 s × 8 mics): 0.4–0.8 s for MD2 entries, 1.0 s for DREGON
+(prior_v4 rigs 1.05 s).
+
+**Stream.** `conf/online_mix/rp_easyv4.yaml`: `rp_priorv4` with the easy bank,
+no per-clip `wind_sc` (DREGON entries carry their fitted wind and the pool
+refuses `wind_sc` on a windy payload; MD2's flight fits carry their own floor),
+`line_scatter_db` 3.4 as in the hard stream.
+
+Caveat: `near_dregon` (the selection's DREGON half) is built from the
+bench-only fit without wind, while the training DREGON half carries the gust
+wind; the validation neighbourhood is therefore cleaner than what the easy runs
+train on.
 
 ## Conclusion
 
