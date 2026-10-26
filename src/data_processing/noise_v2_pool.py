@@ -131,6 +131,12 @@ is the v4 renderer's per-clip SC wind, v1's law (``render_noise``
 ``gustiness``), the prior-v4 rigs' wind; a pool holding a non-v4 entry or a
 v4 one with its own wind refuses it.
 
+``entry_order`` (default ``random``: one entry drawn uniformly per rendered
+window) set to ``cycle`` takes the entries in bank order, one per rendered
+window: a fixed validation panel of ``n`` windows over an ``n``-rig bank
+renders every rig once. The counter is the pool instance's, so ``cycle`` is
+for single-process panels, not for a multi-worker training stream.
+
 EVERYTHING IS VALIDATED WHEN THE POOL IS BUILT — the fit files are read, the
 schemas checked, the rotor and microphone counts compared against the policy's
 — so a bad policy fails where it is loaded and not in a DataLoader worker on
@@ -333,6 +339,7 @@ class NoiseV2Pool:
         sr_work: int | None = None,
         line_scatter_db: float = 0.0,
         wind_sc: dict[str, Any] | None = None,
+        entry_order: str = "random",
         seed: int = 0,
     ):
         self.sample_rate = int(sample_rate)
@@ -396,6 +403,14 @@ class NoiseV2Pool:
         if self.wind_sc is not None:
             check_sc_wind(self.wind_sc)
         self._base_seed = int(seed)
+        # "random": one entry drawn uniformly per rendered window; "cycle": the
+        # entries in bank order, one per rendered window (a FIXED validation
+        # panel that renders each rig once; a per-process counter, so not for
+        # a multi-worker training stream)
+        if entry_order not in ("random", "cycle"):
+            raise ValueError(f"entry_order must be 'random' or 'cycle', got {entry_order!r}")
+        self.entry_order = str(entry_order)
+        self._next_entry = 0
         if self.rps_kind not in trajectory_model.FLIGHT_KINDS:
             raise ValueError(
                 f"noise_v2 renders on a whole flight; rps.kind must be one of "
@@ -631,6 +646,7 @@ class NoiseV2Pool:
             comb_offset_db=float(g("comb_offset_db", 0.0)),
             line_scatter_db=float(g("line_scatter_db", 0.0)),
             wind_sc=None if g("wind_sc") is None else dict(g("wind_sc")),
+            entry_order=str(g("entry_order", "random")),
             seed=int(g("seed", 0)),
         )
 
@@ -774,7 +790,11 @@ class NoiseV2Pool:
         flight (:meth:`traj_key`), so a bank mixing two rigs never crosses one
         rig's comb with the other's flight envelope.
         """
-        entry = self.entries[int(rng.integers(len(self.entries)))]
+        if self.entry_order == "cycle":
+            entry = self.entries[self._next_entry % len(self.entries)]
+            self._next_entry += 1
+        else:
+            entry = self.entries[int(rng.integers(len(self.entries)))]
         rps = self.sample_rps(rng, duration_s, entry)
         level = self._draw_level(rng)
         # The render's own seed: folded from the pool's configured seed and one

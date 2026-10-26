@@ -218,6 +218,22 @@ def test_entries_are_drawn_uniformly_over_the_whole_set():
     assert all(27 <= n <= 73 for n in counts.values()), counts
 
 
+def test_cycle_renders_every_entry_once_in_bank_order_whatever_the_seed():
+    """A fixed validation panel over an ``n``-rig bank must score every rig once:
+    ``entry_order: cycle`` takes the entries in order, one per render, and wraps."""
+    fits = [
+        {"name": "dregon", "cruise": DREGON_FIT},
+        {"name": "michaels", "cruise": MICHAELS_CRUISE},
+        {"name": "michaels_pair", "cruise": MICHAELS_CRUISE, "standby": MICHAELS_STANDBY},
+    ]
+    pool = _pool(duration_s=0.05, fits=fits, entry_order="cycle")
+    rng = np.random.default_rng(2)
+    names = [pool.render(rng, 0.05)[2].name for _ in range(4)]
+    assert names == ["dregon", "michaels", "michaels_pair", "dregon"]
+    with pytest.raises(ValueError, match="entry_order"):
+        _pool(duration_s=0.05, fits=fits, entry_order="shuffle")
+
+
 def test_render_reuse_renders_once_every_reuse_windows_and_repeats_in_between():
     pool = _pool(duration_s=0.05, render_reuse=8, render_pool=2)
     rng = np.random.default_rng(3)

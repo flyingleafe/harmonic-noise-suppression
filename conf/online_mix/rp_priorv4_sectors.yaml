@@ -1,0 +1,60 @@
+# VALIDATION-SECTOR PANEL POLICY of the priorv4 runs
+# (conf/validation/rp_real_priorv4.yaml; docs/experiments/rp-synthetic.md
+# § "Validation sectors"). conf/online_mix/rp_priorv4.yaml - the training
+# stream - with two differences, so that a panel of 32 clips x 8 mics over a
+# 32-rig sector renders EVERY rig once:
+#   * no silence arm: a silent draw would not consume a rig;
+#   * `entry_order: cycle`: the rigs in bank order, one per render.
+# Each sector names its bank through FixedSynthFrameDataset's `preset_bank`;
+# the one below is the uniform sector. The panel itself strips the
+# augmentations and sets flight_reuse / render_reuse to 1 (every clip its own
+# flight and render); speech, SNR, level, wind_sc and line_scatter_db are the
+# stream's. A neighbourhood bank's entries name their drone (`traj_rig`), so
+# they fly that rig's fitted trajectory law under the same rps block (hover_range
+# and shrink act on posterior drones only; rps_max and rotor_sep apply to all).
+# KEEP IN STEP WITH rp_priorv4.yaml.
+
+sample_rate: 16000
+duration_s: 2.0
+base_seed: 20261027
+snr_ref_floor_rms: 0.02
+
+sources:
+  noise:
+    - kind: noise_v2
+      weight: 1.0
+      n_mics: 8
+      n_rotors: 4
+      preset_bank: dload:validation-sectors-v4/uniform.npz
+      entry_order: cycle
+      render_reuse: 1
+      rps_scale_range: [1.0, 1.0]
+      normalize_rms_range: [0.02, 0.25]
+      level_mode: flight
+      line_scatter_db: 3.4
+      wind_sc: {p_wind: 0.7, max_over_floor_db: 33.0, shield_mean_db: 8.0, gustiness: 3}
+      rps:
+        kind: fitted_traj
+        fits: dload:rps-traj-fits
+        rigs: {posterior: 1.0}
+        mean_shift: [0.0, 0.0]
+        hover_range: [35.0, 95.0]
+        rotor_sep: [2.0, 15.0]
+        rps_max: 150.0
+        measurement_noise: false
+        shrink: {rigs: [dregon, michaels], weight: 0.57}
+        flight_fs: 200
+        flight_reuse: 1
+        phases: {takeoff_s: [0.6, 1.6], landing_s: [0.25, 0.8]}
+  speech:
+    - dataset: librispeech
+      subpath: LibriSpeech/train-clean-100
+
+policy:
+  stages:
+    - until: null
+      source_prob: 1.0
+      speech_per_channel: independent
+      snr_per_channel: false
+      snr_db:
+        uniform: {low: -30.0, high: 5.0}

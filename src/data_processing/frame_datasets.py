@@ -470,6 +470,18 @@ def apply_render_reuse(cfg: Any, render_reuse: int | None) -> Any:
     return cfg
 
 
+def apply_preset_bank(cfg: Any, preset_bank: str | None) -> Any:
+    """Override ``sources.noise[*].preset_bank`` in place where a source has one,
+    so one fixed-panel policy serves several rig banks (the validation sectors
+    of ``conf/validation/rp_real_priorv4.yaml``)."""
+    if preset_bank is None:
+        return cfg
+    for src in cfg.sources.noise:
+        if "preset_bank" in src:
+            src.preset_bank = str(preset_bank)
+    return cfg
+
+
 class OnlineMixFrameDataset(IterableDataset):
     """The online-mix training stream: a compiled policy pipeline as a torch
     IterableDataset.
@@ -1341,6 +1353,7 @@ class FixedSynthFrameDataset(Dataset):
         speech: bool | None = None,
         cache_path: str | Path | None = None,
         render_reuse: int | None = None,
+        preset_bank: str | None = None,
         meta: Mapping[str, Any] | None = None,
     ):
         cache = Path(cache_path) if cache_path is not None else None
@@ -1365,6 +1378,7 @@ class FixedSynthFrameDataset(Dataset):
                         del stage[key]
         apply_flight_reuse(cfg, flight_reuse)
         apply_render_reuse(cfg, render_reuse)
+        apply_preset_bank(cfg, preset_bank)
         apply_speech_override(cfg, speech)
         stream = OnlineMixFrameDataset.from_config(cfg, flatten_channels=flatten_channels)
         self._frames: list[td.Frame] = []

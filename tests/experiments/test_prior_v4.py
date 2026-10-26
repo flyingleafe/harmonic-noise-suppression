@@ -28,6 +28,7 @@ from data_processing.noise_model.prior_bank_v4 import (
     PriorBankV4,
     write_prior_bank_v4,
 )
+from data_processing.noise_model.render import regime_blend_weight
 from data_processing.noise_model.v3 import wind_shape_spec
 from experiments.noise_model import identifiability as ID
 from experiments.noise_model import v4_priors as VP
@@ -190,13 +191,54 @@ def test_per_rig_draws_follow_their_laws_and_the_seed(bank: PriorBank) -> None:
     assert abs(alpha.std() - 1.759) < 0.15 and abs(alpha.mean()) < 0.25
 
 
-def test_the_v4_gate_splits_the_exact_spectrum_into_one_line_and_the_rest(bank: PriorBank) -> None:
+def _only(fit: dict[str, Any], r: int, k: int) -> dict[str, Any]:
+    """``fit`` with harmonic ``(r, k)`` alone (none when ``k`` is past its
+    profile): no other line, floor or wind."""
+    par = V4.V4Params.from_payload(fit)
+    out = copy.deepcopy(fit)
+    p = out["params"]
+    aero, motor = (
+        np.asarray(p[key], dtype=np.float64) for key in ("profile_aero_db", "profile_motor_db")
+    )
+    keep_aero = np.full_like(aero, SILENT_LINE_DB)
+    if k <= aero.shape[1]:
+        keep_aero[r, k - 1] = aero[r, k - 1]
+    keep_motor = np.full_like(motor, SILENT_LINE_DB)
+    j = np.flatnonzero(par.motor_orders == k)
+    keep_motor[r, j] = motor[r, j]
+    p["profile_aero_db"], p["profile_motor_db"] = keep_aero.tolist(), keep_motor.tolist()
+    p["floor"] = dict(p["floor"], mean_db=-10000.0, static_rel=0.0)
+    p["wind"] = None
+    return out
+
+
+def _narrow(fit: dict[str, Any], k_max: int) -> dict[str, Any]:
+    """``fit`` cut to the orders ``1 .. k_max`` (aero lines, pedestal, motor orders)."""
+    out = copy.deepcopy(fit)
+    p = out["params"]
+    p["profile_aero_db"] = [row[:k_max] for row in p["profile_aero_db"]]
+    p["pedestal"] = {
+        key: (v[:k_max] if isinstance(v, list) else v) for key, v in p["pedestal"].items()
+    }
+    keep = [j for j, o in enumerate(p["motor_orders"]) if o <= k_max]
+    p["motor_orders"] = [p["motor_orders"][j] for j in keep]
+    p["profile_motor_db"] = [[row[j] for j in keep] for row in p["profile_motor_db"]]
+    return out
+
+
+@pytest.mark.parametrize("case", ["flat_shaft", "speed_shaft", "regime_pair"])
+def test_the_v4_gate_splits_the_exact_spectrum_into_one_line_and_the_rest(
+    bank: PriorBank, case: str
+) -> None:
     """The identifiability gate's v4 contrasts of a converted rig with the phase
     pedestal and motor lines (the bank's gate input) are the exact
     ``v4.expected_periodogram`` of the rig WITHOUT wind at constant speed,
     split into one harmonic (aerodynamic + motor line) and everything else, up
     to the shape table: the gate ignores a payload's wind (given here a loud
-    static one)."""
+    static one). The same holds for a shaft law that is not flat in speed (a
+    fit's: each rotor's shaft at its own speed) and for a standby/cruise pair of
+    different profile widths, blended at the frame's regime weight (an order
+    the narrower regime lacks is the wider one's line alone)."""
     rng = np.random.default_rng(0)
     fit = with_phase_pedestal(convert_prior_v1(bank, 0, seed=SEED), rng, guard=False)
     loud = float(fit["params"]["floor"]["mean_db"]) + 20.0
@@ -207,33 +249,35 @@ def test_the_v4_gate_splits_the_exact_spectrum_into_one_line_and_the_rest(bank: 
     }
     par = V4.V4Params.from_payload(fit)
     assert par.wind is not None and par.motor_orders.tolist()[:2] == [21, 42]
-    speeds = np.array([55.0, 64.0, 81.0, 98.0])
-    pool = ID.frame_pool([np.repeat(speeds[:, None], N_FFT, 1)], n_frames=1, seed=0)
-    ((fast, _),) = ID.line_contrasts(fit, pool)
-    calm = dict(fit, params=dict(fit["params"], wind=None))
-    total = V4.expected_periodogram(calm, speeds, n_fft=N_FFT, sr=SR).mean(axis=0)
-
-    def only(r: int, k: int) -> dict[str, Any]:
-        """``fit`` with harmonic ``(r, k)`` alone: no other line, floor or wind."""
-        out = copy.deepcopy(fit)
-        p = out["params"]
-        aero, motor = (
-            np.asarray(p[key], dtype=np.float64) for key in ("profile_aero_db", "profile_motor_db")
+    if case != "flat_shaft":
+        # the DREGON bench fit's shaft law (a_sigma 2.11, b_lam 4.44) at 4x its scale,
+        # so the shaft visibly widens the high orders and differs between the rotors
+        fit["params"]["shaft"] = dict(
+            fit["params"]["shaft"], eps=0.006, a_sigma=2.11, lam_ref_per_s=52.5, b_lam=4.44
         )
-        keep_aero = np.full_like(aero, SILENT_LINE_DB)
-        keep_aero[r, k - 1] = aero[r, k - 1]
-        keep_motor = np.full_like(motor, SILENT_LINE_DB)
-        j = np.flatnonzero(par.motor_orders == k)
-        keep_motor[r, j] = motor[r, j]
-        p["profile_aero_db"], p["profile_motor_db"] = keep_aero.tolist(), keep_motor.tolist()
-        p["floor"] = dict(p["floor"], mean_db=-10000.0, static_rel=0.0)
-        p["wind"] = None
-        return out
+    speeds = np.array([55.0, 64.0, 81.0, 98.0])
+    track = np.repeat(speeds[:, None], N_FFT, 1)
+    weights: dict[str, tuple[float, dict[str, Any]]] = {"single": (1.0, fit)}
+    if case == "regime_pair":
+        other = with_phase_pedestal(convert_prior_v1(bank, 1, seed=SEED), rng, guard=False)
+        w = float(regime_blend_weight(track, sr=SR)[N_FFT // 2])
+        assert 0.1 < w < 0.9
+        weights = {"standby": (1.0 - w, _narrow(other, 85)), "cruise": (w, fit)}
+    pool = ID.frame_pool([track], n_frames=1, seed=0)
+    gated = weights["single"][1] if "single" in weights else {n: f for n, (_, f) in weights.items()}
+    ((fast, _),) = ID.line_contrasts(gated, pool)
 
+    def expected(f: dict[str, Any]) -> np.ndarray:
+        return V4.expected_periodogram(f, speeds, n_fft=N_FFT, sr=SR).mean(axis=0)
+
+    total = np.sum(
+        [wt * expected(dict(f, params=dict(f["params"], wind=None))) for wt, f in weights.values()],
+        axis=0,
+    )
     err = []
     for r, k in [(1, k) for k in (1, 2, 3, 8, 13, 21, 42, 60, 100)] + [(3, 2), (3, 21), (3, 50)]:
         b = int(np.rint(k * speeds[r] / (SR / N_FFT)))
-        line = V4.expected_periodogram(only(r, k), speeds, n_fft=N_FFT, sr=SR).mean(axis=0)[b]
+        line = sum(wt * expected(_only(f, r, k))[b] for wt, f in weights.values())
         exact = 10.0 * np.log10(total[b] / (total[b] - line))
         err.append(abs(exact - fast[r, 0, k - 1]))
     assert max(err) < 0.05, err

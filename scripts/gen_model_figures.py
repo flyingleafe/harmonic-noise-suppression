@@ -89,7 +89,7 @@ def _plot_tracks(ax, rps, fs, title, ylim=None):
         ax.plot(t, rps[r], lw=0.7, color=COLOURS[r % 4], label=ROTOR_LABELS[r % 4])
     ax.set_title(title, fontsize=9)
     ax.set_xlabel("time (s)")
-    ax.set_ylabel("rotor speed (rev/s)")
+    ax.set_ylabel("rotor speed (Hz)")
     ax.set_xlim(0, t[-1])
     if ylim is not None:
         ax.set_ylim(*ylim)
@@ -130,7 +130,7 @@ def fig_traj_hyperprior(n: int = 4) -> None:
         traj = NL.trajectory("fitted", rig="posterior", seed=101 + i, duration_s=30.0)
         rps = np.asarray(traj["rps"].data)
         hover = float(traj["meta"]["hover_rev_s"])
-        _plot_tracks(ax, rps, RATE_HZ, f"hyperprior drone {i + 1} — hover {hover:.0f} rev/s")
+        _plot_tracks(ax, rps, RATE_HZ, f"hyperprior drone {i + 1} — hover {hover:.0f} Hz")
     axes[0, 1].legend(ncol=4, fontsize=7, loc="upper right")
     fig.tight_layout()
     save(fig, "gen_traj_hyperprior")
@@ -216,7 +216,7 @@ def fig_noise_real_vs_sampled() -> None:
     axes = np.atleast_2d(axes)
     for row, (tag, real_db, samp_db, carrier, dur, fname) in enumerate(panels):
         mean_rps = float(np.mean(carrier))
-        _show_spec(axes[row, 0], real_db, f"{tag} — real, {mean_rps:.0f} rev/s", dur=dur)
+        _show_spec(axes[row, 0], real_db, f"{tag} — real, {mean_rps:.0f} Hz", dur=dur)
         _show_spec(axes[row, 1], samp_db, f"{tag} — fitted model on the same label", dur=dur)
         print(f"  {tag}: support {fname}", flush=True)
     fig.tight_layout()
@@ -250,7 +250,7 @@ def fig_noise_hyperprior(n: int = 4) -> None:
         with contextlib.suppress(Exception):
             name = str(frame["meta"]["entry"])
         label = name or f"entry {i + 1}"
-        title = f"hard bank {label} — hyperprior flight, {hover:.0f} rev/s"
+        title = f"hard bank {label} — hyperprior flight, {hover:.0f} Hz"
         _show_spec(ax, _spec_db(audio), title, dur=len(audio) / SR)
     fig.tight_layout()
     save(fig, "gen_noise_hyperprior")
@@ -607,7 +607,7 @@ def tables() -> None:
         "llll",
         ["symbol", "meaning", "shape", "range / prior"],
         [
-            ["$\\mu$", "per-rotor hover level (rev/s)", "4", "estimated from airborne samples"],
+            ["$\\mu$", "per-rotor hover level (Hz)", "4", "estimated from airborne samples"],
             [
                 "$\\theta$",
                 "rotation of the (collective, yaw) plane (rad)",
@@ -622,7 +622,7 @@ def tables() -> None:
             ],
             [
                 "$\\sigma_{\\mathrm{slow}}$",
-                "slow OU stationary sd per mode (rev/s)",
+                "slow OU stationary sd per mode (Hz)",
                 "4",
                 "LN(1.0, 3.0)",
             ],
@@ -630,7 +630,7 @@ def tables() -> None:
             ["$\\zeta$", "oscillator damping ratio per mode", "4", "$(0.2,3.0)$"],
             [
                 "$\\sigma_{\\mathrm{osc}}$",
-                "oscillator stationary sd per mode (rev/s)",
+                "oscillator stationary sd per mode (Hz)",
                 "4",
                 "LN(1.0, 3.0)",
             ],
@@ -640,14 +640,14 @@ def tables() -> None:
                 "1",
                 "$(10^{-3},1)$, LN(0.05\\,s, 2.0)",
             ],
-            ["$\\sigma_e$", "measurement OU sd, per rotor (rev/s)", "1", "LN(0.1, 3.0)"],
+            ["$\\sigma_e$", "measurement OU sd, per rotor (Hz)", "1", "LN(0.1, 3.0)"],
             [
                 "$s_c$",
-                "sd of the per-flight level common to the rotors (rev/s)",
+                "sd of the per-flight level common to the rotors (Hz)",
                 "1",
                 "moment estimate",
             ],
-            ["$s_r$", "sd of the per-flight per-rotor level (rev/s)", "4", "moment estimate"],
+            ["$s_r$", "sd of the per-flight per-rotor level (Hz)", "4", "moment estimate"],
         ],
         "Parameters of the rotor-speed trajectory model (32 in total; 23 enter the "
         "likelihood, $\\mu$, $s_c$ and $s_r$ are estimated from the airborne samples). "
@@ -721,7 +721,7 @@ def tables() -> None:
             ["\\textbf{total}", "", "\\textbf{349}", "\\textbf{7912}", "", ""],
         ],
         "The seven ingested rigs, on the frozen airborne rule and the common 100\\,Hz "
-        "analysis grid. Hover level spans 78--278\\,rev/s and per-rotor variance a factor of 600.",
+        "analysis grid. Hover level spans 78--278\\,Hz and per-rotor variance a factor of 600.",
         "tab:gen-traj-data",
         star=True,
     )
@@ -797,7 +797,7 @@ def tables() -> None:
             ],
             [
                 "$r_i$",
-                "carrier (rev/s)",
+                "carrier (Hz)",
                 "per rotor",
                 "given: window-refined or telemetry label",
             ],
@@ -984,13 +984,13 @@ def tables() -> None:
                 "13.79",
             ],
         ],
-        "Rotor-speed error by frame regime on the frozen real validation split (rev/s, lower is "
+        "Rotor-speed error by frame regime on the frozen real validation split (Hz, lower is "
         "better), at the checkpoint each arm selected on the real overall error. "
         "\\texttt{real\\_overall} is \\texttt{val/real\\_r3} at that checkpoint, i.e. the "
         "\\emph{all} column of Table~\\ref{tab:nv2}; \\emph{overall} is the same clip-level "
         "metric recomputed by \\texttt{scripts/\\_regime\\_decomp.py} on eight microphones, and "
         "the four regime columns are its per-frame decomposition. Thresholds are stated, not "
-        "fitted (ramp first, at $|\\mathrm{d}\\bar r/\\mathrm{d}t|\\ge20$\\,rev/s$^2$, then zero "
+        "fitted (ramp first, at $|\\mathrm{d}\\bar r/\\mathrm{d}t|\\ge20$\\,Hz/s, then zero "
         "/ standby / cruise by level); frame shares are zero 12.7\\,\\%, standby 11.6\\,\\%, ramp "
         "3.8\\,\\%, cruise 72.0\\,\\%. \\emph{Output spread} is the mean over frames of the "
         "peak-to-peak spread of the four \\emph{predicted} speeds --- how far apart the model "
