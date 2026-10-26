@@ -168,57 +168,83 @@ SECTOR_STYLE = {
 }
 
 
+#: Groups the zoomed row frames: the bank, its sectors and the MD2 neighbourhood
+#: (the DREGON neighbourhood lies ~35 dB away and would flatten the rest).
+ZOOM_GROUPS = (
+    "bank",
+    "uniform",
+    "weak_comb",
+    "strong_motor",
+    "wide_pedestal",
+    "near_md2",
+    "fit_md2",
+)
+
+
+def _draw(ax: Any, xy: np.ndarray, g: np.ndarray) -> None:
+    from scipy.spatial import ConvexHull
+
+    b = g == "bank"
+    ax.scatter(
+        xy[b, 0], xy[b, 1], s=5, c="0.55", alpha=0.4, lw=0, label="training bank (2048 of 16 384)"
+    )
+    for sec, colour in SECTOR_STYLE.items():
+        pts = xy[g == sec]
+        ax.scatter(
+            pts[:, 0], pts[:, 1], s=12, c=colour, lw=0, label=f"sector: {sec.replace('_', ' ')}"
+        )
+        loop = ConvexHull(pts).vertices
+        loop = np.append(loop, loop[0])
+        ax.fill(pts[loop, 0], pts[loop, 1], color=colour, alpha=0.08, lw=0)
+        ax.plot(pts[loop, 0], pts[loop, 1], color=colour, lw=1.4)
+    for fit, marker, colour in (("fit_dregon", "*", "#d62728"), ("fit_md2", "D", "#ff7f0e")):
+        p = xy[g == fit][0]
+        ax.scatter(
+            *p,
+            s=260 if marker == "*" else 90,
+            marker=marker,
+            c=colour,
+            edgecolors="k",
+            linewidths=1.2,
+            zorder=5,
+            label=fit.replace("fit_", "").upper() + " fit",
+        )
+    ax.set_xlabel("MDS 1 (dB)", fontsize=10)
+    ax.set_ylabel("MDS 2 (dB)", fontsize=10)
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.grid(alpha=0.25)
+
+
 def plot(a: argparse.Namespace) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from scipy.spatial import ConvexHull
 
     out = Path(a.out)
     z = np.load(out / "distances.npz")
     g = z["groups"]
     stress = dict(zip(COMPONENTS, z["stress"], strict=True))
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5.2))
-    for ax, comp in zip(axes, COMPONENTS, strict=True):
+    fig, axes = plt.subplots(2, 3, figsize=(16, 10.5))
+    for col, comp in enumerate(COMPONENTS):
         xy = z[f"xy_{comp}"]
-        b = g == "bank"
-        ax.scatter(
-            xy[b, 0],
-            xy[b, 1],
-            s=4,
-            c="0.6",
-            alpha=0.45,
-            lw=0,
-            label="training bank (2048 of 16 384)",
+        _draw(axes[0, col], xy, g)
+        axes[0, col].set_title(
+            f"{comp} distance: metric MDS, stress-1 {stress[comp]:.2f}", fontsize=11
         )
-        for sec, colour in SECTOR_STYLE.items():
-            m = g == sec
-            pts = xy[m]
-            ax.scatter(pts[:, 0], pts[:, 1], s=10, c=colour, lw=0, label=sec.replace("_", " "))
-            hull = ConvexHull(pts)
-            loop = np.append(hull.vertices, hull.vertices[0])
-            ax.fill(pts[loop, 0], pts[loop, 1], color=colour, alpha=0.12, lw=0)
-            ax.plot(pts[loop, 0], pts[loop, 1], color=colour, lw=1.0)
-        for fit, marker, colour in (("fit_dregon", "*", "#d62728"), ("fit_md2", "D", "#ff7f0e")):
-            p = xy[g == fit][0]
-            ax.scatter(
-                *p,
-                s=170 if marker == "*" else 70,
-                marker=marker,
-                c=colour,
-                edgecolors="k",
-                linewidths=1.0,
-                zorder=5,
-                label=fit.replace("fit_", "").upper() + " fit",
-            )
-        ax.set_title(f"{comp} distance — metric MDS, stress-1 {stress[comp]:.2f}", fontsize=10)
-        ax.set_xlabel("MDS 1 (dB)")
-        ax.set_ylabel("MDS 2 (dB)")
-        ax.set_aspect("equal", adjustable="datalim")
-        ax.grid(alpha=0.25)
-    axes[0].legend(fontsize=7, loc="best", markerscale=1.5, framealpha=0.85)
-    fig.tight_layout()
+        _draw(axes[1, col], xy, g)
+        sel = xy[np.isin(g, ZOOM_GROUPS)]
+        lo, hi = sel.min(axis=0), sel.max(axis=0)
+        pad = 0.05 * (hi - lo)
+        axes[1, col].set_xlim(lo[0] - pad[0], hi[0] + pad[0])
+        axes[1, col].set_ylim(lo[1] - pad[1], hi[1] + pad[1])
+        axes[1, col].set_aspect("equal", adjustable="box")
+        axes[1, col].set_title(f"{comp}: zoom on the bank and MD2 (DREGON off-frame)", fontsize=11)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(
+        handles, labels, loc="lower center", ncol=5, fontsize=10, markerscale=1.6, frameon=False
+    )
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
     for ext in ("png", "pdf"):
         fig.savefig(out / f"map.{ext}", dpi=170, bbox_inches="tight")
     print(f"wrote {out / 'map.png'}")

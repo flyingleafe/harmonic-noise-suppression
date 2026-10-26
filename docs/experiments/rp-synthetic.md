@@ -438,7 +438,47 @@ classical solution) of each distance, with Kruskal's stress-1.
 
 **Run.** `scripts/rig_distance_map.py` (`37822beb`) on `uni-cpu`
 (`rig-distance-map-159b00`): 2048 random rigs of the 16 384-rig bank (seed 0),
-both fits and all 192 sector rigs.
+both fits and all 192 sector rigs. Features 79 s on 32 cores; the map is
+`results/rig_distance_v4/map.png` (`--plot`), the numbers
+`results/rig_distance_v4/summary.json`. Stress-1: total 0.16, harmonic 0.17,
+broadband 0.09.
+
+**Results** (dB, full distance, not the map; nearest / median over the 2048
+bank rigs):
+
+| | DREGON fit | MD2 fit |
+|---|---|---|
+| total | 35.5 / 42.2 | 16.2 / 21.8 |
+| harmonic | 17.2 / 22.0 | 7.2 / 12.1 |
+| broadband | 15.0 / 20.2 | 6.1 / 10.0 |
+| own neighbourhood sector, total median | 4.5 | 3.7 |
+
+Fit to fit: total 36.6. Two random bank rigs: median about 10.7 total.
+
+- Both neighbourhoods lie outside the bank's cloud in all three maps; DREGON's
+  about as far from the bank as from MD2, MD2's next to it.
+- Restricted to 40–100 rev/s (the speeds the fits saw; 160 bank rigs), MD2's
+  harmonic distance to the bank drops to 3.4 / 3.9 and its broadband to
+  4.5 / 6.9: MD2's noise is covered where it flies. Its full-range distance
+  comes from 110–150 rev/s (harmonic median 19.2), where its fit extrapolates.
+  DREGON stays 15–22 dB away in every speed range.
+- The axis sectors (weak comb, strong motor, wide pedestal) overlap `uniform`
+  and each other: tails of the prior's coordinates are not distinct spectral
+  regions under this distance.
+- Why DREGON is far: its bench fit's lines stand 36–38 dB over its floor
+  (rotor mean of `10 log10(1 + L/B)` over 30 Hz – 2 kHz at 80 rev/s), against
+  1.3–3.9 for MD2 cruise and 0.6–6.9 for six bank rigs. `near_dregon` is
+  therefore bench-clean audio, much easier than DREGON flight audio.
+- The DREGON and MD2 trajectory laws are alike in an 8 s window: median
+  closest-pair separation 1.8 vs 2.1 rev/s, share of time a pair is within
+  1 rev/s 0.48 vs 0.31. MD2's law spends more windows at low speed (p10 of a
+  window's mean speed 8 vs 16 rev/s; bank 27).
+
+Open: why `near_md2` scores far worse than `uniform` when MD2's spectra are
+typical of the bank. Diagnostic `sector-diag-5f321c` (`uni-gpushort`) scores
+the four pretrained checkpoints (`best_uniform_median`) on the whole
+`rp_real_priorv4` panel with per-frame dumps (`scripts/rp_panel_eval.py
+--dump`).
 
 ## Paper grid (2026-10-23): hard setup approved 2026-10-26
 
