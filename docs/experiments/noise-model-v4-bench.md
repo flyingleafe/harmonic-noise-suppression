@@ -623,6 +623,19 @@ Listen did not run because the render clips (peak 1.38). Reading: the
 gate on five segments does not transfer, and mic-0 LTAS is a weak stand-in
 for spectral similarity.
 
+### Round 7 — the floor at the line bases (2026-10-26)
+
+**Why.** The easy DREGON drone (`c7` + gust wind) has no broadband floor
+between the lines: at 80 rev/s the c7 floor is −134…−136 dB/Hz at
+0.5–1 kHz, the wind fills to ~1.5 kHz and the line skirts above; midway
+between orders it is 4–11 dB under the flight gust fit at 0.76–3 kHz. 30
+orders sit at the W cap (24 Hz). Dmitrii: narrow the pedestals and push the
+floor up to the line bases, then re-measure the rig distance to the wide prior.
+
+**Setup.** Continuations of `c7` (`noise_v4_bench.py resume`) under a phase-
+pedestal width cap `--w-max-hz 6.94` (= c_W; W over it starts just under it)
+and the floor push κ = 10 and κ = 100. One seed, uni.
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,

@@ -389,6 +389,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
         rig,
         seed=int(src["optimiser"]["seed"]),
         kappa=float(src["priors"]["floor_push_kappa"] if args.kappa is None else args.kappa),
+        w_max_hz=float(src["priors"]["w_max_hz"] if args.w_max_hz is None else args.w_max_hz),
         lbfgs_iters=args.lbfgs_iters,
         device=args.device,
         flat_shaft=bool(src["params"]["shaft"]["pinned"]),
@@ -398,7 +399,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     )
     pay = B.payload(model, rec, git=_git())
     pay["optimiser"]["resumed_from"] = str(src_path)
-    path = _next_continuation(args.out, src_path, args.kappa)
+    path = _next_continuation(args.out, src_path, args.kappa, args.w_max_hz)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(pay))
     print(
@@ -410,14 +411,18 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
-def _next_continuation(out: Path, src_path: Path, kappa: float | None = None) -> Path:
+def _next_continuation(
+    out: Path, src_path: Path, kappa: float | None = None, w_max_hz: float | None = None
+) -> Path:
     """``restarts/<stem>__c<n+1>.json`` of a payload ``<stem>[__c<n>]``;
-    ``kappa`` replaces the stem's ``__kappa<K>``."""
+    ``kappa`` replaces the stem's ``__kappa<K>``, ``w_max_hz`` sets its ``__wmax<W>``."""
     m = re.fullmatch(r"(.*?)(?:__c(\d+))?", src_path.stem)
     assert m is not None
     stem = m.group(1)
     if kappa is not None:
         stem = re.sub(r"__kappa[^_]+", f"__kappa{kappa:g}", stem)
+    if w_max_hz is not None:
+        stem = re.sub(r"__wmax[^_]+", "", stem) + f"__wmax{w_max_hz:g}"
     return out / "restarts" / f"{stem}__c{int(m.group(2) or 0) + 1}.json"
 
 
@@ -454,7 +459,14 @@ def cmd_escape(args: argparse.Namespace) -> int:
         )
     else:
         rig = _rig_of_payload(src)
-    model = B.RigModel(rig, device=args.device, seed=seed, kappa=kappa, flat_shaft=flat)
+    model = B.RigModel(
+        rig,
+        device=args.device,
+        seed=seed,
+        kappa=kappa,
+        flat_shaft=flat,
+        w_max_hz=float(src["priors"]["w_max_hz"]),
+    )
     model.load_payload(src)
     f, parts = model.objective()
     # with no round run the payload is the source's state and record
@@ -650,7 +662,11 @@ def cmd_eta(args: argparse.Namespace) -> int:
     else:
         rig = _rig_of_payload(pay)
     model = B.RigModel(
-        rig, device=args.device, kappa=kappa, flat_shaft=bool(pay["params"]["shaft"]["pinned"])
+        rig,
+        device=args.device,
+        kappa=kappa,
+        flat_shaft=bool(pay["params"]["shaft"]["pinned"]),
+        w_max_hz=float(pay["priors"]["w_max_hz"]),
     )
     model.load_payload(pay)
     _write_eta(model, Path(args.fit), args.out, band_hz=args.band_hz, planted=args.planted)
@@ -744,6 +760,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lbfgs-iters", type=int, default=1200, help="loop passes of a quarter")
     p.add_argument("--deadline-min", type=float, default=52.0)
     p.add_argument("--kappa", type=float, default=None, help="default: the source's kappa")
+    p.add_argument(
+        "--w-max-hz", type=float, default=None, help="phase-pedestal width cap (default: source's)"
+    )
     p.add_argument("--device", default="cpu")
     p.add_argument("--threads", type=int, default=8)
     p.set_defaults(func=cmd_resume)

@@ -618,7 +618,7 @@ def phase_pedestal_neg_log_prior(s2P: Tensor, width: Tensor, c_w: Any) -> Tensor
     The priors act on the capped quantities themselves; MAP in the capped
     coordinates (:func:`_capped`) needs no Jacobian, since each ``u -> value``
     is a monotone bijection onto ``(0, cap)`` and both share the optimum."""
-    dd = dict(dtype=s2P.dtype, device=s2P.device)
+    dd: dict[str, Any] = dict(dtype=s2P.dtype, device=s2P.device)
 
     def nrm(x: Tensor, mu: Any, sd: Any) -> Tensor:
         return (0.5 * ((x - torch.as_tensor(mu, **dd)) / torch.as_tensor(sd, **dd)) ** 2).sum()
@@ -652,7 +652,8 @@ class RigModel:
 
     ``seed`` is the restart: 0 starts the pedestal and the shaft at the prior
     medians, ``seed >= 1`` draws them from the priors (spec § Initialisation).
-    ``kappa`` is the floor push (nats per dB of each control value)."""
+    ``kappa`` is the floor push (nats per dB of each control value); ``w_max_hz``
+    the hard cap on the phase-pedestal width (default :data:`.v4_priors.W_MAX_HZ`)."""
 
     def __init__(
         self,
@@ -662,10 +663,12 @@ class RigModel:
         seed: int = 0,
         kappa: float = 0.0,
         flat_shaft: bool = False,
+        w_max_hz: float = PR.W_MAX_HZ,
     ):
         self.rig = rig
         self.seed = int(seed)
         self.kappa = float(kappa)
+        self.w_max_hz = float(w_max_hz)
         #: ``flat_shaft``: one (sigma_nu, lam) for every speed, a_sigma = b_lam = 0
         #: held (gradient zeroed, no prior term)
         self.pinned: tuple[str, ...] = ("a_sigma", "b_lam") if flat_shaft else ()
@@ -764,7 +767,7 @@ class RigModel:
                 u_s2P=_uncapped(
                     np.full(k.size, math.exp(PR.PHASE_SIGMA2_LN[0])), PR.PHASE_SIGMA2_MAX
                 ),
-                u_W=_uncapped(HALF_NORMAL_MEDIAN * c_w, PR.W_MAX_HZ),
+                u_W=_uncapped(HALF_NORMAL_MEDIAN * c_w, self.w_max_hz),
                 log_eps=np.asarray(math.log(HALF_NORMAL_MEDIAN * PR.EPS_HALF_NORMAL)),
                 a_sigma=np.asarray(PR.A_SIGMA[0]),
                 log_lam_ref=np.asarray(PR.LAM_REF_LN[0]),
@@ -788,12 +791,12 @@ class RigModel:
         ls2P = truncated(
             PR.PHASE_SIGMA2_LN[0], PR.PHASE_SIGMA2_LN[1], math.log(PR.PHASE_SIGMA2_MAX)
         )
-        W = truncated(0.0, c_w, PR.W_MAX_HZ, fold=True)
+        W = truncated(0.0, c_w, self.w_max_hz, fold=True)
         return dict(
             u_amp=_uncapped(np.exp(ls2A), self.cap),
             log_gA=mu_g + PR.GAMMA_AMP_LOG_SD * rng.standard_normal(k.size),
             u_s2P=_uncapped(np.exp(ls2P), PR.PHASE_SIGMA2_MAX),
-            u_W=_uncapped(np.maximum(W, 1e-3), PR.W_MAX_HZ),
+            u_W=_uncapped(np.maximum(W, 1e-3), self.w_max_hz),
             log_eps=np.asarray(math.log(abs(PR.EPS_HALF_NORMAL * rng.standard_normal()))),
             a_sigma=np.asarray(PR.A_SIGMA[0] + PR.A_SIGMA[1] * rng.standard_normal()),
             log_lam_ref=np.asarray(PR.LAM_REF_LN[0] + PR.LAM_REF_LN[1] * rng.standard_normal()),
@@ -812,7 +815,7 @@ class RigModel:
         R, mo = rig.n_rotors, rig.motor_orders
         s2A = _capped_np(dyn["u_amp"], self.cap)
         gA, s2P = np.exp(dyn["log_gA"]), _capped_np(dyn["u_s2P"], PR.PHASE_SIGMA2_MAX)
-        gP = _gamma_from_width(_capped_np(dyn["u_W"], PR.W_MAX_HZ), s2P)
+        gP = _gamma_from_width(_capped_np(dyn["u_W"], self.w_max_hz), s2P)
         num, cnt = np.zeros((R, K)), np.zeros((R, K))
         phis = []
         for j, s in enumerate(rig.settings):
@@ -879,8 +882,8 @@ class RigModel:
         return _gamma_from_width(self.width_phase(), self.s2P())
 
     def width_phase(self) -> Tensor:
-        """``W_phi`` per order (Hz, eq-width), capped at :data:`.v4_priors.W_MAX_HZ`."""
-        return _capped(self.params["u_W"], math.log(PR.W_MAX_HZ))
+        """``W_phi`` per order (Hz, eq-width), capped at ``w_max_hz``."""
+        return _capped(self.params["u_W"], math.log(self.w_max_hz))
 
     def shaft(self, j: int) -> tuple[Tensor, Tensor]:
         """``(sigma_nu rad/s, lam 1/s)`` of recording ``j`` from the rig's
@@ -1124,9 +1127,9 @@ class RigModel:
                     a(ped["width_phase_hz"])[:K]
                     if "width_phase_hz" in ped
                     else PR.pedestal_width(a(ped["gamma_phase_hz"]), a(ped["sigma2_phase"]))[:K],
-                    PR.W_MAX_HZ,
+                    self.w_max_hz,
                 ),
-                PR.W_MAX_HZ,
+                self.w_max_hz,
             ),
             log_eps=math.log(sh["eps"]),
             a_sigma=sh["a_sigma"],
@@ -1237,7 +1240,7 @@ def _apply_hold(model: RigModel, ev: dict[str, Any]) -> dict[str, list[int]]:
     hs, hw = np.asarray(ev["hold_log_s2P"]), np.asarray(ev["hold_log_W"])
     p = model.params
     u_s2P_med = _uncapped(np.exp(PR.PHASE_SIGMA2_LN[0]), PR.PHASE_SIGMA2_MAX)
-    u_W_med = _uncapped(HALF_NORMAL_MEDIAN * model.c_w, PR.W_MAX_HZ)
+    u_W_med = _uncapped(HALF_NORMAL_MEDIAN * model.c_w, model.w_max_hz)
     with torch.no_grad():
         us = p["u_s2P"].detach().cpu().numpy().copy()
         us[hs] = u_s2P_med
@@ -1375,6 +1378,7 @@ def fit_rig(
     lbfgs_iters: int = 1200,
     device: Any = "cpu",
     flat_shaft: bool = False,
+    w_max_hz: float = PR.W_MAX_HZ,
     start: dict[str, Any] | None = None,
     resume: bool = False,
     model: RigModel | None = None,
@@ -1403,7 +1407,9 @@ def fit_rig(
     tag = f"[rig s{seed}{' flat' if flat_shaft else ''}]"
     t_all = time.perf_counter()
     if model is None:
-        model = RigModel(rig, device=device, seed=seed, kappa=kappa, flat_shaft=flat_shaft)
+        model = RigModel(
+            rig, device=device, seed=seed, kappa=kappa, flat_shaft=flat_shaft, w_max_hz=w_max_hz
+        )
         if start is not None:
             model.load_payload(start)
     elif not resume:
@@ -1596,7 +1602,7 @@ def _priors_block(model: RigModel) -> dict[str, Any]:
         phase_sigma2_ln=list(PR.PHASE_SIGMA2_LN),
         phase_sigma2_max=PR.PHASE_SIGMA2_MAX,
         c_w=PR.C_W,
-        w_max_hz=PR.W_MAX_HZ,
+        w_max_hz=model.w_max_hz,
         eps_half_normal=PR.EPS_HALF_NORMAL,
         a_sigma=list(PR.A_SIGMA),
         b_lam=list(PR.B_LAM),
