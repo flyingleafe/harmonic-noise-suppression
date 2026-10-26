@@ -486,6 +486,30 @@ HarmoF0-L2, 120 + 60 steps, rounds of 20):
 | HarmoF0-L2 | `rp-harmof0-l2-priorv4-e2322c` | `rp-harmof0-l2-priorv4-ft-969c0d` |
 | Conv+BiGRU | `rp-scv2-priorv4-5a5364` | `rp-scv2-priorv4-ft-cd0055` |
 
+**Results so far (2026-10-26, W&B).** Each score is the raw value at the
+round with the lowest 5-round median of the selection score, as in
+`paper-real-protocol.md`. All values are PIT-MAE in Hz on `val/real_macro`
+unless the column says `uniform`.
+
+| model | state | synth-selected step: `uniform` / `real_macro` | real-selected step: `real_macro` | hard, tuned (step of 20 000) | real-only reference |
+|---|---|---|---|---|---|
+| HRSPNet | running, step 60 000 | 50 500: 1.25 / 5.81 | 36 000: 5.57 | held | 2.52 |
+| HPPNet-L2 | running, step 55 500 | 52 500: 2.61 / 7.98 | 40 000: 6.44 | held | 3.39 |
+| HarmoF0-L2 | saturation stop at 68 500 | 53 500: 4.73 / 12.28 | 36 500: 9.84 | 2.66 (19 000) | 2.62 |
+| Conv+BiGRU | saturation stop at 73 500 | 71 500: 3.28 / 9.89 | 45 000: 8.62 | 3.18 (3000) | 2.65 |
+
+- The fine-tuning started from the loop's `best_uniform_median.ckpt`. For
+  Conv+BiGRU, that checkpoint is from step 58 500, not 71 500: the median at
+  71 500 is lower by only 0.001, which the loop does not count as an
+  improvement.
+- Neither finished fine-tune beats its real-only reference. HarmoF0-L2 ends
+  level with it (2.66 against 2.62). Conv+BiGRU is worse (3.18 against 2.65);
+  its best round comes at step 3000 and no later round improves on it.
+- The fine-tunes are validated on the real split only, so they have no
+  `uniform` score yet.
+- The same numbers are in the paper's Table IX. The two running rows are
+  marked `\prov` there.
+
 ## Conclusion
 
 Pending.
