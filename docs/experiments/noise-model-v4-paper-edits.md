@@ -158,7 +158,14 @@ deviation of 1.516 dB (bar 1.332 dB, earlier fit 1.541 dB).
 % source: omnirun nv4-score-md2-r6c3-449bbb parity/arm_michaels_v4.json
 ```
 
-DREGON: the bench lines in flight fail the gate (best converged flight stage
-15.8\revps{} against the bar 2.188 and the earlier fit's 1.680). Do not write a
-DREGON score sentence until a DREGON fit passes; the reasons are in
-`docs/explainers/noise-model-v4-dregon-gap.qmd` § 5.
+DREGON (accepted 2026-10-26: the bench fit plus the fitted gust wind, no flight
+refit; it does not meet the earlier fit's numbers, so the sentence says so):
+
+```latex
+On DREGON the flight model is the bench fit with the flight wind added and nothing refitted.
+Its spectrograms keep the thin lines of the bench recordings, which every flight refit we tried
+washed out, but the trackers read it less well than the earlier fit: PIT 2.63\revps{} against
+1.68 (bar 2.188) and a long-term-spectrum deviation of 3.94 dB against 2.38 dB.
+% source: omnirun nv4-score-benchwind-17c3b8 parity/arm_dregon_v4.json;
+% results/noise_v4/flight/benchwind/dregon__c7__benchwind_gust.json
+```

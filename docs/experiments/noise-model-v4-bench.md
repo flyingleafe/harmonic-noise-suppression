@@ -1,6 +1,6 @@
 # Noise model v4 — the bench fit on the DREGON single-rotor ladders
 
-**Status:** in progress (2026-10-19 –). Model and procedure:
+**Status:** closed 2026-10-26 (opened 2026-10-19). Model and procedure:
 `docs/explainers/noise-model-v4.qmd` (Fit procedure A). Code:
 `src/experiments/noise_model/bench_v4.py`, driver `scripts/noise_v4_bench.py`.
 
@@ -697,7 +697,10 @@ Bench c7 plus the fitted SC gust wind, no other flight change
 (`results/noise_v4/flight/benchwind/`, job `nv4-pit-benchwind-21131c`):
 HRSPNet 1.82 on the scoring windows (nv3r4 1.105, bench alone 2.10, R2
 1.86), 1.81 on the wide pool; HPPNet 2.63 (bar 1.680), 2.04 wide. The two
-wind-level variants score the same.
+wind-level variants score the same. Official scorer (`nv4-score-benchwind-17c3b8`,
+`results/noise_v4/score/benchwind/`): PIT 2.627 (bar 1.680), LTAS 3.939
+(bar 2.384). Listen did not run (the render peaks at 1.45 and would clip).
+Accepted as the DREGON flight result (Dmitrii, 2026-10-26).
 
 ## Conclusion
 
@@ -709,5 +712,10 @@ wind-level variants score the same.
 - **MD2 flight.** The converged per-regime pair beats nv3r4 on parity
   (0.481 vs 0.515) and on every regime and cruise LTAS; Listen is on par
   within render-seed noise.
-- **DREGON flight.** Not reached: every converged stage on the frozen bench
-  lines fails the PIT bar (best 15.8 vs 1.680; LTAS 2.384 equal).
+- **DREGON flight.** Accepted result (Dmitrii, 2026-10-26): the bench fit
+  plus the fitted SC gust wind, no flight refit
+  (`results/noise_v4/flight/benchwind/dregon__c7__benchwind_gust.json`). It
+  does not meet the nv3r4 bars: PIT 2.627 vs 1.680 (HPPNet), 1.82 vs 1.105
+  (HRSPNet), LTAS 3.94 vs 2.38. No flight refit (alternating, k ≤ 10,
+  nv3r4-like, level and per-rotor trims) beat it on HRSPNet by more than
+  0.15, and all of them wash out the lines the bench fit keeps.
