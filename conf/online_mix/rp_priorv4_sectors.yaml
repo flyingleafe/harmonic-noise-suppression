@@ -25,7 +25,7 @@ sources:
       weight: 1.0
       n_mics: 8
       n_rotors: 4
-      preset_bank: dload:validation-sectors-v4/uniform.npz
+      preset_bank: dload:validation-sectors-v4@9dfde9ea9887fb4e83d07a73c167a63b52d3727febb1e8ad4bbebe21ed745c1a/uniform.npz
       entry_order: cycle
       render_reuse: 1
       rps_scale_range: [1.0, 1.0]

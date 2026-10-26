@@ -1,0 +1,154 @@
+# rp_real_combdiv.yaml (the real panel + the static_comb panel) plus the SIX
+# SYNTHETIC VALIDATION SECTORS of the wide-prior (priorv4) runs
+# (docs/experiments/rp-synthetic.md § "Validation sectors"; Dmitrii,
+# 2026-10-25/26). Each sector is 32 rigs of the pinned dataset
+# `validation-sectors-v4` (scripts/validation_sectors_v4_build.py, rig seed
+# 20261026; the training bank's is 20261024), rendered once each through
+# conf/online_mix/rp_priorv4_sectors.yaml (the training stream without the
+# silence arm, rigs in bank order): 32 clips x 8 mics = 256 mono items, 8 s,
+# augmentations stripped, every clip its own flight and render. Panel seeds
+# 771101-771106 (static_comb's 771001; the training stream's 20261027).
+#
+#   uniform        gated wide-prior draws, unselected
+#   weak_comb      the 32 lowest comb levels (v1 k2_over_floor_db) of 1024 gated draws
+#   strong_motor   the 32 strongest motor families (v1 motor_boost_db) of the same
+#   wide_pedestal  the 32 widest lines (power-weighted phase-pedestal width) of the same
+#   near_dregon    gated prior-shaped perturbations of the DREGON bench fit,
+#                  flown on DREGON's fitted trajectory law
+#   near_md2       the same around the MD2 standby/cruise flight pair, on michaels'
+#
+# STOP AND SELECTION: `uniform` is the only synthetic view that stops the run
+# or selects a checkpoint (Dmitrii): the run continues while the 5-round median
+# of real_macro OR of uniform still improves; the synthetic-selected
+# checkpoint is best_uniform_median.ckpt, the one the fine-tuning starts from.
+# Every other view is reported and keeps its best checkpoints.
+defaults:
+  - rp_real_combdiv
+  - _self_
+
+control: [real_macro, uniform]
+
+datasets:
+  uniform:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/rp_priorv4_sectors.yaml
+      preset_bank: dload:validation-sectors-v4@9dfde9ea9887fb4e83d07a73c167a63b52d3727febb1e8ad4bbebe21ed745c1a/uniform.npz
+      n: 256
+      base_seed: 771101
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      render_reuse: 1
+      meta: {dataset: uniform, source_type: speech}
+    iterable: false
+  weak_comb:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/rp_priorv4_sectors.yaml
+      preset_bank: dload:validation-sectors-v4@9dfde9ea9887fb4e83d07a73c167a63b52d3727febb1e8ad4bbebe21ed745c1a/weak_comb.npz
+      n: 256
+      base_seed: 771102
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      render_reuse: 1
+      meta: {dataset: weak_comb, source_type: speech}
+    iterable: false
+  strong_motor:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/rp_priorv4_sectors.yaml
+      preset_bank: dload:validation-sectors-v4@9dfde9ea9887fb4e83d07a73c167a63b52d3727febb1e8ad4bbebe21ed745c1a/strong_motor.npz
+      n: 256
+      base_seed: 771103
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      render_reuse: 1
+      meta: {dataset: strong_motor, source_type: speech}
+    iterable: false
+  wide_pedestal:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/rp_priorv4_sectors.yaml
+      preset_bank: dload:validation-sectors-v4@9dfde9ea9887fb4e83d07a73c167a63b52d3727febb1e8ad4bbebe21ed745c1a/wide_pedestal.npz
+      n: 256
+      base_seed: 771104
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      render_reuse: 1
+      meta: {dataset: wide_pedestal, source_type: speech}
+    iterable: false
+  near_dregon:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/rp_priorv4_sectors.yaml
+      preset_bank: dload:validation-sectors-v4@9dfde9ea9887fb4e83d07a73c167a63b52d3727febb1e8ad4bbebe21ed745c1a/near_dregon.json
+      n: 256
+      base_seed: 771105
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      render_reuse: 1
+      meta: {dataset: near_dregon, source_type: speech}
+    iterable: false
+  near_md2:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/rp_priorv4_sectors.yaml
+      preset_bank: dload:validation-sectors-v4@9dfde9ea9887fb4e83d07a73c167a63b52d3727febb1e8ad4bbebe21ed745c1a/near_md2.json
+      n: 256
+      base_seed: 771106
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      render_reuse: 1
+      meta: {dataset: near_md2, source_type: speech}
+    iterable: false
+
+views:
+  uniform: {where: {dataset: uniform}}
+  weak_comb: {where: {dataset: weak_comb}}
+  strong_motor: {where: {dataset: strong_motor}}
+  wide_pedestal: {where: {dataset: wide_pedestal}}
+  near_dregon: {where: {dataset: near_dregon}}
+  near_md2: {where: {dataset: near_md2}}
+
+primary:
+  - dregon
+  - md2
+  - real_macro
+  - dregon_nosource
+  - dregon_source
+  - md2_nosource
+  - md2_source
+  - dregon_zero
+  - dregon_standby
+  - dregon_ramp
+  - dregon_cruise
+  - md2_zero
+  - md2_standby
+  - md2_ramp
+  - md2_cruise
+  - real
+  - real_nosource
+  - real_source
+  - real_zero
+  - real_standby
+  - real_ramp
+  - real_cruise
+  - static_comb
+  - uniform
+  - weak_comb
+  - strong_motor
+  - wide_pedestal
+  - near_dregon
+  - near_md2

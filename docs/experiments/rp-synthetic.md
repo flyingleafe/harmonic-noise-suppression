@@ -302,9 +302,117 @@ the pedestal. Published as `prior-v4-banks@2ee5131e`
 (`prior_v4_n16384.npz`, 23.3 MiB, pinned); report
 `results/prior_rigs/prior_v4_n16384.report.json`.
 
-## Paper grid (2026-10-23): pending approval
+## Validation sectors (2026-10-26)
 
-Nothing below is submitted until Dmitrii approves the grid. These runs fill
+The priorv4 runs are scored on six synthetic sectors next to the real panel
+and `static_comb` (`conf/validation/rp_real_priorv4.yaml`). Dmitrii decided
+their content on 2026-10-25/26:
+
+- the distance to a fit is perceptual;
+- the axis sectors are weak comb, strong motor family and wide phase pedestal;
+- the static-comb panel is reused;
+- DREGON is the bench fit c7;
+- MD2 is the per-regime pair r6c1 / r6c3;
+- the neighbourhoods are drawn by prior-shaped perturbation.
+
+Code: `experiments.noise_model.sectors_v4` and
+`scripts/validation_sectors_v4_build.py`.
+
+**Distance.** The distance between two rigs is computed as follows:
+
+- take the mic-mean `v4.expected_periodogram` without wind (2048-point Hann
+  at 16 kHz);
+- evaluate it at 40, 60 and 80 Hz, with the four rotors at speed −3, −1, +1
+  and +3 Hz;
+- pass it through a 64-band mel filterbank (30 Hz–7.9 kHz) and take dB;
+- remove the mean, so level does not count, because the stream normalises
+  level;
+- the distance is the RMS of the dB difference over bands and speeds.
+
+A standby/cruise pair is power-blended by `regime_blend_weight`. The DREGON
+and MD2 fits are 4.83 dB apart. Fresh prior draws give no neighbourhood:
+the nearest of 1200 is 3.0 dB away and the 32nd nearest 4.0–4.1 dB, so the
+neighbourhoods are perturbations of the fits.
+
+**Prior-shaped perturbation** (`sectors_v4.perturb_fit`). The fit's own
+parameters move by the wide prior's spreads times one strength *s*. Each rig
+is one draw, shared by the two regimes of a pair. What moves:
+
+- the comb against the floor: k2 (all orders), the decay slope, the
+  blade-pass boost, the odd-order penalty and the motor boost;
+- a level per rotor and a scatter per line;
+- `alpha_aero`, `alpha_motor` (kept within ±4), the floor exponent `b0`, the
+  static share and the 14 floor-shape weights;
+- the amplitude σ² per order, and the phase σ² and half-width per order,
+  within their caps.
+
+The shaft, the mic response, the motor orders and the floor level stay the
+fit's. The fit's wind is dropped; the stream adds `wind_sc` per clip, as for
+the bank.
+
+**Calibration.** For each fit, *s* is set so that the median distance to the
+fit is 1/3 of the 4.83 dB gap (1.61 dB). With 32 draws per rung:
+
+| strength | 0.1 | 0.2 | 0.35 | 0.5 | 0.75 | 1.0 |
+|---|---:|---:|---:|---:|---:|---:|
+| DREGON median (dB) | 0.42 | 0.85 | 1.49 | 2.13 | 3.21 | 4.39 |
+| MD2 median (dB) | 0.43 | 0.85 | 1.49 | 2.14 | 3.34 | 4.48 |
+
+This gives *s* = 0.375 (DREGON) and 0.374 (MD2).
+
+**Gate.** The identifiability gate now handles a shaft law that depends on
+speed: each rotor's shaft is evaluated at its own frame speed, with one kernel
+table per rotor and frame. It also handles a standby/cruise pair of v4
+payloads, blended per frame. `test_prior_v4.py` checks both against the exact
+expected periodogram (within 0.05 dB). On the bank's trajectory pool, both
+fits pass the gate.
+
+**Build.** omnirun `val-sectors-v4-36a4a4` (`uni-cpu`, 32 workers, 420 s,
+code at `3dbdc5c0`):
+
+- rig seed 20261026 (the training bank's is 20261024);
+- the bank's gate rule and trajectory pool;
+- 32 rigs per sector;
+- the 1024-rig axis pool kept 1024 of 2049 gated prior draws;
+- the DREGON neighbourhood kept 32 of 33 draws, the MD2 neighbourhood 32 of
+  113 (rejected on rotors 1 and 3: 35 and 40 draws).
+
+Published as `validation-sectors-v4@9dfde9ea` (pinned). Its `report.json`
+holds the per-sector statistics. Medians, with p10–p90 in brackets:
+
+| sector | rule | k2 over floor (dB) | motor boost (dB) | pedestal width (Hz) | to DREGON (dB) | to MD2 (dB) |
+|---|---|---|---|---|---|---|
+| axis pool (1024) | gated prior draws | 22.4 [14.0, 32.0] | 6.2 [1.7, 11.2] | 0.37 [0.04, 4.4] | 7.0 [4.7, 10.5] | 7.5 [4.9, 13.2] |
+| `uniform` | 32 at random | 24.7 [17.7, 32.4] | 8.3 [3.7, 12.8] | 0.15 [0.03, 1.3] | 8.0 [5.0, 11.0] | 10.1 [5.9, 14.4] |
+| `weak_comb` | lowest k2 | 6.3 [3.6, 8.6] | 5.4 [0.8, 11.3] | 3.2 [0.17, 7.3] | 7.8 [5.4, 9.3] | 7.3 [5.8, 10.7] |
+| `strong_motor` | highest motor boost | 23.4 [16.4, 29.5] | 13.6 [13.1, 15.4] | 0.16 [0.03, 2.5] | 8.1 [5.1, 10.4] | 10.5 [5.7, 13.1] |
+| `wide_pedestal` | widest lines | 14.6 [6.1, 25.9] | 5.8 [2.0, 8.5] | 7.3 [6.6, 9.9] | 9.8 [8.0, 12.1] | 7.8 [6.0, 9.6] |
+| `near_dregon` | perturbed bench fit | – | – | – | 1.65 [1.04, 2.38] | 5.0 [4.7, 5.3] |
+| `near_md2` | perturbed MD2 pair | – | – | – | 5.0 [4.4, 5.5] | 1.64 [1.16, 2.22] |
+
+The pedestal width is the power-weighted (1 − e^{−σ²})·W of the aerodynamic
+orders at 80 Hz. The phase pedestal is drawn independently per order, so no
+single law coordinate measures it. Every neighbourhood rig is nearer its own
+fit than the other fit: the largest own-fit distance is 3.6 / 3.0 dB, and the
+smallest other-fit distance is 4.5 / 3.3 dB.
+
+**Panels.** Each sector is rendered through
+`conf/online_mix/rp_priorv4_sectors.yaml`:
+
+- the training stream without its silence arm;
+- `entry_order: cycle`, so 32 clips × 8 mics = 256 items render each rig once;
+- 8 s clips, augmentations off, every clip its own flight;
+- panel seeds 771101–771106;
+- a neighbourhood rig flies its own drone's fitted trajectory law
+  (`traj_rig` dregon / michaels).
+
+The stop waits on `real_macro` and `uniform`. `uniform` alone selects the
+synthetic checkpoint (`best_uniform_median`), which seeds the fine-tuning.
+
+## Paper grid (2026-10-23): hard setup approved 2026-10-26
+
+Dmitrii approved the hard setup for the four models on 2026-10-26. The rest of
+the grid waits for approval. These runs fill
 the `\wip` cells of the pretraining table and the simplistic-synthetic
 ablation in the rewritten Section VI of the paper. Recipe (Dmitrii,
 2026-10-23):
@@ -323,9 +431,9 @@ Models: HRSPNet (`hppnet_pyrseplstm_k64`), HarmoF0-L2, Conv+BiGRU
 
 | paper cell | runs | stream | blocked on |
 |---|---|---|---|
-| pretraining table, easy | 4 (one per model) | drones drawn around the DREGON / MD2 fits, each flown on its own drone's trajectory law | (a), (b), (d) |
-| pretraining table, hard | 4 | drones from the revised wide prior, flown on the constrained hyperprior (`hover_range` [35, 95], `rotor_sep` [2, 15], shrink 0.57) | (c), (d) |
-| pretraining table, tuned | 8 | `rp_all` without label augmentation | the 8 runs above |
+| pretraining table, easy | 4 (one per model) | drones drawn around the DREGON / MD2 fits, each flown on its own drone's trajectory law | (a), (b) |
+| pretraining table, hard | 4: `rp_{pyrseplstm_k64,harmof0_l2,scv2,hppnet_l2}_priorv4` | `rp_priorv4`: the wide prior in v4 (`prior-v4-banks@2ee5131e`), flown on the constrained hyperprior (`hover_range` [35, 95], `rotor_sep` [2, 15], shrink 0.57); validation `rp_real_priorv4` | approved 2026-10-26; submitted (§ "Hard setup runs") |
+| pretraining table, tuned | 8: the hard four are `rp_*_priorv4_ft` (`checkpoint: best:uniform@rp_*_priorv4`) | `rp_all` without label augmentation | the hard four: queued after their pretraining (`--after`) |
 | ablation table, static comb, tuned | 1 (HRSPNet) | `rp_all` without label augmentation, from combdiv's synthetic-selected checkpoint (step 97 000) | nothing; can start on approval |
 | ablation table, stochastic comb | 2 (HRSPNet: alone, tuned) | a stochastic-comb stream under this protocol | (e) |
 
@@ -337,17 +445,15 @@ Open decisions:
   converged stage 15.8 rev/s against the bar 2.188;
   `noise-model-v4-bench.md`, round 6). Without it, the DREGON half of the
   easy setup has no fitted flight drone.
-- **(c)** Resolved 2026-10-24: the hard setup's wide prior is the prior_v1
-  bank converted to v4 (§ "The prior_v1 rigs in noise model v4"); the
-  paper's wide-prior table still needs rewriting from those laws.
-- **(d)** The synthetic validation set: "sectors" of the wide prior, among
-  them the fit neighbourhoods and one sector close to the static comb. The
-  split is undecided ("we need to think about it").
+- **(c)** Resolved 2026-10-25: the hard setup's wide prior is drawn fresh
+  from the prior_v1 laws in v4 (rules `prior_v4/4`, `prior-v4-banks@2ee5131e`);
+  the paper's wide-prior table still needs rewriting from those laws.
+- **(d)** Resolved 2026-10-26: § "Validation sectors".
 - **(e)** The stochastic comb under the rp protocol is not defined.
 
 Cost, from combdiv: a synthetic-only run hit the 100 000-step cap after
 17.4 h on a vast A100-80. Per draw, fitted-model renders cost more than combs
-(v2: 1.97 s per 2 s × 8 mics; v4 not measured). A fine-tuning run is 20 000
+(v2: 1.97 s per 2 s × 8 mics; v4 prior rigs 0.026 s per 2 s draw at 40 reuses, prior_v1's 0.027, one thread, 2026-10-26). A fine-tuning run is 20 000
 steps, 1–3 GPU-h at the real runs' rate (HarmoF0-L2 1.4 h per 25 000 steps,
 HRSPNet 4.1 h per 32 000). In total: 19 training runs, 8 of them
 synthetic-only at up to ~17 h each.

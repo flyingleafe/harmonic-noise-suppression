@@ -1,0 +1,24 @@
+# @package _global_
+# Real-data FINE-TUNING of rp_hppnet_l2_priorv4 (paper grid, "tuned" row; Dmitrii, 2026-10-23): warm-started from its synthetic-selected checkpoint (best_uniform_median), trained on rp_all without label augmentation with a fresh AdamW, max LR 1e-4, 1 000 warm-up steps and a cosine over 20 000 steps; validated on the real panel. Batch doc: docs/experiments/rp-synthetic.md.
+defaults:
+  - override /data: rp_real
+  - override /model: hppnet_l2
+  - override /loss: salience_layers_rp
+  - override /metrics: salience_layers_rp
+  - override /validation: rp_real
+  - _self_
+
+experiment_name: rp_hppnet_l2_priorv4_ft
+checkpoint: best:uniform@rp_hppnet_l2_priorv4
+batch_size: 128  # as rp_hppnet_l2_all: no accumulation, A100-80
+grad_accum_steps: 1
+num_workers: 6
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_all.yaml
+optim:
+  lr: 1.0e-4
+  warmup_steps: 1000
+validation:
+  max_optimizer_steps: 20000  # 40 rounds: the cosine's length and the cap (min_rounds 50 never lets the saturation stop fire first)

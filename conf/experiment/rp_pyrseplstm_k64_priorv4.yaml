@@ -1,0 +1,20 @@
+# @package _global_
+# rp_pyrseplstm_k64_all with the real noise replaced by the WIDE PRIOR in noise model v4 (the paper grid's hard setup), synthesized online (conf/online_mix/rp_priorv4.yaml), validated on the real panel, static_comb and the six synthetic sectors (conf/validation/rp_real_priorv4.yaml). Batch doc: docs/experiments/rp-synthetic.md.
+defaults:
+  - override /data: rp_real
+  - override /model: hppnet_pyrseplstm_k64
+  - override /loss: salience_layers_rp
+  - override /metrics: salience_layers_rp
+  - override /validation: rp_real_priorv4
+  - _self_
+
+experiment_name: rp_pyrseplstm_k64_priorv4
+batch_size: 128  # as rp_pyrseplstm_k64_all: no accumulation, A100-80
+grad_accum_steps: 1
+num_workers: 12  # the v4 renders cost 0.026 CPU-s per 2 s draw (prior_v1's 0.027; prior_v1 ran 12)
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_priorv4.yaml
+optim:
+  lr: 1.0e-3  # as rp_pyrseplstm_k64_all

@@ -66,4 +66,5 @@ prior-v4-banks = "2ee5131ebe73d74b580798fa042e5e29f6bbdb0acf49f96f4f4159aea8df26
 recording_with_motor_speed = "5b7eab554710c3d83667085c8f5ca256322ec10e2cffae6002443f63b05257b4"
 rp-real-valid-v1 = "a73562cdd610a4841d80598e3931339c7f5366b6e86fe1dc0598212a7806a92f"
 rps-traj-fits = "6bd4542b4581eedef69ba6cfbe0b771682087c54a2bbbc87ddc3331a57e8180a"
+validation-sectors-v4 = "9dfde9ea9887fb4e83d07a73c167a63b52d3727febb1e8ad4bbebe21ed745c1a"
 zenodo_drone_noises = "a5d0ed89df141780502eef5084bb722ec2d38b4418ff7d0a573dd26f2eea28c6"
