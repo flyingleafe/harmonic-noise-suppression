@@ -1,0 +1,60 @@
+{
+ "tracker": {
+  "experiment": "hppnet_l2_r2_s0",
+  "ckpt": "best",
+  "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+  "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/36c0f0437a35/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
+  "bytes": 2746881,
+  "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
+ },
+ "set": "tuning",
+ "seeds": [
+  2001
+ ],
+ "rows": [
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727403.2050455,
+   "pit": {
+    "real": 0.761534550138141,
+    "bench_c7": 1.8253841252030258
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903911.3944898,
+   "pit": {
+    "real": 0.6732499698574561,
+    "bench_c7": 2.299007849141096
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903584.348311,
+   "pit": {
+    "real": 1.0332323331228634,
+    "bench_c7": 3.4328778603494685
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905731.952559,
+   "pit": {
+    "real": 0.8264977798237672,
+    "bench_c7": 2.2087433897894906
+   }
+  },
+  {
+   "window": "spinning_nosource_room2",
+   "start_s": 1511905206.978012,
+   "pit": {
+    "real": 1.3326907842639515,
+    "bench_c7": 2.0182259153193614
+   }
+  }
+ ],
+ "mean": {
+  "real": 0.9254410834412358,
+  "bench_c7": 2.3568478279604888
+ }
+}

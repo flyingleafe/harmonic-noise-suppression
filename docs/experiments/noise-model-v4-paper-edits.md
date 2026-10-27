@@ -120,8 +120,14 @@ floor fails its 1 dB rule where the truth floor lies far under the lines. The fi
 minimum: one direction of curvature $-0.28$ is left, along which no step lowers the
 objective. The likelihood weight of the bench fit by block jackknife is
 $\eta = 1.5\times10^{-3}$ at 200 Hz blocks and $1.3\times10^{-3}$ with one block per recording.
+On the planted twin, where the model is exact, $\eta = 3.3\times10^{-2}$ and $3.1\times10^{-2}$.
+The Whittle likelihood is therefore overconfident by a factor of about 30 even without model
+error, and the model error of the real recordings adds a factor of about 22. The twin is a minimum
+in the same sense: 6 directions of curvature down to $-0.31$ are left, along which the best step
+gains less than the fit's convergence tolerance ($10^{-4}$ nats per cell).
 % source: results/noise_v4/bench/planted/dregon__kappa0__r5__s2__c6__kappa0__r1.json;
-% results/noise_v4/bench/eta/dregon__kappa0__r5__s2__c7.json
+% results/noise_v4/bench/eta/dregon__kappa0__r5__s2__c7.json;
+% results/noise_v4/bench/eta/dregon__kappa0__r5__s2__c6__kappa0__r1.fit__c3.json
 ```
 
 ## 8. Flight fit of the Matrice 100 (after the "Flight fit." paragraph, ≈ l. 1645)
@@ -152,7 +158,14 @@ deviation of 1.516 dB (bar 1.332 dB, earlier fit 1.541 dB).
 % source: omnirun nv4-score-md2-r6c3-449bbb parity/arm_michaels_v4.json
 ```
 
-DREGON: the bench lines in flight fail the gate (best converged flight stage
-15.8\revps{} against the bar 2.188 and the earlier fit's 1.680). Do not write a
-DREGON score sentence until a DREGON fit passes; the reasons are in
-`docs/explainers/noise-model-v4-dregon-gap.qmd` § 5.
+DREGON (accepted 2026-10-26: the bench fit plus the fitted gust wind, no flight
+refit; it does not meet the earlier fit's numbers, so the sentence says so):
+
+```latex
+On DREGON the flight model is the bench fit with the flight wind added and nothing refitted.
+Its spectrograms keep the thin lines of the bench recordings, which every flight refit we tried
+washed out, but the trackers read it less well than the earlier fit: PIT 2.63\revps{} against
+1.68 (bar 2.188) and a long-term-spectrum deviation of 3.94 dB against 2.38 dB.
+% source: omnirun nv4-score-benchwind-17c3b8 parity/arm_dregon_v4.json;
+% results/noise_v4/flight/benchwind/dregon__c7__benchwind_gust.json
+```

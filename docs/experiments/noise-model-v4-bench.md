@@ -1,6 +1,6 @@
 # Noise model v4 — the bench fit on the DREGON single-rotor ladders
 
-**Status:** in progress (2026-10-19 –). Model and procedure:
+**Status:** closed 2026-10-26 (opened 2026-10-19). Model and procedure:
 `docs/explainers/noise-model-v4.qmd` (Fit procedure A). Code:
 `src/experiments/noise_model/bench_v4.py`, driver `scripts/noise_v4_bench.py`.
 
@@ -401,6 +401,29 @@ gains are 1.17, 0.10, 0.08 and 0.04 nats. On 15.3 M cells that is 8e-8 to
 (no direction lowers the objective at any step) is never met, so η on the
 twin is not reported yet.
 
+**η on the planted twin (Dmitrii: tolerance-based minimum).** A negative
+direction whose best line-search step gains at most the fit's convergence
+tolerance (1e-4 nats per cell × 15.3 M cells = 1,527 nats) counts as flat
+(`44a17f39`, `--flat-gain-per-cell 1e-4`). From `…r1.fit__c2` with its
+saved Hessian (`nv4-planted-eta-33829f`), the 6 directions gain less than
+that (0/6 moved), so the escape ends `stuck`. η is then computed with those
+directions left out (`results/noise_v4/bench/eta/…r1.fit__c3.json`):
+
+|Blocks|Twin η|Real (c7) η|
+|---|---|---|
+|200 Hz (720)|0.0331|0.00152|
+|400 Hz (360)|0.0330|0.00145|
+|800 Hz (180)|0.0313|0.00140|
+|1600 Hz (100)|0.0321|0.00135|
+|per recording (20)|0.0305|0.00132|
+
+Reading: η is stable over block size on both. With an exact model the
+Whittle likelihood is still overconfident by about 30× (η ≈ 0.032). Real
+data add about 22× from model error (0.032 / 0.0014). The state file
+differs from the `c2` payload by up to 68 in one coordinate (a flat
+direction); its objective matches the payload's (−166,179,350.7), so the
+chain uses the state file, as the planted protocol requires.
+
 **MD2 flight.** The converged joint fit (`md2_fly125__flight_v4__s0__r5c1`)
 scored standby PIT 27.8 and parity ratio 3.57, so the per-regime fallback
 applies. Two changes of procedure and prior: the phase pedestal is fitted per
@@ -623,6 +646,62 @@ Listen did not run because the render clips (peak 1.38). Reading: the
 gate on five segments does not transfer, and mic-0 LTAS is a weak stand-in
 for spectral similarity.
 
+*The nv3r4-like refit (2026-10-24; Dmitrii: "remember what was done for
+nv3r4; achieve that, but keep the gusty wind and thin higher harmonics").*
+nv3r4 fitted every rotor's per-order line level in flight (4 × 88, prior sd
+10 dB). The v4 analogue (`3d718f1b`): lines mode with all 148 aerodynamic
+orders free per rotor, N(bench, 10 dB). The shaft ε and the phase pedestal
+of every order are held at the bench (`--hold-eps --hold-pedestal`: thin
+lines). The gust law comes from the battery search (`--wind-from`, offset
+2, scale 1 m/s, rate 8 Hz). Wide pool. Converged after 60 + 62 passes
+(`nv4-nv3like-88bcd7`, `nv4-nv3like-c1-6f7fd5`;
+`results/noise_v4/flight/nv3like/…__lines__c1.json`). Whittle −53.43 M
+against R2's −52.97 M. Battery, tuning: Fréchet 280 (nv3r4 362, R2 311),
+mic-0 LTAS 1.77 (1.72), linear IS 0.173 (0.170), octave IS 0.299 (0.240),
+co-modulation 0.262 (real 0.241), line / floor Δ +2.1 / +2.1 dB. PIT:
+tuning 1.87 (HPPNet). Held-out windows (`nv4-pit-nv3like-872215`): HPPNet
+5.31, HRSPNet 1.68 (nv3r4 1.105). The HPPNet collapse on the scoring
+windows looks like C-wind's 9.6; the tuning segments do not show it.
+Per-rotor trim search on the 18-window wide pool (`921d0b92`). Gate: PIT
+below nv3r4's wide-pool mean. Selection: the lowest all-mic LTAS.
+Wide-pool references (seed 2001): real 1.091, nv3r4 1.683 (all-mic LTAS
+2.02), nv3like 2.009 (all-mic LTAS 1.80). Box 1 (`nv4-trim-nv3like-35fe89`;
+`g_a` −3…6, `g_a1` −3…9, rotors −6…6, `g_f` −6…3): 0/768 feasible, best
+1.743. That point gives 1.542 on the five tuning segments (nv3r4 1.541) and
+1.82 on the other 13 windows (nv3r4 1.74). Box 2, widened past box 1's
+edges (`nv4-trim-nv3like2-fd1df8`; `g_a` 0…14, rotors 3/4 −3…12, `g_f`
+−12…0): 0/768, best 1.705, at lines +5.6 dB, order 1 +9.3, rotors 3/4
++10 / +9 and floor −11 dB (all-mic LTAS 2.16). PIT saturates near 1.71
+whatever the levels. With thin lines (bench ε and pedestal), level trims
+cannot reach nv3r4's wide-pool PIT.
+
+Two probes (seed 2001, HPPNet). (1) High orders as wide as nv3r4's: ε set
+to 0.0103 (σ_ν(80 rev/s) = 5.2 rad/s, nv3r4's value). Wide pool: nv3like
+2.028 (2.009 at the bench ε); best box-1 trim 1.763 (1.743). Wider lines do
+not help. (2) The HPPNet collapse on 4 s windows (nv3like 5.31 official,
+11.6 on 4 s crops of the tuning segments, 1.87 on the 8 s segments). It is
+not a render-length defect. Lines alone score the same on a 4 s render and
+on a cropped 8 s render (1.73 / 1.72). With lines and floor, both collapse
+(hovering crop: 11.2 direct, 9.7 cropped). The failure sits on single mics:
+mic 2 PIT 43–80 rev/s, mics 0 and 4 up to 14, the rest 2–3. Whether it
+happens depends on the random draw (the wind realisation differs between a
+4 s and an 8 s render). On that window the model's mics 0, 1, 2 and 4 are
+6–9 dB quieter than real without the wind. HRSPNet shows no such failure.
+
+*Bench fit rendered as it is (2026-10-24).* c7 on the flight tracks, no
+flight stage, no wind. It shows thin lines up to about 6 kHz but scores
+poorly (`nv4-pit-benchonly-d684d0`): HPPNet 3.72 on the scoring windows
+(bar 1.680), 2.36 on the tuning segments; HRSPNet 2.10 (nv3r4 1.105),
+1.83 on tuning. Visible thin lines are not what the trackers need.
+Bench c7 plus the fitted SC gust wind, no other flight change
+(`results/noise_v4/flight/benchwind/`, job `nv4-pit-benchwind-21131c`):
+HRSPNet 1.82 on the scoring windows (nv3r4 1.105, bench alone 2.10, R2
+1.86), 1.81 on the wide pool; HPPNet 2.63 (bar 1.680), 2.04 wide. The two
+wind-level variants score the same. Official scorer (`nv4-score-benchwind-17c3b8`,
+`results/noise_v4/score/benchwind/`): PIT 2.627 (bar 1.680), LTAS 3.939
+(bar 2.384). Listen did not run (the render peaks at 1.45 and would clip).
+Accepted as the DREGON flight result (Dmitrii, 2026-10-26).
+
 ### Round 7 — the floor at the line bases (2026-10-26)
 
 **Why.** The easy DREGON drone (`c7` + gust wind) has no broadband floor
@@ -655,9 +734,15 @@ sd, ~60 nats per order). Next (7b): cap γ_A at the same 6.94 Hz
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
   κ = 0 (no κ passes the planted 1 dB floor rule).
 - **η (step 3).** 0.00152 (200 Hz blocks) to 0.00132 (per recording) on the
-  final fit.
+  final fit; 0.033 to 0.031 on its planted twin (the Whittle likelihood's
+  own overconfidence, about 30×; model error adds about 22×).
 - **MD2 flight.** The converged per-regime pair beats nv3r4 on parity
   (0.481 vs 0.515) and on every regime and cruise LTAS; Listen is on par
   within render-seed noise.
-- **DREGON flight.** Not reached: every converged stage on the frozen bench
-  lines fails the PIT bar (best 15.8 vs 1.680; LTAS 2.384 equal).
+- **DREGON flight.** Accepted result (Dmitrii, 2026-10-26): the bench fit
+  plus the fitted SC gust wind, no flight refit
+  (`results/noise_v4/flight/benchwind/dregon__c7__benchwind_gust.json`). It
+  does not meet the nv3r4 bars: PIT 2.627 vs 1.680 (HPPNet), 1.82 vs 1.105
+  (HRSPNet), LTAS 3.94 vs 2.38. No flight refit (alternating, k ≤ 10,
+  nv3r4-like, level and per-rotor trims) beat it on HRSPNet by more than
+  0.15, and all of them wash out the lines the bench fit keeps.

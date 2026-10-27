@@ -1,0 +1,183 @@
+{
+ "tracker": {
+  "experiment": "hppnet_l2_r2_s0",
+  "ckpt": "best",
+  "reference": "r2://ml-data/artifacts/hppnet_l2_r2_s0/checkpoints/best.ckpt",
+  "local_path": "/gpfs/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.trees/7787de670e7a/.cache/r2_checkpoints/ml-data__artifacts__hppnet_l2_r2_s0__checkpoints__best.ckpt",
+  "bytes": 2746881,
+  "sha256": "6e50e025ba40df055412ae5d59c2f7a54a23acc0d61c788ab3871fb9fd2877b1"
+ },
+ "set": "wide",
+ "seeds": [
+  2001
+ ],
+ "rows": [
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727403.2050455,
+   "pit": {
+    "real": 0.761534550138141,
+    "bw_gust": 1.7672269366421471,
+    "bw_nv3like": 1.761954085834019
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903911.3944898,
+   "pit": {
+    "real": 0.6732499698574561,
+    "bw_gust": 2.027908762612079,
+    "bw_nv3like": 2.0203823377792003
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903584.348311,
+   "pit": {
+    "real": 1.0332323331228634,
+    "bw_gust": 2.0034182692675895,
+    "bw_nv3like": 2.005455499877324
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905731.952559,
+   "pit": {
+    "real": 0.8264977798237672,
+    "bw_gust": 1.8637025964119187,
+    "bw_nv3like": 1.8613223198924786
+   }
+  },
+  {
+   "window": "spinning_nosource_room2",
+   "start_s": 1511905206.978012,
+   "pit": {
+    "real": 1.3326907842639515,
+    "bw_gust": 1.8661798114401669,
+    "bw_nv3like": 1.8673800984962843
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727411.2050455,
+   "pit": {
+    "real": 1.264375592842439,
+    "bw_gust": 2.2060229721371014,
+    "bw_nv3like": 2.2050854845993886
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727419.2050455,
+   "pit": {
+    "real": 0.8437308370094228,
+    "bw_gust": 1.892435709706787,
+    "bw_nv3like": 1.887640050856696
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727427.2050455,
+   "pit": {
+    "real": 1.3650866667403885,
+    "bw_gust": 2.3028569032180295,
+    "bw_nv3like": 2.2994028493690952
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727435.2050455,
+   "pit": {
+    "real": 0.7097453528933343,
+    "bw_gust": 1.7751736054184648,
+    "bw_nv3like": 1.7734474462099863
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727443.2050455,
+   "pit": {
+    "real": 1.0345596319306645,
+    "bw_gust": 2.1431315820963395,
+    "bw_nv3like": 2.15564805639215
+   }
+  },
+  {
+   "window": "free-flight_nosource_room2",
+   "start_s": 1512727451.2050455,
+   "pit": {
+    "real": 1.1427514868163255,
+    "bw_gust": 2.174558474622752,
+    "bw_nv3like": 2.181772961157222
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903919.3944898,
+   "pit": {
+    "real": 0.7952935846838426,
+    "bw_gust": 1.7598222313979945,
+    "bw_nv3like": 1.7628511847119301
+   }
+  },
+  {
+   "window": "hovering_nosource_room2",
+   "start_s": 1511903927.3944898,
+   "pit": {
+    "real": 1.63639887986547,
+    "bw_gust": 2.168201689817847,
+    "bw_nv3like": 2.1668642195134886
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903592.348311,
+   "pit": {
+    "real": 1.0295104823109287,
+    "bw_gust": 2.0185038040302494,
+    "bw_nv3like": 2.0151668973586383
+   }
+  },
+  {
+   "window": "updown_nosource_room2",
+   "start_s": 1511903600.348311,
+   "pit": {
+    "real": 1.0322093206854077,
+    "bw_gust": 2.256439548021818,
+    "bw_nv3like": 2.261890082456434
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905739.952559,
+   "pit": {
+    "real": 1.2674673602932311,
+    "bw_gust": 2.526359490105997,
+    "bw_nv3like": 2.5273603175115866
+   }
+  },
+  {
+   "window": "rectangle_nosource_room2",
+   "start_s": 1511905747.952559,
+   "pit": {
+    "real": 1.309502954667141,
+    "bw_gust": 1.9158827395521572,
+    "bw_nv3like": 1.9134116479315235
+   }
+  },
+  {
+   "window": "spinning_nosource_room2",
+   "start_s": 1511905214.978012,
+   "pit": {
+    "real": 1.5759775614246134,
+    "bw_gust": 2.03920490068591,
+    "bw_nv3like": 2.048111266349429
+   }
+  }
+ ],
+ "mean": {
+  "real": 1.0907675071871883,
+  "bw_gust": 2.039279445954742,
+  "bw_nv3like": 2.0397303781276044
+ }
+}

@@ -1,0 +1,24 @@
+Error processing line 1 of /data/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.venv/lib/python3.12/site-packages/_virtualenv.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 206, in addpackage
+    File "<string>", line 1, in <module>
+  ModuleNotFoundError: No module named '_virtualenv'
+
+Remainder of file ignored
+Error processing line 1 of /data/scratch/acw592/omnirun/projects/harmonic-noise-suppression/.venv/lib/python3.12/site-packages/_virtualenv.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 206, in addpackage
+    File "<string>", line 1, in <module>
+  ModuleNotFoundError: No module named '_virtualenv'
+
+Remainder of file ignored
+free-flight_nosource_room2 {'real': 0.49, 'bench_c7': 1.55}
+hovering_nosource_room2 {'real': 0.56, 'bench_c7': 1.9}
+updown_nosource_room2 {'real': 0.88, 'bench_c7': 2.24}
+rectangle_nosource_room2 {'real': 0.54, 'bench_c7': 1.72}
+spinning_nosource_room2 {'real': 0.9, 'bench_c7': 1.75}
+tracker hrspnet (default ckpt) set tuning seeds 2001
+real              0.49  0.56  0.88  0.54  0.90  mean 0.670
+bench_c7          1.55  1.90  2.24  1.72  1.75  mean 1.833

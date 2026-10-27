@@ -111,7 +111,7 @@ def unit_worker(unit: Unit) -> dict[str, Any]:
     head = dict(uid=unit.uid, kind=kind, segment=seg)
     if kind == "components":
         t0 = time.time()
-        arrays = LS.build_components(base, seg, seed=int(p["seed"]))
+        arrays = LS.build_components(base, seg, seed=int(p["seed"]), pool=str(p["pool"]))
         LS.save_components(_components_path(work, seg), arrays)
         return head | dict(
             name=str(arrays["name"]),
@@ -251,6 +251,12 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--device", default="cpu", help="the tracker's device (cpu | cuda)")
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--max-segments", type=int, default=None, help="first N tuning segments")
+    ap.add_argument(
+        "--pool",
+        default="floor",
+        help="tuning segments: 'floor' (the five 8 s dregon-floor segments) or 'wide' "
+        "(dregon-flight-wide, 18 windows; never the scoring windows)",
+    )
     ap.add_argument("--points", type=int, default=None, help="cap both stages (smoke)")
     ap.add_argument("--no-resume", action="store_true", help="re-run every unit")
     ap.add_argument(
@@ -266,7 +272,6 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     os.environ.setdefault("NUMBA_NUM_THREADS", str(args.threads))
 
-    from experiments.noise_model import dregon_flight_v4 as DF
     from experiments.noise_model import dregon_lawsearch_v4 as LS
     from experiments.noise_model import flight_v4 as FV
     from experiments.noise_model import gates as GT
@@ -289,7 +294,9 @@ def main(argv: list[str] | None = None) -> None:
     stem = base_path.stem
     out = Path(args.out)
     work = out / f"{stem}__laws"
-    n_specs = len(DF.pool_specs())
+    if args.pool not in LS.POOLS:
+        _die(f"--pool in {LS.POOLS}")
+    n_specs = len(LS.pool_specs(args.pool))
     n_seg = n_specs if args.max_segments is None else min(int(args.max_segments), n_specs)
     n1 = int(args.stage1) if args.points is None else min(int(args.stage1), int(args.points))
     n2 = int(args.stage2) if args.points is None else min(int(args.stage2), int(args.points))
@@ -298,6 +305,7 @@ def main(argv: list[str] | None = None) -> None:
         base=str(base_path),
         base_sha256=hashlib.sha256(raw).hexdigest(),
         n_segments=n_seg,
+        pool=args.pool,
         render_seed=LS.RENDER_SEED,
         params=list(LS.PARAMS),
         box={k: list(v) for k, v in box.items()},
@@ -314,7 +322,13 @@ def main(argv: list[str] | None = None) -> None:
             _die(f"{cfg_path} holds another configuration; use another --out")
     else:
         _atomic_json(cfg_path, config)
-    common = dict(work=str(work), base=str(base_path), threads=args.threads, device=args.device)
+    common = dict(
+        work=str(work),
+        base=str(base_path),
+        threads=args.threads,
+        device=args.device,
+        pool=args.pool,
+    )
     grid = dict(
         resume=not args.no_resume,
         blas_threads=int(args.threads),
