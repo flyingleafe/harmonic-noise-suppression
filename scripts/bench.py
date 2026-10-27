@@ -296,7 +296,7 @@ def bench_hppnet_pyramid(device: torch.device, iters: int, warmup: int, shape: s
 
         return (name, timeit(step, device, iters, warmup))
 
-    m = model
+    m = cast(Any, model)
 
     def upto_fuse() -> torch.Tensor:
         return torch.cat(m.fuse([m.block_1(x) for x in m.frontend(audio)]), dim=-1)
@@ -359,9 +359,7 @@ def bench_hppnet_l2(device: torch.device, iters: int, warmup: int, shape: str | 
     torch.backends.cudnn.benchmark = True
     torch.manual_seed(0)
     model = (
-        HPPNetOrig(n_maps=4, superres_out=True, head="conv1x1", n_bins=n_bins, harmonic_k_max=k_max)
-        .to(device)
-        .train()
+        HPPNetOrig(n_maps=4, head="conv1x1", n_bins=n_bins, harmonic_k_max=k_max).to(device).train()
     )
     audio = torch.randn(b, samples, device=device)
     amp_dtype = torch.float16 if device.type == "cuda" else torch.bfloat16
@@ -438,6 +436,61 @@ def bench_rate_convlstm(device: torch.device, iters: int, warmup: int, shape: st
                 step()
                 torch.cuda.synchronize()
             print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
+
+
+def bench_hrspnet(device: torch.device, iters: int, warmup: int, shape: str | None) -> None:
+    """HRSPNet (``conf/model/hppnet_pyrseplstm_k64.yaml``): its harmonic layer
+    (``conv_3``, HPDC) alone and the full training step, forward+backward under
+    fp16 autocast, on the fused Triton kernels vs the torch path of `tap_conv`
+    (``TAP_CONV_TORCH=1``): median time and peak allocated memory of each.
+    ``--shape B,SAMPLES`` (default ``128,32000``: the training batch).
+    """
+    from pathlib import Path
+
+    import yaml
+
+    from training.config import instantiate_model
+
+    b, samples = _shape(shape, (128, 32000))
+    torch.manual_seed(0)
+    cfg = yaml.safe_load(Path("conf/model/hppnet_pyrseplstm_k64.yaml").read_text())
+    m = cast(Any, instantiate_model(cfg).to(device).train())
+    audio = torch.randn(b, samples, device=device)
+    amp_dtype = torch.float16 if device.type == "cuda" else torch.bfloat16
+    if device.type == "cuda":
+        print(torch.cuda.get_device_name(device))
+    print(f"hrspnet, B={b} samples={samples} params={sum(p.numel() for p in m.parameters()):,}")
+    with torch.no_grad(), torch.autocast(device.type, dtype=amp_dtype):
+        feats = torch.cat(
+            [m.block_2_5(m.block_2(x)) for x in m.fuse([m.block_1(x) for x in m.frontend(audio)])],
+            dim=-1,
+        )
+    feats.requires_grad_(True)
+
+    def layer() -> None:
+        m.zero_grad(set_to_none=True)
+        with torch.autocast(device.type, dtype=amp_dtype):
+            out = m.conv_3(feats, m.harm_lo, m.harm_frac, m.harm_valid)
+        out.float().pow(2).mean().backward()
+
+    def full() -> None:
+        m.zero_grad(set_to_none=True)
+        with torch.autocast(device.type, dtype=amp_dtype):
+            out = m(audio)
+        out.float().pow(2).mean().backward()
+
+    for path, env in (("triton", None), ("torch", "1")):
+        if env is None:
+            os.environ.pop("TAP_CONV_TORCH", None)
+        else:
+            os.environ["TAP_CONV_TORCH"] = env
+        for name, fn in (("conv_3 (HPDC)", layer), ("full step", full)):
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+            ms = timeit(fn, device, iters, warmup)
+            peak = torch.cuda.max_memory_allocated() / 2**30 if device.type == "cuda" else 0.0
+            print(f"  {path:<7}{name:<16}{ms:9.1f} ms   peak allocated {peak:6.2f} GiB", flush=True)
 
 
 def bench_tap_conv(device: torch.device, iters: int, warmup: int, shape: str | None) -> None:
@@ -524,6 +577,7 @@ TARGETS: dict[str, Callable[[torch.device, int, int, str | None], None]] = {
     "noise_gen": bench_noise_gen,
     "rate_convlstm": bench_rate_convlstm,
     "tap_conv": bench_tap_conv,
+    "hrspnet": bench_hrspnet,
 }
 
 
