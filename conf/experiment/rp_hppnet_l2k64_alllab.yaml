@@ -9,8 +9,8 @@ defaults:
   - _self_
 
 experiment_name: rp_hppnet_l2k64_alllab
-batch_size: 128  # as rp_hppnet_l2_alllab: no accumulation, 80 GB card
-grad_accum_steps: 1
+batch_size: 64  # x2 accumulation = 128 as rp_hppnet_l2_alllab; fits any sae GPU (L40S 48 GB), as its uni resume
+grad_accum_steps: 2
 num_workers: 6
 data:
   train:
