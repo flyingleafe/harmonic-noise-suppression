@@ -653,7 +653,9 @@ class RigModel:
     ``seed`` is the restart: 0 starts the pedestal and the shaft at the prior
     medians, ``seed >= 1`` draws them from the priors (spec § Initialisation).
     ``kappa`` is the floor push (nats per dB of each control value); ``w_max_hz``
-    the hard cap on the phase-pedestal width (default :data:`.v4_priors.W_MAX_HZ`)."""
+    the hard cap on the phase-pedestal width (default :data:`.v4_priors.W_MAX_HZ`);
+    ``gamma_amp_max_hz`` an optional hard cap on the amplitude-pedestal rate
+    (``None``: uncapped, the spec's prior)."""
 
     def __init__(
         self,
@@ -664,11 +666,13 @@ class RigModel:
         kappa: float = 0.0,
         flat_shaft: bool = False,
         w_max_hz: float = PR.W_MAX_HZ,
+        gamma_amp_max_hz: float | None = None,
     ):
         self.rig = rig
         self.seed = int(seed)
         self.kappa = float(kappa)
         self.w_max_hz = float(w_max_hz)
+        self.gamma_amp_max_hz = None if gamma_amp_max_hz is None else float(gamma_amp_max_hz)
         #: ``flat_shaft``: one (sigma_nu, lam) for every speed, a_sigma = b_lam = 0
         #: held (gradient zeroed, no prior term)
         self.pinned: tuple[str, ...] = ("a_sigma", "b_lam") if flat_shaft else ()
@@ -814,7 +818,7 @@ class RigModel:
         rig, K = self.rig, self.rig.k_prof
         R, mo = rig.n_rotors, rig.motor_orders
         s2A = _capped_np(dyn["u_amp"], self.cap)
-        gA, s2P = np.exp(dyn["log_gA"]), _capped_np(dyn["u_s2P"], PR.PHASE_SIGMA2_MAX)
+        gA, s2P = self._gA_np(dyn["log_gA"]), _capped_np(dyn["u_s2P"], PR.PHASE_SIGMA2_MAX)
         gP = _gamma_from_width(_capped_np(dyn["u_W"], self.w_max_hz), s2P)
         num, cnt = np.zeros((R, K)), np.zeros((R, K))
         phis = []
@@ -871,7 +875,19 @@ class RigModel:
         return _capped(self.params["u_amp"], self.log_cap)
 
     def gA(self) -> Tensor:
-        return torch.exp(self.params["log_gA"])
+        """``gamma_A`` per order (Hz), capped at ``gamma_amp_max_hz`` when set."""
+        u = self.params["log_gA"]
+        if self.gamma_amp_max_hz is None:
+            return torch.exp(u)
+        return _capped(u, math.log(self.gamma_amp_max_hz))
+
+    def _gA_np(self, u: np.ndarray) -> np.ndarray:
+        return np.exp(u) if self.gamma_amp_max_hz is None else _capped_np(u, self.gamma_amp_max_hz)
+
+    def _gA_coord(self, gA: np.ndarray) -> np.ndarray:
+        """Inverse of :meth:`gA`; a rate at or over the cap starts just under it."""
+        cap = self.gamma_amp_max_hz
+        return np.log(gA) if cap is None else _uncapped(_under(gA, cap), cap)
 
     def s2P(self) -> Tensor:
         """``sigma2_phi`` per order, capped at :data:`.v4_priors.PHASE_SIGMA2_MAX`."""
@@ -1045,7 +1061,7 @@ class RigModel:
             # in log s2 needs no Jacobian (u -> capped value is a monotone
             # bijection onto (0, cap), so both coordinates share the optimum)
             + nrm(torch.log(self.s2A()), PR.amp_log_median(k), PR.AMP_LOG_SD)
-            + nrm(p["log_gA"], PR.gamma_amp_log_median(k), PR.GAMMA_AMP_LOG_SD)
+            + nrm(torch.log(self.gA()), PR.gamma_amp_log_median(k), PR.GAMMA_AMP_LOG_SD)
             + phase_pedestal_neg_log_prior(self.s2P(), self.width_phase(), self.c_w)
             + nrm(torch.exp(p["log_eps"]), 0.0, PR.EPS_HALF_NORMAL)
             + nrm(p["log_lam_ref"], *PR.LAM_REF_LN)
@@ -1116,7 +1132,7 @@ class RigModel:
             floor_mean_db=fl["mean_db"],
             floor_z=fl["shape_z"],
             u_amp=_uncapped(a(ped["sigma2_amp"])[:K], self.cap),
-            log_gA=np.log(a(ped["gamma_amp_hz"])[:K]),
+            log_gA=self._gA_coord(a(ped["gamma_amp_hz"])[:K]),
             # a payload at or over a cap (pre-cap fits) starts just under it;
             # values under the cap load exactly
             u_s2P=_uncapped(
@@ -1266,7 +1282,7 @@ def group_vectors(model: RigModel) -> dict[str, np.ndarray]:
         ped = np.stack(
             [
                 np.log(model.s2A().cpu().numpy()),
-                p["log_gA"],
+                np.log(model.gA().cpu().numpy()),
                 np.log(model.s2P().cpu().numpy()),
                 np.log(model.width_phase().cpu().numpy()),
             ]
@@ -1379,6 +1395,7 @@ def fit_rig(
     device: Any = "cpu",
     flat_shaft: bool = False,
     w_max_hz: float = PR.W_MAX_HZ,
+    gamma_amp_max_hz: float | None = None,
     start: dict[str, Any] | None = None,
     resume: bool = False,
     model: RigModel | None = None,
@@ -1408,7 +1425,13 @@ def fit_rig(
     t_all = time.perf_counter()
     if model is None:
         model = RigModel(
-            rig, device=device, seed=seed, kappa=kappa, flat_shaft=flat_shaft, w_max_hz=w_max_hz
+            rig,
+            device=device,
+            seed=seed,
+            kappa=kappa,
+            flat_shaft=flat_shaft,
+            w_max_hz=w_max_hz,
+            gamma_amp_max_hz=gamma_amp_max_hz,
         )
         if start is not None:
             model.load_payload(start)
@@ -1603,6 +1626,7 @@ def _priors_block(model: RigModel) -> dict[str, Any]:
         phase_sigma2_max=PR.PHASE_SIGMA2_MAX,
         c_w=PR.C_W,
         w_max_hz=model.w_max_hz,
+        gamma_amp_max_hz=model.gamma_amp_max_hz,
         eps_half_normal=PR.EPS_HALF_NORMAL,
         a_sigma=list(PR.A_SIGMA),
         b_lam=list(PR.B_LAM),

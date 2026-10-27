@@ -638,6 +638,17 @@ and the floor push κ = 10 and κ = 100. One seed, 500 min deadline; jobs
 `nv4-r7-wmax-k10-964b17` (kaggle), `nv4-r7-wmax-k100-959311` (colab).
 Then `scripts/rig_distance_map.py --extra` with both payloads.
 
+**7a result: the width cap alone does not lift the floor.** Both converged
+(κ 10: −158,917,177.8 nats, 8 passes; κ 100: −158,872,917.4, 9 passes;
+c7 scores −158,956,814.8 under κ 10). Midway between orders at 80 rev/s the
+floor stays 20–40 dB under the total at 0.5–2 kHz with κ 10 (−82…−61 against
+−40…−42 dB) and rises only at 0.5–0.8 kHz with κ 100 (−44/−48). The power
+moved into the amplitude pedestal, whose rate has no cap: median γ_A at
+k = 21–40 went 1.2 → 3.2 / 6.2 Hz, max 230 Hz (prior LogN(log 1 Hz, 0.5), 11
+sd, ~60 nats per order). Next (7b): cap γ_A at the same 6.94 Hz
+(`--gamma-amp-max-hz`), continuing from the 7a payloads.
+<!-- source: results/noise_v4/bench/restarts/dregon__kappa{10,100}__r5__s2__wmax6.94__c8.json -->
+
 ## Conclusion
 
 - **Bench (step 2).** Converged and at a minimum: `dregon__kappa0__r5__s2__c7`,
