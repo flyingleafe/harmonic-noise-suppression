@@ -704,6 +704,22 @@ uploaded, the fine-tune loads it with 0 missing / 0 unexpected keys.
 | HarmoF0-L2 | `rp-harmof0-l2-easyv4-981698` | `rp-harmof0-l2-easyv4-ft-75b117` |
 | Conv+BiGRU | `rp-scv2-easyv4-1cc57d` | `rp-scv2-easyv4-ft-147745` |
 
+**Results (2026-10-27, W&B; Table VI).** Raw values at the round with the
+lowest 5-round median of the selection score; PIT-MAE (Hz).
+
+| model | stop | near-selected: `near_macro` / `uniform` / `real_macro` | real-selected `real_macro` | tuned (step) |
+|---|---|---|---|---|
+| HRSPNet | 48 500 | 35 000: 4.14 / 17.94 / 7.31 | 6.57 | 2.33 (7000) |
+| HarmoF0-L2 | 48 500 | 33 500: 8.38 / 24.60 / 10.49 | 6.86 | 2.57 (4500) |
+| Conv+BiGRU | **5000, non-finite** | 4000: 8.40 / 31.16 / 9.31 | 9.31 | 2.83 (18 500) |
+| HPPNet-L2 | 82 000 | 52 000: 4.97 / 25.04 / 8.84 | 6.91 | 3.26 (10 000) |
+
+Conv+BiGRU stopped on a non-finite validation round (`val/loss`,
+`val/strong_motor`) at step 5000, so its rows are provisional. Resumed from R2
+(`resume=true logging.resume_id=f7kaox5v`): `rp-scv2-easyv4-resume-f56b45`
+(uni), fine-tune rerun `rp-scv2-easyv4-ft-r-56a3af` (`--after`). Synthetic
+score of the tuned rows: `rp-easytuned-synth-eval-093be0`.
+
 ## Frequency-scaling probe of the grid (2026-10-26)
 
 `scripts/rps_cue_probe.py freq` (six DREGON cruise clips, alpha 0.70-1.30) on the
