@@ -661,8 +661,8 @@ streams need these runs:
 
 | paper cell | run | model config | stream | state |
 |---|---|---|---|---|
-| chain table, `+ harmonics k ≤ 64` | `rp_hppnet_l2k64_{all,alllab}` | `hppnet_l2k64` (new: `hppnet_l2k84` with `harmonic_k_max: 64`, 385 CQT bins, 0.87M) | `all` / `alllab` | config to write |
-| chain table, `+ ConvLSTM` | `rp_hppnet_l2k64_convlstm_{all,alllab}` | `hppnet_l2k64_convlstm` (new: `hppnet_l2k84_convlstm` with `harmonic_k_max: 64`, 0.87M) | `all` / `alllab` | config to write |
+| chain table, `+ harmonics k ≤ 64` | `rp_hppnet_l2k64_{all,alllab}` | `hppnet_l2k64` (`hppnet_l2k84` with `harmonic_k_max: 64`, 385 CQT bins, 0.866M) | `all` / `alllab` | queued 2026-10-27 on `uni` H100 (`d6d80f8c`): `rp-hppnet-l2k64-all-b3eba6`, `rp-hppnet-l2k64-alllab-8899ca` |
+| chain table, `+ ConvLSTM` | `rp_hppnet_l2k64_convlstm_{all,alllab}` | `hppnet_l2k64_convlstm` (`hppnet_l2k84_convlstm` with `harmonic_k_max: 64`, 0.870M) | `all` / `alllab` | queued 2026-10-27 on `uni` H100 (`d6d80f8c`): `rp-hppnet-l2k64-convlstm-fe01b8` (all), `rp-hppnet-l2k64-convlstm-f0b773` (alllab) |
 | transfer table, HRSPNet | `rp_pyrseplstm_k64_{dregonlab,md2lab}` | `hppnet_pyrseplstm_k64` | `dregonlab` / `md2lab` | done 2026-10-24 (`b734dd28`; `rp-pyrseplstm-k64-dregon-ced98a`, `rp-pyrseplstm-k64-md2lab-b481c0`; `ac63b3` failed at the cluster's git fetch): MD2 15.42 / cruise 10.34, DREGON 12.66 / 13.31 |
 | transfer table, Conv+BiGRU | `rp_scv2_{dregon,md2}` | `hb_scv2_mag_nogate` | `dregon` / `md2` | done 2026-10-24 (`rp-scv2-dregon-f26b2b`, `rp-scv2-md2-8ee152`): MD2 14.99 / cruise 4.02, DREGON 31.75 / 37.47 |
 
