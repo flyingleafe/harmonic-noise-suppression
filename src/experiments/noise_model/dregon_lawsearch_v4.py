@@ -85,7 +85,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -589,7 +589,9 @@ def sobol_points(n: int, box: Mapping[str, Sequence[float]], seed: int) -> list[
     if n <= 0:
         return []
     m = max(0, math.ceil(math.log2(n)))
-    u = qmc.Sobol(d=len(_free(box)), scramble=True, seed=int(seed)).random_base2(m)[:n]
+    # ``seed=`` (not ``rng=``) keeps the published Sobol points; the stubs only know ``rng``
+    sobol = cast(Any, qmc.Sobol)(d=len(_free(box)), scramble=True, seed=int(seed))
+    u = sobol.random_base2(m)[:n]
     return _scale(u, box)
 
 
@@ -773,8 +775,8 @@ def main_effects(
             ltas_spread_db=float(max(vl) - min(vl)),
             pit_bin_means=mp,
             ltas_bin_means=ml,
-            spearman_pit=float(spearmanr(x, pit).statistic),
-            spearman_ltas=float(spearmanr(x, ltas).statistic),
+            spearman_pit=float(cast(Any, spearmanr(x, pit)).statistic),
+            spearman_ltas=float(cast(Any, spearmanr(x, ltas)).statistic),
         )
     return out
 

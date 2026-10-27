@@ -242,7 +242,7 @@ def _check_grid(result: GridResult, what: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--base", required=True, help="the noise-v4-fit/3 DREGON flight payload")
     ap.add_argument("--stage1", type=int, default=256, help="stage-1 Sobol points")
     ap.add_argument("--stage2", type=int, default=128, help="stage-2 Sobol points (0: none)")
@@ -329,7 +329,7 @@ def main(argv: list[str] | None = None) -> None:
         device=args.device,
         pool=args.pool,
     )
-    grid = dict(
+    grid: dict[str, Any] = dict(
         resume=not args.no_resume,
         blas_threads=int(args.threads),
         mp_context="spawn",
@@ -402,13 +402,14 @@ def main(argv: list[str] | None = None) -> None:
     if n2 > 0:
         s2_path = work / "stage2_box.json"
         if s2_path.exists():
-            s2 = json.loads(s2_path.read_text())
-            if int(s2["n_stage1"]) != n1:
-                _die(f"{s2_path} was drawn from {s2['n_stage1']} stage-1 points, not {n1}")
+            s2_box: dict[str, Any] = json.loads(s2_path.read_text())
+            if int(s2_box["n_stage1"]) != n1:
+                _die(f"{s2_path} was drawn from {s2_box['n_stage1']} stage-1 points, not {n1}")
         else:
-            s2 = LS.stage2_box(table, bar, box=box, gate=args.gate, selection=args.select)
-            _atomic_json(s2_path, s2)
-        pts2 = LS.sobol_points(n2, s2["box"], LS.SOBOL_SEEDS[1])
+            s2_box = LS.stage2_box(table, bar, box=box, gate=args.gate, selection=args.select)
+            _atomic_json(s2_path, s2_box)
+        s2 = s2_box
+        pts2 = LS.sobol_points(n2, s2_box["box"], LS.SOBOL_SEEDS[1])
         res = run_grid(
             point_units(2, pts2),
             unit_worker,

@@ -38,7 +38,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -101,7 +101,7 @@ def _order_prominence(x: np.ndarray, rps: np.ndarray) -> np.ndarray:
         nperseg=PROM_NFFT,
         noverlap=PROM_NFFT - PROM_HOP,
         window="hann",
-        boundary=None,
+        boundary=cast(Any, None),
         padded=False,
     )
     p = (np.abs(z) ** 2).mean(axis=0)  # (F, N)
@@ -1076,7 +1076,7 @@ def _v4_rig_view(fits: dict[str, dict[str, Any]], *, speeds: np.ndarray, title: 
         for g, wt in weights.items():
             if wt <= 0.0:
                 continue
-            pt = parts[g]
+            pt = cast(dict[str, Any], parts[g])
             floor += wt * V4.expected_periodogram(pt["floor"], rps, n_fft=n_fft).mean(axis=0)
             for r in range(n_rot):
                 combs[r] += wt * V4.expected_periodogram(pt["combs"][r], rps, n_fft=n_fft).mean(
@@ -1138,9 +1138,10 @@ def _v4_rig_view(fits: dict[str, dict[str, Any]], *, speeds: np.ndarray, title: 
     def visible(i: int) -> list[bool]:
         return [True] + [j // 3 == i for j in range(3 * len(views))]
 
-    for trace, vis in zip(fig.data, visible(0), strict=True):
+    traces = cast(Any, fig.data)
+    for trace, vis in zip(traces, visible(0), strict=True):
         trace.visible = vis
-    idx = list(range(len(fig.data)))
+    idx = list(range(len(traces)))
     steps = [
         dict(
             method="restyle",
