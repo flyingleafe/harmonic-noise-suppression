@@ -646,7 +646,8 @@ floor stays 20–40 dB under the total at 0.5–2 kHz with κ 10 (−82…−61 
 moved into the amplitude pedestal, whose rate has no cap: median γ_A at
 k = 21–40 went 1.2 → 3.2 / 6.2 Hz, max 230 Hz (prior LogN(log 1 Hz, 0.5), 11
 sd, ~60 nats per order). Next (7b): cap γ_A at the same 6.94 Hz
-(`--gamma-amp-max-hz`), continuing from the 7a payloads.
+(`--gamma-amp-max-hz`), continuing from the 7a payloads: `nv4-r7b-k10-bc46fa`
+(kaggle), `nv4-r7b-k100-e14ed3` (colab).
 <!-- source: results/noise_v4/bench/restarts/dregon__kappa{10,100}__r5__s2__wmax6.94__c8.json -->
 
 ## Conclusion
