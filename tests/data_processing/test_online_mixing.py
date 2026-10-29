@@ -391,11 +391,25 @@ def test_rate_warp_needs_native_headroom(michaels_frames_dataset, speech_dataset
     # 7-8 kHz empty, so the pool refuses it (16 kHz / 0.44 = 36.4 kHz needed).
     with pytest.raises(ValueError, match="native audio above"):
         build_online_mix_pipeline(_warp_cfg(alpha_low=0.5))
-    # Engines render at the model rate; only the silence floor is admitted.
-    cfg = _warp_cfg()
-    cfg["sources"]["noise"] = [{"kind": "static_comb"}]
-    with pytest.raises(ValueError, match="native-rate noise"):
-        build_online_mix_pipeline(cfg)
+
+
+def test_rate_warp_leaves_model_rate_engine_chunks_unwarped(speech_dataset):
+    # The warp augments the native-rate real recordings only: an engine chunk
+    # (rendered at the model rate) comes out bit-identical, labels included,
+    # with and without the warp block, so warped real and synthetic noise mix.
+    engine = {"kind": "static_comb", "n_harmonics": 8, "n_mics": 2, "n_rotors": 4}
+    warped = _warp_cfg()
+    warped["sources"]["noise"] = [engine]
+    plain = _rps_cfg(base_seed=11)
+    plain["sources"]["noise"] = [engine]
+    plain["policy"] = {"source_prob": 0.0}
+    for fw, fp in zip(_take(warped, 4), _take(plain, 4)):
+        rps = np.asarray(fw["rps"].data)
+        assert rps.any()
+        np.testing.assert_array_equal(rps, np.asarray(fp["rps"].data))
+        np.testing.assert_array_equal(
+            np.asarray(fw["mixture"].data), np.asarray(fp["mixture"].data)
+        )
 
 
 def test_v4_michaels_online_config_uses_librispeech_dataset_form():

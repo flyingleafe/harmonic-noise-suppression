@@ -9,9 +9,9 @@ sampling loops. The mapping (see ``docs/refactor-data-pipelines.md``):
   then ``dload.choice`` over per-record window streams weighted by valid
   duration; each window's start is a uniform draw from a ``random_stream``.
   Resampled to ``sample_rate`` at load — unless the policy has
-  ``noise_rate_warp``: then the pool keeps the native rate and every chunk is
-  warped (or only decimated) to ``sample_rate`` per sample
-  (:mod:`data_processing.rate_warp`);
+  ``noise_rate_warp``: then the real pool keeps the native rate and every real
+  chunk is warped (or only decimated) to ``sample_rate`` per sample
+  (:mod:`data_processing.rate_warp`); engine chunks are never warped;
 - **synthetic engines** (``kind: generated`` / ``gp`` / ``static_comb`` /
   ``stochastic`` / ``silence``) — the
   engine object (a genuinely stateful resource: CUDA producer, GP coefficient
@@ -786,8 +786,10 @@ def build_noise_stream(
 
     ``native`` (a ``noise_rate_warp`` policy) keeps the real recordings at
     their native rate in ``native.window_s`` windows
-    (:func:`_load_real_records`); the only engine admitted then is
-    ``silence``, which renders ``window_s`` at ``sample_rate`` (never warped).
+    (:func:`_load_real_records`). Engines still render ``window_s`` at
+    ``sample_rate`` and are never warped: the warp is an augmentation of the
+    real recordings, so a policy can mix warped real noise with synthetic
+    noise (``conf/online_mix/rp_*_mixlab.yaml``).
     """
     specs = _to_plain(specs)
     items = list(specs) if isinstance(specs, list) else [specs]
@@ -805,13 +807,6 @@ def build_noise_stream(
     real_items = [c for c in items if _cfg_get(c, "kind") not in engine_kinds]
     weighted_real = [c for c in real_items if _cfg_get(c, "weight", None) is not None]
     merged_real = [c for c in real_items if _cfg_get(c, "weight", None) is None]
-    if native is not None:
-        model_rate = sorted({str(_cfg_get(c, "kind")) for c in standalone} - {"silence"})
-        if model_rate:
-            raise ValueError(
-                f"noise_rate_warp needs native-rate noise (kind: frames); {model_rate} "
-                f"render at the model rate {sample_rate} Hz and would get a silent band"
-            )
     record_window_s = native.window_s if native is not None else window_s
     load = partial(
         _load_real_records,
@@ -1049,9 +1044,9 @@ def _render_rps_sample(
     A chunk above the model rate comes from a native-rate pool (the policy
     has ``noise_rate_warp``) and always goes through
     :func:`rate_warp.apply_rate_warp` — warped when the block fired, only
-    decimated otherwise. A model-rate chunk under a warp policy is the
-    ``silence`` floor (``build_noise_stream`` admits no other model-rate
-    source then): zero labels, nothing to warp; the drawn warp is discarded.
+    decimated otherwise. A model-rate chunk under a warp policy comes from an
+    engine (synthetic noise or the ``silence`` floor): it is never warped and
+    its labels stay exact; the drawn warp is discarded.
     """
     rng = make_rng(int(static["base_seed"]), int(gid))
     policy = _resolve_policy(cast(Mapping[str, Any], static["policy"]), int(gid))

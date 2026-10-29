@@ -1,0 +1,20 @@
+# @package _global_
+# rp_hppnet_l2_easyv4 trained from scratch on the 50/50 mixture of its synthetic stream and the real rp_all_labelaug stream (conf/online_mix/rp_easyv4_mixlab.yaml), validated, stopped and selected as rp_hppnet_l2_easyv4 (conf/validation/rp_real_v4easy.yaml). Batch doc: docs/experiments/rp-synthetic.md.
+defaults:
+  - override /data: rp_real
+  - override /model: hppnet_l2
+  - override /loss: salience_layers_rp
+  - override /metrics: salience_layers_rp
+  - override /validation: rp_real_v4easy
+  - _self_
+
+experiment_name: rp_hppnet_l2_easyv4_mixlab
+batch_size: 64  # x2 accumulation = 128 as rp_hppnet_l2_easyv4; fits any sae GPU (L40S 48 GB), as rp_hppnet_l2k64_all
+grad_accum_steps: 2
+num_workers: 12  # as rp_hppnet_l2_easyv4
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_easyv4_mixlab.yaml
+optim:
+  lr: 1.0e-3  # as rp_hppnet_l2_all

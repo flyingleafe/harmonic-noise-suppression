@@ -1,0 +1,20 @@
+# @package _global_
+# rp_pyrseplstm_k64_easyv4 trained from scratch on the 50/50 mixture of its synthetic stream and the real rp_all_labelaug stream (conf/online_mix/rp_easyv4_mixlab.yaml), validated, stopped and selected as rp_pyrseplstm_k64_easyv4 (conf/validation/rp_real_v4easy.yaml). Batch doc: docs/experiments/rp-synthetic.md.
+defaults:
+  - override /data: rp_real
+  - override /model: hppnet_pyrseplstm_k64
+  - override /loss: salience_layers_rp
+  - override /metrics: salience_layers_rp
+  - override /validation: rp_real_v4easy
+  - _self_
+
+experiment_name: rp_pyrseplstm_k64_easyv4_mixlab
+batch_size: 128  # as rp_pyrseplstm_k64_easyv4; peak 17.8 GiB at B 128 (bench-hrspnet-triton-vas-8f5219) fits any sae GPU
+grad_accum_steps: 1
+num_workers: 12  # as rp_pyrseplstm_k64_easyv4
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_easyv4_mixlab.yaml
+optim:
+  lr: 1.0e-3  # as rp_pyrseplstm_k64_all
