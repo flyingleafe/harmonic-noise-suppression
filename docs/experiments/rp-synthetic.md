@@ -716,9 +716,58 @@ lowest 5-round median of the selection score; PIT-MAE (Hz).
 
 Conv+BiGRU stopped on a non-finite validation round (`val/loss`,
 `val/strong_motor`) at step 5000, so its rows are provisional. Resumed from R2
-(`resume=true logging.resume_id=f7kaox5v`): `rp-scv2-easyv4-resume-f56b45`
-(uni), fine-tune rerun `rp-scv2-easyv4-ft-r-56a3af` (`--after`). Synthetic
+(`resume=true logging.resume_id=f7kaox5v`): `rp-scv2-easyv4-resume-34d7c6`
+(uni; the first attempt `-f56b45` failed at the cluster's git fetch), fine-tune
+rerun `rp-scv2-easyv4-ft-r-397eb9` (`--after`). Synthetic
 score of the tuned rows: `rp-easytuned-synth-eval-093be0`.
+All three failed: the resume and its fine-tune because they were submitted from
+a scratch worktree without `.env` (`dload pull` raised `NoCredentialsError`),
+the panel eval because `uni-gpushort` placed it on a V100 (sm_70), where the
+HRSPNet Triton kernel does not compile. Resubmitted 2026-10-29 at `f9f03e17`:
+`rp-scv2-easyv4-resume2-86cbe6` (uni), `rp-scv2-easyv4-ft-r2-dd4c2d`
+(`--after`), `rp-easytuned-synth-eval2-252b74` (uni-gpushort, `--vram 40`).
+
+## Mixed training (2026-10-29)
+
+Dmitrii: train every grid model from scratch on 50 % synthetic and 50 % real
+data with label augmentation, once for each synthetic setup. No fine-tuning
+stage. Read the results against the real-only `rp_*_alllab` runs and the
+pretrain-then-tune `rp_*_{easyv4,priorv4}_ft_lr5e4` runs, on `real_macro`.
+
+**Streams.** `conf/online_mix/rp_{easyv4,priorv4}_mixlab.yaml` is one online
+mix. Its sources are the real pool of `rp_all_labelaug` (merged, weight 2), the
+`noise_v2` source of `rp_easyv4` / `rp_priorv4` verbatim (weight 2) and the
+silence arm at 0.8. That gives 41.7 % real, 41.7 % synthetic and 16.7 % silence
+chunks: exactly half of each parent stream, since each has silence at 16.7 %.
+The policy is `rp_all_labelaug`'s. `noise_rate_warp` (p = 1) now applies to the
+native-rate real chunks only. Synthetic renders are made at 16 kHz and pass
+through unwarped with exact labels. Before `f9f03e17`, `build_noise_stream`
+refused any engine except silence under a warp policy.
+
+Smoke check (`f9f03e17`, 240 clips per stream, in-process): 112 real (all
+warped), 92 synthetic and 36 silence. The expected split is 100 / 100 / 40.
+
+**Setup.** Model, loss, LR, validation panel and stop rule are the synthetic
+pretraining run's: `rp_real_v4easy` (control `real_macro`, `near_macro`) and
+`rp_real_priorv4` (control `real_macro`, `uniform`). HPPNet-L2 uses 64 × 2
+accumulation and the others 128 × 1. Each job gets 16 CPUs (12 workers),
+64 GB and 48 h on `uni`, with no GPU pin.
+
+Known data defects, inherited unchanged from the parent streams:
+
+- The MD2 regime blow-up: a stopped rotor under the cruise fit's α_motor
+  −4.0. It hits 3.5 % of easy MD2 renders and 2.1 % of hard renders.
+- The easy MD2 half carries no wind, while `near_md2` validates with
+  `wind_sc`.
+
+| model | easy (`*_easyv4_mixlab`) | hard (`*_priorv4_mixlab`) |
+|---|---|---|
+| HRSPNet | `rp-pyrseplstm-k64-easyv4-860b68` | `rp-pyrseplstm-k64-priorv-8b1f9a` |
+| HarmoF0-L2 | `rp-harmof0-l2-easyv4-mix-d7c906` | `rp-harmof0-l2-priorv4-mi-f90064` |
+| Conv+BiGRU | `rp-scv2-easyv4-mixlab-d1d875` | `rp-scv2-priorv4-mixlab-954411` |
+| HPPNet-L2 | `rp-hppnet-l2-easyv4-mixl-3516c2` | `rp-hppnet-l2-priorv4-mix-2f2d69` |
+
+Results: pending.
 
 ## Frequency-scaling probe of the grid (2026-10-26)
 

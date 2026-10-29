@@ -440,7 +440,9 @@ label-diff rate (`noise_rate_warp` must change labels on every nonzero-RPS
 fire — all-zero-RPS chunks are exempt, and its fire rate is measured over the
 label-bearing chunks since the silence floor is never warped; every other
 block must never touch labels); every ramp is listed with its window; (4)
-per-id determinism. Nonzero exit on any FAIL — usable as a
+per-id determinism. Engine chunks are never warped either, so on a stream that
+mixes engines with warped real noise (`rp_*_mixlab`) the measured warp rate is
+p × the real share and the warp row FAILs by construction. Nonzero exit on any FAIL — usable as a
 submission gate. Fire detection compares each sample against a control stream
 whose aug block has `probability: 1e-9` (never removes the key — a
 present-but-missed block still consumes the fire-decision RNG draw, so
