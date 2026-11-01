@@ -808,6 +808,49 @@ def test_render_reuse_amortises_synthesis_without_freezing_the_noise() -> None:
     assert eager_calls[0] == 5, "the default must still render every sample"
 
 
+def test_a_longer_render_is_cut_into_aligned_windows_on_every_reuse() -> None:
+    """``render_duration_s`` 2 s at 0.5 s windows: 16 draws at reuse 8 come from
+    2 renders, every draw is a distinct 0.5 s slice of one of them, and its
+    rotor track is cut at the same samples as its audio."""
+    pool = srn.StochasticNoisePool(
+        sample_rate=SR,
+        duration_s=0.5,
+        n_harmonics=24,
+        n_mics=2,
+        line_mode="fm",
+        ranges={"floor_rel_db": (-20.0, -20.0), "min_lines_above_floor": 0.0},
+        render_reuse=8,
+        render_pool=2,
+        render_duration_s=2.0,
+    )
+    renders: list[tuple[np.ndarray, np.ndarray]] = []
+    inner = pool.render
+
+    def kept(rng: np.random.Generator, duration_s: float):  # type: ignore[no-untyped-def]
+        out = inner(rng, duration_s)
+        renders.append((out[0], out[1]))
+        return out
+
+    pool.render = kept  # type: ignore[assignment]
+    rng = np.random.default_rng(5)
+    n = SR // 2
+    drawn = [pool._pooled_render(rng, 0.5) for _ in range(16)]
+
+    assert len(renders) == 2 and all(a.shape[-1] == 2 * SR for a, _ in renders)
+    assert len({a.tobytes() for a, _ in drawn}) > 2, "reuse must cut different windows"
+    for audio, rps in drawn:
+        assert audio.shape[-1] == n and rps.shape[-1] == n
+        hits = [
+            (src_rps, s)
+            for src_audio, src_rps in renders
+            for s in np.flatnonzero(src_audio[0, : 2 * SR - n + 1] == audio[0, 0])
+            if np.array_equal(src_audio[:, s : s + n], audio)
+        ]
+        assert hits, "a drawn window is not a slice of a render"
+        src_rps, s = hits[0]
+        np.testing.assert_array_equal(rps, src_rps[:, s : s + n])
+
+
 def test_per_rotor_floor_guard_lifts_the_quietest_rotor_above_the_floor():
     """A pooled coverage fraction can bury a whole rotor; the per-rotor form
     cannot.

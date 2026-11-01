@@ -1,0 +1,63 @@
+# rp_real.yaml plus a frozen panel of PRE-DRAWN rp_stochcomb samples, for the
+# stochastic-comb arm of the simplistic-synthetic ablation
+# (docs/experiments/rp-synthetic.md). The stochastic counterpart of
+# rp_real_combdiv.yaml, built the same way:
+#
+# stoch_comb: 64 draws x 8 mics = 512 mono items of conf/online_mix/rp_stochcomb.yaml
+# itself, drawn once at the start of the run from base_seed 771002 (training
+# streams from 20261101): 8 s like the real clips, flight_reuse 1 and
+# render_reuse 1 so every clip is its own drone, flight and render; speech and
+# SNR as the stream, the silence arm at its stream weight, augmentations
+# stripped as on the real panel.
+#
+# The stop waits on BOTH controls: the run continues while the 5-round median of
+# real_macro OR of stoch_comb still improves; best_stoch_comb_median.ckpt seeds
+# the fine-tuning.
+defaults:
+  - rp_real
+  - _self_
+
+control: [real_macro, stoch_comb]
+
+datasets:
+  stoch_comb:
+    _target_: data_processing.frame_datasets.FixedSynthFrameDataset
+    params:
+      path: conf/online_mix/rp_stochcomb.yaml
+      n: 512
+      base_seed: 771002
+      duration_s: 8.0
+      augment: false
+      flatten_channels: true
+      flight_reuse: 1
+      render_reuse: 1
+      meta: {dataset: stoch_comb, source_type: speech}
+    iterable: false
+
+views:
+  stoch_comb: {where: {dataset: stoch_comb}}
+
+primary:
+  - dregon
+  - md2
+  - real_macro
+  - dregon_nosource
+  - dregon_source
+  - md2_nosource
+  - md2_source
+  - dregon_zero
+  - dregon_standby
+  - dregon_ramp
+  - dregon_cruise
+  - md2_zero
+  - md2_standby
+  - md2_ramp
+  - md2_cruise
+  - real
+  - real_nosource
+  - real_source
+  - real_zero
+  - real_standby
+  - real_ramp
+  - real_cruise
+  - stoch_comb

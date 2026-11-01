@@ -1,0 +1,20 @@
+# @package _global_
+# rp_pyrseplstm_k64_combdiv with the diverse static comb replaced by the stochastic comb (conf/online_mix/rp_stochcomb.yaml), validated on the real panel plus pre-drawn stochcomb samples (conf/validation/rp_real_stochcomb.yaml). Batch doc: docs/experiments/rp-synthetic.md.
+defaults:
+  - override /data: rp_real
+  - override /model: hppnet_pyrseplstm_k64
+  - override /loss: salience_layers_rp
+  - override /metrics: salience_layers_rp
+  - override /validation: rp_real_stochcomb
+  - _self_
+
+experiment_name: rp_pyrseplstm_k64_stochcomb
+batch_size: 128  # as rp_pyrseplstm_k64_combdiv; peak 17.8 GiB at B 128 (bench-hrspnet-triton-vas-8f5219) fits any sae GPU
+grad_accum_steps: 1
+num_workers: 12  # a stochastic render costs twice a static-comb one (0.23 against 0.11 CPU-s per 4 s)
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_stochcomb.yaml
+optim:
+  lr: 1.0e-3  # as rp_pyrseplstm_k64_all
