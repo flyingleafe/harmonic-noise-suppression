@@ -550,7 +550,7 @@ Open decisions:
   from the prior_v1 laws in v4 (rules `prior_v4/4`, `prior-v4-banks@2ee5131e`);
   the paper's wide-prior table still needs rewriting from those laws.
 - **(d)** Resolved 2026-10-26: § "Validation sectors".
-- **(e)** The stochastic comb under the rp protocol is not defined.
+- **(e)** Resolved 2026-11-01: § "Stochastic comb (2026-11-01)".
 
 Cost, from combdiv: a synthetic-only run hit the 100 000-step cap after
 17.4 h on a vast A100-80. Per draw, fitted-model renders cost more than combs
@@ -821,6 +821,51 @@ W&B runs: easy `o9nhx3u0`, `eqvkd572`, `bv16lw6t`, `9a8fzuve`; hard `tykzoxrx`,
   1.59–9.97, against 9.05–21.06 for the hard fine-tunes.
 - One seed per cell. The Conv+BiGRU fine-tune rerun shows run-to-run noise
   of about 0.1 Hz.
+
+## Stochastic comb (2026-11-01)
+
+The second simplistic generator of the paper's Table VIII (`tab:ablation`).
+Dmitrii's decision: use the stochastic family at its module defaults
+(`StochasticRanges` as is). The visibility block of arm H was rejected because
+its knobs were picked on real validation scores. A single-factor "static comb
+plus drift" was rejected because it needs a new engine.
+
+**Stream.** `conf/online_mix/rp_stochcomb.yaml` is `rp_combdiv` with only the
+engine swapped to `kind: stochastic`. The two combs share everything else:
+
+- the trajectory block;
+- the level law speed^2.5, with no recording-chain floor, so a stopped rotor
+  is silent;
+- each 4 s render normalised to RMS 0.1;
+- mic gains −4 to 0 dB;
+- the comb to Nyquist with a 0.1 band taper (up to 500 orders);
+- 4 s renders reused 40 times, each draw its own 2 s window;
+- the silence arm, speech and augmentations.
+
+The stochastic pool reused whole clips before `6853ed0c`. It now takes
+`render_duration_s` as the static comb and noise_v2 do. A test checks that each
+draw is a slice of a render, with its rotor track cut at the same samples.
+
+**Cost.** A stochastic render costs 0.23 CPU-s per 4 s × 8 mics (static comb:
+0.11). A local draw of 200 clips made 5 renders.
+
+**Validation.** `conf/validation/rp_real_stochcomb.yaml` holds the real panel
+plus a 512-item `stoch_comb` panel (seed 771002), built as `static_comb`. The
+run stops when neither `real_macro` nor `stoch_comb` improves. Caveat: on the
+salv2 grid, the stochastic synthetic views ranked models inversely (good scores
+came with average predictions). The synthetic-selected cell may therefore be a
+poor checkpoint.
+
+**Runs (submitted 2026-11-01, `uni`, `6853ed0c`):**
+
+| run | job |
+|---|---|
+| `rp_pyrseplstm_k64_stochcomb` (16 CPUs, 48 h) | `rp-pyrseplstm-k64-stochc-c91b13` |
+| `rp_pyrseplstm_k64_stochcomb_ft_lr5e4` (`--after`) | `rp-pyrseplstm-k64-stochc-9fa752` |
+| `rp_pyrseplstm_k64_combdiv_ft_lr5e4` (from `best_static_comb_median`, step 88 000) | `rp-pyrseplstm-k64-combdi-f4a38e` |
+
+The table's static-comb synthetic-selected round is 97 000. That is the argmin
+of the median; the loop's saved checkpoint moved last at 88 000.
 
 ## Frequency-scaling probe of the grid (2026-10-26)
 
