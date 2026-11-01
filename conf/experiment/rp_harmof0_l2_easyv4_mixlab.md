@@ -12,4 +12,4 @@ HarmoF0-L2 trained from scratch on mixed data (Dmitrii, 2026-10-29): 50 % the ea
 
 ## Conclusion
 
-Pending.
+Done 2026-10-29 (W&B `eqvkd572`, stopped 78 000): `real_macro` 2.36 at step 63 000, `uniform` 24.05. This is the best HarmoF0-L2 training: real-only 2.62, easy fine-tune 2.57. Batch doc: `docs/experiments/rp-synthetic.md` § "Mixed training".

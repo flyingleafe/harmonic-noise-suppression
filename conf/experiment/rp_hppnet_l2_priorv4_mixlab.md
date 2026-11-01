@@ -12,4 +12,4 @@ HPPNet-L2 trained from scratch on mixed data (Dmitrii, 2026-10-29): 50 % the har
 
 ## Conclusion
 
-Pending.
+Done 2026-10-30 (W&B `hdy8j35o`, stopped 77 000): `real_macro` 4.17 at step 59 500, `uniform` 3.38. This is over the real-only reference (3.39). The error sits on the stopped rotors: zero frames at 22.88 (DREGON) and 17.63 (MD2). Batch doc: `docs/experiments/rp-synthetic.md` § "Mixed training".

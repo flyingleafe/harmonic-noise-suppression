@@ -12,4 +12,4 @@ HPPNet-L2 trained from scratch on mixed data (Dmitrii, 2026-10-29): 50 % the eas
 
 ## Conclusion
 
-Pending.
+Done 2026-10-30 (W&B `9a8fzuve`, stopped 66 500): `real_macro` 2.97 at step 51 500, `uniform` 23.14. This is the best HPPNet-L2 training: real-only 3.39, easy fine-tune 3.26. Batch doc: `docs/experiments/rp-synthetic.md` § "Mixed training".

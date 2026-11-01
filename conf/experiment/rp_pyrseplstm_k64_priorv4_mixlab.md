@@ -12,4 +12,4 @@ HRSPNet trained from scratch on mixed data (Dmitrii, 2026-10-29): 50 % the hard 
 
 ## Conclusion
 
-Pending.
+Done 2026-10-30 (W&B `tykzoxrx`, stopped 78 500): `real_macro` 2.24 at step 55 000, `uniform` 1.59. This is 0.28 Hz under the real-only reference (2.52) and 0.09 Hz over the hard fine-tune (2.15), which keeps `uniform` only at 9.05. Batch doc: `docs/experiments/rp-synthetic.md` § "Mixed training".

@@ -711,7 +711,7 @@ lowest 5-round median of the selection score; PIT-MAE (Hz).
 |---|---|---|---|---|
 | HRSPNet | 48 500 | 35 000: 4.14 / 17.94 / 7.31 | 6.57 | 2.33 (7000) |
 | HarmoF0-L2 | 48 500 | 33 500: 8.38 / 24.60 / 10.49 | 6.86 | 2.57 (4500) |
-| Conv+BiGRU | **5000, non-finite** | 4000: 8.40 / 31.16 / 9.31 | 9.31 | 2.83 (18 500) |
+| Conv+BiGRU | **5000, non-finite** | 4000: 8.40 / 31.16 / 9.31 | 9.31 | 2.94 (17 500; first run 2.83 at 18 500) |
 | HPPNet-L2 | 82 000 | 52 000: 4.97 / 25.04 / 8.84 | 6.91 | 3.26 (10 000) |
 
 Conv+BiGRU stopped on a non-finite validation round (`val/loss`,
@@ -726,6 +726,33 @@ the panel eval because `uni-gpushort` placed it on a V100 (sm_70), where the
 HRSPNet Triton kernel does not compile. Resubmitted 2026-10-29 at `f9f03e17`:
 `rp-scv2-easyv4-resume2-86cbe6` (uni), `rp-scv2-easyv4-ft-r2-dd4c2d`
 (`--after`), `rp-easytuned-synth-eval2-252b74` (uni-gpushort, `--vram 40`).
+
+**Outcome (2026-11-01).** The resume restarted at step 4500 and hit the same
+non-finite round (`val/loss`, `val/strong_motor`) at step 5000, so the
+Conv+BiGRU easy pretraining is still provisional. The non-finite round is
+deterministic; its cause is not yet investigated. The fine-tune rerun (W&B
+`ubonw37z`) started from the same step-4000 checkpoint and reached 2.94 at
+17 500, against 2.83 at 18 500 in the first run (`bpe30410`). This 0.11 gap is
+the run-to-run noise of one fine-tune. The rerun overwrote the first run's
+checkpoints on R2, so Table VI now quotes the rerun.
+
+`--vram 40` did not keep the eval off the V100s. The rerun
+`rp-easytuned-synth-eval3-13beb4` runs with `TAP_CONV_TORCH=1` (the torch
+path), and HarmoF0-L2 was rescored at its table round by
+`rp-easytuned-hf0-synth-e-7e3d62` (`best_real_median`, step 4500; its
+`best_real_macro_median` is step 3000, real_macro 2.51). Outputs are in
+`results/rp_panel_eval/easytuned_synth_v4{,_harmof0}.json`. The real views
+reproduce the tuned rows to 0.01.
+
+| model | `uniform` | `near_macro` |
+|---|---|---|
+| HRSPNet | 23.07 | 5.90 |
+| HarmoF0-L2 | 26.08 | 8.15 |
+| Conv+BiGRU | 37.40 | 15.78 |
+| HPPNet-L2 | 26.69 | 7.70 |
+
+Easy fine-tuning keeps less of the `uniform` skill than hard fine-tuning
+(9.05–21.06), which is expected: the easy pretraining never reached `uniform`.
 
 ## Mixed training (2026-10-29)
 
@@ -767,7 +794,33 @@ Known data defects, inherited unchanged from the parent streams:
 | Conv+BiGRU | `rp-scv2-easyv4-mixlab-d1d875` | `rp-scv2-priorv4-mixlab-954411` |
 | HPPNet-L2 | `rp-hppnet-l2-easyv4-mixl-3516c2` | `rp-hppnet-l2-priorv4-mix-2f2d69` |
 
-Results: pending.
+**Results (2026-11-01, W&B; Table VI "easy, mixed" / "hard, mixed").** All
+eight runs stopped by saturation (37 000–78 500 steps). Each value is raw
+`val/*` at the round with the lowest five-round median of `real_macro`;
+`uniform` is read at that same round. All values are PIT-MAE in Hz.
+
+| model | real only | easy, tuned | hard, tuned | easy, mixed (step) | hard, mixed (step) | `uniform`: easy / hard mixed |
+|---|---|---|---|---|---|---|
+| HRSPNet | 2.52 | 2.33 | **2.15** | 2.48 (28 500) | 2.24 (55 000) | 22.83 / 1.59 |
+| HarmoF0-L2 | 2.62 | 2.57 | 2.59 | **2.36** (63 000) | 4.61 (30 000) | 24.05 / 9.97 |
+| Conv+BiGRU | 2.65 | 2.94 (prov.) | **2.55** | 2.94 (50 500) | 2.89 (54 500) | 23.87 / 4.21 |
+| HPPNet-L2 | 3.39 | 3.26 | 3.89 | **2.97** (51 500) | 4.17 (59 500) | 23.14 / 3.38 |
+
+W&B runs: easy `o9nhx3u0`, `eqvkd572`, `bv16lw6t`, `9a8fzuve`; hard `tykzoxrx`,
+`vtdal2ho`, `59gs164v`, `hdy8j35o`, in table order.
+
+- **Easy mixed** is the best training of HarmoF0-L2 (2.36) and of HPPNet-L2
+  (2.97). It beats each model's own real-only reference by 0.26 and 0.42 Hz.
+  For HRSPNet it ties the reference (2.48 against 2.52). Conv+BiGRU is worse
+  (2.94 against 2.65), and its MD2 zero frames reach 10.34 Hz.
+- **Hard mixed** helps HRSPNet only: 2.24, 0.09 Hz over the hard fine-tune
+  (2.15), with `uniform` kept at 1.59 against 9.05 after fine-tuning.
+  HarmoF0-L2 (4.61) and HPPNet-L2 (4.17) lose on stopped rotors, with zero
+  frames at 9.54 / 23.77 and 22.88 / 17.63 Hz (DREGON / MD2).
+- The mixed runs keep the synthetic skill of their setup: hard `uniform`
+  1.59–9.97, against 9.05–21.06 for the hard fine-tunes.
+- One seed per cell. The Conv+BiGRU fine-tune rerun shows run-to-run noise
+  of about 0.1 Hz.
 
 ## Frequency-scaling probe of the grid (2026-10-26)
 

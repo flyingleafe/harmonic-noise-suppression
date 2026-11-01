@@ -12,4 +12,4 @@ HRSPNet trained from scratch on mixed data (Dmitrii, 2026-10-29): 50 % the easy 
 
 ## Conclusion
 
-Pending.
+Done 2026-10-29 (W&B `o9nhx3u0`, stopped 37 000): `real_macro` 2.48 at step 28 500 (lowest five-round median), `uniform` 22.83. This ties the real-only reference (2.52) and is worse than the easy fine-tune (2.33). Batch doc: `docs/experiments/rp-synthetic.md` § "Mixed training".

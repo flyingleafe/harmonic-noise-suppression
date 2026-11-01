@@ -12,4 +12,4 @@ Conv+BiGRU trained from scratch on mixed data (Dmitrii, 2026-10-29): 50 % the ea
 
 ## Conclusion
 
-Pending.
+Done 2026-10-29 (W&B `bv16lw6t`, stopped 66 500): `real_macro` 2.94 at step 50 500, `uniform` 23.87. This is over the real-only reference (2.65), with MD2 zero frames at 10.34. Batch doc: `docs/experiments/rp-synthetic.md` § "Mixed training".

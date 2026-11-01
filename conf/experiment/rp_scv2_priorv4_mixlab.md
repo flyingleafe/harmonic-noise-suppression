@@ -12,4 +12,4 @@ Conv+BiGRU trained from scratch on mixed data (Dmitrii, 2026-10-29): 50 % the ha
 
 ## Conclusion
 
-Pending.
+Done 2026-10-30 (W&B `59gs164v`, stopped 55 500): `real_macro` 2.89 at step 54 500, `uniform` 4.21. This is over the real-only reference (2.65) and the hard fine-tune (2.55). Batch doc: `docs/experiments/rp-synthetic.md` § "Mixed training".

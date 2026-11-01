@@ -12,4 +12,4 @@ HarmoF0-L2 trained from scratch on mixed data (Dmitrii, 2026-10-29): 50 % the ha
 
 ## Conclusion
 
-Pending.
+Done 2026-10-30 (W&B `vtdal2ho`, stopped 64 000): `real_macro` 4.61 at step 30 000, `uniform` 9.97. This is far over the real-only reference (2.62). The error sits on the stopped rotors: zero frames at 9.54 (DREGON) and 23.77 (MD2). Batch doc: `docs/experiments/rp-synthetic.md` § "Mixed training".
