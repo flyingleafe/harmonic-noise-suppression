@@ -23,6 +23,9 @@ Figures
     trajectory, rotor noise at unit RMS, one colour range; (b) the metric MDS
     of the spectral rig distance: training bank, easy neighbourhoods, fits and
     the drones of (a).
+``gen_speed_laws``
+    Measured line and floor speed exponents on the DREGON bench ladder, using
+    the stored regressions without refitting the audio.
 
 The paper's figures (``fits``, ``noise``, ``hyper``, ``bank``, ``prior``) are
 drawn at print size in :func:`plots.paper.paper_style`; the deck's (``traj``,
@@ -943,6 +946,101 @@ def _load_json(path: Path) -> dict:
         return json.load(fh)
 
 
+@_paper
+def fig_speed_laws() -> None:
+    """Draw the three bench-law panels from the stored ladder regressions."""
+    data = _load_json(ROOT / "results/static_rig/single_rotor/speed_laws.json")
+    fig, axes = plt.subplots(3, 1, figsize=(COLUMN_IN, 5.8))
+    fig.subplots_adjust(left=0.18, right=0.98, bottom=0.08, top=0.97, hspace=0.65)
+
+    lines = data["alpha_k"]
+    orders = np.array([row["k"] for row in lines])
+    exponents = np.array([row["alpha"] for row in lines])
+    errors = np.array([row["se"] for row in lines])
+    families = (
+        ("even", (orders % 2 == 0) & (orders % 21 != 0), COLOURS[0], "o"),
+        ("odd", (orders % 2 != 0) & (orders % 21 != 0), COLOURS[1], "^"),
+        (r"motor $21n$", orders % 21 == 0, COLOURS[2], "s"),
+    )
+    axes[0].errorbar(orders, exponents, yerr=errors, fmt="none", ecolor="0.65", lw=0.5)
+    for label, mask, color, marker in families:
+        axes[0].scatter(
+            orders[mask],
+            exponents[mask],
+            s=8,
+            color=color,
+            marker=marker,
+            label=label,
+            zorder=3,
+        )
+    axes[0].axhline(0, color="0.4", lw=0.5)
+    axes[0].set(
+        xlabel=r"Harmonic order $k$",
+        ylabel=r"Line exponent $\alpha_k$",
+        xlim=(0, orders.max() + 1),
+        ylim=(-6, 12),
+    )
+    axes[0].legend(loc="upper right", ncol=3, fontsize=6.5, handletextpad=0.3, columnspacing=0.8)
+
+    floor_order = data["floor_fixed_order"]
+    axes[1].errorbar(
+        [row["k"] for row in floor_order],
+        [row["beta"] for row in floor_order],
+        yerr=[row["se"] for row in floor_order],
+        fmt="o",
+        ms=2,
+        color=COLOURS[2],
+        ecolor="0.65",
+        lw=0.5,
+    )
+    axes[1].set(
+        xlabel=r"Harmonic order $k$",
+        ylabel="Floor exponent\nat fixed order",
+        xlim=(0, orders.max() + 1),
+        ylim=(-3, 6),
+    )
+
+    floor_freq = data["floor_fixed_f"]
+    centers = np.array([np.sqrt(row["lo"] * row["hi"]) for row in floor_freq])
+    for index, row in enumerate(data["floor_tilt_law"]):
+        axes[2].plot(
+            centers,
+            row["b0_at_2khz"] + row["b1_per_octave"] * np.log2(centers / 2000),
+            color="0.65",
+            lw=0.6,
+            label=r"Fitted $b(f)$" if index == 0 else None,
+        )
+    axes[2].errorbar(
+        centers,
+        [row["b"] for row in floor_freq],
+        yerr=[row["se"] for row in floor_freq],
+        fmt="o-",
+        ms=3,
+        color=COLOURS[3],
+        lw=0.7,
+        label="Measured",
+    )
+    axes[2].plot(
+        centers,
+        [row["b_net"] for row in floor_freq],
+        "s--",
+        ms=3,
+        color="0.35",
+        lw=0.7,
+        label="Ambient removed",
+    )
+    axes[2].set(
+        xscale="log",
+        xlabel="Frequency (Hz)",
+        ylabel=r"Floor exponent $b(f)$",
+        ylim=(0, 7),
+    )
+    axes[2].legend(loc="upper left", fontsize=6.5)
+    for letter, ax in zip("abc", axes):
+        ax.set_title(f"({letter})", loc="left", pad=3)
+    save(fig, "gen_speed_laws", paper=True)
+
+
 # ── tables ──────────────────────────────────────────────────────────────────
 
 
@@ -1137,52 +1235,63 @@ def tables() -> None:
 
     write_table(
         "gen_noise_data",
-        "lllrl",
+        "@{}p{0.29\\textwidth}llp{0.16\\textwidth}p{0.27\\textwidth}@{}",
         ["recording set", "class", "rotors / mics", "duration (s)", "role in the fit"],
         [
             [
-                "DREGON single-motor bench, 50--90\\,\\%",
+                "DREGON single-rotor bench, 50--90\\,\\% (20 recordings)",
                 "bench",
                 "1 / 8",
-                "12--34 per window",
-                "identifies $\\sigma_\\nu$, $\\lambda$, $\\gamma_{rk}$",
+                "9.5--36 per recording",
+                "joint line, floor, pedestal and shaft-law fit",
             ],
             [
                 "DREGON \\texttt{motor\\_allMotors\\_70} bench",
                 "bench",
                 "4 / 8",
                 "$\\sim$30",
-                "four-rotor control",
+                "prediction check, no refit (pending)",
             ],
             [
-                "DREGON room 2 free flight / hover / rectangle / spinning",
+                "DREGON room-2 flights (18 windows)",
                 "flight",
                 "4 / 8",
-                "4 per window, pooled",
-                "floor and flight profile (R5 fit)",
+                "8 per window",
+                "gust-wind calibration; bench lines and floor unchanged",
             ],
             [
-                "Michael's FLY125 cruise",
+                "MD2 FLY125 cruise (8 windows)",
                 "flight",
-                "4 / 1",
-                "4 per window, pooled",
-                "cruise comb and floor (R3 fit)",
+                "4 / 8",
+                "8 per window",
+                "cruise regime fit",
             ],
             [
-                "Michael's FLY125 standby",
+                "MD2 FLY125 standby (3 windows)",
                 "flight",
-                "4 / 1",
-                "4 per window, pooled",
-                "standby regime of the same rig",
+                "4 / 8",
+                "4 per window",
+                "standby regime fit",
             ],
         ],
-        "Recordings behind the shipped noise fits. Flight supports are periodic-Hann frames, "
-        "$N=2048$, hop 512 at 16\\,kHz, pooled over windows; bench supports are one stationary "
-        "periodogram each. The fit band is $30\\,\\mathrm{Hz} \\le f \\le 7900\\,\\mathrm{Hz}$.",
+        "Recordings used for the noise fits and the planned four-rotor prediction check. "
+        "Flight supports use 2048-point periodic-Hann frames with hop 512 at 16\\,kHz, retaining "
+        "every fourth frame; bench supports use one periodogram over each strict rotor-on span. "
+        "The fit band is 30\\,Hz--7.2\\,kHz on the bench and DREGON flight supports, and "
+        "31.25\\,Hz--7.9\\,kHz on MD2. Bench durations are taken from the exported fit metadata.",
         "tab:gen-noise-data",
         star=True,
         size="footnotesize",
         tabcolsep="4pt",
+        source=(
+            "source: docs/experiments/noise-model-v4-bench.md, Setup and Conclusion; "
+            "docs/experiments/noise-model-v4-paper-edits.md, section 6 (prediction pending);\n"
+            "results/noise_v4/bench/restarts/dregon__kappa0__r5__s2__c7.json, recordings[].span_s;\n"
+            "results/noise_v4/flight/gust_r1/"
+            "dregon_room2__flight_v4__c7lines__scwind__wide__lines__c1__gust.json, supports;\n"
+            "results/noise_v4/flight/restarts/"
+            "md2_fly125_{standby,cruise}_fpb__flight_v4__s0__r6c{1,3}.json, pool.members"
+        ),
     )
 
     ref = "\\textit{real reference}"
@@ -1361,6 +1470,8 @@ def main() -> None:
         fig_noise_fits()
     if "prior" in which:
         fig_noise_prior()
+    if "speed_laws" in which:
+        fig_speed_laws()
 
 
 if __name__ == "__main__":
