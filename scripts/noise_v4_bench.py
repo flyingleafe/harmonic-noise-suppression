@@ -2,10 +2,10 @@
 ``docs/explainers/noise-model-v4.qmd``): one joint fit over the 20 single-rotor
 recordings, its restarts and the planted check::
 
-    python scripts/noise_v4_bench.py fit --seeds 4 --kappa K --device cuda [--flat-shaft]
+    python scripts/noise_v4_bench.py fit --seeds 4 --kappa K --device cuda [--flat-shaft|--const-lam]
     python scripts/noise_v4_bench.py reduce
     python scripts/noise_v4_bench.py planted --truth <payload.json> --kappa K --device cuda
-    python scripts/noise_v4_bench.py refit --from <payload.json> --flat-shaft --device cuda
+    python scripts/noise_v4_bench.py refit --from <payload.json> --flat-shaft|--const-lam --device cuda
     python scripts/noise_v4_bench.py resume --from <payload.json> --device cuda
     python scripts/noise_v4_bench.py eta --fit <payload.json> --device cuda
     python scripts/noise_v4_bench.py escape --from <payload.json> --device cuda \\
@@ -16,7 +16,8 @@ Outputs under ``--out`` (default ``results/noise_v4/bench``): ``restarts/`` one
 ``fits/<name>.json`` the selected restart (lowest objective) with the restart
 spread per parameter group; ``planted/<name>.json`` the recovery report;
 ``restarts/<source>__flat.json`` + ``refit/<source>__flat.json`` the nested
-flat-shaft refit (one ``(sigma_nu, lam)`` for every speed) and its comparison;
+flat-shaft refit (one ``(sigma_nu, lam)`` for every speed) and its comparison
+(``__constlam``: ``--const-lam``, only ``b_lam = 0``, a speed-independent rate);
 ``restarts/<source>__c<n+1>.json`` a continuation (``resume``, ``escape``; an
 ``escape`` also writes ``<continuation>.hessian.npz``, its exact state and last
 Hessian, which ``--hessian`` resumes from);
@@ -50,15 +51,34 @@ def _git() -> str | None:
 
 
 def _rig_name(
-    motors: list[str], throttles: list[int], kappa: float, tag: str, flat: bool = False
+    motors: list[str], throttles: list[int], kappa: float, tag: str, pin: str = ""
 ) -> str:
-    """``dregon[-<motors>][-t<throttles>]__kappa<k>[__flat][__tag]``."""
+    """``dregon[-<motors>][-t<throttles>]__kappa<k>[__flat|__constlam][__tag]``."""
     name = "dregon"
     if tuple(motors) != ALL_MOTORS:
         name += "-" + "-".join(motors)
     if tuple(throttles) != ALL_THROTTLES:
         name += "-t" + "-".join(str(t) for t in throttles)
-    return f"{name}__kappa{kappa:g}" + ("__flat" if flat else "") + (f"__{tag}" if tag else "")
+    return f"{name}__kappa{kappa:g}" + (f"__{pin}" if pin else "") + (f"__{tag}" if tag else "")
+
+
+def _pin_of_args(args: argparse.Namespace) -> str:
+    """``flat`` (``--flat-shaft``), ``constlam`` (``--const-lam``) or ``""``."""
+    return "flat" if args.flat_shaft else "constlam" if args.const_lam else ""
+
+
+def _pinned(pin: str) -> tuple[str, ...]:
+    """The shaft exponents a pin holds at 0 (:data:`bench_v4.SHAFT_FLAT`, ...)."""
+    from experiments.noise_model import bench_v4 as B
+
+    return {"": (), "flat": B.SHAFT_FLAT, "constlam": B.SHAFT_CONST_LAM}[pin]
+
+
+def _pinned_of_payload(pay: dict[str, Any]) -> tuple[str, ...]:
+    """Exactly the pinned set a payload records (``params.shaft.pinned``)."""
+    from experiments.noise_model import bench_v4 as B
+
+    return B.shaft_pins(pay["params"]["shaft"]["pinned"])
 
 
 def _rig_of_payload(pay: dict[str, Any]) -> Any:
@@ -87,7 +107,7 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
         adam_steps=int(prm["adam_steps"]),
         lbfgs_iters=int(prm["lbfgs_iters"]),
         device=prm["device"],
-        flat_shaft=bool(prm["flat_shaft"]),
+        pinned=_pinned("flat" if prm["flat_shaft"] else prm.get("pin", "")),
         deadline_s=60.0 * float(prm["deadline_min"]) if prm.get("deadline_min") else None,
     )
     pay = B.payload(model, rec, git=prm["git"])
@@ -118,7 +138,8 @@ def _fit_worker(unit: Unit) -> dict[str, Any]:
 
 def cmd_fit(args: argparse.Namespace) -> int:
     git = _git()
-    name = _rig_name(args.motors, args.throttles, args.kappa, args.tag, args.flat_shaft)
+    pin = _pin_of_args(args)
+    name = _rig_name(args.motors, args.throttles, args.kappa, args.tag, pin)
     units = [
         Unit(
             uid=f"{name}__s{s}",
@@ -127,7 +148,9 @@ def cmd_fit(args: argparse.Namespace) -> int:
                 throttles=list(args.throttles),
                 seed=s,
                 kappa=args.kappa,
-                flat_shaft=bool(args.flat_shaft),
+                flat_shaft=pin == "flat",
+                # only a non-flat pin adds a key: the plain and flat units stay as they were
+                **({"pin": pin} if pin not in ("", "flat") else {}),
                 adam_steps=args.adam_steps,
                 lbfgs_iters=args.lbfgs_iters,
                 deadline_min=args.deadline_min,
@@ -397,7 +420,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
         ),
         lbfgs_iters=args.lbfgs_iters,
         device=args.device,
-        flat_shaft=bool(src["params"]["shaft"]["pinned"]),
+        pinned=_pinned_of_payload(src),
         start=src,
         resume=True,
         deadline_s=60.0 * args.deadline_min,
@@ -457,7 +480,7 @@ def cmd_escape(args: argparse.Namespace) -> int:
     src = json.loads(src_path.read_text())
     seed = int(src["optimiser"]["seed"])
     kappa = float(src["priors"]["floor_push_kappa"])
-    flat = bool(src["params"]["shaft"]["pinned"])
+    pinned = _pinned_of_payload(src)
     if args.planted:
         # a planted twin's fit: the planted recordings its report describes
         rep = json.loads(Path(args.planted).read_text())
@@ -476,7 +499,7 @@ def cmd_escape(args: argparse.Namespace) -> int:
         device=args.device,
         seed=seed,
         kappa=kappa,
-        flat_shaft=flat,
+        pinned=pinned,
         w_max_hz=float(src["priors"]["w_max_hz"]),
         gamma_amp_max_hz=src["priors"].get("gamma_amp_max_hz"),
     )
@@ -492,7 +515,7 @@ def cmd_escape(args: argparse.Namespace) -> int:
             kappa=kappa,
             lbfgs_iters=args.lbfgs_iters,
             device=args.device,
-            flat_shaft=flat,
+            pinned=pinned,
             start=src,
             resume=True,
             model=m,
@@ -584,9 +607,15 @@ def cmd_escape(args: argparse.Namespace) -> int:
 
 
 def cmd_refit(args: argparse.Namespace) -> int:
-    """The nested test of the shaft law: re-optimise a fitted payload with
-    ``a_sigma = b_lam = 0`` (one ``(sigma_nu, lam)`` for every speed) under
-    :func:`bench_v4.fit_rig`'s schedule, and compare."""
+    """The nested test of the shaft law: re-optimise a fitted payload with the
+    shaft exponents pinned at 0 (``--flat-shaft``: ``a_sigma = b_lam = 0``, one
+    ``(sigma_nu, lam)`` for every speed; ``--const-lam``: ``b_lam = 0``, a
+    speed-independent rate) under :func:`bench_v4.fit_rig`'s schedule, and
+    compare. The source is re-scored under this code and its own pinned set,
+    so both objectives are like for like; the BIC threshold is ``ln N_cells``
+    per newly pinned parameter."""
+    import math
+
     import torch
 
     from experiments.noise_model import bench_v4 as B
@@ -595,7 +624,26 @@ def cmd_refit(args: argparse.Namespace) -> int:
     src_path = Path(args.source)
     src = json.loads(src_path.read_text())
     kappa = float(src["priors"]["floor_push_kappa"] if args.kappa is None else args.kappa)
+    pin = _pin_of_args(args)
+    pinned = _pinned(pin)
+    pinned_src = _pinned_of_payload(src)
     rig = _rig_of_payload(src)
+    # the source re-scored under this code, its own pins and the refit's kappa
+    m_src = B.RigModel(
+        rig,
+        device=args.device,
+        seed=int(src["optimiser"]["seed"]),
+        kappa=kappa,
+        pinned=pinned_src,
+        w_max_hz=float(src["priors"]["w_max_hz"]),
+        gamma_amp_max_hz=src["priors"].get("gamma_amp_max_hz"),
+    )
+    m_src.load_payload(src)
+    rescored_total, rescored_parts = m_src.objective()
+    rescored_whittle = float(sum(rescored_parts))
+    del m_src
+    if args.device != "cpu" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
     model, rec = B.fit_rig(
         rig,
         seed=int(src["optimiser"]["seed"]),
@@ -603,33 +651,60 @@ def cmd_refit(args: argparse.Namespace) -> int:
         adam_steps=args.adam_steps,
         lbfgs_iters=args.lbfgs_iters,
         device=args.device,
-        flat_shaft=bool(args.flat_shaft),
+        pinned=pinned,
         start=src,
         deadline_s=60.0 * args.deadline_min,
     )
     pay = B.payload(model, rec, git=_git())
-    uid = src_path.stem + ("__flat" if args.flat_shaft else "__refit")
+    uid = src_path.stem + (f"__{pin}" if pin else "__refit")
     path = args.out / "restarts" / f"{uid}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(pay))
     o_src, o_new = src["objective"], pay["objective"]
     n = int(o_new["n_cells"])
+    new_pins = [p for p in pinned if p not in pinned_src]
+    bic = len(new_pins) * math.log(n)
+    d_total = o_new["total_nats"] - rescored_total
+    d_whittle = o_new["whittle_nats"] - rescored_whittle
     mv = B.group_movement(B.payload_group_vectors(src), B.payload_group_vectors(pay))
+    sh = pay["params"]["shaft"]
     out = dict(
         source=str(src_path),
         refit=str(path),
-        flat_shaft=bool(args.flat_shaft),
+        flat_shaft=pin == "flat",
+        pin=pin,
+        pinned_source=list(pinned_src),
+        pinned_refit=list(pinned),
+        newly_pinned=new_pins,
+        n_pinned=len(pinned),
+        n_newly_pinned=len(new_pins),
         kappa=kappa,
         source_kappa=src["priors"]["floor_push_kappa"],
         n_cells=n,
-        objective_source=o_src["total_nats"],
+        objective_source_payload=o_src["total_nats"],
+        objective_source=rescored_total,
+        whittle_source=rescored_whittle,
         objective_refit_start=rec["objective_start"],
         objective_refit=o_new["total_nats"],
-        delta_total_nats=o_new["total_nats"] - o_src["total_nats"],
-        delta_total_per_cell=(o_new["total_nats"] - o_src["total_nats"]) / n,
-        delta_whittle_nats=o_new["whittle_nats"] - o_src["whittle_nats"],
-        delta_whittle_per_cell=(o_new["whittle_nats"] - o_src["whittle_nats"]) / n,
-        note="the flat refit drops the a_sigma and b_lam prior terms, so its total "
+        whittle_refit=o_new["whittle_nats"],
+        delta_total_nats=d_total,
+        delta_total_per_cell=d_total / n,
+        delta_whittle_nats=d_whittle,
+        delta_whittle_per_cell=d_whittle / n,
+        bic_threshold_nats=bic,
+        accept_pin_total=bool(d_total < bic),
+        accept_pin_whittle=bool(d_whittle < bic),
+        acceptance_rule="objectives are negative log posteriors (lower is better); the pin "
+        "is accepted when delta = refit - source (source re-scored under this code) is "
+        "below n_newly_pinned * ln(n_cells); line levels/widths must also move within "
+        "the convergence tolerances (movement)",
+        fitted=dict(
+            a_sigma=sh.get("a_sigma"),
+            eps=sh["eps"],
+            lam_ref_per_s=sh["lam_ref_per_s"],
+            b_lam=sh["b_lam"],
+        ),
+        note="the refit drops the pinned exponents' prior terms, so its total "
         "objective is not strictly nested; the Whittle delta is the like-for-like term",
         movement=dict(
             levels=mv["levels"],
@@ -678,7 +753,7 @@ def cmd_eta(args: argparse.Namespace) -> int:
         rig,
         device=args.device,
         kappa=kappa,
-        flat_shaft=bool(pay["params"]["shaft"]["pinned"]),
+        pinned=_pinned_of_payload(pay),
         w_max_hz=float(pay["priors"]["w_max_hz"]),
         gamma_amp_max_hz=pay["priors"].get("gamma_amp_max_hz"),
     )
@@ -728,10 +803,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--device", default="cpu")
     p.add_argument("--jobs", type=int, default=1)
     p.add_argument("--threads", type=int, default=8)
-    p.add_argument(
+    pins = p.add_mutually_exclusive_group()
+    pins.add_argument(
         "--flat-shaft",
         action="store_true",
         help="pin a_sigma = b_lam = 0: one shaft for all speeds",
+    )
+    pins.add_argument(
+        "--const-lam",
+        action="store_true",
+        help="pin b_lam = 0: a speed-independent shaft rate, a_sigma free",
     )
     p.set_defaults(func=cmd_fit)
     p = sub.add_parser("reduce")
@@ -759,9 +840,11 @@ def main(argv: list[str] | None = None) -> int:
         help="replace the truth's floor below HZ by the measured inter-line floor",
     )
     p.set_defaults(func=cmd_planted)
-    p = sub.add_parser("refit", help="nested refit of a payload with the shaft law pinned flat")
+    p = sub.add_parser("refit", help="nested refit of a payload with shaft exponents pinned")
     p.add_argument("--from", dest="source", required=True, help="a noise-v4-fit/3 bench payload")
-    p.add_argument("--flat-shaft", action="store_true", help="pin a_sigma = b_lam = 0")
+    pins = p.add_mutually_exclusive_group()
+    pins.add_argument("--flat-shaft", action="store_true", help="pin a_sigma = b_lam = 0")
+    pins.add_argument("--const-lam", action="store_true", help="pin b_lam = 0 (a_sigma free)")
     p.add_argument("--kappa", type=float, default=None, help="default: the source's kappa")
     p.add_argument("--adam-steps", type=int, default=300)
     p.add_argument("--lbfgs-iters", type=int, default=1200)

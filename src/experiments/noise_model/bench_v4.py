@@ -647,6 +647,21 @@ class _Frozen:
     floor_f: Tensor  # the floor basis' PSD-grid frequencies
 
 
+#: the shaft exponents a model may pin at 0 (gradient zeroed, no prior term):
+#: ``SHAFT_FLAT`` one (sigma_nu, lam) for every speed; ``SHAFT_CONST_LAM`` a
+#: speed-independent rate lam = lam_ref with sigma_nu keeping its speed law
+SHAFT_FLAT: tuple[str, ...] = ("a_sigma", "b_lam")
+SHAFT_CONST_LAM: tuple[str, ...] = ("b_lam",)
+
+
+def shaft_pins(pinned: Any) -> tuple[str, ...]:
+    """A pinned set in canonical order (a payload's ``params.shaft.pinned``)."""
+    names = set(pinned)
+    if not names <= set(SHAFT_FLAT):
+        raise ValueError(f"only {SHAFT_FLAT} can be pinned, got {sorted(names)}")
+    return tuple(n for n in SHAFT_FLAT if n in names)
+
+
 class RigModel:
     """The v4 bench forward model and MAP objective of the whole rig.
 
@@ -664,7 +679,7 @@ class RigModel:
         device: Any = "cpu",
         seed: int = 0,
         kappa: float = 0.0,
-        flat_shaft: bool = False,
+        pinned: Any = (),
         w_max_hz: float = PR.W_MAX_HZ,
         gamma_amp_max_hz: float | None = None,
     ):
@@ -673,9 +688,9 @@ class RigModel:
         self.kappa = float(kappa)
         self.w_max_hz = float(w_max_hz)
         self.gamma_amp_max_hz = None if gamma_amp_max_hz is None else float(gamma_amp_max_hz)
-        #: ``flat_shaft``: one (sigma_nu, lam) for every speed, a_sigma = b_lam = 0
-        #: held (gradient zeroed, no prior term)
-        self.pinned: tuple[str, ...] = ("a_sigma", "b_lam") if flat_shaft else ()
+        #: shaft exponents held at 0 (gradient zeroed, no prior term), see
+        #: :data:`SHAFT_FLAT`, :data:`SHAFT_CONST_LAM`
+        self.pinned: tuple[str, ...] = shaft_pins(pinned)
         self.device = torch.device(device)
         dd: dict[str, Any] = dict(dtype=torch.float64, device=self.device)
         self.dd = dd
@@ -1393,7 +1408,7 @@ def fit_rig(
     adam_lr: float = 0.02,
     lbfgs_iters: int = 1200,
     device: Any = "cpu",
-    flat_shaft: bool = False,
+    pinned: Any = (),
     w_max_hz: float = PR.W_MAX_HZ,
     gamma_amp_max_hz: float | None = None,
     start: dict[str, Any] | None = None,
@@ -1420,8 +1435,12 @@ def fit_rig(
     loop and carries the payload's evidence record (a continuation).
     ``model`` (with ``resume``) continues that model's parameters as they
     stand instead of loading ``start``; ``start`` still gives the evidence.
-    ``flat_shaft`` pins ``a_sigma = b_lam = 0``."""
-    tag = f"[rig s{seed}{' flat' if flat_shaft else ''}]"
+    ``pinned`` holds those shaft exponents at 0 (:func:`shaft_pins`)."""
+    pinned = shaft_pins(pinned)
+    pin_tag = {(): "", SHAFT_FLAT: " flat", SHAFT_CONST_LAM: " constlam"}.get(
+        pinned, " pin-" + "-".join(pinned)
+    )
+    tag = f"[rig s{seed}{pin_tag}]"
     t_all = time.perf_counter()
     if model is None:
         model = RigModel(
@@ -1429,7 +1448,7 @@ def fit_rig(
             device=device,
             seed=seed,
             kappa=kappa,
-            flat_shaft=flat_shaft,
+            pinned=pinned,
             w_max_hz=w_max_hz,
             gamma_amp_max_hz=gamma_amp_max_hz,
         )
@@ -1495,7 +1514,7 @@ def fit_rig(
     record = dict(
         seed=int(seed),
         kappa=float(kappa),
-        flat_shaft=bool(flat_shaft),
+        flat_shaft=pinned == SHAFT_FLAT,
         started_from_payload=start is not None,
         resumed=bool(resume),
         adam_steps=0 if resume else int(adam_steps),
