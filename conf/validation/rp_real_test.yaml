@@ -1,0 +1,75 @@
+# HELD-OUT TEST panel of the paper real-data protocol
+# (docs/experiments/paper-real-protocol.md § "Splits", the `test` row): 38
+# clips of rp-real-test-v1 — DREGON free-flight_{speech,whitenoise}-high_room1
+# (13 clips x 8 mics) and MD2 FLY103/FLY108 (25 clips, MONO) — flattened to
+# 129 mono items. Scored once, at the end, by scripts/rp_panel_eval.py
+# --validation rp_real_test; NEVER a training run's validation (no selection
+# may read it). Views and the score are those of rp_real.yaml, minus the two
+# source cells this panel has no clips for (DREGON nosource, MD2 mixed).
+enabled: true
+every_optimizer_steps: 500
+max_optimizer_steps: 100000
+batch_size: 32
+num_workers: null
+smoothing_window: 5
+min_relative_improvement: 0.01
+min_rounds: 50
+final_patience: 30
+control: [real_macro]
+
+datasets:
+  real:
+    _target_: data_processing.frame_datasets.DregonLMFrameDataset
+    params:
+      data_dir: dload:rp-real-test-v1
+      n_fft: 2048
+      hop_length: 512
+      sample_rate: 16000
+      flatten_channels: true
+    iterable: false
+
+views:
+  dregon: {where: {dataset: dregon}}
+  md2: {where: {dataset: md2}}
+  dregon_source: {where: {dataset: dregon, source_type: loudspeaker}}
+  md2_nosource: {where: {dataset: md2, source_type: nosource}}
+  dregon_zero: {where: {dataset: dregon}, regime: zero}
+  dregon_standby: {where: {dataset: dregon}, regime: standby}
+  dregon_ramp: {where: {dataset: dregon}, regime: ramp}
+  dregon_cruise: {where: {dataset: dregon}, regime: cruise}
+  md2_zero: {where: {dataset: md2}, regime: zero}
+  md2_standby: {where: {dataset: md2}, regime: standby}
+  md2_ramp: {where: {dataset: md2}, regime: ramp}
+  md2_cruise: {where: {dataset: md2}, regime: cruise}
+  real: {where: {dataset: [dregon, md2]}}
+  real_nosource: {where: {dataset: [dregon, md2], source_type: nosource}}
+  real_source: {where: {dataset: [dregon, md2], source_type: [loudspeaker, mixed]}}
+  real_zero: {where: {dataset: [dregon, md2]}, regime: zero}
+  real_standby: {where: {dataset: [dregon, md2]}, regime: standby}
+  real_ramp: {where: {dataset: [dregon, md2]}, regime: ramp}
+  real_cruise: {where: {dataset: [dregon, md2]}, regime: cruise}
+
+aggregates:
+  real_macro: {dregon: 0.5, md2: 0.5}
+
+primary:
+  - dregon
+  - md2
+  - real_macro
+  - dregon_source
+  - md2_nosource
+  - dregon_zero
+  - dregon_standby
+  - dregon_ramp
+  - dregon_cruise
+  - md2_zero
+  - md2_standby
+  - md2_ramp
+  - md2_cruise
+  - real
+  - real_nosource
+  - real_source
+  - real_zero
+  - real_standby
+  - real_ramp
+  - real_cruise

@@ -109,12 +109,13 @@ class DregonLMFrameDataset(Dataset):
 
     ``flatten_channels=True`` instead *reproduces* that legacy
     ``train_rps_predictor.py::_flatten_channels`` scheme at the data level:
-    each multichannel sample expands into ``n_channels`` separate mono-view
-    Frames (one per mic, index space becomes ``len(samples) *
-    n_channels``), each broadcasting the sample's single ``(rotor, T_stft)``
-    RPS target — matching the legacy ``(B, C, T) -> (B*C, T)`` batch-flatten
-    trick. ``meta`` gains a ``"channel"`` key recording which mic each
-    flattened item came from. Mutually exclusive with ``channel=<int>``
+    each sample expands into its own channel count of separate mono-view
+    Frames (one per mic; a mono sample gives one item, so a split may mix
+    8-mic and 1-mic recordings), each broadcasting the sample's single
+    ``(rotor, T_stft)`` RPS target — matching the legacy ``(B, C, T) ->
+    (B*C, T)`` batch-flatten trick. ``meta`` gains a ``"channel"`` key
+    recording which mic each flattened item came from. Mutually exclusive
+    with ``channel=<int>``
     (that already selects one channel deterministically). See
     ``data_processing/AGENTS.md`` § "Multichannel Training & Evaluation
     Wiring" and REPLICATION.md § C9.
@@ -166,20 +167,23 @@ class DregonLMFrameDataset(Dataset):
             for d in self.samples
         ]
 
-        self._n_channels_per_sample = 1
+        #: (sample, channel) per item; channel None = every channel (no flattening).
+        self._items: list[tuple[int, int | None]] = [
+            (i, self.channel) for i in range(len(self.samples))
+        ]
         if self.flatten_channels:
             if self.channel is not None:
                 raise ValueError(
                     "flatten_channels=True is incompatible with channel=<int> "
                     "(channel already selects one mic deterministically)"
                 )
-            info = sf.info(str(self.samples[0] / "mixture.wav"))
-            self._n_channels_per_sample = info.channels
-            if self._n_channels_per_sample <= 1:
+            counts = [sf.info(str(d / "mixture.wav")).channels for d in self.samples]
+            if max(counts) <= 1:
                 raise ValueError(
                     "flatten_channels=True needs multichannel mixture.wav files "
-                    f"(>1 channel); {self.samples[0]} has {self._n_channels_per_sample}"
+                    f"(>1 channel); every sample under {data_dir} is mono"
                 )
+            self._items = [(i, c) for i, n in enumerate(counts) for c in range(n)]
 
     def _load_metadata(self) -> dict[str, dict[str, Any]]:
         meta_path = self.data_dir.parent / "metadata.json"
@@ -190,13 +194,10 @@ class DregonLMFrameDataset(Dataset):
         return {item["id"]: item for item in items if "id" in item}
 
     def __len__(self) -> int:
-        return len(self.samples) * self._n_channels_per_sample
+        return len(self._items)
 
     def __getitem__(self, idx: int) -> td.Frame:
-        if self.flatten_channels:
-            sample_idx, channel = divmod(idx, self._n_channels_per_sample)
-        else:
-            sample_idx, channel = idx, self.channel
+        sample_idx, channel = self._items[idx]
 
         d = self.samples[sample_idx]
         raw, sr = sf.read(d / "mixture.wav", dtype="float32", always_2d=True)  # (T, C)

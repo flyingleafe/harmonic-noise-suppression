@@ -73,9 +73,19 @@ corpus; which checkpoint the paper reports is decided after the runs.
 The two high-level source flights have never been in a training stream or a
 validation panel of the current models (checked 2026-10-14; their only uses
 are label-side analyses and one V2-era regressor eval,
-`dregon-lm-v2-v3-baseline.md`). To be made explicit as a `test` split in
-`src/data_processing/sources/dregon.py` and in `src/data_processing/AGENTS.md`
-so no derivation can root on them.
+`dregon-lm-v2-v3-baseline.md`). They are the `test` split of
+`src/data_processing/sources/dregon.py` (`TEST_RECORDING_IDS`), which the
+panel generator refuses for any split other than `test`.
+
+**Test panel (2026-11-06).** `rp-real-test-v1` (derivation in
+`src/data_processing/derivations.py`): the validation clip recipe over the
+two high-level DREGON flights (6 + 7 clips, 8 mics, `motors_measured`) and
+FLY103/FLY108 (13 + 12 clips, mono, calibrated `rps`); no digital speech
+mix and no rotors-off flight. `conf/validation/rp_real_test.yaml` scores it
+with the views of `rp_real` minus DREGON nosource and MD2 mixed (no clips);
+`scripts/rp_test_eval.sh` scores every Table VI checkpoint of the wrap-up
+paper on it (and on `rp_real`, to pair the rows) into
+`results/rp_test_eval/{test,valid}.json`.
 
 ### Training streams (four arms; everything else identical)
 

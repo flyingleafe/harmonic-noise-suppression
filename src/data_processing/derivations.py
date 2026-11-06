@@ -90,6 +90,7 @@ PARENTS = {
     "drone_audio": "dload:drone_audio@b6c77a68c55dedec11750a3784c10833e7db981fab6ef00380300a9e4d382b95",
     "DREGON-frames": "dload:DREGON-frames@261b09971c8ace16e3434f4a89406c6043403f8ac89a3f1202566cb8c712ba89",
     "michaels-frames": "dload:michaels-frames@8e9d149560dd5d5fa8aaa87e7ea537d7e4d96e829e874dab7d9c92621cca6e46",
+    "michaels-test-frames": "dload:michaels-test-frames@353cc523d6091e1eed80a71e808e177ac037977a9031d9a0e030071d9f338991",
     "AVQ": "dload:AVQ@a37840cace1ef87cabcb6c1a3432c67ca942db12611bcca8bd9a782c88622caf",
     "AVQ-egonoise": "dload:AVQ-egonoise@b43b374b007a0d5c9575dd2feacd31a05097d0c436629819b936273f17cf7703",
     "DREGON-LM-V4-michaels-valid-full": "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9",
@@ -376,13 +377,13 @@ REAL_VALID_PANEL_META_KEYS = (
 )
 
 
-def _panel_recordings(source: dict[str, Any], *, sample_rate: int) -> list[td.Frame]:
+def _panel_recordings(source: dict[str, Any], *, sample_rate: int, split: str) -> list[td.Frame]:
     """One panel source's recordings in its ``recording_ids`` order, reduced to
     (audio + rps + meta) with ``rps`` = the declared ``label_key`` track.
 
     The label is chosen by name, not by the published preference order, so
     the spec (and thus the fingerprint) states which track the panel scores.
-    A DREGON test recording is refused outright.
+    A DREGON test recording is refused unless the panel's ``split`` is ``test``.
     """
     from data_processing.frames import adapt_recording_frame, get_meta
     from data_processing.sources.dregon import TEST_RECORDING_IDS
@@ -392,8 +393,10 @@ def _panel_recordings(source: dict[str, Any], *, sample_rate: int) -> list[td.Fr
     label_key = str(source["label_key"])
     wanted = [str(r) for r in source["recording_ids"]]
     held_out = sorted(set(wanted) & set(TEST_RECORDING_IDS))
-    if held_out:
-        raise ValueError(f"{name}: {held_out} are DREGON test recordings (no panel may use them)")
+    if held_out and split != "test":
+        raise ValueError(
+            f"{name}: {held_out} are DREGON test recordings (only a test panel may use them)"
+        )
     found: dict[str, td.Frame] = {}
     for frame in iter_published_frames(name, version):
         rid = str(get_meta(frame, "recording_id", ""))
@@ -450,11 +453,12 @@ def generate_real_valid_panel(gen: dict[str, Any]) -> Iterator[Sample]:
     Clips are the ``real_valid`` recipe (:func:`mixing.iter_real_valid_clips`
     — the same code path as the ``DREGON-LM-V4-*-valid`` splits) over
     ``gen["sources"]`` in declared order; each source names its ``drone`` tag
-    and ``label_key``. ``gen["speech_mix"]`` then appends, in clip order, a
-    copy of every clip of ``speech_mix["drone"]`` mixed with the pinned
+    and ``label_key``. ``gen["speech_mix"]`` (optional) then appends, in clip
+    order, a copy of every clip of ``speech_mix["drone"]`` mixed with the pinned
     speech parent at ``snr_db[j]`` (source-to-noise, global over the clip's
     channels, reference floor ``snr_ref_floor_rms``² as in the online mixer;
-    no augmentation). The clip count must equal ``num_samples``.
+    no augmentation). The clip count must equal ``num_samples``. DREGON test
+    recordings are accepted only when ``gen["split"]`` is ``test``.
     """
     from data_processing import mixing
 
@@ -465,7 +469,7 @@ def generate_real_valid_panel(gen: dict[str, Any]) -> Iterator[Sample]:
     records: list[td.Frame] = []
     tags: dict[str, tuple[str, str]] = {}
     for source in gen["sources"]:
-        for tf in _panel_recordings(source, sample_rate=sample_rate):
+        for tf in _panel_recordings(source, sample_rate=sample_rate, split=str(gen["split"])):
             records.append(tf)
             rid = str(tf["meta"]["recording_id"])
             tags[rid] = (str(source["drone"]), str(source["label_key"]))
@@ -481,22 +485,6 @@ def generate_real_valid_panel(gen: dict[str, Any]) -> Iterator[Sample]:
         )
     )
 
-    mix = gen["speech_mix"]
-    to_mix = [c for c in clips if tags[c[2]["recording_id"]][0] == mix["drone"]]
-    snrs = [float(s) for s in mix["snr_db"]]
-    if len(snrs) != len(to_mix):
-        raise ValueError(f"speech_mix: {len(snrs)} SNRs for {len(to_mix)} {mix['drone']} clips")
-    n_channels = int(to_mix[0][0].shape[0])
-    speech = _panel_speech(
-        mix,
-        gen["parents"]["speech"],
-        n_clips=len(to_mix),
-        n_channels=n_channels,
-        length=length,
-        sr=sample_rate,
-    )
-    floor_power = float(mix["snr_ref_floor_rms"]) ** 2
-
     rows: list[tuple[np.ndarray, np.ndarray, str, str, float | None, list[str] | None, float]] = []
     for audio, rps, cm in clips:
         st = mixing.infer_source_type(cm["recording_id"])
@@ -504,14 +492,32 @@ def generate_real_valid_panel(gen: dict[str, Any]) -> Iterator[Sample]:
             raise ValueError(f"{cm['recording_id']}: unknown source type {st!r}")
         kind = "nosource" if st == "nosource" else "loudspeaker"
         rows.append((audio, rps, cm["recording_id"], kind, None, None, cm["start_time"]))
-    for (audio, rps, cm), snr, (source, ids) in zip(to_mix, snrs, speech, strict=True):
-        mixed = mixing.mix_at_source_to_noise_snr(
-            source, audio, snr, per_channel=False, ref_power_floor=floor_power
+
+    mix = gen.get("speech_mix")
+    if mix is not None:
+        to_mix = [c for c in clips if tags[c[2]["recording_id"]][0] == mix["drone"]]
+        snrs = [float(s) for s in mix["snr_db"]]
+        if len(snrs) != len(to_mix):
+            raise ValueError(f"speech_mix: {len(snrs)} SNRs for {len(to_mix)} {mix['drone']} clips")
+        speech = _panel_speech(
+            mix,
+            gen["parents"]["speech"],
+            n_clips=len(to_mix),
+            n_channels=int(to_mix[0][0].shape[0]),
+            length=length,
+            sr=sample_rate,
         )
-        peak = float(np.max(np.abs(mixed)))
-        if peak > 1.0:
-            raise ValueError(f"{cm['recording_id']} @ {snr} dB clips the PCM16 wav (peak {peak})")
-        rows.append((mixed, rps, cm["recording_id"], "mixed", snr, ids, cm["start_time"]))
+        floor_power = float(mix["snr_ref_floor_rms"]) ** 2
+        for (audio, rps, cm), snr, (source, ids) in zip(to_mix, snrs, speech, strict=True):
+            mixed = mixing.mix_at_source_to_noise_snr(
+                source, audio, snr, per_channel=False, ref_power_floor=floor_power
+            )
+            peak = float(np.max(np.abs(mixed)))
+            if peak > 1.0:
+                raise ValueError(
+                    f"{cm['recording_id']} @ {snr} dB clips the PCM16 wav (peak {peak})"
+                )
+            rows.append((mixed, rps, cm["recording_id"], "mixed", snr, ids, cm["start_time"]))
     if len(rows) != int(gen["num_samples"]):
         raise ValueError(f"panel has {len(rows)} clips, spec says {gen['num_samples']}")
 
@@ -1941,6 +1947,49 @@ SPECS: dict[str, dict[str, Any]] = {
                 "snr_db": [-5.0] * 8 + [-20.0] * 7,
                 "snr_ref_floor_rms": 0.02,
             },
+        },
+    },
+    # ── Paper real-data protocol held-out TEST panel (derivable) ────────────
+    "rp-real-test-v1": {
+        "generator": "real_valid_panel",
+        "fields": _REAL_VALID_PANEL_FIELDS,
+        "adopt_only": False,
+        "note": "The held-out test panel of docs/experiments/paper-real-protocol.md "
+        "(§ Splits, 'test'): the rp-real-valid-v1 clip recipe (8 s "
+        "max_non_overlapping min_motor_rps-0 clips) over the DREGON test "
+        "recordings free-flight_speech-high_room1 (6 clips) and "
+        "free-flight_whitenoise-high_room1 (7) on motors_measured, 8 mics, and "
+        "the MD2 test recordings FLY103 (13) and FLY108 (12) on their "
+        "calibrated rps, MONO. No digital speech mix (the protocol's test row "
+        "has none). 38 clips; scored once, never a training or selection set.",
+        "gen": {
+            "recipe_version": 1,
+            "seed": 44,
+            "num_samples": 38,
+            "split": "test",
+            "params": {
+                "sample_rate": 16000,
+                "sample_duration": 8.0,
+                "min_motor_rps": 0.0,
+                "max_non_overlapping": True,
+            },
+            "sources": [
+                {
+                    "dataset": PARENTS["DREGON-frames"],
+                    "drone": "dregon",
+                    "label_key": "motors_measured",
+                    "recording_ids": [
+                        "free-flight_speech-high_room1",
+                        "free-flight_whitenoise-high_room1",
+                    ],
+                },
+                {
+                    "dataset": PARENTS["michaels-test-frames"],
+                    "drone": "md2",
+                    "label_key": "rps",
+                    "recording_ids": ["FLY103", "FLY108"],
+                },
+            ],
         },
     },
     # ── DN-LM (derived; recipe_version 1 materialized 2026-07) ──────────────

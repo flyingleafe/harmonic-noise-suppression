@@ -88,6 +88,23 @@ def test_flatten_channels_rejects_mono_files(tmp_path):
         DregonLMFrameDataset(root, flatten_channels=True)
 
 
+def test_flatten_channels_indexes_each_sample_by_its_own_channel_count(tmp_path):
+    root = tmp_path / "test"
+    root.mkdir()
+    rng = np.random.default_rng(0)
+    for i, n in enumerate((4, 1, 1, 4)):  # an 8-mic rig beside a mono one, as rp-real-test-v1
+        _write_sample(root, f"sample_{i:05d}", n_channels=n, n_audio=8000, rng=rng)
+    ds = DregonLMFrameDataset(root, flatten_channels=True)
+    assert len(ds) == 10
+    items = [(get_meta(ds[i], "recording_id"), get_meta(ds[i], "channel")) for i in range(10)]
+    assert items == (
+        [("sample_00000", c) for c in range(4)]
+        + [("sample_00001", 0), ("sample_00002", 0)]
+        + [("sample_00003", c) for c in range(4)]
+    )
+    assert all(ds[i]["mixture"].dims == ("time",) for i in range(10))
+
+
 def test_default_dataset_unaffected_by_flatten_channels_flag(tmp_path):
     root = _make_split(tmp_path, n_samples=3, n_channels=8)
     ds = DregonLMFrameDataset(root, channel=0)

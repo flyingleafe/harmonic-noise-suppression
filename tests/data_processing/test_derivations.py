@@ -83,7 +83,7 @@ def test_specs_integrity():
             assert "parents" in gen and "recordings" in gen, name
         elif kind == "real_valid_panel":
             assert entry["fields"]["meta"] == "meta.json", name
-            for key in ("seed", "num_samples", "split", "params", "sources", "speech_mix"):
+            for key in ("seed", "num_samples", "split", "params", "sources"):
                 assert key in gen, f"{name} missing gen[{key!r}]"
             for source in gen["sources"]:
                 assert "@" in source["dataset"] and source["label_key"], f"{name}: {source}"
