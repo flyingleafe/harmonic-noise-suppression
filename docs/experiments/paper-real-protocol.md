@@ -87,6 +87,17 @@ with the views of `rp_real` minus DREGON nosource and MD2 mixed (no clips);
 paper on it (and on `rp_real`, to pair the rows) into
 `results/rp_test_eval/{test,valid}.json`.
 
+**Test result (omnirun rp-test-eval-1f3618, commit 84afb7f1).** 23 of the 28
+Table VI rows reproduce on `rp_real` within 0.04 Hz; five synthetic-selected
+or mixed rows read a different stored checkpoint (HRSPNet easy, hard and
+easy-mixed; Conv+BiGRU hard; HPPNet-L2 hard). Test macro PIT-MAE (Hz), real
+only → best row of the model: HRSPNet 4.56 → 2.46 (hard, tuned), HarmoF0-L2
+15.89 → 4.20 (easy, mixed), Conv+BiGRU 10.14 → 3.81 (hard, mixed), HPPNet-L2
+4.57 → 3.09 (easy, mixed). The real-only baselines fail on FLY103/FLY108
+(MD2 cruise 30.02 HarmoF0-L2, 14.82 Conv+BiGRU, against 2.76 HRSPNet). The
+synthetic-only HRSPNet beats the real-only one (4.07 easy, 4.10 hard). MD2 zero
+and ramp hold 123 and 211 frames (one mic), so they are noisy cells.
+
 ### Training streams (four arms; everything else identical)
 
 | stream | noise sources | label-altering augmentation |
