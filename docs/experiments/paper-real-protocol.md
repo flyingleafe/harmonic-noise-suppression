@@ -99,6 +99,19 @@ only → best row of the model: HRSPNet 4.56 → 2.46 (hard, tuned), HarmoF0-L2
 synthetic-only HRSPNet beats the real-only one (4.07 easy, 4.10 hard). MD2 zero
 and ramp hold 123 and 211 frames (one mic), so they are noisy cells.
 
+**Test result, ablations (omnirun rp-test-eval-abl-9cbb96, commit 4e3b695e).**
+All ten Table VIII runs and all twelve fine-tuning seeds reproduce their
+validation values; the static-comb synthetic-selected checkpoint is stored at
+step 88 000 (validation 19.01, not 16.20). (1) The real-only baselines'
+collapse is missing label augmentation, not architecture: with it HarmoF0-L2
+reaches 4.47 and Conv+BiGRU 5.91 on test (15.89 and 10.14 without). (2) Table
+VIII on test, no/yes label aug.: HPPNet-L2 6.81/4.57, +k≤64 5.02/4.13,
++ConvLSTM 4.12/4.04, +STFT pyramid = HRSPNet 5.02/4.56, k≤84 10.11/3.79 — the
+final adaptation does not hold for real-only training on unseen flights.
+(3) Fine-tuned, three seeds, test macro: hard 2.34 ± 0.01, static comb
+2.51 ± 0.08, stochastic comb 3.58 ± 0.17, easy 3.74 ± 0.44, all below the
+real-only 4.56 (and the best real-only test row, 3.79).
+
 ### Training streams (four arms; everything else identical)
 
 | stream | noise sources | label-altering augmentation |
