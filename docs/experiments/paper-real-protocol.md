@@ -83,9 +83,10 @@ two high-level DREGON flights (6 + 7 clips, 8 mics, `motors_measured`) and
 FLY103/FLY108 (13 + 12 clips, mono, calibrated `rps`); no digital speech
 mix and no rotors-off flight. `conf/validation/rp_real_test.yaml` scores it
 with the views of `rp_real` minus DREGON nosource and MD2 mixed (no clips);
-`scripts/rp_test_eval.sh` scores every Table VI checkpoint of the wrap-up
-paper on it (and on `rp_real`, to pair the rows) into
-`results/rp_test_eval/{test,valid}.json`.
+`scripts/rp_test_eval.sh <group>` scores the checkpoints of one table of the
+wrap-up paper on it (and on `rp_real`, to pair the rows) into
+`results/rp_test_eval/<group>/{test,valid}.json` (`pretrain` = Table VI,
+`arch` = Table VIII, `ablation` = Table IX, `real` = Table IV baselines).
 
 **Test result (omnirun rp-test-eval-1f3618, commit 84afb7f1).** 23 of the 28
 Table VI rows reproduce on `rp_real` within 0.04 Hz; five synthetic-selected
