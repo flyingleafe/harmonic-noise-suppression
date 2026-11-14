@@ -1081,8 +1081,23 @@ score them once finished):
 | HarmoF0-L2 fine-tune seeds 1-2, priority −10 | `rp-harmof0-l2-priorv4-ft-f31011`, `…-0897b5` |
 | Conv+BiGRU fine-tune seeds 1-2, priority −10 | `rp-scv2-priorv4-ft-lr5e4-926d11`, `…-fc70d6` |
 
-The second side ablation, HRSPNet without its harmonic gather, waits for a
-design decision.
+**HRSPNet without its harmonic gather (decided 2026-11-14, Dmitrii).** The
+gather (`conv_3`, 71 proportional taps `k·r` and `r/k`, 145 536 weights) is
+replaced by `taps: dilated`: `n_taps` fixed offsets `r + j·Δo`, evenly spread
+from the fundamental to the top level's ceiling (7992 Hz), i.e. a plain
+dilated convolution along linear frequency, which no harmonic of a moving
+rate stays aligned with. Same reads, kernel and everything else. Two widths:
+71 taps (Δo 110.3 Hz, the parameter count of HRSPNet, 0.52M) and 128 taps
+(Δo 61.2 Hz, 0.64M), to see whether more but simpler taps recover any of it.
+Rejected: a learned dense frequency-to-rate map (unmatched capacity, +0.77M)
+and a fundamental-only read. Same recipe as the chain, at `3c86f28c`:
+
+| variant | pretraining | fine-tune seeds 0 / 1 / 2 |
+|---|---|---|
+| 71 dilated taps | `rp-pyrseplstm-dil71-prio-7f1c27` | `…-08dd93`, `…-0553bd`, `…-50d485` |
+| 128 dilated taps | `rp-pyrseplstm-dil128-pri-6b353e` | `…-567085`, `…-18b065`, `…-97ff72` |
+
+Both arms are in `scripts/rp_test_eval.sh chain_synth`.
 
 ## Frequency-scaling probe of the grid (2026-10-26)
 
