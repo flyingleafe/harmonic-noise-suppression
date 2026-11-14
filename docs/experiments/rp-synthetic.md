@@ -1047,7 +1047,7 @@ reproduces it. Macro PIT-MAE (Hz):
 | model | real only, aug. (test) | synthetic only, uniform / real-sel. (test) | fine-tuned (validation) | fine-tuned (test) |
 |---|---|---|---|---|
 | CQT, $k \le 64$ | 4.13 | 5.94 / 6.56 | 2.71 ± 0.07 (n = 3) | 3.17 ± 0.16 (n = 3) |
-| CQT, $k \le 64$, ConvLSTM | 4.04 | 6.23 / 4.90 | 2.44 (seed 0) | 2.73 (seed 0) |
+| CQT, $k \le 64$, ConvLSTM | 4.04 | 6.23 / 4.90 | 2.49 ± 0.04 (n = 3; seed 0 2.44) | 2.93 ± 0.22 (n = 3; seed 0 2.73) |
 | HRSPNet | 4.56 | 4.10 / 4.36 | 2.06 ± 0.02 (n = 3) | 2.34 ± 0.01 (n = 3) |
 
 Under hard pretraining, the STFT pyramid pays off on the test split: HRSPNet is
@@ -1059,6 +1059,30 @@ ramps (4.71-5.75 against 7.75-10.47 and 6.08). The CQT models are slightly bette
 at DREGON cruise (1.70-1.88 against 1.95-2.08). ConvLSTM seed 0 errs by 21.50 on
 the 123 MD2 zero frames. The synthetic-only selected checkpoints are the stored
 `best_uniform_median` / `best_real_macro_median` from which the fine-tunes start.
+
+**All three ConvLSTM seeds (omnirun `rp-test-eval-chain-16e064`, 2026-11-14).**
+Test 2.73 / 2.91 / 3.16, so HRSPNet's lead over the ConvLSTM model is
+0.59 Hz on test (0.43 on validation). Every ConvLSTM seed fails on the 123
+MD2 zero frames (23.44 ± 2.44 Hz, HRSPNet 3.48 ± 0.65). HPPNet-L2 seed 0 at
+its raw minimum (step 11 500, `rp-test-eval-hppl2s0-a41c9a`): validation 3.66,
+test 5.51. Table VIII now carries these columns.
+
+**The chain table takes this recipe (Dmitrii, 2026-11-14).** Table VIII
+(`tab:arch`) reports every row as hard pretraining plus three fine-tuning
+seeds, read on validation and test at each seed's raw minimum. Launched at
+`632982f7` to complete it (`scripts/rp_test_eval.sh chain_synth` / `base_synth`
+score them once finished):
+
+| run | jobs |
+|---|---|
+| HPPNet-L2 fine-tune seeds 1-2 (seed 0: `rp-hppnet-l2-priorv4-ftl-d77f38`) | `rp-hppnet-l2-priorv4-ft--e02dcd`, `…--cb6d42` (H100) |
+| HRSPNet without recurrence (`hppnet_pyrsep_k64`: `head: sepconv`, 0.44M), pretraining | `rp-pyrsep-k64-priorv4-aae9b6` (H100, 48 h) |
+| its fine-tune seeds 0 / 1 / 2, `--after` the pretraining | `rp-pyrsep-k64-priorv4-ft-002d06`, `…-b57e9a`, `…-16410c` |
+| HarmoF0-L2 fine-tune seeds 1-2, priority −10 | `rp-harmof0-l2-priorv4-ft-f31011`, `…-0897b5` |
+| Conv+BiGRU fine-tune seeds 1-2, priority −10 | `rp-scv2-priorv4-ft-lr5e4-926d11`, `…-fc70d6` |
+
+The second side ablation, HRSPNet without its harmonic gather, waits for a
+design decision.
 
 ## Frequency-scaling probe of the grid (2026-10-26)
 
