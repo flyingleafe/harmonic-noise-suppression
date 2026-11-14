@@ -23,9 +23,13 @@
 #             explicit checkpoint URI.
 #   real      Table IV (tab:real): HarmoF0-L2 and Conv+BiGRU on both real streams
 #             (HRSPNet and HPPNet-L2 are in `arch`).
+#   chain_synth  The CQT chain rows (k <= 64, + ConvLSTM) in the hard setup
+#             (docs/experiments/rp-synthetic.md, 2026-11-14): synthetic-only at
+#             uniform and real_macro, fine-tuning seeds 0-2 at best_real_macro_raw
+#             as in `ablation`.
 set -euo pipefail
 export PYTHONPATH="$PWD/src:$PWD/scripts"
-(($#)) || { echo "usage: $0 pretrain|arch|ablation|real ..." >&2; exit 2; }
+(($#)) || { echo "usage: $0 pretrain|arch|ablation|real|chain_synth ..." >&2; exit 2; }
 SEEDS=r2://ml-data/artifacts
 
 targets_pretrain() {
@@ -83,6 +87,20 @@ targets_real() {
     rp_harmof0_l2_all:best_real_macro_median rp_harmof0_l2_alllab:best_real_macro_median
     rp_scv2_all:best_real_macro_raw rp_scv2_alllab:best_real_macro_median
   )
+}
+
+targets_chain_synth() {
+  local a e
+  for a in hppnet_l2k64 hppnet_l2k64_convlstm; do
+    e=rp_${a}_priorv4_ft_lr5e4
+    TARGETS+=(
+      "rp_${a}_priorv4:best_uniform_median"
+      "rp_${a}_priorv4:best_real_macro_median"
+      "${e}:best_real_macro_raw"
+      "${e}:${SEEDS}/${e}_s1/checkpoints/best_real_macro_raw.ckpt"
+      "${e}:${SEEDS}/${e}_s2/checkpoints/best_real_macro_raw.ckpt"
+    )
+  done
 }
 
 nvidia-smi -L || true
