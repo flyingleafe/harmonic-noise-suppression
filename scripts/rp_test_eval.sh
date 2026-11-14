@@ -107,7 +107,8 @@ synth_arm() {
 
 targets_chain_synth() {
   local a
-  for a in hppnet_l2 hppnet_l2k64 hppnet_l2k64_convlstm pyrseplstm_k64 pyrsep_k64; do
+  for a in hppnet_l2 hppnet_l2k64 hppnet_l2k64_convlstm pyrseplstm_k64 pyrsep_k64 \
+    pyrseplstm_dil71 pyrseplstm_dil128; do
     synth_arm "$a"
   done
 }

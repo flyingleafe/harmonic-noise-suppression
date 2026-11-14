@@ -1,0 +1,37 @@
+# hppnet_pyrseplstm_dil71 — HRSPNet (hppnet_pyrseplstm_k64.yaml) WITHOUT its
+# harmonic gather: the 71 proportional taps (k*r for k = 1..64, r/k for
+# k = 2..8) replaced by 71 FIXED offsets r + j*Δo, evenly spread from the
+# fundamental to the top level's ceiling (Δo = (7992.2 - 159.2) / 71 ≈ 110 Hz):
+# a plain dilated convolution along linear frequency, with the same reads,
+# weights (145 536), kernel and everything else. Side ablation of the paper's
+# chain table under hard pretraining (Dmitrii, 2026-11-14;
+# docs/experiments/rp-synthetic.md). Twin: hppnet_pyrseplstm_dil128.yaml.
+task: salience_rps
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+_target_: models.registry.build_model
+params:
+  name: hppnet_pyramid
+  sr: 16000
+  hop_length: 512
+  num_rotors: 4
+  n_ffts: [16384, 8192, 4096, 2048]
+  level0_fmax: 1200.0
+  out_bins: 164
+  taps: dilated
+  n_taps: 71
+  f_min: null
+  f_max: null
+  c_har: 16
+  embedding: 128
+  norm: instance
+  rate_taps: false
+  n_maps: 4
+  head: convlstm
+  lstm_size: 128
+  max_slew: 15.0
+  separable: true
+model_type: null
+legacy_config_path: null

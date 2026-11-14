@@ -40,6 +40,10 @@ is at ``k*r``: a position proportional to the hypothesis, which no fixed
 dilation reaches and an index table does. Same weights for every rate, same
 taps as the paper (``k = 1..K`` and ``1/k`` for ``k = 2..K_sub``), read with
 linear interpolation from the level whose window suits the frequency.
+``taps="dilated"`` is the control: ``n_taps`` FIXED offsets ``r + j·Δo``, evenly
+spaced from the fundamental to the top ceiling — an ordinary dilated
+convolution along linear frequency, with the same reads, weights and kernel,
+which no harmonic of a moving rate stays aligned with.
 
 TEMPORAL HEAD. `FreqGroupLSTM` runs one recurrence per rate bin and cannot move
 state across bins; a rotor moves ~0.5 bins per frame on average and holds a bin
@@ -195,6 +199,19 @@ def build_tap_table(
     frac 0 and are zeroed by ``valid``.
     """
     f = np.asarray(mults, dtype=np.float64)[:, None] * np.asarray(rates_hz, dtype=np.float64)[None]
+    return tap_table_from_freqs(f, level_df, level_ceiling, level_offset, f_min, f_max)
+
+
+def tap_table_from_freqs(
+    f: np.ndarray,
+    level_df: list[float],
+    level_ceiling: list[float],
+    level_offset: list[int],
+    f_min: float,
+    f_max: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """:func:`build_tap_table` for any ``(J, G)`` matrix of read frequencies in Hz."""
+    f = np.asarray(f, dtype=np.float64)
     j, g = f.shape
     lo = np.zeros((j, g), dtype=np.int64)
     frac = np.zeros((j, g), dtype=np.float64)
@@ -213,13 +230,21 @@ def build_tap_table(
     return torch.from_numpy(lo), torch.from_numpy(frac), torch.from_numpy(valid)
 
 
+def dilated_tap_offsets(n_taps: int, top_hz: float, rate_max_hz: float) -> np.ndarray:
+    """``n_taps`` offsets ``j·Δo`` with ``Δo = (top - rate_max) / n_taps``: the
+    fixed-dilation read ``r + j·Δo`` stays below ``top_hz`` for every rate."""
+    step = (float(top_hz) - float(rate_max_hz)) / int(n_taps)
+    return np.arange(int(n_taps), dtype=np.float64) * step
+
+
 class ProportionalTapConv(nn.Module):
-    """``y = Σ_j W_j · x[m_j · r]``: per-tap ``(C_out, C_in)`` weights shared across rate.
+    """``y = Σ_j W_j · x[f_j(r)]``: per-tap ``(C_out, C_in)`` weights shared across rate.
 
     The linear-axis form of a harmonic dilated convolution: the tap offsets are
     PROPORTIONAL to the hypothesis (``k*r``, ``r/k``, ``2r``, ...), so one weight
     per tap serves every candidate rate. Reads are linear interpolations off a
-    concatenated feature axis, described by a table from :func:`build_tap_table`.
+    concatenated feature axis, described by a table from :func:`build_tap_table`;
+    a table of fixed offsets ``r + o_j`` makes it a plain dilated convolution.
 
     Input ``(B, C_in, T, F_cat)``; output ``(B, C_out, T, G)``. Forward and
     backward are `models.harmonic_ports.tap_conv.tap_conv`; ``chunk_elems``
@@ -281,6 +306,11 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
             reach per frame; sepconv receptive field); half-width
             ``ceil(max_slew / Δr)`` bins.
         separable: rank-factorised ConvLSTM recurrence (`RateConvLSTM`).
+        taps: ``"harmonic"`` (the proportional gather of ``k_max`` / ``k_sub``) or
+            ``"dilated"`` (``n_taps`` fixed offsets ``r + j·Δo`` evenly spread
+            from the fundamental to the top level's ceiling,
+            :func:`dilated_tap_offsets`; ``k_max`` / ``k_sub`` unused).
+        n_taps: number of dilated taps (``taps="dilated"`` only).
     """
 
     def __init__(
@@ -306,6 +336,8 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         lstm_size: int = 128,
         max_slew: float = 15.0,
         separable: bool = True,
+        taps: str = "harmonic",
+        n_taps: int | None = None,
     ):
         super().__init__(int(n_ffts[0]), hop_length, num_rotors)
         self.sr, self.n_maps = int(sr), int(n_maps)
@@ -327,18 +359,28 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         self.block_2 = _conv2d_block(c_har, c_har, kernel_size=7, norm=self.norm)
         self.block_2_5 = _conv2d_block(c_har, c_har, kernel_size=7, norm=self.norm)
 
-        # Harmonic taps off the concatenated level maps.
+        # Taps off the concatenated level maps: the harmonic gather, or its
+        # fixed-dilation control.
         offsets = np.cumsum([0, *self.frontend.n_bins[:-1]]).tolist()
         self.cat_width = int(sum(self.frontend.n_bins))
-        mults = np.concatenate(
-            [np.arange(1, int(k_max) + 1, dtype=np.float64), 1.0 / np.arange(2, int(k_sub) + 1)]
-        )
+        ceilings = [self.frontend.ceiling(lvl) for lvl in range(self.n_levels)]
+        if taps == "harmonic":
+            mults = np.concatenate(
+                [np.arange(1, int(k_max) + 1, dtype=np.float64), 1.0 / np.arange(2, int(k_sub) + 1)]
+            )
+            read_hz = mults[:, None] * grid[None]
+        elif taps == "dilated":
+            if n_taps is None or int(n_taps) < 1:
+                raise ValueError(f"taps='dilated' needs n_taps >= 1, got {n_taps!r}")
+            self.tap_offsets_hz = dilated_tap_offsets(int(n_taps), ceilings[-1], float(grid[-1]))
+            read_hz = grid[None] + self.tap_offsets_hz[:, None]
+        else:
+            raise ValueError(f"taps must be 'harmonic' or 'dilated', got {taps!r}")
         fmin = dr if f_min is None else float(f_min)
-        lo, frac, valid = build_tap_table(
-            mults,
-            grid,
+        lo, frac, valid = tap_table_from_freqs(
+            read_hz,
             self.frontend.df,
-            [self.frontend.ceiling(lvl) for lvl in range(self.n_levels)],
+            ceilings,
             offsets,
             fmin,
             float("inf") if f_max is None else float(f_max),
@@ -346,7 +388,7 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         self.register_buffer("harm_lo", lo, persistent=False)
         self.register_buffer("harm_frac", frac, persistent=False)
         self.register_buffer("harm_valid", valid, persistent=False)
-        self.conv_3 = ProportionalTapConv(len(mults), c_har, embedding)
+        self.conv_3 = ProportionalTapConv(read_hz.shape[0], c_har, embedding)
 
         # Rate-axis context: HPPNet's octave / quarter-octave dilations as gathers
         # on the uniform output grid (one "level": step dr, ceiling (G-2)*dr).
@@ -354,8 +396,8 @@ class HPPNetPyramid(LayerCRFReadout, SalienceRPSPredictor):
         self.block_4: ProportionalTapConv | None = None
         self.block_5: ProportionalTapConv | None = None
         if self.rate_taps:
-            for name, taps in (("oct", octave_taps), ("quart", quarter_taps)):
-                taps_np = np.asarray(taps, dtype=np.float64)
+            for name, rate_mults in (("oct", octave_taps), ("quart", quarter_taps)):
+                taps_np = np.asarray(rate_mults, dtype=np.float64)
                 lo, frac, valid = build_tap_table(
                     taps_np, grid, [dr], [(self.n_bins - 2) * dr], [0], 0.0, float("inf")
                 )

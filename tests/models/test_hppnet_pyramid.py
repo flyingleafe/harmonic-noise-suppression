@@ -239,3 +239,30 @@ def test_rate_taps_off_drops_block_4_and_5_and_norm_selects_the_layer(norm: str)
     assert all(p.grad is not None for p in m.parameters())
     with pytest.raises(ValueError, match="norm"):
         HPPNetPyramid(n_ffts=N_FFTS, level0_fmax=LEVEL0_FMAX, out_bins=OUT_BINS, norm="layer")
+
+
+def test_dilated_taps_read_fixed_offsets_across_the_whole_band() -> None:
+    """The control layer reads ``r + j·Δo`` from the finest covering level: the same
+    evenly spaced offsets at every rate, all below the top ceiling."""
+    n_taps = 12
+    m = HPPNetPyramid(
+        n_ffts=N_FFTS, level0_fmax=LEVEL0_FMAX, out_bins=OUT_BINS, taps="dilated", n_taps=n_taps
+    )
+    fe = m.frontend
+    o = m.tap_offsets_hz
+    assert o[0] == 0.0 and np.allclose(np.diff(o), o[1])
+    assert m.conv_3.n_taps == n_taps
+    level_start = np.cumsum([0, *fe.n_bins[:-1]])
+    lo = m.get_buffer("harm_lo").numpy()
+    frac = m.get_buffer("harm_frac").numpy()
+    valid = m.get_buffer("harm_valid").numpy()
+    rates = m.output_freqs()
+    assert valid[:, 1:].all()  # every rate above the DC floor reads every tap
+    for j in range(n_taps):
+        for g in range(1, OUT_BINS):
+            f = rates[g] + o[j]
+            lvl = next(lv for lv in range(len(fe.n_bins)) if f < fe.ceiling(lv))
+            assert (lo[j, g] - level_start[lvl] + frac[j, g]) * fe.df[lvl] == pytest.approx(f)
+    assert rates[-1] + o[-1] < fe.ceiling(len(fe.n_bins) - 1)
+    with pytest.raises(ValueError, match="n_taps"):
+        HPPNetPyramid(n_ffts=N_FFTS, level0_fmax=LEVEL0_FMAX, out_bins=OUT_BINS, taps="dilated")
