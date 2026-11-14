@@ -564,17 +564,22 @@ class OnlineMixFrameDataset(IterableDataset):
         speech: bool | None = None,
         flight_reuse: int | None = None,
         duration_s: float | None = None,
+        base_seed: int | None = None,
     ) -> OnlineMixFrameDataset:
         """Load an online-mix policy YAML (e.g. ``conf/online_mix/online_mix_*.yaml``)
         and build the dataset from it — the ``_target_`` this module's
         ``conf/data/online_mix_*.yaml`` configs actually use, since a Hydra
         component config carries a config *path*, not an inlined policy tree.
-        ``flatten_channels`` sits next to ``path`` in the Hydra ``params``."""
+        ``flatten_channels`` sits next to ``path`` in the Hydra ``params``.
+        ``base_seed`` replaces the policy's stream seed (the online mixer is
+        seeded independently of the global ``seed``), for paired training seeds."""
         from omegaconf import OmegaConf
 
         cfg = OmegaConf.load(path)
         if duration_s is not None:
             cfg.duration_s = float(duration_s)
+        if base_seed is not None:
+            cfg.base_seed = int(base_seed)
         apply_speech_override(cfg, speech)
         apply_flight_reuse(cfg, flight_reuse)
         return cls.from_config(
