@@ -856,7 +856,7 @@ salv2 grid, the stochastic synthetic views ranked models inversely (good scores
 came with average predictions). The synthetic-selected cell may therefore be a
 poor checkpoint.
 
-**Runs (submitted 2026-11-01, `uni`, `6853ed0c`):**
+**Runs (submitted 2026-11-01, all succeeded by 2026-11-02, `uni`, `6853ed0c`):**
 
 | run | job |
 |---|---|
@@ -866,6 +866,176 @@ poor checkpoint.
 
 The table's static-comb synthetic-selected round is 97 000. That is the argmin
 of the median; the loop's saved checkpoint moved last at 88 000.
+
+**Results.** Table VIII reports raw real-validation macro PIT-MAE at the
+round with the lowest trailing five-round median of the selection score.
+The retrieved checkpoint indices select those same rounds for all new cells.
+
+| training data | synthetic-selected | real-selected | fine-tuned |
+|---|---:|---:|---:|
+| stochastic comb | 11.51 | 11.54 | 2.30 |
+| static comb | 16.20 | 15.39 | 2.15 |
+
+Units: Hz. Stochastic pretraining stopped by saturation at step 60 000:
+`stoch_comb` selects step 32 500 and `real_macro` selects 45 000. Its
+fine-tune starts from `best_stoch_comb_median` and selects step 8000.
+The static-comb fine-tune selects step 15 000 and retains the saved
+88 000-step warm start noted above. Both fine-tunes finish at the 20 000-step cap.
+
+Source: the completed jobs' `validation_history.jsonl` and
+`best_checkpoints.json`, freshly retrieved into `omnirun-outputs/<job>/results/<experiment>/`.
+The CLI pulls hit the documented 60 s timeout; the same authoritative output
+objects were fetched directly from `s3://omnirun-artifacts/<job>/outputs/`.
+`results/rp_stochcomb/table_viii.json` records exact values, selected steps,
+artifact prefixes and source-file SHA-256 hashes.
+
+Both combs transfer poorly without real-data fine-tuning. Their fine-tuned
+scores lie within the range of the fitted-model fine-tunes in Table VIII;
+one seed does not establish equivalence between generators.
+
+## Fine-tuning seed replication (2026-11-05)
+
+**Status:** seven of eight additional runs succeeded, all reaching 20 000 steps.
+Hard seed 2 (`hrsp-ft-hard-s2-f35ea3`) initially failed during the GitHub fetch,
+before training. Its unchanged retry is running; the live history now reaches
+16 000 steps, and its current best is included in the provisional Table VIII update below.
+
+**Motivation.** Dmitrii requested two more fine-tuning seeds for each HRSPNet
+initialization in Table VIII after observing lower raw minima and faster
+adaptation from fitted-model pretraining. Keep both raw-best and median-selected
+scores and the learning curves; do not change the selection rule for one arm only.
+
+**Setup.** Seeds 1 and 2 supplement the original seed 0 for static comb,
+stochastic comb, fitted easy and fitted hard. This measures fine-tuning
+variability conditional on each original pretrained checkpoint, not variability
+of pretraining. Replay each arm's original published code revision. Warm starts
+are pinned to the completed pretraining jobs' immutable
+`r2://omnirun-artifacts/<job>/outputs/results/<experiment>/best_<score>_median.ckpt`
+objects rather than mutable `best:` aliases; this does not redo pretraining
+with the corrected shaft renderer.
+
+All replicas use `rp_all` without label augmentation, batch 128, six data
+workers, a fresh AdamW at max LR 5e-4, 1000 warm-up steps, cosine to 20 000
+steps and validation every 500 steps. Resources: one H100, eight CPUs,
+48 GB RAM and an 8 h limit per job.
+
+The online mixer is seeded independently of the global Torch/NumPy seed.
+Therefore global seeds 1/2 also use stream seeds 20261015/20261016
+(original: 20261014), paired across all four initializations. The existing
+`OnlineMixFrameDataset.from_config` factory receives the unchanged `rp_all`
+policy except for `base_seed`; the fixed real validation panel is unchanged.
+
+| initialization | warm-start step | code revision | seed 1 | seed 2 |
+|---|---:|---|---|---|
+| static comb | 88 000 | `6853ed0cd9ae` | `hrsp-ft-static-s1-7fd17a` | `hrsp-ft-static-s2-e958da` |
+| stochastic comb | 32 500 | `6853ed0cd9ae` | `hrsp-ft-stochastic-s1-ca5b39` | `hrsp-ft-stochastic-s2-7134be` |
+| fitted easy | 33 500 | `8b4e5ffb1e5c` | `hrsp-ft-easy-s1-c667a7` | `hrsp-ft-easy-s2-5cddc0` |
+| fitted hard | 75 000 | `ef74a51ecdb5` | `hrsp-ft-hard-s1-cc73dc` | `hrsp-ft-hard-s2-f35ea3` |
+
+Every replica has a distinct experiment name ending `_s1` or `_s2`, R2 artifact
+prefix and collected-output glob, so none overwrites the original run.
+`results/rp_stochcomb/finetune_seed_jobs_20261105.json` retains the commands,
+full revisions, checkpoint URIs and ETags, seeds and job IDs.
+
+**Verification.** All eight Hydra configurations compose. A local two-sample
+CPU preflight exercises the seeded real-data stream and HRSPNet forward pass.
+All four frozen checkpoints load with zero missing or unexpected keys. The
+daemon accepted all eight jobs with their intended code, commands and group.
+
+**Provisional results.** Include the original seed 0 in each arm. Values below
+are mean ± sample standard deviation across completed fine-tuning seeds.
+The warm-start checkpoint is fixed within each arm; these are not independent
+pretraining seeds.
+
+| initialization | completed seeds | raw-best PIT-MAE (Hz) | median-selected PIT-MAE (Hz) | median steps to raw error < 2.52 Hz |
+|---|---:|---:|---:|---:|
+| static comb | 3 | 2.155 ± 0.067 | 2.189 ± 0.039 | 1500 |
+| stochastic comb | 3 | 2.268 ± 0.022 | 2.325 ± 0.024 | 2000 |
+| fitted easy | 3 | 2.447 ± 0.102 | 2.478 ± 0.141 | 5500 |
+| fitted hard | 2 | 2.0513 ± 0.0001 | 2.140 ± 0.009 | 500 |
+
+Raw-best is the minimum raw `real_macro` across all 40 rounds. Median-selected
+is the raw value at the lowest trailing-five-round median, excluding incomplete
+windows, as in the paper. The speed threshold is the existing real-only reference,
+not a separate target for each model; validation occurs every 500 steps.
+
+Hard seeds 0/1 reach their raw minima at 3000/4000 steps, while static-comb
+seeds 0/1/2 reach theirs at 8000/7000/12 000. The mean errors over validation
+rounds through step 5000 are 2.262 (hard), 2.500 (static), 2.516 (stochastic)
+and 2.989 (easy). Thus the completed hard runs have both lower raw minima and
+better early adaptation. This is not a universal advantage of fitted-model
+pretraining: the easy arm is worse than both combs. No equivalence or significance
+claim is justified from this provisional, fixed-pretraining comparison.
+
+Sources: freshly retrieved histories and checkpoint indices of all eleven
+completed runs in `omnirun-outputs/<job>/results/<experiment>/`.
+`results/rp_stochcomb/finetune_seed_summary.json` stores per-seed values,
+aggregate definitions, selected steps, source paths/hashes and the retry record.
+The pre-training GitHub-fetch failure log is retained as
+`results/rp_stochcomb/failed_hard_s2_f35ea3.log`.
+
+**Table VIII update (2026-11-10).** Dmitrii requested three-seed raw-best
+scores and a column for the optimizer step at the best score. The running
+hard seed is included using its actual current best, not an imputed copy of
+another seed: 2.089404 Hz at step 9000, observed through step 16 000 of 20 000.
+Its live history was uploaded at 2026-11-10 17:45:23 UTC. All other histories
+contain the full 40 rounds.
+
+| initialization | raw-best PIT-MAE, Hz | steps at raw best, thousands |
+|---|---:|---:|
+| static comb | 2.16 ± 0.07 | 9.0 ± 2.6 |
+| stochastic comb | 2.27 ± 0.02 | 6.2 ± 1.5 |
+| fitted easy | 2.45 ± 0.10 | 6.3 ± 0.8 |
+| fitted hard, provisional | 2.06 ± 0.02 | 5.3 ± 3.2 |
+
+Both columns give mean ± sample standard deviation over seeds 0/1/2,
+conditional on fixed pretrained weights. These steps are the argmin of
+each seed's raw validation error, not the first crossing of the reference
+threshold in the earlier completed-run snapshot above. The synthetic-only
+columns remain single-seed, median-selected values; the real-only reference
+remains 2.52 Hz and has no fine-tuning step.
+
+The table marks the incomplete hard seed explicitly. Its caption, the shared
+seed description and the directly dependent results/discussion/conclusion
+passages distinguish this raw-selected three-seed comparison from the
+single-seed median-selected results elsewhere in the paper. Sections I–IV
+are unchanged. Source values, steps, live-object timestamps and file hashes:
+`results/rp_stochcomb/table_viii_multiseed.json`.
+
+In the current PDF, the added held-out-test table shifts the generator ablation
+from Table VIII to Table IX (`tab:ablation`); the architecture table is now
+Table VIII. The updated generator table was built and visually checked on page 18.
+
+## CQT chain rows in the hard setup (2026-11-14)
+
+**Question (Dmitrii).** On the held-out test split, real-only training reverses
+the last row of the paper's chain table: the CQT models with $k \le 64$ (5.02 /
+4.13 Hz without / with label augmentation) and with the ConvLSTM (4.12 / 4.04)
+beat HRSPNet (5.02 / 4.56), while HRSPNet fine-tuned from the hard setup reaches
+2.34 ± 0.01 over three seeds (`paper-real-protocol.md`, "Test result,
+ablations"). Does HRSPNet's STFT pyramid pay off on the test split once the CQT
+rows get the same synthetic pretraining?
+
+**Setup.** `rp_hppnet_l2k64_priorv4` and `rp_hppnet_l2k64_convlstm_priorv4`:
+the two CQT rows on the hard stream `rp_priorv4`, which is unchanged since the
+HRSPNet run at `0d839b3b` (same bank pins; the later `v4.py` and
+`online_mixing.py` changes are off its render path). Batch 64 × 2, max LR 1e-3,
+validation `rp_real_priorv4`, one H100, 16 CPUs, 64 GB, 48 h. Each fine-tunes
+with HRSPNet's recipe (`*_priorv4_ft_lr5e4`) from `best:uniform@`, three seeds
+with fixed pretrained weights: seeds 1 and 2 add
+`experiment_name=<exp>_s<n> seed=<n> +data.train.params.base_seed=2026101{5,6}`,
+the stream seeds of the HRSPNet seeds (the new `from_yaml(base_seed=)`
+override; checked equal to the policy those jobs inlined). Fine-tunes wait
+`--after` their pretraining on an H100, 8 CPUs, 48 GB, 8 h. All at `25f836e5`.
+
+| model | pretraining | fine-tune seed 0 | seed 1 | seed 2 |
+|---|---|---|---|---|
+| CQT, $k \le 64$ | `rp-hppnet-l2k64-priorv4-abaeee` | `rp-hppnet-l2k64-priorv4--104659` | `rp-hppnet-l2k64-priorv4--c7a57b` | `rp-hppnet-l2k64-priorv4--b14785` |
+| CQT, $k \le 64$, ConvLSTM | `rp-hppnet-l2k64-convlstm-e938e4` | `rp-hppnet-l2k64-convlstm-66fab0` | `rp-hppnet-l2k64-convlstm-6c04ca` | `rp-hppnet-l2k64-convlstm-42cebb` |
+
+**Readout.** `scripts/rp_test_eval.sh` on the six fine-tuned seeds at
+`best_real_macro_raw` (as Table IX), against HRSPNet's 2.34 ± 0.01 on test and
+2.06 ± 0.02 on validation. Results pending.
 
 ## Frequency-scaling probe of the grid (2026-10-26)
 
