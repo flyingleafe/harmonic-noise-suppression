@@ -23,13 +23,16 @@
 #             explicit checkpoint URI.
 #   real      Table IV (tab:real): HarmoF0-L2 and Conv+BiGRU on both real streams
 #             (HRSPNet and HPPNet-L2 are in `arch`).
-#   chain_synth  The CQT chain rows (k <= 64, + ConvLSTM) in the hard setup
-#             (docs/experiments/rp-synthetic.md, 2026-11-14): synthetic-only at
-#             uniform and real_macro, fine-tuning seeds 0-2 at best_real_macro_raw
-#             as in `ablation`.
+#   chain_synth  Table VIII (tab:arch) under hard pretraining (docs/experiments/
+#             rp-synthetic.md, 2026-11-14): HPPNet-L2, the CQT rows (k <= 64,
+#             + ConvLSTM), HRSPNet and its side ablations, each synthetic-only at
+#             uniform and real_macro and fine-tuned in seeds 0-2 at
+#             best_real_macro_raw (as `ablation`).
+#   base_synth  The same for the two baselines HarmoF0-L2 and Conv+BiGRU.
+#   A run that is not finished must not be scored: its best checkpoint can still move.
 set -euo pipefail
 export PYTHONPATH="$PWD/src:$PWD/scripts"
-(($#)) || { echo "usage: $0 pretrain|arch|ablation|real|chain_synth ..." >&2; exit 2; }
+(($#)) || { echo "usage: $0 pretrain|arch|ablation|real|chain_synth|base_synth ..." >&2; exit 2; }
 SEEDS=r2://ml-data/artifacts
 
 targets_pretrain() {
@@ -89,18 +92,29 @@ targets_real() {
   )
 }
 
+# One hard-pretrained architecture rp_<arm>_priorv4: synthetic-only at both
+# selectors and its three fine-tuning seeds at their raw real_macro minimum.
+synth_arm() {
+  local e=rp_${1}_priorv4_ft_lr5e4
+  TARGETS+=(
+    "rp_${1}_priorv4:best_uniform_median"
+    "rp_${1}_priorv4:best_real_macro_median"
+    "${e}:best_real_macro_raw"
+    "${e}:${SEEDS}/${e}_s1/checkpoints/best_real_macro_raw.ckpt"
+    "${e}:${SEEDS}/${e}_s2/checkpoints/best_real_macro_raw.ckpt"
+  )
+}
+
 targets_chain_synth() {
-  local a e
-  for a in hppnet_l2k64 hppnet_l2k64_convlstm; do
-    e=rp_${a}_priorv4_ft_lr5e4
-    TARGETS+=(
-      "rp_${a}_priorv4:best_uniform_median"
-      "rp_${a}_priorv4:best_real_macro_median"
-      "${e}:best_real_macro_raw"
-      "${e}:${SEEDS}/${e}_s1/checkpoints/best_real_macro_raw.ckpt"
-      "${e}:${SEEDS}/${e}_s2/checkpoints/best_real_macro_raw.ckpt"
-    )
+  local a
+  for a in hppnet_l2 hppnet_l2k64 hppnet_l2k64_convlstm pyrseplstm_k64 pyrsep_k64; do
+    synth_arm "$a"
   done
+}
+
+targets_base_synth() {
+  synth_arm harmof0_l2
+  synth_arm scv2
 }
 
 nvidia-smi -L || true
