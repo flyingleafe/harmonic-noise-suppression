@@ -1035,7 +1035,30 @@ override; checked equal to the policy those jobs inlined). Fine-tunes wait
 
 **Readout.** `scripts/rp_test_eval.sh` on the six fine-tuned seeds at
 `best_real_macro_raw` (as Table IX), against HRSPNet's 2.34 ± 0.01 on test and
-2.06 ± 0.02 on validation. Results pending.
+2.06 ± 0.02 on validation.
+
+**Interim result (2026-11-14, omnirun `rp-test-eval-chain-0d7144` at
+`5f396112`; `results/rp_test_eval/chain_synth/{test,valid}.json`).** Scored
+the finished runs only: both pretrainings (stopped at 50 500 and 67 000 steps),
+the three $k \le 64$ seeds and ConvLSTM seed 0; ConvLSTM seeds 1-2 were still
+running. Every fine-tuned checkpoint is its seed's raw validation minimum and
+reproduces it. Macro PIT-MAE (Hz):
+
+| model | real only, aug. (test) | synthetic only, uniform / real-sel. (test) | fine-tuned (validation) | fine-tuned (test) |
+|---|---|---|---|---|
+| CQT, $k \le 64$ | 4.13 | 5.94 / 6.56 | 2.71 ± 0.07 (n = 3) | 3.17 ± 0.16 (n = 3) |
+| CQT, $k \le 64$, ConvLSTM | 4.04 | 6.23 / 4.90 | 2.44 (seed 0) | 2.73 (seed 0) |
+| HRSPNet | 4.56 | 4.10 / 4.36 | 2.06 ± 0.02 (n = 3) | 2.34 ± 0.01 (n = 3) |
+
+Under hard pretraining, the STFT pyramid pays off on the test split: HRSPNet is
+0.83 Hz below the $k \le 64$ CQT model (about five of its seed SDs) and 0.39 Hz
+below ConvLSTM seed 0, the reverse of real-only training. The lead is on MD2
+(test 1.45-1.60 against 2.09-2.22 and 2.40; MD2 cruise 0.87-1.05 against
+1.27-1.42), on DREGON zero (0.27-2.16 against 6.04-11.73 and 1.46) and DREGON
+ramps (4.71-5.75 against 7.75-10.47 and 6.08). The CQT models are slightly better
+at DREGON cruise (1.70-1.88 against 1.95-2.08). ConvLSTM seed 0 errs by 21.50 on
+the 123 MD2 zero frames. The synthetic-only selected checkpoints are the stored
+`best_uniform_median` / `best_real_macro_median` from which the fine-tunes start.
 
 ## Frequency-scaling probe of the grid (2026-10-26)
 
