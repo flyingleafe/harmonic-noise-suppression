@@ -21,4 +21,5 @@ by `rp_pyrseplstm_dil71_priorv4_ft_lr5e4` and read on the held-out test split ag
 
 ## Conclusion
 
-Pending.
+Ran 2026-11-15 (`rp-pyrseplstm-dil71-prio-7f1c27`, stopped at 45 500 steps). Synthetic-only test
+macro 8.44 / 7.56 Hz (uniform- / real-selected), against HRSPNet's 4.10 / 4.35.

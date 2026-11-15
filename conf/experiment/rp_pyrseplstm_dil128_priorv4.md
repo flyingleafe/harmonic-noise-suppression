@@ -21,4 +21,5 @@ against HRSPNet's 2.34 ± 0.01 Hz.
 
 ## Conclusion
 
-Pending.
+Ran 2026-11-15 (`rp-pyrseplstm-dil128-pri-6b353e`, stopped at 61 000 steps). Synthetic-only test
+macro 7.16 / 7.16 Hz (uniform- / real-selected), against HRSPNet's 4.10 / 4.35.

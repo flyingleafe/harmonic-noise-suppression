@@ -19,4 +19,8 @@ held-out test split (`scripts/rp_test_eval.sh`).
 
 ## Conclusion
 
-Pending.
+Ran 2026-11-15 (seeds 0 / 1 / 2: `rp-pyrsep-k64-priorv4-ft-002d06`, `-b57e9a`, `-16410c`). Raw
+validation minima 2.730 / 3.094 / 2.544 Hz (2.79 ± 0.28); test 4.32 / 4.76 / 3.93
+(4.34 ± 0.42), against HRSPNet's 2.34 ± 0.01. The recurrence carries the DREGON zero, standby
+and ramp frames (test 26.8 / 28.3 / 15.1 Hz against 0.9 / 13.2 / 5.1); MD2 changes little
+(1.96 against 1.52). Table VIII, "HRSPNet without recurrence".

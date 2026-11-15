@@ -20,4 +20,7 @@ Table IX. Read on the held-out test split against HRSPNet's 2.34 ± 0.01 Hz
 
 ## Conclusion
 
-Pending.
+Ran 2026-11-14 (seeds 0 / 1 / 2: `rp-hppnet-l2k64-convlstm-66fab0`, `-6c04ca`, `-42cebb`). Raw
+validation minima 2.444 / 2.511 / 2.523 Hz (2.49 ± 0.04); test 2.73 / 2.91 / 3.16
+(2.93 ± 0.22), against HRSPNet's 2.34 ± 0.01; MD2 zero 23.4 ± 2.4 Hz in every seed. Table VIII,
+"+ ConvLSTM".

@@ -1099,6 +1099,34 @@ and a fundamental-only read. Same recipe as the chain, at `3c86f28c`:
 
 Both arms are in `scripts/rp_test_eval.sh chain_synth`.
 
+**Results (2026-11-15, omnirun `rp-test-eval-final-d51e2b` at `aa071a49`;
+`results/rp_test_eval/{chain_synth,base_synth}/{test,valid}.json`).** All 18 runs
+succeeded; every fine-tuned checkpoint is its seed's raw validation minimum
+(checked against `validation_history.jsonl`). Macro PIT-MAE (Hz), fine-tuned,
+mean ± SD over three seeds:
+
+| model | params | validation | test | test per seed |
+|---|---|---|---|---|
+| HPPNet-L2 | 0.52M | 3.83 ± 0.19 | 5.11 ± 0.55 | 5.51 / 5.33 / 4.48 |
+| + harmonics $k \le 64$ | 0.87M | 2.71 ± 0.07 | 3.17 ± 0.15 | 3.00 / 3.20 / 3.30 |
+| + ConvLSTM | 0.87M | 2.49 ± 0.04 | 2.93 ± 0.22 | 2.73 / 2.91 / 3.16 |
+| + STFT pyramid = HRSPNet | 0.52M | 2.06 ± 0.02 | 2.34 ± 0.01 | 2.33 / 2.34 / 2.34 |
+| HRSPNet without recurrence | 0.44M | 2.79 ± 0.28 | 4.34 ± 0.42 | 4.32 / 4.76 / 3.93 |
+| HRSPNet, 71 dilated taps | 0.52M | 3.68 ± 0.26 | 5.17 ± 0.18 | 5.36 / 5.15 / 5.00 |
+| HRSPNet, 128 dilated taps | 0.64M | 3.57 ± 0.29 | 6.02 ± 1.16 | 5.17 / 7.35 / 5.56 |
+| HarmoF0-L2 | 0.37M | 2.59 ± 0.01 | 4.83 ± 0.14 | 4.71 / 4.98 / 4.79 |
+| Conv+BiGRU | 1.50M | 2.52 ± 0.05 | 6.00 ± 2.92 | 4.27 / 9.37 / 4.35 |
+
+Every step of the chain lowers both errors; the harmonic range is the largest
+step, the STFT pyramid the second. Both side ablations lose HRSPNet's advantage:
+without recurrence, the DREGON zero, standby and ramp frames fail (26.8 / 28.3 /
+15.1 Hz against 0.9 / 13.2 / 5.1); without the harmonic gather, the model falls
+to HPPNet-L2's level, and 128 taps are worse and less stable than 71. The two
+baselines are as good as HRSPNet's chain rows on validation (2.52-2.59) but
+2.1-2.5× its error on test; Conv+BiGRU seed 1 loses the MD2 cruise (test MD2
+cruise 8.33 ± 7.06 over seeds). Table VIII carries the chain and side rows; the
+baselines' three-seed values are not yet in the paper.
+
 ## Frequency-scaling probe of the grid (2026-10-26)
 
 `scripts/rps_cue_probe.py freq` (six DREGON cruise clips, alpha 0.70-1.30) on the

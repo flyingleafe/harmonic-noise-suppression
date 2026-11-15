@@ -23,4 +23,7 @@ median. Batch 128 as 64 × 2 accumulation, max LR 1e-3, 12 data workers, one H10
 
 ## Conclusion
 
-Pending.
+Ran 2026-11-14 (`rp-hppnet-l2k64-priorv4-abaeee`, stopped at 50 500 steps). Synthetic-only test
+macro 5.94 / 6.56 Hz (uniform- / real-selected). Fine-tuned in three seeds: validation
+2.71 ± 0.07, test 3.17 ± 0.15 Hz, against HRSPNet's 2.06 ± 0.02 / 2.34 ± 0.01
+(`docs/experiments/rp-synthetic.md`, "CQT chain rows in the hard setup").

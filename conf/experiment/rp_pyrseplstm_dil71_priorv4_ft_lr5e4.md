@@ -19,4 +19,8 @@ held-out test split (`scripts/rp_test_eval.sh chain_synth`).
 
 ## Conclusion
 
-Pending.
+Ran 2026-11-15 (seeds 0 / 1 / 2: `rp-pyrseplstm-dil71-prio-08dd93`, `-0553bd`, `-50d485`). Raw
+validation minima 3.839 / 3.814 / 3.370 Hz (3.68 ± 0.26); test 5.36 / 5.15 / 5.00
+(5.17 ± 0.18), the level of HPPNet-L2 (5.11 ± 0.55) and far above HRSPNet's 2.34 ± 0.01. The
+harmonic gather is the component HRSPNet cannot do without. Table VIII, "HRSPNet, 71 dilated
+taps".

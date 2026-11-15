@@ -20,4 +20,6 @@ Table IX. Read on the held-out test split against HRSPNet's 2.34 ± 0.01 Hz
 
 ## Conclusion
 
-Pending.
+Ran 2026-11-14 (seeds 0 / 1 / 2: `rp-hppnet-l2k64-priorv4--104659`, `--c7a57b`, `--b14785`).
+Raw validation minima 2.657 / 2.783 / 2.687 Hz (2.71 ± 0.07); test 3.00 / 3.20 / 3.30
+(3.17 ± 0.15), against HRSPNet's 2.34 ± 0.01. Table VIII, "+ harmonics k <= 64".

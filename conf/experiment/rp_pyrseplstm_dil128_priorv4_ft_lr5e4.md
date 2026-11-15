@@ -20,4 +20,7 @@ held-out test split (`scripts/rp_test_eval.sh chain_synth`).
 
 ## Conclusion
 
-Pending.
+Ran 2026-11-15 (seeds 0 / 1 / 2: `rp-pyrseplstm-dil128-pri-567085`, `-18b065`, `-97ff72`). Raw
+validation minima 3.375 / 3.911 / 3.432 Hz (3.57 ± 0.29); test 5.17 / 7.35 / 5.56
+(6.02 ± 1.16): twice the taps recover nothing of the harmonic gather. Table VIII, "HRSPNet, 128
+dilated taps".

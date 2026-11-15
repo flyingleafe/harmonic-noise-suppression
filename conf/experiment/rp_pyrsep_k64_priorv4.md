@@ -19,4 +19,5 @@ $k \le 64$. Trained like `rp_pyrseplstm_k64_priorv4`: hard stream `rp_priorv4`, 
 
 ## Conclusion
 
-Pending.
+Ran 2026-11-15 (`rp-pyrsep-k64-priorv4-aae9b6`, stopped at 71 000 steps). Synthetic-only test
+macro 6.99 / 6.82 Hz (uniform- / real-selected), against HRSPNet's 4.10 / 4.35.
