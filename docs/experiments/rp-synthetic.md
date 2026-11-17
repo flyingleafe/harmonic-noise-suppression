@@ -1127,6 +1127,32 @@ baselines are as good as HRSPNet's chain rows on validation (2.52-2.59) but
 cruise 8.33 ± 7.06 over seeds). Table VIII carries the chain and side rows; the
 baselines' three-seed values are not yet in the paper.
 
+## HarmoF0-L2 easy fine-tune, seed 1 (2026-11-17)
+
+**Question.** The easy-setup fine-tunes of the two baselines are single-seed
+(Table VI). This run adds a second HarmoF0-L2 seed and is the first training
+run on the `isambard` backend (aarch64, GH200).
+
+**Setup.** `rp_harmof0_l2_easyv4_ft_lr5e4` with the seed convention of the
+chain rows: `experiment_name=rp_harmof0_l2_easyv4_ft_lr5e4_s1 seed=1
++data.train.params.base_seed=20261015`, the same warm start
+(`best:near_macro@rp_harmof0_l2_easyv4`, 0 missing / 0 unexpected keys).
+Omnirun `harmof0-easy-ft-s1-0e893a` on `isambard` at `dcf79fed` (branch
+`isambard-aarch64`: `e323589b` plus the aarch64 lock and docs), one GH200,
+`torch 2.7.0+cu128`; W&B `2t3zxasa`.
+
+**Result.** 20 000 steps and 40 validation rounds in 46 min 45 s. `real_macro`
+PIT-MAE (Hz) from `validation_history.jsonl`, equal to the W&B history:
+
+| seed | raw minimum (step) | lowest 5-round median (step) | raw value at that round |
+|---|---|---|---|
+| 1 | 2.51 (2000) | 2.59 (4000) | 2.59 |
+
+Seed 0 (`rp-harmof0-l2-easyv4-ft-75b117`) reads 2.57 at step 4500 in Table VI,
+and its `best_real_macro_median` round is step 3000 with `real_macro` 2.51
+(§ "Easy setup"). The test split is not scored for either seed. Checkpoints are
+under `r2://ml-data/artifacts/rp_harmof0_l2_easyv4_ft_lr5e4_s1/`.
+
 ## Frequency-scaling probe of the grid (2026-10-26)
 
 `scripts/rps_cue_probe.py freq` (six DREGON cruise clips, alpha 0.70-1.30) on the
