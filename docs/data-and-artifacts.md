@@ -267,6 +267,7 @@ Backends as configured on the daemon:
 | `uni` | Apocrita Slurm, `sae` partition (GPU, account `pilot_sae_gpu`), ≤ 10 days. Real training runs only — must request ≥ 1 GPU |
 | `uni-gpushort` | Apocrita Slurm, `gpushort` partition, ≤ 1 h — smoke tests, kernel benchmarks, short fine-tunes; usually starts within minutes |
 | `uni-cpu` | Apocrita Slurm, `compute` partition — **CPU-only**, ≤ 10 days. Dataset materialization, analysis sweeps, anything that would otherwise peg the laptop CPU; submit with `--gpus 0` |
+| `isambard` | Isambard-AI phase 2 Slurm (`workq`, project `u6acn`), **aarch64** nodes with GH200 GPUs (96 GB), ≤ 24 h. One GPU brings 72 cores and 115 GB RAM. Needs a valid 12-hour login on hetzner — see below |
 | `vast` | Vast.ai marketplace burst (`max_hourly` 2 $/h, auto-terminate) — when the cluster queue is long |
 | `kaggle` | Kaggle free GPU quota — CUDA validation of new code without waiting for the queue; ~1 MB kernel source cap |
 
@@ -311,6 +312,19 @@ omnirun backends check        # re-establish the SSH ControlMaster after expiry
   (`PassManager::run failed`). Pyramid / HDC models there need
   `TAP_CONV_TORCH=1` in the submitted environment (the eager path; scores
   identical — `rp-panel-eval-dropk`, 2026-10-16).
+
+- **`isambard` is aarch64 and its login expires every 12 hours.** The lock
+  resolves the CUDA build there (`torch 2.7.0+cu128`, `torchaudio`, `triton`
+  from PyTorch's cu128 index, `[tool.uv.sources]` in `pyproject.toml`); PyPI's
+  linux-aarch64 torch wheel is CPU-only, and `torchcodec` is not installed on
+  that platform. A new binary dependency needs a `manylinux_2_28_aarch64`
+  wheel or it must build from source on the node. When the ssh certificate on
+  hetzner has expired, `omnirun submit` leaves the job queued and prints
+  `isambard offered no slot: … Isambard login expired — run
+  `clifton-remote hetzner` on the laptop`; after that command the queued jobs
+  place on their own within 5 minutes (`omnirun backends check` at once).
+  Jobs already running keep running on the cluster; their status and logs
+  resume after the re-login. The Triton tap kernel is untested on aarch64.
 
 - **kaggle** (enabled in `~/.config/omnirun/config.toml`): good for short
   evals, not for anything that must start promptly. (a) Kaggle stores every

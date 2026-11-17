@@ -49,6 +49,7 @@ omnirun ps | status <job> | logs -f <job> | wait <job> | pull <job>
 
 omnirun backends (thin client of the hetzner daemon): `uni` (Slurm `sae`,
 long GPU jobs), `uni-gpushort` (≤ 1 h), `uni-cpu` (CPU-only, `--gpus 0`),
+`isambard` (Isambard-AI GH200, aarch64, ≤ 24 h; 12-hour login),
 `vast` (paid burst), `kaggle` (free CUDA validation). Needs a clean pushed
 HEAD; `.env` ships automatically. No `omnirun ssh` in daemon mode.
 Details: `docs/data-and-artifacts.md` § "Job running"; workflow: the
