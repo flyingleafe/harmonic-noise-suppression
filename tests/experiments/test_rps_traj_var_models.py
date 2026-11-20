@@ -490,6 +490,62 @@ def test_switching_sample_follows_the_dwell_law_and_occupancy():
     assert np.all(np.abs(start[:, :10]) < 1e-3) and np.all(np.abs(start[:, 10:]).max(0) > 1e-3)
 
 
+def test_switching_sample_clip_holds_an_explosive_state_and_lets_it_come_back():
+    # state 0 doubles every step (a "ramp" state), state 1 decays slowly; they alternate every 10
+    pmf = np.zeros((2, 10))
+    pmf[:, 9] = 1.0
+    model = SwitchingVarModel(
+        "ramp",
+        RATE,
+        "explicit",
+        mu=np.array([[1.0] * 4, [0.0] * 4]),
+        coefs=np.stack([2.0 * np.eye(4), 0.9 * np.eye(4)])[:, None],
+        sigma=np.stack([1e-6 * np.eye(4)] * 2),
+        delta=np.array([1.0, 0.0]),
+        trans=np.array([[0.0, 1.0], [1.0, 0.0]]),
+        dur_pmf=pmf,
+    )
+    free = model.sample(400, np.random.default_rng(36), start="initial")
+    assert free.max() > 1e6  # x 2^10 up, x 0.9^10 down, every cycle: it leaves any range
+    held = model.sample(400, np.random.default_rng(36), start="initial", clip=(0.0, 50.0))
+    assert held.min() >= 0.0 and held.max() == pytest.approx(50.0)
+    # the cap is fed back: ten decaying steps start from 50, not from the free value
+    np.testing.assert_allclose(held[:, 19], 50.0 * 0.9**10, rtol=1e-2)
+
+
+def test_stable_fit_keeps_a_ramp_state_under_the_unit_circle():
+    rng = np.random.default_rng(40)
+    blocks, labels = [], []
+    for _ in range(30):  # quiet noise, then every rotor growing 8 % a step from its own start
+        quiet = 0.05 * rng.standard_normal((4, 40))
+        ramp = rng.uniform(0.5, 1.5, (4, 1)) * 1.08 ** np.arange(40)[None, :]
+        blocks.append(np.hstack([quiet, ramp + 0.01 * rng.standard_normal((4, 40))]))
+        labels.append(np.r_[np.zeros(40, dtype=np.int64), np.ones(40, dtype=np.int64)])
+
+    def fit(stable: bool) -> SwitchingVarModel:
+        return fit_switching_var(
+            blocks,
+            RATE,
+            n_states=2,
+            order=1,
+            init_labels=labels,
+            n_init=1,
+            max_iter=20,
+            stable=stable,
+        )
+
+    def radius(model: SwitchingVarModel) -> float:
+        return max(float(np.abs(np.linalg.eigvals(a[0])).max()) for a in model.coefs)
+
+    free, held = fit(False), fit(True)
+    assert radius(free) == pytest.approx(1.08, abs=0.02)
+    assert radius(held) < 1.0
+    # the shrunk state still climbs (its intercept was re-estimated), within reach of the data
+    y = held.sample(4000, np.random.default_rng(41))
+    top = max(float(b.max()) for b in blocks)
+    assert 0.2 * top < y.max() < 30.0 * top
+
+
 @pytest.mark.parametrize("durations", ["geometric", "explicit"])
 def test_switching_forecast_lead_one_mean_is_the_filtered_predictive_mean(durations):
     rng = np.random.default_rng(34)

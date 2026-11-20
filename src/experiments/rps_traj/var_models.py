@@ -198,10 +198,11 @@ def _stationary_dist(p: np.ndarray) -> np.ndarray:
 
 
 @njit(cache=True)
-def _simulate_kernel(states, mu, coefs, chol, eps, lags):  # pragma: no cover - jitted
+def _simulate_kernel(states, mu, coefs, chol, eps, lags, lo, hi):  # pragma: no cover - jitted
     """Simulate ``(P, H, 4)`` switching-VAR paths along given state paths.
 
     ``lags[p, k]`` is ``y_{-1-k}`` of path ``p``; ``eps`` are standard normals.
+    Every value is clamped into ``[lo, hi]`` before it is fed back.
     """
     n_paths, horizon = states.shape
     order = coefs.shape[1]
@@ -219,7 +220,7 @@ def _simulate_kernel(states, mu, coefs, chol, eps, lags):  # pragma: no cover - 
                     for m in range(d):
                         prev = out[q, idx, m] if idx >= 0 else lags[q, k - t, m]
                         acc += coefs[s, k, i, m] * prev
-                out[q, t, i] = acc
+                out[q, t, i] = min(max(acc, lo), hi)
     return out
 
 
@@ -559,7 +560,14 @@ class VarModel:
     def _simulate(self, eps: np.ndarray, lags: np.ndarray) -> np.ndarray:
         states = np.zeros(eps.shape[:2], dtype=np.int64)
         return _simulate_kernel(
-            states, self.intercept[None], self.coefs[None], self._chol[None], eps, lags
+            states,
+            self.intercept[None],
+            self.coefs[None],
+            self._chol[None],
+            eps,
+            lags,
+            -np.inf,
+            np.inf,
         )
 
     @cached_property
@@ -856,6 +864,7 @@ class SwitchingVarModel:
         lags: np.ndarray,
         j0: np.ndarray | None = None,
         n0: np.ndarray | None = None,
+        clip: tuple[float, float] | None = None,
     ) -> np.ndarray:
         n_paths = lags.shape[0]
         fresh = j0 is None
@@ -865,7 +874,8 @@ class SwitchingVarModel:
         u_next = rng.random((n_paths, horizon))
         states = _simulate_states(j0, n0, fresh, self.delta, self.trans, self._haz, u_exit, u_next)
         eps = rng.standard_normal((n_paths, horizon, NUM_ROTORS))
-        return _simulate_kernel(states, self.mu, self.coefs, self._chol, eps, lags)
+        lo, hi = (-np.inf, np.inf) if clip is None else (float(clip[0]), float(clip[1]))
+        return _simulate_kernel(states, self.mu, self.coefs, self._chol, eps, lags, lo, hi)
 
     def _burn_in(self) -> int:
         dwell = np.minimum(self.mean_dwell_s * self.rate_hz, 1e5)
@@ -876,18 +886,23 @@ class SwitchingVarModel:
         n: int,
         rng: np.random.Generator,
         start: Literal["stationary", "initial"] = "stationary",
+        clip: tuple[float, float] | None = None,
     ) -> np.ndarray:
         """``(4, n)`` realisation.
 
         ``'stationary'`` opens a visit from ``delta`` with zero lags, runs
         ``_burn_in()`` samples and returns the tail; ``'initial'`` returns the
         samples from that fresh start on (a whole flight starting at rest).
+
+        ``clip=(lo, hi)`` clamps every simulated value into that range before
+        it is fed back: nothing in the model keeps a state's autoregression
+        stable, and a bounded physical quantity gives the bound for free.
         """
         if start not in ("stationary", "initial"):
             raise ValueError(f"unknown start {start!r}")
         burn = self._burn_in() if start == "stationary" else 0
         lags = np.zeros((1, self.order, NUM_ROTORS))
-        y = self._simulate(rng, n + burn, lags)
+        y = self._simulate(rng, n + burn, lags, clip=clip)
         return np.ascontiguousarray(y[0, burn:].T)
 
     def forecast(
@@ -1045,6 +1060,40 @@ def _emission_step(
     return np.stack(bs), np.stack(sigmas)
 
 
+def _stabilise(
+    b: np.ndarray,
+    sig: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    gamma: np.ndarray,
+    order: int,
+    intercept: bool,
+    lam_sigma: float,
+    sigma_floor: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Pull every state whose companion spectral radius reaches
+    :data:`STABLE_RADIUS` back under it (``A_k <- g^k A_k``, the guard
+    :func:`fit_var` applies) and re-estimate that state's intercept and
+    covariance with the shrunk coefficients held."""
+    off = int(intercept)
+    b, sig = b.copy(), sig.copy()
+    for j in range(b.shape[0]):
+        rho = _spectral_radius(_coefs_from_b(b[j], order, intercept)[0])
+        if rho < STABLE_RADIUS:
+            continue
+        g = STABLE_RADIUS / rho * (1.0 - 1e-6)
+        b[j, off:] *= np.repeat(g ** np.arange(1, order + 1), NUM_ROTORS)[:, None]
+        w = gamma[:, j]
+        total = max(float(w.sum()), 1e-300)
+        resid = y - x[:, off:] @ b[j, off:]
+        if intercept:
+            b[j, 0] = (w[:, None] * resid).sum(axis=0) / total
+            resid = resid - b[j, 0]
+        s = (resid * w[:, None]).T @ resid / total
+        sig[j] = shrink_covariance(0.5 * (s + s.T), lam_sigma, sigma_floor)
+    return b, sig
+
+
 def _geometric_pmf(mean_run: float, d_max: int) -> np.ndarray:
     stay = 1.0 - 1.0 / mean_run
     r = (1.0 - stay) * stay ** np.arange(d_max)
@@ -1120,6 +1169,7 @@ def fit_switching_var(
     seed: int = 0,
     name: str | None = None,
     init_labels: Any = None,
+    stable: bool = False,
 ) -> SwitchingVarModel:
     """EM fit of the Markov-switching VAR / VAR(p)-HSMM (see the module docstring).
 
@@ -1131,6 +1181,15 @@ def fit_switching_var(
     ``init_labels`` (one integer array ``(n,)`` per block, values in
     ``0..n_states-1``) replaces the rolling-RMS labelling of restart 0: a
     known segmentation, such as the phases of a whole flight, to start EM at.
+
+    ``stable`` keeps every state's autoregression stable: after each M-step a
+    state whose companion spectral radius reaches :data:`STABLE_RADIUS` is
+    shrunk as :func:`fit_var` shrinks a plain VAR, its intercept and covariance
+    re-estimated.  That projection can lower the likelihood, so a restart then
+    stops when the penalised log-likelihood CHANGES by less than ``tol`` times
+    its magnitude and returns its best iterate (whose log-likelihood ends the
+    trace).  Needed by anything that samples long paths: a state fitted to a
+    ramp is explosive otherwise.
     """
     if durations not in ("geometric", "explicit"):
         raise ValueError(f"unknown durations {durations!r}")
@@ -1185,7 +1244,10 @@ def fit_switching_var(
                 raise ValueError("init_labels must give one state in 0..n_states-1 per sample")
         else:
             labels = _init_labels(k, zs, offsets, order, m, rate_hz, run_len, rng)
-        b, sig = _emission_step(xy, np.eye(m)[labels], lam_a, lam_sigma, sigma_floor, n_unpen)
+        gamma0 = np.eye(m)[labels]
+        b, sig = _emission_step(xy, gamma0, lam_a, lam_sigma, sigma_floor, n_unpen)
+        if stable:
+            b, sig = _stabilise(b, sig, x, y, gamma0, order, intercept, lam_sigma, sigma_floor)
         runs = np.clip(_mean_runs(labels, offsets, m), 2.0, d_max if explicit else np.inf)
         delta = np.full(m, 1.0 / m)
         if explicit:
@@ -1204,12 +1266,16 @@ def fit_switching_var(
         prev = -np.inf
         converged, n_iter = False, 0
         pll = -np.inf
+        peak: tuple[float, SwitchingVarModel, float] | None = None
         for it in range(max_iter + 1):
             logb = np.column_stack([_gauss_logpdf(y - x @ b[j], model._chol[j]) for j in range(m)])
             e = _run_e_step(logb, offsets, model, alpha)
             pll = e.loglik - lam_a * _l1(b, n_unpen)
             trace.append(e.loglik - log_scale)
-            if it > 0 and pll - prev < tol * abs(prev):
+            if stable and (peak is None or pll > peak[0]):
+                peak = (pll, model, trace[-1])
+            change = abs(pll - prev) if stable else pll - prev
+            if it > 0 and change < tol * abs(prev):
                 converged = True
                 break
             if it == max_iter:
@@ -1217,6 +1283,8 @@ def fit_switching_var(
             prev = pll
             # M-step
             b, sig = _emission_step(xy, e.gamma, lam_a, lam_sigma, sigma_floor, n_unpen)
+            if stable:
+                b, sig = _stabilise(b, sig, x, y, e.gamma, order, intercept, lam_sigma, sigma_floor)
             delta = e.first / e.first.sum()
             rows = e.xi.sum(axis=1, keepdims=True)
             trans = np.where(rows > 0.0, e.xi / np.where(rows > 0.0, rows, 1.0), model.trans)
@@ -1225,6 +1293,9 @@ def fit_switching_var(
                 pmf = np.where(tot > 0.0, e.dur / np.where(tot > 0.0, tot, 1.0), model._r)
             model = build(b, sig, delta, trans, pmf)
             n_iter = it + 1
+        if peak is not None:
+            pll, model = peak[0], peak[1]
+            trace.append(peak[2])
         if best is None or pll > best[0]:
             best = (pll, model, trace, n_iter, converged)
 

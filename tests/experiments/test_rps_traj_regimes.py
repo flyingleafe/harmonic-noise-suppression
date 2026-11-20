@@ -444,6 +444,22 @@ def test_score_flights_counts_a_diverged_flight_as_invalid() -> None:
     assert out["inc_q999_gen_0.2"] < 10.0
 
 
+def test_score_flights_keeps_what_is_not_a_flight_out_of_the_read_outs() -> None:
+    rng = np.random.default_rng(9)
+    held = [block_mean(_programmed(rng), FS, 25.0)]
+    good = [block_mean(_programmed(rng, hold_s=h), FS, 25.0) for h in (0.0, 1.0, 2.0)]
+    reference = rc.score_flights(good, held, 25.0)
+    grounded = np.zeros_like(good[0])  # a blip on the ground: no hover of its own
+    grounded[:, 100:105] = 5.0
+    aloft = good[0][:, 400:900]  # starts and ends in the air: landmarks, but not a pass
+    out = rc.score_flights([*good, grounded, aloft], held, 25.0)
+    assert out["valid_rate"] == pytest.approx(0.6) and out["diverged_rate"] == 0.0
+    for key in ("standby_s", "takeoff_rise_s", "midband_s"):
+        assert out["readouts"][key] == reference["readouts"][key]
+    # the grounded flight is scaled by the held-out hover, not by its own (zero)
+    assert out["speed_w1"] < 0.3 and out["inc_q999_gen_0.2"] < 10.0
+
+
 def test_aggregate_means_ranks_and_parameter_sets() -> None:
     def scores(logpdf: float, energy: float, w1: float) -> dict:
         horizons = {

@@ -22,13 +22,13 @@
 # ALL JOBS ARE SUBMITTED FROM ONE DETACHED WORKTREE at the pinned SHA
 # (.worktrees/submit-rps-regimes): omnirun refuses a dirty tree, and a later
 # edit to the main checkout must not change what a queued job runs.  Collect
-# with `omnirun pull <job>` FROM THAT WORKTREE: its results/rps_traj is the
-# main checkout's, so the unit JSONs land in results/rps_traj/regimes/raw.
+# with `omnirun pull <job>` FROM THAT WORKTREE: its results/rps_traj/regimes
+# is linked to the main checkout's, so the unit JSONs land there.
 #
 # A unit that fails leaves <uid>.err beside the JSONs and the rest go on; the
-# job itself ends 0 so that the finished units are collected, and prints the
-# number of .err files as its last line.  Re-submitting a rig at the same SHA
-# resumes it: the cluster worktree keeps the finished units.
+# job prints the number of .err files as its last line and fails if there is
+# one (its outputs are collected either way).  Re-submitting a rig at the same
+# SHA resumes it: the cluster worktree keeps the finished units.
 set -euo pipefail
 
 die() { printf 'rps_traj_regimes_submit: %s\n' "$*" >&2; exit 1; }
@@ -83,6 +83,12 @@ submit() {  # submit <printable name> <omnirun argv...>
 if [ "$DRY" = 0 ]; then
   WT="$(scripts/mk-worktree.sh submit-rps-regimes "$REF")"
   git -C "$WT" checkout --detach "$SHA"
+  # results/rps_traj holds a tracked file, so mk-worktree leaves it a real
+  # directory: link the campaign's own (ignored) subdirectory instead
+  MAIN="$(git rev-parse --path-format=absolute --git-common-dir)"
+  MAIN="${MAIN%/.git}"
+  mkdir -p "$MAIN/$OUT"
+  [ -e "$WT/$OUT" ] || ln -s "$MAIN/$OUT" "$WT/$OUT"
 fi
 
 for t in "${TARGETS[@]}"; do
@@ -95,7 +101,8 @@ for t in "${TARGETS[@]}"; do
   run="python scripts/rps_traj_regimes.py run --rigs $t --jobs $((CPUS / 2)) --threads 2"
   payload="$ENV_WRAPPER; $run --stage cruise; $run --stage cruise --final"
   payload="$payload; $run --stage flight; $run --stage flight --final --arms ours msvar hsmm"
-  payload="$payload; echo \"failed units: \$(ls $OUT/raw/*__${t}__*.err 2>/dev/null | wc -l)\""
+  payload="$payload; n=\$(ls $OUT/raw/*__${t}__*.err 2>/dev/null | wc -l)"
+  payload="$payload; echo \"failed units: \$n\"; [ \"\$n\" -eq 0 ]"
   submit "$t" omnirun submit --backend uni-cpu --gpus 0 --cpus "$CPUS" --mem "$MEM" --time "$TIME" \
     --name "rps-regimes-${t//_/-}" --outputs "$OUT/raw/*__${t}__*" -- bash -lc "$payload"
 done

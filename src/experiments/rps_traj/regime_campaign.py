@@ -125,11 +125,23 @@ DIVERGED_STD = 1e3
 #: variance-based labelling, likelihood prefers states that flicker (dwell
 #: 0.04-2 s on MD2) and 2-8 % of the draws were one valid flight.  The dwell
 #: law spans a whole flight, which makes one EM pass cost seconds.
+#:
+#: Nothing in a switching VAR keeps a state's autoregression stable, and a
+#: state fitted to a ramp is not: sampled as published, every draw of the
+#: Markov-switching VAR on DREGON and nine in ten of the VAR-HSMM on MD2
+#: (fold 0 of each) left the data's range.  Two guards, both in the
+#: baselines' favour: every state is kept stable during EM
+#: (``fit_switching_var(stable=True)``, the guard the plain VAR has), and the
+#: sampler is clamped, inside the recursion, to ``[0, FLIGHT_CAP x the fastest
+#: training sample]`` (a rotor has a top speed).  The share of generated
+#: flights that touch the cap is reported: a stable state with a drift still
+#: climbs for as long as its stay lasts.
 FLIGHT_RATE_HZ = 25.0
 N_FLIGHTS_GEN = 64
 FLIGHT_ORDER = 2
 FLIGHT_SIGMA_FLOOR = 1e-6
 FLIGHT_MAX_ITER = 100
+FLIGHT_CAP = 1.25
 
 
 # ─── data ─────────────────────────────────────────────────────────────────────
@@ -485,26 +497,29 @@ def score_flights(
     gen: Sequence[np.ndarray], held: Sequence[np.ndarray], fs: float
 ) -> dict[str, Any]:
     """Generated whole flights against the held-out ones, all ``(4, n)`` at
-    ``fs``: the CRPS of every read-out (the generated flights are the
-    predictive ensemble, the held-out flight the observation), the share of
-    generated flights that are one valid pass, and Wasserstein distances of
-    speed and increment distributions, speeds relative to each flight's hover.
+    ``fs``: the share of generated flights that are one valid pass, the CRPS
+    of every read-out (the VALID generated flights are the predictive
+    ensemble, the held-out flight the observation: a read-out of something
+    that is not a flight is not a forecast of one), and Wasserstein distances
+    of speed and increment distributions, speeds relative to each flight's
+    hover (the held-out flights' for a generated flight that has none).
 
     A generated flight that is not finite or exceeds ten times the fastest
-    held-out rotor has diverged (a switching VAR can have an explosive state):
-    it counts as invalid and enters no other statistic.
+    held-out rotor has diverged: it counts as invalid and enters no other
+    statistic.
     """
     limit = 10.0 * max(float(np.max(x)) for x in held)
     ok = [x for x in gen if np.isfinite(x).all() and float(np.max(x)) < limit]
     g = [readouts(x, fs) for x in ok]
     h = [readouts(x, fs) for x in held]
+    valid = [r for r in g if r["valid"] == 1.0]
     out: dict[str, Any] = {
-        "valid_rate": float(sum(r["valid"] for r in g)) / max(len(gen), 1),
+        "valid_rate": len(valid) / max(len(gen), 1),
         "diverged_rate": 1.0 - len(ok) / max(len(gen), 1),
         "readouts": {},
     }
     for key in READOUTS:
-        draws = np.array([r[key] for r in g if np.isfinite(r[key])])
+        draws = np.array([r[key] for r in valid if np.isfinite(r[key])])
         obs = [r[key] for r in h if np.isfinite(r[key])]
         entry: dict[str, Any] = {"n_gen": int(draws.size), "observed": obs}
         if draws.size >= 2 and obs:
@@ -515,13 +530,15 @@ def score_flights(
     if not ok:
         return out
 
+    def hover_of(x: np.ndarray) -> float | None:
+        marks = landmarks(x, fs)
+        return None if marks is None else marks.hover
+
+    known = [v for v in (hover_of(x) for x in held) if v is not None]
+    ref = float(np.median(known)) if known else limit / 10.0
+
     def rel(xs: Sequence[np.ndarray]) -> list[np.ndarray]:
-        scaled = []
-        for x in xs:
-            marks = landmarks(x, fs)
-            hover = marks.hover if marks is not None else float(np.percentile(x.mean(axis=0), 90))
-            scaled.append(x / max(hover, 1e-9))
-        return scaled
+        return [x / max(hover_of(x) or ref, 1e-9) for x in xs]
 
     gs, hs = rel(ok), rel(held)
     out["speed_w1"] = _w1(
@@ -593,12 +610,18 @@ def run_flight(unit: Unit) -> dict[str, Any]:
             seed=seed,
             name=f"{arm}_flight",
             init_labels=[phase_labels(m) for m in marks if m is not None],
+            stable=True,
         )
         out["params"] = model.to_dict()
         out["note"] = _switch_note(model)
+        cap = FLIGHT_CAP * max(float(s.max()) for s in seqs)
+        hit = 0
         for _ in range(N_FLIGHTS_GEN):
-            path = np.clip(model.sample(int(1.5 * longest), rng, start="initial"), 0.0, None)
-            gen.append(first_pass(path, FLIGHT_RATE_HZ, hover))
+            path = model.sample(int(1.5 * longest), rng, start="initial", clip=(0.0, cap))
+            path = first_pass(path, FLIGHT_RATE_HZ, hover)
+            hit += int(float(path.max()) >= cap * (1.0 - 1e-9))
+            gen.append(path)
+        out["saturated_rate"] = hit / N_FLIGHTS_GEN
     else:
         raise ValueError(f"unknown flight arm {arm!r}")
     out["fit_s"] = time.perf_counter() - t0
@@ -737,6 +760,7 @@ def aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             flat = {
                 "valid_rate": sc["valid_rate"],
                 "diverged_rate": sc.get("diverged_rate", 0.0),
+                "saturated_rate": float(row.get("saturated_rate", 0.0)),
                 "speed_w1": sc.get("speed_w1", float("nan")),
                 "inc_w1_0.2": sc.get("inc_w1_0.2", float("nan")),
                 "inc_w1_1": sc.get("inc_w1_1", float("nan")),
