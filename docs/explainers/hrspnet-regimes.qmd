@@ -1,0 +1,155 @@
+---
+title: "HRSPNet per frame regime"
+subtitle: "Real-only training against the two best baselines; synthetic-only pretraining on four generators"
+date: 2026-11-06
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  echo: false
+---
+
+All numbers are PIT-MAE (Hz) on the real validation split `rp-real-valid-v1` (DREGON + MD2, eight
+microphones, one rotor assignment per clip). They are copied from the wrap-up paper
+(`writing/papers/2026-08_wrapup/src/main.tex`), except the two comb rows of §2 (sources below).
+
+**Frame regimes** (paper, §Validation): a frame is a *ramp* if the mean rotor speed changes by
+≥ 20 Hz/s, else *zero* if every rotor is below 1 Hz, else *standby* if the mean speed is below
+45 Hz, else *cruise*. Ramps are about 4 % of all frames; the DREGON zero and standby frames come from
+the ground segments of three flights, the MD2 ramps from one take-off and one landing.
+
+```{ojs}
+viewof scale = Inputs.radio(["linear", "log"], {value: "linear", label: "y scale"})
+```
+
+## 1. Trained on real data: HRSPNet against the two best baselines
+
+The baselines are the two strongest non-HRSPNet rows of Table `tab:real` by macro error:
+HarmoF0-L2 (best multi-pitch baseline) and Conv+BiGRU (best regressor). Each model is its better
+stream of `tab:real` (HRSPNet with label augmentation, the two baselines without), at the round with
+the lowest five-round median of `val/real_macro`.
+
+| Model | Macro PIT-MAE (Hz) |
+|---|---:|
+| HRSPNet | **2.52** |
+| HarmoF0-L2 | 2.62 |
+| Conv+BiGRU | 2.65 |
+
+```{ojs}
+//| column: page
+regimeChart(realData, realModels, realColors, {log: scale === "log"})
+```
+
+- **HRSPNet wins clearly** on DREGON ramps (5.63 against 8.64 and 11.28) and on every MD2 cell
+  except zero and ramp: all frames 1.14 against 1.74 / 1.49, standby 1.16 against 2.57 / 1.93,
+  cruise 0.60 against 0.93 / 0.93.
+- **The baselines win** on zero frames (Conv+BiGRU 0.35 on DREGON, HarmoF0-L2 1.47 on MD2, against
+  0.62 and 2.96), on DREGON cruise (HarmoF0-L2 2.23 against 2.97) and on all DREGON frames
+  (3.50 / 3.82 against 3.89). On MD2 ramps Conv+BiGRU is on par (6.38 against 6.58).
+- **Unsolved by all three:** DREGON standby, 13.1–13.4.
+
+## 2. Trained on synthetic data only: four generators for HRSPNet
+
+The same HRSPNet trained on one synthetic stream alone, never on real audio. Each row is read at the
+checkpoint selected on its *synthetic* validation set:
+
+- **hard**: fitted noise model, uniform hyperprior (selector `val/uniform`).
+- **easy**: fitted noise model, narrowed hyperprior around the two fits (selector `val/near_macro`).
+- **static comb** (`combdiv`): one constant harmonic profile per rotor (selector `val/static_comb`).
+- **stochastic comb** (`stochcomb`): Lorentzian lines with slowly varying powers over colored
+  broadband noise (selector `val/stoch_comb`).
+
+The dashed line in each panel is real-only HRSPNet from §1, for reference.
+
+| Training data | Macro PIT-MAE (Hz) |
+|---|---:|
+| fitted model, hard | **6.15** |
+| fitted model, easy | 7.31 |
+| stochastic comb | 11.51 |
+| static comb | 16.20 |
+| *real only (reference)* | *2.52* |
+
+```{ojs}
+//| column: page
+regimeChart(synthData, synthModels, synthColors, {log: scale === "log", ref: realData.filter(d => d.model === "HRSPNet")})
+```
+
+- **Cruise is where the fitted model transfers:** easy reaches 1.34 on DREGON cruise, below the
+  three real-only models of §1 (2.23–2.97), and 1.08 on MD2 cruise. On DREGON cruise the combs err
+  by 12.09 (stochastic) and 21.78 (static).
+- **Zero frames invert the order:** the static comb is near perfect (0.24 / 1.03), the fitted models
+  are not (DREGON zero 14.99 hard, 23.41 easy; MD2 zero 16.01 hard).
+- **Ramps and MD2 standby stay far from real-only** for every generator (10.97–35.82 against
+  1.16–6.58). On DREGON standby, where every real-only model fails (13.1–13.4), the fitted model
+  does better: hard 7.24, easy 8.53.
+- **As pretraining, the gap closes:** after fine-tuning on real data all four reach 2.15–2.33 macro
+  (hard 2.15, static comb 2.15, stochastic comb 2.30, easy 2.33; paper Table `tab:ablation`).
+
+## Sources
+
+- §1: `tab:real`, rows `rp_pyrseplstm_k64_alllab`, `rp_harmof0_l2_all`, `rp_scv2_all`
+  (`results/rp_*/validation_history.jsonl`, `scripts/rp_history.py --best`).
+- §2 hard / easy: `tab:pretrain`, HRSPNet rows (W&B `rp_pyrseplstm_k64_priorv4`, stopped at step
+  96 500; `rp_pyrseplstm_k64_easyv4` j7bpbxia, step 35 000).
+- §2 static comb: `results/rp_pyrseplstm_k64_combdiv/validation_history.jsonl`, step 97 000
+  (lowest five-round median of `val/static_comb`; W&B al9s52jz).
+- §2 stochastic comb: W&B 4r6k1la3 (`rp_pyrseplstm_k64_stochcomb`), step 32 500 (lowest five-round
+  median of `val/stoch_comb`; `results/rp_stochcomb/table_viii.json`).
+
+```{ojs}
+//| output: false
+regimes = ["Zero", "Standby", "Ramp", "Cruise", "All frames"]
+
+// Per model and drone: [all, zero, standby, ramp, cruise], PIT-MAE in Hz.
+function long(table) {
+  const order = ["All frames", "Zero", "Standby", "Ramp", "Cruise"];
+  return Object.entries(table).flatMap(([model, byDrone]) =>
+    Object.entries(byDrone).flatMap(([dataset, values]) =>
+      values.map((value, i) => ({model, dataset, regime: order[i], value}))));
+}
+
+realModels = ["HRSPNet", "HarmoF0-L2", "Conv+BiGRU"]
+realColors = ["#c53030", "#718096", "#cbd5e0"]
+realData = long({
+  "HRSPNet":    {DREGON: [3.89, 0.62, 13.24, 5.63, 2.97], MD2: [1.14, 2.96, 1.16, 6.58, 0.60]},
+  "HarmoF0-L2": {DREGON: [3.50, 1.46, 13.44, 8.64, 2.23], MD2: [1.74, 1.47, 2.57, 11.31, 0.93]},
+  "Conv+BiGRU": {DREGON: [3.82, 0.35, 13.13, 11.28, 2.64], MD2: [1.49, 2.34, 1.93, 6.38, 0.93]},
+})
+
+synthModels = ["fitted, hard", "fitted, easy", "stochastic comb", "static comb"]
+synthColors = ["#2b6cb0", "#63b3ed", "#dd6b20", "#f6ad55"]
+synthData = long({
+  "fitted, hard":    {DREGON: [4.76, 14.99, 7.24, 10.97, 3.23], MD2: [7.53, 16.01, 14.34, 11.74, 3.11]},
+  "fitted, easy":    {DREGON: [4.15, 23.41, 8.53, 15.28, 1.34], MD2: [10.46, 5.09, 32.25, 21.61, 1.08]},
+  "stochastic comb": {DREGON: [12.62, 10.84, 14.76, 21.40, 12.09], MD2: [10.39, 2.04, 25.37, 17.41, 4.65]},
+  "static comb":     {DREGON: [20.08, 0.24, 14.39, 35.82, 21.78], MD2: [12.32, 1.03, 31.04, 27.99, 4.91]},
+})
+
+function regimeChart(data, models, colors, {log = false, ref = null} = {}) {
+  const top = d3.max(data, d => d.value);
+  const floor = 0.1;
+  return Plot.plot({
+    width: 980,
+    height: 560,
+    marginLeft: 56,
+    marginRight: 64,
+    fx: {domain: regimes, label: null, padding: 0.08},
+    fy: {domain: ["DREGON", "MD2"], label: null},
+    x: {domain: models, axis: null, paddingInner: 0.08},
+    y: log
+      ? {type: "log", domain: [floor, 100], ticks: [0.1, 0.3, 1, 3, 10, 30, 100], tickFormat: "~g", label: "PIT-MAE (Hz), lower is better", grid: true}
+      : {domain: [0, top * 1.12], label: "PIT-MAE (Hz), lower is better", grid: true},
+    color: {domain: models, range: colors, legend: true},
+    marks: [
+      Plot.barY(data, {fx: "regime", fy: "dataset", x: "model", y1: log ? floor : 0, y2: "value", fill: "model"}),
+      Plot.text(data, {
+        fx: "regime", fy: "dataset", x: "model", y: "value",
+        text: d => d.value.toFixed(2), dy: -6, fontSize: 9,
+      }),
+      ref ? Plot.ruleY(ref, {fx: "regime", fy: "dataset", y: "value", stroke: "black", strokeWidth: 1.2, strokeDasharray: "4,3"}) : null,
+      Plot.frame({stroke: "#e2e8f0"}),
+    ],
+  });
+}
+```

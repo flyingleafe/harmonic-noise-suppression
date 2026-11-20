@@ -687,8 +687,8 @@ def fig_noise_fits() -> None:
         handles=[
             Line2D([], [], color=PROFILE_COLOURS["aero"], lw=0.9, label="aerodynamic lines"),
             Line2D([], [], color=PROFILE_COLOURS["motor"], lw=0.9, label="motor lines"),
-            Line2D([], [], color=PROFILE_COLOURS["ped"], lw=0.9, label="line pedestals"),
-            Line2D([], [], color=PROFILE_COLOURS["bb"], lw=0.9, label="broadband floor"),
+            Line2D([], [], color=PROFILE_COLOURS["ped"], lw=0.9, label="modulation sidebands"),
+            Line2D([], [], color=PROFILE_COLOURS["bb"], lw=0.9, label="broadband noise"),
             Line2D([], [], color=PROFILE_COLOURS["wind"], lw=0.9, label="wind (DREGON)"),
         ],
         loc="upper right",
@@ -711,7 +711,7 @@ PRIOR_SECTORS = (
     ("uniform", "uniform", None, "o", "#1f77b4"),
     ("weak_comb", "weak comb", "k2_over_floor_db", "s", "#2ca02c"),
     ("strong_motor", "strong motor", "motor_boost_db", "^", "#9467bd"),
-    ("wide_pedestal", "wide pedestal", "pedestal_width_hz", "v", "#8c564b"),
+    ("wide_pedestal", "wide sidebands", "pedestal_width_hz", "v", "#8c564b"),
 )
 #: The easy neighbourhoods and the fits: map group, legend label, colour.
 PRIOR_NEAR = (
@@ -1236,56 +1236,50 @@ def tables() -> None:
     write_table(
         "gen_noise_data",
         "@{}p{0.29\\textwidth}llp{0.16\\textwidth}p{0.27\\textwidth}@{}",
-        ["recording set", "class", "rotors / mics", "duration (s)", "role in the fit"],
+        ["recording set", "type", "rotors / microphones", "duration (s)", "use in the fit"],
         [
             [
-                "DREGON single-rotor bench, 50--90\\,\\% (20 recordings)",
-                "bench",
+                "DREGON test stand, one rotor at 50--90\\,\\% throttle (20 recordings)",
+                "test stand",
                 "1 / 8",
                 "9.5--36 per recording",
-                "joint line, floor, pedestal and shaft-law fit",
+                "one joint fit of harmonics, broadband noise, modulation and shaft noise",
             ],
             [
-                "DREGON \\texttt{motor\\_allMotors\\_70} bench",
-                "bench",
-                "4 / 8",
-                "$\\sim$30",
-                "prediction check, no refit (pending)",
-            ],
-            [
-                "DREGON room-2 flights (18 windows)",
-                "flight",
+                "DREGON flights in room 2 (18 windows)",
+                "in flight",
                 "4 / 8",
                 "8 per window",
-                "gust-wind calibration; bench lines and floor unchanged",
+                "fit of the wind noise; harmonics and broadband noise of the test-stand fit "
+                "stay unchanged",
             ],
             [
-                "MD2 FLY125 cruise (8 windows)",
-                "flight",
+                "MD2 flight FLY125, cruise (8 windows)",
+                "in flight",
                 "4 / 8",
                 "8 per window",
-                "cruise regime fit",
+                "fit for the cruise condition",
             ],
             [
-                "MD2 FLY125 standby (3 windows)",
-                "flight",
+                "MD2 flight FLY125, standby (3 windows)",
+                "in flight",
                 "4 / 8",
                 "4 per window",
-                "standby regime fit",
+                "fit for the standby condition",
             ],
         ],
-        "Recordings used for the noise fits and the planned four-rotor prediction check. "
-        "Flight supports use 2048-point periodic-Hann frames with hop 512 at 16\\,kHz, retaining "
-        "every fourth frame; bench supports use one periodogram over each strict rotor-on span. "
-        "The fit band is 30\\,Hz--7.2\\,kHz on the bench and DREGON flight supports, and "
-        "31.25\\,Hz--7.9\\,kHz on MD2. Bench durations are taken from the exported fit metadata.",
+        "Recordings for the noise fits. "
+        "In-flight windows use frames of 2048 samples at 16\\,kHz with a periodic Hann window. "
+        "The hop is 512 samples, and the fit keeps every fourth frame. "
+        "Each test-stand recording gives one periodogram over its constant-speed segment. "
+        "The fit band is 30\\,Hz--7.2\\,kHz on the test stand and on the DREGON flights, and "
+        "31.25\\,Hz--7.9\\,kHz on MD2. The test-stand durations come from the metadata of the fit.",
         "tab:gen-noise-data",
         star=True,
         size="footnotesize",
         tabcolsep="4pt",
         source=(
-            "source: docs/experiments/noise-model-v4-bench.md, Setup and Conclusion; "
-            "docs/experiments/noise-model-v4-paper-edits.md, section 6 (prediction pending);\n"
+            "source: docs/experiments/noise-model-v4-bench.md, Setup and Conclusion;\n"
             "results/noise_v4/bench/restarts/dregon__kappa0__r5__s2__c7.json, recordings[].span_s;\n"
             "results/noise_v4/flight/gust_r1/"
             "dregon_room2__flight_v4__c7lines__scwind__wide__lines__c1__gust.json, supports;\n"

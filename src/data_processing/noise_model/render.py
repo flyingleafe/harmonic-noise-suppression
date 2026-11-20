@@ -107,7 +107,7 @@ from data_processing.noise_model import FIT_SCHEMA_V3, FIT_SCHEMA_V4, READABLE_F
 from data_processing.noise_model import spectrum as SP
 from data_processing.noise_model.constants import AMP_RPS_REF, SPEED_FLOOR_RPS
 from data_processing.noise_model.floor import floor_geometry, floor_power_spectrum
-from data_processing.noise_model.ou import simulate_state
+from data_processing.noise_model.ou import simulate_state, simulate_state_path
 from data_processing.noise_model.params import array_response_db, gamma_from_params
 from data_processing.noise_model.params import check_schema as _check_schema
 from data_processing.noise_model.resample import AA_PASS_HZ, antialias, decimate_audio
@@ -972,9 +972,9 @@ def _render_noise_v4(
     ``line_scatter_db``):
 
     * per rotor, ONE integrated-OU shaft path at the work rate
-      (:func:`.ou.simulate_state`), shared by the rotor's orders and mics, with
-      ``(sigma_nu, lam)`` from the shaft law at the rotor's CLIP-MEAN speed (the
-      transition is time-invariant; the flight law is flat);
+      (:func:`.ou.simulate_state_path`), shared by the rotor's orders and mics,
+      with ``(sigma_nu, lam)`` evaluated from its local rotor speed on that grid;
+      exact transitions hold the local coefficients over each work interval;
     * per aerodynamic line ``(r, k)``, on the 1 kHz envelope grid, the complex
       envelope ``sqrt(2 P_rk(t)) exp(a - sigma2_amp) exp(i psi)``:
       ``P_rk(t) = 10^{p/10} s_r(t)^alpha_a``, ``a`` a stationary OU of
@@ -1043,12 +1043,14 @@ def _render_noise_v4(
     rng_state, rng_alpha, rng_amp, rng_phase, rng_floor, rng_wind, rng_scatter = _v4_streams(seed)
 
     f_bar = f0.mean(axis=1)
-    s_bar = par.speed(f_bar)
-    sigma_nu, lam = par.shaft.sigma_nu(s_bar), par.shaft.lam(s_bar)
+    local_speed = par.speed(f0) if par.shaft.a_sigma != 0.0 or par.shaft.b_lam != 0.0 else None
+    reference_speed = np.ones(n_rotors)
+    sigma_nu = par.shaft.sigma_nu(reference_speed if par.shaft.a_sigma == 0.0 else local_speed)
+    lam = par.shaft.lam(reference_speed if par.shaft.b_lam == 0.0 else local_speed)
     innov = rng_state.standard_normal((n_rotors, n_work, 2))
     theta = np.stack(
         [
-            simulate_state(innov[r], lam=float(lam[r]), sigma=float(sigma_nu[r]), dt=dt)[0]
+            simulate_state_path(innov[r], lam=lam[r], sigma=sigma_nu[r], dt=dt)[0]
             for r in range(n_rotors)
         ]
     )
@@ -1204,7 +1206,13 @@ def _render_noise_v4(
         n_orders=int(k_max),
         n_rotors=int(n_rotors),
         n_mics=int(n_mics),
-        shaft=dict(sigma_nu_rad_s=sigma_nu.tolist(), lam_per_s=lam.tolist()),
+        shaft=dict(
+            evaluation="local_work_grid",
+            sigma_nu_rad_s_min=(sigma_nu.min(axis=1) if sigma_nu.ndim == 2 else sigma_nu).tolist(),
+            sigma_nu_rad_s_max=(sigma_nu.max(axis=1) if sigma_nu.ndim == 2 else sigma_nu).tolist(),
+            lam_per_s_min=(lam.min(axis=1) if lam.ndim == 2 else lam).tolist(),
+            lam_per_s_max=(lam.max(axis=1) if lam.ndim == 2 else lam).tolist(),
+        ),
         rms=np.sqrt((rendered**2).mean(axis=1)).tolist(),
         normalisation="none (absolute fitted level)",
     )

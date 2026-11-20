@@ -31,11 +31,11 @@ capsule's rendered floor.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
-from scipy.signal import firwin, oaconvolve
+from scipy.signal import firwin, hilbert, oaconvolve
 
 from data_processing.noise_model import FIT_SCHEMA_V4
 from data_processing.noise_model.render import render_noise, render_v4_wind
@@ -374,3 +374,38 @@ def test_wind_sc_draws_v1s_per_clip_wind_over_each_capsules_rendered_floor() -> 
     assert abs(db[0, 0] - db[1, 0]) > 0.5 and np.all((db > -10.0) & (db < 30.05)), db
     with pytest.raises(ValueError, match="wind_sc"):
         render_noise(_static_wind_flight_payload(), rps, sr=SR, n_mics=2, wind_sc=law)
+
+
+def test_shaft_speed_error_tracks_local_speed_instead_of_the_clip_mean() -> None:
+    fit = _payload()
+    params = fit["params"]
+    order = 20
+    params["profile_aero_db"] = np.full((2, order), -300.0).tolist()
+    params["profile_aero_db"][0][order - 1] = -12.0
+    params["motor_orders"] = []
+    params["profile_motor_db"] = [[], []]
+    params["alpha_aero"] = 0.0
+    for key in params["pedestal"]:
+        params["pedestal"][key] = np.zeros(order).tolist()
+    params["shaft"].update(
+        eps=2.0 / (2.0 * np.pi * 80.0), a_sigma=2.0, lam_ref_per_s=60.0, b_lam=0.0
+    )
+    params["floor"]["mean_db"] = -300.0
+    n = 6 * SR
+    rps = np.full((2, n), 64.0)
+    rps[0, : n // 2], rps[0, n // 2 :] = 60.0, 100.0
+    audio = render_noise(fit, rps, sr=SR, n_mics=1, seed=25)[0]
+    labelled_phase = 2.0 * np.pi * order * np.cumsum(rps[0]) / SR
+    analytic = cast(np.ndarray, hilbert(audio))
+    residual_phase = np.unwrap(np.angle(analytic * np.exp(-1j * labelled_phase)))
+    speed_error = np.diff(residual_phase) * SR / order
+    # Ignore the frequency step and Hilbert edge effects. Both stationary spans
+    # are long relative to 1/lambda, so their frequency-error scales are resolved.
+    measured = np.array(
+        [
+            np.std(speed_error[SR // 2 : 5 * SR // 2]),
+            np.std(speed_error[7 * SR // 2 : 11 * SR // 2]),
+        ]
+    )
+    expected = 2.0 * (np.array([60.0, 100.0]) / 80.0) ** 2
+    np.testing.assert_allclose(measured, expected, rtol=0.25)

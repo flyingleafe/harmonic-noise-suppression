@@ -1,0 +1,512 @@
+This section gives the **synthesis** formulas: how each frozen model makes audio from rotor-speed tracks. [The fitting section](#how-we-fit) tells how we set the parameters before synthesis. Here, every fitted value is a fixed constant.
+
+These are source-stage adaptations. The equations follow the implemented synthesis. PTR, HPN and DDSP-Piano use pinned versions of the published source models.
+
+### Shared notation
+
+::: {.table-scroll .fitting-table}
+
+| Symbol | Meaning | Unit |
+|:--|:--|:--|
+| $r=1,\dots,R$, $R=4$ | Rotor index | — |
+| $m=1,\dots,M$, $M=8$ | Microphone index | — |
+| $f_r(t)$ | Recorded speed of rotor $r$ at time $t$ | rev/s |
+| $\bar f(t)=\tfrac1R\sum_r f_r(t)$ | Rotor-mean speed | rev/s |
+| $\langle f_r\rangle$ | Mean of $f_r(t)$ over the 4-s window | rev/s |
+| $B=2$ | Blades per rotor; blade-pass frequency is $Bf_r$ | — |
+| $f_s=16\,\mathrm{kHz}$ | Output sample rate | Hz |
+| $\mathcal D$ | Anti-alias low-pass (7.9-kHz passband edge) and resampling to $f_s$ | — |
+| $\mathcal U(a,b)$, $\mathcal N(0,1)$ | Uniform and standard normal random draws | — |
+
+:::
+
+RPM is $60\times$ the speed in rev/s. A **draw** is one random output for one window. All methods take the speed tracks as given. **No method models remote-control commands, airframe dynamics or the flight controller.**
+
+Outputs are in the digital units of the recordings. No method rescales its output to match the evaluation audio.
+
+Both pulse clocks use the same type of spectral filter. We call it the **fitted STFT EQ**, $\mathcal E_m$. An STFT is a short-time Fourier transform. EQ means a frequency-dependent gain. The filter takes Hann frames of 1024 samples with a hop of 512 samples. For frame centre $t_\ell$ and frequency $\nu$, the gain in dB is
+
+$$
+\begin{aligned}
+g_m(\nu,t_\ell) &= I_\nu\!\left[o_{mb}+\beta_{mb}\,\Delta(t_\ell)\right],\\
+\Delta(t) &= 60\left(\bar f(t)-f_{\mathrm{ref}}\right).
+\end{aligned}
+$$
+
+Here $b$ indexes 20 third-octave centres $c_b$ from 100 Hz to 8 kHz. $o_{mb}$ is an offset in dB. $\beta_{mb}$ is a slope in dB/RPM. $f_{\mathrm{ref}}$ is a reference speed in rev/s. $I_\nu$ interpolates linearly in Hz between centres and holds the end values outside them. The filter multiplies each STFT cell by $10^{g_m/20}$ and inverts the STFT. It changes magnitude only. It adds no delay between microphones.
+
+The EQ gain is a **power ratio in dB applied as an amplitude gain**. Thus a band gain of $g$ dB changes band power by $g$ dB.
+
+### Pulse source + noise + fitted STFT EQ (Yang adaptation) {#synth-yang}
+
+**Arms:** `yang2025` (integer event clock) and `yang2025_phase` (fractional-carry clock) [@yang2025].
+
+**Frozen from the fit:** the EQ offsets $o_{mb}$ and slopes $\beta_{mb}$; $f_{\mathrm{ref}}=80.62$ rev/s; the variation range $\Delta_\mu$; and the noise ratio $\kappa$. The selected settings are $\Delta_\mu=5$ Hz and $\kappa=0.05$ for the integer clock. They are $\Delta_\mu=10$ Hz and $\kappa=0.05$ for fractional carry. Both variants use the same synthesis structure.
+
+The source runs at $f_Y=48$ kHz. We interpolate each speed track to this rate. The blade-pass frequency is $F_r[n]=Bf_r[n]$ in Hz.
+
+**Frequency variation.** One piecewise-constant sequence $\mu[n]$ (Hz) is shared by all rotors. Each segment lasts $\mathcal U(0.02,0.05)$ s. Its value is $\mathcal U(-\Delta_\mu/2,\Delta_\mu/2)$. The last segments of a window stay at zero, as in the upstream code.
+
+**Event clock.** Each rotor $r$ starts at
+
+$$
+\tau_{r,0}=\left\lfloor \frac{U_r f_Y}{F_r[0]}\right\rfloor,
+\qquad U_r\sim\mathcal U(0,1).
+$$
+
+The local period, in samples, is
+
+$$
+T_{r,j}=\frac{f_Y}{F_r[\lfloor\tau_{r,j}\rfloor]+\mu[\lfloor\tau_{r,j}\rfloor]}.
+$$
+
+The two clocks differ in one rule:
+
+$$
+\tau_{r,j+1}=
+\begin{cases}
+\tau_{r,j}+\lfloor T_{r,j}\rfloor, & \text{integer clock},\\
+\tau_{r,j}+T_{r,j}, & \text{fractional carry}.
+\end{cases}
+$$
+
+Each event $j\ge1$ starts a rectangular pulse at sample $n_{r,j}=\lfloor\tau_{r,j}\rfloor$:
+
+$$
+p_r[n]=\sum_{j=1}^{J_r-2}\mathbf{1}\!\left[n_{r,j}\le n<n_{r,j}+3\right].
+$$
+
+Each pulse is 3 samples wide (62.5 µs) with unit height. The sum drops the last two events, as the upstream code does.
+
+**Why the clock matters.** The integer clock discards the fractional part of every period. Its event rate is therefore $f_Y/\lfloor f_Y/F\rfloor\ge F$. At $f_{\mathrm{ref}}$, $F=161.24$ Hz, so $f_Y/F=297.7$. The clock uses 297 samples and gives 161.62 Hz. This is 0.38 Hz too high, and the error grows with harmonic number. The rate can also take only discrete values, about 0.5 Hz apart near 161 Hz. Fractional carry keeps the unused fraction. Each event still lands on a whole sample, but its timing error stays below one sample and does not accumulate.
+
+**Mix, filter and observe.** The source is one signal for all microphones:
+
+$$
+s[n]=\sum_r p_r[n]+\kappa\,w[n],\qquad w[n]\sim\mathcal N(0,1).
+$$
+
+The white noise $w$ has the same power at all frequencies. Its amplitude is relative to unit-height pulses. The output is
+
+$$
+y_m=\mathcal D\!\left(h_{\mathrm{LP}}*\mathcal E_m[s]\right).
+$$
+
+$\mathcal E_m$ runs at 48 kHz, so one frame is 21.3 ms. $h_{\mathrm{LP}}$ is a causal second-order Butterworth low-pass at 2.4 kHz. Its slope is only 12 dB/octave, so it does not remove all content above 2.4 kHz. The fit measured spectra after this low-pass, so the EQ also compensates its roll-off.
+
+**Consequences.** All eight channels come from one source waveform. They differ only by their magnitude EQ. The method has no propagation delay or separate rotor-to-microphone path.
+
+### Coefficient GP: speed-dependent tone weights (Lee adaptation) {#synth-gp}
+
+**Arms:** `lee2026_gp` (white residual noise) and `lee2026_gp_colored` (coloured residual noise) [@lee2026gp]. Both arms load **one** fitted checkpoint.
+
+**Frozen from the fit:** one Gaussian-process (GP) regression per tone coefficient; a residual-level table; and, for the coloured arm, an average residual spectrum per microphone. A GP predicts a smooth function and its uncertainty. We use only its predicted mean.
+
+**Step 1: predict tone weights.** The GP input for microphone $m$ is its position $\mathbf p_m$ (xyz, in m) and the four window-mean speeds:
+
+$$
+\mathbf z_m=\left(\mathbf p_m,\;\langle f_1\rangle,\dots,\langle f_4\rangle\right).
+$$
+
+The **posterior mean** gives $1+2RH=481$ coefficients per microphone. There are $H=60$ harmonics per rotor:
+
+$$
+\widehat{\mathbf c}_m=\boldsymbol\mu_{\mathrm{GP}}(\mathbf z_m)
+=\left(c_{m0},\;\{A_{mrk},B_{mrk}\}_{r,k}\right).
+$$
+
+$\boldsymbol\mu_{\mathrm{GP}}$ is the vector of fitted GP posterior-mean functions, with coefficient units restored after calibration standardisation. $c_{m0}$ is a constant (DC) term. $A$ and $B$ are sine and cosine weights in digital units. We draw no posterior samples. The weights are **constant for the whole window**.
+
+**Step 2: integrate phase.** The blade-pass phase of rotor $r$, in rad, is
+
+$$
+\Phi_r(t)=\varphi_r+2\pi B\int_0^t f_r(u)\,du,
+\qquad \varphi_r\sim\mathcal U(0,2\pi).
+$$
+
+The code integrates the instantaneous speed with the trapezoidal rule. The fit aligned each rotor's phase to a common reference. The true starting phase is therefore unknown, so we draw $\varphi_r$ at random. One $\varphi_r$ is shared by all microphones. The fitted phase differences between microphones stay intact.
+
+**Step 3: build the tones.**
+
+$$
+\begin{aligned}
+x^{\mathrm{tone}}_m(t)={}&c_{m0}+\sum_{r=1}^{R}\sum_{k=1}^{H}
+\Big[A_{mrk}\sin\!\big(k\Phi_r(t)\big)\\
+&\qquad{}+B_{mrk}\cos\!\big(k\Phi_r(t)\big)\Big].
+\end{aligned}
+$$
+
+Tone **frequencies** follow the instantaneous speeds. Tone **levels and phase offsets** do not change within the window.
+
+**Step 4: add residual noise.** The noise level is read from the fitted table at the mean of the window-mean speeds:
+
+$$
+\sigma_m=\mathrm{interp}\!\left(\tfrac1R\textstyle\sum_r\langle f_r\rangle\right).
+$$
+
+The table is clamped at its ends. The noise is $\sigma_m e_m(t)$ at 44.1 kHz, independent for each microphone:
+
+- **White:** $e_m(t)\sim\mathcal N(0,1)$, independent samples.
+- **Coloured:** $e_m=\mathcal F^{-1}\!\left[\sqrt{S_m(\nu)}\,\mathcal F[w_m]\right]/C_m$.
+
+$w_m$ is white noise, $\mathcal F$ is the discrete Fourier transform and $S_m(\nu)$ is the average residual spectrum. $C_m$ sets the expected variance to one. Both arms thus have the same expected noise power. Only the spectral shape differs.
+
+**Step 5: observe.**
+
+$$
+y_m=\mathcal D\,x^{\mathrm{tone}}_m+\mathcal D\left(\sigma_m e_m\right).
+$$
+
+The tone signal is made on a work grid of at least 32 kHz that is a multiple of 44.1 kHz. Padding of 0.1 s on each side absorbs filter edges.
+
+**Consequences.** The tone basis contains only blade-pass harmonics. Energy at other shaft orders cannot become a tone. During the fit, such energy went into the residual. In the coloured arm, it returns as noise with a fixed average spectrum. That spectrum does not move with speed.
+
+### Engine pulse train and harmonic-plus-noise models {#synth-engine}
+
+**Arms:** `doerfler2026_ptr_regimes` and `doerfler2026_hpn_regimes` [@doerfler2026ptr]. There is no pooled version of either arm.
+
+**Step 1: set the clock.** Each rotor $r$ supplies one track $f_r[n]$ in rev/s. The native engine cycle is half the crank rate. Its code converts the speed input $u_r$ to crank revolutions per second by multiplying by $10000/60$. Thus we set
+
+$$
+u_r[n]=\frac{120 f_r[n]}{10000},\qquad
+f_{\mathrm{cycle},r}[n]=\frac12\frac{10000u_r[n]}{60}=f_r[n].
+$$
+
+The same half-rate spacing is the starting frequency grid for HPN. The native model can change its partial frequencies. Torque and its time differences are zero.
+
+**Step 2: make one sound per rotor.** In PTR, each of eight engine cylinders has its own fixed phase offset. Let $\phi_i$ be a cylinder's position in the cycle. The controller bends phase to $\tilde\phi_i=2\pi(\phi_i/(2\pi))^{\nu_i}$. A native pulse has the form
+
+$$
+P_i=c_i E_i(\phi_i)\sum_k a_{ik}\sin(k\tilde\phi_i),\qquad
+E_i(\phi_i)=(1-e^{-\alpha_i\phi_i})e^{-\beta_i\phi_i}.
+$$
+
+The controller supplies gains, decay and phase-shaping terms. The pulse series uses harmonic weights $a_{ik}$ that decay exponentially with order. The noise bank makes bursts, flow noise and a random change to the pulse amplitude. Each cylinder bank goes through a delay filter. A final delay filter acts on the combined banks. The filters use two feedback taps, normally at adjacent sample lags:
+
+$$
+z[n]=x[n]+a\,z[n-L_1]+b\,z[n-L_2].
+$$
+
+The code samples a delay from learned weights. It constrains the two feedback coefficients $a,b$ for stability. These cylinders and filters remain engine components. They do not model the blades.
+
+HPN uses the same type of controller. It replaces the pulse and resonator path with a sum of sinusoids, $\sum_k A_k\cos\Phi_k$, and filtered noise. Its nominal tones start at $k f_r$, before native frequency changes. The phase of each tone integrates its frequency and adds a random start phase. The noise bank also makes bursts, turbulence and flow noise.
+
+**Step 3: add the sources.** Each microphone has its own four frozen sources. The output is $y_m[n]=\sum_{r=1}^{4} y_{mr}[n]$ at 16 kHz. The [fit](#fit-engine) compares this sum with the real mixed audio, not with separate rotor sounds.
+
+### DDSP-Piano: add tuned partials and noise {#synth-piano}
+
+**Arm:** `renault2023_piano_regimes` [@renault2023piano]. One full four-voice model runs per expert, with one environment ID per microphone. There is no pooled fit.
+
+**Step 1: set voice inputs.** At 250 updates per second, the input pitch of voice $r$ is
+
+$$
+q_r=69+12\log_2(f_r/440).
+$$
+
+Pitch stays continuous. It is not rounded to a piano key. The first frame has velocity $64/127$; later frames have no new onset. Pedal values are zero.
+
+**Step 2: make partials.** A partial is one sinusoid within a tone. The native model learns a detuning $d$ in semitones and uses an inharmonicity coefficient $B_r$. Inharmonicity means that a partial can be above an exact integer multiple of the fundamental. The native equation is
+
+$$
+F_{rk}=k\,440\,2^{(q_r+d-69)/12}\sqrt{1+B_r k^2}.
+$$
+
+Each sinusoid uses a phase from the integral of $F_{rk}$, and a gain from the voice's predicted level and partial weights. The pinned configuration includes two substrings and 96 partials. Substrings are multiple oscillating strings for one voice, not extra rotor tracks.
+
+**Step 3: add noise and reverberation.** The native noise branch filters white noise. The reverberation filter applies the learned response for microphone $m$ to the sum of the voice and noise signals. Neither filter is replaced by target audio:
+
+$$
+y_m = h_m * \left(\sum_r s_{mr} + \eta_m\right).
+$$
+
+$s_{mr}$ is the sum of the sinusoids for voice $r$, $\eta_m$ is the filtered noise, and $*$ denotes convolution with the learned response $h_m$. The [fit](#fit-piano) sets those parameters before scoring.
+
+### Gain-curve bank: tones and noise bands (EONE adaptation) {#synth-eone}
+
+**Arm:** `doerfler2026_eone` [@doerfler2026eone]. This is our **adapted, directly fitted source stage** of EONE. It is not the authors' code. It has no pretrained encoder–decoder and no torque input. It reproduces no published number.
+
+**Frozen from the fit:** positive gain curves $G_{mrcp}$ for $M=8$ microphones, $R=4$ rotors and $P=40$ speed knots. Each rotor has $K_h=128$ tone orders and $K_b=64$ noise bands. We write $G^{h}_{mrkp}$ for tone $k$ and $G^{n}_{mrbp}$ for band $b$. The gains are in the digital units of the recordings. A tone gain is a cosine peak amplitude. A noise gain is the RMS level of its band. The paper multiplies each speed gain by a torque gain. Here that torque factor is fixed to 1.
+
+The model runs directly at $f_s=16$ kHz. It needs no resampling. Scoring reloads the frozen curves and runs the same synthesis code as the fit, on CPU.
+
+**Step 1: frame speeds.** A frame has $H=256$ samples (16 ms). Frame $j$ holds the mean speed of its samples:
+
+$$
+\bar f_{rj}=\frac{1}{|\mathcal I_j|}\sum_{n\in\mathcal I_j} f_r[n],
+\qquad \mathcal I_j=\{jH,\dots,(j+1)H-1\}.
+$$
+
+The last frame uses only the samples present. The frame value belongs to the frame centre $n_j=jH+(H-1)/2$.
+
+**Step 2: knot weights (paper Eq. 1).** The knots are at $\rho_p=p\,\rho_{\max}/(P-1)$ RPM, for $p=0,\dots,P-1$ and $\rho_{\max}=10000$ RPM. The speed position on the knot axis is
+
+$$
+\begin{aligned}
+u_{rj}&=(P-1)\,\mathrm{clip}_{[0,1]}\!\left(\frac{60\,\bar f_{rj}}{\rho_{\max}}\right),\\
+i_{rj}&=\min\!\left(\lfloor u_{rj}\rfloor,\,P-2\right),\qquad w_{rj}=u_{rj}-i_{rj}.
+\end{aligned}
+$$
+
+Knot $i_{rj}$ gets weight $1-w_{rj}$. Knot $i_{rj}+1$ gets weight $w_{rj}$. All other knots get 0. So each frame gain interpolates linearly between the two nearest knots:
+
+$$
+a_{mrcj}=(1-w_{rj})\,G_{mrc,i_{rj}}+w_{rj}\,G_{mrc,i_{rj}+1}.
+$$
+
+Here $c$ is a tone or a band. Speeds above $\rho_{\max}$ hold the last knot.
+
+**Step 3: gains per sample.** The gain $a_{mrc}[n]$ interpolates linearly between neighbouring frame centres. Before the first centre and after the last centre, it holds the end value.
+
+**Step 4: tone carriers (paper Eqs. 2–3).** The shaft phase of rotor $r$, in rad, is a running sum:
+
+$$
+\Phi_r[n]=\frac{2\pi}{f_s}\sum_{t=0}^{n}f_r[t].
+$$
+
+The code accumulates it in double precision. Tone $k=1,\dots,K_h$ is shaft order $k$, which is blade-pass multiple $k/B$:
+
+$$
+h_{rk}[n]=\Gamma\!\left(k f_r[n]\right)\cos\!\Big(\big(k\Phi_r[n]\bmod 2\pi\big)+\phi_r\Big),
+\qquad \phi_r\sim\mathcal U(0,2\pi).
+$$
+
+One start phase $\phi_r$ per rotor and draw is **added** to every order. It is not multiplied by $k$. The paper uses 64 multiples $0.5,1,\dots,32$ of an engine firing frequency. We use 128 shaft orders, which are blade-pass multiples $0.5,1,\dots,64$. The highest tone sits at $128 f_r$, for example 6.4 kHz at 50 rev/s. Above that frequency, only the noise bands contribute.
+
+**Anti-alias gate (our addition).** $\Gamma$ removes tones near and above the Nyquist frequency $f_s/2$:
+
+$$
+\Gamma(f)=
+\begin{cases}
+1, & f\le f_p,\\
+\tfrac12\left[1+\cos\!\left(\pi\,\dfrac{f-f_p}{f_s/2-f_p}\right)\right], & f_p<f<f_s/2,\\
+0, & f\ge f_s/2,
+\end{cases}
+\qquad f_p=7.9\ \mathrm{kHz}.
+$$
+
+The gate suppresses carriers near and above Nyquist, sample by sample. It does not establish alias-free behaviour under arbitrary fast frequency or gain modulation.
+
+**Step 5: noise carriers (paper Eqs. 4–5).** The noise bands are spaced on the ERB-rate scale. ERB means equivalent rectangular bandwidth. The scale approximates the frequency resolution of hearing:
+
+$$
+E(\nu)=21.4\log_{10}\!\left(1+0.00437\,\nu\right),\qquad \nu\ \text{in Hz}.
+$$
+
+Band $b=0,\dots,K_b-1$ has centre $c_b=b\,\Delta_E$ on this scale, with spacing $\Delta_E=E(f_s/2)/(K_b-1)$. Its magnitude is a cosine lobe:
+
+$$
+\Lambda_b(\nu)=
+\begin{cases}
+\cos\!\left(\pi\,\dfrac{E(\nu)-c_b}{2\Delta_E}\right), & |E(\nu)-c_b|<\Delta_E,\\
+0, & \text{otherwise}.
+\end{cases}
+$$
+
+Neighbouring lobes overlap by half. Their squared magnitudes add to one. The paper does not state the lobe width or the normalisation; these are our choices.
+
+Each rotor and band gets one periodic noise loop of $L=65536$ samples (4.096 s). $\mathcal F^{-1}_L$ is the inverse real FFT of length $L$:
+
+$$
+\ell_{rb}[n]=\kappa_b\,\mathcal F^{-1}_L\!\left[\Lambda_b(\nu_q)\,e^{i\theta_{rbq}}\right][n],
+\qquad \nu_q=\frac{q f_s}{L},\quad \theta_{rbq}\sim\mathcal U(0,2\pi).
+$$
+
+The DC and Nyquist bins are zero. $\kappa_b$ makes every loop exactly zero-mean with unit RMS. One random offset $o_r\in\{0,\dots,L-1\}$ per rotor sets the read position:
+
+$$
+\eta_{rb}[n]=\ell_{rb}\!\left[(n+o_r)\bmod L\right].
+$$
+
+A scored window has 64000 samples. This is shorter than one loop, so a loop does not repeat inside a window.
+
+**Step 6: mix (paper Eq. 6).** Each microphone adds all rotors, with its own gains:
+
+$$
+y_m[n]=\sum_{r=1}^{R}\left[\sum_{k=1}^{K_h}a^{h}_{mrk}[n]\,h_{rk}[n]
++\sum_{b=0}^{K_b-1}a^{n}_{mrb}[n]\,\eta_{rb}[n]\right].
+$$
+
+**Consequences.** A rotor's tone carriers and noise loops are the same at all eight microphones. Only the gains differ. The method has no propagation delay between microphones. A gain depends only on its own rotor's frame-mean speed, not on the other rotors. Tone levels change only through speed. No random level or phase variation is added within a draw.
+
+### Our stochastic rotor/motor model {#synth-stochastic}
+
+**Arms:** `stochastic` (full model) and `stochastic_coherent` (no added tone variation).
+
+**Frozen from the fit:** two accepted FLY125 parameter sets, one for standby (slow rotors) and one for cruise (fast rotors). We did not refit them for this comparison. Each set renders on the whole speed track. The paragraphs below describe one set; [Regime power blend](#regime-power-blend) combines them.
+
+The speed enters through the relative speed
+
+$$
+s_r(t)=\frac{f_r(t)}{f_{\mathrm{ref}}},\qquad f_{\mathrm{ref}}=80\ \mathrm{rev/s}.
+$$
+
+**Speed-scaled line powers.** Each rotor has two families of narrow lines. **Aerodynamic** lines sit at every integer shaft order $k$. **Motor-order** lines sit at orders $k=3pn$, with $p=7$ pole pairs, so at $k=21,42,\dots$ This motor family is an empirical order prior. It does not identify the physical mechanism of each line. The mean powers are
+
+$$
+\begin{aligned}
+P^{a}_{rk}(t)&=10^{\ell^{a}_{rk}/10}\,s_r(t)^{\alpha_a},\\
+P^{m}_{rn}(t)&=10^{\ell^{m}_{rn}/10}\,s_r(t)^{\alpha_m}.
+\end{aligned}
+$$
+
+$\ell$ is a level in dB of digital power units. $\alpha_a$ and $\alpha_m$ are dimensionless exponents, shared by the rotors of one family. The aerodynamic profile has 130 orders (standby) or 85 orders (cruise). Lines that land above the output band are removed by the anti-alias filter.
+
+**Shared shaft fluctuation.** Each rotor has one phase deviation $\theta_r$ in rad. It moves all orders of that rotor together and is shared by all microphones:
+
+$$
+\begin{aligned}
+\Phi_r(t)&=2\pi\int_0^t f_r(u)\,du+\theta_r(t),\qquad d\theta_r=\nu_r\,dt,\\
+d\nu_r&=-\lambda\,\nu_r\,dt+\sqrt{2\lambda}\,\sigma_\nu(s_r)\,dW_r,\\
+\sigma_\nu(s)&=2\pi f_{\mathrm{ref}}\,\varepsilon\,s^{a_\sigma}.
+\end{aligned}
+$$
+
+$\nu_r$ is an angular-speed error in rad/s. It is an Ornstein–Uhlenbeck (OU) process: a random process that returns towards zero at rate $\lambda$ [@uhlenbeck1930brownian]. $W_r$ is a Wiener process. $\varepsilon$ is a dimensionless relative-speed scale. Both accepted sets fix $\lambda=100.5\ \mathrm{s^{-1}}$, independent of speed. The renderer evaluates $\sigma_\nu$ from the **local** speed on a 32-kHz grid. It uses exact OU transitions over each grid step and never resets the state when the speed changes.
+
+**Normalised log-AM and phase processes.** Each aerodynamic line $(r,k)$ gets a complex envelope
+
+$$
+E_{rk}(t)=c_k\sqrt{2P^a_{rk}(t)}\;
+e^{\,a_{rk}(t)-\sigma^2_{A,k}}\;e^{\,i\psi_{rk}(t)}.
+$$
+
+$a_{rk}$ is a log-amplitude modulation (log-AM) in nepers. $\psi_{rk}$ is a phase modulation in rad. Both are zero-mean stationary OU processes with independent paths. Their variances $\sigma^2_{A,k}$, $\sigma^2_{\psi,k}$ and rates $2\pi\gamma_{A,k}$, $2\pi\gamma_{\psi,k}$ depend on order $k$, not on the rotor.
+
+The term $-\sigma^2_{A,k}$ keeps the **mean power** fixed:
+
+$$
+\mathbb E\!\left[e^{\,2a-2\sigma_A^2}\right]=1
+\quad\text{for}\quad a\sim\mathcal N(0,\sigma_A^2).
+$$
+
+So more modulation does not change the expected line power. The renderer samples the envelopes on a 1-kHz grid and interpolates them linearly. Linear interpolation loses some power. The factor $c_k=(2/3+\rho_k/3)^{-1/2}$ restores it, where $\rho_k$ is the envelope correlation over one 1-ms step. Motor-order lines have the shaft phase but no log-AM or phase process: $E^{m}_{rn}(t)=\sqrt{2P^m_{rn}(t)}$.
+
+**Line signal.** For microphone $m$,
+
+$$
+\begin{aligned}
+x^{\mathrm{line}}_m(t)=\sum_r\sum_{l}\;&10^{G_{rm}/20}\,
+\big|E_{rl}(t)\big|\\
+&\times\cos\!\big(k_l\Phi_r(t)+\arg E_{rl}(t)+\vartheta_{mrl}\big).
+\end{aligned}
+$$
+
+Index $l$ runs over both families, with shaft order $k_l$. If both families share an order, both lines are added. Each $\vartheta_{mrl}\sim\mathcal U(0,2\pi)$ is a fixed random start phase for each microphone, rotor and line.
+
+$G_{rm}$ is the rotor-specific gain in dB. In these flight fits it is a geometric term, $G_{rm}=-20\log_{10}d_{rm}$ minus its mean over rotors, where $d_{rm}$ is the rotor–microphone distance. The code reads this gain at the window-mean line frequency $k_l\langle f_r\rangle$. Here the gain does not depend on frequency, so that approximation has no effect.
+
+**Broadband noise.** Each microphone gets independent white noise $w_m(t)\sim\mathcal N(0,1)$. A fixed spectrum shapes it, and a slowly varying gain scales it:
+
+$$
+\begin{aligned}
+b_m &= \mathrm{WOLA}\!\left[\mathcal F^{-1}\!\big(\sqrt{F(\nu)}\,\mathcal F[w_m]\big);\;Q(\nu,t)\right],\\
+Q(\nu,t)&=\bar s(t)^{\,b(\nu)}+s_0,\qquad \bar s=\tfrac1R\textstyle\sum_r s_r,\\
+b(\nu)&=b_0+b_1\log_2\!\big(\max(\nu,31.25\ \mathrm{Hz})/2\ \mathrm{kHz}\big).
+\end{aligned}
+$$
+
+$F(\nu)$ is a fitted power gain on unit white noise. Its log-frequency shape uses 14 control values. WOLA is weighted overlap-add with 1024-sample frames at 16 kHz. It multiplies local power by $Q(\nu,t)$. $b(\nu)$ is a dimensionless speed exponent. $s_0$ is a small static share. These flight fits use **one** floor driven by the rotor-mean speed, because the mixed recording does not separate each rotor's broadband part.
+
+**Microphone response.**
+
+$$
+y_m=\mathcal{AA}\!\left[\mathcal A_m\!\left(x^{\mathrm{line}}_m+b_m\right)\right].
+$$
+
+$\mathcal A_m$ is a measured per-microphone magnitude response. It is each channel's deviation from the array mean in 24 third-octave bands, from 34 Hz to 6.8 kHz. It acts on the whole channel. $\mathcal{AA}$ is the final anti-alias low-pass at 16 kHz. The accepted fits contain no separate wind term.
+
+#### Regime power blend {#regime-power-blend}
+
+The standby and cruise sets render with **independent** random streams. Their outputs combine sample by sample:
+
+$$
+\begin{aligned}
+y_m(t)&=\sqrt{1-w(t)}\,y^{\mathrm{standby}}_m(t)+\sqrt{w(t)}\,y^{\mathrm{cruise}}_m(t),\\
+w(t)&=3x^2-2x^3,\qquad x=\mathrm{clip}_{[0,1]}\!\left(\frac{\min_r f_r(t)-45}{20}\right).
+\end{aligned}
+$$
+
+$w=0$ when the slowest rotor is at or below 45 rev/s. $w=1$ at or above 65 rev/s. Because the streams are independent, expected powers interpolate: $(1-w)P^{\mathrm{standby}}+wP^{\mathrm{cruise}}$. This is an engineering rule, not a fitted model of the transition. A set with zero weight in the whole window is not rendered.
+
+#### No-added-tone-variation ablation
+
+`stochastic_coherent` loads the same two sets and changes three parameter groups. It does **not** fit again:
+
+$$
+\varepsilon=0,\qquad \sigma^2_{A,k}=0,\qquad \sigma^2_{\psi,k}=0\quad\text{for all }k.
+$$
+
+Then $\theta_r\equiv0$, $a_{rk}\equiv0$, $\psi_{rk}\equiv0$ and $c_k=1$. Line powers, speed exponents, broadband noise, responses and the blend stay unchanged. Some randomness remains: the start phases $\vartheta_{mrl}$, the broadband noise and the independent regime streams. Tone frequencies still follow the recorded speeds.
+
+### Two-expert versions of the baselines {#synth-two-experts}
+
+**Arms:** each external arm with the suffix `_regimes`. The earlier pulse, GP and EONE variants have a separate pooled version. PTR, HPN and DDSP-Piano use only this two-expert treatment.
+
+**Frozen from the fit:** two complete fits of the base family, $\Theta^{\mathrm{standby}}$ and $\Theta^{\mathrm{cruise}}$. [The fitting section](#fit-two-experts) lists their supports. Both GP arms load the same two fits.
+
+Fitted constants can differ between experts. For example, the pulse experts can get different filter coefficients and candidate settings. Single-fit numeric examples above for pulse, GP and EONE refer to the native pooled treatment.
+
+**Step 1: render each expert.** Each expert runs the unchanged synthesis of its base arm, on the **whole** speed track:
+
+$$
+y^{\mathrm{standby}}_m=\mathcal S\!\left[\Theta^{\mathrm{standby}};\,f_{1..R}\right],
+\qquad
+y^{\mathrm{cruise}}_m=\mathcal S\!\left[\Theta^{\mathrm{cruise}};\,f_{1..R}\right].
+$$
+
+$\mathcal S$ is the family's synthesis above. The two experts use **independent** random streams for any native random choices, such as noise samples.
+
+**Step 2: blend.** The weight $w(t)$ is the same function as in our [regime power blend](#regime-power-blend). The code calls the same function:
+
+$$
+\begin{aligned}
+y_m(t)&=\sqrt{1-w(t)}\,y^{\mathrm{standby}}_m(t)+\sqrt{w(t)}\,y^{\mathrm{cruise}}_m(t),\\
+w(t)&=3x^2-2x^3,\qquad x=\mathrm{clip}_{[0,1]}\!\left(\frac{\min_r f_r(t)-45}{20}\right).
+\end{aligned}
+$$
+
+The weight has no time filter and no settling delay. An expert with zero weight in the whole window is not rendered.
+
+**Why the square roots.** The expected output power is
+
+$$
+\mathbb E\,y_m^2=(1-w)\,\mathbb E\bigl(y^{\mathrm{standby}}_m\bigr)^2+w\,\mathbb E\bigl(y^{\mathrm{cruise}}_m\bigr)^2
++2\sqrt{w(1-w)}\;\mathbb E\bigl[y^{\mathrm{standby}}_m y^{\mathrm{cruise}}_m\bigr].
+$$
+
+If the expert signals are independent and zero-mean, the last term is zero in expectation. Then the weights **interpolate power**. They never interpolate parameter vectors, EQ gains or GP coefficients. Between 45 and 65 rev/s, both experts contribute.
+For methods with fixed tone phases, the last term need not be zero. Independent noise streams do not make those tones independent.
+Cylinders, learned resonances and tuning parameters stay within their original source models.
+
+**Consequences.** Speed control and microphone structure stay those of the base arm. At or below 45 rev/s on the slowest rotor, only the standby expert sounds. At or above 65 rev/s, only the cruise expert sounds.
+
+### Summary of the arms
+
+::: {.table-scroll}
+
+| Arm | Tone source | Speed input used | Random per draw |
+|:--|:--|:--|:--|
+| `yang2025` | Pulses, integer clock | $f_r(t)$ for pulses; $\bar f(t)$ for EQ | Start phases, $\mu[n]$, white noise |
+| `yang2025_phase` | Pulses, fractional carry | As `yang2025` | As `yang2025` |
+| `lee2026_gp` | GP-mean harmonics | $f_r(t)$ for phase; $\langle f_r\rangle$ for weights and noise level | $\varphi_r$, white noise |
+| `lee2026_gp_colored` | As `lee2026_gp` | As `lee2026_gp` | $\varphi_r$, coloured noise |
+| `doerfler2026_eone` | 128 gated shaft orders + 64 ERB noise bands per rotor | $f_r(t)$ for phase and gate; 16-ms frame means of $f_r$ for gain curves | $\phi_r$, loop phases $\theta_{rbq}$, loop offsets $o_r$ |
+| `doerfler2026_ptr_regimes` | Engine cylinder pulses and resonators | $f_r(t)$ converted to the native engine cycle | Native stochastic excitation |
+| `doerfler2026_hpn_regimes` | Sinusoidal bank and filtered noise | $f_r(t)$ converted to the native half-order clock | Start phases and native noise |
+| `renault2023_piano_regimes` | Four tuned voices, noise and reverb | Continuous MIDI-scale pitch from $f_r(t)$ | Native filtered noise |
+| `stochastic` | Two line families | $f_r(t)$ for phase, power and shaft law; $\bar s(t)$ for floor; $\min_r f_r$ for blend | Shaft paths, log-AM, phase, start phases, floor noise |
+| `stochastic_coherent` | As `stochastic` | As `stochastic` | Start phases, floor noise |
+| Any `_regimes` arm | One complete source model per expert | As the source model; $\min_r f_r$ for blend | Native choices from independent expert streams |
+
+:::
+
+### Approximations in our implementations
+
+- **Pulses:** one shared source for all microphones and one shared frequency variation for all rotors. The EQ changes magnitude only.
+- **GP:** tone weights and noise level are fixed at **window-mean** speeds. Only tone frequencies follow the instantaneous speed. We use the posterior mean, not posterior samples.
+- **EONE:** the curve bank is fitted directly, without the paper's pretrained encoder–decoder. The torque factor is fixed to 1. We use 128 rotor shaft orders instead of 64 engine orders. The anti-alias gate, the noise-band shape and normalisation, and the loss details are our completions. Microphones share excitations and have no delays.
+- **PTR and HPN:** one engine source per rotor and microphone. The engine control uses a shaft-rate conversion and fixed torque. The native controller and synthesis modules stay in place.
+- **DDSP-Piano:** one voice per rotor and a native environment ID per microphone. Each example has a fixed onset and no pedal action. Learned tuning can move tones from exact rotor orders.
+- **Our model:** the rotor-specific gain is read at the window-mean line frequency. This is exact for the frequency-independent flight gains used here. The motor-order family is an empirical prior. The regime blend interpolates powers, not dynamics. Envelopes use a 1-kHz grid with a power correction.
+- **Two-expert baselines:** each expert extrapolates outside its own support by its family's rule. The blend weights powers; it does not merge parameters or model the transition.
+- **All arms:** the recorded speed tracks drive synthesis directly. No arm models remote-control commands, causal flight-controller response or airframe dynamics.

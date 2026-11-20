@@ -1,0 +1,196 @@
+---
+title: "Can short-window spectra identify MD2 line broadening?"
+subtitle: "What the expected periodogram contains, what it cannot separate, and what the current fit actually estimates"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    html-math-method: katex
+    lightbox: true
+execute:
+  echo: false
+---
+
+```{=html}
+<style>
+main .katex-display { overflow-x: auto; overflow-y: hidden; }
+main .katex { position: relative; }
+main .table-responsive table { min-width: 38rem; }
+</style>
+```
+
+::: {.callout-important}
+## Conclusion
+
+**The claim that amplitude and phase noise cannot be fitted at all from MD2 flight data is incorrect.** The short-window expected periodogram contains information about line broadening. The accepted MD2 fits already estimate the phase-fluctuation variance and sideband width separately for each aerodynamic order.
+
+What is not generally identified is the **physical decomposition** of that broadening into amplitude fluctuations, phase fluctuations and rotor-speed or label error. Some ambiguities are exact, while others depend on the window length, signal-to-noise ratio and parameter constraints. These are different limitations and should not be presented as one impossibility result.
+:::
+
+This note investigates the statement behind the paper's MD2 WIP. The WIP is left unchanged. We inspect the implemented forward model and the accepted fit records, then exercise the same spectral kernels on controlled examples. No MD2 model is refitted, and no new real-data goodness-of-fit result is claimed.
+
+# What the current MD2 procedure does
+
+The flight fit uses 2048-point periodic-Hann windows at 16 kHz: a duration of 128 ms and bin spacing of 7.8125 Hz. Its harmonic atoms are evaluated on a 32 kHz work grid before their expected power is read at the analysis bins. The likelihood compares each observed periodogram with its expected value; it does not model the joint distribution of line levels across successive frames.
+
+The distinction between **a parameter being held fixed** and **a parameter being impossible to estimate** matters here:
+
+::: {.table-responsive}
+| Quantity | Current MD2 procedure | What this establishes |
+|---|---|---|
+| Log-amplitude variance and OU rate | Taken from MD2's block-wander measurements and capped by the amplitude prior | A modelling constraint; not proof that amplitude variation is absent from the expected spectrum |
+| Per-order phase variance and sideband width | Fitted under truncated bench-derived priors | The current model already uses short-window spectra to estimate this broadening component |
+| Rotor-speed jitter magnitude and speed dependence | Fitted for each regime | Some residual broadening is assigned to a shared rotor-level process |
+| Rotor-speed jitter OU rate | Fixed at the label-band-edge convention | A chosen constraint; not proof of zero spectral sensitivity to the rate |
+| Physical jitter versus telemetry error | Represented by the same residual process | The fitted process is not an independent measurement of physical shaft motion |
+:::
+
+Both accepted payloads explicitly record `amplitude: true` and `phase: false` under their `held` fields. They also record `free_phase_pedestal: true`; the phase parameters were not frozen by an evidence test. The implementation adds the per-order variance and width coordinates to the optimizer when that flag is enabled. Thus, “the flight fit cannot fit the pedestal” is inconsistent with the procedure actually used.
+
+The stored width coordinates also do not support the assumption that all modulation sidebands fit inside one bin:
+
+::: {.table-responsive}
+| Fit record | Phase-width coordinates | Median $W$ (Hz) | $W>7.8125$ Hz | $W\geq0.99\times24$ Hz |
+|---|---:|---:|---:|---:|
+| Standby | 130 | 23.188 | 107 | 63 |
+| Cruise | 85 | 0.496 | 11 | 4 |
+:::
+
+These are descriptive counts over all stored coordinates, including weak or potentially uninformative orders, not counts of reliably measured widths. A coordinate near the 24 Hz cap does not show that the physical width is 24 Hz. The table records what the optimizer produced under the present constraints; it does not establish identifiability.
+
+Sources: [`flight_v4.py`, model description and parameter setup](../../src/experiments/noise_model/flight_v4.py), particularly `flight_pedestal`, `FlightV4Model.__init__`, `pedestal` and `objective`; accepted [standby](../../results/noise_v4/flight/restarts/md2_fly125_standby_fpb__flight_v4__s0__r6c1.json) and [cruise](../../results/noise_v4/flight/restarts/md2_fly125_cruise_fpb__flight_v4__s0__r6c3.json) payloads. Their identities are recorded in [evidence.json](md2-noise-identifiability/evidence.json).
+
+# Why broadening remains visible to a short-window fit
+
+For a stationary real line, write its autocorrelation as
+
+$$
+R_x(\tau)=P\cos(2\pi f_k\tau)\,\rho_k(\tau),
+$$
+
+where $P$ is mean line power and $\rho_k$ describes the loss of coherence. If $w_n$ is the analysis window, $U=\sum_n w_n^2$ and $H_w(\ell)=\sum_n w_nw_{n+\ell}$, its expected periodogram is
+
+$$
+\mathbb E I_w(f)
+=\frac{1}{U}\sum_{\ell=-(N-1)}^{N-1}
+H_w(\ell)\,R_x(\ell/f_s)\,
+e^{-\mathrm i2\pi f\ell/f_s}.
+$$
+
+Hence, the expected periodogram depends on the coherence law at the lags supported by the window. The window suppresses long lags; it does **not** replace every narrow physical line by one indistinguishable frequency bin. Changing the coherence law can change the relative powers of the central and neighboring bins even when a width parameter is smaller than the bin spacing.
+
+The implemented flight operator also accounts for the carrier motion supplied by telemetry and for its speed-dependent amplitude within the window. The stationary expression above explains the information loss without replacing that moving-carrier model. In code, `_unit_autocorr` constructs the windowed carrier autocorrelation, `_pedestal_lag_t` and `_shaft_frames` multiply its coherence factors, and `_lag_to_bins` maps the result to analysis-bin powers.
+
+A periodic Hann window has equivalent noise bandwidth $1.5\Delta f=11.71875$ Hz in this setup. This is a property of the window, not a hard lower bound on an estimable model parameter. A narrow line's parameters can remain weakly observable through small, systematic changes of the sampled windowed shape. Whether those changes are large enough in the actual recordings is a separate question.
+
+![The actual flight spectral operator responds to different sideband widths on the 128 ms grid. This controlled example has one stationary order-40 line at 3.2 kHz, phase variance 1 rad², fixed log-amplitude variance 0.12 and amplitude rate 0.14 Hz, and no rotor-speed jitter. Markers are the actual 7.8125 Hz analysis bins. The three curves have the same underlying mean line power; they are not separately peak-normalized. This is an operator check, not a fit to real MD2 data.](md2-noise-identifiability/windowed-widths.png){#fig-windowed-widths}
+
+The width $W$ used here is the model's **power-weighted mean half-width of the sideband mixture**. It is not the full width at half maximum of the complete observed line, which also contains a coherent core, the analysis window and any rotor-speed jitter. For one bounded OU factor of variance $v$ and rate $\gamma$,
+
+$$
+W=\frac{\gamma v}{1-e^{-v}}.
+$$
+
+Indeed, $e^{v(e^{-2\pi\gamma|\tau|}-1)}=e^{-v}\sum_{n=0}^{\infty}(v^n/n!)e^{-2\pi n\gamma|\tau|}$: the zero term is the coherent core, and the remaining terms are Lorentzians with half-widths $n\gamma$. This is the definition implemented by [`v4_priors.pedestal_width`](../../src/experiments/noise_model/v4_priors.py).
+
+# What amplitude and phase noise cannot uniquely tell us
+
+For the implemented zero-mean Gaussian OU processes, let $v_A$ and $v_P$ denote the log-amplitude and phase variances. With mean-power-normalized amplitude modulation, their combined coherence factor is
+
+$$
+\rho_{AP}(\tau)
+=\exp\!\left[
+ v_A\big(e^{-2\pi\gamma_A|\tau|}-1\big)
++v_P\big(e^{-2\pi\gamma_P|\tau|}-1\big)
+\right].
+$$
+
+**Both processes are present in the expected spectrum.** The problem is that they enter it in the same mathematical form. A likelihood based only on this expected spectrum has no intrinsic label telling it which OU factor is amplitude modulation and which is phase modulation.
+
+Two exact ambiguities follow:
+
+1. Exchanging $(v_A,\gamma_A)$ with $(v_P,\gamma_P)$ leaves the expected spectrum unchanged, for every window length.
+2. If $\gamma_A=\gamma_P=\gamma$, the spectrum depends only on $v_A+v_P$. Any nonnegative split of the same total variance gives the same spectrum. This is a continuous ambiguity, not merely an optimizer failing to converge.
+
+If the rates are distinct, sufficiently informative spectra may identify two **unlabelled** components. Independent knowledge of one rate, physical constraints or amplitude-envelope measurements can assign their interpretation. The exact exchange symmetry does not mean that every change of every amplitude or phase parameter is invisible. The equality of their spectral forms and the fact that a periodogram cannot generally separate their physical roles were already derived in the [amplitude/phase spectrum note](pedestal-derivation.html).
+
+There is also a practical short-window ambiguity. At lags much shorter than both correlation times,
+
+$$
+\log\rho_{AP}(\tau)
+=-2\pi\big(v_A\gamma_A+v_P\gamma_P\big)|\tau|
++O(\tau^2).
+$$
+
+The leading term constrains a sum of variance–rate products, not four independent parameters. Longer informative lags distinguish the higher-order terms. A short window, especially after Hann weighting, provides fewer of those lags.
+
+The accepted MD2 amplitude rates are approximately 0.14–0.18 Hz, corresponding to correlation times of roughly one second. They are slow relative to a 128 ms frame. Thus, their **within-frame** shape changes can be small, while their across-frame amplitude fluctuations remain informative. Holding these parameters at a separate amplitude measurement is defensible as a constraint. Claiming that they do not enter the likelihood, or cannot be fitted from flight data by any method, is not.
+
+The latent-free Whittle objective does not exploit the temporal dependence or higher-order distribution of the observed line amplitudes. Those are additional sources of information which could distinguish amplitude variation from phase variation, provided the lines can be isolated reliably. This explains the use of a separate block-wander measurement; it does not establish an impossibility theorem about the flight recordings.
+
+# Does the expected-periodogram objective contain usable shape information?
+
+We check this with the same spectral kernels, rather than infer it from bin spacing. The controlled example below generates its expected spectrum at phase variance 1 rad² and width 8 Hz, then compares candidate variances and widths using
+
+$$
+D(\theta)=\sum_j\left[
+\frac{\mu_{*,j}}{\mu_j(\theta)}
+-\log\frac{\mu_{*,j}}{\mu_j(\theta)}-1
+\right].
+$$
+
+This is the expected excess Whittle loss when the generating mean is $\mu_*$ and the candidate mean is $\mu(\theta)$. The carrier, line power, amplitude parameters and an added flat background are known in this check. The background is 1% of the generating line's peak bin power, and only bins within 65 Hz of the carrier enter the contrast. These assumptions deliberately isolate line-shape information; they are more favorable than fitting overlapping real rotor combs with unknown levels and background.
+
+![Expected Whittle contrast for the controlled line. The generating values are marked by a cross. The objective changes with phase variance and width, rather than being constant because the window is short. Its geometry is not a confidence region for the MD2 recordings, and the color scale is not a calibrated goodness-of-fit statistic.](md2-noise-identifiability/shape-information.png){#fig-shape-information}
+
+The diagnostic also checks the local Jacobian of the log expected spectrum with respect to log variance and log width. Both singular values are nonzero in this example, whereas exchanging the amplitude and phase factors, or redistributing equal-rate variance between them, leaves the spectrum unchanged to numerical precision. Thus, the operator contains shape information and also has the exact ambiguities described above. These statements are compatible.
+
+This does not establish that the accepted MD2 parameters are estimated precisely. That would require data-based likelihood profiles or a sensitivity analysis with the actual comb overlap, backgrounds, nuisance parameters and exposure weights. Convergence of one MAP optimization is not such an analysis, and a value near a prior cap is not evidence that the data uniquely determine it.
+
+# Rotor-speed error is a separate, but related, ambiguity
+
+The residual rotor phase integrates an OU speed error. Its increment variance is
+
+$$
+V_\theta(\tau)
+=\frac{2\sigma_\nu^2}{\lambda^2}
+\left(\lambda|\tau|-1+e^{-\lambda|\tau|}\right),
+\qquad
+\rho_{\mathrm{shaft},k}(\tau)
+=e^{-k^2V_\theta(\tau)/2}.
+$$
+
+Both $\sigma_\nu$ and $\lambda$ affect this law. At very short lags, $V_\theta(\tau)\approx\sigma_\nu^2\tau^2$, which gives little information about $\lambda$. At long lags it is approximately linear with slope $2\sigma_\nu^2/\lambda$, so magnitude and rate can trade off. The informative transition between these limits may or may not be well constrained by the available windows and lines. Fixing $\lambda$ is a modelling decision, not a mathematical demonstration that the spectrum has no dependence on it.
+
+This process is shared across orders through the $k^2$ factor. That structure, and motor lines which carry no independent per-order amplitude or phase modulation, can help distinguish it from other broadening mechanisms. However, freely fitted per-order phase terms compete with it over the finite range of useful lags. Telemetry error also contributes to residual phase relative to the supplied carrier. If telemetry error and physical speed jitter are assigned the same Gaussian covariance law, their sum cannot be separated into physical causes from that covariance alone.
+
+Hence, “some broadening can be estimated” does not imply “physical shaft jitter can be recovered independently.” Conversely, uncertainty about shaft jitter does not make all per-order sideband information disappear.
+
+# How to interpret the visibly thicker real lines
+
+The reported observation is a valid discrepancy between the real and rendered sounds. It is consistent with the model having too little broadening, but does not by itself identify which component is missing. The expected-periodogram model is sensitive to broadening, so insufficient frequency resolution cannot be used as a blanket explanation for ignoring the discrepancy.
+
+Several mechanisms can change a line's apparent width: per-order phase fluctuations, amplitude fluctuations, residual rotor-speed or telemetry error, carrier motion within a window and overlap with another rotor's line. Relative line and background levels also affect how much of a skirt is visible on a logarithmic spectrogram. These mechanisms need not be equally plausible for the particular MD2 lines; the current observation alone does not rank them.
+
+The accepted fits' phase variance and width are already free, but their interpretation remains conditional on the measured amplitude terms, pinned jitter rate, model family, priors and shared-parameter assumptions. A remaining width mismatch could reflect those constraints, a compromise in the joint objective, or a limitation of the forward or rendering model. **Which explanation applies has not been established by this note.** No claim that the model cannot fit the observed widths is justified without examining that question directly.
+
+A focused next investigation would therefore:
+
+1. Compare the real periodogram, fitted expected periodogram and rendered mean periodogram on identical frames and with identical normalization. This separates fit error from a forward-model/rendering mismatch.
+2. Profile the per-order phase variance and width on representative isolated lines, allowing line level and background nuisance parameters to adjust. Compare the likelihood contribution with the prior contribution and report bound-active coordinates.
+3. Test whether allowing the shared jitter magnitude or rate to vary materially changes those profiles. This checks conditional estimates rather than declaring one source unobservable in advance.
+4. Use demodulated amplitude-envelope statistics where rotor separation is reliable to constrain the amplitude/phase split. Cross-frame dependence supplies information which the present latent-free objective does not use.
+
+These steps are proposals, not completed experiments or authorization to change the fitted generator. In the manuscript, the defensible distinction is between **estimating total or conditionally assigned broadening** and **uniquely identifying its physical components**. The current WIP should be reconsidered on that basis after this note is reviewed.
+
+# Reproduction and evidence
+
+The numerical checks use the production flight kernels, a 128 ms periodic Hann window and the same work-grid convention as the accepted MD2 fits. They load no audio and perform no optimization. Run from the repository root:
+
+```bash
+python docs/explainers/md2-noise-identifiability/build.py
+quarto render docs/explainers/md2-noise-identifiability.qmd --to html
+```
+
+The [diagnostic script](md2-noise-identifiability/build.py) records its assumptions, accepted-payload hashes and numerical checks in [evidence.json](md2-noise-identifiability/evidence.json). The accepted standby and cruise artifacts were synchronized from `nv4-md2-cruise-fpg4-caa813`; both local files matched the synchronized copies by SHA-256. The underlying flight fit, priors, renderer and the paper's MD2 WIP are unchanged by this investigation.

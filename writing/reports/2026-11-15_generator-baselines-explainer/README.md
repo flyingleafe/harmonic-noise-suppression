@@ -1,0 +1,21 @@
+# Generator baselines: visual explainer
+
+Canonical source: `index.qmd`. Rendered output: `index.html`.
+
+Run `make` from this directory, in the project devShell. Quarto uses installed Brave for static Mermaid diagrams. The HTML embeds its resources.
+
+`prepare.py` reads the synchronized artifacts pinned by `results/noise_generator_paper/neural_extension_evidence.json`. It requires both comparison panels and every current arm. It excludes archived methods from tables, control summaries, spectrograms and listening. It verifies source hashes, recomputes means and conditional control errors, and draws one saved standby comparison of our model and its ablation. Preparation reports the pair, control-command and listening-player counts. It fits no model and runs no new evaluation.
+
+The fitting section distinguishes each method's data, fitted objects, objective and fixed settings. Its numeric summaries, pulse choices and the EONE calibration table (`assets/eone-fit.md`) come from calibration reports embedded in the hash-checked scored artifacts. For EONE, `prepare.py` checks that the saved settings equal the fixed values stated in the text, that no pretraining was used, that the torque factor is 1 and that every planned epoch completed; it reports the selected epoch and objectives as saved. The original source-model optimiser is not reused for all baselines; the proposed model's accepted historical fits are not a fresh fit on the baseline pool.
+
+The two-expert treatment fits each variant on the exact standby and cruise core supports and applies our power crossfade. `assets/regime-supports.md` reads the supports from the hash-checked accepted-fit inputs named in `input_provenance.json`. The scored reports must identify the same supports, the 45/65 rev/s blend thresholds and the frozen artifacts. `assets/regime-fits.md` summarises each saved expert fit, including the completed PTR, HPN and DDSP-Piano production budgets and upstream revisions. The two GP variants share both checkpoints.
+
+The guide explains our implemented source-stage adaptations, not exact reproductions of all published systems. EONE-RPS is a directly fitted curve bank without the authors' unpublished pretrained encoder–decoder or torque input. `_synthesis.qmd` gives the actual synthesis equations, the two-expert blend and implementation limits. It uses short sentences and defined technical terms; it is not certified ASD-STE100 text. Full-text baseline papers are retained in the `drone-noise-generator` bibliography project.
+
+`assets/results.md` shows the main panel, the native pooled panel and a side-by-side table for variants with both fits. PTR, HPN and DDSP-Piano have no pooled fit. `assets/primary-summary.md` generates the headline from verified means. `assets/controls.md` reports coverage both over all commands and for the one changed rotor, plus conditional error.
+
+The listening section exports the first scored draw-0 window in each of cruise, standby and transition. Each case displays the real microphone-0 audio and every current arm on the same pinned speed tracks. Only absolute worker paths may differ in the window provenance. New runs must also store reference audio and speed tracks equal to the shared reference case. `assets/listening/media.json` records source hashes, playback decisions and spectrogram settings. All spectrograms use the unscaled waveforms and a shared colour scale anchored to the recording's peak plus 10 dB.
+
+WAV clips are mono 16-kHz PCM16. One peak-safe gain is shared within a case, without RMS matching or clipping. A generated card does not set the gain if its pair-common gain would give the recording more than 1% relative RMS PCM16 rounding error, or if the scored case records a generated ISO 532-1 level-domain failure. If that card then needs extra attenuation, it is marked **NOT level-comparable** and records the extra dB. A domain failure is marked separately even if the card can use the common gain. None of these presentation choices changes the scored waveform or metrics.
+
+Figures, tables and hashes are regenerated into `assets/`. The existing evidence, EONE fits and historical outputs are not changed. The paper build copies the explainer's HTML to `samples.html`.

@@ -60,6 +60,7 @@ dependencies = [
     "pyro-ppl>=1.9.1",
     "plotly>=6.5",
     "numba==0.63.1",
+    "mosqito==1.2.1",
 ]
 
 [project.scripts]

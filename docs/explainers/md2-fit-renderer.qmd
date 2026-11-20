@@ -1,0 +1,124 @@
+---
+title: "MD2 Fig. 6(a): interactive waveform re-renderer"
+subtitle: "Edit the accepted MD2 standby/cruise noise-model parameters and re-synthesise the actual waveform of the figure clip"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: false
+    html-math-method: katex
+execute:
+  echo: false
+  warning: false
+---
+
+This page re-renders the MD2 clip used in Fig. 6(a), with the corrected local-speed shaft process. It is not a spectral approximation. Edit parameters below, then press **Re-render**. A local Python backend copies the accepted fit payloads, applies your edits and calls `render_noise_regimes` with fixed seed 7. The source fit files are never modified. The baseline spectrogram and audio have been regenerated; they are not the old published clip-mean render.
+
+The page needs that backend; without it you get only an offline notice. To start it, run these commands from the repository root in the project environment:
+
+```bash
+quarto render docs/explainers/md2-fit-renderer.qmd --to html
+python docs/explainers/md2-fit-renderer/server.py --port 8766
+```
+
+Then open <http://127.0.0.1:8766/>. The server binds to `127.0.0.1` only and serves Plotly locally from `/plotly.min.js`. Quarto's explanatory equations use its default KaTeX CDN; the waveform controls and plots are served locally.
+
+## Renderer
+
+::: {.column-page}
+
+```{ojs}
+//| label: md2-renderer-boot
+md2Renderer = {
+  const offline = (detail) => html`<div class="md2r-offline" role="alert">
+    <p><strong>Renderer backend not reachable.</strong> This page needs the local Python server; no controls run without it.</p>
+    <p>${detail}</p>
+    <pre><code>python docs/explainers/md2-fit-renderer/server.py --port 8766</code></pre>
+    <p>Then open <a href="http://127.0.0.1:8766/">http://127.0.0.1:8766/</a>.</p>
+  </div>`;
+  if (!/^https?:$/.test(window.location.protocol)) {
+    return offline(`Opened from ${window.location.protocol} rather than through the server.`);
+  }
+  let mod;
+  try {
+    mod = await import(new URL("/app.js", window.location.origin).href);
+  } catch (err) {
+    return offline(`Could not load /app.js from ${window.location.origin}: ${err && err.message ? err.message : err}`);
+  }
+  return mod.mountRenderer();
+}
+```
+
+:::
+
+## What is fixed and what is shown
+
+- **Fixed seed.** Every render uses seed 7. A change in the edited panel therefore comes from the parameter edit, not from a fresh noise draw.
+- **Corrected baseline.** Shaft magnitude and rate now follow each rotor's local speed on the work grid. The baseline and edited examples use this renderer, with unchanged fitted parameters. The backend records `shaft_law_evaluation` as `local_work_grid` in its example metadata and downloaded payload provenance.
+- **Reload after the correction.** Old open pages must be reloaded to receive the regenerated baseline. Requests from the previous renderer are rejected rather than comparing new edits against its cached clip-mean baseline.
+- **Absolute spectrograms.** The real, frozen-baseline and edited spectrograms share one fixed absolute dB scale. Its top, $v_\text{max}$, is the 99.5th percentile of the real and baseline bins up to 3 kHz, and it does not change when you edit. The display controls change only the frequency range (up to 8 kHz) and the dynamic range. They never trigger a render.
+- **Shared playback gain.** The three players share one gain, chosen to avoid clipping, so their loudness compares directly. Waveform hashes and RMS values are computed before this gain.
+- **Pending versus applied.** The edited panel always shows the parameters that were last rendered. Edits made since then are listed as pending and never relabel an existing plot.
+- **Fit files untouched.** **Download** saves copies of the source payloads with the applied edits. Each copy is labelled as an interactive edit, not a new fitted result.
+- **Mean spectrum.** The optional mean-spectrum plot is the frame average of the *linear* periodogram, shown in dB. It helps compare line widths across the three panels.
+- **Mean line levels.** The horizontal row of vertical sliders changes each harmonic's mean level in dB relative to its fitted profile. Choose the regime, aerodynamic or motor family, and one rotor or all rotors. A common gain preserves the selected rotors' relative levels. The adjacent $\alpha$ and $\beta$ controls edit the two amplitude speed laws directly.
+
+::: {.callout-note collapse="true"}
+## Fixed example and regime composition
+
+| Item | Value |
+|---|---|
+| Recording | MD2 flight `FLY125`, first Michaels ramp start, 8 s from 11.5875 s |
+| Real channel | microphone index 3, 16 kHz |
+| Synthesis | `data_processing.noise_model.render.render_noise_regimes`, `n_mics = 4` (the figure helper's `NOISESAMP_MIC + 1`), 16 kHz, seed 7, no augmentation, no normalisation |
+| Fits | accepted standby restart `r6c1` and cruise restart `r6c3` from `experiments.noise_model.sectors_v4.FITS["md2"]` |
+| Spectrogram | periodic Hann, $N_\text{FFT}=2048$, hop 512, $\lvert\mathrm{rfft}(x w)\rvert^2/\sum w^2$, dB with floor $10^{-30}$ |
+
+Each regime fit renders the whole track, using its own stream derived from seed 7 by `regime_seeds`. The two streams are then mixed per sample:
+
+$$
+y = \sqrt{1-w}\,y_\text{standby} + \sqrt{w}\,y_\text{cruise},
+$$
+
+where $w$ is the original smoothstep in the slowest rotor's rate. It is 0 at or below 45 rev/s and 1 at or above 65 rev/s. A standby edit therefore changes only the samples where $w<1$, and a cruise edit only those where $w>0$.
+:::
+
+::: {.callout-note collapse="true"}
+## Parameter conventions
+
+**Shaft law.** For each regime, each rotor's speed error is an Ornstein–Uhlenbeck process with time-varying coefficients. Its local stationary scale and correlation rate depend on the rotor rate $r$ (rev/s):
+
+$$
+\sigma_\nu(r)=\sigma_\text{ref}\left(\frac{r}{f_\text{ref}}\right)^{a_\sigma}\ \text{rad/s},\qquad
+\lambda(r)=\lambda_\text{ref}\left(\frac{r}{f_\text{ref}}\right)^{b_\lambda}\ \text{s}^{-1},\qquad f_\text{ref}=80\ \text{rev/s}.
+$$
+
+$\sigma_\text{ref}$ is the law's magnitude **at the reference rate $f_\text{ref}$**. It is not a regime's operating jitter. For example, the standby fit has $\sigma_\text{ref}\approx 0.0044$ rad/s and $a_\sigma\approx-5.38$. Both are reference parameters extrapolated to 80 rev/s, a rate the standby regime does not fly at. To get the jitter at a given rate, evaluate the law there; the display-only probe next to the controls does this.
+
+The payload stores $\varepsilon=\sigma_\text{ref}/(2\pi f_\text{ref})$ and a legacy copy `sigma_nu_rad_s`. The editor uses $\sigma_\text{ref}$ directly. On export, the backend converts it back to $\varepsilon$ and keeps the legacy copy consistent. $f_\text{ref}$ is read-only, fixed at the source fit's 80 rev/s.
+
+**Local-speed shaft rendering.** The renderer evaluates both laws at each rotor's local speed on the work grid. It uses the exact integrated-OU transition with coefficients held over each work interval, initialized at the first local scale and carried continuously between intervals. It no longer replaces the whole trajectory by its 8 s mean, and does not reset the state at STFT or regime boundaries. The fitting likelihood uses a locally stationary approximation within each analysis frame; this remains an approximation when speeds vary within a frame. The probe above is display-only and does not change the evaluation speed.
+
+**Mean amplitudes and speed dependence.** The level sliders edit `profile_aero_db` or `profile_motor_db`, not the fluctuation variances. They change reference line power at 80 rev/s; a gain of +6 dB is approximately a doubling of RMS amplitude. The speed laws are $P_\mathrm{a}(r)=P_{\mathrm{a},80}(r/80)^\alpha$ and $P_\mathrm{m}(r)=P_{\mathrm{m},80}(r/80)^\beta$, so the RMS-amplitude exponents are $\alpha/2$ and $\beta/2$. All these edits are pending until **Re-render**. Resetting shown levels restores only those profile coefficients; the existing global reset restores both speed laws as well.
+
+**Per-order pedestal.** Each aerodynamic order $k=1,\dots,K$ has four parameters:
+
+- amplitude log-variance $\sigma^2_A$;
+- amplitude rate $\gamma_A$ in Hz, with correlation $e^{-2\pi\gamma_A\tau}$;
+- phase variance $\sigma^2_P$ in rad²;
+- phase sideband width $W$ in Hz.
+
+$W$ is the mean **half-width** of the phase-pedestal sidebands. It is not the full width at half maximum of the line in the STFT. The phase rate is not edited directly; the backend derives it as
+
+$$
+\gamma_P = W\,\frac{1-e^{-\sigma^2_P}}{\sigma^2_P},\qquad \gamma_P\to W \text{ as } \sigma^2_P\to 0 .
+$$
+
+The fitting caps were $\sigma^2_P\le 3$ rad² and $W\le 24$ Hz. Here they are shown for reference and are **not** enforced. The backend still rejects:
+
+- non-finite numbers, or negative variances, rates, widths and shaft magnitudes;
+- a non-positive $\lambda_\text{ref}$ or any change to the fixed reference rate;
+- any change of array shape.
+
+The **advanced JSON** editor exposes every remaining parameter the renderer reads: the aerodynamic and motor line profiles, the speed exponents, the floor law and the microphone response. It edits one regime at a time and must keep exactly the keys and array shapes it was given.
+:::

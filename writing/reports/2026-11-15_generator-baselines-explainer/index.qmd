@@ -1,0 +1,433 @@
+---
+title: "Drone noise generator: what the tests show"
+subtitle: "A visual guide · Fitting, synthesis equations and matched listening"
+lang: en
+bibliography: ../../papers/2026-08_wrapup/src/generator-refs.bib
+link-citations: true
+format:
+  html:
+    theme: [cosmo, styles.scss]
+    html-math-method: mathml
+    embed-resources: true
+    toc: false
+    mermaid-format: svg
+    anchor-sections: true
+    fig-cap-location: bottom
+execute:
+  echo: false
+---
+
+::: {.callout-note title="Main result"}
+**Lowest mean log-spectrum errors in the main comparison.** All external methods in this panel use the same standby and cruise audio as our core fits and the same blend. Scores are in dB. Lower is better.
+
+{{< include assets/primary-summary.md >}}
+
+These means describe one evaluation flight. They do not establish a general ranking.
+:::
+
+[Fitting](#how-we-fit) · [Two experts](#fit-two-experts) · [Synthesis equations](#how-we-synthesize) · [Listen and compare](#listen-and-compare) · [Results](#does-the-sound-match-a-recording)
+
+## 1. What do the methods do?
+
+A **baseline** is a comparison method. A **tone** is a narrow frequency component. A **spectrum** shows power at each frequency. **Broadband noise** covers many frequencies.
+
+These cards describe **our test implementations**, not the complete published systems. [See how we fit each method](#how-we-fit).
+
+:::: {.method-grid}
+::: {.method-card}
+### PTR and HPN: reuse two engine models
+
+**PTR** means Pulse-Train-Resonator. It makes pressure pulses. Then delay filters make resonances, as in an exhaust pipe. **HPN** means harmonic-plus-noise. It is the comparison model from the same paper. It uses the same type of controller, but makes tones and filtered noise instead of pulses and resonances. Each rotor drives one full source model. [@doerfler2026ptr]
+:::
+
+::: {.method-card}
+### DDSP-Piano: use four voices
+
+One voice receives each rotor's speed as a changing pitch. The model learns how loud each tone is and how far it moves from an exact harmonic. The model keeps its noise and reverberation parts. Each microphone has a different recording-environment ID. [@renault2023piano]
+:::
+
+::: {.method-card}
+### Yang: build pulses
+
+```{mermaid}
+%%| fig-width: 4
+%%| fig-height: 0.9
+%%{init: {'flowchart': {'htmlLabels': false}}}%%
+flowchart LR
+  accTitle: Pulse generator
+  accDescr: Use rotor speeds to create pulses, add noise, then filter the signal.
+  A[Speeds] --> B[Pulses + noise]
+```
+
+We filter the pulses and noise. We test two pulse clocks. One rounds each period to whole samples. **Fractional carry** keeps the unused fraction and avoids accumulated timing error. This generator is not a neural network. [@yang2025]
+:::
+
+::: {.method-card}
+### GP: learn tone weights
+
+```{mermaid}
+%%| fig-width: 4
+%%| fig-height: 0.9
+%%{init: {'flowchart': {'htmlLabels': false}}}%%
+flowchart LR
+  accTitle: Coefficient GP
+  accDescr: Use speed and microphone position to predict tone weights, then add noise.
+  A[Speeds + xyz] --> B[GP tones + noise]
+```
+
+**GP** means Gaussian process. Our version learns tone weights from speeds and microphone coordinates (xyz). White noise spreads power evenly across frequency. Coloured noise uses a fitted spectral shape. Both versions share one fit.
+
+This is an adaptation of Lee et al., **not their exact waveform model**. [@lee2026gp]
+:::
+
+::: {.method-card}
+### EONE: look up gains from speed
+
+```{mermaid}
+%%| fig-width: 4
+%%| fig-height: 0.9
+%%{init: {'flowchart': {'htmlLabels': false}}}%%
+flowchart LR
+  accTitle: EONE curve bank
+  accDescr: Use each rotor speed to look up tone and noise-band gains, then add the tones and noise bands.
+  A[Speeds] --> B[Gain curves + tones + noise]
+```
+
+EONE stores a positive gain for each tone and noise band at 40 speed points. The rotor speed selects the gains. Each rotor has 128 tones that follow its speed, plus 64 noise bands. We fit the curves directly to calibration audio by gradient descent.
+
+This adapts an engine-sound model to rotors. It is **not the published pretrained system**: its encoder–decoder and weights are not public, and we use no torque input. [@doerfler2026eone]
+:::
+
+::: {.method-card .our-card}
+### Our model: build and vary tones
+
+```{mermaid}
+%%| fig-width: 4
+%%| fig-height: 0.9
+%%{init: {'flowchart': {'htmlLabels': false}}}%%
+flowchart LR
+  accTitle: Our generator
+  accDescr: Use rotor speeds to create varying rotor and motor tones, then add noise.
+  A[Speeds] --> B[Vary tones + noise]
+```
+
+Rotor and motor tone families follow speed. Random changes act on tone level and phase. Phase is position within a tone cycle. Calibration sets the strengths.
+:::
+::::
+
+Pulses, GP and EONE have two treatments. Their **native pooled fits** use the baseline pool, or a subset of it. Their **two-expert fits** use our standby and cruise supports and blend. PTR, HPN and DDSP-Piano have **two-expert fits only**. [See the two-expert treatment](#fit-two-experts).
+
+## 2. How do we fit each method? {#how-we-fit}
+
+**We do not use one common optimiser.** Each method keeps its own fitting procedure. The table gives the main differences.
+
+The baseline pool contains real FLY125 audio and its four rotor-speed tracks. We use fixed microphone coordinates for GP inputs. No parameter search or gain adjustment uses FLY124 audio.
+
+In the filter fits below, `mean_RPM` averages over all rotors and the clip. RPM means revolutions per minute.
+
+::: {.table-scroll .fitting-table}
+{{< include assets/fit-summary.md >}}
+:::
+
+### PTR and HPN: fit four sources to one mixture {#fit-engine}
+
+1. Give each source one speed track. Convert the speed to the control units of the engine model. Hold the torque control at zero; the recording supplies no torque track.
+2. Make four signals and add them for one microphone. Use that microphone's real mixture as the target. There are no recordings of separate rotors.
+3. Use the same spectral and tone-track losses as the published engine comparison. The tone loss uses all four speed tracks against the mixture. It does not use isolated-source targets.
+4. Fit each microphone for 100 epochs of AdamW. An epoch is one pass through the training examples. Use four-second clips (64000 samples) in place of 65536 samples, so standby needs no padding. Cut the longer cruise clips with 50 % overlap. Keep the final epoch. Do not select a checkpoint on other audio.
+
+The [equations](#synth-engine) show the control conversion and the sum of the sources. The code keeps the eight native cylinders in each PTR instance. It does not replace them with blades.
+
+The loss gives equal weight to its spectral term and its tone term. The spectral term compares STFTs at 11 frame lengths. The tone term compares energy along all four rotor tracks. The pinned code uses a one-cycle schedule with a peak learning rate of $2\times10^{-4}$ and weight decay 0.005. Weight decay is 0.01 in the paper text, not in that code.
+
+### DDSP-Piano: fit tone levels, then tune tones {#fit-piano}
+
+One model per expert uses all eight microphones. The model sees a microphone ID instead of a piano recording-environment ID. Each rotor keeps one voice. Its pitch follows speed without rounding. Each clip starts with the same onset velocity ($64/127$). All pedal controls are off.
+
+1. Fit levels, noise and reverberation; keep the tone-frequency parameters fixed.
+2. Fit the tone-frequency parameters; keep the other parameters fixed.
+3. Repeat the first type of fitting.
+
+The loss compares linear and log STFT magnitudes at six frame lengths (64 to 2048 samples). The first and third phases penalise large reverb coefficients. The second penalises changes from the initial inharmonicity parameters. Adam uses rates $10^{-3}$, $10^{-5}$ and $10^{-3}$ and batch sizes 6, 3 and 6. We use three-second training segments with 50 % overlap and drop any incomplete segment. The phases run for 2, 1 and 3 epochs, with 1000 updates per epoch on repeated segments. The last phase keeps the learned tuning fixed. We export its final weights without validation selection. This is not the original piano training run. [See the synthesis equations](#synth-piano).
+
+### Yang: fit a filter, then select pulse/noise settings
+
+1. Fix one pulse clock: integer periods or fractional carry.
+2. Search a grid of pulse-frequency variation and white-noise amplitude settings.
+3. For each setting, fit a separate spectral correction for every microphone.
+4. Select the setting with the lowest corrected log-spectrum error on calibration audio.
+
+Each band's correction has **both an offset and a speed slope**, fitted by least squares:
+
+`gain_dB = offset + slope × (mean_RPM − reference_RPM)`
+
+For the pulse fit, the reference speed is the median of the calibration-clip speed means.
+
+For selection, the model power is `pulse_power + ratio² × noise_power`. We score its corrected spectrum from 125 to 7200 Hz. This is a spectral fit, not our stochastic-process fit.
+
+::: {.table-scroll}
+{{< include assets/pulse-settings.md >}}
+:::
+
+The ratio scales white-noise amplitude before filtering. It is **not** a final noise-power fraction. We use three-sample rectangular pulses at 48 kHz and a second-order 2400-Hz low-pass. These choices and the clock rule stay fixed within each variant.
+
+### GP: extract tone coefficients, then learn their speed dependence
+
+1. Select one-second frames uniformly across the eligible calibration audio.
+2. Fit all four rotors' sine/cosine terms jointly to each mixed waveform, using weighted least squares.
+3. Keep the projection residual for noise. Align the extracted coefficients by rotor phase.
+4. Train one GP for each aligned coefficient.
+
+The basis has 60 blade-pass harmonics per rotor, plus a constant term. The GP inputs are microphone coordinates and four frame-mean speeds. The targets are the extracted coefficients, **not raw audio samples**.
+
+We train the GPs for 200 Adam steps, with learning rate 0.05, in double precision. The objective is **GP marginal likelihood**, not log-spectrum error. This learns kernel length scales, output scales, constant means and regression-noise levels.
+
+Generated audio noise comes from the tone-projection residual, **before phase alignment**. We tabulate its level against mean rotor speed, separately for each microphone. This is not the GP regression-noise parameter.
+
+White and coloured versions share the same fitted GPs and noise-level table. For coloured noise, we also retain each microphone's average residual spectrum. Only this spectral shape differs.
+
+### EONE: fit the gain curves by gradient descent {#fit-eone}
+
+The published EONE first pretrains an encoder–decoder on many engines. It then fine-tunes only a bank of gain curves for one engine. **The pretrained model is not published.** We therefore fit the curve bank directly, from a flat start. This curve-bank stage is the only stage we adapt. The paper also has a torque curve. We have no torque signal, so its factor is fixed to 1.
+
+1. Cut each eight-second calibration window into two non-overlapping four-second pieces.
+2. Start from flat curves. Give half of each microphone's calibration power to the tones and half to the noise bands, shared equally over rotors and components.
+3. For one piece, synthesize all eight microphones from its recorded speed tracks, with fresh random phases. See the [synthesis equations](#synth-eone).
+4. Compute the loss against the real piece. Take one AdamW gradient step.
+5. One **epoch** visits every piece once, in random order. We run 50 epochs.
+6. After each epoch, compute the loss on all pieces with fixed random draws. Keep the curves of the epoch with the lowest loss. Epoch 0 is the flat start.
+
+::: {.equation-block}
+
+**Curve parameters.** Every gain is positive:
+
+$$
+G_{mrcp}=s_m\,\operatorname{softplus}(\vartheta_{mrcp}),
+\qquad \operatorname{softplus}(x)=\ln\!\left(1+e^{x}\right).
+$$
+
+$m$ is the microphone, $r$ the rotor, $c$ a tone order or noise band and $p$ a speed knot. $s_m$ is the root-mean-square (RMS) level of microphone $m$ over the calibration audio. The optimiser changes only $\vartheta$.
+
+**Loss.** For one piece,
+
+$$
+\mathcal L=\mathcal L_{\mathrm{MR}}+1.0\,\mathcal L_{h}+10^{-3}\,\mathcal L_{c}.
+$$
+
+**Multi-resolution STFT loss.** $\mathcal L_{\mathrm{MR}}$ compares STFT magnitudes at 11 frame lengths, $N=32768,16384,\dots,32$, with Hann windows and hop $N/4$. $S_g$ and $S_t$ are the generated and target magnitudes. $E_\tau=\sum_\nu S^2$ is the energy of frame $\tau$. Four terms have equal weight:
+
+$$
+\begin{aligned}
+\mathrm{SC}&=\frac{\|S_g-S_t\|_F}{\|S_t\|_F},
+&\mathrm{LIN}&=\frac{\|S_g-S_t\|_1}{\|S_t\|_1},\\
+\mathrm{LOG}&=\operatorname{mean}\bigl|\ln(S_g+e)-\ln(S_t+e)\bigr|,
+&\mathrm{EN}&=\frac{\sum_\tau|E_{g,\tau}-E_{t,\tau}|}{\sum_\tau E_{t,\tau}}.
+\end{aligned}
+$$
+
+The floor $e=10^{-3}\operatorname{mean}(S_t)$ is 60 dB below the mean target magnitude. $\mathcal L_{\mathrm{MR}}$ is the mean over the four terms, the microphones and the frame lengths.
+
+**Harmonic loss.** $\mathcal L_h$ compares tone energy along the speed tracks. It uses one long STFT: a 65536-point FFT, a 16384-sample Hann window and a 256-sample hop. In frame $\tau$, tone $k$ of rotor $r$ sits at $k\bar f_{r\tau}$. Here $\bar f_{r\tau}$ is the window-weighted mean speed. The tone energy $\mathcal P$ sums $|X|^2$ over ±4 bins (±0.98 Hz) around that frequency:
+
+$$
+\mathcal L_h=\operatorname{mean}_{\text{valid }(m,\tau,r,k)}
+\bigl|\ln(\mathcal P_g+e_h)-\ln(\mathcal P_t+e_h)\bigr|.
+$$
+
+$e_h$ is $10^{-6}$ times the mean valid target energy. A track is valid only if its bins and its highest frequency in the window stay at or below the 7.9-kHz gate edge.
+
+**Curvature penalty.** $\mathcal L_c$ penalises bent curves. With $u_p=\operatorname{softplus}(\vartheta_p)$ along the knots of one curve,
+
+$$
+\mathcal L_c=\operatorname{mean}_{\text{curves}}
+\frac{\operatorname{mean}_p\,(u_{p+1}-2u_p+u_{p-1})^2}{\operatorname{mean}_p\,u_p^2}.
+$$
+
+:::
+
+The optimiser is AdamW without weight decay. Its learning rate follows a one-cycle cosine schedule with a peak of 0.01. A knot that no calibration frame reaches gets no gradient from $\mathcal L_{\mathrm{MR}}$ or $\mathcal L_h$. Only $\mathcal L_c$ moves it.
+
+The paper does not state every detail. The exact loss formulas, floors, noise-band shapes and fine-tuning segmentation are our fixed choices. We set them before any evaluation and did not tune them on FLY124.
+
+The table reads the fit report saved in the scored EONE result file. The objective is a calibration quantity, **not an evaluation score**.
+
+::: {.table-scroll .fitting-table}
+{{< include assets/eone-fit.md >}}
+:::
+
+The selected epoch is the final budgeted epoch. This fixed run does **not** establish full convergence or the performance of the original pretrained EONE system.
+
+### Our model: reuse the accepted physical-process fits {#fit-ours}
+
+Our original fit compares measured spectra with **expected windowed spectra**, plus priors. We measure array responses and amplitude fluctuations separately. Some process parameters are fixed or bounded.
+
+This comparison loads the accepted standby and cruise fits. It does **not** refit our model on the baseline pool. The no-added-variation version changes those saved parameters without fitting again.
+
+::: {.callout-warning title="What this means for the comparison"}
+Same recording does not mean equal fitting information, loss or search budget. The two-expert baselines match **our core fitting supports** and our blend. They do not match our total information: our accepted fits also use auxiliary measurements and bench-informed priors. Each family keeps its own loss, search and fixed settings. In the native pooled fits, GP uses a smaller audio subset. EONE uses no pretrained prior in either treatment. These results compare **calibrated implementations**, not architecture quality under one fitting procedure.
+:::
+
+### Baselines with two experts: same supports, same blend {#fit-two-experts}
+
+An **expert** is one complete fit of a method on one speed regime. Our model has two experts: one for standby (slow rotors) and one for cruise (fast rotors). Each two-expert baseline (arm suffix `_regimes`) gets the same treatment:
+
+1. Read the exact support windows of our two accepted fits from their saved, hash-checked input files.
+2. Fit the family once on the standby windows. Fit it again, independently, on the cruise windows.
+3. Keep each family's own loss, settings, search grid and selection rule. Nothing uses FLY124 audio.
+4. Freeze both experts before scoring. Scoring reloads them and never fits again.
+5. Blend the two outputs with the same square-root weights. See the [blend equations](#synth-two-experts).
+
+These are the **core fitting supports** of our model. Times are relative to the FLY125 audio clock:
+
+::: {.table-scroll .fitting-table}
+{{< include assets/regime-supports.md >}}
+:::
+
+All audio comes from the same pinned recording, rotor-speed labels and whole-recording resampling as the scoring windows.
+
+**Family details.**
+
+- **Pulses.** Each expert runs its own grid search and its own EQ fit. Its EQ reference speed is the median speed of its own windows.
+- **GP.** Each expert extracts up to 64 one-second frames, with 60 blade-pass harmonics and 200 GP training steps. Standby therefore uses all 12 frames and cruise all 64. White and coloured noise share the same two fitted experts.
+- **EONE-RPS.** Each expert fits its own curve bank from a flat start: 128 shaft orders, 64 noise bands, 40 knots and 50 epochs. Torque is fixed to 1 and no pretrained encoder is used, as before. The smaller supports give fewer updates: 150 (standby) and 800 (cruise), against 2100 for the native fit.
+- **PTR and HPN.** Each expert fits four sources per microphone to the mixed sound. It uses the same budget in epochs in both regimes, with more four-second pieces in cruise.
+- **DDSP-Piano.** Each expert uses the native four-voice model and finishes all three phases. It uses the same fixed update budget in both regimes.
+
+Saved fit reports of the scored two-expert arms:
+
+::: {.table-scroll .fitting-table}
+{{< include assets/regime-fits.md >}}
+:::
+
+**Why keep the native pooled fits?** They let us compare two treatments of the same pulse, GP or EONE variant. Each pooled fit can use windows across both speed regimes (GP takes a 64-s subset). The two-expert versions use other windows, separate fits and a blend. This comparison changes all three things. There is no pooled fit for our model, PTR, HPN or DDSP-Piano.
+
+A transition window often lies between the two supports. Both experts can contribute there. Each one extrapolates by its own rule. For the pulse experts, this includes a filter slope fitted on a narrow speed range. The blend is not a fitted transition model.
+
+[Pulse fit](../../../src/experiments/generator_paper/baselines.py) · [GP fit](../../../src/experiments/generator_paper/gp_baseline.py) · [EONE fit](../../../src/experiments/generator_paper/eone_baseline.py) · [PTR and HPN fits](../../../src/experiments/generator_paper/engine_neural.py) · [DDSP-Piano fit](../../../src/experiments/generator_paper/piano_baseline.py)
+
+## 3. How does each method synthesize sound? {#how-we-synthesize}
+
+::: {.synthesis-section}
+
+{{< include _synthesis.qmd >}}
+
+:::
+
+## 4. Listen and compare on the same trajectory {#listen-and-compare}
+
+Choose a speed case and a generator. The **real recording stays visible**. Every generator receives the same four recorded speed tracks. The method menu groups the fits by treatment.
+
+These are the first saved four-second windows in each speed regime, with draw 0. We use **microphone 0**, not an average of microphones. Matching the trajectory does not match random phases or noise samples.
+
+**Start at low volume.** One playback gain is shared by the real recording and all comparable generators within a case. No method gets its own loudness match. Gains differ between cases, so do not compare loudness across cases.
+
+**Level exception.** Sometimes a generated sound is much louder than the recording. A gain shared with it would make the recording very quiet. The 16-bit WAV file would then keep too little of the recording's detail. We test this for each generator: scale the recording by the gain it would share with that generator, code it to 16 bits, and decode it. If the RMS error is above **1 %** of the recording's RMS, the generator does **not** set the common gain. This is a test of the audio file format only. It does not rank the models or test physical validity. A sound that the evaluator scored outside the loudness model's domain is also checked separately.
+
+Such a sound gets its own, more strongly attenuated preview, and a red warning: **NOT level-comparable**. The warning gives the extra attenuation, in dB. A sound that still plays at the common gain gets no red warning. We never clip, cap or match levels. The saved scored waveforms are unchanged.
+
+Each case states how many sounds use the common gain. Any previews are marked on the cards. A preview changes playback only, not the score.
+
+**Scoring note.** A yellow note marks a sound whose scored level is above the 120-dB limit (25–250 Hz) of the loudness model on at least one microphone, at the fixed scoring gain. Its loudness and sharpness scores are undefined. This is a property of the score, read from the saved record, and does not depend on the playback gain.
+
+Spectrograms show the unscaled saved signals, before playback gain. One colour range covers all cards in a case. It is set by the **real recording**: the top is 10 dB above the recording's peak. A louder card **saturates** at the top colour and is labelled with how far its peak exceeds the scale. STFT magnitude uses 2048-sample Hann frames and a 256-sample hop. Its dB scale is a raw transform level, **not dBFS or aircraft sound-pressure level**. Plots show 0–4 kHz; audio retains the full 16-kHz sample-rate output.
+
+```{=html}
+<div id="listening-comparison">
+<noscript><p>JavaScript is off. All cases and methods are listed below; the audio controls still work.</p></noscript>
+
+{{< include assets/listening.html >}}
+
+</div>
+<script src="listening.js"></script>
+```
+
+Use the native players to listen. With JavaScript enabled, only one player runs at a time. On a small screen, scroll a plot sideways. These examples illustrate the sounds; they are **not a listening study**.
+
+## 5. Does the sound match a recording?
+
+::: {.flow-scroll}
+
+```{mermaid}
+%%| fig-width: 7
+%%| fig-height: 5.5
+%%{init: {'flowchart': {'htmlLabels': false}}}%%
+flowchart TB
+  accTitle: Frozen-model comparison
+  accDescr: Freeze the calibrated models, generate from FLY124 speeds, and compare with FLY124 audio.
+  F[Calibrated models] --> M[Freeze parameters]
+  S[FLY124: rotor speeds] --> G[Generate audio]
+  M --> G
+  G --> E[Compare spectra]
+  R[FLY124: recorded audio] --> E
+```
+
+:::
+
+We use one Matrice 100 drone, eight microphones and four rotor-speed tracks. Evaluation uses **26 four-second windows** and four random outputs per window.
+
+**Score:** mean log-spectrum error, in decibels (dB). Lower is better. Each window has equal weight. Bold marks the lowest mean in each column of one table.
+
+{{< include assets/results.md >}}
+
+The column names describe **rotor speeds**, not aircraft speed. “Fast” means *cruise* in the manuscript. “Slow” means *standby*.
+
+Read differences beside the window counts. For example, the changing-speed means use only four windows. A smaller mean is not evidence of a reliable gain on other flights.
+
+::: {.callout-warning title="Limit of this comparison"}
+FLY124 was used in earlier development. It is **not a blind test**. The two-expert arms match our core supports and blend, not our auxiliary measurements, priors, losses or training budget. For example, each two-expert EONE expert trains for 50 epochs: 150 standby and 800 cruise updates, against 2100 in the native fit. In both experts the best epoch is the last one, so convergence is not shown. These results do not prove a general ranking or a few-shot advantage.
+:::
+
+## 6. Do the added tone changes help?
+
+We remove the added random changes in shaft speed, tone level and phase. We keep the fit, tone powers and broadband noise. We do not fit again.
+
+::: {.plot-scroll}
+![Slow rotors: one saved example.](assets/tone-variation.png){fig-alt="The full model fills gaps between tones. Without added tone variation, the spectrum has deeper gaps."}
+:::
+
+*First saved slow-rotor window; draw 0; average power across eight microphones. Levels are not rescaled. On small screens, scroll the plot sideways.*
+
+The table confirms a large improvement across the slow-rotor windows. At fast speeds, removal slightly improves the mean score. **The benefit depends on the speed range.**
+
+“No added tone variation” does not mean “no randomness”. Random initial phases, the input speed changes and broadband noise remain.
+
+## 7. Does the audio follow speed commands?
+
+We command one rotor to run at **70, 72 and 74 revolutions per second (rev/s)**. The other three stay at 80, 88 and 96 rev/s. All these commands are cruise speeds, so a two-expert baseline uses only its cruise expert here. The probe has no separate standby test.
+
+We find the blade-pass tones in the **generated audio**, then read back the speeds. Each method has 48 expected tone commands.
+
+{{< include assets/controls.md >}}
+
+**Read the counts and error together.** A speed error uses matched tones only. A low error with missing tones does **not** show full control.
+
+The commanded-rotor column counts only peaks at the changing setpoint. A method can miss that rotor's tones even when many of its other peaks match. See the manuscript for slopes and their support across draws.
+
+This test checks frequency control and peak visibility, **not sound realism or flight-controller response**.
+
+## What can the paper claim?
+
+- **Compare what was measured:** log-spectrum error by regime, level and time-variation diagnostics, and tone readback. Tone readback and spectral match are different properties.
+- **Keep the limits:** the same supports and blend do not give the methods equal information, losses, optimisers or budgets. The paired comparison cannot show the effect of the blend alone.
+- **Use the ablation carefully:** removing the fitted tone changes does not refit the model. It shows their effect for the saved parameters, not how a separate deterministic fit would perform.
+- **Do not claim** a blind test, a few-shot advantage, better perceived realism or transfer to unseen aircraft.
+
+<details>
+<summary>Study record and full evidence</summary>
+
+The earlier evidence and the EONE-RPS fits remain unchanged. The current tables use a separate evidence file that adds the PTR, HPN and DDSP-Piano arms. It records the source jobs and fit hashes for all reported methods.
+
+The audio, spectrograms and equations work offline. The manuscript, source-code and evidence links below refer to the full research checkout.
+
+[Full manuscript](../../papers/2026-08_wrapup/build/generator/generator.pdf) · [Machine-readable evidence](../../../results/noise_generator_paper/neural_extension_evidence.json) · [Explainer provenance](assets/provenance.json)
+
+The cited baseline papers have retained full text in the bibliography project `drone-noise-generator`.
+
+This guide uses short sentences and defined technical names. It is not a certified ASD-STE100 document.
+
+</details>
+
+## Read the source papers {.unnumbered}
+
+::: {#refs}
+:::

@@ -1042,6 +1042,7 @@ dependencies = [
     { name = "loralib" },
     { name = "matplotlib" },
     { name = "ml-collections" },
+    { name = "mosqito" },
     { name = "nnaudio" },
     { name = "numba" },
     { name = "numpy" },
@@ -1117,6 +1118,7 @@ requires-dist = [
     { name = "loralib", specifier = "==0.1.2" },
     { name = "matplotlib", specifier = "==3.10.3" },
     { name = "ml-collections", specifier = "==1.1.0" },
+    { name = "mosqito", specifier = "==1.2.1" },
     { name = "nnaudio", specifier = ">=0.3.4" },
     { name = "numba", specifier = "==0.63.1" },
     { name = "numpy", specifier = "==2.2.5" },
@@ -2588,6 +2590,20 @@ wheels = [
 ]
 
 [[package]]
+name = "mosqito"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pyuff" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/91/a1/e3e210dd7669ed7a3a35e89600821d555f4ae203d53b7b8b653882a52bcc/mosqito-1.2.1.tar.gz", hash = "sha256:50c0ebdc5102c67cfe4362178ce07d7e6b3211d7cb3e6051082e503ff019f16f", size = 107690, upload-time = "2024-04-22T07:17:27.326Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4c/6c/3443f0ed85e1091bfad146afb426c30109b765ce15101a6fdc7f9df9e727/mosqito-1.2.1-py3-none-any.whl", hash = "sha256:c5370a729b12cb986ff39c71499e51201551b445623b5ca86aed66539d3cfe83", size = 158692, upload-time = "2024-04-22T07:17:25.075Z" },
+]
+
+[[package]]
 name = "moviepy"
 version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3964,6 +3980,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f8/bf/abbd3cdfb8fbc7fb3d4d38d320f2441b1e7cbe29be4f23797b4a2b5d8aac/pytz-2025.2.tar.gz", hash = "sha256:360b9e3dbb49a209c21ad61809c7fb453643e048b38924c765813546746e81c3", size = 320884, upload-time = "2025-03-25T02:25:00.538Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/c4/34e93fe5f5429d7570ec1fa436f1986fb1f00c3e0f43a589fe2bbcd22c3f/pytz-2025.2-py2.py3-none-any.whl", hash = "sha256:5ddf76296dd8c44c26eb8f4b6f35488f3ccbf6fbbd7adee0b7262d43f0ec2f00", size = 509225, upload-time = "2025-03-25T02:24:58.468Z" },
+]
+
+[[package]]
+name = "pyuff"
+version = "2.5.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3d/03/9a90aae2ddbf57027fa065c41f316e8f49275497ed0b6e75c10d3e2ce25f/pyuff-2.5.8.tar.gz", hash = "sha256:42ed104e0b267b185b27a9cc149038b5f897571e1ca9d3546fd7c1d4cfa54e97", size = 56028, upload-time = "2026-09-25T05:43:08.106Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/92/bba8fa744fba3f6b84c65841247e7c60b667d2af9f9fcf262aca616723be/pyuff-2.5.8-py3-none-any.whl", hash = "sha256:d71a86d69c74c6249b3ad2d43adb0ac20e47a6022322af0df6290ebe7486cf78", size = 69617, upload-time = "2026-09-25T05:43:06.538Z" },
 ]
 
 [[package]]

@@ -1,0 +1,90 @@
+{
+  "scope": "Deterministic isolated-line operator checks; no real-data fit or confidence interval",
+  "operator": "flight_v4._unit_autocorr + _pedestal_lag_t + _shaft_frames + _lag_to_bins",
+  "operator_source_sha256": {
+    "src/experiments/noise_model/flight_v4.py": "03bfdae2666307147ffb74ba0a90a73912819cf0b4a2256d61c9ce5bd6d74b4d",
+    "src/experiments/noise_model/spectrum.py": "9430338536acbf101fea23a36918649cdb5fcba42ea76fef174454b51f52745a",
+    "src/experiments/noise_model/v4_priors.py": "3501958de083c6289802cffb329dca6b756c01745ddf31b318e2cbf242f7756c"
+  },
+  "grid": {
+    "sr": 16000,
+    "n_fft": 2048,
+    "sr_work": 32000,
+    "window_s": 0.128,
+    "bin_hz": 7.8125,
+    "hann_enbw_hz": 11.71875
+  },
+  "controlled_line": {
+    "rotor_hz": 80,
+    "order": 40,
+    "carrier_hz": 3200,
+    "sigma2_amp": 0.12,
+    "gamma_amp_hz": 0.14,
+    "phase_variance": 1.0,
+    "phase_widths_hz": [
+      1.0,
+      8.0,
+      24.0
+    ]
+  },
+  "checks": {
+    "am_pm_swap_relative_error": 0.0,
+    "equal_rate_variance_split_relative_error": 4.378854032398654e-17,
+    "captured_band_power_relative_spread": 0.0011185076851198095,
+    "full_work_band_power_relative_spread": 3.330669073875469e-16,
+    "phase_logparameter_jacobian_singular_values": [
+      2.3924254020795455,
+      0.3903148377984275
+    ],
+    "amplitude_zero_vs_held_max_change_over_peak": 0.0018669199973196788,
+    "shaft_rate_50_vs_200_max_change_over_peak": 0.27918916819845413
+  },
+  "accepted_fit_records": {
+    "standby": {
+      "path": "results/noise_v4/flight/restarts/md2_fly125_standby_fpb__flight_v4__s0__r6c1.json",
+      "sha256": "da0649d76591fb202f40eba84e325521b1a722090800642cd44e9a0b0055c557",
+      "phase_fitted": true,
+      "amplitude_held": true,
+      "orders": 130,
+      "phase_width_hz_min_median_max": [
+        0.00019146839948507846,
+        23.18767814765109,
+        23.99989876608086
+      ],
+      "phase_width_above_bin_count": 107,
+      "phase_width_near_cap_count": 63,
+      "gamma_amp_hz_min_max": [
+        0.138222796901348,
+        0.18441165171411422
+      ],
+      "sigma2_amp_min_max": [
+        0.001361867704201682,
+        0.2306138009183693
+      ],
+      "phase_width_source": "fitted per order: sigma2 capped at PHASE_SIGMA2_MAX, W capped at W_MAX_HZ (bench_v4 capped coordinates), gamma = W (1 - e^-sigma2) / sigma2; started at the prior medians"
+    },
+    "cruise": {
+      "path": "results/noise_v4/flight/restarts/md2_fly125_cruise_fpb__flight_v4__s0__r6c3.json",
+      "sha256": "d38512752e162caccdc0cb85024dd0b3e51ac64514a0a44099472799c7307689",
+      "phase_fitted": true,
+      "amplitude_held": true,
+      "orders": 85,
+      "phase_width_hz_min_median_max": [
+        1.2009174918765502e-06,
+        0.49568933354648237,
+        23.996503488711475
+      ],
+      "phase_width_above_bin_count": 11,
+      "phase_width_near_cap_count": 4,
+      "gamma_amp_hz_min_max": [
+        0.138222796901348,
+        0.18441165171411422
+      ],
+      "sigma2_amp_min_max": [
+        0.001361867704201682,
+        0.2306138009183693
+      ],
+      "phase_width_source": "fitted per order: sigma2 capped at PHASE_SIGMA2_MAX, W capped at W_MAX_HZ (bench_v4 capped coordinates), gamma = W (1 - e^-sigma2) / sigma2; started at the prior medians"
+    }
+  }
+}

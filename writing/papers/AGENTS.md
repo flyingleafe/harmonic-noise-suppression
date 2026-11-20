@@ -1,6 +1,6 @@
 # papers/
 
-Self-contained paper drafts. Each subdirectory is one paper.
+Self-contained paper drafts, grouped by project.
 
 | Directory | Status | What it is |
 |-----------|--------|------------|
@@ -8,12 +8,12 @@ Self-contained paper drafts. Each subdirectory is one paper.
 | `2026-07_coupled-vk-blind-rps/` | superseded (Aug 2026) | Blind multi-rotor VK tracking paper. Demoted: its method sections survive as the search section + capture-range ablation of the 2026-08 paper. Builds with **Tectonic v2** (see its `README.md`). |
 | `2026-08_joint-decomposition-rps/` | draft, structure-first (Aug 2026) | The v4 restructure: joint harmonic+broadband decomposition with a built-in measure of fit — one solver, three readouts (decomposition / refinement / measure). Full prose, WIP results behind `\pending{}`/`\wip{}`. Tectonic v2, `writing/papers/2026-08_joint-decomposition-rps/src/index.tex`, output `build/main/main.pdf`. |
 | `2026-08_wrapup/` | draft, restructured 2026-10-10 — **git submodule** (`github.com/flyingleafe/drone-rps-wrapup-paper`, private; run `git submodule update --init` after clone) | The wrap-up paper, refocused on the method: rotor-speed tracking as multi-pitch estimation, the adaptation ladder from HPPNet to HRSPNet (per-rotor output, extended harmonic range, rate ConvLSTM, multi-resolution STFT pyramid), regressor baselines, cross-drone transfer, and the fitted generative noise model as the secondary contribution (synthetic pretraining). Narrative of record: `docs/wrapup-paper-extended-abstract.md`. Written as if the redesigned experiment set were complete; unrun results sit behind `\wip{}`. Tectonic v2, `src/main.tex`, output `build/main/main.pdf`. |
+| `2026-08_wrapup/` (generator target) | IEEE SPL-style draft | Standalone rotor-noise generator comparison on MD2 FLY125 → FLY124 (parameter-transfer diagnostic, not blind). Edit `src/generator.tex` in the shared Tectonic workspace; output `build/generator/generator.pdf`. Campaign record: `docs/experiments/drone-noise-generator-paper.md`. |
 
 ## Conventions
 
-- **One paper per subdirectory.** Each has `main.tex`, `refs.bib`, `Makefile`,
-  `make_figures.py`, `figures/`, and a `README.md` describing scope, build
-  steps, and data provenance.
+- **One project per subdirectory.** Each project's README describes its
+  manuscript sources, build steps, and data provenance.
 - **No fresh experiments at paper-build time.** Figures and tables are
   regenerated from existing results in `../results/` (and other already-
   produced artifacts). If a paper needs a new number, run the experiment

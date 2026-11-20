@@ -1,12 +1,10 @@
 """The integrated Ornstein-Uhlenbeck shaft process: transition, structure
 function and exact path simulator.
 
-MOVED verbatim from :mod:`experiments.stochastic_fit.revised_phase`, which
-imports them back. They live here because the v2 renderer
-(:func:`data_processing.noise_model.render.render_noise`) draws its shaft paths
-with :func:`simulate_state` and its line shapes with the structure function
-:func:`integrated_ou_increment_var`, and ``data_processing`` may not import
-``experiments``. One definition, read by the fit and by the renderer.
+The constant-coefficient transition and structure function are shared by the
+fit and the legacy renderers. V4 additionally uses a NumPy path simulator
+whose coefficients follow the local rotor speed. Keeping both here prevents
+the renderer from importing the experimental fitting modules.
 """
 
 from __future__ import annotations
@@ -16,6 +14,8 @@ from typing import Any
 
 import numpy as np
 import torch
+from numba import njit
+from numba.extending import register_jitable
 from torch import Tensor
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "ou_cholesky",
     "ou_transition",
     "simulate_state",
+    "simulate_state_path",
 ]
 
 
@@ -32,6 +33,21 @@ def _xp(*arrays: Any) -> Any:
         if isinstance(a, Tensor):
             return torch
     return np
+
+
+@register_jitable
+def _ou_terms(lam: float, dt: float) -> tuple[float, float, float, float]:
+    """Stable scalar terms shared by constant and time-varying transitions."""
+    x = lam * dt
+    e = math.exp(-x)
+    one_m_e = -math.expm1(-x)
+    one_m_e2 = -math.expm1(-2.0 * x)
+    bracket = (
+        x**3 / 3.0 - x**4 / 4.0 + 7.0 * x**5 / 60.0
+        if x < 1e-2
+        else x - 2.0 * one_m_e + 0.5 * one_m_e2
+    )
+    return e, one_m_e, one_m_e2, bracket
 
 
 def ou_transition(lam: float, sigma: float, dt: float) -> tuple[np.ndarray, np.ndarray]:
@@ -57,18 +73,10 @@ def ou_transition(lam: float, sigma: float, dt: float) -> tuple[np.ndarray, np.n
         raise ValueError(f"sigma must be non-negative, got {sigma!r}")
     if dt <= 0.0:
         raise ValueError(f"dt must be positive, got {dt!r}")
-    x = lam * dt
-    e = math.exp(-x)
-    one_m_e = -math.expm1(-x)
-    one_m_e2 = -math.expm1(-2.0 * x)
+    e, one_m_e, one_m_e2, bracket = _ou_terms(lam, dt)
     f_mat = np.array([[1.0, one_m_e / lam], [0.0, e]], dtype=np.float64)
     var_nu = sigma**2 * one_m_e2
     cov = (sigma**2 / lam) * one_m_e**2
-    bracket = (
-        x**3 / 3.0 - x**4 / 4.0 + 7.0 * x**5 / 60.0
-        if x < 1e-2
-        else x - 2.0 * one_m_e + 0.5 * one_m_e2
-    )
     var_theta = 2.0 * sigma**2 / lam**2 * bracket
     q_mat = np.array([[var_theta, cov], [cov, var_nu]], dtype=np.float64)
     return f_mat, q_mat
@@ -171,3 +179,73 @@ def simulate_state(innov: Any, *, lam: float, sigma: float, dt: float) -> tuple[
     else:
         theta = np.concatenate((np.zeros_like(nu[..., :1]), np.cumsum(inc, axis=-1)), axis=-1)
     return theta, nu
+
+
+@register_jitable
+def _unit_step(lam: float, dt: float) -> tuple[float, float, float, float, float]:
+    e, one_m_e, one_m_e2, bracket = _ou_terms(lam, dt)
+    a = math.sqrt(max(2.0 / lam**2 * bracket, 0.0))
+    b = (one_m_e**2 / lam) / a if a > 0.0 else 0.0
+    c = math.sqrt(max(one_m_e2 - b * b, 0.0))
+    return e, one_m_e / lam, a, b, c
+
+
+@njit(cache=True)
+def _simulate_state_path(
+    innov: np.ndarray, lam: np.ndarray, sigma: np.ndarray, dt: float
+) -> tuple[np.ndarray, np.ndarray]:
+    n = innov.shape[0]
+    theta = np.empty(n, dtype=np.float64)
+    nu = np.empty(n, dtype=np.float64)
+    theta[0] = 0.0
+    nu[0] = sigma[0] * innov[0, 0]
+    previous_lam = lam[0]
+    e, f01, a, b, c = _unit_step(previous_lam, dt)
+    for j in range(1, n):
+        if lam.size > 1 and lam[j] != previous_lam:
+            previous_lam = lam[j]
+            e, f01, a, b, c = _unit_step(previous_lam, dt)
+        scale = sigma[j] if sigma.size > 1 else sigma[0]
+        z1, z2 = innov[j, 0], innov[j, 1]
+        theta[j] = theta[j - 1] + f01 * nu[j - 1] + scale * a * z1
+        nu[j] = e * nu[j - 1] + scale * (b * z1 + c * z2)
+    return theta, nu
+
+
+def simulate_state_path(
+    innov: np.ndarray, *, lam: float | np.ndarray, sigma: float | np.ndarray, dt: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Integrated OU with local coefficients on one NumPy work-grid path.
+
+    ``innov`` is ``(S, 2)``; ``lam`` and ``sigma`` are scalars or ``(S,)``.
+    The initial speed error has variance ``sigma[0]**2``. Each later interval
+    uses its right-endpoint coefficients and the exact integrated-OU transition
+    for those piecewise-constant coefficients. The speed state is carried
+    continuously through coefficient changes, never reset at frame boundaries.
+
+    This discretizes ``d nu = -lam(t) nu dt + sqrt(2 lam(t)) sigma(t) dW``,
+    ``d theta = nu dt``. ``sigma(t)`` is the local stationary scale, not a
+    claim of instantaneous marginal variance after an abrupt change.
+    Constant coefficients use :func:`simulate_state` unchanged, preserving
+    seeded stationary paths. A constant rate is factored only once.
+    """
+    z = np.asarray(innov, dtype=np.float64)
+    if z.ndim != 2 or z.shape[1] != 2 or not z.shape[0]:
+        raise ValueError("innov must be a non-empty (S, 2) array")
+    if not math.isfinite(dt) or dt <= 0.0:
+        raise ValueError("dt must be finite and positive")
+    coefficients = []
+    for name, value in (("lam", lam), ("sigma", sigma)):
+        v = np.asarray(value, dtype=np.float64)
+        if v.ndim > 1 or (v.ndim == 1 and v.size != z.shape[0]):
+            raise ValueError(f"{name} must be a scalar or have {z.shape[0]} samples")
+        if not np.all(np.isfinite(v)) or np.any(v <= 0.0 if name == "lam" else v < 0.0):
+            raise ValueError(
+                f"{name} must be finite and {'positive' if name == 'lam' else 'non-negative'}"
+            )
+        v = v.reshape(-1)
+        coefficients.append(v[:1] if np.all(v == v[0]) else v)
+    rates, scales = coefficients
+    if rates.size == scales.size == 1:
+        return simulate_state(z, lam=float(rates[0]), sigma=float(scales[0]), dt=dt)
+    return _simulate_state_path(z, rates, scales, dt)
