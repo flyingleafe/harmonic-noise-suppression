@@ -66,3 +66,4 @@ lands as a top-level file here.
 | `paper-real-protocol.md` | `rp_*` (design) | The one real-data regime behind every wrap-up row. **Read § "Motivation"** before comparing `rp_*` to older numbers |
 | `rp-synthetic.md` | `rp_*_combdiv` | Synthetic-noise arms of the rp protocol (diverse static comb, online); real panel + pre-drawn `static_comb` panel, stop on both |
 | `drone-noise-generator-paper.md` | — (`scripts/generator_paper_*.py`, `src/experiments/generator_paper/`) | Rotor-noise generator campaign: published baselines, no-refit ablation, FLY125 → FLY124 transfer and rotor-control probe. |
+| `rps-flight-regimes.md` | — (`scripts/rps_traj_regimes*`, `src/experiments/rps_traj/`) | Whole-flight trajectory model: fitted phase layer + switching cruise noise vs VAR, MS-VAR, VAR-HSMM on 7 rigs, held-out flights. Read § "Conclusion" first |
