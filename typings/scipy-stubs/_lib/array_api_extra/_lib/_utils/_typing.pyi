@@ -1,0 +1,1 @@
+../../../../../../.venv/lib/python3.12/site-packages/scipy/_lib/array_api_extra/_lib/_utils/_typing.pyi

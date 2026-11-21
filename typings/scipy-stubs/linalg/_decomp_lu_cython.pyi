@@ -1,0 +1,1 @@
+../../../.venv/lib/python3.12/site-packages/scipy/linalg/_decomp_lu_cython.pyi

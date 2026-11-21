@@ -1,0 +1,1 @@
+../../../../.venv/lib/python3.12/site-packages/scipy/stats/_unuran/unuran_wrapper.pyi

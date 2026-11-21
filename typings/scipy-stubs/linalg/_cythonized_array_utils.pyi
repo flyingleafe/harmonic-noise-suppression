@@ -1,0 +1,1 @@
+../../../.venv/lib/python3.12/site-packages/scipy/linalg/_cythonized_array_utils.pyi

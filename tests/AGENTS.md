@@ -33,6 +33,7 @@ Root-level modules (no natural package home):
 | `test_plot_timeframe.py` | Generic `plot_timeframe` machinery |
 | `test_dataloader_benchmark.py` | Dataloader throughput smoke |
 | `test_geom_calibration.py` | The **frozen** `notebooks/geom_calibration.py` study — the one deliberate `notebooks/` import; see the file's header for why it is not moved into `src` |
+| `test_typings.py` | `typings/scipy-stubs` (the partial stub package that keeps pyright fast on `scipy.signal`): links back every stub scipy ships, declares exactly scipy's window functions |
 
 ## Running
 

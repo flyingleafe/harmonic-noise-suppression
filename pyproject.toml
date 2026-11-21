@@ -199,8 +199,11 @@ forbidden_modules = ["experiments"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-# Archival restores stay verbatim - never lint or reformat them.
-extend-exclude = ["writing/reports/2026-05-29_classical-baselines"]
+# Archival restores stay verbatim - never lint or reformat them. typings/ is
+# the partial scipy stub package pyright reads: all but one of its files are
+# LINKS to the stubs scipy ships inside .venv, which `ruff check --fix` and
+# `ruff format` would otherwise rewrite in place.
+extend-exclude = ["writing/reports/2026-05-29_classical-baselines", "typings"]
 
 [tool.ruff.lint]
 select = [
@@ -240,9 +243,18 @@ venv = ".venv"
 # pyright would otherwise type-check every `from models import ...` against the
 # other tree's code (and flag anything added on the branch as missing).
 extraPaths = ["src"]
+# Bound what pyright walks. `include` names the code; without it pyright takes
+# the whole checkout. An explicit `exclude` REPLACES pyright's defaults
+# (node_modules, __pycache__, every dot directory), so they are restated below:
+# without them a bare `pyright` and every language server descended into all
+# of .worktrees/* and the data and results trees — 298 829 "source files"
+# after a 245 s walk (2026-11-20), paid again whenever a watched file changed.
+# Files named on the command line (the pre-commit hook) override `include` and
+# still honour `exclude`.
+include = ["src", "scripts", "tests", "train.py", "eval.py"]
 # writing/** holds frozen report/slide scripts pinned to their publication
 # date; they reference since-refactored APIs by design (same rationale as
 # the ruff E402 exemption above).
-exclude = [".venv", "node_modules", ".direnv", "**/notebooks/**", "**/.ipynb_checkpoints/**", "writing", "scripts/static_rig_scratch"]
+exclude = ["**/node_modules", "**/__pycache__", "**/.*", "**/notebooks/**", "writing", "scripts/static_rig_scratch"]
 reportMissingImports = false
 reportMissingTypeStubs = false

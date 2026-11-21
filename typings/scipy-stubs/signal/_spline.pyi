@@ -1,0 +1,1 @@
+../../../.venv/lib/python3.12/site-packages/scipy/signal/_spline.pyi
