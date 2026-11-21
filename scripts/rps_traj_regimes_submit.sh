@@ -26,14 +26,14 @@
 # is linked to the main checkout's, so the unit JSONs land there.
 #
 # A unit that fails leaves <uid>.err beside the JSONs and the rest go on; the
-# job prints the number of .err files as its last line and fails if there is
-# one (its outputs are collected either way).  Re-submitting a rig at the same
+# job prints the number of .err files as its last line and fails if any pass
+# did (its outputs are collected either way).  Re-submitting a rig at the same
 # SHA resumes it: the cluster worktree keeps the finished units.
 set -euo pipefail
 
 die() { printf 'rps_traj_regimes_submit: %s\n' "$*" >&2; exit 1; }
 
-RIGS=(michaels vid_m100 dregon blackbird nanobench neurobem pitcn_quad)
+RIGS=(michaels vid_m100 dregon blackbird_quad nanobench_cf21b neurobem_quad pitcn_quad)
 OUT=results/rps_traj/regimes
 
 DRY=0
@@ -99,10 +99,11 @@ for t in "${TARGETS[@]}"; do
     continue
   fi
   run="python scripts/rps_traj_regimes.py run --rigs $t --jobs $((CPUS / 2)) --threads 2"
-  payload="$ENV_WRAPPER; $run --stage cruise; $run --stage cruise --final"
-  payload="$payload; $run --stage flight; $run --stage flight --final --arms ours msvar hsmm"
-  payload="$payload; n=\$(ls $OUT/raw/*__${t}__*.err 2>/dev/null | wc -l)"
-  payload="$payload; echo \"failed units: \$n\"; [ \"\$n\" -eq 0 ]"
+  payload="$ENV_WRAPPER; st=0; $run --stage cruise || st=1; $run --stage cruise --final || st=1"
+  payload="$payload; $run --stage flight || st=1"
+  payload="$payload; $run --stage flight --final --arms ours msvar hsmm || st=1"
+  payload="$payload; echo \"failed units: \$(ls $OUT/raw/*__${t}__*.err 2>/dev/null | wc -l)\""
+  payload="$payload; exit \$st"
   submit "$t" omnirun submit --backend uni-cpu --gpus 0 --cpus "$CPUS" --mem "$MEM" --time "$TIME" \
     --name "rps-regimes-${t//_/-}" --outputs "$OUT/raw/*__${t}__*" -- bash -lc "$payload"
 done
