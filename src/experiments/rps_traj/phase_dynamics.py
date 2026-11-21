@@ -32,13 +32,14 @@ Scores, per window and held-out flight, 64 generated flights the ensemble:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
 from scipy.stats import wasserstein_distance
 
 from experiments.rps_traj import regime_campaign as rc
+from experiments.rps_traj.cruise_api import NUM_ROTORS
 from experiments.rps_traj.phases import PHASES, Landmarks, landmarks, phase_labels
 from experiments.rps_traj.scores import _energy_scores
 from experiments.rps_traj.transients import fit_phase_layer
@@ -130,6 +131,89 @@ def _events(marks: Landmarks) -> dict[str, int | None]:
     return {"motors_on": marks.motors_on, "takeoff": marks.takeoff, "landing": marks.landing}
 
 
+Generated = list[tuple[np.ndarray, Mapping[str, Any]]]
+
+
+def fit_arm(
+    arm: str, rig: str, fold: str, out_dir: str | None, seed: int = 0, *, same_clock: bool = False
+) -> Callable[[Landmarks, int, np.random.Generator], Generated | None]:
+    """An arm fitted on the training flights of a fold, as a generator of
+    ``n`` flights ``(rps (4, .) at FS, events)`` on the schedule of a held-out
+    flight's landmarks (``None`` when the flight has no take-off to follow).
+
+    ``same_clock`` makes ``ours`` land at the held-out flight's landing time as
+    well: its take-off lasts as long as its own ramp does, so the time airborne
+    is shortened or lengthened by the difference (the levels, hence the ramp,
+    are the first things a draw fixes: the same seed gives them again).
+    """
+    data = rc.rig_data(rig)
+    held_ids = set(data.held_out[int(fold)])
+    train = [f for f in data.flights if f.flight not in held_ids]
+
+    if arm == "ours":
+        cruise = rc._cruise_for_flights(out_dir, rig, fold, seed)
+        layer = fit_phase_layer(train)
+        scale = FS / layer.fs
+
+        def ours(marks: Landmarks, n: int, rng: np.random.Generator) -> Generated | None:
+            if marks.motors_on is None or marks.takeoff is None:
+                return None
+            arrival = marks.takeoff if marks.arrival is None else marks.arrival
+            end = marks.n if marks.landing is None else marks.landing
+            pre = (marks.takeoff - marks.motors_on) / FS
+            air = max((end - arrival) / FS, 1.0)
+            gens: Generated = []
+            for _ in range(n):
+                if same_clock:
+                    state = int(rng.integers(2**62))
+                    first = layer.sample(
+                        cruise, np.random.default_rng(state), airborne_s=air, pre_takeoff_s=pre
+                    )
+                    ramp = (first["arrival"] - first["takeoff"]) / layer.fs
+                    draw = layer.sample(
+                        cruise,
+                        np.random.default_rng(state),
+                        airborne_s=max((end - marks.takeoff) / FS - ramp, 1.0),
+                        pre_takeoff_s=pre,
+                    )
+                else:
+                    draw = layer.sample(cruise, rng, airborne_s=air, pre_takeoff_s=pre)
+                events = {
+                    k: None if draw[k] is None else int(round(draw[k] * scale))
+                    for k in ("motors_on", "takeoff", "landing")
+                }
+                gens.append((rc._to_flight_rate(draw["rps"], layer.fs), events))
+            return gens
+
+        return ours
+
+    seqs = [rc._to_flight_rate(f.rps, f.fs) for f in train]
+    labelled = [(s, landmarks(s, FS)) for s in seqs]
+    model = fit_switching_var(
+        [s for s, m in labelled if m is not None],
+        FS,
+        n_states=len(PHASES),
+        order=int(arm.removeprefix("phasevar")),
+        intercept=True,
+        sigma_floor=rc.FLIGHT_SIGMA_FLOOR,
+        n_init=1,
+        max_iter=0,  # the states are known: the labelled fit is the estimate
+        seed=seed,
+        init_labels=[phase_labels(m) for _, m in labelled if m is not None],
+        stable=True,
+    )
+    cap = rc.FLIGHT_CAP * max(float(s.max()) for s in seqs)
+
+    def phasevar(marks: Landmarks, n: int, rng: np.random.Generator) -> Generated | None:
+        states = np.tile(phase_labels(marks), (n, 1))
+        eps = rng.standard_normal((n, marks.n, NUM_ROTORS))
+        lags = np.zeros((n, model.order, NUM_ROTORS))
+        paths = _simulate_kernel(states, model.mu, model.coefs, model._chol, eps, lags, 0.0, cap)
+        return [(path.T, _events(marks)) for path in paths]
+
+    return phasevar
+
+
 def run_unit(unit: Unit) -> dict[str, Any]:
     """One unit: an arm fitted on the training flights of a fold and scored
     on every window of the held-out ones."""
@@ -138,65 +222,52 @@ def run_unit(unit: Unit) -> dict[str, Any]:
     rc._threads(int(p.get("threads", 1)))
     data = rc.rig_data(rig)
     held_ids = set(data.held_out[int(fold)])
-    train = [f for f in data.flights if f.flight not in held_ids]
-    held = [f for f in data.flights if f.flight in held_ids]
     rng = np.random.default_rng(seed + 20)
     out: dict[str, Any] = {"kind": "phase", "rig": rig, "fold": fold, "arm": arm, "flights": {}}
-
-    if arm == "ours":
-        cruise = rc._cruise_for_flights(p.get("out_dir"), rig, fold, seed)
-        layer = fit_phase_layer(train)
-        scale = FS / layer.fs
-    else:
-        seqs = [rc._to_flight_rate(f.rps, f.fs) for f in train]
-        labelled = [(s, landmarks(s, FS)) for s in seqs]
-        model = fit_switching_var(
-            [s for s, m in labelled if m is not None],
-            FS,
-            n_states=len(PHASES),
-            order=int(arm.removeprefix("phasevar")),
-            intercept=True,
-            sigma_floor=rc.FLIGHT_SIGMA_FLOOR,
-            n_init=1,
-            max_iter=0,  # the states are known: the labelled fit is the estimate
-            seed=seed,
-            init_labels=[phase_labels(m) for _, m in labelled if m is not None],
-            stable=True,
-        )
-        cap = rc.FLIGHT_CAP * max(float(s.max()) for s in seqs)
-
-    for flight in held:
+    generate = fit_arm(arm, rig, fold, p.get("out_dir"), seed)
+    for flight in (f for f in data.flights if f.flight in held_ids):
         real = rc._to_flight_rate(flight.rps, flight.fs)
         marks = landmarks(real, FS)
-        if marks is None:
-            continue
-        gens: list[tuple[np.ndarray, Mapping[str, Any]]] = []
-        if arm == "ours":
-            if marks.motors_on is None or marks.takeoff is None:
-                continue
-            arrival = marks.takeoff if marks.arrival is None else marks.arrival
-            end = marks.n if marks.landing is None else marks.landing
-            for _ in range(N_GEN):
-                draw = layer.sample(
-                    cruise,
-                    rng,
-                    airborne_s=max((end - arrival) / FS, 1.0),
-                    pre_takeoff_s=(marks.takeoff - marks.motors_on) / FS,
-                )
-                events = {
-                    k: None if draw[k] is None else int(round(draw[k] * scale))
-                    for k in ("motors_on", "takeoff", "landing")
-                }
-                gens.append((rc._to_flight_rate(draw["rps"], layer.fs), events))
-        else:
-            states = np.tile(phase_labels(marks), (N_GEN, 1))
-            eps = rng.standard_normal((N_GEN, marks.n, real.shape[0]))
-            lags = np.zeros((N_GEN, model.order, real.shape[0]))
-            paths = _simulate_kernel(
-                states, model.mu, model.coefs, model._chol, eps, lags, 0.0, cap
-            )
-            gens = [(path.T, _events(marks)) for path in paths]
-        out["flights"][flight.flight] = score_flight(real, marks, gens)
+        gens = None if marks is None else generate(marks, N_GEN, rng)
+        if marks is not None and gens is not None:
+            out["flights"][flight.flight] = score_flight(real, marks, gens)
+    return out
+
+
+def example_flights(
+    rig: str, out_dir: str | None, n: int = 3, fold: str = "0", seed: int = 0
+) -> dict[str, Any]:
+    """Generated flights of every arm on ONE schedule: that of the first
+    held-out flight of a fold that goes from the ground to the ground (the
+    first one otherwise).  ``{"flight", "t", "events" (s), "labels", "real",
+    arm: [rps (4, n_t), ...]}``, everything at :data:`FS` on the held-out
+    flight's own clock."""
+    data = rc.rig_data(rig)
+    held = [f for f in data.flights if f.flight in set(data.held_out[int(fold)])]
+    marked = [(f, rc._to_flight_rate(f.rps, f.fs)) for f in held]
+    marked = [(f, x, landmarks(x, FS)) for f, x in marked]
+    whole = [(f, x, m) for f, x, m in marked if m is not None and m.whole]
+    flight, real, marks = (whole or [e for e in marked if e[2] is not None])[0]
+    assert marks is not None
+    out: dict[str, Any] = {
+        "flight": flight.flight,
+        "t": np.arange(marks.n) / FS,
+        "events": {k: None if v is None else v / FS for k, v in _events(marks).items()},
+        "labels": phase_labels(marks),
+        "real": real,
+    }
+    for arm in ARMS:
+        gens = fit_arm(arm, rig, fold, out_dir, seed, same_clock=True)(
+            marks, n, np.random.default_rng(seed + 30)
+        )
+        paths = []
+        for x, events in gens or []:
+            shift = (marks.motors_on or 0) - (events.get("motors_on") or 0)
+            y = np.zeros_like(real)
+            src = x[:, max(-shift, 0) : max(-shift, 0) + marks.n - max(shift, 0)]
+            y[:, max(shift, 0) : max(shift, 0) + src.shape[1]] = src
+            paths.append(y)
+        out[arm] = paths
     return out
 
 

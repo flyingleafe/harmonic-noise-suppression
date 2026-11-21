@@ -159,6 +159,106 @@ def _bench(args: argparse.Namespace) -> int:
     return 0
 
 
+def _examples(args: argparse.Namespace) -> int:
+    """Generated flights of every given-schedule arm beside the held-out flight
+    whose schedule they follow, one zoomable figure a rig."""
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    from experiments.rps_traj.phases import PHASES
+
+    rows = [("real", "held-out flight"), ("ours", "ours"), ("phasevar2", "per-phase VAR(2)")]
+    rows.append(("phasevar4", "per-phase VAR(4)"))
+    rotor = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
+    shade = ["#ffffff", "#fde0c5", "#e8e8e8", "#c9e4f5", "#ffffff", "#d9f0d3"]
+    parts = []
+    for rig in args.rigs or list(rc.FLIGHT_RIGS):
+        ex = pd_.example_flights(rig, args.out, n=args.draws, fold=args.fold)
+        t, labels = ex["t"], ex["labels"]
+        fig = make_subplots(
+            rows=len(rows),
+            cols=1,
+            shared_xaxes=True,
+            shared_yaxes=True,
+            vertical_spacing=0.03,
+            subplot_titles=[title for _, title in rows],
+        )
+        draw_of = []  # per trace: the draw it belongs to (-1: always shown)
+        for r, (key, _) in enumerate(rows, start=1):
+            paths = [ex["real"]] if key == "real" else ex[key]
+            for k, x in enumerate(paths):
+                for i in range(4):
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=t,
+                            y=x[i],
+                            mode="lines",
+                            line={"width": 1, "color": rotor[i]},
+                            name=f"rotor {i + 1}",
+                            legendgroup=f"rotor {i + 1}",
+                            showlegend=(r == 1),
+                            visible=(key == "real" or k == 0),
+                        ),
+                        row=r,
+                        col=1,
+                    )
+                    draw_of.append(-1 if key == "real" else k)
+        edges = [0, *(int(i) + 1 for i in (labels[1:] != labels[:-1]).nonzero()[0]), len(labels)]
+        for a, b in zip(edges[:-1], edges[1:]):
+            phase = int(labels[a])
+            fig.add_vrect(
+                x0=t[a],
+                x1=t[b - 1],
+                fillcolor=shade[phase],
+                opacity=0.45,
+                line_width=0,
+                layer="below",
+                annotation_text=PHASES[phase] if b - a > 8 else "",
+                annotation_position="top left",
+                annotation_font_size=9,
+            )
+        for when in ex["events"].values():
+            if when is not None:
+                fig.add_vline(x=when, line={"width": 1, "dash": "dot", "color": "#555"})
+        fig.update_layout(
+            title=f"{rig}: schedule of held-out flight {ex['flight']} (25 Hz); "
+            "dotted lines: motors on, take-off, landing",
+            height=230 * len(rows) + 120,
+            margin={"l": 60, "r": 20, "t": 90, "b": 40},
+            hovermode="x unified",
+            updatemenus=[
+                {
+                    "type": "buttons",
+                    "direction": "right",
+                    "x": 1.0,
+                    "xanchor": "right",
+                    "y": 1.09,
+                    "buttons": [
+                        {
+                            "label": f"draw {k + 1}",
+                            "method": "update",
+                            "args": [{"visible": [d in (-1, k) for d in draw_of]}],
+                        }
+                        for k in range(args.draws)
+                    ],
+                }
+            ],
+        )
+        fig.update_yaxes(title_text="rev/s")
+        fig.update_xaxes(title_text="s", row=len(rows), col=1)
+        parts.append(fig.to_html(full_html=False, include_plotlyjs=not parts))
+    path = Path(args.out) / "generated_flights.html"
+    path.write_text(
+        "<!doctype html><meta charset='utf-8'><title>Generated flights on a given schedule</title>"
+        "<body style='font-family:sans-serif;max-width:1500px;margin:auto'>"
+        "<p>Every generated flight follows the held-out flight's motors-on, take-off and landing "
+        "times; models are fitted on the other flights of the rig. Drag to zoom (all rows "
+        "together), double-click to reset, buttons switch the draw.</p>" + "\n".join(parts)
+    )
+    print(path)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -178,7 +278,12 @@ def main() -> int:
     bench = sub.add_parser("bench", help="time the Gaussian fit's objective on CPU and GPU")
     bench.add_argument("--rigs", nargs="*", default=None)
     bench.set_defaults(func=_bench)
-    for p in (run, table, bench):
+    examples = sub.add_parser("examples", help="zoomable generated flights on one schedule")
+    examples.add_argument("--rigs", nargs="*", default=None)
+    examples.add_argument("--fold", default="0")
+    examples.add_argument("--draws", type=int, default=3)
+    examples.set_defaults(func=_examples)
+    for p in (run, table, bench, examples):
         p.add_argument("--out", default=DEFAULT_OUT)
     args = ap.parse_args()
     return int(args.func(args))
