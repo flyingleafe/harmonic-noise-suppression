@@ -419,6 +419,44 @@ CRPS of the read-outs of the valid flights (lower is better), MD2 / VID M100
 - Not solved by anyone: how long a flight lasts and, on MD2, how long it idles
   (CRPS 7.4 s).
 
+### Dynamics inside each phase, on a given schedule
+
+When to change phase and how long to stay is the user's choice, so here it is
+given to every arm (`phase_dynamics.py`, run locally, 39 units): the held-out
+flight's motors-on, take-off and landing times. The baseline is then one
+VAR(p) per phase fitted to the training samples of that phase (with known
+states the Markov-switching VAR and the VAR-HSMM are this one model), simulated
+along the held-out flight's own phase labels — which also tell it when each
+transient ends; ours is not told that. 64 generated flights an arm; energy
+score of the four rotor speeds (`path`) and of their 0.2 s increments (`inc`),
+percent of hover, lower is better; `sd` is the standard deviation of the
+generated / held-out 0.2 s increments.
+
+| Window | Score | MD2: ours / VAR(2) / VAR(4) | VID M100 | DREGON |
+|---|---|---|---|---|
+| Start-up, 3 s | path | 3.95 / 15.58 / 14.88 | 0.53 / 4.36 / 1.66 | 1.96 / 7.47 / 9.47 |
+| | inc | 3.90 / 13.13 / 12.98 | 0.63 / 0.95 / 0.69 | 1.79 / 1.46 / 1.69 |
+| Standby, last 2 s | path | 6.08 / 9.53 / 9.60 | 0.64 / 1.13 / 0.67 | 0.30 / 6.74 / 9.03 |
+| | inc | 0.31 / 0.67 / 0.78 | 0.91 / 1.06 / 0.75 | 0.35 / 0.36 / 0.38 |
+| | sd, generated (real) | 0.01 / 0.96 / 1.31 (0.52) | 0.36 / 0.96 / 0.75 (0.58) | 0.43 / 0.49 / 0.53 (0.28) |
+| Take-off, 4 s | path | 13.81 / 18.83 / 18.45 | 11.34 / 10.25 / 9.50 | 11.52 / 11.49 / 11.93 |
+| | inc | 6.04 / 5.07 / 5.07 | 4.85 / 4.57 / 4.23 | 6.83 / 5.42 / 5.37 |
+| | sd, generated (real) | 6.02 / 5.95 / 6.06 (5.51) | 7.27 / 6.33 / 5.93 (5.78) | 6.43 / 6.07 / 5.78 (6.23) |
+| Landing, −0.5…4 s | path | 16.55 / 17.44 / 16.83 | 8.90 / 11.42 / 11.67 | 7.64 / 24.37 / 20.88 |
+| | inc | 6.67 / 6.92 / 6.88 | 5.80 / 8.64 / 8.71 | 8.75 / 40.27 / 37.52 |
+
+Held-out flights: 4, 4 and 10 (5 with a landing); means only, no spread.
+
+- **Take-off is where the per-phase VAR has the better dynamics**: lower
+  increment score on all three rigs (by 13–21 %), and on VID M100 the better
+  path too. Ours ramps at one fitted rate and, on VID M100, moves too much
+  (7.3 against 5.8).
+- **Standby: ours has no fluctuation at all** (MD2: 0.01 against 0.52 real);
+  it still scores better there on MD2 and DREGON because the VAR is twice too
+  rough, but VAR(4) is ahead on VID M100.
+- **Start-up and landing: ours**, on path everywhere and on increments except
+  DREGON's start-up (1.79 against 1.46).
+
 ### Does the fit run faster on a GPU?
 
 No. One objective-and-gradient evaluation of the Gaussian stage, 16 CPU
@@ -436,14 +474,17 @@ numba on the CPU. The whole Gaussian stage took 138–827 s a fold.
 
 - **Whole flights: adopt the phase layer.** It is the only arm that always
   generates a flight, it beats the current scaffold on the transients, and a
-  switching VAR is not a whole-flight generator on this data.
+  switching VAR is not a whole-flight generator on this data. With the
+  schedule given it still has the better start-up and landing; its take-off
+  dynamics are worse than a per-phase VAR's and its standby does not move.
 - **Cruise: adopt the two-level switch, and do not claim more than it shows.**
   It removes most of the Gaussian model's one-step deficit with three
   parameters and is the best arm 2 s ahead, but a three-state Markov-switching
   VAR predicts the next sample better on six rigs of seven with 5–30 times the
   parameters. The third level is unidentified and is not adopted.
-- **Open**: the VID M100 gap; durations of standby and flight; the spectra of
-  NeuroBEM and Blackbird.
+- **Open**: take-off dynamics and standby fluctuation of the layer; the VID
+  M100 gap; durations of standby and flight (the user's choice in use); the
+  spectra of NeuroBEM and Blackbird.
 
 ## Reproduce
 

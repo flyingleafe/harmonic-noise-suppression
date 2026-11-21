@@ -16,6 +16,7 @@ from scipy.linalg import expm
 from scipy.stats import kurtosis
 
 from data_processing.trajectory_model import Params
+from experiments.rps_traj import phase_dynamics as pdyn
 from experiments.rps_traj import regime_campaign as rc
 from experiments.rps_traj.cruise_api import burn_samples, cut_blocks
 from experiments.rps_traj.data import RATE_HZ, Flight
@@ -458,6 +459,39 @@ def test_score_flights_keeps_what_is_not_a_flight_out_of_the_read_outs() -> None
         assert out["readouts"][key] == reference["readouts"][key]
     # the grounded flight is scaled by the held-out hover, not by its own (zero)
     assert out["speed_w1"] < 0.3 and out["inc_q999_gen_0.2"] < 10.0
+
+
+def test_phase_windows_follow_each_flights_own_events_and_score_its_dynamics() -> None:
+    from scipy.ndimage import uniform_filter1d
+
+    rng = np.random.default_rng(11)
+    real = block_mean(_programmed(rng), FS, 25.0)
+    marks = landmarks(real, 25.0)
+    assert marks is not None
+    wins = pdyn.windows(marks)
+    assert set(wins) == set(pdyn.WINDOWS)
+    assert wins["startup"] == ("motors_on", 0, 75) and wins["takeoff"] == ("takeoff", 0, 100)
+
+    def ensemble(smooth: bool) -> list:
+        out = []
+        for hold in (0.0, 1.0, 2.0, 3.0):  # the same program, later and later
+            x = block_mean(_programmed(rng, hold_s=hold), FS, 25.0)
+            m = landmarks(x, 25.0)
+            assert m is not None
+            if smooth:
+                x = uniform_filter1d(x, 25, axis=1)
+            out.append((x, {"motors_on": m.motors_on, "takeoff": m.takeoff, "landing": m.landing}))
+        return out
+
+    good, slow = (
+        pdyn.score_flight(real, marks, ensemble(False)),
+        pdyn.score_flight(real, marks, ensemble(True)),
+    )
+    for window in ("takeoff", "landing"):
+        # a later take-off costs nothing; a smoothed transient does
+        assert good[window]["es_path"] < 0.02 and good[window]["es_inc"] < 0.02
+        assert slow[window]["es_inc"] > 2.0 * good[window]["es_inc"]
+        assert slow[window]["inc_sd_gen"] < 0.9 * slow[window]["inc_sd_real"]
 
 
 def test_aggregate_means_ranks_and_parameter_sets() -> None:

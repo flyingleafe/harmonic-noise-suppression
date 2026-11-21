@@ -135,14 +135,17 @@ class PhaseLayer:
         rng: np.random.Generator,
         *,
         airborne_s: float | None = None,
+        pre_takeoff_s: float | None = None,
         ground_s: tuple[float, float] = (1.0, 1.0),
     ) -> dict[str, Any]:
         """One whole flight ``rps (4, n)`` at ``fs`` (shaft speed, no
         measurement process) and the sample indices of its phase changes.
 
         ``cruise`` supplies the levels (``mu``, ``s_c``, ``s_r``) and the
-        fluctuation; ``airborne_s`` fixes the time from arrival to landing
-        instead of drawing it.
+        fluctuation; ``airborne_s`` fixes the time from arrival to landing and
+        ``pre_takeoff_s`` the time from motors-on to take-off instead of
+        drawing them (a given time on the ground shorter than the start-up
+        curve cuts the curve short).
         """
         fs = self.fs
         params: Params = cruise.params
@@ -156,10 +159,15 @@ class PhaseLayer:
         d_sb, d_cr = standby - sb, hover - h0
 
         n_su = self.startup_common.size
-        pre_s = float(
-            np.exp(self.pre_takeoff_log_s[0] + self.pre_takeoff_log_s[1] * rng.standard_normal())
-        )
-        n_pre = max(int(round(pre_s * fs)), n_su)
+        if pre_takeoff_s is None:
+            pre_s = float(
+                np.exp(
+                    self.pre_takeoff_log_s[0] + self.pre_takeoff_log_s[1] * rng.standard_normal()
+                )
+            )
+            n_pre = max(int(round(pre_s * fs)), n_su)
+        else:
+            n_pre = max(int(round(float(pre_takeoff_s) * fs)), 1)
         air_s = (
             float(np.exp(self.airborne_log_s[0] + self.airborne_log_s[1] * rng.standard_normal()))
             if airborne_s is None

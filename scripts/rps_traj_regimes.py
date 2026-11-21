@@ -30,7 +30,8 @@ _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent if (_HERE.parent / "src").is_dir() else Path.cwd().resolve()
 sys.path.insert(0, str(_ROOT / "src"))
 
-from experiments.rps_traj import regime_campaign as rc  # noqa: E402  (after the path pin)
+from experiments.rps_traj import phase_dynamics as pd_  # noqa: E402  (after the path pin)
+from experiments.rps_traj import regime_campaign as rc  # noqa: E402
 from utils.gridrun import run_grid  # noqa: E402
 
 DEFAULT_OUT = "results/rps_traj/regimes"
@@ -38,20 +39,24 @@ DEFAULT_OUT = "results/rps_traj/regimes"
 
 def _run(args: argparse.Namespace) -> int:
     rigs = args.rigs or list(rc.RIGS)
+    worker = rc.run_unit
     if args.stage == "cruise":
         units = rc.cruise_units(
             rigs, args.families or rc.FAMILIES, final=args.final, threads=args.threads
         )
-    else:
+    elif args.stage == "flight":
         units = rc.flight_units(
             rigs, args.arms or rc.FLIGHT_ARMS, args.out, final=args.final, threads=args.threads
         )
+    else:  # dynamics inside each phase, on the held-out flight's own schedule
+        units = pd_.units(rigs, args.arms or pd_.ARMS, args.out, threads=args.threads)
+        worker = pd_.run_unit
     if args.folds:
         keep = set(args.folds)
         units = [u for u in units if str(u.params["fold"]) in keep]
     result = run_grid(
         units,
-        rc.run_unit,
+        worker,
         args.out,
         jobs=args.jobs,
         resume=not args.no_resume,
@@ -127,6 +132,11 @@ def _table(args: argparse.Namespace) -> int:
     if summary["cruise"]:
         _figure(summary, out / "cruise_scores.png")
     print(rc.markdown(summary))
+    phase = pd_.aggregate(rows)
+    if phase:
+        (out / "phase_summary.json").write_text(json.dumps(phase, indent=1) + "\n")
+        (out / "phase_tables.md").write_text(pd_.markdown(phase) + "\n")
+        print(pd_.markdown(phase))
     print(f"{len(rows)} units -> {out}/summary.json, tables.md, params/ ({len(params)} rigs)")
     return 0
 
@@ -153,7 +163,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     run = sub.add_parser("run", help="fit and score units")
-    run.add_argument("--stage", choices=("cruise", "flight"), required=True)
+    run.add_argument("--stage", choices=("cruise", "flight", "phase"), required=True)
     run.add_argument("--rigs", nargs="*", default=None)
     run.add_argument("--families", nargs="*", default=None, help=f"cruise families {rc.FAMILIES}")
     run.add_argument("--arms", nargs="*", default=None, help=f"whole-flight arms {rc.FLIGHT_ARMS}")
