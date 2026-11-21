@@ -32,6 +32,7 @@ Scores, per window and held-out flight, 64 generated flights the ensemble:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -40,13 +41,19 @@ from scipy.stats import wasserstein_distance
 
 from experiments.rps_traj import regime_campaign as rc
 from experiments.rps_traj.cruise_api import NUM_ROTORS
-from experiments.rps_traj.phases import PHASES, Landmarks, landmarks, phase_labels
+from experiments.rps_traj.phases import PHASES, Landmarks, block_mean, landmarks, phase_labels
 from experiments.rps_traj.scores import _energy_scores
 from experiments.rps_traj.transients import fit_phase_layer
-from experiments.rps_traj.var_models import _simulate_kernel, fit_switching_var
-from utils.gridrun import Unit
+from experiments.rps_traj.var_models import SwitchingVarModel, _simulate_kernel, fit_switching_var
+from utils.gridrun import Unit, unit_path
 
 ARMS = ("ours", "phasevar2", "phasevar4")
+#: The arms shown as examples: also the per-phase VAR(2) whose settled cruise
+#: is the three-state switching VAR of the cruise comparison (the arms that
+#: lead its one-step score), placed at the training hover level.
+EXAMPLE_ARMS = (*ARMS, "phasevar2+msvar3", "phasevar2+hsmm3")
+CRUISE = PHASES.index("cruise")
+SETTLE_S = 3.0
 WINDOWS = ("startup", "standby", "takeoff", "landing")
 METRICS = ("es_path", "es_inc", "inc_w1", "inc_sd_gen", "inc_sd_real")
 
@@ -187,29 +194,69 @@ def fit_arm(
 
         return ours
 
+    base, _, inner = arm.partition("+")
     seqs = [rc._to_flight_rate(f.rps, f.fs) for f in train]
-    labelled = [(s, landmarks(s, FS)) for s in seqs]
+    labelled = [(s, m) for s in seqs if (m := landmarks(s, FS)) is not None]
+    labels = [phase_labels(m) for _, m in labelled]
     model = fit_switching_var(
-        [s for s, m in labelled if m is not None],
+        [s for s, _ in labelled],
         FS,
         n_states=len(PHASES),
-        order=int(arm.removeprefix("phasevar")),
+        order=int(base.removeprefix("phasevar")),
         intercept=True,
         sigma_floor=rc.FLIGHT_SIGMA_FLOOR,
         n_init=1,
         max_iter=0,  # the states are known: the labelled fit is the estimate
         seed=seed,
-        init_labels=[phase_labels(m) for _, m in labelled if m is not None],
+        init_labels=labels,
         stable=True,
     )
     cap = rc.FLIGHT_CAP * max(float(s.max()) for s in seqs)
+    cruise_model: SwitchingVarModel | None = None
+    level = np.zeros(NUM_ROTORS)
+    if inner:  # the cruise campaign's switching VAR of this fold, inside the cruise phase
+        path = unit_path(str(out_dir), f"cruise__{rig}__{fold}__{inner[:-1]}")
+        cruise_model = SwitchingVarModel.from_dict(
+            json.loads(path.read_text())["arms"][inner]["params"]
+        )
+        level = np.concatenate(
+            [s[:, lab == CRUISE] for (s, _), lab in zip(labelled, labels)], axis=1
+        ).mean(axis=1)
+
+    def settled(x: np.ndarray, lab: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        """``x`` with its settled cruise (from SETTLE_S after the arrival to
+        the landing) cross-faded over a second into the training hover level
+        plus the cruise model's fluctuation, brought to :data:`FS`."""
+        assert cruise_model is not None
+        idx = np.flatnonzero(lab == CRUISE)
+        if idx.size < _n(SETTLE_S + 4.0):
+            return x
+        a0, a1 = int(idx[0]) + _n(SETTLE_S), int(idx[-1]) + 1
+        rate = float(cruise_model.rate_hz)
+        draw = cruise_model.sample(int(np.ceil((a1 - a0) * rate / FS)) + 2, rng)
+        if rate > FS:
+            draw = block_mean(draw, rate, FS)
+        elif rate < FS:
+            t = np.arange(a1 - a0) / FS
+            draw = np.stack([np.interp(t, np.arange(row.size) / rate, row) for row in draw])
+        new = level[:, None] + draw[:, : a1 - a0]
+        k = np.arange(a1 - a0)
+        w = np.clip(np.minimum(k + 1, (a1 - a0) - k) / _n(1.0), 0.0, 1.0)
+        out = x.copy()
+        out[:, a0:a1] = (1.0 - w) * x[:, a0:a1] + w * new
+        return np.clip(out, 0.0, None)
 
     def phasevar(marks: Landmarks, n: int, rng: np.random.Generator) -> Generated | None:
-        states = np.tile(phase_labels(marks), (n, 1))
+        lab = phase_labels(marks)
         eps = rng.standard_normal((n, marks.n, NUM_ROTORS))
         lags = np.zeros((n, model.order, NUM_ROTORS))
-        paths = _simulate_kernel(states, model.mu, model.coefs, model._chol, eps, lags, 0.0, cap)
-        return [(path.T, _events(marks)) for path in paths]
+        paths = _simulate_kernel(
+            np.tile(lab, (n, 1)), model.mu, model.coefs, model._chol, eps, lags, 0.0, cap
+        )
+        flights = [path.T for path in paths]
+        if cruise_model is not None:
+            flights = [settled(x, lab, rng) for x in flights]
+        return [(x, _events(marks)) for x in flights]
 
     return phasevar
 
@@ -256,7 +303,7 @@ def example_flights(
         "labels": phase_labels(marks),
         "real": real,
     }
-    for arm in ARMS:
+    for arm in EXAMPLE_ARMS:
         gens = fit_arm(arm, rig, fold, out_dir, seed, same_clock=True)(
             marks, n, np.random.default_rng(seed + 30)
         )

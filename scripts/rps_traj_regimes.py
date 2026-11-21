@@ -167,8 +167,14 @@ def _examples(args: argparse.Namespace) -> int:
 
     from experiments.rps_traj.phases import PHASES
 
-    rows = [("real", "held-out flight"), ("ours", "ours"), ("phasevar2", "per-phase VAR(2)")]
-    rows.append(("phasevar4", "per-phase VAR(4)"))
+    rows = [
+        ("real", "held-out flight"),
+        ("ours", "ours"),
+        ("phasevar2", "per-phase VAR(2)"),
+        ("phasevar4", "per-phase VAR(4)"),
+        ("phasevar2+msvar3", "per-phase VAR(2), cruise = 3-state Markov-switching VAR"),
+        ("phasevar2+hsmm3", "per-phase VAR(2), cruise = 3-state VAR-HSMM"),
+    ]
     rotor = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
     shade = ["#ffffff", "#fde0c5", "#e8e8e8", "#c9e4f5", "#ffffff", "#d9f0d3"]
     parts = []
