@@ -90,7 +90,7 @@ def scan(wav, centre, seed, ticks_s, speeds, bare):
 def measure(root, relative, seed, fit, holdout):
     dat = root / relative
     (wav,) = dat.parent.glob("*.wav")
-    motor = read_motor_dat(dat).sort_values("tick")
+    motor = read_motor_dat(dat)["Motor"].sort_values("tick")
     ticks_s = motor.tick.to_numpy() / NOMINAL
     speeds = motor[list(ROTORS)].to_numpy() / 60
     centres = np.array(fit + holdout)

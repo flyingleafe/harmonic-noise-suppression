@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from data_processing.sources.new_motor_data import datcon_ticks
+from data_processing.sources.motor_dat import datcon_ticks
 
 
 def test_datcon_premature_high_word_does_not_insert_a_fifty_second_gap():
