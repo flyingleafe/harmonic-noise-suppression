@@ -384,8 +384,9 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
   `librispeech-dev-clean` (the `rp-real-valid-*` speech, validation only),
   `drone_audio`, `music`, `new-drone-noises`, `recording_with_motor_speed`,
   `zenodo_drone_noises`, `new_motor_data` (November 2026 motor recordings:
-  `10_Nov/` has FLY013 DAT and CSV, `14_Nov/` has FLY018 DAT; each includes
-  its original ZOOM WAV and JPG).
+  `10_Nov/` has FLY013 DAT and CSV, `14_Nov/` has FLY018 DAT, and `15_Nov/`
+  has FLY022 DAT and CSV. Each session includes its ZOOM WAV; the first two
+  also include a JPG).
 - **Derived DREGON-LM** (17, `sample-dir-v1`, per split):
   `DREGON-LM-{train,valid}`, `DREGON-LM-V2-{train,valid}`,
   `DREGON-LM-V3-{train,valid}`, `DREGON-LM-V4-{train,valid}`,

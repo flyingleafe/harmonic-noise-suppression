@@ -310,8 +310,8 @@ REGISTRY: dict[str, SourceDataset] = {
         SourceDataset(
             name="new_motor_data",
             provenance={
-                "description": "November 2026 motor recordings: FLY013 and FLY018 logs, "
-                "ZOOM audio and session photos; FLY013 also has a CSV export.",
+                "description": "November 2026 motor recordings: FLY013, FLY018 and FLY022 "
+                "logs with ZOOM audio; FLY013 and FLY022 also have CSV exports.",
             },
             raw_dataset="new_motor_data",
         ),
