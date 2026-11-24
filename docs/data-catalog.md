@@ -234,25 +234,40 @@ FLY018 and FLY022 instead give 84.0025 and 84.0028 million ticks per elapsed
 second. FLY013 has no valid GPS UTC; its WAV recorder date is in 2017.
 FLY013 also has five false high-word increments in `Clock:Tick#`. Each inserts
 50.529 s into `Clock:offsetTime`; the low 32 bits and onboard flight timer
-continue normally. For CSV channels, apply `new_motor_data.datcon_ticks` to the
-**whole CSV clock column before slicing**. Never interpolate over the apparent
-gaps or retime the audio to fill the log.
+continue normally. For CSV channels, apply `motor_dat.datcon_ticks` to the
+**whole CSV clock column before slicing**, or use the reader's `DatCon` table.
+Never interpolate over the apparent gaps or retime the audio to fill the log.
 
 Use the **DAT motor-packet tick** for RPM: the CSV holds the latest decoded
 speeds on its row clock, and switching rows does not imply a new measurement.
 Matching the four RPM values reproduces all 15,453 / 27,788 / 32,456 populated
 CSV rows (FLY013/018/022). The held packet is a median 34 / 29 / 29 ms older
 than the row stamp. Native motor packets arrive about every 60 ms and retain
-the spin-down beyond each CSV end. The notebook reader decodes these motor
-packets, not every DJI signal. For the three calibrated sessions:
+the spin-down beyond each CSV end. Both readers return a mapping of group
+name to DataFrame, not one wide table: each stream retains its own samples.
 
 ```python
 from data_processing.sources import raw_root
 from data_processing.sources.new_motor_data import read_aligned_motor
 
 dat = raw_root("new_motor_data") / "14_Nov" / "FLY018.dat"
-motor = read_aligned_motor(dat)  # audio_s, native ticks, byte offset, in_order, four RPMs
+log = read_aligned_motor(dat)        # read_motor_dat(dat) for the unaligned native ticks
+list(log)                            # catalog without decoding every stream
+rpm = log["Motor"]                   # includes RFront, LFront, LBack, RBack in RPM
+imu = log["imu_atti_00"][["audio_s", "ax", "ay", "az"]]
+gps = log["gps_glns_00"][["audio_s", "utc", "lat_deg", "lon_deg"]]
+export = log["DatCon"]               # all columns of the sibling CSV on its own row clock
 ```
+
+The native tables are read directly from the DAT on lookup. Bind a table to a
+variable for repeated use. Each has the original `tick_raw`, unwrapped `tick`,
+packet byte `offset` and `in_order` flag. `read_aligned_motor` adds `audio_s`
+to every group, including the export. Of the 79–80 native groups per file,
+18 use undocumented layouts: `log["record_<type>"]["payload"]` preserves the
+original decoded bytes. No sensor meanings or interpolated values are invented.
+The `DatCon` table is available only with a companion CSV; use it for derived
+signals such as `IMU_ATTI(0):roll:C`. It retains the original `Clock:Tick#`
+and `Clock:offsetTime` alongside the repaired row `tick`.
 
 `audio_s = A + tick / f`, where zero is the first WAV sample. Fit offsets
 against rotor harmonics in moving-speed windows, following the anchored
@@ -273,10 +288,10 @@ per-window residuals go to `results/new_motor_data_alignment/native_clock_window
 
 Filter to `0 <= audio_s < wav_duration` for overlays. FLY013 has no motor
 packets for the WAV's first 34.1 s or last 13.4 s. FLY018/022 have logs on
-both sides of the WAV; a real packet gap, including during spin-down, stays
-a gap. For full CSV exports use `audio_seconds(flight, datcon_ticks(df["Clock:Tick#"]))`
-from the same module. Prefer the DAT for rotor speeds, as shifting a CSV row
-cannot recover the individual sensor's acquisition tick.
+both sides of the WAV; a real packet gap stays a gap. For signals on the
+export grid use `log["DatCon"]`. Prefer the native
+`log["Motor"]` for rotor speeds, as shifting a CSV row cannot recover the
+individual sensor's acquisition tick.
 
 ## Derived dataset variants
 

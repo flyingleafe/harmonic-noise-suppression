@@ -1,7 +1,7 @@
 """Native reader for DJI M100 flight-controller ``.DAT`` logs (``DJI_LOG_V3``).
 
-Reads the per-motor speed telemetry straight from the original ``FLYnnn.DAT``
-with each record's own flight-controller tick — no DatCon CSV in between.
+Native groups are decoded independently, on their own packet clocks. The
+optional sibling DatCon CSV is a separate export, never a native-data source.
 
 Container format (as decoded by DatCon, BudWalkerJava/DatCon,
 ``src/V3/Files/DatFileV3.java`` + ``src/DatConRecs/Payload.java``): after the
@@ -28,20 +28,21 @@ including spin-down packets after the CSV ends.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from numba import njit
+from numpy.typing import ArrayLike, NDArray
+
+from data_processing.sources._dat_records import BUILTIN, decode_builtin
+from data_processing.sources._dat_records import ROTORS as ROTORS
+from data_processing.sources._dat_schema import DEFINITION_RECORD_TYPE, parse_definitions
 
 DAT_MAGIC = b"DJI_LOG_V3"
 MOTOR_RECORD_TYPE = 10090
 MOTOR_PAYLOAD_LEN = 152
-#: Column order of the motor blocks in the payload (= DatCon CSV suffixes).
-ROTORS = ("RFront", "LFront", "LBack", "RBack")
-_ROTOR_BLOCK = 19
-_SPEED_OFFSET = 3
 _HEADER_LEN = 10
 _CRC_LEN = 2
 #: DatCon's assumed M100 tick rate (``DatHeader.getAcType``). NOMINAL, not a
@@ -71,8 +72,11 @@ _CRC16 = np.array([
 
 
 @njit(cache=True)
-def _motor_records(buf: np.ndarray, start: int) -> Iterator[tuple[int, int, bool]]:
-    """Unwrap time across all CRC-valid packets, yielding only motor records."""
+def _packet_index(buf: np.ndarray, start: int):
+    """Index validated packets by (type, width) in one pass, without decoding payloads."""
+    blocks = {}
+    counts = {}
+    first_tick = -1
     n = buf.size
     previous = np.int64(-1)
     tick = np.int64(0)
@@ -101,6 +105,7 @@ def _motor_records(buf: np.ndarray, start: int) -> Iterator[tuple[int, int, bool
         )
         if previous < 0:
             tick = raw
+            first_tick = int(raw)
         else:
             # Late packets can straddle a wrap in either direction. The
             # contiguous M100 logs have subsecond steps; reject gross jumps.
@@ -111,55 +116,200 @@ def _motor_records(buf: np.ndarray, start: int) -> Iterator[tuple[int, int, bool
         previous = raw
         in_order = tick > maximum
         maximum = max(maximum, tick)
-        if (
-            length == MOTOR_PAYLOAD_LEN + _HEADER_LEN + _CRC_LEN
-            and (int(buf[p + 4]) | (int(buf[p + 5]) << 8)) == MOTOR_RECORD_TYPE
-        ):
-            yield int(p), int(tick), bool(in_order)
+        rtype = int(buf[p + 4]) | (int(buf[p + 5]) << 8)
+        key = (rtype << 8) | (int(length) - _HEADER_LEN - _CRC_LEN)
+        if key not in blocks:
+            blocks[key] = np.empty((16, 2), np.int64)
+            counts[key] = 0
+        size = counts[key]
+        block = blocks[key]
+        if size == len(block):
+            larger = np.empty((size * 2, 2), np.int64)
+            larger[:size] = block
+            blocks[key] = block = larger
+        block[size, 0] = p if in_order else -p
+        block[size, 1] = tick
+        counts[key] = size + 1
         p += length
+    return blocks, counts, first_tick
 
 
-def read_motor_dat(path: str | Path, clock_hz: float | None = None) -> pd.DataFrame:
-    """All native motor-speed records of an M100 ``.DAT``, with native ticks.
+@njit(cache=True)
+def _payloads(buf: np.ndarray, index: np.ndarray, width: int) -> np.ndarray:
+    out = np.empty((len(index), width), np.uint8)
+    for i in range(len(index)):
+        start = abs(index[i, 0]) + _HEADER_LEN
+        key = index[i, 1] & 0xFF
+        for j in range(width):
+            out[i, j] = buf[start + j] ^ key
+    return out
 
-    One row per CRC-valid motor record (type 10090, ~16.7 Hz), in file order:
 
-    - ``tick`` — int64 flight-controller tick, unwrapped over every valid
-      record of the file; ``tick & 0xFFFFFFFF`` is the stored value and the
-      high word is 0 at the file's first record.
-    - ``tick_raw`` — the stored uint32 tick; ``offset`` — record byte offset.
-    - ``in_order`` — tick exceeds every earlier record's tick in the file;
-      late but valid packets are retained regardless.
-    - ``RFront``, ``LFront``, ``LBack``, ``RBack`` — int16 motor speed, RPM.
-    - ``time_s`` (only if ``clock_hz`` is given) — ``(tick - tick[0]) /
-      clock_hz``. The tick rate is a calibration choice: :data:`DATCON_CLOCK_HZ`
-      is DatCon's nominal value, not a measurement.
+def datcon_ticks(ticks: ArrayLike) -> NDArray[np.int64]:
+    """Unwrap a full ordered DatCon Clock:Tick# column from its native low word.
+
+    The first row is in epoch zero; successive CSV rows must be less than
+    one wrap apart. Repair the clock *before* slicing (FLY013 has false high words).
     """
-    buf = np.memmap(path, dtype=np.uint8, mode="r")
-    magic = buf[:4096].tobytes().find(DAT_MAGIC)
-    if magic < 0:
-        raise ValueError(f"{path}: no {DAT_MAGIC.decode()} header")
-    records = np.fromiter(
-        _motor_records(buf, magic + len(DAT_MAGIC)),
-        dtype=[("offset", "i8"), ("tick", "i8"), ("in_order", "?")],
-    )
-    if not records.size:
-        raise ValueError(f"{path}: no valid four-rotor M100 motor records")
-    o = records["offset"] + _HEADER_LEN
-    tick = records["tick"]
-    key = tick.astype(np.uint8)
-    cols: dict[str, np.ndarray] = {
-        "tick": tick,
-        "tick_raw": tick.astype(np.uint32),
-        "offset": records["offset"],
-        "in_order": records["in_order"],
-    }
-    for i, name in enumerate(ROTORS):
-        at = o + i * _ROTOR_BLOCK + _SPEED_OFFSET
-        lo = (buf[at] ^ key).astype(np.uint16)
-        hi = (buf[at + 1] ^ key).astype(np.uint16)
-        cols[name] = (lo | (hi << 8)).view(np.int16)
-    df = pd.DataFrame(cols)
-    if clock_hz is not None:
-        df["time_s"] = (df["tick"] - df["tick"].iloc[0]) / clock_hz
-    return df
+    low = np.asarray(ticks).astype(np.uint32, casting="unsafe", copy=False)
+    if low.ndim != 1:
+        raise ValueError("expected the one-dimensional Clock:Tick# column")
+    result = np.empty(low.size, dtype=np.int64)
+    if result.size:
+        result[0] = low[0]
+        np.cumsum(np.diff(low), dtype=np.int64, out=result[1:])
+        result[1:] += result[0]
+    return result
+
+
+_TEXT_GROUPS = {
+    0x8000: "EventLog",
+    0xFF00: "SDLog",
+    0xFFFC: "ModuleName",
+    DEFINITION_RECORD_TYPE: "RecDefs",
+    0xFFFE: "FirmwareVersion",
+    0xFFFF: "ConfigLog",
+}
+_EXPORT = "DatCon"
+_CLOCK_FIELDS = frozenset({"tick", "tick_raw", "offset", "in_order", "time_s", "audio_s"})
+type _Key = tuple[int, int]
+
+
+def _fields(payload: np.ndarray, dtype: np.dtype) -> Iterator[tuple[str, np.ndarray]]:
+    records = payload.view(dtype).reshape(-1)
+    for field in dtype.names or ():
+        yield field, records[field]
+
+
+class DatTelemetry(Mapping[str, pd.DataFrame]):
+    """Lazy native tables, one row per packet; bind a table to keep it in memory.
+
+    ``list(log)`` lists available groups without loading them. Each lookup
+    decodes just that group. ``log["Motor"]`` includes the four RPM columns.
+    ``log["DatCon"]`` (only when a sibling CSV exists) preserves *every*
+    export column, including computed signals, on the corrected CSV row clock.
+    Unspecified packet formats are exposed losslessly as bytes, not guessed.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        clock_hz: float | None,
+        audio_clock: Callable[[np.ndarray], np.ndarray] | None,
+    ) -> None:
+        self._buf = np.memmap(path, dtype=np.uint8, mode="r")
+        header = self._buf[:4096].tobytes().find(DAT_MAGIC)
+        if header < 0:
+            raise ValueError(f"{path}: no {DAT_MAGIC.decode()} header")
+        blocks, counts, self._origin = _packet_index(self._buf, header + len(DAT_MAGIC))
+        if not counts:
+            raise ValueError(f"{path}: no valid packets")
+        self._index: dict[_Key, np.ndarray] = {
+            (k >> 8, k & 255): block[: counts[k]] for k, block in blocks.items()
+        }
+        self._hz = clock_hz
+        self._audio_clock = audio_clock
+        defs = []
+        for (rtype, width), idx in self._index.items():
+            if rtype == DEFINITION_RECORD_TYPE:
+                rows = _payloads(self._buf, idx, width)
+                defs.extend(
+                    (abs(pos), row.tobytes()) for pos, row in zip(idx[:, 0], rows, strict=True)
+                )
+        self._schemas = parse_definitions(msg for _, msg in sorted(defs))
+        self._groups: dict[str, list[_Key]] = {}
+        for key in self._index:
+            rtype, _ = key
+            spec = self._schemas.get(key)
+            builtin = BUILTIN.get(key)
+            layout = builtin if builtin is not None else spec
+            name = layout[0] if layout is not None else _TEXT_GROUPS.get(rtype, f"record_{rtype}")
+            if name in self._groups and self._groups[name][0][0] != rtype:
+                name = f"{name}:{rtype}"
+            self._groups.setdefault(name, []).append(key)
+        self._csv = path.with_suffix(".csv")
+        if self._csv.is_file():
+            self._groups[_EXPORT] = []
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._groups)
+
+    def __len__(self) -> int:
+        return len(self._groups)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._groups
+
+    def __repr__(self) -> str:
+        return f"DatTelemetry({', '.join(self._groups)})"
+
+    def _native(self, key: _Key) -> pd.DataFrame:
+        idx = self._index[key]
+        rtype, width = key
+        payload = _payloads(self._buf, idx, width)
+        cols = {
+            "tick": idx[:, 1],
+            "tick_raw": idx[:, 1].astype(np.uint32),
+            "offset": np.abs(idx[:, 0]),
+            "in_order": idx[:, 0] > 0,
+        }
+        if key in BUILTIN:
+            for field, values in _fields(payload, BUILTIN[key][1]):
+                cols[f"packet:{field}" if field in _CLOCK_FIELDS else field] = values
+            for field, values in decode_builtin(rtype, payload).items():
+                if field in cols or field in _CLOCK_FIELDS:
+                    raise ValueError(f"duplicate engineered column {field!r} in record {rtype}")
+                cols[field] = values
+        if key in self._schemas:
+            schema = self._schemas[key][1]
+            fields = dict(schema.fields or {})
+            builtin_fields = dict(BUILTIN[key][1].fields or {}) if key in BUILTIN else {}
+            for name, values in _fields(payload, schema):
+                if name in builtin_fields and fields.get(name) == builtin_fields[name]:
+                    continue  # same named field, same byte offset and representation
+                if name in cols or name in _CLOCK_FIELDS:
+                    name = f"firmware:{name}"
+                cols[name] = values
+        elif key not in BUILTIN:
+            if rtype in _TEXT_GROUPS:
+                cols["message"] = np.array(
+                    [
+                        row.tobytes().rstrip(b"\x00").decode("utf-8", "backslashreplace")
+                        for row in payload
+                    ],
+                    dtype=object,
+                )
+            else:
+                cols["payload"] = np.array([row.tobytes() for row in payload], dtype=object)
+        return pd.DataFrame(cols)
+
+    def __getitem__(self, group: str) -> pd.DataFrame:
+        keys = self._groups[group]
+        if group == _EXPORT:
+            df = pd.read_csv(self._csv, low_memory=False)
+            df.insert(0, "tick", datcon_ticks(df["Clock:Tick#"]))
+        elif len(keys) == 1:
+            df = self._native(keys[0])
+        else:
+            df = pd.concat([self._native(k) for k in keys], ignore_index=True)
+            df.sort_values("offset", inplace=True, ignore_index=True)
+        if self._hz is not None:
+            df["time_s"] = (df["tick"] - self._origin) / self._hz
+        if self._audio_clock is not None:
+            df.insert(0, "audio_s", self._audio_clock(df["tick"].to_numpy()))
+        return df
+
+
+def read_motor_dat(
+    path: str | Path,
+    clock_hz: float | None = None,
+    *,
+    audio_clock: Callable[[np.ndarray], np.ndarray] | None = None,
+) -> DatTelemetry:
+    """Open all telemetry on its native packet clocks; no CSV or network required.
+
+    If requested, ``time_s`` is relative to the first valid packet in the file
+    at the given tick rate, shared by all groups. ``audio_clock`` maps the
+    unwrapped tick array of each table to seconds from an external WAV start.
+    """
+    return DatTelemetry(Path(path), clock_hz, audio_clock)
