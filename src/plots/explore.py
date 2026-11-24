@@ -414,6 +414,7 @@ RAW_NOISE_DATASETS: dict[str, str] = {
     "drone_audio": "raw drone clip corpus (23k files, no frames builder)",
     "zenodo_drone_noises": "raw Zenodo drone-noise recordings (no frames builder)",
     "new-drone-noises": "raw tree of Michael's TEST flights (frames: michaels-test-frames)",
+    "new_motor_data": "FLY013 and FLY018: raw November 2026 motor logs, ZOOM audio and photos",
 }
 
 _ID_COLUMNS = ("recording_id", "key", "shard", "channels", "sr", "duration_s", "entries")
@@ -436,6 +437,7 @@ def noise_datasets(*, sizes: bool = True) -> pd.DataFrame:
     :func:`load_recording`; ``raw`` = a file tree), ``pinned`` (12-char
     ``dload.lock`` version, ``None`` when not pinned yet), ``what``; with
     ``sizes=True`` (network) also ``recordings``, ``shards``, ``size``.
+    For raw trees, ``recordings`` counts dload sample keys, not recording sessions.
     """
     pins = _lock_pins()
     rows: list[dict[str, Any]] = [
