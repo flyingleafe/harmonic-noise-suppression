@@ -221,6 +221,63 @@ stamps become `(t_log − time_offset) · time_dilation`, and the row cut is
 6.8 % / 9.6 % / 83.6 % (81.6 s, mean 80.6 rev/s). FLY108's first 16 s window is
 the takeoff ramp (per-rotor std 26.6 rev/s) and `fit_new.py` drops it.
 
+## November 2026 motor recordings (`new_motor_data`)
+
+FLY013, FLY018 and FLY022 pair DJI M100 telemetry with a separate ZOOM H1n
+stereo WAV (48 kHz). The DAT is the original telemetry; the DatCon CSV is an
+export, not an independent clock. All three CSVs contain the four
+`Motor:Speed:{RFront,LFront,LBack,RBack}` fields in RPM. Do not align by file
+duration or file modification time.
+
+`Clock:offsetTime` uses 85 million ticks per second. GPS UTC transitions in
+FLY018 and FLY022 instead give 84.0025 and 84.0028 million ticks per elapsed
+second. FLY013 has no valid GPS UTC; its WAV recorder date is in 2017.
+FLY013 also has five false high-word increments in `Clock:Tick#`. Each inserts
+50.529 s into `Clock:offsetTime`; the low 32 bits and onboard flight timer
+continue normally. For CSV channels, apply `new_motor_data.datcon_ticks` to the
+**whole CSV clock column before slicing**. Never interpolate over the apparent
+gaps or retime the audio to fill the log.
+
+Use the **DAT motor-packet tick** for RPM: the CSV holds the latest decoded
+speeds on its row clock, and switching rows does not imply a new measurement.
+Matching the four RPM values reproduces all 15,453 / 27,788 / 32,456 populated
+CSV rows (FLY013/018/022). The held packet is a median 34 / 29 / 29 ms older
+than the row stamp. Native motor packets arrive about every 60 ms and retain
+the spin-down beyond each CSV end. The notebook reader decodes these motor
+packets, not every DJI signal. For the three calibrated sessions:
+
+```python
+from data_processing.sources import raw_root
+from data_processing.sources.new_motor_data import read_aligned_motor
+
+dat = raw_root("new_motor_data") / "14_Nov" / "FLY018.dat"
+motor = read_aligned_motor(dat)  # audio_s, native ticks, byte offset, in_order, four RPMs
+```
+
+`audio_s = A + tick / f`, where zero is the first WAV sample. Fit offsets
+against rotor harmonics in moving-speed windows, following the anchored
+Michael's procedure above; keep the WAV and RPM values unchanged. For
+FLY013 the setup photo shows **no propellers**. High motor orders 84 and 98
+give consistent local lag peaks; the low blade-pass comb used on FLY018 and
+FLY022 does not. RMS below is the difference between the affine map and
+local acoustic lag estimates in windows not used in its line fit (including
+near the first and last motor activity), not absolute lab time. Reproduce
+with `PYTHONPATH=src python scripts/michaels_calib/november_motor_clock.py`;
+per-window residuals go to `results/new_motor_data_alignment/native_clock_windows.csv`.
+
+| Recording | A (s) | f (MHz) | WAV length (s) | First/last native motor sample on WAV clock (s) | Held-out lag RMS (ms) |
+|---|---:|---:|---:|---:|---:|
+| FLY013 | +29.091134 | 84.000904 | 624.539 | 34.101 to 611.175 | 5.1 |
+| FLY018 | −53.894454 | 84.000510 | 952.421 | −48.825 to 964.100 | 4.0 |
+| FLY022 | −273.865007 | 84.001237 | 907.016 | −268.746 to 922.179 | 3.1 |
+
+Filter to `0 <= audio_s < wav_duration` for overlays. FLY013 has no motor
+packets for the WAV's first 34.1 s or last 13.4 s. FLY018/022 have logs on
+both sides of the WAV; a real packet gap, including during spin-down, stays
+a gap. For full CSV exports use `audio_seconds(flight, datcon_ticks(df["Clock:Tick#"]))`
+from the same module. Prefer the DAT for rotor speeds, as shifting a CSV row
+cannot recover the individual sensor's acquisition tick.
+
 ## Derived dataset variants
 
 Every variant is a frozen spec in `derivations.SPECS`; there are no creation
@@ -383,10 +440,9 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
 - **Raw sources** (CLI raw-file convention): `DREGON`, `librispeech`,
   `librispeech-dev-clean` (the `rp-real-valid-*` speech, validation only),
   `drone_audio`, `music`, `new-drone-noises`, `recording_with_motor_speed`,
-  `zenodo_drone_noises`, `new_motor_data` (November 2026 motor recordings:
-  `10_Nov/` has FLY013 DAT and CSV, `14_Nov/` has FLY018 DAT, and `15_Nov/`
-  has FLY022 DAT and CSV. Each session includes its ZOOM WAV; the first two
-  also include a JPG).
+  `zenodo_drone_noises`, `new_motor_data` (November 2026: FLY013 in `10_Nov/`,
+  FLY018 in `14_Nov/`, FLY022 in `15_Nov/`). Each session includes its original
+  DJI DAT, DatCon CSV and stereo ZOOM WAV; the first two also include a JPG.
 - **Derived DREGON-LM** (17, `sample-dir-v1`, per split):
   `DREGON-LM-{train,valid}`, `DREGON-LM-V2-{train,valid}`,
   `DREGON-LM-V3-{train,valid}`, `DREGON-LM-V4-{train,valid}`,
