@@ -2394,3 +2394,46 @@ Three things a caller must know:
 - **The width estimate wants a stricter SNR gate than the covariance does.** The autocorrelation is normalized by the line power AFTER the floor is subtracted, so at SNR ~ 1 that denominator is a small difference of similar numbers and the curve reads above 1. The probe gates at SNR 3 (measured: at 1.3 the curve reached 1.85), against WP18's `MIN_SNR` = 1.
 
 Driver: `scripts/phase_coherence_probe.py` — one gridrun unit per (condition, recording, window, rotor) over the DREGON motor bench, the four-motor bench, and the TRAIN-split free flight (DREGON room 2 + FLY125). Two things it learned the hard way, both now in the driver's own constants: the LINE BAND sets the twin-collision gate, so a 25 Hz band on a four-rotor recording admits 0-3 harmonics per rotor against 4-20 at 10 Hz (measured on its own refined references); and four rotors within about 1 rev/s are ONE comb at any band a 20 s window resolves, so that condition is measured on the mean of the four refined rates with no gate at all.
+
+## November M100: does the VK waveform residual support the acoustic-comb clock?
+
+**Protocol (2026-11-24).** Compare the three published comb clocks with an
+independent local lag scan, `scripts/michaels_calib/november_vk_clock.py --gain comb`.
+The referee is the pooled stereo band-limited waveform residual
+`||x − VK_reconstruct(VK_envelopes(x, r(t)))||₂ / ||x||₂`, not the original
+STFT ridge score. Keep the native motor packet times and measured RPM. The
+preselected fit-window RPM gain is used only to score the carriers, not to
+modify the labels. Use shaft orders 84 and 98 for the bare motors (FLY013),
+and the seven even orders 2–14 for the propeller recordings (FLY018/022).
+Each lag hypothesis sees the same WAV samples; exclude unsupported telemetry
+intervals (>200 ms), and 0.5 s at either end of each excerpt.
+
+Scan ±1 s around a motor-transition seed, then refine the local minimum on a
+2 ms lag grid. Fit `audio_s = A + native_tick / f` only on usable interior
+windows. Keep the early, late, and other check windows out of the fit. Compare
+both affine maps on the same held-out audio and report local lag scatter
+separately. Retain the comb map if the difference cannot be distinguished;
+adopt a VK map only when a well-conditioned fit improves both held-out
+waveform residual and lag RMS. A flat or edge minimum is not a clock measurement.
+This is an acoustic consistency check, not synchronization to an external trigger.
+
+**Results (Apocrita Slurm 37367958).** All 11 fit and 16 held-out windows
+passed the curve-quality checks. Ratio = pooled held-out VK residual norm
+divided by the held-out audio norm; lower is better. The lag RMS uses the
+same held-out windows for the two candidate maps.
+
+| Flight | Fit / held out | Ratio: comb → VK | Lag RMS, ms: comb → VK | Max clock difference on holdout | Selected |
+|---|---:|---:|---:|---:|---|
+| FLY013 | 5 / 6 | 0.822076 → 0.820778 | 7.16 → 2.02 | 5.53 ms | VK |
+| FLY018 | 3 / 5 | 0.381477 → 0.380385 | 3.16 → 0.62 | 3.26 ms | VK |
+| FLY022 | 3 / 5 | 0.303965 → 0.303992 | 2.31 → 2.49 | 1.59 ms | comb |
+
+The VK map lowered the waveform residual on all six FLY013 and all five FLY018
+check windows. FLY022's candidate differed by less than its held-out lag
+scatter and improved neither metric; retain the original map. VK-vs-comb rate
+changes were only −1.03, +1.37 and +1.71 ppm, respectively; the first two
+improvements support the *combined clock map*, not isolated tick-rate
+precision better than 1 ppm. No change to RPM calibration or to the raw
+signals. `results/new_motor_data_alignment/vk_clock/{summary,FLY013,FLY018,FLY022}.json`
+records all selected maps, per-window curves, flags and residuals. Selected
+constants and the frame layout: [data catalog](../data-catalog.md#november-2026-motor-recordings-new_motor_data).
