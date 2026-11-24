@@ -269,22 +269,20 @@ The `DatCon` table is available only with a companion CSV; use it for derived
 signals such as `IMU_ATTI(0):roll:C`. It retains the original `Clock:Tick#`
 and `Clock:offsetTime` alongside the repaired row `tick`.
 
-`audio_s = A + tick / f`, where zero is the first WAV sample. Fit offsets
-against rotor harmonics in moving-speed windows, following the anchored
-Michael's procedure above; keep the WAV and RPM values unchanged. For
-FLY013 the setup photo shows **no propellers**. High motor orders 84 and 98
-give consistent local lag peaks; the low blade-pass comb used on FLY018 and
-FLY022 does not. RMS below is the difference between the affine map and
-local acoustic lag estimates in windows not used in its line fit (including
-near the first and last motor activity), not absolute lab time. Reproduce
-with `PYTHONPATH=src python scripts/michaels_calib/november_motor_clock.py`;
-per-window residuals go to `results/new_motor_data_alignment/native_clock_windows.csv`.
+`audio_s = A + tick / f`, with zero at the first WAV sample. A spectral comb fit
+provided the initial per-recording clock maps (`november_motor_clock.py`).
+The final clocks below were selected against independent coupled Vold–Kalman
+reconstructions (`november_vk_clock.py --gain comb`). FLY013's setup photo
+shows bare motors: use shaft orders 84/98 there, and even orders 2–14 for the
+propeller recordings. The WAV and measured RPM values are unchanged. Held-out
+RMS measures timing consistency with the local VK residual minima, not with
+an external trigger. [Protocol and results](experiments/rps-refine-precision.md#november-m100-does-the-vk-waveform-residual-support-the-acoustic-comb-clock).
 
-| Recording | A (s) | f (MHz) | WAV length (s) | First/last native motor sample on WAV clock (s) | Held-out lag RMS (ms) |
-|---|---:|---:|---:|---:|---:|
-| FLY013 | +29.091134 | 84.000904 | 624.539 | 34.101 to 611.175 | 5.1 |
-| FLY018 | −53.894454 | 84.000510 | 952.421 | −48.825 to 964.100 | 4.0 |
-| FLY022 | −273.865007 | 84.001237 | 907.016 | −268.746 to 922.179 | 3.1 |
+| Recording | Selected map | A (s) | f (MHz) | WAV length (s) | Native motor span on WAV clock (s) | Held-out VK lag RMS (ms) |
+|---|---|---:|---:|---:|---:|---:|
+| FLY013 | VK | +29.096095 | 84.000817 | 624.539 | 34.106 to 611.181 | 2.02 |
+| FLY018 | VK | −53.896370 | 84.000625 | 952.421 | −48.827 to 964.096 | 0.62 |
+| FLY022 | retained comb | −273.865007 | 84.001237 | 907.016 | −268.746 to 922.179 | 2.31 |
 
 Filter to `0 <= audio_s < wav_duration` for overlays. FLY013 has no motor
 packets for the WAV's first 34.1 s or last 13.4 s. FLY018/022 have logs on
@@ -292,6 +290,26 @@ both sides of the WAV; a real packet gap stays a gap. For signals on the
 export grid use `log["DatCon"]`. Prefer the native
 `log["Motor"]` for rotor speeds, as shifting a CSV row cannot recover the
 individual sensor's acquisition tick.
+
+### November recording frames
+
+`new_motor_data-frames@e766b6a9306b` is a `tdframe-v1` derivation of
+`new_motor_data@6e2a87737456` (three recordings, three shards, 2.6 GiB).
+Each sample is a whole recording: stereo `audio`, four native `rps` tracks
+in rev/s, native packet groups under `dat`, and `dat_bytes`, the original
+file including headers, checksums, padding and undecodable ranges. The CSVs
+and photos stay in the raw parent; frame metadata records their hashes.
+The publication readback compared all 15,840,752 native packets, every WAV
+sample and all three embedded DAT SHA-256 hashes to that exact parent.
+
+```python
+from plots import explore
+from data_processing.sources.november_frames import group_to_table, restore_dat
+
+frame = explore.load_recording("new_motor_data-frames", "FLY018")
+imu = group_to_table(frame, "imu_atti_00")  # native data, original row order, calibrated audio_s
+restore_dat(frame, "FLY018-recovered.dat")  # verifies SHA-256 against the frame's metadata
+```
 
 ## Derived dataset variants
 

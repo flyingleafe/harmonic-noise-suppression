@@ -10,11 +10,11 @@ from numpy.typing import ArrayLike, NDArray
 
 from data_processing.sources.motor_dat import DatTelemetry, read_motor_dat
 
-# WAV time at native tick zero (s), native ticks per WAV second. The three
-# recording sessions do not share an offset. See docs/data-catalog.md.
+# WAV seconds at native tick zero, ticks per WAV second. VK residual validation
+# selected VK fits for FLY013/018 and retained the comb fit for FLY022.
 AUDIO_CLOCK = {
-    "FLY013": (29.091134, 84_000_904.0),
-    "FLY018": (-53.894454, 84_000_510.0),
+    "FLY013": (29.09609548872247, 84_000_817.0842002),
+    "FLY018": (-53.89636952411703, 84_000_625.33026023),
     "FLY022": (-273.865007, 84_001_237.0),
 }
 
