@@ -308,6 +308,14 @@ REGISTRY: dict[str, SourceDataset] = {
             raw_dataset="new-drone-noises",
         ),
         SourceDataset(
+            name="new_motor_data",
+            provenance={
+                "description": "November 2026 motor recordings: FLY013 and FLY018 logs, "
+                "ZOOM audio and session photos; FLY013 also has a CSV export.",
+            },
+            raw_dataset="new_motor_data",
+        ),
+        SourceDataset(
             name="recording_with_motor_speed",
             provenance={
                 "citation": "Michael's aligned DJI Matrice 100 recordings (project-local).",

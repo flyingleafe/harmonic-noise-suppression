@@ -375,15 +375,17 @@ module's `PROVENANCE`):
   not. Four segments of `2021-02-18-16-43-54` are logged at 164 Hz, not 400:
   **group by `meta.system.native_rate_hz`**, never assume the nominal rate.
 
-## Pinned catalog (`dload.lock` — 66 datasets)
+## Pinned catalog (`dload.lock`)
 
 Tests assert every `dload.lock` name is a `SPECS` entry, a `sources.REGISTRY`
 entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
 
-- **Raw sources** (8, CLI convention, from `data/`): `DREGON`, `librispeech`,
+- **Raw sources** (CLI raw-file convention): `DREGON`, `librispeech`,
   `librispeech-dev-clean` (the `rp-real-valid-*` speech, validation only),
   `drone_audio`, `music`, `new-drone-noises`, `recording_with_motor_speed`,
-  `zenodo_drone_noises`.
+  `zenodo_drone_noises`, `new_motor_data` (November 2026 motor recordings:
+  `10_Nov/` has FLY013 DAT and CSV, `14_Nov/` has FLY018 DAT; each includes
+  its original ZOOM WAV and JPG).
 - **Derived DREGON-LM** (17, `sample-dir-v1`, per split):
   `DREGON-LM-{train,valid}`, `DREGON-LM-V2-{train,valid}`,
   `DREGON-LM-V3-{train,valid}`, `DREGON-LM-V4-{train,valid}`,
